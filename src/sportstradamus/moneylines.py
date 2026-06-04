@@ -31,6 +31,7 @@ from itertools import groupby
 from operator import itemgetter
 from pathlib import Path
 from time import sleep
+from typing import NamedTuple
 
 import click
 import numpy as np
@@ -322,6 +323,103 @@ def get_moneylines(
     return archive
 
 
+def _props_sports(apikey, sport, key, historical):
+    """Resolve ``[(odds_api_sport_key, league), ...]`` for the prop fetch.
+
+    Returns ``None`` to signal the caller to bail without touching the archive.
+    ``sport="All"`` enumerates active leagues from the Odds API sports index
+    filtered to ``LEAGUES_OF_INTEREST``; an explicit ``sport`` requires the
+    caller to pass the Odds API ``key`` directly.
+    """
+    if sport != "All":
+        if key is None:
+            logger.warning("Key needed for sports other than All")
+            return None
+        return [(key, sport)]
+    if historical:
+        logger.warning("All sports only supported if date is today")
+        return None
+    res = _get_with_retry(ODDS_API_SPORTS_URL, params={"apiKey": apikey})
+    if res.status_code != HTTPStatus.OK:
+        return None
+    return [
+        (s["key"], s["title"])
+        for s in res.json()
+        if s["title"] in LEAGUES_OF_INTEREST and s["active"]
+    ]
+
+
+class _PropsRequest(NamedTuple):
+    event_url_template: str
+    odds_url_template: str
+    day_delta: int
+    params: dict
+    historical: bool
+
+
+def _props_request(apikey, date, historical):
+    if historical:
+        return _PropsRequest(
+            ODDS_API_HISTORICAL_EVENTS_URL,
+            ODDS_API_HISTORICAL_EVENT_ODDS_URL,
+            1,
+            {"apiKey": apikey, "date": date.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")},
+            historical,
+        )
+    return _PropsRequest(
+        ODDS_API_EVENTS_URL, ODDS_API_EVENT_ODDS_URL, 6, {"apiKey": apikey}, historical
+    )
+
+
+def _store_sport_props(archive, ledger, sport, league, props, date, req):
+    """Fetch and archive one sport's events.
+
+    Returns ``False`` when a per-event odds endpoint 404s (the caller aborts the
+    whole run, matching the original early ``return``); ``True`` otherwise.
+    """
+    markets = ",".join(props[league].keys())
+    if league == "MLB":
+        markets += ",totals_1st_1_innings,spreads_1st_1_innings"
+    fetch_params = {**req.params, "markets": markets}
+    events = _get_with_retry(req.event_url_template.format(sport=sport), params=fetch_params)
+    if events.status_code != HTTPStatus.OK:
+        return True
+
+    for event in (events.json()["data"] if req.historical else events.json()):
+        gameDate = datetime.fromisoformat(event["commence_time"]).astimezone(
+            pytz.timezone("America/Chicago")
+        )
+        if gameDate > date + timedelta(days=req.day_delta):
+            continue
+        event_params = {**fetch_params, "regions": "us"}
+        res = _get_with_retry(
+            req.odds_url_template.format(sport=sport, eventId=event["id"]), params=event_params
+        )
+        if res.status_code == HTTPStatus.NOT_FOUND:
+            return False
+        if res.status_code != HTTPStatus.OK:
+            continue
+
+        observed_at = _historical_observed_at(req.historical, gameDate)
+        _archive_event_props(
+            archive,
+            res.json()["data"] if req.historical else res.json(),
+            league,
+            props,
+            gameDate.strftime("%Y-%m-%d"),
+            observed_at,
+        )
+        if not req.historical:
+            ledger[(sport, event["id"])] = {
+                "sport_key": sport,
+                "event_id": event["id"],
+                "league": league,
+                "commence_time": event["commence_time"],
+                "markets": list(props[league].keys()),
+            }
+    return True
+
+
 def get_props(
     archive,
     apikey,
@@ -339,78 +437,15 @@ def get_props(
     if fixture_dir is not None:
         return _get_props_from_fixtures(archive, props, Path(fixture_dir), date)
 
-    if sport == "All":
-        if historical:
-            logger.warning("All sports only supported if date is today")
-            return archive
-        res = _get_with_retry(ODDS_API_SPORTS_URL, params={"apiKey": apikey})
-        if res.status_code != HTTPStatus.OK:
-            return archive
-
-        res = res.json()
-        sports = [
-            (s["key"], s["title"]) for s in res if s["title"] in LEAGUES_OF_INTEREST and s["active"]
-        ]
-    elif key is None:
-        logger.warning("Key needed for sports other than All")
+    sports = _props_sports(apikey, sport, key, historical)
+    if sports is None:
         return archive
-    else:
-        sports = [(key, sport)]
 
-    if historical:
-        event_url_template = ODDS_API_HISTORICAL_EVENTS_URL
-        odds_url_template = ODDS_API_HISTORICAL_EVENT_ODDS_URL
-        dayDelta = 1
-        params = {
-            "apiKey": apikey,
-            "date": date.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        }
-    else:
-        event_url_template = ODDS_API_EVENTS_URL
-        odds_url_template = ODDS_API_EVENT_ODDS_URL
-        dayDelta = 6
-        params = {"apiKey": apikey}
-
+    req = _props_request(apikey, date, historical)
     ledger = {(e["sport_key"], e["event_id"]): e for e in read_upcoming_events()}
-
     for sport, league in sports:
-        params.update({"markets": ",".join(props[league].keys())})
-        if league == "MLB":
-            params["markets"] = params["markets"] + ",totals_1st_1_innings,spreads_1st_1_innings"
-        events = _get_with_retry(event_url_template.format(sport=sport), params=params)
-        if events.status_code != HTTPStatus.OK:
-            continue
-
-        events = events.json()["data"] if historical else events.json()
-
-        for event in events:
-            gameDate = datetime.fromisoformat(event["commence_time"]).astimezone(
-                pytz.timezone("America/Chicago")
-            )
-            if gameDate > date + timedelta(days=dayDelta):
-                continue
-            gameDate_str = gameDate.strftime("%Y-%m-%d")
-            event_params = {**params, "regions": "us"}
-            res = _get_with_retry(
-                odds_url_template.format(sport=sport, eventId=event["id"]), params=event_params
-            )
-            if res.status_code == HTTPStatus.NOT_FOUND:
-                return archive
-            if res.status_code != HTTPStatus.OK:
-                continue
-
-            game = res.json()["data"] if historical else res.json()
-            observed_at = _historical_observed_at(historical, gameDate)
-            _archive_event_props(archive, game, league, props, gameDate_str, observed_at)
-
-            if not historical:
-                ledger[(sport, event["id"])] = {
-                    "sport_key": sport,
-                    "event_id": event["id"],
-                    "league": league,
-                    "commence_time": event["commence_time"],
-                    "markets": list(props[league].keys()),
-                }
+        if not _store_sport_props(archive, ledger, sport, league, props, date, req):
+            return archive
 
     if not historical:
         write_upcoming_events(_prune_upcoming_events(list(ledger.values())))
