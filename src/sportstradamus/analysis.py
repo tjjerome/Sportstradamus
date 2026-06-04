@@ -271,6 +271,67 @@ def _preserve_closing(old_offer, new_offer):
     return tuple(merged)
 
 
+def _offer_result(actual, line, player):
+    """Over / Under / Push for one offer, or NaN if actual or line is missing.
+
+    Matchup (``" vs. "``) players resolve on the sign of ``actual + line``;
+    everyone else on ``actual`` vs ``line``.
+    """
+    if not (pd.notna(actual) and pd.notna(line)):
+        return np.nan
+    if " vs. " in str(player):
+        diff = actual + line
+        return "Over" if diff > 0 else ("Under" if diff < 0 else "Push")
+    return "Over" if actual > line else ("Under" if actual < line else "Push")
+
+
+def _offer_row(pred, pred_cols, offer):
+    line, boost, platform, bet, model_p, books_p, close_p, market_clv, model_clv = _pad_legacy(
+        offer
+    )
+    result = _offer_result(pred.get("Actual"), line, pred.get("Player", ""))
+    row = {col: pred[col] for col in pred_cols}
+    row.update(
+        {
+            "Line": line,
+            "Boost": boost,
+            "Platform": platform,
+            "Bet": bet,
+            "Model P": model_p,
+            "Books P": books_p,
+            "Close Books P": close_p,
+            "Market CLV": market_clv,
+            "Model CLV": model_clv,
+            "Result": result,
+        }
+    )
+    return row
+
+
+def _add_kelly_columns(exploded):
+    """Add Hit and Kelly-relevant Model / Books / K columns in place.
+
+    ``Boost`` on persisted rows is the raw promo multiplier (1.00 = no promo).
+    For Underdog the per-$1 payout multiplier is ``Boost * UNDERDOG_BOOST_BASELINE``;
+    other platforms are treated as already payout-inclusive (back-compat with
+    the pre-fix callers that read ``Model = Model P x Boost`` directly).
+    """
+    if "Result" in exploded.columns and "Bet" in exploded.columns:
+        resolved = exploded.dropna(subset=["Result", "Bet"])
+        if not resolved.empty:
+            exploded.loc[resolved.index, "Hit"] = (resolved["Bet"] == resolved["Result"]).astype(
+                int
+            )
+    if "Model P" in exploded.columns and "Boost" in exploded.columns:
+        platform = exploded.get("Platform", pd.Series(dtype=str))
+        baseline = np.where(platform == "Underdog", UNDERDOG_BOOST_BASELINE, 1.0)
+        payout = exploded["Boost"] * baseline
+        exploded["Model"] = exploded["Model P"] * payout
+        exploded["Books"] = exploded["Books P"].fillna(0.5) * payout
+        exploded["K"] = (exploded["Model"] - 1) / (payout - 1).replace(0, np.nan)
+    return exploded
+
+
 def explode_offers(history):
     """Expand Offers column into one row per offer, inheriting prediction-level cols.
 
@@ -286,65 +347,14 @@ def explode_offers(history):
     rows = []
     for _, pred in history.iterrows():
         offers = pred.get("Offers")
-        if not isinstance(offers, list) or len(offers) == 0:
+        if not isinstance(offers, list) or not offers:
             continue
-        actual = pred.get("Actual")
         for offer in offers:
-            offer = _pad_legacy(offer)
-            line, boost, platform, bet, model_p, books_p, close_p, market_clv, model_clv = offer
-            # Derive result from actual vs line
-            if pd.notna(actual) and pd.notna(line):
-                if " vs. " in str(pred.get("Player", "")):
-                    result = (
-                        "Over"
-                        if (actual + line) > 0
-                        else ("Under" if (actual + line) < 0 else "Push")
-                    )
-                else:
-                    result = "Over" if actual > line else ("Under" if actual < line else "Push")
-            else:
-                result = np.nan
-
-            row = {col: pred[col] for col in pred_cols}
-            row.update(
-                {
-                    "Line": line,
-                    "Boost": boost,
-                    "Platform": platform,
-                    "Bet": bet,
-                    "Model P": model_p,
-                    "Books P": books_p,
-                    "Close Books P": close_p,
-                    "Market CLV": market_clv,
-                    "Model CLV": model_clv,
-                    "Result": result,
-                }
-            )
-            rows.append(row)
+            rows.append(_offer_row(pred, pred_cols, offer))
 
     if not rows:
         return pd.DataFrame()
-
-    exploded = pd.DataFrame(rows)
-    if "Result" in exploded.columns and "Bet" in exploded.columns:
-        resolved = exploded.dropna(subset=["Result", "Bet"])
-        if not resolved.empty:
-            exploded.loc[resolved.index, "Hit"] = (resolved["Bet"] == resolved["Result"]).astype(
-                int
-            )
-    # Derive Kelly-relevant columns. ``Boost`` on persisted rows is the raw
-    # promo multiplier (1.00 = no promo). For Underdog the per-$1 payout
-    # multiplier is ``Boost * UNDERDOG_BOOST_BASELINE``; other platforms are
-    # treated as already payout-inclusive (back-compat with the pre-fix
-    # callers that read ``Model = Model P × Boost`` directly).
-    if "Model P" in exploded.columns and "Boost" in exploded.columns:
-        platform = exploded.get("Platform", pd.Series(dtype=str))
-        baseline = np.where(platform == "Underdog", UNDERDOG_BOOST_BASELINE, 1.0)
-        payout = exploded["Boost"] * baseline
-        exploded["Model"] = exploded["Model P"] * payout
-        exploded["Books"] = exploded["Books P"].fillna(0.5) * payout
-        exploded["K"] = (exploded["Model"] - 1) / (payout - 1).replace(0, np.nan)
-    return exploded
+    return _add_kelly_columns(pd.DataFrame(rows))
 
 
 def resolve_history(history, stats):
