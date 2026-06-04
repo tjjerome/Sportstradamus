@@ -204,6 +204,57 @@ def test_portfolio_empty_input_returns_empty():
     assert out == {}
 
 
+def test_size_candidates_shrinks_filters_and_pairs():
+    # Direct (cvxpy-free) pin of the sizing step: shrinkage-adjusted p, net odds
+    # b, and the floor/EV drops. Expected values derived by hand from the
+    # effective_p = 0.5 + (win_prob - 0.5) * shrinkage rule.
+    sized_p, sized_b, bet_ids = kelly._size_candidates(
+        [
+            KellyCandidate("a", win_prob=0.6, payout_multiplier=Decimal("3")),
+            KellyCandidate("bad", win_prob=0.2, payout_multiplier=Decimal("2")),
+            KellyCandidate(
+                "floor", win_prob=0.6, payout_multiplier=Decimal("3"), model_shrinkage=0.0
+            ),
+            KellyCandidate(
+                "b", win_prob=0.65, payout_multiplier=Decimal("3"), model_shrinkage=0.5
+            ),
+        ]
+    )
+    assert bet_ids == ["a", "b"]
+    assert sized_p == pytest.approx([0.6, 0.575])
+    assert sized_b == pytest.approx([2.0, 2.0])
+
+
+def test_portfolio_drops_floor_shrinkage_candidate():
+    # A candidate whose shrinkage is at/below SHRINKAGE_FLOOR is dropped during
+    # sizing even when its raw odds are +EV.
+    cvxpy = pytest.importorskip("cvxpy")  # noqa: F841
+    out = joint_kelly_portfolio(
+        bankroll=Decimal("1000"),
+        candidates=[
+            KellyCandidate("good", win_prob=0.6, payout_multiplier=Decimal("3")),
+            KellyCandidate(
+                "floored", win_prob=0.6, payout_multiplier=Decimal("3"), model_shrinkage=0.0
+            ),
+        ],
+    )
+    assert "floored" not in out
+    assert "good" in out
+
+
+def test_portfolio_all_filtered_returns_empty():
+    # Every candidate is -EV → no surviving bet ids → empty mapping.
+    cvxpy = pytest.importorskip("cvxpy")  # noqa: F841
+    out = joint_kelly_portfolio(
+        bankroll=Decimal("1000"),
+        candidates=[
+            KellyCandidate("bad1", win_prob=0.2, payout_multiplier=Decimal("2")),
+            KellyCandidate("bad2", win_prob=0.1, payout_multiplier=Decimal("2")),
+        ],
+    )
+    assert out == {}
+
+
 # --------------------------------------------------------------------------- #
 # Resolution chain integration: explicit > CLV > training > fallback
 
