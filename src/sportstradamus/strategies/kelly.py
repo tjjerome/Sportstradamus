@@ -86,14 +86,7 @@ def resolve_shrinkage(
     has_live = live_bss is not None and not _isnan(live_bss) and live_n > 0
 
     if has_train and has_live:
-        if live_n <= LIVE_BLEND_FLOOR:
-            return _clip01(training_bss)
-        if live_n >= LIVE_BLEND_FULL:
-            return _clip01(live_bss)
-        w_live = (live_n - LIVE_BLEND_FLOOR) / (LIVE_BLEND_FULL - LIVE_BLEND_FLOOR)
-        blended = w_live * float(live_bss) + (1.0 - w_live) * float(training_bss)
-        return _clip01(blended)
-
+        return _blend_shrinkage(training_bss, live_bss, live_n)
     if has_train:
         return _clip01(training_bss)
     if has_live:
@@ -101,6 +94,17 @@ def resolve_shrinkage(
 
     _logger.debug("kelly shrinkage fallback: no training or live BSS available; using 1.0")
     return 1.0
+
+
+def _blend_shrinkage(training_bss: float, live_bss: float, live_n: int) -> float:
+    """Ramp from training BSS to live BSS as live_n crosses the blend window."""
+    if live_n <= LIVE_BLEND_FLOOR:
+        return _clip01(training_bss)
+    if live_n >= LIVE_BLEND_FULL:
+        return _clip01(live_bss)
+    w_live = (live_n - LIVE_BLEND_FLOOR) / (LIVE_BLEND_FULL - LIVE_BLEND_FLOOR)
+    blended = w_live * float(live_bss) + (1.0 - w_live) * float(training_bss)
+    return _clip01(blended)
 
 
 def fractional_kelly_stake(
@@ -181,20 +185,7 @@ def joint_kelly_portfolio(
     cvxpy = _lazy_import("cvxpy")
 
     bankroll = Decimal(bankroll)
-    sized_p: list[float] = []
-    sized_b: list[float] = []
-    bet_ids: list[str] = []
-    for c in candidates:
-        s = _clip01(c.model_shrinkage)
-        if s <= SHRINKAGE_FLOOR:
-            continue
-        p = 0.5 + (float(c.win_prob) - 0.5) * s
-        b = float(c.payout_multiplier) - 1.0
-        if b <= 0.0 or b * p - (1.0 - p) <= 0.0:
-            continue
-        sized_p.append(p)
-        sized_b.append(b)
-        bet_ids.append(c.bet_id)
+    sized_p, sized_b, bet_ids = _size_candidates(candidates)
 
     if not bet_ids:
         return {}
@@ -219,6 +210,27 @@ def joint_kelly_portfolio(
         if stake > Decimal("0"):
             out[bet_id] = stake
     return out
+
+
+def _size_candidates(
+    candidates: list[KellyCandidate],
+) -> tuple[list[float], list[float], list[str]]:
+    """Shrinkage-adjust and EV-filter candidates into parallel (p, b, bet_id) lists."""
+    sized_p: list[float] = []
+    sized_b: list[float] = []
+    bet_ids: list[str] = []
+    for c in candidates:
+        s = _clip01(c.model_shrinkage)
+        if s <= SHRINKAGE_FLOOR:
+            continue
+        p = 0.5 + (float(c.win_prob) - 0.5) * s
+        b = float(c.payout_multiplier) - 1.0
+        if b <= 0.0 or b * p - (1.0 - p) <= 0.0:
+            continue
+        sized_p.append(p)
+        sized_b.append(b)
+        bet_ids.append(c.bet_id)
+    return sized_p, sized_b, bet_ids
 
 
 # --------------------------------------------------------------------------- #
