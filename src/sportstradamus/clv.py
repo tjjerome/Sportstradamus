@@ -47,7 +47,6 @@ _logger = get_logger("reflect")
 
 
 def _segments_parquet_path() -> Path:
-    """Return the persistence path for the per-segment CLV parquet."""
     return Path(str(pkg_resources.files(_data_pkg) / "runtime" / "clv_segments.parquet"))
 
 
@@ -67,6 +66,20 @@ def _signed_clv(open_p: float, close_p: float, bet: str) -> float:
         return np.nan
     sign = 1 if bet in _OVER_BETS else -1
     return sign * (float(close_p) - float(open_p))
+
+
+def _fill_offer(offer, close_p: float):
+    """Rewrite one offer tuple with the closing trio; pass-through if already filled."""
+    if isinstance(offer, tuple | list) and len(offer) == LEGACY_OFFER_ARITY:
+        offer = (*tuple(offer), np.nan, np.nan, np.nan)
+    elif not (isinstance(offer, tuple | list) and len(offer) == OFFER_ARITY):
+        return offer
+    line, boost, platform, bet, model_p, books_p, prev_close, _, _ = offer
+    if not pd.isna(prev_close):
+        return tuple(offer)
+    market_clv = _signed_clv(books_p, close_p, bet)
+    model_clv = _signed_clv(model_p, close_p, bet)
+    return (line, boost, platform, bet, model_p, books_p, close_p, market_clv, model_clv)
 
 
 def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
@@ -108,42 +121,48 @@ def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
         commence_at = _commence_time(date_str)
         close_p = _safe_get_ev(archive, league, market, date_str, player, at=commence_at)
 
-        new_offers = []
-        for offer in offers:
-            if isinstance(offer, tuple | list) and len(offer) == LEGACY_OFFER_ARITY:
-                offer = (*tuple(offer), np.nan, np.nan, np.nan)
-            elif not (isinstance(offer, tuple | list) and len(offer) == OFFER_ARITY):
-                new_offers.append(offer)
-                continue
-            line, boost, platform, bet, model_p, books_p, prev_close, _, _ = offer
-            if not pd.isna(prev_close):
-                new_offers.append(tuple(offer))
-                continue
-            market_clv = _signed_clv(books_p, close_p, bet)
-            model_clv = _signed_clv(model_p, close_p, bet)
-            new_offers.append(
-                (line, boost, platform, bet, model_p, books_p, close_p, market_clv, model_clv)
-            )
-
-        history.at[idx, "Offers"] = new_offers
+        history.at[idx, "Offers"] = [_fill_offer(offer, close_p) for offer in offers]
 
     return history
 
 
-def summarize(history: pd.DataFrame, archive=None) -> dict:
-    """Return aggregate CLV stats for logging by ``reflect``.
+def _row_movement(archive, league_val, market_val, date_val, player_val, movement_cache):
+    if archive is None or not date_val or not isinstance(player_val, str):
+        return None
+    cache_key = (league_val, market_val, date_val, player_val)
+    if cache_key not in movement_cache:
+        try:
+            movement_cache[cache_key] = archive.get_movement(
+                league_val,
+                market_val,
+                date_val,
+                player_val,
+                until=_commence_time(date_val),
+            )
+        except (KeyError, ValueError, TypeError):
+            movement_cache[cache_key] = None
+    return movement_cache[cache_key]
 
-    Iterates exploded offers and computes overall n / mean Market CLV /
-    mean Model CLV / fraction of legs that beat the close. Drops legs
-    with NaN closing values from the count.
 
-    When ``archive`` is supplied, augments segments with
-    ``frac_lines_moved_toward_model`` — fraction of legs where the line
-    movement direction matches the model's lean (model_p vs 0.5 × bet
-    direction). Looked up per row via :meth:`Archive.get_movement` and
-    reused across all offers on the row.
-    """
-    legs = []
+def _offer_to_leg(offer, league_val, market_val, platform_default, movement):
+    if not (isinstance(offer, tuple | list) and len(offer) >= OFFER_ARITY):
+        return None
+    _, _, platform, bet, model_p, _, close_p, market_clv, _model_clv = offer[:OFFER_ARITY]
+    if pd.isna(close_p) or pd.isna(market_clv):
+        return None
+    aligned = _movement_alignment(movement, model_p, bet)
+    return {
+        "League": league_val,
+        "Market": market_val,
+        "Platform": platform or platform_default,
+        "Market CLV": float(market_clv),
+        "Model CLV": float(_model_clv) if not pd.isna(_model_clv) else np.nan,
+        "MoveAligned": aligned,
+    }
+
+
+def _collect_clv_legs(history: pd.DataFrame, archive) -> list[dict]:
+    legs: list[dict] = []
     movement_cache: dict = {}
     for _, row in history.iterrows():
         offers = row.get("Offers")
@@ -154,41 +173,17 @@ def summarize(history: pd.DataFrame, archive=None) -> dict:
         market_val = row.get("Market")
         date_val = _normalize_date(row.get("Date"))
         player_val = row.get("Player")
-
-        movement = None
-        if archive is not None and date_val and isinstance(player_val, str):
-            cache_key = (league_val, market_val, date_val, player_val)
-            if cache_key not in movement_cache:
-                try:
-                    movement_cache[cache_key] = archive.get_movement(
-                        league_val,
-                        market_val,
-                        date_val,
-                        player_val,
-                        until=_commence_time(date_val),
-                    )
-                except (KeyError, ValueError, TypeError):
-                    movement_cache[cache_key] = None
-            movement = movement_cache[cache_key]
-
+        movement = _row_movement(
+            archive, league_val, market_val, date_val, player_val, movement_cache
+        )
         for offer in offers:
-            if not (isinstance(offer, tuple | list) and len(offer) >= OFFER_ARITY):
-                continue
-            _, _, platform, bet, model_p, _, close_p, market_clv, _model_clv = offer[:OFFER_ARITY]
-            if pd.isna(close_p) or pd.isna(market_clv):
-                continue
-            aligned = _movement_alignment(movement, model_p, bet)
-            legs.append(
-                {
-                    "League": league_val,
-                    "Market": market_val,
-                    "Platform": platform or platform_default,
-                    "Market CLV": float(market_clv),
-                    "Model CLV": float(_model_clv) if not pd.isna(_model_clv) else np.nan,
-                    "MoveAligned": aligned,
-                }
-            )
+            leg = _offer_to_leg(offer, league_val, market_val, platform_default, movement)
+            if leg is not None:
+                legs.append(leg)
+    return legs
 
+
+def _aggregate_clv_segments(legs: list[dict], archive) -> dict:
     if not legs:
         return {
             "n": 0,
@@ -227,6 +222,23 @@ def summarize(history: pd.DataFrame, archive=None) -> dict:
         "segments": segments,
         "all_segments": grouped,
     }
+
+
+def summarize(history: pd.DataFrame, archive=None) -> dict:
+    """Return aggregate CLV stats for logging by ``reflect``.
+
+    Iterates exploded offers and computes overall n / mean Market CLV /
+    mean Model CLV / fraction of legs that beat the close. Drops legs
+    with NaN closing values from the count.
+
+    When ``archive`` is supplied, augments segments with
+    ``frac_lines_moved_toward_model`` — fraction of legs where the line
+    movement direction matches the model's lean (model_p vs 0.5 × bet
+    direction). Looked up per row via :meth:`Archive.get_movement` and
+    reused across all offers on the row.
+    """
+    legs = _collect_clv_legs(history, archive)
+    return _aggregate_clv_segments(legs, archive)
 
 
 def persist_segments(grouped: pd.DataFrame) -> None:
@@ -337,7 +349,6 @@ def check_close_sample_freshness(
 
 
 def _normalize_date(date) -> str:
-    """Return ``date`` as ``YYYY-MM-DD`` for archive lookup."""
     if date is None:
         return ""
     if isinstance(date, str):
@@ -392,7 +403,7 @@ def _movement_alignment(movement: dict | None, model_p, bet) -> float:
         return np.nan
     open_line = movement.get("open_line")
     close_line = movement.get("close_line")
-    if open_line is None or close_line is None or pd.isna(open_line) or pd.isna(close_line):
+    if pd.isna(open_line) or pd.isna(close_line):
         return np.nan
     if pd.isna(model_p):
         return np.nan
