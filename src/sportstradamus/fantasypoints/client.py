@@ -247,6 +247,10 @@ class FantasyPointsClient:
         if not self._first_call:
             sleep(self._sleep_s)
         self._first_call = False
+        merged = self._build_request_headers(headers, json_body)
+        return self._send_with_retries(method, url, merged, params, json_body, accept)
+
+    def _build_request_headers(self, headers: dict | None, json_body) -> dict:
         merged = self._default_headers()
         if headers:
             merged.update(headers)
@@ -258,7 +262,14 @@ class FantasyPointsClient:
         # that ``requests`` can decompress on its own. Without this the
         # body comes back as undecoded brotli/zstd and JSON parsing
         # blows up with "Expecting value: line 1 column 1".
-        merged = {k: v for k, v in merged.items() if k.lower() != "accept-encoding"}
+        return {k: v for k, v in merged.items() if k.lower() != "accept-encoding"}
+
+    def _send_with_retries(self, method, url, merged, params, json_body, accept):
+        """Issue the request, retrying retryable statuses on the backoff schedule.
+
+        Returns the decoded 2xx body; raises FantasyPointsAuthError on 401/403 and
+        requests.HTTPError once retries are exhausted (or on a non-retryable status).
+        """
         attempts = (*_RETRY_BACKOFF_S, None)
         last_response = None
         for backoff in attempts:
@@ -290,7 +301,6 @@ class FantasyPointsClient:
                 backoff,
             )
             sleep(backoff)
-        # All retries exhausted on a retryable status — surface the last response.
         last_response.raise_for_status()
         # raise_for_status() above always raises on non-2xx; this is just for type checkers.
         raise RuntimeError("unreachable")
