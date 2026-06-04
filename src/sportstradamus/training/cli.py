@@ -142,6 +142,10 @@ def meditate(
     bypass_withholding,
 ):
     """Train or retrain LightGBMLSS models for each configured market."""
+    # style: allow-complexity — meditate entrypoint: a flat training pipeline
+    # (per-league load/update, book-weight fit, then the per-league/per-market
+    # train loop with ship-config resolution). The residual CC is sequential
+    # stages plus per-league/-cell guards, not nested logic.
     # --deterministic implies --force: the input-freeze (new_M = empty)
     # otherwise short-circuits train_market when a prior model pickle exists,
     # which is precisely when the eval harness needs a fresh deterministic
