@@ -145,11 +145,12 @@ We pull deliberately from these, cited rather than copied:
   over importing many names, unless a name is used many times or is a type or
   constant.
 - Relative imports inside a package are fine (`from .base import Stats`).
-- Imports go at the top of the module. The only exception is a genuine
-  lazy-import for an optional dependency (e.g. `cvxpy` / `pyyaml` / `tabulate`
-  in `strategies/`, imported inside the function that needs them so core users
-  need not install the `strategy` group). Don't scatter late imports to dodge a
-  cycle — fix the cycle.
+- Imports go at the top of the module; no optional imports (a dependency is
+  either a core dep imported at the top or it isn't used). The one exception is
+  a deferred, function-local import to keep a heavy transitive dependency out of
+  a specific import path — e.g. `training.report` pulls `torch`, kept out of the
+  dashboard startup path via a function-local import in `strategies/`. Comment
+  why at the import. Don't scatter late imports to dodge a cycle — fix the cycle.
 - Remove an unused import in the same commit that orphans it. `ruff`'s `F401`
   catches the obvious cases.
 
@@ -387,9 +388,8 @@ error that fails quietly.
   library already does well (`itertools`, `collections`, `pathlib`, pandas /
   numpy / polars vectorization) is the mirror image of dependency bloat — both
   add code to maintain. Use what's already imported (§2.9).
-- **Pin via Poetry** (`pyproject.toml` + `poetry.lock`). Optional heavyweight
-  deps go in an optional group and are lazy-imported (§5), so core users don't
-  carry them.
+- **Pin via Poetry** (`pyproject.toml` + `poetry.lock`). Heavyweight deps are
+  core deps imported at module top — no optional groups or optional imports (§5).
 - PyTorch is CPU-only from a custom Poetry source (see CLAUDE.md). Don't swap
   that source without weighing the install-time impact on the production box.
 

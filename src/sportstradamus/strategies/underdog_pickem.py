@@ -174,21 +174,11 @@ def _row_to_entry(
 def _resolve_market_shrinkage(league: str, market: str) -> tuple[float, str]:
     # Lazy imports keep torch (via training.report) out of the dashboard import
     # path — do NOT hoist clv or get_market_calibration to module level.
-    try:
-        from sportstradamus import clv as _clv
-        from sportstradamus.training.report import get_market_calibration
-    except ImportError:
-        return 1.0, "fallback"
+    from sportstradamus import clv as _clv
+    from sportstradamus.training.report import get_market_calibration
 
-    try:
-        live_bss, live_n = _clv.get_segment_calibration(league, market)
-    except Exception:
-        live_bss, live_n = float("nan"), 0
-    try:
-        train_metrics = get_market_calibration(league, market)
-    except Exception:
-        train_metrics = {"brier_skill_score": float("nan")}
-    train_bss = train_metrics.get("brier_skill_score", float("nan"))
+    live_bss, live_n = _clv.get_segment_calibration(league, market)
+    train_bss = get_market_calibration(league, market)["brier_skill_score"]
 
     shrinkage = resolve_shrinkage(training_bss=train_bss, live_bss=live_bss, live_n=live_n)
     has_train = not pd.isna(train_bss)
