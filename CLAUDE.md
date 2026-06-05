@@ -107,8 +107,7 @@ to redo the work.
 
 ## Agentic workflow conventions
 
-These conventions pair with the hooks in `.claude/hooks/` (design:
-`docs/superpowers/specs/2026-06-05-agentic-workflow-enforcement-design.md`).
+These conventions pair with the hooks in `.claude/hooks/`.
 
 * **The refactoring-specialist runs no pytest.** It refactors and runs `ruff`
   on its scope only. The main agent owns the single authoritative gate run —
