@@ -109,25 +109,21 @@ def _pbp():
             }
         ),
         _play(
-            **{
-                "rush": True,
-                "rusher_player_id": "RB1",
-                "yards_gained": 5.0,
-                "epa": 0.2,
-                "down": 1,
-                "ydstogo": 10,
-                "play_time": 28.0,
-            }
+            rush=True,
+            rusher_player_id="RB1",
+            yards_gained=5.0,
+            epa=0.2,
+            down=1,
+            ydstogo=10,
+            play_time=28.0,
         ),
         _play(
-            **{
-                "rush": True,
-                "rusher_player_id": "WR1",
-                "yards_gained": 3.0,
-                "epa": 0.1,
-                "redzone": True,
-                "play_time": 25.0,
-            }
+            rush=True,
+            rusher_player_id="WR1",
+            yards_gained=3.0,
+            epa=0.1,
+            redzone=True,
+            play_time=25.0,
         ),
         _play(
             **{
@@ -145,7 +141,6 @@ def _pbp():
                 "passing_yards": 6.0,
                 "epa": 0.8,
                 "xpass": 0.5,
-                "complete_pass": 1,
                 "down": 1,
                 "ydstogo": 6,
                 "play_time": 20.0,
@@ -171,15 +166,7 @@ def _pbp():
             }
         ),
         _play(
-            **{
-                "posteam": "BUF",
-                "rush": True,
-                "yards_gained": 2.0,
-                "epa": -0.1,
-                "down": 2,
-                "ydstogo": 5,
-                "play_time": 26.0,
-            }
+            posteam="BUF", rush=True, yards_gained=2.0, epa=-0.1, down=2, ydstogo=5, play_time=26.0
         ),
         _play(
             **{

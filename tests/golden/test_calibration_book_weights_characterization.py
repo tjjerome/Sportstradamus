@@ -37,7 +37,9 @@ class _FakeArchive:
 def _player_df(n=12):
     dates = [f"2026-01-{i + 1:02d}" for i in range(n)]
     players = [f"P{i}" for i in range(n)]
-    idx = pd.MultiIndex.from_tuples(list(zip(dates, players)), names=["date", "player"])
+    idx = pd.MultiIndex.from_tuples(
+        list(zip(dates, players, strict=False)), names=["date", "player"]
+    )
     df = pd.DataFrame(
         {"dk": 0.50 + 0.01 * np.arange(n), "fd": 0.55 + 0.005 * np.arange(n), "Line": 9.5},
         index=idx,
@@ -56,7 +58,7 @@ def _player_stat(dates, players, market, results):
 def _team_df(n=12):
     dates = [f"2026-02-{i + 1:02d}" for i in range(n)]
     teams = [f"T{i}" for i in range(n)]
-    idx = pd.MultiIndex.from_tuples(list(zip(dates, teams)), names=["date", "player"])
+    idx = pd.MultiIndex.from_tuples(list(zip(dates, teams, strict=False)), names=["date", "player"])
     df = pd.DataFrame(
         {"dk": 0.50 + 0.01 * np.arange(n), "fd": 0.55 + 0.005 * np.arange(n), "Line": 0.0},
         index=idx,
@@ -144,7 +146,7 @@ def test_totals_extraction_continuous_objective(capture, monkeypatch):
 def test_no_book_columns_returns_empty(capture, monkeypatch):
     _set_dist(monkeypatch, "Gamma")
     df = pd.DataFrame({"Line": [1.0, 2.0]})
-    df2, dates, players = _player_df(12)
+    _df2, dates, players = _player_df(12)
     sd = _player_stat(dates, players, "ZZZ", [10.0 + i for i in range(12)])
 
     assert cal.fit_book_weights("NBA", "ZZZ", sd, _FakeArchive(df), {}) == {}
