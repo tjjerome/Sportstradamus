@@ -17,6 +17,7 @@ from sportstradamus.helpers.io import (
     CURRENT_META_PATH,
     CURRENT_OFFERS_PATH,
     CURRENT_PARLAYS_PATH,
+    CURRENT_PICKEM_PATH,
     _atomic_write_json,
     _atomic_write_parquet,
 )
@@ -111,6 +112,16 @@ def write_current_offers(
         },
         CURRENT_META_PATH,
     )
+
+
+def write_current_pickem(entries: pd.DataFrame) -> None:
+    """Write the current-run Underdog Pick'em entries snapshot atomically.
+
+    `entries` is the frame from `strategies._pickem_emit.entries_to_frame`
+    (bankroll-independent fields; the dashboard sizes stakes from a user
+    bankroll). Written even when empty so the dashboard reflects the latest run.
+    """
+    _atomic_write_parquet(entries, CURRENT_PICKEM_PATH)
 
 
 def _normalize_offers(offers: pd.DataFrame) -> pd.DataFrame:

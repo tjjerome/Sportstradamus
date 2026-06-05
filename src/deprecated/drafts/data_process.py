@@ -1,3 +1,16 @@
+# ARCHIVED 2026-06-04 from src/sportstradamus/drafts/data_process.py
+# Reason: NFL best-ball / draft-ADP research island — no entry point, cron,
+#         dashboard, test, or external importer; a separate product track.
+# Last live SHA: 43fa5b0
+# Original imports (now unresolved here):
+#   import importlib.resources as pkg_resources
+#   from datetime import datetime
+#   import nfl_data_py as nfl
+#   import numpy as np
+#   import pandas as pd
+#   from tqdm import tqdm
+#   from sportstradamus.drafts import data
+
 # %%
 # import data
 import importlib.resources as pkg_resources
@@ -170,24 +183,18 @@ def analyze_teams(teams):
             QB3WR = team.loc[(team["team"] == QBTeams[2]) & wr_filter, "draft_capital_spent"]
             QB3RB = team.loc[(team["team"] == QBTeams[2]) & rb_filter, "draft_capital_spent"]
             QB3TE = team.loc[(team["team"] == QBTeams[2]) & te_filter, "draft_capital_spent"]
-            try:
-                StackedTeam = team.loc[~team["team"].isin(QBTeams), "team"].value_counts().idxmax()
-            except:
-                StackedTeam = "NA"
+            team_counts = team.loc[~team["team"].isin(QBTeams), "team"].value_counts()
+            StackedTeam = team_counts.idxmax() if not team_counts.empty else "NA"
 
             teamStack = team.loc[team["team"] == StackedTeam, "draft_capital_spent"]
 
-            try:
-                StackedDiv = team["division"].value_counts().idxmax()
-            except:
-                StackedDiv = "NA"
+            div_counts = team["division"].value_counts()
+            StackedDiv = div_counts.idxmax() if not div_counts.empty else "NA"
 
             divStack = team.loc[team["division"] == StackedDiv, "draft_capital_spent"]
 
-            try:
-                StackedBye = team["bye"].value_counts().idxmax()
-            except:
-                StackedBye = 0
+            bye_counts = team["bye"].value_counts()
+            StackedBye = bye_counts.idxmax() if not bye_counts.empty else 0
 
             byeStack = team.loc[team["bye"] == StackedBye, "draft_capital_spent"]
 

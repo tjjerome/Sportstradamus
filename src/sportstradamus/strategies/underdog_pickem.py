@@ -18,6 +18,7 @@ from typing import Any
 
 import pandas as pd
 
+from sportstradamus.helpers import stat_map
 from sportstradamus.helpers.logging import get_logger
 from sportstradamus.strategies._pickem_emit import emit_yaml, rank_and_dedupe
 from sportstradamus.strategies.kelly import (
@@ -34,6 +35,11 @@ _logger = get_logger("pickem-build")
 _RIVALS_LEG_SIZES: tuple[int, ...] = (2, 3)
 
 _RECOMMENDATIONS_DIR = Path("data") / "recommendations"
+
+# prophecize's hourly snapshot sizes stakes at this nominal bankroll purely to
+# drive rank_and_dedupe ordering (bankroll-invariant below the per-bet cap); the
+# dashboard re-sizes every entry against the user's actual bankroll.
+REFERENCE_BANKROLL = Decimal("1000")
 
 
 @dataclass(frozen=True)
@@ -238,21 +244,101 @@ def _variant_entries(
     bankroll: Decimal,
     config: PickemConfig,
 ) -> list[RecommendedEntry]:
+    market_by_player = _canonical_markets_by_player(filtered_offers)
     entries: list[RecommendedEntry] = []
     for _, row in parlays.iterrows():
         league = str(row.get("League", ""))
-        market = ""
-        if not filtered_offers.empty and "Market" in filtered_offers.columns:
-            market = str(filtered_offers["Market"].iloc[0])
-        shrinkage_info = _resolve_market_shrinkage(league, market)
+        shrinkage_info = _parlay_shrinkage(row, league, market_by_player)
         entries.append(_row_to_entry(row, variant, bankroll, config, shrinkage_info))
     return entries
+
+
+def _canonical_markets_by_player(filtered_offers: pd.DataFrame) -> dict[str, set[str]]:
+    """Map each offer's player to the canonical market(s) they were offered on.
+
+    Offer ``Market`` is the raw Underdog name (a ``stat_map["Underdog"]`` key);
+    mapping it gives the canonical cell key (``REB``, ``BLST``, …) that
+    ``_resolve_market_shrinkage`` resolves against. The leg display strings
+    can't drive this — they carry a third, lossy namespace (``blocks_and_steals``).
+    """
+    if filtered_offers.empty or not {"Player", "Market"}.issubset(filtered_offers.columns):
+        return {}
+    out: dict[str, set[str]] = {}
+    for player, market in zip(
+        filtered_offers["Player"],
+        filtered_offers["Market"].map(stat_map["Underdog"]),
+        strict=True,
+    ):
+        if isinstance(market, str):
+            out.setdefault(str(player), set()).add(market)
+    return out
+
+
+def _parlay_shrinkage(
+    row: pd.Series, league: str, market_by_player: dict[str, set[str]]
+) -> tuple[float, str]:
+    """Kelly shrinkage for one parlay: the most conservative of its leg markets.
+
+    A parlay cashes only if every leg hits, so it inherits the trust of its
+    least-calibrated market — resolve per distinct leg market and keep the min.
+    """
+    markets: set[str] = set()
+    for i in range(1, int(row["Bet Size"]) + 1):
+        markets |= market_by_player.get(_leg_player(str(row.get(f"Leg {i}", ""))), set())
+    if not markets:
+        return 1.0, "fallback"
+    return min((_resolve_market_shrinkage(league, m) for m in markets), key=lambda r: r[0])
+
+
+def _leg_player(leg: str) -> str:
+    """Player name from a leg string ``"{Player} Over|Under {Line} {Market} - …"``."""
+    for token in (" Over ", " Under "):
+        if token in leg:
+            return leg.split(token, 1)[0].strip()
+    return ""
+
+
+def _parlays_per_variant(
+    scored_offers_df: pd.DataFrame, stats: dict[str, Any], config: PickemConfig
+) -> dict[str, pd.DataFrame]:
+    """Run ``find_correlation`` once per contest variant on already-scored offers.
+
+    The expensive scrape + model scoring happened upstream; this only enumerates
+    correlated parlays per payout variant, which touches no archive.
+    """
+    from sportstradamus.prediction.correlation import find_correlation
+
+    scored = scored_offers_df.to_dict("records") if not scored_offers_df.empty else []
+    return {
+        v: find_correlation(scored, stats, "Underdog", contest_variant=v)[1]
+        for v in config.contest_variants
+    }
+
+
+def build_entries_from_scored(
+    date: datetime.date,
+    bankroll: Decimal,
+    scored_offers_df: pd.DataFrame,
+    stats: dict[str, Any],
+    config: PickemConfig | None = None,
+) -> list[RecommendedEntry]:
+    """Build ranked entries from offers already scored by ``process_offers``.
+
+    Skips the scrape and model scoring — the caller supplies ``scored_offers_df``
+    — and runs only the per-variant correlation search before ranking and
+    sizing. The ``prophecize`` snapshot hook uses this so the hourly run feeds
+    the dashboard without a second scrape or archive lock.
+    """
+    config = config or PickemConfig()
+    parlay_dfs = _parlays_per_variant(scored_offers_df, stats, config)
+    return construct_entries(
+        date, bankroll, config, parlay_dfs=parlay_dfs, offers_df=scored_offers_df
+    )
 
 
 def _live_load(config: PickemConfig) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:
     """Re-run the prophecize loader and search per variant. Heavy."""
     from sportstradamus.books import get_ud
-    from sportstradamus.prediction.correlation import find_correlation
     from sportstradamus.prediction.scoring import process_offers
     from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
 
@@ -267,12 +353,7 @@ def _live_load(config: PickemConfig) -> tuple[dict[str, pd.DataFrame], pd.DataFr
     offers_df, _ = process_offers(
         get_ud(), "Underdog", stats, contest_variant=config.contest_variants[0]
     )
-    scored = offers_df.to_dict("records") if not offers_df.empty else []
-    parlay_dfs = {
-        v: find_correlation(scored, stats, "Underdog", contest_variant=v)[1]
-        for v in config.contest_variants
-    }
-    return parlay_dfs, offers_df
+    return _parlays_per_variant(offers_df, stats, config), offers_df
 
 
 def _build_cli() -> Any:
