@@ -27,6 +27,21 @@ jobs:
       - name: Format check (ruff format)
         run: poetry run ruff format --check src/ tests/
 
+      - name: Stage CI test stubs (gitignored secrets + learned configs)
+        # helpers/config.py loads keys.json plus several learned JSONs eagerly
+        # at import, so the package (and therefore every golden test, including
+        # test_imports) cannot import without them. These files are gitignored
+        # (secrets / runtime-learned outputs); write placeholders with the keys
+        # callers read at import. Empty dicts suffice for the learned configs —
+        # only odds_api is dereferenced at import time.
+        run: |
+          mkdir -p src/sportstradamus/creds
+          printf '%s' '{"odds_api": "", "odds_api_plus": "", "scrapingfish": "", "scrapeops": "", "fantasypoints_authorization": "", "fantasypoints_cookie": "", "fantasypoints_user_agent": ""}' > src/sportstradamus/creds/keys.json
+          printf '%s' '{"NFL": {}, "NBA": {}, "WNBA": {}, "NHL": {}, "MLB": {}}' > src/sportstradamus/data/stat_cv.json
+          printf '%s' '{}' > src/sportstradamus/data/stat_std.json
+          printf '%s' '{}' > src/sportstradamus/data/book_weights.json
+          printf '%s' '{}' > src/sportstradamus/data/goalies.json
+
       - name: Golden tests
         run: poetry run pytest tests/golden/ -v
 
