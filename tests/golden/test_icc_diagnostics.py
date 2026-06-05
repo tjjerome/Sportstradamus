@@ -30,6 +30,11 @@ from sportstradamus.scripts.icc_diagnostics import (
     main,
 )
 
+# Exercises a dev-only research script (sportstradamus.scripts.icc_diagnostics) that
+# never ships to production; statsmodels bootstrap fits make it slow. Excluded from the
+# default fast loop — run with ``pytest -m diagnostics``.
+pytestmark = pytest.mark.diagnostics
+
 # Two markets per synthetic league: one engineered high-ICC, one low-ICC.
 _SYNTH_MARKETS = {"NBA": ["hi", "lo"], "WNBA": ["hi", "lo"], "NFL": ["hi", "lo"]}
 # All synthetic dates fall in one month so every league maps to a single season

@@ -187,6 +187,17 @@ def test_pipeline_smoke(
 
     monkeypatch.setattr(prediction_cli, "write_current_offers", stub_write_current_offers)
 
+    # Pick'em snapshot hook: stub the (network-bound) builder so the wiring is
+    # exercised without find_correlation, and capture the writer call.
+    pickem_snapshot_calls: list = []
+    monkeypatch.setattr(
+        "sportstradamus.strategies.underdog_pickem.build_entries_from_scored",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        prediction_cli, "write_current_pickem", pickem_snapshot_calls.append
+    )
+
     # Skip writing prediction history to data/history.dat.
     def _noop_write(_df):
         return None
@@ -209,6 +220,7 @@ def test_pipeline_smoke(
 
     # The parquet snapshot writer was reached but no real disk write fired.
     assert snapshot_calls, "write_current_offers was never invoked"
+    assert pickem_snapshot_calls, "write_current_pickem was never invoked"
 
     # The orchestration produced offers with EV and at least one parlay candidate.
     assert captured, "process_offers was never invoked"

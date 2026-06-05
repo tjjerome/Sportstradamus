@@ -540,14 +540,16 @@ class StatsNFL(Stats):
             )
             nfl_data["sacks"] = nfl_data["sacks_suffered"].fillna(0).infer_objects(copy=False)
             nfl_data = nfl_data[cols]
-        except:
+        except Exception as exc:
+            logger.warning("load_player_stats() failed: %s", exc)
             nfl_data = pd.DataFrame(columns=cols)
         return nfl_data
 
     def _fetch_snap_counts(self):
         try:
             snaps = nflr.load_snap_counts().to_pandas()
-        except:
+        except Exception as exc:
+            logger.warning("load_snap_counts() failed: %s", exc)
             snaps = pd.DataFrame(
                 columns=[
                     "game_id",

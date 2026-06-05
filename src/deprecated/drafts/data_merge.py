@@ -1,3 +1,13 @@
+# ARCHIVED 2026-06-04 from src/sportstradamus/drafts/data_merge.py
+# Reason: NFL best-ball / draft-ADP research island — no entry point, cron,
+#         dashboard, test, or external importer; a separate product track.
+# Last live SHA: 43fa5b0
+# Original imports (now unresolved here):
+#   import importlib.resources as pkg_resources
+#   import pandas as pd
+#   from tqdm import tqdm
+#   from sportstradamus.drafts import data
+
 # %%
 import importlib.resources as pkg_resources
 

@@ -10,7 +10,8 @@ Branches covered: standard Over / Under / Push (``actual`` vs ``line``);
 matchup ``" vs. "`` Over / Under / Push (sign of ``actual + line``); Underdog
 payout (``Boost * 1.78``) vs other-platform (``* 1.0`` → degenerate K = NaN);
 legacy 6-tuple padding; a NaN ``Actual`` (Result/Hit NaN but Model/Books/K
-still computed); and a multi-offer prediction.
+still computed); a multi-offer prediction; and an empty ``Offers`` list (folded
+in from the former ``test_clv_explode.py``).
 """
 
 from __future__ import annotations
@@ -77,3 +78,20 @@ def test_explode_offers_full_exact_pin():
         pd.DataFrame(_EXPECTED),
         check_dtype=False,
     )
+
+
+def test_explode_offers_handles_empty_offers_list():
+    df = pd.DataFrame(
+        [
+            {
+                "Player": "Empty",
+                "League": "NBA",
+                "Date": "2026-05-04",
+                "Market": "points",
+                "Actual": np.nan,
+                "Offers": [],
+            }
+        ]
+    )
+    out = explode_offers(df)
+    assert out.empty

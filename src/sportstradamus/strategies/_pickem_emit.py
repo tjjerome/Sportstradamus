@@ -12,6 +12,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import pandas as pd
+
 if TYPE_CHECKING:
     from sportstradamus.strategies.underdog_pickem import (
         PickemConfig,
@@ -86,6 +88,49 @@ def emit_yaml(
     with open(out_path, "w") as fh:
         yaml.safe_dump(payload, fh, sort_keys=False)
     return out_path
+
+
+_PICKEM_FRAME_COLS = [
+    "id",
+    "contest_variant",
+    "entry_size",
+    "legs",
+    "joint_prob",
+    "payout_multiplier",
+    "ev",
+    "shrinkage",
+    "shrinkage_source",
+    "league",
+    "game",
+]
+
+
+def entries_to_frame(entries: list[RecommendedEntry]) -> pd.DataFrame:
+    """Flatten ranked entries into the dashboard pickem snapshot frame.
+
+    Bankroll-independent fields only: the dashboard sizes stakes live from a
+    user-entered bankroll, so ``recommended_stake`` is intentionally dropped.
+    """
+    if not entries:
+        return pd.DataFrame(columns=_PICKEM_FRAME_COLS)
+    return pd.DataFrame(
+        [
+            {
+                "id": e.id,
+                "contest_variant": e.contest_variant,
+                "entry_size": e.entry_size,
+                "legs": list(e.legs),
+                "joint_prob": float(e.joint_prob),
+                "payout_multiplier": float(e.payout_multiplier),
+                "ev": float(e.ev),
+                "shrinkage": float(e.shrinkage),
+                "shrinkage_source": e.shrinkage_source,
+                "league": e.extras.get("league", ""),
+                "game": e.extras.get("game", ""),
+            }
+            for e in entries
+        ]
+    )
 
 
 def _lazy_import(name: str) -> Any:
