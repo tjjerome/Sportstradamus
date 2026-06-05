@@ -78,7 +78,7 @@ matplotlib = "^3.7.1"
 optuna = ">=3.5.0,<3.6.0"
 optuna-dashboard = "^0.10.2"
 seaborn = "^0.13.1"
-ruff = "^0.15.0"
+ruff = "0.15.8"         # exact-pin; keep == .pre-commit-config.yaml ruff rev (lock is gitignored, so a caret floats the venv off the hook version → format ping-pong)
 mypy = "^1.10.0"
 pre-commit = "^3.7.0"
 pylint = "^3.2"          # duplicate-code detector only; see [tool.pylint.*]
