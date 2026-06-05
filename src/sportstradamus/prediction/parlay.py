@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from itertools import combinations
 from operator import itemgetter
 from typing import Literal
@@ -14,6 +15,26 @@ from sklearn.metrics import silhouette_score
 from tqdm import tqdm
 
 from sportstradamus.helpers import stat_cv, stat_std, underdog_payouts
+
+
+@dataclass(frozen=True)
+class GameArrays:
+    """Per-game leg×leg and per-leg numeric grids for one matchup.
+
+    Built once by ``correlation._build_correlation_matrices`` and consumed
+    read-only by correlation-column annotation and parlay beam search.
+    """
+
+    C: np.ndarray  # leg×leg correlation
+    M: np.ndarray  # leg×leg boost modifier
+    EV: np.ndarray  # leg×leg model pairwise EV
+    EVb: np.ndarray  # leg×leg book pairwise EV
+    V: np.ndarray  # model std-dev outer product
+    p_model: np.ndarray
+    p_books: np.ndarray
+    p_push: np.ndarray
+    boosts: np.ndarray
+
 
 # --- Beam-search constants --------------------------------------------------
 
@@ -419,10 +440,11 @@ def _parlay_fun(bet, league):
 
 
 def _evaluate_parlay(
-    bet_id, bet_size, payout_base, C, M, p_model, p_books, p_push, boosts,
-    full_payouts, max_boost, bet_df, info, team, opp, leg_teams, legacy,
+    bet_id, bet_size, payout_base, g, full_payouts, max_boost,
+    bet_df, info, team, opp, leg_teams, legacy,
 ):
     """Score one parlay candidate; return its row dict, or None if it fails a gate."""
+    C, M, p_model, p_books, p_push, boosts = g.C, g.M, g.p_model, g.p_books, g.p_push, g.boosts
     boost = _parlay_admissible(bet_id, leg_teams, team, opp, M, boosts, bet_size, max_boost)
     if boost is None:
         return None
@@ -486,13 +508,7 @@ def _evaluate_parlay(
 
 def beam_search_parlays(
     idx,
-    EV,
-    C,
-    M,
-    p_model,
-    p_books,
-    p_push,
-    boosts,
+    g,
     payouts,
     full_payouts,
     max_boost,
@@ -512,14 +528,8 @@ def beam_search_parlays(
 
     Args:
         idx: DataFrame of candidate legs (filtered from the game DataFrame).
-        EV: Pairwise EV matrix for the full game DataFrame.
-        C: Pairwise correlation matrix.
-        M: Pairwise boost-modifier matrix.
-        p_model: Model probability vector (chosen-side win probability).
-        p_books: Books probability vector.
-        p_push: Per-leg push probability (P(stat == line)). Zero for
-            non-integer lines and for continuous-distribution markets.
-        boosts: Boost multiplier vector.
+        g: Per-game leg arrays (correlation/boost matrices, EV grid, per-leg
+            model/book/push probabilities and boosts). See :class:`GameArrays`.
         payouts: Search-list payout multipliers (length = max_size - 1),
             indexed by ``bet_size - 2``. Drives the ranking heuristic and the
             books-EV pre-check.
@@ -550,11 +560,11 @@ def beam_search_parlays(
     for target_size in tqdm(
         range(2, max_bet_size + 1), desc=f"{info['League']}, {team}/{opp} Parlays", leave=False
     ):
-        top_candidates = _expand_candidates(candidates, leg_indices, leg_players, EV, target_size, K)
+        top_candidates = _expand_candidates(candidates, leg_indices, leg_players, g.EV, target_size, K)
         payout_base = payouts[target_size - 2]
         for parlay in top_candidates:
             result = _evaluate_parlay(
-                parlay, target_size, payout_base, C, M, p_model, p_books, p_push, boosts,
+                parlay, target_size, payout_base, g,
                 full_payouts, max_boost, bet_df, info, team, opp, leg_teams, legacy,
             )
             if result is not None:
