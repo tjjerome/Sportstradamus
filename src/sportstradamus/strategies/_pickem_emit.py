@@ -10,9 +10,10 @@ from __future__ import annotations
 import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pandas as pd
+import yaml
 
 if TYPE_CHECKING:
     from sportstradamus.strategies.underdog_pickem import (
@@ -49,8 +50,6 @@ def emit_yaml(
     out_path: Path,
 ) -> Path:
     """Serialize ``entries`` to ``out_path`` and return the path."""
-    yaml = _lazy_import("yaml")
-
     out_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "generated_at": datetime.datetime.now().isoformat(),
@@ -131,12 +130,3 @@ def entries_to_frame(entries: list[RecommendedEntry]) -> pd.DataFrame:
             for e in entries
         ]
     )
-
-
-def _lazy_import(name: str) -> Any:
-    try:
-        return __import__(name)
-    except ImportError as exc:
-        raise ImportError(
-            f"`{name}` is required for pickem-build. Install with `poetry install --with strategy`."
-        ) from exc
