@@ -304,9 +304,8 @@ def test_build_correlation_matrices_structure_and_values() -> None:
     game_df, game_dict = _matrix_game()
     c_map = {("G1.PTS", "G1.AST"): 0.4, ("G1.AST", "C1.REB"): 0.2}
 
-    C, M, EV, EVb, _V, _p_model, _p_books, p_push, _boosts = _build_correlation_matrices(
-        game_df, game_dict, c_map, {}, {}, [3.0]
-    )
+    g = _build_correlation_matrices(game_df, game_dict, c_map, {}, {}, [3.0])
+    C, M, EV, EVb, p_push = g.C, g.M, g.EV, g.EVb, g.p_push
 
     assert C.shape == (3, 3)
     assert np.allclose(np.diag(C), 1.0)  # np.eye base
@@ -332,7 +331,7 @@ def test_build_correlation_matrices_honors_push_column() -> None:
     game_df, game_dict = _matrix_game()
     game_df["Push P"] = [0.1, np.nan, 0.2]
 
-    *_, p_push, _ = _build_correlation_matrices(game_df, game_dict, {}, {}, {}, [3.0])
+    p_push = _build_correlation_matrices(game_df, game_dict, {}, {}, {}, [3.0]).p_push
     assert p_push.tolist() == [0.1, 0.0, 0.2]
 
 

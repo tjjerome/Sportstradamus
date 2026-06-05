@@ -25,6 +25,7 @@ from tqdm import tqdm
 from sportstradamus import data
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, banned, stat_map
 from sportstradamus.prediction.parlay import (
+    GameArrays,
     _payout_curve_for,
     assign_parlay_families,
     beam_search_parlays,
@@ -182,10 +183,10 @@ def _leg_pair_corr_boost(leg1, leg2, c_map, team_mod_map, opp_mod_map):
 def _build_correlation_matrices(game_df, game_dict, c_map, team_mod_map, opp_mod_map, search_payouts):
     """Per-game leg×leg correlation (C) / boost (M) matrices and EV grids.
 
-    Returns ``(C, M, EV, EVb, V, p_model, p_books, p_push, boosts)``: ``C``/``M``
-    symmetric leg matrices, ``EV``/``EVb`` the model/book pairwise expected
-    values, ``V`` the model std-dev outer product, and the per-leg probability /
-    boost vectors beam search consumes.
+    Returns a :class:`GameArrays` bundling the symmetric leg matrices ``C``/``M``,
+    the model/book pairwise expected values ``EV``/``EVb``, the model std-dev
+    outer product ``V``, and the per-leg probability / boost vectors beam search
+    consumes.
     """
     C = np.eye(len(game_dict))
     M = np.zeros([len(game_dict), len(game_dict)])
@@ -227,7 +228,10 @@ def _build_correlation_matrices(game_df, game_dict, c_map, team_mod_map, opp_mod
         )
         * search_payouts[0]
     )
-    return C, M, EV, EVb, V, p_model, p_books, p_push, boosts
+    return GameArrays(
+        C=C, M=M, EV=EV, EVb=EVb, V=V,
+        p_model=p_model, p_books=p_books, p_push=p_push, boosts=boosts,
+    )
 
 
 def _resolve_player_positions(league_df, league, stat_data, usage_str, tiebreaker_str, positions):
@@ -388,12 +392,13 @@ def _select_bet_offers(game_df):
     )
 
 
-def _annotate_correlation_columns(df, game_df, EV, EVb, C, V):
+def _annotate_correlation_columns(df, game_df, g):
     """Fill each offer's ``Team`` / ``Opp Correlation`` display columns in ``df``.
 
     For every leg, surface its top correlated same-team and opponent partners
     (one per player) that clear the display EV / correlation gates.
     """
+    EV, EVb, C, V = g.EV, g.EVb, g.C, g.V
     for i, offer in game_df.iterrows():
         indices = (
             (EV[:, i] > _DISPLAY_MODEL_EV_FLOOR)
@@ -478,10 +483,10 @@ def _process_league_games(
         idx = _select_bet_offers(game_df)
         bet_df = idx.to_dict("index")
 
-        C, M, EV, EVb, V, p_model, p_books, p_push, boosts = _build_correlation_matrices(
+        g = _build_correlation_matrices(
             game_df, game_dict, c_map, team_mod_map, opp_mod_map, search_payouts
         )
-        _annotate_correlation_columns(df, game_df, EV, EVb, C, V)
+        _annotate_correlation_columns(df, game_df, g)
 
         if platform in ["Chalkboard", "ParlayPlay"] and league == "MLB":
             continue
@@ -494,13 +499,7 @@ def _process_league_games(
         max_boost = _MAX_BOOST_UNDERDOG if platform == "Underdog" else _MAX_BOOST_OTHER
         best_bets = beam_search_parlays(
             idx,
-            EV,
-            C,
-            M,
-            p_model,
-            p_books,
-            p_push,
-            boosts,
+            g,
             search_payouts,
             full_payouts,
             max_boost,
@@ -512,7 +511,7 @@ def _process_league_games(
             legacy=legacy,
         )
         if len(best_bets) > 0:
-            parlay_df = _append_parlay_rows(parlay_df, best_bets, C)
+            parlay_df = _append_parlay_rows(parlay_df, best_bets, g.C)
     return parlay_df
 
 
