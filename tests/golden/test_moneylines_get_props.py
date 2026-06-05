@@ -32,12 +32,30 @@ _EVENTS = [{"id": "ev1", "commence_time": _COMMENCE}]
 _GAME = {
     "home_team": "Los Angeles Lakers",
     "away_team": "Boston Celtics",
-    "bookmakers": [{"key": "draftkings", "markets": [
-        {"key": "player_points", "outcomes": [
-            {"description": "LeBron James", "name": "Over", "point": 25.5, "price": 1.9},
-            {"description": "LeBron James", "name": "Under", "point": 25.5, "price": 1.9},
-        ]},
-    ]}],
+    "bookmakers": [
+        {
+            "key": "draftkings",
+            "markets": [
+                {
+                    "key": "player_points",
+                    "outcomes": [
+                        {
+                            "description": "LeBron James",
+                            "name": "Over",
+                            "point": 25.5,
+                            "price": 1.9,
+                        },
+                        {
+                            "description": "LeBron James",
+                            "name": "Under",
+                            "point": 25.5,
+                            "price": 1.9,
+                        },
+                    ],
+                },
+            ],
+        }
+    ],
 }
 
 

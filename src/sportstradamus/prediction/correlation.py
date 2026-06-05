@@ -198,7 +198,9 @@ def _leg_pair_corr_boost(leg1, leg2, c_map, team_mod_map, opp_mod_map):
     return rho / len(cm1) / len(cm2), boost
 
 
-def _build_correlation_matrices(game_df, game_dict, c_map, team_mod_map, opp_mod_map, search_payouts):
+def _build_correlation_matrices(
+    game_df, game_dict, c_map, team_mod_map, opp_mod_map, search_payouts
+):
     """Per-game leg×leg correlation (C) / boost (M) matrices and EV grids.
 
     Returns a :class:`GameArrays` bundling the symmetric leg matrices ``C``/``M``,
@@ -247,8 +249,15 @@ def _build_correlation_matrices(game_df, game_dict, c_map, team_mod_map, opp_mod
         * search_payouts[0]
     )
     return GameArrays(
-        C=C, M=M, EV=EV, EVb=EVb, V=V,
-        p_model=p_model, p_books=p_books, p_push=p_push, boosts=boosts,
+        C=C,
+        M=M,
+        EV=EV,
+        EVb=EVb,
+        V=V,
+        p_model=p_model,
+        p_books=p_books,
+        p_push=p_push,
+        boosts=boosts,
     )
 
 

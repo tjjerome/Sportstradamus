@@ -211,17 +211,25 @@ def _moneyline_sports(apikey, sport, key, historical):
 def _moneyline_request(apikey, date, historical, low_on_credits):
     markets = ["h2h", "totals", "spreads"]
     if historical:
-        return ODDS_API_HISTORICAL_ODDS_URL, _HIST_DAY_WINDOW, {
-            "apiKey": apikey["odds_api_plus"],
+        return (
+            ODDS_API_HISTORICAL_ODDS_URL,
+            _HIST_DAY_WINDOW,
+            {
+                "apiKey": apikey["odds_api_plus"],
+                "regions": "us",
+                "date": date.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "markets": ",".join(markets),
+            },
+        )
+    return (
+        ODDS_API_ODDS_URL,
+        _LIVE_DAY_WINDOW,
+        {
+            "apiKey": apikey["odds_api_plus"] if low_on_credits else apikey["odds_api"],
             "regions": "us",
-            "date": date.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "markets": ",".join(markets),
-        }
-    return ODDS_API_ODDS_URL, _LIVE_DAY_WINDOW, {
-        "apiKey": apikey["odds_api_plus"] if low_on_credits else apikey["odds_api"],
-        "regions": "us",
-        "markets": ",".join(markets),
-    }
+        },
+    )
 
 
 def _parse_market_books(game):
@@ -237,9 +245,7 @@ def _parse_market_books(game):
     for book in game["bookmakers"]:
         for market in book["markets"]:
             if market["key"] == "h2h":
-                odds = no_vig_odds(
-                    market["outcomes"][0]["price"], market["outcomes"][1]["price"]
-                )
+                odds = no_vig_odds(market["outcomes"][0]["price"], market["outcomes"][1]["price"])
                 if market["outcomes"][0]["name"] == game["home_team"]:
                     moneyline_home[book["key"]] = odds[0]
                     moneyline_away[book["key"]] = odds[1]
@@ -372,7 +378,11 @@ def _props_request(apikey, date, historical):
             historical,
         )
     return _PropsRequest(
-        ODDS_API_EVENTS_URL, ODDS_API_EVENT_ODDS_URL, _LIVE_DAY_WINDOW, {"apiKey": apikey}, historical
+        ODDS_API_EVENTS_URL,
+        ODDS_API_EVENT_ODDS_URL,
+        _LIVE_DAY_WINDOW,
+        {"apiKey": apikey},
+        historical,
     )
 
 
@@ -390,7 +400,7 @@ def _store_sport_props(archive, ledger, sport, league, props, date, req):
     if events.status_code != HTTPStatus.OK:
         return True
 
-    for event in (events.json()["data"] if req.historical else events.json()):
+    for event in events.json()["data"] if req.historical else events.json():
         gameDate = datetime.fromisoformat(event["commence_time"]).astimezone(
             pytz.timezone("America/Chicago")
         )

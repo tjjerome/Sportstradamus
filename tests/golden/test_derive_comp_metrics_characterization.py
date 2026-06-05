@@ -21,21 +21,50 @@ import pandas as pd
 from sportstradamus.stats.nfl_fp_loader import derive_comp_metrics
 
 _INPUT_COLUMNS = [
-    "position", "player_game_count", "pass_adv_DB", "rush_basic_ATT", "rec_adv_RTE",
-    "pass_adv_SCRM", "pass_basic_YDS.1", "rec_basic_REC", "rec_adv_CTGT_pct",
-    "rec_sep_cov_WIN_RATE.4", "rec_adv_YPRR", "rec_mz_YPRR.1", "rec_mz_YPRR.2",
-    "rec_sep_align_SEP_SCORE", "rec_sep_align_WIN_RATE", "rec_sep_route_SEP_SCORE",
-    "rec_sep_route_SEP_SCORE.1", "qb_cov_QB_MAN_pct", "off_faced_man_pct",
-    "rush_adv_Success_pct", "rush_adv_EXP_RUN_pct", "rush_bellcow_ATT_pct",
+    "position",
+    "player_game_count",
+    "pass_adv_DB",
+    "rush_basic_ATT",
+    "rec_adv_RTE",
+    "pass_adv_SCRM",
+    "pass_basic_YDS.1",
+    "rec_basic_REC",
+    "rec_adv_CTGT_pct",
+    "rec_sep_cov_WIN_RATE.4",
+    "rec_adv_YPRR",
+    "rec_mz_YPRR.1",
+    "rec_mz_YPRR.2",
+    "rec_sep_align_SEP_SCORE",
+    "rec_sep_align_WIN_RATE",
+    "rec_sep_route_SEP_SCORE",
+    "rec_sep_route_SEP_SCORE.1",
+    "qb_cov_QB_MAN_pct",
+    "off_faced_man_pct",
+    "rush_adv_Success_pct",
+    "rush_adv_EXP_RUN_pct",
+    "rush_bellcow_ATT_pct",
     "rush_bellcow_TGT_pct",
 ]
 
 _DERIVED_ORDER = [
-    "dropbacks", "attempts", "routes",
-    "dropbacks_per_game", "scrambles_per_dropback", "designed_yards_per_game",
-    "total_touches_per_game", "contested_target_rate", "deep_contested_target_rate",
-    "man_yprr_diff", "zone_yprr_diff", "sep_overall", "win_rate_overall",
-    "sep_routes_mean", "cov_man_share", "success_rate", "exp_run_share", "bellcow_score",
+    "dropbacks",
+    "attempts",
+    "routes",
+    "dropbacks_per_game",
+    "scrambles_per_dropback",
+    "designed_yards_per_game",
+    "total_touches_per_game",
+    "contested_target_rate",
+    "deep_contested_target_rate",
+    "man_yprr_diff",
+    "zone_yprr_diff",
+    "sep_overall",
+    "win_rate_overall",
+    "sep_routes_mean",
+    "cov_man_share",
+    "success_rate",
+    "exp_run_share",
+    "bellcow_score",
 ]
 
 
@@ -107,15 +136,22 @@ def test_full_profile_column_order_and_values():
 def test_partial_profile_skips_absent_groups():
     """QB-only columns: receiver / RB metrics are skipped, order is still fixed."""
     qb_cols = [
-        "position", "player_game_count", "pass_adv_DB", "pass_adv_SCRM",
-        "pass_basic_YDS.1", "qb_cov_QB_MAN_pct",
+        "position",
+        "player_game_count",
+        "pass_adv_DB",
+        "pass_adv_SCRM",
+        "pass_basic_YDS.1",
+        "qb_cov_QB_MAN_pct",
     ]
     out = derive_comp_metrics(_full_profile()[qb_cols])
 
     assert list(out.columns) == [
         *qb_cols,
-        "dropbacks", "dropbacks_per_game", "scrambles_per_dropback",
-        "designed_yards_per_game", "cov_man_share",
+        "dropbacks",
+        "dropbacks_per_game",
+        "scrambles_per_dropback",
+        "designed_yards_per_game",
+        "cov_man_share",
     ]
     assert round(out.loc["QB1", "dropbacks_per_game"], 6) == 35.0
     assert round(out.loc["QB1", "cov_man_share"], 6) == 0.32

@@ -341,7 +341,9 @@ def test_parlay_shrinkage_min_over_canonical_leg_markets(monkeypatch):
 
     shrink = {"REB": (0.80, "training"), "STL": (0.20, "training")}
     monkeypatch.setattr(
-        up, "_resolve_market_shrinkage", lambda league, market: shrink.get(market, (1.0, "fallback"))
+        up,
+        "_resolve_market_shrinkage",
+        lambda league, market: shrink.get(market, (1.0, "fallback")),
     )
     row = pd.Series(
         {

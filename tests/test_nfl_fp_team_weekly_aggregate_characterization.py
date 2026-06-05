@@ -35,9 +35,15 @@ def _dispatch_df() -> pd.DataFrame:
             "act": [8.0, 2.0, 6.0],
             "exp": [4.0, 4.0, 3.0],
             "bucket": [
-                json.dumps({"Inside10": {"teamStatsSnapsOffensePass": 6, "teamStatsSnapsOffenseRush": 4}}),
-                json.dumps({"Inside10": {"teamStatsSnapsOffensePass": 4, "teamStatsSnapsOffenseRush": 6}}),
-                json.dumps({"Inside10": {"teamStatsSnapsOffensePass": 3, "teamStatsSnapsOffenseRush": 1}}),
+                json.dumps(
+                    {"Inside10": {"teamStatsSnapsOffensePass": 6, "teamStatsSnapsOffenseRush": 4}}
+                ),
+                json.dumps(
+                    {"Inside10": {"teamStatsSnapsOffensePass": 4, "teamStatsSnapsOffenseRush": 6}}
+                ),
+                json.dumps(
+                    {"Inside10": {"teamStatsSnapsOffensePass": 3, "teamStatsSnapsOffenseRush": 1}}
+                ),
             ],
         }
     )
@@ -89,10 +95,14 @@ def _patch_pattern_a(monkeypatch):
     )
     monkeypatch.setattr(m, "_ALL_RECIPES", recipes)
     frames = {
-        "kindA": pd.DataFrame({TGC: [1, 1, 2, 3], "num": [10.0, 20.0, 5.0, 9.0], "den": [2.0, 2.0, 1.0, 3.0]}),
+        "kindA": pd.DataFrame(
+            {TGC: [1, 1, 2, 3], "num": [10.0, 20.0, 5.0, 9.0], "den": [2.0, 2.0, 1.0, 3.0]}
+        ),
         "kindB": pd.DataFrame({TGC: [1, 2], "val": [3.0, 4.0], "wt": [10.0, 5.0]}),
     }
-    monkeypatch.setattr(m, "_load_kind_window", lambda season, start, end, kind: frames.get(kind, pd.DataFrame()))
+    monkeypatch.setattr(
+        m, "_load_kind_window", lambda season, start, end, kind: frames.get(kind, pd.DataFrame())
+    )
 
 
 def test_aggregate_pattern_a_team_grain(monkeypatch):

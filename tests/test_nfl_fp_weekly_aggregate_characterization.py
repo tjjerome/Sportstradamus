@@ -26,32 +26,47 @@ _W = [(2024, 1, 18)]
 
 def _bucket_df(payload_by_player: dict) -> pd.DataFrame:
     return pd.DataFrame(
-        {PGC: list(payload_by_player), "bucket": [json.dumps(p) for p in payload_by_player.values()]}
+        {
+            PGC: list(payload_by_player),
+            "bucket": [json.dumps(p) for p in payload_by_player.values()],
+        }
     )
 
 
 def _patch_loader(monkeypatch, kind_map: dict):
-    monkeypatch.setattr(m, "_load_kind_multi", lambda windows, kind: kind_map.get(kind, pd.DataFrame()))
+    monkeypatch.setattr(
+        m, "_load_kind_multi", lambda windows, kind: kind_map.get(kind, pd.DataFrame())
+    )
 
 
 def test_aggregate_separation_by_routes(monkeypatch):
     routes = list(m._ROUTE_BUCKET_ORDER[:3])
-    df = _bucket_df({
-        "p1": {routes[0]: {m._SEP_BY_ROUTES_VALUE_KEY: 0.40, m._SEP_BY_ROUTES_WEIGHT_KEY: 10},
-               routes[1]: {m._SEP_BY_ROUTES_VALUE_KEY: 0.55, m._SEP_BY_ROUTES_WEIGHT_KEY: 5}},
-        "p2": {routes[0]: {m._SEP_BY_ROUTES_VALUE_KEY: 0.30, m._SEP_BY_ROUTES_WEIGHT_KEY: 8},
-               "UnknownRoute": {m._SEP_BY_ROUTES_VALUE_KEY: 0.9, m._SEP_BY_ROUTES_WEIGHT_KEY: 2}},
-    })
+    df = _bucket_df(
+        {
+            "p1": {
+                routes[0]: {m._SEP_BY_ROUTES_VALUE_KEY: 0.40, m._SEP_BY_ROUTES_WEIGHT_KEY: 10},
+                routes[1]: {m._SEP_BY_ROUTES_VALUE_KEY: 0.55, m._SEP_BY_ROUTES_WEIGHT_KEY: 5},
+            },
+            "p2": {
+                routes[0]: {m._SEP_BY_ROUTES_VALUE_KEY: 0.30, m._SEP_BY_ROUTES_WEIGHT_KEY: 8},
+                "UnknownRoute": {m._SEP_BY_ROUTES_VALUE_KEY: 0.9, m._SEP_BY_ROUTES_WEIGHT_KEY: 2},
+            },
+        }
+    )
     _patch_loader(monkeypatch, {m._SEP_BY_ROUTES_KIND: df})
     out = m._aggregate_separation_by_routes(_W)
 
     assert list(out.columns) == [
-        "rec_sep_route_SEP_SCORE", "rec_sep_route_SEP_SCORE.1", "rec_sep_route_SEP_SCORE.2",
+        "rec_sep_route_SEP_SCORE",
+        "rec_sep_route_SEP_SCORE.1",
+        "rec_sep_route_SEP_SCORE.2",
     ]
     assert out.loc["p1", "rec_sep_route_SEP_SCORE"] == pytest.approx(0.40)
     assert out.loc["p1", "rec_sep_route_SEP_SCORE.1"] == pytest.approx(0.55)
     assert out.loc["p2", "rec_sep_route_SEP_SCORE"] == pytest.approx(0.30)
-    assert out.loc["p2", "rec_sep_route_SEP_SCORE.2"] == pytest.approx(0.90)  # unknown route appended
+    assert out.loc["p2", "rec_sep_route_SEP_SCORE.2"] == pytest.approx(
+        0.90
+    )  # unknown route appended
     assert pd.isna(out.loc["p1", "rec_sep_route_SEP_SCORE.2"])
 
 
@@ -71,11 +86,26 @@ def test_aggregate_per_coverage_yprr(monkeypatch):
 
 def test_aggregate_separation_by_coverage(monkeypatch):
     schemes = list(m._SEP_BY_COVERAGE_SCHEMES.items())
-    df = _bucket_df({
-        "p1": {schemes[0][1]: {m._SEP_BY_COVERAGE_VALUE_KEY: 0.5, m._SEP_BY_COVERAGE_WEIGHT_KEY: 20},
-               schemes[1][1]: {m._SEP_BY_COVERAGE_VALUE_KEY: 0.6, m._SEP_BY_COVERAGE_WEIGHT_KEY: 10}},
-        "p2": {schemes[0][1]: {m._SEP_BY_COVERAGE_VALUE_KEY: 0.45, m._SEP_BY_COVERAGE_WEIGHT_KEY: 15}},
-    })
+    df = _bucket_df(
+        {
+            "p1": {
+                schemes[0][1]: {
+                    m._SEP_BY_COVERAGE_VALUE_KEY: 0.5,
+                    m._SEP_BY_COVERAGE_WEIGHT_KEY: 20,
+                },
+                schemes[1][1]: {
+                    m._SEP_BY_COVERAGE_VALUE_KEY: 0.6,
+                    m._SEP_BY_COVERAGE_WEIGHT_KEY: 10,
+                },
+            },
+            "p2": {
+                schemes[0][1]: {
+                    m._SEP_BY_COVERAGE_VALUE_KEY: 0.45,
+                    m._SEP_BY_COVERAGE_WEIGHT_KEY: 15,
+                }
+            },
+        }
+    )
     _patch_loader(monkeypatch, {m._SEP_BY_COVERAGE_KIND: df})
     out = m._aggregate_separation_by_coverage(_W)
 
@@ -88,10 +118,14 @@ def test_aggregate_separation_by_coverage(monkeypatch):
 
 def test_aggregate_man_vs_zone_bucket(monkeypatch):
     shells = list(m._MZ_BUCKETS.items())
-    df = _bucket_df({
-        "p1": {shells[0][1]: {m._MZ_VALUE_KEY: 1.5, m._MZ_WEIGHT_KEY: 30},
-               shells[1][1]: {m._MZ_VALUE_KEY: 2.0, m._MZ_WEIGHT_KEY: 20}},
-    })
+    df = _bucket_df(
+        {
+            "p1": {
+                shells[0][1]: {m._MZ_VALUE_KEY: 1.5, m._MZ_WEIGHT_KEY: 30},
+                shells[1][1]: {m._MZ_VALUE_KEY: 2.0, m._MZ_WEIGHT_KEY: 20},
+            },
+        }
+    )
     _patch_loader(monkeypatch, {m._MZ_BUCKET_KIND: df})
     out = m._aggregate_man_vs_zone_bucket(_W)
 
@@ -105,20 +139,35 @@ def test_load_multi_window_one_year_wiring(monkeypatch):
     base = pd.DataFrame({"recipe_col": [1.0, 2.0]}, index=["p1", "p2"])
     monkeypatch.setattr(m, "_aggregate_recipes", lambda w: base.copy())
     # five bucket aggregates, each contributing one distinct column
-    monkeypatch.setattr(m, "_aggregate_separation_by_routes",
-                        lambda w: pd.DataFrame({"rt": [0.1, 0.2]}, index=["p1", "p2"]))
-    monkeypatch.setattr(m, "_aggregate_per_coverage_yprr",
-                        lambda w: pd.DataFrame({"yprr": [0.3, 0.4]}, index=["p1", "p2"]))
-    monkeypatch.setattr(m, "_aggregate_separation_by_coverage",
-                        lambda w: pd.DataFrame({"cov": [0.5, 0.6]}, index=["p1", "p2"]))
-    monkeypatch.setattr(m, "_aggregate_separation_by_alignment_bucket",
-                        lambda w: pd.DataFrame({"align": [0.7, 0.8]}, index=["p1", "p2"]))
-    monkeypatch.setattr(m, "_aggregate_man_vs_zone_bucket",
-                        lambda w: pd.DataFrame({"mz": [0.9, 1.0]}, index=["p1", "p2"]))
-    monkeypatch.setattr(m, "_player_metadata",
-                        lambda w: pd.DataFrame({"POS": ["WR", "RB"]}, index=["p1", "p2"]))
-    monkeypatch.setattr(m, "_player_game_counts",
-                        lambda w: pd.Series([3, 4], index=["p1", "p2"]))
+    monkeypatch.setattr(
+        m,
+        "_aggregate_separation_by_routes",
+        lambda w: pd.DataFrame({"rt": [0.1, 0.2]}, index=["p1", "p2"]),
+    )
+    monkeypatch.setattr(
+        m,
+        "_aggregate_per_coverage_yprr",
+        lambda w: pd.DataFrame({"yprr": [0.3, 0.4]}, index=["p1", "p2"]),
+    )
+    monkeypatch.setattr(
+        m,
+        "_aggregate_separation_by_coverage",
+        lambda w: pd.DataFrame({"cov": [0.5, 0.6]}, index=["p1", "p2"]),
+    )
+    monkeypatch.setattr(
+        m,
+        "_aggregate_separation_by_alignment_bucket",
+        lambda w: pd.DataFrame({"align": [0.7, 0.8]}, index=["p1", "p2"]),
+    )
+    monkeypatch.setattr(
+        m,
+        "_aggregate_man_vs_zone_bucket",
+        lambda w: pd.DataFrame({"mz": [0.9, 1.0]}, index=["p1", "p2"]),
+    )
+    monkeypatch.setattr(
+        m, "_player_metadata", lambda w: pd.DataFrame({"POS": ["WR", "RB"]}, index=["p1", "p2"])
+    )
+    monkeypatch.setattr(m, "_player_game_counts", lambda w: pd.Series([3, 4], index=["p1", "p2"]))
     monkeypatch.setattr(m, "_project_to_name_index", lambda df: df)
     monkeypatch.setattr(m, "_derive_aggregate_metrics", lambda df: df)
     monkeypatch.setattr(m, "_broadcast_team_coverage", lambda df, w: df)

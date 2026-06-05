@@ -273,9 +273,7 @@ def _simulate_gamelog(
     n_stat_slots = N_PLAYERS_PER_TEAM * N_STATS_PER_PLAYER
 
     teams = [f"T{i:02d}" for i in range(n_teams)]
-    stat_cols = [
-        f"P{p}_S{s}" for p in range(N_PLAYERS_PER_TEAM) for s in range(N_STATS_PER_PLAYER)
-    ]
+    stat_cols = [f"P{p}_S{s}" for p in range(N_PLAYERS_PER_TEAM) for s in range(N_STATS_PER_PLAYER)]
 
     true_per_team: dict[str, np.ndarray] = {}
     for team in teams:
@@ -289,10 +287,8 @@ def _simulate_gamelog(
     rows: list[dict] = []
     for game_idx in range(n_games):
         # AR(1) drift on per-player skill (shared across that player's stats).
-        skills = (
-            SKILL_DRIFT_AR1_PHI * skills
-            + SKILL_DRIFT_INNOVATION_SD
-            * rng.standard_normal(size=(n_teams, N_PLAYERS_PER_TEAM))
+        skills = SKILL_DRIFT_AR1_PHI * skills + SKILL_DRIFT_INNOVATION_SD * rng.standard_normal(
+            size=(n_teams, N_PLAYERS_PER_TEAM)
         )
         rng.shuffle(perm_order)
         for pair_idx in range(0, n_teams, 2):
@@ -322,8 +318,10 @@ def _simulate_gamelog(
                     rows.append(row)
     gamelog = pd.DataFrame(rows)
     # Map each per-team latent matrix into a labeled DataFrame for scoring.
-    labeled = {team: pd.DataFrame(true_per_team[team], index=stat_cols, columns=stat_cols)
-               for team in teams}
+    labeled = {
+        team: pd.DataFrame(true_per_team[team], index=stat_cols, columns=stat_cols)
+        for team in teams
+    }
     return gamelog, labeled
 
 
@@ -418,7 +416,9 @@ def _score_recovery(
     metrics = {
         "n_pairs": float(len(pred_arr)),
         "mae": float(np.mean(np.abs(pred_arr - true_arr))) if len(pred_arr) else float("nan"),
-        "rmse": float(np.sqrt(np.mean((pred_arr - true_arr) ** 2))) if len(pred_arr) else float("nan"),
+        "rmse": float(np.sqrt(np.mean((pred_arr - true_arr) ** 2)))
+        if len(pred_arr)
+        else float("nan"),
         "spearman_rho": (
             float(spearmanr(pred_arr, true_arr).statistic) if len(pred_arr) > 1 else float("nan")
         ),
@@ -655,9 +655,7 @@ def _score_against_beat_line(
     return {
         "n_pairs": float(len(pa)),
         "mae_vs_beat_line": float(np.mean(np.abs(pa - aa))),
-        "rho_pred_vs_actual": (
-            float(spearmanr(pa, aa).statistic) if len(pa) > 1 else float("nan")
-        ),
+        "rho_pred_vs_actual": (float(spearmanr(pa, aa).statistic) if len(pa) > 1 else float("nan")),
         "sign_agreement": (sign_match / sign_total) if sign_total else float("nan"),
         "n_sign_pairs": float(sign_total),
         # Per-bucket mean of direction-matched realized beat-line correlation.
@@ -752,10 +750,13 @@ def _score_against_beat_line_quantile(
         return float(np.mean(signed)), int(mask.sum())
 
     bucket_specs = [
-        (f"bot25(<{q25:.3f})",      _bucket_lift(pa_ns, aa_ns, abs_ns < q25)),
+        (f"bot25(<{q25:.3f})", _bucket_lift(pa_ns, aa_ns, abs_ns < q25)),
         (f"mid({q25:.3f}-{q75:.3f})", _bucket_lift(pa_ns, aa_ns, (abs_ns >= q25) & (abs_ns < q75))),
-        (f"top25(>{q75:.3f})",      _bucket_lift(pa_ns, aa_ns, abs_ns >= q75)),
-        (f"extreme(>{extreme_cutoff:.3f},+self)", _bucket_lift(pa_full, aa_full, abs_full >= extreme_cutoff)),
+        (f"top25(>{q75:.3f})", _bucket_lift(pa_ns, aa_ns, abs_ns >= q75)),
+        (
+            f"extreme(>{extreme_cutoff:.3f},+self)",
+            _bucket_lift(pa_full, aa_full, abs_full >= extreme_cutoff),
+        ),
     ]
     bucket_labels = [s[0] for s in bucket_specs]
     bucket_means = [s[1][0] for s in bucket_specs]
@@ -821,21 +822,15 @@ def _print_beat_line_quantile_table(metrics_per_variant: dict[str, dict]) -> Non
         )
 
     click.echo("")
-    click.echo(
-        "      direction-matched realized beat-line corr by |pred| quantile bucket"
-    )
-    click.echo(
-        "      buckets 1-3 exclude same-player pairs; bucket 4 includes them"
-    )
+    click.echo("      direction-matched realized beat-line corr by |pred| quantile bucket")
+    click.echo("      buckets 1-3 exclude same-player pairs; bucket 4 includes them")
     bucket_headers = [
         "bot 25% (no self)",
         "mid 25-75% (no self)",
         "top 25% (no self)",
         "extreme (incl self)",
     ]
-    click.echo(
-        "      " + f"{'bucket':<22}" + "  " + "  ".join(f"{n:>18}" for n in names)
-    )
+    click.echo("      " + f"{'bucket':<22}" + "  " + "  ".join(f"{n:>18}" for n in names))
     click.echo("      " + "-" * 22 + "  " + "  ".join("-" * 18 for _ in names))
     for i, header in enumerate(bucket_headers):
         cells = []
@@ -1010,9 +1005,7 @@ def _holdout_metrics(
     return {
         "n_pairs": float(len(pa)),
         "mae": float(np.mean(np.abs(pa - aa))) if len(pa) else float("nan"),
-        "spearman_rho": (
-            float(spearmanr(pa, aa).statistic) if len(pa) > 1 else float("nan")
-        ),
+        "spearman_rho": (float(spearmanr(pa, aa).statistic) if len(pa) > 1 else float("nan")),
         "sign_agreement": (sign_match / sign_total) if sign_total else float("nan"),
         "n_sign_pairs": float(sign_total),
         "low_overlap_mae": (
@@ -1049,9 +1042,7 @@ def run_real(league: str) -> bool:
     #   beat_line_matrix — 1/0/NaN beat-line booleans against rolling line
     #                      (ground truth for the conditional-probability test)
     try:
-        earliest = pd.to_datetime(
-            stats.gamelog[stats.log_strings["date"]]
-        ).min().to_pydatetime()
+        earliest = pd.to_datetime(stats.gamelog[stats.log_strings["date"]]).min().to_pydatetime()
         res_records = _correlate._build_team_game_records(league, stats, earliest)
         res_matrix = pd.DataFrame(pd.json_normalize(res_records))
     except Exception as exc:
@@ -1083,7 +1074,7 @@ def run_real(league: str) -> bool:
     beat_line_matrix = beat_line_matrix.sort_values("DATE").reset_index(drop=True)
     n = len(res_matrix)
     cutoff_date = res_matrix.loc[int(n * TRAIN_FRACTION), "DATE"]
-    click.echo(f"      train/test cutoff = {cutoff_date} ({int(n*TRAIN_FRACTION)}/{n} rows)")
+    click.echo(f"      train/test cutoff = {cutoff_date} ({int(n * TRAIN_FRACTION)}/{n} rows)")
 
     res_train = res_matrix.loc[res_matrix["DATE"] <= cutoff_date]
     raw_train = raw_matrix.loc[raw_matrix["DATE"] <= cutoff_date]
@@ -1119,9 +1110,7 @@ def run_real(league: str) -> bool:
     beat_line_metrics: dict[str, dict] = {}
     for name, stacked in variants:
         per_team = _stacked_to_per_team(stacked)
-        holdout_metrics[name] = _holdout_metrics(
-            per_team, test_spearman, overlap_per_variant[name]
-        )
+        holdout_metrics[name] = _holdout_metrics(per_team, test_spearman, overlap_per_variant[name])
         beat_line_metrics[name] = _score_against_beat_line_quantile(
             per_team, test_beat_line, _same_player_real
         )

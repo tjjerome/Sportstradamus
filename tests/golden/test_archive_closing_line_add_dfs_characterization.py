@@ -116,10 +116,38 @@ class _CaptureArchive:
 
 def test_add_dfs_dedup_market_resolution_and_ev():
     offers = [
-        {"Player": "Nikola Jokic", "League": "NBA", "Market": "BLK", "Line": 1.5, "Date": "2025-12-23", "Boost": 1.0},
-        {"Player": "Nikola Jokic", "League": "NBA", "Market": "BLK", "Line": 1.5, "Date": "2025-12-23", "Boost": 1.3},
-        {"Player": "Connor McDavid", "League": "NHL", "Market": "PTS", "Line": 1.5, "Date": "2025-12-23", "Boost": 1.0},
-        {"Player": "Some Guy", "League": "WNBA", "Market": "underdog_pts", "Line": 10.5, "Date": "2025-12-23", "Boost": 1.0},
+        {
+            "Player": "Nikola Jokic",
+            "League": "NBA",
+            "Market": "BLK",
+            "Line": 1.5,
+            "Date": "2025-12-23",
+            "Boost": 1.0,
+        },
+        {
+            "Player": "Nikola Jokic",
+            "League": "NBA",
+            "Market": "BLK",
+            "Line": 1.5,
+            "Date": "2025-12-23",
+            "Boost": 1.3,
+        },
+        {
+            "Player": "Connor McDavid",
+            "League": "NHL",
+            "Market": "PTS",
+            "Line": 1.5,
+            "Date": "2025-12-23",
+            "Boost": 1.0,
+        },
+        {
+            "Player": "Some Guy",
+            "League": "WNBA",
+            "Market": "underdog_pts",
+            "Line": 10.5,
+            "Date": "2025-12-23",
+            "Boost": 1.0,
+        },
     ]
     cap = _CaptureArchive()
     Archive.add_dfs(cap, offers, "Underdog", {})
@@ -128,12 +156,12 @@ def test_add_dfs_dedup_market_resolution_and_ev():
     assert len(cap.book_evs) == 3
     leagues_markets_entities = [(lg, mkt, ent) for lg, mkt, ent, _, _ in cap.book_evs]
     assert leagues_markets_entities == [
-        ("NBA", "BLK", "Nikola Jokic"),          # market unchanged
-        ("NHL", "points", "Connor Mcdavid"),     # PTS->points via NHL remap; accents stripped
+        ("NBA", "BLK", "Nikola Jokic"),  # market unchanged
+        ("NHL", "points", "Connor Mcdavid"),  # PTS->points via NHL remap; accents stripped
         ("WNBA", "prizepicks_pts", "Some Guy"),  # underdog->prizepicks for NBA/WNBA
     ]
     evs = {ent: ev for _, _, ent, _, ev in cap.book_evs}
-    assert evs["Nikola Jokic"] == pytest.approx(1.5)   # ZINB gate underflow -> neutral line
+    assert evs["Nikola Jokic"] == pytest.approx(1.5)  # ZINB gate underflow -> neutral line
     assert evs["Connor Mcdavid"] == pytest.approx(1.5)
     assert evs["Some Guy"] == pytest.approx(15.148297929, rel=1e-6)
 

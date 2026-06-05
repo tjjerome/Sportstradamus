@@ -35,43 +35,120 @@ class _FakeDatetime(_dt.datetime):
 
 def _fake_scraper_get(url):
     if "api-web.nhle.com/v1/schedule" in url:
-        return {"nextStartDate": "2024-11-02",
-                "gameWeek": [{"date": "2024-10-31", "games": [{"id": "G1"}]}]}
+        return {
+            "nextStartDate": "2024-11-02",
+            "gameWeek": [{"date": "2024-10-31", "games": [{"id": "G1"}]}],
+        }
     if "weekly-schedule/weekly-games" in url:
-        return {"data": {"content": {"weeklyGames": [
-            {"teamName": "Boston Bruins", "games": [
-                {"gameId": "D1", "opponentTeam": {"name": "Montreal Canadiens"},
-                 "teamType": "HOME"}]}]}}}
+        return {
+            "data": {
+                "content": {
+                    "weeklyGames": [
+                        {
+                            "teamName": "Boston Bruins",
+                            "games": [
+                                {
+                                    "gameId": "D1",
+                                    "opponentTeam": {"name": "Montreal Canadiens"},
+                                    "teamType": "HOME",
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        }
     if "/v1/game/" in url:
-        return {"data": {"gameDate": "2024-11-05T19:00:00+00:00",
-                         "predictedGoalies": {"HOME": [{"goalie": {"fullName": "Goalie Two"}}]}}}
+        return {
+            "data": {
+                "gameDate": "2024-11-05T19:00:00+00:00",
+                "predictedGoalies": {"HOME": [{"goalie": {"fullName": "Goalie Two"}}]},
+            }
+        }
     raise AssertionError(f"unexpected scraper url {url}")
 
 
-_BIOS = pd.DataFrame([
-    {"name": "Skater One", "playerId": 1001, "height": "6' 2\"", "weight": 200,
-     "birthDate": "1995-01-01", "position": "C", "nationality": "USA",
-     "primaryNumber": "10", "primaryPosition": "C", "team": "BOS"},
-    {"name": "Goalie Two", "playerId": 2002, "height": "6' 4\"", "weight": 210,
-     "birthDate": "1993-05-05", "position": "G", "nationality": "CAN",
-     "primaryNumber": "30", "primaryPosition": "G", "team": "BOS"},
-])
-_SKATERS = pd.DataFrame([{
-    "name": "Skater One", "playerId": 1001, "situation": "all", "team": "BOS", "position": "C",
-    "onIce_fenwickPercentage": 0.55, "offIce_fenwickPercentage": 0.50,
-    "icetime": 3600.0, "games_played": 2, "I_F_shifts": 20,
-    "I_F_flurryScoreVenueAdjustedxGoals": 2.0, "I_F_shotAttempts": 10,
-    "I_F_shotsOnGoal": 6, "I_F_goals": 3, "I_F_rebounds": 1, "I_F_freeze": 2,
-    "I_F_oZoneShiftStarts": 8, "I_F_dZoneShiftStarts": 2, "I_F_flyShiftStarts": 4,
-    "I_F_hits": 5, "I_F_takeaways": 3, "I_F_giveaways": 2,
-    "I_F_primaryAssists": 4, "I_F_secondaryAssists": 2,
-    "penalityMinutes": 6, "penalityMinutesDrawn": 4, "shotsBlockedByPlayer": 3,
-}])
-_GOALIES = pd.DataFrame([{
-    "name": "Goalie Two", "playerId": 2002, "situation": "all", "team": "BOS", "position": "G",
-    "icetime": 3600.0, "games_played": 2, "ongoal": 30, "goals": 3,
-    "freeze": 5, "xFreeze": 4, "rebounds": 2, "xRebounds": 1, "flurryAdjustedxGoals": 2.5,
-}])
+_BIOS = pd.DataFrame(
+    [
+        {
+            "name": "Skater One",
+            "playerId": 1001,
+            "height": "6' 2\"",
+            "weight": 200,
+            "birthDate": "1995-01-01",
+            "position": "C",
+            "nationality": "USA",
+            "primaryNumber": "10",
+            "primaryPosition": "C",
+            "team": "BOS",
+        },
+        {
+            "name": "Goalie Two",
+            "playerId": 2002,
+            "height": "6' 4\"",
+            "weight": 210,
+            "birthDate": "1993-05-05",
+            "position": "G",
+            "nationality": "CAN",
+            "primaryNumber": "30",
+            "primaryPosition": "G",
+            "team": "BOS",
+        },
+    ]
+)
+_SKATERS = pd.DataFrame(
+    [
+        {
+            "name": "Skater One",
+            "playerId": 1001,
+            "situation": "all",
+            "team": "BOS",
+            "position": "C",
+            "onIce_fenwickPercentage": 0.55,
+            "offIce_fenwickPercentage": 0.50,
+            "icetime": 3600.0,
+            "games_played": 2,
+            "I_F_shifts": 20,
+            "I_F_flurryScoreVenueAdjustedxGoals": 2.0,
+            "I_F_shotAttempts": 10,
+            "I_F_shotsOnGoal": 6,
+            "I_F_goals": 3,
+            "I_F_rebounds": 1,
+            "I_F_freeze": 2,
+            "I_F_oZoneShiftStarts": 8,
+            "I_F_dZoneShiftStarts": 2,
+            "I_F_flyShiftStarts": 4,
+            "I_F_hits": 5,
+            "I_F_takeaways": 3,
+            "I_F_giveaways": 2,
+            "I_F_primaryAssists": 4,
+            "I_F_secondaryAssists": 2,
+            "penalityMinutes": 6,
+            "penalityMinutesDrawn": 4,
+            "shotsBlockedByPlayer": 3,
+        }
+    ]
+)
+_GOALIES = pd.DataFrame(
+    [
+        {
+            "name": "Goalie Two",
+            "playerId": 2002,
+            "situation": "all",
+            "team": "BOS",
+            "position": "G",
+            "icetime": 3600.0,
+            "games_played": 2,
+            "ongoal": 30,
+            "goals": 3,
+            "freeze": 5,
+            "xFreeze": 4,
+            "rebounds": 2,
+            "xRebounds": 1,
+            "flurryAdjustedxGoals": 2.5,
+        }
+    ]
+)
 
 
 class _Resp:
@@ -101,8 +178,18 @@ class _FakeArchive:
 
 def _fake_parse_game(self, gameId, gameDate):
     return (
-        [{"gameId": "G1", "playerName": "Skater One", "gameDate": "2024-10-31",
-          "team": "BOS", "position": "C", "goals": 1, "assists": 2, "points": 3}],
+        [
+            {
+                "gameId": "G1",
+                "playerName": "Skater One",
+                "gameDate": "2024-10-31",
+                "team": "BOS",
+                "position": "C",
+                "goals": 1,
+                "assists": 2,
+                "points": 3,
+            }
+        ],
         [{"gameId": "G1", "team": "BOS", "gameDate": "2024-10-31", "goals": 3}],
     )
 
@@ -110,17 +197,22 @@ def _fake_parse_game(self, gameId, gameDate):
 @pytest.fixture
 def nhl_update(monkeypatch):
     monkeypatch.setattr(nhl_mod, "datetime", _FakeDatetime)
-    monkeypatch.setattr(nhl_mod, "scraper",
-                        type("S", (), {"get": staticmethod(_fake_scraper_get)})())
+    monkeypatch.setattr(
+        nhl_mod, "scraper", type("S", (), {"get": staticmethod(_fake_scraper_get)})()
+    )
     monkeypatch.setattr(nhl_mod, "requests", _FakeRequests)
     monkeypatch.setattr(nhl_mod, "clean_data", False)
     monkeypatch.setattr(base_mod, "archive", _FakeArchive())
     monkeypatch.setattr(StatsNHL, "parse_game", _fake_parse_game)
 
     captured: dict = {}
-    monkeypatch.setattr(nhl_mod, "write_gamelog",
-                        lambda key, g, t, p: captured.update(
-                            {"key": key, "gamelog": g.copy(), "teamlog": t.copy(), "players": p}))
+    monkeypatch.setattr(
+        nhl_mod,
+        "write_gamelog",
+        lambda key, g, t, p: captured.update(
+            {"key": key, "gamelog": g.copy(), "teamlog": t.copy(), "players": p}
+        ),
+    )
 
     s = StatsNHL()
     s.gamelog = pd.DataFrame()
@@ -151,7 +243,12 @@ def test_nhl_update_gamelog_row(nhl_update):
 def test_nhl_update_teamlog_row(nhl_update):
     t = nhl_update["teamlog"]
     assert t.shape == (1, 4)
-    assert t.iloc[0].to_dict() == {"gameId": "G1", "team": "BOS", "gameDate": "2024-10-31", "goals": 3}
+    assert t.iloc[0].to_dict() == {
+        "gameId": "G1",
+        "team": "BOS",
+        "gameDate": "2024-10-31",
+        "goals": 3,
+    }
 
 
 def test_nhl_update_upcoming_games(nhl_update):

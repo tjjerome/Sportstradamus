@@ -24,33 +24,56 @@ _TEAMS = {
 _GAMES = [
     # gn1, both sides resolve + assign (home name carries accents to strip)
     {
-        "status": "Scheduled", "away_id": 1, "home_id": 2, "game_num": 1,
-        "away_probable_pitcher": "Gerrit Cole", "home_probable_pitcher": "Bréndan Béllo",
+        "status": "Scheduled",
+        "away_id": 1,
+        "home_id": 2,
+        "game_num": 1,
+        "away_probable_pitcher": "Gerrit Cole",
+        "home_probable_pitcher": "Bréndan Béllo",
     },
     # status not in {Pre-Game, Scheduled} -> skipped entirely
     {
-        "status": "Final", "away_id": 1, "home_id": 2, "game_num": 1,
-        "away_probable_pitcher": "X", "home_probable_pitcher": "Y",
+        "status": "Final",
+        "away_id": 1,
+        "home_id": 2,
+        "game_num": 1,
+        "away_probable_pitcher": "X",
+        "home_probable_pitcher": "Y",
     },
     # away id matches no team -> resolution fails, game skipped
     {
-        "status": "Pre-Game", "away_id": 999, "home_id": 2, "game_num": 1,
-        "away_probable_pitcher": "A", "home_probable_pitcher": "B",
+        "status": "Pre-Game",
+        "away_id": 999,
+        "home_id": 2,
+        "game_num": 1,
+        "away_probable_pitcher": "A",
+        "home_probable_pitcher": "B",
     },
     # game_num != 1 -> resolved but no assignment
     {
-        "status": "Scheduled", "away_id": 3, "home_id": 4, "game_num": 2,
-        "away_probable_pitcher": "NoAssign1", "home_probable_pitcher": "NoAssign2",
+        "status": "Scheduled",
+        "away_id": 3,
+        "home_id": 4,
+        "game_num": 2,
+        "away_probable_pitcher": "NoAssign1",
+        "home_probable_pitcher": "NoAssign2",
     },
     # gn1, away_probable_pitcher key absent -> only home (AZ) assigned
     {
-        "status": "Scheduled", "away_id": 3, "home_id": 4, "game_num": 1,
+        "status": "Scheduled",
+        "away_id": 3,
+        "home_id": 4,
+        "game_num": 1,
         "home_probable_pitcher": "Zac Gallen",
     },
     # gn1, both sides already seen -> dedupe keeps first values
     {
-        "status": "Scheduled", "away_id": 1, "home_id": 2, "game_num": 1,
-        "away_probable_pitcher": "OtherGuy", "home_probable_pitcher": "OtherBello",
+        "status": "Scheduled",
+        "away_id": 1,
+        "home_id": 2,
+        "game_num": 1,
+        "away_probable_pitcher": "OtherGuy",
+        "home_probable_pitcher": "OtherBello",
     },
 ]
 

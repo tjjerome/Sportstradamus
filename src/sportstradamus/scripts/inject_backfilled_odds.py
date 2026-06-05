@@ -48,7 +48,11 @@ _SYNTH_ODDS_SENTINEL: float = 0.0
 
 
 def _target_at(game_date: datetime.date) -> datetime.datetime:
-    return datetime.datetime.combine(game_date, datetime.time()) + _COMMENCE_STANDIN - TRAINING_LOOKBACK
+    return (
+        datetime.datetime.combine(game_date, datetime.time())
+        + _COMMENCE_STANDIN
+        - TRAINING_LOOKBACK
+    )
 
 
 def _is_blown(ev: float, line: float) -> bool:
@@ -126,7 +130,9 @@ def main(league, markets, dry_run):
     rebuild). Follow with ``meditate --force`` to retrain against the real book."""
     archive = Archive()
     for market in (m.strip() for m in markets.split(",")):
-        path = pkg_resources.files(data) / f"training_data/{market_file_slug(league, market)}.parquet"
+        path = (
+            pkg_resources.files(data) / f"training_data/{market_file_slug(league, market)}.parquet"
+        )
         if not path.is_file():
             click.echo(f"  {market}: no cached matrix, skip")
             continue

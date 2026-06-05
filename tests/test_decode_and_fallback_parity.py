@@ -63,7 +63,14 @@ def _blend0_over(dist, line, model_ev, book_ev, cv, step, *, shape, gate=None):
             0.0, a, b, cv, "SkewNormal", sigma=np.array([sigma]), skew_alpha=np.array([skew]), **zi
         )
         under = get_odds(
-            np.array([line]), ev_b, "SkewNormal", cv, step=step, sigma=sig_b, skew_alpha=sk_b, gate=g_b
+            np.array([line]),
+            ev_b,
+            "SkewNormal",
+            cv,
+            step=step,
+            sigma=sig_b,
+            skew_alpha=sk_b,
+            gate=g_b,
         )
     return 1 - under
 
@@ -82,7 +89,16 @@ def _blend0_over(dist, line, model_ev, book_ev, cv, step, *, shape, gate=None):
 def test_book_fallback_equals_weight_zero_blend(dist, line, book_ev, cv, step, shape, gate):
     book = _book_over(dist, line, book_ev, cv, step, gate)
     # model_ev deliberately differs from book_ev; w=0 must ignore it entirely.
-    blend = _blend0_over(dist, line, model_ev=book_ev * 1.5, book_ev=book_ev, cv=cv, step=step, shape=shape, gate=gate)
+    blend = _blend0_over(
+        dist,
+        line,
+        model_ev=book_ev * 1.5,
+        book_ev=book_ev,
+        cv=cv,
+        step=step,
+        shape=shape,
+        gate=gate,
+    )
     np.testing.assert_allclose(blend, book, rtol=0, atol=1e-9)
 
 
@@ -131,7 +147,10 @@ def test_decode_skewnormal_matches_inline():
 def test_decode_skewnormal_no_gate_below_threshold():
     pp = pd.DataFrame({"alpha": [0.0]})
     d = decode_predictive_mean(
-        pp, "SkewNormal", sn_loc=np.array([10.0]), sn_scale=np.array([3.0]),
+        pp,
+        "SkewNormal",
+        sn_loc=np.array([10.0]),
+        sn_scale=np.array([3.0]),
         hist_gate=GATE_PUBLISH_THRESHOLD / 2,
     )
     assert d.gate is None

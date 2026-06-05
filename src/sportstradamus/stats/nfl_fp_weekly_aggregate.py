@@ -1081,8 +1081,12 @@ def _explode_scheme_long_rows(df, schemes, value_key, weight_key, bucket_col):
             if value is None or weight is None:
                 continue
             long_rows.append(
-                {PLAYER_GROUP_COL: player_id, bucket_col: bucket_name,
-                 "value": value, "weight": weight}
+                {
+                    PLAYER_GROUP_COL: player_id,
+                    bucket_col: bucket_name,
+                    "value": value,
+                    "weight": weight,
+                }
             )
     return long_rows
 
@@ -1101,8 +1105,12 @@ def _explode_route_long_rows(df, value_key, weight_key):
             if value is None or weight is None:
                 continue
             long_rows.append(
-                {PLAYER_GROUP_COL: player_id, "route_bucket": route_key,
-                 "value": value, "weight": weight}
+                {
+                    PLAYER_GROUP_COL: player_id,
+                    "route_bucket": route_key,
+                    "value": value,
+                    "weight": weight,
+                }
             )
     return long_rows
 
@@ -1296,8 +1304,11 @@ def _aggregate_separation_by_coverage(
     if df.empty or "bucket" not in df.columns or PLAYER_GROUP_COL not in df.columns:
         return pd.DataFrame()
     long_rows = _explode_scheme_long_rows(
-        df, _SEP_BY_COVERAGE_SCHEMES, _SEP_BY_COVERAGE_VALUE_KEY,
-        _SEP_BY_COVERAGE_WEIGHT_KEY, "scheme",
+        df,
+        _SEP_BY_COVERAGE_SCHEMES,
+        _SEP_BY_COVERAGE_VALUE_KEY,
+        _SEP_BY_COVERAGE_WEIGHT_KEY,
+        "scheme",
     )
     if not long_rows:
         return pd.DataFrame()
@@ -1407,7 +1418,11 @@ def _aggregate_man_vs_zone_bucket(
     if df.empty or "bucket" not in df.columns or PLAYER_GROUP_COL not in df.columns:
         return pd.DataFrame()
     long_rows = _explode_scheme_long_rows(
-        df, _MZ_BUCKETS, _MZ_VALUE_KEY, _MZ_WEIGHT_KEY, "shell",
+        df,
+        _MZ_BUCKETS,
+        _MZ_VALUE_KEY,
+        _MZ_WEIGHT_KEY,
+        "shell",
     )
     if not long_rows:
         return pd.DataFrame()

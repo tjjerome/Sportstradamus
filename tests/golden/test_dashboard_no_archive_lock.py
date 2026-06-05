@@ -80,7 +80,9 @@ def _clear_dashboard_imports() -> dict[str, object]:
     object than the one a fresh ``from ... import`` resolves, silently running
     the real function instead of the stub.
     """
-    removed = {name: sys.modules[name] for name in list(sys.modules) if name.startswith(_CLEARED_PREFIXES)}
+    removed = {
+        name: sys.modules[name] for name in list(sys.modules) if name.startswith(_CLEARED_PREFIXES)
+    }
     for name in removed:
         del sys.modules[name]
     return removed

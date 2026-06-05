@@ -29,18 +29,28 @@ def test_merge_prediction_row_update_merges_offers_and_overwrites_non_nan():
     history = _frame(
         [
             {
-                "Player": "P1", "League": "NBA", "Date": "2026-05-04", "Market": "points",
+                "Player": "P1",
+                "League": "NBA",
+                "Date": "2026-05-04",
+                "Market": "points",
                 "Offers": [(18.5, 1.0, "Underdog", "Over", 0.6, 0.55, np.nan, np.nan, np.nan)],
-                "Team": "BOS", "Model EV": 0.1, "Dist": "Poisson",
+                "Team": "BOS",
+                "Model EV": 0.1,
+                "Dist": "Poisson",
             }
         ]
     )
     new_df = _frame(
         [
             {
-                "Player": "P1", "League": "NBA", "Date": "2026-05-04", "Market": "points",
+                "Player": "P1",
+                "League": "NBA",
+                "Date": "2026-05-04",
+                "Market": "points",
                 "Offers": [(20.5, 1.0, "Sleeper", "Under", 0.5, 0.5, np.nan, np.nan, np.nan)],
-                "Team": "BOS", "Model EV": 0.2, "Dist": np.nan,  # NaN -> must NOT overwrite
+                "Team": "BOS",
+                "Model EV": 0.2,
+                "Dist": np.nan,  # NaN -> must NOT overwrite
             }
         ]
     )
@@ -50,26 +60,36 @@ def test_merge_prediction_row_update_merges_offers_and_overwrites_non_nan():
 
     merged = history.at[idx, "Offers"]
     assert {(o[0], o[2]) for o in merged} == {(18.5, "Underdog"), (20.5, "Sleeper")}
-    assert history.at[idx, "Model EV"] == 0.2     # non-NaN -> overwritten
-    assert history.at[idx, "Dist"] == "Poisson"   # new value NaN -> original kept
+    assert history.at[idx, "Model EV"] == 0.2  # non-NaN -> overwritten
+    assert history.at[idx, "Dist"] == "Poisson"  # new value NaN -> original kept
 
 
 def test_merge_prediction_row_inserts_new_index():
     history = _frame(
         [
             {
-                "Player": "P1", "League": "NBA", "Date": "2026-05-04", "Market": "points",
+                "Player": "P1",
+                "League": "NBA",
+                "Date": "2026-05-04",
+                "Market": "points",
                 "Offers": [(18.5, 1.0, "Underdog", "Over", 0.6, 0.55, np.nan, np.nan, np.nan)],
-                "Team": "BOS", "Model EV": 0.1, "Dist": "Poisson",
+                "Team": "BOS",
+                "Model EV": 0.1,
+                "Dist": "Poisson",
             }
         ]
     )
     new_df = _frame(
         [
             {
-                "Player": "P2", "League": "NBA", "Date": "2026-05-04", "Market": "rebounds",
+                "Player": "P2",
+                "League": "NBA",
+                "Date": "2026-05-04",
+                "Market": "rebounds",
                 "Offers": [(8.5, 1.0, "Underdog", "Over", 0.58, 0.52, np.nan, np.nan, np.nan)],
-                "Team": "MIA", "Model EV": 0.05, "Dist": "Poisson",
+                "Team": "MIA",
+                "Model EV": 0.05,
+                "Dist": "Poisson",
             }
         ]
     )

@@ -65,21 +65,63 @@ _SHOT_DATA = {"rowSet": [_SHOT_ROW]}
 
 
 def _player_log_base():
-    return [{
-        "PLAYER_ID": 1, "GAME_ID": "G1", "PLAYER_NAME": "Test Player",
-        "TEAM_ABBREVIATION": "NY", "MATCHUP": "NY vs. CON", "GAME_DATE": "2026-05-20",
-        "MIN": 30.0, "PTS": 20, "REB": 8, "AST": 5, "BLK": 2, "STL": 1, "TOV": 3,
-        "FTM": 4, "FGM": 8, "FGA": 15, "FG3M": 2, "FG3A": 6, "OREB": 2, "DREB": 6,
-        "BLKA": 1, "FTA": 5, "PF": 2, "PFD": 3, "WL": "W",
-    }]
+    return [
+        {
+            "PLAYER_ID": 1,
+            "GAME_ID": "G1",
+            "PLAYER_NAME": "Test Player",
+            "TEAM_ABBREVIATION": "NY",
+            "MATCHUP": "NY vs. CON",
+            "GAME_DATE": "2026-05-20",
+            "MIN": 30.0,
+            "PTS": 20,
+            "REB": 8,
+            "AST": 5,
+            "BLK": 2,
+            "STL": 1,
+            "TOV": 3,
+            "FTM": 4,
+            "FGM": 8,
+            "FGA": 15,
+            "FG3M": 2,
+            "FG3A": 6,
+            "OREB": 2,
+            "DREB": 6,
+            "BLKA": 1,
+            "FTA": 5,
+            "PF": 2,
+            "PFD": 3,
+            "WL": "W",
+        }
+    ]
 
 
 def _team_log_base():
     return [
-        {"TEAM_ID": 10, "GAME_ID": "G1", "TEAM_ABBREVIATION": "NY", "MATCHUP": "NY vs. CON",
-         "GAME_DATE": "2026-05-20", "PTS": 88, "FTM": 14, "FGA": 70, "BLK": 5, "BLKA": 4},
-        {"TEAM_ID": 20, "GAME_ID": "G1", "TEAM_ABBREVIATION": "CON", "MATCHUP": "CON @ NY",
-         "GAME_DATE": "2026-05-20", "PTS": 80, "FTM": 10, "FGA": 65, "BLK": 3, "BLKA": 5},
+        {
+            "TEAM_ID": 10,
+            "GAME_ID": "G1",
+            "TEAM_ABBREVIATION": "NY",
+            "MATCHUP": "NY vs. CON",
+            "GAME_DATE": "2026-05-20",
+            "PTS": 88,
+            "FTM": 14,
+            "FGA": 70,
+            "BLK": 5,
+            "BLKA": 4,
+        },
+        {
+            "TEAM_ID": 20,
+            "GAME_ID": "G1",
+            "TEAM_ABBREVIATION": "CON",
+            "MATCHUP": "CON @ NY",
+            "GAME_DATE": "2026-05-20",
+            "PTS": 80,
+            "FTM": 10,
+            "FGA": 65,
+            "BLK": 3,
+            "BLKA": 5,
+        },
     ]
 
 
@@ -94,21 +136,37 @@ def _fake_fetch(endpoint, host=None, **params):
         return _Resp(raw={"resultSets": _SHOT_DATA})
     if name == "PlayerGameLogs":
         if measure == "Advanced":
-            return _Resp(normalized={"PlayerGameLogs": [
-                {"PLAYER_ID": 1, "GAME_ID": "G1", "OFF_RATING": 110.0, "DEF_RATING": 100.0}]})
+            return _Resp(
+                normalized={
+                    "PlayerGameLogs": [
+                        {"PLAYER_ID": 1, "GAME_ID": "G1", "OFF_RATING": 110.0, "DEF_RATING": 100.0}
+                    ]
+                }
+            )
         if measure == "Usage":
-            return _Resp(normalized={"PlayerGameLogs": [
-                {"PLAYER_ID": 1, "GAME_ID": "G1", "USG_PCT": 0.25}]})
+            return _Resp(
+                normalized={"PlayerGameLogs": [{"PLAYER_ID": 1, "GAME_ID": "G1", "USG_PCT": 0.25}]}
+            )
         return _Resp(normalized={"PlayerGameLogs": _player_log_base()})
     if name == "TeamGameLogs":
         if measure == "Advanced":
-            return _Resp(normalized={"TeamGameLogs": [
-                {"TEAM_ID": 10, "GAME_ID": "G1", "OFF_RATING": 112.0},
-                {"TEAM_ID": 20, "GAME_ID": "G1", "OFF_RATING": 104.0}]})
+            return _Resp(
+                normalized={
+                    "TeamGameLogs": [
+                        {"TEAM_ID": 10, "GAME_ID": "G1", "OFF_RATING": 112.0},
+                        {"TEAM_ID": 20, "GAME_ID": "G1", "OFF_RATING": 104.0},
+                    ]
+                }
+            )
         if measure == "Scoring":
-            return _Resp(normalized={"TeamGameLogs": [
-                {"TEAM_ID": 10, "GAME_ID": "G1", "PCT_PTS_2PT": 0.5},
-                {"TEAM_ID": 20, "GAME_ID": "G1", "PCT_PTS_2PT": 0.45}]})
+            return _Resp(
+                normalized={
+                    "TeamGameLogs": [
+                        {"TEAM_ID": 10, "GAME_ID": "G1", "PCT_PTS_2PT": 0.5},
+                        {"TEAM_ID": 20, "GAME_ID": "G1", "PCT_PTS_2PT": 0.45},
+                    ]
+                }
+            )
         return _Resp(normalized={"TeamGameLogs": _team_log_base()})
     raise AssertionError(f"unexpected endpoint {name}")
 
@@ -121,28 +179,66 @@ class _FakeArchive:
 
 
 _GAMELOG_COLS = [
-    "PLAYER_ID", "GAME_ID", "PLAYER_NAME", "TEAM_ABBREVIATION", "GAME_DATE", "POS",
-    "HOME", "OPP", "MIN", "PTS", "REB", "AST", "BLST", "PRA",
-    "fantasy points prizepicks", "FGA_40", "OFF_RATING", "OREB", "moneyline", "totals",
+    "PLAYER_ID",
+    "GAME_ID",
+    "PLAYER_NAME",
+    "TEAM_ABBREVIATION",
+    "GAME_DATE",
+    "POS",
+    "HOME",
+    "OPP",
+    "MIN",
+    "PTS",
+    "REB",
+    "AST",
+    "BLST",
+    "PRA",
+    "fantasy points prizepicks",
+    "FGA_40",
+    "OFF_RATING",
+    "OREB",
+    "moneyline",
+    "totals",
 ]
 _TEAMLOG_COLS = [
-    "TEAM_ID", "GAME_ID", "TEAM_ABBREVIATION", "OPP", "HOME", "GAME_DATE",
-    "FTM", "FGA", "BLK", "BLKA", "PTS", "FTR", "BLK_RATIO", "OPP_PTS",
+    "TEAM_ID",
+    "GAME_ID",
+    "TEAM_ABBREVIATION",
+    "OPP",
+    "HOME",
+    "GAME_DATE",
+    "FTM",
+    "FGA",
+    "BLK",
+    "BLKA",
+    "PTS",
+    "FTR",
+    "BLK_RATIO",
+    "OPP_PTS",
 ]
 
 
 def _seed_gamelog():
     row = dict.fromkeys(_GAMELOG_COLS, 0)
-    row.update({"PLAYER_ID": 99, "GAME_ID": "G0", "PLAYER_NAME": "Old Player",
-                "TEAM_ABBREVIATION": "LAS", "GAME_DATE": "2026-05-18", "POS": "C",
-                "OFF_RATING": 100.0})
+    row.update(
+        {
+            "PLAYER_ID": 99,
+            "GAME_ID": "G0",
+            "PLAYER_NAME": "Old Player",
+            "TEAM_ABBREVIATION": "LAS",
+            "GAME_DATE": "2026-05-18",
+            "POS": "C",
+            "OFF_RATING": 100.0,
+        }
+    )
     return pd.DataFrame([row], columns=_GAMELOG_COLS)
 
 
 def _seed_teamlog():
     row = dict.fromkeys(_TEAMLOG_COLS, 0)
-    row.update({"TEAM_ID": 30, "GAME_ID": "G0", "TEAM_ABBREVIATION": "LAS",
-                "GAME_DATE": "2026-05-18"})
+    row.update(
+        {"TEAM_ID": 30, "GAME_ID": "G0", "TEAM_ABBREVIATION": "LAS", "GAME_DATE": "2026-05-18"}
+    )
     return pd.DataFrame([row], columns=_TEAMLOG_COLS)
 
 
@@ -156,7 +252,8 @@ def captured_update(monkeypatch):
 
     captured: dict = {}
     monkeypatch.setattr(
-        wnba_mod, "write_gamelog",
+        wnba_mod,
+        "write_gamelog",
         lambda key, gamelog, teamlog, players: captured.update(
             {"key": key, "gamelog": gamelog.copy(), "teamlog": teamlog.copy(), "players": players}
         ),

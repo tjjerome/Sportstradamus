@@ -11,6 +11,7 @@ The fitted state is a plain-typed ``dict`` (lists/floats) so model pickles stay
 portable, and :func:`apply_posthoc` reproduces the fit's transform exactly — the
 training-side test CSV and the live ``model_prob`` path must agree event-for-event.
 """
+
 import numpy as np
 from scipy.special import expit, logit
 from sklearn.isotonic import IsotonicRegression

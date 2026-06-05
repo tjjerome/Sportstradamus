@@ -114,8 +114,12 @@ def test_nhl_combo_opponent_uses_upcoming_games_key(monkeypatch):
 
     s = nhl.StatsNHL.__new__(nhl.StatsNHL)
     s.league = "NHL"
-    s.log_strings = {"player": "playerName", "team": "team",
-                     "opponent": "opponent", "date": "gameDate"}
+    s.log_strings = {
+        "player": "playerName",
+        "team": "team",
+        "opponent": "opponent",
+        "date": "gameDate",
+    }
     s.short_gamelog = pd.DataFrame({"playerName": ["P"], "team": ["BOS"]})
     s.gamelog = pd.DataFrame({"playerName": [], "gameDate": []})
     s.upcoming_games = {"BOS": {"Opponent": "TOR", "Home": True}}

@@ -1029,7 +1029,9 @@ def _zero_inflated_outcome_mean(
     return base_mean
 
 
-def _diag_shape(dist, cv, prob_params, test_mean_yr, test_std_yr, test_denom_mean, y_test, player_stats):
+def _diag_shape(
+    dist, cv, prob_params, test_mean_yr, test_std_yr, test_denom_mean, y_test, player_stats
+):
     """(shape_label, start_shape, model_shape, empirical_shape) for the cell's family."""
     if dist == "SkewNormal":
         diag_start_shape = float(cv)
@@ -1820,9 +1822,7 @@ def _fuse_negbin(out, decoded, splits, model_weight, cv, hist_gate, dist):
         {"gate_model": decoded["gate_test"], "gate_book": hist_gate} if dist == "ZINB" else {}
     )
     _zi_val = (
-        {"gate_model": decoded["gate_validation"], "gate_book": hist_gate}
-        if dist == "ZINB"
-        else {}
+        {"gate_model": decoded["gate_validation"], "gate_book": hist_gate} if dist == "ZINB" else {}
     )
     r_blend_test, p_test, gate_blend_test = fused_loc(
         model_weight,
@@ -2189,7 +2189,13 @@ def train_market(
 
     splits = _step_build_splits(M, stat_data, market)
     dist_info = _step_select_distribution(
-        splits, stat_data, market, league, target_normalization, zinb_mode, deterministic=deterministic
+        splits,
+        stat_data,
+        market,
+        league,
+        target_normalization,
+        zinb_mode,
+        deterministic=deterministic,
     )
     dist = dist_info["dist"]
     cv = dist_info["cv"]
@@ -2280,7 +2286,9 @@ def train_market(
 
     test_calibrated_over = apply_temperature(y_proba_no_filt[:, 1], T_opt)
     if posthoc_slug in posthoc.PROB_STAGE:
-        test_calibrated_over = posthoc.apply_posthoc(posthoc_slug, posthoc_blob, test_calibrated_over)
+        test_calibrated_over = posthoc.apply_posthoc(
+            posthoc_slug, posthoc_blob, test_calibrated_over
+        )
     y_proba_filt = np.array([1 - test_calibrated_over, test_calibrated_over]).transpose()
 
     y_class = np.ravel(
