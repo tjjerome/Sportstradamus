@@ -13,8 +13,8 @@ from sklearn.metrics import brier_score_loss
 
 from sportstradamus import clv
 from sportstradamus.dashboard_data import (
+    filtered_history_or_stop,
     format_ts,
-    get_filtered_history,
     load_history,
     load_parlays,
     load_resolve_meta,
@@ -43,16 +43,7 @@ else:
 
 # --- Sidebar ---
 filters = sidebar_filters(history, parlays, key_prefix="overview_")
-df = get_filtered_history(
-    history,
-    leagues=filters["leagues"],
-    platforms=filters["platforms"],
-    date_range=filters["date_range"],
-)
-
-if df.empty:
-    st.info("No resolved predictions match the current filters.")
-    st.stop()
+df = filtered_history_or_stop(history, filters)
 
 # --- Prep ---
 prob_col = "Model P" if "Model P" in df.columns and df["Model P"].notna().any() else "Model"

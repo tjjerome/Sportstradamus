@@ -13,10 +13,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from sportstradamus.dashboard_data import (
-    format_ts,
     get_filtered_history,
-    load_history,
-    load_resolve_meta,
+    load_resolved_history_or_stop,
     render_banner,
 )
 from sportstradamus.strategies.profit_sim import (
@@ -29,17 +27,9 @@ from sportstradamus.strategies.profit_sim import (
 st.title("Profit Simulation")
 render_banner("stats", "Monte Carlo strategy backtesting")
 
-# --- Load data (pre-resolved by nightly script) ---
-history = load_history()
-if history.empty:
-    st.warning("No prediction history found.")
-    st.stop()
+# resolved by nightly script; dashboard never touches DuckDB directly
+history = load_resolved_history_or_stop()
 
-meta = load_resolve_meta()
-if meta.get("last_run"):
-    st.caption(f"Data last resolved: {format_ts(meta['last_run'])}")
-
-# --- Explode offers and filter to resolved, non-push ---
 df = get_filtered_history(history)
 if df.empty:
     st.info("No resolved predictions found.")
@@ -50,13 +40,11 @@ df = df.loc[df["_date"].notna()]
 
 prob_col = "Model P" if "Model P" in df.columns and df["Model P"].notna().any() else "Model"
 
-# Ensure derived columns exist
 if "K" not in df.columns:
     df["K"] = df[prob_col] * df.get("Boost", 1)
 if "Model" not in df.columns:
     df["Model"] = df["Model P"] * df["Boost"]
 
-# --- Timeframe selector ---
 st.sidebar.header("Simulation Settings")
 tf_options = {"All time": None, "Last 30 days": 30, "3 months": 91, "6 months": 183, "1 year": 365}
 tf_choice = st.sidebar.selectbox("Timeframe", list(tf_options.keys()), index=0)
@@ -77,19 +65,16 @@ if df.empty:
     st.info("No data for selected timeframe.")
     st.stop()
 
-# League filter
 leagues = sorted(df["League"].unique())
 selected_leagues = st.sidebar.multiselect("Leagues", leagues, default=leagues, key="profit_leagues")
 df = df.loc[df["League"].isin(selected_leagues)]
 
-# Platform filter
 platforms = sorted(df["Platform"].unique())
 selected_platforms = st.sidebar.multiselect(
     "Platforms", platforms, default=platforms, key="profit_platforms"
 )
 df = df.loc[df["Platform"].isin(selected_platforms)]
 
-# --- Preset Strategies ---
 PRESETS = {
     "Conservative": {
         "min_model_p": 0.65,
@@ -129,7 +114,6 @@ initial_bankroll = st.sidebar.number_input(
     "Initial Bankroll ($)", value=1000, min_value=100, step=100
 )
 
-# --- Custom Strategy ---
 with st.sidebar.expander("Custom Strategy"):
     custom_min_p = st.slider("Min Model P", 0.50, 0.80, 0.60, 0.01, key="custom_min_p")
     custom_min_books = st.slider("Min Books P", 0.45, 0.60, 0.52, 0.01, key="custom_min_books")
@@ -140,7 +124,6 @@ with st.sidebar.expander("Custom Strategy"):
         "Selection Ranking", list(RANKING_MAP.keys()), key="custom_ranking"
     )
 
-# --- Run Simulations ---
 st.header("Strategy Comparison")
 
 with st.spinner("Running Monte Carlo simulations..."):
@@ -162,7 +145,6 @@ with st.spinner("Running Monte Carlo simulations..."):
         if not result.empty:
             all_results[name] = result
 
-    # Custom
     custom_result = simulate_strategy(
         df,
         prob_col=prob_col,
@@ -182,7 +164,6 @@ if not all_results:
     st.info("No bets matched any strategy criteria.")
     st.stop()
 
-# --- Cumulative Bankroll Chart ---
 fig_bank = go.Figure()
 
 for name, result in all_results.items():
@@ -205,7 +186,6 @@ for name, result in all_results.items():
     }
     color = color_map.get(name, "#95a5a6")
 
-    # Confidence band
     fig_bank.add_trace(
         go.Scatter(
             x=pd.concat([agg["date"], agg["date"][::-1]]),
@@ -221,7 +201,6 @@ for name, result in all_results.items():
         )
     )
 
-    # Mean line
     fig_bank.add_trace(
         go.Scatter(
             x=agg["date"],
@@ -243,42 +222,10 @@ fig_bank.update_layout(
 )
 st.plotly_chart(fig_bank, use_container_width=True)
 
-# --- Summary Table ---
 st.subheader("Strategy Summary")
 summary_rows = []
 for name, result in all_results.items():
-    final_runs = result.groupby("run").last()
-
-    final_bankrolls = final_runs["bankroll"].values
-    mean_final = final_bankrolls.mean()
-    roi = (mean_final - initial_bankroll) / initial_bankroll
-
-    # Drawdown: compute per-run max drawdown and average
-    drawdowns = []
-    for run_i in range(N_MONTE_CARLO):
-        run_data = result.loc[result["run"] == run_i, "bankroll"].values
-        if len(run_data) == 0:
-            continue
-        peak = np.maximum.accumulate(run_data)
-        dd = (peak - run_data) / np.where(peak > 0, peak, 1)
-        drawdowns.append(dd.max())
-
-    mean_dd = np.mean(drawdowns) if drawdowns else 0
-
-    # Sharpe-like ratio
-    daily_returns = result.groupby("run").apply(
-        lambda x: (
-            x["daily_pnl"].values
-            / np.maximum(x["bankroll"].shift(1).fillna(initial_bankroll).values, 1)
-        )
-    )
-    all_returns = np.concatenate(daily_returns.values)
-    sharpe = np.mean(all_returns) / np.std(all_returns) if np.std(all_returns) > 0 else 0
-
-    # Win rate
-    daily_outcomes = result.groupby(["run", "date"])["daily_pnl"].sum().reset_index()
-    win_rate = (daily_outcomes["daily_pnl"] > 0).mean()
-
+    summary = summarize_runs(result, initial_bankroll)
     summary_rows.append(
         {
             "Strategy": name,
@@ -293,7 +240,6 @@ for name, result in all_results.items():
 summary_df = pd.DataFrame(summary_rows)
 st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
-# --- Daily P&L for selected strategy ---
 st.subheader("Daily P&L")
 selected_strategy = st.selectbox("Strategy", list(all_results.keys()), key="pnl_strategy")
 if selected_strategy in all_results:
@@ -311,7 +257,6 @@ if selected_strategy in all_results:
     fig_pnl.update_layout(height=400, showlegend=False)
     st.plotly_chart(fig_pnl, use_container_width=True)
 
-# --- Drawdown Chart ---
 st.subheader("Drawdown Over Time")
 if selected_strategy in all_results:
     dd_data = all_results[selected_strategy]
@@ -335,7 +280,6 @@ if selected_strategy in all_results:
     fig_dd.update_layout(height=350, yaxis_tickformat=".0%")
     st.plotly_chart(fig_dd, use_container_width=True)
 
-# --- Export ---
 st.download_button(
     "Export simulation results (CSV)",
     summary_df.to_csv(index=False),

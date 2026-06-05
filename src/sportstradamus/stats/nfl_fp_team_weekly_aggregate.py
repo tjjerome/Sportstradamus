@@ -457,9 +457,7 @@ def _pool_windows(
     """
     frames = []
     for season, start_week, end_week in pattern_a_windows:
-        if start_week > end_week:
-            continue
-        df = _load_kind_window(season, start_week, end_week, file_kind)
+        df = nfl_fp_team_weekly.load_window_or_empty(season, start_week, end_week, file_kind)
         if not df.empty:
             frames.append(df)
     if not frames:
@@ -768,45 +766,6 @@ def _abbr_from_player_grain(season: int) -> pd.Series | None:
             .set_index(id_col)[_TEAM_ABBR_COL]
         )
     return None
-
-
-def _load_kind_window(
-    season: int,
-    start_week: int,
-    end_week: int,
-    file_kind: str,
-) -> pd.DataFrame:
-    """Read one ``file_kind`` for the closed ``[start_week, end_week]`` range.
-
-    Catches and logs any loader exception rather than propagating it so that a
-    single missing or corrupt snapshot doesn't abort the entire profile build.
-    Callers should treat an empty return as "no data available" and continue.
-
-    Args:
-        season: NFL season year (e.g. 2024).
-        start_week: First week of the range, inclusive.
-        end_week: Last week of the range, inclusive. Must be >= ``start_week``.
-        file_kind: Logical kind name from ``nfl_fp_team_weekly.FILE_KINDS``.
-
-    Returns:
-        Concatenated per-game rows for the range. Empty DataFrame on any error
-        or when the snapshot directory contains no matching files.
-    """
-    if start_week > end_week:
-        return pd.DataFrame()
-    try:
-        df = nfl_fp_team_weekly.load_window(season, start_week, end_week, file_kind)
-    except Exception as exc:
-        logger.warning(
-            "team load_window(%s, %s, %s, %s) failed: %s",
-            season,
-            start_week,
-            end_week,
-            file_kind,
-            exc,
-        )
-        return pd.DataFrame()
-    return df if df is not None else pd.DataFrame()
 
 
 __all__ = ("load_pattern_a_team_features", "load_team_and_defense_features")

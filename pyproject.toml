@@ -43,6 +43,11 @@ scrapeops-python-requests = "^0.4.7"
 streamlit = ">=1.38"
 plotly = ">=5.18"
 streamlit-aggrid = "^1.2.1.post2"
+# cvxpy + SCS power joint_kelly_portfolio; PyYAML and tabulate drive the
+# `kelly` CLI's recommendations-YAML I/O.
+cvxpy = ">=1.4"
+pyyaml = ">=6.0"
+tabulate = ">=0.9"
 
 [tool.poetry.scripts]
 prophecize = "sportstradamus.prediction.cli:main"
@@ -50,24 +55,13 @@ confer = "sportstradamus.moneylines:confer"
 meditate = "sportstradamus.training.cli:meditate"
 dashboard = "sportstradamus.dashboard:run"
 reflect = "sportstradamus.nightly:run"
-kelly = "sportstradamus.strategies.kelly:main"
-pickem-build = "sportstradamus.strategies.underdog_pickem:main"
+kelly = "sportstradamus.strategies.kelly:kelly"
+pickem-build = "sportstradamus.strategies.underdog_pickem:pickem_build"
 backfill-live-metrics = "sportstradamus.scripts.backfill_live_metrics:main"
 check-graduation = "sportstradamus.scripts.check_graduation:main"
 generate-ship-config = "sportstradamus.scripts.generate_ship_config:main"
 merge-archives = "sportstradamus.scripts.merge_archives:main"
 fp-fetch = "sportstradamus.fantasypoints.cli:fp_fetch"
-
-[tool.poetry.group.strategy]
-optional = true
-
-[tool.poetry.group.strategy.dependencies]
-# cvxpy + SCS power joint_kelly_portfolio; PyYAML and tabulate drive the
-# `kelly` CLI's recommendations-YAML I/O. All three are lazy-imported so
-# core users do not have to install them.
-cvxpy = ">=1.4"
-pyyaml = ">=6.0"
-tabulate = ">=0.9"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.23.1"
@@ -222,15 +216,18 @@ check_untyped_defs = true
 # -----------------------------------------------------------------------------
 # Duplication detector. Ruff has no clone detection; pylint's similarity
 # checker fills that gap (GitClear's data makes duplication the dominant
-# AI-debt signal). Advisory like mypy — NOT part of the blocking `ruff check`
-# gate. Run on demand / in CI with everything except the clone checker off:
+# AI-debt signal). BLOCKING: tests/golden/test_no_duplicate_code.py runs the
+# checker over src/sportstradamus/ and fails on any R0801 group, so this command
+# reproduces the gate locally:
 #
 #     poetry run pylint --disable=all --enable=duplicate-code src/sportstradamus/
 #
-# Review the report and hoist genuine clones into the base class or a shared
-# helper (STYLE_GUIDE §2.9; rule of three §2.6). Accept intentional per-league
-# parallelism in stats/ rather than over-abstracting it — raise
-# min-similarity-lines if that directory is too noisy.
+# Policy: any parallelism must be justified (STYLE_GUIDE §2.9; rule of three
+# §2.6). Hoist genuine clones into the base class or a shared helper. A block
+# that stays parallel — same shape but genuinely different knowledge per
+# league/grain — must carry an explicit `# pylint: disable=duplicate-code`
+# pragma with a one-line rationale; the gate tolerates only pragma-justified
+# duplication. Do NOT raise min-similarity-lines to silence a real clone.
 # -----------------------------------------------------------------------------
 [tool.pylint.similarities]
 min-similarity-lines = 6

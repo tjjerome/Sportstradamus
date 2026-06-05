@@ -991,7 +991,7 @@ def _load_kind_multi(windows: Sequence[tuple[int, int, int]], file_kind: str) ->
     """Concatenate per-game rows from every (season, start, end) window for ``file_kind``."""
     frames = []
     for season, start_week, end_week in windows:
-        df = _load_kind(season, start_week, end_week, file_kind)
+        df = nfl_fp_weekly.load_window_or_empty(season, start_week, end_week, file_kind)
         if not df.empty:
             frames.append(df)
     if not frames:
@@ -1415,28 +1415,6 @@ def _aggregate_man_vs_zone_bucket(
     if wide.empty:
         return wide
     return wide.rename(columns={s: f"rec_mz_YPRR_{s}" for s in _MZ_BUCKETS})
-
-
-def _load_kind(season: int, start_week: int, end_week: int, file_kind: str) -> pd.DataFrame:
-    """Read one file_kind for the closed week range, log + swallow loader errors.
-
-    Normalises the loader's ``DataFrame | None`` return to an empty
-    DataFrame so downstream recipe dispatch doesn't have to special-case
-    the None branch (every recipe already short-circuits on ``empty``).
-    """
-    try:
-        df = nfl_fp_weekly.load_window(season, start_week, end_week, file_kind)
-    except Exception as exc:
-        logger.warning(
-            "load_window(%s, %s, %s, %s) failed: %s",
-            season,
-            start_week,
-            end_week,
-            file_kind,
-            exc,
-        )
-        return pd.DataFrame()
-    return df if df is not None else pd.DataFrame()
 
 
 def _player_metadata(windows: Sequence[tuple[int, int, int]]) -> pd.DataFrame:

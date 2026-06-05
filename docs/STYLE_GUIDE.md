@@ -71,7 +71,15 @@ mechanics; this section is the spirit.
    `pathlib`, vectorized `pandas` / `numpy` / `polars`) over hand-rolled or
    reinvented logic (§13). Duplicated logic is the largest measured source of
    drift in AI-assisted code — find it twice, consolidate it; don't copy it a
-   third time.
+   third time. **Any parallelism must be justified:** per-league / per-grain
+   blocks that encode the *same* knowledge get consolidated (base method, shared
+   helper, or a store parameterized by the differing values); a block stays
+   parallel only when it is the same shape over genuinely different knowledge
+   *and* consolidating would force a banned pure-forwarder (§2.10), in which case
+   it carries an explicit `# pylint: disable=duplicate-code` pragma plus a
+   one-line rationale. The blocking duplicate-code gate
+   (`tests/golden/test_no_duplicate_code.py`, pylint R0801 at
+   `min-similarity-lines = 6`) tolerates only pragma-justified clones.
 10. **Prefer deep functions and modules over shallow ones.** A function earns
     its existence by hiding real complexity behind a simple interface, not by
     forwarding a call under a new name. A coherent forty-line function that
@@ -300,7 +308,10 @@ Bare math constants (`0.5`, `1`, `2 * math.pi`) do not need extraction.
 - **A function must add value.** A body that forwards every argument unchanged
   to one other call, or wraps a one-line expression already readable at the
   call site, is a dead wrapper — inline it (§12, §18.7). No wrapper kept "for
-  compatibility" (§18.8).
+  compatibility" (§18.8). This includes the **build-and-invoke thunk** — a
+  function whose whole body builds a callable and immediately calls it
+  (`_build_cli()()`); a console-script entry point must name the command
+  object itself (`module:command`), never a `main()` that builds and runs it.
 - **Name intermediates that are steps, not echoes.** `total = sum(...)` then
   using `total` twice is a step; `x = f(a)` then `return x` is an echo —
   `return f(a)`.
@@ -569,6 +580,7 @@ review finds any of these, it fails before substance review:
 | Smell | Banned by |
 |---|---|
 | Wrapper that only forwards a call | §10, §12, §18.7 |
+| Build-and-invoke thunk (`f()()` as a function body) | §18.7 |
 | Back-compat shim / dual old+new path | §18.2, §18.8 |
 | `try`/fallback/validation for impossible cases | §11, §18.5 |
 | Comment that narrates the code | §9 |
