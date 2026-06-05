@@ -59,7 +59,7 @@ def test_submarket_ev_missing_league_no_keyerror(stats, monkeypatch):
     # not raise KeyError (regression: stat_cv[self.league] subscript).
     monkeypatch.setattr(base, "stat_cv", {})
     monkeypatch.setattr(base, "archive", _FakeArchive({"A": 1.5}, {"A": 0.5}))
-    v, subline, sub_cv, sub_dist = stats._submarket_ev("A", "2026-01-01", "P", "Gamma", 1)
+    v, _subline, sub_cv, _sub_dist = stats._submarket_ev("A", "2026-01-01", "P", "Gamma", 1)
     assert sub_cv == 1
     assert v == 1.5
 

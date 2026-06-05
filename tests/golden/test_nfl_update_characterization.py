@@ -108,7 +108,7 @@ def updated(monkeypatch):
     }))
     monkeypatch.setattr(nfl_mod, "nfl", type("NFL", (), {
         "import_schedules": staticmethod(lambda yrs: _sched_df()),
-        "import_ids": staticmethod(lambda: _ids_df()),
+        "import_ids": staticmethod(_ids_df),
     }))
     monkeypatch.setattr(nfl_mod, "clean_data", False)
     monkeypatch.setattr(base_mod, "archive", _FakeArchive())
