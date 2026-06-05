@@ -36,6 +36,17 @@ repos:
 
   - repo: local
     hooks:
+      # Style §5 / §11: block the defensive try-blocks that were audited out —
+      # bare `except:` and optional-dependency imports (`except ImportError`).
+      # Blind `except Exception:` swallows are left to review: most catches in
+      # this repo log-and-continue around flaky external I/O, so BLE over-reaches.
+      - id: no-defensive-except
+        name: no bare/optional-import except (STYLE_GUIDE §5/§11)
+        entry: python scripts/check_defensive_except.py
+        language: system
+        types: [python]
+        exclude: '^src/deprecated/'
+
       # Smoke test: confer/meditate/prophecize wired through fixtures + stubs.
       # Forced into fake-API mode so the hook never hits the network. Live-API
       # mode (`SPORTSTRADAMUS_INTEGRATION_REAL_APIS=1`) is opt-in for manual
