@@ -147,6 +147,21 @@ def _zscore_within_player(df: pd.DataFrame, player_col: str, market: str) -> pd.
     return ((df[market] - groups.transform("mean")) / std).fillna(0)
 
 
+def flatten_offers(offers: dict | list, market: str) -> dict | list:
+    """Flatten a nested ``{group: {player: ...}}`` offers mapping to ``{player: ...}``.
+
+    Merges every group's player dict, then re-applies the market-keyed group last
+    so its entries win. A non-dict ``offers`` (already flat) is returned unchanged.
+    """
+    if not isinstance(offers, dict):
+        return offers
+    flat: dict = {}
+    for players in offers.values():
+        flat.update(players)
+    flat.update(offers.get(market, {}))
+    return flat
+
+
 def scale_team_volume_to_budget(
     player_profile: pd.DataFrame,
     market: str,
@@ -911,16 +926,30 @@ class Stats:
                     self.playerProfile.index
                 )
 
-    def profile_market(self, market, date=datetime.today().date()):
+    def _begin_profile_market(self, market, date) -> "date | None":
+        """Normalize ``date``, refresh the base profile for ``market``, and return it.
+
+        Returns ``None`` when ``(market, date)`` is already the active profile and
+        the caller should return early; otherwise runs :meth:`base_profile`, records
+        ``market`` as current, and returns the normalized ``date`` for the caller to
+        reuse downstream (the comp path needs a real ``date``, not a ``str``). The
+        subclass ``profile_market`` overrides share this guard.
+        """
         if isinstance(date, str):
             date = datetime.strptime(date, "%Y-%m-%d").date()
         elif isinstance(date, datetime):
             date = date.date()
         if market == self.profiled_market and date == self.profile_latest_date:
-            return
+            return None
 
         self.base_profile(date)
         self.profiled_market = market
+        return date
+
+    def profile_market(self, market, date=datetime.today().date()):
+        date = self._begin_profile_market(market, date)
+        if date is None:
+            return
 
         # Replace slow .filter(lambda) with aggregation-based pre-filtering
         _pc = self.log_strings["player"]
@@ -1501,7 +1530,7 @@ class Stats:
         return stats
 
     def load_volume_model_params(
-        self, offers, market, date, rename_map, position_filter=None
+        self, offers, market, date, rename_map=None, position_filter=None
     ) -> bool:
         """Join a volume model's predicted distribution parameters into playerProfile.
 
@@ -1518,20 +1547,23 @@ class Stats:
             market: The volume stat market name (e.g. ``"carries"``).
             date: Game date used for profiling and stats lookup.
             rename_map: Column rename applied to the raw model output before the
-                join, e.g. ``{"loc": "proj carries loc", ...}``.
+                join, e.g. ``{"loc": "proj carries loc", ...}``. Defaults to the
+                SkewNormal ``loc``/``scale``/``alpha`` map (``proj {market} loc``
+                etc.) shared by NFL and NHL; MLB passes its own ``mean``/``std`` map.
             position_filter: When not ``None``, restrict predicted rows to players
                 whose ``"Player position"`` value is in this collection before the
                 join. NFL passes a per-market list of depth-chart position numbers
                 (``1`` = QB, ``2`` = WR, ``3`` = RB, ``4`` = TE). MLB and NHL
                 pass ``None`` and skip the filter.
         """
-        flat_offers = {}
-        if isinstance(offers, dict):
-            for players in offers.values():
-                flat_offers.update(players)
-            flat_offers.update(offers.get(market, {}))
-        else:
-            flat_offers = offers
+        if rename_map is None:
+            rename_map = {
+                "loc": f"proj {market} loc",
+                "scale": f"proj {market} scale",
+                "alpha": f"proj {market} alpha",
+            }
+
+        flat_offers = flatten_offers(offers, market)
 
         self.profile_market(market, date)
         self.get_depth(flat_offers, date)

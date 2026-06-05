@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import functools
 import importlib.resources as pkg_resources
-import subprocess
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
@@ -47,11 +46,11 @@ from scipy.stats import skewnorm as _scipy_skewnorm
 from sportstradamus import data
 from sportstradamus.analysis import explode_offers
 from sportstradamus.helpers.io import read_history
+from sportstradamus.helpers.provenance import git_sha
 from sportstradamus.training.baselines import _MEANYR_FLOOR as _SN_DENOM_FLOOR
 from sportstradamus.training.markets import ALL_MARKETS
 from sportstradamus.training.ship_config import STAT_META_PATH, TARGET_NORM_NONE, load_stat_meta
 
-# ---------------------------------------------------------------------------
 # Ship gates (see docs/ship_gate.md). The promotion lifecycle is a 2x2:
 # (set first baseline | supersede incumbent) x (research->devel offline |
 # devel->main live).
@@ -73,7 +72,6 @@ from sportstradamus.training.ship_config import STAT_META_PATH, TARGET_NORM_NONE
 #   * devel -> main: a profitability gate on live settled data (positive Kelly-sized
 #     ROI to set a baseline; >= +0.5% ROI over >= 2 weeks to supersede an incumbent)
 #     — see scripts/check_graduation.py.
-# ---------------------------------------------------------------------------
 
 # Bottom-mean QUARTILE = the bench segment (Gate 3); the top-mean DECILE (N_DECILES)
 # is the star segment (Gate 2). Bench is pooled coarser on purpose — low-volume
@@ -232,20 +230,6 @@ class Scorecard:
     # (supersede) requires both segment MAEs to improve >= 5%, so the bench MAE must
     # be on the scorecard. Appended last for the same CSV-append back-compat reason.
     bottom_quartile_mae: float
-
-
-def _git_sha() -> str:
-    """Return the short HEAD SHA, or ``"unknown"`` outside a git tree."""
-    try:
-        return (
-            subprocess.check_output(
-                ["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL
-            )
-            .decode()
-            .strip()
-        )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return "unknown"
 
 
 def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
@@ -496,7 +480,7 @@ def scorecard(
 
     return Scorecard(
         timestamp=datetime.now(UTC).isoformat(timespec="seconds"),
-        git_sha=_git_sha(),
+        git_sha=git_sha(),
         strategy=strategy,
         league=league,
         market=market,
@@ -588,7 +572,6 @@ def _iqr(values: np.ndarray) -> float:
     return float(p75 - p25)
 
 
-# ---------------------------------------------------------------------------
 # Gate 4 analytical IQR (Operation Ship 75 Step 0.2) — Outcome B per the
 # research brief at /tmp/researcher_g4_audit.md. The old gate computed
 # IQR(point_pred) / IQR(actual), a sharpness-vs-calibration category error
@@ -599,7 +582,6 @@ def _iqr(values: np.ndarray) -> float:
 # bag. Validated against sample-based IQR with M=1000 on five real cells
 # (/tmp/g4_iqr_experiment.py) — agrees to <=0.001 on ZINB, within 10% on
 # SkewNormal.
-# ---------------------------------------------------------------------------
 
 
 # torch's NegativeBinomial(probs=p) treats p as "probability of success" and

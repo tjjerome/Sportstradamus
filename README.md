@@ -233,9 +233,9 @@ and prints a tabulated stake table.
 poetry run kelly --bankroll 500 --from data/recommendations/2026-05-08.yaml
 ```
 
-cvxpy / pyyaml / tabulate are lazy-imported from
-`[tool.poetry.group.strategy]`; install with
-`poetry install --with strategy` if the group is not active.
+cvxpy (SCS solver), pyyaml, and tabulate are required base dependencies
+installed by `poetry install`; the `kelly` / `pickem-build` paths import
+them at module top.
 
 ---
 

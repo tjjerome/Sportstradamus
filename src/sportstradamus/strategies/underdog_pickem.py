@@ -16,6 +16,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+import click
 import pandas as pd
 
 from sportstradamus.helpers import stat_map
@@ -171,7 +172,8 @@ def _row_to_entry(
 
 
 def _resolve_market_shrinkage(league: str, market: str) -> tuple[float, str]:
-    """Resolve a Kelly shrinkage value plus a tag identifying its source."""
+    # Lazy imports keep torch (via training.report) out of the dashboard import
+    # path — do NOT hoist clv or get_market_calibration to module level.
     try:
         from sportstradamus import clv as _clv
         from sportstradamus.training.report import get_market_calibration
@@ -189,20 +191,13 @@ def _resolve_market_shrinkage(league: str, market: str) -> tuple[float, str]:
     train_bss = train_metrics.get("brier_skill_score", float("nan"))
 
     shrinkage = resolve_shrinkage(training_bss=train_bss, live_bss=live_bss, live_n=live_n)
-    has_train = not _isna(train_bss)
-    has_live = not _isna(live_bss) and live_n > 0
+    has_train = not pd.isna(train_bss)
+    has_live = not pd.isna(live_bss) and live_n > 0
     if not has_train and not has_live:
         return shrinkage, "fallback"
     if has_train and has_live:
         return shrinkage, "blended"
     return shrinkage, "training" if has_train else "clv_segment"
-
-
-def _isna(x: Any) -> bool:
-    try:
-        return bool(pd.isna(x))
-    except (TypeError, ValueError):
-        return x is None
 
 
 def construct_entries(
@@ -356,36 +351,25 @@ def _live_load(config: PickemConfig) -> tuple[dict[str, pd.DataFrame], pd.DataFr
     return _parlays_per_variant(offers_df, stats, config), offers_df
 
 
-def _build_cli() -> Any:
-    import click
-
-    @click.command()
-    @click.option("--date", default="today", help="Slate date (YYYY-MM-DD or 'today').")
-    @click.option("--bankroll", type=str, required=True, help="Bankroll in dollars.")
-    @click.option(
-        "--out",
-        "out_path",
-        type=click.Path(dir_okay=False),
-        default=None,
-        help="Override output YAML path.",
-    )
-    def pickem_build(date: str, bankroll: str, out_path: str | None) -> None:
-        """Build today's Underdog Pick'em entries and emit recommendations YAML."""
-        slate_date = datetime.date.today() if date == "today" else datetime.date.fromisoformat(date)
-        config = PickemConfig()
-        entries = construct_entries(slate_date, Decimal(bankroll), config)
-        target = (
-            Path(out_path) if out_path else _RECOMMENDATIONS_DIR / f"{slate_date.isoformat()}.yaml"
-        )
-        path = emit_yaml(entries, slate_date, Decimal(bankroll), config, target)
-        click.echo(f"wrote {len(entries)} entries -> {path}")
-
-    return pickem_build
-
-
-def main() -> None:
-    _build_cli()()
+@click.command()
+@click.option("--date", default="today", help="Slate date (YYYY-MM-DD or 'today').")
+@click.option("--bankroll", type=str, required=True, help="Bankroll in dollars.")
+@click.option(
+    "--out",
+    "out_path",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Override output YAML path.",
+)
+def pickem_build(date: str, bankroll: str, out_path: str | None) -> None:
+    """Build today's Underdog Pick'em entries and emit recommendations YAML."""
+    slate_date = datetime.date.today() if date == "today" else datetime.date.fromisoformat(date)
+    config = PickemConfig()
+    entries = construct_entries(slate_date, Decimal(bankroll), config)
+    target = Path(out_path) if out_path else _RECOMMENDATIONS_DIR / f"{slate_date.isoformat()}.yaml"
+    path = emit_yaml(entries, slate_date, Decimal(bankroll), config, target)
+    click.echo(f"wrote {len(entries)} entries -> {path}")
 
 
 if __name__ == "__main__":
-    main()
+    pickem_build()

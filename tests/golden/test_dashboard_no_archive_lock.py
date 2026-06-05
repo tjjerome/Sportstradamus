@@ -56,22 +56,41 @@ def _reset_archive_singleton() -> None:
     Archive._instance = None
 
 
-def _clear_dashboard_imports() -> None:
+_CLEARED_PREFIXES = (
+    "sportstradamus.dashboard",
+    "sportstradamus.pages",
+    "sportstradamus.stats",
+    "sportstradamus.prediction",
+)
+
+
+def _clear_dashboard_imports() -> dict[str, object]:
     """Drop dashboard + stats modules from sys.modules so re-import is fresh.
 
     Other tests in the session may have already imported these modules, in
     which case ``importlib.import_module`` is a no-op and would never trigger
     the module-level code we want to observe. Clearing the cache forces a
     fresh execution.
+
+    Returns the removed ``{name: module}`` mapping so the caller can restore it
+    on teardown via :func:`_restore_modules`. Without that restore, the
+    freshly-imported (or now-missing) entries leak into later tests: any test
+    that monkeypatches a symbol on one of these modules (e.g.
+    ``prediction.correlation.find_correlation``) would patch a different module
+    object than the one a fresh ``from ... import`` resolves, silently running
+    the real function instead of the stub.
     """
-    prefixes = (
-        "sportstradamus.dashboard",
-        "sportstradamus.pages",
-        "sportstradamus.stats",
-        "sportstradamus.prediction",
-    )
-    for name in [m for m in list(sys.modules) if m.startswith(prefixes)]:
+    removed = {name: sys.modules[name] for name in list(sys.modules) if name.startswith(_CLEARED_PREFIXES)}
+    for name in removed:
         del sys.modules[name]
+    return removed
+
+
+def _restore_modules(removed: dict[str, object]) -> None:
+    """Undo :func:`_clear_dashboard_imports`: drop fresh re-imports, restore originals."""
+    for name in [m for m in list(sys.modules) if m.startswith(_CLEARED_PREFIXES)]:
+        del sys.modules[name]
+    sys.modules.update(removed)
 
 
 def _import_page_file(path: Path) -> None:
@@ -104,7 +123,7 @@ def test_dashboard_imports_do_not_construct_archive(tmp_path, monkeypatch) -> No
     """
     monkeypatch.setenv("SPORTSTRADAMUS_ARCHIVE_DB", str(tmp_path / "archive.duckdb"))
     _reset_archive_singleton()
-    _clear_dashboard_imports()
+    removed_modules = _clear_dashboard_imports()
     try:
         from sportstradamus.helpers.archive import Archive
 
@@ -140,5 +159,6 @@ def test_dashboard_imports_do_not_construct_archive(tmp_path, monkeypatch) -> No
             "in helpers/archive.py."
         )
     finally:
+        _restore_modules(removed_modules)
         _reset_archive_singleton()
         monkeypatch.delenv("SPORTSTRADAMUS_ARCHIVE_DB", raising=False)

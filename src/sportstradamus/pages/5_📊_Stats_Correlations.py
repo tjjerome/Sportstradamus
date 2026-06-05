@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from sportstradamus.dashboard_data import (
+    TIMEFRAME_OPTIONS,
     format_ts,
     load_history,
     load_parlays,
@@ -20,15 +21,6 @@ from sportstradamus.dashboard_data import (
     render_banner,
     sidebar_filters,
 )
-
-TIMEFRAME_OPTIONS = {
-    "All time": None,
-    "Last 7 days": 7,
-    "Last 30 days": 30,
-    "Last 3 months": 91,
-    "Last 6 months": 183,
-    "Last year": 365,
-}
 
 st.title("Correlations & Parlays")
 render_banner("stats", "correlation lift, hit rates, parlay calibration")
