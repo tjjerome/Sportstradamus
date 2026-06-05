@@ -510,7 +510,7 @@ def _process_league_games(
             contest_variant=contest_variant,
             legacy=legacy,
         )
-        if len(best_bets) > 0:
+        if best_bets:
             parlay_df = _append_parlay_rows(parlay_df, best_bets, g.C)
     return parlay_df
 
@@ -554,7 +554,7 @@ def find_correlation(
 
     df = pd.DataFrame(offers)
     versus_mask = df["Player"].str.contains(" vs. ")
-    if not df.loc[versus_mask].empty:
+    if versus_mask.any():
         df.loc[versus_mask, "Team"] = df.loc[versus_mask].apply(
             lambda x: x["Team"].split("/")[0 if x["Bet"] == "Over" else 1], axis=1
         )
