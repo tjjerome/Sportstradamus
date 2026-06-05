@@ -207,3 +207,9 @@ notebooks/
 
 # Git worktrees for isolated feature workspaces (subagent-driven development)
 .worktrees/
+
+# Claude Code hook runtime state (per-session markers, snapshots, waiver)
+/.claude/.state/
+
+# Research-gated path list is tracked config despite the broad *.txt ignore above
+!.claude/research_gated.txt
