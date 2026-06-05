@@ -1,3 +1,22 @@
+# ARCHIVED 2026-06-04 from src/sportstradamus/drafts/forecast.py
+# Reason: NFL best-ball / draft-ADP research island — no entry point, cron,
+#         dashboard, test, or external importer; a separate product track.
+# Last live SHA: 43fa5b0
+# Original imports (now unresolved here):
+#   import importlib.resources as pkg_resources
+#   import pickle
+#   import lightgbm as lgb
+#   import numpy as np
+#   import pandas as pd
+#   import plotnine
+#   from lightgbmlss.distributions.ZIPoisson import *
+#   from lightgbmlss.model import *
+#   from matplotlib import pyplot as plt
+#   from plotnine import *
+#   from sklearn.model_selection import train_test_split
+#   from tqdm import tqdm
+#   from sportstradamus.drafts import data
+
 # %%
 import importlib.resources as pkg_resources
 import pickle

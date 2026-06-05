@@ -244,3 +244,112 @@ def test_dedupe_max_overlap(fake_market_calibration):
         parlay_dfs=parlay_dfs,
     )
     assert len(out) == 1
+
+
+# --- snapshot frame + reuse helper -------------------------------------------
+
+
+def test_entries_to_frame_columns(fake_market_calibration):
+    from sportstradamus.strategies._pickem_emit import entries_to_frame
+
+    cfg = PickemConfig(
+        min_model_edge=0.0,
+        min_sharp_edge=0.0,
+        disagreement_threshold=1.0,
+        min_ev=0.0,
+        entry_sizes=(3,),
+        contest_variants=("power",),
+    )
+    offers = _offers([("Clark", "IND", "PTS", "Over", 0.6, 0.58)])
+    parlay_dfs = {"power": pd.DataFrame([_parlay(["L1", "L2", "L3"], model_ev=1.5)])}
+    entries = construct_entries(
+        datetime.date(2026, 5, 8), Decimal("500"), cfg, parlay_dfs=parlay_dfs, offers_df=offers
+    )
+
+    df = entries_to_frame(entries)
+    assert list(df.columns) == [
+        "id",
+        "contest_variant",
+        "entry_size",
+        "legs",
+        "joint_prob",
+        "payout_multiplier",
+        "ev",
+        "shrinkage",
+        "shrinkage_source",
+        "league",
+        "game",
+    ]
+    assert df["contest_variant"].iloc[0] == "power"
+    assert df["legs"].iloc[0] == ["L1", "L2", "L3"]
+    # Snapshot is bankroll-independent — the dashboard sizes stakes live.
+    assert "recommended_stake" not in df.columns
+
+
+def test_entries_to_frame_empty_keeps_schema():
+    from sportstradamus.strategies._pickem_emit import entries_to_frame
+
+    df = entries_to_frame([])
+    assert df.empty
+    assert "joint_prob" in df.columns
+
+
+def test_build_entries_from_scored_fans_out_variants(monkeypatch, fake_market_calibration):
+    from sportstradamus.strategies import underdog_pickem as up
+
+    calls: list[str] = []
+
+    def fake_find_correlation(scored, stats, platform, contest_variant="pooled", **kwargs):
+        calls.append(contest_variant)
+        return scored, pd.DataFrame([_parlay(["L1", "L2", "L3"], model_ev=1.4)])
+
+    monkeypatch.setattr(
+        "sportstradamus.prediction.correlation.find_correlation", fake_find_correlation
+    )
+
+    cfg = PickemConfig(
+        min_model_edge=0.0,
+        min_sharp_edge=0.0,
+        disagreement_threshold=1.0,
+        min_ev=0.0,
+        entry_sizes=(3,),
+        contest_variants=("power", "flex", "rivals"),
+    )
+    offers = _offers([("Clark", "IND", "PTS", "Over", 0.55, 0.54)])
+    entries = up.build_entries_from_scored(
+        datetime.date(2026, 5, 8), Decimal("500"), offers, {}, cfg
+    )
+
+    assert set(calls) == {"power", "flex", "rivals"}
+    assert entries
+
+
+def test_parlay_shrinkage_min_over_canonical_leg_markets(monkeypatch):
+    from sportstradamus.strategies import underdog_pickem as up
+
+    # Raw Underdog Market names map via stat_map: Rebounds->REB, Steals->STL.
+    offers = pd.DataFrame(
+        {
+            "Player": ["A. Player", "B. Player"],
+            "Market": ["Rebounds", "Steals"],
+            "Model P": [0.60, 0.60],
+            "Books P": [0.55, 0.55],
+        }
+    )
+    by_player = up._canonical_markets_by_player(offers)
+    assert by_player == {"A. Player": {"REB"}, "B. Player": {"STL"}}
+
+    shrink = {"REB": (0.80, "training"), "STL": (0.20, "training")}
+    monkeypatch.setattr(
+        up, "_resolve_market_shrinkage", lambda league, market: shrink.get(market, (1.0, "fallback"))
+    )
+    row = pd.Series(
+        {
+            "Bet Size": 2,
+            "Leg 1": "A. Player Over 4.5 rebounds - 60.0%, 1.6x",
+            "Leg 2": "B. Player Over 1.5 steals - 60.0%, 2.5x",
+        }
+    )
+    shrinkage, source = up._parlay_shrinkage(row, "WNBA", by_player)
+    assert shrinkage == 0.20  # min(REB=0.80, STL=0.20) — least-calibrated leg
+    assert source == "training"

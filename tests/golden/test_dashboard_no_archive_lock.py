@@ -21,6 +21,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 # Project source root: src/sportstradamus/
 _PROJECT_SRC = Path(__file__).resolve().parents[2] / "src" / "sportstradamus"
 
@@ -107,6 +109,18 @@ def test_dashboard_imports_do_not_construct_archive(tmp_path, monkeypatch) -> No
         from sportstradamus.helpers.archive import Archive
 
         assert Archive._instance is None, "test fixture failed to reset singleton"
+
+        # A Streamlit page is a script: importing it runs its whole body, which
+        # calls load_history()/load_parlay_hist() and then per-row CRPS over the
+        # real history parquet — ~90s of work irrelevant to this test. Empty the
+        # one reader both funnel through so each page short-circuits on its
+        # ``if history.empty: st.stop()`` guard. The import statements (where a
+        # top-level Archive() would fire) still execute, so the assertion below is
+        # unaffected.
+        monkeypatch.setattr(
+            "sportstradamus.helpers.io.read_parquet_safe",
+            lambda *_a, **_k: pd.DataFrame(),
+        )
 
         for name in _DASHBOARD_MODULES:
             with contextlib.suppress(Exception):

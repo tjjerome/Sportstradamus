@@ -27,6 +27,11 @@ from sportstradamus.scripts.zinb_routing_diagnostics import (
     main,
 )
 
+# Exercises a dev-only research script (sportstradamus.scripts.zinb_routing_diagnostics)
+# that never ships to production; statsmodels bootstrap fits make it slow. Excluded
+# from the default fast loop — run with ``pytest -m diagnostics``.
+pytestmark = pytest.mark.diagnostics
+
 # Markets per synthetic league. The NFL stems carry spaces so the loader's
 # space -> hyphen filename mapping is exercised.
 _SYNTH_MARKETS = {
