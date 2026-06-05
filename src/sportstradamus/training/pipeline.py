@@ -63,7 +63,9 @@ def train_market(
         book_weights = {}
 
     book_weights.setdefault(league, {}).setdefault(market, {})
-    book_weights[league][market] = fit_book_weights(league, market, stat_data, archive, book_weights)
+    book_weights[league][market] = fit_book_weights(
+        league, market, stat_data, archive, book_weights
+    )
 
     with open(pkg_resources.files(data) / "book_weights.json", "w") as outfile:
         json.dump(book_weights, outfile, indent=4)
@@ -113,9 +115,7 @@ def train_market(
     if "Player" in M.columns:
         M = M.drop_duplicates(subset=["Player", "Date"], keep="last")
     step = M["Result"].drop_duplicates().sort_values().diff().min()
-    _prep_gate = (
-        stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma") else 0
-    )
+    _prep_gate = stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma") else 0
     synthetic_mask = M.Odds.isna() | (M.Odds == 0)
     if "Odds_synthetic" in M.columns:
         synthetic_mask |= M["Odds_synthetic"].fillna(False)
@@ -218,9 +218,7 @@ def train_market(
             nonzero_mask = y_train_labels > 0
             X_train = X_train[nonzero_mask]
             y_train_labels = y_train_labels[nonzero_mask]
-            denom_col = (
-                "MeanYr_nonzero" if "MeanYr_nonzero" in X_train.columns else "MeanYr"
-            )
+            denom_col = "MeanYr_nonzero" if "MeanYr_nonzero" in X_train.columns else "MeanYr"
         else:
             denom_col = "MeanYr"
 
@@ -276,9 +274,7 @@ def train_market(
         )
 
     model = LightGBMLSS(dist_obj)
-    set_model_start_values(
-        model, dist, X_train, shape_ceiling=shape_ceiling, normalized=normalize
-    )
+    set_model_start_values(model, dist, X_train, shape_ceiling=shape_ceiling, normalized=normalize)
 
     col_list = list(X_train.columns)
     monotone = [0] * len(col_list)
@@ -489,9 +485,7 @@ def train_market(
         )
 
         if dist in ("NegBin", "ZINB"):
-            _zi_test = (
-                dict(gate_model=gate_test, gate_book=hist_gate) if dist == "ZINB" else {}
-            )
+            _zi_test = dict(gate_model=gate_test, gate_book=hist_gate) if dist == "ZINB" else {}
             _zi_val = (
                 dict(gate_model=gate_validation, gate_book=hist_gate) if dist == "ZINB" else {}
             )
@@ -512,9 +506,7 @@ def train_market(
             )
 
         else:
-            _zi_test = (
-                dict(gate_model=gate_test, gate_book=hist_gate) if dist == "ZAGamma" else {}
-            )
+            _zi_test = dict(gate_model=gate_test, gate_book=hist_gate) if dist == "ZAGamma" else {}
             _zi_val = (
                 dict(gate_model=gate_validation, gate_book=hist_gate) if dist == "ZAGamma" else {}
             )
@@ -583,9 +575,7 @@ def train_market(
                     cdf_grid = gamma.cdf(
                         x_grid[:, None], alpha_cal[None, :], scale=scale_cal[None, :]
                     )
-                    cdf_grid = (
-                        gate_blend_val[None, :] + (1 - gate_blend_val[None, :]) * cdf_grid
-                    )
+                    cdf_grid = gate_blend_val[None, :] + (1 - gate_blend_val[None, :]) * cdf_grid
 
                     indicator = (y_val_arr[None, :] <= x_grid[:, None]).astype(float)
                     crps = np.sum((cdf_grid - indicator) ** 2, axis=0) * dx
@@ -608,9 +598,7 @@ def train_market(
         max_c = shape_ceiling / mean_shape if mean_shape > 0 else 10.0
         upper_bound = min(10.0, max_c)
 
-        disp_result = minimize_scalar(
-            dispersion_loss, bounds=(0.1, upper_bound), method="bounded"
-        )
+        disp_result = minimize_scalar(dispersion_loss, bounds=(0.1, upper_bound), method="bounded")
         c_opt = disp_result.x
 
         if dist in ("NegBin", "ZINB"):
@@ -731,9 +719,7 @@ def train_market(
         ll[i] = log_loss(y_class, y_proba[:, 1])
         over_pct[i] = y_pred[mask].mean() / mask.mean() if mask.sum() > 0 else np.nan
         under_mask = mask & (y_pred == 0)
-        under_prec[i] = (
-            (y_class[under_mask] == 0).mean() if under_mask.sum() > 0 else np.nan
-        )
+        under_prec[i] = (y_class[under_mask] == 0).mean() if under_mask.sum() > 0 else np.nan
 
     # Shape parameter diagnostics
     test_mean_yr = X_test["MeanYr"].mean()
@@ -748,13 +734,9 @@ def train_market(
         diag_empirical_shape = float(result_arr.std() / max(result_arr.mean(), 1e-6))
         diag_shape_label = "scale"
     elif dist in ("Gamma", "ZAGamma"):
-        diag_start_shape = float(
-            np.clip((test_mean_yr / max(test_std_yr, 1e-6)) ** 2, 0.1, 100)
-        )
+        diag_start_shape = float(np.clip((test_mean_yr / max(test_std_yr, 1e-6)) ** 2, 0.1, 100))
         diag_model_shape = float(prob_params["concentration"].mean())
-        per_player_emp_alpha = (
-            player_stats.mean() / np.maximum(player_stats.std(), 0.01)
-        ) ** 2
+        per_player_emp_alpha = (player_stats.mean() / np.maximum(player_stats.std(), 0.01)) ** 2
         diag_empirical_shape = float(np.median(per_player_emp_alpha))
         diag_shape_label = "alpha"
     elif dist in ("NegBin", "ZINB"):
@@ -779,9 +761,7 @@ def train_market(
     _meanyr_arr = X_test["MeanYr"].to_numpy()
     _result_arr = y_test["Result"].to_numpy()
     diag_ev_meanyr_corr = float(np.corrcoef(_meanyr_arr, weighted_mean - _meanyr_arr)[0, 1])
-    diag_result_meanyr_corr = float(
-        np.corrcoef(_meanyr_arr, _result_arr - _meanyr_arr)[0, 1]
-    )
+    diag_result_meanyr_corr = float(np.corrcoef(_meanyr_arr, _result_arr - _meanyr_arr)[0, 1])
 
     ev_minus_line_arr = weighted_mean - B_test["Line"].to_numpy()
     diag_median_ev_diff = float(np.median(ev_minus_line_arr))
@@ -824,9 +804,7 @@ def train_market(
         cf_pred = (cf_over > 0.5).astype(int)
         cf_mask = np.maximum(cf_under, cf_over) > 0.54
         diag_cf_over_pct = (
-            float(cf_pred[cf_mask].mean() / cf_mask.mean())
-            if cf_mask.sum() > 10
-            else float("nan")
+            float(cf_pred[cf_mask].mean() / cf_mask.mean()) if cf_mask.sum() > 10 else float("nan")
         )
     else:
         diag_cf_over_pct = float("nan")
@@ -890,9 +868,7 @@ def train_market(
         if hist_gate > 0.02:
             X_test["Gate"] = hist_gate
     elif dist in ("NegBin", "ZINB"):
-        base_ev = (
-            prob_params["total_count"] * prob_params["probs"] / (1 - prob_params["probs"])
-        )
+        base_ev = prob_params["total_count"] * prob_params["probs"] / (1 - prob_params["probs"])
         X_test["EV"] = base_ev
         if dist == "ZINB":
             X_test["Gate"] = prob_params["gate"]
