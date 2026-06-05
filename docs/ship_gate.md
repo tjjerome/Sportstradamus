@@ -160,8 +160,8 @@ gate's natural threshold.
 ## research → devel, supersede an incumbent: S1 + S2 + S3 (Phase 3)
 
 A challenger replaces an established baseline only if **all three** hold. Computed by
-`supersede_verdict()` (lands in Phase 3) on two row-aligned test-set CSVs via
-`compression_eval --baseline ... --candidate ...`.
+`supersede_verdict()` on two row-aligned test-set CSVs via
+`python -m sportstradamus.training.scorecard --baseline ... --candidate ...`.
 
 | # | Gate | Rule |
 |---|------|------|

@@ -7,17 +7,16 @@ and that none of the orchestration code has been broken by a refactor.
 Two modes, controlled by the ``SPORTSTRADAMUS_INTEGRATION_REAL_APIS``
 environment variable:
 
-* **Fake (default).** The Odds API, ``nba_api``, Google Sheets, Underdog,
-  and Sleeper are all replaced with stubs / canned fixtures. Runs in
-  well under 90 seconds.
+* **Fake (default).** The Odds API, ``nba_api``, Underdog, and Sleeper are
+  all replaced with stubs / canned fixtures. Runs in well under 90 seconds.
 * **Real.** Set ``SPORTSTRADAMUS_INTEGRATION_REAL_APIS=1`` to opt in to
   live network calls (``confer`` still goes through ``--fixture-dir``,
   but ``meditate`` and ``prophecize`` get real ``StatsWNBA`` data).
   Allowed to take longer.
 
 The test never writes data: every disk-write touchpoint
-(``Archive.write``, model pickle writes, history files, Google Sheets) is
-intercepted. We exercise import paths and callback wiring only.
+(``Archive.write``, model pickle writes, history files) is intercepted.
+We exercise import paths and callback wiring only.
 
 Marked ``integration`` so the default ``pytest`` collection skips it; opt
 in with ``pytest -m integration``.

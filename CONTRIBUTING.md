@@ -403,7 +403,7 @@ unchanged — the mechanism is simply now live.
 ### Phase B — per-market ship PRs (repeating)
 
 When a `(league, market)` cell clears **Gate 1** (see
-`docs/gbdt_mean_regression_plan.md`, "Ship mechanism — per-cell strategy config
+`docs/archive/gbdt_mean_regression_plan.md`, "Ship mechanism — per-cell strategy config
 on devel"), open a focused PR to `devel` carrying the **production delta only**:
 
 1. **Training** — if the cell ships a *new* strategy: its slug + forward/decode in
@@ -415,7 +415,7 @@ on devel"), open a focused PR to `devel` carrying the **production delta only**:
    `shipped` to `"devel"` to ship, or back to `"withheld"` to dark-out a
    cell under rework).
 
-The offline **evidence** that justifies the ship (compression-eval runs,
+The offline **evidence** that justifies the ship (scorecard A/B runs,
 diagnostic verdicts) **travels as prose in the PR description, never as committed
 code.**
 
@@ -460,8 +460,8 @@ the training report is the behavioral regression check.
 
 `tests/integration/test_end_to_end.py` exercises the
 `confer -> meditate -> prophecize` wiring against cached Odds API fixtures
-and stubbed external dependencies (`nba_api`, Optuna, Google Sheets, Underdog,
-Sleeper). It is marked `integration` and is excluded from the default
+and stubbed external dependencies (`nba_api`, Optuna, Underdog, Sleeper).
+It is marked `integration` and is excluded from the default
 `pytest` collection; opt in explicitly:
 
 ```bash

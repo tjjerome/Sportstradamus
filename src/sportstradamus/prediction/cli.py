@@ -78,7 +78,7 @@ _HISTORY_RETENTION_DAYS = 365
 )
 @line_profiler.profile
 def main(progress, legacy_correlation, contest_variant, log_level):
-    """Run the full prediction pipeline and write results to Google Sheets."""
+    """Run the full prediction pipeline and write parquet snapshots for the dashboard."""
     # style: allow-complexity — prophecize entrypoint: a flat top-level pipeline
     # (per-league load/update, per-platform fetch+score, snapshot + history
     # persistence). The residual CC is sequential stages and per-platform/-league

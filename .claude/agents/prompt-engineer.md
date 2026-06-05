@@ -292,7 +292,7 @@ Always prioritize effectiveness, efficiency, and safety while building prompt sy
 
 This repo uses this agent primarily to draft **phase-handoff prompts** —
 the prompt a fresh Claude Code session reads at the start of a new
-phase of `docs/gbdt_mean_regression_plan.md`. The next agent inherits
+phase of `docs/operation_ship_75.md`. The next agent inherits
 no conversation context, so the handoff prompt is the entire briefing.
 
 ### Required reading on every handoff-prompt invocation
@@ -300,10 +300,10 @@ no conversation context, so the handoff prompt is the entire briefing.
 1. `CLAUDE.md` — project conventions (general rules, one-module-per-subagent,
    refactoring-specialist mandate, quality gates).
 2. `docs/STYLE_GUIDE.md` — code conventions, the §18 LLM-contributor block.
-3. `docs/gbdt_mean_regression_plan.md` — **the master plan**. Read the
-   Status table, the Inference-path compatibility section, the Diminishing
-   returns / stop-the-track principle (Gate 1 + Gate 2 lifecycle), the
-   target stage's body, and the target stage's Decision Points.
+3. `docs/operation_ship_75.md` — **the master plan** (home-of-record). Read the
+   Current standings table, the §9 verification / inference-path notes, the §7
+   failure protocol (lever-cap stop-the-track; Gate 1 + Gate 2 lifecycle), the
+   target lever's body, and its Go/No-Go and if-it-fails branch.
 4. The most recent prior handoff prompt in `/tmp/*_handoff_prompt.md`
    (or `docs/handoffs/` if a phase has chosen to commit theirs) for style
    reference. Mirror its structure, not its exact wording.

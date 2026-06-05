@@ -7,8 +7,8 @@ Pages in the pages/ directory are auto-discovered and shown in the sidebar.
 import sys
 from pathlib import Path
 
-# Ensure `src/` is before `src/sportstradamus/` in sys.path so that
-# `import sportstradamus` resolves to the package, not sportstradamus.py.
+# Ensure `src/` is on sys.path so `import sportstradamus` resolves to the
+# installed package when Streamlit runs this file directly.
 _src_dir = str(Path(__file__).parent.parent)
 if _src_dir not in sys.path:
     sys.path.insert(0, _src_dir)
