@@ -24,6 +24,7 @@ from sportstradamus.helpers.io import (
     CURRENT_META_PATH,
     CURRENT_OFFERS_PATH,
     CURRENT_PARLAYS_PATH,
+    CURRENT_PICKEM_PATH,
     HISTORY_PATH,
     MODEL_STATS_PATH,
     PARLAY_HIST_PATH,
@@ -198,6 +199,16 @@ def _load_current_parlays_cached(mtime: float) -> pd.DataFrame:
 def load_current_parlays() -> pd.DataFrame:
     """Today's parlay candidates, written by ``prophecize`` (mtime-keyed cache)."""
     return _load_current_parlays_cached(_mtime(CURRENT_PARLAYS_PATH))
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading pickem entries...")
+def _load_current_pickem_cached(mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(CURRENT_PICKEM_PATH)
+
+
+def load_current_pickem() -> pd.DataFrame:
+    """Today's Underdog Pick'em entries, written by ``prophecize`` (mtime-keyed cache)."""
+    return _load_current_pickem_cached(_mtime(CURRENT_PICKEM_PATH))
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)

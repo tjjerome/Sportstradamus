@@ -1,3 +1,18 @@
+# ARCHIVED 2026-06-04 from src/sportstradamus/drafts/train.py
+# Reason: NFL best-ball / draft-ADP research island — no entry point, cron,
+#         dashboard, test, or external importer; a separate product track.
+# Last live SHA: 43fa5b0
+# Original imports (now unresolved here):
+#   import importlib.resources as pkg_resources
+#   import pickle
+#   import numpy as np
+#   import pandas as pd
+#   from lightgbm import LGBMClassifier
+#   from sklearn.calibration import CalibratedClassifierCV
+#   from sklearn.metrics import (
+#   from sklearn.model_selection import train_test_split
+#   from sportstradamus.drafts import data
+
 import importlib.resources as pkg_resources
 import pickle
 

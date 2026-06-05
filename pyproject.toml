@@ -75,6 +75,7 @@ sphinx-pdj-theme = "^0.4.0"
 sphinx-pyproject = "^0.1.0"
 lightgbm = ">=4.2.0,<4.3.0"
 pytest = "^9.0.3"
+pytest-xdist = "^3.6"
 matplotlib = "^3.7.1"
 optuna = ">=3.5.0,<3.6.0"
 optuna-dashboard = "^0.10.2"
@@ -242,7 +243,11 @@ ignore-signatures = true
 testpaths = ["tests"]
 markers = [
     "integration: end-to-end pipeline test (confer -> meditate -> prophecize) on cached fixtures. Skipped by default; opt in with `pytest -m integration`.",
+    "diagnostics: tests for dev-only research scripts (zinb-routing, icc) that never ship to production. Slow (statsmodels bootstrap). Skipped by default; opt in with `pytest -m diagnostics`.",
 ]
-# Default runs skip the integration suite. CI's `pytest tests/golden/` is
-# unaffected because golden tests are unmarked.
-addopts = "-m 'not integration'"
+# Default runs skip the integration + diagnostics suites and parallelize via
+# pytest-xdist (`-n auto`). CI's `pytest tests/golden/` is unaffected by the marker
+# filter (golden tests are unmarked) and now runs across all cores.
+# The integration suite is NOT xdist-safe — its autouse preserve_data_files fixture
+# mutates a shared config/stat_meta.json — so run it serially: `pytest -m integration -n0`.
+addopts = "-m 'not integration and not diagnostics' -n auto"

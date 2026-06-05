@@ -87,9 +87,10 @@ to redo the work.
   parallelized. Single-module work stays in the main session; deviating from
   the per-subagent scope (e.g. one subagent touching two modules) needs an
   explicit reason recorded in the plan.
-* Before claiming anything is "done", run `poetry run pytest tests/golden/`,
-  `poetry run pytest -m integration` (fake-mode, no network), and
-  `poetry run ruff check src/sportstradamus/`. All three must be clean.
+* Before claiming anything is "done", run `poetry run pytest tests/golden/`
+  (now parallel via pytest-xdist), `poetry run pytest -m integration -n0`
+  (fake-mode, no network; `-n0` because the integration suite is not xdist-safe),
+  and `poetry run ruff check src/sportstradamus/`. All three must be clean.
 * Dashboard banner/caption timestamp lines show only the timestamp. Do not append
   feature descriptions, announcements, or other text to them.
 
@@ -115,7 +116,8 @@ Do not undo that work:
   See STYLE_GUIDE.md §9.
 * **Dashboard never touches the DuckDB archive.** The Streamlit dashboard reads
   pre-computed parquet snapshots only (`data/history.parquet`,
-  `data/parlay_hist.parquet`, `data/model_stats.parquet`). DuckDB holds an
+  `data/parlay_hist.parquet`, `data/model_stats.parquet`,
+  `data/runtime/current_pickem.parquet`). DuckDB holds an
   exclusive file lock for the entire lifetime of any read-write connection;
   the dashboard is the only long-lived process in the system, so any archive
   connection it opens — even accidentally via a module-level `Archive()` in
@@ -185,8 +187,11 @@ poetry run kelly             # re-size a recommendations YAML offline
 
 # Quality gates — all three must pass before committing
 poetry run ruff check src/sportstradamus/
-poetry run pytest tests/golden/
-poetry run pytest -m integration            # fake-mode end-to-end, no network
+poetry run pytest tests/golden/             # parallel via pytest-xdist (-n auto lives in addopts)
+poetry run pytest -m integration -n0        # fake-mode end-to-end, no network; -n0: integration is not xdist-safe
+
+# Dev-only diagnostic-script tests (zinb-routing, icc), excluded from the default loop
+poetry run pytest -m diagnostics
 
 # Regenerate CLI help snapshots after an intentional flag change
 REGENERATE_SNAPSHOTS=1 poetry run pytest tests/golden/test_cli_help.py

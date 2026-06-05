@@ -1,3 +1,18 @@
+# ARCHIVED 2026-06-04 from src/sportstradamus/drafts/update_ez_adp.py
+# Reason: NFL best-ball / draft-ADP research island — no entry point, cron,
+#         dashboard, test, or external importer; a separate product track.
+# Last live SHA: 43fa5b0
+# Original imports (now unresolved here):
+#   import importlib.resources as pkg_resources
+#   import os.path
+#   import gspread
+#   import pandas as pd
+#   import requests
+#   from google.auth.transport.requests import Request
+#   from google.oauth2.credentials import Credentials
+#   from google_auth_oauthlib.flow import InstalledAppFlow
+#   from sportstradamus import creds
+
 import importlib.resources as pkg_resources
 import os.path
 
