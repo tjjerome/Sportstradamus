@@ -717,15 +717,9 @@ class StatsMLB(Stats):
         self.teamlog.drop_duplicates(subset=["gameId", "team"], keep="last", inplace=True)
 
     def profile_market(self, market, date=datetime.today().date()):
-        if isinstance(date, str):
-            date = datetime.strptime(date, "%Y-%m-%d").date()
-        elif isinstance(date, datetime):
-            date = date.date()
-        if market == self.profiled_market and date == self.profile_latest_date:
+        date = self._begin_profile_market(market, date)
+        if date is None:
             return
-
-        self.base_profile(date)
-        self.profiled_market = market
 
         self.pitcherProfile = pd.DataFrame(columns=["z", "home", "moneyline gain", "totals gain"])
 

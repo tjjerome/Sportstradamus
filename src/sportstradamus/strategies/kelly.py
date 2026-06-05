@@ -19,7 +19,11 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, Decimal
-from typing import Any
+
+import click
+import cvxpy
+import tabulate
+import yaml
 
 from sportstradamus.helpers.logging import get_logger
 
@@ -82,8 +86,8 @@ def resolve_shrinkage(
     if explicit is not None:
         return _clip01(explicit)
 
-    has_train = training_bss is not None and not _isnan(training_bss)
-    has_live = live_bss is not None and not _isnan(live_bss) and live_n > 0
+    has_train = training_bss is not None and not math.isnan(training_bss)
+    has_live = live_bss is not None and not math.isnan(live_bss) and live_n > 0
 
     if has_train and has_live:
         return _blend_shrinkage(training_bss, live_bss, live_n)
@@ -182,8 +186,6 @@ def joint_kelly_portfolio(
     if not candidates:
         return {}
 
-    cvxpy = _lazy_import("cvxpy")
-
     bankroll = Decimal(bankroll)
     sized_p, sized_b, bet_ids = _size_candidates(candidates)
 
@@ -233,89 +235,60 @@ def _size_candidates(
     return sized_p, sized_b, bet_ids
 
 
-# --------------------------------------------------------------------------- #
-# CLI
+@click.command()
+@click.option("--bankroll", type=str, required=True, help="Bankroll in dollars.")
+@click.option(
+    "--from",
+    "yaml_path",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Path to a recommendations YAML produced by pickem-build.",
+)
+@click.option(
+    "--fraction",
+    type=float,
+    default=DEFAULT_KELLY_FRACTION,
+    show_default=True,
+    help="Kelly fraction multiplier.",
+)
+def kelly(bankroll: str, yaml_path: str, fraction: float) -> None:
+    """Re-size stakes from a recommendations YAML and print a table."""
+    with open(yaml_path) as fh:
+        doc = yaml.safe_load(fh)
 
-
-def _build_cli() -> Any:
-    import click
-
-    @click.command()
-    @click.option("--bankroll", type=str, required=True, help="Bankroll in dollars.")
-    @click.option(
-        "--from",
-        "yaml_path",
-        type=click.Path(exists=True, dir_okay=False),
-        required=True,
-        help="Path to a recommendations YAML produced by pickem-build.",
-    )
-    @click.option(
-        "--fraction",
-        type=float,
-        default=DEFAULT_KELLY_FRACTION,
-        show_default=True,
-        help="Kelly fraction multiplier.",
-    )
-    def kelly(bankroll: str, yaml_path: str, fraction: float) -> None:
-        """Re-size stakes from a recommendations YAML and print a table."""
-        yaml = _lazy_import("yaml")
-        tabulate = _lazy_import("tabulate")
-
-        with open(yaml_path) as fh:
-            doc = yaml.safe_load(fh)
-
-        entries = doc.get("entries", []) if isinstance(doc, dict) else []
-        bankroll_dec = Decimal(bankroll)
-        rows = []
-        for entry in entries:
-            stake = fractional_kelly_stake(
-                bankroll=bankroll_dec,
-                win_prob=float(entry.get("joint_prob", 0.0)),
-                payout_multiplier=Decimal(str(entry.get("payout_multiplier", 0))),
-                fraction=fraction,
-                model_shrinkage=float(entry.get("shrinkage", 1.0)),
-            )
-            rows.append(
-                [
-                    entry.get("id", ""),
-                    entry.get("contest_variant", ""),
-                    entry.get("entry_size", ""),
-                    f"{float(entry.get('joint_prob', 0.0)):.3f}",
-                    f"{float(entry.get('payout_multiplier', 0.0)):.2f}",
-                    f"{float(entry.get('ev', 0.0)):+.3f}",
-                    f"{stake:.2f}",
-                ]
-            )
-        click.echo(
-            tabulate.tabulate(
-                rows,
-                headers=["id", "variant", "size", "p", "payout", "ev", "stake"],
-                tablefmt="github",
-            )
+    entries = doc.get("entries", []) if isinstance(doc, dict) else []
+    bankroll_dec = Decimal(bankroll)
+    rows = []
+    for entry in entries:
+        stake = fractional_kelly_stake(
+            bankroll=bankroll_dec,
+            win_prob=float(entry.get("joint_prob", 0.0)),
+            payout_multiplier=Decimal(str(entry.get("payout_multiplier", 0))),
+            fraction=fraction,
+            model_shrinkage=float(entry.get("shrinkage", 1.0)),
         )
-
-    return kelly
-
-
-def main() -> None:
-    _build_cli()()
-
-
-# --------------------------------------------------------------------------- #
-# Internal helpers
+        rows.append(
+            [
+                entry.get("id", ""),
+                entry.get("contest_variant", ""),
+                entry.get("entry_size", ""),
+                f"{float(entry.get('joint_prob', 0.0)):.3f}",
+                f"{float(entry.get('payout_multiplier', 0.0)):.2f}",
+                f"{float(entry.get('ev', 0.0)):+.3f}",
+                f"{stake:.2f}",
+            ]
+        )
+    click.echo(
+        tabulate.tabulate(
+            rows,
+            headers=["id", "variant", "size", "p", "payout", "ev", "stake"],
+            tablefmt="github",
+        )
+    )
 
 
 def _clip01(x: float) -> float:
     return max(SHRINKAGE_FLOOR, min(1.0, float(x)))
-
-
-def _isnan(x: float | None) -> bool:
-    if x is None:
-        return True
-    try:
-        return math.isnan(float(x))
-    except (TypeError, ValueError):
-        return True
 
 
 def _quantize_stake(stake: Decimal) -> Decimal:
@@ -324,15 +297,5 @@ def _quantize_stake(stake: Decimal) -> Decimal:
     return stake.quantize(_STAKE_QUANTUM, rounding=ROUND_DOWN)
 
 
-def _lazy_import(name: str) -> Any:
-    try:
-        return __import__(name)
-    except ImportError as exc:
-        raise ImportError(
-            f"`{name}` is required for this code path. Install with "
-            f"`poetry install --with strategy`."
-        ) from exc
-
-
 if __name__ == "__main__":
-    main()
+    kelly()

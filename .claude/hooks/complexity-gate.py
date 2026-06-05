@@ -18,8 +18,10 @@ Thresholds map to docs/STYLE_GUIDE.md:
   - cyclomatic complexity  > 49   hard ceiling — no tag waives it
   - function source lines  > 200  (§2.8 / §10 mandatory-refactor line; no monoliths)
   - control-flow nesting   > 4    (§10, ">4 levels is a refactor signal")
+  - dead wrapper                  (§18.7, forward-only body / build-and-invoke
+                                  thunk); tag: allow-wrapper
 
-Escape hatch: put `# style: allow-complexity` (or -length, -nesting, -all)
+Escape hatch: put `# style: allow-complexity` (or -length, -nesting, -wrapper, -all)
 inside a function to waive that check — the documented-suppression posture of
 §19. Pair it with a one-line reason. `allow-complexity` waives 11..CC_HARD_MAX
 only; it does NOT waive complexity over CC_HARD_MAX. Keep complexity tags
@@ -53,7 +55,7 @@ INCLUDE_PREFIX = "src/sportstradamus/"
 EXCLUDE_PREFIXES = ("src/sportstradamus/scripts/", "src/deprecated/", "tests/")
 # ----------------------------------------------------------------------------
 
-ALLOW_RE = re.compile(r"#\s*style:\s*allow-(complexity|length|nesting|all)")
+ALLOW_RE = re.compile(r"#\s*style:\s*allow-(complexity|length|nesting|wrapper|all)")
 HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", re.M)
 
 
@@ -170,8 +172,40 @@ def allowed(func, lines):
     end = getattr(func, "end_lineno", func.lineno)
     found = set(ALLOW_RE.findall("\n".join(lines[start - 1:end])))
     if "all" in found:
-        return {"complexity", "length", "nesting"}
+        return {"complexity", "length", "nesting", "wrapper"}
     return found
+
+
+def is_dead_wrapper(func):
+    """True if the body is a dead wrapper (STYLE_GUIDE §18.7): a build-and-invoke
+    thunk (``x()()``) or a call forwarding the function's own parameters unchanged
+    to a bare-name callee. ``self``/``cls`` dispatch and any added argument,
+    keyword, or literal disqualify it."""
+    body = func.body
+    if (body and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)):
+        body = body[1:]
+    if len(body) != 1:
+        return False
+    stmt = body[0]
+    if not isinstance(stmt, (ast.Return, ast.Expr)):
+        return False
+    call = stmt.value
+    if not isinstance(call, ast.Call):
+        return False
+    if isinstance(call.func, ast.Call):
+        return True
+    if not isinstance(call.func, ast.Name) or call.keywords:
+        return False
+    if any(isinstance(a, ast.Starred) for a in call.args):
+        return False
+    params = [a.arg for a in (*func.args.posonlyargs, *func.args.args)]
+    if params and params[0] in ("self", "cls"):
+        params = params[1:]
+    if not params or len(call.args) != len(params):
+        return False
+    return all(isinstance(a, ast.Name) and a.id == p for a, p in zip(call.args, params))
 
 
 def metrics_for(src):
@@ -183,6 +217,7 @@ def metrics_for(src):
             "complexity": complexity(fn),
             "length": length(fn, lines),
             "nesting": nesting(fn),
+            "wrapper": is_dead_wrapper(fn),
             "lineno": fn.lineno,
             "end_lineno": getattr(fn, "end_lineno", fn.lineno),
             "allow": allowed(fn, lines),
@@ -318,6 +353,14 @@ def main():
             problems.append(
                 f"  {qn}()  {label}: {val}  (limit {limit}, {origin})\n"
                 f"      \u2192 {fix}")
+
+        if m["wrapper"] and "wrapper" not in m["allow"]:
+            problems.append(
+                f"  {qn}()  dead wrapper: body only forwards a call or is a build-"
+                f"and-invoke thunk (STYLE_GUIDE \u00a718.7). Inline it; for a CLI entry "
+                f"point name the command at module level (`module:command`). Add "
+                f"`# style: allow-wrapper` + a one-line reason if genuinely "
+                f"irreducible.")
 
     if not problems:
         return 0

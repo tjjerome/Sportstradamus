@@ -935,6 +935,27 @@ def _zagamma_crps(y, ev, alpha, beta, gate):
     return crps
 
 
+def backfill_crps(history: pd.DataFrame) -> bool:
+    """Fill the per-prediction ``CRPS`` column in place for newly-resolved rows.
+
+    CRPS is a pure function of a prediction's distribution and its realized
+    ``Actual``, so it never changes once the prediction resolves. The nightly
+    resolve computes it once here and stores it in history.parquet; the dashboard
+    then only aggregates the column instead of re-integrating per row on every
+    rerun. Returns True if any cell was filled, so the caller knows whether the
+    parquet needs rewriting.
+    """
+    if "Dist" not in history.columns or "Actual" not in history.columns:
+        return False
+    if "CRPS" not in history.columns:
+        history["CRPS"] = np.nan
+    need = history["Dist"].notna() & history["Actual"].notna() & history["CRPS"].isna()
+    if not need.any():
+        return False
+    history.loc[need, "CRPS"] = history.loc[need].apply(compute_crps_row, axis=1)
+    return True
+
+
 def compute_brier_skill_score(subset, base_rate=0.5):
     """Compute Brier Skill Score: 1 - Brier/Brier_ref.
 
