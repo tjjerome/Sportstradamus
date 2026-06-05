@@ -35,9 +35,6 @@ Refuse to start if any of these are true:
 - The working tree has uncommitted changes you did not produce in this
   invocation. Either commit them first or abort. You will not refactor on
   top of someone else's dirty state.
-- Tests are red on the target files' modules before you touch them. A red
-  baseline means you cannot tell whether your change broke anything.
-  Report the failure and stop.
 
 ## What you look for (in priority order)
 
@@ -256,11 +253,10 @@ Execute in this exact order. Do not interleave.
 
 1. Read STYLE_GUIDE.md, CLAUDE.md, CONTRIBUTING.md.
 2. Read every file in the named scope, in full.
-3. Run the three quality gates and record they are green:
-   - `poetry run ruff check src/sportstradamus/`
-   - `poetry run pytest tests/golden/`
-   - `poetry run pytest -m integration`
-4. If any gate is red, stop. Report and exit.
+3. Confirm the working tree has no changes you did not produce in this
+   invocation (the precondition above). You do NOT run pytest — the main agent
+   ran the gates green before dispatching you and owns the single authoritative
+   gate run after you return.
 
 ### Phase 2 — Survey
 
@@ -290,17 +286,18 @@ Per STYLE_GUIDE §15. For each item on the punch list:
 
 1. Make the change. One change. No drive-by tidying.
 2. Run `poetry run ruff check` on the affected file.
-3. Run the relevant test slice (`pytest tests/golden/` minimum;
-   integration suite if the change touched a CLI or pipeline seam).
-4. If anything regressed, revert that change and move on. Do not chain
-   uncertain edits.
-5. Update callers in the same step. No half-migrations.
+3. If ruff regresses, or the change could affect behavior (outputs, schema,
+   numeric results), revert it and move on. Do not chain uncertain edits.
+4. Update callers in the same step. No half-migrations.
 
-After every five items, run the full three-gate suite to catch drift.
+You run no pytest. Keep each seam strictly behavior-preserving; the main agent's
+single post-refactor gate run is the safety net.
 
 ### Phase 4 — Final validation
 
-1. Run all three quality gates clean.
+1. Run `poetry run ruff check --fix` and `poetry run ruff format` on your scope
+   once, and confirm `ruff check` is clean. Run NO pytest — the main agent runs
+   `tests/golden/` + `-m integration -n0` once after you return.
 2. `git diff --stat` the scope. Confirm: only the named files changed
    (plus their callers if the refactor required it). No `data/`, no
    `archive/`, no `creds/`.
@@ -314,7 +311,8 @@ commit body:
 
 ```
 Refactor scope: <files>
-Quality gates: ruff ✓ / golden ✓ / integration ✓
+Quality gates: ruff ✓ (golden + integration are the main agent's single
+post-refactor run, not yours)
 
 Changes by category:
 - Orchestrator flatness (§10): <count> — <one-line each>
@@ -340,4 +338,5 @@ the caller should validate before merging.
   references.
 - Cite §N for every justification. "Inlined because §12 dead-helper rule"
   beats "cleaner now".
-- Never claim success without showing the three green gates.
+- Never claim success without showing `ruff check` clean. Golden + integration
+  are the main agent's single authoritative run after you return; do not run them.

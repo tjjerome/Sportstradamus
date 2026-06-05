@@ -105,6 +105,35 @@ to redo the work.
 * Dashboard banner/caption timestamp lines show only the timestamp. Do not append
   feature descriptions, announcements, or other text to them.
 
+## Agentic workflow conventions
+
+These conventions pair with the hooks in `.claude/hooks/` (design:
+`docs/superpowers/specs/2026-06-05-agentic-workflow-enforcement-design.md`).
+
+* **The refactoring-specialist runs no pytest.** It refactors and runs `ruff`
+  on its scope only. The main agent owns the single authoritative gate run —
+  after the specialist returns, run `poetry run ruff check src/sportstradamus/`,
+  `poetry run pytest tests/golden/`, and the integration command below, exactly
+  once. If they fail, isolate cause via `git diff` of the specialist's changes.
+
+* **Integration gate before a push.** The push-gate hook reads
+  `.claude/.state/integration_green`. Run the authoritative integration suite as:
+  `poetry run pytest -m integration -n0 && touch "$CLAUDE_PROJECT_DIR/.claude/.state/integration_green"`
+  so a clean run clears the push prompt. Editing any `.py` afterward re-arms it.
+
+* **Research-first.** Before building any Operation Ship 75 §8-flagged lever, or
+  changing a distribution family / dispersion mechanism, dispatch the
+  `research-analyst` subagent first and cite its `/tmp/researcher_*.md` brief.
+  The research-gate hook enforces the discrete cases (a `shipped:` flip in
+  `stat_meta.json`, edits to a distribution-family file in
+  `.claude/research_gated.txt`); this convention covers the judgment calls a
+  path matcher cannot see. To proceed without a brief on a gated edit, write a
+  one-line justification to `.claude/.state/research_waiver`.
+
+* **Session memory capture.** When a unit of work completes — notably before or
+  at a push — offer to capture any durable, non-obvious, repeatable lesson to the
+  memory dir in the standard format. Do not force a memory from every session.
+
 ## Hard rules — these caused the last major refactor
 
 The codebase was refactored from several 1,000–7,000 line monoliths into packages.
