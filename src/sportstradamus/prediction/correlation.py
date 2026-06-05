@@ -66,6 +66,24 @@ _DISPLAY_BOOKS_EV_FLOOR: float = 0.9
 # (Family clustering itself lives in ``parlay.assign_parlay_families``.)
 _PARLAY_TOP_N_PER_SORT: int = 300
 
+# Per-league player-position resolution (consumed by _resolve_player_positions):
+# the usage-profile stat that ranks players within a (team, position) group, its
+# tiebreaker column, and the depth-chart position labels indexed by lineup slot.
+# MLB is absent — it ranks by batting order instead.
+_LEAGUE_USAGE_STAT = {"NBA": "MIN", "WNBA": "MIN", "NFL": "snap pct", "NHL": "TimeShare"}
+_LEAGUE_USAGE_TIEBREAKER = {
+    "NBA": "USG_PCT short",
+    "WNBA": "USG_PCT short",
+    "NFL": "route participation short",
+    "NHL": "Fenwick short",
+}
+_LEAGUE_POSITIONS = {
+    "NBA": ["P", "C", "F", "W", "B"],
+    "NFL": ["QB", "WR", "RB", "TE"],
+    "NHL": ["C", "W", "D", "G"],
+    "WNBA": ["G", "F", "C"],
+}
+
 
 def _legacy_underdog_overwrite_payouts() -> dict[int, float]:
     """Reproduce the audit §2.4 legacy line-498 overwrite table.
@@ -234,7 +252,7 @@ def _build_correlation_matrices(game_df, game_dict, c_map, team_mod_map, opp_mod
     )
 
 
-def _resolve_player_positions(league_df, league, stat_data, usage_str, tiebreaker_str, positions):
+def _resolve_player_positions(league_df, league, stat_data):
     """Map each leg's numeric depth-chart slot to a position+rank label.
 
     Non-MLB: drop combo / ``vs.`` legs, rank players within (team, position) by
@@ -245,18 +263,20 @@ def _resolve_player_positions(league_df, league, stat_data, usage_str, tiebreake
     if league != "MLB":
         league_df["Player position"] = league_df["Player position"].apply(
             lambda x: (
-                positions[league][x - 1]
+                _LEAGUE_POSITIONS[league][x - 1]
                 if isinstance(x, int)
-                else [positions[league][i - 1] for i in x]
+                else [_LEAGUE_POSITIONS[league][i - 1] for i in x]
             )
         )
         combo_df = league_df.loc[league_df.Player.str.contains(r"\+|vs.")]
         league_df = league_df.loc[~league_df.index.isin(combo_df.index)]
         player_df = league_df[["Player", "Team", "Player position"]]
         player_df.drop_duplicates(inplace=True)
-        stat_data.profile_market(usage_str[league])
+        stat_data.profile_market(_LEAGUE_USAGE_STAT[league])
         usage = pd.DataFrame(
-            stat_data.playerProfile[[usage_str[league] + " short", tiebreaker_str[league]]]
+            stat_data.playerProfile[
+                [_LEAGUE_USAGE_STAT[league] + " short", _LEAGUE_USAGE_TIEBREAKER[league]]
+            ]
         )
         usage.reset_index(inplace=True)
         usage.rename(
@@ -269,9 +289,9 @@ def _resolve_player_positions(league_df, league, stat_data, usage_str, tiebreake
         )
         player_df = player_df.merge(usage, how="left").fillna(0).infer_objects(copy=False)
         ranks = (
-            player_df.sort_values(tiebreaker_str[league], ascending=False)
+            player_df.sort_values(_LEAGUE_USAGE_TIEBREAKER[league], ascending=False)
             .groupby(["Team", "Player position"])
-            .rank(ascending=False, method="first")[usage_str[league] + " short"]
+            .rank(ascending=False, method="first")[_LEAGUE_USAGE_STAT[league] + " short"]
             .astype(int)
         )
         player_df["Player position"] = player_df["Player position"] + ranks.astype(str)
@@ -591,19 +611,6 @@ def find_correlation(
             "Bet Size",
         ]
     )
-    usage_str = {"NBA": "MIN", "WNBA": "MIN", "NFL": "snap pct", "NHL": "TimeShare"}
-    tiebreaker_str = {
-        "NBA": "USG_PCT short",
-        "WNBA": "USG_PCT short",
-        "NFL": "route participation short",
-        "NHL": "Fenwick short",
-    }
-    positions = {
-        "NBA": ["P", "C", "F", "W", "B"],
-        "NFL": ["QB", "WR", "RB", "TE"],
-        "NHL": ["C", "W", "D", "G"],
-        "WNBA": ["G", "F", "C"],
-    }
     # ``search_payouts`` is the single-multiplier-per-size list used inside the
     # beam-search ranking; ``full_payouts`` is the per-(size, miss-count) lookup
     # driving push-aware EV and the display Boost column.
@@ -626,9 +633,7 @@ def find_correlation(
         if platform == "Underdog":
             league_df["Boost"] = league_df["Boost"] / UNDERDOG_BOOST_BASELINE
 
-        league_df = _resolve_player_positions(
-            league_df, league, stat_data, usage_str, tiebreaker_str, positions
-        )
+        league_df = _resolve_player_positions(league_df, league, stat_data)
         league_df = _build_cmarket_desc(league_df, league, new_map)
         parlay_df = _process_league_games(
             df,
