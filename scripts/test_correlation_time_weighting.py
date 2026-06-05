@@ -120,9 +120,7 @@ def _build_team_game_records_beat_line(league: str, stats, earliest_date) -> lis
         cmod._residualize_gamelog = orig
 
 
-def _load_or_build_pivots(
-    league: str, use_cache: bool
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+def _load_or_build_pivots(league: str, use_cache: bool) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Return (residualized_matrix, beat_line_matrix), using parquet cache.
 
     The pivots only depend on the gamelog, so a fingerprint of (n_rows,
@@ -151,9 +149,7 @@ def _load_or_build_pivots(
         return res_matrix, beat_matrix
 
     click.echo("      cache miss — rebuilding pivots (this takes ~10 min on NBA)")
-    earliest = pd.to_datetime(
-        stats.gamelog[stats.log_strings["date"]]
-    ).min().to_pydatetime()
+    earliest = pd.to_datetime(stats.gamelog[stats.log_strings["date"]]).min().to_pydatetime()
     res_records = _correlate._build_team_game_records(league, stats, earliest)
     res_matrix = pd.DataFrame(pd.json_normalize(res_records))
     beat_records = _build_team_game_records_beat_line(league, stats, earliest)
@@ -381,10 +377,13 @@ def _score_arrays_vs_beat_line(
         return float(signed.mean()), int(mask.sum())
 
     bucket_specs = [
-        (f"bot25(<{q25:.3f})",      _lift(pa_ns, aa_ns, abs_ns < q25)),
+        (f"bot25(<{q25:.3f})", _lift(pa_ns, aa_ns, abs_ns < q25)),
         (f"mid({q25:.3f}-{q75:.3f})", _lift(pa_ns, aa_ns, (abs_ns >= q25) & (abs_ns < q75))),
-        (f"top25(>{q75:.3f})",      _lift(pa_ns, aa_ns, abs_ns >= q75)),
-        (f"extreme(>{extreme_cutoff:.3f},+self)", _lift(pa_full, aa_full, abs_full >= extreme_cutoff)),
+        (f"top25(>{q75:.3f})", _lift(pa_ns, aa_ns, abs_ns >= q75)),
+        (
+            f"extreme(>{extreme_cutoff:.3f},+self)",
+            _lift(pa_full, aa_full, abs_full >= extreme_cutoff),
+        ),
     ]
     bucket_labels = [s[0] for s in bucket_specs]
     bucket_means = [s[1][0] for s in bucket_specs]
@@ -447,8 +446,8 @@ def _print_grid(
     click.echo("")
     click.echo(f"      {title}")
     label = "horizon \\ half_life"
-    header = "      " + f"{label:>20}" + "  " + "  ".join(
-        f"{_format_param(h):>10}" for h in half_lives
+    header = (
+        "      " + f"{label:>20}" + "  " + "  ".join(f"{_format_param(h):>10}" for h in half_lives)
     )
     click.echo(header)
     click.echo("      " + "-" * 20 + "  " + "  ".join("-" * 10 for _ in half_lives))
@@ -476,10 +475,7 @@ def run_sweep(
     n = len(res_matrix)
     cutoff_date = res_matrix.loc[int(n * TRAIN_FRACTION), "DATE"]
     cutoff_ts = pd.Timestamp(cutoff_date)
-    click.echo(
-        f"      train/test cutoff = {cutoff_ts.date()} "
-        f"({int(n*TRAIN_FRACTION)}/{n} rows)"
-    )
+    click.echo(f"      train/test cutoff = {cutoff_ts.date()} ({int(n * TRAIN_FRACTION)}/{n} rows)")
 
     res_train_full = res_matrix.loc[res_matrix["DATE"] <= cutoff_ts]
     beat_test = beat_matrix.loc[beat_matrix["DATE"] > cutoff_ts]
@@ -510,15 +506,12 @@ def run_sweep(
         if not np.isfinite(horizon):
             mask_h = np.ones(len(res_train_full), dtype=bool)
         else:
-            mask_h = (
-                (cutoff_ts - train_dates_full).dt.days <= horizon
-            ).values
+            mask_h = ((cutoff_ts - train_dates_full).dt.days <= horizon).values
         train_h = res_train_full.loc[mask_h]
         train_dates_h = train_dates_full.loc[mask_h]
         if len(train_h) < 100:
             pbar.write(
-                f"      horizon={_format_param(horizon)} → only "
-                f"{len(train_h)} train rows; skipping"
+                f"      horizon={_format_param(horizon)} → only {len(train_h)} train rows; skipping"
             )
             pbar.update(len(half_lives))
             continue

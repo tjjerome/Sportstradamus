@@ -65,19 +65,29 @@ def _decoded() -> dict:
 
 def _splits() -> dict:
     return {
-        "B_test": pd.DataFrame({"EV": np.linspace(8.5, 14.5, _N), "Line": np.linspace(9.0, 14.0, _N)}),
+        "B_test": pd.DataFrame(
+            {"EV": np.linspace(8.5, 14.5, _N), "Line": np.linspace(9.0, 14.0, _N)}
+        ),
         "B_validation": pd.DataFrame({"EV": np.linspace(8.6, 14.6, _N)}),
         "y_validation": pd.DataFrame({"Result": np.linspace(7.0, 16.0, _N)}),
         "y_test": pd.DataFrame({"Result": np.linspace(7.5, 15.5, _N)}),
         "X_test": pd.DataFrame(
-            {"MeanYr": np.linspace(8.0, 13.0, _N), "STDYr": np.full(_N, 4.0), "denom": np.linspace(9.0, 12.0, _N)}
+            {
+                "MeanYr": np.linspace(8.0, 13.0, _N),
+                "STDYr": np.full(_N, 4.0),
+                "denom": np.linspace(9.0, 12.0, _N),
+            }
         ),
     }
 
 
 def _prob_params() -> pd.DataFrame:
     return pd.DataFrame(
-        {"scale": np.full(_N, 0.3), "concentration": np.full(_N, 2.0), "total_count": np.full(_N, 4.0)}
+        {
+            "scale": np.full(_N, 0.3),
+            "concentration": np.full(_N, 2.0),
+            "total_count": np.full(_N, 4.0),
+        }
     )
 
 
@@ -94,65 +104,110 @@ def test_fuse_skewnormal_no_gate(fit_calls):
     out = pipe._step_fuse_predictions(_decoded(), _splits(), "SkewNormal", 0.9, 0.0)
     assert fit_calls[0]["base_dist"] == "SkewNormal"
     assert fit_calls[0]["kwargs"] == {"cv": 0.9, "model_sigma": 3.1, "model_skew_alpha": 0.25}
-    _assert_fuse(out, {
-        "model_weight": 0.5, "weighted_mean": 11.40086223,
-        "sn_sigma_blend_test": 4.06124187, "sn_sigma_blend_val": 4.1882951,
-        "sn_alpha_blend_test": 0.1, "sn_alpha_blend_val": 0.125,
-    })
+    _assert_fuse(
+        out,
+        {
+            "model_weight": 0.5,
+            "weighted_mean": 11.40086223,
+            "sn_sigma_blend_test": 4.06124187,
+            "sn_sigma_blend_val": 4.1882951,
+            "sn_alpha_blend_test": 0.1,
+            "sn_alpha_blend_val": 0.125,
+        },
+    )
 
 
 def test_fuse_skewnormal_with_gate(fit_calls):
     out = pipe._step_fuse_predictions(_decoded(), _splits(), "SkewNormal", 0.9, 0.3)
     assert fit_calls[0]["kwargs"]["gate_book"] == 0.3
-    _assert_fuse(out, {
-        "model_weight": 0.5, "weighted_mean": 11.40086223,
-        "gate_blend_test": 0.3, "gate_blend_val": 0.3,
-        "sn_sigma_blend_test": 4.06124187, "sn_sigma_blend_val": 4.1882951,
-        "sn_alpha_blend_test": 0.1, "sn_alpha_blend_val": 0.125,
-    })
+    _assert_fuse(
+        out,
+        {
+            "model_weight": 0.5,
+            "weighted_mean": 11.40086223,
+            "gate_blend_test": 0.3,
+            "gate_blend_val": 0.3,
+            "sn_sigma_blend_test": 4.06124187,
+            "sn_sigma_blend_val": 4.1882951,
+            "sn_alpha_blend_test": 0.1,
+            "sn_alpha_blend_val": 0.125,
+        },
+    )
 
 
 def test_fuse_negbin(fit_calls):
     out = pipe._step_fuse_predictions(_decoded(), _splits(), "NegBin", 0.9, 0.0)
     assert fit_calls[0]["base_dist"] == "NegBin"
     assert fit_calls[0]["kwargs"] == {"model_alpha": 2.1, "model_r": 4.2, "cv": 0.9}
-    _assert_fuse(out, {
-        "model_weight": 0.5, "weighted_mean": 11.49875967,
-        "r_test": 2.10818511, "r_blend_val": 2.1602469, "p_test": 0.1588969, "p_val": 0.15851274,
-    })
+    _assert_fuse(
+        out,
+        {
+            "model_weight": 0.5,
+            "weighted_mean": 11.49875967,
+            "r_test": 2.10818511,
+            "r_blend_val": 2.1602469,
+            "p_test": 0.1588969,
+            "p_val": 0.15851274,
+        },
+    )
 
 
 def test_fuse_zinb(fit_calls):
     out = pipe._step_fuse_predictions(_decoded(), _splits(), "ZINB", 0.9, 0.3)
     assert fit_calls[0]["base_dist"] == "NegBin"
-    assert fit_calls[0]["kwargs"]["gate_model"] == 0.32 and fit_calls[0]["kwargs"]["gate_book"] == 0.3
-    _assert_fuse(out, {
-        "model_weight": 0.5, "weighted_mean": 11.49875967,
-        "gate_blend_test": 0.3, "gate_blend_val": 0.31,
-        "r_test": 2.10818511, "r_blend_val": 2.1602469, "p_test": 0.1588969, "p_val": 0.15851274,
-    })
+    assert (
+        fit_calls[0]["kwargs"]["gate_model"] == 0.32 and fit_calls[0]["kwargs"]["gate_book"] == 0.3
+    )
+    _assert_fuse(
+        out,
+        {
+            "model_weight": 0.5,
+            "weighted_mean": 11.49875967,
+            "gate_blend_test": 0.3,
+            "gate_blend_val": 0.31,
+            "r_test": 2.10818511,
+            "r_blend_val": 2.1602469,
+            "p_test": 0.1588969,
+            "p_val": 0.15851274,
+        },
+    )
 
 
 def test_fuse_gamma(fit_calls):
     out = pipe._step_fuse_predictions(_decoded(), _splits(), "Gamma", 0.9, 0.0)
     assert fit_calls[0]["base_dist"] == "Gamma"
-    _assert_fuse(out, {
-        "model_weight": 0.5, "weighted_mean": 11.49534129,
-        "alpha_blend": 1.61691423, "alpha_blend_val": 1.66672267,
-        "beta_blend": 0.14599945, "beta_blend_val": 0.14573308,
-    })
+    _assert_fuse(
+        out,
+        {
+            "model_weight": 0.5,
+            "weighted_mean": 11.49534129,
+            "alpha_blend": 1.61691423,
+            "alpha_blend_val": 1.66672267,
+            "beta_blend": 0.14599945,
+            "beta_blend_val": 0.14573308,
+        },
+    )
 
 
 def test_fuse_zagamma(fit_calls):
     out = pipe._step_fuse_predictions(_decoded(), _splits(), "ZAGamma", 0.9, 0.3)
     assert fit_calls[0]["base_dist"] == "Gamma"
-    assert fit_calls[0]["kwargs"]["gate_model"] == 0.32 and fit_calls[0]["kwargs"]["gate_book"] == 0.3
-    _assert_fuse(out, {
-        "model_weight": 0.5, "weighted_mean": 11.49534129,
-        "gate_blend_test": 0.3, "gate_blend_val": 0.31,
-        "alpha_blend": 1.61691423, "alpha_blend_val": 1.66672267,
-        "beta_blend": 0.14599945, "beta_blend_val": 0.14573308,
-    })
+    assert (
+        fit_calls[0]["kwargs"]["gate_model"] == 0.32 and fit_calls[0]["kwargs"]["gate_book"] == 0.3
+    )
+    _assert_fuse(
+        out,
+        {
+            "model_weight": 0.5,
+            "weighted_mean": 11.49534129,
+            "gate_blend_test": 0.3,
+            "gate_blend_val": 0.31,
+            "alpha_blend": 1.61691423,
+            "alpha_blend_val": 1.66672267,
+            "beta_blend": 0.14599945,
+            "beta_blend_val": 0.14573308,
+        },
+    )
 
 
 def _diag(dist, gate_blend_test):
@@ -161,8 +216,17 @@ def _diag(dist, gate_blend_test):
     y_class = np.array([0, 1, 0, 1, 1, 0, 1, 1])
     player_stats = pd.Series(np.linspace(5.0, 20.0, 20))
     return pipe._step_compute_diagnostics(
-        _splits(), _prob_params(), weighted_mean, y_proba, y_class, gate_blend_test,
-        dist, 0.9, "denom", player_stats, 1,
+        _splits(),
+        _prob_params(),
+        weighted_mean,
+        y_proba,
+        y_class,
+        gate_blend_test,
+        dist,
+        0.9,
+        "denom",
+        player_stats,
+        1,
     )
 
 
@@ -231,15 +295,33 @@ def test_diag_over_pct_and_cf_nonnan_branch():
     splits = {
         "B_test": pd.DataFrame({"EV": line, "Line": line}),
         "y_test": pd.DataFrame({"Result": np.linspace(10.0, 18.0, n)}),
-        "X_test": pd.DataFrame({"MeanYr": np.linspace(8.0, 13.0, n), "STDYr": np.full(n, 4.0), "denom": np.full(n, 10.0)}),
+        "X_test": pd.DataFrame(
+            {
+                "MeanYr": np.linspace(8.0, 13.0, n),
+                "STDYr": np.full(n, 4.0),
+                "denom": np.full(n, 10.0),
+            }
+        ),
     }
-    prob_params = pd.DataFrame({"scale": np.full(n, 0.3), "concentration": np.full(n, 2.0), "total_count": np.full(n, 4.0)})
+    prob_params = pd.DataFrame(
+        {"scale": np.full(n, 0.3), "concentration": np.full(n, 2.0), "total_count": np.full(n, 4.0)}
+    )
     y_proba = np.column_stack([np.full(n, 0.2), np.full(n, 0.8)])
     y_class = np.array([1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1])
     player_stats = pd.Series(np.linspace(5.0, 20.0, 20))
 
     out = pipe._step_compute_diagnostics(
-        splits, prob_params, weighted_mean, y_proba, y_class, None, "Gamma", 0.9, "denom", player_stats, 1
+        splits,
+        prob_params,
+        weighted_mean,
+        y_proba,
+        y_class,
+        None,
+        "Gamma",
+        0.9,
+        "denom",
+        player_stats,
+        1,
     )
     assert out["frac_ev_gt_line"] == pytest.approx(1.0)
     assert out["over_pct_ev_gt"] == pytest.approx(0.875)

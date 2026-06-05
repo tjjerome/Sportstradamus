@@ -293,12 +293,22 @@ class StatsNHL(Stats):
                 win = (game["homeTeam"]["score"] > game["awayTeam"]["score"]) == home
 
                 if player["position"] == "Team Level":
-                    teamlog.append(self._team_level_row(player, gameId, gameDate, team, opponent, home))
+                    teamlog.append(
+                        self._team_level_row(player, gameId, gameDate, team, opponent, home)
+                    )
                 else:
                     gamelog.append(
                         self._skater_row(
-                            player, gameId, gameDate, team, opponent, home, win,
-                            game_df, pp_df, team_map,
+                            player,
+                            gameId,
+                            gameDate,
+                            team,
+                            opponent,
+                            home,
+                            win,
+                            game_df,
+                            pp_df,
+                            team_map,
                         )
                     )
 
@@ -350,19 +360,13 @@ class StatsNHL(Stats):
                 if shotsAgainst
                 else 0,
                 "Freeze": (
-                    (
-                        float(player["OffIce_A_freeze"])
-                        - float(player["OffIce_A_xFreeze"])
-                    )
+                    (float(player["OffIce_A_freeze"]) - float(player["OffIce_A_xFreeze"]))
                     / shotsAgainst
                 )
                 if shotsAgainst
                 else 0,
                 "Rebound": (
-                    (
-                        float(player["OffIce_A_rebounds"])
-                        - float(player["OffIce_A_xRebounds"])
-                    )
+                    (float(player["OffIce_A_rebounds"]) - float(player["OffIce_A_xRebounds"]))
                     / shotsAgainst
                 )
                 if shotsAgainst
@@ -380,7 +384,9 @@ class StatsNHL(Stats):
         )
         return n | stats
 
-    def _skater_row(self, player, gameId, gameDate, team, opponent, home, win, game_df, pp_df, team_map):
+    def _skater_row(
+        self, player, gameId, gameDate, team, opponent, home, win, game_df, pp_df, team_map
+    ):
         """Build one skater/goalie gamelog row (box score + on-ice rates + fantasy points)."""
         n = {
             "gameId": gameId,
@@ -388,9 +394,7 @@ class StatsNHL(Stats):
             "team": team,
             "opponent": opponent,
             "opponent goalie": remove_accents(
-                game_df.loc[
-                    (game_df.position == "G") & (game_df.team != team), "playerName"
-                ].iat[0]
+                game_df.loc[(game_df.position == "G") & (game_df.team != team), "playerName"].iat[0]
             ),
             "home": home,
             "playerId": player["playerId"],
@@ -401,11 +405,9 @@ class StatsNHL(Stats):
             "points": float(player["I_F_points"]),
             "shots": float(player["I_F_shotsOnGoal"]),
             "blocked": float(player["I_A_blockedShotAttempts"]),
-            "sogBS": float(player["I_F_shotsOnGoal"])
-            + float(player["I_A_blockedShotAttempts"]),
+            "sogBS": float(player["I_F_shotsOnGoal"]) + float(player["I_A_blockedShotAttempts"]),
             "goals": float(player["I_F_goals"]),
-            "assists": float(player["I_F_primaryAssists"])
-            + float(player["I_F_secondaryAssists"]),
+            "assists": float(player["I_F_primaryAssists"]) + float(player["I_F_secondaryAssists"]),
             "hits": float(player["I_F_hits"]),
             "faceOffWins": float(player["I_F_faceOffsWon"]),
             "timeOnIce": float(player["I_F_iceTime"]) / 60,
@@ -415,9 +417,7 @@ class StatsNHL(Stats):
         }
         if player["playerName"] in pp_df["playerName"].to_list():
             stats["powerPlayPoints"] = float(
-                pp_df.loc[pp_df["playerName"] == player["playerName"]][
-                    "I_F_points"
-                ].iat[0]
+                pp_df.loc[pp_df["playerName"] == player["playerName"]]["I_F_points"].iat[0]
             )
         else:
             stats["powerPlayPoints"] = 0
@@ -449,30 +449,18 @@ class StatsNHL(Stats):
         stats.update(
             {
                 "GOE": (
-                    (
-                        stats["goals"]
-                        - float(player["I_F_flurryScoreVenueAdjustedxGoals"])
-                    )
-                    / shots
+                    (stats["goals"] - float(player["I_F_flurryScoreVenueAdjustedxGoals"])) / shots
                 )
                 if shots
                 else 0,
                 "Fenwick": float(player["OnIce_unblockedShotAttempts_For_Percentage"]),
                 "TimeShare": stats["timeOnIce"]
                 / (
-                    float(
-                        game_df.loc[
-                            game_df["playerName"] == team, "OffIce_F_iceTime"
-                        ].iat[0]
-                    )
+                    float(game_df.loc[game_df["playerName"] == team, "OffIce_F_iceTime"].iat[0])
                     / 60
                 ),
                 "ShotShare": stats["shots"]
-                / float(
-                    game_df.loc[
-                        game_df["playerName"] == team, "OffIce_F_shotsOnGoal"
-                    ].iat[0]
-                ),
+                / float(game_df.loc[game_df["playerName"] == team, "OffIce_F_shotsOnGoal"].iat[0]),
                 "Shot60": stats["shots"] * 60 / stats["timeOnIce"],
                 "Blk60": stats["blocked"] * 60 / stats["timeOnIce"],
                 "Hit60": stats["hits"] * 60 / stats["timeOnIce"],
@@ -496,19 +484,13 @@ class StatsNHL(Stats):
                 if shotsAgainst
                 else 0,
                 "Rebound": (
-                    (
-                        float(player["OnIce_A_rebounds"])
-                        - float(player["OnIce_A_xRebounds"])
-                    )
+                    (float(player["OnIce_A_rebounds"]) - float(player["OnIce_A_xRebounds"]))
                     / shotsAgainst
                 )
                 if shotsAgainst
                 else 0,
                 "RG": (
-                    (
-                        float(player["OnIce_A_reboundGoals"])
-                        - float(player["OnIce_A_reboundxGoals"])
-                    )
+                    (float(player["OnIce_A_reboundGoals"]) - float(player["OnIce_A_reboundxGoals"]))
                     / float(player["OnIce_A_rebounds"])
                 )
                 if float(player["OnIce_A_rebounds"])
@@ -546,7 +528,10 @@ class StatsNHL(Stats):
         ]
         self.teamlog.drop_duplicates(subset=["gameId", "team"], keep="last", inplace=True)
 
-        if self.season_start < datetime.today().date() - timedelta(days=_STALE_SEASON_DAYS) or clean_data:
+        if (
+            self.season_start < datetime.today().date() - timedelta(days=_STALE_SEASON_DAYS)
+            or clean_data
+        ):
             self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
             self._enrich_team_markets(self.gamelog, date_col="gameDate", team_col="team")
 
@@ -692,9 +677,7 @@ class StatsNHL(Stats):
             skater_df["I_F_oZoneShiftStarts"] + skater_df["I_F_dZoneShiftStarts"]
         )
         skater_df["flyStarts"] = skater_df["I_F_flyShiftStarts"] / skater_df["I_F_shifts"]
-        skater_df["shotAttempts"] = (
-            skater_df["I_F_shotAttempts"] / skater_df["icetime"] * 60 * 60
-        )
+        skater_df["shotAttempts"] = skater_df["I_F_shotAttempts"] / skater_df["icetime"] * 60 * 60
         skater_df["hits"] = skater_df["I_F_hits"] / skater_df["icetime"] * 60 * 60
         skater_df["takeaways"] = skater_df["I_F_takeaways"] / skater_df["icetime"] * 60 * 60
         skater_df["giveaways"] = skater_df["I_F_giveaways"] / skater_df["icetime"] * 60 * 60
@@ -704,9 +687,7 @@ class StatsNHL(Stats):
             * 60
             * 60
         )
-        skater_df["penaltyMinutes"] = (
-            skater_df["penalityMinutes"] / skater_df["icetime"] * 60 * 60
-        )
+        skater_df["penaltyMinutes"] = skater_df["penalityMinutes"] / skater_df["icetime"] * 60 * 60
         skater_df["penaltyMinutesDrawn"] = (
             skater_df["penalityMinutesDrawn"] / skater_df["icetime"] * 60 * 60
         )
@@ -758,9 +739,9 @@ class StatsNHL(Stats):
         goalie_df["freezeAgainst"] = (goalie_df["freeze"] - goalie_df["xFreeze"]) / goalie_df[
             "saves"
         ]
-        goalie_df["reboundsAgainst"] = (
-            goalie_df["rebounds"] - goalie_df["xRebounds"]
-        ) / goalie_df["saves"]
+        goalie_df["reboundsAgainst"] = (goalie_df["rebounds"] - goalie_df["xRebounds"]) / goalie_df[
+            "saves"
+        ]
         goalie_df["goalsAgainst"] = (
             goalie_df["goals"] - goalie_df["flurryAdjustedxGoals"]
         ) / goalie_df["ongoal"]
@@ -884,7 +865,9 @@ class StatsNHL(Stats):
         elif market == "goalsAgainst":
             ev = archive.get_total("NHL", date, opponent)
         elif "fantasy" in market:
-            ev = self._check_nhl_fantasy(market, date, player, team, opponent, dist, cv, player_games)
+            ev = self._check_nhl_fantasy(
+                market, date, player, team, opponent, dist, cv, player_games
+            )
         return 0 if np.isnan(ev) else ev
 
     def _check_nhl_fantasy(self, market, date, player, team, opponent, dist, cv, player_games):
@@ -892,8 +875,12 @@ class StatsNHL(Stats):
             fantasy_props = [("goals", 8), ("assists", 5), ("shots", 1.5), ("blocked", 1.5)]
         elif ("underdog" in market) and ("skater" in market):
             fantasy_props = [
-                ("goals", 6), ("assists", 4), ("shots", 1),
-                ("blocked", 1), ("hits", 0.5), ("powerPlayPoints", 0.5),
+                ("goals", 6),
+                ("assists", 4),
+                ("shots", 1),
+                ("blocked", 1),
+                ("hits", 0.5),
+                ("powerPlayPoints", 0.5),
             ]
         else:
             fantasy_props = [("saves", 0.6), ("goalsAgainst", -3), ("Moneyline", 6)]

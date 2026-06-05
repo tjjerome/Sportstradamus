@@ -20,10 +20,10 @@ def test_extract_platforms_from_offers():
             "Offers": [
                 [(18.5, 1.0, "Underdog"), (20.5, 2.0, "Sleeper")],
                 [(8.5, 1.0, "Underdog")],
-                np.nan,            # dropped by dropna
+                np.nan,  # dropped by dropna
                 [(1.5, 1.0, "")],  # falsy platform slot -> skipped
-                [(2.5, 1.0)],      # len < 3 -> skipped
-                "not-a-list",      # non-list entry -> skipped
+                [(2.5, 1.0)],  # len < 3 -> skipped
+                "not-a-list",  # non-list entry -> skipped
             ]
         }
     )

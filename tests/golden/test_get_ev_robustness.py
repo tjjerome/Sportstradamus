@@ -52,7 +52,9 @@ def test_skewnormal_asymptote_band_returns_line():
     # under just above the asymptote inverted to ~1.9e6 before the guard.
     for under in (asymptote - 1e-3, asymptote + 1e-4, asymptote + 5e-3):
         ev = get_ev(40.5, float(np.clip(under, 1e-6, 1 - 1e-6)), RY_CV, dist="SkewNormal")
-        assert ev == pytest.approx(40.5), f"under={under} near asymptote should return the line, got {ev}"
+        assert ev == pytest.approx(40.5), (
+            f"under={under} near asymptote should return the line, got {ev}"
+        )
 
 
 def test_skewnormal_no_crash_or_blowup_across_under_grid():

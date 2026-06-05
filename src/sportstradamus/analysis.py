@@ -78,9 +78,7 @@ def _leg_market_map(league, platform, stat_map):
 def _bet_gameday_rows(gamelog, ls, bet):
     game_dates = pd.to_datetime(gamelog[ls["date"]]).dt.date
     bet_date = pd.to_datetime(bet.Date).date()
-    return gamelog.loc[
-        (game_dates == bet_date) & (gamelog[ls["team"]].isin(bet.Game.split("/")))
-    ]
+    return gamelog.loc[(game_dates == bet_date) & (gamelog[ls["team"]].isin(bet.Game.split("/")))]
 
 
 def _leg_result_value(game, ls, player, market):
@@ -382,8 +380,7 @@ def _player_date_value(gamelog, ls, player, market, date):
     ``market`` column raises KeyError, which the caller turns into a skip.
     """
     g = gamelog.loc[
-        (gamelog[ls["player"]] == player)
-        & (pd.to_datetime(gamelog[ls["date"]]).dt.date == date)
+        (gamelog[ls["player"]] == player) & (pd.to_datetime(gamelog[ls["date"]]).dt.date == date)
     ]
     if g.empty or g[market].isna().any():
         return None

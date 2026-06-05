@@ -22,16 +22,40 @@ import pytest
 
 from sportstradamus.stats.nfl import StatsNFL
 
-_PBP_NUM = ["xpass", "down", "ydstogo", "epa", "yards_gained", "cpoe", "complete_pass",
-            "n_blitzers", "play_time", "home_score", "away_score", "air_yards",
-            "passing_yards", "rushing_yards", "receiving_yards"]
+_PBP_NUM = [
+    "xpass",
+    "down",
+    "ydstogo",
+    "epa",
+    "yards_gained",
+    "cpoe",
+    "complete_pass",
+    "n_blitzers",
+    "play_time",
+    "home_score",
+    "away_score",
+    "air_yards",
+    "passing_yards",
+    "rushing_yards",
+    "receiving_yards",
+]
 _PBP_BOOL = ["pass", "rush", "qb_dropback", "pass_attempt", "redzone", "sack"]
 
 
 def _play(**kw):
-    r = {"week": 1, "home_team": "KC", "away_team": "BUF", "posteam": "KC",
-         "home_score": 21, "away_score": 17, "read_thrown": "0", "pass_location": "",
-         "passer_player_id": None, "rusher_player_id": None, "receiver_player_id": None}
+    r = {
+        "week": 1,
+        "home_team": "KC",
+        "away_team": "BUF",
+        "posteam": "KC",
+        "home_score": 21,
+        "away_score": 17,
+        "read_thrown": "0",
+        "pass_location": "",
+        "passer_player_id": None,
+        "rusher_player_id": None,
+        "receiver_player_id": None,
+    }
     for c in _PBP_NUM:
         r.setdefault(c, 0.0)
     for c in _PBP_BOOL:
@@ -42,68 +66,230 @@ def _play(**kw):
 
 def _pbp():
     rows = [
-        _play(**{"pass": True, "qb_dropback": True, "pass_attempt": True, "complete_pass": 1,
-                 "pass_location": "middle", "read_thrown": "1", "receiver_player_id": "WR1",
-                 "passer_player_id": "QB1", "air_yards": 10.0, "yards_gained": 12.0,
-                 "receiving_yards": 12.0, "passing_yards": 12.0, "epa": 0.5, "xpass": 0.6,
-                 "cpoe": 5.0, "down": 1, "ydstogo": 10, "play_time": 30.0, "n_blitzers": 1}),
-        _play(**{"pass": True, "qb_dropback": True, "pass_attempt": True, "complete_pass": 0,
-                 "pass_location": "left", "receiver_player_id": "WR1", "passer_player_id": "QB1",
-                 "air_yards": 20.0, "yards_gained": 0.0, "epa": -0.3, "xpass": 0.7, "cpoe": -2.0,
-                 "down": 2, "ydstogo": 8, "play_time": 6.0}),
-        _play(**{"rush": True, "rusher_player_id": "RB1", "yards_gained": 5.0, "epa": 0.2,
-                 "down": 1, "ydstogo": 10, "play_time": 28.0}),
-        _play(**{"rush": True, "rusher_player_id": "WR1", "yards_gained": 3.0, "epa": 0.1,
-                 "redzone": True, "play_time": 25.0}),
-        _play(**{"pass": True, "qb_dropback": True, "pass_attempt": True, "complete_pass": 1,
-                 "pass_location": "middle", "redzone": True, "receiver_player_id": "WR1",
-                 "passer_player_id": "QB1", "air_yards": 5.0, "yards_gained": 6.0,
-                 "receiving_yards": 6.0, "passing_yards": 6.0, "epa": 0.8, "xpass": 0.5,
-                 "complete_pass": 1, "down": 1, "ydstogo": 6, "play_time": 20.0}),
-        _play(**{"posteam": "BUF", "pass": True, "qb_dropback": True, "pass_attempt": True,
-                 "complete_pass": 1, "pass_location": "middle", "read_thrown": "1", "epa": 0.4,
-                 "xpass": 0.55, "yards_gained": 9.0, "cpoe": 3.0, "down": 1, "ydstogo": 10,
-                 "play_time": 27.0, "n_blitzers": 1}),
-        _play(**{"posteam": "BUF", "rush": True, "yards_gained": 2.0, "epa": -0.1, "down": 2,
-                 "ydstogo": 5, "play_time": 26.0}),
-        _play(**{"posteam": "BUF", "pass": True, "qb_dropback": True, "pass_attempt": True,
-                 "complete_pass": 0, "pass_location": "right", "epa": -0.5, "xpass": 0.65,
-                 "yards_gained": 0.0, "sack": True, "down": 3, "ydstogo": 8, "play_time": 5.0}),
+        _play(
+            **{
+                "pass": True,
+                "qb_dropback": True,
+                "pass_attempt": True,
+                "complete_pass": 1,
+                "pass_location": "middle",
+                "read_thrown": "1",
+                "receiver_player_id": "WR1",
+                "passer_player_id": "QB1",
+                "air_yards": 10.0,
+                "yards_gained": 12.0,
+                "receiving_yards": 12.0,
+                "passing_yards": 12.0,
+                "epa": 0.5,
+                "xpass": 0.6,
+                "cpoe": 5.0,
+                "down": 1,
+                "ydstogo": 10,
+                "play_time": 30.0,
+                "n_blitzers": 1,
+            }
+        ),
+        _play(
+            **{
+                "pass": True,
+                "qb_dropback": True,
+                "pass_attempt": True,
+                "complete_pass": 0,
+                "pass_location": "left",
+                "receiver_player_id": "WR1",
+                "passer_player_id": "QB1",
+                "air_yards": 20.0,
+                "yards_gained": 0.0,
+                "epa": -0.3,
+                "xpass": 0.7,
+                "cpoe": -2.0,
+                "down": 2,
+                "ydstogo": 8,
+                "play_time": 6.0,
+            }
+        ),
+        _play(
+            **{
+                "rush": True,
+                "rusher_player_id": "RB1",
+                "yards_gained": 5.0,
+                "epa": 0.2,
+                "down": 1,
+                "ydstogo": 10,
+                "play_time": 28.0,
+            }
+        ),
+        _play(
+            **{
+                "rush": True,
+                "rusher_player_id": "WR1",
+                "yards_gained": 3.0,
+                "epa": 0.1,
+                "redzone": True,
+                "play_time": 25.0,
+            }
+        ),
+        _play(
+            **{
+                "pass": True,
+                "qb_dropback": True,
+                "pass_attempt": True,
+                "complete_pass": 1,
+                "pass_location": "middle",
+                "redzone": True,
+                "receiver_player_id": "WR1",
+                "passer_player_id": "QB1",
+                "air_yards": 5.0,
+                "yards_gained": 6.0,
+                "receiving_yards": 6.0,
+                "passing_yards": 6.0,
+                "epa": 0.8,
+                "xpass": 0.5,
+                "complete_pass": 1,
+                "down": 1,
+                "ydstogo": 6,
+                "play_time": 20.0,
+            }
+        ),
+        _play(
+            **{
+                "posteam": "BUF",
+                "pass": True,
+                "qb_dropback": True,
+                "pass_attempt": True,
+                "complete_pass": 1,
+                "pass_location": "middle",
+                "read_thrown": "1",
+                "epa": 0.4,
+                "xpass": 0.55,
+                "yards_gained": 9.0,
+                "cpoe": 3.0,
+                "down": 1,
+                "ydstogo": 10,
+                "play_time": 27.0,
+                "n_blitzers": 1,
+            }
+        ),
+        _play(
+            **{
+                "posteam": "BUF",
+                "rush": True,
+                "yards_gained": 2.0,
+                "epa": -0.1,
+                "down": 2,
+                "ydstogo": 5,
+                "play_time": 26.0,
+            }
+        ),
+        _play(
+            **{
+                "posteam": "BUF",
+                "pass": True,
+                "qb_dropback": True,
+                "pass_attempt": True,
+                "complete_pass": 0,
+                "pass_location": "right",
+                "epa": -0.5,
+                "xpass": 0.65,
+                "yards_gained": 0.0,
+                "sack": True,
+                "down": 3,
+                "ydstogo": 8,
+                "play_time": 5.0,
+            }
+        ),
     ]
     return pd.DataFrame(rows)
 
 
 def _ngs():
-    return pd.DataFrame([
-        {"player_display_name": "Test WR", "week": 1, "player_position": "WR", "team_abbr": "KC",
-         "expected_rush_yards": 0.0, "rush_attempts": 0.0,
-         "completion_percentage_above_expectation": 0.0, "completion_percentage": 0.0,
-         "passer_rating": 0.0, "avg_intended_air_yards": 0.0, "avg_air_yards_differential": 0.0,
-         "avg_time_to_throw": 0.0, "aggressiveness": 0.0, "rush_yards_over_expected": 0.0,
-         "rush_pct_over_expected": 0.0, "avg_yac_above_expectation": 2.5, "avg_separation": 3.0,
-         "avg_cushion": 5.0},
-        {"player_display_name": "Test RB", "week": 1, "player_position": "RB", "team_abbr": "KC",
-         "expected_rush_yards": 40.0, "rush_attempts": 10.0,
-         "completion_percentage_above_expectation": 0.0, "completion_percentage": 0.0,
-         "passer_rating": 0.0, "avg_intended_air_yards": 0.0, "avg_air_yards_differential": 0.0,
-         "avg_time_to_throw": 0.0, "aggressiveness": 0.0, "rush_yards_over_expected": 5.0,
-         "rush_pct_over_expected": 0.1, "avg_yac_above_expectation": 0.0, "avg_separation": 0.0,
-         "avg_cushion": 0.0},
-    ])
+    return pd.DataFrame(
+        [
+            {
+                "player_display_name": "Test WR",
+                "week": 1,
+                "player_position": "WR",
+                "team_abbr": "KC",
+                "expected_rush_yards": 0.0,
+                "rush_attempts": 0.0,
+                "completion_percentage_above_expectation": 0.0,
+                "completion_percentage": 0.0,
+                "passer_rating": 0.0,
+                "avg_intended_air_yards": 0.0,
+                "avg_air_yards_differential": 0.0,
+                "avg_time_to_throw": 0.0,
+                "aggressiveness": 0.0,
+                "rush_yards_over_expected": 0.0,
+                "rush_pct_over_expected": 0.0,
+                "avg_yac_above_expectation": 2.5,
+                "avg_separation": 3.0,
+                "avg_cushion": 5.0,
+            },
+            {
+                "player_display_name": "Test RB",
+                "week": 1,
+                "player_position": "RB",
+                "team_abbr": "KC",
+                "expected_rush_yards": 40.0,
+                "rush_attempts": 10.0,
+                "completion_percentage_above_expectation": 0.0,
+                "completion_percentage": 0.0,
+                "passer_rating": 0.0,
+                "avg_intended_air_yards": 0.0,
+                "avg_air_yards_differential": 0.0,
+                "avg_time_to_throw": 0.0,
+                "aggressiveness": 0.0,
+                "rush_yards_over_expected": 5.0,
+                "rush_pct_over_expected": 0.1,
+                "avg_yac_above_expectation": 0.0,
+                "avg_separation": 0.0,
+                "avg_cushion": 0.0,
+            },
+        ]
+    )
 
 
 def _pfr():
-    return pd.DataFrame([
-        {"pfr_player_name": "Test WR", "week": 1, "opponent": "BUF", "team": "KC",
-         "times_pressured": 0, "rushing_broken_tackles": 1, "receiving_broken_tackles": 2,
-         "rushing_yards_after_contact_avg": 3.5, "receiving_drop_pct": 5.0, "passing_drop_pct": 0.0},
-        {"pfr_player_name": "Opp QB", "week": 1, "opponent": "KC", "team": "BUF",
-         "times_pressured": 4, "rushing_broken_tackles": 0, "receiving_broken_tackles": 0,
-         "rushing_yards_after_contact_avg": 0.0, "receiving_drop_pct": 0.0, "passing_drop_pct": 0.0},
-        {"pfr_player_name": "Home QB", "week": 1, "opponent": "BUF", "team": "KC",
-         "times_pressured": 3, "rushing_broken_tackles": 0, "receiving_broken_tackles": 0,
-         "rushing_yards_after_contact_avg": 0.0, "receiving_drop_pct": 0.0, "passing_drop_pct": 0.0},
-    ])
+    return pd.DataFrame(
+        [
+            {
+                "pfr_player_name": "Test WR",
+                "week": 1,
+                "opponent": "BUF",
+                "team": "KC",
+                "times_pressured": 0,
+                "rushing_broken_tackles": 1,
+                "receiving_broken_tackles": 2,
+                "rushing_yards_after_contact_avg": 3.5,
+                "receiving_drop_pct": 5.0,
+                "passing_drop_pct": 0.0,
+            },
+            {
+                "pfr_player_name": "Opp QB",
+                "week": 1,
+                "opponent": "KC",
+                "team": "BUF",
+                "times_pressured": 4,
+                "rushing_broken_tackles": 0,
+                "receiving_broken_tackles": 0,
+                "rushing_yards_after_contact_avg": 0.0,
+                "receiving_drop_pct": 0.0,
+                "passing_drop_pct": 0.0,
+            },
+            {
+                "pfr_player_name": "Home QB",
+                "week": 1,
+                "opponent": "BUF",
+                "team": "KC",
+                "times_pressured": 3,
+                "rushing_broken_tackles": 0,
+                "receiving_broken_tackles": 0,
+                "rushing_yards_after_contact_avg": 0.0,
+                "receiving_drop_pct": 0.0,
+                "passing_drop_pct": 0.0,
+            },
+        ]
+    )
 
 
 def _seed():
@@ -113,8 +299,9 @@ def _seed():
     s.ngs = _ngs()
     s.pfr = _pfr()
     s.ids = {"Test QB": "QB1", "Test RB": "RB1", "Test WR": "WR1"}
-    s.gamelog = pd.DataFrame([{"season": 2024, "week": 1, "player display name": "Test WR",
-                               "snap pct": 0.8}])
+    s.gamelog = pd.DataFrame(
+        [{"season": 2024, "week": 1, "player display name": "Test WR", "snap pct": 0.8}]
+    )
     return s
 
 

@@ -42,17 +42,32 @@ _GAMES = [
         "home_team": "Los Angeles Lakers",
         "away_team": "Boston Celtics",
         "bookmakers": [
-            {"key": "draftkings", "markets": [
-                {"key": "h2h", "outcomes": [
-                    {"name": "Los Angeles Lakers", "price": -150},
-                    {"name": "Boston Celtics", "price": 130}]},
-                {"key": "totals", "outcomes": [
-                    {"name": "Over", "point": 220.5, "price": -110},
-                    {"name": "Under", "point": 220.5, "price": -110}]},
-                {"key": "spreads", "outcomes": [
-                    {"name": "Los Angeles Lakers", "point": -3.5, "price": -110},
-                    {"name": "Boston Celtics", "point": 3.5, "price": -110}]},
-            ]},
+            {
+                "key": "draftkings",
+                "markets": [
+                    {
+                        "key": "h2h",
+                        "outcomes": [
+                            {"name": "Los Angeles Lakers", "price": -150},
+                            {"name": "Boston Celtics", "price": 130},
+                        ],
+                    },
+                    {
+                        "key": "totals",
+                        "outcomes": [
+                            {"name": "Over", "point": 220.5, "price": -110},
+                            {"name": "Under", "point": 220.5, "price": -110},
+                        ],
+                    },
+                    {
+                        "key": "spreads",
+                        "outcomes": [
+                            {"name": "Los Angeles Lakers", "point": -3.5, "price": -110},
+                            {"name": "Boston Celtics", "point": 3.5, "price": -110},
+                        ],
+                    },
+                ],
+            },
         ],
     },
 ]

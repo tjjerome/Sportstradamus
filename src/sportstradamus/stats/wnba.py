@@ -36,6 +36,7 @@ _WNBA_TEAM_ABBR_MAP = {
     "WSH": "WAS",
 }
 
+
 def _remap_abbr(series: pd.Series) -> pd.Series:
     return series.map(lambda x: _WNBA_TEAM_ABBR_MAP.get(x, x))
 
@@ -89,8 +90,9 @@ class StatsWNBA(StatsNBA):
 
         self.upcoming_games = fetch_upcoming_games("10", self.season_start.year, today)
 
-        (nba_gamelog, adv_gamelog, usg_gamelog, teamlog, sco_teamlog,
-         adv_teamlog) = self._fetch_wnba_logs(latest_date, today)
+        (nba_gamelog, adv_gamelog, usg_gamelog, teamlog, sco_teamlog, adv_teamlog) = (
+            self._fetch_wnba_logs(latest_date, today)
+        )
 
         stat_df = self._assemble_wnba_player_rows(nba_gamelog, adv_gamelog, usg_gamelog, player_df)
         if not stat_df.empty:
@@ -116,7 +118,10 @@ class StatsWNBA(StatsNBA):
         self.gamelog.drop_duplicates(subset=["PLAYER_ID", "GAME_ID"], keep="last", inplace=True)
         self.teamlog.drop_duplicates(subset=["TEAM_ID", "GAME_ID"], keep="last", inplace=True)
 
-        if self.season_start < datetime.today().date() - timedelta(days=_STALE_SEASON_DAYS) or clean_data:
+        if (
+            self.season_start < datetime.today().date() - timedelta(days=_STALE_SEASON_DAYS)
+            or clean_data
+        ):
             self._enrich_team_markets(
                 self.gamelog,
                 date_col=self.log_strings["date"],
@@ -303,12 +308,8 @@ class StatsWNBA(StatsNBA):
 
         stat_df = (
             pd.DataFrame(nba_gamelog)
-            .merge(
-                pd.DataFrame(adv_gamelog), on=["PLAYER_ID", "GAME_ID"], suffixes=[None, "_y"]
-            )
-            .merge(
-                pd.DataFrame(usg_gamelog), on=["PLAYER_ID", "GAME_ID"], suffixes=[None, "_y"]
-            )
+            .merge(pd.DataFrame(adv_gamelog), on=["PLAYER_ID", "GAME_ID"], suffixes=[None, "_y"])
+            .merge(pd.DataFrame(usg_gamelog), on=["PLAYER_ID", "GAME_ID"], suffixes=[None, "_y"])
         )
         stat_df = stat_df[[col for col in stat_df.columns if "_y" not in col]]
         stat_df.drop_duplicates(subset=["PLAYER_ID", "GAME_ID"], keep="last", inplace=True)
@@ -349,9 +350,7 @@ class StatsWNBA(StatsNBA):
         stat_df["fantasy points parlay"] = stat_df["PRA"] + stat_df["BLST"] * 2 - stat_df["TOV"]
         stat_df["FTR"] = stat_df["FTM"] / stat_df["FGA"]
         stat_df["FG3_RATIO"] = stat_df["FG3A"] / stat_df["FGA"]
-        stat_df["BLK_PCT"] = (
-            (stat_df["BLK"] / stat_df["BLKA"]).fillna(0).infer_objects(copy=False)
-        )
+        stat_df["BLK_PCT"] = (stat_df["BLK"] / stat_df["BLKA"]).fillna(0).infer_objects(copy=False)
         stat_df["FGA_40"] = stat_df["FGA"] / stat_df["MIN"] * 40
         stat_df["FG3A_40"] = stat_df["FG3A"] / stat_df["MIN"] * 40
         stat_df["REB_40"] = stat_df["REB"] / stat_df["MIN"] * 40

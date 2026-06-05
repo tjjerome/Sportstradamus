@@ -261,7 +261,14 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
     # ``Blended_EV`` while reporting the raw-``EV`` compression view, and the Gamma PIT
     # reads ``EV`` as a distribution parameter.
     optional = {
-        "P", "P_standalone", "Odds", "Line", "Player", "Date", "EV", "Blended_EV",
+        "P",
+        "P_standalone",
+        "Odds",
+        "Line",
+        "Player",
+        "Date",
+        "EV",
+        "Blended_EV",
     } & set(df.columns)
     # Per-row distribution params (Operation Ship 75 Step 0.2 G4 audit).
     # ``training/pipeline.py::_step_persist_artifacts`` dumps these at lines
@@ -808,7 +815,6 @@ def _randomized_pit_draws(
     return [cdf - (1.0 - rng.random(n)) * pmf for _ in range(_RANDOMIZED_PIT_DRAWS)]
 
 
-
 def _randomized_pit_ks(df: pd.DataFrame, dist: str, y: np.ndarray, *, strategy: str) -> float:
     """Whole-CDF KS distance from Uniform of the randomized PIT — the Gate-4 statistic.
 
@@ -1177,7 +1183,9 @@ def gate_row(
         g1_clustered_hi = None
         if "Player" in df.columns:
             g1_clustered_hi = _gate1_brier_ci_clustered(
-                p_model_b, p_book, y_b,
+                p_model_b,
+                p_book,
+                y_b,
                 df.loc[priced_index, "Player"].to_numpy(),
                 np.random.default_rng(_GATE1_SEED),
             )[2]

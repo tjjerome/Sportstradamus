@@ -30,27 +30,74 @@ _GAME = {
     "home_team": "Los Angeles Lakers",
     "away_team": "Boston Celtics",
     "bookmakers": [
-        {"key": "draftkings", "markets": [
-            {"key": "player_points", "outcomes": [
-                {"description": "LeBron James", "name": "Over", "point": 25.5, "price": 1.9},
-                {"description": "LeBron James", "name": "Under", "point": 25.5, "price": 1.9},
-                {"description": "Anthony Davis", "name": "Over", "point": 20.5, "price": 1.5},
-                {"description": "Anthony Davis", "name": "Under", "point": 20.5, "price": 2.5},
-                {"description": "Anthony Davis", "name": "Over", "point": 22.5, "price": 2.0},
-                {"description": "Anthony Davis", "name": "Under", "point": 22.5, "price": 2.0},
-                {"description": "Stephen Curry", "name": "Yes", "price": 1.8},
-                {"description": "Stephen Curry", "name": "No", "price": 2.0},
-                {"description": "Russell Westbrook", "name": "Under", "point": 5.5, "price": 2.5},
-            ]},
-            {"key": "totals", "outcomes": [
-                {"name": "Over", "point": 220.5, "price": 1.9},
-                {"name": "Under", "point": 220.5, "price": 1.9},
-            ]},
-            {"key": "spreads", "outcomes": [
-                {"name": "Los Angeles Lakers", "point": -3.5, "price": 1.9},
-                {"name": "Boston Celtics", "point": 3.5, "price": 1.9},
-            ]},
-        ]},
+        {
+            "key": "draftkings",
+            "markets": [
+                {
+                    "key": "player_points",
+                    "outcomes": [
+                        {
+                            "description": "LeBron James",
+                            "name": "Over",
+                            "point": 25.5,
+                            "price": 1.9,
+                        },
+                        {
+                            "description": "LeBron James",
+                            "name": "Under",
+                            "point": 25.5,
+                            "price": 1.9,
+                        },
+                        {
+                            "description": "Anthony Davis",
+                            "name": "Over",
+                            "point": 20.5,
+                            "price": 1.5,
+                        },
+                        {
+                            "description": "Anthony Davis",
+                            "name": "Under",
+                            "point": 20.5,
+                            "price": 2.5,
+                        },
+                        {
+                            "description": "Anthony Davis",
+                            "name": "Over",
+                            "point": 22.5,
+                            "price": 2.0,
+                        },
+                        {
+                            "description": "Anthony Davis",
+                            "name": "Under",
+                            "point": 22.5,
+                            "price": 2.0,
+                        },
+                        {"description": "Stephen Curry", "name": "Yes", "price": 1.8},
+                        {"description": "Stephen Curry", "name": "No", "price": 2.0},
+                        {
+                            "description": "Russell Westbrook",
+                            "name": "Under",
+                            "point": 5.5,
+                            "price": 2.5,
+                        },
+                    ],
+                },
+                {
+                    "key": "totals",
+                    "outcomes": [
+                        {"name": "Over", "point": 220.5, "price": 1.9},
+                        {"name": "Under", "point": 220.5, "price": 1.9},
+                    ],
+                },
+                {
+                    "key": "spreads",
+                    "outcomes": [
+                        {"name": "Los Angeles Lakers", "point": -3.5, "price": 1.9},
+                        {"name": "Boston Celtics", "point": 3.5, "price": 1.9},
+                    ],
+                },
+            ],
+        },
     ],
 }
 
@@ -70,8 +117,15 @@ class _FakeArchive:
 _EXPECTED_PLAYER = [
     ("NBA", "PTS", "2026-06-04", "Anthony Davis", {"draftkings": 22.50000000086482}, [22.5], None),
     ("NBA", "PTS", "2026-06-04", "Lebron James", {"draftkings": 25.50000000098013}, [25.5], None),
-    ("NBA", "PTS", "2026-06-04", "Russell Westbrook",
-     {"draftkings": 5.992252582383513}, [5.5], None),
+    (
+        "NBA",
+        "PTS",
+        "2026-06-04",
+        "Russell Westbrook",
+        {"draftkings": 5.992252582383513},
+        [5.5],
+        None,
+    ),
     ("NBA", "PTS", "2026-06-04", "Stephen Curry", {"draftkings": 0.5176230601457675}, [0.5], None),
 ]
 

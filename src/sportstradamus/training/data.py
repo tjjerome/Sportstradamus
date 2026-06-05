@@ -89,7 +89,9 @@ def count_training_rows(stat_data, market, start_date, archive) -> int:
     return total
 
 
-def _histogram_weights(values, reference_values, min_reference=_MIN_HISTOGRAM_REFERENCE) -> np.ndarray:
+def _histogram_weights(
+    values, reference_values, min_reference=_MIN_HISTOGRAM_REFERENCE
+) -> np.ndarray:
     """Compute removal probabilities via histogram matching.
 
     Returns probability array aligned to values. Rows whose bin density

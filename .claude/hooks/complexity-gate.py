@@ -86,8 +86,9 @@ def complexity(func):
 
     def rec(node):
         nonlocal score
-        if isinstance(node, (ast.If, ast.IfExp, ast.For, ast.AsyncFor,
-                             ast.While, ast.ExceptHandler)):
+        if isinstance(
+            node, (ast.If, ast.IfExp, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler)
+        ):
             score += 1
         elif isinstance(node, ast.BoolOp):
             score += len(node.values) - 1
@@ -170,7 +171,7 @@ def length(func, lines):
 def allowed(func, lines):
     start = func.lineno
     end = getattr(func, "end_lineno", func.lineno)
-    found = set(ALLOW_RE.findall("\n".join(lines[start - 1:end])))
+    found = set(ALLOW_RE.findall("\n".join(lines[start - 1 : end])))
     if "all" in found:
         return {"complexity", "length", "nesting", "wrapper"}
     return found
@@ -182,9 +183,12 @@ def is_dead_wrapper(func):
     to a bare-name callee. ``self``/``cls`` dispatch and any added argument,
     keyword, or literal disqualify it."""
     body = func.body
-    if (body and isinstance(body[0], ast.Expr)
-            and isinstance(body[0].value, ast.Constant)
-            and isinstance(body[0].value.value, str)):
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
         body = body[1:]
     if len(body) != 1:
         return False
@@ -227,8 +231,7 @@ def metrics_for(src):
 
 def git(args, cwd):
     try:
-        r = subprocess.run(["git", *args], cwd=cwd, capture_output=True,
-                           text=True, timeout=10)
+        r = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=10)
     except Exception:
         return None
     return r.stdout if r.returncode == 0 else None
@@ -255,14 +258,26 @@ def read_stdin_path():
 
 
 CHECKS = (
-    ("complexity", CC_MAX, "cyclomatic complexity",
-     "Extract helpers or replace branching with a lookup table / early "
-     "returns (STYLE_GUIDE §10)."),
-    ("length", LEN_MAX, "source lines",
-     "Extract named _step_* helpers; the orchestrator should read as a list "
-     "of steps (STYLE_GUIDE §2.8, §10)."),
-    ("nesting", NEST_MAX, "levels of nesting",
-     "Flatten with guard clauses and early returns (STYLE_GUIDE §10)."),
+    (
+        "complexity",
+        CC_MAX,
+        "cyclomatic complexity",
+        "Extract helpers or replace branching with a lookup table / early "
+        "returns (STYLE_GUIDE §10).",
+    ),
+    (
+        "length",
+        LEN_MAX,
+        "source lines",
+        "Extract named _step_* helpers; the orchestrator should read as a list "
+        "of steps (STYLE_GUIDE §2.8, §10).",
+    ),
+    (
+        "nesting",
+        NEST_MAX,
+        "levels of nesting",
+        "Flatten with guard clauses and early returns (STYLE_GUIDE §10).",
+    ),
 )
 
 
@@ -295,12 +310,13 @@ def main():
     except SyntaxError as e:
         sys.stderr.write(
             f"[style-gate] {rel} does not parse after the edit: {e.msg} "
-            f"(line {e.lineno}). Fix the syntax error before continuing.\n")
+            f"(line {e.lineno}). Fix the syntax error before continuing.\n"
+        )
         return 2
 
     head_src = git(["show", f"HEAD:{rel}"], repo)
     if head_src is None:
-        base = {}              # new file (untracked, or not yet in HEAD)
+        base = {}  # new file (untracked, or not yet in HEAD)
         touched = set(cur)
     else:
         try:
@@ -309,7 +325,7 @@ def main():
             base = {}
         ranges = changed_ranges(repo, rel) or []
         if not ranges:
-            return 0           # nothing changed vs HEAD
+            return 0  # nothing changed vs HEAD
         touched = set()
         for qn, m in cur.items():
             for lo, hi in ranges:
@@ -334,25 +350,27 @@ def main():
                     problems.append(
                         f"  {qn}()  cyclomatic complexity: {val}  (hard ceiling "
                         f"{CC_HARD_MAX} — no `# style: allow-complexity` tag waives "
-                        f"this; refactor)\n      → {fix}")
+                        f"this; refactor)\n      → {fix}"
+                    )
                 elif val > limit and not tagged:
                     origin = "new" if b is None else f"was {b[key]}"
                     problems.append(
                         f"  {qn}()  cyclomatic complexity: {val}  (limit {limit}, "
                         f"{origin} — refactor to ≤ {limit}, or add `# style: "
                         f"allow-complexity` + a one-line reason per §19)\n"
-                        f"      → {fix}")
+                        f"      → {fix}"
+                    )
                 continue
 
             if val <= limit or tagged:
                 continue
             prior = b[key] if b else None
             if prior is not None and val <= prior:
-                continue       # over the limit, but you didn't make it worse
+                continue  # over the limit, but you didn't make it worse
             origin = "new" if prior is None else f"was {prior}"
             problems.append(
-                f"  {qn}()  {label}: {val}  (limit {limit}, {origin})\n"
-                f"      \u2192 {fix}")
+                f"  {qn}()  {label}: {val}  (limit {limit}, {origin})\n      \u2192 {fix}"
+            )
 
         if m["wrapper"] and "wrapper" not in m["allow"]:
             problems.append(
@@ -360,7 +378,8 @@ def main():
                 f"and-invoke thunk (STYLE_GUIDE \u00a718.7). Inline it; for a CLI entry "
                 f"point name the command at module level (`module:command`). Add "
                 f"`# style: allow-wrapper` + a one-line reason if genuinely "
-                f"irreducible.")
+                f"irreducible."
+            )
 
     if not problems:
         return 0
@@ -373,7 +392,8 @@ def main():
         f"({CC_HARD_MAX}) must be refactored; complexity over {CC_MAX} that is "
         "genuinely a high-level orchestrator may carry `# style: allow-complexity` "
         "+ a one-line reason (§19), kept minimal. Length/nesting: add "
-        "`# style: allow-<check>` if irreducible.\n")
+        "`# style: allow-<check>` if irreducible.\n"
+    )
     return 2
 
 

@@ -322,7 +322,7 @@ def test_parse_curl_invalid_json_body_yields_none():
 
 def test_parse_curl_defaults_to_post_when_body_present_without_method():
     spec = parse_curl_to_spec(
-        'curl \'https://example/api/x\' --data-raw \'{"k":1}\'',
+        "curl 'https://example/api/x' --data-raw '{\"k\":1}'",
         name="x",
         output_subdir="x",
     )

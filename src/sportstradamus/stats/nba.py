@@ -577,8 +577,12 @@ class StatsNBA(Stats):
         )
         player_df.Player = player_df.Player.apply(remove_accents)
         player_df.rename(
-            columns={"Player": "PLAYER_NAME", "Team": "TEAM_ABBREVIATION",
-                     "Age": "AGE", "Pos": "POS"},
+            columns={
+                "Player": "PLAYER_NAME",
+                "Team": "TEAM_ABBREVIATION",
+                "Age": "AGE",
+                "Pos": "POS",
+            },
             inplace=True,
         )
 
@@ -605,7 +609,9 @@ class StatsNBA(Stats):
             "date_to_nullable": today.strftime("%m/%d/%Y"),
         }
         include_playin = (today.month == 4) or (today - latest_date).days > _CATCHUP_THRESHOLD_DAYS
-        include_playoffs = (4 <= today.month <= 6) or (today - latest_date).days > _CATCHUP_THRESHOLD_DAYS
+        include_playoffs = (4 <= today.month <= 6) or (
+            today - latest_date
+        ).days > _CATCHUP_THRESHOLD_DAYS
         nba_gamelog, adv_gamelog, usg_gamelog, teamlog, sco_teamlog, adv_teamlog = (
             self._fetch_game_logs(params, include_playin, include_playoffs)
         )
@@ -720,6 +726,7 @@ class StatsNBA(Stats):
         Returns ``(playerBios, shotData, synergy)`` as DataFrames / a dict of
         play-type DataFrames; on an API error every result is its empty shape.
         """
+
         def _synergy(play_type):
             return nba_client.fetch(
                 nba.synergyplaytypes.SynergyPlayTypes,
@@ -733,8 +740,12 @@ class StatsNBA(Stats):
             ).get_dict()["resultSets"][0]
 
         synergy_types = [
-            ("POST", "Postup"), ("HANDOFF", "Handoff"), ("ISO", "Isolation"),
-            ("PR", "PRBallHandler"), ("SPOT", "Spotup"), ("PUTBACK", "OffRebound"),
+            ("POST", "Postup"),
+            ("HANDOFF", "Handoff"),
+            ("ISO", "Isolation"),
+            ("PR", "PRBallHandler"),
+            ("SPOT", "Spotup"),
+            ("PUTBACK", "OffRebound"),
         ]
         try:
             with tqdm(total=8, desc="NBA league endpoints", unit="endpoint", leave=False) as pbar:
@@ -839,18 +850,37 @@ class StatsNBA(Stats):
             / player_df["PLAYER_HEIGHT_INCHES"]
         )
         numeric_cols = [
-            "AGE", "PLAYER_HEIGHT_INCHES", "PLAYER_BMI", "USG_PCT", "TS_PCT",
-            "ITP_PCT", "ITP_PPP", "MR_PCT", "MR_PPP", "C3_PCT", "C3_PPP", "B3_PCT", "B3_PPP",
-            "POST_PCT", "POST_PPP", "HANDOFF_PCT", "HANDOFF_PPP", "ISO_PCT", "ISO_PPP",
-            "PR_PCT", "PR_PPP", "SPOT_PCT", "SPOT_PPP", "PUTBACK_PCT", "PUTBACK_PPP",
+            "AGE",
+            "PLAYER_HEIGHT_INCHES",
+            "PLAYER_BMI",
+            "USG_PCT",
+            "TS_PCT",
+            "ITP_PCT",
+            "ITP_PPP",
+            "MR_PCT",
+            "MR_PPP",
+            "C3_PCT",
+            "C3_PPP",
+            "B3_PCT",
+            "B3_PPP",
+            "POST_PCT",
+            "POST_PPP",
+            "HANDOFF_PCT",
+            "HANDOFF_PPP",
+            "ISO_PCT",
+            "ISO_PPP",
+            "PR_PCT",
+            "PR_PPP",
+            "SPOT_PCT",
+            "SPOT_PPP",
+            "PUTBACK_PCT",
+            "PUTBACK_PPP",
         ]
         player_df = player_df.groupby("TEAM_ABBREVIATION")[["POS", *numeric_cols]].apply(
             lambda x: x
         )
         player_df[numeric_cols] = player_df[numeric_cols].fillna(0)
-        player_df = {
-            level: player_df.xs(level).T.to_dict() for level in player_df.index.levels[0]
-        }
+        player_df = {level: player_df.xs(level).T.to_dict() for level in player_df.index.levels[0]}
         if self.season in self.players:
             self.players[self.season] = {
                 team: players | player_df.get(team, {})
@@ -866,6 +896,7 @@ class StatsNBA(Stats):
         adv_teamlog)``; all empty on API error (a partial pull would mix
         populated and empty logs).
         """
+
         def _player_logs(measure=None):
             extra = {} if measure is None else {"measure_type_player_game_logs_nullable": measure}
             return nba_client.fetch(
@@ -895,8 +926,12 @@ class StatsNBA(Stats):
         if include_playoffs:
             season_types.append("Playoffs")
         try:
-            with tqdm(total=len(season_types) * len(base_calls),
-                      desc="NBA player/team gamelogs", unit="endpoint", leave=False) as pbar:
+            with tqdm(
+                total=len(season_types) * len(base_calls),
+                desc="NBA player/team gamelogs",
+                unit="endpoint",
+                leave=False,
+            ) as pbar:
                 for season_type in season_types:
                     if season_type is not None:
                         params.update({"season_type_nullable": season_type})
@@ -926,16 +961,20 @@ class StatsNBA(Stats):
         team_key = self.log_strings["team"]
         team_df = []
         for team1, team2 in zip(*[iter(teamlog)] * 2, strict=False):
-            team1.update({
-                "FTR": (team1["FTM"] / team1["FGA"]) if team1["FGA"] > 0 else 0,
-                "BLK_RATIO": (team1["BLK"] / team1["BLKA"]) if team1["BLKA"] > 0 else 0,
-                "OPP": team2[team_key],
-            })
-            team2.update({
-                "FTR": (team2["FTM"] / team2["FGA"]) if team2["FGA"] > 0 else 0,
-                "BLK_RATIO": (team2["BLK"] / team2["BLKA"]) if team2["BLKA"] > 0 else 0,
-                "OPP": team1[team_key],
-            })
+            team1.update(
+                {
+                    "FTR": (team1["FTM"] / team1["FGA"]) if team1["FGA"] > 0 else 0,
+                    "BLK_RATIO": (team1["BLK"] / team1["BLKA"]) if team1["BLKA"] > 0 else 0,
+                    "OPP": team2[team_key],
+                }
+            )
+            team2.update(
+                {
+                    "FTR": (team2["FTM"] / team2["FGA"]) if team2["FGA"] > 0 else 0,
+                    "BLK_RATIO": (team2["BLK"] / team2["BLKA"]) if team2["BLKA"] > 0 else 0,
+                    "OPP": team1[team_key],
+                }
+            )
             team1.update({"OPP_" + k: v for k, v in team2.items() if "OPP_" + k in team_cols})
             team2.update({"OPP_" + k: v for k, v in team1.items() if "OPP_" + k in team_cols})
             team_df.append(team1)
@@ -1027,11 +1066,13 @@ class StatsNBA(Stats):
             if game["PLAYER_NAME"] not in self.players[self.season][team_abbr] or not isinstance(
                 existing_pos, str
             ):
-                self.players[self.season][team_abbr].setdefault(game["PLAYER_NAME"], {})[
-                    "POS"
-                ] = self._resolve_player_position(game, position_map)
+                self.players[self.season][team_abbr].setdefault(game["PLAYER_NAME"], {})["POS"] = (
+                    self._resolve_player_position(game, position_map)
+                )
 
-            game["POS"] = self.players[self.season][team_abbr].get(game["PLAYER_NAME"], {}).get("POS")
+            game["POS"] = (
+                self.players[self.season][team_abbr].get(game["PLAYER_NAME"], {}).get("POS")
+            )
             game["HOME"] = "vs." in game["MATCHUP"]
             teams = game["MATCHUP"].replace("vs.", "@").split(" @ ")
             for team in teams:
@@ -1053,7 +1094,9 @@ class StatsNBA(Stats):
         df[team] = df[team].replace(fixups)
         df[opp] = df[opp].replace(fixups)
 
-    def get_volume_stats(self, offers, date=datetime.today().date()):  # style: allow-complexity — pre-existing CC 12; NBA/WNBA branch + model/missing guards are irreducible
+    def get_volume_stats(
+        self, offers, date=datetime.today().date()
+    ):  # style: allow-complexity — pre-existing CC 12; NBA/WNBA branch + model/missing guards are irreducible
         """Predict minutes and normalize projections against the team-game minute budget.
 
         Scores each player in ``offers`` with the trained MIN model, then rescales
@@ -1185,15 +1228,24 @@ class StatsNBA(Stats):
             ev = self._combo_market_ev(market, date, player, dist, cv)
         elif market in ["DREB", "OREB"]:
             ev = (
-                archive.get_ev(self.league, "REB", date, player)
-                * player_games[market].sum()
-                / player_games["REB"].sum()
-            ) if player_games["REB"].sum() else 0
+                (
+                    archive.get_ev(self.league, "REB", date, player)
+                    * player_games[market].sum()
+                    / player_games["REB"].sum()
+                )
+                if player_games["REB"].sum()
+                else 0
+            )
         elif "fantasy" in market:
             ev = 0
             book_odds = False
             fantasy_props = [
-                ("PTS", 1), ("REB", 1.2), ("AST", 1.5), ("BLK", 3), ("STL", 3), ("TOV", -1),
+                ("PTS", 1),
+                ("REB", 1.2),
+                ("AST", 1.5),
+                ("BLK", 3),
+                ("STL", 3),
+                ("TOV", -1),
             ]
             for submarket, weight in fantasy_props:
                 v, subline, sub_cv, sub_dist = self._submarket_ev(submarket, date, player, dist, cv)
