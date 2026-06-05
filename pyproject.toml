@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "Sportstradamus"
 version = "4.2.0"
-description = "Scrape Sportsbooks Odds and Player Stats and export to Google Sheets"
+description = "Scrape Sportsbooks Odds and Player Stats and surface +EV bets in a Streamlit dashboard"
 authors = ["Trevor Jerome <trevor81994@gmail.com>"]
 readme = "README.md"
 homepage = "https://github.com/tjjerome/sportstradamus"
@@ -9,8 +9,6 @@ repository = "https://github.com/tjjerome/sportstradamus"
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.12"
-google-auth-oauthlib = ">=1.0.0"
-gspread = ">=5.8.0"
 mlb-statsapi = ">=1.6.1"
 nba-api = ">=1.11.4"
 nfl-data-py = ">=0.3.2"

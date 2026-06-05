@@ -32,8 +32,9 @@
 
 **State:** ✅ done (PR #46).
 
-- [`scripts/compression_eval.py`](../src/sportstradamus/scripts/compression_eval.py)
-  + [`tests/golden/test_compression_eval.py`](../tests/golden/test_compression_eval.py).
+- [`training/scorecard.py`](../src/sportstradamus/training/scorecard.py)
+  + [`tests/golden/test_scorecard.py`](../tests/golden/test_scorecard.py)
+  (promoted from the original `scripts/compression_eval.py` harness in `98e1b45`).
 - Opt-in `meditate --deterministic`:
   - RNGs pinned (random / numpy / torch + `torch.use_deterministic_algorithms`)
   - Optuna swapped for `DETERMINISTIC_FIXED_PARAMS`
@@ -60,7 +61,7 @@ vs `ratio_meanyr`:
 | `centered_additive_mean10` (trailing-10) | every market KILLs | FGA +4.6% (under 5% bar), PA −6.6%, PR −6.7% |
 
 Count-family markets show exactly 0% delta under both (transform no-op
-for NegBin / ZINB). Confirms OVERCONFIDENCE_INVESTIGATION §3.2: the
+for NegBin / ZINB). Confirms the archived NBA-overconfidence investigation §3.2: the
 SkewNormal level bias is not the dominant compression cause path-wide
 regardless of baseline horizon. FGA is genuinely special (EB(MeanYr)
 captures structural shot-volume; Mean10 too noisy).
@@ -70,8 +71,8 @@ captures structural shot-volume; Mean10 too noisy).
 gate, live-path test) is **reusable** for future phases.
 
 Full prose:
-[`docs/CENTERED_TARGET_NEGATIVE_RESULT.md`](CENTERED_TARGET_NEGATIVE_RESULT.md)
-and archived context P1 row.
+[`docs/archive/nba_overconfidence_investigation.md`](archive/nba_overconfidence_investigation.md)
+(the centered-target negative result) and archived context P1 row.
 
 ## 3. Phase P2.A — `init_score` baseline DEAD
 
@@ -142,7 +143,7 @@ bit-identity. Determinism gate has parallel hurdle assertion.
 |---|---|---|
 | 0.1 | `compute_book_brier_skill_score` (book as reference, not chance) | [analysis.py](../src/sportstradamus/analysis.py) — 8 unit tests, hand-ref within 1e-6 |
 | 0.2 | `_compute_live_metrics` Step 6 in `nightly.py`; writes `data/live_metrics_per_market.parquet` (locked 10-col / 2-window schema) | [nightly.py](../src/sportstradamus/nightly.py) — 6 round-trip tests |
-| 0.3 | `compression_eval --live-window N` + `_history_to_eval_frame` + per-league `_load_league_stats_lookup` | [compression_eval.py](../src/sportstradamus/scripts/compression_eval.py) — 8 new tests |
+| 0.3 | `scorecard --live-window N` + `_history_to_eval_frame` + per-league `_load_league_stats_lookup` | [training/scorecard.py](../src/sportstradamus/training/scorecard.py) — 8 new tests |
 | 0.4 | `check_graduation` CLI: joins Gate 1 × Gate 2, `_classify_lifecycle` → {not-shipped, in-test, graduated, demoted} | [scripts/check_graduation.py](../src/sportstradamus/scripts/check_graduation.py) — 11 tests, 7 parametrized |
 | 0.5 | `backfill_live_metrics` — walks history backwards, day-precision dedup | [scripts/backfill_live_metrics.py](../src/sportstradamus/scripts/backfill_live_metrics.py) — 5 tests |
 
@@ -351,9 +352,9 @@ primary build (deferred behind 75% breadth).
   locked in `data/ship_config.json` (`b5d2609` / `c9fcf01` / `fbec3cc`).
   P2.B HurdleZINB (`cee5625`). P1 strategy infrastructure (`1d0e65e`).
 - **Note:** the locked-baseline numbers above used the *old* Tier-0
-  spec (absolute bias + BSS ≥ 0). Under the new
-  [`tier0_scorecard.csv`](../src/sportstradamus/data/tier0_scorecard.csv)
-  (adds G4 IQR ratio and G5 ECE), some of these no longer ship. See
+  spec (absolute bias + BSS ≥ 0). Under the new five-gate scorecard
+  ([`training/scorecard.py`](../src/sportstradamus/training/scorecard.py),
+  adds G4 IQR ratio and G5 ECE), some of these no longer ship. See
   Step 0 audit in
   [`operation_ship_75.md`](operation_ship_75.md).
 
@@ -365,13 +366,13 @@ last-verified against `fbec3cc` (HEAD before Ship 75 rework):
 | File | Role | Key lines |
 |---|---|---|
 | [`src/sportstradamus/training/pipeline.py`](../src/sportstradamus/training/pipeline.py) | target build, dist select, training, denorm, test_set dump | 245–324 (branch/target), 328 (`lgb.Dataset` init_score injection), 341 / 394–409 (`set_model_start_values`), 345–346 (MeanYr monotone), 348–368 (Optuna search space), 439–452 (SkewNormal denorm), ~960 / 981 (test_set dump) |
-| [`src/sportstradamus/training/report.py`](../src/sportstradamus/training/report.py) | diagnostics → `training_report.txt`, `model_stats.parquet` | `ev_meanyr_corr` / `result_meanyr_corr` (~850), `write_model_stats` |
+| [`src/sportstradamus/training/report.py`](../src/sportstradamus/training/report.py) | diagnostics → `model_stats.parquet` (+ `.csv` mirror) | `ev_meanyr_corr` / `result_meanyr_corr` (~850), `write_model_stats` |
 | [`src/sportstradamus/stats/base.py`](../src/sportstradamus/stats/base.py) | baseline features + target; inference-time mirror lives here | 597 (`get_stats`), 676–702 (`MeanYr`, `Mean10`, `*_Ratio`), 1005 / 1011 / 1082 (`Result`) |
 | [`src/sportstradamus/stats/nba.py`](../src/sportstradamus/stats/nba.py) | NBA `MIN`, `USG_PCT`, per-48 stats | 127–135, 359, 366 |
 | [`src/sportstradamus/helpers/distributions.py`](../src/sportstradamus/helpers/distributions.py) | `set_model_start_values`; `fused_loc` (book blend) | 425–504 |
 | [`src/sportstradamus/skew_normal.py`](../src/sportstradamus/skew_normal.py) | custom SkewNormal (location-scale, supports negatives) | 30–199 |
 | [`src/sportstradamus/hurdle.py`](../src/sportstradamus/hurdle.py) | HurdleZINB (Stage 2 ZTNB lives here, unwired) | ~201 (NegBin loss) |
-| [`src/sportstradamus/scripts/compression_eval.py`](../src/sportstradamus/scripts/compression_eval.py) | P0 harness — decile table, compression ratio, run log, diff verdict, gate scorecard, `supersede_verdict` | 100–104 (gate constants), 488–498 (`_gate4_iqr_spread`), 528 (`gate_row`), 623–654 (`apply_thresholds`), 657 (`write_gate_scorecard`), 851 (`supersede_verdict`), 1167 (`main`) |
+| [`src/sportstradamus/training/scorecard.py`](../src/sportstradamus/training/scorecard.py) | P0 harness (promoted from `scripts/compression_eval.py` in `98e1b45`) — decile table, compression ratio, run log, diff verdict, gate scorecard, `supersede_verdict` | 84–149 (gate constants), 927 (`_gate4_iqr_spread`), 1110 (`gate_row`), 1295 (`apply_thresholds`), 1389 (`write_gate_scorecard`), 1641 (`supersede_verdict`), 1989 (`main`) |
 | [`src/sportstradamus/prediction/model_prob.py`](../src/sportstradamus/prediction/model_prob.py) | Live-path confound — shipped strategies must survive end-to-end | SkewNormal decode ~276, NegBin/ZINB decode 259–272, hurdle dispatch 205, `fused_loc` w≈0.9 blend, `temperature` ≈ 1.37 |
 | [`src/sportstradamus/training/ship_config.py`](../src/sportstradamus/training/ship_config.py) | per-cell `ship_config.json` loader + `resolve_cell_strategy` + `resolve_cell_zinb_mode` + `WITHHELD` | 37 (`WITHHELD`), 90 (`load_ship_config`), 117 (`resolve_cell_strategy`), 145 (`resolve_cell_zinb_mode`) |
 | [`src/sportstradamus/training/baselines.py`](../src/sportstradamus/training/baselines.py) | strategy registry | 243–268 (`_STRATEGIES`), 272 (`STRATEGY_SLUGS`), 278 (`ZINB_MODES`) |
@@ -424,10 +425,11 @@ running any cross-league A/B:
 3. **WNBA shares NBA's structure but has half the games / season.**
    EB K=10 probably fine but verify. The per-100-poss factorization
    (T5-basketball) is KILLED so the transfer point is moot. WNBA has
-   no `FGM` or `FG3A` markets (confirmed against `stat_dist.json`);
+   no `FGM` or `FG3A` markets (confirmed against the `stat_dist`
+   config view of `stat_meta.json`);
    `FTM_per_FGA` + `FG3M_per_FGA` are the available efficiency
    factors for ICC diagnostics.
-4. **The compression_eval A/B harness is league-agnostic but file
+4. **The scorecard A/B harness is league-agnostic but file
    paths are league-specific.** Cached parquets at
    `data/training_data/{LEAGUE}_{market}.parquet`; deterministic test
    sets at `data/test_sets/deterministic/{strategy}/{LEAGUE}_{market}.csv`.
@@ -445,7 +447,7 @@ running any cross-league A/B:
 7. **Two-track parallelism holds across leagues.** Track A and B
    touch different distribution branches and markets; workable in
    parallel per league. Shared resource is the read-only
-   `compression_eval` harness.
+   `scorecard` harness.
 8. **Low-mean conditional-dispersion diagnostics need a non-Pearson
    estimator — trust the Dunn–Smyth RQR over Pearson at mean ≲ 0.11.**
    In B1.5 the df-corrected Pearson and RQR variance diverged at very

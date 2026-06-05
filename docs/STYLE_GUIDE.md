@@ -501,7 +501,7 @@ grepping the codebase for meaning.
   points wired in `pyproject.toml`:
   - `meditate` trains models — the `training/` package, entry `training/cli.py`,
     per-market work in `training/pipeline.py:train_market`.
-  - `prophecize` scores offers and exports to Google Sheets — the `prediction/`
+  - `prophecize` scores offers and writes dashboard snapshots — the `prediction/`
     package, entry `prediction/cli.py`, scoring in `prediction/model_prob.py`.
   - `confer` fetches current odds — `moneylines.py`.
   - `reflect` analyzes parlay performance — `nightly.py`.
