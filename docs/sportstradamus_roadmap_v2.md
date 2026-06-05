@@ -45,10 +45,11 @@ the live implementation (see [Active Track](#active-track--model-correctness--ma
 not optional polish. Shipped so far: P0 offline harness, P0.5 determinism gate, P1
 centered-target verdict (FGA ship / family kill), P2.B HurdleZINB (6/8 NBA ZINB ship), Stage 0
 live instrumentation, Stage B1/B1.5 routing diagnostics, A1/A1.5/A1.6 ICC diagnostics + NFL
-position-split cleanup. **Goal: ≥ 75% of markets per league carry a set baseline.** Current:
-NBA 13/21, WNBA 10/18, NFL 13/20 — **gap NBA −3, WNBA −4, NFL −2**. Immediate next: Tier-0
-audit code → Stage B1.6 feature/bias track → depth tracks A2/B2/B3; follow until diminishing
-returns.
+position-split cleanup. **Goal: ≥ 75% of markets per league carry a set baseline.** Current
+(2026-06-03, post Gate-4 PIT-KS reset): NBA 9/21, WNBA 5/18, NFL 5/20 — **gap NBA −7,
+WNBA −9, NFL −10** (19/59 = 32%); see [`operation_ship_75.md`](operation_ship_75.md) for the
+live count. Immediate next: L0 free promotes → L1 post-hoc dispersion calibration (the binding
+constraint after the reset), then features / depth.
 
 | Phase | State | Notes |
 |---|---|---|
@@ -66,10 +67,11 @@ returns.
   `meditate --rebuild-correlations` (`training/cli.py:50`).
 - **1.2 Parlay** ✅ audit / ⚠️ fixes partial — audit `docs/PARLAY_AUDIT.md`,
   `PARLAY_CALIBRATION_*.png/csv`, `scripts/audit_parlay_calibration.py`. `beam_search_parlays`
-  is Gaussian-copula-based (`correlation.py:603`), takes `contest_variant: Literal['power','flex','insurance','rivals']`,
-  reads `data/underdog_payouts.json`, push-aware EV via `_expected_payout_with_pushes`.
-  **`prediction/parlay.py` does not exist; both functions live in `prediction/correlation.py`.**
-  Open findings remain (PSD repair, magic numbers, `banned_combos` semantics, `Boost`-column).
+  is Gaussian-copula-based, takes `contest_variant: Literal['power','flex','insurance','rivals']`,
+  reads `data/underdog_payouts.json`, push-aware EV via `_expected_payout_with_pushes`, nearest-PSD
+  repair via `_nearest_psd`. **`beam_search_parlays` was since split into `prediction/parlay.py`**
+  (`find_correlation` stays in `prediction/correlation.py`).
+  Open findings remain (magic numbers, `banned_combos` semantics, `Boost`-column).
 - **1.3 Closing-line freeze** ❌ — not built as a discrete step. `clv.fill_from_archive` uses
   the last archived sample before kickoff as "close" (the Odds API stops surfacing prematch
   odds for in-progress games). Works for the CLV summary; no queryable `closing_lines/` snapshot.
@@ -132,7 +134,9 @@ status, not a duplicate of the stage detail.
   similar across passing/rushing markets).
 
 **Goal:** ≥ 75% of markets per league carry a *set baseline* (NBA ≥ 16/21, WNBA ≥ 14/18,
-NFL ≥ 15/20). **Current:** NBA 13/21, WNBA 10/18, NFL 13/20 — **gap NBA −3, WNBA −4, NFL −2**.
+NFL ≥ 15/20). **Current (2026-06-03, post Gate-4 PIT-KS reset):** NBA 9/21, WNBA 5/18,
+NFL 5/20 — **gap NBA −7, WNBA −9, NFL −10** (19/59 = 32%). See
+[`operation_ship_75.md`](operation_ship_75.md) for the live count.
 
 **Scope (pre-break, active):** reach 75% breadth (Tier-0 audit code → Stage B1.6 feature/bias
 track), then the core depth methods expected to pay off — A2 (T3 tail-head), A3 (calibration
@@ -140,8 +144,10 @@ polish), B2 (routing + feature engineering), B3 (MZINB / marginalized-hurdle fam
 post-break speculative tail (Stage A4 / B4 / long-shots) is **deferred into Phase 6**. Follow the
 track until diminishing returns, then stop it per-cell.
 
-**Immediate next steps:** Tier-0 audit code → Stage B1.6 feature/bias track → A2/B2/B3. See the
-gbdt plan's "Roadmap to 75%" and "Diminishing returns — stop-the-track principle" sections.
+**Immediate next steps:** L0 free promotes → L1 post-hoc dispersion calibration (the binding
+constraint after the Gate-4 reset), then features / depth. See
+[`operation_ship_75.md`](operation_ship_75.md) §5 (lever stack), §6 (per-league path), and §7
+(stop-the-track principle).
 
 ---
 
@@ -153,10 +159,11 @@ live-metrics + graduation tooling is production runtime.
 
 **Offline A/B + verdict**
 
-- `compression_eval` (`src/sportstradamus/scripts/compression_eval.py`) — offline A/B harness
+- `scorecard` (`src/sportstradamus/training/scorecard.py`) — offline A/B harness
   over cached `data/test_sets/`; `--baseline` / `--candidate` / `--live-window N`. `verdict()`
   encodes only the **Tier-1** relative gate today; the **Tier-0** absolute-only mode is the next
-  code step. *(dev-only)*
+  code step. *(module is production — `report()` inline-calls `compute_gates`; only the
+  standalone A/B CLI is a dev exercise)*
 
 **Live metrics + lifecycle (production runtime)**
 
@@ -191,9 +198,9 @@ live-metrics + graduation tooling is production runtime.
   single toggle a ship PR flips.
 - `devel-ship-curator` agent (`.claude/agents/devel-ship-curator.md`) — carves per-market
   production-delta ship PRs to `devel`, enforcing the research-scaffolding denylist
-  (`compression_eval`, `zinb_routing_diagnostics`, `icc_diagnostics`, `statsmodels`, `/tmp`
+  (`zinb_routing_diagnostics`, `icc_diagnostics`, `statsmodels`, `/tmp`
   harnesses). Never pushes; the human approves.
-- [`docs/ship_gate.md`](ship_gate.md) — human-readable mirror of the `compression_eval` threshold
+- [`docs/ship_gate.md`](ship_gate.md) — human-readable mirror of the `scorecard` threshold
   constants. Update it whenever a threshold changes.
 
 ---
@@ -264,8 +271,8 @@ golden, CLI snapshots; `poetry run meditate --rebuild-correlations --league NBA`
 ### 1.2 Audit `find_correlation` + `beam_search_parlays` — ✅ AUDIT / ⚠️ FIXES PARTIAL
 
 **Audit** at `docs/PARLAY_AUDIT.md`; calibration plot/CSV at `docs/PARLAY_CALIBRATION_*`.
-**Note:** `prediction/parlay.py` was never split out — `beam_search_parlays` lives in
-`prediction/correlation.py:504+`. **Shipped:** Gaussian copula, `contest_variant` parameter
+**Note:** `beam_search_parlays` was since split out into `prediction/parlay.py`
+(`find_correlation` stays in `prediction/correlation.py`). **Shipped:** Gaussian copula, `contest_variant` parameter
 (power/flex/insurance/rivals), `data/underdog_payouts.json`, push-aware EV via
 `_expected_payout_with_pushes`.
 
@@ -291,7 +298,7 @@ EV correctly. Existing callers unbroken.
 - `find_correlation`'s pairwise EV `exp(C * sqrt(V_i V_j)) * p_i p_j` is not a probability and is
   unbounded — wrap/replace with a bounded score.
 - The Σ matrix passed to `multivariate_normal.cdf` is built pair-by-pair; singular submatrices are
-  dropped rather than nearest-PSD-projected.
+  now nearest-PSD-projected via `parlay.py:_nearest_psd` (**resolved** by the GameArrays refactor).
 - Beam width 1000, EV cutoff 1.05, boost bands, final EV floors are inline magic numbers (STYLE_GUIDE.md §9).
 - `data/banned_combos.json` is a soft modifier; no pair is hard-banned. Decide whether a hard-ban
   path is desired.
@@ -598,8 +605,8 @@ active model track — the post-diminishing-returns stages from
 **Stage B4** (tuning/polish — optional), and any long-shot method; plus (2) the **original refinements**
 6.1–6.5 below. None of Phase 6 was ever the urgent work — the urgent work is fixing the discovered
 defects and reaching 75% breadth (see [Active Track](#active-track--model-correctness--market-breadth-in-progress)).
-Everything here is **deferred until breadth is met**; the gbdt plan stays the home of record for the
-A4/B4 stage detail.
+Everything here is **deferred until breadth is met**; the A4/B4 stage detail is preserved in the
+archived [`docs/archive/gbdt_mean_regression_plan.md`](archive/gbdt_mean_regression_plan.md).
 
 ### 6.1 Bayesian hierarchical for low-sample players — ❌ NOT STARTED
 
@@ -642,7 +649,7 @@ in [85%, 95%] at alpha=0.1; half-width monotonic in n_calibration.
 ### 6.5 Push-aware EV refinement — ❌ NOT STARTED
 
 Phase 1.2 added basic push handling; this models integer-valued markets (NFL TDs, NHL goals, NBA 3PM)
-with discrete distributions explicitly. Audit every `data/stat_dist.json` market's support
+with discrete distributions explicitly. Audit every `data/config/stat_meta.json` market's support
 (continuous/integer/hybrid) → `docs/MARKET_SUPPORT_AUDIT.md`. Refine `helpers/distributions.get_odds`:
 exact `P(stat == line)` from the discrete PMF for integer support (`nbinom.pmf` for NegBin);
 continuity correction `P(line-0.5 < stat < line+0.5)` for continuous distributions on integer-valued
@@ -660,9 +667,9 @@ since the 2026-05-08 audit. With placed-bet tracking out of scope, the remaining
 narrow. Recommended order:
 
 1. **Model Correctness & Market Breadth — ACTIVE (lead).** Reach ≥ 75% baseline breadth per league
-   (gap NBA −3, WNBA −4, NFL −2): Tier-0 audit code → Stage B1.6 feature/bias track → core depth
-   A2/B2/B3. Follow until diminishing returns; the speculative tail (A4/B4) is deferred to Phase 6.
-   Home of record: [`docs/operation_ship_75.md`](operation_ship_75.md).
+   (gap NBA −7, WNBA −9, NFL −10 as of 2026-06-03): L0 free promotes → L1 dispersion calibration →
+   features / depth. Follow until diminishing returns; the speculative tail (A4/B4) is deferred to
+   Phase 6. Home of record: [`docs/operation_ship_75.md`](operation_ship_75.md).
 2. **Phase 1.2 follow-up — open audit findings (1 weekend).** Fix the `find_correlation`
    pairwise-EV unbounded score, replace inline magic numbers with named constants, swap substring
    same-player guarding for `player_id` joins, reconcile the `Boost`-column overwrite at
@@ -714,8 +721,8 @@ Scope decisions consolidated from across the roadmap. Each links back to where t
 | **Phase 3.4 Pick'em Champions** | REMOVED | Pari-mutuel (peer-to-peer) is a different problem shape — percentile-rank, not static-line-vs-sharp arbitrage; revisit only after Phase 3 shows measurable CLV. See [§3.4](#34-pickem-champions--%E2%9D%8C-removed). |
 | **Streaks / Ladders** (Phase 3.5) | DEFERRED | Each warrants its own design pass (Streaks is a sequential decision problem). Rivals shipped folded into `pickem-build`. See [§3.5](#35-streaks--ladders--rivals--rivals--done-streaksladders--%E2%9D%8C-deferred). |
 | **Phase 4.1 alerts/push notifications** | DEFERRED to roadmap end | Line-update cadence (60s+ polls) makes push low-value vs the next dashboard refresh. Revisit if cadence <~10s, a websocket feed lands, or the user misses high-edge windows. See [§4.1](#41-alerts-package--%E2%9A%A0%EF%B8%8F-deferred-to-end-of-roadmap). |
-| **Model speculative tail — Stage A4 / B4 / long-shots** | DEFERRED into Phase 6 | Post-diminishing-returns model work; not urgent vs reaching 75% breadth. Home of record stays the gbdt plan. See [Phase 6](#phase-6--modeling-refinements-ongoing) + [Active Track](#active-track--model-correctness--market-breadth-in-progress). |
-| **`prediction/parlay.py`** | NEVER SPLIT OUT | `find_correlation` and `beam_search_parlays` both live in `prediction/correlation.py`; either split per the CONTRIBUTING.md contract or update the doc. See [§1.2 open findings](#12-audit-find_correlation--beam_search_parlays--%E2%9C%85-audit--%E2%9A%A0%EF%B8%8F-fixes-partial). |
+| **Model speculative tail — Stage A4 / B4 / long-shots** | DEFERRED into Phase 6 | Post-diminishing-returns model work; not urgent vs reaching 75% breadth. A4/B4 detail preserved in the archived `docs/archive/gbdt_mean_regression_plan.md`. See [Phase 6](#phase-6--modeling-refinements-ongoing) + [Active Track](#active-track--model-correctness--market-breadth-in-progress). |
+| **`prediction/parlay.py`** | SPLIT OUT (resolved) | `beam_search_parlays` now lives in `prediction/parlay.py`; `find_correlation` stays in `prediction/correlation.py` — matches the CONTRIBUTING.md package map. |
 | **Bankroll** | CLI flag, not state | With the bet logger dropped, bankroll is a parameter to `kelly`/`pickem-build` — no `data/bankroll.json`, no DB row. See [§3.3](#33-underdog-native-strategy-module--%E2%9C%85-done). |
 | **`clv.py` location** | Stays at package root | Would have moved into `tracking/`; without the bet logger, leaving it next to `nightly.py` is the right shape. |
 
@@ -730,7 +737,7 @@ Items the audit surfaced that aren't in any phase but matter for long-term healt
 - **Closing-line bias check** — once a freeze exists (1.3), compare open-at-scrape vs close. Open moving
   *toward* the model = you're sharper than the open; close moving *away* = a model bug hiding behind a
   momentary mis-price.
-- **Per-market shape-ratio dashboard** — `training_report.txt` exposes `shape_ratio` as a snapshot; a
+- **Per-market shape-ratio dashboard** — `model_stats.parquet` exposes `shape_ratio` as a snapshot; a
   per-retrain historical CSV surfaces drift (1.0→1.3 over six months = creeping dispersion). Cheap add to
   `training/report.py`.
 - **Parquet-everything migration** — confirm no production path still reads CSV/pickle; the archive is
@@ -743,8 +750,8 @@ Items the audit surfaced that aren't in any phase but matter for long-term healt
 
 - **Magic-number purge in `correlation.py`** — the audit's list (`K=1000`, EV cutoffs, boost bands, the
   `[0, 0, 3.5, 6.5, 6, 10, 25]` payout array) deserves its own commit (STYLE_GUIDE.md §9).
-- **`prediction/parlay.py` split** — CONTRIBUTING.md advertises it but both functions live in
-  `correlation.py`; split or update the doc — don't leave the inconsistency.
+- **`prediction/parlay.py` split** — ✅ done; `beam_search_parlays` now lives in
+  `prediction/parlay.py`, matching the CONTRIBUTING.md package map.
 - **`src/deprecated/` README cleanup** — the TODO list references replaced items (`correlation.py`,
   `opt_parlay.py`); Phase 1.6 fixes this, but until it lands the README misleads new agents.
 - **`clv.py` location is fine** — see [Decisions & Trade-offs](#decisions--trade-offs).

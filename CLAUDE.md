@@ -216,7 +216,7 @@ poetry install
 poetry run pre-commit install   # required once after clone
 
 # CLI entry points
-poetry run prophecize        # prediction pipeline → Google Sheets
+poetry run prophecize        # prediction pipeline → dashboard snapshots
 poetry run confer            # fetch current odds/props
 poetry run meditate          # train/retrain ML models
 poetry run reflect           # historical parlay performance
@@ -311,8 +311,9 @@ Full per-submodule breakdown is in CONTRIBUTING.md §Package Map.
    matrices per market, tunes LightGBMLSS with Optuna, calibrates against bookmaker
    lines, and writes model pickles.
 4. **Prediction** (`prediction/`): `model_prob` loads trained models, `process_offers`
-   scores each offer for EV, `find_correlation` scores parlay legs, `sheets.py` exports
-   to Google Sheets via gspread.
+   scores each offer for EV, `find_correlation` scores parlay legs, and `persist.py`
+   writes parquet snapshots (`current_offers`, `current_pickem`, `history`) the Streamlit
+   dashboard reads.
 
 ### Core Class Hierarchy
 
@@ -444,4 +445,4 @@ production data.
 - `data/training_data/` — Cached training matrices
 - `data/player_data/{LEAGUE}/{YEAR}/` — Historical game log CSVs
 - `data/test_sets/` — Holdout test data
-- `creds/` — API keys (`keys.json`), Google OAuth (`credentials.json`, `token.json`)
+- `creds/` — API keys (`keys.json`)

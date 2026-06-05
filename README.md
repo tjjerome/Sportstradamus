@@ -1,8 +1,8 @@
 # Sportstradamus
 
 A Python package that scrapes sportsbook odds and player stats, trains distributional ML models
-that predict player performance, and exports value recommendations to Google Sheets. Supports
-MLB, NBA, NFL, NHL, and WNBA.
+that predict player performance, and surfaces value recommendations through a Streamlit
+dashboard. Supports MLB, NBA, NFL, NHL, and WNBA.
 
 ---
 
@@ -35,7 +35,8 @@ The system runs a four-stage pipeline:
    (e.g. "NBA: points", "NFL: receiving yards"), tunes hyperparameters with Optuna, and
    calibrates the output distribution against bookmaker lines.
 4. **Predict** — `prophecize` loads trained models, scores every live offer against the model,
-   computes expected value, and exports picks to a Google Sheet.
+   computes expected value, and writes parquet snapshots (`current_offers.parquet`,
+   `current_pickem.parquet`, `history.parquet`) that the Streamlit dashboard reads.
 
 ---
 
@@ -63,18 +64,16 @@ The first install is slow (~1–2 GB download). Subsequent installs use the cach
 
 ## API Keys and Credentials
 
-Four external services need credentials. All secrets live in
+Three external services need API keys. All secrets live in
 `src/sportstradamus/creds/` — **this directory is git-ignored and must be
 created manually**.
 
 ```
 src/sportstradamus/creds/
-├── keys.json           # API keys for Odds API, ScrapeOps, ScrapingFish
-├── credentials.json    # Google OAuth client secret (downloaded from Cloud Console)
-└── token.json          # Auto-generated on first prophecize run — do not create manually
+└── keys.json           # API keys for Odds API, ScrapeOps, ScrapingFish
 ```
 
-### 1. `keys.json`
+### `keys.json`
 
 Create this file with the following structure:
 
@@ -92,23 +91,6 @@ Create this file with the following structure:
 | `scrapeops` | [ScrapeOps](https://scrapeops.io) | Rotates realistic browser headers on HTTP requests to avoid bot detection | Free tier: 1k req/month |
 | `scrapingfish` | [ScrapingFish](https://scrapingfish.com) | Proxy/rendering fallback for harder-to-scrape endpoints | Pay-as-you-go |
 
-### 2. Google Sheets credentials (`credentials.json`)
-
-`prophecize` writes picks to a Google Sheet. To enable this:
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com) and create a project.
-2. Enable the **Google Sheets API** and the **Google Drive API** for the project.
-3. Create an **OAuth 2.0 Client ID** (type: Desktop application).
-4. Download the client secret JSON and save it as
-   `src/sportstradamus/creds/credentials.json`.
-5. On the first `prophecize` run, a browser window will open asking you to authorize
-   the app. After you approve, a `token.json` is written automatically and subsequent
-   runs are silent.
-
-The app requests these scopes:
-- `https://www.googleapis.com/auth/spreadsheets`
-- `https://www.googleapis.com/auth/drive`
-
 ---
 
 ## First-Run Setup
@@ -122,7 +104,7 @@ poetry run confer
 # 2. Train models for one league to verify the pipeline (~10–30 minutes)
 poetry run meditate --league NBA
 
-# 3. Score current offers and export to Google Sheets
+# 3. Score current offers and write dashboard snapshots
 poetry run prophecize
 ```
 
@@ -158,22 +140,26 @@ calibrates against bookmaker lines, and writes model pickles to
 
 ```bash
 poetry run meditate                          # train only stale/missing models
-poetry run meditate --force                  # retrain every model
 poetry run meditate --league NBA             # one league only
-poetry run meditate --rebuild-filter         # full feature set → rerun SHAP → rewrite filter
-poetry run meditate --reset-markets NBA:points,NBA:assists
+poetry run meditate --market points,assists  # only the named market stem(s)
+poetry run meditate --force                  # don't skip markets with fresh data
+poetry run meditate --rebuild-correlations   # rebuild the {LEAGUE}_corr.csv matrices
+# --help lists the rest: --target-normalization, --zinb-mode, --branch, --deterministic, --bypass-withholding
 ```
 
-After training, a diagnostic report is written to
-`src/sportstradamus/data/training_report.txt`. See [CLAUDE.md](CLAUDE.md) for a
-full explanation of every metric in that report.
+After training, per-cell diagnostics are written to
+`src/sportstradamus/data/training/model_stats.parquet` (with a `model_stats.csv`
+mirror) and surfaced on the dashboard's Model Training page. See
+[CLAUDE.md](CLAUDE.md) §Training stats for a full explanation of every column.
 
 ---
 
 ### `poetry run prophecize`
 
 Scores all current offers against trained models, computes expected value,
-filters by confidence threshold, and exports picks to Google Sheets.
+filters by confidence threshold, and writes parquet snapshots
+(`current_offers.parquet`, `current_pickem.parquet`, `history.parquet`) that the
+Streamlit dashboard reads.
 
 ```bash
 poetry run prophecize
@@ -244,7 +230,7 @@ them at module top.
 ```
 morning:
   poetry run confer          # pull today's lines
-  poetry run prophecize      # score + export to Sheets
+  poetry run prophecize      # score + write dashboard snapshots
 
 weekly (or when model accuracy drops):
   poetry run meditate        # retrain stale models
@@ -258,18 +244,18 @@ has not been updated, `meditate` will skip the league. Update
 
 ## Configuration Files
 
-These files live in `src/sportstradamus/data/` and control model behavior.
-Most are updated automatically by `meditate`; a few need manual attention.
+These files live under `src/sportstradamus/data/` (the JSON configs in
+`data/config/`) and control model behavior. Most are updated automatically by
+`meditate`; a few need manual attention.
 
 | File | Updated by | Purpose |
 |---|---|---|
-| `stat_dist.json` | manual / `meditate` | Distribution type per stat (Gamma, NegBin, ZINB, ZAGamma, SkewNormal) |
-| `stat_cv.json` | manual | Coefficient of variation per stat — controls spread of Gamma/NegBin priors |
-| `stat_zi.json` | `meditate` | Zero-inflation gate parameters per stat |
+| `stat_meta.json` | manual + `meditate` | Per-cell `{dist, shipped, strategy}` — distribution family, release surface (`withheld`/`devel`/`main`), training-strategy slug |
+| `stat_calibration.json` | `meditate` (gitignored) | Per-cell `{cv, std, zi}` — coefficient of variation, spread, zero-inflation; recomputed each run |
 | `stat_map.json` | manual | Stat name mappings across APIs and sportsbooks |
-| `feature_filter.json` | `meditate --rebuild-filter` | SHAP-based feature importance thresholds |
+| `feature_filter.json` | manual | League-shared (`Common`) + per-market locked-in (`Always`) feature lists (the SHAP-ranked `Filtered` buckets were removed in the 2026-05-27 no-filter rewire) |
 | `playerCompStats.json` | `scripts/optimize_comp_weights.py` | Learned comp-weight vectors per league/position |
-| `book_weights.json` | `meditate` (`fit_book_weights`) | Per-sportsbook reliability weights for consensus lines |
+| `book_weights.json` | `meditate` (`fit_book_weights`, gitignored) | Per-sportsbook reliability weights for consensus lines |
 | `{LEAGUE}_corr.csv` | `meditate` (`correlate`) | Player stat correlation matrices for parlay EV |
 | `prop_books.json` | manual | Which sportsbooks to query per league |
 | `banned_combos.json` | manual | Player pairs excluded from parlay correlation |
@@ -280,17 +266,16 @@ Most are updated automatically by `meditate`; a few need manual attention.
 
 ```
 src/sportstradamus/data/
-├── models/                     # trained LightGBMLSS pickles ({LEAGUE}_{market}.pkl)
-├── training_data/              # cached feature matrices ({LEAGUE}_{market}.csv)
+├── models/                      # trained LightGBMLSS pickles ({LEAGUE}_{market}.pkl)
+├── training_data/               # cached feature matrices ({LEAGUE}_{market}.csv)
 ├── player_data/{LEAGUE}/{YEAR}/ # per-player game log CSVs
-├── test_sets/                  # holdout test data
-├── training_report.txt         # latest meditate diagnostic output
-└── *.json / *.csv              # config files (see table above)
+├── test_sets/                   # holdout test data
+├── training/model_stats.parquet # per-cell meditate diagnostics (+ .csv mirror)
+├── config/                      # JSON config (see table above)
+└── *.csv                        # correlation matrices, etc.
 
 src/sportstradamus/creds/
-├── keys.json                   # API keys (git-ignored, create manually)
-├── credentials.json            # Google OAuth client secret (git-ignored)
-└── token.json                  # auto-generated OAuth token (git-ignored)
+└── keys.json                    # API keys (git-ignored, create manually)
 ```
 
 ---
@@ -305,15 +290,15 @@ last live git SHA) and should be reintroduced if the corresponding feature
 returns. See [`src/deprecated/README.md`](src/deprecated/README.md) for the
 header protocol and reintroduction process.
 
-- [ ] **TODO: reimplement parlay search** (`unused_funcs.py::find_bets`,
-      `opt_parlay.py`) — combinatorial search over +EV legs. May have been
-      replaced by in-line parlay logic in `sportstradamus.py`; decide whether
-      to delete or rewire.
+- [x] **DONE: parlay search reimplemented** — superseded by
+      `prediction/parlay.py:beam_search_parlays` (Gaussian-copula beam search).
+      `unused_funcs.py::find_bets` / `opt_parlay.py` remain in `src/deprecated/`
+      pending a triage-delete.
 - [ ] **TODO: reimplement BettingPros NFL ingest** (`get_lines.py`) —
       redundant with `books.py` scrapers, but a useful fallback.
-- [ ] **TODO: reimplement team correlation generator** (`correlation.py`) —
-      produces `{LEAGUE}_corr.csv` consumed by `sportstradamus.py`'s parlay
-      logic. Those CSVs are currently stale; a script or CLI is needed.
+- [x] **DONE: team correlation generator reimplemented** — `training/correlate.py`
+      now builds the `{LEAGUE}_corr.csv` matrices (`meditate --rebuild-correlations`).
+      The old `correlation.py` remains in `src/deprecated/` pending a triage-delete.
 - [ ] **TODO: reimplement LightGBM feature-importance plot**
       (`see_features.py`).
 - [ ] **TODO: reimplement testing utilities** (`test.py`) — ad-hoc
