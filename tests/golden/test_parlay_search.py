@@ -20,6 +20,7 @@ import pytest
 
 from sportstradamus.prediction.parlay import (
     _PSD_EIG_TOLERANCE,
+    GameArrays,
     _expected_payout_with_pushes,
     _nearest_psd,
     _payout_curve_for,
@@ -300,9 +301,12 @@ def _beam_inputs() -> dict:
     idx = pd.DataFrame(
         [{"Player": f"P{i}", "Team": bet_df[i]["Team"]} for i in range(n)], index=range(n)
     )
+    g = GameArrays(
+        C=C, M=M, EV=EV, EVb=np.zeros((n, n)), V=V,  # EVb is annotation-only, unused here
+        p_model=p_model, p_books=p_books, p_push=np.zeros(n), boosts=boosts,
+    )
     return {
-        "idx": idx, "EV": EV, "C": C, "M": M, "p_model": p_model, "p_books": p_books,
-        "p_push": np.zeros(n), "boosts": boosts, "payouts": payouts,
+        "idx": idx, "g": g, "payouts": payouts,
         "full_payouts": {2: [3.0, 0.0], 3: [6.0, 0.0], 4: [10.0, 0.0]}, "max_boost": 10.0,
         "bet_df": bet_df, "info": {"Game": "A/B", "Date": "2026-01-01",
                                    "League": "NBA", "Platform": "Underdog"},
