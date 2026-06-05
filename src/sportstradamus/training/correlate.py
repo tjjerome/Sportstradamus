@@ -23,7 +23,6 @@ pipeline.
 import hashlib
 import importlib.resources as pkg_resources
 import json
-import subprocess
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
@@ -32,6 +31,7 @@ from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import get_logger
+from sportstradamus.helpers.provenance import git_sha
 
 logger = get_logger(__name__)
 
@@ -62,6 +62,12 @@ CORR_MAGNITUDE_FLOOR: float = 0.05
 _TEAMS_PER_GAME: int = 2
 _MIN_CORR_DIMENSIONS: int = 2
 
+# _TRACKED_STATS groups markets by correlation role (NBA/WNBA by position,
+# other leagues flat) for matrix stratification -- a different concept from
+# training.markets.ALL_MARKETS (the flat per-league model-training list). The
+# two deliberately share only incidental scoring-stat windows; DRY-merging them
+# would couple unrelated configs, so the duplicate-code check is silenced here.
+# pylint: disable=duplicate-code
 _TRACKED_STATS: dict[str, dict] = {
     "NFL": {
         "QB": [
@@ -398,16 +404,7 @@ _TRACKED_STATS: dict[str, dict] = {
         ],
     },
 }
-
-
-def _git_sha() -> str:
-    """Return the short git SHA of the current HEAD, or ``"unknown"`` if not in a repo."""
-    try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL, text=True
-        ).strip()
-    except (subprocess.SubprocessError, FileNotFoundError):
-        return "unknown"
+# pylint: enable=duplicate-code
 
 
 def _build_cache_key(league: str, stat_data) -> dict:
@@ -880,7 +877,7 @@ def _write_corr_metadata(league, matrix, per_team_obs, cache_key):
     metadata = {
         "league": league,
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        "git_sha": _git_sha(),
+        "git_sha": git_sha(),
         "lookback_days": LOOKBACK_DAYS,
         "rolling_window_games": ROLLING_WINDOW_GAMES,
         "min_overlap_for_full_weight": MIN_OVERLAP_FOR_FULL_WEIGHT,

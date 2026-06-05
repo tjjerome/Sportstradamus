@@ -49,14 +49,8 @@ pure noise once the segment crosses ~25 legs but should still be smoothed
 by training-time history; by ~100 legs the live signal dominates because
 current-season conditions have moved past training assumptions.
 
-## Optional dependencies
+## Dependencies
 
-`joint_kelly_portfolio` and the `kelly` CLI lazy-import `cvxpy`,
-`PyYAML`, and `tabulate`. Install via:
-
-```bash
-poetry install --with strategy
-```
-
-Importing `sportstradamus.strategies.kelly` itself does not require any
-of these.
+`joint_kelly_portfolio` uses `cvxpy` (SCS solver); the `kelly` CLI uses
+`PyYAML` + `tabulate` for recommendations-YAML I/O. All three are required
+base dependencies (installed by `poetry install`) and imported at module top.

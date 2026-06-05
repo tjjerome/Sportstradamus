@@ -16,6 +16,7 @@ import streamlit as st
 from sportstradamus import data
 from sportstradamus.analysis import (
     _migrate_flat_history,
+    backfill_crps,
     check_bet,
     explode_offers,
     resolve_history,
@@ -87,6 +88,16 @@ GAMELOG_SCHEMA = {
 # Banner accent colors used by the two visual sections.
 PRED_BANNER_COLOR = "#1f4e79"  # deep teal
 STATS_BANNER_COLOR = "#2d6a4f"  # forest green
+
+# Stats-page time-window menu: label -> lookback days (None = all time).
+TIMEFRAME_OPTIONS = {
+    "All time": None,
+    "Last 7 days": 7,
+    "Last 30 days": 30,
+    "Last 3 months": 91,
+    "Last 6 months": 183,
+    "Last year": 365,
+}
 
 # Cache TTL for parquet/JSON loaders. mtime is the primary invalidation signal;
 # this is a safety net so a cache entry can't outlive 10 min even if the host
@@ -313,16 +324,20 @@ def load_resolve_meta() -> dict:
 
 
 def resolve_and_save(history: pd.DataFrame, stats: dict) -> pd.DataFrame:
-    """Resolve pending predictions (fill Actual) and save back to parquet."""
+    """Resolve pending predictions (fill Actual + CRPS) and save back to parquet."""
     if "Actual" not in history.columns:
         history["Actual"] = np.nan
 
     pending_count = history["Actual"].isna().sum()
-    if pending_count == 0:
-        return history
+    if pending_count:
+        history = resolve_history(history, stats)
 
-    history = resolve_history(history, stats)
-    write_history(history)
+    # CRPS is precomputed here (not in the dashboard) so the diagnostics page only
+    # aggregates it; this also backfills history that predates the column.
+    crps_added = backfill_crps(history)
+
+    if pending_count or crps_added:
+        write_history(history)
     return history
 
 
@@ -477,3 +492,33 @@ def sidebar_filters(
         "leagues": selected_leagues,
         "platforms": selected_platforms,
     }
+
+
+def load_resolved_history_or_stop() -> pd.DataFrame:
+    """Load prediction history for a stats page, or ``st.stop()`` the page if absent.
+
+    Shared stats-page preamble: stops with a warning when no history exists,
+    otherwise captions the last-resolved timestamp and returns the frame.
+    """
+    history = load_history()
+    if history.empty:
+        st.warning("No prediction history found.")
+        st.stop()
+    meta = load_resolve_meta()
+    if meta.get("last_run"):
+        st.caption(f"Data last resolved: {format_ts(meta['last_run'])}")
+    return history
+
+
+def filtered_history_or_stop(history: pd.DataFrame, filters: dict) -> pd.DataFrame:
+    """Apply sidebar ``filters`` to ``history``, or ``st.stop()`` the page if nothing remains."""
+    df = get_filtered_history(
+        history,
+        leagues=filters["leagues"],
+        platforms=filters["platforms"],
+        date_range=filters["date_range"],
+    )
+    if df.empty:
+        st.info("No resolved predictions match the current filters.")
+        st.stop()
+    return df

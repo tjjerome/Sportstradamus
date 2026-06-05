@@ -813,11 +813,6 @@ class StatsNHL(Stats):
             offers,
             market,
             date,
-            {
-                "loc": f"proj {market} loc",
-                "scale": f"proj {market} scale",
-                "alpha": f"proj {market} alpha",
-            },
         ):
             return
 

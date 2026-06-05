@@ -20,40 +20,22 @@ from sklearn.metrics import brier_score_loss
 from sportstradamus.analysis import (
     compute_brier_skill_score,
     compute_coverage,
-    compute_crps_row,
     murphy_decomposition,
 )
 from sportstradamus.dashboard_data import (
-    format_ts,
-    get_filtered_history,
+    TIMEFRAME_OPTIONS,
+    filtered_history_or_stop,
     get_prediction_history,
-    load_history,
-    load_resolve_meta,
+    load_resolved_history_or_stop,
     render_banner,
     sidebar_filters,
 )
-
-TIMEFRAME_OPTIONS = {
-    "All time": None,
-    "Last 7 days": 7,
-    "Last 30 days": 30,
-    "Last 3 months": 91,
-    "Last 6 months": 183,
-    "Last year": 365,
-}
 
 st.title("Market Diagnostics & Forecast Quality")
 render_banner("stats", "per-market accuracy, calibration, CRPS")
 
 # --- Load data (pre-resolved by nightly script) ---
-history = load_history()
-if history.empty:
-    st.warning("No prediction history found.")
-    st.stop()
-
-meta = load_resolve_meta()
-if meta.get("last_run"):
-    st.caption(f"Data last resolved: {format_ts(meta['last_run'])}")
+history = load_resolved_history_or_stop()
 
 # --- Sidebar filters (time window first, then league/platform) ---
 st.sidebar.header("Filters")
@@ -66,15 +48,7 @@ if TIMEFRAME_OPTIONS[time_window] is not None:
 
 filters = sidebar_filters(history, key_prefix="mkt_")
 
-df = get_filtered_history(
-    history,
-    leagues=filters["leagues"],
-    platforms=filters["platforms"],
-    date_range=filters["date_range"],
-)
-if df.empty:
-    st.info("No resolved predictions match the current filters.")
-    st.stop()
+df = filtered_history_or_stop(history, filters)
 
 prob_col = "Model P" if "Model P" in df.columns and df["Model P"].notna().any() else "Model"
 df["Hit"] = (df["Bet"] == df["Result"]).astype(int)
@@ -87,6 +61,25 @@ if cutoff is not None:
 if df.empty:
     st.info("No data for selected time window.")
     st.stop()
+
+# CRPS is precomputed per prediction by the nightly resolve
+# (dashboard_data.resolve_and_save); here we only aggregate the stored column
+# instead of re-integrating per row on every rerun.
+pred_df = get_prediction_history(
+    history,
+    leagues=filters["leagues"],
+    date_range=filters["date_range"],
+)
+pred_df["_date"] = pd.to_datetime(pred_df["Date"], errors="coerce").dt.date
+if cutoff is not None:
+    pred_df = pred_df.loc[pred_df["_date"] >= cutoff]
+
+crps_by_market = pd.Series(dtype=float)
+crps_counts = pd.Series(dtype=int)
+if "CRPS" in pred_df.columns:
+    _crps_grp = pred_df.dropna(subset=["CRPS"]).groupby(["League", "Market"])["CRPS"]
+    crps_by_market = _crps_grp.mean()
+    crps_counts = _crps_grp.size()
 
 # =====================================================================
 # MARKET DIAGNOSTICS
@@ -117,12 +110,9 @@ for (league, market), grp in df.groupby(["League", "Market"]):
         "Samples": len(grp),
     }
 
-    # CRPS if distribution data available
-    if "Dist" in grp.columns:
-        dist_valid = grp.dropna(subset=["Dist", "Actual"])
-        if len(dist_valid) >= 5:
-            crps_vals = dist_valid.apply(compute_crps_row, axis=1)
-            row["CRPS"] = round(crps_vals.mean(), 4)
+    # CRPS precomputed per prediction in resolve; aggregate to a prediction-level mean.
+    if (league, market) in crps_by_market.index and crps_counts.get((league, market), 0) >= 5:
+        row["CRPS"] = round(float(crps_by_market.loc[(league, market)]), 4)
 
     market_rows.append(row)
 
@@ -362,23 +352,13 @@ if decomp_rows:
         "Good models have low reliability (well-calibrated) and high resolution (discriminative)."
     )
 
-# --- CRPS and Coverage use prediction-level data (no explosion needed) ---
-pred_df = get_prediction_history(
-    history,
-    leagues=filters["leagues"],
-    date_range=filters["date_range"],
-)
-pred_df["_date"] = pd.to_datetime(pred_df["Date"], errors="coerce").dt.date
-if cutoff is not None:
-    pred_df = pred_df.loc[pred_df["_date"] >= cutoff]
-
-# --- CRPS Over Time ---
-has_crps = "Dist" in pred_df.columns and "Actual" in pred_df.columns
+# CRPS precomputed in nightly resolve; aggregate the stored column here.
+has_crps = "CRPS" in pred_df.columns and pred_df["CRPS"].notna().any()
+has_dist = "Dist" in pred_df.columns and "Actual" in pred_df.columns
 if has_crps:
-    crps_df = pred_df.dropna(subset=["Dist", "Actual"]).copy()
+    crps_df = pred_df.dropna(subset=["CRPS"]).copy()
     if len(crps_df) >= 10:
         st.subheader("CRPS Over Time")
-        crps_df["CRPS"] = crps_df.apply(compute_crps_row, axis=1)
         crps_daily = (
             crps_df.groupby(["_date", "League"])
             .agg(
@@ -399,7 +379,7 @@ if has_crps:
         st.plotly_chart(fig_crps, use_container_width=True)
 
 # --- Prediction Interval Coverage ---
-if has_crps:
+if has_dist:
     cov_df = pred_df.dropna(subset=["Dist", "Actual"])
     if len(cov_df) >= 20:
         st.subheader("Prediction Interval Coverage")

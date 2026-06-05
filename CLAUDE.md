@@ -41,7 +41,9 @@ machine-written code and the fastest way to make a file tiring to read.
 beats six 7-line fragments you have to read together to follow one thought.
 
 * A function must earn its name with real logic. No wrappers that only rename and
-  forward a call. Keep a single logical operation within ~3 layers of our own calls.
+  forward a call, and no build-and-invoke thunks (`def main(): _build_cli()()`): name
+  the command at module level and point the entry point at it (`module:command`). Keep
+  a single logical operation within ~3 layers of our own calls.
 * No new class where a function does the job. No factory / strategy / config-object /
   dependency-injection scaffolding unless **three** real implementations already
   need it (rule of three). Build for today's task, not a hypothetical future one.
@@ -56,6 +58,15 @@ drift in AI-assisted codebases.
   `itertools`, `collections`, `pathlib`, and vectorized pandas/numpy/polars before
   hand-rolling a loop.
 * Find the same logic in two places? Consolidate it — don't copy it a third time.
+* **Any parallelism must be justified.** Per-league / per-grain blocks that look
+  alike are not automatically fine: if they encode the *same* knowledge,
+  consolidate (base-class method, shared helper, or a store parameterized by the
+  differing values). A block may stay parallel only when it is the *same shape
+  over genuinely different knowledge* — e.g. league-specific physical constants —
+  and consolidating would force a banned pure-forwarder; then it carries an
+  explicit `# pylint: disable=duplicate-code` pragma with a one-line rationale.
+  The blocking `tests/golden/test_no_duplicate_code.py` gate fails on any
+  unjustified clone (pylint R0801).
 
 **Type hints in moderation.** Annotate public signatures and module boundaries;
 skip the obvious locals. Avoid `Any` — model real structures with `dataclass`,

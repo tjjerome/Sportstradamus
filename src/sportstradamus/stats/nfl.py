@@ -1824,11 +1824,6 @@ class StatsNFL(Stats):
                 offers,
                 market,
                 date,
-                {
-                    "loc": f"proj {market} loc",
-                    "scale": f"proj {market} scale",
-                    "alpha": f"proj {market} alpha",
-                },
                 position_filter=_VOLUME_MARKET_POSITION_FILTER[market],
             ):
                 return
