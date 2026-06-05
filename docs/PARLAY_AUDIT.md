@@ -5,12 +5,11 @@ Audit of `sportstradamus.prediction.correlation.find_correlation` and
 analysis. No production code is changed in this pass; remediation is gated on
 the findings below and lands in the next session.
 
-> **Layout note.** `CONTRIBUTING.md` advertises a separate
-> `prediction/parlay.py` module. It does not exist on disk:
-> `beam_search_parlays` is defined in `prediction/correlation.py` (line 504)
-> alongside `find_correlation`. The audit therefore reads both functions out
-> of `correlation.py`. Splitting them is a refactor candidate but is out of
-> scope here.
+> **Layout note.** `beam_search_parlays` has since been split out into
+> `prediction/parlay.py` (matching the `CONTRIBUTING.md` package map);
+> `find_correlation` stays in `prediction/correlation.py`. This audit was
+> written when both lived in `correlation.py`, so its line citations point
+> there; the logic analyzed is unchanged.
 
 ---
 
@@ -309,9 +308,11 @@ df5 = (
   distance, but every member is kept; the consumer is expected to pick one
   per family.
 
-Dedup against the Sheets layer happens in `prediction/sheets.py:save_data`
-(`sheets.py:60-64`), which adds `(Platform, Game, Family) → Rank` columns
-but again does not drop overlaps.
+Dedup against the (since-deprecated) Sheets layer happened in
+`prediction/sheets.py:save_data` (`sheets.py:60-64`), which added
+`(Platform, Game, Family) → Rank` columns but again did not drop overlaps.
+The live path now persists via `prediction/persist.py` to parquet for the
+dashboard; the overlap behavior is unchanged.
 
 ---
 

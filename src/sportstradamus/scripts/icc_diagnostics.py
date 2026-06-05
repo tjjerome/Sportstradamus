@@ -133,8 +133,9 @@ class _ParticipatingGroups(NamedTuple):
 def skewnormal_cells() -> list[tuple[str, str]]:
     """Return every (league, market) whose stat_dist label is exactly ``SkewNormal``.
 
-    Derived dynamically from ``stat_dist.json`` and ``ALL_MARKETS`` so the set
-    tracks config drift. Asserts the plan's guard count of 36.
+    Derived dynamically from the ``stat_dist`` config view (``stat_meta.json``)
+    and ``ALL_MARKETS`` so the set tracks config drift. Asserts the plan's guard
+    count of 36.
 
     Returns:
         Sorted-by-config (league, market) pairs over NBA, WNBA, and NFL.

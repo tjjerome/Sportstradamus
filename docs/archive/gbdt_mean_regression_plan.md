@@ -173,17 +173,19 @@ family builds) is **secondary** to reaching 75% breadth.
 ## Market cell status — Gate 1 / `devel` / `main`
 
 Per-cell shipping status. Sourced from committed state only — locked baselines in
-[`data/ship_config.json`](../src/sportstradamus/data/ship_config.json), roster in
+[`data/config/stat_meta.json`](../src/sportstradamus/data/config/stat_meta.json)
+(per cell: `dist`, `shipped`, `strategy`), roster in
 [`training/markets.py`](../src/sportstradamus/training/markets.py) (`ALL_MARKETS`),
-families in [`data/stat_dist.json`](../src/sportstradamus/data/stat_dist.json), and
-the locked 2026-05-21 breadth audit. No verdict is recomputed here.
+and the locked 2026-05-21 breadth audit. No verdict is recomputed here.
 
 - **Gate 1** = passes the Tier-0 absolute gates. A locked baseline ⇒ Gate 1 passed.
-- **`devel`** = baseline shipped to live beta (the `ship_config.json` entry).
-- **`main`** = graduated on the 14-day Gate-2 live soak. **No cell has begun a soak**
+- **`devel`** = baseline shipped to live beta (`stat_meta.json` cell with
+  `shipped: "devel"`).
+- **`main`** = graduated on the 14-day Gate-2 live soak (`stat_meta.json` cell
+  with `shipped: "main"`). **No cell has begun a soak**
   (`data/live_metrics_per_market.parquet` not yet populated), so every `main` is ⏳.
-- Unbaselined cells (no `ship_config.json` entry) are the **Step-2 feature/bias-track
-  (B1.6)** work pool.
+- `shipped: "withheld"` cells are the **Step-2 feature/bias-track (B1.6)**
+  work pool.
 
 **Baselined (full-HP locked, Step 3): NBA 13/21, WNBA 10/18, NFL 13/20.** 75% target
 / gap: NBA 16 (**−3**), WNBA 14 (**−4**), NFL 15 (**−2**). The Step-1 screen reports
@@ -294,7 +296,7 @@ phase are in the context doc → **Status / progress log (detailed)**.
 ## Scope — leagues this plan covers
 
 The training pipeline ships models for three leagues. Every method below applies to
-all three unless flagged league-specific. Market counts (from `data/stat_dist.json`):
+all three unless flagged league-specific. Market counts (from `data/config/stat_meta.json`):
 
 | League | SkewNormal markets | ZINB markets | Games/season per player | EB K (current) |
 |---|---|---|---|---|
@@ -389,50 +391,42 @@ not-shipped  ─[Gate 1: offline]→  in-production-test  ─[Gate 2: live]→  
 
 ### Gate 1 — Offline ship gate
 
-Computed on the **held-out validation + test split** that `train_market`
-already produces (lines 547-553 in [pipeline.py](../src/sportstradamus/training/pipeline.py)
-and the deterministic test_set CSVs under `data/test_sets/`). Gate 1 has **two
-tiers** (see "Top priority — baseline breadth" above): **Tier 0** sets a cell's
-*first* baseline from the **absolute** rows only; **Tier 1** supersedes an
-*established* baseline and additionally requires the **relative** rows. The Tier
-column tags which rows apply when.
+Computed on the **held-out validation + test split** `train_market` already produces
+(lines 547-553 in [pipeline.py](../src/sportstradamus/training/pipeline.py) + the
+deterministic test_set CSVs). Two tiers: **Tier 0** sets a cell's *first* baseline from
+the **absolute** rows only; **Tier 1** supersedes an *established* baseline and adds the
+**relative** rows. **Quick-reference threshold values:
+[docs/ship_gate.md](ship_gate.md) is the authoritative mirror.**
 
 | Offline metric | Threshold | Tier | Where it lives |
 |---|---|---|---|
-| Top-mean-decile MAE on the test split | ≥ 5% better than the current baseline on the same cell | Tier 1 only | `compression_eval --baseline ... --candidate ...` output |
-| Global MAE on the test split | not worse by > 1% vs current baseline | Tier 1 only | `compression_eval` global summary |
-| `brier_skill_score` (book baseline) | **Tier 0:** ≥ 0 (beats book); **Tier 1:** not worse than the established baseline | both | `model_stats.parquet` for the candidate run |
-| Bottom-quartile bias — **absolute** | over-prediction ≤ +30% of quartile mean (floor 0.10); under-prediction tolerated | both | `bottom_quartile_bias` / `bottom_quartile_mean` in `compression_eval` |
-| Bottom-quartile bias — **relative** | not more positive than the established baseline | Tier 1 only | `verdict()` condition 4a |
-| Top-decile bias — **absolute** | \|bias\| ≤ 30% of decile mean (floor 0.10), bidirectional | both | `top_decile_bias` / `top_decile_mean` in `compression_eval` |
-| Determinism gate (when changing the deterministic-mode pipeline) | green for every league with cached parquets | both | `tests/integration/test_determinism_gate.py` (current NBA-only; Stage 0 prerequisite extends to WNBA + NFL) |
+| Top-mean-decile MAE on test split | ≥ 5% better than current baseline | Tier 1 only | `compression_eval --baseline … --candidate …` |
+| Global MAE on test split | not worse by > 1% | Tier 1 only | `compression_eval` global summary |
+| `brier_skill_score` (book baseline) | **Tier 0:** ≥ 0; **Tier 1:** not worse than baseline | both | `model_stats.parquet` for the candidate run |
+| Bottom-quartile bias — **absolute** | over-prediction ≤ +30% of quartile mean (floor 0.10); under-prediction tolerated | both | `bottom_quartile_bias` / `bottom_quartile_mean` |
+| Bottom-quartile bias — **relative** | not more positive than baseline | Tier 1 only | `verdict()` condition 4a |
+| Top-decile bias — **absolute** | \|bias\| ≤ 30% of decile mean (floor 0.10), bidirectional | both | `top_decile_bias` / `top_decile_mean` |
+| Determinism gate (when changing the deterministic-mode pipeline) | green for every league with cached parquets | both | `tests/integration/test_determinism_gate.py` (currently NBA-only; Stage 0 extends to WNBA + NFL) |
 
-**Tier 0 — set the first baseline (the priority):** the "both" rows must clear —
-bottom-quartile + top-decile absolute bias and `brier_skill_score ≥ 0`. Of every
-candidate (incl. the incumbent default) that clears them on a cell, the
-highest-BSS full retrain is set as that cell's baseline and promoted to the
-**mandatory ≥ 14-day soak window**.
-
-**Tier 1 — supersede an established baseline:** all rows must clear — the absolute
-rows plus the relative ≥ 5% top-decile, global-MAE-not-worse, BSS-not-worse, and
-bottom-quartile-not-more-positive checks — on every cell in every covered league
-(or the routing config records the exceptions). On promotion the previous pickle
-stays archived under `data/old_models/` so revert is one cron-pull away.
+**Tier 0** (priority): the "both" rows clear; the highest-BSS full retrain among all
+candidates (incl. incumbent) sets the baseline and is promoted to the **mandatory
+≥ 14-day soak**. **Tier 1**: all rows clear on every cell in every covered league (or
+routing config records exceptions). On promotion the previous pickle is archived under
+`data/old_models/` so revert is one cron-pull away.
 
 ### Gate 2 — Live graduation gate
 
-Computed on the **last 30 days of settled production offers** by the
-Stage 0 `compute_book_brier_skill_score` and rolling-window aggregator
-in `nightly.py`. A cell graduates from the track — no further stage work
-— if all five hold:
+Computed on the **last 30 days of settled production offers** by Stage 0's
+`compute_book_brier_skill_score` and the rolling-window aggregator in `nightly.py`. A
+cell graduates if all five hold:
 
-| Case | Threshold | Where |
+| Live metric | Threshold | Where it lives |
 |---|---|---|
-| Settled book-BSS (30 days, ≥ 200 offers) | ≥ 0 AND ≥ training-set `brier_skill_score − 0.02` (no live-vs-offline regression > 0.02) | Stage 0 deliverable 0.1 (`compute_book_brier_skill_score`); persisted by 0.2 in `data/live_metrics_per_market.parquet` |
-| Empirical over-rate vs predicted over-rate on settled offers | within ±0.03 over ≥ 200 settled offers | same parquet — Stage 0 0.2 |
-| Top-decile live MAE on settled bets | ≥ 5% better than prior-version live MAE on the same cell, OR within 5% of the offline compression_eval test-set MAE (i.e. no live-vs-offline drift) | Stage 0 deliverable 0.3 (`compression_eval --live-window 30`) |
-| Bottom-quartile bias (one-sided) + top-decile bias (bidirectional) on settled bets | mirrors Gate 1 cond. 4 over ≥ 100 settled offers: bottom-quartile over-prediction ≤ +30% of band mean (floor 0.10) AND not more positive than prior; top-decile \|bias\| ≤ 30% (floor 0.10) | Stage 0 deliverable 0.3 (`compression_eval --live-window 30`), `bottom_quartile_bias` column (live analog of the Gate 1 row) |
-| Profit-sim parlay yield | non-negative on slates containing the cell | dashboard Stats Profit Sim page; Stage 0 0.2 aggregates per-cell into the same parquet |
+| Settled book-BSS (30d, ≥ 200 offers) | ≥ 0 AND ≥ training `brier_skill_score − 0.02` | Stage 0 0.1/0.2 → `live_metrics_per_market.parquet` |
+| Empirical vs predicted over-rate (settled) | within ±0.03 over ≥ 200 offers | same parquet (0.2) |
+| Top-decile live MAE on settled bets | ≥ 5% better than prior-version live MAE, OR within 5% of offline test-set MAE | Stage 0 0.3 (`compression_eval --live-window 30`) |
+| Bottom-quartile bias (one-sided) + top-decile bias (bidirectional) on settled bets | mirrors Gate 1 cond. 4 over ≥ 100 offers | Stage 0 0.3, `bottom_quartile_bias` column |
+| Profit-sim parlay yield | non-negative on slates containing the cell | dashboard Stats Profit Sim; 0.2 aggregates per-cell |
 
 On graduation, mark ✅ in the Status table with the graduating stage + triggering
 metrics. The track continues on non-graduating cells only — the live-data analog of
@@ -449,22 +443,26 @@ to revert to). Every cell must clear Gate 1, soak, then clear Gate 2.
 The gates decide *when* a cell ships; this is *how* it goes live on the production
 server (which tracks `devel`). Two invariants keep it safe:
 
-- **Training is config-driven.** A git-tracked `data/ship_config.json` (nested
-  `{league: {market: strategy}}`, mirroring `ALL_MARKETS`) assigns each cell one of
-  three states:
-  - a real strategy slug (one of `baselines.STRATEGY_SLUGS`) → **shipped**: train that
-    cell with that strategy;
-  - `"withheld"` → **under rework**: skip training **and delete** the cell's pickle
-    (`data/models/{league}_{market}.mdl`) so it goes dark;
-  - **absent** → **untouched**: train with the run's default strategy. An empty/missing
-    `ship_config.json` is a strict no-op.
-- **Inference is pickle-driven.** `model_prob` never reads `ship_config.json`; it
-  decodes the strategy recorded *in the pickle it loaded* (pickles are
-  self-describing). A missing pickle returns `[]` (market skipped). Training config and
-  inference cannot drift — the server runs only the strategy baked into the pickle.
+- **Training is config-driven.** Each cell in
+  `data/config/stat_meta.json` carries `{"dist": ..., "shipped":
+  "withheld" | "devel" | "main", "strategy": ...}`. The `shipped` field
+  is the release-state lever:
+  - `"devel"` or `"main"` → **shipped**: train with the cell's
+    `strategy` slug (or `"none"` for count-branch cells).
+  - `"withheld"` → **under rework**: skip training **and delete** the
+    cell's pickle (`data/models/{league}_{market}.mdl`) so it goes dark.
+  Every cell is present in `stat_meta.json` (no "absent" state); a
+  cell that should not ship sits at `shipped: "withheld"` with
+  `strategy: "none"`.
+- **Inference is pickle-driven.** `model_prob` never reads
+  `stat_meta.json`; it decodes the strategy recorded *in the pickle it
+  loaded* (pickles are self-describing). A missing pickle returns `[]`
+  (market skipped). Training config and inference cannot drift — the
+  server runs only the strategy baked into the pickle.
 
-**Shipping a cell is a one-line PR to `ship_config.json` on `devel`,** landed by the
-next weekly `meditate`:
+**Shipping a cell is a one-line edit to `stat_meta.json` on `devel`**
+(set `shipped: "withheld"` → `"devel"`), landed by the next weekly
+`meditate`:
 
 ```
 absent ──(begin rework)──▶ "withheld" ──(Gate 1 pass)──▶ "<strategy>" ──(Gate 2 pass)──▶ graduated
@@ -473,20 +471,34 @@ absent ──(begin rework)──▶ "withheld" ──(Gate 1 pass)──▶ "<s
   └──(back to default)────────┘                             └◀──(Gate 2 live regression)──────┘
 ```
 
+**Default-deny (gate-driven serving control).** Every cell in
+`stat_meta.json` carries an explicit `shipped` field — no implicit
+"absent" state. `shipped: "withheld"` is the default state for cells
+that have not cleared Gate 1; `shipped: "devel"` ships on the
+production-tracking branch; `shipped: "main"` is also Gate-2 graduated.
+`generate-ship-config --branch main` (monthly cron via `run_job.sh
+gate-status`) mutates `stat_meta.json` to promote Gate-2 graduated cells
+from `"devel"` → `"main"` (and demote regressions), opening a PR a
+human merges. On `devel`, the human edits `stat_meta.json` directly to
+ship a Gate-1 passer; `generate-ship-config --branch devel` only
+validates the file + prints a summary.
+
 - **Withhold is deliberate and scoped.** Only an *explicitly* `"withheld"` cell is
   pruned; the prune is inline in `meditate`'s per-cell loop, so a scoped run
   (`meditate --market FG3M`) can only prune cells in its own scope — a stray dev run
   cannot dark-out the book.
 - **New strategies are additive:** (1) a slug in `baselines.STRATEGY_SLUGS` with
   forward/decode functions, (2) a `model_prob` decode branch keyed on that slug, (3)
-  the `ship_config.json` line. The decode branch lands *with* the strategy (Stage B1.6
-  workstream 1). `load_ship_config` validates every value against
-  `STRATEGY_SLUGS ∪ {"withheld"}` at startup so a typo fails `meditate` fast.
+  the cell's `strategy` line in `stat_meta.json`. The decode branch lands *with*
+  the strategy (Stage B1.6 workstream 1). `load_ship_config` validates every
+  cell against the schema (SkewNormal must use a real slug; count-branch must
+  use `"none"`; `shipped` must be one of `{"withheld", "devel", "main"}`) at
+  startup so a typo fails `meditate` fast.
 
-End-to-end: Gate 1 SHIP → edit `ship_config.json` → merge `devel` → next weekly
-`meditate` retrains only that cell → `prophecize` scores it live → 14-day soak →
-Gate 2. Revert-archiving the prior pickle under `data/old_models/` is orthogonal to the
-withhold prune.
+End-to-end: Gate 1 SHIP → edit `stat_meta.json` (`shipped: "withheld"` →
+`"devel"`) → merge `devel` → next weekly `meditate` retrains only that
+cell → `prophecize` scores it live → 14-day soak → Gate 2. Revert-archiving
+the prior pickle under `data/old_models/` is orthogonal to the withhold prune.
 
 **Implementation note:** the plumbing — `training/ship_config.py`
 (loader + `resolve_cell_strategy` + `WITHHELD`), `helpers/io.py` (`model_pickle_path` +
@@ -529,7 +541,7 @@ model-research ─(build + offline-test)→ trim → devel-foundation
 
 The `devel-foundation` / `model-research` →(Gate-1 passers)→ `devel` crossing is carved
 by the **`devel-ship-curator`** agent: it branches off `devel`, brings only
-production-runtime code + the single `data/ship_config.json` toggle for one cleared
+production-runtime code + the single `data/config/stat_meta.json` toggle for one cleared
 cell, **hard-excludes** the research-scaffolding denylist (`compression_eval`,
 `zinb_routing_diagnostics`, `icc_diagnostics`, `statsmodels`, `/tmp` harnesses), carries
 the offline verdict as **PR prose not code**, verifies the three gates, and **never
@@ -692,7 +704,7 @@ feature apply, but count-family reasoning does not (treat as Track-A). New refs 
    verify in A1. The per-100-poss factorization (T5-basketball) transfers exactly. **A1.5
    update:** T5-basketball is KILLED, so the transfer point is moot. WNBA's own factor-ICC
    verdict is **low-confidence**: WNBA has no `FGM` or `FG3A` *markets* (confirmed against
-   `stat_dist.json` — WNBA set is MIN/AST/FG3M/PA/PR/PTS/RA/REB/OREB/DREB/FGA/BLK/STL/BLST/
+   `stat_meta.json` (the `dist` field per cell) — WNBA set is MIN/AST/FG3M/PA/PR/PTS/RA/REB/OREB/DREB/FGA/BLK/STL/BLST/
    TOV/FTM/PRA/fantasy), so true FG%/3P% are uncomputable and `PTS_per_FGA` (0.103) is the
    *only* clean efficiency factor — the WNBA gap (+0.456) rests on a single point. No regen
    path for FGM/FG3A; a real verdict needs **new test cases** from WNBA's actual markets.
@@ -733,20 +745,63 @@ feature apply, but count-family reasoning does not (treat as Track-A). New refs 
    overfit, and percent-calibration error is worst in low-base-rate groups [48]. Use the
    global affine `y ~ a + b·ŷ` form there; reserve isotonic / per-decile for the
    higher-mean NBA/WNBA count cells. (B1.6 research verdict, 2026-05-22.)
+10. **Training and live `predicted_over_rate` / `empirical_over_rate` are not the same
+    quantity — never compare them directly to diagnose model drift.** Training computes
+    `(P > 0.5).mean()` and `(Result >= Line).mean()` over **all** validation rows;
+    live computes `(Bet == "Over").mean()` and `(Result == "Over").mean()` over **only
+    the Sleeper/Underdog offers that survived publication filtering** (`Boost ≤ 3.65`,
+    `head(3)` per player by Distance). On NBA/FG3M 2026-05-24 this produced a fake 28pp
+    "drift" signal that was 90% a measurement artifact + 9pp the `>=` vs `>` push
+    convention asymmetry. The like-for-like metric is `Bet=Over hit rate` (= training
+    `precision_over` ↔ live `precision_over_live`, added 2026-05-24); compare those.
+    See `/tmp/researcher_fg3m_calibration_divergence.md` and
+    `nightly._side_precision` / `graduation.MIN_PRECISION_OVER`.
+
+## Open follow-ups from the 2026-05-24 FG3M-calibration researcher brief
+
+Cited file: `/tmp/researcher_fg3m_calibration_divergence.md`. None of these are
+shipping critical paths yet — they're tracked here so they don't drop.
+
+1. **Align push convention across pipelines.** `pipeline.py:1451` builds
+   `y_class_val = (Result >= Line)`; live `analysis.py:296` uses strict `>` and
+   labels equality as `Push`. On integer-line markets this inflates training
+   `empirical_over_rate` ~9pp and can flip the perceived sign of model bias.
+   Fix: switch training to strict `>` and account for pushes as a 3-class
+   outcome (or carry a `Push` column the loss treats as half-Brier). Affects
+   `_step_calibrate_temperature` and `_compute_metrics`.
+2. **Add publication-filtered `Bet=Over` rate to training metrics.** Today
+   training reports `predicted_over_rate = (P > 0.5).mean()` over every validation
+   row, but live reports `(Bet == "Over").mean()` over only the published Sleeper/UD
+   offers (`prediction/model_prob.py:519-524`). The right offline analogue is to
+   apply the same filter against validation rows that have a Sleeper/UD line in
+   the Archive, then report `Bet=Over` rate on that subset. ~1-day change in
+   `_step_compute_metrics`; would have caught the FG3M pseudo-drift offline.
+3. **Re-run HurdleZINB pickup for FTM, BLK, OREB.** The 2026-05 hurdle ship
+   skipped these on the old gate set; the brief shows they still exhibit the
+   joint-ZINB under-fit signature in **both** training and live data (FTM
+   training pred 0.10 vs empirical 0.41; BLK pred 0.09 vs empirical 0.34; OREB
+   similar). Lever is `--zinb-mode=hurdle` (per `p2_hurdle_zinb_verdict.md`);
+   re-evaluate against the new gates.
+4. **Sleeper Under-boost asymmetry investigation.** `prediction/cli.py:155-157`
+   computes Sleeper's Under-side boost as `1.78² / over_boost`, which on a 3×
+   Over-boosted line yields an Under boost of ~1.06 — never recommendable. This
+   structurally biases FG3M / BLK / OREB recommendations to Over regardless of
+   what the model thinks. Decide: accept (correct payout math), or build a
+   platform-aware EV threshold that handles asymmetric two-sided markets.
 
 ## Critical files
 
 | File | Role | Key lines |
 |---|---|---|
-| [src/sportstradamus/training/pipeline.py](../src/sportstradamus/training/pipeline.py) | target build, dist select, training, denorm, test_set dump | 245–324 (branch/target), 328 (`lgb.Dataset` — `init_score` injection point), 341/394–409 (`set_model_start_values`), 345–346 (MeanYr monotone), 348–368 (Optuna search space), 439–452 (SkewNormal denorm), ~960/981 (test_set dump) |
-| [src/sportstradamus/training/report.py](../src/sportstradamus/training/report.py) | diagnostics → `training_report.txt`, `model_stats.parquet` | `ev_meanyr_corr`/`result_meanyr_corr` (~850), `write_model_stats` |
-| [src/sportstradamus/stats/base.py](../src/sportstradamus/stats/base.py) | baseline features + target; inference-time mirror lives here | 597 (`get_stats`), 676–702 (`MeanYr`, `Mean10`, `*_Ratio`), 1005/1011/1082 (`Result`) |
-| [src/sportstradamus/stats/nba.py](../src/sportstradamus/stats/nba.py) | NBA `MIN`, `USG_PCT`, per-48 stats | 127–135, 359, 366 |
-| [src/sportstradamus/helpers/distributions.py](../src/sportstradamus/helpers/distributions.py) | `set_model_start_values`; `fused_loc` (book blend) | 425–504 |
-| [src/sportstradamus/skew_normal.py](../src/sportstradamus/skew_normal.py) | custom SkewNormal (location-scale, supports negatives) | 30–199 |
-| [src/sportstradamus/hurdle.py](../src/sportstradamus/hurdle.py) | HurdleZINB (Stage 2 ZTNB lives here for Track-B Stage B1) | ~201 (NegBin loss for Stage 2) |
-| [src/sportstradamus/scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py) | **P0 harness** — decile table, compression ratio, run log, diff verdict | — |
-| [src/sportstradamus/prediction/model_prob.py](../src/sportstradamus/prediction/model_prob.py) | **Live-path confound** — where shipped strategies must survive end-to-end | SkewNormal decode, `fused_loc` w≈0.9 blend, `temperature`≈1.37 |
+| [training/pipeline.py](../src/sportstradamus/training/pipeline.py) | target build, dist select, training, denorm, test_set dump | 245–324 (branch/target), 328 (`lgb.Dataset` — `init_score` injection), 341/394–409 (`set_model_start_values`), 345–346 (MeanYr monotone), 348–368 (Optuna search space), 439–452 (SkewNormal denorm), ~960/981 (test_set dump) |
+| [training/report.py](../src/sportstradamus/training/report.py) | diagnostics → `training_report.txt`, `model_stats.parquet` | `ev_meanyr_corr`/`result_meanyr_corr` (~850), `write_model_stats` |
+| [stats/base.py](../src/sportstradamus/stats/base.py) | baseline features + target; inference-time mirror | 597 (`get_stats`), 676–702 (`MeanYr`, `Mean10`, `*_Ratio`), 1005/1011/1082 (`Result`) |
+| [stats/nba.py](../src/sportstradamus/stats/nba.py) | NBA `MIN`, `USG_PCT`, per-48 stats | 127–135, 359, 366 |
+| [helpers/distributions.py](../src/sportstradamus/helpers/distributions.py) | `set_model_start_values`; `fused_loc` (book blend) | 425–504 |
+| [skew_normal.py](../src/sportstradamus/skew_normal.py) | custom SkewNormal (location-scale, supports negatives) | 30–199 |
+| [hurdle.py](../src/sportstradamus/hurdle.py) | HurdleZINB (Stage 2 ZTNB lives here for B1) | ~201 (NegBin loss for Stage 2) |
+| [scripts/compression_eval.py](../src/sportstradamus/scripts/compression_eval.py) | **P0 harness** — decile table, compression ratio, run log, diff verdict | — |
+| [prediction/model_prob.py](../src/sportstradamus/prediction/model_prob.py) | **Live-path confound** — where shipped strategies must survive end-to-end | SkewNormal decode, `fused_loc` w≈0.9 blend, `temperature`≈1.37 |
 | [docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md](superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md) | Source spec for the **ZINB derived-π gate** fix (P2.B precursor) | Phase B "SUPERSEDED → derived-π" |
 
 ## Verification (every code session)
@@ -851,7 +906,7 @@ behind PR #46.
   13 NFL baselines (full-HP confirmed)").
 - Earlier plan-rewrite HEAD: `6e913b1` ("docs: add research handoff for centered-target
   negative result").
-- Latest shipped: 13 NBA + 10 WNBA + 13 NFL baselines locked in `data/ship_config.json`
+- Latest shipped: 13 NBA + 10 WNBA + 13 NFL baselines locked in `data/config/stat_meta.json`
   (`b5d2609` / `c9fcf01` / `fbec3cc`); P2.B HurdleZINB (`cee5625` ships
   `centered_additive_eb_meanyr_k10`); P1 follow-up `1d0e65e` adds `centered_additive_mean10`
   as the path-wide A/B counterexample.
