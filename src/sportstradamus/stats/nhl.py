@@ -1026,4 +1026,3 @@ class StatsNHL(Stats):
                 ev = 0
 
         return 0 if np.isnan(ev) else ev
-

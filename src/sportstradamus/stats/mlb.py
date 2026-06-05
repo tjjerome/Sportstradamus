@@ -935,7 +935,6 @@ class StatsMLB(Stats):
                 -1,
             )
 
-
     def profile_market(self, market, date=datetime.today().date()):
         if isinstance(date, str):
             date = datetime.strptime(date, "%Y-%m-%d").date()
@@ -1091,7 +1090,6 @@ class StatsMLB(Stats):
         self.pitcherProfile.fillna(0.0, inplace=True)
         self.teamProfile.fillna(0.0, inplace=True)
         self.playerProfile.fillna(0.0, inplace=True)
-
 
     def get_volume_stats(self, offers, date=datetime.today().date(), pitcher=False):
         flat_offers = {}
@@ -1334,4 +1332,3 @@ class StatsMLB(Stats):
                     depth[player] = int(mode.iloc[-1])
 
             self.playerProfile["depth"] = depth
-
