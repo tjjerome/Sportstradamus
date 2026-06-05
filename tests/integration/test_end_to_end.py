@@ -119,9 +119,9 @@ def test_pipeline_smoke(
 
     result = runner.invoke(meditate, ["--league", "WNBA"], catch_exceptions=False)
     assert result.exit_code == 0, f"meditate failed: {result.output}"
-    assert ("WNBA", "PTS") in train_market_calls, (
-        f"train_market was not invoked for WNBA:PTS. calls={train_market_calls}"
-    )
+    assert (
+        ("WNBA", "PTS") in train_market_calls
+    ), f"train_market was not invoked for WNBA:PTS. calls={train_market_calls}"
 
     # ----- Phase 3: prophecize (CLI invoked; sheets + scrapers mocked) -----
     from sportstradamus.prediction import cli as prediction_cli
@@ -175,9 +175,9 @@ def test_pipeline_smoke(
     assert captured, "process_offers was never invoked"
     underdog_offers, _ = captured.get("Underdog", (pd.DataFrame(), pd.DataFrame()))
     assert len(underdog_offers) >= 10, f"expected >= 10 offers with EV, got {len(underdog_offers)}"
-    assert underdog_offers["Model EV"].notna().sum() >= 10, (
-        "fewer than 10 offers had a populated Model EV column"
-    )
+    assert (
+        underdog_offers["Model EV"].notna().sum() >= 10
+    ), "fewer than 10 offers had a populated Model EV column"
     parlay_total = sum(len(p) for _, p in captured.values())
     assert parlay_total >= 1, "no parlay candidates were returned"
 

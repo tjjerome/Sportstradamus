@@ -1264,7 +1264,6 @@ class StatsNBA(Stats):
                 {"players": self.players, "gamelog": self.gamelog, "teamlog": self.teamlog}, outfile
             )
 
-
     def get_volume_stats(self, offers, date=datetime.today().date()):
         market = "MIN"
         flat_offers = {}
@@ -1524,4 +1523,3 @@ class StatsNBA(Stats):
             ev = 0
 
         return 0 if np.isnan(ev) else ev
-
