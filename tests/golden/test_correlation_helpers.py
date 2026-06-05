@@ -72,6 +72,7 @@ def _stats_for(players: list[str], usage_col: str, tiebreaker_col: str) -> _Fake
 
 # --- real NBA slate (offer-correlation characterization) --------------------
 
+
 # Real NYK/SAS offers (2026-06-03) from data/runtime/current_offers.parquet.
 # League/Date/Team/Opponent/Player/Market/Line/Boost/Bet/Model P/Model/Books are
 # verbatim. Books P = clip(Model P - 0.08, .05, .95) (book-prob proxy; snapshot
@@ -93,7 +94,18 @@ def _nba_offers() -> list[dict]:
         ("SAS", "NYK", "Luke Kornet", "PR", 5.5, 1.73, "Over", 0.739604, 1.279515, 0.855582),
         ("SAS", "NYK", "Luke Kornet", "REB", 3.5, 2.39, "Over", 0.577842, 1.381042, 0.494779),
         ("SAS", "NYK", "Victor Wembanyama", "BLK", 3.5, 1.96, "Over", 0.702637, 1.377169, 0.735718),
-        ("SAS", "NYK", "Victor Wembanyama", "BLST", 4.5, 1.87, "Under", 0.735725, 1.375805, 1.194457),
+        (
+            "SAS",
+            "NYK",
+            "Victor Wembanyama",
+            "BLST",
+            4.5,
+            1.87,
+            "Under",
+            0.735725,
+            1.375805,
+            1.194457,
+        ),
     ]
     players = [r[2] for r in raw]
     pos_of = {p: (i % 5) + 1 for i, p in enumerate(dict.fromkeys(players))}
@@ -164,14 +176,13 @@ def test_find_correlation_offer_correlations_real_nba() -> None:
 
     actual = sorted(
         (r["Player"], r["Market"], r["Team Correlation"], r["Opp Correlation"])
-        for _, r in offer_df[
-            ["Player", "Market", "Team Correlation", "Opp Correlation"]
-        ].iterrows()
+        for _, r in offer_df[["Player", "Market", "Team Correlation", "Opp Correlation"]].iterrows()
     )
     assert actual == sorted(_EXPECTED_OFFER_CORR)
 
 
 # --- synthetic WNBA slate (parlay-assembly structure) -----------------------
+
 
 # Uniform-ish high win probs + Boost == UNDERDOG_BOOST_BASELINE (post-normalize
 # 1.0) clear the beam-search EV gates so the assembly path actually runs.
@@ -226,6 +237,7 @@ def test_find_correlation_builds_parlays_wnba() -> None:
 
 
 # --- pure-kernel unit tests -------------------------------------------------
+
 
 # Two single-position legs whose cMarket tokens key into the c_map below.
 def _leg(player: str, bet: str, cmarket: str) -> dict:

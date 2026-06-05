@@ -296,8 +296,10 @@ def meditate(
             if cell_target_norm == TARGET_NORM_NONE:
                 cell_target_norm = target_normalization
             cell_posthoc = stat_meta_full.get(lg, {}).get(market, {}).get("posthoc", "none")
-            cell_blending = stat_meta_full.get(lg, {}).get(market, {}).get(
-                "blending", calibration.DEFAULT_BLENDING
+            cell_blending = (
+                stat_meta_full.get(lg, {})
+                .get(market, {})
+                .get("blending", calibration.DEFAULT_BLENDING)
             )
             train_market(
                 lg,

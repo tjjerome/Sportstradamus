@@ -1053,12 +1053,26 @@ def _supersede_pair(
     candidate_p = np.clip(p_true + rng.normal(0, candidate_calibration_noise, n), 1e-3, 1.0 - 1e-3)
     dist_cols = {"SN_Loc": meanyr, "SN_Scale": np.full(n, scale), "SN_Alpha": np.zeros(n)}
     b_df = pd.DataFrame(
-        {"MeanYr": meanyr, "Result": result, "EV": baseline_ev, "Line": line,
-         "Odds": odds, "P": baseline_p, **dist_cols}
+        {
+            "MeanYr": meanyr,
+            "Result": result,
+            "EV": baseline_ev,
+            "Line": line,
+            "Odds": odds,
+            "P": baseline_p,
+            **dist_cols,
+        }
     )
     c_df = pd.DataFrame(
-        {"MeanYr": meanyr, "Result": result, "EV": meanyr.copy(), "Line": line,
-         "Odds": odds, "P": candidate_p, **dist_cols}
+        {
+            "MeanYr": meanyr,
+            "Result": result,
+            "EV": meanyr.copy(),
+            "Line": line,
+            "Odds": odds,
+            "P": candidate_p,
+            **dist_cols,
+        }
     )
     return b_df, c_df
 
@@ -1429,7 +1443,9 @@ def test_live_window_cli_rejects_conflicting_flags(monkeypatch, tmp_path):
     assert "cannot combine" in result.output.lower()
 
 
-def _skewnormal_frame(pred_scale: float, *, true_scale: float = 4.0, n: int = 8000, seed: int = 3) -> pd.DataFrame:
+def _skewnormal_frame(
+    pred_scale: float, *, true_scale: float = 4.0, n: int = 8000, seed: int = 3
+) -> pd.DataFrame:
     """SkewNormal (α=0 ⇒ Normal) frame whose predictive scale may differ from truth.
 
     Truth ~ Normal(0, ``true_scale``); the per-row predictive is Normal(0,
@@ -1535,7 +1551,14 @@ def test_randomized_pit_ks_collapses_count_lattice():
     rng = np.random.default_rng(7)
     r, nb_p = 1.5, 0.4  # scipy nbinom(r, 1 - nb_p); mean 1.0 — deep in the lattice regime
     y = nbinom.rvs(r, 1.0 - nb_p, size=6000, random_state=rng).astype(float)
-    df = pd.DataFrame({"Result": y, "EV": np.full_like(y, 1.0), "R": np.full_like(y, r), "NB_P": np.full_like(y, nb_p)})
+    df = pd.DataFrame(
+        {
+            "Result": y,
+            "EV": np.full_like(y, 1.0),
+            "R": np.full_like(y, r),
+            "NB_P": np.full_like(y, nb_p),
+        }
+    )
     assert _infer_dist_from_columns(df) == "NegBin"
     mid_ks = _ks_uniform(_pred_midpit(df, "NegBin", y, strategy="baseline"))
     rand_ks = _randomized_pit_ks(df, "NegBin", y, strategy="baseline")

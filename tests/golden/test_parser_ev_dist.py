@@ -44,8 +44,18 @@ def test_low_count_prop_ev_round_trips_under_market_dist():
                     {
                         "key": "player_blocks",
                         "outcomes": [
-                            {"description": "Nikola Jokic", "name": "Over", "price": 1.05, "point": 0.5},
-                            {"description": "Nikola Jokic", "name": "Under", "price": 9.0, "point": 0.5},
+                            {
+                                "description": "Nikola Jokic",
+                                "name": "Over",
+                                "price": 1.05,
+                                "point": 0.5,
+                            },
+                            {
+                                "description": "Nikola Jokic",
+                                "name": "Under",
+                                "price": 9.0,
+                                "point": 0.5,
+                            },
                         ],
                     }
                 ],
@@ -53,7 +63,9 @@ def test_low_count_prop_ev_round_trips_under_market_dist():
         ],
     }
     archive = _CaptureArchive()
-    _archive_event_props(archive, game, "NBA", {"NBA": {"player_blocks": "BLK"}}, datetime.date(2025, 12, 23))
+    _archive_event_props(
+        archive, game, "NBA", {"NBA": {"player_blocks": "BLK"}}, datetime.date(2025, 12, 23)
+    )
 
     ev = archive.book_evs[("BLK", "Nikola Jokic")]["draftkings"]
     cv = stat_cv["NBA"]["BLK"]

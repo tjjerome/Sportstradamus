@@ -302,15 +302,26 @@ def _beam_inputs() -> dict:
         [{"Player": f"P{i}", "Team": bet_df[i]["Team"]} for i in range(n)], index=range(n)
     )
     g = GameArrays(
-        C=C, M=M, EV=EV, EVb=np.zeros((n, n)), V=V,  # EVb is annotation-only, unused here
-        p_model=p_model, p_books=p_books, p_push=np.zeros(n), boosts=boosts,
+        C=C,
+        M=M,
+        EV=EV,
+        EVb=np.zeros((n, n)),
+        V=V,  # EVb is annotation-only, unused here
+        p_model=p_model,
+        p_books=p_books,
+        p_push=np.zeros(n),
+        boosts=boosts,
     )
     return {
-        "idx": idx, "g": g, "payouts": payouts,
-        "full_payouts": {2: [3.0, 0.0], 3: [6.0, 0.0], 4: [10.0, 0.0]}, "max_boost": 10.0,
-        "bet_df": bet_df, "info": {"Game": "A/B", "Date": "2026-01-01",
-                                   "League": "NBA", "Platform": "Underdog"},
-        "team": "A", "opp": "B",
+        "idx": idx,
+        "g": g,
+        "payouts": payouts,
+        "full_payouts": {2: [3.0, 0.0], 3: [6.0, 0.0], 4: [10.0, 0.0]},
+        "max_boost": 10.0,
+        "bet_df": bet_df,
+        "info": {"Game": "A/B", "Date": "2026-01-01", "League": "NBA", "Platform": "Underdog"},
+        "team": "A",
+        "opp": "B",
     }
 
 
@@ -321,8 +332,12 @@ def test_beam_search_characterization() -> None:
     def sig(r):
         return (
             r["Bet Size"],
-            round(r["Model EV"], 6), round(r["Books EV"], 6), round(r["Rec Bet"], 6),
-            round(r["P"], 6), round(r["PB"], 6), round(r["Boost"], 6),
+            round(r["Model EV"], 6),
+            round(r["Books EV"], 6),
+            round(r["Rec Bet"], 6),
+            round(r["P"], 6),
+            round(r["PB"], 6),
+            round(r["Boost"], 6),
         )
 
     expected = (

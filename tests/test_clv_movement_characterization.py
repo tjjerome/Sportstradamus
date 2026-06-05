@@ -36,14 +36,17 @@ def test_movement_alignment_under_bet_flips_sign():
     assert clv._movement_alignment({"open_line": 10.0, "close_line": 9.0}, 0.6, "Under") == 1.0
 
 
-@pytest.mark.parametrize("movement,model_p,bet", [
-    (None, 0.6, "Over"),
-    ({"open_line": 10.0, "close_line": 10.0}, 0.6, "Over"),       # flat line
-    ({"close_line": 11.0}, 0.6, "Over"),                          # open None -> pd.isna
-    ({"open_line": np.nan, "close_line": 11.0}, 0.6, "Over"),     # open NaN
-    ({"open_line": 10.0, "close_line": 11.0}, np.nan, "Over"),    # model_p NaN
-    ({"open_line": 10.0, "close_line": 11.0}, 0.5, "Over"),       # model neutral
-])
+@pytest.mark.parametrize(
+    "movement,model_p,bet",
+    [
+        (None, 0.6, "Over"),
+        ({"open_line": 10.0, "close_line": 10.0}, 0.6, "Over"),  # flat line
+        ({"close_line": 11.0}, 0.6, "Over"),  # open None -> pd.isna
+        ({"open_line": np.nan, "close_line": 11.0}, 0.6, "Over"),  # open NaN
+        ({"open_line": 10.0, "close_line": 11.0}, np.nan, "Over"),  # model_p NaN
+        ({"open_line": 10.0, "close_line": 11.0}, 0.5, "Over"),  # model neutral
+    ],
+)
 def test_movement_alignment_nan_cases(movement, model_p, bet):
     assert math.isnan(clv._movement_alignment(movement, model_p, bet))
 
@@ -58,17 +61,21 @@ class _MovementArchive:
 
 def _filled_history():
     """One row, two filled Over offers (close_p + market_clv present so legs count)."""
-    return pd.DataFrame([{
-        "Player": "Player A",
-        "League": "NBA",
-        "Date": "2026-05-04",
-        "Market": "points",
-        "Platform": "Underdog",
-        "Offers": [
-            (10.5, 1.0, "Underdog", "Over", 0.60, 0.55, 0.58, 0.03, 0.02),
-            (11.5, 1.0, "Underdog", "Over", 0.62, 0.54, 0.57, 0.04, 0.03),
-        ],
-    }])
+    return pd.DataFrame(
+        [
+            {
+                "Player": "Player A",
+                "League": "NBA",
+                "Date": "2026-05-04",
+                "Market": "points",
+                "Platform": "Underdog",
+                "Offers": [
+                    (10.5, 1.0, "Underdog", "Over", 0.60, 0.55, 0.58, 0.03, 0.02),
+                    (11.5, 1.0, "Underdog", "Over", 0.62, 0.54, 0.57, 0.04, 0.03),
+                ],
+            }
+        ]
+    )
 
 
 def test_summarize_with_archive_adds_movement_alignment_column():

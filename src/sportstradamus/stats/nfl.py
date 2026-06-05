@@ -141,9 +141,9 @@ _COMP_KNN_MAX: int = 15
 # Numbers correspond to self.positions = ["QB","WR","RB","TE"] (index+1):
 #   QB=1, WR=2, RB=3, TE=4. Must mirror NFL_MARKET_POSITIONS (name→number).
 _VOLUME_MARKET_POSITION_FILTER: dict[str, list[int]] = {
-    "attempts": [1],        # QB only
-    "carries": [1, 3],      # QB + RB (QBs scramble)
-    "targets": [2, 3, 4],   # WR + RB + TE
+    "attempts": [1],  # QB only
+    "carries": [1, 3],  # QB + RB (QBs scramble)
+    "targets": [2, 3, 4],  # WR + RB + TE
 }
 
 
@@ -863,6 +863,7 @@ class StatsNFL(Stats):
         ]
         self.gamelog.drop_duplicates(inplace=True)
         self.teamlog.drop_duplicates(inplace=True)
+
     def parse_pbp(self, week, team, year, playerName=""):
         self._ensure_pbp_loaded(year)
         pbp = self.pbp.loc[
@@ -977,18 +978,14 @@ class StatsNFL(Stats):
         off_rush_epa = pbp_off.loc[pbp_off["rush"], "epa"].mean()
         off_pass_epa = pbp_off.loc[pbp_off["pass"], "epa"].mean()
         off_rz_epa = pbp_off.loc[pbp_off["redzone"], "epa"].mean()
-        off_fr_epa = pbp_off.loc[
-            (pbp_off["pass"]) & (pbp_off["read_thrown"] == "1"), "epa"
-        ].mean()
+        off_fr_epa = pbp_off.loc[(pbp_off["pass"]) & (pbp_off["read_thrown"] == "1"), "epa"].mean()
         off_mid_epa = pbp_off.loc[
             (pbp_off["pass"]) & (pbp_off["pass_location"] == "middle"), "epa"
         ].mean()
         def_rush_epa = pbp_def.loc[pbp_def["rush"], "epa"].mean()
         def_pass_epa = pbp_def.loc[pbp_def["pass"], "epa"].mean()
         def_rz_epa = pbp_def.loc[pbp_def["redzone"], "epa"].mean()
-        def_fr_epa = pbp_def.loc[
-            (pbp_def["pass"]) & (pbp_def["read_thrown"] == "1"), "epa"
-        ].mean()
+        def_fr_epa = pbp_def.loc[(pbp_def["pass"]) & (pbp_def["read_thrown"] == "1"), "epa"].mean()
         def_mid_epa = pbp_def.loc[
             (pbp_def["pass"]) & (pbp_def["pass_location"] == "middle"), "epa"
         ].mean()
@@ -1218,8 +1215,7 @@ class StatsNFL(Stats):
         rz_target_pct = self._ratio(
             len(
                 pbp_off.loc[
-                    (pbp_off["receiver_player_id"] == self.ids.get(playerName))
-                    & pbp_off["redzone"]
+                    (pbp_off["receiver_player_id"] == self.ids.get(playerName)) & pbp_off["redzone"]
                 ]
             ),
             rz_passes,
@@ -1228,8 +1224,7 @@ class StatsNFL(Stats):
         rz_attempt_pct = self._ratio(
             len(
                 pbp_off.loc[
-                    (pbp_off["rusher_player_id"] == self.ids.get(playerName))
-                    & pbp_off["redzone"]
+                    (pbp_off["rusher_player_id"] == self.ids.get(playerName)) & pbp_off["redzone"]
                 ]
             ),
             rz_rushes,
@@ -1304,6 +1299,7 @@ class StatsNFL(Stats):
             "passing_first_downs": passing_first_downs,
             "first_downs": first_downs,
         }
+
     def build_comp_profile(self, target_game_date: date | None = None) -> pd.DataFrame:
         """Build the NFL player comp profile from per-game FP snapshots + PBP aggregates.
 
@@ -1861,9 +1857,7 @@ class StatsNFL(Stats):
             inplace=True,
             errors="ignore",
         )
-        self.playerProfile.drop(
-            columns=[f"proj {market} alpha"], inplace=True, errors="ignore"
-        )
+        self.playerProfile.drop(columns=[f"proj {market} alpha"], inplace=True, errors="ignore")
 
         self.playerProfile.fillna(0, inplace=True)
 

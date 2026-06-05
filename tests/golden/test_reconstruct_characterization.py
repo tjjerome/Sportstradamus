@@ -27,8 +27,13 @@ from sportstradamus.analysis import (
 
 def _row(dist, cv, ev, param, gate, actual=None):
     return {
-        "Dist": dist, "CV": cv, "Model EV": ev, "Model Param": param,
-        "Gate": gate, "Actual": actual, "Step": 1,
+        "Dist": dist,
+        "CV": cv,
+        "Model EV": ev,
+        "Model Param": param,
+        "Gate": gate,
+        "Actual": actual,
+        "Step": 1,
     }
 
 
@@ -63,13 +68,13 @@ _QUANTILE_EXPECTED = {
     ("negbin", 0.1): 3.0,
     ("negbin", 0.5): 9.0,
     ("negbin", 0.9): 18.0,
-    ("zinb", 0.1): 0.0,   # q <= gate (0.2) -> 0.0
-    ("zinb", 0.5): 7.0,   # q_adj = (0.5 - 0.2) / 0.8
+    ("zinb", 0.1): 0.0,  # q <= gate (0.2) -> 0.0
+    ("zinb", 0.5): 7.0,  # q_adj = (0.5 - 0.2) / 0.8
     ("zinb", 0.9): 17.0,
     ("gamma", 0.1): 10.674049447419465,
     ("gamma", 0.5): 18.944043518782863,
     ("gamma", 0.9): 30.691223205968015,
-    ("zagamma", 0.1): 0.0,   # q <= gate (0.15) -> 0.0
+    ("zagamma", 0.1): 0.0,  # q <= gate (0.15) -> 0.0
     ("zagamma", 0.5): 17.268370451545504,
     ("zagamma", 0.9): 29.69433587140154,
     ("negbin_paramnone", 0.1): 2.0,

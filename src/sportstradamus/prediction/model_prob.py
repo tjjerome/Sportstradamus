@@ -161,7 +161,9 @@ def _apply_mean_posthoc(
     return model_mu
 
 
-def _book_cell_params(league: str, market: str) -> tuple[str | None, float | None, float | None, float | None]:
+def _book_cell_params(
+    league: str, market: str
+) -> tuple[str | None, float | None, float | None, float | None]:
     """Resolve ``(dist, cv, gate, step)`` for a cell from config, no pickle.
 
     Mirrors the pickle metadata ``model_prob`` reads, sourced instead from the
@@ -173,7 +175,9 @@ def _book_cell_params(league: str, market: str) -> tuple[str | None, float | Non
     if dist is None:
         return None, None, None, None
     cv = stat_cv[league].get(market, 1)
-    gate = stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma", "SkewNormal") else 0
+    gate = (
+        stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma", "SkewNormal") else 0
+    )
     step = 1.0 if dist in ("NegBin", "ZINB", "Poisson") else 0.5
     return dist, cv, gate, step
 
@@ -188,16 +192,18 @@ def _book_over_prob(
     """
     if dist == "SkewNormal":
         return offer_df.apply(
-            lambda x: 1
-            - get_odds(
-                x["Line"],
-                x["Books EV"],
-                dist,
-                cv=cv,
-                step=step,
-                sigma=x["Books EV"] * cv,
-                skew_alpha=0,
-                gate=gate,
+            lambda x: (
+                1
+                - get_odds(
+                    x["Line"],
+                    x["Books EV"],
+                    dist,
+                    cv=cv,
+                    step=step,
+                    sigma=x["Books EV"] * cv,
+                    skew_alpha=0,
+                    gate=gate,
+                )
             ),
             axis=1,
         )
@@ -401,8 +407,13 @@ def _col_or_none(df: pd.DataFrame, col: str, active: bool = True) -> np.ndarray 
 
 
 def _build_prob_params(
-    filedict: dict, market: str, stat_data, playerStats: pd.DataFrame, dist: str,
-    offset_meta, normalized: bool,
+    filedict: dict,
+    market: str,
+    stat_data,
+    playerStats: pd.DataFrame,
+    dist: str,
+    offset_meta,
+    normalized: bool,
 ) -> pd.DataFrame:
     if market in stat_data.volume_stats:
         prob_params = pd.DataFrame(index=playerStats.index)
@@ -428,7 +439,10 @@ def _build_prob_params(
         model.set_model_start_values(playerStats)
     else:
         set_model_start_values(
-            model, dist, playerStats, normalized=normalized,
+            model,
+            dist,
+            playerStats,
+            normalized=normalized,
             offset_mode=bool(offset_meta and offset_meta.get("method") == "eb_additive"),
         )
     prob_params = model.predict(playerStats, pred_type="parameters")
@@ -437,8 +451,14 @@ def _build_prob_params(
 
 
 def _book_evs_for_players(
-    playerStats: pd.DataFrame, offer_df: pd.DataFrame, market: str, dist: str, cv: float,
-    hist_gate: float, dateMap: dict, stat_data,
+    playerStats: pd.DataFrame,
+    offer_df: pd.DataFrame,
+    market: str,
+    dist: str,
+    cv: float,
+    hist_gate: float,
+    dateMap: dict,
+    stat_data,
 ) -> list:
     evs = []
     for player in playerStats.index:
@@ -472,8 +492,12 @@ def _set_decoded(prob_params: pd.DataFrame, decoded, shape_col: str, shape_val) 
 
 
 def _decode_model_params(
-    prob_params: pd.DataFrame, dist: str, playerStats: pd.DataFrame, hist_gate: float,
-    offset_meta, target_normalization: str,
+    prob_params: pd.DataFrame,
+    dist: str,
+    playerStats: pd.DataFrame,
+    hist_gate: float,
+    offset_meta,
+    target_normalization: str,
 ) -> None:
     # The column guards skip the volume_stats branch, which already set Model EV
     # from the player profile rather than a fitted distribution.
@@ -514,7 +538,11 @@ def _blend_with_book(
     zi = _zi_kwargs(offer_df, dist, hist_gate)
     if dist == "SkewNormal":
         base_mean, sigma_blend, skew_blend, gate_blend = fused_loc(
-            model_weight, model_ev, books_ev, cv, "SkewNormal",
+            model_weight,
+            model_ev,
+            books_ev,
+            cv,
+            "SkewNormal",
             sigma=_col_or_none(offer_df, "Model Sigma"),
             skew_alpha=_col_or_none(offer_df, "Model Skew"),
             **zi,
@@ -523,15 +551,25 @@ def _blend_with_book(
         offer_df["Model Skew"] = skew_blend
     elif dist in ("NegBin", "ZINB"):
         r_blend, p_blend, gate_blend = fused_loc(
-            model_weight, model_ev, books_ev, cv, "NegBin",
-            r=_col_or_none(offer_df, "Model R"), **zi,
+            model_weight,
+            model_ev,
+            books_ev,
+            cv,
+            "NegBin",
+            r=_col_or_none(offer_df, "Model R"),
+            **zi,
         )
         base_mean = r_blend * (1 - p_blend) / p_blend
         offer_df["Model R"] = r_blend
     else:
         alpha_blend, beta_blend, gate_blend = fused_loc(
-            model_weight, model_ev, books_ev, cv, "Gamma",
-            alpha=_col_or_none(offer_df, "Model Alpha"), **zi,
+            model_weight,
+            model_ev,
+            books_ev,
+            cv,
+            "Gamma",
+            alpha=_col_or_none(offer_df, "Model Alpha"),
+            **zi,
         )
         base_mean = alpha_blend / beta_blend
         offer_df["Model Alpha"] = alpha_blend
@@ -568,9 +606,7 @@ def _model_over_and_push(offer_df: pd.DataFrame, dist: str, cv: float, step, bas
         raw_under = get_odds(line, base_mean, dist, cv, alpha=alpha, step=step, r=r, gate=gate)
     # Push prob for integer-line discrete markets (continuous dists return zero);
     # correlation.py uses it for the Underdog "push drops one leg" rule.
-    push = get_push_prob(
-        line, base_mean, dist, cv=cv, r=r, sigma=sigma, skew_alpha=skew, gate=gate
-    )
+    push = get_push_prob(line, base_mean, dist, cv=cv, r=r, sigma=sigma, skew_alpha=skew, gate=gate)
     return 1 - raw_under, push
 
 
@@ -627,9 +663,7 @@ def model_prob(
     posthoc_slug = filedict.get("posthoc", "none")
     posthoc_blob = filedict.get("posthoc_blob", None)
     hist_gate = (
-        stat_zi.get(league, {}).get(market, 0)
-        if dist in ("ZINB", "ZAGamma", "SkewNormal")
-        else 0
+        stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma", "SkewNormal") else 0
     )
 
     prob_params = _build_prob_params(

@@ -5,6 +5,7 @@ over-probabilities (what the offline ship gates score); ``model_prob`` applies
 ``_apply_prob_posthoc`` to the live over-probabilities. If they diverge, a cell
 ships offline but behaves differently in production. These tests pin them together.
 """
+
 import numpy as np
 
 from sportstradamus.prediction.model_prob import _apply_prob_posthoc

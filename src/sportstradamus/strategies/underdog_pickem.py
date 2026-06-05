@@ -114,9 +114,7 @@ def _rivals_row_covered(row: pd.Series, players: list[str]) -> bool:
         if "vs." not in str(desc):
             continue
         sides = [s.strip() for s in str(desc).split("vs.")[:2]]
-        covered = sum(
-            1 for side in sides if any(side and side.split()[0] in p for p in players)
-        )
+        covered = sum(1 for side in sides if any(side and side.split()[0] in p for p in players))
         if covered < 2:
             _logger.warning("rivals candidate dropped: one-sided (%s)", desc)
             return False

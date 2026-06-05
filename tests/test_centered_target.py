@@ -109,7 +109,9 @@ def test_centered_eb_forward_subtracts_eb_prior():
     )
     expected = y - expected_eb
 
-    out = get_target_normalization("centered_additive_eb_meanyr_k10").forward(y, X, global_mean=10.0)
+    out = get_target_normalization("centered_additive_eb_meanyr_k10").forward(
+        y, X, global_mean=10.0
+    )
     np.testing.assert_allclose(out, expected, atol=1e-12)
 
 

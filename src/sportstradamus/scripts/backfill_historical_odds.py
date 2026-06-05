@@ -81,7 +81,9 @@ def _load_keys_and_props(league, markets):
     subset = {key: name for key, name in full.items() if name in want}
     missing = want - set(subset.values())
     if missing:
-        raise click.ClickException(f"markets not in stat_map[Odds API][{league}]: {sorted(missing)}")
+        raise click.ClickException(
+            f"markets not in stat_map[Odds API][{league}]: {sorted(missing)}"
+        )
     return apikey, {league: subset}
 
 
@@ -146,7 +148,9 @@ def _probe(apikey, props, league, sport_key, dates, snapshot_hour):
     archive = _CaptureArchive()
     for d in dates:
         click.echo(f"  fetching {d} (as-of {_as_of(d, snapshot_hour):%Y-%m-%d %H:%MZ})")
-        get_props(archive, apikey, props, date=_as_of(d, snapshot_hour), sport=league, key=sport_key)
+        get_props(
+            archive, apikey, props, date=_as_of(d, snapshot_hour), sport=league, key=sport_key
+        )
     click.echo("DRY RUN — per-market book-ev spread:")
     _report_dry_run(archive)
 
@@ -161,9 +165,13 @@ def _backfill(apikey, props, league, sport_key, dates, snapshot_hour):
 
     archive = Archive()
     for i, d in enumerate(remaining, 1):
-        click.echo(f"  [{i}/{len(remaining)}] {d} (as-of {_as_of(d, snapshot_hour):%Y-%m-%d %H:%MZ})")
+        click.echo(
+            f"  [{i}/{len(remaining)}] {d} (as-of {_as_of(d, snapshot_hour):%Y-%m-%d %H:%MZ})"
+        )
         try:
-            get_props(archive, apikey, props, date=_as_of(d, snapshot_hour), sport=league, key=sport_key)
+            get_props(
+                archive, apikey, props, date=_as_of(d, snapshot_hour), sport=league, key=sport_key
+            )
         except OddsAPIAuthError as e:
             click.echo(f"STOP (401): {e}")
             click.echo(
@@ -195,7 +203,9 @@ def main(league, markets, start, end, snapshot_hour, max_dates, dry_run):
     apikey, props = _load_keys_and_props(league, markets)
     sport_key = ODDS_API_SPORT_KEYS[league]
     dates = _game_dates(league, markets, start, end)
-    click.echo(f"{league}: {len(dates)} archived game-date(s) {start}..{end}, markets={list(props[league].values())}")
+    click.echo(
+        f"{league}: {len(dates)} archived game-date(s) {start}..{end}, markets={list(props[league].values())}"
+    )
 
     if dry_run:
         _probe(apikey, props, league, sport_key, dates[: max_dates or len(dates)], snapshot_hour)

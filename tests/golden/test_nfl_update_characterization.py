@@ -26,12 +26,38 @@ import sportstradamus.stats.nfl as nfl_mod
 from sportstradamus.stats.nfl import StatsNFL
 
 _COLS = [
-    "player_id", "player_display_name", "position_group", "team", "season", "week", "season_type",
-    "completions", "attempts", "passing_yards", "passing_tds", "interceptions", "sacks",
-    "sack_fumbles", "sack_fumbles_lost", "passing_2pt_conversions", "carries", "rushing_yards",
-    "rushing_tds", "rushing_fumbles", "rushing_fumbles_lost", "rushing_2pt_conversions",
-    "receptions", "targets", "receiving_yards", "receiving_tds", "receiving_fumbles",
-    "receiving_fumbles_lost", "receiving_2pt_conversions", "target_share", "air_yards_share", "wopr",
+    "player_id",
+    "player_display_name",
+    "position_group",
+    "team",
+    "season",
+    "week",
+    "season_type",
+    "completions",
+    "attempts",
+    "passing_yards",
+    "passing_tds",
+    "interceptions",
+    "sacks",
+    "sack_fumbles",
+    "sack_fumbles_lost",
+    "passing_2pt_conversions",
+    "carries",
+    "rushing_yards",
+    "rushing_tds",
+    "rushing_fumbles",
+    "rushing_fumbles_lost",
+    "rushing_2pt_conversions",
+    "receptions",
+    "targets",
+    "receiving_yards",
+    "receiving_tds",
+    "receiving_fumbles",
+    "receiving_fumbles_lost",
+    "receiving_2pt_conversions",
+    "target_share",
+    "air_yards_share",
+    "wopr",
 ]
 
 
@@ -43,39 +69,93 @@ class _FakeDatetime(_dt.datetime):
 
 def _player_stats_df():
     row = dict.fromkeys(_COLS, 0)
-    row.update({
-        "player_id": "00-1", "player_display_name": "Test QB", "position_group": "QB", "team": "KC",
-        "season": 2024, "week": 1, "season_type": "REG", "completions": 25, "attempts": 35,
-        "passing_yards": 300, "passing_tds": 3, "carries": 4, "rushing_yards": 20, "rushing_tds": 1,
-    })
+    row.update(
+        {
+            "player_id": "00-1",
+            "player_display_name": "Test QB",
+            "position_group": "QB",
+            "team": "KC",
+            "season": 2024,
+            "week": 1,
+            "season_type": "REG",
+            "completions": 25,
+            "attempts": 35,
+            "passing_yards": 300,
+            "passing_tds": 3,
+            "carries": 4,
+            "rushing_yards": 20,
+            "rushing_tds": 1,
+        }
+    )
     row["passing_interceptions"] = 1
     row["sacks_suffered"] = 2
     return pd.DataFrame([row])
 
 
 def _snaps_df():
-    return pd.DataFrame([{
-        "game_id": "2024_01_BUF_KC", "pfr_game_id": "x", "season": 2024, "game_type": "REG",
-        "week": 1, "player": "Test QB", "pfr_player_id": "y", "position": "QB", "team": "KC",
-        "opponent": "BUF", "offense_snaps": 60, "offense_pct": 0.95, "defense_snaps": 0,
-        "defense_pct": 0.0, "st_snaps": 0, "st_pct": 0.0,
-    }])
+    return pd.DataFrame(
+        [
+            {
+                "game_id": "2024_01_BUF_KC",
+                "pfr_game_id": "x",
+                "season": 2024,
+                "game_type": "REG",
+                "week": 1,
+                "player": "Test QB",
+                "pfr_player_id": "y",
+                "position": "QB",
+                "team": "KC",
+                "opponent": "BUF",
+                "offense_snaps": 60,
+                "offense_pct": 0.95,
+                "defense_snaps": 0,
+                "defense_pct": 0.0,
+                "st_snaps": 0,
+                "st_pct": 0.0,
+            }
+        ]
+    )
 
 
 def _sched_df():
-    return pd.DataFrame([
-        {"away_team": "BUF", "home_team": "KC", "gameday": "2024-09-08", "weekday": "Sunday",
-         "gametime": "13:00", "week": 1, "game_id": "2024_01_BUF_KC"},
-        {"away_team": "NYJ", "home_team": "KC", "gameday": "2024-09-15", "weekday": "Sunday",
-         "gametime": "16:00", "week": 2, "game_id": "2024_02_NYJ_KC"},
-    ])
+    return pd.DataFrame(
+        [
+            {
+                "away_team": "BUF",
+                "home_team": "KC",
+                "gameday": "2024-09-08",
+                "weekday": "Sunday",
+                "gametime": "13:00",
+                "week": 1,
+                "game_id": "2024_01_BUF_KC",
+            },
+            {
+                "away_team": "NYJ",
+                "home_team": "KC",
+                "gameday": "2024-09-15",
+                "weekday": "Sunday",
+                "gametime": "16:00",
+                "week": 2,
+                "game_id": "2024_02_NYJ_KC",
+            },
+        ]
+    )
 
 
 def _ids_df():
-    return pd.DataFrame([{
-        "name": "Test QB", "gsis_id": "00-1", "position": "QB", "team": "KCC",
-        "age": 28.0, "height": 75, "weight": 220,
-    }])
+    return pd.DataFrame(
+        [
+            {
+                "name": "Test QB",
+                "gsis_id": "00-1",
+                "position": "QB",
+                "team": "KCC",
+                "age": 28.0,
+                "height": 75,
+                "weight": 220,
+            }
+        ]
+    )
 
 
 class _Loadable:
@@ -102,24 +182,46 @@ def _fake_parse_pbp(self, week, team, season, player=None):
 @pytest.fixture
 def updated(monkeypatch):
     monkeypatch.setattr(nfl_mod, "datetime", _FakeDatetime)
-    monkeypatch.setattr(nfl_mod, "nflr", type("NFLR", (), {
-        "load_player_stats": staticmethod(lambda: _Loadable(_player_stats_df())),
-        "load_snap_counts": staticmethod(lambda: _Loadable(_snaps_df())),
-    }))
-    monkeypatch.setattr(nfl_mod, "nfl", type("NFL", (), {
-        "import_schedules": staticmethod(lambda yrs: _sched_df()),
-        "import_ids": staticmethod(lambda: _ids_df()),
-    }))
+    monkeypatch.setattr(
+        nfl_mod,
+        "nflr",
+        type(
+            "NFLR",
+            (),
+            {
+                "load_player_stats": staticmethod(lambda: _Loadable(_player_stats_df())),
+                "load_snap_counts": staticmethod(lambda: _Loadable(_snaps_df())),
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        nfl_mod,
+        "nfl",
+        type(
+            "NFL",
+            (),
+            {
+                "import_schedules": staticmethod(lambda yrs: _sched_df()),
+                "import_ids": staticmethod(lambda: _ids_df()),
+            },
+        ),
+    )
     monkeypatch.setattr(nfl_mod, "clean_data", False)
     monkeypatch.setattr(base_mod, "archive", _FakeArchive())
     monkeypatch.setattr(StatsNFL, "parse_pbp", _fake_parse_pbp)
     captured = {}
-    monkeypatch.setattr(nfl_mod, "write_gamelog", lambda key, g, t, p: captured.update(
-        {"key": key, "gamelog": g.copy(), "teamlog": t.copy(), "players": p}))
+    monkeypatch.setattr(
+        nfl_mod,
+        "write_gamelog",
+        lambda key, g, t, p: captured.update(
+            {"key": key, "gamelog": g.copy(), "teamlog": t.copy(), "players": p}
+        ),
+    )
 
     s = StatsNFL()
-    s.gamelog = pd.DataFrame(columns=["season", "week", "player id", "opponent", "home",
-                                      "game id", "gameday"])
+    s.gamelog = pd.DataFrame(
+        columns=["season", "week", "player id", "opponent", "home", "game id", "gameday"]
+    )
     s.teamlog = pd.DataFrame(columns=["season", "week", "team", "gameday"])
     s.players = pd.DataFrame()
     s.update()
@@ -135,16 +237,56 @@ def test_update_gamelog_shape_and_columns(updated):
     g = updated["gamelog"]
     assert g.shape == (1, 50)
     assert set(g.columns) == {
-        "season", "week", "player id", "opponent", "home", "game id", "gameday",
-        "player display name", "position", "team", "season type", "completions", "attempts",
-        "passing yards", "passing tds", "interceptions", "sacks", "sack fumbles",
-        "sack fumbles lost", "passing 2pt conversions", "carries", "rushing yards", "rushing tds",
-        "rushing fumbles", "rushing fumbles lost", "rushing 2pt conversions", "receptions",
-        "targets", "receiving yards", "receiving tds", "receiving fumbles", "receiving fumbles lost",
-        "receiving 2pt conversions", "target share", "air yards share", "wopr", "snap pct",
-        "fumbles", "fumbles lost", "yards", "qb yards", "tds", "qb tds",
-        "fantasy points prizepicks", "fantasy points underdog", "fantasy points parlayplay",
-        "yards per target", "moneyline", "totals", "air yards",
+        "season",
+        "week",
+        "player id",
+        "opponent",
+        "home",
+        "game id",
+        "gameday",
+        "player display name",
+        "position",
+        "team",
+        "season type",
+        "completions",
+        "attempts",
+        "passing yards",
+        "passing tds",
+        "interceptions",
+        "sacks",
+        "sack fumbles",
+        "sack fumbles lost",
+        "passing 2pt conversions",
+        "carries",
+        "rushing yards",
+        "rushing tds",
+        "rushing fumbles",
+        "rushing fumbles lost",
+        "rushing 2pt conversions",
+        "receptions",
+        "targets",
+        "receiving yards",
+        "receiving tds",
+        "receiving fumbles",
+        "receiving fumbles lost",
+        "receiving 2pt conversions",
+        "target share",
+        "air yards share",
+        "wopr",
+        "snap pct",
+        "fumbles",
+        "fumbles lost",
+        "yards",
+        "qb yards",
+        "tds",
+        "qb tds",
+        "fantasy points prizepicks",
+        "fantasy points underdog",
+        "fantasy points parlayplay",
+        "yards per target",
+        "moneyline",
+        "totals",
+        "air yards",
     }
 
 

@@ -300,6 +300,7 @@ def _compute_live_metrics(history: pd.DataFrame, *, now: datetime | None = None)
 
     return _enforce_live_metrics_dtypes(pd.DataFrame(rows))
 
+
 @click.command()
 @click.option("--league", default=None, help="Resolve only this league (default: all).")
 @click.option(

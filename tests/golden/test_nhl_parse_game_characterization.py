@@ -20,50 +20,127 @@ import sportstradamus.stats.nhl as nhl_mod
 from sportstradamus.stats.nhl import StatsNHL
 
 _TEAM_COLS = [
-    "OffIce_F_shotAttempts", "OffIce_F_unblockedShotAttempts", "OffIce_F_hits",
-    "OffIce_F_takeaways", "OffIce_F_penalityMinutes", "OffIce_shotAttempts_For_Percentage",
-    "OffIce_unblockedShotAttempts_For_Percentage", "OffIce_hits_For_Percentage",
-    "OffIce_takeaways_For_Percentage", "OffIce_penalityMinutes_For_Percentage",
-    "OffIce_A_blockedShotAttempts", "OffIce_A_shotAttempts",
-    "OffIce_F_flurryScoreVenueAdjustedxGoals", "OffIce_A_flurryScoreVenueAdjustedxGoals",
-    "OffIce_A_goals", "OffIce_F_goals", "OffIce_A_shotsOnGoal", "OffIce_A_savedShotsOnGoal",
-    "OffIce_A_freeze", "OffIce_A_xFreeze", "OffIce_A_rebounds", "OffIce_A_xRebounds",
-    "OffIce_A_reboundGoals", "OffIce_A_reboundxGoals", "OffIce_F_iceTime", "OffIce_F_shotsOnGoal",
+    "OffIce_F_shotAttempts",
+    "OffIce_F_unblockedShotAttempts",
+    "OffIce_F_hits",
+    "OffIce_F_takeaways",
+    "OffIce_F_penalityMinutes",
+    "OffIce_shotAttempts_For_Percentage",
+    "OffIce_unblockedShotAttempts_For_Percentage",
+    "OffIce_hits_For_Percentage",
+    "OffIce_takeaways_For_Percentage",
+    "OffIce_penalityMinutes_For_Percentage",
+    "OffIce_A_blockedShotAttempts",
+    "OffIce_A_shotAttempts",
+    "OffIce_F_flurryScoreVenueAdjustedxGoals",
+    "OffIce_A_flurryScoreVenueAdjustedxGoals",
+    "OffIce_A_goals",
+    "OffIce_F_goals",
+    "OffIce_A_shotsOnGoal",
+    "OffIce_A_savedShotsOnGoal",
+    "OffIce_A_freeze",
+    "OffIce_A_xFreeze",
+    "OffIce_A_rebounds",
+    "OffIce_A_xRebounds",
+    "OffIce_A_reboundGoals",
+    "OffIce_A_reboundxGoals",
+    "OffIce_F_iceTime",
+    "OffIce_F_shotsOnGoal",
 ]
 _SKATER_COLS = [
-    "I_F_points", "I_F_shotsOnGoal", "I_A_blockedShotAttempts", "I_F_goals",
-    "I_F_primaryAssists", "I_F_secondaryAssists", "I_F_hits", "I_F_faceOffsWon", "I_F_iceTime",
-    "OnIce_A_savedShotsOnGoal", "OnIce_A_shotsOnGoal", "OnIce_A_goals", "I_F_shotAttempts",
-    "I_F_flurryScoreVenueAdjustedxGoals", "OnIce_unblockedShotAttempts_For_Percentage",
-    "OnIce_A_flurryScoreVenueAdjustedxGoals", "OnIce_A_freeze", "OnIce_A_xFreeze",
-    "OnIce_A_rebounds", "OnIce_A_xRebounds", "OnIce_A_reboundGoals", "OnIce_A_reboundxGoals",
+    "I_F_points",
+    "I_F_shotsOnGoal",
+    "I_A_blockedShotAttempts",
+    "I_F_goals",
+    "I_F_primaryAssists",
+    "I_F_secondaryAssists",
+    "I_F_hits",
+    "I_F_faceOffsWon",
+    "I_F_iceTime",
+    "OnIce_A_savedShotsOnGoal",
+    "OnIce_A_shotsOnGoal",
+    "OnIce_A_goals",
+    "I_F_shotAttempts",
+    "I_F_flurryScoreVenueAdjustedxGoals",
+    "OnIce_unblockedShotAttempts_For_Percentage",
+    "OnIce_A_flurryScoreVenueAdjustedxGoals",
+    "OnIce_A_freeze",
+    "OnIce_A_xFreeze",
+    "OnIce_A_rebounds",
+    "OnIce_A_xRebounds",
+    "OnIce_A_reboundGoals",
+    "OnIce_A_reboundxGoals",
 ]
 _ALL_NUM = _TEAM_COLS + _SKATER_COLS
 
 
 def _row(situation, position, team, playerName, playerId, **over):
     r = dict.fromkeys(_ALL_NUM, 1.0)
-    r.update({"situation": situation, "position": position, "team": team,
-              "playerName": playerName, "playerId": playerId})
+    r.update(
+        {
+            "situation": situation,
+            "position": position,
+            "team": team,
+            "playerName": playerName,
+            "playerId": playerId,
+        }
+    )
     r.update(over)
     return r
 
 
 def _game_df():
-    return pd.DataFrame([
-        _row("all", "Team Level", "BOS", "BOS", 0, OffIce_F_iceTime=3600.0,
-             OffIce_F_shotsOnGoal=30.0, OffIce_A_shotsOnGoal=28.0, OffIce_A_shotAttempts=50.0,
-             OffIce_F_shotAttempts=55.0, OffIce_F_goals=3.0, OffIce_A_goals=2.0),
-        _row("all", "Team Level", "MTL", "MTL", 0, OffIce_F_iceTime=3600.0,
-             OffIce_F_shotsOnGoal=28.0, OffIce_A_shotsOnGoal=30.0, OffIce_A_shotAttempts=55.0,
-             OffIce_F_shotAttempts=50.0, OffIce_F_goals=2.0, OffIce_A_goals=3.0),
-        _row("all", "C", "BOS", "Skater One", 1001, I_F_iceTime=1200.0, I_F_shotAttempts=5.0,
-             OnIce_A_shotsOnGoal=10.0, I_F_goals=2.0, I_F_points=4.0, I_F_shotsOnGoal=6.0,
-             I_F_primaryAssists=1.0, I_F_secondaryAssists=1.0, I_F_hits=3.0),
-        _row("all", "G", "BOS", "Bos Goalie", 1003, I_F_iceTime=3600.0),
-        _row("all", "G", "MTL", "Mtl Goalie", 2003, I_F_iceTime=3600.0),
-        _row("5on4", "C", "BOS", "Skater One", 1001, I_F_points=2.0),
-    ])
+    return pd.DataFrame(
+        [
+            _row(
+                "all",
+                "Team Level",
+                "BOS",
+                "BOS",
+                0,
+                OffIce_F_iceTime=3600.0,
+                OffIce_F_shotsOnGoal=30.0,
+                OffIce_A_shotsOnGoal=28.0,
+                OffIce_A_shotAttempts=50.0,
+                OffIce_F_shotAttempts=55.0,
+                OffIce_F_goals=3.0,
+                OffIce_A_goals=2.0,
+            ),
+            _row(
+                "all",
+                "Team Level",
+                "MTL",
+                "MTL",
+                0,
+                OffIce_F_iceTime=3600.0,
+                OffIce_F_shotsOnGoal=28.0,
+                OffIce_A_shotsOnGoal=30.0,
+                OffIce_A_shotAttempts=55.0,
+                OffIce_F_shotAttempts=50.0,
+                OffIce_F_goals=2.0,
+                OffIce_A_goals=3.0,
+            ),
+            _row(
+                "all",
+                "C",
+                "BOS",
+                "Skater One",
+                1001,
+                I_F_iceTime=1200.0,
+                I_F_shotAttempts=5.0,
+                OnIce_A_shotsOnGoal=10.0,
+                I_F_goals=2.0,
+                I_F_points=4.0,
+                I_F_shotsOnGoal=6.0,
+                I_F_primaryAssists=1.0,
+                I_F_secondaryAssists=1.0,
+                I_F_hits=3.0,
+            ),
+            _row("all", "G", "BOS", "Bos Goalie", 1003, I_F_iceTime=3600.0),
+            _row("all", "G", "MTL", "Mtl Goalie", 2003, I_F_iceTime=3600.0),
+            _row("5on4", "C", "BOS", "Skater One", 1001, I_F_points=2.0),
+        ]
+    )
 
 
 class _Resp:
@@ -74,13 +151,26 @@ class _Resp:
 
 @pytest.fixture
 def parsed(monkeypatch):
-    monkeypatch.setattr(nhl_mod, "scraper", type("S", (), {"get": staticmethod(lambda url: {
-        "season": 20242025,
-        "awayTeam": {"abbrev": "MTL", "score": 2},
-        "homeTeam": {"abbrev": "BOS", "score": 3},
-    })})())
-    monkeypatch.setattr(nhl_mod, "requests",
-                        type("R", (), {"get": staticmethod(lambda url: _Resp(_game_df()))}))
+    monkeypatch.setattr(
+        nhl_mod,
+        "scraper",
+        type(
+            "S",
+            (),
+            {
+                "get": staticmethod(
+                    lambda url: {
+                        "season": 20242025,
+                        "awayTeam": {"abbrev": "MTL", "score": 2},
+                        "homeTeam": {"abbrev": "BOS", "score": 3},
+                    }
+                )
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        nhl_mod, "requests", type("R", (), {"get": staticmethod(lambda url: _Resp(_game_df()))})
+    )
     gamelog, teamlog = StatsNHL().parse_game("G1", "2024-10-31")
     return {"gamelog": gamelog, "teamlog": teamlog}
 
@@ -130,11 +220,32 @@ def test_parse_game_skater_row(parsed):
 
 
 def test_parse_game_empty_on_non_200(monkeypatch):
-    monkeypatch.setattr(nhl_mod, "scraper", type("S", (), {"get": staticmethod(lambda url: {
-        "season": 20242025, "awayTeam": {"abbrev": "MTL", "score": 2},
-        "homeTeam": {"abbrev": "BOS", "score": 3}})})())
-    monkeypatch.setattr(nhl_mod, "requests",
-                        type("R", (), {"get": staticmethod(lambda url: type("E", (), {"status_code": 404, "text": ""})())}))
+    monkeypatch.setattr(
+        nhl_mod,
+        "scraper",
+        type(
+            "S",
+            (),
+            {
+                "get": staticmethod(
+                    lambda url: {
+                        "season": 20242025,
+                        "awayTeam": {"abbrev": "MTL", "score": 2},
+                        "homeTeam": {"abbrev": "BOS", "score": 3},
+                    }
+                )
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        nhl_mod,
+        "requests",
+        type(
+            "R",
+            (),
+            {"get": staticmethod(lambda url: type("E", (), {"status_code": 404, "text": ""})())},
+        ),
+    )
     gamelog, teamlog = StatsNHL().parse_game("G1", "2024-10-31")
     assert gamelog == []
     assert teamlog == []

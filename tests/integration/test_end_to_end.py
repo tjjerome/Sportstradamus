@@ -194,9 +194,7 @@ def test_pipeline_smoke(
         "sportstradamus.strategies.underdog_pickem.build_entries_from_scored",
         lambda *args, **kwargs: [],
     )
-    monkeypatch.setattr(
-        prediction_cli, "write_current_pickem", pickem_snapshot_calls.append
-    )
+    monkeypatch.setattr(prediction_cli, "write_current_pickem", pickem_snapshot_calls.append)
 
     # Skip writing prediction history to data/history.dat.
     def _noop_write(_df):

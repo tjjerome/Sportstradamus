@@ -1,4 +1,5 @@
 """Unit tests for the post-hoc corrector registry (training/posthoc.py)."""
+
 import numpy as np
 import pytest
 from scipy.special import expit, logit
