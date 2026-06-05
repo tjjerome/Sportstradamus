@@ -1353,7 +1353,6 @@ class StatsNFL(Stats):
 
         self.comps = comps
 
-
     def check_combo_markets(self, market, player, date=datetime.today().date()):
         return 0  # TODO reimplement this
         player_games = self.short_gamelog.loc[
@@ -1628,4 +1627,3 @@ class StatsNFL(Stats):
 
         # Defragment after 3-market loop's sequential .join / .loc column inserts.
         self.playerProfile = self.playerProfile.copy()
-

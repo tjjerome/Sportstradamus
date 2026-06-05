@@ -66,7 +66,7 @@ poetry run pytest tests/golden/
 REGENERATE_SNAPSHOTS=1 poetry run pytest tests/golden/test_cli_help.py
 ```
 
-Python 3.11 required. PyTorch CPU-only (2.1.2) via custom Poetry source.
+Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
 
 ## Package structure (canonical paths)
 

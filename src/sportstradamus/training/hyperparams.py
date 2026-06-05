@@ -28,9 +28,10 @@ def warm_start_hyper_opt(
     silence=True,
 ):
     """Run a shortened hyper_opt seeded with previous best parameters."""
+    # Deferred: lightgbm and optuna are heavy; keeping them out of the top-level
+    # import keeps dashboard startup fast (training/ is not imported by the dashboard).
     import lightgbm as lgb
     import optuna
-    from optuna.integration import LightGBMPruningCallback
     from optuna.samplers import TPESampler
 
     tunable_params = {k for k, v in hp_dict.items() if v[0] != "none"}
@@ -55,7 +56,11 @@ def warm_start_hyper_opt(
         if "boosting" not in hyper_params:
             hyper_params["boosting"] = trial.suggest_categorical("boosting", ["gbdt"])
 
-        pruning_callback = LightGBMPruningCallback(trial, model.dist.loss_fn)
+        # optuna 3.5's LightGBMPruningCallback hardcodes the cv validation name to
+        # "cv_agg", but lightgbm >=4.6 reports cv eval results under "valid", so the
+        # callback can never match and raises. Run without cross-trial pruning;
+        # early stopping still bounds each trial and the seeded params are evaluated
+        # first, so the selected hyperparameters are unaffected.
         early_stopping_callback = lgb.early_stopping(
             stopping_rounds=early_stopping_rounds, verbose=False
         )
@@ -65,7 +70,7 @@ def warm_start_hyper_opt(
             train_set,
             num_boost_round=num_boost_round,
             nfold=nfold,
-            callbacks=[pruning_callback, early_stopping_callback],
+            callbacks=[early_stopping_callback],
             seed=None,
         )
 
@@ -76,16 +81,12 @@ def warm_start_hyper_opt(
     if silence:
         optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-    sampler = TPESampler()
-    pruner = optuna.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=20)
     study = optuna.create_study(
-        sampler=sampler,
-        pruner=pruner,
+        sampler=TPESampler(),
         direction="minimize",
         study_name="LightGBMLSS Warm-Start Optimization",
     )
 
-    # Enqueue previous best params as the first trial
     seed_params = {k: v for k, v in initial_params.items() if k in tunable_params}
     seed_params["boosting"] = "gbdt"
     study.enqueue_trial(seed_params)

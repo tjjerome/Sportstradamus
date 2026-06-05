@@ -9,7 +9,6 @@ repository = "https://github.com/tjjerome/sportstradamus"
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.12"
-python-snappy = "^0.6.1"
 google-auth-oauthlib = ">=1.0.0"
 gspread = ">=5.8.0"
 mlb-statsapi = ">=1.6.1"
@@ -32,7 +31,7 @@ pytz = "^2023.3"
 scikit-learn = ">=1.5.0,<1.8.0"
 shap = ">=0.44.0,<0.45.0"
 lightgbmlss = ">=0.6"
-torch = {version = "2.1.2", source = "pytorch_cpu"}
+torch = {version = "2.9.1", source = "pytorch_cpu"}
 line-profiler = "^4.1.3"
 klepto = {extras = ["archives"], version = "^0.2.5"}
 nflreadpy = "^0.1.2"
@@ -53,7 +52,7 @@ reflect = "sportstradamus.nightly:run"
 ipykernel = "^6.23.1"
 sphinx-pdj-theme = "^0.4.0"
 sphinx-pyproject = "^0.1.0"
-lightgbm = ">=4.2.0,<4.3.0"
+lightgbm = ">=4.6.0,<4.7.0"
 pytest = "^9.0.3"
 matplotlib = "^3.7.1"
 optuna = ">=3.5.0,<3.6.0"
