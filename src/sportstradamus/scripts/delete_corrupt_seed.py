@@ -45,9 +45,7 @@ BLOWN_LINE_FACTOR = 5.0
 # COALESCE fallback when no line row exists — makes the line-relative check a no-op.
 _NO_LINE_SENTINEL = 1e30
 
-_MIDNIGHT_SEED = (
-    "date_part('hour', observed_at) = 0 AND date_part('minute', observed_at) = 0"
-)
+_MIDNIGHT_SEED = "date_part('hour', observed_at) = 0 AND date_part('minute', observed_at) = 0"
 
 # A row is magnitude-blown if its ev grossly exceeds the line (latest line per
 # date/entity) or, absent any line, an absolute ceiling.
@@ -83,9 +81,7 @@ _BLOWN_WHERE = f"league = ? AND market = ? AND ({_BLOWN_PREDICATE})"
 
 
 def _count(con, where: str, league: str, market: str) -> int:
-    return con.execute(
-        f"SELECT COUNT(*) FROM odds WHERE {where}", [league, market]
-    ).fetchone()[0]
+    return con.execute(f"SELECT COUNT(*) FROM odds WHERE {where}", [league, market]).fetchone()[0]
 
 
 def _delete(con, where: str, league: str, market: str) -> int:

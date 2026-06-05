@@ -9,6 +9,7 @@ convolution for the (count) TD market. The pass/rush correlation comes from the
 per-league correlation matrix; it is negative (game-script substitution), so an
 independence assumption overstates the combined variance.
 """
+
 import numpy as np
 from scipy.stats import norm
 
@@ -55,7 +56,12 @@ def derived_book_under_prob_row(row: dict, market: str, rho: float) -> float | N
         return None
     if market == "qb-yards":
         over = normal_sum_over_prob(
-            row["line"], pass_params["mu"], pass_params["sd"], rush_params["mu"], rush_params["sd"], rho
+            row["line"],
+            pass_params["mu"],
+            pass_params["sd"],
+            rush_params["mu"],
+            rush_params["sd"],
+            rho,
         )
     elif market == "qb-tds":
         over = count_sum_over_prob(row["line"], pass_params["pmf"], rush_params["pmf"])

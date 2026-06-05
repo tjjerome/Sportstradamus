@@ -33,20 +33,29 @@ _GAMES = [
 
 _AVAILABLE = [
     {
-        "sport": "NBA", "subject_id": "p1", "game_id": "g1", "wager_type": "Points",
+        "sport": "NBA",
+        "subject_id": "p1",
+        "game_id": "g1",
+        "wager_type": "Points",
         "options": [
             {"outcome": "over", "outcome_value": 25.5, "payout_multiplier": 1.0},
             {"outcome": "under", "outcome_value": 25.5, "payout_multiplier": 1.2},
         ],
     },
     {
-        "sport": "NBA", "subject_id": "p2", "game_id": "g1", "wager_type": "Rebounds",
+        "sport": "NBA",
+        "subject_id": "p2",
+        "game_id": "g1",
+        "wager_type": "Rebounds",
         "options": [
             {"outcome": "over", "outcome_value": 8.5, "payout_multiplier": 0.9},
         ],
     },
     {
-        "sport": "NBA", "subject_id": "ZZZ", "game_id": "g1", "wager_type": "Points",
+        "sport": "NBA",
+        "subject_id": "ZZZ",
+        "game_id": "g1",
+        "wager_type": "Points",
         "options": [
             {"outcome": "over", "outcome_value": 1.5, "payout_multiplier": 1.0},
         ],
@@ -55,7 +64,10 @@ _AVAILABLE = [
 
 _ALT = [
     {
-        "sport": "NBA", "subject_id": "p1", "game_id": "g1", "wager_type": "Assists",
+        "sport": "NBA",
+        "subject_id": "p1",
+        "game_id": "g1",
+        "wager_type": "Assists",
         "options": [
             {"outcome": "under", "outcome_value": 5.5, "payout_multiplier": 1.1},
         ],
@@ -88,19 +100,43 @@ class _FakeRequests:
 _EXPECTED = {
     "NBA": {
         "Points": [
-            {"Player": "Lebron James", "League": "NBA", "Team": "LAL", "Opponent": "BOS",
-             "Date": "2026-06-03", "Market": "Points", "Line": 25.5,
-             "Boost_Over": 1.0, "Boost_Under": 1.2},
+            {
+                "Player": "Lebron James",
+                "League": "NBA",
+                "Team": "LAL",
+                "Opponent": "BOS",
+                "Date": "2026-06-03",
+                "Market": "Points",
+                "Line": 25.5,
+                "Boost_Over": 1.0,
+                "Boost_Under": 1.2,
+            },
         ],
         "Rebounds": [
-            {"Player": "Jayson Tatum", "League": "NBA", "Team": "BOS", "Opponent": "LAL",
-             "Date": "2026-06-03", "Market": "Rebounds", "Line": 8.5,
-             "Boost_Over": 0.9, "Boost_Under": 0.0},
+            {
+                "Player": "Jayson Tatum",
+                "League": "NBA",
+                "Team": "BOS",
+                "Opponent": "LAL",
+                "Date": "2026-06-03",
+                "Market": "Rebounds",
+                "Line": 8.5,
+                "Boost_Over": 0.9,
+                "Boost_Under": 0.0,
+            },
         ],
         "Assists": [
-            {"Player": "Lebron James", "League": "NBA", "Team": "LAL", "Opponent": "BOS",
-             "Date": "2026-06-03", "Market": "Assists", "Line": 5.5,
-             "Boost_Over": 0.0, "Boost_Under": 1.1},
+            {
+                "Player": "Lebron James",
+                "League": "NBA",
+                "Team": "LAL",
+                "Opponent": "BOS",
+                "Date": "2026-06-03",
+                "Market": "Assists",
+                "Line": 5.5,
+                "Boost_Over": 0.0,
+                "Boost_Under": 1.1,
+            },
         ],
     },
 }

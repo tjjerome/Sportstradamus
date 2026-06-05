@@ -1254,9 +1254,7 @@ class Stats:
         stats["MeanYr_nonzero"] = stats["MeanYr_nonzero"].fillna(stats["MeanYr"].clip(lower=0.5))
         stats["STD10"] = pg_last10.groupby(player_col)[market].std()
         stats["STDYr"] = playergames.groupby(player_col)[market].std()
-        last_date = pd.to_datetime(
-            playergames.groupby(player_col)[self.log_strings["date"]].last()
-        )
+        last_date = pd.to_datetime(playergames.groupby(player_col)[self.log_strings["date"]].last())
         stats["DaysOff"] = (pd.Timestamp(date) - last_date).dt.days
         stats["DaysIntoSeason"] = (date - self.season_start).days
         stats["GamesPlayed"] = playergames.groupby(player_col)[market].count()
@@ -1418,15 +1416,13 @@ class Stats:
         if is_pitch_market:
             comps = self.comps["pitchers"].get(pid, [pid])
             compGames = self.short_gamelog.loc[
-                self.short_gamelog["playerId"].isin(comps)
-                & self.short_gamelog["starting pitcher"]
+                self.short_gamelog["playerId"].isin(comps) & self.short_gamelog["starting pitcher"]
             ].copy()
             return None if compGames.empty else compGames
 
         comps = self.comps["hitters"].get(pid, [pid])
         compGames = self.short_gamelog.loc[
-            self.short_gamelog["playerId"].isin(comps)
-            & self.short_gamelog["starting batter"]
+            self.short_gamelog["playerId"].isin(comps) & self.short_gamelog["starting batter"]
         ].copy()
         if compGames.empty:
             return None
@@ -1492,9 +1488,7 @@ class Stats:
         # Mean distance to comps (player-side uniqueness signal -- not matchup-
         # dependent). Carried on defstats only because cached training matrices know
         # it under the ``Defense `` prefix.
-        defstats["comp distance"] = (
-            cp_df.groupby("player")["dist"].mean().reindex(defstats.index)
-        )
+        defstats["comp distance"] = cp_df.groupby("player")["dist"].mean().reindex(defstats.index)
         merged = cp_df.merge(
             gl_z[[player_col, opp_col, "_mkt_zscore"]],
             left_on=["comp", "opp"],

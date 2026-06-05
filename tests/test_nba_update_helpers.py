@@ -25,9 +25,20 @@ def _stats():
 
 def test_compute_derived_player_stats():
     game = {
-        "PTS": 20, "REB": 10, "AST": 5, "BLK": 2, "STL": 1, "TOV": 3,
-        "FTM": 4, "FGA": 15, "FG3A": 6, "FG3M": 2, "BLKA": 1,
-        "OREB": 3, "DREB": 7, "MIN": 30,
+        "PTS": 20,
+        "REB": 10,
+        "AST": 5,
+        "BLK": 2,
+        "STL": 1,
+        "TOV": 3,
+        "FTM": 4,
+        "FGA": 15,
+        "FG3A": 6,
+        "FG3M": 2,
+        "BLKA": 1,
+        "OREB": 3,
+        "DREB": 7,
+        "MIN": 30,
     }
     nba.StatsNBA._compute_derived_player_stats(game)
 
@@ -49,9 +60,20 @@ def test_compute_derived_player_stats():
 
 def test_compute_derived_player_stats_zero_denominators():
     game = {
-        "PTS": 0, "REB": 0, "AST": 0, "BLK": 0, "STL": 0, "TOV": 0,
-        "FTM": 0, "FGA": 0, "FG3A": 0, "FG3M": 0, "BLKA": 0,
-        "OREB": 0, "DREB": 0, "MIN": 1,
+        "PTS": 0,
+        "REB": 0,
+        "AST": 0,
+        "BLK": 0,
+        "STL": 0,
+        "TOV": 0,
+        "FTM": 0,
+        "FGA": 0,
+        "FG3A": 0,
+        "FG3M": 0,
+        "BLKA": 0,
+        "OREB": 0,
+        "DREB": 0,
+        "MIN": 1,
     }
     nba.StatsNBA._compute_derived_player_stats(game)
 
@@ -61,10 +83,12 @@ def test_compute_derived_player_stats_zero_denominators():
 
 
 def test_canonicalize_team_abbrevs():
-    df = pd.DataFrame({
-        "TEAM_ABBREVIATION": ["UTAH", "NOP", "GS", "NY", "SA", "BOS"],
-        "OPP": ["SA", "NY", "GS", "NOP", "UTAH", "BOS"],
-    })
+    df = pd.DataFrame(
+        {
+            "TEAM_ABBREVIATION": ["UTAH", "NOP", "GS", "NY", "SA", "BOS"],
+            "OPP": ["SA", "NY", "GS", "NOP", "UTAH", "BOS"],
+        }
+    )
     _stats()._canonicalize_team_abbrevs(df)
 
     assert list(df["TEAM_ABBREVIATION"]) == ["UTA", "NO", "GSW", "NYK", "SAS", "BOS"]
@@ -80,8 +104,13 @@ def test_merge_team_logs():
     sco_idx = {(1, "G1"): {"PCT_PTS_2PT": 0.5}}
     nba.StatsNBA._merge_team_logs(teamlog, adv_idx, sco_idx)
 
-    assert teamlog[0] == {"TEAM_ID": 1, "GAME_ID": "G1", "PTS": 100,
-                          "OFF_RATING": 110, "PCT_PTS_2PT": 0.5}
+    assert teamlog[0] == {
+        "TEAM_ID": 1,
+        "GAME_ID": "G1",
+        "PTS": 100,
+        "OFF_RATING": 110,
+        "PCT_PTS_2PT": 0.5,
+    }
     # Team 2 has no advanced/scoring entry — left untouched.
     assert teamlog[1] == {"TEAM_ID": 2, "GAME_ID": "G1", "PTS": 98}
 

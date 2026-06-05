@@ -814,7 +814,15 @@ class Archive:
         snapshot's as-of time so point-in-time training reads pick it up.
         """
         self._pending_odds.append(
-            (league, market, date, entity, book, float(ev), observed_at or datetime.datetime.utcnow())
+            (
+                league,
+                market,
+                date,
+                entity,
+                book,
+                float(ev),
+                observed_at or datetime.datetime.utcnow(),
+            )
         )
 
     def _stage_line(

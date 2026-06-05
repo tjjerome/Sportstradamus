@@ -43,15 +43,17 @@ def _dense_matrix() -> pd.DataFrame:
     archived = np.where(i % 5 < 2, 1, 0)
     meanyr = (i % 13).astype(float) + 1.0
     pos = np.where(i < 150, "RB", "WR")
-    return pd.DataFrame({
-        "DaysIntoSeason": days,
-        "Result": result,
-        "Line": line,
-        "Archived": archived,
-        "MeanYr": meanyr,
-        "Player position": pos,
-        "Date": pd.date_range("2024-01-01", periods=300, freq="D"),
-    })
+    return pd.DataFrame(
+        {
+            "DaysIntoSeason": days,
+            "Result": result,
+            "Line": line,
+            "Archived": archived,
+            "MeanYr": meanyr,
+            "Player position": pos,
+            "Date": pd.date_range("2024-01-01", periods=300, freq="D"),
+        }
+    )
 
 
 def _sparse_matrix() -> pd.DataFrame:
@@ -66,14 +68,16 @@ def _sparse_matrix() -> pd.DataFrame:
     line[push_idx] = result[push_idx]
     archived = np.where(i < 3, 1, 0)
     meanyr = (i % 7).astype(float) + 1.0
-    return pd.DataFrame({
-        "DaysIntoSeason": days,
-        "Result": result,
-        "Line": line,
-        "Archived": archived,
-        "MeanYr": meanyr,
-        "Date": pd.date_range("2024-02-01", periods=60, freq="D"),
-    })
+    return pd.DataFrame(
+        {
+            "DaysIntoSeason": days,
+            "Result": result,
+            "Line": line,
+            "Archived": archived,
+            "MeanYr": meanyr,
+            "Date": pd.date_range("2024-02-01", periods=60, freq="D"),
+        }
+    )
 
 
 def _sha(df: pd.DataFrame) -> str:

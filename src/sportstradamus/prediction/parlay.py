@@ -410,7 +410,9 @@ def _psd_or_none(SIG, legacy):
     return SIG
 
 
-def _parlay_payout_prob(p, push_legs, SIG, bet_size, boost, payout, full_payouts, payout_base, legacy):
+def _parlay_payout_prob(
+    p, push_legs, SIG, bet_size, boost, payout, full_payouts, payout_base, legacy
+):
     has_pushes = bool(np.any(push_legs > _PUSH_PROB_FLOOR))
     # Curves with payouts at multiple miss-counts (e.g. Underdog flex and
     # insurance) need the MC path even with zero pushes — the analytical
@@ -440,8 +442,18 @@ def _parlay_fun(bet, league):
 
 
 def _evaluate_parlay(
-    bet_id, bet_size, payout_base, g, full_payouts, max_boost,
-    bet_df, info, team, opp, leg_teams, legacy,
+    bet_id,
+    bet_size,
+    payout_base,
+    g,
+    full_payouts,
+    max_boost,
+    bet_df,
+    info,
+    team,
+    opp,
+    leg_teams,
+    legacy,
 ):
     """Score one parlay candidate; return its row dict, or None if it fails a gate."""
     C, M, p_model, p_books, p_push, boosts = g.C, g.M, g.p_model, g.p_books, g.p_push, g.boosts
@@ -560,12 +572,24 @@ def beam_search_parlays(
     for target_size in tqdm(
         range(2, max_bet_size + 1), desc=f"{info['League']}, {team}/{opp} Parlays", leave=False
     ):
-        top_candidates = _expand_candidates(candidates, leg_indices, leg_players, g.EV, target_size, K)
+        top_candidates = _expand_candidates(
+            candidates, leg_indices, leg_players, g.EV, target_size, K
+        )
         payout_base = payouts[target_size - 2]
         for parlay in top_candidates:
             result = _evaluate_parlay(
-                parlay, target_size, payout_base, g,
-                full_payouts, max_boost, bet_df, info, team, opp, leg_teams, legacy,
+                parlay,
+                target_size,
+                payout_base,
+                g,
+                full_payouts,
+                max_boost,
+                bet_df,
+                info,
+                team,
+                opp,
+                leg_teams,
+                legacy,
             )
             if result is not None:
                 all_results.append(result)

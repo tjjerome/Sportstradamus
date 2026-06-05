@@ -345,8 +345,11 @@ def _player_stardom(stats: _GameLegStats, families: list[float], player: str) ->
     All three numeric components are free proxies for "this is a featured player".
     """
     best_pct = max(
-        (_line_pct(stats, mk, ln)
-         for fam in families for _, mk, ln in stats.fam_legs[fam].get(player, [])),
+        (
+            _line_pct(stats, mk, ln)
+            for fam in families
+            for _, mk, ln in stats.fam_legs[fam].get(player, [])
+        ),
         default=0.0,
     )
     return (len(stats.player_markets[player]), best_pct, stats.player_total[player], player)

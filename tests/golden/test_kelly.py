@@ -215,9 +215,7 @@ def test_size_candidates_shrinks_filters_and_pairs():
             KellyCandidate(
                 "floor", win_prob=0.6, payout_multiplier=Decimal("3"), model_shrinkage=0.0
             ),
-            KellyCandidate(
-                "b", win_prob=0.65, payout_multiplier=Decimal("3"), model_shrinkage=0.5
-            ),
+            KellyCandidate("b", win_prob=0.65, payout_multiplier=Decimal("3"), model_shrinkage=0.5),
         ]
     )
     assert bet_ids == ["a", "b"]

@@ -45,8 +45,16 @@ def test_full_slate_drop_split_backfill_keep_sort():
 
     # Keep-column projection (in _OFFER_KEEP_COLS order); internal artifacts gone.
     assert list(out.columns) == [
-        "Player", "Boost", "Model", "Books", "Dist",
-        "Gate", "Model R", "Model Alpha", "Model Sigma", "Model Skew",
+        "Player",
+        "Boost",
+        "Model",
+        "Books",
+        "Dist",
+        "Gate",
+        "Model R",
+        "Model Alpha",
+        "Model Sigma",
+        "Model Skew",
     ]
     assert "Model Param" not in out.columns
     assert "Temperature" not in out.columns

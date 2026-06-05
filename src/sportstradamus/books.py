@@ -207,9 +207,7 @@ def _ud_rival_offer(o: dict, players: dict, matches: dict, ou_market: str) -> tu
         "Team": ABBR_MAP.get(player1["Team"], player1["Team"])
         + "/"
         + ABBR_MAP.get(player2["Team"], player2["Team"]),
-        "Opponent": ABBR_MAP.get(opponent1, opponent1)
-        + "/"
-        + ABBR_MAP.get(opponent2, opponent2),
+        "Opponent": ABBR_MAP.get(opponent1, opponent1) + "/" + ABBR_MAP.get(opponent2, opponent2),
         "Date": game1["Date"],
         "Market": "H2H " + bet,
         "Line": float(o["options"][0]["spread"]) - float(o["options"][1]["spread"]),
@@ -221,9 +219,7 @@ def _ud_rival_offer(o: dict, players: dict, matches: dict, ou_market: str) -> tu
     if "Fantasy" in ou_market and n["League"] == "MLB":
         pitchers = list(get_mlb_pitchers().values())
         n["Market"] = (
-            "H2H Pitcher Fantasy Points"
-            if n["Player"] in pitchers
-            else "H2H Hitter Fantasy Points"
+            "H2H Pitcher Fantasy Points" if n["Player"] in pitchers else "H2H Hitter Fantasy Points"
         )
     return n, bet
 
@@ -329,17 +325,19 @@ def _sleeper_prop_offers(prop: dict, players: dict, league: str, games: dict) ->
         outcomes = [x for x in all_outcomes if x["outcome_value"] == line]
         if len(outcomes) < 2:
             outcomes = [*outcomes, {}] if outcomes[0]["outcome"] == "over" else [{}, *outcomes]
-        offers.append({
-            "Player": player_name,
-            "League": league.upper(),
-            "Team": ABBR_MAP.get(player_team, player_team),
-            "Opponent": ABBR_MAP.get(opp, opp),
-            "Date": game_date,
-            "Market": prop["wager_type"],
-            "Line": line,
-            "Boost_Over": float(outcomes[0].get("payout_multiplier", 0)),
-            "Boost_Under": float(outcomes[1].get("payout_multiplier", 0)),
-        })
+        offers.append(
+            {
+                "Player": player_name,
+                "League": league.upper(),
+                "Team": ABBR_MAP.get(player_team, player_team),
+                "Opponent": ABBR_MAP.get(opp, opp),
+                "Date": game_date,
+                "Market": prop["wager_type"],
+                "Line": line,
+                "Boost_Over": float(outcomes[0].get("payout_multiplier", 0)),
+                "Boost_Under": float(outcomes[1].get("payout_multiplier", 0)),
+            }
+        )
     return offers
 
 

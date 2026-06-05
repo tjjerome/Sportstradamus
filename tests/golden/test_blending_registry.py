@@ -27,11 +27,18 @@ def test_nll_strategy_reproduces_fit_model_weight():
 
 def test_unknown_blending_slug_rejected():
     from sportstradamus.training import ship_config
+
     with pytest.raises(ValueError, match="unknown blending"):
         ship_config._validate_cell(
-            "NFL", "passing-tds",
-            {"shipped": "withheld", "dist": "ZINB",
-             "target_normalization": "none", "posthoc": "none", "blending": "bogus"},
+            "NFL",
+            "passing-tds",
+            {
+                "shipped": "withheld",
+                "dist": "ZINB",
+                "target_normalization": "none",
+                "posthoc": "none",
+                "blending": "bogus",
+            },
         )
 
 

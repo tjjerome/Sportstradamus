@@ -55,7 +55,5 @@ def test_clustered_ci_is_wider_on_correlated_panel():
     players = np.repeat(np.arange(40), 25)
     values = np.repeat(player_means, 25)  # constant within player
     _, lo_i, hi_i = _bootstrap_mean_ci(values, np.random.default_rng(1))
-    _, lo_c, hi_c = _bootstrap_mean_ci_clustered(
-        values, players, np.random.default_rng(1)
-    )
+    _, lo_c, hi_c = _bootstrap_mean_ci_clustered(values, players, np.random.default_rng(1))
     assert (hi_c - lo_c) > (hi_i - lo_i)

@@ -123,9 +123,7 @@ def _reference_load_head(stub, offers, market, date, rename_map, position_filter
         prob_params.sort_index(inplace=True)
         playerStats.sort_index(inplace=True)
         if position_filter is not None:
-            prob_params = prob_params.loc[
-                playerStats["Player position"].isin(position_filter)
-            ]
+            prob_params = prob_params.loc[playerStats["Player position"].isin(position_filter)]
     else:
         return
 
@@ -174,7 +172,10 @@ def _assert_match(
 def _params(index, columns):
     # Distinct, deterministic values so a misrouted rename/drop is visible.
     return pd.DataFrame(
-        {c: [round(0.1 * (j + 1) + i, 3) for i in range(len(index))] for j, c in enumerate(columns)},
+        {
+            c: [round(0.1 * (j + 1) + i, 3) for i in range(len(index))]
+            for j, c in enumerate(columns)
+        },
         index=index,
     )
 
@@ -201,8 +202,13 @@ def test_nhl_skewnormal_map():
         "alpha": "proj timeOnIce alpha",
     }
     _assert_match(
-        "NHL", "timeOnIce", player_stats, player_profile,
-        ["Home", "Player position", "f1"], params, rename_map,
+        "NHL",
+        "timeOnIce",
+        player_stats,
+        player_profile,
+        ["Home", "Player position", "f1"],
+        params,
+        rename_map,
     )
 
 
@@ -219,16 +225,19 @@ def test_mlb_rate_map_without_player_position():
         "scale": "proj plateAppearances std",
     }
     _assert_match(
-        "MLB", "plateAppearances", player_stats, player_profile,
-        ["Home", "f1"], params, rename_map,
+        "MLB",
+        "plateAppearances",
+        player_stats,
+        player_profile,
+        ["Home", "f1"],
+        params,
+        rename_map,
     )
 
 
 def test_mlb_loc_map_without_player_position():
     idx = ["A", "B", "C"]
-    player_stats = pd.DataFrame(
-        {"Home": [1, 0, 1], "f1": [0.4, 0.5, 0.6]}, index=idx
-    )
+    player_stats = pd.DataFrame({"Home": [1, 0, 1], "f1": [0.4, 0.5, 0.6]}, index=idx)
     player_profile = pd.DataFrame({"keep": [1, 2, 3]}, index=idx)
     params = _params(idx, ["loc", "scale", "gate"])
     rename_map = {
@@ -237,8 +246,13 @@ def test_mlb_loc_map_without_player_position():
         "scale": "proj plateAppearances std",
     }
     _assert_match(
-        "MLB", "plateAppearances", player_stats, player_profile,
-        ["Home", "f1"], params, rename_map,
+        "MLB",
+        "plateAppearances",
+        player_stats,
+        player_profile,
+        ["Home", "f1"],
+        params,
+        rename_map,
     )
 
 
@@ -263,8 +277,13 @@ def test_nfl_position_filter_drops_out_of_position_players():
         "alpha": "proj carries alpha",
     }
     _assert_match(
-        "NFL", "carries", player_stats, player_profile,
-        ["Home", "Player position", "f1"], params, rename_map,
+        "NFL",
+        "carries",
+        player_stats,
+        player_profile,
+        ["Home", "Player position", "f1"],
+        params,
+        rename_map,
         position_filter=[1, 3],
     )
 

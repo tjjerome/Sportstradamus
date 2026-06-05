@@ -53,10 +53,12 @@ def _records(league, log, latest_date):
     rows = []
     for i, x in enumerate([1, 2, 3, 4, 5, 6]):
         d = today - _dt.timedelta(days=10 + i)
-        rows.append({"TEAM": "AAA", "DATE": d, "x": float(x), "y": float(2 * x + 1),
-                     "_OPP_x": float(7 - x)})
-        rows.append({"TEAM": "BBB", "DATE": d, "x": float(7 - x), "y": float(x * x),
-                     "_OPP_x": float(x)})
+        rows.append(
+            {"TEAM": "AAA", "DATE": d, "x": float(x), "y": float(2 * x + 1), "_OPP_x": float(7 - x)}
+        )
+        rows.append(
+            {"TEAM": "BBB", "DATE": d, "x": float(7 - x), "y": float(x * x), "_OPP_x": float(x)}
+        )
     return rows
 
 
@@ -65,8 +67,9 @@ def outputs(monkeypatch):
     league_dir = Path(str(pkg_resources.files(_data) / "leagues" / "nba"))
     raw = Path(str(pkg_resources.files(_data) / "training_data" / "NBA_corr.parquet"))
     targets = ["corr_metadata.json", "corr_same_team.parquet", "corr_opposing.parquet"]
-    saved = {n: (league_dir / n).read_bytes() if (league_dir / n).is_file() else None
-             for n in targets}
+    saved = {
+        n: (league_dir / n).read_bytes() if (league_dir / n).is_file() else None for n in targets
+    }
     saved_raw = raw.read_bytes() if raw.is_file() else None
     monkeypatch.setattr(corr_mod, "_build_team_game_records", _records)
     try:
@@ -90,10 +93,14 @@ def outputs(monkeypatch):
 
 def test_same_team_blocks(outputs):
     expected = {
-        ("AAA", "x", "x"): 0.2, ("AAA", "x", "y"): 0.2,
-        ("AAA", "y", "x"): 0.2, ("AAA", "y", "y"): 0.2,
-        ("BBB", "x", "x"): 0.2, ("BBB", "x", "y"): -0.2,
-        ("BBB", "y", "x"): -0.2, ("BBB", "y", "y"): 0.2,
+        ("AAA", "x", "x"): 0.2,
+        ("AAA", "x", "y"): 0.2,
+        ("AAA", "y", "x"): 0.2,
+        ("AAA", "y", "y"): 0.2,
+        ("BBB", "x", "x"): 0.2,
+        ("BBB", "x", "y"): -0.2,
+        ("BBB", "y", "x"): -0.2,
+        ("BBB", "y", "y"): 0.2,
     }
     assert set(outputs["same"]) == set(expected)
     for k, v in expected.items():
@@ -102,8 +109,10 @@ def test_same_team_blocks(outputs):
 
 def test_opposing_blocks(outputs):
     expected = {
-        ("AAA", "x", "x"): -0.2, ("AAA", "y", "x"): -0.2,
-        ("BBB", "x", "x"): -0.2, ("BBB", "y", "x"): 0.2,
+        ("AAA", "x", "x"): -0.2,
+        ("AAA", "y", "x"): -0.2,
+        ("BBB", "x", "x"): -0.2,
+        ("BBB", "y", "x"): 0.2,
     }
     assert set(outputs["opp"]) == set(expected)
     for k, v in expected.items():

@@ -60,6 +60,10 @@ def test_derived_book_qb_tds_dispatch():
     # Exercise the qb-tds branch through the adapter: count_sum dispatch, the
     # ["pmf"] key extraction, and the 1-over inversion. conv([.3,.7],[.4,.6]) =
     # [.12,.46,.42]; line 0.5 => P(total>=1)=.88 over => under .12.
-    row = {"line": 0.5, "pass": {"pmf": np.array([0.3, 0.7])}, "rush": {"pmf": np.array([0.4, 0.6])}}
+    row = {
+        "line": 0.5,
+        "pass": {"pmf": np.array([0.3, 0.7])},
+        "rush": {"pmf": np.array([0.4, 0.6])},
+    }
     under = derived_book_under_prob_row(row, market="qb-tds", rho=0.0)
     assert abs(under - 0.12) < 1e-9

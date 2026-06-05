@@ -40,14 +40,18 @@ class _FakeStats:
 
 
 def _history():
-    return pd.DataFrame({
-        "League": ["NBA", "NBA"],
-        "Market": ["PTS", "REB"],
-        "Date": ["2025-01-01", "2025-01-02"],
-        "Offers": [[(10.0, 1.0, "Underdog", "Over", 0.6, 0.5, 0.0, 0.0, 0.0)],
-                   [(8.0, 1.0, "Underdog", "Under", 0.55, 0.5, 0.0, 0.0, 0.0)]],
-        "Actual": [np.nan, np.nan],
-    })
+    return pd.DataFrame(
+        {
+            "League": ["NBA", "NBA"],
+            "Market": ["PTS", "REB"],
+            "Date": ["2025-01-01", "2025-01-02"],
+            "Offers": [
+                [(10.0, 1.0, "Underdog", "Over", 0.6, 0.5, 0.0, 0.0, 0.0)],
+                [(8.0, 1.0, "Underdog", "Under", 0.55, 0.5, 0.0, 0.0, 0.0)],
+            ],
+            "Actual": [np.nan, np.nan],
+        }
+    )
 
 
 def _resolve_history(history, stats):
@@ -66,14 +70,16 @@ def meta(monkeypatch):
     monkeypatch.setattr(nightly.clv, "fill_from_archive", lambda h, a: h)
     monkeypatch.setattr(nightly.clv, "summarize", lambda h, archive=None: {"n": 0})
     monkeypatch.setattr(nightly.clv, "persist_segments", lambda s: None)
-    monkeypatch.setattr(nightly, "read_parlay_hist",
-                        lambda: pd.DataFrame({"Legs": [np.nan], "Misses": [np.nan]}))
+    monkeypatch.setattr(
+        nightly, "read_parlay_hist", lambda: pd.DataFrame({"Legs": [np.nan], "Misses": [np.nan]})
+    )
     monkeypatch.setattr(nightly, "write_parlay_hist", lambda p: None)
     monkeypatch.setattr(nightly, "check_bet", lambda bet, stats, stat_map: (1, 0))
     written = {}
     monkeypatch.setattr(nightly, "_compute_live_metrics", lambda h: pd.DataFrame({"a": [1, 2, 3]}))
-    monkeypatch.setattr(nightly, "_atomic_write_parquet",
-                        lambda df, path: written.update({"rows": len(df)}))
+    monkeypatch.setattr(
+        nightly, "_atomic_write_parquet", lambda df, path: written.update({"rows": len(df)})
+    )
 
     meta_path = Path(str(pkg_resources.files(data) / "runtime" / "resolve_meta.json"))
     saved = meta_path.read_bytes() if meta_path.is_file() else None
