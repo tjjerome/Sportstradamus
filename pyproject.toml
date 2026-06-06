@@ -59,6 +59,7 @@ backfill-live-metrics = "sportstradamus.scripts.backfill_live_metrics:main"
 check-graduation = "sportstradamus.scripts.check_graduation:main"
 generate-ship-config = "sportstradamus.scripts.generate_ship_config:main"
 merge-archives = "sportstradamus.scripts.merge_archives:main"
+sweep-runaway-odds = "sportstradamus.scripts.sweep_runaway_odds:main"
 fp-fetch = "sportstradamus.fantasypoints.cli:fp_fetch"
 
 [tool.poetry.group.dev.dependencies]
