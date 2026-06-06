@@ -244,7 +244,7 @@
         },
         "RA": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
