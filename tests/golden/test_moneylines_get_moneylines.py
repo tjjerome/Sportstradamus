@@ -102,8 +102,8 @@ class _FakeArchive:
 _EXPECTED = [
     ("NBA", "Moneyline", _GAME_DATE, "BOS", {"draftkings": 0.42016806722689076}),
     ("NBA", "Moneyline", _GAME_DATE, "LAL", {"draftkings": 0.5798319327731092}),
-    ("NBA", "Totals", _GAME_DATE, "BOS", {"draftkings": 106.30092918426874}),
-    ("NBA", "Totals", _GAME_DATE, "LAL", {"draftkings": 109.72999141502845}),
+    ("NBA", "Totals", _GAME_DATE, "BOS", {"draftkings": 106.30129478600526}),
+    ("NBA", "Totals", _GAME_DATE, "LAL", {"draftkings": 109.72961408582509}),
 ]
 
 

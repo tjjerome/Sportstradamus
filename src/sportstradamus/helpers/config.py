@@ -97,6 +97,21 @@ stat_zi: dict[str, dict[str, float]] = {
     for league, markets in stat_meta.items()
 }
 
+
+def book_gate(league: str, market: str, dist: str) -> float | None:
+    """Zero-inflation gate for the book-EV round trip, or ``None`` when ungated.
+
+    The single source of truth shared by the archive / moneylines *encode*
+    (``get_ev``) and the book-fallback *decode* (``get_odds`` via
+    ``_book_cell_params``) so the gate is applied symmetrically. SkewNormal is
+    continuous and treated as ungated; only ``ZINB``/``ZAGamma`` carry the
+    historical zero rate from :data:`stat_zi`.
+    """
+    if dist not in ("ZINB", "ZAGamma"):
+        return None
+    return stat_zi.get(league, {}).get(market, 0) or None
+
+
 with (_config_dir / "stat_map.json").open() as infile:
     stat_map = json.load(infile)
 

@@ -17,6 +17,7 @@ import datetime
 import pytest
 
 from sportstradamus.helpers.archive import Archive, _devig_over
+from sportstradamus.helpers.distributions import SN_MAX_MEAN_FACTOR
 
 
 class _FakeCursor:
@@ -161,9 +162,11 @@ def test_add_dfs_dedup_market_resolution_and_ev():
         ("WNBA", "prizepicks_pts", "Some Guy"),  # underdog->prizepicks for NBA/WNBA
     ]
     evs = {ent: ev for _, _, ent, _, ev in cap.book_evs}
-    assert evs["Nikola Jokic"] == pytest.approx(1.5)  # ZINB gate underflow -> neutral line
-    assert evs["Connor Mcdavid"] == pytest.approx(1.5)
-    assert evs["Some Guy"] == pytest.approx(15.148297929, rel=1e-6)
+    # even-money under (0.5) sits below BLK's ~0.63 gate -> unrepresentable -> clamps to cap
+    assert evs["Nikola Jokic"] == pytest.approx(SN_MAX_MEAN_FACTOR * 1.5)
+    # SkewNormal even-money inverts *near* (not exactly) the line -- the true get_odds inverse
+    assert evs["Connor Mcdavid"] == pytest.approx(1.3941112846397181, rel=1e-6)
+    assert evs["Some Guy"] == pytest.approx(15.136385967037269, rel=1e-6)
 
     assert cap.lines == [
         ("NBA", "BLK", "Nikola Jokic", 1.5),
