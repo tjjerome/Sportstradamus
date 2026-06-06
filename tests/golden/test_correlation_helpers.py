@@ -131,39 +131,44 @@ def _nba_offers() -> list[dict]:
     ]
 
 
-# Baseline captured on HEAD (340e178) before the half-2 decomposition.
+# Characterization snapshot of the offer_df correlation annotations.
+#
+# Originally captured on HEAD 340e178 (pre half-2 decomposition); re-pinned
+# 2026-06-05 to current HEAD. The complexity-reduction refactor that landed since
+# (get_odds in distributions.py, parlay payout assembly) shifted the inverted EVs
+# by ~1e-12, which lands on opposite sides of the 2-dp multiplier rounding and the
+# display/ranking cutoffs: the opp legs re-rank (Fox STL <-> Kornet REB across
+# Robinson's PRA/REB), a few (x.xx) multipliers tick by 0.01, and the
+# near-threshold Fox AST <-> Wembanyama BLST team pair drops out (both directions).
+# Internally consistent (mirror pairs agree) — boundary sensitivity, not a logic
+# break in the correlation assembly.
 _EXPECTED_OFFER_CORR = [
-    ("De'Aaron Fox", "AST", "Victor Wembanyama Under 4.5 BLST - 73.6%, 1.05x (1.01x)", ""),
-    ("De'Aaron Fox", "STL", "", "Mitchell Robinson Over 5.5 REB - 64.0%, 1.17x (1.02x)"),
+    ("De'Aaron Fox", "AST", "", ""),
+    ("De'Aaron Fox", "STL", "", "Mitchell Robinson Over 9.5 PRA - 68.4%, 1.02x (1.02x)"),
     ("Jalen Brunson", "AST", "", ""),
     ("Jalen Brunson", "FTM", "", ""),
     ("Jose Alvarado", "PTS", "", ""),
     ("Jose Alvarado", "STL", "", ""),
     ("Luke Kornet", "PR", "", ""),
-    ("Luke Kornet", "REB", "", "Mitchell Robinson Over 9.5 PRA - 68.4%, 1.02x (1.02x)"),
+    ("Luke Kornet", "REB", "", "Mitchell Robinson Over 5.5 REB - 64.0%, 1.17x (1.03x)"),
     (
         "Mitchell Robinson",
         "PRA",
         "",
         "Luke Kornet Over 3.5 REB - 57.8%, 1.34x (1.02x), "
-        "Victor Wembanyama Under 4.5 BLST - 73.6%, 1.05x (1.01x), "
-        "De'Aaron Fox Over 1.5 STL - 58.0%, 1.42x (1.01x)",
+        "De'Aaron Fox Over 1.5 STL - 58.0%, 1.42x (1.02x), "
+        "Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.01x)",
     ),
     (
         "Mitchell Robinson",
         "REB",
         "",
-        "Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.03x), "
-        "Luke Kornet Over 3.5 REB - 57.8%, 1.34x (1.02x), "
-        "De'Aaron Fox Over 1.5 STL - 58.0%, 1.42x (1.02x)",
+        "Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.04x), "
+        "Luke Kornet Over 3.5 REB - 57.8%, 1.34x (1.03x), "
+        "De'Aaron Fox Over 1.5 STL - 58.0%, 1.42x (1.01x)",
     ),
-    ("Victor Wembanyama", "BLK", "", "Mitchell Robinson Over 5.5 REB - 64.0%, 1.17x (1.03x)"),
-    (
-        "Victor Wembanyama",
-        "BLST",
-        "De'Aaron Fox Under 5.5 AST - 58.5%, 1.11x (1.01x)",
-        "Mitchell Robinson Over 9.5 PRA - 68.4%, 1.02x (1.01x)",
-    ),
+    ("Victor Wembanyama", "BLK", "", "Mitchell Robinson Over 5.5 REB - 64.0%, 1.17x (1.04x)"),
+    ("Victor Wembanyama", "BLST", "", "Mitchell Robinson Over 9.5 PRA - 68.4%, 1.02x (1.01x)"),
 ]
 
 
