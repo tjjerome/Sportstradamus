@@ -43,6 +43,24 @@ from sportstradamus.prediction.correlation import (
 )
 
 
+def _has_corr_parquets(league: str) -> bool:
+    league_dir = pkg_resources.files(data) / "leagues" / league
+    return (league_dir / "corr_same_team.parquet").is_file()
+
+
+# The per-league correlation parquets are gitignored, so they are absent in CI.
+# The tests that read them skip when the data is missing; the synthetic-c_map
+# kernel tests below run regardless.
+_needs_nba_corr = pytest.mark.skipif(
+    not _has_corr_parquets("nba"),
+    reason="NBA correlation parquets are gitignored; absent in CI",
+)
+_needs_wnba_corr = pytest.mark.skipif(
+    not _has_corr_parquets("wnba"),
+    reason="WNBA correlation parquets are gitignored; absent in CI",
+)
+
+
 class _FakeStats:
     """Minimal stand-in for a league ``Stats`` object.
 
@@ -172,6 +190,7 @@ _EXPECTED_OFFER_CORR = [
 ]
 
 
+@_needs_nba_corr
 def test_find_correlation_offer_correlations_real_nba() -> None:
     """Pin the deterministic offer_df correlation annotation on a real slate."""
     offers = _nba_offers()
@@ -222,6 +241,7 @@ def _wnba_offers() -> list[dict]:
     ]
 
 
+@_needs_wnba_corr
 def test_find_correlation_builds_parlays_wnba() -> None:
     """find_correlation wires beam_search + assembles a well-formed parlay_df.
 
@@ -352,6 +372,7 @@ def test_build_correlation_matrices_honors_push_column() -> None:
     assert p_push.tolist() == [0.1, 0.0, 0.2]
 
 
+@_needs_nba_corr
 def test_kernel_reads_real_nba_cmap() -> None:
     """End-to-end on real data: a real c_map entry flows through the kernel.
 
