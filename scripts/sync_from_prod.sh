@@ -56,8 +56,16 @@ echo ">> sync_from_prod: $PROD_SSH:$PROD_DIR -> $LOCAL_DIR"
 # 1. Fail fast if prod is off / off the LAN / outbound ssh not set up.
 if [[ "$DRY_RUN" -eq 1 ]]; then
     printf '+ %s\n' "ssh ${SSH_OPTS[*]} $PROD_SSH true"
-elif ! ssh "${SSH_OPTS[@]}" "$PROD_SSH" true 2>/dev/null; then
-    echo "ERROR: prod unreachable at $PROD_SSH (is it on? on the LAN? outbound ssh set up?)" >&2
+elif ! probe_err="$(ssh "${SSH_OPTS[@]}" "$PROD_SSH" true 2>&1)"; then
+    if [[ "$probe_err" == *"Permission denied"* ]]; then
+        echo "ERROR: prod refused non-interactive auth at $PROD_SSH." >&2
+        echo "       This script needs key-based ssh (BatchMode rejects password prompts)." >&2
+        echo "       Set it up once:  ssh-keygen -t ed25519   # if you have no key" >&2
+        echo "                        ssh-copy-id $PROD_SSH" >&2
+    else
+        echo "ERROR: prod unreachable at $PROD_SSH (is it on? on the LAN? outbound ssh set up?)" >&2
+        echo "       ssh: $probe_err" >&2
+    fi
     exit 1
 fi
 
