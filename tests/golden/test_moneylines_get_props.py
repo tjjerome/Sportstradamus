@@ -103,7 +103,7 @@ _EXPECTED_LEDGER = [
 ]
 
 
-def test_get_props_live_path(monkeypatch) -> None:
+def test_get_props_live_path(monkeypatch, assert_player_books_close) -> None:
     written = []
     monkeypatch.setattr(moneylines, "_get_with_retry", _fake_get_with_retry)
     monkeypatch.setattr(moneylines, "read_upcoming_events", list)
@@ -113,5 +113,5 @@ def test_get_props_live_path(monkeypatch) -> None:
     returned = moneylines.get_props(archive, "kp", _PROPS, date=_DATE)
 
     assert returned is archive
-    assert archive.player_books == _EXPECTED_PLAYER
+    assert_player_books_close(archive.player_books, _EXPECTED_PLAYER)
     assert written == [_EXPECTED_LEDGER]
