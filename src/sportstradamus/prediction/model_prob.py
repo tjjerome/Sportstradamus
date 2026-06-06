@@ -57,6 +57,14 @@ _MAX_UNDERDOG_BOOST = 3.65
 # Coin-flip prior used when no bookmaker price is available for an offer.
 _BOOK_PRIOR_PROB: float = 0.5
 
+# A bookmaker projected mean beyond this multiple of its own line is corrupt data,
+# not an edge: model and book project the same stat, and a sane book mean sits
+# within a small factor of the line it was quoted at. Values above the cap (e.g. a
+# pre-fix get_ev zero-inflation runaway still committed in the archive) are dropped
+# from the log-opinion pool — the blend rides the line instead of letting garbage
+# dominate — and warned so the corruption never inflates predictions silently.
+_BOOK_EV_LINE_CAP: float = 10.0
+
 # Maximum scored offers retained per player after boost-distance deduplication.
 _MAX_OFFERS_PER_PLAYER: int = 3
 
@@ -516,11 +524,32 @@ def _zi_kwargs(offer_df: pd.DataFrame, dist: str, hist_gate: float) -> dict:
     return {}
 
 
+def _sanitize_book_ev(books_ev: np.ndarray, line: np.ndarray) -> np.ndarray:
+    """Drop book means implausibly far above their line before the blend.
+
+    A book projected mean beyond ``_BOOK_EV_LINE_CAP`` times its line is corrupt
+    data, not signal (see the constant), and would dominate ``fused_loc``'s
+    log-opinion pool. Offenders are replaced with the line — the neutral book mean,
+    matching :func:`get_ev`'s own zero-inflation fallback — and warned so corruption
+    surfaces instead of silently inflating predictions.
+    """
+    ceiling = _BOOK_EV_LINE_CAP * np.clip(line, 0.5, None)
+    corrupt = books_ev > ceiling
+    if corrupt.any():
+        logger.warning(
+            f"dropped {int(corrupt.sum())} implausible book EV(s) from the blend "
+            f"(max {float(np.nanmax(books_ev)):.1f})"
+        )
+        return np.where(corrupt, line, books_ev)
+    return books_ev
+
+
 def _blend_with_book(
     offer_df: pd.DataFrame, dist: str, model_weight: float, cv: float, hist_gate: float
 ):
     model_ev = offer_df["Model EV"].to_numpy()
     books_ev = offer_df["Books EV"].fillna(offer_df["Model EV"]).to_numpy()
+    books_ev = _sanitize_book_ev(books_ev, offer_df["Line"].to_numpy())
     zi = _zi_kwargs(offer_df, dist, hist_gate)
     if dist == "SkewNormal":
         base_mean, sigma_blend, skew_blend, gate_blend = fused_loc(
