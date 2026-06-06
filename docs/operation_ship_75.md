@@ -167,7 +167,7 @@ both. Report-only companions name the *direction* a KS scalar can't:
 | HurdleZINB (per-cell mode) | **Alive** — shipped; 6/8 NBA ZINB markets. Available per-cell via `zinb_mode`. | Phase P2.B |
 | Post-hoc **mean** correction (`roe_mean` / `isotonic_mean`) | **Alive & shipped** — `MEAN_STAGE` in [`posthoc.py`](../src/sportstradamus/training/posthoc.py); flipped NFL passing-tds + interceptions. | Stage B1.6 / Step 1 |
 | Post-hoc **probability** recalibration (`prob_recal_*`) | **Alive** — `PROB_STAGE` built, available per-cell. | posthoc.py |
-| Post-hoc **scale / dispersion** correction | **Untried** — see §4. The lever that directly attacks the new binding gate. | this rewrite |
+| Post-hoc **scale / dispersion** correction | **GO — route 1a-hybrid** (fit in `_step_calibrate_dispersion` via `scorecard._randomized_pit_ks`; reuse `dispersion_cal` field + apply; count branch CRPS→PIT-KS too). Reverses the v1 "route 1b" after C0 fixed the decode bug 1b dodged. Levi closed-form σ-scaling is a dead end (diverges 5–7000× on skewed cells). | §5 L1 / brief `researcher_lever1_strategy.md` |
 | Player-level features (expanding-mean, EB-shrunk, opp-defense) | **Alive, unbuilt** — RANK 2/3 in the breadth verdict. | Stage B1.6 |
 | Per-position model split (NFL) | **Alive, deferred to Ship 90 (T11)** — can be pulled forward if NFL stalls. | Stage A1.6 |
 
@@ -326,6 +326,86 @@ mislocation is in the mean/skew not the scale):
   than a scalar — escalate to Lever 4 (per-cell family/shape) and flag as research holes
   (§8): is the SkewNormal *shape* (tail weight), not just its width, wrong here?
 
+#### Lever 1 — BUILT 2026-06-06 (route 1a-hybrid, served-predictive)
+
+The dispersion fit is implemented and gate-green (golden + integration + a dump↔inference
+round-trip unit test). **Operator call this session: Gate 4 certifies the SERVED (blended ×
+c) predictive — the distribution the parlay builder actually prices — not the model-only
+shape.** Consequences threaded end to end:
+
+- **Fit** ([`scorecard.fit_skewnorm_dispersion_c`](../src/sportstradamus/training/scorecard.py)):
+  minimizes the gate's own `_randomized_pit_ks` over a scale multiplier `c` on the served
+  predictive (blended mean held fixed, scipy loc derived via the shared
+  `helpers.distributions.skewnormal_loc_from_mean`). No PIT-math duplication.
+- **Calibrate** (`_step_calibrate_dispersion` SkewNormal branch): drops the `c=1.0`
+  early-return; emits served `sn_sigma_blend_{test,val}` = blended × c, mirroring the count
+  branch's `r_test`. `_step_compute_test_probabilities` + temperature now read the served sigma
+  so the `P` column matches inference.
+- **Dump** (`_step_persist_artifacts`): writes the served (blended, c-baked) loc/scale/skew,
+  re-encoded to normalized space via the new `baselines.encode_loc/encode_scale` (exact
+  inverses of `decode_*`), so the scorecard's existing decode recovers the served EV params
+  byte-for-byte. C0's decode + the strategy plumbing are untouched.
+- **Apply** ([`model_prob._dispersion_calibrate`](../src/sportstradamus/prediction/model_prob.py)):
+  drops the `dist == "SkewNormal"` guard; `Model Sigma *= dispersion_cal` after the blend
+  (current code order = the served sigma). Existing `dispersion_cal` pickle field + legacy
+  fallback reused.
+- **Real-data validation** (NBA AST, `--deterministic` so it's a deliberately low-quality
+  model, not a ship verdict): the fit returned **c = 1.158**; held-out test `pit_ks`
+  dropped **0.1149 (c=1) → 0.0867 (c=1.158)**, with the test-optimal c = 1.29 → 0.063. So
+  widening monotonically reduces miscalibration on the disjoint split and the val-fit c is
+  conservative vs test-optimal, exactly the ~20–30% val→test discount the brief predicted.
+  **Production ship counts await the C3 real-HPO retrain loop** (deterministic HPO is too weak
+  to clear 0.05 on its own).
+- **Note for C3:** because Gate 4 now scores the *blended* predictive (wider than model-only —
+  the book widens the too-narrow model), the model-only board (`board_postC0.csv`) and its
+  tier map are **pessimistic**; the real flip counts come from the retrain, as always planned.
+
+#### Lever 1 — research verdict (2026-06-06; brief `researcher_lever1_strategy.md` supersedes the v1 `researcher_dispersion_cal.md`)
+
+**GO.** A textbook post-hoc scale calibration (engineering, not a research bet: Levi et al.
+2022 arXiv:1905.11659; Kuleshov et al. 2018 arXiv:1807.00263). Two independent research passes
+plus the C0 fix converged the build:
+
+- **Route 1a-hybrid (reverses the v1 "route 1b" call).** Fit the dispersion scalar `c` *inside*
+  [`_step_calibrate_dispersion`](../src/sportstradamus/training/pipeline.py) (remove the line-1512
+  SkewNormal early-return), **objective = `scorecard._randomized_pit_ks` on the decoded
+  predictive** for *both* branches, reusing the existing `dispersion_cal` pickle field + the
+  [`_dispersion_calibrate`](../src/sportstradamus/prediction/model_prob.py) apply (drop its
+  `dist == "SkewNormal"` clause; `Model Sigma *= dispersion_cal` after decode). Why 1a-hybrid
+  now beats 1b: (1) C0 fixed the decode bug 1b was meant to dodge; (2) the fit objective *must*
+  be the gate's own KS — a `SCALE_STAGE` in posthoc would either import scorecard (1a-hybrid in
+  disguise) or re-duplicate the PIT math (the exact bug class C0 closed); (3) `dispersion_cal`
+  is **orthogonal to `posthoc`**, so a cell stacks `roe_mean` (L2) **and** a scale fit (L1) —
+  1b's single-slug `posthoc` structurally cannot, and the mean-then-width cells are a large part
+  of the board. Constrain the fit to `g1_ci_hi ≤ baseline+0.01` and `g5 < 0.075`.
+- **Do NOT use the Levi closed-form** σ-scaling (`α²=mean(resid²/σ²)`): empirically diverges
+  5–7000× from the KS-optimal `c` on these skewed cells (WNBA DREB α=7158 vs c=1.43). Keep the
+  KS `minimize_scalar`.
+- **C0 decode bug — DONE** (this session): `_decode_sn_loc_scale` now dispatches the canonical
+  `baselines` decode; `load_test_set` retains `Mean10`. DREB 0.504→0.153, receptions
+  0.432→0.184 (verified), both still moderate-fail g4 → they route **L2 (`roe_mean`) → L1**
+  (orthogonal stacking). Plain under-dispersion + mild low-loc bias; **Lever 5 not triggered.**
+- **The count branch is systematically over-wide — a one-change-helps-21 lever.** All 21
+  ZINB/NegBin cells over-cover (central-50 0.70–0.87) and every one improves under `c>1`;
+  re-targeting the count `dispersion_cal` fit CRPS→PIT-KS tightens the whole branch (corrects
+  v1's "coverage is wrong-sign" overstatement: PIT-KS and over-coverage agree on *direction*
+  here; PIT-KS stays the objective because coverage-matching would over-narrow some lattices).
+- **Whole-board tier map** (c-grid; discount ~20–30% for val→test, always retrain):
+  - **Tier A — scalar flips:** NBA +6 (AST/DREB/FGM/FG3A/MIN/RA), WNBA +3 (PTS/REB/RA).
+  - **Tier B — count CRPS→PIT-KS:** NBA +3 (FTM/STL/TOV), WNBA +3 (BLST/FTM/OREB), NFL +1 (passing-tds).
+  - **Tier C — mean-then-width (L2→L1 stack):** WNBA DREB/AST, NFL receptions/receiving-yards/rushing-yards.
+  - **Tier D — no scalar saves (needs c=1.5–2.0 ⇒ structural):** NFL attempts (0.214), qb-yards
+    (0.227), completions, carries, receiving/rushing-yards — g1, not width, binds. → Lever 3/4d.
+- **Fragility: 6 shipped cells fail a fresh re-score — a threshold cliff, not staleness**
+  (pickle/CSV mtimes Δ=0.0m; PIT reproducible to 6 dp). NBA PRA/WNBA PA/WNBA PRA miss by
+  +0.0002–0.0011 (literal flapping at 0.05); NBA PA +0.0073 (L1 rescues at c=1.05); **NFL
+  interceptions actually passes g4, fails g1; NFL targets (g2+g4) is the one genuine
+  regression.** See the new §8 hole #0 — the hysteresis-vs-demote policy is an **operator call**.
+- **Honest breadth after L1 + count-retarget (post-discount):** NBA ~15–17 (**clears 16**),
+  WNBA ~12–14 (**at-risk, zero margin** — L0 already banked), NFL ~7–9 (**cannot reach 15** on
+  this lever stack; the gap is g1/signal on volume cells → L3/L4d or an operator denominator
+  call; pre-name attempts/qb-yards `deferred-90`).
+
 ### Lever 2 — Post-hoc mean correction (already built)
 
 **Mechanism.** `roe_mean` (affine) / `isotonic_mean` `MEAN_STAGE` correctors, selected
@@ -462,6 +542,30 @@ plausibly flip; the target gap is in parentheses.
 
 These are the points where the plan rests on an *assumption* a focused study should
 confirm or kill. Each is a place a lever could fail; knowing early reorders the queue.
+
+> **Resolved 2026-06-06** (brief `researcher_dispersion_cal.md`, distilled into the §5 Lever 1
+> verdict block): holes **#1** (feasible `c` exists for moderate cells; trade bounded, g5 binds
+> first), **#2** (skip was a-priori, not a tested negative), **#3** (PIT-KS re-target flips the
+> count cells; coverage is the wrong objective), and **#5** (the "severe" cells are a decode
+> artifact, not a shape problem) are answered. A **new prerequisite hole #0** surfaced:
+>
+> 0. **The `centered_additive_*` Gate-4 PIT decode bug** — **RESOLVED (C0, this session).**
+>    `_decode_sn_loc_scale` now dispatches the canonical `baselines` decode and `load_test_set`
+>    retains `Mean10`; DREB 0.504→0.153, receptions 0.432→0.184. No shipped cell moved.
+>
+> **New hole #0b (highest priority — gate-policy, operator call): Gate-4 baseline hysteresis.**
+> A fresh re-score fails 6 cells the `shipped` field still calls `devel` — 3 by +0.0002–0.0011,
+> literal flapping at the hard 0.05 cutoff (a finite-sample KS statistic is a step function at
+> the boundary; arXiv:2503.11673). Options: (a) an asymmetric **hysteresis band** — demote a
+> *baselined* cell only at `pit_ks ≥ 0.05 + ε` (ε≈0.005, vig-scale), first-ship stays strict
+> 0.05 (this is a deployment-stability tolerance à la arXiv:2403.19871, **not** a breadth
+> loosening — pin with a golden test + reconcile with the monthly `gate-status` auto-demote);
+> (b) ship L1 first (moves the 4 salvageable cliff cells to comfortable margin) and accept the
+> 2 genuine demotions (NFL targets g2+g4, interceptions g1). **Decision pending — it gates
+> trust in the ship-incrementally premise.**
+>
+> Holes #4 (do the marginal NFL g1s improve under calibration) and #6 (block-bootstrap backlog)
+> remain open.
 
 1. **Will post-hoc scale calibration actually move PIT-KS without breaking g1/g5?**
    The central assumption of Lever 1. A quick study on 3–4 representative cells (one

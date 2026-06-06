@@ -18,7 +18,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from sportstradamus.prediction.model_prob import _decode_skewnormal
+from sportstradamus.prediction.model_prob import _decode_skewnormal, _dispersion_calibrate
 from sportstradamus.training.baselines import EB_SHRINKAGE_K, compute_eb_prior
 
 # Floor applied to ``MeanYr`` before division. Mirrors the value pinned in
@@ -228,3 +228,72 @@ def test_meanyr_floor_applied_in_ratio_path():
 
     # loc=1 -> Model EV == MeanYr_clipped. First three should hit the 0.5 floor.
     np.testing.assert_array_equal(out["Model EV"].to_numpy(), np.array([0.5, 0.5, 0.5, 10.0]))
+
+
+def test_dispersion_calibrate_scales_skewnormal_sigma():
+    """Route 1a-hybrid: SkewNormal ``Model Sigma`` is scaled by the dispersion factor
+    after the blend, mirroring the count branch — the calibrated scale is what Gate 4
+    scored on the test CSV and what the parlay builder must price.
+    """
+    offer_df = pd.DataFrame({"Model Sigma": [2.0, 3.0, 4.0], "Model Skew": [0.0, 1.0, -1.0]})
+    _dispersion_calibrate(offer_df, "SkewNormal", 1.5)
+    np.testing.assert_allclose(offer_df["Model Sigma"].to_numpy(), [3.0, 4.5, 6.0])
+
+
+def test_dispersion_calibrate_unit_factor_leaves_skewnormal_sigma_untouched():
+    offer_df = pd.DataFrame({"Model Sigma": [2.0, 3.0]})
+    _dispersion_calibrate(offer_df, "SkewNormal", 1.0)
+    np.testing.assert_array_equal(offer_df["Model Sigma"].to_numpy(), [2.0, 3.0])
+
+
+def test_served_dispersion_dump_prices_identically_to_inference():
+    """C1 round-trip: the SkewNormal predictive the scorecard decodes from the test-CSV
+    dump prices byte-for-byte like the one inference serves after dispersion calibration.
+
+    Routes both the inference params (blended sigma × c via the real
+    ``_dispersion_calibrate``) and the gate-decoded params (persist's served-loc
+    derivation + ``baselines.encode`` → scorecard ``_decode_sn_loc_scale``) through the
+    real ``get_odds`` and asserts identical under-probabilities. A drift in the loc
+    formula, the encode/decode inverse, or the apply order breaks it.
+    """
+    from sportstradamus.helpers.distributions import get_odds
+    from sportstradamus.training.baselines import get_target_normalization
+    from sportstradamus.training.scorecard import _decode_sn_loc_scale
+
+    rng = np.random.default_rng(11)
+    n = 12
+    mean = rng.uniform(5.0, 25.0, n)
+    blended_sigma = rng.uniform(1.5, 6.0, n)
+    skew = rng.uniform(-0.5, 0.8, n)
+    meanyr = rng.uniform(2.0, 20.0, n)
+    line = mean + rng.uniform(-2.0, 2.0, n)
+    c = 1.37
+
+    # Inference: dispersion applied to the post-blend sigma, then priced.
+    offer = pd.DataFrame({"Model Sigma": blended_sigma.copy(), "Model Skew": skew})
+    _dispersion_calibrate(offer, "SkewNormal", c)
+    served_sigma = offer["Model Sigma"].to_numpy()
+    under_inf = get_odds(line, mean, "SkewNormal", sigma=served_sigma, skew_alpha=skew)
+
+    # Dump: persist holds the mean fixed, derives the scipy loc, re-encodes to model space.
+    shift = (skew / np.sqrt(1 + skew**2)) * np.sqrt(2 / np.pi)
+    served_loc = mean - served_sigma * shift
+    strat = get_target_normalization("ratio_meanyr")
+    X = pd.DataFrame({"MeanYr": meanyr})
+    dumped = pd.DataFrame(
+        {
+            "SN_Loc": strat.encode_loc(served_loc, X, 0.0, "MeanYr"),
+            "SN_Scale": strat.encode_scale(served_sigma, X, "MeanYr"),
+            "SN_Alpha": skew,
+            "MeanYr": meanyr,
+        }
+    )
+
+    # Gate: decode, reconstruct the held-fixed mean, price through the same odds path.
+    loc_g, scale_g = _decode_sn_loc_scale(dumped, "ratio_meanyr")
+    decoded_mean = loc_g + scale_g * shift
+    under_gate = get_odds(line, decoded_mean, "SkewNormal", sigma=scale_g, skew_alpha=skew)
+
+    np.testing.assert_allclose(decoded_mean, mean, atol=1e-9)
+    np.testing.assert_allclose(scale_g, served_sigma, atol=1e-9)
+    np.testing.assert_allclose(under_gate, under_inf, atol=1e-12)

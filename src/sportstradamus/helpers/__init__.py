@@ -60,6 +60,7 @@ from sportstradamus.helpers.distributions import (
     odds_to_prob,
     prob_to_odds,
     set_model_start_values,
+    skewnormal_loc_from_mean,
 )
 from sportstradamus.helpers.logging import JsonFormatter, get_logger
 from sportstradamus.helpers.scraping import Scrape
@@ -116,6 +117,7 @@ __all__ = [
     "remove_accents",
     "requests",
     "set_model_start_values",
+    "skewnormal_loc_from_mean",
     "stat_cv",
     "stat_dist",
     "stat_map",

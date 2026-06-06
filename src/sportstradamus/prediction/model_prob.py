@@ -611,13 +611,16 @@ def _blend_with_book(
 
 
 def _dispersion_calibrate(offer_df: pd.DataFrame, dist: str, dispersion_cal: float) -> None:
-    # SkewNormal calibrates via CRPS, not a shape multiplier — skip it.
-    if dispersion_cal == 1.0 or dist == "SkewNormal":
+    # Applied after the blend, so the shape param carries the served (blended × c)
+    # dispersion Gate 4 scored. SkewNormal scales sigma; count scales r; Gamma scales alpha.
+    if dispersion_cal == 1.0:
         return
     if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
         offer_df["Model R"] = offer_df["Model R"] * dispersion_cal
     elif dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns:
         offer_df["Model Alpha"] = offer_df["Model Alpha"] * dispersion_cal
+    elif dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
+        offer_df["Model Sigma"] = offer_df["Model Sigma"] * dispersion_cal
 
 
 def _model_over_and_push(offer_df: pd.DataFrame, dist: str, cv: float, step, base_mean):
