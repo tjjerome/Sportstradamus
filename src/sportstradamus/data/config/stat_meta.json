@@ -502,7 +502,7 @@
         },
         "BLK": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
             "posthoc": "none"
         },
@@ -520,7 +520,7 @@
         },
         "FG3M": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
             "posthoc": "none"
         },
@@ -592,7 +592,7 @@
         },
         "TOV": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
             "posthoc": "none"
         },
