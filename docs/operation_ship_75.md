@@ -360,6 +360,30 @@ shape.** Consequences threaded end to end:
   the book widens the too-narrow model), the model-only board (`board_postC0.csv`) and its
   tier map are **pessimistic**; the real flip counts come from the retrain, as always planned.
 
+#### Lever 1 — SHIPPED first cell (NBA RA) 2026-06-06 — C3 loop proven end-to-end
+
+- **Blocker (found + fixed).** `data/models/` is empty in a fresh checkout, so every local
+  retrain takes the *cold* HPO path — and `lightgbm 4.6` broke it: optuna's
+  `LightGBMPruningCallback` hardcodes the cv validation name to `"cv_agg"`, but lightgbm ≥ 4.6
+  reports cv eval under `"valid"`, so the callback raises. Fallout of the local-only lightgbm
+  bump `ff75d41` (on `model-research`, **not** `origin/devel` — the server runs 4.2 and is
+  unaffected). Fix: consolidate the cold and warm paths into one
+  [`hyperparams.tune_hyperparameters(initial_params=None)`](../src/sportstradamus/training/hyperparams.py)
+  (cold = warm minus the seed enqueue; both omit the broken pruner — the same TPE-over-cv loop
+  lightgbmlss `hyper_opt` runs), redirect the pipeline cold caller, add
+  `tests/integration/test_cold_hpo_lightgbm46.py` as the regression guard.
+- **NBA RA shipped.** Real HPO (98 trials, `--bypass-withholding`, `ratio_meanyr`) + C1 →
+  `dispersion_cal = 1.077`; **g4 `pit_ks` 0.0530 → 0.0339** (clears 0.05), g1 brier-skill
+  0.030 → 0.033 (improved), g5 ECE 0.032 — **5/5 gates, `ship=True`**. `dispersion_cal > 1`
+  confirms the g4 flip is *caused* by C1's widening, not a luckier HPO draw. Flipped
+  `shipped: withheld → devel`. **NBA 9 → 10, board 22 → 23/59.**
+- **C2-remainder done.** The SkewNormal determinism gate is extended to WNBA (PTS) and NFL
+  (receiving-yards) via a shared `_assert_skewnormal_params_bit_reproducible`; 3/3 cross-league
+  bit-identity holds — the Lever-1 ship prerequisite.
+- **AST (moderate stress test) retraining.** Gap 0.052, the cell where the deterministic
+  post-cal (0.087) would still fail g4 — its real-HPO verdict decides whether moderate cells
+  ship on L1 alone or route to L3/L4.
+
 #### Lever 1 — research verdict (2026-06-06; brief `researcher_lever1_strategy.md` supersedes the v1 `researcher_dispersion_cal.md`)
 
 **GO.** A textbook post-hoc scale calibration (engineering, not a research bet: Levi et al.

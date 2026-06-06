@@ -33,17 +33,32 @@ from sportstradamus.training.pipeline import (
 GATE_N_ROWS = 4000
 
 
-@pytest.mark.integration
-def test_deterministic_mode_is_bit_reproducible():
-    parquet = pkg_resources.files(data) / "training_data/NBA_FGA.parquet"
+def _assert_skewnormal_params_bit_reproducible(parquet_name: str, stats, market: str) -> None:
+    """Two seeded SkewNormal fit/predicts on a cached parquet must match exactly.
+
+    Shared body for the per-league SkewNormal determinism gates. The gate
+    overrides ``DETERMINISTIC_FIXED_PARAMS`` to introduce real LightGBM
+    stochasticity (feature/row subsampling), so it genuinely tests that
+    ``seed_everything`` + the merged LightGBM seed kwargs pin stochastic tree
+    building, not that no-randomness is trivially deterministic. The Lever-1
+    dispersion calibration (served-predictive ``sigma`` x c) promotes
+    SkewNormal cells across NBA/WNBA/NFL, so this two-run bit-identity must
+    hold on every covered league before any promotion.
+
+    Args:
+        parquet_name: Cached training matrix filename under ``data/training_data``.
+        stats: League ``Stats`` instance providing ``get_stat_columns``.
+        market: Market stem to pull feature columns for.
+    """
+    parquet = pkg_resources.files(data) / f"training_data/{parquet_name}"
     if not parquet.is_file():
-        pytest.skip("cached NBA_FGA.parquet not present in this environment")
+        pytest.skip(f"cached {parquet_name} not present in this environment")
 
     M = pd.read_parquet(parquet)
     M = M.sort_values(["Date"]).head(GATE_N_ROWS).reset_index(drop=True)
 
-    cols = StatsNBA().get_stat_columns("FGA")
-    X = M[cols].copy()
+    cols = stats.get_stat_columns(market)
+    X = M.reindex(columns=cols).copy()
     for c in ("Home", "Player position"):
         if c in X.columns:
             X[c] = X[c].astype("category")
@@ -54,7 +69,7 @@ def test_deterministic_mode_is_bit_reproducible():
     X_train, y_train = X.iloc[:n_train], y.iloc[:n_train]
     X_test = X.iloc[n_train:]
 
-    # FGA is SkewNormal + ratio-normalized (global_mean >= 2.0 branch).
+    # SkewNormal ratio_meanyr normalization (global_mean >= 2.0 branch).
     y_train_labels = np.ravel(y_train.to_numpy()).astype(float)
     meanyr_train = X_train["MeanYr"].clip(lower=0.5).to_numpy()
     y_train_labels = np.clip(y_train_labels / meanyr_train, 0.01, None)
@@ -67,29 +82,41 @@ def test_deterministic_mode_is_bit_reproducible():
             X_train,
             y_train_labels,
             X_test,
-            # Override DETERMINISTIC_FIXED_PARAMS to introduce real stochasticity
-            # (feature/row subsampling). This way the gate ACTUALLY tests that the
-            # seeding mechanism pins LightGBM's stochastic tree building, not that
-            # no-randomness is trivially deterministic. seed_everything + LightGBM
-            # seed kwargs (merged inside fit_lss_model) must yield bit-identical
-            # output across two runs at the same seed; different seeds must differ.
-            params=(
-                {
-                    **DETERMINISTIC_FIXED_PARAMS,
-                    "feature_fraction": 0.8,
-                    "bagging_fraction": 0.8,
-                    "bagging_freq": 1,
-                    "monotone_constraints": [0] * X_train.shape[1],
-                }
-            ),
+            params={
+                **DETERMINISTIC_FIXED_PARAMS,
+                "feature_fraction": 0.8,
+                "bagging_fraction": 0.8,
+                "bagging_freq": 1,
+                "monotone_constraints": [0] * X_train.shape[1],
+            },
             normalized=True,
             shape_ceiling=100.0,
             seed=DETERMINISTIC_SEED,
         )
 
-    p1 = run()
-    p2 = run()
-    pd.testing.assert_frame_equal(p1, p2, check_exact=True)
+    pd.testing.assert_frame_equal(run(), run(), check_exact=True)
+
+
+@pytest.mark.integration
+def test_deterministic_mode_is_bit_reproducible():
+    """NBA FGA - canonical SkewNormal ratio-normalized market."""
+    _assert_skewnormal_params_bit_reproducible("NBA_FGA.parquet", StatsNBA(), "FGA")
+
+
+@pytest.mark.integration
+def test_deterministic_mode_skewnormal_is_bit_reproducible_wnba():
+    """WNBA PTS - Lever-1 dispersion calibration promotes WNBA SkewNormal cells,
+    so the served-predictive bit-identity must hold on WNBA before any ship."""
+    _assert_skewnormal_params_bit_reproducible("WNBA_PTS.parquet", StatsWNBA(), "PTS")
+
+
+@pytest.mark.integration
+def test_deterministic_mode_skewnormal_is_bit_reproducible_nfl():
+    """NFL receiving-yards - cross-league SkewNormal determinism guard for the
+    Lever-1 served-predictive ship on the watched NFL league."""
+    _assert_skewnormal_params_bit_reproducible(
+        "NFL_receiving-yards.parquet", StatsNFL(), "receiving yards"
+    )
 
 
 def _assert_hurdle_params_bit_reproducible(parquet_name: str, stats, market: str) -> None:
