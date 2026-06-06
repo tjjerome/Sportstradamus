@@ -360,7 +360,7 @@ shape.** Consequences threaded end to end:
   the book widens the too-narrow model), the model-only board (`board_postC0.csv`) and its
   tier map are **pessimistic**; the real flip counts come from the retrain, as always planned.
 
-#### Lever 1 — SHIPPED first cell (NBA RA) 2026-06-06 — C3 loop proven end-to-end
+#### Lever 1 — SHIPPED 2 cells (RA, MIN); C1 ceiling found at moderate cells — 2026-06-06
 
 - **Blocker (found + fixed).** `data/models/` is empty in a fresh checkout, so every local
   retrain takes the *cold* HPO path — and `lightgbm 4.6` broke it: optuna's
@@ -377,12 +377,22 @@ shape.** Consequences threaded end to end:
   0.030 → 0.033 (improved), g5 ECE 0.032 — **5/5 gates, `ship=True`**. `dispersion_cal > 1`
   confirms the g4 flip is *caused* by C1's widening, not a luckier HPO draw. Flipped
   `shipped: withheld → devel`. **NBA 9 → 10, board 22 → 23/59.**
+- **NBA MIN shipped.** Real HPO + C1 → `dispersion_cal = 1.102`; **g4 `pit_ks` 0.0549 → 0.0298**,
+  all 5 gates, g1 brier-skill 0.33 (model dominates the book). Flipped `withheld → devel`.
+  **NBA 10 → 11, board 23 → 24/59.** Its blended scale-only floor (0.023) sits *below* its
+  model-only floor (0.033) — the precision-weighted book blend was benign here.
 - **C2-remainder done.** The SkewNormal determinism gate is extended to WNBA (PTS) and NFL
   (receiving-yards) via a shared `_assert_skewnormal_params_bit_reproducible`; 3/3 cross-league
   bit-identity holds — the Lever-1 ship prerequisite.
-- **AST (moderate stress test) retraining.** Gap 0.052, the cell where the deterministic
-  post-cal (0.087) would still fail g4 — its real-HPO verdict decides whether moderate cells
-  ship on L1 alone or route to L3/L4.
+- **AST — C1 ceiling (did not ship).** Real HPO + C1 fit a large `c = 1.277` and pulled g4
+  `pit_ks` 0.1024 → 0.0812, but **the scale-only floor is 0.063 > 0.05**: sweeping `c` on the
+  served predictive bottoms at total c ≈ 1.39, then over-disperses. No uniform scale calibrates
+  AST — the residual is *shape*, not width, and unlike MIN the blend *lifts* AST's floor (book
+  and model disagree on the conditional), so widening can't recover it. **Verdict: hair's-breadth
+  g4 cells (RA 0.003, MIN 0.005 gap) ship on C1; moderate cells (AST 0.052 gap) need L4 (shape —
+  a skew-aware post-hoc or a heavier tail), not more width.** The model-only floor proxy (DREB
+  0.036 / FGM 0.043 / FG3A 0.032, all < 0.05) is suggestive but *not* sufficient — the gate
+  scores the blend and AST shows the blend is the wildcard, so each still needs its own retrain.
 
 #### Lever 1 — research verdict (2026-06-06; brief `researcher_lever1_strategy.md` supersedes the v1 `researcher_dispersion_cal.md`)
 
