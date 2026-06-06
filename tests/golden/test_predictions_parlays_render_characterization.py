@@ -109,7 +109,7 @@ def test_metric_row_with_indep_and_two_legs(row_indep):
     render = _load_render(st)
     render(row_indep, pd.DataFrame())
 
-    assert ("container", {"border": True}) == st.calls[0]
+    assert st.calls[0] == ("container", {"border": True})
     assert ("columns", 6) in st.calls
     labels = [a[0] for a, _ in _metric_calls(st.calls)]
     assert labels == ["Model EV", "Books EV", "Boost", "Bet Size", "Fun", "Joint vs Indep"]
