@@ -130,40 +130,50 @@ def _skewnormal_ev(line, under, cv, skew_alpha):
     return float(brentq(_sn_residual, lo, hi, xtol=1e-8))
 
 
-def _solve_ev(residual_fn, lo, hi):
-    # Expand the upper bracket until the residual crosses zero, then bisect.
+def _solve_ev(residual_fn, lo, hi, *, fallback=None):
     # CDF is monotone decreasing in mean, so residual(hi) starts positive and
     # eventually goes negative; the loop always terminates for valid inputs.
+    #
+    # ``fallback`` (zero-inflated inversion only): ``hi`` is then a hard
+    # plausibility ceiling rather than a starting guess. A root beyond it means
+    # the book's non-zero under-prob sits barely above the structural zero rate,
+    # leaving almost no mass in (0, line] — the inversion runs away to an absurd
+    # mean (book and model disagree on the zero rate). Return the neutral
+    # fallback instead of chasing it; mirrors ``_skewnormal_ev``'s
+    # degenerate-bracket guard.
+    if fallback is not None and residual_fn(hi) > 0:
+        return fallback
     while residual_fn(hi) > 0:
         hi *= 2
     return float(brentq(residual_fn, lo, hi, xtol=1e-8))
 
 
-def _negbin_poisson_ev(line, under, cv, lo, hi):
+def _negbin_poisson_ev(line, under, cv, lo, hi, *, neutral_fallback=False):
+    fallback = float(line) if neutral_fallback else None
     line = np.ceil(float(line) - 1)
     if cv == 1:
 
         def _pois_residual(mean):
             return float(poisson.cdf(line, mean)) - under
 
-        return _solve_ev(_pois_residual, lo, hi)
+        return _solve_ev(_pois_residual, lo, hi, fallback=fallback)
     r = 1.0 / cv
 
     def _nb_residual(mean):
         p = r / (r + mean)
         return float(nbinom.cdf(line, r, p)) - under
 
-    return _solve_ev(_nb_residual, lo, hi)
+    return _solve_ev(_nb_residual, lo, hi, fallback=fallback)
 
 
-def _gamma_ev(line, under, cv, lo, hi):
+def _gamma_ev(line, under, cv, lo, hi, *, neutral_fallback=False):
     line = float(line)
     alpha = 1.0 / (cv**2)
 
     def _gamma_residual(mean):
         return float(gamma.cdf(line, alpha, scale=mean / alpha)) - under
 
-    return _solve_ev(_gamma_residual, lo, hi)
+    return _solve_ev(_gamma_residual, lo, hi, fallback=line if neutral_fallback else None)
 
 
 def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None):
@@ -193,14 +203,18 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None):
     # For ZI distributions, strip out the zero-inflation component so we solve
     # for the base distribution mean: gate + (1-gate)*base_CDF = under
     # ⇒ base_CDF = (under - gate) / (1 - gate)
+    zi_inversion = False
     if gate is not None and gate > 0 and dist in ("ZINB", "ZAGamma", "SkewNormal"):
         base_cdf = (under - gate) / (1 - gate)
         # An under-prob at or below the zero-inflation mass leaves no room for the
         # base distribution below the line, so the inversion runs away to a huge
         # mean (the book and the model's zero rate disagree). Use the neutral line.
+        # base_CDF just *above* zero runs away just as badly (mean -> hundreds for
+        # a 2.5 line); ``neutral_fallback`` below caps that at the ``hi`` ceiling.
         if base_cdf <= 0:
             return float(line)
         under = np.clip(base_cdf, 1e-6, 1 - 1e-6)
+        zi_inversion = True
 
     # CDF is monotonically decreasing in mean (1→0), so a bracket is always valid:
     #   at lo≈0 the CDF≈1 > under, at hi→∞ the CDF→0 < under.
@@ -208,10 +222,10 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None):
     hi = max(2 * line / max(1 - under, 0.01), 1.0)
 
     if dist in ("NegBin", "ZINB", "Poisson"):
-        return _negbin_poisson_ev(line, under, cv, lo, hi)
+        return _negbin_poisson_ev(line, under, cv, lo, hi, neutral_fallback=zi_inversion)
     if dist == "SkewNormal":
         return _skewnormal_ev(line, under, cv, skew_alpha)
-    return _gamma_ev(line, under, cv, lo, hi)
+    return _gamma_ev(line, under, cv, lo, hi, neutral_fallback=zi_inversion)
 
 
 def _negbin_odds(line, ev, cv, r, gate, dist):
