@@ -111,6 +111,7 @@ def test_fuse_skewnormal_no_gate(fit_calls):
         {
             "model_weight": 0.5,
             "weighted_mean": 11.40086223,
+            "weighted_mean_val": 11.84094376,
             "sn_sigma_blend_test": 4.06124187,
             "sn_sigma_blend_val": 4.1882951,
             "sn_alpha_blend_test": 0.1,
@@ -129,6 +130,7 @@ def test_fuse_skewnormal_with_gate(fit_calls):
         {
             "model_weight": 0.5,
             "weighted_mean": 11.40086223,
+            "weighted_mean_val": 11.84094376,
             "gate_blend_test": 0.3,
             "gate_blend_val": 0.3,
             "sn_sigma_blend_test": 4.06124187,

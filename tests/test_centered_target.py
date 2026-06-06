@@ -251,6 +251,27 @@ def test_strategy_slugs_publishes_registered_options():
     assert "centered_additive_mean10" in TARGET_NORMALIZATION_SLUGS
 
 
+@pytest.mark.parametrize("slug", TARGET_NORMALIZATION_SLUGS)
+def test_encode_inverts_decode_for_loc_and_scale(slug):
+    """encode_loc/encode_scale must exactly invert decode_loc/decode_scale.
+
+    The Gate-4 served-predictive dump (pipeline ``_step_persist_artifacts``) writes
+    EV-space blended params back into the model's normalized space via ``encode`` so
+    the scorecard's existing ``decode`` recovers them byte-for-byte at re-score time.
+    A round-trip miss would re-introduce exactly the train/predict decode drift this
+    registry exists to prevent.
+    """
+    X = _synth_x(n=12, rng_seed=3)
+    strat = get_target_normalization(slug)
+    gm = 9.0
+    loc_ev = np.linspace(1.0, 30.0, len(X))
+    scale_ev = np.linspace(0.5, 8.0, len(X))
+    enc_loc = strat.encode_loc(loc_ev, X, global_mean=gm)
+    enc_scale = strat.encode_scale(scale_ev, X)
+    np.testing.assert_allclose(strat.decode_loc(enc_loc, X, global_mean=gm), loc_ev, atol=1e-9)
+    np.testing.assert_allclose(strat.decode_scale(enc_scale, X), scale_ev, atol=1e-9)
+
+
 # ---------------------------------------------------------------------------
 # set_model_start_values offset_mode (Task 2)
 # ---------------------------------------------------------------------------

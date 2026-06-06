@@ -103,6 +103,8 @@ class TargetNormalization:
     _forward: Callable[[np.ndarray, pd.DataFrame, float, str], np.ndarray]
     _decode_loc: Callable[[np.ndarray, pd.DataFrame, float, str], np.ndarray]
     _decode_scale: Callable[[np.ndarray, pd.DataFrame, str], np.ndarray]
+    _encode_loc: Callable[[np.ndarray, pd.DataFrame, float, str], np.ndarray]
+    _encode_scale: Callable[[np.ndarray, pd.DataFrame, str], np.ndarray]
     _offset_meta: Callable[[float, str], dict | None]
 
     def forward(
@@ -134,6 +136,32 @@ class TargetNormalization:
         """Convert raw ``scale`` into an absolute sigma."""
         return self._decode_scale(scale, X, denom_col)
 
+    def encode_loc(
+        self,
+        loc: np.ndarray,
+        X: pd.DataFrame,
+        global_mean: float,
+        denom_col: str = "MeanYr",
+    ) -> np.ndarray:
+        """Map an absolute EV ``loc`` back into the model's normalized space.
+
+        Exact inverse of :meth:`decode_loc`. Used by the Gate-4 served-predictive
+        dump to store blended params so the scorecard's decode recovers them.
+        """
+        return self._encode_loc(loc, X, global_mean, denom_col)
+
+    def encode_scale(
+        self,
+        scale: np.ndarray,
+        X: pd.DataFrame,
+        denom_col: str = "MeanYr",
+    ) -> np.ndarray:
+        """Map an absolute sigma back into the model's normalized space.
+
+        Exact inverse of :meth:`decode_scale`.
+        """
+        return self._encode_scale(scale, X, denom_col)
+
     def offset_meta(
         self,
         global_mean: float,
@@ -160,6 +188,18 @@ def _ratio_decode_loc(
 def _ratio_decode_scale(scale: np.ndarray, X: pd.DataFrame, denom_col: str) -> np.ndarray:
     meanyr = X[denom_col].clip(lower=_MEANYR_FLOOR).to_numpy()
     return np.asarray(scale, dtype=float) * meanyr
+
+
+def _ratio_encode_loc(
+    loc: np.ndarray, X: pd.DataFrame, global_mean: float, denom_col: str
+) -> np.ndarray:
+    meanyr = X[denom_col].clip(lower=_MEANYR_FLOOR).to_numpy()
+    return np.asarray(loc, dtype=float) / meanyr
+
+
+def _ratio_encode_scale(scale: np.ndarray, X: pd.DataFrame, denom_col: str) -> np.ndarray:
+    meanyr = X[denom_col].clip(lower=_MEANYR_FLOOR).to_numpy()
+    return np.asarray(scale, dtype=float) / meanyr
 
 
 def _ratio_offset_meta(global_mean: float, denom_col: str) -> dict | None:
@@ -192,6 +232,18 @@ def _centered_eb_decode_loc(
 
 def _centered_eb_decode_scale(scale: np.ndarray, X: pd.DataFrame, denom_col: str) -> np.ndarray:
     return np.asarray(scale, dtype=float)
+
+
+def _centered_eb_encode_loc(
+    loc: np.ndarray, X: pd.DataFrame, global_mean: float, denom_col: str
+) -> np.ndarray:
+    eb = compute_eb_prior(
+        X[denom_col].clip(lower=_MEANYR_FLOOR).to_numpy(),
+        X["GamesPlayed"].clip(lower=0).to_numpy(),
+        global_mean,
+        EB_SHRINKAGE_K,
+    )
+    return np.asarray(loc, dtype=float) - eb
 
 
 def _centered_eb_offset_meta(global_mean: float, denom_col: str) -> dict:
@@ -231,6 +283,12 @@ def _centered_mean10_decode_scale(scale: np.ndarray, X: pd.DataFrame, denom_col:
     return np.asarray(scale, dtype=float)
 
 
+def _centered_mean10_encode_loc(
+    loc: np.ndarray, X: pd.DataFrame, global_mean: float, denom_col: str
+) -> np.ndarray:
+    return np.asarray(loc, dtype=float) - _mean10_baseline(X, denom_col)
+
+
 def _centered_mean10_offset_meta(global_mean: float, denom_col: str) -> dict:
     return {
         "method": "mean10_additive",
@@ -247,6 +305,8 @@ _TARGET_NORMALIZATIONS: dict[str, TargetNormalization] = {
         _forward=_ratio_forward,
         _decode_loc=_ratio_decode_loc,
         _decode_scale=_ratio_decode_scale,
+        _encode_loc=_ratio_encode_loc,
+        _encode_scale=_ratio_encode_scale,
         _offset_meta=_ratio_offset_meta,
     ),
     "centered_additive_eb_meanyr_k10": TargetNormalization(
@@ -255,6 +315,8 @@ _TARGET_NORMALIZATIONS: dict[str, TargetNormalization] = {
         _forward=_centered_eb_forward,
         _decode_loc=_centered_eb_decode_loc,
         _decode_scale=_centered_eb_decode_scale,
+        _encode_loc=_centered_eb_encode_loc,
+        _encode_scale=_centered_eb_decode_scale,
         _offset_meta=_centered_eb_offset_meta,
     ),
     "centered_additive_mean10": TargetNormalization(
@@ -263,6 +325,8 @@ _TARGET_NORMALIZATIONS: dict[str, TargetNormalization] = {
         _forward=_centered_mean10_forward,
         _decode_loc=_centered_mean10_decode_loc,
         _decode_scale=_centered_mean10_decode_scale,
+        _encode_loc=_centered_mean10_encode_loc,
+        _encode_scale=_centered_mean10_decode_scale,
         _offset_meta=_centered_mean10_offset_meta,
     ),
 }

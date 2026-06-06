@@ -39,15 +39,17 @@ from pathlib import Path
 import click
 import numpy as np
 import pandas as pd
+from scipy.optimize import minimize_scalar
 from scipy.stats import gamma as _scipy_gamma
 from scipy.stats import nbinom as _scipy_nbinom
 from scipy.stats import skewnorm as _scipy_skewnorm
 
 from sportstradamus import data
 from sportstradamus.analysis import explode_offers
+from sportstradamus.helpers.distributions import skewnormal_loc_from_mean
 from sportstradamus.helpers.io import read_history
 from sportstradamus.helpers.provenance import git_sha
-from sportstradamus.training.baselines import _MEANYR_FLOOR as _SN_DENOM_FLOOR
+from sportstradamus.training.baselines import get_target_normalization
 from sportstradamus.training.markets import ALL_MARKETS
 from sportstradamus.training.ship_config import STAT_META_PATH, TARGET_NORM_NONE, load_stat_meta
 
@@ -128,6 +130,9 @@ _GATE4_KS_NOISE_COEF: float = 1.358
 # over a seeded draw set so the gate stays reproducible.
 _RANDOMIZED_PIT_DRAWS: int = 25
 _RANDOMIZED_PIT_SEED: int = 4517
+# Search range for the SkewNormal dispersion scalar c (fit_skewnorm_dispersion_c). Lower
+# bound permits tightening an over-wide cell; upper bound matches the count branch's hard cap.
+_DISPERSION_C_BOUNDS: tuple[float, float] = (0.1, 10.0)
 # Reported (not a ship term): the over-tail of the same randomized PIT, restricted to
 # u >= _TAIL_PIT_FLOOR. The global Gate-4 KS is a sup over the whole CDF, so it nets
 # compensating directional errors and a cell can pass g4 while mispricing the alt-OVER
@@ -279,6 +284,7 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
         "SN_Loc",
         "SN_Scale",
         "SN_Alpha",
+        "Mean10",  # centered_additive SkewNormal decode re-adds this baseline to loc
         "R",
         "NB_P",
         "Alpha",
@@ -632,33 +638,29 @@ def _infer_dist_from_columns(df: pd.DataFrame) -> str | None:
     return None
 
 
-# MeanYr floor for ratio_meanyr decode is canonical at
-# `training.baselines._MEANYR_FLOOR` (imported at the top of this module as
-# `_SN_DENOM_FLOOR`); the analytical-IQR mirror must agree with the training
-# pipeline or the predicted IQR drifts from what the model actually output.
-
-# Strategies that decode SkewNormal scale by multiplying with MeanYr_clipped,
-# mirroring training.baselines._ratio_decode_scale. centered_additive_*
-# strategies leave SN_Scale alone (baselines._centered_eb_decode_scale and
-# _centered_mean10_decode_scale return raw scale).
-_RATIO_LIKE_STRATEGIES: frozenset[str] = frozenset({"ratio_meanyr"})
+# SkewNormal strategies the gate can decode from the dumped params alone (no
+# persisted global_mean — both ignore it). Any other string reaching this mirror is
+# an A/B run-label (``baseline`` / ``unlabeled``) on a frame already in EV-space, so
+# it passes through unchanged; ``_resolve_decode_strategy`` only ever yields these two.
+_SN_DECODE_STRATEGIES: frozenset[str] = frozenset({"ratio_meanyr", "centered_additive_mean10"})
 
 
 def _decode_sn_loc_scale(df: pd.DataFrame, strategy: str) -> tuple[np.ndarray, np.ndarray]:
     """Decode raw SkewNormal ``loc`` / ``scale`` to EV-space per strategy.
 
-    Mirrors ``training.baselines.TargetNormalization.decode_loc`` / ``decode_scale``
-    for the strategies wired in ``_TARGET_NORMALIZATIONS`` there. ``ratio_meanyr``
-    multiplies both by ``MeanYr.clip(_SN_DENOM_FLOOR)``; the
-    ``centered_additive_*`` strategies leave ``scale`` alone (location decode
-    is irrelevant for IQR, which is location-free for SkewNormal).
+    Dispatches through the canonical ``baselines`` registry so the gate scores the
+    same absolute predictive that ``prediction.model_prob`` prices, rather than a
+    hand-rolled mirror that can drift. ``ratio_meanyr`` multiplies both by ``MeanYr``;
+    ``centered_additive_mean10`` re-adds the Mean10 baseline to ``loc`` — irrelevant
+    for the location-free IQR but load-bearing for the PIT, which is where the old
+    hand-rolled mirror silently dropped the offset.
     """
     raw_loc = df["SN_Loc"].to_numpy(dtype=float)
     raw_scale = df["SN_Scale"].to_numpy(dtype=float)
-    if strategy in _RATIO_LIKE_STRATEGIES and "MeanYr" in df.columns:
-        meanyr = df["MeanYr"].clip(lower=_SN_DENOM_FLOOR).to_numpy(dtype=float)
-        return raw_loc * meanyr, raw_scale * meanyr
-    return raw_loc, raw_scale
+    if strategy not in _SN_DECODE_STRATEGIES:
+        return raw_loc, raw_scale
+    strat = get_target_normalization(strategy)
+    return strat.decode_loc(raw_loc, df, 0.0), strat.decode_scale(raw_scale, df)
 
 
 def _pred_ppf(df: pd.DataFrame, dist: str, q: float, *, strategy: str) -> np.ndarray:
@@ -825,6 +827,41 @@ def _randomized_pit_ks(df: pd.DataFrame, dist: str, y: np.ndarray, *, strategy: 
     """
     draws = _randomized_pit_draws(df, dist, y, strategy=strategy)
     return float(np.mean([_ks_uniform(u) for u in draws]))
+
+
+def fit_skewnorm_dispersion_c(
+    mean: np.ndarray,
+    sigma: np.ndarray,
+    skew: np.ndarray,
+    y: np.ndarray,
+    *,
+    bounds: tuple[float, float] = _DISPERSION_C_BOUNDS,
+) -> float:
+    """Fit the scale multiplier ``c`` that minimizes the Gate-4 randomized-PIT KS.
+
+    The served SkewNormal predictive holds the (blended) mean fixed and scales the
+    scale by ``c``. The scipy ``loc`` is derived via
+    :func:`helpers.distributions.skewnormal_loc_from_mean` — the same formula the
+    betting path uses — so the fit optimizes the exact gate statistic the test-set
+    CSV is later scored against; no re-derived PIT math.
+    """
+    mean = np.asarray(mean, dtype=float)
+    sigma = np.asarray(sigma, dtype=float)
+    skew = np.asarray(skew, dtype=float)
+    y = np.asarray(y, dtype=float)
+
+    def _ks(c: float) -> float:
+        scale = sigma * c
+        df = pd.DataFrame(
+            {
+                "SN_Loc": skewnormal_loc_from_mean(mean, scale, skew),
+                "SN_Scale": scale,
+                "SN_Alpha": skew,
+            }
+        )
+        return _randomized_pit_ks(df, "SkewNormal", y, strategy=TARGET_NORM_NONE)
+
+    return float(minimize_scalar(_ks, bounds=bounds, method="bounded").x)
 
 
 def _gate4_pit_ks_threshold(n: int) -> float:

@@ -18,6 +18,7 @@ from sportstradamus.training.scorecard import (
     _GATE4_PIT_KS_DELTA,
     _GATE5_ECE_MAX,
     _SUPERSEDE_S3_Z_MIN,
+    _decode_sn_loc_scale,
     _dispersion_diagnostics,
     _ece_debias_offset,
     _gate1_brier_ci,
@@ -41,6 +42,7 @@ from sportstradamus.training.scorecard import (
     _zinb_ppf,
     apply_thresholds,
     decile_table,
+    fit_skewnorm_dispersion_c,
     gate_row,
     load_test_set,
     scorecard,
@@ -383,6 +385,7 @@ def test_iqr_pred_analytical_skewnormal_centered_strategy_passes_scale_through()
             "SN_Loc": np.full(n, raw_loc),
             "SN_Scale": np.full(n, raw_scale),
             "SN_Alpha": np.full(n, alpha),
+            "Mean10": np.full(n, 3.0),  # re-added to loc; IQR is location-invariant
             "MeanYr": np.full(n, 4.0),  # would change result under ratio_meanyr
         }
     )
@@ -390,6 +393,101 @@ def test_iqr_pred_analytical_skewnormal_centered_strategy_passes_scale_through()
     q25 = float(skewnorm.ppf(0.25, alpha, loc=raw_loc, scale=raw_scale))
     q75 = float(skewnorm.ppf(0.75, alpha, loc=raw_loc, scale=raw_scale))
     assert iqr == pytest.approx(q75 - q25, abs=1e-6)
+
+
+def test_decode_sn_loc_scale_centered_additive_readds_location_offset():
+    """centered_additive_mean10 PIT decode must re-add the Mean10 baseline to loc.
+
+    Regression for the Gate-4 decode bug: the scorecard mirror returned the raw
+    SN_Loc for centered strategies (correct for the location-free IQR, wrong for
+    the location-sensitive PIT), mis-locating the predictive by the ~Mean10 offset
+    and inflating pit_ks. Scale is still passed through unchanged for this strategy.
+    """
+    raw_loc = np.array([0.1, -0.2, 0.0])
+    mean10 = np.array([2.4, 3.0, 1.8])  # all above the MeanYr floor; clip is a no-op
+    df = pd.DataFrame(
+        {
+            "SN_Loc": raw_loc,
+            "SN_Scale": np.array([1.5, 2.0, 1.0]),
+            "Mean10": mean10,
+            "MeanYr": np.array([2.5, 3.1, 1.9]),
+        }
+    )
+    loc, scale = _decode_sn_loc_scale(df, "centered_additive_mean10")
+    np.testing.assert_allclose(loc, mean10 + raw_loc)
+    np.testing.assert_allclose(scale, df["SN_Scale"].to_numpy())
+
+
+def test_decode_sn_loc_scale_ratio_multiplies_both_by_meanyr():
+    """ratio_meanyr decode is unchanged by the centered-offset fix (regression guard)."""
+    df = pd.DataFrame({"SN_Loc": [0.5], "SN_Scale": [0.3], "MeanYr": [10.0]})
+    loc, scale = _decode_sn_loc_scale(df, "ratio_meanyr")
+    np.testing.assert_allclose(loc, [5.0])
+    np.testing.assert_allclose(scale, [3.0])
+
+
+def test_fit_skewnorm_dispersion_c_widens_underdispersed_symmetric():
+    """A predictive half as wide as the truth must fit c ~ 2 to recover calibration.
+
+    Symmetric case (skew=0): delta=0, so loc == mean and scaling the scale never
+    moves the centre. y ~ Normal(mu, s); we hand the fitter the SAME mean but
+    sigma = s/2 (under-dispersed), and the Gate-4-optimal c that makes the PIT
+    Uniform is the one that restores the true scale, i.e. c ~ 2.
+    """
+    rng = np.random.default_rng(0)
+    mu, s_true, n = 7.0, 3.0, 4000
+    y = rng.normal(mu, s_true, n)
+    c = fit_skewnorm_dispersion_c(
+        np.full(n, mu), np.full(n, s_true / 2.0), np.zeros(n), y
+    )
+    assert abs(c - 2.0) < 0.25
+
+
+def test_fit_skewnorm_dispersion_c_unit_for_calibrated_symmetric():
+    """A predictive already at the true scale must fit c ~ 1 (no widening)."""
+    rng = np.random.default_rng(1)
+    mu, s_true, n = 4.0, 2.0, 4000
+    y = rng.normal(mu, s_true, n)
+    c = fit_skewnorm_dispersion_c(np.full(n, mu), np.full(n, s_true), np.zeros(n), y)
+    assert abs(c - 1.0) < 0.2
+
+
+def test_fit_skewnorm_dispersion_c_recovers_scale_under_skew():
+    """With nonzero skew the fitter must still recover the true scale.
+
+    The served predictive holds the MEAN fixed and derives loc from the scaled
+    scale exactly as the betting path does, so feeding the true mean + half the
+    true scale of a skewed draw must fit c ~ 2.
+    """
+    from scipy.stats import skewnorm as _sn
+
+    a, loc_true, scale_true, n = 5.0, 2.0, 2.5, 6000
+    y = _sn.rvs(a, loc=loc_true, scale=scale_true, size=n, random_state=2)
+    delta = a / np.sqrt(1 + a**2)
+    mean_true = loc_true + scale_true * delta * np.sqrt(2 / np.pi)
+    c = fit_skewnorm_dispersion_c(
+        np.full(n, mean_true), np.full(n, scale_true / 2.0), np.full(n, a), y
+    )
+    assert abs(c - 2.0) < 0.3
+
+
+def test_load_test_set_retains_mean10_for_centered_decode(tmp_path):
+    """Mean10 must survive load_test_set — the centered_additive PIT decode reads it."""
+    csv = tmp_path / "WNBA_DREB.csv"
+    pd.DataFrame(
+        {
+            "MeanYr": [2.0],
+            "Result": [3.0],
+            "Blended_EV": [2.5],
+            "EV": [2.5],
+            "SN_Loc": [0.1],
+            "SN_Scale": [1.0],
+            "SN_Alpha": [0.0],
+            "Mean10": [2.4],
+        }
+    ).to_csv(csv, index=False)
+    out = load_test_set(csv, "Blended_EV")
+    assert "Mean10" in out.columns
 
 
 def test_iqr_pred_analytical_gamma_recovers_rate_from_ev():

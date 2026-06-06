@@ -94,6 +94,35 @@ def no_vig_odds(over, under=None):
 SN_MAX_MEAN_FACTOR = 5.0
 
 
+def skewnormal_loc_from_mean(
+    mean: np.ndarray | float,
+    sigma: np.ndarray | float,
+    skew: np.ndarray | float,
+) -> np.ndarray:
+    """Derive the scipy SkewNormal ``loc`` parameter from the distribution mean.
+
+    ``loc = mean - sigma * delta * sqrt(2/pi)``
+    where ``delta = skew / sqrt(1 + skew**2)``.
+
+    This is the exact inversion used in ``_skewnormal_odds``, ``fused_loc``,
+    and ``get_ev``'s internal residual — one authoritative formula so the
+    betting path, the training dump, and the Gate-4 fit all derive the same loc.
+
+    Args:
+        mean: Distributional mean (E[X]).
+        sigma: Scale parameter (positive).
+        skew: Shape / skewness parameter (alpha).
+
+    Returns:
+        ``loc`` parameter for ``scipy.stats.skewnorm(skew, loc=loc, scale=sigma)``.
+    """
+    mean = np.asarray(mean, dtype=float)
+    sigma = np.asarray(sigma, dtype=float)
+    skew = np.asarray(skew, dtype=float)
+    delta = skew / np.sqrt(1.0 + skew**2)
+    return mean - sigma * delta * np.sqrt(2.0 / np.pi)
+
+
 def _skewnormal_ev(line, under, cv, skew_alpha):
     """Solve for the SkewNormal mean reproducing the book's ``under`` at ``line``.
 

@@ -39,6 +39,7 @@ from sportstradamus.helpers import (
     get_logger,
     get_odds,
     set_model_start_values,
+    skewnormal_loc_from_mean,
     stat_cv,
     stat_zi,
 )
@@ -55,6 +56,7 @@ from sportstradamus.training.config import (
 from sportstradamus.training.data import trim_matrix
 from sportstradamus.training.hyperparams import _BoundedResponseFn, warm_start_hyper_opt
 from sportstradamus.training.report import report
+from sportstradamus.training.scorecard import fit_skewnorm_dispersion_c
 from sportstradamus.training.shap import compute_market_importance
 
 logger = get_logger(__name__)
@@ -1339,6 +1341,10 @@ def _step_persist_artifacts(
     deterministic: bool,
     target_normalization: str,
     zinb_mode: str,
+    sn_scale_test: np.ndarray | None,
+    sn_skew_test: np.ndarray | None,
+    global_mean: float,
+    denom_col: str,
 ) -> None:
     """Write the test-set CSV and the model pickle.
 
@@ -1362,9 +1368,17 @@ def _step_persist_artifacts(
     # measures dispersion, which the corrector intentionally leaves alone.
     X_test["EV"] = ev
     if dist == "SkewNormal":
-        X_test["SN_Loc"] = prob_params["loc"]
-        X_test["SN_Scale"] = prob_params["scale"]
-        X_test["SN_Alpha"] = prob_params["alpha"]
+        # Gate 4 must score the SERVED predictive (blended params × dispersion c),
+        # the same distribution inference prices. Derive scipy loc via
+        # skewnormal_loc_from_mean — the single authoritative formula shared with the
+        # betting path and the scorecard fit — then re-encode loc/scale to the model's
+        # normalized space so the scorecard's decode recovers the served EV params
+        # byte-for-byte (encode is the exact inverse of that decode).
+        strat = baselines.get_target_normalization(target_normalization)
+        served_loc = skewnormal_loc_from_mean(weighted_mean, sn_scale_test, sn_skew_test)
+        X_test["SN_Loc"] = strat.encode_loc(served_loc, X_test, global_mean, denom_col)
+        X_test["SN_Scale"] = strat.encode_scale(sn_scale_test, X_test, denom_col)
+        X_test["SN_Alpha"] = sn_skew_test
         if hist_gate > GATE_PUBLISH_THRESHOLD:
             X_test["Gate"] = hist_gate
     elif dist in ("NegBin", "ZINB"):
@@ -1491,11 +1505,12 @@ def _step_calibrate_dispersion(
 
     Pure: returns a new dict with updated ``r_test``, ``r_blend_val``,
     ``alpha_blend``, ``alpha_blend_val``, ``beta_blend_val``, ``c_opt``,
-    ``val_weighted_mean`` (count branch) or ``val_weighted_mean_val``
-    (SkewNormal). Hurdle ZINB participates in dispersion calibration via the
-    NegBin branch — gate is passed through as ``gate_blend_val``.
+    ``val_weighted_mean`` (count branch) or ``sn_sigma_blend_test`` (= blended
+    test sigma × ``c_opt``) + ``val_weighted_mean_val`` (SkewNormal). The
+    SkewNormal ``c_opt`` minimizes the Gate-4 randomized-PIT KS of the served
+    (blended) predictive; the count branch minimizes CRPS. Hurdle ZINB
+    participates via the NegBin branch — gate passed through as ``gate_blend_val``.
     """
-    book_ev_val = splits["B_validation"]["EV"].to_numpy()
     y_val_arr = splits["y_validation"]["Result"].to_numpy()
 
     out = {
@@ -1505,22 +1520,26 @@ def _step_calibrate_dispersion(
         "alpha_blend": fused["alpha_blend"],
         "alpha_blend_val": fused["alpha_blend_val"],
         "beta_blend_val": fused["beta_blend_val"],
+        "sn_sigma_blend_test": fused["sn_sigma_blend_test"],
+        "sn_sigma_blend_val": fused["sn_sigma_blend_val"],
         "val_weighted_mean": None,
         "val_weighted_mean_val": None,
     }
 
     if dist == "SkewNormal":
-        val_weighted_mean_val, _, _, _ = fused_loc(
-            model_weight,
-            decoded["ev_validation"],
-            book_ev_val,
-            cv,
-            "SkewNormal",
-            sigma=decoded["sn_sigma_val"],
-            skew_alpha=decoded["sn_alpha_val"],
-            **({"gate_book": hist_gate} if hist_gate > GATE_PUBLISH_THRESHOLD else {}),
+        # Fit c against the served (blended) predictive — the exact thing inference
+        # prices and Gate 4 scores: mean held fixed at the blended val mean, scale
+        # scaled by c. Reuses the gate's own randomized-PIT KS (no PIT-math dup).
+        c_opt = fit_skewnorm_dispersion_c(
+            fused["weighted_mean_val"],
+            fused["sn_sigma_blend_val"],
+            fused["sn_alpha_blend_val"],
+            y_val_arr,
         )
-        out["val_weighted_mean_val"] = val_weighted_mean_val
+        out["c_opt"] = c_opt
+        out["sn_sigma_blend_test"] = fused["sn_sigma_blend_test"] * c_opt
+        out["sn_sigma_blend_val"] = fused["sn_sigma_blend_val"] * c_opt
+        out["val_weighted_mean_val"] = fused["weighted_mean_val"]
         return out
 
     r_blend_val = fused["r_blend_val"]
@@ -1582,7 +1601,7 @@ def _step_compute_test_probabilities(
             B_test["Line"].to_numpy(),
             weighted_mean,
             "SkewNormal",
-            sigma=fused["sn_sigma_blend_test"],
+            sigma=calibrated["sn_sigma_blend_test"],
             skew_alpha=fused["sn_alpha_blend_test"],
             gate=fused["gate_blend_test"],
         )
@@ -1623,7 +1642,7 @@ def _step_calibrate_temperature(
             B_validation["Line"].to_numpy(),
             calibrated["val_weighted_mean_val"],
             "SkewNormal",
-            sigma=fused["sn_sigma_blend_val"],
+            sigma=calibrated["sn_sigma_blend_val"],
             skew_alpha=fused["sn_alpha_blend_val"],
             gate=fused["gate_blend_val"],
         )
@@ -1772,7 +1791,7 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
         skew_alpha=decoded["sn_alpha_test"],
         **_zi_kwargs,
     )
-    _, sn_sigma_blend_val, sn_alpha_blend_val, gate_blend_val = fused_loc(
+    weighted_mean_val, sn_sigma_blend_val, sn_alpha_blend_val, gate_blend_val = fused_loc(
         model_weight,
         ev_validation,
         book_ev_val,
@@ -1786,6 +1805,7 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
         {
             "model_weight": model_weight,
             "weighted_mean": weighted_mean,
+            "weighted_mean_val": weighted_mean_val,
             "gate_blend_test": gate_blend_test,
             "gate_blend_val": gate_blend_val,
             "sn_sigma_blend_test": sn_sigma_blend_test,
@@ -1945,6 +1965,7 @@ def _step_fuse_predictions(
     out = {
         "model_weight": None,
         "weighted_mean": None,
+        "weighted_mean_val": None,
         "gate_blend_test": None,
         "gate_blend_val": None,
         "r_test": None,
@@ -2381,6 +2402,10 @@ def train_market(
         deterministic=deterministic,
         target_normalization=target_normalization,
         zinb_mode=zinb_mode,
+        sn_scale_test=calibrated["sn_sigma_blend_test"],
+        sn_skew_test=fused["sn_alpha_blend_test"],
+        global_mean=dist_info["global_mean"],
+        denom_col=dist_info["denom_col"],
     )
 
     # Drift-monitoring SHAP: write per-cell |SHAP| + corr columns to the
