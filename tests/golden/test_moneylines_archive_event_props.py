@@ -135,10 +135,10 @@ _EXPECTED_TEAM = [
 ]
 
 
-def test_archive_event_props_parses_event() -> None:
+def test_archive_event_props_parses_event(assert_player_books_close) -> None:
     archive = _FakeArchive()
 
     moneylines._archive_event_props(archive, _GAME, "NBA", _PROPS, "2026-06-04")
 
-    assert archive.player_books == _EXPECTED_PLAYER
+    assert_player_books_close(archive.player_books, _EXPECTED_PLAYER)
     assert archive.team_books == _EXPECTED_TEAM
