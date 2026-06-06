@@ -43,6 +43,7 @@ from sportstradamus import creds, data
 from sportstradamus.helpers import (
     Archive,
     abbreviations,
+    book_gate,
     get_ev,
     get_logger,
     no_vig_odds,
@@ -526,11 +527,13 @@ def _event_player_props(book, market, league, props, odds):
         line = lines[0].get("point", 0.5)
         odds[market_name][player]["Lines"].append(line)
         price = no_vig_odds(*[x["price"] for x in lines])
+        dist = stat_dist.get(league, {}).get(market_name, "SkewNormal")
         ev = get_ev(
             line,
             price[1],
             stat_cv[league].get(market_name, 1),
-            dist=stat_dist.get(league, {}).get(market_name, "SkewNormal"),
+            dist=dist,
+            gate=book_gate(league, market_name, dist),
         )
         odds[market_name][player]["EV"][book["key"]] = ev
 

@@ -94,138 +94,49 @@ def no_vig_odds(over, under=None):
 SN_MAX_MEAN_FACTOR = 5.0
 
 
-def _skewnormal_ev(line, under, cv, skew_alpha):
-    """Solve for the SkewNormal mean reproducing the book's ``under`` at ``line``.
-
-    The scale grows with the mean, so ``cdf(line, mean)`` asymptotes to
-    ``Phi(-1/cv)`` as ``mean → ∞`` rather than to 0. An under-prob near that floor
-    inverts to a mean many times the line — and can hand ``brentq`` a same-sign
-    bracket — so an under that would imply a mean above ``SN_MAX_MEAN_FACTOR ×
-    line`` collapses to the neutral line. The cutoff ``Phi((1-F)/(F·cv))`` is the
-    under-prob at which ``cdf(line, F·line) = under``.
-    """
-    line = float(line)
-    a = float(skew_alpha) if skew_alpha is not None else 0.0
-    f = SN_MAX_MEAN_FACTOR
-    if a == 0.0 and under <= norm.cdf((1 - f) / (f * cv)):
-        return line
-
-    def _sn_residual(mean):
-        sigma = mean * cv
-        delta = a / np.sqrt(1 + a**2)
-        loc_sn = mean - sigma * delta * np.sqrt(2 / np.pi)
-        try:
-            return float(skewnorm.cdf(line, a, loc=loc_sn, scale=sigma)) - under
-        except (ValueError, RuntimeWarning):
-            return np.nan
-
-    lo = 1e-6
-    hi = max(2 * line / max(1 - under, 0.01), 1.0)
-    while hi < 1e8 and _sn_residual(hi) > 0:
-        hi = min(hi * 2, 1e8)
-    # brentq needs endpoints straddling zero; if they don't (``a != 0`` asymptote
-    # or a numerical edge) the bracket is degenerate. nan-safe chained compare.
-    if not (_sn_residual(lo) > 0 > _sn_residual(hi)):
-        return line
-    return float(brentq(_sn_residual, lo, hi, xtol=1e-8))
-
-
-def _solve_ev(residual_fn, lo, hi, *, fallback=None):
-    # CDF is monotone decreasing in mean, so residual(hi) starts positive and
-    # eventually goes negative; the loop always terminates for valid inputs.
-    #
-    # ``fallback`` (zero-inflated inversion only): ``hi`` is then a hard
-    # plausibility ceiling rather than a starting guess. A root beyond it means
-    # the book's non-zero under-prob sits barely above the structural zero rate,
-    # leaving almost no mass in (0, line] — the inversion runs away to an absurd
-    # mean (book and model disagree on the zero rate). Return the neutral
-    # fallback instead of chasing it; mirrors ``_skewnormal_ev``'s
-    # degenerate-bracket guard.
-    if fallback is not None and residual_fn(hi) > 0:
-        return fallback
-    while residual_fn(hi) > 0:
-        hi *= 2
-    return float(brentq(residual_fn, lo, hi, xtol=1e-8))
-
-
-def _negbin_poisson_ev(line, under, cv, lo, hi, *, neutral_fallback=False):
-    fallback = float(line) if neutral_fallback else None
-    line = np.ceil(float(line) - 1)
-    if cv == 1:
-
-        def _pois_residual(mean):
-            return float(poisson.cdf(line, mean)) - under
-
-        return _solve_ev(_pois_residual, lo, hi, fallback=fallback)
-    r = 1.0 / cv
-
-    def _nb_residual(mean):
-        p = r / (r + mean)
-        return float(nbinom.cdf(line, r, p)) - under
-
-    return _solve_ev(_nb_residual, lo, hi, fallback=fallback)
-
-
-def _gamma_ev(line, under, cv, lo, hi, *, neutral_fallback=False):
-    line = float(line)
-    alpha = 1.0 / (cv**2)
-
-    def _gamma_residual(mean):
-        return float(gamma.cdf(line, alpha, scale=mean / alpha)) - under
-
-    return _solve_ev(_gamma_residual, lo, hi, fallback=line if neutral_fallback else None)
-
-
 def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None):
-    """Invert the book's (line, under-prob) to recover the implied mean.
+    """Invert the book's ``(line, under-prob)`` to the implied mean.
 
-    For zero-inflated distributions (ZINB/ZAGamma) with ``gate`` supplied,
-    the book's CDF is decomposed as ``gate + (1-gate) * base_CDF`` and the
-    function solves for the *base* distribution mean so ``fused_loc``
-    receives comparable parameters on both sides.
+    The exact numerical inverse of :func:`get_odds`: returns the mean ``ev`` for
+    which ``get_odds(line, ev, dist, …) == under``, so the book-EV round trip
+    shared by the archive write and ``book_fallback_prob`` read is self-consistent
+    for every family and gate (the zero-inflation gate is re-added on decode, so
+    it must not be stripped here — it is baked into the inverted ``get_odds``).
+
+    The implied mean is capped at ``SN_MAX_MEAN_FACTOR × line``: a book price that
+    would imply a larger mean (its under-prob sits below the capped distribution's
+    floor — e.g. a high-zero-rate count at a low line) clamps to that ceiling
+    rather than running away. A non-monotone bracket (e.g. a negative spread line)
+    returns the neutral line.
 
     Args:
         line: The bookmaker's line.
-        under: The bookmaker's implied probability that the outcome is
-            under the line.
-        cv: Coefficient of variation. Used to derive shape: ``1/cv`` for
-            NegBin, ``1/cv²`` for Gamma.
-        dist: Distribution family — one of ``"Gamma"``, ``"ZAGamma"``,
-            ``"NegBin"``, ``"ZINB"``, ``"Poisson"``, ``"SkewNormal"``.
-        gate: Historical zero-inflation probability. ``None`` means no ZI.
-        skew_alpha: Skewness parameter for SkewNormal; ``None`` → 0 (symmetric).
+        under: The bookmaker's implied probability that the outcome is under the line.
+        cv: Coefficient of variation (shape source when alpha/r are not supplied).
+        dist: Distribution family — ``"Gamma"``/``"ZAGamma"``/``"NegBin"``/
+            ``"ZINB"``/``"Poisson"``/``"SkewNormal"``.
+        gate: Zero-inflation probability; ``None`` disables ZI handling.
+        skew_alpha: SkewNormal skewness; ``None`` → 0 (symmetric).
 
     Returns:
-        The base-distribution mean that reproduces the book's ``under``.
+        The mean that reproduces the book's ``under`` under :func:`get_odds`.
     """
-    under = np.clip(under, 1e-6, 1 - 1e-6)
+    under = float(np.clip(under, 1e-6, 1 - 1e-6))
+    step = 1.0 if dist in ("NegBin", "ZINB", "Poisson") else 0.5
 
-    # For ZI distributions, strip out the zero-inflation component so we solve
-    # for the base distribution mean: gate + (1-gate)*base_CDF = under
-    # ⇒ base_CDF = (under - gate) / (1 - gate)
-    zi_inversion = False
-    if gate is not None and gate > 0 and dist in ("ZINB", "ZAGamma", "SkewNormal"):
-        base_cdf = (under - gate) / (1 - gate)
-        # An under-prob at or below the zero-inflation mass leaves no room for the
-        # base distribution below the line, so the inversion runs away to a huge
-        # mean (the book and the model's zero rate disagree). Use the neutral line.
-        # base_CDF just *above* zero runs away just as badly (mean -> hundreds for
-        # a 2.5 line); ``neutral_fallback`` below caps that at the ``hi`` ceiling.
-        if base_cdf <= 0:
-            return float(line)
-        under = np.clip(base_cdf, 1e-6, 1 - 1e-6)
-        zi_inversion = True
+    def p_under(ev):
+        return get_odds(line, ev, dist, cv=cv, step=step, gate=gate, skew_alpha=skew_alpha)
 
-    # CDF is monotonically decreasing in mean (1→0), so a bracket is always valid:
-    #   at lo≈0 the CDF≈1 > under, at hi→∞ the CDF→0 < under.
     lo = 1e-6
-    hi = max(2 * line / max(1 - under, 0.01), 1.0)
-
-    if dist in ("NegBin", "ZINB", "Poisson"):
-        return _negbin_poisson_ev(line, under, cv, lo, hi, neutral_fallback=zi_inversion)
-    if dist == "SkewNormal":
-        return _skewnormal_ev(line, under, cv, skew_alpha)
-    return _gamma_ev(line, under, cv, lo, hi, neutral_fallback=zi_inversion)
+    hi = max(SN_MAX_MEAN_FACTOR * float(line), 1.0)
+    p_lo, p_hi = p_under(lo), p_under(hi)
+    if p_lo <= p_hi:  # non-monotone bracket (e.g. a negative line) — no inversion
+        return float(line)
+    if under >= p_lo:  # implied mean at or below the floor
+        return lo
+    if under <= p_hi:  # implied mean beyond the cap — clamp instead of running away
+        return hi
+    return float(brentq(lambda ev: p_under(ev) - under, lo, hi, xtol=1e-8))
 
 
 def _negbin_odds(line, ev, cv, r, gate, dist):
@@ -547,7 +458,6 @@ def fused_loc(
         model_loc = ev_a - model_sigma * model_delta * np.sqrt(2 / np.pi)
         book_loc = ev_b  # alpha=0 → delta=0 → loc = EV.
 
-        # Precision-weighted blend.
         prec_m = 1.0 / model_sigma**2
         prec_b = 1.0 / book_sigma**2
         total_prec = w * prec_m + (1 - w) * prec_b
@@ -555,13 +465,11 @@ def fused_loc(
         blended_sigma = 1.0 / np.sqrt(total_prec)
         blended_skew = w * model_skew  # book alpha=0, so blend reduces to w * model.
 
-        # Compute blended EV from blended params.
         bl_delta = blended_skew / np.sqrt(1 + blended_skew**2)
         blended_ev = blended_loc + blended_sigma * bl_delta * np.sqrt(2 / np.pi)
 
         return blended_ev, blended_sigma, blended_skew, gate_blend
 
-    # Gamma — precision-weighted blend.
     ev_a = np.clip(np.asarray(ev_a, dtype=float), 1e-9, None)
     ev_b = np.clip(np.asarray(ev_b, dtype=float), 1e-9, None)
     model_alpha = np.clip(np.asarray(alpha, dtype=float), 1e-9, None)

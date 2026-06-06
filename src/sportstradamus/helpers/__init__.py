@@ -30,6 +30,7 @@ from sportstradamus.helpers.archive import Archive, LazyArchive, clean_archive
 from sportstradamus.helpers.config import (
     abbreviations,
     banned,
+    book_gate,
     book_weights,
     books,
     combo_props,
@@ -91,6 +92,7 @@ __all__ = [
     "abbreviations",
     "apply_temperature",
     "banned",
+    "book_gate",
     "book_weights",
     "books",
     "clean_archive",
