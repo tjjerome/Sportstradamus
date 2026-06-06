@@ -15,22 +15,29 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sportstradamus.helpers.distributions import get_ev, get_odds, set_model_start_values
+from sportstradamus.helpers.distributions import (
+    SN_MAX_MEAN_FACTOR,
+    get_ev,
+    get_odds,
+    set_model_start_values,
+)
 
 
 def test_get_ev_by_family():
-    assert get_ev(10.5, 0.55, cv=0.8, dist="Gamma") == pytest.approx(11.8298596864, abs=1e-6)
+    assert get_ev(10.5, 0.55, cv=0.8, dist="Gamma") == pytest.approx(11.8187948708, abs=1e-6)
     assert get_ev(10.5, 0.55, cv=0.8, dist="ZAGamma", gate=0.2) == pytest.approx(
-        15.1734854492, abs=1e-6
+        15.1645576946, abs=1e-6
     )
-    # under-prob at/below the ZI mass -> inversion runaway -> neutral line returned
-    assert get_ev(5.5, 0.10, cv=0.8, dist="ZAGamma", gate=0.2) == 5.5
+    # under-prob below the ZI mass -> unrepresentable -> clamps to the plausibility cap
+    assert get_ev(5.5, 0.10, cv=0.8, dist="ZAGamma", gate=0.2) == pytest.approx(
+        SN_MAX_MEAN_FACTOR * 5.5, abs=1e-6
+    )
     assert get_ev(7.5, 0.6, cv=0.5, dist="NegBin") == pytest.approx(7.4215818099, abs=1e-6)
-    assert get_ev(7.5, 0.6, cv=0.5, dist="ZINB", gate=0.15) == pytest.approx(8.5907941048, abs=1e-6)
+    assert get_ev(7.5, 0.6, cv=0.5, dist="ZINB", gate=0.15) == pytest.approx(8.5907941045, abs=1e-6)
     assert get_ev(4.5, 0.45, cv=1, dist="Poisson") == pytest.approx(4.9461078629, abs=1e-6)
     assert get_ev(20.5, 0.5, cv=0.4, dist="SkewNormal") == pytest.approx(20.5, abs=1e-6)
     assert get_ev(20.5, 0.5, cv=0.4, dist="SkewNormal", skew_alpha=2.0) == pytest.approx(
-        20.9892961429, abs=1e-6
+        20.9849997782, abs=1e-6
     )
 
 

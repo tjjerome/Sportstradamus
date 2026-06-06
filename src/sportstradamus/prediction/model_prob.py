@@ -21,6 +21,7 @@ from sportstradamus.helpers import (
     UNDERDOG_BOOST_BASELINE,
     LazyArchive,
     apply_temperature,
+    book_gate,
     decode_predictive_mean,
     fused_loc,
     get_ev,
@@ -169,9 +170,7 @@ def _book_cell_params(
     if dist is None:
         return None, None, None, None
     cv = stat_cv[league].get(market, 1)
-    gate = (
-        stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma", "SkewNormal") else 0
-    )
+    gate = book_gate(league, market, dist)
     step = 1.0 if dist in ("NegBin", "ZINB", "Poisson") else 0.5
     return dist, cv, gate, step
 

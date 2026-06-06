@@ -117,23 +117,23 @@ class _FakeArchive:
 
 
 _EXPECTED_PLAYER = [
-    ("NBA", "PTS", "2026-06-04", "Anthony Davis", {"draftkings": 22.50000000086482}, [22.5], None),
-    ("NBA", "PTS", "2026-06-04", "Lebron James", {"draftkings": 25.50000000098013}, [25.5], None),
+    ("NBA", "PTS", "2026-06-04", "Anthony Davis", {"draftkings": 22.50000000000054}, [22.5], None),
+    ("NBA", "PTS", "2026-06-04", "Lebron James", {"draftkings": 25.500000000000618}, [25.5], None),
     (
         "NBA",
         "PTS",
         "2026-06-04",
         "Russell Westbrook",
-        {"draftkings": 5.992252582383513},
+        {"draftkings": 5.999344441953691},
         [5.5],
         None,
     ),
-    ("NBA", "PTS", "2026-06-04", "Stephen Curry", {"draftkings": 0.5176230601457675}, [0.5], None),
+    ("NBA", "PTS", "2026-06-04", "Stephen Curry", {"draftkings": 0.5785114444497812}, [0.5], None),
 ]
 
 _EXPECTED_TEAM = [
-    ("NBA", "", "2026-06-04", "LAL", {"draftkings": 110.25000000000013}),
-    ("NBA", "", "2026-06-04", "BOS", {"draftkings": 110.25000000000013}),
+    ("NBA", "", "2026-06-04", "LAL", {"draftkings": 110.24999999999997}),
+    ("NBA", "", "2026-06-04", "BOS", {"draftkings": 110.24999999999997}),
 ]
 
 

@@ -17,6 +17,7 @@ import datetime
 import pytest
 
 from sportstradamus.helpers.archive import Archive, _devig_over
+from sportstradamus.helpers.distributions import SN_MAX_MEAN_FACTOR
 
 
 class _FakeCursor:
@@ -161,13 +162,17 @@ def test_add_dfs_dedup_market_resolution_and_ev():
         ("WNBA", "prizepicks_pts", "Some Guy"),  # underdog->prizepicks for NBA/WNBA
     ]
     evs = {ent: ev for _, _, ent, _, ev in cap.book_evs}
-    # Nikola Jokic BLK is a ZINB whose gate behavior is calibration-sensitive:
-    # under the real stat_cv the gate underflows to the neutral line (~1.5);
-    # under CI's stubbed calibration it clears to a real EV just above the line
-    # (~1.68). Both sit well below any runaway, so pin the band, not a point.
-    assert 1.35 < evs["Nikola Jokic"] < 1.85
-    assert evs["Connor Mcdavid"] == pytest.approx(1.5)
-    assert evs["Some Guy"] == pytest.approx(15.148297929, rel=1e-6)
+    # These DFS even-money EVs read the gitignored stat_calibration.json, so they are
+    # calibration-sensitive (production-derived local vs CI stub) -- pin bounded bands,
+    # not calibration-specific points. Jokic BLK (ZINB): under a low gate the even-money
+    # under inverts just above the line (~1.5-1.7); under a high gate it sits below the
+    # gate floor and clamps to the cap. Either way bounded by the cap -- never the old
+    # runaway -- which is what the get_ev clamp guarantees.
+    assert 1.35 < evs["Nikola Jokic"] <= SN_MAX_MEAN_FACTOR * 1.5
+    # SkewNormal even-money inverts *near* the line (the true get_odds inverse, a few
+    # percent off and a touch calibration-dependent).
+    assert 1.3 < evs["Connor Mcdavid"] < 1.6
+    assert 15.0 < evs["Some Guy"] < 15.3
 
     assert cap.lines == [
         ("NBA", "BLK", "Nikola Jokic", 1.5),

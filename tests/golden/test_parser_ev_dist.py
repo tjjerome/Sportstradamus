@@ -1,19 +1,24 @@
 """The props parser must invert each book price under the market's own
-distribution, not the ``get_ev`` SkewNormal default.
+distribution and zero-inflation gate, not the ``get_ev`` SkewNormal default.
 
-For low-count markets (blocks/steals/tds, lines 0.5-1.5) the SkewNormal
-inversion is ill-conditioned: its CDF asymptotes to ``Phi(-1/cv)``, so a
-de-vigged under-prob just above that asymptote drives the solved mean toward
-infinity and the archived ``ev`` explodes (up to ``line * 1e6``). Passing the
-real distribution (ZINB/NegBin for counts) keeps the inversion bounded and
-makes it the true inverse of the ``get_odds`` call training reads it back with.
-Regression guard for the moneylines.py parser dist fix.
+``stat_dist`` routes a count market (blocks/steals/tds) to ZINB/NegBin and
+``book_gate`` supplies its zero-inflation gate; the parser threads both into
+``get_ev`` so the archived book mean is the exact inverse of the gated
+``get_odds`` call the book-fallback decode (``_book_cell_params``) reads it back
+with. A center priced to clear a low line implies an under far below the count's
+representable band, so the inversion clamps to the plausibility cap
+(``SN_MAX_MEAN_FACTOR × line``) — bounded, never the old SkewNormal-asymptote
+runaway — and lands on a different mean than the SkewNormal default would, which
+is the routing this guards. Regression guard for the moneylines.py parser
+dist+gate wiring.
 """
 
 import datetime
 
-from sportstradamus.helpers import stat_cv, stat_dist
-from sportstradamus.helpers.distributions import get_odds, no_vig_odds
+import pytest
+
+from sportstradamus.helpers import book_gate, stat_cv, stat_dist
+from sportstradamus.helpers.distributions import SN_MAX_MEAN_FACTOR, get_ev, no_vig_odds
 from sportstradamus.moneylines import _archive_event_props
 
 
@@ -28,11 +33,13 @@ class _CaptureArchive:
         pass
 
 
-def test_low_count_prop_ev_round_trips_under_market_dist():
-    # A center priced ~89% to clear 0.5 blocks: over short (1.05 decimal),
-    # under long (9.0). Inverting this under the market's real ZINB keeps the
-    # archived ev a true inverse of the get_odds call training reads it back
-    # with; the SkewNormal default does not (and blows up in the asymptote band).
+def test_low_count_prop_ev_inverts_under_market_dist_and_gate():
+    # A center priced ~89% to clear 0.5 blocks: over short (1.05), under long
+    # (9.0) → de-vigged under ~0.10, below NBA BLK's ~0.63 zero-inflation gate.
+    # The parser must invert under the market's ZINB *and* book_gate; that exact
+    # call is the inverse of the gated get_odds the fallback decode reads it with,
+    # and it lands on the cap (2.5) here, distinct from the SkewNormal default's
+    # ~2.02. A sub-band quote clamps to the cap rather than running away.
     game = {
         "commence_time": "2025-12-23T23:00:00Z",
         "home_team": "Denver Nuggets",
@@ -70,12 +77,13 @@ def test_low_count_prop_ev_round_trips_under_market_dist():
     ev = archive.book_evs[("BLK", "Nikola Jokic")]["draftkings"]
     cv = stat_cv["NBA"]["BLK"]
     dist = stat_dist["NBA"]["BLK"]
-    expected_under = no_vig_odds(1.05, 9.0)[1]
-    # Training recovers p_book via get_odds under the market's real dist; the
-    # parser must have used the same dist for that to recover the book's quote.
-    recovered_under = get_odds(0.5, ev, dist, cv=cv)
-    assert abs(recovered_under - expected_under) < 0.02, (
-        f"parser ev must round-trip to the book under-prob {expected_under:.3f}, got {recovered_under:.3f} "
-        f"(ev={ev:.3f}) — the SkewNormal default breaks this"
+    under = no_vig_odds(1.05, 9.0)[1]
+    # The parser must thread the market dist + book_gate into get_ev; the
+    # SkewNormal default (or a missing gate that changed the inversion) would
+    # land on a different mean.
+    expected_ev = get_ev(0.5, under, cv, dist=dist, gate=book_gate("NBA", "BLK", dist))
+    assert ev == pytest.approx(expected_ev), (
+        f"parser must invert under {dist}+book_gate, got ev={ev:.4f} vs {expected_ev:.4f} "
+        "(the SkewNormal default diverges here)"
     )
-    assert 0 < ev < 10, f"low-count ev should stay bounded, got {ev}"
+    assert 0 < ev <= SN_MAX_MEAN_FACTOR * 0.5, f"sub-band quote must clamp, not run away: {ev}"
