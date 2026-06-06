@@ -22,15 +22,26 @@ from sportstradamus.stats import nfl_fp_weekly as player
 _SEASON = 2022
 _WEEKS_2022 = list(range(1, 37))
 
+# The 2022 FantasyPoints weekly snapshots are proprietary and gitignored, so they
+# are absent in CI. The tests that read them skip when the data is missing; the
+# absent-season / error-path tests below run regardless.
+_needs_fp_snapshots = pytest.mark.skipif(
+    player.snapshot_dir(_SEASON, 1) is None or team.snapshot_dir(_SEASON, 1) is None,
+    reason="FantasyPoints 2022 weekly snapshots are gitignored/proprietary; absent in CI",
+)
 
+
+@_needs_fp_snapshots
 def test_available_snapshots_player() -> None:
     assert player.available_snapshots(_SEASON) == _WEEKS_2022
 
 
+@_needs_fp_snapshots
 def test_available_snapshots_team() -> None:
     assert team.available_snapshots(_SEASON) == _WEEKS_2022
 
 
+@_needs_fp_snapshots
 def test_snapshot_dir_present_and_absent() -> None:
     assert player.snapshot_dir(_SEASON, 1) is not None
     assert player.snapshot_dir(2099, 1) is None
@@ -38,6 +49,7 @@ def test_snapshot_dir_present_and_absent() -> None:
     assert team.snapshot_dir(2099, 1) is None
 
 
+@_needs_fp_snapshots
 def test_load_snapshot_player_shape() -> None:
     # Exact shape guards the player base-dir + FILE_KINDS wiring: a store
     # pointed at team_data would not return this frame.
@@ -46,6 +58,7 @@ def test_load_snapshot_player_shape() -> None:
     assert df.shape == (1141, 73)
 
 
+@_needs_fp_snapshots
 def test_load_snapshot_team_shape() -> None:
     df = team.load_snapshot(_SEASON, 1, "coverage_matrix")
     assert isinstance(df, pd.DataFrame)
@@ -59,6 +72,7 @@ def test_load_snapshot_unknown_kind_label() -> None:
         team.load_snapshot(_SEASON, 1, "__nope__")
 
 
+@_needs_fp_snapshots
 def test_load_window_concatenates() -> None:
     one = player.load_snapshot(_SEASON, 1, "efficiency")
     win = player.load_window(_SEASON, 1, 2, "efficiency")
@@ -66,6 +80,7 @@ def test_load_window_concatenates() -> None:
     assert len(win) >= len(one)
 
 
+@_needs_fp_snapshots
 def test_load_through_player() -> None:
     assert isinstance(player.load_through(_SEASON, 2, "efficiency"), pd.DataFrame)
 
@@ -77,6 +92,7 @@ def test_load_all_snapshots_player() -> None:
     assert all(isinstance(v, pd.DataFrame) for v in allsnap.values())
 
 
+@_needs_fp_snapshots
 def test_snapshot_inventory_columns_and_rows() -> None:
     inv_p = player.snapshot_inventory([_SEASON])
     assert list(inv_p.columns) == ["season", "snapshot_week", *player.FILE_KINDS]
@@ -87,6 +103,7 @@ def test_snapshot_inventory_columns_and_rows() -> None:
     assert len(inv_t) == 36
 
 
+@_needs_fp_snapshots
 def test_load_window_or_empty_matches_load_window() -> None:
     # On the happy path the swallow-and-normalize wrapper returns load_window's
     # frame unchanged; the aggregate recipes consumed this contract via the old
