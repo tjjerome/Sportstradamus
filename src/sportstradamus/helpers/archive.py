@@ -35,7 +35,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 
-from sportstradamus.helpers.config import book_weights, stat_cv, stat_dist, stat_zi
+from sportstradamus.helpers.config import book_gate, book_weights, stat_cv, stat_dist
 from sportstradamus.helpers.distributions import get_ev, get_odds, no_vig_odds
 from sportstradamus.helpers.text import remove_accents
 
@@ -862,7 +862,7 @@ class Archive:
 
             cv = stat_cv.get(league, {}).get(market, 1)
             dist = stat_dist.get(league, {}).get(market, "Gamma")
-            gate = stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma") else 0
+            gate = book_gate(league, market, dist)
 
             player = remove_accents(o["Player"])
             line = float(o["Line"])
@@ -871,7 +871,7 @@ class Archive:
             # A missing/zero under side fabricated a ~6.5%-vig under in no_vig_odds
             # that inverts to a blown count-cell ev; DFS picks are symmetric instead.
             odds = no_vig_odds(over, _dfs_under_boost(over, o.get("Boost_Under")))
-            ev = get_ev(line, odds[1], cv, dist=dist, gate=gate or None)
+            ev = get_ev(line, odds[1], cv, dist=dist, gate=gate)
 
             self._stage_book_ev(league, market, d, player, platform, ev)
             self._stage_line(league, market, d, player, line)

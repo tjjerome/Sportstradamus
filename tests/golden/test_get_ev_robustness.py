@@ -14,15 +14,17 @@ Two ill-conditioned bands corrupt the archive when left unguarded:
    hair above that floor inverts to a runaway mean (rushing-yards evs in the
    millions) and can hand ``brentq`` a same-sign bracket that raises.
 
-Both degenerate bands must collapse to the neutral line, while genuinely
-well-posed prices keep inverting to a real mean.
+Both degenerate bands must clamp to the plausibility cap (``SN_MAX_MEAN_FACTOR ×
+line``) — bounded, never a runaway, and decoding back through ``get_odds`` to the
+nearest achievable probability — while genuinely well-posed prices keep inverting
+to a real mean.
 """
 
 import numpy as np
 import pytest
 
 from sportstradamus.helpers.archive import Archive
-from sportstradamus.helpers.distributions import get_ev
+from sportstradamus.helpers.distributions import SN_MAX_MEAN_FACTOR, get_ev
 
 # NBA BLK calibration (high zero-inflation count cell).
 BLK_CV = 0.5435
@@ -36,12 +38,15 @@ FG3M_GATE = 0.3370
 RY_CV = 0.905
 
 
-def test_zinb_under_at_or_below_gate_returns_line():
-    # A realistic two-sided BLK o/u 1.5 (-130/+110) de-vigs to under ~0.46, which
-    # is below the 0.63 gate: the unguarded inversion blew this to ~5900.
+def test_zinb_under_at_or_below_gate_clamps_to_cap():
+    # A realistic two-sided BLK o/u 1.5 (-130/+110) de-vigs to under ~0.46, below
+    # the 0.63 gate: the under-prob sits beneath the gated count's floor, so no
+    # finite mean reproduces it (the unguarded inversion blew this to ~5900). It
+    # must clamp to the cap, which decodes back to the gate floor — not the line,
+    # whose decode re-adds the full gate to an overconfident ~0.8.
     for under in (0.06, 0.30, 0.457, 0.60):
         ev = get_ev(1.5, under, BLK_CV, dist="ZINB", gate=BLK_GATE)
-        assert ev == pytest.approx(1.5), f"under={under} should fall back to the line, got {ev}"
+        assert ev == pytest.approx(SN_MAX_MEAN_FACTOR * 1.5), f"under={under} got {ev}"
 
 
 def test_zinb_under_above_gate_still_inverts():
@@ -55,11 +60,11 @@ def test_zinb_under_above_gate_still_inverts():
 def test_zinb_under_just_above_gate_no_runaway():
     # The 2026-06-05 FG3M bug: an under-prob just *above* the gate strips to a
     # tiny-positive base CDF that the unguarded inversion blew to 90-7800 for a
-    # 2.5 line. The base_cdf<=0 guard misses this band; the hi-ceiling fallback
-    # must collapse it to the neutral line.
+    # 2.5 line. The cap must bound it — unders far enough above the gate still
+    # invert to a real mean, the rest clamp to the ceiling.
     for under in (FG3M_GATE + 0.002, FG3M_GATE + 0.03, FG3M_GATE + 0.10):
         ev = get_ev(2.5, under, FG3M_CV, dist="ZINB", gate=FG3M_GATE)
-        assert ev == pytest.approx(2.5), f"under={under} should fall back to the line, got {ev}"
+        assert np.isfinite(ev) and ev <= SN_MAX_MEAN_FACTOR * 2.5, f"under={under} got {ev}"
 
 
 def test_zinb_well_above_gate_fg3m_still_inverts():
@@ -78,16 +83,15 @@ def test_zinb_no_runaway_across_under_grid():
         assert np.isfinite(ev) and ev <= 5 * 2.5, f"under={under} produced {ev}"
 
 
-def test_skewnormal_asymptote_band_returns_line():
+def test_skewnormal_asymptote_band_clamps_to_cap():
     from scipy.stats import norm
 
     asymptote = norm.cdf(-1.0 / RY_CV)
-    # under just above the asymptote inverted to ~1.9e6 before the guard.
+    # under near the mean→∞ asymptote inverted to ~1.9e6 before the guard; it must
+    # clamp to the plausibility cap instead.
     for under in (asymptote - 1e-3, asymptote + 1e-4, asymptote + 5e-3):
         ev = get_ev(40.5, float(np.clip(under, 1e-6, 1 - 1e-6)), RY_CV, dist="SkewNormal")
-        assert ev == pytest.approx(40.5), (
-            f"under={under} near asymptote should return the line, got {ev}"
-        )
+        assert ev == pytest.approx(SN_MAX_MEAN_FACTOR * 40.5), f"under={under} got {ev}"
 
 
 def test_skewnormal_no_crash_or_blowup_across_under_grid():
@@ -117,10 +121,11 @@ class _CaptureArchive:
         pass
 
 
-def test_add_dfs_missing_under_side_is_symmetric_not_blown():
+def test_add_dfs_missing_under_side_is_bounded_not_blown():
     # A Rivals/H2H-style DFS pick carries a single Boost and no Boost_Under; the
     # one-sided no_vig fabrication used to drive the count-cell ev into the
-    # thousands. It must price as a symmetric ~even pick instead.
+    # thousands. It must stay bounded by the cap (BLK's high gate floors the even
+    # price at the gate, not a runaway).
     offer = {
         "Player": "Nikola Jokic",
         "League": "NBA",
@@ -131,4 +136,6 @@ def test_add_dfs_missing_under_side_is_symmetric_not_blown():
     }
     cap = _CaptureArchive()
     Archive.add_dfs(cap, [offer], "Underdog", {})
-    assert cap.evs and cap.evs[0] < 5, f"missing under side blew the ev: {cap.evs}"
+    assert cap.evs and cap.evs[0] <= SN_MAX_MEAN_FACTOR * 1.5, (
+        f"missing under side blew the ev: {cap.evs}"
+    )
