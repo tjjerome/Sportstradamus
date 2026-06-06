@@ -14,17 +14,16 @@ the package ``runtime`` dir is restored by the fixture.
 
 from __future__ import annotations
 
+import importlib.resources as pkg_resources
 import json
 from pathlib import Path
 
-import importlib.resources as pkg_resources
 import numpy as np
 import pandas as pd
 import pytest
 from click.testing import CliRunner
 
-import sportstradamus.nightly as nightly
-from sportstradamus import data
+from sportstradamus import data, nightly
 
 
 class _FakeStats:
@@ -66,7 +65,7 @@ def meta(monkeypatch):
     monkeypatch.setattr(nightly, "read_history", _history)
     monkeypatch.setattr(nightly, "resolve_history", _resolve_history)
     monkeypatch.setattr(nightly, "write_history", lambda h: None)
-    monkeypatch.setattr(nightly, "Archive", lambda: object())
+    monkeypatch.setattr(nightly, "Archive", object)
     monkeypatch.setattr(nightly.clv, "fill_from_archive", lambda h, a: h)
     monkeypatch.setattr(nightly.clv, "summarize", lambda h, archive=None: {"n": 0})
     monkeypatch.setattr(nightly.clv, "persist_segments", lambda s: None)

@@ -64,7 +64,10 @@ def _load_fg3m_case():
     # to the batch size exactly as model_prob does before predict.
     X = X.tail(200).reset_index(drop=True)
     set_model_start_values(
-        fd["model"], "ZINB", X, normalized=bool(fd.get("normalized", False)),
+        fd["model"],
+        "ZINB",
+        X,
+        normalized=bool(fd.get("normalized", False)),
         shape_ceiling=fd.get("shape_ceiling"),
     )
     pp = fd["model"].predict(X, pred_type="parameters")
@@ -122,7 +125,9 @@ def test_clean_book_ev_blend_matches_offline_decode_in_band():
     np.testing.assert_array_equal(_sanitize_book_ev(model_ev.copy(), line), model_ev)
 
     blended, base_mean = _blend(model_ev, decoded, line, model_ev.copy())
-    np.testing.assert_allclose(base_mean, model_ev, rtol=1e-6, err_msg="pool drifted off the decode")
+    np.testing.assert_allclose(
+        base_mean, model_ev, rtol=1e-6, err_msg="pool drifted off the decode"
+    )
     assert np.isfinite(blended).all()
     assert (blended > 0).all()
     assert (blended <= base_mean + 1e-9).all(), "gate-applied mean must not exceed the base"
