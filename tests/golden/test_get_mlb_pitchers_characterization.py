@@ -10,7 +10,7 @@ dedupe, accent stripping, and the franchise-alias backfill.
 
 import pytest
 
-import sportstradamus.helpers.text as text
+from sportstradamus.helpers import text
 
 _TEAMS = {
     "teams": [

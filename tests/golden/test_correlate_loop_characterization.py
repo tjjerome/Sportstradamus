@@ -19,10 +19,10 @@ from __future__ import annotations
 
 import datetime as _dt
 import importlib
+import importlib.resources as pkg_resources
 import json
 from pathlib import Path
 
-import importlib.resources as pkg_resources
 import pandas as pd
 import pytest
 

@@ -202,7 +202,7 @@ def updated(monkeypatch):
             (),
             {
                 "import_schedules": staticmethod(lambda yrs: _sched_df()),
-                "import_ids": staticmethod(lambda: _ids_df()),
+                "import_ids": staticmethod(_ids_df),
             },
         ),
     )
