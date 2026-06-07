@@ -162,7 +162,7 @@ both. Report-only companions name the *direction* a KS scalar can't:
 
 | Lever | Verdict | Source |
 |---|---|---|
-| Centered-target normalization (family-wide) | **Dead** — FGA-only ship; SkewNormal level bias is not the dominant compression cause. Default stays `ratio_meanyr`. | Phase P1 |
+| Centered-target normalization (`centered_additive_mean10`) | **REOPENED — alive (overturns the P1 "dead" call).** P1 ruled it out as a *mean/level-compression* fix (FGA-only ship) — a different objective, scored before the Gate-4 PIT-KS redefinition. It was **never tried as a PIT-calibration lever**, and the 2026-06-07 honest sweep finds it **systematically out-calibrates `ratio_meanyr` on Gate 4**: deterministic 5/5 on WNBA AST/PTS/RA/REB/DREB + NBA AST/DREB (stand-ins, real-HPO confirm pending). A leading ship axis, not dead. | Phase P1 → §5 sweep 2026-06-07 |
 | `init_score` warm-start baseline | **Dead** — byte-identical to plain NegBin. | Phase P2.A |
 | ZTNB-hurdle likelihood | **Refuted** — incompatible with the derived-π decode; would regress the 6 shipped hurdle markets. | Stage B1 |
 | T5 multiplicative factorization (volume × efficiency) | **Killed** — Goodman variance-of-products gives +27% predictive-variance inflation on the priced cell. | Stage A1.5 |
@@ -522,6 +522,10 @@ shape.** Consequences threaded end to end:
   a skew-aware post-hoc or a heavier tail), not more width.** The model-only floor proxy (DREB
   0.036 / FGM 0.043 / FG3A 0.032, all < 0.05) is suggestive but *not* sufficient — the gate
   scores the blend and AST shows the blend is the wildcard, so each still needs its own retrain.
+  *(Scope correction, 2026-06-07: the C1-scale ceiling under `ratio_meanyr` is a real tried result,
+  but the "residual is shape → AST needs L4" conclusion was itself premature — the §5 sweep ships
+  AST under the `centered_additive_mean10` normalization (det g4 0.042), which reshapes the residual.
+  The normalization axis resolves it; nothing here rules AST out.)*
 
 #### Lever 4a — skew calibration: research + applicability screen — 2026-06-07
 
@@ -538,11 +542,15 @@ adds a sibling `skew_cal` field) — an engineering change, **not** a new distri
   symmetry. Fit `s` in the **centered-skewness** metric (clamp `|s| ≤ 3`), warm-start `(c,0)`,
   **fit on val**, ship only at **val `pit_ks < 0.040`** (the val→test discount is +0.008–0.010;
   measured by split-half).
-- **NBA AST → `deferred-90`, not L4a.** Its residual is a Gaussian-thin heavy *tail* the
-  SkewNormal structurally cannot reach (`z₉₉ = +4.9σ`, excess-kurtosis ≈ 591); johnsonSU (skew +
-  heavy) hits 0.0345 where the joint `(c,s)` floors at 0.0488 (gap 0.014 = the tail). Split-half
-  honest fit lands at 0.060 > 0.05. A skew-t head (L5) buys ~0.01 in-sample the discount erases —
-  a poor trade on one cell. Revisit only as an L5 *batch* if ≥ 3 cells justify a shared skew-t.
+- **NBA AST — the L4a screen routed it `deferred-90` (heavy tail); the sweep refutes that.** Under
+  its own `ratio_meanyr` normalization the residual is a Gaussian-thin heavy *tail* the SkewNormal
+  cannot reach by `(c,s)` alone (`z₉₉ = +4.9σ`, excess-kurtosis ≈ 591; johnsonSU hits 0.0345 where the
+  joint `(c,s)` floors at 0.0488, gap 0.014 = the tail; split-half honest fit 0.060 > 0.05). That is a
+  real **calibration-axis-under-`ratio_meanyr`** verdict — and it is *normalization-specific*: the
+  2026-06-07 sweep ships NBA AST under `centered_additive_mean10` (deterministic g4 0.042), because the
+  centered target reshapes the residual the tail lived in. So `deferred-90` was premature. A skew-t head
+  (L5) remains the fallback **only if** the normalization + real-HPO route also fails, and L5 stays a
+  *batch* call (≥ 3 cells before a shared skew-t) — not a per-cell rule-out here.
 - **Applicability screen (brief open-q#5).** Ran the johnsonSU-vs-joint-`(c,s)` floor on every
   withheld SkewNormal cell **decoded with its own `target_normalization`** (the brief's scratch
   hardcoded `ratio_meanyr`, which mis-decoded the `centered_additive_mean10` cells — that is what
@@ -559,10 +567,10 @@ adds a sibling `skew_cal` field) — an engineering change, **not** a new distri
   | NFL fantasy-underdog | 0.0750 | 0.0209 | 0.0453 | −0.011 ✓ | **L4a ship** |
   | NFL receiving-yards | 0.0751 | 0.0333 | 0.0342 | +0.0075 ✗ | g4-fixable, g1-blocked (sharp book → L3) |
   | NFL rushing-yards | 0.0739 | 0.0343 | 0.0367 | +0.0101 ✗ | g4-fixable, g1-blocked → L3 |
-  | NBA AST | 0.0629 | 0.0488 | 0.0345 | −0.038 ✓ | heavy tail → `deferred-90` |
-  | NFL passing-yards | 0.0800 | 0.0463 | 0.0236 | — | heavy tail → defer (n=377) |
-  | WNBA DREB | 0.0933 | 0.0564 | 0.1225 | — | neither (joint can't reach 0.04, jsu worse) → defer |
-  | NFL receptions | 0.1244 | 0.0738 | 0.5255 | — | neither → defer |
+  | NBA AST | 0.0629 | 0.0488 | 0.0345 | −0.038 ✓ | screen said heavy-tail `deferred-90` — **refuted by the 2026-06-07 sweep: ships under `centered_additive_mean10`, det g4 0.042** |
+  | NFL passing-yards | 0.0800 | 0.0463 | 0.0236 | — | heavy tail → defer (n=377) — *normalization axis untried, not ruled out* |
+  | WNBA DREB | 0.0933 | 0.0564 | 0.1225 | — | screen said neither → defer — **refuted by the 2026-06-07 sweep: ships under `centered_additive_mean10`, det g4 0.035** |
+  | NFL receptions | 0.1244 | 0.0738 | 0.5255 | — | neither on the calibration axis → defer — *in the running sweep; normalization axis untried, not ruled out* |
 
   **Verdict: BUILD L4a** — 4 g1-clean, g4-L4a-fixable ships (WNBA AST + NFL yards / fantasy-pp /
   fantasy-ud) from one ~½-day engineering build; **3 of the 4 are NFL** (the binding league, 5/20).
@@ -839,14 +847,16 @@ confirm or kill. Each is a place a lever could fail; knowing early reorders the 
 >   calibration machinery. The sweep scores both decodable normalizations per cell; the §6 counts,
 >   computed against each cell's single default normalization, are a lower bound.
 >
-> **Considered and dropped: predictive-variance regularization.** A lever was proposed to "escape a
-> local minimum where a worse (deterministic) model out-calibrates the sharper HPO model." That
-> premise was a measurement artifact — an earlier search build re-fit calibration on the *test* rows
-> and reported 0.039 for WNBA AST; the honest deterministic stand-in matches real HPO on
-> like-for-like (g4 0.126 vs 0.123 under `ratio_meanyr`). With no worse-beats-better paradox the
-> lever has no motivating evidence and is not queued. Overconfidence itself (coverage 0.376) is real
-> but is addressed on the normalization and post-hoc-calibration axes the sweep already exercises,
-> not by a new variance-penalty mechanism.
+> **Predictive-variance regularization — not currently queued, but untried and NOT ruled out.** A
+> lever was floated to "escape a local minimum where a worse (deterministic) model out-calibrates the
+> sharper HPO model." *That specific premise* was a measurement artifact — an earlier search build
+> re-fit calibration on the *test* rows and reported 0.039 for WNBA AST; the honest deterministic
+> stand-in matches real HPO on like-for-like (g4 0.126 vs 0.123 under `ratio_meanyr`), so there is no
+> worse-beats-better paradox to escape, and we are not prioritizing it. But the underlying
+> overconfidence is real (WNBA AST central-50 coverage 0.376) and **no variance-regularization
+> experiment has actually been run** — so the lever is *unproven, not refuted*. If the normalization
+> and post-hoc-calibration axes (which the sweep exercises first) leave a cell overconfident, a
+> training-time variance penalty is a legitimate untried option to pick back up.
 
 1. **Will post-hoc scale calibration actually move PIT-KS without breaking g1/g5?**
    The central assumption of Lever 1. A quick study on 3–4 representative cells (one
