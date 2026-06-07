@@ -1,73 +1,130 @@
-"""Operation Ship 75 combination search — per-market Optuna over (normalization × loss).
+"""Operation Ship 75 combination search — per-market ranking over decodable normalizations.
 
-The search ranks each market's axis corner cheaply, then confirms the winner under real HPO
-before any ship. The expensive axis is ``normalization × loss`` (one deterministic train per
-combo); calibration is free — a transform of the trained predictive's arrays (mean held fixed),
-swept post-hoc by :func:`scorecard.sweep_calibration_modes`. This module carries the pure search
-logic; the deterministic ``meditate`` trials + Optuna study live in ``search_market``.
+For each normalization the search trains one deterministic ``meditate`` trial and reads its
+honest val-fit→test gate row: the dumped served predictive already carries the pipeline's
+validation-fit joint calibration, so the gates are scored the same way production would score
+them — the search never re-fits calibration on the test rows (that in-sample re-fit oversold the
+first screen; see docs/operation_ship_75.md §5). Markets are ranked by min-gate ship slack; the
+top rows are the real-HPO confirm candidates. The deterministic score *ranks* only — nothing
+ships off it.
 """
 
-from dataclasses import dataclass
+import importlib.resources as pkg_resources
+import pathlib
+import subprocess
 
-import numpy as np
+import click
+import pandas as pd
 
-from sportstradamus.training.scorecard import min_gate_slack, sweep_calibration_modes
+from sportstradamus import data as _data_pkg
+from sportstradamus.helpers.io import market_file_slug
+from sportstradamus.training.scorecard import (
+    apply_thresholds,
+    gate_row,
+    load_test_set,
+    min_gate_slack,
+)
+
+# The normalization corners the SkewNormal gate can decode (and therefore score). The dormant
+# EB slug `centered_additive_eb_meanyr_k10` has no gate decode yet, so the search skips it until
+# `_decode_sn_loc_scale` learns it — see docs/operation_ship_75.md §5 (combination search).
+_DECODABLE_SN_NORMS: tuple[str, ...] = ("ratio_meanyr", "centered_additive_mean10")
+
+_SHIP_PRED_COL = "Blended_EV"
+_TEST_SETS_ROOT = pathlib.Path(str(pkg_resources.files(_data_pkg) / "test_sets"))
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+_DETERMINISTIC_MODEL_ROOT = _REPO_ROOT / "research" / "models" / "deterministic"
+# 30-minute ceiling; a deterministic meditate run is fast-HP, but SN cells with large datasets
+# can take ~10 min, so 1800 s keeps CI from hanging without cutting off valid runs.
+_MEDITATE_TRIAL_TIMEOUT_S = 1800
 
 
-@dataclass(frozen=True)
-class TrialResult:
-    """The best calibration corner for one trained ``(normalization, loss)`` model.
+def _dump_paths(league: str, market: str, norm: str) -> tuple[pathlib.Path, pathlib.Path]:
+    """CSV under ``test_sets/deterministic/<norm>/`` and pickle under ``research/models/deterministic/<norm>/``."""
+    filename = market_file_slug(league, market)
+    csv = _TEST_SETS_ROOT / "deterministic" / norm / f"{filename}.csv"
+    mdl = _DETERMINISTIC_MODEL_ROOT / norm / f"{filename}.mdl"
+    return csv, mdl
 
-    ``mode`` is the winning calibration mode; ``c`` / ``s`` its fitted scale + additive skew
-    shift; ``pit_ks`` the Gate-4 KS it reaches; ``slack`` the min-gate ship margin (``> 0`` ⇔
-    ships) the Optuna objective maximizes.
+
+def _run_deterministic_meditate(league: str, market: str, norm: str) -> None:
+    """Train one deterministic ``(cell, normalization)`` trial via the meditate CLI.
+
+    ``--deterministic`` pins RNGs and the fixed fast hyperparameters and dumps to the research
+    sandbox (never production); ``--bypass-withholding`` lets a withheld cell train under the
+    forced ``--target-normalization``. The trained model is a *ranking* stand-in, never shipped.
     """
-
-    mode: str
-    slack: float
-    c: float
-    s: float
-    pit_ks: float
-
-
-def recover_fused_predictive(
-    mean: np.ndarray,
-    served_sigma: np.ndarray,
-    served_alpha: np.ndarray,
-    dispersion_cal: float,
-    skew_cal: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Invert post-hoc calibration back to the pre-calibration (fused) predictive.
-
-    A trained cell dumps its *served* SkewNormal params (scale already multiplied by
-    ``dispersion_cal``, skew already shifted by ``skew_cal``); the calibration sweep needs the
-    fused predictive to re-fit every mode from scratch. The mean is held fixed by calibration
-    (``skewnormal_loc_from_mean``) so it passes through. ``dispersion_cal=1`` / ``skew_cal=0``
-    recovers an uncalibrated dump unchanged.
-    """
-    fused_sigma = np.asarray(served_sigma, dtype=float) / dispersion_cal
-    fused_skew = np.asarray(served_alpha, dtype=float) - skew_cal
-    return mean, fused_sigma, fused_skew
+    cmd = [
+        "poetry",
+        "run",
+        "meditate",
+        "--league",
+        league,
+        "--market",
+        market,
+        "--deterministic",
+        "--bypass-withholding",
+        "--target-normalization",
+        norm,
+    ]
+    subprocess.run(cmd, cwd=_REPO_ROOT, check=True, timeout=_MEDITATE_TRIAL_TIMEOUT_S)
 
 
-def evaluate_trial(
-    base_row: dict[str, object],
-    mean: np.ndarray,
-    sigma: np.ndarray,
-    skew: np.ndarray,
-    y: np.ndarray,
-) -> TrialResult:
-    """Rank one trained model's calibration corner by the min-gate ship slack.
-
-    Sweeps the four post-hoc calibration modes on the fused predictive (free, no retrain),
-    substitutes each mode's Gate-4 KS into the trial's honest gate row, and returns the mode with
-    the largest :func:`~sportstradamus.training.scorecard.min_gate_slack`. Gates 2/3 are
-    mean-invariant and Gates 1/5 are read from ``base_row`` (the L4a brief established calibration
-    barely moves them), so only Gate 4 varies across modes — no re-pricing.
-    """
-    fits = sweep_calibration_modes(mean, sigma, skew, y)
-    slack, fit = max(
-        ((min_gate_slack({**base_row, "g4_pit_ks": f.pit_ks}), f) for f in fits),
-        key=lambda t: t[0],
+def _score_normalization(league: str, market: str, norm: str) -> dict[str, object]:
+    """Score a trained trial's dump; ``dispersion_cal`` / ``skew_cal`` are read from the pickle for context only."""
+    csv_path, mdl_path = _dump_paths(league, market, norm)
+    df = load_test_set(csv_path, _SHIP_PRED_COL)
+    filedict = pd.read_pickle(mdl_path)
+    row = apply_thresholds(
+        gate_row(
+            df, _SHIP_PRED_COL, league=league, market=market, strategy=norm, decode_strategy=norm
+        )
     )
-    return TrialResult(mode=fit.mode, slack=slack, c=fit.c, s=fit.s, pit_ks=fit.pit_ks)
+    return {
+        "normalization": norm,
+        "slack": min_gate_slack(row),
+        "ships": bool(row.get("ship")),
+        "dispersion_cal": filedict.get("dispersion_cal", 1.0),
+        "skew_cal": filedict.get("skew_cal") or 0.0,
+        "g4_pit_ks": row.get("g4_pit_ks"),
+        "g4_pit_ks_max": row.get("g4_pit_ks_max"),
+        "n": row.get("n_rows"),
+    }
+
+
+def search_market(
+    league: str,
+    market: str,
+    *,
+    normalizations: tuple[str, ...] = _DECODABLE_SN_NORMS,
+    retrain: bool = True,
+) -> pd.DataFrame:
+    """Rank normalization corners by deterministic ship margin.
+
+    When ``retrain`` is False and a dump exists for a normalization, the existing dump is reused.
+    Result is sorted by min-gate slack descending; top rows are real-HPO confirm candidates.
+    """
+    rows = []
+    for norm in normalizations:
+        if retrain or not all(p.exists() for p in _dump_paths(league, market, norm)):
+            _run_deterministic_meditate(league, market, norm)
+        rows.append(_score_normalization(league, market, norm))
+    return pd.DataFrame(rows).sort_values("slack", ascending=False, ignore_index=True)
+
+
+@click.command(name="combo-search")
+@click.option("--league", required=True, help="League code, e.g. WNBA.")
+@click.option("--market", required=True, help="Market stem, e.g. AST.")
+@click.option(
+    "--retrain/--reuse-dumps",
+    default=True,
+    help="Retrain each deterministic trial (default) or reuse an existing dump when present.",
+)
+def main(league: str, market: str, retrain: bool) -> None:
+    """Per-market Operation Ship 75 combination search (deterministic ranking)."""
+    table = search_market(league, market, retrain=retrain)
+    click.echo(table.to_string(index=False))
+
+
+if __name__ == "__main__":
+    main()

@@ -332,31 +332,40 @@ So the search is, **per market**: an **Optuna study over the categorical `(norma
 loss_fn)` space** (the repo's existing HPO engine — TPE with pruning, and it scales cleanly if
 we later add continuous blend weights or a hierarchical-Bayes layer). Each **trial** is one
 `--deterministic` train (bit-reproducible, fast, never published); the trial's **objective** is
-the **maximum min-gate slack** the model can reach after the free post-hoc calibration sweep —
-a single scalar that is positive iff the cell ships and larger the more gate headroom it has,
-so it optimizes "ships, with margin" across all five gates at once rather than chasing g4 alone.
-The study returns the best `(normalization, loss, calibration-mode)` triple per cell.
+the **honest min-gate slack** of its val-fit→test gate row (the deterministic dump carries the
+pipeline's own validation-fit calibration) — a single scalar that is positive iff the cell ships
+and larger the more gate headroom it has, so it optimizes "ships, with margin" across all five
+gates at once rather than chasing g4 alone. The study returns the best `(normalization, loss)`
+corner per cell; an honest-val calibration-mode sweep layers on once a validation dump exists.
 
-*Why the post-hoc sweep needs no re-pricing (a fidelity guard).* The min-gate slack is assembled
-without re-deriving the model's over-probability `P` under each `(c, s)` — which would risk
-diverging from the pipeline's own pricing. It does not need to: post-hoc calibration **holds the
-blended mean fixed** (`skewnormal_loc_from_mean`), so **Gates 2/3 — scored on `Blended_EV`, the
-mean — are calibration-invariant**; **Gate 4 is computed exactly from the SkewNormal params** by
-the gate's own `_served_sn_pit_ks` (no `P` column); and **Gates 1/5 are read from the trial's
-honest trained scorecard row** (the L4a brief established calibration barely moves Gate 1, and the
-shape shift is near-`P`-neutral at the line). The sweep therefore varies only Gate 4 across the
-four modes and picks the mode with the most Gate-4 headroom subject to the trial's Gate-1/5
-passing; the trial's full five-gate row is the honest base. The real-HPO confirm re-runs the whole
-scorecard with the pipeline's pricing before any ship, so the ranker never has to reproduce it.
+*What the built ranker actually scores (and the calibration-honesty trap it avoids).* The shipped
+`training/combo_search.py` ranks each normalization by the **honest val-fit→test gate row**: the
+deterministic dump already carries the pipeline's own **validation-fit** joint calibration, so the
+ranker just calls `gate_row` on it — the *same* code production ships on — and reads
+`min_gate_slack` off the result. No test re-fit, so fidelity is by construction. An earlier build
+instead **re-fit the four calibration modes on the trial's test rows** (even with an OOS
+split-half) and reported the best; that path oversold the screen by ~0.008 KS and is removed. The
+*design* sweep — try `{none, dispersion, skew-joint, skew-sequential}` and keep the best — is
+still cheap when honest (post-hoc calibration **holds the blended mean fixed** via
+`skewnormal_loc_from_mean`, so **Gates 2/3 are calibration-invariant**, **Gate 4 is exact from the
+SkewNormal params** via `_served_sn_pit_ks`, and **Gates 1/5 barely move**, so only Gate 4 varies
+across modes — no `P` re-pricing). But an *honest* sweep must fit each mode on a dumped
+**validation** predictive, not the test set; until that val dump exists, each trial uses the
+pipeline's one val-fit mode as-is. `scorecard.sweep_calibration_modes` is built and tested for that
+future honest-val sweep; it is deliberately **not** wired into the ranker yet.
 
 **The deterministic study only ranks; the real-HPO scorecard ships.** The WNBA-AST lesson
-(2026-06-07) is that a CRPS-optimized *real* model is narrower than its deterministic stand-in
-and calibrates qualitatively differently — a deterministic winner can fail the honest retrain.
-The search is therefore used as a cheap *ranker*: take the **top-K (K≈2–3) triples per cell**,
-re-run each under **real HPO**, and ship the first that clears the official 5-gate scorecard
-(`model_stats.parquet`) — never the deterministic score. This bounds real-HPO cost at K
-retrains per promising cell while protecting against the screen bias that sank the per-cell L4a
-proof.
+(2026-06-07, corrected): on **like-for-like** normalization the deterministic stand-in **tracks**
+real HPO — under the default `ratio_meanyr` the honest deterministic Gate-4 KS is **0.126**, matching
+real HPO's **0.123** (no "worse model beats better" paradox; the apparent paradox was the dishonest
+test re-fit reporting 0.039, now gone). The ranker's value is that it surfaced a *different*
+normalization that ships honestly: under `centered_additive_mean10` WNBA AST clears all five gates
+(g4 = 0.047 knife-edge, g1 −0.017, g5 0.049) where `ratio_meanyr` fails g4 hard. That is a
+normalization swap to **confirm under real HPO**, not a calibration trick. The search is therefore a
+cheap *ranker*: take the **top-K (K≈2–3) corners per cell**, re-run each under **real HPO**, and ship
+the first that clears the official 5-gate scorecard (`model_stats.parquet`) — never the deterministic
+score. The knife-edge g4 (0.047 vs 0.05) is exactly the kind of margin the val→test discount can
+erase, so the real-HPO confirm is mandatory.
 
 Sweep the **whole board**, shipping cells included (a shipped cell may have a better corner than
 the scale-only default it settled for). The calibration-proof cells the L4a screen isolated
