@@ -410,20 +410,35 @@ of the three axes only one is executable today:
 | Axis | Values defined | Executable today | Build to put the rest on the table |
 |---|---|---|---|
 | **Normalization** | `ratio_meanyr`, `centered_additive_mean10`, `centered_additive_eb_meanyr_k10`, `ratio_projvol` | **2 of 4** — only `ratio_meanyr` + `centered_additive_mean10` have a Gate-4 SkewNormal decode (`scorecard._decode_sn_loc_scale`) | teach the decode the **EB** slug; **build** `ratio_projvol` (target = y / projected-volume) |
-| **Calibration** | `none`, `dispersion`, `skew-joint`, `skew-sequential` | **1** — each dump carries the pipeline's own val-fit mode; the ranker reads it, it does not sweep | dump the **validation** predictive so `scorecard.sweep_calibration_modes` fits each mode on val (not test) and the ranker picks honestly |
+| **Calibration** | `none`, `dispersion`, `skew-joint`, `skew-sequential` | **auto-fit per train, not enumerated** — the pipeline fits one mode (joint `(c,s)` with an opt-in margin that adaptively falls back to dispersion-only or none), so `(c,s)` *vary per cell* (sweep data: `s=0` for WNBA RA, `s≈3` for WNBA AST, `s=−2.0` for NBA fantasy-pp); the ranker reads that fit — it does not *compare* the four modes | dump the **validation** predictive so `scorecard.sweep_calibration_modes` compares all four (incl. sequential) per cell and the ranker picks the best |
 | **Loss / blending** | loss `nll`/`crps`; blend weights | **1, pinned** — `loss_fn` fixed per family (no CLI flag to vary it); blend frozen | add a `--loss-fn` flag to `meditate`; expose the blend weights |
 
-So **today the "matrix" is a 1-axis, 2-point line** (the two decodable normalizations). The three axes
-are *defined*, but two of them are **pinned to a single value** right now — calibration to the
-pipeline's one val-fit mode, loss to the family default — so the realized search set is the product
-**2 × 1 × 1 = 2 points**: one degree of freedom, a line, not a volume. An axis adds a dimension only
-once it has ≥ 2 enumerable values wired in. The line carries a precise objective and a real-HPO
-confirm gate — well-defined and running, but not the full cross-product.
-"Everything on the table" is exactly the four builds in the right column (EB decode, `ratio_projvol`,
-the honest-val calibration sweep, the `loss_fn` flag). The doc's "Optuna study" is a fifth piece: with
-two normalizations a plain enumeration suffices, so the TPE engine earns its keep only once those
-builds expand the space enough that a full grid is wasteful. Until then the ranker is an honest,
-fully-specified enumeration — and nothing in the space is ruled out, only not-yet-wired.
+The three axes are *defined*, but they are not in the same state, and the distinction is
+**independently swept vs auto-fit vs fixed**:
+- **Normalization — independently swept.** The search enumerates 2 of 4 values and *compares* them
+  (ratio vs centered). This is the one axis the search itself controls.
+- **Calibration — auto-fit per train, not frozen and not independently swept.** The pipeline optimizes
+  `(c,s)` for every (cell, normalization) — the sweep data shows it ranging from dispersion-only
+  (`s=0`, WNBA RA) through skew-joint (`s≈3`, WNBA AST) to negative skew (`s=−2.0`, NBA fantasy-pp), so
+  calibration is genuinely *being explored*. What the search does **not** do is hold a cell fixed and
+  *compare* the four modes — it takes the pipeline's one fit. So calibration is a *dependent* coordinate
+  (a function of each train), not one the search chooses.
+- **Loss / blending — fixed.** One value (family default), no flag.
+
+So the realized search has **one independent degree of freedom — normalization** — with calibration
+auto-fit at each point and loss held constant. That is why the *visited set* is a line (2 points): we
+**control and compare** along one axis. It is **not** that calibration is constant — it varies richly
+per cell; it is that we don't independently choose it. (My earlier "pinned to a single value" for
+calibration was wrong — corrected here.)
+
+Putting the rest **on the table** means giving the *other* axes real, independently-chosen extent: 2
+more normalizations (teach the gate the **EB** decode, build **`ratio_projvol`**) and a **loss** choice
+(`--loss-fn` flag) + blend weights — these are the genuinely unexplored directions. The calibration
+"build" is smaller than the others: the pipeline already auto-fits the joint optimum per cell, so an
+explicit mode sweep only adds the **sequential** mode and the option to override the opt-in margin — a
+refinement, not a new dimension. The "Optuna study" is a driver that only earns its keep once those
+builds make the grid large enough that plain enumeration is wasteful. Until then the ranker is an
+honest, fully-specified enumeration — and nothing in the space is ruled out, only not-yet-wired.
 
 ### Lever 0 — Re-score every withheld cell under the current gates; promote free passers
 
