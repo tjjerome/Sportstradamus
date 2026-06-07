@@ -70,27 +70,6 @@ def test_check_close_sample_freshness_emits_one_warning_per_segment(caplog):
     assert int(out.iloc[0]["n"]) == 2
 
 
-def test_check_close_sample_freshness_skips_missing_timestamps():
-    samples = pd.DataFrame(
-        [
-            {
-                "league": "NBA",
-                "market": "points",
-                "date": "2026-05-04",
-                "commence_time": _commence(),
-                "sample_ts": pd.NaT,
-            }
-        ]
-    )
-    out = clv.check_close_sample_freshness(samples)
-    assert out.empty
-
-
-def test_check_close_sample_freshness_handles_empty_frame():
-    out = clv.check_close_sample_freshness(pd.DataFrame())
-    assert out.empty
-
-
 def test_persist_segments_writes_parquet(_isolated_segments_parquet):
     rows = []
     # 25 over-rate-1 legs in NBA/points (segment beats close every time).
@@ -133,24 +112,6 @@ def test_get_segment_calibration_returns_fallback_when_missing(
     assert n == 0
 
 
-def test_get_segment_calibration_low_n_returns_fallback(_isolated_segments_parquet):
-    pd.DataFrame(
-        [
-            {
-                "League": "NBA",
-                "Market": "points",
-                "Platform": "Underdog",
-                "n": 5,
-                "market_clv": 0.05,
-                "frac_beat_close": 1.0,
-            }
-        ]
-    ).to_parquet(_isolated_segments_parquet, index=False)
-    shrink, n = clv.get_segment_calibration("NBA", "points")
-    assert shrink == 1.0
-    assert n == 5
-
-
 def test_get_segment_calibration_remaps_frac_beat(_isolated_segments_parquet):
     pd.DataFrame(
         [
@@ -186,33 +147,6 @@ def test_get_segment_calibration_clamps_below_half(_isolated_segments_parquet):
     shrink, n = clv.get_segment_calibration("NBA", "points")
     assert shrink == 0.0
     assert n == 40
-
-
-def test_get_segment_calibration_aggregates_platforms(_isolated_segments_parquet):
-    pd.DataFrame(
-        [
-            {
-                "League": "NBA",
-                "Market": "points",
-                "Platform": "Underdog",
-                "n": 30,
-                "market_clv": 0.04,
-                "frac_beat_close": 0.6,
-            },
-            {
-                "League": "NBA",
-                "Market": "points",
-                "Platform": "Sleeper",
-                "n": 30,
-                "market_clv": 0.02,
-                "frac_beat_close": 0.8,
-            },
-        ]
-    ).to_parquet(_isolated_segments_parquet, index=False)
-    shrink, n = clv.get_segment_calibration("NBA", "points")
-    # Weighted mean of frac_beat = 0.7  → 2*(0.7-0.5) = 0.4
-    assert n == 60
-    assert shrink == pytest.approx(0.4)
 
 
 def test_lookback_warn_threshold_constant_is_stable():

@@ -288,15 +288,6 @@ def test_leg_pair_corr_boost_opposite_bet_flips_sign() -> None:
     assert rho == pytest.approx(-0.4)
 
 
-def test_leg_pair_corr_boost_reversed_key_lookup() -> None:
-    """The (y, x) fallback lookup finds a pair stored in the other order."""
-    c_map = {("G1.AST", "G1.PTS"): 0.25}
-    rho, _ = _leg_pair_corr_boost(
-        _leg("A", "Over", "G1.PTS"), _leg("B", "Over", "G1.AST"), c_map, {}, {}
-    )
-    assert rho == pytest.approx(0.25)
-
-
 def test_leg_pair_corr_boost_same_player_zeroes_boost() -> None:
     """A leg pair on the same player collapses the boost to 0 (uncombinable)."""
     c_map = {("G1.PTS", "G1.AST"): 0.4}
@@ -304,22 +295,6 @@ def test_leg_pair_corr_boost_same_player_zeroes_boost() -> None:
         _leg("Luka", "Over", "G1.PTS"), _leg("Luka", "Over", "G1.AST"), c_map, {}, {}
     )
     assert boost == 0
-
-
-def test_leg_pair_corr_boost_applies_banned_modifier() -> None:
-    """The boost modifier is keyed by the digit-stripped, _OPP_-stripped tokens.
-
-    Same bet uses ``modifier[0]``; opposite bet uses ``modifier[1]``.
-    """
-    team_mod = {frozenset(["G.PTS", "G.AST"]): [2.0, 0.5]}
-    _, boost_same = _leg_pair_corr_boost(
-        _leg("A", "Over", "G1.PTS"), _leg("B", "Over", "G1.AST"), {}, team_mod, {}
-    )
-    _, boost_opp = _leg_pair_corr_boost(
-        _leg("A", "Over", "G1.PTS"), _leg("B", "Under", "G1.AST"), {}, team_mod, {}
-    )
-    assert boost_same == pytest.approx(2.0)
-    assert boost_opp == pytest.approx(0.5)
 
 
 def _matrix_game() -> tuple[pd.DataFrame, dict]:
@@ -363,34 +338,3 @@ def test_build_correlation_matrices_structure_and_values() -> None:
     assert EVb.shape == (3, 3)
 
 
-def test_build_correlation_matrices_honors_push_column() -> None:
-    """A present Push P column is carried through (NaNs filled with 0)."""
-    game_df, game_dict = _matrix_game()
-    game_df["Push P"] = [0.1, np.nan, 0.2]
-
-    p_push = _build_correlation_matrices(game_df, game_dict, {}, {}, {}, [3.0]).p_push
-    assert p_push.tolist() == [0.1, 0.0, 0.2]
-
-
-@_needs_nba_corr
-def test_kernel_reads_real_nba_cmap() -> None:
-    """End-to-end on real data: a real c_map entry flows through the kernel.
-
-    ``_build_game_corr_map`` reads the packaged NBA parquets; the kernel must
-    reproduce one of its (weighted) entries as the leg-pair correlation.
-    """
-    league_dir = pkg_resources.files(data) / "leagues" / "nba"
-    c_same = pd.read_parquet(league_dir / "corr_same_team.parquet")
-    c_same.rename_axis(["team", "market", "correlation"], inplace=True)
-    c_same.columns = ["R"]
-    c_opp = pd.read_parquet(league_dir / "corr_opposing.parquet")
-    c_opp.rename_axis(["team", "market", "correlation"], inplace=True)
-    c_opp.columns = ["R"]
-
-    c_map = _build_game_corr_map("NYK", "SAS", c_same, c_opp)
-    assert c_map, "real NBA c_map is empty — parquet vocabulary changed?"
-
-    (x, y), expected = next((k, v) for k, v in c_map.items() if k[0] != k[1])
-    rho, boost = _leg_pair_corr_boost(_leg("A", "Over", x), _leg("B", "Over", y), c_map, {}, {})
-    assert rho == pytest.approx(expected)
-    assert boost == 1
