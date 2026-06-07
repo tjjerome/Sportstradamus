@@ -16,9 +16,8 @@ from lightgbmlss.distributions.NegativeBinomial import NegativeBinomial
 from lightgbmlss.distributions.ZINB import ZINB
 from lightgbmlss.model import LightGBMLSS
 from scipy.optimize import minimize_scalar
-from scipy.special import beta as beta_fn
 from scipy.special import expit, logit
-from scipy.stats import gamma, nbinom, norm, skewnorm
+from scipy.stats import norm, skewnorm
 from sklearn.metrics import (
     accuracy_score,
     brier_score_loss,
@@ -35,9 +34,11 @@ from sportstradamus.helpers import (
     apply_temperature,
     decode_predictive_mean,
     fused_loc,
+    gamma_crps,
     get_ev,
     get_logger,
     get_odds,
+    negbin_crps,
     set_model_start_values,
     skewnormal_loc_from_mean,
     stat_cv,
@@ -1473,32 +1474,11 @@ def _dispersion_crps_loss(
     if dist in ("NegBin", "ZINB"):
         r_cal = r_blend_val * c
         p_cal = r_cal / (r_cal + val_weighted_mean)
-        k_max = int(max(y_val_arr.max() * 2, np.mean(val_weighted_mean) * 4, 30))
-        k_vals = np.arange(k_max + 1)
-        cdf = nbinom.cdf(k_vals[:, None], r_cal[None, :], p_cal[None, :])
-        if gate_blend_val is not None:
-            cdf = gate_blend_val[None, :] + (1 - gate_blend_val[None, :]) * cdf
-        indicator = (y_val_arr[None, :] <= k_vals[:, None]).astype(float)
-        crps = np.sum((cdf - indicator) ** 2, axis=0)
+        crps = negbin_crps(y_val_arr, r_cal, p_cal, gate=gate_blend_val)
     else:
         alpha_cal = alpha_blend_val * c
         scale_cal = val_weighted_mean / alpha_cal
-        if gate_blend_val is not None:
-            x_max = max(y_val_arr.max() * 2, np.mean(val_weighted_mean) * 4)
-            x_grid = np.linspace(0, x_max, 500)
-            dx = x_grid[1] - x_grid[0]
-            cdf_grid = gamma.cdf(x_grid[:, None], alpha_cal[None, :], scale=scale_cal[None, :])
-            cdf_grid = gate_blend_val[None, :] + (1 - gate_blend_val[None, :]) * cdf_grid
-            indicator = (y_val_arr[None, :] <= x_grid[:, None]).astype(float)
-            crps = np.sum((cdf_grid - indicator) ** 2, axis=0) * dx
-        else:
-            F_y = gamma.cdf(y_val_arr, alpha_cal, scale=scale_cal)
-            F_y_a1 = gamma.cdf(y_val_arr, alpha_cal + 1, scale=scale_cal)
-            crps = (
-                y_val_arr * (2 * F_y - 1)
-                - val_weighted_mean * (2 * F_y_a1 - 1)
-                - scale_cal / beta_fn(0.5, alpha_cal)
-            )
+        crps = gamma_crps(y_val_arr, alpha_cal, scale_cal, gate=gate_blend_val)
     reg = 0.01 * np.log(c) ** 2
     return np.mean(crps) + reg
 

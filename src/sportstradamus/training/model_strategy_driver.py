@@ -34,13 +34,16 @@ from sportstradamus.training.scorecard import CALIBRATION_MODES
 
 # Search axes in the ``[kind, spec, stage]`` shape — ``[kind, spec]`` mirrors pipeline's
 # hp_search_space, ``stage`` splits the retrain grid (GridSampler exhaustive) from the free
-# post-hoc sweep (scored off each trained dump, no retrain). A continuous retrain axis would
-# read ``["float", {"low": ...}, "retrain"]`` and require a ``suggest_float`` branch in
+# post-hoc sweep (scored off each trained dump, no retrain). ``blending_loss_fn`` rides the retrain
+# tier today: the blend weight is fit *inside* meditate, so a ``crps`` blend needs a train — the
+# brief's free post-hoc w-refit needs the dump to carry the pre-blend components, which it does not
+# yet. Only ``calibration`` is genuinely free. A continuous retrain axis would read
+# ``["float", {"low": ...}, "retrain"]`` and require a ``suggest_float`` branch in
 # :func:`_retrain_grid` plus a TPE sampler.
 SEARCH_SPACE: dict[str, list] = {
     "normalization": ["categorical", list(_DECODABLE_SN_NORMS), "retrain"],
     "dist_training_loss": ["categorical", ["crps", "nll"], "retrain"],
-    "blending_loss_fn": ["categorical", sorted(calibration.BLENDING_SLUGS), "posthoc"],
+    "blending_loss_fn": ["categorical", sorted(calibration.BLENDING_SLUGS), "retrain"],
     "calibration": ["categorical", list(CALIBRATION_MODES), "posthoc"],
 }
 
@@ -88,33 +91,29 @@ def _run_and_score(
     *,
     normalization: str,
     dist_training_loss: str,
-    blending_choices: tuple[str, ...],
+    blending_loss_fn: str,
 ) -> list[dict[str, object]]:
-    """Train one deterministic retrain corner, then sweep the free post-hoc axes off its dump.
+    """Train one deterministic retrain corner, then sweep the free post-hoc calibration axis.
 
-    The retrain axes (``normalization``, ``dist_training_loss``) train one ``meditate`` trial; the
-    calibration axis is then swept for free (four rows per blend objective, mean held fixed) and the
-    blending axis loops its objectives. Only the ``nll`` blend objective ships today — a non-nll
-    objective fails loud *before* any meditate runs, until ``calibration.fit_blend_weight`` grows a
-    crps post-hoc refit (docs/operation_ship_75.md §8 crps-blending gate). The dump is keyed by
-    normalization only, so scoring right after this trial's train — before the next sequential trial
-    overwrites it — keeps the loss axis honest without a loss-keyed dump path.
+    The retrain corner is ``(normalization × dist_training_loss × blending_loss_fn)`` — all three
+    need a train (the blend weight is fit inside meditate, so a ``crps`` blend retrains; the
+    free post-hoc w-refit would need the dump to carry pre-blend components, which it does not
+    yet). The calibration axis is then swept for free (four rows, mean held fixed). The dump is
+    keyed by normalization only, so scoring right after this trial's train — before the next
+    sequential trial overwrites it — keeps the loss/blend axes honest without a loss-keyed dump
+    path.
     """
-    unbuilt = [b for b in blending_choices if b != "nll"]
-    if unbuilt:
-        raise NotImplementedError(
-            f"blending_loss_fn {unbuilt} need a post-hoc calibration.fit_blend_weight refit; only "
-            "'nll' blending ships today (docs/operation_ship_75.md §8 crps-blending gate)."
-        )
     _run_deterministic_meditate(
-        league, market, normalization, dist_training_loss=dist_training_loss
+        league,
+        market,
+        normalization,
+        dist_training_loss=dist_training_loss,
+        blending_loss_fn=blending_loss_fn,
     )
-    rows: list[dict[str, object]] = []
-    for blending in blending_choices:
-        for row in score_calibration_modes(league, market, normalization):
-            row["dist_training_loss"] = dist_training_loss
-            row["blending_loss_fn"] = blending
-            rows.append(row)
+    rows = score_calibration_modes(league, market, normalization)
+    for row in rows:
+        row["dist_training_loss"] = dist_training_loss
+        row["blending_loss_fn"] = blending_loss_fn
     return rows
 
 
@@ -142,7 +141,6 @@ def search_cell(league: str, market: str, *, space: dict[str, list] = SEARCH_SPA
     the real-HPO confirm candidate. Sorted by ``slack`` descending.
     """
     grid = _retrain_grid(space)
-    blending_choices = tuple(space["blending_loss_fn"][1])
     study = optuna.create_study(direction="minimize", sampler=optuna.samplers.GridSampler(grid))
 
     def objective(trial: optuna.Trial) -> float:
@@ -152,7 +150,7 @@ def search_cell(league: str, market: str, *, space: dict[str, list] = SEARCH_SPA
             market,
             normalization=params["normalization"],
             dist_training_loss=params["dist_training_loss"],
-            blending_choices=blending_choices,
+            blending_loss_fn=params["blending_loss_fn"],
         )
         trial.set_user_attr("rows", rows)
         return -max(float(row["slack"]) for row in rows)

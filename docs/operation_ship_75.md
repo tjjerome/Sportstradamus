@@ -340,12 +340,15 @@ because the three axes are **not equally expensive**:
 So the search is, **per market**: an **Optuna study over the categorical retrain grid**, built
 2026-06-07 as [`training/model_strategy_driver.py`](../src/sportstradamus/training/model_strategy_driver.py)
 (entry point `model-strategy-driver`). Its `SEARCH_SPACE` is four axes in pipeline's `[kind, spec]`
-idiom plus a `stage` tag: the **retrain** axes `normalization × dist_training_loss` form a
-`GridSampler` grid (exhaustive + deterministic — the right tool for ≤8 discrete corners; the
-`[kind, spec, stage]` shape flips to TPE the moment a continuous axis lands), and the **post-hoc**
-axes — `calibration` (the free 4-mode sweep, fanned out off each trained corner with no extra train)
-and `blending_loss_fn` (degenerate at `nll` today; a non-`nll` value fails loud until the gated
-`crps` refit lands) — are scored off each trained dump. Each **trial** is one `--deterministic`
+idiom plus a `stage` tag: the **retrain** axes `normalization × dist_training_loss × blending_loss_fn`
+form a `GridSampler` grid (exhaustive + deterministic — the right tool for ≤12 discrete corners; the
+`[kind, spec, stage]` shape flips to TPE the moment a continuous axis lands), and the one **post-hoc**
+axis — `calibration` (the free 4-mode sweep, fanned out off each trained corner with no extra train) —
+is scored off each trained dump. `blending_loss_fn` rides the *retrain* tier (not post-hoc) because the
+blend weight is fit *inside* meditate: a `--blending-loss-fn crps` run refits `w` by CRPS during
+training. The brief's free post-hoc `w`-refit needs the dump to carry the pre-blend components, which
+the deterministic flow does not persist yet; until it does, a `crps` blend costs a train. Each
+**trial** is one `--deterministic`
 train (bit-reproducible, fast, never published); the objective is the **min-gate slack** of the
 best post-hoc row — a single scalar positive iff the corner ships and larger the more gate headroom
 it has, so it optimizes "ships, with margin" across all five gates at once rather than chasing g4
@@ -394,10 +397,17 @@ the scale-only default it settled for). The calibration-proof cells the L4a scre
 (heavy-tail NBA AST / NFL passing-yards; g1-blocked NFL receiving/rushing-yards; the
 centered-strategy WNBA DREB / NFL receptions) are the highest-value rows but not the limit.
 Built 2026-06-07: the per-market Optuna driver (`model-strategy-driver`), the `--dist-training-loss`
-and `--blending-loss-fn` `meditate` flags, and the forced 4-mode calibration sweep (wrapping
-`training/scorecard.py`'s gate computation). Still unbuilt: the `ratio_projvol` `TargetNormalization`,
-the honest-val dump that makes the calibration sweep OOS, and a non-`nll` `blending_loss_fn` value
-(the `crps` blend objective is gated on the empirical clamp-bite check in `/tmp/researcher_crps_blending.md`). A genuinely structural fourth lever — a **hierarchical Bayesian** layer that
+and `--blending-loss-fn` `meditate` flags, the forced 4-mode calibration sweep (wrapping
+`training/scorecard.py`'s gate computation), and the **`crps` blend objective** (`fit_model_weight_crps`,
+registered in `BLENDING_SLUGS`). The crps build cleared its gate: the empirical clamp-bite check
+(`/tmp/clamp_bite_check.py`, the brief's decisive #1) found the `-20` logpdf clamp bites on the blended
+predictive of every heavy-tail SkewNormal cell (0.18–1.79% of rows, mean 0.77%, concentrated on the
+under-dispersed binding cells), so it is not the "~0 everywhere" KILL picture. The win is *modest* and
+per-cell — guardrail-2 (the per-cell search scoring) is the arbiter of whether any cell adopts it.
+Still unbuilt: the `ratio_projvol` `TargetNormalization`, the honest-val dump that makes the
+calibration sweep OOS, and the **free post-hoc `w`-refit** (so `crps` blend stops costing a train —
+needs the dump to carry the pre-blend components). A genuinely structural fourth lever — a
+**hierarchical Bayesian** layer that
 generalizes the dormant EB prior (learn the shrinkage per group, pool the full predictive across
 player ← position ← team/league rather than the mean only) — is the research-gated answer to the
 small-sample NFL wall and is scoped by a `research-analyst` brief before any build.
@@ -434,10 +444,12 @@ fixed — and the ship bar differs for a withheld cell vs an incumbent:
 **Two caveats on "wire in a new parameter."** (a) **Research-gate** — a parameter that changes a
 *distribution family or dispersion mechanism* needs a `research-analyst` brief before it is wired or
 built (CLAUDE.md research-first); a plain knob (a normalization slug, a loss choice) does not.
-(b) **Wiring an axis-value ≠ it sweeps.** A value can sit in `SEARCH_SPACE` yet fail loud until its
-machinery exists — `blending_loss_fn` carries `crps` as a defined value but the driver raises
-`NotImplementedError` on it until `fit_model_weight_crps` is built (itself gated on the clamp-bite
-check). So "wire it in" is sometimes "wire the axis, build the value, then it sweeps."
+(b) **Wiring an axis-value ≠ it sweeps.** A value can sit in `SEARCH_SPACE` yet not sweep until its
+machinery exists, and its *cost tier* can shift once it does. `blending_loss_fn` carried `crps` as a
+defined value before `fit_model_weight_crps` existed; building it (2026-06-07, after the clamp-bite
+check cleared) made it sweepable — but on the *retrain* tier, not the brief's free post-hoc tier,
+because the deterministic dump doesn't yet carry the pre-blend components a free `w`-refit needs. So
+"wire it in" is sometimes "wire the axis, build the value, decide the tier — then it sweeps."
 
 **Sweep in flight (2026-06-07, preliminary).** The first honest pass — the built normalization
 ranker ([`training/model_strategy_search.py`](../src/sportstradamus/training/model_strategy_search.py): deterministic
@@ -456,34 +468,25 @@ layer remain unbuilt. This *preliminary* pass predates the driver — it is the 
 **Is the search matrix well-defined? — the executable state, honestly.** The *method* is well-defined
 and proven: per cell, enumerate the executable axis-values, train one `--deterministic` model each,
 score the **honest val-fit→test gate row** (the production gate path), rank by `min_gate_slack`, and
-confirm the top-K under real HPO before any ship. What is **not** yet a full matrix is the *space* —
-of the three axes only one is executable today:
+confirm the top-K under real HPO before any ship. As of 2026-06-07 the driver controls three of the
+four axis dimensions (normalization, dist-loss, blend-loss as the retrain grid; calibration swept free);
+the executable state per axis:
 
 | Axis | Values defined | Executable today | Build to put the rest on the table |
 |---|---|---|---|
 | **Normalization** | `ratio_meanyr`, `centered_additive_mean10`, `centered_additive_eb_meanyr_k10`, `ratio_projvol` | **3 of 4** — `ratio_meanyr` + `centered_additive_mean10` + the **EB** slug now have a Gate-4 SkewNormal decode (`scorecard._decode_sn_loc_scale`, EB off the dumped `GlobalMean`) | **build** `ratio_projvol` (target = y / projected-volume) |
 | **Calibration** | `none`, `dispersion`, `skew-joint`, `skew-sequential` | **swept by the driver (in-sample)** — `gate_rows_by_calibration_mode` recovers the blended predictive off each dump and *compares* all four modes per corner; today the dump is the **test** split, so it is an in-sample ranking signal (real-HPO confirms) | dump the **validation** predictive so the same sweep is OOS |
-| **Loss / blending** | loss `nll`/`crps`; blend weights | **dist-loss: 2, executable** (`--dist-training-loss nll\|crps`); **blend-loss: 1** (`--blending-loss-fn nll`; `crps` gated) | wire the `crps` blend objective (`fit_model_weight_crps`) once the clamp-bite check clears; expose the blend weights |
+| **Loss / blending** | loss `nll`/`crps`; blend weights | **dist-loss: 2** (`--dist-training-loss nll\|crps`) + **blend-loss: 2** (`--blending-loss-fn nll\|crps`; `fit_model_weight_crps` built 2026-06-07) — both retrain-tier | free post-hoc `w`-refit (so `crps` blend stops costing a train); expose the blend weights |
 
-The three axes are *defined*, but they are not in the same state, and the distinction is
-**independently swept vs auto-fit vs fixed**:
-- **Normalization — independently swept.** The search enumerates 2 of 4 values and *compares* them
-  (ratio vs centered). This is the one axis the search itself controls.
-- **Calibration — auto-fit per train, not frozen and not independently swept.** The pipeline optimizes
-  `(c,s)` for every (cell, normalization) — the sweep data shows it ranging from dispersion-only
-  (`s=0`, WNBA RA) through skew-joint (`s≈3`, WNBA AST) to negative skew (`s=−2.0`, NBA fantasy-pp), so
-  calibration is genuinely *being explored*. What the search does **not** do is hold a cell fixed and
-  *compare* the four modes — it takes the pipeline's one fit. So calibration is a *dependent* coordinate
-  (a function of each train), not one the search chooses.
-- **Loss / blending — fixed.** One value (family default), no flag.
-
-As of 2026-06-07 the realized search has **two independent retrain degrees of freedom**
-(`normalization × dist_training_loss`, the `GridSampler` grid) **plus the free post-hoc calibration
-sweep** (all four modes compared per corner) — the driver controls and compares along all three. The
-earlier "one DOF — a line of 2 points" state is superseded: the visited set is now a `(3 norms × 2
-losses × 4 cal-modes)` board per cell once a sweep is run. What remains genuinely unbuilt is narrow:
-the `ratio_projvol` normalization value and the `crps` blend objective (the two missing axis-*values*),
-plus the honest-val calibration dump (a *fidelity* upgrade — today's sweep is in-sample) and the
+As of 2026-06-07 the driver gives the search **three independent retrain degrees of freedom**
+(`normalization × dist_training_loss × blending_loss_fn`, the `GridSampler` grid) **plus the free
+post-hoc calibration sweep** (all four modes compared per corner) — it controls and compares along
+every axis, where the pre-driver state only *auto-fit* calibration and held loss/blend fixed. The
+earlier "one DOF — a line of 2 points" framing is fully superseded: the visited set is a
+`(3 norms × 2 dist-losses × 2 blend-losses × 4 cal-modes) = 48`-row board per cell once a sweep is run.
+What remains genuinely unbuilt is narrow and is *fidelity / cost*, not new axes: the `ratio_projvol`
+normalization value (the one missing axis-value), the honest-val calibration dump (today's sweep is
+in-sample), the free post-hoc `w`-refit (so a `crps` blend stops costing a train), and the
 research-gated hierarchical-Bayes layer. Nothing in the space is ruled out — only those are not-yet-wired.
 
 ### Lever 0 — Re-score every withheld cell under the current gates; promote free passers
