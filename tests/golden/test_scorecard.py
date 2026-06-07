@@ -1023,3 +1023,177 @@ def test_live_window_cli_smoke_with_mock_stats(monkeypatch):
     assert result.exit_code == 0, result.output
     assert "NBA_PTS" in result.output
     assert "live_30d" in result.output
+
+
+def test_eb_gate_decode_reconstructs_served_loc_with_dumped_global_mean():
+    """``centered_additive_eb_meanyr_k10`` gate decode round-trips through the dumped GlobalMean.
+
+    SN_Loc dumps as ``served_loc − EB_prior(MeanYr, GamesPlayed, global_mean, K)``; the gate
+    must add the EB prior back using the *dumped* ``GlobalMean`` (not the hardcoded 0.0 the two
+    older normalizations ignore) to recover ``served_loc`` byte-for-byte. Mirrors the
+    prediction-side EB decode pinned in ``tests/test_model_prob_skewnormal_decode.py``, on the
+    scorecard side — without the GlobalMean read the EB prior shrinks toward 0 and the decode
+    silently corrupts every PIT/IQR the gate scores.
+    """
+    from sportstradamus.training.baselines import get_target_normalization
+
+    rng = np.random.default_rng(17)
+    n = 16
+    global_mean = 8.4
+    served_loc = rng.uniform(3.0, 22.0, n)
+    served_scale = rng.uniform(1.0, 5.0, n)
+    skew = rng.uniform(-1.0, 2.0, n)
+    meanyr = rng.uniform(2.0, 25.0, n)
+    games = rng.integers(1, 80, n).astype(float)
+
+    strat = get_target_normalization("centered_additive_eb_meanyr_k10")
+    X = pd.DataFrame({"MeanYr": meanyr, "GamesPlayed": games})
+    dumped = pd.DataFrame(
+        {
+            "SN_Loc": strat.encode_loc(served_loc, X, global_mean, "MeanYr"),
+            "SN_Scale": strat.encode_scale(served_scale, X, "MeanYr"),
+            "SN_Alpha": skew,
+            "MeanYr": meanyr,
+            "GamesPlayed": games,
+            "GlobalMean": global_mean,
+        }
+    )
+
+    loc_g, scale_g = _decode_sn_loc_scale(dumped, "centered_additive_eb_meanyr_k10")
+    np.testing.assert_allclose(loc_g, served_loc, atol=1e-9)
+    np.testing.assert_allclose(scale_g, served_scale, atol=1e-9)
+    # The EB prior was actually added back — decode is not the raw (encoded) loc.
+    assert not np.allclose(loc_g, dumped["SN_Loc"].to_numpy())
+
+
+def test_eb_gate_decode_zero_global_mean_fallback_differs_from_real_prior():
+    """Guard the silent-corruption failure mode: decoding the same SN_Loc with the legacy
+    GlobalMean-absent fallback (0.0) must NOT match the real-global-mean decode — proving the
+    gate genuinely consumes the dumped GlobalMean rather than ignoring it like the older norms.
+    """
+    from sportstradamus.training.baselines import get_target_normalization
+
+    rng = np.random.default_rng(23)
+    n = 12
+    global_mean = 11.0
+    served_loc = rng.uniform(3.0, 20.0, n)
+    meanyr = rng.uniform(2.0, 25.0, n)
+    games = rng.integers(1, 60, n).astype(float)
+
+    strat = get_target_normalization("centered_additive_eb_meanyr_k10")
+    X = pd.DataFrame({"MeanYr": meanyr, "GamesPlayed": games})
+    sn_loc = strat.encode_loc(served_loc, X, global_mean, "MeanYr")
+    base = {"SN_Scale": np.ones(n), "SN_Alpha": np.zeros(n), "MeanYr": meanyr, "GamesPlayed": games}
+
+    with_gm = pd.DataFrame({"SN_Loc": sn_loc, **base, "GlobalMean": global_mean})
+    without_gm = pd.DataFrame({"SN_Loc": sn_loc, **base})
+
+    loc_real, _ = _decode_sn_loc_scale(with_gm, "centered_additive_eb_meanyr_k10")
+    loc_fallback, _ = _decode_sn_loc_scale(without_gm, "centered_additive_eb_meanyr_k10")
+
+    np.testing.assert_allclose(loc_real, served_loc, atol=1e-9)
+    assert not np.allclose(loc_real, loc_fallback)
+
+
+def _served_sn_dump(n=600, seed=5, c0=1.3, s0=0.6, strategy="ratio_meanyr"):
+    """A SkewNormal dump whose served params bake in a known auto-fit ``(c0, s0)`` over known
+    blended (sigma, skew) — so the recovery (served ÷ c0, served − s0) has a ground truth.
+    """
+    from sportstradamus.helpers.distributions import skewnormal_loc_from_mean
+    from sportstradamus.training.baselines import get_target_normalization
+
+    rng = np.random.default_rng(seed)
+    meanyr = rng.uniform(3.0, 25.0, n)
+    mean = meanyr + rng.normal(0.0, 1.0, n)
+    blended_sigma = rng.uniform(1.0, 4.0, n)
+    blended_skew = rng.uniform(-0.5, 1.0, n)
+    served_sigma = blended_sigma * c0
+    served_skew = blended_skew + s0
+    served_loc = skewnormal_loc_from_mean(mean, served_sigma, served_skew)
+    strat = get_target_normalization(strategy)
+    X = pd.DataFrame({"MeanYr": meanyr})
+    df = pd.DataFrame(
+        {
+            "MeanYr": meanyr,
+            "Result": mean + rng.normal(0.0, blended_sigma),
+            "Blended_EV": mean,
+            "Line": mean + rng.uniform(-2.0, 2.0, n),
+            "Odds": np.full(n, 0.5),
+            "P": np.clip(rng.uniform(0.1, 0.9, n), 0.0, 1.0),
+            "SN_Loc": strat.encode_loc(served_loc, X, 0.0, "MeanYr"),
+            "SN_Scale": strat.encode_scale(served_sigma, X, "MeanYr"),
+            "SN_Alpha": served_skew,
+        }
+    )
+    return df, blended_sigma, blended_skew, mean, c0, s0
+
+
+def test_recover_blended_sn_inverts_autofit_calibration():
+    """The post-hoc calibration axis recovers the pre-calibration blended params by dividing the
+    served scale by the dumped dispersion_cal and subtracting skew_cal from the served alpha.
+    """
+    from sportstradamus.training.scorecard import _recover_blended_sn
+
+    df, bsig, bskew, mean, c0, s0 = _served_sn_dump()
+    m, sigma, skew, y = _recover_blended_sn(df, "Blended_EV", "ratio_meanyr", c0, s0)
+    np.testing.assert_allclose(sigma, bsig, atol=1e-9)
+    np.testing.assert_allclose(skew, bskew, atol=1e-9)
+    np.testing.assert_allclose(m, mean, atol=1e-9)
+    np.testing.assert_array_equal(y, df["Result"].to_numpy())
+
+
+def test_gate_rows_by_calibration_mode_scores_all_four_modes():
+    """The calibration axis scores every post-hoc mode off one trained dump (no retrain): four
+    full ship-gate rows, with the ``none`` mode reporting the identity transform.
+    """
+    from sportstradamus.training.scorecard import (
+        CALIBRATION_MODES,
+        gate_rows_by_calibration_mode,
+    )
+
+    df, _bsig, _bskew, _mean, c0, s0 = _served_sn_dump()
+    rows = gate_rows_by_calibration_mode(
+        df,
+        "Blended_EV",
+        league="NBA",
+        market="PTS",
+        strategy="ratio_meanyr",
+        decode_strategy="ratio_meanyr",
+        dispersion_cal=c0,
+        skew_cal=s0,
+    )
+    assert set(rows) == set(CALIBRATION_MODES)
+    assert rows["none"]["dispersion_cal"] == 1.0
+    assert rows["none"]["skew_cal"] == 0.0
+    for row in rows.values():
+        assert "ship" in row
+        assert np.isfinite(min_gate_slack(row))
+
+
+def test_load_test_set_retains_eb_decode_columns(tmp_path):
+    """``load_test_set`` curates feature columns, but the EB-prior decode needs ``GamesPlayed``
+    and ``GlobalMean`` at gate time (mirroring how ``Mean10`` is retained for the mean10 decode).
+    Without them the combination-search EB scoring raises ``KeyError`` instead of decoding.
+    """
+    df = pd.DataFrame(
+        {
+            "MeanYr": [5.0, 6.0, 7.0, 8.0],
+            "Result": [4.0, 7.0, 6.0, 9.0],
+            "Blended_EV": [5.1, 6.2, 6.8, 8.3],
+            "SN_Loc": [0.1, 0.2, 0.3, 0.4],
+            "SN_Scale": [1.0, 1.0, 1.0, 1.0],
+            "SN_Alpha": [0.0, 0.0, 0.0, 0.0],
+            "GamesPlayed": [10.0, 20.0, 30.0, 40.0],
+            "GlobalMean": [6.5, 6.5, 6.5, 6.5],
+            "some_feature": [1.0, 2.0, 3.0, 4.0],
+        }
+    )
+    path = tmp_path / "WNBA_AST.csv"
+    df.to_csv(path, index=False)
+
+    out = load_test_set(path, "Blended_EV")
+
+    assert "GamesPlayed" in out.columns
+    assert "GlobalMean" in out.columns
+    # Curation still drops non-decode feature columns.
+    assert "some_feature" not in out.columns

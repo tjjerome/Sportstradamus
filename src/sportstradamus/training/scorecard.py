@@ -298,7 +298,9 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
         "SN_Loc",
         "SN_Scale",
         "SN_Alpha",
-        "Mean10",  # centered_additive SkewNormal decode re-adds this baseline to loc
+        "Mean10",  # centered_additive_mean10 SkewNormal decode re-adds this baseline to loc
+        "GamesPlayed",  # centered_additive_eb decode re-adds an EB prior over (MeanYr, GamesPlayed)
+        "GlobalMean",  # …shrunk toward this persisted global mean
         "R",
         "NB_P",
         "Alpha",
@@ -652,11 +654,13 @@ def _infer_dist_from_columns(df: pd.DataFrame) -> str | None:
     return None
 
 
-# SkewNormal strategies the gate can decode from the dumped params alone (no
-# persisted global_mean — both ignore it). Any other string reaching this mirror is
-# an A/B run-label (``baseline`` / ``unlabeled``) on a frame already in EV-space, so
-# it passes through unchanged; ``_resolve_decode_strategy`` only ever yields these two.
-_SN_DECODE_STRATEGIES: frozenset[str] = frozenset({"ratio_meanyr", "centered_additive_mean10"})
+# SkewNormal strategies the gate can decode from the dumped params. ``ratio_meanyr``
+# and ``centered_additive_mean10`` ignore ``GlobalMean``; ``centered_additive_eb_meanyr_k10``
+# re-adds it from the persisted ``GlobalMean`` column (fallback 0.0). Any other string
+# is an A/B run-label on a frame already in EV-space — pass through unchanged.
+_SN_DECODE_STRATEGIES: frozenset[str] = frozenset(
+    {"ratio_meanyr", "centered_additive_mean10", "centered_additive_eb_meanyr_k10"}
+)
 
 
 def _decode_sn_loc_scale(df: pd.DataFrame, strategy: str) -> tuple[np.ndarray, np.ndarray]:
@@ -667,14 +671,19 @@ def _decode_sn_loc_scale(df: pd.DataFrame, strategy: str) -> tuple[np.ndarray, n
     hand-rolled mirror that can drift. ``ratio_meanyr`` multiplies both by ``MeanYr``;
     ``centered_additive_mean10`` re-adds the Mean10 baseline to ``loc`` — irrelevant
     for the location-free IQR but load-bearing for the PIT, which is where the old
-    hand-rolled mirror silently dropped the offset.
+    hand-rolled mirror silently dropped the offset. ``centered_additive_eb_meanyr_k10``
+    re-adds an empirical-Bayes prior that shrinks toward ``global_mean``, which the
+    pipeline persists per-row as the constant ``GlobalMean`` column; without it the
+    prior shrinks toward 0 and the decode silently corrupts the PIT. Ratio/Mean10
+    decodes ignore ``global_mean``, so the legacy 0.0 fallback is correct for them.
     """
     raw_loc = df["SN_Loc"].to_numpy(dtype=float)
     raw_scale = df["SN_Scale"].to_numpy(dtype=float)
     if strategy not in _SN_DECODE_STRATEGIES:
         return raw_loc, raw_scale
+    global_mean = float(df["GlobalMean"].iloc[0]) if "GlobalMean" in df.columns else 0.0
     strat = get_target_normalization(strategy)
-    return strat.decode_loc(raw_loc, df, 0.0), strat.decode_scale(raw_scale, df)
+    return strat.decode_loc(raw_loc, df, global_mean), strat.decode_scale(raw_scale, df)
 
 
 def _pred_ppf(df: pd.DataFrame, dist: str, q: float, *, strategy: str) -> np.ndarray:
@@ -936,6 +945,7 @@ def fit_skewnorm_dispersion_skew(
     ks_scale_only = _served_sn_pit_ks(mean, sigma, skew, y, c0, 0.0)
 
     if joint:
+
         def _ks(params: np.ndarray) -> float:
             c, s = params
             if not (bounds[0] <= c <= bounds[1] and skew_bounds[0] <= s <= skew_bounds[1]):
@@ -1017,6 +1027,80 @@ def sweep_calibration_modes(
         CalibrationModeFit(mode, c, s, _served_sn_pit_ks(mean, sigma, skew, y, c, s))
         for mode, (c, s) in params.items()
     ]
+
+
+# The post-hoc calibration modes the search ranks, in sweep order. Pinned to the keys
+# sweep_calibration_modes returns by test_gate_rows_by_calibration_mode_scores_all_four_modes.
+CALIBRATION_MODES: tuple[str, ...] = ("none", "dispersion", "skew-joint", "skew-sequential")
+
+
+def _recover_blended_sn(
+    df: pd.DataFrame, pred_col: str, decode_strategy: str, dispersion_cal: float, skew_cal: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Recover the pre-calibration blended ``(mean, sigma, skew, y)`` from a served SkewNormal dump.
+
+    The dump's served scale/alpha carry the pipeline's auto-fit ``(dispersion_cal, skew_cal)`` —
+    ``served_sigma = blended_sigma·c``, ``served_skew = blended_skew + s`` — so dividing the decoded
+    scale by ``c`` and subtracting ``s`` from the alpha inverts it. ``mean`` is the held-fixed
+    blended mean (``pred_col``); ``y`` the realized outcome.
+    """
+    _, served_scale = _decode_sn_loc_scale(df, decode_strategy)
+    served_skew = df["SN_Alpha"].to_numpy(dtype=float)
+    return (
+        df[pred_col].to_numpy(dtype=float),
+        served_scale / dispersion_cal,
+        served_skew - skew_cal,
+        df[ACTUAL_COL].to_numpy(dtype=float),
+    )
+
+
+def gate_rows_by_calibration_mode(
+    df: pd.DataFrame,
+    pred_col: str,
+    *,
+    league: str,
+    market: str,
+    strategy: str,
+    decode_strategy: str,
+    dispersion_cal: float,
+    skew_cal: float,
+) -> dict[str, dict[str, object]]:
+    """Score every post-hoc calibration mode off one trained SkewNormal dump — the free calibration
+    axis of the Operation Ship 75 search.
+
+    Recovers the blended params (:func:`_recover_blended_sn`), then for each mode re-applies its
+    fitted ``(c, s)`` over them (mean held fixed), re-encodes a per-mode frame, and runs the same
+    :func:`gate_row` — so the four modes are scored without a retrain. Each returned row carries the
+    mode's own ``(c, s)`` as ``dispersion_cal`` / ``skew_cal``.
+    """
+    mean, blended_sigma, blended_skew, y = _recover_blended_sn(
+        df, pred_col, decode_strategy, dispersion_cal, skew_cal
+    )
+    strat = get_target_normalization(strategy)
+    global_mean = float(df["GlobalMean"].iloc[0]) if "GlobalMean" in df.columns else 0.0
+    rows: dict[str, dict[str, object]] = {}
+    for fit in sweep_calibration_modes(mean, blended_sigma, blended_skew, y):
+        sigma_m = blended_sigma * fit.c
+        skew_m = blended_skew + fit.s
+        loc_m = skewnormal_loc_from_mean(mean, sigma_m, skew_m)
+        frame = df.copy()
+        frame["SN_Loc"] = strat.encode_loc(loc_m, df, global_mean, "MeanYr")
+        frame["SN_Scale"] = strat.encode_scale(sigma_m, df, "MeanYr")
+        frame["SN_Alpha"] = skew_m
+        row = apply_thresholds(
+            gate_row(
+                frame,
+                pred_col,
+                league=league,
+                market=market,
+                strategy=strategy,
+                decode_strategy=decode_strategy,
+            )
+        )
+        row["dispersion_cal"] = fit.c
+        row["skew_cal"] = fit.s
+        rows[fit.mode] = row
+    return rows
 
 
 def _gate4_pit_ks_threshold(n: int) -> float:

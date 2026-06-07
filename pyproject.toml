@@ -65,6 +65,8 @@ generate-ship-config = "sportstradamus.scripts.generate_ship_config:main"
 merge-archives = "sportstradamus.scripts.merge_archives:main"
 sweep-runaway-odds = "sportstradamus.scripts.sweep_runaway_odds:main"
 fp-fetch = "sportstradamus.fantasypoints.cli:fp_fetch"
+model-strategy-search = "sportstradamus.training.model_strategy_search:main"
+model-strategy-driver = "sportstradamus.training.model_strategy_driver:main"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.23.1"

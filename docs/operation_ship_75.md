@@ -276,7 +276,7 @@ that a failure on one does not block the others.
 The lever cascade below (L0–L5) is the depth-first exploration of **one** of three
 orthogonal axes. A served predictive is `(normalization → model+loss → blend → calibration)`,
 and three of those stages are independently swappable per cell
-(`target_normalization ⊥ {posthoc, dispersion_cal, skew_cal} ⊥ loss_fn`). Naming them:
+(`target_normalization ⊥ {posthoc, dispersion_cal, skew_cal} ⊥ {dist_training_loss, blending_loss_fn}`). Naming them:
 
 - **Normalization** — the target transform the model fits. *Well-defined* (`ratio_meanyr`,
   `centered_additive_mean10`, `centered_additive_eb_meanyr_k10`) but badly *under-explored*:
@@ -337,18 +337,23 @@ because the three axes are **not equally expensive**:
 - **Only `normalization × loss` costs a train** — ≈ `(2–4 cell-applicable norms) × 2 losses`
   = **4–8 trains per cell**, not 32.
 
-So the search is, **per market**: an **Optuna study over the categorical `(normalization,
-loss_fn)` space** (the repo's existing HPO engine — TPE with pruning, and it scales cleanly if
-we later add continuous blend weights or a hierarchical-Bayes layer). Each **trial** is one
-`--deterministic` train (bit-reproducible, fast, never published); the trial's **objective** is
-the **honest min-gate slack** of its val-fit→test gate row (the deterministic dump carries the
-pipeline's own validation-fit calibration) — a single scalar that is positive iff the cell ships
-and larger the more gate headroom it has, so it optimizes "ships, with margin" across all five
-gates at once rather than chasing g4 alone. The study returns the best `(normalization, loss)`
-corner per cell; an honest-val calibration-mode sweep layers on once a validation dump exists.
+So the search is, **per market**: an **Optuna study over the categorical retrain grid**, built
+2026-06-07 as [`training/model_strategy_driver.py`](../src/sportstradamus/training/model_strategy_driver.py)
+(entry point `model-strategy-driver`). Its `SEARCH_SPACE` is four axes in pipeline's `[kind, spec]`
+idiom plus a `stage` tag: the **retrain** axes `normalization × dist_training_loss` form a
+`GridSampler` grid (exhaustive + deterministic — the right tool for ≤8 discrete corners; the
+`[kind, spec, stage]` shape flips to TPE the moment a continuous axis lands), and the **post-hoc**
+axes — `calibration` (the free 4-mode sweep, fanned out off each trained corner with no extra train)
+and `blending_loss_fn` (degenerate at `nll` today; a non-`nll` value fails loud until the gated
+`crps` refit lands) — are scored off each trained dump. Each **trial** is one `--deterministic`
+train (bit-reproducible, fast, never published); the objective is the **min-gate slack** of the
+best post-hoc row — a single scalar positive iff the corner ships and larger the more gate headroom
+it has, so it optimizes "ships, with margin" across all five gates at once rather than chasing g4
+alone. Per cell the study returns one board row per `(retrain corner × calibration mode)`, ranked by
+slack.
 
 *What the built ranker actually scores (and the calibration-honesty trap it avoids).* The shipped
-`training/combo_search.py` ranks each normalization by the **honest val-fit→test gate row**: the
+`training/model_strategy_search.py` ranks each normalization by the **honest val-fit→test gate row**: the
 deterministic dump already carries the pipeline's own **validation-fit** joint calibration, so the
 ranker just calls `gate_row` on it — the *same* code production ships on — and reads
 `min_gate_slack` off the result. No test re-fit, so fidelity is by construction. An earlier build
@@ -360,8 +365,16 @@ still cheap when honest (post-hoc calibration **holds the blended mean fixed** v
 SkewNormal params** via `_served_sn_pit_ks`, and **Gates 1/5 barely move**, so only Gate 4 varies
 across modes — no `P` re-pricing). But an *honest* sweep must fit each mode on a dumped
 **validation** predictive, not the test set; until that val dump exists, each trial uses the
-pipeline's one val-fit mode as-is. `scorecard.sweep_calibration_modes` is built and tested for that
-future honest-val sweep; it is deliberately **not** wired into the ranker yet.
+pipeline's one val-fit mode as-is. `scorecard.sweep_calibration_modes` is **now wired into the
+driver** (via `gate_rows_by_calibration_mode` → `model_strategy_search.score_calibration_modes`): it
+recovers each dump's pre-calibration blended `(mean, sigma, skew)` — dividing the served scale by the
+pipeline's auto-fit `dispersion_cal` and subtracting `skew_cal`, both read from the pickle — and fits
+all four modes over it, no retrain. **Honesty caveat:** today that recovered predictive is the *test*
+dump (the deterministic flow dumps only the test split), so the in-driver sweep is an **in-sample
+ranking signal** — the same optimism (~0.008 KS) the earlier test-refit screen carried, acceptable
+*only* because the driver ranks and the real-HPO 5-gate scorecard ships. The honest-val upgrade is to
+recover from a dumped **validation** predictive; the recovery code is identical, only the dump split
+changes.
 
 **The deterministic study only ranks; the real-HPO scorecard ships.** The WNBA-AST lesson
 (2026-06-07, corrected): on **like-for-like** normalization the deterministic stand-in **tracks**
@@ -380,16 +393,17 @@ Sweep the **whole board**, shipping cells included (a shipped cell may have a be
 the scale-only default it settled for). The calibration-proof cells the L4a screen isolated
 (heavy-tail NBA AST / NFL passing-yards; g1-blocked NFL receiving/rushing-yards; the
 centered-strategy WNBA DREB / NFL receptions) are the highest-value rows but not the limit.
-Building this needs: calibration mode as a forced `{none, dispersion, skew-joint,
-skew-sequential}` flag, `loss_fn` as a CLI flag, the `ratio_projvol` `TargetNormalization`, and
-a per-market Optuna driver whose objective wraps the existing `training/scorecard.py` gate
-computation. A genuinely structural fourth lever — a **hierarchical Bayesian** layer that
+Built 2026-06-07: the per-market Optuna driver (`model-strategy-driver`), the `--dist-training-loss`
+and `--blending-loss-fn` `meditate` flags, and the forced 4-mode calibration sweep (wrapping
+`training/scorecard.py`'s gate computation). Still unbuilt: the `ratio_projvol` `TargetNormalization`,
+the honest-val dump that makes the calibration sweep OOS, and a non-`nll` `blending_loss_fn` value
+(the `crps` blend objective is gated on the empirical clamp-bite check in `/tmp/researcher_crps_blending.md`). A genuinely structural fourth lever — a **hierarchical Bayesian** layer that
 generalizes the dormant EB prior (learn the shrinkage per group, pool the full predictive across
 player ← position ← team/league rather than the mean only) — is the research-gated answer to the
 small-sample NFL wall and is scoped by a `research-analyst` brief before any build.
 
 **Sweep in flight (2026-06-07, preliminary).** The first honest pass — the built normalization
-ranker ([`training/combo_search.py`](../src/sportstradamus/training/combo_search.py): deterministic
+ranker ([`training/model_strategy_search.py`](../src/sportstradamus/training/model_strategy_search.py): deterministic
 trains × both decodable normalizations, scored on val-fit→test gates) — is running across the
 withheld SkewNormal cells of the covered leagues. The early signal is strong and consistent:
 `centered_additive_mean10` systematically out-calibrates `ratio_meanyr` on Gate 4, flipping a batch
@@ -398,8 +412,9 @@ margin below 0.05, not knife-edge). These are **deterministic stand-in** verdict
 after its real-HPO confirm — but they corroborate the thesis above that **normalization, not
 calibration, is the dominant unexplored axis** (and they confirm this section's own prediction that
 the "centered-strategy" cells like WNBA DREB resolve once the normalization axis is tried). The
-`loss_fn` / `ratio_projvol` / Optuna extensions remain unbuilt; this pass is the normalization slice
-alone.
+Optuna `GridSampler` driver + the `dist_training_loss`/`blending_loss_fn` flags + the 4-mode
+calibration sweep landed 2026-06-07; the `ratio_projvol` normalization and the hierarchical-Bayes
+layer remain unbuilt. This *preliminary* pass predates the driver — it is the normalization slice alone.
 
 **Is the search matrix well-defined? — the executable state, honestly.** The *method* is well-defined
 and proven: per cell, enumerate the executable axis-values, train one `--deterministic` model each,
@@ -409,9 +424,9 @@ of the three axes only one is executable today:
 
 | Axis | Values defined | Executable today | Build to put the rest on the table |
 |---|---|---|---|
-| **Normalization** | `ratio_meanyr`, `centered_additive_mean10`, `centered_additive_eb_meanyr_k10`, `ratio_projvol` | **2 of 4** — only `ratio_meanyr` + `centered_additive_mean10` have a Gate-4 SkewNormal decode (`scorecard._decode_sn_loc_scale`) | teach the decode the **EB** slug; **build** `ratio_projvol` (target = y / projected-volume) |
-| **Calibration** | `none`, `dispersion`, `skew-joint`, `skew-sequential` | **auto-fit per train, not enumerated** — the pipeline fits one mode (joint `(c,s)` with an opt-in margin that adaptively falls back to dispersion-only or none), so `(c,s)` *vary per cell* (sweep data: `s=0` for WNBA RA, `s≈3` for WNBA AST, `s=−2.0` for NBA fantasy-pp); the ranker reads that fit — it does not *compare* the four modes | dump the **validation** predictive so `scorecard.sweep_calibration_modes` compares all four (incl. sequential) per cell and the ranker picks the best |
-| **Loss / blending** | loss `nll`/`crps`; blend weights | **1, pinned** — `loss_fn` fixed per family (no CLI flag to vary it); blend frozen | add a `--loss-fn` flag to `meditate`; expose the blend weights |
+| **Normalization** | `ratio_meanyr`, `centered_additive_mean10`, `centered_additive_eb_meanyr_k10`, `ratio_projvol` | **3 of 4** — `ratio_meanyr` + `centered_additive_mean10` + the **EB** slug now have a Gate-4 SkewNormal decode (`scorecard._decode_sn_loc_scale`, EB off the dumped `GlobalMean`) | **build** `ratio_projvol` (target = y / projected-volume) |
+| **Calibration** | `none`, `dispersion`, `skew-joint`, `skew-sequential` | **swept by the driver (in-sample)** — `gate_rows_by_calibration_mode` recovers the blended predictive off each dump and *compares* all four modes per corner; today the dump is the **test** split, so it is an in-sample ranking signal (real-HPO confirms) | dump the **validation** predictive so the same sweep is OOS |
+| **Loss / blending** | loss `nll`/`crps`; blend weights | **dist-loss: 2, executable** (`--dist-training-loss nll\|crps`); **blend-loss: 1** (`--blending-loss-fn nll`; `crps` gated) | wire the `crps` blend objective (`fit_model_weight_crps`) once the clamp-bite check clears; expose the blend weights |
 
 The three axes are *defined*, but they are not in the same state, and the distinction is
 **independently swept vs auto-fit vs fixed**:
@@ -425,20 +440,14 @@ The three axes are *defined*, but they are not in the same state, and the distin
   (a function of each train), not one the search chooses.
 - **Loss / blending — fixed.** One value (family default), no flag.
 
-So the realized search has **one independent degree of freedom — normalization** — with calibration
-auto-fit at each point and loss held constant. That is why the *visited set* is a line (2 points): we
-**control and compare** along one axis. It is **not** that calibration is constant — it varies richly
-per cell; it is that we don't independently choose it. (My earlier "pinned to a single value" for
-calibration was wrong — corrected here.)
-
-Putting the rest **on the table** means giving the *other* axes real, independently-chosen extent: 2
-more normalizations (teach the gate the **EB** decode, build **`ratio_projvol`**) and a **loss** choice
-(`--loss-fn` flag) + blend weights — these are the genuinely unexplored directions. The calibration
-"build" is smaller than the others: the pipeline already auto-fits the joint optimum per cell, so an
-explicit mode sweep only adds the **sequential** mode and the option to override the opt-in margin — a
-refinement, not a new dimension. The "Optuna study" is a driver that only earns its keep once those
-builds make the grid large enough that plain enumeration is wasteful. Until then the ranker is an
-honest, fully-specified enumeration — and nothing in the space is ruled out, only not-yet-wired.
+As of 2026-06-07 the realized search has **two independent retrain degrees of freedom**
+(`normalization × dist_training_loss`, the `GridSampler` grid) **plus the free post-hoc calibration
+sweep** (all four modes compared per corner) — the driver controls and compares along all three. The
+earlier "one DOF — a line of 2 points" state is superseded: the visited set is now a `(3 norms × 2
+losses × 4 cal-modes)` board per cell once a sweep is run. What remains genuinely unbuilt is narrow:
+the `ratio_projvol` normalization value and the `crps` blend objective (the two missing axis-*values*),
+plus the honest-val calibration dump (a *fidelity* upgrade — today's sweep is in-sample) and the
+research-gated hierarchical-Bayes layer. Nothing in the space is ruled out — only those are not-yet-wired.
 
 ### Lever 0 — Re-score every withheld cell under the current gates; promote free passers
 
