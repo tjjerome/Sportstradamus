@@ -18,17 +18,23 @@ import pandas as pd
 
 from sportstradamus import data as _data_pkg
 from sportstradamus.helpers.io import market_file_slug
+from sportstradamus.training.pipeline import LOSS_AUTO
 from sportstradamus.training.scorecard import (
     apply_thresholds,
     gate_row,
+    gate_rows_by_calibration_mode,
     load_test_set,
     min_gate_slack,
 )
 
-# The normalization corners the SkewNormal gate can decode (and therefore score). The dormant
-# EB slug `centered_additive_eb_meanyr_k10` has no gate decode yet, so the search skips it until
-# `_decode_sn_loc_scale` learns it — see docs/operation_ship_75.md §5 (combination search).
-_DECODABLE_SN_NORMS: tuple[str, ...] = ("ratio_meanyr", "centered_additive_mean10")
+# The normalization corners the SkewNormal gate can decode (and therefore score). The EB slug
+# `centered_additive_eb_meanyr_k10` decodes off the dumped `GlobalMean` column (the gate re-adds
+# the empirical-Bayes prior) — see docs/operation_ship_75.md §5 (combination search).
+_DECODABLE_SN_NORMS: tuple[str, ...] = (
+    "ratio_meanyr",
+    "centered_additive_mean10",
+    "centered_additive_eb_meanyr_k10",
+)
 
 _SHIP_PRED_COL = "Blended_EV"
 _TEST_SETS_ROOT = pathlib.Path(str(pkg_resources.files(_data_pkg) / "test_sets"))
@@ -47,12 +53,20 @@ def _dump_paths(league: str, market: str, norm: str) -> tuple[pathlib.Path, path
     return csv, mdl
 
 
-def _run_deterministic_meditate(league: str, market: str, norm: str) -> None:
-    """Train one deterministic ``(cell, normalization)`` trial via the meditate CLI.
+def _run_deterministic_meditate(
+    league: str,
+    market: str,
+    norm: str,
+    dist_training_loss: str = LOSS_AUTO,
+    blending_loss_fn: str = LOSS_AUTO,
+) -> None:
+    """Train one deterministic ``(cell, normalization, dist-loss, blend-loss)`` trial via meditate.
 
     ``--deterministic`` pins RNGs and the fixed fast hyperparameters and dumps to the research
     sandbox (never production); ``--bypass-withholding`` lets a withheld cell train under the
-    forced ``--target-normalization``. The trained model is a *ranking* stand-in, never shipped.
+    forced ``--target-normalization``. Non-``auto`` losses are forwarded as ``--dist-training-loss``
+    / ``--blending-loss-fn`` so the search can sweep them; ``auto`` leaves that arg off (command
+    byte-identical to the normalization-only trial). The trained model is a *ranking* stand-in.
     """
     cmd = [
         "poetry",
@@ -67,6 +81,10 @@ def _run_deterministic_meditate(league: str, market: str, norm: str) -> None:
         "--target-normalization",
         norm,
     ]
+    if dist_training_loss != LOSS_AUTO:
+        cmd += ["--dist-training-loss", dist_training_loss]
+    if blending_loss_fn != LOSS_AUTO:
+        cmd += ["--blending-loss-fn", blending_loss_fn]
     subprocess.run(cmd, cwd=_REPO_ROOT, check=True, timeout=_MEDITATE_TRIAL_TIMEOUT_S)
 
 
@@ -92,6 +110,43 @@ def _score_normalization(league: str, market: str, norm: str) -> dict[str, objec
     }
 
 
+def score_calibration_modes(league: str, market: str, norm: str) -> list[dict[str, object]]:
+    """Gate all four post-hoc calibration modes off one trained dump — the search's free axis.
+
+    The dump's served SkewNormal params bake in the pipeline's auto-fit ``(dispersion_cal,
+    skew_cal)`` (read from the pickle); :func:`gate_rows_by_calibration_mode` recovers the blended
+    predictive against that baseline and re-gates every mode without a retrain. Returns one ship-row
+    per mode, each carrying the mode's *own* fitted calibration (not the dump's).
+    """
+    csv_path, mdl_path = _dump_paths(league, market, norm)
+    df = load_test_set(csv_path, _SHIP_PRED_COL)
+    filedict = pd.read_pickle(mdl_path)
+    mode_rows = gate_rows_by_calibration_mode(
+        df,
+        _SHIP_PRED_COL,
+        league=league,
+        market=market,
+        strategy=norm,
+        decode_strategy=norm,
+        dispersion_cal=filedict.get("dispersion_cal", 1.0),
+        skew_cal=filedict.get("skew_cal") or 0.0,
+    )
+    return [
+        {
+            "normalization": norm,
+            "calibration": mode,
+            "slack": min_gate_slack(row),
+            "ships": bool(row.get("ship")),
+            "dispersion_cal": row["dispersion_cal"],
+            "skew_cal": row["skew_cal"],
+            "g4_pit_ks": row.get("g4_pit_ks"),
+            "g4_pit_ks_max": row.get("g4_pit_ks_max"),
+            "n": row.get("n_rows"),
+        }
+        for mode, row in mode_rows.items()
+    ]
+
+
 def search_market(
     league: str,
     market: str,
@@ -112,7 +167,7 @@ def search_market(
     return pd.DataFrame(rows).sort_values("slack", ascending=False, ignore_index=True)
 
 
-@click.command(name="combo-search")
+@click.command(name="model-strategy-search")
 @click.option("--league", required=True, help="League code, e.g. WNBA.")
 @click.option("--market", required=True, help="Market stem, e.g. AST.")
 @click.option(

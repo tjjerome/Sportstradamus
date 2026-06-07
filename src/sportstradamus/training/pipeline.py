@@ -102,6 +102,18 @@ _MIN_PLAYER_NONZERO_OBS_DEFAULT: int = 60
 # Shape ceiling = marginal_shape * this multiplier.  2× gives the optimizer
 # headroom to exceed the prior while preventing runaway over-dispersion.
 _SHAPE_CEILING_MULTIPLIER: float = 2.0
+# The ``"auto"`` sentinel shared by the loss search axes: it means "use the default for this
+# context" (the per-family training loss here; the cell's stat_meta blending in the CLI), so a
+# default run reproduces production. The Operation Ship 75 search sweeps nll ↔ crps off these.
+LOSS_AUTO: str = "auto"
+# Training loss exposed by ``meditate --dist-training-loss`` — crps for the SkewNormal continuous
+# branch, nll for the count branch when ``auto``.
+DIST_TRAINING_LOSS_CHOICES: tuple[str, ...] = (LOSS_AUTO, "nll", "crps")
+
+
+def _resolve_loss_fn(family_default: str, override: str) -> str:
+    """Shared by the training-loss and blending-loss axes so ``auto`` reproduces production for each context."""
+    return family_default if override == LOSS_AUTO else override
 
 
 # Fixed RNG seed for --deterministic runs (debug/eval only).
@@ -1383,6 +1395,10 @@ def _step_persist_artifacts(
         X_test["SN_Loc"] = strat.encode_loc(served_loc, X_test, global_mean, denom_col)
         X_test["SN_Scale"] = strat.encode_scale(sn_scale_test, X_test, denom_col)
         X_test["SN_Alpha"] = sn_skew_test
+        # The EB-prior normalizations decode loc by re-adding an empirical-Bayes prior that
+        # shrinks toward global_mean; persist it so the scorecard's `_decode_sn_loc_scale`
+        # recovers the served loc instead of shrinking toward 0. Ratio/Mean10 decodes ignore it.
+        X_test["GlobalMean"] = global_mean
         if hist_gate > GATE_PUBLISH_THRESHOLD:
             X_test["Gate"] = hist_gate
     elif dist in ("NegBin", "ZINB"):
@@ -2013,6 +2029,7 @@ def _step_select_distribution(
     zinb_mode: str,
     *,
     deterministic: bool,
+    dist_training_loss: str = LOSS_AUTO,
 ) -> dict:
     """Choose distribution family + apply target transform + compute shape priors.
 
@@ -2071,7 +2088,9 @@ def _step_select_distribution(
 
     if global_mean >= _SKEWNORMAL_MEAN_THRESHOLD:
         dist = "SkewNormal"
-        dist_obj = SkewNormalDist(stabilization="None", loss_fn="crps")
+        dist_obj = SkewNormalDist(
+            stabilization="None", loss_fn=_resolve_loss_fn("crps", dist_training_loss)
+        )
 
         cv = (
             player_stats.std()
@@ -2101,10 +2120,14 @@ def _step_select_distribution(
         if hist_gate > GATE_PUBLISH_THRESHOLD:
             dist = "ZINB"
         if dist == "NegBin":
-            dist_obj = NegativeBinomial(stabilization="None", loss_fn="nll")
+            dist_obj = NegativeBinomial(
+                stabilization="None", loss_fn=_resolve_loss_fn("nll", dist_training_loss)
+            )
         elif zinb_mode == "joint":
             # Legacy jointly-fit LightGBMLSS ZINB path — byte-identical to pre-P2.B.
-            dist_obj = ZINB(stabilization="None", loss_fn="nll")
+            dist_obj = ZINB(
+                stabilization="None", loss_fn=_resolve_loss_fn("nll", dist_training_loss)
+            )
         # else: hurdle path — dist_obj is not constructed; HurdleZINB is built at fit time.
 
         per_player_r = player_stats.mean() ** 2 / np.maximum(
@@ -2162,6 +2185,7 @@ def train_market(
     posthoc_slug: str = "none",
     blending: str = calibration.DEFAULT_BLENDING,
     zinb_mode: str = "joint",
+    dist_training_loss: str = LOSS_AUTO,
 ) -> None:
     """Train or retrain one LightGBMLSS model for a single league/market pair.
 
@@ -2242,6 +2266,7 @@ def train_market(
         target_normalization,
         zinb_mode,
         deterministic=deterministic,
+        dist_training_loss=dist_training_loss,
     )
     dist = dist_info["dist"]
     cv = dist_info["cv"]
