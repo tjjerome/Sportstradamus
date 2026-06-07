@@ -411,10 +411,14 @@ of the three axes only one is executable today:
 |---|---|---|---|
 | **Normalization** | `ratio_meanyr`, `centered_additive_mean10`, `centered_additive_eb_meanyr_k10`, `ratio_projvol` | **2 of 4** — only `ratio_meanyr` + `centered_additive_mean10` have a Gate-4 SkewNormal decode (`scorecard._decode_sn_loc_scale`) | teach the decode the **EB** slug; **build** `ratio_projvol` (target = y / projected-volume) |
 | **Calibration** | `none`, `dispersion`, `skew-joint`, `skew-sequential` | **1** — each dump carries the pipeline's own val-fit mode; the ranker reads it, it does not sweep | dump the **validation** predictive so `scorecard.sweep_calibration_modes` fits each mode on val (not test) and the ranker picks honestly |
-| **Loss / blending** | loss `nll`/`crps`; blend weights | **0** — `loss_fn` is fixed per family (no CLI flag); blend frozen | add a `--loss-fn` flag to `meditate`; expose the blend weights |
+| **Loss / blending** | loss `nll`/`crps`; blend weights | **1, pinned** — `loss_fn` fixed per family (no CLI flag to vary it); blend frozen | add a `--loss-fn` flag to `meditate`; expose the blend weights |
 
-So **today the "matrix" is a 1-axis, 2-point line** (the two decodable normalizations) with a precise
-objective and a real-HPO confirm gate — well-defined and running, but not the full cross-product.
+So **today the "matrix" is a 1-axis, 2-point line** (the two decodable normalizations). The three axes
+are *defined*, but two of them are **pinned to a single value** right now — calibration to the
+pipeline's one val-fit mode, loss to the family default — so the realized search set is the product
+**2 × 1 × 1 = 2 points**: one degree of freedom, a line, not a volume. An axis adds a dimension only
+once it has ≥ 2 enumerable values wired in. The line carries a precise objective and a real-HPO
+confirm gate — well-defined and running, but not the full cross-product.
 "Everything on the table" is exactly the four builds in the right column (EB decode, `ratio_projvol`,
 the honest-val calibration sweep, the `loss_fn` flag). The doc's "Optuna study" is a fifth piece: with
 two normalizations a plain enumeration suffices, so the TPE engine earns its keep only once those
