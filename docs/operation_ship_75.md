@@ -402,6 +402,43 @@ generalizes the dormant EB prior (learn the shrinkage per group, pool the full p
 player ← position ← team/league rather than the mean only) — is the research-gated answer to the
 small-sample NFL wall and is scoped by a `research-analyst` brief before any build.
 
+**The operating loop (per parameter, per cell).** Once an axis is wired, the per-cell workflow is
+fixed — and the ship bar differs for a withheld cell vs an incumbent:
+
+1. **Driver board = candidate generator.** `model-strategy-driver` returns the ranked board
+   (deterministic train + in-sample calibration sweep). A `ships=True` row is a *candidate flag*,
+   never a ship — the real gate is the full-HPO official 5-gate scorecard in `model_stats.parquet`.
+   Carry the **top-K (2–3)** corners per cell forward.
+
+2. **Withheld cell → real-HPO confirm → ship to devel.** Set the winning corner's strategy
+   (`target_normalization` + calibration mode + `dist_training_loss`) in `stat_meta.json`, run a
+   full-HPO `meditate`, read the official scorecard. A clean **5/5** → flip
+   `shipped: "withheld" → "devel"`. Ship the first top-K corner that clears; if the winner is just
+   the cell's current default strategy it is a straight confirm (no strategy edit). The knife-edge
+   cells (g4 within ~0.003 of 0.05) are exactly where the val→test discount bites, so the confirm is
+   mandatory — never ship the deterministic score.
+
+3. **Incumbent (already-shipped) cell with a better corner → supersede, a higher bar.** A shipped
+   cell does **not** re-ship on a fresh 5/5 — the candidate must *beat the incumbent*. Built as
+   `scorecard.supersede_verdict(baseline, candidate)` (`docs/ship_gate.md`, "supersede an
+   incumbent"), three gates AND'd:
+   - **S1** — candidate clears the standard 5-gate scorecard standalone;
+   - **S2** — paired Brier CI lower-bound > 0 (candidate statistically sharper on the shared rows);
+   - **S3** — paired Kelly-Sharpe Memmel-z > min (candidate's simulated returns statistically sharper).
+
+   All three → `SUPERSEDE` (swap the strategy in `stat_meta.json`); any fail → `HOLD` (keep the
+   incumbent). Both sides need full-HPO, row-aligned test dumps; CLI
+   `python -m sportstradamus.training.scorecard --baseline … --candidate …`. The S2/S3
+   beat-incumbent asymmetry is deliberate — it stops strategy-churn on noise.
+
+**Two caveats on "wire in a new parameter."** (a) **Research-gate** — a parameter that changes a
+*distribution family or dispersion mechanism* needs a `research-analyst` brief before it is wired or
+built (CLAUDE.md research-first); a plain knob (a normalization slug, a loss choice) does not.
+(b) **Wiring an axis-value ≠ it sweeps.** A value can sit in `SEARCH_SPACE` yet fail loud until its
+machinery exists — `blending_loss_fn` carries `crps` as a defined value but the driver raises
+`NotImplementedError` on it until `fit_model_weight_crps` is built (itself gated on the clamp-bite
+check). So "wire it in" is sometimes "wire the axis, build the value, then it sweeps."
+
 **Sweep in flight (2026-06-07, preliminary).** The first honest pass — the built normalization
 ranker ([`training/model_strategy_search.py`](../src/sportstradamus/training/model_strategy_search.py): deterministic
 trains × both decodable normalizations, scored on val-fit→test gates) — is running across the
