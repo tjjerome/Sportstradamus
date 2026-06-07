@@ -166,13 +166,13 @@ both. Report-only companions name the *direction* a KS scalar can't:
 | `init_score` warm-start baseline | **Dead** — byte-identical to plain NegBin. | Phase P2.A |
 | ZTNB-hurdle likelihood | **Refuted** — incompatible with the derived-π decode; would regress the 6 shipped hurdle markets. | Stage B1 |
 | T5 multiplicative factorization (volume × efficiency) | **Killed** — Goodman variance-of-products gives +27% predictive-variance inflation on the priced cell. | Stage A1.5 |
-| Family build for *mean* compression (CMPμ / MZINB) | **Deferred** — top-decile mean compression is distribution-family-*invariant* (it is the tree leaf-average itself, refs [3][4][30]); re-parameterizing dispersion leaves the boosted mean head untouched. Re-entry only per the §7a condition. | Stage B1.5 §7a |
+| Family build for *mean* compression (CMPμ / MZINB) | **On the table — conditional.** Top-decile mean compression is distribution-family-*invariant* (the tree leaf-average itself, refs [3][4][30]), so re-parameterizing dispersion alone won't move it — re-entry is *gated on the §7a condition*, not shelved. | Stage B1.5 §7a |
 | HurdleZINB (per-cell mode) | **Alive** — shipped; 6/8 NBA ZINB markets. Available per-cell via `zinb_mode`. | Phase P2.B |
 | Post-hoc **mean** correction (`roe_mean` / `isotonic_mean`) | **Alive & shipped** — `MEAN_STAGE` in [`posthoc.py`](../src/sportstradamus/training/posthoc.py); flipped NFL passing-tds + interceptions. | Stage B1.6 / Step 1 |
 | Post-hoc **probability** recalibration (`prob_recal_*`) | **Alive** — `PROB_STAGE` built, available per-cell. | posthoc.py |
 | Post-hoc **scale / dispersion** correction | **GO — route 1a-hybrid** (fit in `_step_calibrate_dispersion` via `scorecard._randomized_pit_ks`; reuse `dispersion_cal` field + apply; count branch CRPS→PIT-KS too). Reverses the v1 "route 1b" after C0 fixed the decode bug 1b dodged. Levi closed-form σ-scaling is a dead end (diverges 5–7000× on skewed cells). | §5 L1 / brief `researcher_lever1_strategy.md` |
 | Player-level features (expanding-mean, EB-shrunk, opp-defense) | **Alive, unbuilt** — RANK 2/3 in the breadth verdict. | Stage B1.6 |
-| Per-position model split (NFL) | **Alive, deferred to Ship 90 (T11)** — can be pulled forward if NFL stalls. | Stage A1.6 |
+| Per-position model split (NFL) | **Alive, on the table (T11)** — a live NFL lever now, not held for Ship 90; pull forward whenever the binding league needs it. | Stage A1.6 |
 
 ---
 
@@ -314,12 +314,16 @@ and three of those stages are independently swappable per cell
   (`fused_loc`: precision-weighted pool + per-cell `model_weight`). Both frozen today
   (loss set per family, blend structure fixed). Under-explored.
 
-**"Defer" in the cascade below means "exhausted on the calibration/feature axis for this
-cell," NOT "unwinnable."** A `deferred-90` or Lever-cap verdict is a per-axis statement; the
-cell re-enters the moment the normalization or blending axis is tried. No cell and no league
-is written off while two of three axes sit unexplored — language anywhere in this document
-that reads as a hard ceiling (a league that "cannot reach" its target, an "efficient-market
-wall") is shorthand for "on the lever stack as run so far," and is wrong if read as final.
+**Nothing is deferred. Every withheld cell and every lever is a live Ship-75 candidate.** The
+`deferred-90` / "defer" / Lever-cap tags are **retired for the duration of this operation.** They
+were always per-axis verdicts — almost always the *calibration axis under a single normalization* —
+and the 2026-06-07 sweep showed how badly that mis-reads: cells the screen stamped `deferred-90`
+ship under a *different* normalization. A cell leaves the Ship-75 board **only** after it has
+actually failed on **all three axes** (normalization × calibration × blending) **plus** the
+hierarchical layer — and as of 2026-06-07 that is true of **zero cells**. Any "defer",
+"deferred-90", "cannot reach", or "efficient-market wall" wording that survives below is the *old*
+per-axis verdict, kept for its evidence but **superseded by this policy**; read none of it as final.
+The bar for parking a cell is axis-exhaustion across the whole matrix, never a single screen.
 
 **Next phase after the calibration pass — the combination search (smart, per-market; not a
 brute-force grid).** The naive read — cross every axis value for every cell,
@@ -396,6 +400,26 @@ calibration, is the dominant unexplored axis** (and they confirm this section's 
 the "centered-strategy" cells like WNBA DREB resolve once the normalization axis is tried). The
 `loss_fn` / `ratio_projvol` / Optuna extensions remain unbuilt; this pass is the normalization slice
 alone.
+
+**Is the search matrix well-defined? — the executable state, honestly.** The *method* is well-defined
+and proven: per cell, enumerate the executable axis-values, train one `--deterministic` model each,
+score the **honest val-fit→test gate row** (the production gate path), rank by `min_gate_slack`, and
+confirm the top-K under real HPO before any ship. What is **not** yet a full matrix is the *space* —
+of the three axes only one is executable today:
+
+| Axis | Values defined | Executable today | Build to put the rest on the table |
+|---|---|---|---|
+| **Normalization** | `ratio_meanyr`, `centered_additive_mean10`, `centered_additive_eb_meanyr_k10`, `ratio_projvol` | **2 of 4** — only `ratio_meanyr` + `centered_additive_mean10` have a Gate-4 SkewNormal decode (`scorecard._decode_sn_loc_scale`) | teach the decode the **EB** slug; **build** `ratio_projvol` (target = y / projected-volume) |
+| **Calibration** | `none`, `dispersion`, `skew-joint`, `skew-sequential` | **1** — each dump carries the pipeline's own val-fit mode; the ranker reads it, it does not sweep | dump the **validation** predictive so `scorecard.sweep_calibration_modes` fits each mode on val (not test) and the ranker picks honestly |
+| **Loss / blending** | loss `nll`/`crps`; blend weights | **0** — `loss_fn` is fixed per family (no CLI flag); blend frozen | add a `--loss-fn` flag to `meditate`; expose the blend weights |
+
+So **today the "matrix" is a 1-axis, 2-point line** (the two decodable normalizations) with a precise
+objective and a real-HPO confirm gate — well-defined and running, but not the full cross-product.
+"Everything on the table" is exactly the four builds in the right column (EB decode, `ratio_projvol`,
+the honest-val calibration sweep, the `loss_fn` flag). The doc's "Optuna study" is a fifth piece: with
+two normalizations a plain enumeration suffices, so the TPE engine earns its keep only once those
+builds expand the space enough that a full grid is wasteful. Until then the ranker is an honest,
+fully-specified enumeration — and nothing in the space is ruled out, only not-yet-wired.
 
 ### Lever 0 — Re-score every withheld cell under the current gates; promote free passers
 
@@ -565,12 +589,12 @@ adds a sibling `skew_cal` field) — an engineering change, **not** a new distri
   | NFL yards | 0.0613 | 0.0184 | 0.0195 | −0.017 ✓ | **L4a ship** |
   | NFL fantasy-prizepicks | 0.0540 | 0.0170 | 0.0393 | −0.046 ✓ | **L4a ship** |
   | NFL fantasy-underdog | 0.0750 | 0.0209 | 0.0453 | −0.011 ✓ | **L4a ship** |
-  | NFL receiving-yards | 0.0751 | 0.0333 | 0.0342 | +0.0075 ✗ | g4-fixable, g1-blocked (sharp book → L3) |
-  | NFL rushing-yards | 0.0739 | 0.0343 | 0.0367 | +0.0101 ✗ | g4-fixable, g1-blocked → L3 |
-  | NBA AST | 0.0629 | 0.0488 | 0.0345 | −0.038 ✓ | screen said heavy-tail `deferred-90` — **refuted by the 2026-06-07 sweep: ships under `centered_additive_mean10`, det g4 0.042** |
-  | NFL passing-yards | 0.0800 | 0.0463 | 0.0236 | — | heavy tail → defer (n=377) — *normalization axis untried, not ruled out* |
-  | WNBA DREB | 0.0933 | 0.0564 | 0.1225 | — | screen said neither → defer — **refuted by the 2026-06-07 sweep: ships under `centered_additive_mean10`, det g4 0.035** |
-  | NFL receptions | 0.1244 | 0.0738 | 0.5255 | — | neither on the calibration axis → defer — *in the running sweep; normalization axis untried, not ruled out* |
+  | NFL receiving-yards | 0.0751 | 0.0333 | 0.0342 | +0.0075 ✗ | g4-fixable; g1 not yet cleared → on the table for L3 features + normalization |
+  | NFL rushing-yards | 0.0739 | 0.0343 | 0.0367 | +0.0101 ✗ | g4-fixable; g1 not yet cleared → on the table for L3 + normalization |
+  | NBA AST | 0.0629 | 0.0488 | 0.0345 | −0.038 ✓ | screen stamped heavy-tail `deferred-90` — **refuted by the 2026-06-07 sweep: ships under `centered_additive_mean10`, det g4 0.042** |
+  | NFL passing-yards | 0.0800 | 0.0463 | 0.0236 | — | heavy tail on the calibration axis (n=377) — *on the table; normalization/blending untried* |
+  | WNBA DREB | 0.0933 | 0.0564 | 0.1225 | — | screen said neither → **refuted by the 2026-06-07 sweep: ships under `centered_additive_mean10`, det g4 0.035** |
+  | NFL receptions | 0.1244 | 0.0738 | 0.5255 | — | neither on the calibration axis — *on the table; in the running sweep, normalization untried* |
 
   **Verdict: BUILD L4a** — 4 g1-clean, g4-L4a-fixable ships (WNBA AST + NFL yards / fantasy-pp /
   fantasy-ud) from one ~½-day engineering build; **3 of the 4 are NFL** (the binding league, 5/20).
@@ -597,12 +621,13 @@ adds a sibling `skew_cal` field) — an engineering change, **not** a new distri
   `(c,s)` on the test rows and reported 0.039, reproducing the in-sample optimism; that dishonest
   path was removed — commit `10306ee`.)
 
-  **The `defer` / `deferred-90` rows above are CALIBRATION-AXIS verdicts, not final.** The screen
-  varied only `(c, s)`; it did not touch normalization or blending. NBA AST's heavy tail and NFL
-  receptions' / WNBA DREB's hard PIT may resolve under a **volume/rate normalization**
-  (`ratio_projvol`) — a per-carry / per-minute target reshapes the residual the calibration knob
-  can't reach — or under the dormant **EB** normalization. These four are the seed input set for
-  the combination search (§5 framing), run *after* the L4a/L1 calibration pass ships its cells.
+  **Every row above is a live Ship-75 candidate — none is parked.** The screen varied only `(c, s)`;
+  it did not touch normalization or blending. The sweep has already flipped NBA AST and WNBA DREB
+  (under `centered_additive_mean10`); NFL receptions and passing-yards stay on the table for the
+  **volume/rate normalization** (`ratio_projvol` — a per-carry / per-minute target reshapes the
+  residual the calibration knob can't reach), the dormant **EB** normalization, and the **blending**
+  axis. All of them are seed inputs for the combination search (§5); nothing waits in a Ship-90
+  holding pen.
 
 #### Lever 1 — research verdict (2026-06-06; brief `researcher_lever1_strategy.md` supersedes the v1 `researcher_dispersion_cal.md`)
 
@@ -707,17 +732,19 @@ behind `supersede_verdict()`:
   mechanically-implausible splits out and stop Optuna wasting trials — for the NFL
   small-n volume cells. BSS guardrail per cell; wrong-sign prior is *worse* than none, so
   commit only priors with mechanical meaning (volume shares, plays-per-game).
-- **4d** per-position model split (T11), pulled forward from Ship 90 if NFL stalls short
-  of 15 — train separate (position, market) models where eligible-position marginals
-  diverge materially; min-row guard + fallback to pooled+categorical.
+- **4d** per-position model split (T11) — a live NFL lever (no longer held for Ship 90): train
+  separate (position, market) models where eligible-position marginals diverge materially; min-row
+  guard + fallback to pooled+categorical.
 
-**Lever cap.** A cell that fails Levers 1–4 is exhausted *on the calibration + feature axis*
-and parks at `deferred-90` **with a one-line reason naming the axis tried** — but it is not
-done: it is queued for the combination search (the normalization × calibration × blending
-cross-product, §5 framing) and then the hierarchical layer. `deferred-90` is a "come back with
-a different axis" tag, never "unwinnable." Gate-definition changes never count as a lever.
+**Lever cap.** A cell that fails Levers 1–4 is exhausted *on the calibration + feature axis only* —
+it stays a **live Ship-75 candidate** and is handed to the combination search (the normalization ×
+calibration × blending matrix, §5) and then the hierarchical layer, with a one-line note naming the
+axis already tried. It does **not** receive a `deferred-90` tag — that tag is **retired for this
+operation** (§5 policy). A cell becomes Ship-90 territory only after the *whole matrix* plus the
+hierarchical layer has actually failed it; **zero cells qualify today.** Gate-definition changes
+never count as a lever.
 
-### Lever 5 — Distribution / tail rebuild (deferred)
+### Lever 5 — Distribution / tail rebuild (sequenced last — on the table)
 
 The T3 spliced/Pareto-tail or Student-t LSS head, or the CMPμ/MZINB family build. Heavy
 inference-side work (references §12, "new distribution head"). Score only on cells that
@@ -750,9 +777,9 @@ counts as the pre-sweep estimate; the sweep's board is authoritative.
 
 - **L0 free promotes — DONE:** BLK, FG3M, TOV shipped → 8/18.
 - **L1 / normalization** available on Gate-4-only cells: AST, BLST, DREB, FTM, OREB, PTS,
-  RA, REB, fantasy-points-prizepicks (DREB is severe at 0.50 — discount it). AST honestly
-  ships under the `centered_additive_mean10` normalization (val-fit→test g4 0.047) — the
-  sweep's lead candidate, pending real-HPO confirm.
+  RA, REB, fantasy-points-prizepicks. DREB screened severe (0.50) on the calibration axis but
+  **ships under `centered_additive_mean10` in the sweep** (det 0.035) — not discounted. AST likewise
+  ships under centered (val-fit→test g4 0.047), the sweep's lead candidate, pending real-HPO confirm.
 - **L3** on STL (g1 edge).
 - **Verdict: achievable.** +6 of the eight realistic L1/normalization cells = 14.
 
@@ -760,7 +787,8 @@ counts as the pre-sweep estimate; the sweep's board is authoritative.
 
 - **L1 dispersion, g1 already passes** on **5** tractable cells: passing-tds,
   passing-yards, yards, fantasy-points-underdog, sacks-taken → **10/20**. (A 6th g4-only
-  cell, receptions, is severe at `pit_ks` 0.43 — discount it.)
+  cell, receptions, screened severe at `pit_ks` 0.43 on the calibration axis — it is in the running
+  sweep with the normalization axis untried, so it stays on the table.)
 - **L1 + edge** on 6 g1+g4 cells: the 5 continuous-volume markets (attempts, carries,
   completions, receiving-yards, rushing-yards) + qb-tds. g1 is *marginal* (`ci_hi`
   0.007–0.018) and these are also under-dispersed, so L1 *might* pull g1 under 0.005 as a
@@ -773,7 +801,8 @@ counts as the pre-sweep estimate; the sweep's board is authoritative.
   sharp line (the g1 guardrail). The bar is *don't regress the blend*, not *beat the book*
   (§Purpose). **Plan for failure here:** if NFL stalls at 11–13, escalate to L4d
   (per-position split), and for any cell the model can't improve, lean on the book in the
-  blend — before declaring `deferred-90`, and never by loosening a gate.
+  blend — that ships if calibration holds. No cell is shelved to `deferred-90` (the tag is retired
+this operation), and never loosen a gate.
 
 ---
 
@@ -782,9 +811,12 @@ counts as the pre-sweep estimate; the sweep's board is authoritative.
 - **Per-lever:** each lever above has an explicit go/no-go and an if-it-fails branch.
   When a lever's go/no-go fails on a cell, record it (lever-attempt +1) and take the
   branch. Do not grind a dead lever.
-- **Per-cell:** four failed levers ⇒ `deferred-90` with a one-line reason. The mandate is
-  *push every cell until it ships or fails ≥ 4 levers* — no easy out, but no infinite
-  grind either.
+- **Per-cell:** push every cell until it ships or has actually failed across the **whole matrix**
+  — all three axes (normalization × calibration × blending) plus the hierarchical layer. Four
+  failed *calibration/feature* levers is **not** an exit: the cell moves to the combination search
+  and the hierarchical layer with a one-line note naming the axes tried. No easy out, no infinite
+  grind, and **no `deferred-90` shelf** — the only ways off the Ship-75 board are genuine
+  matrix-wide exhaustion (zero cells today) or the operator's explicit, documented denominator call.
 - **Operation-level: failure is not an option.** The §6 arithmetic shows NBA and WNBA
   clear with L0+L1 alone, with backups. NFL is the one league that can genuinely stall;
   its escalation ladder (L1 → L3 → L4d per-position) is deep enough to reach 15, and for
@@ -919,8 +951,9 @@ hard rule).
 3. [`docs/ship_gate.md`](ship_gate.md) — current g1–g5 thresholds (authoritative)
 4. [`docs/operation_ship_references.md`](operation_ship_references.md) — research verdicts,
    citations [1]–[48], critical-files map, the per-change-type inference-path checklist
-5. [`docs/operation_ship_90.md`](operation_ship_90.md) — next-rung stub; holds the
-   deferred levers (T11 per-position, T3 tail head, CMPμ) this plan may pull forward
+5. [`docs/operation_ship_90.md`](operation_ship_90.md) — next-rung stub; the levers it lists
+   (T11 per-position, T3 tail head, CMPμ) are **on the Ship-75 table too** — pulled forward as
+   needed, not reserved
 
 Done = each league shows ≥ 75% (`shipped ∈ {devel, main}`) on a fresh scorecard, with
 every promotion having cleared its go/no-go and, for baselined cells, `supersede_verdict()`.
