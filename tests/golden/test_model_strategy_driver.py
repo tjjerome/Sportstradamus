@@ -4,21 +4,21 @@ The orchestration (retrain-grid enumeration, free post-hoc calibration sweep, bo
 exercised with the heavy per-corner ``meditate`` train+score monkeypatched out, so no model trains.
 The real per-corner primitives are covered separately (``training.model_strategy_search`` +
 ``training.scorecard``, and end-to-end by a deterministic meditate run); here we pin that the
-Optuna GridSampler study visits every *retrain* corner once, that each corner contributes one row
-per post-hoc (blending × calibration) combination, and that the board ranks by ship slack.
+Optuna GridSampler study visits every *retrain* corner (normalization × dist-loss × blend-loss)
+once, that each corner contributes one row per post-hoc calibration mode, and that the board ranks
+by ship slack.
 """
 
 import subprocess
 
 import pandas as pd
-import pytest
 
-from sportstradamus.training import model_strategy_driver, model_strategy_search
+from sportstradamus.training import calibration, model_strategy_driver, model_strategy_search
 
 
-def _fake_run_and_score(league, market, *, normalization, dist_training_loss, blending_choices):
-    """Canned per-corner rows: one row per (blending × calibration mode); slack favors
-    centered-mean10 + nll training-loss + skew-joint calibration, deterministic per corner.
+def _fake_run_and_score(league, market, *, normalization, dist_training_loss, blending_loss_fn):
+    """Canned per-corner rows: one per calibration mode; slack favors centered-mean10 + nll
+    training-loss + crps blend + skew-joint calibration, deterministic per corner.
     """
     norm_slack = {
         "ratio_meanyr": 0.00,
@@ -26,25 +26,25 @@ def _fake_run_and_score(league, market, *, normalization, dist_training_loss, bl
         "centered_additive_eb_meanyr_k10": -0.10,
     }[normalization]
     loss_bonus = 0.05 if dist_training_loss == "nll" else 0.0
+    blend_bonus = 0.02 if blending_loss_fn == "crps" else 0.0
     rows = []
-    for blending in blending_choices:
-        for mode in model_strategy_driver.CALIBRATION_MODES:
-            slack = norm_slack + loss_bonus + (0.03 if mode == "skew-joint" else 0.0)
-            rows.append(
-                {
-                    "normalization": normalization,
-                    "dist_training_loss": dist_training_loss,
-                    "blending_loss_fn": blending,
-                    "calibration": mode,
-                    "slack": slack,
-                    "ships": slack > 0,
-                    "dispersion_cal": 1.0,
-                    "skew_cal": 0.0,
-                    "g4_pit_ks": 0.04,
-                    "g4_pit_ks_max": 0.05,
-                    "n": 2000,
-                }
-            )
+    for mode in model_strategy_driver.CALIBRATION_MODES:
+        slack = norm_slack + loss_bonus + blend_bonus + (0.03 if mode == "skew-joint" else 0.0)
+        rows.append(
+            {
+                "normalization": normalization,
+                "dist_training_loss": dist_training_loss,
+                "blending_loss_fn": blending_loss_fn,
+                "calibration": mode,
+                "slack": slack,
+                "ships": slack > 0,
+                "dispersion_cal": 1.0,
+                "skew_cal": 0.0,
+                "g4_pit_ks": 0.04,
+                "g4_pit_ks_max": 0.05,
+                "n": 2000,
+            }
+        )
     return rows
 
 
@@ -60,13 +60,14 @@ def test_search_space_is_kind_spec_stage_shape():
         assert stage in {"retrain", "posthoc"}
     assert space["normalization"] == ["categorical", list(model_strategy_search._DECODABLE_SN_NORMS), "retrain"]
     assert space["dist_training_loss"] == ["categorical", ["crps", "nll"], "retrain"]
-    assert space["blending_loss_fn"][2] == "posthoc"
+    # blending rides the retrain tier (w is fit inside meditate); calibration is the only free axis.
+    assert space["blending_loss_fn"] == ["categorical", sorted(calibration.BLENDING_SLUGS), "retrain"]
     assert space["calibration"] == ["categorical", list(model_strategy_driver.CALIBRATION_MODES), "posthoc"]
 
 
 def test_retrain_grid_keeps_only_retrain_axes():
     grid = model_strategy_driver._retrain_grid(model_strategy_driver.SEARCH_SPACE)
-    assert set(grid) == {"normalization", "dist_training_loss"}
+    assert set(grid) == {"normalization", "dist_training_loss", "blending_loss_fn"}
     assert grid["dist_training_loss"] == ["crps", "nll"]
 
 
@@ -79,18 +80,21 @@ def test_search_cell_enumerates_retrain_grid_times_posthoc_and_ranks_by_slack(mo
     n_losses = len(space["dist_training_loss"][1])
     n_blend = len(space["blending_loss_fn"][1])
     n_cal = len(space["calibration"][1])
-    # Retrain grid (norm × dist-loss) trained once each, fanned out over the free post-hoc sweep.
+    # Retrain grid (norm × dist-loss × blend-loss) trained once each, fanned out over the free sweep.
     assert len(board) == n_norms * n_losses * n_blend * n_cal
     # Every (retrain corner × calibration mode) appears exactly once.
-    assert set(zip(board["normalization"], board["dist_training_loss"], board["calibration"], strict=True)) == {
-        (n, loss, cal)
+    corner_cols = ["normalization", "dist_training_loss", "blending_loss_fn", "calibration"]
+    assert set(zip(*(board[c] for c in corner_cols), strict=True)) == {
+        (n, loss, blend, cal)
         for n in space["normalization"][1]
         for loss in space["dist_training_loss"][1]
+        for blend in space["blending_loss_fn"][1]
         for cal in space["calibration"][1]
     }
-    # Best corner: centered-mean10 + nll training-loss + skew-joint calibration (0.20 + 0.05 + 0.03).
+    # Best corner: centered-mean10 + nll + crps blend + skew-joint (0.20 + 0.05 + 0.02 + 0.03).
     assert board.iloc[0]["normalization"] == "centered_additive_mean10"
     assert board.iloc[0]["dist_training_loss"] == "nll"
+    assert board.iloc[0]["blending_loss_fn"] == "crps"
     assert board.iloc[0]["calibration"] == "skew-joint"
     assert board["slack"].is_monotonic_decreasing
 
@@ -102,20 +106,8 @@ def test_search_cell_carries_league_market_columns(monkeypatch):
     assert (board["market"] == "FGA").all()
 
 
-def test_run_and_score_fails_loud_on_unbuilt_blending():
-    """A non-nll blend objective fails loud (and before any meditate) until the post-hoc crps refit lands."""
-    with pytest.raises(NotImplementedError, match="crps-blending"):
-        model_strategy_driver._run_and_score(
-            "WNBA",
-            "AST",
-            normalization="ratio_meanyr",
-            dist_training_loss="nll",
-            blending_choices=("crps",),
-        )
-
-
-def test_run_deterministic_meditate_forwards_dist_training_loss(monkeypatch):
-    """The search primitive forwards a non-auto training loss as ``--dist-training-loss`` and omits it on auto."""
+def test_run_deterministic_meditate_forwards_loss_axes(monkeypatch):
+    """The search primitive forwards non-auto training/blend losses as their flags, omits on auto."""
     calls = []
     monkeypatch.setattr(
         model_strategy_search.subprocess,
@@ -123,12 +115,16 @@ def test_run_deterministic_meditate_forwards_dist_training_loss(monkeypatch):
         lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0),
     )
 
-    model_strategy_search._run_deterministic_meditate("WNBA", "AST", "ratio_meanyr", dist_training_loss="nll")
-    assert "--dist-training-loss" in calls[-1]
-    assert calls[-1][calls[-1].index("--dist-training-loss") + 1] == "nll"
+    model_strategy_search._run_deterministic_meditate(
+        "WNBA", "AST", "ratio_meanyr", dist_training_loss="nll", blending_loss_fn="crps"
+    )
+    last = calls[-1]
+    assert last[last.index("--dist-training-loss") + 1] == "nll"
+    assert last[last.index("--blending-loss-fn") + 1] == "crps"
 
     model_strategy_search._run_deterministic_meditate("WNBA", "AST", "ratio_meanyr")
     assert "--dist-training-loss" not in calls[-1]
+    assert "--blending-loss-fn" not in calls[-1]
 
 
 def test_cli_runs_a_single_cell(monkeypatch):

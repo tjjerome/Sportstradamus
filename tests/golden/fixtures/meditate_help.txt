@@ -43,7 +43,8 @@ Options:
                                   nll for the count branch. 'nll'/'crps'
                                   override every family; an Operation Ship 75
                                   search axis.  [default: auto]
-  --blending-loss-fn [auto|nll]   Loss minimized when fitting the model↔book
+  --blending-loss-fn [auto|crps|nll]
+                                  Loss minimized when fitting the model↔book
                                   blend weight. 'auto' (default) honors each
                                   cell's stat_meta blending; an explicit slug
                                   overrides every cell. An Operation Ship 75
