@@ -44,11 +44,13 @@ from sportstradamus.training.scorecard import (
     _zinb_ppf,
     apply_thresholds,
     fit_skewnorm_dispersion_c,
+    fit_skewnorm_dispersion_skew,
     gate_row,
     load_test_set,
     main,
     scorecard,
     supersede_verdict,
+    sweep_calibration_modes,
     write_gate_scorecard,
 )
 
@@ -265,6 +267,191 @@ def test_fit_skewnorm_dispersion_c_widens_underdispersed_symmetric():
         np.full(n, mu), np.full(n, s_true / 2.0), np.zeros(n), y
     )
     assert abs(c - 2.0) < 0.25
+
+
+def _sn_pit_ks(mean, sigma, skew, y, c, s):
+    from sportstradamus.helpers.distributions import skewnormal_loc_from_mean
+    from sportstradamus.training.scorecard import TARGET_NORM_NONE, _randomized_pit_ks
+
+    scale = sigma * c
+    alpha = skew + s
+    df = pd.DataFrame(
+        {
+            "SN_Loc": skewnormal_loc_from_mean(mean, scale, alpha),
+            "SN_Scale": scale,
+            "SN_Alpha": alpha,
+        }
+    )
+    return _randomized_pit_ks(df, "SkewNormal", y, strategy=TARGET_NORM_NONE)
+
+
+def test_fit_skewnorm_dispersion_skew_recovers_underskew():
+    """Lever 4a: a served predictive that collapsed to symmetry (``alpha = 0``) on
+    right-skewed truth cannot be calibrated by scale alone — the joint ``(c, s)`` fit
+    must inject a positive additive skew shift that materially beats the scale-only KS.
+    """
+    from scipy import stats as st
+
+    rng = np.random.default_rng(0)
+    a_true, n = 4.0, 4000
+    y = st.skewnorm.rvs(a_true, size=n, random_state=rng)
+    mean = np.full(n, float(y.mean()))
+    sigma = np.full(n, float(y.std()))
+    skew0 = np.zeros(n)
+
+    c_only = fit_skewnorm_dispersion_c(mean, sigma, skew0, y)
+    c, s = fit_skewnorm_dispersion_skew(mean, sigma, skew0, y)
+
+    assert s > 1.0
+    assert -3.0 <= s <= 3.0
+    assert _sn_pit_ks(mean, sigma, skew0, y, c, s) < _sn_pit_ks(mean, sigma, skew0, y, c_only, 0.0) - 0.02
+
+
+def test_fit_skewnorm_dispersion_skew_noop_on_calibrated():
+    """No-op on an already-calibrated symmetric cell: the skew knob must not manufacture
+    spurious asymmetry, so it returns ``c ~ 1``, ``s ~ 0`` and does not worsen the PIT.
+    """
+    rng = np.random.default_rng(1)
+    mu, sd, n = 5.0, 2.0, 4000
+    y = rng.normal(mu, sd, n)
+    mean, sigma, skew0 = np.full(n, mu), np.full(n, sd), np.zeros(n)
+
+    c, s = fit_skewnorm_dispersion_skew(mean, sigma, skew0, y)
+
+    assert s == 0.0  # opt-in: a sub-margin gain falls back to the pure Lever-1 (c, 0)
+    assert abs(c - 1.0) < 0.15
+    assert _sn_pit_ks(mean, sigma, skew0, y, c, s) < 0.04
+
+
+def test_fit_skewnorm_dispersion_skew_is_bit_reproducible():
+    """The joint ``(c, s)`` fit must be bit-identical run-to-run — deterministic Nelder-Mead
+    from fixed starts over the seeded randomized PIT. The dumped ``SN_Alpha`` carries ``s``,
+    so the determinism gate's SkewNormal bit-identity depends on this fit being reproducible.
+    """
+    from scipy import stats as st
+
+    rng = np.random.default_rng(2)
+    y = st.skewnorm.rvs(3.0, size=3000, random_state=rng)
+    mean, sigma, skew0 = np.full(3000, float(y.mean())), np.full(3000, float(y.std())), np.zeros(3000)
+
+    assert fit_skewnorm_dispersion_skew(mean, sigma, skew0, y) == fit_skewnorm_dispersion_skew(
+        mean, sigma, skew0, y
+    )
+
+
+def test_fit_skewnorm_dispersion_skew_sequential_freezes_scale_then_fits_skew():
+    """Sequential variant (``joint=False``): fit the Lever-1 scale first, freeze it, then fit the
+    additive skew on top by a 1-D search. With the served predictive carrying a *wrong-direction*
+    base skew that scale cannot fix, the returned ``c`` is exactly the scale-only optimum (the joint
+    fit may instead move ``c``) and the additive shift still materially beats scale-only.
+    """
+    from scipy import stats as st
+
+    rng = np.random.default_rng(7)
+    y = st.skewnorm.rvs(4.0, size=4000, random_state=rng)
+    mean = np.full(4000, float(y.mean()))
+    sigma = np.full(4000, float(y.std()))
+    base = np.full(4000, -3.0)  # model fit a negative skew on right-skewed truth
+
+    c_only = fit_skewnorm_dispersion_c(mean, sigma, base, y)
+    c, s = fit_skewnorm_dispersion_skew(mean, sigma, base, y, joint=False)
+
+    assert c == c_only  # scale frozen at the Lever-1 optimum, not re-optimized with s
+    assert s > 0.0
+    assert _sn_pit_ks(mean, sigma, base, y, c, s) < _sn_pit_ks(mean, sigma, base, y, c_only, 0.0) - 0.01
+
+
+def test_fit_skewnorm_dispersion_skew_sequential_noop_on_calibrated():
+    """The sequential variant must also reject a sub-margin skew on an already-calibrated cell,
+    falling back to the pure Lever-1 ``(c, 0)`` like the joint fit does.
+    """
+    rng = np.random.default_rng(1)
+    mu, sd, n = 5.0, 2.0, 4000
+    y = rng.normal(mu, sd, n)
+    mean, sigma, skew0 = np.full(n, mu), np.full(n, sd), np.zeros(n)
+
+    c, s = fit_skewnorm_dispersion_skew(mean, sigma, skew0, y, joint=False)
+
+    assert s == 0.0
+    assert abs(c - 1.0) < 0.15
+
+
+def test_joint_skew_fit_dominates_sequential_on_alpha_collapse():
+    """Pins the coupling finding behind keeping the joint fit as the production default: on an
+    ``alpha≈0`` collapsed predictive over right-skewed truth, the scale-only optimum sits at a ``c``
+    where the skew gradient vanishes, so sequential (freeze that ``c``, then fit ``s``) is a no-op,
+    while the joint fit co-moves ``c`` upward and injects the skew the cell needs. Joint must clear
+    Gate-4 KS strictly below what sequential can reach here.
+    """
+    from scipy import stats as st
+
+    rng = np.random.default_rng(0)
+    y = st.skewnorm.rvs(4.0, size=4000, random_state=rng)
+    mean = np.full(4000, float(y.mean()))
+    sigma = np.full(4000, float(y.std()))
+    skew0 = np.zeros(4000)
+
+    c_seq, s_seq = fit_skewnorm_dispersion_skew(mean, sigma, skew0, y, joint=False)
+    c_j, s_j = fit_skewnorm_dispersion_skew(mean, sigma, skew0, y, joint=True)
+
+    assert s_seq == 0.0  # frozen at a skew-dead scale → sequential cannot help
+    assert s_j > 1.0
+    assert _sn_pit_ks(mean, sigma, skew0, y, c_j, s_j) < _sn_pit_ks(mean, sigma, skew0, y, c_seq, s_seq)
+
+
+def test_sweep_calibration_modes_returns_four_labeled_fits():
+    """The post-hoc calibration sweep fits all four modes on one fixed served predictive and
+    reports each mode's ``(c, s)`` and Gate-4 KS, so the combination search can rank a cell's
+    calibration corner without a retrain. The ``none`` baseline must be the identity ``(1, 0)``.
+    """
+    rng = np.random.default_rng(3)
+    y = rng.normal(6.0, 2.0, 3000)
+    mean, sigma, skew0 = np.full(3000, 6.0), np.full(3000, 2.0), np.zeros(3000)
+
+    fits = sweep_calibration_modes(mean, sigma, skew0, y)
+
+    assert {f.mode for f in fits} == {"none", "dispersion", "skew-joint", "skew-sequential"}
+    none = next(f for f in fits if f.mode == "none")
+    assert none.c == 1.0 and none.s == 0.0
+    assert none.pit_ks == _sn_pit_ks(mean, sigma, skew0, y, 1.0, 0.0)
+
+
+def test_sweep_calibration_modes_dispersion_wins_on_underdispersed_symmetric():
+    """An under-dispersed symmetric cell needs width, not shape: the best (min-KS) mode must beat
+    ``none`` and the winning scale must widen (``c > 1``) with no manufactured skew.
+    """
+    rng = np.random.default_rng(4)
+    mu, s_true, n = 7.0, 3.0, 4000
+    y = rng.normal(mu, s_true, n)
+    mean, sigma, skew0 = np.full(n, mu), np.full(n, s_true / 2.0), np.zeros(n)
+
+    fits = sweep_calibration_modes(mean, sigma, skew0, y)
+    best = min(fits, key=lambda f: f.pit_ks)
+    none = next(f for f in fits if f.mode == "none")
+
+    assert best.mode != "none"
+    assert best.pit_ks < none.pit_ks
+    assert best.c > 1.5  # restores the halved width
+
+
+def test_sweep_calibration_modes_skew_joint_wins_on_underskew():
+    """On an ``alpha≈0`` collapse over right-skewed truth the winning mode must be ``skew-joint`` —
+    the coupling finding: scale alone (``dispersion``) and the sequential skew fit both stall where
+    the joint fit clears, so the sweep must surface joint as the cell's calibration corner.
+    """
+    from scipy import stats as st
+
+    rng = np.random.default_rng(0)
+    y = st.skewnorm.rvs(4.0, size=4000, random_state=rng)
+    mean, sigma, skew0 = np.full(4000, float(y.mean())), np.full(4000, float(y.std())), np.zeros(4000)
+
+    fits = sweep_calibration_modes(mean, sigma, skew0, y)
+    best = min(fits, key=lambda f: f.pit_ks)
+    by_mode = {f.mode: f for f in fits}
+
+    assert best.mode == "skew-joint"
+    assert best.pit_ks < by_mode["dispersion"].pit_ks
+    assert best.pit_ks < by_mode["skew-sequential"].pit_ks
 
 
 def test_resolve_decode_strategy_substitutes_default_for_none(monkeypatch):
