@@ -268,6 +268,108 @@ Each lever names its **mechanism**, **targets**, a **go/no-go** measured on vali
 *before* any ship, and an explicit **if-it-fails** branch. Levers are independent enough
 that a failure on one does not block the others.
 
+### The search space is three axes, not one cascade — and we have explored ~one
+
+The lever cascade below (L0–L5) is the depth-first exploration of **one** of three
+orthogonal axes. A served predictive is `(normalization → model+loss → blend → calibration)`,
+and three of those stages are independently swappable per cell
+(`target_normalization ⊥ {posthoc, dispersion_cal, skew_cal} ⊥ loss_fn`). Naming them:
+
+- **Normalization** — the target transform the model fits. *Well-defined* (`ratio_meanyr`,
+  `centered_additive_mean10`, `centered_additive_eb_meanyr_k10`) but badly *under-explored*:
+  the EB / hierarchical-shrinkage strategy is built, decode-tested, and assigned to **zero**
+  production cells, and **volume normalization does not exist yet**. Modeling `points`
+  (or `points / season-mean`) conflates *efficiency × opportunity*. A `ratio_projvol`
+  strategy — target `= y / projected-volume` (a per-minute / per-carry / per-target rate),
+  decode `= rate × projected-volume` — separates the stable efficiency signal from the
+  matchup-driven volume signal. The volume projections **already exist** (`proj_*` features:
+  projected carries/targets/minutes) — they are used as *features* but never as the
+  normalization *denominator*. This is the most likely structural unlock for the NFL
+  volume cells (a `rushing-yards` g1 block is plausibly a volume/efficiency conflation the
+  book prices and we do not).
+
+- **Calibration** — post-hoc on the served predictive: **{none, dispersion, skew-joint,
+  skew-sequential}**. This is the axis worked to date (L1 `dispersion_cal`, L4a `skew_cal`).
+  Two fit *orders* exist for the scale-and-skew pair `(c, s)` and they are **not** equivalent:
+  *joint* optimizes `(c, s)` together; *sequential* fits the Lever-1 scale `c`, freezes it,
+  then fits the additive skew `s` on top. On the binding under-skew cells **joint strictly
+  dominates** — the coupling is structural (Hallin & Ley's Fisher-information singularity at
+  `alpha ≈ 0`): the scale-only KS optimum lands at a `c` where the skew gradient vanishes, so
+  sequential is stuck at `s = 0` there, while joint co-moves `c` upward *and* injects skew
+  (synthetic check 2026-06-07: scale-only KS 0.064 → sequential 0.064 → joint 0.015).
+  Sequential earns its keep only where the trained model already carries a wrong/weak
+  *directional* skew at a scale-active `c` (it then touches it up); joint is the prior. Because
+  every mode here is a post-hoc transform of a *fixed* trained predictive, the whole calibration
+  axis is **free to sweep** — no retrain — which is what makes the combination search below cheap.
+  Calibration is close to exhausted as a *breadth* lever on its own — it fixes width/shape,
+  never signal or location-scale structure.
+
+- **Blending** — how the model's distribution meets the book: the training **loss** (`nll`
+  vs `crps`, upstream — it shapes the predictive that gets blended) × the **blend** itself
+  (`fused_loc`: precision-weighted pool + per-cell `model_weight`). Both frozen today
+  (loss set per family, blend structure fixed). Under-explored.
+
+**"Defer" in the cascade below means "exhausted on the calibration/feature axis for this
+cell," NOT "unwinnable."** A `deferred-90` or Lever-cap verdict is a per-axis statement; the
+cell re-enters the moment the normalization or blending axis is tried. No cell and no league
+is written off while two of three axes sit unexplored — language anywhere in this document
+that reads as a hard ceiling (a league that "cannot reach" its target, an "efficient-market
+wall") is shorthand for "on the lever stack as run so far," and is wrong if read as final.
+
+**Next phase after the calibration pass — the combination search (smart, per-market; not a
+brute-force grid).** The naive read — cross every axis value for every cell,
+`normalization {4} × calibration {4} × loss {2} = 32` retrains × ~38 cells — is the wrong shape,
+because the three axes are **not equally expensive**:
+
+- **Calibration is post-hoc and free.** Every calibration mode is a transform of an *already
+  trained* predictive's val/test arrays (§5 calibration bullet), fit in milliseconds. It must
+  **not** sit in the training loop. Given one trained model, sweep all four modes and keep the
+  best — that collapses the `×4` calibration factor to zero retrains.
+- **Only `normalization × loss` costs a train** — ≈ `(2–4 cell-applicable norms) × 2 losses`
+  = **4–8 trains per cell**, not 32.
+
+So the search is, **per market**: an **Optuna study over the categorical `(normalization,
+loss_fn)` space** (the repo's existing HPO engine — TPE with pruning, and it scales cleanly if
+we later add continuous blend weights or a hierarchical-Bayes layer). Each **trial** is one
+`--deterministic` train (bit-reproducible, fast, never published); the trial's **objective** is
+the **maximum min-gate slack** the model can reach after the free post-hoc calibration sweep —
+a single scalar that is positive iff the cell ships and larger the more gate headroom it has,
+so it optimizes "ships, with margin" across all five gates at once rather than chasing g4 alone.
+The study returns the best `(normalization, loss, calibration-mode)` triple per cell.
+
+*Why the post-hoc sweep needs no re-pricing (a fidelity guard).* The min-gate slack is assembled
+without re-deriving the model's over-probability `P` under each `(c, s)` — which would risk
+diverging from the pipeline's own pricing. It does not need to: post-hoc calibration **holds the
+blended mean fixed** (`skewnormal_loc_from_mean`), so **Gates 2/3 — scored on `Blended_EV`, the
+mean — are calibration-invariant**; **Gate 4 is computed exactly from the SkewNormal params** by
+the gate's own `_served_sn_pit_ks` (no `P` column); and **Gates 1/5 are read from the trial's
+honest trained scorecard row** (the L4a brief established calibration barely moves Gate 1, and the
+shape shift is near-`P`-neutral at the line). The sweep therefore varies only Gate 4 across the
+four modes and picks the mode with the most Gate-4 headroom subject to the trial's Gate-1/5
+passing; the trial's full five-gate row is the honest base. The real-HPO confirm re-runs the whole
+scorecard with the pipeline's pricing before any ship, so the ranker never has to reproduce it.
+
+**The deterministic study only ranks; the real-HPO scorecard ships.** The WNBA-AST lesson
+(2026-06-07) is that a CRPS-optimized *real* model is narrower than its deterministic stand-in
+and calibrates qualitatively differently — a deterministic winner can fail the honest retrain.
+The search is therefore used as a cheap *ranker*: take the **top-K (K≈2–3) triples per cell**,
+re-run each under **real HPO**, and ship the first that clears the official 5-gate scorecard
+(`model_stats.parquet`) — never the deterministic score. This bounds real-HPO cost at K
+retrains per promising cell while protecting against the screen bias that sank the per-cell L4a
+proof.
+
+Sweep the **whole board**, shipping cells included (a shipped cell may have a better corner than
+the scale-only default it settled for). The calibration-proof cells the L4a screen isolated
+(heavy-tail NBA AST / NFL passing-yards; g1-blocked NFL receiving/rushing-yards; the
+centered-strategy WNBA DREB / NFL receptions) are the highest-value rows but not the limit.
+Building this needs: calibration mode as a forced `{none, dispersion, skew-joint,
+skew-sequential}` flag, `loss_fn` as a CLI flag, the `ratio_projvol` `TargetNormalization`, and
+a per-market Optuna driver whose objective wraps the existing `training/scorecard.py` gate
+computation. A genuinely structural fourth lever — a **hierarchical Bayesian** layer that
+generalizes the dormant EB prior (learn the shrinkage per group, pool the full predictive across
+player ← position ← team/league rather than the mean only) — is the research-gated answer to the
+small-sample NFL wall and is scoped by a `research-analyst` brief before any build.
+
 ### Lever 0 — Re-score every withheld cell under the current gates; promote free passers
 
 **Mechanism.** The Gate-4 redefinition was applied as *demotions only*; cells that the
@@ -394,6 +496,63 @@ shape.** Consequences threaded end to end:
   0.036 / FGM 0.043 / FG3A 0.032, all < 0.05) is suggestive but *not* sufficient — the gate
   scores the blend and AST shows the blend is the wildcard, so each still needs its own retrain.
 
+#### Lever 4a — skew calibration: research + applicability screen — 2026-06-07
+
+Lever 4a = a **second** post-hoc knob beside L1's scale `c`: an additive shift `s` on the
+served SkewNormal shape `alpha`, fit *jointly* with `c` by minimizing the same Gate-4
+randomized-PIT KS. It stays inside the SkewNormal family (reuses `dispersion_cal` machinery,
+adds a sibling `skew_cal` field) — an engineering change, **not** a new distribution head.
+
+- **Research brief `/tmp/researcher_l4_shape.md` (research-gated; mechanism = GO).** Additive
+  (not multiplicative — the model fits `alpha ≈ 0`, so `alpha × k` injects no skew) and *joint*
+  (not sequential — `c` and `s` are coupled). The `alpha ≈ 0` fit is *expected*, not a bug: the
+  SkewNormal direct parameterization has a **Fisher-information singularity at `alpha = 0`**
+  (Hallin & Ley 2014, *Bernoulli* 20(3), arXiv:1209.4177), so the per-row skew head collapses to
+  symmetry. Fit `s` in the **centered-skewness** metric (clamp `|s| ≤ 3`), warm-start `(c,0)`,
+  **fit on val**, ship only at **val `pit_ks < 0.040`** (the val→test discount is +0.008–0.010;
+  measured by split-half).
+- **NBA AST → `deferred-90`, not L4a.** Its residual is a Gaussian-thin heavy *tail* the
+  SkewNormal structurally cannot reach (`z₉₉ = +4.9σ`, excess-kurtosis ≈ 591); johnsonSU (skew +
+  heavy) hits 0.0345 where the joint `(c,s)` floors at 0.0488 (gap 0.014 = the tail). Split-half
+  honest fit lands at 0.060 > 0.05. A skew-t head (L5) buys ~0.01 in-sample the discount erases —
+  a poor trade on one cell. Revisit only as an L5 *batch* if ≥ 3 cells justify a shared skew-t.
+- **Applicability screen (brief open-q#5).** Ran the johnsonSU-vs-joint-`(c,s)` floor on every
+  withheld SkewNormal cell **decoded with its own `target_normalization`** (the brief's scratch
+  hardcoded `ratio_meanyr`, which mis-decoded the `centered_additive_mean10` cells — that is what
+  manufactured WNBA DREB's spurious −37.8 served mean). A cell is a **true L4a candidate** only
+  where `joint(c,s) ≈ johnsonSU` (skew is the residual, tail already calibrated) **and** `joint <
+  0.040` (survives the discount). Then layered the current g1 (Brier non-inferiority) as a ship
+  proxy — L4a barely moves g1, so a cell that fails g1 now won't ship on calibration alone:
+
+  | cell | scale-only ks | joint (c,s) ks | johnsonSU ks | g1_ci_hi | route |
+  |---|---|---|---|---|---|
+  | WNBA AST | 0.0513 | 0.0397 | 0.0437 | −0.027 ✓ | **L4a ship** |
+  | NFL yards | 0.0613 | 0.0184 | 0.0195 | −0.017 ✓ | **L4a ship** |
+  | NFL fantasy-prizepicks | 0.0540 | 0.0170 | 0.0393 | −0.046 ✓ | **L4a ship** |
+  | NFL fantasy-underdog | 0.0750 | 0.0209 | 0.0453 | −0.011 ✓ | **L4a ship** |
+  | NFL receiving-yards | 0.0751 | 0.0333 | 0.0342 | +0.0075 ✗ | g4-fixable, g1-blocked (sharp book → L3) |
+  | NFL rushing-yards | 0.0739 | 0.0343 | 0.0367 | +0.0101 ✗ | g4-fixable, g1-blocked → L3 |
+  | NBA AST | 0.0629 | 0.0488 | 0.0345 | −0.038 ✓ | heavy tail → `deferred-90` |
+  | NFL passing-yards | 0.0800 | 0.0463 | 0.0236 | — | heavy tail → defer (n=377) |
+  | WNBA DREB | 0.0933 | 0.0564 | 0.1225 | — | neither (joint can't reach 0.04, jsu worse) → defer |
+  | NFL receptions | 0.1244 | 0.0738 | 0.5255 | — | neither → defer |
+
+  **Verdict: BUILD L4a** — 4 g1-clean, g4-L4a-fixable ships (WNBA AST + NFL yards / fantasy-pp /
+  fantasy-ud) from one ~½-day engineering build; **3 of the 4 are NFL** (the binding league, 5/20).
+  This overturns the brief's "NO-GO on building it for AST as the breadth play" — that NO-GO was
+  explicitly conditioned on AST being the *only* target; the screen (which the brief itself asked
+  for) found the breadth. The L1-shippable batch (scale-only `< 0.05`) is unchanged: NBA {DREB
+  0.036, FGM 0.043, FG3A 0.032}, WNBA {PTS 0.046, RA 0.030, REB 0.035, fantasy-pp 0.047}, NFL
+  {carries 0.047, sacks-taken 0.045}. (All in-sample test-set floors — the honest verdict is the
+  val→test retrain, never the proxy.)
+
+  **The `defer` / `deferred-90` rows above are CALIBRATION-AXIS verdicts, not final.** The screen
+  varied only `(c, s)`; it did not touch normalization or blending. NBA AST's heavy tail and NFL
+  receptions' / WNBA DREB's hard PIT may resolve under a **volume/rate normalization**
+  (`ratio_projvol`) — a per-carry / per-minute target reshapes the residual the calibration knob
+  can't reach — or under the dormant **EB** normalization. These four are the seed input set for
+  the combination search (§5 framing), run *after* the L4a/L1 calibration pass ships its cells.
+
 #### Lever 1 — research verdict (2026-06-06; brief `researcher_lever1_strategy.md` supersedes the v1 `researcher_dispersion_cal.md`)
 
 **GO.** A textbook post-hoc scale calibration (engineering, not a research bet: Levi et al.
@@ -435,10 +594,15 @@ plus the C0 fix converged the build:
   +0.0002–0.0011 (literal flapping at 0.05); NBA PA +0.0073 (L1 rescues at c=1.05); **NFL
   interceptions actually passes g4, fails g1; NFL targets (g2+g4) is the one genuine
   regression.** See the new §8 hole #0 — the hysteresis-vs-demote policy is an **operator call**.
-- **Honest breadth after L1 + count-retarget (post-discount):** NBA ~15–17 (**clears 16**),
-  WNBA ~12–14 (**at-risk, zero margin** — L0 already banked), NFL ~7–9 (**cannot reach 15** on
-  this lever stack; the gap is g1/signal on volume cells → L3/L4d or an operator denominator
-  call; pre-name attempts/qb-yards `deferred-90`).
+- **Honest breadth after L1 + count-retarget (post-discount), CALIBRATION AXIS ONLY:** NBA
+  ~15–17 (**clears 16**), WNBA ~12–14 (**at-risk, zero margin** — L0 already banked), NFL ~7–9.
+  NFL falling short of 15 *on the calibration axis* is **not a ceiling** — it is the signal
+  that NFL's remaining cells need the **normalization** axis (volume / `ratio_projvol`: the g1
+  gap on `attempts`/`carries`/`receiving-yards`/`rushing-yards`/`qb-yards` is most likely an
+  efficiency-vs-volume conflation a rate target separates) and/or the **blending** axis, both
+  untried. Do **not** pre-name these `deferred-90`; they are queued for the combination search,
+  then the hierarchical layer if that stalls. The breadth number is a *calibration-axis*
+  estimate, not a league verdict.
 
 ### Lever 2 — Post-hoc mean correction (already built)
 
@@ -496,14 +660,20 @@ behind `supersede_verdict()`:
   of 15 — train separate (position, market) models where eligible-position marginals
   diverge materially; min-row guard + fallback to pooled+categorical.
 
-**Lever cap.** A cell that fails four distinct levers moves to `deferred-90` with a
-one-line documented reason. Gate-definition changes never count as a lever.
+**Lever cap.** A cell that fails Levers 1–4 is exhausted *on the calibration + feature axis*
+and parks at `deferred-90` **with a one-line reason naming the axis tried** — but it is not
+done: it is queued for the combination search (the normalization × calibration × blending
+cross-product, §5 framing) and then the hierarchical layer. `deferred-90` is a "come back with
+a different axis" tag, never "unwinnable." Gate-definition changes never count as a lever.
 
 ### Lever 5 — Distribution / tail rebuild (deferred)
 
 The T3 spliced/Pareto-tail or Student-t LSS head, or the CMPμ/MZINB family build. Heavy
 inference-side work (references §12, "new distribution head"). Score only on cells that
-reach it; if zero qualify after Levers 1–4 (likely), it stays parked in Ship 90.
+reach it. Note this is the *calibration-axis* terminal lever; a cell that needs it (a genuine
+heavy tail like NBA AST) may instead be reachable on the **normalization** axis (a volume/rate
+target can change the residual-tail shape) — try the cheaper combination search before
+committing to a new distribution head.
 
 ---
 

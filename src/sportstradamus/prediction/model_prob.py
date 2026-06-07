@@ -609,10 +609,13 @@ def _blend_with_book(
     return base_mean
 
 
-def _dispersion_calibrate(offer_df: pd.DataFrame, dist: str, dispersion_cal: float) -> None:
-    # Applied after the blend, so the shape param carries the served (blended × c)
-    # dispersion Gate 4 scored. SkewNormal scales sigma; count scales r; Gamma scales alpha.
-    if dispersion_cal == 1.0:
+def _dispersion_calibrate(
+    offer_df: pd.DataFrame, dist: str, dispersion_cal: float, skew_cal: float
+) -> None:
+    # The skew shift is derived into loc downstream by get_odds (mean held fixed),
+    # so it must land before _model_over_and_push reads Model Skew.
+    # A skew-only cell (c == 1, s != 0) must still enter — guard on both knobs.
+    if dispersion_cal == 1.0 and skew_cal == 0.0:
         return
     if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
         offer_df["Model R"] = offer_df["Model R"] * dispersion_cal
@@ -620,6 +623,7 @@ def _dispersion_calibrate(offer_df: pd.DataFrame, dist: str, dispersion_cal: flo
         offer_df["Model Alpha"] = offer_df["Model Alpha"] * dispersion_cal
     elif dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
         offer_df["Model Sigma"] = offer_df["Model Sigma"] * dispersion_cal
+        offer_df["Model Skew"] = offer_df["Model Skew"] + skew_cal
 
 
 def _model_over_and_push(offer_df: pd.DataFrame, dist: str, cv: float, step, base_mean):
@@ -681,6 +685,7 @@ def model_prob(
     model_weight = filedict["weight"]
     temperature = filedict.get("temperature", None)
     dispersion_cal = filedict.get("dispersion_cal", 1.0)
+    skew_cal = filedict.get("skew_cal", 0.0)
     shape_ceiling = filedict.get("shape_ceiling")
     dist = filedict["distribution"]
     step = filedict["step"]
@@ -733,7 +738,7 @@ def model_prob(
     # ZI dists: book reports the non-zero component EV; scale to marginal EV.
     if hist_gate and dist in ("ZINB", "ZAGamma", "SkewNormal"):
         offer_df["Books EV"] = (1 - hist_gate) * offer_df["Books EV"]
-    _dispersion_calibrate(offer_df, dist, dispersion_cal)
+    _dispersion_calibrate(offer_df, dist, dispersion_cal, skew_cal)
 
     raw_over, push = _model_over_and_push(offer_df, dist, cv, step, base_mean)
     offer_df["Push P"] = np.asarray(push, dtype=float)

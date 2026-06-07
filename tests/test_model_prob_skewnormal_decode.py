@@ -236,14 +236,34 @@ def test_dispersion_calibrate_scales_skewnormal_sigma():
     scored on the test CSV and what the parlay builder must price.
     """
     offer_df = pd.DataFrame({"Model Sigma": [2.0, 3.0, 4.0], "Model Skew": [0.0, 1.0, -1.0]})
-    _dispersion_calibrate(offer_df, "SkewNormal", 1.5)
+    _dispersion_calibrate(offer_df, "SkewNormal", 1.5, 0.0)
     np.testing.assert_allclose(offer_df["Model Sigma"].to_numpy(), [3.0, 4.5, 6.0])
+    np.testing.assert_array_equal(offer_df["Model Skew"].to_numpy(), [0.0, 1.0, -1.0])
 
 
 def test_dispersion_calibrate_unit_factor_leaves_skewnormal_sigma_untouched():
-    offer_df = pd.DataFrame({"Model Sigma": [2.0, 3.0]})
-    _dispersion_calibrate(offer_df, "SkewNormal", 1.0)
+    offer_df = pd.DataFrame({"Model Sigma": [2.0, 3.0], "Model Skew": [0.0, 1.0]})
+    _dispersion_calibrate(offer_df, "SkewNormal", 1.0, 0.0)
     np.testing.assert_array_equal(offer_df["Model Sigma"].to_numpy(), [2.0, 3.0])
+    np.testing.assert_array_equal(offer_df["Model Skew"].to_numpy(), [0.0, 1.0])
+
+
+def test_dispersion_calibrate_shifts_skewnormal_skew():
+    """Lever 4a: the additive skew shift lands on ``Model Skew`` while sigma still scales."""
+    offer_df = pd.DataFrame({"Model Sigma": [2.0, 3.0, 4.0], "Model Skew": [0.0, 1.0, -1.0]})
+    _dispersion_calibrate(offer_df, "SkewNormal", 1.5, 0.8)
+    np.testing.assert_allclose(offer_df["Model Sigma"].to_numpy(), [3.0, 4.5, 6.0])
+    np.testing.assert_allclose(offer_df["Model Skew"].to_numpy(), [0.8, 1.8, -0.2])
+
+
+def test_dispersion_calibrate_skew_only_does_not_early_return():
+    """A skew-only cell (``c == 1``, ``s != 0``) must still apply — the guard checks both
+    knobs, else the skew shift silently no-ops when the scale needs no change.
+    """
+    offer_df = pd.DataFrame({"Model Sigma": [2.0, 3.0], "Model Skew": [0.0, 1.0]})
+    _dispersion_calibrate(offer_df, "SkewNormal", 1.0, 0.5)
+    np.testing.assert_array_equal(offer_df["Model Sigma"].to_numpy(), [2.0, 3.0])
+    np.testing.assert_allclose(offer_df["Model Skew"].to_numpy(), [0.5, 1.5])
 
 
 def test_served_dispersion_dump_prices_identically_to_inference():
@@ -271,7 +291,7 @@ def test_served_dispersion_dump_prices_identically_to_inference():
 
     # Inference: dispersion applied to the post-blend sigma, then priced.
     offer = pd.DataFrame({"Model Sigma": blended_sigma.copy(), "Model Skew": skew})
-    _dispersion_calibrate(offer, "SkewNormal", c)
+    _dispersion_calibrate(offer, "SkewNormal", c, 0.0)
     served_sigma = offer["Model Sigma"].to_numpy()
     under_inf = get_odds(line, mean, "SkewNormal", sigma=served_sigma, skew_alpha=skew)
 
@@ -294,6 +314,60 @@ def test_served_dispersion_dump_prices_identically_to_inference():
     decoded_mean = loc_g + scale_g * shift
     under_gate = get_odds(line, decoded_mean, "SkewNormal", sigma=scale_g, skew_alpha=skew)
 
+    np.testing.assert_allclose(decoded_mean, mean, atol=1e-9)
+    np.testing.assert_allclose(scale_g, served_sigma, atol=1e-9)
+    np.testing.assert_allclose(under_gate, under_inf, atol=1e-12)
+
+
+def test_served_skew_dump_prices_identically_to_inference():
+    """Lever 4a round-trip: a nonzero ``skew_cal`` shift round-trips dump↔inference.
+
+    The shift lands on ``Model Skew`` (inference) and on the dumped ``SN_Alpha`` + the
+    served-loc derivation (persist, which derives loc from the *shifted* skew to hold the
+    mean fixed). The gate decodes both; the priced under-probabilities must match. A drift
+    in the apply order, the loc formula, or the encode/decode inverse breaks it.
+    """
+    from sportstradamus.helpers.distributions import get_odds, skewnormal_loc_from_mean
+    from sportstradamus.training.baselines import get_target_normalization
+    from sportstradamus.training.scorecard import _decode_sn_loc_scale
+
+    rng = np.random.default_rng(13)
+    n = 12
+    mean = rng.uniform(5.0, 25.0, n)
+    blended_sigma = rng.uniform(1.5, 6.0, n)
+    skew = rng.uniform(-0.5, 0.8, n)
+    meanyr = rng.uniform(2.0, 20.0, n)
+    line = mean + rng.uniform(-2.0, 2.0, n)
+    c, s = 1.37, 1.85
+
+    # Inference: dispersion + skew applied to the post-blend params, then priced.
+    offer = pd.DataFrame({"Model Sigma": blended_sigma.copy(), "Model Skew": skew.copy()})
+    _dispersion_calibrate(offer, "SkewNormal", c, s)
+    served_sigma = offer["Model Sigma"].to_numpy()
+    served_skew = offer["Model Skew"].to_numpy()
+    under_inf = get_odds(line, mean, "SkewNormal", sigma=served_sigma, skew_alpha=served_skew)
+
+    # Dump: persist derives the scipy loc from the SHIFTED skew, holding the mean fixed.
+    served_loc = skewnormal_loc_from_mean(mean, served_sigma, served_skew)
+    strat = get_target_normalization("ratio_meanyr")
+    X = pd.DataFrame({"MeanYr": meanyr})
+    dumped = pd.DataFrame(
+        {
+            "SN_Loc": strat.encode_loc(served_loc, X, 0.0, "MeanYr"),
+            "SN_Scale": strat.encode_scale(served_sigma, X, "MeanYr"),
+            "SN_Alpha": served_skew,
+            "MeanYr": meanyr,
+        }
+    )
+
+    loc_g, scale_g = _decode_sn_loc_scale(dumped, "ratio_meanyr")
+    alpha_g = dumped["SN_Alpha"].to_numpy()
+    shift_g = (alpha_g / np.sqrt(1 + alpha_g**2)) * np.sqrt(2 / np.pi)
+    decoded_mean = loc_g + scale_g * shift_g
+    under_gate = get_odds(line, decoded_mean, "SkewNormal", sigma=scale_g, skew_alpha=alpha_g)
+
+    assert not np.allclose(served_skew, skew)  # the shift actually moved the skew
+    np.testing.assert_allclose(served_skew, skew + s, atol=1e-12)
     np.testing.assert_allclose(decoded_mean, mean, atol=1e-9)
     np.testing.assert_allclose(scale_g, served_sigma, atol=1e-9)
     np.testing.assert_allclose(under_gate, under_inf, atol=1e-12)

@@ -63,6 +63,7 @@ DIRECTIONS: dict[str, str] = {
     "shape_ratio": INFO,
     "marginal_shape": INFO,
     "dispersion_cal": INFO,
+    "skew_cal": INFO,
     # Ship gates
     "g1_brier_diff_mean": LOWER,
     "g1_brier_diff_ci_lo": LOWER,
@@ -139,6 +140,7 @@ TAB_COLUMNS: dict[str, list[str]] = {
         "shape_ratio",
         "marginal_shape",
         "dispersion_cal",
+        "skew_cal",
     ],
     "Ship gates": [
         "g1_brier_diff_mean",

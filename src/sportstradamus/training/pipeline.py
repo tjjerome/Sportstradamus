@@ -56,7 +56,7 @@ from sportstradamus.training.config import (
 from sportstradamus.training.data import trim_matrix
 from sportstradamus.training.hyperparams import _BoundedResponseFn, tune_hyperparameters
 from sportstradamus.training.report import report
-from sportstradamus.training.scorecard import fit_skewnorm_dispersion_c
+from sportstradamus.training.scorecard import fit_skewnorm_dispersion_skew
 from sportstradamus.training.shap import compute_market_importance
 
 logger = get_logger(__name__)
@@ -1234,6 +1234,7 @@ def _build_filedict(
     skill: dict,
     diag: dict,
     c_opt: float,
+    skew_cal: float,
     shape_ceiling,
     marginal_shape,
     opt_params: dict,
@@ -1287,6 +1288,7 @@ def _build_filedict(
             "ev_minus_line": diag["ev_minus_line"],
             "result_mean": diag["result_mean"],
             "dispersion_cal": c_opt,
+            "skew_cal": skew_cal,
             "median_ev_diff": diag["median_ev_diff"],
             "frac_ev_gt_line": diag["frac_ev_gt_line"],
             "over_pct_ev_gt": diag["over_pct_ev_gt"],
@@ -1303,6 +1305,7 @@ def _build_filedict(
         "std": y.Result.std(),
         "temperature": T_opt,
         "dispersion_cal": c_opt,
+        "skew_cal": skew_cal,
         "weight": model_weight,
         "r_book": None,
         "hist_gate": hist_gate,
@@ -1507,15 +1510,18 @@ def _step_calibrate_dispersion(
     Pure: returns a new dict with updated ``r_test``, ``r_blend_val``,
     ``alpha_blend``, ``alpha_blend_val``, ``beta_blend_val``, ``c_opt``,
     ``val_weighted_mean`` (count branch) or ``sn_sigma_blend_test`` (= blended
-    test sigma × ``c_opt``) + ``val_weighted_mean_val`` (SkewNormal). The
-    SkewNormal ``c_opt`` minimizes the Gate-4 randomized-PIT KS of the served
-    (blended) predictive; the count branch minimizes CRPS. Hurdle ZINB
-    participates via the NegBin branch — gate passed through as ``gate_blend_val``.
+    test sigma × ``c_opt``), ``skew_cal`` + ``sn_alpha_blend_{test,val}`` (= blended
+    alpha + ``skew_cal``) + ``val_weighted_mean_val`` (SkewNormal). The SkewNormal
+    branch fits ``(c_opt, skew_cal)`` jointly (Lever 1 scale + Lever 4a additive skew
+    shift) to minimize the Gate-4 randomized-PIT KS of the served (blended) predictive;
+    ``skew_cal = 0`` recovers pure scale calibration. The count branch minimizes CRPS.
+    Hurdle ZINB participates via the NegBin branch — gate passed through as ``gate_blend_val``.
     """
     y_val_arr = splits["y_validation"]["Result"].to_numpy()
 
     out = {
         "c_opt": 1.0,
+        "skew_cal": 0.0,
         "r_test": fused["r_test"],
         "r_blend_val": fused["r_blend_val"],
         "alpha_blend": fused["alpha_blend"],
@@ -1523,23 +1529,29 @@ def _step_calibrate_dispersion(
         "beta_blend_val": fused["beta_blend_val"],
         "sn_sigma_blend_test": fused["sn_sigma_blend_test"],
         "sn_sigma_blend_val": fused["sn_sigma_blend_val"],
+        "sn_alpha_blend_test": fused["sn_alpha_blend_test"],
+        "sn_alpha_blend_val": fused["sn_alpha_blend_val"],
         "val_weighted_mean": None,
         "val_weighted_mean_val": None,
     }
 
     if dist == "SkewNormal":
-        # Fit c against the served (blended) predictive — the exact thing inference
-        # prices and Gate 4 scores: mean held fixed at the blended val mean, scale
-        # scaled by c. Reuses the gate's own randomized-PIT KS (no PIT-math dup).
-        c_opt = fit_skewnorm_dispersion_c(
+        # Fit c (Lever 1, scale) and s (Lever 4a, additive skew shift) jointly against the
+        # served (blended) predictive — the exact thing inference prices and Gate 4 scores:
+        # mean held fixed at the blended val mean, scale scaled by c, shape shifted by s.
+        # Reuses the gate's own randomized-PIT KS (no PIT-math dup); s = 0 ⇒ pure Lever 1.
+        c_opt, s_opt = fit_skewnorm_dispersion_skew(
             fused["weighted_mean_val"],
             fused["sn_sigma_blend_val"],
             fused["sn_alpha_blend_val"],
             y_val_arr,
         )
         out["c_opt"] = c_opt
+        out["skew_cal"] = s_opt
         out["sn_sigma_blend_test"] = fused["sn_sigma_blend_test"] * c_opt
         out["sn_sigma_blend_val"] = fused["sn_sigma_blend_val"] * c_opt
+        out["sn_alpha_blend_test"] = fused["sn_alpha_blend_test"] + s_opt
+        out["sn_alpha_blend_val"] = fused["sn_alpha_blend_val"] + s_opt
         out["val_weighted_mean_val"] = fused["weighted_mean_val"]
         return out
 
@@ -1603,7 +1615,7 @@ def _step_compute_test_probabilities(
             weighted_mean,
             "SkewNormal",
             sigma=calibrated["sn_sigma_blend_test"],
-            skew_alpha=fused["sn_alpha_blend_test"],
+            skew_alpha=calibrated["sn_alpha_blend_test"],
             gate=fused["gate_blend_test"],
         )
     elif dist in ("NegBin", "ZINB"):
@@ -1644,7 +1656,7 @@ def _step_calibrate_temperature(
             calibrated["val_weighted_mean_val"],
             "SkewNormal",
             sigma=calibrated["sn_sigma_blend_val"],
-            skew_alpha=fused["sn_alpha_blend_val"],
+            skew_alpha=calibrated["sn_alpha_blend_val"],
             gate=fused["gate_blend_val"],
         )
     else:
@@ -2368,6 +2380,7 @@ def train_market(
         skill=skill,
         diag=diag,
         c_opt=calibrated["c_opt"],
+        skew_cal=calibrated["skew_cal"],
         shape_ceiling=shape_ceiling,
         marginal_shape=dist_info["marginal_shape"],
         opt_params=opt_params,
@@ -2404,7 +2417,7 @@ def train_market(
         target_normalization=target_normalization,
         zinb_mode=zinb_mode,
         sn_scale_test=calibrated["sn_sigma_blend_test"],
-        sn_skew_test=fused["sn_alpha_blend_test"],
+        sn_skew_test=calibrated["sn_alpha_blend_test"],
         global_mean=dist_info["global_mean"],
         denom_col=dist_info["denom_col"],
     )
