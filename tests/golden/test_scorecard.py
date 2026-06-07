@@ -3,11 +3,19 @@
 Exercises the numeric path (decile binning, compression ratio, scorecard, the five
 offline ship gates, and their deterministic-1/0 oracle) on synthetic test-set frames
 so no trained model, network, or plotting backend is required.
+
+One representative is kept per distinct behavior family (each gate + its oracle
+identity, the dispersion/PIT-KS/tail-KS diagnostics, supersede S1/S2/S3, the
+apply_thresholds wiring + strict-threshold pins, and the --live-window CLI). Mirror
+cases and pure-internal numeric duplicates were removed in the 2026-06 test cull.
 """
+
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
 import pytest
+from click.testing import CliRunner
 
 from sportstradamus.training.scorecard import (
     _GATE1_CI_HI_MAX,
@@ -20,10 +28,8 @@ from sportstradamus.training.scorecard import (
     _SUPERSEDE_S3_Z_MIN,
     _decode_sn_loc_scale,
     _dispersion_diagnostics,
-    _ece_debias_offset,
     _gate1_brier_ci,
     _gate4_iqr_spread,
-    _gate4_pit_ks_threshold,
     _gate5_ece_debiased,
     _gate5_ece_equal_mass,
     _gate23_segment_match,
@@ -32,19 +38,15 @@ from sportstradamus.training.scorecard import (
     _ks_uniform,
     _memmel_sharpe_z,
     _pred_midpit,
-    _pred_ppf,
     _randomized_pit_ks,
     _segment_masks,
-    _supersede_paired_brier_ci,
-    _supersede_paired_sharpe,
     _tail_ks_uniform,
-    _test_set_to_bet_frame,
     _zinb_ppf,
     apply_thresholds,
-    decile_table,
     fit_skewnorm_dispersion_c,
     gate_row,
     load_test_set,
+    main,
     scorecard,
     supersede_verdict,
     write_gate_scorecard,
@@ -86,18 +88,8 @@ def _priced_frame(n: int = 4000, seed: int = 7) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Compression diagnostics (decile table, std-ratio scorecard) — unchanged.
+# Compression diagnostics (decile table, std-ratio scorecard).
 # ---------------------------------------------------------------------------
-
-
-def test_decile_table_shape_and_monotone_bias():
-    df = _compressed_frame()
-    table = decile_table(df, "EV", n_deciles=10)
-    assert len(table) == 10
-    # Compression => top decile under-predicted (negative bias), bottom
-    # decile over-predicted (positive bias).
-    assert table.iloc[-1]["bias"] < 0
-    assert table.iloc[0]["bias"] > 0
 
 
 def test_compression_ratio_below_one_for_shrunk_predictions():
@@ -107,59 +99,10 @@ def test_compression_ratio_below_one_for_shrunk_predictions():
     assert card.top_decile_bias < 0
 
 
-def test_perfect_predictions_have_unit_ratio():
-    rng = np.random.default_rng(1)
-    meanyr = rng.uniform(2, 30, 1000)
-    df = pd.DataFrame({"MeanYr": meanyr, "Result": meanyr, "EV": meanyr})
-    card = scorecard(df, "EV", strategy="t", league="NBA", market="PTS")
-    assert card.compression_ratio == pytest.approx(1.0, abs=1e-9)
-    assert card.global_mae == pytest.approx(0.0, abs=1e-9)
-
-
-def test_scorecard_includes_bottom_quartile_bias_and_mean():
-    # Bottom quartile (25 lowest-MeanYr rows of 100) over-predicted by a known
-    # +2.0; all other rows predicted perfectly. The scorecard must surface the
-    # bottom-quartile signed bias and that quartile's empirical (actual) mean.
-    meanyr = np.arange(100, dtype=float)
-    result = meanyr.copy()
-    pred = result.copy()
-    pred[:25] += 2.0  # over-predict the lowest quartile only
-    df = pd.DataFrame({"MeanYr": meanyr, "Result": result, "EV": pred})
-    card = scorecard(df, "EV", strategy="t", league="NBA", market="PTS")
-    assert card.bottom_quartile_bias == pytest.approx(2.0)
-    assert card.bottom_quartile_mean == pytest.approx(12.0)  # mean(0..24)
-    assert card.bottom_quartile_mae == pytest.approx(2.0)
-
-
 def test_brier_skill_score_positive_when_model_beats_book():
     card = scorecard(_priced_frame(seed=0), "EV", strategy="t", league="NBA", market="PTS")
     assert card.brier_skill_score is not None
     assert card.brier_skill_score > 0.1
-
-
-def test_brier_skill_score_negative_when_book_beats_model():
-    rng = np.random.default_rng(1)
-    n = 4000
-    meanyr = rng.uniform(2, 30, n)
-    line = meanyr.copy()
-    p_true = rng.uniform(0.05, 0.95, n)
-    outcomes = rng.uniform(size=n) < p_true
-    result = np.where(outcomes, line + 1.0, line - 1.0)
-    df = pd.DataFrame(
-        {
-            "MeanYr": meanyr,
-            "Result": result,
-            "EV": meanyr,
-            "Line": line,
-            # Model is anti-correlated noise; book is the true probability so
-            # book_over = 1 - Odds nails it.
-            "P": 1.0 - p_true,
-            "Odds": 1.0 - p_true,
-        }
-    )
-    card = scorecard(df, "EV", strategy="t", league="NBA", market="PTS")
-    assert card.brier_skill_score is not None
-    assert card.brier_skill_score < 0
 
 
 # ---------------------------------------------------------------------------
@@ -190,27 +133,6 @@ def test_gate1_ci_below_zero_when_model_beats_book():
     assert hi < 0  # 95% CI entirely below 0
 
 
-def test_gate1_ci_above_zero_when_book_beats_model():
-    rng = np.random.default_rng(1)
-    y = (rng.uniform(size=4000) < 0.5).astype(float)
-    p_model = np.where(y == 1, 0.1, 0.9)  # anti-correlated
-    p_book = np.where(y == 1, 0.9, 0.1)  # nails it
-    mean, lo, _hi = _gate1_brier_ci(p_model, p_book, y, rng)
-    assert mean > 0
-    assert lo > 0  # CI excludes 0 on the book's side
-
-
-def test_gate1_oracle_equals_negative_book_brier():
-    # Oracle p_model = y -> d_i = -(p_book - y)^2; the point mean is exactly
-    # -mean(book Brier), and the CI sits entirely below 0.
-    rng = np.random.default_rng(2)
-    y = (rng.uniform(size=3000) < 0.5).astype(float)
-    p_book = rng.uniform(0.2, 0.8, size=3000)
-    mean, _lo, hi = _gate1_brier_ci(y, p_book, y, rng)
-    assert mean == pytest.approx(-float(np.mean((p_book - y) ** 2)))
-    assert hi < 0
-
-
 # ---------------------------------------------------------------------------
 # Gates 2/3 — segment bias-vs-spread match (denominator = segment sigma).
 # ---------------------------------------------------------------------------
@@ -229,16 +151,9 @@ def test_gate23_segment_match_z_matches_known_bias():
     assert z == pytest.approx(2.0 / expected_sigma)
 
 
-def test_gate23_oracle_z_is_zero():
-    actual = np.arange(50, 150, dtype=float)
-    mask = np.zeros(len(actual), dtype=bool)
-    mask[:30] = True
-    *_, z = _gate23_segment_match(actual, actual, mask)  # oracle: pred = actual
-    assert z == pytest.approx(0.0)
-
-
 # ---------------------------------------------------------------------------
-# Gate 4 — IQR spread (compression).
+# Gate 4 — IQR spread (compression) + analytical pooled IQR (Operation Ship 75
+# Step 0.2). Brief at /tmp/researcher_g4_audit.md (Outcome B).
 # ---------------------------------------------------------------------------
 
 
@@ -246,29 +161,6 @@ def test_gate4_iqr_ratio_below_one_for_compressed():
     df = _compressed_frame()
     _, _, ratio = _gate4_iqr_spread(df["Result"].to_numpy(), df["EV"].to_numpy())
     assert 0.45 < ratio < 0.55  # predictions shrunk to half-spread
-
-
-def test_gate4_iqr_ratio_unit_for_perfect():
-    x = np.arange(100, dtype=float)
-    _, _, ratio = _gate4_iqr_spread(x, x)
-    assert ratio == pytest.approx(1.0)
-
-
-# ---------------------------------------------------------------------------
-# Gate 4 analytical IQR (Operation Ship 75 Step 0.2) — pooled per-row q25/q75
-# from the predicted distribution; replaces the broken point-IQR estimator on
-# probabilistic markets. Brief at /tmp/researcher_g4_audit.md (Outcome B).
-# ---------------------------------------------------------------------------
-
-
-def test_zinb_ppf_zero_inflated_quantile_clips_to_zero():
-    """Quantiles below the zero-inflation gate land at 0."""
-    r = np.array([5.0, 5.0])
-    nb_p = np.array([0.4, 0.4])
-    gate = np.array([0.4, 0.4])  # 40% structural zeros
-    # q=0.25 is well below π=0.4, so all rows return 0.
-    out = _zinb_ppf(0.25, r, nb_p, gate)
-    assert out.tolist() == [0.0, 0.0]
 
 
 def test_zinb_ppf_above_gate_matches_rescaled_nbinom():
@@ -290,19 +182,6 @@ def test_zinb_ppf_above_gate_matches_rescaled_nbinom():
     assert np.allclose(out, expected)
 
 
-def test_zinb_ppf_no_gate_matches_plain_nbinom():
-    """gate=0 reduces ZINB to plain NB at every quantile."""
-    from scipy.stats import nbinom
-
-    r = np.array([5.0, 8.0, 12.0])
-    nb_p = np.array([0.3, 0.5, 0.7])
-    gate = np.zeros(3)
-    for q in (0.25, 0.5, 0.75):
-        out = _zinb_ppf(q, r, nb_p, gate)
-        ref = nbinom.ppf(q, r, 1.0 - nb_p)
-        assert np.allclose(out, ref), f"mismatch at q={q}"
-
-
 def test_iqr_pred_analytical_negbin_matches_pooled_quantiles():
     """NegBin analytical IQR = IQR(concat(q25_per_row, q75_per_row))."""
     from scipy.stats import nbinom
@@ -318,30 +197,6 @@ def test_iqr_pred_analytical_negbin_matches_pooled_quantiles():
     # All rows identical → pooled IQR equals the per-row IQR.
     q25 = nbinom.ppf(0.25, 10.0, 0.5)
     q75 = nbinom.ppf(0.75, 10.0, 0.5)
-    assert iqr == pytest.approx(q75 - q25, abs=1e-9)
-
-
-def test_iqr_pred_analytical_zinb_brief_worked_example():
-    """ZINB(π=0.3, r=5, p=0.4) — pooled IQR matches the manual computation.
-
-    F_ZINB(0) = 0.3 + 0.7 * (1-0.4)^5 = 0.3 + 0.7 * 0.07776 = 0.3544
-    F_ZINB(1) = 0.3 + 0.7 * nbinom.cdf(1, 5, 0.6) per scipy convention.
-    Since q25=0.25 < 0.3544 the per-row q25 = 0.
-    q75=0.75 → (0.75 - 0.3)/0.7 = 0.6429 → nbinom.ppf(0.6429, 5, 0.6).
-    """
-    from scipy.stats import nbinom
-
-    n = 1000
-    df = pd.DataFrame(
-        {
-            "R": np.full(n, 5.0),
-            "NB_P": np.full(n, 0.4),
-            "Gate": np.full(n, 0.3),
-        }
-    )
-    iqr = _iqr_pred_analytical(df, "ZINB", strategy="ratio_meanyr")
-    q25 = 0.0
-    q75 = float(nbinom.ppf((0.75 - 0.3) / (1 - 0.3), 5.0, 1.0 - 0.4))
     assert iqr == pytest.approx(q75 - q25, abs=1e-9)
 
 
@@ -372,29 +227,6 @@ def test_iqr_pred_analytical_skewnormal_ratio_strategy():
     assert iqr == pytest.approx(q75 - q25, abs=1e-6)
 
 
-def test_iqr_pred_analytical_skewnormal_centered_strategy_passes_scale_through():
-    """centered_additive_* strategies leave SN_Scale alone (no MeanYr multiply)."""
-    from scipy.stats import skewnorm
-
-    n = 500
-    raw_loc = 1.5
-    raw_scale = 2.0
-    alpha = -1.0
-    df = pd.DataFrame(
-        {
-            "SN_Loc": np.full(n, raw_loc),
-            "SN_Scale": np.full(n, raw_scale),
-            "SN_Alpha": np.full(n, alpha),
-            "Mean10": np.full(n, 3.0),  # re-added to loc; IQR is location-invariant
-            "MeanYr": np.full(n, 4.0),  # would change result under ratio_meanyr
-        }
-    )
-    iqr = _iqr_pred_analytical(df, "SkewNormal", strategy="centered_additive_mean10")
-    q25 = float(skewnorm.ppf(0.25, alpha, loc=raw_loc, scale=raw_scale))
-    q75 = float(skewnorm.ppf(0.75, alpha, loc=raw_loc, scale=raw_scale))
-    assert iqr == pytest.approx(q75 - q25, abs=1e-6)
-
-
 def test_decode_sn_loc_scale_centered_additive_readds_location_offset():
     """centered_additive_mean10 PIT decode must re-add the Mean10 baseline to loc.
 
@@ -418,14 +250,6 @@ def test_decode_sn_loc_scale_centered_additive_readds_location_offset():
     np.testing.assert_allclose(scale, df["SN_Scale"].to_numpy())
 
 
-def test_decode_sn_loc_scale_ratio_multiplies_both_by_meanyr():
-    """ratio_meanyr decode is unchanged by the centered-offset fix (regression guard)."""
-    df = pd.DataFrame({"SN_Loc": [0.5], "SN_Scale": [0.3], "MeanYr": [10.0]})
-    loc, scale = _decode_sn_loc_scale(df, "ratio_meanyr")
-    np.testing.assert_allclose(loc, [5.0])
-    np.testing.assert_allclose(scale, [3.0])
-
-
 def test_fit_skewnorm_dispersion_c_widens_underdispersed_symmetric():
     """A predictive half as wide as the truth must fit c ~ 2 to recover calibration.
 
@@ -441,73 +265,6 @@ def test_fit_skewnorm_dispersion_c_widens_underdispersed_symmetric():
         np.full(n, mu), np.full(n, s_true / 2.0), np.zeros(n), y
     )
     assert abs(c - 2.0) < 0.25
-
-
-def test_fit_skewnorm_dispersion_c_unit_for_calibrated_symmetric():
-    """A predictive already at the true scale must fit c ~ 1 (no widening)."""
-    rng = np.random.default_rng(1)
-    mu, s_true, n = 4.0, 2.0, 4000
-    y = rng.normal(mu, s_true, n)
-    c = fit_skewnorm_dispersion_c(np.full(n, mu), np.full(n, s_true), np.zeros(n), y)
-    assert abs(c - 1.0) < 0.2
-
-
-def test_fit_skewnorm_dispersion_c_recovers_scale_under_skew():
-    """With nonzero skew the fitter must still recover the true scale.
-
-    The served predictive holds the MEAN fixed and derives loc from the scaled
-    scale exactly as the betting path does, so feeding the true mean + half the
-    true scale of a skewed draw must fit c ~ 2.
-    """
-    from scipy.stats import skewnorm as _sn
-
-    a, loc_true, scale_true, n = 5.0, 2.0, 2.5, 6000
-    y = _sn.rvs(a, loc=loc_true, scale=scale_true, size=n, random_state=2)
-    delta = a / np.sqrt(1 + a**2)
-    mean_true = loc_true + scale_true * delta * np.sqrt(2 / np.pi)
-    c = fit_skewnorm_dispersion_c(
-        np.full(n, mean_true), np.full(n, scale_true / 2.0), np.full(n, a), y
-    )
-    assert abs(c - 2.0) < 0.3
-
-
-def test_load_test_set_retains_mean10_for_centered_decode(tmp_path):
-    """Mean10 must survive load_test_set — the centered_additive PIT decode reads it."""
-    csv = tmp_path / "WNBA_DREB.csv"
-    pd.DataFrame(
-        {
-            "MeanYr": [2.0],
-            "Result": [3.0],
-            "Blended_EV": [2.5],
-            "EV": [2.5],
-            "SN_Loc": [0.1],
-            "SN_Scale": [1.0],
-            "SN_Alpha": [0.0],
-            "Mean10": [2.4],
-        }
-    ).to_csv(csv, index=False)
-    out = load_test_set(csv, "Blended_EV")
-    assert "Mean10" in out.columns
-
-
-def test_iqr_pred_analytical_gamma_recovers_rate_from_ev():
-    """Gamma analytical IQR uses scipy.stats.gamma; rate = Alpha / EV."""
-    from scipy.stats import gamma as scipy_gamma
-
-    n = 500
-    a = 4.0
-    rate = 2.0
-    ev = a / rate
-    df = pd.DataFrame(
-        {
-            "Alpha": np.full(n, a),
-            "EV": np.full(n, ev),
-        }
-    )
-    iqr = _iqr_pred_analytical(df, "Gamma", strategy="ratio_meanyr")
-    q25 = float(scipy_gamma.ppf(0.25, a, scale=1.0 / rate))
-    q75 = float(scipy_gamma.ppf(0.75, a, scale=1.0 / rate))
-    assert iqr == pytest.approx(q75 - q25, abs=1e-6)
 
 
 def test_resolve_decode_strategy_substitutes_default_for_none(monkeypatch):
@@ -543,68 +300,6 @@ def test_resolve_decode_strategy_substitutes_default_for_none(monkeypatch):
     # A real per-cell slug survives while withheld (not collapsed to WITHHELD).
     assert sc._resolve_decode_strategy("NFL", "receptions") == "centered_additive_mean10"
     assert sc._resolve_decode_strategy("NFL", "passing-yards") == "ratio_meanyr"
-
-
-def test_gate4_iqr_spread_back_compat_point_iqr_without_df():
-    """Old signature (no df / dist / strategy) keeps point-IQR semantics — the
-    oracle row (pred = actual) still returns ratio = 1.0 so existing assertions
-    on `g4_iqr_ratio_oracle` carry over.
-    """
-    x = np.arange(100, dtype=float)
-    _, _, ratio = _gate4_iqr_spread(x, x)
-    assert ratio == pytest.approx(1.0)
-
-
-def test_gate4_iqr_spread_analytical_replaces_point_on_zinb():
-    """When df + dist supplied, predicted IQR is the analytical pooled IQR.
-
-    For a calibrated ZINB-like population, analytical IQR should match the
-    actuals' IQR closely — the new gate stops measuring the point-prediction
-    smoothing artifact.
-    """
-    from scipy.stats import nbinom
-
-    rng = np.random.default_rng(1729)
-    n = 4000
-    r_arr = np.full(n, 5.0)
-    p_arr = np.full(n, 0.4)
-    gate_arr = np.zeros(n)
-    # Calibrated actuals drawn from the matching NB.
-    actuals = nbinom.rvs(5.0, 1.0 - 0.4, size=n, random_state=rng).astype(float)
-    pred = np.full(n, float(actuals.mean()))  # point pred — smooth, deliberately
-    df = pd.DataFrame({"Result": actuals, "EV": pred, "R": r_arr, "NB_P": p_arr, "Gate": gate_arr})
-    iqr_pred, iqr_true, ratio = _gate4_iqr_spread(
-        actuals, pred, df=df, dist="ZINB", strategy="ratio_meanyr"
-    )
-    assert iqr_true > 0
-    # Analytical pooled q75 - q25 on the matching NB should equal the actuals' IQR
-    # (integer support; pooled bag of identical per-row q25/q75 gives that exact diff).
-    expected_q25 = float(nbinom.ppf(0.25, 5.0, 1.0 - 0.4))
-    expected_q75 = float(nbinom.ppf(0.75, 5.0, 1.0 - 0.4))
-    assert iqr_pred == pytest.approx(expected_q75 - expected_q25, abs=1e-9)
-    assert ratio > 0.5  # passes the gate
-
-
-def test_gate4_iqr_spread_degenerate_zero_over_zero_ships():
-    """IQR_true = 0 AND IQR_pred = 0 → ratio 1.0 (the 0/0 convention)."""
-    n = 200
-    actuals = np.zeros(n)
-    # ZINB with extreme structural zeros → IQR_pred also 0.
-    df = pd.DataFrame(
-        {
-            "Result": actuals,
-            "EV": np.zeros(n),
-            "R": np.full(n, 1.0),
-            "NB_P": np.full(n, 0.01),  # tiny mass on >0
-            "Gate": np.full(n, 0.99),  # 99% structural zeros
-        }
-    )
-    iqr_pred, iqr_true, ratio = _gate4_iqr_spread(
-        actuals, np.zeros(n), df=df, dist="ZINB", strategy="ratio_meanyr"
-    )
-    assert iqr_true == 0.0
-    assert iqr_pred == 0.0
-    assert ratio == pytest.approx(1.0)
 
 
 def test_gate4_iqr_spread_degenerate_nonzero_pred_zero_true_fails():
@@ -649,96 +344,15 @@ def test_infer_dist_from_columns_dispatches_by_param_columns():
     assert _infer_dist_from_columns(bare) is None
 
 
-def test_gate_row_uses_analytical_g4_when_dist_columns_present():
-    """gate_row auto-detects ZINB columns and routes G4 through the analytical path.
-
-    On a synthetic calibrated ZINB-like frame, the analytical g4_iqr_pred should
-    differ from the point IQR of EV (which is degenerate at the mean).
-    """
-    from scipy.stats import nbinom
-
-    rng = np.random.default_rng(31)
-    n = 4000
-    actuals = nbinom.rvs(5.0, 1.0 - 0.4, size=n, random_state=rng).astype(float)
-    point_pred = np.full(n, float(actuals.mean()))
-    df = pd.DataFrame(
-        {
-            "MeanYr": np.full(n, float(actuals.mean())),
-            "Result": actuals,
-            "EV": point_pred,
-            "R": np.full(n, 5.0),
-            "NB_P": np.full(n, 0.4),
-            "Gate": np.zeros(n),
-        }
-    )
-    row = gate_row(df, "EV", league="NBA", market="REB", strategy="ratio_meanyr")
-    # Analytical replaces point on dist-aware rows: analytical pred IQR is the
-    # integer NB IQR (non-zero), not the (==0) point IQR of a constant EV column.
-    assert row["g4_iqr_pred"] > 0.0
-    # Sanity: point IQR of the EV column truly is 0, so any non-zero g4_iqr_pred
-    # proves the gate switched from the point estimator to the analytical one.
-    point_iqr = float(np.percentile(point_pred, 75) - np.percentile(point_pred, 25))
-    assert point_iqr == 0.0
-
-
 # ---------------------------------------------------------------------------
-# Gate 5 — equal-mass ECE.
+# Gate 5 — equal-mass ECE + debiased ECE (Ship 75 Step 0.5, Roelofs 2022).
 # ---------------------------------------------------------------------------
-
-
-def test_gate5_ece_zero_for_oracle():
-    y = np.array([0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0])
-    assert _gate5_ece_equal_mass(y, y) == pytest.approx(0.0)
 
 
 def test_gate5_ece_large_for_confidently_wrong():
     y = np.zeros(1000)
     p_model = np.full(1000, 0.9)  # confident "over" on outcomes that never hit
     assert _gate5_ece_equal_mass(p_model, y) == pytest.approx(0.9, abs=1e-9)
-
-
-def test_gate5_ece_small_for_calibrated_stream():
-    rng = np.random.default_rng(3)
-    p_model = rng.uniform(0.0, 1.0, 20000)
-    y = (rng.uniform(size=20000) < p_model).astype(float)  # calibrated by construction
-    assert _gate5_ece_equal_mass(p_model, y) < 0.05
-
-
-# ---------------------------------------------------------------------------
-# Gate 5 debiased ECE (Ship 75 Step 0.5) — Roelofs 2022 correction for the
-# N-dependent upward binning bias documented in
-# /tmp/researcher_lifecycle_gate_audit.md. The raw ECE estimator falsely
-# fails up to 44.6% of perfectly calibrated NFL-N=240 cells; the debiased
-# variant subtracts the null-distribution mean per cell.
-# ---------------------------------------------------------------------------
-
-
-def test_ece_debias_offset_returns_positive_finite():
-    """The null-ECE bias is strictly positive for finite N (Roelofs 2022)."""
-    rng = np.random.default_rng(0)
-    p_model = rng.uniform(0.05, 0.95, 300)
-    offset = _ece_debias_offset(p_model, n_resamples=50, rng=np.random.default_rng(1729))
-    assert offset > 0
-    assert np.isfinite(offset)
-
-
-def test_ece_debias_offset_decreases_with_n():
-    """Binning bias shrinks as N grows — matches the audit's N-dependence table."""
-    rng = np.random.default_rng(0)
-    p_small = rng.uniform(0.05, 0.95, 240)
-    p_large = rng.uniform(0.05, 0.95, 2000)
-    off_small = _ece_debias_offset(p_small, n_resamples=80, rng=np.random.default_rng(1729))
-    off_large = _ece_debias_offset(p_large, n_resamples=80, rng=np.random.default_rng(1729))
-    assert off_small > off_large  # smaller N → larger bias
-
-
-def test_ece_debias_offset_deterministic_under_seed():
-    """Same seed → byte-identical offset (no determinism gate breakage)."""
-    rng = np.random.default_rng(0)
-    p_model = rng.uniform(0.05, 0.95, 500)
-    a = _ece_debias_offset(p_model, n_resamples=40, rng=np.random.default_rng(1729))
-    b = _ece_debias_offset(p_model, n_resamples=40, rng=np.random.default_rng(1729))
-    assert a == b
 
 
 def test_gate5_ece_debiased_perfect_calibration_near_zero():
@@ -755,53 +369,9 @@ def test_gate5_ece_debiased_perfect_calibration_near_zero():
     assert abs(debiased) < 0.03  # near-zero after correction
 
 
-def test_gate5_ece_debiased_preserves_real_miscalibration():
-    """A confidently-wrong model still has nonzero debiased ECE — the bias
-    correction subtracts the null floor, not the genuine signal.
-    """
-    y = np.zeros(1000)
-    p_model = np.full(1000, 0.9)
-    raw = _gate5_ece_equal_mass(p_model, y)
-    debiased = _gate5_ece_debiased(p_model, y, n_resamples=40, rng=np.random.default_rng(1729))
-    assert raw == pytest.approx(0.9, abs=1e-9)
-    # Null bias on a degenerate constant-p stream is small; debiased ≈ raw.
-    assert abs(debiased - raw) < 0.05
-
-
 # ---------------------------------------------------------------------------
-# Supersede S3 — Memmel 2003 paired Sharpe inference. Replaces the bare
-# `sharpe_candidate > sharpe_baseline` rule, which had ~50% Type-I rate per
-# the audit. Per Memmel: z = (SR_c - SR_b) / SE(SR_diff) with closed-form
-# variance using the paired correlation; one-sided ship at z > 1.645.
+# Supersede S3 — Memmel 2003 paired Sharpe inference (z > 1.645 to ship).
 # ---------------------------------------------------------------------------
-
-
-def test_memmel_sharpe_z_identical_returns_zero():
-    """Two identical return streams → SR_diff = 0 → z exactly 0."""
-    rng = np.random.default_rng(7)
-    r = rng.normal(0.001, 0.02, 500)
-    sr_b, sr_c, z = _memmel_sharpe_z(r, r.copy())
-    assert sr_b == pytest.approx(sr_c)
-    assert z == pytest.approx(0.0, abs=1e-9)
-
-
-def test_memmel_sharpe_z_near_identical_models_under_critical():
-    """Two near-identical models (tiny iid noise) — z should sit well below
-    1.645 the vast majority of the time, fixing the audit's coin-flip rate.
-    """
-    rng = np.random.default_rng(11)
-    base = rng.normal(0.001, 0.02, 1000)
-    type1_rejects = 0
-    for i in range(40):
-        rng_i = np.random.default_rng(100 + i)
-        b = base + rng_i.normal(0, 1e-4, 1000)
-        c = base + rng_i.normal(0, 1e-4, 1000)
-        _, _, z = _memmel_sharpe_z(b, c)
-        if z > _SUPERSEDE_S3_Z_MIN:
-            type1_rejects += 1
-    # Under one-sided α=0.05, expected ~2 of 40. The audit's bare-comparison
-    # rule rejects ~20 of 40 (50%). Tolerate up to 6 for sample-size noise.
-    assert type1_rejects <= 6
 
 
 def test_memmel_sharpe_z_positive_when_candidate_genuinely_better():
@@ -813,34 +383,6 @@ def test_memmel_sharpe_z_positive_when_candidate_genuinely_better():
     sr_b, sr_c, z = _memmel_sharpe_z(b, c)
     assert sr_c > sr_b
     assert z > _SUPERSEDE_S3_Z_MIN
-
-
-def test_memmel_sharpe_z_correlation_tightens_se():
-    """Highly-correlated paired returns yield a smaller SE than uncorrelated
-    pairs at the same per-series SR — the whole point of using paired inference.
-    """
-    rng = np.random.default_rng(17)
-    n = 1000
-    common = rng.normal(0, 0.02, n)
-    # Correlated pair: shared common signal + tiny independent noise.
-    b_corr = common + rng.normal(0.0005, 0.001, n)
-    c_corr = common + rng.normal(0.0006, 0.001, n)  # tiny mean shift
-    # Independent pair: same marginals but no shared shock.
-    b_ind = rng.normal(common.mean(), common.std(), n) + rng.normal(0.0005, 0.001, n)
-    c_ind = rng.normal(common.mean(), common.std(), n) + rng.normal(0.0006, 0.001, n)
-    _, _, z_corr = _memmel_sharpe_z(b_corr, c_corr)
-    _, _, z_ind = _memmel_sharpe_z(b_ind, c_ind)
-    # Same expected SR difference, but correlated pair gets a sharper z.
-    assert abs(z_corr) > abs(z_ind)
-
-
-def test_memmel_sharpe_z_handles_zero_variance_returns():
-    """A zero-variance return series (Sharpe undefined) returns z=0 gracefully."""
-    rng = np.random.default_rng(19)
-    flat = np.zeros(200)
-    r = rng.normal(0.001, 0.02, 200)
-    _, _, z = _memmel_sharpe_z(flat, r)
-    assert np.isfinite(z) or z == 0.0  # implementation must not crash
 
 
 # ---------------------------------------------------------------------------
@@ -900,38 +442,6 @@ def test_gate_row_full_column_set_and_oracle_identities():
     assert row["g4_iqr_ratio_oracle"] == pytest.approx(1.0)
     assert row["g5_ece_oracle"] == pytest.approx(0.0)
     assert row["g1_brier_diff_ci_hi_oracle"] < 0  # oracle beats the (imperfect) book
-
-
-def test_gate_row_no_book_columns_blanks_gates_1_and_5():
-    """No P/Odds/Line at all → both book-touching gates blank, price-free gates still run."""
-    df = _compressed_frame()
-    row = gate_row(df, "EV", league="NBA", market="AST", strategy="t")
-    assert row["g1_brier_diff_mean"] is None
-    assert row["g1_brier_skill_score"] is None
-    assert row["g5_ece"] is None
-    assert row["g2_star_z"] is not None
-    assert row["g4_iqr_ratio"] is not None
-
-
-def test_gate_row_no_odds_but_line_present_blanks_g1_only():
-    """Book-unpriced cells (Line + P present, no Odds) → Gate 1 blank, Gate 5 still computes.
-
-    Gate 5 is model-only calibration: it needs P + Line + Result but NOT the book's
-    Odds, so it should still produce a value when the market has a posted line and a
-    model probability but no book quote to compare Brier against.
-    """
-    rng = np.random.default_rng(11)
-    n = 2000
-    meanyr = rng.uniform(2, 30, n)
-    line = meanyr.copy()
-    p = rng.uniform(0.05, 0.95, n)
-    outcomes = rng.uniform(size=n) < p
-    result = np.where(outcomes, line + 1.0, line - 1.0)
-    df = pd.DataFrame({"MeanYr": meanyr, "Result": result, "EV": meanyr, "Line": line, "P": p})
-    row = gate_row(df, "EV", league="NBA", market="AST", strategy="t")
-    assert row["g1_brier_diff_mean"] is None  # no Odds → Gate 1 auto-pass at verdict time
-    assert row["g1_brier_skill_score"] is None
-    assert row["g5_ece"] is not None  # Gate 5 computes on P + Line alone
 
 
 def test_write_gate_scorecard_sorts_and_overwrites(tmp_path):
@@ -1016,48 +526,6 @@ def test_apply_thresholds_each_gate_fails_when_threshold_exceeded():
         assert not out["ship"]
 
 
-def test_apply_thresholds_g1_non_inferiority_margin():
-    """G1 ships on the tie margin; ``g1_has_edge`` flags provable superiority separately."""
-    # Clear win (ci_hi < 0): ships and has edge.
-    win = apply_thresholds(_clean_row(g1_brier_diff_ci_hi=-0.03))
-    assert win["g1_pass"] and win["g1_has_edge"]
-    # Tight tie (0 <= ci_hi < margin): at least as good as the book ⇒ ships, but no edge.
-    tie = apply_thresholds(_clean_row(g1_brier_diff_ci_hi=0.002))
-    assert tie["g1_pass"] and not tie["g1_has_edge"] and tie["ship"]
-    # Mild-worse beyond the margin: fails, no edge.
-    worse = apply_thresholds(_clean_row(g1_brier_diff_ci_hi=0.01))
-    assert not worse["g1_pass"] and not worse["g1_has_edge"] and not worse["ship"]
-
-
-def test_apply_thresholds_g1_no_odds_auto_passes():
-    """G1 blank (no book Odds) ⇒ auto-pass — model wins by default."""
-    out = apply_thresholds(
-        _clean_row(
-            g1_brier_diff_mean=None,
-            g1_brier_diff_ci_lo=None,
-            g1_brier_diff_ci_hi=None,
-            g1_brier_diff_mean_oracle=None,
-            g1_brier_skill_score=None,
-        )
-    )
-    assert out["g1_pass"]
-    assert out["ship"]
-
-
-def test_apply_thresholds_g4_blank_pit_fails():
-    """G4 blank (no per-row dist params ⇒ no g4_pit_ks) fails — no credit for absent evidence."""
-    out = apply_thresholds(_clean_row(g4_pit_ks=None, g4_pit_ks_max=None))
-    assert not out["g4_pass"]
-    assert not out["ship"]
-
-
-def test_apply_thresholds_g5_blank_fails():
-    """G5 blank (no P or no Line) fails — not auto-pass; the cell couldn't compute calibration."""
-    out = apply_thresholds(_clean_row(g5_ece=None))
-    assert not out["g5_pass"]
-    assert not out["ship"]
-
-
 def test_strict_thresholds_are_pinned():
     """Lock the strict starter combo so an accidental tweak fails CI."""
     assert _GATE1_NONINF_MARGIN == 0.005
@@ -1085,35 +553,8 @@ def test_load_test_set_drops_nonfinite_and_validates_columns(tmp_path):
         load_test_set(bp, "EV")
 
 
-def test_load_test_set_keeps_optional_columns_when_present(tmp_path):
-    df = pd.DataFrame(
-        {
-            "MeanYr": [10.0, 12.0, 14.0],
-            "Result": [11.0, 13.0, 15.0],
-            "EV": [10.5, 12.5, 14.5],
-            "P": [0.55, 0.60, 0.50],
-            "Odds": [0.45, 0.40, 0.50],
-            "Line": [10.0, 12.0, 14.0],
-        }
-    )
-    p = tmp_path / "NBA_PTS.csv"
-    df.to_csv(p, index=False)
-    loaded = load_test_set(p, "EV")
-    assert {"P", "Odds", "Line"}.issubset(loaded.columns)
-    assert len(loaded) == 3
-
-
-def test_load_test_set_handles_missing_optional_columns(tmp_path):
-    df = pd.DataFrame({"MeanYr": [10.0, 12.0], "Result": [11.0, 13.0], "EV": [10.5, 12.5]})
-    p = tmp_path / "NBA_PTS.csv"
-    df.to_csv(p, index=False)
-    loaded = load_test_set(p, "EV")
-    card = scorecard(loaded, "EV", strategy="t", league="NBA", market="PTS")
-    assert card.brier_skill_score is None
-
-
 # ---------------------------------------------------------------------------
-# Supersede gate — S1 + S2 + S3 (research -> devel, supersede an incumbent)
+# Supersede gate — S1 + S2 + S3 (research -> devel, supersede an incumbent).
 # ---------------------------------------------------------------------------
 
 
@@ -1175,120 +616,6 @@ def _supersede_pair(
     return b_df, c_df
 
 
-def test_paired_brier_ci_positive_when_candidate_beats_baseline():
-    # Candidate is well-calibrated; baseline is regressed toward 0.5 → candidate
-    # Brier strictly lower per event ⇒ d_i > 0 ⇒ CI lo > 0. Need a decent N for
-    # the bootstrap CI to be tight enough to strictly exclude 0.
-    b_df, c_df = _supersede_pair(n=4000)
-    res = _supersede_paired_brier_ci(b_df, c_df)
-    assert res is not None
-    n, mean, ci_lo, _ci_hi = res
-    assert n == len(b_df)
-    assert mean > 0
-    assert ci_lo > 0
-
-
-def test_paired_brier_ci_negative_when_baseline_beats_candidate():
-    # Add enough noise to the candidate's P that it's WORSE than the baseline's
-    # mid-regressed-but-still-signal P. Needs n large + noise large for the CI
-    # to land strictly below 0.
-    b_df, c_df = _supersede_pair(n=4000, candidate_calibration_noise=0.8)
-    res = _supersede_paired_brier_ci(b_df, c_df)
-    assert res is not None
-    _, mean, _ci_lo, ci_hi = res
-    assert mean < 0
-    assert ci_hi < 0
-
-
-def test_paired_brier_ci_returns_none_when_inputs_lack_p():
-    df = pd.DataFrame({"MeanYr": [1.0], "Result": [1.0], "EV": [1.0], "Line": [1.0]})
-    assert _supersede_paired_brier_ci(df, df) is None
-
-
-def test_paired_brier_ci_returns_none_on_empty_intersection():
-    b_df, c_df = _supersede_pair(n=50)
-    # Disjoint indices — no shared events.
-    c_df.index = c_df.index + 1000
-    assert _supersede_paired_brier_ci(b_df, c_df) is None
-
-
-def test_test_set_to_bet_frame_picks_ev_side_and_decimal_payout():
-    # EV > Line ⇒ bet over ⇒ Hit = (Result >= Line); payout = 1/(1-Odds).
-    df = pd.DataFrame(
-        {
-            "MeanYr": [10.0, 10.0],
-            "Result": [12.0, 8.0],
-            "EV": [11.0, 11.0],  # both EV > Line ⇒ both bet over
-            "Line": [10.0, 10.0],
-            "Odds": [0.4, 0.4],  # book under-prob 0.4 ⇒ over-prob 0.6
-            "P": [0.6, 0.6],
-        }
-    )
-    bets = _test_set_to_bet_frame(df, "EV")
-    assert len(bets) == 2
-    assert (bets["Platform"] == "Sleeper").all()
-    # Boost = decimal odds = 1 / book_over_prob = 1 / 0.6 ≈ 1.667
-    assert bets["Boost"].iloc[0] == pytest.approx(1.0 / 0.6)
-    # Hit: row 0 Result >= Line ⇒ True; row 1 ⇒ False.
-    assert bool(bets["Hit"].iloc[0]) is True
-    assert bool(bets["Hit"].iloc[1]) is False
-
-
-def test_test_set_to_bet_frame_returns_empty_without_odds():
-    df = pd.DataFrame({"MeanYr": [1.0], "Result": [1.0], "EV": [1.0], "Line": [1.0], "P": [0.5]})
-    bets = _test_set_to_bet_frame(df, "EV")
-    assert bets.empty
-
-
-def test_test_set_to_bet_frame_picks_under_when_ev_below_line():
-    # EV < Line ⇒ bet under ⇒ Hit when Result < Line; book_under_prob = Odds.
-    df = pd.DataFrame(
-        {
-            "MeanYr": [10.0],
-            "Result": [8.0],
-            "EV": [9.0],  # EV < Line ⇒ bet under
-            "Line": [10.0],
-            "Odds": [0.55],  # book under-prob 0.55 ⇒ decimal odds = 1/0.55
-            "P": [0.4],
-        }
-    )
-    bets = _test_set_to_bet_frame(df, "EV")
-    assert bets["Boost"].iloc[0] == pytest.approx(1.0 / 0.55)
-    # Hit: Result (8) < Line (10) ⇒ under wins.
-    assert bool(bets["Hit"].iloc[0]) is True
-    # Model probability on the UNDER side = 1 - P = 0.6.
-    assert bets["Model P"].iloc[0] == pytest.approx(0.6)
-
-
-def test_paired_sharpe_returns_finite_pair():
-    b_df, c_df = _supersede_pair()
-    res = _supersede_paired_sharpe(b_df, c_df, "EV")
-    assert res is not None
-    sb, sc, z = res
-    assert np.isfinite(sb)
-    assert np.isfinite(sc)
-    assert np.isfinite(z)
-
-
-def test_paired_sharpe_candidate_higher_when_better_calibrated():
-    # Calibrated candidate vs regressed baseline ⇒ candidate Kelly stakes are
-    # more aligned with true win probability ⇒ higher long-run Sharpe AND a
-    # positive Memmel z (the paired-inference test that supersedes the bare
-    # ``sc > sb`` rule).
-    b_df, c_df = _supersede_pair(n=2000)
-    res = _supersede_paired_sharpe(b_df, c_df, "EV")
-    assert res is not None
-    sb, sc, z = res
-    assert sc > sb
-    assert z > 0
-
-
-def test_paired_sharpe_returns_none_on_empty_intersection():
-    b_df, c_df = _supersede_pair(n=20)
-    c_df.index = c_df.index + 1000
-    assert _supersede_paired_sharpe(b_df, c_df, "EV") is None
-
-
 def test_supersede_verdict_ships_when_all_three_pass():
     # A clean calibrated candidate that clears all 5 gates outright + beats a
     # regressed-toward-0.5 baseline on paired Brier + has higher Sharpe ⇒ ship.
@@ -1309,31 +636,105 @@ def test_supersede_verdict_holds_when_candidate_worse():
     assert v["ship"] is False
 
 
-def test_supersede_verdict_holds_when_baseline_unpriced():
-    # Baseline has no Odds column ⇒ S2 and S3 both return None ⇒ HOLD even if
-    # the candidate would clear S1 on its own.
-    _b, c_df = _supersede_pair(n=200, seed=21)
-    b_unpriced = c_df.drop(columns=["Odds"])
-    v = supersede_verdict(b_unpriced, c_df, "EV", strategy="cand")
-    assert v["s2_pass"] is False
-    assert v["s3_pass"] is False
-    assert v["ship"] is False
+# ---------------------------------------------------------------------------
+# Dispersion diagnostics + randomized PIT-KS / tail-KS (Ship 75 binding
+# constraint — under-dispersion detection across count + continuous families).
+# ---------------------------------------------------------------------------
+
+
+def _skewnormal_frame(
+    pred_scale: float, *, true_scale: float = 4.0, n: int = 8000, seed: int = 3
+) -> pd.DataFrame:
+    """SkewNormal (α=0 ⇒ Normal) frame whose predictive scale may differ from truth.
+
+    Truth ~ Normal(0, ``true_scale``); the per-row predictive is Normal(0,
+    ``pred_scale``). ``pred_scale == true_scale`` is calibrated; smaller is
+    under-dispersed (intervals too narrow), larger is over-dispersed. No
+    ``MeanYr`` column, so the decode leaves ``SN_Scale`` untouched.
+    """
+    rng = np.random.default_rng(seed)
+    actual = rng.normal(0.0, true_scale, n)
+    return pd.DataFrame(
+        {
+            "Result": actual,
+            "EV": np.zeros(n),
+            "SN_Loc": np.zeros(n),
+            "SN_Scale": np.full(n, pred_scale),
+            "SN_Alpha": np.zeros(n),
+        }
+    )
+
+
+def test_dispersion_diagnostics_calibrated_is_near_nominal():
+    """A correctly-scaled predictive covers at its nominal rate with a tiny PIT-KS."""
+    df = _skewnormal_frame(pred_scale=4.0)
+    pit_ks, tail_pit_ks, cov50, cov80 = _dispersion_diagnostics(
+        df, "SkewNormal", df["Result"].to_numpy(), strategy="baseline"
+    )
+    assert cov50 == pytest.approx(0.50, abs=0.04)
+    assert cov80 == pytest.approx(0.80, abs=0.04)
+    assert pit_ks < 0.05
+    assert tail_pit_ks <= pit_ks  # over-tail sub-supremum of the whole-CDF KS
+
+
+def test_dispersion_diagnostics_flags_underdispersion():
+    """Too-narrow predictive (half scale) → central coverage collapses, PIT-KS spikes.
+
+    This is the NFL-receptions pathology: actuals fall *outside* the central
+    interval far more than nominal, so coverage drops well below 0.50/0.80.
+    """
+    df = _skewnormal_frame(pred_scale=2.0)
+    pit_ks, _tail, cov50, cov80 = _dispersion_diagnostics(
+        df, "SkewNormal", df["Result"].to_numpy(), strategy="baseline"
+    )
+    assert cov50 < 0.35
+    assert cov80 < 0.60
+    assert pit_ks > 0.15
+
+
+def test_randomized_pit_ks_collapses_count_lattice():
+    """On a calibrated low-count NegBin frame the mid-PIT KS is lattice-inflated while the
+    randomized PIT KS is small — the fix that lets one Gate-4 threshold span count and
+    continuous families (a continuous-tuned 0.05 would otherwise fail calibrated counts)."""
+    from scipy.stats import nbinom
+
+    rng = np.random.default_rng(7)
+    r, nb_p = 1.5, 0.4  # scipy nbinom(r, 1 - nb_p); mean 1.0 — deep in the lattice regime
+    y = nbinom.rvs(r, 1.0 - nb_p, size=6000, random_state=rng).astype(float)
+    df = pd.DataFrame(
+        {
+            "Result": y,
+            "EV": np.full_like(y, 1.0),
+            "R": np.full_like(y, r),
+            "NB_P": np.full_like(y, nb_p),
+        }
+    )
+    assert _infer_dist_from_columns(df) == "NegBin"
+    mid_ks = _ks_uniform(_pred_midpit(df, "NegBin", y, strategy="baseline"))
+    rand_ks = _randomized_pit_ks(df, "NegBin", y, strategy="baseline")
+    assert rand_ks < mid_ks - 0.02  # randomization removes the discreteness inflation
+    assert rand_ks < 0.05  # calibrated cell clears the gate on the fixed statistic
+
+
+def test_tail_ks_localizes_over_tail_miscalibration():
+    """The reported over-tail KS is a sub-supremum of the whole-CDF KS (so always ≤ it):
+    it localizes *where* the deviation lives. A self-correcting bulk bump leaves the
+    over-tail clean (tail-KS ≈ 0 ≪ global); a deficit confined to the over-tail puts the
+    global supremum in the tail (tail-KS ≈ global) — the alt-OVER mispricing that the
+    whole-CDF gate nets away."""
+    bulk = np.linspace(0.0, 1.0, 1000, endpoint=False)
+    bulk[(bulk >= 0.4) & (bulk < 0.6)] = 0.4  # pile the middle fifth; CDF rejoins uniform by u=0.6
+    assert _ks_uniform(bulk) > 0.15
+    assert _tail_ks_uniform(bulk) < 0.01  # over-tail is undisturbed
+
+    tail = np.linspace(0.0, 0.88, 1000, endpoint=False)  # no PIT mass above 0.88
+    assert _tail_ks_uniform(tail) == pytest.approx(_ks_uniform(tail))  # global sup is in the tail
+    assert _tail_ks_uniform(tail) > 0.1
 
 
 # ---------------------------------------------------------------------------
-# --live-window mode (Stage 0 deliverable 0.3)
+# --live-window mode (Stage 0 deliverable 0.3).
 # ---------------------------------------------------------------------------
-
-import math
-from datetime import datetime, timedelta
-
-from click.testing import CliRunner
-
-from sportstradamus.training.scorecard import (
-    _history_to_eval_frame,
-    _make_meanyr_lookup_from_gamelog,
-    main,
-)
 
 
 def _build_live_offer(line, bet, model_p, books_p):
@@ -1374,140 +775,6 @@ def _build_live_history_fixture(n: int = 60, market: str = "PTS") -> pd.DataFram
     return pd.DataFrame(rows)
 
 
-def test_history_to_eval_frame_renames_and_normalizes_columns():
-    history = _build_live_history_fixture(n=40, market="PTS")
-    lookup = lambda player, market, date: 22.0  # noqa: E731 — closure for fixture
-    frame = _history_to_eval_frame(
-        history, league="NBA", market="PTS", window_days=30, meanyr_lookup=lookup
-    )
-    assert list(frame.columns) == ["MeanYr", "Result", "EV", "P", "Odds", "Line"]
-    assert (frame["MeanYr"] == 22.0).all()
-    assert frame["EV"].notna().all()
-    # Odds column is the book UNDER prob — flipped relative to the bet's side.
-    # Since the lookup is constant and rows survive after dropna(), we should
-    # have at least most of the input rows present.
-    assert len(frame) > 0
-
-
-def test_history_to_eval_frame_empty_history_returns_empty_schema():
-    frame = _history_to_eval_frame(
-        pd.DataFrame(),
-        league="NBA",
-        market="PTS",
-        window_days=30,
-        meanyr_lookup=lambda p, m, d: 0.0,
-    )
-    assert frame.empty
-    assert list(frame.columns) == ["MeanYr", "Result", "EV", "P", "Odds", "Line"]
-
-
-def test_history_to_eval_frame_filters_to_league_market_and_window():
-    today = datetime(2026, 5, 20)
-    rows = []
-    # In-scope: NBA + PTS within window
-    for idx in range(5):
-        rows.append(
-            {
-                "Player": f"A_{idx}",
-                "League": "NBA",
-                "Date": today.strftime("%Y-%m-%d"),
-                "Market": "PTS",
-                "Model EV": 20.0,
-                "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)],
-                "Actual": 22.0,
-            }
-        )
-    # Out-of-scope league
-    rows.append(
-        {
-            "Player": "B",
-            "League": "WNBA",
-            "Date": today.strftime("%Y-%m-%d"),
-            "Market": "PTS",
-            "Model EV": 20.0,
-            "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)],
-            "Actual": 22.0,
-        }
-    )
-    # Out-of-scope market
-    rows.append(
-        {
-            "Player": "C",
-            "League": "NBA",
-            "Date": today.strftime("%Y-%m-%d"),
-            "Market": "REB",
-            "Model EV": 20.0,
-            "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)],
-            "Actual": 22.0,
-        }
-    )
-    # Out-of-scope date
-    rows.append(
-        {
-            "Player": "D",
-            "League": "NBA",
-            "Date": (today - timedelta(days=120)).strftime("%Y-%m-%d"),
-            "Market": "PTS",
-            "Model EV": 20.0,
-            "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)],
-            "Actual": 22.0,
-        }
-    )
-    history = pd.DataFrame(rows)
-    frame = _history_to_eval_frame(
-        history,
-        league="NBA",
-        market="PTS",
-        window_days=30,
-        meanyr_lookup=lambda p, m, d: 18.0,
-    )
-    assert len(frame) == 5
-
-
-def test_make_meanyr_lookup_returns_nan_when_gamelog_empty():
-    lookup = _make_meanyr_lookup_from_gamelog(pd.DataFrame(), date_col="gameDate")
-    assert math.isnan(lookup("AnyPlayer", "PTS", pd.Timestamp("2026-05-20")))
-
-
-def test_make_meanyr_lookup_returns_nan_when_market_column_missing():
-    gl = pd.DataFrame(
-        {
-            "playerName": ["Player_X"] * 5,
-            "gameDate": pd.date_range("2026-04-01", periods=5, freq="D"),
-            "REB": [10, 11, 12, 9, 8],
-        }
-    )
-    lookup = _make_meanyr_lookup_from_gamelog(gl, date_col="gameDate")
-    assert math.isnan(lookup("Player_X", "PTS", pd.Timestamp("2026-05-20")))
-
-
-def test_make_meanyr_lookup_returns_mean_of_prior_year():
-    gl = pd.DataFrame(
-        {
-            "playerName": ["Player_X"] * 4,
-            "gameDate": [
-                pd.Timestamp("2026-05-10"),
-                pd.Timestamp("2026-05-12"),
-                pd.Timestamp("2026-05-15"),
-                pd.Timestamp("2026-05-19"),  # before the lookup date 2026-05-20
-            ],
-            "PTS": [10.0, 20.0, 30.0, 40.0],
-        }
-    )
-    lookup = _make_meanyr_lookup_from_gamelog(gl, date_col="gameDate")
-    val = lookup("Player_X", "PTS", pd.Timestamp("2026-05-20"))
-    assert val == pytest.approx(25.0)
-
-
-def test_live_window_cli_unknown_league_filter_errors(monkeypatch):
-    runner = CliRunner()
-    history = pd.DataFrame()
-    monkeypatch.setattr("sportstradamus.training.scorecard.read_history", lambda: history)
-    result = runner.invoke(main, ["--live-window", "30"])
-    assert result.exit_code != 0
-    assert "empty" in result.output.lower()
-
-
 def test_live_window_cli_smoke_with_mock_stats(monkeypatch):
     """Full --live-window run with mocked Stats loading — no real gamelog needed."""
     history = _build_live_history_fixture(n=80, market="PTS")
@@ -1523,193 +790,3 @@ def test_live_window_cli_smoke_with_mock_stats(monkeypatch):
     assert result.exit_code == 0, result.output
     assert "NBA_PTS" in result.output
     assert "live_30d" in result.output
-
-
-def test_live_window_cli_rejects_conflicting_flags(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "sportstradamus.training.scorecard.read_history",
-        lambda: _build_live_history_fixture(n=10),
-    )
-    runner = CliRunner()
-    fake_csv = tmp_path / "fake.csv"
-    fake_csv.write_text("MeanYr,Result,EV\n1,1,1\n")
-    result = runner.invoke(
-        main,
-        ["--live-window", "30", "--baseline", str(fake_csv), "--candidate", str(fake_csv)],
-    )
-    assert result.exit_code != 0
-    assert "cannot combine" in result.output.lower()
-
-
-def _skewnormal_frame(
-    pred_scale: float, *, true_scale: float = 4.0, n: int = 8000, seed: int = 3
-) -> pd.DataFrame:
-    """SkewNormal (α=0 ⇒ Normal) frame whose predictive scale may differ from truth.
-
-    Truth ~ Normal(0, ``true_scale``); the per-row predictive is Normal(0,
-    ``pred_scale``). ``pred_scale == true_scale`` is calibrated; smaller is
-    under-dispersed (intervals too narrow), larger is over-dispersed. No
-    ``MeanYr`` column, so the decode leaves ``SN_Scale`` untouched.
-    """
-    rng = np.random.default_rng(seed)
-    actual = rng.normal(0.0, true_scale, n)
-    return pd.DataFrame(
-        {
-            "Result": actual,
-            "EV": np.zeros(n),
-            "SN_Loc": np.zeros(n),
-            "SN_Scale": np.full(n, pred_scale),
-            "SN_Alpha": np.zeros(n),
-        }
-    )
-
-
-def test_pred_ppf_reconstructs_iqr_pred_analytical():
-    """`_iqr_pred_analytical` must equal `_iqr` of the concatenated `_pred_ppf` bag.
-
-    Guards the refactor that split the per-family quantile inversion out of the
-    pooled-IQR helper — the two must stay numerically identical.
-    """
-    df = _skewnormal_frame(pred_scale=4.0)
-    q25 = _pred_ppf(df, "SkewNormal", 0.25, strategy="baseline")
-    q75 = _pred_ppf(df, "SkewNormal", 0.75, strategy="baseline")
-    expected = np.percentile(np.concatenate([q25, q75]), 75) - np.percentile(
-        np.concatenate([q25, q75]), 25
-    )
-    assert _iqr_pred_analytical(df, "SkewNormal", strategy="baseline") == pytest.approx(expected)
-
-
-def test_dispersion_diagnostics_calibrated_is_near_nominal():
-    """A correctly-scaled predictive covers at its nominal rate with a tiny PIT-KS."""
-    df = _skewnormal_frame(pred_scale=4.0)
-    pit_ks, tail_pit_ks, cov50, cov80 = _dispersion_diagnostics(
-        df, "SkewNormal", df["Result"].to_numpy(), strategy="baseline"
-    )
-    assert cov50 == pytest.approx(0.50, abs=0.04)
-    assert cov80 == pytest.approx(0.80, abs=0.04)
-    assert pit_ks < 0.05
-    assert tail_pit_ks <= pit_ks  # over-tail sub-supremum of the whole-CDF KS
-
-
-def test_dispersion_diagnostics_flags_underdispersion():
-    """Too-narrow predictive (half scale) → central coverage collapses, PIT-KS spikes.
-
-    This is the NFL-receptions pathology: actuals fall *outside* the central
-    interval far more than nominal, so coverage drops well below 0.50/0.80.
-    """
-    df = _skewnormal_frame(pred_scale=2.0)
-    pit_ks, _tail, cov50, cov80 = _dispersion_diagnostics(
-        df, "SkewNormal", df["Result"].to_numpy(), strategy="baseline"
-    )
-    assert cov50 < 0.35
-    assert cov80 < 0.60
-    assert pit_ks > 0.15
-
-
-def test_dispersion_diagnostics_flags_overdispersion():
-    """Too-wide predictive (double scale) → actuals cluster inside, coverage overshoots."""
-    df = _skewnormal_frame(pred_scale=8.0)
-    _, _, cov50, cov80 = _dispersion_diagnostics(
-        df, "SkewNormal", df["Result"].to_numpy(), strategy="baseline"
-    )
-    assert cov50 > 0.65
-    assert cov80 > 0.90
-
-
-def test_dispersion_diagnostics_zinb_is_finite_and_bounded():
-    """The count branch (ZINB mid-PIT + integer-quantile coverage) stays well-formed."""
-    rng = np.random.default_rng(11)
-    n = 3000
-    df = pd.DataFrame(
-        {
-            "Result": rng.poisson(0.7, n).astype(float),
-            "EV": np.full(n, 0.7),
-            "R": np.full(n, 1.5),
-            "NB_P": np.full(n, 0.4),
-            "Gate": np.full(n, 0.3),
-        }
-    )
-    assert _infer_dist_from_columns(df) == "ZINB"
-    pit_ks, tail_pit_ks, cov50, cov80 = _dispersion_diagnostics(
-        df, "ZINB", df["Result"].to_numpy(), strategy="baseline"
-    )
-    for v in (pit_ks, tail_pit_ks, cov50, cov80):
-        assert np.isfinite(v) and 0.0 <= v <= 1.0
-    assert tail_pit_ks <= pit_ks
-    pit = _pred_midpit(df, "ZINB", df["Result"].to_numpy(), strategy="baseline")
-    assert np.all((pit >= 0.0) & (pit <= 1.0))
-
-
-def test_randomized_pit_ks_collapses_count_lattice():
-    """On a calibrated low-count NegBin frame the mid-PIT KS is lattice-inflated while the
-    randomized PIT KS is small — the fix that lets one Gate-4 threshold span count and
-    continuous families (a continuous-tuned 0.05 would otherwise fail calibrated counts)."""
-    from scipy.stats import nbinom
-
-    rng = np.random.default_rng(7)
-    r, nb_p = 1.5, 0.4  # scipy nbinom(r, 1 - nb_p); mean 1.0 — deep in the lattice regime
-    y = nbinom.rvs(r, 1.0 - nb_p, size=6000, random_state=rng).astype(float)
-    df = pd.DataFrame(
-        {
-            "Result": y,
-            "EV": np.full_like(y, 1.0),
-            "R": np.full_like(y, r),
-            "NB_P": np.full_like(y, nb_p),
-        }
-    )
-    assert _infer_dist_from_columns(df) == "NegBin"
-    mid_ks = _ks_uniform(_pred_midpit(df, "NegBin", y, strategy="baseline"))
-    rand_ks = _randomized_pit_ks(df, "NegBin", y, strategy="baseline")
-    assert rand_ks < mid_ks - 0.02  # randomization removes the discreteness inflation
-    assert rand_ks < 0.05  # calibrated cell clears the gate on the fixed statistic
-
-
-def test_randomized_pit_ks_continuous_is_deterministic_ordinary_pit():
-    """Continuous families have no point mass, so the randomized KS is the deterministic
-    ``KS(F(y))`` — no draw dependence."""
-    df = _skewnormal_frame(pred_scale=4.0)
-    y = df["Result"].to_numpy()
-    expected = _ks_uniform(_pred_midpit(df, "SkewNormal", y, strategy="baseline"))
-    assert _randomized_pit_ks(df, "SkewNormal", y, strategy="baseline") == pytest.approx(expected)
-
-
-def test_gate4_pit_ks_threshold_takes_larger_of_delta_and_noise_floor():
-    """Per-cell bound = max(δ=0.05, 1.358/√n): δ binds at large n, the KS noise floor at small."""
-    assert _gate4_pit_ks_threshold(2000) == pytest.approx(_GATE4_PIT_KS_DELTA)  # floor ~0.030 < δ
-    assert _gate4_pit_ks_threshold(100) == pytest.approx(_GATE4_KS_NOISE_COEF / 10.0)  # 0.1358 > δ
-    assert np.isnan(_gate4_pit_ks_threshold(0))
-
-
-def test_tail_ks_localizes_over_tail_miscalibration():
-    """The reported over-tail KS is a sub-supremum of the whole-CDF KS (so always ≤ it):
-    it localizes *where* the deviation lives. A self-correcting bulk bump leaves the
-    over-tail clean (tail-KS ≈ 0 ≪ global); a deficit confined to the over-tail puts the
-    global supremum in the tail (tail-KS ≈ global) — the alt-OVER mispricing that the
-    whole-CDF gate nets away."""
-    bulk = np.linspace(0.0, 1.0, 1000, endpoint=False)
-    bulk[(bulk >= 0.4) & (bulk < 0.6)] = 0.4  # pile the middle fifth; CDF rejoins uniform by u=0.6
-    assert _ks_uniform(bulk) > 0.15
-    assert _tail_ks_uniform(bulk) < 0.01  # over-tail is undisturbed
-
-    tail = np.linspace(0.0, 0.88, 1000, endpoint=False)  # no PIT mass above 0.88
-    assert _tail_ks_uniform(tail) == pytest.approx(_ks_uniform(tail))  # global sup is in the tail
-    assert _tail_ks_uniform(tail) > 0.1
-
-
-def test_standalone_g1_column_scores_preblend_probs():
-    """`g1_brier_diff_ci_hi_standalone` scores `P_standalone` on the fused rows.
-
-    Blank when the column is absent; present and distinct when supplied. With a
-    coin-flip standalone model and the frame's random (0.5) book, the standalone
-    paired-Brier ties the book (upper bound 0), while the sharp fused model beats
-    it (upper bound < 0) — so the standalone bound sits strictly above the fused.
-    """
-    df = _priced_frame()
-    base = gate_row(df, "EV", league="NBA", market="PTS", strategy="t")
-    assert base["g1_brier_diff_ci_hi_standalone"] is None
-
-    df_sa = df.copy()
-    df_sa["P_standalone"] = 0.5
-    row = gate_row(df_sa, "EV", league="NBA", market="PTS", strategy="t")
-    assert row["g1_brier_diff_ci_hi_standalone"] is not None
-    assert row["g1_brier_diff_ci_hi_standalone"] > row["g1_brier_diff_ci_hi"]

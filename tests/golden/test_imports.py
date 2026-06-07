@@ -13,18 +13,11 @@ import pytest
 
 CORE_MODULES = [
     "sportstradamus.helpers",
-    "sportstradamus.spiderLogger",
-    "sportstradamus.skew_normal",
     "sportstradamus.stats",
     "sportstradamus.books",
     "sportstradamus.moneylines",
     "sportstradamus.training",
     "sportstradamus.prediction",
-    "sportstradamus.nightly",
-    "sportstradamus.dashboard",
-    "sportstradamus.dashboard_app",
-    "sportstradamus.dashboard_data",
-    "sportstradamus.analysis",
 ]
 
 

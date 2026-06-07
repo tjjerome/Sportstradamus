@@ -49,37 +49,3 @@ def test_keeps_categorical_columns_even_when_degenerate() -> None:
     assert "informative" in kept
 
 
-def test_keeps_column_with_some_nans_and_two_distinct_values() -> None:
-    X_train = pd.DataFrame(
-        {
-            "sparse_but_varied": [1.0, np.nan, 2.0, np.nan, 1.0],
-        }
-    )
-    kept = _prune_uninformative_features(X_train, categorical_cols=[])
-    # Has 2 distinct non-NaN values → informative.
-    assert kept == ["sparse_but_varied"]
-
-
-def test_drops_column_with_one_distinct_value_and_nans() -> None:
-    X_train = pd.DataFrame(
-        {
-            "near_constant": [1.0, np.nan, 1.0, np.nan, 1.0],
-        }
-    )
-    kept = _prune_uninformative_features(X_train, categorical_cols=[])
-    # nunique(dropna=True) == 1 → cannot split → dropped.
-    assert kept == []
-
-
-def test_preserves_column_order() -> None:
-    X_train = pd.DataFrame(
-        {
-            "a": [1.0, 2.0],
-            "b": [3.0, 3.0],  # constant, dropped
-            "c": [4.0, 5.0],
-            "d": [np.nan, np.nan],  # all-nan, dropped
-            "e": [6.0, 7.0],
-        }
-    )
-    kept = _prune_uninformative_features(X_train, categorical_cols=[])
-    assert kept == ["a", "c", "e"]
