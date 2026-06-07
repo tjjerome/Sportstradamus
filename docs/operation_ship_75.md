@@ -69,29 +69,32 @@ It follows that:
   still matters, because the parlay builder still needs a well-shaped distribution around
   that line.
 
-## Current standings (2026-06-03, post Gate-4 PIT-KS reset)
+## Current standings (2026-06-07, post L0 + L1 ships)
 
 | League | Shipped (`devel`) | Target | Gap |
 |---|---|---|---|
-| NBA | 9 / 21 | 16 | **−7** |
-| WNBA | 5 / 18 | 14 | **−9** |
+| NBA | 11 / 21 | 16 | **−5** |
+| WNBA | 8 / 18 | 14 | **−6** |
 | NFL | 5 / 20 | 15 | **−10** |
-| **Total** | **19 / 59 (32%)** | 45 | **−26** |
+| **Total** | **24 / 59 (41%)** | 45 | **−21** |
 
 Source of truth: the `shipped` field in `stat_meta.json` (verified directly, not the
 stale `model_stats.parquet`, which still carries the retired IQR-g4 columns). Shipped
 cells today:
 
-- **NBA (9):** BLK, BLST, FG3M, OREB, PA, PR, PRA, PTS, REB
-- **WNBA (5):** FGA, MIN, PA, PR, PRA
+- **NBA (11):** BLK, BLST, FG3M, MIN, OREB, PA, PR, PRA, PTS, RA, REB
+- **WNBA (8):** BLK, FG3M, FGA, MIN, PA, PR, PRA, TOV
 - **NFL (5):** interceptions, receiving-tds, rushing-tds, targets, tds
 
-This is a deliberate, correct tightening — not a regression. The previous "43/59 = 73%"
-was scored under a Gate 4 (`IQR(EV)/IQR(Result) > 0.5`) that turned out to be measuring
-sharpness, not calibration, and waved through under-dispersed cells. The redefinition to
-a randomized-PIT KS calibration gate (commit `2f1ecd4`) demoted 24 false passes
-(`cb077db`). The board is now honest. Getting back above 75% is a model-quality job, and
-the binding constraint is now precisely identified (§3).
+The board bottomed at **19/59 (32%)** on 2026-06-03 after the Gate-4 redefinition and has
+recovered to 24/59 via **Lever 0** (free re-score promotes: WNBA BLK/FG3M/TOV) and
+**Lever 1** (post-hoc scale calibration: NBA RA/MIN). This is a deliberate, correct
+tightening — not a regression. The previous "43/59 = 73%" was scored under a Gate 4
+(`IQR(EV)/IQR(Result) > 0.5`) that turned out to be measuring sharpness, not calibration,
+and waved through under-dispersed cells. The redefinition to a randomized-PIT KS
+calibration gate (commit `2f1ecd4`) demoted 24 false passes (`cb077db`). The board is now
+honest. Getting back above 75% is a model-quality job, and the binding constraint is
+precisely identified (§3).
 
 ---
 
@@ -300,9 +303,11 @@ and three of those stages are independently swappable per cell
   Sequential earns its keep only where the trained model already carries a wrong/weak
   *directional* skew at a scale-active `c` (it then touches it up); joint is the prior. Because
   every mode here is a post-hoc transform of a *fixed* trained predictive, the whole calibration
-  axis is **free to sweep** — no retrain — which is what makes the combination search below cheap.
-  Calibration is close to exhausted as a *breadth* lever on its own — it fixes width/shape,
-  never signal or location-scale structure.
+  axis is **free to sweep** — no retrain. The honest combination search below does *not* yet exploit
+  this: it reads the pipeline's one val-fit mode off each dump, because an honest sweep must fit the
+  modes on a dumped *validation* predictive, not the test rows (re-fitting on test is the optimism that
+  sank the first screen — §5 search). Calibration is close to exhausted as a *breadth* lever on its own
+  — it fixes width/shape, never signal or location-scale structure.
 
 - **Blending** — how the model's distribution meets the book: the training **loss** (`nll`
   vs `crps`, upstream — it shapes the predictive that gets blended) × the **blend** itself
@@ -378,6 +383,19 @@ computation. A genuinely structural fourth lever — a **hierarchical Bayesian**
 generalizes the dormant EB prior (learn the shrinkage per group, pool the full predictive across
 player ← position ← team/league rather than the mean only) — is the research-gated answer to the
 small-sample NFL wall and is scoped by a `research-analyst` brief before any build.
+
+**Sweep in flight (2026-06-07, preliminary).** The first honest pass — the built normalization
+ranker ([`training/combo_search.py`](../src/sportstradamus/training/combo_search.py): deterministic
+trains × both decodable normalizations, scored on val-fit→test gates) — is running across the
+withheld SkewNormal cells of the covered leagues. The early signal is strong and consistent:
+`centered_additive_mean10` systematically out-calibrates `ratio_meanyr` on Gate 4, flipping a batch
+of withheld cells (on the first 8: WNBA AST/PTS/RA/REB/DREB and NBA AST/DREB, several with real
+margin below 0.05, not knife-edge). These are **deterministic stand-in** verdicts — each ships only
+after its real-HPO confirm — but they corroborate the thesis above that **normalization, not
+calibration, is the dominant unexplored axis** (and they confirm this section's own prediction that
+the "centered-strategy" cells like WNBA DREB resolve once the normalization axis is tried). The
+`loss_fn` / `ratio_projvol` / Optuna extensions remain unbuilt; this pass is the normalization slice
+alone.
 
 ### Lever 0 — Re-score every withheld cell under the current gates; promote free passers
 
@@ -555,6 +573,22 @@ adds a sibling `skew_cal` field) — an engineering change, **not** a new distri
   {carries 0.047, sacks-taken 0.045}. (All in-sample test-set floors — the honest verdict is the
   val→test retrain, never the proxy.)
 
+  **Honest-retrain reconciliation (2026-06-07, first cell).** WNBA AST is the first screen row
+  taken through the honest val-fit→test retrain (the combination search of §5). The screen's
+  in-sample `joint(c,s) = 0.0397` was decoded under the cell's own `ratio_meanyr` normalization;
+  the honest val-fit→test KS under `ratio_meanyr` is **0.126** — the in-sample fit oversold by
+  ~0.086, an order of magnitude past the assumed +0.008–0.010 discount. The cell nonetheless
+  **ships**, but under the *other* decodable normalization: `centered_additive_mean10` lands an
+  honest g4 = **0.047** (5/5; g1 −0.017, g5 0.049), pending real-HPO confirm. Two lessons: (1) the
+  in-sample screen floors are unreliable ship predictors for *overconfident* cells (WNBA AST
+  central-50 coverage 0.376) — the val→test discount is cell- and normalization-specific and can be
+  an order of magnitude larger than the uniform estimate; (2) the decisive axis here is
+  **normalization, not calibration** — the same `(c,s)` machinery ships the cell under one target
+  transform and fails it under another, which is exactly why the honest sweep scores *both*
+  normalizations per cell rather than trusting the screened one. (An earlier search build re-fit
+  `(c,s)` on the test rows and reported 0.039, reproducing the in-sample optimism; that dishonest
+  path was removed — commit `10306ee`.)
+
   **The `defer` / `deferred-90` rows above are CALIBRATION-AXIS verdicts, not final.** The screen
   varied only `(c, s)`; it did not touch normalization or blending. NBA AST's heavy tail and NFL
   receptions' / WNBA DREB's hard PIT may resolve under a **volume/rate normalization**
@@ -688,25 +722,31 @@ committing to a new distribution head.
 
 ## 6. Per-league path to 75%
 
-The arithmetic, grounded in the fresh re-score. "Available" counts the cells a lever can
-plausibly flip; the target gap is in parentheses.
+The arithmetic, grounded in the 2026-06-03 re-score. "Available" counts the cells a lever
+can plausibly flip; the target gap is in parentheses. **Caveat for the reader:** the per-cell
+`pit_ks` figures below are *in-sample* test-set floors from the L0/L4a screen and run
+optimistic — the honest combination-search sweep (§5), now re-grounding every withheld cell
+on its val-fit→test gates across both decodable normalizations, supersedes them. Treat the
+counts as the pre-sweep estimate; the sweep's board is authoritative.
 
-### NBA — 9/21, need +7 → 16
+### NBA — 11/21, need +5 → 16
 
-- **L1 dispersion** available on **9** Gate-4-only cells: AST, DREB, FG3A, FGM, FTM, MIN,
-  RA, STL, TOV. Four are hair's-breadth (`pit_ks` ≤ 0.055: MIN, RA, STL, TOV).
+- **L1 dispersion** available on Gate-4-only cells: AST, DREB, FG3A, FGM, FTM, STL, TOV
+  (MIN and RA already shipped via L1).
 - **L2 then L1** on FGA, fantasy-points-prizepicks (g2 bias + g4).
 - **L3** on PF (g1 + g5 — the one genuinely hard NBA cell).
-- **Verdict: comfortable.** L1 alone clears the target if it flips ≥ 7 of 9. FGA/FP/PF
-  are backups, not load-bearing.
+- **Verdict: comfortable.** +5 of those seven L1 cells clears the target; FGA/FP/PF are
+  backups, not load-bearing.
 
-### WNBA — 5/18, need +9 → 14
+### WNBA — 8/18, need +6 → 14
 
-- **L0 free promotes:** BLK, FG3M, TOV → 8/18.
-- **L1 dispersion** available on **9** Gate-4-only cells: AST, BLST, DREB, FTM, OREB, PTS,
-  RA, REB, fantasy-points-prizepicks (DREB is severe at 0.50 — discount it).
+- **L0 free promotes — DONE:** BLK, FG3M, TOV shipped → 8/18.
+- **L1 / normalization** available on Gate-4-only cells: AST, BLST, DREB, FTM, OREB, PTS,
+  RA, REB, fantasy-points-prizepicks (DREB is severe at 0.50 — discount it). AST honestly
+  ships under the `centered_additive_mean10` normalization (val-fit→test g4 0.047) — the
+  sweep's lead candidate, pending real-HPO confirm.
 - **L3** on STL (g1 edge).
-- **Verdict: achievable.** 8 + any 6 of the 8 realistic L1 cells = 14. Headroom of ~2.
+- **Verdict: achievable.** +6 of the eight realistic L1/normalization cells = 14.
 
 ### NFL — 5/20, need +10 → 15 (the binding league)
 
@@ -779,6 +819,34 @@ confirm or kill. Each is a place a lever could fail; knowing early reorders the 
 >
 > Holes #4 (do the marginal NFL g1s improve under calibration) and #6 (block-bootstrap backlog)
 > remain open.
+>
+> **Updated 2026-06-07 (honest combination-search sweep).** Two methodological results from the
+> first honest val-fit→test retrains (the §5 sweep), both bearing on how much to trust the
+> in-sample screen that seeds this plan:
+>
+> - **The in-sample screen floors oversell, and not by a fixed discount.** The L4a screen and the
+>   §6 per-cell `pit_ks` columns are 2-parameter fits on the *test* rows. For WNBA AST the
+>   in-sample `joint(c,s) = 0.0397` became an honest val→test **0.126** under the cell's own
+>   `ratio_meanyr` normalization — an 0.086 oversell, an order of magnitude past the assumed
+>   +0.008–0.010. The oversell tracks model overconfidence (WNBA AST central-50 coverage 0.376),
+>   so the floors are *rank* hints, not ship predictions. The honest sweep (val-fit→test gates,
+>   both normalizations, deterministic ranker → real-HPO confirm) replaces them; nothing ships on
+>   an in-sample floor. This *refines* hole #1: post-hoc scale **does** move PIT-KS with g1/g5
+>   intact (WNBA AST 0.126→0.047, g1 −0.017, g5 0.049) — but only under the right normalization and
+>   with a cell-specific val→test discount.
+> - **Normalization is a first-class ship axis, often decisive over calibration.** WNBA AST ships
+>   under `centered_additive_mean10` (0.047) and fails under `ratio_meanyr` (0.126) with the *same*
+>   calibration machinery. The sweep scores both decodable normalizations per cell; the §6 counts,
+>   computed against each cell's single default normalization, are a lower bound.
+>
+> **Considered and dropped: predictive-variance regularization.** A lever was proposed to "escape a
+> local minimum where a worse (deterministic) model out-calibrates the sharper HPO model." That
+> premise was a measurement artifact — an earlier search build re-fit calibration on the *test* rows
+> and reported 0.039 for WNBA AST; the honest deterministic stand-in matches real HPO on
+> like-for-like (g4 0.126 vs 0.123 under `ratio_meanyr`). With no worse-beats-better paradox the
+> lever has no motivating evidence and is not queued. Overconfidence itself (coverage 0.376) is real
+> but is addressed on the normalization and post-hoc-calibration axes the sweep already exercises,
+> not by a new variance-penalty mechanism.
 
 1. **Will post-hoc scale calibration actually move PIT-KS without breaking g1/g5?**
    The central assumption of Lever 1. A quick study on 3–4 representative cells (one
