@@ -1522,6 +1522,35 @@ def apply_thresholds(row: dict[str, object]) -> dict[str, object]:
     return out
 
 
+def _normalized_gate_slack(value: float | None, threshold: float) -> float:
+    """Headroom of one upper-bounded gate in units of its own threshold: ``(threshold - value) /
+    threshold`` (positive ⇒ passing). A ``None`` value is a hard fail (the gate couldn't compute),
+    so it returns ``-inf`` and binds the minimum.
+    """
+    return -np.inf if value is None else (threshold - value) / threshold
+
+
+def min_gate_slack(row: dict[str, object]) -> float:
+    """Single continuous ship-margin scalar: the minimum per-gate headroom across the five gates,
+    each normalized to its own threshold so they compare. ``> 0`` ⇔ every gate passes with room,
+    and the value is the binding (tightest) gate's fractional headroom.
+
+    The combination search maximizes this over ``(normalization, loss, calibration-mode)``: it is
+    a *ranking* signal only — the authoritative ship decision is :func:`apply_thresholds` on the
+    real-HPO scorecard. A blank Gate 1 (no book) auto-passes and so does not bind; blank Gate
+    2/3/4/5 are hard fails (``-inf``).
+    """
+    hi = row.get("g1_brier_diff_ci_hi")
+    g4, g4_max = row.get("g4_pit_ks"), row.get("g4_pit_ks_max")
+    return min(
+        np.inf if hi is None else (_GATE1_NONINF_MARGIN - hi) / _GATE1_NONINF_MARGIN,
+        _normalized_gate_slack(row.get("g2_star_z"), _GATE2_STAR_Z_MAX),
+        _normalized_gate_slack(row.get("g3_bench_z"), _GATE3_BENCH_Z_MAX),
+        -np.inf if g4 is None or g4_max is None else (g4_max - g4) / g4_max,
+        _normalized_gate_slack(row.get("g5_ece_debiased", row.get("g5_ece")), _GATE5_ECE_MAX),
+    )
+
+
 # Identity columns gate_row attaches that the inline caller already owns on
 # the row it's merging into — strip them off in compute_gates so the merge
 # can't fight the parent row over (league, market).

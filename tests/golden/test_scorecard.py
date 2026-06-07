@@ -48,6 +48,7 @@ from sportstradamus.training.scorecard import (
     gate_row,
     load_test_set,
     main,
+    min_gate_slack,
     scorecard,
     supersede_verdict,
     sweep_calibration_modes,
@@ -452,6 +453,51 @@ def test_sweep_calibration_modes_skew_joint_wins_on_underskew():
     assert best.mode == "skew-joint"
     assert best.pit_ks < by_mode["dispersion"].pit_ks
     assert best.pit_ks < by_mode["skew-sequential"].pit_ks
+
+
+def test_min_gate_slack_is_the_binding_gate_headroom_when_all_pass():
+    """The ship-margin scalar is the minimum per-gate headroom, each normalized to its own
+    threshold; when every gate passes it is the tightest gate's fractional headroom (here Gate 4).
+    """
+    row = {
+        "g1_brier_diff_ci_hi": 0.0,  # (0.005-0)/0.005 = 1.0
+        "g2_star_z": 0.25,  # (0.5-0.25)/0.5 = 0.5
+        "g3_bench_z": 0.0,  # 1.0
+        "g4_pit_ks": 0.04,
+        "g4_pit_ks_max": 0.05,  # (0.05-0.04)/0.05 = 0.2  <- binding
+        "g5_ece_debiased": 0.05,  # (0.075-0.05)/0.075 = 0.333
+    }
+    assert min_gate_slack(row) == pytest.approx(0.2)
+
+
+def test_min_gate_slack_negative_when_gate4_fails():
+    """A failing gate drives the scalar below zero — the search must rank a non-shipping combo
+    under a shipping one.
+    """
+    row = {
+        "g1_brier_diff_ci_hi": 0.0,
+        "g2_star_z": 0.25,
+        "g3_bench_z": 0.0,
+        "g4_pit_ks": 0.06,  # (0.05-0.06)/0.05 = -0.2
+        "g4_pit_ks_max": 0.05,
+        "g5_ece_debiased": 0.05,
+    }
+    assert min_gate_slack(row) < 0
+
+
+def test_min_gate_slack_g1_blank_does_not_bind():
+    """A blank Gate 1 (no book) auto-passes, so it must not bind the minimum — the scalar stays
+    positive and equals the tightest *computed* gate (Gate 4 here), not a -inf from the blank.
+    """
+    row = {
+        "g1_brier_diff_ci_hi": None,  # no Odds → auto-pass, non-binding
+        "g2_star_z": 0.0,
+        "g3_bench_z": 0.0,
+        "g4_pit_ks": 0.04,
+        "g4_pit_ks_max": 0.05,
+        "g5_ece_debiased": 0.03,
+    }
+    assert min_gate_slack(row) == pytest.approx(0.2)
 
 
 def test_resolve_decode_strategy_substitutes_default_for_none(monkeypatch):
