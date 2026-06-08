@@ -4,9 +4,9 @@
 > citations, and the inference-path checklist live in
 > [`operation_ship_references.md`](operation_ship_references.md). Current gate
 > thresholds live in [`ship_gate.md`](ship_gate.md). The next-rung stub is
-> [`operation_ship_90.md`](operation_ship_90.md). This document was rewritten clean on
-> 2026-06-03 after the Gate-4 PIT-KS redefinition reset the board; the prior (bloated)
-> revision is recoverable from git history (`git show 5c4a335:docs/operation_ship_75.md`).
+> [`operation_ship_90.md`](operation_ship_90.md). Rewritten clean on 2026-06-03 after the
+> Gate-4 PIT-KS redefinition reset the board, and amended continuously since; prior revisions
+> are recoverable from git history (`git show 5c4a335:docs/operation_ship_75.md`).
 
 ## North Star
 
@@ -52,7 +52,7 @@ carries. The book is there to be *used*.
 **Calibration is the product.** The parlay builder needs well-shaped full predictive
 distributions to price alt-lines and to assemble correlated legs without compounding
 mispricing. That is why **Gate 4 (PIT-KS calibration) is the real quality bar** — and why
-the under-dispersion fix (§5 L1) is the centre of the plan.
+fixing under-dispersion is central to the plan (§3, §5).
 
 **Gate 1 is a no-regression guardrail, not a "beat the book" demand.** It is a
 *non-inferiority* test: it certifies that blending our model into the sharp line does not
@@ -183,14 +183,15 @@ the gates. That work is finished (§1a). **The gates are now correct, so from he
 plan is organized around model-quality levers**, cheapest-first, each shipping per cell
 on a clean re-score.
 
-The single most important consequence of the Gate-4 reset: the dominant failure mode
-across all three leagues is no longer bias, ECE, or Brier — it is **predictive
+The single most important consequence of the Gate-4 reset: the dominant *gate-failure
+symptom* across all three leagues is no longer bias, ECE, or Brier — it is **predictive
 under-dispersion** (the per-row distribution is too narrow), which the new PIT-KS gate
-measures directly and the old IQR gate hid.
+measures directly and the old IQR gate hid. Which *lever* best fixes that symptom is an
+open tension (§3).
 
 ---
 
-## 3. Diagnosis: systematic under-dispersion is the binding constraint
+## 3. Diagnosis: under-dispersion is the dominant symptom — two candidate primary levers
 
 A fresh full-board re-score (all 59 test CSVs through `compute_gates`, the exact
 production path) shows the failure modes are overwhelmingly concentrated on Gate 4, and
@@ -243,9 +244,22 @@ families *do* get `dispersion_cal` (CRPS-fit), but the hair's-breadth count fail
 (NBA FTM 0.066, STL 0.051, TOV 0.051) show the **CRPS objective is not the PIT-KS
 objective** — minimizing CRPS does not guarantee a calibrated PIT.
 
-This is good news: the binding constraint has a named, surgical root cause in existing,
-tested machinery, and the lever that addresses it (§5 L1) has the highest leverage in
-the plan.
+This is a named, surgical root cause in existing, tested machinery — **but which lever is
+primary is an open tension, not a settled call.** Two candidates address the same too-narrow
+PIT from different angles, and the plan deliberately does not pick between them yet:
+
+- **Post-hoc dispersion calibration (§5 Lever 1).** Scale the served SkewNormal width to a
+  Uniform PIT. Ships the hair's-breadth cells (NBA RA, MIN) outright; this is the
+  calibration-primary reading (the §5 Lever-1 "main event" framing).
+- **Normalization (§5 search space).** A centered / rate target reshapes the residual so the
+  predictive is calibratable at all. The 2026-06-07 sweep finds `centered_additive_mean10`
+  systematically out-calibrates `ratio_meanyr` on Gate 4 and ships moderate/severe cells (NBA
+  AST, WNBA DREB) that **no scalar width fix reaches** — which is why §5/§8 call post-hoc
+  calibration "close to exhausted as a *breadth* lever" and normalization "often decisive."
+
+These two readings are **not reconciled.** The honest combination search (§5) is the
+adjudicator: it scores both axes per cell and lets the gate decide. Read §3's heading as the
+*symptom* (too-narrow PIT), not a verdict that calibration is the fix.
 
 ---
 
@@ -271,7 +285,7 @@ Each lever names its **mechanism**, **targets**, a **go/no-go** measured on vali
 *before* any ship, and an explicit **if-it-fails** branch. Levers are independent enough
 that a failure on one does not block the others.
 
-### The search space is three axes, not one cascade — and we have explored ~one
+### The search space — three axes
 
 The lever cascade below (L0–L5) is the depth-first exploration of **one** of three
 orthogonal axes. A served predictive is `(normalization → model+loss → blend → calibration)`,
@@ -303,16 +317,39 @@ and three of those stages are independently swappable per cell
   Sequential earns its keep only where the trained model already carries a wrong/weak
   *directional* skew at a scale-active `c` (it then touches it up); joint is the prior. Because
   every mode here is a post-hoc transform of a *fixed* trained predictive, the whole calibration
-  axis is **free to sweep** — no retrain. The honest combination search below does *not* yet exploit
-  this: it reads the pipeline's one val-fit mode off each dump, because an honest sweep must fit the
-  modes on a dumped *validation* predictive, not the test rows (re-fitting on test is the optimism that
-  sank the first screen — §5 search). Calibration is close to exhausted as a *breadth* lever on its own
-  — it fixes width/shape, never signal or location-scale structure.
+  axis is **free to sweep** — no retrain (the driver sweeps it; see the executable-state table
+  below). Calibration is close to exhausted as a *breadth* lever on its own — it fixes width/shape,
+  never signal or location-scale structure.
 
 - **Blending** — how the model's distribution meets the book: the training **loss** (`nll`
   vs `crps`, upstream — it shapes the predictive that gets blended) × the **blend** itself
-  (`fused_loc`: precision-weighted pool + per-cell `model_weight`). Both frozen today
-  (loss set per family, blend structure fixed). Under-explored.
+  (`fused_loc`: precision-weighted pool + per-cell `model_weight`). The `crps` training loss and
+  blend objective are both built (2026-06-07, `fit_model_weight_crps`); the blend *structure* is
+  fixed.
+
+**The executable state, honestly.** The *method* is well-defined and proven: per cell, enumerate
+the executable axis-values, train one `--deterministic` model each, score the **honest
+val-fit→test gate row** (the production gate path), rank by `min_gate_slack`, and confirm the
+top-K under real HPO before any ship (the combination-search driver below automates this loop).
+As of 2026-06-07 the driver controls three of the four axis dimensions (normalization, dist-loss,
+blend-loss as the retrain grid; calibration swept free); the executable state per axis:
+
+| Axis | Values defined | Executable today | Build to put the rest on the table |
+|---|---|---|---|
+| **Normalization** | `ratio_meanyr`, `centered_additive_mean10`, `centered_additive_eb_meanyr_k10`, `ratio_projvol` | **3 of 4** — `ratio_meanyr` + `centered_additive_mean10` + the **EB** slug now have a Gate-4 SkewNormal decode (`scorecard._decode_sn_loc_scale`, EB off the dumped `GlobalMean`) | **build** `ratio_projvol` (target = y / projected-volume) |
+| **Calibration** | `none`, `dispersion`, `skew-joint`, `skew-sequential` | **swept by the driver (in-sample)** — `gate_rows_by_calibration_mode` recovers the blended predictive off each dump and *compares* all four modes per corner; today the dump is the **test** split, so it is an in-sample ranking signal (real-HPO confirms) | dump the **validation** predictive so the same sweep is OOS |
+| **Loss / blending** | loss `nll`/`crps`; blend weights | **dist-loss: 2** (`--dist-training-loss nll\|crps`) + **blend-loss: 2** (`--blending-loss-fn nll\|crps`; `fit_model_weight_crps` built 2026-06-07) — both retrain-tier | free post-hoc `w`-refit (so `crps` blend stops costing a train); expose the blend weights |
+
+As of 2026-06-07 the driver gives the search **three independent retrain degrees of freedom**
+(`normalization × dist_training_loss × blending_loss_fn`, the `GridSampler` grid) **plus the free
+post-hoc calibration sweep** (all four modes compared per corner) — it controls and compares along
+every axis, where the pre-driver state only *auto-fit* calibration and held loss/blend fixed. The
+earlier "one DOF — a line of 2 points" framing is fully superseded: the visited set is a
+`(3 norms × 2 dist-losses × 2 blend-losses × 4 cal-modes) = 48`-row board per cell once a sweep is run.
+What remains genuinely unbuilt is narrow and is *fidelity / cost*, not new axes: the `ratio_projvol`
+normalization value (the one missing axis-value), the honest-val calibration dump (today's sweep is
+in-sample), the free post-hoc `w`-refit (so a `crps` blend stops costing a train), and the
+research-gated hierarchical-Bayes layer. Nothing in the space is ruled out — only those are not-yet-wired.
 
 **Nothing is deferred. Every withheld cell and every lever is a live Ship-75 candidate.** The
 `deferred-90` / "defer" / Lever-cap tags are **retired for the duration of this operation.** They
@@ -361,7 +398,8 @@ deterministic dump already carries the pipeline's own **validation-fit** joint c
 ranker just calls `gate_row` on it — the *same* code production ships on — and reads
 `min_gate_slack` off the result. No test re-fit, so fidelity is by construction. An earlier build
 instead **re-fit the four calibration modes on the trial's test rows** (even with an OOS
-split-half) and reported the best; that path oversold the screen by ~0.008 KS and is removed. The
+split-half) and reported the best; that path oversold the screen by ~0.008 KS and is removed
+(commit `10306ee`). The
 *design* sweep — try `{none, dispersion, skew-joint, skew-sequential}` and keep the best — is
 still cheap when honest (post-hoc calibration **holds the blended mean fixed** via
 `skewnormal_loc_from_mean`, so **Gates 2/3 are calibration-invariant**, **Gate 4 is exact from the
@@ -465,30 +503,6 @@ Optuna `GridSampler` driver + the `dist_training_loss`/`blending_loss_fn` flags 
 calibration sweep landed 2026-06-07; the `ratio_projvol` normalization and the hierarchical-Bayes
 layer remain unbuilt. This *preliminary* pass predates the driver — it is the normalization slice alone.
 
-**Is the search matrix well-defined? — the executable state, honestly.** The *method* is well-defined
-and proven: per cell, enumerate the executable axis-values, train one `--deterministic` model each,
-score the **honest val-fit→test gate row** (the production gate path), rank by `min_gate_slack`, and
-confirm the top-K under real HPO before any ship. As of 2026-06-07 the driver controls three of the
-four axis dimensions (normalization, dist-loss, blend-loss as the retrain grid; calibration swept free);
-the executable state per axis:
-
-| Axis | Values defined | Executable today | Build to put the rest on the table |
-|---|---|---|---|
-| **Normalization** | `ratio_meanyr`, `centered_additive_mean10`, `centered_additive_eb_meanyr_k10`, `ratio_projvol` | **3 of 4** — `ratio_meanyr` + `centered_additive_mean10` + the **EB** slug now have a Gate-4 SkewNormal decode (`scorecard._decode_sn_loc_scale`, EB off the dumped `GlobalMean`) | **build** `ratio_projvol` (target = y / projected-volume) |
-| **Calibration** | `none`, `dispersion`, `skew-joint`, `skew-sequential` | **swept by the driver (in-sample)** — `gate_rows_by_calibration_mode` recovers the blended predictive off each dump and *compares* all four modes per corner; today the dump is the **test** split, so it is an in-sample ranking signal (real-HPO confirms) | dump the **validation** predictive so the same sweep is OOS |
-| **Loss / blending** | loss `nll`/`crps`; blend weights | **dist-loss: 2** (`--dist-training-loss nll\|crps`) + **blend-loss: 2** (`--blending-loss-fn nll\|crps`; `fit_model_weight_crps` built 2026-06-07) — both retrain-tier | free post-hoc `w`-refit (so `crps` blend stops costing a train); expose the blend weights |
-
-As of 2026-06-07 the driver gives the search **three independent retrain degrees of freedom**
-(`normalization × dist_training_loss × blending_loss_fn`, the `GridSampler` grid) **plus the free
-post-hoc calibration sweep** (all four modes compared per corner) — it controls and compares along
-every axis, where the pre-driver state only *auto-fit* calibration and held loss/blend fixed. The
-earlier "one DOF — a line of 2 points" framing is fully superseded: the visited set is a
-`(3 norms × 2 dist-losses × 2 blend-losses × 4 cal-modes) = 48`-row board per cell once a sweep is run.
-What remains genuinely unbuilt is narrow and is *fidelity / cost*, not new axes: the `ratio_projvol`
-normalization value (the one missing axis-value), the honest-val calibration dump (today's sweep is
-in-sample), the free post-hoc `w`-refit (so a `crps` blend stops costing a train), and the
-research-gated hierarchical-Bayes layer. Nothing in the space is ruled out — only those are not-yet-wired.
-
 ### Lever 0 — Re-score every withheld cell under the current gates; promote free passers
 
 **Mechanism.** The Gate-4 redefinition was applied as *demotions only*; cells that the
@@ -509,22 +523,16 @@ to chase before anything else ships.)
 
 ### Lever 1 — Post-hoc dispersion calibration (the main event)
 
-**Mechanism.** Fit a per-cell scale correction so the predictive PIT is Uniform, applied
-after decode and `fused_loc`, leak-free (fit on validation, applied to the disjoint test
-split). Two implementation routes, cheaper first:
+**Mechanism — built route 1a-hybrid** (why this route, not a `posthoc` `SCALE_STAGE`: the
+research-verdict block below). Fit a per-cell scale `c` so the predictive PIT is Uniform,
+applied after decode and `fused_loc`, leak-free (fit on validation, applied to the disjoint
+test split). The fit lives **inside** `_step_calibrate_dispersion` (drop the SkewNormal
+early-return) with objective = `scorecard._randomized_pit_ks`, reusing the existing
+`dispersion_cal` pickle field and the `model_prob._dispersion_calibrate` apply.
 
-- **1a — Extend the existing `dispersion_cal` to SkewNormal.** Remove the early-return
-  in `_step_calibrate_dispersion` and the `dist != "SkewNormal"` guard in `model_prob.py`;
-  fit `c_opt` to scale `SN_Scale` (sigma). Reuses the pickle field, the inference apply
-  site, and the determinism harness already in place.
-- **1b — A new `SCALE_STAGE` in `posthoc.py`.** Mirror `MEAN_STAGE`/`PROB_STAGE`:
-  `{"scale_pit", ...}`, fit on the fused predictive to minimize PIT-KS (or match
-  `central50`/`central80` coverage) directly, selected per cell via the `posthoc` field.
-  Cleaner separation; works for count families too.
-
-**Re-target the objective.** The count-branch `dispersion_cal` currently minimizes CRPS;
-the gate is PIT-KS. Re-target the fit to **coverage / PIT-KS** (or add it as a
-tiebreaker). This is what should flip the hair's-breadth count cells (FTM/STL/TOV).
+**Re-target the count objective.** The count-branch `dispersion_cal` minimized CRPS; the gate
+is PIT-KS. Re-targeting the fit to PIT-KS is what flips the hair's-breadth count cells
+(FTM/STL/TOV).
 
 **Targets.** The 24 "Gate-4-only" cells, plus a likely assist on the 6 "g4+marginal-g1"
 NFL cells. Expected: NBA +6–9, WNBA +6–8, NFL +3–5.
@@ -673,21 +681,13 @@ adds a sibling `skew_cal` field) — an engineering change, **not** a new distri
   {carries 0.047, sacks-taken 0.045}. (All in-sample test-set floors — the honest verdict is the
   val→test retrain, never the proxy.)
 
-  **Honest-retrain reconciliation (2026-06-07, first cell).** WNBA AST is the first screen row
-  taken through the honest val-fit→test retrain (the combination search of §5). The screen's
-  in-sample `joint(c,s) = 0.0397` was decoded under the cell's own `ratio_meanyr` normalization;
-  the honest val-fit→test KS under `ratio_meanyr` is **0.126** — the in-sample fit oversold by
-  ~0.086, an order of magnitude past the assumed +0.008–0.010 discount. The cell nonetheless
-  **ships**, but under the *other* decodable normalization: `centered_additive_mean10` lands an
-  honest g4 = **0.047** (5/5; g1 −0.017, g5 0.049), pending real-HPO confirm. Two lessons: (1) the
-  in-sample screen floors are unreliable ship predictors for *overconfident* cells (WNBA AST
-  central-50 coverage 0.376) — the val→test discount is cell- and normalization-specific and can be
-  an order of magnitude larger than the uniform estimate; (2) the decisive axis here is
-  **normalization, not calibration** — the same `(c,s)` machinery ships the cell under one target
-  transform and fails it under another, which is exactly why the honest sweep scores *both*
-  normalizations per cell rather than trusting the screened one. (An earlier search build re-fit
-  `(c,s)` on the test rows and reported 0.039, reproducing the in-sample optimism; that dishonest
-  path was removed — commit `10306ee`.)
+  **Honest-retrain reconciliation.** WNBA AST is the first screen row taken through the honest
+  val-fit→test retrain: the screen's in-sample `joint(c,s) = 0.0397` (decoded under `ratio_meanyr`)
+  became an honest **0.126** under that same normalization, and the cell ships only under
+  `centered_additive_mean10` (g4 **0.047**). The full anecdote and its two lessons — in-sample
+  floors oversell (here by ~0.086), and normalization is the decisive axis — live in the §5
+  *operating loop* and §8; the point here is that the L4a screen's `(c,s)` floors are *rank hints*,
+  not ship predictions.
 
   **Every row above is a live Ship-75 candidate — none is parked.** The screen varied only `(c, s)`;
   it did not touch normalization or blending. The sweep has already flipped NBA AST and WNBA DREB
@@ -807,10 +807,8 @@ behind `supersede_verdict()`:
 **Lever cap.** A cell that fails Levers 1–4 is exhausted *on the calibration + feature axis only* —
 it stays a **live Ship-75 candidate** and is handed to the combination search (the normalization ×
 calibration × blending matrix, §5) and then the hierarchical layer, with a one-line note naming the
-axis already tried. It does **not** receive a `deferred-90` tag — that tag is **retired for this
-operation** (§5 policy). A cell becomes Ship-90 territory only after the *whole matrix* plus the
-hierarchical layer has actually failed it; **zero cells qualify today.** Gate-definition changes
-never count as a lever.
+axis already tried. It does **not** receive a `deferred-90` tag (§5 standing policy; zero cells
+qualify for Ship-90 territory today). Gate-definition changes never count as a lever.
 
 ### Lever 5 — Distribution / tail rebuild (sequenced last — on the table)
 
@@ -869,8 +867,7 @@ counts as the pre-sweep estimate; the sweep's board is authoritative.
   sharp line (the g1 guardrail). The bar is *don't regress the blend*, not *beat the book*
   (§Purpose). **Plan for failure here:** if NFL stalls at 11–13, escalate to L4d
   (per-position split), and for any cell the model can't improve, lean on the book in the
-  blend — that ships if calibration holds. No cell is shelved to `deferred-90` (the tag is retired
-this operation), and never loosen a gate.
+  blend — that ships if calibration holds. No cell is shelved (§5 standing policy); never loosen a gate.
 
 ---
 
@@ -880,11 +877,11 @@ this operation), and never loosen a gate.
   When a lever's go/no-go fails on a cell, record it (lever-attempt +1) and take the
   branch. Do not grind a dead lever.
 - **Per-cell:** push every cell until it ships or has actually failed across the **whole matrix**
-  — all three axes (normalization × calibration × blending) plus the hierarchical layer. Four
-  failed *calibration/feature* levers is **not** an exit: the cell moves to the combination search
-  and the hierarchical layer with a one-line note naming the axes tried. No easy out, no infinite
-  grind, and **no `deferred-90` shelf** — the only ways off the Ship-75 board are genuine
-  matrix-wide exhaustion (zero cells today) or the operator's explicit, documented denominator call.
+  — all three axes (normalization × calibration × blending) plus the hierarchical layer (§5
+  standing policy). Four failed *calibration/feature* levers is **not** an exit: the cell moves to
+  the combination search and the hierarchical layer with a one-line note naming the axes tried. The
+  only ways off the Ship-75 board are genuine matrix-wide exhaustion (zero cells today) or the
+  operator's explicit, documented denominator call.
 - **Operation-level: failure is not an option.** The §6 arithmetic shows NBA and WNBA
   clear with L0+L1 alone, with backups. NFL is the one league that can genuinely stall;
   its escalation ladder (L1 → L3 → L4d per-position) is deep enough to reach 15, and for
@@ -958,29 +955,26 @@ confirm or kill. Each is a place a lever could fail; knowing early reorders the 
 > and post-hoc-calibration axes (which the sweep exercises first) leave a cell overconfident, a
 > training-time variance penalty is a legitimate untried option to pick back up.
 
-1. **Will post-hoc scale calibration actually move PIT-KS without breaking g1/g5?**
-   The central assumption of Lever 1. A quick study on 3–4 representative cells (one
-   hair's-breadth, one moderate, one severe) before the full build: fit `c_opt` to
-   coverage on validation, measure the g1/g5 trade. If widening reliably trades g4 for
-   g1, the plan pivots to Lever 3 sooner. **Highest-priority hole.**
-2. **Was the SkewNormal dispersion-calibration exclusion deliberate?** Two hardcoded
-   skips (§3) suggest someone tried and backed out. Check git blame / archived context
-   for a prior negative result before re-enabling — we may be about to repeat a known
-   failure. (Cheap; do it first.)
-3. **CRPS-vs-PIT-KS objective gap.** Quantify how much re-targeting the count-branch
-   dispersion fit from CRPS to coverage moves the hair's-breadth ZINB cells (FTM/STL/TOV).
-   If small, the count cells need a different lever than the SkewNormal ones.
-4. **Do the marginal NFL g1s improve when dispersion is calibrated?** The difference
-   between NFL reaching 10 and reaching 15. A targeted before/after Brier-CI on the 5
-   g1+g4 volume cells after a candidate L1 fit.
-5. **Severe-coverage cells: width or shape?** WNBA DREB (0.50), NFL receptions (0.43),
-   qb-yards (0.23) are too far off for a scalar. Is SkewNormal's *tail weight* wrong
-   (→ Student-t / spliced tail, Lever 5) or is it a feature/mislocation problem? A PIT
-   histogram (not just the KS scalar) per cell answers this.
-6. **The block-bootstrap / clustered-g1 backlog.** The test-set CSVs still lack a
-   `game_date` column on combined-stat cells, blocking the player-clustered Gate-1 recheck
-   and a closing-line-value gate. Resolving the training-data join unlocks both and is the
-   one principled selection-style criterion worth building (Step 0.10).
+**The numbered holes, current status** (resolutions in the blockquote above and the §5 Lever-1
+block; only #4 and #6 remain open — #0b is the highest-priority open hole):
+
+1. *Will post-hoc scale calibration move PIT-KS without breaking g1/g5?* **Resolved** — yes,
+   refined by the 2026-06-07 sweep: it does, but only under the right normalization and with a
+   cell-specific val→test discount (WNBA AST 0.126→0.047, g1 −0.017, g5 0.049).
+2. *Was the SkewNormal dispersion-cal exclusion deliberate?* **Resolved** — an a-priori skip,
+   not a tested negative.
+3. *CRPS-vs-PIT-KS objective gap on the count branch.* **Resolved** — the PIT-KS re-target
+   flips the count cells; coverage is the wrong objective (over-narrows some lattices).
+4. **Open — do the marginal NFL g1s improve when dispersion is calibrated?** The difference
+   between NFL reaching 10 and reaching 15. A targeted before/after Brier-CI on the 5 g1+g4
+   volume cells after a candidate L1 fit.
+5. *Severe-coverage cells: width or shape?* **Resolved** — a decode artifact (C0), not a shape
+   problem; plain under-dispersion + mild low-loc bias, and the severe cells (WNBA DREB, NFL
+   receptions) ship under the centered normalization rather than via a new tail head.
+6. **Open — the block-bootstrap / clustered-g1 backlog.** The test-set CSVs still lack a
+   `game_date` column on combined-stat cells, blocking the player-clustered Gate-1 recheck and
+   a closing-line-value gate. Resolving the training-data join unlocks both and is the one
+   principled selection-style criterion worth building (Step 0.10).
 
 ---
 
