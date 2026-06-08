@@ -450,6 +450,39 @@ describe. At minimum, consider:
 - This guide — when conventions change.
 - Tests — when a contract is clarified, freeze it in a test.
 
+### 16.1 Write docs that don't drift
+
+Documentation rots by accretion: each edit appends instead of revising, until a
+clean doc is a contradictory pile (operation_ship_75.md went from a clean rewrite
+to 1,000 drifting lines in days). The rules that prevent it:
+
+- **One canonical home per fact.** State a fact once; everywhere else,
+  cross-reference it (`see §X`). Duplicated prose is where contradictions breed —
+  the two copies drift apart, and a later edit fixes only one.
+- **Revise in place; never layer.** When a fact changes, find the old statement
+  and fix or delete it — do not write the new truth beside the stale one. Before
+  you finish, grep the doc for the thing you changed and reconcile every hit.
+- **Describe the current state, not the history.** A living doc says what is true
+  now; how it got there belongs in git, not the body.
+- **Changelogs stay short and caveman.** If a doc keeps a changelog, give it one
+  short section: one-line entries, caveman-compressed, newest-first, and cap the
+  recent few (~5) — older entries fall off to git history. A dated *narrative
+  build-log block* in the body (`#### … — BUILT <date>`, then a SHIPPED block, then
+  a verdict block) is the anti-pattern; it only ever grows. Keep the verdict, drop
+  the play-by-play.
+- **Resolve contradictions; don't collect them.** A new finding that overturns an
+  earlier claim means you *change the earlier claim*. If you genuinely can't
+  resolve it yet, mark it as one explicit, labelled open tension — not two
+  confident statements that disagree.
+- **Sprawl is the signal to consolidate.** When a section gets tiring to read or
+  hard to edit, that is the cue to compress it now, not to append one more
+  paragraph.
+
+Body and explanatory prose stay clear and normal (Strunk, §2) — caveman applies to
+*changelog entries*, not to the reasoning a human reviews. The
+`.claude/hooks/docs-style.py` hook nudges when a `.md` edit adds a dated build-log
+block; it is a reminder, not a blocker — heed it by consolidating.
+
 ---
 
 ## 17. Domain Glossary
