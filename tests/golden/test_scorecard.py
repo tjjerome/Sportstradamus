@@ -51,7 +51,6 @@ from sportstradamus.training.scorecard import (
     min_gate_slack,
     scorecard,
     supersede_verdict,
-    sweep_calibration_modes,
     write_gate_scorecard,
 )
 
@@ -398,61 +397,6 @@ def test_joint_skew_fit_dominates_sequential_on_alpha_collapse():
     assert s_seq == 0.0  # frozen at a skew-dead scale → sequential cannot help
     assert s_j > 1.0
     assert _sn_pit_ks(mean, sigma, skew0, y, c_j, s_j) < _sn_pit_ks(mean, sigma, skew0, y, c_seq, s_seq)
-
-
-def test_sweep_calibration_modes_returns_four_labeled_fits():
-    """The post-hoc calibration sweep fits all four modes on one fixed served predictive and
-    reports each mode's ``(c, s)`` and Gate-4 KS, so the combination search can rank a cell's
-    calibration corner without a retrain. The ``none`` baseline must be the identity ``(1, 0)``.
-    """
-    rng = np.random.default_rng(3)
-    y = rng.normal(6.0, 2.0, 3000)
-    mean, sigma, skew0 = np.full(3000, 6.0), np.full(3000, 2.0), np.zeros(3000)
-
-    fits = sweep_calibration_modes(mean, sigma, skew0, y)
-
-    assert {f.mode for f in fits} == {"none", "dispersion", "skew-joint", "skew-sequential"}
-    none = next(f for f in fits if f.mode == "none")
-    assert none.c == 1.0 and none.s == 0.0
-    assert none.pit_ks == _sn_pit_ks(mean, sigma, skew0, y, 1.0, 0.0)
-
-
-def test_sweep_calibration_modes_dispersion_wins_on_underdispersed_symmetric():
-    """An under-dispersed symmetric cell needs width, not shape: the best (min-KS) mode must beat
-    ``none`` and the winning scale must widen (``c > 1``) with no manufactured skew.
-    """
-    rng = np.random.default_rng(4)
-    mu, s_true, n = 7.0, 3.0, 4000
-    y = rng.normal(mu, s_true, n)
-    mean, sigma, skew0 = np.full(n, mu), np.full(n, s_true / 2.0), np.zeros(n)
-
-    fits = sweep_calibration_modes(mean, sigma, skew0, y)
-    best = min(fits, key=lambda f: f.pit_ks)
-    none = next(f for f in fits if f.mode == "none")
-
-    assert best.mode != "none"
-    assert best.pit_ks < none.pit_ks
-    assert best.c > 1.5  # restores the halved width
-
-
-def test_sweep_calibration_modes_skew_joint_wins_on_underskew():
-    """On an ``alpha≈0`` collapse over right-skewed truth the winning mode must be ``skew-joint`` —
-    the coupling finding: scale alone (``dispersion``) and the sequential skew fit both stall where
-    the joint fit clears, so the sweep must surface joint as the cell's calibration corner.
-    """
-    from scipy import stats as st
-
-    rng = np.random.default_rng(0)
-    y = st.skewnorm.rvs(4.0, size=4000, random_state=rng)
-    mean, sigma, skew0 = np.full(4000, float(y.mean())), np.full(4000, float(y.std())), np.zeros(4000)
-
-    fits = sweep_calibration_modes(mean, sigma, skew0, y)
-    best = min(fits, key=lambda f: f.pit_ks)
-    by_mode = {f.mode: f for f in fits}
-
-    assert best.mode == "skew-joint"
-    assert best.pit_ks < by_mode["dispersion"].pit_ks
-    assert best.pit_ks < by_mode["skew-sequential"].pit_ks
 
 
 def test_min_gate_slack_is_the_binding_gate_headroom_when_all_pass():
@@ -1093,81 +1037,6 @@ def test_eb_gate_decode_zero_global_mean_fallback_differs_from_real_prior():
 
     np.testing.assert_allclose(loc_real, served_loc, atol=1e-9)
     assert not np.allclose(loc_real, loc_fallback)
-
-
-def _served_sn_dump(n=600, seed=5, c0=1.3, s0=0.6, strategy="ratio_meanyr"):
-    """A SkewNormal dump whose served params bake in a known auto-fit ``(c0, s0)`` over known
-    blended (sigma, skew) — so the recovery (served ÷ c0, served − s0) has a ground truth.
-    """
-    from sportstradamus.helpers.distributions import skewnormal_loc_from_mean
-    from sportstradamus.training.baselines import get_target_normalization
-
-    rng = np.random.default_rng(seed)
-    meanyr = rng.uniform(3.0, 25.0, n)
-    mean = meanyr + rng.normal(0.0, 1.0, n)
-    blended_sigma = rng.uniform(1.0, 4.0, n)
-    blended_skew = rng.uniform(-0.5, 1.0, n)
-    served_sigma = blended_sigma * c0
-    served_skew = blended_skew + s0
-    served_loc = skewnormal_loc_from_mean(mean, served_sigma, served_skew)
-    strat = get_target_normalization(strategy)
-    X = pd.DataFrame({"MeanYr": meanyr})
-    df = pd.DataFrame(
-        {
-            "MeanYr": meanyr,
-            "Result": mean + rng.normal(0.0, blended_sigma),
-            "Blended_EV": mean,
-            "Line": mean + rng.uniform(-2.0, 2.0, n),
-            "Odds": np.full(n, 0.5),
-            "P": np.clip(rng.uniform(0.1, 0.9, n), 0.0, 1.0),
-            "SN_Loc": strat.encode_loc(served_loc, X, 0.0, "MeanYr"),
-            "SN_Scale": strat.encode_scale(served_sigma, X, "MeanYr"),
-            "SN_Alpha": served_skew,
-        }
-    )
-    return df, blended_sigma, blended_skew, mean, c0, s0
-
-
-def test_recover_blended_sn_inverts_autofit_calibration():
-    """The post-hoc calibration axis recovers the pre-calibration blended params by dividing the
-    served scale by the dumped dispersion_cal and subtracting skew_cal from the served alpha.
-    """
-    from sportstradamus.training.scorecard import _recover_blended_sn
-
-    df, bsig, bskew, mean, c0, s0 = _served_sn_dump()
-    m, sigma, skew, y = _recover_blended_sn(df, "Blended_EV", "ratio_meanyr", c0, s0)
-    np.testing.assert_allclose(sigma, bsig, atol=1e-9)
-    np.testing.assert_allclose(skew, bskew, atol=1e-9)
-    np.testing.assert_allclose(m, mean, atol=1e-9)
-    np.testing.assert_array_equal(y, df["Result"].to_numpy())
-
-
-def test_gate_rows_by_calibration_mode_scores_all_four_modes():
-    """The calibration axis scores every post-hoc mode off one trained dump (no retrain): four
-    full ship-gate rows, with the ``none`` mode reporting the identity transform.
-    """
-    from sportstradamus.training.scorecard import (
-        CALIBRATION_MODES,
-        gate_rows_by_calibration_mode,
-    )
-
-    df, _bsig, _bskew, _mean, c0, s0 = _served_sn_dump()
-    rows = gate_rows_by_calibration_mode(
-        df,
-        "Blended_EV",
-        league="NBA",
-        market="PTS",
-        strategy="ratio_meanyr",
-        decode_strategy="ratio_meanyr",
-        dispersion_cal=c0,
-        skew_cal=s0,
-    )
-    assert set(rows) == set(CALIBRATION_MODES)
-    assert rows["none"]["dispersion_cal"] == 1.0
-    assert rows["none"]["skew_cal"] == 0.0
-    for row in rows.values():
-        assert "ship" in row
-        assert np.isfinite(min_gate_slack(row))
 
 
 def test_load_test_set_retains_eb_decode_columns(tmp_path):

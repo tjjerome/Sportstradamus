@@ -157,7 +157,7 @@ def negbin_crps(y, r, p, gate=None) -> np.ndarray:
     k_vals = np.arange(k_max + 1)
     cdf = nbinom.cdf(k_vals[:, None], r[None, :], p[None, :])
     if gate is not None:
-        gate = np.asarray(gate, dtype=float)
+        gate = np.atleast_1d(np.asarray(gate, dtype=float))
         cdf = gate[None, :] + (1 - gate[None, :]) * cdf
     indicator = (y[None, :] <= k_vals[:, None]).astype(float)
     return np.sum((cdf - indicator) ** 2, axis=0)
@@ -174,7 +174,7 @@ def gamma_crps(y, alpha, scale, gate=None) -> np.ndarray:
     scale = np.asarray(scale, dtype=float)
     mean = alpha * scale
     if gate is not None:
-        gate = np.asarray(gate, dtype=float)
+        gate = np.atleast_1d(np.asarray(gate, dtype=float))
         x_grid = np.linspace(0, _crps_grid_bound(y, mean), _CRPS_GRID_POINTS)
         dx = x_grid[1] - x_grid[0]
         cdf = gamma.cdf(x_grid[:, None], alpha[None, :], scale=scale[None, :])
@@ -203,7 +203,7 @@ def skewnorm_crps(y, loc, scale, alpha, gate=None) -> np.ndarray:
     dx = x_grid[1] - x_grid[0]
     cdf = skewnorm.cdf(x_grid[:, None], alpha[None, :], loc=loc[None, :], scale=scale[None, :])
     if gate is not None:
-        gate = np.asarray(gate, dtype=float)
+        gate = np.atleast_1d(np.asarray(gate, dtype=float))
         cdf = gate[None, :] + (1 - gate[None, :]) * cdf
     indicator = (y[None, :] <= x_grid[:, None]).astype(float)
     return np.sum((cdf - indicator) ** 2, axis=0) * dx

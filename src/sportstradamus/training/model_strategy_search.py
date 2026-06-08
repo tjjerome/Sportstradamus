@@ -22,7 +22,6 @@ from sportstradamus.training.pipeline import LOSS_AUTO
 from sportstradamus.training.scorecard import (
     apply_thresholds,
     gate_row,
-    gate_rows_by_calibration_mode,
     load_test_set,
     min_gate_slack,
 )
@@ -108,43 +107,6 @@ def _score_normalization(league: str, market: str, norm: str) -> dict[str, objec
         "g4_pit_ks_max": row.get("g4_pit_ks_max"),
         "n": row.get("n_rows"),
     }
-
-
-def score_calibration_modes(league: str, market: str, norm: str) -> list[dict[str, object]]:
-    """Gate all four post-hoc calibration modes off one trained dump — the search's free axis.
-
-    The dump's served SkewNormal params bake in the pipeline's auto-fit ``(dispersion_cal,
-    skew_cal)`` (read from the pickle); :func:`gate_rows_by_calibration_mode` recovers the blended
-    predictive against that baseline and re-gates every mode without a retrain. Returns one ship-row
-    per mode, each carrying the mode's *own* fitted calibration (not the dump's).
-    """
-    csv_path, mdl_path = _dump_paths(league, market, norm)
-    df = load_test_set(csv_path, _SHIP_PRED_COL)
-    filedict = pd.read_pickle(mdl_path)
-    mode_rows = gate_rows_by_calibration_mode(
-        df,
-        _SHIP_PRED_COL,
-        league=league,
-        market=market,
-        strategy=norm,
-        decode_strategy=norm,
-        dispersion_cal=filedict.get("dispersion_cal", 1.0),
-        skew_cal=filedict.get("skew_cal") or 0.0,
-    )
-    return [
-        {
-            "normalization": norm,
-            "calibration": mode,
-            "slack": min_gate_slack(row),
-            "ships": bool(row.get("ship")),
-            "dispersion_cal": row["dispersion_cal"],
-            "skew_cal": row["skew_cal"],
-            "g4_pit_ks": row.get("g4_pit_ks"),
-            "g4_pit_ks_max": row.get("g4_pit_ks_max"),
-            "n": row.get("n_rows"),
-        }
-        for mode, row in mode_rows.items()
-    ]
 
 
 def search_market(
