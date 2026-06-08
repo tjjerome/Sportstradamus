@@ -1,16 +1,20 @@
-"""Operation Ship 75 search driver: an Optuna study over the search grid, per cell.
+"""Operation Ship 75 search driver: an Optuna study over the retrain grid, per cell.
 
-For each ``(league, market)`` cell the driver runs an Optuna study over the *retrain* axes —
-training one deterministic ``meditate`` trial per grid corner — then fans each trained corner out
-across the *free post-hoc* axes (the four calibration modes, swept off the dump with no retrain).
-Every board row is scored through the honest val-fit→test gate (the per-corner primitives live in
-:mod:`sportstradamus.training.model_strategy_search`). The objective minimizes the negative best
-ship slack over a corner's post-hoc fan-out, so the study's best trial is the most-shippable corner.
+For each ``(league, market)`` cell the driver runs an Optuna study over the retrain axes
+(normalization × dist-loss × blend-loss), training one deterministic ``meditate`` trial per grid
+corner and scoring it through the *honest* production gate: the deterministic dump already carries
+the pipeline's validation-fit joint calibration, and
+:func:`model_strategy_search._score_normalization` runs the same :func:`scorecard.gate_row` the
+production scorecard does — no test re-fit. The driver is a fixed-HP replica of the production HPO
+pipeline: same calibration, same gate, same dump decode; the *only* differences are fixed
+hyperparameters in place of the Optuna search and the deterministic sandbox write locations (so a
+trial never clobbers a real trained market). The objective minimizes the negative ship slack, so
+the study's best trial is the most-shippable corner.
 
 The retrain grid is enumerable and categorical today, so the sampler is
 :class:`optuna.samplers.GridSampler` — exhaustive and deterministic, the right tool for a discrete
-space (no TPE guessing over six corners). The ``[kind, spec, stage]`` :data:`SEARCH_SPACE` mirrors
-``pipeline.py``'s ``hp_search_space`` (with a ``stage`` tag splitting retrain from post-hoc), so a
+space (no TPE guessing over a dozen corners). The ``[kind, spec, stage]`` :data:`SEARCH_SPACE`
+mirrors ``pipeline.py``'s ``hp_search_space`` (with a ``stage`` tag; every axis retrains today), so a
 continuous retrain axis (a blend weight, say) is a one-line addition that flips the sampler to TPE.
 
 Research scaffolding: the deterministic trials *rank* only — nothing ships off them. The top corner
@@ -28,23 +32,22 @@ from sportstradamus.training import calibration
 from sportstradamus.training.model_strategy_search import (
     _DECODABLE_SN_NORMS,
     _run_deterministic_meditate,
-    score_calibration_modes,
+    _score_normalization,
 )
-from sportstradamus.training.scorecard import CALIBRATION_MODES
 
 # Search axes in the ``[kind, spec, stage]`` shape — ``[kind, spec]`` mirrors pipeline's
-# hp_search_space, ``stage`` splits the retrain grid (GridSampler exhaustive) from the free
-# post-hoc sweep (scored off each trained dump, no retrain). ``blending_loss_fn`` rides the retrain
-# tier today: the blend weight is fit *inside* meditate, so a ``crps`` blend needs a train — the
-# brief's free post-hoc w-refit needs the dump to carry the pre-blend components, which it does not
-# yet. Only ``calibration`` is genuinely free. A continuous retrain axis would read
+# hp_search_space, ``stage`` tags the retrain grid the GridSampler enumerates. Every axis retrains:
+# normalization and both loss axes change the trained model (the blend weight is fit *inside*
+# meditate, so a ``crps`` blend needs a train). Calibration is deliberately NOT an axis: the
+# pipeline auto-fits the joint ``(dispersion_cal, skew_cal)`` on validation per corner and the
+# honest gate reads that fit off the dump — re-fitting calibration modes on the test dump would be
+# the in-sample artifact the honest scorer exists to avoid. A continuous retrain axis would read
 # ``["float", {"low": ...}, "retrain"]`` and require a ``suggest_float`` branch in
 # :func:`_retrain_grid` plus a TPE sampler.
 SEARCH_SPACE: dict[str, list] = {
     "normalization": ["categorical", list(_DECODABLE_SN_NORMS), "retrain"],
     "dist_training_loss": ["categorical", ["crps", "nll"], "retrain"],
     "blending_loss_fn": ["categorical", sorted(calibration.BLENDING_SLUGS), "retrain"],
-    "calibration": ["categorical", list(CALIBRATION_MODES), "posthoc"],
 }
 
 # Default board: the covered-league withheld SkewNormal cells this lever can reach. NFL's
@@ -74,7 +77,6 @@ _BOARD_COLUMNS: list[str] = [
     "normalization",
     "dist_training_loss",
     "blending_loss_fn",
-    "calibration",
     "slack",
     "ships",
     "dispersion_cal",
@@ -93,15 +95,14 @@ def _run_and_score(
     dist_training_loss: str,
     blending_loss_fn: str,
 ) -> list[dict[str, object]]:
-    """Train one deterministic retrain corner, then sweep the free post-hoc calibration axis.
+    """Score the ``(normalization × dist_training_loss × blending_loss_fn)`` retrain corner.
 
-    The retrain corner is ``(normalization × dist_training_loss × blending_loss_fn)`` — all three
-    need a train (the blend weight is fit inside meditate, so a ``crps`` blend retrains; the
-    free post-hoc w-refit would need the dump to carry pre-blend components, which it does not
-    yet). The calibration axis is then swept for free (four rows, mean held fixed). The dump is
-    keyed by normalization only, so scoring right after this trial's train — before the next
-    sequential trial overwrites it — keeps the loss/blend axes honest without a loss-keyed dump
-    path.
+    Calibration is not re-fit here: the dump already carries the pipeline's validation-fit joint
+    calibration, and :func:`model_strategy_search._score_normalization` reads it off the dump via
+    the production :func:`scorecard.gate_row` — no test re-fit. The dump is keyed by normalization,
+    so scoring right after this trial's train — before the next sequential trial overwrites it —
+    keeps the loss/blend axes honest without a loss-keyed dump path. Returns a one-row list so the
+    GridSampler objective and board assembly read uniformly.
     """
     _run_deterministic_meditate(
         league,
@@ -110,11 +111,10 @@ def _run_and_score(
         dist_training_loss=dist_training_loss,
         blending_loss_fn=blending_loss_fn,
     )
-    rows = score_calibration_modes(league, market, normalization)
-    for row in rows:
-        row["dist_training_loss"] = dist_training_loss
-        row["blending_loss_fn"] = blending_loss_fn
-    return rows
+    row = _score_normalization(league, market, normalization)
+    row["dist_training_loss"] = dist_training_loss
+    row["blending_loss_fn"] = blending_loss_fn
+    return [row]
 
 
 def _retrain_grid(space: dict[str, list]) -> dict[str, list]:
@@ -136,9 +136,9 @@ def _retrain_grid(space: dict[str, list]) -> dict[str, list]:
 def search_cell(league: str, market: str, *, space: dict[str, list] = SEARCH_SPACE) -> pd.DataFrame:
     """Run the per-cell Optuna GridSampler study and return its board, ranked by ship slack.
 
-    One trial per retrain corner, each fanned out over the free post-hoc sweep; the board carries
-    every (corner × calibration-mode) row's slack / ship verdict / Gate-4 PIT-KS so the top row is
-    the real-HPO confirm candidate. Sorted by ``slack`` descending.
+    One honest row per retrain corner (normalization × dist-loss × blend-loss); the board carries
+    each corner's slack / ship verdict / Gate-4 PIT-KS so the top row is the real-HPO confirm
+    candidate. Sorted by ``slack`` descending.
     """
     grid = _retrain_grid(space)
     study = optuna.create_study(direction="minimize", sampler=optuna.samplers.GridSampler(grid))

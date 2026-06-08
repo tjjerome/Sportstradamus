@@ -68,3 +68,20 @@ def test_skewnorm_crps_gate_shrinks_zero_outcome_crps():
     hi = skewnorm_crps(y, loc, scale, alpha, gate=np.array([0.9]))
     lo = skewnorm_crps(y, loc, scale, alpha, gate=np.array([0.1]))
     assert hi[0] < lo[0]
+
+
+def test_crps_integrands_accept_scalar_gate():
+    # A no-zero-inflation cell (e.g. SkewNormal AST) blends to a *scalar* gate, not a
+    # per-row array. Each integrand must broadcast that constant to all rows — the same
+    # value as passing a full array of it — not crash indexing a 0-d array.
+    y = np.array([1.0, 2.0, 3.0, 0.0])
+    cases = (
+        (skewnorm_crps, (y, np.full(4, 1.5), np.full(4, 1.0), np.full(4, 2.0))),
+        (negbin_crps, (y, np.full(4, 5.0), np.full(4, 0.5))),
+        (gamma_crps, (y, np.full(4, 2.0), np.full(4, 1.0))),
+    )
+    for fn, args in cases:
+        scalar = fn(*args, gate=0.2)
+        array = fn(*args, gate=np.full(4, 0.2))
+        assert scalar.shape == (4,)
+        assert np.allclose(scalar, array)
