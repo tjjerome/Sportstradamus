@@ -1,0 +1,51 @@
+# Sportstradamus dashboard theme — the machine-enforced half of the design system.
+# This file is the single source of truth for the visual identity; DESIGN.md mirrors
+# these tokens in human-readable form and states the do/don't rules. Edit them together.
+# Verified against the Streamlit 1.58 theming reference.
+
+[theme]
+# Committed identity: dark, electric-blue, IBM Plex. Deliberately NOT the Streamlit
+# default red and NOT a purple gradient — the two biggest "AI-generated" tells.
+# Single [theme] block locks the app to dark; add [theme.light] + [theme.dark]
+# later to expose the in-app light/dark toggle.
+base = "dark"
+
+primaryColor = "#2E6BE6"             # electric blue; dark enough for white button text
+backgroundColor = "#0E1117"          # near-black main surface
+secondaryBackgroundColor = "#1A1D24" # cards, widgets, code blocks
+textColor = "#E6E9EF"
+borderColor = "#2A2E37"
+linkColor = "#5B8DEF"
+linkUnderline = false
+codeBackgroundColor = "#11141A"
+
+baseRadius = "small"                 # 4px — DESIGN.md caps radius at small
+buttonRadius = "small"
+showWidgetBorder = true
+showSidebarBorder = true
+
+# Typography — IBM Plex Sans reads well in dense numeric tables (AG Grid's own default);
+# IBM Plex Mono gives tabular numerals so stat columns align by place value.
+font = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+headingFont = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@500;600;700&display=swap"
+codeFont = "'IBM Plex Mono':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap"
+baseFontSize = 14
+
+# Semantic palette — used ONLY by intent (good/bad/warn) in tables, badges, sparklines.
+# Reserve redColor for negative/bad values; never as a brand accent.
+greenColor = "#1F9D55"
+redColor = "#E5484D"
+orangeColor = "#F5A524"
+yellowColor = "#E8C547"
+blueColor = "#2E6BE6"
+grayColor = "#8A91A0"
+
+# Chart palettes inherited by Plotly / Altair / Vega-Lite. Brand-led but colorblind-safe
+# (Okabe-Ito-derived hues); sequential ramp is exactly 10 colors as Streamlit requires.
+chartCategoricalColors = ["#2E6BE6", "#1F9D55", "#E69F00", "#E5484D", "#56B4E9", "#CC79A7", "#0072B2", "#F0E442"]
+chartSequentialColors = ["#EAF1FC", "#CBDDF7", "#A6C5F0", "#7FAAE8", "#5B8DE0", "#3D72D6", "#2E6BE6", "#2351B4", "#183A82", "#0E2350"]
+chartDivergingColors = ["#9A2B2B", "#C0453E", "#D97A6C", "#E8B4A8", "#EEE3DC", "#CBDDF7", "#7FAAE8", "#3D72D6", "#2351B4", "#142C66"]
+
+# Dataframe chrome tied to the surface/border tokens.
+dataframeHeaderBackgroundColor = "#1A1D24"
+dataframeBorderColor = "#2A2E37"

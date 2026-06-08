@@ -16,7 +16,7 @@ later phases — most of which have since landed.
 
 ## Table of Contents
 
-- [Current Status Snapshot](#current-status-snapshot-audited-2026-05-21)
+- [Status at a glance](#status-at-a-glance)
 - [Active Track — Model Correctness & Market Breadth](#active-track--model-correctness--market-breadth-in-progress)
 - [Tools and CLIs Built](#tools-and-clis-built)
 - [Standing Rules (every session)](#standing-rules-every-session)
@@ -32,82 +32,28 @@ later phases — most of which have since landed.
 
 ---
 
-## Current Status Snapshot (audited 2026-05-21)
+## Status at a glance
 
 Status markers are inlined per sub-phase below; this is the executive summary. Since the
 2026-05-08 audit, the headline change is the model-correctness-and-breadth track, now the
-project's **active** work (Phases 1–6 keep their original numbers). Phase-1 follow-ups
-(1.2, 1.6) and deferred Phases 4–6 are otherwise unchanged.
+project's **active** work (Phases 1–6 keep their original numbers).
 
-**ACTIVE — Model Correctness & Market Breadth (IN PROGRESS).** Home of record:
-[`docs/operation_ship_75.md`](operation_ship_75.md). Prompted by defects in
-the live implementation (see [Active Track](#active-track--model-correctness--market-breadth-in-progress)),
-not optional polish. Shipped so far: P0 offline harness, P0.5 determinism gate, P1
-centered-target verdict (FGA ship / family kill), P2.B HurdleZINB (6/8 NBA ZINB ship), Stage 0
-live instrumentation, Stage B1/B1.5 routing diagnostics, A1/A1.5/A1.6 ICC diagnostics + NFL
-position-split cleanup. **Goal: ≥ 75% of markets per league carry a set baseline.** Current
-(2026-06-03, post Gate-4 PIT-KS reset): NBA 9/21, WNBA 5/18, NFL 5/20 — **gap NBA −7,
-WNBA −9, NFL −10** (19/59 = 32%); see [`operation_ship_75.md`](operation_ship_75.md) for the
-live count. Immediate next: L0 free promotes → L1 post-hoc dispersion calibration (the binding
-constraint after the reset), then features / depth.
+**ACTIVE — Model Correctness & Market Breadth (IN PROGRESS).** The lead work; home of record
+[`docs/operation_ship_75.md`](operation_ship_75.md). Prompted by defects in the live
+implementation (see [Active Track](#active-track--model-correctness--market-breadth-in-progress)),
+not optional polish. **Goal: ≥ 75% of markets per league carry a set baseline** (NBA ≥ 16/21,
+WNBA ≥ 14/18, NFL ≥ 15/20). The live count, the lever stack, and the next step all live in
+[`operation_ship_75.md`](operation_ship_75.md); this roadmap does not restate them — they move
+on every ship.
 
 | Phase | State | Notes |
 |---|---|---|
 | 1 — Audit & Strengthen Foundation | ~80% | 1.1/1.4/1.5 ✅; 1.2 audit ✅ fixes ⚠️; 1.3 ⚠️ dropped; 1.6 ❌ |
 | 2 — CLV Tracker | ✅ (in scope) | Retrospective CLV done; placed-bet logging out of scope |
 | 3 — Underdog Decision Engine | Shipped (Power/Flex/Rivals) | 3.1/3.2/3.3 ✅; 3.4 REMOVED; 3.5 Rivals ✅, Streaks/Ladders deferred |
-| 4 — Alerts & Dashboard | Deferred / scope-reduced | 4.1 deferred to end; 4.2 baseline exists, tabs reduced |
+| 4 — Alerts & Dashboard | Deferred / scope-reduced | 4.1 deferred to end; 4.2 recs tab shipped, Open/Settled/Bankroll dropped |
 | 5 — Best Ball / Battle Royale | ~15% (legacy shape) | Legacy `drafts/` pipeline only; roadmap modules unbuilt |
 | 6 — Modeling Refinements | 0% | None started; home for deferred model tail |
-
-**Phase 1 detail:**
-
-- **1.1 Correlate** ✅ — audit `docs/archive/CORRELATE_AUDIT.md`; fixes shipped: rolling 8-game
-  residualization (`_residualize_gamelog`, line 404), stratified matrices,
-  `meditate --rebuild-correlations` (`training/cli.py:50`).
-- **1.2 Parlay** ✅ audit / ⚠️ fixes partial — audit `docs/PARLAY_AUDIT.md`,
-  `PARLAY_CALIBRATION_*.png/csv`, `scripts/audit_parlay_calibration.py`. `beam_search_parlays`
-  is Gaussian-copula-based, takes `contest_variant: Literal['power','flex','insurance','rivals']`,
-  reads `data/underdog_payouts.json`, push-aware EV via `_expected_payout_with_pushes`, nearest-PSD
-  repair via `_nearest_psd`. **`beam_search_parlays` was since split into `prediction/parlay.py`**
-  (`find_correlation` stays in `prediction/correlation.py`).
-  Open findings remain (magic numbers, `banned_combos` semantics, `Boost`-column).
-- **1.3 Closing-line freeze** ❌ — not built as a discrete step. `clv.fill_from_archive` uses
-  the last archived sample before kickoff as "close" (the Odds API stops surfacing prematch
-  odds for in-progress games). Works for the CLV summary; no queryable `closing_lines/` snapshot.
-- **1.4 Structured logging** ✅ — `helpers/logging.py`.
-- **1.5 Integration tests** ✅ — `tests/integration/test_end_to_end.py`.
-- **1.6 Deprecated triage** ❌ — doc not produced; `src/deprecated/` still carries TODOs
-  referencing replaced modules.
-
-**Phase 2 — CLV Tracker (✅ for this package's scope):** CLV computation exists
-(`src/sportstradamus/clv.py`), wired into `nightly.reflect` with segmented summaries gated by
-`CLV_SEGMENT_MIN_N`. Placed-bet logging is **out of scope** (personal bookkeeping); the original
-`tracking/` package (2.2/2.3) and `tracking.db`-dependent dashboard tabs (4.2) are dropped, not
-deferred. Monitor: revisit if segment sizes stay below `CLV_SEGMENT_MIN_N=20`, if the implicit
-"last sample before kickoff = close" assumption diverges from sharp closes, or if `frac_beat_close`
-drifts from ~50% on no-edge segments.
-
-**Phase 3 — Underdog Decision Engine (shipped, Power/Flex/Rivals):** see
-[docs/archive/PHASE_3_IMPLEMENTATION.md](archive/PHASE_3_IMPLEMENTATION.md). 3.1 Kelly ✅, 3.2 contest-variant
-payouts ✅, 3.3 Underdog-native module ✅, 3.4 Champions ❌ REMOVED (pari-mutuel), 3.5 Rivals ✅ /
-Streaks+Ladders ❌ DEFERRED.
-
-**Phase 4 — Alerts & Dashboard (deferred / scope-reduced):** 4.1 alerts ❌ deferred to roadmap
-end (line-update cadence too slow to make push meaningfully time-sensitive). 4.2 dashboard ✅
-baseline (`dashboard.py`, `dashboard_app.py`, `dashboard_data.py`, `pages/`); Open Entries /
-Settled History / Bankroll tabs dropped (depended on `tracking.db`); a Today's Recommendations
-tab off `data/recommendations/{today}.yaml` is still worthwhile.
-
-**Phase 5 — Best Ball / Battle Royale (~15%, different shape):** `drafts/` holds the *legacy*
-pipeline (`data_merge.py`, `data_process.py`, `forecast.py`, `train.py`, `update_ez_adp.py`),
-not the proposed modules. ❌ No `adp.py`, `projections.py`, `battle_royale.py`,
-`advance_equity.py`, `best_ball_optimizer.py`, or `exposure.py`. The roadmap replaces this
-package; do it as a sub-phase, not additively.
-
-**Phase 6 — Modeling Refinements (0%):** 6.1 Bayesian hierarchical, 6.2 NFL game sim, 6.3
-news/weather, 6.4 conformal, 6.5 push refinement — none started. Push handling itself is in
-production via 1.2; the *per-market support audit* and discrete-PMF refinement are not.
 
 **Off-roadmap landings:** `helpers/archive.py` migrated klepto → DuckDB (bulk-deduped flush);
 `scripts/` migration scripts for archive/training-data/gamelogs/correlations/pickles → parquet;
@@ -133,10 +79,9 @@ status, not a duplicate of the stage detail.
 - **NFL position-confound** that put the passing-yards training mean at **38 instead of 216** (and
   similar across passing/rushing markets).
 
-**Goal:** ≥ 75% of markets per league carry a *set baseline* (NBA ≥ 16/21, WNBA ≥ 14/18,
-NFL ≥ 15/20). **Current (2026-06-03, post Gate-4 PIT-KS reset):** NBA 9/21, WNBA 5/18,
-NFL 5/20 — **gap NBA −7, WNBA −9, NFL −10** (19/59 = 32%). See
-[`operation_ship_75.md`](operation_ship_75.md) for the live count.
+**Goal:** ≥ 75% of markets per league carry a *set baseline* (per-league targets in
+[Status at a glance](#status-at-a-glance)). The live count and per-league gaps move on every
+ship — see [`operation_ship_75.md`](operation_ship_75.md).
 
 **Scope (pre-break, active):** reach 75% breadth (Tier-0 audit code → Stage B1.6 feature/bias
 track), then the core depth methods expected to pay off — A2 (T3 tail-head), A3 (calibration
@@ -144,10 +89,9 @@ polish), B2 (routing + feature engineering), B3 (MZINB / marginalized-hurdle fam
 post-break speculative tail (Stage A4 / B4 / long-shots) is **deferred into Phase 6**. Follow the
 track until diminishing returns, then stop it per-cell.
 
-**Immediate next steps:** L0 free promotes → L1 post-hoc dispersion calibration (the binding
-constraint after the Gate-4 reset), then features / depth. See
-[`operation_ship_75.md`](operation_ship_75.md) §5 (lever stack), §6 (per-league path), and §7
-(stop-the-track principle).
+**Lever stack and next step:** owned by [`operation_ship_75.md`](operation_ship_75.md) — §5
+(lever stack), §6 (per-league path), §7 (stop-the-track principle). This roadmap points rather
+than restates, because it moves on every ship.
 
 ---
 
@@ -160,10 +104,10 @@ live-metrics + graduation tooling is production runtime.
 **Offline A/B + verdict**
 
 - `scorecard` (`src/sportstradamus/training/scorecard.py`) — offline A/B harness
-  over cached `data/test_sets/`; `--baseline` / `--candidate` / `--live-window N`. `verdict()`
-  encodes only the **Tier-1** relative gate today; the **Tier-0** absolute-only mode is the next
-  code step. *(module is production — `report()` inline-calls `compute_gates`; only the
-  standalone A/B CLI is a dev exercise)*
+  over cached `data/test_sets/`; `--baseline` / `--candidate` / `--live-window N`. Its
+  `compute_gates` returns the per-cell five-gate scorecard (g1–g5 + `ship`); `report()`
+  inline-calls it on every `meditate` run, so the gate logic is production — only the standalone
+  A/B CLI is a dev exercise. Thresholds mirrored in [`docs/ship_gate.md`](ship_gate.md).
 
 **Live metrics + lifecycle (production runtime)**
 
@@ -247,7 +191,7 @@ aren't recreated, and state acceptance criteria.
 **Goal:** validate that the existing correlation/parlay/EV pipeline does what it claims, fix
 methodology gaps, and add the observability + contest-variant features the live code is missing.
 Each sub-phase is audit-then-surgery: the first session reads the code and writes findings; the
-fix is gated on the audit. **Estimated:** 3–4 weekends.
+fix is gated on the audit.
 
 ### 1.1 Audit `training/correlate.py` — ✅ DONE (audit + fix shipped)
 
@@ -274,7 +218,7 @@ golden, CLI snapshots; `poetry run meditate --rebuild-correlations --league NBA`
 **Note:** `beam_search_parlays` was since split out into `prediction/parlay.py`
 (`find_correlation` stays in `prediction/correlation.py`). **Shipped:** Gaussian copula, `contest_variant` parameter
 (power/flex/insurance/rivals), `data/underdog_payouts.json`, push-aware EV via
-`_expected_payout_with_pushes`.
+`_expected_payout_with_pushes`, nearest-PSD Σ-repair via `parlay.py:_nearest_psd`.
 
 The audit answered, per quoted source: `find_correlation`'s joint-probability formula (copula vs
 Pearson product vs log-odds), same-player guarding, `banned_combos.json` usage; `beam_search_parlays`
@@ -297,8 +241,6 @@ EV correctly. Existing callers unbroken.
 
 - `find_correlation`'s pairwise EV `exp(C * sqrt(V_i V_j)) * p_i p_j` is not a probability and is
   unbounded — wrap/replace with a bounded score.
-- The Σ matrix passed to `multivariate_normal.cdf` is built pair-by-pair; singular submatrices are
-  now nearest-PSD-projected via `parlay.py:_nearest_psd` (**resolved** by the GameArrays refactor).
 - Beam width 1000, EV cutoff 1.05, boost bands, final EV floors are inline magic numbers (STYLE_GUIDE.md §9).
 - `data/banned_combos.json` is a soft modifier; no pair is hard-banned. Decide whether a hard-ban
   path is desired.
@@ -311,6 +253,16 @@ EV correctly. Existing callers unbroken.
   one-per-family selection.
 - The committed calibration plot is a placeholder (no `parlay_hist.dat`); rerun on a production host
   with archive data and commit the result.
+- **Copula over calibrated marginals (deferred here from the Ship-75 audit).** Once Ship-75 lands
+  well-calibrated marginal predictives, replace the Pearson/Gaussian-copula approximation with a copula
+  fit on PIT-transformed historical residuals (`U_{i,t} = F̂_i(y_{i,t})`) within same-game leg groups
+  (and per leg-type pair, e.g. QB pass-yds × WR rec-yds on the same offense): fit a Gaussian/t-copula,
+  EB-shrink the per-pair correlations across teams, and price by sampling jointly then inverting through
+  the marginals. Add a **dependence diagnostic** — average pairwise rank correlation of residual PITs
+  within same-game groups vs the under-independence prediction. At parlay dimensions of 2–6 a Gaussian
+  copula suffices; vines are overkill. This is the audit's single largest *product*-EV lever: the five
+  gates are marginal-only, the product is parlays, and the DFS pick'em apps largely don't tax leg
+  correlation — the asymmetry that makes them beatable. See [`operation_ship_75.md`](operation_ship_75.md) §10.
 
 ### 1.3 Closing-line freeze — ⚠️ DROPPED (workaround sufficient)
 
@@ -364,7 +316,7 @@ follow review). Report counts: REVIVE / DELETE / ARCHIVE.
 **Goal:** measure whether the model beats the close. ROI alone is too noisy at recreational scale;
 closing-line value is the standard quant-betting skill-vs-variance metric, and the one diagnostic
 `nightly.py:reflect` did not produce. This phase extends `reflect` rather than building a parallel
-system. **Estimated:** 1–2 weekends.
+system.
 
 ### 2.1 Audit `nightly.py:reflect` — ✅ SUPERSEDED
 
@@ -408,7 +360,7 @@ can't answer a real question.
 ## Phase 3 — Underdog-Specific Decision Engine
 
 **Goal:** turn EV signals into ranked Underdog entries with proper bankroll sizing across Underdog's
-contest variants. **Estimated:** 4–5 weekends. Implementation log:
+contest variants. Implementation log:
 [docs/archive/PHASE_3_IMPLEMENTATION.md](archive/PHASE_3_IMPLEMENTATION.md).
 
 ### 3.1 Kelly sizing module — ✅ DONE
@@ -442,10 +394,12 @@ are sharper). Default behavior unchanged for callers not passing `contest_varian
 ### 3.3 Underdog-native strategy module — ✅ DONE
 
 `src/sportstradamus/strategies/underdog_pickem.py` plus the `pickem-build` CLI
-(archive/PHASE_3_IMPLEMENTATION.md §6). Sheets export was deprecated on `devel`, so the only sink is
-`data/recommendations/{date}.yaml` (the dashboard reads it directly). Bankroll is a CLI flag only (no
-`data/bankroll.json`). Rivals is folded into the same orchestrator (2- and 3-leg sizes only, both
-sides of the matchup required).
+(archive/PHASE_3_IMPLEMENTATION.md §6). Sheets export was deprecated on `devel`. `pickem-build`
+writes `data/recommendations/{date}.yaml` (which `kelly` re-sizes offline); the dashboard's Pickem
+page reads the recommendations from the `prophecize` snapshot (`data/runtime/current_pickem.parquet`),
+not the YAML — see [§4.2](#42-dashboard-extensions--%E2%9A%A0%EF%B8%8F-scope-reduced). Bankroll is a
+CLI flag only (no `data/bankroll.json`). Rivals is folded into the same orchestrator (2- and 3-leg
+sizes only, both sides of the matchup required).
 
 API: `PickemConfig` (edge/disagreement/correlation/EV thresholds, `entry_sizes`, `contest_variants`,
 `top_k`, `max_overlap`, `kelly_fraction`, `max_stake_pct_bankroll`) and
@@ -491,7 +445,7 @@ calculation.
 ## Phase 4 — Real-Time Alerts and Dashboard Extensions
 
 **Goal:** push high-edge opportunities to your phone the moment they appear and extend the Streamlit
-dashboard for review-and-act workflows. **Estimated:** 2 weekends.
+dashboard for review-and-act workflows.
 
 ### 4.1 Alerts package — ⚠️ DEFERRED to end of roadmap
 
@@ -511,20 +465,20 @@ with an `AlertEvent` / `AlertRule` Protocol / async-polling `Dispatcher`; rules
 ### 4.2 Dashboard extensions — ⚠️ SCOPE-REDUCED
 
 Baseline `dashboard.py`, `dashboard_app.py`, `dashboard_data.py`, and `pages/` exist. The Open Entries /
-Settled History / Bankroll tabs are **dropped** (they depended on `tracking.db`). A **Today's
-Recommendations** tab reading `data/recommendations/{today}.yaml` (produced by Phase 3.3) is still worth
-building once that module lands — table of rank / contest_type / variant / modeled_ev / joint_prob /
-recommended_stake / top correlated pair, with leg-by-leg expand. Auto-refresh ~60s; no new dependencies;
-cache DB reads >200ms with `@st.cache_data(ttl=30)`; smoke test importing the dashboard module and
-asserting the tab function exists. See [Decisions & Trade-offs](#decisions--trade-offs).
+Settled History / Bankroll tabs are **dropped** (they depended on `tracking.db`). The **Today's
+Recommendations** tab **shipped** as `pages/2_Predictions_Pickem.py`: it reads the `prophecize`
+Pick'em snapshot (`data/runtime/current_pickem.parquet` via `load_current_pickem()`) and folds Kelly
+sizing in through a bankroll slider (see [§3.3](#33-underdog-native-strategy-module--%E2%9C%85-done)). A
+sibling `pages/2_Predictions_Parlays.py` covers beam-search parlays. See
+[Decisions & Trade-offs](#decisions--trade-offs).
 
 ---
 
 ## Phase 5 — Best Ball and Battle Royale
 
 **Goal:** play Underdog's draft products, which the existing system ignores. NFL-season-aligned: Best
-Ball drafts run March–August, Battle Royale weekly during the regular season. **Estimated:** 8–12
-weekends, season-aligned. The roadmap effectively **replaces** the legacy `drafts/` package.
+Ball drafts run March–August, Battle Royale weekly during the regular season. The roadmap
+effectively **replaces** the legacy `drafts/` package.
 
 ### 5.1 ADP ingestion — ❌ NOT DONE (legacy `update_ez_adp.py` exists)
 
@@ -597,7 +551,7 @@ fixture.
 ## Phase 6 — Modeling Refinements (Ongoing)
 
 **Goal:** squeeze additional CLV out of edge cases and underserved markets. None required for
-profitability; all upside. **Estimated:** opportunistic, 1–4 weekends per item.
+profitability; all upside.
 
 Phase 6 is the home for **deferred** model work of two kinds: (1) the **speculative tail** of the
 active model track — the post-diminishing-returns stages from
@@ -607,6 +561,14 @@ active model track — the post-diminishing-returns stages from
 defects and reaching 75% breadth (see [Active Track](#active-track--model-correctness--market-breadth-in-progress)).
 Everything here is **deferred until breadth is met**; the A4/B4 stage detail is preserved in the
 archived [`docs/archive/gbdt_mean_regression_plan.md`](archive/gbdt_mean_regression_plan.md).
+
+The full-distribution audit adds to this deferred tail (kind 1): **distributional conformal / CQR** for
+the alt-line ladder (refines [§6.4](#64-conformal-prediction-wrappers--%E2%9D%8C-not-started)); a **CLV
+CRPS-edge dashboard** (model vs the de-vigged *closing* distribution, per market, weekly); and two
+backbone swings — **TabPFN-as-platform** and a **multi-task shared-trunk NN** pooling across
+cells/leagues (the per-cell, small-n use of TabPFN stays in Ship-75 §5.7). The heaviest tail-head
+rebuilds (spliced/Pareto, MZINB) also land here. The marginal-breadth levers from the same audit are
+**not** deferred — they live in [`operation_ship_75.md`](operation_ship_75.md) §5.
 
 ### 6.1 Bayesian hierarchical for low-sample players — ❌ NOT STARTED
 
@@ -646,6 +608,12 @@ a `kelly.py` option to size on the conformal interval lower bound (conservative 
 `meditate --fit-conformal` persists to `data/conformal/{LEAGUE}_{market}.pkl`. Tests: observed coverage
 in [85%, 95%] at alpha=0.1; half-width monotonic in n_calibration.
 
+**Audit extension (deferred from Ship-75):** for the full alt-line ladder the parlay builder prices, the
+relevant tool is a *distributional* conformal predictive (Chernozhukov et al. 2021) or conformalized
+quantile regression (Romano et al. 2019) over the whole CDF, not just `prob_over` at one line —
+sequenced after Ship-75's marginals are calibrated. Conformal guarantees are marginal, not conditional,
+unless DCP / multivalid conformal is used.
+
 ### 6.5 Push-aware EV refinement — ❌ NOT STARTED
 
 Phase 1.2 added basic push handling; this models integer-valued markets (NFL TDs, NHL goals, NBA 3PM)
@@ -661,51 +629,34 @@ non-zero push probability.
 
 ## Critical Path (post-2026-05-08 audit, scope-reduced)
 
-The model-correctness-and-breadth track now **leads** the critical path. The modeling and CLV
-foundations are in place (1.1 + 1.2 + 2.x + 3.x); Kelly (3.1) and the Underdog-native CLI (3.3) landed
-since the 2026-05-08 audit. With placed-bet tracking out of scope, the remaining non-model work is
-narrow. Recommended order:
+The model-correctness-and-breadth track now **leads** the critical path. The modeling, CLV, Kelly
+(3.1), and Underdog-native (3.3) foundations all landed since the 2026-05-08 audit (1.1 + 1.2 + 2.x +
+3.x). With placed-bet tracking out of scope, the remaining non-model work is narrow.
 
-1. **Model Correctness & Market Breadth — ACTIVE (lead).** Reach ≥ 75% baseline breadth per league
-   (gap NBA −7, WNBA −9, NFL −10 as of 2026-06-03): L0 free promotes → L1 dispersion calibration →
-   features / depth. Follow until diminishing returns; the speculative tail (A4/B4) is deferred to
-   Phase 6. Home of record: [`docs/operation_ship_75.md`](operation_ship_75.md).
-2. **Phase 1.2 follow-up — open audit findings (1 weekend).** Fix the `find_correlation`
-   pairwise-EV unbounded score, replace inline magic numbers with named constants, swap substring
-   same-player guarding for `player_id` joins, reconcile the `Boost`-column overwrite at
-   `correlation.py:498` so the displayed multiplier matches the EV that ranked the parlay, and re-run
-   `audit_parlay_calibration.py` on production archive data to commit a real plot.
-3. **Phase 1.6 — deprecated triage (½ weekend).** `correlation.py` and `opt_parlay.py` in
-   `src/deprecated/` can be deleted; `opt_kelley_bet.py` marked REVIVE. Cheap; unblocks future-agent
-   confusion.
-4. **Phase 3.1 — Kelly module — ✅ landed since the audit.** `strategies/kelly.py` + `kelly` CLI.
-   Output is a recommendation, not a placed-bet trigger.
-5. **Phase 3.3 — Underdog-native CLI — ✅ landed since the audit.** `pickem-build` emits ranked,
-   Kelly-sized recommendations to `data/recommendations/{date}.yaml`.
-6. **Phase 4.2 dashboard — Today's Recommendations tab only.** Reads `data/recommendations/{today}.yaml`.
-   Skip Open Entries / Settled History / Bankroll tabs. The dashboard refresh covers the alerting role
-   at current polling cadence.
+**Already landed:** Phase 3.1 Kelly (`strategies/kelly.py` + `kelly` CLI — a recommendation, not a
+placed-bet trigger), Phase 3.3 Underdog-native (`pickem-build` → `data/recommendations/{date}.yaml`),
+Phase 4.2 Today's Recommendations tab (`pages/2_Predictions_Pickem.py`).
+
+**Open, in recommended order:**
+
+1. **Model Correctness & Market Breadth — ACTIVE (lead).** Reach ≥ 75% baseline breadth per league,
+   then follow until diminishing returns; the speculative tail (A4/B4) is deferred to Phase 6. Live
+   count, lever stack, and next step: [`docs/operation_ship_75.md`](operation_ship_75.md).
+2. **Phase 1.2 follow-up — open audit findings.** Fix the `find_correlation` pairwise-EV unbounded
+   score, replace inline magic numbers with named constants, swap substring same-player guarding for
+   `player_id` joins, reconcile the `Boost`-column overwrite at `correlation.py:498` so the displayed
+   multiplier matches the EV that ranked the parlay, and re-run `audit_parlay_calibration.py` on
+   production archive data to commit a real plot.
+3. **Phase 1.6 — deprecated triage.** `correlation.py` and `opt_parlay.py` in `src/deprecated/` can be
+   deleted; `opt_kelley_bet.py` marked REVIVE. Cheap; unblocks future-agent confusion.
 
 (Phase 4.1 alerts/push are deferred to the very end — see §4.1 for revisit triggers.) That sequence
 finishes the package's mandate — ranked, sized, EV-positive Underdog recommendations with measurable
 CLV — and then stops. Personal bet tracking is a downstream concern users own themselves.
 
-**Pacing (scope-reduced; original assumed a placed-bet logger + per-bet CLV):**
-
-| Month | Focus |
-|---|---|
-| 1 | Phase 1.2 follow-ups + 1.6 deprecated triage. CLV monitoring on existing `clv.summarize`. |
-| 2 | Phase 3.1 (Kelly) + 3.3 (Underdog-native `pickem-build`). |
-| 3 | Phase 4.2 Today's Recommendations tab. Review CLV on accumulated segments. |
-| 4–5 | Phase 3.4 (Champions) + 3.5 (Streaks/Ladders/Rivals) as appetite allows. |
-| 6–9 | Phase 5 (Best Ball + Battle Royale rebuild), aligned with NFL season. |
-| 10–12 | Phase 6 refinements (conformal first, Bayesian after) as edge erodes. |
-| Last | Phase 4.1 alerts/push, only if polling cadence justifies it (see §4.1). |
-
-Phase 1 audit work is undramatic but it is where most of the edge correction happens. A realistic
-minimum-viable path was **1.1 + 1.2 + 2 + 3.1 + 3.3**; with the placed-bet logger dropped, only
-**3.1 + 3.3 + the 1.2 follow-ups** remain on it — roughly 3–4 weekends to a ranked-and-sized
-recommendation pipeline; everything else is multipliers on that core.
+Phase 1 audit work is undramatic but it is where most of the edge correction happens. With the
+placed-bet logger dropped, only **3.1 + 3.3 + the 1.2 follow-ups** were the minimum-viable path to a
+ranked-and-sized recommendation pipeline; everything else is multipliers on that core.
 
 ---
 
@@ -725,6 +676,7 @@ Scope decisions consolidated from across the roadmap. Each links back to where t
 | **`prediction/parlay.py`** | SPLIT OUT (resolved) | `beam_search_parlays` now lives in `prediction/parlay.py`; `find_correlation` stays in `prediction/correlation.py` — matches the CONTRIBUTING.md package map. |
 | **Bankroll** | CLI flag, not state | With the bet logger dropped, bankroll is a parameter to `kelly`/`pickem-build` — no `data/bankroll.json`, no DB row. See [§3.3](#33-underdog-native-strategy-module--%E2%9C%85-done). |
 | **`clv.py` location** | Stays at package root | Would have moved into `tracking/`; without the bet logger, leaving it next to `nightly.py` is the right shape. |
+| **Full-distribution audit** | Marginal-breadth levers → Ship-75 §5; parlay-dependence + conformal-ladder + backbone swings deferred here | Folded into [`operation_ship_75.md`](operation_ship_75.md) §5 (four-axis: normalization / model-loss / blend / calibration); the non-marginal-breadth tail (copula §1.2; conformal / CLV-dashboard / TabPFN-platform / multi-task-NN Phase 6) defers to just after 75%. |
 
 ---
 
@@ -750,11 +702,8 @@ Items the audit surfaced that aren't in any phase but matter for long-term healt
 
 - **Magic-number purge in `correlation.py`** — the audit's list (`K=1000`, EV cutoffs, boost bands, the
   `[0, 0, 3.5, 6.5, 6, 10, 25]` payout array) deserves its own commit (STYLE_GUIDE.md §9).
-- **`prediction/parlay.py` split** — ✅ done; `beam_search_parlays` now lives in
-  `prediction/parlay.py`, matching the CONTRIBUTING.md package map.
 - **`src/deprecated/` README cleanup** — the TODO list references replaced items (`correlation.py`,
   `opt_parlay.py`); Phase 1.6 fixes this, but until it lands the README misleads new agents.
-- **`clv.py` location is fine** — see [Decisions & Trade-offs](#decisions--trade-offs).
 - **`book_weights.json` provenance** — referenced in the prediction pipeline and Phase 2.3 but the source
   and refit cadence are undocumented; add a provenance note + `scripts/refit_book_weights.py`.
 
@@ -770,7 +719,6 @@ Items the audit surfaced that aren't in any phase but matter for long-term healt
 
 **Operational**
 
-- **Bankroll input is a CLI flag, not state** — see [Decisions & Trade-offs](#decisions--trade-offs).
 - **`pyproject.toml` script registration** — 5 scripts wired today (`prophecize`, `confer`, `meditate`,
   `dashboard`, `reflect`); register `kelly`, `pickem-build`, `alert-watch` in one batch with consistent
   verb-noun, dash-separated naming.
