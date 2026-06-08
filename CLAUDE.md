@@ -111,6 +111,13 @@ to redo the work.
   and `poetry run ruff check src/sportstradamus/`. All three must be clean.
 * Dashboard banner/caption timestamp lines show only the timestamp. Do not append
   feature descriptions, announcements, or other text to them.
+* **Dashboard UI work: read [DESIGN.md](DESIGN.md) first.** It holds the committed visual
+  identity — FIXED design tokens mirrored in `.streamlit/config.toml` — plus the NEVER list
+  that keeps the app from looking AI-generated (no default-red, no purple gradients, no
+  Inter/Roboto, Material icons not emoji). Treat the FIXED tokens as inviolable and do not
+  supplement them with your own defaults. The `design-lint` hook nudges live and
+  `tests/golden/test_design_tokens.py` is the hard gate; Stage 2/3 work is parked in
+  [docs/dashboard_design_stage2_3.md](docs/dashboard_design_stage2_3.md).
 
 ## Agentic workflow conventions
 
@@ -376,7 +383,7 @@ Single source of truth for per-cell training diagnostics. Written by
 `training/report.py:report()` after every `meditate` run as **one wide row
 per `(league, market)` cell**; consumed by:
 
-* The Streamlit dashboard (`pages/7_📊_Stats_Model_Training.py`) — tab views
+* The Streamlit dashboard (`pages/7_Stats_Model_Training.py`) — tab views
   by metric family with `lifecycle_state` joined in from
   `training/graduation.py:lifecycle_table()`.
 * `training.report.get_market_calibration(league, market)` — kelly's

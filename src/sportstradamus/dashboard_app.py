@@ -26,7 +26,7 @@ with left:
     st.markdown(
         f"""
 <div style="border:2px solid {PRED_BANNER_COLOR};border-radius:8px;padding:18px">
-  <h3 style="color:{PRED_BANNER_COLOR};margin-top:0">🎯 Predictions</h3>
+  <h3 style="color:{PRED_BANNER_COLOR};margin-top:0">Predictions</h3>
   <p>Today's scored offers and parlay candidates from the latest
   <code>prophecize</code> run.</p>
   <ul>
@@ -42,7 +42,7 @@ with right:
     st.markdown(
         f"""
 <div style="border:2px solid {STATS_BANNER_COLOR};border-radius:8px;padding:18px">
-  <h3 style="color:{STATS_BANNER_COLOR};margin-top:0">📊 Stats</h3>
+  <h3 style="color:{STATS_BANNER_COLOR};margin-top:0">Stats</h3>
   <p>Historical accuracy, profit, calibration, and training-time
   diagnostics.</p>
   <ul>
