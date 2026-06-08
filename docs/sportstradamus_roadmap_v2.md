@@ -253,6 +253,16 @@ EV correctly. Existing callers unbroken.
   one-per-family selection.
 - The committed calibration plot is a placeholder (no `parlay_hist.dat`); rerun on a production host
   with archive data and commit the result.
+- **Copula over calibrated marginals (deferred here from the Ship-75 audit).** Once Ship-75 lands
+  well-calibrated marginal predictives, replace the Pearson/Gaussian-copula approximation with a copula
+  fit on PIT-transformed historical residuals (`U_{i,t} = F̂_i(y_{i,t})`) within same-game leg groups
+  (and per leg-type pair, e.g. QB pass-yds × WR rec-yds on the same offense): fit a Gaussian/t-copula,
+  EB-shrink the per-pair correlations across teams, and price by sampling jointly then inverting through
+  the marginals. Add a **dependence diagnostic** — average pairwise rank correlation of residual PITs
+  within same-game groups vs the under-independence prediction. At parlay dimensions of 2–6 a Gaussian
+  copula suffices; vines are overkill. This is the audit's single largest *product*-EV lever: the five
+  gates are marginal-only, the product is parlays, and the DFS pick'em apps largely don't tax leg
+  correlation — the asymmetry that makes them beatable. See [`operation_ship_75.md`](operation_ship_75.md) §10.
 
 ### 1.3 Closing-line freeze — ⚠️ DROPPED (workaround sufficient)
 
@@ -552,6 +562,14 @@ defects and reaching 75% breadth (see [Active Track](#active-track--model-correc
 Everything here is **deferred until breadth is met**; the A4/B4 stage detail is preserved in the
 archived [`docs/archive/gbdt_mean_regression_plan.md`](archive/gbdt_mean_regression_plan.md).
 
+The full-distribution audit adds to this deferred tail (kind 1): **distributional conformal / CQR** for
+the alt-line ladder (refines [§6.4](#64-conformal-prediction-wrappers--%E2%9D%8C-not-started)); a **CLV
+CRPS-edge dashboard** (model vs the de-vigged *closing* distribution, per market, weekly); and two
+backbone swings — **TabPFN-as-platform** and a **multi-task shared-trunk NN** pooling across
+cells/leagues (the per-cell, small-n use of TabPFN stays in Ship-75 §5.7). The heaviest tail-head
+rebuilds (spliced/Pareto, MZINB) also land here. The marginal-breadth levers from the same audit are
+**not** deferred — they live in [`operation_ship_75.md`](operation_ship_75.md) §5.
+
 ### 6.1 Bayesian hierarchical for low-sample players — ❌ NOT STARTED
 
 `training/bayes_hier.py` — PyMC NegBin with player random effects partially pooled to position priors;
@@ -589,6 +607,12 @@ change). `fit_conformal(model, X_calib, y_calib, alpha=0.1) -> ConformalCalibrat
 a `kelly.py` option to size on the conformal interval lower bound (conservative under high uncertainty);
 `meditate --fit-conformal` persists to `data/conformal/{LEAGUE}_{market}.pkl`. Tests: observed coverage
 in [85%, 95%] at alpha=0.1; half-width monotonic in n_calibration.
+
+**Audit extension (deferred from Ship-75):** for the full alt-line ladder the parlay builder prices, the
+relevant tool is a *distributional* conformal predictive (Chernozhukov et al. 2021) or conformalized
+quantile regression (Romano et al. 2019) over the whole CDF, not just `prob_over` at one line —
+sequenced after Ship-75's marginals are calibrated. Conformal guarantees are marginal, not conditional,
+unless DCP / multivalid conformal is used.
 
 ### 6.5 Push-aware EV refinement — ❌ NOT STARTED
 
@@ -652,6 +676,7 @@ Scope decisions consolidated from across the roadmap. Each links back to where t
 | **`prediction/parlay.py`** | SPLIT OUT (resolved) | `beam_search_parlays` now lives in `prediction/parlay.py`; `find_correlation` stays in `prediction/correlation.py` — matches the CONTRIBUTING.md package map. |
 | **Bankroll** | CLI flag, not state | With the bet logger dropped, bankroll is a parameter to `kelly`/`pickem-build` — no `data/bankroll.json`, no DB row. See [§3.3](#33-underdog-native-strategy-module--%E2%9C%85-done). |
 | **`clv.py` location** | Stays at package root | Would have moved into `tracking/`; without the bet logger, leaving it next to `nightly.py` is the right shape. |
+| **Full-distribution audit** | Marginal-breadth levers → Ship-75 §5; parlay-dependence + conformal-ladder + backbone swings deferred here | Folded into [`operation_ship_75.md`](operation_ship_75.md) §5 (four-axis: normalization / model-loss / blend / calibration); the non-marginal-breadth tail (copula §1.2; conformal / CLV-dashboard / TabPFN-platform / multi-task-NN Phase 6) defers to just after 75%. |
 
 ---
 
