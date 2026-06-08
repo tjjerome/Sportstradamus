@@ -175,7 +175,6 @@ def load_history() -> pd.DataFrame:
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading parlay history...")
 def _load_parlays_cached(mtime: float) -> pd.DataFrame:
-    """Cached read of the parlay-history parquet; ``mtime`` is the cache key."""
     parlays = read_parlay_hist()
     if parlays.empty:
         return parlays
@@ -188,7 +187,7 @@ def _load_parlays_cached(mtime: float) -> pd.DataFrame:
 
 
 def load_parlays() -> pd.DataFrame:
-    """Load parlay history from parquet (mtime-keyed cache)."""
+    """Parlay history from parquet, keyed on file mtime so cron rewrites invalidate the cache."""
     return _load_parlays_cached(_mtime(PARLAY_HIST_PATH))
 
 
@@ -198,7 +197,7 @@ def _load_current_offers_cached(mtime: float) -> pd.DataFrame:
 
 
 def load_current_offers() -> pd.DataFrame:
-    """Today's scored offers, written by ``prophecize`` (mtime-keyed cache)."""
+    """Today's scored offers from the latest ``prophecize`` snapshot."""
     return _load_current_offers_cached(_mtime(CURRENT_OFFERS_PATH))
 
 
@@ -208,7 +207,7 @@ def _load_current_parlays_cached(mtime: float) -> pd.DataFrame:
 
 
 def load_current_parlays() -> pd.DataFrame:
-    """Today's parlay candidates, written by ``prophecize`` (mtime-keyed cache)."""
+    """Today's parlay candidates from the latest ``prophecize`` snapshot."""
     return _load_current_parlays_cached(_mtime(CURRENT_PARLAYS_PATH))
 
 
@@ -218,7 +217,7 @@ def _load_current_pickem_cached(mtime: float) -> pd.DataFrame:
 
 
 def load_current_pickem() -> pd.DataFrame:
-    """Today's Underdog Pick'em entries, written by ``prophecize`` (mtime-keyed cache)."""
+    """Today's Underdog Pick'em entries from the latest ``prophecize`` snapshot."""
     return _load_current_pickem_cached(_mtime(CURRENT_PICKEM_PATH))
 
 
@@ -271,14 +270,14 @@ def load_model_stats() -> pd.DataFrame:
 def render_banner(kind: Literal["predictions", "stats"], subtitle: str = "") -> None:
     """Render a colored section banner so Predictions vs Stats are visually distinct."""
     if kind == "predictions":
-        color, icon, label = PRED_BANNER_COLOR, "🎯", "Predictions"
+        color, label = PRED_BANNER_COLOR, "Predictions"
     else:
-        color, icon, label = STATS_BANNER_COLOR, "📊", "Stats"
+        color, label = STATS_BANNER_COLOR, "Stats"
     sub = f" — {subtitle}" if subtitle else ""
     st.markdown(
         f'<div style="background:{color};padding:10px 14px;border-radius:6px;'
         f'color:white;margin-bottom:14px;font-size:14px">'
-        f"{icon} <b>{label}</b>{sub}</div>",
+        f"<b>{label}</b>{sub}</div>",
         unsafe_allow_html=True,
     )
 
@@ -374,12 +373,10 @@ def get_filtered_history(
     Returns a per-offer DataFrame with columns: all prediction-level cols +
     Line, Boost, Platform, Bet, Model P, Books P, Result, Hit, Model, Books, K.
     """
-    # Explode normalized schema into one row per offer
     df = explode_offers(history)
     if df.empty:
         return df
 
-    # Drop pushes and unresolved
     df = df.dropna(subset=["Result"])
     df = df.loc[df["Result"] != "Push"]
 
@@ -451,7 +448,6 @@ def sidebar_filters(
         st.rerun()
     st.sidebar.header("Filters")
 
-    # Date range
     if not history.empty:
         dates = pd.to_datetime(history["Date"], errors="coerce").dropna()
         min_date = dates.min().date()
@@ -470,19 +466,16 @@ def sidebar_filters(
     if len(date_range) == 1:
         date_range = (date_range[0], max_date)
 
-    # League filter
     leagues = sorted(history["League"].dropna().unique()) if not history.empty else []
     selected_leagues = st.sidebar.multiselect(
         "Leagues", leagues, default=leagues, key=f"{key_prefix}leagues"
     )
 
-    # Platform filter (extracted from Offers in normalized schema)
     platforms = _extract_platforms(history)
     selected_platforms = st.sidebar.multiselect(
         "Platforms", platforms, default=platforms, key=f"{key_prefix}platforms"
     )
 
-    # Data coverage indicator
     if not history.empty and "Dist" in history.columns:
         coverage = history["Dist"].notna().mean()
         st.sidebar.metric("Distribution Data Coverage", f"{coverage:.0%}")

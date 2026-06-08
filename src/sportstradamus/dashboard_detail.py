@@ -109,7 +109,6 @@ def _history_chart(df: pd.DataFrame, line: float) -> alt.Chart:
 
 
 def _to_american(p: float) -> str:
-    """Convert probability to American odds format."""
     if not isinstance(p, float) or np.isnan(p) or p <= 0 or p >= 1:
         return "N/A"
     if p >= 0.5:
@@ -118,7 +117,6 @@ def _to_american(p: float) -> str:
 
 
 def _parse_corr(s: str, max_n: int = 3) -> list[tuple[str, float]]:
-    """Parse comma-separated correlation string into (desc, multiplier) tuples."""
     if not isinstance(s, str) or not s.strip():
         return []
     out = []
@@ -143,16 +141,15 @@ _CORR_MODERATE_MULT = 1.1
 
 
 def _strength_badge(mult: float) -> str:
-    """Return emoji badge for correlation strength."""
+    """Return a semantic colored badge for correlation strength (color paired with text)."""
     if mult >= _CORR_STRONG_MULT:
-        return "🔴 Strong"
+        return ":red[Strong]"
     if mult >= _CORR_MODERATE_MULT:
-        return "🟡 Moderate"
-    return "⚪ Mild"
+        return ":orange[Moderate]"
+    return ":gray[Mild]"
 
 
 def _find_corr_row_idx(desc: str, filtered: pd.DataFrame) -> int | None:
-    """Find row index in filtered DataFrame matching a correlation description."""
     for direction in ("Over", "Under"):
         if direction in desc:
             player_name = desc.split(direction)[0].strip()
@@ -165,7 +162,6 @@ def _find_corr_row_idx(desc: str, filtered: pd.DataFrame) -> int | None:
 def _render_corr_cards(
     items: list[tuple[str, float]], group_label: str, filtered: pd.DataFrame, tab_key_prefix: str
 ) -> None:
-    """Render correlated bet cards as clickable buttons."""
     if not items:
         return
     st.markdown(f"**{group_label}**")
@@ -173,7 +169,7 @@ def _render_corr_cards(
         col1, col2 = st.columns([4, 1])
         col1.markdown(f"**{desc}**")
         col2.markdown(_strength_badge(mult) + f" {mult:.2f}×")
-        if st.button("View →", key=f"{tab_key_prefix}_{i}"):
+        if st.button("View", icon=":material/arrow_forward:", key=f"{tab_key_prefix}_{i}"):
             idx = _find_corr_row_idx(desc, filtered)
             if idx is not None:
                 st.session_state.detail_stack.append(idx)
@@ -656,12 +652,12 @@ def _render_context_metrics(row: pd.Series) -> None:
 
 def _render_nav() -> None:
     nav = st.columns([1, 1, 6])
-    if nav[0].button("✕ Close"):
+    if nav[0].button("Close", icon=":material/close:"):
         st.session_state.detail_stack = []
         st.session_state.last_grid_key = None
         st.rerun()
     if len(st.session_state.detail_stack) > 1:
-        if nav[1].button("← Back"):
+        if nav[1].button("Back", icon=":material/arrow_back:"):
             st.session_state.detail_stack.pop()
             st.rerun()
 
@@ -687,7 +683,9 @@ def _show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
     )
     _render_context_metrics(row)
 
-    tab1, tab2, tab3 = st.tabs(["📈 History", "〜 Model", "🔗 Correlated"])
+    tab1, tab2, tab3 = st.tabs(
+        [":material/history: History", ":material/query_stats: Model", ":material/hub: Correlated"]
+    )
     with tab1:
         _render_history_tab(row)
     with tab2:
