@@ -2,7 +2,7 @@
 
 Phase 2 of the new ship-gate plan
 ([docs/ship_gate.md](../../../docs/ship_gate.md)) — lifted from
-``pages/6_📊_Stats_Profit_Sim.py`` so the same Monte-Carlo strategy backtest
+``pages/6_Stats_Profit_Sim.py`` so the same Monte-Carlo strategy backtest
 that powers the dashboard can also size the offline supersede gate
 (S3 — paired Sharpe) and the live devel→main gate (positive Kelly ROI;
 +0.5% / 2-wk vs incumbent). Behavior is preserved relative to the page;

@@ -88,6 +88,13 @@ to redo the work.
 ## General Rules
 
 * Talk like caveman except when /writing-clearly-and-concisely overrides
+* **Documentation: write to not drift.** Before editing any `.md`, skim
+  [docs/STYLE_GUIDE.md §16](docs/STYLE_GUIDE.md). One canonical home per fact
+  (cross-ref, don't restate); revise stale statements in place rather than layering
+  new ones beside them; living docs describe current state. Changelogs stay short
+  and caveman — one-line entries, newest-first, cap the recent few, detail in git;
+  no dated narrative build-log blocks in the body. The `docs-style.py` hook nudges
+  when an edit adds one.
 * Use `click` over `argparse` for CLI args
 * Long-running scripts: add a status bar with `tqdm`
 * **Multi-module work uses subagent-driven development by default.** When a
@@ -104,6 +111,41 @@ to redo the work.
   and `poetry run ruff check src/sportstradamus/`. All three must be clean.
 * Dashboard banner/caption timestamp lines show only the timestamp. Do not append
   feature descriptions, announcements, or other text to them.
+* **Dashboard UI work: read [DESIGN.md](DESIGN.md) first.** It holds the committed visual
+  identity — FIXED design tokens mirrored in `.streamlit/config.toml` — plus the NEVER list
+  that keeps the app from looking AI-generated (no default-red, no purple gradients, no
+  Inter/Roboto, Material icons not emoji). Treat the FIXED tokens as inviolable and do not
+  supplement them with your own defaults. The `design-lint` hook nudges live and
+  `tests/golden/test_design_tokens.py` is the hard gate; Stage 2/3 work is parked in
+  [docs/dashboard_design_stage2_3.md](docs/dashboard_design_stage2_3.md).
+
+## Agentic workflow conventions
+
+These conventions pair with the hooks in `.claude/hooks/`.
+
+* **The refactoring-specialist runs no pytest.** It refactors and runs `ruff`
+  on its scope only. The main agent owns the single authoritative gate run —
+  after the specialist returns, run `poetry run ruff check src/sportstradamus/`,
+  `poetry run pytest tests/golden/`, and the integration command below, exactly
+  once. If they fail, isolate cause via `git diff` of the specialist's changes.
+
+* **Integration gate before a push.** The push-gate hook reads
+  `.claude/.state/integration_green`. Run the authoritative integration suite as:
+  `poetry run pytest -m integration -n0 && touch "$CLAUDE_PROJECT_DIR/.claude/.state/integration_green"`
+  so a clean run clears the push prompt. Editing any `.py` afterward re-arms it.
+
+* **Research-first.** Before building any Operation Ship 75 §8-flagged lever, or
+  changing a distribution family / dispersion mechanism, dispatch the
+  `research-analyst` subagent first and cite its `/tmp/researcher_*.md` brief.
+  The research-gate hook enforces the discrete cases (a `shipped:` flip in
+  `stat_meta.json`, edits to a distribution-family file in
+  `.claude/research_gated.txt`); this convention covers the judgment calls a
+  path matcher cannot see. To proceed without a brief on a gated edit, write a
+  one-line justification to `.claude/.state/research_waiver`.
+
+* **Session memory capture.** When a unit of work completes — notably before or
+  at a push — offer to capture any durable, non-obvious, repeatable lesson to the
+  memory dir in the standard format. Do not force a memory from every session.
 
 ## Hard rules — these caused the last major refactor
 
@@ -341,7 +383,7 @@ Single source of truth for per-cell training diagnostics. Written by
 `training/report.py:report()` after every `meditate` run as **one wide row
 per `(league, market)` cell**; consumed by:
 
-* The Streamlit dashboard (`pages/7_📊_Stats_Model_Training.py`) — tab views
+* The Streamlit dashboard (`pages/7_Stats_Model_Training.py`) — tab views
   by metric family with `lifecycle_state` joined in from
   `training/graduation.py:lifecycle_table()`.
 * `training.report.get_market_calibration(league, market)` — kelly's

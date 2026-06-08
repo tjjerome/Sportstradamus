@@ -97,7 +97,7 @@ Sportstradamus/
 | `report.py` | `report()` — walks model pickles, builds the wide one-row-per-cell training stats, and writes `data/training/model_stats.parquet` + `model_stats.csv` mirror. `get_market_calibration` exposes `{kelly_shrinkage, brier_skill_score, model_weight}` for Kelly to read. Inline calls `training.scorecard.compute_gates` per cell |
 | `scorecard.py` | `compute_gates(test_set_df, *, league, market)` — five offline ship gates (G1 paired Brier CI, G2/G3 star/bench z, G4 IQR ratio, G5 Roelofs-debiased ECE) called inline by `report()` and exposed via a standalone click CLI (`poetry run python -m sportstradamus.training.scorecard ...`) for A/B-test runs. The CLI never writes `model_stats.parquet` |
 | `data.py` | `count_training_rows`, `trim_matrix`, `_histogram_weights` |
-| `hyperparams.py` | `warm_start_hyper_opt`, `_BoundedResponseFn` |
+| `hyperparams.py` | `tune_hyperparameters`, `_BoundedResponseFn` |
 | `markets.py` | `ALL_MARKETS` — per-league market name lists |
 | `config.py` | `load/save_distribution_config`, `load_shipped_config`, `load/save_zi_config` |
 | `__init__.py` | Re-exports the public API |
@@ -351,8 +351,8 @@ The training loop is in `training/pipeline.py` → `train_market`. The stages in
 2. **Distribution selection** — `calibration.select_distribution`; `global_mean >= 2`
    switches to SkewNormal
 3. **Normalization** — SkewNormal targets are normalized by mean before fitting
-4. **Hyperparameter search** — Optuna via `hyperparams.warm_start_hyper_opt`, seeded
-   from the previous best params if the model pickle exists
+4. **Hyperparameter search** — Optuna via `hyperparams.tune_hyperparameters`, seeded
+   from the previous best params if the model pickle exists (cold start when none)
 5. **Model fit** — `LightGBMLSS.fit`
 6. **Dispersion calibration** — `minimize_scalar` on CRPS loss over the validation set
 7. **Temperature scaling** — Brier loss minimization on the validation set
