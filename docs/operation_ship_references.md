@@ -503,6 +503,32 @@ Renumbered from the deprecated context doc.
 [47] Efron, B., Morris, C. (1973). Stein's estimation rule and its competitors — James-Stein / empirical-Bayes shrinkage.
 [48] Roelofs, R., et al. (2022). Mitigating bias in calibration error estimation — low-base-rate sensitivity.
 
+*Added by the full-distribution audit (marginal-breadth levers folded into [`operation_ship_75.md`](operation_ship_75.md) §5):*
+
+[49] Czado, C., Gneiting, T., Held, L. (2009). Predictive model assessment for count data. *Biometrics* 65(4), 1254–1261.
+[50] Hallin, M., Ley, C. (2014). Skew-symmetric distributions and Fisher information — the double sin of the skew-normal. *Bernoulli* 20(3), 1432–1462. *(arXiv:1209.4177)*
+[51] Kuleshov, V., Fenner, N., Ermon, S. (2018). Accurate uncertainties for deep learning using calibrated regression. *ICML*. *(arXiv:1807.00263)*
+[52] Henzi, A., Ziegel, J., Gneiting, T. (2021). Isotonic distributional regression. *JRSS-B* 83(5), 963–993.
+[53] Marx, C., et al. (2022). Modular conformal calibration. *(arXiv:2206.11468)*
+[54] Genest, C., Zidek, J. (1986). Combining probability distributions — a critique and annotated bibliography. *Statistical Science* 1(1), 114–135.
+[55] Clarke, S., Kovalchik, S., Ingram, M. (2017). Adjusting bookmaker's odds to allow for overround. *Am. J. Sports Science* 5(6), 45–49.
+[56] Ranjan, R., Gneiting, T. (2010). Combining probability forecasts — the beta-transformed linear pool. *JRSS-B* 72(1), 71–91.
+[57] Gneiting, T., Ranjan, R. (2013). Combining predictive distributions. *Electronic Journal of Statistics* 7, 1747–1782.
+[58] Hora, S. C. (2004). Probability judgments for continuous quantities — linear-pool dispersion. *Management Science* 50(5), 597–604.
+[59] Gebetsberger, M., et al. (2018). Estimation methods for nonhomogeneous regression — CRPS vs maximum likelihood. *Monthly Weather Review* 146(12), 4323–4338.
+[60] Chung, Y., et al. (2021). Beyond pinball loss — quantile methods for calibrated uncertainty. *NeurIPS*.
+[61] Arellano-Valle, R. B., Azzalini, A. (2008). The centred parametrization for the multivariate skew-normal distribution. *J. Multivariate Analysis* 99, 1362–1382.
+[62] Jones, M. C., Pewsey, A. (2009). Sinh-arcsinh distributions. *Biometrika* 96(4), 761–780.
+[63] Harris, T., Yang, Z., Hardin, J. (2012). Modeling underdispersed count data with generalized Poisson regression. *Stata Journal* 12(4), 736–747.
+[64] Efron, B. (1986). Double exponential families and their use in GLM regression. *JASA* 81(395), 709–721.
+[65] Gelman, A., Hill, J. (2007). *Data Analysis Using Regression and Multilevel/Hierarchical Models.* Cambridge UP.
+[66] Hollmann, N., et al. (2025). Accurate predictions on small data with a tabular foundation model (TabPFN v2). *Nature* 636, 319–326.
+[67] Grinsztajn, L., Oyallon, E., Varoquaux, G. (2022). Why do tree-based models still outperform deep learning on tabular data? *NeurIPS*. *(arXiv:2207.08815)*
+[68] McElfresh, D., et al. (2023). When do neural nets outperform boosted trees on tabular data? *NeurIPS*. *(arXiv:2305.02997)*
+[69] Arnold, S., Walz, E.-M., Ziegel, J., Gneiting, T. (2024). Decompositions of the mean CRPS. *Electronic Journal of Statistics* 18, 4992–5044.
+[70] Chernozhukov, V., Wüthrich, K., Zhu, Y. (2021). Distributional conformal prediction. *PNAS* 118(48). *(arXiv:1909.07889)*
+[71] López de Prado, M. (2018). *Advances in Financial Machine Learning.* Wiley (ch. 7 purging/embargo, ch. 12 CPCV).
+
 ---
 
 > **For full prose**, see the archived
