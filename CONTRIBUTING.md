@@ -20,8 +20,9 @@ style guide is the mechanical source of truth; this document gives you the map.
 7. [Adding a New League](#adding-a-new-league)
 8. [Adding a New Market](#adding-a-new-market)
 9. [Modifying the Training Pipeline](#modifying-the-training-pipeline)
-10. [Tests](#tests)
-11. [Archived / Deprecated Code](#archived--deprecated-code)
+10. [Shipping to Production (devel)](#shipping-to-production-devel)
+11. [Tests](#tests)
+12. [Archived / Deprecated Code](#archived--deprecated-code)
 
 ---
 
@@ -40,7 +41,6 @@ Sportstradamus/
 │   │   ├── nightly.py          # reflect command
 │   │   ├── dashboard.py        # dashboard command entry point
 │   │   ├── dashboard_app.py    # Streamlit app
-│   │   ├── feature_selection.py
 │   │   ├── skew_normal.py      # custom PyTorch distribution
 │   │   ├── analysis.py
 │   │   ├── creds/              # API keys + Google OAuth (git-ignored)
@@ -66,8 +66,8 @@ Sportstradamus/
 
 | Module | What's in it |
 |---|---|
-| `config.py` | Loads every JSON config file at import time; exposes `stat_cv`, `stat_dist`, `stat_map`, `stat_zi`, `stat_std`, `book_weights`, `books`, `feature_filter`, `banned`, `abbreviations`, `combo_props`, `nhl_goalies`, `name_map`, `odds_api` |
-| `archive.py` | `Archive` class — klepto HDF wrapper for persisting odds keyed by `(date, league, market, player)`. Methods: `get_line`, `get_ev`, `write`, `clip`. Also `clean_archive`. |
+| `config.py` | Loads every JSON config file at import time; exposes `stat_meta` (per-cell `{dist, shipped, strategy, cv, std, zi}` union of committed `stat_meta.json` and gitignored `stat_calibration.json`), the legacy per-field views `stat_cv` / `stat_dist` / `stat_std` / `stat_zi` derived from it, plus `stat_map`, `book_weights`, `books`, `feature_filter`, `banned`, `abbreviations`, `combo_props`, `nhl_goalies`, `name_map`, `odds_api` |
+| `archive.py` | `Archive` class — DuckDB singleton at `archive/archive.duckdb` with `odds(league, market, game_date, entity, book, ev)` and `lines(...)` tables. Public read methods: `get_ev`, `get_line`, `get_moneyline`, `get_total`, `get_team_market`, `to_pandas`, `archived_players_by_date`. Public write methods: `add_dfs`, `merge_player_books`, `set_team_books`, `write`. Module-level helper: `clean_archive`. |
 | `scraping.py` | `Scrape` class — `requests.Session` with ScrapeOps browser-header rotation and ScrapingFish proxy fallback |
 | `distributions.py` | `fused_loc`, `get_ev`, `get_odds`, `fit_distro`, `no_vig_odds`, `odds_to_prob`, `prob_to_odds`, `set_model_start_values` |
 | `text.py` | `remove_accents`, `merge_dict`, `hmean`, `get_trends`, `get_mlb_pitchers` |
@@ -89,16 +89,17 @@ Sportstradamus/
 
 | Module | What's in it |
 |---|---|
-| `cli.py` | `meditate` click command — thin orchestrator: reset-markets handling, stats init, league setup (book weights, comps, correlations), per-market loop calling `train_market` |
+| `cli.py` | `meditate` click command — thin orchestrator: stats init, league setup (book weights, comps, correlations), per-market loop calling `train_market` |
 | `pipeline.py` | `train_market(league, market, stat_data, ...)` — the full per-market training loop: data load, distribution selection, normalization, Optuna search, LightGBMLSS fit, dispersion calibration, temperature scaling, model save |
 | `calibration.py` | `fit_book_weights`, `fit_model_weight`, `select_distribution` |
-| `shap.py` | SHAP importance computation, feature filter management: `compute_market_importance`, `filter_market`, `filter_features`, `see_features`, `_scouting_shap_and_filter` |
+| `shap.py` | Post-train drift-monitoring SHAP only: `compute_market_importance` writes per-cell |SHAP| + corr columns to `feature_importances.csv` / `feature_correlations.csv` after each model trains. `see_features` rebuilds the CSVs from all pickles in batch. SHAP no longer drives feature selection (2026-05-27 no-filter rewire) |
 | `correlate.py` | `correlate(league, stat_data)` — builds `{LEAGUE}_corr.csv` from player stat history |
-| `report.py` | `report()` — reads model pickles, writes `training_report.txt` |
+| `report.py` | `report()` — walks model pickles, builds the wide one-row-per-cell training stats, and writes `data/training/model_stats.parquet` + `model_stats.csv` mirror. `get_market_calibration` exposes `{kelly_shrinkage, brier_skill_score, model_weight}` for Kelly to read. Inline calls `training.scorecard.compute_gates` per cell |
+| `scorecard.py` | `compute_gates(test_set_df, *, league, market)` — five offline ship gates (G1 paired Brier CI, G2/G3 star/bench z, G4 IQR ratio, G5 Roelofs-debiased ECE) called inline by `report()` and exposed via a standalone click CLI (`poetry run python -m sportstradamus.training.scorecard ...`) for A/B-test runs. The CLI never writes `model_stats.parquet` |
 | `data.py` | `count_training_rows`, `trim_matrix`, `_histogram_weights` |
-| `hyperparams.py` | `warm_start_hyper_opt`, `_BoundedResponseFn` |
+| `hyperparams.py` | `tune_hyperparameters`, `_BoundedResponseFn` |
 | `markets.py` | `ALL_MARKETS` — per-league market name lists |
-| `config.py` | `load/save_distribution_config`, `load/save_zi_config` |
+| `config.py` | `load/save_distribution_config`, `load_shipped_config`, `load/save_zi_config` |
 | `__init__.py` | Re-exports the public API |
 
 ### `prediction/` — The `prophecize` pipeline
@@ -108,10 +109,24 @@ Sportstradamus/
 | `cli.py` | `main` click command — Google auth, stats init, fetch offers, score, write sheet. Also `_get_sheets_client` |
 | `model_prob.py` | `model_prob` — loads a trained model, computes blended probability distributions for every offer |
 | `scoring.py` | `process_offers`, `match_offers` — offer-level EV scoring and deduplication |
-| `correlation.py` | `find_correlation` — loads correlation CSVs, scores parlay legs |
-| `parlay.py` | `beam_search_parlays`, `save_data` |
-| `sheets.py` | `write_to_sheet`, `format_sheet` — gspread write paths |
-| `__init__.py` | Re-exports the public API |
+| `correlation.py` | `find_correlation` — loads correlation CSVs, scores parlay legs (calls `parlay.beam_search_parlays`) |
+| `parlay.py` | `beam_search_parlays` plus its helpers `_payout_curve_for`, `_expected_payout_with_pushes`, `_nearest_psd`, and the per-search constants. Re-exported at the package level. |
+| `persist.py` | `save_data` — writes scored offers to disk |
+| `__init__.py` | Re-exports the public API (including `beam_search_parlays` from `parlay.py`) |
+
+> `prediction/sheets.py` was deprecated on `devel`; the live path is
+> `data/recommendations/{date}.yaml` (written by
+> `strategies/underdog_pickem.py`) which the dashboard reads directly.
+
+### `strategies/` — Underdog-native decision engine
+
+| Module | What's in it |
+|---|---|
+| `kelly.py` | `fractional_kelly_stake`, `joint_kelly_portfolio`, `KellyCandidate`, the resolution chain (explicit > live CLV-segment BSS > training BSS > fallback `1.0`), and the `kelly` CLI. cvxpy / pyyaml / tabulate are lazy-imported from `[tool.poetry.group.strategy]`. |
+| `underdog_pickem.py` | `PickemConfig`, `RecommendedEntry`, `construct_entries`, and the `pickem-build` CLI. Pure orchestrator — no math. Covers Power, Flex, and Rivals (Rivals restricted to 2/3-leg sizes). |
+| `_pickem_emit.py` | YAML-emit helpers split out so `underdog_pickem.py` stays under the 300-line cap. |
+| `__init__.py` | Re-exports `kelly` and `underdog_pickem`. |
+| `README.md` | Module-level docs: resolution chain, blending ramp, contest variants. |
 
 ### Other top-level modules
 
@@ -122,7 +137,6 @@ Sportstradamus/
 | `nightly.py` | `reflect` | Historical parlay performance analysis |
 | `dashboard.py` / `dashboard_app.py` | `dashboard` | Streamlit dashboard |
 | `skew_normal.py` | — | Custom PyTorch `SkewNormal` distribution for LightGBMLSS |
-| `feature_selection.py` | — | Feature selection helpers used during training |
 
 ---
 
@@ -135,7 +149,7 @@ confer
   books.get_sleeper()          ← Sleeper API
         │
         ▼
-  Archive.write()  →  data/   (klepto HDF)
+  Archive.write()  →  archive/archive.duckdb
 
 meditate
   Stats{League}.load()         ← league APIs / cached CSVs in data/player_data/
@@ -159,8 +173,28 @@ prophecize
   prediction/parlay.beam_search_parlays()
         │
         ▼
-  prediction/sheets.write_to_sheet()  →  Google Sheets
+  prediction/persist.save_data()  →  scored-offer cache
+
+pickem-build (Phase 3)
+  prediction/parlay.beam_search_parlays(contest_variant=...)
+  strategies/kelly.fractional_kelly_stake(...)
+        │
+        ▼
+  data/recommendations/{date}.yaml
+        │
+        ▼
+  poetry run kelly --from <yaml>           ← offline re-sizing
+  dashboard "Today's Recommendations" tab  ← live review
 ```
+
+**NFL comp data:** Player-comp aggregates for NFL come from FantasyPoints
+season exports (manually refreshed to
+`src/sportstradamus/data/player_data/NFL/{year}/`) plus PBP-derived
+aggregates from `nfl_data_py` via `stats/nfl_pbp_agg.py`. These are
+distinct from the `nfl_data_py` weekly logs that drive training features.
+The comp feature list is evidence-based per established stickiness
+research; `scripts/comp_feature_stability.py` validates Y/Y stability as
+a gate before `optimize_comp_weights.py --save`.
 
 ---
 
@@ -169,15 +203,18 @@ prophecize
 | I want to... | Look here |
 |---|---|
 | Change which markets a league trains | `training/markets.py` → `ALL_MARKETS` |
-| Change which distribution a stat uses | `src/sportstradamus/data/stat_dist.json` |
-| Add/remove a sportsbook from consensus lines | `src/sportstradamus/data/prop_books.json` |
-| Add a player name alias | `src/sportstradamus/data/name_map.json` |
-| Understand a training report metric | [CLAUDE.md](CLAUDE.md) §Training Report Diagnostics |
+| Change which distribution a stat uses | `src/sportstradamus/data/config/stat_meta.json` (`dist` field) |
+| Ship a cell that cleared Gate 1 | `src/sportstradamus/data/config/stat_meta.json` (`shipped: "withheld"` → `"devel"`) |
+| Add/remove a sportsbook from consensus lines | `src/sportstradamus/data/config/prop_books.json` |
+| Add a player name alias | `src/sportstradamus/data/config/name_map.json` |
+| Understand a training stats metric | [CLAUDE.md](CLAUDE.md) §Training stats — covers the wide one-row-per-cell schema (identity, scoring rules, ECE, discrimination, EV/line, Kelly, shape, ship gates, hyperparameters) and the CSV mirror |
+| Know what `kelly_shrinkage` Kelly reads | `training/report.py:get_market_calibration` → returns `{kelly_shrinkage, brier_skill_score, model_weight}` for a `(league, market)` from `data/training/model_stats.parquet` |
+| Tune the Kelly resolution chain | `strategies/kelly.py` constants `LIVE_BLEND_FLOOR=25`, `LIVE_BLEND_FULL=100`, `DEFAULT_KELLY_FRACTION=0.25`, `MAX_FRACTION_OF_BANKROLL=0.005` |
 | Change the confidence cutoff for picks | `prediction/scoring.py` → `MIN_CONFIDENCE` |
 | Change the Optuna hyperparameter search space | `training/pipeline.py` → `train_market` objective |
 | Change how distributions are blended with bookmaker lines | `helpers/distributions.py` → `fused_loc` |
 | Update the season start date for a league | `stats/{league}.py` → `Stats{League}.season_start` |
-| Change SHAP importance thresholds | `training/shap.py` → `filter_features` / run `meditate --rebuild-filter` |
+| Refresh per-cell SHAP diagnostic CSV from scratch | `training/shap.py:see_features` — re-runs SHAP on every saved pickle, rewrites `feature_importances.csv` + `feature_correlations.csv`. Does NOT change feature selection — selection is unfiltered since the 2026-05-27 rewire |
 | Change book reliability weights | `training/calibration.py` → `fit_book_weights`, or edit `data/book_weights.json` directly |
 | Find why a comp feature has a certain weight | `data/playerCompStats.json` + `scripts/optimize_comp_weights.py` |
 | Read archived / removed code | `src/deprecated/` |
@@ -199,7 +236,8 @@ commit runs `ruff check --fix` and `ruff format`. CI runs the same checks plus
 
 ### Workflow
 
-1. Work on a feature branch off `main`.
+1. Work on a feature branch off `devel` (production tracks `devel`; `main`
+   lags — see CLAUDE.md §Production deployment).
 2. Run `poetry run ruff check src/ --fix && poetry run ruff format src/` before
    committing. The pre-commit hook does this, but running it manually first avoids
    a hook-rejected commit.
@@ -211,7 +249,7 @@ commit runs `ruff check --fix` and `ruff format`. CI runs the same checks plus
    ```
 4. For changes that touch the training pipeline, run `meditate` on a small league
    (`--league WNBA` if in-season) to confirm models still train without errors and
-   the `training_report.txt` values look plausible.
+   the `data/training/model_stats.csv` values look plausible.
 5. For changes that touch `prophecize`, run it against the live data and spot-check
    the exported sheet.
 
@@ -229,22 +267,17 @@ change the `torch` dependency without verifying the new wheel exists in that sou
 
 ## Style Rules Summary
 
-The full rules are in [docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md). Quick reference:
+Code conventions live in [docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md) — read it
+once, cite sections by number (`§N`). It is the single source of truth; this
+document deliberately does not restate the rules, so the two can't drift apart.
 
-- **Formatter:** `ruff format`. Line length 100. Double quotes.
-- **Linter:** `ruff check`. Enforces PEP 8, import order, pydocstyle (Google convention),
-  bugbear, and more.
-- **Docstrings:** Every public function and class. Google format (Args / Returns / Raises).
-  Module-level docstring on every file under `src/sportstradamus/`.
-- **Type hints:** Required on all public function signatures.
-- **Naming:** `snake_case` for modules/functions/variables, `PascalCase` for classes,
-  `UPPER_SNAKE_CASE` for module-level constants.
-- **Comments:** Explain *why*, not *what*. No commented-out code — delete it and let
-  `git log` keep the history. If code will return, move it to `src/deprecated/` instead.
-- **Function length:** Target ≤ 60 logical lines. Hard cap ~120. Extract helpers when
-  nesting exceeds 4 levels.
-- **No speculative abstraction.** Three similar lines of code are better than a premature
-  abstraction. Extract only after the third concrete reuse.
+The posture in one line: **less code, written for a human to maintain** — no
+wrappers that only forward a call, no fallbacks for cases that can't happen, no
+comments that narrate the code. The §18 smells table is the fastest checklist.
+
+Mechanical enforcement (`ruff format` + `ruff check --fix`, line length 100,
+Google docstrings, the three quality gates) is configured in `pyproject.toml`
+and runs automatically — see STYLE_GUIDE §19.
 
 ---
 
@@ -263,12 +296,15 @@ The full rules are in [docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md). Quick referenc
 
 3. **Add markets** to `training/markets.py` → `ALL_MARKETS["{LEAGUE}"]`.
 
-4. **Add distribution types** in `data/stat_dist.json` for each new market.
+4. **Add per-cell entries** in `data/config/stat_meta.json` for each new
+   market: `{"dist": "Gamma" | "NegBin" | ..., "shipped": "withheld",
+   "strategy": "none"}`. The cell ships only after passing Gate 1 (then
+   edit `shipped` to `"devel"`).
 
-5. **Add stat name mappings** in `data/stat_map.json` to normalize API names to
-   internal names.
+5. **Add stat name mappings** in `data/config/stat_map.json` to normalize
+   API names to internal names.
 
-6. **Add abbreviations** to `data/abbreviations.json`.
+6. **Add abbreviations** to `data/config/abbreviations.json`.
 
 7. **Wire into `meditate`** — `training/cli.py` already reads `ALL_MARKETS` and
    instantiates each league's Stats class dynamically; if your class follows the naming
@@ -283,11 +319,14 @@ The full rules are in [docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md). Quick referenc
 A "market" is a betting category for a single stat in a single league (e.g. "assists",
 "strikeouts"). To add one:
 
-1. **`data/stat_dist.json`** — add `"{LEAGUE}: {market}": "Gamma"` (or NegBin / ZINB /
-   ZAGamma based on whether the stat is continuous or count-valued and whether it has
-   zero-inflation).
+1. **`data/config/stat_meta.json`** — add a per-cell entry:
+   `"{LEAGUE}": {"{market}": {"dist": "Gamma", "shipped": "withheld",
+   "strategy": "none"}}` (pick a distribution family based on whether the
+   stat is continuous or count-valued and whether it has zero-inflation).
+   `shipped: "withheld"` keeps the cell out of training until it clears
+   Gate 1.
 
-2. **`data/stat_map.json`** — map the sportsbook's name for the stat to your internal name.
+2. **`data/config/stat_map.json`** — map the sportsbook's name for the stat to your internal name.
 
 3. **`training/markets.py` → `ALL_MARKETS`** — append the market string to the list for
    that league.
@@ -299,7 +338,8 @@ A "market" is a betting category for a single stat in a single league (e.g. "ass
    columns for a single offer as `get_training_matrix` produces for training.
 
 6. Run `poetry run meditate --league {LEAGUE}` — the new market will train on the first
-   pass. Review its block in `training_report.txt`.
+   pass. Review its row in `data/training/model_stats.csv` (CSV mirror of the parquet
+   the dashboard reads).
 
 ---
 
@@ -311,8 +351,8 @@ The training loop is in `training/pipeline.py` → `train_market`. The stages in
 2. **Distribution selection** — `calibration.select_distribution`; `global_mean >= 2`
    switches to SkewNormal
 3. **Normalization** — SkewNormal targets are normalized by mean before fitting
-4. **Hyperparameter search** — Optuna via `hyperparams.warm_start_hyper_opt`, seeded
-   from the previous best params if the model pickle exists
+4. **Hyperparameter search** — Optuna via `hyperparams.tune_hyperparameters`, seeded
+   from the previous best params if the model pickle exists (cold start when none)
 5. **Model fit** — `LightGBMLSS.fit`
 6. **Dispersion calibration** — `minimize_scalar` on CRPS loss over the validation set
 7. **Temperature scaling** — Brier loss minimization on the validation set
@@ -322,6 +362,82 @@ The training loop is in `training/pipeline.py` → `train_market`. The stages in
 To change the objective function, edit the `objective` closure inside `train_market`.
 To change dispersion calibration, edit the `minimize_scalar` call that follows model fit.
 To change the feature filter logic, see `training/shap.py`.
+
+---
+
+## Shipping to Production (`devel`)
+
+**The production server tracks `devel` and pulls the entire branch.** Anything
+merged to `devel` runs in production — including its dependencies and console
+scripts. So `devel` must carry **production-runtime code and operator tools
+only**, never the dev-only research scaffolding used to *decide* a change.
+
+This is the process for shipping **any** model change for **any** market to
+production. The ship mechanism — `data/config/stat_meta.json`'s per-cell
+`shipped` field, the per-cell strategy resolve + withhold/prune in
+`meditate`, and the Gate 1 / Gate 2 lifecycle — applies to **every
+`(league, market)` cell**, not to one track or league. A research line
+(e.g. the GBDT mean-regression work on
+`claude/fix-gbdt-mean-regression-*`) is just where the *evidence* for a
+given ship is produced; the pipeline itself is project-wide.
+
+Model improvements are developed on a long-lived research branch that accumulates
+diagnostics, A/B harnesses, and experiment flags. **Do not merge a research
+branch wholesale into `devel`.** Ship in two phases.
+
+### Phase A — foundation (one-time)
+
+Land the production substrate the ship mechanism needs:
+
+- the strategy registry (`training/baselines.py`) + pipeline `target_strategy` /
+  `zinb_mode` dispatch + `model_prob` decode;
+- the Gate 2 live-metrics machinery (`analysis.compute_book_brier_skill_score`,
+  the `nightly.py` live-metrics step, `check-graduation`, `backfill-live-metrics`);
+- the per-cell ship plumbing (`training/ship_config.py`, the `helpers/io.py`
+  model-pickle helpers, the `meditate` wiring) + a `data/config/stat_meta.json`
+  in which every cell starts `shipped: "withheld"`.
+
+With every cell `"withheld"` and default flags, production behavior is
+unchanged — the mechanism is simply now live.
+
+### Phase B — per-market ship PRs (repeating)
+
+When a `(league, market)` cell clears **Gate 1** (see
+`docs/archive/gbdt_mean_regression_plan.md`, "Ship mechanism — per-cell strategy config
+on devel"), open a focused PR to `devel` carrying the **production delta only**:
+
+1. **Training** — if the cell ships a *new* strategy: its slug + forward/decode in
+   `training/baselines.py`. If it needs new features: those `stats/` + `pipeline`
+   additions. If the strategy is already deployed: nothing here.
+2. **Inference** — the matching `model_prob` decode branch for that strategy, with
+   an inference-path test (a Gate 1 requirement).
+3. **Toggle** — the one-field edit in `stat_meta.json` (set the cell's
+   `shipped` to `"devel"` to ship, or back to `"withheld"` to dark-out a
+   cell under rework).
+
+The offline **evidence** that justifies the ship (scorecard A/B runs,
+diagnostic verdicts) **travels as prose in the PR description, never as committed
+code.**
+
+### Keep on `devel` vs leave on the research branch
+
+| Keep (production runtime / operator tools) | Leave off `devel` (dev-only research) |
+|---|---|
+| `baselines.py`, pipeline dispatch, `model_prob` decode, `training/scorecard.py` (inline-called by `report()`) | `training/scorecard.py` standalone-CLI A/B mode (single/diff/live-window flags) — keep the module, leave the research CLI exercises off |
+| `ship_config.py` + `helpers/io.py` model-pickle helpers + `meditate` wiring | `zinb-routing-diagnostics` + the **`statsmodels`** dependency it pulls in |
+| `nightly` live-metrics, `check-graduation`, `backfill-live-metrics` | `icc-diagnostics` |
+| Production data / feature fixes | the diagnostics' test suites; any `/tmp` harness |
+
+The `--target-strategy` / `--zinb-mode` / `--deterministic` flags default to
+current production behavior, so they are inert on `devel`; the heavy determinism
+*integration tests* are dev scaffolding and need not ship.
+
+### Use the `devel-ship-curator` agent
+
+Phase B PRs (and any further foundation layers) **must be carved by the
+`devel-ship-curator` agent** (`.claude/agents/devel-ship-curator.md`), which
+enforces the keep/drop split above and the production-delta-only discipline.
+The initial Phase A foundation PR is the one exception — it is carved by hand.
 
 ---
 
@@ -344,8 +460,8 @@ the training report is the behavioral regression check.
 
 `tests/integration/test_end_to_end.py` exercises the
 `confer -> meditate -> prophecize` wiring against cached Odds API fixtures
-and stubbed external dependencies (`nba_api`, Optuna, Google Sheets, Underdog,
-Sleeper). It is marked `integration` and is excluded from the default
+and stubbed external dependencies (`nba_api`, Optuna, Underdog, Sleeper).
+It is marked `integration` and is excluded from the default
 `pytest` collection; opt in explicitly:
 
 ```bash
