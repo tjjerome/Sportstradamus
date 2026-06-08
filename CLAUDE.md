@@ -88,6 +88,13 @@ to redo the work.
 ## General Rules
 
 * Talk like caveman except when /writing-clearly-and-concisely overrides
+* **Documentation: write to not drift.** Before editing any `.md`, skim
+  [docs/STYLE_GUIDE.md §16](docs/STYLE_GUIDE.md). One canonical home per fact
+  (cross-ref, don't restate); revise stale statements in place rather than layering
+  new ones beside them; living docs describe current state. Changelogs stay short
+  and caveman — one-line entries, newest-first, cap the recent few, detail in git;
+  no dated narrative build-log blocks in the body. The `docs-style.py` hook nudges
+  when an edit adds one.
 * Use `click` over `argparse` for CLI args
 * Long-running scripts: add a status bar with `tqdm`
 * **Multi-module work uses subagent-driven development by default.** When a
