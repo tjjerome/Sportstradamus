@@ -98,9 +98,10 @@ def _restore_modules(removed: dict[str, object]) -> None:
 def _import_page_file(path: Path) -> None:
     """Import a Streamlit page by filesystem path.
 
-    Pages use emoji in their filenames (``1_🎯_Predictions_Today.py``)
-    which are not valid Python identifiers, so they must be loaded via
-    ``importlib.util.spec_from_file_location`` rather than a normal import.
+    Pages keep a numeric ordering prefix in their filenames
+    (``1_Predictions_Today.py``) which is not a valid Python identifier, so
+    they must be loaded via ``importlib.util.spec_from_file_location`` rather
+    than a normal import.
 
     Streamlit-runtime side effects (``st.set_page_config`` outside a session,
     ``@st.cache_data`` registration) may raise when executed without a
