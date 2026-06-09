@@ -33,10 +33,21 @@ def _fake_run_and_score(league, market, *, normalization, dist_training_loss, bl
             "blending_loss_fn": blending_loss_fn,
             "slack": slack,
             "ships": slack > 0,
-            "dispersion_cal": 1.0,
-            "skew_cal": 0.0,
+            "g1_pass": True,
+            "g1_brier_diff_ci_hi": -0.01,
+            "g1_brier_skill": 0.03,
+            "g2_pass": True,
+            "g2_star_z": 0.1,
+            "g3_pass": True,
+            "g3_bench_z": 0.2,
+            "g4_pass": True,
             "g4_pit_ks": 0.04,
             "g4_pit_ks_max": 0.05,
+            "g5_pass": True,
+            "g5_ece_debiased": 0.03,
+            "central50_coverage": 0.49,
+            "dispersion_cal": 1.0,
+            "skew_cal": 0.0,
             "n": 2000,
         }
     ]
@@ -133,6 +144,27 @@ def test_search_cell_carries_league_market_columns(monkeypatch):
     assert (board["market"] == "FGA").all()
 
 
+def test_search_cell_records_all_five_gates(monkeypatch):
+    """The board surfaces every gate (value + pass), not just g4 — so a normalization/loss
+    choice's cost on g1/g5 is readable off the board, not merely inferable from min-gate slack.
+    """
+    monkeypatch.setattr(model_strategy_driver, "_run_and_score", _fake_run_and_score)
+    board = model_strategy_driver.search_cell("WNBA", "AST")
+    for col in (
+        "g1_pass",
+        "g1_brier_diff_ci_hi",
+        "g2_pass",
+        "g2_star_z",
+        "g3_pass",
+        "g3_bench_z",
+        "g4_pass",
+        "g4_pit_ks",
+        "g5_pass",
+        "g5_ece_debiased",
+    ):
+        assert col in board.columns
+
+
 def test_run_deterministic_meditate_forwards_loss_axes(monkeypatch):
     """The search primitive forwards non-auto training/blend losses as their flags, omits on auto."""
     calls = []
@@ -154,10 +186,40 @@ def test_run_deterministic_meditate_forwards_loss_axes(monkeypatch):
     assert "--blending-loss-fn" not in calls[-1]
 
 
-def test_cli_runs_a_single_cell(monkeypatch):
+def test_cli_runs_a_single_cell(monkeypatch, tmp_path):
     from click.testing import CliRunner
 
     monkeypatch.setattr(model_strategy_driver, "_run_and_score", _fake_run_and_score)
-    result = CliRunner().invoke(model_strategy_driver.main, ["--league", "WNBA", "--market", "AST"])
+    out = str(tmp_path / "board.csv")
+    result = CliRunner().invoke(
+        model_strategy_driver.main, ["--league", "WNBA", "--market", "AST", "--out", out]
+    )
     assert result.exit_code == 0, result.output
     assert "centered_additive_mean10" in result.output
+
+
+def test_cli_single_cell_upserts_into_existing_board(monkeypatch, tmp_path):
+    """A single-cell run merges into the board file — replacing that cell's prior rows, keeping
+    the others — so it refreshes the living board instead of clobbering it.
+    """
+    from click.testing import CliRunner
+
+    monkeypatch.setattr(model_strategy_driver, "_run_and_score", _fake_run_and_score)
+    out = str(tmp_path / "board.csv")
+    runner = CliRunner()
+
+    def run(league, market):
+        return runner.invoke(
+            model_strategy_driver.main, ["--league", league, "--market", market, "--out", out]
+        )
+
+    assert run("WNBA", "AST").exit_code == 0
+    assert run("NBA", "FGA").exit_code == 0
+    board = pd.read_csv(out)
+    assert set(zip(board["league"], board["market"], strict=True)) == {
+        ("WNBA", "AST"),
+        ("NBA", "FGA"),
+    }
+    n_two_cells = len(board)
+    assert run("WNBA", "AST").exit_code == 0  # re-run replaces the cell's rows, not appends
+    assert len(pd.read_csv(out)) == n_two_cells

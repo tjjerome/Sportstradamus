@@ -101,10 +101,24 @@ def _score_normalization(league: str, market: str, norm: str) -> dict[str, objec
         "normalization": norm,
         "slack": min_gate_slack(row),
         "ships": bool(row.get("ship")),
-        "dispersion_cal": filedict.get("dispersion_cal", 1.0),
-        "skew_cal": filedict.get("skew_cal") or 0.0,
+        # All five gates (value + pass), not just g4 — so a normalization/loss choice's cost on
+        # g1 (Brier non-inferiority) or g5 (ECE) is visible on the board, and g2/g3 + g1 brier
+        # skill + central-50 coverage show how close the served EV sits to the outcome.
+        "g1_pass": bool(row.get("g1_pass")),
+        "g1_brier_diff_ci_hi": row.get("g1_brier_diff_ci_hi"),
+        "g1_brier_skill": row.get("g1_brier_skill_score"),
+        "g2_pass": bool(row.get("g2_pass")),
+        "g2_star_z": row.get("g2_star_z"),
+        "g3_pass": bool(row.get("g3_pass")),
+        "g3_bench_z": row.get("g3_bench_z"),
+        "g4_pass": bool(row.get("g4_pass")),
         "g4_pit_ks": row.get("g4_pit_ks"),
         "g4_pit_ks_max": row.get("g4_pit_ks_max"),
+        "g5_pass": bool(row.get("g5_pass")),
+        "g5_ece_debiased": row.get("g5_ece_debiased"),
+        "central50_coverage": row.get("central50_coverage"),
+        "dispersion_cal": filedict.get("dispersion_cal", 1.0),
+        "skew_cal": filedict.get("skew_cal") or 0.0,
         "n": row.get("n_rows"),
     }
 
