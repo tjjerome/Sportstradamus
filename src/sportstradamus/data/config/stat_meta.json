@@ -148,9 +148,10 @@
     "NBA": {
         "AST": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "none",
+            "blending": "crps"
         },
         "BLK": {
             "dist": "ZINB",
@@ -166,9 +167,10 @@
         },
         "DREB": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "none",
+            "blending": "crps"
         },
         "FG3A": {
             "dist": "SkewNormal",
@@ -190,9 +192,10 @@
         },
         "FGM": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "none",
+            "blending": "crps"
         },
         "FTM": {
             "dist": "ZINB",
@@ -202,7 +205,7 @@
         },
         "MIN": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
@@ -244,7 +247,7 @@
         },
         "RA": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
@@ -502,7 +505,7 @@
         },
         "BLK": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
             "posthoc": "none"
         },
@@ -514,13 +517,14 @@
         },
         "DREB": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "centered_additive_mean10",
-            "posthoc": "none"
+            "posthoc": "none",
+            "blending": "crps"
         },
         "FG3M": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
             "posthoc": "none"
         },
@@ -568,8 +572,8 @@
         },
         "PTS": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
             "posthoc": "prob_recal_isotonic"
         },
         "RA": {
@@ -580,8 +584,8 @@
         },
         "REB": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
             "posthoc": "none"
         },
         "STL": {
@@ -592,7 +596,7 @@
         },
         "TOV": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
             "posthoc": "none"
         },
