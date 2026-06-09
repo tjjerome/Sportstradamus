@@ -26,13 +26,16 @@ _N = 8
 
 @pytest.fixture
 def fit_calls(monkeypatch):
-    """Patch fit_model_weight to record its call and return a fixed weight (0.5)."""
+    """Patch fit_blend_weight to record its call and return a fixed weight (0.5).
+
+    ``fit_blend_weight(blending, *args, **kwargs)`` — blending is args[0], dist is args[4].
+    """
     calls: list[dict] = []
 
     def _fake(*args, **kwargs):
         calls.append(
             {
-                "base_dist": args[3] if len(args) > 3 else None,
+                "base_dist": args[4] if len(args) > 4 else None,
                 "kwargs": {
                     k: (round(float(np.mean(v)), 6) if isinstance(v, np.ndarray) else v)
                     for k, v in kwargs.items()
@@ -41,7 +44,7 @@ def fit_calls(monkeypatch):
         )
         return 0.5
 
-    monkeypatch.setattr(pipe, "fit_model_weight", _fake)
+    monkeypatch.setattr(pipe.calibration, "fit_blend_weight", _fake)
     return calls
 
 
@@ -109,6 +112,7 @@ def test_fuse_skewnormal_no_gate(fit_calls):
         {
             "model_weight": 0.5,
             "weighted_mean": 11.40086223,
+            "weighted_mean_val": 11.84094376,
             "sn_sigma_blend_test": 4.06124187,
             "sn_sigma_blend_val": 4.1882951,
             "sn_alpha_blend_test": 0.1,
@@ -125,6 +129,7 @@ def test_fuse_skewnormal_with_gate(fit_calls):
         {
             "model_weight": 0.5,
             "weighted_mean": 11.40086223,
+            "weighted_mean_val": 11.84094376,
             "gate_blend_test": 0.3,
             "gate_blend_val": 0.3,
             "sn_sigma_blend_test": 4.06124187,

@@ -26,8 +26,18 @@ from dataclasses import dataclass
 
 import numpy as np
 from scipy.optimize import brentq, minimize
+from scipy.special import beta as beta_fn
 from scipy.special import expit, logit
 from scipy.stats import gamma, nbinom, norm, poisson, skewnorm
+
+# Grid resolution for the continuous CRPS integrands (SkewNormal, gated Gamma).
+# 500 points over the support is the resolution the dispersion-calibration CRPS
+# settled on; the arg-min over a scalar weight/scale is invariant to it.
+_CRPS_GRID_POINTS = 500
+
+# Minimum support size for the NegBin CRPS sum: even when observed values and the
+# predictive mean are small, we sum at least this many terms to cover the tail.
+_NEGBIN_CRPS_K_FLOOR = 30
 
 # Weight on the lower-bound tail violation in ``fit_distro``'s objective: the
 # clamp cares far more about a left-tail breach (mass below ``lower_bound``)
@@ -92,6 +102,107 @@ def no_vig_odds(over, under=None):
 # own blown-row threshold (``BLOWN_LINE_FACTOR``). Below the corresponding
 # under-prob the inversion would exceed it, so the line is used instead.
 SN_MAX_MEAN_FACTOR = 5.0
+
+
+def skewnormal_loc_from_mean(
+    mean: np.ndarray | float,
+    sigma: np.ndarray | float,
+    skew: np.ndarray | float,
+) -> np.ndarray:
+    """Derive the scipy SkewNormal ``loc`` parameter from the distribution mean.
+
+    ``loc = mean - sigma * delta * sqrt(2/pi)``
+    where ``delta = skew / sqrt(1 + skew**2)``.
+
+    This is the exact inversion used in ``_skewnormal_odds``, ``fused_loc``,
+    and ``get_ev``'s internal residual — one authoritative formula so the
+    betting path, the training dump, and the Gate-4 fit all derive the same loc.
+
+    Args:
+        mean: Distributional mean (E[X]).
+        sigma: Scale parameter (positive).
+        skew: Shape / skewness parameter (alpha).
+
+    Returns:
+        ``loc`` parameter for ``scipy.stats.skewnorm(skew, loc=loc, scale=sigma)``.
+    """
+    mean = np.asarray(mean, dtype=float)
+    sigma = np.asarray(sigma, dtype=float)
+    skew = np.asarray(skew, dtype=float)
+    delta = skew / np.sqrt(1.0 + skew**2)
+    return mean - sigma * delta * np.sqrt(2.0 / np.pi)
+
+
+def _crps_grid_bound(y: np.ndarray, mean: np.ndarray) -> float:
+    """Upper integration limit for a continuous CRPS grid: ``max(2·max(y), 4·mean(mean))``."""
+    return max(float(y.max()) * 2, float(np.mean(mean)) * 4)
+
+
+def negbin_crps(y, r, p, gate=None) -> np.ndarray:
+    """Per-row CRPS of a (gated) NegBin predictive: ``Σ_k (F(k) − 1{y≤k})²``.
+
+    Sums over the integer support. When ``gate`` is given the predictive is
+    zero-inflated and the gated CDF ``gate + (1−gate)·F_base`` carries the
+    zero spike (no separate ``y==0`` term).
+    """
+    y = np.asarray(y, dtype=float)
+    r = np.asarray(r, dtype=float)
+    p = np.asarray(p, dtype=float)
+    mean = r * (1 - p) / p
+    k_max = int(max(y.max() * 2, np.mean(mean) * 4, _NEGBIN_CRPS_K_FLOOR))
+    k_vals = np.arange(k_max + 1)
+    cdf = nbinom.cdf(k_vals[:, None], r[None, :], p[None, :])
+    if gate is not None:
+        gate = np.atleast_1d(np.asarray(gate, dtype=float))
+        cdf = gate[None, :] + (1 - gate[None, :]) * cdf
+    indicator = (y[None, :] <= k_vals[:, None]).astype(float)
+    return np.sum((cdf - indicator) ** 2, axis=0)
+
+
+def gamma_crps(y, alpha, scale, gate=None) -> np.ndarray:
+    """Per-row CRPS of a (gated) Gamma predictive.
+
+    Non-gated uses the closed form (Scheuerer & Möller); the zero-inflated case
+    integrates the gated CDF on a grid because the spike has no closed form.
+    """
+    y = np.asarray(y, dtype=float)
+    alpha = np.asarray(alpha, dtype=float)
+    scale = np.asarray(scale, dtype=float)
+    mean = alpha * scale
+    if gate is not None:
+        gate = np.atleast_1d(np.asarray(gate, dtype=float))
+        x_grid = np.linspace(0, _crps_grid_bound(y, mean), _CRPS_GRID_POINTS)
+        dx = x_grid[1] - x_grid[0]
+        cdf = gamma.cdf(x_grid[:, None], alpha[None, :], scale=scale[None, :])
+        cdf = gate[None, :] + (1 - gate[None, :]) * cdf
+        indicator = (y[None, :] <= x_grid[:, None]).astype(float)
+        return np.sum((cdf - indicator) ** 2, axis=0) * dx
+    f_y = gamma.cdf(y, alpha, scale=scale)
+    f_y_a1 = gamma.cdf(y, alpha + 1, scale=scale)
+    return y * (2 * f_y - 1) - mean * (2 * f_y_a1 - 1) - scale / beta_fn(0.5, alpha)
+
+
+def skewnorm_crps(y, loc, scale, alpha, gate=None) -> np.ndarray:
+    """Per-row CRPS of a (gated) SkewNormal predictive by trapezoid grid integration.
+
+    The skew-normal has no published closed-form CRPS, so integrate
+    ``(F(x) − 1{y≤x})²`` over a grid using the analytic CDF. When ``gate`` is given
+    the gated CDF ``gate + (1−gate)·F_base`` carries the zero spike.
+    """
+    y = np.asarray(y, dtype=float)
+    loc = np.asarray(loc, dtype=float)
+    scale = np.asarray(scale, dtype=float)
+    alpha = np.asarray(alpha, dtype=float)
+    delta = alpha / np.sqrt(1.0 + alpha**2)
+    mean = loc + scale * delta * np.sqrt(2.0 / np.pi)
+    x_grid = np.linspace(0, _crps_grid_bound(y, mean), _CRPS_GRID_POINTS)
+    dx = x_grid[1] - x_grid[0]
+    cdf = skewnorm.cdf(x_grid[:, None], alpha[None, :], loc=loc[None, :], scale=scale[None, :])
+    if gate is not None:
+        gate = np.atleast_1d(np.asarray(gate, dtype=float))
+        cdf = gate[None, :] + (1 - gate[None, :]) * cdf
+    indicator = (y[None, :] <= x_grid[:, None]).astype(float)
+    return np.sum((cdf - indicator) ** 2, axis=0) * dx
 
 
 def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None):

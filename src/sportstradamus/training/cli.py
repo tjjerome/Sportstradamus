@@ -12,11 +12,15 @@ from sportstradamus import data
 from sportstradamus.helpers import Archive, book_weights, feature_filter, get_logger
 from sportstradamus.helpers.io import prune_model_pickle
 from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
-from sportstradamus.training import baselines
+from sportstradamus.training import baselines, calibration
 from sportstradamus.training.calibration import fit_book_weights
 from sportstradamus.training.correlate import correlate
 from sportstradamus.training.markets import ALL_MARKETS, select_markets
-from sportstradamus.training.pipeline import train_market
+from sportstradamus.training.pipeline import (
+    DIST_TRAINING_LOSS_CHOICES,
+    LOSS_AUTO,
+    train_market,
+)
 from sportstradamus.training.ship_config import (
     SKEW_NORMAL_DIST,
     STAT_META_PATH,
@@ -97,6 +101,28 @@ _RNG_SEED: int = 69
     ),
 )
 @click.option(
+    "--dist-training-loss",
+    type=click.Choice(list(DIST_TRAINING_LOSS_CHOICES)),
+    default=LOSS_AUTO,
+    show_default=True,
+    help=(
+        "Training loss for the LightGBMLSS distribution. 'auto' (default) keeps the "
+        "per-family production loss — crps for SkewNormal, nll for the count branch. "
+        "'nll'/'crps' override every family; an Operation Ship 75 search axis."
+    ),
+)
+@click.option(
+    "--blending-loss-fn",
+    type=click.Choice([LOSS_AUTO, *sorted(calibration.BLENDING_SLUGS)]),
+    default=LOSS_AUTO,
+    show_default=True,
+    help=(
+        "Loss minimized when fitting the model↔book blend weight. 'auto' (default) honors each "
+        "cell's stat_meta blending; an explicit slug overrides every cell. An Operation Ship 75 "
+        "search axis — choices grow with calibration.BLENDING_SLUGS as new blend objectives ship."
+    ),
+)
+@click.option(
     "--market",
     default=None,
     help=(
@@ -137,6 +163,8 @@ def meditate(
     deterministic,
     target_normalization,
     zinb_mode,
+    dist_training_loss,
+    blending_loss_fn,
     market,
     branch,
     bypass_withholding,
@@ -296,6 +324,15 @@ def meditate(
             if cell_target_norm == TARGET_NORM_NONE:
                 cell_target_norm = target_normalization
             cell_posthoc = stat_meta_full.get(lg, {}).get(market, {}).get("posthoc", "none")
+            cell_blending = (
+                stat_meta_full.get(lg, {})
+                .get(market, {})
+                .get("blending", calibration.DEFAULT_BLENDING)
+            )
+            # --blending-loss-fn overrides the per-cell stat_meta blending for the search axis;
+            # 'auto' leaves each cell on its configured blend.
+            if blending_loss_fn != LOSS_AUTO:
+                cell_blending = blending_loss_fn
             train_market(
                 lg,
                 market,
@@ -306,5 +343,7 @@ def meditate(
                 deterministic=deterministic,
                 target_normalization=cell_target_norm,
                 posthoc_slug=cell_posthoc,
+                blending=cell_blending,
                 zinb_mode=zinb_mode,
+                dist_training_loss=dist_training_loss,
             )

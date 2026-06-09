@@ -6,7 +6,15 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.stats import fit, gamma, nbinom, norm, poisson, skewnorm
 
-from sportstradamus.helpers import fused_loc, get_logger, stat_cv
+from sportstradamus.helpers import (
+    fused_loc,
+    gamma_crps,
+    get_logger,
+    negbin_crps,
+    skewnorm_crps,
+    skewnormal_loc_from_mean,
+    stat_cv,
+)
 
 logger = get_logger(__name__)
 
@@ -199,6 +207,14 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
     return {}
 
 
+def _minimize_weight(objective) -> float:
+    """Minimize a per-weight blend objective over ``[_MODEL_WEIGHT_MIN, _MODEL_WEIGHT_MAX]`` (TNC)."""
+    res = minimize(
+        objective, 0.5, bounds=[(_MODEL_WEIGHT_MIN, _MODEL_WEIGHT_MAX)], tol=1e-8, method="TNC"
+    )
+    return res.x[0]
+
+
 def fit_model_weight(
     model_ev,
     odds_ev,
@@ -267,10 +283,7 @@ def fit_model_weight(
                 return -np.mean(loglik)
             return -np.mean(base_logpdf)
 
-        res = minimize(
-            objective, 0.5, bounds=[(_MODEL_WEIGHT_MIN, _MODEL_WEIGHT_MAX)], tol=1e-8, method="TNC"
-        )
-        return res.x[0]
+        return _minimize_weight(objective)
 
     if dist == "NegBin":
         model_r_arr = np.asarray(model_r, dtype=float)
@@ -297,10 +310,7 @@ def fit_model_weight(
                 return -np.mean(loglik)
             return -np.mean(base_logpmf)
 
-        res = minimize(
-            objective, 0.5, bounds=[(_MODEL_WEIGHT_MIN, _MODEL_WEIGHT_MAX)], tol=1e-8, method="TNC"
-        )
-        return res.x[0]
+        return _minimize_weight(objective)
     model_alpha_arr = np.asarray(model_alpha, dtype=float)
 
     def objective(w):
@@ -324,10 +334,106 @@ def fit_model_weight(
             return -np.mean(loglik)
         return -np.mean(base_logpdf)
 
-    res = minimize(
-        objective, 0.5, bounds=[(_MODEL_WEIGHT_MIN, _MODEL_WEIGHT_MAX)], tol=1e-8, method="TNC"
-    )
-    return res.x[0]
+    return _minimize_weight(objective)
+
+
+def fit_model_weight_crps(
+    model_ev,
+    odds_ev,
+    result,
+    dist,
+    model_alpha=None,
+    model_r=None,
+    cv=None,
+    model_sigma=None,
+    model_skew_alpha=None,
+    gate_model=None,
+    gate_book=None,
+) -> float:
+    """Fit the model↔book blend weight by minimizing mean CRPS of the blended predictive.
+
+    Mirrors :func:`fit_model_weight` — same ``fused_loc`` blend, same ``[0.05, 0.9]`` bounds, same
+    zero-inflation gate plumbing — but swaps the clamped log-likelihood for the strictly-proper,
+    bounded CRPS. CRPS needs no ``-20`` clamp, so it drops the clamp's left-tail bias on ``w``
+    (the robustness lever for heavy-tailed cells; see ``/tmp/researcher_crps_blending.md``). The
+    gated CDF carries the zero spike, so no separate ``y==0`` term is added.
+
+    Returns a single float w in [0.05, 0.9].
+    """
+    result = np.asarray(result, dtype=float)
+    model_ev = np.asarray(model_ev, dtype=float)
+    odds_ev = np.asarray(odds_ev, dtype=float)
+
+    if dist == "SkewNormal":
+        model_sigma_arr = np.asarray(model_sigma, dtype=float)
+        model_skew_arr = np.asarray(model_skew_alpha, dtype=float)
+
+        def objective(w):
+            bl_ev, bl_sigma, bl_alpha, g_blend = fused_loc(
+                w,
+                model_ev,
+                odds_ev,
+                cv,
+                "SkewNormal",
+                sigma=model_sigma_arr,
+                skew_alpha=model_skew_arr,
+                gate_book=gate_book,
+            )
+            bl_loc = skewnormal_loc_from_mean(bl_ev, bl_sigma, bl_alpha)
+            return np.mean(skewnorm_crps(result, bl_loc, bl_sigma, bl_alpha, gate=g_blend))
+
+        return _minimize_weight(objective)
+
+    if dist == "NegBin":
+        model_r_arr = np.asarray(model_r, dtype=float)
+
+        def objective(w):
+            r_blend, p_blend, g_blend = fused_loc(
+                w,
+                model_ev,
+                odds_ev,
+                cv,
+                "NegBin",
+                r=model_r_arr,
+                gate_model=gate_model,
+                gate_book=gate_book,
+            )
+            return np.mean(negbin_crps(result, r_blend, p_blend, gate=g_blend))
+
+        return _minimize_weight(objective)
+
+    model_alpha_arr = np.asarray(model_alpha, dtype=float)
+
+    def objective(w):
+        alpha_bl, beta_bl, g_blend = fused_loc(
+            w,
+            model_ev,
+            odds_ev,
+            cv,
+            "Gamma",
+            alpha=model_alpha_arr,
+            gate_model=gate_model,
+            gate_book=gate_book,
+        )
+        return np.mean(gamma_crps(result, alpha_bl, 1 / beta_bl, gate=g_blend))
+
+    return _minimize_weight(objective)
+
+
+DEFAULT_BLENDING: str = "nll"
+BLENDING_SLUGS: frozenset[str] = frozenset({"nll", "crps"})
+
+
+def fit_blend_weight(blending: str, *args, **kwargs) -> float:
+    """Dispatch to the blend strategy's weight fitter. ``nll`` is the legacy
+    clamped-log-likelihood objective in :func:`fit_model_weight`; ``crps`` is the
+    bounded strictly-proper objective in :func:`fit_model_weight_crps`.
+    """
+    if blending not in BLENDING_SLUGS:
+        raise ValueError(f"Unknown blending slug {blending!r}; valid: {sorted(BLENDING_SLUGS)}")
+    if blending == "crps":
+        return fit_model_weight_crps(*args, **kwargs)
+    return fit_model_weight(*args, **kwargs)
 
 
 def select_distribution(player_stats) -> tuple[str, float]:
