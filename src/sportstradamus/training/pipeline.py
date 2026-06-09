@@ -45,8 +45,8 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.hurdle import HurdleZINB
 from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
-from sportstradamus.training import baselines, posthoc
-from sportstradamus.training.calibration import fit_book_weights, fit_model_weight
+from sportstradamus.training import baselines, calibration, posthoc
+from sportstradamus.training.calibration import fit_book_weights
 from sportstradamus.training.config import (
     load_distribution_config,
     save_cv_std_config,
@@ -100,6 +100,15 @@ _MIN_PLAYER_NONZERO_OBS_DEFAULT: int = 60
 # Shape ceiling = marginal_shape * this multiplier.  2× gives the optimizer
 # headroom to exceed the prior while preventing runaway over-dispersion.
 _SHAPE_CEILING_MULTIPLIER: float = 2.0
+# The ``"auto"`` sentinel shared by the loss search axes: it means "use the default for this
+# context" (the per-family training loss here; the cell's stat_meta blending in the CLI), so a
+# default run reproduces production. The Operation Ship 75 search sweeps nll ↔ crps off these.
+LOSS_AUTO: str = "auto"
+DIST_TRAINING_LOSS_CHOICES: tuple[str, ...] = (LOSS_AUTO, "nll", "crps")
+
+
+def _resolve_loss_fn(family_default: str, override: str) -> str:
+    return family_default if override == LOSS_AUTO else override
 
 
 # Fixed RNG seed for --deterministic runs (debug/eval only).
@@ -1738,7 +1747,8 @@ def _step_decode_predictions(
     return out
 
 
-def _fuse_skewnormal(out, decoded, splits, cv, hist_gate):
+def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
+    """SkewNormal branch: fit model_weight, blend sigma / skew on test + validation."""
     ev = decoded["ev"]
     ev_validation = decoded["ev_validation"]
     book_ev_test = splits["B_test"]["EV"].to_numpy()
@@ -1746,7 +1756,8 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate):
     y_val_result = splits["y_validation"]["Result"].to_numpy()
 
     _zi_kwargs = {"gate_book": hist_gate} if hist_gate > GATE_PUBLISH_THRESHOLD else {}
-    model_weight = fit_model_weight(
+    model_weight = calibration.fit_blend_weight(
+        blending,
         ev_validation,
         book_ev_val,
         y_val_result,
@@ -1791,14 +1802,16 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate):
     return out
 
 
-def _fit_nonsn_weight(out, decoded, splits, base_dist, dist, cv, hist_gate):
+def _fit_nonsn_weight(out, decoded, splits, base_dist, dist, cv, hist_gate, blending):
+    """Fit model_weight for the NegBin / Gamma families (shared preamble)."""
     book_ev_val = splits["B_validation"]["EV"].to_numpy()
     y_val_result = splits["y_validation"]["Result"].to_numpy()
 
     _zi_kwargs = {}
     if dist in ("ZINB", "ZAGamma") and hist_gate > 0:
         _zi_kwargs = {"gate_model": decoded["gate_validation"], "gate_book": hist_gate}
-    model_weight = fit_model_weight(
+    model_weight = calibration.fit_blend_weight(
+        blending,
         decoded["ev_validation"],
         book_ev_val,
         y_val_result,
@@ -1908,6 +1921,7 @@ def _step_fuse_predictions(
     dist: str,
     cv: float,
     hist_gate: float,
+    blending: str = calibration.DEFAULT_BLENDING,
 ) -> dict:
     """Fit model_weight, then fuse model+book predictions on test and validation.
 
@@ -1951,9 +1965,9 @@ def _step_fuse_predictions(
     }
 
     if dist == "SkewNormal":
-        return _fuse_skewnormal(out, decoded, splits, cv, hist_gate)
+        return _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending)
 
-    model_weight = _fit_nonsn_weight(out, decoded, splits, base_dist, dist, cv, hist_gate)
+    model_weight = _fit_nonsn_weight(out, decoded, splits, base_dist, dist, cv, hist_gate, blending)
     if dist in ("NegBin", "ZINB"):
         return _fuse_negbin(out, decoded, splits, model_weight, cv, hist_gate, dist)
     return _fuse_gamma(out, decoded, splits, model_weight, cv, hist_gate, dist)
@@ -1968,6 +1982,7 @@ def _step_select_distribution(
     zinb_mode: str,
     *,
     deterministic: bool,
+    dist_training_loss: str = LOSS_AUTO,
 ) -> dict:
     """Choose distribution family + apply target transform + compute shape priors.
 
@@ -2026,7 +2041,9 @@ def _step_select_distribution(
 
     if global_mean >= _SKEWNORMAL_MEAN_THRESHOLD:
         dist = "SkewNormal"
-        dist_obj = SkewNormalDist(stabilization="None", loss_fn="crps")
+        dist_obj = SkewNormalDist(
+            stabilization="None", loss_fn=_resolve_loss_fn("crps", dist_training_loss)
+        )
 
         cv = (
             player_stats.std()
@@ -2056,10 +2073,14 @@ def _step_select_distribution(
         if hist_gate > GATE_PUBLISH_THRESHOLD:
             dist = "ZINB"
         if dist == "NegBin":
-            dist_obj = NegativeBinomial(stabilization="None", loss_fn="nll")
+            dist_obj = NegativeBinomial(
+                stabilization="None", loss_fn=_resolve_loss_fn("nll", dist_training_loss)
+            )
         elif zinb_mode == "joint":
             # Legacy jointly-fit LightGBMLSS ZINB path — byte-identical to pre-P2.B.
-            dist_obj = ZINB(stabilization="None", loss_fn="nll")
+            dist_obj = ZINB(
+                stabilization="None", loss_fn=_resolve_loss_fn("nll", dist_training_loss)
+            )
         # else: hurdle path — dist_obj is not constructed; HurdleZINB is built at fit time.
 
         per_player_r = player_stats.mean() ** 2 / np.maximum(
@@ -2115,7 +2136,9 @@ def train_market(
     deterministic: bool = False,
     target_normalization: str = "ratio_meanyr",
     posthoc_slug: str = "none",
+    blending: str = calibration.DEFAULT_BLENDING,
     zinb_mode: str = "joint",
+    dist_training_loss: str = LOSS_AUTO,
 ) -> None:
     """Train or retrain one LightGBMLSS model for a single league/market pair.
 
@@ -2196,6 +2219,7 @@ def train_market(
         target_normalization,
         zinb_mode,
         deterministic=deterministic,
+        dist_training_loss=dist_training_loss,
     )
     dist = dist_info["dist"]
     cv = dist_info["cv"]
@@ -2252,7 +2276,7 @@ def train_market(
         dist_info["denom_col"],
         hist_gate,
     )
-    fused = _step_fuse_predictions(decoded, splits, dist, cv, hist_gate)
+    fused = _step_fuse_predictions(decoded, splits, dist, cv, hist_gate, blending=blending)
     calibrated = _step_calibrate_dispersion(
         decoded,
         fused,

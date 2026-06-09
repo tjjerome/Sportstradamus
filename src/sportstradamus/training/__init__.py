@@ -6,6 +6,7 @@ internal module layout.
 """
 
 from sportstradamus.training.calibration import (
+    fit_blend_weight,
     fit_book_weights,
     fit_model_weight,
     select_distribution,
@@ -21,6 +22,7 @@ from sportstradamus.training.shap import (
 __all__ = [
     "compute_market_importance",
     "correlate",
+    "fit_blend_weight",
     "fit_book_weights",
     "fit_model_weight",
     "meditate",

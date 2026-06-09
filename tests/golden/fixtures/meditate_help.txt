@@ -36,6 +36,21 @@ Options:
                                   docs/OVERCONFIDENCE_INVESTIGATION.md §2).
                                   Default 'joint' is byte-identical to pre-P2.B
                                   production.  [default: joint]
+  --dist-training-loss [auto|nll|crps]
+                                  Training loss for the LightGBMLSS
+                                  distribution. 'auto' (default) keeps the per-
+                                  family production loss — crps for SkewNormal,
+                                  nll for the count branch. 'nll'/'crps'
+                                  override every family; an Operation Ship 75
+                                  search axis.  [default: auto]
+  --blending-loss-fn [auto|crps|nll]
+                                  Loss minimized when fitting the model↔book
+                                  blend weight. 'auto' (default) honors each
+                                  cell's stat_meta blending; an explicit slug
+                                  overrides every cell. An Operation Ship 75
+                                  search axis — choices grow with
+                                  calibration.BLENDING_SLUGS as new blend
+                                  objectives ship.  [default: auto]
   --market TEXT                   Comma-separated market stem(s) to train (e.g.
                                   'FTM,STL'). When omitted, all markets for the
                                   active league are trained. A stem absent from
