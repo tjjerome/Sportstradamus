@@ -374,11 +374,21 @@ a faithful fixed-HP replica of the production HPO pipeline — same calibration,
 write locations.
 
 **The deterministic study only ranks; the real-HPO scorecard ships.** Take the top-K (K ≈ 2–3)
-corners per cell, re-run each under real HPO, and ship the first that clears the official 5-gate
-scorecard (`model_stats.csv`) — never the deterministic score. Knife-edge cells (g4 within ~0.003 of
-0.05) are exactly where the val→test discount bites, so the confirm is mandatory. Sweep the **whole**
-board, shipped cells included — a shipped cell may have a better corner than the scale-only default
-it settled for.
+**production-reproducible** corners per cell — including any that *fail* the deterministic gate by
+≤3% of threshold (`min_gate_slack ≥ -0.03`), since the val→test discount tips knife-edge cells in
+*either* direction (a board passer can fail HPO; a board near-miss can clear it) — and re-run each
+under real HPO, working down the list until one clears the official 5-gate scorecard
+(`model_stats.csv`) or the list is exhausted (then defer to the calibration ladder, §5.2) — never
+ship the deterministic score. Reproducible means the
+corner reproduces under the server's plain `meditate`: `target_normalization`, `posthoc`, and
+`blending` persist per-cell in `stat_meta.json`, but `--dist-training-loss` does **not**, so for a
+SkewNormal cell only the family-default `crps` dist-loss is shippable — an `nll`-dist corner can
+clear the run yet will silently retrain to `crps` on the server. The top board corner by
+deterministic slack is not always the one that survives HPO (NBA DREB: eb topped the board but mean10
+is the corner that ships), which is why the list is walked, not just its head. Knife-edge cells
+(g4 within ~0.003 of 0.05) are exactly where the val→test discount bites, so the confirm is
+mandatory. Sweep the **whole** board, shipped cells included — a shipped cell may have a better
+corner than the scale-only default it settled for.
 
 **The operating loop (per parameter, per cell).** Once an axis is wired, the per-cell workflow is
 fixed — and the ship bar differs for a withheld cell vs an incumbent:
@@ -389,13 +399,17 @@ fixed — and the ship bar differs for a withheld cell vs an incumbent:
    (`model_stats.csv` / `.parquet`). Carry the **top-K (2–3)** corners per cell forward.
 
 2. **Withheld cell → real-HPO confirm → ship to devel.** Set the winning corner's
-   `target_normalization` (and `posthoc`) in `stat_meta.json` and pass any non-default
-   `--dist-training-loss` / `--blending-loss-fn` to a full-HPO `meditate`, then read the official
-   scorecard. A clean **5/5** → flip
-   `shipped: "withheld" → "devel"`. Ship the first top-K corner that clears; if the winner is just
-   the cell's current default strategy it is a straight confirm (no strategy edit). The knife-edge
-   cells (g4 within ~0.003 of 0.05) are exactly where the val→test discount bites, so the confirm is
-   mandatory — never ship the deterministic score.
+   `target_normalization`, `posthoc`, and `blending` in `stat_meta.json` *before* the full-HPO
+   `meditate` — the normalization must be set first or the Gate-4 decode reads the cell's stale
+   strategy and reports a spurious miss (`scorecard._resolve_decode_strategy` reads stat_meta, not
+   the `--target-normalization` flag). Pass the corner's `--target-normalization` /
+   `--blending-loss-fn` flags to match during the confirm; `--dist-training-loss` is not persisted,
+   so a shippable corner uses the family default (`crps` for SkewNormal). Then read the official
+   scorecard. A clean **5/5** → flip `shipped: "withheld" → "devel"`. Walk down the reproducible
+   top-K, shipping the first that clears; if the winner is just the cell's current default strategy
+   it is a straight confirm (no strategy edit). The knife-edge cells (g4 within ~0.003 of 0.05) are
+   exactly where the val→test discount bites, so the confirm is mandatory — never ship the
+   deterministic score.
 
 3. **Incumbent (already-shipped) cell with a better corner → supersede, a higher bar.** A shipped
    cell does **not** re-ship on a fresh 5/5 — the candidate must *beat the incumbent*. Built as
