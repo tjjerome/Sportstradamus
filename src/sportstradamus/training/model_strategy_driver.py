@@ -21,6 +21,7 @@ Research scaffolding: the deterministic trials *rank* only — nothing ships off
 is the real-HPO confirm candidate; a clean 5/5 on the official (full-HPO) scorecard is what ships.
 """
 
+import importlib.resources as pkg_resources
 import math
 import pathlib
 
@@ -28,6 +29,7 @@ import click
 import optuna
 import pandas as pd
 
+from sportstradamus import data as _data_pkg
 from sportstradamus.training import calibration
 from sportstradamus.training.model_strategy_search import (
     _DECODABLE_SN_NORMS,
@@ -79,12 +81,28 @@ _BOARD_COLUMNS: list[str] = [
     "blending_loss_fn",
     "slack",
     "ships",
-    "dispersion_cal",
-    "skew_cal",
+    "g1_pass",
+    "g1_brier_diff_ci_hi",
+    "g1_brier_skill",
+    "g2_pass",
+    "g2_star_z",
+    "g3_pass",
+    "g3_bench_z",
+    "g4_pass",
     "g4_pit_ks",
     "g4_pit_ks_max",
+    "g5_pass",
+    "g5_ece_debiased",
+    "central50_coverage",
+    "dispersion_cal",
+    "skew_cal",
     "n",
 ]
+
+# Default output path for the living board — both CLI modes write here unless --out overrides.
+STRATEGY_RESEARCH_BOARD: pathlib.Path = pathlib.Path(
+    str(pkg_resources.files(_data_pkg) / "research" / "strategy_research_board.csv")
+)
 
 
 def _run_and_score(
@@ -181,6 +199,22 @@ def run_board(
     return pd.concat(boards, ignore_index=True)
 
 
+def _upsert_cell(cell_board: pd.DataFrame, out: str) -> pd.DataFrame:
+    """Merge one cell's rows into the board CSV at ``out`` — replacing any prior rows for that
+    cell — so a single-cell run refreshes the living board instead of clobbering it. Returns the
+    rows written for this cell (what the CLI echoes).
+    """
+    path = pathlib.Path(out)
+    if path.exists():
+        prior = pd.read_csv(path)
+        league, market = cell_board["league"].iloc[0], cell_board["market"].iloc[0]
+        keep = prior[~((prior["league"] == league) & (prior["market"] == market))]
+        pd.concat([keep, cell_board], ignore_index=True).to_csv(path, index=False)
+    else:
+        cell_board.to_csv(path, index=False)
+    return cell_board
+
+
 @click.command(name="model-strategy-driver")
 @click.option("--league", default=None, help="League code, e.g. WNBA (single-cell mode).")
 @click.option("--market", default=None, help="Market stem, e.g. AST (single-cell mode).")
@@ -193,20 +227,22 @@ def run_board(
     "--out",
     type=click.Path(dir_okay=False),
     default=None,
-    help="Write the board CSV here (incremental in --board mode).",
+    help="Board CSV path. Defaults to the package data dir "
+    "(data/research/strategy_research_board.csv): --board overwrites it, a single cell upserts.",
 )
 def main(league: str | None, market: str | None, board: bool, out: str | None) -> None:
-    """Operation Ship 75 search driver — GridSampler over the retrain grid × free post-hoc sweep."""
+    """Operation Ship 75 strategy research board — a per-cell GridSampler over the retrain grid
+    (normalization × dist-loss × blend-loss), one honest val-fit→test gate row per corner.
+    """
     optuna.logging.set_verbosity(optuna.logging.WARNING)
+    out = out or str(STRATEGY_RESEARCH_BOARD)
+    pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
     if board:
         result = run_board(out=out)
     else:
         if not (league and market):
             raise click.UsageError("pass --league and --market, or --board")
-        result = search_cell(league, market)
-        if out is not None:
-            pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
-            result.to_csv(out, index=False)
+        result = _upsert_cell(search_cell(league, market), out)
     click.echo(result.to_string(index=False))
 
 

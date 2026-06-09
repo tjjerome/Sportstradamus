@@ -17,12 +17,19 @@ def _canned_row(*, ship, g4_pit_ks):
     """A scorecard ship-row where Gate 4 binds the slack (g1/g2/g3/g5 pass with full headroom)."""
     return {
         "ship": ship,
-        "g1_brier_diff_ci_hi": 0.0,
-        "g2_star_z": 0.0,
-        "g3_bench_z": 0.0,
+        "g1_brier_diff_ci_hi": -0.01,
+        "g1_brier_skill_score": 0.04,
+        "g1_pass": True,
+        "g2_star_z": 0.1,
+        "g2_pass": True,
+        "g3_bench_z": 0.2,
+        "g3_pass": True,
         "g4_pit_ks": g4_pit_ks,
         "g4_pit_ks_max": 0.05,
-        "g5_ece_debiased": 0.0,
+        "g4_pass": g4_pit_ks < 0.05,
+        "g5_ece_debiased": 0.03,
+        "g5_pass": True,
+        "central50_coverage": 0.49,
         "n_rows": 1500,
     }
 
@@ -52,6 +59,15 @@ def test_score_normalization_runs_production_gate_and_maps_row(monkeypatch):
     assert row["ships"] is True
     # Gate 4 binds: slack = (g4_max - g4) / g4_max.
     assert row["slack"] == (0.05 - 0.03) / 0.05
+    # All five gates are surfaced (value + pass), not just g4 — so crps-vs-nll cost on g1/g5 is
+    # visible on the board, not merely inferable from the min-gate slack.
+    assert row["g1_pass"] is True and row["g1_brier_diff_ci_hi"] == -0.01
+    assert row["g1_brier_skill"] == 0.04
+    assert row["g2_pass"] is True and row["g2_star_z"] == 0.1
+    assert row["g3_pass"] is True and row["g3_bench_z"] == 0.2
+    assert row["g4_pass"] is True
+    assert row["g5_pass"] is True and row["g5_ece_debiased"] == 0.03
+    assert row["central50_coverage"] == 0.49
     # The dump already bakes the pipeline's val-fit calibration into the served predictive; the
     # pickle's (dispersion_cal, skew_cal) are surfaced for context only.
     assert row["dispersion_cal"] == 1.27

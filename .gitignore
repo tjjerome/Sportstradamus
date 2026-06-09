@@ -213,3 +213,9 @@ notebooks/
 
 # Research-gated path list is tracked config despite the broad *.txt ignore above
 !.claude/research_gated.txt
+.claude/scheduled_tasks.lock
+docs/superpowers/specs/*
+src/sportstradamus/data/leagues/nba/corr_metadata.json
+src/sportstradamus/data/leagues/nfl/corr_metadata.json
+src/sportstradamus/data/leagues/wnba/corr_metadata.json
+src/sportstradamus/data/runtime/*
