@@ -19,11 +19,32 @@ class _BoundedResponseFn:
         return torch.clamp(self.orig_fn(predt), max=self.ceiling)
 
 
-def warm_start_hyper_opt(
+def _suggest_params(trial, hp_dict):
+    hyper_params = {}
+    for param_name, param_value in hp_dict.items():
+        param_type = param_value[0]
+        if param_type in ("categorical", "none"):
+            hyper_params[param_name] = trial.suggest_categorical(param_name, param_value[1])
+        elif param_type == "float":
+            c = param_value[1]
+            hyper_params[param_name] = trial.suggest_float(
+                param_name, low=c["low"], high=c["high"], log=c["log"]
+            )
+        elif param_type == "int":
+            c = param_value[1]
+            hyper_params[param_name] = trial.suggest_int(
+                param_name, low=c["low"], high=c["high"], log=c["log"]
+            )
+    if "boosting" not in hyper_params:
+        hyper_params["boosting"] = trial.suggest_categorical("boosting", ["gbdt"])
+    return hyper_params
+
+
+def run_hyper_opt(
     model,
     hp_dict,
     train_set,
-    initial_params,
+    initial_params=None,
     num_boost_round=999,
     nfold=4,
     early_stopping_rounds=50,
@@ -31,40 +52,23 @@ def warm_start_hyper_opt(
     n_trials=100,
     silence=True,
 ):
-    """Run a shortened hyper_opt seeded with previous best parameters."""
+    """Run Optuna HPO for LightGBMLSS.
+
+    optuna 3.5's ``LightGBMPruningCallback`` hardcodes the cv validation name
+    to "cv_agg" while lightgbm >=4.6 reports cv results under "valid", so that
+    callback can never match and raises. Running with only early stopping
+    sidesteps it; each trial stays bounded and, on a warm start, the seeded
+    params are evaluated first, so the selected hyperparameters are unaffected.
+    """
     # Deferred: lightgbm and optuna are heavy; keeping them out of the top-level
     # import keeps dashboard startup fast (training/ is not imported by the dashboard).
     import lightgbm as lgb
     import optuna
     from optuna.samplers import TPESampler
 
-    tunable_params = {k for k, v in hp_dict.items() if v[0] != "none"}
-
     def objective(trial):
-        hyper_params = {}
-        for param_name, param_value in hp_dict.items():
-            param_type = param_value[0]
-            if param_type in ("categorical", "none"):
-                hyper_params[param_name] = trial.suggest_categorical(param_name, param_value[1])
-            elif param_type == "float":
-                c = param_value[1]
-                hyper_params[param_name] = trial.suggest_float(
-                    param_name, low=c["low"], high=c["high"], log=c["log"]
-                )
-            elif param_type == "int":
-                c = param_value[1]
-                hyper_params[param_name] = trial.suggest_int(
-                    param_name, low=c["low"], high=c["high"], log=c["log"]
-                )
+        hyper_params = _suggest_params(trial, hp_dict)
 
-        if "boosting" not in hyper_params:
-            hyper_params["boosting"] = trial.suggest_categorical("boosting", ["gbdt"])
-
-        # optuna 3.5's LightGBMPruningCallback hardcodes the cv validation name to
-        # "cv_agg", but lightgbm >=4.6 reports cv eval results under "valid", so the
-        # callback can never match and raises. Run without cross-trial pruning;
-        # early stopping still bounds each trial and the seeded params are evaluated
-        # first, so the selected hyperparameters are unaffected.
         early_stopping_callback = lgb.early_stopping(
             stopping_rounds=early_stopping_rounds, verbose=False
         )
@@ -88,16 +92,18 @@ def warm_start_hyper_opt(
     study = optuna.create_study(
         sampler=TPESampler(),
         direction="minimize",
-        study_name="LightGBMLSS Warm-Start Optimization",
+        study_name="LightGBMLSS Hyper-Parameter Optimization",
     )
 
-    seed_params = {k: v for k, v in initial_params.items() if k in tunable_params}
-    seed_params["boosting"] = "gbdt"
-    study.enqueue_trial(seed_params)
+    if initial_params is not None:
+        tunable_params = {k for k, v in hp_dict.items() if v[0] != "none"}
+        seed_params = {k: v for k, v in initial_params.items() if k in tunable_params}
+        seed_params["boosting"] = "gbdt"
+        study.enqueue_trial(seed_params)
 
     study.optimize(objective, n_trials=n_trials, timeout=60 * max_minutes, show_progress_bar=True)
 
-    logger.info("Warm-Start Hyper-Parameter Optimization finished.")
+    logger.info("Hyper-Parameter Optimization finished.")
     logger.info("  Number of finished trials: %d", len(study.trials))
     logger.info("  Best trial:")
     opt_param = study.best_trial
