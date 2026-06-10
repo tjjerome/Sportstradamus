@@ -19,7 +19,7 @@ class _BoundedResponseFn:
         return torch.clamp(self.orig_fn(predt), max=self.ceiling)
 
 
-def _suggest_trial_params(trial, hp_dict):
+def _suggest_params(trial, hp_dict):
     hyper_params = {}
     for param_name, param_value in hp_dict.items():
         param_type = param_value[0]
@@ -40,7 +40,7 @@ def _suggest_trial_params(trial, hp_dict):
     return hyper_params
 
 
-def tune_hyperparameters(
+def run_hyper_opt(
     model,
     hp_dict,
     train_set,
@@ -52,15 +52,13 @@ def tune_hyperparameters(
     n_trials=100,
     silence=True,
 ):
-    """Tune hyperparameters via TPE over LightGBMLSS cross-validation.
+    """Run Optuna HPO for LightGBMLSS.
 
-    When ``initial_params`` is given, its values seed the first trial (warm
-    start from a previous pickle); when ``None`` the search is cold. This
-    replaces ``LightGBMLSS.hyper_opt`` for both paths: that method adds an
-    optuna ``LightGBMPruningCallback`` whose validation name is hardcoded to
-    ``"cv_agg"``, which lightgbm>=4.6 never produces (it reports cv eval under
-    ``"valid"``), so the callback raises. This loop omits cross-trial pruning;
-    per-trial early stopping still bounds each trial.
+    optuna 3.5's ``LightGBMPruningCallback`` hardcodes the cv validation name
+    to "cv_agg" while lightgbm >=4.6 reports cv results under "valid", so that
+    callback can never match and raises. Running with only early stopping
+    sidesteps it; each trial stays bounded and, on a warm start, the seeded
+    params are evaluated first, so the selected hyperparameters are unaffected.
     """
     # Deferred: lightgbm and optuna are heavy; keeping them out of the top-level
     # import keeps dashboard startup fast (training/ is not imported by the dashboard).
@@ -69,7 +67,8 @@ def tune_hyperparameters(
     from optuna.samplers import TPESampler
 
     def objective(trial):
-        hyper_params = _suggest_trial_params(trial, hp_dict)
+        hyper_params = _suggest_params(trial, hp_dict)
+
         early_stopping_callback = lgb.early_stopping(
             stopping_rounds=early_stopping_rounds, verbose=False
         )
