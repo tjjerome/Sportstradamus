@@ -204,3 +204,6 @@ src/sportstradamus/data/training_data/.gitignore:Zone.Identifier
 *.parquet
 research/
 notebooks/
+.claude/.state/*
+src/sportstradamus/data/leagues/nba/corr_metadata.json
+docs/superpowers/specs/*
