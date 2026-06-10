@@ -204,6 +204,18 @@ src/sportstradamus/data/training_data/.gitignore:Zone.Identifier
 *.parquet
 research/
 notebooks/
-.claude/.state/*
-src/sportstradamus/data/leagues/nba/corr_metadata.json
+
+# Git worktrees for isolated feature workspaces (subagent-driven development)
+.worktrees/
+
+# Claude Code hook runtime state (per-session markers, snapshots, waiver)
+/.claude/.state/
+
+# Research-gated path list is tracked config despite the broad *.txt ignore above
+!.claude/research_gated.txt
+.claude/scheduled_tasks.lock
 docs/superpowers/specs/*
+src/sportstradamus/data/leagues/nba/corr_metadata.json
+src/sportstradamus/data/leagues/nfl/corr_metadata.json
+src/sportstradamus/data/leagues/wnba/corr_metadata.json
+src/sportstradamus/data/runtime/*
