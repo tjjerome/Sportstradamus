@@ -53,7 +53,7 @@ from sportstradamus.training.config import (
     save_zi_config,
 )
 from sportstradamus.training.data import trim_matrix
-from sportstradamus.training.hyperparams import _BoundedResponseFn, warm_start_hyper_opt
+from sportstradamus.training.hyperparams import _BoundedResponseFn, run_hyper_opt
 from sportstradamus.training.report import report
 from sportstradamus.training.shap import compute_market_importance
 
@@ -843,7 +843,8 @@ def _step_select_hyperparams(
                 "opt_rounds": 200,
             }
     elif opt_params is None or opt_params.get("opt_rounds") is None:
-        opt_params = model.hyper_opt(
+        opt_params = run_hyper_opt(
+            model,
             hp_search_space,
             dtrain,
             num_boost_round=999,
@@ -851,11 +852,10 @@ def _step_select_hyperparams(
             early_stopping_rounds=50,
             max_minutes=60,
             n_trials=300,
-            silence=True,
         )
     else:
-        opt_params = warm_start_hyper_opt(
-            model, hp_search_space, dtrain, opt_params, n_trials=150, max_minutes=5
+        opt_params = run_hyper_opt(
+            model, hp_search_space, dtrain, initial_params=opt_params, n_trials=150, max_minutes=5
         )
     return opt_params, monotone
 
