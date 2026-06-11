@@ -653,6 +653,11 @@ re-score, ship per passer; SHAP importance < 0.001 ⇒ inert → revert, don't c
 the per-position split (§5.6); for a cell the model still can't improve, lean harder on the book in the
 blend (ride the sharp line; ships if calibration holds) — never "unwinnable."
 
+Feature-lever detail beyond 3a/3b — comps, aggregation, neglected data, new free sources, the
+feature-count ablation, and the five-league roadmap — lives in
+[`feature_improvement_plan.md`](feature_improvement_plan.md) (canonical home; 3a/3b above = its
+M-1/B-3).
+
 ### §5.9 — Lever cap & matrix-exhaustion policy
 
 A cell that fails one axis is exhausted *on that axis only* — it stays a **live Ship-75 candidate** and
@@ -822,7 +827,9 @@ hard rule).
 5. [`docs/operation_ship_90.md`](operation_ship_90.md) — next-rung stub; the levers it lists
    (T11 per-position, T3 tail head, CMPμ) are **on the Ship-75 table too** — pulled forward as
    needed, not reserved
-6. [`docs/sportstradamus_roadmap_v3.md`](sportstradamus_roadmap_v3.md) — the swimlane master
+6. [`docs/feature_improvement_plan.md`](feature_improvement_plan.md) — feature-lever detail
+   across all five leagues (workstreams A–E, per-league plans, prioritized roadmap)
+7. [`docs/sportstradamus_roadmap_v3.md`](sportstradamus_roadmap_v3.md) — the swimlane master
    index. The parlay copula / dependence layer is now the `parlay-dependence` lane
    ([`docs/handoffs/parlay-dependence.md`](handoffs/parlay-dependence.md), gated on calibrated
    marginals); the conformal alt-line ladder, CLV-edge dashboard, TabPFN-as-platform /
