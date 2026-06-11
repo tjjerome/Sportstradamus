@@ -32,9 +32,11 @@ if offers.empty:
     )
     st.stop()
 
-# Hot-row highlight thresholds
+# Hot-row highlight: model EV > this and books P > this and boost below ceiling
+# qualifies a row for the blue background. Tuned empirically vs bankroll ROI.
 EV_HOT_THRESHOLD = 1.02
 BOOKS_HOT_THRESHOLD = 0.95
+# Boosted rows above this ceiling signal a line move, not genuine edge.
 BOOST_HOT_CEILING = 2.5
 HIGHLIGHT_BG = "#1f4e79"
 

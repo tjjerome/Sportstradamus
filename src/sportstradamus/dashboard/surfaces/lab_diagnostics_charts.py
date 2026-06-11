@@ -173,10 +173,16 @@ def coverage_bar(cov_league_df: pd.DataFrame) -> go.Figure:
     return fig
 
 
+# Bias thresholds for Over/Under balance: < 3% is well-calibrated, 3–7% is
+# marginal, > 7% is a notable prediction bias worth investigating.
+_BIAS_OK = 0.03
+_BIAS_WARN = 0.07
+
+
 def bias_color(b: float) -> str:
     ab = abs(b)
-    if ab < 0.03:
+    if ab < _BIAS_OK:
         return "green"
-    if ab < 0.07:
+    if ab < _BIAS_WARN:
         return "orange"
     return "red"

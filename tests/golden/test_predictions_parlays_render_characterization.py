@@ -16,7 +16,13 @@ import types
 import pandas as pd
 import pytest
 
-_SURFACES = pathlib.Path(__file__).resolve().parents[2] / "src" / "sportstradamus" / "dashboard" / "surfaces"
+_SURFACES = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "src"
+    / "sportstradamus"
+    / "dashboard"
+    / "surfaces"
+)
 _PAGE = _SURFACES / "slips.py"
 _LEG_COLS = [f"Leg {i}" for i in range(1, 7)]
 

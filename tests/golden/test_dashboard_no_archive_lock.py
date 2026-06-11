@@ -119,7 +119,7 @@ def _discover_dashboard_modules() -> list[str]:
         onerror=lambda name: None,
     ):
         discovered.append(info.name)
-    return [_pkg.__name__] + discovered
+    return [_pkg.__name__, *discovered]
 
 
 def test_dashboard_imports_do_not_construct_archive(tmp_path, monkeypatch) -> None:

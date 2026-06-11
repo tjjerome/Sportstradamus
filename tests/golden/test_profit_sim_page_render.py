@@ -13,7 +13,14 @@ import pathlib
 
 import pandas as pd
 
-_PAGE = pathlib.Path(__file__).resolve().parents[2] / "src" / "sportstradamus" / "dashboard" / "surfaces" / "receipts_sim.py"
+_PAGE = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "src"
+    / "sportstradamus"
+    / "dashboard"
+    / "surfaces"
+    / "receipts_sim.py"
+)
 
 _FAKE_SUMMARY = {
     "mean_final": 1234.0,
