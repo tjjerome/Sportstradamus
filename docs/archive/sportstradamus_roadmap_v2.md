@@ -1,5 +1,12 @@
 # Sportstradamus Improvement Roadmap (v2)
 
+> **ARCHIVED — superseded by [`../sportstradamus_roadmap_v3.md`](../sportstradamus_roadmap_v3.md)
+> (swimlane index + per-workstream briefs in `docs/handoffs/`).** Status claims
+> below are stale and non-normative. Retained for the *original design (for
+> reference)* blocks and phase acceptance specs that the v3 lanes mine
+> (ledger §2.2/2.3 schema, streaks §3.5, alerts §4.1, draft products §5.1–5.6,
+> model refinements §6.x).
+
 A six-phase plan for evolving `tjjerome/Sportstradamus` from a sophisticated modeling
 factory with partial decision-engine coverage into a complete Underdog edge system. The
 prior roadmap mis-assumed several production features were missing; they exist (`training/correlate.py`,
@@ -39,11 +46,11 @@ Status markers are inlined per sub-phase below; this is the executive summary. S
 project's **active** work (Phases 1–6 keep their original numbers).
 
 **ACTIVE — Model Correctness & Market Breadth (IN PROGRESS).** The lead work; home of record
-[`docs/operation_ship_75.md`](operation_ship_75.md). Prompted by defects in the live
+[`docs/operation_ship_75.md`](../operation_ship_75.md). Prompted by defects in the live
 implementation (see [Active Track](#active-track--model-correctness--market-breadth-in-progress)),
 not optional polish. **Goal: ≥ 75% of markets per league carry a set baseline** (NBA ≥ 16/21,
 WNBA ≥ 14/18, NFL ≥ 15/20). The live count, the lever stack, and the next step all live in
-[`operation_ship_75.md`](operation_ship_75.md); this roadmap does not restate them — they move
+[`operation_ship_75.md`](../operation_ship_75.md); this roadmap does not restate them — they move
 on every ship.
 
 | Phase | State | Notes |
@@ -66,7 +73,7 @@ on every ship.
 **This leads the remaining work**, ahead of deferred Phase 4 (alerts/dashboard) and Phase 5
 (best ball). It is not a Phase-6 refinement: it was prompted by **defects discovered in the
 live implementation**, making it production-quality *correction* work. Home of record:
-[`docs/operation_ship_75.md`](operation_ship_75.md) — this entry is a pointer +
+[`docs/operation_ship_75.md`](../operation_ship_75.md) — this entry is a pointer +
 status, not a duplicate of the stage detail.
 
 **Discovered defects (why it is urgent):**
@@ -81,7 +88,7 @@ status, not a duplicate of the stage detail.
 
 **Goal:** ≥ 75% of markets per league carry a *set baseline* (per-league targets in
 [Status at a glance](#status-at-a-glance)). The live count and per-league gaps move on every
-ship — see [`operation_ship_75.md`](operation_ship_75.md).
+ship — see [`operation_ship_75.md`](../operation_ship_75.md).
 
 **Scope (pre-break, active):** reach 75% breadth (Tier-0 audit code → Stage B1.6 feature/bias
 track), then the core depth methods expected to pay off — A2 (T3 tail-head), A3 (calibration
@@ -89,7 +96,7 @@ polish), B2 (routing + feature engineering), B3 (MZINB / marginalized-hurdle fam
 post-break speculative tail (Stage A4 / B4 / long-shots) is **deferred into Phase 6**. Follow the
 track until diminishing returns, then stop it per-cell.
 
-**Lever stack and next step:** owned by [`operation_ship_75.md`](operation_ship_75.md) — §5
+**Lever stack and next step:** owned by [`operation_ship_75.md`](../operation_ship_75.md) — §5
 (lever stack), §6 (per-league path), §7 (stop-the-track principle). This roadmap points rather
 than restates, because it moves on every ship.
 
@@ -107,7 +114,7 @@ live-metrics + graduation tooling is production runtime.
   over cached `data/test_sets/`; `--baseline` / `--candidate` / `--live-window N`. Its
   `compute_gates` returns the per-cell five-gate scorecard (g1–g5 + `ship`); `report()`
   inline-calls it on every `meditate` run, so the gate logic is production — only the standalone
-  A/B CLI is a dev exercise. Thresholds mirrored in [`docs/ship_gate.md`](ship_gate.md).
+  A/B CLI is a dev exercise. Thresholds mirrored in [`docs/ship_gate.md`](../ship_gate.md).
 
 **Live metrics + lifecycle (production runtime)**
 
@@ -144,7 +151,7 @@ live-metrics + graduation tooling is production runtime.
   production-delta ship PRs to `devel`, enforcing the research-scaffolding denylist
   (`zinb_routing_diagnostics`, `icc_diagnostics`, `statsmodels`, `/tmp`
   harnesses). Never pushes; the human approves.
-- [`docs/ship_gate.md`](ship_gate.md) — human-readable mirror of the `scorecard` threshold
+- [`docs/ship_gate.md`](../ship_gate.md) — human-readable mirror of the `scorecard` threshold
   constants. Update it whenever a threshold changes.
 
 ---
@@ -262,7 +269,7 @@ EV correctly. Existing callers unbroken.
   within same-game groups vs the under-independence prediction. At parlay dimensions of 2–6 a Gaussian
   copula suffices; vines are overkill. This is the audit's single largest *product*-EV lever: the five
   gates are marginal-only, the product is parlays, and the DFS pick'em apps largely don't tax leg
-  correlation — the asymmetry that makes them beatable. See [`operation_ship_75.md`](operation_ship_75.md) §10.
+  correlation — the asymmetry that makes them beatable. See [`operation_ship_75.md`](../operation_ship_75.md) §10.
 
 ### 1.3 Closing-line freeze — ⚠️ DROPPED (workaround sufficient)
 
@@ -361,7 +368,7 @@ can't answer a real question.
 
 **Goal:** turn EV signals into ranked Underdog entries with proper bankroll sizing across Underdog's
 contest variants. Implementation log:
-[docs/archive/PHASE_3_IMPLEMENTATION.md](archive/PHASE_3_IMPLEMENTATION.md).
+[docs/archive/PHASE_3_IMPLEMENTATION.md](PHASE_3_IMPLEMENTATION.md).
 
 ### 3.1 Kelly sizing module — ✅ DONE
 
@@ -555,12 +562,12 @@ profitability; all upside.
 
 Phase 6 is the home for **deferred** model work of two kinds: (1) the **speculative tail** of the
 active model track — the post-diminishing-returns stages from
-[`docs/operation_ship_75.md`](operation_ship_75.md): **Stage A4** (novel risky retries),
+[`docs/operation_ship_75.md`](../operation_ship_75.md): **Stage A4** (novel risky retries),
 **Stage B4** (tuning/polish — optional), and any long-shot method; plus (2) the **original refinements**
 6.1–6.5 below. None of Phase 6 was ever the urgent work — the urgent work is fixing the discovered
 defects and reaching 75% breadth (see [Active Track](#active-track--model-correctness--market-breadth-in-progress)).
 Everything here is **deferred until breadth is met**; the A4/B4 stage detail is preserved in the
-archived [`docs/archive/gbdt_mean_regression_plan.md`](archive/gbdt_mean_regression_plan.md).
+archived [`docs/archive/gbdt_mean_regression_plan.md`](gbdt_mean_regression_plan.md).
 
 The full-distribution audit adds to this deferred tail (kind 1): **distributional conformal / CQR** for
 the alt-line ladder (refines [§6.4](#64-conformal-prediction-wrappers--%E2%9D%8C-not-started)); a **CLV
@@ -568,7 +575,7 @@ CRPS-edge dashboard** (model vs the de-vigged *closing* distribution, per market
 backbone swings — **TabPFN-as-platform** and a **multi-task shared-trunk NN** pooling across
 cells/leagues (the per-cell, small-n use of TabPFN stays in Ship-75 §5.7). The heaviest tail-head
 rebuilds (spliced/Pareto, MZINB) also land here. The marginal-breadth levers from the same audit are
-**not** deferred — they live in [`operation_ship_75.md`](operation_ship_75.md) §5.
+**not** deferred — they live in [`operation_ship_75.md`](../operation_ship_75.md) §5.
 
 ### 6.1 Bayesian hierarchical for low-sample players — ❌ NOT STARTED
 
@@ -641,7 +648,7 @@ Phase 4.2 Today's Recommendations tab (`pages/2_Predictions_Pickem.py`).
 
 1. **Model Correctness & Market Breadth — ACTIVE (lead).** Reach ≥ 75% baseline breadth per league,
    then follow until diminishing returns; the speculative tail (A4/B4) is deferred to Phase 6. Live
-   count, lever stack, and next step: [`docs/operation_ship_75.md`](operation_ship_75.md).
+   count, lever stack, and next step: [`docs/operation_ship_75.md`](../operation_ship_75.md).
 2. **Phase 1.2 follow-up — open audit findings.** Fix the `find_correlation` pairwise-EV unbounded
    score, replace inline magic numbers with named constants, swap substring same-player guarding for
    `player_id` joins, reconcile the `Boost`-column overwrite at `correlation.py:498` so the displayed
@@ -676,7 +683,7 @@ Scope decisions consolidated from across the roadmap. Each links back to where t
 | **`prediction/parlay.py`** | SPLIT OUT (resolved) | `beam_search_parlays` now lives in `prediction/parlay.py`; `find_correlation` stays in `prediction/correlation.py` — matches the CONTRIBUTING.md package map. |
 | **Bankroll** | CLI flag, not state | With the bet logger dropped, bankroll is a parameter to `kelly`/`pickem-build` — no `data/bankroll.json`, no DB row. See [§3.3](#33-underdog-native-strategy-module--%E2%9C%85-done). |
 | **`clv.py` location** | Stays at package root | Would have moved into `tracking/`; without the bet logger, leaving it next to `nightly.py` is the right shape. |
-| **Full-distribution audit** | Marginal-breadth levers → Ship-75 §5; parlay-dependence + conformal-ladder + backbone swings deferred here | Folded into [`operation_ship_75.md`](operation_ship_75.md) §5 (four-axis: normalization / model-loss / blend / calibration); the non-marginal-breadth tail (copula §1.2; conformal / CLV-dashboard / TabPFN-platform / multi-task-NN Phase 6) defers to just after 75%. |
+| **Full-distribution audit** | Marginal-breadth levers → Ship-75 §5; parlay-dependence + conformal-ladder + backbone swings deferred here | Folded into [`operation_ship_75.md`](../operation_ship_75.md) §5 (four-axis: normalization / model-loss / blend / calibration); the non-marginal-breadth tail (copula §1.2; conformal / CLV-dashboard / TabPFN-platform / multi-task-NN Phase 6) defers to just after 75%. |
 
 ---
 
