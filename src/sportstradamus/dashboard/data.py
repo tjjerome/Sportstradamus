@@ -289,6 +289,19 @@ def load_resolve_meta() -> dict:
         return {}
 
 
+def sport_filtered(df: pd.DataFrame) -> pd.DataFrame:
+    """Narrow ``df`` to the app-level sport switch (``st.session_state["sport"]``).
+
+    Returns ``df`` unchanged when "All" is selected or there is no ``League``
+    column. Empty-result handling stays with the caller — each surface words
+    its own message.
+    """
+    sport = st.session_state.get("sport", "All")
+    if sport == "All" or "League" not in df.columns:
+        return df
+    return df.loc[df["League"] == sport]
+
+
 def get_filtered_history(
     history: pd.DataFrame,
     leagues: list | None = None,

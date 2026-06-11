@@ -13,7 +13,7 @@ _CONTINUOUS = ("Gamma", "ZAGamma", "SkewNormal")
 _ZERO_INFLATED = ("ZAGamma", "ZINB")
 
 # Offer columns -> distribution-parameter names the curve builders read.
-_DIST_PARAM_COLS = {
+DIST_PARAM_COLS = {
     "Model R": "r",
     "Model Alpha": "alpha",
     "Model Sigma": "sigma",

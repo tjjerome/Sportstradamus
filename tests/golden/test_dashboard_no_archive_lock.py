@@ -17,15 +17,10 @@ from __future__ import annotations
 
 import contextlib
 import importlib
-import importlib.util
 import pkgutil
 import sys
-from pathlib import Path
 
 import pandas as pd
-
-# Project source root: src/sportstradamus/
-_PROJECT_SRC = Path(__file__).resolve().parents[2] / "src" / "sportstradamus"
 
 
 def _reset_archive_singleton() -> None:
@@ -50,7 +45,6 @@ def _reset_archive_singleton() -> None:
 
 _CLEARED_PREFIXES = (
     "sportstradamus.dashboard",
-    "sportstradamus.pages",
     "sportstradamus.stats",
     "sportstradamus.prediction",
 )
@@ -85,27 +79,6 @@ def _restore_modules(removed: dict[str, object]) -> None:
     for name in [m for m in list(sys.modules) if m.startswith(_CLEARED_PREFIXES)]:
         del sys.modules[name]
     sys.modules.update(removed)
-
-
-def _import_page_file(path: Path) -> None:
-    """Import a Streamlit page by filesystem path.
-
-    Pages keep a numeric ordering prefix in their filenames
-    (``1_Predictions_Today.py``) which is not a valid Python identifier, so
-    they must be loaded via ``importlib.util.spec_from_file_location`` rather
-    than a normal import.
-
-    Streamlit-runtime side effects (``st.set_page_config`` outside a session,
-    ``@st.cache_data`` registration) may raise when executed without a
-    running Streamlit; we suppress those because the assertion we care about
-    is purely the Archive singleton, not whether the page renders.
-    """
-    spec = importlib.util.spec_from_file_location(f"_pinned_page_{path.stem}", path)
-    if spec is None or spec.loader is None:
-        return
-    module = importlib.util.module_from_spec(spec)
-    with contextlib.suppress(Exception):
-        spec.loader.exec_module(module)
 
 
 def _discover_dashboard_modules() -> list[str]:
@@ -150,22 +123,14 @@ def test_dashboard_imports_do_not_construct_archive(tmp_path, monkeypatch) -> No
             lambda *_a, **_k: pd.DataFrame(),
         )
 
-        # Auto-discover all modules in the new sportstradamus.dashboard package.
+        # Importing a surface module executes its whole script body (Streamlit
+        # calls included), so the walk covers exactly what a real page run
+        # covers; runtime-context errors are suppressed because the assertion
+        # is purely the Archive singleton.
         dashboard_module_names = _discover_dashboard_modules()
         for name in dashboard_module_names:
             with contextlib.suppress(Exception):
                 importlib.import_module(name)
-
-        # Also walk the surfaces/ and components/ directories as script files
-        # (they run Streamlit top-level code not importable via the normal path).
-        dashboard_dir = _PROJECT_SRC / "dashboard"
-        for subdir in ("surfaces", "components"):
-            script_dir = dashboard_dir / subdir
-            if script_dir.is_dir():
-                for page_path in sorted(script_dir.glob("*.py")):
-                    if page_path.name == "__init__.py":
-                        continue
-                    _import_page_file(page_path)
 
         assert Archive._instance is None, (
             "Dashboard imports constructed the Archive singleton, which holds "

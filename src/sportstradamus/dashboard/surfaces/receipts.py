@@ -1,4 +1,4 @@
-"""Page 1: Overview — KPIs, accuracy trends, profit trends, and volume."""
+"""Receipts — overview KPIs, accuracy trends, profit trends, and volume."""
 
 import pandas as pd
 import plotly.express as px
@@ -15,6 +15,7 @@ from sportstradamus.dashboard.data import (
     load_resolve_meta,
     render_banner,
     sidebar_filters,
+    sport_filtered,
 )
 
 # Standard -110 juice: risk $110 to win $100. Used for flat-unit P&L accounting.
@@ -38,14 +39,12 @@ else:
         "Nightly resolution has not run yet. Run `poetry run reflect` to resolve prediction outcomes."
     )
 
-# Apply global sport switch pre-filter before the sidebar builds its league
-# multiselect, so the sidebar only offers that sport's leagues.
-_sport = st.session_state.get("sport", "All")
-if _sport != "All" and "League" in history.columns:
-    history = history.loc[history["League"] == _sport]
-    if history.empty:
-        st.info("No resolved predictions match the current sport filter.")
-        st.stop()
+# Sport narrow runs before the sidebar builds its league multiselect, so the
+# sidebar only offers that sport's leagues.
+history = sport_filtered(history)
+if history.empty:
+    st.info("No resolved predictions match the current sport filter.")
+    st.stop()
 
 filters = sidebar_filters(history, parlays, key_prefix="overview_")
 df = filtered_history_or_stop(history, filters)

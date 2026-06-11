@@ -1,4 +1,4 @@
-"""Page 4: Profit Simulation — preset and custom strategies with Monte Carlo."""
+"""Profit Sim — preset and custom strategies with Monte Carlo."""
 
 from datetime import datetime, timedelta
 
@@ -12,6 +12,7 @@ from sportstradamus.dashboard.data import (
     get_filtered_history,
     load_resolved_history_or_stop,
     render_banner,
+    sport_filtered,
 )
 from sportstradamus.strategies.profit_sim import (
     N_MONTE_CARLO_DEFAULT,
@@ -31,12 +32,10 @@ if df.empty:
     st.info("No resolved predictions found.")
     st.stop()
 
-_sport = st.session_state.get("sport", "All")
-if _sport != "All" and "League" in df.columns:
-    df = df.loc[df["League"] == _sport]
-    if df.empty:
-        st.info("No resolved predictions match the current sport filter.")
-        st.stop()
+df = sport_filtered(df)
+if df.empty:
+    st.info("No resolved predictions match the current sport filter.")
+    st.stop()
 
 df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
 df = df.loc[df["_date"].notna()]

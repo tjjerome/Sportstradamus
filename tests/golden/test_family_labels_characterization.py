@@ -1,4 +1,4 @@
-"""Exact-value characterization pin for ``dashboard_detail.family_labels_for_game``.
+"""Exact-value characterization pin for ``dashboard.components.stories.family_labels_for_game``.
 
 The existing ``tests/test_dashboard_detail.py`` test asserts only PROPERTIES
 (distinct labels, deterministic, star-not-bench). This pins the EXACT label

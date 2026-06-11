@@ -1,4 +1,4 @@
-"""Characterization pin for ``dashboard_data._extract_platforms``.
+"""Characterization pin for ``dashboard.data._extract_platforms``.
 
 Pins the unique-platform extraction before the nesting-sweep flatten: the
 normalized ``Offers`` path (per-offer tuple slot 2, skipping non-list entries,

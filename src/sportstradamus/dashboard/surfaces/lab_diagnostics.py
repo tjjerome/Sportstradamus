@@ -1,4 +1,4 @@
-"""Page 2: Market Diagnostics & Forecast Quality.
+"""Lab Diagnostics — market diagnostics and forecast quality.
 
 Combines market-level diagnostics with professional forecasting metrics
 following Gneiting & Raftery (2007) and Murphy (1973).
@@ -23,6 +23,7 @@ from sportstradamus.dashboard.data import (
     load_resolved_history_or_stop,
     render_banner,
     sidebar_filters,
+    sport_filtered,
 )
 from sportstradamus.dashboard.surfaces.lab_diagnostics_charts import (
     bias_bar,
@@ -45,14 +46,12 @@ render_banner("stats", "per-market accuracy, calibration, CRPS")
 
 history = load_resolved_history_or_stop()
 
-# Apply global sport switch pre-filter before the sidebar builds its league
-# multiselect, so the sidebar only offers that sport's leagues.
-_sport = st.session_state.get("sport", "All")
-if _sport != "All" and "League" in history.columns:
-    history = history.loc[history["League"] == _sport]
-    if history.empty:
-        st.info("No data matches the current sport filter.")
-        st.stop()
+# Sport narrow runs before the sidebar builds its league multiselect, so the
+# sidebar only offers that sport's leagues.
+history = sport_filtered(history)
+if history.empty:
+    st.info("No data matches the current sport filter.")
+    st.stop()
 
 st.sidebar.header("Filters")
 time_window = st.sidebar.selectbox(

@@ -4,7 +4,12 @@ import pandas as pd
 import streamlit as st
 
 from sportstradamus.dashboard.components.deep_dive import to_american
-from sportstradamus.dashboard.data import format_ts, load_current_meta, load_current_offers
+from sportstradamus.dashboard.data import (
+    format_ts,
+    load_current_meta,
+    load_current_offers,
+    sport_filtered,
+)
 
 st.title("Game")
 
@@ -12,18 +17,19 @@ meta = load_current_meta()
 generated = format_ts(meta.get("generated_at", "no run on record"))
 st.caption(f"Last updated: {generated}")
 
-offers = load_current_offers()
-
-_sport = st.session_state.get("sport", "All")
-if _sport != "All" and not offers.empty and "League" in offers.columns:
-    offers = offers.loc[offers["League"] == _sport]
+offers = sport_filtered(load_current_offers())
 
 if offers.empty:
     st.info("No current predictions. Run `poetry run prophecize` to generate offers.")
     st.stop()
 
 if "Team" in offers.columns and "Opponent" in offers.columns:
-    game_labels = (offers["Team"] + " vs " + offers["Opponent"]).dropna().unique().tolist()
+    # Label format must match tonight.py's View-game query param; the date
+    # suffix keeps a doubleheader's two games distinct.
+    offers = offers.assign(_game=offers["Team"] + " vs " + offers["Opponent"])
+    if "Date" in offers.columns:
+        offers["_game"] += " · " + offers["Date"].astype(str)
+    game_labels = offers["_game"].dropna().unique().tolist()
 else:
     game_labels = []
 
@@ -36,16 +42,7 @@ if not game_labels:
     st.stop()
 
 selected_game = st.selectbox("Select game", game_labels, index=default_idx)
-
-if "Team" in offers.columns and "Opponent" in offers.columns:
-    parts = selected_game.split(" vs ", 1)
-    if len(parts) == 2:
-        team, opponent = parts
-        game_offers = offers.loc[(offers["Team"] == team) & (offers["Opponent"] == opponent)]
-    else:
-        game_offers = pd.DataFrame()
-else:
-    game_offers = pd.DataFrame()
+game_offers = offers.loc[offers["_game"] == selected_game]
 
 if game_offers.empty:
     st.info("No offers found for this game.")
