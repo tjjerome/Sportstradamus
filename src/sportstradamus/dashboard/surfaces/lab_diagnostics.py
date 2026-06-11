@@ -76,9 +76,8 @@ if df.empty:
     st.info("No data for selected time window.")
     st.stop()
 
-# CRPS is precomputed per prediction by the nightly resolve
-# (dashboard/data.py resolve_and_save); here we only aggregate the stored column
-# instead of re-integrating per row on every rerun.
+# CRPS arrives as a precomputed per-prediction column; here we only aggregate
+# the stored values instead of re-integrating per row on every rerun.
 pred_df = get_prediction_history(
     history,
     leagues=filters["leagues"],
@@ -239,7 +238,6 @@ if has_crps:
         )
         st.plotly_chart(crps_line(crps_daily), use_container_width=True)
 
-# --- Prediction Interval Coverage ---
 if has_dist:
     cov_df = pred_df.dropna(subset=["Dist", "Actual"])
     if len(cov_df) >= 20:
