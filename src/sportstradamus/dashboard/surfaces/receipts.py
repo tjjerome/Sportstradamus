@@ -38,16 +38,17 @@ else:
         "Nightly resolution has not run yet. Run `poetry run reflect` to resolve prediction outcomes."
     )
 
-filters = sidebar_filters(history, parlays, key_prefix="overview_")
-df = filtered_history_or_stop(history, filters)
-
-# Apply global sport switch pre-filter
+# Apply global sport switch pre-filter before the sidebar builds its league
+# multiselect, so the sidebar only offers that sport's leagues.
 _sport = st.session_state.get("sport", "All")
-if _sport != "All" and "League" in df.columns:
-    df = df.loc[df["League"] == _sport]
-    if df.empty:
+if _sport != "All" and "League" in history.columns:
+    history = history.loc[history["League"] == _sport]
+    if history.empty:
         st.info("No resolved predictions match the current sport filter.")
         st.stop()
+
+filters = sidebar_filters(history, parlays, key_prefix="overview_")
+df = filtered_history_or_stop(history, filters)
 
 prob_col = "Model P" if "Model P" in df.columns and df["Model P"].notna().any() else "Model"
 df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
@@ -142,7 +143,8 @@ if not volume_pivot.empty:
     fig_heat.update_layout(height=300)
     st.plotly_chart(fig_heat, use_container_width=True)
 
-# CLV uses unfiltered history — it is a structural model property, not a view slice.
+# CLV ignores the sidebar filters — it is a structural model property, not a
+# view slice — but the global sport switch still applies (history is narrowed above).
 st.subheader("Closing Line Value")
 clv_summary = clv.summarize(history)
 

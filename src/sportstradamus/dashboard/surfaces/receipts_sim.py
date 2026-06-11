@@ -31,6 +31,13 @@ if df.empty:
     st.info("No resolved predictions found.")
     st.stop()
 
+_sport = st.session_state.get("sport", "All")
+if _sport != "All" and "League" in df.columns:
+    df = df.loc[df["League"] == _sport]
+    if df.empty:
+        st.info("No resolved predictions match the current sport filter.")
+        st.stop()
+
 df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
 df = df.loc[df["_date"].notna()]
 

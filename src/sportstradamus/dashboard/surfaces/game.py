@@ -3,16 +3,8 @@
 import pandas as pd
 import streamlit as st
 
+from sportstradamus.dashboard.components.deep_dive import to_american
 from sportstradamus.dashboard.data import format_ts, load_current_meta, load_current_offers
-
-
-def _to_american(p: float) -> str:
-    if not isinstance(p, float | int) or pd.isna(p) or p <= 0 or p >= 1:
-        return "N/A"
-    if p >= 0.5:
-        return f"-{round(p / (1 - p) * 100)}"
-    return f"+{round((1 - p) / p * 100)}"
-
 
 st.title("Game")
 
@@ -22,7 +14,6 @@ st.caption(f"Last updated: {generated}")
 
 offers = load_current_offers()
 
-# Apply global sport switch pre-filter
 _sport = st.session_state.get("sport", "All")
 if _sport != "All" and not offers.empty and "League" in offers.columns:
     offers = offers.loc[offers["League"] == _sport]
@@ -62,7 +53,7 @@ if game_offers.empty:
 
 ctx = game_offers.iloc[0]
 c1, c2, c3 = st.columns(3)
-c1.metric("Moneyline", _to_american(ctx.get("Moneyline")) if "Moneyline" in ctx.index else "N/A")
+c1.metric("Moneyline", to_american(ctx.get("Moneyline")) if "Moneyline" in ctx.index else "N/A")
 ou = ctx.get("O/U")
 c2.metric("O/U Total", f"{ou:.1f}" if pd.notna(ou) and isinstance(ou, int | float) else "N/A")
 c3.metric("League", ctx.get("League", "N/A"))
