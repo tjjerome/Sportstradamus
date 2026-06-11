@@ -1,6 +1,6 @@
 # Dashboard UX — "the Oracle"
 
-> Status: ACTIVE — stage P1
+> Status: ACTIVE — stage P2
 
 ## 1. Mission & money logic
 
@@ -185,4 +185,5 @@ devel-bound PR; research-analyst only if a stage turns into a modeling question 
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
-- 2026-06-11 · P0 · celestial tokens + spec + lane + mockups landed (feature/dashboard-ux) · gates pending this session · next: P1 package migration
+- 2026-06-11 · P1 · six-surface package landed, legacy pages deleted, 2 review rounds + quality fixes (2eed419..66ede1c); host crash mid-commit recovered via reflog repoint + working-tree recommit; 2 latent profit-sim crashes fixed at source (strategies/profit_sim.py — outside-footprint touch, disclosed) · gates ✓/✓/✓ · next: P2 pipeline precompute (stories.py, keep-cols, corr slices)
+- 2026-06-11 · P0 · celestial tokens + spec + lane + mockups landed (6a33b81) · gates ✓/✓/✓ · next: P1 package migration
