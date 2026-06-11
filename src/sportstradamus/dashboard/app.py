@@ -31,9 +31,11 @@ st.session_state["sport"] = _sport_widget if _sport_widget is not None else "All
 # st.Page paths resolve relative to app.py's directory.
 _surfaces = Path(__file__).parent / "surfaces"
 
+# Six surfaces live top-level (unnamed section renders headerless);
+# only Model Lab gets a group header.
 pg = st.navigation(
     {
-        "Predictions": [
+        "": [
             st.Page(
                 str(_surfaces / "tonight.py"),
                 title="Tonight",
@@ -59,8 +61,6 @@ pg = st.navigation(
                 icon=":material/receipt_long:",
                 url_path="slips",
             ),
-        ],
-        "Stats": [
             st.Page(
                 str(_surfaces / "receipts.py"),
                 title="Receipts",
