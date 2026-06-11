@@ -1,4 +1,4 @@
-"""Regression pin for the ``pages/6_…_Stats_Profit_Sim.py`` summary-table block.
+"""Regression pin for the ``surfaces/receipts_sim.py`` summary-table block.
 
 The page shipped two latent ``NameError``s in this block: ``range(N_MONTE_CARLO)``
 (only ``N_MONTE_CARLO_DEFAULT`` is imported) and a ``summary[...]`` dict that was
@@ -13,11 +13,7 @@ import pathlib
 
 import pandas as pd
 
-_PAGE = next(
-    (pathlib.Path(__file__).resolve().parents[2] / "src" / "sportstradamus" / "pages").glob(
-        "6_*Stats_Profit_Sim.py"
-    )
-)
+_PAGE = pathlib.Path(__file__).resolve().parents[2] / "src" / "sportstradamus" / "dashboard" / "surfaces" / "receipts_sim.py"
 
 _FAKE_SUMMARY = {
     "mean_final": 1234.0,

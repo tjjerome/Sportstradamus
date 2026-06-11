@@ -1,7 +1,7 @@
-"""Characterization pins for ``pages/2_…_Predictions_Parlays.py::_render_parlay``.
+"""Characterization pins for ``surfaces/slips.py::_render_parlay``.
 
-The page module executes Streamlit page code at import (``st.set_page_config``,
-data loads, ``st.stop``), so it cannot be imported in a unit test. Instead the
+The page module executes Streamlit page code at import (data loads, ``st.stop``),
+so it cannot be imported in a unit test. Instead the
 function-definition region (``def _render_parlay`` up to the top-level
 ``for game`` loop) is sliced out of the source and exec'd into a namespace with
 a recording fake ``st`` and stub ``parse_leg`` / ``find_offer_idx``. Assertions
@@ -16,8 +16,8 @@ import types
 import pandas as pd
 import pytest
 
-_PAGES = pathlib.Path(__file__).resolve().parents[2] / "src" / "sportstradamus" / "pages"
-_PAGE = next(_PAGES.glob("2_*Predictions_Parlays.py"))
+_SURFACES = pathlib.Path(__file__).resolve().parents[2] / "src" / "sportstradamus" / "dashboard" / "surfaces"
+_PAGE = _SURFACES / "slips.py"
 _LEG_COLS = [f"Leg {i}" for i in range(1, 7)]
 
 
@@ -68,7 +68,7 @@ class _FakeSt:
 def _load_render(fake_st, *, offer_idx=None):
     src = _PAGE.read_text(encoding="utf-8")
     start = src.index("def _render_parlay")
-    end = src.index("\nfor game, group in view.groupby")
+    end = src.index("\ntab_parlays, tab_pickem = st.tabs")
     ns = {
         "pd": pd,
         "st": fake_st,

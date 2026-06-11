@@ -1,9 +1,7 @@
 """Page 1: Overview — KPIs, accuracy trends, profit trends, and volume."""
 
-import pathlib
-import sys
-
-sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
+# Standard -110 juice: risk $110 to win $100. Used for flat-unit P&L accounting.
+_JUICE_PAYOUT = 100 / 110
 
 import pandas as pd
 import plotly.express as px
@@ -12,7 +10,7 @@ import streamlit as st
 from sklearn.metrics import brier_score_loss
 
 from sportstradamus import clv
-from sportstradamus.dashboard_data import (
+from sportstradamus.dashboard.data import (
     filtered_history_or_stop,
     format_ts,
     load_history,
@@ -25,7 +23,6 @@ from sportstradamus.dashboard_data import (
 st.title("Overview")
 render_banner("stats", "historical accuracy, profit, and volume")
 
-# --- Load data (pre-resolved by nightly script) ---
 history = load_history()
 parlays = load_parlays()
 
@@ -41,17 +38,22 @@ else:
         "Nightly resolution has not run yet. Run `poetry run reflect` to resolve prediction outcomes."
     )
 
-# --- Sidebar ---
 filters = sidebar_filters(history, parlays, key_prefix="overview_")
 df = filtered_history_or_stop(history, filters)
 
-# --- Prep ---
+# Apply global sport switch pre-filter
+_sport = st.session_state.get("sport", "All")
+if _sport != "All" and "League" in df.columns:
+    df = df.loc[df["League"] == _sport]
+    if df.empty:
+        st.info("No resolved predictions match the current sport filter.")
+        st.stop()
+
 prob_col = "Model P" if "Model P" in df.columns and df["Model P"].notna().any() else "Model"
 df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
 df["Hit"] = (df["Bet"] == df["Result"]).astype(int)
-df["Profit Unit"] = df["Hit"] * (100 / 110) - (1 - df["Hit"])
+df["Profit Unit"] = df["Hit"] * _JUICE_PAYOUT - (1 - df["Hit"])
 
-# --- KPI Cards ---
 col1, col2, col3, col4, col5 = st.columns(5)
 accuracy = df["Hit"].mean()
 roi = df["Profit Unit"].sum() / len(df)
@@ -71,7 +73,6 @@ st.download_button(
     "text/csv",
 )
 
-# --- Cumulative Accuracy Time Series ---
 st.subheader("Rolling 30-Day Accuracy by League")
 daily_league = (
     df.groupby(["_date", "League"])
@@ -88,7 +89,6 @@ for league in sorted(daily_league["League"].unique()):
     ld = daily_league.loc[daily_league["League"] == league].copy()
     ld["CumHits"] = ld["Hits"].cumsum()
     ld["CumBets"] = ld["Bets"].cumsum()
-    # Rolling 30-day accuracy
     ld["Roll30_Hits"] = ld["Hits"].rolling(30, min_periods=1).sum()
     ld["Roll30_Bets"] = ld["Bets"].rolling(30, min_periods=1).sum()
     ld["Roll30_Acc"] = ld["Roll30_Hits"] / ld["Roll30_Bets"]
@@ -105,7 +105,6 @@ fig_acc.add_hline(y=0.5, line_dash="dash", line_color="gray", annotation_text="5
 fig_acc.update_layout(yaxis_title="Accuracy", xaxis_title="Date", height=400)
 st.plotly_chart(fig_acc, use_container_width=True)
 
-# --- Cumulative Profit Time Series ---
 st.subheader("Cumulative Profit (Units)")
 daily_profit = (
     df.groupby("_date")
@@ -127,7 +126,6 @@ fig_profit = px.area(
 fig_profit.update_layout(height=400)
 st.plotly_chart(fig_profit, use_container_width=True)
 
-# --- Volume Heatmap ---
 st.subheader("Prediction Volume")
 volume = df.groupby(["_date", "League"]).size().reset_index(name="Count")
 volume_pivot = volume.pivot_table(index="League", columns="_date", values="Count", fill_value=0)
@@ -144,9 +142,7 @@ if not volume_pivot.empty:
     fig_heat.update_layout(height=300)
     st.plotly_chart(fig_heat, use_container_width=True)
 
-# --- Closing Line Value summary --------------------------------------------
-# Computed against the unfiltered history because CLV is a structural property
-# of the model, not of the user's current view.
+# CLV uses unfiltered history — it is a structural model property, not a view slice.
 st.subheader("Closing Line Value")
 clv_summary = clv.summarize(history)
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import importlib
 import importlib.util
+import pkgutil
 import sys
 from pathlib import Path
 
@@ -25,15 +26,6 @@ import pandas as pd
 
 # Project source root: src/sportstradamus/
 _PROJECT_SRC = Path(__file__).resolve().parents[2] / "src" / "sportstradamus"
-
-# Dashboard entry surfaces. Add new top-level dashboard modules here when
-# they appear under src/sportstradamus/.
-_DASHBOARD_MODULES = (
-    "sportstradamus.dashboard",
-    "sportstradamus.dashboard_app",
-    "sportstradamus.dashboard_data",
-    "sportstradamus.dashboard_detail",
-)
 
 
 def _reset_archive_singleton() -> None:
@@ -116,6 +108,20 @@ def _import_page_file(path: Path) -> None:
         spec.loader.exec_module(module)
 
 
+def _discover_dashboard_modules() -> list[str]:
+    """Auto-discover all importable modules in the sportstradamus.dashboard package."""
+    import sportstradamus.dashboard as _pkg
+
+    discovered = []
+    for info in pkgutil.walk_packages(
+        path=_pkg.__path__,
+        prefix=_pkg.__name__ + ".",
+        onerror=lambda name: None,
+    ):
+        discovered.append(info.name)
+    return [_pkg.__name__] + discovered
+
+
 def test_dashboard_imports_do_not_construct_archive(tmp_path, monkeypatch) -> None:
     """Importing every dashboard surface must leave ``Archive._instance`` is ``None``.
 
@@ -144,14 +150,22 @@ def test_dashboard_imports_do_not_construct_archive(tmp_path, monkeypatch) -> No
             lambda *_a, **_k: pd.DataFrame(),
         )
 
-        for name in _DASHBOARD_MODULES:
+        # Auto-discover all modules in the new sportstradamus.dashboard package.
+        dashboard_module_names = _discover_dashboard_modules()
+        for name in dashboard_module_names:
             with contextlib.suppress(Exception):
                 importlib.import_module(name)
 
-        for page_path in sorted((_PROJECT_SRC / "pages").glob("*.py")):
-            if page_path.name == "__init__.py":
-                continue
-            _import_page_file(page_path)
+        # Also walk the surfaces/ and components/ directories as script files
+        # (they run Streamlit top-level code not importable via the normal path).
+        dashboard_dir = _PROJECT_SRC / "dashboard"
+        for subdir in ("surfaces", "components"):
+            script_dir = dashboard_dir / subdir
+            if script_dir.is_dir():
+                for page_path in sorted(script_dir.glob("*.py")):
+                    if page_path.name == "__init__.py":
+                        continue
+                    _import_page_file(page_path)
 
         assert Archive._instance is None, (
             "Dashboard imports constructed the Archive singleton, which holds "

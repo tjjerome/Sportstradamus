@@ -1,7 +1,7 @@
 """Sportstradamus Dashboard — Streamlit entry point.
 
-Launched via `poetry run reflect`. Uses subprocess to start Streamlit
-with the main app file, which auto-discovers pages in the pages/ directory.
+Launched via `poetry run dashboard`. Uses subprocess to start Streamlit
+with the main app file.
 """
 
 import subprocess
@@ -20,9 +20,9 @@ def run() -> None:
     popup, which misleads users — clicking "Rerun" only re-executes the
     script, it does not invalidate the data cache, so the displayed data
     looks unchanged. Data freshness is handled by mtime-keyed caches in
-    ``dashboard_data.py``.
+    ``dashboard/data.py``.
     """
-    app_path = Path(__file__).parent / "dashboard_app.py"
+    app_path = Path(__file__).parent / "app.py"
     subprocess.run(
         [
             sys.executable,

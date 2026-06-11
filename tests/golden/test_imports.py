@@ -22,8 +22,10 @@ CORE_MODULES = [
     "sportstradamus.prediction",
     "sportstradamus.nightly",
     "sportstradamus.dashboard",
-    "sportstradamus.dashboard_app",
-    "sportstradamus.dashboard_data",
+    "sportstradamus.dashboard.data",
+    "sportstradamus.dashboard.legs",
+    "sportstradamus.dashboard.components.deep_dive",
+    "sportstradamus.dashboard.components.stories",
     "sportstradamus.analysis",
 ]
 

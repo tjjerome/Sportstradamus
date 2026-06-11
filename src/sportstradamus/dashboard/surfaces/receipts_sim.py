@@ -1,9 +1,5 @@
 """Page 4: Profit Simulation — preset and custom strategies with Monte Carlo."""
 
-import pathlib
-import sys
-
-sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -12,7 +8,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from sportstradamus.dashboard_data import (
+from sportstradamus.dashboard.data import (
     get_filtered_history,
     load_resolved_history_or_stop,
     render_banner,
@@ -110,6 +106,15 @@ PRESETS = {
     },
 }
 
+# Strategy colors for Monte Carlo chart — paired with PRESETS keys + "Custom".
+_STRATEGY_COLORS = {
+    "Conservative": "#3498db",
+    "Moderate": "#2ecc71",
+    "Aggressive": "#e74c3c",
+    "Kelly": "#9b59b6",
+    "Custom": "#f39c12",
+}
+
 initial_bankroll = st.sidebar.number_input(
     "Initial Bankroll ($)", value=1000, min_value=100, step=100
 )
@@ -177,14 +182,7 @@ for name, result in all_results.items():
         .reset_index()
     )
 
-    color_map = {
-        "Conservative": "#3498db",
-        "Moderate": "#2ecc71",
-        "Aggressive": "#e74c3c",
-        "Kelly": "#9b59b6",
-        "Custom": "#f39c12",
-    }
-    color = color_map.get(name, "#95a5a6")
+    color = _STRATEGY_COLORS.get(name, "#95a5a6")
 
     fig_bank.add_trace(
         go.Scatter(
