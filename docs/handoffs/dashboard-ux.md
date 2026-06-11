@@ -120,8 +120,12 @@ stage ends with the §9 checklist green and the dashboard runnable.
   manual: slip survives full nav cycle; backdated slip grades on reflect. Est: 2–3 sessions.
   Kill branch: if copula import drags weight, inline the 30-line MVN-cdf math instead.
 - **P4 — Tonight + Game.** Goal: narrative surfaces (cards, prophecies, why-strings, context
-  strip, constellation v1, `?game=` links, scars mounted). Acceptance: render pins; archive-lock
-  gate green. Est: 1–2 sessions.
+  strip, constellation v1, `?game=` links, scars mounted). MUST FIX (P1 known bug): Tonight's
+  View-game button lands on the Game page's default game — `st.switch_page` drops query params
+  set in the same run (tonight.py sets `st.query_params["game"]` then switches). Hand off via a
+  plain `st.session_state` key; game.py reads session-state first, `?game=` second (deep links).
+  Acceptance: render pins; archive-lock gate green; View-game lands on the clicked game
+  (doubleheaders included). Est: 1–2 sessions.
 - **P5 — Board + Slips upgrade.** Goal: themed AG Grid (right-aligned numerals, edge heatmap,
   sparkline, prophecy lenses), load-into-rail. Entry: pin `streamlit-aggrid` version. Acceptance:
   grid-options golden (token colors, no centered numerics). Est: 1–2 sessions. Kill branch: any
