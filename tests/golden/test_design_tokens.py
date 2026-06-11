@@ -41,7 +41,11 @@ def _theme() -> dict:
 
 
 def _dashboard_files() -> list[Path]:
-    files = list((_SRC / "pages").glob("*.py")) + sorted(_SRC.glob("dashboard*.py"))
+    files = (
+        list((_SRC / "pages").glob("*.py"))
+        + sorted(_SRC.glob("dashboard*.py"))
+        + sorted((_SRC / "dashboard").rglob("*.py"))
+    )
     return [f for f in files if f.name != "__init__.py"]
 
 
@@ -60,6 +64,25 @@ def test_design_md_present_with_rules() -> None:
     text = (_REPO / "DESIGN.md").read_text(encoding="utf-8")
     for needle in ("Design tokens (FIXED", "## 6. NEVER", "FIXED vs FLEXIBLE"):
         assert needle in text, f"DESIGN.md missing section: {needle!r}"
+
+
+def test_design_md_celestial_layer() -> None:
+    """The approved celestial amendment: gold token, display-only faces, ambient-art rules."""
+    text = (_REPO / "DESIGN.md").read_text(encoding="utf-8")
+    for needle in (
+        "#C9A227",
+        "Cinzel",
+        "Cormorant Garamond",
+        "Never for data, numerals",
+        "no AI-generated images",
+        "constellation",
+    ):
+        assert needle in text, f"DESIGN.md missing celestial-layer rule: {needle!r}"
+    theme_py = _SRC / "dashboard" / "theme.py"
+    if theme_py.exists():
+        assert "#C9A227" in theme_py.read_text(encoding="utf-8"), (
+            "dashboard/theme.py gold constant drifted from DESIGN.md #C9A227"
+        )
 
 
 def test_no_emoji_in_dashboard_sources() -> None:

@@ -2,7 +2,8 @@
 """PostToolUse[Edit|Write|MultiEdit] hook: nudge on dashboard "AI-slop" design tells.
 
 Fires a one-line, non-blocking reminder of DESIGN.md when an edit to a dashboard source
-(`src/sportstradamus/dashboard*.py`, `src/sportstradamus/pages/*.py`) or
+(`src/sportstradamus/dashboard*.py`, `src/sportstradamus/dashboard/**`,
+`src/sportstradamus/pages/*.py`) or
 `.streamlit/config.toml` *adds* one of the named tells the design system bans: emoji used as
 iconography, an overused font (Inter/Roboto/Arial/Helvetica/Open Sans/Lato), the default
 Streamlit red `#FF4B4B`, a purple/violet gradient, or `st.balloons()`/`st.snow()`. The edit
@@ -41,7 +42,9 @@ def in_scope(path: str) -> bool:
         return True
     base = p.rsplit("/", 1)[-1]
     return base.endswith(".py") and (
-        "/sportstradamus/pages/" in p or base.startswith("dashboard")
+        "/sportstradamus/pages/" in p
+        or "/sportstradamus/dashboard/" in p
+        or base.startswith("dashboard")
     )
 
 

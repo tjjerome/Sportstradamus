@@ -73,6 +73,7 @@ an exception. A session works one lane and reads that lane's brief.
 | `sleeper-parity` | Full Sleeper decision-layer parity | QUEUED | stage-0 product verification | [handoffs/sleeper-parity.md](handoffs/sleeper-parity.md) |
 | `parlay-dependence` | Copula on PIT residuals — biggest product-EV lever | BLOCKED (on: D3) | D3 | [handoffs/parlay-dependence.md](handoffs/parlay-dependence.md) |
 | `mlb-nhl-activation` | Audit, then activate the two withheld leagues | QUEUED | stage-0 audit → D1/D2 | [handoffs/mlb-nhl-activation.md](handoffs/mlb-nhl-activation.md) |
+| `dashboard-ux` | Narrative-first dashboard: six surfaces, slip builder, receipts, celestial skin | ACTIVE | — | [handoffs/dashboard-ux.md](handoffs/dashboard-ux.md) |
 | `bestball-2027` | Draft products for the 2027 season | BLOCKED (on: D4) | D4 | [handoffs/bestball-2027.md](handoffs/bestball-2027.md) |
 | `hygiene-closeout` | Triage, calibration re-run, drift fixes, recurring checks | ACTIVE | — | [handoffs/hygiene-closeout.md](handoffs/hygiene-closeout.md) |
 
@@ -162,6 +163,7 @@ sketches live in the archived v2.
 | Model lever stack, per-league path, stop rules | [`operation_ship_75.md`](operation_ship_75.md) §5–§7 |
 | Per-cell gate numbers | `data/training/model_stats.csv` (mirror of the parquet) |
 | Lane procedure, locked decisions, status | `docs/handoffs/{lane}.md` |
+| Dashboard UX design (surfaces, slip rail, taxonomy, scars) | [`dashboard_ux_redesign.md`](dashboard_ux_redesign.md) |
 | Package map, ship mechanics, league/market how-to | `CONTRIBUTING.md` |
 | Session law (gates, subagents, hard rules) | `CLAUDE.md` |
 | Code style | `docs/STYLE_GUIDE.md` |

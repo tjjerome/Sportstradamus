@@ -119,8 +119,10 @@ to redo the work.
   that keeps the app from looking AI-generated (no default-red, no purple gradients, no
   Inter/Roboto, Material icons not emoji). Treat the FIXED tokens as inviolable and do not
   supplement them with your own defaults. The `design-lint` hook nudges live and
-  `tests/golden/test_design_tokens.py` is the hard gate; Stage 2/3 work is parked in
-  [docs/dashboard_design_stage2_3.md](docs/dashboard_design_stage2_3.md).
+  `tests/golden/test_design_tokens.py` is the hard gate. The UX redesign spec (six surfaces,
+  slip rail, taxonomy, scars) is
+  [docs/dashboard_ux_redesign.md](docs/dashboard_ux_redesign.md); its lane brief is
+  [docs/handoffs/dashboard-ux.md](docs/handoffs/dashboard-ux.md).
 
 ## Agentic workflow conventions
 
