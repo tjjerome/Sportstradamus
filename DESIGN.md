@@ -7,20 +7,25 @@ these constraints with your own defaults.** When a case isn't covered, pick from
 ask — do not invent new values.
 
 Enforcement: the `design-lint` hook nudges live on banned patterns; `tests/golden/test_design_tokens.py`
-is the hard gate. Stage 2/3 (table craft, normalization, chart re-theme, nav migration) is parked in
-[docs/dashboard_design_stage2_3.md](docs/dashboard_design_stage2_3.md). The vendored
+is the hard gate. The UX redesign (six surfaces, slip rail, celestial layer) is specified in
+[docs/dashboard_ux_redesign.md](docs/dashboard_ux_redesign.md); it absorbed the old Stage 2/3 parking
+doc (now in `docs/archive/`). The vendored
 [frontend-design skill](.claude/skills/frontend-design/SKILL.md) carries the same bans at the agent
 level.
 
 ## 1. Brand & tone
 
 A multi-sport fantasy/props tool used daily, often on mobile, under time pressure (lineups lock).
-The feel: **credible sports-broadcast** — fast, data-dense but scannable, trustworthy with numbers.
-The differentiation is *table craft and transparency*, not decoration: normalized stats, documented
-definitions, consistent layout. Dark by default (late-night lineup setting, reduced eye strain — the
-Sleeper precedent).
+The feel: **credible sports-broadcast with a celestial-oracle layer** — fast, data-dense but
+scannable, trustworthy with numbers; the name promises Nostradamus, so the chrome leans
+mystic-meets-sports (prophecy voice, gold accents, constellation motifs) while every number stays
+broadcast-sober. The differentiation is *table craft and transparency*, not decoration: normalized
+stats, documented definitions, consistent layout. Dark by default (late-night lineup setting,
+reduced eye strain — the Sleeper precedent; the night sky is also the oracle's canvas). The
+prophecy-voice naming map (stories→prophecies, etc.) lives in
+[docs/dashboard_ux_redesign.md](docs/dashboard_ux_redesign.md) — one home, don't restate it here.
 
-## 2. Design tokens (FIXED — mirror of `.streamlit/config.toml`)
+## 2. Design tokens (FIXED — mirrored in `.streamlit/config.toml` + `dashboard/theme.py`)
 
 **Color**
 
@@ -36,13 +41,24 @@ Sleeper precedent).
 | Bad / negative | `redColor` | `#E5484D` |
 | Warning | `orangeColor` | `#F5A524` |
 | Neutral | `grayColor` | `#8A91A0` |
+| Prophecy / celestial accent | `goldColor` | `#C9A227` |
 
 Semantic colors are used **only by intent** in tables/badges/sparklines. Red is reserved for
-negative/bad values — never a brand accent.
+negative/bad values — never a brand accent. Gold is the *oracle's* color: kickers, prophecy
+headlines, constellation highlights, correlation strength — never body text, never primary buttons
+(primary stays electric blue), never a substitute for green/red semantics.
+
+Streamlit's `[theme]` block has no free-form keys, so `config.toml` mirrors only the tokens
+Streamlit understands; `goldColor`, the display fonts, and the ambient-image rules are mirrored in
+`sportstradamus/dashboard/theme.py` instead. The two mirrors together are the machine-readable
+token set — edit DESIGN.md and the relevant mirror in the same commit.
 
 **Type** — `IBM Plex Sans` (body + headings), `IBM Plex Mono` (code + tabular numerals so stat
 columns align by place value). Base 14px. Hierarchy comes from size + weight + color, never size
-alone.
+alone. **Display-only celestial faces**: `Cinzel` (kickers, small-caps labels) and
+`Cormorant Garamond` (prophecy/story headlines) — applied solely through the `.celestial-kicker` /
+`.celestial-headline` classes injected once in `dashboard/app.py`. Never for data, numerals,
+tables, body copy, or anything a user scans for a number.
 
 **Spacing** — Streamlit's native scale; when adding custom gaps, stay on a 4 / 8 / 12 / 16 / 24 step.
 
@@ -56,7 +72,18 @@ Altair / Vega-Lite inherit these automatically.
 
 - **Theming**: always via `config.toml`. Reserve `st.html` / `unsafe_allow_html` CSS for targeted
   *structural* gaps only, scoped through a widget's `key=`-generated `.st-key-…` class — never for
-  colors/fonts/backgrounds that a token already covers.
+  colors/fonts/backgrounds that a token already covers. Two named exceptions, both injected once in
+  `dashboard/app.py`: the display-font CSS (`.celestial-kicker` / `.celestial-headline`, §2) and the
+  ambient-image layer (below).
+- **Nebula wash**: a faint radial gradient inside the surface palette (blue-family stops drawn from
+  `chartSequentialColors`, gold highlights ≤ 12% opacity) is permitted on **hero/prophecy cards
+  only**. The purple/violet gradient ban (§6) stands untouched.
+- **Ambient imagery**: semi-transparent background art blending mystic + sports (night-sky fields,
+  hourglass/sand motifs, celestial sports equipment). Slots and files are declared in
+  `data/assets/ambient/ambient_manifest.json` (slot → file, opacity, placement, license/attribution);
+  slots without art render token-palette gradients. Rules: opacity ≤ 20% over `backgroundColor`,
+  body text on top must keep WCAG AA contrast, **never behind dense tables or stat grids**, and art
+  is stock or commissioned only — no AI-generated images, license recorded in the manifest.
 - **Tables**: `streamlit-aggrid` (already a dependency), themed to these tokens, for the main stat
   grids; native `st.dataframe` + `column_config` / `ProgressColumn` for simpler ones. See §4.
 - **Metrics**: establish hierarchy — one hero number + smaller supporting metrics with context
@@ -79,6 +106,14 @@ Altair / Vega-Lite inherit these automatically.
 - Progressive disclosure: expandable rows, pagination, column hiding. Lead with the primary KPI
   (top-left, F-pattern), push detail into drill-downs.
 
+## 4a. Signature element — the constellation
+
+Correlation rendered as a star map: legs/players are stars (gold for thesis legs, gray for
+context), pairwise correlation |ρ| is the edge weight (opacity/width), and the viewer reads "these
+picks rise together" at a glance. This is the one piece of decoration that *is* data — use it on
+Game pages and parlay detail, keep it on `backgroundColor`, and never let it crowd a table. It is
+the brand's signature; treat its grammar (star = leg, edge = correlation) as FIXED.
+
 ## 5. Iconography
 
 Material Symbols only, via the `:material/icon_name:` shortcode (works in Markdown, labels, and many
@@ -98,11 +133,17 @@ team/sport marks: inline SVG recolored via `currentColor`.
 - **NEVER** center-align numeric columns.
 - **NEVER** invent off-scale spacing, radii, or colors — use the tokens.
 - **NEVER** theme via inline CSS when `config.toml` can do it.
+- **NEVER** set numeric/data content in the display faces (Cinzel/Cormorant) — numerals are always
+  Plex.
+- **NEVER** ship an AI-generated image; ambient art is stock/commissioned with a manifest license
+  line.
 
 ## 7. FIXED vs FLEXIBLE
 
-**FIXED** (never alter): the color palette, fonts, spacing scale, radius, chart palettes, and every
-NEVER rule in §6.
+**FIXED** (never alter): the color palette (gold included), the fonts (Plex for everything that
+isn't a `.celestial-*` class; Cinzel/Cormorant only through those classes), spacing scale, radius,
+chart palettes, the constellation grammar (§4a), the ambient-imagery rules (§3), and every NEVER
+rule in §6.
 
 **FLEXIBLE** (experiment freely): layout composition, which chart type fits the data, micro-
 interactions, information density *within* the spacing scale, and whether a view leans on cards vs
@@ -119,7 +160,8 @@ from the defined scale or ask — do not invent.
 
 ## 9. References
 
-- [docs/dashboard_design_stage2_3.md](docs/dashboard_design_stage2_3.md) — parked table/chart/nav work.
+- [docs/dashboard_ux_redesign.md](docs/dashboard_ux_redesign.md) — the UX redesign spec (six
+  surfaces, slip rail, deep-dive v2, naming map, ambient-imagery slot map + artist brief).
 - [.claude/skills/frontend-design/SKILL.md](.claude/skills/frontend-design/SKILL.md) — Anthropic's
   frontend-design skill (the named bans, at the agent level).
 - Streamlit theming reference (bundled): `streamlit/.agents/skills/developing-with-streamlit/references/theme.md`.
