@@ -1,5 +1,13 @@
 # The Underdog Edge Suite
 
+> **Vision / orientation document — NOT a spec.** Predates the build. Where it
+> conflicts with `CLAUDE.md` / `CONTRIBUTING.md` /
+> [`sportstradamus_roadmap_v3.md`](sportstradamus_roadmap_v3.md), the repo docs
+> win — notably: the stack is DuckDB + parquet + cron (not
+> Postgres/TimescaleDB/Redis/Prefect), bet logging is replaced by the
+> simulated-bettor ledger lane, and alerts are deferred. Do not implement
+> anything from this document without a workstream brief in `docs/handoffs/`.
+
 ## A Comprehensive Software Architecture for a Recreational Quant DFS Operation
 
 ---

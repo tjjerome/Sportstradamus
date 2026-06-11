@@ -97,6 +97,9 @@ to redo the work.
   when an edit adds one.
 * Use `click` over `argparse` for CLI args
 * Long-running scripts: add a status bar with `tqdm`
+* Money values are always `Decimal`, never `float`
+* Program roadmap: [docs/sportstradamus_roadmap_v3.md](docs/sportstradamus_roadmap_v3.md)
+  (swimlane index). Working a lane? Read its brief in `docs/handoffs/` first.
 * **Multi-module work uses subagent-driven development by default.** When a
   task touches two or more modules, dispatch one subagent per module rather
   than serializing through the main session. The main session orchestrates,

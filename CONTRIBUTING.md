@@ -223,6 +223,10 @@ a gate before `optimize_comp_weights.py --save`.
 
 ## Making Changes
 
+Working a roadmap lane? The swimlane index is
+[docs/sportstradamus_roadmap_v3.md](docs/sportstradamus_roadmap_v3.md) and each
+lane's brief lives in `docs/handoffs/` — read the brief before the code.
+
 ### Setup
 
 ```bash
@@ -259,6 +263,10 @@ commit runs `ruff check --fix` and `ruff format`. CI runs the same checks plus
 poetry add <package>          # runtime dependency
 poetry add --group dev <package>   # dev-only
 ```
+
+Heavy optional-feature dependencies go in a named Poetry group (only `dev`
+exists today; `bayes` / `alerts` are the reserved names if those features ever
+land) so the core install stays lean — name the group in the PR.
 
 PyTorch must stay CPU-only (the `torch-cpu` source in `pyproject.toml`). Do not
 change the `torch` dependency without verifying the new wheel exists in that source.
