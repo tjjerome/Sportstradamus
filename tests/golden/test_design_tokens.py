@@ -75,10 +75,9 @@ def test_design_md_celestial_layer() -> None:
     ):
         assert needle in text, f"DESIGN.md missing celestial-layer rule: {needle!r}"
     theme_py = _SRC / "dashboard" / "theme.py"
-    if theme_py.exists():
-        assert "#C9A227" in theme_py.read_text(encoding="utf-8"), (
-            "dashboard/theme.py gold constant drifted from DESIGN.md #C9A227"
-        )
+    assert "#C9A227" in theme_py.read_text(encoding="utf-8"), (
+        "dashboard/theme.py gold constant drifted from DESIGN.md #C9A227"
+    )
 
 
 def test_no_emoji_in_dashboard_sources() -> None:
