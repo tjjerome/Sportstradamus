@@ -8,15 +8,11 @@ whether higher or lower is better (or that the field is informational).
 """
 
 import datetime as dt
-import pathlib
-import sys
-
-sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
 
 import pandas as pd
 import streamlit as st
 
-from sportstradamus.dashboard_data import format_ts, load_model_stats, render_banner
+from sportstradamus.dashboard.data import format_ts, load_model_stats, render_banner
 from sportstradamus.helpers.io import LIVE_METRICS_PATH, MODEL_STATS_PATH
 from sportstradamus.training.graduation import lifecycle_table
 
@@ -229,7 +225,6 @@ def _render_tab(tab_name: str, metric_cols: list[str], view: pd.DataFrame) -> No
     )
 
 
-st.set_page_config(page_title="Stats — Model Training", layout="wide")
 st.title("Model Training Diagnostics")
 
 mtime = (

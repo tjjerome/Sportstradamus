@@ -1,6 +1,6 @@
 """Shared data loading and state for the Sportstradamus dashboard.
 
-All pages import from here to get cached DataFrames and filters.
+All surfaces import from here to get cached DataFrames and filters.
 """
 
 import importlib.resources as pkg_resources
@@ -294,7 +294,7 @@ def load_stats() -> dict:
         try:
             obj = cls()
             obj.load()
-            if hasattr(obj, "gamelog") and not obj.gamelog.empty:
+            if not obj.gamelog.empty:
                 stats[lg] = obj
         except Exception:
             pass

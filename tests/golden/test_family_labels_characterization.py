@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from sportstradamus.dashboard_detail import family_labels_for_game
+from sportstradamus.dashboard.components.stories import family_labels_for_game
 
 # Star Wing: 3 markets (Points/Rebounds/Assists), biggest lines -> #1 star.
 # Other Star: 2 markets -> #2. Bench Guy: 1 tiny prop -> never headlines.

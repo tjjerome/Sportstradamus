@@ -2,11 +2,8 @@
 
 import pandas as pd
 
-from sportstradamus.dashboard_detail import (
-    family_labels_for_game,
-    find_offer_idx,
-    parse_leg,
-)
+from sportstradamus.dashboard.components.stories import family_labels_for_game
+from sportstradamus.dashboard.legs import find_offer_idx, parse_leg
 
 
 def test_parse_leg_well_formed():

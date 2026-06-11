@@ -4,16 +4,10 @@ Combines market-level diagnostics with professional forecasting metrics
 following Gneiting & Raftery (2007) and Murphy (1973).
 """
 
-import pathlib
-import sys
-
-sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
 from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
 from sklearn.metrics import brier_score_loss
 
@@ -22,7 +16,7 @@ from sportstradamus.analysis import (
     compute_coverage,
     murphy_decomposition,
 )
-from sportstradamus.dashboard_data import (
+from sportstradamus.dashboard.data import (
     TIMEFRAME_OPTIONS,
     filtered_history_or_stop,
     get_prediction_history,
@@ -30,14 +24,27 @@ from sportstradamus.dashboard_data import (
     render_banner,
     sidebar_filters,
 )
+from sportstradamus.dashboard.surfaces.lab_diagnostics_charts import (
+    bias_bar,
+    bias_color,
+    bss_bar,
+    coverage_bar,
+    crps_line,
+    ev_divergence_bar,
+    murphy_decomp_bar,
+    reliability_diagram,
+    sharpness_histogram,
+)
+
+# Minimum predicted-probability std; markets below this cluster too tightly
+# to discriminate, flagged as likely under-dispersed.
+_LOW_SHARPNESS_STD = 0.04
 
 st.title("Market Diagnostics & Forecast Quality")
 render_banner("stats", "per-market accuracy, calibration, CRPS")
 
-# --- Load data (pre-resolved by nightly script) ---
 history = load_resolved_history_or_stop()
 
-# --- Sidebar filters (time window first, then league/platform) ---
 st.sidebar.header("Filters")
 time_window = st.sidebar.selectbox(
     "Time window", list(TIMEFRAME_OPTIONS.keys()), index=0, key="mkt_time"
@@ -50,11 +57,18 @@ filters = sidebar_filters(history, key_prefix="mkt_")
 
 df = filtered_history_or_stop(history, filters)
 
+# Apply global sport switch pre-filter
+_sport = st.session_state.get("sport", "All")
+if _sport != "All" and "League" in df.columns:
+    df = df.loc[df["League"] == _sport]
+    if df.empty:
+        st.info("No data matches the current sport filter.")
+        st.stop()
+
 prob_col = "Model P" if "Model P" in df.columns and df["Model P"].notna().any() else "Model"
 df["Hit"] = (df["Bet"] == df["Result"]).astype(int)
 df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
 
-# Apply time window to exploded data
 if cutoff is not None:
     df = df.loc[df["_date"] >= cutoff]
 
@@ -63,7 +77,7 @@ if df.empty:
     st.stop()
 
 # CRPS is precomputed per prediction by the nightly resolve
-# (dashboard_data.resolve_and_save); here we only aggregate the stored column
+# (dashboard/data.py resolve_and_save); here we only aggregate the stored column
 # instead of re-integrating per row on every rerun.
 pred_df = get_prediction_history(
     history,
@@ -81,12 +95,8 @@ if "CRPS" in pred_df.columns:
     crps_by_market = _crps_grp.mean()
     crps_counts = _crps_grp.size()
 
-# =====================================================================
-# MARKET DIAGNOSTICS
-# =====================================================================
 st.header("Market-Level Diagnostics")
 
-# --- Accuracy Table ---
 st.subheader("Accuracy by League-Market")
 market_rows = []
 for (league, market), grp in df.groupby(["League", "Market"]):
@@ -110,7 +120,6 @@ for (league, market), grp in df.groupby(["League", "Market"]):
         "Samples": len(grp),
     }
 
-    # CRPS precomputed per prediction in resolve; aggregate to a prediction-level mean.
     if (league, market) in crps_by_market.index and crps_counts.get((league, market), 0) >= 5:
         row["CRPS"] = round(float(crps_by_market.loc[(league, market)]), 4)
 
@@ -130,38 +139,15 @@ if not market_df.empty:
         "text/csv",
     )
 
-# --- Bias Detector ---
 st.subheader("Prediction Bias by Market")
 if not market_df.empty:
     bias_df = market_df.copy()
     bias_df["abs_balance"] = bias_df["Balance"].abs()
-
-    def bias_color(b):
-        ab = abs(b)
-        if ab < 0.03:
-            return "green"
-        if ab < 0.07:
-            return "orange"
-        return "red"
-
     bias_df["Color"] = bias_df["Balance"].apply(bias_color)
     bias_df["Label"] = bias_df["League"] + " - " + bias_df["Market"]
     bias_df = bias_df.sort_values("Balance")
+    st.plotly_chart(bias_bar(bias_df), use_container_width=True)
 
-    fig_bias = px.bar(
-        bias_df,
-        x="Balance",
-        y="Label",
-        orientation="h",
-        color="Color",
-        color_discrete_map={"green": "#2ecc71", "orange": "#f39c12", "red": "#e74c3c"},
-        labels={"Balance": "Over Bias (Predicted − Actual)", "Label": ""},
-    )
-    fig_bias.update_layout(showlegend=False, height=max(300, len(bias_df) * 22))
-    fig_bias.add_vline(x=0, line_dash="dash", line_color="gray")
-    st.plotly_chart(fig_bias, use_container_width=True)
-
-# --- Prediction Clustering / Sharpness ---
 st.subheader("Prediction Sharpness (Model P Distribution)")
 selected_league = st.selectbox(
     "League for sharpness view", ["All", *sorted(df["League"].unique())], key="sharp_league"
@@ -171,64 +157,33 @@ sharp_df = df if selected_league == "All" else df.loc[df["League"] == selected_l
 if not sharp_df.empty:
     markets_to_show = sorted(sharp_df["Market"].value_counts().head(12).index)
     sharp_subset = sharp_df.loc[sharp_df["Market"].isin(markets_to_show)]
+    st.plotly_chart(sharpness_histogram(sharp_subset, prob_col), use_container_width=True)
 
-    fig_sharp = px.histogram(
-        sharp_subset,
-        x=prob_col,
-        facet_col="Market",
-        facet_col_wrap=4,
-        nbins=20,
-        labels={prob_col: "Model P"},
-        title="Distribution of predicted probabilities per market",
-    )
-    fig_sharp.update_layout(height=600)
-    st.plotly_chart(fig_sharp, use_container_width=True)
-
-    # Flag low-sharpness markets
     sharpness_df = sharp_df.groupby("Market")[prob_col].std().reset_index()
     sharpness_df.columns = ["Market", "Std(Model P)"]
     sharpness_df = sharpness_df.sort_values("Std(Model P)")
-    low_sharp = sharpness_df.loc[sharpness_df["Std(Model P)"] < 0.04]
+    low_sharp = sharpness_df.loc[sharpness_df["Std(Model P)"] < _LOW_SHARPNESS_STD]
     if not low_sharp.empty:
         st.warning(
             f"Low sharpness (std < 0.04) — predictions cluster too tightly: "
             f"{', '.join(low_sharp['Market'].tolist())}"
         )
 
-# --- Accuracy by EV Divergence ---
 st.subheader("Accuracy by Model-Book Divergence")
 if "Model EV" in df.columns and "Line" in df.columns:
     ev_df = df.dropna(subset=["Model EV", "Line"]).copy()
     ev_df["EV_Div"] = (ev_df["Model EV"] - ev_df["Line"]).abs() / ev_df["Line"].clip(lower=0.1)
     ev_df["Div_Bucket"] = pd.qcut(ev_df["EV_Div"], q=5, duplicates="drop")
-
     div_stats = (
         ev_df.groupby("Div_Bucket", observed=False)
-        .agg(
-            Accuracy=("Hit", "mean"),
-            Count=("Hit", "count"),
-        )
+        .agg(Accuracy=("Hit", "mean"), Count=("Hit", "count"))
         .reset_index()
     )
     div_stats["Div_Bucket"] = div_stats["Div_Bucket"].astype(str)
+    st.plotly_chart(ev_divergence_bar(div_stats), use_container_width=True)
 
-    fig_div = px.bar(
-        div_stats,
-        x="Div_Bucket",
-        y="Accuracy",
-        text="Count",
-        labels={"Div_Bucket": "|Model EV - Line| / Line"},
-    )
-    fig_div.add_hline(y=0.5, line_dash="dash", line_color="gray")
-    fig_div.update_layout(height=400)
-    st.plotly_chart(fig_div, use_container_width=True)
-
-# =====================================================================
-# PROPER SCORING METRICS
-# =====================================================================
 st.header("Forecast Quality (Proper Scoring Rules)")
 
-# --- Calibration / Reliability Diagram ---
 st.subheader("Reliability Diagram")
 cal_df = df.copy()
 bins = np.linspace(0.5, 1.0, 11)
@@ -242,71 +197,15 @@ cal_stats = (
     )
     .reset_index()
 )
+st.plotly_chart(reliability_diagram(cal_stats), use_container_width=True)
 
-fig_rel = go.Figure()
-# Perfect calibration line
-fig_rel.add_trace(
-    go.Scatter(
-        x=[0.5, 1.0],
-        y=[0.5, 1.0],
-        mode="lines",
-        line={"dash": "dash", "color": "gray"},
-        name="Perfect calibration",
-        showlegend=True,
-    )
-)
-# Calibration points
-fig_rel.add_trace(
-    go.Scatter(
-        x=cal_stats["Predicted"],
-        y=cal_stats["Actual"],
-        mode="lines+markers",
-        name="Model",
-        marker={"size": cal_stats["Count"].clip(upper=500) / 20 + 5},
-        text=[f"n={c}" for c in cal_stats["Count"]],
-        hovertemplate="Predicted: %{x:.3f}<br>Actual: %{y:.3f}<br>%{text}",
-    )
-)
-# Count histogram on secondary y-axis
-fig_rel.add_trace(
-    go.Bar(
-        x=cal_stats["Predicted"],
-        y=cal_stats["Count"],
-        name="Sample count",
-        yaxis="y2",
-        opacity=0.3,
-    )
-)
-fig_rel.update_layout(
-    yaxis={"title": "Actual Hit Rate", "range": [0.4, 1.0]},
-    yaxis2={"title": "Count", "overlaying": "y", "side": "right"},
-    xaxis_title="Predicted Probability",
-    height=450,
-)
-st.plotly_chart(fig_rel, use_container_width=True)
-
-# --- Brier Skill Score by League ---
 st.subheader("Brier Skill Score by League-Market")
 if not market_df.empty and "BSS" in market_df.columns:
     bss_df = market_df.dropna(subset=["BSS"]).copy()
     bss_df["Label"] = bss_df["League"] + " - " + bss_df["Market"]
     bss_df = bss_df.sort_values("BSS", ascending=True)
+    st.plotly_chart(bss_bar(bss_df), use_container_width=True)
 
-    fig_bss = px.bar(
-        bss_df,
-        x="BSS",
-        y="Label",
-        orientation="h",
-        color="BSS",
-        color_continuous_scale="RdYlGn",
-        color_continuous_midpoint=0,
-        labels={"BSS": "Brier Skill Score", "Label": ""},
-    )
-    fig_bss.add_vline(x=0, line_dash="dash", line_color="gray", annotation_text="No skill")
-    fig_bss.update_layout(height=max(300, len(bss_df) * 22))
-    st.plotly_chart(fig_bss, use_container_width=True)
-
-# --- Murphy Decomposition ---
 st.subheader("Brier Score Decomposition (Murphy 1973)")
 decomp_rows = []
 for (league, market), grp in df.groupby(["League", "Market"]):
@@ -321,38 +220,12 @@ if decomp_rows:
     decomp_df = pd.DataFrame(decomp_rows)
     decomp_df["Label"] = decomp_df["League"] + " - " + decomp_df["Market"]
     decomp_df = decomp_df.sort_values("Brier")
-
-    fig_decomp = go.Figure()
-    fig_decomp.add_trace(
-        go.Bar(
-            y=decomp_df["Label"],
-            x=decomp_df["Reliability"],
-            name="Reliability (lower=better)",
-            orientation="h",
-            marker_color="#e74c3c",
-        )
-    )
-    fig_decomp.add_trace(
-        go.Bar(
-            y=decomp_df["Label"],
-            x=-decomp_df["Resolution"],
-            name="Resolution (higher=better)",
-            orientation="h",
-            marker_color="#2ecc71",
-        )
-    )
-    fig_decomp.update_layout(
-        barmode="relative",
-        xaxis_title="Contribution to Brier Score",
-        height=max(300, len(decomp_df) * 22),
-    )
-    st.plotly_chart(fig_decomp, use_container_width=True)
+    st.plotly_chart(murphy_decomp_bar(decomp_df), use_container_width=True)
     st.caption(
         "BS = Reliability - Resolution + Uncertainty. "
         "Good models have low reliability (well-calibrated) and high resolution (discriminative)."
     )
 
-# CRPS precomputed in nightly resolve; aggregate the stored column here.
 has_crps = "CRPS" in pred_df.columns and pred_df["CRPS"].notna().any()
 has_dist = "Dist" in pred_df.columns and "Actual" in pred_df.columns
 if has_crps:
@@ -361,22 +234,10 @@ if has_crps:
         st.subheader("CRPS Over Time")
         crps_daily = (
             crps_df.groupby(["_date", "League"])
-            .agg(
-                CRPS=("CRPS", "mean"),
-                Count=("CRPS", "count"),
-            )
+            .agg(CRPS=("CRPS", "mean"), Count=("CRPS", "count"))
             .reset_index()
         )
-
-        fig_crps = px.line(
-            crps_daily,
-            x="_date",
-            y="CRPS",
-            color="League",
-            labels={"_date": "Date", "CRPS": "Mean CRPS (lower=better)"},
-        )
-        fig_crps.update_layout(height=400)
-        st.plotly_chart(fig_crps, use_container_width=True)
+        st.plotly_chart(crps_line(crps_daily), use_container_width=True)
 
 # --- Prediction Interval Coverage ---
 if has_dist:
@@ -401,7 +262,6 @@ if has_dist:
         if not cov_display.empty:
             st.dataframe(cov_display, use_container_width=True, hide_index=True)
 
-            # Coverage by league
             cov_rows = []
             for league, lgrp in cov_df.groupby("League"):
                 if len(lgrp) < 10:
@@ -409,29 +269,6 @@ if has_dist:
                 lcov = compute_coverage(lgrp, levels=(0.5, 0.8, 0.9))
                 for level, cov_val in lcov.items():
                     if not np.isnan(cov_val):
-                        cov_rows.append(
-                            {
-                                "League": league,
-                                "Nominal": level,
-                                "Actual": cov_val,
-                            }
-                        )
+                        cov_rows.append({"League": league, "Nominal": level, "Actual": cov_val})
             if cov_rows:
-                cov_league_df = pd.DataFrame(cov_rows)
-                fig_cov = px.bar(
-                    cov_league_df,
-                    x="League",
-                    y="Actual",
-                    color="Nominal",
-                    barmode="group",
-                    labels={"Actual": "Actual Coverage"},
-                )
-                for nom in [0.5, 0.8, 0.9]:
-                    fig_cov.add_hline(
-                        y=nom,
-                        line_dash="dot",
-                        line_color="gray",
-                        annotation_text=f"{int(nom * 100)}% target",
-                    )
-                fig_cov.update_layout(height=400)
-                st.plotly_chart(fig_cov, use_container_width=True)
+                st.plotly_chart(coverage_bar(pd.DataFrame(cov_rows)), use_container_width=True)

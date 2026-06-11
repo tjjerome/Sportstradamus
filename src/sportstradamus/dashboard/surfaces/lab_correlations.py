@@ -1,9 +1,5 @@
 """Page 3: Correlations & Parlays — correlation effectiveness, hit rates, calibration."""
 
-import pathlib
-import sys
-
-sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent))
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -12,7 +8,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from sportstradamus.dashboard_data import (
+from sportstradamus.dashboard.data import (
     TIMEFRAME_OPTIONS,
     format_ts,
     load_history,
@@ -25,7 +21,6 @@ from sportstradamus.dashboard_data import (
 st.title("Correlations & Parlays")
 render_banner("stats", "correlation lift, hit rates, parlay calibration")
 
-# --- Load data (pre-resolved by nightly script) ---
 history = load_history()
 parlays = load_parlays()
 
@@ -37,7 +32,6 @@ meta = load_resolve_meta()
 if meta.get("last_run"):
     st.caption(f"Data last resolved: {format_ts(meta['last_run'])}")
 
-# --- Sidebar: time window first, then league/platform ---
 st.sidebar.header("Filters")
 time_window = st.sidebar.selectbox(
     "Time window", list(TIMEFRAME_OPTIONS.keys()), index=0, key="corr_time"
@@ -48,7 +42,6 @@ if TIMEFRAME_OPTIONS[time_window] is not None:
 
 filters = sidebar_filters(history if not history.empty else parlays, key_prefix="corr_")
 
-# --- Filter parlays ---
 pf = parlays.copy()
 pf["_date"] = pd.to_datetime(pf["Date"], errors="coerce").dt.date
 pf = pf.loc[pf["_date"].notna()]
@@ -65,6 +58,11 @@ if filters["leagues"]:
     pf = pf.loc[pf["League"].isin(filters["leagues"])]
 if filters["platforms"]:
     pf = pf.loc[pf["Platform"].isin(filters["platforms"])]
+
+# Apply global sport switch pre-filter
+_sport = st.session_state.get("sport", "All")
+if _sport != "All" and "League" in pf.columns:
+    pf = pf.loc[pf["League"] == _sport]
 
 # Resolve for display
 resolved = pf.dropna(subset=["Legs"]).copy()
@@ -85,9 +83,6 @@ st.download_button(
     "text/csv",
 )
 
-# =====================================================================
-# CORRELATION VALUE-ADD
-# =====================================================================
 st.header("Correlation Value-Add")
 
 has_indep = "Indep P" in resolved.columns and resolved["Indep P"].notna().any()
@@ -168,9 +163,6 @@ if "Boost" in resolved.columns:
     fig_boost.update_layout(height=400)
     st.plotly_chart(fig_boost, use_container_width=True)
 
-# =====================================================================
-# HIT RATE BY PARLAY SIZE
-# =====================================================================
 st.header("Hit Rate by Parlay Size")
 
 for platform in sorted(resolved["Platform"].unique()):
@@ -226,9 +218,6 @@ for platform in sorted(resolved["Platform"].unique()):
         fig_miss.update_layout(height=350)
         st.plotly_chart(fig_miss, use_container_width=True)
 
-# =====================================================================
-# PARLAY CALIBRATION CURVE
-# =====================================================================
 if "P" in resolved.columns and resolved["P"].notna().any():
     st.header("Parlay Calibration Curve")
     cal_df = resolved.dropna(subset=["P"]).copy()
