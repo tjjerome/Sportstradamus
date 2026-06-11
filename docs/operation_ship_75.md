@@ -481,7 +481,7 @@ existing `prob_recal_isotonic` fixes. It acts on `Z = F(Y|X)`, the randomized PI
 ports to both heads (widen SkewNormal / narrow count) unchanged. Prefer isotonic / IDR over conformal
 *calibration* on the count lattice — conformal yields discontinuous randomized CDFs (Marx 2022), bad for
 pricing a ladder. (Conformal *predictive distributions* for the alt-line ladder are a separate, deferred
-item — roadmap Phase 6.)
+item — roadmap v3 §8 deferred register.)
 
 **Go/No-Go (per cell, on validation, before ship).** `pit_ks` crosses below `max(0.05, 1.358/√n)`
 **and** g1 Brier-skill drops by ≤ 0.01 (the §1.4-class guardrail) **and** g5 ECE stays < 0.075. Any
@@ -549,7 +549,7 @@ line, per-cell variance from residual studies → precision weight; "book is noi
 out as lower precision. (d) Learn `w` by CRPS (continuous) / log-score (count), shrunk per-cell toward a
 global prior ∝ 1/n_cell; do not hard-code book = truth (props are soft). (e) **Time-varying `w_book`**
 ramp toward close (the de-vigged *close* is the best probability estimate, but at *close*). The CLV-edge
-*dashboard* defers to the roadmap; the weight schedule stays here.
+*dashboard* defers to the roadmap v3 §8 register; the weight schedule stays here.
 
 **Go/No-Go.** `pit_ks` below threshold with g1 BSS drop ≤ 0.01 and g5 < 0.075, on validation, before
 ship; an inference-path round-trip test for every new served object (de-vig method, recovered book
@@ -581,7 +581,7 @@ How the model trains its own predictive, upstream of the blend.
 slightly more efficient under correct specification (Gebetsberger 2018); keep the per-cell winner.
 Honest caveat: LightGBMLSS's CRPS path sets the Hessian to 1 (first-order, discards loss curvature),
 which is *why* a properly-curved CRPS head (NGBoost's natural gradient) is the narrow-use Hail-Mary
-(§5.6 / roadmap), not the default.
+(§5.6 / roadmap v3 §8), not the default.
 
 **Training-time variance / soft-calibration regularizer (unbuilt; the lever §8 flags as "untried, not
 refuted").** Concrete form: an MMD-to-uniform-PIT penalty (Chung 2021) or a held-out variance penalty
@@ -637,7 +637,7 @@ Partial pooling dominates both no-pooling and complete-pooling at n ≈ 300–10
   backbone — the data is tabular and medium-sized, GBDT's home turf (Grinsztajn 2022; McElfresh 2023).
 - **Hierarchical-Bayes** layer (player ⊂ position ⊂ team) — research-gated escalation if EB shrinkage and
   TabPFN are insufficient. (The multi-task shared-trunk NN that pools across cells/leagues defers to the
-  roadmap.)
+  roadmap v3 §8 register.)
 
 ### §5.8 — Features: leakage-safe player-level
 
@@ -661,8 +661,8 @@ already tried. The only ways off the board are genuine matrix-wide exhaustion ac
 (normalization × model/loss × blend × calibration) **plus** the family and hierarchical tracks — true of
 **zero cells** today — or the operator's explicit, documented denominator call. No `deferred-90` tag
 (zero cells qualify for Ship-90 territory today); the heaviest tail-head rebuilds (spliced/Pareto-tail,
-MZINB) are the deferred long-shots (roadmap Phase 6), tried only after the cheaper family (§5.6) and
-normalization (§5.4) moves. Gate-definition changes never count as a lever.
+MZINB) are the deferred long-shots (roadmap v3 §8 deferred register), tried only after the cheaper
+family (§5.6) and normalization (§5.4) moves. Gate-definition changes never count as a lever.
 
 ---
 
@@ -822,10 +822,11 @@ hard rule).
 5. [`docs/operation_ship_90.md`](operation_ship_90.md) — next-rung stub; the levers it lists
    (T11 per-position, T3 tail head, CMPμ) are **on the Ship-75 table too** — pulled forward as
    needed, not reserved
-6. [`docs/sportstradamus_roadmap_v2.md`](sportstradamus_roadmap_v2.md) — home of record for the
-   audit-deferred tail (post-Ship-75): the parlay copula / dependence layer (Phase 1.2 follow-ups),
-   and the conformal alt-line ladder, CLV-edge dashboard, TabPFN-as-platform / multi-task-NN backbone,
-   and heaviest tail-head rebuilds (Phase 6)
+6. [`docs/sportstradamus_roadmap_v3.md`](sportstradamus_roadmap_v3.md) — the swimlane master
+   index. The parlay copula / dependence layer is now the `parlay-dependence` lane
+   ([`docs/handoffs/parlay-dependence.md`](handoffs/parlay-dependence.md), gated on calibrated
+   marginals); the conformal alt-line ladder, CLV-edge dashboard, TabPFN-as-platform /
+   multi-task-NN backbone, and heaviest tail-head rebuilds live in its §8 deferred register
 
 Done = each league shows ≥ 75% (`shipped ∈ {devel, main}`) on a fresh scorecard, with
 every promotion having cleared its go/no-go and, for baselined cells, `supersede_verdict()`.
