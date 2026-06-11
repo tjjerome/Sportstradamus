@@ -122,6 +122,13 @@ _STRATEGY_COLORS = {
     "Custom": "#f39c12",
 }
 
+
+def _band_fillcolor(hex_color: str) -> str:
+    """10%-alpha rgba() for the percentile band; plotly rejects 8-digit hex."""
+    r, g, b = (int(hex_color[i : i + 2], 16) for i in (1, 3, 5))
+    return f"rgba({r},{g},{b},0.1)"
+
+
 initial_bankroll = st.sidebar.number_input(
     "Initial Bankroll ($)", value=1000, min_value=100, step=100
 )
@@ -196,9 +203,7 @@ for name, result in all_results.items():
             x=pd.concat([agg["date"], agg["date"][::-1]]),
             y=pd.concat([agg["p90"], agg["p10"][::-1]]),
             fill="toself",
-            fillcolor=color.replace(")", ",0.1)").replace("rgb", "rgba")
-            if "rgb" in color
-            else color + "1A",
+            fillcolor=_band_fillcolor(color),
             line={"width": 0},
             name=f"{name} (10th-90th %ile)",
             showlegend=False,

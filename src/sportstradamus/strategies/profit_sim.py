@@ -52,8 +52,7 @@ _KELLY_ALL_MAX_BETS_DAY: int = 10_000_000
 # Underdog / default sportsbook -110 vig (100/110 payout per dollar staked).
 _DEFAULT_AMERICAN_MINUS_110_PAYOUT: float = 100.0 / 110.0
 
-# Ranking column mapping — translates the user-facing ranking label into the
-# exploded-frame column name the simulator sorts on.
+# Translates the user-facing ranking label into the exploded-frame column name.
 RANKING_MAP: dict[str, str] = {
     "Kelly": "K",
     "Probability": "Model P",
@@ -91,20 +90,30 @@ def simulate_strategy(
 ) -> pd.DataFrame:
     """Monte-Carlo backtest a filter-and-rank strategy on exploded offers.
 
-    Filters ``df`` to rows with ``prob_col >= min_model_p`` and
-    ``Books >= min_books_p``, then for each MC run walks the date axis and
-    on each date picks at most ``max_bets_day`` bets via probability-
-    weighted sampling (when more eligible than the cap) or by deduplicating
-    on the base player (when at or below the cap). Bets are sized as
-    fixed-percent of bankroll or Kelly (capped at 5%) per ``use_kelly``.
+    Filters ``df`` to rows with ``prob_col >= min_model_p``,
+    ``Books >= min_books_p``, and a finite ranking value — NaN and ±inf
+    both poison the normalized sampling weights (``inf / inf = NaN``), so a
+    row that cannot be ranked is excluded up front. Then for each MC run
+    walks the date axis and on each date picks at most ``max_bets_day``
+    bets via probability-weighted sampling (when more eligible than the
+    cap) or by deduplicating on the base player (when at or below the cap).
+    Bets are sized as fixed-percent of bankroll or Kelly (capped at 5%)
+    per ``use_kelly``.
 
     Returns a long-format DataFrame ``[date, run, bankroll, daily_pnl]``,
     one row per (date, run). Empty input or no eligible rows return an
     empty DataFrame.
     """
+    if df.empty:
+        return pd.DataFrame()
+
     rank_col = RANKING_MAP.get(ranking, "K")
 
-    eligible = df.loc[(df[prob_col] >= min_model_p) & (df["Books"].fillna(0) >= min_books_p)].copy()
+    eligible = df.loc[
+        (df[prob_col] >= min_model_p)
+        & (df["Books"].fillna(0) >= min_books_p)
+        & np.isfinite(df[rank_col])
+    ].copy()
     if eligible.empty:
         return pd.DataFrame()
 
