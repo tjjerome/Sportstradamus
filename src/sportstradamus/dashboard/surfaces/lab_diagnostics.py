@@ -45,6 +45,15 @@ render_banner("stats", "per-market accuracy, calibration, CRPS")
 
 history = load_resolved_history_or_stop()
 
+# Apply global sport switch pre-filter before the sidebar builds its league
+# multiselect, so the sidebar only offers that sport's leagues.
+_sport = st.session_state.get("sport", "All")
+if _sport != "All" and "League" in history.columns:
+    history = history.loc[history["League"] == _sport]
+    if history.empty:
+        st.info("No data matches the current sport filter.")
+        st.stop()
+
 st.sidebar.header("Filters")
 time_window = st.sidebar.selectbox(
     "Time window", list(TIMEFRAME_OPTIONS.keys()), index=0, key="mkt_time"
@@ -56,14 +65,6 @@ if TIMEFRAME_OPTIONS[time_window] is not None:
 filters = sidebar_filters(history, key_prefix="mkt_")
 
 df = filtered_history_or_stop(history, filters)
-
-# Apply global sport switch pre-filter
-_sport = st.session_state.get("sport", "All")
-if _sport != "All" and "League" in df.columns:
-    df = df.loc[df["League"] == _sport]
-    if df.empty:
-        st.info("No data matches the current sport filter.")
-        st.stop()
 
 prob_col = "Model P" if "Model P" in df.columns and df["Model P"].notna().any() else "Model"
 df["Hit"] = (df["Bet"] == df["Result"]).astype(int)
@@ -164,7 +165,7 @@ if not sharp_df.empty:
     low_sharp = sharpness_df.loc[sharpness_df["Std(Model P)"] < _LOW_SHARPNESS_STD]
     if not low_sharp.empty:
         st.warning(
-            f"Low sharpness (std < 0.04) — predictions cluster too tightly: "
+            f"Low sharpness (std < {_LOW_SHARPNESS_STD}) — predictions cluster too tightly: "
             f"{', '.join(low_sharp['Market'].tolist())}"
         )
 
