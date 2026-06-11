@@ -28,6 +28,18 @@ if parlays.empty:
     st.warning("No parlay history found. Run `prophecize` first.")
     st.stop()
 
+# Apply global sport switch pre-filter before the sidebar builds its league
+# multiselect, so the sidebar only offers that sport's leagues.
+_sport = st.session_state.get("sport", "All")
+if _sport != "All":
+    if "League" in history.columns:
+        history = history.loc[history["League"] == _sport]
+    if "League" in parlays.columns:
+        parlays = parlays.loc[parlays["League"] == _sport]
+    if parlays.empty:
+        st.info("No parlays match the current sport filter.")
+        st.stop()
+
 meta = load_resolve_meta()
 if meta.get("last_run"):
     st.caption(f"Data last resolved: {format_ts(meta['last_run'])}")
@@ -58,11 +70,6 @@ if filters["leagues"]:
     pf = pf.loc[pf["League"].isin(filters["leagues"])]
 if filters["platforms"]:
     pf = pf.loc[pf["Platform"].isin(filters["platforms"])]
-
-# Apply global sport switch pre-filter
-_sport = st.session_state.get("sport", "All")
-if _sport != "All" and "League" in pf.columns:
-    pf = pf.loc[pf["League"] == _sport]
 
 # Resolve for display
 resolved = pf.dropna(subset=["Legs"]).copy()
@@ -117,7 +124,6 @@ if has_indep and has_corr_p:
     fig_scatter.update_layout(height=500)
     st.plotly_chart(fig_scatter, use_container_width=True)
 
-    # Quantify value-add
     above_line = scatter_df.loc[scatter_df["P"] > scatter_df["Indep P"]]
     below_line = scatter_df.loc[scatter_df["P"] <= scatter_df["Indep P"]]
 
@@ -137,7 +143,6 @@ elif has_corr_p:
         "Falling back to Leg Probs for independent rate estimation."
     )
 
-# --- Correlation Boost vs Hit Rate ---
 st.subheader("Correlation Boost vs Hit Rate")
 if "Boost" in resolved.columns:
     boost_df = resolved.copy()
@@ -197,7 +202,6 @@ for platform in sorted(resolved["Platform"].unique()):
         size_df = pd.DataFrame(size_data)
         st.dataframe(size_df, use_container_width=True, hide_index=True)
 
-        # Miss distribution chart
         miss_cols = ["Hit All", "Missed 1", "Missed 2+"]
         miss_df = size_df[["Size", *miss_cols]].melt(
             id_vars="Size", var_name="Outcome", value_name="Count"
