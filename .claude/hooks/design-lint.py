@@ -11,6 +11,7 @@ has already applied; exit 2 only surfaces the reminder (the repo's PostToolUse f
 convention, same as docs-style.py) so the next edit corrects course. Anything out of scope, or
 an edit without a tell, exits 0 silently. The hard gate is tests/golden/test_design_tokens.py.
 """
+
 from __future__ import annotations
 
 import json

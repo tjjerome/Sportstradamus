@@ -1,8 +1,5 @@
 """Page 1: Overview — KPIs, accuracy trends, profit trends, and volume."""
 
-# Standard -110 juice: risk $110 to win $100. Used for flat-unit P&L accounting.
-_JUICE_PAYOUT = 100 / 110
-
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -19,6 +16,9 @@ from sportstradamus.dashboard.data import (
     render_banner,
     sidebar_filters,
 )
+
+# Standard -110 juice: risk $110 to win $100. Used for flat-unit P&L accounting.
+_JUICE_PAYOUT = 100 / 110
 
 st.title("Overview")
 render_banner("stats", "historical accuracy, profit, and volume")
