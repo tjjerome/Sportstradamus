@@ -41,11 +41,7 @@ def _theme() -> dict:
 
 
 def _dashboard_files() -> list[Path]:
-    files = (
-        list((_SRC / "pages").glob("*.py"))
-        + sorted(_SRC.glob("dashboard*.py"))
-        + sorted((_SRC / "dashboard").rglob("*.py"))
-    )
+    files = sorted((_SRC / "dashboard").rglob("*.py"))
     return [f for f in files if f.name != "__init__.py"]
 
 

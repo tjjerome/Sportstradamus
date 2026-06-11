@@ -5,7 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from sportstradamus.dashboard.components.deep_dive_charts import (
-    _DIST_PARAM_COLS,
+    DIST_PARAM_COLS,
     build_h2h_history,
     build_recent_history,
     distribution_chart,
@@ -126,7 +126,7 @@ def _render_model_tab(row: pd.Series) -> None:
         return
 
     params = {
-        param: row.get(col) for col, param in _DIST_PARAM_COLS.items() if pd.notna(row.get(col))
+        param: row.get(col) for col, param in DIST_PARAM_COLS.items() if pd.notna(row.get(col))
     }
     std = row.get("Model STD") or ev * 0.3
     try:

@@ -10,6 +10,7 @@ from sportstradamus.dashboard.data import (
     load_current_meta,
     load_current_offers,
     render_banner,
+    sport_filtered,
 )
 
 st.title("Today's Predictions")
@@ -18,12 +19,7 @@ meta = load_current_meta()
 generated = format_ts(meta.get("generated_at", "no run on record"))
 render_banner("predictions", f"generated {generated}")
 
-offers = load_current_offers()
-
-# Apply global sport switch pre-filter
-_sport = st.session_state.get("sport", "All")
-if _sport != "All" and not offers.empty and "League" in offers.columns:
-    offers = offers.loc[offers["League"] == _sport]
+offers = sport_filtered(load_current_offers())
 
 if offers.empty:
     st.info(

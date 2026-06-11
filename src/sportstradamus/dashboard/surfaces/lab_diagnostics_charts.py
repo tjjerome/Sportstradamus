@@ -5,6 +5,11 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
+# Bias thresholds for Over/Under balance: < 3% is well-calibrated, 3–7% is
+# marginal, > 7% is a notable prediction bias worth investigating.
+_BIAS_OK = 0.03
+_BIAS_WARN = 0.07
+
 
 def bias_bar(bias_df: pd.DataFrame) -> go.Figure:
     """Horizontal bar chart of Over/Under bias by league-market."""
@@ -171,12 +176,6 @@ def coverage_bar(cov_league_df: pd.DataFrame) -> go.Figure:
         )
     fig.update_layout(height=400)
     return fig
-
-
-# Bias thresholds for Over/Under balance: < 3% is well-calibrated, 3–7% is
-# marginal, > 7% is a notable prediction bias worth investigating.
-_BIAS_OK = 0.03
-_BIAS_WARN = 0.07
 
 
 def bias_color(b: float) -> str:

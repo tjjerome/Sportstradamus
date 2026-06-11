@@ -1,4 +1,4 @@
-"""Page 3: Correlations & Parlays — correlation effectiveness, hit rates, calibration."""
+"""Lab Correlations — correlation effectiveness, hit rates, parlay calibration."""
 
 from datetime import datetime, timedelta
 
@@ -16,6 +16,7 @@ from sportstradamus.dashboard.data import (
     load_resolve_meta,
     render_banner,
     sidebar_filters,
+    sport_filtered,
 )
 
 st.title("Correlations & Parlays")
@@ -28,17 +29,13 @@ if parlays.empty:
     st.warning("No parlay history found. Run `prophecize` first.")
     st.stop()
 
-# Apply global sport switch pre-filter before the sidebar builds its league
-# multiselect, so the sidebar only offers that sport's leagues.
-_sport = st.session_state.get("sport", "All")
-if _sport != "All":
-    if "League" in history.columns:
-        history = history.loc[history["League"] == _sport]
-    if "League" in parlays.columns:
-        parlays = parlays.loc[parlays["League"] == _sport]
-    if parlays.empty:
-        st.info("No parlays match the current sport filter.")
-        st.stop()
+# Sport narrow runs before the sidebar builds its league multiselect, so the
+# sidebar only offers that sport's leagues.
+history = sport_filtered(history)
+parlays = sport_filtered(parlays)
+if parlays.empty:
+    st.info("No parlays match the current sport filter.")
+    st.stop()
 
 meta = load_resolve_meta()
 if meta.get("last_run"):
@@ -58,7 +55,6 @@ pf = parlays.copy()
 pf["_date"] = pd.to_datetime(pf["Date"], errors="coerce").dt.date
 pf = pf.loc[pf["_date"].notna()]
 
-# Apply time window
 if cutoff is not None:
     pf = pf.loc[pf["_date"] >= cutoff]
 
@@ -71,7 +67,6 @@ if filters["leagues"]:
 if filters["platforms"]:
     pf = pf.loc[pf["Platform"].isin(filters["platforms"])]
 
-# Resolve for display
 resolved = pf.dropna(subset=["Legs"]).copy()
 if not resolved.empty:
     resolved[["Legs", "Misses"]] = resolved[["Legs", "Misses"]].astype(int)

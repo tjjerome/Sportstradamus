@@ -4,7 +4,12 @@
 import pandas as pd
 import streamlit as st
 
-from sportstradamus.dashboard.data import format_ts, load_current_meta, load_current_offers
+from sportstradamus.dashboard.data import (
+    format_ts,
+    load_current_meta,
+    load_current_offers,
+    sport_filtered,
+)
 
 st.title("Tonight")
 
@@ -12,12 +17,7 @@ meta = load_current_meta()
 generated = format_ts(meta.get("generated_at", "no run on record"))
 st.caption(f"Last updated: {generated}")
 
-offers = load_current_offers()
-
-# Apply global sport switch pre-filter
-_sport = st.session_state.get("sport", "All")
-if _sport != "All" and not offers.empty and "League" in offers.columns:
-    offers = offers.loc[offers["League"] == _sport]
+offers = sport_filtered(load_current_offers())
 
 if offers.empty:
     st.info("No current predictions. Run `poetry run prophecize` to generate offers.")
@@ -51,12 +51,13 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
                 st.caption(lock_time)
             st.caption(f"{offer_count} offer{'s' if offer_count != 1 else ''}")
             if top_ev is not None and pd.notna(top_ev):
-                ev_sign = f"{top_ev:+.2f}" if top_ev >= 0 else f"{top_ev:.2f}"
-                st.caption(f"Top edge: {ev_sign}")
+                st.caption(f"Top edge: {top_ev:+.2f}")
         with right:
             game_label = f"{team} vs {opponent}"
-            if st.button("View game", key=f"tonight_{game_label}_{league}"):
-                st.query_params["game"] = game_label
+            # Date keeps doubleheaders distinct; format must match game.py's labels.
+            game_param = f"{game_label} · {date_raw}" if date_raw else game_label
+            if st.button("View game", key=f"tonight_{league}_{date_raw}_{game_label}"):
+                st.query_params["game"] = game_param
                 st.switch_page("surfaces/game.py")
 
 st.caption("Prophecies arrive with the next data wave.")
