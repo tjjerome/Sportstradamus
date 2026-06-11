@@ -20,7 +20,7 @@ Public surface:
   ``{mean_final, roi, max_drawdown, sharpe, win_rate}``.
 
 Input DataFrame contract (from
-:func:`sportstradamus.dashboard_data.get_filtered_history`):
+:func:`sportstradamus.dashboard.data.get_filtered_history`):
 the exploded per-offer frame, indexed by row, with columns
 ``Player, Market, Platform, Boost, Model P, Books, Hit`` plus the
 ``ranking`` column (``K`` / ``Model P`` / ``Model``) and the caller's

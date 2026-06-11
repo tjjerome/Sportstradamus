@@ -26,7 +26,8 @@ def init_detail_state() -> None:
         st.session_state.corr_nav = False
 
 
-def _to_american(p: float) -> str:
+def to_american(p: float) -> str:
+    """Format a win probability as American odds, or ``"N/A"`` outside (0, 1)."""
     if not isinstance(p, float) or np.isnan(p) or p <= 0 or p >= 1:
         return "N/A"
     if p >= 0.5:
@@ -140,7 +141,7 @@ def _render_context_metrics(row: pd.Series) -> None:
     col1, col2, col3 = st.columns(3)
     with col1:
         ml = row.get("Moneyline")
-        st.metric("Moneyline", _to_american(ml) if pd.notna(ml) else "N/A")
+        st.metric("Moneyline", to_american(ml) if pd.notna(ml) else "N/A")
     with col2:
         ou = row.get("O/U")
         ou_str = f"{ou:.1f}" if pd.notna(ou) and isinstance(ou, int | float) else "N/A"
