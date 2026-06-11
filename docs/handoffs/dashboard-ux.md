@@ -109,8 +109,15 @@ stage ends with the §9 checklist green and the dashboard runnable.
   manual: six nav entries render real snapshots, sport switch filters, deep-dive opens from
   Board. Est: 1–2 sessions. If it fails: revert to last green, halve the port batch.
 - **P2 — pipeline precompute.** Goal: `stories.py` why-strings/theses, `K`/`Why`/`Game` keep-cols,
-  `Thesis` on parlays, `current_game_corr.parquet`, `stories_version` in meta. Acceptance:
-  persist characterization updated; stories golden test (deterministic, hash-stable); corr-slice
+  `Thesis` on parlays, `current_game_corr.parquet`, `stories_version` in meta. Owner requirement
+  on naming (raised post-P1): the current family/parlay labels are insufficient and repetitive —
+  the P2 thesis generator must clearly beat them, not port them. Bar: headlines unique within a
+  slate (no duplicate theses across that day's families), built from concrete game context
+  (players, leg directions, blowout/shootout/grind shape from spread+total+corr structure), not
+  generic stock phrases; phrase bank large enough that repeat users don't see the same headline
+  two days running. Still deterministic templates (locked decision §4) — diversity comes from
+  bank size + context keying, not randomness. Acceptance: persist characterization updated;
+  stories golden test (deterministic, hash-stable); headline-uniqueness-within-slate test; corr-slice
   golden (symmetric, joins to offers); integration -n0 shows columns flowing. Est: 1–2 sessions.
   Kill branch: if corr-slice via `find_correlation` return-arity change breaks pins, fall back to
   a collector param.
