@@ -1,5 +1,11 @@
 # Operation Ship 90 — Stub
 
+> **ARCHIVED — superseded by [`../model_improvement_track.md`](../model_improvement_track.md)
+> §7.8 (the D5 → Ship-90 stage).** Several concepts below (the `deferred-90` register, the
+> excluded-markets placeholders, "Steps 0–4") were retired by the no-defer policy and are
+> non-normative. Retained for the original idea list; the live levers it names (T11, CMPμ,
+> tail heads) are on the consolidated doc's §7.6 table.
+
 > **Status:** stub. Filled in as Operation Ship 75 lands and we see
 > which cells resisted. This doc captures ideas as they surface so they
 > aren't lost.

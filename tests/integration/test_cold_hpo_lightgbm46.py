@@ -6,7 +6,7 @@ Regression guard for the optuna ``LightGBMPruningCallback`` / lightgbm
 lightgbm>=4.6 reports cv eval results under ``"valid"``, so that callback can
 never match and raises. The training pipeline's cold-start path (no warm-start
 pickle, the only path when ``data/models/`` is empty) must therefore route
-through :func:`tune_hyperparameters`, which omits the pruning callback, not
+through :func:`run_hyper_opt`, which omits the pruning callback, not
 through ``LightGBMLSS.hyper_opt``.
 
 Marked ``@pytest.mark.integration``: runs a small but real optuna + lightgbm
@@ -20,12 +20,12 @@ import pytest
 
 
 @pytest.mark.integration
-def test_cold_tune_hyperparameters_returns_params_without_cv_agg_error():
+def test_cold_run_hyper_opt_returns_params_without_cv_agg_error():
     import lightgbm as lgb
     from lightgbmlss.model import LightGBMLSS
 
     from sportstradamus.skew_normal import SkewNormal
-    from sportstradamus.training.hyperparams import tune_hyperparameters
+    from sportstradamus.training.hyperparams import run_hyper_opt
 
     rng = np.random.default_rng(0)
     n = 600
@@ -40,7 +40,7 @@ def test_cold_tune_hyperparameters_returns_params_without_cv_agg_error():
         "learning_rate": ["float", {"low": 0.05, "high": 0.2, "log": True}],
     }
 
-    params = tune_hyperparameters(
+    params = run_hyper_opt(
         model,
         hp_dict,
         dtrain,

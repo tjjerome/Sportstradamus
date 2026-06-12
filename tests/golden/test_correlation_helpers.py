@@ -336,5 +336,3 @@ def test_build_correlation_matrices_structure_and_values() -> None:
     assert EV[0, 1] == pytest.approx(np.exp(0.4 * v01) * 0.3 * 1.0 * 3.0)
     assert np.allclose(EV, EV.T)
     assert EVb.shape == (3, 3)
-
-

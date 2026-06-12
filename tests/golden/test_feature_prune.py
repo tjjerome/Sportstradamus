@@ -47,5 +47,3 @@ def test_keeps_categorical_columns_even_when_degenerate() -> None:
     # Home is constant but categorical — it must survive.
     assert "Home" in kept
     assert "informative" in kept
-
-
