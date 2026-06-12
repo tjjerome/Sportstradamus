@@ -19,7 +19,9 @@ from sportstradamus.analysis import (
     explode_offers,
 )
 from sportstradamus.helpers.io import (
+    CURRENT_GAME_CONTEXT_PATH,
     CURRENT_GAME_CORR_PATH,
+    CURRENT_GAME_STORIES_PATH,
     CURRENT_META_PATH,
     CURRENT_OFFERS_PATH,
     CURRENT_PARLAYS_PATH,
@@ -27,9 +29,11 @@ from sportstradamus.helpers.io import (
     HISTORY_PATH,
     MODEL_STATS_PATH,
     PARLAY_HIST_PATH,
+    USER_SLIPS_PATH,
     read_history,
     read_parlay_hist,
     read_parquet_safe,
+    read_user_slips,
     write_history,
 )
 
@@ -211,6 +215,46 @@ def load_current_game_corr() -> pd.DataFrame:
     copula, the constellation, and the swap dialog.
     """
     return _load_current_game_corr_cached(_mtime(CURRENT_GAME_CORR_PATH))
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading story menu...")
+def _load_current_game_stories_cached(mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(CURRENT_GAME_STORIES_PATH)
+
+
+def load_current_game_stories() -> pd.DataFrame:
+    """Per-(platform, game) story menu from the latest ``prophecize`` snapshot.
+
+    Keys ``platform, League, Game, story_id, objective`` with ``legs`` a JSON
+    leg-desc list; ``headline``/``joint_p``/``model_ev``/``kelly_stake``/
+    ``bet_size`` per row. Seeds the Slips constellation builder (Bankroll
+    Builder / Shoot the Moon).
+    """
+    return _load_current_game_stories_cached(_mtime(CURRENT_GAME_STORIES_PATH))
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading game context...")
+def _load_current_game_context_cached(mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(CURRENT_GAME_CONTEXT_PATH)
+
+
+def load_current_game_context() -> pd.DataFrame:
+    """Per-game context (total/spread/shape/pos_edges) from the latest snapshot.
+
+    One row per ``League, Game, Date``; feeds the live thesis regen in the
+    constellation builder via ``slip_engine.slip_headline``.
+    """
+    return _load_current_game_context_cached(_mtime(CURRENT_GAME_CONTEXT_PATH))
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
+def _load_user_slips_cached(mtime: float) -> pd.DataFrame:
+    return read_user_slips()
+
+
+def load_user_slips() -> pd.DataFrame:
+    """User-saved slips (dashboard 'Lock it in'); graded nightly. mtime-keyed cache."""
+    return _load_user_slips_cached(_mtime(USER_SLIPS_PATH))
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading pickem entries...")

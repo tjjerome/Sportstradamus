@@ -5,8 +5,13 @@ import streamlit as st
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 from sportstradamus.dashboard.components.deep_dive import init_detail_state, show_detail
+from sportstradamus.dashboard.components.slip_builder import (
+    add_to_simple_slip,
+    render_simple_builder,
+)
 from sportstradamus.dashboard.data import (
     format_ts,
+    load_current_game_corr,
     load_current_meta,
     load_current_offers,
     render_banner,
@@ -181,6 +186,30 @@ if st.session_state.detail_stack:
     show_detail(filtered.loc[row_idx], filtered)
 else:
     st.caption("Click a row to see charts and correlated bets.")
+
+st.subheader("Build a cross-game slip")
+if selected_rows:
+    sel = selected_rows[0]
+    mask = (
+        (filtered["Player"] == sel.get("Player"))
+        & (filtered["Market"] == sel.get("Market"))
+        & (filtered["Bet"] == sel.get("Bet"))
+        & (filtered["Platform"] == sel.get("Platform"))
+    )
+    match = filtered.loc[mask]
+    if not match.empty and match.iloc[0]["Platform"] in ("Underdog", "Sleeper"):
+        full = match.iloc[0]
+        if st.button(
+            f"Add {full['Player']} {full['Bet']} {full['Line']:.10g} to slip",
+            key="board_add_slip",
+        ):
+            add_to_simple_slip(full.to_dict())
+            st.rerun()
+    else:
+        st.caption("Select an Underdog or Sleeper row to add it to a slip.")
+else:
+    st.caption("Select a row above, then add it to your slip.")
+render_simple_builder(filtered, load_current_game_corr())
 
 with st.expander("Snapshot info"):
     st.json(meta)

@@ -13,6 +13,7 @@ from sportstradamus.dashboard.data import (
     load_history,
     load_parlays,
     load_resolve_meta,
+    load_user_slips,
     render_banner,
     sidebar_filters,
     sport_filtered,
@@ -72,6 +73,43 @@ st.download_button(
     "history_filtered.csv",
     "text/csv",
 )
+
+st.subheader("Your slips")
+user_slips = load_user_slips()
+if user_slips.empty:
+    st.caption("Lock in a slip on the Build or Board surface to track it here.")
+else:
+    has_status = "status" in user_slips.columns
+    pending_n = int((user_slips["status"] == "pending").sum()) if has_status else len(user_slips)
+    graded = (
+        user_slips.loc[user_slips["status"] != "pending"] if has_status else user_slips.iloc[:0]
+    )
+    if not graded.empty:
+        wins = int((graded["status"] == "won").sum())
+        st.caption(
+            f"{len(graded)} graded · {wins} won · {pending_n} pending — your record vs the model's."
+        )
+    else:
+        st.caption(f"{pending_n} pending — graded nightly by `reflect`.")
+    slip_cols = [
+        c
+        for c in [
+            "saved_at",
+            "platform",
+            "play_type",
+            "headline",
+            "bet_size",
+            "model_ev",
+            "stake",
+            "status",
+        ]
+        if c in user_slips.columns
+    ]
+    st.dataframe(
+        user_slips.sort_values("saved_at", ascending=False)[slip_cols],
+        hide_index=True,
+        use_container_width=True,
+    )
 
 st.subheader("Rolling 30-Day Accuracy by League")
 daily_league = (
