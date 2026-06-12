@@ -112,7 +112,9 @@ def test_sweep_spares_multibook_higher_line_clamp(tmp_path):
     con.close()
 
     report = sweep_runaway_odds(db, apply=False)
-    assert report["blown"] == 0  # both within 5×MAX(line)=12.5; latest-line join would wrongly flag the 12.5
+    assert (
+        report["blown"] == 0
+    )  # both within 5×MAX(line)=12.5; latest-line join would wrongly flag the 12.5
 
 
 def test_sweep_spares_negative_line_team_market(tmp_path):
@@ -132,7 +134,9 @@ def test_sweep_spares_negative_line_team_market(tmp_path):
     con.close()
 
     report = sweep_runaway_odds(db, apply=False)
-    assert report["blown"] == 0  # no positive line for the slot -> line arm off, ev well under the absolute ceiling
+    assert (
+        report["blown"] == 0
+    )  # no positive line for the slot -> line arm off, ev well under the absolute ceiling
 
 
 def test_sweep_flags_sub_2000_runaway(tmp_path):
