@@ -69,11 +69,12 @@ def test_process_offers_routing(monkeypatch):
         return [f"scored:{league}:{market}"]
 
     def fake_find_correlation(
-        new_offers, stats_arg, book, *, contest_variant, legacy, corr_sink=None
+        new_offers, stats_arg, book, *, contest_variant, legacy, corr_sink=None, story_sink=None
     ):
         captured["offers"] = list(new_offers)
         captured["book"] = book
         captured["corr_sink"] = corr_sink
+        captured["story_sink"] = story_sink
         return pd.DataFrame({"n": [len(new_offers)]}), pd.DataFrame({"p": []})
 
     monkeypatch.setattr(scoring, "archive", fake_archive)

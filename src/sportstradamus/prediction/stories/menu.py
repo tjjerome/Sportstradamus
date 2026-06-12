@@ -1,0 +1,309 @@
+"""Per-game story menu: correlation-cluster stories with two starting parlays.
+
+``build_game_stories`` turns each game's scoring bundle (``GameScoringContext``,
+captured by ``find_correlation``'s ``story_sink``) into up to five data-driven
+*stories* — greedy correlation clusters of the game's strong legs. Each story
+emits two starting parlays over its cluster's legs (legs may be shared):
+
+* **Bankroll Builder** — the leg-subset with the highest single-bet full-Kelly
+  *log-growth* ``G`` (the bet that compounds bankroll fastest, not the biggest
+  stake). Tends to the tight 2-3-leg core.
+* **Shoot the Moon** — the leg-subset with the highest *model EV* inside the
+  play-type cap (the widest high-edge set; usually a flex extension of Builder).
+
+Pure and ``Archive``-free so the P3 dashboard rail can recompute it live. Subsets
+are enumerated but scored in two phases — a cheap independent-joint proxy ranks
+every subset, then only a shortlist is priced through the real Gaussian-copula
+scorer (``parlay._parlay_payout_prob``), whose flex branch runs a 50k-sample
+Monte-Carlo. The final argmax always uses the exact score, so fidelity holds while
+the expensive MC stays bounded.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from collections.abc import Mapping, Sequence
+from itertools import combinations
+
+import numpy as np
+import pandas as pd
+
+from sportstradamus.prediction.parlay import (
+    _PAYOUT_CLIP_HI,
+    _PAYOUT_CLIP_LO,
+    _POWER_MAX_SIZE,
+    GameScoringContext,
+    _parlay_payout_prob,
+    _psd_or_none,
+)
+from sportstradamus.prediction.stories.context import GameCtx, ctxs_from_frame
+from sportstradamus.prediction.stories.engine import thesis_variants
+from sportstradamus.prediction.stories.legs import enrich_legs, parse_leg
+
+# A leg qualifies as a story seed when its per-$1 model EV clears this edge — the
+# same 0.05 the unit-thesis gate and per-offer "why" already use.
+_MENU_EDGE_FLOOR: float = 0.05
+# Two strong legs join a cluster when |rho| over their pair clears this; matches
+# the display-correlation floor in correlation.py.
+_CLUSTER_RHO_FLOOR: float = 0.05
+# Brute-force bound: 2**8 = 256 subsets keeps a cluster's enumeration instant.
+_MAX_CLUSTER_LEGS: int = 8
+# Owner-locked menu cap: at most five stories per (platform, game).
+_MAX_STORIES: int = 5
+# Drop a cluster whose best Shoot-the-Moon subset can't clear breakeven EV.
+_MENU_MIN_MOON_EV: float = 1.0
+# Exact-scored flex finalists per objective per cluster (Power subsets are all
+# exact-scored cheaply via the analytical mvn.cdf, so they bypass the shortlist).
+_SHORTLIST_K: int = 8
+
+_STORY_COLS = [
+    "platform",
+    "League",
+    "Game",
+    "story_id",
+    "objective",
+    "headline",
+    "legs",
+    "joint_p",
+    "model_ev",
+    "kelly_stake",
+    "bet_size",
+    "Date",
+]
+
+
+def build_game_stories(
+    story_ctxs: Sequence[GameScoringContext],
+    offers: pd.DataFrame,
+    context: pd.DataFrame,
+    corr: list[dict] | None,
+) -> pd.DataFrame:
+    """One menu (≤5 stories × 2 objectives) per ``(platform, game)``.
+
+    ``story_ctxs`` is the ``story_sink`` filled by ``find_correlation`` (one per
+    game per platform); ``context``/``corr`` are the already-built
+    ``current_game_context`` frame and ``current_game_corr`` slices, reused to
+    headline each story via the P2 thesis engine.
+    """
+    ctxs = ctxs_from_frame(context, corr)
+    rows: list[dict] = []
+    for sctx in story_ctxs:
+        rows.extend(_stories_for_game(sctx, offers, ctxs))
+    return pd.DataFrame(rows, columns=_STORY_COLS)
+
+
+def _stories_for_game(
+    sctx: GameScoringContext, offers: pd.DataFrame, ctxs: Mapping[str, GameCtx]
+) -> list[dict]:
+    edge = _strong_legs(sctx)
+    if len(edge) < 2:
+        return []
+    scored = []
+    for cluster in _cluster_strong_legs(edge, sctx.g.C):
+        builder, moon = _best_subsets(cluster, sctx)
+        if builder is not None:
+            scored.append((cluster, builder, moon))
+    scored.sort(
+        key=lambda cb: (
+            -cb[2]["model_ev"],
+            -max(edge[i] for i in cb[0]),
+            tuple(sorted(cb[2]["legs"])),
+        )
+    )
+    rows: list[dict] = []
+    for rank, (_cluster, builder, moon) in enumerate(scored[:_MAX_STORIES]):
+        story_id = f"{sctx.game}#{rank}"
+        rows.append(_row(sctx, story_id, "builder", builder, offers, ctxs))
+        rows.append(_row(sctx, story_id, "moon", moon, offers, ctxs))
+    return rows
+
+
+def _strong_legs(sctx: GameScoringContext) -> dict[int, float]:
+    """Bet-eligible, model-favored legs mapped to their per-$1 edge.
+
+    Every leg in ``leg_indices`` is already a player-prop or Rivals leg (game
+    lines are L3-gated, not yet in the candidate set), so eligibility reduces to
+    the strong-edge floor.
+    """
+    return {
+        i: sctx.bet_df[i]["Model"]
+        for i in sctx.leg_indices
+        if sctx.bet_df[i]["Model"] - 1.0 >= _MENU_EDGE_FLOOR
+    }
+
+
+def _cluster_strong_legs(edge: Mapping[int, float], corr: np.ndarray) -> list[list[int]]:
+    """Greedy ρ-graph clusters over the strong legs; singleton clusters dropped.
+
+    Seeds on the strongest remaining leg and attaches any leg correlated with a
+    current member, so an isolated strong leg forms no story (a thin game yields
+    few or zero) and a correlated bundle forms exactly one.
+    """
+    remaining = set(edge)
+    order = sorted(edge, key=lambda i: -edge[i])
+    clusters = []
+    while remaining:
+        seed = next(i for i in order if i in remaining)
+        cluster = _grow_cluster(seed, remaining, order, corr)
+        if len(cluster) >= 2:
+            clusters.append(sorted(cluster))
+    return clusters
+
+
+def _grow_cluster(
+    seed: int, remaining: set[int], order: Sequence[int], corr: np.ndarray
+) -> list[int]:
+    """Attach legs correlated (|ρ| ≥ floor) with any member, strongest first, up to the cap."""
+    cluster = [seed]
+    remaining.discard(seed)
+    changed = True
+    while changed and len(cluster) < _MAX_CLUSTER_LEGS:
+        changed = False
+        for j in order:
+            if j not in remaining:
+                continue
+            if any(abs(corr[j, m]) >= _CLUSTER_RHO_FLOOR for m in cluster):
+                cluster.append(j)
+                remaining.discard(j)
+                changed = True
+                if len(cluster) >= _MAX_CLUSTER_LEGS:
+                    break
+    return cluster
+
+
+def _best_subsets(
+    cluster: Sequence[int], sctx: GameScoringContext
+) -> tuple[dict | None, dict | None]:
+    """The (Builder, Moon) parlays for one cluster, or (None, None) if degenerate.
+
+    Phase 1 ranks every subset by a pure-numpy independent-joint proxy; phase 2
+    exact-scores only the shortlist (top-K by each objective ∪ all cheap Power
+    subsets) through the copula scorer.
+    """
+    proxies = [
+        (combo, *_independent(combo, sctx))
+        for size in range(2, min(len(cluster), sctx.max_size) + 1)
+        for combo in combinations(cluster, size)
+    ]
+    if not proxies:
+        return None, None
+    scored = [_score_subset(bet_id, sctx) for bet_id in _shortlist(proxies)]
+    builder = min(scored, key=lambda s: (-s["G"], s["bet_size"], tuple(sorted(s["legs"]))))
+    moon = min(scored, key=lambda s: (-s["model_ev"], -s["bet_size"], tuple(sorted(s["legs"]))))
+    if moon["model_ev"] <= _MENU_MIN_MOON_EV:
+        return None, None
+    return builder, moon
+
+
+def _shortlist(proxies: Sequence[tuple]) -> list[tuple[int, ...]]:
+    """Distinct subsets worth an exact score: top-K by EV ∪ top-K by G ∪ all Power."""
+    by_ev = sorted(proxies, key=lambda x: -x[1])[:_SHORTLIST_K]
+    by_g = sorted(proxies, key=lambda x: -x[2])[:_SHORTLIST_K]
+    power = [p for p in proxies if len(p[0]) <= _POWER_MAX_SIZE]
+    picked = {p[0]: None for p in (*by_ev, *by_g, *power)}
+    return list(picked)
+
+
+def _independent(bet_id: Sequence[int], sctx: GameScoringContext) -> tuple[float, float]:
+    """Cheap proxy: (independent EV, independent log-growth) — no copula, no MC."""
+    p_ind = float(np.prod(sctx.g.p_model[np.asarray(bet_id)]))
+    _boost, payout = _boost_payout(bet_id, sctx)
+    return p_ind * payout, _log_growth(p_ind, payout)
+
+
+def _score_subset(bet_id: Sequence[int], sctx: GameScoringContext) -> dict:
+    """Exact copula score for one subset (reuses parlay's gate-free scorer)."""
+    size = len(bet_id)
+    g = sctx.g
+    arr = np.asarray(bet_id)
+    boost, payout = _boost_payout(bet_id, sctx)
+    sig = _psd_or_none(g.C[np.ix_(bet_id, bet_id)], legacy=False)
+    model_ev = float(
+        _parlay_payout_prob(
+            g.p_model[arr],
+            g.p_push[arr],
+            sig,
+            size,
+            boost,
+            payout,
+            sctx.full_payouts,
+            sctx.payout_base_by_size[size],
+            False,
+        )
+    )
+    win_prob = model_ev / payout if payout > 0 else 0.0
+    return {
+        "bet_id": tuple(bet_id),
+        "bet_size": size,
+        "model_ev": model_ev,
+        "win_prob": win_prob,
+        "G": _log_growth(win_prob, payout),
+        "kelly_stake": _kelly_fraction(win_prob, payout),
+        "legs": [sctx.bet_df[i]["Desc"] for i in bet_id],
+    }
+
+
+def _boost_payout(bet_id: Sequence[int], sctx: GameScoringContext) -> tuple[float, float]:
+    """Modifier-product boost and clipped payout multiplier for a subset (no admissibility gate)."""
+    size = len(bet_id)
+    g = sctx.g
+    pairs = g.M[np.ix_(bet_id, bet_id)][np.triu_indices(size, 1)]
+    boost = float(np.prod(pairs) * np.prod(g.boosts[np.asarray(bet_id)]))
+    payout = float(
+        np.clip(boost * sctx.payout_base_by_size[size], _PAYOUT_CLIP_LO, _PAYOUT_CLIP_HI)
+    )
+    return boost, payout
+
+
+def _kelly_fraction(p: float, payout: float) -> float:
+    """Full-Kelly fraction of bankroll for a single bet; 0 when there's no edge."""
+    b = payout - 1.0
+    if b <= 0.0:
+        return 0.0
+    return max(0.0, (p * (b + 1.0) - 1.0) / b)
+
+
+def _log_growth(p: float, payout: float) -> float:
+    """Expected log-growth of a single parlay bet at its own full-Kelly fraction."""
+    f = _kelly_fraction(p, payout)
+    if f <= 0.0:
+        return 0.0
+    b = payout - 1.0
+    return p * math.log1p(b * f) + (1.0 - p) * math.log1p(-f)
+
+
+def _row(
+    sctx: GameScoringContext,
+    story_id: str,
+    objective: str,
+    sub: Mapping,
+    offers: pd.DataFrame,
+    ctxs: Mapping[str, GameCtx],
+) -> dict:
+    return {
+        "platform": sctx.platform,
+        "League": sctx.league,
+        "Game": sctx.game,
+        "story_id": story_id,
+        "objective": objective,
+        "headline": _headline(sub["bet_id"], sctx, offers, ctxs),
+        "legs": json.dumps(sub["legs"]),
+        "joint_p": sub["win_prob"],
+        "model_ev": sub["model_ev"],
+        "kelly_stake": sub["kelly_stake"],
+        "bet_size": sub["bet_size"],
+        "Date": sctx.date,
+    }
+
+
+def _headline(
+    bet_id: Sequence[int],
+    sctx: GameScoringContext,
+    offers: pd.DataFrame,
+    ctxs: Mapping[str, GameCtx],
+) -> str:
+    """The P2 thesis headline for a chosen parlay (game-script fallback labels, never seeds)."""
+    parsed = [p for p in (parse_leg(sctx.bet_df[i]["Desc"]) for i in bet_id) if p]
+    variants, vi, _ = thesis_variants(enrich_legs(parsed, offers), ctxs)
+    return variants[vi] if variants else ""

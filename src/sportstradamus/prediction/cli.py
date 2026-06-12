@@ -36,6 +36,7 @@ from sportstradamus.history_schema import HISTORY_COLS, PREDICTION_LEVEL_COLS
 from sportstradamus.prediction.persist import (
     write_current_game_context,
     write_current_game_corr,
+    write_current_game_stories,
     write_current_offers,
     write_current_pickem,
 )
@@ -44,6 +45,7 @@ from sportstradamus.prediction.stories import (
     attach_offer_why,
     attach_parlay_theses,
     build_game_context,
+    build_game_stories,
 )
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
@@ -131,6 +133,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     platforms_run: list[str] = []
     scored_ud: pd.DataFrame | None = None
     corr_sink: list[dict] = []
+    story_sink: list = []
 
     try:
         ud_dict = get_ud()
@@ -141,6 +144,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
             contest_variant=contest_variant,
             legacy=legacy_correlation,
             corr_sink=corr_sink,
+            story_sink=story_sink,
         )
         parlay_df = pd.concat([parlay_df, ud5])
         # Capture the raw scored frame (pre Market-remap / Boost-rescale) for the
@@ -172,6 +176,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
             contest_variant=contest_variant,
             legacy=legacy_correlation,
             corr_sink=corr_sink,
+            story_sink=story_sink,
         )
         parlay_df = pd.concat([parlay_df, sl5])
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
@@ -211,6 +216,10 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     parlay_df = attach_parlay_theses(
         parlay_df, snapshot_offers, corr=corr_sink, context=game_context
     )
+    # Story menu (Slips grouping key): up to 5 correlation-cluster stories per
+    # (platform, game), each a Bankroll Builder + Shoot-the-Moon parlay. Reuses
+    # the same game_context + corr slices the thesis pass built.
+    game_stories = build_game_stories(story_sink, snapshot_offers, game_context, corr_sink)
 
     write_current_offers(
         snapshot_offers,
@@ -221,6 +230,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     )
     write_current_game_corr(corr_sink)
     write_current_game_context(game_context)
+    write_current_game_stories(game_stories)
 
     _write_pickem_snapshot(scored_ud, stats)
 

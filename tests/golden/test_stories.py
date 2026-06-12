@@ -79,7 +79,7 @@ def _theses_by_family(parlays: pd.DataFrame, offers: pd.DataFrame) -> dict[tuple
 
 
 def test_version_present():
-    assert STORIES_VERSION == "p2-2"
+    assert STORIES_VERSION == "p3a"
 
 
 def test_thesis_exact_strings():
