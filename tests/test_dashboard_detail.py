@@ -56,6 +56,7 @@ def test_find_offer_idx_resolves_platform_market_codes():
             "Bet": ["Over", "Under", "Over"],
             "Market": ["PRA", "FGA", "FG3M"],
             "Line": [16.5, 17.5, 2.5],
+            "Platform": ["Underdog", "Underdog", "Sleeper"],
         }
     )
     # Underdog: spaced display name -> "Pts+Rebs+Asts" -> PRA
@@ -85,3 +86,23 @@ def test_find_offer_idx_resolves_platform_market_codes():
         )
         == 2
     )
+
+
+def test_find_offer_idx_pins_platform_when_same_leg_on_both_books():
+    """The same (player, market, line) trades on both books with different
+    boosts; the match must follow the requested platform, not the first row —
+    otherwise a slip snapshots the wrong book's Boost and misprices (the 1.78x
+    Sleeper multiplier double-counted under the Underdog payout curve)."""
+    offers = pd.DataFrame(
+        {
+            "Player": ["Aaliyah Edwards", "Aaliyah Edwards"],
+            "Bet": ["Over", "Over"],
+            "Market": ["PTS", "PTS"],
+            "Line": [10.5, 10.5],
+            "Platform": ["Sleeper", "Underdog"],
+            "Boost": [1.78, 1.00],
+        }
+    )
+    leg = parse_leg("Aaliyah Edwards Over 10.5 PTS - 90%, 1.0x")
+    assert find_offer_idx(leg, offers, "Underdog") == 1  # not row 0 (Sleeper)
+    assert find_offer_idx(leg, offers, "Sleeper") == 0
