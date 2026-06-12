@@ -1,12 +1,13 @@
-"""Hash-stable pins for ``prediction.stories`` — the P2 prophecy prose generator.
+"""Hash-stable pins for ``prediction.stories`` — the v2 prophecy generator.
 
-These freeze the EXACT ``Thesis`` and ``Why`` strings for fixed fixtures so the
-md5 seeding, star-carousel ranking, game-shape classification, phrase-bank
-selection, and the slate-uniqueness pass are all proven behavior-preserving.
-The property tests are the dashboard phrase-bank's old guarantees (a clear star
-headlines, a lone benchwarmer never does, deterministic, empty-safe) reframed
-for the new per-family theses. ``Date`` is fixed in every fixture because it
-seeds the variant pick.
+These freeze the exact ``Thesis`` / ``Why`` strings for fixed fixtures so the
+archetype routing, game-context classification, voice-bank selection, md5
+seeding, and slate-uniqueness pass are all proven behavior-preserving. The
+routing property tests are the heart: a clear star headlines its family, a
+no-standout leg-set routes to the *game-script* archetype (never an arbitrary
+alphabetical star), and the per-offer "why" reads form + matchup + edge.
+``Date`` is fixed because it seeds the variant pick; ``O/U`` is the team
+half-total (the two sides sum to the game total) per the v2 context contract.
 """
 
 from __future__ import annotations
@@ -22,36 +23,37 @@ from sportstradamus.prediction.stories import (
 
 _DATE = "2026-06-13"
 
-# Two games' worth of offer context the theses read: a high-total lopsided
-# matchup (BOS favored, total 238 → blowout) and a tight mid-total one
-# (DEN/MIA, ML ~ coin flip). ``Moneyline`` is the implied win probability.
+# Two games. BOS/PHI: half-totals 120+118 = 238, BOS favored 0.74 → blowout.
+# DEN/MIA: 112+112 = 224, ML ~ coin flip (0.55) → coinflip. ``Moneyline`` is the
+# team's implied win probability; ``Position`` is the resolved depth-chart label.
 _OFFERS = pd.DataFrame(
     [
-        {"League": "NBA", "Game": "BOS/PHI", "Player": "Jayson Tatum", "Market": "PTS",
-         "Bet": "Over", "Line": 28.5, "O/U": 238.0, "Moneyline": 0.74,
-         "Avg 5": 3.5, "Avg H2H": 2.0, "DVPOA": 0.10, "Model P": 0.59, "Books P": 0.52,
-         "Model": 1.18, "Books": 1.00},
-        {"League": "NBA", "Game": "BOS/PHI", "Player": "Jayson Tatum", "Market": "REB",
-         "Bet": "Over", "Line": 8.5, "O/U": 238.0, "Moneyline": 0.74,
-         "Avg 5": 1.0, "Avg H2H": 0.0, "DVPOA": 0.02, "Model P": 0.56, "Books P": 0.50,
-         "Model": 1.10, "Books": 1.00},
-        {"League": "NBA", "Game": "BOS/PHI", "Player": "Joel Embiid", "Market": "PTS",
-         "Bet": "Under", "Line": 30.5, "O/U": 238.0, "Moneyline": 0.26,
-         "Avg 5": -2.0, "Avg H2H": -1.5, "DVPOA": -0.08, "Model P": 0.57, "Books P": 0.51,
-         "Model": 1.12, "Books": 1.00},
-        {"League": "NBA", "Game": "DEN/MIA", "Player": "Nikola Jokic", "Market": "AST",
-         "Bet": "Over", "Line": 9.5, "O/U": 224.0, "Moneyline": 0.55,
-         "Avg 5": 1.5, "Avg H2H": 0.0, "DVPOA": 0.06, "Model P": 0.60, "Books P": 0.53,
-         "Model": 1.20, "Books": 1.00},
-        {"League": "NBA", "Game": "DEN/MIA", "Player": "Nikola Jokic", "Market": "REB",
-         "Bet": "Over", "Line": 12.5, "O/U": 224.0, "Moneyline": 0.55,
-         "Avg 5": 2.0, "Avg H2H": 1.0, "DVPOA": 0.03, "Model P": 0.58, "Books P": 0.52,
-         "Model": 1.15, "Books": 1.00},
+        {"League": "NBA", "Game": "BOS/PHI", "Date": _DATE, "Team": "BOS", "Opponent": "PHI",
+         "Player": "Jayson Tatum", "Market": "PTS", "Bet": "Over", "Line": 28.5,
+         "O/U": 120.0, "Moneyline": 0.74, "DVPOA": 0.10, "Position": "F1",
+         "Avg 5": 3.5, "Avg H2H": 2.0, "Model P": 0.59, "Books P": 0.52, "Model": 1.18, "Books": 1.00},
+        {"League": "NBA", "Game": "BOS/PHI", "Date": _DATE, "Team": "BOS", "Opponent": "PHI",
+         "Player": "Jayson Tatum", "Market": "REB", "Bet": "Over", "Line": 8.5,
+         "O/U": 120.0, "Moneyline": 0.74, "DVPOA": 0.02, "Position": "F1",
+         "Avg 5": 1.0, "Avg H2H": 0.0, "Model P": 0.56, "Books P": 0.50, "Model": 1.10, "Books": 1.00},
+        {"League": "NBA", "Game": "BOS/PHI", "Date": _DATE, "Team": "PHI", "Opponent": "BOS",
+         "Player": "Joel Embiid", "Market": "PTS", "Bet": "Under", "Line": 30.5,
+         "O/U": 118.0, "Moneyline": 0.26, "DVPOA": -0.08, "Position": "C1",
+         "Avg 5": -2.0, "Avg H2H": -1.5, "Model P": 0.57, "Books P": 0.51, "Model": 1.12, "Books": 1.00},
+        {"League": "NBA", "Game": "DEN/MIA", "Date": _DATE, "Team": "DEN", "Opponent": "MIA",
+         "Player": "Nikola Jokic", "Market": "AST", "Bet": "Over", "Line": 9.5,
+         "O/U": 112.0, "Moneyline": 0.55, "DVPOA": 0.06, "Position": "C1",
+         "Avg 5": 1.5, "Avg H2H": 0.0, "Model P": 0.60, "Books P": 0.53, "Model": 1.20, "Books": 1.00},
+        {"League": "NBA", "Game": "DEN/MIA", "Date": _DATE, "Team": "DEN", "Opponent": "MIA",
+         "Player": "Nikola Jokic", "Market": "REB", "Bet": "Over", "Line": 12.5,
+         "O/U": 112.0, "Moneyline": 0.55, "DVPOA": 0.03, "Position": "C1",
+         "Avg 5": 2.0, "Avg H2H": 1.0, "Model P": 0.58, "Books P": 0.52, "Model": 1.15, "Books": 1.00},
     ]
 )
 
-# Three families on one (NBA, _DATE) slate. Tatum drives BOS family 1 (two
-# markets), Embiid the Under-only BOS family 2; Jokic drives DEN/MIA.
+# Three families: Tatum drives BOS family 1 (two markets, blowout); BOS family 2
+# is an even Embiid-Under / Tatum-Over split with no leg-majority → game-script;
+# Jokic drives DEN/MIA.
 _PARLAYS = pd.DataFrame(
     [
         {"League": "NBA", "Game": "BOS/PHI", "Date": _DATE, "Family": 1.0,
@@ -77,24 +79,32 @@ def _theses_by_family(parlays: pd.DataFrame, offers: pd.DataFrame) -> dict[tuple
 
 
 def test_version_present():
-    assert STORIES_VERSION == "p2-1"
+    assert STORIES_VERSION == "p2-2"
 
 
 def test_thesis_exact_strings():
     assert _theses_by_family(_PARLAYS, _OFFERS) == {
         ("BOS/PHI", 1.0): "The BOS/PHI blowout lets Jayson Tatum hunt points unopposed",
-        ("BOS/PHI", 2.0): "Up big early, Joel Embiid sits as BOS/PHI gets called off the gas",
+        ("BOS/PHI", 2.0): "The scoring in BOS/PHI comes from everywhere",
         ("DEN/MIA", 1.0): (
-            "Nikola Jokic pulls the strings down the stretch of a razor-thin DEN/MIA"
+            "In a DEN/MIA toss-up, Nikola Jokic keeps creating the next good look"
         ),
     }
 
 
-def test_thesis_written_on_every_family_row():
+def test_no_standout_family_routes_to_game_script_not_a_star():
+    """The even Embiid-Under / Tatum-Over split has no leg-majority ⇒ the headline
+    is about the game, naming neither player (the v1 alphabetical-star bug)."""
+    thesis = _theses_by_family(_PARLAYS, _OFFERS)[("BOS/PHI", 2.0)]
+    assert "Tatum" not in thesis and "Embiid" not in thesis
+    assert thesis
+
+
+def test_thesis_written_on_every_row():
     out = attach_parlay_theses(_PARLAYS.copy(), _OFFERS.copy())
+    assert (out["Thesis"] != "").all()
     bos1 = out[(out["Game"] == "BOS/PHI") & (out["Family"] == 1.0)]
     assert bos1["Thesis"].nunique() == 1
-    assert (out["Thesis"] != "").all()
 
 
 def test_why_exact_strings():
@@ -122,28 +132,30 @@ def test_why_ev_fallback_when_no_book_prob():
     assert attach_offer_why(row)["Why"].iloc[0] == "The model prices it at 1.41x."
 
 
+def _star_offer(game: str, team: str, opp: str, player: str, pos: str) -> dict:
+    return {"League": "NBA", "Game": game, "Date": _DATE, "Team": team, "Opponent": opp,
+            "Player": player, "Market": "PTS", "Bet": "Over", "Line": 25.5,
+            "O/U": 112.0, "Moneyline": 0.5, "DVPOA": 0.0, "Position": pos}
+
+
 def test_slate_uniqueness_guaranteed():
-    """No two families in the same (League, Date) share a thesis."""
-    date = _DATE
+    """No two leg-sets in the same (League, Date) share a thesis."""
     offers = pd.DataFrame(
         [
-            {"League": "NBA", "Game": "AAA/BBB", "Player": "Star One", "Market": "PTS",
-             "Bet": "Over", "Line": 25.5, "O/U": 225.0, "Moneyline": 0.5},
-            {"League": "NBA", "Game": "CCC/DDD", "Player": "Star Two", "Market": "PTS",
-             "Bet": "Over", "Line": 25.5, "O/U": 225.0, "Moneyline": 0.5},
-            {"League": "NBA", "Game": "EEE/FFF", "Player": "Star Three", "Market": "PTS",
-             "Bet": "Over", "Line": 25.5, "O/U": 225.0, "Moneyline": 0.5},
+            _star_offer("AAA/BBB", "AAA", "BBB", "Star One", "G1"),
+            _star_offer("CCC/DDD", "CCC", "DDD", "Star Two", "G1"),
+            _star_offer("EEE/FFF", "EEE", "FFF", "Star Three", "G1"),
         ]
     )
-    legs = lambda game, p: {  # noqa: E731
+    legs = lambda p: {  # noqa: E731
         "Leg 1": f"{p} Over 25.5 PTS - 60.0%, 1.0x",
         "Leg 2": f"{p} Over 5.5 REB - 55.0%, 1.0x",
     }
     parlays = pd.DataFrame(
         [
-            {"League": "NBA", "Game": "AAA/BBB", "Date": date, "Family": 1.0, **legs("AAA/BBB", "Star One")},
-            {"League": "NBA", "Game": "CCC/DDD", "Date": date, "Family": 1.0, **legs("CCC/DDD", "Star Two")},
-            {"League": "NBA", "Game": "EEE/FFF", "Date": date, "Family": 1.0, **legs("EEE/FFF", "Star Three")},
+            {"League": "NBA", "Game": "AAA/BBB", "Date": _DATE, "Family": 1.0, **legs("Star One")},
+            {"League": "NBA", "Game": "CCC/DDD", "Date": _DATE, "Family": 1.0, **legs("Star Two")},
+            {"League": "NBA", "Game": "EEE/FFF", "Date": _DATE, "Family": 1.0, **legs("Star Three")},
         ]
     )
     heads = list(_theses_by_family(parlays, offers).values())
@@ -152,13 +164,21 @@ def test_slate_uniqueness_guaranteed():
 
 
 def test_clear_star_headlines_not_the_benchwarmer():
-    """The multi-market star drives the family; a lone tiny prop never headlines."""
+    """The multi-leg star drives the family; a lone tiny prop never headlines."""
     offers = pd.DataFrame(
         [
-            {"League": "NBA", "Game": "X/Y", "Player": "Star Wing", "Market": "PTS",
-             "Bet": "Over", "Line": 28.5, "O/U": 224.0, "Moneyline": 0.5},
-            {"League": "NBA", "Game": "X/Y", "Player": "Bench Guy", "Market": "REB",
-             "Bet": "Under", "Line": 3.5, "O/U": 224.0, "Moneyline": 0.5},
+            {"League": "NBA", "Game": "X/Y", "Date": _DATE, "Team": "X", "Opponent": "Y",
+             "Player": "Star Wing", "Market": "PTS", "Bet": "Over", "Line": 28.5,
+             "O/U": 112.0, "Moneyline": 0.5, "DVPOA": 0.0, "Position": "F1"},
+            {"League": "NBA", "Game": "X/Y", "Date": _DATE, "Team": "X", "Opponent": "Y",
+             "Player": "Star Wing", "Market": "REB", "Bet": "Over", "Line": 9.5,
+             "O/U": 112.0, "Moneyline": 0.5, "DVPOA": 0.0, "Position": "F1"},
+            {"League": "NBA", "Game": "X/Y", "Date": _DATE, "Team": "X", "Opponent": "Y",
+             "Player": "Star Wing", "Market": "AST", "Bet": "Over", "Line": 6.5,
+             "O/U": 112.0, "Moneyline": 0.5, "DVPOA": 0.0, "Position": "F1"},
+            {"League": "NBA", "Game": "X/Y", "Date": _DATE, "Team": "Y", "Opponent": "X",
+             "Player": "Bench Guy", "Market": "REB", "Bet": "Under", "Line": 3.5,
+             "O/U": 112.0, "Moneyline": 0.5, "DVPOA": 0.0, "Position": "C2"},
         ]
     )
     parlays = pd.DataFrame(
@@ -196,8 +216,8 @@ def test_no_parseable_legs_yields_blank_thesis():
     assert out["Thesis"].iloc[0] == ""
 
 
-def test_thesis_without_game_context_falls_back_to_even_shape():
-    """Offers lacking the ``Game`` key (early-P2 snapshot) ⇒ league-agnostic shape."""
+def test_thesis_without_game_context_degrades_gracefully():
+    """Offers lacking the ``Game`` key (no context) ⇒ a non-empty fallback headline."""
     offers_no_game = pd.DataFrame(
         [{"League": "NBA", "Player": "Lone Star", "Market": "PTS", "Bet": "Over", "Line": 25.5}]
     )
@@ -206,8 +226,7 @@ def test_thesis_without_game_context_falls_back_to_even_shape():
           "Leg 1": "Lone Star Over 25.5 PTS - 60.0%, 1.0x"}]
     )
     thesis = _theses_by_family(parlays, offers_no_game)[("L/M", 1.0)]
-    assert "Lone Star" in thesis
-    assert thesis  # an "even"-shape scoring-over headline still renders
+    assert thesis  # a game-script "even"-shape headline still renders, no crash
 
 
 def test_parse_leg_round_trip():

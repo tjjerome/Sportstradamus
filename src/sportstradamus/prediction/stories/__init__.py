@@ -15,10 +15,17 @@ odds): the favorite is the side nearer 1.0 and ``max|p - 0.5|`` over a game's
 offers measures how lopsided the matchup is.
 """
 
+from sportstradamus.prediction.stories.context import build_game_context
 from sportstradamus.prediction.stories.legs import parse_leg
 from sportstradamus.prediction.stories.thesis import attach_parlay_theses
 from sportstradamus.prediction.stories.why import attach_offer_why
 
-STORIES_VERSION: str = "p2-1"
+STORIES_VERSION: str = "p2-2"
 
-__all__ = ["STORIES_VERSION", "attach_offer_why", "attach_parlay_theses", "parse_leg"]
+__all__ = [
+    "STORIES_VERSION",
+    "attach_offer_why",
+    "attach_parlay_theses",
+    "build_game_context",
+    "parse_leg",
+]

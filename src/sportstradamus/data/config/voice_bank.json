@@ -1,0 +1,1479 @@
+{
+  "shared": {
+    "player": {
+      "even": {
+        "Over": {
+          "scoring": [
+            "{p} outruns the number in {g}",
+            "The line sells {p} short in {g} — over",
+            "{p} keeps the scoreboard busy in {g}"
+          ],
+          "boards": [
+            "Every miss in {g} is {p}'s to claim",
+            "{p} owns the second chances in {g}",
+            "The caroms in {g} all find {p}"
+          ],
+          "playmaking": [
+            "The offense in {g} runs through {p}'s hands",
+            "{p} keeps the helpers coming in {g}",
+            "{p} makes everyone around better in {g}"
+          ],
+          "stops": [
+            "{p} closes every lane in {g}",
+            "Nothing comes easy in {g} with {p} lurking",
+            "{p} turns defense into numbers in {g}"
+          ],
+          "k's": [
+            "{p} slams the door all night in {g}",
+            "One duel at a time, {p} wins {g}",
+            "{p} sends them away empty-handed in {g}"
+          ],
+          "production": [
+            "The night in {g} bends toward {p}",
+            "{p} leaves fingerprints all over {g}",
+            "Whatever {g} demands, {p} supplies",
+            "{p}'s line travels — over in {g}"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "{g} keeps {p} off the scoreboard",
+            "The number is a ceiling {p} never touches in {g}",
+            "{p}'s scoring well runs dry in {g}"
+          ],
+          "boards": [
+            "The second chances in {g} bounce away from {p}",
+            "{p} gets crowded out in {g}",
+            "{g} leaves no scraps for {p}"
+          ],
+          "playmaking": [
+            "{p}'s passes find nobody in {g}",
+            "The connections never come for {p} in {g}",
+            "The supply line from {p} runs dry in {g}"
+          ],
+          "stops": [
+            "The action in {g} happens away from {p}",
+            "{g} steers wide of {p} all night",
+            "{p} watches {g} go by without a takeaway"
+          ],
+          "k's": [
+            "{p} can't slam the door in {g}",
+            "They keep finding a way past {p} in {g}",
+            "The duels go against {p} in {g}"
+          ],
+          "production": [
+            "A quiet night finds {p} in {g}",
+            "{g} asks little of {p} and gets less",
+            "{p} fades into the scenery of {g}",
+            "The under is written all over {p} in {g}"
+          ]
+        }
+      }
+    },
+    "game-script": {
+      "shootout": {
+        "Over": {
+          "production": [
+            "The {g} shootout lifts every line with it",
+            "{g} turns into a sprint and every number rides along",
+            "Offense begets offense in {g} — overs across the board"
+          ],
+          "scoring": [
+            "{g} plays fast and the points multiply",
+            "The {g} scoreboard never sits still",
+            "Both sides trade haymakers in {g} — scoring everywhere"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} runs hot, but these numbers stay out of the current",
+            "Not every line rides the {g} wave — these fade it",
+            "The {g} shootout is loud; these stat lines stay quiet"
+          ]
+        }
+      },
+      "grind": {
+        "Over": {
+          "production": [
+            "The {g} grind rewards whoever keeps working — these lines clear",
+            "Slow night in {g}, but these stats don't need pace",
+            "{g} is a war of attrition and these numbers dig in"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} bogs down and drags every number with it",
+            "The {g} grind starves the stat sheet — unders",
+            "Nothing flows in {g} — take the short side"
+          ],
+          "scoring": [
+            "Scoring goes to die in {g}",
+            "{g} is a defensive struggle written in advance — fade the points",
+            "The points never show up in {g}"
+          ]
+        }
+      },
+      "blowout": {
+        "Over": {
+          "production": [
+            "{g} gets decided early and the stats pile up unbothered",
+            "One side runs away with {g} — ride the volume",
+            "{g} tips lopsided and the counting stats feast"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} gets out of hand and the stars call it a night — unders",
+            "A lopsided {g} shortens every headliner's evening",
+            "The {g} rout sends the regulars home early"
+          ]
+        }
+      },
+      "coinflip": {
+        "Over": {
+          "production": [
+            "{g} goes the distance — every minute, every stat, all night",
+            "A {g} this tight keeps every starter working late",
+            "Nobody rests in a {g} decided at the wire — overs"
+          ]
+        },
+        "Under": {
+          "production": [
+            "A nervy {g} tightens every grip — unders",
+            "{g} stays close and careful, and the numbers stay small",
+            "Tension squeezes the stat sheet in {g}"
+          ]
+        }
+      },
+      "even": {
+        "Over": {
+          "production": [
+            "Edges scattered all over {g} — take the overs",
+            "No headline act in {g}, just numbers everywhere",
+            "{g} sets a full table and a little of everything cashes"
+          ],
+          "scoring": [
+            "The scoring in {g} comes from everywhere",
+            "{g} tilts toward points, no matter who supplies them",
+            "The board leans over in {g}"
+          ],
+          "stops": [
+            "The defenses write the story of {g}",
+            "{g} turns on takeaways — the disruptors eat",
+            "Defense travels, and it's coming to {g}"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} promises less than the lines do — unders",
+            "The quiet kind of night is coming in {g}",
+            "{g} runs flat and the numbers come up short"
+          ],
+          "scoring": [
+            "Points come grudgingly in {g}",
+            "{g} has a low ceiling — fade the scoring",
+            "The well runs shallow in {g}"
+          ],
+          "stops": [
+            "{g} stays clean — few mistakes, fewer takeaways",
+            "The defensive playmakers go hungry in {g}",
+            "{g} runs crisp and the havoc numbers starve"
+          ]
+        }
+      }
+    },
+    "unit": {
+      "even": {
+        "Over": {
+          "production": [
+            "{team}'s {grp} unit has the edge on {opp} — overs",
+            "Wherever {opp} is soft, {team}'s {grp} corps lives",
+            "The numbers say {opp} can't hold up against {team}'s {grp}s"
+          ],
+          "scoring": [
+            "{team}'s {grp}s do the scoring against {opp}",
+            "{opp} has no answer for {team}'s {grp} unit — points follow",
+            "The scoring flows through {team}'s {grp}s against {opp}"
+          ],
+          "stops": [
+            "{team}'s {grp}s harass {opp} into mistake after mistake",
+            "{opp} runs straight into {team}'s {grp} wall",
+            "The takeaways belong to {team}'s {grp}s against {opp}"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{opp} clamps down on {team}'s {grp}s — unders",
+            "{team}'s {grp} unit walks into a wall in {opp}",
+            "{opp} takes {team}'s {grp}s out of the script"
+          ]
+        }
+      }
+    },
+    "stack": {
+      "even": {
+        "Over": {
+          "production": [
+            "A {n}-leg {g} stack, and {p} sets the tone",
+            "{n} legs from {g} rise together — {p} leads them up",
+            "One game, {n} ways: {g} pays through {p}"
+          ],
+          "scoring": [
+            "{n} scoring legs out of {g}, all pulled into {p}'s orbit",
+            "When {p} heats up, all {n} legs of this {g} stack ride along",
+            "{g} feeds {n} scorers at once and {p} eats first"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{n} unders out of {g}, and {p} anchors the fade",
+            "A {n}-leg fade of {g}, with {p} the quietest of all",
+            "{g} comes up short {n} different ways, starting with {p}"
+          ]
+        }
+      }
+    }
+  },
+  "basketball": {
+    "player": {
+      "shootout": {
+        "Over": {
+          "scoring": [
+            "In {g}'s track meet, {p} pours in the points",
+            "The {g} shootout writes itself and {p} is the author",
+            "Scoreboard ablaze in {g}, {p} answers every run",
+            "{g} turns into a fireworks show; {p} lights the fuse",
+            "No brakes in {g} — {p} rides the avalanche of points"
+          ],
+          "boards": [
+            "Misses fly in the {g} shootout and {p} hoards the rebounds",
+            "All that {g} firing means caroms — {p} owns the glass",
+            "{p} feasts on the wreckage of {g}'s shootout"
+          ],
+          "playmaking": [
+            "{g} runs end to end and {p} keeps feeding the break",
+            "In the {g} shootout {p} conducts the orchestra of assists",
+            "Every {g} possession a chance — {p} sets the table all night"
+          ],
+          "stops": [
+            "Even in the {g} shootout {p} keeps stuffing the box score",
+            "Chaos in {g} plays into {p}'s hands — stocks pile up"
+          ],
+          "k's": [
+            "{p} answers the {g} firefight with strikeout after strikeout",
+            "Bats hot all over {g}, yet {p} keeps missing them"
+          ],
+          "production": [
+            "The {g} shootout belongs to {p}, who stuffs the sheet",
+            "{p} rides the {g} track meet to a monster line"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "Even amid the {g} shootout, {p} gets held under",
+            "{g} runs wild but {p} is the one shooter who goes quiet"
+          ],
+          "production": [
+            "The {g} shootout passes {p} by",
+            "Points everywhere in {g} except on {p}'s ledger"
+          ]
+        }
+      },
+      "grind": {
+        "Over": {
+          "scoring": [
+            "In the {g} rockfight, {p} still finds the bucket",
+            "{g} is a grind, but {p} drags points out of the mud",
+            "When {g} bogs down, {p} is the lone source of offense",
+            "Low and slow in {g} — {p} is where the points hide"
+          ],
+          "boards": [
+            "The {g} rockfight is won on the glass and {p} crashes it",
+            "Every {g} possession a war; {p} cleans up the misses",
+            "Grind games reward the boards — {p} dominates the {g} glass"
+          ],
+          "playmaking": [
+            "In the {g} grind, {p} is the one who makes the pass that matters",
+            "{g} slows to a crawl and {p} orchestrates every good look"
+          ],
+          "stops": [
+            "The {g} rockfight is {p}'s element — stops and takeaways pile up",
+            "Defense decides {g} and {p} is everywhere on the stat sheet",
+            "{p} thrives in the {g} mud, racking up stocks"
+          ],
+          "k's": [
+            "{p} turns the {g} pitchers' duel into a strikeout clinic",
+            "Bats go cold in {g} and {p} buries them"
+          ],
+          "production": [
+            "The {g} grind bends to {p}, who fills the box score anyway",
+            "{p} is the heartbeat of a rugged {g} night"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "The {g} rockfight swallows {p}'s scoring whole",
+            "Nothing comes easy in {g}; {p} stays bottled up"
+          ],
+          "production": [
+            "The {g} grind smothers {p}",
+            "A quiet {p} fits a quiet {g} script"
+          ]
+        }
+      },
+      "blowout": {
+        "Over": {
+          "scoring": [
+            "{p} pads the lead as {g} turns into a runaway",
+            "The {g} blowout lets {p} hunt points unopposed",
+            "Garbage time looms in {g} and {p} cashes in early",
+            "{p} steps on the gas before {g} is even decided"
+          ],
+          "boards": [
+            "The {g} runaway sends {p} to the glass with room to roam",
+            "{p} mops up the boards as {g} gets out of hand"
+          ],
+          "playmaking": [
+            "{p} carves up a {g} mismatch with assists to spare",
+            "The {g} blowout is a playground and {p} runs it"
+          ],
+          "stops": [
+            "A {g} mismatch frees {p} to gamble — stocks everywhere",
+            "{p} feasts on a careless {g} blowout for stops"
+          ],
+          "k's": [
+            "{p} cruises through a one-sided {g}, strikeouts mounting"
+          ],
+          "production": [
+            "The {g} runaway is {p}'s stat-sheet stuffing showcase",
+            "{p} feasts before {g}'s outcome is ever in doubt"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "Up big early, {p} sits as {g} gets called off the gas",
+            "The {g} blowout benches {p} before the points pile up",
+            "{p}'s night ends early in a lopsided {g}"
+          ],
+          "production": [
+            "Garbage time steals {p}'s counting stats in {g}",
+            "A {g} runaway quietly caps {p}'s line"
+          ]
+        }
+      },
+      "coinflip": {
+        "Over": {
+          "scoring": [
+            "{g} comes down to the wire and {p} keeps scoring to the end",
+            "In a {g} coin flip, {p} is the hand on the scale — buckets",
+            "Every possession matters in {g}; {p} answers with points"
+          ],
+          "boards": [
+            "A tight {g} is decided on the glass and {p} owns it",
+            "{p} crashes the boards as {g} stays knotted to the finish"
+          ],
+          "playmaking": [
+            "{p} pulls the strings down the stretch of a razor-thin {g}",
+            "In a {g} toss-up, {p} keeps creating the next good look"
+          ],
+          "stops": [
+            "A clutch {g} swings on stops — {p} makes them",
+            "{p} loads the box score as {g} stays deadlocked"
+          ],
+          "k's": [
+            "{p} wins the {g} chess match a strikeout at a time"
+          ],
+          "production": [
+            "In a coin-flip {g}, {p} tilts it with a full stat line",
+            "{p} carries the load through a nervy {g}"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "A clenched {g} chokes off {p}'s looks",
+            "{p} gets squeezed quiet in a tense {g}"
+          ],
+          "production": [
+            "The tight {g} keeps {p} in check",
+            "{p} fades as {g} grinds to the wire"
+          ]
+        }
+      },
+      "even": {
+        "Over": {
+          "scoring": [
+            "{p} is primed to fill it up against {g}",
+            "The number's too low for {p} in {g} — over",
+            "{p} has the matchup to score early and often in {g}",
+            "Lean into {p}'s scoring touch in {g}"
+          ],
+          "boards": [
+            "{p} cleans the glass in {g}",
+            "Rebounds come to {p} in {g} — over the number",
+            "{p} owns the paint against {g}"
+          ],
+          "playmaking": [
+            "{p} sets the table all night in {g}",
+            "Assists flow through {p} in {g}",
+            "{p} runs the show against {g}"
+          ],
+          "stops": [
+            "{p} stuffs the box score in {g}",
+            "Stocks pile up for {p} against {g}",
+            "{p} is a menace on defense in {g}"
+          ],
+          "k's": [
+            "{p} racks up the strikeouts against {g}",
+            "{p} is unhittable in {g}"
+          ],
+          "production": [
+            "{p} stuffs the stat sheet in {g}",
+            "{p} takes over against {g}",
+            "All signs point to a big {p} night in {g}"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "{p} runs cold against {g}",
+            "The matchup holds {p} in check in {g}",
+            "{p} can't buy a bucket against {g}"
+          ],
+          "boards": [
+            "{p} gets boxed out in {g}",
+            "{p} stays off the glass against {g}"
+          ],
+          "playmaking": [
+            "{p} can't find anyone against {g}",
+            "{g} bottles {p} up"
+          ],
+          "stops": [
+            "{p} stays out of the box score in {g}",
+            "Quiet defensive night for {p} in {g}"
+          ],
+          "k's": [
+            "{p} gets hit around in {g}",
+            "No swing-and-miss for {p} against {g}"
+          ],
+          "production": [
+            "{p} has a quiet night in {g}",
+            "{p} no-shows against {g}",
+            "The under is the call on {p} in {g}"
+          ]
+        }
+      }
+    },
+    "game-script": {
+      "shootout": {
+        "Over": {
+          "production": [
+            "The {g} track meet lifts every stat line in the gym",
+            "{g} is all gas and no half-court sets — overs everywhere",
+            "Pace is the prophecy in {g}: the whole card runs hot"
+          ],
+          "scoring": [
+            "Nobody guards anybody in {g} — points for everyone",
+            "Threes rain from both benches in {g}",
+            "{g} turns the scoreboard into a slot machine"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} runs hot but these lines sit out the sprint",
+            "Even a track meet has spectators — these {g} lines watch",
+            "Fast game, quiet corners — fade these in {g}"
+          ]
+        }
+      },
+      "grind": {
+        "Over": {
+          "production": [
+            "The {g} rockfight rewards the workers — these lines still clear",
+            "{g} is ugly on purpose and the hustle numbers cash",
+            "Grind games count different stats, and {g} counts these"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} is a rockfight — the unders write themselves",
+            "Every minute of {g} is mud; nothing climbs out",
+            "The pace dies early in {g} and takes the stat sheet with it"
+          ],
+          "scoring": [
+            "Buckets are rationed in {g} — take the unders",
+            "The rims tighten up in {g}",
+            "{g} is a no-fly zone for scorers"
+          ]
+        }
+      },
+      "blowout": {
+        "Over": {
+          "production": [
+            "{g} breaks open early — stats pile up on the second unit",
+            "Garbage time is a stat buffet in {g}",
+            "The {g} rout frees every line to run"
+          ]
+        },
+        "Under": {
+          "production": [
+            "The starters watch the fourth quarter of {g} from the bench",
+            "The {g} blowout sends the stars to street clothes early",
+            "{g} gets decided by halftime and the minutes dry up"
+          ]
+        }
+      },
+      "coinflip": {
+        "Over": {
+          "production": [
+            "{g} goes to the wire — heavy minutes, full stat lines",
+            "Every possession of {g} matters, so the stars never sit",
+            "Clutch time in {g} puts the ball in the best hands — overs"
+          ]
+        },
+        "Under": {
+          "production": [
+            "Crunch time shrinks the game in {g} — unders",
+            "{g} stays knotted and careful; the stat sheet pays for it",
+            "Late-game {g} possessions turn to sludge — fade the counters"
+          ]
+        }
+      },
+      "even": {
+        "Over": {
+          "production": [
+            "No star carries {g} — the whole gym eats",
+            "The edges in {g} are spread across the rotation — overs",
+            "{g} promises quiet stars and loud box scores"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} reads flat — the box scores stay modest",
+            "No current to ride in {g}; the unders hold",
+            "The signs over {g} all point down"
+          ]
+        }
+      }
+    },
+    "unit": {
+      "even": {
+        "Over": {
+          "production": [
+            "{team}'s {grp}s feast on a soft {opp} rotation",
+            "{team} hunts the {opp} mismatch with its {grp}s all night",
+            "The {grp} matchup is the crack in {opp}'s wall, and {team} pours through"
+          ],
+          "scoring": [
+            "{team}'s {grp}s get their buckets on {opp}",
+            "{opp} can't keep {team}'s {grp}s off the scoreboard",
+            "The points flow to {team}'s {grp}s against {opp}"
+          ],
+          "boards": [
+            "{team}'s {grp}s clean the glass against {opp}",
+            "{opp} concedes the boards to {team}'s {grp}s",
+            "Second chances belong to {team}'s {grp} crew over {opp}"
+          ]
+        }
+      }
+    },
+    "stack": {
+      "even": {
+        "Over": {
+          "production": [
+            "A {n}-leg {g} stack rides {p}'s gravity",
+            "{p} bends {g} and all {n} legs bend along",
+            "One hot hand in {g} warms all {n} legs — {p} deals"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{n} quiet legs from {g}, and {p} sets the hush",
+            "Fade {g} {n} ways — {p} leads the retreat",
+            "The {g} stack points down: {n} unders behind {p}"
+          ]
+        }
+      },
+      "shootout": {
+        "Over": {
+          "production": [
+            "{n} legs strapped to the {g} track meet, {p} in the front seat",
+            "The {g} pace lifts all {n} boats and {p} steers",
+            "Stack the {g} shootout {n} deep — {p} brings it home"
+          ]
+        }
+      }
+    }
+  },
+  "football": {
+    "player": {
+      "shootout": {
+        "Over": {
+          "scoring": [
+            "In the {g} shootout, {p} piles up yards by the drive",
+            "{g} turns into seven-on-seven and {p} feasts",
+            "No defense shows up in {g} — {p} runs free all day",
+            "The scoreboard spins in {g} and {p} keeps it spinning"
+          ],
+          "playmaking": [
+            "{g} airs it out and the targets funnel to {p}",
+            "Every {g} drive goes through {p}'s hands",
+            "The {g} shootout never punts, and {p} never leaves the field"
+          ],
+          "stops": [
+            "All those {g} snaps mean tackles, and {p} collects them",
+            "The {g} shootout runs play after play at {p} — the sheet fills",
+            "{g} never slows down, so {p} never stops hitting"
+          ],
+          "production": [
+            "The {g} shootout is {p}'s stage",
+            "{p} rides the {g} scoring spree to a monster line",
+            "Shootouts crown the skill players, and {g} crowns {p}"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "Points everywhere in {g}, but the game plan forgets {p}",
+            "{g} lights up while {p} waits on a target that never comes"
+          ],
+          "production": [
+            "The {g} shootout tells its story without {p}",
+            "{g} explodes and {p} somehow stays quiet"
+          ]
+        }
+      },
+      "grind": {
+        "Over": {
+          "scoring": [
+            "{g} is trench warfare and {p} grinds out every yard",
+            "When {g} bogs down, the offense leans on {p}",
+            "Three yards and a cloud of dust in {g} — {p} carries the load"
+          ],
+          "playmaking": [
+            "{g} shrinks to checkdowns and {p} is the checkdown",
+            "The {g} grind funnels every safe throw to {p}",
+            "Short fields, short throws: {g} keeps finding {p}"
+          ],
+          "stops": [
+            "The {g} rockfight is won up front and {p} lives there",
+            "Run after run comes {p}'s way in {g} — the tackles stack up",
+            "{p} feasts in the {g} trenches"
+          ],
+          "production": [
+            "Ugly game, pretty line: {p} owns the {g} grind",
+            "{p} is the one engine that runs in the {g} mud",
+            "{g} turns heavy, and heavy games belong to {p}"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "The {g} slugfest swallows {p} whole",
+            "No room to breathe in {g}; {p} stays bottled up"
+          ],
+          "production": [
+            "The {g} grind buries {p}'s touches",
+            "{p} disappears into the {g} trenches"
+          ]
+        }
+      },
+      "blowout": {
+        "Over": {
+          "scoring": [
+            "{g} breaks open and {p} piles on against a beaten front",
+            "The {g} rout means clock-killing carries, and {p} eats",
+            "{p} pads the lead in {g} one chunk play at a time"
+          ],
+          "playmaking": [
+            "A {g} blowout means garbage-time targets, and {p} hoards them",
+            "{p} carves up a {g} mismatch underneath all day"
+          ],
+          "stops": [
+            "The {g} blowout lets {p} pin the ears back and hunt",
+            "{p} tees off on a one-way {g} script — sacks follow"
+          ],
+          "production": [
+            "The {g} runaway hands {p} a stat-padding clinic",
+            "{p} fills the box score before {g} is even decided"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "Up big, {g} turns to kneel-downs and {p}'s day ends early",
+            "The {g} blowout benches {p} for the fourth quarter"
+          ],
+          "production": [
+            "Garbage time eats {p}'s snaps in {g}",
+            "A lopsided {g} caps {p}'s touches"
+          ]
+        }
+      },
+      "coinflip": {
+        "Over": {
+          "scoring": [
+            "{g} stays tight to the final gun and {p} keeps moving the chains",
+            "Every drive of {g} matters and {p} answers each one",
+            "In a {g} coin flip, the ball finds {p} when it counts"
+          ],
+          "playmaking": [
+            "Third-and-anything in {g} means a throw toward {p}",
+            "A one-score {g} keeps the offense honest and {p} busy"
+          ],
+          "stops": [
+            "A tight {g} is decided in the trenches, and {p} wins there",
+            "{p} makes the stop {g} hinges on, then makes five more"
+          ],
+          "production": [
+            "{g} goes the distance and {p} carries it",
+            "Four full quarters in {g}, all of them {p}'s"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "A field-position fight in {g} squeezes {p} out",
+            "{g} tightens up and {p}'s looks vanish"
+          ],
+          "production": [
+            "The tight {g} script keeps {p} under wraps",
+            "{p} gets lost in a {g} game of inches"
+          ]
+        }
+      },
+      "even": {
+        "Over": {
+          "scoring": [
+            "{p} moves the chains all day in {g}",
+            "The number is light for {p}'s workload in {g}",
+            "{g} can't account for {p} — the yards come easy"
+          ],
+          "playmaking": [
+            "{p} is the first read in {g}, snap after snap",
+            "Targets rain on {p} in {g}",
+            "{p} owns the middle of the field in {g}"
+          ],
+          "stops": [
+            "{p} lives in the backfield in {g}",
+            "Everything {g} runs goes through {p}'s gap",
+            "{p} hunts for all four quarters of {g}"
+          ],
+          "production": [
+            "{p} touches everything in {g}",
+            "The {g} game plan starts and ends with {p}",
+            "All signs in {g} point to a heavy {p} workload"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "{g} keys on {p} and takes the yards away",
+            "{p} runs into a loaded box in {g}",
+            "The sticks stay out of reach for {p} in {g}"
+          ],
+          "playmaking": [
+            "Coverage rolls toward {p} all game in {g}",
+            "{p} gets blanketed in {g}"
+          ],
+          "stops": [
+            "{g} runs the play away from {p} all day",
+            "A quiet day in the trenches for {p} in {g}"
+          ],
+          "production": [
+            "{g} hides {p} in plain sight — under",
+            "{p}'s number never gets called in {g}",
+            "The {g} script writes {p} out"
+          ]
+        }
+      }
+    },
+    "game-script": {
+      "shootout": {
+        "Over": {
+          "production": [
+            "Flags down, throttles open — {g} is a shootout and every line rides",
+            "Both sides script {g} like a two-minute drill — overs",
+            "{g} turns into a track meet in pads — yardage for everybody"
+          ],
+          "scoring": [
+            "{g} becomes a red-zone relay — scoring everywhere",
+            "Two no-huddle offenses turn {g} into a pinball machine",
+            "The {g} scoreboard operator earns overtime pay"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} burns hot, but these lines sit out the fireworks",
+            "Everyone eats in {g} except these few — fade them",
+            "The {g} shootout has blind spots, and these unders live there"
+          ]
+        }
+      },
+      "grind": {
+        "Over": {
+          "production": [
+            "{g} is a fistfight, and fistfights still fill stat sheets",
+            "Clock runs, pads crack — the {g} grind pays the patient",
+            "{g} stays in the trenches, where these numbers live"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} is three-and-out theater — unders",
+            "The punters headline {g}; everyone else goes quiet",
+            "The {g} slugfest starves every stat line"
+          ],
+          "scoring": [
+            "Two walls collide in {g} — nothing gets through",
+            "{g} is field goals and field position all night",
+            "Points come at a premium in {g} — fade the scoring"
+          ]
+        }
+      },
+      "blowout": {
+        "Over": {
+          "production": [
+            "{g} breaks open by halftime and the stats run downhill",
+            "One side empties the playbook on {g} — volume everywhere",
+            "{g} goes one-way and the yards pile up unanswered"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} is over by the third quarter — the backups finish it",
+            "The {g} rout sends the starters to the bench and the lines south",
+            "Kneel-downs close {g}; the counting stats never finish"
+          ]
+        }
+      },
+      "coinflip": {
+        "Over": {
+          "production": [
+            "{g} comes down to a two-minute drill — starters play every snap",
+            "A one-score {g} keeps both playbooks wide open — overs",
+            "Sixty minutes of leverage in {g}; the volume follows"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} turns conservative late — both sides sit on the ball",
+            "A field-position {g} chokes the stat sheet",
+            "Tight {g}, tight play calls — unders"
+          ]
+        }
+      },
+      "even": {
+        "Over": {
+          "production": [
+            "No headliner in {g} — the production spreads wide",
+            "{g} feeds everybody a little; stack the overs",
+            "The {g} edges hide in the corners of the box score"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} reads flat off the tape — unders",
+            "Nothing about {g} says fireworks; take the quiet side",
+            "The {g} script runs short on heroes"
+          ]
+        }
+      }
+    },
+    "unit": {
+      "even": {
+        "Over": {
+          "production": [
+            "{team}'s {grp} room wins its matchup with {opp} snap after snap",
+            "{opp} has no answer for the {team} {grp} room",
+            "{team}'s {grp}s out-class {opp} from the first drive"
+          ],
+          "scoring": [
+            "{team}'s {grp}s find the soft spots in {opp}'s coverage",
+            "{opp} can't keep {team}'s {grp}s out of the end zone",
+            "The yards flow to {team}'s {grp} room against {opp}"
+          ],
+          "stops": [
+            "{team}'s {grp}s live in the {opp} backfield",
+            "{opp}'s protection cracks and {team}'s {grp}s pour through"
+          ]
+        }
+      }
+    },
+    "stack": {
+      "even": {
+        "Over": {
+          "production": [
+            "A {n}-leg {g} stack keyed to {p}'s workload",
+            "{n} legs of {g}, all downstream of {p}",
+            "When {p} cooks in {g}, all {n} legs eat"
+          ]
+        }
+      },
+      "shootout": {
+        "Over": {
+          "production": [
+            "{n} legs ride the {g} shootout with {p} at the wheel",
+            "The {g} air show lifts {n} legs — {p} flies lead",
+            "Stack {g} {n} deep; {p} keeps the drives alive"
+          ]
+        }
+      }
+    }
+  },
+  "hockey": {
+    "player": {
+      "shootout": {
+        "Over": {
+          "scoring": [
+            "{g} turns into firewagon hockey and {p} lights the lamp",
+            "End to end all night in {g} — {p} buries the chances",
+            "{g} opens up and {p} fills the net",
+            "Pucks fly in {g} and {p}'s stick stays hot"
+          ],
+          "k's": [
+            "Rubber rains on {p} in {g} — the saves pile up",
+            "{g} turns into a shooting gallery and {p} stands tall in it",
+            "Shot after shot comes at {p} in {g}, and most die in the glove"
+          ],
+          "stops": [
+            "Chances everywhere in {g} — {p} eats pucks all night",
+            "{p} sacrifices the body shift after shift in a wide-open {g}"
+          ],
+          "production": [
+            "The {g} firefight runs through {p}'s line",
+            "{p} feasts at even strength and on the power play in {g}"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "Goals everywhere in {g} except off {p}'s stick",
+            "{g} lights up around {p}, who never finds twine"
+          ],
+          "production": [
+            "The {g} goal rush skates right past {p}",
+            "{p}'s line misses the {g} party"
+          ]
+        }
+      },
+      "grind": {
+        "Over": {
+          "scoring": [
+            "{g} is playoff hockey and {p} scores the greasy goal",
+            "The ice tilts slow in {g}, but {p} still finds the net",
+            "One goal might win {g} — {p} supplies it"
+          ],
+          "stops": [
+            "{p} owns the shot lanes in a buttoned-up {g}",
+            "The {g} trap means blocked shots, and {p} blocks them all",
+            "{p} eats rubber on every {g} penalty kill"
+          ],
+          "k's": [
+            "A goalie duel in {g}, and {p} refuses to blink",
+            "{p} matches the {g} grind save for save",
+            "Shutout watch in {g}: {p} turns away everything"
+          ],
+          "playmaking": [
+            "In a tight-checking {g}, {p} threads the only passes that matter",
+            "{p} finds seams in {g} that nobody else sees"
+          ],
+          "production": [
+            "The {g} grind bends around {p}'s shifts",
+            "Heavy ice in {g}, and {p} skates through it anyway"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "The {g} trap swallows {p}'s chances",
+            "{p} fires into shin pads all night in {g}"
+          ],
+          "production": [
+            "{g} checks {p} into silence",
+            "No room on the {g} ice for {p} tonight"
+          ]
+        }
+      },
+      "blowout": {
+        "Over": {
+          "scoring": [
+            "{g} gets out of hand and {p} keeps scoring anyway",
+            "The {g} rout floods the slot and {p} cashes twice",
+            "The backcheck quits in {g} and {p} feasts"
+          ],
+          "k's": [
+            "The {g} rout leaves {p} alone in a shooting gallery — saves mount",
+            "{p} holds the fort while {g} runs away — busy night, big number"
+          ],
+          "production": [
+            "A laugher in {g} means power-play reps for {p} all night",
+            "{p} stuffs the sheet while {g} runs away"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "Up big, {g} rolls four lines and {p}'s shifts shrink",
+            "The {g} blowout shortens {p}'s night"
+          ],
+          "production": [
+            "Garbage minutes in {g} cap {p}'s shifts",
+            "A decided {g} parks {p} on the bench"
+          ]
+        }
+      },
+      "coinflip": {
+        "Over": {
+          "scoring": [
+            "{g} hangs on one goal and {p} scores it",
+            "Tied late in {g}, the puck finds {p}'s tape",
+            "{p} owns the big shifts in a knotted {g}"
+          ],
+          "k's": [
+            "{p} steals {g} one save at a time",
+            "A one-goal {g} is a goalie's stage, and {p} takes it"
+          ],
+          "stops": [
+            "Every {g} shift is a battle and {p} guards the door",
+            "{p} throws the body around a deadlocked {g}"
+          ],
+          "production": [
+            "{p} double-shifts through a {g} nail-biter",
+            "{g} stays tied and {p} stays on the ice"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "A cagey {g} keeps {p} to the outside",
+            "{p}'s looks dry up as {g} tightens"
+          ],
+          "production": [
+            "The {g} chess match plays {p} off the puck",
+            "{p} grips the stick too tight in a tense {g}"
+          ]
+        }
+      },
+      "even": {
+        "Over": {
+          "scoring": [
+            "{p} buries the chances in {g}",
+            "The lamp keeps lighting for {p} in {g}",
+            "{p} peppers the net in {g}"
+          ],
+          "k's": [
+            "{p} shuts the door in {g}",
+            "The crease belongs to {p} in {g}",
+            "{p} sees every puck in {g}"
+          ],
+          "stops": [
+            "{p} eats rubber in {g}",
+            "The shot lanes close wherever {p} skates in {g}"
+          ],
+          "playmaking": [
+            "The puck moves through {p} in {g}",
+            "{p} quarterbacks the power play in {g}"
+          ],
+          "production": [
+            "{p} drives the play every shift in {g}",
+            "{g} runs through {p}'s line",
+            "Big minutes, big night: {p} owns {g}"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "{p} can't beat anyone clean in {g}",
+            "{g} keeps {p} to the outside",
+            "No twine for {p} in {g}"
+          ],
+          "k's": [
+            "The pucks find holes in {p} tonight in {g}",
+            "{p} fights the puck all night in {g}"
+          ],
+          "stops": [
+            "{p} stays out of the lanes in {g}",
+            "Few pucks find {p}'s shin pads in {g}"
+          ],
+          "production": [
+            "{p} skates a quiet {g}",
+            "{g} pins {p}'s line in its own end",
+            "Third-pairing minutes loom for {p} in {g}"
+          ]
+        }
+      }
+    },
+    "game-script": {
+      "shootout": {
+        "Over": {
+          "production": [
+            "{g} turns into firewagon hockey — overs up and down the card",
+            "Both benches trade odd-man rushes in {g}; every line eats",
+            "The goalies get no help in {g} — ride the offense"
+          ],
+          "scoring": [
+            "Red lights all night in {g}",
+            "Defense is a rumor in {g} — goals come in bunches",
+            "{g} plays loose and the pucks pour in"
+          ]
+        }
+      },
+      "grind": {
+        "Over": {
+          "production": [
+            "{g} is heavy ice, and these lines feed on the grind",
+            "Blocked shots, board battles, body checks — {g} pays the workers",
+            "The {g} grind runs through the corners, where these stats live"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} is a 2-1 game written in advance — unders",
+            "Two traps collide in {g}; nothing gets through the neutral zone",
+            "{g} grinds along the boards and the stat lines starve"
+          ]
+        }
+      },
+      "blowout": {
+        "Over": {
+          "production": [
+            "{g} turns into target practice — the counting stats feast",
+            "The {g} rout keeps the power play humming — volume everywhere",
+            "One net sees all the action in {g} and the numbers climb"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} is decided by the second intermission — the fourth lines finish it",
+            "A {g} laugher melts the stars' ice time — unders",
+            "The {g} rout turns the third period into a scrimmage"
+          ]
+        }
+      },
+      "coinflip": {
+        "Over": {
+          "production": [
+            "{g} smells like overtime — extra shifts for everybody",
+            "A one-goal {g} keeps the top lines double-shifting",
+            "Sixty-five minutes loom in {g}, and the volume rides along"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} tightens into a chess match — unders",
+            "Nobody risks the extra pass in a knotted {g}; the chances die",
+            "{g} locks up after forty minutes and the stat sheet freezes"
+          ]
+        }
+      },
+      "even": {
+        "Over": {
+          "production": [
+            "No headliner in {g} — depth scoring carries the night",
+            "{g} spreads the wealth across all four lines",
+            "The {g} edges live in the bottom six — overs"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} reads sleepy — fade the stat lines",
+            "The {g} forecast calls for flurries, never the storm",
+            "Quiet boards, quiet sheets in {g}"
+          ]
+        }
+      }
+    },
+    "unit": {
+      "even": {
+        "Over": {
+          "production": [
+            "{team}'s {grp} corps tilts the ice against {opp}",
+            "{opp} can't match {team}'s {grp} depth shift for shift",
+            "The {grp} battle goes {team}'s way against {opp} all night"
+          ],
+          "scoring": [
+            "{team}'s {grp}s live in the {opp} slot tonight",
+            "{opp}'s blue line parts for {team}'s {grp}s",
+            "The chances stack up for {team}'s {grp}s against {opp}"
+          ]
+        }
+      }
+    },
+    "stack": {
+      "even": {
+        "Over": {
+          "production": [
+            "A {n}-leg {g} stack skates on {p}'s line",
+            "{n} legs from {g} ride the same shift as {p}",
+            "When {p}'s line rolls in {g}, all {n} legs roll with it"
+          ]
+        }
+      },
+      "shootout": {
+        "Over": {
+          "production": [
+            "{n} legs strapped to a {g} firefight, {p} on the top line",
+            "The {g} goal rush carries {n} legs and {p} leads it"
+          ]
+        }
+      }
+    }
+  },
+  "baseball": {
+    "player": {
+      "shootout": {
+        "Over": {
+          "scoring": [
+            "{g} turns into a slugfest and {p} keeps the line moving",
+            "Balls fly out of the yard in {g} — {p} joins the parade",
+            "{g} is batting practice and {p} swings first",
+            "Every inning of {g} bleeds runs and {p} cashes the runners"
+          ],
+          "k's": [
+            "Runs everywhere in {g}, but {p} keeps missing bats anyway",
+            "{p} punches tickets while the {g} fireworks go off"
+          ],
+          "production": [
+            "The {g} hit parade marches through {p}",
+            "{p} feasts in a {g} game with no pitching"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "Runs rain all over {g} but {p}'s bat stays dry",
+            "{g} turns into a carousel and {p} never boards"
+          ],
+          "k's": [
+            "The bats find everything {p} throws in {g}",
+            "The {g} slugfest chases {p} early"
+          ],
+          "production": [
+            "The {g} slugfest skips {p}'s spot in the order",
+            "Loud {g}, quiet {p}"
+          ]
+        }
+      },
+      "grind": {
+        "Over": {
+          "scoring": [
+            "A pitchers' duel in {g}, and {p} is the one who cracks it",
+            "Runs are scarce in {g}; {p} scratches one across",
+            "{p} finds the gap nobody else can find in {g}"
+          ],
+          "k's": [
+            "Zeros stack up in {g} and {p} stacks punchouts with them",
+            "{p} owns the corners all night in {g}",
+            "The {g} duel is {p}'s kind of night — the whiffs pile up"
+          ],
+          "production": [
+            "Every base is earned in {g}, and {p} earns plenty",
+            "The {g} chess match tilts toward {p}"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "The {g} duel swallows {p}'s bat",
+            "{p} sees nothing to hit all night in {g}"
+          ],
+          "production": [
+            "{g} is a 1-0 kind of night, and {p} stays quiet",
+            "The {g} grind pitches around {p}"
+          ]
+        }
+      },
+      "blowout": {
+        "Over": {
+          "scoring": [
+            "{g} breaks open and {p} feasts on mop-up relief",
+            "The {g} rout keeps turning the lineup over, and {p} keeps cashing",
+            "{p} pads the line against a beaten {g} bullpen"
+          ],
+          "k's": [
+            "A big lead in {g} lets {p} attack the zone — the whiffs follow",
+            "{p} paints corners at leisure in a one-sided {g}"
+          ],
+          "production": [
+            "{g} runs away and {p} tours the bases unbothered",
+            "The {g} laugher is {p}'s buffet"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "Up big, {g} empties the bench and {p}'s at-bats vanish",
+            "The {g} blowout shortens {p}'s night at the plate"
+          ],
+          "production": [
+            "Garbage innings eat {p}'s counting stats in {g}",
+            "A lopsided {g} caps {p}'s day at the yard"
+          ]
+        }
+      },
+      "coinflip": {
+        "Over": {
+          "scoring": [
+            "{g} stays knotted and {p} swings the biggest bat in it",
+            "Extra innings loom in {g} — more at-bats, more {p}",
+            "A one-run {g} hangs on {p}'s barrel"
+          ],
+          "k's": [
+            "Every out matters in {g}, so {p} takes them by strikeout",
+            "{p} settles a one-run {g} with the whiff"
+          ],
+          "production": [
+            "{g} goes the full nine and {p} fills every inning of it",
+            "A tight {g} keeps {p} in the middle of everything"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "The matchup relievers erase {p} late in {g}",
+            "{p} gets pitched carefully in a tight {g}"
+          ],
+          "production": [
+            "The {g} margin is too thin for {p} to feast",
+            "{p} presses in a {g} decided by inches"
+          ]
+        }
+      },
+      "even": {
+        "Over": {
+          "scoring": [
+            "{p} squares up everything in {g}",
+            "The bases keep calling for {p} in {g}",
+            "{p} sprays line drives all over {g}"
+          ],
+          "k's": [
+            "{p} carves the {g} lineup",
+            "The punchouts come easy for {p} in {g}",
+            "{p} has the {g} order swinging at shadows"
+          ],
+          "production": [
+            "{p} stays hot through {g}",
+            "{g} feeds {p}'s bat all night",
+            "The total bases stack up for {p} in {g}"
+          ]
+        },
+        "Under": {
+          "scoring": [
+            "{p} chases all night in {g}",
+            "The {g} pitching keeps {p} off the barrel",
+            "Empty swings for {p} in {g}"
+          ],
+          "k's": [
+            "The {g} bats put everything in play against {p}",
+            "{p} can't find the swing-and-miss in {g}",
+            "Quick outs and few whiffs for {p} in {g}"
+          ],
+          "production": [
+            "{p} takes the collar in {g}",
+            "A quiet night at the plate finds {p} in {g}",
+            "{g} writes {p} out of the box score"
+          ]
+        }
+      }
+    },
+    "game-script": {
+      "shootout": {
+        "Over": {
+          "production": [
+            "{g} turns into a home-run derby — overs everywhere",
+            "Neither bullpen survives {g}; the bats feast",
+            "A football score is coming in {g} — ride the offense"
+          ],
+          "scoring": [
+            "The baseballs are juiced in {g} tonight",
+            "{g} is batting practice with a crowd",
+            "The runs come in crooked numbers all night in {g}"
+          ]
+        }
+      },
+      "grind": {
+        "Over": {
+          "production": [
+            "A {g} duel still pays the patient — these lines clear",
+            "{g} is all pitching, and the pitching stats eat first",
+            "The {g} grind feeds the arms, not the bats"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} is a pitchers' duel — zeros up and down the card",
+            "Two aces strangle {g}; the unders breathe easy",
+            "{g} moves fast and scores nothing — take the quiet side"
+          ]
+        }
+      },
+      "blowout": {
+        "Over": {
+          "production": [
+            "{g} breaks open and the lineup keeps turning over — volume for everyone",
+            "Mop-up pitching in {g} is a green light for every bat",
+            "{g} piles it on early and never lets up"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} empties both benches by the seventh — unders",
+            "The {g} rout hands the late innings to the September call-ups",
+            "The stars exit a lopsided {g} early, and the lines die on the bench"
+          ]
+        }
+      },
+      "coinflip": {
+        "Over": {
+          "production": [
+            "{g} smells like extra innings — more outs, more chances, more everything",
+            "A one-run {g} burns both bullpens, and the bats get their look",
+            "{g} runs deep into the night and the counting stats ride along"
+          ]
+        },
+        "Under": {
+          "production": [
+            "Small ball chokes {g} — unders",
+            "Every {g} at-bat gets the careful treatment — fade the props",
+            "A tight {g} turns into bullpen chess, and the numbers stay low"
+          ]
+        }
+      },
+      "even": {
+        "Over": {
+          "production": [
+            "No ace and no slugger headlines {g} — the whole order chips in",
+            "{g} spreads the hits around — overs in the aggregate",
+            "The {g} edges hide in the middle innings"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} reads like a getaway-day snoozer — unders",
+            "{g} promises a tidy, quiet nine",
+            "The bats stay in the rack in {g}"
+          ]
+        }
+      }
+    },
+    "unit": {
+      "even": {
+        "Over": {
+          "production": [
+            "{team}'s {grp} corps owns the matchup with {opp}",
+            "{team}'s {grp}s win the night against {opp}, one matchup at a time",
+            "{opp} has no answer for {team}'s {grp} group, top to bottom"
+          ],
+          "scoring": [
+            "{team}'s {grp}s tee off on {opp}",
+            "The {team} {grp} group strings hits together against {opp}"
+          ]
+        }
+      }
+    },
+    "stack": {
+      "even": {
+        "Over": {
+          "production": [
+            "A {n}-leg {g} stack that bats around {p}",
+            "{n} legs from {g} ride the same rally as {p}",
+            "The {g} order turns over {n} ways and {p} leads off"
+          ]
+        }
+      },
+      "shootout": {
+        "Over": {
+          "production": [
+            "{n} legs ride the {g} slugfest and {p} bats cleanup",
+            "The {g} rally lifts {n} legs at once — {p} sparks it"
+          ]
+        }
+      }
+    }
+  }
+}

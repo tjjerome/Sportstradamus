@@ -108,3 +108,23 @@ def test_game_k_why_retained_in_keep_order():
     assert out.loc[0, "Game"] == "AAA/BBB"
     assert out.loc[0, "K"] == 0.42
     assert out.loc[0, "Why"] == "form + edge"
+
+
+def test_position_label_retained_when_present():
+    """The P2 depth-chart label survives the projection (build_game_context reads it)."""
+    df = pd.DataFrame(
+        {
+            "Player": ["P"],
+            "Position": ["G1"],
+            "Boost": [1.0],
+            "Model": [0.5],
+            "Books": [0.0],
+            "Dist": ["Gamma"],
+            "Model Param": [2.0],
+        }
+    )
+
+    out = _normalize_offers(df)
+
+    assert "Position" in out.columns
+    assert out.loc[0, "Position"] == "G1"
