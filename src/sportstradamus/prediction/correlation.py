@@ -453,6 +453,38 @@ def _annotate_correlation_columns(df, game_df, g):
         )
 
 
+def _collect_game_corr(game_df, C, league, game_label, market_map):
+    """Per-game upper-triangle correlation slice for the dashboard rail/constellation.
+
+    Emits one row per distinct leg pair, keyed by ``Player|Market|Bet`` with the
+    canonical ``Market`` code (``market_map`` mirrors the post-``process_offers``
+    remap ``cli`` applies) so the slice joins ``current_offers.parquet``. ``C`` is
+    positionally aligned to ``game_df`` (the caller reset its index). Correlation
+    is line-independent, so same-key pairs at different lines collapse on the
+    caller's dedup.
+    """
+    players = game_df["Player"].to_numpy()
+    markets = game_df["Market"].to_numpy()
+    bets = game_df["Bet"].to_numpy()
+    rows = []
+    for i, j in combinations(range(len(game_df)), 2):
+        leg_i = f"{players[i]}|{market_map.get(markets[i], markets[i])}|{bets[i]}"
+        leg_j = f"{players[j]}|{market_map.get(markets[j], markets[j])}|{bets[j]}"
+        if leg_i == leg_j:
+            continue
+        leg_a, leg_b = sorted((leg_i, leg_j))
+        rows.append(
+            {
+                "League": league,
+                "Game": game_label,
+                "leg_a": leg_a,
+                "leg_b": leg_b,
+                "rho": float(C[i, j]),
+            }
+        )
+    return rows
+
+
 def _append_parlay_rows(parlay_df, best_bets, C):
     """Dedup beam-search bets across the three sort views, label families, append.
 
@@ -489,11 +521,14 @@ def _process_league_games(
     parlay_df,
     contest_variant,
     legacy,
+    corr_sink,
+    market_map,
 ):
     """Annotate correlations and beam-search parlays for every game in a league.
 
     For each (team, opponent) pairing: assemble the game frame, build the
-    correlation / boost matrices, annotate ``df``'s display columns, and — unless
+    correlation / boost matrices, annotate ``df``'s display columns, collect the
+    per-game correlation slice into ``corr_sink`` (when not None), and — unless
     the platform/league is parlay-ineligible — beam-search parlays onto
     ``parlay_df`` (returned).
     """
@@ -516,6 +551,11 @@ def _process_league_games(
             game_df, game_dict, c_map, team_mod_map, opp_mod_map, search_payouts
         )
         _annotate_correlation_columns(df, game_df, g)
+
+        if corr_sink is not None:
+            corr_sink.extend(
+                _collect_game_corr(game_df, g.C, league, "/".join(sorted([team, opp])), market_map)
+            )
 
         if platform in ["Chalkboard", "ParlayPlay"] and league == "MLB":
             continue
@@ -552,6 +592,7 @@ def find_correlation(
     *,
     contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"] = "pooled",
     legacy: bool = False,
+    corr_sink: list | None = None,
 ):
     """Annotate offers with correlation info and build parlay candidates.
 
@@ -570,6 +611,10 @@ def find_correlation(
         legacy: When True, reproduce the pre-2026.05 pipeline verbatim — no
             PSD repair, no push-aware EV, mixed insurance/power Boost overwrite.
             Removed next release.
+        corr_sink: When provided, each game appends its upper-triangle
+            correlation slice (``League, Game, leg_a, leg_b, rho``) to this list
+            for the dashboard rail/constellation. The pickem variant-sweep caller
+            leaves it None.
 
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]: ``(offer_df, parlay_df)`` where
@@ -597,6 +642,11 @@ def find_correlation(
 
     df["Team Correlation"] = ""
     df["Opp Correlation"] = ""
+    # Canonical matchup key shared by offers, parlays, and the corr slice so the
+    # dashboard joins them. Distinct from the "Team vs Opp · Date" display label.
+    df["Game"] = [
+        "/".join(sorted([t, o])) for t, o in zip(df["Team"], df["Opponent"], strict=False)
+    ]
     parlay_df = pd.DataFrame(
         columns=[
             "Game",
@@ -658,6 +708,8 @@ def find_correlation(
             parlay_df,
             contest_variant,
             legacy,
+            corr_sink,
+            stat_map[platform],
         )
 
     if legacy and platform == "Underdog":

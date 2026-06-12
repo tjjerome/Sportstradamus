@@ -1,6 +1,6 @@
 # Dashboard UX — "the Oracle"
 
-> Status: ACTIVE — stage P2
+> Status: ACTIVE — stage P3
 
 ## 1. Mission & money logic
 
@@ -196,5 +196,6 @@ devel-bound PR; research-analyst only if a stage turns into a modeling question 
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
+- 2026-06-11 · P2 · pipeline precompute: `prediction/stories/` generator (per-family `Thesis` + per-offer `Why`; 107-variant date-keyed prophecy bank; slate-uniqueness pass) replaces & retires the render-time phrase bank; `Game`/`K`/`Why` offer keep-cols; `current_game_corr.parquet` via opt-in `find_correlation(corr_sink=…)` (return-arity avoided per kill-branch); `stories_version` in meta; Slips reads precomputed `Thesis`; `parse_leg` moved to prediction layer (dashboard re-exports). Generator subagent-built then carved to a <300-line package; refactoring-specialist pass (reverted its 2 out-of-footprint pre-existing-comment edits in io.py/cli.py). · gates ruff ✓ / golden ✓ (494 pass; **2 pre-existing unrelated reds left untouched** — `stats` `get_training_matrix` data-drift + pickem SciPy-cdf xdist flake, both fail on lane HEAD with P2 stashed) / integration ✓ · next: P3 slip engine
 - 2026-06-11 · P1 · six-surface package landed, legacy pages deleted, 2 review rounds + quality fixes (2eed419..66ede1c); host crash mid-commit recovered via reflog repoint + working-tree recommit; 2 latent profit-sim crashes fixed at source (strategies/profit_sim.py — outside-footprint touch, disclosed) · gates ✓/✓/✓ · next: P2 pipeline precompute (stories.py, keep-cols, corr slices)
 - 2026-06-11 · P0 · celestial tokens + spec + lane + mockups landed (6a33b81) · gates ✓/✓/✓ · next: P1 package migration

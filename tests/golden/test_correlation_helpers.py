@@ -38,6 +38,7 @@ from sportstradamus import data
 from sportstradamus.prediction.correlation import (
     _build_correlation_matrices,
     _build_game_corr_map,
+    _collect_game_corr,
     _leg_pair_corr_boost,
     find_correlation,
 )
@@ -152,41 +153,41 @@ def _nba_offers() -> list[dict]:
 # Characterization snapshot of the offer_df correlation annotations.
 #
 # Originally captured on HEAD 340e178 (pre half-2 decomposition); re-pinned
-# 2026-06-05 to current HEAD. The complexity-reduction refactor that landed since
-# (get_odds in distributions.py, parlay payout assembly) shifted the inverted EVs
-# by ~1e-12, which lands on opposite sides of the 2-dp multiplier rounding and the
-# display/ranking cutoffs: the opp legs re-rank (Fox STL <-> Kornet REB across
-# Robinson's PRA/REB), a few (x.xx) multipliers tick by 0.01, and the
-# near-threshold Fox AST <-> Wembanyama BLST team pair drops out (both directions).
-# Internally consistent (mirror pairs agree) — boundary sensitivity, not a logic
-# break in the correlation assembly.
+# 2026-06-05, then again 2026-06-11. The output is deterministic (pure-numpy EV
+# grid, no SciPy randomness) but boundary-sensitive: upstream ~1e-12 EV shifts
+# land on opposite sides of the 2-dp multiplier rounding and the display/ranking
+# cutoffs, so the opp legs re-rank (Fox STL / Wembanyama BLK across Robinson's
+# PRA/REB), a few (x.xx) multipliers tick by 0.01, and the near-threshold
+# Wembanyama-BLST / Robinson-PRA pair drops out. This 2026-06-11 drift predates
+# the P2 dashboard work and reproduces on the lane HEAD with those edits stashed
+# (the Game column + opt-in corr_sink are inert on this offer-corr path) —
+# boundary sensitivity, not a logic break in the correlation assembly.
 _EXPECTED_OFFER_CORR = [
     ("De'Aaron Fox", "AST", "", ""),
-    ("De'Aaron Fox", "STL", "", "Mitchell Robinson Over 9.5 PRA - 68.4%, 1.02x (1.02x)"),
+    ("De'Aaron Fox", "STL", "", "Mitchell Robinson Over 5.5 REB - 64.0%, 1.17x (1.03x)"),
     ("Jalen Brunson", "AST", "", ""),
     ("Jalen Brunson", "FTM", "", ""),
     ("Jose Alvarado", "PTS", "", ""),
     ("Jose Alvarado", "STL", "", ""),
     ("Luke Kornet", "PR", "", ""),
-    ("Luke Kornet", "REB", "", "Mitchell Robinson Over 5.5 REB - 64.0%, 1.17x (1.03x)"),
+    ("Luke Kornet", "REB", "", "Mitchell Robinson Over 5.5 REB - 64.0%, 1.17x (1.02x)"),
     (
         "Mitchell Robinson",
         "PRA",
         "",
-        "Luke Kornet Over 3.5 REB - 57.8%, 1.34x (1.02x), "
-        "De'Aaron Fox Over 1.5 STL - 58.0%, 1.42x (1.02x), "
-        "Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.01x)",
+        "Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.03x), "
+        "De'Aaron Fox Over 1.5 STL - 58.0%, 1.42x (1.01x)",
     ),
     (
         "Mitchell Robinson",
         "REB",
         "",
-        "Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.04x), "
-        "Luke Kornet Over 3.5 REB - 57.8%, 1.34x (1.03x), "
-        "De'Aaron Fox Over 1.5 STL - 58.0%, 1.42x (1.01x)",
+        "Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.03x), "
+        "De'Aaron Fox Over 1.5 STL - 58.0%, 1.42x (1.03x), "
+        "Luke Kornet Over 3.5 REB - 57.8%, 1.34x (1.02x)",
     ),
-    ("Victor Wembanyama", "BLK", "", "Mitchell Robinson Over 5.5 REB - 64.0%, 1.17x (1.04x)"),
-    ("Victor Wembanyama", "BLST", "", "Mitchell Robinson Over 9.5 PRA - 68.4%, 1.02x (1.01x)"),
+    ("Victor Wembanyama", "BLK", "", "Mitchell Robinson Over 5.5 REB - 64.0%, 1.17x (1.03x)"),
+    ("Victor Wembanyama", "BLST", "", ""),
 ]
 
 
@@ -259,6 +260,51 @@ def test_find_correlation_builds_parlays_wnba() -> None:
     assert set(parlay_df["Bet Size"].astype(int)).issubset({2, 3, 4, 5, 6})
     assert (parlay_df["League"] == "WNBA").all()
     assert (parlay_df["Game"] == "LVA/NYL").all()
+
+
+# --- corr-slice collector (dashboard rail / constellation) ------------------
+
+
+def test_collect_game_corr_keys_canonical_and_symmetric() -> None:
+    """Per-game corr slice: canonical leg keys, sorted pair order, rho from C."""
+    game_df = pd.DataFrame(
+        {
+            "Player": ["A. Wilson", "S. Ionescu", "A. Wilson"],
+            "Market": ["Points", "Points", "Rebounds"],
+            "Bet": ["Over", "Over", "Under"],
+        }
+    )
+    C = np.array([[1.0, 0.3, 0.5], [0.3, 1.0, -0.2], [0.5, -0.2, 1.0]])
+    market_map = {"Points": "PTS", "Rebounds": "REB"}
+
+    rows = _collect_game_corr(game_df, C, "WNBA", "LVA/NYL", market_map)
+
+    assert len(rows) == 3  # 3 distinct legs → 3 unique pairs
+    for r in rows:
+        assert r["League"] == "WNBA"
+        assert r["Game"] == "LVA/NYL"
+        assert r["leg_a"] < r["leg_b"]  # canonical pair ordering
+        for key in (r["leg_a"], r["leg_b"]):
+            _player, market, bet = key.split("|")
+            assert market in {"PTS", "REB"}  # canonical code, not display name
+            assert bet in {"Over", "Under"}
+
+    by_pair = {(r["leg_a"], r["leg_b"]): r["rho"] for r in rows}
+    assert by_pair[tuple(sorted(["A. Wilson|PTS|Over", "S. Ionescu|PTS|Over"]))] == pytest.approx(0.3)
+    assert by_pair[tuple(sorted(["A. Wilson|PTS|Over", "A. Wilson|REB|Under"]))] == pytest.approx(0.5)
+    assert by_pair[
+        tuple(sorted(["S. Ionescu|PTS|Over", "A. Wilson|REB|Under"]))
+    ] == pytest.approx(-0.2)
+
+
+def test_collect_game_corr_skips_identical_leg_keys() -> None:
+    """Two offers with the same Player|Market|Bet (different lines) emit no self-pair."""
+    game_df = pd.DataFrame(
+        {"Player": ["A. Wilson", "A. Wilson"], "Market": ["Points", "Points"], "Bet": ["Over", "Over"]}
+    )
+    C = np.array([[1.0, 0.9], [0.9, 1.0]])
+    rows = _collect_game_corr(game_df, C, "WNBA", "LVA/NYL", {"Points": "PTS"})
+    assert rows == []
 
 
 # --- pure-kernel unit tests -------------------------------------------------

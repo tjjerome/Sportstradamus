@@ -186,6 +186,9 @@ def test_pipeline_smoke(
 
     monkeypatch.setattr(prediction_cli, "write_current_offers", stub_write_current_offers)
 
+    game_corr_calls: list = []
+    monkeypatch.setattr(prediction_cli, "write_current_game_corr", game_corr_calls.append)
+
     # Pick'em snapshot hook: stub the (network-bound) builder so the wiring is
     # exercised without find_correlation, and capture the writer call.
     pickem_snapshot_calls: list = []
@@ -228,6 +231,13 @@ def test_pipeline_smoke(
     )
     parlay_total = sum(len(p) for _, p in captured.values())
     assert parlay_total >= 1, "no parlay candidates were returned"
+
+    # The P2 narrative layer attached its columns and the corr-slice writer fired.
+    snapshot_offers = snapshot_calls[0]["offers"]
+    snapshot_parlays = snapshot_calls[0]["parlays"]
+    assert "Why" in snapshot_offers.columns, "attach_offer_why did not add the Why column"
+    assert "Thesis" in snapshot_parlays.columns, "attach_parlay_theses did not add the Thesis column"
+    assert game_corr_calls, "write_current_game_corr was never invoked"
 
 
 # --- helpers --------------------------------------------------------------

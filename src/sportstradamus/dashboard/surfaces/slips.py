@@ -6,7 +6,6 @@ import pandas as pd
 import streamlit as st
 
 from sportstradamus.dashboard.components.deep_dive import init_detail_state, show_detail
-from sportstradamus.dashboard.components.stories import family_labels_for_game
 from sportstradamus.dashboard.data import (
     format_ts,
     load_current_meta,
@@ -33,6 +32,21 @@ SORT_OPTIONS = {
 
 # Iteration order controls section order in the Pick'em tab.
 VARIANT_LABELS = {"power": "Power", "flex": "Flex", "rivals": "Rivals"}
+
+
+def _family_theses(group: pd.DataFrame, families: list) -> dict:
+    """Map each family to its precomputed Thesis headline (``prediction/stories.py``).
+
+    Thesis is constant within a family; an older snapshot written before the
+    narrative layer falls back to a neutral label.
+    """
+    if "Thesis" not in group.columns:
+        return {fam: f"Bet family {int(fam)}" for fam in families}
+    labels = {}
+    for fam in families:
+        theses = group.loc[group["Family"] == fam, "Thesis"].dropna()
+        labels[fam] = theses.iloc[0] if not theses.empty else f"Bet family {int(fam)}"
+    return labels
 
 
 def _compute_stake(row: pd.Series, bankroll: float) -> float:
@@ -167,7 +181,7 @@ with tab_parlays:
             top_ev = group["Model EV"].max()
             with st.expander(f"{game} — {len(group)} parlays, top EV {top_ev:.2f}"):
                 families = sorted(group["Family"].dropna().unique())
-                labels = family_labels_for_game(group)
+                labels = _family_theses(group, families)
                 if len(families) > 1:
                     fam_choice = st.selectbox(
                         "Bet family",

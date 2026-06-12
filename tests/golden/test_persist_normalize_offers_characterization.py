@@ -70,3 +70,41 @@ def test_full_slate_drop_split_backfill_keep_sort():
 
     assert by_player["Gate"].isna().all()
     assert by_player["Model Skew"].isna().all()
+
+
+def test_game_k_why_retained_in_keep_order():
+    """The P2 narrative/Kelly columns survive the projection in keep-col order."""
+    df = pd.DataFrame(
+        {
+            "Player": ["P"],
+            "Game": ["AAA/BBB"],
+            "K": [0.42],
+            "Why": ["form + edge"],
+            "Boost": [1.0],
+            "Model": [0.5],
+            "Books": [0.0],
+            "Dist": ["Gamma"],
+            "Model Param": [2.0],
+        }
+    )
+
+    out = _normalize_offers(df)
+
+    assert list(out.columns) == [
+        "Game",
+        "Player",
+        "Boost",
+        "Model",
+        "Books",
+        "K",
+        "Why",
+        "Dist",
+        "Gate",
+        "Model R",
+        "Model Alpha",
+        "Model Sigma",
+        "Model Skew",
+    ]
+    assert out.loc[0, "Game"] == "AAA/BBB"
+    assert out.loc[0, "K"] == 0.42
+    assert out.loc[0, "Why"] == "form + edge"

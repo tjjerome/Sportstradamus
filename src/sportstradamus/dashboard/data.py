@@ -19,6 +19,7 @@ from sportstradamus.analysis import (
     explode_offers,
 )
 from sportstradamus.helpers.io import (
+    CURRENT_GAME_CORR_PATH,
     CURRENT_META_PATH,
     CURRENT_OFFERS_PATH,
     CURRENT_PARLAYS_PATH,
@@ -195,6 +196,21 @@ def _load_current_parlays_cached(mtime: float) -> pd.DataFrame:
 def load_current_parlays() -> pd.DataFrame:
     """Today's parlay candidates from the latest ``prophecize`` snapshot."""
     return _load_current_parlays_cached(_mtime(CURRENT_PARLAYS_PATH))
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading correlation slices...")
+def _load_current_game_corr_cached(mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(CURRENT_GAME_CORR_PATH)
+
+
+def load_current_game_corr() -> pd.DataFrame:
+    """Per-game leg-pair correlation slices from the latest ``prophecize`` snapshot.
+
+    Columns ``League, Game, leg_a, leg_b, rho`` with leg key ``Player|Market|Bet``;
+    joins ``current_offers`` on the canonical ``Game`` key. Feeds the slip rail
+    copula, the constellation, and the swap dialog.
+    """
+    return _load_current_game_corr_cached(_mtime(CURRENT_GAME_CORR_PATH))
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading pickem entries...")
