@@ -191,6 +191,9 @@ def build_game_context(offers: pd.DataFrame, default_totals: dict[str, float]) -
 
 def _game_row(key: tuple, grp: pd.DataFrame) -> dict:
     league, game, date = key
+    # groupby keeps offers' index, which can repeat a label across two teams; reset
+    # it so the favorite lookup (grp.loc[mls.idxmax()]) returns a scalar, not a Series.
+    grp = grp.reset_index(drop=True)
     team_totals = (
         grp.groupby("Team")["O/U"]
         .apply(lambda s: pd.to_numeric(s, errors="coerce").median())

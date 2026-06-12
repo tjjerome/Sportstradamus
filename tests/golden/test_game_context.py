@@ -10,6 +10,7 @@ is the team half-total, not the raw game total).
 
 from __future__ import annotations
 
+import io
 import json
 
 import pandas as pd
@@ -67,6 +68,26 @@ def test_build_game_context_two_team_game():
     assert edges["BOS"]["F"]["n"] == 2
     assert round(edges["BOS"]["F"]["dvpoa"], 3) == 0.15
     assert edges["PHI"]["C"]["n"] == 1
+
+
+def test_build_game_context_duplicate_index_favorite_is_scalar():
+    """Regression: ``groupby`` keeps offers' index, which can repeat a label across
+    two teams (a real slate hit ``23 SAS`` / ``23 NYK``). The favorite lookup must
+    stay a scalar so the context row serializes to parquet instead of carrying a
+    two-row ``Team`` Series."""
+    offers = pd.DataFrame(
+        [
+            {"League": "NBA", "Game": "SAS/NYK", "Date": "2026-06-13", "Team": "SAS",
+             "Opponent": "NYK", "O/U": 112.0, "Moneyline": 0.40, "Player": "A", "Market": "PTS"},
+            {"League": "NBA", "Game": "SAS/NYK", "Date": "2026-06-13", "Team": "NYK",
+             "Opponent": "SAS", "O/U": 116.0, "Moneyline": 0.60, "Player": "B", "Market": "PTS"},
+        ],
+        index=[23, 23],  # the non-unique label that produced the Series-not-scalar crash
+    )
+    ctx = build_game_context(offers, {"NBA": 111.667})
+    row = ctx.iloc[0]
+    assert row["fav_team"] == "NYK" and isinstance(row["fav_team"], str)
+    ctx.to_parquet(io.BytesIO(), engine="pyarrow", index=False)  # must not raise ArrowInvalid
 
 
 def test_build_game_context_slate_median_baseline():
