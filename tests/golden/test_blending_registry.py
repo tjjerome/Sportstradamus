@@ -24,7 +24,12 @@ def test_fit_blend_weight_crps_returns_bounded_weight_each_family():
     families = (
         {"dist": "NegBin", "model_r": np.full(n, 5.0), "cv": 0.5},
         {"dist": "Gamma", "model_alpha": np.full(n, 4.0), "cv": 0.5},
-        {"dist": "SkewNormal", "model_sigma": np.full(n, 1.5), "model_skew_alpha": np.zeros(n), "cv": 0.5},
+        {
+            "dist": "SkewNormal",
+            "model_sigma": np.full(n, 1.5),
+            "model_skew_alpha": np.zeros(n),
+            "cv": 0.5,
+        },
     )
     for fam in families:
         dist = fam.pop("dist")

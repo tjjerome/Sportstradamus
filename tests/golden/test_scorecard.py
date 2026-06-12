@@ -263,9 +263,7 @@ def test_fit_skewnorm_dispersion_c_widens_underdispersed_symmetric():
     rng = np.random.default_rng(0)
     mu, s_true, n = 7.0, 3.0, 4000
     y = rng.normal(mu, s_true, n)
-    c = fit_skewnorm_dispersion_c(
-        np.full(n, mu), np.full(n, s_true / 2.0), np.zeros(n), y
-    )
+    c = fit_skewnorm_dispersion_c(np.full(n, mu), np.full(n, s_true / 2.0), np.zeros(n), y)
     assert abs(c - 2.0) < 0.25
 
 
@@ -304,7 +302,10 @@ def test_fit_skewnorm_dispersion_skew_recovers_underskew():
 
     assert s > 1.0
     assert -3.0 <= s <= 3.0
-    assert _sn_pit_ks(mean, sigma, skew0, y, c, s) < _sn_pit_ks(mean, sigma, skew0, y, c_only, 0.0) - 0.02
+    assert (
+        _sn_pit_ks(mean, sigma, skew0, y, c, s)
+        < _sn_pit_ks(mean, sigma, skew0, y, c_only, 0.0) - 0.02
+    )
 
 
 def test_fit_skewnorm_dispersion_skew_noop_on_calibrated():
@@ -332,7 +333,11 @@ def test_fit_skewnorm_dispersion_skew_is_bit_reproducible():
 
     rng = np.random.default_rng(2)
     y = st.skewnorm.rvs(3.0, size=3000, random_state=rng)
-    mean, sigma, skew0 = np.full(3000, float(y.mean())), np.full(3000, float(y.std())), np.zeros(3000)
+    mean, sigma, skew0 = (
+        np.full(3000, float(y.mean())),
+        np.full(3000, float(y.std())),
+        np.zeros(3000),
+    )
 
     assert fit_skewnorm_dispersion_skew(mean, sigma, skew0, y) == fit_skewnorm_dispersion_skew(
         mean, sigma, skew0, y
@@ -358,7 +363,10 @@ def test_fit_skewnorm_dispersion_skew_sequential_freezes_scale_then_fits_skew():
 
     assert c == c_only  # scale frozen at the Lever-1 optimum, not re-optimized with s
     assert s > 0.0
-    assert _sn_pit_ks(mean, sigma, base, y, c, s) < _sn_pit_ks(mean, sigma, base, y, c_only, 0.0) - 0.01
+    assert (
+        _sn_pit_ks(mean, sigma, base, y, c, s)
+        < _sn_pit_ks(mean, sigma, base, y, c_only, 0.0) - 0.01
+    )
 
 
 def test_fit_skewnorm_dispersion_skew_sequential_noop_on_calibrated():
@@ -396,7 +404,9 @@ def test_joint_skew_fit_dominates_sequential_on_alpha_collapse():
 
     assert s_seq == 0.0  # frozen at a skew-dead scale → sequential cannot help
     assert s_j > 1.0
-    assert _sn_pit_ks(mean, sigma, skew0, y, c_j, s_j) < _sn_pit_ks(mean, sigma, skew0, y, c_seq, s_seq)
+    assert _sn_pit_ks(mean, sigma, skew0, y, c_j, s_j) < _sn_pit_ks(
+        mean, sigma, skew0, y, c_seq, s_seq
+    )
 
 
 def test_min_gate_slack_is_the_binding_gate_headroom_when_all_pass():
