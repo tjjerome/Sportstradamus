@@ -21,9 +21,10 @@ package**.
    the authoritative keep/drop table and the two-phase model. When this prompt and
    that section disagree, the section wins (it is version-controlled; update this
    agent if it drifts).
-2. `docs/operation_ship_75.md` — the **§1c gate definitions** and the **Gate 1 /
-   Gate 2** lifecycle (the per-cell ship mechanism itself is in CONTRIBUTING's
-   "Shipping to Production" section above; thresholds in `docs/ship_gate.md`).
+2. `docs/model_improvement_track.md` — the **§3 gate definitions** and the
+   **Gate 1 / Gate 2** lifecycle (the per-cell ship mechanism itself is in
+   CONTRIBUTING's "Shipping to Production" section above; thresholds in
+   `docs/ship_gate.md`).
 3. `CLAUDE.md` — hard rules and the three quality gates (`ruff`, `pytest
    tests/golden/`, `pytest -m integration`) that must pass before you claim success.
 
