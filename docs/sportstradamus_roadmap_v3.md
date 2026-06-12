@@ -12,11 +12,11 @@ lever detail, stage detail, or per-cell anything — those have canonical homes
 
 A full toolset to profit on DFS pick'em apps — **Underdog and Sleeper** — by
 handing their parlay builders better-calibrated probabilities than the apps'
-implied prices (the lens of [`operation_ship_75.md`](operation_ship_75.md)
-§Purpose: beat the apps, blend with the sharp books, calibration is the
-product). Model correctness leads; draft products (Best Ball) target the 2027
-season. Non-normative background vision:
-[`underdog_edge_suite.md`](underdog_edge_suite.md).
+implied prices (the lens of
+[`model_improvement_track.md`](model_improvement_track.md) §1: beat the apps,
+blend with the sharp books, calibration is the product). Model correctness
+leads; draft products (Best Ball) target the 2027 season. Non-normative
+background vision: [`underdog_edge_suite.md`](underdog_edge_suite.md).
 
 ## 2. Ground truth — run, don't read
 
@@ -35,7 +35,7 @@ git fetch origin && git log --oneline origin/devel -5
 ```
 
 Breadth targets are stable: NBA ≥ 16/21 · WNBA ≥ 14/18 · NFL ≥ 15/20
-([`operation_ship_75.md`](operation_ship_75.md) §North Star). MLB and NHL have
+([`model_improvement_track.md`](model_improvement_track.md) §0). MLB and NHL have
 cells in `stat_meta.json` but no breadth target until their gates (D1/D2) decide.
 
 ## 3. Foundations already shipped
@@ -68,7 +68,7 @@ an exception. A session works one lane and reads that lane's brief.
 
 | Lane | Mission | Status | Entry gate | Brief |
 |---|---|---|---|---|
-| `model-track` | Ship-75 breadth → Ship-90; the lead lane | ACTIVE | — | [handoffs/model-track.md](handoffs/model-track.md) |
+| `model-track` | Ship-75 breadth → Ship-90; the lead lane | ACTIVE | — | [model_improvement_track.md](model_improvement_track.md) |
 | `sim-bettor-ledger` | Pre-registered paper-trading ledger + circuit breakers | QUEUED | D6 policy sign-off | [handoffs/sim-bettor-ledger.md](handoffs/sim-bettor-ledger.md) |
 | `sleeper-parity` | Full Sleeper decision-layer parity | QUEUED | stage-0 product verification | [handoffs/sleeper-parity.md](handoffs/sleeper-parity.md) |
 | `parlay-dependence` | Copula on PIT residuals — biggest product-EV lever | BLOCKED (on: D3) | D3 | [handoffs/parlay-dependence.md](handoffs/parlay-dependence.md) |
@@ -102,8 +102,8 @@ Everything not listed here is pivot-free.
 
 Setbacks are expected: methods fail, apps change their products, plans change.
 Three failure classes, each with a standing response — failure is per-lever,
-never per-operation (ship_75 §North Star: every lane carries more levers than
-it has cells to flip).
+never per-operation (model_improvement_track.md §0: every lane carries more
+levers than it has cells to flip).
 
 - **Method fails** (a lever doesn't move its metric): record the verdict +
   evidence pointer in the brief's ledger, take the stage's if-it-fails branch
@@ -128,7 +128,7 @@ flip a gate.
 | D2 | NHL activation go/no-go | stage-0 NHL packet | ~Sep 2026, before puck drop |
 | D3 | Start `parlay-dependence` | ≥2 leagues at target + Opus research brief + sleeper-parity merged | when inputs exist |
 | D4 | Start `bestball-2027` | calendar ≥ ~Nov 2026 + model-track health | before 2027 drafts open |
-| D5 | Declare Ship-90 | Ship-75 targets met; [`operation_ship_90.md`](operation_ship_90.md) open questions | at 75% breadth |
+| D5 | Declare Ship-90 | Ship-75 targets met; [`model_improvement_track.md`](model_improvement_track.md) §7.8 decision packet | at 75% breadth |
 | D6 | Ledger policy spec v1 sign-off | `sim-bettor-ledger` stage-0 spec | unblocks the lane |
 | D7 | Real-stake scaling | ledger CLV/ROI over a meaningful sample | outside repo scope; named so the ledger has a customer |
 
@@ -148,7 +148,8 @@ sketches live in the archived v2.
   `sim-bettor-ledger`; do not resurrect (archived v2 §2.2/2.3).
 - **Model speculative tail** — conformal ladder + CQR, CLV-CRPS dashboard,
   TabPFN-as-platform, multi-task NN, spliced/Pareto tails, MZINB — deferred
-  behind breadth; pointers in ship_75 §5.6/§5.9 and archived v2 §Phase 6.
+  behind breadth; pointers in model_improvement_track.md §7.6/§9 and archived
+  v2 §Phase 6.
 - **Streamlit → FastAPI rewrite** — only if real-time push ever becomes the
   product (archived v2 §Suggestions).
 - **Idea backlog** — archived v2 §Suggestions for Further Improvement.
@@ -159,9 +160,9 @@ sketches live in the archived v2.
 |---|---|
 | Shipped counts / release surface | `src/sportstradamus/data/config/stat_meta.json` (`shipped`) |
 | Gate thresholds g1–g5, Gate 2 | [`ship_gate.md`](ship_gate.md) |
-| Model lever stack, per-league path, stop rules | [`operation_ship_75.md`](operation_ship_75.md) §5–§7 |
+| Model lever stack, per-league path, stop rules | [`model_improvement_track.md`](model_improvement_track.md) §5–§9 |
 | Per-cell gate numbers | `data/training/model_stats.csv` (mirror of the parquet) |
-| Lane procedure, locked decisions, status | `docs/handoffs/{lane}.md` |
+| Lane procedure, locked decisions, status | `docs/handoffs/{lane}.md` (model track: [`model_improvement_track.md`](model_improvement_track.md)) |
 | Package map, ship mechanics, league/market how-to | `CONTRIBUTING.md` |
 | Session law (gates, subagents, hard rules) | `CLAUDE.md` |
 | Code style | `docs/STYLE_GUIDE.md` |
@@ -169,4 +170,5 @@ sketches live in the archived v2.
 
 ## Changelog
 
+- model-track lane consolidated: ship75/ship90/feature-plan/brief merged into `model_improvement_track.md`; lane row + doc map repointed.
 - v3 replaces v2: swimlane structure, briefs in `docs/handoffs/`, change-absorption protocol, Sleeper parity + ledger + league-activation lanes added.

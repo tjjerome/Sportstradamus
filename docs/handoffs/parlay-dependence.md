@@ -19,17 +19,16 @@ Money logic: the five ship gates certify **marginals only**; the product is
 **parlays**; and the DFS apps largely don't tax leg correlation — that
 asymmetry is the core of why they're beatable. The predecessor design calls
 this "the audit's single largest *product*-EV lever"
-([archived v2 §1.2](../archive/sportstradamus_roadmap_v2.md));
-[`operation_ship_75.md`](../operation_ship_75.md) §10 defers it here as "the
-audit-deferred tail (post-Ship-75): the parlay copula / dependence layer
-(Phase 1.2 follow-ups)". Better joint pricing multiplies the EV of every
-entry on both apps.
+([archived v2 §1.2](../archive/sportstradamus_roadmap_v2.md)); the model
+track defers it here (roadmap v3 §4 lane row — "biggest product-EV lever",
+gated on calibrated marginals, D3). Better joint pricing multiplies the EV of
+every entry on both apps.
 
 ## 2. Read first (in order)
 
-1. [`operation_ship_75.md`](../operation_ship_75.md) §Purpose + §10 — the
-   lens (calibration is the product; Gate 4 PIT-KS is the real bar) and the
-   deferral this lane resumes.
+1. [`model_improvement_track.md`](../model_improvement_track.md) §1 + §12 —
+   the lens (calibration is the product; Gate 4 PIT-KS is the real bar) and
+   the doc map for the marginals this lane consumes.
 2. [`archive/sportstradamus_roadmap_v2.md`](../archive/sportstradamus_roadmap_v2.md)
    §1.2 — the design sketch this brief restates, plus the open Phase 1.2.x
    audit findings.
@@ -104,7 +103,7 @@ ls -la data/parlay_hist.parquet 2>/dev/null
   verdict; mirror the existing `legacy` flag pattern (parlay.py:533,
   correlation.py:554). Default stays incumbent until stage 3 acceptance.
 - 2026-06-10 — Never loosen gates, harness thresholds, or test tolerances to
-  pass (ship_75 §Purpose discipline).
+  pass (model_improvement_track.md §1/§9 discipline).
 - 2026-06-10 — Vine copulas are out of scope at dims 2–6 (archived v2 §1.2);
   relitigating that is owner-only.
 
@@ -200,7 +199,8 @@ valuable verdict.
 ## 7. Working rules
 
 - Conflict order: command output > CLAUDE.md/CONTRIBUTING.md >
-  [`operation_ship_75.md`](../operation_ship_75.md) > this brief > roadmap v3.
+  [`model_improvement_track.md`](../model_improvement_track.md) > this brief >
+  roadmap v3.
 - Reuse before you write (CLAUDE.md): residualization, stratification, and
   shrinkage exist in `training/correlate.py`; the lane parameterizes or
   extends them, never re-implements them beside themselves.
