@@ -12,6 +12,8 @@ line (model and book project the *same* stat, so a >10x gap is bad data, not an
 edge) and ``_blend_with_book`` applies it before pooling.
 """
 
+import logging
+
 import numpy as np
 import pandas as pd
 
@@ -65,6 +67,18 @@ def test_corrupt_book_ev_does_not_inflate_blend():
     assert (blended <= _BOOK_EV_LINE_CAP * line).all()
     # Neutralized book -> blend rides the model, never the runaway.
     assert (blended < 4.0).all(), f"corrupt book still inflated the blend: {blended}"
+
+
+def test_warning_reports_offender_ratio_and_cell(caplog):
+    # The benign-vs-corrupt signal lives in the worst ev/line ratio + cell, not the
+    # array max: a ~5x DFS clamp placeholder must read apart from a >1000x runaway.
+    line = np.array([0.5, 1.5])
+    books = np.array([7.5, 1.0])  # 7.5 on a 0.5 line = 15x cap -> dropped; 1.0 kept
+    with caplog.at_level(logging.WARNING, logger="log"):
+        out = _sanitize_book_ev(books, line, cell="WNBA FG3M")
+    assert out[0] == 0.5 and out[1] == 1.0
+    assert "WNBA FG3M" in caplog.text
+    assert "15x" in caplog.text  # worst ev/line = 7.5 / 0.5
 
 
 def test_sane_book_ev_blend_unchanged_by_guard():

@@ -58,12 +58,19 @@ _MAX_UNDERDOG_BOOST = 3.65
 # Coin-flip prior used when no bookmaker price is available for an offer.
 _BOOK_PRIOR_PROB: float = 0.5
 
-# A bookmaker projected mean beyond this multiple of its own line is corrupt data,
-# not an edge: model and book project the same stat, and a sane book mean sits
-# within a small factor of the line it was quoted at. Values above the cap (e.g. a
-# pre-fix get_ev zero-inflation runaway still committed in the archive) are dropped
-# from the log-opinion pool — the blend rides the line instead of letting garbage
-# dominate — and warned so the corruption never inflates predictions silently.
+# Runtime blend guard -- the loosest of three staggered book-EV bounds, each with a
+# deliberately different factor AND basis:
+#   get_ev write clamp  SN_MAX_MEAN_FACTOR=5x  vs a book's OWN line (inversion sanity)
+#   offline sweep       BLOWN_LINE_FACTOR=5x   vs MAX archived line for the slot
+#   this guard          _BOOK_EV_LINE_CAP=10x  vs the CURRENT offer's line
+# When the cross-book mean exceeds 10x the offer being priced, the blend rides the
+# line. 10x (not 5x) spares a genuine book-over-line edge; the current-offer basis is
+# what catches the common BENIGN trigger -- a high-zero-rate count (e.g. FG3M) priced
+# as a DFS pick inverts above the cap, so get_ev clamps it to 5x its OWN (higher)
+# line and a 7.5 book EV on a 1.5 line trips a 0.5-line offer. The warning's ev/line
+# ratio separates that (~5x placeholder) from a pre-clamp archive runaway (>1000x).
+# Do NOT re-base this to MAX archived line: a 5x-own-line clamp sits under it and
+# would leak the placeholder into the pool.
 _BOOK_EV_LINE_CAP: float = 10.0
 
 # Maximum scored offers retained per player after boost-distance deduplication.
@@ -523,32 +530,41 @@ def _zi_kwargs(offer_df: pd.DataFrame, dist: str, hist_gate: float) -> dict:
     return {}
 
 
-def _sanitize_book_ev(books_ev: np.ndarray, line: np.ndarray) -> np.ndarray:
+def _sanitize_book_ev(books_ev: np.ndarray, line: np.ndarray, cell: str = "") -> np.ndarray:
     """Drop book means implausibly far above their line before the blend.
 
     A book projected mean beyond ``_BOOK_EV_LINE_CAP`` times its line is corrupt
     data, not signal (see the constant), and would dominate ``fused_loc``'s
     log-opinion pool. Offenders are replaced with the line — the neutral book mean,
-    matching :func:`get_ev`'s own zero-inflation fallback — and warned so corruption
-    surfaces instead of silently inflating predictions.
+    matching :func:`get_ev`'s own zero-inflation fallback. The warning reports the
+    worst offender's ev/line ratio so a benign DFS clamp placeholder (~5x line on a
+    high-zero-rate count) reads apart from a pre-clamp archive runaway (>1000x).
     """
     ceiling = _BOOK_EV_LINE_CAP * np.clip(line, 0.5, None)
     corrupt = books_ev > ceiling
     if corrupt.any():
+        ratio = books_ev / np.clip(line, 0.5, None)
+        worst = int(np.argmax(np.where(corrupt, ratio, -np.inf)))
         logger.warning(
-            f"dropped {int(corrupt.sum())} implausible book EV(s) from the blend "
-            f"(max {float(np.nanmax(books_ev)):.1f})"
+            f"dropped {int(corrupt.sum())}/{corrupt.size} implausible book EV(s) from "
+            f"the {cell + ' ' if cell else ''}blend (worst {books_ev[worst]:.1f} on line "
+            f"{line[worst]:.1f} = {ratio[worst]:.0f}x, cap {_BOOK_EV_LINE_CAP:.0f}x); rode the line"
         )
         return np.where(corrupt, line, books_ev)
     return books_ev
 
 
 def _blend_with_book(
-    offer_df: pd.DataFrame, dist: str, model_weight: float, cv: float, hist_gate: float
-):
+    offer_df: pd.DataFrame,
+    dist: str,
+    model_weight: float,
+    cv: float,
+    hist_gate: float,
+    cell: str = "",
+) -> np.ndarray:
     model_ev = offer_df["Model EV"].to_numpy()
     books_ev = offer_df["Books EV"].fillna(offer_df["Model EV"]).to_numpy()
-    books_ev = _sanitize_book_ev(books_ev, offer_df["Line"].to_numpy())
+    books_ev = _sanitize_book_ev(books_ev, offer_df["Line"].to_numpy(), cell)
     zi = _zi_kwargs(offer_df, dist, hist_gate)
     if dist == "SkewNormal":
         base_mean, sigma_blend, skew_blend, gate_blend = fused_loc(
@@ -706,7 +722,7 @@ def model_prob(
     offer_df["Books"] = _book_over_prob(offer_df, dist, cv, step, hist_gate or None)
     _clamp_shape_ceiling(offer_df, dist, shape_ceiling)
 
-    base_mean = _blend_with_book(offer_df, dist, model_weight, cv, hist_gate)
+    base_mean = _blend_with_book(offer_df, dist, model_weight, cv, hist_gate, f"{league} {market}")
 
     # ZI dists: book reports the non-zero component EV; scale to marginal EV.
     if hist_gate and dist in ("ZINB", "ZAGamma", "SkewNormal"):
