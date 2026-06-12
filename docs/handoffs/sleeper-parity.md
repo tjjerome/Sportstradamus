@@ -111,7 +111,8 @@ condition (§8).
 | [`tests/golden/`](../../tests/golden/) | New EV-engine and orchestrator tests; existing pickem/kelly/dashboard gates stay green |
 
 This lane touches the serving path (`prophecize` → snapshots): see the
-inference-path compatibility pointer in [`operation_ship_references.md`](../operation_ship_references.md).
+inference-path compatibility checklist in
+[`model_improvement_track.md`](../model_improvement_track.md) §11.3.
 
 ## 6. Stage plan
 

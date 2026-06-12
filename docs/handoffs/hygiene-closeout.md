@@ -21,9 +21,9 @@ accuracy has never been verified on production data.
    subject.
 4. [`../../src/sportstradamus/scripts/audit_parlay_calibration.py`](../../src/sportstradamus/scripts/audit_parlay_calibration.py)
    — the calibration harness stage 2 re-runs.
-5. [`../operation_ship_90.md`](../operation_ship_90.md) +
-   [`../operation_ship_75.md`](../operation_ship_75.md) §5.9 — the
-   `deferred-90` inconsistency stage 3 reconciles.
+5. [`../model_improvement_track.md`](../model_improvement_track.md) §9 — the
+   no-defer / matrix-exhaustion policy stage 3's drift sweeps guard
+   (`deferred-90` is a retired tag).
 
 ## 3. Verify before you trust
 
@@ -31,7 +31,7 @@ accuracy has never been verified on production data.
 git fetch origin && git log --oneline origin/devel -3
 ls docs/DEPRECATED_TRIAGE.md 2>/dev/null          # stage 1 done?
 ls src/deprecated/                                 # triage subject
-grep -n "deferred-90" docs/operation_ship_90.md docs/operation_ship_75.md
+grep -rn "deferred-90" docs/*.md   # only model_improvement_track.md's retirement notes should hit
 grep -rn "roadmap_v2" docs/*.md .claude/ 2>/dev/null | grep -v archive  # drift
 ```
 
@@ -73,15 +73,16 @@ edits to), `src/sportstradamus/scripts/` (read/run), `pyproject.toml`
    derive from production data (dates + row counts in the ledger line).
    1 session + owner time. *If production data can't be exported:* park the
    stage, note in ledger, move on.
-3. **Drift sweeps + recurring checks.** (a) Reconcile
-   [`../operation_ship_90.md`](../operation_ship_90.md)'s `deferred-90`
-   mentions with ship_75 §5.9 (tag retired, zero cells qualify) — revise in
-   place. (b) Verify `pyproject.toml` script registrations match shipped
-   CLIs. (c) Run the recurring checks and record results: per-season
-   `underdog_payouts.json` verification vs the live product (archived v2
-   §3.2 mandate); monthly free-passer re-score reminder to the model-track
-   lane (ship_75 §5.1). Acceptance: each check's result in the ledger.
-   ~1 session each visit; repeats.
+3. **Drift sweeps + recurring checks.** (a) `deferred-90` drift grep (§3
+   block) — the tag is retired
+   ([`../model_improvement_track.md`](../model_improvement_track.md) §9);
+   only its retirement notes should match. (b) Verify `pyproject.toml`
+   script registrations match shipped CLIs. (c) Run the recurring checks and
+   record results: per-season `underdog_payouts.json` verification vs the
+   live product (archived v2 §3.2 mandate); monthly free-passer re-score
+   reminder to the model-track lane (model_improvement_track.md §7.0).
+   Acceptance: each check's result in the ledger. ~1 session each visit;
+   repeats.
 
 Lane-level: items here are independent; any can be parked without blocking
 the others.
