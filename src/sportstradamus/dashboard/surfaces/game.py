@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from sportstradamus.dashboard.components.deep_dive import to_american
+from sportstradamus.dashboard.components.slip_builder import seed_from_legs
 from sportstradamus.dashboard.data import (
     format_ts,
     load_current_meta,
@@ -62,5 +63,23 @@ display_cols = [
 ]
 st.dataframe(game_offers[display_cols], use_container_width=True, hide_index=True)
 
-st.caption("Prophecy constellation coming in a future phase.")
+st.subheader("Build a slip from this game")
+build_platforms = sorted(game_offers["Platform"].dropna().unique())
+if build_platforms:
+    build_platform = st.selectbox("Platform", build_platforms, key="game_build_platform")
+    pool = game_offers.loc[game_offers["Platform"] == build_platform]
+    leg_rows = {
+        f"{r['Player']} {r['Bet']} {float(r['Line']):.10g} {r['Market']}": r
+        for r in pool.to_dict("records")
+        if pd.notna(r.get("Model P"))
+    }
+    picks = st.multiselect(
+        "Legs (same game → constellation)", list(leg_rows), key="game_build_legs"
+    )
+    if len(picks) >= 2 and st.button(
+        "Build in constellation", type="primary", key="game_build_btn"
+    ):
+        seed_from_legs([leg_rows[p] for p in picks], build_platform, "constellation")
+        st.switch_page("surfaces/slips.py")
+
 st.caption("Prophecies arrive with the next data wave.")

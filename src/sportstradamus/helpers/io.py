@@ -47,6 +47,8 @@ MODEL_STATS_PATH = _TRAINING_DIR / "model_stats.parquet"
 # by code (parquet is the authoritative source on disagreement).
 MODEL_STATS_CSV_PATH = _TRAINING_DIR / "model_stats.csv"
 LIVE_METRICS_PATH = _RUNTIME_DIR / "live_metrics_per_market.parquet"
+# User-built slips saved from the dashboard ("Lock it in"); graded by nightly.
+USER_SLIPS_PATH = _RUNTIME_DIR / "user_slips.parquet"
 
 # Root for trained model pickles. model_pickle_path builds the per-cell path
 # from this root; prune_model_pickle deletes one to dark-out a withheld cell.
@@ -143,7 +145,6 @@ def _atomic_write_json(obj, path) -> None:
 
 
 def _atomic_write_csv(df: pd.DataFrame, path) -> None:
-    """Write a DataFrame to CSV via a tempfile + replace, so partial reads never see torn data."""
     path = Path(str(path))
     tmp = path.with_suffix(path.suffix + ".tmp")
     df.to_csv(tmp, index=False)
@@ -255,6 +256,36 @@ def read_parlay_hist() -> pd.DataFrame:
         if col in df.columns:
             df[col] = df[col].apply(_list_to_tuple)
     return df
+
+
+# ---------------------------------------------------------------------------
+# User-built slips (dashboard "Lock it in" -> nightly grading)
+# ---------------------------------------------------------------------------
+
+
+def read_user_slips() -> pd.DataFrame:
+    """Return saved user slips, or an empty DataFrame when none are on disk."""
+    return read_parquet_safe(USER_SLIPS_PATH)
+
+
+def upsert_user_slip(row: dict) -> None:
+    """Insert a slip or replace the existing one with the same ``slip_id``.
+
+    "Lock it in" on a fresh slip appends; editing a locked slip and re-locking
+    replaces its row in place (a re-lock resets the grading columns to pending).
+    """
+    existing = read_user_slips()
+    if not existing.empty and "slip_id" in existing.columns:
+        existing = existing.loc[existing["slip_id"] != row["slip_id"]]
+        combined = pd.concat([existing, pd.DataFrame([row])], ignore_index=True)
+    else:
+        combined = pd.DataFrame([row])
+    _atomic_write_parquet(combined, USER_SLIPS_PATH)
+
+
+def write_user_slips(df: pd.DataFrame) -> None:
+    """Atomically rewrite the whole user-slips table (nightly grading writeback)."""
+    _atomic_write_parquet(df, USER_SLIPS_PATH)
 
 
 # ---------------------------------------------------------------------------

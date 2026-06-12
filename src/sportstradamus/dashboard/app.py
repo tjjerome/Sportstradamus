@@ -15,7 +15,13 @@ if _src_dir not in sys.path:
 
 import streamlit as st
 
+from sportstradamus.dashboard.components.locked_shelf import render_locked_shelf
+from sportstradamus.dashboard.components.slip_builder import init_slip_state
+
 st.set_page_config(page_title="Sportstradamus Dashboard", layout="wide")
+
+# Slip state is shared across surfaces; seed it before any surface renders.
+init_slip_state()
 
 # Global sport switch: stored under plain key so surfaces read it without the
 # widget-key indirection. Copy widget value into the plain key each run.
@@ -96,5 +102,9 @@ pg = st.navigation(
         ],
     }
 )
+
+# The slip shelf lives in the sidebar beneath the nav, on every surface.
+with st.sidebar:
+    render_locked_shelf()
 
 pg.run()
