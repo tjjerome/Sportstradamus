@@ -1,6 +1,6 @@
 # Dashboard UX — "the Oracle"
 
-> Status: ACTIVE — stage P3
+> Status: ACTIVE — P2 complete (thesis engine v2 landed); next P3 slip engine
 
 ## 1. Mission & money logic
 
@@ -108,31 +108,125 @@ stage ends with the §9 checklist green and the dashboard runnable.
   auto-discovery; two source-slice render pins → new paths). Acceptance: all gates green;
   manual: six nav entries render real snapshots, sport switch filters, deep-dive opens from
   Board. Est: 1–2 sessions. If it fails: revert to last green, halve the port batch.
-- **P2 — pipeline precompute.** Goal: `stories.py` why-strings/theses, `K`/`Why`/`Game` keep-cols,
-  `Thesis` on parlays, `current_game_corr.parquet`, `stories_version` in meta. Owner requirement
-  on naming (raised post-P1): the current family/parlay labels are insufficient and repetitive —
-  the P2 thesis generator must clearly beat them, not port them. Bar: headlines unique within a
-  slate (no duplicate theses across that day's families), built from concrete game context
-  (players, leg directions, blowout/shootout/grind shape from spread+total+corr structure), not
-  generic stock phrases; phrase bank large enough that repeat users don't see the same headline
-  two days running. Still deterministic templates (locked decision §4) — diversity comes from
-  bank size + context keying, not randomness. Acceptance: persist characterization updated;
-  stories golden test (deterministic, hash-stable); headline-uniqueness-within-slate test; corr-slice
-  golden (symmetric, joins to offers); integration -n0 shows columns flowing. Est: 1–2 sessions.
-  Kill branch: if corr-slice via `find_correlation` return-arity change breaks pins, fall back to
-  a collector param.
+- **P2 — pipeline precompute + thesis engine v2.** ✔ Two increments landed. First the v1
+  generator (`Why`/`K`/`Game` offer keep-cols, `Thesis` on parlays, `current_game_corr.parquet`
+  per-game leg-pair ρ via opt-in `find_correlation(corr_sink=…)`, `stories_version` in meta,
+  render-time phrase bank retired, `parse_leg` moved to the prediction layer); then the v2 thesis
+  engine (the four-archetype router + `current_game_context.parquet` + JSON voice banks detailed
+  below). The naming bar (owner, post-P1) is met: headlines unique within a slate, built from
+  concrete game context, bank large enough that repeat users don't see the same headline two days
+  running; deterministic templates only (locked §4), diversity from bank size + context keying +
+  the md5 date seed, never randomness. See §10 for both landings. Design rationale + verified code
+  citations live in `docs/superpowers/specs/2026-06-11-thesis-engine-v2-design.md` (background).
+
+  *Why it was reopened:* v1 told exactly one story — a featured player (`_family_thesis` always
+  elected a star, breaking ties alphabetically by name) — and its game-shape classifier was dead in
+  production. The snapshot `O/U` column is the **team-implied half-total** (~108 NBA / ~82 WNBA;
+  `cli.py` overwrites `O/U` with `archive.get_total`, which stores `(total ± spread)/2` per
+  team — `moneylines.py:295-302`), but v1's `_TOTAL_BANDS` expected raw game totals (NBA
+  235/215). So `total.median() ≈ 108 ≤ 215` always ⇒ every non-lopsided game classified "grind"
+  and the shootout/coinflip/even cells were dead inventory. v2 replaces that with the
+  league-relative `total_ratio` band classifier.
+
+  1. **Game-context precompute + classifier fix.** New `current_game_context.parquet`, one row per
+     `(League, Game, Date)`, path constant in `helpers/io.py` (`CURRENT_GAME_CONTEXT_PATH`), written
+     by `persist.py` beside the corr slice from a pure `build_game_context(offers, default_totals)`
+     over the finished `snapshot_offers` (no archive reads — cli passes `archive.default_totals` in).
+     Columns: `League`/`Game`/`Date`; `game_total` (sum of the two teams' median `O/U`); `spread`
+     (abs diff of the two team-implied totals — exact, needs no `get_spread`); `fav_team` (max
+     `Moneyline`); `ml_fav_prob`, `ml_margin` (`max|p − 0.5|`); `total_ratio` (`game_total /
+     baseline`); `baseline_total`; `shape`; `pos_edges` (JSON `{team: {pos_group: {dvpoa, n}}}`);
+     `n_offers`. Replace `_TOTAL_BANDS`/`_DEFAULT_TOTAL_BAND` with one league-agnostic ratio-band
+     classifier over `total_ratio`: `_SHOOTOUT_RATIO = 1.05`, `_GRIND_RATIO = 0.95`, keep
+     `_ML_LOPSIDED_MARGIN = 0.18` (already probability-space). Baseline = slate-median game total
+     when the slate has ≥ 4 games, else `2 × default_totals[league]`. Keep the position labels:
+     `_resolve_player_positions` (`correlation.py`) already resolves `G1`/`QB1`/`B3` on the league
+     slice but never writes them back — write them onto the offers frame as a new `Position` string
+     column and append it to `_OFFER_KEEP_COLS` (append-only); combo/`vs.` legs resolve empty and
+     are excluded from `pos_edges`.
+  2. **Pure archetype engine.** `thesis(legs, ctxs) -> headline`: pure, deterministic, no I/O, no
+     archive, no `Family` input. `Leg`/`GameCtx` are frozen dataclasses built by `enrich_legs(parsed,
+     offers)` + the context codec. Variant seed keeps the md5 date scheme keyed on the leg-set:
+     `md5(game | sorted-leg-keys | date | shape | archetype)` — identical between prophecize and the
+     P3 rail because `date` is the snapshot date, not wall-clock. Four archetypes with named-constant
+     firing gates, precedence **player → stack → unit → game-script**:
+     - **player** — one player holds ≥ 0.5 of the legs **and** ≥ 2 legs (strict gate — kills the
+       alphabetical-star pick on no-standout slips).
+     - **stack** — ≥ 3 legs in the primary game, ≥ 2 distinct players, mean bet-signed ρ ≥ 0.10 over
+       the slip's leg pairs (read from the corr slice).
+     - **unit** — ≥ 2 legs share `(team, position-group, direction)` and that group's aggregated
+       DVPOA edge ≥ 0.05 (pos_group = `Position` label minus its rank digit, `G1`→`G`).
+     - **game-script** — shape ∈ {shootout, grind, blowout, coinflip}; the no-standout / mixed-slip
+       answer ("shootout lifts every stat line"), always available.
+
+     Fallback when nothing fires and shape is "even" → game-script "even" cells, never a forced star.
+     Multi-game slip → pick the primary game (most legs, ties by sorted game key) and tell its story.
+     `attach_parlay_theses` slims to a pipeline adapter: parse each parlay row's legs → enrich →
+     build `GameCtx`s once per game → call `thesis()` per **distinct leg-set** → run the existing
+     slate-uniqueness pass over distinct leg-sets within `(League, Date)`. `Family` leaves the thesis
+     path entirely but stays on `current_parlays.parquet` for Slips grouping/ordering only.
+  3. **Per-sport voice banks (all five leagues now — do not defer for seasonality).** Bank STRINGS
+     live in an external committed data file `data/config/voice_bank.json` (same convention as
+     `stat_map.json`) — a phrase bank is data, not code, so it is **not** bounded by the 300-line
+     code limit and should be authored generously (many variants per reachable cell so repeat users
+     rotate; that is what a data file is for). Nested
+     `{voice: {archetype: {shape: {direction: {category: [variants]}}}}}`; voices `basketball` (NBA
+     **and** WNBA share it), `football`, `hockey`, `baseball`, and `shared` (the league-neutral
+     fallback net). `stories/bank.py` is a small pure loader: a cached JSON read plus
+     `bank_cell(voice, archetype, shape, direction, category)` walking the fallback chain `(voice,
+     arch, shape, dir, cat) → (shared, …) → (shared, …, "even", dir, cat) → (shared, …, "even", dir,
+     "production")` (guaranteed hit). v1's 107 player variants are preserved verbatim as
+     basketball's player cells. Template slots: player `{p}`/`{g}`; unit `{team}`/`{grp}`/`{opp}`;
+     game-script `{g}`; stack `{n}`/`{g}`/`{p}` — voices use only their archetype's slots. Author
+     football/hockey/baseball from game knowledge with sport-correct vocabulary and pin via a
+     synthetic-fixture coverage golden (no live legs needed; classifier/normalization/categories are
+     league-blind, so adding a league is one JSON voice block). Decisions: **no pace source**
+     (`total_ratio` is the tempo proxy); **WNBA shares the basketball voice**.
+
+  File layout (300-line cap on CODE only — bank strings are external JSON): `stories/legs.py`
+  (parse + `enrich_legs` + `_stat_category`), `why.py` (unchanged), `context.py` (`GameCtx`/`Leg`,
+  `build_game_context`, parquet↔ctx codec, classifier + ratio constants), `engine.py` (`thesis`,
+  archetype router, variant seed, slate-uniqueness machinery), `thesis.py` (slims to the
+  `attach_parlay_theses` adapter), `bank.py` (JSON loader + fallback) + `data/config/voice_bank.json`.
+  The stories package stays import-safe (no `Archive()` at module load — pinned by
+  `test_dashboard_no_archive_lock.py`) so the P3 rail can import and recompute the engine live. Bump
+  `stories_version`.
+
+  Acceptance: context-builder golden (synthetic two-team offers → exact row; game_total / spread /
+  ratio hand-computed); a synthetic slate hits all five shapes (the all-grind repro fails);
+  archetype routing unit tests per gate (the no-standout fixture routes to game-script, not an
+  alphabetical star; stack / unit / player gates); `thesis()` determinism (same inputs + date →
+  byte-equal); per-league bank-coverage golden (every league × archetype × shape × direction
+  resolves with no KeyError; football/hockey/baseball render sport-correct vocabulary from synthetic
+  fixtures); headline-uniqueness-within-slate still holds; persist characterization updated;
+  integration -n0 shows the new file + `Position` flowing; archive-lock + design goldens green;
+  refactoring-specialist on every touched `.py`. Est: 3–4 sessions.
 - **P3 — slip engine.** Goal: rail on all surfaces, both joint probs, payout/EV/kelly, play-type
-  chip rule (single constant), save + reflect grading, Sleeper unverified state. Acceptance:
-  unit tests (2-leg hand-computed joint; 3→4 leg play-type boundary; Decimal quantization);
-  manual: slip survives full nav cycle; backdated slip grades on reflect. Est: 2–3 sessions.
-  Kill branch: if copula import drags weight, inline the 30-line MVN-cdf math instead.
+  chip rule (single constant), save + reflect grading, Sleeper unverified state. **Live thesis
+  regen:** the rail recomputes `thesis(legs, ctxs)` (the P2 engine) on every slip edit
+  (add/remove/swap) via a thin `dashboard/slip/story.py`, so a user-edited slip never shows a stale
+  headline naming a removed player. Legs come from slip state enriched against the loaded offers
+  frame; `GameCtx`s from a new `load_current_game_context` + the existing `load_current_game_corr`.
+  An unedited loaded slip shows the precomputed `Thesis` verbatim (it may carry a slate-uniqueness
+  bump the pure function can't reproduce); the first edit switches to the live recompute (the
+  single-slip recompute skips the slate-uniqueness pass — faithfulness beats slate uniqueness for
+  one slip). A slip whose game lacks a context row degrades to shape "even" routing, never a crash.
+  Acceptance: unit tests (2-leg hand-computed joint; 3→4 leg play-type boundary; Decimal
+  quantization); removing the named player changes the headline and the old name never renders;
+  missing-context slip degrades to "even"; manual: slip survives full nav cycle; backdated slip
+  grades on reflect; archive-lock golden green. Est: 2–3 sessions. Kill branch: if copula import
+  drags weight, inline the 30-line MVN-cdf math instead.
 - **P4 — Tonight + Game.** Goal: narrative surfaces (cards, prophecies, why-strings, context
   strip, constellation v1, `?game=` links, scars mounted). MUST FIX (P1 known bug): Tonight's
   View-game button lands on the Game page's default game — `st.switch_page` drops query params
   set in the same run (tonight.py sets `st.query_params["game"]` then switches). Hand off via a
   plain `st.session_state` key; game.py reads session-state first, `?game=` second (deep links).
-  Acceptance: render pins; archive-lock gate green; View-game lands on the clicked game
-  (doubleheaders included). Est: 1–2 sessions.
+  **Context strip + headlines read `current_game_context.parquet`** (the P2 artifact): the Game
+  context strip shows total / derived spread / favorite (replacing the per-row `O/U`/`Moneyline`
+  peek at `surfaces/game.py:51-56`); Tonight cards show the top per-leg-set thesis headline per
+  game. Acceptance: render pins; archive-lock gate green; View-game lands on the clicked game
+  (doubleheaders included); context strip shows the derived spread for a fixture game. Est: 1–2
+  sessions.
 - **P5 — Board + Slips upgrade.** Goal: themed AG Grid (right-aligned numerals, edge heatmap,
   sparkline, prophecy lenses), load-into-rail. Entry: pin `streamlit-aggrid` version. Acceptance:
   grid-options golden (token colors, no centered numerics). Est: 1–2 sessions. Kill branch: any
@@ -196,6 +290,8 @@ devel-bound PR; research-analyst only if a stage turns into a modeling question 
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
+- 2026-06-12 · P2 ✔ · thesis engine v2 landed. Four-archetype router `route(legs,ctxs)` → player/stack/unit/game-script (`engine.py`), pure + bank-free, no `Family` input; player gate requires a *unique* leg-majority (kills v1's alphabetical star — a 2-2 tie routes to game-script). New `current_game_context.parquet` (one row per League/Game/Date: `game_total`/`spread`/`fav_team`/`ml_margin`/`total_ratio`/`shape`/`pos_edges`) from pure `build_game_context`; league-relative `total_ratio` band classifier replaces the dead `_TOTAL_BANDS` (the all-grind repro now spans all five shapes). `Position` depth labels written back in `correlation.py` + kept in `_OFFER_KEEP_COLS`. Voice banks externalised to `data/config/voice_bank.json` (5 voices basketball/football/hockey/baseball/shared, 625 variants, v1's 107 preserved verbatim) + `bank.py` loader w/ guaranteed-hit fallback chain. cli builds context once, feeds the same frame to the thesis pass *and* its writer (headline ↔ artifact agree). stories package stays `Archive()`-free for the P3 live rail. `STORIES_VERSION` → `p2-2`. Live-regen → P3, context strip → P4. · gates ruff ✓ / golden ✓ (1728 pass; **1 pre-existing unrelated red left untouched** — `stats` `get_training_matrix` data-drift digest, fails on lane HEAD with P2 stashed) / integration ✓ (14 pass, new `current_game_context` + `Position` flow asserted) · refactoring-specialist ✓ (inlined 3 single-expr helpers, deleted orphan `thesis()`) · next: P3 slip engine
+- 2026-06-12 · P2 reopened (status P3→P2) · thesis engine v2 folded into the P2 stage entry. Shipped v1 generator tells one story (featured player, alphabetical tiebreak) and its game-shape classifier is dead in prod — `O/U` is the team half-total (~108 NBA / ~82 WNBA), not the 235 `_TOTAL_BANDS` expect, so every non-lopsided game classifies "grind". P2 now also owns: `current_game_context.parquet` precompute + ratio-band classifier fix + kept `Position` labels; the pure `thesis(legs,ctx)` archetype engine (player/stack/unit/game-script, `Family` demoted to Slips grouping); per-sport voice banks for all five leagues authored from game knowledge + synthetic-fixture tests. Live-regen folds into P3, context strip into P4. Spec: `docs/superpowers/specs/2026-06-11-thesis-engine-v2-design.md`. · next: game-context precompute + classifier fix
 - 2026-06-11 · P2 · pipeline precompute: `prediction/stories/` generator (per-family `Thesis` + per-offer `Why`; 107-variant date-keyed prophecy bank; slate-uniqueness pass) replaces & retires the render-time phrase bank; `Game`/`K`/`Why` offer keep-cols; `current_game_corr.parquet` via opt-in `find_correlation(corr_sink=…)` (return-arity avoided per kill-branch); `stories_version` in meta; Slips reads precomputed `Thesis`; `parse_leg` moved to prediction layer (dashboard re-exports). Generator subagent-built then carved to a <300-line package; refactoring-specialist pass (reverted its 2 out-of-footprint pre-existing-comment edits in io.py/cli.py). · gates ruff ✓ / golden ✓ (494 pass; **2 pre-existing unrelated reds left untouched** — `stats` `get_training_matrix` data-drift + pickem SciPy-cdf xdist flake, both fail on lane HEAD with P2 stashed) / integration ✓ · next: P3 slip engine
 - 2026-06-11 · P1 · six-surface package landed, legacy pages deleted, 2 review rounds + quality fixes (2eed419..66ede1c); host crash mid-commit recovered via reflog repoint + working-tree recommit; 2 latent profit-sim crashes fixed at source (strategies/profit_sim.py — outside-footprint touch, disclosed) · gates ✓/✓/✓ · next: P2 pipeline precompute (stories.py, keep-cols, corr slices)
 - 2026-06-11 · P0 · celestial tokens + spec + lane + mockups landed (6a33b81) · gates ✓/✓/✓ · next: P1 package migration

@@ -642,6 +642,8 @@ def find_correlation(
 
     df["Team Correlation"] = ""
     df["Opp Correlation"] = ""
+    # Depth-chart labels resolved per league below; combo legs keep "".
+    df["Position"] = ""
     # Canonical matchup key shared by offers, parlays, and the corr slice so the
     # dashboard joins them. Distinct from the "Team vs Opp · Date" display label.
     df["Game"] = [
@@ -693,6 +695,10 @@ def find_correlation(
             league_df["Boost"] = league_df["Boost"] / UNDERDOG_BOOST_BASELINE
 
         league_df = _resolve_player_positions(league_df, league, stat_data)
+        # _resolve_player_positions returns a slice the function otherwise drops;
+        # persist the depth-chart labels onto the returned frame (combos absent
+        # from its index keep "") so build_game_context can read Position.
+        df.loc[league_df.index, "Position"] = league_df["Player position"]
         league_df = _build_cmarket_desc(league_df, league, new_map)
         parlay_df = _process_league_games(
             df,

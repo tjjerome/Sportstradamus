@@ -189,6 +189,9 @@ def test_pipeline_smoke(
     game_corr_calls: list = []
     monkeypatch.setattr(prediction_cli, "write_current_game_corr", game_corr_calls.append)
 
+    game_context_calls: list = []
+    monkeypatch.setattr(prediction_cli, "write_current_game_context", game_context_calls.append)
+
     # Pick'em snapshot hook: stub the (network-bound) builder so the wiring is
     # exercised without find_correlation, and capture the writer call.
     pickem_snapshot_calls: list = []
@@ -236,8 +239,17 @@ def test_pipeline_smoke(
     snapshot_offers = snapshot_calls[0]["offers"]
     snapshot_parlays = snapshot_calls[0]["parlays"]
     assert "Why" in snapshot_offers.columns, "attach_offer_why did not add the Why column"
+    assert "Position" in snapshot_offers.columns, "Position depth label did not flow to offers"
     assert "Thesis" in snapshot_parlays.columns, "attach_parlay_theses did not add the Thesis column"
     assert game_corr_calls, "write_current_game_corr was never invoked"
+
+    # Game context is built once and the same frame fed to the writer: one row per
+    # (League, Game, Date) with a classified shape.
+    assert game_context_calls, "write_current_game_context was never invoked"
+    context = game_context_calls[0]
+    assert not context.empty, "build_game_context produced no rows from the offers frame"
+    assert set(context["Game"]) == {"LVA/NYL", "PHX/SEA"}, f"unexpected games: {set(context['Game'])}"
+    assert context["shape"].notna().all(), "every game context row carries a classified shape"
 
 
 # --- helpers --------------------------------------------------------------
@@ -286,14 +298,30 @@ _PLAYER_LINES = [
 ]
 
 
+# Team → implied win probability and half-total, so ``build_game_context`` has a
+# real ``Moneyline``/``O/U`` to classify shape from (LVA and SEA the favorites).
+_TEAM_CONTEXT = {
+    "LVA": (0.62, 86.0), "NYL": (0.38, 80.0),
+    "SEA": (0.55, 83.0), "PHX": (0.45, 81.0),
+}
+
+
 def _synthetic_offers() -> pd.DataFrame:
-    """Mirror the column contract that ``prediction/cli.py`` consumes."""
+    """Mirror the column contract that ``prediction/cli.py`` consumes.
+
+    Carries the post-``find_correlation`` columns the P2 narrative layer reads —
+    ``Game`` (canonical sorted key), ``O/U`` half-total, ``Moneyline`` win
+    probability, ``Position`` depth label, ``DVPOA`` — so ``build_game_context``
+    produces real context rows rather than the empty-frame fallback.
+    """
     rows = []
-    for player, team, opp, line, model_ev in _PLAYER_LINES:
+    for i, (player, team, opp, line, model_ev) in enumerate(_PLAYER_LINES):
+        win_prob, half_total = _TEAM_CONTEXT[team]
         rows.append(
             {
                 "League": "WNBA",
                 "Date": "2026-05-08",
+                "Game": "/".join(sorted([team, opp])),
                 "Team": team,
                 "Opponent": opp,
                 "Player": player,
@@ -308,6 +336,9 @@ def _synthetic_offers() -> pd.DataFrame:
                 "Books P": 0.50,
                 "Model": 1.05,
                 "Books": 1.0,
+                "O/U": half_total,
+                "Moneyline": win_prob,
+                "DVPOA": 0.06,
                 "Dist": "Gamma",
                 "CV": 1.0,
                 "Gate": 0,
@@ -315,6 +346,7 @@ def _synthetic_offers() -> pd.DataFrame:
                 "Disp Cal": 1.0,
                 "Step": 0.5,
                 "Player position": "G",
+                "Position": f"G{i % 3 + 1}",
                 "K": 1.0,
             }
         )

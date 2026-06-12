@@ -262,6 +262,26 @@ def test_find_correlation_builds_parlays_wnba() -> None:
     assert (parlay_df["Game"] == "LVA/NYL").all()
 
 
+@_needs_wnba_corr
+def test_find_correlation_writes_position_labels_wnba() -> None:
+    """Resolved depth-chart labels survive onto the returned offers frame.
+
+    ``_resolve_player_positions`` builds ``G1``/``F1``/... labels on a league
+    slice that the function discards; v2 writes them back as a ``Position``
+    column so ``build_game_context`` can aggregate positional matchup edges.
+    """
+    offers = _wnba_offers()
+    stats = {"WNBA": _stats_for([o["Player"] for o in offers], "MIN short", "USG_PCT short")}
+
+    offer_df, _ = find_correlation(offers, stats, "Underdog", contest_variant="power")
+
+    assert "Position" in offer_df.columns
+    labels = offer_df["Position"].astype(str).str.strip()
+    assert (labels != "").all()  # no combo legs in this fixture ⇒ every leg resolves
+    # WNBA depth labels are a position letter (G/F/C) plus a usage rank digit.
+    assert labels.str.match(r"^[GFC]\d+$").all()
+
+
 # --- corr-slice collector (dashboard rail / constellation) ------------------
 
 

@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus.helpers.io import (
+    CURRENT_GAME_CONTEXT_PATH,
     CURRENT_GAME_CORR_PATH,
     CURRENT_META_PATH,
     CURRENT_OFFERS_PATH,
@@ -28,14 +29,14 @@ from sportstradamus.prediction.stories import STORIES_VERSION
 # - Offer details: League, Date, Team, Opponent, Game (canonical matchup key),
 #   Player, Market, Platform, Bet, Line, Boost
 # - Scoring: Model P (hit probability), Model (edge), Books, Model EV, K (Kelly), Model STD, Push P
-# - Context: Avg 5, Avg H2H, Moneyline, O/U, DVPOA
+# - Context: Avg 5, Avg H2H, Moneyline, O/U, DVPOA, Position (depth-chart label)
 # - Correlations: Team Correlation, Opp Correlation
-# - Narrative: Why (precomputed "the case" string, prediction/stories.py)
+# - Narrative: Why (precomputed "the case" string, prediction/stories)
 # - Stat key: Stat (for history lookups)
 # - Distribution (for PDF/PMF): Dist, CV, Gate, and shape parameters (Model R, Alpha, Sigma, Skew)
 #
 # Dropped internal columns: Model Param (generic workaround), Temperature, Disp Cal, Step,
-# Books P, Player position (not needed for rendering).
+# Books P, Player position (numeric depth slot — the resolved label rides in Position).
 _OFFER_KEEP_COLS = [
     "League",
     "Date",
@@ -60,6 +61,7 @@ _OFFER_KEEP_COLS = [
     "Moneyline",
     "O/U",
     "DVPOA",
+    "Position",
     "Team Correlation",
     "Opp Correlation",
     "Why",
@@ -135,6 +137,18 @@ def write_current_game_corr(corr_rows: list[dict] | pd.DataFrame) -> None:
     if not df.empty:
         df = df.drop_duplicates(subset=["League", "Game", "leg_a", "leg_b"], ignore_index=True)
     _atomic_write_parquet(df, CURRENT_GAME_CORR_PATH)
+
+
+def write_current_game_context(context: pd.DataFrame) -> None:
+    """Write the per-game context snapshot atomically.
+
+    ``context`` is the prebuilt ``stories.build_game_context`` frame (one row per
+    ``(League, Game, Date)`` — game shape, derived spread, favorite, positional
+    DVPOA edges). The caller builds it once and feeds the same frame to the
+    thesis pass, so headline and artifact share one view. Written even when empty
+    so the dashboard reflects the latest run.
+    """
+    _atomic_write_parquet(context, CURRENT_GAME_CONTEXT_PATH)
 
 
 def write_current_pickem(entries: pd.DataFrame) -> None:

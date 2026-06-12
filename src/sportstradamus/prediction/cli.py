@@ -34,12 +34,17 @@ from sportstradamus.helpers.io import (
 )
 from sportstradamus.history_schema import HISTORY_COLS, PREDICTION_LEVEL_COLS
 from sportstradamus.prediction.persist import (
+    write_current_game_context,
     write_current_game_corr,
     write_current_offers,
     write_current_pickem,
 )
 from sportstradamus.prediction.scoring import process_offers
-from sportstradamus.prediction.stories import attach_offer_why, attach_parlay_theses
+from sportstradamus.prediction.stories import (
+    attach_offer_why,
+    attach_parlay_theses,
+    build_game_context,
+)
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
 
@@ -199,8 +204,13 @@ def main(progress, legacy_correlation, contest_variant, log_level):
 
     # Precompute the narrative layer (deterministic templates, prediction/stories):
     # per-offer "the case" and per-family thesis headlines the dashboard renders verbatim.
+    # Game context is built once and shared by the thesis pass and its own snapshot so
+    # headline and artifact agree on every game's shape.
     snapshot_offers = attach_offer_why(snapshot_offers)
-    parlay_df = attach_parlay_theses(parlay_df, snapshot_offers)
+    game_context = build_game_context(snapshot_offers, archive.default_totals)
+    parlay_df = attach_parlay_theses(
+        parlay_df, snapshot_offers, corr=corr_sink, context=game_context
+    )
 
     write_current_offers(
         snapshot_offers,
@@ -210,6 +220,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
         contest_variant=contest_variant,
     )
     write_current_game_corr(corr_sink)
+    write_current_game_context(game_context)
 
     _write_pickem_snapshot(scored_ud, stats)
 
