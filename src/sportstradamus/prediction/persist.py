@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus.helpers.io import (
+    CURRENT_GAME_CORR_PATH,
     CURRENT_META_PATH,
     CURRENT_OFFERS_PATH,
     CURRENT_PARLAYS_PATH,
@@ -21,22 +22,26 @@ from sportstradamus.helpers.io import (
     _atomic_write_json,
     _atomic_write_parquet,
 )
+from sportstradamus.prediction.stories import STORIES_VERSION
 
 # Display columns kept in current_offers.parquet. The dashboard reads:
-# - Offer details: League, Date, Team, Opponent, Player, Market, Platform, Bet, Line, Boost
-# - Scoring: Model P (hit probability), Model (edge), Books, Model EV, Model STD, Push P
+# - Offer details: League, Date, Team, Opponent, Game (canonical matchup key),
+#   Player, Market, Platform, Bet, Line, Boost
+# - Scoring: Model P (hit probability), Model (edge), Books, Model EV, K (Kelly), Model STD, Push P
 # - Context: Avg 5, Avg H2H, Moneyline, O/U, DVPOA
 # - Correlations: Team Correlation, Opp Correlation
+# - Narrative: Why (precomputed "the case" string, prediction/stories.py)
 # - Stat key: Stat (for history lookups)
 # - Distribution (for PDF/PMF): Dist, CV, Gate, and shape parameters (Model R, Alpha, Sigma, Skew)
 #
 # Dropped internal columns: Model Param (generic workaround), Temperature, Disp Cal, Step,
-# Books P, K, Player position (not needed for rendering).
+# Books P, Player position (not needed for rendering).
 _OFFER_KEEP_COLS = [
     "League",
     "Date",
     "Team",
     "Opponent",
+    "Game",
     "Player",
     "Market",
     "Platform",
@@ -47,6 +52,7 @@ _OFFER_KEEP_COLS = [
     "Model",
     "Books",
     "Model EV",
+    "K",
     "Model STD",
     "Push P",
     "Avg 5",
@@ -56,6 +62,7 @@ _OFFER_KEEP_COLS = [
     "DVPOA",
     "Team Correlation",
     "Opp Correlation",
+    "Why",
     "Stat",
     "Dist",
     "CV",
@@ -109,9 +116,25 @@ def write_current_offers(
             "contest_variant": contest_variant,
             "offer_rows": len(offers_out),
             "parlay_rows": len(parlays_out),
+            "stories_version": STORIES_VERSION,
         },
         CURRENT_META_PATH,
     )
+
+
+def write_current_game_corr(corr_rows: list[dict] | pd.DataFrame) -> None:
+    """Write the per-game correlation slices snapshot atomically.
+
+    ``corr_rows`` is the collector list filled by ``find_correlation`` (one row
+    per game leg pair: ``League, Game, leg_a, leg_b, rho``). Deduped on the
+    matchup + leg-pair key — the same pair recurs across platforms and across a
+    player's multiple lines, and correlation is line-independent. Written even
+    when empty so the dashboard reflects the latest run.
+    """
+    df = pd.DataFrame(corr_rows, columns=["League", "Game", "leg_a", "leg_b", "rho"])
+    if not df.empty:
+        df = df.drop_duplicates(subset=["League", "Game", "leg_a", "leg_b"], ignore_index=True)
+    _atomic_write_parquet(df, CURRENT_GAME_CORR_PATH)
 
 
 def write_current_pickem(entries: pd.DataFrame) -> None:

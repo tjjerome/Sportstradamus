@@ -33,8 +33,13 @@ from sportstradamus.helpers.io import (
     write_parlay_hist,
 )
 from sportstradamus.history_schema import HISTORY_COLS, PREDICTION_LEVEL_COLS
-from sportstradamus.prediction.persist import write_current_offers, write_current_pickem
+from sportstradamus.prediction.persist import (
+    write_current_game_corr,
+    write_current_offers,
+    write_current_pickem,
+)
 from sportstradamus.prediction.scoring import process_offers
+from sportstradamus.prediction.stories import attach_offer_why, attach_parlay_theses
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
 
@@ -120,6 +125,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     parlay_df = pd.DataFrame()
     platforms_run: list[str] = []
     scored_ud: pd.DataFrame | None = None
+    corr_sink: list[dict] = []
 
     try:
         ud_dict = get_ud()
@@ -129,6 +135,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
             stats,
             contest_variant=contest_variant,
             legacy=legacy_correlation,
+            corr_sink=corr_sink,
         )
         parlay_df = pd.concat([parlay_df, ud5])
         # Capture the raw scored frame (pre Market-remap / Boost-rescale) for the
@@ -159,6 +166,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
             stats,
             contest_variant=contest_variant,
             legacy=legacy_correlation,
+            corr_sink=corr_sink,
         )
         parlay_df = pd.concat([parlay_df, sl5])
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
@@ -189,6 +197,11 @@ def main(progress, legacy_correlation, contest_variant, log_level):
             axis=1,
         )
 
+    # Precompute the narrative layer (deterministic templates, prediction/stories):
+    # per-offer "the case" and per-family thesis headlines the dashboard renders verbatim.
+    snapshot_offers = attach_offer_why(snapshot_offers)
+    parlay_df = attach_parlay_theses(parlay_df, snapshot_offers)
+
     write_current_offers(
         snapshot_offers,
         parlay_df,
@@ -196,6 +209,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
         platforms_run,
         contest_variant=contest_variant,
     )
+    write_current_game_corr(corr_sink)
 
     _write_pickem_snapshot(scored_ud, stats)
 

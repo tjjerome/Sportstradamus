@@ -37,6 +37,7 @@ PARLAY_HIST_PATH = _RUNTIME_DIR / "parlay_hist.parquet"
 CURRENT_OFFERS_PATH = _RUNTIME_DIR / "current_offers.parquet"
 CURRENT_PARLAYS_PATH = _RUNTIME_DIR / "current_parlays.parquet"
 CURRENT_PICKEM_PATH = _RUNTIME_DIR / "current_pickem.parquet"
+CURRENT_GAME_CORR_PATH = _RUNTIME_DIR / "current_game_corr.parquet"
 CURRENT_META_PATH = _RUNTIME_DIR / "current_meta.json"
 MODEL_STATS_PATH = _TRAINING_DIR / "model_stats.parquet"
 # Plain-text mirror of model_stats.parquet for filesystem browsing in VSCode.
