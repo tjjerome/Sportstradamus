@@ -26,6 +26,7 @@ from sportstradamus import data
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, banned, stat_map
 from sportstradamus.prediction.parlay import (
     GameArrays,
+    GameScoringContext,
     _payout_curve_for,
     assign_parlay_families,
     beam_search_parlays,
@@ -507,6 +508,35 @@ def _append_parlay_rows(parlay_df, best_bets, C):
     return pd.concat([parlay_df, df5.drop(columns="Bet ID")], ignore_index=True)
 
 
+def _append_story_context(
+    story_sink, platform, league, game, date, g, bet_df, idx, search_payouts, full_payouts
+):
+    """Capture one game's scoring bundle for the story-menu generator.
+
+    No-op unless ``story_sink`` is provided (the pickem variant-sweep caller and
+    beam-search-only runs leave it None) and the game has bet-eligible legs. The
+    bundle lets the generator price story subsets beam search never enumerates.
+    """
+    if story_sink is None or idx.empty:
+        return
+    story_sink.append(
+        GameScoringContext(
+            platform=platform,
+            league=league,
+            game=game,
+            date=str(date),
+            g=g,
+            bet_df=bet_df,
+            leg_indices=tuple(sorted(idx.index.to_numpy())),
+            full_payouts=full_payouts,
+            payout_base_by_size={
+                s: search_payouts[s - 2] for s in range(2, len(search_payouts) + 2)
+            },
+            max_size=max(full_payouts),
+        )
+    )
+
+
 def _process_league_games(
     df,
     league_df,
@@ -522,6 +552,7 @@ def _process_league_games(
     contest_variant,
     legacy,
     corr_sink,
+    story_sink,
     market_map,
 ):
     """Annotate correlations and beam-search parlays for every game in a league.
@@ -566,6 +597,18 @@ def _process_league_games(
             "Platform": platform,
         }
         max_boost = _MAX_BOOST_UNDERDOG if platform == "Underdog" else _MAX_BOOST_OTHER
+        _append_story_context(
+            story_sink,
+            platform,
+            league,
+            info["Game"],
+            date,
+            g,
+            bet_df,
+            idx,
+            search_payouts,
+            full_payouts,
+        )
         best_bets = beam_search_parlays(
             idx,
             g,
@@ -593,6 +636,7 @@ def find_correlation(
     contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"] = "pooled",
     legacy: bool = False,
     corr_sink: list | None = None,
+    story_sink: list | None = None,
 ):
     """Annotate offers with correlation info and build parlay candidates.
 
@@ -615,6 +659,10 @@ def find_correlation(
             correlation slice (``League, Game, leg_a, leg_b, rho``) to this list
             for the dashboard rail/constellation. The pickem variant-sweep caller
             leaves it None.
+        story_sink: When provided, each game appends a
+            :class:`~sportstradamus.prediction.parlay.GameScoringContext` to this
+            list so the story-menu generator can price story subsets. The pickem
+            variant-sweep caller leaves it None.
 
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]: ``(offer_df, parlay_df)`` where
@@ -715,6 +763,7 @@ def find_correlation(
             contest_variant,
             legacy,
             corr_sink,
+            story_sink,
             stat_map[platform],
         )
 

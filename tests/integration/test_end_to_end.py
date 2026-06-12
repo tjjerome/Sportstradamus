@@ -192,6 +192,9 @@ def test_pipeline_smoke(
     game_context_calls: list = []
     monkeypatch.setattr(prediction_cli, "write_current_game_context", game_context_calls.append)
 
+    game_stories_calls: list = []
+    monkeypatch.setattr(prediction_cli, "write_current_game_stories", game_stories_calls.append)
+
     # Pick'em snapshot hook: stub the (network-bound) builder so the wiring is
     # exercised without find_correlation, and capture the writer call.
     pickem_snapshot_calls: list = []
@@ -250,6 +253,14 @@ def test_pipeline_smoke(
     assert not context.empty, "build_game_context produced no rows from the offers frame"
     assert set(context["Game"]) == {"LVA/NYL", "PHX/SEA"}, f"unexpected games: {set(context['Game'])}"
     assert context["shape"].notna().all(), "every game context row carries a classified shape"
+
+    # Story-menu writer fired with a column-stable frame. It is empty here: the
+    # stubbed process_offers populates no story_sink, so the generator yields no
+    # stories (story generation itself is covered by tests/golden/test_story_menu).
+    from sportstradamus.prediction.stories.menu import _STORY_COLS
+
+    assert game_stories_calls, "write_current_game_stories was never invoked"
+    assert list(game_stories_calls[0].columns) == _STORY_COLS
 
 
 # --- helpers --------------------------------------------------------------

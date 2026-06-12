@@ -36,6 +36,31 @@ class GameArrays:
     boosts: np.ndarray
 
 
+@dataclass(frozen=True)
+class GameScoringContext:
+    """One game's scoring bundle, captured so an arbitrary leg-subset can be priced.
+
+    ``find_correlation`` builds the per-game :class:`GameArrays` ``g`` and the
+    payout tables for the beam search; the story-menu generator reuses the same
+    objects to score story subsets that beam search never enumerates (it only
+    keeps both-team parlays). ``leg_indices`` are positions into ``g``'s matrices
+    (the bet-eligible legs); ``bet_df`` maps the same positions to their offer
+    records (``Desc``/``Model``/``Bet``/``Team``/…). Collected per game into the
+    opt-in ``story_sink``; one context per ``(platform, game)``.
+    """
+
+    platform: str
+    league: str
+    game: str
+    date: str
+    g: GameArrays
+    bet_df: dict
+    leg_indices: tuple[int, ...]
+    full_payouts: dict[int, list[float]]
+    payout_base_by_size: dict[int, float]
+    max_size: int
+
+
 # --- Beam-search constants --------------------------------------------------
 
 # Beam width: max parlay candidates carried between sizes. Empirically large

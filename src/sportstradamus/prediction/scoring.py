@@ -36,7 +36,14 @@ archive = LazyArchive()
 
 @line_profiler.profile
 def process_offers(
-    offer_dict, book, stats, *, contest_variant="pooled", legacy=False, corr_sink=None
+    offer_dict,
+    book,
+    stats,
+    *,
+    contest_variant="pooled",
+    legacy=False,
+    corr_sink=None,
+    story_sink=None,
 ):
     """Score all offers from one platform and return annotated DataFrames.
 
@@ -53,6 +60,8 @@ def process_offers(
         legacy: Legacy-pipeline escape hatch; passed to find_correlation.
         corr_sink: Optional list the per-game correlation slices accumulate into;
             forwarded to find_correlation. See its docstring.
+        story_sink: Optional list the per-game scoring bundles accumulate into;
+            forwarded to find_correlation for the story-menu generator.
 
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]: ``(offer_df, parlay_df)``.
@@ -66,7 +75,13 @@ def process_offers(
                 new_offers.extend(_match_league_offers(league, markets, stats, book, pbar))
 
     offer_df, parlays = find_correlation(
-        new_offers, stats, book, contest_variant=contest_variant, legacy=legacy, corr_sink=corr_sink
+        new_offers,
+        stats,
+        book,
+        contest_variant=contest_variant,
+        legacy=legacy,
+        corr_sink=corr_sink,
+        story_sink=story_sink,
     )
 
     logger.info(str(len(offer_df)) + " offers processed")
