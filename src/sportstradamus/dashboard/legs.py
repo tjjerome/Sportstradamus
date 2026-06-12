@@ -35,8 +35,11 @@ def _candidate_markets(market: str, platform: str | None) -> set[str]:
 def find_offer_idx(parsed: dict, offers: pd.DataFrame, platform: str | None = None) -> int | None:
     """Find the offers-frame index for a parsed leg, or ``None`` if it moved.
 
-    ``platform`` is the parlay's book; it lets the leg's display market be
-    translated to the canonical code stored in the offers snapshot.
+    ``platform`` is the parlay's book; it translates the leg's display market to
+    the canonical code stored in the offers snapshot **and** pins the match to
+    that book — the same (player, market, line) trades on both Underdog and
+    Sleeper with different payout multipliers, so a platform-blind match would
+    snapshot the wrong book's ``Boost`` and misprice the slip.
     """
     if not parsed or offers.empty:
         return None
@@ -47,5 +50,7 @@ def find_offer_idx(parsed: dict, offers: pd.DataFrame, platform: str | None = No
         & (offers["Market"].isin(markets))
         & (pd.to_numeric(offers["Line"], errors="coerce") == parsed["Line"])
     )
+    if platform is not None:
+        mask &= offers["Platform"] == platform
     matches = offers.index[mask]
     return int(matches[0]) if len(matches) else None
