@@ -1,5 +1,9 @@
 # Model Track — Ship-75 → Ship-90
 
+> **ARCHIVED — superseded by [`../model_improvement_track.md`](../model_improvement_track.md),
+> which absorbs this brief's session mechanics (→ §11.5), stage plan (→ §7), verify block
+> (→ §2), and ledger (→ §12). The roadmap v3 §4 lane row points there now.**
+
 > Status: ACTIVE — Ship-75 lever work
 
 ## 1. Mission & money logic

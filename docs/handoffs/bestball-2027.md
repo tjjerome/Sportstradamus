@@ -117,7 +117,7 @@ owner-only.
   `sportstradamus.training` interfaces. The projection layer is a TRANSLATION
   layer; no new model (archived v2 §5.2). Never edit serving-path modules from
   this lane; compat notes:
-  [operation_ship_references.md](../operation_ship_references.md).
+  [model_improvement_track.md](../model_improvement_track.md) §11.3.
 - `sportstradamus.helpers` — `Scrape` for ADP HTTP, config loaders. Reuse,
   don't fork.
 - `src/sportstradamus/pages/` — companion/exposure views (stages 5–6). Parquet

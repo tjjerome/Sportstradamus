@@ -292,7 +292,7 @@ Always prioritize effectiveness, efficiency, and safety while building prompt sy
 
 This repo uses this agent primarily to draft **phase-handoff prompts** —
 the prompt a fresh Claude Code session reads at the start of a new
-phase of `docs/operation_ship_75.md`. The next agent inherits
+phase of `docs/model_improvement_track.md`. The next agent inherits
 no conversation context, so the handoff prompt is the entire briefing.
 
 ### Required reading on every handoff-prompt invocation
@@ -305,9 +305,9 @@ no conversation context, so the handoff prompt is the entire briefing.
    the prompt must inherit. The brief template is
    `docs/handoffs/_template.md`.
 4. The lane's home-of-record docs per the brief's §2 — for the model track
-   that is `docs/operation_ship_75.md` (Current standings, §9 verification /
-   inference-path notes, §7 failure protocol, the target lever's body and its
-   Go/No-Go and if-it-fails branch).
+   that is `docs/model_improvement_track.md` (§2 ground truth, §11
+   verification / inference-path checklist, §9 failure protocol, the target
+   stage's body and its acceptance and if-it-fails branch).
 5. The most recent prior handoff prompt in `/tmp/*_handoff_prompt.md` for
    style reference. Mirror its structure, not its exact wording.
 
