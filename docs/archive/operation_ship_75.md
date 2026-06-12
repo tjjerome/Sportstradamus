@@ -1,5 +1,12 @@
 # Operation Ship 75
 
+> **ARCHIVED — superseded by [`../model_improvement_track.md`](../model_improvement_track.md)
+> (the consolidated model-track home of record: lever stack → §5–§7, per-league path → §8,
+> failure protocol → §9, research holes → §10, verification → §11).** Status claims and
+> per-cell counts below are stale and non-normative. Retained for the full lever-stack prose
+> the consolidation compressed; research verdicts live on in
+> [`operation_ship_references.md`](../operation_ship_references.md).
+
 > **Home of record for the model-research push to 75% breadth.** Research verdicts,
 > citations, and the inference-path checklist live in
 > [`operation_ship_references.md`](operation_ship_references.md). Current gate

@@ -134,7 +134,8 @@ These conventions pair with the hooks in `.claude/hooks/`.
   `poetry run pytest -m integration -n0 && touch "$CLAUDE_PROJECT_DIR/.claude/.state/integration_green"`
   so a clean run clears the push prompt. Editing any `.py` afterward re-arms it.
 
-* **Research-first.** Before building any Operation Ship 75 §8-flagged lever, or
+* **Research-first.** Before building any `docs/model_improvement_track.md`
+  §10-flagged lever, or
   changing a distribution family / dispersion mechanism, dispatch the
   `research-analyst` subagent first and cite its `/tmp/researcher_*.md` brief.
   The research-gate hook enforces the discrete cases (a `shipped:` flip in
