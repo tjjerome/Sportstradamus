@@ -71,3 +71,14 @@ def test_both_builder_types_round_trip(tmp_path, monkeypatch):
     assert set(df["builder_type"]) == {"constellation", "simple"}
     legs = json.loads(df.loc[df["slip_id"] == "c1", "legs"].iloc[0])
     assert legs[0]["league"] == "WNBA"
+
+
+def test_delete_removes_one_slip_and_no_ops_when_absent(tmp_path, monkeypatch):
+    _patch_path(tmp_path, monkeypatch)
+    io.upsert_user_slip(_row("s1"))
+    io.upsert_user_slip(_row("s2"))
+    io.delete_user_slip("s1")
+    remaining = io.read_user_slips()
+    assert list(remaining["slip_id"]) == ["s2"]
+    io.delete_user_slip("ghost")  # absent id is a no-op, not an error
+    assert list(io.read_user_slips()["slip_id"]) == ["s2"]

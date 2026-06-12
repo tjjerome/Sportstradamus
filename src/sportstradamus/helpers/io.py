@@ -288,6 +288,14 @@ def write_user_slips(df: pd.DataFrame) -> None:
     _atomic_write_parquet(df, USER_SLIPS_PATH)
 
 
+def delete_user_slip(slip_id: str) -> None:
+    """Drop one slip by ``slip_id`` (the sidebar "Delete"); no-op if it's gone."""
+    existing = read_user_slips()
+    if existing.empty or "slip_id" not in existing.columns:
+        return
+    _atomic_write_parquet(existing.loc[existing["slip_id"] != slip_id], USER_SLIPS_PATH)
+
+
 # ---------------------------------------------------------------------------
 # Upcoming-events ledger (close-line scheduler input)
 # ---------------------------------------------------------------------------
