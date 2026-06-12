@@ -65,8 +65,12 @@ All owner-locked 2026-06-11 (the mockup-review session); changes are owner-only:
 - Prose is precomputed templates/phrase banks at prophecize time. Free-LLM rewriter is an
   optional later seam, never a dependency. No paid APIs anywhere in the dashboard path.
 - Platform taxonomy: platforms = Underdog, Sleeper. Power/Flex = auto play types (2–3 / 4+
-  legs), informational chip only. Rivals = leg type. Internal `contest_variant` field names
-  unchanged.
+  legs), informational chip only. Rivals = leg type (sits inside a Power/Flex slip beside player
+  props and game lines, not a separate contest). Internal `contest_variant` field names unchanged.
+- Slips is a **story menu**, not the old `Family` cluster: up to 5 data-driven stories per game,
+  each offering a **Bankroll Builder** (max Kelly log-growth, sun motif) and a **Shoot the Moon**
+  (max EV, moon motif) starting parlay, edited from there in the constellation. Menu stakes are a
+  standalone preview; the slip rail is the real bankroll allocator. Mechanics live in P3.
 - Underdog game lines get **no modeling engine** (sharp lines); correlation-engine citizens
   only, book-implied probabilities.
 - Ambient/visual art is stock or commissioned only — **never AI-generated**;
@@ -201,9 +205,39 @@ stage ends with the §9 checklist green and the dashboard runnable.
   fixtures); headline-uniqueness-within-slate still holds; persist characterization updated;
   integration -n0 shows the new file + `Position` flowing; archive-lock + design goldens green;
   refactoring-specialist on every touched `.py`. Est: 3–4 sessions.
-- **P3 — slip engine.** Goal: rail on all surfaces, both joint probs, payout/EV/kelly, play-type
-  chip rule (single constant), save + reflect grading, Sleeper unverified state. **Live thesis
-  regen:** the rail recomputes `thesis(legs, ctxs)` (the P2 engine) on every slip edit
+- **P3 — slip engine + story menu.** Goal: the story-menu workflow that replaces `Family`, the rail
+  on all surfaces, both joint probs, payout/EV/kelly, play-type chip rule (single constant), save +
+  reflect grading, Sleeper unverified state.
+
+  **Story menu (pipeline precompute — replaces `Family` as the Slips grouping key).** `prophecize`
+  writes `current_game_stories.parquet` keyed `(platform, League, Game, story_id, objective)` →
+  `{legs, headline, joint_p, model_ev, kelly_stake}`. Per `(platform, game)`, enumerate up to **5**
+  stories straight from the game's real signal — strong individual legs (edge ≥ the menu floor;
+  start at the 0.05 the unit gate and per-offer "why" already use) and the correlation clusters
+  among them. **No "always" archetype** — a thin game yields few or zero stories; game-script
+  surfaces only when the shape is itself the signal (the engine keeps its game-script *fallback* for
+  labeling a user-built slip, but the generator has none). Eligible leg types are player props,
+  **Rivals** matchup legs, and — behind **L3** — game lines, which double as correlation anchors that
+  pull player legs into a story (a DFS line diverging from our weighted consensus is the edge). For
+  each story emit two parlays over its eligible legs, **free to share legs**:
+  - **Bankroll Builder** (sun motif) = max expected **log-growth** G — the full-Kelly geometric
+    growth rate, i.e. the bet that compounds bankroll fastest, *not* the one with the biggest stake.
+  - **Shoot the Moon** (moon motif) = max **Model EV** — the widest high-edge set inside the
+    play-type cap; usually the 5–6-leg extension of the 2–3-leg Builder.
+
+  Score every candidate leg-subset through the existing copula joint-prob → Kelly/EV path (reuse
+  `find_correlation`'s scorer, don't rebuild); brute-force over subsets is fine at ~8–12 offers a
+  game. Platforms compute independently and **the same story repeating across platforms is expected
+  and good** — same story across books = a stronger data-backed call.
+
+  **Slips flow.** Platform select (Underdog/Sleeper) → up to 5 **story cards** (engine headline +
+  one-line why) → two **variant chips** (Bankroll Builder / Shoot the Moon) → the chosen parlay
+  loads into the constellation editor (P4). Menu stakes are a **standalone preview** (the parlay's
+  own full-Kelly fraction of bankroll — "if this were your only bet"); the live rail re-runs the
+  joint slate allocation over whatever is actually in the slip — the real allocator, the same
+  bankroll slider the pickem page carries.
+
+  **Live thesis regen:** the rail recomputes `thesis(legs, ctxs)` (the P2 engine) on every slip edit
   (add/remove/swap) via a thin `dashboard/slip/story.py`, so a user-edited slip never shows a stale
   headline naming a removed player. Legs come from slip state enriched against the loaded offers
   frame; `GameCtx`s from a new `load_current_game_context` + the existing `load_current_game_corr`.
@@ -211,11 +245,16 @@ stage ends with the §9 checklist green and the dashboard runnable.
   bump the pure function can't reproduce); the first edit switches to the live recompute (the
   single-slip recompute skips the slate-uniqueness pass — faithfulness beats slate uniqueness for
   one slip). A slip whose game lacks a context row degrades to shape "even" routing, never a crash.
-  Acceptance: unit tests (2-leg hand-computed joint; 3→4 leg play-type boundary; Decimal
-  quantization); removing the named player changes the headline and the old name never renders;
-  missing-context slip degrades to "even"; manual: slip survives full nav cycle; backdated slip
-  grades on reflect; archive-lock golden green. Est: 2–3 sessions. Kill branch: if copula import
-  drags weight, inline the 30-line MVN-cdf math instead.
+
+  Acceptance: story-enumerator unit tests (cap 5; a no-signal game yields zero; edge floor honored;
+  correlation-cluster stories form); two-objective construction (Builder's G ≥ any sibling's growth,
+  Moon's EV ≥ Builder's EV, shared legs allowed); per-platform menus independent; standalone-preview
+  vs slip-allocated sizing diverge as designed; rail unit tests (2-leg hand-computed joint; 3→4 leg
+  play-type boundary; Decimal quantization); removing the named player changes the headline and the
+  old name never renders; missing-context slip degrades to "even"; manual: slip survives full nav
+  cycle; backdated slip grades on reflect; archive-lock golden green. Est: 4–5 sessions (the menu
+  generator is the pipeline half). Kill branch: if copula import drags weight, inline the 30-line
+  MVN-cdf math instead.
 - **P4 — Tonight + Game.** Goal: narrative surfaces (cards, prophecies, why-strings, context
   strip, constellation v1, `?game=` links, scars mounted). MUST FIX (P1 known bug): Tonight's
   View-game button lands on the Game page's default game — `st.switch_page` drops query params
@@ -224,7 +263,10 @@ stage ends with the §9 checklist green and the dashboard runnable.
   **Context strip + headlines read `current_game_context.parquet`** (the P2 artifact): the Game
   context strip shows total / derived spread / favorite (replacing the per-row `O/U`/`Moneyline`
   peek at `surfaces/game.py:51-56`); Tonight cards show the top per-leg-set thesis headline per
-  game. Acceptance: render pins; archive-lock gate green; View-game lands on the clicked game
+  game. **Constellation v1 doubles as the slip editor the P3 story menu loads into** — nodes are the
+  game's candidate legs (player props, Rivals, L3 game lines), edges the `current_game_corr` ρ;
+  add/remove/swap drives the live rail + thesis regen (graph viz here, the seeded parlay + rail
+  mechanics are P3). Acceptance: render pins; archive-lock gate green; View-game lands on the clicked game
   (doubleheaders included); context strip shows the derived spread for a fixture game. Est: 1–2
   sessions.
 - **P5 — Board + Slips upgrade.** Goal: themed AG Grid (right-aligned numerals, edge heatmap,
@@ -246,7 +288,9 @@ stage ends with the §9 checklist green and the dashboard runnable.
 - **L2 — comps persistence.** Persist comp outputs at prophecize time; comps panel + chip flip
   on.
 - **L3 — game lines into the correlation engine.** Book-implied probs only; Game-board rows +
-  constellation team nodes + slip legs flip on. Re-verify UD product first (§3).
+  constellation team nodes + slip legs flip on, **and game lines become eligible P3 story-menu legs**
+  — a game line whose book-implied prob diverges from our weighted consensus is a candidate strong
+  leg and a correlation anchor that pulls player legs into a story. Re-verify UD product first (§3).
 - **L4 — correlation-block risk.** UD/Sleeper pairing-rule model; rail chip flips on.
 - **L5 — ambient art acquisition.** Stock/commissioned per spec §6 brief; manifest fill-in.
 - **L6 — optional free-LLM prose rewriter.** Only if a free API exists; templates remain the
