@@ -15,7 +15,7 @@ decision engines (kelly, pickem-build, parlay pricing) are league-agnostic and
 already built; what MLB/NHL need is model-quality work + data-freshness repair
 plus a small, known CLI-wiring delta (§3 findings) — not new architecture. No
 doc gives these leagues a breadth target —
-[`operation_ship_75.md`](../operation_ship_75.md) §North Star covers
+[`model_improvement_track.md`](../model_improvement_track.md) §0 covers
 NBA/WNBA/NFL only; this lane exists to close that gap. Seasonal urgency: **MLB
 is in season now** — the apps price it heavily while NBA/NFL are dark, and the
 D1 option decays as the season burns. NHL starts in October; D2 wants its
@@ -27,9 +27,10 @@ packet by ~Sep.
    (seasonality) + §7 (the D1/D2 rows) — why now, and who decides. Predecessor
    design sketches: [`../archive/sportstradamus_roadmap_v2.md`](../archive/sportstradamus_roadmap_v2.md)
    (non-normative, status claims stale).
-2. [`../operation_ship_75.md`](../operation_ship_75.md) §Purpose (the lens),
-   §3 (the failure-mode-census pattern stage 0 copies), §5.0 operating loop +
-   §5 lever stack (the post-GO method, reused wholesale — never restated here).
+2. [`../model_improvement_track.md`](../model_improvement_track.md) §1 (the
+   lens), §4.3 (the failure-mode-census pattern stage 0 copies), §6 operating
+   loop + §5/§7 lever stages (the post-GO method, reused wholesale — never
+   restated here).
 3. [`../ship_gate.md`](../ship_gate.md) — g1–g5 thresholds the packets score
    against.
 4. [`CONTRIBUTING.md`](../../CONTRIBUTING.md) §Package Map, §Adding a New
@@ -38,8 +39,8 @@ packet by ~Sep.
 5. [`CLAUDE.md`](../../CLAUDE.md) §Hard rules (DuckDB lock) + §Agentic workflow
    conventions (research-first) — assumed law; the two rules this lane leans
    on hardest.
-6. [`model-track.md`](model-track.md) — the lane whose footprint and per-cell
-   loop stage 1+ mirrors.
+6. [`../model_improvement_track.md`](../model_improvement_track.md) §11.5 —
+   the model-track footprint and session mechanics stage 1+ mirrors.
 7. `src/sportstradamus/stats/mlb.py`, `src/sportstradamus/stats/nhl.py` — the
    two Stats classes under audit (`season_start`, `load`/`update`).
 8. `src/sportstradamus/training/markets.py` +
@@ -113,8 +114,8 @@ Findings verified 2026-06-10 (each re-derivable above — re-verify, don't trust
   coverage "thin"; books scrapers were the intended source).
   `scripts/backfill_historical_odds.py` does carry `baseball_mlb` /
   `icehockey_nhl` sport keys. The archive's MLB/NHL book side is therefore
-  legacy-era until proven otherwise — the ship_75 §1b "is the book honest?"
-  check is mandatory before any g1 verdict is believed.
+  legacy-era until proven otherwise — the model_improvement_track.md §4.2
+  "is the book honest?" check is mandatory before any g1 verdict is believed.
 - **All 40 cells are `dist: SkewNormal`** with `target_normalization` /
   `posthoc` `"none"` — including count-shaped stats (home runs, stolen bases,
   goals, assists, blocked). Any re-route is research-gated (§4).
@@ -123,9 +124,10 @@ Findings verified 2026-06-10 (each re-derivable above — re-verify, don't trust
   (gitignored — freshness is only checkable where the data lives).
 - `meditate` skips + pickle-prunes withheld cells; audit training needs
   `--bypass-withholding` or a `--deterministic` sandbox run (writes to
-  `research/models/deterministic/`, never production). The ship_75 §5.0
-  strategy driver may not be landed on the working branch — `ls
-  src/sportstradamus/training/model_strategy_driver.py` before planning around it.
+  `research/models/deterministic/`, never production). The strategy driver
+  lives on `model-research` only (model_improvement_track.md §5 branch
+  asymmetry) — `ls src/sportstradamus/training/model_strategy_driver.py`
+  before planning around it.
 
 ### Volatile product assumptions
 
@@ -164,8 +166,9 @@ run, but nothing merges in stage 0.
 **Post-GO (stage 1+):** mirrors the model-track footprint —
 `sportstradamus.training` (pipeline, scorecard, report),
 `data/config/stat_meta.json`, ship-config plumbing — see
-[`model-track.md`](model-track.md) §5 and ship_75 §5; not restated here. Plus
-the activation-specific deltas this audit names:
+[`../model_improvement_track.md`](../model_improvement_track.md) §11.5 and
+§5–§7; not restated here. Plus the activation-specific deltas this audit
+names:
 
 | Module | Why |
 |---|---|
@@ -178,7 +181,7 @@ the activation-specific deltas this audit names:
 
 Editing outside the footprint is a stop condition (§8). Serving-path changes
 carry the inference-path compatibility checklist
-([`../operation_ship_references.md`](../operation_ship_references.md)) —
+([`../model_improvement_track.md`](../model_improvement_track.md) §11.3) —
 reference it, don't restate it.
 
 ## 6. Stage plan
@@ -193,15 +196,15 @@ reference it, don't restate it.
      `StatsMLB.load()/update()` still run against today's statsapi;
      `season_start` fix.
   2. Archive odds coverage by market (counts, date range, distinct books) +
-     the honesty check: real two-sided prices or a legacy seed (ship_75 §1b
-     pattern)? g1 grades against this.
+     the honesty check: real two-sided prices or a legacy seed
+     (model_improvement_track.md §4.2 pattern)? g1 grades against this.
   3. App coverage census: markets Underdog/Sleeper actually price, mapped onto
      the 24 cells; unpriced cells flagged for the owner's denominator call.
   4. Wiring-delta list (§3 findings) with cost estimate.
   5. `meditate --league MLB --bypass-withholding --market <subset>` smoke on a
      scratch branch (or `--deterministic` sandbox) + full scorecard sweep →
      free-passer count (cells already clearing g1–g5) + a failure-mode census
-     table à la ship_75 §3.
+     table à la model_improvement_track.md §4.3.
   6. Recommended GO/NO-GO with reasons + a proposed breadth target for the
      owner to lock at D1.
 - **Acceptance:** packet committed + §10 ledger line + owner pointed at it.
@@ -223,21 +226,23 @@ acceptance and kill criteria.
 
 - **Entry:** D1 (MLB) or D2 (NHL) = GO, owner-committed; breadth target locked.
 - **Procedure:** land the packet's wiring deltas + data repair first (one
-  module per subagent), then the ship_75 §5.0 operating loop verbatim — free
-  passers first (§5.1 pattern), then the lever stack cheapest-first. Loop and
-  stack live in [`../operation_ship_75.md`](../operation_ship_75.md) §5; this
-  brief does not restate them.
+  module per subagent), then the model_improvement_track.md §6 operating loop
+  verbatim — free passers first (§7.0 pattern), then the §7 stage ladder
+  cheapest-first. Loop and stages live in
+  [`../model_improvement_track.md`](../model_improvement_track.md) §6–§7;
+  this brief does not restate them.
 - **Acceptance per cell:** official full-HPO scorecard 5/5
   ([`../ship_gate.md`](../ship_gate.md)) → `shipped: "devel"` via standard
   mechanics (CONTRIBUTING §Shipping; devel-ship-curator carves every PR).
 - **Est. sessions:** set by the packet's free-passer count + failure census.
-- **Kill criteria:** ship_75 §7 failure protocol per lever/cell. League-level
-  kill is an owner call → status `DONE (no-go)` or `BLOCKED (on: next season)`.
+- **Kill criteria:** model_improvement_track.md §9 failure protocol per
+  lever/cell. League-level kill is an owner call → status `DONE (no-go)` or
+  `BLOCKED (on: next season)`.
 
 ## 7. Working rules
 
 - Conflict order: command output > CLAUDE.md/CONTRIBUTING.md > home-of-record
-  doc (ship_75, ship_gate) > this brief > roadmap v3.
+  doc (model_improvement_track, ship_gate) > this brief > roadmap v3.
 - **Archive lock discipline.** Probes open `duckdb.connect(...,
   read_only=True)` and close immediately. `Archive()` is a read-write
   singleton whose DuckDB file lock lives for the connection lifetime — never
@@ -247,8 +252,8 @@ acceptance and kill criteria.
 - Production data flows one way here: `scripts/sync_from_prod.sh` (pull).
   `sync_to_prod.sh`, crontab edits, anything on the prod box: owner-only.
 - Compute: full-league `meditate` is hours; default to `--market` scoping and
-  `--deterministic` sandbox runs for exploration (ship_75 §5.0); real-HPO only
-  to confirm a ship candidate.
+  `--deterministic` sandbox runs for exploration (model_improvement_track.md
+  §6); real-HPO only to confirm a ship candidate.
 - Packets and this brief revise in place (STYLE_GUIDE §16); the §10 ledger is
   the only append-only zone.
 
@@ -263,8 +268,8 @@ acceptance and kill criteria.
 - anything touching credentials, paid APIs (incl. Odds API probes for MLB/NHL
   coverage), cron, or ToS surface (live Underdog/Sleeper scrapes);
 - a full-league `meditate` looks necessary — it is real cost; prefer
-  `--market` scoping and the deterministic sandbox (ship_75 §5.0), and ask
-  before any full run;
+  `--market` scoping and the deterministic sandbox (model_improvement_track.md
+  §6), and ask before any full run;
 - cron / production-box changes of any kind — owner-only;
 - two consecutive sessions with no acceptance criterion moving (grind detector).
 

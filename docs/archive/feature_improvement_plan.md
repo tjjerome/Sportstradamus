@@ -1,5 +1,10 @@
 # Feature Improvement Plan
 
+> **ARCHIVED — superseded by [`../model_improvement_track.md`](../model_improvement_track.md)
+> (feature stages → §7.0/§7.3/§7.4/§7.6/§7.7, validation protocol + worked example → §11.2,
+> feature-count verdict → §7.4 item 5).** Status claims below are stale and non-normative.
+> Retained for the full per-item hypothesis/evidence prose the consolidation compressed.
+
 > **Status: ACTIVE — stage 0 (hygiene + quick wins).** Canonical home for feature-lever
 > detail across all five leagues; [`operation_ship_75.md`](operation_ship_75.md) §5.8
 > cross-references this doc. Gate thresholds live in [`ship_gate.md`](ship_gate.md);
