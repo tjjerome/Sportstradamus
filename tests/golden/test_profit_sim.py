@@ -237,5 +237,3 @@ def test_summarize_sharpe_finite_on_mixed_outcomes():
     )
     summary = summarize_runs(result, initial_bankroll=1000.0)
     assert np.isfinite(summary["sharpe"])
-
-

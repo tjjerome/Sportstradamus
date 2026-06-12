@@ -41,9 +41,7 @@ def test_negbin_crps_matches_brute_force_support_sum():
     y = np.array([3.0, 5.0])
     got = negbin_crps(y, r, p)
     k = np.arange(0, 400)
-    want = np.array(
-        [np.sum((nbinom.cdf(k, r[i], p[i]) - (y[i] <= k)) ** 2) for i in range(2)]
-    )
+    want = np.array([np.sum((nbinom.cdf(k, r[i], p[i]) - (y[i] <= k)) ** 2) for i in range(2)])
     assert np.allclose(got, want, rtol=1e-6)
 
 
@@ -55,7 +53,10 @@ def test_gamma_crps_closed_form_matches_fine_grid():
     x = np.linspace(0, 200, 60000)
     dx = x[1] - x[0]
     want = np.array(
-        [np.sum((gamma_dist.cdf(x, alpha[i], scale=scale[i]) - (y[i] <= x)) ** 2) * dx for i in range(2)]
+        [
+            np.sum((gamma_dist.cdf(x, alpha[i], scale=scale[i]) - (y[i] <= x)) ** 2) * dx
+            for i in range(2)
+        ]
     )
     assert np.allclose(got, want, rtol=1e-2, atol=1e-2)
 

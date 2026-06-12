@@ -71,7 +71,11 @@ def test_search_space_is_all_retrain_kind_spec_stage_shape():
         "retrain",
     ]
     assert space["dist_training_loss"] == ["categorical", ["crps", "nll"], "retrain"]
-    assert space["blending_loss_fn"] == ["categorical", sorted(calibration.BLENDING_SLUGS), "retrain"]
+    assert space["blending_loss_fn"] == [
+        "categorical",
+        sorted(calibration.BLENDING_SLUGS),
+        "retrain",
+    ]
 
 
 def test_retrain_grid_keeps_only_retrain_axes():
@@ -103,7 +107,11 @@ def test_run_and_score_scores_with_honest_gate_row(monkeypatch):
 
     monkeypatch.setattr(model_strategy_driver, "_score_normalization", fake_score)
     rows = model_strategy_driver._run_and_score(
-        "WNBA", "AST", normalization="ratio_meanyr", dist_training_loss="nll", blending_loss_fn="crps"
+        "WNBA",
+        "AST",
+        normalization="ratio_meanyr",
+        dist_training_loss="nll",
+        blending_loss_fn="crps",
     )
     assert captured["args"] == ("WNBA", "AST", "ratio_meanyr")
     assert len(rows) == 1
