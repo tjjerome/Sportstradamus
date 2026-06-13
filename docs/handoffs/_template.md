@@ -66,7 +66,7 @@ relitigate; changes are owner-only. Workstream-scoped decisions live HERE
 paths (sportstradamus.stats / .training / .prediction / .helpers — per
 CONTRIBUTING §Package Map) so deleted shims are not recreated. Editing outside
 the footprint is a stop condition (§8). If the lane touches the serving path,
-add the inference-path compatibility pointer (model_improvement_track.md §11.3)
+add the inference-path compatibility pointer (model_improvement_track.md §7.3)
 — reference it, don't restate it. -->
 
 ## 6. Stage plan
@@ -80,7 +80,7 @@ Per stage:
   "Owner is satisfied" is an escalation, never an acceptance criterion.
 - **Est. sessions**
 - **Kill criteria / if-it-fails branch** — mandatory (model_improvement_track.md
-  §7/§9 discipline: scrap the path, take the next; record the verdict in the
+  §6/§8 discipline: scrap the path, take the next; record the verdict in the
   ledger). -->
 
 ## 7. Working rules

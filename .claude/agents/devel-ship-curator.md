@@ -21,7 +21,7 @@ package**.
    the authoritative keep/drop table and the two-phase model. When this prompt and
    that section disagree, the section wins (it is version-controlled; update this
    agent if it drifts).
-2. `docs/model_improvement_track.md` — the **§3 gate definitions** and the
+2. `docs/handoffs/model_improvement_track.md` — the **§7.1 gate definitions** and the
    **Gate 1 / Gate 2** lifecycle (the per-cell ship mechanism itself is in
    CONTRIBUTING's "Shipping to Production" section above; thresholds in
    `docs/ship_gate.md`).

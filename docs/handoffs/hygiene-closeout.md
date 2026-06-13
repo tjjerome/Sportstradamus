@@ -21,7 +21,7 @@ accuracy has never been verified on production data.
    subject.
 4. [`../../src/sportstradamus/scripts/audit_parlay_calibration.py`](../../src/sportstradamus/scripts/audit_parlay_calibration.py)
    — the calibration harness stage 2 re-runs.
-5. [`../model_improvement_track.md`](../model_improvement_track.md) §9 — the
+5. [`model_improvement_track.md`](model_improvement_track.md) §8 — the
    no-defer / matrix-exhaustion policy stage 3's drift sweeps guard
    (`deferred-90` is a retired tag).
 
@@ -75,12 +75,12 @@ edits to), `src/sportstradamus/scripts/` (read/run), `pyproject.toml`
    stage, note in ledger, move on.
 3. **Drift sweeps + recurring checks.** (a) `deferred-90` drift grep (§3
    block) — the tag is retired
-   ([`../model_improvement_track.md`](../model_improvement_track.md) §9);
+   ([`model_improvement_track.md`](model_improvement_track.md) §8);
    only its retirement notes should match. (b) Verify `pyproject.toml`
    script registrations match shipped CLIs. (c) Run the recurring checks and
    record results: per-season `underdog_payouts.json` verification vs the
    live product (archived v2 §3.2 mandate); monthly free-passer re-score
-   reminder to the model-track lane (model_improvement_track.md §7.0).
+   reminder to the model-track lane (model_improvement_track.md §6.0).
    Acceptance: each check's result in the ledger. ~1 session each visit;
    repeats.
 

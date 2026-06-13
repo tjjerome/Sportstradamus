@@ -3,7 +3,7 @@
 High-level flowcharts for the training and inference pipelines. The authoritative
 narrative is [CONTRIBUTING.md](../CONTRIBUTING.md) §Data Flow and §Modifying the
 Training Pipeline; the offline ship-gate detail is in
-[docs/model_improvement_track.md](model_improvement_track.md) and
+[docs/handoffs/model_improvement_track.md](handoffs/model_improvement_track.md) and
 [docs/ship_gate.md](ship_gate.md).
 
 ## Training Pipeline (`meditate` → `training/pipeline.py:train_market`)
@@ -15,7 +15,7 @@ flowchart TD
     C --> D["SkewNormal: normalize target by mean<br/>count families train on raw counts"]
     D --> E["hyperparams.warm_start_hyper_opt<br/>Optuna search, seeded from prior best"]
     E --> F["LightGBMLSS.fit<br/>per-row distribution parameters"]
-    F --> G["dispersion calibration on validation<br/>count: minimize_scalar(CRPS) · SkewNormal: joint (c, skew) vs PIT-KS<br/>(ladder: model_improvement_track §7.1)"]
+    F --> G["dispersion calibration on validation<br/>count: minimize_scalar(CRPS) · SkewNormal: joint (c, skew) vs PIT-KS<br/>(ladder: model_improvement_track §6.1)"]
     G --> H["temperature scaling<br/>fit T on validation Brier"]
     H --> I["diagnostics baked into the model pickle"]
     I --> J["save pickle<br/>data/models/{LEAGUE}_{market}.pkl"]

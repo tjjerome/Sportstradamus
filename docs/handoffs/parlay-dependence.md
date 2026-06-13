@@ -26,7 +26,7 @@ every entry on both apps.
 
 ## 2. Read first (in order)
 
-1. [`model_improvement_track.md`](../model_improvement_track.md) §1 + §12 —
+1. [`model_improvement_track.md`](model_improvement_track.md) §1 + §2 —
    the lens (calibration is the product; Gate 4 PIT-KS is the real bar) and
    the doc map for the marginals this lane consumes.
 2. [`archive/sportstradamus_roadmap_v2.md`](../archive/sportstradamus_roadmap_v2.md)
@@ -103,7 +103,7 @@ ls -la data/parlay_hist.parquet 2>/dev/null
   verdict; mirror the existing `legacy` flag pattern (parlay.py:533,
   correlation.py:554). Default stays incumbent until stage 3 acceptance.
 - 2026-06-10 — Never loosen gates, harness thresholds, or test tolerances to
-  pass (model_improvement_track.md §1/§9 discipline).
+  pass (model_improvement_track.md §1/§8 discipline).
 - 2026-06-10 — Vine copulas are out of scope at dims 2–6 (archived v2 §1.2);
   relitigating that is owner-only.
 
@@ -199,7 +199,7 @@ valuable verdict.
 ## 7. Working rules
 
 - Conflict order: command output > CLAUDE.md/CONTRIBUTING.md >
-  [`model_improvement_track.md`](../model_improvement_track.md) > this brief >
+  [`model_improvement_track.md`](model_improvement_track.md) > this brief >
   roadmap v3.
 - Reuse before you write (CLAUDE.md): residualization, stratification, and
   shrinkage exist in `training/correlate.py`; the lane parameterizes or

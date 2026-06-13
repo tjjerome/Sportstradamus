@@ -3,28 +3,30 @@
 > Status: ACTIVE — Ship-75 rung
 >
 > **The single home of record for the model improvement track** — the lead lane of
-> [`sportstradamus_roadmap_v3.md`](sportstradamus_roadmap_v3.md). Every lever, stage, per-league
-> path, validation recipe, and session rule for pushing market cells through the offline ship
-> gates lives here, from the current Ship-75 rung through the D5 decision to the Ship-90 rung.
+> [`sportstradamus_roadmap_v3.md`](../sportstradamus_roadmap_v3.md). Every lever, stage,
+> per-league path, validation recipe, and session rule for pushing market cells through the
+> offline ship gates lives here, from the current Ship-75 rung through the D5 decision to the
+> Ship-90 rung.
 >
 > Consolidated 2026-06-12 from four docs, now archived: `operation_ship_75.md`,
 > `operation_ship_90.md`, `feature_improvement_plan.md`, `handoffs/model-track.md`
-> (see [`archive/`](archive/); pre-consolidation text recoverable via
+> (see [`../archive/`](../archive/); pre-consolidation text recoverable via
 > `git show 805cea7:docs/operation_ship_75.md` on devel and
 > `git show 46338ef:docs/operation_ship_75.md` on model-research, whose operating-loop
 > refinements are folded in below). Three companions stay canonical and are **not** restated
-> here: [`ship_gate.md`](ship_gate.md) (gate thresholds — owner-only),
-> [`operation_ship_references.md`](operation_ship_references.md) (research verdicts, citations
-> [1]–[71], commit refs), and the roadmap (program index, other lanes, deferred register).
+> here: [`../ship_gate.md`](../ship_gate.md) (gate thresholds — owner-only),
+> [`../operation_ship_references.md`](../operation_ship_references.md) (research verdicts,
+> citations [1]–[71], commit refs), and the roadmap (program index, other lanes, deferred
+> register).
 
-## 0. Mission, north stars, locked decisions
+## 1. Mission & money logic
 
 **Get ≥ 75% of each covered league's markets past the five offline ship gates (g1–g5) in
-[`training/scorecard.py`](../src/sportstradamus/training/scorecard.py), then take the Ship-90
-rung when gate D5 fires.** This is the lead lane: calibrated full predictive distributions are
-the input every decision engine consumes, breadth is the number of +EV opportunities per slate,
-and Gate-4 PIT-KS calibration *is* alt-line pricing accuracy. Nothing downstream out-earns its
-marginals.
+[`training/scorecard.py`](../../src/sportstradamus/training/scorecard.py), then take the
+Ship-90 rung when gate D5 fires.** This is the lead lane: calibrated full predictive
+distributions are the input every decision engine consumes, breadth is the number of +EV
+opportunities per slate, and Gate-4 PIT-KS calibration *is* alt-line pricing accuracy. Nothing
+downstream out-earns its marginals.
 
 | League | Ship-75 target | Ship-90 target |
 |---|---|---|
@@ -33,33 +35,19 @@ marginals.
 | NFL | ≥ 15 / 20 | ≥ 18 / 20 |
 
 A cell counts toward the numerator once it is `shipped ∈ {"devel", "main"}` in
-[`stat_meta.json`](../src/sportstradamus/data/config/stat_meta.json) — the production server
+[`stat_meta.json`](../../src/sportstradamus/data/config/stat_meta.json) — the production server
 tracks `devel`, so a Gate-1-clearing cell in its 14-day Gate-2 soak is already live and already
 counts. Mantra: *don't let perfect be the enemy of good.* The gate certifies **deployable**; the
 Kelly sizer and the live soak certify **profitable**. MLB and NHL have cells in `stat_meta.json`
 but no breadth target until their activation gates decide (D1/D2 —
-[`handoffs/mlb-nhl-activation.md`](handoffs/mlb-nhl-activation.md)).
+[`mlb-nhl-activation.md`](mlb-nhl-activation.md)).
 
 **Failure is not an option at the operation level.** Individual *levers* are allowed to fail —
 when one doesn't move a cell, scrap that path and take the next. The plan is built so every
 league has more independent levers than it has cells to flip, and the failure branches are
-written down in advance (§7, §9).
+written down in advance (§6, §8).
 
-**Locked decisions (owner):**
-
-- 2026-06-10 — the model track stays the lead lane; other lanes never preempt it.
-- 2026-06-10 — gate definitions and thresholds are owner-only; a gate change never counts as a
-  lever (§9).
-- Standing — ship incrementally: a Gate-1-clearing cell goes to `shipped: "devel"` and counts;
-  don't hold ships for batches.
-- Standing — new external data is free sources only; all five leagues get equal feature-effort
-  budget (refinement for NBA/WNBA/NFL, foundation parity for MLB/NHL).
-
-**Conflict order:** command output > `CLAUDE.md` / `CONTRIBUTING.md` > this doc > roadmap v3.
-If command output contradicts prose here, the output wins — fix the doc in place (minor) or stop
-and ask (material).
-
-## 1. The lens — beat the DFS apps; the sharp book is an asset, not an adversary
+### 1.1 The lens — beat the DFS apps; the sharp book is an asset, not an adversary
 
 Read this before anything about a "gate." It is the lens for the whole operation and the
 correction that had to be repeated most often during the gate audits.
@@ -78,7 +66,7 @@ we inherit its sharpness and add whatever marginal signal the model carries.
 **Calibration is the product.** The parlay builder needs well-shaped full predictive
 distributions to price alt-lines and to assemble correlated legs without compounding mispricing.
 That is why Gate 4 (PIT-KS calibration) is the real quality bar — and why fixing
-under-dispersion is central to the plan (§4, §7).
+under-dispersion is central to the plan (§6, §7).
 
 **Gate 1 is a no-regression guardrail, not a "beat the book" demand.** It is a *non-inferiority*
 test: it certifies that blending our model into the sharp line does not make the ensemble *worse*
@@ -93,7 +81,20 @@ than the line alone. A tie passes — that is the entire point. It follows that:
   ride the book line (a tie) — and even then the calibration work (g4) still matters, because the
   parlay builder still needs a well-shaped distribution around that line.
 
-## 2. Ground truth — run, don't read
+## 2. Read first (in order)
+
+| Fact | Canonical home |
+|---|---|
+| Gate thresholds g1–g5, Gate-2, S1–S3, tighten/loosen | [`../ship_gate.md`](../ship_gate.md) |
+| Release surface per cell | `stat_meta.json` `shipped` (git carries flip history) |
+| Per-cell gate numbers | `data/training/model_stats.csv` (mirror of the parquet) |
+| Lever stack, stages, per-league routing, session rules | **this doc** |
+| Research verdicts, citations [1]–[71], commit refs | [`../operation_ship_references.md`](../operation_ship_references.md) |
+| Program index, other lanes, decision gates D1–D7, deferred register | [`../sportstradamus_roadmap_v3.md`](../sportstradamus_roadmap_v3.md) |
+| Ship mechanics how-to, package map | `CONTRIBUTING.md` |
+| Session law (gates, subagents, hard rules) | `CLAUDE.md` |
+
+## 3. Verify before you trust
 
 Numbers drift on every ship and every `meditate`. Per-cell standings are **never** restated as
 prose anywhere in this doc; derive them:
@@ -135,50 +136,12 @@ print(con.execute('select league, min(game_date), max(game_date), count(*) from 
 
 Column dictionary for `model_stats.csv` / `.parquet`: CLAUDE.md §Training stats.
 
-**Volatile product assumptions:** none directly — this track prices stats, not app products.
-App-side payout drift is the decision lanes' problem.
+### Volatile product assumptions
 
-## 3. The bar — five gates, lifecycle, supersession
+None directly — this track prices stats, not app products. App-side payout drift is the
+decision lanes' problem.
 
-Full thresholds, rationale, and the tighten/loosen procedure live in
-[`ship_gate.md`](ship_gate.md) (canonical; owner-only). Convenience snapshot of the five
-first-ship gates:
-
-| # | Gate | Statistic | Threshold |
-|---|---|---|---|
-| 1 | Brier vs book (non-inferiority) | paired-bootstrap 95% CI of `(p_model−y)² − (p_book−y)²` | `ci_hi < 0.005` |
-| 2 | Star σ-match | `\|mean(Blended_EV) − mean(Result)\| / std` on top-mean decile | `z < 0.5` |
-| 3 | Bench σ-match | same on bottom-mean quartile | `z < 0.5` |
-| 4 | **PIT-KS calibration** | `KS(randomized-PIT, Uniform)` of the predictive CDF | `pit_ks < max(0.05, 1.358/√n)` |
-| 5 | Equal-mass debiased ECE | 10 equal-mass `p_model` bins | `ece < 0.075` |
-
-Gate 4 is the load-bearing one: `pit_ks = sup|F_model − F_true|` **is** the worst-case alt-line
-mispricing, and the randomized PIT (Brockwell 2007) is exactly Uniform under calibration for
-count *and* continuous families, so one threshold spans both. Report-only companions name the
-*direction* a KS scalar can't: `central50_coverage` / `central80_coverage` (below nominal ⇒
-predictive too narrow), `g4_tail_pit_ks` (alt-over wobble), `g1_has_edge`, `betting_active`, and
-the retired IQR ratio survives as `g4_iqr_ratio`. Advisory diagnostics worth adding (report-only,
-never a gate): Anderson-Darling PIT (tail-weighted), conditional/stratified PIT-KS (by
-mean-decile / blowout / position / home-away), the non-randomized PIT for the count head, and a
-CRPS reliability decomposition (Arnold et al. 2024).
-
-**Lifecycle.** Five offline gates (Gate 1) certify a first ship → `shipped: "withheld" → "devel"`
-(one-line `stat_meta.json` edit; production tracks devel) → 14-day live Gate-2 soak →
-`check-graduation` classifies {not-shipped, in-test, graduated, demoted} → the monthly
-`gate-status` cron promotes graduates to `main` via PR. Demotions flow back the same way.
-
-**Supersession (Tier 1).** A *baselined* (already-shipped) cell never re-ships on a fresh 5/5 —
-the candidate must beat the incumbent via `scorecard.supersede_verdict(baseline, candidate)`:
-**S1** candidate clears the 5 gates standalone, **S2** paired Brier CI lower-bound > 0, **S3**
-paired Kelly-Sharpe Memmel-z > min. All three → SUPERSEDE (swap the strategy in
-`stat_meta.json`); any fail → HOLD. The S2/S3 asymmetry is deliberate — it stops strategy-churn
-on noise. First-ships use Tier-0 absolute gates only. CLI:
-`python -m sportstradamus.training.scorecard --baseline … --candidate …` (both sides full-HPO,
-row-aligned test dumps).
-
-## 4. State of the board
-
-### 4.1 The gates are trustworthy (audits closed)
+### 3.1 The gates are trustworthy (audits closed)
 
 Every gate was independently audited; several were measuring artifacts and were fixed. A cell
 that fails a gate today is failing on real model quality, not a scorer bug:
@@ -192,18 +155,18 @@ that fails a gate today is failing on real model quality, not a scorer bug:
 | G1 selection-gate proposal | Precision-on-value-picks gate = multiplicity trap (0/6 NFL cells survive Bonferroni) | **KEEP g1 as-is.** Standing rule: never gate on a model-conditioned statistic |
 | G1 −0.0 rounding | Sign-bit preserved; genuinely-negative CI bound in (−5e-5, 0) false-failed | **Fixed** — `np.signbit` |
 
-### 4.2 The book we grade against is real (archive repair, permanent infrastructure)
+### 3.2 The book we grade against is real (archive repair, permanent infrastructure)
 
 The archived per-book `ev` for the passing/count families was a legacy klepto-era seed (every
 book = consensus median ⇒ `p_book ≡ 0.5`), not a real price. Real two-sided historical prices
 were re-fetched (Odds API, `backfill_historical_odds.py`) and injected rebuild-equivalently
 (`inject_backfilled_odds.py`); every g1 verdict now grades against an honest book. The repair
 also confirmed how sharp the asset is: honest continuous NFL volume lines sit at the median
-(`p_book ≈ 0.5`, `brier_book ≈ 0.25` by construction) — per §1 that makes them good blend
+(`p_book ≈ 0.5`, `brier_book ≈ 0.25` by construction) — per §1.1 that makes them good blend
 ingredients, not walls. NFL is the hard league because its small samples (≈300–1000 rows/cell)
 make the *don't-regress-the-blend* bar harder to clear — not because any market is unwinnable.
 
-### 4.3 Diagnosis — under-dispersion is the dominant symptom
+### 3.3 Diagnosis — under-dispersion is the dominant symptom
 
 The 2026-06-03 full-board re-score (every test CSV through `compute_gates`, the exact production
 path) found failure modes overwhelmingly concentrated on Gate 4, pointing one direction: **too
@@ -212,12 +175,12 @@ narrow**. Census of the then-40 withheld cells (evidence snapshot — regenerate
 
 | Primary failure | Count | Routed to |
 |---|---|---|
-| Gate 4 only (g1/g2/g3/g5 all pass) | 24 | calibration (§7.1) / normalization (§7.2) |
-| Gate 4 + marginal Gate 1 (`ci_hi` 0.007–0.018) | 6 (all NFL) | calibration → features (§7.3) / blend (§7.5) |
-| Gate 4 + Gate 2/3 (bias) | 3 | mean rung then scale rung (§7.1) |
-| Multi-gate (g1+g3+g4) | 2 (NFL passing-first-downs, qb-yards) | hardest; features + per-position (§7.6) |
-| Gate 1 only / Gate 1+5 (edge) | 2 (WNBA STL; NBA PF) | features (§7.3) |
-| Pass now, un-promoted | 3 (WNBA BLK, FG3M, TOV) | promoted since — free-passer sweep is §7.0 |
+| Gate 4 only (g1/g2/g3/g5 all pass) | 24 | calibration (§6.1) / normalization (§6.2) |
+| Gate 4 + marginal Gate 1 (`ci_hi` 0.007–0.018) | 6 (all NFL) | calibration → features (§6.3) / blend (§6.5) |
+| Gate 4 + Gate 2/3 (bias) | 3 | mean rung then scale rung (§6.1) |
+| Multi-gate (g1+g3+g4) | 2 (NFL passing-first-downs, qb-yards) | hardest; features + per-position (§6.6) |
+| Gate 1 only / Gate 1+5 (edge) | 2 (WNBA STL; NBA PF) | features (§6.3) |
+| Pass now, un-promoted | 3 (WNBA BLK, FG3M, TOV) | promoted since — free-passer sweep is §6.0 |
 
 The two modeling **heads fail in opposite directions** (Czado-Gneiting-Held 2009) — there is no
 single "widen everything" fix:
@@ -225,43 +188,66 @@ single "widen everything" fix:
 - **Continuous (SkewNormal)** — *under-dispersed* (PIT U-shaped, central-50 below nominal:
   shipped cells sat at ≈0.44–0.46, withheld ones as low as 0.23–0.38 in the snapshot). Needs
   widening.
-- **Count (ZINB / NegBin / ZAGamma)** — *over-covers* (PIT inverted-U, central-50 above nominal).
-  Needs narrowing — and the negative-binomial conditional variance is bounded below by its mean,
-  so a near-equidispersed-or-tighter truth is *forced* too wide: the deepest count cells need a
-  both-directions family (§7.6), a structural ceiling post-hoc cannot clear.
+- **Count (ZINB / NegBin / ZAGamma)** — *over-covers* (PIT inverted-U, central-50 above
+  nominal). Needs narrowing — and the negative-binomial conditional variance is bounded below by
+  its mean, so a near-equidispersed-or-tighter truth is *forced* too wide: the deepest count
+  cells need a both-directions family (§6.6), a structural ceiling post-hoc cannot clear.
 
-**Root cause and what remains.** The original sin — SkewNormal received no dispersion calibration
-at all (two hardcoded exclusions) — **is fixed**: the pipeline now fits a joint `(c, skew_cal)`
-scale/skew against PIT-KS for SkewNormal and applies it on the served path (§7.1 Rung B). What
-remains is the *residual* under-dispersion a scalar can't reach: every SkewNormal cell starts on
-the raw GBDT scale — leaf-averaged, dynamic-range-compressed (refs [3][4][30]) — and on
-moderate/severe cells the miss is *shape* or *location*, not pure scale. The count families get
-`dispersion_cal` too, but the original objective was CRPS, not PIT-KS (re-targeted in §7.1).
+**Root cause and what remains.** The original sin — SkewNormal received no dispersion
+calibration at all (two hardcoded exclusions) — **is fixed**: the pipeline now fits a joint
+`(c, skew_cal)` scale/skew against PIT-KS for SkewNormal and applies it on the served path
+(§6.1 Rung B). What remains is the *residual* under-dispersion a scalar can't reach: every
+SkewNormal cell starts on the raw GBDT scale — leaf-averaged, dynamic-range-compressed
+(refs [3][4][30]) — and on moderate/severe cells the miss is *shape* or *location*, not pure
+scale. The count families get `dispersion_cal` too, but the original objective was CRPS, not
+PIT-KS (re-targeted in §6.1).
 
-**Which axis fixes a given cell is not assumed — the honest search adjudicates (§5–§6).** The
+**Which axis fixes a given cell is not assumed — the honest search adjudicates (§6).** The
 headroom is real: on Gate-4-only cells the g1 margins are comfortable (snapshot: NBA AST `ci_hi`
-−0.028, WNBA DREB −0.064) — the blend already ties-or-beats the book on a proper score; only the
-predictive shape that prices alt-lines is too tight. The mirror-image risk: over-widening pushes
-probabilities toward 0.5 and can *reduce* Brier skill (g1) and shift ECE (g5) — so every width
-fix is fit to a calibration target and guard-railed on g1/g5 (§7.1 go/no-go).
+−0.028, WNBA DREB −0.064) — the blend already ties-or-beats the book on a proper score; only
+the predictive shape that prices alt-lines is too tight. The mirror-image risk: over-widening
+pushes probabilities toward 0.5 and can *reduce* Brier skill (g1) and shift ECE (g5) — so every
+width fix is fit to a calibration target and guard-railed on g1/g5 (§6.1 go/no-go).
 
-### 4.4 Lever verdicts — what is dead, what is alive
+### 3.4 Lever verdicts — what is dead, what is alive
 
 | Lever | Verdict | Evidence |
 |---|---|---|
-| Centered-target normalization (`centered_additive_mean10`) | **Alive & shipping** — out-calibrates `ratio_meanyr` on Gate 4 for several cells the scalar width fix can't reach (run the §2 shipped-counts block; several cells carry it in `stat_meta.json` today). The old P1 "dead" call judged it as a *mean-compression* fix under the pre-PIT-KS gate — superseded | refs §2 + sweep board |
+| Centered-target normalization (`centered_additive_mean10`) | **Alive & shipping** — out-calibrates `ratio_meanyr` on Gate 4 for several cells the scalar width fix can't reach (run the §3 shipped-counts block; several cells carry it in `stat_meta.json` today). The old P1 "dead" call judged it as a *mean-compression* fix under the pre-PIT-KS gate — superseded | refs §3 + sweep board |
 | `init_score` warm-start baseline | **Dead** — byte-identical to plain NegBin | refs §3 |
 | ZTNB-hurdle likelihood | **Refuted** — incompatible with the derived-π decode; would regress the shipped hurdle markets | refs §6 |
 | T5 multiplicative factorization (volume × efficiency) | **Killed** — Goodman variance-of-products gives +27% predictive-variance inflation on the priced cell | refs §9 |
-| Family build (CMP / GenPoisson; SHASH / JSU; skew-t) | **On the table — research-gated** (§7.6). Top-decile *mean* compression is family-invariant (the leaf average itself), but a both-directions count family fixes the over-covering count cells NegBin can't, and SHASH/JSU fixes heavy-kurtosis continuous cells | refs §7 |
+| Family build (CMP / GenPoisson; SHASH / JSU; skew-t) | **On the table — research-gated** (§6.6). Top-decile *mean* compression is family-invariant (the leaf average itself), but a both-directions count family fixes the over-covering count cells NegBin can't, and SHASH/JSU fixes heavy-kurtosis continuous cells | refs §7 |
 | HurdleZINB (per-cell `zinb_mode`) | **Alive & shipped** — 6/8 NBA ZINB markets | refs §4 |
-| Post-hoc mean correction (`roe_mean` / `isotonic_mean`) | **Alive & shipped** — `MEAN_STAGE` in [`posthoc.py`](../src/sportstradamus/training/posthoc.py); use skeptically (§7.1 Rung A) | refs §8 |
+| Post-hoc mean correction (`roe_mean` / `isotonic_mean`) | **Alive & shipped** — `MEAN_STAGE` in [`posthoc.py`](../../src/sportstradamus/training/posthoc.py); use skeptically (§6.1 Rung A) | refs §8 |
 | Post-hoc probability recalibration (`prob_recal_*`) | **Alive** — `PROB_STAGE` built, available per-cell | posthoc.py |
-| Post-hoc scale/dispersion (joint `(c, skew_cal)` vs PIT-KS) | **Shipped** — route 1a-hybrid; Levi closed-form σ-scaling is a dead end (diverges 5–7000× on skewed cells) | §7.1 Rung B |
-| Player-level features (expanding-mean, EB-shrunk, opp-defense) | **Alive, unbuilt** — RANK 2/3 in the breadth verdict; §7.3 M-1 | refs §8 |
+| Post-hoc scale/dispersion (joint `(c, skew_cal)` vs PIT-KS) | **Shipped** — route 1a-hybrid; Levi closed-form σ-scaling is a dead end (diverges 5–7000× on skewed cells) | §6.1 Rung B |
+| Player-level features (expanding-mean, EB-shrunk, opp-defense) | **Alive, unbuilt** — RANK 2/3 in the breadth verdict; §6.3 M-1 | refs §8 |
 | Per-position model split (NFL, T11) | **Alive, on the table** — a live lever now, not held for Ship-90 | refs §9 |
 
-## 5. The four axes and the strategy search
+## 4. Locked decisions
+
+- 2026-06-10 — the model track stays the lead lane; other lanes never preempt it.
+- 2026-06-10 — gate definitions and thresholds are owner-only; a gate change never counts as a
+  lever (§8).
+- Standing — ship incrementally: a Gate-1-clearing cell goes to `shipped: "devel"` and counts;
+  don't hold ships for batches.
+- Standing — new external data is free sources only; all five leagues get equal feature-effort
+  budget (refinement for NBA/WNBA/NFL, foundation parity for MLB/NHL).
+
+**Conflict order:** command output > `CLAUDE.md` / `CONTRIBUTING.md` > this doc > roadmap v3.
+If command output contradicts prose here, the output wins — fix the doc in place (minor) or stop
+and ask (material).
+
+## 5. Module footprint & canonical paths
+
+`sportstradamus.training` (pipeline, scorecard, report, calibration, strategy driver),
+`sportstradamus.stats` (feature columns), `data/config/{stat_meta.json, ship_config.json}`,
+`tests/golden/`. Prediction-side edits only via §7.3.
+
+## 6. Stage plan
+
+### The four axes and the strategy search
 
 A served predictive is built in four independently-swappable stages,
 `normalization → model/loss → blend → calibration`
@@ -269,10 +255,10 @@ A served predictive is built in four independently-swappable stages,
 
 | Axis | Values | Executable today | Unbuilt |
 |---|---|---|---|
-| **Normalization** (retrain) | `ratio_meanyr`, `centered_additive_mean10`, `centered_additive_eb_meanyr_k10`, `ratio_projvol` | 3 of 4 carry a Gate-4 SkewNormal decode (`scorecard._decode_sn_loc_scale`; EB off the dumped `GlobalMean`) | `ratio_projvol` (§7.2) |
-| **Model/loss** (retrain) | dist-loss `nll`/`crps`; variance / soft-cal regularizer | dist-loss via `--dist-training-loss` | variance / MMD-to-uniform-PIT regularizer (§7.5) |
-| **Blend** (retrain weight + research-gated structure) | blend-loss `nll`/`crps`; `fused_loc` pool; book recovery; BLP wrapper; p_book noise | blend-loss via `--blending-loss-fn` (`fit_model_weight_crps` built); current `fused_loc` pool | density-LOP fix, power de-vig, book recovery, BLP, p_book noise, free post-hoc `w`-refit (§7.5) |
-| **Calibration** (auto-fit, not searched) | location (`roe_mean`/`isotonic_mean`); scale+shape (`dispersion_cal` + joint `skew_cal`); full-CDF (isotonic-PIT / IDR) | location + scale+shape shipped, baked into the dump, read by the gate | isotonic-PIT / IDR full-CDF recal (§7.1 Rung C) |
+| **Normalization** (retrain) | `ratio_meanyr`, `centered_additive_mean10`, `centered_additive_eb_meanyr_k10`, `ratio_projvol` | 3 of 4 carry a Gate-4 SkewNormal decode (`scorecard._decode_sn_loc_scale`; EB off the dumped `GlobalMean`) | `ratio_projvol` (§6.2) |
+| **Model/loss** (retrain) | dist-loss `nll`/`crps`; variance / soft-cal regularizer | dist-loss via `--dist-training-loss` | variance / MMD-to-uniform-PIT regularizer (§6.5) |
+| **Blend** (retrain weight + research-gated structure) | blend-loss `nll`/`crps`; `fused_loc` pool; book recovery; BLP wrapper; p_book noise | blend-loss via `--blending-loss-fn` (`fit_model_weight_crps` built); current `fused_loc` pool | density-LOP fix, power de-vig, book recovery, BLP, p_book noise, free post-hoc `w`-refit (§6.5) |
+| **Calibration** (auto-fit, not searched) | location (`roe_mean`/`isotonic_mean`); scale+shape (`dispersion_cal` + joint `skew_cal`); full-CDF (isotonic-PIT / IDR) | location + scale+shape shipped, baked into the dump, read by the gate | isotonic-PIT / IDR full-CDF recal (§6.1 Rung C) |
 
 **The search interface.** The per-market searcher is
 `training/model_strategy_driver.py` (entry point `model-strategy-driver`;
@@ -288,7 +274,7 @@ hyperparameters and writes to a sandbox (`research/models/deterministic/` +
 > `model-research` branch only (`ls src/sportstradamus/training/model_strategy_driver.py`).
 > On `devel` the fallback is manual ranking from `model_stats.csv` (sort withheld cells by
 > min-gate slack / `pit_ks` distance to threshold) plus per-cell `meditate --deterministic`
-> A/Bs via the scorecard CLI. Porting the driver to devel is a §7.0 task — until it lands,
+> A/Bs via the scorecard CLI. Porting the driver to devel is a §6.0 task — until it lands,
 > board generation happens on model-research and ships are confirmed wherever the cell will
 > ship from.
 
@@ -312,22 +298,23 @@ locations.
 old `deferred-90` / "defer" / lever-cap tags are retired — they were per-axis verdicts (almost
 always the calibration axis under a single normalization), and the honest sweep showed cells
 stamped `deferred-90` ship under a *different* normalization. A cell leaves the board **only**
-on matrix-wide exhaustion (§9) or the operator's explicit, documented denominator call.
+on matrix-wide exhaustion (§8) or the operator's explicit, documented denominator call.
 
-**Two caveats on "wire in a new parameter."** (a) **Research-gate** — a parameter that changes a
-*distribution family or dispersion mechanism* needs a `research-analyst` brief before it is wired
-or built (§10); a plain knob (a normalization slug, a loss choice) does not. (b) **Wiring an
-axis-value ≠ it sweeps.** A value can sit in `SEARCH_SPACE` yet not sweep until its machinery
-exists, and its cost tier can shift once it does (`blending_loss_fn` carried `crps` before
-`fit_model_weight_crps` existed; building it made it sweepable — on the *retrain* tier, because
-the deterministic dump doesn't carry the pre-blend components a free `w`-refit needs). "Wire it
-in" is sometimes "wire the axis, build the value, decide the tier — then it sweeps."
+**Two caveats on "wire in a new parameter."** (a) **Research-gate** — a parameter that changes
+a *distribution family or dispersion mechanism* needs a `research-analyst` brief before it is
+wired or built (§8.2); a plain knob (a normalization slug, a loss choice) does not.
+(b) **Wiring an axis-value ≠ it sweeps.** A value can sit in `SEARCH_SPACE` yet not sweep
+until its machinery exists, and its cost tier can shift once it does (`blending_loss_fn` carried
+`crps` before `fit_model_weight_crps` existed; building it made it sweepable — on the *retrain*
+tier, because the deterministic dump doesn't carry the pre-blend components a free `w`-refit
+needs). "Wire it in" is sometimes "wire the axis, build the value, decide the tier — then it
+sweeps."
 
-## 6. The operating loop (per cell)
+### The operating loop (per cell)
 
 The deterministic study only **ranks**; the real-HPO scorecard **ships**. Fixed workflow:
 
-1. **Board = candidate generator.** `model-strategy-driver` (or the devel manual fallback, §5)
+1. **Board = candidate generator.** `model-strategy-driver` (or the devel manual fallback above)
    returns the ranked board, one deterministic train per corner, scored on the honest
    val-fit→test gate row. A `ships=True` row is a *candidate flag*, never a ship.
 
@@ -344,34 +331,25 @@ The deterministic study only **ranks**; the real-HPO scorecard **ships**. Fixed 
 
 3. **Withheld cell → real-HPO confirm → ship to devel.** Set the corner's
    `target_normalization`, `posthoc`, and `blending` in `stat_meta.json` **before** the full-HPO
-   `meditate` — `scorecard._resolve_decode_strategy` reads `stat_meta.json`, not the CLI flag, so
-   a stale strategy there yields a spurious Gate-4 miss. Pass the corner's
+   `meditate` — `scorecard._resolve_decode_strategy` reads `stat_meta.json`, not the CLI flag,
+   so a stale strategy there yields a spurious Gate-4 miss. Pass the corner's
    `--target-normalization` / `--blending-loss-fn` flags to match during the confirm. Read the
    official scorecard (`model_stats.csv`). A clean **5/5** → flip
    `shipped: "withheld" → "devel"`. Walk down the reproducible top-K, shipping the first that
-   clears; list exhausted ⇒ route the cell to the calibration ladder (§7.1) and record the axis
-   attempt (§9). If the winner is the cell's current default strategy it is a straight confirm
+   clears; list exhausted ⇒ route the cell to the calibration ladder (§6.1) and record the axis
+   attempt (§8). If the winner is the cell's current default strategy it is a straight confirm
    (no strategy edit). Knife-edge cells (g4 within ~0.003 of 0.05) are exactly where the
    val→test discount bites — the confirm is mandatory; never ship the deterministic score.
 
-4. **Incumbent cell with a better corner → supersede.** The higher bar of §3 (S1+S2+S3) applies.
-   Sweep the **whole** board, shipped cells included — a shipped cell may have a better corner
-   than the scale-only default it settled for.
+4. **Incumbent cell with a better corner → supersede.** The higher bar of §7.1 (S1+S2+S3)
+   applies. Sweep the **whole** board, shipped cells included — a shipped cell may have a better
+   corner than the scale-only default it settled for.
 
 Exploration runs always use `meditate --deterministic` (sandboxed writes) with `--market`
 scoping; full-league retrains are expensive — don't run one to answer a one-cell question. Every
 target cell that is withheld needs `--bypass-withholding` or the run silently skips it.
 
-## 7. The progression — ordered stage ladder
-
-Stages are ordered cheapest-first; **every stage ships per cell on a clean re-score** the moment
-it produces a passer (ship-incrementally — stages are not batches to complete before shipping).
-Work stages concurrently where they don't share a surface (e.g., Stage 3 feature batches can run
-while Stage 1 calibration cells confirm), but a single session works one stage's scope. Each
-stage names its **entry**, **steps**, **acceptance**, and **if-it-fails** branch. Research-gated
-items are flagged.
-
-### §7.0 Stage 0 — Bookkeeping & trust (standing + one-time, all small)
+### §6.0 Stage 0 — Bookkeeping & trust (standing + one-time, all small)
 
 Entry: none — most of this recurs.
 
@@ -387,16 +365,16 @@ Entry: none — most of this recurs.
    A fresh re-score fails several `devel` cells by a hair (a finite-sample KS statistic is a
    step function at the hard 0.05 cutoff). Options: (a) asymmetric hysteresis band — demote a
    baselined cell only at `pit_ks ≥ 0.055` (first-ship stays strict 0.05), pinned by a golden
-   test and reconciled with the monthly auto-demote; (b) ship the §7.1 scale fit first (moves
+   test and reconciled with the monthly auto-demote; (b) ship the §6.1 scale fit first (moves
    salvageable cliff cells to comfortable margin), re-score, accept the genuine demotions.
    **Recommendation: (b) first** — it needs no gate-policy change; revisit (a) only if
    demote/promote churn persists across two monthly cycles. Prepare the packet (cells, slacks,
    churn count); the owner flips.
 3. **Stale-importances purge (QW-2/C-4, one-time + golden).** 155 `Player Player *_asof` rows in
    `feature_importances.csv` are residue of a fixed double-prefix bug. Batch-rebuild via
-   `see_features()` ([`training/shap.py`](../src/sportstradamus/training/shap.py)) so rows derive
-   only from current model pickles; add a golden assert that no `Player Player ` rows exist.
-   *Acceptance:* §2 hygiene block reports 0 stale rows; golden test pins it.
+   `see_features()` ([`training/shap.py`](../../src/sportstradamus/training/shap.py)) so rows
+   derive only from current model pickles; add a golden assert that no `Player Player ` rows
+   exist. *Acceptance:* §3 hygiene block reports 0 stale rows; golden test pins it.
 4. **Train/live parity harness (build-first — blocks all Stage-3/4 feature work).** No harness
    exists comparing `get_training_matrix` vs `get_stats` on a frozen gameday. Build the golden
    test: one frozen gameday, both paths, assert column sets and values match for the shared
@@ -404,19 +382,19 @@ Entry: none — most of this recurs.
    later feature batch extends it. Until this exists, no new feature ships.
 5. **Pre-register the NFL g1×dispersion experiment (hole #4 — the difference between NFL
    reaching 10 and reaching 15).** Before/after paired Brier-CI on the five g1+g4 NFL volume
-   cells (attempts, carries, completions, receiving-yards, rushing-yards) under a candidate
-   §7.1 scale fit: does calibrating dispersion pull the marginal `ci_hi` (0.007–0.018 at the
+   cells (attempts, carries, completions, receiving-yards, rushing-yards) under a candidate §6.1
+   scale fit: does calibrating dispersion pull the marginal `ci_hi` (0.007–0.018 at the
    2026-06-03 snapshot) under 0.005 as a side effect? Run it as soon as a candidate fit exists
-   for one of the five — the answer reorders the NFL queue (§8), so measure early, not when NFL
-   stalls. *Registered decision rule:* if ≥3 of 5 cells move `ci_hi` below threshold → NFL path
-   runs through Stage 1 alone; if ≤1 does → pull Stage 3 features and §7.6 per-position forward
-   for NFL immediately.
+   for one of the five — the answer reorders the NFL queue (§6.9), so measure early, not when
+   NFL stalls. *Registered decision rule:* if ≥3 of 5 cells move `ci_hi` below threshold → NFL
+   path runs through Stage 1 alone; if ≤1 does → pull Stage 3 features and §6.6 per-position
+   forward for NFL immediately.
 6. **Port the strategy driver to devel (small code PR, separate session).**
-   `model_strategy_driver.py` + `model_strategy_search.py` are research-branch-only (§5);
-   porting removes the branch asymmetry and lets devel sessions generate boards. Until then the
-   manual fallback applies.
+   `model_strategy_driver.py` + `model_strategy_search.py` are research-branch-only (branch
+   asymmetry note above); porting removes the branch asymmetry and lets devel sessions generate
+   boards. Until then the manual fallback applies.
 
-### §7.1 Stage 1 — Calibration axis: the post-hoc ladder (location → scale+shape → full-CDF)
+### §6.1 Stage 1 — Calibration axis: the post-hoc ladder (location → scale+shape → full-CDF)
 
 Post-hoc transforms on the served predictive, free or near-free (fit on validation, applied to
 the disjoint test split). Close to exhausted as a *breadth* lever alone — it fixes
@@ -430,14 +408,14 @@ Entry: cell fails g4 (either direction) or g2/g3.
   bias failures. At NFL count means use affine ROE only (isotonic tails overfit at low base
   rates, ref [48]). **Operator note — skeptical:** post-hoc correction of the *predicted mean*
   edits the central tendency the model is supposed to learn; prefer fixing location at the
-  source (normalization §7.2, features §7.3), carry mean correction as last resort, and ship a
+  source (normalization §6.2, features §6.3), carry mean correction as last resort, and ship a
   mean-corrected cell only if it also holds the g1 BSS guardrail and survives the val→test
   discount.
 - **Rung B — scale + shape (joint `(c, skew_cal)`, shipped).** Per-cell scale `c` fit so the
   served predictive PIT is Uniform, inside
-  [`pipeline._step_calibrate_dispersion`](../src/sportstradamus/training/pipeline.py) with
+  [`pipeline._step_calibrate_dispersion`](../../src/sportstradamus/training/pipeline.py) with
   objective `scorecard._randomized_pit_ks`, applied via
-  [`model_prob._dispersion_calibrate`](../src/sportstradamus/prediction/model_prob.py). The
+  [`model_prob._dispersion_calibrate`](../../src/sportstradamus/prediction/model_prob.py). The
   additive skew `skew_cal` on the served SkewNormal `alpha` is fit *jointly* with `c` against
   the same PIT-KS — additive not multiplicative because the direct parameterization has a
   Fisher-information singularity at `alpha = 0` (Hallin & Ley 2014), so `alpha × k` injects no
@@ -460,29 +438,29 @@ Entry: cell fails g4 (either direction) or g2/g3.
   (Conformal *predictive distributions* are separately deferred — roadmap v3 §8.)
 
 **Acceptance (per cell, on validation, before ship):** `pit_ks` below `max(0.05, 1.358/√n)`
-**and** g1 Brier-skill drop ≤ 0.01 **and** g5 ECE < 0.075. Any served calibration object (scale,
-skew, Rung-C map) must be written to the test-CSV dump (`_step_persist_artifacts`) and applied
-identically at inference — pickle key + legacy fallback + byte-identical round-trip test
-(§11.3).
+**and** g1 Brier-skill drop ≤ 0.01 **and** g5 ECE < 0.075. Any served calibration object
+(scale, skew, Rung-C map) must be written to the test-CSV dump (`_step_persist_artifacts`) and
+applied identically at inference — pickle key + legacy fallback + byte-identical round-trip test
+(§7.3).
 
 **If it fails:** widening flips g4 but breaks g1/g5, or `pit_ks` won't move because the
 mislocation is mean/skew not scale → route bias-direction cells (g2/g3) through Rung A; route
-cells trading g4 for g1 to features (§7.3 — signal, not width); residual *shape* the SkewNormal
-can't reach by `(c, s)` → normalization (§7.2) and blend (§7.5); family rebuild (§7.6) only on
+cells trading g4 for g1 to features (§6.3 — signal, not width); residual *shape* the SkewNormal
+can't reach by `(c, s)` → normalization (§6.2) and blend (§6.5); family rebuild (§6.6) only on
 matrix-wide exhaustion. Do not pre-tag cells dead.
 
-### §7.2 Stage 2 — Strategy sweep: normalization × loss
+### §6.2 Stage 2 — Strategy sweep: normalization × loss
 
 Entry: driver (or fallback) available; cell on the board.
 
-The retrain axes, searched per §5–§6. Normalization is **often decisive over calibration**: the
+The retrain axes, searched per above. Normalization is **often decisive over calibration**: the
 honest sweep ships moderate/severe cells under `centered_additive_mean10` that no scalar width
 fix reaches — a centered/rate target reshapes the residual so the predictive is calibratable at
 all. The EB / hierarchical-shrinkage strategy (`centered_additive_eb_meanyr_k10`) is built and
 decode-tested. Training loss `nll` vs `crps` per cell: min-CRPS is more robust to
 misspecification, max-likelihood slightly more efficient under correct specification
-(Gebetsberger 2018) — keep the per-cell winner, subject to the §6 reproducibility rule
-(dist-loss does not persist; only the family default ships).
+(Gebetsberger 2018) — keep the per-cell winner, subject to the operating-loop reproducibility
+rule (dist-loss does not persist; only the family default ships).
 
 **Build: `ratio_projvol` (the most likely NFL volume unlock).** Modeling `points` (or
 `points/season-mean`) conflates *efficiency × opportunity*. Target = `y / projected-volume`
@@ -491,19 +469,19 @@ side use `log(volume)` as a GLM offset and delta-method (or Monte-Carlo) back to
 for the gate. The volume projections **already exist** (`proj_*` features: projected
 carries/targets/minutes) — used as features today, never as the denominator. A `rushing-yards`
 g1 block is plausibly a volume/efficiency conflation the book prices and we don't. Decode +
-leakage tests before any ship (§11.3 new-strategy row).
+leakage tests before any ship (§7.3 new-strategy row).
 
-**Acceptance:** per §6 — official 5/5 on the full-HPO confirm (withheld) or S1–S3 (incumbent).
-**If it fails:** the cell records the normalization axis as tried (§9) and routes to features
-(§7.3) or blend (§7.5).
+**Acceptance:** per the operating loop above — official 5/5 on the full-HPO confirm (withheld)
+or S1–S3 (incumbent). **If it fails:** the cell records the normalization axis as tried (§8) and
+routes to features (§6.3) or blend (§6.5).
 
-### §7.3 Stage 3 — Feature batch 1: quick wins + the pre-registered build
+### §6.3 Stage 3 — Feature batch 1: quick wins + the pre-registered build
 
-Entry: §7.0 parity harness green. Targets the cells that need *signal*, not width: the NFL
-g1+g4 volume five, WNBA STL, NBA PF — Gate-4 under-dispersion belongs to §7.1/§7.2, and feature
+Entry: §6.0 parity harness green. Targets the cells that need *signal*, not width: the NFL
+g1+g4 volume five, WNBA STL, NBA PF — Gate-4 under-dispersion belongs to §6.1/§6.2, and feature
 work complements, never replaces it.
 
-All items follow the §11.2 validation protocol (leakage test → parity → regen → deterministic
+All items follow the §7.2 validation protocol (leakage test → parity → regen → deterministic
 A/B → real-HPO confirm) and the batching policy (features land per-league in batches — one regen
 per league per batch, never one feature at a time; regen costs hours per league board). The
 inert-revert rule applies to every item: SHAP importance < 0.001 ⇒ inert ⇒ revert; never carry
@@ -511,16 +489,16 @@ dead columns.
 
 1. **QW-1 — spread, opponent implied total, game total, blowout flag (all leagues).** Game
    script conditions volume markets; the model sees only own-team `Moneyline`/`Total`. Zero new
-   data: [`moneylines.py`](../src/sportstradamus/moneylines.py) stores archive `Totals` as the
-   implied team total (`(game_total + team_spread)/2`), so `Spread = Total(team) − Total(opp)`
+   data: [`moneylines.py`](../../src/sportstradamus/moneylines.py) stores archive `Totals` as
+   the implied team total (`(game_total + team_spread)/2`), so `Spread = Total(team) − Total(opp)`
    and `GameTotal = Total(team) + Total(opp)` come from two `archive.get_total()` calls,
    leakage-safe via the existing `at=target_at` mechanism. Implement in `_game_context` —
    **both** branches (historical gamelog + upcoming archive lookups); `Blowout = |Spread| >
    threshold` with the threshold a named per-league module-level constant (build-time operator
    decision, no magic numbers); register columns in the `Common` bucket of
-   [`feature_filter.json`](../src/sportstradamus/data/config/feature_filter.json).
+   [`feature_filter.json`](../../src/sportstradamus/data/config/feature_filter.json).
 2. **QW-4 — NFL schedule context.** `weekday` / `gametime` are fetched and discarded
-   ([`nfl.py`](../src/sportstradamus/stats/nfl.py)). Emit `Weekday`, `PrimeTime`, short-week
+   ([`nfl.py`](../../src/sportstradamus/stats/nfl.py)). Emit `Weekday`, `PrimeTime`, short-week
    rest differential.
 3. **QW-5 / A-1 — harvest more from the existing comp pool (NBA/WNBA/NFL/NHL).** The pool
    already computes pairs + distances (`_comp_pairs`, cached); emitting more aggregates is
@@ -535,16 +513,16 @@ dead columns.
    strength cross-validated, landed as a named constant — do not invent a value); plus
    opponent-defense × player interaction columns (`profile_market`) and the blowout flag from
    QW-1. Mirrored exactly in training and `get_stats` (strict `<` date filter); extend
-   [`test_meanyr_mean10_leakage.py`](../tests/test_meanyr_mean10_leakage.py) before any ship.
+   [`test_meanyr_mean10_leakage.py`](../../tests/test_meanyr_mean10_leakage.py) before any ship.
    Pre-registered targets: NFL volume five, WNBA STL, NBA PF.
 
 WNBA lands every shared-base item in the same PR as NBA (shared `base.py` machinery; EB-shrunk
-variants preferred at half the games). **Acceptance:** per §11.2 step 5. **If it fails:** a
-feature that doesn't carry g1 for an NFL cell escalates to the per-position split (§7.6); a cell
+variants preferred at half the games). **Acceptance:** per §7.2 step 5. **If it fails:** a
+feature that doesn't carry g1 for an NFL cell escalates to the per-position split (§6.6); a cell
 the model still can't improve leans harder on the book in the blend — rides the sharp line and
 ships if calibration holds; never "unwinnable."
 
-### §7.4 Stage 4 — Feature batch 2 + the feature-count ablation
+### §6.4 Stage 4 — Feature batch 2 + the feature-count ablation
 
 Entry: Stage-3 batch confirmed (its regen + parity infrastructure is reused).
 
@@ -560,12 +538,14 @@ Entry: Stage-3 batch confirmed (its regen + parity infrastructure is reused).
    historically, so it backfills leakage-clean; emit starter flag + "starters missing" count.
    Both leagues in one PR.
 4. **M-5 / A-2 — comp-weight re-optimization with the stability gate.** Idle tooling exists:
-   [`comp_feature_stability.py`](../src/sportstradamus/scripts/comp_feature_stability.py) (YoY
-   keep/transform/drop), [`evaluate_comp_features.py`](../src/sportstradamus/scripts/evaluate_comp_features.py)
-   (greedy add/remove), [`optimize_comp_weights.py`](../src/sportstradamus/scripts/optimize_comp_weights.py)
+   [`comp_feature_stability.py`](../../src/sportstradamus/scripts/comp_feature_stability.py)
+   (YoY keep/transform/drop),
+   [`evaluate_comp_features.py`](../../src/sportstradamus/scripts/evaluate_comp_features.py)
+   (greedy add/remove),
+   [`optimize_comp_weights.py`](../../src/sportstradamus/scripts/optimize_comp_weights.py)
    (differential evolution on Spearman). Run stability → evaluate → optimize per league; extend
    the optimizer to co-optimize K (currently min 5 / max 15–20) and the distance-kernel exponent
-   (`1/(1+d)`). Spearman is in-sample to the comp objective — the arbiter is the §11.2
+   (`1/(1+d)`). Spearman is in-sample to the comp objective — the arbiter is the §7.2
    deterministic A/B. Revert = restore prior `playerCompStats.json` (versioned).
 5. **M-8 — the NFL small-n ablation (pre-registered; settles "too many features?").** 2–3
    small-n NFL cells from the g1-blocked volume five: full candidate set vs per-cell top-K
@@ -580,14 +560,14 @@ Entry: Stage-3 batch confirmed (its regen + parity infrastructure is reused).
    |ρ| > 0.98 pairs only where one column is derived from the other by construction, and only
    through the standard A/B.
 
-### §7.5 Stage 5 — Structural width fixes: blend rebuild + training-time regularizer (research-gated)
+### §6.5 Stage 5 — Structural width fixes: blend rebuild + training-time regularizer (research-gated)
 
-Entry: a cell where §7.1–§7.3 left the served predictive miscalibrated, or NFL needs the
-blend-side escalation (§8). **Structure changes here alter the dispersion mechanism →
-`research-analyst` brief first (§10).**
+Entry: a cell where §6.1–§6.3 left the served predictive miscalibrated, or NFL needs the
+blend-side escalation (§6.9). **Structure changes here alter the dispersion mechanism →
+`research-analyst` brief first (§8.2).**
 
 **Why the blend is the under-built axis.** `fused_loc`
-([`helpers/distributions.py`](../src/sportstradamus/helpers/distributions.py)) blends summary
+([`helpers/distributions.py`](../../src/sportstradamus/helpers/distributions.py)) blends summary
 *parameters*, with five measured immaturities: (1) parameter blend ≠ density pool — the NegBin
 path log-blends `(μ, r)` but a true logarithmic opinion pool multiplies the PMFs pointwise and
 renormalizes (parameter-blending coincides with the LOP only in the Gaussian case, so the
@@ -614,9 +594,9 @@ wrapper `F^BLP = B_{α,β}(w·F_model + (1−w)·F_book)` (Ranjan & Gneiting 201
 dispersive — narrows *or* widens, learned from history — fit **outside** the five gate
 calculations. This is the principled under-dispersion fix that supersedes the bolt-on scalar
 widener. **Do not** substitute a raw *linear* pool: its widening is disagreement-driven and
-degrades sharpness and the KS/ECE gates (Gneiting & Ranjan 2013; Hora 2004). (c) Conjugate noise
-on `p_book`: treat `logit(p_book)` as a Gaussian observation on the model's logit-CDF at the
-line, per-cell variance from residual studies → precision weight. (d) Learn `w` by CRPS
+degrades sharpness and the KS/ECE gates (Gneiting & Ranjan 2013; Hora 2004). (c) Conjugate
+noise on `p_book`: treat `logit(p_book)` as a Gaussian observation on the model's logit-CDF at
+the line, per-cell variance from residual studies → precision weight. (d) Learn `w` by CRPS
 (continuous) / log-score (count), shrunk per-cell toward a global prior ∝ 1/n_cell; never
 hard-code book = truth. (e) Time-varying `w_book` ramp toward close (the de-vigged close is the
 best probability estimate, but at close). The CLV-edge dashboard defers to roadmap v3 §8; the
@@ -628,28 +608,28 @@ or held-out variance penalty that widens σ where the model is overconfident —
 under-dispersion at the source. Pick it up if normalization + blend leave a cell overconfident.
 CRPS-stacking the model's own CDF variants across loss × transform via a log / beta-transformed
 pool (never raw linear) is the cheap cousin. Honest caveat for both: LightGBMLSS's CRPS path
-sets the Hessian to 1 (first-order), which is why a properly-curved CRPS head (NGBoost-style) is
-a narrow-use Hail-Mary, not the default.
+sets the Hessian to 1 (first-order), which is why a properly-curved CRPS head (NGBoost-style)
+is a narrow-use Hail-Mary, not the default.
 
-**Acceptance:** `pit_ks` below threshold with g1 BSS drop ≤ 0.01 and g5 < 0.075, on validation,
-before ship; an inference-path round-trip test for every new served object (de-vig method,
-recovered book params, BLP coefficients — §11.3). **If it fails:** a cell the blend can't widen
-into calibration without a g1 hit is signal-starved → features (§7.3) or normalization (§7.2); a
-genuine heavy tail the BLP can't reach → family (§7.6).
+**Acceptance:** `pit_ks` below threshold with g1 BSS drop ≤ 0.01 and g5 < 0.075, on
+validation, before ship; an inference-path round-trip test for every new served object (de-vig
+method, recovered book params, BLP coefficients — §7.3). **If it fails:** a cell the blend can't
+widen into calibration without a g1 hit is signal-starved → features (§6.3) or normalization
+(§6.2); a genuine heavy tail the BLP can't reach → family (§6.6).
 
-### §7.6 Stage 6 — Research-gated escalations: family, hierarchical, per-position
+### §6.6 Stage 6 — Research-gated escalations: family, hierarchical, per-position
 
-Entry: per-cell, when the cheaper axes are recorded-tried (§9); for NFL, when §8's escalation
-fires. **Every family / dispersion item needs a `research-analyst` brief before build (§10).**
+Entry: per-cell, when the cheaper axes are recorded-tried (§8); for NFL, when §6.9's escalation
+fires. **Every family / dispersion item needs a `research-analyst` brief before build (§8.2).**
 Each family swap is a one-field `stat_meta.json` edit + retrain behind `supersede_verdict()`.
 
 - **Continuous family ladder, escalating expressiveness.** (a) **Centered-parametrization
   SkewNormal / skew-t** (Arellano-Valle & Azzalini 2008) — a loss-function change that removes
   the `alpha = 0` Fisher-information singularity at the source (distinct from, complementary to,
-  the post-hoc `skew_cal` patch); try first; fixes the singularity, **not** the tails. (b)
-  **SHASH / Johnson-SU** (Jones & Pewsey 2009) — 4-parameter, separate skew and kurtosis — for
-  heavy-kurtosis cells the centered family leaves too thin. (c) **skew-t / Student-t** for the
-  heaviest tails. Tweedie / generalized-gamma for zero-mass continuous cells (NFL RB2 rush
+  the post-hoc `skew_cal` patch); try first; fixes the singularity, **not** the tails.
+  (b) **SHASH / Johnson-SU** (Jones & Pewsey 2009) — 4-parameter, separate skew and kurtosis —
+  for heavy-kurtosis cells the centered family leaves too thin. (c) **skew-t / Student-t** for
+  the heaviest tails. Tweedie / generalized-gamma for zero-mass continuous cells (NFL RB2 rush
   yards).
 - **Count family — the structural ceiling.** Over-covering count cells that won't narrow under
   recalibration (NegBin variance ≥ mean) need a both-directions family: **COM-Poisson** (Sellers
@@ -695,21 +675,21 @@ Each family swap is a one-field `stat_meta.json` edit + retrain behind `supersed
   priority; single-cell targets — MLB K/BB umpire zones, NBA PF crew rates — only after the
   owning league's medium items are exhausted).
 
-### §7.7 Stage 7 — Foundation leagues (MLB / NHL)
+### §6.7 Stage 7 — Foundation leagues (MLB / NHL)
 
 Entry: matrix/feature builds proceed **now**; training ships only post-D1 (MLB) / post-D2 (NHL)
-— gates owned by [`handoffs/mlb-nhl-activation.md`](handoffs/mlb-nhl-activation.md) (data
-freshness, book honesty, GO/NO-GO; not restated here).
+— gates owned by [`mlb-nhl-activation.md`](mlb-nhl-activation.md) (data freshness, book
+honesty, GO/NO-GO; not restated here).
 
 MLB/NHL are not "efficient cells with nothing to learn" — they are starved of inputs (raw
 `stat_types`: MLB 13, NHL 14, vs NBA 138; ~100–120 matrix columns vs ~460–480). Closing that
 input gap is this stage:
 
-1. **L-1 / D-1 — MLB statcast breadth via pybaseball (the MLB parity centerpiece, XL).** Barrel%,
-   exit velocity, xBA/xwOBA, hard-hit%, whiff%, chase%, pitcher arsenal/usage/velocity — free,
-   historical, event-dated, so point-in-time aggregates are leakage-clean by construction. New
-   ingest module patterned on the FP loader family
-   ([`nfl_fp_loader.py`](../src/sportstradamus/stats/nfl_fp_loader.py)); extend `stat_types`;
+1. **L-1 / D-1 — MLB statcast breadth via pybaseball (the MLB parity centerpiece, XL).**
+   Barrel%, exit velocity, xBA/xwOBA, hard-hit%, whiff%, chase%, pitcher
+   arsenal/usage/velocity — free, historical, event-dated, so point-in-time aggregates are
+   leakage-clean by construction. New ingest module patterned on the FP loader family
+   ([`nfl_fp_loader.py`](../../src/sportstradamus/stats/nfl_fp_loader.py)); extend `stat_types`;
    join through the existing `_join_fp_player_features` / `_join_fp_team_features` base hooks.
 2. **QW-3 / C-1 — MLB batting order reaches the matrix (S, after a 30-min verification).**
    Batting order and `starting batter` are already stored per gamelog row and reach
@@ -731,12 +711,12 @@ input gap is this stage:
    column counts without SHAP evidence.
 
 Anti-drift guard: foundation leagues have slow feedback (no trained cells until D1/D2) while
-refinement leagues confirm fast — hold the equal-effort budget (§0) so effort does not silently
+refinement leagues confirm fast — hold the equal-effort budget (§1) so effort does not silently
 flow to wherever feedback is quickest.
 
-### §7.8 Stage 8 — D5 → the Ship-90 rung
+### §6.8 Stage 8 — D5 → the Ship-90 rung
 
-Entry: §0 Ship-75 targets met on a fresh scorecard (run the §2 block — never prose).
+Entry: §1 Ship-75 targets met on a fresh scorecard (run the §3 block — never prose).
 
 Ship-90 is the same operation at a higher bar (NBA ≥ 19/21, WNBA ≥ 17/18, NFL ≥ 18/20) — the
 lever stack does not change; the remaining cells are by construction the ones that resisted the
@@ -744,159 +724,124 @@ most axes. The session's job at this stage is the **D5 decision packet** for the
 (roadmap v3 §7); the owner flips the rung. The packet contains:
 
 1. **Standings + resistance map.** Per-league fresh scorecard; for every still-withheld cell,
-   the axes tried and verdicts (§9 records) — the Ship-90 queue is ordered by what is *left*
-   per cell, mostly §7.5/§7.6 structural items by then.
+   the axes tried and verdicts (§8 records) — the Ship-90 queue is ordered by what is *left*
+   per cell, mostly §6.5/§6.6 structural items by then.
 2. **Gate-tightening proposal (owner-only).** Candidates: G2/G3 z-bound 0.5 → 0.3; G5 ECE
    0.075 → 0.05. Decide tighten-early (forces some Ship-75 graduates back into queue) vs
    tighten-late. **Before proposing any tightening, run the profit-sim** (`dashboard` pages
-   3/4/6 over resolved history): are profitable cells currently locked out that tightening
-   would lock out harder? Never tighten on aesthetics.
+   3/4/6 over resolved history): are profitable cells currently locked out that tightening would
+   lock out harder? Never tighten on aesthetics.
 3. **Live-drift readiness.** By D5 the Gate-2 soak archive should hold months of live per-cell
    metrics (`data/live_metrics_per_market.parquet`, 7d/30d windows) — report whether
    drift/regime detection (e.g., league-wide 3PA trends) is signal-worthy yet.
 4. **Branch-ladder question.** Ship-75 ships per-cell from research → devel via the curator. If
-   Ship-90's tightened gates need a more disciplined staging pipeline, the
-   `devel-foundation` buffer branch is the named option — owner decides.
+   Ship-90's tightened gates need a more disciplined staging pipeline, the `devel-foundation`
+   buffer branch is the named option — owner decides.
 5. **Inference-cost check.** Per-cell calibration objects accrete (pickle keys: `temperature`,
    `dispersion_cal`, `skew_cal`, Rung-C maps, BLP coefficients…); measure `prophecize` load
    time before the rung adds more.
 
 Out of scope at any rung: changing the LightGBMLSS framework upstream; adding new leagues
 (MLB/NHL have their own activation lane); replacing the GBDT base learner wholesale (until the
-full §7 ladder is exhausted on every cell — not the case while zero cells are matrix-exhausted).
+full §6 ladder is exhausted on every cell — not the case while zero cells are matrix-exhausted).
 
-## 8. Per-league routing
+### §6.9 Per-league routing
 
-Live counts: §2 block. Per-cell gate numbers and current candidates: `model_stats.csv` + the
+Live counts: §3 block. Per-cell gate numbers and current candidates: `model_stats.csv` + the
 sweep board. What follows is the durable routing — which lever classes plausibly flip which
 cell classes — not a snapshot.
 
-### NBA — comfortable
+#### NBA — comfortable
 
-- **Calibration (§7.1) / sweep (§7.2)** on the Gate-4-only cells (snapshot examples: DREB,
+- **Calibration (§6.1) / sweep (§6.2)** on the Gate-4-only cells (snapshot examples: DREB,
   FG3A, FGM, FTM, STL, TOV; AST shipped via the centered normalization, MIN and RA via the
   scale fit).
-- **Rung A then Rung B (§7.1)** on the g2-bias + g4 cells (FGA, fantasy-points-prizepicks).
-- **Features (§7.3)** on PF (g1+g5 — the one genuinely hard NBA cell; also a D-5 referee
+- **Rung A then Rung B (§6.1)** on the g2-bias + g4 cells (FGA, fantasy-points-prizepicks).
+- **Features (§6.3)** on PF (g1+g5 — the one genuinely hard NBA cell; also a D-5 referee
   candidate, last).
 - Verdict: five of the seven calibration-class cells clear the target; FGA/FP/PF are backups,
   not load-bearing.
 
-### WNBA — achievable
+#### WNBA — achievable
 
-- **Free promotes** banked (§7.0 sweep — BLK, FG3M, TOV shipped 2026-06).
-- **Calibration (§7.1) / normalization (§7.2)** on the Gate-4-only cells (snapshot: AST, BLST,
+- **Free promotes** banked (§6.0 sweep — BLK, FG3M, TOV shipped 2026-06).
+- **Calibration (§6.1) / normalization (§6.2)** on the Gate-4-only cells (snapshot: AST, BLST,
   DREB, FTM, OREB, PTS, RA, REB, fantasy-points-prizepicks); cells the calibration axis can't
-  reach route to `centered_additive_mean10` in the sweep — current candidate status is the
-  sweep board, never an in-sample floor.
-- **Features (§7.3)** on STL (g1 edge). Small-n caveats: half NBA's games — EB-shrunk feature
-  variants preferred, affine ROE over isotonic (§11.4).
+  reach route to `centered_additive_mean10` in the sweep — current candidate status is the sweep
+  board, never an in-sample floor.
+- **Features (§6.3)** on STL (g1 edge). Small-n caveats: half NBA's games — EB-shrunk feature
+  variants preferred, affine ROE over isotonic (§7.4.9).
 - Verdict: six of the eight realistic calibration/normalization cells.
 
-### NFL — the binding league, with a real failure mode
+#### NFL — the binding league, with a real failure mode
 
-- **Calibration (§7.1), g1 already passes:** passing-tds, passing-yards, yards,
+- **Calibration (§6.1), g1 already passes:** passing-tds, passing-yards, yards,
   fantasy-points-underdog, sacks-taken (snapshot); receptions screened severe on the calibration
-  axis but stays live with normalization (§7.2 `ratio_projvol`) and blend (§7.5) untried.
+  axis but stays live with normalization (§6.2 `ratio_projvol`) and blend (§6.5) untried.
 - **Calibration + edge — the crux:** the continuous-volume five (attempts, carries, completions,
-  receiving-yards, rushing-yards) + qb-tds fail g4 plus a *marginal* g1. Whether the §7.1 scale
-  fit pulls g1 under threshold as a side effect is **hole #4 — pre-registered in §7.0.5 with
+  receiving-yards, rushing-yards) + qb-tds fail g4 plus a *marginal* g1. Whether the §6.1 scale
+  fit pulls g1 under threshold as a side effect is **hole #4 — pre-registered in §6.0.5 with
   its decision rule**; run it early.
-- **Escalation ladder, in order:** §7.1 scale fit → hole-#4 verdict → §7.3 features (M-1
-  primary) → §7.2 `ratio_projvol` → §7.5 blend rebuild → §7.6 per-position split / monotone
+- **Escalation ladder, in order:** §6.1 scale fit → hole-#4 verdict → §6.3 features (M-1
+  primary) → §6.2 `ratio_projvol` → §6.5 blend rebuild → §6.6 per-position split / monotone
   priors / TabPFN. Hardest cells (qb-yards, passing-first-downs multi-gate; receptions severe)
   sit at the ladder's deep end.
 - For any cell the model can't improve: lean harder on the book in the blend — rides the sharp
-  line, ships if calibration holds. No cell is shelved (§9); never loosen a gate.
+  line, ships if calibration holds. No cell is shelved (§8); never loosen a gate.
 
-### MLB / NHL — foundation, then activation
+#### MLB / NHL — foundation, then activation
 
-Feature foundations are §7.7 and proceed now; training/shipping is gated on D1/D2
-([`handoffs/mlb-nhl-activation.md`](handoffs/mlb-nhl-activation.md)). First targets when active:
-MLB hitter volume markets (batting order), Ks later (umpire); NHL goalie SV + skater
-shots/points.
+Feature foundations are §6.7 and proceed now; training/shipping is gated on D1/D2
+([`mlb-nhl-activation.md`](mlb-nhl-activation.md)). First targets when active: MLB hitter
+volume markets (batting order), Ks later (umpire); NHL goalie SV + skater shots/points.
 
-## 9. Failure protocol & matrix exhaustion
+## 7. Working rules
 
-- **Per-lever:** every §7 stage carries a go/no-go and an if-it-fails branch. When a lever's
-  go/no-go fails on a cell, record it (lever-attempt +1, with the axis named) and take the
-  branch. Do not grind a dead lever.
-- **Per-cell:** push every cell until it ships or has actually failed across the **whole
-  matrix** — all four axes (normalization × model/loss × blend × calibration) **plus** the
-  family and hierarchical tracks. Four failed calibration/feature levers is *not* an exit: the
-  cell moves to the next axis with a one-line note naming the axes tried. The only ways off the
-  board are genuine matrix-wide exhaustion (true of **zero** cells today) or the operator's
-  explicit, documented denominator call. The heaviest tail-head rebuilds (spliced/Pareto,
-  MZINB) are deferred long-shots (roadmap v3 §8), tried only after the cheaper §7.6 moves.
-- **Operation-level: failure is not an option.** §8 shows NBA and WNBA clear on §7.0+§7.1
-  alone, with backups; NFL's escalation ladder is deep enough to reach 15, and the terminal
-  fallback (ride the book line, calibrated) ships.
-- **Never loosen a gate to hit breadth.** Gate constants are effect-size floors (vig-scale),
-  not breadth knobs. Standing rule: any search over bet-definition knobs must be
-  multiplicity-corrected before it informs a ship, and never gate on a model-conditioned
-  statistic.
-- **Grind detector:** two consecutive sessions with no acceptance criterion moving is a hard
-  stop — escalate to the owner; a cell that resists an axis moves to the next axis, never gets
-  re-ground.
-- **Park & pivot:** if blocked (e.g., NFL Gate-2 soak needs live games that won't exist until
-  September), append a §12 ledger line with the reason, set `BLOCKED (on: …)` in the status
-  line, flip the roadmap v3 §4 row, and point the owner at the swimlane index.
+### §7.1 The bar — five gates, lifecycle, supersession
 
-## 10. Research holes & research-first triggers
+Full thresholds, rationale, and the tighten/loosen procedure live in
+[`../ship_gate.md`](../ship_gate.md) (canonical; owner-only). Convenience snapshot of the five
+first-ship gates:
 
-**Dispatch `research-analyst` before** (CLAUDE.md research-first; the research-gate hook
-enforces the file-level cases): any §7.6 family/distribution change; any §7.5 blend-structure
-change or training-time dispersion regularizer; §7.6 hierarchical/TabPFN escalation; the
-§7.6-flagged feature items C-3 / B-5 / L-3 (D-4 brief-note level); any hole below before
-betting the plan on it. Plain knobs (normalization slug, loss choice, ordinary features) need
-no brief. To proceed without a brief on a hook-gated edit, write a one-line justification to
-`.claude/.state/research_waiver`.
+| # | Gate | Statistic | Threshold |
+|---|---|---|---|
+| 1 | Brier vs book (non-inferiority) | paired-bootstrap 95% CI of `(p_model−y)² − (p_book−y)²` | `ci_hi < 0.005` |
+| 2 | Star σ-match | `\|mean(Blended_EV) − mean(Result)\| / std` on top-mean decile | `z < 0.5` |
+| 3 | Bench σ-match | same on bottom-mean quartile | `z < 0.5` |
+| 4 | **PIT-KS calibration** | `KS(randomized-PIT, Uniform)` of the predictive CDF | `pit_ks < max(0.05, 1.358/√n)` |
+| 5 | Equal-mass debiased ECE | 10 equal-mass `p_model` bins | `ece < 0.075` |
 
-**Open holes:**
+Gate 4 is the load-bearing one: `pit_ks = sup|F_model − F_true|` **is** the worst-case alt-line
+mispricing, and the randomized PIT (Brockwell 2007) is exactly Uniform under calibration for
+count *and* continuous families, so one threshold spans both. Report-only companions name the
+*direction* a KS scalar can't: `central50_coverage` / `central80_coverage` (below nominal ⇒
+predictive too narrow), `g4_tail_pit_ks` (alt-over wobble), `g1_has_edge`, `betting_active`, and
+the retired IQR ratio survives as `g4_iqr_ratio`. Advisory diagnostics worth adding (report-only,
+never a gate): Anderson-Darling PIT (tail-weighted), conditional/stratified PIT-KS (by
+mean-decile / blowout / position / home-away), the non-randomized PIT for the count head, and a
+CRPS reliability decomposition (Arnold et al. 2024).
 
-- **#0b — Gate-4 baseline hysteresis** (highest priority; owner call). §7.0.2 carries the
-  decision packet and the recommendation (ship the scale fit first; hysteresis only if churn
-  persists). It gates trust in the ship-incrementally premise.
-- **#4 — do the marginal NFL g1s improve when dispersion is calibrated?** Pre-registered as
-  §7.0.5 with its decision rule. The difference between NFL reaching 10 and reaching 15.
-- **#6 — the block-bootstrap / clustered-g1 backlog.** Test-set CSVs still lack `game_date` on
-  combined-stat cells, blocking the player-clustered Gate-1 recheck and a closing-line-value
-  gate. The concrete method is CPCV + a player/date embargo (López de Prado 2018) — a
-  validation refinement, not a gate change; the one principled selection-style criterion worth
-  building.
+**Lifecycle.** Five offline gates (Gate 1) certify a first ship → `shipped: "withheld" → "devel"`
+(one-line `stat_meta.json` edit; production tracks devel) → 14-day live Gate-2 soak →
+`check-graduation` classifies {not-shipped, in-test, graduated, demoted} → the monthly
+`gate-status` cron promotes graduates to `main` via PR. Demotions flow back the same way.
 
-**Resolved (one-liners; detail in references doc):** post-hoc scale moves PIT-KS without
-breaking g1/g5, but only under the right normalization and with a cell-specific val→test
-discount; the SkewNormal dispersion-cal exclusion was an a-priori skip, not a tested negative;
-the count branch needed the PIT-KS re-target (coverage was the wrong objective); the
-severe-coverage cells were a decode artifact + plain under-dispersion, not a new-tail-head
-problem — they ship under the centered normalization; the in-sample 2-parameter screen oversells
-the honest val→test gate (nothing ships on an in-sample floor); normalization is a first-class
-ship axis, often decisive; the variance regularizer is untried, not refuted.
+**Supersession (Tier 1).** A *baselined* (already-shipped) cell never re-ships on a fresh 5/5 —
+the candidate must beat the incumbent via `scorecard.supersede_verdict(baseline, candidate)`:
+**S1** candidate clears the 5 gates standalone, **S2** paired Brier CI lower-bound > 0, **S3**
+paired Kelly-Sharpe Memmel-z > min. All three → SUPERSEDE (swap the strategy in
+`stat_meta.json`); any fail → HOLD. The S2/S3 asymmetry is deliberate — it stops strategy-churn
+on noise. First-ships use Tier-0 absolute gates only. CLI:
+`python -m sportstradamus.training.scorecard --baseline … --candidate …` (both sides full-HPO,
+row-aligned test dumps).
 
-## 11. Validation, ship mechanics & session rules
-
-### 11.1 Always-on gates
-
-```bash
-poetry run ruff check src/sportstradamus/
-poetry run pytest tests/golden/          # incl. scorecard / gate tests
-poetry run pytest -m integration -n0     # fake-mode, no network; then:
-touch .claude/.state/integration_green
-```
-
-The determinism gate ([`test_determinism_gate.py`](../tests/integration/test_determinism_gate.py))
-must stay green; extend it to WNBA + NFL before any cross-league lever ship (§11.4.5).
-Cross-league testing policy: smoke (1–2 markets/league) before full verification; a smoke
-regression is a hard stop.
-
-### 11.2 Feature validation protocol (every §7.3/§7.4/§7.7 item)
+### §7.2 Feature validation protocol (every §6.3/§6.4/§6.7 item)
 
 1. **Leakage test first.** Extend
-   [`test_meanyr_mean10_leakage.py`](../tests/test_meanyr_mean10_leakage.py): temporal features
-   assert strict `<` date visibility; as-of/external features assert the training value is
-   reconstructable from data observable at `game_time − TRAINING_LOOKBACK`.
-2. **Train/live parity test per batch** (the §7.0.4 harness). Paired surfaces change in one PR —
+   [`test_meanyr_mean10_leakage.py`](../../tests/test_meanyr_mean10_leakage.py): temporal
+   features assert strict `<` date visibility; as-of/external features assert the training value
+   is reconstructable from data observable at `game_time − TRAINING_LOOKBACK`.
+2. **Train/live parity test per batch** (the §6.0.4 harness). Paired surfaces change in one PR —
    the two fill sites, any new context column's historical + upcoming branches.
 3. **Regen + deterministic A/B.** Two verified `pipeline.py` facts force the ordering:
    `--deterministic` **never rebuilds the matrix** (cache-only load; parquet write skipped), and
@@ -919,7 +864,7 @@ regression is a hard stop.
    pruned → silently inert. Control: mandatory per-cell parquet delete + full regen per batch;
    golden test that a sentinel new column survives `_prune_uninformative_features` after regen.
    Verify regen feasibility per league first (the 850-day window must be resolvable from the
-   archive — §2 archive block) before deleting any cache.
+   archive — §3 archive block) before deleting any cache.
 
 **Worked example — QW-1 on NFL `carries`, end-to-end.** Read the cell's `target_normalization`
 from `stat_meta.json` (`carries` → `ratio_meanyr`) and pass it explicitly so baseline and
@@ -955,7 +900,7 @@ poetry run python -m sportstradamus.training.scorecard \
     --baseline /tmp/NFL_carries.baseline.csv \
     --candidate src/sportstradamus/data/test_sets/deterministic/ratio_meanyr/NFL_carries.csv
 
-# 4. decide: gate-row improvement => real-HPO confirm (11.2 step 5);
+# 4. decide: gate-row improvement => real-HPO confirm (§7.2 step 5);
 #    SHAP < 0.001 or regression => restore /tmp/NFL_carries.cache.bak, revert edit.
 ```
 
@@ -965,7 +910,7 @@ Executor notes: the deterministic CSV subdir is the normalization slug
 `update()` requires league-API access — run after the daily jobs or accept a slightly stale
 gamelog on both sides (fine: the A/B only needs both sides identical).
 
-### 11.3 Inference-path compatibility checklist (per change type)
+### §7.3 Inference-path compatibility checklist (per change type)
 
 Every change lands its inference-side mirror **in the same PR, before promotion**. Gate 1 lets a
 change into the test window; this checklist makes the window safe.
@@ -974,7 +919,7 @@ change into the test window; this checklist makes the window safe.
 |---|---|---|
 | Training-only (loss change, monotone constraint, per-parameter Optuna, reweighting) | None — output schema unchanged | Stage B1 ZTNB attempt |
 | New target / baseline strategy | Inverse decode in `model_prob._decode_skewnormal` via `baselines.STRATEGY_REGISTRY[strategy].decode_loc/decode_scale`; matching `*_Ratio` feature in `get_stats`; `target_strategy` + `offset_meta` keys round-trip | P1 `centered_additive_*` |
-| New distribution head (SHASH, CMP, MZINB, PGBM, MEGB, gbex) | (a) decode block in `model_prob.py`; (b) `get_ev` / `get_odds` / `fused_loc` / `set_model_start_values` accept the new `dist`; (c) `dist` in `_build_filedict` + legacy fallback; (d) live-path test mirroring [`test_zinb_hurdle_live_path.py`](../tests/integration/test_zinb_hurdle_live_path.py) | P2.B HurdleZINB |
+| New distribution head (SHASH, CMP, MZINB, PGBM, MEGB, gbex) | (a) decode block in `model_prob.py`; (b) `get_ev` / `get_odds` / `fused_loc` / `set_model_start_values` accept the new `dist`; (c) `dist` in `_build_filedict` + legacy fallback; (d) live-path test mirroring [`test_zinb_hurdle_live_path.py`](../../tests/integration/test_zinb_hurdle_live_path.py) | P2.B HurdleZINB |
 | Post-hoc calibration object (Rung-C map, CQR, `bias_correction`) | Pickle as a new key; load in `model_prob`, apply after decode (before/after `fused_loc` per what's calibrated); byte-identical round-trip test | `temperature` field |
 | New player-level feature | Column in BOTH `get_training_matrix` and `get_stats`, computed identically, leakage-safe; same dtype/index; `feature_filter.json` registration | `MeanYr` / `Mean10` / `*_Ratio` |
 | Multi-head factorization | N pickles/market, Monte-Carlo combine, multi-output blend — **largest inference-side change in plan**; T5 is killed, so only relevant if a future factorization survives a brief | none in-repo |
@@ -991,7 +936,7 @@ byte-identical predictions. Fields written by `_build_filedict` as of the consol
 `offset_meta`, `target_strategy`, `zinb_mode`, `is_hurdle`, `expected_columns` — verify against
 the code before relying on the list.
 
-### 11.4 Cross-league caveats (read before any cross-league A/B)
+### §7.4 Cross-league caveats (read before any cross-league A/B)
 
 1. NFL sample sizes are an order of magnitude smaller than NBA (~17 vs ~82
    games/player/season); re-derive EB shrinkage `K = σ²_within / σ²_between` per league.
@@ -1013,7 +958,7 @@ the code before relying on the list.
 9. Post-hoc bias correctors at NFL count means must be affine ROE, not isotonic/per-decile
    (low-base-rate overfit, ref [48]); reserve isotonic for higher-mean NBA/WNBA count cells.
 
-### 11.5 Ship & session mechanics
+### §7.5 Ship & session mechanics
 
 - **Ship to devel = one-line `stat_meta.json` edit** (`shipped: "withheld" → "devel"`) the human
   commits; `generate-ship-config --branch devel` validates + summarizes. Promotion to `main` is
@@ -1024,38 +969,98 @@ the code before relying on the list.
   scaffolding.
 - **`refactoring-specialist`** runs on every touched Python file before any push / PR / review
   (CLAUDE.md hard rule, five triggers).
-- **Module footprint:** `sportstradamus.training` (pipeline, scorecard, report, calibration,
-  strategy driver), `sportstradamus.stats` (feature columns), `data/config/{stat_meta.json,
-  ship_config.json}`, `tests/golden/`. Prediction-side edits only via §11.3.
-- **Stop and ask the owner:** gate-constant or test-tolerance changes (always); smoke
-  regression; gates red at session start through no fault of yours; anything touching cron,
-  credentials, or paid APIs; the §9 grind detector.
-- **Session definition of done:** refactoring-specialist ran on every touched `.py`; the three
-  §11.1 gates clean; one §12 ledger line appended; status line updated on stage boundaries;
-  durable non-obvious lesson → offer a memory capture.
 
-## 12. Doc map & ledger
+## 8. Escalation & stop conditions
 
-| Fact | Canonical home |
-|---|---|
-| Gate thresholds g1–g5, Gate-2, S1–S3, tighten/loosen | [`ship_gate.md`](ship_gate.md) |
-| Release surface per cell | `stat_meta.json` `shipped` (git carries flip history) |
-| Per-cell gate numbers | `data/training/model_stats.csv` (mirror of the parquet) |
-| Lever stack, stages, per-league routing, session rules | **this doc** |
-| Research verdicts, citations [1]–[71], commit refs | [`operation_ship_references.md`](operation_ship_references.md) |
-| Program index, other lanes, decision gates D1–D7, deferred register | [`sportstradamus_roadmap_v3.md`](sportstradamus_roadmap_v3.md) |
-| Ship mechanics how-to, package map | `CONTRIBUTING.md` |
-| Session law (gates, subagents, hard rules) | `CLAUDE.md` |
+### §8.1 Failure protocol & matrix exhaustion
 
-### Ledger (append-only, newest first, cap ~15)
+- **Per-lever:** every §6 stage carries a go/no-go and an if-it-fails branch. When a lever's
+  go/no-go fails on a cell, record it (lever-attempt +1, with the axis named) and take the
+  branch. Do not grind a dead lever.
+- **Per-cell:** push every cell until it ships or has actually failed across the **whole
+  matrix** — all four axes (normalization × model/loss × blend × calibration) **plus** the
+  family and hierarchical tracks. Four failed calibration/feature levers is *not* an exit: the
+  cell moves to the next axis with a one-line note naming the axes tried. The only ways off the
+  board are genuine matrix-wide exhaustion (true of **zero** cells today) or the operator's
+  explicit, documented denominator call. The heaviest tail-head rebuilds (spliced/Pareto,
+  MZINB) are deferred long-shots (roadmap v3 §8), tried only after the cheaper §6.6 moves.
+- **Operation-level: failure is not an option.** §6.9 shows NBA and WNBA clear on §6.0+§6.1
+  alone, with backups; NFL's escalation ladder is deep enough to reach 15, and the terminal
+  fallback (ride the book line, calibrated) ships.
+- **Never loosen a gate to hit breadth.** Gate constants are effect-size floors (vig-scale),
+  not breadth knobs. Standing rule: any search over bet-definition knobs must be
+  multiplicity-corrected before it informs a ship, and never gate on a model-conditioned
+  statistic.
+- **Grind detector:** two consecutive sessions with no acceptance criterion moving is a hard
+  stop — escalate to the owner; a cell that resists an axis moves to the next axis, never gets
+  re-ground.
+- **Park & pivot:** if blocked (e.g., NFL Gate-2 soak needs live games that won't exist until
+  September), append a §10 ledger line with the reason, set `BLOCKED (on: …)` in the status
+  line, flip the roadmap v3 §4 row, and point the owner at the swimlane index.
 
-- 2026-06-12 · consolidation · doc created from operation_ship_75 + operation_ship_90 +
-  feature_improvement_plan + model-track brief, with the model-research operating-loop
-  refinements folded in · next: §7.0 Stage 0 (free-passer sweep, hole-#0b packet, parity
-  harness, hole-#4 pre-registration)
-- 2026-06-10 · created (as handoffs/model-track.md) · brief drafted from roadmap-v3 migration ·
-  next: free-passer re-score sweep
+### §8.2 Research holes & research-first triggers
 
-### Changelog
+**Dispatch `research-analyst` before** (CLAUDE.md research-first; the research-gate hook
+enforces the file-level cases): any §6.6 family/distribution change; any §6.5 blend-structure
+change or training-time dispersion regularizer; §6.6 hierarchical/TabPFN escalation; the
+§6.6-flagged feature items C-3 / B-5 / L-3 (D-4 brief-note level); any hole below before
+betting the plan on it. Plain knobs (normalization slug, loss choice, ordinary features) need
+no brief. To proceed without a brief on a hook-gated edit, write a one-line justification to
+`.claude/.state/research_waiver`.
 
-- 2026-06-12 consolidated four docs into one ordered progression; MR loop deltas folded in.
+**Open holes:**
+
+- **#0b — Gate-4 baseline hysteresis** (highest priority; owner call). §6.0.2 carries the
+  decision packet and the recommendation (ship the scale fit first; hysteresis only if churn
+  persists). It gates trust in the ship-incrementally premise.
+- **#4 — do the marginal NFL g1s improve when dispersion is calibrated?** Pre-registered as
+  §6.0.5 with its decision rule. The difference between NFL reaching 10 and reaching 15.
+- **#6 — the block-bootstrap / clustered-g1 backlog.** Test-set CSVs still lack `game_date` on
+  combined-stat cells, blocking the player-clustered Gate-1 recheck and a closing-line-value
+  gate. The concrete method is CPCV + a player/date embargo (López de Prado 2018) — a
+  validation refinement, not a gate change; the one principled selection-style criterion worth
+  building.
+
+**Resolved (one-liners; detail in [`../operation_ship_references.md`](../operation_ship_references.md)):**
+post-hoc scale moves PIT-KS without breaking g1/g5, but only under the right normalization and
+with a cell-specific val→test discount; the SkewNormal dispersion-cal exclusion was an a-priori
+skip, not a tested negative; the count branch needed the PIT-KS re-target (coverage was the
+wrong objective); the severe-coverage cells were a decode artifact + plain under-dispersion, not
+a new-tail-head problem — they ship under the centered normalization; the in-sample 2-parameter
+screen oversells the honest val→test gate (nothing ships on an in-sample floor); normalization
+is a first-class ship axis, often decisive; the variance regularizer is untried, not refuted.
+
+**STOP and ask the owner when:**
+
+- gate-constant or test-tolerance changes (always);
+- smoke regression;
+- gates red at session start through no fault of yours;
+- anything touching cron, credentials, or paid APIs;
+- the §8.1 grind detector fires.
+
+**DISPATCH a subagent when:**
+
+- `research-analyst` (Opus-backed) — for the §8.2 triggers above;
+- `devel-ship-curator` — every devel-bound ship PR;
+- `refactoring-specialist` — per the five CLAUDE.md triggers.
+
+## 9. Session definition of done
+
+- refactoring-specialist ran on every `.py` touched this session (CLAUDE.md five-trigger rule).
+- `poetry run ruff check src/sportstradamus/` clean.
+- `poetry run pytest tests/golden/` clean (incl. scorecard / gate tests).
+- `poetry run pytest -m integration -n0` clean, then `touch .claude/.state/integration_green`.
+  The determinism gate
+  ([`test_determinism_gate.py`](../../tests/integration/test_determinism_gate.py)) must stay
+  green; extend it to WNBA + NFL before any cross-league lever ship (§7.4.5). Cross-league
+  testing policy: smoke (1–2 markets/league) before full verification; a smoke regression is a
+  hard stop.
+- One ledger line appended to §10; status line updated if a stage boundary was crossed.
+- Never push `devel` directly — devel-ship-curator carves ship PRs.
+- Durable non-obvious lesson? Offer a memory capture (CLAUDE.md §Agentic workflow conventions).
+
+## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
+
+- 2026-06-13 · moved to docs/handoffs/; reformatted to handoff template (§1–§10); stages §7.N→§6.N, validation §11.N→§7.N, failure §9→§8, research §10→§8.2 · next: §6.0 free-passer sweep + hole-#0b packet
+- 2026-06-12 · consolidated four docs into one ordered progression; MR loop deltas folded in · next: §6.0 Stage 0
+- 2026-06-10 · created (as handoffs/model-track.md) · brief drafted from roadmap-v3 migration · next: free-passer re-score sweep
