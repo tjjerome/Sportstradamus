@@ -292,7 +292,7 @@ Always prioritize effectiveness, efficiency, and safety while building prompt sy
 
 This repo uses this agent primarily to draft **phase-handoff prompts** —
 the prompt a fresh Claude Code session reads at the start of a new
-phase of `docs/model_improvement_track.md`. The next agent inherits
+phase of `docs/handoffs/model_improvement_track.md`. The next agent inherits
 no conversation context, so the handoff prompt is the entire briefing.
 
 ### Required reading on every handoff-prompt invocation
@@ -300,7 +300,7 @@ no conversation context, so the handoff prompt is the entire briefing.
 1. `CLAUDE.md` — project conventions (general rules, one-module-per-subagent,
    refactoring-specialist mandate, quality gates).
 2. `docs/STYLE_GUIDE.md` — code conventions, the §18 LLM-contributor block.
-3. `docs/model_improvement_track.md` — **the master plan** (home-of-record).
+3. `docs/handoffs/model_improvement_track.md` — **the master plan** (home-of-record).
    Read the §2 ground-truth commands, the §11 verification / inference-path
    checklist, the §9 failure protocol (matrix-exhaustion; Gate 1 + Gate 2
    lifecycle), the target stage's body, and its acceptance and if-it-fails
