@@ -1,6 +1,6 @@
 # Model Improvement Track — References
 
-> **The evidence appendix for [`model_improvement_track.md`](model_improvement_track.md):**
+> **The evidence appendix for [`model_improvement_track.md`](handoffs/model_improvement_track.md):**
 > research verdicts (P0–A1.6), branch/commit refs, the critical-files map, and citations
 > [1]–[71]. Preserves the load-bearing facts from the deprecated
 > [`gbdt_mean_regression_plan.md`](archive/gbdt_mean_regression_plan.md) /
@@ -344,7 +344,7 @@ primary build (deferred behind 75% breadth).
   passing-yards 15000 → 2646 rows, mean 38.1 → 215.9.
 - New Stage A4 entry **T11**: per-position model-split bias experiment
   (originally deferred to Ship 90; now a live lever —
-  [`model_improvement_track.md`](model_improvement_track.md) §7.6).
+  [`model_improvement_track.md`](handoffs/model_improvement_track.md) §6.6).
 
 ## 10. Branch / PR / commit refs
 
@@ -359,7 +359,7 @@ primary build (deferred behind 75% breadth).
   ([`training/scorecard.py`](../src/sportstradamus/training/scorecard.py),
   adds G4 IQR ratio and G5 ECE), some of these no longer ship. See
   the gate-audit table in
-  [`model_improvement_track.md`](model_improvement_track.md) §4.1.
+  [`model_improvement_track.md`](handoffs/model_improvement_track.md) §3.1.
 
 ## 11. Critical files map
 
@@ -383,13 +383,13 @@ last-verified against `fbec3cc` (HEAD before Ship 75 rework):
 ## 12. Per-change-type inference-path checklist
 
 Moved — the checklist is operational, not historical. Canonical home:
-[`model_improvement_track.md`](model_improvement_track.md) §11.3 (table, the
+[`model_improvement_track.md`](handoffs/model_improvement_track.md) §7.3 (table, the
 hard ship gate, and the pickle-schema discipline).
 
 ## 13. Cross-league caveats
 
-Moved — canonical home: [`model_improvement_track.md`](model_improvement_track.md)
-§11.4. The B1.5 numeric evidence behind its caveat 8 (Pearson-vs-RQR divergence at
+Moved — canonical home: [`model_improvement_track.md`](handoffs/model_improvement_track.md)
+§7.4. The B1.5 numeric evidence behind its caveat 8 (Pearson-vs-RQR divergence at
 very low NFL means: rushing-tds Pearson 0.57 vs RQR 0.96; interceptions 1.38 vs
 1.04) stays preserved here.
 
@@ -435,7 +435,7 @@ Renumbered from the deprecated context doc.
 [47] Efron, B., Morris, C. (1973). Stein's estimation rule and its competitors — James-Stein / empirical-Bayes shrinkage.
 [48] Roelofs, R., et al. (2022). Mitigating bias in calibration error estimation — low-base-rate sensitivity.
 
-*Added by the full-distribution audit (marginal-breadth levers folded into [`model_improvement_track.md`](model_improvement_track.md) §5–§7):*
+*Added by the full-distribution audit (marginal-breadth levers folded into [`model_improvement_track.md`](handoffs/model_improvement_track.md) §6):*
 
 [49] Czado, C., Gneiting, T., Held, L. (2009). Predictive model assessment for count data. *Biometrics* 65(4), 1254–1261.
 [50] Hallin, M., Ley, C. (2014). Skew-symmetric distributions and Fisher information — the double sin of the skew-normal. *Bernoulli* 20(3), 1432–1462. *(arXiv:1209.4177)*

@@ -292,7 +292,7 @@ Always prioritize effectiveness, efficiency, and safety while building prompt sy
 
 This repo uses this agent primarily to draft **phase-handoff prompts** —
 the prompt a fresh Claude Code session reads at the start of a new
-phase of `docs/model_improvement_track.md`. The next agent inherits
+phase of `docs/handoffs/model_improvement_track.md`. The next agent inherits
 no conversation context, so the handoff prompt is the entire briefing.
 
 ### Required reading on every handoff-prompt invocation

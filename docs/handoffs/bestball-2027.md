@@ -13,7 +13,7 @@ from 0% live code with archived reference implementations.
 Draft products are a separate prize ecology from pick'em. The edge is
 ADP/advance-equity arbitrage: draft players whose advance equity exceeds their
 ADP cost — Week-17-weighted value, mandatory stacking — rather than per-leg line
-arbitrage ([underdog_edge_suite.md §4.3–§4.4](../underdog_edge_suite.md)). It
+arbitrage ([underdog_edge_suite.md §3.3–§4.4](../underdog_edge_suite.md)). It
 deploys capital in the NFL offseason when pick'em volume dips (Best Ball drafts
 run ~Mar–Aug; Battle Royale weekly in season — archived v2 §Phase 5). Honest
 framing from the vision doc: roughly +5–15% Best Ball ROI for sharp recreational
@@ -28,7 +28,7 @@ play, with high variance and settlement deferred to season end
    and the D4 gate this lane is blocked on.
 3. [archive/sportstradamus_roadmap_v2.md §Phase 5](../archive/sportstradamus_roadmap_v2.md)
    — §5.1–§5.6 hold this lane's full acceptance criteria (spec of record).
-4. [underdog_edge_suite.md §4.3–§4.4, §5.1](../underdog_edge_suite.md) —
+4. [underdog_edge_suite.md §3.3–§4.4, §5.1](../underdog_edge_suite.md) —
    strategy framing for draft products. Non-normative vision; orientation only.
 5. `src/deprecated/drafts/` — archived legacy package (`update_ez_adp.py`,
    `forecast.py`, `data_process.py`, `data_merge.py`, `train.py`); stage-0
@@ -73,12 +73,12 @@ re-verification, revise this brief in place, then resume.
 - **Best Ball contest structure** — 18-round rosters with position min/max,
   12-team pods, advance rules (top-2-of-12 after the 14-week regular season,
   then single-week eliminations weeks 15/16/17), payout curve, rake. These
-  shift yearly (edge-suite §4.3 flags this explicitly). Re-verify against the
+  shift yearly (edge-suite §3.3 flags this explicitly). Re-verify against the
   live Underdog lobby/rules pages each season **before building math on them**;
   capture verified rules in `src/sportstradamus/data/contests/{contest}.json`
   (stage-0/2 artifact).
 - **ADP source endpoints** — Underdog publishes pick distributions
-  (edge-suite §4.3); the legacy fetcher hit
+  (edge-suite §3.3); the legacy fetcher hit
   `stats.underdogfantasy.com/v1/slates/...` (see
   `src/deprecated/drafts/update_ez_adp.py`). Verify availability and response
   shape before stage 1; manual-CSV fallback exists (§6 stage 1).
@@ -117,7 +117,7 @@ owner-only.
   `sportstradamus.training` interfaces. The projection layer is a TRANSLATION
   layer; no new model (archived v2 §5.2). Never edit serving-path modules from
   this lane; compat notes:
-  [model_improvement_track.md](../model_improvement_track.md) §11.3.
+  [model_improvement_track.md](model_improvement_track.md) §7.3.
 - `sportstradamus.helpers` — `Scrape` for ADP HTTP, config loaders. Reuse,
   don't fork.
 - `src/sportstradamus/pages/` — companion/exposure views (stages 5–6). Parquet
@@ -199,7 +199,7 @@ stage before any code.
 Conflict order: command output > CLAUDE.md/CONTRIBUTING.md > home-of-record doc
 > this brief > roadmap v3.
 
-- Archived v2 §5.1–§5.6 is the spec of record; edge-suite §4.3–§4.4 is
+- Archived v2 §5.1–§5.6 is the spec of record; edge-suite §3.3–§4.4 is
   orientation only — never treat its numbers as acceptance criteria.
 - Every simulation is deterministic with an explicit seed; tests run on
   fixtures, never live HTTP (archived §5.1–§5.4).

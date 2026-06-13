@@ -79,7 +79,7 @@ stage 0, revise this brief in place, then resume.
 ## 4. Locked decisions
 
 Owner decisions, dated. Sessions may not relitigate; changes are owner-only.
-Cross-lane gates live in [roadmap v3 §5/§7](../sportstradamus_roadmap_v3.md).
+Cross-lane gates live in [roadmap v3 §6](../sportstradamus_roadmap_v3.md).
 
 - Full parity is the scope (owner, 2026-06-10): payout modeling, push/void
   handling, EV, entry construction, Kelly sizing, recommendations YAML — not
@@ -112,7 +112,7 @@ condition (§8).
 
 This lane touches the serving path (`prophecize` → snapshots): see the
 inference-path compatibility checklist in
-[`model_improvement_track.md`](../model_improvement_track.md) §11.3.
+[`model_improvement_track.md`](model_improvement_track.md) §7.3.
 
 ## 6. Stage plan
 
