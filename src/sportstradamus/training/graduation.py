@@ -222,3 +222,28 @@ def graduated_cells(model_stats_path: Path, live_metrics_path: Path) -> set[tupl
         return set()
     grad = table[table["lifecycle_state"] == "graduated"]
     return set(zip(grad["league"], grad["market"], strict=False))
+
+
+def served_cells_failing_ship(
+    meta: dict[str, dict[str, dict]],
+    model_stats_path: Path,
+) -> list[tuple[str, str]]:
+    """Return ``(league, market)`` cells marked ``shipped`` devel/main yet failing ship.
+
+    A cell may serve only when its ``model_stats`` row clears all five offline
+    gates (``ship == True``; see ``training.scorecard``). This is the invariant
+    the ``generate-ship-config --branch devel`` guard and the golden test both
+    enforce. A missing parquet or an ``NA`` ``ship`` (no scored evidence) is not
+    a failure — only an explicit ``ship == False`` demotes.
+    """
+    if not model_stats_path.exists():
+        return []
+    stats = pd.read_parquet(model_stats_path, columns=["league", "market", "ship"])
+    failed = stats["ship"].eq(False).fillna(False).astype(bool)
+    failing_rows = set(zip(stats.loc[failed, "league"], stats.loc[failed, "market"], strict=False))
+    return [
+        (league, market)
+        for league, markets in meta.items()
+        for market, cell in markets.items()
+        if cell.get("shipped") in ("devel", "main") and (league, market) in failing_rows
+    ]
