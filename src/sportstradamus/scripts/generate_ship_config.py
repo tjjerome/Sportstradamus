@@ -27,7 +27,7 @@ from sportstradamus.helpers.io import (
     MODEL_STATS_PATH,
     prune_model_pickle,
 )
-from sportstradamus.training.graduation import graduated_cells
+from sportstradamus.training.graduation import graduated_cells, served_cells_failing_ship
 from sportstradamus.training.markets import ALL_MARKETS
 from sportstradamus.training.ship_config import (
     STAT_META_PATH,
@@ -114,7 +114,7 @@ def promote_for_main(
     "--model-stats",
     type=click.Path(path_type=Path),
     default=None,
-    help="Gate 1 parquet path (defaults to data/model_stats.parquet). Only read for --branch main.",
+    help="Gate 1 parquet path (defaults to data/model_stats.parquet). Read for both branches.",
 )
 @click.option(
     "--live-metrics",
@@ -158,6 +158,16 @@ def main(branch, prune, meta, model_stats, live_metrics, dry_run) -> None:
             f"# branch=devel: active={n_active} withheld={n_withheld} "
             f"(stat_meta.json validated; no mutation)"
         )
+        failing = served_cells_failing_ship(meta_map, model_stats_path)
+        if failing:
+            for lg, mk in failing:
+                click.echo(
+                    f"  ERROR {lg}/{mk}: shipped on devel but ship=False (offline gates fail)"
+                )
+            raise click.ClickException(
+                f"{len(failing)} served cell(s) fail the ship gate; "
+                "demote each to shipped=withheld in stat_meta.json"
+            )
 
     if prune:
         # Use the resolved (post-mutation) config to decide what to prune.
