@@ -15,7 +15,7 @@ decision engines (kelly, pickem-build, parlay pricing) are league-agnostic and
 already built; what MLB/NHL need is model-quality work + data-freshness repair
 plus a small, known CLI-wiring delta (§3 findings) — not new architecture. No
 doc gives these leagues a breadth target —
-[`model_improvement_track.md`](../model_improvement_track.md) §0 covers
+[`model_improvement_track.md`](model_improvement_track.md) §1 covers
 NBA/WNBA/NFL only; this lane exists to close that gap. Seasonal urgency: **MLB
 is in season now** — the apps price it heavily while NBA/NFL are dark, and the
 D1 option decays as the season burns. NHL starts in October; D2 wants its
@@ -27,9 +27,9 @@ packet by ~Sep.
    (seasonality) + §7 (the D1/D2 rows) — why now, and who decides. Predecessor
    design sketches: [`../archive/sportstradamus_roadmap_v2.md`](../archive/sportstradamus_roadmap_v2.md)
    (non-normative, status claims stale).
-2. [`../model_improvement_track.md`](../model_improvement_track.md) §1 (the
-   lens), §4.3 (the failure-mode-census pattern stage 0 copies), §6 operating
-   loop + §5/§7 lever stages (the post-GO method, reused wholesale — never
+2. [`model_improvement_track.md`](model_improvement_track.md) §1 (the
+   lens), §3.3 (the failure-mode-census pattern stage 0 copies), §6 operating
+   loop + §6 lever stages (the post-GO method, reused wholesale — never
    restated here).
 3. [`../ship_gate.md`](../ship_gate.md) — g1–g5 thresholds the packets score
    against.
@@ -39,7 +39,7 @@ packet by ~Sep.
 5. [`CLAUDE.md`](../../CLAUDE.md) §Hard rules (DuckDB lock) + §Agentic workflow
    conventions (research-first) — assumed law; the two rules this lane leans
    on hardest.
-6. [`../model_improvement_track.md`](../model_improvement_track.md) §11.5 —
+6. [`model_improvement_track.md`](model_improvement_track.md) §7.5 —
    the model-track footprint and session mechanics stage 1+ mirrors.
 7. `src/sportstradamus/stats/mlb.py`, `src/sportstradamus/stats/nhl.py` — the
    two Stats classes under audit (`season_start`, `load`/`update`).
@@ -114,7 +114,7 @@ Findings verified 2026-06-10 (each re-derivable above — re-verify, don't trust
   coverage "thin"; books scrapers were the intended source).
   `scripts/backfill_historical_odds.py` does carry `baseball_mlb` /
   `icehockey_nhl` sport keys. The archive's MLB/NHL book side is therefore
-  legacy-era until proven otherwise — the model_improvement_track.md §4.2
+  legacy-era until proven otherwise — the model_improvement_track.md §3.2
   "is the book honest?" check is mandatory before any g1 verdict is believed.
 - **All 40 cells are `dist: SkewNormal`** with `target_normalization` /
   `posthoc` `"none"` — including count-shaped stats (home runs, stolen bases,
@@ -125,7 +125,7 @@ Findings verified 2026-06-10 (each re-derivable above — re-verify, don't trust
 - `meditate` skips + pickle-prunes withheld cells; audit training needs
   `--bypass-withholding` or a `--deterministic` sandbox run (writes to
   `research/models/deterministic/`, never production). The strategy driver
-  lives on `model-research` only (model_improvement_track.md §5 branch
+  lives on `model-research` only (model_improvement_track.md §6 branch
   asymmetry) — `ls src/sportstradamus/training/model_strategy_driver.py`
   before planning around it.
 
@@ -166,8 +166,8 @@ run, but nothing merges in stage 0.
 **Post-GO (stage 1+):** mirrors the model-track footprint —
 `sportstradamus.training` (pipeline, scorecard, report),
 `data/config/stat_meta.json`, ship-config plumbing — see
-[`../model_improvement_track.md`](../model_improvement_track.md) §11.5 and
-§5–§7; not restated here. Plus the activation-specific deltas this audit
+[`model_improvement_track.md`](model_improvement_track.md) §7.5 and
+§6; not restated here. Plus the activation-specific deltas this audit
 names:
 
 | Module | Why |
@@ -181,7 +181,7 @@ names:
 
 Editing outside the footprint is a stop condition (§8). Serving-path changes
 carry the inference-path compatibility checklist
-([`../model_improvement_track.md`](../model_improvement_track.md) §11.3) —
+([`model_improvement_track.md`](model_improvement_track.md) §7.3) —
 reference it, don't restate it.
 
 ## 6. Stage plan
@@ -204,7 +204,7 @@ reference it, don't restate it.
   5. `meditate --league MLB --bypass-withholding --market <subset>` smoke on a
      scratch branch (or `--deterministic` sandbox) + full scorecard sweep →
      free-passer count (cells already clearing g1–g5) + a failure-mode census
-     table à la model_improvement_track.md §4.3.
+     table à la model_improvement_track.md §3.3.
   6. Recommended GO/NO-GO with reasons + a proposed breadth target for the
      owner to lock at D1.
 - **Acceptance:** packet committed + §10 ledger line + owner pointed at it.
@@ -227,15 +227,15 @@ acceptance and kill criteria.
 - **Entry:** D1 (MLB) or D2 (NHL) = GO, owner-committed; breadth target locked.
 - **Procedure:** land the packet's wiring deltas + data repair first (one
   module per subagent), then the model_improvement_track.md §6 operating loop
-  verbatim — free passers first (§7.0 pattern), then the §7 stage ladder
+  verbatim — free passers first (§6.0 pattern), then the §6 stage ladder
   cheapest-first. Loop and stages live in
-  [`../model_improvement_track.md`](../model_improvement_track.md) §6–§7;
+  [`model_improvement_track.md`](model_improvement_track.md) §6;
   this brief does not restate them.
 - **Acceptance per cell:** official full-HPO scorecard 5/5
   ([`../ship_gate.md`](../ship_gate.md)) → `shipped: "devel"` via standard
   mechanics (CONTRIBUTING §Shipping; devel-ship-curator carves every PR).
 - **Est. sessions:** set by the packet's free-passer count + failure census.
-- **Kill criteria:** model_improvement_track.md §9 failure protocol per
+- **Kill criteria:** model_improvement_track.md §8 failure protocol per
   lever/cell. League-level kill is an owner call → status `DONE (no-go)` or
   `BLOCKED (on: next season)`.
 

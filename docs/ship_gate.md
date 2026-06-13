@@ -17,8 +17,8 @@ ground truth:
   [`stat_meta.json`](../src/sportstradamus/data/config/stat_meta.json) —
   `"devel"` / `"main"` ship; `"withheld"` does not.
 - **The track that ships against these gates:**
-  [`model_improvement_track.md`](model_improvement_track.md) (standings are
-  never prose — its §2 ground-truth commands).
+  [`handoffs/model_improvement_track.md`](handoffs/model_improvement_track.md) (standings are
+  never prose — its §3 ground-truth commands).
 - **Per-cell gate pass/fail:** a fresh `python -m sportstradamus.training.scorecard`
   sweep (`model_stats.parquet` can lag a gate redefinition).
 
