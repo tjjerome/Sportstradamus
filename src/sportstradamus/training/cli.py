@@ -7,10 +7,11 @@ from datetime import datetime, timedelta
 
 import click
 import numpy as np
+import pandas as pd
 
 from sportstradamus import data
 from sportstradamus.helpers import Archive, book_weights, feature_filter, get_logger
-from sportstradamus.helpers.io import prune_model_pickle
+from sportstradamus.helpers.io import MODEL_STATS_PATH, prune_model_pickle
 from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
 from sportstradamus.training import baselines, calibration
 from sportstradamus.training.calibration import fit_book_weights
@@ -26,6 +27,7 @@ from sportstradamus.training.ship_config import (
     STAT_META_PATH,
     TARGET_NORM_NONE,
     WITHHELD,
+    ShipConfig,
     load_ship_config,
     load_stat_meta,
     resolve_cell_target_normalization,
@@ -37,6 +39,50 @@ np.seterr(divide="ignore", invalid="ignore")
 # Reproducibility seed for non-deterministic training runs. Not used under
 # --deterministic (which pins RNGs via seed_everything with a fixed value).
 _RNG_SEED: int = 69
+
+
+def _enforce_ship_gate(
+    active_markets: dict[str, list[str]],
+    ship_config: ShipConfig,
+    loaded_leagues: set[str],
+    log,
+) -> int:
+    """Dark-out every served cell whose latest offline gates fail.
+
+    A cell may serve only when its ``model_stats`` row has ``ship == True``
+    (all five gates; ``training.scorecard``). ``report()`` writes each cell's
+    fresh gates during training, so this post-loop pass prunes the production
+    pickle of any served cell that came back ``ship == False`` — the same
+    dark-out a ``withheld`` cell gets, so inference skips the market. Scoped to
+    leagues actually loaded this run and to cells served on the branch
+    (``ship_config`` value other than ``WITHHELD``); an empty ``ship_config``
+    (``--deterministic`` or the integration smoke test) serves nothing, so this
+    no-ops.
+    """
+    if not MODEL_STATS_PATH.is_file():
+        return 0
+    stats = pd.read_parquet(
+        MODEL_STATS_PATH, columns=["league", "market", "ship", "g4_pass", "g4_pit_ks"]
+    )
+    failed = stats["ship"].eq(False).fillna(False).astype(bool)
+    failing = {(r.league, r.market): r for r in stats[failed].itertuples(index=False)}
+    pruned = 0
+    for lg, markets in active_markets.items():
+        if lg not in loaded_leagues:
+            continue
+        for market in markets:
+            if ship_config.get(lg, {}).get(market, WITHHELD) == WITHHELD:
+                continue
+            row = failing.get((lg, market))
+            if row is None or not prune_model_pickle(lg, market):
+                continue
+            pruned += 1
+            click.echo(
+                f"DEMOTE [{lg}] {market}: ship=False "
+                f"(g4_pass={row.g4_pass}, pit_ks={row.g4_pit_ks:.3f}) — pruned pickle"
+            )
+            log.warning("ship-gate demote", extra={"league": lg, "market": market})
+    return pruned
 
 
 @click.command()
@@ -347,3 +393,8 @@ def meditate(
                 zinb_mode=zinb_mode,
                 dist_training_loss=dist_training_loss,
             )
+
+    if not deterministic:
+        demoted = _enforce_ship_gate(active_markets, ship_config, set(stat_structs), log)
+        if demoted:
+            click.echo(f"ship-gate: pruned {demoted} served cell(s) with ship=False")

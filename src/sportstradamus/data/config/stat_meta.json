@@ -148,7 +148,7 @@
     "NBA": {
         "AST": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "none",
             "blending": "crps"
@@ -167,7 +167,7 @@
         },
         "DREB": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "none",
             "blending": "crps"
@@ -192,7 +192,7 @@
         },
         "FGM": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "none",
             "blending": "crps"
@@ -211,7 +211,7 @@
         },
         "OREB": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
@@ -229,7 +229,7 @@
         },
         "PR": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
@@ -247,7 +247,7 @@
         },
         "RA": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
@@ -309,7 +309,7 @@
         },
         "interceptions": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "roe_mean"
         },
@@ -381,7 +381,7 @@
         },
         "targets": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
@@ -517,7 +517,7 @@
         },
         "DREB": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "none",
             "blending": "crps"
@@ -572,7 +572,7 @@
         },
         "PTS": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "prob_recal_isotonic"
         },
@@ -584,7 +584,7 @@
         },
         "REB": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "none"
         },
@@ -596,7 +596,7 @@
         },
         "TOV": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
