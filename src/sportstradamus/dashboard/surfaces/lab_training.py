@@ -218,7 +218,7 @@ def _render_tab(tab_name: str, metric_cols: list[str], view: pd.DataFrame) -> No
     cols = [c for c in ID_COLS + metric_cols if c in view.columns]
     st.dataframe(
         view[cols].sort_values(["league", "market"]),
-        use_container_width=True,
+        width="stretch",
         height=560,
         hide_index=True,
         column_config=_column_config(cols),

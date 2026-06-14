@@ -27,10 +27,15 @@ from decimal import Decimal
 import pandas as pd
 import streamlit as st
 
+from sportstradamus.dashboard.components.constellation import constellation_figure
+from sportstradamus.dashboard.components.constellation_component import render_constellation
+from sportstradamus.dashboard.components.deep_dive import init_detail_state, show_detail
+from sportstradamus.dashboard.components.satellite_picker import render_satellites
 from sportstradamus.dashboard.data import load_model_stats
-from sportstradamus.dashboard.legs import find_offer_idx, parse_leg
+from sportstradamus.dashboard.legs import corr_key, find_offer_idx, parse_leg
 from sportstradamus.dashboard.slip_engine import SlipScore, score_slip, slip_headline
 from sportstradamus.helpers.io import upsert_user_slip
+from sportstradamus.prediction.stories.legs import validate_parlay_legs
 
 _LEGS = "slip_legs"
 _PLATFORM = "slip_platform"
@@ -39,7 +44,8 @@ _BANKROLL = "slip_bankroll"
 _EDIT_ID = "edit_slip_id"
 
 # Leg fields snapshotted from an offer row; the rest of the app reads these.
-_SNAPSHOT_COLS = ("Player", "Market", "Bet", "Game", "League", "Platform", "Date")
+# Team feeds the constellation's both-teams validity gate; K its star-size edge.
+_SNAPSHOT_COLS = ("Player", "Market", "Bet", "Game", "League", "Platform", "Date", "Team", "K")
 
 
 def init_slip_state() -> None:
@@ -69,9 +75,7 @@ def bankroll_input() -> None:
 
 
 def _leg_from_offer(row: Mapping) -> dict:
-    """Snapshot an offer row into a slip leg (numeric fields + canonical Desc).
-
-    The Desc carries the pipeline's ``- {pct}%, {boost}x`` tail so it parses the
+    """The Desc carries the pipeline's ``- {pct}%, {boost}x`` tail so it parses the
     same way parlay legs do (``parse_leg`` for headlines, the grading
     ``LEG_PATTERN`` for outcomes).
     """
@@ -214,24 +218,44 @@ def _slip_shrinkage(legs: Sequence[Mapping]) -> float:
 def render_constellation_builder(
     offers: pd.DataFrame, corr: pd.DataFrame, ctxs: Mapping, *, key_prefix: str = "cb"
 ) -> None:
-    """Same-game correlation-aware editor with a live deterministic thesis headline."""
+    """Same-game correlation-aware editor with a live deterministic thesis headline.
+
+    The constellation is the editor: a full-color star is a slip leg, a desaturated
+    one a candidate, and clicking either toggles it; a star's hover card opens the
+    full offer detail without disturbing the slip.
+    """
     legs = st.session_state[_LEGS]
     if not legs:
         st.info("Pick a story above to start a slip, or load one from the rail.")
         return
-    _render_leg_list(key_prefix)
-    _render_add_leg(offers, key_prefix)
+    focus, pool = _focus_pool(legs, offers)
+    focus_legs = [leg for leg in legs if leg["Game"] == focus]
+    _render_constellation(focus_legs, corr, pool, key_prefix)
+    _render_leg_list(key_prefix, focus_game=focus, removable=False)
+    act = render_satellites(
+        offers,
+        focus_game=focus,
+        platform=st.session_state[_PLATFORM],
+        legs=legs,
+        key_prefix=key_prefix,
+    )
+    if _apply_satellite_action(act, legs):
+        st.rerun()
+    _draw_detail_dialog(offers)
+    valid, reason = validate_parlay_legs(legs)
     if len(legs) < 2:
-        st.caption("Add at least two legs to price the slip.")
+        st.caption(reason or "Tap a gray star to add a leg.")
         return
+    if not valid:
+        st.warning(reason)
     shrink = _slip_shrinkage(legs)
     score = _score(legs, corr, shrink)
-    headline = slip_headline(legs, offers, ctxs)
+    headline = slip_headline(focus_legs, offers, ctxs)
     if headline:
         st.markdown(f"#### {headline}")
     _render_metrics(score, correlated=True)
-    st.caption("Constellation view and pairing-block risk arrive with theming.")
-    _render_lock_in(score, headline, shrink, key_prefix)
+    st.caption("Pairing-block risk arrives with the correlation-block model.")
+    _render_lock_in(score, headline, shrink, key_prefix, can_lock=valid)
 
 
 def render_simple_builder(
@@ -261,39 +285,146 @@ def _score(legs: Sequence[Mapping], corr: pd.DataFrame, shrink: float) -> SlipSc
     )
 
 
-def _render_leg_list(key_prefix: str) -> None:
+def _render_leg_list(
+    key_prefix: str, *, focus_game: str | None = None, removable: bool = True
+) -> None:
+    """List slip legs. ``focus_game`` shows only that game's legs (satellites are listed
+    in the picker); ``removable=False`` drops the button column because a leg is removed
+    by clicking its star.
+    """
     legs = st.session_state[_LEGS]
     for i, leg in enumerate(legs):
+        if focus_game is not None and leg["Game"] != focus_game:
+            continue
+        line = f"{leg['Desc']}  ·  {leg['League']}"
+        if not removable:
+            st.write(line)
+            continue
         text_col, rm_col = st.columns([8, 1])
-        text_col.write(f"{leg['Desc']}  ·  {leg['League']}")
+        text_col.write(line)
         if rm_col.button(":material/close:", key=f"{key_prefix}_rm_{i}", help="Remove leg"):
             remove_leg(i)
             st.rerun()
 
 
-def _render_add_leg(offers: pd.DataFrame, key_prefix: str) -> None:
-    """Same-game candidate picker, ranked by edge (story-fit ranking is a later polish)."""
-    legs = st.session_state[_LEGS]
-    games = {leg["Game"] for leg in legs}
-    if len(games) != 1:
-        return
-    game = games.pop()
-    platform = st.session_state[_PLATFORM]
-    used = {(leg["Player"], leg["Market"], leg["Bet"]) for leg in legs}
-    pool = offers.loc[(offers["Game"] == game) & (offers["Platform"] == platform)]
-    cands = [
-        r
-        for r in pool.to_dict("records")
-        if (r["Player"], r["Market"], r["Bet"]) not in used and pd.notna(r.get("Model P"))
-    ]
-    if not cands:
-        return
-    cands.sort(key=lambda r: -float(r.get("Model EV", 0.0) or 0.0))
-    labels = {f"{c['Player']} {c['Bet']} {float(c['Line']):.10g} {c['Market']}": c for c in cands}
-    choice = st.selectbox("Add a leg", ["—", *labels], key=f"{key_prefix}_add")
-    if choice != "—" and st.button("Add leg", key=f"{key_prefix}_addbtn"):
-        st.session_state[_LEGS].append(_leg_from_offer(labels[choice]))
+def _render_constellation(
+    legs: list[dict], corr: pd.DataFrame, pool: pd.DataFrame, key_prefix: str
+) -> None:
+    """Draw the interactive star map and act on the component's click/detail callback.
+
+    A star click toggles its leg (rerun to refresh the map); the hover card's **Full
+    detail** seeds the offer dialog, drawn by ``_draw_detail_dialog`` once the map and
+    the satellite picker have both rendered (so a satellite's detail opens the same
+    way). The component re-sends its last action on every rerun, so each is deduped by
+    nonce and fires once.
+    """
+    action = render_constellation(
+        constellation_figure(legs, corr, pool), key=f"{key_prefix}_constellation"
+    )
+    if _apply_constellation_action(action, legs, pool, key_prefix):
         st.rerun()
+
+
+def _draw_detail_dialog(offers: pd.DataFrame) -> None:
+    """Draw the offer-detail dialog for whichever offer is on the detail stack.
+
+    Shared by the constellation stars and the satellite picks — both push an
+    offers-frame index. The dialog's correlation-nav is scoped to that offer's own
+    game pool; correlated legs are same-game, so the scope holds across the reruns
+    navigation triggers.
+    """
+    stack = st.session_state.get("detail_stack")
+    if not stack or stack[-1] not in offers.index:
+        return
+    row = offers.loc[stack[-1]]
+    game_pool = offers[
+        (offers["Game"] == row["Game"]) & (offers["Platform"] == st.session_state[_PLATFORM])
+    ]
+    show_detail(row, game_pool)
+
+
+def _apply_constellation_action(
+    action: Mapping | None, legs: list[dict], pool: pd.DataFrame, key_prefix: str
+) -> bool:
+    """Process the component's last action once; return True if the slip changed.
+
+    A ``click`` toggles the star's leg (caller reruns); a ``detail`` seeds the offer
+    dialog and leaves the slip alone. The nonce is deduped against the last handled,
+    since the component re-sends the same value until the user acts again.
+    """
+    if not action:
+        return False
+    nonce_key = f"{key_prefix}_cst_nonce"
+    if action.get("nonce") == st.session_state.get(nonce_key):
+        return False
+    st.session_state[nonce_key] = action.get("nonce")
+    key = action.get("key")
+    if action.get("action") == "detail":
+        _open_offer_detail(key, pool)
+        return False
+    return _toggle_leg(key, legs, pool)
+
+
+def _apply_satellite_action(action: Mapping | None, legs: list[dict]) -> bool:
+    """Apply the satellite picker's action; return True if the slip changed.
+
+    ``add``/``remove`` mutate the slip (caller reruns); ``detail`` seeds the offer
+    dialog and leaves the slip alone (``_draw_detail_dialog`` draws it).
+    """
+    if not action:
+        return False
+    if "add" in action:
+        legs.append(_leg_from_offer(action["add"]))
+        return True
+    if "remove" in action:
+        remove_leg(action["remove"])
+        return True
+    init_detail_state()
+    st.session_state.detail_stack = [action["detail"]]
+    return False
+
+
+def _toggle_leg(key: str, legs: list[dict], pool: pd.DataFrame) -> bool:
+    """Toggle the clicked star: a slip leg → remove, a candidate → add (True if changed)."""
+    for i, leg in enumerate(legs):
+        if corr_key(leg) == key:
+            remove_leg(i)
+            return True
+    match = _pool_match_for_key(pool, key)
+    if match is None:
+        return False
+    legs.append(_leg_from_offer(match[1]))
+    return True
+
+
+def _open_offer_detail(key: str, pool: pd.DataFrame) -> None:
+    """Reuses the Board's ``deep_dive`` dialog and its ``detail_stack`` navigation; the
+    slip lives in session state, so opening detail never clears the parlay.
+    """
+    match = _pool_match_for_key(pool, key)
+    if match is None:
+        return
+    init_detail_state()
+    st.session_state.detail_stack = [match[0]]
+
+
+def _pool_match_for_key(pool: pd.DataFrame, key: str) -> tuple | None:
+    """``(index label, row dict)`` for the pool offer matching a star's key, or ``None``."""
+    for idx, row in zip(pool.index, pool.to_dict("records"), strict=True):
+        if corr_key(row) == key:
+            return idx, row
+    return None
+
+
+def _focus_pool(legs: Sequence[Mapping], offers: pd.DataFrame) -> tuple[str, pd.DataFrame]:
+    """The slip's focus game (the oldest leg's game) and its candidate offers on the platform.
+
+    The constellation anchors on this one game; legs from other games are satellites,
+    rendered outside the map. ``legs`` is non-empty (the caller guards).
+    """
+    focus = legs[0]["Game"]
+    platform = st.session_state[_PLATFORM]
+    return focus, offers.loc[(offers["Game"] == focus) & (offers["Platform"] == platform)]
 
 
 def _render_metrics(score: SlipScore, *, correlated: bool) -> None:
@@ -316,9 +447,13 @@ def _render_metrics(score: SlipScore, *, correlated: bool) -> None:
         st.caption("Sleeper payout approximate — correlation factor pending.")
 
 
-def _render_lock_in(score: SlipScore, headline: str, shrink: float, key_prefix: str) -> None:
+def _render_lock_in(
+    score: SlipScore, headline: str, shrink: float, key_prefix: str, *, can_lock: bool = True
+) -> None:
     lock_col, clear_col = st.columns(2)
-    if lock_col.button("Lock it in!", key=f"{key_prefix}_lock", type="primary"):
+    if lock_col.button(
+        "Lock it in!", key=f"{key_prefix}_lock", type="primary", disabled=not can_lock
+    ):
         lock_in(score, headline, shrink)
     if clear_col.button("Clear", key=f"{key_prefix}_clear"):
         clear_slip()

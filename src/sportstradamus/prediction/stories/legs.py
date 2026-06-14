@@ -10,6 +10,8 @@ maps a market to the coarse category the phrase bank is keyed by.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+
 import pandas as pd
 
 from sportstradamus.prediction.stories.context import Leg
@@ -166,3 +168,27 @@ def parse_leg(leg: str) -> dict | None:
             return None
         return {"Player": player.strip(), "Bet": bet, "Line": line, "Market": market}
     return None
+
+
+def validate_parlay_legs(
+    legs: Sequence[Mapping], *, require_both_teams: bool = True
+) -> tuple[bool, str]:
+    """Whether a same-game leg-set is a valid DFS entry; ``(ok, reason_if_not)``.
+
+    Underdog/Sleeper reject a same-game parlay that repeats a player (two markets
+    on one name) or sits entirely on one team. Shared by the dashboard slip
+    editor's lock-in gate and the story-menu preset generator, so a seeded preset
+    is valid by construction. Legs carry the offer-row ``Player``/``Team``; a leg
+    without a ``Team`` can't satisfy the both-sides rule on its own.
+
+    ``require_both_teams=False`` relaxes only the both-sides rule (never the
+    distinct-player rule): the menu sets it for a game whose model edge is entirely
+    one-sided, so it can still offer that team's preset — the user adds the second
+    team from another game (a satellite leg) in the editor.
+    """
+    players = [leg["Player"] for leg in legs]
+    if len(set(players)) < len(players):
+        return False, "Two legs share a player — each leg needs a distinct player."
+    if require_both_teams and len({leg.get("Team") for leg in legs if leg.get("Team")}) < 2:
+        return False, "Add a leg from the other team — a parlay needs both sides."
+    return True, ""

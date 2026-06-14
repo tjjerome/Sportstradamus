@@ -108,7 +108,7 @@ else:
     st.dataframe(
         user_slips.sort_values("saved_at", ascending=False)[slip_cols],
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
     )
 
 st.subheader("Rolling 30-Day Accuracy by League")
@@ -141,7 +141,7 @@ for league in sorted(daily_league["League"].unique()):
 
 fig_acc.add_hline(y=0.5, line_dash="dash", line_color="gray", annotation_text="50%")
 fig_acc.update_layout(yaxis_title="Accuracy", xaxis_title="Date", height=400)
-st.plotly_chart(fig_acc, use_container_width=True)
+st.plotly_chart(fig_acc, width="stretch")
 
 st.subheader("Cumulative Profit (Units)")
 daily_profit = (
@@ -162,7 +162,7 @@ fig_profit = px.area(
     labels={"_date": "Date", "Cumulative Profit": "Units"},
 )
 fig_profit.update_layout(height=400)
-st.plotly_chart(fig_profit, use_container_width=True)
+st.plotly_chart(fig_profit, width="stretch")
 
 st.subheader("Prediction Volume")
 volume = df.groupby(["_date", "League"]).size().reset_index(name="Count")
@@ -178,7 +178,7 @@ if not volume_pivot.empty:
         color_continuous_scale="Blues",
     )
     fig_heat.update_layout(height=300)
-    st.plotly_chart(fig_heat, use_container_width=True)
+    st.plotly_chart(fig_heat, width="stretch")
 
 # CLV ignores the sidebar filters — it is a structural model property, not a
 # view slice — but the global sport switch still applies (history is narrowed above).
@@ -207,6 +207,6 @@ else:
         )
         st.dataframe(
             segments.style.format({"market_clv": "{:+.3f}"}),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
