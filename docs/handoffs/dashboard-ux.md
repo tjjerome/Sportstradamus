@@ -1,6 +1,6 @@
 # Dashboard UX — "the Oracle"
 
-> Status: ACTIVE — P4.5 + satellite legs complete (a single-team game reaches a valid parlay through a grouped-by-game satellite picker; satellite picks show the same condensed offer card as the constellation; one-sided games emit single-team presets via the whole-game gate; candidate stars carry captions); next P5 Board + Slips AG Grid upgrade
+> Status: ACTIVE — P4.5 complete; next P5 Board + Slips AG Grid upgrade
 
 ## 1. Mission & money logic
 
