@@ -106,7 +106,7 @@ def _render_pickem(entries: pd.DataFrame, offers: pd.DataFrame) -> None:
                 }
             ),
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
         )
     _render_pickem_loader(view, offers)
 

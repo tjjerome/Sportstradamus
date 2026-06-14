@@ -26,6 +26,7 @@ from sportstradamus.prediction.parlay import (
     _payout_curve_for,
     _psd_or_none,
 )
+from sportstradamus.prediction.stories.legs import validate_parlay_legs
 from sportstradamus.prediction.stories.menu import (
     _MENU_EDGE_FLOOR,
     _log_growth,
@@ -112,7 +113,9 @@ def _block_diag_corr(block_sizes, rho):
 
 def test_caps_at_five_stories():
     corr = _block_diag_corr([2] * 6, 0.4)  # six separable two-leg clusters
-    sctx, offers = _ctx([0.62] * 12, corr)
+    # Interleave teams so every 2-leg block spans both sides — a single-team block
+    # is not a valid parlay and the menu would (correctly) drop it.
+    sctx, offers = _ctx([0.62] * 12, corr, teams=["AAA", "BBB"] * 6)
     out = build_game_stories([sctx], offers, pd.DataFrame(), None)
     assert out["story_id"].nunique() == 5
     assert set(out["objective"]) == {"builder", "moon"}
@@ -164,10 +167,13 @@ def test_objectives_are_true_argmaxes_and_share_legs():
     # scipy's mvn.cdf is randomized QMC for dim ≥ 3, so EV carries ~1e-4 noise
     # between scorings; compare the chosen leg-SET (stable when the gap ≫ noise),
     # not exact EV. The 2-leg vs 3-leg EV gap here is ~0.24, far above the noise.
+    # The menu argmaxes over *valid* subsets only, so the oracle must too —
+    # otherwise a single-team subset could pose as the "expected" argmax.
     all_scores = [
         _score_subset(c, sctx)
         for size in range(2, min(len(sctx.leg_indices), sctx.max_size) + 1)
         for c in combinations(sctx.leg_indices, size)
+        if validate_parlay_legs([sctx.bet_df[i] for i in c])[0]
     ]
     builder_legs = set(json.loads(builder["legs"]))
     moon_legs = set(json.loads(moon["legs"]))
@@ -232,3 +238,43 @@ def test_model_ev_is_the_real_copula_scorer():
 
 def test_edge_floor_value_is_owner_locked():
     assert _MENU_EDGE_FLOOR == 0.05
+
+
+def _row_players(legs_json: str) -> list[str]:
+    return [leg.split(" Over ")[0].split(" Under ")[0] for leg in json.loads(legs_json)]
+
+
+def test_presets_are_valid_parlays():
+    # Every emitted Builder/Moon must be a valid DFS entry — distinct players and
+    # both teams — because the menu enumerates only valid subsets.
+    corr = _block_diag_corr([3], 0.3)
+    sctx, offers = _ctx([0.66, 0.65, 0.64], corr, teams=["AAA", "BBB", "AAA"])
+    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    assert not out.empty
+    team_of = dict(zip(offers["Player"], offers["Team"], strict=True))
+    for legs_json in out["legs"]:
+        players = _row_players(legs_json)
+        assert len(set(players)) == len(players)  # no repeated player
+        assert len({team_of[p] for p in players}) >= 2  # both teams covered
+
+
+def test_single_team_game_emits_single_team_story():
+    # When the model's edge legs are ALL on one team, a single-team preset IS allowed —
+    # the user completes it with a cross-game satellite leg in the editor. (Whole-game gate.)
+    corr = _block_diag_corr([3], 0.3)
+    sctx, offers = _ctx([0.66, 0.65, 0.64], corr, teams=["AAA", "AAA", "AAA"])
+    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    assert not out.empty
+    team_of = dict(zip(offers["Player"], offers["Team"], strict=True))
+    for legs_json in out["legs"]:
+        players = _row_players(legs_json)
+        assert len(set(players)) == len(players)         # distinct players still required
+        assert {team_of[p] for p in players} == {"AAA"}  # single-team preset, the game being one-sided
+
+
+def test_single_team_clusters_in_two_team_game_emit_no_story():
+    # The game's edge spans both teams but each correlation cluster is one-sided and none
+    # bridges them → the whole-game gate keeps both-teams required → no story emitted.
+    corr = _block_diag_corr([2, 2], 0.4)
+    sctx, offers = _ctx([0.66, 0.65, 0.64, 0.63], corr, teams=["AAA", "AAA", "BBB", "BBB"])
+    assert build_game_stories([sctx], offers, pd.DataFrame(), None).empty

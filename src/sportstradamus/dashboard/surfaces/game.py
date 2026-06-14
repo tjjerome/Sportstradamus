@@ -3,14 +3,15 @@
 import pandas as pd
 import streamlit as st
 
-from sportstradamus.dashboard.components.deep_dive import to_american
 from sportstradamus.dashboard.components.slip_builder import seed_from_legs
 from sportstradamus.dashboard.data import (
     format_ts,
+    load_current_game_context,
     load_current_meta,
     load_current_offers,
     sport_filtered,
 )
+from sportstradamus.dashboard.narrative import context_strip
 
 st.title("Game")
 
@@ -34,34 +35,46 @@ if "Team" in offers.columns and "Opponent" in offers.columns:
 else:
     game_labels = []
 
-# Read game from query params; fall back to selectbox
-param_game = st.query_params.get("game", "")
-default_idx = game_labels.index(param_game) if param_game and param_game in game_labels else 0
-
 if not game_labels:
     st.info("No game grouping columns in offer data.")
     st.stop()
 
-selected_game = st.selectbox("Select game", game_labels, index=default_idx)
+# Pre-select the clicked game: the in-app handoff (session, one-shot) wins, then
+# a ?game= deep link. Seeding the widget key lets a later selectbox change stick
+# across reruns instead of being re-forced; drop a stale value if the option set
+# changed (e.g. the sport switch narrowed the slate).
+preselect = st.session_state.pop("nav_game", "") or st.query_params.get("game", "")
+if preselect in game_labels:
+    st.session_state["game_select"] = preselect
+if st.session_state.get("game_select") not in game_labels:
+    st.session_state.pop("game_select", None)
+
+selected_game = st.selectbox("Select game", game_labels, key="game_select")
 game_offers = offers.loc[offers["_game"] == selected_game]
 
 if game_offers.empty:
     st.info("No offers found for this game.")
     st.stop()
 
-ctx = game_offers.iloc[0]
+ctx_row = game_offers.iloc[0]
+strip = context_strip(load_current_game_context(), game=ctx_row["Game"], date=ctx_row["Date"])
 c1, c2, c3 = st.columns(3)
-c1.metric("Moneyline", to_american(ctx.get("Moneyline")) if "Moneyline" in ctx.index else "N/A")
-ou = ctx.get("O/U")
-c2.metric("O/U Total", f"{ou:.1f}" if pd.notna(ou) and isinstance(ou, int | float) else "N/A")
-c3.metric("League", ctx.get("League", "N/A"))
+if strip:
+    fav, spread = strip["fav_team"], strip["spread"]
+    c1.metric("Total", f"{strip['game_total']:.1f}")
+    c2.metric("Spread", f"{fav} -{spread:.1f}" if fav and spread > 0 else "Even")
+    c3.metric("Shape", str(strip["shape"]).title())
+else:
+    c1.metric("Total", "N/A")
+    c2.metric("Spread", "N/A")
+    c3.metric("League", ctx_row.get("League", "N/A"))
 
 display_cols = [
     c
     for c in ["Player", "Market", "Bet", "Line", "Model EV", "Model", "Books", "Platform"]
     if c in game_offers.columns
 ]
-st.dataframe(game_offers[display_cols], use_container_width=True, hide_index=True)
+st.dataframe(game_offers[display_cols], width="stretch", hide_index=True)
 
 st.subheader("Build a slip from this game")
 build_platforms = sorted(game_offers["Platform"].dropna().unique())

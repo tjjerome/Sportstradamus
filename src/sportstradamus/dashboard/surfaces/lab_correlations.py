@@ -117,7 +117,7 @@ if has_indep and has_corr_p:
         )
     )
     fig_scatter.update_layout(height=500)
-    st.plotly_chart(fig_scatter, use_container_width=True)
+    st.plotly_chart(fig_scatter, width="stretch")
 
     above_line = scatter_df.loc[scatter_df["P"] > scatter_df["Indep P"]]
     below_line = scatter_df.loc[scatter_df["P"] <= scatter_df["Indep P"]]
@@ -161,7 +161,7 @@ if "Boost" in resolved.columns:
         labels={"Boost_Bucket": "Boost Range", "Hit_Rate": "Hit Rate"},
     )
     fig_boost.update_layout(height=400)
-    st.plotly_chart(fig_boost, use_container_width=True)
+    st.plotly_chart(fig_boost, width="stretch")
 
 st.header("Hit Rate by Parlay Size")
 
@@ -195,7 +195,7 @@ for platform in sorted(resolved["Platform"].unique()):
 
     if size_data:
         size_df = pd.DataFrame(size_data)
-        st.dataframe(size_df, use_container_width=True, hide_index=True)
+        st.dataframe(size_df, width="stretch", hide_index=True)
 
         miss_cols = ["Hit All", "Missed 1", "Missed 2+"]
         miss_df = size_df[["Size", *miss_cols]].melt(
@@ -215,7 +215,7 @@ for platform in sorted(resolved["Platform"].unique()):
             labels={"Size": "Parlay Size", "Count": "Parlays"},
         )
         fig_miss.update_layout(height=350)
-        st.plotly_chart(fig_miss, use_container_width=True)
+        st.plotly_chart(fig_miss, width="stretch")
 
 if "P" in resolved.columns and resolved["P"].notna().any():
     st.header("Parlay Calibration Curve")
@@ -257,4 +257,4 @@ if "P" in resolved.columns and resolved["P"].notna().any():
         yaxis_title="Actual Hit Rate",
         height=400,
     )
-    st.plotly_chart(fig_pcal, use_container_width=True)
+    st.plotly_chart(fig_pcal, width="stretch")

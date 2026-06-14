@@ -150,7 +150,7 @@ ag = AgGrid(
     update_mode=GridUpdateMode.SELECTION_CHANGED,
     fit_columns_on_grid_load=True,
     height=720,
-    use_container_width=True,
+    width="stretch",
 )
 
 selected = ag.selected_rows

@@ -128,7 +128,7 @@ market_df = pd.DataFrame(market_rows)
 if not market_df.empty:
     st.dataframe(
         market_df.sort_values("Accuracy", ascending=False),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     st.download_button(
@@ -145,7 +145,7 @@ if not market_df.empty:
     bias_df["Color"] = bias_df["Balance"].apply(bias_color)
     bias_df["Label"] = bias_df["League"] + " - " + bias_df["Market"]
     bias_df = bias_df.sort_values("Balance")
-    st.plotly_chart(bias_bar(bias_df), use_container_width=True)
+    st.plotly_chart(bias_bar(bias_df), width="stretch")
 
 st.subheader("Prediction Sharpness (Model P Distribution)")
 selected_league = st.selectbox(
@@ -156,7 +156,7 @@ sharp_df = df if selected_league == "All" else df.loc[df["League"] == selected_l
 if not sharp_df.empty:
     markets_to_show = sorted(sharp_df["Market"].value_counts().head(12).index)
     sharp_subset = sharp_df.loc[sharp_df["Market"].isin(markets_to_show)]
-    st.plotly_chart(sharpness_histogram(sharp_subset, prob_col), use_container_width=True)
+    st.plotly_chart(sharpness_histogram(sharp_subset, prob_col), width="stretch")
 
     sharpness_df = sharp_df.groupby("Market")[prob_col].std().reset_index()
     sharpness_df.columns = ["Market", "Std(Model P)"]
@@ -179,7 +179,7 @@ if "Model EV" in df.columns and "Line" in df.columns:
         .reset_index()
     )
     div_stats["Div_Bucket"] = div_stats["Div_Bucket"].astype(str)
-    st.plotly_chart(ev_divergence_bar(div_stats), use_container_width=True)
+    st.plotly_chart(ev_divergence_bar(div_stats), width="stretch")
 
 st.header("Forecast Quality (Proper Scoring Rules)")
 
@@ -196,14 +196,14 @@ cal_stats = (
     )
     .reset_index()
 )
-st.plotly_chart(reliability_diagram(cal_stats), use_container_width=True)
+st.plotly_chart(reliability_diagram(cal_stats), width="stretch")
 
 st.subheader("Brier Skill Score by League-Market")
 if not market_df.empty and "BSS" in market_df.columns:
     bss_df = market_df.dropna(subset=["BSS"]).copy()
     bss_df["Label"] = bss_df["League"] + " - " + bss_df["Market"]
     bss_df = bss_df.sort_values("BSS", ascending=True)
-    st.plotly_chart(bss_bar(bss_df), use_container_width=True)
+    st.plotly_chart(bss_bar(bss_df), width="stretch")
 
 st.subheader("Brier Score Decomposition (Murphy 1973)")
 decomp_rows = []
@@ -219,7 +219,7 @@ if decomp_rows:
     decomp_df = pd.DataFrame(decomp_rows)
     decomp_df["Label"] = decomp_df["League"] + " - " + decomp_df["Market"]
     decomp_df = decomp_df.sort_values("Brier")
-    st.plotly_chart(murphy_decomp_bar(decomp_df), use_container_width=True)
+    st.plotly_chart(murphy_decomp_bar(decomp_df), width="stretch")
     st.caption(
         "BS = Reliability - Resolution + Uncertainty. "
         "Good models have low reliability (well-calibrated) and high resolution (discriminative)."
@@ -236,7 +236,7 @@ if has_crps:
             .agg(CRPS=("CRPS", "mean"), Count=("CRPS", "count"))
             .reset_index()
         )
-        st.plotly_chart(crps_line(crps_daily), use_container_width=True)
+        st.plotly_chart(crps_line(crps_daily), width="stretch")
 
 if has_dist:
     cov_df = pred_df.dropna(subset=["Dist", "Actual"])
@@ -258,7 +258,7 @@ if has_dist:
             ]
         )
         if not cov_display.empty:
-            st.dataframe(cov_display, use_container_width=True, hide_index=True)
+            st.dataframe(cov_display, width="stretch", hide_index=True)
 
             cov_rows = []
             for league, lgrp in cov_df.groupby("League"):
@@ -269,4 +269,4 @@ if has_dist:
                     if not np.isnan(cov_val):
                         cov_rows.append({"League": league, "Nominal": level, "Actual": cov_val})
             if cov_rows:
-                st.plotly_chart(coverage_bar(pd.DataFrame(cov_rows)), use_container_width=True)
+                st.plotly_chart(coverage_bar(pd.DataFrame(cov_rows)), width="stretch")

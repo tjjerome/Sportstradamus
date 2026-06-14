@@ -1,5 +1,7 @@
 """Offer-detail dialog and navigation for the dashboard."""
 
+from collections.abc import Mapping
+
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -33,6 +35,22 @@ def to_american(p: float) -> str:
     if p >= 0.5:
         return f"-{round(p / (1 - p) * 100)}"
     return f"+{round((1 - p) / p * 100)}"
+
+
+def render_offer_card(row: Mapping) -> None:
+    """Compact offer card — the Streamlit twin of the constellation's JS hover card.
+
+    Player + bet/line/market + win/boost/Kelly. The headshot (a person icon) and
+    the last-5 line are scarred placeholders, matching the constellation card: the
+    offer snapshot carries no player-id or gamelog columns to fill them yet.
+    """
+    win = float(row.get("Model P", 0.0) or 0.0)
+    boost = float(row.get("Boost", 1.0) or 1.0)
+    kelly = float(row.get("K", 0.0) or 0.0)
+    st.markdown(f":material/account_circle: **{row['Player']}**")
+    st.caption(f"{row['Bet']} {float(row['Line']):.10g} {row['Market']}")
+    st.markdown(f"Win **{win:.0%}** · **{boost:.2f}×** · Kelly **{kelly:.0%}**")
+    st.caption(":gray[Last 5 — coming soon]")
 
 
 def _parse_corr(s: str, max_n: int = 3) -> list[tuple[str, float]]:
@@ -111,7 +129,7 @@ def _render_history_tab(row: pd.Series) -> None:
 
     display_df = _select_history_df(hist_df, h2h_df, league, opponent, id(row))
     if not display_df.empty:
-        st.altair_chart(history_chart(display_df, line), use_container_width=True)
+        st.altair_chart(history_chart(display_df, line), width="stretch")
     elif hist_df.empty:
         st.caption("No history available for this player/stat.")
 
@@ -132,7 +150,7 @@ def _render_model_tab(row: pd.Series) -> None:
     try:
         df_pdf, y_title, is_continuous = distribution_frame(dist, ev, std, params, line)
         chart = distribution_chart(df_pdf, is_continuous, line, row["Market"], y_title)
-        st.altair_chart(chart, use_container_width=True)
+        st.altair_chart(chart, width="stretch")
     except Exception as e:
         st.error(f"Error computing distribution: {e}")
 

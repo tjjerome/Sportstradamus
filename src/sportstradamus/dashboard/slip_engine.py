@@ -29,6 +29,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import multivariate_normal, norm
 
+from sportstradamus.dashboard.legs import corr_key
 from sportstradamus.prediction.parlay import (
     _PAYOUT_CLIP_HI,
     _PAYOUT_CLIP_LO,
@@ -117,7 +118,7 @@ def _block_diagonal_sig(legs: Sequence[Mapping], corr: pd.DataFrame) -> np.ndarr
     sig = np.eye(n)
     if corr is None or corr.empty:
         return sig
-    keys = [_leg_key(leg) for leg in legs]
+    keys = [corr_key(leg) for leg in legs]
     games = [str(leg.get("Game", "")) for leg in legs]
     rho_by_game = _rho_lookup(corr, set(games))
     for i in range(n):
@@ -136,11 +137,6 @@ def _rho_lookup(corr: pd.DataFrame, games: set[str]) -> dict:
         (str(row.Game), frozenset((row.leg_a, row.leg_b))): float(row.rho)
         for row in slice_df.itertuples(index=False)
     }
-
-
-def _leg_key(leg: Mapping) -> str:
-    """Canonical correlation-slice key for a leg: ``Player|Market|Bet``."""
-    return f"{leg['Player']}|{leg['Market']}|{leg['Bet']}"
 
 
 def slip_headline(legs: Sequence[Mapping], offers: pd.DataFrame, ctxs: Mapping) -> str:

@@ -5,12 +5,23 @@ prediction layer produces those strings — and is re-exported here for the
 dashboard surfaces that import it from this module.
 """
 
+from collections.abc import Mapping
+
 import pandas as pd
 
 from sportstradamus.helpers import stat_map
 from sportstradamus.prediction.stories import parse_leg
 
-__all__ = ["find_offer_idx", "parse_leg"]
+__all__ = ["corr_key", "find_offer_idx", "parse_leg"]
+
+
+def corr_key(leg: Mapping) -> str:
+    """Canonical correlation-slice key for a leg: ``Player|Market|Bet``.
+
+    Matches ``current_game_corr``'s ``leg_a``/``leg_b`` keys so the slip engine
+    and the constellation share one key format (no duplicate clone of it).
+    """
+    return f"{leg['Player']}|{leg['Market']}|{leg['Bet']}"
 
 
 def _candidate_markets(market: str, platform: str | None) -> set[str]:

@@ -8,8 +8,10 @@ from sportstradamus.dashboard.data import (
     format_ts,
     load_current_meta,
     load_current_offers,
+    load_current_parlays,
     sport_filtered,
 )
+from sportstradamus.dashboard.narrative import top_thesis
 
 st.title("Tonight")
 
@@ -18,6 +20,7 @@ generated = format_ts(meta.get("generated_at", "no run on record"))
 st.caption(f"Last updated: {generated}")
 
 offers = sport_filtered(load_current_offers())
+parlays = load_current_parlays()
 
 if offers.empty:
     st.info("No current predictions. Run `poetry run prophecize` to generate offers.")
@@ -42,11 +45,14 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
 
     offer_count = len(group)
     top_ev = group["Model EV"].max() if "Model EV" in group.columns else None
+    headline = top_thesis(parlays, game=group["Game"].iloc[0], date=date_raw)
 
     with st.container(border=True):
         left, right = st.columns([4, 1])
         with left:
             st.markdown(f"**{team} vs {opponent}**  ·  {league}")
+            if headline:
+                st.markdown(headline)
             if lock_time:
                 st.caption(lock_time)
             st.caption(f"{offer_count} offer{'s' if offer_count != 1 else ''}")
@@ -57,7 +63,9 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
             # Date keeps doubleheaders distinct; format must match game.py's labels.
             game_param = f"{game_label} · {date_raw}" if date_raw else game_label
             if st.button("View game", key=f"tonight_{league}_{date_raw}_{game_label}"):
-                st.query_params["game"] = game_param
+                # switch_page drops query params set the same run; hand off via
+                # session state and let game.py read it first (?game= is the deep link).
+                st.session_state["nav_game"] = game_param
                 st.switch_page("surfaces/game.py")
 
 st.caption("Prophecies arrive with the next data wave.")

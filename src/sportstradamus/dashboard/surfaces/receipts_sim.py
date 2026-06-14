@@ -229,7 +229,7 @@ fig_bank.update_layout(
     height=500,
     title="Cumulative Bankroll (Monte Carlo Mean with 10th-90th Percentile Band)",
 )
-st.plotly_chart(fig_bank, use_container_width=True)
+st.plotly_chart(fig_bank, width="stretch")
 
 st.subheader("Strategy Summary")
 summary_rows = []
@@ -247,7 +247,7 @@ for name, result in all_results.items():
     )
 
 summary_df = pd.DataFrame(summary_rows)
-st.dataframe(summary_df, use_container_width=True, hide_index=True)
+st.dataframe(summary_df, width="stretch", hide_index=True)
 
 st.subheader("Daily P&L")
 selected_strategy = st.selectbox("Strategy", list(all_results.keys()), key="pnl_strategy")
@@ -264,7 +264,7 @@ if selected_strategy in all_results:
         labels={"date": "Date", "daily_pnl": "Daily P&L ($)"},
     )
     fig_pnl.update_layout(height=400, showlegend=False)
-    st.plotly_chart(fig_pnl, use_container_width=True)
+    st.plotly_chart(fig_pnl, width="stretch")
 
 st.subheader("Drawdown Over Time")
 if selected_strategy in all_results:
@@ -287,7 +287,7 @@ if selected_strategy in all_results:
         color_discrete_sequence=["#e74c3c"],
     )
     fig_dd.update_layout(height=350, yaxis_tickformat=".0%")
-    st.plotly_chart(fig_dd, use_container_width=True)
+    st.plotly_chart(fig_dd, width="stretch")
 
 st.download_button(
     "Export simulation results (CSV)",

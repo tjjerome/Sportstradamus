@@ -39,7 +39,7 @@ from sportstradamus.prediction.parlay import (
 )
 from sportstradamus.prediction.stories.context import GameCtx, ctxs_from_frame
 from sportstradamus.prediction.stories.engine import thesis_variants
-from sportstradamus.prediction.stories.legs import enrich_legs, parse_leg
+from sportstradamus.prediction.stories.legs import enrich_legs, parse_leg, validate_parlay_legs
 
 # A leg qualifies as a story seed when its per-$1 model EV clears this edge — the
 # same 0.05 the unit-thesis gate and per-offer "why" already use.
@@ -99,9 +99,15 @@ def _stories_for_game(
     edge = _strong_legs(sctx)
     if len(edge) < 2:
         return []
+    # Whole-game gate: only when the model's edge is entirely one-sided may a story
+    # be a single-team preset (the user completes it with a satellite leg). A game
+    # with edge on both teams still requires both-teams presets.
+    require_both = (
+        len({sctx.bet_df[i].get("Team") for i in edge if sctx.bet_df[i].get("Team")}) >= 2
+    )
     scored = []
     for cluster in _cluster_strong_legs(edge, sctx.g.C):
-        builder, moon = _best_subsets(cluster, sctx)
+        builder, moon = _best_subsets(cluster, sctx, require_both_teams=require_both)
         if builder is not None:
             scored.append((cluster, builder, moon))
     scored.sort(
@@ -173,18 +179,24 @@ def _grow_cluster(
 
 
 def _best_subsets(
-    cluster: Sequence[int], sctx: GameScoringContext
+    cluster: Sequence[int], sctx: GameScoringContext, *, require_both_teams: bool = True
 ) -> tuple[dict | None, dict | None]:
     """The (Builder, Moon) parlays for one cluster, or (None, None) if degenerate.
 
-    Phase 1 ranks every subset by a pure-numpy independent-joint proxy; phase 2
-    exact-scores only the shortlist (top-K by each objective ∪ all cheap Power
-    subsets) through the copula scorer.
+    Only **valid** parlays are enumerated, so the Builder/Moon picks are valid by
+    construction. With ``require_both_teams`` (a two-team game) a one-team cluster
+    yields ``(None, None)``; a one-sided game relaxes that, so its single-team
+    cluster still produces a preset. Phase 1 ranks every candidate by a pure-numpy
+    independent-joint proxy; phase 2 exact-scores only the shortlist (top-K by each
+    objective ∪ all cheap Power subsets) through the copula scorer.
     """
     proxies = [
         (combo, *_independent(combo, sctx))
         for size in range(2, min(len(cluster), sctx.max_size) + 1)
         for combo in combinations(cluster, size)
+        if validate_parlay_legs(
+            [sctx.bet_df[i] for i in combo], require_both_teams=require_both_teams
+        )[0]
     ]
     if not proxies:
         return None, None

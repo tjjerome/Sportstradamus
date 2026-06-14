@@ -108,11 +108,27 @@ Altair / Vega-Lite inherit these automatically.
 
 ## 4a. Signature element — the constellation
 
-Correlation rendered as a star map: legs/players are stars (gold for thesis legs, gray for
-context), pairwise correlation |ρ| is the edge weight (opacity/width), and the viewer reads "these
-picks rise together" at a glance. This is the one piece of decoration that *is* data — use it on
-Game pages and parlay detail, keep it on `backgroundColor`, and never let it crowd a table. It is
-the brand's signature; treat its grammar (star = leg, edge = correlation) as FIXED.
+Correlation rendered as a star map, and the slip editor's primary control. Each leg is a star
+**filled with its team's color** (the two sides of the matchup read at a glance) and **sized by
+its model edge** (the strongest legs read biggest). The map is **static per game** — its stars are
+the game's model-liked legs, fixed in place; selecting a leg never moves a star, it only lights it
+up. A leg in the slip burns at **full color and opacity**; a candidate is the same color
+**desaturated toward gray and dimmed** — selection is alpha + saturation, never an outline (a gold
+ring read as a team color). Pairwise correlation |ρ| is the edge weight (gold, opacity/width ∝ |ρ|,
+dashed when ρ < 0 — "fights the thesis"); an edge stays hidden until one of its stars is in the
+slip and faintly previews on hover, so the clutter scales with the slip, not the game.
+Layout is **team-anchored force-directed**: each team's most-connected leg is pinned to its side,
+the correlation edges place the rest, so a cross-matchup leg floats toward the centre and an
+unrepresented side leaves its half empty (the both-teams parlay rule, made visual). Legs from
+*other* games never become stars here — the map stays one game; a single-sided game reaches its
+second team through a separate satellite section beside the map, never by crowding the constellation.
+In the editor the map is interactive — click a star to add or remove its leg, and hover a star for a card (its
+read plus a **Full detail** link into the offer dialog, slip preserved) — with the modebar and
+zoom/pan off (it's a map, not a chart). This is the one piece of decoration that *is* data: use it on the slip
+editor, Game pages, and parlay detail, keep it on `backgroundColor`, never let it crowd a table. It
+is the brand's signature; treat its grammar — star = leg, **fill = team**, **size = edge**,
+**brightness = in the slip**, edge = correlation — as FIXED. Team fills are an on-token placeholder
+(`chartCategoricalColors`) until `team_assets.json` (P8).
 
 ## 5. Iconography
 
