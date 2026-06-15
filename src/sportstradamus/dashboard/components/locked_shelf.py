@@ -16,7 +16,7 @@ from collections.abc import Mapping
 import pandas as pd
 import streamlit as st
 
-from sportstradamus.dashboard.components.slip_builder import bankroll_input, load_slip
+from sportstradamus.dashboard.components.slip_state import bankroll_input, load_slip
 from sportstradamus.dashboard.data import load_current_offers, load_user_slips
 from sportstradamus.helpers.io import delete_user_slip
 

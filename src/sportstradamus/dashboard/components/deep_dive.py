@@ -44,9 +44,9 @@ def render_offer_card(row: Mapping) -> None:
     the last-5 line are scarred placeholders, matching the constellation card: the
     offer snapshot carries no player-id or gamelog columns to fill them yet.
     """
-    win = float(row.get("Model P", 0.0) or 0.0)
+    win = float(row.get("Win Prob", 0.0) or 0.0)
     boost = float(row.get("Boost", 1.0) or 1.0)
-    kelly = float(row.get("K", 0.0) or 0.0)
+    kelly = float(row.get("Kelly", 0.0) or 0.0)
     st.markdown(f":material/account_circle: **{row['Player']}**")
     st.caption(f"{row['Bet']} {float(row['Line']):.10g} {row['Market']}")
     st.markdown(f"Win **{win:.0%}** · **{boost:.2f}×** · Kelly **{kelly:.0%}**")
@@ -136,7 +136,7 @@ def _render_history_tab(row: pd.Series) -> None:
 
 def _render_model_tab(row: pd.Series) -> None:
     dist = row.get("Dist")
-    ev = row.get("Model EV")
+    ev = row.get("Projection")
     cv = row.get("CV")
     line = row.get("Line")
     if not (pd.notna(dist) and pd.notna(ev) and pd.notna(cv)):
@@ -146,7 +146,7 @@ def _render_model_tab(row: pd.Series) -> None:
     params = {
         param: row.get(col) for col, param in DIST_PARAM_COLS.items() if pd.notna(row.get(col))
     }
-    std = row.get("Model STD") or ev * 0.3
+    std = row.get("Projection STD") or ev * 0.3
     try:
         df_pdf, y_title, is_continuous = distribution_frame(dist, ev, std, params, line)
         chart = distribution_chart(df_pdf, is_continuous, line, row["Market"], y_title)

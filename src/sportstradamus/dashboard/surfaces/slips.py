@@ -5,11 +5,9 @@ from decimal import Decimal
 import pandas as pd
 import streamlit as st
 
-from sportstradamus.dashboard.components.slip_builder import (
-    render_constellation_builder,
-    seed_from_legs,
-    seed_from_story,
-)
+from sportstradamus.dashboard.components.grid import render_themed_grid
+from sportstradamus.dashboard.components.slip_builder import render_constellation_builder
+from sportstradamus.dashboard.components.slip_state import seed_from_legs, seed_from_story
 from sportstradamus.dashboard.data import (
     format_ts,
     load_current_game_context,
@@ -29,6 +27,19 @@ from sportstradamus.strategies.kelly import fractional_kelly_stake
 VARIANT_LABELS = {"power": "Power", "flex": "Flex", "rivals": "Rivals"}
 # Default bankroll if the global slip-state key hasn't been touched yet.
 _DEFAULT_BANKROLL = 1000.0
+
+# Pick'em themed-grid geometry: header + per-row pixel heights, capped so a long slate
+# scrolls inside the grid instead of stretching the page.
+_PICKEM_ROW_PX = 32
+_PICKEM_HEADER_PX = 56
+_PICKEM_MAX_GRID_HEIGHT = 420
+_PICKEM_HELP = {
+    "Size": "Number of legs in the entry.",
+    "Joint P": "Modeled probability all legs hit.",
+    "Payout": "Entry payout multiplier on a win.",
+    "EV %": "Entry expected value: +5% means $1 returns $1.05 on average.",
+    "Stake": "Quarter-Kelly stake scaled to your bankroll.",
+}
 
 
 def _compute_stake(row: pd.Series, bankroll: float) -> float:
@@ -94,19 +105,24 @@ def _render_pickem(entries: pd.DataFrame, offers: pd.DataFrame) -> None:
         if group.empty:
             continue
         st.subheader(f"{label} — {len(group)} entries, ${group['Stake'].sum():,.2f} staked")
-        st.dataframe(
-            pd.DataFrame(
-                {
-                    "Legs": group["legs"].apply("  +  ".join),
-                    "Size": group["entry_size"],
-                    "Joint P": group["joint_prob"].map("{:.1%}".format),
-                    "Payout": group["payout_multiplier"].map("{:.2f}x".format),
-                    "EV": group["ev"].map("{:+.1%}".format),
-                    "Stake": group["Stake"].map("${:,.2f}".format),
-                }
-            ),
-            hide_index=True,
-            width="stretch",
+        grid_df = pd.DataFrame(
+            {
+                "Legs": group["legs"].apply("  +  ".join),
+                "Size": group["entry_size"].astype(int),
+                "Joint P": group["joint_prob"].map("{:.1%}".format),
+                "Payout": group["payout_multiplier"].map("{:.2f}x".format),
+                "EV %": (group["ev"] * 100).round(1),
+                "Stake": group["Stake"].map("${:,.2f}".format),
+            }
+        )
+        render_themed_grid(
+            grid_df,
+            numeric_cols=["Size", "Joint P", "Payout", "EV %", "Stake"],
+            heatmap_col="EV %",
+            heatmap_center=0.0,
+            header_help=_PICKEM_HELP,
+            height=min(_PICKEM_MAX_GRID_HEIGHT, _PICKEM_HEADER_PX + _PICKEM_ROW_PX * (len(group) + 1)),
+            key=f"pickem_grid_{variant}",
         )
     _render_pickem_loader(view, offers)
 

@@ -48,18 +48,18 @@ def satellite_groups(
     if offers.empty:
         return []
     pool = offers[
-        (offers["Platform"] == platform) & (offers["Game"] != focus_game) & (offers["K"] > 0)
+        (offers["Platform"] == platform) & (offers["Game"] != focus_game) & (offers["Kelly"] > 0)
     ]
     groups: list[tuple[str, list[dict]]] = []
     for game, block in pool.groupby("Game", sort=False):
         rows = [
             row
-            for row in block.sort_values("K", ascending=False).to_dict("records")
+            for row in block.sort_values("Kelly", ascending=False).to_dict("records")
             if corr_key(row) not in exclude_keys
         ]
         if rows:
             groups.append((str(game), rows[:_PER_GAME_CAP]))
-    groups.sort(key=lambda g: float(g[1][0]["K"]), reverse=True)
+    groups.sort(key=lambda g: float(g[1][0]["Kelly"]), reverse=True)
     return groups
 
 

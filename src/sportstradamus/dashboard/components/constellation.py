@@ -81,9 +81,9 @@ def star_label(leg: Mapping) -> str:
 
 
 def _hover_text(leg: Mapping) -> str:
-    p = float(leg.get("Model P", 0.0) or 0.0)
+    p = float(leg.get("Win Prob", 0.0) or 0.0)
     boost = float(leg.get("Boost", 1.0) or 1.0)
-    k = float(leg.get("K", 0.0) or 0.0)
+    k = float(leg.get("Kelly", 0.0) or 0.0)
     head = f"{leg['Player']} — {leg['Market']} {_bet_word(leg['Bet'])} {float(leg['Line']):.10g}"
     return f"{head}<br>Win {p:.0%} · {boost:.2f}x · Kelly {k:.0%}"
 
@@ -95,9 +95,9 @@ def _card_fields(leg: Mapping) -> list:
         str(leg["Market"]),
         _bet_word(leg["Bet"]),
         float(leg["Line"]),
-        float(leg.get("Model P", 0.0) or 0.0),
+        float(leg.get("Win Prob", 0.0) or 0.0),
         float(leg.get("Boost", 1.0) or 1.0),
-        float(leg.get("K", 0.0) or 0.0),
+        float(leg.get("Kelly", 0.0) or 0.0),
     ]
 
 
@@ -105,7 +105,7 @@ def _node_info(leg: Mapping) -> dict:
     return {
         "label": star_label(leg),
         "team": leg.get("Team"),
-        "edge": float(leg.get("K", 0.0) or 0.0),
+        "edge": float(leg.get("Kelly", 0.0) or 0.0),
         "hover": _hover_text(leg),
         "card": _card_fields(leg),
     }
@@ -160,7 +160,7 @@ def _universe(pool: pd.DataFrame | None, slip_legs: Sequence[Mapping]) -> dict[s
     info: dict[str, dict] = {}
     if pool is not None and not pool.empty:
         for row in pool.to_dict("records"):
-            if float(row.get("K", 0.0) or 0.0) > 0:
+            if float(row.get("Kelly", 0.0) or 0.0) > 0:
                 info.setdefault(corr_key(row), _node_info(row))
     for leg in slip_legs:
         info.setdefault(corr_key(leg), _node_info(leg))

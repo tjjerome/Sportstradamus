@@ -56,6 +56,19 @@ def test_config_toml_carries_fixed_identity() -> None:
         assert _BANNED_FONT.search(t[key]) is None, f"{key} uses an overused font"
 
 
+def test_diverging_ramp_mirrors_config() -> None:
+    """theme.DIVERGING_COLORS is the non-Streamlit mirror of config.toml chartDivergingColors.
+
+    Runtime grid code (components/grid.py) bakes the diverging heatmap ramp from
+    theme.DIVERGING_COLORS without a TOML read, so it must stay byte-equal to the config.
+    """
+    from sportstradamus.dashboard.theme import DIVERGING_COLORS
+
+    assert _theme()["chartDivergingColors"] == DIVERGING_COLORS, (
+        "dashboard/theme.DIVERGING_COLORS drifted from config.toml chartDivergingColors"
+    )
+
+
 def test_design_md_present_with_rules() -> None:
     text = (_REPO / "DESIGN.md").read_text(encoding="utf-8")
     for needle in ("Design tokens (FIXED", "## 6. NEVER", "FIXED vs FLEXIBLE"):

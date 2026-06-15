@@ -30,8 +30,8 @@ def _leg(player, market, bet, line, p, boost, game, push=0.0):
         "Market": market,
         "Bet": bet,
         "Line": line,
-        "Model P": p,
-        "Push P": push,
+        "Win Prob": p,
+        "Push Prob": push,
         "Boost": boost,
         "Game": game,
     }

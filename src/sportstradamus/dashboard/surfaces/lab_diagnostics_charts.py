@@ -35,7 +35,7 @@ def sharpness_histogram(sharp_subset: pd.DataFrame, prob_col: str) -> go.Figure:
         facet_col="Market",
         facet_col_wrap=4,
         nbins=20,
-        labels={prob_col: "Model P"},
+        labels={prob_col: "Win Prob"},
         title="Distribution of predicted probabilities per market",
     )
     fig.update_layout(height=600)

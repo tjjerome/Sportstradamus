@@ -70,11 +70,11 @@ def score_slip(
 ) -> SlipScore:
     """Price a user slip by reusing the parlay copula scorer.
 
-    ``legs`` are snapshotted leg dicts (``Model P``/``Push P``/``Boost``/``Game``
+    ``legs`` are snapshotted leg dicts (``Win Prob``/``Push Prob``/``Boost``/``Game``
     + ``Player|Market|Bet`` fields); ``corr`` is the ``current_game_corr`` slice.
     """
     n = len(legs)
-    p = np.clip(np.array([float(leg["Model P"]) for leg in legs]), _PROB_EPS, 1 - _PROB_EPS)
+    p = np.clip(np.array([float(leg["Win Prob"]) for leg in legs]), _PROB_EPS, 1 - _PROB_EPS)
     indep_p = float(np.prod(p))
     play_type, full_payouts, base, payout_approximate = _platform_pricing(platform, n)
     if n < 2 or base <= 0.0:
@@ -84,7 +84,7 @@ def score_slip(
     joint_p = float(multivariate_normal.cdf(norm.ppf(p), np.zeros(n), sig))
     boost = float(np.prod([float(leg["Boost"]) for leg in legs]))
     payout = float(np.clip(boost * base, _PAYOUT_CLIP_LO, _PAYOUT_CLIP_HI))
-    push = np.array([float(leg.get("Push P", 0.0) or 0.0) for leg in legs])
+    push = np.array([float(leg.get("Push Prob", 0.0) or 0.0) for leg in legs])
     model_ev = float(_parlay_payout_prob(p, push, sig, n, boost, payout, full_payouts, base, False))
     kelly_win = model_ev / payout if payout > 0 else 0.0
     stake = fractional_kelly_stake(
