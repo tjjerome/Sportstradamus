@@ -10,7 +10,7 @@ from sportstradamus.dashboard.data import (
     load_current_parlays,
     sport_filtered,
 )
-from sportstradamus.dashboard.narrative import top_thesis
+from sportstradamus.dashboard.narrative import home_away, top_thesis
 
 st.title("Tonight")
 
@@ -26,8 +26,10 @@ if offers.empty:
     st.caption("Prophecies arrive with the next data wave.")
     st.stop()
 
-game_key_cols = [c for c in ["League", "Date", "Team", "Opponent"] if c in offers.columns]
-if not game_key_cols:
+# Group on the canonical Game key (not Team/Opponent) so a matchup's two
+# per-team orderings collapse to one card.
+game_key_cols = [c for c in ["League", "Date", "Game"] if c in offers.columns]
+if "Game" not in offers.columns:
     st.info("Offer data missing game grouping columns.")
     st.stop()
 
@@ -37,9 +39,8 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
     key_dict = dict(zip(game_key_cols, game_key, strict=False))
 
     league = key_dict.get("League", "")
-    team = key_dict.get("Team", "")
-    opponent = key_dict.get("Opponent", "")
     date_raw = key_dict.get("Date", "")
+    home, away = home_away(group)
     lock_time = format_ts(str(date_raw)) if date_raw else ""
 
     offer_count = len(group)
@@ -49,7 +50,7 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
     with st.container(border=True):
         left, right = st.columns([4, 1])
         with left:
-            st.markdown(f"**{team} vs {opponent}**  ·  {league}")
+            st.markdown(f"**{home} vs {away}**  ·  {league}")
             if headline:
                 st.markdown(headline)
             if lock_time:
@@ -58,15 +59,15 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
             if top_ev is not None and pd.notna(top_ev):
                 st.caption(f"Top edge: {top_ev:+.2f}")
         with right:
-            game_label = f"{team} vs {opponent}"
-            # Date keeps doubleheaders distinct; format must match the Slips
-            # game-seed labels.
+            game_label = f"{home} vs {away}"
+            # Date keeps doubleheaders distinct; format must match the Games
+            # page's game-picker labels.
             game_param = f"{game_label} · {date_raw}" if date_raw else game_label
             if st.button("View game", key=f"tonight_{league}_{date_raw}_{game_label}"):
                 # switch_page drops query params set the same run; hand off via
-                # session state and let the Slips game-seed read it first (?game=
+                # session state and let the Games picker read it first (?game=
                 # is the deep link).
                 st.session_state["nav_game"] = game_param
-                st.switch_page("surfaces/slips.py")
+                st.switch_page("surfaces/games.py")
 
 st.caption("Prophecies arrive with the next data wave.")

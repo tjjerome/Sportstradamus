@@ -26,7 +26,8 @@ from sportstradamus.helpers.io import (
 from sportstradamus.prediction.stories import STORIES_VERSION
 
 # Display columns kept in current_offers.parquet. The dashboard reads:
-# - Offer details: League, Date, Team, Opponent, Game (canonical matchup key),
+# - Offer details: League, Date, Team, Opponent, Home (is Team the host — orders the
+#   "{home} vs {away}" matchup label), Game (canonical matchup key),
 #   Player, Market, Platform, Bet, Line, Boost
 # - Scoring: Win Prob (hit probability), Model EV (edge), Market EV, Projection (stat mean),
 #   Kelly, Projection STD, Push Prob
@@ -43,6 +44,7 @@ _OFFER_KEEP_COLS = [
     "Date",
     "Team",
     "Opponent",
+    "Home",
     "Game",
     "Player",
     "Market",

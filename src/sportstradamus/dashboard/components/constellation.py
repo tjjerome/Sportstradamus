@@ -129,9 +129,10 @@ def constellation_figure(
         return fig
     keys = sorted(info)
     active = {corr_key(leg) for leg in slip_legs} & set(keys)
-    rho = _rho_map(corr, _slip_game(slip_legs))
+    game = _game_of(pool, slip_legs)
+    rho = _rho_map(corr, game)
 
-    teams = _game_teams(slip_legs)
+    teams = _teams_of(game)
     team_color = {team: _TEAM_PALETTE[i % len(_TEAM_PALETTE)] for i, team in enumerate(teams)}
     node_team = {k: info[k]["team"] for k in keys}
     edges = _edges(keys, rho)
@@ -192,7 +193,15 @@ def _blank_figure() -> go.Figure:
     return fig
 
 
-def _slip_game(slip_legs: Sequence[Mapping]) -> str:
+def _game_of(pool: pd.DataFrame | None, slip_legs: Sequence[Mapping]) -> str:
+    """The matchup this map draws — read from the candidate ``pool`` so the layout is
+    static per game and the field renders before any leg is picked; falls back to the
+    slip's game when there is no pool (e.g. an active leg whose offer has expired).
+    """
+    if pool is not None and not pool.empty and "Game" in pool.columns:
+        games = pool["Game"].dropna()
+        if not games.empty:
+            return str(games.iloc[0])
     for leg in slip_legs:
         game = leg.get("Game")
         if game:
@@ -200,9 +209,8 @@ def _slip_game(slip_legs: Sequence[Mapping]) -> str:
     return ""
 
 
-def _game_teams(slip_legs: Sequence[Mapping]) -> list[str]:
+def _teams_of(game: str) -> list[str]:
     """The matchup's two team codes, sorted — the two anchored sides."""
-    game = _slip_game(slip_legs)
     return sorted(set(game.split("/"))) if game else []
 
 
