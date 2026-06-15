@@ -2,8 +2,8 @@
 
 Builds a deterministic 1-2 clause sentence per offer row from columns already on
 ``current_offers``. ``Avg 5`` / ``Avg H2H`` are stored as average-minus-line
-deviations; the edge clause prefers explicit ``Model P`` vs ``Books P`` and falls
-back to the model/book EV multiples (payout x, > 1.0 is +EV).
+deviations; the edge clause prefers explicit ``Win Prob`` vs ``Market Prob`` and falls
+back to the model/book EV multiples (``Model EV`` / ``Market EV``, payout x where > 1.0 is +EV).
 """
 
 import pandas as pd

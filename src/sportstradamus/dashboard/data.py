@@ -373,7 +373,7 @@ def get_filtered_history(
     """Explode offers and apply sidebar filters.
 
     Returns a per-offer DataFrame with columns: all prediction-level cols +
-    Line, Boost, Platform, Bet, Model P, Books P, Result, Hit, Model, Books, K.
+    Line, Boost, Platform, Bet, Win Prob, Market Prob, Result, Hit, Model EV, Market EV, Kelly.
     """
     df = explode_offers(history)
     if df.empty:
@@ -392,7 +392,7 @@ def get_filtered_history(
         df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
         df = df.loc[(df["_date"] >= date_range[0]) & (df["_date"] <= date_range[1])]
     if min_model_p is not None:
-        prob_col = "Model P" if "Model P" in df.columns and df["Model P"].notna().any() else "Model"
+        prob_col = "Win Prob" if "Win Prob" in df.columns and df["Win Prob"].notna().any() else "Model EV"
         df = df.loc[df[prob_col] >= min_model_p]
 
     return df

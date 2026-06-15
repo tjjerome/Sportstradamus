@@ -162,8 +162,8 @@ def _migrate_flat_history(history):
     """Convert old flat history schema (one row per offer) to normalized schema.
 
     Groups by (Player, League, Date, Market) and collects per-offer columns
-    into an Offers list of 9-tuples: (Line, Boost, Platform, Bet, ModelP, BooksP,
-    CloseMarketProb, MarketCLV, ModelCLV). The trailing three are NaN-padded for
+    into an Offers list of 9-tuples: (Line, Boost, Platform, Bet, Win Prob, Market Prob,
+    Close Market Prob, Market CLV, Model CLV). The trailing three are NaN-padded for
     pre-CLV rows; ``reflect`` populates them from the archive on resolution.
     """
     pred_cols = [*PREDICTION_LEVEL_COLS, "Actual"]

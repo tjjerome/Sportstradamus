@@ -44,7 +44,7 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
     lock_time = format_ts(str(date_raw)) if date_raw else ""
 
     offer_count = len(group)
-    top_ev = group["Model EV"].max() if "Model EV" in group.columns else None
+    top_ev = group["Projection"].max() if "Projection" in group.columns else None
     headline = top_thesis(parlays, game=group["Game"].iloc[0], date=date_raw)
 
     with st.container(border=True):

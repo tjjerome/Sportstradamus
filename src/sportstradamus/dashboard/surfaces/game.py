@@ -3,7 +3,7 @@
 import pandas as pd
 import streamlit as st
 
-from sportstradamus.dashboard.components.slip_builder import seed_from_legs
+from sportstradamus.dashboard.components.slip_state import seed_from_legs
 from sportstradamus.dashboard.data import (
     format_ts,
     load_current_game_context,
@@ -71,7 +71,7 @@ else:
 
 display_cols = [
     c
-    for c in ["Player", "Market", "Bet", "Line", "Model EV", "Model", "Books", "Platform"]
+    for c in ["Player", "Market", "Bet", "Line", "Projection", "Model EV", "Market EV", "Platform"]
     if c in game_offers.columns
 ]
 st.dataframe(game_offers[display_cols], width="stretch", hide_index=True)
@@ -84,7 +84,7 @@ if build_platforms:
     leg_rows = {
         f"{r['Player']} {r['Bet']} {float(r['Line']):.10g} {r['Market']}": r
         for r in pool.to_dict("records")
-        if pd.notna(r.get("Model P"))
+        if pd.notna(r.get("Win Prob"))
     }
     picks = st.multiselect(
         "Legs (same game → constellation)", list(leg_rows), key="game_build_legs"

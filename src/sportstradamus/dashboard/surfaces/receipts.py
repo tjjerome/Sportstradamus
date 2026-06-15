@@ -50,7 +50,7 @@ if history.empty:
 filters = sidebar_filters(history, parlays, key_prefix="overview_")
 df = filtered_history_or_stop(history, filters)
 
-prob_col = "Model P" if "Model P" in df.columns and df["Model P"].notna().any() else "Model"
+prob_col = "Win Prob" if "Win Prob" in df.columns and df["Win Prob"].notna().any() else "Model EV"
 df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
 df["Hit"] = (df["Bet"] == df["Result"]).astype(int)
 df["Profit Unit"] = df["Hit"] * _JUICE_PAYOUT - (1 - df["Hit"])

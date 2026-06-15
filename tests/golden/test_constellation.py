@@ -34,8 +34,8 @@ def _row(i: int, key: str, k: float) -> dict:
         "Line": 10.5,
         "Game": "NYK/SAS",
         "Team": _TEAMS[i % 2],
-        "K": k,
-        "Model P": 0.6,
+        "Kelly": k,
+        "Win Prob": 0.6,
         "Boost": 1.5,
     }
 

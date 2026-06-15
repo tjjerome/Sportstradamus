@@ -2,13 +2,12 @@
 
 import pandas as pd
 import streamlit as st
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
+from sportstradamus.dashboard import columns
 from sportstradamus.dashboard.components.deep_dive import init_detail_state, show_detail
-from sportstradamus.dashboard.components.slip_builder import (
-    add_to_simple_slip,
-    render_simple_builder,
-)
+from sportstradamus.dashboard.components.grid import render_themed_grid
+from sportstradamus.dashboard.components.slip_builder import render_simple_builder
+from sportstradamus.dashboard.components.slip_state import add_to_simple_slip
 from sportstradamus.dashboard.data import (
     format_ts,
     load_current_game_corr,
@@ -17,6 +16,7 @@ from sportstradamus.dashboard.data import (
     render_banner,
     sport_filtered,
 )
+from sportstradamus.dashboard.lenses import LENSES, apply_lens
 
 st.title("Today's Predictions")
 
@@ -33,15 +33,6 @@ if offers.empty:
     )
     st.stop()
 
-# Hot-row highlight: model EV > this and books P > this and boost below ceiling
-# qualifies a row for the blue background. Tuned empirically vs bankroll ROI.
-EV_HOT_THRESHOLD = 1.02
-BOOKS_HOT_THRESHOLD = 0.95
-# Boosted rows above this ceiling signal a line move, not genuine edge.
-BOOST_HOT_CEILING = 2.5
-HIGHLIGHT_BG = "#1f4e79"
-
-# Main table columns
 MAIN_COLS = [
     "League",
     "Date",
@@ -52,19 +43,22 @@ MAIN_COLS = [
     "Bet",
     "Line",
     "Boost",
-    "Model P",
-    "Model",
-    "Books",
+    "Win Prob",
+    "Edge",
+    "Kelly",
+    "Model EV",
+    "Market EV",
     "Platform",
 ]
 
-# Numeric columns for range filtering
-RANGE_COLS = ["Model P", "Model", "Books"]
+RANGE_COLS = ["Win Prob", "Model EV", "Market EV"]
 
-signal_cols = [c for c in ["Boost", "Model", "Books"] if c in offers.columns]
+signal_cols = [c for c in ["Boost", "Model EV", "Market EV"] if c in offers.columns]
 if signal_cols:
     signal = offers[signal_cols].fillna(0)
     offers = offers.loc[(signal != 0).any(axis=1)]
+
+lens = st.segmented_control("Prophecy lens", list(LENSES), default="All", key="board_lens") or "All"
 
 col1, col2, col3 = st.columns(3)
 with col1:
@@ -79,7 +73,7 @@ with col3:
 
 player_query = st.text_input("Player search", placeholder="e.g. Jokic")
 
-filtered = offers
+filtered = apply_lens(offers, lens)
 if selected_leagues:
     filtered = filtered.loc[filtered["League"].isin(selected_leagues)]
 if selected_platforms and "Platform" in filtered:
@@ -102,63 +96,46 @@ if range_cols:
         hi = float(series.max())
         if lo == hi:
             continue
-        sel = slot.slider(col, lo, hi, (lo, hi), step=(hi - lo) / 100 or 0.01)
+        sel = slot.slider(
+            columns.LABELS.get(col, col), lo, hi, (lo, hi), step=(hi - lo) / 100 or 0.01
+        )
         vals = pd.to_numeric(filtered[col], errors="coerce")
         filtered = filtered.loc[vals.between(sel[0], sel[1]) | vals.isna()]
 
-if "Model" in filtered.columns:
-    filtered = filtered.sort_values("Model", ascending=False)
+if "Model EV" in filtered.columns:
+    filtered = filtered.sort_values("Model EV", ascending=False)
 
 filtered = filtered.reset_index(drop=True)
 st.caption(f"Showing **{len(filtered):,}** of {len(offers):,} offers")
 
 init_detail_state()
 
+filtered = columns.add_edge(filtered)
 display_cols = [c for c in MAIN_COLS if c in filtered.columns]
 grid_df = filtered[display_cols].copy()
-format_cols = {"Boost": 2, "Model": 2, "Books": 2}
 
-if "Model P" in grid_df.columns:
-    grid_df["Model P"] = (grid_df["Model P"] * 100).apply(
+if "Win Prob" in grid_df.columns:
+    grid_df["Win Prob"] = (grid_df["Win Prob"] * 100).apply(
         lambda x: f"{x:.2f}%" if pd.notna(x) else ""
     )
-
-for col, decimals in format_cols.items():
+for col in ("Boost", "Edge", "Kelly", "Model EV", "Market EV"):
     if col in grid_df.columns:
-        grid_df[col] = grid_df[col].round(decimals)
+        grid_df[col] = pd.to_numeric(grid_df[col], errors="coerce").round(2)
+grid_df = grid_df.rename(columns=columns.LABELS)
 
-gb = GridOptionsBuilder.from_dataframe(grid_df)
-gb.configure_selection(selection_mode="single", use_checkbox=False)
-gb.configure_grid_options(rowStyle={"cursor": "pointer"})
-
-gb.configure_column(
-    "Model",
-    cellStyle={
-        "function": (
-            f"params.data.Model > {EV_HOT_THRESHOLD} && "
-            f"params.data.Books > {BOOKS_HOT_THRESHOLD} && "
-            f"params.data.Boost <= {BOOST_HOT_CEILING} "
-            f"? {{'backgroundColor': '{HIGHLIGHT_BG}', 'color': 'white'}} : {{}}"
-        )
-    },
-)
-
-go = gb.build()
-ag = AgGrid(
+numeric_cols = [
+    c
+    for c in ("Line", "Boost", "Win %", "Edge", "Kelly", "Model EV", "Market EV")
+    if c in grid_df.columns
+]
+selected_rows = render_themed_grid(
     grid_df,
-    gridOptions=go,
-    update_mode=GridUpdateMode.SELECTION_CHANGED,
-    fit_columns_on_grid_load=True,
-    height=720,
-    width="stretch",
+    numeric_cols=numeric_cols,
+    heatmap_col="Edge",
+    heatmap_center=0.0,
+    header_help=columns.HELP,
 )
-
-selected = ag.selected_rows
-# Newer streamlit-aggrid returns a DataFrame; older versions return a list.
-if isinstance(selected, pd.DataFrame):
-    selected_rows = selected.to_dict("records")
-else:
-    selected_rows = selected or []
+st.caption("Trend sparklines arrive with the L1 line-movement export.")
 
 if st.session_state.corr_nav:
     # Rerun from "View →" button — keep the stack as-is, just clear the flag.

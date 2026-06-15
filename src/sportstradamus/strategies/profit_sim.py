@@ -22,9 +22,9 @@ Public surface:
 Input DataFrame contract (from
 :func:`sportstradamus.dashboard.data.get_filtered_history`):
 the exploded per-offer frame, indexed by row, with columns
-``Player, Market, Platform, Boost, Model P, Books, Hit`` plus the
-``ranking`` column (``K`` / ``Model P`` / ``Model``) and the caller's
-``prob_col`` (defaults to ``Model P`` in the dashboard). A ``_date``
+``Player, Market, Platform, Boost, Win Prob, Market EV, Hit`` plus the
+``ranking`` column (``Kelly`` / ``Win Prob`` / ``Model EV``) and the caller's
+``prob_col`` (defaults to ``Win Prob`` in the dashboard). A ``_date``
 column is materialized inside the simulator from ``Date`` if absent.
 """
 

@@ -16,7 +16,7 @@ if _src_dir not in sys.path:
 import streamlit as st
 
 from sportstradamus.dashboard.components.locked_shelf import render_locked_shelf
-from sportstradamus.dashboard.components.slip_builder import init_slip_state
+from sportstradamus.dashboard.components.slip_state import init_slip_state
 
 st.set_page_config(page_title="Sportstradamus Dashboard", layout="wide")
 

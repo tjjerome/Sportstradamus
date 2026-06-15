@@ -65,7 +65,7 @@ filters = sidebar_filters(history, key_prefix="mkt_")
 
 df = filtered_history_or_stop(history, filters)
 
-prob_col = "Model P" if "Model P" in df.columns and df["Model P"].notna().any() else "Model"
+prob_col = "Win Prob" if "Win Prob" in df.columns and df["Win Prob"].notna().any() else "Model EV"
 df["Hit"] = (df["Bet"] == df["Result"]).astype(int)
 df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
 
@@ -147,7 +147,7 @@ if not market_df.empty:
     bias_df = bias_df.sort_values("Balance")
     st.plotly_chart(bias_bar(bias_df), width="stretch")
 
-st.subheader("Prediction Sharpness (Model P Distribution)")
+st.subheader("Prediction Sharpness (Win Prob Distribution)")
 selected_league = st.selectbox(
     "League for sharpness view", ["All", *sorted(df["League"].unique())], key="sharp_league"
 )
@@ -159,9 +159,9 @@ if not sharp_df.empty:
     st.plotly_chart(sharpness_histogram(sharp_subset, prob_col), width="stretch")
 
     sharpness_df = sharp_df.groupby("Market")[prob_col].std().reset_index()
-    sharpness_df.columns = ["Market", "Std(Model P)"]
-    sharpness_df = sharpness_df.sort_values("Std(Model P)")
-    low_sharp = sharpness_df.loc[sharpness_df["Std(Model P)"] < _LOW_SHARPNESS_STD]
+    sharpness_df.columns = ["Market", "Std(Win Prob)"]
+    sharpness_df = sharpness_df.sort_values("Std(Win Prob)")
+    low_sharp = sharpness_df.loc[sharpness_df["Std(Win Prob)"] < _LOW_SHARPNESS_STD]
     if not low_sharp.empty:
         st.warning(
             f"Low sharpness (std < {_LOW_SHARPNESS_STD}) — predictions cluster too tightly: "
@@ -169,9 +169,9 @@ if not sharp_df.empty:
         )
 
 st.subheader("Accuracy by Model-Book Divergence")
-if "Model EV" in df.columns and "Line" in df.columns:
-    ev_df = df.dropna(subset=["Model EV", "Line"]).copy()
-    ev_df["EV_Div"] = (ev_df["Model EV"] - ev_df["Line"]).abs() / ev_df["Line"].clip(lower=0.1)
+if "Projection" in df.columns and "Line" in df.columns:
+    ev_df = df.dropna(subset=["Projection", "Line"]).copy()
+    ev_df["EV_Div"] = (ev_df["Projection"] - ev_df["Line"]).abs() / ev_df["Line"].clip(lower=0.1)
     ev_df["Div_Bucket"] = pd.qcut(ev_df["EV_Div"], q=5, duplicates="drop")
     div_stats = (
         ev_df.groupby("Div_Bucket", observed=False)

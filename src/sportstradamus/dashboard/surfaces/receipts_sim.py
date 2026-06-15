@@ -40,12 +40,12 @@ if df.empty:
 df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
 df = df.loc[df["_date"].notna()]
 
-prob_col = "Model P" if "Model P" in df.columns and df["Model P"].notna().any() else "Model"
+prob_col = "Win Prob" if "Win Prob" in df.columns and df["Win Prob"].notna().any() else "Model EV"
 
-if "K" not in df.columns:
-    df["K"] = df[prob_col] * df.get("Boost", 1)
-if "Model" not in df.columns:
-    df["Model"] = df["Model P"] * df["Boost"]
+if "Kelly" not in df.columns:
+    df["Kelly"] = df[prob_col] * df.get("Boost", 1)
+if "Model EV" not in df.columns:
+    df["Model EV"] = df["Win Prob"] * df["Boost"]
 
 st.sidebar.header("Simulation Settings")
 tf_options = {"All time": None, "Last 30 days": 30, "3 months": 91, "6 months": 183, "1 year": 365}
@@ -133,8 +133,8 @@ initial_bankroll = st.sidebar.number_input(
 )
 
 with st.sidebar.expander("Custom Strategy"):
-    custom_min_p = st.slider("Min Model P", 0.50, 0.80, 0.60, 0.01, key="custom_min_p")
-    custom_min_books = st.slider("Min Books P", 0.45, 0.60, 0.52, 0.01, key="custom_min_books")
+    custom_min_p = st.slider("Min Win Prob", 0.50, 0.80, 0.60, 0.01, key="custom_min_p")
+    custom_min_books = st.slider("Min Market Prob", 0.45, 0.60, 0.52, 0.01, key="custom_min_books")
     custom_max_bets = st.slider("Max Bets/Day", 1, 50, 10, key="custom_max_bets")
     custom_sizing = st.slider("Bet Size (%)", 0.5, 5.0, 1.0, 0.5, key="custom_sizing")
     custom_kelly = st.toggle("Kelly Sizing", value=False, key="custom_kelly")

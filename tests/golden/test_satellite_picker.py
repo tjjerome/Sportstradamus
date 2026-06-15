@@ -16,8 +16,8 @@ from sportstradamus.dashboard.legs import corr_key
 def _offer(player, market, bet, line, game, team, platform, k):
     return {
         "Player": player, "Market": market, "Bet": bet, "Line": line,
-        "Game": game, "Team": team, "Platform": platform, "K": k,
-        "League": "NBA", "Date": "2026-06-14", "Model P": 0.6, "Boost": 2.0,
+        "Game": game, "Team": team, "Platform": platform, "Kelly": k,
+        "League": "NBA", "Date": "2026-06-14", "Win Prob": 0.6, "Boost": 2.0,
     }
 
 
@@ -53,7 +53,7 @@ def test_caps_per_game_and_ranks_games_by_best_edge():
     assert groups[0][0] == "DEN/LAL"                       # strongest single leg leads
     bos = dict(groups)["BOS/MIA"]
     assert len(bos) == _PER_GAME_CAP                       # capped per game
-    assert [r["K"] for r in bos] == sorted((r["K"] for r in bos), reverse=True)  # sorted by edge
+    assert [r["Kelly"] for r in bos] == sorted((r["Kelly"] for r in bos), reverse=True)  # sorted by edge
 
 
 def test_empty_when_no_other_game_qualifies():
