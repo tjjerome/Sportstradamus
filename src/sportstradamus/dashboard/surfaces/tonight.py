@@ -44,6 +44,14 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
     lock_time = format_ts(str(date_raw)) if date_raw else ""
 
     offer_count = len(group)
+    # Legs past the Kelly filter (Kelly > 0) — the model-liked picks the constellation
+    # draws as stars; deduped to distinct Player/Market/Bet across books and alt-lines.
+    kelly = pd.to_numeric(group["Kelly"], errors="coerce") if "Kelly" in group else None
+    liked_count = (
+        group.loc[kelly > 0].drop_duplicates(["Player", "Market", "Bet"]).shape[0]
+        if kelly is not None
+        else 0
+    )
     # Top edge = the best model edge vs the DFS payout in the game (Model EV − 1).
     edges = pd.to_numeric(group["Model EV"], errors="coerce") - 1 if "Model EV" in group else None
     top_edge = edges.max() if edges is not None and edges.notna().any() else None
@@ -57,7 +65,9 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
                 st.markdown(headline)
             if lock_time:
                 st.caption(lock_time)
-            st.caption(f"{offer_count} offer{'s' if offer_count != 1 else ''}")
+            st.caption(
+                f"{offer_count} offer{'s' if offer_count != 1 else ''} · {liked_count} model-liked"
+            )
             if top_edge is not None and pd.notna(top_edge):
                 st.caption(f"Top edge: {top_edge:+.1%}")
         with right:
