@@ -23,9 +23,11 @@ from sportstradamus.helpers.io import (
     CURRENT_GAME_CORR_PATH,
     CURRENT_GAME_STORIES_PATH,
     CURRENT_META_PATH,
+    CURRENT_OFFER_DETAILS_PATH,
     CURRENT_OFFERS_PATH,
     CURRENT_PARLAYS_PATH,
     HISTORY_PATH,
+    LIVE_METRICS_PATH,
     MODEL_STATS_PATH,
     PARLAY_HIST_PATH,
     USER_SLIPS_PATH,
@@ -246,6 +248,36 @@ def load_current_game_context() -> pd.DataFrame:
     return _load_current_game_context_cached(_mtime(CURRENT_GAME_CONTEXT_PATH))
 
 
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading offer details...")
+def _load_current_offer_details_cached(mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(CURRENT_OFFER_DETAILS_PATH)
+
+
+def load_current_offer_details() -> pd.DataFrame:
+    """Prerendered deep-dive detail rows from the latest ``prophecize`` snapshot.
+
+    One row per ``League, Date, Player, Market, Opponent`` with JSON-string
+    ``comps_vs_opp`` / ``volume_trend`` / ``other_stats`` columns the deep-dive
+    Comps and Other-stats tabs decode. Empty when the sidecar is absent.
+    """
+    return _load_current_offer_details_cached(_mtime(CURRENT_OFFER_DETAILS_PATH))
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading live metrics...")
+def _load_live_metrics_cached(mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(LIVE_METRICS_PATH)
+
+
+def load_live_metrics() -> pd.DataFrame:
+    """Per-cell live settlement metrics, one row per ``league, market, window_days``.
+
+    Written by ``nightly._compute_live_metrics``; carries ``precision_over_live`` /
+    ``precision_under_live`` / ``n_settled`` for the deep-dive market-trust panel.
+    Empty when no settled history exists yet.
+    """
+    return _load_live_metrics_cached(_mtime(LIVE_METRICS_PATH))
+
+
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
 def _load_user_slips_cached(mtime: float) -> pd.DataFrame:
     return read_user_slips()
@@ -381,7 +413,9 @@ def get_filtered_history(
         df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
         df = df.loc[(df["_date"] >= date_range[0]) & (df["_date"] <= date_range[1])]
     if min_model_p is not None:
-        prob_col = "Win Prob" if "Win Prob" in df.columns and df["Win Prob"].notna().any() else "Model EV"
+        prob_col = (
+            "Win Prob" if "Win Prob" in df.columns and df["Win Prob"].notna().any() else "Model EV"
+        )
         df = df.loc[df[prob_col] >= min_model_p]
 
     return df

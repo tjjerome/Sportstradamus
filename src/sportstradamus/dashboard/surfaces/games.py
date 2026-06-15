@@ -25,13 +25,8 @@ from sportstradamus.dashboard.data import (
     render_banner,
     sport_filtered,
 )
-from sportstradamus.dashboard.narrative import context_strip, home_away
+from sportstradamus.dashboard.narrative import SHAPE_HELP, context_strip, home_away
 from sportstradamus.prediction.stories.context import ctxs_from_frame
-
-_SHAPE_HELP = (
-    "Projected game script: shootout (high total), grind (low total), blowout "
-    "(lopsided), or coinflip (tight). It tilts which counting stats run hot."
-)
 
 
 def _candidate_games(offers: pd.DataFrame, platform: str) -> dict[str, dict]:
@@ -73,7 +68,7 @@ def _render_banner(game_context: pd.DataFrame, game: str, date: str) -> None:
     c1, c2, c3 = st.columns(3)
     c1.metric("Total", f"{strip['game_total']:.1f}")
     c2.metric("Spread", f"{fav} -{spread:.1f}" if fav and spread > 0 else "Even")
-    c3.metric("Shape", str(strip["shape"]).title(), help=_SHAPE_HELP)
+    c3.metric("Shape", str(strip["shape"]).title(), help=SHAPE_HELP)
 
 
 def _render_story_preloader(

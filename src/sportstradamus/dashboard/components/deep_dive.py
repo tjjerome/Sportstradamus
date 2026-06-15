@@ -1,5 +1,13 @@
-"""Offer-detail dialog and navigation for the dashboard."""
+"""Offer-detail dialog and navigation for the dashboard.
 
+The evidence-chain view a user opens on any offer: a header edge badge, the model's
+"case" (the per-offer ``Why``), a game-context strip, a live market-trust read with a
+deep-link to the Model Lab cell, and five tabs (History, Model, Comps, Other stats,
+Correlated). The Comps / Other-stats tabs read the ``current_offer_details`` sidecar
+prerendered at ``prophecize`` time so the server never recomputes them live.
+"""
+
+import json
 from collections.abc import Mapping
 
 import numpy as np
@@ -13,9 +21,23 @@ from sportstradamus.dashboard.components.deep_dive_charts import (
     distribution_chart,
     distribution_frame,
     history_chart,
+    sparkline,
     strength_badge,
 )
-from sportstradamus.dashboard.data import GAMELOG_SCHEMA
+from sportstradamus.dashboard.components.slip_state import add_to_simple_slip
+from sportstradamus.dashboard.data import (
+    GAMELOG_SCHEMA,
+    load_current_game_context,
+    load_current_offer_details,
+    load_live_metrics,
+)
+from sportstradamus.dashboard.narrative import SHAPE_HELP, context_strip
+
+# Market-trust reads the 30-day live-settlement window; below this many settled legs
+# the live hit-rate is too sparse to show (honest "needs more data" caption instead).
+_LIVE_WINDOW_DAYS = 30
+_MIN_SETTLED = 30
+_DETAIL_KEY = ["League", "Date", "Player", "Market", "Opponent"]
 
 
 def init_detail_state() -> None:
@@ -53,6 +75,162 @@ def render_offer_card(row: Mapping) -> None:
     st.caption(":gray[Last 5 — coming soon]")
 
 
+def _edge_badge(model_ev: float) -> str:
+    """Board-style Model Edge (``Model EV − 1``) as a semantic colored chip."""
+    edge = model_ev - 1.0
+    color = "green" if edge >= 0 else "red"
+    return f":{color}[**{edge:+.0%} edge**]"
+
+
+def _render_header(row: pd.Series) -> None:
+    head, badge = st.columns([4, 1])
+    head.subheader(f"{row.get('Player', '?')} — {row.get('Market', '?')}")
+    head.caption(
+        f"**{row.get('Bet', '?')} {row.get('Line', '?')}** · "
+        f"{row.get('Team', '?')} vs {row.get('Opponent', '?')} · "
+        f"{row.get('League', '?')} · {row.get('Platform', '?')}"
+    )
+    model_ev = row.get("Model EV")
+    if pd.notna(model_ev):
+        badge.markdown(_edge_badge(float(model_ev)))
+
+
+def _render_case(row: pd.Series) -> None:
+    """The model's case for the pick — the per-offer ``Why`` prose, if present."""
+    why = row.get("Why")
+    if isinstance(why, str) and why.strip():
+        st.info(why)
+
+
+def _pct(v) -> str:
+    return f"{v * 100:+.1f}%" if pd.notna(v) and isinstance(v, int | float) else "N/A"
+
+
+def _team_total_metric(col, ou, strip: dict | None) -> None:
+    if not (pd.notna(ou) and isinstance(ou, int | float)):
+        col.metric("Implied team total", "N/A")
+        return
+    delta = None
+    if strip and not pd.isna(strip["baseline_total"]):
+        delta = f"{ou - strip['baseline_total'] / 2:+.1f} vs avg"
+    col.metric("Implied team total", f"{ou:.1f}", delta=delta, delta_color="off")
+
+
+def _render_context_strip(row: pd.Series, game_context: pd.DataFrame) -> None:
+    strip = (
+        context_strip(game_context, game=row.get("Game", ""), date=row.get("Date", ""))
+        if not game_context.empty
+        else None
+    )
+    c1, c2, c3, c4 = st.columns(4)
+    _team_total_metric(c1, row.get("O/U"), strip)
+    ml = row.get("Moneyline")
+    c2.metric("Moneyline", to_american(ml) if pd.notna(ml) else "N/A")
+    shape = strip["shape"] if strip else None
+    c3.metric("Game shape", str(shape).title() if shape else "N/A", help=SHAPE_HELP)
+    c4.metric("DVPOA", _pct(row.get("DVPOA")))
+
+
+def _live_read(live: pd.DataFrame, league, market, bet) -> tuple[float | None, int]:
+    """``(bet-side live precision, n_settled)`` for the cell's 30-day window.
+
+    Selects ``precision_over_live`` for an Over bet, ``precision_under_live`` otherwise;
+    ``(None, 0)`` when the cell has no live row. Pure — the panel formats the result.
+    """
+    if live.empty:
+        return None, 0
+    sub = live[
+        (live["league"] == league)
+        & (live["market"] == market)
+        & (live["window_days"] == _LIVE_WINDOW_DAYS)
+    ]
+    if sub.empty:
+        return None, 0
+    r = sub.iloc[0]
+    prec = r["precision_over_live"] if bet == "Over" else r["precision_under_live"]
+    return (float(prec) if pd.notna(prec) else None), int(r["n_settled"])
+
+
+def _market_trust_metric(col, live: pd.DataFrame, league, market, bet) -> None:
+    prec, n = _live_read(live, league, market, bet)
+    if n == 0:
+        col.caption("Market trust: no live settlement history yet.")
+    elif n >= _MIN_SETTLED and prec is not None:
+        col.metric(f"{bet} hit rate · live 30d", f"{prec:.0%}", help=f"{n} settled legs")
+    else:
+        col.caption(f"Market trust: needs ≥{_MIN_SETTLED} settled ({n} so far).")
+
+
+def _render_market_trust(row: pd.Series, live: pd.DataFrame) -> None:
+    league, market, bet = row.get("League"), row.get("Market"), row.get("Bet")
+    info, action = st.columns([3, 1])
+    _market_trust_metric(info, live, league, market, bet)
+    if action.button("View in Model Lab", icon=":material/open_in_new:", key="nav_lab_cell"):
+        st.session_state["nav_cell"] = (league, market)
+        st.switch_page("surfaces/lab_training.py")
+
+
+def _detail_row(row: pd.Series, details: pd.DataFrame) -> pd.Series | None:
+    """The prerendered detail row matching this offer's key, or ``None`` if absent."""
+    if details.empty:
+        return None
+    mask = pd.Series(True, index=details.index)
+    for col in _DETAIL_KEY:
+        mask &= details[col].astype(str) == str(row.get(col))
+    sub = details[mask]
+    return sub.iloc[0] if not sub.empty else None
+
+
+def _decode(detail: pd.Series | None, col: str) -> list:
+    if detail is None:
+        return []
+    raw = detail.get(col)
+    return json.loads(raw) if isinstance(raw, str) and raw else []
+
+
+def _render_comps_tab(detail: pd.Series | None, row: pd.Series) -> None:
+    comps = _decode(detail, "comps_vs_opp")
+    opp = row.get("Opponent", "")
+    if not comps:
+        st.caption(f"No comparable player has faced {opp} in the last 300 days.")
+        return
+    df = pd.DataFrame(comps)
+    df["pct_diff"] = (df["pct_diff"] * 100).map(lambda v: f"{v:+.0f}%")
+    df = df.rename(
+        columns={
+            "comp": "Comp",
+            "n_games": "Games",
+            "avg_vs_opp": f"Avg vs {opp}",
+            "pct_diff": "vs their avg",
+        }
+    )
+    st.caption(
+        f"KNN comps who faced {opp} in the last 300 days — their average then, "
+        "against their own 300-day norm."
+    )
+    st.dataframe(df, hide_index=True, width="stretch")
+
+
+def _render_other_stats_tab(detail: pd.Series | None, row: pd.Series) -> None:
+    volume = _decode(detail, "volume_trend")
+    others = _decode(detail, "other_stats")
+    if not volume and not others:
+        st.caption("No prerendered supporting-stat detail — re-run `prophecize` to refresh.")
+        return
+    if volume:
+        st.markdown(f"**Volume trend** · last {len(volume)}")
+        st.altair_chart(sparkline(volume), width="stretch")
+    for o in others:
+        c1, c2, c3 = st.columns([2, 1, 2])
+        c1.markdown(f"**{o['stat']}**")
+        c2.markdown(f"{o['value']:.3g}")
+        pct = o.get("percentile")
+        if pct is not None:
+            c3.caption(f"{pct:.0%} pctile · position, this week")
+        if o.get("series"):
+            c3.altair_chart(sparkline(o["series"]), width="stretch")
+
+
 def _parse_corr(s: str, max_n: int = 3) -> list[tuple[str, float]]:
     if not isinstance(s, str) or not s.strip():
         return []
@@ -88,15 +266,20 @@ def _render_corr_cards(
         return
     st.markdown(f"**{group_label}**")
     for i, (desc, mult) in enumerate(items):
-        col1, col2 = st.columns([4, 1])
+        col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
         col1.markdown(f"**{desc}**")
         col2.markdown(strength_badge(mult) + f" {mult:.2f}×")
-        if st.button("View", icon=":material/arrow_forward:", key=f"{tab_key_prefix}_{i}"):
-            idx = _find_corr_row_idx(desc, filtered)
+        idx = _find_corr_row_idx(desc, filtered)
+        if col3.button("View", icon=":material/arrow_forward:", key=f"{tab_key_prefix}_view_{i}"):
             if idx is not None:
                 st.session_state.detail_stack.append(idx)
                 st.session_state.corr_nav = True
                 st.rerun()
+        if idx is not None and col4.button(
+            "+ slip", icon=":material/add:", key=f"{tab_key_prefix}_slip_{i}"
+        ):
+            add_to_simple_slip(filtered.loc[idx])
+            st.toast(f"Added {filtered.loc[idx]['Player']} to slip")
 
 
 def _select_history_df(
@@ -149,27 +332,22 @@ def _render_model_tab(row: pd.Series) -> None:
     std = row.get("Projection STD") or ev * 0.3
     try:
         df_pdf, y_title, is_continuous = distribution_frame(dist, ev, std, params, line)
-        chart = distribution_chart(df_pdf, is_continuous, line, row["Market"], y_title)
+        chart = distribution_chart(
+            df_pdf,
+            is_continuous,
+            line,
+            row["Market"],
+            y_title,
+            projection=ev,
+            consensus_line=row.get("Consensus Line"),
+        )
         st.altair_chart(chart, width="stretch")
+        st.caption(
+            ":material/circle: app line (dashed) · :gray[consensus line (solid)] · "
+            ":orange[model projection (dot)]"
+        )
     except Exception as e:
         st.error(f"Error computing distribution: {e}")
-
-
-def _render_context_metrics(row: pd.Series) -> None:
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        ml = row.get("Moneyline")
-        st.metric("Moneyline", to_american(ml) if pd.notna(ml) else "N/A")
-    with col2:
-        ou = row.get("O/U")
-        ou_str = f"{ou:.1f}" if pd.notna(ou) and isinstance(ou, int | float) else "N/A"
-        st.metric("O/U Total", ou_str)
-    with col3:
-        dvpoa = row.get("DVPOA")
-        dvpoa_str = (
-            f"{dvpoa * 100:+.1f}%" if pd.notna(dvpoa) and isinstance(dvpoa, int | float) else "N/A"
-        )
-        st.metric("DVPOA", dvpoa_str)
 
 
 def _render_nav() -> None:
@@ -196,21 +374,28 @@ def _render_corr_tab(row: pd.Series, filtered: pd.DataFrame) -> None:
 @st.dialog("Offer detail", width="large")
 def show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
     _render_nav()
+    _render_header(row)
+    _render_case(row)
+    _render_context_strip(row, load_current_game_context())
+    _render_market_trust(row, load_live_metrics())
 
-    st.subheader(f"{row.get('Player', '?')} — {row.get('Market', '?')}")
-    st.write(
-        f"**{row.get('Bet', '?')} {row.get('Line', '?')}** · "
-        f"{row.get('Team', '?')} vs {row.get('Opponent', '?')} · "
-        f"{row.get('League', '?')} · {row.get('Platform', '?')}"
+    detail = _detail_row(row, load_current_offer_details())
+    tabs = st.tabs(
+        [
+            ":material/history: History",
+            ":material/query_stats: Model",
+            ":material/group: Comps",
+            ":material/insights: Other stats",
+            ":material/hub: Correlated",
+        ]
     )
-    _render_context_metrics(row)
-
-    tab1, tab2, tab3 = st.tabs(
-        [":material/history: History", ":material/query_stats: Model", ":material/hub: Correlated"]
-    )
-    with tab1:
+    with tabs[0]:
         _render_history_tab(row)
-    with tab2:
+    with tabs[1]:
         _render_model_tab(row)
-    with tab3:
+    with tabs[2]:
+        _render_comps_tab(detail, row)
+    with tabs[3]:
+        _render_other_stats_tab(detail, row)
+    with tabs[4]:
         _render_corr_tab(row, filtered)

@@ -13,6 +13,7 @@ import pandas as pd
 import streamlit as st
 
 from sportstradamus.dashboard.data import format_ts, load_model_stats, render_banner
+from sportstradamus.dashboard.narrative import lab_filters_for_nav_cell
 from sportstradamus.helpers.io import LIVE_METRICS_PATH, MODEL_STATS_PATH
 from sportstradamus.training.graduation import lifecycle_table
 
@@ -255,10 +256,20 @@ if not lifecycle.empty:
 else:
     stats["lifecycle_state"] = pd.NA
 
+# A deep-dive "View in Model Lab" handoff preselects this cell's league + market.
+for _key, _val in lab_filters_for_nav_cell(st.session_state.pop("nav_cell", None)).items():
+    st.session_state[_key] = _val
+
 with st.sidebar:
     st.header("Filters")
     leagues = sorted(stats["league"].dropna().unique())
-    sel_leagues = st.multiselect("Leagues", leagues, default=leagues)
+    markets = sorted(stats["market"].dropna().unique())
+    if "lab_leagues" not in st.session_state:
+        st.session_state["lab_leagues"] = leagues
+    if "lab_markets" not in st.session_state:
+        st.session_state["lab_markets"] = markets
+    sel_leagues = st.multiselect("Leagues", leagues, key="lab_leagues")
+    sel_markets = st.multiselect("Markets", markets, key="lab_markets")
     distributions = sorted(stats["distribution"].dropna().unique())
     sel_dists = st.multiselect("Distributions", distributions, default=distributions)
     shipped_states = (
@@ -274,7 +285,11 @@ with st.sidebar:
         else []
     )
 
-scope = stats["league"].isin(sel_leagues) & stats["distribution"].isin(sel_dists)
+scope = (
+    stats["league"].isin(sel_leagues)
+    & stats["market"].isin(sel_markets)
+    & stats["distribution"].isin(sel_dists)
+)
 if sel_shipped:
     scope &= stats["shipped"].isin(sel_shipped)
 if sel_lifecycle:

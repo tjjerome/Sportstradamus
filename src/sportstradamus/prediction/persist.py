@@ -18,6 +18,7 @@ from sportstradamus.helpers.io import (
     CURRENT_GAME_CORR_PATH,
     CURRENT_GAME_STORIES_PATH,
     CURRENT_META_PATH,
+    CURRENT_OFFER_DETAILS_PATH,
     CURRENT_OFFERS_PATH,
     CURRENT_PARLAYS_PATH,
     _atomic_write_json,
@@ -28,7 +29,8 @@ from sportstradamus.prediction.stories import STORIES_VERSION
 # Display columns kept in current_offers.parquet. The dashboard reads:
 # - Offer details: League, Date, Team, Opponent, Home (is Team the host — orders the
 #   "{home} vs {away}" matchup label), Game (canonical matchup key),
-#   Player, Market, Platform, Bet, Line, Boost
+#   Player, Market, Platform, Bet, Line, Consensus Line (weighted-avg book line from
+#   archive.get_line — the Model-tab consensus marker, distinct from the DFS app Line), Boost
 # - Scoring: Win Prob (hit probability), Model EV (edge), Market EV, Projection (stat mean),
 #   Kelly, Projection STD, Push Prob
 # - Context: Avg 5, Avg H2H, Moneyline, O/U, DVPOA, Position (depth-chart label)
@@ -51,6 +53,7 @@ _OFFER_KEEP_COLS = [
     "Platform",
     "Bet",
     "Line",
+    "Consensus Line",
     "Boost",
     "Win Prob",
     "Model EV",
@@ -163,6 +166,18 @@ def write_current_game_stories(stories: pd.DataFrame) -> None:
     an empty slate still writes a header-only snapshot the dashboard can read.
     """
     _atomic_write_parquet(stories, CURRENT_GAME_STORIES_PATH)
+
+
+def write_current_offer_details(details: pd.DataFrame) -> None:
+    """Write the per-offer deep-dive detail prerender atomically.
+
+    ``details`` is the ``stories.build_offer_details`` frame: one row per
+    ``(League, Date, Player, Market, Opponent)`` with ``comps_vs_opp`` /
+    ``volume_trend`` / ``other_stats`` JSON payloads the dashboard renders without
+    recomputing. Column-stable even on an empty slate, so a header-only snapshot
+    still writes for the dashboard to read.
+    """
+    _atomic_write_parquet(details, CURRENT_OFFER_DETAILS_PATH)
 
 
 def _normalize_offers(offers: pd.DataFrame) -> pd.DataFrame:
