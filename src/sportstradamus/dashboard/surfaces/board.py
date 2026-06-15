@@ -50,7 +50,7 @@ MAIN_COLS = [
     "Platform",
 ]
 
-RANGE_COLS = ["Win Prob", "Model EV", "Market EV"]
+RANGE_COLS = ["Win Prob", columns.MODEL_EDGE, columns.CONSENSUS_EDGE]
 
 signal_cols = [c for c in ["Boost", "Model EV", "Market EV"] if c in offers.columns]
 if signal_cols:
@@ -82,6 +82,9 @@ if selected_markets:
 if player_query:
     filtered = filtered.loc[filtered["Player"].str.contains(player_query, case=False, na=False)]
 
+# Derive Model/Consensus Edge before the sliders so they filter on edge, not raw EV.
+filtered = columns.add_edges(filtered)
+
 range_cols = [c for c in RANGE_COLS if c in filtered.columns]
 if range_cols:
     st.caption("Numeric range filters")
@@ -108,7 +111,6 @@ st.caption(f"Showing **{len(filtered):,}** of {len(offers):,} offers")
 
 init_detail_state()
 
-filtered = columns.add_edges(filtered)
 display_cols = [c for c in MAIN_COLS if c in filtered.columns]
 grid_df = filtered[display_cols].copy()
 
