@@ -44,7 +44,9 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
     lock_time = format_ts(str(date_raw)) if date_raw else ""
 
     offer_count = len(group)
-    top_ev = group["Projection"].max() if "Projection" in group.columns else None
+    # Top edge = the best model edge vs the DFS payout in the game (Model EV − 1).
+    edges = pd.to_numeric(group["Model EV"], errors="coerce") - 1 if "Model EV" in group else None
+    top_edge = edges.max() if edges is not None and edges.notna().any() else None
     headline = top_thesis(parlays, game=group["Game"].iloc[0], date=date_raw)
 
     with st.container(border=True):
@@ -56,8 +58,8 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
             if lock_time:
                 st.caption(lock_time)
             st.caption(f"{offer_count} offer{'s' if offer_count != 1 else ''}")
-            if top_ev is not None and pd.notna(top_ev):
-                st.caption(f"Top edge: {top_ev:+.2f}")
+            if top_edge is not None and pd.notna(top_edge):
+                st.caption(f"Top edge: {top_edge:+.1%}")
         with right:
             game_label = f"{home} vs {away}"
             # Date keeps doubleheaders distinct; format must match the Games
