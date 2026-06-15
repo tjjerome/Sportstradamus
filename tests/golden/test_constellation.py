@@ -163,6 +163,14 @@ def test_team_hubs_anchor_to_opposite_sides():
     assert pos["A|PTS|Over"][0] < 0 < pos["B|PTS|Over"][0]  # NYK left, SAS right
 
 
+def test_candidate_layout_anchors_from_pool_without_a_slip():
+    # The map's game is read from the pool, so the field anchors each team to its
+    # side before any leg is picked (and stays static once one is).
+    pool = _pool(("A|PTS|Over", 0.4), ("B|PTS|Over", 0.3))  # A = NYK, B = SAS
+    pos = _node_pos(constellation_figure([], _corr(("A|PTS|Over", "B|PTS|Over", 0.5)), pool))
+    assert pos["A|PTS|Over"][0] < 0 < pos["B|PTS|Over"][0]
+
+
 def _edge_by_pair(fig) -> dict:
     return {frozenset(e.meta): e for e in _edge_traces(fig)}
 

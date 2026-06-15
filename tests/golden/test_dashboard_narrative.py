@@ -8,7 +8,28 @@ from __future__ import annotations
 
 import pandas as pd
 
-from sportstradamus.dashboard.narrative import context_strip, top_thesis
+from sportstradamus.dashboard.narrative import context_strip, home_away, top_thesis
+
+
+def test_home_away_orders_home_first_from_home_flag():
+    # The Game key is alphabetical (TOR/WAS); the Home flag puts the host first.
+    group = pd.DataFrame(
+        [
+            {"Game": "TOR/WAS", "Team": "WAS", "Opponent": "TOR", "Home": True},
+            {"Game": "TOR/WAS", "Team": "TOR", "Opponent": "WAS", "Home": False},
+        ]
+    )
+    assert home_away(group) == ("WAS", "TOR")
+
+
+def test_home_away_falls_back_to_canonical_without_home_column():
+    group = pd.DataFrame(
+        [
+            {"Game": "TOR/WAS", "Team": "TOR", "Opponent": "WAS"},
+            {"Game": "TOR/WAS", "Team": "WAS", "Opponent": "TOR"},
+        ]
+    )
+    assert home_away(group) == ("TOR", "WAS")  # canonical (alphabetical) order
 
 
 def test_top_thesis_picks_highest_ev():

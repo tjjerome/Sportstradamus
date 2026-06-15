@@ -4,7 +4,7 @@ Two render entry points share the ``slip_state`` API (session-state contract,
 seed/add/lock primitives) and one live scorer (``slip_engine.score_slip``):
 
 * :func:`render_constellation_builder` — same-game, correlation-aware, with a
-  live deterministic thesis headline. Hosted on the Slips surface; seeded from a
+  live deterministic thesis headline. Hosted on the Games surface; seeded from a
   story (Bankroll Builder / Shoot the Moon), a game-seed selection, or a sidebar
   edit. Carries the focus game's Total / Spread / Shape context banner.
 * :func:`render_simple_builder` — any-game, grade-only (no thesis); hosted on the
@@ -40,16 +40,8 @@ from sportstradamus.dashboard.components.slip_state import (
 )
 from sportstradamus.dashboard.data import load_model_stats
 from sportstradamus.dashboard.legs import corr_key
-from sportstradamus.dashboard.narrative import context_strip
 from sportstradamus.dashboard.slip_engine import SlipScore, score_slip, slip_headline
 from sportstradamus.prediction.stories.legs import validate_parlay_legs
-
-# Plain-language gloss for the focus game's "Shape" metric (the projected game
-# script ``classify_shape`` names from the model's total + win probability).
-_SHAPE_HELP = (
-    "Projected game script: shootout (high total), grind (low total), blowout "
-    "(lopsided), or coinflip (tight). It tilts which counting stats run hot."
-)
 
 
 def _slip_shrinkage(legs: Sequence[Mapping]) -> float:
@@ -69,46 +61,48 @@ def render_constellation_builder(
     corr: pd.DataFrame,
     ctxs: Mapping,
     *,
-    game_context: pd.DataFrame,
+    focus_game: str,
     key_prefix: str = "cb",
 ) -> None:
     """Same-game correlation-aware editor with a live deterministic thesis headline.
 
-    The constellation is the editor: a full-color star is a slip leg, a desaturated
-    one a candidate, and clicking either toggles it; a star's hover card opens the
-    full offer detail without disturbing the slip. ``game_context`` is
-    ``current_game_context``, read for the focus game's Total / Spread / Shape banner.
+    Draws ``focus_game``'s star map whether or not a slip is seeded: every candidate
+    (model-liked, Kelly > 0) leg is a clickable star, so a slip can be built from
+    scratch by clicking or pre-seeded from a story; a star's hover card opens the
+    full offer detail without disturbing the slip. Other-game slip legs show as
+    satellites. The caller draws the game's context banner above this.
     """
+    if not focus_game:
+        st.info("Pick a game above to see its constellation.")
+        return
     legs = st.session_state[_LEGS]
-    if not legs:
-        st.info("Pick a story above to start a slip, or load one from the rail.")
-        return
-    focus, pool = _focus_pool(legs, offers)
-    focus_legs = [leg for leg in legs if leg["Game"] == focus]
-    _render_game_banner(game_context, focus_legs[0])
+    platform = st.session_state[_PLATFORM]
+    pool = offers.loc[(offers["Game"] == focus_game) & (offers["Platform"] == platform)]
+    focus_legs = [leg for leg in legs if leg["Game"] == focus_game]
     _render_constellation(focus_legs, corr, pool, key_prefix)
-    _render_leg_list(key_prefix, focus_game=focus, removable=False)
-    act = render_satellites(
-        offers,
-        focus_game=focus,
-        platform=st.session_state[_PLATFORM],
-        legs=legs,
-        key_prefix=key_prefix,
-    )
-    if _apply_satellite_action(act, legs):
-        st.rerun()
+    _render_leg_list(key_prefix, focus_game=focus_game, removable=False)
+    if legs:
+        act = render_satellites(
+            offers, focus_game=focus_game, platform=platform, legs=legs, key_prefix=key_prefix
+        )
+        if _apply_satellite_action(act, legs):
+            st.rerun()
     _draw_detail_dialog(offers)
-    valid, reason = validate_parlay_legs(legs)
     if len(legs) < 2:
-        st.caption(reason or "Tap a gray star to add a leg.")
+        if legs:
+            _, reason = validate_parlay_legs(legs)
+            st.caption(reason or "Tap a star to add another leg.")
+        else:
+            st.caption("Tap a star to start a slip from this game.")
         return
+    valid, reason = validate_parlay_legs(legs)
     if not valid:
         st.warning(reason)
     shrink = _slip_shrinkage(legs)
     score = score_slip(
         legs,
         corr,
-        platform=st.session_state[_PLATFORM],
+        platform=platform,
         bankroll=Decimal(str(st.session_state[_BANKROLL])),
         shrinkage=shrink,
     )
@@ -271,29 +265,6 @@ def _pool_match_for_key(pool: pd.DataFrame, key: str) -> tuple | None:
         if corr_key(row) == key:
             return idx, row
     return None
-
-
-def _focus_pool(legs: Sequence[Mapping], offers: pd.DataFrame) -> tuple[str, pd.DataFrame]:
-    """The slip's focus game (the oldest leg's game) and its candidate offers on the platform.
-
-    The constellation anchors on this one game; legs from other games are satellites,
-    rendered outside the map. ``legs`` is non-empty (the caller guards).
-    """
-    focus = legs[0]["Game"]
-    platform = st.session_state[_PLATFORM]
-    return focus, offers.loc[(offers["Game"] == focus) & (offers["Platform"] == platform)]
-
-
-def _render_game_banner(game_context: pd.DataFrame, focus_leg: Mapping) -> None:
-    """Total / Spread / Shape strip for the slip's focus game (blank if unknown)."""
-    strip = context_strip(game_context, game=focus_leg["Game"], date=focus_leg["Date"])
-    if not strip:
-        return
-    fav, spread = strip["fav_team"], strip["spread"]
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total", f"{strip['game_total']:.1f}")
-    c2.metric("Spread", f"{fav} -{spread:.1f}" if fav and spread > 0 else "Even")
-    c3.metric("Shape", str(strip["shape"]).title(), help=_SHAPE_HELP)
 
 
 def _render_metrics(score: SlipScore, *, correlated: bool) -> None:

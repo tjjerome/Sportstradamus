@@ -40,7 +40,9 @@ def render_locked_shelf() -> None:
 def _render_shelf_entry(row: Mapping, offers: pd.DataFrame) -> None:
     with st.container(border=True):
         st.caption((row.get("headline") or "Custom slip")[:_SHELF_HEADLINE_CHARS])
-        st.write(f"{int(row['bet_size'])} legs · {row['platform']} {row.get('play_type', '')}".rstrip())
+        st.write(
+            f"{int(row['bet_size'])} legs · {row['platform']} {row.get('play_type', '')}".rstrip()
+        )
         st.caption(
             f"{_fnum(row.get('payout_multiplier')):.2f}x · "
             f"EV {_fnum(row.get('model_ev'), 1.0) - 1:+.0%} · "
@@ -49,7 +51,9 @@ def _render_shelf_entry(row: Mapping, offers: pd.DataFrame) -> None:
         view_col, edit_col, del_col = st.columns(3)
         if view_col.button("View", key=f"shelf_view_{row['slip_id']}"):
             _slip_dialog(row)
-        target = "surfaces/slips.py" if row["builder_type"] == "constellation" else "surfaces/board.py"
+        target = (
+            "surfaces/games.py" if row["builder_type"] == "constellation" else "surfaces/board.py"
+        )
         if edit_col.button("Edit", key=f"shelf_edit_{row['slip_id']}"):
             load_slip(row, offers)
             st.switch_page(target)
@@ -78,5 +82,4 @@ def _slip_dialog(row: Mapping) -> None:
 
 
 def _fnum(value, default: float = 0.0) -> float:
-    """Coerce a possibly-missing/NaN slip field to a float for display."""
     return float(value) if pd.notna(value) else default

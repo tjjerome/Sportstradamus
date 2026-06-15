@@ -1,6 +1,6 @@
 """Narrative display values derived from the prophecize snapshots.
 
-Pure lookups the Tonight and Game surfaces use to turn the precomputed thesis
+Pure lookups the Tonight and Games surfaces use to turn the precomputed thesis
 and game-context artifacts into per-game display text — no Streamlit, no I/O, so
 they unit-test directly. Both key on the canonical ``Game`` slash key
 (``"NYK/SAS"``) plus ``Date`` so a doubleheader's two games stay distinct.
@@ -26,6 +26,25 @@ def top_thesis(parlays: pd.DataFrame, *, game: str, date) -> str:
         return ""
     thesis = sub.loc[sub["Model EV"].idxmax(), "Thesis"]
     return str(thesis) if pd.notna(thesis) else ""
+
+
+def home_away(group: pd.DataFrame) -> tuple[str, str]:
+    """``(home, away)`` team codes for one game's offer rows.
+
+    The home side is the one whose rows carry ``Home == True`` (a model feature);
+    without that column — snapshots written before it was surfaced — the canonical
+    ``Game`` slash key (alphabetical) orders the matchup so it still renders
+    deterministically. Dedups the two per-team orderings of one game to a single label.
+    """
+    teams = str(group["Game"].iloc[0]).split("/")
+    if "Home" in group.columns:
+        hosts = group.loc[group["Home"].astype(object).eq(True), "Team"]
+        if not hosts.empty:
+            home = str(hosts.iloc[0])
+            away = next((t for t in teams if t != home), "")
+            if away:
+                return home, away
+    return (teams[0], teams[1]) if len(teams) == 2 else (teams[0] if teams else "", "")
 
 
 def context_strip(ctx_df: pd.DataFrame, *, game: str, date) -> dict | None:

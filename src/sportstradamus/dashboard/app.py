@@ -55,10 +55,10 @@ pg = st.navigation(
                 url_path="board",
             ),
             st.Page(
-                str(_surfaces / "slips.py"),
-                title="Slips",
-                icon=":material/receipt_long:",
-                url_path="slips",
+                str(_surfaces / "games.py"),
+                title="Games",
+                icon=":material/sports_basketball:",
+                url_path="games",
             ),
             st.Page(
                 str(_surfaces / "receipts.py"),
