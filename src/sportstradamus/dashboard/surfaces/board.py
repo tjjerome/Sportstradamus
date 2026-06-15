@@ -82,7 +82,6 @@ if selected_markets:
 if player_query:
     filtered = filtered.loc[filtered["Player"].str.contains(player_query, case=False, na=False)]
 
-# Numeric range filters
 range_cols = [c for c in RANGE_COLS if c in filtered.columns]
 if range_cols:
     st.caption("Numeric range filters")
@@ -118,7 +117,8 @@ if "Win Prob" in grid_df.columns:
         lambda x: f"{x:.2f}%" if pd.notna(x) else ""
     )
 # Model/Consensus Edge are edge-vs-DFS percentages (EV - 1, x100); kept numeric so the
-# heatmap can bucket Model Edge.
+# heatmap can bucket Model Edge and the grid sorts them — the "%" is a display suffix
+# (percent_cols below), not baked into the value.
 for col in (columns.MODEL_EDGE, columns.CONSENSUS_EDGE):
     if col in grid_df.columns:
         grid_df[col] = (pd.to_numeric(grid_df[col], errors="coerce") * 100).round(1)
@@ -138,6 +138,7 @@ selected_rows = render_themed_grid(
     heatmap_col=columns.MODEL_EDGE,
     heatmap_center=0.0,
     header_help=columns.HELP,
+    percent_cols=[columns.MODEL_EDGE, columns.CONSENSUS_EDGE],
 )
 st.caption("Trend sparklines arrive with the L1 line-movement export.")
 

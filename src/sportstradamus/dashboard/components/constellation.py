@@ -9,12 +9,12 @@ color desaturated and dimmed — selection is alpha + saturation, not a ring (a 
 ring read as a team color). Stories / Builder / Moon just pre-activate a subset.
 
 Edges are pairwise correlations (gold, width/opacity ∝ |ρ|, dashed when ρ < 0 —
-"fights the thesis") and stay **hidden until you activate a connected star** — an
-empty slip is a clean field, and each leg you pick lights up only its own ties, so
-the clutter scales with the slip, not the game. The *layout* still springs on the
-full correlation web, so a star's placement reflects every tie. Each team's
-most-connected leg is pinned to its side, so a cross-matchup leg floats toward the
-centre and an unrepresented side leaves its half empty.
+"fights the thesis") and stay **hidden until both their stars are in the slip** — so
+the only edges drawn are the correlations among your slip's own legs (an empty or
+one-leg slip is a clean field), and hovering any star faint-previews its other ties.
+The *layout* still springs on the full correlation web, so a star's placement reflects
+every tie. Each team's most-connected leg is pinned to its side, so a cross-matchup leg
+floats toward the centre and an unrepresented side leaves its half empty.
 
 The figure is pure (no Streamlit, no Archive): each node carries its
 ``Player|Market|Bet`` key plus its hover-card fields as ``customdata`` (the key at
@@ -229,8 +229,8 @@ def _edges(keys: list[str], rho: dict[frozenset, float]) -> list[tuple[str, str,
     """Every correlation tie among shown nodes (|ρ| ≥ floor), signed and sorted.
 
     Feeds both the spring *layout* (which pulls on |ρ| so a leg's placement reflects
-    all its ties) and the *drawn* edges (one trace each, hidden until an endpoint is
-    active). Sorted so the trace order — hence the figure — is deterministic.
+    all its ties) and the *drawn* edges (one trace each, hidden until both endpoints
+    are active). Sorted so the trace order — hence the figure — is deterministic.
     """
     node_set = set(keys)
     out = []
@@ -317,11 +317,12 @@ def _rescale(pos: dict[str, tuple[float, float]]) -> dict[str, tuple[float, floa
 def _add_edge(fig: go.Figure, a: str, b: str, p0, p1, rho: float, *, active: set[str]) -> None:
     """One correlation edge: gold, width/opacity ∝ |ρ|, dashed when ρ < 0.
 
-    Hidden (opacity 0) until an endpoint is in the slip, so clutter scales with the
-    slip not the game; ``meta`` carries the endpoint keys so the component's JS can
-    find a star's incident ties to dim-in on hover.
+    Hidden (opacity 0) until **both** endpoints are in the slip, so the only edges
+    drawn are the correlations among the slip's own legs (a seeded multi-leg slip
+    isn't a hairball of ties out to candidates); ``meta`` carries the endpoint keys
+    so the component's JS can faint-preview a star's other ties on hover.
     """
-    incident = a in active or b in active
+    incident = a in active and b in active
     fig.add_trace(
         go.Scatter(
             x=[p0[0], p1[0]],

@@ -1,14 +1,18 @@
-"""Satellite legs — edge legs from other games, to complete a single-team slip.
+"""Supplemental leg pickers — non-star legs to round out a same-game slip.
 
-The constellation builder is same-game (DESIGN §4a): a game whose model-liked legs
-(Kelly ``K`` > 0) sit on only one of its two teams can't form a valid parlay on its
-own (``validate_parlay_legs`` needs two distinct teams). This picker offers the game's
-complement — ``K`` > 0 legs from *other* games on the slip's platform, grouped by
-game — so a user can add one validating leg or a whole second cluster. The
-constellation stays untouched; these ride along as satellites.
+The constellation builder is same-game (DESIGN §4a) and only draws model-liked stars
+(Kelly ``K`` > 0). Two gaps need a non-star path, both rendered as chip sections below
+the map:
 
-Pure query plus a thin Streamlit render that returns an add/remove action for the
-builder to apply (the builder owns the slip state). No Archive, no parquet — it slices
+* :func:`render_satellites` — a game whose ``K`` > 0 legs sit on only one of its two
+  teams can't form a valid parlay alone (``validate_parlay_legs`` needs two distinct
+  teams), so this offers ``K`` > 0 legs from *other* games on the platform, grouped by
+  game — add one validating leg or a whole second cluster. They ride along as satellites.
+* :func:`render_disliked_legs` — the manual override for a same-game leg you believe in
+  that the model passes on (``K`` ≤ 0, so it isn't a star).
+
+Pure queries plus thin Streamlit renders that return an add/remove/detail action for the
+builder to apply (the builder owns the slip state). No Archive, no parquet — they slice
 the in-memory ``current_offers`` the builder already holds.
 """
 
@@ -27,6 +31,8 @@ from sportstradamus.prediction.stories.legs import validate_parlay_legs
 # Top legs offered per other game — enough to grab a small second cluster, few enough
 # to keep the section uncluttered.
 _PER_GAME_CAP = 6
+# Same-game model-passed legs offered — a few chips, the least-disliked first.
+_DISLIKED_CAP = 9
 # Chip columns per satellite game row — matches the visual density of the constellation.
 _SATELLITE_COLS = 3
 
@@ -138,3 +144,43 @@ def _render_added(satellites: list[tuple[int, Mapping]], key_prefix: str) -> dic
         if rm_col.button(":material/close:", key=f"{key_prefix}_sat_rm_{i}", help="Remove leg"):
             action = {"remove": i}
     return action
+
+
+def render_disliked_legs(
+    offers: pd.DataFrame,
+    *,
+    focus_game: str,
+    platform: str,
+    legs: Sequence[Mapping],
+    key_prefix: str,
+) -> dict | None:
+    """Render the 'add a leg the model doesn't like' section; return an add/detail action.
+
+    The constellation only draws the focus game's model-liked stars (``K`` > 0); this is
+    the manual override for a same-game leg you believe in that the model passes on
+    (``K`` ≤ 0). Chips are the game's non-star offers, least-disliked first, capped to
+    ``_DISLIKED_CAP``; returns the same ``{"add": row}`` / ``{"detail": idx}`` union the
+    satellite picker does, for the builder to apply (already-slipped legs are excluded).
+    """
+    exclude = {corr_key(leg) for leg in legs}
+    kelly = pd.to_numeric(offers["Kelly"], errors="coerce")
+    pool = offers[(offers["Platform"] == platform) & (offers["Game"] == focus_game) & (kelly <= 0)]
+    rows = [
+        row
+        for row in pool.sort_values("Kelly", ascending=False).to_dict("records")
+        if corr_key(row) not in exclude
+    ]
+    with st.expander("Add a leg the model doesn't like", expanded=False):
+        if not rows:
+            st.caption("No other legs in this game.")
+            return None
+        action: dict | None = None
+        cols = st.columns(_SATELLITE_COLS)
+        for j, row in enumerate(rows[:_DISLIKED_CAP]):
+            with cols[j % _SATELLITE_COLS].popover(star_label(row), width="stretch"):
+                picked = _render_pick_popover(row, offers, platform, f"{key_prefix}_dis")
+            if picked:
+                action = picked
+        if len(rows) > _DISLIKED_CAP:
+            st.caption(f"Showing {_DISLIKED_CAP} of {len(rows)} — nearest the model's line first.")
+        return action
