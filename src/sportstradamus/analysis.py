@@ -60,6 +60,15 @@ _BOOK_PROB_PICK_FLOOR = 0.52
 # Model-probability cut points for the ROI threshold sweep (compute_individual_metrics).
 _ROI_THRESHOLDS = (0.55, 0.58, 0.60, 0.65, 0.70)
 
+# Flat -110 ("standard juice") accounting: risk 110 to win 100. The Receipts hero and
+# skeptic checks price every rec as one flat -110 unit so the numbers stay comparable.
+JUICE_PAYOUT = 100 / 110
+# Decimal odds of that flat bet (stake 1 → return 1 + 100/110 on a win).
+_FLAT_DECIMAL_ODDS = 1 + JUICE_PAYOUT
+# A rec clears the "EV>5%" skeptic check when its model edge at the flat reference price
+# clears this: Win Prob * _FLAT_DECIMAL_ODDS - 1 >= 0.05  <=>  Win Prob >= 0.55.
+_EV_EDGE_MIN = 0.05
+
 # Upper bound on the NegBin CRPS finite-sum support; the PMF tail is negligible
 # well before this, so the cap only guards pathological (huge-EV) inputs.
 _CRPS_NEGBIN_SUM_CAP = 500
@@ -539,7 +548,8 @@ def _roi_table(history, today):
                 (
                     "Book Filtered",
                     history.loc[
-                        (history["_date"] >= cutoff) & (history["Market EV"] > _BOOK_PROB_PICK_FLOOR)
+                        (history["_date"] >= cutoff)
+                        & (history["Market EV"] > _BOOK_PROB_PICK_FLOOR)
                     ],
                 ),
             ]:
@@ -571,7 +581,9 @@ def compute_individual_metrics(history):
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     prob_col = (
-        "Win Prob" if "Win Prob" in history.columns and history["Win Prob"].notna().any() else "Model EV"
+        "Win Prob"
+        if "Win Prob" in history.columns and history["Win Prob"].notna().any()
+        else "Model EV"
     )
     today = datetime.today().date()
     history["_date"] = pd.to_datetime(history["Date"], errors="coerce").dt.date
@@ -582,6 +594,104 @@ def compute_individual_metrics(history):
     daily, calibration = _daily_calibration_tables(filtered, prob_col, today)
     roi = _roi_table(history, today)
     return hist_stats, daily, calibration, roi
+
+
+def _with_profit_units(exploded):
+    """Return a copy carrying ``Hit`` and the flat -110 ``Profit Unit`` per offer.
+
+    ``Hit`` is derived from ``Bet == Result`` when absent. A hit pays
+    ``JUICE_PAYOUT``, a miss ``-1`` — the flat-unit basis the Receipts hero and
+    skeptic checks share so every number is comparable.
+    """
+    df = exploded.copy()
+    if "Hit" not in df.columns:
+        df["Hit"] = (df["Bet"] == df["Result"]).astype(int)
+    df["Profit Unit"] = df["Hit"] * JUICE_PAYOUT - (1 - df["Hit"])
+    return df
+
+
+def tailed_record(exploded) -> dict:
+    """Receipts hero — win/loss record and flat-unit P&L if you'd tailed every rec."""
+    if exploded.empty:
+        return {"units": 0.0, "wins": 0, "losses": 0, "n": 0, "roi": 0.0, "win_pct": 0.0}
+    df = _with_profit_units(exploded)
+    n = len(df)
+    wins = int(df["Hit"].sum())
+    units = float(df["Profit Unit"].sum())
+    return {
+        "units": units,
+        "wins": wins,
+        "losses": n - wins,
+        "n": n,
+        "roi": units / n,
+        "win_pct": wins / n,
+    }
+
+
+def ev_threshold_record(exploded, *, edge_min: float = _EV_EDGE_MIN) -> dict:
+    """Record over recs whose flat -110 model edge clears ``edge_min``.
+
+    A rec qualifies when ``prob * _FLAT_DECIMAL_ODDS - 1 >= edge_min``, the same
+    accounting basis as the hero — so "record at EV>5%" stays coherent with the P&L
+    beside it. ``prob`` is ``Win Prob`` (falling back to ``Model EV``).
+    """
+    if exploded.empty:
+        return tailed_record(exploded)
+    prob_col = (
+        "Win Prob"
+        if "Win Prob" in exploded.columns and exploded["Win Prob"].notna().any()
+        else "Model EV"
+    )
+    qualifying = exploded.loc[exploded[prob_col] * _FLAT_DECIMAL_ODDS - 1 >= edge_min]
+    return tailed_record(qualifying)
+
+
+def worst_month(exploded) -> dict:
+    """The single worst calendar month by flat-unit P&L — losers shown, never hidden.
+
+    Returns ``{month, units, n, win_pct}`` for the ``YYYY-MM`` with the lowest summed
+    units (ties broken to the earliest month); ``{}`` when nothing is resolved.
+    """
+    if exploded.empty:
+        return {}
+    df = _with_profit_units(exploded)
+    df["_month"] = pd.to_datetime(df["Date"], errors="coerce").dt.strftime("%Y-%m")
+    df = df.loc[df["_month"].notna()]
+    if df.empty:
+        return {}
+    grouped = (
+        df.groupby("_month")
+        .agg(units=("Profit Unit", "sum"), n=("Hit", "count"), wins=("Hit", "sum"))
+        .sort_index()  # chronological order makes idxmin keep the earliest tie
+    )
+    worst = grouped["units"].idxmin()
+    row = grouped.loc[worst]
+    return {
+        "month": worst,
+        "units": float(row["units"]),
+        "n": int(row["n"]),
+        "win_pct": float(row["wins"] / row["n"]),
+    }
+
+
+def record_grid(exploded, by: str) -> pd.DataFrame:
+    """Per-group record (``Bets`` / ``Win%`` / ``Units`` / ``ROI``), sorted Units-desc.
+
+    ``by`` is one of ``League`` / ``Market`` / ``Platform``. ``Win%`` and ``ROI`` are
+    fractions; the surface scales them to percentage points for the themed grid.
+    """
+    cols = [by, "Bets", "Win%", "Units", "ROI"]
+    if exploded.empty:
+        return pd.DataFrame(columns=cols)
+    df = _with_profit_units(exploded)
+    grouped = (
+        df.groupby(by)
+        .agg(Bets=("Hit", "count"), wins=("Hit", "sum"), Units=("Profit Unit", "sum"))
+        .reset_index()
+    )
+    grouped["Win%"] = grouped["wins"] / grouped["Bets"]
+    grouped["ROI"] = grouped["Units"] / grouped["Bets"]
+    return grouped.sort_values("Units", ascending=False)[cols].reset_index(drop=True)
 
 
 def _prep_parlays(parlays, stats, stat_map, today):
@@ -963,7 +1073,9 @@ def compute_brier_skill_score(subset, base_rate=0.5):
         return np.nan
     hits = (subset["Bet"] == subset["Result"]).astype(int)
     prob_col = (
-        "Win Prob" if "Win Prob" in subset.columns and subset["Win Prob"].notna().any() else "Model EV"
+        "Win Prob"
+        if "Win Prob" in subset.columns and subset["Win Prob"].notna().any()
+        else "Model EV"
     )
     brier = brier_score_loss(hits, subset[prob_col].clip(0, 1))
     brier_ref = base_rate * (1 - base_rate)
@@ -987,7 +1099,9 @@ def compute_book_brier_skill_score(subset):
         return np.nan
     hits = (subset["Bet"] == subset["Result"]).astype(int)
     prob_col = (
-        "Win Prob" if "Win Prob" in subset.columns and subset["Win Prob"].notna().any() else "Model EV"
+        "Win Prob"
+        if "Win Prob" in subset.columns and subset["Win Prob"].notna().any()
+        else "Model EV"
     )
     brier_model = brier_score_loss(hits, subset[prob_col].clip(0, 1))
     brier_book = brier_score_loss(hits, subset["Market Prob"].clip(0, 1))
@@ -1008,7 +1122,9 @@ def murphy_decomposition(subset):
         return {"Reliability": np.nan, "Resolution": np.nan, "Uncertainty": np.nan, "Brier": np.nan}
 
     prob_col = (
-        "Win Prob" if "Win Prob" in subset.columns and subset["Win Prob"].notna().any() else "Model EV"
+        "Win Prob"
+        if "Win Prob" in subset.columns and subset["Win Prob"].notna().any()
+        else "Model EV"
     )
     hits = (subset["Bet"] == subset["Result"]).astype(float)
     probs = subset[prob_col].clip(0, 1).values

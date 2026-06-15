@@ -66,12 +66,6 @@ pg = st.navigation(
                 icon=":material/verified:",
                 url_path="receipts",
             ),
-            st.Page(
-                str(_surfaces / "receipts_sim.py"),
-                title="Profit Sim",
-                icon=":material/bar_chart:",
-                url_path="receipts-sim",
-            ),
         ],
         "Model Lab": [
             st.Page(
