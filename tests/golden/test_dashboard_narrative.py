@@ -67,6 +67,7 @@ def test_context_strip_returns_fields():
             {
                 "League": "NBA", "Game": "NYK/SAS", "Date": "2026-06-13",
                 "game_total": 216.1, "spread": 5.3, "fav_team": "SAS", "shape": "coinflip",
+                "baseline_total": 220.0,
             }
         ]
     )
@@ -75,6 +76,7 @@ def test_context_strip_returns_fields():
         "spread": 5.3,
         "fav_team": "SAS",
         "shape": "coinflip",
+        "baseline_total": 220.0,
     }
 
 
@@ -97,10 +99,12 @@ def test_context_strip_doubleheader_splits_on_date():
             {
                 "League": "WNBA", "Game": "DAL/POR", "Date": "2026-06-13",
                 "game_total": 163.3, "spread": 0.0, "fav_team": None, "shape": "even",
+                "baseline_total": 165.6,
             },
             {
                 "League": "WNBA", "Game": "DAL/POR", "Date": "2026-06-14",
                 "game_total": 170.0, "spread": 4.0, "fav_team": "DAL", "shape": "coinflip",
+                "baseline_total": 165.6,
             },
         ]
     )

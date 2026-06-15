@@ -1,14 +1,20 @@
-"""Narrative display values derived from the prophecize snapshots.
+"""Narrative display values and cross-surface handoffs from the prophecize snapshots.
 
-Pure lookups the Tonight and Games surfaces use to turn the precomputed thesis
-and game-context artifacts into per-game display text — no Streamlit, no I/O, so
-they unit-test directly. Both key on the canonical ``Game`` slash key
-(``"NYK/SAS"``) plus ``Date`` so a doubleheader's two games stay distinct.
+Pure lookups the Tonight, Games, and deep-dive surfaces use to turn the precomputed
+thesis and game-context artifacts into per-game display text — no Streamlit, no I/O, so
+they unit-test directly. Most key on the canonical ``Game`` slash key (``"NYK/SAS"``)
+plus ``Date`` so a doubleheader's two games stay distinct.
 """
 
 from __future__ import annotations
 
 import pandas as pd
+
+# Game-shape gloss, shared by the Games banner and the deep-dive context strip.
+SHAPE_HELP = (
+    "Projected game script: shootout (high total), grind (low total), blowout "
+    "(lopsided), or coinflip (tight). It tilts which counting stats run hot."
+)
 
 
 def top_thesis(parlays: pd.DataFrame, *, game: str, date) -> str:
@@ -64,4 +70,17 @@ def context_strip(ctx_df: pd.DataFrame, *, game: str, date) -> dict | None:
         "spread": float(row["spread"]),
         "fav_team": row["fav_team"],
         "shape": row["shape"],
+        "baseline_total": float(row["baseline_total"]),
     }
+
+
+def lab_filters_for_nav_cell(nav_cell) -> dict[str, list[str]]:
+    """Lab Training filter-key presets for a deep-dive "View in Model Lab" handoff.
+
+    Maps a ``(league, market)`` cell to the page's keyed multiselects so the link
+    lands scoped to exactly that cell; ``{}`` when there is no pending handoff.
+    """
+    if not nav_cell:
+        return {}
+    league, market = nav_cell
+    return {"lab_leagues": [league], "lab_markets": [market]}

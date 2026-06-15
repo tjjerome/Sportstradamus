@@ -7,6 +7,7 @@ import streamlit as st
 from scipy import stats
 
 from sportstradamus.dashboard.data import GAMELOG_SCHEMA, load_gamelog
+from sportstradamus.dashboard.theme import GOLD, GRAY
 
 # Distribution families, mirrored from the prediction pipeline.
 _CONTINUOUS = ("Gamma", "ZAGamma", "SkewNormal")
@@ -112,8 +113,37 @@ def distribution_frame(dist: str, ev: float, std: float, params: dict, line: flo
     return df_pdf, y_title, is_continuous
 
 
+def _projection_overlay(df_pdf: pd.DataFrame, projection: float) -> tuple[alt.Chart, alt.Chart]:
+    """A dot at the model mean (sitting on its own density) plus a numeric label.
+
+    Not a rule — the projection is a point estimate, distinct from the two vertical
+    book lines. Its height interpolates the curve so the dot rides the distribution.
+    Returned as two charts (not pre-layered) so the caller's ``+`` keeps a flat layer
+    list rather than nesting a sub-LayerChart.
+    """
+    y_at = float(np.interp(projection, df_pdf["x"], df_pdf["P"]))
+    pt = pd.DataFrame({"x": [projection], "P": [y_at], "label": [f"{projection:.1f}"]})
+    dot = (
+        alt.Chart(pt)
+        .mark_point(filled=True, size=90, color=GOLD, shape="diamond")
+        .encode(x="x:Q", y="P:Q")
+    )
+    label = (
+        alt.Chart(pt)
+        .mark_text(dy=-12, color=GOLD, fontWeight="bold")
+        .encode(x="x:Q", y="P:Q", text="label:N")
+    )
+    return dot, label
+
+
 def distribution_chart(
-    df_pdf: pd.DataFrame, is_continuous: bool, line: float, market: str, y_title: str
+    df_pdf: pd.DataFrame,
+    is_continuous: bool,
+    line: float,
+    market: str,
+    y_title: str,
+    projection: float | None = None,
+    consensus_line: float | None = None,
 ) -> alt.Chart:
     color_enc = alt.Color(
         "Side:N",
@@ -149,7 +179,19 @@ def distribution_chart(
         .mark_rule(strokeDash=[6, 3], color="#FFFFFF", strokeWidth=1.5)
         .encode(x="Line:Q")
     )
-    return chart + betting_line
+    chart = chart + betting_line
+    # Consensus market line: solid GRAY rule, distinct from the white dashed app line,
+    # and carrying no color encoding so it never re-splits the over/under shading.
+    if consensus_line is not None and not pd.isna(consensus_line):
+        chart = chart + (
+            alt.Chart(pd.DataFrame({"Consensus": [consensus_line]}))
+            .mark_rule(color=GRAY, strokeWidth=2)
+            .encode(x="Consensus:Q")
+        )
+    if projection is not None and not pd.isna(projection):
+        dot, label = _projection_overlay(df_pdf, projection)
+        chart = chart + dot + label
+    return chart
 
 
 def _has_cols(df: pd.DataFrame, *cols: str | None) -> bool:
@@ -189,7 +231,6 @@ def build_recent_history(
         pg = pg.sort_values(dcol)
     pg = pg.tail(10)
 
-    # x-axis label: "@OPP, MM/DD" away, "OPP, MM/DD" home
     if _has_cols(pg, ocol, hcol):
         labels = np.where(pg[hcol].astype(bool), "", "@") + pg[ocol].astype(str)
     elif _has_cols(pg, ocol):
@@ -229,6 +270,17 @@ def build_h2h_history(
 
     opp_vals = games[ocol].values if _has_cols(games, ocol) else opponent
     return _history_frame(labels.values, games[stat_key].values, line, opp_vals)
+
+
+def sparkline(series: list[float], *, height: int = 44) -> alt.Chart:
+    """A minimal axis-less gold line for a short value series (Other-stats tab)."""
+    df = pd.DataFrame({"i": range(len(series)), "v": series})
+    return (
+        alt.Chart(df)
+        .mark_line(color=GOLD, strokeWidth=2, point=alt.OverlayMarkDef(color=GOLD, size=18))
+        .encode(x=alt.X("i:Q", axis=None), y=alt.Y("v:Q", axis=None), tooltip=["v:Q"])
+        .properties(height=height)
+    )
 
 
 def strength_badge(mult: float) -> str:

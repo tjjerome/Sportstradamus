@@ -90,7 +90,7 @@ def render_satellites(
         offers, focus_game=focus_game, platform=platform, exclude_keys=exclude
     )
     with st.expander("Add a leg from another game", expanded=not validate_parlay_legs(legs)[0]):
-        action = _render_added(satellites, key_prefix)
+        action = _render_added(satellites, key_prefix, caption="From other games", infix="sat")
         if not groups:
             st.caption(f"No other-game edge legs on {platform}.")
             return action
@@ -132,16 +132,23 @@ def _render_pick_popover(
     return None
 
 
-def _render_added(satellites: list[tuple[int, Mapping]], key_prefix: str) -> dict | None:
-    """List the slip's current satellites with a remove control; return a remove action."""
-    if not satellites:
+def _render_added(
+    items: list[tuple[int, Mapping]], key_prefix: str, *, caption: str, infix: str
+) -> dict | None:
+    """List non-star slip legs with a remove control; return a remove action.
+
+    Used for both other-game satellites and same-game model-passed legs — neither is a
+    star on the map, so this list is their only removal path. ``items`` are
+    ``(slip_index, leg)`` pairs; ``infix`` namespaces the button keys per section.
+    """
+    if not items:
         return None
-    st.caption("From other games")
+    st.caption(caption)
     action: dict | None = None
-    for i, leg in satellites:
+    for i, leg in items:
         text_col, rm_col = st.columns([8, 1])
         text_col.write(leg["Desc"])
-        if rm_col.button(":material/close:", key=f"{key_prefix}_sat_rm_{i}", help="Remove leg"):
+        if rm_col.button(":material/close:", key=f"{key_prefix}_{infix}_rm_{i}", help="Remove leg"):
             action = {"remove": i}
     return action
 
@@ -158,10 +165,18 @@ def render_disliked_legs(
 
     The constellation only draws the focus game's model-liked stars (``K`` > 0); this is
     the manual override for a same-game leg you believe in that the model passes on
-    (``K`` ≤ 0). Chips are the game's non-star offers, least-disliked first, capped to
-    ``_DISLIKED_CAP``; returns the same ``{"add": row}`` / ``{"detail": idx}`` union the
-    satellite picker does, for the builder to apply (already-slipped legs are excluded).
+    (``K`` ≤ 0). Such a leg rides in the slip like a satellite — never drawn on the map,
+    listed here with a remove control. Chips are the game's other non-star offers,
+    least-disliked first, capped to ``_DISLIKED_CAP``; returns the same
+    ``{"add": row}`` / ``{"remove": idx}`` / ``{"detail": idx}`` union the satellite
+    picker does (already-slipped legs are excluded from the chips).
     """
+    # P8: restyle these chips/popovers to match the constellation hover card.
+    added = [
+        (i, leg)
+        for i, leg in enumerate(legs)
+        if leg["Game"] == focus_game and float(leg.get("Kelly", 0.0) or 0.0) <= 0
+    ]
     exclude = {corr_key(leg) for leg in legs}
     kelly = pd.to_numeric(offers["Kelly"], errors="coerce")
     pool = offers[(offers["Platform"] == platform) & (offers["Game"] == focus_game) & (kelly <= 0)]
@@ -171,10 +186,13 @@ def render_disliked_legs(
         if corr_key(row) not in exclude
     ]
     with st.expander("Add a leg the model doesn't like", expanded=False):
+        action = _render_added(
+            added, key_prefix, caption="In this slip (model passes)", infix="dis"
+        )
         if not rows:
-            st.caption("No other legs in this game.")
-            return None
-        action: dict | None = None
+            if not added:
+                st.caption("No other legs in this game.")
+            return action
         cols = st.columns(_SATELLITE_COLS)
         for j, row in enumerate(rows[:_DISLIKED_CAP]):
             with cols[j % _SATELLITE_COLS].popover(star_label(row), width="stretch"):

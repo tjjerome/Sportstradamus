@@ -18,6 +18,12 @@ skip when absent. To keep the matrix deterministic and pickle-free:
   ``get_ev`` / ``get_line`` reads — its values deliberately drive both the
   ``line <= 0`` (→ ``Avg10`` fallback, ``Archived=False``) and ``ev <= 0``
   (→ ``get_ev`` recompute) branches of the odds loop.
+* ``base.stat_cv`` is pinned to ``{"NBA": {"MIN": _NBA_MIN_CV}}``. It is otherwise
+  derived from ``stat_calibration.json`` — gitignored and rewritten by every
+  ``meditate`` run — and feeds the ``Odds`` column (all rows, via ``get_odds``) and
+  the recomputed ``EV`` (via ``get_ev``), so without the pin the digest drifts with
+  the live calibration. ``stat_dist`` is left live: it is tracked config, so a change
+  there is intentional and should legitimately re-pin this test.
 
 The exact frame digest is the master pin; shape / column-hash / archived-count and a
 few column sums make a regression diagnosable. Because the matrix embeds every
@@ -51,10 +57,14 @@ def _col_hash(frame: pd.DataFrame) -> str:
 _SLATE_DATE = _date(2025, 3, 10)
 _CUTOFF = _date(2025, 3, 9)
 _FROZEN_TODAY = _datetime(2025, 3, 12, 12, 0, 0)
+# stat_cv is derived from the gitignored, meditate-recomputed stat_calibration.json;
+# pinning NBA MIN's coefficient of variation keeps the Odds/EV columns (and the digest)
+# deterministic instead of drifting with the live calibration.
+_NBA_MIN_CV = 0.33
 
 _GTM_SHAPE = (321, 286)
 _GTM_COL_HASH = "d268da7b83ad9449"
-_GTM_DIGEST = 2319885884448680794
+_GTM_DIGEST = 1449650711683417532
 _GTM_ARCHIVED = 266
 _GTM_DATES = ["2025-03-10", "2025-03-11"]
 _GTM_EV_SUM = 1368.791
@@ -101,6 +111,7 @@ def test_nba_get_training_matrix(monkeypatch):
     stats = _load_or_skip()
     monkeypatch.setattr(base, "datetime", _FrozenDatetime)
     monkeypatch.setattr(base, "archive", _FakeArchive())
+    monkeypatch.setattr(base, "stat_cv", {"NBA": {"MIN": _NBA_MIN_CV}})
 
     out = stats.get_training_matrix("MIN", cutoff_date=_CUTOFF)
 

@@ -39,6 +39,9 @@ CURRENT_PARLAYS_PATH = _RUNTIME_DIR / "current_parlays.parquet"
 CURRENT_GAME_CORR_PATH = _RUNTIME_DIR / "current_game_corr.parquet"
 CURRENT_GAME_CONTEXT_PATH = _RUNTIME_DIR / "current_game_context.parquet"
 CURRENT_GAME_STORIES_PATH = _RUNTIME_DIR / "current_game_stories.parquet"
+# Per-offer deep-dive detail prerender (comps-vs-opponent, volume trend, SHAP "other
+# stats"), keyed by (League, Date, Player, Market, Opponent). Written by prophecize.
+CURRENT_OFFER_DETAILS_PATH = _RUNTIME_DIR / "current_offer_details.parquet"
 CURRENT_META_PATH = _RUNTIME_DIR / "current_meta.json"
 MODEL_STATS_PATH = _TRAINING_DIR / "model_stats.parquet"
 # Plain-text mirror of model_stats.parquet for filesystem browsing in VSCode.

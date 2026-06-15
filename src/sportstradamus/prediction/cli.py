@@ -13,6 +13,7 @@ Orchestrates the full prediction pipeline:
 from __future__ import annotations
 
 import datetime
+import importlib.resources as pkg_resources
 import os
 from functools import partialmethod
 
@@ -22,7 +23,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from sportstradamus import creds
+from sportstradamus import creds, data
 from sportstradamus.analysis import _merge_offers
 from sportstradamus.books import get_sleeper, get_ud
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, LazyArchive, get_logger, stat_map
@@ -37,6 +38,7 @@ from sportstradamus.prediction.persist import (
     write_current_game_context,
     write_current_game_corr,
     write_current_game_stories,
+    write_current_offer_details,
     write_current_offers,
 )
 from sportstradamus.prediction.scoring import process_offers
@@ -46,6 +48,7 @@ from sportstradamus.prediction.stories import (
     build_game_context,
     build_game_stories,
 )
+from sportstradamus.prediction.stories.details import build_offer_details
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
 
@@ -58,6 +61,56 @@ os.environ["LINE_PROFILE"] = "0"
 archive = LazyArchive()
 
 _HISTORY_RETENTION_DAYS = 365
+
+# Per-league gamelog volume-stat column for the deep-dive volume trend.
+_VOLUME_STAT = {
+    "NBA": "MIN",
+    "WNBA": "MIN",
+    "NFL": "snap pct",
+    "MLB": "plateAppearances",
+    "NHL": "TimeShare",
+}
+# Leagues whose comps use the KNN ``_comp_pairs`` table; MLB's pitcher/hitter comps
+# have a different structure and are deferred (empty comps-vs-opponent panel).
+_COMP_PAIR_LEAGUES = {"NBA", "WNBA", "NFL", "NHL"}
+# Recency window for the detail gamelog — covers the 300-day comps window with margin
+# while bounding the per-offer work. ``self.gamelog`` is the full multi-year log.
+_DETAIL_GAMELOG_DAYS = 400
+_FEATURE_IMPORTANCES_PATH = pkg_resources.files(data) / "training" / "feature_importances.csv"
+
+
+def _offer_details_frame(snapshot_offers: pd.DataFrame, stats: dict) -> pd.DataFrame:
+    """Assemble the per-offer detail prerender from the scored slate + Stats objects.
+
+    Uses ``sd.gamelog`` (always loaded) not ``short_gamelog`` (only set inside
+    ``get_stats``, absent for book-fallback leagues); the detail helpers window it
+    to the comps / sparkline ranges they need.
+    """
+    today = datetime.date.today()
+    if snapshot_offers.empty:
+        return build_offer_details(
+            snapshot_offers, {}, pd.DataFrame(), exclude=frozenset(), today=today
+        )
+    importances = pd.read_csv(_FEATURE_IMPORTANCES_PATH, index_col=0)
+    empty_pairs = pd.DataFrame(columns=["player", "comp"])
+    cutoff = pd.Timestamp(today - datetime.timedelta(days=_DETAIL_GAMELOG_DAYS))
+    offer_leagues = set(snapshot_offers["League"].unique())
+    league_data = {}
+    for league, sd in stats.items():
+        if league not in offer_leagues:
+            continue
+        dcol = sd.log_strings["date"]
+        gl = sd.gamelog.copy()
+        gl[dcol] = pd.to_datetime(gl[dcol])
+        league_data[league] = {
+            "comp_pairs": sd._comp_pairs() if league in _COMP_PAIR_LEAGUES else empty_pairs,
+            "gamelog": gl[gl[dcol] >= cutoff],
+            "cols": sd.log_strings,
+            "volume_stat": _VOLUME_STAT.get(league, ""),
+        }
+    return build_offer_details(
+        snapshot_offers, league_data, importances, exclude=frozenset(), today=today
+    )
 
 
 @click.command()
@@ -201,19 +254,25 @@ def main(progress, legacy_correlation, contest_variant, log_level):
             axis=1,
         )
 
-    # Precompute the narrative layer (deterministic templates, prediction/stories):
-    # per-offer "the case" and per-family thesis headlines the dashboard renders verbatim.
-    # Game context is built once and shared by the thesis pass and its own snapshot so
-    # headline and artifact agree on every game's shape.
+    if not snapshot_offers.empty:
+        key_cols = ["League", "Market", "Date", "Player"]
+        line_map = {
+            key: archive.get_line(*key)
+            for key in snapshot_offers[key_cols]
+            .drop_duplicates()
+            .itertuples(index=False, name=None)
+        }
+        snapshot_offers["Consensus Line"] = [
+            line_map[key] for key in snapshot_offers[key_cols].itertuples(index=False, name=None)
+        ]
+
     snapshot_offers = attach_offer_why(snapshot_offers)
     game_context = build_game_context(snapshot_offers, archive.default_totals)
     parlay_df = attach_parlay_theses(
         parlay_df, snapshot_offers, corr=corr_sink, context=game_context
     )
-    # Story menu (Slips grouping key): up to 5 correlation-cluster stories per
-    # (platform, game), each a Bankroll Builder + Shoot-the-Moon parlay. Reuses
-    # the same game_context + corr slices the thesis pass built.
     game_stories = build_game_stories(story_sink, snapshot_offers, game_context, corr_sink)
+    offer_details = _offer_details_frame(snapshot_offers, stats)
 
     write_current_offers(
         snapshot_offers,
@@ -225,6 +284,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     write_current_game_corr(corr_sink)
     write_current_game_context(game_context)
     write_current_game_stories(game_stories)
+    write_current_offer_details(offer_details)
 
     if not parlay_df.empty:
         old_parlays = read_parlay_hist()

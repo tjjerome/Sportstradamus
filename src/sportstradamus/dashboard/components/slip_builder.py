@@ -82,7 +82,10 @@ def render_constellation_builder(
     platform = st.session_state[_PLATFORM]
     pool = offers.loc[(offers["Game"] == focus_game) & (offers["Platform"] == platform)]
     focus_legs = [leg for leg in legs if leg["Game"] == focus_game]
-    _render_constellation(focus_legs, corr, pool, key_prefix)
+    # Only the model-liked legs are stars; a manually-added model-passed leg (Kelly ≤ 0)
+    # rides in the slip like a satellite — listed by the picker, never drawn on the map.
+    star_legs = [leg for leg in focus_legs if float(leg.get("Kelly", 0.0) or 0.0) > 0]
+    _render_constellation(star_legs, corr, pool, key_prefix)
     _render_leg_list(key_prefix, focus_game=focus_game, removable=False)
     _render_supplemental_pickers(
         offers, focus_game=focus_game, platform=platform, legs=legs, key_prefix=key_prefix
@@ -140,13 +143,15 @@ def render_simple_builder(
 def _render_leg_list(
     key_prefix: str, *, focus_game: str | None = None, removable: bool = True
 ) -> None:
-    """List slip legs. ``focus_game`` shows only that game's legs (satellites are listed
-    in the picker); ``removable=False`` drops the button column because a leg is removed
-    by clicking its star.
+    """List slip legs. ``focus_game`` shows only that game's **star** legs (Kelly > 0);
+    satellites and same-game model-passed legs are listed by the pickers. ``removable=False``
+    drops the button column because a star leg is removed by clicking it on the map.
     """
     legs = st.session_state[_LEGS]
     for i, leg in enumerate(legs):
-        if focus_game is not None and leg["Game"] != focus_game:
+        if focus_game is not None and (
+            leg["Game"] != focus_game or float(leg.get("Kelly", 0.0) or 0.0) <= 0
+        ):
             continue
         line = f"{leg['Desc']}  ·  {leg['League']}"
         if not removable:
