@@ -20,7 +20,7 @@ from sportstradamus.strategies.underdog_pickem import (
 
 
 def _offers(rows):
-    cols = ["Player", "Team", "Market", "Bet", "Model P", "Books P"]
+    cols = ["Player", "Team", "Market", "Bet", "Win Prob", "Market Prob"]
     return pd.DataFrame(rows, columns=cols)
 
 
@@ -32,7 +32,7 @@ def _parlay(legs, *, bet_size=None, model_ev=2.5, payout=3.0, league="WNBA", gam
         "League": league,
         "Platform": "Underdog",
         "Model EV": model_ev,
-        "Books EV": model_ev * 0.95,
+        "Market EV": model_ev * 0.95,
         "Boost": payout,
         "Rec Bet": 1.0,
         "Bet Size": bet_size,
@@ -332,8 +332,8 @@ def test_parlay_shrinkage_min_over_canonical_leg_markets(monkeypatch):
         {
             "Player": ["A. Player", "B. Player"],
             "Market": ["Rebounds", "Steals"],
-            "Model P": [0.60, 0.60],
-            "Books P": [0.55, 0.55],
+            "Win Prob": [0.60, 0.60],
+            "Market Prob": [0.55, 0.55],
         }
     )
     by_player = up._canonical_markets_by_player(offers)

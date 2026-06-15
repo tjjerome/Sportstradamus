@@ -31,23 +31,23 @@ _OFFERS = pd.DataFrame(
         {"League": "NBA", "Game": "BOS/PHI", "Date": _DATE, "Team": "BOS", "Opponent": "PHI",
          "Player": "Jayson Tatum", "Market": "PTS", "Bet": "Over", "Line": 28.5,
          "O/U": 120.0, "Moneyline": 0.74, "DVPOA": 0.10, "Position": "F1",
-         "Avg 5": 3.5, "Avg H2H": 2.0, "Model P": 0.59, "Books P": 0.52, "Model": 1.18, "Books": 1.00},
+         "Avg 5": 3.5, "Avg H2H": 2.0, "Win Prob": 0.59, "Market Prob": 0.52, "Model EV": 1.18, "Market EV": 1.00},
         {"League": "NBA", "Game": "BOS/PHI", "Date": _DATE, "Team": "BOS", "Opponent": "PHI",
          "Player": "Jayson Tatum", "Market": "REB", "Bet": "Over", "Line": 8.5,
          "O/U": 120.0, "Moneyline": 0.74, "DVPOA": 0.02, "Position": "F1",
-         "Avg 5": 1.0, "Avg H2H": 0.0, "Model P": 0.56, "Books P": 0.50, "Model": 1.10, "Books": 1.00},
+         "Avg 5": 1.0, "Avg H2H": 0.0, "Win Prob": 0.56, "Market Prob": 0.50, "Model EV": 1.10, "Market EV": 1.00},
         {"League": "NBA", "Game": "BOS/PHI", "Date": _DATE, "Team": "PHI", "Opponent": "BOS",
          "Player": "Joel Embiid", "Market": "PTS", "Bet": "Under", "Line": 30.5,
          "O/U": 118.0, "Moneyline": 0.26, "DVPOA": -0.08, "Position": "C1",
-         "Avg 5": -2.0, "Avg H2H": -1.5, "Model P": 0.57, "Books P": 0.51, "Model": 1.12, "Books": 1.00},
+         "Avg 5": -2.0, "Avg H2H": -1.5, "Win Prob": 0.57, "Market Prob": 0.51, "Model EV": 1.12, "Market EV": 1.00},
         {"League": "NBA", "Game": "DEN/MIA", "Date": _DATE, "Team": "DEN", "Opponent": "MIA",
          "Player": "Nikola Jokic", "Market": "AST", "Bet": "Over", "Line": 9.5,
          "O/U": 112.0, "Moneyline": 0.55, "DVPOA": 0.06, "Position": "C1",
-         "Avg 5": 1.5, "Avg H2H": 0.0, "Model P": 0.60, "Books P": 0.53, "Model": 1.20, "Books": 1.00},
+         "Avg 5": 1.5, "Avg H2H": 0.0, "Win Prob": 0.60, "Market Prob": 0.53, "Model EV": 1.20, "Market EV": 1.00},
         {"League": "NBA", "Game": "DEN/MIA", "Date": _DATE, "Team": "DEN", "Opponent": "MIA",
          "Player": "Nikola Jokic", "Market": "REB", "Bet": "Over", "Line": 12.5,
          "O/U": 112.0, "Moneyline": 0.55, "DVPOA": 0.03, "Position": "C1",
-         "Avg 5": 2.0, "Avg H2H": 1.0, "Model P": 0.58, "Books P": 0.52, "Model": 1.15, "Books": 1.00},
+         "Avg 5": 2.0, "Avg H2H": 1.0, "Win Prob": 0.58, "Market Prob": 0.52, "Model EV": 1.15, "Market EV": 1.00},
     ]
 )
 
@@ -127,7 +127,7 @@ def test_why_ev_fallback_when_no_book_prob():
     """No ``Books P`` column ⇒ edge clause comes from the EV multiples."""
     row = pd.DataFrame(
         [{"Player": "Solo Star", "Market": "REB", "Bet": "Under", "Line": 6.5,
-          "Avg 5": None, "DVPOA": None, "Model P": 0.72, "Model": 1.41, "Books": 1.41}]
+          "Avg 5": None, "DVPOA": None, "Win Prob": 0.72, "Model EV": 1.41, "Market EV": 1.41}]
     )
     assert attach_offer_why(row)["Why"].iloc[0] == "The model prices it at 1.41x."
 

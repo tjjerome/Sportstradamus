@@ -211,12 +211,12 @@ def _build_correlation_matrices(
     """
     C = np.eye(len(game_dict))
     M = np.zeros([len(game_dict), len(game_dict)])
-    p_model = game_df["Model P"].to_numpy()
-    p_books = game_df["Books P"].to_numpy()
+    p_model = game_df["Win Prob"].to_numpy()
+    p_books = game_df["Market Prob"].to_numpy()
     # ``Push P`` is added by :func:`model_prob` for integer-line discrete markets;
     # missing for combo legs etc. — fill 0.0 so the analytical mvn.cdf path runs.
-    if "Push P" in game_df.columns:
-        p_push = game_df["Push P"].fillna(0.0).to_numpy()
+    if "Push Prob" in game_df.columns:
+        p_push = game_df["Push Prob"].fillna(0.0).to_numpy()
     else:
         p_push = np.zeros(len(game_df), dtype=float)
     boosts = game_df["Boost"].to_numpy()
@@ -356,7 +356,7 @@ def _build_cmarket_desc(league_df, league, new_map):
     league_df["Desc"] = (
         league_df["Desc"]
         + " - "
-        + league_df["Model P"].multiply(100).round(1).astype(str)
+        + league_df["Win Prob"].multiply(100).round(1).astype(str)
         + "%, "
         + league_df["Boost"].round(2).astype(str)
         + "x"
@@ -402,21 +402,21 @@ def _select_bet_offers(game_df):
     tractable.
     """
     idx = game_df.loc[
-        (game_df["Books"] > _OFFER_BOOKS_EV_FLOOR)
-        & (game_df["Books P"] >= _OFFER_BOOKS_PROB_FLOOR)
-        & (game_df["Model"] > _OFFER_MODEL_EV_FLOOR)
-        & (game_df["Model P"] >= _OFFER_MODEL_PROB_FLOOR)
-    ].sort_values("K", ascending=False)
+        (game_df["Market EV"] > _OFFER_BOOKS_EV_FLOOR)
+        & (game_df["Market Prob"] >= _OFFER_BOOKS_PROB_FLOOR)
+        & (game_df["Model EV"] > _OFFER_MODEL_EV_FLOOR)
+        & (game_df["Win Prob"] >= _OFFER_MODEL_PROB_FLOOR)
+    ].sort_values("Kelly", ascending=False)
     idx = idx.drop_duplicates(subset=["Player", "Team", "Market", "Line"])
     idx = idx.groupby("Player").head(_MAX_OFFERS_PER_PLAYER)
     idx = (
-        idx.sort_values(["Model", "Books"], ascending=False)
+        idx.sort_values(["Model EV", "Market EV"], ascending=False)
         .groupby("Team")
         .head(_MAX_OFFERS_PER_TEAM)
         .sort_values(["Team", "Player"])
     )
     return (
-        idx.sort_values(["Model", "Books"], ascending=False)
+        idx.sort_values(["Model EV", "Market EV"], ascending=False)
         .head(_MAX_OFFERS_PER_GAME)
         .sort_values(["Team", "Player"])
     )
@@ -666,7 +666,7 @@ def find_correlation(
 
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]: ``(offer_df, parlay_df)`` where
-            ``offer_df`` is the full scored slate sorted by ``Model`` and
+            ``offer_df`` is the full scored slate sorted by ``Model EV`` and
             ``parlay_df`` has beam-search parlay candidates.
     """
     logger.info("Finding Correlations")
@@ -704,7 +704,7 @@ def find_correlation(
             "League",
             "Platform",
             "Model EV",
-            "Books EV",
+            "Market EV",
             "Boost",
             "Rec Bet",
             "Leg 1",
@@ -777,4 +777,4 @@ def find_correlation(
             * parlay_df["Boost"]
         )
 
-    return df.dropna(subset="Model").sort_values("Model", ascending=False), parlay_df
+    return df.dropna(subset="Model EV").sort_values("Model EV", ascending=False), parlay_df

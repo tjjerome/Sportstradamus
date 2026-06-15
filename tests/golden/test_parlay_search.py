@@ -294,7 +294,7 @@ def _beam_inputs() -> dict:
             "Line": 1.5,
             "Market": f"Market{i}",
             "Bet": "Over",
-            "Model P": p_model[i],
+            "Win Prob": p_model[i],
         }
         for i in range(n)
     }
@@ -333,7 +333,7 @@ def test_beam_search_characterization() -> None:
         return (
             r["Bet Size"],
             round(r["Model EV"], 6),
-            round(r["Books EV"], 6),
+            round(r["Market EV"], 6),
             round(r["Rec Bet"], 6),
             round(r["P"], 6),
             round(r["PB"], 6),

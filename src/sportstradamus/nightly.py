@@ -127,7 +127,7 @@ def _side_precision(group: pd.DataFrame, side: str) -> float:
 
 
 def _top_decile_mae(group: pd.DataFrame) -> float:
-    """MAE of |Model EV - Actual| on the top-decile offers by Line.
+    """MAE of |Projection - Actual| on the top-decile offers by Line.
 
     Buckets by Line (no Stats loading at reflect time per Stage 0 locked
     decision #17 — the heavy MeanYr lookup lives in compression_eval's
@@ -140,7 +140,7 @@ def _top_decile_mae(group: pd.DataFrame) -> float:
     top = group[group["Line"] >= threshold]
     if top.empty:
         return float("nan")
-    return float((top["Model EV"] - top["Actual"]).abs().mean())
+    return float((top["Projection"] - top["Actual"]).abs().mean())
 
 
 def _profit_sim_yield(group: pd.DataFrame) -> float:
@@ -155,7 +155,7 @@ def _profit_sim_yield(group: pd.DataFrame) -> float:
     n = len(group)
     if n == 0:
         return float("nan")
-    books_p = group["Books P"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
+    books_p = group["Market Prob"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
     boost = group["Boost"].fillna(1.0).to_numpy()
     hit = group["Hit"].fillna(0).to_numpy()
     is_over = (group["Bet"] == "Over").to_numpy()
@@ -177,11 +177,11 @@ def _profit_sim_kelly_yield(group: pd.DataFrame) -> float:
     n = len(group)
     if n == 0:
         return float("nan")
-    books_p = group["Books P"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
+    books_p = group["Market Prob"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
     boost = group["Boost"].fillna(1.0).to_numpy()
     hit = group["Hit"].fillna(0).to_numpy()
     is_over = (group["Bet"] == "Over").to_numpy()
-    model_p = group["Model P"].clip(_BOOKS_P_CLIP, 1.0 - _BOOKS_P_CLIP).to_numpy()
+    model_p = group["Win Prob"].clip(_BOOKS_P_CLIP, 1.0 - _BOOKS_P_CLIP).to_numpy()
     decimal_odds = np.where(is_over, boost / books_p, boost / (1 - books_p))
     b = decimal_odds - 1.0
     # b <= 0 ⇒ even-money or worse — Kelly always returns 0; skip those bets.

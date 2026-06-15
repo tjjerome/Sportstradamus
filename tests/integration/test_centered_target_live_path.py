@@ -133,7 +133,7 @@ def test_centered_additive_skewnormal_decodes_with_finite_alpha_and_no_compressi
     delta = raw_alpha / np.sqrt(1 + raw_alpha**2)
     expected_ev = eb + raw_loc + raw_scale * delta * np.sqrt(2 / np.pi)
     np.testing.assert_allclose(
-        decoded["Model EV"].to_numpy(),
+        decoded["Projection"].to_numpy(),
         expected_ev,
         atol=1e-9,
         err_msg=("Live decode formula does not match the train-side EB-additive transform."),
@@ -143,7 +143,7 @@ def test_centered_additive_skewnormal_decodes_with_finite_alpha_and_no_compressi
     meanyr = X_test["MeanYr"].to_numpy()
     top_q = meanyr >= np.quantile(meanyr, 0.8)
     if top_q.sum() > 0:
-        ratio = decoded["Model EV"].to_numpy()[top_q] / meanyr[top_q]
+        ratio = decoded["Projection"].to_numpy()[top_q] / meanyr[top_q]
         assert ratio.mean() >= _TOP_QUINTILE_EV_FRACTION_FLOOR, (
             f"Top-quintile mean Model EV / MeanYr = {ratio.mean():.3f}; "
             f"centered strategy should not compress high-volume players below "
@@ -151,5 +151,5 @@ def test_centered_additive_skewnormal_decodes_with_finite_alpha_and_no_compressi
         )
 
     # Assertion 4: overall magnitudes are sane.
-    assert decoded["Model EV"].notna().all()
-    assert decoded["Model EV"].mean() > 0
+    assert decoded["Projection"].notna().all()
+    assert decoded["Projection"].mean() > 0

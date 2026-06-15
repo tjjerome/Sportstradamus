@@ -133,9 +133,9 @@ def _strong_legs(sctx: GameScoringContext) -> dict[int, float]:
     the strong-edge floor.
     """
     return {
-        i: sctx.bet_df[i]["Model"]
+        i: sctx.bet_df[i]["Model EV"]
         for i in sctx.leg_indices
-        if sctx.bet_df[i]["Model"] - 1.0 >= _MENU_EDGE_FLOOR
+        if sctx.bet_df[i]["Model EV"] - 1.0 >= _MENU_EDGE_FLOOR
     }
 
 

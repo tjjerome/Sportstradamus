@@ -33,7 +33,7 @@ def _build_history(span_days: int = 100, n_per_cell: int = 8) -> pd.DataFrame:
                     "League": league,
                     "Date": date,
                     "Market": market,
-                    "Model EV": line,
+                    "Projection": line,
                     "Offers": [_offer(line, "Over", 0.55, 0.50)],
                     "Actual": float(rng.normal(line, 2.0)),
                 }

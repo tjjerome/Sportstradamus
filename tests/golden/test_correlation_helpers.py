@@ -139,11 +139,11 @@ def _nba_offers() -> list[dict]:
             "Line": line,
             "Boost": boost,
             "Bet": bet,
-            "Model P": mp,
-            "Books P": round(min(max(mp - 0.08, 0.05), 0.95), 4),
-            "Model": model,
-            "Books": books,
-            "K": round(mp, 4),
+            "Win Prob": mp,
+            "Market Prob": round(min(max(mp - 0.08, 0.05), 0.95), 4),
+            "Model EV": model,
+            "Market EV": books,
+            "Kelly": round(mp, 4),
             "Player position": pos_of[player],
         }
         for team, opp, player, market, line, boost, bet, mp, model, books in raw
@@ -231,11 +231,11 @@ def _wnba_offers() -> list[dict]:
             "Line": line,
             "Boost": 1.78,  # == UNDERDOG_BOOST_BASELINE → post-normalization 1.0
             "Bet": "Over",
-            "Model P": mp,
-            "Books P": round(mp - 0.10, 4),
-            "Model": 1.0 + (mp - 0.5),
-            "Books": 1.0,
-            "K": 1.0,
+            "Win Prob": mp,
+            "Market Prob": round(mp - 0.10, 4),
+            "Model EV": 1.0 + (mp - 0.5),
+            "Market EV": 1.0,
+            "Kelly": 1.0,
             "Player position": pos,
         }
         for player, team, opp, market, line, pos, mp in raw
@@ -255,7 +255,7 @@ def test_find_correlation_builds_parlays_wnba() -> None:
     _, parlay_df = find_correlation(offers, stats, "Underdog", contest_variant="power")
 
     assert not parlay_df.empty
-    for col in ("Game", "League", "Platform", "Model EV", "Books EV", "Legs", "Bet Size", "Family"):
+    for col in ("Game", "League", "Platform", "Model EV", "Market EV", "Legs", "Bet Size", "Family"):
         assert col in parlay_df.columns
     assert set(parlay_df["Bet Size"].astype(int)).issubset({2, 3, 4, 5, 6})
     assert (parlay_df["League"] == "WNBA").all()
@@ -391,8 +391,8 @@ def test_leg_pair_corr_boost_applies_banned_modifier() -> None:
 def _matrix_game() -> tuple[pd.DataFrame, dict]:
     game_df = pd.DataFrame(
         {
-            "Model P": [0.6, 0.5, 0.7],
-            "Books P": [0.55, 0.48, 0.66],
+            "Win Prob": [0.6, 0.5, 0.7],
+            "Market Prob": [0.55, 0.48, 0.66],
             "Boost": [1.0, 1.0, 1.0],
             "Player": ["A", "B", "C"],
             "Bet": ["Over", "Over", "Over"],
@@ -432,7 +432,7 @@ def test_build_correlation_matrices_structure_and_values() -> None:
 def test_build_correlation_matrices_honors_push_column() -> None:
     """A present Push P column is carried through (NaNs filled with 0)."""
     game_df, game_dict = _matrix_game()
-    game_df["Push P"] = [0.1, np.nan, 0.2]
+    game_df["Push Prob"] = [0.1, np.nan, 0.2]
 
     p_push = _build_correlation_matrices(game_df, game_dict, {}, {}, {}, [3.0]).p_push
     assert p_push.tolist() == [0.1, 0.0, 0.2]

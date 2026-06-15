@@ -1159,7 +1159,7 @@ def test_test_set_to_bet_frame_picks_under_when_ev_below_line():
     # Hit: Result (8) < Line (10) ⇒ under wins.
     assert bool(bets["Hit"].iloc[0]) is True
     # Model probability on the UNDER side = 1 - P = 0.6.
-    assert bets["Model P"].iloc[0] == pytest.approx(0.6)
+    assert bets["Win Prob"].iloc[0] == pytest.approx(0.6)
 
 
 def test_paired_sharpe_returns_finite_pair():
@@ -1260,8 +1260,8 @@ def _build_live_history_fixture(n: int = 60, market: str = "PTS") -> pd.DataFram
                 "Team": "HOME",
                 "Date": date,
                 "Market": market,
-                "Model EV": line + rng.normal(0, 1.5),
-                "Books EV": line,
+                "Projection": line + rng.normal(0, 1.5),
+                "Market Projection": line,
                 "Dist": "SkewNormal",
                 "CV": 0.3,
                 "Model Param": line,
@@ -1314,7 +1314,7 @@ def test_history_to_eval_frame_filters_to_league_market_and_window():
                 "League": "NBA",
                 "Date": today.strftime("%Y-%m-%d"),
                 "Market": "PTS",
-                "Model EV": 20.0,
+                "Projection": 20.0,
                 "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)],
                 "Actual": 22.0,
             }
@@ -1326,7 +1326,7 @@ def test_history_to_eval_frame_filters_to_league_market_and_window():
             "League": "WNBA",
             "Date": today.strftime("%Y-%m-%d"),
             "Market": "PTS",
-            "Model EV": 20.0,
+            "Projection": 20.0,
             "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)],
             "Actual": 22.0,
         }
@@ -1338,7 +1338,7 @@ def test_history_to_eval_frame_filters_to_league_market_and_window():
             "League": "NBA",
             "Date": today.strftime("%Y-%m-%d"),
             "Market": "REB",
-            "Model EV": 20.0,
+            "Projection": 20.0,
             "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)],
             "Actual": 22.0,
         }
@@ -1350,7 +1350,7 @@ def test_history_to_eval_frame_filters_to_league_market_and_window():
             "League": "NBA",
             "Date": (today - timedelta(days=120)).strftime("%Y-%m-%d"),
             "Market": "PTS",
-            "Model EV": 20.0,
+            "Projection": 20.0,
             "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)],
             "Actual": 22.0,
         }

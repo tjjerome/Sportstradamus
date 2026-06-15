@@ -109,9 +109,9 @@ def test_full_parity_model_mirrors_book(monkeypatch):
     assert len(records) == 1
     rec = records[0]
     # The model slot is the book: identical probability and EV-weighted value.
-    assert rec["Model P"] == pytest.approx(rec["Books P"])
-    assert rec["Model"] == pytest.approx(rec["Books"])
-    assert rec["Model EV"] == pytest.approx(_BOOK_EV)
+    assert rec["Win Prob"] == pytest.approx(rec["Market Prob"])
+    assert rec["Model EV"] == pytest.approx(rec["Market EV"])
+    assert rec["Projection"] == pytest.approx(_BOOK_EV)
     assert rec["Dist"] == "NegBin"
     # Feature-derived parity columns are populated; position mapped to an int.
     assert isinstance(rec["Player position"], (int, np.integer))
@@ -119,7 +119,7 @@ def test_full_parity_model_mirrors_book(monkeypatch):
     assert rec["Avg 5"] == pytest.approx(20.0 - _LINE)
     # Probability equals the devigged book over/under at the line.
     over = 1 - get_odds(_LINE, _BOOK_EV, "NegBin", _CV, step=1.0, gate=None)
-    assert rec["Model P"] == pytest.approx(max(over, 1 - over))
+    assert rec["Win Prob"] == pytest.approx(max(over, 1 - over))
 
 
 def test_neutral_fill_when_no_feature_matrix(monkeypatch):
@@ -131,7 +131,7 @@ def test_neutral_fill_when_no_feature_matrix(monkeypatch):
 
     assert len(records) == 1
     rec = records[0]
-    assert rec["Model"] == pytest.approx(rec["Books"])
+    assert rec["Model EV"] == pytest.approx(rec["Market EV"])
     # Player position must be the int sentinel -1, never NaN, or correlation breaks.
     assert rec["Player position"] == -1
     assert isinstance(rec["Player position"], (int, np.integer))

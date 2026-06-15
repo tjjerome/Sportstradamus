@@ -21,7 +21,7 @@ def _history() -> pd.DataFrame:
             {
                 "Dist": "NegBin",
                 "CV": 0.5,
-                "Model EV": 6.0,
+                "Projection": 6.0,
                 "Model Param": 3.0,
                 "Gate": np.nan,
                 "Actual": 7.0,
@@ -29,7 +29,7 @@ def _history() -> pd.DataFrame:
             {
                 "Dist": "Gamma",
                 "CV": 0.4,
-                "Model EV": 10.0,
+                "Projection": 10.0,
                 "Model Param": 5.0,
                 "Gate": np.nan,
                 "Actual": 12.0,
@@ -37,7 +37,7 @@ def _history() -> pd.DataFrame:
             {
                 "Dist": np.nan,
                 "CV": 0.5,
-                "Model EV": 6.0,
+                "Projection": 6.0,
                 "Model Param": 3.0,
                 "Gate": np.nan,
                 "Actual": 5.0,
@@ -45,7 +45,7 @@ def _history() -> pd.DataFrame:
             {
                 "Dist": "NegBin",
                 "CV": 0.5,
-                "Model EV": 6.0,
+                "Projection": 6.0,
                 "Model Param": 3.0,
                 "Gate": np.nan,
                 "Actual": np.nan,
