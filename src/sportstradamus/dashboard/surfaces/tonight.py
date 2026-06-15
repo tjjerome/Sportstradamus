@@ -1,5 +1,4 @@
 """Tonight — game-card slate showing today's offers grouped by game."""
-# pylint: disable=duplicate-code  # same offers preamble as game.py; different presentation logic
 
 import pandas as pd
 import streamlit as st
@@ -60,12 +59,14 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
                 st.caption(f"Top edge: {top_ev:+.2f}")
         with right:
             game_label = f"{team} vs {opponent}"
-            # Date keeps doubleheaders distinct; format must match game.py's labels.
+            # Date keeps doubleheaders distinct; format must match the Slips
+            # game-seed labels.
             game_param = f"{game_label} · {date_raw}" if date_raw else game_label
             if st.button("View game", key=f"tonight_{league}_{date_raw}_{game_label}"):
                 # switch_page drops query params set the same run; hand off via
-                # session state and let game.py read it first (?game= is the deep link).
+                # session state and let the Slips game-seed read it first (?game=
+                # is the deep link).
                 st.session_state["nav_game"] = game_param
-                st.switch_page("surfaces/game.py")
+                st.switch_page("surfaces/slips.py")
 
 st.caption("Prophecies arrive with the next data wave.")

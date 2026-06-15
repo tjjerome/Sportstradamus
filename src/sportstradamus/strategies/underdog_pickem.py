@@ -37,11 +37,6 @@ _RIVALS_LEG_SIZES: tuple[int, ...] = (2, 3)
 
 _RECOMMENDATIONS_DIR = Path("data") / "recommendations"
 
-# prophecize's hourly snapshot sizes stakes at this nominal bankroll purely to
-# drive rank_and_dedupe ordering (bankroll-invariant below the per-bet cap); the
-# dashboard re-sizes every entry against the user's actual bankroll.
-REFERENCE_BANKROLL = Decimal("1000")
-
 
 @dataclass(frozen=True)
 class PickemConfig:
@@ -296,27 +291,6 @@ def _parlays_per_variant(
         v: find_correlation(scored, stats, "Underdog", contest_variant=v)[1]
         for v in config.contest_variants
     }
-
-
-def build_entries_from_scored(
-    date: datetime.date,
-    bankroll: Decimal,
-    scored_offers_df: pd.DataFrame,
-    stats: dict[str, Any],
-    config: PickemConfig | None = None,
-) -> list[RecommendedEntry]:
-    """Build ranked entries from offers already scored by ``process_offers``.
-
-    Skips the scrape and model scoring — the caller supplies ``scored_offers_df``
-    — and runs only the per-variant correlation search before ranking and
-    sizing. The ``prophecize`` snapshot hook uses this so the hourly run feeds
-    the dashboard without a second scrape or archive lock.
-    """
-    config = config or PickemConfig()
-    parlay_dfs = _parlays_per_variant(scored_offers_df, stats, config)
-    return construct_entries(
-        date, bankroll, config, parlay_dfs=parlay_dfs, offers_df=scored_offers_df
-    )
 
 
 def _live_load(config: PickemConfig) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:

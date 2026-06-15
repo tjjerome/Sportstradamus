@@ -5,8 +5,8 @@ seed/add/lock primitives) and one live scorer (``slip_engine.score_slip``):
 
 * :func:`render_constellation_builder` — same-game, correlation-aware, with a
   live deterministic thesis headline. Hosted on the Slips surface; seeded from a
-  story (Bankroll Builder / Shoot the Moon), a Game-tab selection, or a sidebar
-  edit. The literal star/edge visual is a later theming step; this is the editor.
+  story (Bankroll Builder / Shoot the Moon), a game-seed selection, or a sidebar
+  edit. Carries the focus game's Total / Spread / Shape context banner.
 * :func:`render_simple_builder` — any-game, grade-only (no thesis); hosted on the
   Board over a cross-game selection.
 
@@ -40,12 +40,19 @@ from sportstradamus.dashboard.components.slip_state import (
 )
 from sportstradamus.dashboard.data import load_model_stats
 from sportstradamus.dashboard.legs import corr_key
+from sportstradamus.dashboard.narrative import context_strip
 from sportstradamus.dashboard.slip_engine import SlipScore, score_slip, slip_headline
 from sportstradamus.prediction.stories.legs import validate_parlay_legs
 
+# Plain-language gloss for the focus game's "Shape" metric (the projected game
+# script ``classify_shape`` names from the model's total + win probability).
+_SHAPE_HELP = (
+    "Projected game script: shootout (high total), grind (low total), blowout "
+    "(lopsided), or coinflip (tight). It tilts which counting stats run hot."
+)
+
 
 def _slip_shrinkage(legs: Sequence[Mapping]) -> float:
-    """Resolved slip shrinkage = min per-leg ``kelly_shrinkage`` from model_stats (default 1.0)."""
     stats = load_model_stats()
     if stats.empty or "kelly_shrinkage" not in stats.columns:
         return 1.0
@@ -58,13 +65,19 @@ def _slip_shrinkage(legs: Sequence[Mapping]) -> float:
 
 
 def render_constellation_builder(
-    offers: pd.DataFrame, corr: pd.DataFrame, ctxs: Mapping, *, key_prefix: str = "cb"
+    offers: pd.DataFrame,
+    corr: pd.DataFrame,
+    ctxs: Mapping,
+    *,
+    game_context: pd.DataFrame,
+    key_prefix: str = "cb",
 ) -> None:
     """Same-game correlation-aware editor with a live deterministic thesis headline.
 
     The constellation is the editor: a full-color star is a slip leg, a desaturated
     one a candidate, and clicking either toggles it; a star's hover card opens the
-    full offer detail without disturbing the slip.
+    full offer detail without disturbing the slip. ``game_context`` is
+    ``current_game_context``, read for the focus game's Total / Spread / Shape banner.
     """
     legs = st.session_state[_LEGS]
     if not legs:
@@ -72,6 +85,7 @@ def render_constellation_builder(
         return
     focus, pool = _focus_pool(legs, offers)
     focus_legs = [leg for leg in legs if leg["Game"] == focus]
+    _render_game_banner(game_context, focus_legs[0])
     _render_constellation(focus_legs, corr, pool, key_prefix)
     _render_leg_list(key_prefix, focus_game=focus, removable=False)
     act = render_satellites(
@@ -91,7 +105,13 @@ def render_constellation_builder(
     if not valid:
         st.warning(reason)
     shrink = _slip_shrinkage(legs)
-    score = _score(legs, corr, shrink)
+    score = score_slip(
+        legs,
+        corr,
+        platform=st.session_state[_PLATFORM],
+        bankroll=Decimal(str(st.session_state[_BANKROLL])),
+        shrinkage=shrink,
+    )
     headline = slip_headline(focus_legs, offers, ctxs)
     if headline:
         st.markdown(f"#### {headline}")
@@ -112,19 +132,15 @@ def render_simple_builder(
         st.caption("Select at least two legs to price the slip.")
         return
     shrink = _slip_shrinkage(legs)
-    score = _score(legs, corr, shrink)
-    _render_metrics(score, correlated=False)
-    _render_lock_in(score, "", shrink, key_prefix)
-
-
-def _score(legs: Sequence[Mapping], corr: pd.DataFrame, shrink: float) -> SlipScore:
-    return score_slip(
+    score = score_slip(
         legs,
         corr,
         platform=st.session_state[_PLATFORM],
         bankroll=Decimal(str(st.session_state[_BANKROLL])),
         shrinkage=shrink,
     )
+    _render_metrics(score, correlated=False)
+    _render_lock_in(score, "", shrink, key_prefix)
 
 
 def _render_leg_list(
@@ -251,7 +267,6 @@ def _open_offer_detail(key: str, pool: pd.DataFrame) -> None:
 
 
 def _pool_match_for_key(pool: pd.DataFrame, key: str) -> tuple | None:
-    """``(index label, row dict)`` for the pool offer matching a star's key, or ``None``."""
     for idx, row in zip(pool.index, pool.to_dict("records"), strict=True):
         if corr_key(row) == key:
             return idx, row
@@ -267,6 +282,18 @@ def _focus_pool(legs: Sequence[Mapping], offers: pd.DataFrame) -> tuple[str, pd.
     focus = legs[0]["Game"]
     platform = st.session_state[_PLATFORM]
     return focus, offers.loc[(offers["Game"] == focus) & (offers["Platform"] == platform)]
+
+
+def _render_game_banner(game_context: pd.DataFrame, focus_leg: Mapping) -> None:
+    """Total / Spread / Shape strip for the slip's focus game (blank if unknown)."""
+    strip = context_strip(game_context, game=focus_leg["Game"], date=focus_leg["Date"])
+    if not strip:
+        return
+    fav, spread = strip["fav_team"], strip["spread"]
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total", f"{strip['game_total']:.1f}")
+    c2.metric("Spread", f"{fav} -{spread:.1f}" if fav and spread > 0 else "Even")
+    c3.metric("Shape", str(strip["shape"]).title(), help=_SHAPE_HELP)
 
 
 def _render_metrics(score: SlipScore, *, correlated: bool) -> None:

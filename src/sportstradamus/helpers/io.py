@@ -36,7 +36,6 @@ HISTORY_PATH = _RUNTIME_DIR / "history.parquet"
 PARLAY_HIST_PATH = _RUNTIME_DIR / "parlay_hist.parquet"
 CURRENT_OFFERS_PATH = _RUNTIME_DIR / "current_offers.parquet"
 CURRENT_PARLAYS_PATH = _RUNTIME_DIR / "current_parlays.parquet"
-CURRENT_PICKEM_PATH = _RUNTIME_DIR / "current_pickem.parquet"
 CURRENT_GAME_CORR_PATH = _RUNTIME_DIR / "current_game_corr.parquet"
 CURRENT_GAME_CONTEXT_PATH = _RUNTIME_DIR / "current_game_context.parquet"
 CURRENT_GAME_STORIES_PATH = _RUNTIME_DIR / "current_game_stories.parquet"
@@ -165,7 +164,6 @@ def read_parquet_safe(path) -> pd.DataFrame:
 
 
 def _pad_legacy_offer(offer):
-    """Pad a 6-tuple legacy offer up to the current 9-field shape with NaN."""
     if len(offer) == _LEGACY_OFFER_LEN:
         return (*tuple(offer), np.nan, np.nan, np.nan)
     return tuple(offer)
