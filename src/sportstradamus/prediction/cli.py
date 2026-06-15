@@ -38,7 +38,6 @@ from sportstradamus.prediction.persist import (
     write_current_game_corr,
     write_current_game_stories,
     write_current_offers,
-    write_current_pickem,
 )
 from sportstradamus.prediction.scoring import process_offers
 from sportstradamus.prediction.stories import (
@@ -131,7 +130,6 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     all_offers: list[pd.DataFrame] = []
     parlay_df = pd.DataFrame()
     platforms_run: list[str] = []
-    scored_ud: pd.DataFrame | None = None
     corr_sink: list[dict] = []
     story_sink: list = []
 
@@ -147,9 +145,6 @@ def main(progress, legacy_correlation, contest_variant, log_level):
             story_sink=story_sink,
         )
         parlay_df = pd.concat([parlay_df, ud5])
-        # Capture the raw scored frame (pre Market-remap / Boost-rescale) for the
-        # Pick'em snapshot — find_correlation expects the process_offers shape.
-        scored_ud = ud_offers.copy()
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
         ud_offers["Stat"] = ud_offers[
             "Market"
@@ -200,7 +195,6 @@ def main(progress, legacy_correlation, contest_variant, log_level):
         parlay_df.reset_index(drop=True, inplace=True)
         parlay_df[["Legs", "Misses", "Profit"]] = np.nan
 
-    # Overwrite O/U percentage with raw game total from Archive
     if not snapshot_offers.empty and "O/U" in snapshot_offers.columns:
         snapshot_offers["O/U"] = snapshot_offers.apply(
             lambda r: archive.get_total(r["League"], r["Date"], r["Team"]) or r["O/U"],
@@ -231,8 +225,6 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     write_current_game_corr(corr_sink)
     write_current_game_context(game_context)
     write_current_game_stories(game_stories)
-
-    _write_pickem_snapshot(scored_ud, stats)
 
     if not parlay_df.empty:
         old_parlays = read_parlay_hist()
@@ -305,31 +297,6 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     write_history(history)
 
     logger.info("Success!")
-
-
-def _write_pickem_snapshot(scored_ud: pd.DataFrame | None, stats: dict) -> None:
-    """Build the Underdog Pick'em entries snapshot from already-scored offers.
-
-    Reuses prophecize's scored Underdog frame — no second scrape, no extra
-    archive lock — and writes ``current_pickem.parquet`` for the dashboard.
-    Guarded so a pickem failure never breaks the core run.
-    """
-    if scored_ud is None or scored_ud.empty:
-        return
-    try:
-        from sportstradamus.strategies._pickem_emit import entries_to_frame
-        from sportstradamus.strategies.underdog_pickem import (
-            REFERENCE_BANKROLL,
-            PickemConfig,
-            build_entries_from_scored,
-        )
-
-        entries = build_entries_from_scored(
-            datetime.date.today(), REFERENCE_BANKROLL, scored_ud, stats, PickemConfig()
-        )
-        write_current_pickem(entries_to_frame(entries))
-    except Exception:
-        logger.exception("Failed to build pickem snapshot")
 
 
 def _merge_prediction_row(history, new_df, idx):

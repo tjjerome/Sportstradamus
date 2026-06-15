@@ -34,10 +34,9 @@ _sport_widget = st.segmented_control(
 )
 st.session_state["sport"] = _sport_widget if _sport_widget is not None else "All"
 
-# st.Page paths resolve relative to app.py's directory.
 _surfaces = Path(__file__).parent / "surfaces"
 
-# Six surfaces live top-level (unnamed section renders headerless);
+# Five surfaces live top-level (unnamed section renders headerless);
 # only Model Lab gets a group header.
 pg = st.navigation(
     {
@@ -48,12 +47,6 @@ pg = st.navigation(
                 icon=":material/dark_mode:",
                 default=True,
                 url_path="tonight",
-            ),
-            st.Page(
-                str(_surfaces / "game.py"),
-                title="Game",
-                icon=":material/sports_basketball:",
-                url_path="game",
             ),
             st.Page(
                 str(_surfaces / "board.py"),
@@ -103,7 +96,6 @@ pg = st.navigation(
     }
 )
 
-# The slip shelf lives in the sidebar beneath the nav, on every surface.
 with st.sidebar:
     render_locked_shelf()
 

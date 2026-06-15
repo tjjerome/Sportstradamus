@@ -1,11 +1,13 @@
-"""Build a slip — story-seeded constellation builder, plus Pick'em entries."""
+"""Build a slip — story- or game-seeded constellation builder.
 
-from decimal import Decimal
+Folds the former Game surface in: a slip can be seeded from a curated story or
+from any game's offers, and the builder carries that game's Total / Spread /
+Shape context banner.
+"""
 
 import pandas as pd
 import streamlit as st
 
-from sportstradamus.dashboard.components.grid import render_themed_grid
 from sportstradamus.dashboard.components.slip_builder import render_constellation_builder
 from sportstradamus.dashboard.components.slip_state import seed_from_legs, seed_from_story
 from sportstradamus.dashboard.data import (
@@ -15,43 +17,10 @@ from sportstradamus.dashboard.data import (
     load_current_game_stories,
     load_current_meta,
     load_current_offers,
-    load_current_pickem,
     render_banner,
     sport_filtered,
 )
-from sportstradamus.dashboard.legs import find_offer_idx, parse_leg
 from sportstradamus.prediction.stories.context import ctxs_from_frame
-from sportstradamus.strategies.kelly import fractional_kelly_stake
-
-# Iteration order controls section order in the Pick'em tab.
-VARIANT_LABELS = {"power": "Power", "flex": "Flex", "rivals": "Rivals"}
-# Default bankroll if the global slip-state key hasn't been touched yet.
-_DEFAULT_BANKROLL = 1000.0
-
-# Pick'em themed-grid geometry: header + per-row pixel heights, capped so a long slate
-# scrolls inside the grid instead of stretching the page.
-_PICKEM_ROW_PX = 32
-_PICKEM_HEADER_PX = 56
-_PICKEM_MAX_GRID_HEIGHT = 420
-_PICKEM_HELP = {
-    "Size": "Number of legs in the entry.",
-    "Joint P": "Modeled probability all legs hit.",
-    "Payout": "Entry payout multiplier on a win.",
-    "EV %": "Entry expected value: +5% means $1 returns $1.05 on average.",
-    "Stake": "Quarter-Kelly stake scaled to your bankroll.",
-}
-
-
-def _compute_stake(row: pd.Series, bankroll: float) -> float:
-    """Quarter-Kelly stake for a Pick'em entry scaled to ``bankroll``."""
-    return float(
-        fractional_kelly_stake(
-            bankroll=Decimal(str(bankroll)),
-            win_prob=float(row["joint_prob"]),
-            payout_multiplier=Decimal(str(row["payout_multiplier"])),
-            model_shrinkage=float(row["shrinkage"]),
-        )
-    )
 
 
 def _render_story_cascade(stories: pd.DataFrame, offers: pd.DataFrame) -> None:
@@ -93,102 +62,75 @@ def _render_story_cascade(stories: pd.DataFrame, offers: pd.DataFrame) -> None:
         st.rerun()
 
 
-def _render_pickem(entries: pd.DataFrame, offers: pd.DataFrame) -> None:
-    bankroll = float(st.session_state.get("slip_bankroll", _DEFAULT_BANKROLL))
-    view = entries.copy()
-    view["Stake"] = view.apply(lambda r: _compute_stake(r, bankroll), axis=1)
-    view = view.sort_values("ev", ascending=False)
-    st.caption(f"{len(view)} entries across {view['contest_variant'].nunique()} contest variants.")
+def _apply_game_preselect(games: list[str]) -> None:
+    """Pre-select the Tonight "View game" handoff: session key wins, then ``?game=``.
 
-    for variant, label in VARIANT_LABELS.items():
-        group = view.loc[view["contest_variant"] == variant]
-        if group.empty:
-            continue
-        st.subheader(f"{label} — {len(group)} entries, ${group['Stake'].sum():,.2f} staked")
-        grid_df = pd.DataFrame(
-            {
-                "Legs": group["legs"].apply("  +  ".join),
-                "Size": group["entry_size"].astype(int),
-                "Joint P": group["joint_prob"].map("{:.1%}".format),
-                "Payout": group["payout_multiplier"].map("{:.2f}x".format),
-                "EV %": (group["ev"] * 100).round(1),
-                "Stake": group["Stake"].map("${:,.2f}".format),
-            }
-        )
-        render_themed_grid(
-            grid_df,
-            numeric_cols=["Size", "Joint P", "Payout", "EV %", "Stake"],
-            heatmap_col="EV %",
-            heatmap_center=0.0,
-            header_help=_PICKEM_HELP,
-            height=min(_PICKEM_MAX_GRID_HEIGHT, _PICKEM_HEADER_PX + _PICKEM_ROW_PX * (len(group) + 1)),
-            key=f"pickem_grid_{variant}",
-        )
-    _render_pickem_loader(view, offers)
+    A stale value (e.g. the sport switch narrowed the slate) is dropped so the
+    picker falls back to the first game instead of an empty selection.
+    """
+    preselect = st.session_state.pop("nav_game", "") or st.query_params.get("game", "")
+    if preselect in games:
+        st.session_state["game_seed_select"] = preselect
+    if st.session_state.get("game_seed_select") not in games:
+        st.session_state.pop("game_seed_select", None)
 
 
-def _render_pickem_loader(entries: pd.DataFrame, offers: pd.DataFrame) -> None:
-    """Load any Pick'em entry into the builder to edit as your own."""
-    labels = {
-        f"{VARIANT_LABELS.get(e['contest_variant'], e['contest_variant'])}: {'  +  '.join(e['legs'])}": e
-        for e in entries.to_dict("records")
+def _render_game_seed(offers: pd.DataFrame) -> None:
+    """Pick a game and platform, choose its legs, seed the constellation builder.
+
+    The game label (with a date suffix to keep a doubleheader's two games
+    distinct) must match tonight.py's handoff format.
+    """
+    if not {"Team", "Opponent"} <= set(offers.columns):
+        return
+    labelled = offers.assign(_game=offers["Team"] + " vs " + offers["Opponent"])
+    if "Date" in labelled.columns:
+        labelled["_game"] += " · " + labelled["Date"].astype(str)
+    games = labelled["_game"].dropna().unique().tolist()
+    if not games:
+        return
+
+    _apply_game_preselect(games)
+    game = st.selectbox("Game", games, key="game_seed_select")
+    pool = labelled.loc[labelled["_game"] == game]
+    platforms = sorted(pool["Platform"].dropna().unique())
+    if not platforms:
+        return
+    platform = st.selectbox("Platform", platforms, key="game_seed_platform")
+    ppool = pool.loc[pool["Platform"] == platform]
+    leg_rows = {
+        f"{r['Player']} {r['Bet']} {float(r['Line']):.10g} {r['Market']}": r
+        for r in ppool.to_dict("records")
+        if pd.notna(r.get("Win Prob"))
     }
-    pick = st.selectbox("Edit a Pick'em entry as your own", ["—", *labels], key="pickem_load")
-    if pick == "—" or not st.button("Load into builder", key="pickem_load_btn"):
-        return
-    rows = []
-    for leg in labels[pick]["legs"]:
-        parsed = parse_leg(leg)
-        idx = find_offer_idx(parsed, offers, "Underdog") if parsed else None
-        if idx is not None:
-            rows.append(offers.loc[idx].to_dict())
-    if len(rows) < 2:
-        st.toast("Couldn't resolve this entry's legs against current offers.")
-        return
-    same_game = len({r["Game"] for r in rows}) == 1
-    seed_from_legs(rows, "Underdog", "constellation" if same_game else "simple")
-    if same_game:
+    picks = st.multiselect("Legs", list(leg_rows), key="game_seed_legs")
+    if len(picks) >= 2 and st.button("Seed builder", type="primary", key="game_seed_btn"):
+        seed_from_legs([leg_rows[p] for p in picks], platform, "constellation")
         st.rerun()
+
+
+st.title("Build a slip")
+meta = load_current_meta()
+render_banner("predictions", f"generated {format_ts(meta.get('generated_at', 'no run on record'))}")
+
+offers = load_current_offers().reset_index(drop=True)
+corr = load_current_game_corr()
+game_context = load_current_game_context()
+ctxs = ctxs_from_frame(game_context, corr)
+stories = sport_filtered(load_current_game_stories())
+
+editing = (
+    st.session_state.get("edit_slip_id") is not None
+    and st.session_state.get("slip_builder") == "constellation"
+)
+if not editing:
+    if stories.empty:
+        st.info("No story menu found. Run `poetry run prophecize` to generate stories.")
     else:
-        st.switch_page("surfaces/board.py")
+        st.subheader("Start from a story")
+        _render_story_cascade(stories, offers)
+    st.subheader("Start from a game")
+    _render_game_seed(sport_filtered(offers))
 
-
-tab_build, tab_pickem = st.tabs(["Build a slip", "Pick'em"])
-
-with tab_build:
-    st.title("Build a slip")
-    meta = load_current_meta()
-    render_banner(
-        "predictions", f"generated {format_ts(meta.get('generated_at', 'no run on record'))}"
-    )
-
-    offers = load_current_offers().reset_index(drop=True)
-    corr = load_current_game_corr()
-    ctxs = ctxs_from_frame(load_current_game_context(), corr)
-    stories = sport_filtered(load_current_game_stories())
-
-    editing = (
-        st.session_state.get("edit_slip_id") is not None
-        and st.session_state.get("slip_builder") == "constellation"
-    )
-    if not editing:
-        if stories.empty:
-            st.info("No story menu found. Run `poetry run prophecize` to generate stories.")
-        else:
-            _render_story_cascade(stories, offers)
-
-    st.divider()
-    render_constellation_builder(offers, corr, ctxs)
-
-with tab_pickem:
-    st.title("Pick'em entries")
-    meta = load_current_meta()
-    render_banner(
-        "predictions", f"generated {format_ts(meta.get('generated_at', 'no run on record'))}"
-    )
-
-    entries = sport_filtered(load_current_pickem())
-    if entries.empty:
-        st.info("No current Pick'em entries. Run `poetry run prophecize` to generate them.")
-    else:
-        _render_pickem(entries, load_current_offers().reset_index(drop=True))
+st.divider()
+render_constellation_builder(offers, corr, ctxs, game_context=game_context)

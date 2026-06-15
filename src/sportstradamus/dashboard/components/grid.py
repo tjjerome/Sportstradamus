@@ -2,8 +2,8 @@
 
 DESIGN.md §4: numbers right-align in tabular (Plex Mono) numerals, never centered;
 conditional heatmaps use the diverging chart ramp (red ↔ neutral ↔ blue), never gold.
-Both stat surfaces (Board, Slips Pick'em) build their grid through here so the rules
-live once and ``tests/golden/test_grid_options.py`` has a single pure target.
+The Board builds its grid through here so the rules live once and
+``tests/golden/test_grid_options.py`` has a single pure target.
 """
 
 from __future__ import annotations
@@ -132,8 +132,7 @@ def render_themed_grid(
 ) -> list[dict]:
     """Render the themed grid; return the selected rows as dicts (empty when none).
 
-    ``key`` disambiguates multiple grids rendered on one page (e.g. the Slips tab's
-    per-contest-variant Pick'em grids).
+    ``key`` disambiguates multiple grids rendered on one page.
     """
     options = build_themed_grid_options(
         df,
