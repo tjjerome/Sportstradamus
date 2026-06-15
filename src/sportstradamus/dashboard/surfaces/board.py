@@ -44,10 +44,9 @@ MAIN_COLS = [
     "Line",
     "Boost",
     "Win Prob",
-    "Edge",
+    "Model Edge",
+    "Consensus Edge",
     "Kelly",
-    "Model EV",
-    "Market EV",
     "Platform",
 ]
 
@@ -110,7 +109,7 @@ st.caption(f"Showing **{len(filtered):,}** of {len(offers):,} offers")
 
 init_detail_state()
 
-filtered = columns.add_edge(filtered)
+filtered = columns.add_edges(filtered)
 display_cols = [c for c in MAIN_COLS if c in filtered.columns]
 grid_df = filtered[display_cols].copy()
 
@@ -118,20 +117,25 @@ if "Win Prob" in grid_df.columns:
     grid_df["Win Prob"] = (grid_df["Win Prob"] * 100).apply(
         lambda x: f"{x:.2f}%" if pd.notna(x) else ""
     )
-for col in ("Boost", "Edge", "Kelly", "Model EV", "Market EV"):
+# Model/Consensus Edge are edge-vs-DFS percentages (EV - 1, x100); kept numeric so the
+# heatmap can bucket Model Edge.
+for col in (columns.MODEL_EDGE, columns.CONSENSUS_EDGE):
+    if col in grid_df.columns:
+        grid_df[col] = (pd.to_numeric(grid_df[col], errors="coerce") * 100).round(1)
+for col in ("Boost", "Kelly"):
     if col in grid_df.columns:
         grid_df[col] = pd.to_numeric(grid_df[col], errors="coerce").round(2)
 grid_df = grid_df.rename(columns=columns.LABELS)
 
 numeric_cols = [
     c
-    for c in ("Line", "Boost", "Win %", "Edge", "Kelly", "Model EV", "Market EV")
+    for c in ("Line", "Boost", "Win %", columns.MODEL_EDGE, columns.CONSENSUS_EDGE, "Kelly")
     if c in grid_df.columns
 ]
 selected_rows = render_themed_grid(
     grid_df,
     numeric_cols=numeric_cols,
-    heatmap_col="Edge",
+    heatmap_col=columns.MODEL_EDGE,
     heatmap_center=0.0,
     header_help=columns.HELP,
 )

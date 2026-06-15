@@ -93,7 +93,6 @@ def write_current_offers(
     leagues: Iterable[str],
     platforms: Iterable[str],
     contest_variant: str = "pooled",
-    stats_dict: dict | None = None,
 ) -> None:
     """Write the current-run snapshot atomically.
 
@@ -103,9 +102,6 @@ def write_current_offers(
     variant the parlays were scored under, recorded in meta so the dashboard
     can display which payout schedule the EV column reflects. Empty inputs
     are still written so the dashboard reflects the most recent run.
-
-    The `stats_dict` parameter is unused (retained for API compatibility).
-    The dashboard loads player history directly from cached gamelog parquets.
     """
     offers_out = _normalize_offers(offers)
     parlays_out = _normalize_parlays(parlays)
