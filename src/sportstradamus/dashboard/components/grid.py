@@ -20,6 +20,11 @@ _MONO = "IBM Plex Mono, monospace"
 _RIGHT_STYLE = {"textAlign": "right", "fontFamily": _MONO}
 # Same style as a JS object literal, for the heatmap expression's null / neutral branches.
 _RIGHT_EXPR = "{'textAlign':'right','fontFamily':'IBM Plex Mono, monospace'}"
+# Append a "%" to a numeric cell for display only — the underlying value stays numeric so
+# sorting and the heatmap still see the number (the Board's edge columns are EV − 1, x100).
+_PERCENT_FORMATTER = JsCode(
+    "function(params){return (params.value==null||isNaN(params.value))?'':params.value.toFixed(1)+'%';}"
+)
 
 # Light text (textColor token) reads on every painted bucket because only the saturated
 # ramp ends are painted — the near-neutral band stays unpainted.
@@ -91,11 +96,14 @@ def build_themed_grid_options(
     header_help: Mapping[str, str] | None = None,
     selection_mode: str = "single",
     sparkline_col: str | None = None,  # L1 scar hook — line-movement sparklines, not built
+    percent_cols: Sequence[str] = (),
 ) -> dict:
     """Token-themed ``gridOptions``: right-aligned mono numerals, an optional diverging
-    heatmap on ``heatmap_col``, and per-column header tooltips. Pure — no Streamlit call.
+    heatmap on ``heatmap_col``, per-column header tooltips, and a "%" display suffix on
+    ``percent_cols`` (kept numeric underneath). Pure — no Streamlit call.
     """
     help_map = dict(header_help or {})
+    pct = set(percent_cols)
     present = set(df.columns)
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_selection(selection_mode=selection_mode, use_checkbox=False)
@@ -110,6 +118,8 @@ def build_themed_grid_options(
         else:
             cell_style = dict(_RIGHT_STYLE)
         kwargs = {"cellStyle": cell_style}
+        if col in pct:
+            kwargs["valueFormatter"] = _PERCENT_FORMATTER
         if help_map.get(col):
             kwargs["headerTooltip"] = help_map[col]
         gb.configure_column(col, **kwargs)
@@ -127,6 +137,7 @@ def render_themed_grid(
     heatmap_center: float = 0.0,
     header_help: Mapping[str, str] | None = None,
     selection_mode: str = "single",
+    percent_cols: Sequence[str] = (),
     height: int = 720,
     key: str | None = None,
 ) -> list[dict]:
@@ -141,6 +152,7 @@ def render_themed_grid(
         heatmap_center=heatmap_center,
         header_help=header_help,
         selection_mode=selection_mode,
+        percent_cols=percent_cols,
     )
     grid = AgGrid(
         df,

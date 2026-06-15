@@ -78,6 +78,20 @@ def test_heatmap_is_jscode_on_its_column_only() -> None:
         )
 
 
+def test_percent_cols_get_a_value_formatter_value_stays_numeric() -> None:
+    options = build_themed_grid_options(
+        _GRID_DF,
+        numeric_cols=_NUMERIC,
+        heatmap_col=MODEL_EDGE,
+        percent_cols=[MODEL_EDGE, CONSENSUS_EDGE],
+    )
+    defs = _column_defs(options)
+    for col in (MODEL_EDGE, CONSENSUS_EDGE):
+        fmt = defs[col].get("valueFormatter")
+        assert fmt is not None and "%" in fmt.js_code  # display-only suffix
+    assert "valueFormatter" not in defs["Kelly"]  # only percent_cols get it
+
+
 def test_header_tooltips_attached() -> None:
     help_map = {MODEL_EDGE: "your edge vs DFS", CONSENSUS_EDGE: "book's view"}
     options = build_themed_grid_options(

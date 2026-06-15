@@ -27,7 +27,10 @@ import streamlit as st
 from sportstradamus.dashboard.components.constellation import constellation_figure
 from sportstradamus.dashboard.components.constellation_component import render_constellation
 from sportstradamus.dashboard.components.deep_dive import init_detail_state, show_detail
-from sportstradamus.dashboard.components.satellite_picker import render_satellites
+from sportstradamus.dashboard.components.satellite_picker import (
+    render_disliked_legs,
+    render_satellites,
+)
 from sportstradamus.dashboard.components.slip_state import (
     _BANKROLL,
     _BUILDER,
@@ -81,12 +84,9 @@ def render_constellation_builder(
     focus_legs = [leg for leg in legs if leg["Game"] == focus_game]
     _render_constellation(focus_legs, corr, pool, key_prefix)
     _render_leg_list(key_prefix, focus_game=focus_game, removable=False)
-    if legs:
-        act = render_satellites(
-            offers, focus_game=focus_game, platform=platform, legs=legs, key_prefix=key_prefix
-        )
-        if _apply_satellite_action(act, legs):
-            st.rerun()
+    _render_supplemental_pickers(
+        offers, focus_game=focus_game, platform=platform, legs=legs, key_prefix=key_prefix
+    )
     _draw_detail_dialog(offers)
     if len(legs) < 2:
         if legs:
@@ -159,6 +159,30 @@ def _render_leg_list(
             st.rerun()
 
 
+def _render_supplemental_pickers(
+    offers: pd.DataFrame,
+    *,
+    focus_game: str,
+    platform: str,
+    legs: list[dict],
+    key_prefix: str,
+) -> None:
+    """Non-star leg pickers below the map: other-game satellites (only once the slip has
+    a leg to complete) and same-game model-passed legs; rerun when either changes the slip.
+    """
+    if legs:
+        act = render_satellites(
+            offers, focus_game=focus_game, platform=platform, legs=legs, key_prefix=key_prefix
+        )
+        if _apply_satellite_action(act, legs):
+            st.rerun()
+    dis = render_disliked_legs(
+        offers, focus_game=focus_game, platform=platform, legs=legs, key_prefix=key_prefix
+    )
+    if _apply_satellite_action(dis, legs):
+        st.rerun()
+
+
 def _render_constellation(
     legs: list[dict], corr: pd.DataFrame, pool: pd.DataFrame, key_prefix: str
 ) -> None:
@@ -173,7 +197,7 @@ def _render_constellation(
     action = render_constellation(
         constellation_figure(legs, corr, pool), key=f"{key_prefix}_constellation"
     )
-    if _apply_constellation_action(action, legs, pool, key_prefix):
+    if _apply_constellation_action(action, pool, key_prefix):
         st.rerun()
 
 
@@ -196,7 +220,7 @@ def _draw_detail_dialog(offers: pd.DataFrame) -> None:
 
 
 def _apply_constellation_action(
-    action: Mapping | None, legs: list[dict], pool: pd.DataFrame, key_prefix: str
+    action: Mapping | None, pool: pd.DataFrame, key_prefix: str
 ) -> bool:
     """Process the component's last action once; return True if the slip changed.
 
@@ -214,7 +238,7 @@ def _apply_constellation_action(
     if action.get("action") == "detail":
         _open_offer_detail(key, pool)
         return False
-    return _toggle_leg(key, legs, pool)
+    return _toggle_leg(key, pool)
 
 
 def _apply_satellite_action(action: Mapping | None, legs: list[dict]) -> bool:
@@ -236,8 +260,13 @@ def _apply_satellite_action(action: Mapping | None, legs: list[dict]) -> bool:
     return False
 
 
-def _toggle_leg(key: str, legs: list[dict], pool: pd.DataFrame) -> bool:
-    """Toggle the clicked star: a slip leg → remove, a candidate → add (True if changed)."""
+def _toggle_leg(key: str, pool: pd.DataFrame) -> bool:
+    """Toggle the clicked star against the active slip: a slip leg → remove, a candidate
+    → add. Reads/mutates the canonical slip (``st.session_state[_LEGS]``) directly — the
+    map is drawn over the focus game's *filtered* leg view, so toggling that throwaway
+    copy would drop the add and mis-index the remove once a slip has cross-game legs.
+    """
+    legs = st.session_state[_LEGS]
     for i, leg in enumerate(legs):
         if corr_key(leg) == key:
             remove_leg(i)

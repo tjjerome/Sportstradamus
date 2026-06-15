@@ -119,6 +119,46 @@ def _platform_selector(offers: pd.DataFrame) -> str:
     return st.selectbox("Platform", platforms, index=index, key="game_platform")
 
 
+def _select_slip_label(games: dict[str, dict], slip_game: str) -> None:
+    """Point the game selectbox at the active slip's game when it's a listed candidate."""
+    for label, info in games.items():
+        if info["game"] == slip_game:
+            st.session_state["game_select"] = label
+            return
+
+
+def _game_picker(
+    games: dict[str, dict],
+    game_context: pd.DataFrame,
+    stories: pd.DataFrame,
+    offers: pd.DataFrame,
+    legs: list[dict],
+) -> str:
+    """Render the game picker + context banner + story preloader; return the focus game.
+
+    The picker stays visible whether or not a slip is seeded. A live slip pins the focus
+    (and the selectbox, when listed) to its own game so the map keeps matching the slip;
+    clearing the slip frees the picker. Otherwise the Tonight "View game" handoff wins.
+    """
+    slip_game = legs[0]["Game"] if legs else ""
+    if not games:
+        if not slip_game:
+            st.info("No model-liked legs on this platform right now.")
+        return slip_game
+    if slip_game:
+        _select_slip_label(games, slip_game)
+    else:
+        _apply_game_preselect(list(games))
+    choice = st.selectbox("Game", list(games), key="game_select")
+    if slip_game:
+        focus_game, date = slip_game, str(legs[0]["Date"])
+    else:
+        focus_game, date = games[choice]["game"], games[choice]["date"]
+    _render_banner(game_context, focus_game, date)
+    _render_story_preloader(stories, st.session_state[_PLATFORM], focus_game, offers)
+    return focus_game
+
+
 st.title("Games")
 meta = load_current_meta()
 render_banner("predictions", f"generated {format_ts(meta.get('generated_at', 'no run on record'))}")
@@ -129,28 +169,17 @@ game_context = load_current_game_context()
 ctxs = ctxs_from_frame(game_context, corr)
 stories = sport_filtered(load_current_game_stories())
 
-# A seeded/active slip locks the view to its own game; otherwise the picker drives
-# which game's constellation + context banner show (and a click starts a fresh slip).
+# The picker (platform + game + banner + story preloader) stays visible whether or not
+# a slip is seeded; a live slip pins it to that slip's game (see _game_picker).
 legs = st.session_state[_LEGS]
-if legs:
-    focus_game = legs[0]["Game"]
-    _render_banner(game_context, focus_game, str(legs[0]["Date"]))
-elif offers.empty:
+if offers.empty:
     st.info("No current predictions. Run `poetry run prophecize` to generate offers.")
     focus_game = ""
 else:
     st.session_state[_PLATFORM] = _platform_selector(offers)
     st.session_state[_BUILDER] = "constellation"
     games = _candidate_games(offers, st.session_state[_PLATFORM])
-    if not games:
-        st.info("No model-liked legs on this platform right now.")
-        focus_game = ""
-    else:
-        _apply_game_preselect(list(games))
-        choice = st.selectbox("Game", list(games), key="game_select")
-        focus_game = games[choice]["game"]
-        _render_banner(game_context, focus_game, games[choice]["date"])
-        _render_story_preloader(stories, st.session_state[_PLATFORM], focus_game, offers)
+    focus_game = _game_picker(games, game_context, stories, offers, legs)
 
 st.divider()
 render_constellation_builder(offers, corr, ctxs, focus_game=focus_game)

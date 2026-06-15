@@ -6,7 +6,7 @@ selecting a leg never moves a star, it only lights it up. A slip leg renders act
 (full team color, opacity 1, labelled); a candidate renders desaturated + dim,
 labelled like the rest. Star size ∝ Kelly edge. Each team's hub anchors to its side. Every tie is a
 gold edge (width/opacity ∝ |ρ|, dashed when ρ < 0) that stays hidden (opacity 0)
-until one of its stars is in the slip. These assert that grammar, the static layout,
+until both its stars are in the slip. These assert that grammar, the static layout,
 the size/selection encodings, the hover, the per-edge endpoint ``meta``, and the
 click-key + card-field ``customdata`` the in-app editor and its JS card rely on.
 """
@@ -194,10 +194,11 @@ def test_all_ties_drawn_with_endpoint_meta_and_dashed_negative():
     assert edges[frozenset(("A|PTS|Over", "C|AST|Over"))].line.dash == "solid"  # positive
 
 
-def test_edges_hidden_until_a_star_is_active():
-    # A in the slip (active); B, C are candidates. Ties touching A light up; the
-    # B-C tie (no active endpoint) stays hidden — clutter scales with the slip.
-    legs = _slip("A|PTS|Over")
+def test_edges_show_only_between_two_slip_legs():
+    # Only a tie whose BOTH endpoints are in the slip is drawn — the slip's own
+    # correlations, never the ties out to candidates. A + B are in the slip, C is a
+    # candidate: A-B lights up; A-C and B-C stay hidden.
+    legs = _slip("A|PTS|Over", "B|REB|Under")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3), ("C|AST|Over", 0.3))
     corr = _corr(
         ("A|PTS|Over", "B|REB|Under", 0.4),
@@ -205,9 +206,18 @@ def test_edges_hidden_until_a_star_is_active():
         ("B|REB|Under", "C|AST|Over", 0.5),
     )
     edges = _edge_by_pair(constellation_figure(legs, corr, pool))
-    assert edges[frozenset(("A|PTS|Over", "B|REB|Under"))].opacity > 0  # incident to active A
-    assert edges[frozenset(("A|PTS|Over", "C|AST|Over"))].opacity > 0
-    assert edges[frozenset(("B|REB|Under", "C|AST|Over"))].opacity == 0  # no active endpoint → hidden
+    assert edges[frozenset(("A|PTS|Over", "B|REB|Under"))].opacity > 0  # both in the slip
+    assert edges[frozenset(("A|PTS|Over", "C|AST|Over"))].opacity == 0  # C is a candidate
+    assert edges[frozenset(("B|REB|Under", "C|AST|Over"))].opacity == 0  # C is a candidate
+
+
+def test_single_slip_leg_draws_no_edges():
+    # One leg in the slip → no pair is fully in the slip → a clean field (ties preview
+    # only on hover, client-side). The B-C-less single-active case the old map lit up.
+    legs = _slip("A|PTS|Over")
+    pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3))
+    edges = _edge_traces(constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.5)), pool))
+    assert edges and all(e.opacity == 0 for e in edges)
 
 
 def test_empty_active_set_hides_all_edges():
