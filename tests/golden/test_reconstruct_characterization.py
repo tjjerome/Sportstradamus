@@ -29,7 +29,7 @@ def _row(dist, cv, ev, param, gate, actual=None):
     return {
         "Dist": dist,
         "CV": cv,
-        "Model EV": ev,
+        "Projection": ev,
         "Model Param": param,
         "Gate": gate,
         "Actual": actual,

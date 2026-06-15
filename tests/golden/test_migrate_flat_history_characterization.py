@@ -33,10 +33,10 @@ def _build_flat() -> pd.DataFrame:
                 "Boost": 1.0,
                 "Platform": "Underdog",
                 "Bet": "Over",
-                "Model": 0.60,
-                "Books": 0.55,
+                "Model EV": 0.60,
+                "Market EV": 0.55,
                 "Team": "BOS",
-                "Model EV": 0.10,
+                "Projection": 0.10,
                 "Dist": "Poisson",
             },
             {
@@ -48,10 +48,10 @@ def _build_flat() -> pd.DataFrame:
                 "Boost": 2.0,
                 "Platform": "Underdog",
                 "Bet": "Under",
-                "Model": 1.10,
-                "Books": 1.00,
+                "Model EV": 1.10,
+                "Market EV": 1.00,
                 "Team": "BOS",
-                "Model EV": 0.12,
+                "Projection": 0.12,
                 "Dist": "Poisson",
             },
             {
@@ -63,10 +63,10 @@ def _build_flat() -> pd.DataFrame:
                 "Boost": 1.0,
                 "Platform": "Underdog",
                 "Bet": "Over",
-                "Model": 0.62,
-                "Books": 0.56,
+                "Model EV": 0.62,
+                "Market EV": 0.56,
                 "Team": "BOS",
-                "Model EV": 0.15,
+                "Projection": 0.15,
                 "Dist": "Poisson",
             },
             {
@@ -78,10 +78,10 @@ def _build_flat() -> pd.DataFrame:
                 "Boost": 1.0,
                 "Platform": "Sleeper",
                 "Bet": "Over",
-                "Model": 0.50,
-                "Books": 0.50,
+                "Model EV": 0.50,
+                "Market EV": 0.50,
                 "Team": "BOS",
-                "Model EV": 0.0,
+                "Projection": 0.0,
                 "Dist": "Poisson",
             },
             {
@@ -93,10 +93,10 @@ def _build_flat() -> pd.DataFrame:
                 "Boost": 1.0,
                 "Platform": "Sleeper",
                 "Bet": "Over",
-                "Model": 0.58,
-                "Books": 0.52,
+                "Model EV": 0.58,
+                "Market EV": 0.52,
                 "Team": "MIA",
-                "Model EV": 0.05,
+                "Projection": 0.05,
                 "Dist": "Poisson",
             },
         ]
@@ -143,8 +143,8 @@ def test_migrate_flat_history_normalizes_offers():
         "Market",
         "Offers",
         "Team",
-        "Model EV",
-        "Books EV",
+        "Projection",
+        "Market Projection",
         "Dist",
         "CV",
         "Model Param",
@@ -162,8 +162,8 @@ def test_migrate_flat_history_normalizes_offers():
     # Prediction-level cols come from the group's LAST row (P1's last row is the
     # NaN-Line Sleeper row with Model EV 0.0).
     assert by_player["P1"]["Team"] == "BOS"
-    assert by_player["P1"]["Model EV"] == 0.0
+    assert by_player["P1"]["Projection"] == 0.0
     assert by_player["P1"]["Dist"] == "Poisson"
     assert math.isnan(by_player["P1"]["Actual"])
     assert by_player["P2"]["Team"] == "MIA"
-    assert by_player["P2"]["Model EV"] == 0.05
+    assert by_player["P2"]["Projection"] == 0.05

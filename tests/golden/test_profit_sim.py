@@ -42,10 +42,10 @@ def _make_offers(n_days: int = 3, hit_pattern: list[bool] | None = None) -> pd.D
                 "Market": "points",
                 "Platform": "Underdog",
                 "Boost": 1.0,
-                "Model P": 0.7,
-                "Model": 0.7,
-                "K": 0.05,
-                "Books": 0.55,
+                "Win Prob": 0.7,
+                "Model EV": 0.7,
+                "Kelly": 0.05,
+                "Market EV": 0.55,
                 "Hit": hit_pattern[i],
                 "_date": pd.Timestamp(f"2026-01-{i + 1:02d}").date(),
             }
@@ -81,9 +81,9 @@ def test_ranking_map_keys_pinned():
     # Pinned because the page's UI selectbox surfaces these strings;
     # changing them is a UI-facing change, not a refactor.
     assert set(RANKING_MAP.keys()) == {"Kelly", "Probability", "EV"}
-    assert RANKING_MAP["Kelly"] == "K"
-    assert RANKING_MAP["Probability"] == "Model P"
-    assert RANKING_MAP["EV"] == "Model"
+    assert RANKING_MAP["Kelly"] == "Kelly"
+    assert RANKING_MAP["Probability"] == "Win Prob"
+    assert RANKING_MAP["EV"] == "Model EV"
 
 
 # --------------------------------------------------------------------------- #
@@ -92,11 +92,11 @@ def test_ranking_map_keys_pinned():
 
 def test_empty_input_returns_empty():
     df = pd.DataFrame(
-        columns=["Player", "Market", "Platform", "Boost", "Model P", "Books", "Hit", "_date", "K"]
+        columns=["Player", "Market", "Platform", "Boost", "Win Prob", "Market EV", "Hit", "_date", "Kelly"]
     )
     result = simulate_strategy(
         df,
-        prob_col="Model P",
+        prob_col="Win Prob",
         ranking="Kelly",
         min_model_p=0.5,
         min_books_p=0.5,
@@ -114,7 +114,7 @@ def test_threshold_filter_yields_empty_when_unmet():
     # min_model_p = 0.99 → no row qualifies
     result = simulate_strategy(
         df,
-        prob_col="Model P",
+        prob_col="Win Prob",
         ranking="Kelly",
         min_model_p=0.99,
         min_books_p=0.0,
@@ -131,7 +131,7 @@ def test_flat_sizing_one_run_columns_and_progression():
     df = _make_offers(n_days=3, hit_pattern=[True, False, True])
     result = simulate_strategy(
         df,
-        prob_col="Model P",
+        prob_col="Win Prob",
         ranking="Kelly",
         min_model_p=0.5,
         min_books_p=0.0,
@@ -158,10 +158,10 @@ def test_kelly_sizing_caps_at_five_percent():
     df = _make_offers(n_days=1, hit_pattern=[False])
     df.loc[0, "Platform"] = "Sleeper"
     df.loc[0, "Boost"] = 2.0
-    df.loc[0, "Model P"] = 0.99
+    df.loc[0, "Win Prob"] = 0.99
     result = simulate_strategy(
         df,
-        prob_col="Model P",
+        prob_col="Win Prob",
         ranking="Kelly",
         min_model_p=0.5,
         min_books_p=0.0,
@@ -184,7 +184,7 @@ def test_kelly_skips_minus_110_payout():
     df = _make_offers(n_days=1, hit_pattern=[True])
     result = simulate_strategy(
         df,
-        prob_col="Model P",
+        prob_col="Win Prob",
         ranking="Kelly",
         min_model_p=0.5,
         min_books_p=0.0,
@@ -206,7 +206,7 @@ def test_kelly_skips_payout_le_one():
     df.loc[0, "Boost"] = 1.0  # Sleeper Boost=1 → Payout=1, skip
     result = simulate_strategy(
         df,
-        prob_col="Model P",
+        prob_col="Win Prob",
         ranking="Kelly",
         min_model_p=0.5,
         min_books_p=0.0,
@@ -227,7 +227,7 @@ def test_monte_carlo_seed_reproducibility():
     df = _make_offers(n_days=4)
     r1 = simulate_strategy(
         df,
-        prob_col="Model P",
+        prob_col="Win Prob",
         ranking="Kelly",
         min_model_p=0.5,
         min_books_p=0.0,
@@ -239,7 +239,7 @@ def test_monte_carlo_seed_reproducibility():
     )
     r2 = simulate_strategy(
         df,
-        prob_col="Model P",
+        prob_col="Win Prob",
         ranking="Kelly",
         min_model_p=0.5,
         min_books_p=0.0,
@@ -264,10 +264,10 @@ def test_caller_rng_overrides_default_seed():
                 "Market": "points",
                 "Platform": "Underdog",
                 "Boost": 1.0,
-                "Model P": 0.6 + 0.01 * i,
-                "Model": 0.6 + 0.01 * i,
-                "K": 0.05 + 0.01 * i,
-                "Books": 0.55,
+                "Win Prob": 0.6 + 0.01 * i,
+                "Model EV": 0.6 + 0.01 * i,
+                "Kelly": 0.05 + 0.01 * i,
+                "Market EV": 0.55,
                 "Hit": (i % 3) == 0,
                 "_date": pd.Timestamp("2026-01-01").date(),
             }
@@ -275,7 +275,7 @@ def test_caller_rng_overrides_default_seed():
     df = pd.DataFrame(rows)
     r1 = simulate_strategy(
         df,
-        prob_col="Model P",
+        prob_col="Win Prob",
         ranking="Kelly",
         min_model_p=0.0,
         min_books_p=0.0,
@@ -288,7 +288,7 @@ def test_caller_rng_overrides_default_seed():
     )
     r2 = simulate_strategy(
         df,
-        prob_col="Model P",
+        prob_col="Win Prob",
         ranking="Kelly",
         min_model_p=0.0,
         min_books_p=0.0,
@@ -308,8 +308,8 @@ def test_caller_rng_overrides_default_seed():
 
 def test_kelly_all_is_deterministic():
     df = _make_offers(n_days=3, hit_pattern=[True, False, True])
-    r1 = simulate_kelly_all(df, prob_col="Model P", initial_bankroll=1000.0)
-    r2 = simulate_kelly_all(df, prob_col="Model P", initial_bankroll=1000.0)
+    r1 = simulate_kelly_all(df, prob_col="Win Prob", initial_bankroll=1000.0)
+    r2 = simulate_kelly_all(df, prob_col="Win Prob", initial_bankroll=1000.0)
     pd.testing.assert_frame_equal(r1, r2)
 
 
@@ -320,14 +320,14 @@ def test_kelly_all_uses_kelly_sizing_no_thresholds():
     df = _make_offers(n_days=1, hit_pattern=[True])
     df.loc[0, "Platform"] = "Sleeper"
     df.loc[0, "Boost"] = 2.0
-    df.loc[0, "Model P"] = 0.40
-    result = simulate_kelly_all(df, prob_col="Model P", initial_bankroll=1000.0)
+    df.loc[0, "Win Prob"] = 0.40
+    result = simulate_kelly_all(df, prob_col="Win Prob", initial_bankroll=1000.0)
     assert result.iloc[0]["bankroll"] == pytest.approx(1000.0)
 
 
 def test_kelly_all_runs_one_mc_pass():
     df = _make_offers(n_days=5)
-    result = simulate_kelly_all(df, prob_col="Model P", initial_bankroll=1000.0)
+    result = simulate_kelly_all(df, prob_col="Win Prob", initial_bankroll=1000.0)
     # n_mc=1 → exactly len(dates) rows, all run==0
     assert len(result) == 5
     assert (result["run"] == 0).all()
@@ -352,7 +352,7 @@ def test_summarize_winning_run_positive_roi():
     df = _make_offers(n_days=3, hit_pattern=[True, True, True])
     result = simulate_strategy(
         df,
-        prob_col="Model P",
+        prob_col="Win Prob",
         ranking="Kelly",
         min_model_p=0.5,
         min_books_p=0.0,
@@ -374,7 +374,7 @@ def test_summarize_losing_run_negative_roi_and_drawdown():
     df = _make_offers(n_days=3, hit_pattern=[False, False, False])
     result = simulate_strategy(
         df,
-        prob_col="Model P",
+        prob_col="Win Prob",
         ranking="Kelly",
         min_model_p=0.5,
         min_books_p=0.0,
@@ -395,7 +395,7 @@ def test_summarize_sharpe_finite_on_mixed_outcomes():
     df = _make_offers(n_days=4, hit_pattern=[True, False, True, False])
     result = simulate_strategy(
         df,
-        prob_col="Model P",
+        prob_col="Win Prob",
         ranking="Kelly",
         min_model_p=0.5,
         min_books_p=0.0,
@@ -419,7 +419,7 @@ def test_summarize_aggregates_across_runs():
     df = _make_offers(n_days=2, hit_pattern=[True, False])
     result = simulate_strategy(
         df,
-        prob_col="Model P",
+        prob_col="Win Prob",
         ranking="Kelly",
         min_model_p=0.5,
         min_books_p=0.0,

@@ -94,13 +94,13 @@ def _matchup_clause(row: pd.Series) -> str:
 def _edge_clause(row: pd.Series) -> str:
     """Model-vs-book disagreement.
 
-    Prefers explicit hit probabilities (``Model P`` vs ``Books P``) when the
+    Prefers explicit hit probabilities (``Win Prob`` vs ``Market Prob``) when the
     book column is present. The live snapshot carries no book hit-prob column,
-    so it falls back to the EV multiples (``Model`` / ``Books``, payout x where
+    so it falls back to the EV multiples (``Model EV`` / ``Market EV``, payout x where
     > 1.0 is +EV); when no consensus book exists those two are equal and the
     clause is dropped.
     """
-    model_p, book_p = _val(row, "Model P"), _val(row, "Books P")
+    model_p, book_p = _val(row, "Win Prob"), _val(row, "Market Prob")
     if book_p is not None and model_p is not None:
         gap = model_p - book_p
         if abs(gap) < _EDGE_CLAUSE_FLOOR:
@@ -115,7 +115,7 @@ def _edge_clause(row: pd.Series) -> str:
 
 
 def _ev_clause(row: pd.Series) -> str:
-    model_ev, book_ev = _val(row, "Model"), _val(row, "Books")
+    model_ev, book_ev = _val(row, "Model EV"), _val(row, "Market EV")
     if model_ev is None:
         return ""
     if book_ev is None or abs(model_ev - book_ev) < _EV_GAP_FLOOR:

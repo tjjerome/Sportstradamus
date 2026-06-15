@@ -238,7 +238,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
         old_parlays = read_parlay_hist()
         if not old_parlays.empty:
             combined = pd.concat([parlay_df, old_parlays], ignore_index=True).drop_duplicates(
-                subset=["Model EV", "Books EV"], ignore_index=True
+                subset=["Model EV", "Market EV"], ignore_index=True
             )
         else:
             combined = parlay_df

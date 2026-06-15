@@ -28,8 +28,8 @@ def test_full_slate_drop_split_backfill_keep_sort():
     df = pd.DataFrame(
         {
             "Boost": [0.0, 0.0, 1.0, 0.0],
-            "Model": [0.0, 0.5, 0.3, 0.9],
-            "Books": [0.0, 0.0, 0.0, 0.0],
+            "Model EV": [0.0, 0.5, 0.3, 0.9],
+            "Market EV": [0.0, 0.0, 0.0, 0.0],
             "Model Param": [1.0, 2.0, 3.0, 4.0],
             "Dist": ["NegBin", "NegBin", "Gamma", "SkewNormal"],
             "Player": ["Zero", "Neg", "Gam", "Skew"],
@@ -41,14 +41,14 @@ def test_full_slate_drop_split_backfill_keep_sort():
 
     # No-signal row ("Zero") dropped; remainder sorted by Model descending.
     assert out["Player"].tolist() == ["Skew", "Neg", "Gam"]
-    assert out["Model"].tolist() == [0.9, 0.5, 0.3]
+    assert out["Model EV"].tolist() == [0.9, 0.5, 0.3]
 
     # Keep-column projection (in _OFFER_KEEP_COLS order); internal artifacts gone.
     assert list(out.columns) == [
         "Player",
         "Boost",
-        "Model",
-        "Books",
+        "Model EV",
+        "Market EV",
         "Dist",
         "Gate",
         "Model R",
@@ -78,11 +78,11 @@ def test_game_k_why_retained_in_keep_order():
         {
             "Player": ["P"],
             "Game": ["AAA/BBB"],
-            "K": [0.42],
+            "Kelly": [0.42],
             "Why": ["form + edge"],
             "Boost": [1.0],
-            "Model": [0.5],
-            "Books": [0.0],
+            "Model EV": [0.5],
+            "Market EV": [0.0],
             "Dist": ["Gamma"],
             "Model Param": [2.0],
         }
@@ -94,9 +94,9 @@ def test_game_k_why_retained_in_keep_order():
         "Game",
         "Player",
         "Boost",
-        "Model",
-        "Books",
-        "K",
+        "Model EV",
+        "Market EV",
+        "Kelly",
         "Why",
         "Dist",
         "Gate",
@@ -106,7 +106,7 @@ def test_game_k_why_retained_in_keep_order():
         "Model Skew",
     ]
     assert out.loc[0, "Game"] == "AAA/BBB"
-    assert out.loc[0, "K"] == 0.42
+    assert out.loc[0, "Kelly"] == 0.42
     assert out.loc[0, "Why"] == "form + edge"
 
 
@@ -117,8 +117,8 @@ def test_position_label_retained_when_present():
             "Player": ["P"],
             "Position": ["G1"],
             "Boost": [1.0],
-            "Model": [0.5],
-            "Books": [0.0],
+            "Model EV": [0.5],
+            "Market EV": [0.0],
             "Dist": ["Gamma"],
             "Model Param": [2.0],
         }

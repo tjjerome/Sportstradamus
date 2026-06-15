@@ -57,7 +57,7 @@ def _ctx(probs, corr, *, platform="Underdog", edges=None, teams=None, game="AAA/
     bet_df = {
         i: {
             "Desc": f"Player{i} Over {5 + i}.5 {markets[i]} - {probs[i] * 100:.1f}%, 1.0x",
-            "Model": edges[i],
+            "Model EV": edges[i],
             "Bet": "Over",
             "Team": teams[i],
             "Player": f"Player{i}",

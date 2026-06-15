@@ -163,7 +163,7 @@ def _migrate_flat_history(history):
 
     Groups by (Player, League, Date, Market) and collects per-offer columns
     into an Offers list of 9-tuples: (Line, Boost, Platform, Bet, ModelP, BooksP,
-    CloseBooksP, MarketCLV, ModelCLV). The trailing three are NaN-padded for
+    CloseMarketProb, MarketCLV, ModelCLV). The trailing three are NaN-padded for
     pre-CLV rows; ``reflect`` populates them from the archive on resolution.
     """
     pred_cols = [*PREDICTION_LEVEL_COLS, "Actual"]
@@ -191,8 +191,8 @@ def _migrate_flat_history(history):
 def _prep_legacy_columns(history):
     """Ensure offer/prediction columns exist and back-fill Model P / Books P.
 
-    The legacy flat schema stored boosted ``Model`` / ``Books``; the normalized
-    schema wants de-boosted per-offer ``Model P`` / ``Books P``. Mutates
+    The legacy flat schema stored boosted ``Model EV`` / ``Market EV``; the normalized
+    schema wants de-boosted per-offer ``Win Prob`` / ``Market Prob``. Mutates
     ``history`` in place.
     """
     offer_cols = OFFER_FIELDS[:LEGACY_OFFER_ARITY]
@@ -201,19 +201,19 @@ def _prep_legacy_columns(history):
         if col not in history.columns:
             history[col] = np.nan
 
-    if "Model P" not in history.columns or history["Model P"].isna().all():
-        if "Model" in history.columns:
-            history["Model P"] = history["Model"] / history.get("Boost", 1)
-    if "Books P" not in history.columns or history["Books P"].isna().all():
-        if "Books" in history.columns:
-            history["Books P"] = history["Books"] / history.get("Boost", 1)
+    if "Win Prob" not in history.columns or history["Win Prob"].isna().all():
+        if "Model EV" in history.columns:
+            history["Win Prob"] = history["Model EV"] / history.get("Boost", 1)
+    if "Market Prob" not in history.columns or history["Market Prob"].isna().all():
+        if "Market EV" in history.columns:
+            history["Market Prob"] = history["Market EV"] / history.get("Boost", 1)
 
 
 def _offer_tuple(r):
     """Build one normalized 9-tuple offer from a legacy flat row, or None.
 
     Returns None when the row has no line (NaN). The trailing closing trio
-    (Close Books P, Market CLV, Model CLV) is NaN-padded; ``reflect`` fills it.
+    (Close Market Prob, Market CLV, Model CLV) is NaN-padded; ``reflect`` fills it.
     """
     line = r.get("Line")
     if pd.isna(line):
@@ -223,9 +223,9 @@ def _offer_tuple(r):
         float(r.get("Boost", 1)),
         str(r.get("Platform", "")),
         str(r.get("Bet", "")),
-        float(r["Model P"]) if pd.notna(r.get("Model P")) else np.nan,
-        float(r["Books P"]) if pd.notna(r.get("Books P")) else np.nan,
-        np.nan,  # Close Books P — populated by reflect.
+        float(r["Win Prob"]) if pd.notna(r.get("Win Prob")) else np.nan,
+        float(r["Market Prob"]) if pd.notna(r.get("Market Prob")) else np.nan,
+        np.nan,  # Close Market Prob — populated by reflect.
         np.nan,  # Market CLV
         np.nan,  # Model CLV
     )
@@ -250,7 +250,7 @@ def _merge_offers(old_offers, new_offers):
     """Merge old and new offer lists, deduplicating by (Line, Platform).
 
     New offers overwrite old ones with the same (Line, Platform) key, except
-    in the closing-trio positions (CloseBooksP, MarketCLV, ModelCLV): a
+    in the closing-trio positions (CloseMarketProb, MarketCLV, ModelCLV): a
     captured non-NaN closing value on the old offer is preserved when the
     new offer is NaN there. Without this, the next ``prophecize`` run would
     clobber any close-line snapshot ``reflect`` had already filled in.
@@ -313,9 +313,9 @@ def _offer_row(pred, pred_cols, offer):
             "Boost": boost,
             "Platform": platform,
             "Bet": bet,
-            "Model P": model_p,
-            "Books P": books_p,
-            "Close Books P": close_p,
+            "Win Prob": model_p,
+            "Market Prob": books_p,
+            "Close Market Prob": close_p,
             "Market CLV": market_clv,
             "Model CLV": model_clv,
             "Result": result,
@@ -330,7 +330,7 @@ def _add_kelly_columns(exploded):
     ``Boost`` on persisted rows is the raw promo multiplier (1.00 = no promo).
     For Underdog the per-$1 payout multiplier is ``Boost * UNDERDOG_BOOST_BASELINE``;
     other platforms are treated as already payout-inclusive (back-compat with
-    the pre-fix callers that read ``Model = Model P x Boost`` directly).
+    the pre-fix callers that read ``Model EV = Win Prob x Boost`` directly).
     """
     if "Result" in exploded.columns and "Bet" in exploded.columns:
         resolved = exploded.dropna(subset=["Result", "Bet"])
@@ -338,13 +338,13 @@ def _add_kelly_columns(exploded):
             exploded.loc[resolved.index, "Hit"] = (resolved["Bet"] == resolved["Result"]).astype(
                 int
             )
-    if "Model P" in exploded.columns and "Boost" in exploded.columns:
+    if "Win Prob" in exploded.columns and "Boost" in exploded.columns:
         platform = exploded.get("Platform", pd.Series(dtype=str))
         baseline = np.where(platform == "Underdog", UNDERDOG_BOOST_BASELINE, 1.0)
         payout = exploded["Boost"] * baseline
-        exploded["Model"] = exploded["Model P"] * payout
-        exploded["Books"] = exploded["Books P"].fillna(0.5) * payout
-        exploded["K"] = (exploded["Model"] - 1) / (payout - 1).replace(0, np.nan)
+        exploded["Model EV"] = exploded["Win Prob"] * payout
+        exploded["Market EV"] = exploded["Market Prob"].fillna(0.5) * payout
+        exploded["Kelly"] = (exploded["Model EV"] - 1) / (payout - 1).replace(0, np.nan)
     return exploded
 
 
@@ -352,7 +352,7 @@ def explode_offers(history):
     """Expand Offers column into one row per offer, inheriting prediction-level cols.
 
     Returns DataFrame with columns: all prediction-level cols + Line, Boost,
-    Platform, Bet, Model P, Books P, Close Books P, Market CLV, Model CLV,
+    Platform, Bet, Win Prob, Market Prob, Close Market Prob, Market CLV, Model CLV,
     Result, Hit. Legacy 6-tuples are read transparently — the closing trio
     surfaces as NaN.
     """
@@ -471,7 +471,7 @@ def _hist_stats_table(filtered, prob_col, today):
         _append_stats_row(rows, tf_data, prob_col, tf_label, "All")
         _append_stats_row(
             rows,
-            tf_data.loc[tf_data["Books"] > _BOOK_PROB_PICK_FLOOR],
+            tf_data.loc[tf_data["Market EV"] > _BOOK_PROB_PICK_FLOOR],
             prob_col,
             tf_label,
             "All, Book Filtered",
@@ -539,11 +539,11 @@ def _roi_table(history, today):
                 (
                     "Book Filtered",
                     history.loc[
-                        (history["_date"] >= cutoff) & (history["Books"] > _BOOK_PROB_PICK_FLOOR)
+                        (history["_date"] >= cutoff) & (history["Market EV"] > _BOOK_PROB_PICK_FLOOR)
                     ],
                 ),
             ]:
-                t_sub = subset.loc[subset["Model"] > threshold]
+                t_sub = subset.loc[subset["Model EV"] > threshold]
                 if t_sub.empty:
                     continue
                 wins = (t_sub["Bet"] == t_sub["Result"]).sum()
@@ -571,12 +571,12 @@ def compute_individual_metrics(history):
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     prob_col = (
-        "Model P" if "Model P" in history.columns and history["Model P"].notna().any() else "Model"
+        "Win Prob" if "Win Prob" in history.columns and history["Win Prob"].notna().any() else "Model EV"
     )
     today = datetime.today().date()
     history["_date"] = pd.to_datetime(history["Date"], errors="coerce").dt.date
     history = history.loc[history["_date"].notna()].copy()
-    filtered = history.loc[history["Model"] > _MODEL_PROB_PICK_FLOOR]
+    filtered = history.loc[history["Model EV"] > _MODEL_PROB_PICK_FLOOR]
 
     hist_stats = _hist_stats_table(filtered, prob_col, today)
     daily, calibration = _daily_calibration_tables(filtered, prob_col, today)
@@ -782,7 +782,7 @@ def compute_parlay_metrics(parlays, stats, stat_map):
 
 
 def _dist_params(row):
-    """Extract (Dist, CV, Model EV, Model Param, Gate) from a saved-prediction row.
+    """Extract (Dist, CV, Projection, Model Param, Gate) from a saved-prediction row.
 
     Gate is normalized to None when absent (NaN), matching how the reconstruct
     and CRPS math treat "no zero-inflation gate".
@@ -791,7 +791,7 @@ def _dist_params(row):
     return (
         row["Dist"],
         row["CV"],
-        row["Model EV"],
+        row["Projection"],
         row.get("Model Param"),
         None if pd.isna(gate) else gate,
     )
@@ -963,7 +963,7 @@ def compute_brier_skill_score(subset, base_rate=0.5):
         return np.nan
     hits = (subset["Bet"] == subset["Result"]).astype(int)
     prob_col = (
-        "Model P" if "Model P" in subset.columns and subset["Model P"].notna().any() else "Model"
+        "Win Prob" if "Win Prob" in subset.columns and subset["Win Prob"].notna().any() else "Model EV"
     )
     brier = brier_score_loss(hits, subset[prob_col].clip(0, 1))
     brier_ref = base_rate * (1 - base_rate)
@@ -976,21 +976,21 @@ def compute_book_brier_skill_score(subset):
     """Brier Skill Score with the bookmaker as the reference baseline.
 
     Mirrors training-side ``brier_skill_score``: ``1 - brier(model)/brier(book)``.
-    Hits are ``(Bet == Result)``; the model probability column is ``Model P`` with
-    a fallback to ``Model``; the book probability column is ``Books P``. Returns
-    NaN if subset is empty, ``Books P`` is missing or all-NaN, or the book's
+    Hits are ``(Bet == Result)``; the model probability column is ``Win Prob`` with
+    a fallback to ``Model EV``; the book probability column is ``Market Prob``. Returns
+    NaN if subset is empty, ``Market Prob`` is missing or all-NaN, or the book's
     Brier is zero (degenerate baseline).
     """
     if len(subset) == 0:
         return np.nan
-    if "Books P" not in subset.columns or subset["Books P"].isna().all():
+    if "Market Prob" not in subset.columns or subset["Market Prob"].isna().all():
         return np.nan
     hits = (subset["Bet"] == subset["Result"]).astype(int)
     prob_col = (
-        "Model P" if "Model P" in subset.columns and subset["Model P"].notna().any() else "Model"
+        "Win Prob" if "Win Prob" in subset.columns and subset["Win Prob"].notna().any() else "Model EV"
     )
     brier_model = brier_score_loss(hits, subset[prob_col].clip(0, 1))
-    brier_book = brier_score_loss(hits, subset["Books P"].clip(0, 1))
+    brier_book = brier_score_loss(hits, subset["Market Prob"].clip(0, 1))
     if brier_book == 0:
         return np.nan
     return 1 - brier_model / brier_book
@@ -1008,7 +1008,7 @@ def murphy_decomposition(subset):
         return {"Reliability": np.nan, "Resolution": np.nan, "Uncertainty": np.nan, "Brier": np.nan}
 
     prob_col = (
-        "Model P" if "Model P" in subset.columns and subset["Model P"].notna().any() else "Model"
+        "Win Prob" if "Win Prob" in subset.columns and subset["Win Prob"].notna().any() else "Model EV"
     )
     hits = (subset["Bet"] == subset["Result"]).astype(float)
     probs = subset[prob_col].clip(0, 1).values

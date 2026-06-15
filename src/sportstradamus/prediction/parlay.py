@@ -517,7 +517,7 @@ def _evaluate_parlay(
     display_boost = boost if legacy else payout
     parlay_dict = info | {
         "Model EV": p,
-        "Books EV": pb,
+        "Market EV": pb,
         "Boost": display_boost,
         "Rec Bet": units,
         "Leg 1": "",
@@ -532,7 +532,7 @@ def _evaluate_parlay(
         "PB": prev_pb,
         "Fun": _parlay_fun(bet, info["League"]),
         "Bet Size": bet_size,
-        "Leg Probs": tuple(bet_df[i]["Model P"] for i in bet_id),
+        "Leg Probs": tuple(bet_df[i]["Win Prob"] for i in bet_id),
         "Corr Pairs": tuple(SIG[np.triu_indices(bet_size, 1)]),
         "Boost Pairs": tuple(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size, 1)]),
         "Indep P": float(np.prod(p_model[np.ix_(bet_id)]) * payout),

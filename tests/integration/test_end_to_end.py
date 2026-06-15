@@ -232,8 +232,8 @@ def test_pipeline_smoke(
     assert captured, "process_offers was never invoked"
     underdog_offers, _ = captured.get("Underdog", (pd.DataFrame(), pd.DataFrame()))
     assert len(underdog_offers) >= 10, f"expected >= 10 offers with EV, got {len(underdog_offers)}"
-    assert underdog_offers["Model EV"].notna().sum() >= 10, (
-        "fewer than 10 offers had a populated Model EV column"
+    assert underdog_offers["Projection"].notna().sum() >= 10, (
+        "fewer than 10 offers had a populated Projection column"
     )
     parlay_total = sum(len(p) for _, p in captured.values())
     assert parlay_total >= 1, "no parlay candidates were returned"
@@ -340,13 +340,13 @@ def _synthetic_offers() -> pd.DataFrame:
                 "Line": line,
                 "Boost": 1.0,
                 "Bet": "Over",
-                "Model EV": model_ev,
+                "Projection": model_ev,
                 "Model Param": line,
-                "Books EV": line,
-                "Model P": 0.55,
-                "Books P": 0.50,
-                "Model": 1.05,
-                "Books": 1.0,
+                "Market Projection": line,
+                "Win Prob": 0.55,
+                "Market Prob": 0.50,
+                "Model EV": 1.05,
+                "Market EV": 1.0,
                 "O/U": half_total,
                 "Moneyline": win_prob,
                 "DVPOA": 0.06,
@@ -358,7 +358,7 @@ def _synthetic_offers() -> pd.DataFrame:
                 "Step": 0.5,
                 "Player position": "G",
                 "Position": f"G{i % 3 + 1}",
-                "K": 1.0,
+                "Kelly": 1.0,
             }
         )
     return pd.DataFrame(rows)
@@ -374,7 +374,7 @@ def _synthetic_parlays(book: str) -> pd.DataFrame:
                 "Game": "LVA@NYL",
                 "Family": "WNBA-PTS",
                 "Model EV": 1.45,
-                "Books EV": 1.10,
+                "Market EV": 1.10,
                 "Rec Bet": 5.0,
                 "Fun": 0.8,
                 "P": 0.42,

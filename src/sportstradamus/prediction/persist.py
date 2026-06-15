@@ -29,7 +29,8 @@ from sportstradamus.prediction.stories import STORIES_VERSION
 # Display columns kept in current_offers.parquet. The dashboard reads:
 # - Offer details: League, Date, Team, Opponent, Game (canonical matchup key),
 #   Player, Market, Platform, Bet, Line, Boost
-# - Scoring: Model P (hit probability), Model (edge), Books, Model EV, K (Kelly), Model STD, Push P
+# - Scoring: Win Prob (hit probability), Model EV (edge), Market EV, Projection (stat mean),
+#   Kelly, Projection STD, Push Prob
 # - Context: Avg 5, Avg H2H, Moneyline, O/U, DVPOA, Position (depth-chart label)
 # - Correlations: Team Correlation, Opp Correlation
 # - Narrative: Why (precomputed "the case" string, prediction/stories)
@@ -37,7 +38,7 @@ from sportstradamus.prediction.stories import STORIES_VERSION
 # - Distribution (for PDF/PMF): Dist, CV, Gate, and shape parameters (Model R, Alpha, Sigma, Skew)
 #
 # Dropped internal columns: Model Param (generic workaround), Temperature, Disp Cal, Step,
-# Books P, Player position (numeric depth slot — the resolved label rides in Position).
+# Market Prob, Player position (numeric depth slot — the resolved label rides in Position).
 _OFFER_KEEP_COLS = [
     "League",
     "Date",
@@ -50,13 +51,13 @@ _OFFER_KEEP_COLS = [
     "Bet",
     "Line",
     "Boost",
-    "Model P",
-    "Model",
-    "Books",
+    "Win Prob",
     "Model EV",
-    "K",
-    "Model STD",
-    "Push P",
+    "Market EV",
+    "Projection",
+    "Kelly",
+    "Projection STD",
+    "Push Prob",
     "Avg 5",
     "Avg H2H",
     "Moneyline",
@@ -78,7 +79,7 @@ _OFFER_KEEP_COLS = [
 
 # A row with no boost, no model edge, and no book edge carries no signal —
 # it is a scoring artifact and is dropped before the snapshot is written.
-_OFFER_SIGNAL_COLS = ["Boost", "Model", "Books"]
+_OFFER_SIGNAL_COLS = ["Boost", "Model EV", "Market EV"]
 
 # Internal correlation cols dropped from current_parlays.parquet — these are
 # scoring artifacts not useful for human review. `Indep P` is kept (independence
@@ -198,8 +199,8 @@ def _normalize_offers(offers: pd.DataFrame) -> pd.DataFrame:
 
     keep = [c for c in _OFFER_KEEP_COLS if c in df.columns]
     df = df[keep]
-    if "Model" in df.columns:
-        df = df.sort_values("Model", ascending=False, ignore_index=True)
+    if "Model EV" in df.columns:
+        df = df.sort_values("Model EV", ascending=False, ignore_index=True)
     return df
 
 

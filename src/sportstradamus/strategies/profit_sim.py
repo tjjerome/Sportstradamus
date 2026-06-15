@@ -54,9 +54,9 @@ _DEFAULT_AMERICAN_MINUS_110_PAYOUT: float = 100.0 / 110.0
 
 # Translates the user-facing ranking label into the exploded-frame column name.
 RANKING_MAP: dict[str, str] = {
-    "Kelly": "K",
-    "Probability": "Model P",
-    "EV": "Model",
+    "Kelly": "Kelly",
+    "Probability": "Win Prob",
+    "EV": "Model EV",
 }
 
 
@@ -91,7 +91,7 @@ def simulate_strategy(
     """Monte-Carlo backtest a filter-and-rank strategy on exploded offers.
 
     Filters ``df`` to rows with ``prob_col >= min_model_p``,
-    ``Books >= min_books_p``, and a finite ranking value — NaN and ±inf
+    ``Market EV >= min_books_p``, and a finite ranking value — NaN and ±inf
     both poison the normalized sampling weights (``inf / inf = NaN``), so a
     row that cannot be ranked is excluded up front. Then for each MC run
     walks the date axis and on each date picks at most ``max_bets_day``
@@ -107,11 +107,11 @@ def simulate_strategy(
     if df.empty:
         return pd.DataFrame()
 
-    rank_col = RANKING_MAP.get(ranking, "K")
+    rank_col = RANKING_MAP.get(ranking, "Kelly")
 
     eligible = df.loc[
         (df[prob_col] >= min_model_p)
-        & (df["Books"].fillna(0) >= min_books_p)
+        & (df["Market EV"].fillna(0) >= min_books_p)
         & np.isfinite(df[rank_col])
     ].copy()
     if eligible.empty:
