@@ -16,9 +16,8 @@ from lightgbmlss.distributions.NegativeBinomial import NegativeBinomial
 from lightgbmlss.distributions.ZINB import ZINB
 from lightgbmlss.model import LightGBMLSS
 from scipy.optimize import minimize_scalar
-from scipy.special import beta as beta_fn
 from scipy.special import expit, logit
-from scipy.stats import gamma, nbinom, norm, skewnorm
+from scipy.stats import norm, skewnorm
 from sklearn.metrics import (
     accuracy_score,
     brier_score_loss,
@@ -35,10 +34,13 @@ from sportstradamus.helpers import (
     apply_temperature,
     decode_predictive_mean,
     fused_loc,
+    gamma_crps,
     get_ev,
     get_logger,
     get_odds,
+    negbin_crps,
     set_model_start_values,
+    skewnormal_loc_from_mean,
     stat_cv,
     stat_zi,
 )
@@ -55,6 +57,7 @@ from sportstradamus.training.config import (
 from sportstradamus.training.data import trim_matrix
 from sportstradamus.training.hyperparams import _BoundedResponseFn, run_hyper_opt
 from sportstradamus.training.report import report
+from sportstradamus.training.scorecard import fit_skewnorm_dispersion_skew
 from sportstradamus.training.shap import compute_market_importance
 
 logger = get_logger(__name__)
@@ -104,10 +107,13 @@ _SHAPE_CEILING_MULTIPLIER: float = 2.0
 # context" (the per-family training loss here; the cell's stat_meta blending in the CLI), so a
 # default run reproduces production. The Operation Ship 75 search sweeps nll ↔ crps off these.
 LOSS_AUTO: str = "auto"
+# Training loss exposed by ``meditate --dist-training-loss`` — crps for the SkewNormal continuous
+# branch, nll for the count branch when ``auto``.
 DIST_TRAINING_LOSS_CHOICES: tuple[str, ...] = (LOSS_AUTO, "nll", "crps")
 
 
 def _resolve_loss_fn(family_default: str, override: str) -> str:
+    """Shared by the training-loss and blending-loss axes so ``auto`` reproduces production for each context."""
     return family_default if override == LOSS_AUTO else override
 
 
@@ -1240,6 +1246,7 @@ def _build_filedict(
     skill: dict,
     diag: dict,
     c_opt: float,
+    skew_cal: float,
     shape_ceiling,
     marginal_shape,
     opt_params: dict,
@@ -1293,6 +1300,7 @@ def _build_filedict(
             "ev_minus_line": diag["ev_minus_line"],
             "result_mean": diag["result_mean"],
             "dispersion_cal": c_opt,
+            "skew_cal": skew_cal,
             "median_ev_diff": diag["median_ev_diff"],
             "frac_ev_gt_line": diag["frac_ev_gt_line"],
             "over_pct_ev_gt": diag["over_pct_ev_gt"],
@@ -1309,6 +1317,7 @@ def _build_filedict(
         "std": y.Result.std(),
         "temperature": T_opt,
         "dispersion_cal": c_opt,
+        "skew_cal": skew_cal,
         "weight": model_weight,
         "r_book": None,
         "hist_gate": hist_gate,
@@ -1341,12 +1350,17 @@ def _step_persist_artifacts(
     decoded: dict,
     weighted_mean: np.ndarray,
     y_proba_filt: np.ndarray,
+    y_proba_raw: np.ndarray,
     dist: str,
     hist_gate: float,
     filename: str,
     deterministic: bool,
     target_normalization: str,
     zinb_mode: str,
+    sn_scale_test: np.ndarray | None,
+    sn_skew_test: np.ndarray | None,
+    global_mean: float,
+    denom_col: str,
 ) -> None:
     """Write the test-set CSV and the model pickle.
 
@@ -1370,9 +1384,21 @@ def _step_persist_artifacts(
     # measures dispersion, which the corrector intentionally leaves alone.
     X_test["EV"] = ev
     if dist == "SkewNormal":
-        X_test["SN_Loc"] = prob_params["loc"]
-        X_test["SN_Scale"] = prob_params["scale"]
-        X_test["SN_Alpha"] = prob_params["alpha"]
+        # Gate 4 must score the SERVED predictive (blended params × dispersion c),
+        # the same distribution inference prices. Derive scipy loc via
+        # skewnormal_loc_from_mean — the single authoritative formula shared with the
+        # betting path and the scorecard fit — then re-encode loc/scale to the model's
+        # normalized space so the scorecard's decode recovers the served EV params
+        # byte-for-byte (encode is the exact inverse of that decode).
+        strat = baselines.get_target_normalization(target_normalization)
+        served_loc = skewnormal_loc_from_mean(weighted_mean, sn_scale_test, sn_skew_test)
+        X_test["SN_Loc"] = strat.encode_loc(served_loc, X_test, global_mean, denom_col)
+        X_test["SN_Scale"] = strat.encode_scale(sn_scale_test, X_test, denom_col)
+        X_test["SN_Alpha"] = sn_skew_test
+        # The EB-prior normalizations decode loc by re-adding an empirical-Bayes prior that
+        # shrinks toward global_mean; persist it so the scorecard's `_decode_sn_loc_scale`
+        # recovers the served loc instead of shrinking toward 0. Ratio/Mean10 decodes ignore it.
+        X_test["GlobalMean"] = global_mean
         if hist_gate > GATE_PUBLISH_THRESHOLD:
             X_test["Gate"] = hist_gate
     elif dist in ("NegBin", "ZINB"):
@@ -1386,6 +1412,9 @@ def _step_persist_artifacts(
         X_test["Alpha"] = prob_params["concentration"]
 
     X_test["P"] = y_proba_filt[:, 1]
+    # Pre-blend (model-only) over-probability — lets the offline scorecard report a
+    # standalone Gate-1 CI alongside the fused one, attributing the pass to model vs book.
+    X_test["P_standalone"] = y_proba_raw[:, 1]
     _persist_player_metadata(X_test, splits)
 
     # Under --deterministic, redirect to a `deterministic/` subdir so the
@@ -1444,32 +1473,11 @@ def _dispersion_crps_loss(
     if dist in ("NegBin", "ZINB"):
         r_cal = r_blend_val * c
         p_cal = r_cal / (r_cal + val_weighted_mean)
-        k_max = int(max(y_val_arr.max() * 2, np.mean(val_weighted_mean) * 4, 30))
-        k_vals = np.arange(k_max + 1)
-        cdf = nbinom.cdf(k_vals[:, None], r_cal[None, :], p_cal[None, :])
-        if gate_blend_val is not None:
-            cdf = gate_blend_val[None, :] + (1 - gate_blend_val[None, :]) * cdf
-        indicator = (y_val_arr[None, :] <= k_vals[:, None]).astype(float)
-        crps = np.sum((cdf - indicator) ** 2, axis=0)
+        crps = negbin_crps(y_val_arr, r_cal, p_cal, gate=gate_blend_val)
     else:
         alpha_cal = alpha_blend_val * c
         scale_cal = val_weighted_mean / alpha_cal
-        if gate_blend_val is not None:
-            x_max = max(y_val_arr.max() * 2, np.mean(val_weighted_mean) * 4)
-            x_grid = np.linspace(0, x_max, 500)
-            dx = x_grid[1] - x_grid[0]
-            cdf_grid = gamma.cdf(x_grid[:, None], alpha_cal[None, :], scale=scale_cal[None, :])
-            cdf_grid = gate_blend_val[None, :] + (1 - gate_blend_val[None, :]) * cdf_grid
-            indicator = (y_val_arr[None, :] <= x_grid[:, None]).astype(float)
-            crps = np.sum((cdf_grid - indicator) ** 2, axis=0) * dx
-        else:
-            F_y = gamma.cdf(y_val_arr, alpha_cal, scale=scale_cal)
-            F_y_a1 = gamma.cdf(y_val_arr, alpha_cal + 1, scale=scale_cal)
-            crps = (
-                y_val_arr * (2 * F_y - 1)
-                - val_weighted_mean * (2 * F_y_a1 - 1)
-                - scale_cal / beta_fn(0.5, alpha_cal)
-            )
+        crps = gamma_crps(y_val_arr, alpha_cal, scale_cal, gate=gate_blend_val)
     reg = 0.01 * np.log(c) ** 2
     return np.mean(crps) + reg
 
@@ -1496,36 +1504,50 @@ def _step_calibrate_dispersion(
 
     Pure: returns a new dict with updated ``r_test``, ``r_blend_val``,
     ``alpha_blend``, ``alpha_blend_val``, ``beta_blend_val``, ``c_opt``,
-    ``val_weighted_mean`` (count branch) or ``val_weighted_mean_val``
-    (SkewNormal). Hurdle ZINB participates in dispersion calibration via the
-    NegBin branch — gate is passed through as ``gate_blend_val``.
+    ``val_weighted_mean`` (count branch) or ``sn_sigma_blend_test`` (= blended
+    test sigma × ``c_opt``), ``skew_cal`` + ``sn_alpha_blend_{test,val}`` (= blended
+    alpha + ``skew_cal``) + ``val_weighted_mean_val`` (SkewNormal). The SkewNormal
+    branch fits ``(c_opt, skew_cal)`` jointly (Lever 1 scale + Lever 4a additive skew
+    shift) to minimize the Gate-4 randomized-PIT KS of the served (blended) predictive;
+    ``skew_cal = 0`` recovers pure scale calibration. The count branch minimizes CRPS.
+    Hurdle ZINB participates via the NegBin branch — gate passed through as ``gate_blend_val``.
     """
-    book_ev_val = splits["B_validation"]["EV"].to_numpy()
     y_val_arr = splits["y_validation"]["Result"].to_numpy()
 
     out = {
         "c_opt": 1.0,
+        "skew_cal": 0.0,
         "r_test": fused["r_test"],
         "r_blend_val": fused["r_blend_val"],
         "alpha_blend": fused["alpha_blend"],
         "alpha_blend_val": fused["alpha_blend_val"],
         "beta_blend_val": fused["beta_blend_val"],
+        "sn_sigma_blend_test": fused["sn_sigma_blend_test"],
+        "sn_sigma_blend_val": fused["sn_sigma_blend_val"],
+        "sn_alpha_blend_test": fused["sn_alpha_blend_test"],
+        "sn_alpha_blend_val": fused["sn_alpha_blend_val"],
         "val_weighted_mean": None,
         "val_weighted_mean_val": None,
     }
 
     if dist == "SkewNormal":
-        val_weighted_mean_val, _, _, _ = fused_loc(
-            model_weight,
-            decoded["ev_validation"],
-            book_ev_val,
-            cv,
-            "SkewNormal",
-            sigma=decoded["sn_sigma_val"],
-            skew_alpha=decoded["sn_alpha_val"],
-            **({"gate_book": hist_gate} if hist_gate > GATE_PUBLISH_THRESHOLD else {}),
+        # Fit c (Lever 1, scale) and s (Lever 4a, additive skew shift) jointly against the
+        # served (blended) predictive — the exact thing inference prices and Gate 4 scores:
+        # mean held fixed at the blended val mean, scale scaled by c, shape shifted by s.
+        # Reuses the gate's own randomized-PIT KS (no PIT-math dup); s = 0 ⇒ pure Lever 1.
+        c_opt, s_opt = fit_skewnorm_dispersion_skew(
+            fused["weighted_mean_val"],
+            fused["sn_sigma_blend_val"],
+            fused["sn_alpha_blend_val"],
+            y_val_arr,
         )
-        out["val_weighted_mean_val"] = val_weighted_mean_val
+        out["c_opt"] = c_opt
+        out["skew_cal"] = s_opt
+        out["sn_sigma_blend_test"] = fused["sn_sigma_blend_test"] * c_opt
+        out["sn_sigma_blend_val"] = fused["sn_sigma_blend_val"] * c_opt
+        out["sn_alpha_blend_test"] = fused["sn_alpha_blend_test"] + s_opt
+        out["sn_alpha_blend_val"] = fused["sn_alpha_blend_val"] + s_opt
+        out["val_weighted_mean_val"] = fused["weighted_mean_val"]
         return out
 
     r_blend_val = fused["r_blend_val"]
@@ -1587,8 +1609,8 @@ def _step_compute_test_probabilities(
             B_test["Line"].to_numpy(),
             weighted_mean,
             "SkewNormal",
-            sigma=fused["sn_sigma_blend_test"],
-            skew_alpha=fused["sn_alpha_blend_test"],
+            sigma=calibrated["sn_sigma_blend_test"],
+            skew_alpha=calibrated["sn_alpha_blend_test"],
             gate=fused["gate_blend_test"],
         )
     elif dist in ("NegBin", "ZINB"):
@@ -1628,8 +1650,8 @@ def _step_calibrate_temperature(
             B_validation["Line"].to_numpy(),
             calibrated["val_weighted_mean_val"],
             "SkewNormal",
-            sigma=fused["sn_sigma_blend_val"],
-            skew_alpha=fused["sn_alpha_blend_val"],
+            sigma=calibrated["sn_sigma_blend_val"],
+            skew_alpha=calibrated["sn_alpha_blend_val"],
             gate=fused["gate_blend_val"],
         )
     else:
@@ -1777,7 +1799,7 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
         skew_alpha=decoded["sn_alpha_test"],
         **_zi_kwargs,
     )
-    _, sn_sigma_blend_val, sn_alpha_blend_val, gate_blend_val = fused_loc(
+    weighted_mean_val, sn_sigma_blend_val, sn_alpha_blend_val, gate_blend_val = fused_loc(
         model_weight,
         ev_validation,
         book_ev_val,
@@ -1791,6 +1813,7 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
         {
             "model_weight": model_weight,
             "weighted_mean": weighted_mean,
+            "weighted_mean_val": weighted_mean_val,
             "gate_blend_test": gate_blend_test,
             "gate_blend_val": gate_blend_val,
             "sn_sigma_blend_test": sn_sigma_blend_test,
@@ -1826,6 +1849,7 @@ def _fit_nonsn_weight(out, decoded, splits, base_dist, dist, cv, hist_gate, blen
 
 
 def _fuse_negbin(out, decoded, splits, model_weight, cv, hist_gate, dist):
+    """NegBin / ZINB branch: blend r + derive p on test + validation."""
     ev = decoded["ev"]
     ev_validation = decoded["ev_validation"]
     book_ev_test = splits["B_test"]["EV"].to_numpy()
@@ -1870,6 +1894,7 @@ def _fuse_negbin(out, decoded, splits, model_weight, cv, hist_gate, dist):
 
 
 def _fuse_gamma(out, decoded, splits, model_weight, cv, hist_gate, dist):
+    """Gamma / ZAGamma branch: blend alpha + beta on test + validation."""
     ev = decoded["ev"]
     ev_validation = decoded["ev_validation"]
     book_ev_test = splits["B_test"]["EV"].to_numpy()
@@ -1948,6 +1973,7 @@ def _step_fuse_predictions(
     out = {
         "model_weight": None,
         "weighted_mean": None,
+        "weighted_mean_val": None,
         "gate_blend_test": None,
         "gate_blend_val": None,
         "r_test": None,
@@ -2276,6 +2302,22 @@ def train_market(
         dist_info["denom_col"],
         hist_gate,
     )
+
+    # Mean-stage post-hoc (orthogonal to target_normalization and to the
+    # prob-stage corrector below): fit on the validation decoded mean, then
+    # correct both test and validation means BEFORE fusion so the correction
+    # flows through the blend into P (Gate 1/5) and into the persisted EV
+    # (Gate 2/3). roe_mean undoes leaf-averaging compression; it deliberately
+    # does not touch dispersion (Gate 4).
+    mean_posthoc_blob = None
+    if posthoc_slug in posthoc.MEAN_STAGE:
+        val_result = splits["y_validation"]["Result"].to_numpy(dtype=float)
+        mean_posthoc_blob = posthoc.fit_posthoc(posthoc_slug, decoded["ev_validation"], val_result)
+        decoded["ev"] = posthoc.apply_posthoc(posthoc_slug, mean_posthoc_blob, decoded["ev"])
+        decoded["ev_validation"] = posthoc.apply_posthoc(
+            posthoc_slug, mean_posthoc_blob, decoded["ev_validation"]
+        )
+
     fused = _step_fuse_predictions(decoded, splits, dist, cv, hist_gate, blending=blending)
     calibrated = _step_calibrate_dispersion(
         decoded,
@@ -2300,7 +2342,7 @@ def train_market(
     # both the validation probs (so skill reflects it) and the persisted test
     # probs (so the offline ship gates see the corrected cell). No-op when the
     # cell's posthoc slug is "none" or not a probability-stage corrector.
-    posthoc_blob = None
+    posthoc_blob = mean_posthoc_blob  # None unless the slug is a MEAN_STAGE corrector
     if posthoc_slug in posthoc.PROB_STAGE:
         posthoc_blob = posthoc.fit_posthoc(posthoc_slug, val_calibrated, y_class_val)
         val_calibrated = posthoc.apply_posthoc(posthoc_slug, posthoc_blob, val_calibrated)
@@ -2342,6 +2384,7 @@ def train_market(
         skill=skill,
         diag=diag,
         c_opt=calibrated["c_opt"],
+        skew_cal=calibrated["skew_cal"],
         shape_ceiling=shape_ceiling,
         marginal_shape=dist_info["marginal_shape"],
         opt_params=opt_params,
@@ -2370,12 +2413,17 @@ def train_market(
         decoded=decoded,
         weighted_mean=fused["weighted_mean"],
         y_proba_filt=y_proba_filt,
+        y_proba_raw=y_proba_raw,
         dist=dist,
         hist_gate=hist_gate,
         filename=filename,
         deterministic=deterministic,
         target_normalization=target_normalization,
         zinb_mode=zinb_mode,
+        sn_scale_test=calibrated["sn_sigma_blend_test"],
+        sn_skew_test=calibrated["sn_alpha_blend_test"],
+        global_mean=dist_info["global_mean"],
+        denom_col=dist_info["denom_col"],
     )
 
     # Drift-monitoring SHAP: write per-cell |SHAP| + corr columns to the

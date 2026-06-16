@@ -39,15 +39,17 @@ from pathlib import Path
 import click
 import numpy as np
 import pandas as pd
+from scipy.optimize import minimize, minimize_scalar
 from scipy.stats import gamma as _scipy_gamma
 from scipy.stats import nbinom as _scipy_nbinom
 from scipy.stats import skewnorm as _scipy_skewnorm
 
 from sportstradamus import data
 from sportstradamus.analysis import explode_offers
+from sportstradamus.helpers.distributions import skewnormal_loc_from_mean
 from sportstradamus.helpers.io import read_history
 from sportstradamus.helpers.provenance import git_sha
-from sportstradamus.training.baselines import _MEANYR_FLOOR as _SN_DENOM_FLOOR
+from sportstradamus.training.baselines import get_target_normalization
 from sportstradamus.training.markets import ALL_MARKETS
 from sportstradamus.training.ship_config import STAT_META_PATH, TARGET_NORM_NONE, load_stat_meta
 
@@ -128,6 +130,23 @@ _GATE4_KS_NOISE_COEF: float = 1.358
 # over a seeded draw set so the gate stays reproducible.
 _RANDOMIZED_PIT_DRAWS: int = 25
 _RANDOMIZED_PIT_SEED: int = 4517
+# Search range for the SkewNormal dispersion scalar c (fit_skewnorm_dispersion_c). Lower
+# bound permits tightening an over-wide cell; upper bound matches the count branch's hard cap.
+_DISPERSION_C_BOUNDS: tuple[float, float] = (0.1, 10.0)
+# Clamp on the Lever-4a additive skew shift s (fit_skewnorm_dispersion_skew). |s| <= 3 keeps
+# the served skewness well inside the SkewNormal's range and bounds the 2-param fit's capacity
+# at ~2k calibration rows (the skewness MLE is only n^(1/4)-consistent near alpha=0 —
+# Hallin & Ley 2014 — so an unbounded shift overfits the gate's own KS).
+_DISPERSION_SKEW_BOUNDS: tuple[float, float] = (-3.0, 3.0)
+# Deterministic warm starts for the joint (c, s) fit. The objective has a flat-gradient
+# Fisher singularity at s = 0, so a single Nelder-Mead seeded there stalls; spanning negative,
+# zero, and positive skew lets the arg-min escape it for either skew direction.
+_DISPERSION_SKEW_STARTS: tuple[float, ...] = (-1.5, 0.0, 1.5, 3.0)
+# Minimum PIT-KS improvement (vs scale-only) for the skew shift to be kept; below it the fit
+# returns the pure Lever-1 (c, 0), byte-identical. Set to the measured val->test discount: a
+# skew gain smaller than the discount is finite-sample noise that won't survive to the test
+# gate, and on an already-calibrated cell the flat surface yields a spurious gain ~0.004.
+_DISPERSION_SKEW_MIN_GAIN: float = 0.008
 # Reported (not a ship term): the over-tail of the same randomized PIT, restricted to
 # u >= _TAIL_PIT_FLOOR. The global Gate-4 KS is a sup over the whole CDF, so it nets
 # compensating directional errors and a cell can pass g4 while mispricing the alt-OVER
@@ -279,6 +298,9 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
         "SN_Loc",
         "SN_Scale",
         "SN_Alpha",
+        "Mean10",  # centered_additive_mean10 SkewNormal decode re-adds this baseline to loc
+        "GamesPlayed",  # centered_additive_eb decode re-adds an EB prior over (MeanYr, GamesPlayed)
+        "GlobalMean",  # …shrunk toward this persisted global mean
         "R",
         "NB_P",
         "Alpha",
@@ -632,33 +654,36 @@ def _infer_dist_from_columns(df: pd.DataFrame) -> str | None:
     return None
 
 
-# MeanYr floor for ratio_meanyr decode is canonical at
-# `training.baselines._MEANYR_FLOOR` (imported at the top of this module as
-# `_SN_DENOM_FLOOR`); the analytical-IQR mirror must agree with the training
-# pipeline or the predicted IQR drifts from what the model actually output.
-
-# Strategies that decode SkewNormal scale by multiplying with MeanYr_clipped,
-# mirroring training.baselines._ratio_decode_scale. centered_additive_*
-# strategies leave SN_Scale alone (baselines._centered_eb_decode_scale and
-# _centered_mean10_decode_scale return raw scale).
-_RATIO_LIKE_STRATEGIES: frozenset[str] = frozenset({"ratio_meanyr"})
+# SkewNormal strategies the gate can decode from the dumped params. ``ratio_meanyr``
+# and ``centered_additive_mean10`` ignore ``GlobalMean``; ``centered_additive_eb_meanyr_k10``
+# re-adds it from the persisted ``GlobalMean`` column (fallback 0.0). Any other string
+# is an A/B run-label on a frame already in EV-space — pass through unchanged.
+_SN_DECODE_STRATEGIES: frozenset[str] = frozenset(
+    {"ratio_meanyr", "centered_additive_mean10", "centered_additive_eb_meanyr_k10"}
+)
 
 
 def _decode_sn_loc_scale(df: pd.DataFrame, strategy: str) -> tuple[np.ndarray, np.ndarray]:
     """Decode raw SkewNormal ``loc`` / ``scale`` to EV-space per strategy.
 
-    Mirrors ``training.baselines.TargetNormalization.decode_loc`` / ``decode_scale``
-    for the strategies wired in ``_TARGET_NORMALIZATIONS`` there. ``ratio_meanyr``
-    multiplies both by ``MeanYr.clip(_SN_DENOM_FLOOR)``; the
-    ``centered_additive_*`` strategies leave ``scale`` alone (location decode
-    is irrelevant for IQR, which is location-free for SkewNormal).
+    Dispatches through the canonical ``baselines`` registry so the gate scores the
+    same absolute predictive that ``prediction.model_prob`` prices, rather than a
+    hand-rolled mirror that can drift. ``ratio_meanyr`` multiplies both by ``MeanYr``;
+    ``centered_additive_mean10`` re-adds the Mean10 baseline to ``loc`` — irrelevant
+    for the location-free IQR but load-bearing for the PIT, which is where the old
+    hand-rolled mirror silently dropped the offset. ``centered_additive_eb_meanyr_k10``
+    re-adds an empirical-Bayes prior that shrinks toward ``global_mean``, which the
+    pipeline persists per-row as the constant ``GlobalMean`` column; without it the
+    prior shrinks toward 0 and the decode silently corrupts the PIT. Ratio/Mean10
+    decodes ignore ``global_mean``, so the legacy 0.0 fallback is correct for them.
     """
     raw_loc = df["SN_Loc"].to_numpy(dtype=float)
     raw_scale = df["SN_Scale"].to_numpy(dtype=float)
-    if strategy in _RATIO_LIKE_STRATEGIES and "MeanYr" in df.columns:
-        meanyr = df["MeanYr"].clip(lower=_SN_DENOM_FLOOR).to_numpy(dtype=float)
-        return raw_loc * meanyr, raw_scale * meanyr
-    return raw_loc, raw_scale
+    if strategy not in _SN_DECODE_STRATEGIES:
+        return raw_loc, raw_scale
+    global_mean = float(df["GlobalMean"].iloc[0]) if "GlobalMean" in df.columns else 0.0
+    strat = get_target_normalization(strategy)
+    return strat.decode_loc(raw_loc, df, global_mean), strat.decode_scale(raw_scale, df)
 
 
 def _pred_ppf(df: pd.DataFrame, dist: str, q: float, *, strategy: str) -> np.ndarray:
@@ -825,6 +850,133 @@ def _randomized_pit_ks(df: pd.DataFrame, dist: str, y: np.ndarray, *, strategy: 
     """
     draws = _randomized_pit_draws(df, dist, y, strategy=strategy)
     return float(np.mean([_ks_uniform(u) for u in draws]))
+
+
+def _served_sn_pit_ks(
+    mean: np.ndarray,
+    sigma: np.ndarray,
+    skew: np.ndarray,
+    y: np.ndarray,
+    c: float,
+    s: float,
+) -> float:
+    """Gate-4 randomized-PIT KS of the served SkewNormal under scale ``c`` and skew shift ``s``.
+
+    Holds the (blended) mean fixed and re-derives ``loc`` per row through the shared
+    :func:`helpers.distributions.skewnormal_loc_from_mean` — the same formula the betting
+    path uses — so the fit optimizes the exact gate statistic the test-set CSV is later
+    scored against; no re-derived PIT math. ``c`` scales the scale, ``s`` shifts the shape
+    (``alpha + s``). The Lever-1 and Lever-4a fits both minimize this.
+    """
+    scale = sigma * c
+    alpha = skew + s
+    df = pd.DataFrame(
+        {
+            "SN_Loc": skewnormal_loc_from_mean(mean, scale, alpha),
+            "SN_Scale": scale,
+            "SN_Alpha": alpha,
+        }
+    )
+    return _randomized_pit_ks(df, "SkewNormal", y, strategy=TARGET_NORM_NONE)
+
+
+def fit_skewnorm_dispersion_c(
+    mean: np.ndarray,
+    sigma: np.ndarray,
+    skew: np.ndarray,
+    y: np.ndarray,
+    *,
+    bounds: tuple[float, float] = _DISPERSION_C_BOUNDS,
+) -> float:
+    """Fit the scale multiplier ``c`` that minimizes the Gate-4 randomized-PIT KS (Lever 1).
+
+    The served SkewNormal predictive holds the (blended) mean fixed and scales the scale by
+    ``c`` (shape left untouched). See :func:`_served_sn_pit_ks` for the shared objective.
+    """
+    mean = np.asarray(mean, dtype=float)
+    sigma = np.asarray(sigma, dtype=float)
+    skew = np.asarray(skew, dtype=float)
+    y = np.asarray(y, dtype=float)
+
+    return float(
+        minimize_scalar(
+            lambda c: _served_sn_pit_ks(mean, sigma, skew, y, c, 0.0),
+            bounds=bounds,
+            method="bounded",
+        ).x
+    )
+
+
+def fit_skewnorm_dispersion_skew(
+    mean: np.ndarray,
+    sigma: np.ndarray,
+    skew: np.ndarray,
+    y: np.ndarray,
+    *,
+    bounds: tuple[float, float] = _DISPERSION_C_BOUNDS,
+    skew_bounds: tuple[float, float] = _DISPERSION_SKEW_BOUNDS,
+    joint: bool = True,
+) -> tuple[float, float]:
+    """Fit the scale ``c`` and additive skew shift ``s`` minimizing the Gate-4 KS (Lever 4a).
+
+    The served SkewNormal collapses to ``alpha ≈ 0`` (the Fisher-information singularity at the
+    symmetric point — Hallin & Ley 2014, *Bernoulli* 20(3)), so a multiplicative skew adjustment
+    injects nothing; the shift is additive, ``alpha + s``.
+
+    Two fit orders, selected by ``joint``:
+
+    * ``joint=True`` (default) — ``c`` and ``s`` are optimized *together* by multi-start
+      Nelder-Mead. They are coupled (the scale-only optimum widens once skew is admitted), and the
+      objective is flat at ``s = 0``, so the fit is restarted across :data:`_DISPERSION_SKEW_STARTS`
+      and the arg-min taken. The scale is free to move off its scale-only value.
+    * ``joint=False`` — *sequential* "dispersion then skew": the Lever-1 scale ``c`` is fit and
+      frozen, then ``s`` is fit alone on top by a 1-D bounded search. The returned ``c`` is exactly
+      the scale-only optimum.
+
+    Both warm-start from the scale-only ``c`` and apply the same opt-in margin: a calibrated
+    ``(c, s)`` that fails to beat scale-only by at least :data:`_DISPERSION_SKEW_MIN_GAIN` returns
+    ``(c0, 0.0)`` — the pure Lever-1 result. ``s = 0`` recovers scale-only either way.
+    """
+    mean = np.asarray(mean, dtype=float)
+    sigma = np.asarray(sigma, dtype=float)
+    skew = np.asarray(skew, dtype=float)
+    y = np.asarray(y, dtype=float)
+    c0 = fit_skewnorm_dispersion_c(mean, sigma, skew, y, bounds=bounds)
+    ks_scale_only = _served_sn_pit_ks(mean, sigma, skew, y, c0, 0.0)
+
+    if joint:
+
+        def _ks(params: np.ndarray) -> float:
+            c, s = params
+            if not (bounds[0] <= c <= bounds[1] and skew_bounds[0] <= s <= skew_bounds[1]):
+                return 1.0
+            return _served_sn_pit_ks(mean, sigma, skew, y, c, s)
+
+        best = min(
+            (
+                minimize(
+                    _ks,
+                    x0=np.array([c0, s0]),
+                    method="Nelder-Mead",
+                    options={"xatol": 1e-3, "fatol": 1e-4, "maxiter": 400},
+                )
+                for s0 in _DISPERSION_SKEW_STARTS
+            ),
+            key=lambda r: r.fun,
+        )
+        c, s = float(np.clip(best.x[0], *bounds)), float(np.clip(best.x[1], *skew_bounds))
+    else:
+        s_seq = minimize_scalar(
+            lambda s: _served_sn_pit_ks(mean, sigma, skew, y, c0, s),
+            bounds=skew_bounds,
+            method="bounded",
+        ).x
+        c, s = c0, float(np.clip(s_seq, *skew_bounds))
+
+    ks_cal = _served_sn_pit_ks(mean, sigma, skew, y, c, s)
+    if ks_cal > ks_scale_only - _DISPERSION_SKEW_MIN_GAIN:
+        return c0, 0.0
+    return c, s
 
 
 def _gate4_pit_ks_threshold(n: int) -> float:
@@ -1330,6 +1482,35 @@ def apply_thresholds(row: dict[str, object]) -> dict[str, object]:
     return out
 
 
+def _normalized_gate_slack(value: float | None, threshold: float) -> float:
+    """Headroom of one upper-bounded gate in units of its own threshold: ``(threshold - value) /
+    threshold`` (positive ⇒ passing). A ``None`` value is a hard fail (the gate couldn't compute),
+    so it returns ``-inf`` and binds the minimum.
+    """
+    return -np.inf if value is None else (threshold - value) / threshold
+
+
+def min_gate_slack(row: dict[str, object]) -> float:
+    """Single continuous ship-margin scalar: the minimum per-gate headroom across the five gates,
+    each normalized to its own threshold so they compare. ``> 0`` ⇔ every gate passes with room,
+    and the value is the binding (tightest) gate's fractional headroom.
+
+    The combination search maximizes this over ``(normalization, loss, calibration-mode)``: it is
+    a *ranking* signal only — the authoritative ship decision is :func:`apply_thresholds` on the
+    real-HPO scorecard. A blank Gate 1 (no book) auto-passes and so does not bind; blank Gate
+    2/3/4/5 are hard fails (``-inf``).
+    """
+    hi = row.get("g1_brier_diff_ci_hi")
+    g4, g4_max = row.get("g4_pit_ks"), row.get("g4_pit_ks_max")
+    return min(
+        np.inf if hi is None else (_GATE1_NONINF_MARGIN - hi) / _GATE1_NONINF_MARGIN,
+        _normalized_gate_slack(row.get("g2_star_z"), _GATE2_STAR_Z_MAX),
+        _normalized_gate_slack(row.get("g3_bench_z"), _GATE3_BENCH_Z_MAX),
+        -np.inf if g4 is None or g4_max is None else (g4_max - g4) / g4_max,
+        _normalized_gate_slack(row.get("g5_ece_debiased", row.get("g5_ece")), _GATE5_ECE_MAX),
+    )
+
+
 # Identity columns gate_row attaches that the inline caller already owns on
 # the row it's merging into — strip them off in compute_gates so the merge
 # can't fight the parent row over (league, market).
@@ -1762,7 +1943,6 @@ def write_scatter(df: pd.DataFrame, pred_col: str, out_path: Path, title: str) -
 
 
 def _print_table(table: pd.DataFrame) -> None:
-    """Pretty-print the decile table to stdout."""
     click.echo(
         f"{'decile':>6} {'meanyr':>8} {'n':>6} {'mae':>8} {'bias':>8} {'pred':>8} {'actual':>8}"
     )

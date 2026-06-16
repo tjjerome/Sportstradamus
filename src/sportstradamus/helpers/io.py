@@ -25,8 +25,6 @@ import pandas as pd
 
 from sportstradamus import data
 
-# --- Canonical artifact paths ---
-# Dashboard reads these; pipelines write these. Single source of truth.
 # Layout: data/config/ (live configs), data/runtime/ (job state),
 # data/training/ (training outputs), data/leagues/{league}/ (per-league files),
 # data/models/ (model pickles).
@@ -42,6 +40,7 @@ CURRENT_GAME_STORIES_PATH = _RUNTIME_DIR / "current_game_stories.parquet"
 # Per-offer deep-dive detail prerender (comps-vs-opponent, volume trend, SHAP "other
 # stats"), keyed by (League, Date, Player, Market, Opponent). Written by prophecize.
 CURRENT_OFFER_DETAILS_PATH = _RUNTIME_DIR / "current_offer_details.parquet"
+CURRENT_PICKEM_PATH = _RUNTIME_DIR / "current_pickem.parquet"
 CURRENT_META_PATH = _RUNTIME_DIR / "current_meta.json"
 MODEL_STATS_PATH = _TRAINING_DIR / "model_stats.parquet"
 # Plain-text mirror of model_stats.parquet for filesystem browsing in VSCode.

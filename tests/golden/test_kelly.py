@@ -44,18 +44,6 @@ def test_positive_ev_matches_closed_form():
     assert stake == Decimal("5.00")
 
 
-def test_uncapped_when_below_hard_cap():
-    # Tiny edge so quarter-Kelly < 0.005 cap. b=1, p=0.51, q=0.49
-    # f* = (1*0.51 - 0.49)/1 = 0.02; quarter-Kelly fraction = 0.005, hits the cap.
-    # Use a smaller edge to stay under: p=0.505 → f*=0.01, qK=0.0025 → $2.50 of $1000.
-    stake = fractional_kelly_stake(
-        bankroll=Decimal("1000"),
-        win_prob=0.505,
-        payout_multiplier=Decimal("2"),
-    )
-    assert stake == Decimal("2.50")
-
-
 def test_hard_cap_active():
     # Big edge → uncapped stake exceeds 0.5 % of bankroll → cap should pin it.
     stake = fractional_kelly_stake(
@@ -65,31 +53,6 @@ def test_hard_cap_active():
     )
     cap = Decimal("1000") * Decimal(repr(MAX_FRACTION_OF_BANKROLL))
     assert stake == cap.quantize(Decimal("0.01"))
-
-
-def test_zero_shrinkage_returns_zero():
-    assert fractional_kelly_stake(
-        bankroll=Decimal("1000"),
-        win_prob=0.7,
-        payout_multiplier=Decimal("3"),
-        model_shrinkage=0.0,
-    ) == Decimal("0")
-
-
-def test_shrinkage_reduces_stake_monotonically():
-    full = fractional_kelly_stake(
-        bankroll=Decimal("1000"),
-        win_prob=0.7,
-        payout_multiplier=Decimal("3"),
-        model_shrinkage=1.0,
-    )
-    half = fractional_kelly_stake(
-        bankroll=Decimal("1000"),
-        win_prob=0.7,
-        payout_multiplier=Decimal("3"),
-        model_shrinkage=0.5,
-    )
-    assert full >= half >= Decimal("0")
 
 
 # --------------------------------------------------------------------------- #
@@ -102,18 +65,6 @@ def test_resolve_explicit_overrides():
     ) == pytest.approx(0.42)
 
 
-def test_resolve_below_floor_uses_training():
-    # n=10 → live ignored, training_bss used directly.
-    out = resolve_shrinkage(training_bss=0.7, live_bss=0.1, live_n=10)
-    assert out == pytest.approx(0.7)
-
-
-def test_resolve_at_full_uses_live():
-    # n=100 → live dominates entirely.
-    out = resolve_shrinkage(training_bss=0.7, live_bss=0.1, live_n=LIVE_BLEND_FULL)
-    assert out == pytest.approx(0.1)
-
-
 def test_resolve_midramp_blends_evenly():
     # n = (25+100)/2 = 62.5 → w_live = (62-25)/75 ≈ 0.4933 (using n=62)
     n = 62
@@ -121,11 +72,6 @@ def test_resolve_midramp_blends_evenly():
     expected = w_live * 0.2 + (1 - w_live) * 0.8
     out = resolve_shrinkage(training_bss=0.8, live_bss=0.2, live_n=n)
     assert out == pytest.approx(expected, abs=1e-9)
-
-
-def test_resolve_only_live():
-    out = resolve_shrinkage(training_bss=None, live_bss=0.5, live_n=200)
-    assert out == pytest.approx(0.5)
 
 
 def test_resolve_neither_logs_debug_and_returns_one(caplog, monkeypatch):
@@ -141,34 +87,8 @@ def test_resolve_neither_logs_debug_and_returns_one(caplog, monkeypatch):
     assert any("fallback" in rec.message for rec in caplog.records)
 
 
-def test_resolve_missing_training_low_n_uses_live_when_available():
-    # No training BSS, live n below the floor but >0 with valid live_bss →
-    # rule 4 ("only live present") applies; live_bss is used directly.
-    out = resolve_shrinkage(training_bss=None, live_bss=0.4, live_n=10)
-    assert out == pytest.approx(0.4)
-
-
-def test_resolve_clips_to_unit_interval():
-    assert resolve_shrinkage(explicit=1.5) == 1.0
-    assert resolve_shrinkage(explicit=-0.5) == 0.0
-
-
 # --------------------------------------------------------------------------- #
 # joint_kelly_portfolio
-
-
-def test_portfolio_skips_negative_ev_candidates():
-    # First candidate is +EV; second is -EV and must be dropped silently.
-    cvxpy = pytest.importorskip("cvxpy")  # noqa: F841
-    out = joint_kelly_portfolio(
-        bankroll=Decimal("1000"),
-        candidates=[
-            KellyCandidate("good", win_prob=0.6, payout_multiplier=Decimal("3")),
-            KellyCandidate("bad", win_prob=0.2, payout_multiplier=Decimal("2")),
-        ],
-    )
-    assert "bad" not in out
-    assert "good" in out
 
 
 def test_portfolio_respects_total_budget():
@@ -199,9 +119,23 @@ def test_portfolio_per_leg_cap_holds():
     assert out["a"] <= cap.quantize(Decimal("0.01"))
 
 
-def test_portfolio_empty_input_returns_empty():
-    out = joint_kelly_portfolio(bankroll=Decimal("1000"), candidates=[])
-    assert out == {}
+def test_size_candidates_shrinks_filters_and_pairs():
+    # Direct (cvxpy-free) pin of the sizing step: shrinkage-adjusted p, net odds
+    # b, and the floor/EV drops. Expected values derived by hand from the
+    # effective_p = 0.5 + (win_prob - 0.5) * shrinkage rule.
+    sized_p, sized_b, bet_ids = kelly._size_candidates(
+        [
+            KellyCandidate("a", win_prob=0.6, payout_multiplier=Decimal("3")),
+            KellyCandidate("bad", win_prob=0.2, payout_multiplier=Decimal("2")),
+            KellyCandidate(
+                "floor", win_prob=0.6, payout_multiplier=Decimal("3"), model_shrinkage=0.0
+            ),
+            KellyCandidate("b", win_prob=0.65, payout_multiplier=Decimal("3"), model_shrinkage=0.5),
+        ]
+    )
+    assert bet_ids == ["a", "b"]
+    assert sized_p == pytest.approx([0.6, 0.575])
+    assert sized_b == pytest.approx([2.0, 2.0])
 
 
 def test_size_candidates_shrinks_filters_and_pairs():

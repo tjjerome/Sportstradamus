@@ -36,7 +36,7 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.spiderLogger import logger
 from sportstradamus.training.baselines import get_target_normalization
-from sportstradamus.training.posthoc import PROB_STAGE, apply_posthoc
+from sportstradamus.training.posthoc import MEAN_STAGE, PROB_STAGE, apply_posthoc
 
 # LazyArchive defers DuckDB lock acquisition until the first attribute
 # access. See LazyArchive docstring in helpers/archive.py.
@@ -161,6 +161,20 @@ def _apply_prob_posthoc(
     if posthoc_slug in PROB_STAGE:
         return apply_posthoc(posthoc_slug, posthoc_blob, cal_over)
     return cal_over
+
+
+def _apply_mean_posthoc(
+    model_mu: np.ndarray, posthoc_slug: str, posthoc_blob: dict | None
+) -> np.ndarray:
+    """Apply a fitted mean-stage corrector to the decoded model mean.
+
+    No-op unless the cell's slug is a :data:`MEAN_STAGE` corrector. Mirrors the
+    training-side correction in ``pipeline.train_market`` so the live blend sees
+    the same corrected mean.
+    """
+    if posthoc_slug in MEAN_STAGE:
+        return apply_posthoc(posthoc_slug, posthoc_blob, model_mu)
+    return model_mu
 
 
 def _book_cell_params(
@@ -611,14 +625,21 @@ def _blend_with_book(
     return base_mean
 
 
-def _dispersion_calibrate(offer_df: pd.DataFrame, dist: str, dispersion_cal: float) -> None:
-    # SkewNormal calibrates via CRPS, not a shape multiplier — skip it.
-    if dispersion_cal == 1.0 or dist == "SkewNormal":
+def _dispersion_calibrate(
+    offer_df: pd.DataFrame, dist: str, dispersion_cal: float, skew_cal: float
+) -> None:
+    # The skew shift is derived into loc downstream by get_odds (mean held fixed),
+    # so it must land before _model_over_and_push reads Model Skew.
+    # A skew-only cell (c == 1, s != 0) must still enter — guard on both knobs.
+    if dispersion_cal == 1.0 and skew_cal == 0.0:
         return
     if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
         offer_df["Model R"] = offer_df["Model R"] * dispersion_cal
     elif dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns:
         offer_df["Model Alpha"] = offer_df["Model Alpha"] * dispersion_cal
+    elif dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
+        offer_df["Model Sigma"] = offer_df["Model Sigma"] * dispersion_cal
+        offer_df["Model Skew"] = offer_df["Model Skew"] + skew_cal
 
 
 def _model_over_and_push(offer_df: pd.DataFrame, dist: str, cv: float, step, base_mean):
@@ -680,6 +701,7 @@ def model_prob(
     model_weight = filedict["weight"]
     temperature = filedict.get("temperature", None)
     dispersion_cal = filedict.get("dispersion_cal", 1.0)
+    skew_cal = filedict.get("skew_cal", 0.0)
     shape_ceiling = filedict.get("shape_ceiling")
     dist = filedict["distribution"]
     step = filedict["step"]
@@ -721,13 +743,18 @@ def model_prob(
 
     offer_df["Market EV"] = _book_over_prob(offer_df, dist, cv, step, hist_gate or None)
     _clamp_shape_ceiling(offer_df, dist, shape_ceiling)
+    # Mean-stage post-hoc correction before blending, mirroring train_market so
+    # live predictions match the offline test CSV event-for-event.
+    offer_df["Projection"] = _apply_mean_posthoc(
+        offer_df["Projection"].to_numpy(), posthoc_slug, posthoc_blob
+    )
 
     base_mean = _blend_with_book(offer_df, dist, model_weight, cv, hist_gate, f"{league} {market}")
 
     # ZI dists: book reports the non-zero component EV; scale to marginal EV.
     if hist_gate and dist in ("ZINB", "ZAGamma", "SkewNormal"):
         offer_df["Market Projection"] = (1 - hist_gate) * offer_df["Market Projection"]
-    _dispersion_calibrate(offer_df, dist, dispersion_cal)
+    _dispersion_calibrate(offer_df, dist, dispersion_cal, skew_cal)
 
     raw_over, push = _model_over_and_push(offer_df, dist, cv, step, base_mean)
     offer_df["Push Prob"] = np.asarray(push, dtype=float)
@@ -778,7 +805,9 @@ def book_fallback_prob(
 
     evs = _composite_book_evs(offer_df.index.unique(), league, market, date_map, stat_data)
     offer_df["Market Projection"] = offer_df.index.map(evs)
-    offer_df = offer_df.loc[offer_df["Market Projection"].notna() & (offer_df["Market Projection"] > 0)]
+    offer_df = offer_df.loc[
+        offer_df["Market Projection"].notna() & (offer_df["Market Projection"] > 0)
+    ]
     if offer_df.empty:
         return []
 

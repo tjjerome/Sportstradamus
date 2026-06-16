@@ -18,6 +18,7 @@ from sportstradamus.training.scorecard import (
     _GATE4_PIT_KS_DELTA,
     _GATE5_ECE_MAX,
     _SUPERSEDE_S3_Z_MIN,
+    _decode_sn_loc_scale,
     _dispersion_diagnostics,
     _ece_debias_offset,
     _gate1_brier_ci,
@@ -41,8 +42,11 @@ from sportstradamus.training.scorecard import (
     _zinb_ppf,
     apply_thresholds,
     decile_table,
+    fit_skewnorm_dispersion_c,
+    fit_skewnorm_dispersion_skew,
     gate_row,
     load_test_set,
+    min_gate_slack,
     scorecard,
     supersede_verdict,
     write_gate_scorecard,
@@ -383,6 +387,7 @@ def test_iqr_pred_analytical_skewnormal_centered_strategy_passes_scale_through()
             "SN_Loc": np.full(n, raw_loc),
             "SN_Scale": np.full(n, raw_scale),
             "SN_Alpha": np.full(n, alpha),
+            "Mean10": np.full(n, 4.0),  # location offset re-added to loc; IQR is location-free
             "MeanYr": np.full(n, 4.0),  # would change result under ratio_meanyr
         }
     )
@@ -1615,3 +1620,314 @@ def test_standalone_g1_column_scores_preblend_probs():
     row = gate_row(df_sa, "EV", league="NBA", market="PTS", strategy="t")
     assert row["g1_brier_diff_ci_hi_standalone"] is not None
     assert row["g1_brier_diff_ci_hi_standalone"] > row["g1_brier_diff_ci_hi"]
+
+
+def _sn_pit_ks(mean, sigma, skew, y, c, s):
+    from sportstradamus.helpers.distributions import skewnormal_loc_from_mean
+    from sportstradamus.training.scorecard import TARGET_NORM_NONE, _randomized_pit_ks
+
+    scale = sigma * c
+    alpha = skew + s
+    df = pd.DataFrame(
+        {
+            "SN_Loc": skewnormal_loc_from_mean(mean, scale, alpha),
+            "SN_Scale": scale,
+            "SN_Alpha": alpha,
+        }
+    )
+    return _randomized_pit_ks(df, "SkewNormal", y, strategy=TARGET_NORM_NONE)
+
+
+def test_decode_sn_loc_scale_centered_additive_readds_location_offset():
+    """centered_additive_mean10 PIT decode must re-add the Mean10 baseline to loc.
+
+    Regression for the Gate-4 decode bug: the scorecard mirror returned the raw
+    SN_Loc for centered strategies (correct for the location-free IQR, wrong for
+    the location-sensitive PIT), mis-locating the predictive by the ~Mean10 offset
+    and inflating pit_ks. Scale is still passed through unchanged for this strategy.
+    """
+    raw_loc = np.array([0.1, -0.2, 0.0])
+    mean10 = np.array([2.4, 3.0, 1.8])  # all above the MeanYr floor; clip is a no-op
+    df = pd.DataFrame(
+        {
+            "SN_Loc": raw_loc,
+            "SN_Scale": np.array([1.5, 2.0, 1.0]),
+            "Mean10": mean10,
+            "MeanYr": np.array([2.5, 3.1, 1.9]),
+        }
+    )
+    loc, scale = _decode_sn_loc_scale(df, "centered_additive_mean10")
+    np.testing.assert_allclose(loc, mean10 + raw_loc)
+    np.testing.assert_allclose(scale, df["SN_Scale"].to_numpy())
+
+def test_fit_skewnorm_dispersion_c_widens_underdispersed_symmetric():
+    """A predictive half as wide as the truth must fit c ~ 2 to recover calibration.
+
+    Symmetric case (skew=0): delta=0, so loc == mean and scaling the scale never
+    moves the centre. y ~ Normal(mu, s); we hand the fitter the SAME mean but
+    sigma = s/2 (under-dispersed), and the Gate-4-optimal c that makes the PIT
+    Uniform is the one that restores the true scale, i.e. c ~ 2.
+    """
+    rng = np.random.default_rng(0)
+    mu, s_true, n = 7.0, 3.0, 4000
+    y = rng.normal(mu, s_true, n)
+    c = fit_skewnorm_dispersion_c(np.full(n, mu), np.full(n, s_true / 2.0), np.zeros(n), y)
+    assert abs(c - 2.0) < 0.25
+
+def test_fit_skewnorm_dispersion_skew_recovers_underskew():
+    """Lever 4a: a served predictive that collapsed to symmetry (``alpha = 0``) on
+    right-skewed truth cannot be calibrated by scale alone — the joint ``(c, s)`` fit
+    must inject a positive additive skew shift that materially beats the scale-only KS.
+    """
+    from scipy import stats as st
+
+    rng = np.random.default_rng(0)
+    a_true, n = 4.0, 4000
+    y = st.skewnorm.rvs(a_true, size=n, random_state=rng)
+    mean = np.full(n, float(y.mean()))
+    sigma = np.full(n, float(y.std()))
+    skew0 = np.zeros(n)
+
+    c_only = fit_skewnorm_dispersion_c(mean, sigma, skew0, y)
+    c, s = fit_skewnorm_dispersion_skew(mean, sigma, skew0, y)
+
+    assert s > 1.0
+    assert -3.0 <= s <= 3.0
+    assert (
+        _sn_pit_ks(mean, sigma, skew0, y, c, s)
+        < _sn_pit_ks(mean, sigma, skew0, y, c_only, 0.0) - 0.02
+    )
+
+def test_fit_skewnorm_dispersion_skew_noop_on_calibrated():
+    """No-op on an already-calibrated symmetric cell: the skew knob must not manufacture
+    spurious asymmetry, so it returns ``c ~ 1``, ``s ~ 0`` and does not worsen the PIT.
+    """
+    rng = np.random.default_rng(1)
+    mu, sd, n = 5.0, 2.0, 4000
+    y = rng.normal(mu, sd, n)
+    mean, sigma, skew0 = np.full(n, mu), np.full(n, sd), np.zeros(n)
+
+    c, s = fit_skewnorm_dispersion_skew(mean, sigma, skew0, y)
+
+    assert s == 0.0  # opt-in: a sub-margin gain falls back to the pure Lever-1 (c, 0)
+    assert abs(c - 1.0) < 0.15
+    assert _sn_pit_ks(mean, sigma, skew0, y, c, s) < 0.04
+
+def test_fit_skewnorm_dispersion_skew_is_bit_reproducible():
+    """The joint ``(c, s)`` fit must be bit-identical run-to-run — deterministic Nelder-Mead
+    from fixed starts over the seeded randomized PIT. The dumped ``SN_Alpha`` carries ``s``,
+    so the determinism gate's SkewNormal bit-identity depends on this fit being reproducible.
+    """
+    from scipy import stats as st
+
+    rng = np.random.default_rng(2)
+    y = st.skewnorm.rvs(3.0, size=3000, random_state=rng)
+    mean, sigma, skew0 = (
+        np.full(3000, float(y.mean())),
+        np.full(3000, float(y.std())),
+        np.zeros(3000),
+    )
+
+    assert fit_skewnorm_dispersion_skew(mean, sigma, skew0, y) == fit_skewnorm_dispersion_skew(
+        mean, sigma, skew0, y
+    )
+
+def test_fit_skewnorm_dispersion_skew_sequential_freezes_scale_then_fits_skew():
+    """Sequential variant (``joint=False``): fit the Lever-1 scale first, freeze it, then fit the
+    additive skew on top by a 1-D search. With the served predictive carrying a *wrong-direction*
+    base skew that scale cannot fix, the returned ``c`` is exactly the scale-only optimum (the joint
+    fit may instead move ``c``) and the additive shift still materially beats scale-only.
+    """
+    from scipy import stats as st
+
+    rng = np.random.default_rng(7)
+    y = st.skewnorm.rvs(4.0, size=4000, random_state=rng)
+    mean = np.full(4000, float(y.mean()))
+    sigma = np.full(4000, float(y.std()))
+    base = np.full(4000, -3.0)  # model fit a negative skew on right-skewed truth
+
+    c_only = fit_skewnorm_dispersion_c(mean, sigma, base, y)
+    c, s = fit_skewnorm_dispersion_skew(mean, sigma, base, y, joint=False)
+
+    assert c == c_only  # scale frozen at the Lever-1 optimum, not re-optimized with s
+    assert s > 0.0
+    assert (
+        _sn_pit_ks(mean, sigma, base, y, c, s)
+        < _sn_pit_ks(mean, sigma, base, y, c_only, 0.0) - 0.01
+    )
+
+def test_fit_skewnorm_dispersion_skew_sequential_noop_on_calibrated():
+    """The sequential variant must also reject a sub-margin skew on an already-calibrated cell,
+    falling back to the pure Lever-1 ``(c, 0)`` like the joint fit does.
+    """
+    rng = np.random.default_rng(1)
+    mu, sd, n = 5.0, 2.0, 4000
+    y = rng.normal(mu, sd, n)
+    mean, sigma, skew0 = np.full(n, mu), np.full(n, sd), np.zeros(n)
+
+    c, s = fit_skewnorm_dispersion_skew(mean, sigma, skew0, y, joint=False)
+
+    assert s == 0.0
+    assert abs(c - 1.0) < 0.15
+
+def test_joint_skew_fit_dominates_sequential_on_alpha_collapse():
+    """Pins the coupling finding behind keeping the joint fit as the production default: on an
+    ``alpha≈0`` collapsed predictive over right-skewed truth, the scale-only optimum sits at a ``c``
+    where the skew gradient vanishes, so sequential (freeze that ``c``, then fit ``s``) is a no-op,
+    while the joint fit co-moves ``c`` upward and injects the skew the cell needs. Joint must clear
+    Gate-4 KS strictly below what sequential can reach here.
+    """
+    from scipy import stats as st
+
+    rng = np.random.default_rng(0)
+    y = st.skewnorm.rvs(4.0, size=4000, random_state=rng)
+    mean = np.full(4000, float(y.mean()))
+    sigma = np.full(4000, float(y.std()))
+    skew0 = np.zeros(4000)
+
+    c_seq, s_seq = fit_skewnorm_dispersion_skew(mean, sigma, skew0, y, joint=False)
+    c_j, s_j = fit_skewnorm_dispersion_skew(mean, sigma, skew0, y, joint=True)
+
+    assert s_seq == 0.0  # frozen at a skew-dead scale → sequential cannot help
+    assert s_j > 1.0
+    assert _sn_pit_ks(mean, sigma, skew0, y, c_j, s_j) < _sn_pit_ks(
+        mean, sigma, skew0, y, c_seq, s_seq
+    )
+
+def test_min_gate_slack_is_the_binding_gate_headroom_when_all_pass():
+    """The ship-margin scalar is the minimum per-gate headroom, each normalized to its own
+    threshold; when every gate passes it is the tightest gate's fractional headroom (here Gate 4).
+    """
+    row = {
+        "g1_brier_diff_ci_hi": 0.0,  # (0.005-0)/0.005 = 1.0
+        "g2_star_z": 0.25,  # (0.5-0.25)/0.5 = 0.5
+        "g3_bench_z": 0.0,  # 1.0
+        "g4_pit_ks": 0.04,
+        "g4_pit_ks_max": 0.05,  # (0.05-0.04)/0.05 = 0.2  <- binding
+        "g5_ece_debiased": 0.05,  # (0.075-0.05)/0.075 = 0.333
+    }
+    assert min_gate_slack(row) == pytest.approx(0.2)
+
+def test_min_gate_slack_negative_when_gate4_fails():
+    """A failing gate drives the scalar below zero — the search must rank a non-shipping combo
+    under a shipping one.
+    """
+    row = {
+        "g1_brier_diff_ci_hi": 0.0,
+        "g2_star_z": 0.25,
+        "g3_bench_z": 0.0,
+        "g4_pit_ks": 0.06,  # (0.05-0.06)/0.05 = -0.2
+        "g4_pit_ks_max": 0.05,
+        "g5_ece_debiased": 0.05,
+    }
+    assert min_gate_slack(row) < 0
+
+def test_min_gate_slack_g1_blank_does_not_bind():
+    """A blank Gate 1 (no book) auto-passes, so it must not bind the minimum — the scalar stays
+    positive and equals the tightest *computed* gate (Gate 4 here), not a -inf from the blank.
+    """
+    row = {
+        "g1_brier_diff_ci_hi": None,  # no Odds → auto-pass, non-binding
+        "g2_star_z": 0.0,
+        "g3_bench_z": 0.0,
+        "g4_pit_ks": 0.04,
+        "g4_pit_ks_max": 0.05,
+        "g5_ece_debiased": 0.03,
+    }
+    assert min_gate_slack(row) == pytest.approx(0.2)
+
+def test_eb_gate_decode_reconstructs_served_loc_with_dumped_global_mean():
+    """``centered_additive_eb_meanyr_k10`` gate decode round-trips through the dumped GlobalMean.
+
+    SN_Loc dumps as ``served_loc − EB_prior(MeanYr, GamesPlayed, global_mean, K)``; the gate
+    must add the EB prior back using the *dumped* ``GlobalMean`` (not the hardcoded 0.0 the two
+    older normalizations ignore) to recover ``served_loc`` byte-for-byte. Mirrors the
+    prediction-side EB decode pinned in ``tests/test_model_prob_skewnormal_decode.py``, on the
+    scorecard side — without the GlobalMean read the EB prior shrinks toward 0 and the decode
+    silently corrupts every PIT/IQR the gate scores.
+    """
+    from sportstradamus.training.baselines import get_target_normalization
+
+    rng = np.random.default_rng(17)
+    n = 16
+    global_mean = 8.4
+    served_loc = rng.uniform(3.0, 22.0, n)
+    served_scale = rng.uniform(1.0, 5.0, n)
+    skew = rng.uniform(-1.0, 2.0, n)
+    meanyr = rng.uniform(2.0, 25.0, n)
+    games = rng.integers(1, 80, n).astype(float)
+
+    strat = get_target_normalization("centered_additive_eb_meanyr_k10")
+    X = pd.DataFrame({"MeanYr": meanyr, "GamesPlayed": games})
+    dumped = pd.DataFrame(
+        {
+            "SN_Loc": strat.encode_loc(served_loc, X, global_mean, "MeanYr"),
+            "SN_Scale": strat.encode_scale(served_scale, X, "MeanYr"),
+            "SN_Alpha": skew,
+            "MeanYr": meanyr,
+            "GamesPlayed": games,
+            "GlobalMean": global_mean,
+        }
+    )
+
+    loc_g, scale_g = _decode_sn_loc_scale(dumped, "centered_additive_eb_meanyr_k10")
+    np.testing.assert_allclose(loc_g, served_loc, atol=1e-9)
+    np.testing.assert_allclose(scale_g, served_scale, atol=1e-9)
+    # The EB prior was actually added back — decode is not the raw (encoded) loc.
+    assert not np.allclose(loc_g, dumped["SN_Loc"].to_numpy())
+
+def test_eb_gate_decode_zero_global_mean_fallback_differs_from_real_prior():
+    """Guard the silent-corruption failure mode: decoding the same SN_Loc with the legacy
+    GlobalMean-absent fallback (0.0) must NOT match the real-global-mean decode — proving the
+    gate genuinely consumes the dumped GlobalMean rather than ignoring it like the older norms.
+    """
+    from sportstradamus.training.baselines import get_target_normalization
+
+    rng = np.random.default_rng(23)
+    n = 12
+    global_mean = 11.0
+    served_loc = rng.uniform(3.0, 20.0, n)
+    meanyr = rng.uniform(2.0, 25.0, n)
+    games = rng.integers(1, 60, n).astype(float)
+
+    strat = get_target_normalization("centered_additive_eb_meanyr_k10")
+    X = pd.DataFrame({"MeanYr": meanyr, "GamesPlayed": games})
+    sn_loc = strat.encode_loc(served_loc, X, global_mean, "MeanYr")
+    base = {"SN_Scale": np.ones(n), "SN_Alpha": np.zeros(n), "MeanYr": meanyr, "GamesPlayed": games}
+
+    with_gm = pd.DataFrame({"SN_Loc": sn_loc, **base, "GlobalMean": global_mean})
+    without_gm = pd.DataFrame({"SN_Loc": sn_loc, **base})
+
+    loc_real, _ = _decode_sn_loc_scale(with_gm, "centered_additive_eb_meanyr_k10")
+    loc_fallback, _ = _decode_sn_loc_scale(without_gm, "centered_additive_eb_meanyr_k10")
+
+    np.testing.assert_allclose(loc_real, served_loc, atol=1e-9)
+    assert not np.allclose(loc_real, loc_fallback)
+
+def test_load_test_set_retains_eb_decode_columns(tmp_path):
+    """``load_test_set`` curates feature columns, but the EB-prior decode needs ``GamesPlayed``
+    and ``GlobalMean`` at gate time (mirroring how ``Mean10`` is retained for the mean10 decode).
+    Without them the combination-search EB scoring raises ``KeyError`` instead of decoding.
+    """
+    df = pd.DataFrame(
+        {
+            "MeanYr": [5.0, 6.0, 7.0, 8.0],
+            "Result": [4.0, 7.0, 6.0, 9.0],
+            "Blended_EV": [5.1, 6.2, 6.8, 8.3],
+            "SN_Loc": [0.1, 0.2, 0.3, 0.4],
+            "SN_Scale": [1.0, 1.0, 1.0, 1.0],
+            "SN_Alpha": [0.0, 0.0, 0.0, 0.0],
+            "GamesPlayed": [10.0, 20.0, 30.0, 40.0],
+            "GlobalMean": [6.5, 6.5, 6.5, 6.5],
+            "some_feature": [1.0, 2.0, 3.0, 4.0],
+        }
+    )
+    path = tmp_path / "WNBA_AST.csv"
+    df.to_csv(path, index=False)
+
+    out = load_test_set(path, "Blended_EV")
+
+    assert "GamesPlayed" in out.columns
+    assert "GlobalMean" in out.columns
+    # Curation still drops non-decode feature columns.
+    assert "some_feature" not in out.columns
