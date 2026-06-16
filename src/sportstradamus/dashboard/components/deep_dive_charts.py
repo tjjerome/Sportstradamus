@@ -113,6 +113,21 @@ def distribution_frame(dist: str, ev: float, std: float, params: dict, line: flo
     return df_pdf, y_title, is_continuous
 
 
+def resolve_std(projection_std, ev: float, cv: float) -> float:
+    """A positive, finite spread for the distribution x-range.
+
+    Prefers the model's ``Projection STD``; book-fallback offers carry none, so it
+    falls back to the CV-implied ``ev * cv`` (``cv`` is always present), then ``ev * 0.3``.
+    The NaN guard matters: ``NaN or default`` keeps the NaN (NaN is truthy), which blanks
+    the x-range and renders the curve invisible.
+    """
+    if pd.notna(projection_std) and projection_std > 0:
+        return float(projection_std)
+    if pd.notna(cv) and cv > 0:
+        return float(ev) * float(cv)
+    return float(ev) * 0.3
+
+
 def _projection_overlay(df_pdf: pd.DataFrame, projection: float) -> tuple[alt.Chart, alt.Chart]:
     """A dot at the model mean (sitting on its own density) plus a numeric label.
 

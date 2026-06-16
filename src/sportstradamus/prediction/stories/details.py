@@ -25,7 +25,7 @@ _FEATURE_SUFFIXES = (" short", " growth", " long")
 
 # One detail row per offer's player/market/opponent (platform- and line-independent —
 # comps, volume, and SHAP context don't vary by book or line). The dashboard joins on
-# the key; the three payload columns are JSON strings (the ``legs``-JSON precedent).
+# the key.
 _DETAIL_KEY = ["League", "Date", "Player", "Market", "Opponent"]
 _DETAIL_COLS = [*_DETAIL_KEY, "comps_vs_opp", "volume_trend", "other_stats"]
 
@@ -174,6 +174,42 @@ def _position_cohorts(
     return cohorts
 
 
+def _stat_entry(
+    stat: str,
+    player: str,
+    pos: str,
+    means: dict[str, pd.Series],
+    cohorts: dict[tuple[str, str], list[float]],
+    gamelog: pd.DataFrame,
+    cols: dict[str, str],
+) -> dict | None:
+    """One ``{stat, value, series, percentile}`` row, or ``None`` when the player has
+    no recent value for ``stat``. ``value`` is the last-``n`` mean; ``percentile`` ranks
+    it against the same-position cohort.
+    """
+    raw = means[stat].get(player)
+    if raw is None or pd.isna(raw):
+        return None
+    value = round(float(raw), 2)
+    return {
+        "stat": stat,
+        "value": value,
+        "series": volume_trend(player, gamelog, cols, stat),
+        "percentile": position_percentile(value, cohorts.get((pos, stat), [])),
+    }
+
+
+def _resolve_volume_stat(volume_stat: str | dict[str, str], pos: str) -> str:
+    """The player's volume stat — a flat per-league string, or a per-position map (NFL).
+
+    Position labels carry a depth rank (``"QB1"``, ``"WR2"``); the map keys on the base
+    position, so the trailing rank digits are stripped before lookup.
+    """
+    if isinstance(volume_stat, dict):
+        return volume_stat.get(pos.rstrip("0123456789"), "")
+    return volume_stat
+
+
 def _other_stats_for(
     player: str,
     pos: str,
@@ -183,21 +219,8 @@ def _other_stats_for(
     gamelog: pd.DataFrame,
     cols: dict[str, str],
 ) -> list[dict]:
-    out = []
-    for stat in ranked:
-        raw = means[stat].get(player)
-        if raw is None or pd.isna(raw):
-            continue
-        value = round(float(raw), 2)
-        out.append(
-            {
-                "stat": stat,
-                "value": value,
-                "series": volume_trend(player, gamelog, cols, stat),
-                "percentile": position_percentile(value, cohorts.get((pos, stat), [])),
-            }
-        )
-    return out
+    entries = (_stat_entry(s, player, pos, means, cohorts, gamelog, cols) for s in ranked)
+    return [e for e in entries if e is not None]
 
 
 def _market_detail_rows(
@@ -216,18 +239,27 @@ def _market_detail_rows(
         ld["volume_stat"],
     )
     stat = str(mgrp["Stat"].iloc[0])
+    vol_by_pos = {p: _resolve_volume_stat(volume_stat, p) for p in mgrp["Position"].astype(str)}
+    vol_present = [s for s in dict.fromkeys(vol_by_pos.values()) if s and s in gl.columns]
     ranked = rank_other_stats(
         f"{league}_{market}",
         importances,
-        exclude=exclude | {volume_stat, stat},
+        exclude=exclude | set(vol_by_pos.values()) | {stat},
         available=set(gl.columns),
     )
-    means = {s: _recent_means(gl, cols, s) for s in ranked}
-    cohorts = _position_cohorts(mgrp, ranked, means)
+    cohort_stats = vol_present + ranked
+    means = {s: _recent_means(gl, cols, s) for s in cohort_stats}
+    cohorts = _position_cohorts(mgrp, cohort_stats, means)
 
     rows = []
     for off in mgrp.to_dict("records"):
-        player, opp, pos = off["Player"], off["Opponent"], off.get("Position", "")
+        player, opp, pos = off["Player"], off["Opponent"], str(off.get("Position", ""))
+        vol_stat = vol_by_pos.get(pos, "")
+        volume = (
+            _stat_entry(vol_stat, player, pos, means, cohorts, gl, cols)
+            if vol_stat in means
+            else None
+        )
         rows.append(
             {
                 "League": league,
@@ -238,7 +270,7 @@ def _market_detail_rows(
                 "comps_vs_opp": json.dumps(
                     comps_vs_opponent(player, opp, stat, comp_pairs, gl, cols, today=today)
                 ),
-                "volume_trend": json.dumps(volume_trend(player, gl, cols, volume_stat)),
+                "volume_trend": json.dumps(volume),
                 "other_stats": json.dumps(
                     _other_stats_for(player, pos, ranked, means, cohorts, gl, cols)
                 ),

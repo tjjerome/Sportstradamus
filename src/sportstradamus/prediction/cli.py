@@ -62,11 +62,13 @@ archive = LazyArchive()
 
 _HISTORY_RETENTION_DAYS = 365
 
-# Per-league gamelog volume-stat column for the deep-dive volume trend.
-_VOLUME_STAT = {
+# Per-league gamelog volume-stat column for the deep-dive volume trend. NFL maps by
+# base position (the snapshot's depth-rank suffix is stripped before lookup) so each
+# player shows their own opportunity stat — pass attempts, carries, or targets.
+_VOLUME_STAT: dict[str, str | dict[str, str]] = {
     "NBA": "MIN",
     "WNBA": "MIN",
-    "NFL": "snap pct",
+    "NFL": {"QB": "attempts", "RB": "carries", "WR": "targets", "TE": "targets"},
     "MLB": "plateAppearances",
     "NHL": "TimeShare",
 }

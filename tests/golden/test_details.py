@@ -229,7 +229,11 @@ def test_build_offer_details_assembles_per_offer_row():
     assert [c["comp"] for c in comps] == ["CompA", "CompB"]
     assert comps[0]["avg_vs_opp"] == 25.0 and round(comps[0]["pct_diff"], 2) == 0.25
 
-    assert json.loads(star["volume_trend"]) == [28.0, 30.0]  # MIN, chronological
+    vol = json.loads(star["volume_trend"])  # now a {stat, value, series, percentile} entry
+    assert vol["stat"] == "MIN"
+    assert vol["series"] == [28.0, 30.0]  # chronological
+    assert vol["value"] == 29.0  # last-10 mean of Star's MIN (30, 28)
+    assert vol["percentile"] == 1.0  # Star 29 vs Nova 26 in the G1 cohort
 
     other = json.loads(star["other_stats"])
     assert [o["stat"] for o in other] == ["FGA", "REB"]  # PTS (market) + MIN (volume) excluded
@@ -239,6 +243,51 @@ def test_build_offer_details_assembles_per_offer_row():
 
     # Nova has no comps in the pair table ⇒ empty comps panel, no crash.
     assert json.loads(out.loc["Nova"]["comps_vs_opp"]) == []
+
+
+def _nfl_offers() -> pd.DataFrame:
+    # Position carries the depth rank (QB1 / WR1) — the volume map keys on the base.
+    return pd.DataFrame(
+        [
+            {"League": "NFL", "Date": "2026-06-15", "Player": "Passer", "Market": "passing yards",
+             "Opponent": "NYG", "Position": "QB1", "Stat": "passing yards"},
+            {"League": "NFL", "Date": "2026-06-15", "Player": "Catcher", "Market": "receiving yards",
+             "Opponent": "DAL", "Position": "WR1", "Stat": "receiving yards"},
+        ]
+    )
+
+
+def _nfl_gamelog() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {"PLAYER": "Passer", "OPP": "NYG", "DATE": "2026-06-01", "attempts": 35.0, "targets": 0.0},
+            {"PLAYER": "Passer", "OPP": "DAL", "DATE": "2026-05-01", "attempts": 31.0, "targets": 0.0},
+            {"PLAYER": "Catcher", "OPP": "DAL", "DATE": "2026-06-01", "attempts": 0.0, "targets": 9.0},
+            {"PLAYER": "Catcher", "OPP": "NYG", "DATE": "2026-05-01", "attempts": 0.0, "targets": 7.0},
+        ]
+    )
+
+
+def test_build_offer_details_nfl_volume_stat_by_position():
+    league_data = {
+        "NFL": {
+            "comp_pairs": pd.DataFrame(columns=["player", "comp"]),
+            "gamelog": _nfl_gamelog(),
+            "cols": _COLS,
+            "volume_stat": {"QB": "attempts", "RB": "carries", "WR": "targets", "TE": "targets"},
+        }
+    }
+    out = build_offer_details(
+        _nfl_offers(), league_data, _importances(), exclude=set(), today=_TODAY
+    ).set_index("Player")
+
+    qb = json.loads(out.loc["Passer"]["volume_trend"])
+    assert qb["stat"] == "attempts"  # QB1 → attempts, not snap pct
+    assert qb["series"] == [31.0, 35.0] and qb["value"] == 33.0
+
+    wr = json.loads(out.loc["Catcher"]["volume_trend"])
+    assert wr["stat"] == "targets"  # WR1 → targets
+    assert wr["series"] == [7.0, 9.0] and wr["value"] == 8.0
 
 
 def test_build_offer_details_empty_safe():

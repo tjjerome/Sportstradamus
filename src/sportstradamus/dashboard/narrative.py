@@ -72,15 +72,3 @@ def context_strip(ctx_df: pd.DataFrame, *, game: str, date) -> dict | None:
         "shape": row["shape"],
         "baseline_total": float(row["baseline_total"]),
     }
-
-
-def lab_filters_for_nav_cell(nav_cell) -> dict[str, list[str]]:
-    """Lab Training filter-key presets for a deep-dive "View in Model Lab" handoff.
-
-    Maps a ``(league, market)`` cell to the page's keyed multiselects so the link
-    lands scoped to exactly that cell; ``{}`` when there is no pending handoff.
-    """
-    if not nav_cell:
-        return {}
-    league, market = nav_cell
-    return {"lab_leagues": [league], "lab_markets": [market]}

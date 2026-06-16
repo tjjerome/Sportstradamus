@@ -1,10 +1,10 @@
 """Offer-detail dialog and navigation for the dashboard.
 
 The evidence-chain view a user opens on any offer: a header edge badge, the model's
-"case" (the per-offer ``Why``), a game-context strip, a live market-trust read with a
-deep-link to the Model Lab cell, and five tabs (History, Model, Comps, Other stats,
-Correlated). The Comps / Other-stats tabs read the ``current_offer_details`` sidecar
-prerendered at ``prophecize`` time so the server never recomputes them live.
+"case" (the per-offer ``Why``), a game-context strip, and five tabs (History, Model,
+Comps, Other stats, Correlated). The Comps / Other-stats tabs read the
+``current_offer_details`` sidecar prerendered at ``prophecize`` time so the server never
+recomputes them live.
 """
 
 import json
@@ -21,6 +21,7 @@ from sportstradamus.dashboard.components.deep_dive_charts import (
     distribution_chart,
     distribution_frame,
     history_chart,
+    resolve_std,
     sparkline,
     strength_badge,
 )
@@ -29,14 +30,10 @@ from sportstradamus.dashboard.data import (
     GAMELOG_SCHEMA,
     load_current_game_context,
     load_current_offer_details,
-    load_live_metrics,
+    load_stat_tooltips,
 )
 from sportstradamus.dashboard.narrative import SHAPE_HELP, context_strip
 
-# Market-trust reads the 30-day live-settlement window; below this many settled legs
-# the live hit-rate is too sparse to show (honest "needs more data" caption instead).
-_LIVE_WINDOW_DAYS = 30
-_MIN_SETTLED = 30
 _DETAIL_KEY = ["League", "Date", "Player", "Market", "Opponent"]
 
 
@@ -48,6 +45,21 @@ def init_detail_state() -> None:
         st.session_state.last_grid_key = None
     if "corr_nav" not in st.session_state:
         st.session_state.corr_nav = False
+
+
+def drop_detail_on_page_change(state, page_id: str) -> None:
+    """Close an offer-detail dialog left open when the active surface changes.
+
+    ``detail_stack`` is global session state shared by every dialog-owning surface
+    (Board, Games), so a dialog left open on one page would re-open the moment you
+    return to another. The app entry calls this once per run with the active page id;
+    within a page (id unchanged) the stack and its correlation-nav history survive
+    across reruns.
+    """
+    if state.get("_active_page") != page_id:
+        state["detail_stack"] = []
+        state["last_grid_key"] = None
+        state["_active_page"] = page_id
 
 
 def to_american(p: float) -> str:
@@ -131,45 +143,6 @@ def _render_context_strip(row: pd.Series, game_context: pd.DataFrame) -> None:
     c4.metric("DVPOA", _pct(row.get("DVPOA")))
 
 
-def _live_read(live: pd.DataFrame, league, market, bet) -> tuple[float | None, int]:
-    """``(bet-side live precision, n_settled)`` for the cell's 30-day window.
-
-    Selects ``precision_over_live`` for an Over bet, ``precision_under_live`` otherwise;
-    ``(None, 0)`` when the cell has no live row. Pure — the panel formats the result.
-    """
-    if live.empty:
-        return None, 0
-    sub = live[
-        (live["league"] == league)
-        & (live["market"] == market)
-        & (live["window_days"] == _LIVE_WINDOW_DAYS)
-    ]
-    if sub.empty:
-        return None, 0
-    r = sub.iloc[0]
-    prec = r["precision_over_live"] if bet == "Over" else r["precision_under_live"]
-    return (float(prec) if pd.notna(prec) else None), int(r["n_settled"])
-
-
-def _market_trust_metric(col, live: pd.DataFrame, league, market, bet) -> None:
-    prec, n = _live_read(live, league, market, bet)
-    if n == 0:
-        col.caption("Market trust: no live settlement history yet.")
-    elif n >= _MIN_SETTLED and prec is not None:
-        col.metric(f"{bet} hit rate · live 30d", f"{prec:.0%}", help=f"{n} settled legs")
-    else:
-        col.caption(f"Market trust: needs ≥{_MIN_SETTLED} settled ({n} so far).")
-
-
-def _render_market_trust(row: pd.Series, live: pd.DataFrame) -> None:
-    league, market, bet = row.get("League"), row.get("Market"), row.get("Bet")
-    info, action = st.columns([3, 1])
-    _market_trust_metric(info, live, league, market, bet)
-    if action.button("View in Model Lab", icon=":material/open_in_new:", key="nav_lab_cell"):
-        st.session_state["nav_cell"] = (league, market)
-        st.switch_page("surfaces/lab_training.py")
-
-
 def _detail_row(row: pd.Series, details: pd.DataFrame) -> pd.Series | None:
     """The prerendered detail row matching this offer's key, or ``None`` if absent."""
     if details.empty:
@@ -181,7 +154,10 @@ def _detail_row(row: pd.Series, details: pd.DataFrame) -> pd.Series | None:
     return sub.iloc[0] if not sub.empty else None
 
 
-def _decode(detail: pd.Series | None, col: str) -> list:
+def _decode(detail: pd.Series | None, col: str):
+    """Parse a sidecar JSON column. ``[]`` when absent/empty; the payload otherwise
+    (a list for comps/other_stats, a single dict for volume_trend, ``None`` for null).
+    """
     if detail is None:
         return []
     raw = detail.get(col)
@@ -211,24 +187,30 @@ def _render_comps_tab(detail: pd.Series | None, row: pd.Series) -> None:
     st.dataframe(df, hide_index=True, width="stretch")
 
 
+def _render_stat_row(entry: dict, tooltip: str | None) -> None:
+    """``delta_color="off"`` places the percentile chip below the metric without
+    coloring it green/red — same trick as ``_team_total_metric``.
+    """
+    num_col, spark_col = st.columns([1, 1])
+    pct = entry.get("percentile")
+    delta = f"{pct:.0%} pctile" if pct is not None else None
+    num_col.metric(
+        entry["stat"], f"{entry['value']:.3g}", delta=delta, delta_color="off", help=tooltip
+    )
+    if entry.get("series"):
+        spark_col.altair_chart(sparkline(entry["series"]), width="stretch")
+
+
 def _render_other_stats_tab(detail: pd.Series | None, row: pd.Series) -> None:
     volume = _decode(detail, "volume_trend")
+    volume = volume if isinstance(volume, dict) else None
     others = _decode(detail, "other_stats")
     if not volume and not others:
         st.caption("No prerendered supporting-stat detail — re-run `prophecize` to refresh.")
         return
-    if volume:
-        st.markdown(f"**Volume trend** · last {len(volume)}")
-        st.altair_chart(sparkline(volume), width="stretch")
-    for o in others:
-        c1, c2, c3 = st.columns([2, 1, 2])
-        c1.markdown(f"**{o['stat']}**")
-        c2.markdown(f"{o['value']:.3g}")
-        pct = o.get("percentile")
-        if pct is not None:
-            c3.caption(f"{pct:.0%} pctile · position, this week")
-        if o.get("series"):
-            c3.altair_chart(sparkline(o["series"]), width="stretch")
+    tips = load_stat_tooltips().get(row.get("League", ""), {})
+    for entry in ([volume] if volume else []) + list(others):
+        _render_stat_row(entry, tips.get(entry["stat"]))
 
 
 def _parse_corr(s: str, max_n: int = 3) -> list[tuple[str, float]]:
@@ -329,7 +311,7 @@ def _render_model_tab(row: pd.Series) -> None:
     params = {
         param: row.get(col) for col, param in DIST_PARAM_COLS.items() if pd.notna(row.get(col))
     }
-    std = row.get("Projection STD") or ev * 0.3
+    std = resolve_std(row.get("Projection STD"), ev, cv)
     try:
         df_pdf, y_title, is_continuous = distribution_frame(dist, ev, std, params, line)
         chart = distribution_chart(
@@ -377,7 +359,6 @@ def show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
     _render_header(row)
     _render_case(row)
     _render_context_strip(row, load_current_game_context())
-    _render_market_trust(row, load_live_metrics())
 
     detail = _detail_row(row, load_current_offer_details())
     tabs = st.tabs(
