@@ -13,7 +13,6 @@ import pandas as pd
 import streamlit as st
 
 from sportstradamus.dashboard.data import format_ts, load_model_stats, render_banner
-from sportstradamus.dashboard.narrative import lab_filters_for_nav_cell
 from sportstradamus.helpers.io import LIVE_METRICS_PATH, MODEL_STATS_PATH
 from sportstradamus.training.graduation import lifecycle_table
 
@@ -255,10 +254,6 @@ if not lifecycle.empty:
     )
 else:
     stats["lifecycle_state"] = pd.NA
-
-# A deep-dive "View in Model Lab" handoff preselects this cell's league + market.
-for _key, _val in lab_filters_for_nav_cell(st.session_state.pop("nav_cell", None)).items():
-    st.session_state[_key] = _val
 
 with st.sidebar:
     st.header("Filters")

@@ -27,7 +27,6 @@ from sportstradamus.helpers.io import (
     CURRENT_OFFERS_PATH,
     CURRENT_PARLAYS_PATH,
     HISTORY_PATH,
-    LIVE_METRICS_PATH,
     MODEL_STATS_PATH,
     PARLAY_HIST_PATH,
     USER_SLIPS_PATH,
@@ -263,21 +262,6 @@ def load_current_offer_details() -> pd.DataFrame:
     return _load_current_offer_details_cached(_mtime(CURRENT_OFFER_DETAILS_PATH))
 
 
-@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading live metrics...")
-def _load_live_metrics_cached(mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(LIVE_METRICS_PATH)
-
-
-def load_live_metrics() -> pd.DataFrame:
-    """Per-cell live settlement metrics, one row per ``league, market, window_days``.
-
-    Written by ``nightly._compute_live_metrics``; carries ``precision_over_live`` /
-    ``precision_under_live`` / ``n_settled`` for the deep-dive market-trust panel.
-    Empty when no settled history exists yet.
-    """
-    return _load_live_metrics_cached(_mtime(LIVE_METRICS_PATH))
-
-
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
 def _load_user_slips_cached(mtime: float) -> pd.DataFrame:
     return read_user_slips()
@@ -353,6 +337,13 @@ def render_banner(kind: Literal["predictions", "stats"], subtitle: str = "") -> 
 def load_stat_map() -> dict:
     """Load the stat name mapping config (static, long-lived cache)."""
     with open(pkg_resources.files(data) / "config" / "stat_map.json") as f:
+        return json.load(f)
+
+
+@st.cache_data(ttl=_STATIC_CONFIG_TTL_SECONDS, show_spinner=False)
+def load_stat_tooltips() -> dict[str, dict[str, str]]:
+    """Per-league ``{stat: tooltip}`` glosses for the deep-dive Other-stats tab."""
+    with open(pkg_resources.files(data) / "config" / "stat_tooltips.json") as f:
         return json.load(f)
 
 

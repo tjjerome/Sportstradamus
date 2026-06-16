@@ -68,6 +68,9 @@ _FLAT_DECIMAL_ODDS = 1 + JUICE_PAYOUT
 # A rec clears the "EV>5%" skeptic check when its model edge at the flat reference price
 # clears this: Win Prob * _FLAT_DECIMAL_ODDS - 1 >= 0.05  <=>  Win Prob >= 0.55.
 _EV_EDGE_MIN = 0.05
+# One real-world bet = one (player, market, line, side, date); the snapshot lists the same
+# prop under every book that posts it, so the Receipts hero dedups on this before counting.
+_BET_KEY = ["Date", "Player", "Market", "Line", "Bet"]
 
 # Upper bound on the NegBin CRPS finite-sum support; the PMF tail is negligible
 # well before this, so the cap only guards pathological (huge-EV) inputs.
@@ -608,6 +611,17 @@ def _with_profit_units(exploded):
         df["Hit"] = (df["Bet"] == df["Result"]).astype(int)
     df["Profit Unit"] = df["Hit"] * JUICE_PAYOUT - (1 - df["Hit"])
     return df
+
+
+def dedup_bets(exploded):
+    """Collapse the same real-world bet posted under multiple books to a single row.
+
+    The snapshot lists one ``(player, market, line, side, date)`` prop under every book
+    that offers it; tailing it once — not once per book — is the honest unit. A different
+    line is a different bet and survives. Keeps the first occurrence.
+    """
+    key = [c for c in _BET_KEY if c in exploded.columns]
+    return exploded.drop_duplicates(subset=key) if key else exploded
 
 
 def tailed_record(exploded) -> dict:

@@ -16,6 +16,7 @@ from sportstradamus import clv
 from sportstradamus.analysis import (
     JUICE_PAYOUT,
     compute_book_brier_skill_score,
+    dedup_bets,
     ev_threshold_record,
     record_grid,
     tailed_record,
@@ -63,6 +64,9 @@ if history.empty:
 filters = sidebar_filters(history, parlays, key_prefix="receipts_")
 df = filtered_history_or_stop(history, filters)
 
+# One real-world bet per (player, market, line, side, date): the snapshot lists the same
+# prop under every book that posts it, so tailing it once — not once per book — is honest.
+df = dedup_bets(df)
 prob_col = "Win Prob" if "Win Prob" in df.columns and df["Win Prob"].notna().any() else "Model EV"
 df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
 df["Hit"] = (df["Bet"] == df["Result"]).astype(int)
@@ -71,12 +75,12 @@ df["Profit Unit"] = df["Hit"] * JUICE_PAYOUT - (1 - df["Hit"])
 st.subheader("If you'd tailed every rec")
 record = tailed_record(df)
 h1, h2, h3 = st.columns(3)
-h1.metric("Units", f"{record['units']:+.1f}")
-h2.metric("Record", f"{record['wins']}–{record['losses']}", f"{record['win_pct']:.1%} win")
-h3.metric("ROI", f"{record['roi']:+.1%}")
+h1.metric("ROI", f"{record['roi']:+.1%}")
+h2.metric("Win rate", f"{record['win_pct']:.1%}")
+h3.metric("Record", f"{record['wins']:,}–{record['losses']:,}")
 st.caption(
-    f"{record['n']:,} resolved recs, each priced as one flat -110 unit "
-    "(win +0.91u, loss -1u). Push legs excluded."
+    f"+{record['units']:.0f} units across {record['n']:,} unique resolved recs — flat -110 "
+    "(win +0.91u, loss -1u), deduped across books, pushes excluded."
 )
 
 daily_profit = (
@@ -271,5 +275,11 @@ else:
             hide_index=True,
         )
 
-with st.expander("Strategy simulator", expanded=False):
+st.subheader("Strategy simulator")
+if st.toggle("Run the Monte-Carlo strategy backtest", key="receipts_run_sim"):
     render_profit_sim(history)
+else:
+    st.caption(
+        "Off by default — toggle on to run the Monte-Carlo bankroll backtest across preset "
+        "and custom staking strategies (a few seconds of compute)."
+    )

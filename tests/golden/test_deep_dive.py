@@ -1,61 +1,53 @@
-"""Pure helpers behind the deep-dive dialog (market-trust read, sidecar decode,
-detail-row lookup, edge badge) and the Model-Lab nav handoff.
+"""Pure helpers behind the deep-dive dialog (sidecar decode, detail-row lookup, edge
+badge) and the page-change dialog reset.
 
 The Streamlit render itself is exercised by the dashboard AppTest smoke; these pin the
-unit logic the render depends on — bet-side / window selection, JSON decode, the
-five-key join, and the league+market preselect a "View in Model Lab" click hands off.
+unit logic the render depends on — JSON decode, the five-key join, and the cross-page
+detail-stack reset.
 """
 
 from __future__ import annotations
 
+import importlib.resources as pkg_resources
 import json
 
 import pandas as pd
 
+from sportstradamus import data as data_pkg
 from sportstradamus.dashboard.components.deep_dive import (
     _decode,
     _detail_row,
     _edge_badge,
-    _live_read,
+    drop_detail_on_page_change,
 )
-from sportstradamus.dashboard.narrative import lab_filters_for_nav_cell
 
 
-def _live_df() -> pd.DataFrame:
-    # Same cell at both windows; the 7-day row carries decoy precisions so a test
-    # failure to filter on window_days==30 is visible.
-    return pd.DataFrame(
-        [
-            {"league": "NBA", "market": "PTS", "window_days": 7,
-             "n_settled": 200, "precision_over_live": 0.10, "precision_under_live": 0.20},
-            {"league": "NBA", "market": "PTS", "window_days": 30,
-             "n_settled": 120, "precision_over_live": 0.63, "precision_under_live": 0.58},
-            {"league": "NBA", "market": "AST", "window_days": 30,
-             "n_settled": 5, "precision_over_live": 0.80, "precision_under_live": float("nan")},
-        ]
-    )
+def test_stat_tooltips_config_well_formed():
+    # League-keyed {stat: gloss}; the deep-dive Other-stats tab looks tooltips up by
+    # (League, stat), so the NFL per-position volume stats must each have a gloss.
+    with open(pkg_resources.files(data_pkg) / "config" / "stat_tooltips.json") as f:
+        tips = json.load(f)
+    assert {"NBA", "WNBA", "NFL", "MLB", "NHL"} <= set(tips)
+    assert {"attempts", "carries", "targets"} <= set(tips["NFL"])
+    assert "MIN" in tips["NBA"]
+    assert all(isinstance(v, str) and v for league in tips.values() for v in league.values())
 
 
-def test_live_read_bet_side_and_window():
-    live = _live_df()
-    assert _live_read(live, "NBA", "PTS", "Over") == (0.63, 120)
-    assert _live_read(live, "NBA", "PTS", "Under") == (0.58, 120)
+def test_drop_detail_on_page_change():
+    # Same page across reruns → the open dialog + its corr-nav history survive.
+    s = {"_active_page": "board", "detail_stack": [5], "last_grid_key": "k"}
+    drop_detail_on_page_change(s, "board")
+    assert s["detail_stack"] == [5]
 
+    # Navigating to another surface drops the stale dialog so it can't re-open.
+    drop_detail_on_page_change(s, "receipts")
+    assert s["detail_stack"] == [] and s["last_grid_key"] is None
+    assert s["_active_page"] == "receipts"
 
-def test_live_read_sparse_returns_count():
-    # AST has only 5 settled (below the panel's threshold) — the read still returns
-    # the count so the caller can show the honest "needs more" caption.
-    assert _live_read(_live_df(), "NBA", "AST", "Over") == (0.80, 5)
-
-
-def test_live_read_nan_precision_is_none():
-    prec, n = _live_read(_live_df(), "NBA", "AST", "Under")
-    assert prec is None and n == 5
-
-
-def test_live_read_absent_cell_and_empty():
-    assert _live_read(_live_df(), "NBA", "REB", "Over") == (None, 0)
-    assert _live_read(pd.DataFrame(), "NBA", "PTS", "Over") == (None, 0)
+    # Fresh session (no marker yet) initializes the marker and leaves nothing open.
+    s2: dict = {}
+    drop_detail_on_page_change(s2, "games")
+    assert s2["detail_stack"] == [] and s2["_active_page"] == "games"
 
 
 def test_decode_json_and_degenerate():
@@ -92,9 +84,3 @@ def test_detail_row_five_key_join():
 def test_edge_badge_sign_color():
     assert ":green[" in _edge_badge(1.12) and "+12%" in _edge_badge(1.12)
     assert ":red[" in _edge_badge(0.95) and "-5%" in _edge_badge(0.95)
-
-
-def test_lab_filters_for_nav_cell():
-    assert lab_filters_for_nav_cell(("NBA", "PTS")) == {"lab_leagues": ["NBA"], "lab_markets": ["PTS"]}
-    assert lab_filters_for_nav_cell(None) == {}
-    assert lab_filters_for_nav_cell(()) == {}

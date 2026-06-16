@@ -15,6 +15,7 @@ if _src_dir not in sys.path:
 
 import streamlit as st
 
+from sportstradamus.dashboard.components.deep_dive import drop_detail_on_page_change
 from sportstradamus.dashboard.components.locked_shelf import render_locked_shelf
 from sportstradamus.dashboard.components.slip_state import init_slip_state
 
@@ -36,7 +37,7 @@ st.session_state["sport"] = _sport_widget if _sport_widget is not None else "All
 
 _surfaces = Path(__file__).parent / "surfaces"
 
-# Five surfaces live top-level (unnamed section renders headerless);
+# Four surfaces live top-level (unnamed section renders headerless);
 # only Model Lab gets a group header.
 pg = st.navigation(
     {
@@ -92,5 +93,9 @@ pg = st.navigation(
 
 with st.sidebar:
     render_locked_shelf()
+
+# Close any offer-detail dialog left open on a previous surface (detail_stack is
+# global session state and would otherwise re-open on the next dialog-owning page).
+drop_detail_on_page_change(st.session_state, pg.url_path)
 
 pg.run()

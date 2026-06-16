@@ -9,14 +9,40 @@ assert the altair layer spec carries each without re-shading the over/under spli
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from sportstradamus.dashboard.components.deep_dive_charts import (
     distribution_chart,
     distribution_frame,
+    resolve_std,
 )
 from sportstradamus.dashboard.theme import GOLD
 
 _APP_LINE = "#FFFFFF"
+
+
+def test_resolve_std_falls_back_when_projection_std_missing():
+    # Model std present and positive → used as-is.
+    assert resolve_std(2.0, 9.5, 0.55) == 2.0
+    # NaN Projection STD (book-fallback offers carry none) → CV-implied spread, NOT NaN.
+    # Regression: the old `Projection STD or ev*0.3` returned NaN because NaN is truthy,
+    # so the x-range was all-NaN and the curve rendered invisible.
+    assert resolve_std(float("nan"), 9.5, 0.55) == pytest.approx(9.5 * 0.55)
+    # Non-positive std also falls back to the CV spread.
+    assert resolve_std(0.0, 9.5, 0.55) == pytest.approx(9.5 * 0.55)
+    # CV also missing → last-resort 0.3 fraction of the mean.
+    assert resolve_std(float("nan"), 10.0, float("nan")) == pytest.approx(3.0)
+
+
+def test_distribution_frame_renders_with_cv_fallback_std():
+    # A book-fallback SkewNormal row (no sigma/skew/Projection STD) still produces a
+    # finite, non-flat curve once std falls back to the CV-implied spread.
+    std = resolve_std(float("nan"), 9.5, 0.55)
+    df_pdf, _, is_cont = distribution_frame("SkewNormal", 9.5, std, {}, 8.5)
+    assert is_cont
+    assert df_pdf["x"].notna().all()
+    assert df_pdf["P"].notna().all()
+    assert df_pdf["P"].max() > 0
 
 
 def _layers(chart) -> list[dict]:

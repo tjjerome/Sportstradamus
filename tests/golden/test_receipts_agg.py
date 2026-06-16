@@ -15,11 +15,33 @@ import pytest
 from sportstradamus.analysis import (
     _FLAT_DECIMAL_ODDS,
     JUICE_PAYOUT,
+    dedup_bets,
     ev_threshold_record,
     record_grid,
     tailed_record,
     worst_month,
 )
+
+
+def test_dedup_bets_collapses_per_book_duplicates():
+    # The snapshot lists one real-world prop under every book that posts it; tailing it
+    # once — not once per book — is the honest unit. Same (player, market, line, side,
+    # date) collapses; a different line is a different bet and survives.
+    df = pd.DataFrame(
+        [
+            {"Date": "2026-06-15", "Player": "A", "Market": "PTS", "Line": 25.5,
+             "Bet": "Over", "Platform": "Underdog"},
+            {"Date": "2026-06-15", "Player": "A", "Market": "PTS", "Line": 25.5,
+             "Bet": "Over", "Platform": "Sleeper"},
+            {"Date": "2026-06-15", "Player": "A", "Market": "PTS", "Line": 26.5,
+             "Bet": "Over", "Platform": "Underdog"},
+            {"Date": "2026-06-15", "Player": "B", "Market": "AST", "Line": 5.5,
+             "Bet": "Under", "Platform": "Underdog"},
+        ]
+    )
+    out = dedup_bets(df)
+    assert len(out) == 3  # the two identical props collapse to one; the 26.5 line stays
+    assert dedup_bets(pd.DataFrame()).empty
 
 
 def _exploded() -> pd.DataFrame:
