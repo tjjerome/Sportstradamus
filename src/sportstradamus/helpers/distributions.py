@@ -134,7 +134,11 @@ def skewnormal_loc_from_mean(
 
 
 def _crps_grid_bound(y: np.ndarray, mean: np.ndarray) -> float:
-    """Upper integration limit for a continuous CRPS grid: ``max(2·max(y), 4·mean(mean))``."""
+    """Upper integration limit for a continuous CRPS grid: ``max(2·max(y), 4·mean(mean))``.
+
+    Extends past the realized upper tail and the predictive mean so the grid never
+    truncates the tail CRPS is chosen to weight (researcher_crps_blending.md §4).
+    """
     return max(float(y.max()) * 2, float(np.mean(mean)) * 4)
 
 

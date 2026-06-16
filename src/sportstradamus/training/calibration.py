@@ -420,6 +420,11 @@ def fit_model_weight_crps(
     return _minimize_weight(objective)
 
 
+# Per-cell blend strategy: how the model and book distributions are combined.
+# Each entry owns its weight-fitting objective and its weight bounds, so a future
+# strategy can change the objective (e.g. Brier-at-line) and/or the bounds (e.g.
+# drop the 0.05 floor) without touching the others. Default `nll` reproduces the
+# historical behavior exactly.
 DEFAULT_BLENDING: str = "nll"
 BLENDING_SLUGS: frozenset[str] = frozenset({"nll", "crps"})
 

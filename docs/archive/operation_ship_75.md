@@ -381,11 +381,21 @@ a faithful fixed-HP replica of the production HPO pipeline — same calibration,
 write locations.
 
 **The deterministic study only ranks; the real-HPO scorecard ships.** Take the top-K (K ≈ 2–3)
-corners per cell, re-run each under real HPO, and ship the first that clears the official 5-gate
-scorecard (`model_stats.csv`) — never the deterministic score. Knife-edge cells (g4 within ~0.003 of
-0.05) are exactly where the val→test discount bites, so the confirm is mandatory. Sweep the **whole**
-board, shipped cells included — a shipped cell may have a better corner than the scale-only default
-it settled for.
+**production-reproducible** corners per cell — including any that *fail* the deterministic gate by
+≤3% of threshold (`min_gate_slack ≥ -0.03`), since the val→test discount tips knife-edge cells in
+*either* direction (a board passer can fail HPO; a board near-miss can clear it) — and re-run each
+under real HPO, working down the list until one clears the official 5-gate scorecard
+(`model_stats.csv`) or the list is exhausted (then defer to the calibration ladder, §5.2) — never
+ship the deterministic score. Reproducible means the
+corner reproduces under the server's plain `meditate`: `target_normalization`, `posthoc`, and
+`blending` persist per-cell in `stat_meta.json`, but `--dist-training-loss` does **not**, so for a
+SkewNormal cell only the family-default `crps` dist-loss is shippable — an `nll`-dist corner can
+clear the run yet will silently retrain to `crps` on the server. The top board corner by
+deterministic slack is not always the one that survives HPO (NBA DREB: eb topped the board but mean10
+is the corner that ships), which is why the list is walked, not just its head. Knife-edge cells
+(g4 within ~0.003 of 0.05) are exactly where the val→test discount bites, so the confirm is
+mandatory. Sweep the **whole** board, shipped cells included — a shipped cell may have a better
+corner than the scale-only default it settled for.
 
 **The operating loop (per parameter, per cell).** Once an axis is wired, the per-cell workflow is
 fixed — and the ship bar differs for a withheld cell vs an incumbent:
@@ -396,13 +406,17 @@ fixed — and the ship bar differs for a withheld cell vs an incumbent:
    (`model_stats.csv` / `.parquet`). Carry the **top-K (2–3)** corners per cell forward.
 
 2. **Withheld cell → real-HPO confirm → ship to devel.** Set the winning corner's
-   `target_normalization` (and `posthoc`) in `stat_meta.json` and pass any non-default
-   `--dist-training-loss` / `--blending-loss-fn` to a full-HPO `meditate`, then read the official
-   scorecard. A clean **5/5** → flip
-   `shipped: "withheld" → "devel"`. Ship the first top-K corner that clears; if the winner is just
-   the cell's current default strategy it is a straight confirm (no strategy edit). The knife-edge
-   cells (g4 within ~0.003 of 0.05) are exactly where the val→test discount bites, so the confirm is
-   mandatory — never ship the deterministic score.
+   `target_normalization`, `posthoc`, and `blending` in `stat_meta.json` *before* the full-HPO
+   `meditate` — the normalization must be set first or the Gate-4 decode reads the cell's stale
+   strategy and reports a spurious miss (`scorecard._resolve_decode_strategy` reads stat_meta, not
+   the `--target-normalization` flag). Pass the corner's `--target-normalization` /
+   `--blending-loss-fn` flags to match during the confirm; `--dist-training-loss` is not persisted,
+   so a shippable corner uses the family default (`crps` for SkewNormal). Then read the official
+   scorecard. A clean **5/5** → flip `shipped: "withheld" → "devel"`. Walk down the reproducible
+   top-K, shipping the first that clears; if the winner is just the cell's current default strategy
+   it is a straight confirm (no strategy edit). The knife-edge cells (g4 within ~0.003 of 0.05) are
+   exactly where the val→test discount bites, so the confirm is mandatory — never ship the
+   deterministic score.
 
 3. **Incumbent (already-shipped) cell with a better corner → supersede, a higher bar.** A shipped
    cell does **not** re-ship on a fresh 5/5 — the candidate must *beat the incumbent*. Built as
@@ -488,7 +502,7 @@ existing `prob_recal_isotonic` fixes. It acts on `Z = F(Y|X)`, the randomized PI
 ports to both heads (widen SkewNormal / narrow count) unchanged. Prefer isotonic / IDR over conformal
 *calibration* on the count lattice — conformal yields discontinuous randomized CDFs (Marx 2022), bad for
 pricing a ladder. (Conformal *predictive distributions* for the alt-line ladder are a separate, deferred
-item — roadmap v3 §8 deferred register.)
+item — roadmap Phase 6.)
 
 **Go/No-Go (per cell, on validation, before ship).** `pit_ks` crosses below `max(0.05, 1.358/√n)`
 **and** g1 Brier-skill drops by ≤ 0.01 (the §1.4-class guardrail) **and** g5 ECE stays < 0.075. Any
@@ -556,7 +570,7 @@ line, per-cell variance from residual studies → precision weight; "book is noi
 out as lower precision. (d) Learn `w` by CRPS (continuous) / log-score (count), shrunk per-cell toward a
 global prior ∝ 1/n_cell; do not hard-code book = truth (props are soft). (e) **Time-varying `w_book`**
 ramp toward close (the de-vigged *close* is the best probability estimate, but at *close*). The CLV-edge
-*dashboard* defers to the roadmap v3 §8 register; the weight schedule stays here.
+*dashboard* defers to the roadmap; the weight schedule stays here.
 
 **Go/No-Go.** `pit_ks` below threshold with g1 BSS drop ≤ 0.01 and g5 < 0.075, on validation, before
 ship; an inference-path round-trip test for every new served object (de-vig method, recovered book
@@ -588,7 +602,7 @@ How the model trains its own predictive, upstream of the blend.
 slightly more efficient under correct specification (Gebetsberger 2018); keep the per-cell winner.
 Honest caveat: LightGBMLSS's CRPS path sets the Hessian to 1 (first-order, discards loss curvature),
 which is *why* a properly-curved CRPS head (NGBoost's natural gradient) is the narrow-use Hail-Mary
-(§5.6 / roadmap v3 §8), not the default.
+(§5.6 / roadmap), not the default.
 
 **Training-time variance / soft-calibration regularizer (unbuilt; the lever §8 flags as "untried, not
 refuted").** Concrete form: an MMD-to-uniform-PIT penalty (Chung 2021) or a held-out variance penalty
@@ -644,7 +658,7 @@ Partial pooling dominates both no-pooling and complete-pooling at n ≈ 300–10
   backbone — the data is tabular and medium-sized, GBDT's home turf (Grinsztajn 2022; McElfresh 2023).
 - **Hierarchical-Bayes** layer (player ⊂ position ⊂ team) — research-gated escalation if EB shrinkage and
   TabPFN are insufficient. (The multi-task shared-trunk NN that pools across cells/leagues defers to the
-  roadmap v3 §8 register.)
+  roadmap.)
 
 ### §5.8 — Features: leakage-safe player-level
 
@@ -660,11 +674,6 @@ re-score, ship per passer; SHAP importance < 0.001 ⇒ inert → revert, don't c
 the per-position split (§5.6); for a cell the model still can't improve, lean harder on the book in the
 blend (ride the sharp line; ships if calibration holds) — never "unwinnable."
 
-Feature-lever detail beyond 3a/3b — comps, aggregation, neglected data, new free sources, the
-feature-count ablation, and the five-league roadmap — lives in
-[`feature_improvement_plan.md`](feature_improvement_plan.md) (canonical home; 3a/3b above = its
-M-1/B-3).
-
 ### §5.9 — Lever cap & matrix-exhaustion policy
 
 A cell that fails one axis is exhausted *on that axis only* — it stays a **live Ship-75 candidate** and
@@ -673,8 +682,8 @@ already tried. The only ways off the board are genuine matrix-wide exhaustion ac
 (normalization × model/loss × blend × calibration) **plus** the family and hierarchical tracks — true of
 **zero cells** today — or the operator's explicit, documented denominator call. No `deferred-90` tag
 (zero cells qualify for Ship-90 territory today); the heaviest tail-head rebuilds (spliced/Pareto-tail,
-MZINB) are the deferred long-shots (roadmap v3 §8 deferred register), tried only after the cheaper
-family (§5.6) and normalization (§5.4) moves. Gate-definition changes never count as a lever.
+MZINB) are the deferred long-shots (roadmap Phase 6), tried only after the cheaper family (§5.6) and
+normalization (§5.4) moves. Gate-definition changes never count as a lever.
 
 ---
 
@@ -834,13 +843,10 @@ hard rule).
 5. [`docs/operation_ship_90.md`](operation_ship_90.md) — next-rung stub; the levers it lists
    (T11 per-position, T3 tail head, CMPμ) are **on the Ship-75 table too** — pulled forward as
    needed, not reserved
-6. [`docs/feature_improvement_plan.md`](feature_improvement_plan.md) — feature-lever detail
-   across all five leagues (workstreams A–E, per-league plans, prioritized roadmap)
-7. [`docs/sportstradamus_roadmap_v3.md`](sportstradamus_roadmap_v3.md) — the swimlane master
-   index. The parlay copula / dependence layer is now the `parlay-dependence` lane
-   ([`docs/handoffs/parlay-dependence.md`](handoffs/parlay-dependence.md), gated on calibrated
-   marginals); the conformal alt-line ladder, CLV-edge dashboard, TabPFN-as-platform /
-   multi-task-NN backbone, and heaviest tail-head rebuilds live in its §8 deferred register
+6. [`docs/sportstradamus_roadmap_v2.md`](sportstradamus_roadmap_v2.md) — home of record for the
+   audit-deferred tail (post-Ship-75): the parlay copula / dependence layer (Phase 1.2 follow-ups),
+   and the conformal alt-line ladder, CLV-edge dashboard, TabPFN-as-platform / multi-task-NN backbone,
+   and heaviest tail-head rebuilds (Phase 6)
 
 Done = each league shows ≥ 75% (`shipped ∈ {devel, main}`) on a fresh scorecard, with
 every promotion having cleared its go/no-go and, for baselined cells, `supersede_verdict()`.
