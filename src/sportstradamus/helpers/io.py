@@ -130,24 +130,33 @@ def prune_model_pickle(league: str, market: str) -> bool:
     return existed
 
 
-def _atomic_write_parquet(df: pd.DataFrame, path, compression: str | None = None) -> None:
+def _atomic_tmp(path) -> tuple[Path, Path]:
+    """Resolve ``(target, target.tmp)`` for an atomic write, creating the parent.
+
+    Snapshot dirs (``runtime/``, ``training/``) are gitignored and so absent on a
+    fresh checkout or install; the write-temp-then-rename fails on a missing
+    parent. Mirrors the mkdir the model-pickle writer does in training/pipeline.py.
+    """
     path = Path(str(path))
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path, path.with_suffix(path.suffix + ".tmp")
+
+
+def _atomic_write_parquet(df: pd.DataFrame, path, compression: str | None = None) -> None:
+    path, tmp = _atomic_tmp(path)
     df.to_parquet(tmp, engine="pyarrow", index=False, compression=compression)
     tmp.replace(path)
 
 
 def _atomic_write_json(obj, path) -> None:
-    path = Path(str(path))
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    path, tmp = _atomic_tmp(path)
     with tmp.open("w") as f:
         json.dump(obj, f, indent=2, default=str)
     tmp.replace(path)
 
 
 def _atomic_write_csv(df: pd.DataFrame, path) -> None:
-    path = Path(str(path))
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    path, tmp = _atomic_tmp(path)
     df.to_csv(tmp, index=False)
     tmp.replace(path)
 
