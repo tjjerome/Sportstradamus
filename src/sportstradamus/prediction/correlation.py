@@ -26,6 +26,7 @@ from sportstradamus import data
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, banned, stat_map
 from sportstradamus.prediction.parlay import (
     GameArrays,
+    GameScoringContext,
     _payout_curve_for,
     assign_parlay_families,
     beam_search_parlays,
@@ -210,12 +211,12 @@ def _build_correlation_matrices(
     """
     C = np.eye(len(game_dict))
     M = np.zeros([len(game_dict), len(game_dict)])
-    p_model = game_df["Model P"].to_numpy()
-    p_books = game_df["Books P"].to_numpy()
+    p_model = game_df["Win Prob"].to_numpy()
+    p_books = game_df["Market Prob"].to_numpy()
     # ``Push P`` is added by :func:`model_prob` for integer-line discrete markets;
     # missing for combo legs etc. — fill 0.0 so the analytical mvn.cdf path runs.
-    if "Push P" in game_df.columns:
-        p_push = game_df["Push P"].fillna(0.0).to_numpy()
+    if "Push Prob" in game_df.columns:
+        p_push = game_df["Push Prob"].fillna(0.0).to_numpy()
     else:
         p_push = np.zeros(len(game_df), dtype=float)
     boosts = game_df["Boost"].to_numpy()
@@ -355,7 +356,7 @@ def _build_cmarket_desc(league_df, league, new_map):
     league_df["Desc"] = (
         league_df["Desc"]
         + " - "
-        + league_df["Model P"].multiply(100).round(1).astype(str)
+        + league_df["Win Prob"].multiply(100).round(1).astype(str)
         + "%, "
         + league_df["Boost"].round(2).astype(str)
         + "x"
@@ -401,21 +402,21 @@ def _select_bet_offers(game_df):
     tractable.
     """
     idx = game_df.loc[
-        (game_df["Books"] > _OFFER_BOOKS_EV_FLOOR)
-        & (game_df["Books P"] >= _OFFER_BOOKS_PROB_FLOOR)
-        & (game_df["Model"] > _OFFER_MODEL_EV_FLOOR)
-        & (game_df["Model P"] >= _OFFER_MODEL_PROB_FLOOR)
-    ].sort_values("K", ascending=False)
+        (game_df["Market EV"] > _OFFER_BOOKS_EV_FLOOR)
+        & (game_df["Market Prob"] >= _OFFER_BOOKS_PROB_FLOOR)
+        & (game_df["Model EV"] > _OFFER_MODEL_EV_FLOOR)
+        & (game_df["Win Prob"] >= _OFFER_MODEL_PROB_FLOOR)
+    ].sort_values("Kelly", ascending=False)
     idx = idx.drop_duplicates(subset=["Player", "Team", "Market", "Line"])
     idx = idx.groupby("Player").head(_MAX_OFFERS_PER_PLAYER)
     idx = (
-        idx.sort_values(["Model", "Books"], ascending=False)
+        idx.sort_values(["Model EV", "Market EV"], ascending=False)
         .groupby("Team")
         .head(_MAX_OFFERS_PER_TEAM)
         .sort_values(["Team", "Player"])
     )
     return (
-        idx.sort_values(["Model", "Books"], ascending=False)
+        idx.sort_values(["Model EV", "Market EV"], ascending=False)
         .head(_MAX_OFFERS_PER_GAME)
         .sort_values(["Team", "Player"])
     )
@@ -453,6 +454,38 @@ def _annotate_correlation_columns(df, game_df, g):
         )
 
 
+def _collect_game_corr(game_df, C, league, game_label, market_map):
+    """Per-game upper-triangle correlation slice for the dashboard rail/constellation.
+
+    Emits one row per distinct leg pair, keyed by ``Player|Market|Bet`` with the
+    canonical ``Market`` code (``market_map`` mirrors the post-``process_offers``
+    remap ``cli`` applies) so the slice joins ``current_offers.parquet``. ``C`` is
+    positionally aligned to ``game_df`` (the caller reset its index). Correlation
+    is line-independent, so same-key pairs at different lines collapse on the
+    caller's dedup.
+    """
+    players = game_df["Player"].to_numpy()
+    markets = game_df["Market"].to_numpy()
+    bets = game_df["Bet"].to_numpy()
+    rows = []
+    for i, j in combinations(range(len(game_df)), 2):
+        leg_i = f"{players[i]}|{market_map.get(markets[i], markets[i])}|{bets[i]}"
+        leg_j = f"{players[j]}|{market_map.get(markets[j], markets[j])}|{bets[j]}"
+        if leg_i == leg_j:
+            continue
+        leg_a, leg_b = sorted((leg_i, leg_j))
+        rows.append(
+            {
+                "League": league,
+                "Game": game_label,
+                "leg_a": leg_a,
+                "leg_b": leg_b,
+                "rho": float(C[i, j]),
+            }
+        )
+    return rows
+
+
 def _append_parlay_rows(parlay_df, best_bets, C):
     """Dedup beam-search bets across the three sort views, label families, append.
 
@@ -475,6 +508,35 @@ def _append_parlay_rows(parlay_df, best_bets, C):
     return pd.concat([parlay_df, df5.drop(columns="Bet ID")], ignore_index=True)
 
 
+def _append_story_context(
+    story_sink, platform, league, game, date, g, bet_df, idx, search_payouts, full_payouts
+):
+    """Capture one game's scoring bundle for the story-menu generator.
+
+    No-op unless ``story_sink`` is provided (the pickem variant-sweep caller and
+    beam-search-only runs leave it None) and the game has bet-eligible legs. The
+    bundle lets the generator price story subsets beam search never enumerates.
+    """
+    if story_sink is None or idx.empty:
+        return
+    story_sink.append(
+        GameScoringContext(
+            platform=platform,
+            league=league,
+            game=game,
+            date=str(date),
+            g=g,
+            bet_df=bet_df,
+            leg_indices=tuple(sorted(idx.index.to_numpy())),
+            full_payouts=full_payouts,
+            payout_base_by_size={
+                s: search_payouts[s - 2] for s in range(2, len(search_payouts) + 2)
+            },
+            max_size=max(full_payouts),
+        )
+    )
+
+
 def _process_league_games(
     df,
     league_df,
@@ -489,11 +551,15 @@ def _process_league_games(
     parlay_df,
     contest_variant,
     legacy,
+    corr_sink,
+    story_sink,
+    market_map,
 ):
     """Annotate correlations and beam-search parlays for every game in a league.
 
     For each (team, opponent) pairing: assemble the game frame, build the
-    correlation / boost matrices, annotate ``df``'s display columns, and — unless
+    correlation / boost matrices, annotate ``df``'s display columns, collect the
+    per-game correlation slice into ``corr_sink`` (when not None), and — unless
     the platform/league is parlay-ineligible — beam-search parlays onto
     ``parlay_df`` (returned).
     """
@@ -517,6 +583,11 @@ def _process_league_games(
         )
         _annotate_correlation_columns(df, game_df, g)
 
+        if corr_sink is not None:
+            corr_sink.extend(
+                _collect_game_corr(game_df, g.C, league, "/".join(sorted([team, opp])), market_map)
+            )
+
         if platform in ["Chalkboard", "ParlayPlay"] and league == "MLB":
             continue
         info = {
@@ -526,6 +597,18 @@ def _process_league_games(
             "Platform": platform,
         }
         max_boost = _MAX_BOOST_UNDERDOG if platform == "Underdog" else _MAX_BOOST_OTHER
+        _append_story_context(
+            story_sink,
+            platform,
+            league,
+            info["Game"],
+            date,
+            g,
+            bet_df,
+            idx,
+            search_payouts,
+            full_payouts,
+        )
         best_bets = beam_search_parlays(
             idx,
             g,
@@ -552,6 +635,8 @@ def find_correlation(
     *,
     contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"] = "pooled",
     legacy: bool = False,
+    corr_sink: list | None = None,
+    story_sink: list | None = None,
 ):
     """Annotate offers with correlation info and build parlay candidates.
 
@@ -570,10 +655,18 @@ def find_correlation(
         legacy: When True, reproduce the pre-2026.05 pipeline verbatim — no
             PSD repair, no push-aware EV, mixed insurance/power Boost overwrite.
             Removed next release.
+        corr_sink: When provided, each game appends its upper-triangle
+            correlation slice (``League, Game, leg_a, leg_b, rho``) to this list
+            for the dashboard rail/constellation. The pickem variant-sweep caller
+            leaves it None.
+        story_sink: When provided, each game appends a
+            :class:`~sportstradamus.prediction.parlay.GameScoringContext` to this
+            list so the story-menu generator can price story subsets. The pickem
+            variant-sweep caller leaves it None.
 
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]: ``(offer_df, parlay_df)`` where
-            ``offer_df`` is the full scored slate sorted by ``Model`` and
+            ``offer_df`` is the full scored slate sorted by ``Model EV`` and
             ``parlay_df`` has beam-search parlay candidates.
     """
     logger.info("Finding Correlations")
@@ -597,6 +690,13 @@ def find_correlation(
 
     df["Team Correlation"] = ""
     df["Opp Correlation"] = ""
+    # Depth-chart labels resolved per league below; combo legs keep "".
+    df["Position"] = ""
+    # Canonical matchup key shared by offers, parlays, and the corr slice so the
+    # dashboard joins them. Distinct from the "Team vs Opp · Date" display label.
+    df["Game"] = [
+        "/".join(sorted([t, o])) for t, o in zip(df["Team"], df["Opponent"], strict=False)
+    ]
     parlay_df = pd.DataFrame(
         columns=[
             "Game",
@@ -604,7 +704,7 @@ def find_correlation(
             "League",
             "Platform",
             "Model EV",
-            "Books EV",
+            "Market EV",
             "Boost",
             "Rec Bet",
             "Leg 1",
@@ -643,6 +743,10 @@ def find_correlation(
             league_df["Boost"] = league_df["Boost"] / UNDERDOG_BOOST_BASELINE
 
         league_df = _resolve_player_positions(league_df, league, stat_data)
+        # _resolve_player_positions returns a slice the function otherwise drops;
+        # persist the depth-chart labels onto the returned frame (combos absent
+        # from its index keep "") so build_game_context can read Position.
+        df.loc[league_df.index, "Position"] = league_df["Player position"]
         league_df = _build_cmarket_desc(league_df, league, new_map)
         parlay_df = _process_league_games(
             df,
@@ -658,6 +762,9 @@ def find_correlation(
             parlay_df,
             contest_variant,
             legacy,
+            corr_sink,
+            story_sink,
+            stat_map[platform],
         )
 
     if legacy and platform == "Underdog":
@@ -670,4 +777,4 @@ def find_correlation(
             * parlay_df["Boost"]
         )
 
-    return df.dropna(subset="Model").sort_values("Model", ascending=False), parlay_df
+    return df.dropna(subset="Model EV").sort_values("Model EV", ascending=False), parlay_df

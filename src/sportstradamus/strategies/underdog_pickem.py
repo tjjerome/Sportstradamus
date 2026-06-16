@@ -37,11 +37,6 @@ _RIVALS_LEG_SIZES: tuple[int, ...] = (2, 3)
 
 _RECOMMENDATIONS_DIR = Path("data") / "recommendations"
 
-# prophecize's hourly snapshot sizes stakes at this nominal bankroll purely to
-# drive rank_and_dedupe ordering (bankroll-invariant below the per-bet cap); the
-# dashboard re-sizes every entry against the user's actual bankroll.
-REFERENCE_BANKROLL = Decimal("1000")
-
 
 @dataclass(frozen=True)
 class PickemConfig:
@@ -81,16 +76,16 @@ def _filter_legs(offers: pd.DataFrame, config: PickemConfig) -> pd.DataFrame:
     """Apply leg-level filters: model & sharp coverage + edge + disagreement."""
     if offers.empty:
         return offers
-    required = {"Model P", "Books P"}
+    required = {"Win Prob", "Market Prob"}
     if not required.issubset(offers.columns):
         msg = f"_filter_legs needs columns {required}; got {set(offers.columns)}"
         raise ValueError(msg)
 
-    df = offers.dropna(subset=["Model P", "Books P"]).copy()
+    df = offers.dropna(subset=["Win Prob", "Market Prob"]).copy()
     keep = (
-        ((df["Model P"] - 0.5) >= config.min_model_edge)
-        & ((df["Books P"] - 0.5) >= config.min_sharp_edge)
-        & ((df["Model P"] - df["Books P"]).abs() <= config.disagreement_threshold)
+        ((df["Win Prob"] - 0.5) >= config.min_model_edge)
+        & ((df["Market Prob"] - 0.5) >= config.min_sharp_edge)
+        & ((df["Win Prob"] - df["Market Prob"]).abs() <= config.disagreement_threshold)
     )
     return df.loc[keep].copy()
 
@@ -296,27 +291,6 @@ def _parlays_per_variant(
         v: find_correlation(scored, stats, "Underdog", contest_variant=v)[1]
         for v in config.contest_variants
     }
-
-
-def build_entries_from_scored(
-    date: datetime.date,
-    bankroll: Decimal,
-    scored_offers_df: pd.DataFrame,
-    stats: dict[str, Any],
-    config: PickemConfig | None = None,
-) -> list[RecommendedEntry]:
-    """Build ranked entries from offers already scored by ``process_offers``.
-
-    Skips the scrape and model scoring — the caller supplies ``scored_offers_df``
-    — and runs only the per-variant correlation search before ranking and
-    sizing. The ``prophecize`` snapshot hook uses this so the hourly run feeds
-    the dashboard without a second scrape or archive lock.
-    """
-    config = config or PickemConfig()
-    parlay_dfs = _parlays_per_variant(scored_offers_df, stats, config)
-    return construct_entries(
-        date, bankroll, config, parlay_dfs=parlay_dfs, offers_df=scored_offers_df
-    )
 
 
 def _live_load(config: PickemConfig) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:

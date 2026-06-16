@@ -41,7 +41,7 @@ def _theme() -> dict:
 
 
 def _dashboard_files() -> list[Path]:
-    files = list((_SRC / "pages").glob("*.py")) + sorted(_SRC.glob("dashboard*.py"))
+    files = sorted((_SRC / "dashboard").rglob("*.py"))
     return [f for f in files if f.name != "__init__.py"]
 
 
@@ -56,10 +56,41 @@ def test_config_toml_carries_fixed_identity() -> None:
         assert _BANNED_FONT.search(t[key]) is None, f"{key} uses an overused font"
 
 
+def test_diverging_ramp_mirrors_config() -> None:
+    """theme.DIVERGING_COLORS is the non-Streamlit mirror of config.toml chartDivergingColors.
+
+    Runtime grid code (components/grid.py) bakes the diverging heatmap ramp from
+    theme.DIVERGING_COLORS without a TOML read, so it must stay byte-equal to the config.
+    """
+    from sportstradamus.dashboard.theme import DIVERGING_COLORS
+
+    assert _theme()["chartDivergingColors"] == DIVERGING_COLORS, (
+        "dashboard/theme.DIVERGING_COLORS drifted from config.toml chartDivergingColors"
+    )
+
+
 def test_design_md_present_with_rules() -> None:
     text = (_REPO / "DESIGN.md").read_text(encoding="utf-8")
     for needle in ("Design tokens (FIXED", "## 6. NEVER", "FIXED vs FLEXIBLE"):
         assert needle in text, f"DESIGN.md missing section: {needle!r}"
+
+
+def test_design_md_celestial_layer() -> None:
+    """The approved celestial amendment: gold token, display-only faces, ambient-art rules."""
+    text = (_REPO / "DESIGN.md").read_text(encoding="utf-8")
+    for needle in (
+        "#C9A227",
+        "Cinzel",
+        "Cormorant Garamond",
+        "Never for data, numerals",
+        "no AI-generated images",
+        "constellation",
+    ):
+        assert needle in text, f"DESIGN.md missing celestial-layer rule: {needle!r}"
+    theme_py = _SRC / "dashboard" / "theme.py"
+    assert "#C9A227" in theme_py.read_text(encoding="utf-8"), (
+        "dashboard/theme.py gold constant drifted from DESIGN.md #C9A227"
+    )
 
 
 def test_no_emoji_in_dashboard_sources() -> None:

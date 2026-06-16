@@ -13,6 +13,7 @@ Orchestrates the full prediction pipeline:
 from __future__ import annotations
 
 import datetime
+import importlib.resources as pkg_resources
 import os
 from functools import partialmethod
 
@@ -22,7 +23,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from sportstradamus import creds
+from sportstradamus import creds, data
 from sportstradamus.analysis import _merge_offers
 from sportstradamus.books import get_sleeper, get_ud
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, LazyArchive, get_logger, stat_map
@@ -33,8 +34,21 @@ from sportstradamus.helpers.io import (
     write_parlay_hist,
 )
 from sportstradamus.history_schema import HISTORY_COLS, PREDICTION_LEVEL_COLS
-from sportstradamus.prediction.persist import write_current_offers, write_current_pickem
+from sportstradamus.prediction.persist import (
+    write_current_game_context,
+    write_current_game_corr,
+    write_current_game_stories,
+    write_current_offer_details,
+    write_current_offers,
+)
 from sportstradamus.prediction.scoring import process_offers
+from sportstradamus.prediction.stories import (
+    attach_offer_why,
+    attach_parlay_theses,
+    build_game_context,
+    build_game_stories,
+)
+from sportstradamus.prediction.stories.details import build_offer_details
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
 
@@ -47,6 +61,58 @@ os.environ["LINE_PROFILE"] = "0"
 archive = LazyArchive()
 
 _HISTORY_RETENTION_DAYS = 365
+
+# Per-league gamelog volume-stat column for the deep-dive volume trend. NFL maps by
+# base position (the snapshot's depth-rank suffix is stripped before lookup) so each
+# player shows their own opportunity stat — pass attempts, carries, or targets.
+_VOLUME_STAT: dict[str, str | dict[str, str]] = {
+    "NBA": "MIN",
+    "WNBA": "MIN",
+    "NFL": {"QB": "attempts", "RB": "carries", "WR": "targets", "TE": "targets"},
+    "MLB": "plateAppearances",
+    "NHL": "TimeShare",
+}
+# Leagues whose comps use the KNN ``_comp_pairs`` table; MLB's pitcher/hitter comps
+# have a different structure and are deferred (empty comps-vs-opponent panel).
+_COMP_PAIR_LEAGUES = {"NBA", "WNBA", "NFL", "NHL"}
+# Recency window for the detail gamelog — covers the 300-day comps window with margin
+# while bounding the per-offer work. ``self.gamelog`` is the full multi-year log.
+_DETAIL_GAMELOG_DAYS = 400
+_FEATURE_IMPORTANCES_PATH = pkg_resources.files(data) / "training" / "feature_importances.csv"
+
+
+def _offer_details_frame(snapshot_offers: pd.DataFrame, stats: dict) -> pd.DataFrame:
+    """Assemble the per-offer detail prerender from the scored slate + Stats objects.
+
+    Uses ``sd.gamelog`` (always loaded) not ``short_gamelog`` (only set inside
+    ``get_stats``, absent for book-fallback leagues); the detail helpers window it
+    to the comps / sparkline ranges they need.
+    """
+    today = datetime.date.today()
+    if snapshot_offers.empty:
+        return build_offer_details(
+            snapshot_offers, {}, pd.DataFrame(), exclude=frozenset(), today=today
+        )
+    importances = pd.read_csv(_FEATURE_IMPORTANCES_PATH, index_col=0)
+    empty_pairs = pd.DataFrame(columns=["player", "comp"])
+    cutoff = pd.Timestamp(today - datetime.timedelta(days=_DETAIL_GAMELOG_DAYS))
+    offer_leagues = set(snapshot_offers["League"].unique())
+    league_data = {}
+    for league, sd in stats.items():
+        if league not in offer_leagues:
+            continue
+        dcol = sd.log_strings["date"]
+        gl = sd.gamelog.copy()
+        gl[dcol] = pd.to_datetime(gl[dcol])
+        league_data[league] = {
+            "comp_pairs": sd._comp_pairs() if league in _COMP_PAIR_LEAGUES else empty_pairs,
+            "gamelog": gl[gl[dcol] >= cutoff],
+            "cols": sd.log_strings,
+            "volume_stat": _VOLUME_STAT.get(league, ""),
+        }
+    return build_offer_details(
+        snapshot_offers, league_data, importances, exclude=frozenset(), today=today
+    )
 
 
 @click.command()
@@ -119,7 +185,8 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     all_offers: list[pd.DataFrame] = []
     parlay_df = pd.DataFrame()
     platforms_run: list[str] = []
-    scored_ud: pd.DataFrame | None = None
+    corr_sink: list[dict] = []
+    story_sink: list = []
 
     try:
         ud_dict = get_ud()
@@ -129,11 +196,10 @@ def main(progress, legacy_correlation, contest_variant, log_level):
             stats,
             contest_variant=contest_variant,
             legacy=legacy_correlation,
+            corr_sink=corr_sink,
+            story_sink=story_sink,
         )
         parlay_df = pd.concat([parlay_df, ud5])
-        # Capture the raw scored frame (pre Market-remap / Boost-rescale) for the
-        # Pick'em snapshot — find_correlation expects the process_offers shape.
-        scored_ud = ud_offers.copy()
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
         ud_offers["Stat"] = ud_offers[
             "Market"
@@ -159,6 +225,8 @@ def main(progress, legacy_correlation, contest_variant, log_level):
             stats,
             contest_variant=contest_variant,
             legacy=legacy_correlation,
+            corr_sink=corr_sink,
+            story_sink=story_sink,
         )
         parlay_df = pd.concat([parlay_df, sl5])
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
@@ -182,12 +250,31 @@ def main(progress, legacy_correlation, contest_variant, log_level):
         parlay_df.reset_index(drop=True, inplace=True)
         parlay_df[["Legs", "Misses", "Profit"]] = np.nan
 
-    # Overwrite O/U percentage with raw game total from Archive
     if not snapshot_offers.empty and "O/U" in snapshot_offers.columns:
         snapshot_offers["O/U"] = snapshot_offers.apply(
             lambda r: archive.get_total(r["League"], r["Date"], r["Team"]) or r["O/U"],
             axis=1,
         )
+
+    if not snapshot_offers.empty:
+        key_cols = ["League", "Market", "Date", "Player"]
+        line_map = {
+            key: archive.get_line(*key)
+            for key in snapshot_offers[key_cols]
+            .drop_duplicates()
+            .itertuples(index=False, name=None)
+        }
+        snapshot_offers["Consensus Line"] = [
+            line_map[key] for key in snapshot_offers[key_cols].itertuples(index=False, name=None)
+        ]
+
+    snapshot_offers = attach_offer_why(snapshot_offers)
+    game_context = build_game_context(snapshot_offers, archive.default_totals)
+    parlay_df = attach_parlay_theses(
+        parlay_df, snapshot_offers, corr=corr_sink, context=game_context
+    )
+    game_stories = build_game_stories(story_sink, snapshot_offers, game_context, corr_sink)
+    offer_details = _offer_details_frame(snapshot_offers, stats)
 
     write_current_offers(
         snapshot_offers,
@@ -196,14 +283,16 @@ def main(progress, legacy_correlation, contest_variant, log_level):
         platforms_run,
         contest_variant=contest_variant,
     )
-
-    _write_pickem_snapshot(scored_ud, stats)
+    write_current_game_corr(corr_sink)
+    write_current_game_context(game_context)
+    write_current_game_stories(game_stories)
+    write_current_offer_details(offer_details)
 
     if not parlay_df.empty:
         old_parlays = read_parlay_hist()
         if not old_parlays.empty:
             combined = pd.concat([parlay_df, old_parlays], ignore_index=True).drop_duplicates(
-                subset=["Model EV", "Books EV"], ignore_index=True
+                subset=["Model EV", "Market EV"], ignore_index=True
             )
         else:
             combined = parlay_df
@@ -270,31 +359,6 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     write_history(history)
 
     logger.info("Success!")
-
-
-def _write_pickem_snapshot(scored_ud: pd.DataFrame | None, stats: dict) -> None:
-    """Build the Underdog Pick'em entries snapshot from already-scored offers.
-
-    Reuses prophecize's scored Underdog frame — no second scrape, no extra
-    archive lock — and writes ``current_pickem.parquet`` for the dashboard.
-    Guarded so a pickem failure never breaks the core run.
-    """
-    if scored_ud is None or scored_ud.empty:
-        return
-    try:
-        from sportstradamus.strategies._pickem_emit import entries_to_frame
-        from sportstradamus.strategies.underdog_pickem import (
-            REFERENCE_BANKROLL,
-            PickemConfig,
-            build_entries_from_scored,
-        )
-
-        entries = build_entries_from_scored(
-            datetime.date.today(), REFERENCE_BANKROLL, scored_ud, stats, PickemConfig()
-        )
-        write_current_pickem(entries_to_frame(entries))
-    except Exception:
-        logger.exception("Failed to build pickem snapshot")
 
 
 def _merge_prediction_row(history, new_df, idx):

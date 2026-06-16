@@ -33,8 +33,10 @@ SLEEPER_ALT_URL = "https://api.sleeper.app/lines/available_alt"
 SLEEPER_GAMES_URL = "https://api.sleeper.app/scores/lines_game_picker"
 SLEEPER_PLAYERS_URL = "https://api.sleeper.app/players/{league}?exclude_injury=false"
 
-# Team abbreviation corrections applied across both scrapers
-ABBR_MAP = {"WSH": "WAS", "GS": "GSW", "PHO": "PHX", "NOP": "NO", "AZ": "ARI"}
+# Team abbreviation corrections applied across both scrapers. PDX→POR makes Portland's
+# WNBA team match the NBA code (Sleeper uses the airport code PDX; PDX is unused
+# elsewhere, so the flat map is safe).
+ABBR_MAP = {"WSH": "WAS", "GS": "GSW", "PHO": "PHX", "NOP": "NO", "AZ": "ARI", "PDX": "POR"}
 
 _scraper: Scrape | None = None
 

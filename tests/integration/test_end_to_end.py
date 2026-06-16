@@ -186,14 +186,14 @@ def test_pipeline_smoke(
 
     monkeypatch.setattr(prediction_cli, "write_current_offers", stub_write_current_offers)
 
-    # Pick'em snapshot hook: stub the (network-bound) builder so the wiring is
-    # exercised without find_correlation, and capture the writer call.
-    pickem_snapshot_calls: list = []
-    monkeypatch.setattr(
-        "sportstradamus.strategies.underdog_pickem.build_entries_from_scored",
-        lambda *args, **kwargs: [],
-    )
-    monkeypatch.setattr(prediction_cli, "write_current_pickem", pickem_snapshot_calls.append)
+    game_corr_calls: list = []
+    monkeypatch.setattr(prediction_cli, "write_current_game_corr", game_corr_calls.append)
+
+    game_context_calls: list = []
+    monkeypatch.setattr(prediction_cli, "write_current_game_context", game_context_calls.append)
+
+    game_stories_calls: list = []
+    monkeypatch.setattr(prediction_cli, "write_current_game_stories", game_stories_calls.append)
 
     # Skip writing prediction history to data/history.dat.
     def _noop_write(_df):
@@ -217,17 +217,40 @@ def test_pipeline_smoke(
 
     # The parquet snapshot writer was reached but no real disk write fired.
     assert snapshot_calls, "write_current_offers was never invoked"
-    assert pickem_snapshot_calls, "write_current_pickem was never invoked"
 
     # The orchestration produced offers with EV and at least one parlay candidate.
     assert captured, "process_offers was never invoked"
     underdog_offers, _ = captured.get("Underdog", (pd.DataFrame(), pd.DataFrame()))
     assert len(underdog_offers) >= 10, f"expected >= 10 offers with EV, got {len(underdog_offers)}"
-    assert underdog_offers["Model EV"].notna().sum() >= 10, (
-        "fewer than 10 offers had a populated Model EV column"
+    assert underdog_offers["Projection"].notna().sum() >= 10, (
+        "fewer than 10 offers had a populated Projection column"
     )
     parlay_total = sum(len(p) for _, p in captured.values())
     assert parlay_total >= 1, "no parlay candidates were returned"
+
+    # The P2 narrative layer attached its columns and the corr-slice writer fired.
+    snapshot_offers = snapshot_calls[0]["offers"]
+    snapshot_parlays = snapshot_calls[0]["parlays"]
+    assert "Why" in snapshot_offers.columns, "attach_offer_why did not add the Why column"
+    assert "Position" in snapshot_offers.columns, "Position depth label did not flow to offers"
+    assert "Thesis" in snapshot_parlays.columns, "attach_parlay_theses did not add the Thesis column"
+    assert game_corr_calls, "write_current_game_corr was never invoked"
+
+    # Game context is built once and the same frame fed to the writer: one row per
+    # (League, Game, Date) with a classified shape.
+    assert game_context_calls, "write_current_game_context was never invoked"
+    context = game_context_calls[0]
+    assert not context.empty, "build_game_context produced no rows from the offers frame"
+    assert set(context["Game"]) == {"LVA/NYL", "PHX/SEA"}, f"unexpected games: {set(context['Game'])}"
+    assert context["shape"].notna().all(), "every game context row carries a classified shape"
+
+    # Story-menu writer fired with a column-stable frame. It is empty here: the
+    # stubbed process_offers populates no story_sink, so the generator yields no
+    # stories (story generation itself is covered by tests/golden/test_story_menu).
+    from sportstradamus.prediction.stories.menu import _STORY_COLS
+
+    assert game_stories_calls, "write_current_game_stories was never invoked"
+    assert list(game_stories_calls[0].columns) == _STORY_COLS
 
 
 # --- helpers --------------------------------------------------------------
@@ -276,14 +299,30 @@ _PLAYER_LINES = [
 ]
 
 
+# Team → implied win probability and half-total, so ``build_game_context`` has a
+# real ``Moneyline``/``O/U`` to classify shape from (LVA and SEA the favorites).
+_TEAM_CONTEXT = {
+    "LVA": (0.62, 86.0), "NYL": (0.38, 80.0),
+    "SEA": (0.55, 83.0), "PHX": (0.45, 81.0),
+}
+
+
 def _synthetic_offers() -> pd.DataFrame:
-    """Mirror the column contract that ``prediction/cli.py`` consumes."""
+    """Mirror the column contract that ``prediction/cli.py`` consumes.
+
+    Carries the post-``find_correlation`` columns the P2 narrative layer reads —
+    ``Game`` (canonical sorted key), ``O/U`` half-total, ``Moneyline`` win
+    probability, ``Position`` depth label, ``DVPOA`` — so ``build_game_context``
+    produces real context rows rather than the empty-frame fallback.
+    """
     rows = []
-    for player, team, opp, line, model_ev in _PLAYER_LINES:
+    for i, (player, team, opp, line, model_ev) in enumerate(_PLAYER_LINES):
+        win_prob, half_total = _TEAM_CONTEXT[team]
         rows.append(
             {
                 "League": "WNBA",
                 "Date": "2026-05-08",
+                "Game": "/".join(sorted([team, opp])),
                 "Team": team,
                 "Opponent": opp,
                 "Player": player,
@@ -291,13 +330,16 @@ def _synthetic_offers() -> pd.DataFrame:
                 "Line": line,
                 "Boost": 1.0,
                 "Bet": "Over",
-                "Model EV": model_ev,
+                "Projection": model_ev,
                 "Model Param": line,
-                "Books EV": line,
-                "Model P": 0.55,
-                "Books P": 0.50,
-                "Model": 1.05,
-                "Books": 1.0,
+                "Market Projection": line,
+                "Win Prob": 0.55,
+                "Market Prob": 0.50,
+                "Model EV": 1.05,
+                "Market EV": 1.0,
+                "O/U": half_total,
+                "Moneyline": win_prob,
+                "DVPOA": 0.06,
                 "Dist": "Gamma",
                 "CV": 1.0,
                 "Gate": 0,
@@ -305,7 +347,8 @@ def _synthetic_offers() -> pd.DataFrame:
                 "Disp Cal": 1.0,
                 "Step": 0.5,
                 "Player position": "G",
-                "K": 1.0,
+                "Position": f"G{i % 3 + 1}",
+                "Kelly": 1.0,
             }
         )
     return pd.DataFrame(rows)
@@ -321,7 +364,7 @@ def _synthetic_parlays(book: str) -> pd.DataFrame:
                 "Game": "LVA@NYL",
                 "Family": "WNBA-PTS",
                 "Model EV": 1.45,
-                "Books EV": 1.10,
+                "Market EV": 1.10,
                 "Rec Bet": 5.0,
                 "Fun": 0.8,
                 "P": 0.42,

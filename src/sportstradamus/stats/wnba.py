@@ -34,6 +34,7 @@ _WNBA_TEAM_ABBR_MAP = {
     "LV": "LVA",
     "PHO": "PHX",
     "WSH": "WAS",
+    "PDX": "POR",  # Portland — canonical POR (parity with the NBA), not the airport code
 }
 
 

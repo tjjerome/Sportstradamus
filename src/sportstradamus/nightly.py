@@ -23,6 +23,8 @@ from tqdm import tqdm
 
 from sportstradamus import clv, data
 from sportstradamus.analysis import (
+    _leg_market_map,
+    _resolve_leg,
     check_bet,
     compute_book_brier_skill_score,
     explode_offers,
@@ -34,8 +36,10 @@ from sportstradamus.helpers.io import (
     _atomic_write_parquet,
     read_history,
     read_parlay_hist,
+    read_user_slips,
     write_history,
     write_parlay_hist,
+    write_user_slips,
 )
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 
@@ -123,7 +127,7 @@ def _side_precision(group: pd.DataFrame, side: str) -> float:
 
 
 def _top_decile_mae(group: pd.DataFrame) -> float:
-    """MAE of |Model EV - Actual| on the top-decile offers by Line.
+    """MAE of |Projection - Actual| on the top-decile offers by Line.
 
     Buckets by Line (no Stats loading at reflect time per Stage 0 locked
     decision #17 — the heavy MeanYr lookup lives in compression_eval's
@@ -136,7 +140,7 @@ def _top_decile_mae(group: pd.DataFrame) -> float:
     top = group[group["Line"] >= threshold]
     if top.empty:
         return float("nan")
-    return float((top["Model EV"] - top["Actual"]).abs().mean())
+    return float((top["Projection"] - top["Actual"]).abs().mean())
 
 
 def _profit_sim_yield(group: pd.DataFrame) -> float:
@@ -151,7 +155,7 @@ def _profit_sim_yield(group: pd.DataFrame) -> float:
     n = len(group)
     if n == 0:
         return float("nan")
-    books_p = group["Books P"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
+    books_p = group["Market Prob"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
     boost = group["Boost"].fillna(1.0).to_numpy()
     hit = group["Hit"].fillna(0).to_numpy()
     is_over = (group["Bet"] == "Over").to_numpy()
@@ -173,11 +177,11 @@ def _profit_sim_kelly_yield(group: pd.DataFrame) -> float:
     n = len(group)
     if n == 0:
         return float("nan")
-    books_p = group["Books P"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
+    books_p = group["Market Prob"].clip(_BOOKS_P_CLIP, 1 - _BOOKS_P_CLIP).to_numpy()
     boost = group["Boost"].fillna(1.0).to_numpy()
     hit = group["Hit"].fillna(0).to_numpy()
     is_over = (group["Bet"] == "Over").to_numpy()
-    model_p = group["Model P"].clip(_BOOKS_P_CLIP, 1.0 - _BOOKS_P_CLIP).to_numpy()
+    model_p = group["Win Prob"].clip(_BOOKS_P_CLIP, 1.0 - _BOOKS_P_CLIP).to_numpy()
     decimal_odds = np.where(is_over, boost / books_p, boost / (1 - books_p))
     b = decimal_odds - 1.0
     # b <= 0 ⇒ even-money or worse — Kelly always returns 0; skip those bets.
@@ -328,7 +332,8 @@ def run(league, skip_update, history_only, log_level):
     stats = _load_league_stats(league, skip_update)
     history, n_resolved_hist = _resolve_and_clv_history(stats)
     n_resolved_parl = _resolve_parlays(stats, history_only)
-    _write_resolve_meta(history, n_resolved_hist, n_resolved_parl)
+    n_resolved_slips = _resolve_user_slips(stats, history_only)
+    _write_resolve_meta(history, n_resolved_hist, n_resolved_parl, n_resolved_slips)
 
     metrics = _compute_live_metrics(history)
     _atomic_write_parquet(metrics, LIVE_METRICS_PATH)
@@ -438,11 +443,93 @@ def _resolve_parlays(stats, history_only):
     return n_resolved_parl
 
 
-def _write_resolve_meta(history, n_resolved_hist, n_resolved_parl):
+# Flex / Sleeper slips still cash with up to this many missed legs (partial tier).
+_FLEX_MAX_MISS = 2
+
+
+def _resolve_user_slips(stats, history_only):
+    """Grade pending dashboard-built slips against final game logs.
+
+    Mirrors :func:`_resolve_parlays` but resolves each leg against its own
+    league/game/date (a slip may span games), so it reuses the per-leg
+    ``analysis._resolve_leg`` rather than the single-game ``check_bet``.
+    """
+    if history_only:
+        return 0
+    slips = read_user_slips()
+    if slips.empty or "status" not in slips.columns:
+        return 0
+    pending = slips.loc[slips["status"] == "pending"]
+    if pending.empty:
+        return 0
+    stat_map = json.loads((pkg_resources.files(data) / "config" / "stat_map.json").read_text())
+    graded = 0
+    for idx, row in pending.iterrows():
+        outcome = _grade_slip(row, stats, stat_map)
+        if outcome is None:
+            continue
+        for col, value in outcome.items():
+            slips.loc[idx, col] = value
+        graded += 1
+    if graded:
+        write_user_slips(slips)
+    logger.info(f"User slips: graded {graded} / {len(pending)} pending")
+    return graded
+
+
+def _grade_slip(row, stats, stat_map):
+    """Resolve one slip; return the writeback dict, or ``None`` while a game is unplayed."""
+    per_leg = []
+    for leg in json.loads(row["legs"]):
+        league = leg["league"]
+        if league not in stats:
+            return None
+        stat_obj = stats[league]
+        ls = stat_obj.log_strings
+        game_rows = _gameday_rows_for(stat_obj.gamelog, ls, leg["date"], leg["game"])
+        if game_rows.empty:
+            return None
+        new_map = _leg_market_map(league, row["platform"], stat_map)
+        per_leg.append(_resolve_leg(game_rows, ls, new_map, leg["desc"]))
+    hits = sum(1 for o in per_leg if o == 0)
+    effective = sum(1 for o in per_leg if o is not None)
+    status = _slip_status(row["play_type"], hits, effective)
+    realized = {"won": float(row["payout_multiplier"]), "push": 1.0, "lost": 0.0}.get(
+        status, np.nan
+    )
+    return {
+        "status": status,
+        "legs_hit": hits,
+        "result": json.dumps(per_leg),
+        "payout_realized": realized,
+        "graded_at": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
+
+
+def _gameday_rows_for(gamelog, ls, date, game):
+    """Gamelog rows for a leg's game on its date (mirrors analysis._bet_gameday_rows)."""
+    game_dates = pd.to_datetime(gamelog[ls["date"]]).dt.date
+    leg_date = pd.to_datetime(date).date()
+    return gamelog.loc[(game_dates == leg_date) & (gamelog[ls["team"]].isin(str(game).split("/")))]
+
+
+def _slip_status(play_type, hits, effective):
+    """Slip outcome from hits: Power all-or-nothing, Flex/Sleeper partial-cash."""
+    if effective == 0:
+        return "push"
+    if hits == effective:
+        return "won"
+    if play_type in ("Flex", "Sleeper") and hits >= 2 and effective - hits <= _FLEX_MAX_MISS:
+        return "partial"
+    return "lost"
+
+
+def _write_resolve_meta(history, n_resolved_hist, n_resolved_parl, n_resolved_slips):
     meta = {
         "last_run": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "history_resolved": n_resolved_hist,
         "parlays_resolved": n_resolved_parl,
+        "slips_resolved": n_resolved_slips,
         "history_total": len(history),
         "history_pending": int(history["Actual"].isna().sum()),
     }
@@ -452,5 +539,6 @@ def _write_resolve_meta(history, n_resolved_hist, n_resolved_parl):
     click.echo(
         f"Done. History: {n_resolved_hist} resolved. "
         f"Parlays: {n_resolved_parl} resolved. "
+        f"Slips: {n_resolved_slips} graded. "
         f"Last run: {meta['last_run']}"
     )

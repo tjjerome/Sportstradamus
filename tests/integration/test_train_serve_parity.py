@@ -80,15 +80,15 @@ def _blend(model_ev, decoded, line, books_ev):
     mp = importlib.import_module("sportstradamus.prediction.model_prob")
     offer_df = pd.DataFrame(
         {
-            "Model EV": model_ev,
-            "Books EV": books_ev,
+            "Projection": model_ev,
+            "Market Projection": books_ev,
             "Line": line,
             "Model R": np.asarray(decoded.r, dtype=float),
             "Model Gate": np.asarray(decoded.gate, dtype=float),
         }
     )
     base_mean = mp._blend_with_book(offer_df, "ZINB", model_weight=0.85, cv=0.566, hist_gate=0.337)
-    return offer_df["Model EV"].to_numpy(), np.asarray(base_mean, dtype=float)
+    return offer_df["Projection"].to_numpy(), np.asarray(base_mean, dtype=float)
 
 
 @pytest.mark.integration

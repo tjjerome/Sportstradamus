@@ -39,7 +39,7 @@ flowchart TD
     E --> F["distributions.get_odds<br/>CDF at line → P(over), P(under)"]
     F --> G["temperature scaling + dispersion_cal<br/>calibrated P(over), P(under)"]
     G --> H["EV per offer →<br/>correlation.find_correlation →<br/>parlay.beam_search_parlays"]
-    H --> I["persist.write_current_offers + write_current_pickem<br/>history.parquet / parlay_hist.parquet"]
+    H --> I["persist.write_current_offers<br/>history.parquet / parlay_hist.parquet"]
     I --> J["Streamlit dashboard<br/>reads the parquet snapshots"]
 
     style E fill:#f9d77e,stroke:#d4a017
