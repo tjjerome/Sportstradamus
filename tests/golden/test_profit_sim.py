@@ -62,15 +62,24 @@ def test_payout_underdog_minus_110():
     assert compute_payout(row) == pytest.approx(100 / 110)
 
 
-def test_payout_sleeper_returns_boost():
-    row = pd.Series({"Platform": "Sleeper", "Boost": 1.0})
-    assert compute_payout(row) == pytest.approx(1.0)
+def test_payout_sleeper_net_is_boost_minus_one():
+    # Sleeper Boost is a gross multiplier (stake returned with it); net profit
+    # per $1 is boost - 1. Boost=1.0 → 0.0 (push-equivalent), Boost=2.0 → 1.0.
+    assert compute_payout(pd.Series({"Platform": "Sleeper", "Boost": 1.0})) == pytest.approx(0.0)
+    assert compute_payout(pd.Series({"Platform": "Sleeper", "Boost": 2.0})) == pytest.approx(1.0)
 
 
 def test_payout_unknown_defaults_minus_110():
     row = pd.Series({"Platform": "DraftKings", "Boost": 2.0})
     # default branch applies -110 then multiplies by boost
     assert compute_payout(row) == pytest.approx((100 / 110) * 2.0)
+
+
+def test_payout_non_finite_boost_is_zero():
+    # Bug 3: an inf/NaN boost is unpriceable; compute_payout returns 0.0 (no
+    # edge) so the eligibility filter and the Kelly guard both drop the row.
+    assert compute_payout(pd.Series({"Platform": "Underdog", "Boost": np.inf})) == 0.0
+    assert compute_payout(pd.Series({"Platform": "Sleeper", "Boost": np.nan})) == 0.0
 
 
 # --------------------------------------------------------------------------- #
@@ -185,12 +194,11 @@ def test_kelly_sizing_caps_at_five_percent():
     assert result.iloc[0]["daily_pnl"] == pytest.approx(-50.0)
 
 
-def test_kelly_skips_minus_110_payout():
-    # Dashboard behavior preserved: payout = 100/110 ≤ 1 triggers the
-    # early-exit in the Kelly branch (the formula treats payout as net
-    # odds; with -110 net odds < 1, the sim skips the leg). simulate_kelly_all
-    # therefore needs payouts > 1 to bet — Phase 3 (S3) feeds Odds-derived
-    # payouts directly rather than the dashboard's exploded-history Boost.
+def test_kelly_bets_underdog_minus_110():
+    # Bug 2 fix: Payout is now NET (0.909 for -110), so the Kelly branch rebuilds
+    # decimal odds (net + 1 = 1.909) and bets the leg instead of skipping every
+    # Underdog row. p=0.7 → kelly_f = (0.7 * 1.909 - 1) / 0.909 ≈ 0.370, capped at
+    # 0.05 → stake 50; win settles +50 * 0.909.
     df = _make_offers(n_days=1, hit_pattern=[True])
     result = simulate_strategy(
         df,
@@ -204,16 +212,16 @@ def test_kelly_skips_minus_110_payout():
         initial_bankroll=1000.0,
         n_mc=1,
     )
-    assert result.iloc[0]["bankroll"] == pytest.approx(1000.0)
-    assert result.iloc[0]["daily_pnl"] == pytest.approx(0.0)
+    assert result.iloc[0]["daily_pnl"] == pytest.approx(50.0 * (100 / 110))
+    assert result.iloc[0]["bankroll"] == pytest.approx(1000.0 + 50.0 * (100 / 110))
 
 
-def test_kelly_skips_payout_le_one():
-    # If Payout <= 1, Kelly skips the bet entirely (avoids divide-by-zero
-    # on b = payout - 1).
+def test_kelly_skips_zero_net_edge():
+    # Sleeper Boost=1.0 → net payout 0.0 → no edge; the Kelly branch skips it
+    # (guards net <= 0, which also avoids divide-by-zero on decimal - 1 = net).
     df = _make_offers(n_days=1, hit_pattern=[True])
     df.loc[0, "Platform"] = "Sleeper"
-    df.loc[0, "Boost"] = 1.0  # Sleeper Boost=1 → Payout=1, skip
+    df.loc[0, "Boost"] = 1.0  # Sleeper Boost=1 → net 0.0, skip
     result = simulate_strategy(
         df,
         prob_col="Win Prob",
@@ -310,6 +318,136 @@ def test_caller_rng_overrides_default_seed():
         rng=np.random.default_rng(123),
     )
     pd.testing.assert_frame_equal(r1, r2)
+
+
+# --------------------------------------------------------------------------- #
+# payout/Kelly bug fixes + staking params
+
+
+def test_sleeper_win_settles_net_not_gross():
+    # Bug 1: a winning Sleeper bet adds net (boost - 1), not gross boost. Boost=2,
+    # flat 10% of 1000 = 100 stake, win → +100 * (2 - 1) = +100 → 1100 (the old
+    # gross-as-net bug added 100 * 2 = +200 → 1200).
+    df = _make_offers(n_days=1, hit_pattern=[True])
+    df.loc[0, "Platform"] = "Sleeper"
+    df.loc[0, "Boost"] = 2.0
+    result = simulate_strategy(
+        df,
+        prob_col="Win Prob",
+        ranking="Kelly",
+        min_model_p=0.5,
+        min_books_p=0.0,
+        max_bets_day=10,
+        sizing_pct=10.0,
+        use_kelly=False,
+        initial_bankroll=1000.0,
+        n_mc=1,
+    )
+    assert result.iloc[0]["bankroll"] == pytest.approx(1100.0)
+
+
+def test_non_finite_boost_row_excluded():
+    # Bug 3: an inf boost is unpriceable; the eligibility filter drops it before
+    # the sim. The sole row has inf boost → no eligible bets → empty result.
+    df = _make_offers(n_days=1, hit_pattern=[True])
+    df.loc[0, "Boost"] = np.inf
+    result = simulate_strategy(
+        df,
+        prob_col="Win Prob",
+        ranking="Kelly",
+        min_model_p=0.5,
+        min_books_p=0.0,
+        max_bets_day=10,
+        sizing_pct=10.0,
+        use_kelly=False,
+        initial_bankroll=1000.0,
+        n_mc=1,
+    )
+    assert result.empty
+
+
+def _flat_common() -> dict:
+    return {
+        "prob_col": "Win Prob",
+        "ranking": "Kelly",
+        "min_model_p": 0.5,
+        "min_books_p": 0.0,
+        "max_bets_day": 10,
+        "sizing_pct": 10.0,
+        "use_kelly": False,
+        "initial_bankroll": 1000.0,
+        "n_mc": 1,
+    }
+
+
+def test_staking_defaults_preserve_flat_behavior():
+    # New staking knobs default to current behavior — passing the defaults
+    # explicitly matches omitting them.
+    df = _make_offers(n_days=3, hit_pattern=[True, False, True])
+    base = simulate_strategy(df, **_flat_common())
+    explicit = simulate_strategy(
+        df, **_flat_common(), flat_off_initial=False, daily_exposure_cap=None, kelly_fraction=1.0
+    )
+    pd.testing.assert_frame_equal(base, explicit)
+
+
+def test_flat_off_initial_sizes_off_starting_bankroll():
+    # flat_off_initial sizes every flat bet off the initial bankroll, not the
+    # compounding current one — so a day-2 win stakes the same as day-1 despite
+    # the day-1 win having lifted the bankroll.
+    df = _make_offers(n_days=2, hit_pattern=[True, True])
+    off_init = simulate_strategy(df, **_flat_common(), flat_off_initial=True)
+    payout = 100 / 110
+    assert off_init.iloc[0]["daily_pnl"] == pytest.approx(100.0 * payout)
+    assert off_init.iloc[1]["daily_pnl"] == pytest.approx(100.0 * payout)
+
+
+def test_kelly_fraction_reduces_stake():
+    # Half-Kelly stakes (and so wins) exactly half of full Kelly when the raw
+    # fraction is below the 5% cap (p=0.54 on -110 → kelly_f ≈ 0.034 < 0.05).
+    df = _make_offers(n_days=1, hit_pattern=[True])
+    df.loc[0, "Win Prob"] = 0.54
+    common = {
+        "prob_col": "Win Prob",
+        "ranking": "Kelly",
+        "min_model_p": 0.0,
+        "min_books_p": 0.0,
+        "max_bets_day": 10,
+        "sizing_pct": 0.0,
+        "use_kelly": True,
+        "initial_bankroll": 1000.0,
+        "n_mc": 1,
+    }
+    full = simulate_strategy(df, **common, kelly_fraction=1.0)
+    half = simulate_strategy(df, **common, kelly_fraction=0.5)
+    assert half.iloc[0]["daily_pnl"] == pytest.approx(full.iloc[0]["daily_pnl"] * 0.5)
+
+
+def test_daily_exposure_cap_bounds_total_stake():
+    # Two finite UD bets same day, flat 10% each = 200 total; a 5%-of-1000 cap
+    # (= 50) bounds the day's wagered to 50 (first funded, rest clipped/broken).
+    same_day = pd.Timestamp("2026-01-01").date()
+    df = pd.DataFrame(
+        [
+            {
+                "Player": p,
+                "Market": "points",
+                "Platform": "Underdog",
+                "Boost": 1.0,
+                "Win Prob": 0.7,
+                "Model EV": 0.7,
+                "Kelly": 0.05,
+                "Market EV": 0.55,
+                "Hit": False,
+                "_date": same_day,
+            }
+            for p in ("A", "B")
+        ]
+    )
+    uncapped = simulate_strategy(df, **_flat_common())
+    capped = simulate_strategy(df, **_flat_common(), daily_exposure_cap=0.05)
+    assert uncapped.iloc[0]["daily_pnl"] == pytest.approx(-200.0)
+    assert capped.iloc[0]["daily_pnl"] == pytest.approx(-50.0)
 
 
 # --------------------------------------------------------------------------- #

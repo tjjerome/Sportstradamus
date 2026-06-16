@@ -1686,11 +1686,13 @@ def _test_set_to_bet_frame(df: pd.DataFrame, pred_col: str) -> pd.DataFrame:
 
     For each event the model picks the **EV side** (``over`` if ``pred >= Line`` else
     ``under``). The bet's ``Model P`` is the model's probability on that side;
-    ``Boost`` is the decimal-odds payout ``1 / clip(book_p)`` so
-    :func:`sportstradamus.strategies.profit_sim.compute_payout` (under
-    ``Platform="Sleeper"``, which returns ``boost``) yields a payout > 1 and the
-    sim's Kelly branch doesn't early-exit. Synthetic monotonic dates make each
-    event its own "day" so the resulting return series has per-event resolution.
+    ``Boost`` is the decimal-odds payout ``1 / clip(book_p)`` and
+    ``Platform="Sleeper"`` makes
+    :func:`sportstradamus.strategies.profit_sim.compute_payout` return the net
+    ``boost - 1``; the sim's Kelly branch rebuilds decimal odds as ``net + 1`` (so
+    the fraction is unchanged) and settles winners at net, giving each event a
+    well-defined Kelly stake and return. Synthetic monotonic dates make each event
+    its own "day" so the resulting return series has per-event resolution.
     Returns an empty frame when ``Odds`` / ``P`` / ``Line`` are absent.
     """
     if _calibration_inputs(df) is None or "Odds" not in df.columns:
