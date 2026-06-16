@@ -1,22 +1,27 @@
-"""Regression pin for the ``pages/6_…_Stats_Profit_Sim.py`` summary-table block.
+"""Regression pin for the profit-sim summary-table block.
 
-The page shipped two latent ``NameError``s in this block: ``range(N_MONTE_CARLO)``
-(only ``N_MONTE_CARLO_DEFAULT`` is imported) and a ``summary[...]`` dict that was
-never built (a stale ``summarize_runs`` extraction left the inline computation
-dead and the dict reference dangling). Compile / import / the archive-lock test
-all passed — only an actual Streamlit run hit the error — so this slices the
-block out of the page source and exec's it with a stub ``summarize_runs`` to pin
-that it runs and formats every column.
+The block shipped two latent ``NameError``s once (``range(N_MONTE_CARLO)`` and a
+``summary[...]`` dict that was never built). Compile / import / the archive-lock test all
+passed — only an actual Streamlit run hit the error — so this slices the
+``summary_rows`` → ``summary_df`` block out of the source and exec's it with a stub
+``summarize_runs`` to pin that it runs and formats every column.
+
+The block now lives in ``components/profit_sim.py:_render_summary_table`` (P7 folded the
+standalone Profit Sim page into Receipts); the slice is dedented to module level before exec.
 """
 
 import pathlib
+import textwrap
 
 import pandas as pd
 
-_PAGE = next(
-    (pathlib.Path(__file__).resolve().parents[2] / "src" / "sportstradamus" / "pages").glob(
-        "6_*Stats_Profit_Sim.py"
-    )
+_COMPONENT = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "src"
+    / "sportstradamus"
+    / "dashboard"
+    / "components"
+    / "profit_sim.py"
 )
 
 _FAKE_SUMMARY = {
@@ -29,16 +34,17 @@ _FAKE_SUMMARY = {
 
 
 def test_summary_table_block_builds_rows_via_summarize_runs() -> None:
-    src = _PAGE.read_text(encoding="utf-8")
-    start = src.index("summary_rows = []")
-    end = src.index("\nst.dataframe(summary_df")
+    src = _COMPONENT.read_text(encoding="utf-8")
+    start = src.rindex("\n", 0, src.index("summary_rows = []")) + 1
+    end = src.index("\n", src.index("summary_df = pd.DataFrame(summary_rows)")) + 1
+    block = textwrap.dedent(src[start:end])
     ns = {
         "pd": pd,
         "all_results": {"Moderate": pd.DataFrame({"run": [0], "bankroll": [1234.0]})},
         "initial_bankroll": 1000,
         "summarize_runs": lambda result, initial_bankroll: _FAKE_SUMMARY,
     }
-    exec(compile(src[start:end], str(_PAGE), "exec"), ns)
+    exec(compile(block, str(_COMPONENT), "exec"), ns)
 
     df = ns["summary_df"]
     assert list(df["Strategy"]) == ["Moderate"]

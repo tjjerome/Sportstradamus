@@ -1,4 +1,4 @@
-"""Characterization pin for ``dashboard_data._extract_platforms``.
+"""Characterization pin for ``dashboard.data._extract_platforms``.
 
 Pins the unique-platform extraction before the nesting-sweep flatten: the
 normalized ``Offers`` path (per-offer tuple slot 2, skipping non-list entries,
@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from sportstradamus.dashboard_data import _extract_platforms
+from sportstradamus.dashboard.data import _extract_platforms
 
 
 def test_extract_platforms_from_offers():

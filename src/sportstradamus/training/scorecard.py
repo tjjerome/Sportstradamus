@@ -1544,10 +1544,10 @@ def _test_set_to_bet_frame(df: pd.DataFrame, pred_col: str) -> pd.DataFrame:
             "Market": "supersede",
             "Platform": "Sleeper",
             "Boost": payout_decimal,
-            "Model P": p_model,
-            "Model": p_model,
-            "K": p_model * payout_decimal,
-            "Books": 1.0,
+            "Win Prob": p_model,
+            "Model EV": p_model,
+            "Kelly": p_model * payout_decimal,
+            "Market EV": 1.0,
             "Hit": hit,
             "_date": dates,
         }
@@ -1627,10 +1627,10 @@ def _supersede_paired_sharpe(
     if b_bets.empty or c_bets.empty:
         return None
     b_sim = simulate_kelly_all(
-        b_bets, prob_col="Model P", initial_bankroll=_SUPERSEDE_S3_INITIAL_BANKROLL
+        b_bets, prob_col="Win Prob", initial_bankroll=_SUPERSEDE_S3_INITIAL_BANKROLL
     )
     c_sim = simulate_kelly_all(
-        c_bets, prob_col="Model P", initial_bankroll=_SUPERSEDE_S3_INITIAL_BANKROLL
+        c_bets, prob_col="Win Prob", initial_bankroll=_SUPERSEDE_S3_INITIAL_BANKROLL
     )
     b_returns = extract_sim_returns(b_sim, _SUPERSEDE_S3_INITIAL_BANKROLL)
     c_returns = extract_sim_returns(c_sim, _SUPERSEDE_S3_INITIAL_BANKROLL)
@@ -1819,8 +1819,8 @@ def _history_to_eval_frame(
         return pd.DataFrame(columns=list(_LIVE_EVAL_COLUMNS))
 
     over_mask = subset["Bet"].eq("Over").to_numpy()
-    model_p = subset["Model P"].to_numpy()
-    books_p = subset["Books P"].to_numpy()
+    model_p = subset["Win Prob"].to_numpy()
+    books_p = subset["Market Prob"].to_numpy()
     out = pd.DataFrame(
         {
             "MeanYr": [
@@ -1828,7 +1828,7 @@ def _history_to_eval_frame(
                 for player, date in zip(subset["Player"], subset["_date"], strict=False)
             ],
             "Result": subset["Actual"].astype(float).to_numpy(),
-            "EV": subset["Model EV"].astype(float).to_numpy(),
+            "EV": subset["Projection"].astype(float).to_numpy(),
             "P": np.where(over_mask, model_p, 1.0 - model_p),
             "Odds": np.where(over_mask, 1.0 - books_p, books_p),
             "Line": subset["Line"].astype(float).to_numpy(),

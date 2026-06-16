@@ -80,7 +80,7 @@ def test_legacy_pickle_decodes_through_ratio_path_bit_identical():
     )
 
     # Bitwise equality vs. legacy formula.
-    np.testing.assert_array_equal(out["Model EV"].to_numpy(), expected_ev)
+    np.testing.assert_array_equal(out["Projection"].to_numpy(), expected_ev)
     np.testing.assert_array_equal(out["Model Sigma"].to_numpy(), expected_sigma)
     np.testing.assert_array_equal(out["Model Skew"].to_numpy(), expected_skew)
     # Gate stays off when hist_gate <= publish threshold.
@@ -103,7 +103,7 @@ def test_ratio_path_uses_meanyr_nonzero_when_hist_gate_exceeds_threshold():
         target_normalization="ratio_meanyr",
     )
 
-    np.testing.assert_array_equal(out["Model EV"].to_numpy(), expected_ev)
+    np.testing.assert_array_equal(out["Projection"].to_numpy(), expected_ev)
     np.testing.assert_array_equal(out["Model Gate"].to_numpy(), np.full(len(X), hist_gate))
 
 
@@ -140,12 +140,12 @@ def test_centered_additive_decodes_through_eb_offset_path():
         target_normalization="centered_additive_eb_meanyr_k10",
     )
 
-    np.testing.assert_allclose(out["Model EV"].to_numpy(), expected_ev, atol=1e-12)
+    np.testing.assert_allclose(out["Projection"].to_numpy(), expected_ev, atol=1e-12)
     # Centered scale stays in absolute residual units — NOT × MeanYr.
     np.testing.assert_array_equal(out["Model Sigma"].to_numpy(), scale)
     # And critically: NOT equal to the ratio decode (which would be loc * MeanYr).
     meanyr_clipped = X["MeanYr"].clip(lower=_MEANYR_FLOOR).to_numpy()
-    assert not np.allclose(out["Model EV"].to_numpy(), loc * meanyr_clipped)
+    assert not np.allclose(out["Projection"].to_numpy(), loc * meanyr_clipped)
 
 
 def test_centered_additive_model_skew_is_finite():
@@ -176,7 +176,7 @@ def test_centered_additive_model_skew_is_finite():
         "Model Skew must be finite for every row — see "
         "docs/OVERCONFIDENCE_INVESTIGATION.md §3.4 (FGA NaN dead end)."
     )
-    assert np.all(np.isfinite(out["Model EV"].to_numpy()))
+    assert np.all(np.isfinite(out["Projection"].to_numpy()))
     assert np.all(np.isfinite(out["Model Sigma"].to_numpy()))
 
 
@@ -195,7 +195,7 @@ def test_ratio_path_model_skew_is_finite():
     )
 
     assert np.all(np.isfinite(out["Model Skew"].to_numpy()))
-    assert np.all(np.isfinite(out["Model EV"].to_numpy()))
+    assert np.all(np.isfinite(out["Projection"].to_numpy()))
     assert np.all(np.isfinite(out["Model Sigma"].to_numpy()))
 
 
@@ -227,4 +227,4 @@ def test_meanyr_floor_applied_in_ratio_path():
     )
 
     # loc=1 -> Model EV == MeanYr_clipped. First three should hit the 0.5 floor.
-    np.testing.assert_array_equal(out["Model EV"].to_numpy(), np.array([0.5, 0.5, 0.5, 10.0]))
+    np.testing.assert_array_equal(out["Projection"].to_numpy(), np.array([0.5, 0.5, 0.5, 10.0]))

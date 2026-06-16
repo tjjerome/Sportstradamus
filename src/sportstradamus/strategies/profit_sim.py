@@ -20,11 +20,11 @@ Public surface:
   ``{mean_final, roi, max_drawdown, sharpe, win_rate}``.
 
 Input DataFrame contract (from
-:func:`sportstradamus.dashboard_data.get_filtered_history`):
+:func:`sportstradamus.dashboard.data.get_filtered_history`):
 the exploded per-offer frame, indexed by row, with columns
-``Player, Market, Platform, Boost, Model P, Books, Hit`` plus the
-``ranking`` column (``K`` / ``Model P`` / ``Model``) and the caller's
-``prob_col`` (defaults to ``Model P`` in the dashboard). A ``_date``
+``Player, Market, Platform, Boost, Win Prob, Market EV, Hit`` plus the
+``ranking`` column (``Kelly`` / ``Win Prob`` / ``Model EV``) and the caller's
+``prob_col`` (defaults to ``Win Prob`` in the dashboard). A ``_date``
 column is materialized inside the simulator from ``Date`` if absent.
 """
 
@@ -52,12 +52,11 @@ _KELLY_ALL_MAX_BETS_DAY: int = 10_000_000
 # Underdog / default sportsbook -110 vig (100/110 payout per dollar staked).
 _DEFAULT_AMERICAN_MINUS_110_PAYOUT: float = 100.0 / 110.0
 
-# Ranking column mapping — translates the user-facing ranking label into the
-# exploded-frame column name the simulator sorts on.
+# Translates the user-facing ranking label into the exploded-frame column name.
 RANKING_MAP: dict[str, str] = {
-    "Kelly": "K",
-    "Probability": "Model P",
-    "EV": "Model",
+    "Kelly": "Kelly",
+    "Probability": "Win Prob",
+    "EV": "Model EV",
 }
 
 
@@ -91,20 +90,30 @@ def simulate_strategy(
 ) -> pd.DataFrame:
     """Monte-Carlo backtest a filter-and-rank strategy on exploded offers.
 
-    Filters ``df`` to rows with ``prob_col >= min_model_p`` and
-    ``Books >= min_books_p``, then for each MC run walks the date axis and
-    on each date picks at most ``max_bets_day`` bets via probability-
-    weighted sampling (when more eligible than the cap) or by deduplicating
-    on the base player (when at or below the cap). Bets are sized as
-    fixed-percent of bankroll or Kelly (capped at 5%) per ``use_kelly``.
+    Filters ``df`` to rows with ``prob_col >= min_model_p``,
+    ``Market EV >= min_books_p``, and a finite ranking value — NaN and ±inf
+    both poison the normalized sampling weights (``inf / inf = NaN``), so a
+    row that cannot be ranked is excluded up front. Then for each MC run
+    walks the date axis and on each date picks at most ``max_bets_day``
+    bets via probability-weighted sampling (when more eligible than the
+    cap) or by deduplicating on the base player (when at or below the cap).
+    Bets are sized as fixed-percent of bankroll or Kelly (capped at 5%)
+    per ``use_kelly``.
 
     Returns a long-format DataFrame ``[date, run, bankroll, daily_pnl]``,
     one row per (date, run). Empty input or no eligible rows return an
     empty DataFrame.
     """
-    rank_col = RANKING_MAP.get(ranking, "K")
+    if df.empty:
+        return pd.DataFrame()
 
-    eligible = df.loc[(df[prob_col] >= min_model_p) & (df["Books"].fillna(0) >= min_books_p)].copy()
+    rank_col = RANKING_MAP.get(ranking, "Kelly")
+
+    eligible = df.loc[
+        (df[prob_col] >= min_model_p)
+        & (df["Market EV"].fillna(0) >= min_books_p)
+        & np.isfinite(df[rank_col])
+    ].copy()
     if eligible.empty:
         return pd.DataFrame()
 

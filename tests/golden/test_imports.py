@@ -20,10 +20,12 @@ CORE_MODULES = [
     "sportstradamus.moneylines",
     "sportstradamus.training",
     "sportstradamus.prediction",
+    "sportstradamus.prediction.stories",
     "sportstradamus.nightly",
     "sportstradamus.dashboard",
-    "sportstradamus.dashboard_app",
-    "sportstradamus.dashboard_data",
+    "sportstradamus.dashboard.data",
+    "sportstradamus.dashboard.legs",
+    "sportstradamus.dashboard.components.deep_dive",
     "sportstradamus.analysis",
 ]
 

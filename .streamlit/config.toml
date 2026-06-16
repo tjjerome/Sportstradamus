@@ -1,6 +1,9 @@
 # Sportstradamus dashboard theme — the machine-enforced half of the design system.
-# This file is the single source of truth for the visual identity; DESIGN.md mirrors
-# these tokens in human-readable form and states the do/don't rules. Edit them together.
+# This file mirrors the tokens Streamlit's [theme] block understands; DESIGN.md states
+# the rules. Tokens Streamlit has no key for — the celestial gold accent #C9A227, the
+# display-only faces (Cinzel / Cormorant Garamond via .celestial-* classes), the
+# ambient-image rules — are mirrored in sportstradamus/dashboard/theme.py instead
+# (DESIGN.md §2). Edit DESIGN.md and the relevant mirror together.
 # Verified against the Streamlit 1.58 theming reference.
 
 [theme]
