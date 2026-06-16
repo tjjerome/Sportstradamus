@@ -23,12 +23,16 @@ from sportstradamus.analysis import (
     worst_month,
 )
 from sportstradamus.dashboard.components.grid import render_themed_grid
-from sportstradamus.dashboard.components.profit_sim import render_profit_sim
+from sportstradamus.dashboard.components.profit_sim import (
+    render_profit_sim,
+    render_profit_sim_summary,
+)
 from sportstradamus.dashboard.data import (
     filtered_history_or_stop,
     format_ts,
     load_history,
     load_parlays,
+    load_profit_sim_summary,
     load_resolve_meta,
     load_user_slips,
     render_banner,
@@ -274,10 +278,10 @@ else:
         )
 
 st.subheader("Strategy simulator")
-if st.toggle("Run the Monte-Carlo strategy backtest", key="receipts_run_sim"):
+st.caption(
+    "If you'd staked the model's positive-edge bets under each strategy. Computed nightly — "
+    "ROI / Sharpe / drawdown / win-rate over each look-back window."
+)
+render_profit_sim_summary(load_profit_sim_summary())
+with st.expander("Customize & run a live backtest"):
     render_profit_sim(history)
-else:
-    st.caption(
-        "Off by default — toggle on to run the Monte-Carlo bankroll backtest across preset "
-        "and custom staking strategies (a few seconds of compute)."
-    )
