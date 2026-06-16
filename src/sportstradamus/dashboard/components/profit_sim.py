@@ -1,10 +1,11 @@
-"""Profit-simulation panel — preset and custom strategies with Monte Carlo.
+"""Profit-simulation panel — precomputed grid + an opt-in live Monte-Carlo backtest.
 
-Folded into the Receipts surface (``surfaces/receipts.py``) as an expander. Controls
-live inline (not on ``st.sidebar``, which the host page owns) so the panel embeds without
-colliding with the page's own filters. ``render_profit_sim(history)`` takes the raw
-prediction history and explodes it itself, keeping the sim independent of the Receipts
-sidebar slice exactly as the old standalone page was.
+Folded into the Receipts surface (``surfaces/receipts.py``). ``render_profit_sim_summary``
+shows the strategy x horizon grid ``reflect`` precomputed (instant, no Monte-Carlo at page
+load — the owner's "do the MC in the nightly run, not at load time"). ``render_profit_sim``
+is the opt-in live run behind an expander: it re-simulates the same strategies over a custom
+bankroll / look-back / consensus-edge filter, with the bankroll fan chart and P&L. Controls
+live inline (not on ``st.sidebar``, which the host page owns).
 """
 
 from datetime import datetime, timedelta
@@ -15,64 +16,37 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from sportstradamus.analysis import PROFIT_SIM_STRATEGIES, filter_bet_universe
 from sportstradamus.dashboard.data import get_filtered_history, sport_filtered
 from sportstradamus.strategies.profit_sim import (
     N_MONTE_CARLO_DEFAULT,
-    RANKING_MAP,
     simulate_strategy,
     summarize_runs,
 )
 
-PRESETS = {
-    "Conservative": {
-        "min_model_p": 0.65,
-        "min_books_p": 0.52,
-        "max_bets_day": 5,
-        "sizing_pct": 1.0,
-        "use_kelly": False,
-        "ranking": "Kelly",
-    },
-    "Moderate": {
-        "min_model_p": 0.60,
-        "min_books_p": 0.52,
-        "max_bets_day": 10,
-        "sizing_pct": 1.0,
-        "use_kelly": False,
-        "ranking": "Kelly",
-    },
-    "Aggressive": {
-        "min_model_p": 0.55,
-        "min_books_p": 0.50,
-        "max_bets_day": 20,
-        "sizing_pct": 2.0,
-        "use_kelly": False,
-        "ranking": "EV",
-    },
-    "Kelly": {
-        "min_model_p": 0.58,
-        "min_books_p": 0.52,
-        "max_bets_day": 15,
-        "sizing_pct": 1.0,
-        "use_kelly": True,
-        "ranking": "Kelly",
-    },
-}
-
-# Strategy colors for the Monte Carlo chart — paired with PRESETS keys + "Custom".
-_STRATEGY_COLORS = {
-    "Conservative": "#3498db",
-    "Moderate": "#2ecc71",
-    "Aggressive": "#e74c3c",
-    "Kelly": "#9b59b6",
-    "Custom": "#f39c12",
-}
-
-_TIMEFRAMES = {
-    "All time": None,
-    "Last 30 days": 30,
+# Look-back windows (owner spec: 1w / 1m / 3m / 6m / 1y). Days match analysis.TIMEFRAMES,
+# whose raw labels key the precomputed grid; _HORIZON_LABELS maps those to these.
+_HORIZONS = {
+    "1 week": 7,
+    "1 month": 30,
     "3 months": 91,
     "6 months": 183,
     "1 year": 365,
+}
+_HORIZON_LABELS = {
+    "7d": "1 week",
+    "30d": "1 month",
+    "3m": "3 months",
+    "6m": "6 months",
+    "1y": "1 year",
+}
+
+# One distinct line color per strategy for the Monte-Carlo fan chart (brand gold leads).
+_STRATEGY_COLORS = {
+    "Flat · Conservative": "#4F86C6",
+    "Flat · Moderate": "#3FA796",
+    "Kelly · Conservative": "#C9A227",
+    "Kelly · Moderate": "#D98E04",
 }
 
 
@@ -80,6 +54,33 @@ def _band_fillcolor(hex_color: str) -> str:
     """10%-alpha rgba() for the percentile band; plotly rejects 8-digit hex."""
     r, g, b = (int(hex_color[i : i + 2], 16) for i in (1, 3, 5))
     return f"rgba({r},{g},{b},0.1)"
+
+
+def render_profit_sim_summary(summary: pd.DataFrame) -> None:
+    """Show the precomputed strategy grid for a chosen look-back — instant, no MC."""
+    if summary.empty:
+        st.caption("The strategy backtest runs nightly; no results yet.")
+        return
+    available = [h for h in _HORIZON_LABELS if h in set(summary["Horizon"])]
+    default = "3m" if "3m" in available else available[-1]
+    choice = st.selectbox(
+        "Look-back window",
+        available,
+        index=available.index(default),
+        format_func=lambda h: _HORIZON_LABELS[h],
+        key="receipts_sim_horizon",
+    )
+    grid = summary.loc[summary["Horizon"] == choice].sort_values("ROI", ascending=False)
+    display = pd.DataFrame(
+        {
+            "Strategy": grid["Strategy"],
+            "ROI": grid["ROI"].map("{:+.1%}".format),
+            "Sharpe": grid["Sharpe"].map("{:.2f}".format),
+            "Max Drawdown": grid["Max Drawdown"].map("{:.1%}".format),
+            "Win%": grid["Win%"].map("{:.1%}".format),
+        }
+    )
+    st.dataframe(display, width="stretch", hide_index=True)
 
 
 def _prepare_sim_frame(history: pd.DataFrame) -> tuple[pd.DataFrame, str]:
@@ -108,67 +109,44 @@ def _prepare_sim_frame(history: pd.DataFrame) -> tuple[pd.DataFrame, str]:
     return df, prob_col
 
 
-def _apply_sim_controls(df: pd.DataFrame) -> tuple[pd.DataFrame, int, dict]:
-    """Render the inline controls, apply timeframe/league/platform filters.
+def _apply_sim_controls(df: pd.DataFrame) -> tuple[pd.DataFrame, int, bool]:
+    """Render the inline controls, apply the look-back window + edge filter.
 
-    Returns ``(filtered_df, initial_bankroll, custom_params)``; the frame is empty (with
-    an ``st.info`` shown) when the timeframe slice removes everything.
+    Returns ``(filtered_df, initial_bankroll, compound)``; the frame is empty (with an
+    ``st.info`` shown) when the window or the edge filter removes everything.
     """
     c1, c2, c3 = st.columns(3)
-    tf_choice = c1.selectbox("Timeframe", list(_TIMEFRAMES), index=0, key="profit_timeframe")
+    horizon = c1.selectbox("Look-back window", list(_HORIZONS), index=1, key="profit_horizon")
     initial_bankroll = c2.number_input(
-        "Initial Bankroll ($)", value=1000, min_value=100, step=100, key="profit_bankroll"
+        "Initial bankroll ($)", value=1000, min_value=100, step=100, key="profit_bankroll"
     )
-    custom_range = c3.date_input("Or custom date range", value=(), key="profit_custom_range")
+    min_edge = c3.slider("Min consensus edge", 0.0, 0.10, 0.0, 0.01, key="profit_min_edge")
+    compound = st.toggle(
+        "Compound bankroll (size off current, not initial)", value=False, key="profit_compound"
+    )
 
-    tf_days = _TIMEFRAMES[tf_choice]
-    if tf_days is not None:
-        df = df.loc[df["_date"] >= datetime.today().date() - timedelta(days=tf_days)]
-    if len(custom_range) == 2:
-        df = df.loc[(df["_date"] >= custom_range[0]) & (df["_date"] <= custom_range[1])]
+    df = df.loc[df["_date"] >= datetime.today().date() - timedelta(days=_HORIZONS[horizon])]
+    df = filter_bet_universe(df, min_consensus_edge=min_edge)
     if df.empty:
-        st.info("No data for selected timeframe.")
-        return df, initial_bankroll, {}
-
-    leagues = sorted(df["League"].unique())
-    df = df.loc[
-        df["League"].isin(st.multiselect("Leagues", leagues, leagues, key="profit_leagues"))
-    ]
-    platforms = sorted(df["Platform"].unique())
-    df = df.loc[
-        df["Platform"].isin(
-            st.multiselect("Platforms", platforms, platforms, key="profit_platforms")
-        )
-    ]
-
-    with st.expander("Custom strategy"):
-        custom = {
-            "min_model_p": st.slider(
-                "Min Win Prob", 0.50, 0.80, 0.60, 0.01, key="profit_custom_min_p"
-            ),
-            "min_books_p": st.slider(
-                "Min Market Prob", 0.45, 0.60, 0.52, 0.01, key="profit_custom_min_books"
-            ),
-            "max_bets_day": st.slider("Max Bets/Day", 1, 50, 10, key="profit_custom_max_bets"),
-            "sizing_pct": st.slider("Bet Size (%)", 0.5, 5.0, 1.0, 0.5, key="profit_custom_sizing"),
-            "use_kelly": st.toggle("Kelly Sizing", value=False, key="profit_custom_kelly"),
-            "ranking": st.selectbox(
-                "Selection Ranking", list(RANKING_MAP), key="profit_custom_ranking"
-            ),
-        }
-    return df, initial_bankroll, custom
+        st.info("No positive-edge bets in this window.")
+    return df, int(initial_bankroll), compound
 
 
-def _run_strategies(df: pd.DataFrame, prob_col: str, initial_bankroll: int, custom: dict) -> dict:
-    """Run the preset strategies plus the custom one; drop those that match no bets."""
+def _run_strategies(
+    df: pd.DataFrame, prob_col: str, initial_bankroll: int, *, compound: bool
+) -> dict:
+    """Run every strategy over ``df``; flip flat staking to off-current when compounding."""
     all_results = {}
-    for name, params in {**PRESETS, "Custom": custom}.items():
+    for name, params in PROFIT_SIM_STRATEGIES.items():
+        call = dict(params)
+        if not call["use_kelly"]:
+            call["flat_off_initial"] = not compound
         result = simulate_strategy(
             df,
             prob_col=prob_col,
             initial_bankroll=initial_bankroll,
             n_mc=N_MONTE_CARLO_DEFAULT,
-            **params,
+            **call,
         )
         if not result.empty:
             all_results[name] = result
@@ -275,18 +253,18 @@ def _render_pnl_drawdown(all_results: dict) -> None:
 
 
 def render_profit_sim(history: pd.DataFrame) -> None:
-    """Render the Monte-Carlo strategy panel for ``history`` (raw prediction rows)."""
+    """Render the live Monte-Carlo strategy panel for ``history`` (raw prediction rows)."""
     df, prob_col = _prepare_sim_frame(history)
     if df.empty:
         return
-    df, initial_bankroll, custom = _apply_sim_controls(df)
+    df, initial_bankroll, compound = _apply_sim_controls(df)
     if df.empty:
         return
 
     with st.spinner("Running Monte Carlo simulations..."):
-        all_results = _run_strategies(df, prob_col, initial_bankroll, custom)
+        all_results = _run_strategies(df, prob_col, initial_bankroll, compound=compound)
     if not all_results:
-        st.info("No bets matched any strategy criteria.")
+        st.info("No bets matched any strategy.")
         return
 
     _render_bankroll_chart(all_results, initial_bankroll)

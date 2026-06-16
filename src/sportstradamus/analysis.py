@@ -21,6 +21,11 @@ from sportstradamus.history_schema import (
     OFFER_FIELDS,
     PREDICTION_LEVEL_COLS,
 )
+from sportstradamus.strategies.profit_sim import (
+    N_MONTE_CARLO_DEFAULT,
+    simulate_strategy,
+    summarize_runs,
+)
 
 LEG_PATTERN = re.compile(r"^(.+?)\s+(Over|Under)\s+([\d.]+)\s+(.+?)\s+-\s+[\d.]+%")
 
@@ -706,6 +711,128 @@ def record_grid(exploded, by: str) -> pd.DataFrame:
     grouped["Win%"] = grouped["wins"] / grouped["Bets"]
     grouped["ROI"] = grouped["Units"] / grouped["Bets"]
     return grouped.sort_values("Units", ascending=False)[cols].reset_index(drop=True)
+
+
+# Reference bankroll for the precomputed grid. ROI / Sharpe / drawdown / win-rate are
+# all bankroll-relative, so the absolute value only fixes the simulation's scale.
+PROFIT_SIM_INITIAL_BANKROLL = 1000.0
+
+# Bet selection shared by every strategy: positive model edge against the DFS payout.
+_PROFIT_SIM_BASE = {"ranking": "Kelly", "min_model_p": 0.0, "min_books_p": 0.0}
+
+# The four strategies the Receipts panel precomputes per horizon. Conservative caps the
+# day's exposure at 5%, Moderate at 10% (owner spec); Flat stakes a fixed percent off the
+# *initial* bankroll (no compounding), Kelly is fractional and capped per-leg by the engine.
+PROFIT_SIM_STRATEGIES: dict[str, dict] = {
+    "Flat · Conservative": {
+        **_PROFIT_SIM_BASE,
+        "max_bets_day": 5,
+        "sizing_pct": 1.0,
+        "use_kelly": False,
+        "flat_off_initial": True,
+        "daily_exposure_cap": 0.05,
+    },
+    "Flat · Moderate": {
+        **_PROFIT_SIM_BASE,
+        "max_bets_day": 10,
+        "sizing_pct": 2.0,
+        "use_kelly": False,
+        "flat_off_initial": True,
+        "daily_exposure_cap": 0.10,
+    },
+    "Kelly · Conservative": {
+        **_PROFIT_SIM_BASE,
+        "max_bets_day": 5,
+        "sizing_pct": 1.0,
+        "use_kelly": True,
+        "kelly_fraction": 0.25,
+        "daily_exposure_cap": 0.05,
+    },
+    "Kelly · Moderate": {
+        **_PROFIT_SIM_BASE,
+        "max_bets_day": 10,
+        "sizing_pct": 1.0,
+        "use_kelly": True,
+        "kelly_fraction": 0.50,
+        "daily_exposure_cap": 0.10,
+    },
+}
+
+_PROFIT_SIM_SUMMARY_COLS = ["Strategy", "Horizon", "ROI", "Sharpe", "Max Drawdown", "Win%"]
+
+
+def filter_bet_universe(exploded, *, min_consensus_edge: float = 0.0):
+    """Bets every strategy considers: positive model edge AND a soft-enough book.
+
+    Model Edge ``= Model EV - 1 > 0`` (the model likes it vs the DFS payout) and
+    Consensus Edge ``= Market EV - 1 > min_consensus_edge`` (the book also prices a
+    soft line). Both bounds are strict.
+    """
+    if exploded.empty:
+        return exploded
+    return exploded.loc[
+        (exploded["Model EV"] > 1.0) & (exploded["Market EV"] > 1.0 + min_consensus_edge)
+    ]
+
+
+def precompute_profit_sim_summary(
+    exploded,
+    *,
+    today=None,
+    n_mc: int = N_MONTE_CARLO_DEFAULT,
+    min_consensus_edge: float = 0.0,
+) -> pd.DataFrame:
+    """Monte-Carlo every strategy over every horizon; return the summary grid.
+
+    One row per ``(strategy, horizon)`` with ``ROI`` / ``Sharpe`` / ``Max Drawdown`` /
+    ``Win%``. Written nightly so the Receipts panel reads it instead of running the MC
+    at page load. A horizon with no in-window bets contributes no rows.
+    """
+    if exploded.empty:
+        return pd.DataFrame(columns=_PROFIT_SIM_SUMMARY_COLS)
+
+    df = exploded.copy()
+    if "Result" in df.columns:
+        df = df.dropna(subset=["Result"])
+        df = df.loc[df["Result"] != "Push"]
+    df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
+    df = df.loc[df["_date"].notna()]
+    universe = filter_bet_universe(df, min_consensus_edge=min_consensus_edge)
+    if universe.empty:
+        return pd.DataFrame(columns=_PROFIT_SIM_SUMMARY_COLS)
+
+    prob_col = (
+        "Win Prob"
+        if "Win Prob" in universe.columns and universe["Win Prob"].notna().any()
+        else "Model EV"
+    )
+    today = today or datetime.today().date()
+
+    rows = []
+    for hz_label, hz_days in TIMEFRAMES:
+        window = universe.loc[universe["_date"] >= today - timedelta(days=hz_days)]
+        if window.empty:
+            continue
+        for name, params in PROFIT_SIM_STRATEGIES.items():
+            sim = simulate_strategy(
+                window,
+                prob_col=prob_col,
+                initial_bankroll=PROFIT_SIM_INITIAL_BANKROLL,
+                n_mc=n_mc,
+                **params,
+            )
+            summary = summarize_runs(sim, PROFIT_SIM_INITIAL_BANKROLL)
+            rows.append(
+                {
+                    "Strategy": name,
+                    "Horizon": hz_label,
+                    "ROI": summary["roi"],
+                    "Sharpe": summary["sharpe"],
+                    "Max Drawdown": summary["max_drawdown"],
+                    "Win%": summary["win_rate"],
+                }
+            )
+    return pd.DataFrame(rows, columns=_PROFIT_SIM_SUMMARY_COLS)
 
 
 def _prep_parlays(parlays, stats, stat_map, today):

@@ -29,6 +29,7 @@ from sportstradamus.helpers.io import (
     HISTORY_PATH,
     MODEL_STATS_PATH,
     PARLAY_HIST_PATH,
+    PROFIT_SIM_SUMMARY_PATH,
     USER_SLIPS_PATH,
     read_history,
     read_parlay_hist,
@@ -230,6 +231,21 @@ def load_current_game_stories() -> pd.DataFrame:
     Builder / Shoot the Moon).
     """
     return _load_current_game_stories_cached(_mtime(CURRENT_GAME_STORIES_PATH))
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
+def _load_profit_sim_summary_cached(mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(PROFIT_SIM_SUMMARY_PATH)
+
+
+def load_profit_sim_summary() -> pd.DataFrame:
+    """Precomputed strategy x horizon profit-sim grid from the latest ``reflect`` run.
+
+    Columns ``Strategy, Horizon, ROI, Sharpe, Max Drawdown, Win%``. Receipts reads
+    this instead of running the Monte-Carlo backtest at page load; empty when
+    ``reflect`` has not written it yet.
+    """
+    return _load_profit_sim_summary_cached(_mtime(PROFIT_SIM_SUMMARY_PATH))
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading game context...")

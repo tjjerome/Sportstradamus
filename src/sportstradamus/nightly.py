@@ -28,11 +28,13 @@ from sportstradamus.analysis import (
     check_bet,
     compute_book_brier_skill_score,
     explode_offers,
+    precompute_profit_sim_summary,
     resolve_history,
 )
 from sportstradamus.helpers import Archive, get_logger
 from sportstradamus.helpers.io import (
     LIVE_METRICS_PATH,
+    PROFIT_SIM_SUMMARY_PATH,
     _atomic_write_parquet,
     read_history,
     read_parlay_hist,
@@ -305,6 +307,14 @@ def _compute_live_metrics(history: pd.DataFrame, *, now: datetime | None = None)
     return _enforce_live_metrics_dtypes(pd.DataFrame(rows))
 
 
+def _precompute_profit_sim(history):
+    summary = precompute_profit_sim_summary(explode_offers(history))
+    _atomic_write_parquet(summary, PROFIT_SIM_SUMMARY_PATH)
+    logger.info(
+        f"Profit sim: wrote {len(summary)} strategy-horizon rows to {PROFIT_SIM_SUMMARY_PATH.name}"
+    )
+
+
 @click.command()
 @click.option("--league", default=None, help="Resolve only this league (default: all).")
 @click.option(
@@ -338,6 +348,8 @@ def run(league, skip_update, history_only, log_level):
     metrics = _compute_live_metrics(history)
     _atomic_write_parquet(metrics, LIVE_METRICS_PATH)
     logger.info(f"Live metrics: wrote {len(metrics)} rows to {LIVE_METRICS_PATH.name}")
+
+    _precompute_profit_sim(history)
 
 
 def _load_one_league(lg, cls, skip_update):

@@ -48,6 +48,9 @@ MODEL_STATS_PATH = _TRAINING_DIR / "model_stats.parquet"
 # by code (parquet is the authoritative source on disagreement).
 MODEL_STATS_CSV_PATH = _TRAINING_DIR / "model_stats.csv"
 LIVE_METRICS_PATH = _RUNTIME_DIR / "live_metrics_per_market.parquet"
+# Precomputed strategy x horizon profit-sim grid (Receipts reads it instead of
+# running the Monte-Carlo backtest at page load). Written nightly by reflect.
+PROFIT_SIM_SUMMARY_PATH = _RUNTIME_DIR / "profit_sim_summary.parquet"
 # User-built slips saved from the dashboard ("Lock it in"); graded by nightly.
 USER_SLIPS_PATH = _RUNTIME_DIR / "user_slips.parquet"
 
