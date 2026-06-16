@@ -94,7 +94,13 @@ def _offer_details_frame(snapshot_offers: pd.DataFrame, stats: dict) -> pd.DataF
         return build_offer_details(
             snapshot_offers, {}, pd.DataFrame(), exclude=frozenset(), today=today
         )
-    importances = pd.read_csv(_FEATURE_IMPORTANCES_PATH, index_col=0)
+    # Drift-monitoring SHAP CSV is meditate output; absent on a fresh checkout or
+    # before the first train. The detail builder treats an empty frame as "no
+    # SHAP-derived other-stats" (details.py returns [] on a missing market column).
+    try:
+        importances = pd.read_csv(_FEATURE_IMPORTANCES_PATH, index_col=0)
+    except FileNotFoundError:
+        importances = pd.DataFrame()
     empty_pairs = pd.DataFrame(columns=["player", "comp"])
     cutoff = pd.Timestamp(today - datetime.timedelta(days=_DETAIL_GAMELOG_DAYS))
     offer_leagues = set(snapshot_offers["League"].unique())
