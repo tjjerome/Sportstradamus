@@ -104,12 +104,19 @@ def test_underdog_play_type_by_size():
         _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y"),
         _leg("B", "REB", "Over", 8.5, 0.6, 1.0, "X/Y"),
     ]
-    four = two + [
+    four = [
+        *two,
         _leg("C", "AST", "Over", 5.5, 0.6, 1.0, "X/Y"),
         _leg("D", "STL", "Over", 1.5, 0.6, 1.0, "X/Y"),
     ]
-    assert score_slip(two, _corr([]), platform="Underdog", bankroll=Decimal("1000")).play_type == "Power"
-    assert score_slip(four, _corr([]), platform="Underdog", bankroll=Decimal("1000")).play_type == "Flex"
+    assert (
+        score_slip(two, _corr([]), platform="Underdog", bankroll=Decimal("1000")).play_type
+        == "Power"
+    )
+    assert (
+        score_slip(four, _corr([]), platform="Underdog", bankroll=Decimal("1000")).play_type
+        == "Flex"
+    )
 
 
 def test_negative_edge_yields_zero_stake():

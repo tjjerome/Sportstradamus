@@ -62,20 +62,44 @@ def test_decode_json_and_degenerate():
 def test_detail_row_five_key_join():
     details = pd.DataFrame(
         [
-            {"League": "NBA", "Date": "2026-06-15", "Player": "A. One",
-             "Market": "PTS", "Opponent": "BOS", "volume_trend": "[1]"},
-            {"League": "NBA", "Date": "2026-06-15", "Player": "A. One",
-             "Market": "AST", "Opponent": "BOS", "volume_trend": "[2]"},
+            {
+                "League": "NBA",
+                "Date": "2026-06-15",
+                "Player": "A. One",
+                "Market": "PTS",
+                "Opponent": "BOS",
+                "volume_trend": "[1]",
+            },
+            {
+                "League": "NBA",
+                "Date": "2026-06-15",
+                "Player": "A. One",
+                "Market": "AST",
+                "Opponent": "BOS",
+                "volume_trend": "[2]",
+            },
         ]
     )
     row = pd.Series(
-        {"League": "NBA", "Date": "2026-06-15", "Player": "A. One", "Market": "AST", "Opponent": "BOS"}
+        {
+            "League": "NBA",
+            "Date": "2026-06-15",
+            "Player": "A. One",
+            "Market": "AST",
+            "Opponent": "BOS",
+        }
     )
     hit = _detail_row(row, details)
     assert hit is not None and hit["volume_trend"] == "[2]"
 
     miss = pd.Series(
-        {"League": "NBA", "Date": "2026-06-15", "Player": "A. One", "Market": "REB", "Opponent": "BOS"}
+        {
+            "League": "NBA",
+            "Date": "2026-06-15",
+            "Player": "A. One",
+            "Market": "REB",
+            "Opponent": "BOS",
+        }
     )
     assert _detail_row(miss, details) is None
     assert _detail_row(row, pd.DataFrame()) is None

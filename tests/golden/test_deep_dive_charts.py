@@ -50,12 +50,18 @@ def _layers(chart) -> list[dict]:
 
 
 def _rules(layers: list[dict]) -> list[dict]:
-    return [lyr for lyr in layers if isinstance(lyr.get("mark"), dict) and lyr["mark"].get("type") == "rule"]
+    return [
+        lyr
+        for lyr in layers
+        if isinstance(lyr.get("mark"), dict) and lyr["mark"].get("type") == "rule"
+    ]
 
 
 def _marks_of_type(layers: list[dict], *types: str) -> list[dict]:
     return [
-        lyr for lyr in layers if isinstance(lyr.get("mark"), dict) and lyr["mark"].get("type") in types
+        lyr
+        for lyr in layers
+        if isinstance(lyr.get("mark"), dict) and lyr["mark"].get("type") in types
     ]
 
 

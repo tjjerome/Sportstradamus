@@ -95,7 +95,9 @@ def _sizes(fig) -> dict:
 
 def test_universe_is_only_k_positive_legs():
     legs = _slip("A|PTS|Over")
-    pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.1), ("C|AST|Over", -0.2), ("D|PTS|Under", 0.0))
+    pool = _pool(
+        ("A|PTS|Over", 0.4), ("B|REB|Under", 0.1), ("C|AST|Over", -0.2), ("D|PTS|Under", 0.0)
+    )
     fig = constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.3)), pool)
     assert _shown_keys(fig) == {"A|PTS|Over", "B|REB|Under"}  # C (<0) and D (==0) dropped
 
@@ -139,9 +141,9 @@ def test_layout_is_static_under_selection():
 def test_nodes_carry_leg_key_customdata():
     legs = _slip("A|PTS|Over")
     pool = _pool(("A|PTS|Over", 0.4))
-    assert [cd[0] for cd in _trace(constellation_figure(legs, _corr(), pool), "active").customdata] == [
-        "A|PTS|Over"
-    ]
+    assert [
+        cd[0] for cd in _trace(constellation_figure(legs, _corr(), pool), "active").customdata
+    ] == ["A|PTS|Over"]
 
 
 def test_node_customdata_carries_card_fields():
@@ -216,7 +218,9 @@ def test_single_slip_leg_draws_no_edges():
     # only on hover, client-side). The B-C-less single-active case the old map lit up.
     legs = _slip("A|PTS|Over")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3))
-    edges = _edge_traces(constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.5)), pool))
+    edges = _edge_traces(
+        constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.5)), pool)
+    )
     assert edges and all(e.opacity == 0 for e in edges)
 
 

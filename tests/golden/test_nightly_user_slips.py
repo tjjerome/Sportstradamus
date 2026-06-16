@@ -41,7 +41,12 @@ def _slip(slip_id, play_type, legs, date="2026-06-10"):
         "status": "pending",
         "legs": json.dumps(
             [
-                {"desc": f"{p} {b} {ln:.10g} {m} - 75.0%, 1.00x", "league": "WNBA", "game": g, "date": date}
+                {
+                    "desc": f"{p} {b} {ln:.10g} {m} - 75.0%, 1.00x",
+                    "league": "WNBA",
+                    "game": g,
+                    "date": date,
+                }
                 for p, b, ln, m, g in legs
             ]
         ),
@@ -54,15 +59,29 @@ def test_resolve_grades_power_flex_and_skips_unplayed(tmp_path, monkeypatch):
 
     slips = pd.DataFrame(
         [
-            _slip("won", "Power", [("A. Wilson", "Over", 23.5, "PTS", "LV"),
-                                   ("C. Clark", "Over", 4.5, "AST", "IND")]),
-            _slip("lost", "Power", [("A. Wilson", "Over", 23.5, "PTS", "LV"),
-                                    ("C. Clark", "Over", 7.5, "AST", "IND")]),
-            _slip("partial", "Flex", [("A. Wilson", "Over", 23.5, "PTS", "LV"),
-                                      ("A. Wilson", "Over", 2.5, "AST", "LV"),
-                                      ("J. Young", "Over", 3.5, "FG3M", "LV"),
-                                      ("C. Clark", "Over", 7.5, "AST", "IND")]),
-            _slip("unplayed", "Power", [("A. Wilson", "Over", 23.5, "PTS", "MIN")], date="2026-06-11"),
+            _slip(
+                "won",
+                "Power",
+                [("A. Wilson", "Over", 23.5, "PTS", "LV"), ("C. Clark", "Over", 4.5, "AST", "IND")],
+            ),
+            _slip(
+                "lost",
+                "Power",
+                [("A. Wilson", "Over", 23.5, "PTS", "LV"), ("C. Clark", "Over", 7.5, "AST", "IND")],
+            ),
+            _slip(
+                "partial",
+                "Flex",
+                [
+                    ("A. Wilson", "Over", 23.5, "PTS", "LV"),
+                    ("A. Wilson", "Over", 2.5, "AST", "LV"),
+                    ("J. Young", "Over", 3.5, "FG3M", "LV"),
+                    ("C. Clark", "Over", 7.5, "AST", "IND"),
+                ],
+            ),
+            _slip(
+                "unplayed", "Power", [("A. Wilson", "Over", 23.5, "PTS", "MIN")], date="2026-06-11"
+            ),
         ]
     )
     io.write_user_slips(slips)

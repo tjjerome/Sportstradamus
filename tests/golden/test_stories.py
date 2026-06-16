@@ -28,26 +28,111 @@ _DATE = "2026-06-13"
 # team's implied win probability; ``Position`` is the resolved depth-chart label.
 _OFFERS = pd.DataFrame(
     [
-        {"League": "NBA", "Game": "BOS/PHI", "Date": _DATE, "Team": "BOS", "Opponent": "PHI",
-         "Player": "Jayson Tatum", "Market": "PTS", "Bet": "Over", "Line": 28.5,
-         "O/U": 120.0, "Moneyline": 0.74, "DVPOA": 0.10, "Position": "F1",
-         "Avg 5": 3.5, "Avg H2H": 2.0, "Win Prob": 0.59, "Market Prob": 0.52, "Model EV": 1.18, "Market EV": 1.00},
-        {"League": "NBA", "Game": "BOS/PHI", "Date": _DATE, "Team": "BOS", "Opponent": "PHI",
-         "Player": "Jayson Tatum", "Market": "REB", "Bet": "Over", "Line": 8.5,
-         "O/U": 120.0, "Moneyline": 0.74, "DVPOA": 0.02, "Position": "F1",
-         "Avg 5": 1.0, "Avg H2H": 0.0, "Win Prob": 0.56, "Market Prob": 0.50, "Model EV": 1.10, "Market EV": 1.00},
-        {"League": "NBA", "Game": "BOS/PHI", "Date": _DATE, "Team": "PHI", "Opponent": "BOS",
-         "Player": "Joel Embiid", "Market": "PTS", "Bet": "Under", "Line": 30.5,
-         "O/U": 118.0, "Moneyline": 0.26, "DVPOA": -0.08, "Position": "C1",
-         "Avg 5": -2.0, "Avg H2H": -1.5, "Win Prob": 0.57, "Market Prob": 0.51, "Model EV": 1.12, "Market EV": 1.00},
-        {"League": "NBA", "Game": "DEN/MIA", "Date": _DATE, "Team": "DEN", "Opponent": "MIA",
-         "Player": "Nikola Jokic", "Market": "AST", "Bet": "Over", "Line": 9.5,
-         "O/U": 112.0, "Moneyline": 0.55, "DVPOA": 0.06, "Position": "C1",
-         "Avg 5": 1.5, "Avg H2H": 0.0, "Win Prob": 0.60, "Market Prob": 0.53, "Model EV": 1.20, "Market EV": 1.00},
-        {"League": "NBA", "Game": "DEN/MIA", "Date": _DATE, "Team": "DEN", "Opponent": "MIA",
-         "Player": "Nikola Jokic", "Market": "REB", "Bet": "Over", "Line": 12.5,
-         "O/U": 112.0, "Moneyline": 0.55, "DVPOA": 0.03, "Position": "C1",
-         "Avg 5": 2.0, "Avg H2H": 1.0, "Win Prob": 0.58, "Market Prob": 0.52, "Model EV": 1.15, "Market EV": 1.00},
+        {
+            "League": "NBA",
+            "Game": "BOS/PHI",
+            "Date": _DATE,
+            "Team": "BOS",
+            "Opponent": "PHI",
+            "Player": "Jayson Tatum",
+            "Market": "PTS",
+            "Bet": "Over",
+            "Line": 28.5,
+            "O/U": 120.0,
+            "Moneyline": 0.74,
+            "DVPOA": 0.10,
+            "Position": "F1",
+            "Avg 5": 3.5,
+            "Avg H2H": 2.0,
+            "Win Prob": 0.59,
+            "Market Prob": 0.52,
+            "Model EV": 1.18,
+            "Market EV": 1.00,
+        },
+        {
+            "League": "NBA",
+            "Game": "BOS/PHI",
+            "Date": _DATE,
+            "Team": "BOS",
+            "Opponent": "PHI",
+            "Player": "Jayson Tatum",
+            "Market": "REB",
+            "Bet": "Over",
+            "Line": 8.5,
+            "O/U": 120.0,
+            "Moneyline": 0.74,
+            "DVPOA": 0.02,
+            "Position": "F1",
+            "Avg 5": 1.0,
+            "Avg H2H": 0.0,
+            "Win Prob": 0.56,
+            "Market Prob": 0.50,
+            "Model EV": 1.10,
+            "Market EV": 1.00,
+        },
+        {
+            "League": "NBA",
+            "Game": "BOS/PHI",
+            "Date": _DATE,
+            "Team": "PHI",
+            "Opponent": "BOS",
+            "Player": "Joel Embiid",
+            "Market": "PTS",
+            "Bet": "Under",
+            "Line": 30.5,
+            "O/U": 118.0,
+            "Moneyline": 0.26,
+            "DVPOA": -0.08,
+            "Position": "C1",
+            "Avg 5": -2.0,
+            "Avg H2H": -1.5,
+            "Win Prob": 0.57,
+            "Market Prob": 0.51,
+            "Model EV": 1.12,
+            "Market EV": 1.00,
+        },
+        {
+            "League": "NBA",
+            "Game": "DEN/MIA",
+            "Date": _DATE,
+            "Team": "DEN",
+            "Opponent": "MIA",
+            "Player": "Nikola Jokic",
+            "Market": "AST",
+            "Bet": "Over",
+            "Line": 9.5,
+            "O/U": 112.0,
+            "Moneyline": 0.55,
+            "DVPOA": 0.06,
+            "Position": "C1",
+            "Avg 5": 1.5,
+            "Avg H2H": 0.0,
+            "Win Prob": 0.60,
+            "Market Prob": 0.53,
+            "Model EV": 1.20,
+            "Market EV": 1.00,
+        },
+        {
+            "League": "NBA",
+            "Game": "DEN/MIA",
+            "Date": _DATE,
+            "Team": "DEN",
+            "Opponent": "MIA",
+            "Player": "Nikola Jokic",
+            "Market": "REB",
+            "Bet": "Over",
+            "Line": 12.5,
+            "O/U": 112.0,
+            "Moneyline": 0.55,
+            "DVPOA": 0.03,
+            "Position": "C1",
+            "Avg 5": 2.0,
+            "Avg H2H": 1.0,
+            "Win Prob": 0.58,
+            "Market Prob": 0.52,
+            "Model EV": 1.15,
+            "Market EV": 1.00,
+        },
     ]
 )
 
@@ -56,18 +141,33 @@ _OFFERS = pd.DataFrame(
 # Jokic drives DEN/MIA.
 _PARLAYS = pd.DataFrame(
     [
-        {"League": "NBA", "Game": "BOS/PHI", "Date": _DATE, "Family": 1.0,
-         "Leg 1": "Jayson Tatum Over 28.5 PTS - 59.0%, 1.0x",
-         "Leg 2": "Jayson Tatum Over 8.5 REB - 56.0%, 1.0x",
-         "Leg 3": "Joel Embiid Under 30.5 PTS - 57.0%, 1.0x"},
-        {"League": "NBA", "Game": "BOS/PHI", "Date": _DATE, "Family": 2.0,
-         "Leg 1": "Joel Embiid Under 30.5 PTS - 57.0%, 1.0x",
-         "Leg 2": "Jayson Tatum Over 28.5 PTS - 59.0%, 1.0x",
-         "Leg 3": None},
-        {"League": "NBA", "Game": "DEN/MIA", "Date": _DATE, "Family": 1.0,
-         "Leg 1": "Nikola Jokic Over 9.5 AST - 60.0%, 1.0x",
-         "Leg 2": "Nikola Jokic Over 12.5 REB - 58.0%, 1.0x",
-         "Leg 3": None},
+        {
+            "League": "NBA",
+            "Game": "BOS/PHI",
+            "Date": _DATE,
+            "Family": 1.0,
+            "Leg 1": "Jayson Tatum Over 28.5 PTS - 59.0%, 1.0x",
+            "Leg 2": "Jayson Tatum Over 8.5 REB - 56.0%, 1.0x",
+            "Leg 3": "Joel Embiid Under 30.5 PTS - 57.0%, 1.0x",
+        },
+        {
+            "League": "NBA",
+            "Game": "BOS/PHI",
+            "Date": _DATE,
+            "Family": 2.0,
+            "Leg 1": "Joel Embiid Under 30.5 PTS - 57.0%, 1.0x",
+            "Leg 2": "Jayson Tatum Over 28.5 PTS - 59.0%, 1.0x",
+            "Leg 3": None,
+        },
+        {
+            "League": "NBA",
+            "Game": "DEN/MIA",
+            "Date": _DATE,
+            "Family": 1.0,
+            "Leg 1": "Nikola Jokic Over 9.5 AST - 60.0%, 1.0x",
+            "Leg 2": "Nikola Jokic Over 12.5 REB - 58.0%, 1.0x",
+            "Leg 3": None,
+        },
     ]
 )
 
@@ -86,9 +186,7 @@ def test_thesis_exact_strings():
     assert _theses_by_family(_PARLAYS, _OFFERS) == {
         ("BOS/PHI", 1.0): "The BOS/PHI blowout lets Jayson Tatum hunt points unopposed",
         ("BOS/PHI", 2.0): "The scoring in BOS/PHI comes from everywhere",
-        ("DEN/MIA", 1.0): (
-            "In a DEN/MIA toss-up, Nikola Jokic keeps creating the next good look"
-        ),
+        ("DEN/MIA", 1.0): ("In a DEN/MIA toss-up, Nikola Jokic keeps creating the next good look"),
     }
 
 
@@ -126,16 +224,39 @@ def test_why_exact_strings():
 def test_why_ev_fallback_when_no_book_prob():
     """No ``Books P`` column ⇒ edge clause comes from the EV multiples."""
     row = pd.DataFrame(
-        [{"Player": "Solo Star", "Market": "REB", "Bet": "Under", "Line": 6.5,
-          "Avg 5": None, "DVPOA": None, "Win Prob": 0.72, "Model EV": 1.41, "Market EV": 1.41}]
+        [
+            {
+                "Player": "Solo Star",
+                "Market": "REB",
+                "Bet": "Under",
+                "Line": 6.5,
+                "Avg 5": None,
+                "DVPOA": None,
+                "Win Prob": 0.72,
+                "Model EV": 1.41,
+                "Market EV": 1.41,
+            }
+        ]
     )
     assert attach_offer_why(row)["Why"].iloc[0] == "The model prices it at 1.41x."
 
 
 def _star_offer(game: str, team: str, opp: str, player: str, pos: str) -> dict:
-    return {"League": "NBA", "Game": game, "Date": _DATE, "Team": team, "Opponent": opp,
-            "Player": player, "Market": "PTS", "Bet": "Over", "Line": 25.5,
-            "O/U": 112.0, "Moneyline": 0.5, "DVPOA": 0.0, "Position": pos}
+    return {
+        "League": "NBA",
+        "Game": game,
+        "Date": _DATE,
+        "Team": team,
+        "Opponent": opp,
+        "Player": player,
+        "Market": "PTS",
+        "Bet": "Over",
+        "Line": 25.5,
+        "O/U": 112.0,
+        "Moneyline": 0.5,
+        "DVPOA": 0.0,
+        "Position": pos,
+    }
 
 
 def test_slate_uniqueness_guaranteed():
@@ -155,7 +276,13 @@ def test_slate_uniqueness_guaranteed():
         [
             {"League": "NBA", "Game": "AAA/BBB", "Date": _DATE, "Family": 1.0, **legs("Star One")},
             {"League": "NBA", "Game": "CCC/DDD", "Date": _DATE, "Family": 1.0, **legs("Star Two")},
-            {"League": "NBA", "Game": "EEE/FFF", "Date": _DATE, "Family": 1.0, **legs("Star Three")},
+            {
+                "League": "NBA",
+                "Game": "EEE/FFF",
+                "Date": _DATE,
+                "Family": 1.0,
+                **legs("Star Three"),
+            },
         ]
     )
     heads = list(_theses_by_family(parlays, offers).values())
@@ -167,27 +294,80 @@ def test_clear_star_headlines_not_the_benchwarmer():
     """The multi-leg star drives the family; a lone tiny prop never headlines."""
     offers = pd.DataFrame(
         [
-            {"League": "NBA", "Game": "X/Y", "Date": _DATE, "Team": "X", "Opponent": "Y",
-             "Player": "Star Wing", "Market": "PTS", "Bet": "Over", "Line": 28.5,
-             "O/U": 112.0, "Moneyline": 0.5, "DVPOA": 0.0, "Position": "F1"},
-            {"League": "NBA", "Game": "X/Y", "Date": _DATE, "Team": "X", "Opponent": "Y",
-             "Player": "Star Wing", "Market": "REB", "Bet": "Over", "Line": 9.5,
-             "O/U": 112.0, "Moneyline": 0.5, "DVPOA": 0.0, "Position": "F1"},
-            {"League": "NBA", "Game": "X/Y", "Date": _DATE, "Team": "X", "Opponent": "Y",
-             "Player": "Star Wing", "Market": "AST", "Bet": "Over", "Line": 6.5,
-             "O/U": 112.0, "Moneyline": 0.5, "DVPOA": 0.0, "Position": "F1"},
-            {"League": "NBA", "Game": "X/Y", "Date": _DATE, "Team": "Y", "Opponent": "X",
-             "Player": "Bench Guy", "Market": "REB", "Bet": "Under", "Line": 3.5,
-             "O/U": 112.0, "Moneyline": 0.5, "DVPOA": 0.0, "Position": "C2"},
+            {
+                "League": "NBA",
+                "Game": "X/Y",
+                "Date": _DATE,
+                "Team": "X",
+                "Opponent": "Y",
+                "Player": "Star Wing",
+                "Market": "PTS",
+                "Bet": "Over",
+                "Line": 28.5,
+                "O/U": 112.0,
+                "Moneyline": 0.5,
+                "DVPOA": 0.0,
+                "Position": "F1",
+            },
+            {
+                "League": "NBA",
+                "Game": "X/Y",
+                "Date": _DATE,
+                "Team": "X",
+                "Opponent": "Y",
+                "Player": "Star Wing",
+                "Market": "REB",
+                "Bet": "Over",
+                "Line": 9.5,
+                "O/U": 112.0,
+                "Moneyline": 0.5,
+                "DVPOA": 0.0,
+                "Position": "F1",
+            },
+            {
+                "League": "NBA",
+                "Game": "X/Y",
+                "Date": _DATE,
+                "Team": "X",
+                "Opponent": "Y",
+                "Player": "Star Wing",
+                "Market": "AST",
+                "Bet": "Over",
+                "Line": 6.5,
+                "O/U": 112.0,
+                "Moneyline": 0.5,
+                "DVPOA": 0.0,
+                "Position": "F1",
+            },
+            {
+                "League": "NBA",
+                "Game": "X/Y",
+                "Date": _DATE,
+                "Team": "Y",
+                "Opponent": "X",
+                "Player": "Bench Guy",
+                "Market": "REB",
+                "Bet": "Under",
+                "Line": 3.5,
+                "O/U": 112.0,
+                "Moneyline": 0.5,
+                "DVPOA": 0.0,
+                "Position": "C2",
+            },
         ]
     )
     parlays = pd.DataFrame(
         [
-            {"League": "NBA", "Game": "X/Y", "Date": _DATE, "Family": 1.0,
-             "Leg 1": "Star Wing Over 28.5 PTS - 60.0%, 1.0x",
-             "Leg 2": "Star Wing Over 9.5 REB - 58.0%, 1.0x",
-             "Leg 3": "Star Wing Over 6.5 AST - 57.0%, 1.0x",
-             "Leg 4": "Bench Guy Under 3.5 REB - 70.0%, 1.0x"},
+            {
+                "League": "NBA",
+                "Game": "X/Y",
+                "Date": _DATE,
+                "Family": 1.0,
+                "Leg 1": "Star Wing Over 28.5 PTS - 60.0%, 1.0x",
+                "Leg 2": "Star Wing Over 9.5 REB - 58.0%, 1.0x",
+                "Leg 3": "Star Wing Over 6.5 AST - 57.0%, 1.0x",
+                "Leg 4": "Bench Guy Under 3.5 REB - 70.0%, 1.0x",
+            },
         ]
     )
     thesis = _theses_by_family(parlays, offers)[("X/Y", 1.0)]
@@ -222,8 +402,15 @@ def test_thesis_without_game_context_degrades_gracefully():
         [{"League": "NBA", "Player": "Lone Star", "Market": "PTS", "Bet": "Over", "Line": 25.5}]
     )
     parlays = pd.DataFrame(
-        [{"League": "NBA", "Game": "L/M", "Date": _DATE, "Family": 1.0,
-          "Leg 1": "Lone Star Over 25.5 PTS - 60.0%, 1.0x"}]
+        [
+            {
+                "League": "NBA",
+                "Game": "L/M",
+                "Date": _DATE,
+                "Family": 1.0,
+                "Leg 1": "Lone Star Over 25.5 PTS - 60.0%, 1.0x",
+            }
+        ]
     )
     thesis = _theses_by_family(parlays, offers_no_game)[("L/M", 1.0)]
     assert thesis  # a game-script "even"-shape headline still renders, no crash
@@ -231,10 +418,16 @@ def test_thesis_without_game_context_degrades_gracefully():
 
 def test_parse_leg_round_trip():
     assert parse_leg("Jayson Tatum Over 28.5 PTS - 59.0%, 1.03x") == {
-        "Player": "Jayson Tatum", "Bet": "Over", "Line": 28.5, "Market": "PTS",
+        "Player": "Jayson Tatum",
+        "Bet": "Over",
+        "Line": 28.5,
+        "Market": "PTS",
     }
     assert parse_leg("Pts + Rebs Guy Under 17.5 Pts + Rebs + Asts - 58.9%, 1.17x") == {
-        "Player": "Pts + Rebs Guy", "Bet": "Under", "Line": 17.5, "Market": "Pts + Rebs + Asts",
+        "Player": "Pts + Rebs Guy",
+        "Bet": "Under",
+        "Line": 17.5,
+        "Market": "Pts + Rebs + Asts",
     }
     assert parse_leg("") is None
     assert parse_leg("no bet token here") is None
