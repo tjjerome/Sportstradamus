@@ -35,7 +35,9 @@ from sportstradamus.prediction.stories.menu import (
 )
 
 
-def _ctx(probs, corr, *, platform="Underdog", edges=None, teams=None, game="AAA/BBB", max_size=None):
+def _ctx(
+    probs, corr, *, platform="Underdog", edges=None, teams=None, game="AAA/BBB", max_size=None
+):
     """Build one synthetic GameScoringContext + its matching offers frame."""
     n = len(probs)
     probs = np.asarray(probs, dtype=float)
@@ -178,8 +180,12 @@ def test_objectives_are_true_argmaxes_and_share_legs():
     builder_legs = set(json.loads(builder["legs"]))
     moon_legs = set(json.loads(moon["legs"]))
     assert builder["model_ev"] <= moon["model_ev"]  # both from one scoring pass: Moon EV ≥ Builder
-    assert moon_legs == set(max(all_scores, key=lambda s: s["model_ev"])["legs"])  # global EV argmax
-    assert builder_legs == set(max(all_scores, key=lambda s: s["G"])["legs"])  # global log-growth argmax
+    assert moon_legs == set(
+        max(all_scores, key=lambda s: s["model_ev"])["legs"]
+    )  # global EV argmax
+    assert builder_legs == set(
+        max(all_scores, key=lambda s: s["G"])["legs"]
+    )  # global log-growth argmax
     # This fixture diverges: tight strong pair builds, wider set shoots the moon.
     assert builder["bet_size"] < moon["bet_size"]
     assert builder_legs <= moon_legs  # shared legs allowed
@@ -229,8 +235,15 @@ def test_model_ev_is_the_real_copula_scorer():
     sig = _psd_or_none(g.C[np.ix_(bet_id, bet_id)], legacy=False)
     direct = float(
         _parlay_payout_prob(
-            g.p_model[arr], g.p_push[arr], sig, 2, boost, payout, sctx.full_payouts,
-            sctx.payout_base_by_size[2], False,
+            g.p_model[arr],
+            g.p_push[arr],
+            sig,
+            2,
+            boost,
+            payout,
+            sctx.full_payouts,
+            sctx.payout_base_by_size[2],
+            False,
         )
     )
     assert scored["model_ev"] == direct
@@ -268,8 +281,10 @@ def test_single_team_game_emits_single_team_story():
     team_of = dict(zip(offers["Player"], offers["Team"], strict=True))
     for legs_json in out["legs"]:
         players = _row_players(legs_json)
-        assert len(set(players)) == len(players)         # distinct players still required
-        assert {team_of[p] for p in players} == {"AAA"}  # single-team preset, the game being one-sided
+        assert len(set(players)) == len(players)  # distinct players still required
+        assert {team_of[p] for p in players} == {
+            "AAA"
+        }  # single-team preset, the game being one-sided
 
 
 def test_single_team_clusters_in_two_team_game_emit_no_story():

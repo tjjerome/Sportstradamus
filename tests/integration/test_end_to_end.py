@@ -233,7 +233,9 @@ def test_pipeline_smoke(
     snapshot_parlays = snapshot_calls[0]["parlays"]
     assert "Why" in snapshot_offers.columns, "attach_offer_why did not add the Why column"
     assert "Position" in snapshot_offers.columns, "Position depth label did not flow to offers"
-    assert "Thesis" in snapshot_parlays.columns, "attach_parlay_theses did not add the Thesis column"
+    assert "Thesis" in snapshot_parlays.columns, (
+        "attach_parlay_theses did not add the Thesis column"
+    )
     assert game_corr_calls, "write_current_game_corr was never invoked"
 
     # Game context is built once and the same frame fed to the writer: one row per
@@ -241,7 +243,9 @@ def test_pipeline_smoke(
     assert game_context_calls, "write_current_game_context was never invoked"
     context = game_context_calls[0]
     assert not context.empty, "build_game_context produced no rows from the offers frame"
-    assert set(context["Game"]) == {"LVA/NYL", "PHX/SEA"}, f"unexpected games: {set(context['Game'])}"
+    assert set(context["Game"]) == {"LVA/NYL", "PHX/SEA"}, (
+        f"unexpected games: {set(context['Game'])}"
+    )
     assert context["shape"].notna().all(), "every game context row carries a classified shape"
 
     # Story-menu writer fired with a column-stable frame. It is empty here: the
@@ -302,8 +306,10 @@ _PLAYER_LINES = [
 # Team → implied win probability and half-total, so ``build_game_context`` has a
 # real ``Moneyline``/``O/U`` to classify shape from (LVA and SEA the favorites).
 _TEAM_CONTEXT = {
-    "LVA": (0.62, 86.0), "NYL": (0.38, 80.0),
-    "SEA": (0.55, 83.0), "PHX": (0.45, 81.0),
+    "LVA": (0.62, 86.0),
+    "NYL": (0.38, 80.0),
+    "SEA": (0.55, 83.0),
+    "PHX": (0.45, 81.0),
 }
 
 

@@ -255,7 +255,16 @@ def test_find_correlation_builds_parlays_wnba() -> None:
     _, parlay_df = find_correlation(offers, stats, "Underdog", contest_variant="power")
 
     assert not parlay_df.empty
-    for col in ("Game", "League", "Platform", "Model EV", "Market EV", "Legs", "Bet Size", "Family"):
+    for col in (
+        "Game",
+        "League",
+        "Platform",
+        "Model EV",
+        "Market EV",
+        "Legs",
+        "Bet Size",
+        "Family",
+    ):
         assert col in parlay_df.columns
     assert set(parlay_df["Bet Size"].astype(int)).issubset({2, 3, 4, 5, 6})
     assert (parlay_df["League"] == "WNBA").all()
@@ -310,17 +319,25 @@ def test_collect_game_corr_keys_canonical_and_symmetric() -> None:
             assert bet in {"Over", "Under"}
 
     by_pair = {(r["leg_a"], r["leg_b"]): r["rho"] for r in rows}
-    assert by_pair[tuple(sorted(["A. Wilson|PTS|Over", "S. Ionescu|PTS|Over"]))] == pytest.approx(0.3)
-    assert by_pair[tuple(sorted(["A. Wilson|PTS|Over", "A. Wilson|REB|Under"]))] == pytest.approx(0.5)
-    assert by_pair[
-        tuple(sorted(["S. Ionescu|PTS|Over", "A. Wilson|REB|Under"]))
-    ] == pytest.approx(-0.2)
+    assert by_pair[tuple(sorted(["A. Wilson|PTS|Over", "S. Ionescu|PTS|Over"]))] == pytest.approx(
+        0.3
+    )
+    assert by_pair[tuple(sorted(["A. Wilson|PTS|Over", "A. Wilson|REB|Under"]))] == pytest.approx(
+        0.5
+    )
+    assert by_pair[tuple(sorted(["S. Ionescu|PTS|Over", "A. Wilson|REB|Under"]))] == pytest.approx(
+        -0.2
+    )
 
 
 def test_collect_game_corr_skips_identical_leg_keys() -> None:
     """Two offers with the same Player|Market|Bet (different lines) emit no self-pair."""
     game_df = pd.DataFrame(
-        {"Player": ["A. Wilson", "A. Wilson"], "Market": ["Points", "Points"], "Bet": ["Over", "Over"]}
+        {
+            "Player": ["A. Wilson", "A. Wilson"],
+            "Market": ["Points", "Points"],
+            "Bet": ["Over", "Over"],
+        }
     )
     C = np.array([[1.0, 0.9], [0.9, 1.0]])
     rows = _collect_game_corr(game_df, C, "WNBA", "LVA/NYL", {"Points": "PTS"})

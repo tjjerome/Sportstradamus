@@ -1660,6 +1660,7 @@ def test_decode_sn_loc_scale_centered_additive_readds_location_offset():
     np.testing.assert_allclose(loc, mean10 + raw_loc)
     np.testing.assert_allclose(scale, df["SN_Scale"].to_numpy())
 
+
 def test_fit_skewnorm_dispersion_c_widens_underdispersed_symmetric():
     """A predictive half as wide as the truth must fit c ~ 2 to recover calibration.
 
@@ -1673,6 +1674,7 @@ def test_fit_skewnorm_dispersion_c_widens_underdispersed_symmetric():
     y = rng.normal(mu, s_true, n)
     c = fit_skewnorm_dispersion_c(np.full(n, mu), np.full(n, s_true / 2.0), np.zeros(n), y)
     assert abs(c - 2.0) < 0.25
+
 
 def test_fit_skewnorm_dispersion_skew_recovers_underskew():
     """Lever 4a: a served predictive that collapsed to symmetry (``alpha = 0``) on
@@ -1698,6 +1700,7 @@ def test_fit_skewnorm_dispersion_skew_recovers_underskew():
         < _sn_pit_ks(mean, sigma, skew0, y, c_only, 0.0) - 0.02
     )
 
+
 def test_fit_skewnorm_dispersion_skew_noop_on_calibrated():
     """No-op on an already-calibrated symmetric cell: the skew knob must not manufacture
     spurious asymmetry, so it returns ``c ~ 1``, ``s ~ 0`` and does not worsen the PIT.
@@ -1712,6 +1715,7 @@ def test_fit_skewnorm_dispersion_skew_noop_on_calibrated():
     assert s == 0.0  # opt-in: a sub-margin gain falls back to the pure Lever-1 (c, 0)
     assert abs(c - 1.0) < 0.15
     assert _sn_pit_ks(mean, sigma, skew0, y, c, s) < 0.04
+
 
 def test_fit_skewnorm_dispersion_skew_is_bit_reproducible():
     """The joint ``(c, s)`` fit must be bit-identical run-to-run — deterministic Nelder-Mead
@@ -1731,6 +1735,7 @@ def test_fit_skewnorm_dispersion_skew_is_bit_reproducible():
     assert fit_skewnorm_dispersion_skew(mean, sigma, skew0, y) == fit_skewnorm_dispersion_skew(
         mean, sigma, skew0, y
     )
+
 
 def test_fit_skewnorm_dispersion_skew_sequential_freezes_scale_then_fits_skew():
     """Sequential variant (``joint=False``): fit the Lever-1 scale first, freeze it, then fit the
@@ -1756,6 +1761,7 @@ def test_fit_skewnorm_dispersion_skew_sequential_freezes_scale_then_fits_skew():
         < _sn_pit_ks(mean, sigma, base, y, c_only, 0.0) - 0.01
     )
 
+
 def test_fit_skewnorm_dispersion_skew_sequential_noop_on_calibrated():
     """The sequential variant must also reject a sub-margin skew on an already-calibrated cell,
     falling back to the pure Lever-1 ``(c, 0)`` like the joint fit does.
@@ -1769,6 +1775,7 @@ def test_fit_skewnorm_dispersion_skew_sequential_noop_on_calibrated():
 
     assert s == 0.0
     assert abs(c - 1.0) < 0.15
+
 
 def test_joint_skew_fit_dominates_sequential_on_alpha_collapse():
     """Pins the coupling finding behind keeping the joint fit as the production default: on an
@@ -1794,6 +1801,7 @@ def test_joint_skew_fit_dominates_sequential_on_alpha_collapse():
         mean, sigma, skew0, y, c_seq, s_seq
     )
 
+
 def test_min_gate_slack_is_the_binding_gate_headroom_when_all_pass():
     """The ship-margin scalar is the minimum per-gate headroom, each normalized to its own
     threshold; when every gate passes it is the tightest gate's fractional headroom (here Gate 4).
@@ -1807,6 +1815,7 @@ def test_min_gate_slack_is_the_binding_gate_headroom_when_all_pass():
         "g5_ece_debiased": 0.05,  # (0.075-0.05)/0.075 = 0.333
     }
     assert min_gate_slack(row) == pytest.approx(0.2)
+
 
 def test_min_gate_slack_negative_when_gate4_fails():
     """A failing gate drives the scalar below zero — the search must rank a non-shipping combo
@@ -1822,6 +1831,7 @@ def test_min_gate_slack_negative_when_gate4_fails():
     }
     assert min_gate_slack(row) < 0
 
+
 def test_min_gate_slack_g1_blank_does_not_bind():
     """A blank Gate 1 (no book) auto-passes, so it must not bind the minimum — the scalar stays
     positive and equals the tightest *computed* gate (Gate 4 here), not a -inf from the blank.
@@ -1835,6 +1845,7 @@ def test_min_gate_slack_g1_blank_does_not_bind():
         "g5_ece_debiased": 0.03,
     }
     assert min_gate_slack(row) == pytest.approx(0.2)
+
 
 def test_eb_gate_decode_reconstructs_served_loc_with_dumped_global_mean():
     """``centered_additive_eb_meanyr_k10`` gate decode round-trips through the dumped GlobalMean.
@@ -1876,6 +1887,7 @@ def test_eb_gate_decode_reconstructs_served_loc_with_dumped_global_mean():
     # The EB prior was actually added back — decode is not the raw (encoded) loc.
     assert not np.allclose(loc_g, dumped["SN_Loc"].to_numpy())
 
+
 def test_eb_gate_decode_zero_global_mean_fallback_differs_from_real_prior():
     """Guard the silent-corruption failure mode: decoding the same SN_Loc with the legacy
     GlobalMean-absent fallback (0.0) must NOT match the real-global-mean decode — proving the
@@ -1903,6 +1915,7 @@ def test_eb_gate_decode_zero_global_mean_fallback_differs_from_real_prior():
 
     np.testing.assert_allclose(loc_real, served_loc, atol=1e-9)
     assert not np.allclose(loc_real, loc_fallback)
+
 
 def test_load_test_set_retains_eb_decode_columns(tmp_path):
     """``load_test_set`` curates feature columns, but the EB-prior decode needs ``GamesPlayed``

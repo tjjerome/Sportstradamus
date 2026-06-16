@@ -20,10 +20,24 @@ from sportstradamus.prediction.stories.legs import enrich_legs
 def test_enrich_legs_joins_offer_context():
     offers = pd.DataFrame(
         [
-            {"Player": "Jokic", "Bet": "Over", "Line": 9.5, "Market": "AST",
-             "Game": "DEN/MIA", "Team": "DEN", "Position": "C1"},
-            {"Player": "Jokic", "Bet": "Over", "Line": 12.5, "Market": "REB",
-             "Game": "DEN/MIA", "Team": "DEN", "Position": "C1"},
+            {
+                "Player": "Jokic",
+                "Bet": "Over",
+                "Line": 9.5,
+                "Market": "AST",
+                "Game": "DEN/MIA",
+                "Team": "DEN",
+                "Position": "C1",
+            },
+            {
+                "Player": "Jokic",
+                "Bet": "Over",
+                "Line": 12.5,
+                "Market": "REB",
+                "Game": "DEN/MIA",
+                "Team": "DEN",
+                "Position": "C1",
+            },
         ]
     )
     parsed = [{"Player": "Jokic", "Bet": "Over", "Line": 9.5, "Market": "Assists"}]
@@ -101,7 +115,10 @@ def test_route_unit_on_shared_position_group_edge():
         ("B", "Over", 18.5, "PTS", "X/Y", "X", "G2", "scoring"),
     )
     ctx = GameCtx(
-        league="NBA", game="X/Y", shape="even", fav_team="X",
+        league="NBA",
+        game="X/Y",
+        shape="even",
+        fav_team="X",
         pos_edges={"X": {"G": {"dvpoa": 0.12, "n": 2}}},
     )
     archetype, subject = route(legs, {"X/Y": ctx})
@@ -110,5 +127,5 @@ def test_route_unit_on_shared_position_group_edge():
 
 
 def test_route_empty_legs_is_game_script():
-    archetype, subject = route([], {})
+    archetype, _subject = route([], {})
     assert archetype == "game-script"

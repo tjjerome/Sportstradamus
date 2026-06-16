@@ -41,15 +41,45 @@ def test_build_game_context_two_team_game():
     favorite = higher win prob, positional DVPOA edges aggregated by group."""
     offers = pd.DataFrame(
         [
-            {"League": "NBA", "Game": "BOS/PHI", "Date": "2026-06-13", "Team": "BOS",
-             "Opponent": "PHI", "O/U": 120.0, "Moneyline": 0.74, "DVPOA": 0.10,
-             "Position": "F1", "Player": "A", "Market": "PTS"},
-            {"League": "NBA", "Game": "BOS/PHI", "Date": "2026-06-13", "Team": "BOS",
-             "Opponent": "PHI", "O/U": 120.0, "Moneyline": 0.74, "DVPOA": 0.20,
-             "Position": "F1", "Player": "B", "Market": "REB"},
-            {"League": "NBA", "Game": "BOS/PHI", "Date": "2026-06-13", "Team": "PHI",
-             "Opponent": "BOS", "O/U": 118.0, "Moneyline": 0.26, "DVPOA": -0.05,
-             "Position": "C1", "Player": "C", "Market": "PTS"},
+            {
+                "League": "NBA",
+                "Game": "BOS/PHI",
+                "Date": "2026-06-13",
+                "Team": "BOS",
+                "Opponent": "PHI",
+                "O/U": 120.0,
+                "Moneyline": 0.74,
+                "DVPOA": 0.10,
+                "Position": "F1",
+                "Player": "A",
+                "Market": "PTS",
+            },
+            {
+                "League": "NBA",
+                "Game": "BOS/PHI",
+                "Date": "2026-06-13",
+                "Team": "BOS",
+                "Opponent": "PHI",
+                "O/U": 120.0,
+                "Moneyline": 0.74,
+                "DVPOA": 0.20,
+                "Position": "F1",
+                "Player": "B",
+                "Market": "REB",
+            },
+            {
+                "League": "NBA",
+                "Game": "BOS/PHI",
+                "Date": "2026-06-13",
+                "Team": "PHI",
+                "Opponent": "BOS",
+                "O/U": 118.0,
+                "Moneyline": 0.26,
+                "DVPOA": -0.05,
+                "Position": "C1",
+                "Player": "C",
+                "Market": "PTS",
+            },
         ]
     )
     ctx = build_game_context(offers, {"NBA": 111.667})
@@ -77,10 +107,28 @@ def test_build_game_context_duplicate_index_favorite_is_scalar():
     two-row ``Team`` Series."""
     offers = pd.DataFrame(
         [
-            {"League": "NBA", "Game": "SAS/NYK", "Date": "2026-06-13", "Team": "SAS",
-             "Opponent": "NYK", "O/U": 112.0, "Moneyline": 0.40, "Player": "A", "Market": "PTS"},
-            {"League": "NBA", "Game": "SAS/NYK", "Date": "2026-06-13", "Team": "NYK",
-             "Opponent": "SAS", "O/U": 116.0, "Moneyline": 0.60, "Player": "B", "Market": "PTS"},
+            {
+                "League": "NBA",
+                "Game": "SAS/NYK",
+                "Date": "2026-06-13",
+                "Team": "SAS",
+                "Opponent": "NYK",
+                "O/U": 112.0,
+                "Moneyline": 0.40,
+                "Player": "A",
+                "Market": "PTS",
+            },
+            {
+                "League": "NBA",
+                "Game": "SAS/NYK",
+                "Date": "2026-06-13",
+                "Team": "NYK",
+                "Opponent": "SAS",
+                "O/U": 116.0,
+                "Moneyline": 0.60,
+                "Player": "B",
+                "Market": "PTS",
+            },
         ],
         index=[23, 23],  # the non-unique label that produced the Series-not-scalar crash
     )
@@ -94,26 +142,55 @@ def test_build_game_context_slate_median_baseline():
     """Four games on a league slate ⇒ baseline is the slate-median game total,
     and the shape rides the league-relative ratio when the game is tight."""
     rows = []
-    for game, half in [("AAA/BBB", 100.0), ("CCC/DDD", 110.0),
-                       ("EEE/FFF", 120.0), ("GGG/HHH", 130.0)]:
+    for game, half in [
+        ("AAA/BBB", 100.0),
+        ("CCC/DDD", 110.0),
+        ("EEE/FFF", 120.0),
+        ("GGG/HHH", 130.0),
+    ]:
         a, b = game.split("/")
         rows += [
-            {"League": "NBA", "Game": game, "Date": "2026-06-13", "Team": a,
-             "Opponent": b, "O/U": half, "Moneyline": 0.5, "Player": "x", "Market": "PTS"},
-            {"League": "NBA", "Game": game, "Date": "2026-06-13", "Team": b,
-             "Opponent": a, "O/U": half, "Moneyline": 0.5, "Player": "y", "Market": "PTS"},
+            {
+                "League": "NBA",
+                "Game": game,
+                "Date": "2026-06-13",
+                "Team": a,
+                "Opponent": b,
+                "O/U": half,
+                "Moneyline": 0.5,
+                "Player": "x",
+                "Market": "PTS",
+            },
+            {
+                "League": "NBA",
+                "Game": game,
+                "Date": "2026-06-13",
+                "Team": b,
+                "Opponent": a,
+                "O/U": half,
+                "Moneyline": 0.5,
+                "Player": "y",
+                "Market": "PTS",
+            },
         ]
     ctx = build_game_context(pd.DataFrame(rows), {"NBA": 111.667}).set_index("Game")
     assert (ctx["baseline_total"] == 230.0).all()  # median of 200/220/240/260
-    assert ctx.loc["AAA/BBB", "shape"] == "grind"     # 200/230 = 0.87
+    assert ctx.loc["AAA/BBB", "shape"] == "grind"  # 200/230 = 0.87
     assert ctx.loc["GGG/HHH", "shape"] == "shootout"  # 260/230 = 1.13
 
 
 def test_ctx_from_row_parses_pos_edges():
     row = {
-        "League": "NBA", "Game": "BOS/PHI", "Date": "2026-06-13", "shape": "blowout",
-        "game_total": 238.0, "total_ratio": 1.07, "fav_team": "BOS", "ml_margin": 0.24,
-        "spread": 2.0, "pos_edges": '{"BOS": {"F": {"dvpoa": 0.15, "n": 2}}}',
+        "League": "NBA",
+        "Game": "BOS/PHI",
+        "Date": "2026-06-13",
+        "shape": "blowout",
+        "game_total": 238.0,
+        "total_ratio": 1.07,
+        "fav_team": "BOS",
+        "ml_margin": 0.24,
+        "spread": 2.0,
+        "pos_edges": '{"BOS": {"F": {"dvpoa": 0.15, "n": 2}}}',
     }
     ctx = ctx_from_row(row)
     assert isinstance(ctx, GameCtx)
@@ -126,15 +203,40 @@ def test_ctx_from_row_parses_pos_edges():
 def test_ctxs_from_frame_keys_by_game_and_attaches_rho():
     offers = pd.DataFrame(
         [
-            {"League": "NBA", "Game": "BOS/PHI", "Date": "2026-06-13", "Team": "BOS",
-             "Opponent": "PHI", "O/U": 120.0, "Moneyline": 0.55, "Player": "A", "Market": "PTS"},
-            {"League": "NBA", "Game": "BOS/PHI", "Date": "2026-06-13", "Team": "PHI",
-             "Opponent": "BOS", "O/U": 118.0, "Moneyline": 0.45, "Player": "B", "Market": "PTS"},
+            {
+                "League": "NBA",
+                "Game": "BOS/PHI",
+                "Date": "2026-06-13",
+                "Team": "BOS",
+                "Opponent": "PHI",
+                "O/U": 120.0,
+                "Moneyline": 0.55,
+                "Player": "A",
+                "Market": "PTS",
+            },
+            {
+                "League": "NBA",
+                "Game": "BOS/PHI",
+                "Date": "2026-06-13",
+                "Team": "PHI",
+                "Opponent": "BOS",
+                "O/U": 118.0,
+                "Moneyline": 0.45,
+                "Player": "B",
+                "Market": "PTS",
+            },
         ]
     )
     ctx_df = build_game_context(offers, {"NBA": 111.667})
-    corr = [{"League": "NBA", "Game": "BOS/PHI", "leg_a": "A|PTS|Over",
-             "leg_b": "B|REB|Over", "rho": 0.4}]
+    corr = [
+        {
+            "League": "NBA",
+            "Game": "BOS/PHI",
+            "leg_a": "A|PTS|Over",
+            "leg_b": "B|REB|Over",
+            "rho": 0.4,
+        }
+    ]
     ctxs = ctxs_from_frame(ctx_df, corr)
     assert set(ctxs) == {"BOS/PHI"}
     assert ctxs["BOS/PHI"].rho[frozenset({"A|PTS|Over", "B|REB|Over"})] == 0.4
@@ -149,7 +251,18 @@ def test_leg_dataclass_is_frozen():
 def test_build_game_context_empty_safe():
     out = build_game_context(pd.DataFrame(), {"NBA": 111.667})
     assert list(out.columns) == [
-        "League", "Game", "Date", "game_total", "spread", "fav_team", "ml_fav_prob",
-        "ml_margin", "total_ratio", "baseline_total", "shape", "pos_edges", "n_offers",
+        "League",
+        "Game",
+        "Date",
+        "game_total",
+        "spread",
+        "fav_team",
+        "ml_fav_prob",
+        "ml_margin",
+        "total_ratio",
+        "baseline_total",
+        "shape",
+        "pos_edges",
+        "n_offers",
     ]
     assert out.empty

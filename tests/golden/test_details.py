@@ -56,9 +56,7 @@ def _comp_pairs() -> pd.DataFrame:
 
 
 def test_comps_vs_opponent_avg_and_pct_diff():
-    out = comps_vs_opponent(
-        "Star", "PHI", "PTS", _comp_pairs(), _gamelog(), _COLS, today=_TODAY
-    )
+    out = comps_vs_opponent("Star", "PHI", "PTS", _comp_pairs(), _gamelog(), _COLS, today=_TODAY)
     # CompC never faced PHI ⇒ dropped; order follows the closest-first comp list.
     assert [r["comp"] for r in out] == ["CompA", "CompB"]
     a, b = out
@@ -71,16 +69,12 @@ def test_comps_vs_opponent_avg_and_pct_diff():
 
 
 def test_comps_vs_opponent_none_faced_is_empty():
-    out = comps_vs_opponent(
-        "Star", "DEN", "PTS", _comp_pairs(), _gamelog(), _COLS, today=_TODAY
-    )
+    out = comps_vs_opponent("Star", "DEN", "PTS", _comp_pairs(), _gamelog(), _COLS, today=_TODAY)
     assert out == []
 
 
 def test_comps_vs_opponent_unknown_player_is_empty():
-    out = comps_vs_opponent(
-        "Ghost", "PHI", "PTS", _comp_pairs(), _gamelog(), _COLS, today=_TODAY
-    )
+    out = comps_vs_opponent("Ghost", "PHI", "PTS", _comp_pairs(), _gamelog(), _COLS, today=_TODAY)
     assert out == []
 
 
@@ -178,10 +172,24 @@ def test_position_percentile():
 def _slate_offers() -> pd.DataFrame:
     return pd.DataFrame(
         [
-            {"League": "NBA", "Date": "2026-06-15", "Player": "Star", "Market": "PTS",
-             "Opponent": "PHI", "Position": "G1", "Stat": "PTS"},
-            {"League": "NBA", "Date": "2026-06-15", "Player": "Nova", "Market": "PTS",
-             "Opponent": "BOS", "Position": "G1", "Stat": "PTS"},
+            {
+                "League": "NBA",
+                "Date": "2026-06-15",
+                "Player": "Star",
+                "Market": "PTS",
+                "Opponent": "PHI",
+                "Position": "G1",
+                "Stat": "PTS",
+            },
+            {
+                "League": "NBA",
+                "Date": "2026-06-15",
+                "Player": "Nova",
+                "Market": "PTS",
+                "Opponent": "BOS",
+                "Position": "G1",
+                "Stat": "PTS",
+            },
         ]
     )
 
@@ -189,15 +197,87 @@ def _slate_offers() -> pd.DataFrame:
 def _slate_gamelog() -> pd.DataFrame:
     return pd.DataFrame(
         [
-            {"PLAYER": "Star", "OPP": "PHI", "DATE": "2026-06-01", "PTS": 25.0, "MIN": 30.0, "FGA": 10.0, "REB": 5.0},
-            {"PLAYER": "Star", "OPP": "BOS", "DATE": "2026-05-01", "PTS": 20.0, "MIN": 28.0, "FGA": 14.0, "REB": 7.0},
-            {"PLAYER": "Nova", "OPP": "BOS", "DATE": "2026-06-01", "PTS": 18.0, "MIN": 25.0, "FGA": 8.0, "REB": 6.0},
-            {"PLAYER": "Nova", "OPP": "PHI", "DATE": "2026-05-01", "PTS": 22.0, "MIN": 27.0, "FGA": 8.0, "REB": 4.0},
-            {"PLAYER": "CompA", "OPP": "PHI", "DATE": "2026-06-01", "PTS": 20.0, "MIN": 0.0, "FGA": 0.0, "REB": 0.0},
-            {"PLAYER": "CompA", "OPP": "PHI", "DATE": "2026-05-01", "PTS": 30.0, "MIN": 0.0, "FGA": 0.0, "REB": 0.0},
-            {"PLAYER": "CompA", "OPP": "BOS", "DATE": "2026-04-01", "PTS": 10.0, "MIN": 0.0, "FGA": 0.0, "REB": 0.0},
-            {"PLAYER": "CompB", "OPP": "PHI", "DATE": "2026-06-02", "PTS": 10.0, "MIN": 0.0, "FGA": 0.0, "REB": 0.0},
-            {"PLAYER": "CompB", "OPP": "NYK", "DATE": "2026-05-02", "PTS": 30.0, "MIN": 0.0, "FGA": 0.0, "REB": 0.0},
+            {
+                "PLAYER": "Star",
+                "OPP": "PHI",
+                "DATE": "2026-06-01",
+                "PTS": 25.0,
+                "MIN": 30.0,
+                "FGA": 10.0,
+                "REB": 5.0,
+            },
+            {
+                "PLAYER": "Star",
+                "OPP": "BOS",
+                "DATE": "2026-05-01",
+                "PTS": 20.0,
+                "MIN": 28.0,
+                "FGA": 14.0,
+                "REB": 7.0,
+            },
+            {
+                "PLAYER": "Nova",
+                "OPP": "BOS",
+                "DATE": "2026-06-01",
+                "PTS": 18.0,
+                "MIN": 25.0,
+                "FGA": 8.0,
+                "REB": 6.0,
+            },
+            {
+                "PLAYER": "Nova",
+                "OPP": "PHI",
+                "DATE": "2026-05-01",
+                "PTS": 22.0,
+                "MIN": 27.0,
+                "FGA": 8.0,
+                "REB": 4.0,
+            },
+            {
+                "PLAYER": "CompA",
+                "OPP": "PHI",
+                "DATE": "2026-06-01",
+                "PTS": 20.0,
+                "MIN": 0.0,
+                "FGA": 0.0,
+                "REB": 0.0,
+            },
+            {
+                "PLAYER": "CompA",
+                "OPP": "PHI",
+                "DATE": "2026-05-01",
+                "PTS": 30.0,
+                "MIN": 0.0,
+                "FGA": 0.0,
+                "REB": 0.0,
+            },
+            {
+                "PLAYER": "CompA",
+                "OPP": "BOS",
+                "DATE": "2026-04-01",
+                "PTS": 10.0,
+                "MIN": 0.0,
+                "FGA": 0.0,
+                "REB": 0.0,
+            },
+            {
+                "PLAYER": "CompB",
+                "OPP": "PHI",
+                "DATE": "2026-06-02",
+                "PTS": 10.0,
+                "MIN": 0.0,
+                "FGA": 0.0,
+                "REB": 0.0,
+            },
+            {
+                "PLAYER": "CompB",
+                "OPP": "NYK",
+                "DATE": "2026-05-02",
+                "PTS": 30.0,
+                "MIN": 0.0,
+                "FGA": 0.0,
+                "REB": 0.0,
+            },
         ]
     )
 
@@ -249,10 +329,24 @@ def _nfl_offers() -> pd.DataFrame:
     # Position carries the depth rank (QB1 / WR1) — the volume map keys on the base.
     return pd.DataFrame(
         [
-            {"League": "NFL", "Date": "2026-06-15", "Player": "Passer", "Market": "passing yards",
-             "Opponent": "NYG", "Position": "QB1", "Stat": "passing yards"},
-            {"League": "NFL", "Date": "2026-06-15", "Player": "Catcher", "Market": "receiving yards",
-             "Opponent": "DAL", "Position": "WR1", "Stat": "receiving yards"},
+            {
+                "League": "NFL",
+                "Date": "2026-06-15",
+                "Player": "Passer",
+                "Market": "passing yards",
+                "Opponent": "NYG",
+                "Position": "QB1",
+                "Stat": "passing yards",
+            },
+            {
+                "League": "NFL",
+                "Date": "2026-06-15",
+                "Player": "Catcher",
+                "Market": "receiving yards",
+                "Opponent": "DAL",
+                "Position": "WR1",
+                "Stat": "receiving yards",
+            },
         ]
     )
 
@@ -260,10 +354,34 @@ def _nfl_offers() -> pd.DataFrame:
 def _nfl_gamelog() -> pd.DataFrame:
     return pd.DataFrame(
         [
-            {"PLAYER": "Passer", "OPP": "NYG", "DATE": "2026-06-01", "attempts": 35.0, "targets": 0.0},
-            {"PLAYER": "Passer", "OPP": "DAL", "DATE": "2026-05-01", "attempts": 31.0, "targets": 0.0},
-            {"PLAYER": "Catcher", "OPP": "DAL", "DATE": "2026-06-01", "attempts": 0.0, "targets": 9.0},
-            {"PLAYER": "Catcher", "OPP": "NYG", "DATE": "2026-05-01", "attempts": 0.0, "targets": 7.0},
+            {
+                "PLAYER": "Passer",
+                "OPP": "NYG",
+                "DATE": "2026-06-01",
+                "attempts": 35.0,
+                "targets": 0.0,
+            },
+            {
+                "PLAYER": "Passer",
+                "OPP": "DAL",
+                "DATE": "2026-05-01",
+                "attempts": 31.0,
+                "targets": 0.0,
+            },
+            {
+                "PLAYER": "Catcher",
+                "OPP": "DAL",
+                "DATE": "2026-06-01",
+                "attempts": 0.0,
+                "targets": 9.0,
+            },
+            {
+                "PLAYER": "Catcher",
+                "OPP": "NYG",
+                "DATE": "2026-05-01",
+                "attempts": 0.0,
+                "targets": 7.0,
+            },
         ]
     )
 
@@ -291,11 +409,15 @@ def test_build_offer_details_nfl_volume_stat_by_position():
 
 
 def test_build_offer_details_empty_safe():
-    out = build_offer_details(
-        pd.DataFrame(), {}, _importances(), exclude=set(), today=_TODAY
-    )
+    out = build_offer_details(pd.DataFrame(), {}, _importances(), exclude=set(), today=_TODAY)
     assert list(out.columns) == [
-        "League", "Date", "Player", "Market", "Opponent",
-        "comps_vs_opp", "volume_trend", "other_stats",
+        "League",
+        "Date",
+        "Player",
+        "Market",
+        "Opponent",
+        "comps_vs_opp",
+        "volume_trend",
+        "other_stats",
     ]
     assert out.empty

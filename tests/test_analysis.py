@@ -89,7 +89,9 @@ def test_compute_book_brier_skill_score_is_positive_when_model_beats_book():
     result = rng.choice(["Over", "Under"], size=n, p=[0.7, 0.3])
     model_p = np.where(result == "Over", 0.8, 0.3)
     books_p = np.full(n, 0.5)
-    subset = pd.DataFrame({"Bet": bet, "Result": result, "Win Prob": model_p, "Market Prob": books_p})
+    subset = pd.DataFrame(
+        {"Bet": bet, "Result": result, "Win Prob": model_p, "Market Prob": books_p}
+    )
     assert compute_book_brier_skill_score(subset) > 0
 
 
@@ -100,5 +102,7 @@ def test_compute_book_brier_skill_score_is_negative_when_book_beats_model():
     result = rng.choice(["Over", "Under"], size=n, p=[0.7, 0.3])
     model_p = np.full(n, 0.5)
     books_p = np.where(result == "Over", 0.8, 0.3)
-    subset = pd.DataFrame({"Bet": bet, "Result": result, "Win Prob": model_p, "Market Prob": books_p})
+    subset = pd.DataFrame(
+        {"Bet": bet, "Result": result, "Win Prob": model_p, "Market Prob": books_p}
+    )
     assert compute_book_brier_skill_score(subset) < 0

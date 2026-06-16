@@ -92,7 +92,17 @@ def test_ranking_map_keys_pinned():
 
 def test_empty_input_returns_empty():
     df = pd.DataFrame(
-        columns=["Player", "Market", "Platform", "Boost", "Win Prob", "Market EV", "Hit", "_date", "Kelly"]
+        columns=[
+            "Player",
+            "Market",
+            "Platform",
+            "Boost",
+            "Win Prob",
+            "Market EV",
+            "Hit",
+            "_date",
+            "Kelly",
+        ]
     )
     result = simulate_strategy(
         df,
