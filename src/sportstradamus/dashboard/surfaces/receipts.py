@@ -64,8 +64,6 @@ if history.empty:
 filters = sidebar_filters(history, parlays, key_prefix="receipts_")
 df = filtered_history_or_stop(history, filters)
 
-# One real-world bet per (player, market, line, side, date): the snapshot lists the same
-# prop under every book that posts it, so tailing it once — not once per book — is honest.
 df = dedup_bets(df)
 prob_col = "Win Prob" if "Win Prob" in df.columns and df["Win Prob"].notna().any() else "Model EV"
 df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date

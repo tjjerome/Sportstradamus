@@ -142,7 +142,6 @@ def _load_history_cached(mtime: float) -> pd.DataFrame:
     if history.empty:
         return history
 
-    # Migrate old flat schema → normalized (one row per prediction, Offers list)
     if "Offers" not in history.columns:
         history = _migrate_flat_history(history)
         write_history(history)
