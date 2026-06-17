@@ -375,11 +375,19 @@ Entry: none — most of this recurs.
    `see_features()` ([`training/shap.py`](../../src/sportstradamus/training/shap.py)) so rows
    derive only from current model pickles; add a golden assert that no `Player Player ` rows
    exist. *Acceptance:* §3 hygiene block reports 0 stale rows; golden test pins it.
-4. **Train/live parity harness (build-first — blocks all Stage-3/4 feature work).** No harness
-   exists comparing `get_training_matrix` vs `get_stats` on a frozen gameday. Build the golden
-   test: one frozen gameday, both paths, assert column sets and values match for the shared
-   surface. *Acceptance:* test in `tests/golden/`, green on the current feature set, and every
-   later feature batch extends it. Until this exists, no new feature ships.
+4. **Train/live parity harness (BUILT — `tests/golden/test_train_live_feature_parity.py`).**
+   `get_training_matrix` and the live serving path share `get_stats`; the only per-gameday
+   divergence is `_game_context`'s `date < today` branch (historical reads the gamelog row,
+   upcoming reads `upcoming_games` + `archive.get_moneyline`/`get_total`) plus the fillna
+   asymmetry (training `replace([inf,-inf],0)`, serving not). The harness drives the real
+   `StatsNBA.get_stats` twice on one synthetic frozen gameday — flipping only that branch (real
+   today vs a frozen `today == D`) — and asserts identical column sets, identical values on the
+   `get_stat_columns` shared surface, no inf on the shared surface, and matching
+   `Home`/`Moneyline`/`Total`. Synthetic logs + stubbed archive + pre-seeded comps + injected
+   depth keep it a fast (~3.5 s) network-free golden test; those stubs are branch-independent
+   shared state so they cannot mask the divergence. **Every later feature batch extends it**
+   (the in-file parity-surface extension point) — per §7.2 step 2, a new per-gameday feature
+   that does not extend this gate does not ship.
 5. **Pre-register the NFL g1×dispersion experiment (hole #4 — the difference between NFL
    reaching 10 and reaching 15).** Before/after paired Brier-CI on the five g1+g4 NFL volume
    cells (attempts, carries, completions, receiving-yards, rushing-yards) under a candidate §6.1
@@ -1061,6 +1069,7 @@ is a first-class ship axis, often decisive; the variance regularizer is untried,
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-06-17 · §6.0.4 train/live parity harness BUILT (`tests/golden/test_train_live_feature_parity.py`, ~3.5 s, sanity-flip verified) — Stage-3/4 feature work now unblocked. Free-passer sweep null (0 ship-True∧withheld in the 19 fresh `model_stats` rows); hole-#0b deferred (cycle-1 g4 churn only). also synced model-research `stat_meta.json` to origin/devel — demoted WNBA PA + NBA BLST `devel`→`withheld` (fail g4; `test_ship_gate_invariant` now green; served set == production). · next: §6.0.3 stale-importances purge or §6.3 QW-1 features
 - 2026-06-13 · moved to docs/handoffs/; reformatted to handoff template (§1–§10); stages §7.N→§6.N, validation §11.N→§7.N, failure §9→§8, research §10→§8.2 · next: §6.0 free-passer sweep + hole-#0b packet
 - 2026-06-12 · consolidated four docs into one ordered progression; MR loop deltas folded in · next: §6.0 Stage 0
 - 2026-06-10 · created (as handoffs/model-track.md) · brief drafted from roadmap-v3 migration · next: free-passer re-score sweep
