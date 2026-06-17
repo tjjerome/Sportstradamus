@@ -28,7 +28,10 @@ After=network.target
 
 [Service]
 WorkingDirectory=/home/trevor/Sportstradamus
-ExecStart=/home/trevor/.local/bin/poetry run streamlit run src/sportstradamus/dashboard_app.py --server.port 8501 --server.address 127.0.0.1 --server.headless true
+Environment=STREAMLIT_SERVER_PORT=8501
+Environment=STREAMLIT_SERVER_ADDRESS=127.0.0.1
+Environment=STREAMLIT_SERVER_HEADLESS=true
+ExecStart=/home/trevor/.local/bin/poetry run dashboard
 Restart=always
 RestartSec=5
 User=trevor
@@ -37,8 +40,17 @@ User=trevor
 WantedBy=multi-user.target
 ```
 
-Bind to `127.0.0.1` so Streamlit is only reachable through the local
-loopback. Tailscale Serve (step 7) proxies the tailnet hostname into it.
+`poetry run dashboard` is the canonical entry point (`sportstradamus.dashboard:run`);
+it launches `streamlit run` on the package's `dashboard/app.py` with the file watcher
+off, so an unattended server never shows the misleading "Source file changed, rerun?"
+popup. Don't point `ExecStart` at a `.py` directly — the launcher centralizes those
+production flags, and the old single-file `dashboard_app.py` no longer exists (the
+dashboard is a package now).
+
+The bind comes from the `Environment=` lines (Streamlit reads `STREAMLIT_SERVER_*` env
+vars), since the `dashboard` command takes no flags. `STREAMLIT_SERVER_ADDRESS=127.0.0.1`
+keeps Streamlit on the local loopback so it's only reachable through Tailscale Serve
+(step 7), which proxies the tailnet hostname into it.
 
 Enable and start:
 
@@ -161,9 +173,9 @@ both `tailscaled` and `sportstradamus-dashboard` should auto-start, and
 |---|---|
 | `tailscale status` shows the device offline | `sudo systemctl restart tailscaled` |
 | HTTPS URL returns 502 | Check the dashboard is listening: `ss -tlnp \| grep 8501` |
-| Dashboard reachable on LAN but not via tailnet | Streamlit bound to `127.0.0.1` is correct *only* if `tailscale serve` proxies it; otherwise bind to `0.0.0.0` |
+| Dashboard reachable on LAN but not via tailnet | Binding to `127.0.0.1` (via `STREAMLIT_SERVER_ADDRESS`) is correct *only* if `tailscale serve` proxies it; otherwise set `Environment=STREAMLIT_SERVER_ADDRESS=0.0.0.0` |
 | Cert error in browser | Re-run `sudo tailscale cert <hostname>`; check it matches the URL exactly |
-| Dashboard not restarting after crash | `journalctl -u sportstradamus-dashboard -n 100` — check the `ExecStart` path matches your `poetry` install |
+| Dashboard not restarting after crash | `journalctl -u sportstradamus-dashboard -n 100` — check the `poetry` path in `ExecStart` matches `which poetry`, and that `poetry run dashboard` starts by hand |
 
 ## Day-to-day commands
 
