@@ -87,6 +87,14 @@ _LOW_API_CREDITS_THRESHOLD = 50
 _LIVE_DAY_WINDOW = 6
 _HIST_DAY_WINDOW = 1
 
+# Game lines (totals, spreads) are symmetric: the no-vig median price IS the
+# implied value, so their EV must invert under a symmetric distribution. Pin the
+# family explicitly rather than lean on get_ev's default — a 2026-03 default flip
+# to "Gamma" silently inflated every archived NBA total by 1/ln(2) (Gamma at cv=1
+# is exponential, mean = median/ln(2)) before it was caught. "Normal" forces
+# alpha=0 and is immune to any future change of get_ev's default.
+_GAME_LINE_DIST = "Normal"
+
 
 class OddsAPIAuthError(RuntimeError):
     """Raised on an Odds API ``401`` — out of usage credits or a bad key.
@@ -256,11 +264,11 @@ def _parse_market_books(game):
             elif market["key"] == "totals":
                 outcomes = sorted(market["outcomes"], key=itemgetter("name"))
                 odds = no_vig_odds(outcomes[0]["price"], outcomes[1]["price"])
-                totals[book["key"]] = get_ev(outcomes[1]["point"], odds[1])
+                totals[book["key"]] = get_ev(outcomes[1]["point"], odds[1], dist=_GAME_LINE_DIST)
             elif market["key"] == "spreads" and market["outcomes"][0].get("point"):
                 outcomes = sorted(market["outcomes"], key=itemgetter("point"))
                 odds = no_vig_odds(outcomes[0]["price"], outcomes[1]["price"])
-                spread = get_ev(outcomes[1]["point"], odds[1])
+                spread = get_ev(outcomes[1]["point"], odds[1], dist=_GAME_LINE_DIST)
                 if outcomes[0]["name"] == game["home_team"]:
                     spread_home[book["key"]] = spread
                     spread_away[book["key"]] = -spread
@@ -544,7 +552,9 @@ def _event_totals_book(market, book, totals):
     outcomes = sorted(market["outcomes"], key=itemgetter("name"))
     sub_odds = no_vig_odds(outcomes[0]["price"], outcomes[1]["price"])
     totals.setdefault(spread_name, {})
-    totals[spread_name][book["key"]] = get_ev(outcomes[1]["point"], sub_odds[1])
+    totals[spread_name][book["key"]] = get_ev(
+        outcomes[1]["point"], sub_odds[1], dist=_GAME_LINE_DIST
+    )
 
 
 def _event_spread_book(market, book, game, spread_home, spread_away):
@@ -552,7 +562,7 @@ def _event_spread_book(market, book, game, spread_home, spread_away):
     spread_name = " ".join(market["key"].split("_")[1:])
     outcomes = sorted(market["outcomes"], key=itemgetter("point"))
     sub_odds = no_vig_odds(outcomes[0]["price"], outcomes[1]["price"])
-    spread = get_ev(outcomes[1]["point"], sub_odds[1])
+    spread = get_ev(outcomes[1]["point"], sub_odds[1], dist=_GAME_LINE_DIST)
     spread_home.setdefault(spread_name, {})
     spread_away.setdefault(spread_name, {})
     if outcomes[0]["name"] == game["home_team"]:

@@ -229,7 +229,8 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None):
         under: The bookmaker's implied probability that the outcome is under the line.
         cv: Coefficient of variation (shape source when alpha/r are not supplied).
         dist: Distribution family — ``"Gamma"``/``"ZAGamma"``/``"NegBin"``/
-            ``"ZINB"``/``"Poisson"``/``"SkewNormal"``.
+            ``"ZINB"``/``"Poisson"``/``"SkewNormal"``/``"Normal"`` (symmetric,
+            ev == line at an even-money price; game lines pin here).
         gate: Zero-inflation probability; ``None`` disables ZI handling.
         skew_alpha: SkewNormal skewness; ``None`` → 0 (symmetric).
 
@@ -332,6 +333,11 @@ def get_odds(
         return _negbin_odds(line, ev, cv, r, gate, dist)
     if dist == "SkewNormal":
         return _skewnormal_odds(high, low, ev, cv, sigma, skew_alpha, gate)
+    if dist == "Normal":
+        # skew_alpha is deliberately ignored: game lines must invert symmetrically
+        # because the no-vig median price IS the implied value. Passing any skew
+        # here would make the EV depend on the book's vig direction.
+        return _skewnormal_odds(high, low, ev, cv, sigma, 0.0, gate)
     return _gamma_odds(high, low, ev, cv, alpha, gate, dist)
 
 
