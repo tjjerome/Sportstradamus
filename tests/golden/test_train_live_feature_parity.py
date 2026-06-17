@@ -52,7 +52,9 @@ GAMES_BACK = 15
 # Per-team game context baked into the synthetic gamelog. The stubbed archive and
 # upcoming_games must echo these exactly, so the two _game_context branches agree.
 TEAM_MONEYLINE = {"AAA": -150.0, "BBB": 130.0}
-TEAM_TOTAL = {"AAA": 112.5, "BBB": 110.0}
+# 14.5-point implied gap so |Spread| clears the NBA blowout threshold -- exercises
+# the Blowout==1 (.astype(int) on True) path through both _game_context branches.
+TEAM_TOTAL = {"AAA": 112.5, "BBB": 98.0}
 TEAM_HOME = {"AAA": True, "BBB": False}
 
 
@@ -240,7 +242,9 @@ def test_train_and_live_feature_paths_agree_on_a_frozen_gameday(primed_stats, mo
     assert not inf_cols, f"shared feature columns contain inf (train zeros it, serve does not): {inf_cols}"
 
     # The _game_context invariant, named explicitly so a regression points here.
-    for col in ("Home", "Moneyline", "Total"):
+    # OppTotal + the derived Spread/GameTotal/Blowout (QW-1) ride the same
+    # historical-gamelog vs upcoming-archive divergence as Total, so they pin here too.
+    for col in ("Home", "Moneyline", "Total", "OppTotal", "Spread", "GameTotal", "Blowout"):
         assert train[col].tolist() == live[col].tolist(), f"_game_context branch divergence on {col}"
 
     # parity-surface extension point: a future feature batch that adds a per-gameday

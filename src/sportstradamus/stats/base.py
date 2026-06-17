@@ -83,6 +83,25 @@ _SEASON_ROLLOVER_MONTH: int = 8
 # tip-offs.
 _SCHEDULE_LOOKAHEAD_DAYS: int = 3
 
+# A "blowout" is a game lopsided enough to suppress a starter's volume. Each
+# threshold is the |implied spread| (own minus opponent implied total, league
+# units) at which per-player-normalized starter playing time first drops >~4%
+# and keeps falling. Derived from the gamelog: the effect is FAVORITE-ONLY (the
+# favorite rests starters; underdog starters play full/more minutes chasing) —
+# the signed Spread feature carries that asymmetry, so this stays |spread|-based
+# as a sign-agnostic regime flag. NBA/WNBA knee ~10 pts (≈ p80 spread); NFL ~11
+# (snaps resist past p80). NHL shows no playing-time effect (TimeShare flat/rising
+# in blowouts) so its value is a nominal lopsidedness marker (~p90, expect Blowout
+# inert and reverted at validation); MLB has no local line history to fit, so 2.5
+# runs is a reasoned default, not derived.
+_BLOWOUT_SPREAD_THRESHOLD: dict[str, float] = {
+    "NBA": 10.0,
+    "WNBA": 10.0,
+    "NFL": 11.0,
+    "NHL": 1.5,
+    "MLB": 2.5,
+}
+
 
 # Columns of the empty per-player feature frame get_stats seeds before populating
 # rows -- and the frame it returns when no requested player has game history.
@@ -107,6 +126,10 @@ _BASE_STAT_COLUMNS = [
     "Home",
     "Moneyline",
     "Total",
+    "OppTotal",
+    "Spread",
+    "GameTotal",
+    "Blowout",
 ]
 # LazyArchive defers DuckDB lock acquisition until the first attribute
 # access so processes that merely import this module — most importantly
@@ -1270,13 +1293,16 @@ class Stats:
         return stats.loc[~stats.index.duplicated()]
 
     def _game_context(self, stats, offers, market, date, teams, opponents):
-        """Attach Home / Moneyline / Total and resolve the game-day matchup.
+        """Attach the game-script context and resolve the game-day matchup.
 
-        Historical (``date`` in the past) reads the realized ``gamelog`` row and
-        rebinds ``teams`` / ``opponents`` (and MLB ``pitchers``) from it; upcoming
-        reads ``upcoming_games`` plus the archived moneyline/total. Returns the
-        (possibly rebound) ``(stats, teams, opponents, pitchers)``; ``pitchers`` is
-        ``None`` for non-MLB leagues.
+        Sets Home / Moneyline / Total (own team) plus OppTotal (opponent implied
+        total) and the derived Spread / GameTotal / Blowout. Historical (``date``
+        in the past) reads the realized ``gamelog`` row and rebinds ``teams`` /
+        ``opponents`` (and MLB ``pitchers``) from it, taking OppTotal from the same
+        frame; upcoming reads ``upcoming_games`` plus the archived moneyline/total
+        and an extra ``get_total`` for the opponent. Returns the (possibly rebound)
+        ``(stats, teams, opponents, pitchers)``; ``pitchers`` is ``None`` for
+        non-MLB leagues.
         """
         pitchers = None
         if date < datetime.today().date():
@@ -1291,6 +1317,8 @@ class Stats:
 
             teams = todays_games[self.log_strings["team"]].to_dict()
             opponents = todays_games[self.log_strings["opponent"]].to_dict()
+            team_total = todays_games.groupby(self.log_strings["team"])["totals"].first()
+            stats["OppTotal"] = pd.Series(opponents).map(team_total)
             if self.league == "MLB":
                 pitchers = todays_games["opponent pitcher"].to_dict()
         else:
@@ -1322,6 +1350,14 @@ class Stats:
             stats["Total"] = [
                 archive.get_total(self.league, dates[x], teams[x]) for x in stats.index
             ]
+            stats["OppTotal"] = [
+                archive.get_total(self.league, dates[x], opponents[x]) for x in stats.index
+            ]
+        stats["Spread"] = stats["Total"] - stats["OppTotal"]
+        stats["GameTotal"] = stats["Total"] + stats["OppTotal"]
+        stats["Blowout"] = (
+            stats["Spread"].abs() > _BLOWOUT_SPREAD_THRESHOLD[self.league]
+        ).astype(int)
         return stats, teams, opponents, pitchers
 
     def _h2h_features(self, stats, market, opponents, pitchers):

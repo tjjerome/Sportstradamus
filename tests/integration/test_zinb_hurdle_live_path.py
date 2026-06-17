@@ -68,7 +68,9 @@ def test_hurdle_zinb_decodes_finite_and_reconstructs_zero_rate_identity():
     M = M.sort_values(["Date"]).head(_GATE_N_ROWS).reset_index(drop=True)
 
     cols = StatsNBA().get_stat_columns("FG3M")
-    X = M[cols].copy()
+    # reindex (not M[cols]) matches production _step_build_splits: a feature_filter
+    # addition not yet regenerated into the cached parquet fills NaN, not KeyError.
+    X = M.reindex(columns=cols).copy()
     for c in ("Home", "Player position"):
         if c in X.columns:
             X[c] = X[c].astype("category")
@@ -158,7 +160,9 @@ def test_hurdle_zinb_live_path_is_deterministic():
     M = pd.read_parquet(parquet)
     M = M.sort_values(["Date"]).head(_GATE_N_ROWS).reset_index(drop=True)
     cols = StatsNBA().get_stat_columns("FG3M")
-    X = M[cols].copy()
+    # reindex (not M[cols]) matches production _step_build_splits: a feature_filter
+    # addition not yet regenerated into the cached parquet fills NaN, not KeyError.
+    X = M.reindex(columns=cols).copy()
     for c in ("Home", "Player position"):
         if c in X.columns:
             X[c] = X[c].astype("category")
