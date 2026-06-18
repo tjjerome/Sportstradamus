@@ -411,5 +411,31 @@ def test_archive_auto_migrates_pre_observed_at_schema(tmp_path, monkeypatch):
         Archive._instance._initialized = False
 
 
+# --------------------------------------------------------------------------
+# ladder capture (WS1 — alt-line rungs)
+# --------------------------------------------------------------------------
+
+
+def test_add_ladder_round_trips_all_rungs(archive):
+    archive.add_ladder(
+        "NBA",
+        "PTS",
+        "2026-05-08",
+        "Nikola Jokic",
+        "draftkings",
+        [(19.5, 0.82), (24.5, 0.55), (29.5, 0.28)],
+    )
+    archive.write()
+
+    rows = archive._connection.execute(
+        "SELECT book, line, p_over FROM ladder ORDER BY line"
+    ).fetchall()
+    assert rows == [
+        ("draftkings", 19.5, 0.82),
+        ("draftkings", 24.5, 0.55),
+        ("draftkings", 29.5, 0.28),
+    ]
+
+
 # Silence unused-import warnings — datetime is referenced via the dt alias.
 _ = datetime
