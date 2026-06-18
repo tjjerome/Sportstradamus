@@ -78,23 +78,46 @@ def prob_to_odds(p):
     return int(np.round((p / (1 - p)) * -100))
 
 
-def no_vig_odds(over, under=None):
+# Power de-vig applies only to lopsided quotes; on the body (near even money) it
+# is numerically identical to the proportional method, so gating it there is free.
+_DEVIG_LOPSIDED_FLAG = 0.3
+# Bracket ceiling for the power-exponent root-find; k stays near 1 for real vigs.
+_DEVIG_POWER_MAX = 50.0
+
+
+def _power_devig_exponent(o: float, u: float) -> float:
+    """Solve ``o**k + u**k == 1`` for the de-vig power ``k`` (Clarke et al. 2017)."""
+    if o + u <= 1:
+        return 1.0
+    return brentq(lambda k: o**k + u**k - 1.0, 1.0, _DEVIG_POWER_MAX, xtol=1e-10)
+
+
+def no_vig_odds(over, under=None, method="proportional"):
     """Return ``[p_over, p_under]`` with the bookmaker's hold removed.
 
     Accepts either American odds (``|x| >= 100``) or decimal odds. When
     ``under`` is omitted, the caller is treated as offering a one-sided
     line; we fabricate an under from a conservative 6.5% vig assumption
     so the two-sided math still works.
+
+    ``method="power"`` switches lopsided two-sided quotes (``|p_over - 0.5| >
+    _DEVIG_LOPSIDED_FLAG``) to the power (logarithmic) de-vig, which corrects
+    favourite-longshot bias (Clarke, Kovalchik & Ingram 2017); the body and
+    every one-sided line stay on the proportional default (identical at even
+    money).
     """
     o = odds_to_prob(over) if np.abs(over) >= 100 else 1 / over
     if under is None or under <= 0:
         juice = 1.0652
         u = juice - o
-    else:
-        u = odds_to_prob(under) if np.abs(under) >= 100 else 1 / under
+        return [o / juice, u / juice]
 
-        juice = o + u
+    u = odds_to_prob(under) if np.abs(under) >= 100 else 1 / under
+    if method == "power" and np.abs(o / (o + u) - 0.5) > _DEVIG_LOPSIDED_FLAG:
+        k = _power_devig_exponent(o, u)
+        return [o**k, u**k]
 
+    juice = o + u
     return [o / juice, u / juice]
 
 
@@ -131,6 +154,21 @@ def skewnormal_loc_from_mean(
     skew = np.asarray(skew, dtype=float)
     delta = skew / np.sqrt(1.0 + skew**2)
     return mean - sigma * delta * np.sqrt(2.0 / np.pi)
+
+
+def _book_loc_with_skew(ev_b, book_sigma, line, book_skew):
+    """SkewNormal book ``loc`` that holds the de-vigged point (the line is a median).
+
+    The symmetric book places ``P(X < line)`` at ``norm.cdf(line, ev_b, book_sigma)``.
+    This returns the ``loc`` for which a ``SkewNormal(book_skew)`` book reproduces
+    that same probability at ``line``, so giving the book a skew shifts its *mean*
+    without moving the de-vigged point it was priced at. Reduces to ``ev_b`` at
+    ``book_skew == 0`` (then ``skewnorm.ppf(Φ(z), 0) == z``).
+    """
+    ev_b = np.asarray(ev_b, dtype=float)
+    book_sigma = np.asarray(book_sigma, dtype=float)
+    z = (np.asarray(line, dtype=float) - ev_b) / book_sigma
+    return ev_b + book_sigma * (z - skewnorm.ppf(norm.cdf(z), book_skew))
 
 
 def _crps_grid_bound(y: np.ndarray, mean: np.ndarray) -> float:
@@ -509,6 +547,8 @@ def fused_loc(
     skew_alpha=None,
     gate_model=None,
     gate_book=None,
+    line=None,
+    book_skew=0.0,
 ):
     """Blend model and bookmaker distribution parameters with weight ``w``.
 
@@ -543,6 +583,12 @@ def fused_loc(
         skew_alpha: SkewNormal per-observation skewness from the model.
         gate_model: Model's per-observation zero-inflation gate.
         gate_book: Historical zero-inflation gate for the book side.
+        line: The bookmaker's consensus line. Required by ``_book_loc_with_skew``
+            when ``book_skew != 0``; ignored otherwise and for non-SkewNormal dists.
+        book_skew: SkewNormal skewness prior for the book side. When non-zero, the
+            book's ``loc`` is shifted so the de-vigged price (a median) is held
+            fixed — see :func:`_book_loc_with_skew`. Zero recovers the symmetric
+            (Normal) book side.
 
     Returns:
         NegBin → ``(r_blend, p, gate_blend)``,
@@ -571,20 +617,25 @@ def fused_loc(
         model_sigma = np.clip(np.asarray(sigma, dtype=float), 1e-6, None)
         model_skew = np.asarray(skew_alpha, dtype=float)
 
-        # Book side: symmetric normal (alpha=0), sigma = ev * cv.
+        # Book side: sigma = ev * cv. A per-cell historical skew prior (book_skew)
+        # gives the book a shape while holding the de-vigged point (the line is a
+        # median) — see _book_loc_with_skew; book_skew=0 recovers the symmetric loc.
         book_sigma = np.clip(ev_b * cv, 1e-6, None)
+        if book_skew != 0.0 and line is not None:
+            book_loc = _book_loc_with_skew(ev_b, book_sigma, line, book_skew)
+        else:
+            book_loc = ev_b
 
         # Derive loc from EV: loc = EV - sigma * delta * sqrt(2/pi).
         model_delta = model_skew / np.sqrt(1 + model_skew**2)
         model_loc = ev_a - model_sigma * model_delta * np.sqrt(2 / np.pi)
-        book_loc = ev_b  # alpha=0 → delta=0 → loc = EV.
 
         prec_m = 1.0 / model_sigma**2
         prec_b = 1.0 / book_sigma**2
         total_prec = w * prec_m + (1 - w) * prec_b
         blended_loc = (w * model_loc * prec_m + (1 - w) * book_loc * prec_b) / total_prec
         blended_sigma = 1.0 / np.sqrt(total_prec)
-        blended_skew = w * model_skew  # book alpha=0, so blend reduces to w * model.
+        blended_skew = w * model_skew + (1 - w) * book_skew
 
         bl_delta = blended_skew / np.sqrt(1 + blended_skew**2)
         blended_ev = blended_loc + blended_sigma * bl_delta * np.sqrt(2 / np.pi)
@@ -631,16 +682,11 @@ def _skewnormal_start_values(mu, std, n, offset_mode, normalized):
         loc = mu.copy()
         scale = std.copy()
     alpha_skew = np.zeros(n)  # Start symmetric.
-    # loc: identity → raw = value.
-    # scale: exp → raw = log(value).
-    # alpha: identity → raw = value.
     return np.column_stack([loc, np.log(np.clip(scale, 1e-6, None)), alpha_skew])
 
 
 def _negbin_start_values(mu, std, hist_gate, dist, _r_upper):
-    # r = mu² / (var - mu); ReLU response → raw = value (identity for r>0).
     r_init = np.clip(mu**2 / np.clip(std**2 - mu, 1e-6, None), 0.5, _r_upper)
-    # PyTorch probs = mu / (mu + r); sigmoid response → raw = logit(probs).
     probs = np.clip(mu / (mu + r_init), 0.01, 0.99)
     if dist == "ZINB":
         nb_zeros = nbinom.pmf(0, r_init, probs)
@@ -657,7 +703,6 @@ def _gamma_start_values(mu, std, hist_gate, dist, _a_upper):
         mu = mu / (1 - hist_gate)
     alpha = np.clip((mu / std) ** 2, 0.1, _a_upper)
     beta = np.clip(alpha / np.clip(mu, 1e-6, None), 0.01, 50)
-    # softplus response → raw = softplus_inv(value).
     return np.column_stack([_softplus_inv(alpha), _softplus_inv(beta)])
 
 
