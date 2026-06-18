@@ -1985,6 +1985,9 @@ def _step_fuse_predictions(
         dist: Distribution name.
         cv: Coefficient of variation from ``_step_select_distribution``.
         hist_gate: Historical zero rate.
+        blending: Blending loss slug forwarded to ``calibration.fit_blend_weight``.
+        book_skew: Per-cell SkewNormal prior for the book side; forwarded to
+            ``_fuse_skewnormal`` / ``fused_loc``. Non-SkewNormal families ignore it.
 
     Returns:
         Dict with: ``model_weight``, ``weighted_mean``, ``gate_blend_test``,

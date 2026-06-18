@@ -656,7 +656,7 @@ def _archive_event_props(archive, game, league, props, gameDate, observed_at=Non
             archive.merge_player_books(
                 league, market, gameDate, player, entry["EV"], [line], observed_at=observed_at
             )
-            for book, rungs in entry.get("Ladder", {}).items():
+            for book, rungs in entry["Ladder"].items():
                 archive.add_ladder(
                     league, market, gameDate, player, book, rungs, observed_at=observed_at
                 )
