@@ -156,48 +156,6 @@ def skewnormal_loc_from_mean(
     return mean - sigma * delta * np.sqrt(2.0 / np.pi)
 
 
-def _book_loc_with_skew(ev_b, book_sigma, line, book_skew):
-    """SkewNormal book ``loc`` that holds the de-vigged point (the line is a median).
-
-    The symmetric book places ``P(X < line)`` at ``norm.cdf(line, ev_b, book_sigma)``.
-    This returns the ``loc`` for which a ``SkewNormal(book_skew)`` book reproduces
-    that same probability at ``line``, so giving the book a skew shifts its *mean*
-    without moving the de-vigged point it was priced at. Reduces to ``ev_b`` at
-    ``book_skew == 0`` (then ``skewnorm.ppf(Φ(z), 0) == z``).
-    """
-    ev_b = np.asarray(ev_b, dtype=float)
-    book_sigma = np.asarray(book_sigma, dtype=float)
-    z = (np.asarray(line, dtype=float) - ev_b) / book_sigma
-    return ev_b + book_sigma * (z - skewnorm.ppf(norm.cdf(z), book_skew))
-
-
-# The SkewNormal's third standardized moment saturates at this magnitude; an
-# empirical skewness past it is clamped to the family's feasible edge.
-_MAX_SKEWNORM_SKEWNESS = 0.9952717
-# Cap |delta| just below 1 so the alpha = delta / sqrt(1 - delta**2) inversion
-# stays finite at the ceiling (delta -> 1 ⇒ alpha -> inf).
-_MAX_SKEWNORM_DELTA = 0.9999
-
-
-def skewnorm_alpha_from_skewness(skewness: float) -> float:
-    """Invert the SkewNormal skewness → ``alpha`` map (closed form).
-
-    Solves ``gamma1 = (4-pi)/2 * (delta*b)**3 / (1 - (delta*b)**2)**1.5`` for
-    ``alpha = delta / sqrt(1 - delta**2)``, where ``b = sqrt(2/pi)`` and
-    ``delta = alpha / sqrt(1 + alpha**2)``. A symmetric or non-finite input
-    returns ``0.0``; a magnitude beyond the family ceiling clamps to a large
-    finite ``alpha`` at the feasible edge.
-    """
-    if not np.isfinite(skewness) or skewness == 0.0:
-        return 0.0
-    c = (4 - np.pi) / 2
-    g = min(abs(float(skewness)), _MAX_SKEWNORM_SKEWNESS)
-    t = (g / c) ** (1 / 3)
-    m = t / np.sqrt(1 + t**2)
-    delta = min(m * np.sqrt(np.pi / 2), _MAX_SKEWNORM_DELTA)
-    return float(np.sign(skewness) * delta / np.sqrt(1 - delta**2))
-
-
 def _crps_grid_bound(y: np.ndarray, mean: np.ndarray) -> float:
     """Upper integration limit for a continuous CRPS grid: ``max(2·max(y), 4·mean(mean))``.
 
@@ -574,8 +532,6 @@ def fused_loc(
     skew_alpha=None,
     gate_model=None,
     gate_book=None,
-    line=None,
-    book_skew=0.0,
 ):
     """Blend model and bookmaker distribution parameters with weight ``w``.
 
@@ -610,12 +566,6 @@ def fused_loc(
         skew_alpha: SkewNormal per-observation skewness from the model.
         gate_model: Model's per-observation zero-inflation gate.
         gate_book: Historical zero-inflation gate for the book side.
-        line: The bookmaker's consensus line. Required by ``_book_loc_with_skew``
-            when ``book_skew != 0``; ignored otherwise and for non-SkewNormal dists.
-        book_skew: SkewNormal skewness prior for the book side. When non-zero, the
-            book's ``loc`` is shifted so the de-vigged price (a median) is held
-            fixed — see :func:`_book_loc_with_skew`. Zero recovers the symmetric
-            (Normal) book side.
 
     Returns:
         NegBin → ``(r_blend, p, gate_blend)``,
@@ -644,25 +594,20 @@ def fused_loc(
         model_sigma = np.clip(np.asarray(sigma, dtype=float), 1e-6, None)
         model_skew = np.asarray(skew_alpha, dtype=float)
 
-        # Book side: sigma = ev * cv. A per-cell historical skew prior (book_skew)
-        # gives the book a shape while holding the de-vigged point (the line is a
-        # median) — see _book_loc_with_skew; book_skew=0 recovers the symmetric loc.
+        # Book side: symmetric normal (alpha=0), sigma = ev * cv.
         book_sigma = np.clip(ev_b * cv, 1e-6, None)
-        if book_skew != 0.0 and line is not None:
-            book_loc = _book_loc_with_skew(ev_b, book_sigma, line, book_skew)
-        else:
-            book_loc = ev_b
 
         # Derive loc from EV: loc = EV - sigma * delta * sqrt(2/pi).
         model_delta = model_skew / np.sqrt(1 + model_skew**2)
         model_loc = ev_a - model_sigma * model_delta * np.sqrt(2 / np.pi)
+        book_loc = ev_b  # alpha=0 → delta=0 → loc = EV.
 
         prec_m = 1.0 / model_sigma**2
         prec_b = 1.0 / book_sigma**2
         total_prec = w * prec_m + (1 - w) * prec_b
         blended_loc = (w * model_loc * prec_m + (1 - w) * book_loc * prec_b) / total_prec
         blended_sigma = 1.0 / np.sqrt(total_prec)
-        blended_skew = w * model_skew + (1 - w) * book_skew
+        blended_skew = w * model_skew  # book alpha=0, so blend reduces to w * model.
 
         bl_delta = blended_skew / np.sqrt(1 + blended_skew**2)
         blended_ev = blended_loc + blended_sigma * bl_delta * np.sqrt(2 / np.pi)

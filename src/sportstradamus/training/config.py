@@ -110,16 +110,11 @@ def save_zi_config(config: dict) -> None:
     _write(_STAT_CAL_PATH, cal)
 
 
-def save_cv_std_config(
-    cv_config: dict, std_config: dict, book_skew_config: dict | None = None
-) -> None:
-    """Persist ``cv`` + ``std`` (+ optional ``book_skew``) into ``stat_calibration.json``.
+def save_cv_std_config(cv_config: dict, std_config: dict) -> None:
+    """Persist ``cv`` + ``std`` maps into ``stat_calibration.json``.
 
-    All maps share ``{league: {market: value}}`` shape and are written in one
-    disk round-trip; the ``zi`` field on existing cells is preserved. ``book_skew``
-    is the non-circular SkewNormal prior for the book side (see
-    ``training.pipeline._within_player_book_skew``); omit it to leave the field
-    untouched.
+    Both maps share ``{league: {market: value}}`` shape and are written in
+    one disk round-trip; the ``zi`` field on existing cells is preserved.
     """
     cal = _load(_STAT_CAL_PATH)
     for league, markets in cv_config.items():
@@ -134,10 +129,4 @@ def save_cv_std_config(
                 market, {"cv": 1.0, "std": None, "zi": None}
             )
             cell["std"] = std
-    for league, markets in (book_skew_config or {}).items():
-        for market, book_skew in markets.items():
-            cell = cal.setdefault(league, {}).setdefault(
-                market, {"cv": 1.0, "std": None, "zi": None}
-            )
-            cell["book_skew"] = book_skew
     _write(_STAT_CAL_PATH, cal)
