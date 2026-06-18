@@ -151,6 +151,51 @@ def _minimal_filedict_kwargs(book_skew):
     )
 
 
+def _sn_fuse_fixtures(n=64, seed=0):
+    rng = np.random.default_rng(seed)
+    ev = rng.uniform(15.0, 25.0, n)
+    ev_val = rng.uniform(15.0, 25.0, n)
+    book = ev + rng.normal(0.0, 1.0, n)
+    decoded = {
+        "ev": ev,
+        "ev_validation": ev_val,
+        "sn_sigma_test": np.full(n, 5.0),
+        "sn_alpha_test": np.full(n, 1.5),
+        "sn_sigma_val": np.full(n, 5.0),
+        "sn_alpha_val": np.full(n, 1.5),
+    }
+    splits = {
+        "B_test": pd.DataFrame({"EV": book, "Line": np.full(n, 20.0)}),
+        "B_validation": pd.DataFrame({"EV": ev_val, "Line": np.full(n, 20.0)}),
+        "y_validation": pd.DataFrame({"Result": rng.uniform(10.0, 30.0, n)}),
+    }
+    return decoded, splits
+
+
+def test_training_blend_applies_book_skew_into_blended_alpha():
+    # Train/serve parity: the training SkewNormal blend must apply book_skew the
+    # same way serving's _blend_with_book does, or the scorecard gates a symmetric
+    # predictive the betting path never prices.
+    from sportstradamus.training import calibration
+    from sportstradamus.training.pipeline import _fuse_skewnormal
+
+    decoded, splits = _sn_fuse_fixtures()
+    out = _fuse_skewnormal({}, decoded, splits, 0.3, 0.0, calibration.DEFAULT_BLENDING, book_skew=2.0)
+    w = out["model_weight"]
+    # blended alpha = w*model_skew + (1-w)*book_skew (model_skew=1.5 here).
+    np.testing.assert_allclose(out["sn_alpha_blend_test"], w * 1.5 + (1 - w) * 2.0, atol=1e-9)
+
+
+def test_training_blend_book_skew_zero_is_symmetric():
+    from sportstradamus.training import calibration
+    from sportstradamus.training.pipeline import _fuse_skewnormal
+
+    decoded, splits = _sn_fuse_fixtures()
+    out = _fuse_skewnormal({}, decoded, splits, 0.3, 0.0, calibration.DEFAULT_BLENDING, book_skew=0.0)
+    w = out["model_weight"]
+    np.testing.assert_allclose(out["sn_alpha_blend_test"], w * 1.5, atol=1e-9)
+
+
 def test_filedict_carries_book_skew_through_pickle():
     fd = _build_filedict(**_minimal_filedict_kwargs(1.75))
     assert fd["book_skew"] == 1.75

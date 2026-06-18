@@ -105,6 +105,12 @@ _MIN_PLAYER_NONZERO_OBS_DEFAULT: int = 60
 # as symmetric (book_skew=0); the cube-root skewness→alpha inverse otherwise turns
 # near-zero noise into a spurious book-mean shift. SE(skewness) ≈ sqrt(6/n).
 _BOOK_SKEW_SE_GATE: float = 2.0
+# The within-player MARGINAL residual-skew prior over-skews the book CONDITIONAL:
+# a 2026-06-18 deterministic A/B (NBA PTS/REB/MIN, /tmp/ab_book_skew_result.txt)
+# showed it shifts the blended mean 8-11% and worsens Gate-4 (and g2) on every cell,
+# even at w=0.9. Gated off until a ladder-fit source (WS1, once alt-line rungs accrue)
+# replaces it; the shape-borrow MECHANISM stays wired + tested at book_skew=0.
+_BOOK_SKEW_PRIOR_ENABLED: bool = False
 # Shape ceiling = marginal_shape * this multiplier.  2× gives the optimizer
 # headroom to exceed the prior while preventing runaway over-dispersion.
 _SHAPE_CEILING_MULTIPLIER: float = 2.0
@@ -1781,8 +1787,14 @@ def _step_decode_predictions(
     return out
 
 
-def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
-    """SkewNormal branch: fit model_weight, blend sigma / skew on test + validation."""
+def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending, book_skew=0.0):
+    """SkewNormal branch: fit model_weight, blend sigma / skew on test + validation.
+
+    ``book_skew`` (the non-circular per-cell prior) is threaded into the final
+    test/val blends exactly as serving's ``model_prob._blend_with_book`` does — the
+    weight fit still sees the symmetric book, so ``w`` matches the pickle the betting
+    path reads — keeping the scorecard's offline gates on the same predictive served.
+    """
     ev = decoded["ev"]
     ev_validation = decoded["ev_validation"]
     book_ev_test = splits["B_test"]["EV"].to_numpy()
@@ -1809,6 +1821,8 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
         "SkewNormal",
         sigma=decoded["sn_sigma_test"],
         skew_alpha=decoded["sn_alpha_test"],
+        line=splits["B_test"]["Line"].to_numpy(),
+        book_skew=book_skew,
         **_zi_kwargs,
     )
     weighted_mean_val, sn_sigma_blend_val, sn_alpha_blend_val, gate_blend_val = fused_loc(
@@ -1819,6 +1833,8 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
         "SkewNormal",
         sigma=decoded["sn_sigma_val"],
         skew_alpha=decoded["sn_alpha_val"],
+        line=splits["B_validation"]["Line"].to_numpy(),
+        book_skew=book_skew,
         **_zi_kwargs,
     )
     out.update(
@@ -1959,6 +1975,7 @@ def _step_fuse_predictions(
     cv: float,
     hist_gate: float,
     blending: str = calibration.DEFAULT_BLENDING,
+    book_skew: float = 0.0,
 ) -> dict:
     """Fit model_weight, then fuse model+book predictions on test and validation.
 
@@ -2003,7 +2020,7 @@ def _step_fuse_predictions(
     }
 
     if dist == "SkewNormal":
-        return _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending)
+        return _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending, book_skew)
 
     model_weight = _fit_nonsn_weight(out, decoded, splits, base_dist, dist, cv, hist_gate, blending)
     if dist in ("NegBin", "ZINB"):
@@ -2110,7 +2127,7 @@ def _step_select_distribution(
             / player_stats.count().sum()
         ).sum()
         cv = max(cv, _SKEWNORMAL_CV_FLOOR)
-        book_skew = _within_player_book_skew(player_stats)
+        book_skew = _within_player_book_skew(player_stats) if _BOOK_SKEW_PRIOR_ENABLED else 0.0
         shape_ceiling = None
         # NaN not None: count-branch marginal-shape doesn't apply here, and
         # float(None) raises TypeError in _wide_row's _diag() helper.
@@ -2352,7 +2369,9 @@ def train_market(
             posthoc_slug, mean_posthoc_blob, decoded["ev_validation"]
         )
 
-    fused = _step_fuse_predictions(decoded, splits, dist, cv, hist_gate, blending=blending)
+    fused = _step_fuse_predictions(
+        decoded, splits, dist, cv, hist_gate, blending=blending, book_skew=dist_info["book_skew"]
+    )
     calibrated = _step_calibrate_dispersion(
         decoded,
         fused,
