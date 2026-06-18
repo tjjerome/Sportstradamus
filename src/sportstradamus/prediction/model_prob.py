@@ -58,13 +58,19 @@ _MAX_UNDERDOG_BOOST = 3.65
 # Coin-flip prior used when no bookmaker price is available for an offer.
 _BOOK_PRIOR_PROB: float = 0.5
 
-# A bookmaker projected mean beyond this multiple of its own line is corrupt data,
-# not an edge: model and book project the same stat, and a sane book mean sits
-# within a small factor of the line it was quoted at. Values above the cap (e.g. a
-# pre-fix get_ev zero-inflation runaway still committed in the archive) are dropped
-# from the log-opinion pool — the blend rides the line instead of letting garbage
-# dominate — and warned so the corruption never inflates predictions silently.
+# A bookmaker projected mean beyond this multiple of its own line is implausible:
+# model and book project the same stat, and a sane book mean sits within a small
+# factor of the line it was quoted at. Such rows (a pre-fix get_ev zero-inflation
+# runaway still in the archive, or an ill-conditioned anytime-TD count-tail
+# inversion) trigger the regularizer below — and are warned so corruption never
+# inflates predictions silently.
 _BOOK_EV_LINE_CAP: float = 10.0
+
+# Runaway book means are shrunk toward the model rather than discarded to the line:
+# a book mean is capped at this many model predictive SDs from the model mean
+# (|mu_book - mu_hat| <= K*SD). Wide enough (4 SD) that a genuinely disagreeing
+# book stays an independent vote; only ill-conditioned-tail / corrupt rows bind.
+_BOOK_EV_MODEL_SD_CAP: float = 4.0
 
 # Maximum scored offers retained per player after boost-distance deduplication.
 _MAX_OFFERS_PER_PLAYER: int = 3
@@ -537,24 +543,43 @@ def _zi_kwargs(offer_df: pd.DataFrame, dist: str, hist_gate: float) -> dict:
     return {}
 
 
-def _sanitize_book_ev(books_ev: np.ndarray, line: np.ndarray) -> np.ndarray:
-    """Drop book means implausibly far above their line before the blend.
+def _model_predictive_sd(offer_df: pd.DataFrame, dist: str, model_ev: np.ndarray) -> np.ndarray:
+    """Per-row model predictive SD — the scale for the book-EV plausibility band.
 
-    A book projected mean beyond ``_BOOK_EV_LINE_CAP`` times its line is corrupt
-    data, not signal (see the constant), and would dominate ``fused_loc``'s
-    log-opinion pool. Offenders are replaced with the line — the neutral book mean,
-    matching :func:`get_ev`'s own zero-inflation fallback — and warned so corruption
-    surfaces instead of silently inflating predictions.
+    Read off the model's pre-blend shape columns (``Model R`` / ``Model Alpha`` /
+    ``Model Sigma``); falls back to the mean when a shape column is absent.
     """
-    ceiling = _BOOK_EV_LINE_CAP * np.clip(line, 0.5, None)
-    corrupt = books_ev > ceiling
-    if corrupt.any():
-        logger.warning(
-            f"dropped {int(corrupt.sum())} implausible book EV(s) from the blend "
-            f"(max {float(np.nanmax(books_ev)):.1f})"
-        )
-        return np.where(corrupt, line, books_ev)
-    return books_ev
+    if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
+        r = np.clip(offer_df["Model R"].to_numpy(), 1e-9, None)
+        return np.sqrt(model_ev + model_ev**2 / r)
+    if dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns:
+        alpha = np.clip(offer_df["Model Alpha"].to_numpy(), 1e-9, None)
+        return model_ev / np.sqrt(alpha)
+    if dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
+        return np.clip(offer_df["Model Sigma"].to_numpy(), 1e-9, None)
+    return np.clip(model_ev, 0.5, None)
+
+
+def _sanitize_book_ev(
+    books_ev: np.ndarray, line: np.ndarray, model_ev: np.ndarray, model_sd: np.ndarray
+) -> np.ndarray:
+    """Regularize book means implausibly far above their line before the blend.
+
+    A book projected mean beyond ``_BOOK_EV_LINE_CAP`` times its line is bad data or
+    an ill-conditioned count-tail inversion (``mu = -log(1-p)`` blows up as p->1) and
+    would dominate ``fused_loc``'s log-opinion pool. Such runaway rows are shrunk
+    toward the model mean — capped at ``model_ev + _BOOK_EV_MODEL_SD_CAP * SD`` —
+    rather than discarded to the line, and warned so corruption still surfaces.
+    """
+    runaway = books_ev > _BOOK_EV_LINE_CAP * np.clip(line, 0.5, None)
+    if not runaway.any():
+        return books_ev
+    band = model_ev + _BOOK_EV_MODEL_SD_CAP * np.clip(model_sd, 1e-9, None)
+    logger.warning(
+        f"regularized {int(runaway.sum())} implausible book EV(s) toward the model "
+        f"(max {float(np.nanmax(books_ev)):.1f})"
+    )
+    return np.where(runaway, np.minimum(books_ev, band), books_ev)
 
 
 def _blend_with_book(
@@ -562,7 +587,8 @@ def _blend_with_book(
 ):
     model_ev = offer_df["Model EV"].to_numpy()
     books_ev = offer_df["Books EV"].fillna(offer_df["Model EV"]).to_numpy()
-    books_ev = _sanitize_book_ev(books_ev, offer_df["Line"].to_numpy())
+    model_sd = _model_predictive_sd(offer_df, dist, model_ev)
+    books_ev = _sanitize_book_ev(books_ev, offer_df["Line"].to_numpy(), model_ev, model_sd)
     zi = _zi_kwargs(offer_df, dist, hist_gate)
     if dist == "SkewNormal":
         base_mean, sigma_blend, skew_blend, gate_blend = fused_loc(
