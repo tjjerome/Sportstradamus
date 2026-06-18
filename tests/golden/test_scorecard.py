@@ -252,6 +252,37 @@ def test_decode_sn_loc_scale_centered_additive_readds_location_offset():
     np.testing.assert_allclose(scale, df["SN_Scale"].to_numpy())
 
 
+def test_decode_sn_loc_scale_uses_persisted_denom_col():
+    """Gate-4 decode must use the cell's persisted DenomCol, not a hardcoded MeanYr.
+
+    Regression for the Gate-4 denom bug: a zero-inflated SkewNormal cell encodes (and
+    serves) against MeanYr_nonzero, but the decode hardcoded MeanYr, mis-scaling its
+    dispersion by MeanYr/MeanYr_nonzero into spurious under-dispersion and a false g4
+    fail. The pipeline now persists DenomCol; absent it (legacy CSVs) the decode falls
+    back to MeanYr, its original scoring.
+    """
+    raw_loc = np.array([0.4, 0.5, 0.6])
+    raw_scale = np.array([0.10, 0.12, 0.14])
+    meanyr = np.array([2.0, 3.0, 4.0])
+    meanyr_nonzero = np.array([3.0, 4.5, 6.0])  # > MeanYr, as on a zero-inflated cell
+    base = {
+        "SN_Loc": raw_loc,
+        "SN_Scale": raw_scale,
+        "MeanYr": meanyr,
+        "MeanYr_nonzero": meanyr_nonzero,
+    }
+
+    loc_nz, scale_nz = _decode_sn_loc_scale(
+        pd.DataFrame({**base, "DenomCol": "MeanYr_nonzero"}), "ratio_meanyr"
+    )
+    np.testing.assert_allclose(scale_nz, raw_scale * meanyr_nonzero)
+    np.testing.assert_allclose(loc_nz, raw_loc * meanyr_nonzero)
+
+    loc_legacy, scale_legacy = _decode_sn_loc_scale(pd.DataFrame(base), "ratio_meanyr")
+    np.testing.assert_allclose(scale_legacy, raw_scale * meanyr)
+    np.testing.assert_allclose(loc_legacy, raw_loc * meanyr)
+
+
 def test_fit_skewnorm_dispersion_c_widens_underdispersed_symmetric():
     """A predictive half as wide as the truth must fit c ~ 2 to recover calibration.
 

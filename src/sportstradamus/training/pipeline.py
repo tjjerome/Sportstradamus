@@ -1389,12 +1389,17 @@ def _step_persist_artifacts(
         # skewnormal_loc_from_mean — the single authoritative formula shared with the
         # betting path and the scorecard fit — then re-encode loc/scale to the model's
         # normalized space so the scorecard's decode recovers the served EV params
-        # byte-for-byte (encode is the exact inverse of that decode).
+        # byte-for-byte. Encode is the exact inverse of decode only when both use this
+        # cell's denom_col, which the scorecard recovers from DenomCol persisted below.
         strat = baselines.get_target_normalization(target_normalization)
         served_loc = skewnormal_loc_from_mean(weighted_mean, sn_scale_test, sn_skew_test)
         X_test["SN_Loc"] = strat.encode_loc(served_loc, X_test, global_mean, denom_col)
         X_test["SN_Scale"] = strat.encode_scale(sn_scale_test, X_test, denom_col)
         X_test["SN_Alpha"] = sn_skew_test
+        # Zero-inflated cells encode against MeanYr_nonzero, not MeanYr; persist the
+        # choice so the scorecard's Gate-4 decode reads the same denominator the
+        # betting path serves with (else its dispersion is mis-scaled and g4 fails).
+        X_test["DenomCol"] = denom_col
         # The EB-prior normalizations decode loc by re-adding an empirical-Bayes prior that
         # shrinks toward global_mean; persist it so the scorecard's `_decode_sn_loc_scale`
         # recovers the served loc instead of shrinking toward 0. Ratio/Mean10 decodes ignore it.
