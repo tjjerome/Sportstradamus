@@ -489,6 +489,9 @@ def _historical_observed_at(historical, gameDate):
     return datetime(gameDate.year, gameDate.month, gameDate.day, 1, 0, 0)
 
 
+_PROP_SIDE_RENAME = {"Yes": "Over", "No": "Under"}
+
+
 def _resolve_prop_lines(lines):
     """Normalize one player's raw option rows to the one or two lines we price.
 
@@ -500,7 +503,7 @@ def _resolve_prop_lines(lines):
     lines = list(lines)
     for line in lines:
         line.setdefault("point", 0.5)
-        line["name"] = {"Yes": "Over", "No": "Under"}.get(line["name"], line["name"])
+        line["name"] = _PROP_SIDE_RENAME.get(line["name"], line["name"])
 
     lines = sorted(lines, key=itemgetter("name"))
     if len({line["point"] for line in lines}) > 1:
@@ -518,6 +521,29 @@ def _resolve_prop_lines(lines):
     return lines
 
 
+def _devig_ladder(rows):
+    """De-vig every offered point in one ``(player, book)`` quote.
+
+    Returns ``[(line, p_over), ...]`` across all alt-line rungs — the full ladder
+    the consensus collapse discards. A lone ``Under`` is flipped to an ``Over``
+    price (matching :func:`_resolve_prop_lines`); a lone ``Over`` de-vigs one-sided.
+    Rungs keep first-appearance order.
+    """
+    by_point: dict[float, dict[str, float]] = {}
+    for row in rows:
+        name = _PROP_SIDE_RENAME.get(row["name"], row["name"])
+        by_point.setdefault(row.get("point", 0.5), {})[name] = row["price"]
+    rungs = []
+    for point, sides in by_point.items():
+        over, under = sides.get("Over"), sides.get("Under")
+        if over is None and under is None:
+            continue
+        if over is None:
+            over, under = under / (under - 1), None
+        rungs.append((point, no_vig_odds(over, under)[0]))
+    return rungs
+
+
 def _event_player_props(book, market, league, props, odds):
     """Accumulate one book's player-prop market into ``odds`` (mutated)."""
     market_name = props[league].get(market["key"])
@@ -530,10 +556,14 @@ def _event_player_props(book, market, league, props, odds):
 
     for player, lines in groupby(outcomes, itemgetter("description")):
         player = remove_accents(player).replace(" Total", "")
-        odds[market_name].setdefault(player, {"EV": {}, "Lines": []})
+        entry = odds[market_name].setdefault(player, {"EV": {}, "Lines": [], "Ladder": {}})
+        lines = list(lines)
+        rungs = _devig_ladder(lines)
+        if rungs:
+            entry["Ladder"][book["key"]] = rungs
         lines = _resolve_prop_lines(lines)
         line = lines[0].get("point", 0.5)
-        odds[market_name][player]["Lines"].append(line)
+        entry["Lines"].append(line)
         price = no_vig_odds(*[x["price"] for x in lines])
         dist = stat_dist.get(league, {}).get(market_name, "SkewNormal")
         ev = get_ev(
@@ -543,7 +573,7 @@ def _event_player_props(book, market, league, props, odds):
             dist=dist,
             gate=book_gate(league, market_name, dist),
         )
-        odds[market_name][player]["EV"][book["key"]] = ev
+        entry["EV"][book["key"]] = ev
 
 
 def _event_totals_book(market, book, totals):
@@ -626,6 +656,10 @@ def _archive_event_props(archive, game, league, props, gameDate, observed_at=Non
             archive.merge_player_books(
                 league, market, gameDate, player, entry["EV"], [line], observed_at=observed_at
             )
+            for book, rungs in entry.get("Ladder", {}).items():
+                archive.add_ladder(
+                    league, market, gameDate, player, book, rungs, observed_at=observed_at
+                )
 
     _write_event_totals(archive, game, league, gameDate, totals, spread_home, spread_away)
 
