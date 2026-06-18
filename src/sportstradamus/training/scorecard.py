@@ -668,22 +668,32 @@ def _decode_sn_loc_scale(df: pd.DataFrame, strategy: str) -> tuple[np.ndarray, n
 
     Dispatches through the canonical ``baselines`` registry so the gate scores the
     same absolute predictive that ``prediction.model_prob`` prices, rather than a
-    hand-rolled mirror that can drift. ``ratio_meanyr`` multiplies both by ``MeanYr``;
-    ``centered_additive_mean10`` re-adds the Mean10 baseline to ``loc`` — irrelevant
-    for the location-free IQR but load-bearing for the PIT, which is where the old
-    hand-rolled mirror silently dropped the offset. ``centered_additive_eb_meanyr_k10``
+    hand-rolled mirror that can drift. ``ratio_meanyr`` multiplies both by the cell's
+    denominator; ``centered_additive_mean10`` re-adds the Mean10 baseline to ``loc`` —
+    irrelevant for the location-free IQR but load-bearing for the PIT, which is where
+    the old hand-rolled mirror silently dropped the offset. ``centered_additive_eb_meanyr_k10``
     re-adds an empirical-Bayes prior that shrinks toward ``global_mean``, which the
     pipeline persists per-row as the constant ``GlobalMean`` column; without it the
     prior shrinks toward 0 and the decode silently corrupts the PIT. Ratio/Mean10
     decodes ignore ``global_mean``, so the legacy 0.0 fallback is correct for them.
+
+    The denominator must match the one the cell encoded (and serves) with: a
+    zero-inflated SkewNormal cell uses ``MeanYr_nonzero``, not ``MeanYr``, so the
+    pipeline persists the choice as the constant ``DenomCol`` column. Decoding a
+    nonzero-denominator cell against ``MeanYr`` mis-scales its dispersion and fails
+    Gate 4 on a predictive the betting path never priced.
     """
     raw_loc = df["SN_Loc"].to_numpy(dtype=float)
     raw_scale = df["SN_Scale"].to_numpy(dtype=float)
     if strategy not in _SN_DECODE_STRATEGIES:
         return raw_loc, raw_scale
     global_mean = float(df["GlobalMean"].iloc[0]) if "GlobalMean" in df.columns else 0.0
+    denom_col = str(df["DenomCol"].iloc[0]) if "DenomCol" in df.columns else "MeanYr"
     strat = get_target_normalization(strategy)
-    return strat.decode_loc(raw_loc, df, global_mean), strat.decode_scale(raw_scale, df)
+    return (
+        strat.decode_loc(raw_loc, df, global_mean, denom_col),
+        strat.decode_scale(raw_scale, df, denom_col),
+    )
 
 
 def _pred_ppf(df: pd.DataFrame, dist: str, q: float, *, strategy: str) -> np.ndarray:
