@@ -171,6 +171,33 @@ def _book_loc_with_skew(ev_b, book_sigma, line, book_skew):
     return ev_b + book_sigma * (z - skewnorm.ppf(norm.cdf(z), book_skew))
 
 
+# The SkewNormal's third standardized moment saturates at this magnitude; an
+# empirical skewness past it is clamped to the family's feasible edge.
+_MAX_SKEWNORM_SKEWNESS = 0.9952717
+# Cap |delta| just below 1 so the alpha = delta / sqrt(1 - delta**2) inversion
+# stays finite at the ceiling (delta -> 1 ⇒ alpha -> inf).
+_MAX_SKEWNORM_DELTA = 0.9999
+
+
+def skewnorm_alpha_from_skewness(skewness: float) -> float:
+    """Invert the SkewNormal skewness → ``alpha`` map (closed form).
+
+    Solves ``gamma1 = (4-pi)/2 * (delta*b)**3 / (1 - (delta*b)**2)**1.5`` for
+    ``alpha = delta / sqrt(1 - delta**2)``, where ``b = sqrt(2/pi)`` and
+    ``delta = alpha / sqrt(1 + alpha**2)``. A symmetric or non-finite input
+    returns ``0.0``; a magnitude beyond the family ceiling clamps to a large
+    finite ``alpha`` at the feasible edge.
+    """
+    if not np.isfinite(skewness) or skewness == 0.0:
+        return 0.0
+    c = (4 - np.pi) / 2
+    g = min(abs(float(skewness)), _MAX_SKEWNORM_SKEWNESS)
+    t = (g / c) ** (1 / 3)
+    m = t / np.sqrt(1 + t**2)
+    delta = min(m * np.sqrt(np.pi / 2), _MAX_SKEWNORM_DELTA)
+    return float(np.sign(skewness) * delta / np.sqrt(1 - delta**2))
+
+
 def _crps_grid_bound(y: np.ndarray, mean: np.ndarray) -> float:
     """Upper integration limit for a continuous CRPS grid: ``max(2·max(y), 4·mean(mean))``.
 

@@ -40,6 +40,7 @@ from sportstradamus.helpers import (
     get_odds,
     negbin_crps,
     set_model_start_values,
+    skewnorm_alpha_from_skewness,
     skewnormal_loc_from_mean,
     stat_cv,
     stat_zi,
@@ -100,6 +101,10 @@ _MARGINAL_SHAPE_FLOOR: float = 0.5
 # estimate. Per-league because season lengths differ; default for unlisted leagues.
 _MIN_PLAYER_NONZERO_OBS: dict[str, int] = {"NBA": 60, "NFL": 10, "NHL": 60, "WNBA": 40, "MLB": 60}
 _MIN_PLAYER_NONZERO_OBS_DEFAULT: int = 60
+# A pooled within-player skewness within this many sampling-SEs of zero is treated
+# as symmetric (book_skew=0); the cube-root skewness→alpha inverse otherwise turns
+# near-zero noise into a spurious book-mean shift. SE(skewness) ≈ sqrt(6/n).
+_BOOK_SKEW_SE_GATE: float = 2.0
 # Shape ceiling = marginal_shape * this multiplier.  2× gives the optimizer
 # headroom to exceed the prior while preventing runaway over-dispersion.
 _SHAPE_CEILING_MULTIPLIER: float = 2.0
@@ -1252,6 +1257,7 @@ def _build_filedict(
     opt_params: dict,
     dist: str,
     cv: float,
+    book_skew: float,
     y,
     T_opt: float,
     model_weight,
@@ -1314,6 +1320,7 @@ def _build_filedict(
         "params": opt_params,
         "distribution": dist,
         "cv": cv,
+        "book_skew": book_skew,
         "std": y.Result.std(),
         "temperature": T_opt,
         "dispersion_cal": c_opt,
@@ -2004,6 +2011,25 @@ def _step_fuse_predictions(
     return _fuse_gamma(out, decoded, splits, model_weight, cv, hist_gate, dist)
 
 
+def _within_player_book_skew(player_stats) -> float:
+    """Non-circular book-skew prior: the SkewNormal ``alpha`` matching the pooled
+    within-player standardized-residual skewness of realized outcomes.
+
+    Centering each player's outcomes on their own mean/std and pooling removes the
+    between-player mean spread, leaving the shared *shape*; its skewness is a
+    property of realized results alone (never a model prediction), so the book side
+    can borrow it without the blend flattering itself in g4.
+    """
+    resid = player_stats.transform(lambda s: (s - s.mean()) / s.std()).replace(
+        [np.inf, -np.inf], np.nan
+    )
+    skew = resid.skew()
+    n = int(resid.notna().sum())
+    if not np.isfinite(skew) or n < 3 or abs(skew) < _BOOK_SKEW_SE_GATE * np.sqrt(6.0 / n):
+        return 0.0
+    return skewnorm_alpha_from_skewness(skew)
+
+
 def _step_select_distribution(
     splits: dict,
     stat_data,
@@ -2067,6 +2093,7 @@ def _step_select_distribution(
     normalize = False
     offset_mode = False
     denom_col = "MeanYr"
+    book_skew = 0.0
     strategy = baselines.get_target_normalization(target_normalization)
     dist_obj = None
 
@@ -2083,6 +2110,7 @@ def _step_select_distribution(
             / player_stats.count().sum()
         ).sum()
         cv = max(cv, _SKEWNORMAL_CV_FLOOR)
+        book_skew = _within_player_book_skew(player_stats)
         shape_ceiling = None
         # NaN not None: count-branch marginal-shape doesn't apply here, and
         # float(None) raises TypeError in _wide_row's _diag() helper.
@@ -2134,7 +2162,7 @@ def _step_select_distribution(
         cv = max(cv, 1 / np.sqrt(shape_ceiling))
 
     stat_cv[league][market] = cv
-    save_cv_std_config({league: {market: cv}}, {})
+    save_cv_std_config({league: {market: cv}}, {}, {league: {market: book_skew}})
 
     # Reflect SkewNormal nonzero filtering back into splits.
     splits["X_train"] = X_train
@@ -2149,6 +2177,7 @@ def _step_select_distribution(
         "normalize": normalize,
         "offset_mode": offset_mode,
         "denom_col": denom_col,
+        "book_skew": book_skew,
         "target_normalization": strategy,
         "hist_gate": hist_gate,
         "player_stats": player_stats,
@@ -2395,6 +2424,7 @@ def train_market(
         opt_params=opt_params,
         dist=dist,
         cv=cv,
+        book_skew=dist_info["book_skew"],
         y=splits["y"],
         T_opt=T_opt,
         model_weight=fused["model_weight"],
