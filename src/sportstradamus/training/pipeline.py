@@ -40,7 +40,6 @@ from sportstradamus.helpers import (
     get_odds,
     negbin_crps,
     set_model_start_values,
-    skewnorm_alpha_from_skewness,
     skewnormal_loc_from_mean,
     stat_cv,
     stat_zi,
@@ -101,16 +100,6 @@ _MARGINAL_SHAPE_FLOOR: float = 0.5
 # estimate. Per-league because season lengths differ; default for unlisted leagues.
 _MIN_PLAYER_NONZERO_OBS: dict[str, int] = {"NBA": 60, "NFL": 10, "NHL": 60, "WNBA": 40, "MLB": 60}
 _MIN_PLAYER_NONZERO_OBS_DEFAULT: int = 60
-# A pooled within-player skewness within this many sampling-SEs of zero is treated
-# as symmetric (book_skew=0); the cube-root skewness→alpha inverse otherwise turns
-# near-zero noise into a spurious book-mean shift. SE(skewness) ≈ sqrt(6/n).
-_BOOK_SKEW_SE_GATE: float = 2.0
-# The within-player MARGINAL residual-skew prior over-skews the book CONDITIONAL:
-# a 2026-06-18 deterministic A/B (NBA PTS/REB/MIN, /tmp/ab_book_skew_result.txt)
-# showed it shifts the blended mean 8-11% and worsens Gate-4 (and g2) on every cell,
-# even at w=0.9. Gated off until a ladder-fit source (WS1, once alt-line rungs accrue)
-# replaces it; the shape-borrow MECHANISM stays wired + tested at book_skew=0.
-_BOOK_SKEW_PRIOR_ENABLED: bool = False
 # Shape ceiling = marginal_shape * this multiplier.  2× gives the optimizer
 # headroom to exceed the prior while preventing runaway over-dispersion.
 _SHAPE_CEILING_MULTIPLIER: float = 2.0
@@ -1263,7 +1252,6 @@ def _build_filedict(
     opt_params: dict,
     dist: str,
     cv: float,
-    book_skew: float,
     y,
     T_opt: float,
     model_weight,
@@ -1326,7 +1314,6 @@ def _build_filedict(
         "params": opt_params,
         "distribution": dist,
         "cv": cv,
-        "book_skew": book_skew,
         "std": y.Result.std(),
         "temperature": T_opt,
         "dispersion_cal": c_opt,
@@ -1787,14 +1774,8 @@ def _step_decode_predictions(
     return out
 
 
-def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending, book_skew=0.0):
-    """SkewNormal branch: fit model_weight, blend sigma / skew on test + validation.
-
-    ``book_skew`` (the non-circular per-cell prior) is threaded into the final
-    test/val blends exactly as serving's ``model_prob._blend_with_book`` does — the
-    weight fit still sees the symmetric book, so ``w`` matches the pickle the betting
-    path reads — keeping the scorecard's offline gates on the same predictive served.
-    """
+def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
+    """SkewNormal branch: fit model_weight, blend sigma / skew on test + validation."""
     ev = decoded["ev"]
     ev_validation = decoded["ev_validation"]
     book_ev_test = splits["B_test"]["EV"].to_numpy()
@@ -1821,8 +1802,6 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending, book_skew=0.
         "SkewNormal",
         sigma=decoded["sn_sigma_test"],
         skew_alpha=decoded["sn_alpha_test"],
-        line=splits["B_test"]["Line"].to_numpy(),
-        book_skew=book_skew,
         **_zi_kwargs,
     )
     weighted_mean_val, sn_sigma_blend_val, sn_alpha_blend_val, gate_blend_val = fused_loc(
@@ -1833,8 +1812,6 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending, book_skew=0.
         "SkewNormal",
         sigma=decoded["sn_sigma_val"],
         skew_alpha=decoded["sn_alpha_val"],
-        line=splits["B_validation"]["Line"].to_numpy(),
-        book_skew=book_skew,
         **_zi_kwargs,
     )
     out.update(
@@ -1975,7 +1952,6 @@ def _step_fuse_predictions(
     cv: float,
     hist_gate: float,
     blending: str = calibration.DEFAULT_BLENDING,
-    book_skew: float = 0.0,
 ) -> dict:
     """Fit model_weight, then fuse model+book predictions on test and validation.
 
@@ -1986,8 +1962,6 @@ def _step_fuse_predictions(
         cv: Coefficient of variation from ``_step_select_distribution``.
         hist_gate: Historical zero rate.
         blending: Blending loss slug forwarded to ``calibration.fit_blend_weight``.
-        book_skew: Per-cell SkewNormal prior for the book side; forwarded to
-            ``_fuse_skewnormal`` / ``fused_loc``. Non-SkewNormal families ignore it.
 
     Returns:
         Dict with: ``model_weight``, ``weighted_mean``, ``gate_blend_test``,
@@ -2023,31 +1997,12 @@ def _step_fuse_predictions(
     }
 
     if dist == "SkewNormal":
-        return _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending, book_skew)
+        return _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending)
 
     model_weight = _fit_nonsn_weight(out, decoded, splits, base_dist, dist, cv, hist_gate, blending)
     if dist in ("NegBin", "ZINB"):
         return _fuse_negbin(out, decoded, splits, model_weight, cv, hist_gate, dist)
     return _fuse_gamma(out, decoded, splits, model_weight, cv, hist_gate, dist)
-
-
-def _within_player_book_skew(player_stats) -> float:
-    """Non-circular book-skew prior: the SkewNormal ``alpha`` matching the pooled
-    within-player standardized-residual skewness of realized outcomes.
-
-    Centering each player's outcomes on their own mean/std and pooling removes the
-    between-player mean spread, leaving the shared *shape*; its skewness is a
-    property of realized results alone (never a model prediction), so the book side
-    can borrow it without the blend flattering itself in g4.
-    """
-    resid = player_stats.transform(lambda s: (s - s.mean()) / s.std()).replace(
-        [np.inf, -np.inf], np.nan
-    )
-    skew = resid.skew()
-    n = int(resid.notna().sum())
-    if not np.isfinite(skew) or n < 3 or abs(skew) < _BOOK_SKEW_SE_GATE * np.sqrt(6.0 / n):
-        return 0.0
-    return skewnorm_alpha_from_skewness(skew)
 
 
 def _step_select_distribution(
@@ -2113,7 +2068,6 @@ def _step_select_distribution(
     normalize = False
     offset_mode = False
     denom_col = "MeanYr"
-    book_skew = 0.0
     strategy = baselines.get_target_normalization(target_normalization)
     dist_obj = None
 
@@ -2130,7 +2084,6 @@ def _step_select_distribution(
             / player_stats.count().sum()
         ).sum()
         cv = max(cv, _SKEWNORMAL_CV_FLOOR)
-        book_skew = _within_player_book_skew(player_stats) if _BOOK_SKEW_PRIOR_ENABLED else 0.0
         shape_ceiling = None
         # NaN not None: count-branch marginal-shape doesn't apply here, and
         # float(None) raises TypeError in _wide_row's _diag() helper.
@@ -2182,7 +2135,7 @@ def _step_select_distribution(
         cv = max(cv, 1 / np.sqrt(shape_ceiling))
 
     stat_cv[league][market] = cv
-    save_cv_std_config({league: {market: cv}}, {}, {league: {market: book_skew}})
+    save_cv_std_config({league: {market: cv}}, {})
 
     # Reflect SkewNormal nonzero filtering back into splits.
     splits["X_train"] = X_train
@@ -2197,7 +2150,6 @@ def _step_select_distribution(
         "normalize": normalize,
         "offset_mode": offset_mode,
         "denom_col": denom_col,
-        "book_skew": book_skew,
         "target_normalization": strategy,
         "hist_gate": hist_gate,
         "player_stats": player_stats,
@@ -2372,9 +2324,7 @@ def train_market(
             posthoc_slug, mean_posthoc_blob, decoded["ev_validation"]
         )
 
-    fused = _step_fuse_predictions(
-        decoded, splits, dist, cv, hist_gate, blending=blending, book_skew=dist_info["book_skew"]
-    )
+    fused = _step_fuse_predictions(decoded, splits, dist, cv, hist_gate, blending=blending)
     calibrated = _step_calibrate_dispersion(
         decoded,
         fused,
@@ -2446,7 +2396,6 @@ def train_market(
         opt_params=opt_params,
         dist=dist,
         cv=cv,
-        book_skew=dist_info["book_skew"],
         y=splits["y"],
         T_opt=T_opt,
         model_weight=fused["model_weight"],

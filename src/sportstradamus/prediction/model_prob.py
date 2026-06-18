@@ -583,12 +583,7 @@ def _sanitize_book_ev(
 
 
 def _blend_with_book(
-    offer_df: pd.DataFrame,
-    dist: str,
-    model_weight: float,
-    cv: float,
-    hist_gate: float,
-    book_skew: float = 0.0,
+    offer_df: pd.DataFrame, dist: str, model_weight: float, cv: float, hist_gate: float
 ):
     model_ev = offer_df["Model EV"].to_numpy()
     books_ev = offer_df["Books EV"].fillna(offer_df["Model EV"]).to_numpy()
@@ -604,8 +599,6 @@ def _blend_with_book(
             "SkewNormal",
             sigma=_col_or_none(offer_df, "Model Sigma"),
             skew_alpha=_col_or_none(offer_df, "Model Skew"),
-            line=offer_df["Line"].to_numpy(),
-            book_skew=book_skew,
             **zi,
         )
         offer_df["Model Sigma"] = sigma_blend
@@ -715,7 +708,6 @@ def model_prob(
     with open(filepath, "rb") as infile:
         filedict = pickle.load(infile)
     cv = filedict["cv"]
-    book_skew = filedict.get("book_skew", 0.0)
     model_weight = filedict["weight"]
     temperature = filedict.get("temperature", None)
     dispersion_cal = filedict.get("dispersion_cal", 1.0)
@@ -767,7 +759,7 @@ def model_prob(
         offer_df["Model EV"].to_numpy(), posthoc_slug, posthoc_blob
     )
 
-    base_mean = _blend_with_book(offer_df, dist, model_weight, cv, hist_gate, book_skew)
+    base_mean = _blend_with_book(offer_df, dist, model_weight, cv, hist_gate)
 
     # ZI dists: book reports the non-zero component EV; scale to marginal EV.
     if hist_gate and dist in ("ZINB", "ZAGamma", "SkewNormal"):

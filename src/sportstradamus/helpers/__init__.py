@@ -63,7 +63,6 @@ from sportstradamus.helpers.distributions import (
     odds_to_prob,
     prob_to_odds,
     set_model_start_values,
-    skewnorm_alpha_from_skewness,
     skewnorm_crps,
     skewnormal_loc_from_mean,
 )
@@ -125,7 +124,6 @@ __all__ = [
     "remove_accents",
     "requests",
     "set_model_start_values",
-    "skewnorm_alpha_from_skewness",
     "skewnorm_crps",
     "skewnormal_loc_from_mean",
     "stat_cv",
