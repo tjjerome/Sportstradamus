@@ -32,6 +32,9 @@ class _CaptureArchive:
     def set_team_books(self, *args, **kwargs):
         pass
 
+    def add_ladder(self, *args, **kwargs):
+        pass
+
 
 def test_low_count_prop_ev_inverts_under_market_dist_and_gate():
     # A center priced ~89% to clear 0.5 blocks: over short (1.05), under long

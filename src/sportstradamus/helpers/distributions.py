@@ -78,23 +78,46 @@ def prob_to_odds(p):
     return int(np.round((p / (1 - p)) * -100))
 
 
-def no_vig_odds(over, under=None):
+# Power de-vig applies only to lopsided quotes; on the body (near even money) it
+# is numerically identical to the proportional method, so gating it there is free.
+_DEVIG_LOPSIDED_FLAG = 0.3
+# Bracket ceiling for the power-exponent root-find; k stays near 1 for real vigs.
+_DEVIG_POWER_MAX = 50.0
+
+
+def _power_devig_exponent(o: float, u: float) -> float:
+    """Solve ``o**k + u**k == 1`` for the de-vig power ``k`` (Clarke et al. 2017)."""
+    if o + u <= 1:
+        return 1.0
+    return brentq(lambda k: o**k + u**k - 1.0, 1.0, _DEVIG_POWER_MAX, xtol=1e-10)
+
+
+def no_vig_odds(over, under=None, method="proportional"):
     """Return ``[p_over, p_under]`` with the bookmaker's hold removed.
 
     Accepts either American odds (``|x| >= 100``) or decimal odds. When
     ``under`` is omitted, the caller is treated as offering a one-sided
     line; we fabricate an under from a conservative 6.5% vig assumption
     so the two-sided math still works.
+
+    ``method="power"`` switches lopsided two-sided quotes (``|p_over - 0.5| >
+    _DEVIG_LOPSIDED_FLAG``) to the power (logarithmic) de-vig, which corrects
+    favourite-longshot bias (Clarke, Kovalchik & Ingram 2017); the body and
+    every one-sided line stay on the proportional default (identical at even
+    money).
     """
     o = odds_to_prob(over) if np.abs(over) >= 100 else 1 / over
     if under is None or under <= 0:
         juice = 1.0652
         u = juice - o
-    else:
-        u = odds_to_prob(under) if np.abs(under) >= 100 else 1 / under
+        return [o / juice, u / juice]
 
-        juice = o + u
+    u = odds_to_prob(under) if np.abs(under) >= 100 else 1 / under
+    if method == "power" and np.abs(o / (o + u) - 0.5) > _DEVIG_LOPSIDED_FLAG:
+        k = _power_devig_exponent(o, u)
+        return [o**k, u**k]
 
+    juice = o + u
     return [o / juice, u / juice]
 
 
@@ -229,7 +252,8 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None):
         under: The bookmaker's implied probability that the outcome is under the line.
         cv: Coefficient of variation (shape source when alpha/r are not supplied).
         dist: Distribution family — ``"Gamma"``/``"ZAGamma"``/``"NegBin"``/
-            ``"ZINB"``/``"Poisson"``/``"SkewNormal"``.
+            ``"ZINB"``/``"Poisson"``/``"SkewNormal"``/``"Normal"`` (symmetric,
+            ev == line at an even-money price; game lines pin here).
         gate: Zero-inflation probability; ``None`` disables ZI handling.
         skew_alpha: SkewNormal skewness; ``None`` → 0 (symmetric).
 
@@ -332,6 +356,11 @@ def get_odds(
         return _negbin_odds(line, ev, cv, r, gate, dist)
     if dist == "SkewNormal":
         return _skewnormal_odds(high, low, ev, cv, sigma, skew_alpha, gate)
+    if dist == "Normal":
+        # skew_alpha is deliberately ignored: game lines must invert symmetrically
+        # because the no-vig median price IS the implied value. Passing any skew
+        # here would make the EV depend on the book's vig direction.
+        return _skewnormal_odds(high, low, ev, cv, sigma, 0.0, gate)
     return _gamma_odds(high, low, ev, cv, alpha, gate, dist)
 
 
@@ -625,16 +654,11 @@ def _skewnormal_start_values(mu, std, n, offset_mode, normalized):
         loc = mu.copy()
         scale = std.copy()
     alpha_skew = np.zeros(n)  # Start symmetric.
-    # loc: identity → raw = value.
-    # scale: exp → raw = log(value).
-    # alpha: identity → raw = value.
     return np.column_stack([loc, np.log(np.clip(scale, 1e-6, None)), alpha_skew])
 
 
 def _negbin_start_values(mu, std, hist_gate, dist, _r_upper):
-    # r = mu² / (var - mu); ReLU response → raw = value (identity for r>0).
     r_init = np.clip(mu**2 / np.clip(std**2 - mu, 1e-6, None), 0.5, _r_upper)
-    # PyTorch probs = mu / (mu + r); sigmoid response → raw = logit(probs).
     probs = np.clip(mu / (mu + r_init), 0.01, 0.99)
     if dist == "ZINB":
         nb_zeros = nbinom.pmf(0, r_init, probs)
@@ -651,7 +675,6 @@ def _gamma_start_values(mu, std, hist_gate, dist, _a_upper):
         mu = mu / (1 - hist_gate)
     alpha = np.clip((mu / std) ** 2, 0.1, _a_upper)
     beta = np.clip(alpha / np.clip(mu, 1e-6, None), 0.01, 50)
-    # softplus response → raw = softplus_inv(value).
     return np.column_stack([_softplus_inv(alpha), _softplus_inv(beta)])
 
 

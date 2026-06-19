@@ -122,7 +122,10 @@ def test_clean_book_ev_blend_matches_offline_decode_in_band():
     decoded, line = _load_fg3m_case()
     model_ev = np.asarray(decoded.ev, dtype=float)
     # A book that agrees with the model leaves the guard a no-op.
-    np.testing.assert_array_equal(_sanitize_book_ev(model_ev.copy(), line), model_ev)
+    model_sd = np.ones_like(model_ev)
+    np.testing.assert_array_equal(
+        _sanitize_book_ev(model_ev.copy(), line, model_ev, model_sd), model_ev
+    )
 
     blended, base_mean = _blend(model_ev, decoded, line, model_ev.copy())
     np.testing.assert_allclose(

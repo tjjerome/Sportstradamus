@@ -152,7 +152,24 @@ def test_cli_devel_validates_and_summarizes(tmp_path):
     assert result.exit_code == 0, result.output
     assert "active=1" in result.output
     assert "withheld=1" in result.output
-    # devel mode must not mutate stat_meta.
+    assert meta_path.read_text() == before
+
+
+def test_cli_reports_free_passers_without_mutating(tmp_path):
+    meta_path = tmp_path / "stat_meta.json"
+    _write(
+        meta_path,
+        {"NBA": {"REB": _meta_cell("SkewNormal", "withheld", TARGET_NORM_NONE)}},
+    )
+    ms = tmp_path / "ms.parquet"
+    pd.DataFrame([{"league": "NBA", "market": "REB", "ship": True}]).to_parquet(
+        ms, engine="pyarrow", index=False
+    )
+    before = meta_path.read_text()
+    result = _invoke(["--branch", "devel", "--meta", str(meta_path), "--model-stats", str(ms)])
+    assert result.exit_code == 0, result.output
+    assert "FREE-PASSER" in result.output
+    assert "NBA/REB" in result.output
     assert meta_path.read_text() == before
 
 
@@ -172,6 +189,7 @@ def test_cli_main_promotes_graduated_cells(tmp_path):
                 "distribution": "SkewNormal",
                 "row_kind": "model",
                 "metric_row": "calibrated",
+                "ship": True,
                 "brier_skill_score": 0.12,
                 "predicted_over_rate": 0.5,
                 "empirical_over_rate": 0.5,
@@ -227,6 +245,7 @@ def test_cli_main_dry_run_does_not_write(tmp_path):
                 "distribution": "SkewNormal",
                 "row_kind": "model",
                 "metric_row": "calibrated",
+                "ship": True,
                 "brier_skill_score": 0.12,
                 "predicted_over_rate": 0.5,
                 "empirical_over_rate": 0.5,

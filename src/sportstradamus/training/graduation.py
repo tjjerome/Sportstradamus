@@ -247,3 +247,30 @@ def served_cells_failing_ship(
         for market, cell in markets.items()
         if cell.get("shipped") in ("devel", "main") and (league, market) in failing_rows
     ]
+
+
+def free_passer_cells(
+    meta: dict[str, dict[str, dict]],
+    model_stats_path: Path,
+) -> list[tuple[str, str]]:
+    """Return ``(league, market)`` cells passing ship yet still ``shipped: "withheld"``.
+
+    The Gate-4 redefinition demoted cells but never auto-promoted the ones the
+    new gate newly passes (the free-passer sweep, model_improvement_track §6.0).
+    These are candidates for a manual flip to ``"devel"`` after a re-confirm on
+    the official scorecard — auto-flipping is unsafe, since a sweep pass that
+    disagrees with the scorecard is a scorer bug to chase. A missing parquet or
+    an ``NA`` ``ship`` (no scored evidence) is not a pass — only an explicit
+    ``ship == True`` qualifies.
+    """
+    if not model_stats_path.exists():
+        return []
+    stats = pd.read_parquet(model_stats_path, columns=["league", "market", "ship"])
+    passed = stats["ship"].eq(True).fillna(False).astype(bool)
+    passing_rows = set(zip(stats.loc[passed, "league"], stats.loc[passed, "market"], strict=False))
+    return [
+        (league, market)
+        for league, markets in meta.items()
+        for market, cell in markets.items()
+        if cell.get("shipped") == "withheld" and (league, market) in passing_rows
+    ]

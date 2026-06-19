@@ -104,6 +104,16 @@ CREATE TABLE IF NOT EXISTS lines (
     line         DOUBLE NOT NULL,
     observed_at  TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS ladder (
+    league       TEXT NOT NULL,
+    market       TEXT NOT NULL,
+    game_date    DATE NOT NULL,
+    entity       TEXT NOT NULL,
+    book         TEXT NOT NULL,
+    line         DOUBLE NOT NULL,
+    p_over       DOUBLE NOT NULL,
+    observed_at  TIMESTAMP
+);
 """
 
 
@@ -295,6 +305,7 @@ class Archive:
         # successive observations; flushed in bulk by :meth:`write`.
         self._pending_odds: list[tuple] = []
         self._pending_lines: list[tuple] = []
+        self._pending_ladder: list[tuple] = []
 
     def _table_columns(self, table: str) -> set[str]:
         return {
@@ -329,10 +340,6 @@ class Archive:
             if "sample_ts" in self._table_columns(table):
                 self._connection.execute(f"ALTER TABLE {table} DROP COLUMN sample_ts")
         self._connection.commit()
-
-    # ------------------------------------------------------------------ #
-    # Read API
-    # ------------------------------------------------------------------ #
 
     def _weighted_book_ev(self, league: str, market: str, rows: list[tuple[str, float]]) -> float:
         weights = book_weights.get(league, {}).get(market, {})
@@ -668,10 +675,6 @@ class Archive:
         sample_rows = self._connection.execute(sample_sql, sample_params).fetchall()
         return sample_rows[0][0] if sample_rows and sample_rows[0][0] is not None else None
 
-    # ------------------------------------------------------------------ #
-    # History API
-    # ------------------------------------------------------------------ #
-
     def get_line_history(
         self,
         league: str,
@@ -794,10 +797,6 @@ class Archive:
 
         return out
 
-    # ------------------------------------------------------------------ #
-    # Write API
-    # ------------------------------------------------------------------ #
-
     def _stage_book_ev(
         self,
         league: str,
@@ -838,6 +837,56 @@ class Archive:
         self._pending_lines.append(
             (league, market, date, entity, float(line), observed_at or datetime.datetime.utcnow())
         )
+
+    def _stage_ladder(
+        self,
+        league: str,
+        market: str,
+        date: datetime.date,
+        entity: str,
+        book: str,
+        line: float,
+        p_over: float,
+        observed_at: datetime.datetime | None = None,
+    ) -> None:
+        """Buffer one alt-line rung's de-vigged over-probability; flushed by :meth:`write`."""
+        self._pending_ladder.append(
+            (
+                league,
+                market,
+                date,
+                entity,
+                book,
+                float(line),
+                float(p_over),
+                observed_at or datetime.datetime.utcnow(),
+            )
+        )
+
+    def add_ladder(
+        self,
+        league: str,
+        market: str,
+        date: str | datetime.date,
+        entity: str,
+        book: str,
+        rungs: list[tuple[float, float]],
+        observed_at: datetime.datetime | None = None,
+    ) -> None:
+        """Append every offered alt-line rung for one ``(player, book)``.
+
+        ``rungs`` is a list of ``(line, de-vigged over-prob)`` captured before the
+        consensus collapse, so the full ladder survives for later book-CDF fitting.
+        The consensus ``ev`` / ``Lines`` path is unaffected — this is additive.
+        """
+        d = _safe_date(date)
+        if d is None:
+            return
+        entity = remove_accents(entity)
+        for line, p_over in rungs:
+            if line is None or p_over is None:
+                continue
+            self._stage_ladder(league, market, d, entity, book, line, p_over, observed_at)
 
     def add_dfs(self, offers, platform, key):
         """Add a batch of scraped offers to the archive for one ``platform``.
@@ -928,10 +977,6 @@ class Archive:
                 continue
             self._stage_book_ev(league, market, d, team, book, ev)
 
-    # ------------------------------------------------------------------ #
-    # Sync
-    # ------------------------------------------------------------------ #
-
     def write(self, all=False):
         """Flush pending writes to disk.
 
@@ -961,9 +1006,26 @@ class Archive:
             )
             con.execute("INSERT INTO lines SELECT * FROM lines_df")
 
+        if self._pending_ladder:
+            ladder_df = pd.DataFrame(  # noqa: F841 — referenced via DuckDB DataFrame replacement
+                self._pending_ladder,
+                columns=[
+                    "league",
+                    "market",
+                    "game_date",
+                    "entity",
+                    "book",
+                    "line",
+                    "p_over",
+                    "observed_at",
+                ],
+            )
+            con.execute("INSERT INTO ladder SELECT * FROM ladder_df")
+
         con.commit()
         self._pending_odds.clear()
         self._pending_lines.clear()
+        self._pending_ladder.clear()
 
 
 class LazyArchive:
