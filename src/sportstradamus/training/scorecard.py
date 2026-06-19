@@ -2219,15 +2219,17 @@ def main(
             if frame.empty:
                 click.echo(f"{cell_league}_{cell_market}: no offers in last {live_window}d.")
                 continue
+            # history.parquet carries only the raw model mean (Model EV -> EV); the fused
+            # Blended_EV lives in the dumped test-set CSVs, so live monitoring scores EV.
             card = scorecard(
                 frame,
-                pred_col,
+                "EV",
                 strategy=live_strategy,
                 league=cell_league,
                 market=cell_market,
                 n_deciles=deciles,
             )
-            _print_live_scorecard(card, f"{cell_league}_{cell_market}", pred_col)
+            _print_live_scorecard(card, f"{cell_league}_{cell_market}", "EV")
             if not no_log:
                 append_run_log(card, log_path)
         return
