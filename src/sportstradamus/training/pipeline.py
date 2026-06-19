@@ -151,7 +151,7 @@ DETERMINISTIC_FIXED_PARAMS = {
     "bagging_freq": 0,
     "max_depth": -1,
     "max_bin": 127,
-    "num_threads": 1,  # multi-thread LightGBM histogram reductions are not bit-reproducible even with deterministic=True
+    "num_threads": 8,  # --deterministic overrides to 1; multi-thread histogram reductions are not bit-reproducible
     "feature_pre_filter": False,
 }
 
@@ -170,20 +170,22 @@ def seed_everything(seed: int) -> dict[str, int | bool]:
     Returns:
         LightGBM training params to merge into the params dict: ``seed``,
         ``bagging_seed``, ``feature_fraction_seed`` (all == ``seed``),
-        ``deterministic`` (True), ``force_row_wise`` (True).
+        ``deterministic`` (True), ``force_row_wise`` (True), ``num_threads``
+        (1 -- overrides the default 8 so histogram reductions stay bit-reproducible).
     """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.use_deterministic_algorithms(
         True
-    )  # NOTE: process-global; later non-deterministic torch ops in-process will raise
+    )  # process-global; later non-deterministic torch ops in-process will raise
     return {
         "seed": seed,
         "bagging_seed": seed,
         "feature_fraction_seed": seed,
         "deterministic": True,
         "force_row_wise": True,
+        "num_threads": 1,  # multi-thread histogram reductions are not bit-reproducible
     }
 
 
