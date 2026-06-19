@@ -45,7 +45,9 @@ def _load_fixture():
     M = M.sort_values(["Date"]).head(GATE_N_ROWS).reset_index(drop=True)
 
     cols = StatsNBA().get_stat_columns("FGA")
-    X = M[cols].copy()
+    # reindex (not M[cols]) matches production _step_build_splits: a feature_filter
+    # addition not yet regenerated into the cached parquet fills NaN, not KeyError.
+    X = M.reindex(columns=cols).copy()
     for c in ("Home", "Player position"):
         if c in X.columns:
             X[c] = X[c].astype("category")
