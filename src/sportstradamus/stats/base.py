@@ -52,11 +52,24 @@ _COMP_Z_CLIP: float = 10.0
 # recommend K in the 8-12 band; 10 is the middle of that band.
 _COMP_EB_PRIOR_K: float = 10.0
 
+# Empirical-Bayes prior count for the career expanding-mean shrinkage toward the
+# per-position baseline (same K/(K+n) Efron-Morris form as _COMP_EB_PRIOR_K). K is
+# the game count at which a player's own career mean and the position prior carry
+# equal weight; placeholder 10.0 (the comp-K midpoint) until cross-validated per
+# league by held-out NLL of MeanYr_expanding_eb (see the §6.3 follow-up).
+_EXPANDING_EB_PRIOR_K: float = 10.0
+
 # Quantile bands for the ``comps p25`` / ``comps p75`` signals. Use the
 # distance-weighted comp distribution rather than the raw comp set: a
 # closer comp gets more vote, matching how ``comps mean`` is built.
 _COMP_QUANTILE_LO: float = 0.25
 _COMP_QUANTILE_HI: float = 0.75
+
+# Half-life (days) for recency-weighting comp (comp, opponent) outcomes in the
+# matchup-conditional comp lookup. A comp's game decays as
+# ``exp(-days_ago / halflife)`` so recent matchups dominate the raw/z estimate.
+# ~45 days ≈ the trailing-window center of mass; cross-validate per league later.
+_COMP_RECENCY_HALFLIFE_DAYS: float = 45.0
 
 # Clip bounds for per-player projection scale ratios in get_volume_stats.
 # Floor prevents shrinking a player below 10% of their mean; cap prevents
@@ -102,6 +115,30 @@ _BLOWOUT_SPREAD_THRESHOLD: dict[str, float] = {
     "MLB": 2.5,
 }
 
+# Postseason decode for the leagues whose native game ID encodes the season type
+# (verified against the cached gamelogs): NBA/WNBA carry it in the 3rd character,
+# NHL in characters 5-6. The value is ``(slice_start, slice_stop, postseason_codes)``.
+# Postseason codes: NBA playoffs(4) + play-in(5); WNBA playoffs(4) only -- its 5 is
+# the Commissioner's Cup, not a bracket game; NHL playoffs(03). Every other code is
+# regular or exhibition (preseason, All-Star, NBA Cup, 4 Nations) and flags 0, which
+# is exactly the exclusion we want. NFL/MLB carry no such ID and override _playoff_flag.
+_PLAYOFF_GAMEID_CODE: dict[str, tuple[int, int, frozenset[str]]] = {
+    "NBA": (2, 3, frozenset({"4", "5"})),
+    "WNBA": (2, 3, frozenset({"4"})),
+    "NHL": (4, 6, frozenset({"03"})),
+}
+
+# Series context (playoff contention). The within-series W-L record is tallied from
+# prior playoff teamlog games against the same opponent inside this lookback window;
+# a best-of-7 spans ~2 weeks, so 30 days isolates the current series from any
+# prior-season meeting against the same team (two teams meet in at most one series
+# per postseason, so no same-postseason cross-round collision).
+_SERIES_LOOKBACK_DAYS: int = 30
+# Wins to clinch the default playoff series: NBA and NHL are best-of-7 every round.
+# WNBA (round-dependent) and MLB (round-dependent) override _series_games_to_win.
+_SERIES_DEFAULT_GAMES_TO_WIN: int = 4
+_SERIES_FEATURE_COLS = ("SeriesWins", "SeriesLosses", "FacingElimination", "CanClinch")
+
 
 # Columns of the empty per-player feature frame get_stats seeds before populating
 # rows -- and the frame it returns when no requested player has game history.
@@ -115,6 +152,9 @@ _BASE_STAT_COLUMNS = [
     "Mean10",
     "MeanYr",
     "MeanYr_nonzero",
+    "MeanYr_expanding_shifted",
+    "MeanYr_expanding_eb",
+    "MeanYr_expanding_vsopp",
     "MeanH2H",
     "STD10",
     "STDYr",
@@ -130,6 +170,11 @@ _BASE_STAT_COLUMNS = [
     "Spread",
     "GameTotal",
     "Blowout",
+    "Playoff",
+    "SeriesWins",
+    "SeriesLosses",
+    "FacingElimination",
+    "CanClinch",
 ]
 # LazyArchive defers DuckDB lock acquisition until the first attribute
 # access so processes that merely import this module — most importantly
@@ -733,6 +778,30 @@ class Stats:
             team_stat_types = self.team_stat_types
         return stat_types, team_stat_types
 
+    def _player_recent_slope(self, frame, value_cols):
+        """Per-player OLS slope of each value col over the player's last 5 games.
+
+        Rank-indexed least-squares slope, zeroed for players with fewer than
+        ``_MIN_GAMES_FOR_TRENDS`` total games. Shared by the efficiency-stat
+        ``growth`` profile columns and the comp-trend market signal.
+        """
+        _pc = self.log_strings["player"]
+        last5 = frame.groupby(_pc).tail(5).copy()
+        last5["_rank"] = last5.groupby(_pc).cumcount()
+        grp = last5.groupby(_pc)
+        n = grp.size()
+        sum_r = grp["_rank"].sum()
+        sum_r2 = (last5["_rank"] ** 2).groupby(last5[_pc]).sum()
+        denom = (n * sum_r2 - sum_r**2).replace(0, np.nan)
+        valid = [c for c in value_cols if c in last5.columns]
+        sum_y = grp[valid].sum()
+        iy = last5[valid].multiply(last5["_rank"], axis=0)
+        sum_iy = iy.groupby(last5[_pc]).sum()
+        slopes = (sum_iy.multiply(n, axis=0) - sum_y.multiply(sum_r, axis=0)).div(denom, axis=0)
+        total = frame.groupby(_pc).size()
+        slopes.loc[total < _MIN_GAMES_FOR_TRENDS] = 0.0
+        return slopes.fillna(0).infer_objects(copy=False)
+
     def _build_player_profile_stats(self, stat_types, date):
         _filled_gl = self.short_gamelog.fillna(0).infer_objects(copy=False)
         _player_col = self.log_strings["player"]
@@ -752,24 +821,7 @@ class Stats:
             .add_suffix(" short", 1)
         )
 
-        # slope = (N*Σ(rank*y) - Σrank*Σy) / (N*Σrank² - (Σrank)²)
-        _last5t = _last5.copy()
-        _last5t["_rank"] = _last5t.groupby(_player_col).cumcount()
-        _grp_t = _last5t.groupby(_player_col)
-        _n_t = _grp_t.size()
-        _sum_r = _grp_t["_rank"].sum()
-        _sum_r2 = (_last5t["_rank"] ** 2).groupby(_last5t[_player_col]).sum()
-        _denom_t = (_n_t * _sum_r2 - _sum_r**2).replace(0, np.nan)
-        _valid_stats = [s for s in stat_types if s in _last5t.columns]
-        _sum_y = _grp_t[_valid_stats].sum()
-        _iy = _last5t[_valid_stats].multiply(_last5t["_rank"], axis=0)
-        _sum_iy = _iy.groupby(_last5t[_player_col]).sum()
-        playertrends = (_sum_iy.multiply(_n_t, axis=0) - _sum_y.multiply(_sum_r, axis=0)).div(
-            _denom_t, axis=0
-        )
-        _total_games = _filled_gl.groupby(_player_col).size()
-        playertrends.loc[_total_games < _MIN_GAMES_FOR_TRENDS] = 0.0
-        playertrends = playertrends.fillna(0).infer_objects(copy=False).add_suffix(" growth", 1)
+        playertrends = self._player_recent_slope(_filled_gl, stat_types).add_suffix(" growth", 1)
 
         playerstats = playerstats.join(playershortstats)
         playerstats = playerstats.join(playertrends)
@@ -892,7 +944,7 @@ class Stats:
             else:
                 self.defenseProfile[position] = positionGroups.mean().div(leagueavg) - 1
 
-    def _apply_comp_features(self, date, _all_mean):
+    def _apply_comp_features(self, date, market, _all_mean, _all_trend):
         # Pass ``date`` so the training-matrix iteration rebuilds the comp
         # pool whenever the advancing date crosses into a new Wednesday-keyed
         # week (see :meth:`_ensure_comps`). The inference / cron path passes
@@ -949,6 +1001,23 @@ class Stats:
                     self.playerProfile.index
                 )
 
+                # Wide comp spread flags an unreliable ``comps mean`` anchor.
+                _dev = _cp_df_p["comp_mean"] - _cp_df_p["player"].map(_comp_wmean)
+                _wvar = (_dev**2 * _cp_df_p["weight"]).groupby(_cp_df_p["player"]).sum() / _wcnt_p
+                self.playerProfile["comps std"] = np.sqrt(_wvar).reindex(self.playerProfile.index)
+
+                # Distance-weighted mean of comps' recent market slope -- mirrors
+                # comps mean but over the per-player trend (_all_trend) rather
+                # than the level (_all_mean).
+                _cg = _cp_df_p.assign(comp_trend=_cp_df_p["comp"].map(_all_trend)).dropna(
+                    subset=["comp_trend"]
+                )
+                _g_wsum = (_cg["comp_trend"] * _cg["weight"]).groupby(_cg["player"]).sum()
+                _g_wcnt = _cg["weight"].groupby(_cg["player"]).sum()
+                self.playerProfile["comps trend"] = (_g_wsum / _g_wcnt).reindex(
+                    self.playerProfile.index
+                )
+
     def _begin_profile_market(self, market, date) -> "date | None":
         """Normalize ``date``, refresh the base profile for ``market``, and return it.
 
@@ -990,7 +1059,19 @@ class Stats:
             return
 
         self.playerProfile[
-            ["z", "home", "moneyline gain", "totals gain", "position z", "comps mean", "comps z"]
+            [
+                "z",
+                "home",
+                "moneyline gain",
+                "totals gain",
+                "position z",
+                "comps mean",
+                "comps z",
+                "comps raw",
+                "comps z recent",
+                "comps std",
+                "comps trend",
+            ]
         ] = 0.0
         self.playerProfile["z"] = (playerGroups[market].mean() - leagueavg).div(leaguestd)
 
@@ -999,6 +1080,7 @@ class Stats:
         _home_mask = _filtered[_home_col].astype(bool)
         _home_mean = _filtered.loc[_home_mask].groupby(_pc)[market].mean()
         _all_mean = playerGroups[market].mean()
+        _all_trend = self._player_recent_slope(_filtered, [market])[market]
         self.playerProfile["home"] = _home_mean / _all_mean - 1
 
         defenseGroups = self.short_gamelog.groupby(
@@ -1095,7 +1177,7 @@ class Stats:
             _denom_dt = (_n_def * _SX2_dt - _SX_dt**2).replace(0, np.nan)
             self.defenseProfile["totals gain"] = (_n_def * _SXY_dt - _SX_dt * _SY_def) / _denom_dt
 
-        self._apply_comp_features(date, _all_mean)
+        self._apply_comp_features(date, market, _all_mean, _all_trend)
 
         self.defenseProfile.fillna(0.0, inplace=True)
         self.teamProfile.fillna(0.0, inplace=True)
@@ -1206,7 +1288,15 @@ class Stats:
         )
         self._h2h_features(stats, market, opponents, pitchers)
         stats, defstats = self._join_profiles(stats, teams, opponents, pitchers)
-        self._comp_features(stats, defstats, market, opponents)
+        # _join_profiles drops players off the depth chart, which can leave a
+        # gameday with zero rows (e.g. a recent date whose players aren't on the
+        # depth chart yet); the feature builders below index per-row and raise on
+        # an empty frame, so return early -- the day contributes no training rows.
+        if stats.empty:
+            return stats
+        self._expanding_features(stats, market, date, opponents)
+        self._interaction_features(stats, defstats)
+        self._comp_features(stats, defstats, market, opponents, date)
         stats = self._join_defense_and_parks(stats, defstats, teams)
         return stats.fillna(0).infer_objects(copy=False)
 
@@ -1355,9 +1445,12 @@ class Stats:
             ]
         stats["Spread"] = stats["Total"] - stats["OppTotal"]
         stats["GameTotal"] = stats["Total"] + stats["OppTotal"]
-        stats["Blowout"] = (
-            stats["Spread"].abs() > _BLOWOUT_SPREAD_THRESHOLD[self.league]
-        ).astype(int)
+        stats["Blowout"] = (stats["Spread"].abs() > _BLOWOUT_SPREAD_THRESHOLD[self.league]).astype(
+            int
+        )
+        self._schedule_context(stats, date, teams)
+        self._playoff_flag(stats, date, teams)
+        self._series_context(stats, date, teams, opponents)
         return stats, teams, opponents, pitchers
 
     def _h2h_features(self, stats, market, opponents, pitchers):
@@ -1375,6 +1468,159 @@ class Stats:
         stats["AvgH2H"] = h2hgames[market].median()
         stats["MeanH2H"] = h2hgames[market].mean()
         stats["H2HPlayed"] = h2hgames[market].count()
+
+    def _schedule_context(self, stats, date, teams):
+        """Hook: attach league-specific schedule-context columns. No-op on base.
+
+        NFL overrides this to emit Weekday / PrimeTime / RestDiff from the schedule
+        carried on the gamelog (historical) or ``upcoming_games`` (upcoming). Called
+        at the end of :meth:`_game_context` so it shares the same date branch.
+        """
+
+    def _playoff_flag(self, stats, date, teams):
+        """Flag postseason games via the native game-ID season-type code.
+
+        Handles the three leagues whose game ID encodes the season type
+        (:data:`_PLAYOFF_GAMEID_CODE`); NFL and MLB override with their own signal.
+        Historical reads the realized gamelog row's game ID per player. The upcoming
+        schedule carries no game ID, so the serve branch infers the phase from the
+        season's latest completed game -- a games-based read, not a calendar window,
+        so it needs no per-league regular-season length (which drifts year to year).
+        """
+        start, stop, codes = _PLAYOFF_GAMEID_CODE[self.league]
+        game_col = self.log_strings["game"]
+        gl_dates = pd.to_datetime(self.gamelog[self.log_strings["date"]])
+        if date < datetime.today().date():
+            todays = (
+                self.gamelog.loc[gl_dates.dt.date == date]
+                .drop_duplicates(self.log_strings["player"])
+                .set_index(self.log_strings["player"])
+            )
+            game_codes = todays[game_col].astype(str).str.slice(start, stop).reindex(stats.index)
+            stats["Playoff"] = game_codes.isin(codes).astype(int)
+        else:
+            latest_code = str(self.gamelog.loc[gl_dates.idxmax(), game_col])[start:stop]
+            stats["Playoff"] = int(latest_code in codes)
+
+    def _series_context(self, stats, date, teams, opponents):
+        """Attach playoff-series contention: within-series W-L record plus the
+        FacingElimination / CanClinch flags (model track series-context feature).
+
+        Tallies the record from prior playoff teamlog games against this opponent
+        (:meth:`_tally_series_record`), then derives the flags from a per-league
+        wins-to-clinch (:meth:`_series_games_to_win`: best-of-7 here, round-dependent
+        for WNBA/MLB). Regular-season games carry no series, so the whole block
+        short-circuits to zero when nobody on the slate is in the postseason. NFL
+        (single-elimination, no multi-game series) overrides this entirely.
+        """
+        if not stats["Playoff"].any():
+            stats[list(_SERIES_FEATURE_COLS)] = 0
+            return
+        playoff_teamlog = self._playoff_teamlog()
+        wins, losses = self._tally_series_record(
+            playoff_teamlog, stats.index, date, teams, opponents
+        )
+        matchups = {(teams.get(p), opponents.get(p)) for p in stats.index}
+        games_to_win = {
+            m: self._series_games_to_win(playoff_teamlog, m[0], m[1], date) for m in matchups
+        }
+        gtw = pd.Series(
+            {p: games_to_win[(teams.get(p), opponents.get(p))] for p in stats.index}, dtype=float
+        )
+        in_playoffs = stats["Playoff"] == 1
+        stats["SeriesWins"] = wins
+        stats["SeriesLosses"] = losses
+        stats["FacingElimination"] = ((losses == gtw - 1) & in_playoffs).astype(int)
+        stats["CanClinch"] = ((wins == gtw - 1) & in_playoffs).astype(int)
+
+    def _tally_series_record(self, playoff_teamlog, index, date, teams, opponents):
+        """Per-player (wins, losses) in the current playoff series, from the teamlog.
+
+        Counts this team's prior wins/losses against the matchup opponent within
+        :data:`_SERIES_LOOKBACK_DAYS` (the same-postseason series window). Shared by
+        the game-ID leagues and MLB; they differ only in how ``playoff_teamlog`` is
+        scoped (:meth:`_playoff_teamlog`).
+        """
+        team_col, opp_col, date_col = (
+            self.log_strings["team"],
+            self.log_strings["opponent"],
+            self.log_strings["date"],
+        )
+        tl_dates = pd.to_datetime(playoff_teamlog[date_col]).dt.date
+        window = playoff_teamlog.loc[
+            (tl_dates < date) & (tl_dates >= date - timedelta(days=_SERIES_LOOKBACK_DAYS))
+        ]
+        wins = window.loc[window["WL"] == "W"].groupby([team_col, opp_col]).size()
+        losses = window.loc[window["WL"] == "L"].groupby([team_col, opp_col]).size()
+        series_wins = pd.Series(
+            {p: int(wins.get((teams.get(p), opponents.get(p)), 0)) for p in index}, dtype=int
+        )
+        series_losses = pd.Series(
+            {p: int(losses.get((teams.get(p), opponents.get(p)), 0)) for p in index}, dtype=int
+        )
+        return series_wins, series_losses
+
+    def _playoff_teamlog(self):
+        """Teamlog rows that are playoff games, for the game-ID leagues. MLB overrides
+        (its game ID carries no code) to scope by the stamped ``game type``.
+        """
+        start, stop, codes = _PLAYOFF_GAMEID_CODE[self.league]
+        game_codes = self.teamlog[self.log_strings["game"]].astype(str).str.slice(start, stop)
+        return self.teamlog.loc[game_codes.isin(codes)]
+
+    def _series_games_to_win(self, playoff_teamlog, team, opp, date):
+        """Wins needed to clinch the series. Best-of-7 for NBA/NHL; WNBA and MLB
+        override for their round-dependent formats.
+        """
+        return _SERIES_DEFAULT_GAMES_TO_WIN
+
+    def _expanding_features(self, stats, market, date, opponents):
+        """Career expanding-mean player features (M-1), leakage-safe.
+
+        Reads the FULL gamelog (strict ``< date``) per requested player -- distinct
+        from the 1-year-window ``MeanYr`` in :meth:`_rolling_features`. Emits the
+        career mean, its head-to-head-vs-opponent variant, and an Empirical-Bayes
+        shrinkage of the career mean toward the per-position baseline where the
+        career window is sparse (the small-n NFL case the build pre-registers).
+        """
+        player_col = self.log_strings["player"]
+        opp_col = self.log_strings["opponent"]
+        gld = pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date
+        career = self.gamelog.loc[gld < date, [player_col, opp_col, market]].copy()
+        career[player_col] = career[player_col].apply(remove_accents)
+        career = career.loc[career[player_col].isin(stats.index)]
+
+        career_grp = career.groupby(player_col)[market]
+        stats["MeanYr_expanding_shifted"] = career_grp.mean().reindex(stats.index)
+        n_career = career_grp.count().reindex(stats.index).fillna(0)
+        stats["MeanYr_expanding_n"] = n_career
+
+        h2h = career.loc[career[opp_col] == career[player_col].map(opponents)]
+        h2h_grp = h2h.groupby(player_col)[market]
+        stats["MeanYr_expanding_vsopp"] = h2h_grp.mean().reindex(stats.index)
+        stats["MeanYr_expanding_vsopp_n"] = h2h_grp.count().reindex(stats.index).fillna(0)
+
+        expanding = stats["MeanYr_expanding_shifted"]
+        pos_baseline = expanding.groupby(stats["Player position"]).transform("mean")
+        pos_baseline = pos_baseline.fillna(expanding.mean())
+        shrink = n_career / (n_career + _EXPANDING_EB_PRIOR_K)
+        stats["MeanYr_expanding_eb"] = (
+            shrink * expanding.fillna(pos_baseline) + (1.0 - shrink) * pos_baseline
+        )
+
+    def _interaction_features(self, stats, defstats):
+        """Opponent-defense × player interaction columns (M-1, non-MLB).
+
+        Products of leakage-safe profile columns: the player's career level scaled
+        by the opponent's overall defense ratio, and the player's standardized level
+        scaled by the opponent's defense strength vs the player's own position. MLB
+        is excluded -- its ``defstats`` carries a pitcher overlay, not the team-defense
+        ``avg`` / per-position strength these products assume.
+        """
+        if self.league == "MLB":
+            return
+        stats["PlayerExp_x_DefAvg"] = stats["MeanYr_expanding_eb"] * defstats["avg"]
+        stats["PlayerZ_x_DefPos"] = stats["Player z"] * defstats["position"]
 
     def _join_profiles(self, stats, teams, opponents, pitchers):
         """Join player / team / defense profiles; return ``(stats, defstats)``.
@@ -1402,13 +1648,17 @@ class Stats:
                 [x for x in stats.index.map(pitchers) if x in self.pitcherProfile.index]
             ].values
         else:
-            defstats["position"] = np.diag(defstats.iloc[:, stats["Player position"] + 5])
+            # The depth filter above can leave zero rows; guard the per-row
+            # position diag (the drop still runs so the empty frame keeps the
+            # same schema as populated gamedays).
+            if len(stats):
+                defstats["position"] = np.diag(defstats.iloc[:, stats["Player position"] + 5])
             defstats.drop(columns=self.positions, inplace=True)
 
         defstats.index = stats.index
         return stats, defstats
 
-    def _comp_features(self, stats, defstats, market, opponents):
+    def _comp_features(self, stats, defstats, market, opponents, date):
         """Attach the matchup-conditional comp signal to ``stats`` / ``defstats``.
 
         The residual signal writes to ``stats["Player comps z"]`` (was the misnamed
@@ -1421,7 +1671,7 @@ class Stats:
         if self.league == "MLB":
             self._mlb_comp_features(stats, defstats, market, opponents)
         else:
-            self._nonmlb_comp_features(stats, defstats, market, opponents)
+            self._nonmlb_comp_features(stats, defstats, market, opponents, date)
 
     def _mlb_comp_features(self, stats, defstats, market, opponents):
         """MLB per-player comp-z: z-score each comp's outcome vs this opponent."""
@@ -1480,18 +1730,22 @@ class Stats:
             )
         return compGames
 
-    def _nonmlb_comp_features(self, stats, defstats, market, opponents):
+    def _nonmlb_comp_features(self, stats, defstats, market, opponents, date):
         """Non-MLB matchup-conditional comp lookup (vectorized).
 
         The static ``(player, comp, position, dist, weight)`` table is built once per
         comp-pool swap by :meth:`_comp_pairs`; here we attach the per-call opponent
         and merge against the per-day z-scored gamelog to get each comp's outcome vs
         this opponent, z-scored against the comp's own baseline and distance-weighted.
+        QW-5 adds a recency-weighted raw-scale mean and a recency-weighted z sibling.
         """
         opp_col = self.log_strings["opponent"]
         player_col = self.log_strings["player"]
-        gl_z = self.short_gamelog[[player_col, opp_col, market]].copy()
+        date_col = self.log_strings["date"]
+        gl_z = self.short_gamelog[[player_col, opp_col, market, date_col]].copy()
         gl_z["_mkt_zscore"] = _zscore_within_player(gl_z, player_col, market)
+        _days_ago = (pd.Timestamp(date) - pd.to_datetime(gl_z[date_col])).dt.days
+        gl_z["_recency_w"] = np.exp(-_days_ago / _COMP_RECENCY_HALFLIFE_DAYS)
 
         pairs = self._comp_pairs()
         if pairs.empty:
@@ -1526,7 +1780,7 @@ class Stats:
         # it under the ``Defense `` prefix.
         defstats["comp distance"] = cp_df.groupby("player")["dist"].mean().reindex(defstats.index)
         merged = cp_df.merge(
-            gl_z[[player_col, opp_col, "_mkt_zscore"]],
+            gl_z[[player_col, opp_col, market, "_mkt_zscore", "_recency_w"]],
             left_on=["comp", "opp"],
             right_on=[player_col, opp_col],
             how="inner",
@@ -1539,6 +1793,23 @@ class Stats:
         # Count of (comp, opponent) game observations backing each ``Player comps z``
         # estimate. Stays on defstats for cached-matrix compatibility.
         defstats["comp n"] = merged.groupby("player").size().reindex(defstats.index)
+
+        # Emitted alongside ``Player comps z`` (which stays distance-only) so
+        # the A/B picks the winner rather than silently regressing the shipped feature.
+        merged["_rw"] = merged["weight"] * merged["_recency_w"]
+        _rw_sum = merged.groupby("player")["_rw"].sum()
+        merged["_weighted_raw"] = merged[market] * merged["_rw"]
+        stats["Player comps raw"] = (
+            (merged.groupby("player")["_weighted_raw"].sum() / _rw_sum)
+            .reindex(stats.index)
+            .fillna(0.0)
+        )
+        merged["_weighted_z_recent"] = merged["_mkt_zscore"] * merged["_rw"]
+        stats["Player comps z recent"] = (
+            (merged.groupby("player")["_weighted_z_recent"].sum() / _rw_sum)
+            .reindex(stats.index)
+            .fillna(0.0)
+        )
 
     def _join_defense_and_parks(self, stats, defstats, teams):
         """Join the defense profile and, for MLB, the per-team park factors."""

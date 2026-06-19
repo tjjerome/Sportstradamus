@@ -243,9 +243,34 @@ def test_train_and_live_feature_paths_agree_on_a_frozen_gameday(primed_stats, mo
 
     # The _game_context invariant, named explicitly so a regression points here.
     # OppTotal + the derived Spread/GameTotal/Blowout (QW-1) ride the same
-    # historical-gamelog vs upcoming-archive divergence as Total, so they pin here too.
-    for col in ("Home", "Moneyline", "Total", "OppTotal", "Spread", "GameTotal", "Blowout"):
+    # historical-gamelog vs upcoming-archive divergence as Total, so they pin here too;
+    # Playoff (game-ID season-type decode) and the series-context columns
+    # (SeriesWins/SeriesLosses/FacingElimination/CanClinch) are the same _game_context
+    # surface -- regular-season synthetic logs short-circuit them to 0 in both branches.
+    for col in (
+        "Home", "Moneyline", "Total", "OppTotal", "Spread", "GameTotal", "Blowout",
+        "Playoff", "SeriesWins", "SeriesLosses", "FacingElimination", "CanClinch",
+    ):
         assert train[col].tolist() == live[col].tolist(), f"_game_context branch divergence on {col}"
+
+    # M-1 player-level build: the career expanding mean (full-gamelog, strict-< date),
+    # its EB-shrunk + vs-opponent variants, and the opp-defense × player interaction
+    # products must agree across the historical/upcoming branches. Pinned explicitly
+    # so a regression points here, not just at the shared-surface loop above.
+    for col in (
+        "MeanYr_expanding_shifted",
+        "MeanYr_expanding_eb",
+        "MeanYr_expanding_vsopp",
+        "PlayerExp_x_DefAvg",
+        "PlayerZ_x_DefPos",
+    ):
+        assert np.allclose(
+            train[col].to_numpy(dtype=float),
+            live[col].to_numpy(dtype=float),
+            rtol=0,
+            atol=1e-9,
+            equal_nan=True,
+        ), f"M-1 feature branch divergence on {col}"
 
     # parity-surface extension point: a future feature batch that adds a per-gameday
     # column (or a new _game_context lookup / volume-dispatch surface) extends the
