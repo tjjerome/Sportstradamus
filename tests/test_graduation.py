@@ -11,6 +11,7 @@ import pytest
 from sportstradamus.training.graduation import (
     MIN_PRECISION_OVER,
     classify_lifecycle,
+    free_passer_cells,
     graduated_cells,
     lifecycle_table,
     read_gate1,
@@ -156,6 +157,35 @@ def test_graduated_cells(tmp_path):
 
 def test_graduated_cells_missing_model_stats_is_empty(tmp_path):
     assert graduated_cells(tmp_path / "nope.parquet", tmp_path / "nolive.parquet") == set()
+
+
+def _seed_model_stats_with_ship(path):
+    """Seed model_stats with an explicit per-cell ``ship`` (True / False / NA)."""
+    rows = [
+        {"league": "NBA", "market": "PTS", "ship": True},  # passes ship
+        {"league": "NBA", "market": "REB", "ship": False},  # fails ship
+        {"league": "WNBA", "market": "AST", "ship": True},  # passes ship, already served
+        {"league": "NFL", "market": "carries", "ship": None},  # no scored evidence
+    ]
+    pd.DataFrame(rows).to_parquet(path, engine="pyarrow", index=False)
+
+
+def test_free_passer_cells(tmp_path):
+    ms = tmp_path / "model_stats.parquet"
+    _seed_model_stats_with_ship(ms)
+    meta = {
+        "NBA": {"PTS": {"shipped": "withheld"}, "REB": {"shipped": "withheld"}},
+        "WNBA": {"AST": {"shipped": "devel"}},
+        "NFL": {"carries": {"shipped": "withheld"}},
+    }
+    # Only NBA/PTS: ship==True AND still withheld. REB fails ship; WNBA/AST already
+    # served; NFL/carries has NA ship (no evidence -> not a pass).
+    assert free_passer_cells(meta, ms) == [("NBA", "PTS")]
+
+
+def test_free_passer_cells_missing_model_stats_is_empty(tmp_path):
+    meta = {"NBA": {"PTS": {"shipped": "withheld"}}}
+    assert free_passer_cells(meta, tmp_path / "nope.parquet") == []
 
 
 def _seed_live_metrics_with_precision(path):

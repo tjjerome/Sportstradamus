@@ -151,7 +151,7 @@ DETERMINISTIC_FIXED_PARAMS = {
     "bagging_freq": 0,
     "max_depth": -1,
     "max_bin": 127,
-    "num_threads": 1,  # multi-thread LightGBM histogram reductions are not bit-reproducible even with deterministic=True
+    "num_threads": 8,  # --deterministic overrides to 1; multi-thread histogram reductions are not bit-reproducible
     "feature_pre_filter": False,
 }
 
@@ -170,20 +170,22 @@ def seed_everything(seed: int) -> dict[str, int | bool]:
     Returns:
         LightGBM training params to merge into the params dict: ``seed``,
         ``bagging_seed``, ``feature_fraction_seed`` (all == ``seed``),
-        ``deterministic`` (True), ``force_row_wise`` (True).
+        ``deterministic`` (True), ``force_row_wise`` (True), ``num_threads``
+        (1 -- overrides the default 8 so histogram reductions stay bit-reproducible).
     """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.use_deterministic_algorithms(
         True
-    )  # NOTE: process-global; later non-deterministic torch ops in-process will raise
+    )  # process-global; later non-deterministic torch ops in-process will raise
     return {
         "seed": seed,
         "bagging_seed": seed,
         "feature_fraction_seed": seed,
         "deterministic": True,
         "force_row_wise": True,
+        "num_threads": 1,  # multi-thread histogram reductions are not bit-reproducible
     }
 
 
@@ -1389,12 +1391,17 @@ def _step_persist_artifacts(
         # skewnormal_loc_from_mean — the single authoritative formula shared with the
         # betting path and the scorecard fit — then re-encode loc/scale to the model's
         # normalized space so the scorecard's decode recovers the served EV params
-        # byte-for-byte (encode is the exact inverse of that decode).
+        # byte-for-byte. Encode is the exact inverse of decode only when both use this
+        # cell's denom_col, which the scorecard recovers from DenomCol persisted below.
         strat = baselines.get_target_normalization(target_normalization)
         served_loc = skewnormal_loc_from_mean(weighted_mean, sn_scale_test, sn_skew_test)
         X_test["SN_Loc"] = strat.encode_loc(served_loc, X_test, global_mean, denom_col)
         X_test["SN_Scale"] = strat.encode_scale(sn_scale_test, X_test, denom_col)
         X_test["SN_Alpha"] = sn_skew_test
+        # Zero-inflated cells encode against MeanYr_nonzero, not MeanYr; persist the
+        # choice so the scorecard's Gate-4 decode reads the same denominator the
+        # betting path serves with (else its dispersion is mis-scaled and g4 fails).
+        X_test["DenomCol"] = denom_col
         # The EB-prior normalizations decode loc by re-adding an empirical-Bayes prior that
         # shrinks toward global_mean; persist it so the scorecard's `_decode_sn_loc_scale`
         # recovers the served loc instead of shrinking toward 0. Ratio/Mean10 decodes ignore it.
@@ -1956,6 +1963,7 @@ def _step_fuse_predictions(
         dist: Distribution name.
         cv: Coefficient of variation from ``_step_select_distribution``.
         hist_gate: Historical zero rate.
+        blending: Blending loss slug forwarded to ``calibration.fit_blend_weight``.
 
     Returns:
         Dict with: ``model_weight``, ``weighted_mean``, ``gate_blend_test``,

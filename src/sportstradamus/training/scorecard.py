@@ -184,9 +184,12 @@ N_DECILES = 10
 DECILE_COL = "MeanYr"
 ACTUAL_COL = "Result"
 
-# Raw model EV is the cleanest view of the model's own compression; Blended_EV
-# mixes in the bookmaker line and masks it. Default to the raw model column.
-DEFAULT_PRED_COL = "EV"
+# The ship gates score the fused ``Blended_EV`` — what the parlay actually drafts and what
+# ``report.compute_gates`` scores in production (``report._SHIP_PRED_COL``). Default the CLI /
+# A-B to that same column so a scorecard reflects the shipping decision rather than the raw
+# model's pre-fusion compression. The raw-model-EV view stays available via ``--pred-col EV``
+# and is always reported alongside as ``g2_star_z_raw`` / ``g3_bench_z_raw``.
+DEFAULT_PRED_COL = "Blended_EV"
 
 # Research artifacts live outside the package data dir — the run log is an append-only
 # experiment journal, not shipped data. Climb scripts -> sportstradamus -> src -> repo
@@ -668,22 +671,32 @@ def _decode_sn_loc_scale(df: pd.DataFrame, strategy: str) -> tuple[np.ndarray, n
 
     Dispatches through the canonical ``baselines`` registry so the gate scores the
     same absolute predictive that ``prediction.model_prob`` prices, rather than a
-    hand-rolled mirror that can drift. ``ratio_meanyr`` multiplies both by ``MeanYr``;
-    ``centered_additive_mean10`` re-adds the Mean10 baseline to ``loc`` — irrelevant
-    for the location-free IQR but load-bearing for the PIT, which is where the old
-    hand-rolled mirror silently dropped the offset. ``centered_additive_eb_meanyr_k10``
+    hand-rolled mirror that can drift. ``ratio_meanyr`` multiplies both by the cell's
+    denominator; ``centered_additive_mean10`` re-adds the Mean10 baseline to ``loc`` —
+    irrelevant for the location-free IQR but load-bearing for the PIT, which is where
+    the old hand-rolled mirror silently dropped the offset. ``centered_additive_eb_meanyr_k10``
     re-adds an empirical-Bayes prior that shrinks toward ``global_mean``, which the
     pipeline persists per-row as the constant ``GlobalMean`` column; without it the
     prior shrinks toward 0 and the decode silently corrupts the PIT. Ratio/Mean10
     decodes ignore ``global_mean``, so the legacy 0.0 fallback is correct for them.
+
+    The denominator must match the one the cell encoded (and serves) with: a
+    zero-inflated SkewNormal cell uses ``MeanYr_nonzero``, not ``MeanYr``, so the
+    pipeline persists the choice as the constant ``DenomCol`` column. Decoding a
+    nonzero-denominator cell against ``MeanYr`` mis-scales its dispersion and fails
+    Gate 4 on a predictive the betting path never priced.
     """
     raw_loc = df["SN_Loc"].to_numpy(dtype=float)
     raw_scale = df["SN_Scale"].to_numpy(dtype=float)
     if strategy not in _SN_DECODE_STRATEGIES:
         return raw_loc, raw_scale
     global_mean = float(df["GlobalMean"].iloc[0]) if "GlobalMean" in df.columns else 0.0
+    denom_col = str(df["DenomCol"].iloc[0]) if "DenomCol" in df.columns else "MeanYr"
     strat = get_target_normalization(strategy)
-    return strat.decode_loc(raw_loc, df, global_mean), strat.decode_scale(raw_scale, df)
+    return (
+        strat.decode_loc(raw_loc, df, global_mean, denom_col),
+        strat.decode_scale(raw_scale, df, denom_col),
+    )
 
 
 def _pred_ppf(df: pd.DataFrame, dist: str, q: float, *, strategy: str) -> np.ndarray:
@@ -1541,7 +1554,7 @@ def compute_gates(
         strategy: Run label written into the row's ``strategy`` field
             before it's stripped. Defaults to ``"meditate"`` so the inline
             caller doesn't have to think about a label that's never read.
-        pred_col: Predicted-mean column to evaluate (``"EV"`` by default).
+        pred_col: Predicted-mean column to evaluate (``"Blended_EV"`` = fused ship gate; ``"EV"`` = raw model).
 
     Returns:
         Dict carrying every gate measurement, oracle bound, per-gate
@@ -2117,7 +2130,7 @@ def _resolve_live_cells(
     "--pred-col",
     type=click.Choice(["EV", "Blended_EV"]),
     default=DEFAULT_PRED_COL,
-    help="Predicted-mean column to evaluate. EV = raw model (default).",
+    help="Predicted-mean column to evaluate. Blended_EV = fused ship gate (default); EV = raw model.",
 )
 @click.option("--strategy", default="unlabeled", help="Strategy label for the run log.")
 @click.option("--deciles", default=N_DECILES, show_default=True, help="Number of buckets.")
@@ -2208,15 +2221,17 @@ def main(
             if frame.empty:
                 click.echo(f"{cell_league}_{cell_market}: no offers in last {live_window}d.")
                 continue
+            # history.parquet carries only the raw model mean (Model EV -> EV); the fused
+            # Blended_EV lives in the dumped test-set CSVs, so live monitoring scores EV.
             card = scorecard(
                 frame,
-                pred_col,
+                "EV",
                 strategy=live_strategy,
                 league=cell_league,
                 market=cell_market,
                 n_deciles=deciles,
             )
-            _print_live_scorecard(card, f"{cell_league}_{cell_market}", pred_col)
+            _print_live_scorecard(card, f"{cell_league}_{cell_market}", "EV")
             if not no_log:
                 append_run_log(card, log_path)
         return
