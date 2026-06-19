@@ -48,6 +48,14 @@ _STALE_SEASON_DAYS = 300
 _PLAYOFF_MONTH = 9
 # Days between latest_date and today that also triggers a playoff-log fetch mid-season.
 _PLAYOFF_LAG_DAYS = 150
+# WNBA playoff series formats: first round best-of-3, semifinals + finals best-of-5.
+# The round isn't in the game ID, so it's inferred from the count of distinct prior
+# opponents this postseason (each prior round = one more opponent already faced).
+_WNBA_FIRST_ROUND_WINS = 2
+_WNBA_LATER_ROUND_WINS = 3
+# A WNBA postseason spans ~6 weeks; this window brackets it (and stays well short of a
+# year) so the round inference only counts opponents from the current postseason.
+_POSTSEASON_LOOKBACK_DAYS = 75
 
 
 class StatsWNBA(StatsNBA):
@@ -64,6 +72,26 @@ class StatsWNBA(StatsNBA):
         self.stat_types = [stat.replace("_48", "_40") for stat in self.stat_types]
 
         self.season = self.season_start.year
+
+    def _series_games_to_win(self, playoff_teamlog, team, opp, date):
+        """Wins to clinch this WNBA series: best-of-3 in the first round, best-of-5 in
+        the semifinals + finals. The round is inferred from the count of distinct
+        opponents this team has already faced this postseason (a prior-round proxy,
+        since the round isn't encoded in the game ID).
+        """
+        team_col, opp_col, date_col = (
+            self.log_strings["team"],
+            self.log_strings["opponent"],
+            self.log_strings["date"],
+        )
+        tl_dates = pd.to_datetime(playoff_teamlog[date_col]).dt.date
+        this_postseason = playoff_teamlog.loc[
+            (playoff_teamlog[team_col] == team)
+            & (tl_dates < date)
+            & (tl_dates >= date - timedelta(days=_POSTSEASON_LOOKBACK_DAYS))
+        ]
+        prior_rounds = this_postseason.loc[this_postseason[opp_col] != opp, opp_col].nunique()
+        return _WNBA_FIRST_ROUND_WINS if prior_rounds == 0 else _WNBA_LATER_ROUND_WINS
 
     def load(self) -> None:
         """Load data from files."""

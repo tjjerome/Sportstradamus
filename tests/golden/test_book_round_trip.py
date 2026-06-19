@@ -6,6 +6,8 @@ must be inverses, and the zero-inflation gate must be applied symmetrically, or 
 book-only leg shows a fake edge that buries the genuinely-modeled markets.
 """
 
+import math
+
 import pytest
 
 from sportstradamus.helpers import stat_cv
@@ -15,7 +17,7 @@ from sportstradamus.prediction.model_prob import _book_cell_params
 
 def _decode(line, ev, dist, cv, gate):
     step = 1.0 if dist in ("NegBin", "ZINB", "Poisson") else 0.5
-    sigma = ev * cv if dist == "SkewNormal" else None
+    sigma = ev * cv if dist in ("SkewNormal", "Normal") else None
     return get_odds(line, ev, dist, cv=cv, step=step, gate=gate, sigma=sigma)
 
 
@@ -23,6 +25,7 @@ def _decode(line, ev, dist, cv, gate):
 # cap (SN_MAX_MEAN_FACTOR * line) — the regime where the round trip must be exact.
 _ROUND_TRIP_CASES = [
     (16.5, 0.544, "SkewNormal", None),
+    (8.5, 0.3, "Normal", None),
     (6.5, 0.55, "SkewNormal", None),
     (3.5, 0.555, "SkewNormal", None),
     (24.5, 0.5, "SkewNormal", None),
@@ -79,6 +82,40 @@ def test_zinb_even_money_book_not_overconfident(league, market, line):
     ev = get_ev(line, 0.5, cv, dist=dist, gate=gate)
     p_under = get_odds(line, ev, dist, cv=cv, step=step, gate=gate)
     assert p_under < 0.65
+
+
+# Realistic game-line points: NBA/NFL/MLB totals and a spread. The even-money
+# guardrail must hold regardless of cv (a Normal's median equals its mean).
+_GAME_LINES = [229.5, 44.5, 8.5, -6.5, 2.5]
+
+
+@pytest.mark.parametrize("line", _GAME_LINES)
+@pytest.mark.parametrize("cv", [0.3, 1.0, 2.0])
+def test_normal_even_money_price_returns_the_line(line, cv):
+    """Game-line guardrail: a no-vig (0.5) price under ``dist="Normal"`` implies
+    a mean equal to the line.
+
+    ``moneylines._GAME_LINE_DIST`` pins totals/spreads to ``"Normal"`` precisely
+    so this holds. A Normal's median equals its mean, so the implied value of an
+    even-money line is the line itself for any cv — no encode-side inflation.
+    """
+    assert get_ev(line, 0.5, cv, dist="Normal") == pytest.approx(line, abs=0.6)
+
+
+@pytest.mark.parametrize("line", [229.5, 44.5, 8.5])
+def test_gamma_even_money_inflates_line_so_normal_pin_matters(line):
+    """Why game lines must pin ``"Normal"``, not ride ``get_ev``'s default.
+
+    A 2026-03 flip of the default to ``"Gamma"`` silently inflated every archived
+    NBA total: Gamma at cv=1 is exponential, whose mean is ``median / ln(2) ≈
+    1.4427 × median``. This asserts the regression family really does diverge from
+    the line at an even-money price (so the Normal pin is load-bearing, not
+    cosmetic), while ``"Normal"`` stays on the line.
+    """
+    gamma_ev = get_ev(line, 0.5, 1.0, dist="Gamma")
+    assert gamma_ev == pytest.approx(line / math.log(2), rel=0.05)
+    assert gamma_ev > line * 1.4  # materially above the true line
+    assert get_ev(line, 0.5, 1.0, dist="Normal") == pytest.approx(line, abs=0.6)
 
 
 def test_stat_cv_present_for_reported_cells():

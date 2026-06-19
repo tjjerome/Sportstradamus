@@ -7,40 +7,49 @@ written ~7800 to the ``odds`` table — the live decode in
 ``prediction/model_prob.py`` must ride the line instead of letting the
 log-opinion pool ``fused_loc`` chase the garbage.
 
-``_sanitize_book_ev`` drops any book mean beyond ``_BOOK_EV_LINE_CAP`` times its
-line (model and book project the *same* stat, so a >10x gap is bad data, not an
-edge) and ``_blend_with_book`` applies it before pooling.
+A book mean beyond ``_BOOK_EV_LINE_CAP`` times its line is implausible (model and
+book project the *same* stat, so a >10x gap is bad data or an ill-conditioned
+count tail). ``_sanitize_book_ev`` shrinks such runaway rows toward
+``model_ev + _BOOK_EV_MODEL_SD_CAP * SD`` (the count-tail regularization, WS4)
+rather than discarding them to the line, and ``_blend_with_book`` applies it
+before pooling.
 """
 
 import logging
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from sportstradamus.prediction.model_prob import (
     _BOOK_EV_LINE_CAP,
+    _BOOK_EV_MODEL_SD_CAP,
     _blend_with_book,
     _sanitize_book_ev,
 )
 
 
-def test_sanitize_drops_only_implausibly_high_book_ev():
+def test_runaway_book_ev_shrinks_toward_model_not_line():
+    # A blown / ill-conditioned book mean collapses toward model_ev + K*SD, not the
+    # line (the old blunt cap) -- the count-tail regularization.
+    line = np.array([2.5])
+    books = np.array([7802.0])
+    model_ev = np.array([2.7])
+    model_sd = np.array([1.716])
+    out = _sanitize_book_ev(books, line, model_ev, model_sd)
+    assert out[0] == pytest.approx(2.7 + _BOOK_EV_MODEL_SD_CAP * 1.716)
+
+
+def test_sanitize_only_clamps_runaway_rows():
+    # 7802 >> 10*2.5 (runaway -> shrunk); the rest sit within the line ceiling and
+    # pass through untouched, keeping the book an independent vote.
     line = np.array([2.5, 1.5, 0.5, 0.3])
-    # 7802 >> 10*2.5 (corrupt); 3.0 <= 10*1.5 (kept); 0.4 below line (kept,
-    # one-sided guard); 4.0 vs a 0.3 line uses the 0.5 floor -> cap 5.0 (kept).
     books = np.array([7802.0, 3.0, 0.4, 4.0])
-    out = _sanitize_book_ev(books, line)
-    assert out[0] == 2.5, "blown book EV must collapse to the line"
-    assert out[1] == 3.0
-    assert out[2] == 0.4
-    assert out[3] == 4.0
-
-
-def test_sanitize_passes_through_when_all_sane():
-    line = np.array([2.5, 1.5])
-    books = np.array([3.1, 1.2])
-    out = _sanitize_book_ev(books, line)
-    np.testing.assert_array_equal(out, books)
+    model_ev = np.array([2.7, 1.4, 0.45, 0.3])
+    model_sd = np.array([1.7, 1.2, 0.7, 0.5])
+    out = _sanitize_book_ev(books, line, model_ev, model_sd)
+    assert out[0] == pytest.approx(2.7 + _BOOK_EV_MODEL_SD_CAP * 1.7)
+    np.testing.assert_array_equal(out[1:], books[1:])
 
 
 def _zinb_offer_df(books_ev):
@@ -73,10 +82,12 @@ def test_warning_reports_offender_ratio_and_cell(caplog):
     # The benign-vs-corrupt signal lives in the worst ev/line ratio + cell, not the
     # array max: a ~5x DFS clamp placeholder must read apart from a >1000x runaway.
     line = np.array([0.5, 1.5])
-    books = np.array([7.5, 1.0])  # 7.5 on a 0.5 line = 15x cap -> dropped; 1.0 kept
+    books = np.array([7.5, 1.0])  # 7.5 on a 0.5 line = 15x cap -> shrunk; 1.0 kept
+    model_ev = np.array([0.45, 1.0])
+    model_sd = np.array([0.3, 0.4])
     with caplog.at_level(logging.WARNING, logger="log"):
-        out = _sanitize_book_ev(books, line, cell="WNBA FG3M")
-    assert out[0] == 0.5 and out[1] == 1.0
+        out = _sanitize_book_ev(books, line, model_ev, model_sd, cell="WNBA FG3M")
+    assert out[0] == pytest.approx(0.45 + _BOOK_EV_MODEL_SD_CAP * 0.3) and out[1] == 1.0
     assert "WNBA FG3M" in caplog.text
     assert "15x" in caplog.text  # worst ev/line = 7.5 / 0.5
 

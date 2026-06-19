@@ -27,7 +27,11 @@ from sportstradamus.helpers.io import (
     MODEL_STATS_PATH,
     prune_model_pickle,
 )
-from sportstradamus.training.graduation import graduated_cells, served_cells_failing_ship
+from sportstradamus.training.graduation import (
+    free_passer_cells,
+    graduated_cells,
+    served_cells_failing_ship,
+)
 from sportstradamus.training.markets import ALL_MARKETS
 from sportstradamus.training.ship_config import (
     STAT_META_PATH,
@@ -150,7 +154,6 @@ def main(branch, prune, meta, model_stats, live_metrics, dry_run) -> None:
         elif dry_run:
             click.echo("# (dry-run, not written)")
     else:
-        # branch == "devel": validate + summarize.
         config = load_ship_config(branch="devel", path=meta_path)
         n_active = sum(1 for lg in config for mk in config[lg] if config[lg][mk] != WITHHELD)
         n_withheld = sum(1 for lg in config for mk in config[lg] if config[lg][mk] == WITHHELD)
@@ -168,6 +171,20 @@ def main(branch, prune, meta, model_stats, live_metrics, dry_run) -> None:
                 f"{len(failing)} served cell(s) fail the ship gate; "
                 "demote each to shipped=withheld in stat_meta.json"
             )
+
+    # Free-passer sweep (report-only): cells the offline gate now passes that are
+    # still withheld. Surfaced for a manual flip after a scorecard re-confirm; never
+    # auto-flipped (a sweep pass disagreeing with the scorecard is a scorer bug).
+    free_passers = free_passer_cells(meta_map, model_stats_path)
+    for lg, mk in free_passers:
+        click.echo(
+            f"  FREE-PASSER {lg}/{mk}: ship=True but shipped=withheld "
+            "(re-confirm on official scorecard, then flip to devel)"
+        )
+    if free_passers:
+        click.echo(
+            f"# {len(free_passers)} free-passer cell(s) — manual flip after scorecard re-confirm"
+        )
 
     if prune:
         # Use the resolved (post-mutation) config to decide what to prune.
