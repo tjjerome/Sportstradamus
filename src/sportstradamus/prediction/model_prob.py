@@ -72,6 +72,21 @@ _BOOK_EV_LINE_CAP: float = 10.0
 # book stays an independent vote; only ill-conditioned-tail / corrupt rows bind.
 _BOOK_EV_MODEL_SD_CAP: float = 4.0
 
+# Symmetric guard on the model side: a model mean beyond this multiple of the player's
+# own realized scale (max of MeanYr / Mean10 / STDYr) is a sparse-leaf blow-up of the
+# unbounded response function, not a projection (realized Result/own-scale p99.9 ~40, so
+# 10x is wide headroom). Winsorized toward the cap before the pool so a runaway can't ride
+# model_weight into a max-confidence bet. See research/ brief; Mekelburg & Strauss (2024).
+_MODEL_EV_OWN_SCALE_CAP: float = 10.0
+
+# Cap floor: the own-scale cap never drops below _MODEL_EV_OWN_SCALE_CAP * this (= 5), so a
+# low-volume player with a small legitimate mean is never clamped.
+_OWN_SCALE_FLOOR: float = 0.5
+
+# Below this own-scale a player has no informative history to anchor a model mean (a
+# debutant, or a position player on a foreign stat line); the clamp can't help, so drop it.
+_OWN_SCALE_MIN: float = 0.1
+
 # Maximum scored offers retained per player after boost-distance deduplication.
 _MAX_OFFERS_PER_PLAYER: int = 3
 
@@ -582,6 +597,63 @@ def _sanitize_book_ev(
     return np.where(runaway, np.minimum(books_ev, band), books_ev)
 
 
+def _own_scale(offer_df: pd.DataFrame) -> np.ndarray | None:
+    """Per-row book-independent scale: max of the player's MeanYr / Mean10 / STDYr.
+
+    Returns ``None`` when none of the three columns are present (a book-fallback
+    frame), so callers no-op rather than fabricate a scale.
+    """
+    cols = [c for c in ("MeanYr", "Mean10", "STDYr") if c in offer_df.columns]
+    if not cols:
+        return None
+    return np.nan_to_num(offer_df[cols].to_numpy(dtype=float)).max(axis=1)
+
+
+def _sanitize_model_ev(offer_df: pd.DataFrame, dist: str) -> None:
+    """Winsorize a runaway model mean toward the player's own realized scale.
+
+    Symmetric with :func:`_sanitize_book_ev` (which shrinks an implausible *book*
+    mean toward the model): a model mean beyond ``_MODEL_EV_OWN_SCALE_CAP`` times the
+    own-scale is a sparse-leaf blow-up of the unbounded response function, and the
+    fused pool damps it only by ``(1 - model_weight)`` — so a high-model-weight cell
+    would ride it into a max-confidence bet. Clamp the mean before the pool; for
+    SkewNormal rescale the scale by the same factor to hold the per-row CV (the scale
+    co-explodes with the mean). Count families rely on the existing ``shape_ceiling``.
+    """
+    own = _own_scale(offer_df)
+    if own is None:
+        return
+    model_ev = offer_df["Model EV"].to_numpy(dtype=float)
+    cap = _MODEL_EV_OWN_SCALE_CAP * np.clip(own, _OWN_SCALE_FLOOR, None)
+    runaway = model_ev > cap
+    if not runaway.any():
+        return
+    clamped = np.minimum(model_ev, cap)
+    if dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
+        shrink = np.where(runaway, clamped / np.clip(model_ev, 1e-9, None), 1.0)
+        offer_df["Model Sigma"] = offer_df["Model Sigma"].to_numpy(dtype=float) * shrink
+    offer_df["Model EV"] = clamped
+    logger.warning(
+        f"clamped {int(runaway.sum())} runaway model EV(s) toward "
+        f"{_MODEL_EV_OWN_SCALE_CAP:g}x own-scale (max {float(np.nanmax(model_ev)):.1f})"
+    )
+
+
+def _drop_no_history_offers(offer_df: pd.DataFrame) -> pd.DataFrame:
+    """Drop single-player offers with no informative own-scale history.
+
+    A debutant or a position player forced onto a foreign stat line (a running back
+    on a passing-yards line) has ~0 own-scale, so the model mean rests on nothing and
+    :func:`_sanitize_model_ev` has no anchor. Player-vs-player combos carry no
+    per-player own-scale and are kept.
+    """
+    own = _own_scale(offer_df)
+    if own is None:
+        return offer_df
+    keep = (own >= _OWN_SCALE_MIN) | offer_df["Player"].str.contains("vs.", regex=False).to_numpy()
+    return offer_df.loc[keep]
+
+
 def _blend_with_book(
     offer_df: pd.DataFrame, dist: str, model_weight: float, cv: float, hist_gate: float
 ):
@@ -748,6 +820,7 @@ def model_prob(
 
     offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
     offer_df = offer_df.loc[~offer_df[["Books EV", "Model EV"]].isna().all(axis=1)]
+    offer_df = _drop_no_history_offers(offer_df)
     if offer_df.empty:
         return []
 
@@ -758,6 +831,7 @@ def model_prob(
     offer_df["Model EV"] = _apply_mean_posthoc(
         offer_df["Model EV"].to_numpy(), posthoc_slug, posthoc_blob
     )
+    _sanitize_model_ev(offer_df, dist)
 
     base_mean = _blend_with_book(offer_df, dist, model_weight, cv, hist_gate)
 

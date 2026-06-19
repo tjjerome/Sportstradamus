@@ -184,9 +184,12 @@ N_DECILES = 10
 DECILE_COL = "MeanYr"
 ACTUAL_COL = "Result"
 
-# Raw model EV is the cleanest view of the model's own compression; Blended_EV
-# mixes in the bookmaker line and masks it. Default to the raw model column.
-DEFAULT_PRED_COL = "EV"
+# The ship gates score the fused ``Blended_EV`` — what the parlay actually drafts and what
+# ``report.compute_gates`` scores in production (``report._SHIP_PRED_COL``). Default the CLI /
+# A-B to that same column so a scorecard reflects the shipping decision rather than the raw
+# model's pre-fusion compression. The raw-model-EV view stays available via ``--pred-col EV``
+# and is always reported alongside as ``g2_star_z_raw`` / ``g3_bench_z_raw``.
+DEFAULT_PRED_COL = "Blended_EV"
 
 # Research artifacts live outside the package data dir — the run log is an append-only
 # experiment journal, not shipped data. Climb scripts -> sportstradamus -> src -> repo
@@ -1551,7 +1554,7 @@ def compute_gates(
         strategy: Run label written into the row's ``strategy`` field
             before it's stripped. Defaults to ``"meditate"`` so the inline
             caller doesn't have to think about a label that's never read.
-        pred_col: Predicted-mean column to evaluate (``"EV"`` by default).
+        pred_col: Predicted-mean column to evaluate (``"Blended_EV"`` = fused ship gate; ``"EV"`` = raw model).
 
     Returns:
         Dict carrying every gate measurement, oracle bound, per-gate
@@ -2125,7 +2128,7 @@ def _resolve_live_cells(
     "--pred-col",
     type=click.Choice(["EV", "Blended_EV"]),
     default=DEFAULT_PRED_COL,
-    help="Predicted-mean column to evaluate. EV = raw model (default).",
+    help="Predicted-mean column to evaluate. Blended_EV = fused ship gate (default); EV = raw model.",
 )
 @click.option("--strategy", default="unlabeled", help="Strategy label for the run log.")
 @click.option("--deciles", default=N_DECILES, show_default=True, help="Number of buckets.")
