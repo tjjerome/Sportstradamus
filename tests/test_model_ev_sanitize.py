@@ -4,6 +4,7 @@ Winsorizes a runaway model predictive mean toward the player's own realized scal
 before the book-fusion pool, and drops offers with no informative own-scale history.
 Research verdict: /tmp/researcher_model_ev_runaway.md (Mekelburg & Strauss 2024).
 """
+
 from __future__ import annotations
 
 import pandas as pd
@@ -29,7 +30,9 @@ def test_own_scale_none_when_columns_absent():
 
 def test_clamps_runaway_skewnormal_mean_and_rescales_sigma_to_hold_cv():
     # own_scale=2 -> cap=20; EV=50 is runaway, Sigma=10 (CV=0.2).
-    df = _df([{"MeanYr": 2.0, "Mean10": 2.0, "STDYr": 1.0, "Projection": 50.0, "Model Sigma": 10.0}])
+    df = _df(
+        [{"MeanYr": 2.0, "Mean10": 2.0, "STDYr": 1.0, "Projection": 50.0, "Model Sigma": 10.0}]
+    )
     _sanitize_model_ev(df, "SkewNormal")
     assert df.loc[0, "Projection"] == 20.0
     # Sigma shrinks by the same 20/50 factor so CV stays 0.2.

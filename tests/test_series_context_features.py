@@ -57,10 +57,14 @@ def _gameid_teamlog(cls, gameid, rows, ref=D):
 def test_nba_series_record_and_bo7_flags():
     # BOS leads MIA 3-1 within the series window.
     rows = [
-        ("BOS", "MIA", 8, "W"), ("MIA", "BOS", 8, "L"),
-        ("BOS", "MIA", 6, "W"), ("MIA", "BOS", 6, "L"),
-        ("BOS", "MIA", 4, "L"), ("MIA", "BOS", 4, "W"),
-        ("BOS", "MIA", 2, "W"), ("MIA", "BOS", 2, "L"),
+        ("BOS", "MIA", 8, "W"),
+        ("MIA", "BOS", 8, "L"),
+        ("BOS", "MIA", 6, "W"),
+        ("MIA", "BOS", 6, "L"),
+        ("BOS", "MIA", 4, "L"),
+        ("MIA", "BOS", 4, "W"),
+        ("BOS", "MIA", 2, "W"),
+        ("MIA", "BOS", 2, "L"),
     ]
     s = _gameid_teamlog(StatsNBA, NBA_PO, rows)
     stats = _playoff(["pb", "pm"])
@@ -90,7 +94,9 @@ def test_non_playoff_short_circuits_to_zero():
     stats = pd.DataFrame(index=["p"])
     stats["Playoff"] = 0
     s._series_context(stats, D, {"p": "BOS"}, {"p": "MIA"})
-    assert stats.loc["p", list(("SeriesWins", "SeriesLosses", "FacingElimination", "CanClinch"))].tolist() == [0, 0, 0, 0]
+    assert stats.loc[
+        "p", ["SeriesWins", "SeriesLosses", "FacingElimination", "CanClinch"]
+    ].tolist() == [0, 0, 0, 0]
 
 
 def test_nhl_bo7_facing_elimination_at_three_losses():
@@ -116,13 +122,15 @@ def test_wnba_later_round_is_best_of_five():
     # A prior-round opponent (ATL) this postseason -> semis -> bo5 -> one loss is NOT
     # elimination, two losses is.
     base = [("BOS", "ATL", 20, "W")]  # round 1, outside the MIA series window
-    one_loss = _gameid_teamlog(StatsWNBA, WNBA_PO, base + [("BOS", "MIA", 3, "L")])
+    one_loss = _gameid_teamlog(StatsWNBA, WNBA_PO, [*base, ("BOS", "MIA", 3, "L")])
     stats = _playoff(["pb"])
     one_loss._series_context(stats, D, {"pb": "BOS"}, {"pb": "MIA"})
     assert stats.loc["pb", "SeriesLosses"] == 1
     assert stats.loc["pb", "FacingElimination"] == 0  # bo5 needs 2
 
-    two_loss = _gameid_teamlog(StatsWNBA, WNBA_PO, base + [("BOS", "MIA", 5, "L"), ("BOS", "MIA", 3, "L")])
+    two_loss = _gameid_teamlog(
+        StatsWNBA, WNBA_PO, [*base, ("BOS", "MIA", 5, "L"), ("BOS", "MIA", 3, "L")]
+    )
     stats2 = _playoff(["pb"])
     two_loss._series_context(stats2, D, {"pb": "BOS"}, {"pb": "MIA"})
     assert stats2.loc["pb", "SeriesLosses"] == 2
@@ -150,7 +158,13 @@ def _mlb_teamlog(rows, ref=D):
 
 def test_mlb_wildcard_is_best_of_three():
     rows = [
-        ("NYY", "BOS", 0, "L", "F"),  # current game (date D) -> game_type lookup, excluded from tally
+        (
+            "NYY",
+            "BOS",
+            0,
+            "L",
+            "F",
+        ),  # current game (date D) -> game_type lookup, excluded from tally
         ("NYY", "BOS", 2, "L", "F"),
         ("BOS", "NYY", 2, "W", "F"),
     ]

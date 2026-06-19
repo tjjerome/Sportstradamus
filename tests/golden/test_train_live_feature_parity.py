@@ -239,7 +239,9 @@ def test_train_and_live_feature_paths_agree_on_a_frozen_gameday(primed_stats, mo
             or np.isinf(live[c].to_numpy(dtype=float)).any()
         )
     ]
-    assert not inf_cols, f"shared feature columns contain inf (train zeros it, serve does not): {inf_cols}"
+    assert not inf_cols, (
+        f"shared feature columns contain inf (train zeros it, serve does not): {inf_cols}"
+    )
 
     # The _game_context invariant, named explicitly so a regression points here.
     # OppTotal + the derived Spread/GameTotal/Blowout (QW-1) ride the same
@@ -248,10 +250,22 @@ def test_train_and_live_feature_paths_agree_on_a_frozen_gameday(primed_stats, mo
     # (SeriesWins/SeriesLosses/FacingElimination/CanClinch) are the same _game_context
     # surface -- regular-season synthetic logs short-circuit them to 0 in both branches.
     for col in (
-        "Home", "Moneyline", "Total", "OppTotal", "Spread", "GameTotal", "Blowout",
-        "Playoff", "SeriesWins", "SeriesLosses", "FacingElimination", "CanClinch",
+        "Home",
+        "Moneyline",
+        "Total",
+        "OppTotal",
+        "Spread",
+        "GameTotal",
+        "Blowout",
+        "Playoff",
+        "SeriesWins",
+        "SeriesLosses",
+        "FacingElimination",
+        "CanClinch",
     ):
-        assert train[col].tolist() == live[col].tolist(), f"_game_context branch divergence on {col}"
+        assert train[col].tolist() == live[col].tolist(), (
+            f"_game_context branch divergence on {col}"
+        )
 
     # M-1 player-level build: the career expanding mean (full-gamelog, strict-< date),
     # its EB-shrunk + vs-opponent variants, and the opp-defense × player interaction

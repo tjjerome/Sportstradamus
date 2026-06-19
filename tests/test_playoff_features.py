@@ -100,9 +100,7 @@ def test_gameid_historical_and_serve_agree_on_a_playoff_game(league):
     s = cls()
     ls = s.log_strings
     po_id = cases["po"][0]
-    s.gamelog = pd.DataFrame(
-        [{ls["player"]: "X", ls["game"]: po_id, ls["date"]: PAST.isoformat()}]
-    )
+    s.gamelog = pd.DataFrame([{ls["player"]: "X", ls["game"]: po_id, ls["date"]: PAST.isoformat()}])
     hist = pd.DataFrame(index=["X"])
     s._playoff_flag(hist, PAST, {})
     serve = pd.DataFrame(index=["X"])
