@@ -80,9 +80,13 @@ def _fake_get_with_retry(url, params=None):
 class _FakeArchive:
     def __init__(self):
         self.player_books = []
+        self.ladder_calls = []
 
     def merge_player_books(self, league, market, gameDate, player, ev, lines, observed_at=None):
         self.player_books.append((league, market, gameDate, player, ev, lines, observed_at))
+
+    def add_ladder(self, league, market, gameDate, player, book, rungs, observed_at=None):
+        self.ladder_calls.append((league, market, gameDate, player, book, rungs, observed_at))
 
     def set_team_books(self, league, market, gameDate, team, books):  # pragma: no cover
         raise AssertionError("synthetic payload has no totals market")

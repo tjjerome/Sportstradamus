@@ -58,20 +58,34 @@ _MAX_UNDERDOG_BOOST = 3.65
 # Coin-flip prior used when no bookmaker price is available for an offer.
 _BOOK_PRIOR_PROB: float = 0.5
 
-# Runtime blend guard -- the loosest of three staggered book-EV bounds, each with a
-# deliberately different factor AND basis:
-#   get_ev write clamp  SN_MAX_MEAN_FACTOR=5x  vs a book's OWN line (inversion sanity)
-#   offline sweep       BLOWN_LINE_FACTOR=5x   vs MAX archived line for the slot
-#   this guard          _BOOK_EV_LINE_CAP=10x  vs the CURRENT offer's line
-# When the cross-book mean exceeds 10x the offer being priced, the blend rides the
-# line. 10x (not 5x) spares a genuine book-over-line edge; the current-offer basis is
-# what catches the common BENIGN trigger -- a high-zero-rate count (e.g. FG3M) priced
-# as a DFS pick inverts above the cap, so get_ev clamps it to 5x its OWN (higher)
-# line and a 7.5 book EV on a 1.5 line trips a 0.5-line offer. The warning's ev/line
-# ratio separates that (~5x placeholder) from a pre-clamp archive runaway (>1000x).
-# Do NOT re-base this to MAX archived line: a 5x-own-line clamp sits under it and
-# would leak the placeholder into the pool.
+# A bookmaker projected mean beyond this multiple of its own line is implausible:
+# model and book project the same stat, and a sane book mean sits within a small
+# factor of the line it was quoted at. Such rows (a pre-fix get_ev zero-inflation
+# runaway still in the archive, or an ill-conditioned anytime-TD count-tail
+# inversion) trigger the regularizer below — and are warned so corruption never
+# inflates predictions silently.
 _BOOK_EV_LINE_CAP: float = 10.0
+
+# Runaway book means are shrunk toward the model rather than discarded to the line:
+# a book mean is capped at this many model predictive SDs from the model mean
+# (|mu_book - mu_hat| <= K*SD). Wide enough (4 SD) that a genuinely disagreeing
+# book stays an independent vote; only ill-conditioned-tail / corrupt rows bind.
+_BOOK_EV_MODEL_SD_CAP: float = 4.0
+
+# Symmetric guard on the model side: a model mean beyond this multiple of the player's
+# own realized scale (max of MeanYr / Mean10 / STDYr) is a sparse-leaf blow-up of the
+# unbounded response function, not a projection (realized Result/own-scale p99.9 ~40, so
+# 10x is wide headroom). Winsorized toward the cap before the pool so a runaway can't ride
+# model_weight into a max-confidence bet. See research/ brief; Mekelburg & Strauss (2024).
+_MODEL_EV_OWN_SCALE_CAP: float = 10.0
+
+# Cap floor: the own-scale cap never drops below _MODEL_EV_OWN_SCALE_CAP * this (= 5), so a
+# low-volume player with a small legitimate mean is never clamped.
+_OWN_SCALE_FLOOR: float = 0.5
+
+# Below this own-scale a player has no informative history to anchor a model mean (a
+# debutant, or a position player on a foreign stat line); the clamp can't help, so drop it.
+_OWN_SCALE_MIN: float = 0.1
 
 # Maximum scored offers retained per player after boost-distance deduplication.
 _MAX_OFFERS_PER_PLAYER: int = 3
@@ -498,13 +512,6 @@ def _book_evs_for_players(
     return evs
 
 
-def _set_decoded(prob_params: pd.DataFrame, decoded, shape_col: str, shape_val) -> None:
-    prob_params["Projection"] = decoded.ev
-    prob_params[shape_col] = shape_val
-    if decoded.gate is not None:
-        prob_params["Model Gate"] = decoded.gate
-
-
 def _decode_model_params(
     prob_params: pd.DataFrame,
     dist: str,
@@ -517,10 +524,16 @@ def _decode_model_params(
     # from the player profile rather than a fitted distribution.
     if dist in ("NegBin", "ZINB") and "total_count" in prob_params.columns:
         decoded = decode_predictive_mean(prob_params, dist)
-        _set_decoded(prob_params, decoded, "Model R", decoded.r)
+        prob_params["Projection"] = decoded.ev
+        prob_params["Model R"] = decoded.r
+        if decoded.gate is not None:
+            prob_params["Model Gate"] = decoded.gate
     elif dist in ("Gamma", "ZAGamma") and "concentration" in prob_params.columns:
         decoded = decode_predictive_mean(prob_params, dist)
-        _set_decoded(prob_params, decoded, "Model Alpha", decoded.alpha)
+        prob_params["Projection"] = decoded.ev
+        prob_params["Model Alpha"] = decoded.alpha
+        if decoded.gate is not None:
+            prob_params["Model Gate"] = decoded.gate
     elif dist == "SkewNormal" and "loc" in prob_params.columns:
         # Dispatch SkewNormal loc/scale through the baselines registry so the
         # train-side forward transform and predict-side inverse cannot drift.
@@ -544,28 +557,109 @@ def _zi_kwargs(offer_df: pd.DataFrame, dist: str, hist_gate: float) -> dict:
     return {}
 
 
-def _sanitize_book_ev(books_ev: np.ndarray, line: np.ndarray, cell: str = "") -> np.ndarray:
-    """Drop book means implausibly far above their line before the blend.
+def _model_predictive_sd(offer_df: pd.DataFrame, dist: str, model_ev: np.ndarray) -> np.ndarray:
+    """Per-row model predictive SD — the scale for the book-EV plausibility band.
 
-    A book projected mean beyond ``_BOOK_EV_LINE_CAP`` times its line is corrupt
-    data, not signal (see the constant), and would dominate ``fused_loc``'s
-    log-opinion pool. Offenders are replaced with the line — the neutral book mean,
-    matching :func:`get_ev`'s own zero-inflation fallback. The warning reports the
-    worst offender's ev/line ratio so a benign DFS clamp placeholder (~5x line on a
-    high-zero-rate count) reads apart from a pre-clamp archive runaway (>1000x).
+    Read off the model's pre-blend shape columns (``Model R`` / ``Model Alpha`` /
+    ``Model Sigma``); falls back to the mean when a shape column is absent.
     """
-    ceiling = _BOOK_EV_LINE_CAP * np.clip(line, 0.5, None)
-    corrupt = books_ev > ceiling
-    if corrupt.any():
-        ratio = books_ev / np.clip(line, 0.5, None)
-        worst = int(np.argmax(np.where(corrupt, ratio, -np.inf)))
-        logger.warning(
-            f"dropped {int(corrupt.sum())}/{corrupt.size} implausible book EV(s) from "
-            f"the {cell + ' ' if cell else ''}blend (worst {books_ev[worst]:.1f} on line "
-            f"{line[worst]:.1f} = {ratio[worst]:.0f}x, cap {_BOOK_EV_LINE_CAP:.0f}x); rode the line"
-        )
-        return np.where(corrupt, line, books_ev)
-    return books_ev
+    if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
+        r = np.clip(offer_df["Model R"].to_numpy(), 1e-9, None)
+        return np.sqrt(model_ev + model_ev**2 / r)
+    if dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns:
+        alpha = np.clip(offer_df["Model Alpha"].to_numpy(), 1e-9, None)
+        return model_ev / np.sqrt(alpha)
+    if dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
+        return np.clip(offer_df["Model Sigma"].to_numpy(), 1e-9, None)
+    return np.clip(model_ev, 0.5, None)
+
+
+def _sanitize_book_ev(
+    books_ev: np.ndarray,
+    line: np.ndarray,
+    model_ev: np.ndarray,
+    model_sd: np.ndarray,
+    cell: str = "",
+) -> np.ndarray:
+    """Regularize book means implausibly far above their line before the blend.
+
+    A book projected mean beyond ``_BOOK_EV_LINE_CAP`` times its line is bad data or
+    an ill-conditioned count-tail inversion (``mu = -log(1-p)`` blows up as p->1) and
+    would dominate ``fused_loc``'s log-opinion pool. Such runaway rows are shrunk
+    toward the model mean — capped at ``model_ev + _BOOK_EV_MODEL_SD_CAP * SD`` —
+    rather than discarded to the line. The warning reports the worst offender's
+    ev/line ratio so a benign DFS-clamp placeholder (~5x line on a high-zero-rate
+    count) reads apart from a pre-clamp archive runaway (>1000x).
+    """
+    runaway = books_ev > _BOOK_EV_LINE_CAP * np.clip(line, 0.5, None)
+    if not runaway.any():
+        return books_ev
+    band = model_ev + _BOOK_EV_MODEL_SD_CAP * np.clip(model_sd, 1e-9, None)
+    ratio = books_ev / np.clip(line, 0.5, None)
+    worst = int(np.argmax(np.where(runaway, ratio, -np.inf)))
+    logger.warning(
+        f"regularized {int(runaway.sum())}/{runaway.size} implausible book EV(s) toward "
+        f"the model in the {cell + ' ' if cell else ''}blend (worst {books_ev[worst]:.1f} on "
+        f"line {line[worst]:.1f} = {ratio[worst]:.0f}x, cap {_BOOK_EV_LINE_CAP:.0f}x)"
+    )
+    return np.where(runaway, np.minimum(books_ev, band), books_ev)
+
+
+def _own_scale(offer_df: pd.DataFrame) -> np.ndarray | None:
+    """Per-row book-independent scale: max of the player's MeanYr / Mean10 / STDYr.
+
+    Returns ``None`` when none of the three columns are present (a book-fallback
+    frame), so callers no-op rather than fabricate a scale.
+    """
+    cols = [c for c in ("MeanYr", "Mean10", "STDYr") if c in offer_df.columns]
+    if not cols:
+        return None
+    return np.nan_to_num(offer_df[cols].to_numpy(dtype=float)).max(axis=1)
+
+
+def _sanitize_model_ev(offer_df: pd.DataFrame, dist: str) -> None:
+    """Winsorize a runaway model mean toward the player's own realized scale.
+
+    Symmetric with :func:`_sanitize_book_ev` (which shrinks an implausible *book*
+    mean toward the model): a model mean beyond ``_MODEL_EV_OWN_SCALE_CAP`` times the
+    own-scale is a sparse-leaf blow-up of the unbounded response function, and the
+    fused pool damps it only by ``(1 - model_weight)`` — so a high-model-weight cell
+    would ride it into a max-confidence bet. Clamp the mean before the pool; for
+    SkewNormal rescale the scale by the same factor to hold the per-row CV (the scale
+    co-explodes with the mean). Count families rely on the existing ``shape_ceiling``.
+    """
+    own = _own_scale(offer_df)
+    if own is None:
+        return
+    model_ev = offer_df["Projection"].to_numpy(dtype=float)
+    cap = _MODEL_EV_OWN_SCALE_CAP * np.clip(own, _OWN_SCALE_FLOOR, None)
+    runaway = model_ev > cap
+    if not runaway.any():
+        return
+    clamped = np.minimum(model_ev, cap)
+    if dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
+        shrink = np.where(runaway, clamped / np.clip(model_ev, 1e-9, None), 1.0)
+        offer_df["Model Sigma"] = offer_df["Model Sigma"].to_numpy(dtype=float) * shrink
+    offer_df["Projection"] = clamped
+    logger.warning(
+        f"clamped {int(runaway.sum())} runaway model EV(s) toward "
+        f"{_MODEL_EV_OWN_SCALE_CAP:g}x own-scale (max {float(np.nanmax(model_ev)):.1f})"
+    )
+
+
+def _drop_no_history_offers(offer_df: pd.DataFrame) -> pd.DataFrame:
+    """Drop single-player offers with no informative own-scale history.
+
+    A debutant or a position player forced onto a foreign stat line (a running back
+    on a passing-yards line) has ~0 own-scale, so the model mean rests on nothing and
+    :func:`_sanitize_model_ev` has no anchor. Player-vs-player combos carry no
+    per-player own-scale and are kept.
+    """
+    own = _own_scale(offer_df)
+    if own is None:
+        return offer_df
+    keep = (own >= _OWN_SCALE_MIN) | offer_df["Player"].str.contains("vs.", regex=False).to_numpy()
+    return offer_df.loc[keep]
 
 
 def _blend_with_book(
@@ -578,7 +672,8 @@ def _blend_with_book(
 ) -> np.ndarray:
     model_ev = offer_df["Projection"].to_numpy()
     books_ev = offer_df["Market Projection"].fillna(offer_df["Projection"]).to_numpy()
-    books_ev = _sanitize_book_ev(books_ev, offer_df["Line"].to_numpy(), cell)
+    model_sd = _model_predictive_sd(offer_df, dist, model_ev)
+    books_ev = _sanitize_book_ev(books_ev, offer_df["Line"].to_numpy(), model_ev, model_sd, cell)
     zi = _zi_kwargs(offer_df, dist, hist_gate)
     if dist == "SkewNormal":
         base_mean, sigma_blend, skew_blend, gate_blend = fused_loc(
@@ -738,6 +833,7 @@ def model_prob(
 
     offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
     offer_df = offer_df.loc[~offer_df[["Market Projection", "Projection"]].isna().all(axis=1)]
+    offer_df = _drop_no_history_offers(offer_df)
     if offer_df.empty:
         return []
 
@@ -748,6 +844,7 @@ def model_prob(
     offer_df["Projection"] = _apply_mean_posthoc(
         offer_df["Projection"].to_numpy(), posthoc_slug, posthoc_blob
     )
+    _sanitize_model_ev(offer_df, dist)
 
     base_mean = _blend_with_book(offer_df, dist, model_weight, cv, hist_gate, f"{league} {market}")
 

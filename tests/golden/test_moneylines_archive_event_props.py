@@ -108,12 +108,16 @@ class _FakeArchive:
     def __init__(self):
         self.player_books = []
         self.team_books = []
+        self.ladder_calls = []
 
     def merge_player_books(self, league, market, gameDate, player, ev, lines, observed_at=None):
         self.player_books.append((league, market, gameDate, player, ev, lines, observed_at))
 
     def set_team_books(self, league, market, gameDate, team, books):
         self.team_books.append((league, market, gameDate, team, books))
+
+    def add_ladder(self, league, market, gameDate, player, book, rungs, observed_at=None):
+        self.ladder_calls.append((league, market, gameDate, player, book, rungs, observed_at))
 
 
 _EXPECTED_PLAYER = [
@@ -156,3 +160,17 @@ def test_archive_event_props_parses_event() -> None:
         assert (got_head, got_line, got_obs) == (exp_head, exp_line, exp_obs)
         assert got_ev == pytest.approx(exp_ev, rel=0.15)
     assert archive.team_books == _EXPECTED_TEAM
+
+
+def test_archive_event_props_captures_full_ladder() -> None:
+    """Every offered alt-line rung is persisted, not just the even-money one the
+    consensus collapses to (Anthony Davis offers 20.5 and 22.5)."""
+    archive = _FakeArchive()
+
+    moneylines._archive_event_props(archive, _GAME, "NBA", _PROPS, "2026-06-04")
+
+    ladder = {(player, book): rungs for _, _, _, player, book, rungs, _ in archive.ladder_calls}
+    davis = ladder[("Anthony Davis", "draftkings")]
+    assert [r[0] for r in davis] == [20.5, 22.5]
+    assert davis[0][1] == pytest.approx(0.625, abs=1e-6)
+    assert davis[1][1] == pytest.approx(0.5, abs=1e-6)

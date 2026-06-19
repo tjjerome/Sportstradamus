@@ -47,6 +47,16 @@ _FIP_CONSTANT: float = 3.2
 # included in the profiling group.  Filters out players with too few non-zero
 # occurrences to provide meaningful signal.
 _MARKET_HIT_RATE_MIN: float = 0.1
+# MLB schedule game_type codes that are postseason (Wild Card, Division Series,
+# League Championship, World Series, generic Playoff). "R" is regular season and
+# the spring/exhibition/All-Star codes (S/E/A) are filtered out before they reach
+# the gamelog, so anything in this set is a true bracket game.
+_MLB_POSTSEASON_GAME_TYPES: frozenset[str] = frozenset({"F", "D", "L", "W", "P"})
+# Wins to clinch each MLB postseason round, keyed by game_type: Wild Card best-of-3,
+# Division Series best-of-5, League Championship + World Series best-of-7. A generic
+# postseason code (P) and anything unmapped fall back to best-of-5.
+_MLB_SERIES_GAMES_TO_WIN: dict[str, int] = {"F": 2, "D": 3, "L": 4, "W": 4, "P": 3}
+_MLB_DEFAULT_SERIES_WINS: int = 3
 
 
 def _mlb_team_abbr(mlb_teams, team_id):
@@ -65,36 +75,28 @@ def _build_mlb_upcoming_games(mlb_games, mlb_teams):
             homeTeam = _mlb_team_abbr(mlb_teams, game["home_id"])
             game_bs = mlb.boxscore_data(game["game_id"])
             players = {p["id"]: p["fullName"] for k, p in game_bs["playerInfo"].items()}
-            if game["game_num"] == 1:
-                mlb_upcoming_games[awayTeam] = {
-                    "Pitcher": remove_accents(game["away_probable_pitcher"]),
-                    "Home": False,
-                    "Opponent": homeTeam,
-                    "Opponent Pitcher": remove_accents(game["home_probable_pitcher"]),
-                    "Batting Order": [players[i] for i in game_bs["away"]["battingOrder"]],
-                }
-                mlb_upcoming_games[homeTeam] = {
-                    "Pitcher": remove_accents(game["home_probable_pitcher"]),
-                    "Home": True,
-                    "Opponent": awayTeam,
-                    "Opponent Pitcher": remove_accents(game["away_probable_pitcher"]),
-                    "Batting Order": [players[i] for i in game_bs["home"]["battingOrder"]],
-                }
-            elif game["game_num"] > 1:
-                mlb_upcoming_games[awayTeam + str(game["game_num"])] = {
-                    "Pitcher": remove_accents(game["away_probable_pitcher"]),
-                    "Home": False,
-                    "Opponent": homeTeam,
-                    "Opponent Pitcher": remove_accents(game["home_probable_pitcher"]),
-                    "Batting Order": [players[i] for i in game_bs["away"]["battingOrder"]],
-                }
-                mlb_upcoming_games[homeTeam + str(game["game_num"])] = {
-                    "Pitcher": remove_accents(game["home_probable_pitcher"]),
-                    "Home": True,
-                    "Opponent": awayTeam,
-                    "Opponent Pitcher": remove_accents(game["away_probable_pitcher"]),
-                    "Batting Order": [players[i] for i in game_bs["home"]["battingOrder"]],
-                }
+            playoff = game["game_type"] in _MLB_POSTSEASON_GAME_TYPES
+            away_entry = {
+                "Pitcher": remove_accents(game["away_probable_pitcher"]),
+                "Home": False,
+                "Opponent": homeTeam,
+                "Opponent Pitcher": remove_accents(game["home_probable_pitcher"]),
+                "Batting Order": [players[i] for i in game_bs["away"]["battingOrder"]],
+                "Playoff": playoff,
+                "game type": game["game_type"],
+            }
+            home_entry = {
+                "Pitcher": remove_accents(game["home_probable_pitcher"]),
+                "Home": True,
+                "Opponent": awayTeam,
+                "Opponent Pitcher": remove_accents(game["away_probable_pitcher"]),
+                "Batting Order": [players[i] for i in game_bs["home"]["battingOrder"]],
+                "Playoff": playoff,
+                "game type": game["game_type"],
+            }
+            suffix = "" if game["game_num"] == 1 else str(game["game_num"])
+            mlb_upcoming_games[awayTeam + suffix] = away_entry
+            mlb_upcoming_games[homeTeam + suffix] = home_entry
     return mlb_upcoming_games
 
 
@@ -692,6 +694,14 @@ class StatsMLB(Stats):
         for id in tqdm(mlb_game_ids, desc="Getting MLB Stats"):
             self.parse_game(id)
 
+        game_type_map = {g["game_id"]: g["game_type"] for g in mlb_games}
+        for log_name in ("gamelog", "teamlog"):
+            log = getattr(self, log_name)
+            stamped = log["gameId"].map(game_type_map)
+            if "game type" in log:
+                stamped = stamped.fillna(log["game type"])
+            log["game type"] = stamped
+
         self._trim_old_games(today)
 
         if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
@@ -715,6 +725,55 @@ class StatsMLB(Stats):
         ]
         self.gamelog.drop_duplicates(subset=["gameId", "playerId"], keep="last", inplace=True)
         self.teamlog.drop_duplicates(subset=["gameId", "team"], keep="last", inplace=True)
+
+    def _playoff_flag(self, stats, date, teams):
+        """Flag postseason games from the stamped ``game type`` (historical) or the
+        ``Playoff`` bool on ``upcoming_games`` (upcoming). MLB game IDs carry no
+        season-type code, so the type is stamped at fetch; rows logged before the
+        column existed (pre-backfill) carry no type and read as regular (0).
+        """
+        if date < datetime.today().date():
+            todays = (
+                self.gamelog.loc[pd.to_datetime(self.gamelog["gameDate"]).dt.date == date]
+                .drop_duplicates("playerName")
+                .set_index("playerName")
+            )
+            if "game type" in todays:
+                playoff = todays["game type"].reindex(stats.index).isin(_MLB_POSTSEASON_GAME_TYPES)
+            else:
+                playoff = pd.Series(False, index=stats.index)
+        else:
+            ug = self.upcoming_games
+            playoff = pd.Series(
+                {p: bool(ug.get(teams.get(p), {}).get("Playoff")) for p in stats.index}
+            )
+        stats["Playoff"] = playoff.astype(int)
+
+    def _playoff_teamlog(self):
+        """MLB game IDs carry no season-type code, so scope the series teamlog by the
+        stamped ``game type``. Empty until the historical backfill stamps it.
+        """
+        if "game type" not in self.teamlog:
+            return self.teamlog.iloc[0:0]
+        return self.teamlog.loc[self.teamlog["game type"].isin(_MLB_POSTSEASON_GAME_TYPES)]
+
+    def _series_games_to_win(self, playoff_teamlog, team, opp, date):
+        """Wins to clinch by MLB postseason round (Wild Card best-of-3 .. World Series
+        best-of-7). The round is the matchup's ``game type`` -- read from the realized
+        teamlog row (historical) or ``upcoming_games`` (upcoming).
+        """
+        date_col = self.log_strings["date"]
+        tl_dates = pd.to_datetime(playoff_teamlog[date_col]).dt.date
+        this_game = playoff_teamlog.loc[
+            (playoff_teamlog[self.log_strings["team"]] == team)
+            & (playoff_teamlog[self.log_strings["opponent"]] == opp)
+            & (tl_dates == date)
+        ]
+        if not this_game.empty:
+            game_type = this_game["game type"].iloc[0]
+        else:
+            game_type = self.upcoming_games.get(team, {}).get("game type")
+        return _MLB_SERIES_GAMES_TO_WIN.get(game_type, _MLB_DEFAULT_SERIES_WINS)
 
     def profile_market(self, market, date=datetime.today().date()):
         date = self._begin_profile_market(market, date)
