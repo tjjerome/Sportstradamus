@@ -89,6 +89,67 @@ def test_meanyr_mean10_exclude_target_date_sentinel():
     assert games_played == 15  # strictly < 16 (would be 16 with `<=`).
 
 
+def test_expanding_features_source_uses_strict_less_than():
+    """Guards the M-1 career expanding mean against a ``<`` → ``<=`` regression."""
+    src = inspect.getsource(Stats._expanding_features)
+    assert "gld < date" in src.replace("\n", " "), (
+        "Stats._expanding_features must use strict less-than (`gld < date`) so the "
+        "target game is excluded from MeanYr_expanding_shifted / _vsopp / _eb."
+    )
+
+
+def _expanding_matches_production(gamelog: pd.DataFrame, target_date: date) -> pd.DataFrame:
+    """Replicate ``Stats._expanding_features`` career filter (full history, strict <)."""
+    gld = pd.to_datetime(gamelog["GAME_DATE"]).dt.date
+    return gamelog[gld < target_date].copy()
+
+
+def test_expanding_mean_reads_full_history_and_excludes_target():
+    """Career expanding mean spans beyond the 1-yr window and drops the target row."""
+    target = date(2025, 3, 15)
+    # One game 400 days back (OUTSIDE the 300-day short window), 15 recent games,
+    # and a target-date sentinel. The expanding mean must include the old game
+    # (proving it reads the full gamelog) and exclude the sentinel.
+    old_game = target - timedelta(days=400)
+    recent = [target - timedelta(days=i) for i in range(1, 16)]
+    gamelog = pd.DataFrame(
+        {
+            "PLAYER_NAME": ["P"] * 17,
+            "GAME_DATE": [old_game, *recent, target],
+            "PTS": [4.0] + [10.0] * 15 + [999.0],
+        }
+    )
+
+    career = _expanding_matches_production(gamelog, target)
+    assert (pd.to_datetime(career["GAME_DATE"]).dt.date < target).all()
+    assert 999.0 not in career["PTS"].to_numpy()
+
+    grp = career.groupby("PLAYER_NAME")["PTS"]
+    # (4 + 15*10) / 16 = 9.625 -- includes the >1yr game, excludes the sentinel.
+    assert grp.mean()["P"] == (4.0 + 15 * 10.0) / 16
+    assert grp.count()["P"] == 16
+
+
+def test_expanding_vsopp_excludes_target():
+    """The head-to-head career variant must also exclude the target-date game."""
+    target = date(2025, 3, 15)
+    prior = [target - timedelta(days=i) for i in range(1, 4)]
+    gamelog = pd.DataFrame(
+        {
+            "PLAYER_NAME": ["P"] * 4,
+            "GAME_DATE": [*prior, target],
+            "OPPONENT": ["DET", "DET", "CHI", "DET"],
+            "PTS": [12.0, 8.0, 5.0, 999.0],
+        }
+    )
+    career = _expanding_matches_production(gamelog, target)
+    h2h = career.loc[career["OPPONENT"] == "DET"]
+    assert 999.0 not in h2h["PTS"].to_numpy()
+    # Only the two prior DET games (12, 8); the target-date DET game is excluded.
+    assert h2h["PTS"].mean() == 10.0
+    assert len(h2h) == 2
+
+
 def test_meanyr_mean10_filter_with_only_target_date_returns_empty():
     """Edge case: a player whose only game is at target_date has no prior history."""
     target = date(2025, 3, 15)
