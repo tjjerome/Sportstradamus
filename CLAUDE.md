@@ -97,6 +97,9 @@ to redo the work.
   when an edit adds one.
 * Use `click` over `argparse` for CLI args
 * Long-running scripts: add a status bar with `tqdm`
+* Money values are always `Decimal`, never `float`
+* Program roadmap: [docs/sportstradamus_roadmap_v3.md](docs/sportstradamus_roadmap_v3.md)
+  (swimlane index). Working a lane? Read its brief in `docs/handoffs/` first.
 * **Multi-module work uses subagent-driven development by default.** When a
   task touches two or more modules, dispatch one subagent per module rather
   than serializing through the main session. The main session orchestrates,
@@ -116,8 +119,10 @@ to redo the work.
   that keeps the app from looking AI-generated (no default-red, no purple gradients, no
   Inter/Roboto, Material icons not emoji). Treat the FIXED tokens as inviolable and do not
   supplement them with your own defaults. The `design-lint` hook nudges live and
-  `tests/golden/test_design_tokens.py` is the hard gate; Stage 2/3 work is parked in
-  [docs/dashboard_design_stage2_3.md](docs/dashboard_design_stage2_3.md).
+  `tests/golden/test_design_tokens.py` is the hard gate. The UX redesign spec (six surfaces,
+  slip rail, taxonomy, scars) is
+  [docs/dashboard_ux_redesign.md](docs/dashboard_ux_redesign.md); its lane brief is
+  [docs/handoffs/dashboard-ux.md](docs/handoffs/dashboard-ux.md).
 
 ## Agentic workflow conventions
 

@@ -11,8 +11,8 @@ license: Complete terms in LICENSE.txt
 > discipline (commit to a distinctive, intentional aesthetic before coding) and the **NEVER** bans (no overused
 > fonts, no purple gradients, no cookie-cutter look). Realize them via **config.toml tokens + Material Symbols**, not
 > hand-rolled CSS, scroll animations, gradient meshes, custom cursors, or grid-breaking layouts (DESIGN.md keeps the
-> dashboard config.toml-themed, data-dense, and scannable; that is our committed "extreme"). Stage 2/3 work is parked
-> in [docs/dashboard_design_stage2_3.md](../../../docs/dashboard_design_stage2_3.md).
+> dashboard config.toml-themed, data-dense, and scannable; that is our committed "extreme"). The UX redesign spec
+> lives in [docs/dashboard_ux_redesign.md](../../../docs/dashboard_ux_redesign.md).
 
 This skill guides creation of distinctive, production-grade frontend interfaces that avoid generic "AI slop" aesthetics. Implement real working code with exceptional attention to aesthetic details and creative choices.
 

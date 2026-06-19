@@ -81,16 +81,16 @@ def _filter_legs(offers: pd.DataFrame, config: PickemConfig) -> pd.DataFrame:
     """Apply leg-level filters: model & sharp coverage + edge + disagreement."""
     if offers.empty:
         return offers
-    required = {"Model P", "Books P"}
+    required = {"Win Prob", "Market Prob"}
     if not required.issubset(offers.columns):
         msg = f"_filter_legs needs columns {required}; got {set(offers.columns)}"
         raise ValueError(msg)
 
-    df = offers.dropna(subset=["Model P", "Books P"]).copy()
+    df = offers.dropna(subset=["Win Prob", "Market Prob"]).copy()
     keep = (
-        ((df["Model P"] - 0.5) >= config.min_model_edge)
-        & ((df["Books P"] - 0.5) >= config.min_sharp_edge)
-        & ((df["Model P"] - df["Books P"]).abs() <= config.disagreement_threshold)
+        ((df["Win Prob"] - 0.5) >= config.min_model_edge)
+        & ((df["Market Prob"] - 0.5) >= config.min_sharp_edge)
+        & ((df["Win Prob"] - df["Market Prob"]).abs() <= config.disagreement_threshold)
     )
     return df.loc[keep].copy()
 

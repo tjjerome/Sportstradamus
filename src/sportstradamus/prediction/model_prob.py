@@ -136,7 +136,7 @@ def _decode_skewnormal(
 
     Returns:
         The same ``prob_params`` frame, mutated in place with the absolute
-        ``Model EV``, ``Model Sigma``, ``Model Skew``, and optional
+        ``Projection``, ``Model Sigma``, ``Model Skew``, and optional
         ``Model Gate`` columns set.
     """
     strategy = get_target_normalization(target_normalization)
@@ -155,7 +155,7 @@ def _decode_skewnormal(
     decoded = decode_predictive_mean(
         prob_params, "SkewNormal", sn_loc=ev_loc, sn_scale=ev_scale, hist_gate=hist_gate
     )
-    prob_params["Model EV"] = decoded.ev
+    prob_params["Projection"] = decoded.ev
     prob_params["Model Sigma"] = decoded.sigma
     prob_params["Model Skew"] = decoded.skew
     if decoded.gate is not None:
@@ -213,7 +213,7 @@ def _book_cell_params(
 def _book_over_prob(
     offer_df: pd.DataFrame, dist: str, cv: float, step: float, gate: float | None
 ) -> pd.Series:
-    """Devigged book probability of the over per row, inverted from ``Books EV``.
+    """Devigged book probability of the over per row, inverted from ``Market Projection``.
 
     Inverts the composite book EV through the cell distribution at each row's
     line. Shared by :func:`model_prob` and :func:`book_fallback_prob`.
@@ -224,11 +224,11 @@ def _book_over_prob(
                 1
                 - get_odds(
                     x["Line"],
-                    x["Books EV"],
+                    x["Market Projection"],
                     dist,
                     cv=cv,
                     step=step,
-                    sigma=x["Books EV"] * cv,
+                    sigma=x["Market Projection"] * cv,
                     skew_alpha=0,
                     gate=gate,
                 )
@@ -236,7 +236,7 @@ def _book_over_prob(
             axis=1,
         )
     return offer_df.apply(
-        lambda x: 1 - get_odds(x["Line"], x["Books EV"], dist, cv, step=step, gate=gate),
+        lambda x: 1 - get_odds(x["Line"], x["Market Projection"], dist, cv, step=step, gate=gate),
         axis=1,
     )
 
@@ -259,7 +259,7 @@ def _composite_book_evs(players, league: str, market: str, date_map: dict, stat_
 
 
 def _annotate_display_shape(offer_df: pd.DataFrame, dist: str) -> None:
-    """Set the display-only ``Model Param`` and ``Model STD`` columns in place.
+    """Set the display-only ``Model Param`` and ``Projection STD`` columns in place.
 
     Reads the distribution-shape parameters the model emitted (``Model R`` /
     ``Model Sigma`` / ``Model Alpha``); falls back to NaN when they are absent,
@@ -277,10 +277,10 @@ def _annotate_display_shape(offer_df: pd.DataFrame, dist: str) -> None:
     else:
         offer_df["Model Param"] = np.nan
 
-    _m = offer_df["Model EV"].to_numpy(dtype=float)
+    _m = offer_df["Projection"].to_numpy(dtype=float)
     if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
         _r = offer_df["Model R"].to_numpy(dtype=float)
-        offer_df["Model STD"] = np.sqrt(np.clip(_m + _m**2 / np.clip(_r, 1e-6, None), 0, None))
+        offer_df["Projection STD"] = np.sqrt(np.clip(_m + _m**2 / np.clip(_r, 1e-6, None), 0, None))
     elif dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
         _sg = offer_df["Model Sigma"].to_numpy(dtype=float)
         _sk = (
@@ -289,12 +289,12 @@ def _annotate_display_shape(offer_df: pd.DataFrame, dist: str) -> None:
             else np.zeros_like(_sg)
         )
         _delta = _sk / np.sqrt(1 + _sk**2)
-        offer_df["Model STD"] = _sg * np.sqrt(np.clip(1 - 2 * _delta**2 / np.pi, 0, None))
+        offer_df["Projection STD"] = _sg * np.sqrt(np.clip(1 - 2 * _delta**2 / np.pi, 0, None))
     elif "Model Alpha" in offer_df.columns:
         _a = offer_df["Model Alpha"].to_numpy(dtype=float)
-        offer_df["Model STD"] = _m / np.sqrt(np.clip(_a, 1e-6, None))
+        offer_df["Projection STD"] = _m / np.sqrt(np.clip(_a, 1e-6, None))
     else:
-        offer_df["Model STD"] = np.nan
+        offer_df["Projection STD"] = np.nan
 
 
 def _finalize_records(
@@ -311,8 +311,8 @@ def _finalize_records(
 
     Shared tail of :func:`model_prob` and :func:`book_fallback_prob`. Expects
     ``offer_df`` to already carry ``Model Over`` / ``Model Under`` (win
-    probabilities for each side), the raw ``Books`` over-probability, ``Push P``,
-    ``Model EV`` and ``Books EV``. Feature-derived passenger columns absent on a
+    probabilities for each side), the raw ``Market EV`` over-probability, ``Push Prob``,
+    ``Projection`` and ``Market Projection``. Feature-derived passenger columns absent on a
     book-fallback record (built without a feature matrix) are filled neutral so
     correlation and the dashboard read sane values — ``Player position`` in
     particular must stay an int, never NaN, or correlation's position map breaks.
@@ -325,7 +325,7 @@ def _finalize_records(
     offer_df["Model Over"] = offer_df["Model Over"].clip(upper=_MAX_CONFIDENCE)
     offer_df["Model Under"] = offer_df["Model Under"].clip(upper=_MAX_CONFIDENCE)
 
-    offer_df["Model P"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
+    offer_df["Win Prob"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
     offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
 
     if "Boost" in offer_df.columns:
@@ -342,13 +342,13 @@ def _finalize_records(
         axis=1,
     )
 
-    offer_df["Model"] = offer_df["Model P"] * offer_df["Boost"]
-    offer_df.loc[(offer_df["Bet"] == "Under"), "Books"] = (
-        1 - offer_df.loc[(offer_df["Bet"] == "Under"), "Books"]
+    offer_df["Model EV"] = offer_df["Win Prob"] * offer_df["Boost"]
+    offer_df.loc[(offer_df["Bet"] == "Under"), "Market EV"] = (
+        1 - offer_df.loc[(offer_df["Bet"] == "Under"), "Market EV"]
     )
-    offer_df["Books P"] = offer_df["Books"].fillna(_BOOK_PRIOR_PROB)
-    offer_df["Books"] = offer_df["Books P"] * offer_df["Boost"]
-    offer_df["K"] = (offer_df["Model"] - 1) / (offer_df["Boost"] - 1)
+    offer_df["Market Prob"] = offer_df["Market EV"].fillna(_BOOK_PRIOR_PROB)
+    offer_df["Market EV"] = offer_df["Market Prob"] * offer_df["Boost"]
+    offer_df["Kelly"] = (offer_df["Model EV"] - 1) / (offer_df["Boost"] - 1)
     offer_df["Distance"] = offer_df["Boost"] / UNDERDOG_BOOST_BASELINE
     offer_df.loc[offer_df["Distance"] < 1, "Distance"] = (
         1 / offer_df.loc[offer_df["Distance"] < 1, "Distance"]
@@ -392,22 +392,22 @@ def _finalize_records(
             "Line",
             "Boost",
             "Bet",
-            "Books",
-            "Model",
+            "Market EV",
+            "Model EV",
             "Avg 5",
             "Avg H2H",
             "Moneyline",
             "O/U",
             "DVPOA",
             "Player position",
-            "Model EV",
+            "Projection",
             "Model Param",
-            "Model STD",
-            "Model P",
-            "Push P",
-            "Books EV",
-            "Books P",
-            "K",
+            "Projection STD",
+            "Win Prob",
+            "Push Prob",
+            "Market Projection",
+            "Market Prob",
+            "Kelly",
             "Dist",
             "CV",
             "Gate",
@@ -449,7 +449,7 @@ def _build_prob_params(
         if f"proj {market} std" in stat_data.playerProfile.columns:
             prob_params = prob_params.join(stat_data.playerProfile[f"proj {market} std"])
         prob_params.rename(
-            columns={f"proj {market} mean": "Model EV", f"proj {market} std": "Model Param"},
+            columns={f"proj {market} mean": "Projection", f"proj {market} std": "Model Param"},
             inplace=True,
         )
         return prob_params
@@ -512,13 +512,6 @@ def _book_evs_for_players(
     return evs
 
 
-def _set_decoded(prob_params: pd.DataFrame, decoded, shape_col: str, shape_val) -> None:
-    prob_params["Model EV"] = decoded.ev
-    prob_params[shape_col] = shape_val
-    if decoded.gate is not None:
-        prob_params["Model Gate"] = decoded.gate
-
-
 def _decode_model_params(
     prob_params: pd.DataFrame,
     dist: str,
@@ -527,14 +520,20 @@ def _decode_model_params(
     offset_meta,
     target_normalization: str,
 ) -> None:
-    # The column guards skip the volume_stats branch, which already set Model EV
+    # The column guards skip the volume_stats branch, which already set Projection
     # from the player profile rather than a fitted distribution.
     if dist in ("NegBin", "ZINB") and "total_count" in prob_params.columns:
         decoded = decode_predictive_mean(prob_params, dist)
-        _set_decoded(prob_params, decoded, "Model R", decoded.r)
+        prob_params["Projection"] = decoded.ev
+        prob_params["Model R"] = decoded.r
+        if decoded.gate is not None:
+            prob_params["Model Gate"] = decoded.gate
     elif dist in ("Gamma", "ZAGamma") and "concentration" in prob_params.columns:
         decoded = decode_predictive_mean(prob_params, dist)
-        _set_decoded(prob_params, decoded, "Model Alpha", decoded.alpha)
+        prob_params["Projection"] = decoded.ev
+        prob_params["Model Alpha"] = decoded.alpha
+        if decoded.gate is not None:
+            prob_params["Model Gate"] = decoded.gate
     elif dist == "SkewNormal" and "loc" in prob_params.columns:
         # Dispatch SkewNormal loc/scale through the baselines registry so the
         # train-side forward transform and predict-side inverse cannot drift.
@@ -576,7 +575,11 @@ def _model_predictive_sd(offer_df: pd.DataFrame, dist: str, model_ev: np.ndarray
 
 
 def _sanitize_book_ev(
-    books_ev: np.ndarray, line: np.ndarray, model_ev: np.ndarray, model_sd: np.ndarray
+    books_ev: np.ndarray,
+    line: np.ndarray,
+    model_ev: np.ndarray,
+    model_sd: np.ndarray,
+    cell: str = "",
 ) -> np.ndarray:
     """Regularize book means implausibly far above their line before the blend.
 
@@ -584,15 +587,20 @@ def _sanitize_book_ev(
     an ill-conditioned count-tail inversion (``mu = -log(1-p)`` blows up as p->1) and
     would dominate ``fused_loc``'s log-opinion pool. Such runaway rows are shrunk
     toward the model mean — capped at ``model_ev + _BOOK_EV_MODEL_SD_CAP * SD`` —
-    rather than discarded to the line, and warned so corruption still surfaces.
+    rather than discarded to the line. The warning reports the worst offender's
+    ev/line ratio so a benign DFS-clamp placeholder (~5x line on a high-zero-rate
+    count) reads apart from a pre-clamp archive runaway (>1000x).
     """
     runaway = books_ev > _BOOK_EV_LINE_CAP * np.clip(line, 0.5, None)
     if not runaway.any():
         return books_ev
     band = model_ev + _BOOK_EV_MODEL_SD_CAP * np.clip(model_sd, 1e-9, None)
+    ratio = books_ev / np.clip(line, 0.5, None)
+    worst = int(np.argmax(np.where(runaway, ratio, -np.inf)))
     logger.warning(
-        f"regularized {int(runaway.sum())} implausible book EV(s) toward the model "
-        f"(max {float(np.nanmax(books_ev)):.1f})"
+        f"regularized {int(runaway.sum())}/{runaway.size} implausible book EV(s) toward "
+        f"the model in the {cell + ' ' if cell else ''}blend (worst {books_ev[worst]:.1f} on "
+        f"line {line[worst]:.1f} = {ratio[worst]:.0f}x, cap {_BOOK_EV_LINE_CAP:.0f}x)"
     )
     return np.where(runaway, np.minimum(books_ev, band), books_ev)
 
@@ -623,7 +631,7 @@ def _sanitize_model_ev(offer_df: pd.DataFrame, dist: str) -> None:
     own = _own_scale(offer_df)
     if own is None:
         return
-    model_ev = offer_df["Model EV"].to_numpy(dtype=float)
+    model_ev = offer_df["Projection"].to_numpy(dtype=float)
     cap = _MODEL_EV_OWN_SCALE_CAP * np.clip(own, _OWN_SCALE_FLOOR, None)
     runaway = model_ev > cap
     if not runaway.any():
@@ -632,7 +640,7 @@ def _sanitize_model_ev(offer_df: pd.DataFrame, dist: str) -> None:
     if dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
         shrink = np.where(runaway, clamped / np.clip(model_ev, 1e-9, None), 1.0)
         offer_df["Model Sigma"] = offer_df["Model Sigma"].to_numpy(dtype=float) * shrink
-    offer_df["Model EV"] = clamped
+    offer_df["Projection"] = clamped
     logger.warning(
         f"clamped {int(runaway.sum())} runaway model EV(s) toward "
         f"{_MODEL_EV_OWN_SCALE_CAP:g}x own-scale (max {float(np.nanmax(model_ev)):.1f})"
@@ -655,12 +663,17 @@ def _drop_no_history_offers(offer_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _blend_with_book(
-    offer_df: pd.DataFrame, dist: str, model_weight: float, cv: float, hist_gate: float
-):
-    model_ev = offer_df["Model EV"].to_numpy()
-    books_ev = offer_df["Books EV"].fillna(offer_df["Model EV"]).to_numpy()
+    offer_df: pd.DataFrame,
+    dist: str,
+    model_weight: float,
+    cv: float,
+    hist_gate: float,
+    cell: str = "",
+) -> np.ndarray:
+    model_ev = offer_df["Projection"].to_numpy()
+    books_ev = offer_df["Market Projection"].fillna(offer_df["Projection"]).to_numpy()
     model_sd = _model_predictive_sd(offer_df, dist, model_ev)
-    books_ev = _sanitize_book_ev(books_ev, offer_df["Line"].to_numpy(), model_ev, model_sd)
+    books_ev = _sanitize_book_ev(books_ev, offer_df["Line"].to_numpy(), model_ev, model_sd, cell)
     zi = _zi_kwargs(offer_df, dist, hist_gate)
     if dist == "SkewNormal":
         base_mean, sigma_blend, skew_blend, gate_blend = fused_loc(
@@ -700,10 +713,10 @@ def _blend_with_book(
         base_mean = alpha_blend / beta_blend
         offer_df["Model Alpha"] = alpha_blend
     if gate_blend is not None:
-        offer_df["Model EV"] = (1 - gate_blend) * base_mean
+        offer_df["Projection"] = (1 - gate_blend) * base_mean
         offer_df["Model Gate"] = gate_blend
     else:
-        offer_df["Model EV"] = base_mean
+        offer_df["Projection"] = base_mean
     return base_mean
 
 
@@ -757,7 +770,7 @@ def model_prob(
     prediction on ``playerStats``, blends the model distribution with the
     bookmaker-implied distribution via ``fused_loc``, applies temperature
     scaling, and returns a list of offer dicts augmented with scoring
-    columns (``Model``, ``Books``, ``Model EV``, ``Bet``, ``K``, etc.).
+    columns (``Model EV``, ``Market EV``, ``Projection``, ``Bet``, ``Kelly``, etc.).
 
     Returns an empty list when no model file exists or when the joined
     DataFrame is empty after filtering.
@@ -811,7 +824,7 @@ def model_prob(
     evs = _book_evs_for_players(
         playerStats, offer_df, market, dist, cv, hist_gate, dateMap, stat_data
     )
-    playerStats["Books EV"] = evs
+    playerStats["Market Projection"] = evs
     playerStats["Books STD"] = cv * np.array(evs)
 
     _decode_model_params(
@@ -819,29 +832,29 @@ def model_prob(
     )
 
     offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
-    offer_df = offer_df.loc[~offer_df[["Books EV", "Model EV"]].isna().all(axis=1)]
+    offer_df = offer_df.loc[~offer_df[["Market Projection", "Projection"]].isna().all(axis=1)]
     offer_df = _drop_no_history_offers(offer_df)
     if offer_df.empty:
         return []
 
-    offer_df["Books"] = _book_over_prob(offer_df, dist, cv, step, hist_gate or None)
+    offer_df["Market EV"] = _book_over_prob(offer_df, dist, cv, step, hist_gate or None)
     _clamp_shape_ceiling(offer_df, dist, shape_ceiling)
     # Mean-stage post-hoc correction before blending, mirroring train_market so
     # live predictions match the offline test CSV event-for-event.
-    offer_df["Model EV"] = _apply_mean_posthoc(
-        offer_df["Model EV"].to_numpy(), posthoc_slug, posthoc_blob
+    offer_df["Projection"] = _apply_mean_posthoc(
+        offer_df["Projection"].to_numpy(), posthoc_slug, posthoc_blob
     )
     _sanitize_model_ev(offer_df, dist)
 
-    base_mean = _blend_with_book(offer_df, dist, model_weight, cv, hist_gate)
+    base_mean = _blend_with_book(offer_df, dist, model_weight, cv, hist_gate, f"{league} {market}")
 
     # ZI dists: book reports the non-zero component EV; scale to marginal EV.
     if hist_gate and dist in ("ZINB", "ZAGamma", "SkewNormal"):
-        offer_df["Books EV"] = (1 - hist_gate) * offer_df["Books EV"]
+        offer_df["Market Projection"] = (1 - hist_gate) * offer_df["Market Projection"]
     _dispersion_calibrate(offer_df, dist, dispersion_cal, skew_cal)
 
     raw_over, push = _model_over_and_push(offer_df, dist, cv, step, base_mean)
-    offer_df["Push P"] = np.asarray(push, dtype=float)
+    offer_df["Push Prob"] = np.asarray(push, dtype=float)
 
     cal_over = apply_temperature(raw_over, temperature)
     cal_over = _apply_prob_posthoc(cal_over, posthoc_slug, posthoc_blob)
@@ -867,7 +880,7 @@ def book_fallback_prob(
     the composite, vig-free book probability — ``archive.get_ev`` inverted
     through the cell's configured distribution — as the model prediction, so the
     leg still flows through correlation, parlay search, and the export with no
-    claimed edge (``Model`` mirrors ``Books``). Returns an empty list when the
+    claimed edge (``Model EV`` mirrors ``Market EV``). Returns an empty list when the
     market is unknown to ``stat_meta`` (no distribution to devig with) or no leg
     has book odds.
     """
@@ -888,8 +901,10 @@ def book_fallback_prob(
         return []
 
     evs = _composite_book_evs(offer_df.index.unique(), league, market, date_map, stat_data)
-    offer_df["Books EV"] = offer_df.index.map(evs)
-    offer_df = offer_df.loc[offer_df["Books EV"].notna() & (offer_df["Books EV"] > 0)]
+    offer_df["Market Projection"] = offer_df.index.map(evs)
+    offer_df = offer_df.loc[
+        offer_df["Market Projection"].notna() & (offer_df["Market Projection"] > 0)
+    ]
     if offer_df.empty:
         return []
 
@@ -903,18 +918,18 @@ def book_fallback_prob(
         offer_df = offer_df.join(playerStats)
     offer_df = offer_df.reset_index(drop=True)
 
-    offer_df["Books"] = _book_over_prob(offer_df, dist, cv, step, gate_arg)
-    _base_ev = offer_df["Books EV"].to_numpy()
-    offer_df["Push P"] = np.asarray(
+    offer_df["Market EV"] = _book_over_prob(offer_df, dist, cv, step, gate_arg)
+    _base_ev = offer_df["Market Projection"].to_numpy()
+    offer_df["Push Prob"] = np.asarray(
         get_push_prob(offer_df["Line"].to_numpy(), _base_ev, dist, cv=cv, gate=gate_arg),
         dtype=float,
     )
     if hist_gate:
-        offer_df["Books EV"] = (1 - hist_gate) * offer_df["Books EV"]
+        offer_df["Market Projection"] = (1 - hist_gate) * offer_df["Market Projection"]
 
-    _over = offer_df["Books"].to_numpy()
+    _over = offer_df["Market EV"].to_numpy()
     offer_df["Model Over"] = _over
     offer_df["Model Under"] = 1 - _over
-    offer_df["Model EV"] = offer_df["Books EV"]
+    offer_df["Projection"] = offer_df["Market Projection"]
 
     return _finalize_records(offer_df, league, platform, dist, cv, step, None, 1.0)

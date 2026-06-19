@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sportstradamus UX — deep dive, swap, and the mystical question</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Cinzel:wght@500;600&family=Cormorant+Garamond:ital,wght@0,600;1,500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0E1117; --surface:#1A1D24; --text:#E6E9EF; --border:#2A2E37;
+    --blue:#2E6BE6; --link:#5B8DEF; --green:#1F9D55; --red:#E5484D;
+    --orange:#F5A524; --gray:#8A91A0; --gold:#C9A227;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;font-size:14px;line-height:1.45;padding:24px;max-width:1180px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 4px}
+  h2{font-size:16px;margin:30px 0 6px;color:var(--link)}
+  .subtitle{color:var(--gray);margin:0 0 8px}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  .wire{padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:4px;font-size:12px}
+  .split{display:flex;gap:12px;align-items:flex-start}
+  .main{flex:1;min-width:0}
+  .panel{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:10px;margin:6px 0}
+  .sec{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--gray);margin:10px 0 4px}
+  .badge{font-family:'IBM Plex Mono',monospace;padding:0 5px;border-radius:3px;white-space:nowrap}
+  .badge.g{color:var(--green);border:1px solid var(--green)}
+  .badge.o{color:var(--orange);border:1px solid var(--orange)}
+  .btn{display:inline-block;background:var(--blue);color:#fff;border-radius:3px;padding:1px 8px;font-size:11px}
+  .btn.ghost{background:transparent;border:1px solid var(--border);color:var(--gray)}
+  .stat-chip{display:inline-flex;flex-direction:column;border:1px solid var(--border);border-radius:4px;padding:5px 9px;margin:0 6px 6px 0;cursor:pointer;background:var(--surface)}
+  .stat-chip.on{border-color:var(--blue);background:rgba(46,107,230,.12)}
+  .stat-chip .v{font-family:'IBM Plex Mono',monospace;font-weight:600}
+  .stat-chip .k{font-size:9px;color:var(--gray);text-transform:uppercase;letter-spacing:.08em}
+  .avatar{width:44px;height:44px;border-radius:50%;background:#5b1721;border:2px solid #c8102e;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px}
+  .leg{display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-top:1px dashed var(--border);align-items:center}
+  .row{display:flex;justify-content:space-between;gap:6px;padding:5px 6px;border-bottom:1px solid var(--border);align-items:center}
+  .num{font-family:'IBM Plex Mono',monospace;text-align:right}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .vibe-label{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .letter{width:26px;height:26px;border-radius:4px;background:var(--blue);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700}
+  /* mystical treatment */
+  .myst{border:1px solid #3a3450;background:radial-gradient(ellipse at 30% -20%, rgba(86,70,140,.18), transparent 60%), var(--bg)}
+  .myst .kicker{font-family:'Cinzel',serif;font-size:10px;letter-spacing:.28em;color:var(--gold);text-transform:uppercase}
+  .myst .headline{font-family:'Cormorant Garamond',serif;font-size:23px;font-weight:600;margin:2px 0 6px;color:#EDE6D6}
+  .myst .rule{height:1px;background:linear-gradient(90deg,transparent,var(--gold),transparent);border:0;margin:6px 0}
+  .constellation{position:relative;height:120px;background:var(--bg);border:1px solid #3a3450;border-radius:4px;overflow:hidden}
+  .star{position:absolute;width:8px;height:8px;border-radius:50%;background:var(--gold);box-shadow:0 0 8px rgba(201,162,39,.8)}
+  .star.dim{width:5px;height:5px;background:#6a7287;box-shadow:none}
+  .constellation svg{position:absolute;inset:0}
+  .constellation .lbl{position:absolute;font-size:9px;color:var(--gray)}
+</style>
+</head>
+<body>
+<h1>Three answers: the deep dive (kept + expanded) · swap-a-leg · the mystical question</h1>
+<p class="subtitle">Scroll all three, then answer in terminal.</p>
+
+<h2>1 · Player deep dive v2 — distribution stays, inputs become clickable</h2>
+<div class="wire">
+  <div style="display:flex;gap:10px;align-items:center;border-bottom:2px solid #c8102e;padding-bottom:8px;margin-bottom:8px">
+    <div class="avatar">AW</div>
+    <div><b style="font-size:15px">A'ja Wilson <span class="mono" style="color:var(--gray)">#22 · F</span></b><br><span style="color:var(--gray)">Las Vegas Aces @ Indiana Fever · 7:00</span></div>
+    <span style="margin-left:auto" class="mono">Points <b>o23.5</b> · UD <span class="badge g">EV +11%</span></span>
+  </div>
+  <div class="split">
+    <div class="main">
+      <div class="sec" style="margin-top:0">Projected distribution (exactly as today, plus shading + verdict)</div>
+      <div class="panel" style="height:130px;position:relative">
+        <svg width="100%" height="100%" viewBox="0 0 400 100" preserveAspectRatio="none">
+          <path d="M0,98 C60,96 90,60 140,30 C170,12 200,8 230,18 C270,32 320,80 400,96" fill="rgba(46,107,230,.18)" stroke="#2E6BE6" stroke-width="2"/>
+          <line x1="218" y1="0" x2="218" y2="100" stroke="#E6E9EF" stroke-dasharray="4 3"/>
+          <text x="224" y="12" fill="#8A91A0" font-size="9">line 23.5</text>
+          <text x="280" y="40" fill="#1F9D55" font-size="11" font-family="monospace">P(over) 61%</text>
+        </svg>
+      </div>
+      <div class="sec">What feeds it — click any chip, chart below flips to that stat <span class="badge o">SHAP-ranked</span></div>
+      <div>
+        <span class="stat-chip on"><span class="v">26.1</span><span class="k">avg last 5</span></span>
+        <span class="stat-chip"><span class="v">24.8</span><span class="k">avg vs IND</span></span>
+        <span class="stat-chip"><span class="v">+9%</span><span class="k">DVPOA</span></span>
+        <span class="stat-chip"><span class="v">165.5</span><span class="k">game total</span></span>
+        <span class="stat-chip"><span class="v">−180</span><span class="k">moneyline</span></span>
+        <span class="stat-chip"><span class="v">34.2</span><span class="k">minutes L10</span></span>
+        <span class="stat-chip"><span class="v">7/9</span><span class="k">comps hit*</span></span>
+      </div>
+      <div class="panel" style="height:84px;position:relative">
+        <svg width="100%" height="100%" viewBox="0 0 400 70" preserveAspectRatio="none">
+          <line x1="0" y1="28" x2="400" y2="28" stroke="#8A91A0" stroke-dasharray="3 3"/>
+          <rect x="10"  y="34" width="26" height="34" fill="#E5484D"/><rect x="48"  y="14" width="26" height="54" fill="#1F9D55"/><rect x="86" y="22" width="26" height="46" fill="#1F9D55"/><rect x="124" y="40" width="26" height="28" fill="#E5484D"/><rect x="162" y="8" width="26" height="60" fill="#1F9D55"/><rect x="200" y="18" width="26" height="50" fill="#1F9D55"/><rect x="238" y="12" width="26" height="56" fill="#1F9D55"/><rect x="276" y="30" width="26" height="38" fill="#E5484D"/><rect x="314" y="10" width="26" height="58" fill="#1F9D55"/><rect x="352" y="16" width="26" height="52" fill="#1F9D55"/>
+          <text x="6" y="24" fill="#8A91A0" font-size="9">23.5</text>
+        </svg>
+      </div>
+      <div style="color:var(--gray)">selected chip = "avg last 5" → last-10 games vs line (today's History tab, now driven by chip selection). H2H chip → vs-IND games only. Minutes chip → minutes trend. *comps chip = placeholder until comps persist.</div>
+    </div>
+    <div style="width:230px;flex-shrink:0">
+      <div class="sec" style="margin-top:0">The case (auto-prose)</div>
+      <div class="panel" style="font-size:11.5px">Cleared 23.5 in 8 of 10. Fever allow +9% to opposing PFs. Model 61% vs book 52% — the edge is the disagreement.</div>
+      <div class="sec">Market trust</div>
+      <div class="panel" style="font-size:11.5px">WNBA Points: beat book 30d <span class="badge g">live</span> · calibration ✓ → Model Lab</div>
+      <div class="sec">Pairs well with</div>
+      <div class="panel" style="font-size:11.5px">J. Young o2.5 3PM <span class="mono" style="color:var(--gold)">ρ .31</span><br>Aces −2.5 <span class="mono" style="color:var(--gold)">ρ .24</span> <span class="btn" style="float:right">+ slip</span></div>
+    </div>
+  </div>
+</div>
+
+<h2>2 · Swap a leg — correlation-ranked, thesis-aware</h2>
+<div class="wire">
+  <div style="color:var(--gray);margin-bottom:6px">Context kept on top: the story + remaining legs. Candidates ranked by <b>story fit</b> = corr with remaining legs × edge. Each row says what it does to the slip.</div>
+  <div class="panel">
+    <b>Aces pull away late</b> — swapping <s style="color:var(--gray)">C. Clark u8.5 Ast</s>; keeping Wilson o23.5 + Young o2.5
+    <div class="row" style="color:var(--gray);margin-top:6px"><span>CANDIDATE</span><span class="num">FIT ρ</span><span class="num">EDGE</span><span class="num">SLIP EV →</span><span></span></div>
+    <div class="row"><span>K. Plum o2.5 Stl+Blk <span style="color:var(--gray)">· same run, defense fuels it</span></span><span class="num" style="color:var(--gold)">.28</span><span class="num" style="color:var(--green)">+7%</span><span class="num" style="color:var(--green)">+9% → +11%</span><span class="btn">swap in</span></div>
+    <div class="row"><span>Aces team total o82.5 <span style="color:var(--gray)">· the thesis itself</span></span><span class="num" style="color:var(--gold)">.41</span><span class="num" style="color:var(--green)">+5%</span><span class="num" style="color:var(--green)">+9% → +10%</span><span class="btn">swap in</span></div>
+    <div class="row"><span>K. Mitchell u17.5 Pts <span style="color:var(--gray)">· blowout benches her</span></span><span class="num" style="color:var(--gold)">.22</span><span class="num" style="color:var(--orange)">+4%</span><span class="num" style="color:var(--orange)">+9% → +8%</span><span class="btn">swap in</span></div>
+    <div class="row" style="border-bottom:0"><span style="color:var(--gray)">anti-fit shown too, flagged:</span><span class="num" style="color:var(--red)">−.18</span><span class="num" style="color:var(--green)">+6%</span><span class="num" style="color:var(--red)">+9% → +6%</span><span class="btn ghost">fights thesis</span></div>
+  </div>
+</div>
+
+<h2>3 · The mystical question — same card, two skins</h2>
+<p class="subtitle">"Sportstradamus" promises an oracle; current tokens say "broadcast lab". Your DESIGN.md locks palette/fonts (FIXED, test-enforced) — going mystical means amending it deliberately. Two depths:</p>
+<div class="grid2">
+  <div class="wire">
+    <div class="vibe-label"><div class="letter">A</div><b>Oracle voice only</b> <span style="color:var(--gray)">— zero token changes</span></div>
+    <div class="panel" style="border-color:var(--blue)">
+      <div style="font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--link)">Tonight's lead prophecy · LVA @ IND</div>
+      <div style="font-size:15px;font-weight:700;margin:2px 0 6px">Aces pull away late</div>
+      <div class="leg"><span><span style="display:inline-block;width:18px;height:18px;border-radius:50%;background:#5b1721;border:1px solid #c8102e;font-size:8px;text-align:center;line-height:16px">AW</span> Wilson o23.5 Pts</span><span class="badge g">+11%</span></div>
+      <div class="leg"><span>Young o2.5 3PM</span><span class="badge g">+6%</span></div>
+      <div style="margin-top:6px"><span class="btn">Add prophecy to slip</span></div>
+    </div>
+    <div style="color:var(--gray);font-size:12px">Renames (stories→prophecies, receipts→"the record"), Material icons, headshots/team colors as the only new visuals. DESIGN.md §1 tone line updated, tokens untouched.</div>
+  </div>
+  <div class="wire myst">
+    <div class="vibe-label"><div class="letter" style="background:var(--gold);color:#0E1117">B</div><b>Celestial layer</b> <span style="color:var(--gray)">— amend tokens: gold accent + serif display, night-sky texture</span></div>
+    <div class="panel myst" style="border-color:#3a3450">
+      <div class="kicker">Tonight's lead prophecy</div>
+      <div class="headline">The Aces pull away late</div>
+      <hr class="rule">
+      <div class="leg"><span><span style="display:inline-block;width:18px;height:18px;border-radius:50%;background:#5b1721;border:1px solid #c8102e;font-size:8px;text-align:center;line-height:16px">AW</span> Wilson o23.5 Pts</span><span class="badge" style="color:var(--gold);border:1px solid var(--gold)">+11%</span></div>
+      <div class="leg"><span>Young o2.5 3PM</span><span class="badge g">+6%</span></div>
+      <div style="margin-top:6px"><span class="btn" style="background:var(--gold);color:#0E1117">Add prophecy to slip</span></div>
+    </div>
+    <div class="sec" style="color:var(--gold)">signature element: correlations as constellation</div>
+    <div class="constellation">
+      <svg><line x1="60" y1="60" x2="150" y2="35" stroke="#C9A227" stroke-opacity=".5"/><line x1="60" y1="60" x2="140" y2="90" stroke="#C9A227" stroke-opacity=".35"/><line x1="150" y1="35" x2="240" y2="55" stroke="#6a7287" stroke-opacity=".4"/><line x1="60" y1="60" x2="240" y2="55" stroke="#6a7287" stroke-opacity=".25"/></svg>
+      <div class="star" style="left:56px;top:56px"></div><div class="star" style="left:146px;top:31px"></div><div class="star dim" style="left:137px;top:87px"></div><div class="star dim" style="left:236px;top:52px"></div>
+      <div class="lbl" style="left:40px;top:70px">Wilson Pts</div><div class="lbl" style="left:130px;top:16px">Young 3PM</div><div class="lbl" style="left:120px;top:98px">Plum S+B</div><div class="lbl" style="left:215px;top:62px">Clark Ast</div>
+    </div>
+    <div style="color:var(--gray);font-size:12px;margin-top:6px">Cinzel kickers + Cormorant headlines (display only; Plex stays for data), gold = prophecy/edge accent, faint nebula on hero cards only. DESIGN.md + config.toml + golden test amended together. Purple-gradient ban survives (this is gold-on-night, not neon).</div>
+  </div>
+</div>
+<p class="subtitle" style="margin-top:10px">Either way: headshots, jersey numbers, team logos + colors come via a new asset layer (league CDN headshots + static team color map) — roadmap item, graceful initials-fallback shown above.</p>
+<script>
+const v0=fetch('/version.txt').then(r=>r.text());
+setInterval(async()=>{const a=await v0;const b=await fetch('/version.txt?'+Date.now()).then(r=>r.text());if(a!==b)location.reload()},2000);
+</script>
+</body>
+</html>

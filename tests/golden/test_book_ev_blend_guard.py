@@ -15,6 +15,8 @@ rather than discarding them to the line, and ``_blend_with_book`` applies it
 before pooling.
 """
 
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -53,8 +55,8 @@ def test_sanitize_only_clamps_runaway_rows():
 def _zinb_offer_df(books_ev):
     return pd.DataFrame(
         {
-            "Model EV": [2.70, 1.40, 0.90],
-            "Books EV": books_ev,
+            "Projection": [2.70, 1.40, 0.90],
+            "Market Projection": books_ev,
             "Line": [2.5, 1.5, 0.5],
             "Model R": [30.0, 30.0, 30.0],
             "Model Gate": [0.10, 0.20, 0.30],
@@ -68,7 +70,7 @@ def test_corrupt_book_ev_does_not_inflate_blend():
     # (Champagnie 2.7 -> 7.45) the unguarded pool produced live.
     offer_df = _zinb_offer_df([7802.0, 7802.0, 4268.0])
     _blend_with_book(offer_df, "ZINB", model_weight=0.85, cv=0.566, hist_gate=0.337)
-    blended = offer_df["Model EV"].to_numpy()
+    blended = offer_df["Projection"].to_numpy()
     line = offer_df["Line"].to_numpy()
     assert np.isfinite(blended).all()
     assert (blended <= _BOOK_EV_LINE_CAP * line).all()
@@ -76,12 +78,26 @@ def test_corrupt_book_ev_does_not_inflate_blend():
     assert (blended < 4.0).all(), f"corrupt book still inflated the blend: {blended}"
 
 
+def test_warning_reports_offender_ratio_and_cell(caplog):
+    # The benign-vs-corrupt signal lives in the worst ev/line ratio + cell, not the
+    # array max: a ~5x DFS clamp placeholder must read apart from a >1000x runaway.
+    line = np.array([0.5, 1.5])
+    books = np.array([7.5, 1.0])  # 7.5 on a 0.5 line = 15x cap -> shrunk; 1.0 kept
+    model_ev = np.array([0.45, 1.0])
+    model_sd = np.array([0.3, 0.4])
+    with caplog.at_level(logging.WARNING, logger="log"):
+        out = _sanitize_book_ev(books, line, model_ev, model_sd, cell="WNBA FG3M")
+    assert out[0] == pytest.approx(0.45 + _BOOK_EV_MODEL_SD_CAP * 0.3) and out[1] == 1.0
+    assert "WNBA FG3M" in caplog.text
+    assert "15x" in caplog.text  # worst ev/line = 7.5 / 0.5
+
+
 def test_sane_book_ev_blend_unchanged_by_guard():
     # A legitimate book EV near the line must blend normally (the guard is inert).
     sane = _zinb_offer_df([2.6, 1.5, 0.6])
     guarded = sane.copy()
     _blend_with_book(guarded, "ZINB", model_weight=0.85, cv=0.566, hist_gate=0.337)
-    blended = guarded["Model EV"].to_numpy()
+    blended = guarded["Projection"].to_numpy()
     # Blended mean sits in the plausible band between the model and the book.
     assert (blended > 0).all()
     assert (blended < 3.5).all()

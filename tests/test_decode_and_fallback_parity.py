@@ -35,7 +35,7 @@ mp = importlib.import_module("sportstradamus.prediction.model_prob")
 
 def _book_over(dist, line, book_ev, cv, step, gate):
     """Over-probability the fallback assigns — the real ``_book_over_prob``."""
-    offer_df = pd.DataFrame({"Line": [line], "Books EV": [book_ev]})
+    offer_df = pd.DataFrame({"Line": [line], "Market Projection": [book_ev]})
     return mp._book_over_prob(offer_df, dist, cv, step, gate).to_numpy()
 
 

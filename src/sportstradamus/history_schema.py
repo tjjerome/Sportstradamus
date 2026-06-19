@@ -12,8 +12,8 @@ three.
 
 PREDICTION_LEVEL_COLS = [
     "Team",
-    "Model EV",
-    "Books EV",
+    "Projection",
+    "Market Projection",
     "Dist",
     "CV",
     "Model Param",
@@ -38,14 +38,14 @@ OFFER_FIELDS = [
     "Boost",
     "Platform",
     "Bet",
-    "Model P",
-    "Books P",
-    "Close Books P",
+    "Win Prob",
+    "Market Prob",
+    "Close Market Prob",
     "Market CLV",
     "Model CLV",
 ]
 OFFER_ARITY = len(OFFER_FIELDS)
 # Offers written before the CLV migration carried only the first six fields.
 LEGACY_OFFER_ARITY = 6
-# Tuple positions of the closing trio (Close Books P, Market CLV, Model CLV).
+# Tuple positions of the closing trio (Close Market Prob, Market CLV, Model CLV).
 CLOSING_FIELD_INDICES = tuple(range(LEGACY_OFFER_ARITY, OFFER_ARITY))

@@ -165,7 +165,7 @@ def reflect():
                 mean_profit = np.zeros([int(1 / n), int(5 / n)])
                 for i, bt in enumerate(tqdm(np.arange(1, 2, n))):
                     for j, mt in enumerate(np.arange(1, 6, n)):
-                        test_df = df.loc[(df["Books EV"] > bt) & (df["Model EV"] > mt)]
+                        test_df = df.loc[(df["Market EV"] > bt) & (df["Model EV"] > mt)]
                         bets = (
                             test_df.sort_values("Model EV", ascending=False)
                             .groupby(["Game", "Date"])
@@ -186,7 +186,7 @@ def reflect():
                 book_threshold = book_threshold[model_threshold > 1]
                 model_threshold = model_threshold[model_threshold > 1]
                 p = np.polyfit(np.log(6 - model_threshold), book_threshold, 1)
-                mask = (p[0] * np.log(6 - df["Model EV"]) + p[1]) < df["Books EV"]
+                mask = (p[0] * np.log(6 - df["Model EV"]) + p[1]) < df["Market EV"]
 
                 fig = plt.figure()
                 ax = sns.heatmap(
