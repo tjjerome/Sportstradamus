@@ -300,14 +300,16 @@ no conversation context, so the handoff prompt is the entire briefing.
 1. `CLAUDE.md` — project conventions (general rules, one-module-per-subagent,
    refactoring-specialist mandate, quality gates).
 2. `docs/STYLE_GUIDE.md` — code conventions, the §18 LLM-contributor block.
-3. `docs/handoffs/model_improvement_track.md` — **the master plan** (home-of-record).
-   Read the §2 ground-truth commands, the §11 verification / inference-path
-   checklist, the §9 failure protocol (matrix-exhaustion; Gate 1 + Gate 2
-   lifecycle), the target stage's body, and its acceptance and if-it-fails
-   branch.
-4. The most recent prior handoff prompt in `/tmp/*_handoff_prompt.md`
-   (or `docs/handoffs/` if a phase has chosen to commit theirs) for style
-   reference. Mirror its structure, not its exact wording.
+3. The workstream brief at `docs/handoffs/{slug}.md` — the lane this session
+   prompt serves: its stage plan, locked decisions, and ledger are the scope
+   the prompt must inherit. The brief template is
+   `docs/handoffs/_template.md`.
+4. The lane's home-of-record docs per the brief's §2 — for the model track
+   that is `docs/model_improvement_track.md` (§2 ground truth, §11
+   verification / inference-path checklist, §9 failure protocol, the target
+   stage's body and its acceptance and if-it-fails branch).
+5. The most recent prior handoff prompt in `/tmp/*_handoff_prompt.md` for
+   style reference. Mirror its structure, not its exact wording.
 
 ### Standard handoff-prompt structure (do not deviate without reason)
 
@@ -368,5 +370,8 @@ no conversation context, so the handoff prompt is the entire briefing.
   `/tmp/p2_handoff_prompt.md`).
 - After writing, print the file path + the first 30 lines so the user
   can confirm tone and structure before the next session starts.
-- If the user accepts it, copy to `docs/handoffs/{next-stage-slug}.md`
-  for durable git history. If not, iterate.
+- Ephemeral session prompts stay in `/tmp`. Durable structure lives in the
+  workstream brief: on a stage boundary, update `docs/handoffs/{slug}.md`
+  (stage plan, status line, ledger) instead of committing prompt copies —
+  `docs/handoffs/` holds briefs only. New briefs and major re-briefs are
+  drafted from `docs/handoffs/_template.md`.

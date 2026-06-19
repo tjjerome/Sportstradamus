@@ -21,6 +21,11 @@ from sportstradamus.history_schema import (
     OFFER_FIELDS,
     PREDICTION_LEVEL_COLS,
 )
+from sportstradamus.strategies.profit_sim import (
+    N_MONTE_CARLO_DEFAULT,
+    simulate_strategy,
+    summarize_runs,
+)
 
 LEG_PATTERN = re.compile(r"^(.+?)\s+(Over|Under)\s+([\d.]+)\s+(.+?)\s+-\s+[\d.]+%")
 
@@ -59,6 +64,18 @@ _BOOK_PROB_PICK_FLOOR = 0.52
 
 # Model-probability cut points for the ROI threshold sweep (compute_individual_metrics).
 _ROI_THRESHOLDS = (0.55, 0.58, 0.60, 0.65, 0.70)
+
+# Flat -110 ("standard juice") accounting: risk 110 to win 100. The Receipts hero and
+# skeptic checks price every rec as one flat -110 unit so the numbers stay comparable.
+JUICE_PAYOUT = 100 / 110
+# Decimal odds of that flat bet (stake 1 → return 1 + 100/110 on a win).
+_FLAT_DECIMAL_ODDS = 1 + JUICE_PAYOUT
+# A rec clears the "EV>5%" skeptic check when its model edge at the flat reference price
+# clears this: Win Prob * _FLAT_DECIMAL_ODDS - 1 >= 0.05  <=>  Win Prob >= 0.55.
+_EV_EDGE_MIN = 0.05
+# One real-world bet = one (player, market, line, side, date); the snapshot lists the same
+# prop under every book that posts it, so the Receipts hero dedups on this before counting.
+_BET_KEY = ["Date", "Player", "Market", "Line", "Bet"]
 
 # Upper bound on the NegBin CRPS finite-sum support; the PMF tail is negligible
 # well before this, so the cap only guards pathological (huge-EV) inputs.
@@ -162,8 +179,8 @@ def _migrate_flat_history(history):
     """Convert old flat history schema (one row per offer) to normalized schema.
 
     Groups by (Player, League, Date, Market) and collects per-offer columns
-    into an Offers list of 9-tuples: (Line, Boost, Platform, Bet, ModelP, BooksP,
-    CloseBooksP, MarketCLV, ModelCLV). The trailing three are NaN-padded for
+    into an Offers list of 9-tuples: (Line, Boost, Platform, Bet, Win Prob, Market Prob,
+    Close Market Prob, Market CLV, Model CLV). The trailing three are NaN-padded for
     pre-CLV rows; ``reflect`` populates them from the archive on resolution.
     """
     pred_cols = [*PREDICTION_LEVEL_COLS, "Actual"]
@@ -191,8 +208,8 @@ def _migrate_flat_history(history):
 def _prep_legacy_columns(history):
     """Ensure offer/prediction columns exist and back-fill Model P / Books P.
 
-    The legacy flat schema stored boosted ``Model`` / ``Books``; the normalized
-    schema wants de-boosted per-offer ``Model P`` / ``Books P``. Mutates
+    The legacy flat schema stored boosted ``Model EV`` / ``Market EV``; the normalized
+    schema wants de-boosted per-offer ``Win Prob`` / ``Market Prob``. Mutates
     ``history`` in place.
     """
     offer_cols = OFFER_FIELDS[:LEGACY_OFFER_ARITY]
@@ -201,19 +218,19 @@ def _prep_legacy_columns(history):
         if col not in history.columns:
             history[col] = np.nan
 
-    if "Model P" not in history.columns or history["Model P"].isna().all():
-        if "Model" in history.columns:
-            history["Model P"] = history["Model"] / history.get("Boost", 1)
-    if "Books P" not in history.columns or history["Books P"].isna().all():
-        if "Books" in history.columns:
-            history["Books P"] = history["Books"] / history.get("Boost", 1)
+    if "Win Prob" not in history.columns or history["Win Prob"].isna().all():
+        if "Model EV" in history.columns:
+            history["Win Prob"] = history["Model EV"] / history.get("Boost", 1)
+    if "Market Prob" not in history.columns or history["Market Prob"].isna().all():
+        if "Market EV" in history.columns:
+            history["Market Prob"] = history["Market EV"] / history.get("Boost", 1)
 
 
 def _offer_tuple(r):
     """Build one normalized 9-tuple offer from a legacy flat row, or None.
 
     Returns None when the row has no line (NaN). The trailing closing trio
-    (Close Books P, Market CLV, Model CLV) is NaN-padded; ``reflect`` fills it.
+    (Close Market Prob, Market CLV, Model CLV) is NaN-padded; ``reflect`` fills it.
     """
     line = r.get("Line")
     if pd.isna(line):
@@ -223,9 +240,9 @@ def _offer_tuple(r):
         float(r.get("Boost", 1)),
         str(r.get("Platform", "")),
         str(r.get("Bet", "")),
-        float(r["Model P"]) if pd.notna(r.get("Model P")) else np.nan,
-        float(r["Books P"]) if pd.notna(r.get("Books P")) else np.nan,
-        np.nan,  # Close Books P — populated by reflect.
+        float(r["Win Prob"]) if pd.notna(r.get("Win Prob")) else np.nan,
+        float(r["Market Prob"]) if pd.notna(r.get("Market Prob")) else np.nan,
+        np.nan,  # Close Market Prob — populated by reflect.
         np.nan,  # Market CLV
         np.nan,  # Model CLV
     )
@@ -250,7 +267,7 @@ def _merge_offers(old_offers, new_offers):
     """Merge old and new offer lists, deduplicating by (Line, Platform).
 
     New offers overwrite old ones with the same (Line, Platform) key, except
-    in the closing-trio positions (CloseBooksP, MarketCLV, ModelCLV): a
+    in the closing-trio positions (CloseMarketProb, MarketCLV, ModelCLV): a
     captured non-NaN closing value on the old offer is preserved when the
     new offer is NaN there. Without this, the next ``prophecize`` run would
     clobber any close-line snapshot ``reflect`` had already filled in.
@@ -313,9 +330,9 @@ def _offer_row(pred, pred_cols, offer):
             "Boost": boost,
             "Platform": platform,
             "Bet": bet,
-            "Model P": model_p,
-            "Books P": books_p,
-            "Close Books P": close_p,
+            "Win Prob": model_p,
+            "Market Prob": books_p,
+            "Close Market Prob": close_p,
             "Market CLV": market_clv,
             "Model CLV": model_clv,
             "Result": result,
@@ -330,7 +347,7 @@ def _add_kelly_columns(exploded):
     ``Boost`` on persisted rows is the raw promo multiplier (1.00 = no promo).
     For Underdog the per-$1 payout multiplier is ``Boost * UNDERDOG_BOOST_BASELINE``;
     other platforms are treated as already payout-inclusive (back-compat with
-    the pre-fix callers that read ``Model = Model P x Boost`` directly).
+    the pre-fix callers that read ``Model EV = Win Prob x Boost`` directly).
     """
     if "Result" in exploded.columns and "Bet" in exploded.columns:
         resolved = exploded.dropna(subset=["Result", "Bet"])
@@ -338,13 +355,13 @@ def _add_kelly_columns(exploded):
             exploded.loc[resolved.index, "Hit"] = (resolved["Bet"] == resolved["Result"]).astype(
                 int
             )
-    if "Model P" in exploded.columns and "Boost" in exploded.columns:
+    if "Win Prob" in exploded.columns and "Boost" in exploded.columns:
         platform = exploded.get("Platform", pd.Series(dtype=str))
         baseline = np.where(platform == "Underdog", UNDERDOG_BOOST_BASELINE, 1.0)
         payout = exploded["Boost"] * baseline
-        exploded["Model"] = exploded["Model P"] * payout
-        exploded["Books"] = exploded["Books P"].fillna(0.5) * payout
-        exploded["K"] = (exploded["Model"] - 1) / (payout - 1).replace(0, np.nan)
+        exploded["Model EV"] = exploded["Win Prob"] * payout
+        exploded["Market EV"] = exploded["Market Prob"].fillna(0.5) * payout
+        exploded["Kelly"] = (exploded["Model EV"] - 1) / (payout - 1).replace(0, np.nan)
     return exploded
 
 
@@ -352,7 +369,7 @@ def explode_offers(history):
     """Expand Offers column into one row per offer, inheriting prediction-level cols.
 
     Returns DataFrame with columns: all prediction-level cols + Line, Boost,
-    Platform, Bet, Model P, Books P, Close Books P, Market CLV, Model CLV,
+    Platform, Bet, Win Prob, Market Prob, Close Market Prob, Market CLV, Model CLV,
     Result, Hit. Legacy 6-tuples are read transparently — the closing trio
     surfaces as NaN.
     """
@@ -471,7 +488,7 @@ def _hist_stats_table(filtered, prob_col, today):
         _append_stats_row(rows, tf_data, prob_col, tf_label, "All")
         _append_stats_row(
             rows,
-            tf_data.loc[tf_data["Books"] > _BOOK_PROB_PICK_FLOOR],
+            tf_data.loc[tf_data["Market EV"] > _BOOK_PROB_PICK_FLOOR],
             prob_col,
             tf_label,
             "All, Book Filtered",
@@ -539,11 +556,12 @@ def _roi_table(history, today):
                 (
                     "Book Filtered",
                     history.loc[
-                        (history["_date"] >= cutoff) & (history["Books"] > _BOOK_PROB_PICK_FLOOR)
+                        (history["_date"] >= cutoff)
+                        & (history["Market EV"] > _BOOK_PROB_PICK_FLOOR)
                     ],
                 ),
             ]:
-                t_sub = subset.loc[subset["Model"] > threshold]
+                t_sub = subset.loc[subset["Model EV"] > threshold]
                 if t_sub.empty:
                     continue
                 wins = (t_sub["Bet"] == t_sub["Result"]).sum()
@@ -571,17 +589,250 @@ def compute_individual_metrics(history):
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     prob_col = (
-        "Model P" if "Model P" in history.columns and history["Model P"].notna().any() else "Model"
+        "Win Prob"
+        if "Win Prob" in history.columns and history["Win Prob"].notna().any()
+        else "Model EV"
     )
     today = datetime.today().date()
     history["_date"] = pd.to_datetime(history["Date"], errors="coerce").dt.date
     history = history.loc[history["_date"].notna()].copy()
-    filtered = history.loc[history["Model"] > _MODEL_PROB_PICK_FLOOR]
+    filtered = history.loc[history["Model EV"] > _MODEL_PROB_PICK_FLOOR]
 
     hist_stats = _hist_stats_table(filtered, prob_col, today)
     daily, calibration = _daily_calibration_tables(filtered, prob_col, today)
     roi = _roi_table(history, today)
     return hist_stats, daily, calibration, roi
+
+
+def _with_profit_units(exploded):
+    """Return a copy carrying ``Hit`` and the flat -110 ``Profit Unit`` per offer.
+
+    ``Hit`` is derived from ``Bet == Result`` when absent. A hit pays
+    ``JUICE_PAYOUT``, a miss ``-1`` — the flat-unit basis the Receipts hero and
+    skeptic checks share so every number is comparable.
+    """
+    df = exploded.copy()
+    if "Hit" not in df.columns:
+        df["Hit"] = (df["Bet"] == df["Result"]).astype(int)
+    df["Profit Unit"] = df["Hit"] * JUICE_PAYOUT - (1 - df["Hit"])
+    return df
+
+
+def dedup_bets(exploded):
+    """Collapse the same real-world bet posted under multiple books to a single row.
+
+    The snapshot lists one ``(player, market, line, side, date)`` prop under every book
+    that offers it; tailing it once — not once per book — is the honest unit. A different
+    line is a different bet and survives. Keeps the first occurrence.
+    """
+    key = [c for c in _BET_KEY if c in exploded.columns]
+    return exploded.drop_duplicates(subset=key) if key else exploded
+
+
+def tailed_record(exploded) -> dict:
+    """Receipts hero — win/loss record and flat-unit P&L if you'd tailed every rec."""
+    if exploded.empty:
+        return {"units": 0.0, "wins": 0, "losses": 0, "n": 0, "roi": 0.0, "win_pct": 0.0}
+    df = _with_profit_units(exploded)
+    n = len(df)
+    wins = int(df["Hit"].sum())
+    units = float(df["Profit Unit"].sum())
+    return {
+        "units": units,
+        "wins": wins,
+        "losses": n - wins,
+        "n": n,
+        "roi": units / n,
+        "win_pct": wins / n,
+    }
+
+
+def ev_threshold_record(exploded, *, edge_min: float = _EV_EDGE_MIN) -> dict:
+    """Record over recs whose flat -110 model edge clears ``edge_min``.
+
+    A rec qualifies when ``prob * _FLAT_DECIMAL_ODDS - 1 >= edge_min``, the same
+    accounting basis as the hero — so "record at EV>5%" stays coherent with the P&L
+    beside it. ``prob`` is ``Win Prob`` (falling back to ``Model EV``).
+    """
+    if exploded.empty:
+        return tailed_record(exploded)
+    prob_col = (
+        "Win Prob"
+        if "Win Prob" in exploded.columns and exploded["Win Prob"].notna().any()
+        else "Model EV"
+    )
+    qualifying = exploded.loc[exploded[prob_col] * _FLAT_DECIMAL_ODDS - 1 >= edge_min]
+    return tailed_record(qualifying)
+
+
+def worst_month(exploded) -> dict:
+    """The single worst calendar month by flat-unit P&L — losers shown, never hidden.
+
+    Returns ``{month, units, n, win_pct}`` for the ``YYYY-MM`` with the lowest summed
+    units (ties broken to the earliest month); ``{}`` when nothing is resolved.
+    """
+    if exploded.empty:
+        return {}
+    df = _with_profit_units(exploded)
+    df["_month"] = pd.to_datetime(df["Date"], errors="coerce").dt.strftime("%Y-%m")
+    df = df.loc[df["_month"].notna()]
+    if df.empty:
+        return {}
+    grouped = (
+        df.groupby("_month")
+        .agg(units=("Profit Unit", "sum"), n=("Hit", "count"), wins=("Hit", "sum"))
+        .sort_index()  # chronological order makes idxmin keep the earliest tie
+    )
+    worst = grouped["units"].idxmin()
+    row = grouped.loc[worst]
+    return {
+        "month": worst,
+        "units": float(row["units"]),
+        "n": int(row["n"]),
+        "win_pct": float(row["wins"] / row["n"]),
+    }
+
+
+def record_grid(exploded, by: str) -> pd.DataFrame:
+    """Per-group record (``Bets`` / ``Win%`` / ``Units`` / ``ROI``), sorted Units-desc.
+
+    ``by`` is one of ``League`` / ``Market`` / ``Platform``. ``Win%`` and ``ROI`` are
+    fractions; the surface scales them to percentage points for the themed grid.
+    """
+    cols = [by, "Bets", "Win%", "Units", "ROI"]
+    if exploded.empty:
+        return pd.DataFrame(columns=cols)
+    df = _with_profit_units(exploded)
+    grouped = (
+        df.groupby(by)
+        .agg(Bets=("Hit", "count"), wins=("Hit", "sum"), Units=("Profit Unit", "sum"))
+        .reset_index()
+    )
+    grouped["Win%"] = grouped["wins"] / grouped["Bets"]
+    grouped["ROI"] = grouped["Units"] / grouped["Bets"]
+    return grouped.sort_values("Units", ascending=False)[cols].reset_index(drop=True)
+
+
+# Reference bankroll for the precomputed grid. ROI / Sharpe / drawdown / win-rate are
+# all bankroll-relative, so the absolute value only fixes the simulation's scale.
+PROFIT_SIM_INITIAL_BANKROLL = 1000.0
+
+# Bet selection shared by every strategy: positive model edge against the DFS payout.
+_PROFIT_SIM_BASE = {"ranking": "Kelly", "min_model_p": 0.0, "min_books_p": 0.0}
+
+# The four strategies the Receipts panel precomputes per horizon. Conservative caps the
+# day's exposure at 5%, Moderate at 10% (owner spec); Flat stakes a fixed percent off the
+# *initial* bankroll (no compounding), Kelly is fractional and capped per-leg by the engine.
+PROFIT_SIM_STRATEGIES: dict[str, dict] = {
+    "Flat · Conservative": {
+        **_PROFIT_SIM_BASE,
+        "max_bets_day": 5,
+        "sizing_pct": 1.0,
+        "use_kelly": False,
+        "flat_off_initial": True,
+        "daily_exposure_cap": 0.05,
+    },
+    "Flat · Moderate": {
+        **_PROFIT_SIM_BASE,
+        "max_bets_day": 10,
+        "sizing_pct": 2.0,
+        "use_kelly": False,
+        "flat_off_initial": True,
+        "daily_exposure_cap": 0.10,
+    },
+    "Kelly · Conservative": {
+        **_PROFIT_SIM_BASE,
+        "max_bets_day": 5,
+        "sizing_pct": 1.0,
+        "use_kelly": True,
+        "kelly_fraction": 0.25,
+        "daily_exposure_cap": 0.05,
+    },
+    "Kelly · Moderate": {
+        **_PROFIT_SIM_BASE,
+        "max_bets_day": 10,
+        "sizing_pct": 1.0,
+        "use_kelly": True,
+        "kelly_fraction": 0.50,
+        "daily_exposure_cap": 0.10,
+    },
+}
+
+_PROFIT_SIM_SUMMARY_COLS = ["Strategy", "Horizon", "ROI", "Sharpe", "Max Drawdown", "Win%"]
+
+
+def filter_bet_universe(exploded, *, min_consensus_edge: float = 0.0):
+    """Bets every strategy considers: positive model edge AND a soft-enough book.
+
+    Model Edge ``= Model EV - 1 > 0`` (the model likes it vs the DFS payout) and
+    Consensus Edge ``= Market EV - 1 > min_consensus_edge`` (the book also prices a
+    soft line). Both bounds are strict.
+    """
+    if exploded.empty:
+        return exploded
+    return exploded.loc[
+        (exploded["Model EV"] > 1.0) & (exploded["Market EV"] > 1.0 + min_consensus_edge)
+    ]
+
+
+def precompute_profit_sim_summary(
+    exploded,
+    *,
+    today=None,
+    n_mc: int = N_MONTE_CARLO_DEFAULT,
+    min_consensus_edge: float = 0.0,
+) -> pd.DataFrame:
+    """Monte-Carlo every strategy over every horizon; return the summary grid.
+
+    One row per ``(strategy, horizon)`` with ``ROI`` / ``Sharpe`` / ``Max Drawdown`` /
+    ``Win%``. Written nightly so the Receipts panel reads it instead of running the MC
+    at page load. A horizon with no in-window bets contributes no rows.
+    """
+    if exploded.empty:
+        return pd.DataFrame(columns=_PROFIT_SIM_SUMMARY_COLS)
+
+    df = exploded.copy()
+    if "Result" in df.columns:
+        df = df.dropna(subset=["Result"])
+        df = df.loc[df["Result"] != "Push"]
+    df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
+    df = df.loc[df["_date"].notna()]
+    universe = filter_bet_universe(df, min_consensus_edge=min_consensus_edge)
+    if universe.empty:
+        return pd.DataFrame(columns=_PROFIT_SIM_SUMMARY_COLS)
+
+    prob_col = (
+        "Win Prob"
+        if "Win Prob" in universe.columns and universe["Win Prob"].notna().any()
+        else "Model EV"
+    )
+    today = today or datetime.today().date()
+
+    rows = []
+    for hz_label, hz_days in TIMEFRAMES:
+        window = universe.loc[universe["_date"] >= today - timedelta(days=hz_days)]
+        if window.empty:
+            continue
+        for name, params in PROFIT_SIM_STRATEGIES.items():
+            sim = simulate_strategy(
+                window,
+                prob_col=prob_col,
+                initial_bankroll=PROFIT_SIM_INITIAL_BANKROLL,
+                n_mc=n_mc,
+                **params,
+            )
+            summary = summarize_runs(sim, PROFIT_SIM_INITIAL_BANKROLL)
+            rows.append(
+                {
+                    "Strategy": name,
+                    "Horizon": hz_label,
+                    "ROI": summary["roi"],
+                    "Sharpe": summary["sharpe"],
+                    "Max Drawdown": summary["max_drawdown"],
+                    "Win%": summary["win_rate"],
+                }
+            )
+    return pd.DataFrame(rows, columns=_PROFIT_SIM_SUMMARY_COLS)
 
 
 def _prep_parlays(parlays, stats, stat_map, today):
@@ -782,7 +1033,7 @@ def compute_parlay_metrics(parlays, stats, stat_map):
 
 
 def _dist_params(row):
-    """Extract (Dist, CV, Model EV, Model Param, Gate) from a saved-prediction row.
+    """Extract (Dist, CV, Projection, Model Param, Gate) from a saved-prediction row.
 
     Gate is normalized to None when absent (NaN), matching how the reconstruct
     and CRPS math treat "no zero-inflation gate".
@@ -791,7 +1042,7 @@ def _dist_params(row):
     return (
         row["Dist"],
         row["CV"],
-        row["Model EV"],
+        row["Projection"],
         row.get("Model Param"),
         None if pd.isna(gate) else gate,
     )
@@ -963,7 +1214,9 @@ def compute_brier_skill_score(subset, base_rate=0.5):
         return np.nan
     hits = (subset["Bet"] == subset["Result"]).astype(int)
     prob_col = (
-        "Model P" if "Model P" in subset.columns and subset["Model P"].notna().any() else "Model"
+        "Win Prob"
+        if "Win Prob" in subset.columns and subset["Win Prob"].notna().any()
+        else "Model EV"
     )
     brier = brier_score_loss(hits, subset[prob_col].clip(0, 1))
     brier_ref = base_rate * (1 - base_rate)
@@ -976,21 +1229,23 @@ def compute_book_brier_skill_score(subset):
     """Brier Skill Score with the bookmaker as the reference baseline.
 
     Mirrors training-side ``brier_skill_score``: ``1 - brier(model)/brier(book)``.
-    Hits are ``(Bet == Result)``; the model probability column is ``Model P`` with
-    a fallback to ``Model``; the book probability column is ``Books P``. Returns
-    NaN if subset is empty, ``Books P`` is missing or all-NaN, or the book's
+    Hits are ``(Bet == Result)``; the model probability column is ``Win Prob`` with
+    a fallback to ``Model EV``; the book probability column is ``Market Prob``. Returns
+    NaN if subset is empty, ``Market Prob`` is missing or all-NaN, or the book's
     Brier is zero (degenerate baseline).
     """
     if len(subset) == 0:
         return np.nan
-    if "Books P" not in subset.columns or subset["Books P"].isna().all():
+    if "Market Prob" not in subset.columns or subset["Market Prob"].isna().all():
         return np.nan
     hits = (subset["Bet"] == subset["Result"]).astype(int)
     prob_col = (
-        "Model P" if "Model P" in subset.columns and subset["Model P"].notna().any() else "Model"
+        "Win Prob"
+        if "Win Prob" in subset.columns and subset["Win Prob"].notna().any()
+        else "Model EV"
     )
     brier_model = brier_score_loss(hits, subset[prob_col].clip(0, 1))
-    brier_book = brier_score_loss(hits, subset["Books P"].clip(0, 1))
+    brier_book = brier_score_loss(hits, subset["Market Prob"].clip(0, 1))
     if brier_book == 0:
         return np.nan
     return 1 - brier_model / brier_book
@@ -1008,7 +1263,9 @@ def murphy_decomposition(subset):
         return {"Reliability": np.nan, "Resolution": np.nan, "Uncertainty": np.nan, "Brier": np.nan}
 
     prob_col = (
-        "Model P" if "Model P" in subset.columns and subset["Model P"].notna().any() else "Model"
+        "Win Prob"
+        if "Win Prob" in subset.columns and subset["Win Prob"].notna().any()
+        else "Model EV"
     )
     hits = (subset["Bet"] == subset["Result"]).astype(float)
     probs = subset[prob_col].clip(0, 1).values

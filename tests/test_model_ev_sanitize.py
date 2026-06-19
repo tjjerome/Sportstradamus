@@ -29,44 +29,44 @@ def test_own_scale_none_when_columns_absent():
 
 def test_clamps_runaway_skewnormal_mean_and_rescales_sigma_to_hold_cv():
     # own_scale=2 -> cap=20; EV=50 is runaway, Sigma=10 (CV=0.2).
-    df = _df([{"MeanYr": 2.0, "Mean10": 2.0, "STDYr": 1.0, "Model EV": 50.0, "Model Sigma": 10.0}])
+    df = _df([{"MeanYr": 2.0, "Mean10": 2.0, "STDYr": 1.0, "Projection": 50.0, "Model Sigma": 10.0}])
     _sanitize_model_ev(df, "SkewNormal")
-    assert df.loc[0, "Model EV"] == 20.0
+    assert df.loc[0, "Projection"] == 20.0
     # Sigma shrinks by the same 20/50 factor so CV stays 0.2.
     assert df.loc[0, "Model Sigma"] == 4.0
 
 
 def test_leaves_healthy_rows_untouched():
-    df = _df([{"MeanYr": 2.0, "Mean10": 2.0, "STDYr": 1.0, "Model EV": 15.0, "Model Sigma": 3.0}])
+    df = _df([{"MeanYr": 2.0, "Mean10": 2.0, "STDYr": 1.0, "Projection": 15.0, "Model Sigma": 3.0}])
     _sanitize_model_ev(df, "SkewNormal")
-    assert df.loc[0, "Model EV"] == 15.0
+    assert df.loc[0, "Projection"] == 15.0
     assert df.loc[0, "Model Sigma"] == 3.0
 
 
 def test_count_family_clamps_mean_only():
     # ZINB has no Model Sigma; own_scale=1 -> cap=10; EV=2671 -> 10.
-    df = _df([{"MeanYr": 1.0, "Mean10": 1.0, "STDYr": 0.5, "Model EV": 2671.0}])
+    df = _df([{"MeanYr": 1.0, "Mean10": 1.0, "STDYr": 0.5, "Projection": 2671.0}])
     _sanitize_model_ev(df, "ZINB")
-    assert df.loc[0, "Model EV"] == 10.0
+    assert df.loc[0, "Projection"] == 10.0
 
 
 def test_cap_floor_protects_low_volume_rows():
     # own_scale=0.2 clips to floor 0.5 -> cap=5; EV=4 stays, EV=6 clamps to 5.
     df = _df(
         [
-            {"MeanYr": 0.2, "Mean10": 0.0, "STDYr": 0.0, "Model EV": 4.0},
-            {"MeanYr": 0.2, "Mean10": 0.0, "STDYr": 0.0, "Model EV": 6.0},
+            {"MeanYr": 0.2, "Mean10": 0.0, "STDYr": 0.0, "Projection": 4.0},
+            {"MeanYr": 0.2, "Mean10": 0.0, "STDYr": 0.0, "Projection": 6.0},
         ]
     )
     _sanitize_model_ev(df, "ZINB")
-    assert df.loc[0, "Model EV"] == 4.0
-    assert df.loc[1, "Model EV"] == 5.0
+    assert df.loc[0, "Projection"] == 4.0
+    assert df.loc[1, "Projection"] == 5.0
 
 
 def test_noop_without_own_scale_columns():
-    df = _df([{"Model EV": 9999.0}])
+    df = _df([{"Projection": 9999.0}])
     _sanitize_model_ev(df, "ZINB")  # book-fallback frame: must not raise
-    assert df.loc[0, "Model EV"] == 9999.0
+    assert df.loc[0, "Projection"] == 9999.0
 
 
 def test_drop_no_history_drops_zero_scale_keeps_history_and_combos():

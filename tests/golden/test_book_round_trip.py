@@ -23,10 +23,12 @@ def _decode(line, ev, dist, cv, gate):
 
 # (line, cv, dist, gate) chosen so the implied mean stays inside the plausibility
 # cap (SN_MAX_MEAN_FACTOR * line) — the regime where the round trip must be exact.
-# One representative per distribution family (gate handling differs by family).
 _ROUND_TRIP_CASES = [
     (16.5, 0.544, "SkewNormal", None),
     (8.5, 0.3, "Normal", None),
+    (6.5, 0.55, "SkewNormal", None),
+    (3.5, 0.555, "SkewNormal", None),
+    (24.5, 0.5, "SkewNormal", None),
     (7.5, 0.5, "NegBin", None),
     (10.5, 0.8, "Gamma", None),
     (7.5, 0.5, "ZINB", 0.15),
@@ -35,14 +37,14 @@ _ROUND_TRIP_CASES = [
 
 
 @pytest.mark.parametrize("line,cv,dist,gate", _ROUND_TRIP_CASES)
-@pytest.mark.parametrize("under", [0.3, 0.7])
+@pytest.mark.parametrize("under", [0.3, 0.5, 0.7])
 def test_get_ev_inverts_get_odds(line, cv, dist, gate, under):
     """`get_ev` is the numerical inverse of `get_odds` within the plausibility cap."""
     ev = get_ev(line, under, cv, dist=dist, gate=gate)
     assert _decode(line, ev, dist, cv, gate) == pytest.approx(under, abs=5e-3)
 
 
-@pytest.mark.parametrize("league,market", [("WNBA", "REB")])
+@pytest.mark.parametrize("league,market", [("WNBA", "REB"), ("WNBA", "PTS"), ("WNBA", "AST")])
 def test_book_fallback_skewnormal_has_no_gate(league, market):
     """SkewNormal book-fallback must not re-add a zero-inflation gate the encode never removed."""
     dist, _cv, gate, _step = _book_cell_params(league, market)
@@ -50,7 +52,9 @@ def test_book_fallback_skewnormal_has_no_gate(league, market):
     assert not gate
 
 
-@pytest.mark.parametrize("league,market,line", [("WNBA", "REB", 6.5)])
+@pytest.mark.parametrize(
+    "league,market,line", [("WNBA", "REB", 6.5), ("WNBA", "PTS", 16.5), ("WNBA", "AST", 3.5)]
+)
 def test_skewnormal_even_money_book_is_neutral(league, market, line):
     """An even-money SkewNormal book price decodes to ~0.5.
 
@@ -64,7 +68,7 @@ def test_skewnormal_even_money_book_is_neutral(league, market, line):
     assert p_under == pytest.approx(0.5, abs=0.02)
 
 
-@pytest.mark.parametrize("league,market,line", [("NBA", "STL", 0.5)])
+@pytest.mark.parametrize("league,market,line", [("NBA", "STL", 0.5), ("WNBA", "FG3M", 0.5)])
 def test_zinb_even_money_book_not_overconfident(league, market, line):
     """A high-zero-rate ZINB count at a 0.5 line must not manufacture a wildly
     overconfident Under from the round trip.

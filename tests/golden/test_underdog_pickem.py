@@ -20,7 +20,7 @@ from sportstradamus.strategies.underdog_pickem import (
 
 
 def _offers(rows):
-    cols = ["Player", "Team", "Market", "Bet", "Model P", "Books P"]
+    cols = ["Player", "Team", "Market", "Bet", "Win Prob", "Market Prob"]
     return pd.DataFrame(rows, columns=cols)
 
 
@@ -32,7 +32,7 @@ def _parlay(legs, *, bet_size=None, model_ev=2.5, payout=3.0, league="WNBA", gam
         "League": league,
         "Platform": "Underdog",
         "Model EV": model_ev,
-        "Books EV": model_ev * 0.95,
+        "Market EV": model_ev * 0.95,
         "Boost": payout,
         "Rec Bet": 1.0,
         "Bet Size": bet_size,
@@ -57,6 +57,12 @@ def test_filter_legs_drops_below_model_edge():
     )
     out = _filter_legs(df, cfg)
     assert list(out["Player"]) == ["Caitlin Clark"]
+
+
+def test_filter_legs_drops_below_sharp_edge():
+    cfg = PickemConfig(min_model_edge=0.0, min_sharp_edge=0.10)
+    df = _offers([("X", "T", "M", "Over", 0.60, 0.55)])
+    assert _filter_legs(df, cfg).empty
 
 
 def test_filter_legs_disagreement():
@@ -86,6 +92,18 @@ def test_filter_parlays_size_and_ev():
     out = _filter_parlays(df, "power", cfg.entry_sizes, cfg)
     assert len(out) == 1
     assert out["Bet Size"].iloc[0] == 3
+
+
+def test_filter_parlays_rivals_overrides_entry_sizes():
+    cfg = PickemConfig(min_ev=0.0, entry_sizes=(5, 6))
+    df = pd.DataFrame(
+        [
+            _parlay(["A vs. B"], bet_size=2, model_ev=1.5),
+            _parlay(["A vs. B", "C vs. D", "E vs. F", "G vs. H", "I vs. J"], model_ev=2.0),
+        ]
+    )
+    out = _filter_parlays(df, "rivals", cfg.entry_sizes, cfg)
+    assert list(out["Bet Size"]) == [2]
 
 
 # --- rivals coverage ---------------------------------------------------------
@@ -228,9 +246,6 @@ def test_dedupe_max_overlap(fake_market_calibration):
     assert len(out) == 1
 
 
-# --- snapshot frame + reuse helper -------------------------------------------
-
-
 def test_parlay_shrinkage_min_over_canonical_leg_markets(monkeypatch):
     from sportstradamus.strategies import underdog_pickem as up
 
@@ -239,8 +254,8 @@ def test_parlay_shrinkage_min_over_canonical_leg_markets(monkeypatch):
         {
             "Player": ["A. Player", "B. Player"],
             "Market": ["Rebounds", "Steals"],
-            "Model P": [0.60, 0.60],
-            "Books P": [0.55, 0.55],
+            "Win Prob": [0.60, 0.60],
+            "Market Prob": [0.55, 0.55],
         }
     )
     by_player = up._canonical_markets_by_player(offers)

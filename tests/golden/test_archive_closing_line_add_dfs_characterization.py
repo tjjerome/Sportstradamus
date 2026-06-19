@@ -73,9 +73,32 @@ def test_get_closing_line_devig_and_book_set():
     assert cl.book_set == frozenset({"BookA", "BookB", "BookC", "BookD"})
 
 
+def test_get_closing_line_sample_query_no_at():
+    fake = _FakeClosing(10.0, _BOOK_ROWS, _SAMPLE)
+    Archive.get_closing_line(fake, "ZZZ", "zzz", "2025-03-10", "Someone")
+    sql, params = fake._connection.calls[0]
+    assert "observed_at <= ?" not in sql
+    assert sql.endswith("ORDER BY observed_at DESC LIMIT 1")
+    assert params == ["ZZZ", "zzz", datetime.date(2025, 3, 10), "Someone"]
+
+
+def test_get_closing_line_sample_query_with_at():
+    fake = _FakeClosing(10.0, _BOOK_ROWS, _SAMPLE)
+    at = datetime.datetime(2025, 3, 9, 19, 0)
+    Archive.get_closing_line(fake, "ZZZ", "zzz", "2025-03-10", "Someone", at=at)
+    sql, params = fake._connection.calls[0]
+    assert "AND observed_at <= ?" in sql
+    assert params == ["ZZZ", "zzz", datetime.date(2025, 3, 10), "Someone", at]
+
+
 def test_get_closing_line_empty_rows_returns_none():
     fake = _FakeClosing(10.0, [], [])
     assert Archive.get_closing_line(fake, "ZZZ", "zzz", "2025-03-10", "X") is None
+
+
+def test_get_closing_line_bad_date_returns_none():
+    fake = _FakeClosing(10.0, _BOOK_ROWS, _SAMPLE)
+    assert Archive.get_closing_line(fake, "ZZZ", "zzz", "not-a-date", "X") is None
 
 
 class _CaptureArchive:
