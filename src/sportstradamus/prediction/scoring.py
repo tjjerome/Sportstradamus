@@ -173,7 +173,7 @@ def match_offers(offers, league, market, platform, stat_data):
                 return pd.DataFrame()
             with open(filepath, "rb") as infile:
                 expected_cols = pickle.load(infile)["expected_columns"]
-            playerStats = playerStats[expected_cols]
+            playerStats = playerStats.reindex(columns=expected_cols)
 
             return (
                 playerStats[~playerStats.index.duplicated(keep="first")]
