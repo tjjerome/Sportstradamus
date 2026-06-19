@@ -1355,9 +1355,9 @@ class Stats:
             ]
         stats["Spread"] = stats["Total"] - stats["OppTotal"]
         stats["GameTotal"] = stats["Total"] + stats["OppTotal"]
-        stats["Blowout"] = (
-            stats["Spread"].abs() > _BLOWOUT_SPREAD_THRESHOLD[self.league]
-        ).astype(int)
+        stats["Blowout"] = (stats["Spread"].abs() > _BLOWOUT_SPREAD_THRESHOLD[self.league]).astype(
+            int
+        )
         return stats, teams, opponents, pitchers
 
     def _h2h_features(self, stats, market, opponents, pitchers):
