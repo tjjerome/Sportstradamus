@@ -218,6 +218,7 @@ notebooks/
 !.claude/research_gated.txt
 .claude/scheduled_tasks.lock
 docs/superpowers/specs/*
+docs/superpowers/plans/*
 src/sportstradamus/data/leagues/nba/corr_metadata.json
 src/sportstradamus/data/leagues/nfl/corr_metadata.json
 src/sportstradamus/data/leagues/wnba/corr_metadata.json
