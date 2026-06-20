@@ -21,7 +21,7 @@
 
 ## 1. Mission & money logic
 
-**Get ≥ 75% of each covered league's markets past the five offline ship gates (g1–g5) in
+**Get ≥ 75% of each covered league's markets past the six offline ship gates (g1–g6) in
 [`training/scorecard.py`](../../src/sportstradamus/training/scorecard.py), then take the
 Ship-90 rung when gate D5 fires.** This is the lead lane: calibrated full predictive
 distributions are the input every decision engine consumes, breadth is the number of +EV
@@ -85,7 +85,7 @@ than the line alone. A tie passes — that is the entire point. It follows that:
 
 | Fact | Canonical home |
 |---|---|
-| Gate thresholds g1–g5, Gate-2, S1–S3, tighten/loosen | [`../ship_gate.md`](../ship_gate.md) |
+| Gate thresholds g1–g6, Gate-2, S1–S3, tighten/loosen | [`../ship_gate.md`](../ship_gate.md) |
 | Release surface per cell | `stat_meta.json` `shipped` (git carries flip history) |
 | Per-cell gate numbers | `data/training/model_stats.csv` (mirror of the parquet) |
 | Lever stack, stages, per-league routing, session rules | **this doc** |
@@ -106,7 +106,7 @@ git fetch origin && git log --oneline origin/devel -5
 # Shipped counts per league (withheld / devel / main)
 python3 -c "import json,collections; m=json.load(open('src/sportstradamus/data/config/stat_meta.json')); [print(l, dict(collections.Counter(c['shipped'] for c in v.values()))) for l,v in m.items()]"
 
-# Per-cell gate numbers (g1–g5, pit_ks slack, ship) — rewritten by every meditate
+# Per-cell gate numbers (g1–g6, pit_ks slack, ship) — rewritten by every meditate
 ls -la data/training/model_stats.csv   # stale ⇒ re-run meditate before trusting
 
 # Lifecycle per (league, market): not-shipped / in-test / graduated / demoted
@@ -284,7 +284,7 @@ Optuna `GridSampler` grid (≤12 discrete corners, exhaustive and deterministic;
 Calibration is auto-fit per corner — a post-hoc transform fit in milliseconds never sits in the
 training loop; that cost asymmetry is the design's core. The objective is the negative
 **min-gate slack**: a single scalar, positive iff the corner ships, larger with more headroom
-across all five gates at once — it optimizes "ships, with margin," not Gate 4 alone.
+across all six gates at once — it optimizes "ships, with margin," not Gate 4 alone.
 
 Each corner is scored by the **honest val-fit→test gate row**
 (`model_strategy_search._score_normalization`): the deterministic dump already carries the
@@ -827,10 +827,10 @@ volume markets (batting order), Ks later (umpire); NHL goalie SV + skater shots/
 
 ## 7. Working rules
 
-### §7.1 The bar — five gates, lifecycle, supersession
+### §7.1 The bar — six gates, lifecycle, supersession
 
 Full thresholds, rationale, and the tighten/loosen procedure live in
-[`../ship_gate.md`](../ship_gate.md) (canonical; owner-only). Convenience snapshot of the five
+[`../ship_gate.md`](../ship_gate.md) (canonical; owner-only). Convenience snapshot of the six
 first-ship gates:
 
 | # | Gate | Statistic | Threshold |
@@ -840,6 +840,7 @@ first-ship gates:
 | 3 | Bench σ-match | same on bottom-mean quartile | `z < 0.5` |
 | 4 | **PIT-KS calibration** | `KS(randomized-PIT, Uniform)` of the predictive CDF | `pit_ks < max(0.05, 1.358/√n)` |
 | 5 | Equal-mass debiased ECE | 10 equal-mass `p_model` bins | `ece < 0.075` |
+| 6 | **Anti-shrinkage** (`ratio_meanyr` SkewNormal only) | stable top-MeanYr `Σ Blended_EV / Σ Mean10`, clustered-CI upper bound vs the causal recent-form floor; `corr(Mean10,Result) ≥ 0.55` anchor | `star_hi ≥ star_ref − 0.03` (bball 0.98 / NFL 0.94) |
 
 Gate 4 is the load-bearing one: `pit_ks = sup|F_model − F_true|` **is** the worst-case alt-line
 mispricing, and the randomized PIT (Brockwell 2007) is exactly Uniform under calibration for
@@ -851,14 +852,14 @@ never a gate): Anderson-Darling PIT (tail-weighted), conditional/stratified PIT-
 mean-decile / blowout / position / home-away), the non-randomized PIT for the count head, and a
 CRPS reliability decomposition (Arnold et al. 2024).
 
-**Lifecycle.** Five offline gates (Gate 1) certify a first ship → `shipped: "withheld" → "devel"`
+**Lifecycle.** Six offline gates (Gate 1) certify a first ship → `shipped: "withheld" → "devel"`
 (one-line `stat_meta.json` edit; production tracks devel) → 14-day live Gate-2 soak →
 `check-graduation` classifies {not-shipped, in-test, graduated, demoted} → the monthly
 `gate-status` cron promotes graduates to `main` via PR. Demotions flow back the same way.
 
-**Supersession (Tier 1).** A *baselined* (already-shipped) cell never re-ships on a fresh 5/5 —
+**Supersession (Tier 1).** A *baselined* (already-shipped) cell never re-ships on a fresh 6/6 —
 the candidate must beat the incumbent via `scorecard.supersede_verdict(baseline, candidate)`:
-**S1** candidate clears the 5 gates standalone, **S2** paired Brier CI lower-bound > 0, **S3**
+**S1** candidate clears the 6 gates standalone, **S2** paired Brier CI lower-bound > 0, **S3**
 paired Kelly-Sharpe Memmel-z > min. All three → SUPERSEDE (swap the strategy in
 `stat_meta.json`); any fail → HOLD. The S2/S3 asymmetry is deliberate — it stops strategy-churn
 on noise. First-ships use Tier-0 absolute gates only. CLI:
@@ -885,7 +886,7 @@ row-aligned test dumps).
    deterministic train with flags identical to the baseline; (v) compare the two sandbox CSVs
    with the scorecard CLI (writes a sandbox scorecard CSV, never `model_stats.parquet`).
 4. **Inert-revert rule:** SHAP importance < 0.001 ⇒ inert ⇒ revert. Never carry dead columns.
-5. **Ship path.** Deterministic A/B improvement ⇒ full-HPO `meditate` ⇒ official 5-gate
+5. **Ship path.** Deterministic A/B improvement ⇒ full-HPO `meditate` ⇒ official 6-gate
    scorecard; incumbents additionally need `supersede_verdict()`. Never ship on in-sample
    screens.
 6. **Batching.** One regen per league per batch, never one feature at a time (regen costs hours
@@ -1050,6 +1051,15 @@ no brief. To proceed without a brief on a hook-gated edit, write a one-line just
   gate. The concrete method is CPCV + a player/date embargo (López de Prado 2018) — a
   validation refinement, not a gate change; the one principled selection-style criterion worth
   building.
+- **#7 — the MeanYr over-shrinkage root cause** (Gate 6 detects the symptom; this re-ships the
+  pulled-back WNBA FGA/PR/PRA). The `ratio_meanyr` 365-day denominator conflates "high historical
+  average" with "will regress", so the holdout target teaches a high-volume regression real games
+  don't show (6-season causal: a *stable* star produces ~0.99× recent form, not the holdout's
+  ~0.83×). The fix is a normalization change — a recency-weighted / decline-aware baseline
+  denominator, or a posthoc `isotonic_mean` corrector lifting the stable-star prediction — which
+  must clear all six gates, Gate 6 as the regression test. Research-gated (normalization axis).
+  PR/PRA may re-ship faster than FGA: part of their flag is real even by the outcome gates
+  (`pred/Result` 0.92 / 0.96 vs FGA's 1.00). [research: `/tmp/researcher_overshrinkage_gate.md`]
 
 **Resolved (one-liners; detail in [`../operation_ship_references.md`](../operation_ship_references.md)):**
 post-hoc scale moves PIT-KS without breaking g1/g5, but only under the right normalization and
@@ -1095,6 +1105,7 @@ decoded mean and a high gate cannot hide an inflated μ; the failure mode is not
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
 - 2026-06-20 · §6.3 CV the two placeholder feature constants + revert `PrimeTime`/`RestDiff` **DONE** (closes two prior `next:` items; the "do not invent a value" discipline). **EB `_EXPANDING_EB_PRIOR_K` → per-league `{NFL: 1.0}`, else keep 10.0** (`base.py`): tiered held-out CV via the new dev-only driver `scripts/cv_feature_constants.py` (devel-denylisted like `regen_ab_batch.py`). **Tier-1** cheap 1-feature OOF (purged GroupKFold-by-player, low-`n_career` stratum where the shrink bites) said K=1 globally — but the **Tier-2 deterministic `meditate` confirm (NFL+WNBA, K∈{1,2} vs 10, `min_gate_slack` Δ) DIVERGED**: NFL **carries +2.96** (both low-K agree, large — though nothing ships either way, book-wall [[project_passing_book_degenerate]]), WNBA **uniformly prefers K=10** and **K=1 flips WNBA MIN out of ship** (the univariate OOF oversold K=1; the fitted gates caught the variance cost the OOF couldn't see). NBA scoped out (lown_frac 0.4–2.6%, inert) → keep 10. Per-league dict per the plan's divergence rule; latent (no net-shippable gain today — the only cell that moves is book-walled NFL volume). **Recency `_COMP_RECENCY_HALFLIFE_DAYS` = keep 45 (CV-inert)**: `Player comps z recent` is a recency-reweighted **convex combination**, so H only re-weights *within* the mean — held-out OOF R² spread ≤ 0.0006 across H∈{14..180}, all 7 cells / 3 leagues. (Driver faithfulness bug fixed along the way: the comp step fires 2×/gameday — the `_dispatch_volume_stats` volume pass + the served `get_stats` — and the matrix keeps the LAST, so the recency capture must `drop_duplicates(keep="last")`, not `pivot_table` mean; the mean corrupted the faithful-replay check 0→1.72.) **`PrimeTime`/`RestDiff` REVERTED** (`nfl.py` / `feature_filter.json` / `test_nfl_schedule_features`, keep `Weekday`): both dead — zero `feature_importances` (0 variance), and their `gametime`/`own rest`/`opp rest` inputs were 100% NaN on all 33,303 history rows (the QW-4 schedule backfill was deferred and never run). That all-NaN col ALSO **broke `StatsNFL.update()` perf** — the `gamelog.isna().any(axis=1)` backfill selector matched 100% of rows every run, reprocessing the full pbp history (minutes, hourly in-season once NFL starts); dropping the cols + an `update()` cleanup that sheds them from any pre-revert cache (gamelog is gitignored → per-env, the server self-heals on pull) collapses the selection **33303→0** (verified read-only). Gates: refactoring-specialist clean (base.py+nfl.py, 0 refactors), ruff clean, integration 17 pass; golden = my code clean — the 5 reds all reproduce with my changes stashed (2 known correlation reds + **3 NEW pre-existing time-bombs unrelated to this work**: `_build_live_history_fixture` hardcodes `today=2026-05-20` while `_history_to_eval_frame` filters by the *real* `datetime.now()` 30-day window → the 06-19→06-20 calendar rollover pushed the fixture's newest row outside the window → empty eval frame; flagged for a separate 1-line fixture fix). · next: fix the scorecard-fixture date time-bomb (separate, not this landing); re-confirm WNBA fantasy-points (still omitted); investigate the 4 A/B regressors (NBA_STL, WNBA_OREB, NFL qb-yards/receiving-tds)
+- 2026-06-19 · **Gate 6 (anti-shrinkage) ADDED** — sixth offline ship gate, `ratio_meanyr` SkewNormal cohort only (auto-pass elsewhere). Catches the MeanYr over-shrinkage g1–g5 are blind to: the 365-day MeanYr denominator teaches a high-volume regression real games don't show, the model fits the holdout faithfully (top-decile pred/Result≈1.0) so every outcome-scored gate passes — a relative-bias g2/g3 rework is **equally blind** (the holdout's own stable stars are suppressed; verified). Gate 6 instead scores the *stable* (`|Mean10/MeanYr−1|≤0.12`) top-MeanYr-quartile `Σ Blended_EV / Σ Mean10` (player-clustered bootstrap 97.5% upper bound) vs the **causal recent-form floor** (~0.99 bball / ~0.94 NFL, off 6 gamelog seasons), anchored on `corr(Mean10,Result)≥0.55` (exempts MIN + bursty counts), **star-side only** (the ratio_meanyr denom deflates the whole distribution → never inflates the bench; the bench leg was research-refuted — would false-flag NBA PA). `scorecard.py`: `_gate6_star_ratio` + `_bootstrap_ratio_ci_clustered` + `_gate6_passes`, wired into `apply_thresholds` (`ship`) + `min_gate_slack`; 3 golden pins. **Pulled back WNBA FGA/PR/PRA** (`shipped:devel→withheld`) — gate-confirmed over-shrinkers (live symptom: FGA projecting a stable 13.4-shooter at 10.1, Win-Prob pinned at the 0.90 clamp); NBA PTS/PA/PRA/REB clear, WNBA/NBA MIN + NBA RA exempt (anchor). Research `/tmp/researcher_overshrinkage_gate.md`. worktree off origin/devel → PR. Gates: ruff clean, golden 1859 pass (the 3 live-window failures are a **pre-existing** date-fixture time-bomb — identical on stashed origin/devel, NOT mine), integration green. · next: the §8.2 root-cause fix (MeanYr-denominator artifact → recency-weighted baseline) to re-ship FGA/PR/PRA — a SEPARATE session; PR/PRA may return faster than FGA (their flag is partly real even by outcome gates)
 - 2026-06-19 · §6.3 real-HPO ship-confirm + serving guards **DONE** (the deterministic A/B's follow-up verdict). Walked the 17 deterministic flippers through full production `meditate` (official 5-gate scorecard on the fused `Blended_EV` = `report._SHIP_PRED_COL`), thread-bumped serial tail (NFL + WNBA-ratio + WNBA-centered + NBA-ratio + NBA-centered, all `rc=0`, ~08:07→15:37). **16 of 17 confirmed** — WNBA **fantasy-points** was omitted from the confirm groups (gap, re-run next). **Verdict = 6 net-new promotes** (`shipped:withheld` ∧ ship=True, fresh `M_cand` pickle today): NBA **AST/PR/RA**, WNBA **PTS/RA/REB**; the 9 already-`devel` cells (NBA MIN/PA/PRA/PTS/REB, WNBA FGA/MIN/PR/PRA) re-confirm ship=True; NFL **sacks-taken** = ship=False (g1 book-wall, [[project_passing_book_degenerate]]). **Brier caveat:** the NBA trio passes all 5 gates but `brier_skill_score ≤ 0` (AST −0.021, PR −0.017, RA −0.00002) → `kelly_shrinkage≈0` (served, ~no bet); only the WNBA trio carries positive Brier skill (+0.017 / +0.033 / +0.010). So the deterministic A/B oversold 17→6 net-new, exactly the [[operation_ship_75_state]] caveat — direction was the deliverable, the real-HPO confirm is the verdict. Process note: the already-`devel` warm cells did NOT re-train (only the withheld/cold cells logged BYPASS-withhold + got fresh pickles); already shipped ⇒ no action, their §6.3 re-fit rides the devel server's next `meditate`. **Serving guards committed (model-research):** model-EV runaway winsorize `_sanitize_model_ev`+`_drop_no_history_offers` (book-independent clamp toward `K=10·max(MeanYr,Mean10,STDYr)`, SkewNormal `Sigma` rescaled to hold CV; symmetric with `_sanitize_book_ev`; research `/tmp/researcher_model_ev_runaway.md`) [`46461dd`]; scorecard `DEFAULT_PRED_COL` EV→`Blended_EV` to match the ship gate, with `--live-window` scoped back to raw `EV` (history.parquet carries no fused column, only `Model EV`→`EV`) [`46461dd`+`fa02f84`]; LightGBM `num_threads` default 1→8, `--deterministic` forces 1 (behaviorally neutral — non-deterministic HPO already forced 8 via the `_suggest_params` search space; the bump just documents the default) [`c44a6f7`]. **Curator:** `devel-ship-curator` dispatched (worktree-isolated) to carve the production delta + the 6 stat_meta flips — prepares the devel PR, human approves, never pushes. Gates: ruff clean, golden 263 pass (same pre-existing `test_find_correlation_offer_correlations_real_nba` red), integration 17 pass. · next: CV `_EXPANDING_EB_PRIOR_K`+`_COMP_RECENCY_HALFLIFE_DAYS` per league; revert-or-backfill `PrimeTime`/`RestDiff`; re-confirm WNBA fantasy-points (omitted); investigate the 4 A/B regressors (NBA_STL, WNBA_OREB, NFL qb-yards/receiving-tds)
 - 2026-06-19 · §6.3 batch 1 + Playoff/series — per-league regen + deterministic §7.2 A/B **DONE** (the three BUILT entries' follow-up). **3 pre-regen gap fixes** (base.py/nfl.py, refactoring-specialist clean): (a) `comps trend` was all-zero — it read the per-player `{market} growth` col, which `_profile_stat_types` only emits for the 37 efficiency stats and never for a market → rewired to a shared `_player_recent_slope` over the MARKET, threaded as a new `_all_trend` arg to `_apply_comp_features` (`test_comp_aggregates` updated to the new contract); nunique 1→1031 on NFL passing-yards. (b) QW-4 `_schedule_context` KeyError'd on cached gamelog rows predating `gametime`/`own rest`/`opp rest` → graceful-degrade to NaN/empty (`Weekday` still derives off the always-present gameday). (c) a recent gameday whose players are all off the depth chart empties `stats` at the `Player depth>0` filter inside `_join_profiles` → `.iloc[:,[]]` crash → 2-part guard (early-return after `_join_profiles` + `len(stats)` guard on the position diag). Rebuilt NFL `attempts`/`carries` volume models (deterministic → data/models/) so `proj_*` survives the direct-`get_training_matrix` regen — they'd been ship-pruned and `get_volume_stats` early-returns on the first missing model, so all 10 `proj_*` were GONE; restored (total_GONE=0). **Regen** all 59 cells (NBA 21 @ `cutoff=2025-01-01` to skip the 2-yr-gamelog cold start; NFL 20 + WNBA 18 default 850d); clean isolation = drop-new-cols baseline (`M_base`=`M_cand`−the 16 NBA/WNBA or 19 NFL new cols, identical rows). **3 leagues regen'd in PARALLEL** via per-process `SPORTSTRADAMUS_ARCHIVE_DB` archive copies (sidesteps DuckDB's process-lifetime exclusive lock; `get_training_matrix` only reads odds); Phase B SERIAL (book_weights.json is a shared read-modify-write — though Phase B safely overlapped the remaining Phase A since `book_weights` is an in-memory module global immune to disk writes). New driver `scripts/regen_ab_batch.py` (resumable). **A/B** (deterministic, both arms identical `target_normalization`): **17 cells flip baseline-KILL(g4)→candidate-SHIP** — NBA AST/MIN/PA/PR/PRA/PTS/RA/REB (PR also SUPERSEDEs), WNBA FGA/MIN/PR/PRA/PTS/RA/REB/fantasy-points, NFL sacks-taken; ~6 more g4-fixed (NFL passing family — g4 fixed, g1 book-wall remains; WNBA BLK; NBA DREB/TOV); **4 REGRESS** (NBA_STL, WNBA_OREB, NFL qb-yards, NFL receiving-tds); rest HOLD. **CAVEAT — effect inflated by the deterministic small-HP**: the feature-poor `M_base` under-fits variance (iqr_ratio 0.005–0.72; NFL passing-yards 0.005, WNBA_MIN 0.032) and the variance-signal cols (`MeanYr_expanding_*`, `comps std`/`trend`) rescue it to ~0.87–1.23; real HPO would partly close that baseline gap, so the proxy oversells ([[operation_ship_75_state]]) — direction is the deliverable, the real-HPO ship-confirm is the verdict. **Inert** (model-agnostic variance across the 59 candidate matrices): `PrimeTime`+`RestDiff` globally inert (0 variance, NFL-only) — DORMANT pending the gametime/rest schedule backfill (deferred), not useless; `SeriesWins`/`SeriesLosses` inert for NFL (single-elim, correct) but active in 39 NBA+WNBA cells; the other 15 batch cols carry signal in every cell they appear. Benign: `Odds_synthetic` drops from 7 sparse-odds NFL/NBA cells (a train-pipeline artifact baked into the old cache, not a `get_training_matrix` output; both arms identical). Gates: ruff clean, golden green save the 1 **pre-existing** fixture-based `test_find_correlation_offer_correlations_real_nba` red (NOT mine — the test never calls `get_stats`), integration 17 pass. Artifacts: `/tmp/regen_ab/` (sidecars + 59 scorecards + `AB_SUMMARY.txt`); canonical training_data parquets now = `M_cand` (gitignored), `.regen_backup/` preserves originals. · next: real-HPO ship-confirm on the g4-flippers (`supersede_verdict` for incumbents) → devel flips; revert-or-backfill `PrimeTime`/`RestDiff`; investigate the 4 regressors; CV `_EXPANDING_EB_PRIOR_K`+`_COMP_RECENCY_HALFLIFE_DAYS` per league
 - 2026-06-18 · Playoff **series-context** feature **BUILT (code+tests only)** — owner ask after the `Playoff` flag, scope "Elimination only" (build-only; regen + MLB backfill PENDING). Emits `SeriesWins`/`SeriesLosses` + `FacingElimination`/`CanClinch`. The within-series W-L record is tallied from the **teamlog** (the clean game-result source — `WL` + opponent + date present every league, unlike the player gamelog which lacks `WL` for NHL/MLB/NFL) over prior playoff games vs the same opponent inside `_SERIES_LOOKBACK_DAYS`=30 (two teams meet in ≤1 series/postseason, so the window isolates the current series from any prior-season meeting). Flags derive from a per-league wins-to-clinch (`_series_games_to_win`): **NBA/NHL** best-of-7 (base const 4); **MLB** by round via `game type` (WC `F`→bo3, LDS `D`→bo5, LCS/WS `L`/`W`→bo7) — game_type now stamped onto BOTH gamelog and teamlog in `update()` (+ carried on the upcoming dict for the serve-branch round), 60-day window/run so historical backfill rides the regen follow-up (pre-backfill → regular/0); **WNBA** round-detected (bo3 first round, bo5 later — round = distinct prior-postseason opponents within `_POSTSEASON_LOOKBACK_DAYS`=75, since the WNBA game ID carries no round and the format drifts); **NFL** single-elimination → `FacingElimination`=`CanClinch`=`Playoff`, no record. Architecture: base `_series_context` orchestrator (short-circuits to 0 when nobody on the slate is in the postseason) + shared `_tally_series_record` + hooks `_playoff_teamlog` (game-ID scope) / `_series_games_to_win`; NFL overrides the orchestrator, MLB overrides both hooks, WNBA overrides `_series_games_to_win` (R0801-clean per the specialist — genuinely different per-league knowledge). 4 cols seeded in `_BASE_STAT_COLUMNS` + registered in all 5 `Common`. Tests: new `test_series_context_features.py` (10 — record tally, the 30-day window, bo7/bo3/bo5/per-MLB-round elimination+clinch arithmetic, non-playoff short-circuit, MLB serve-from-upcoming) + the 4 cols added to the parity `_game_context` pin. Gates: ruff clean, golden 263 pass (same pre-existing correlation red), integration 17 pass. · next: folds into the §6.3 regen follow-up (MLB needs the game_type backfill on gamelog+teamlog before the series cols carry signal).
