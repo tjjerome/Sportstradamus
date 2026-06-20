@@ -17,6 +17,8 @@ from sportstradamus.training.scorecard import (
     _GATE4_KS_NOISE_COEF,
     _GATE4_PIT_KS_DELTA,
     _GATE5_ECE_MAX,
+    _GATE6_MARGIN,
+    _GATE6_MIN_RECENT_CORR,
     _SUPERSEDE_S3_Z_MIN,
     _decode_sn_loc_scale,
     _dispersion_diagnostics,
@@ -589,6 +591,92 @@ def test_gate_row_uses_analytical_g4_when_dist_columns_present():
 
 
 # ---------------------------------------------------------------------------
+# Gate 6 — anti-shrinkage (ratio_meanyr SkewNormal cohort).
+# ---------------------------------------------------------------------------
+
+
+def _cohort_frame(
+    n: int = 200, seed: int = 11, *, shrink: float = 0.8, anchored: bool = True
+) -> pd.DataFrame:
+    """A ratio_meanyr SkewNormal cohort frame of stable players (recent form ≈ season
+    baseline) whose ``Blended_EV`` is ``shrink``× their recent form. ``anchored`` ties
+    ``Result`` to ``Mean10`` so the Gate-6 ``corr`` anchor passes; set it False to model a
+    MIN-like cell where recent form doesn't predict the outcome.
+    """
+    rng = np.random.default_rng(seed)
+    meanyr = rng.uniform(2.0, 20.0, n)
+    mean10 = meanyr * (1.0 + rng.uniform(-0.05, 0.05, n))  # all inside the ±0.12 stable band
+    result = mean10 + rng.normal(0.0, 0.5, n) if anchored else rng.uniform(2.0, 20.0, n)
+    return pd.DataFrame(
+        {
+            "MeanYr": meanyr,
+            "Result": result,
+            "Blended_EV": shrink * mean10,
+            "Mean10": mean10,
+            "Player": [f"P{i % 40}" for i in range(n)],
+            "SN_Loc": np.zeros(n),
+            "SN_Scale": np.ones(n),
+            "SN_Alpha": np.zeros(n),
+        }
+    )
+
+
+def test_gate6_flags_overshrunk_ratio_meanyr_cohort():
+    """Gate 6 fails a ratio_meanyr SkewNormal cell whose stable stars are predicted well below
+    their recent form — the defect the outcome-scored gates miss because the holdout shares it.
+    """
+    row = apply_thresholds(
+        gate_row(
+            _cohort_frame(shrink=0.8, anchored=True),
+            "Blended_EV",
+            league="WNBA",
+            market="FGA",
+            strategy="ratio_meanyr",
+            decode_strategy="ratio_meanyr",
+        )
+    )
+    assert row["g6_recent_corr"] >= _GATE6_MIN_RECENT_CORR
+    assert row["g6_star_ci_hi"] < row["g6_star_ref"] - _GATE6_MARGIN
+    assert not row["g6_pass"]
+    assert not row["ship"]
+
+
+def test_gate6_exempts_unanchored_cell():
+    """When recent form doesn't predict the outcome (corr below the anchor — the MIN case),
+    Gate 6 auto-passes the same over-shrunk frame: recent form isn't a valid yardstick.
+    """
+    row = apply_thresholds(
+        gate_row(
+            _cohort_frame(shrink=0.8, anchored=False),
+            "Blended_EV",
+            league="WNBA",
+            market="MIN",
+            strategy="ratio_meanyr",
+            decode_strategy="ratio_meanyr",
+        )
+    )
+    assert row["g6_recent_corr"] < _GATE6_MIN_RECENT_CORR
+    assert row["g6_star_ci_hi"] is None
+    assert row["g6_pass"]
+
+
+def test_gate6_auto_passes_outside_ratio_meanyr_cohort():
+    """Gate 6 is cohort-scoped: a non-ratio_meanyr normalization auto-passes the same frame."""
+    row = apply_thresholds(
+        gate_row(
+            _cohort_frame(shrink=0.8, anchored=True),
+            "Blended_EV",
+            league="WNBA",
+            market="REB",
+            strategy="centered_additive_mean10",
+            decode_strategy="centered_additive_mean10",
+        )
+    )
+    assert row["g6_star_ci_hi"] is None
+    assert row["g6_pass"]
+
+
+# ---------------------------------------------------------------------------
 # Gate 5 — equal-mass ECE.
 # ---------------------------------------------------------------------------
 
@@ -799,6 +887,10 @@ def test_gate_row_full_column_set_and_oracle_identities():
         "g5_ece_null_bias",
         "g5_ece_debiased",
         "g5_ece_debiased_oracle",
+        "g6_recent_corr",
+        "g6_star_ratio",
+        "g6_star_ci_hi",
+        "g6_star_ref",
     }
     assert set(row) == expected
     # Oracle identities: segment z = 0, IQR ratio = 1, ECE = 0, Brier diff < 0.
@@ -1250,7 +1342,7 @@ def _build_live_offer(line, bet, model_p, books_p):
 def _build_live_history_fixture(n: int = 60, market: str = "PTS") -> pd.DataFrame:
     rng = np.random.default_rng(13)
     rows = []
-    today = datetime(2026, 5, 20)
+    today = datetime.now()
     for idx in range(n):
         date = (today - timedelta(days=int(rng.integers(0, 25)))).strftime("%Y-%m-%d")
         line = float(rng.uniform(8.0, 30.0))
@@ -1309,7 +1401,7 @@ def test_history_to_eval_frame_empty_history_returns_empty_schema():
 
 
 def test_history_to_eval_frame_filters_to_league_market_and_window():
-    today = datetime(2026, 5, 20)
+    today = datetime.now()
     rows = []
     # In-scope: NBA + PTS within window
     for idx in range(5):
