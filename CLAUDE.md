@@ -415,7 +415,7 @@ consult.
 | EV / line | `model_ev`, `mean_line`, `result_mean`, `mean_ev_diff` (↑), `median_ev_diff` (↑), `frac_ev_gt_line` | `meditate` |
 | Kelly | `kelly_shrinkage` (↑), `model_weight` | `meditate` |
 | Shape | `model_shape`, `empirical_shape`, `shape_ratio`, `marginal_shape`, `dispersion_cal` | `meditate` |
-| Ship gates | `g1_brier_diff_mean` (↓), `g1_brier_diff_ci_lo/hi`, `g1_brier_diff_mean_oracle` (+ oracle CI), `g2_star_z` (↓), `g3_bench_z` (↓), `g4_iqr_ratio`, `g5_ece_debiased` (↓), `g1_pass`…`g5_pass`, `ship` | `training.scorecard.compute_gates` |
+| Ship gates | `g1_brier_diff_mean` (↓), `g1_brier_diff_ci_lo/hi`, `g1_brier_diff_mean_oracle` (+ oracle CI), `g2_star_z` (↓), `g3_bench_z` (↓), `g4_iqr_ratio`, `g5_ece_debiased` (↓), `g6_star_ci_hi`/`g6_star_ref`/`g6_recent_corr` (`ratio_meanyr` SkewNormal cohort), `g1_pass`…`g6_pass`, `ship` | `training.scorecard.compute_gates` |
 | HP | `hp_rounds`, `hp_leaves`, `hp_lr`, `hp_min_child`, `hp_l1`, `hp_l2` | `meditate` |
 | Calibration | `cv`, `std` | `meditate` (from `stat_calibration.json`) |
 
