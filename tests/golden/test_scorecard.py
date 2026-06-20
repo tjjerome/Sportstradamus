@@ -1250,7 +1250,9 @@ def _build_live_offer(line, bet, model_p, books_p):
 def _build_live_history_fixture(n: int = 60, market: str = "PTS") -> pd.DataFrame:
     rng = np.random.default_rng(13)
     rows = []
-    today = datetime(2026, 5, 20)
+    # Anchor to the real now: _history_to_eval_frame filters against datetime.now()'s
+    # window, so a hardcoded date silently ages out of the window as the calendar advances.
+    today = datetime.now()
     for idx in range(n):
         date = (today - timedelta(days=int(rng.integers(0, 25)))).strftime("%Y-%m-%d")
         line = float(rng.uniform(8.0, 30.0))
@@ -1309,7 +1311,7 @@ def test_history_to_eval_frame_empty_history_returns_empty_schema():
 
 
 def test_history_to_eval_frame_filters_to_league_market_and_window():
-    today = datetime(2026, 5, 20)
+    today = datetime.now()  # see _build_live_history_fixture: window filters against now()
     rows = []
     # In-scope: NBA + PTS within window
     for idx in range(5):
