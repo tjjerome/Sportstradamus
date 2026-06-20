@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sportstradamus UX — assembled design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0E1117; --surface:#1A1D24; --text:#E6E9EF; --border:#2A2E37;
+    --blue:#2E6BE6; --link:#5B8DEF; --green:#1F9D55; --red:#E5484D;
+    --orange:#F5A524; --gray:#8A91A0;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;font-size:14px;line-height:1.45;padding:24px;max-width:1180px;margin:0 auto}
+  h1{font-size:20px;margin:0 0 4px}
+  h2{font-size:16px;margin:28px 0 6px;color:var(--link)}
+  .subtitle{color:var(--gray);margin:0 0 8px}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  .wire{padding:14px;background:var(--surface);border:1px solid var(--border);border-radius:4px;font-size:12px}
+  .map{display:flex;gap:10px;flex-wrap:wrap}
+  .node{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:10px 12px;flex:1;min-width:170px}
+  .node b{display:block;margin-bottom:4px}
+  .node .sub{color:var(--gray);font-size:11px}
+  .node.hot{border-color:var(--blue)}
+  .tag{display:inline-block;font-size:9px;letter-spacing:.1em;text-transform:uppercase;border:1px solid var(--orange);color:var(--orange);border-radius:3px;padding:0 5px;margin-left:6px;vertical-align:middle}
+  .tag.new{border-color:var(--green);color:var(--green)}
+  .leg{display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-top:1px dashed var(--border)}
+  .badge{font-family:'IBM Plex Mono',monospace;padding:0 5px;border-radius:3px;white-space:nowrap}
+  .badge.g{color:var(--green);border:1px solid var(--green)}
+  .badge.o{color:var(--orange);border:1px solid var(--orange)}
+  .badge.r{color:var(--red);border:1px solid var(--red)}
+  .chip{display:inline-block;border:1px solid var(--border);border-radius:10px;padding:0 8px;margin:0 4px 4px 0;color:var(--link);font-size:11px}
+  .btn{display:inline-block;background:var(--blue);color:#fff;border-radius:3px;padding:1px 8px;font-size:11px}
+  .btn.ghost{background:transparent;border:1px solid var(--border);color:var(--gray)}
+  .split{display:flex;gap:12px;align-items:flex-start}
+  .main{flex:1;min-width:0}
+  .rail{width:200px;flex-shrink:0;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:10px;font-size:11px}
+  .rail h4{margin:0 0 6px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--gray)}
+  .stat{display:flex;justify-content:space-between;margin:2px 0}
+  .stat b{font-family:'IBM Plex Mono',monospace}
+  .sec{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--gray);margin:12px 0 4px}
+  .row{display:flex;justify-content:space-between;gap:6px;padding:4px 6px;border-bottom:1px solid var(--border);align-items:center}
+  .num{font-family:'IBM Plex Mono',monospace;text-align:right}
+  .panel{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:10px;margin:6px 0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .spark{color:var(--green);font-family:'IBM Plex Mono',monospace;letter-spacing:-1px}
+  .big{font-size:26px;font-weight:700;font-family:'IBM Plex Mono',monospace}
+  ul{margin:4px 0;padding-left:18px}
+</style>
+</head>
+<body>
+<h1>The assembled design — scroll, then approve or object in terminal</h1>
+<p class="subtitle">C spine, B board inside. <span class="tag">placeholder</span> = scaffolded now, computed later (roadmap item). <span class="tag new">new calc</span> = new but cheap from existing data.</p>
+
+<h2>1 · Navigation (st.navigation, Material icons, slip rail on every page)</h2>
+<div class="wire">
+  <div class="map">
+    <div class="node hot"><b>Tonight</b><span class="sub">home. slate of game cards: stories per game, top edge, lock countdown. click → Game page</span></div>
+    <div class="node hot"><b>Game</b><span class="sub">one matchup: its stories, its board, matchup context strip, evidence dialogs</span></div>
+    <div class="node"><b>Board</b><span class="sub">cross-game shop: every offer, AG Grid, story chips as lenses, EV/kelly columns</span></div>
+    <div class="node"><b>Slips</b><span class="sub">model's pre-built entries (parlays + Underdog pick'em Power/Flex/Rivals) — load any into your slip and edit</span></div>
+    <div class="node"><b>Receipts</b><span class="sub">profitability proof: the skeptic page. your saved slips graded too</span></div>
+    <div class="node"><b>Model Lab</b><span class="sub">how the sausage is made: per-market health, calibration, training diagnostics (current pages 4/5/7 fold in)</span></div>
+  </div>
+  <div style="margin-top:8px;color:var(--gray)">Sport switch (All · WNBA · MLB · …) global, top of every page. Old 8 pages → these 6 surfaces.</div>
+</div>
+
+<h2>2 · Game page — the heart</h2>
+<div class="wire">
+  <div class="split">
+    <div class="main">
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><b style="font-size:14px">LVA @ IND · 7:00 · locks 2h 14m</b><span class="mono" style="color:var(--gray)">total 165.5 · IND −2.5 · pace: fast</span></div>
+      <div class="sec">Stories (model-built, correlation-aware)</div>
+      <div class="panel" style="border-color:var(--blue)">
+        <div style="display:flex;justify-content:space-between"><b>Aces pull away late</b><span class="mono" style="color:var(--green)">3-leg · 6.4x · EV +9%</span></div>
+        <div class="leg"><span>A. Wilson o23.5 Pts</span><span style="color:var(--gray)">26.1 avg L5 · weak rim D <span class="tag new">why-string</span></span><span class="badge g">+11%</span></div>
+        <div class="leg"><span>J. Young o2.5 3PM</span><span style="color:var(--gray)">corr +0.31 w/ Wilson</span><span class="badge g">+6%</span></div>
+        <div class="leg"><span>C. Clark u8.5 Ast</span><span style="color:var(--gray)">trailing script</span><span class="badge o">+3%</span></div>
+        <div style="margin-top:6px"><span class="btn">Load into slip</span> <span class="btn ghost">swap a leg</span></div>
+      </div>
+      <div class="panel"><div style="display:flex;justify-content:space-between"><b>Clark triple-double watch</b><span class="mono" style="color:var(--gray)">3-leg · EV +5%</span></div></div>
+      <div class="sec">This game's board (every offer, both platforms)</div>
+      <div class="row" style="color:var(--gray)"><span>OFFER</span><span class="num">L5 FORM</span><span class="num">MODEL</span><span class="num">BOOK</span><span class="num">EDGE</span><span></span></div>
+      <div class="row"><span>A. Wilson o23.5 Pts</span><span class="num spark">▂▆▇▅▇</span><span class="num">61%</span><span class="num">52%</span><span class="num" style="color:var(--green)">+11%</span><span class="btn">+ slip</span></div>
+      <div class="row"><span>K. Mitchell o17.5 Pts</span><span class="num spark">▇▃▅▆▂</span><span class="num">55%</span><span class="num">51%</span><span class="num" style="color:var(--green)">+5%</span><span class="btn">+ slip</span></div>
+      <div style="color:var(--gray);margin-top:4px">row click → evidence dialog (§4)</div>
+    </div>
+    <div class="rail">
+      <h4>My slip · 3 legs</h4>
+      <div class="stat"><span>platform</span><b>UD Power</b></div>
+      <div style="margin:6px 0">A. Wilson o23.5 <span style="color:var(--gray)">×</span><br>J. Young o2.5 <span style="color:var(--gray)">×</span><br>C. Clark u8.5 <span style="color:var(--gray)">×</span></div>
+      <hr style="border-color:var(--border)">
+      <div class="stat"><span>independent</span><b>30%</b></div>
+      <div class="stat"><span>w/ correlation</span><b style="color:var(--green)">34% ↑</b></div>
+      <div class="stat"><span>payout</span><b>6.4x</b></div>
+      <div class="stat"><span>EV</span><b style="color:var(--green)">+9.2%</b></div>
+      <div class="stat"><span>kelly stake</span><b>$12 of $1k</b></div>
+      <div style="margin-top:6px;color:var(--gray)">⚠ correlation block risk: UD may reject Wilson+Young <span class="tag">placeholder</span></div>
+      <div style="margin-top:6px"><span class="btn">Save slip</span> <span class="btn ghost">clear</span></div>
+      <div style="margin-top:4px;color:var(--gray)">saved slips are graded in Receipts → your record vs model's</div>
+    </div>
+  </div>
+</div>
+
+<h2>3 · Receipts — convince a skeptic in 10 seconds</h2>
+<div class="wire">
+  <div class="split">
+    <div class="main">
+      <div class="grid2">
+        <div class="panel"><div class="sec" style="margin-top:0">If you'd tailed every rec ($10 flat)</div><div class="big" style="color:var(--green)">+$1,842</div><div style="color:var(--gray)">since Jan · 4,211 picks · ROI +4.4%<br><span class="spark">▁▂▂▃▃▄▅▅▆▇</span> cumulative units</div></div>
+        <div class="panel">
+          <div class="sec" style="margin-top:0">The skeptic checks</div>
+          <div class="stat"><span>record at EV&gt;5%</span><b>58.1% (n=1,904)</b></div>
+          <div class="stat"><span>beat closing line</span><b style="color:var(--green)">61% of picks</b></div>
+          <div class="stat"><span>calibration</span><b>said 60% → hit 59.4%</b></div>
+          <div class="stat"><span>worst month</span><b style="color:var(--red)">−$214 (Mar)</b></div>
+        </div>
+      </div>
+      <div class="panel"><div class="sec" style="margin-top:0">By league / market / platform</div><div style="color:var(--gray)">sortable grid: n, hit%, ROI, CLV — the honest table, losers shown</div></div>
+      <div class="panel"><div class="sec" style="margin-top:0">Strategy simulator</div><div style="color:var(--gray)">current Profit Sim folds in here: "what if kelly / flat / top-N only" Monte Carlo</div></div>
+    </div>
+    <div class="rail"><h4>Your slips</h4><div style="color:var(--gray)">saved slips graded nightly: your record, your ROI, vs model-as-dealt <span class="tag new">grading</span></div></div>
+  </div>
+</div>
+
+<h2>4 · Evidence dialog v2 — "why this pick" one click from anywhere</h2>
+<div class="wire">
+  <div class="grid2">
+    <div class="panel"><b>The case</b> (new lead tab)<ul>
+      <li>form: 26.1 L5 vs 23.5 line · 8/10 over <span class="tag new">why-string</span></li>
+      <li>matchup: IND 27th vs PF scoring (DVPOA +9%)</li>
+      <li>model vs book: 61% vs 52% — disagreement is the edge</li>
+      <li>market health: this market beat book 30d <span class="badge g">live</span></li>
+      <li>comp players hit 7/9 similar spots <span class="tag">placeholder</span></li>
+      <li>line moved 22.5 → 23.5 since open <span class="tag">placeholder</span></li></ul></div>
+    <div class="panel"><b>Existing tabs survive</b><ul>
+      <li>History — last-10 bars vs line (today's dialog)</li>
+      <li>Model — distribution curve + params</li>
+      <li>Correlated — pairs-well-with legs → add to slip</li></ul>
+      <div style="color:var(--gray)">market health deep-link → Model Lab cell page</div></div>
+  </div>
+</div>
+
+<h2>5 · What gets scaffolded as placeholder (roadmap items, visible-but-empty panels)</h2>
+<div class="wire">
+  <ul style="margin:0">
+    <li><b>Line movement timeline</b> per offer — needs archive→parquet export cron (dashboard never touches DuckDB)</li>
+    <li><b>Comps panel</b> — "players like X in spots like this" — computed at inference today, not persisted; persist at prophecize time</li>
+    <li><b>Correlation-block risk</b> per slip — UD/Sleeper pairing-rules model</li>
+    <li><b>Why-strings + story theses</b> — template prose from existing features (Avg5/DVPOA/corr); cheap, ships early</li>
+    <li><b>Your-slips grading</b> — persist saved slips, grade nightly in reflect</li>
+  </ul>
+</div>
+<script>
+const v0=fetch('/version.txt').then(r=>r.text());
+setInterval(async()=>{const a=await v0;const b=await fetch('/version.txt?'+Date.now()).then(r=>r.text());if(a!==b)location.reload()},2000);
+</script>
+</body>
+</html>

@@ -77,6 +77,30 @@ def test_assign_families_collapses_when_unseparable() -> None:
     assert set(labels) == {1}
 
 
+def test_assign_families_handles_non_psd_without_nan() -> None:
+    """Indefinite C (negative off-diagonals) yields valid labels, no nan."""
+    c = _grouped_c([[0, 1, 2], [3, 4, 5]], intra=0.6, cross=0.0)
+    c[2, 5] = c[5, 2] = -0.95
+    c[1, 4] = c[4, 1] = -0.9
+    assert np.min(np.linalg.eigvalsh(c)) < 0, "test setup invalid"
+    bet_ids = [(0, 1), (0, 2), (1, 2), (3, 4), (3, 5), (4, 5), (0, 3), (2, 5)]
+
+    labels = assign_parlay_families(bet_ids, c)
+    assert len(labels) == 8
+    assert np.all(np.isfinite(labels))
+    assert labels.min() >= 1
+    assert 1 <= len(set(labels)) <= 4
+
+
+def test_assign_families_tiny_input_is_single_family() -> None:
+    """At/under the clustering minimum (5), everything is family 1."""
+    c = np.eye(3)
+    bet_ids = [(0, 1), (1, 2), (0, 2), (0, 1), (1, 2)]
+    labels = assign_parlay_families(bet_ids, c)
+    assert len(labels) == 5
+    assert set(labels) == {1}
+
+
 def test_assign_families_is_deterministic() -> None:
     """Identical inputs produce identical labels across calls."""
     c = _grouped_c([[0, 1, 2], [3, 4, 5]], intra=0.8, cross=0.0)
@@ -109,6 +133,18 @@ def test_nearest_psd_repairs_negative_eigenvalue() -> None:
     assert np.min(eigvals) > 0
     assert np.allclose(np.diag(repaired), 1.0, atol=1e-9)
     assert np.allclose(repaired, repaired.T, atol=1e-12)
+
+
+def test_nearest_psd_passes_through_already_psd() -> None:
+    """A PSD matrix with unit diagonal is returned essentially unchanged."""
+    rng = np.random.default_rng(0)
+    a = rng.standard_normal((5, 8))
+    sigma = a @ a.T
+    d = 1.0 / np.sqrt(np.diag(sigma))
+    sigma = sigma * d[:, None] * d[None, :]
+
+    repaired = _nearest_psd(sigma)
+    assert np.allclose(repaired, sigma, atol=1e-9)
 
 
 def test_push_aware_payout_independent_two_leg_power() -> None:
@@ -202,6 +238,15 @@ def test_flex_vs_power_diverges_under_misses() -> None:
     assert ev_power == pytest.approx(20.0 * 0.55**5, rel=0.05)
 
 
+def test_payout_curve_loader_returns_power_by_default() -> None:
+    """``_payout_curve_for("Underdog", "power", legacy=False)`` reads the
+    JSON config and returns the 0-misses entries as the search list."""
+    search, full = _payout_curve_for("Underdog", "power", legacy=False)
+    assert search[0] == pytest.approx(3.0)  # 2-leg power
+    assert full[2][0] == pytest.approx(3.0)
+    assert full[2][1] == 0.0  # power: no payout at 1 miss
+
+
 def test_payout_curve_legacy_underdog_matches_audit() -> None:
     """Legacy mode returns the audit-documented insurance line for ranking
     and the mixed insurance/power overwrite for display."""
@@ -210,6 +255,16 @@ def test_payout_curve_legacy_underdog_matches_audit() -> None:
     # Mixed regime: 4-leg display = 6.0 (power), 5-leg = 10.0 (power).
     assert full[4][0] == pytest.approx(6.0)
     assert full[5][0] == pytest.approx(10.0)
+
+
+def test_psd_repair_keeps_correlation_units_diagonal() -> None:
+    """After repair, the matrix is still a correlation matrix (unit diag),
+    so downstream norm.ppf/mvn-cdf calls remain valid."""
+    bad = np.array([[1.0, 1.5], [1.5, 1.0]])  # |rho| > 1, not valid
+    repaired = _nearest_psd(bad)
+    assert np.allclose(np.diag(repaired), 1.0, atol=1e-9)
+    # Off-diagonal must be in [-1, 1] for a correlation matrix.
+    assert -1.0 - 1e-9 <= repaired[0, 1] <= 1.0 + 1e-9
 
 
 def _beam_inputs() -> dict:
@@ -239,7 +294,7 @@ def _beam_inputs() -> dict:
             "Line": 1.5,
             "Market": f"Market{i}",
             "Bet": "Over",
-            "Model P": p_model[i],
+            "Win Prob": p_model[i],
         }
         for i in range(n)
     }
@@ -278,7 +333,7 @@ def test_beam_search_characterization() -> None:
         return (
             r["Bet Size"],
             round(r["Model EV"], 6),
-            round(r["Books EV"], 6),
+            round(r["Market EV"], 6),
             round(r["Rec Bet"], 6),
             round(r["P"], 6),
             round(r["PB"], 6),

@@ -1,12 +1,8 @@
-"""Unit tests for the dashboard parlay-leg helpers and family naming."""
+"""Unit tests for the dashboard parlay-leg helpers (offer lookup + re-exported parse)."""
 
 import pandas as pd
 
-from sportstradamus.dashboard_detail import (
-    family_labels_for_game,
-    find_offer_idx,
-    parse_leg,
-)
+from sportstradamus.dashboard.legs import find_offer_idx, parse_leg
 
 
 def test_parse_leg_well_formed():
@@ -60,6 +56,7 @@ def test_find_offer_idx_resolves_platform_market_codes():
             "Bet": ["Over", "Under", "Over"],
             "Market": ["PRA", "FGA", "FG3M"],
             "Line": [16.5, 17.5, 2.5],
+            "Platform": ["Underdog", "Underdog", "Sleeper"],
         }
     )
     # Underdog: spaced display name -> "Pts+Rebs+Asts" -> PRA
@@ -91,40 +88,21 @@ def test_find_offer_idx_resolves_platform_market_codes():
     )
 
 
-def test_family_labels_star_carousel_distinct_and_deterministic():
-    # Stars appear in BOTH families (they're the high-edge core). The scheme
-    # must headline real stars — not the lone-prop benchwarmer — and give each
-    # family a different star. Star Wing has the most markets (3) and biggest
-    # lines, Other Star has 2 markets; Bench Guy has one tiny prop.
-    game = pd.DataFrame(
+def test_find_offer_idx_pins_platform_when_same_leg_on_both_books():
+    """The same (player, market, line) trades on both books with different
+    boosts; the match must follow the requested platform, not the first row —
+    otherwise a slip snapshots the wrong book's Boost and misprices (the 1.78x
+    Sleeper multiplier double-counted under the Underdog payout curve)."""
+    offers = pd.DataFrame(
         {
-            "Family": [1.0, 1.0, 2.0, 2.0],
-            "Leg 1": [
-                "Star Wing Over 28.5 Points - 60%, 1.0x",
-                "Star Wing Over 9.5 Rebounds - 58%, 1.0x",
-                "Star Wing Over 28.5 Points - 60%, 1.0x",
-                "Star Wing Over 6.5 Assists - 57%, 1.0x",
-            ],
-            "Leg 2": [
-                "Other Star Over 22.5 Points - 59%, 1.0x",
-                "Other Star Over 7.5 Assists - 55%, 1.0x",
-                "Other Star Over 22.5 Points - 59%, 1.0x",
-                "Other Star Over 7.5 Assists - 55%, 1.0x",
-            ],
-            "Leg 3": [
-                "Bench Guy Under 3.5 Rebounds - 70%, 1.0x",
-                "Bench Guy Under 3.5 Rebounds - 70%, 1.0x",
-                None,
-                None,
-            ],
+            "Player": ["Aaliyah Edwards", "Aaliyah Edwards"],
+            "Bet": ["Over", "Over"],
+            "Market": ["PTS", "PTS"],
+            "Line": [10.5, 10.5],
+            "Platform": ["Sleeper", "Underdog"],
+            "Boost": [1.78, 1.00],
         }
     )
-    labels = family_labels_for_game(game)
-    assert set(labels) == {1.0, 2.0}
-    blob = " ".join(labels.values())
-    assert "Star Wing" in blob
-    assert "Other Star" in blob
-    assert "Bench Guy" not in blob  # benchwarmer must never headline
-    assert labels[1.0] != labels[2.0]  # each family distinct
-    # Deterministic across calls.
-    assert family_labels_for_game(game) == labels
+    leg = parse_leg("Aaliyah Edwards Over 10.5 PTS - 90%, 1.0x")
+    assert find_offer_idx(leg, offers, "Underdog") == 1  # not row 0 (Sleeper)
+    assert find_offer_idx(leg, offers, "Sleeper") == 0

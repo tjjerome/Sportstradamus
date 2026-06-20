@@ -56,9 +56,7 @@ def test_comps_std_and_trend_are_distance_weighted(monkeypatch):
     wvar = (0.8 * (20 - wmean) ** 2 + 0.4 * (10 - wmean) ** 2) / 1.2
     assert s.playerProfile.loc["T1", "comps std"] == pytest.approx(wvar**0.5)
     # trend = distance-weighted mean of the comps' growth slopes.
-    assert s.playerProfile.loc["T1", "comps trend"] == pytest.approx(
-        (0.8 * 2.0 + 0.4 * -1.0) / 1.2
-    )
+    assert s.playerProfile.loc["T1", "comps trend"] == pytest.approx((0.8 * 2.0 + 0.4 * -1.0) / 1.2)
 
 
 def _run_nonmlb(monkeypatch, rows) -> pd.DataFrame:

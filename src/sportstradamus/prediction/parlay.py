@@ -36,6 +36,31 @@ class GameArrays:
     boosts: np.ndarray
 
 
+@dataclass(frozen=True)
+class GameScoringContext:
+    """One game's scoring bundle, captured so an arbitrary leg-subset can be priced.
+
+    ``find_correlation`` builds the per-game :class:`GameArrays` ``g`` and the
+    payout tables for the beam search; the story-menu generator reuses the same
+    objects to score story subsets that beam search never enumerates (it only
+    keeps both-team parlays). ``leg_indices`` are positions into ``g``'s matrices
+    (the bet-eligible legs); ``bet_df`` maps the same positions to their offer
+    records (``Desc``/``Model``/``Bet``/``Team``/…). Collected per game into the
+    opt-in ``story_sink``; one context per ``(platform, game)``.
+    """
+
+    platform: str
+    league: str
+    game: str
+    date: str
+    g: GameArrays
+    bet_df: dict
+    leg_indices: tuple[int, ...]
+    full_payouts: dict[int, list[float]]
+    payout_base_by_size: dict[int, float]
+    max_size: int
+
+
 # --- Beam-search constants --------------------------------------------------
 
 # Beam width: max parlay candidates carried between sizes. Empirically large
@@ -492,7 +517,7 @@ def _evaluate_parlay(
     display_boost = boost if legacy else payout
     parlay_dict = info | {
         "Model EV": p,
-        "Books EV": pb,
+        "Market EV": pb,
         "Boost": display_boost,
         "Rec Bet": units,
         "Leg 1": "",
@@ -507,7 +532,7 @@ def _evaluate_parlay(
         "PB": prev_pb,
         "Fun": _parlay_fun(bet, info["League"]),
         "Bet Size": bet_size,
-        "Leg Probs": tuple(bet_df[i]["Model P"] for i in bet_id),
+        "Leg Probs": tuple(bet_df[i]["Win Prob"] for i in bet_id),
         "Corr Pairs": tuple(SIG[np.triu_indices(bet_size, 1)]),
         "Boost Pairs": tuple(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size, 1)]),
         "Indep P": float(np.prod(p_model[np.ix_(bet_id)]) * payout),

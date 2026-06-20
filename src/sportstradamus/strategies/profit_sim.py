@@ -20,11 +20,11 @@ Public surface:
   ``{mean_final, roi, max_drawdown, sharpe, win_rate}``.
 
 Input DataFrame contract (from
-:func:`sportstradamus.dashboard_data.get_filtered_history`):
+:func:`sportstradamus.dashboard.data.get_filtered_history`):
 the exploded per-offer frame, indexed by row, with columns
-``Player, Market, Platform, Boost, Model P, Books, Hit`` plus the
-``ranking`` column (``K`` / ``Model P`` / ``Model``) and the caller's
-``prob_col`` (defaults to ``Model P`` in the dashboard). A ``_date``
+``Player, Market, Platform, Boost, Win Prob, Market EV, Hit`` plus the
+``ranking`` column (``Kelly`` / ``Win Prob`` / ``Model EV``) and the caller's
+``prob_col`` (defaults to ``Win Prob`` in the dashboard). A ``_date``
 column is materialized inside the simulator from ``Date`` if absent.
 """
 
@@ -52,27 +52,30 @@ _KELLY_ALL_MAX_BETS_DAY: int = 10_000_000
 # Underdog / default sportsbook -110 vig (100/110 payout per dollar staked).
 _DEFAULT_AMERICAN_MINUS_110_PAYOUT: float = 100.0 / 110.0
 
-# Ranking column mapping — translates the user-facing ranking label into the
-# exploded-frame column name the simulator sorts on.
+# Translates the user-facing ranking label into the exploded-frame column name.
 RANKING_MAP: dict[str, str] = {
-    "Kelly": "K",
-    "Probability": "Model P",
-    "EV": "Model",
+    "Kelly": "Kelly",
+    "Probability": "Win Prob",
+    "EV": "Model EV",
 }
 
 
 def compute_payout(row: pd.Series) -> float:
-    """Return the payout multiplier for a winning $1 bet on ``row``.
+    """Return the NET payout multiplier for a winning $1 bet on ``row``.
 
-    Underdog / unspecified platforms pay -110 (100/110 per dollar staked);
-    Sleeper pays 1× (the platform tracks its own juice elsewhere). All
-    platforms get the per-row ``Boost`` multiplier applied last.
+    Net profit per dollar staked, not gross — the win line settles
+    ``bet_size * payout``, so it must exclude the returned stake. Underdog /
+    unspecified platforms net -110 (100/110 per dollar); Sleeper's ``Boost`` is a
+    gross multiplier (stake returned with it), so its net is ``boost - 1``. The
+    per-row ``Boost`` scales the Underdog leg. A non-finite boost is unpriceable;
+    return 0.0 (no edge) so the eligibility filter and the Kelly guard drop it.
     """
-    platform = row.get("Platform", "")
-    boost = row.get("Boost", 1)
-    if platform == "Sleeper":
-        return float(boost)
-    return _DEFAULT_AMERICAN_MINUS_110_PAYOUT * float(boost)
+    boost = float(row.get("Boost", 1))
+    if not np.isfinite(boost):
+        return 0.0
+    if row.get("Platform", "") == "Sleeper":
+        return boost - 1.0
+    return _DEFAULT_AMERICAN_MINUS_110_PAYOUT * boost
 
 
 def simulate_strategy(
@@ -88,23 +91,39 @@ def simulate_strategy(
     initial_bankroll: float,
     n_mc: int = N_MONTE_CARLO_DEFAULT,
     rng: np.random.Generator | None = None,
+    flat_off_initial: bool = False,
+    daily_exposure_cap: float | None = None,
+    kelly_fraction: float = 1.0,
 ) -> pd.DataFrame:
     """Monte-Carlo backtest a filter-and-rank strategy on exploded offers.
 
-    Filters ``df`` to rows with ``prob_col >= min_model_p`` and
-    ``Books >= min_books_p``, then for each MC run walks the date axis and
-    on each date picks at most ``max_bets_day`` bets via probability-
-    weighted sampling (when more eligible than the cap) or by deduplicating
-    on the base player (when at or below the cap). Bets are sized as
-    fixed-percent of bankroll or Kelly (capped at 5%) per ``use_kelly``.
+    Filters ``df`` to rows with ``prob_col >= min_model_p``,
+    ``Market EV >= min_books_p``, a finite ranking value, and a finite
+    ``Boost`` — NaN and ±inf poison the normalized sampling weights
+    (``inf / inf = NaN``) and a non-finite boost yields an unpriceable payout,
+    so such rows are excluded up front. Then for each MC run walks the date axis
+    and on each date picks at most ``max_bets_day`` bets via probability-weighted
+    sampling (when more eligible than the cap) or by deduplicating on the base
+    player (when at or below the cap). Bets are sized as fixed-percent of
+    bankroll or Kelly (capped at 5%) per ``use_kelly``; the staking knobs
+    ``flat_off_initial`` / ``daily_exposure_cap`` / ``kelly_fraction`` default to
+    current behavior (flat off current bankroll, uncapped, full Kelly) — see
+    :func:`_settle_day`.
 
     Returns a long-format DataFrame ``[date, run, bankroll, daily_pnl]``,
-    one row per (date, run). Empty input or no eligible rows return an
-    empty DataFrame.
+    one row per (date, run).
     """
-    rank_col = RANKING_MAP.get(ranking, "K")
+    if df.empty:
+        return pd.DataFrame()
 
-    eligible = df.loc[(df[prob_col] >= min_model_p) & (df["Books"].fillna(0) >= min_books_p)].copy()
+    rank_col = RANKING_MAP.get(ranking, "Kelly")
+
+    eligible = df.loc[
+        (df[prob_col] >= min_model_p)
+        & (df["Market EV"].fillna(0) >= min_books_p)
+        & np.isfinite(df[rank_col])
+        & np.isfinite(df["Boost"])
+    ].copy()
     if eligible.empty:
         return pd.DataFrame()
 
@@ -131,7 +150,17 @@ def simulate_strategy(
                 continue
 
             day_bets = _pick_day_bets(day_bets, rank_col, max_bets_day, rng)
-            daily_pnl = _settle_day(day_bets, prob_col, use_kelly, sizing_pct, bankroll)
+            daily_pnl = _settle_day(
+                day_bets,
+                prob_col,
+                use_kelly,
+                sizing_pct,
+                bankroll,
+                initial_bankroll=initial_bankroll,
+                flat_off_initial=flat_off_initial,
+                daily_exposure_cap=daily_exposure_cap,
+                kelly_fraction=kelly_fraction,
+            )
             bankroll = max(bankroll + daily_pnl, 0.0)
             all_runs.append(
                 {"date": date, "run": run_i, "bankroll": bankroll, "daily_pnl": daily_pnl}
@@ -300,19 +329,43 @@ def _settle_day(
     use_kelly: bool,
     sizing_pct: float,
     bankroll: float,
+    *,
+    initial_bankroll: float,
+    flat_off_initial: bool,
+    daily_exposure_cap: float | None,
+    kelly_fraction: float,
 ) -> float:
-    """Apply the bet-sizing rule to ``day_bets`` and return the day's PnL."""
+    """Apply the bet-sizing rule to ``day_bets`` and return the day's PnL.
+
+    ``Payout`` is net profit per dollar (see :func:`compute_payout`), so the
+    Kelly branch rebuilds decimal odds as ``net + 1`` and skips only a
+    non-positive net — it previously compared the net against 1 and so discarded
+    every Underdog leg (net 0.909). ``kelly_fraction`` scales the raw fraction
+    before the 5% cap (1.0 = full Kelly). Flat bets size off the initial bankroll
+    when ``flat_off_initial`` else the current one. ``daily_exposure_cap`` (a
+    fraction of bankroll, ``None`` = uncapped) bounds the day's total stake,
+    funding higher-ranked bets first.
+    """
+    flat_base = initial_bankroll if flat_off_initial else bankroll
+    remaining = None if daily_exposure_cap is None else daily_exposure_cap * bankroll
     daily_pnl = 0.0
     for _, bet in day_bets.iterrows():
         if use_kelly:
-            payout_mult = bet["Payout"]
-            if payout_mult <= 1:
+            net = bet["Payout"]
+            if net <= 0:
                 continue
-            kelly_f = (bet[prob_col] * payout_mult - 1) / (payout_mult - 1)
-            kelly_f = max(0.0, min(kelly_f, _KELLY_CAP_FRACTION))
+            decimal = net + 1.0
+            kelly_f = (bet[prob_col] * decimal - 1) / (decimal - 1)
+            kelly_f = max(0.0, min(kelly_f * kelly_fraction, _KELLY_CAP_FRACTION))
             bet_size = bankroll * kelly_f
         else:
-            bet_size = bankroll * float(sizing_pct) / 100.0
+            bet_size = flat_base * float(sizing_pct) / 100.0
+
+        if remaining is not None:
+            if remaining <= 0:
+                break
+            bet_size = min(bet_size, remaining)
+            remaining -= bet_size
 
         if bet["Hit"]:
             daily_pnl += bet_size * bet["Payout"]

@@ -1699,11 +1699,13 @@ def _test_set_to_bet_frame(df: pd.DataFrame, pred_col: str) -> pd.DataFrame:
 
     For each event the model picks the **EV side** (``over`` if ``pred >= Line`` else
     ``under``). The bet's ``Model P`` is the model's probability on that side;
-    ``Boost`` is the decimal-odds payout ``1 / clip(book_p)`` so
-    :func:`sportstradamus.strategies.profit_sim.compute_payout` (under
-    ``Platform="Sleeper"``, which returns ``boost``) yields a payout > 1 and the
-    sim's Kelly branch doesn't early-exit. Synthetic monotonic dates make each
-    event its own "day" so the resulting return series has per-event resolution.
+    ``Boost`` is the decimal-odds payout ``1 / clip(book_p)`` and
+    ``Platform="Sleeper"`` makes
+    :func:`sportstradamus.strategies.profit_sim.compute_payout` return the net
+    ``boost - 1``; the sim's Kelly branch rebuilds decimal odds as ``net + 1`` (so
+    the fraction is unchanged) and settles winners at net, giving each event a
+    well-defined Kelly stake and return. Synthetic monotonic dates make each event
+    its own "day" so the resulting return series has per-event resolution.
     Returns an empty frame when ``Odds`` / ``P`` / ``Line`` are absent.
     """
     if _calibration_inputs(df) is None or "Odds" not in df.columns:
@@ -1738,10 +1740,10 @@ def _test_set_to_bet_frame(df: pd.DataFrame, pred_col: str) -> pd.DataFrame:
             "Market": "supersede",
             "Platform": "Sleeper",
             "Boost": payout_decimal,
-            "Model P": p_model,
-            "Model": p_model,
-            "K": p_model * payout_decimal,
-            "Books": 1.0,
+            "Win Prob": p_model,
+            "Model EV": p_model,
+            "Kelly": p_model * payout_decimal,
+            "Market EV": 1.0,
             "Hit": hit,
             "_date": dates,
         }
@@ -1821,10 +1823,10 @@ def _supersede_paired_sharpe(
     if b_bets.empty or c_bets.empty:
         return None
     b_sim = simulate_kelly_all(
-        b_bets, prob_col="Model P", initial_bankroll=_SUPERSEDE_S3_INITIAL_BANKROLL
+        b_bets, prob_col="Win Prob", initial_bankroll=_SUPERSEDE_S3_INITIAL_BANKROLL
     )
     c_sim = simulate_kelly_all(
-        c_bets, prob_col="Model P", initial_bankroll=_SUPERSEDE_S3_INITIAL_BANKROLL
+        c_bets, prob_col="Win Prob", initial_bankroll=_SUPERSEDE_S3_INITIAL_BANKROLL
     )
     b_returns = extract_sim_returns(b_sim, _SUPERSEDE_S3_INITIAL_BANKROLL)
     c_returns = extract_sim_returns(c_sim, _SUPERSEDE_S3_INITIAL_BANKROLL)
@@ -2012,8 +2014,8 @@ def _history_to_eval_frame(
         return pd.DataFrame(columns=list(_LIVE_EVAL_COLUMNS))
 
     over_mask = subset["Bet"].eq("Over").to_numpy()
-    model_p = subset["Model P"].to_numpy()
-    books_p = subset["Books P"].to_numpy()
+    model_p = subset["Win Prob"].to_numpy()
+    books_p = subset["Market Prob"].to_numpy()
     out = pd.DataFrame(
         {
             "MeanYr": [
@@ -2021,7 +2023,7 @@ def _history_to_eval_frame(
                 for player, date in zip(subset["Player"], subset["_date"], strict=False)
             ],
             "Result": subset["Actual"].astype(float).to_numpy(),
-            "EV": subset["Model EV"].astype(float).to_numpy(),
+            "EV": subset["Projection"].astype(float).to_numpy(),
             "P": np.where(over_mask, model_p, 1.0 - model_p),
             "Odds": np.where(over_mask, 1.0 - books_p, books_p),
             "Line": subset["Line"].astype(float).to_numpy(),
@@ -2219,15 +2221,17 @@ def main(
             if frame.empty:
                 click.echo(f"{cell_league}_{cell_market}: no offers in last {live_window}d.")
                 continue
+            # history.parquet carries only the raw model mean (Model EV -> EV); the fused
+            # Blended_EV lives in the dumped test-set CSVs, so live monitoring scores EV.
             card = scorecard(
                 frame,
-                pred_col,
+                "EV",
                 strategy=live_strategy,
                 league=cell_league,
                 market=cell_market,
                 n_deciles=deciles,
             )
-            _print_live_scorecard(card, f"{cell_league}_{cell_market}", pred_col)
+            _print_live_scorecard(card, f"{cell_league}_{cell_market}", "EV")
             if not no_log:
                 append_run_log(card, log_path)
         return
