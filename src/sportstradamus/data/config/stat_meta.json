@@ -174,8 +174,8 @@
         },
         "FG3A": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
+            "shipped": "devel",
+            "target_normalization": "centered_additive_eb_meanyr_k10",
             "posthoc": "none"
         },
         "FG3M": {
@@ -271,9 +271,10 @@
         },
         "fantasy points prizepicks": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "none",
+            "blending": "crps"
         }
     },
     "NFL": {
@@ -345,7 +346,7 @@
         },
         "receiving tds": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
@@ -602,7 +603,7 @@
         },
         "fantasy points prizepicks": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         }
