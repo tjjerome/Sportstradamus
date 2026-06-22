@@ -44,6 +44,7 @@ from sportstradamus.training.config import (
 from sportstradamus.training.scorecard import (
     compute_gates,
     load_test_set,
+    recent_form_fired,
 )
 
 logger = get_logger(__name__)
@@ -246,7 +247,23 @@ def _wide_row(
     }
 
 
-def _layer_gates_from_test_set(row: dict, league: str, market: str) -> None:
+def _load_prior_g6_fired() -> dict[tuple[str, str], bool]:
+    """Map ``(league, market) -> recent-form leg fired last run``, read once from the existing
+    ``model_stats.parquet`` before this run overwrites it. Seeds Gate-6 anchor hysteresis; empty on
+    the first ever run (every cell then judges at the fire-on threshold).
+    """
+    if not MODEL_STATS_PATH.is_file():
+        return {}
+    prior = pd.read_parquet(MODEL_STATS_PATH)
+    return {
+        (str(r["league"]), str(r["market"])): recent_form_fired(r)
+        for r in prior.to_dict("records")
+    }
+
+
+def _layer_gates_from_test_set(
+    row: dict, league: str, market: str, *, prior_g6_fired: bool | None = None
+) -> None:
     """Overwrite the placeholder ship-gate columns on ``row`` if the test-set CSV is present.
 
     Skips silently when the CSV is missing (the cell trained but its test_set
@@ -263,7 +280,15 @@ def _layer_gates_from_test_set(row: dict, league: str, market: str) -> None:
         return
     if df.empty:
         return
-    row.update(compute_gates(df, league=league, market=market, pred_col=_SHIP_PRED_COL))
+    row.update(
+        compute_gates(
+            df,
+            league=league,
+            market=market,
+            pred_col=_SHIP_PRED_COL,
+            prior_g6_fired=prior_g6_fired,
+        )
+    )
 
 
 def write_model_stats(
@@ -284,12 +309,15 @@ def write_model_stats(
             map fall back to ``"withheld"``.
     """
     shipped_map = stat_shipped or {}
+    prior_g6 = _load_prior_g6_fired()
     rows = []
     for league, markets in league_models.items():
         for market, model in markets.items():
             shipped = shipped_map.get(league, {}).get(market, "withheld")
             row = _wide_row(model, league, market, shipped, stat_cv, stat_std)
-            _layer_gates_from_test_set(row, league, market)
+            _layer_gates_from_test_set(
+                row, league, market, prior_g6_fired=prior_g6.get((league, market))
+            )
             rows.append(row)
 
     df = pd.DataFrame(rows)
