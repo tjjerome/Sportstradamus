@@ -17,8 +17,9 @@ from sportstradamus.training.scorecard import (
     _GATE4_KS_NOISE_COEF,
     _GATE4_PIT_KS_DELTA,
     _GATE5_ECE_MAX,
+    _GATE6_FIRE_ON,
     _GATE6_MARGIN,
-    _GATE6_MIN_RECENT_CORR,
+    _GATE6_STAR_REF_BASKETBALL,
     _SUPERSEDE_S3_Z_MIN,
     _decode_sn_loc_scale,
     _dispersion_diagnostics,
@@ -591,17 +592,17 @@ def test_gate_row_uses_analytical_g4_when_dist_columns_present():
 
 
 # ---------------------------------------------------------------------------
-# Gate 6 — anti-shrinkage (ratio_meanyr SkewNormal cohort).
+# Gate 6 — anti-shrinkage (all cells; the corr anchor, not the normalization, scopes it).
 # ---------------------------------------------------------------------------
 
 
 def _cohort_frame(
     n: int = 200, seed: int = 11, *, shrink: float = 0.8, anchored: bool = True
 ) -> pd.DataFrame:
-    """A ratio_meanyr SkewNormal cohort frame of stable players (recent form ≈ season
-    baseline) whose ``Blended_EV`` is ``shrink``× their recent form. ``anchored`` ties
-    ``Result`` to ``Mean10`` so the Gate-6 ``corr`` anchor passes; set it False to model a
-    MIN-like cell where recent form doesn't predict the outcome.
+    """A frame of stable players (recent form ≈ season baseline) whose ``Blended_EV`` is
+    ``shrink``× their recent form. ``anchored`` ties ``Result`` to ``Mean10`` so the Gate-6
+    ``corr`` anchor passes; set it False to model a MIN-like cell where recent form doesn't
+    predict the outcome.
     """
     rng = np.random.default_rng(seed)
     meanyr = rng.uniform(2.0, 20.0, n)
@@ -635,7 +636,7 @@ def test_gate6_flags_overshrunk_ratio_meanyr_cohort():
             decode_strategy="ratio_meanyr",
         )
     )
-    assert row["g6_recent_corr"] >= _GATE6_MIN_RECENT_CORR
+    assert row["g6_recent_corr"] >= _GATE6_FIRE_ON
     assert row["g6_star_ci_hi"] < row["g6_star_ref"] - _GATE6_MARGIN
     assert not row["g6_pass"]
     assert not row["ship"]
@@ -655,13 +656,15 @@ def test_gate6_exempts_unanchored_cell():
             decode_strategy="ratio_meanyr",
         )
     )
-    assert row["g6_recent_corr"] < _GATE6_MIN_RECENT_CORR
+    assert row["g6_recent_corr"] < _GATE6_FIRE_ON
     assert row["g6_star_ci_hi"] is None
     assert row["g6_pass"]
 
 
-def test_gate6_auto_passes_outside_ratio_meanyr_cohort():
-    """Gate 6 is cohort-scoped: a non-ratio_meanyr normalization auto-passes the same frame."""
+def test_gate6_gates_non_ratio_meanyr_normalization():
+    """Gate 6 is no longer cohort-scoped: a centered (non-ratio_meanyr) cell whose stable stars
+    are over-shrunk is gated and fails — the WNBA-FGA mean-regression the narrow scope missed.
+    """
     row = apply_thresholds(
         gate_row(
             _cohort_frame(shrink=0.8, anchored=True),
@@ -672,8 +675,244 @@ def test_gate6_auto_passes_outside_ratio_meanyr_cohort():
             decode_strategy="centered_additive_mean10",
         )
     )
-    assert row["g6_star_ci_hi"] is None
-    assert row["g6_pass"]
+    assert _GATE6_STAR_REF_BASKETBALL == 0.95  # relaxed from 0.98 — allow ~5% star shrinkage
+    assert row["g6_star_ref"] == _GATE6_STAR_REF_BASKETBALL
+    assert row["g6_star_ci_hi"] is not None
+    assert row["g6_star_ci_hi"] < row["g6_star_ref"] - _GATE6_MARGIN
+    assert not row["g6_pass"]
+    assert not row["ship"]
+
+
+def test_gate6_applies_regardless_of_distribution_family():
+    """Gate 6 reads only the served EV against recent form / the outcome, so it fires for count
+    families too: strip the SkewNormal params and it still computes on a bare data frame.
+    """
+    from sportstradamus.training.scorecard import _gate6_legs
+
+    frame = _cohort_frame(shrink=0.8, anchored=True).drop(
+        columns=["SN_Loc", "SN_Scale", "SN_Alpha"]
+    )
+    g6 = _gate6_legs(frame, "Blended_EV", league="WNBA")
+    assert g6["g6_recent_corr"] >= _GATE6_FIRE_ON
+    assert g6["g6_star_ci_hi"] is not None
+    assert g6["g6_star_ci_hi"] < g6["g6_star_ref"] - _GATE6_MARGIN
+    assert g6["g6_star_ref"] == _GATE6_STAR_REF_BASKETBALL
+    assert g6["g6_citl_ci_hi"] is not None  # CITL runs regardless of distribution family
+
+
+def test_gate6_hysteresis_and_over_constants_exist():
+    from sportstradamus.training.scorecard import (
+        _GATE6_FIRE_ON,
+        _GATE6_KEEP_ON,
+        _GATE6_OVER_MIN_MEAN,
+    )
+
+    # Deadband: a fresh cell starts judging at FIRE_ON, a flagged cell keeps down to KEEP_ON.
+    assert _GATE6_FIRE_ON == 0.58
+    assert _GATE6_KEEP_ON == 0.52
+    assert _GATE6_KEEP_ON < _GATE6_FIRE_ON
+    # Over-leg degenerate-count guard: only test a count bench whose realized mean clears 1.
+    assert _GATE6_OVER_MIN_MEAN == 1.0
+
+
+def test_gate6_anchored_hysteresis():
+    from sportstradamus.training.scorecard import _gate6_anchored
+
+    # Above fire-on: always judged, regardless of prior.
+    assert _gate6_anchored(0.60, None) is True
+    assert _gate6_anchored(0.58, False) is True
+    # In the deadband: judged only if it fired last run.
+    assert _gate6_anchored(0.56, True) is True
+    assert _gate6_anchored(0.56, None) is False
+    assert _gate6_anchored(0.56, False) is False
+    # Below keep-on: never judged.
+    assert _gate6_anchored(0.51, True) is False
+    # Non-finite corr (degenerate cell): not anchored.
+    assert _gate6_anchored(np.nan, True) is False
+
+
+def _legs_frame(n=200, seed=11, *, ev_over_form=0.8, result_over_form=1.0, anchored=True):
+    """Stable-star frame: ``Blended_EV = ev_over_form × Mean10`` and ``Result = result_over_form ×
+    base + noise``, where ``base`` is ``Mean10`` (anchored — high corr) or an independent uniform
+    (unanchored — low corr, the MIN case). Lets the recent-form leg and the CITL-under leg be
+    driven independently.
+    """
+    rng = np.random.default_rng(seed)
+    meanyr = rng.uniform(2.0, 20.0, n)
+    mean10 = meanyr * (1.0 + rng.uniform(-0.05, 0.05, n))  # inside the ±0.12 stable band
+    base = mean10 if anchored else rng.uniform(2.0, 20.0, n)
+    return pd.DataFrame(
+        {
+            "MeanYr": meanyr,
+            "Mean10": mean10,
+            "Result": result_over_form * base + rng.normal(0.0, 0.3, n),
+            "Blended_EV": ev_over_form * mean10,
+            "Player": [f"P{i % 40}" for i in range(n)],
+            "SN_Loc": np.zeros(n),
+            "SN_Scale": np.ones(n),
+            "SN_Alpha": np.zeros(n),
+        }
+    )
+
+
+def _count_legs_frame(n=200, seed=7, *, bench_ev_over_result=1.3, bench_mean=2.0):
+    """Count/ZINB frame (``R``/``NB_P``/``Gate`` ⇒ ``_infer_dist`` == ``"ZINB"``) whose stable
+    BENCH (low MeanYr) is over-predicted vs a realized mean controllable above/below the guard.
+    """
+    rng = np.random.default_rng(seed)
+    meanyr = np.concatenate([rng.uniform(0.5, 3.0, n // 2), rng.uniform(8.0, 20.0, n // 2)])
+    mean10 = meanyr * (1.0 + rng.uniform(-0.05, 0.05, n))
+    bench = meanyr <= np.quantile(meanyr, 0.25)
+    result = np.where(bench, bench_mean, mean10) + rng.normal(0.0, 0.2, n)
+    ev = np.where(bench, bench_ev_over_result * bench_mean, mean10)
+    return pd.DataFrame(
+        {
+            "MeanYr": meanyr,
+            "Mean10": mean10,
+            "Result": result,
+            "Blended_EV": ev,
+            "Player": [f"P{i % 40}" for i in range(n)],
+            "R": np.ones(n),
+            "NB_P": np.full(n, 0.5),
+            "Gate": np.zeros(n),
+        }
+    )
+
+
+def _deadband_frame(n=2000, seed=0):
+    """A frame whose ``corr(Mean10, Result)`` sits in the ``[0.52, 0.58)`` hysteresis deadband, so
+    the recent-form leg is judged only when the prior run fired. Large ``n`` keeps the empirical
+    corr tight around the tuned ~0.55.
+    """
+    rng = np.random.default_rng(seed)
+    meanyr = rng.uniform(5.0, 20.0, n)
+    mean10 = meanyr * (1.0 + rng.uniform(-0.05, 0.05, n))
+    result = mean10 + rng.normal(0.0, 1.52 * mean10.std(), n)  # tuned so pearson r ≈ 0.55
+    return pd.DataFrame(
+        {
+            "MeanYr": meanyr,
+            "Mean10": mean10,
+            "Result": result,
+            "Blended_EV": 0.8 * mean10,
+            "Player": [f"P{i % 80}" for i in range(n)],
+            "SN_Loc": np.zeros(n),
+            "SN_Scale": np.ones(n),
+            "SN_Alpha": np.zeros(n),
+        }
+    )
+
+
+def test_gate6_legs_recent_form_fires_when_anchored():
+    from sportstradamus.training.scorecard import _gate6_legs
+
+    g6 = _gate6_legs(_legs_frame(ev_over_form=0.8), "Blended_EV", league="WNBA", prior_g6_fired=None)
+    assert g6["g6_recent_corr"] >= 0.58  # anchored at fire-on
+    assert g6["g6_star_ci_hi"] is not None
+    assert g6["g6_star_ci_hi"] < g6["g6_star_ref"] - _GATE6_MARGIN  # over-shrinks vs recent form
+
+
+def test_gate6_legs_recent_form_exempt_below_keep_on():
+    from sportstradamus.training.scorecard import _gate6_legs
+
+    # Unanchored (Result independent of Mean10) ⇒ low corr ⇒ recent-form blank, but CITL still runs.
+    g6 = _gate6_legs(
+        _legs_frame(ev_over_form=0.8, anchored=False), "Blended_EV", league="WNBA", prior_g6_fired=None
+    )
+    assert g6["g6_star_ci_hi"] is None  # recent-form exempt
+    assert g6["g6_citl_ci_hi"] is not None  # CITL is not anchor-gated
+
+
+def test_gate6_legs_citl_under_fires_against_outcome():
+    from sportstradamus.training.scorecard import _gate6_legs
+
+    # EV 0.85× the realized outcome on stable stars: CITL fires regardless of the recent-form leg.
+    g6 = _gate6_legs(
+        _legs_frame(ev_over_form=0.85, anchored=True), "Blended_EV", league="NBA", prior_g6_fired=None
+    )
+    assert g6["g6_citl_ci_hi"] is not None
+    assert g6["g6_citl_ci_hi"] < 1.0 - _GATE6_MARGIN
+
+
+def test_gate6_legs_citl_silent_when_pred_not_below_outcome():
+    from sportstradamus.training.scorecard import _gate6_legs
+
+    # Pred below recent form but ABOVE the realized outcome (the outcome vindicates the regression).
+    g6 = _gate6_legs(
+        _legs_frame(ev_over_form=0.8, result_over_form=0.74, anchored=False),
+        "Blended_EV",
+        league="NBA",
+        prior_g6_fired=None,
+    )
+    assert g6["g6_citl_ci_hi"] >= 1.0 - _GATE6_MARGIN  # does not fire
+
+
+def test_gate6_legs_over_leg_fires_on_count_bench():
+    from sportstradamus.training.scorecard import _gate6_legs
+
+    g6 = _gate6_legs(
+        _count_legs_frame(bench_ev_over_result=1.3), "Blended_EV", league="WNBA", prior_g6_fired=None
+    )
+    assert g6["g6_over_ci_lo"] is not None
+    assert g6["g6_over_ci_lo"] > 1.0 + _GATE6_MARGIN
+
+
+def test_gate6_legs_over_leg_silent_under_degenerate_guard():
+    from sportstradamus.training.scorecard import _gate6_legs
+
+    # Same over-prediction but bench realized mean < 1 ⇒ guard blanks the over-leg.
+    g6 = _gate6_legs(
+        _count_legs_frame(bench_ev_over_result=1.3, bench_mean=0.4),
+        "Blended_EV",
+        league="WNBA",
+        prior_g6_fired=None,
+    )
+    assert g6["g6_over_ci_lo"] is None
+
+
+def test_gate6_legs_over_leg_blank_for_non_count_family():
+    from sportstradamus.training.scorecard import _gate6_legs
+
+    g6 = _gate6_legs(_legs_frame(), "Blended_EV", league="WNBA", prior_g6_fired=None)  # SkewNormal
+    assert g6["g6_over_ci_lo"] is None
+
+
+def test_gate6_passes_ors_three_legs():
+    from sportstradamus.training.scorecard import _gate6_passes
+
+    ok = {"g6_star_ci_hi": None, "g6_star_ref": None, "g6_citl_ci_hi": None, "g6_over_ci_lo": None}
+    assert _gate6_passes(ok) is True  # all blank ⇒ auto-pass
+    assert _gate6_passes({**ok, "g6_star_ci_hi": 0.80, "g6_star_ref": 0.95}) is False  # recent-form
+    assert _gate6_passes({**ok, "g6_citl_ci_hi": 0.90}) is False  # CITL-under (< 1 - 0.03)
+    assert _gate6_passes({**ok, "g6_citl_ci_hi": 0.99}) is True
+    assert _gate6_passes({**ok, "g6_over_ci_lo": 1.10}) is False  # over (> 1 + 0.03)
+    assert _gate6_passes({**ok, "g6_over_ci_lo": 1.00}) is True
+
+
+def test_recent_form_fired_reads_prior_row():
+    from sportstradamus.training.scorecard import recent_form_fired
+
+    assert recent_form_fired({"g6_star_ci_hi": 0.80, "g6_star_ref": 0.95}) is True
+    assert recent_form_fired({"g6_star_ci_hi": 0.99, "g6_star_ref": 0.95}) is False
+    assert recent_form_fired({"g6_star_ci_hi": None, "g6_star_ref": None}) is False
+
+
+def test_gate6_fails_ship_through_gate_row():
+    # Anchored under-prediction: recent-form AND CITL fire, so g6 fails and ship is False.
+    df = _legs_frame(ev_over_form=0.85, anchored=True, n=400)
+    row = apply_thresholds(gate_row(df, "Blended_EV", league="NBA", market="x", strategy="x"))
+    assert row["g6_citl_ci_hi"] is not None and row["g6_citl_ci_hi"] < 1.0 - _GATE6_MARGIN
+    assert row["g6_pass"] is False
+    assert row["ship"] is False
+
+
+def test_gate_row_threads_prior_g6_fired():
+    df = _deadband_frame()
+    corr = np.corrcoef(df["Mean10"], df["Result"])[0, 1]
+    assert 0.52 <= corr < 0.58  # precondition: the frame sits in the deadband
+    judged = gate_row(df, "Blended_EV", league="WNBA", market="x", strategy="x", prior_g6_fired=True)
+    exempt = gate_row(df, "Blended_EV", league="WNBA", market="x", strategy="x", prior_g6_fired=None)
+    assert judged["g6_star_ci_hi"] is not None  # prior fired ⇒ kept on in the band
+    assert exempt["g6_star_ci_hi"] is None  # no prior ⇒ exempt in the band
 
 
 # ---------------------------------------------------------------------------
@@ -891,6 +1130,10 @@ def test_gate_row_full_column_set_and_oracle_identities():
         "g6_star_ratio",
         "g6_star_ci_hi",
         "g6_star_ref",
+        "g6_citl_ratio",
+        "g6_citl_ci_hi",
+        "g6_over_ratio",
+        "g6_over_ci_lo",
     }
     assert set(row) == expected
     # Oracle identities: segment z = 0, IQR ratio = 1, ECE = 0, Brier diff < 0.

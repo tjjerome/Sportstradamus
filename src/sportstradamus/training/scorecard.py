@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import functools
 import importlib.resources as pkg_resources
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -105,9 +105,9 @@ _ECE_BINS: int = 10
 #                      the worst-case alt-line probability mispricing — under the larger of
 #                      the δ effect-size floor and the cell's KS sampling-noise floor
 #   G5 ece    < 0.075: 10-bin equal-mass ECE under 7.5% (Roelofs-debiased: raw - null bias offset)
-#   G6 star ratio    : (ratio_meanyr SkewNormal only) stable top-MeanYr pred / recent form,
+#   G6 star ratio    : (all cells; corr anchor scopes it) stable top-MeanYr pred / recent form,
 #                      clustered-CI upper bound at/above the causal real-game floor — catches the
-#                      MeanYr-shrinkage the holdout-scored G1-G5 are blind to; off-cohort auto-pass
+#                      mean-regression the holdout-scored G1-G5 are blind to; anchor-miss auto-pass
 # G1 ships on the tie margin (intent: "ensemble at least as good as the book"); the
 # stricter ci_hi < 0 (model provably beats the book) is retained as the reported,
 # non-decisive ``g1_has_edge`` flag for sizing/prioritization. G2/G3 score the FUSED
@@ -170,33 +170,42 @@ _GATE5_DEBIAS_RESAMPLES: int = 200
 # Gate-1 paired-Brier bootstrap on the same probabilities.
 _GATE5_DEBIAS_SEED: int = 9173
 
-# Gate 6 (anti-shrinkage) — a sixth ship term for the ratio_meanyr SkewNormal cohort only.
-# Those cells divide the target by a 365-day MeanYr that conflates "high historical average"
-# with "will regress", so the holdout teaches a high-volume regression real games don't show.
-# g1-g5 — all scored against that same holdout — are blind to it: the model matches the
-# holdout's own suppressed stars (top-decile pred/Result ~ 1.0). Gate 6 instead scores the
-# model's STABLE top-MeanYr prediction against recent form (Mean10), the one yardstick the
-# artifact doesn't suppress, and fails the cell when it sits below the causal real-game floor.
-# Star-side only: the ratio_meanyr denominator deflates the whole distribution, so it
-# under-predicts (never inflates) the bench. [research-analyst
-# /tmp/researcher_overshrinkage_gate.md, 2026-06-19]
+# Gate 6 (anti-shrinkage) — a sixth ship term applied to every cell. It catches a stable-star
+# regression toward the global mean that the outcome-scored gates (g1-g5) can miss. The first
+# case was the ratio_meanyr cohort: dividing the target by a 365-day MeanYr that conflates "high
+# historical average" with "will regress" teaches a high-volume regression real games don't show,
+# and g1-g5 — all scored against that same holdout — match its own suppressed stars (top-decile
+# pred/Result ~ 1.0), blind to it. But the blind spot is general: g2's bias z divides by the
+# outcome sigma, so on a high-variance stat a real proportional star shrinkage launders into a
+# tiny z and passes. Gate 6 instead scores the model's STABLE top-MeanYr prediction against
+# recent form (Mean10) — the one yardstick these artifacts don't suppress — and fails the cell
+# when it sits below the causal real-game floor. The corr anchor (not the normalization or
+# family) scopes it. [research-analyst /tmp/researcher_overshrinkage_gate.md, 2026-06-19;
+# scope widened to all cells 2026-06-21]
 # A "stable" player = recent form within this band of the season baseline; real production
 # tracks recent form for them (noisy windows mean-revert, stable ones don't).
 _GATE6_STABLE_BAND: float = 0.12  # |Mean10/MeanYr - 1| <= this
-# corr(Mean10, Result) anchor: below it recent form isn't a valid yardstick and the gate
-# can't fire — exempts MIN (corr ~0.3-0.5) and the bursty counts, retains FGA/PR/PRA (~0.6).
-_GATE6_MIN_RECENT_CORR: float = 0.55
+# corr(Mean10, Result) anchor with hysteresis: recent form is a valid yardstick only above it
+# (exempts MIN ~0.3-0.5 and bursty counts, retains FGA/PR/PRA ~0.6). Two thresholds form a
+# deadband so a near-0.55 cell can't flip ship state on a retrain wobble: a fresh cell starts
+# being judged at FIRE_ON; a cell whose recent-form leg fired last run keeps being judged down to
+# KEEP_ON. Below KEEP_ON (or no prior fire) the recent-form leg is exempt.
+_GATE6_FIRE_ON: float = 0.58
+_GATE6_KEEP_ON: float = 0.52
+# Over-leg guard: count/ZINB bench over-prediction is only testable where the stable bench's
+# realized mean clears this — below it Σ Result → 0 and the ratio is discreteness, not a defect.
+_GATE6_OVER_MIN_MEAN: float = 1.0
 # Tie band below the floor (~the house vig; the g4 delta=0.05 scale): a stable-star CI within
 # this of the floor is a statistical tie, not over-shrinkage.
 _GATE6_MARGIN: float = 0.03
 # Below this many stable stars the cell is too sparse to test -> auto-pass (tiny NFL cells).
 _GATE6_MIN_STAR_ROWS: int = 30
-# Causal stable-form star floor: a stable high-volume player's next game as a fraction of
-# trailing-10 form, from the league gamelogs (6 WNBA / NBA / NFL seasons). ~0.99 and
-# stat-invariant across basketball; NFL position-mixed yardage runs ~0.94 (the only material
-# split — the full per-stat table is in the research brief). Recompute when the gamelog grows
-# by a season.
-_GATE6_STAR_REF_BASKETBALL: float = 0.98
+# Stable-form star floor the gate enforces: a stable high-volume player's served EV as a
+# fraction of trailing-10 form. The causal value from the league gamelogs (6 WNBA / NBA / NFL
+# seasons) runs ~0.99 and stat-invariant across basketball, but the gate floor sits below it to
+# tolerate ~5% star shrinkage before failing (owner call 2026-06-21); NFL position-mixed yardage
+# runs ~0.94. Recompute the causal value when the gamelog grows by a season.
+_GATE6_STAR_REF_BASKETBALL: float = 0.95
 _GATE6_STAR_REF_NFL: float = 0.94
 
 # Breadth target — at least this fraction of each league's markets should clear the
@@ -721,12 +730,19 @@ def _infer_dist_from_columns(df: pd.DataFrame) -> str | None:
     return None
 
 
-# SkewNormal strategies the gate can decode from the dumped params. ``ratio_meanyr``
-# and ``centered_additive_mean10`` ignore ``GlobalMean``; ``centered_additive_eb_meanyr_k10``
-# re-adds it from the persisted ``GlobalMean`` column (fallback 0.0). Any other string
-# is an A/B run-label on a frame already in EV-space — pass through unchanged.
+# SkewNormal strategies the gate can decode from the dumped params. ``ratio_meanyr``,
+# ``ratio_projvol``, and ``centered_additive_mean10`` ignore ``GlobalMean``;
+# ``ratio_projvol`` multiplies by the persisted ``DenomCol`` (a projected-volume column,
+# with the same per-row MeanYr fallback the served path uses);
+# ``centered_additive_eb_meanyr_k10`` re-adds ``GlobalMean`` from the persisted column
+# (fallback 0.0).
 _SN_DECODE_STRATEGIES: frozenset[str] = frozenset(
-    {"ratio_meanyr", "centered_additive_mean10", "centered_additive_eb_meanyr_k10"}
+    {
+        "ratio_meanyr",
+        "ratio_projvol",
+        "centered_additive_mean10",
+        "centered_additive_eb_meanyr_k10",
+    }
 )
 
 
@@ -1336,45 +1352,88 @@ def _zero_inflated_mean(df: pd.DataFrame, pred: np.ndarray) -> np.ndarray:
     return pred
 
 
-def _gate6_star_ratio(
+def _gate6_anchored(corr: float, prior_g6_fired: bool | None) -> bool:
+    """Gate-6 recent-form anchor with hysteresis. A fresh cell starts being judged at
+    :data:`_GATE6_FIRE_ON`; a cell whose recent-form leg fired on the prior run keeps being judged
+    down to :data:`_GATE6_KEEP_ON`. Outside that the recent-form leg is exempt — ``Mean10`` is not
+    a valid yardstick where recent form doesn't predict the outcome (the corr-anchor rationale).
+    """
+    if not np.isfinite(corr):
+        return False
+    if corr >= _GATE6_FIRE_ON:
+        return True
+    return corr >= _GATE6_KEEP_ON and bool(prior_g6_fired)
+
+
+_GATE6_BLANK_LEGS: dict[str, float | None] = {
+    "g6_recent_corr": None,
+    "g6_star_ratio": None,
+    "g6_star_ci_hi": None,
+    "g6_star_ref": None,
+    "g6_citl_ratio": None,
+    "g6_citl_ci_hi": None,
+    "g6_over_ratio": None,
+    "g6_over_ci_lo": None,
+}
+
+
+def _gate6_legs(
     df: pd.DataFrame,
     pred_col: str,
     *,
     league: str,
-    decode_strategy: str,
-) -> tuple[float | None, float | None, float | None, float | None]:
-    """Gate 6 (anti-shrinkage): the stable-star prediction-vs-recent-form ratio and its CI.
+    prior_g6_fired: bool | None = None,
+) -> dict[str, float | None]:
+    """Gate 6 (anti-shrinkage): three one-sided legs on the stable top/bottom-MeanYr segments, each
+    reading the served ``pred_col`` (so all are normalization- and family-agnostic):
 
-    Returns ``(recent_corr, star_ratio, star_ci_hi, star_ref)``. Every element is ``None``
-    (the gate auto-passes) when the cell is outside the ``ratio_meanyr`` SkewNormal cohort,
-    or — within it — when recent form isn't predictive (``recent_corr`` below the anchor) or
-    too few stable stars exist to test. When computed, the cell over-shrinks iff
-    ``star_ci_hi`` — the player-clustered bootstrap 97.5% upper bound of ``Σ pred / Σ Mean10``
-    over the stable top-MeanYr quartile — sits :data:`_GATE6_MARGIN` below the causal real-game
-    floor ``star_ref``, which the league fixes (NFL position-mixed yardage vs basketball).
+    * **recent-form** (star vs ``Mean10``): the original leg, gated by the corr anchor with
+      hysteresis — catches the ``ratio_meanyr`` holdout-corruption class CITL is blind to.
+    * **CITL-under** (star vs ``Result``): calibration-in-the-large, run on *every* cell (the
+      outcome is a valid yardstick without the anchor) — catches outcome under-shrinkage that
+      Gate 2's σ-normalization launders.
+    * **over** (bench vs ``Result``): count/ZINB bench over-prediction, guarded by a realized
+      segment-mean floor so it can't fire on degenerate rare counts.
+
+    Returns the ``g6_*`` measurement subset; a leg's keys are ``None`` where it can't or shouldn't
+    test (the gate auto-passes a blank leg).
     """
-    if decode_strategy != "ratio_meanyr" or _infer_dist_from_columns(df) != "SkewNormal":
-        return None, None, None, None
     if not {"Mean10", "Player"}.issubset(df.columns):
-        return None, None, None, None
+        return dict(_GATE6_BLANK_LEGS)
     work = df[(df[DECILE_COL] > 0) & (df["Mean10"] > 0)]
     meanyr = work[DECILE_COL].to_numpy()
     mean10 = work["Mean10"].to_numpy()
-    recent_corr = _corr(mean10, work[ACTUAL_COL].to_numpy())
-    if not np.isfinite(recent_corr) or recent_corr < _GATE6_MIN_RECENT_CORR:
-        return recent_corr, None, None, None
+    result = work[ACTUAL_COL].to_numpy()
+    pred = work[pred_col].to_numpy()
+    players = work["Player"].to_numpy()
+    rng = np.random.default_rng(_GATE1_SEED)
+    out = dict(_GATE6_BLANK_LEGS)
+
+    corr = _corr(mean10, result)
+    out["g6_recent_corr"] = corr if np.isfinite(corr) else None
+
     stable = np.abs(mean10 / meanyr - 1.0) <= _GATE6_STABLE_BAND
     star = stable & (meanyr >= np.quantile(meanyr, 1.0 - BOTTOM_QUARTILE_FRAC))
-    if int(star.sum()) < _GATE6_MIN_STAR_ROWS:
-        return recent_corr, None, None, None
-    star_ref = _GATE6_STAR_REF_NFL if league == "NFL" else _GATE6_STAR_REF_BASKETBALL
-    ratio, _, ratio_hi = _bootstrap_ratio_ci_clustered(
-        work[pred_col].to_numpy()[star],
-        mean10[star],
-        work["Player"].to_numpy()[star],
-        np.random.default_rng(_GATE1_SEED),
-    )
-    return recent_corr, ratio, ratio_hi, star_ref
+    if int(star.sum()) >= _GATE6_MIN_STAR_ROWS:
+        citl, _, citl_hi = _bootstrap_ratio_ci_clustered(pred[star], result[star], players[star], rng)
+        out["g6_citl_ratio"], out["g6_citl_ci_hi"] = citl, citl_hi
+        if _gate6_anchored(corr, prior_g6_fired):
+            ratio, _, ratio_hi = _bootstrap_ratio_ci_clustered(
+                pred[star], mean10[star], players[star], rng
+            )
+            out["g6_star_ratio"], out["g6_star_ci_hi"] = ratio, ratio_hi
+            out["g6_star_ref"] = (
+                _GATE6_STAR_REF_NFL if league == "NFL" else _GATE6_STAR_REF_BASKETBALL
+            )
+
+    if _infer_dist_from_columns(df) in ("NegBin", "ZINB"):
+        bench = stable & (meanyr <= np.quantile(meanyr, BOTTOM_QUARTILE_FRAC))
+        if int(bench.sum()) >= _GATE6_MIN_STAR_ROWS and result[bench].mean() >= _GATE6_OVER_MIN_MEAN:
+            over, over_lo, _ = _bootstrap_ratio_ci_clustered(
+                pred[bench], result[bench], players[bench], rng
+            )
+            out["g6_over_ratio"], out["g6_over_ci_lo"] = over, over_lo
+    return out
 
 
 def gate_row(
@@ -1385,6 +1444,7 @@ def gate_row(
     market: str,
     strategy: str,
     decode_strategy: str | None = None,
+    prior_g6_fired: bool | None = None,
 ) -> dict[str, object]:
     """Compute the offline ship gates for one cell — a model row plus an oracle row.
 
@@ -1490,12 +1550,10 @@ def gate_row(
             else g5_ece_o
         )
 
-    # Gate 6 — anti-shrinkage. Scores the stable top-MeanYr prediction against recent form;
-    # auto-passes (Nones) outside the ratio_meanyr SkewNormal cohort and wherever it can't
-    # test. ``decode_for_g4`` is the resolved per-cell normalization (the cohort key).
-    g6_corr, g6_ratio, g6_hi, g6_ref = _gate6_star_ratio(
-        df, pred_col, league=league, decode_strategy=decode_for_g4
-    )
+    # Gate 6 — anti-shrinkage. Three OR-ed one-sided legs (recent-form, CITL-under, count over) on
+    # the served prediction; each auto-passes (Nones) where it can't or shouldn't test. The
+    # recent-form leg carries the corr-anchor hysteresis seeded by ``prior_g6_fired``.
+    g6 = _gate6_legs(df, pred_col, league=league, prior_g6_fired=prior_g6_fired)
 
     r = _round_gate_value
     return {
@@ -1540,10 +1598,7 @@ def gate_row(
         "g5_ece_null_bias": r(g5_ece_bias),
         "g5_ece_debiased": r(g5_ece_db),
         "g5_ece_debiased_oracle": r(g5_ece_db_o),
-        "g6_recent_corr": r(g6_corr),
-        "g6_star_ratio": r(g6_ratio),
-        "g6_star_ci_hi": r(g6_hi),
-        "g6_star_ref": r(g6_ref),
+        **{k: r(v) for k, v in g6.items()},
     }
 
 
@@ -1573,12 +1628,30 @@ def _below_zero_ci_bound(hi: float | None) -> bool:
     return hi < _GATE1_CI_HI_MAX or (hi == 0.0 and bool(np.signbit(hi)))
 
 
-def _gate6_passes(hi: float | None, ref: float | None) -> bool:
-    """Gate-6 ship test: auto-pass when not applicable (blank ``hi`` / ``ref`` — outside the
-    cohort or untestable), else pass iff the stable-star CI upper bound sits within the tie
-    margin of the causal floor. The blank-is-pass here is deliberate, unlike g2-g5.
+def _gate6_passes(row: Mapping[str, object]) -> bool:
+    """Gate-6 ship test: pass iff none of the three one-sided legs fires. Each leg auto-passes when
+    blank (not applicable / untestable) — the deliberate blank-is-pass, unlike g2-g5.
+
+    * recent-form: ``star_ci_hi`` (CI UB of ``Σpred/ΣMean10``) at/above ``star_ref − margin``.
+    * CITL-under: ``citl_ci_hi`` (UB of ``Σpred/ΣResult``) at/above ``1 − margin``.
+    * over: ``over_ci_lo`` (LB of bench ``Σpred/ΣResult``) at/below ``1 + margin``.
     """
-    return hi is None or ref is None or hi >= ref - _GATE6_MARGIN
+    star_hi, star_ref = row.get("g6_star_ci_hi"), row.get("g6_star_ref")
+    citl_hi = row.get("g6_citl_ci_hi")
+    over_lo = row.get("g6_over_ci_lo")
+    recent_ok = star_hi is None or star_ref is None or star_hi >= star_ref - _GATE6_MARGIN
+    citl_ok = citl_hi is None or citl_hi >= 1.0 - _GATE6_MARGIN
+    over_ok = over_lo is None or over_lo <= 1.0 + _GATE6_MARGIN
+    return recent_ok and citl_ok and over_ok
+
+
+def recent_form_fired(row: Mapping[str, object]) -> bool:
+    """Whether the recent-form leg flagged this cell on the row's run. Seeds Gate-6 hysteresis from
+    the prior ``model_stats`` row using ``g6_star_ci_hi``/``g6_star_ref`` (columns that predate this
+    rework, so the first run after it lands is still seeded — cold-start safe).
+    """
+    hi, ref = row.get("g6_star_ci_hi"), row.get("g6_star_ref")
+    return hi is not None and ref is not None and hi < ref - _GATE6_MARGIN
 
 
 def apply_thresholds(row: dict[str, object]) -> dict[str, object]:
@@ -1609,9 +1682,9 @@ def apply_thresholds(row: dict[str, object]) -> dict[str, object]:
     # to raw ECE if the debiased column is absent (synthetic golden frames).
     g5 = out.get("g5_ece_debiased", out.get("g5_ece"))
     g5_pass = g5 is not None and g5 < _GATE5_ECE_MAX
-    # Gate 6 (anti-shrinkage): blank = "not applicable" auto-pass (outside the cohort or
-    # untestable), the opposite of the g2-g5 blank-is-fail convention. See :func:`_gate6_passes`.
-    g6_pass = _gate6_passes(out.get("g6_star_ci_hi"), out.get("g6_star_ref"))
+    # Gate 6 (anti-shrinkage): pass iff none of the three one-sided legs fires; each blank leg is a
+    # "not applicable" auto-pass, the opposite of the g2-g5 blank-is-fail convention.
+    g6_pass = _gate6_passes(out)
     out["g1_pass"] = g1_pass
     out["g1_has_edge"] = _below_zero_ci_bound(out.get("g1_brier_diff_ci_hi"))
     out["g2_pass"] = g2_pass
@@ -1643,17 +1716,22 @@ def min_gate_slack(row: dict[str, object]) -> float:
     """
     hi = row.get("g1_brier_diff_ci_hi")
     g4, g4_max = row.get("g4_pit_ks"), row.get("g4_pit_ks_max")
-    # Gate 6 auto-pass (blank) never binds (+inf); a tested cohort cell contributes the
-    # stable-star CI's fractional headroom above the tie-margin'd causal floor.
-    g6_hi = row.get("g6_star_ci_hi")
-    g6_ref = row.get("g6_star_ref")
+    # Gate 6 auto-pass (blank leg) never binds (+inf). recent-form / CITL are lower-bounded (the
+    # value must clear a floor, so headroom is value − floor); over is upper-bounded.
+    star_hi, star_ref = row.get("g6_star_ci_hi"), row.get("g6_star_ref")
+    citl_hi = row.get("g6_citl_ci_hi")
+    over_lo = row.get("g6_over_ci_lo")
     return min(
         np.inf if hi is None else (_GATE1_NONINF_MARGIN - hi) / _GATE1_NONINF_MARGIN,
         _normalized_gate_slack(row.get("g2_star_z"), _GATE2_STAR_Z_MAX),
         _normalized_gate_slack(row.get("g3_bench_z"), _GATE3_BENCH_Z_MAX),
         -np.inf if g4 is None or g4_max is None else (g4_max - g4) / g4_max,
         _normalized_gate_slack(row.get("g5_ece_debiased", row.get("g5_ece")), _GATE5_ECE_MAX),
-        np.inf if g6_hi is None else _normalized_gate_slack(g6_hi, g6_ref - _GATE6_MARGIN),
+        np.inf
+        if star_hi is None or star_ref is None
+        else (star_hi - (star_ref - _GATE6_MARGIN)) / (star_ref - _GATE6_MARGIN),
+        np.inf if citl_hi is None else (citl_hi - (1.0 - _GATE6_MARGIN)) / (1.0 - _GATE6_MARGIN),
+        np.inf if over_lo is None else _normalized_gate_slack(over_lo, 1.0 + _GATE6_MARGIN),
     )
 
 
@@ -1670,6 +1748,7 @@ def compute_gates(
     market: str,
     strategy: str = "meditate",
     pred_col: str = DEFAULT_PRED_COL,
+    prior_g6_fired: bool | None = None,
 ) -> dict[str, object]:
     """Per-cell ship-gate column dict for inline use by ``training.report``.
 
@@ -1688,6 +1767,8 @@ def compute_gates(
             before it's stripped. Defaults to ``"meditate"`` so the inline
             caller doesn't have to think about a label that's never read.
         pred_col: Predicted-mean column to evaluate (``"Blended_EV"`` = fused ship gate; ``"EV"`` = raw model).
+        prior_g6_fired: Whether the recent-form leg fired on the prior run, seeding the Gate-6
+            anchor hysteresis. ``None`` (no prior / cold start) judges at the fire-on threshold.
 
     Returns:
         Dict carrying every gate measurement, oracle bound, per-gate
@@ -1705,6 +1786,7 @@ def compute_gates(
             market=market_stem,
             strategy=strategy,
             decode_strategy=decode_strategy,
+            prior_g6_fired=prior_g6_fired,
         )
     )
     gate_only = {k: v for k, v in row.items() if k not in _GATE_ROW_IDENTITY_KEYS}
