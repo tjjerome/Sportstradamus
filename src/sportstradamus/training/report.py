@@ -58,7 +58,16 @@ _SHIP_PRED_COL = "Blended_EV"
 # Tri-state ship-gate columns. Cast at the parquet boundary to the pandas
 # nullable BooleanDtype so a missing scorecard run round-trips as pd.NA
 # instead of decaying into False.
-_GATE_PASS_COLS = ("g1_pass", "g1_has_edge", "g2_pass", "g3_pass", "g4_pass", "g5_pass", "ship")
+_GATE_PASS_COLS = (
+    "g1_pass",
+    "g1_has_edge",
+    "g2_pass",
+    "g3_pass",
+    "g4_pass",
+    "g5_pass",
+    "g6_pass",
+    "ship",
+)
 
 # ``training.scorecard.compute_gates`` reads per-cell test-set CSVs from this
 # directory. ``meditate`` dumps them inside :class:`training.pipeline.train_market`
@@ -233,6 +242,7 @@ def _wide_row(
         "g3_pass": pd.NA,
         "g4_pass": pd.NA,
         "g5_pass": pd.NA,
+        "g6_pass": pd.NA,
         "ship": pd.NA,
         # Hyperparameters
         "hp_rounds": _param("opt_rounds"),
@@ -256,8 +266,7 @@ def _load_prior_g6_fired() -> dict[tuple[str, str], bool]:
         return {}
     prior = pd.read_parquet(MODEL_STATS_PATH)
     return {
-        (str(r["league"]), str(r["market"])): recent_form_fired(r)
-        for r in prior.to_dict("records")
+        (str(r["league"]), str(r["market"])): recent_form_fired(r) for r in prior.to_dict("records")
     }
 
 

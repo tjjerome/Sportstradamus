@@ -1353,11 +1353,6 @@ def _zero_inflated_mean(df: pd.DataFrame, pred: np.ndarray) -> np.ndarray:
 
 
 def _gate6_anchored(corr: float, prior_g6_fired: bool | None) -> bool:
-    """Gate-6 recent-form anchor with hysteresis. A fresh cell starts being judged at
-    :data:`_GATE6_FIRE_ON`; a cell whose recent-form leg fired on the prior run keeps being judged
-    down to :data:`_GATE6_KEEP_ON`. Outside that the recent-form leg is exempt — ``Mean10`` is not
-    a valid yardstick where recent form doesn't predict the outcome (the corr-anchor rationale).
-    """
     if not np.isfinite(corr):
         return False
     if corr >= _GATE6_FIRE_ON:
@@ -1415,7 +1410,9 @@ def _gate6_legs(
     stable = np.abs(mean10 / meanyr - 1.0) <= _GATE6_STABLE_BAND
     star = stable & (meanyr >= np.quantile(meanyr, 1.0 - BOTTOM_QUARTILE_FRAC))
     if int(star.sum()) >= _GATE6_MIN_STAR_ROWS:
-        citl, _, citl_hi = _bootstrap_ratio_ci_clustered(pred[star], result[star], players[star], rng)
+        citl, _, citl_hi = _bootstrap_ratio_ci_clustered(
+            pred[star], result[star], players[star], rng
+        )
         out["g6_citl_ratio"], out["g6_citl_ci_hi"] = citl, citl_hi
         if _gate6_anchored(corr, prior_g6_fired):
             ratio, _, ratio_hi = _bootstrap_ratio_ci_clustered(
@@ -1428,7 +1425,10 @@ def _gate6_legs(
 
     if _infer_dist_from_columns(df) in ("NegBin", "ZINB"):
         bench = stable & (meanyr <= np.quantile(meanyr, BOTTOM_QUARTILE_FRAC))
-        if int(bench.sum()) >= _GATE6_MIN_STAR_ROWS and result[bench].mean() >= _GATE6_OVER_MIN_MEAN:
+        if (
+            int(bench.sum()) >= _GATE6_MIN_STAR_ROWS
+            and result[bench].mean() >= _GATE6_OVER_MIN_MEAN
+        ):
             over, over_lo, _ = _bootstrap_ratio_ci_clustered(
                 pred[bench], result[bench], players[bench], rng
             )
@@ -1550,9 +1550,6 @@ def gate_row(
             else g5_ece_o
         )
 
-    # Gate 6 — anti-shrinkage. Three OR-ed one-sided legs (recent-form, CITL-under, count over) on
-    # the served prediction; each auto-passes (Nones) where it can't or shouldn't test. The
-    # recent-form leg carries the corr-anchor hysteresis seeded by ``prior_g6_fired``.
     g6 = _gate6_legs(df, pred_col, league=league, prior_g6_fired=prior_g6_fired)
 
     r = _round_gate_value
