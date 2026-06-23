@@ -85,6 +85,17 @@ def _enforce_ship_gate(
     return pruned
 
 
+def _resolve_cell_knob(stat_meta_full, lg, market, key, default, flag_value):
+    """Per-cell training knob from stat_meta, overridden run-wide by an explicit (non-``auto``) flag.
+
+    Shared by the blending-loss and HP-selection axes: ``flag_value == LOSS_AUTO`` honors each
+    cell's persisted ``key`` (so the production cron reproduces a cell's shipped config); an
+    explicit slug forces every cell for a one-shot A/B.
+    """
+    cell_value = stat_meta_full.get(lg, {}).get(market, {}).get(key, default)
+    return cell_value if flag_value == LOSS_AUTO else flag_value
+
+
 @click.command()
 @click.option(
     "--force/--no-force",
@@ -201,6 +212,40 @@ def _enforce_ship_gate(
         "pickles feed proj_* features into downstream training matrices."
     ),
 )
+@click.option(
+    "--stabilization",
+    type=click.Choice(["None", "MAD", "L2"]),
+    default="None",
+    show_default=True,
+    help=(
+        "Per-distribution-parameter gradient stabilization for LightGBMLSS. 'None' (default) "
+        "is current production. 'MAD'/'L2' damp the scale-head's large/outlier gradients (the "
+        "only in-API per-parameter sigma knob); an Operation Ship 75 calibration search axis."
+    ),
+)
+@click.option(
+    "--hpo-selection",
+    type=click.Choice([LOSS_AUTO, "loss", "calibrated"]),
+    default=LOSS_AUTO,
+    show_default=True,
+    help=(
+        "Optuna trial-selection rule for SkewNormal cells. 'auto' (default) honors each cell's "
+        "stat_meta hpo_selection (else 'loss'); an explicit slug overrides every cell. 'loss' picks "
+        "the lowest CV CRPS; 'calibrated' re-ranks the top trials by validation PIT-KS and picks the "
+        "sharpest that clears the Gate-4 threshold (sharpness subject to calibration); a Ship 75 axis."
+    ),
+)
+@click.option(
+    "--count-dispersion-objective",
+    type=click.Choice(["crps", "pit_ks"]),
+    default="crps",
+    show_default=True,
+    help=(
+        "Objective the count branch (NegBin/ZINB/Gamma) minimizes when fitting the dispersion "
+        "scale. 'crps' (default) is current production; 'pit_ks' targets the served Gate-4 "
+        "randomized-PIT KS directly, mirroring the SkewNormal branch; a Ship 75 axis."
+    ),
+)
 def meditate(
     force,
     league,
@@ -214,6 +259,9 @@ def meditate(
     market,
     branch,
     bypass_withholding,
+    stabilization,
+    hpo_selection,
+    count_dispersion_objective,
 ):
     """Train or retrain LightGBMLSS models for each configured market."""
     # style: allow-complexity — meditate entrypoint: a flat training pipeline
@@ -370,15 +418,19 @@ def meditate(
             if cell_target_norm == TARGET_NORM_NONE:
                 cell_target_norm = target_normalization
             cell_posthoc = stat_meta_full.get(lg, {}).get(market, {}).get("posthoc", "none")
-            cell_blending = (
-                stat_meta_full.get(lg, {})
-                .get(market, {})
-                .get("blending", calibration.DEFAULT_BLENDING)
+            # --blending-loss-fn / --hpo-selection override the per-cell stat_meta value for the
+            # search axis; 'auto' leaves each cell on its configured knob.
+            cell_blending = _resolve_cell_knob(
+                stat_meta_full,
+                lg,
+                market,
+                "blending",
+                calibration.DEFAULT_BLENDING,
+                blending_loss_fn,
             )
-            # --blending-loss-fn overrides the per-cell stat_meta blending for the search axis;
-            # 'auto' leaves each cell on its configured blend.
-            if blending_loss_fn != LOSS_AUTO:
-                cell_blending = blending_loss_fn
+            cell_hpo_selection = _resolve_cell_knob(
+                stat_meta_full, lg, market, "hpo_selection", "loss", hpo_selection
+            )
             train_market(
                 lg,
                 market,
@@ -392,6 +444,9 @@ def meditate(
                 blending=cell_blending,
                 zinb_mode=zinb_mode,
                 dist_training_loss=dist_training_loss,
+                stabilization=stabilization,
+                hpo_selection=cell_hpo_selection,
+                count_dispersion_objective=count_dispersion_objective,
             )
 
     if not deterministic:
