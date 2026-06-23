@@ -2,9 +2,10 @@
 
 Lever 2 — count-branch dispersion calibration re-targeted from CRPS to the Gate-4
 randomized-PIT KS (`_dispersion_pit_ks_loss`).
-Lever 1 — calibration-constrained HP selection policy (`_pick_calibrated_candidate`):
-pick the lowest-CRPS trial whose CV PIT-KS clears the gate threshold, else fall back to
-the best-calibrated trial.
+Lever 1 — calibration-constrained HP *search*: the Optuna objective is the one-sided
+search-gating score `_penalized_objective` (CRPS plus a hinge on the validation PIT-KS over
+the Gate-4 threshold), so the sampler explores the wider-sigma region; the final pick is
+`_pick_calibrated_candidate` (lowest-CRPS trial clearing the threshold, else best-calibrated).
 
 Both are opt-in; production defaults (CRPS dispersion, loss-only selection) are unchanged.
 """
@@ -98,6 +99,27 @@ def test_stabilization_arg_reaches_distribution_attribute():
 
     assert SkewNormal(stabilization="MAD", loss_fn="crps").stabilization == "MAD"
     assert SkewNormal(stabilization="None", loss_fn="crps").stabilization == "None"
+
+
+def test_penalized_objective_is_pure_crps_in_feasible_region():
+    """Lever 1 search-gate: the hinge is one-sided, so a calibrated trial (PIT-KS at or below the
+    threshold) is scored by pure CRPS — the feasible region keeps sharpest-wins, with no pull toward
+    the over-dispersed marginal predictor (the GBR degeneracy guard)."""
+    from sportstradamus.training.hyperparams import _penalized_objective
+
+    assert _penalized_objective(3.0, 0.04, 0.05) == 3.0
+    assert _penalized_objective(3.0, 0.05, 0.05) == 3.0
+
+
+def test_penalized_objective_steers_search_away_from_uncalibrated():
+    """Lever 1 search-gate: a sharp-but-uncalibrated trial (low CRPS, PIT-KS over the gate) must
+    score WORSE than a blunter calibrated one, so the TPE sampler is steered into the wider-sigma
+    feasible region instead of only re-ranking the sharpest cluster post hoc."""
+    from sportstradamus.training.hyperparams import _penalized_objective
+
+    sharp_uncalibrated = _penalized_objective(3.00, 0.10, 0.05)
+    blunt_calibrated = _penalized_objective(3.20, 0.04, 0.05)
+    assert sharp_uncalibrated > blunt_calibrated
 
 
 def test_resolve_cell_knob_persists_per_cell_selection_and_honors_flag_override():

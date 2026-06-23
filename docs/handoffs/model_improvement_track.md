@@ -341,8 +341,8 @@ The deterministic study only **ranks**; the real-HPO scorecard **ships**. Fixed 
    (no strategy edit). Knife-edge cells (g4 within ~0.003 of 0.05) are exactly where the
    val→test discount bites — the confirm is mandatory; never ship the deterministic score.
    **HP-selection is a confirm-time axis the board cannot see.** The deterministic study fixes one
-   HP set, so it never produces the trial *spread* `--hpo-selection calibrated` re-ranks by
-   validation PIT-KS (§6.1 Lever 1); the selection policy is therefore orthogonal to the board's
+   HP set, so it never runs the search `--hpo-selection calibrated` gates on validation PIT-KS
+   (§6.1 Lever 1); the selection policy is therefore orthogonal to the board's
    normalization pick and decided only here. **Confirm every SkewNormal candidate under `calibrated`
    first** — it picks the sharpest trial that *clears* Gate-4, so it weakly dominates `loss` on g4 at
    a small g1-sharpness cost; a clean 5/5 ships with `hpo_selection: "calibrated"` persisted in
@@ -488,24 +488,38 @@ Entry: cell fails g4 (either direction) or g2/g3.
 The post-hoc rungs above polish a *fixed* trained σ-head; these two change which head you get,
 upstream of the polish. Both default to current production.
 
-- **Lever 1 — calibration-constrained HP selection (`--hpo-selection calibrated`, SkewNormal
+- **Lever 1 — calibration-constrained HP *search* (`--hpo-selection calibrated`, SkewNormal
   cells).** Why full HPO often *fails* g4 where the deliberately under-fit deterministic run
   passes: μ and σ share one LightGBMLSS boosting process and one HP set, so the standard knobs
   move sharpness and calibration *together*; full HPO walks to the CRPS minimum (the sharpest σ
   surface), not the calibrated one, while the under-fit run's near-constant σ ≈ the marginal
-  residual SD is homoscedastically calibrated "for free." The fix is the *selection rule*, not the
-  loss: among the top-K lowest-CRPS Optuna trials, refit each, score the served validation PIT-KS
-  (post-hoc-`c`-polished, the exact gate statistic), and pick the lowest-CRPS trial that clears
-  the Gate-4 threshold — falling back to the best-calibrated, *logged* (Gneiting-Balabdaoui-Raftery
-  2007 "sharpness subject to calibration" as a hard constraint; Niculescu-Mizil & Caruana 2005,
-  over-boosting overshoots the calibration optimum). Built across
-  [`hyperparams.run_hyper_opt(top_k=…)`](../../src/sportstradamus/training/hyperparams.py) +
-  [`pipeline._select_calibrated_hp`](../../src/sportstradamus/training/pipeline.py). **Reality
-  check:** it only re-ranks *within* the trials HPO already explored — if no HP setting in the
-  space is calibratable for a cell, the logged fallback fires and it is a no-op; that cell routes
-  to normalization (§6.2) / Rung C / family (§6.6). The measure is the model-only (pre-book-blend)
-  predictive; sound because the model dominates the failing cells, but it does not capture a cell
-  the *blend* would rescue.
+  residual SD is homoscedastically calibrated "for free." The fix is the *selection objective*, not
+  the loss: the Optuna objective is **search-gated** — `CRPS + M·max(0, PIT-KS − τ)`, a one-sided
+  hinge on the served validation PIT-KS over the Gate-4 threshold τ (M=10) — so the TPE sampler
+  *explores* the wider-σ region instead of re-ranking only the sharpest cluster; the feasible region
+  stays ranked by pure CRPS (zero hinge once calibrated ⇒ no pull toward the over-dispersed marginal
+  predictor, the GBR degeneracy guard). Final pick: the lowest-CRPS trial clearing τ, else the
+  best-calibrated, *logged* (Gneiting-Balabdaoui-Raftery 2007 "sharpness subject to calibration" as a
+  hard constraint; research brief `/tmp/researcher_hpo_objective.md`). Built across
+  [`hyperparams.run_hyper_opt(calibration_penalty=…)`](../../src/sportstradamus/training/hyperparams.py)
+  (+ `_penalized_objective`) and the per-trial served-PIT-KS closure
+  [`pipeline._calibration_penalty`](../../src/sportstradamus/training/pipeline.py); cost is one extra
+  refit per Optuna trial (the brief's `return_cvbooster` OOF variant is a deferred optimization). The
+  measure is the model-only (pre-book-blend) predictive; sound because the model dominates the failing
+  cells, but it does not capture a cell the *blend* would rescue.
+
+  **Scale-bound vs shape-bound — what the search-gate can and cannot fix.** A g4-failing SkewNormal
+  cell is one of two kinds, separated by the PIT central-coverage triple already in the gate row:
+  *scale-bound* — cov50/cov80 *below* nominal (uniformly too narrow); the wide-σ trial exists but
+  CRPS-selection never sampled it, so the search-gate rescues it (DREB: g4 0.0651 → 0.0508, the
+  near-miss the gate should now close). *shape-bound* — cov50/cov80 *near* nominal yet KS still fails
+  because the PIT defect *wanders* (a lumpy histogram no scalar σ can move); the family cannot
+  represent the cell's shape at any σ, the logged fallback fires, and the search-gate is a no-op (PA:
+  cov50 0.493 / cov80 0.813, g4 0.0581 — the calibrated arm widened σ +34% *and* raised book-skill and
+  still failed). Shape-bound cells route to §6.6 **manual per-cell** family escalation
+  (centered-parametrization SN → SHASH/JSU → skew-t), not to any HP knob. Diagnose with cov50/cov80
+  before spending a real-HPO confirm; the scale-bound vs shape-bound *mix* across the live g4-failing
+  SN cohort decides search-gate-vs-§6.6 ROI and is the cheap next read (open-Q #9).
 - **Lever 4 — per-parameter gradient stabilization (`--stabilization MAD|L2`).** The only in-API
   σ-vs-μ-asymmetric knob: LightGBMLSS stabilizes each distributional parameter's gradient/Hessian
   independently, and `MAD`/`L2` damp the σ-head's large/outlier gradients (the over-fit mechanism
@@ -1174,16 +1188,18 @@ no brief. To proceed without a brief on a hook-gated edit, write a one-line just
   [research: `/tmp/researcher_projvol_dispersion.md`]
 - **#9 — do the calibration-aware HP levers (§6.1 Lever 1 / Rung B′ / Lever 4) move the served
   set, or only re-rank trials that ship/fail together?** Built + opt-in; unanswered until run on
-  real cells. (a) Lever-1 constrained selection wants a confirm on a knife-edge cell (WNBA DREB,
-  det g4 0.048 → full-HPO 0.060) where it can flip the outcome the loss-only rule got wrong (the
-  deterministic-oversell lesson); if no HP setting in the search space is calibratable the logged
-  fallback fires and it is a no-op → route to §6.2 / Rung C. (b) Rung B′'s PIT-KS count objective
+  real cells. (a) Lever 1 is now the **search-gate** (the objective steers the TPE study toward the
+  calibrated region, not just a top-K re-rank); the open question is the **scale-bound vs shape-bound
+  mix** across the live g4-failing SN cohort — the cheap cov50/cov80 gate-row query decides
+  search-gate-vs-§6.6 ROI before any retrain. Confirm on the scale-bound near-miss WNBA DREB (g4
+  0.0651 → 0.0508 under the old re-rank; the search-gate should close the last 0.001); shape-bound
+  cells (cov ≈ nominal, KS wandering — PA) are a search-gate no-op and route to §6.6. (b) Rung B′'s PIT-KS count objective
   has no sharpness brake — watch g6's over-leg and the g1 acceptance for over-tightening. (c) only
   promote `--stabilization` to a swept axis if MAD/L2 ever wins on ≥1 cell (YAGNI). (d) the
   under-wide-AND-mislocated NFL SkewNormal cells (attempts/carries, central-50 ≈ 0.27/0.34) are out
   of reach for any selection/post-hoc width fix — that defect is signal/family, not width; confirm
   via §6.3 features and/or the §6.9 `log(volume)` offset before spending a calibration lever on
-  them. [research: `/tmp/researcher_calibration_hp.md`]
+  them. [research: `/tmp/researcher_calibration_hp.md`, `/tmp/researcher_hpo_objective.md`]
 
 **Resolved (one-liners; detail in [`../operation_ship_references.md`](../operation_ship_references.md)):**
 post-hoc scale moves PIT-KS without breaking g1/g5, but only under the right normalization and
@@ -1228,6 +1244,7 @@ decoded mean and a high gate cannot hide an inflated μ; the failure mode is not
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-06-23 · **Lever 1 reworked — HP *search-gate* replaces the top-8 re-rank (research-gated build).** Brief `/tmp/researcher_hpo_objective.md`: keep CV-CRPS as the base selection score (do NOT switch to NLL — it loses g1–g4 + EV in-house and is tail-fragile); the change is the constraint *form*. The old Lever 1 re-ranked only the top-8 lowest-CRPS trials — structurally blind to the wider-σ corner CRPS never samples (PA's whole top-8 was under-dispersed). Now the Optuna objective is **search-gated**: `CRPS + 10·max(0, val_PIT-KS − τ)`, a one-sided hinge (zero once calibrated ⇒ the feasible region stays ranked by pure CRPS, the GBR degeneracy guard) so the TPE sampler *explores* the calibrated region; final pick unchanged (`_pick_calibrated_candidate`). **Inert by default** — no-op unless `hpo_selection: calibrated` + SkewNormal; `calibration_penalty is None` reproduces plain CV-CRPS byte-for-byte. `hyperparams.run_hyper_opt(calibration_penalty=…)` + `_penalized_objective` + `_collect_calibrated_candidates`; `pipeline._calibration_penalty` closure replaces the removed `_select_calibrated_hp`/`_calibrated_top_k`; cost = one extra refit/trial (`return_cvbooster` OOF variant deferred). **Brief reframe:** PA was the wrong poster child — it is **shape-bound** (cov50/cov80 ≈ nominal, PIT supremum wanders → family-misspecified), a search-gate no-op routing to §6.6 **manual per-cell** family; **DREB** is the **scale-bound** beneficiary (0.0651 → 0.0508, the gate should now close it). TDD (`_penalized_objective` golden), gates: ruff clean, golden 1908 pass (1 pre-existing correlation red), integration 22 pass, refactoring-specialist clean. · next: cov50/cov80-stratify the live g4-failing SN cohort (scale-vs-shape mix = search-gate-vs-§6.6 ROI, open-Q #9); real-HPO confirm DREB under the search-gate; re-confirm PR (it shipped under the old re-rank, PR #84).
 - 2026-06-23 · **PA/PR/DREB calibrated re-confirm — Lever 1 VALIDATED, ships WNBA PR; per-cell `hpo_selection` persistence + §6.2 confirm policy.** Ran the 3 in-regime g4-bound WNBA SkewNormal cells (PA/PR net-new, DREB the knife-edge) as a controlled **loss-vs-calibrated A/B** (same `ca_mean10` norm, full cold HPO, differing only in `--hpo-selection`). **PR RESCUED** — loss g4 **0.0516 (fail) → calibrated 0.0423 (pass)**, ships 6/6: calibrated selection traded a hair of sharpness for the wider-σ trial that clears Gate-4, exactly the Lever-1 mechanism. **DREB near-miss** (0.0651 → 0.0508; slack −0.302 → −0.016 — a Rung-C candidate now), **PA no-op** (0.0581 → 0.0583 — the logged fallback fired, no calibratable trial in the top-K). All three fail **g4-only** under loss (gates `111011`), the exact regime Lever 1 targets. **Durability gap found + fixed:** `--hpo-selection` was a *run-wide* flag, not per-cell, so PR's calibrated ship would **dark out on the next devel cron** (warm HPO walks back to the sharper g4-failing trial → `_enforce_ship_gate` prunes). Made it per-cell like `blending`: new `cli._resolve_cell_knob` consolidates the blending + hpo_selection reads, `--hpo-selection` default `loss`→`auto` (honors stat_meta, explicit slug still forces a run-wide A/B), and WNBA PR carries `hpo_selection: "calibrated"`. **§6.2 operating loop updated** — HP-selection is a confirm-time axis the deterministic board can't see (it fixes one HP set, no trial spread to re-rank); **confirm every SN candidate under `calibrated` first** (weakly dominates loss on g4), fall back to `loss` if its wider σ tips g1, persist the winner per-cell. **Ships WNBA PR + PRA → devel** (PRA durable under the default loss from the prior confirm; +2 WNBA served). Gates: ruff clean, golden green (+ `_resolve_cell_knob` persistence test), integration green, refactoring-specialist clean. · next: §6.1 Rung C (whole-CDF PIT recal) for DREB's 0.0508 near-miss + the mixed-direction SN cohort; persist `stabilization`/`count_dispersion_objective` per-cell only if a cell ever ships on Lever 2/4 (YAGNI until then).
 - 2026-06-22 · **`centered_additive_mean10`-over-`ratio_meanyr` confirm queue RAN (full HPO) + three calibration-aware HP levers BUILT.** Confirm queue (6 cells, the `ca_mean10`-board-best-differs set): 3 supersede (NBA RA/PR, WNBA fantasy) + 3 net-new (WNBA PA/PR/PRA). **Only WNBA PRA SHIPS** (net-new, real `min_gate_slack` +0.068 — the tiny det board margin +0.036 survived full HPO), the other 5 HOLD: the deterministic board oversold g4 again ([[deterministic_ab_g4_oversell]]) — WNBA PA/PR det g4 margins +0.33/+0.32 **evaporated** at full HPO; supersede trio failed S2/S3. WNBA 7→8. **The HPO-vs-deterministic g4 paradox** (sharp μ surface ≠ calibrated σ surface; μ/σ share one LightGBMLSS HP set so standard knobs move both together) was researched (`/tmp/researcher_calibration_hp.md`) → **3 cheap opt-in levers built, defaults = production:** **Lever 1** `--hpo-selection calibrated` ([`hyperparams.run_hyper_opt(top_k)`](../../src/sportstradamus/training/hyperparams.py) returns top-K lowest-CRPS trials → [`pipeline._select_calibrated_hp`](../../src/sportstradamus/training/pipeline.py) refits each + re-ranks by validation PIT-KS, picks sharpest that clears g4, logged fallback; SkewNormal only); **Lever 2** `--count-dispersion-objective pit_ks` (count `dispersion_cal` CRPS→PIT-KS via `_dispersion_pit_ks_loss`; §6.1 Rung B′); **Lever 4** `--stabilization MAD|L2` (σ-head gradient damping; the only in-API per-param knob). Levers 3 (whole-CDF Rung C) + 5 (in-training PIT reg) folded to §6.1/§6.5 as next/deferred; the g4-failing SN cells are **mixed-direction** (WNBA fantasy over-wide, NFL attempts/carries under-wide) so a scalar `c` can't fix them — Rung C re-ranked above family rebuilds. Gates: ruff clean, refactoring-specialist clean, golden 1905 pass (1 pre-existing real-NBA correlation red), integration 22 pass. WNBA PRA flip staged (uncommitted). · next: re-confirm the 5 HOLD SN cells (NBA RA/PR, WNBA PA/PR/fantasy) with `--hpo-selection calibrated` (does calibrated selection rescue any?); commit WNBA PRA + any new winners → devel via devel-ship-curator.
 - 2026-06-22 · **§6.2 all-cells CV re-sweep vs the reworked Gate 6 + `ratio_projvol` — g6 VALIDATED, projvol REFUTED.** Re-scored all 59 cells' existing deterministic dumps against the 3-leg g6 (instant — g6 changed scoring, not training): g6 fires on exactly **4 corners via the right legs** — NBA fantasy-points `ratio_meanyr` via **CITL** at corr 0.556 (*below* the 0.58 recent-form anchor, the σ-laundered case the rework targets), WNBA FGA + NFL targets/rushing-yards via recent-form; **0 served cells false-flag**; shippable set unchanged (all 4 g6-fails were already non-shipping corners). Trained `ratio_projvol` on 41 eligible cells (39 ok, 2 NFL timeouts = same low-mean data-prep hang): **0/40 ship, g4 fails 39/40**, −5 to −16 `min_gate_slack` worse than every incumbent. Research (`/tmp/researcher_projvol_dispersion.md`): the linear `scale × volume` dispersion decode is a real symptom but **NOT the binding defect** — no `volume^p` or compound-variance scale clears the volume-stratified PIT-KS-max (≥ 0.111 NBA / 0.148 WNBA / 0.342 NFL rushing-yards); the binding defect is the **ratio-induced high-skew, zero-inflated low-volume tail SkewNormal can't shape** (low-q actual skew +0.99/+1.30/+2.90, `outcome ≤ 0.5` up to 33%) → **scoped abandonment of the projvol implementation**, efficiency × opportunity preserved only as the §6.9 count-branch `log(volume)` NB/Tweedie offset. proj-MIN itself is sound (corr 0.79 with realized minutes); ignoring its uncertainty under-states dispersion ~20–40% but doesn't clear g4 alone. `ratio_projvol` recorded tried-refuted (§6.2/§8). · next: NFL `log(volume)` NB/Tweedie offset folded into §6.6 as a deep-end family escalation (revisit only if features/blend can't ship NFL yards); firing the `centered_additive_mean10`-over-`ratio_meanyr` confirm queue on full HPO now.
