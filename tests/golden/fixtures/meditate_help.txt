@@ -72,4 +72,28 @@ Options:
                                   attempts/carries/targets) train so their
                                   pickles feed proj_* features into downstream
                                   training matrices.
+  --stabilization [None|MAD|L2]   Per-distribution-parameter gradient
+                                  stabilization for LightGBMLSS. 'None'
+                                  (default) is current production. 'MAD'/'L2'
+                                  damp the scale-head's large/outlier gradients
+                                  (the only in-API per-parameter sigma knob); an
+                                  Operation Ship 75 calibration search axis.
+                                  [default: None]
+  --hpo-selection [auto|loss|calibrated]
+                                  Optuna trial-selection rule for SkewNormal
+                                  cells. 'auto' (default) honors each cell's
+                                  stat_meta hpo_selection (else 'loss'); an
+                                  explicit slug overrides every cell. 'loss'
+                                  picks the lowest CV CRPS; 'calibrated' re-
+                                  ranks the top trials by validation PIT-KS and
+                                  picks the sharpest that clears the Gate-4
+                                  threshold (sharpness subject to calibration);
+                                  a Ship 75 axis.  [default: auto]
+  --count-dispersion-objective [crps|pit_ks]
+                                  Objective the count branch (NegBin/ZINB/Gamma)
+                                  minimizes when fitting the dispersion scale.
+                                  'crps' (default) is current production;
+                                  'pit_ks' targets the served Gate-4 randomized-
+                                  PIT KS directly, mirroring the SkewNormal
+                                  branch; a Ship 75 axis.  [default: crps]
   --help                          Show this message and exit.

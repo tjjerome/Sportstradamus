@@ -561,14 +561,15 @@
         },
         "PR": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "none",
+            "hpo_selection": "calibrated"
         },
         "PRA": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
             "posthoc": "none"
         },
         "PTS": {
