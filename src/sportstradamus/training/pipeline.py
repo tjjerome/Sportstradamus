@@ -811,12 +811,6 @@ def _step_build_lss_model(
     return model
 
 
-# Lever 1 re-ranks the K lowest-CRPS HP trials by validation calibration. K bounds the extra
-# refits; 8 is wide enough to contain a calibrated trial when the frontier has one, cheap enough
-# (~8 fits) against a 150-300-trial search.
-_CALIBRATED_SELECTION_TOP_K = 8
-
-
 def _pick_calibrated_candidate(candidates: list[dict], threshold: float) -> dict:
     """Calibration-constrained HP selection (Lever 1): the lowest-CRPS trial whose CV
     PIT-KS clears ``threshold``; if none qualify, the best-calibrated trial.
@@ -839,15 +833,13 @@ def _pick_calibrated_candidate(candidates: list[dict], threshold: float) -> dict
     return min(candidates, key=lambda c: c["pit_ks"])
 
 
-def _select_calibrated_hp(candidates: list[dict], splits: dict, dist_info: dict) -> dict:
-    """Lever 1: re-rank SkewNormal HP candidates by post-hoc-polished validation PIT-KS and
-    return the lowest-CRPS one that clears the Gate-4 threshold (else the best-calibrated).
+def _calibration_penalty(splits: dict, dist_info: dict):
+    """Build the per-trial served-PIT-KS evaluator that gates the SkewNormal HPO search (Lever 1).
 
-    Each candidate is refit with the exact production fitter (:func:`fit_predict_params`) and
-    scored on the validation split in the model's own decoded, pre-book-blend space. The model
-    dominates the failing SkewNormal cells, so its calibration closely proxies the served Gate 4
-    while sparing a per-candidate book blend; the measure mirrors the served post-hoc — hold the
-    predictive mean, scale-calibrate (``c``) the scale, take the randomized-PIT KS.
+    Returns a closure over ``splits``/``dist_info`` mapping a candidate param dict to the served
+    SkewNormal randomized-PIT KS on the validation split. Skips the book blend (the model dominates
+    failing SkewNormal cells, so the model-only KS closely proxies the served Gate-4 statistic while
+    keeping per-trial cost to one refit).
     """
     dist = dist_info["dist"]
     strategy = dist_info["target_normalization"]
@@ -856,8 +848,7 @@ def _select_calibrated_hp(candidates: list[dict], splits: dict, dist_info: dict)
     X_val = splits["X_validation"]
     y_val = splits["y_validation"]["Result"].to_numpy(dtype=float)
 
-    for cand in candidates:
-        params = {k: v for k, v in cand.items() if k not in ("cv_loss", "pit_ks")}
+    def served_pit_ks(params: dict) -> float:
         preds = fit_predict_params(
             dist_info["dist_obj"],
             dist,
@@ -874,21 +865,9 @@ def _select_calibrated_hp(candidates: list[dict], splits: dict, dist_info: dict)
         skew = preds["alpha"].to_numpy()
         mean = decode_predictive_mean(preds, dist, sn_loc=sn_loc, sn_scale=sn_scale).ev
         c = fit_skewnorm_dispersion_c(mean, sn_scale, skew, y_val)
-        cand["pit_ks"] = _served_sn_pit_ks(mean, sn_scale, skew, y_val, c, 0.0)
+        return _served_sn_pit_ks(mean, sn_scale, skew, y_val, c, 0.0)
 
-    winner = _pick_calibrated_candidate(candidates, _gate4_pit_ks_threshold(len(y_val)))
-    return {k: v for k, v in winner.items() if k not in ("cv_loss", "pit_ks")}
-
-
-def _calibrated_top_k(hpo_selection: str, dist: str) -> int:
-    """How many lowest-CRPS trials Lever 1 re-ranks (1 ⇒ loss-only selection).
-
-    Only SkewNormal cells opt in: the re-rank measure is the served SkewNormal PIT-KS, and
-    the count branch routes calibration through the Lever-2 dispersion retarget instead.
-    """
-    if hpo_selection == "calibrated" and dist == "SkewNormal":
-        return _CALIBRATED_SELECTION_TOP_K
-    return 1
+    return served_pit_ks
 
 
 def _step_select_hyperparams(
@@ -900,13 +879,15 @@ def _step_select_hyperparams(
     *,
     use_hurdle: bool,
     deterministic: bool,
-    hpo_selection: str = "loss",
+    calibration_penalty=None,
+    penalty_threshold=None,
 ) -> tuple[dict | list[dict], list[int]]:
     """Pick Optuna-tuned params, warm-start, or the deterministic fixed set.
 
-    With ``hpo_selection == "calibrated"`` on a SkewNormal cell the Optuna paths return the
-    top-K lowest-CRPS trials (a list) for the caller's :func:`_select_calibrated_hp` re-rank
-    (Lever 1); every other case returns the single best param dict as before.
+    When ``calibration_penalty`` is given (Lever 1, the SkewNormal calibrated path) the Optuna
+    objective is search-gated on validation PIT-KS and the paths return every completed trial (a
+    list) for the caller's :func:`_pick_calibrated_candidate` final pick; every other case returns
+    the single best param dict as before.
 
     Args:
         X_train: Training feature matrix (used to size ``min_child_weight`` upper).
@@ -914,19 +895,21 @@ def _step_select_hyperparams(
         model: Built LightGBMLSS for the LSS path; ``None`` for hurdle.
         use_hurdle: True when the hurdle path will fit the model later.
         deterministic: If True, use ``DETERMINISTIC_FIXED_PARAMS`` verbatim.
+        calibration_penalty: Per-trial PIT-KS evaluator returned by
+            :func:`_calibration_penalty`; ``None`` for the plain-CRPS path.
+        penalty_threshold: Gate-4 PIT-KS threshold paired with
+            ``calibration_penalty``; ``None`` when penalty is None.
         opt_params_in: Warm-start params from the existing pickle, if any.
         dtrain: ``lgb.Dataset`` for the LSS Optuna path.
 
     Returns:
         ``(opt_params, monotone)`` — hyperparam dict (or list of dicts when
-        ``top_k > 1``) and the monotone constraint vector.
+        ``calibration_penalty`` is given) and the monotone constraint vector.
     """
     col_list = list(X_train.columns)
     monotone = [0] * len(col_list)
     if dist in ("Gamma", "ZAGamma", "SkewNormal") and "MeanYr" in col_list:
         monotone[col_list.index("MeanYr")] = 1
-
-    top_k = _calibrated_top_k(hpo_selection, dist)
 
     hp_search_space = {
         "feature_pre_filter": ["none", [False]],
@@ -974,7 +957,8 @@ def _step_select_hyperparams(
             early_stopping_rounds=50,
             max_minutes=60,
             n_trials=300,
-            top_k=top_k,
+            calibration_penalty=calibration_penalty,
+            penalty_threshold=penalty_threshold,
         )
     else:
         opt_params = run_hyper_opt(
@@ -984,7 +968,8 @@ def _step_select_hyperparams(
             initial_params=opt_params,
             n_trials=150,
             max_minutes=5,
-            top_k=top_k,
+            calibration_penalty=calibration_penalty,
+            penalty_threshold=penalty_threshold,
         )
     return opt_params, monotone
 
@@ -2445,6 +2430,10 @@ def train_market(
     )
     dtrain = lgb.Dataset(splits["X_train"], label=splits["y_train_labels"])
     opt_params_in = filedict.get("params")
+    penalty = penalty_threshold = None
+    if hpo_selection == "calibrated" and dist == "SkewNormal":
+        penalty = _calibration_penalty(splits, dist_info)
+        penalty_threshold = _gate4_pit_ks_threshold(len(splits["y_validation"]))
     opt_params, _ = _step_select_hyperparams(
         splits["X_train"],
         dist,
@@ -2453,10 +2442,12 @@ def train_market(
         dtrain,
         use_hurdle=use_hurdle,
         deterministic=deterministic,
-        hpo_selection=hpo_selection,
+        calibration_penalty=penalty,
+        penalty_threshold=penalty_threshold,
     )
     if isinstance(opt_params, list):
-        opt_params = _select_calibrated_hp(opt_params, splits, dist_info)
+        picked = _pick_calibrated_candidate(opt_params, penalty_threshold)
+        opt_params = {k: v for k, v in picked.items() if k not in ("cv_loss", "pit_ks")}
     model = _step_fit_model(
         dist,
         dist_info["dist_obj"],

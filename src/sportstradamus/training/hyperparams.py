@@ -40,6 +40,42 @@ def _suggest_params(trial, hp_dict):
     return hyper_params
 
 
+# Lever 1 search-gate weight. The hinge is one-sided (zero once a trial clears the Gate-4 PIT-KS
+# threshold), so a large weight only discourages the under-dispersed corner without distorting the
+# feasible region — which stays ranked by pure CRPS (no pull toward the over-dispersed marginal
+# predictor). 10x dominates the inter-trial CRPS spread (~0.03) at a typical gate excess (~0.05),
+# so an uncalibrated-but-sharp trial loses to a calibrated one.
+_CALIBRATION_PENALTY_WEIGHT = 10.0
+
+
+def _penalized_objective(crps: float, pit_ks: float, threshold: float) -> float:
+    """Search-gating HPO objective (Lever 1): CRPS plus a one-sided hinge on the validation PIT-KS.
+
+    Zero hinge for calibrated trials (``pit_ks <= threshold``) so the feasible region is ranked by
+    pure CRPS; infeasible trials are pushed up by their Gate-4 excess, steering the TPE sampler
+    toward the wider-sigma calibrated region rather than only re-ranking the sharpest cluster.
+    """
+    return crps + _CALIBRATION_PENALTY_WEIGHT * max(0.0, pit_ks - threshold)
+
+
+def _collect_calibrated_candidates(trials):
+    """Every completed Lever-1 trial as a param dict tagged with its raw ``cv_loss`` and ``pit_ks``,
+    sorted by CRPS — the candidate set :func:`_pick_calibrated_candidate` picks the final HP from.
+    """
+    completed = sorted(
+        (t for t in trials if "pit_ks" in t.user_attrs),
+        key=lambda t: t.user_attrs["cv_loss"],
+    )
+    candidates = []
+    for trial in completed:
+        params = dict(trial.params)
+        params["opt_rounds"] = int(trial.user_attrs["opt_round"])
+        params["cv_loss"] = float(trial.user_attrs["cv_loss"])
+        params["pit_ks"] = float(trial.user_attrs["pit_ks"])
+        candidates.append(params)
+    return candidates
+
+
 def run_hyper_opt(
     model,
     hp_dict,
@@ -51,7 +87,8 @@ def run_hyper_opt(
     max_minutes=15,
     n_trials=100,
     silence=True,
-    top_k=1,
+    calibration_penalty=None,
+    penalty_threshold=None,
 ):
     """Run Optuna HPO for LightGBMLSS.
 
@@ -61,10 +98,13 @@ def run_hyper_opt(
     sidesteps it; each trial stays bounded and, on a warm start, the seeded
     params are evaluated first, so the selected hyperparameters are unaffected.
 
-    With ``top_k == 1`` (default) returns the single best-CV-loss param dict. With
-    ``top_k > 1`` returns a list of the ``top_k`` lowest-CV-loss trials' param dicts,
-    each tagged with ``cv_loss``, for the caller's calibration-constrained re-rank
-    (Lever 1); the loss-only search is unchanged — only the return shape differs.
+    Default (``calibration_penalty is None``) returns the single best-CV-loss param dict and the
+    objective is plain CV-CRPS — unchanged. When ``calibration_penalty`` is given (Lever 1, the
+    SkewNormal calibrated path), the objective becomes the search-gating score
+    ``CRPS + weight*max(0, pit_ks - penalty_threshold)`` — ``calibration_penalty(params)`` returns
+    the trial's served validation PIT-KS — so the TPE sampler explores the wider-sigma region. The
+    return is then every completed trial's param dict tagged with its raw ``cv_loss``
+    and ``pit_ks``, sorted by ``cv_loss``, for :func:`_pick_calibrated_candidate`'s final pick.
     """
     # Deferred: lightgbm and optuna are heavy; keeping them out of the top-level
     # import keeps dashboard startup fast (training/ is not imported by the dashboard).
@@ -88,9 +128,16 @@ def run_hyper_opt(
             seed=None,
         )
 
-        opt_rounds = np.argmin(np.array(cv_result[f"valid {model.dist.loss_fn}-mean"])) + 1
-        trial.set_user_attr("opt_round", int(opt_rounds))
-        return np.min(np.array(cv_result[f"valid {model.dist.loss_fn}-mean"]))
+        cv_losses = np.array(cv_result[f"valid {model.dist.loss_fn}-mean"])
+        opt_rounds = int(np.argmin(cv_losses)) + 1
+        trial.set_user_attr("opt_round", opt_rounds)
+        crps = float(np.min(cv_losses))
+        if calibration_penalty is None:
+            return crps
+        pit_ks = float(calibration_penalty({**hyper_params, "opt_rounds": opt_rounds}))
+        trial.set_user_attr("cv_loss", crps)
+        trial.set_user_attr("pit_ks", pit_ks)
+        return _penalized_objective(crps, pit_ks, penalty_threshold)
 
     if silence:
         optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -112,18 +159,8 @@ def run_hyper_opt(
     logger.info("Hyper-Parameter Optimization finished.")
     logger.info("  Number of finished trials: %d", len(study.trials))
 
-    if top_k > 1:
-        completed = sorted(
-            (t for t in study.trials if t.value is not None and "opt_round" in t.user_attrs),
-            key=lambda t: t.value,
-        )
-        candidates = []
-        for trial in completed[:top_k]:
-            params = dict(trial.params)
-            params["opt_rounds"] = int(trial.user_attrs["opt_round"])
-            params["cv_loss"] = float(trial.value)
-            candidates.append(params)
-        return candidates
+    if calibration_penalty is not None:
+        return _collect_calibrated_candidates(study.trials)
 
     logger.info("  Best trial:")
     opt_param = study.best_trial
