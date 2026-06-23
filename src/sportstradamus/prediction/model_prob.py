@@ -140,7 +140,11 @@ def _decode_skewnormal(
         ``Model Gate`` columns set.
     """
     strategy = get_target_normalization(target_normalization)
-    denom_col = (
+    # ratio_projvol persists its projected-volume denominator in offset_meta, so
+    # serving reads the exact column the cell trained against. Every other
+    # strategy leaves it unset and falls back to the season-mean choice
+    # (MeanYr_nonzero for zero-inflated cells, else MeanYr).
+    denom_col = (offset_meta or {}).get("denom_col") or (
         "MeanYr_nonzero"
         if (hist_gate > NONZERO_DENOM_GATE and "MeanYr_nonzero" in playerStats.columns)
         else "MeanYr"
