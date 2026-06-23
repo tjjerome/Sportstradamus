@@ -57,8 +57,15 @@ from sportstradamus.training.config import (
 from sportstradamus.training.data import trim_matrix
 from sportstradamus.training.hyperparams import _BoundedResponseFn, run_hyper_opt
 from sportstradamus.training.report import report
-from sportstradamus.training.scorecard import fit_skewnorm_dispersion_skew
+from sportstradamus.training.scorecard import (
+    _gate4_pit_ks_threshold,
+    _randomized_pit_ks,
+    _served_sn_pit_ks,
+    fit_skewnorm_dispersion_c,
+    fit_skewnorm_dispersion_skew,
+)
 from sportstradamus.training.shap import compute_market_importance
+from sportstradamus.training.ship_config import TARGET_NORM_NONE
 
 logger = get_logger(__name__)
 
@@ -784,6 +791,86 @@ def _step_build_lss_model(
     return model
 
 
+# Lever 1 re-ranks the K lowest-CRPS HP trials by validation calibration. K bounds the extra
+# refits; 8 is wide enough to contain a calibrated trial when the frontier has one, cheap enough
+# (~8 fits) against a 150-300-trial search.
+_CALIBRATED_SELECTION_TOP_K = 8
+
+
+def _pick_calibrated_candidate(candidates: list[dict], threshold: float) -> dict:
+    """Calibration-constrained HP selection (Lever 1): the lowest-CRPS trial whose CV
+    PIT-KS clears ``threshold``; if none qualify, the best-calibrated trial.
+
+    Operationalizes Gneiting-Balabdaoui-Raftery 2007's "sharpness subject to calibration"
+    as a hard constraint (congruent with the ship gate) rather than a scalarized penalty.
+    The fallback is logged: a vacuous constraint (no qualifying trial — common at low n)
+    silently degrades to loss-only selection exactly where calibration matters most
+    (research brief reality-check b).
+    """
+    qualified = [c for c in candidates if c["pit_ks"] < threshold]
+    if qualified:
+        return min(qualified, key=lambda c: c["cv_loss"])
+    logger.warning(
+        "calibrated HP selection: no trial met CV-PIT-KS < %.4f (best %.4f); "
+        "falling back to min-PIT-KS",
+        threshold,
+        min(c["pit_ks"] for c in candidates),
+    )
+    return min(candidates, key=lambda c: c["pit_ks"])
+
+
+def _select_calibrated_hp(candidates: list[dict], splits: dict, dist_info: dict) -> dict:
+    """Lever 1: re-rank SkewNormal HP candidates by post-hoc-polished validation PIT-KS and
+    return the lowest-CRPS one that clears the Gate-4 threshold (else the best-calibrated).
+
+    Each candidate is refit with the exact production fitter (:func:`fit_predict_params`) and
+    scored on the validation split in the model's own decoded, pre-book-blend space. The model
+    dominates the failing SkewNormal cells, so its calibration closely proxies the served Gate 4
+    while sparing a per-candidate book blend; the measure mirrors the served post-hoc — hold the
+    predictive mean, scale-calibrate (``c``) the scale, take the randomized-PIT KS.
+    """
+    dist = dist_info["dist"]
+    strategy = dist_info["target_normalization"]
+    global_mean = dist_info["global_mean"]
+    denom_col = dist_info["denom_col"]
+    X_val = splits["X_validation"]
+    y_val = splits["y_validation"]["Result"].to_numpy(dtype=float)
+
+    for cand in candidates:
+        params = {k: v for k, v in cand.items() if k not in ("cv_loss", "pit_ks")}
+        preds = fit_predict_params(
+            dist_info["dist_obj"],
+            dist,
+            splits["X_train"],
+            splits["y_train_labels"],
+            X_val,
+            params,
+            normalized=dist_info["normalize"],
+            shape_ceiling=dist_info["shape_ceiling"],
+            offset_mode=dist_info["offset_mode"],
+        )
+        sn_loc = strategy.decode_loc(preds["loc"].to_numpy(), X_val, global_mean, denom_col)
+        sn_scale = strategy.decode_scale(preds["scale"].to_numpy(), X_val, denom_col)
+        skew = preds["alpha"].to_numpy()
+        mean = decode_predictive_mean(preds, dist, sn_loc=sn_loc, sn_scale=sn_scale).ev
+        c = fit_skewnorm_dispersion_c(mean, sn_scale, skew, y_val)
+        cand["pit_ks"] = _served_sn_pit_ks(mean, sn_scale, skew, y_val, c, 0.0)
+
+    winner = _pick_calibrated_candidate(candidates, _gate4_pit_ks_threshold(len(y_val)))
+    return {k: v for k, v in winner.items() if k not in ("cv_loss", "pit_ks")}
+
+
+def _calibrated_top_k(hpo_selection: str, dist: str) -> int:
+    """How many lowest-CRPS trials Lever 1 re-ranks (1 ⇒ loss-only selection).
+
+    Only SkewNormal cells opt in: the re-rank measure is the served SkewNormal PIT-KS, and
+    the count branch routes calibration through the Lever-2 dispersion retarget instead.
+    """
+    if hpo_selection == "calibrated" and dist == "SkewNormal":
+        return _CALIBRATED_SELECTION_TOP_K
+    return 1
+
+
 def _step_select_hyperparams(
     X_train,
     dist: str,
@@ -793,8 +880,13 @@ def _step_select_hyperparams(
     *,
     use_hurdle: bool,
     deterministic: bool,
-) -> tuple[dict, list[int]]:
+    hpo_selection: str = "loss",
+) -> tuple[dict | list[dict], list[int]]:
     """Pick Optuna-tuned params, warm-start, or the deterministic fixed set.
+
+    With ``hpo_selection == "calibrated"`` on a SkewNormal cell the Optuna paths return the
+    top-K lowest-CRPS trials (a list) for the caller's :func:`_select_calibrated_hp` re-rank
+    (Lever 1); every other case returns the single best param dict as before.
 
     Args:
         X_train: Training feature matrix (used to size ``min_child_weight`` upper).
@@ -806,8 +898,8 @@ def _step_select_hyperparams(
         dtrain: ``lgb.Dataset`` for the LSS Optuna path.
 
     Returns:
-        ``(opt_params, monotone)`` — final hyperparam dict and the monotone
-        constraint vector.
+        ``(opt_params, monotone)`` — hyperparam dict (or list of dicts when
+        ``top_k > 1``) and the monotone constraint vector.
     """
     col_list = list(X_train.columns)
     monotone = [0] * len(col_list)
@@ -836,6 +928,8 @@ def _step_select_hyperparams(
         "bagging_freq": ["none", [1]],
     }
 
+    top_k = _calibrated_top_k(hpo_selection, dist)
+
     opt_params = opt_params_in
     if deterministic:
         opt_params = {**DETERMINISTIC_FIXED_PARAMS, "monotone_constraints": monotone}
@@ -860,10 +954,17 @@ def _step_select_hyperparams(
             early_stopping_rounds=50,
             max_minutes=60,
             n_trials=300,
+            top_k=top_k,
         )
     else:
         opt_params = run_hyper_opt(
-            model, hp_search_space, dtrain, initial_params=opt_params, n_trials=150, max_minutes=5
+            model,
+            hp_search_space,
+            dtrain,
+            initial_params=opt_params,
+            n_trials=150,
+            max_minutes=5,
+            top_k=top_k,
         )
     return opt_params, monotone
 
@@ -1489,6 +1590,40 @@ def _dispersion_crps_loss(
     return np.mean(crps) + reg
 
 
+def _dispersion_pit_ks_loss(
+    c: float,
+    *,
+    dist: str,
+    y_val_arr: np.ndarray,
+    val_weighted_mean: np.ndarray,
+    gate_blend_val: np.ndarray | None,
+    r_blend_val: np.ndarray | None = None,
+    alpha_blend_val: np.ndarray | None = None,
+) -> float:
+    """Gate-4 randomized-PIT KS dispersion loss for one count-branch scale ``c`` (Lever 2).
+
+    The PIT-KS counterpart of :func:`_dispersion_crps_loss`: it minimizes the exact statistic
+    Gate 4 scores instead of CRPS, mirroring the SkewNormal branch (which already fits its
+    scale on the served PIT-KS). The mean is held fixed and the shape (NegBin ``r``, Gamma
+    ``alpha``) is scaled by ``c``; the same ``0.01·log(c)²`` brake as the CRPS path keeps a
+    flat objective from driving ``c`` to an extreme (research brief open-question 2 guard).
+    """
+    if dist in ("NegBin", "ZINB"):
+        r_cal = r_blend_val * c
+        # `_pred_cdf_pmf` reads NB_P as the failure prob (scipy success = 1 − NB_P), so the
+        # served mean is r·NB_P/(1−NB_P); hold it at val_weighted_mean ⇒ NB_P = mean/(r+mean).
+        # (The CRPS path's `p_cal = r/(r+mean)` is `negbin_crps`'s reciprocal convention.)
+        nb_p = val_weighted_mean / (r_cal + val_weighted_mean)
+        params = pd.DataFrame({"R": r_cal, "NB_P": nb_p})
+    else:
+        params = pd.DataFrame({"Alpha": alpha_blend_val * c, "EV": val_weighted_mean})
+    if gate_blend_val is not None:
+        params["Gate"] = gate_blend_val
+    ks = _randomized_pit_ks(params, dist, y_val_arr, strategy=TARGET_NORM_NONE)
+    reg = 0.01 * np.log(c) ** 2
+    return ks + reg
+
+
 def _brier_temperature_loss(T: float, val_logits: np.ndarray, y_class_val: np.ndarray) -> float:
     """Brier + (T-1)² regularization at temperature ``T``. Pure."""
     cal = expit(val_logits / T)
@@ -1506,6 +1641,8 @@ def _step_calibrate_dispersion(
     hist_gate: float,
     shape_ceiling,
     model_weight,
+    *,
+    count_dispersion_objective: str = "crps",
 ) -> dict:
     """Fit dispersion scaling factor ``c_opt`` and apply it to blended params.
 
@@ -1573,8 +1710,13 @@ def _step_calibrate_dispersion(
     max_c = shape_ceiling / mean_shape if mean_shape > 0 else 10.0
     upper_bound = min(10.0, max_c)
 
+    # Lever 2: minimize the served Gate-4 PIT-KS instead of CRPS when opted in. Same
+    # signature, so the objective is a drop-in swap; default keeps the CRPS production path.
+    disp_loss = (
+        _dispersion_pit_ks_loss if count_dispersion_objective == "pit_ks" else _dispersion_crps_loss
+    )
     disp_result = minimize_scalar(
-        lambda c: _dispersion_crps_loss(
+        lambda c: disp_loss(
             c,
             dist=dist,
             y_val_arr=y_val_arr,
@@ -2017,6 +2159,7 @@ def _step_select_distribution(
     *,
     deterministic: bool,
     dist_training_loss: str = LOSS_AUTO,
+    stabilization: str = "None",
 ) -> dict:
     """Choose distribution family + apply target transform + compute shape priors.
 
@@ -2076,7 +2219,7 @@ def _step_select_distribution(
     if global_mean >= _SKEWNORMAL_MEAN_THRESHOLD:
         dist = "SkewNormal"
         dist_obj = SkewNormalDist(
-            stabilization="None", loss_fn=_resolve_loss_fn("crps", dist_training_loss)
+            stabilization=stabilization, loss_fn=_resolve_loss_fn("crps", dist_training_loss)
         )
 
         cv = (
@@ -2108,12 +2251,12 @@ def _step_select_distribution(
             dist = "ZINB"
         if dist == "NegBin":
             dist_obj = NegativeBinomial(
-                stabilization="None", loss_fn=_resolve_loss_fn("nll", dist_training_loss)
+                stabilization=stabilization, loss_fn=_resolve_loss_fn("nll", dist_training_loss)
             )
         elif zinb_mode == "joint":
             # Legacy jointly-fit LightGBMLSS ZINB path — byte-identical to pre-P2.B.
             dist_obj = ZINB(
-                stabilization="None", loss_fn=_resolve_loss_fn("nll", dist_training_loss)
+                stabilization=stabilization, loss_fn=_resolve_loss_fn("nll", dist_training_loss)
             )
         # else: hurdle path — dist_obj is not constructed; HurdleZINB is built at fit time.
 
@@ -2173,6 +2316,9 @@ def train_market(
     blending: str = calibration.DEFAULT_BLENDING,
     zinb_mode: str = "joint",
     dist_training_loss: str = LOSS_AUTO,
+    stabilization: str = "None",
+    hpo_selection: str = "loss",
+    count_dispersion_objective: str = "crps",
 ) -> None:
     """Train or retrain one LightGBMLSS model for a single league/market pair.
 
@@ -2216,6 +2362,8 @@ def train_market(
     """
     # style: allow-length  pre-existing research orchestrator (§2.8/§18.9): flag,
     # don't split. Already over the limit before the FBT keyword-only conversion.
+    # style: allow-complexity  the per-cell training orchestrator: the Lever-1 candidate-list
+    # collapse is one more sequential stage, not nested logic.
     if zinb_mode not in {"joint", "hurdle"}:
         raise ValueError(f"zinb_mode must be 'joint' or 'hurdle', got {zinb_mode!r}")
 
@@ -2254,6 +2402,7 @@ def train_market(
         zinb_mode,
         deterministic=deterministic,
         dist_training_loss=dist_training_loss,
+        stabilization=stabilization,
     )
     dist = dist_info["dist"]
     cv = dist_info["cv"]
@@ -2280,7 +2429,10 @@ def train_market(
         dtrain,
         use_hurdle=use_hurdle,
         deterministic=deterministic,
+        hpo_selection=hpo_selection,
     )
+    if isinstance(opt_params, list):
+        opt_params = _select_calibrated_hp(opt_params, splits, dist_info)
     model = _step_fit_model(
         dist,
         dist_info["dist_obj"],
@@ -2336,6 +2488,7 @@ def train_market(
         hist_gate,
         shape_ceiling,
         fused["model_weight"],
+        count_dispersion_objective=count_dispersion_objective,
     )
 
     y_proba_no_filt = _step_compute_test_probabilities(

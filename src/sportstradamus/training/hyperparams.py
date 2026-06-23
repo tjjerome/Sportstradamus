@@ -51,6 +51,7 @@ def run_hyper_opt(
     max_minutes=15,
     n_trials=100,
     silence=True,
+    top_k=1,
 ):
     """Run Optuna HPO for LightGBMLSS.
 
@@ -59,6 +60,11 @@ def run_hyper_opt(
     callback can never match and raises. Running with only early stopping
     sidesteps it; each trial stays bounded and, on a warm start, the seeded
     params are evaluated first, so the selected hyperparameters are unaffected.
+
+    With ``top_k == 1`` (default) returns the single best-CV-loss param dict. With
+    ``top_k > 1`` returns a list of the ``top_k`` lowest-CV-loss trials' param dicts,
+    each tagged with ``cv_loss``, for the caller's calibration-constrained re-rank
+    (Lever 1); the loss-only search is unchanged — only the return shape differs.
     """
     # Deferred: lightgbm and optuna are heavy; keeping them out of the top-level
     # import keeps dashboard startup fast (training/ is not imported by the dashboard).
@@ -105,6 +111,20 @@ def run_hyper_opt(
 
     logger.info("Hyper-Parameter Optimization finished.")
     logger.info("  Number of finished trials: %d", len(study.trials))
+
+    if top_k > 1:
+        completed = sorted(
+            (t for t in study.trials if t.value is not None and "opt_round" in t.user_attrs),
+            key=lambda t: t.value,
+        )
+        candidates = []
+        for trial in completed[:top_k]:
+            params = dict(trial.params)
+            params["opt_rounds"] = int(trial.user_attrs["opt_round"])
+            params["cv_loss"] = float(trial.value)
+            candidates.append(params)
+        return candidates
+
     logger.info("  Best trial:")
     opt_param = study.best_trial
     opt_param.params["opt_rounds"] = int(
