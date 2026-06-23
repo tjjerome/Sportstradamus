@@ -35,8 +35,16 @@ def test_run_hyper_opt_top_k_returns_ranked_candidate_list():
     }
 
     candidates = run_hyper_opt(
-        model, hp_dict, dtrain, num_boost_round=20, nfold=2,
-        early_stopping_rounds=10, max_minutes=2, n_trials=4, silence=True, top_k=3,
+        model,
+        hp_dict,
+        dtrain,
+        num_boost_round=20,
+        nfold=2,
+        early_stopping_rounds=10,
+        max_minutes=2,
+        n_trials=4,
+        silence=True,
+        top_k=3,
     )
 
     assert isinstance(candidates, list)
@@ -92,8 +100,13 @@ def test_select_calibrated_hp_scores_and_picks_skewnormal_candidate():
     }
     n_feat = X.shape[1]
     candidates = [
-        {**DETERMINISTIC_FIXED_PARAMS, "opt_rounds": 20, "num_leaves": nl,
-         "monotone_constraints": [0] * n_feat, "cv_loss": loss}
+        {
+            **DETERMINISTIC_FIXED_PARAMS,
+            "opt_rounds": 20,
+            "num_leaves": nl,
+            "monotone_constraints": [0] * n_feat,
+            "cv_loss": loss,
+        }
         for nl, loss in [(8, 1.00), (31, 0.92), (63, 0.97)]
     ]
 
