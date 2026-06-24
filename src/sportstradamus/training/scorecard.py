@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import functools
 import importlib.resources as pkg_resources
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
@@ -51,6 +52,7 @@ from sportstradamus.helpers.io import read_history
 from sportstradamus.helpers.provenance import git_sha
 from sportstradamus.training.baselines import get_target_normalization
 from sportstradamus.training.markets import ALL_MARKETS
+from sportstradamus.training.posthoc import apply_cdf_recal
 from sportstradamus.training.ship_config import STAT_META_PATH, TARGET_NORM_NONE, load_stat_meta
 
 # Ship gates (see docs/ship_gate.md). The promotion lifecycle is a 2x2:
@@ -349,6 +351,7 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
         "NB_P",
         "Alpha",
         "Gate",
+        "PITRecalKnots",  # §6.1 Rung C whole-CDF map g; Gate 4 warps the PIT through it
     } & set(df.columns)
     out = df[sorted(required | optional | dist_params)].copy()
     # Filter non-finite rows on required columns only — missing P/Odds/Line rows
@@ -913,6 +916,12 @@ def _tail_ks_uniform(values: np.ndarray, floor: float = _TAIL_PIT_FLOOR) -> floa
     return max(d_plus, d_minus)
 
 
+def _pit_recal_blob(df: pd.DataFrame) -> dict | None:
+    if "PITRecalKnots" not in df.columns:
+        return None
+    return json.loads(df["PITRecalKnots"].iloc[0])
+
+
 def _randomized_pit_draws(
     df: pd.DataFrame, dist: str, y: np.ndarray, *, strategy: str
 ) -> list[np.ndarray]:
@@ -926,11 +935,17 @@ def _randomized_pit_draws(
     reproducible.
     """
     cdf, pmf = _pred_cdf_pmf(df, dist, y, strategy=strategy)
+    # §6.1 Rung C: warp each PIT draw through the served whole-CDF map g (identity unless the
+    # cell persisted a PITRecalKnots column), so Gate 4 scores the recalibrated predictive.
+    recal = _pit_recal_blob(df)
     if not np.any(pmf > 0):
-        return [cdf]
+        return [apply_cdf_recal(recal, cdf)]
     rng = np.random.default_rng(_RANDOMIZED_PIT_SEED)
     n = len(cdf)
-    return [cdf - (1.0 - rng.random(n)) * pmf for _ in range(_RANDOMIZED_PIT_DRAWS)]
+    return [
+        apply_cdf_recal(recal, cdf - (1.0 - rng.random(n)) * pmf)
+        for _ in range(_RANDOMIZED_PIT_DRAWS)
+    ]
 
 
 def _randomized_pit_ks(df: pd.DataFrame, dist: str, y: np.ndarray, *, strategy: str) -> float:
