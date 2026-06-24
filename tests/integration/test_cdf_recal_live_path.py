@@ -65,7 +65,7 @@ def _fit_real_skewnormal_params():
     if not parquet.is_file():
         pytest.skip(f"cached {_LEAGUE}_{_MARKET}.parquet not present")
     m = pd.read_parquet(parquet).sort_values(["Date"]).head(_N_TRAIN_ROWS).reset_index(drop=True)
-    splits = _step_build_splits(m, StatsNBA(), _MARKET, "ratio_meanyr")
+    splits = _step_build_splits(m, StatsNBA(), _MARKET)
     params = {
         **DETERMINISTIC_FIXED_PARAMS,
         "feature_fraction": 0.8,
