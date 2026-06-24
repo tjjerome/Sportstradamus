@@ -555,9 +555,9 @@
         },
         "PA": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "posthoc": "cdf_recal_isotonic"
         },
         "PR": {
             "dist": "SkewNormal",
