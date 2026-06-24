@@ -36,7 +36,12 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.spiderLogger import logger
 from sportstradamus.training.baselines import get_target_normalization
-from sportstradamus.training.posthoc import MEAN_STAGE, PROB_STAGE, apply_posthoc
+from sportstradamus.training.posthoc import (
+    MEAN_STAGE,
+    PROB_STAGE,
+    apply_cdf_recal,
+    apply_posthoc,
+)
 
 # LazyArchive defers DuckDB lock acquisition until the first attribute
 # access. See LazyArchive docstring in helpers/archive.py.
@@ -175,6 +180,20 @@ def _apply_prob_posthoc(
     if posthoc_slug in PROB_STAGE:
         return apply_posthoc(posthoc_slug, posthoc_blob, cal_over)
     return cal_over
+
+
+def _apply_cdf_recal_over(raw_over: np.ndarray, pit_recal_blob: dict | None) -> np.ndarray:
+    """Apply the §6.1 Rung C whole-CDF map to the raw model over-probability.
+
+    The recalibrated served CDF is ``F* = g∘F``, so the over-prob becomes
+    ``1 − g(F(line)) = 1 − g(1 − over_raw)``. Mirrors the training-side warp in
+    ``pipeline._step_compute_test_probabilities`` so the live probability matches the
+    offline-gated one. A legacy pickle (``pit_recal_blob`` is None) returns ``raw_over``
+    untouched — the ``1 − (1 − x)`` round-trip would perturb it at float epsilon.
+    """
+    if pit_recal_blob is None:
+        return raw_over
+    return 1.0 - apply_cdf_recal(pit_recal_blob, 1.0 - np.asarray(raw_over, dtype=float))
 
 
 def _apply_mean_posthoc(
@@ -809,6 +828,7 @@ def model_prob(
     )
     posthoc_slug = filedict.get("posthoc", "none")
     posthoc_blob = filedict.get("posthoc_blob", None)
+    pit_recal_blob = filedict.get("pit_recal_blob", None)
     hist_gate = (
         stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma", "SkewNormal") else 0
     )
@@ -856,6 +876,9 @@ def model_prob(
     raw_over, push = _model_over_and_push(offer_df, dist, cv, step, base_mean)
     offer_df["Push Prob"] = np.asarray(push, dtype=float)
 
+    # §6.1 Rung C reshapes the whole served CDF (over = 1 − g(1 − over_raw)) before the
+    # binary-prob temperature/posthoc, matching the training-side warp + Gate-4 PIT.
+    raw_over = _apply_cdf_recal_over(raw_over, pit_recal_blob)
     cal_over = apply_temperature(raw_over, temperature)
     cal_over = _apply_prob_posthoc(cal_over, posthoc_slug, posthoc_blob)
     offer_df["Model Under"] = 1 - cal_over

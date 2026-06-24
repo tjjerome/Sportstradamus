@@ -59,6 +59,7 @@ from sportstradamus.training.hyperparams import _BoundedResponseFn, run_hyper_op
 from sportstradamus.training.report import report
 from sportstradamus.training.scorecard import (
     _gate4_pit_ks_threshold,
+    _randomized_pit_draws,
     _randomized_pit_ks,
     _served_sn_pit_ks,
     fit_skewnorm_dispersion_c,
@@ -1352,6 +1353,7 @@ def _build_filedict(
     target_normalization: str,
     posthoc_slug: str,
     posthoc_blob: dict | None,
+    pit_recal_blob: dict | None,
     zinb_mode: str,
     X,
 ) -> dict:
@@ -1415,6 +1417,7 @@ def _build_filedict(
         "target_normalization": target_normalization,
         "posthoc": posthoc_slug,
         "posthoc_blob": posthoc_blob,
+        "pit_recal_blob": pit_recal_blob,
         "zinb_mode": zinb_mode,
         "is_hurdle": bool(getattr(model, "is_hurdle", False)),
         "expected_columns": list(X.columns),
@@ -1449,6 +1452,7 @@ def _step_persist_artifacts(
     sn_skew_test: np.ndarray | None,
     global_mean: float,
     denom_col: str,
+    pit_recal_blob: dict | None = None,
 ) -> None:
     """Write the test-set CSV and the model pickle.
 
@@ -1503,6 +1507,12 @@ def _step_persist_artifacts(
         if dist == "ZAGamma":
             X_test["Gate"] = prob_params["gate"]
         X_test["Alpha"] = prob_params["concentration"]
+
+    if pit_recal_blob is not None:
+        # §6.1 Rung C map, persisted as one constant JSON column so the CSV-only scorecard
+        # can apply g to the PIT before the Gate-4 KS (mirrors DenomCol/GlobalMean). Absent
+        # column => no warp => byte-identical to a pre-Rung-C cell.
+        X_test["PITRecalKnots"] = json.dumps(pit_recal_blob)
 
     X_test["P"] = y_proba_filt[:, 1]
     # Pre-blend (model-only) over-probability — lets the offline scorecard report a
@@ -1617,6 +1627,28 @@ def _brier_temperature_loss(T: float, val_logits: np.ndarray, y_class_val: np.nd
     return brier + reg
 
 
+def _blended_val_pit(fused: dict, y_val: np.ndarray) -> np.ndarray:
+    """Per-row served PIT ``F(y)`` of the RAW blended SkewNormal validation predictive.
+
+    The Rung C fit input: builds the same served-space df as :func:`_served_sn_pit_ks`
+    (so the map is fit on the exact predictive Gate 4 scores) and averages the
+    randomized-PIT draws to one value per row (a single ``F(y)`` for the continuous head).
+    """
+    mean = fused["weighted_mean_val"]
+    scale = fused["sn_sigma_blend_val"]
+    alpha = fused["sn_alpha_blend_val"]
+    params = pd.DataFrame(
+        {
+            "SN_Loc": skewnormal_loc_from_mean(mean, scale, alpha),
+            "SN_Scale": scale,
+            "SN_Alpha": alpha,
+        }
+    )
+    return np.mean(
+        _randomized_pit_draws(params, "SkewNormal", y_val, strategy=TARGET_NORM_NONE), axis=0
+    )
+
+
 def _step_calibrate_dispersion(
     decoded: dict,
     fused: dict,
@@ -1628,6 +1660,7 @@ def _step_calibrate_dispersion(
     model_weight,
     *,
     count_dispersion_objective: str = "crps",
+    posthoc_slug: str = "none",
 ) -> dict:
     """Fit dispersion scaling factor ``c_opt`` and apply it to blended params.
 
@@ -1657,7 +1690,22 @@ def _step_calibrate_dispersion(
         "sn_alpha_blend_val": fused["sn_alpha_blend_val"],
         "val_weighted_mean": None,
         "val_weighted_mean_val": None,
+        "pit_recal_blob": None,
     }
+
+    # §6.1 Rung C (posthoc CDF_STAGE) replaces the scalar (c, skew_cal): serve the RAW
+    # blended params (c=1, s=0, already in `out`) and recalibrate the whole CDF via a
+    # monotone PIT map fit — cross-fit lambda — on the validation PIT. Count families keep
+    # the scalar (their port is deferred, plan §Out of scope), so the slug never breaks them.
+    if posthoc_slug in posthoc.CDF_STAGE and dist == "SkewNormal":
+        # The scalar (c, skew) is bypassed, but the temperature + test-prob steps still read
+        # the served val mean off this dict — the raw sigma/alpha are already set above.
+        out["val_weighted_mean_val"] = fused["weighted_mean_val"]
+        blob, cv_ks = posthoc.select_pit_recal(_blended_val_pit(fused, y_val_arr))
+        out["pit_recal_blob"] = blob
+        if blob is not None:
+            logger.info("Rung C: lambda=%.2f cross-fit pit_ks=%.4f", blob["lam"], cv_ks)
+        return out
 
     if dist == "SkewNormal":
         # Fit c (Lever 1, scale) and s (Lever 4a, additive skew shift) jointly against the
@@ -1764,6 +1812,9 @@ def _step_compute_test_probabilities(
             step=step,
             gate=fused["gate_blend_test"],
         )
+    # §6.1 Rung C: serve the recalibrated CDF F*=g∘F, so the persisted over-prob (Gate 1/5)
+    # matches what model_prob serves. Identity (no copy) for a cell without a map.
+    under = posthoc.apply_cdf_recal(calibrated.get("pit_recal_blob"), under)
     return np.array([under, 1 - under]).transpose()
 
 
@@ -1801,6 +1852,8 @@ def _step_calibrate_temperature(
             r=_r_val,
             gate=_gate_val,
         )
+    # §6.1 Rung C: temperature calibrates the SERVED over-prob, so fit it on the warped CDF.
+    val_raw_under = posthoc.apply_cdf_recal(calibrated.get("pit_recal_blob"), val_raw_under)
     val_raw_over_clipped = np.clip(1 - val_raw_under, 1e-6, 1 - 1e-6)
     val_logits = logit(val_raw_over_clipped)
     result_ts = minimize_scalar(
@@ -2480,6 +2533,7 @@ def train_market(
         shape_ceiling,
         fused["model_weight"],
         count_dispersion_objective=count_dispersion_objective,
+        posthoc_slug=posthoc_slug,
     )
 
     y_proba_no_filt = _step_compute_test_probabilities(
@@ -2554,6 +2608,7 @@ def train_market(
         target_normalization=target_normalization,
         posthoc_slug=posthoc_slug,
         posthoc_blob=posthoc_blob,
+        pit_recal_blob=calibrated.get("pit_recal_blob"),
         zinb_mode=zinb_mode,
         X=splits["X"],
     )
@@ -2576,6 +2631,7 @@ def train_market(
         sn_skew_test=calibrated["sn_alpha_blend_test"],
         global_mean=dist_info["global_mean"],
         denom_col=dist_info["denom_col"],
+        pit_recal_blob=calibrated.get("pit_recal_blob"),
     )
 
     # Drift-monitoring SHAP: write per-cell |SHAP| + corr columns to the
