@@ -110,6 +110,30 @@ def normalize_market(league: str, market: str, platform: str) -> str:
     return market
 
 
+def _resolve_denom_col(offset_meta: dict | None, hist_gate: float, columns) -> str:
+    """SkewNormal decode denominator, preferring the value training persisted.
+
+    The denom (``MeanYr`` vs ``MeanYr_nonzero``) is a property of the trained model:
+    training picks it from the empirical zero-rate and stores it in the pickle. Reading
+    it back keeps serve in lockstep even when the runtime ``stat_zi`` (gitignored,
+    per-box) is stale or absent. Falls back to the legacy ``hist_gate`` recompute for
+    pre-persist pickles; the ``prior_*`` keys cover already-shipped centered pickles
+    without a retrain (mean10 stores the denom as ``prior_fallback_col``, EB as
+    ``prior_col``).
+    """
+    om = offset_meta or {}
+    persisted = om.get("denom_col") or om.get("prior_fallback_col")
+    if persisted is None and om.get("method") == "eb_additive":
+        persisted = om.get("prior_col")
+    if persisted is not None:
+        return persisted
+    return (
+        "MeanYr_nonzero"
+        if (hist_gate > NONZERO_DENOM_GATE and "MeanYr_nonzero" in columns)
+        else "MeanYr"
+    )
+
+
 def _decode_skewnormal(
     prob_params: pd.DataFrame,
     playerStats: pd.DataFrame,
@@ -145,15 +169,10 @@ def _decode_skewnormal(
         ``Model Gate`` columns set.
     """
     strategy = get_target_normalization(target_normalization)
-    # ratio_projvol persists its projected-volume denominator in offset_meta, so
-    # serving reads the exact column the cell trained against. Every other
-    # strategy leaves it unset and falls back to the season-mean choice
-    # (MeanYr_nonzero for zero-inflated cells, else MeanYr).
-    denom_col = (offset_meta or {}).get("denom_col") or (
-        "MeanYr_nonzero"
-        if (hist_gate > NONZERO_DENOM_GATE and "MeanYr_nonzero" in playerStats.columns)
-        else "MeanYr"
-    )
+    # ratio_projvol persists its projected-volume denominator in offset_meta;
+    # _resolve_denom_col reads it (and the centered prior_* back-compat keys),
+    # falling back to the season-mean choice for legacy pickles.
+    denom_col = _resolve_denom_col(offset_meta, hist_gate, playerStats.columns)
     # global_mean snapshot lives in offset_meta for centered strategies; the
     # ratio strategy ignores it (uses MeanYr from features directly).
     global_mean = float((offset_meta or {}).get("global_mean", 0.0))
@@ -457,14 +476,30 @@ def _col_or_none(df: pd.DataFrame, col: str, active: bool = True) -> np.ndarray 
     return df[col].to_numpy() if active and col in df.columns else None
 
 
+def _serve_offset_mode(dist: str, target_normalization: str) -> bool:
+    """Whether serve seeds the SkewNormal with the centered-residual offset.
+
+    Mirrors training's ``offset_mode = strategy.start_mode_flag == "offset"``
+    (``pipeline.train_market``) so a model trained against any offset strategy seeds the
+    same way at predict time. Derived from the registry — not a hardcoded
+    ``offset_meta["method"]`` string — so a new offset strategy needs no serve-side edit.
+    Only the SkewNormal seed consumes ``offset_mode``; the ``dist`` guard short-circuits
+    the registry lookup off that path and for non-registry legacy slugs.
+    """
+    return (
+        dist == "SkewNormal"
+        and get_target_normalization(target_normalization).start_mode_flag == "offset"
+    )
+
+
 def _build_prob_params(
     filedict: dict,
     market: str,
     stat_data,
     playerStats: pd.DataFrame,
     dist: str,
-    offset_meta,
     normalized: bool,
+    target_normalization: str,
 ) -> pd.DataFrame:
     if market in stat_data.volume_stats:
         prob_params = pd.DataFrame(index=playerStats.index)
@@ -494,7 +529,7 @@ def _build_prob_params(
             dist,
             playerStats,
             normalized=normalized,
-            offset_mode=bool(offset_meta and offset_meta.get("method") == "eb_additive"),
+            offset_mode=_serve_offset_mode(dist, target_normalization),
         )
     prob_params = model.predict(playerStats, pred_type="parameters")
     prob_params.index = playerStats.index
@@ -838,7 +873,7 @@ def model_prob(
     )
 
     prob_params = _build_prob_params(
-        filedict, market, stat_data, playerStats, dist, offset_meta, normalized
+        filedict, market, stat_data, playerStats, dist, normalized, target_normalization
     )
     prob_params.sort_index(inplace=True)
     playerStats.sort_index(inplace=True)

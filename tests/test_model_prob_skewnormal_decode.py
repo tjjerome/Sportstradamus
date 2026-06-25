@@ -148,6 +148,45 @@ def test_centered_additive_decodes_through_eb_offset_path():
     assert not np.allclose(out["Projection"].to_numpy(), loc * meanyr_clipped)
 
 
+def test_centered_mean10_decodes_through_mean10_offset_path():
+    """mean10: Model EV = Mean10 + loc + scale·delta·sqrt(2/pi); scale stays absolute.
+
+    The centered_additive_mean10 decode path had no serve-side coverage — the gap behind
+    the 2026-06-24 ~2x overconfidence ship.
+    """
+    X = _synth_player_stats()
+    X["Mean10"] = np.random.default_rng(21).uniform(2.0, 25.0, len(X))
+    prob_params = _synth_prob_params()
+    offset_meta = {
+        "method": "mean10_additive",
+        "global_mean": 8.69,
+        "prior_col": "Mean10",
+        "prior_fallback_col": "MeanYr",
+        "denom_col": "MeanYr",
+    }
+    loc = prob_params["loc"].to_numpy()
+    scale = prob_params["scale"].to_numpy()
+    alpha_sn = prob_params["alpha"].to_numpy()
+    delta = alpha_sn / np.sqrt(1 + alpha_sn**2)
+    # All Mean10 present (≥ floor) ⇒ baseline is Mean10, the denom fallback is unused.
+    expected_ev = X["Mean10"].to_numpy() + loc + scale * delta * np.sqrt(2 / np.pi)
+
+    out = _decode_skewnormal(
+        prob_params.copy(),
+        X,
+        hist_gate=0.0,
+        offset_meta=offset_meta,
+        target_normalization="centered_additive_mean10",
+    )
+
+    np.testing.assert_allclose(out["Projection"].to_numpy(), expected_ev, atol=1e-12)
+    # Centered scale stays in absolute residual units — NOT × MeanYr.
+    np.testing.assert_array_equal(out["Model Sigma"].to_numpy(), scale)
+    # And NOT the ratio decode (loc × MeanYr) — the family the bug confused it with.
+    meanyr_clipped = X["MeanYr"].clip(lower=_MEANYR_FLOOR).to_numpy()
+    assert not np.allclose(out["Projection"].to_numpy(), loc * meanyr_clipped)
+
+
 def test_centered_additive_model_skew_is_finite():
     """Load-bearing: FGA dead end (docs §3.4) was NaN alpha at this layer."""
     X = _synth_player_stats(n=10, rng_seed=3)

@@ -1,13 +1,20 @@
-"""Live-path verification for the centered_additive_eb_meanyr_k10 strategy.
+"""Live-path verification for the centered-additive SkewNormal strategies.
 
-Trains a deterministic SkewNormal model on cached NBA_FGA features, builds a
-pickle-shaped filedict with offset_meta + target_normalization, and drives it
-through model_prob._decode_skewnormal. Asserts Model Skew is finite for
-every row (the FGA NaN dead end from docs/OVERCONFIDENCE_INVESTIGATION.md
-3.4 must not recur) and Model EV matches the EB-additive formula.
+Trains a deterministic SkewNormal model on cached NBA_FGA features under each
+``centered_additive`` target normalization, builds the pickle-shaped ``offset_meta`` from
+the registry, and drives it through ``model_prob._decode_skewnormal`` with the
+serve-derived ``offset_mode``. Guards the invariants a serve-decode drift has broken:
 
-Marked @pytest.mark.integration, no network -- relies on the cached
-NBA_FGA.parquet fixture. Skips cleanly when the parquet is absent.
+* ``Model Skew`` stays finite for every row (the FGA NaN dead end,
+  ``docs/OVERCONFIDENCE_INVESTIGATION.md`` 3.4).
+* The decoded mean is not inflated. A serve seeding drift (the prediction path deciding
+  ``offset_mode`` from a hardcoded ``method`` string) doubled ``centered_additive_mean10``
+  projections on 2026-06-24; a >= 1.5x median ``Projection/MeanYr`` fails here. This is the
+  end-to-end backstop, parametrized over both centered strategies so the newer
+  ``mean10_additive`` family is no longer uncovered.
+
+Marked @pytest.mark.integration, no network -- relies on the cached NBA_FGA.parquet
+fixture. Skips cleanly when the parquet is absent.
 """
 
 from __future__ import annotations
@@ -19,38 +26,36 @@ import pandas as pd
 import pytest
 
 from sportstradamus import data
-from sportstradamus.prediction.model_prob import _decode_skewnormal
+from sportstradamus.prediction.model_prob import _decode_skewnormal, _serve_offset_mode
 from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
 from sportstradamus.stats import StatsNBA
-from sportstradamus.training.baselines import (
-    EB_SHRINKAGE_K,
-    compute_eb_prior,
-    get_target_normalization,
-)
+from sportstradamus.training.baselines import get_target_normalization
 from sportstradamus.training.pipeline import (
     DETERMINISTIC_FIXED_PARAMS,
     DETERMINISTIC_SEED,
     fit_predict_params,
 )
 
-# Same subsample size as test_determinism_gate.py -- large enough to exercise
-# tree building, small enough to keep the test < ~30s.
+# Same subsample size as test_determinism_gate.py -- large enough to exercise tree
+# building, small enough to keep the test < ~30s.
 _GATE_N_ROWS = 4000
 
-# High-volume quintile threshold for the amplification guard. Centered
-# strategy must not collapse top-quintile EV below 70% of MeanYr.
+# High-volume quintile threshold for the amplification guard. Centered strategy must not
+# collapse top-quintile EV below 70% of MeanYr.
 _TOP_QUINTILE_EV_FRACTION_FLOOR = 0.7
+
+# A serve seeding/denom drift doubles the projection; the centered mean must track MeanYr.
+_MAX_MEDIAN_INFLATION = 1.5
 
 
 @pytest.mark.integration
-def test_centered_additive_skewnormal_decodes_with_finite_alpha_and_no_compression():
+@pytest.mark.parametrize("slug", ["centered_additive_eb_meanyr_k10", "centered_additive_mean10"])
+def test_centered_skewnormal_live_decode_finite_and_uninflated(slug):
     parquet = pkg_resources.files(data) / "training_data/NBA_FGA.parquet"
     if not parquet.is_file():
         pytest.skip("cached NBA_FGA.parquet not present in this environment")
 
-    M = pd.read_parquet(parquet)
-    M = M.sort_values(["Date"]).head(_GATE_N_ROWS).reset_index(drop=True)
-
+    M = pd.read_parquet(parquet).sort_values(["Date"]).head(_GATE_N_ROWS).reset_index(drop=True)
     cols = StatsNBA().get_stat_columns("FGA")
     # reindex (not M[cols]) matches production _step_build_splits: a feature_filter
     # addition not yet regenerated into the cached parquet fills NaN, not KeyError.
@@ -66,10 +71,12 @@ def test_centered_additive_skewnormal_decodes_with_finite_alpha_and_no_compressi
 
     global_mean = float(np.ravel(y_train.to_numpy()).mean())
     denom_col = "MeanYr"
-    strategy = get_target_normalization("centered_additive_eb_meanyr_k10")
+    strategy = get_target_normalization(slug)
+    offset_mode = strategy.start_mode_flag == "offset"
 
-    y_train_labels = np.ravel(y_train.to_numpy()).astype(float)
-    y_train_labels = strategy.forward(y_train_labels, X_train, global_mean, denom_col)
+    y_train_labels = strategy.forward(
+        np.ravel(y_train.to_numpy()).astype(float), X_train, global_mean, denom_col
+    )
 
     dist_obj = SkewNormalDist(stabilization="None", loss_fn="crps")
     params = {
@@ -89,69 +96,38 @@ def test_centered_additive_skewnormal_decodes_with_finite_alpha_and_no_compressi
         normalized=False,
         shape_ceiling=100.0,
         seed=DETERMINISTIC_SEED,
-        offset_mode=True,
+        offset_mode=offset_mode,
     )
 
-    # Drive through the LIVE decode path (the same helper model_prob uses).
-    offset_meta = {
-        "method": "eb_additive",
-        "k": EB_SHRINKAGE_K,
-        "global_mean": global_mean,
-        "prior_col": denom_col,
-        "games_col": "GamesPlayed",
-    }
-    # Capture raw loc/scale/alpha BEFORE _decode_skewnormal mutates the frame
-    # in place. The decode helper overwrites the "loc"/"scale" columns is a
-    # no-op on this path (it only sets Model EV / Model Sigma / Model Skew),
-    # but reading the raw arrays up front keeps the formula check independent.
-    raw_loc = prob_params["loc"].to_numpy().copy()
-    raw_scale = prob_params["scale"].to_numpy().copy()
-    raw_alpha = prob_params["alpha"].to_numpy().copy()
-
+    # Drive the LIVE decode with the registry-persisted offset_meta and the serve-derived
+    # seeding flag — exactly what model_prob does at predict time.
+    assert _serve_offset_mode("SkewNormal", slug) is offset_mode
+    offset_meta = strategy.offset_meta(global_mean, denom_col)
     decoded = _decode_skewnormal(
-        prob_params,
-        X_test,
-        hist_gate=0.0,
-        offset_meta=offset_meta,
-        target_normalization="centered_additive_eb_meanyr_k10",
+        prob_params, X_test, hist_gate=0.0, offset_meta=offset_meta, target_normalization=slug
     )
 
-    # Assertion 1: Model Skew finite for every row (FGA NaN guard).
-    assert decoded["Model Skew"].notna().all(), (
-        "Model Skew (alpha) must be finite under the centered strategy -- "
-        "NaN here is the FGA dead end from OVERCONFIDENCE_INVESTIGATION.md 3.4."
-    )
+    # FGA NaN guard.
     assert np.isfinite(decoded["Model Skew"].to_numpy()).all(), (
-        "Model Skew must be finite (no inf) for every row."
+        "Model Skew must be finite for every row -- see "
+        "docs/OVERCONFIDENCE_INVESTIGATION.md 3.4 (FGA NaN dead end)."
     )
+    proj = decoded["Projection"].to_numpy()
+    assert decoded["Projection"].notna().all() and (proj > 0).all()
 
-    # Assertion 2: Model EV matches EB_prior + loc + scale*delta*sqrt(2/pi).
-    eb = compute_eb_prior(
-        X_test[denom_col].clip(lower=0.5).to_numpy(),
-        X_test["GamesPlayed"].clip(lower=0).to_numpy(),
-        global_mean,
-        EB_SHRINKAGE_K,
-    )
-    delta = raw_alpha / np.sqrt(1 + raw_alpha**2)
-    expected_ev = eb + raw_loc + raw_scale * delta * np.sqrt(2 / np.pi)
-    np.testing.assert_allclose(
-        decoded["Projection"].to_numpy(),
-        expected_ev,
-        atol=1e-9,
-        err_msg=("Live decode formula does not match the train-side EB-additive transform."),
-    )
-
-    # Assertion 3: top-quintile EV not collapsed (anti-amplification guard).
+    # Anti-inflation: the centered mean tracks MeanYr; a seeding/denom drift doubles it.
     meanyr = X_test["MeanYr"].to_numpy()
+    median_ratio = float(np.median(proj / meanyr))
+    assert median_ratio < _MAX_MEDIAN_INFLATION, (
+        f"{slug}: median Projection/MeanYr = {median_ratio:.2f} >= {_MAX_MEDIAN_INFLATION} -- "
+        "a serve seeding/denom drift (the 2026-06-24 ~2x overconfidence bug) is back."
+    )
+
+    # Anti-compression: top-quintile EV not collapsed below the MeanYr floor.
     top_q = meanyr >= np.quantile(meanyr, 0.8)
     if top_q.sum() > 0:
-        ratio = decoded["Projection"].to_numpy()[top_q] / meanyr[top_q]
+        ratio = proj[top_q] / meanyr[top_q]
         assert ratio.mean() >= _TOP_QUINTILE_EV_FRACTION_FLOOR, (
-            f"Top-quintile mean Model EV / MeanYr = {ratio.mean():.3f}; "
-            f"centered strategy should not compress high-volume players below "
-            f"{_TOP_QUINTILE_EV_FRACTION_FLOOR}x MeanYr."
+            f"{slug}: top-quintile mean Projection/MeanYr = {ratio.mean():.3f} < "
+            f"{_TOP_QUINTILE_EV_FRACTION_FLOOR}; centered strategy compresses high-volume players."
         )
-
-    # Assertion 4: overall magnitudes are sane.
-    assert decoded["Projection"].notna().all()
-    assert decoded["Projection"].mean() > 0

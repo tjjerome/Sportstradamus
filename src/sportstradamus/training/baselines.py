@@ -227,8 +227,8 @@ def _ratio_encode_scale(scale: np.ndarray, X: pd.DataFrame, denom_col: str) -> n
     return np.asarray(scale, dtype=float) / meanyr
 
 
-def _ratio_offset_meta(global_mean: float, denom_col: str) -> dict | None:
-    return None
+def _ratio_offset_meta(global_mean: float, denom_col: str) -> dict:
+    return {"method": "ratio", "denom_col": denom_col}
 
 
 def _centered_eb_forward(
@@ -278,6 +278,7 @@ def _centered_eb_offset_meta(global_mean: float, denom_col: str) -> dict:
         "global_mean": float(global_mean),
         "prior_col": denom_col,
         "games_col": "GamesPlayed",
+        "denom_col": denom_col,
     }
 
 
@@ -320,6 +321,7 @@ def _centered_mean10_offset_meta(global_mean: float, denom_col: str) -> dict:
         "global_mean": float(global_mean),
         "prior_col": "Mean10",
         "prior_fallback_col": denom_col,
+        "denom_col": denom_col,
     }
 
 
