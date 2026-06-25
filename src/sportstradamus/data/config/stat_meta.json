@@ -287,7 +287,7 @@
         "carries": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
+            "target_normalization": "centered_additive_mean10",
             "posthoc": "none"
         },
         "completions": {
@@ -305,7 +305,7 @@
         "fantasy points underdog": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
+            "target_normalization": "centered_additive_mean10",
             "posthoc": "none"
         },
         "interceptions": {
@@ -383,7 +383,7 @@
         "targets": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
+            "target_normalization": "centered_additive_mean10",
             "posthoc": "none"
         },
         "tds": {
