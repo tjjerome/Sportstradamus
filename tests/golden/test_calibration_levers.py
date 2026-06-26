@@ -122,6 +122,25 @@ def test_penalized_objective_steers_search_away_from_uncalibrated():
     assert sharp_uncalibrated > blunt_calibrated
 
 
+def test_clamp_seed_params_rescues_sub_floor_log_param():
+    """Warm-start regression: a pickle storing lambda_l1=0.0 (LightGBM's default, below the
+    1e-6 log-scale floor) must be clamped up to the floor, not enqueued as-is — seeding 0.0 into
+    a log=True distribution makes Optuna take log(0) and abort the whole study. In-bounds seeds
+    pass through unchanged and 'none'-type (fixed) params are not seeded."""
+    from sportstradamus.training.hyperparams import _clamp_seed_params
+
+    hp_dict = {
+        "num_threads": ["none", [8]],
+        "lambda_l1": ["float", {"low": 1e-6, "high": 10, "log": True}],
+        "num_leaves": ["int", {"low": 8, "high": 127, "log": False}],
+    }
+    seed = _clamp_seed_params(hp_dict, {"lambda_l1": 0.0, "num_leaves": 31, "num_threads": 8})
+
+    assert seed["lambda_l1"] == 1e-6  # sub-floor log param clamped up — no log(0) abort
+    assert seed["num_leaves"] == 31  # in-bounds seed unchanged
+    assert "num_threads" not in seed  # 'none'-type fixed params are not seeded
+
+
 def test_resolve_cell_knob_persists_per_cell_selection_and_honors_flag_override():
     """Lever-1 durability: a cell's stat_meta hpo_selection is what the production cron applies
     under the default 'auto' flag, so a calibrated-selected ship reproduces on retrain instead of

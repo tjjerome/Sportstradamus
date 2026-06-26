@@ -76,6 +76,22 @@ def _collect_calibrated_candidates(trials):
     return candidates
 
 
+def _clamp_seed_params(hp_dict: dict, initial_params: dict) -> dict:
+    """Warm-start seed clamped into the current search space.
+
+    A value stored in the pickle can fall outside today's bounds — notably
+    ``lambda_l1``/``lambda_l2`` = 0.0 (LightGBM's default, below the ``1e-6`` log-scale
+    floor) — which makes Optuna's ``enqueue_trial`` take ``log(0)`` and abort the whole
+    study. Clamping each tunable seed into ``[low, high]`` honors the warm start instead.
+    """
+    seed = {}
+    for name, (kind, spec) in hp_dict.items():
+        if kind == "none" or name not in initial_params:
+            continue
+        seed[name] = min(max(initial_params[name], spec["low"]), spec["high"])
+    return seed
+
+
 def run_hyper_opt(
     model,
     hp_dict,
@@ -149,8 +165,7 @@ def run_hyper_opt(
     )
 
     if initial_params is not None:
-        tunable_params = {k for k, v in hp_dict.items() if v[0] != "none"}
-        seed_params = {k: v for k, v in initial_params.items() if k in tunable_params}
+        seed_params = _clamp_seed_params(hp_dict, initial_params)
         seed_params["boosting"] = "gbdt"
         study.enqueue_trial(seed_params)
 
