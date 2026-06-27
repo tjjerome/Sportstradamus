@@ -668,13 +668,17 @@ def _prune_uninformative_features(X_train: pd.DataFrame, categorical_cols: list[
     return keep
 
 
-def _step_build_splits(M: pd.DataFrame, stat_data, market: str) -> dict:
+def _step_build_splits(
+    M: pd.DataFrame, stat_data, market: str, target_normalization: str = "ratio_meanyr"
+) -> dict:
     """Build feature matrix, temporal 70/30 split, then 50/50 test/validation.
 
     Args:
         M: Trimmed training matrix.
         stat_data: Stats instance (provides ``get_stat_columns``).
         market: Market name.
+        target_normalization: Normalization slug. ``ratio_projvol`` needs its
+            projected-volume denominator carried into ``X`` (see below).
 
     Returns:
         Dict with: ``X``, ``y``, ``X_train``, ``X_test``, ``X_validation``,
@@ -692,6 +696,18 @@ def _step_build_splits(M: pd.DataFrame, stat_data, market: str) -> dict:
     # concat-fill old cached rows the same way, so behavior is identical on
     # the happy path.
     X = M.reindex(columns=stat_data.get_stat_columns(market))
+
+    # ratio_projvol divides by a projected-volume column that base_profile does
+    # not emit, so get_stat_columns omits it and the reindex above drops it.
+    # Carry it in from M (the matrix build persisted it) so the denominator
+    # reaches every split, the model's expected_columns, and the served dump —
+    # the same denominator-as-feature shape ratio_meanyr has with MeanYr.
+    projvol_denom = None
+    if target_normalization == "ratio_projvol":
+        projvol_denom = baselines.resolve_denom_col(
+            target_normalization, stat_data.league, market, M.columns, zero_inflated=False
+        )
+        X[projvol_denom] = M[projvol_denom]
 
     categories = ["Home", "Player position"]
     if "Player position" not in X.columns:
@@ -719,6 +735,10 @@ def _step_build_splits(M: pd.DataFrame, stat_data, market: str) -> dict:
     # ``prediction/scoring.py``), so pruning at train time propagates
     # cleanly to serving without any inference-side change.
     kept_cols = _prune_uninformative_features(X_train, categories)
+    # The projvol denominator is load-bearing for decode even if its train-split
+    # variance is low — never let pruning drop it.
+    if projvol_denom is not None and projvol_denom not in kept_cols:
+        kept_cols.append(projvol_denom)
     if len(kept_cols) < len(X.columns):
         X = X[kept_cols]
         X_train = X_train[kept_cols]
@@ -2276,10 +2296,14 @@ def _step_select_distribution(
             nonzero_mask = y_train_labels > 0
             X_train = X_train[nonzero_mask]
             y_train_labels = y_train_labels[nonzero_mask]
-            denom_col = "MeanYr_nonzero" if "MeanYr_nonzero" in X_train.columns else "MeanYr"
-        else:
-            denom_col = "MeanYr"
 
+        denom_col = baselines.resolve_denom_col(
+            target_normalization,
+            league,
+            market,
+            X_train.columns,
+            zero_inflated=hist_gate > NONZERO_DENOM_GATE,
+        )
         normalize = strategy.start_mode_flag == "normalized"
         offset_mode = strategy.start_mode_flag == "offset"
         y_train_labels = strategy.forward(y_train_labels, X_train, global_mean, denom_col)
@@ -2430,7 +2454,7 @@ def train_market(
         M, training_data_path, stat_data, deterministic=deterministic
     )
 
-    splits = _step_build_splits(M, stat_data, market)
+    splits = _step_build_splits(M, stat_data, market, target_normalization)
     dist_info = _step_select_distribution(
         splits,
         stat_data,

@@ -37,6 +37,7 @@ _MP = sys.modules["sportstradamus.prediction.model_prob"]
 # the missing-entry case is exactly how the mean10 2x bug shipped.
 _EXPECTED_SERVE_OFFSET = {
     "ratio_meanyr": False,
+    "ratio_projvol": False,
     "centered_additive_eb_meanyr_k10": True,
     "centered_additive_mean10": True,
 }

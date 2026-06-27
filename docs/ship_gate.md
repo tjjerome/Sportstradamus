@@ -50,8 +50,10 @@ re-enters the set-baseline track** for a fresh baseline (drift monitor).
 Computed by `gate_row()` + `apply_thresholds()` on the test-set CSVs dumped by
 `meditate`. A cell **ships** iff all six pass. Star = top-mean **decile**; bench =
 bottom-mean **quartile** (pooled coarser on purpose — low-volume players generalize
-more than stars). Gate 6 is **cohort-scoped** — it only constrains `ratio_meanyr`
-SkewNormal cells and auto-passes everything else.
+more than stars). Gate 6 **applies to every cell** and is the **OR of three one-sided
+anti-shrinkage legs** (recent-form, CITL-under, count over — below): the cell fails Gate 6
+if any leg fires. Only the recent-form leg is anchor-scoped (`corr(Mean10, Result)` with a
+hysteresis deadband); the CITL-under leg runs on every cell.
 
 | # | Gate | Formula | Threshold | Constant |
 |---|------|---------|-----------|----------|
@@ -60,7 +62,7 @@ SkewNormal cells and auto-passes everything else.
 | 3 | **Bench σ-match** | Same on the bottom-mean quartile | `z < 0.5` | `_GATE3_BENCH_Z_MAX = 0.5` |
 | 4 | **PIT-KS calibration** | `pit_ks = KS(randomized-PIT, Uniform)` of the predictive CDF (seeded draws, averaged) | `pit_ks < max(δ, 1.358/√n)`, `δ = 0.05` — whole-CDF mispricing under the larger of the vig-scale effect floor and the cell's KS α=0.05 noise floor | `_GATE4_PIT_KS_DELTA = 0.05` |
 | 5 | **Equal-mass ECE** | 10 equal-mass `p_model` bins; `ece = Σ (n_b/N)·|mean(p_model) − mean(y)|` | `ece < 0.075` | `_GATE5_ECE_MAX = 0.075` |
-| 6 | **Anti-shrinkage (recent-form floor)** | (`ratio_meanyr` SkewNormal only) `r_star = Σ Blended_EV / Σ Mean10` on *stable* (`\|Mean10/MeanYr−1\| ≤ 0.12`) top-MeanYr-quartile players; player-clustered bootstrap 97.5% upper bound `star_hi`, gated on `corr(Mean10, Result) ≥ 0.55` | `star_hi ≥ star_ref − 0.03` — the stable star not projected materially below the causal real-game floor (`star_ref`: basketball `0.98`, NFL `0.94`) | `_GATE6_STAR_REF_BASKETBALL = 0.98`, `_GATE6_MARGIN = 0.03` |
+| 6 | **Anti-shrinkage (3 OR-ed legs)** | Fails if ANY leg fires; each is a player-clustered bootstrap one-sided CI on *stable* (`\|Mean10/MeanYr−1\| ≤ 0.12`) segments. **(a) recent-form** `Σ Blended_EV / Σ Mean10` on the top-MeanYr quartile (UB `star_hi`), anchored on `corr(Mean10, Result)` with a `0.58/0.52` hysteresis deadband. **(b) CITL-under** `Σ Blended_EV / Σ Result` on the same stars (UB `citl_hi`), every cell. **(c) over** `Σ Blended_EV / Σ Result` on the bottom-MeanYr quartile (LB `over_lo`), count/ZINB only, guarded by `mean(Result) ≥ 1` | recent-form `star_hi ≥ star_ref − 0.03` (`star_ref`: basketball `0.95`, NFL `0.94`); CITL `citl_hi ≥ 1 − 0.03`; over `over_lo ≤ 1 + 0.03` | `_GATE6_STAR_REF_BASKETBALL = 0.95`, `_GATE6_MARGIN = 0.03`, `_GATE6_FIRE_ON = 0.58`, `_GATE6_KEEP_ON = 0.52`, `_GATE6_OVER_MIN_MEAN = 1.0` |
 
 **Denominators are σ, not σ/√N.** Gates 2/3 use the segment's **standard deviation**
 (not the standard error of the mean). With ~2000 rows per cell, σ/√N collapses to
@@ -68,21 +70,45 @@ near-zero on low-variance bench segments and the gate fires on a negligible bias
 σ keeps the yardstick at "what a typical event in the segment looks like" regardless
 of N.
 
-**Gate 6 catches MeanYr over-shrinkage the other five are blind to.** The `ratio_meanyr`
-cells divide the target by a 365-day MeanYr that conflates "high historical average" with
-"will regress", so the holdout itself teaches a high-volume regression real games don't
-show. The model fits that holdout faithfully — top-decile `mean(pred)/mean(Result) ≈ 1.0`
-— so every outcome-scored gate passes (a relative-bias rework of Gates 2/3 is equally
-blind: the holdout's own stable stars are suppressed). Gate 6 instead scores the model's
-*stable* top-MeanYr prediction against the players' **recent form** (`Mean10`), the one
-yardstick the artifact doesn't suppress, and fails the cell when a stable star is projected
-materially below the causal real-game floor (~0.99× recent form, measured from 6 seasons of
-gamelog; ~0.94 for NFL position-mixed yardage). The `corr ≥ 0.55` anchor exempts cells
-where recent form isn't predictive (minutes, bursty counts); the gate is **star-side only**
-because the `ratio_meanyr` denominator deflates the whole distribution and so never inflates
-the bench. Live symptom that motivated it: served WNBA FGA projecting a stable 13.4-shooter
-at 10.1 (Win-Prob pinned at the 0.90 clamp). [research:
-`/tmp/researcher_overshrinkage_gate.md`]
+**Gate 6 catches a stable-star regression toward the global mean the other five can miss.**
+The first case was the `ratio_meanyr` cohort: those cells divide the target by a 365-day
+MeanYr that conflates "high historical average" with "will regress", so the holdout itself
+teaches a high-volume regression real games don't show. The model fits that holdout
+faithfully — top-decile `mean(pred)/mean(Result) ≈ 1.0` — so every outcome-scored gate
+passes (a relative-bias rework of Gates 2/3 is equally blind: the holdout's own stable stars
+are suppressed). But the blind spot is general: Gate 2's bias `z` divides by the outcome σ,
+so on a high-variance stat a real proportional star shrinkage launders into a tiny `z` and
+passes (the shipped NBA fantasy-points case — stable stars served at `0.88×` recent form,
+Gate-2 `z = 0.22`). Three one-sided legs, OR-ed, cover the failure from different angles:
+
+1. **Recent-form** (the original leg): scores the *stable* top-MeanYr prediction against the
+   players' **recent form** (`Mean10`) — the one yardstick the `ratio_meanyr` holdout
+   corruption does not suppress (the held-out `Result` is itself suppressed, so a leg scored
+   against the outcome is structurally blind to that class). Fails when a stable star is
+   projected materially below the causal real-game floor (~0.99× recent form, measured from
+   6 seasons of gamelog; the floor is set to `0.95` to tolerate ~5% shrinkage, ~0.94 for NFL
+   position-mixed yardage). Anchored on `corr(Mean10, Result)`, because where recent form
+   doesn't predict the outcome (minutes, bursty counts) predicting below it is correct
+   regression, not shrinkage. The anchor uses a **`0.58/0.52` hysteresis deadband** — a fresh
+   cell is judged at `0.58`, a cell whose leg fired last run keeps being judged down to
+   `0.52` — so a cell whose `corr` straddles the boundary can't flip ship state on a retrain
+   wobble.
+2. **CITL-under** (calibration-in-the-large, every cell): scores the same stable stars'
+   `Σ Blended_EV / Σ Result` against the realized outcome, failing when the served prediction
+   sits materially below it (`citl_hi < 1 − 0.03`). This is the σ-denominator-free counterpart
+   to Gate 2 — it catches the proportional under-prediction the outcome confirms (NBA
+   fantasy-points) regardless of variance, and it runs without the anchor because the outcome
+   is always a valid yardstick.
+3. **Over** (count/ZINB bench): scores `Σ Blended_EV / Σ Result` on the stable *bottom*-MeanYr
+   quartile, failing when low-volume players are over-predicted (`over_lo > 1 + 0.03`). Guarded
+   by `mean(Result) ≥ 1` so it can't fire on degenerate rare counts where the ratio is
+   discreteness, not a defect.
+
+The recent-form and CITL legs are star-side (mean-regression deflates the stars, where recent
+form is also the cleanest yardstick); the over leg is the only bench-side check and is scoped to
+count families. Live symptom that motivated the original leg: served WNBA FGA projecting a stable
+13.4-shooter at 10.1 (Win-Prob pinned at the 0.90 clamp). [research:
+`/tmp/researcher_overshrinkage_gate.md`, `/tmp/researcher_gate6_scope_and_drift.md`]
 
 **Gate 1 is non-inferiority, not superiority.** Intent #3 is "the deployed ensemble
 is *at least as good as* the book," so a statistical **tie passes** — we do not demand
@@ -162,10 +188,10 @@ as the reported `g4_iqr_ratio`.
   retired IQR gate (randomized-PIT is well-defined on count cells), so that Step 0.4
   blank-pass workaround is closed.
 - **Gates 2/3 blank**: fail (couldn't compute).
-- **Gate 6 blank** (off-cohort — not `ratio_meanyr` SkewNormal — or untestable: recent
-  form unanchored / too few stable stars): **auto-pass** — "not applicable", the only
-  blank-is-pass besides Gate 1. Gate 6 never fails for absence of evidence; it fires only
-  on a positive over-shrinkage signal.
+- **Gate 6 blank** (every leg untestable: recent form below the anchor / too few stable
+  stars / over-leg guard or non-count family): **auto-pass** — "not applicable", the only
+  blank-is-pass besides Gate 1. Each of the three legs auto-passes independently when it
+  can't test; Gate 6 fails only when a leg fires on a positive signal.
 
 **Oracle columns.** Gates 1–5 each emit a sibling "oracle" value computed under the
 deterministic-1/0 oracle (`pred = Result`; over-prob `= 1 if Result>=Line else 0`):

@@ -106,7 +106,6 @@ _NON_NUMERIC_GAMELOG_COLS = frozenset(
         "season type",
         "opponent",
         "gameday",
-        "gametime",
         "game id",
         "home",
     }
@@ -119,10 +118,6 @@ _UNMODELED_CARRY_RESERVE: int = 6  # mean carries for rank-3+ rushers per game
 _UNMODELED_TARGET_RESERVE: int = 8  # mean targets for rank-5+ receivers per game
 _CARRY_CAP: int = 40  # absolute single-player carry ceiling per game
 _TARGET_CAP: int = 20  # absolute single-player target ceiling per game
-
-# Kickoff hour (24h, schedule-local) at/after which an NFL game is national
-# prime time (SNF/MNF/TNF kick ~20:15-20:20). Prime-time games skew game script.
-_NFL_PRIMETIME_HOUR: int = 20
 
 # Gamelog lookback window for data hygiene: drop rows older than this many days
 # (~6 seasons). Keeping more than 6 seasons of NFL data inflates storage and
@@ -475,6 +470,13 @@ class StatsNFL(Stats):
     def update(self):
         """Update data from the web API."""
         self.need_pbp = True
+        # QW-4 gametime / own rest / opp rest were reverted 2026-06-20 (the
+        # PrimeTime/RestDiff features they fed carried zero importance). Shed them
+        # from any pre-revert cache so the ``isna().any`` backfill selector below
+        # doesn't flag every historical row -- they were NaN across all of it.
+        self.gamelog = self.gamelog.drop(
+            columns=["gametime", "own rest", "opp rest"], errors="ignore"
+        )
         nfl_data = self._fetch_player_stats()
         snaps = self._fetch_snap_counts()
         sched = self._fetch_schedule()
@@ -590,61 +592,34 @@ class StatsNFL(Stats):
             logger.warning(
                 "Failed to fetch NFL schedule data; upcoming games and game metadata will not be updated this run"
             )
-            sched = pd.DataFrame(
-                columns=[
-                    "away_team",
-                    "home_team",
-                    "gameday",
-                    "weekday",
-                    "gametime",
-                    "away_rest",
-                    "home_rest",
-                    "week",
-                    "game_id",
-                ]
-            )
+            sched = pd.DataFrame(columns=["away_team", "home_team", "gameday", "week", "game_id"])
         return sched
 
     def _compute_upcoming_games(self, sched):
         upcoming_games = sched.loc[
             pd.to_datetime(sched["gameday"]).dt.date >= datetime.today().date(),
-            [
-                "gameday",
-                "away_team",
-                "home_team",
-                "weekday",
-                "gametime",
-                "away_rest",
-                "home_rest",
-                "week",
-            ],
+            ["gameday", "away_team", "home_team", "week"],
         ]
         if not upcoming_games.empty:
-            upcoming_games["gametime"] = (
-                upcoming_games["weekday"].str[:-3] + " " + upcoming_games["gametime"]
-            )
             # Playoff games run past the regular-season schedule (week 19+).
             upcoming_games["playoff"] = upcoming_games["week"] > NFL_REGULAR_SEASON_WEEKS
             df1 = upcoming_games.rename(columns={"home_team": "Team", "away_team": "Opponent"})
             df2 = upcoming_games.rename(columns={"away_team": "Team", "home_team": "Opponent"})
             df1["Home"] = True
             df2["Home"] = False
-            df1["rest_diff"] = df1["home_rest"] - df1["away_rest"]
-            df2["rest_diff"] = df2["away_rest"] - df2["home_rest"]
             upcoming_games = pd.concat([df1, df2]).sort_values("gameday")
             self.upcoming_games = (
                 upcoming_games.groupby("Team")
                 .apply(lambda x: x.head(1))
-                .droplevel(1)[["Opponent", "Home", "gameday", "gametime", "rest_diff", "playoff"]]
+                .droplevel(1)[["Opponent", "Home", "gameday", "playoff"]]
                 .to_dict(orient="index")
             )
 
     def _schedule_context(self, stats, date, teams):
-        """QW-4: emit Weekday / PrimeTime / RestDiff game-script context.
+        """QW-4: emit the ``Weekday`` game-script feature (game date day-of-week).
 
         Historical reads the realized gamelog row for ``date``; upcoming reads
-        ``upcoming_games``. Weekday is the game date's day-of-week (not the ragged
-        ``weekday`` string), so both branches agree on the parity surface.
+        ``upcoming_games``. Both derive Weekday from the game date, so they agree.
         """
         if date < datetime.today().date():
             todays = (
@@ -653,29 +628,12 @@ class StatsNFL(Stats):
                 .set_index("player display name")
             )
             gameday = pd.to_datetime(todays["gameday"]).reindex(stats.index)
-            # gametime / own rest / opp rest are stamped only on rows assembled
-            # after QW-4 landed; historical cache rows lack them, so degrade to
-            # NaN (PrimeTime/RestDiff inert) until a schedule backfill -- Weekday
-            # still derives from the always-present gameday.
-            if "gametime" in todays.columns:
-                gametime = todays["gametime"].reindex(stats.index)
-            else:
-                gametime = pd.Series(index=stats.index, dtype=object)
-            if {"own rest", "opp rest"}.issubset(todays.columns):
-                rest_diff = (todays["own rest"] - todays["opp rest"]).reindex(stats.index)
-            else:
-                rest_diff = pd.Series(np.nan, index=stats.index)
         else:
             ug = self.upcoming_games
             rows = {p: ug.get(teams.get(p), {}) for p in stats.index}
             gameday = pd.to_datetime(pd.Series({p: r.get("gameday") for p, r in rows.items()}))
-            gametime = pd.Series({p: r.get("gametime") for p, r in rows.items()})
-            rest_diff = pd.Series({p: r.get("rest_diff") for p, r in rows.items()})
 
-        kickoff_hour = gametime.str.split().str[-1].str.split(":").str[0].astype(float)
         stats["Weekday"] = gameday.dt.dayofweek
-        stats["PrimeTime"] = (kickoff_hour >= _NFL_PRIMETIME_HOUR).astype(float)
-        stats["RestDiff"] = rest_diff
 
     def _playoff_flag(self, stats, date, teams):
         """Flag postseason games from the gamelog ``season type`` (historical) or the
@@ -706,21 +664,15 @@ class StatsNFL(Stats):
         stats["CanClinch"] = stats["Playoff"]
 
     def _assemble_gamelog_frame(self, nfl_data, sched, snaps):
-        # Carry each team's own/opponent rest (QW-4): home side takes home_rest as
-        # own, away side takes away_rest -- so the gamelog row has own/opp directly
-        # without needing the home flag (backfilled later).
-        home_side = sched.rename(columns={"home_team": "recent_team"}).assign(
-            own_rest=sched["home_rest"], opp_rest=sched["away_rest"]
-        )
-        away_side = sched.rename(columns={"away_team": "recent_team"}).assign(
-            own_rest=sched["away_rest"], opp_rest=sched["home_rest"]
-        )
-        nfl_data = nfl_data.merge(
-            pd.concat([home_side, away_side])[
-                ["recent_team", "week", "gameday", "gametime", "own_rest", "opp_rest"]
-            ],
-            how="left",
-        )
+        # Attach each row's gameday from the schedule -- home and away side both map
+        # their team to recent_team so the merge reaches every player row.
+        sched_long = pd.concat(
+            [
+                sched.rename(columns={"home_team": "recent_team"}),
+                sched.rename(columns={"away_team": "recent_team"}),
+            ]
+        )[["recent_team", "week", "gameday"]]
+        nfl_data = nfl_data.merge(sched_long, how="left")
         nfl_data = nfl_data.loc[nfl_data["position_group"].isin(["QB", "WR", "RB", "TE"])]
         snaps = snaps.loc[snaps["position"].isin(["QB", "WR", "RB", "TE"])]
         snaps["player_display_name"] = snaps["player"].map(remove_accents)

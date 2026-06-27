@@ -169,6 +169,9 @@ def _decode_skewnormal(
         ``Model Gate`` columns set.
     """
     strategy = get_target_normalization(target_normalization)
+    # ratio_projvol persists its projected-volume denominator in offset_meta;
+    # _resolve_denom_col reads it (and the centered prior_* back-compat keys),
+    # falling back to the season-mean choice for legacy pickles.
     denom_col = _resolve_denom_col(offset_meta, hist_gate, playerStats.columns)
     # global_mean snapshot lives in offset_meta for centered strategies; the
     # ratio strategy ignores it (uses MeanYr from features directly).

@@ -64,6 +64,31 @@ _MEANYR_FLOOR: float = 0.5
 # Floor applied to the ratio target post-divide, mirroring pipeline.py:468.
 _RATIO_TARGET_FLOOR: float = 0.01
 
+# Fallback denominator for ``ratio_projvol`` when a volume projection is missing:
+# degrades cleanly to ``ratio_meanyr`` semantics and is present in every
+# train, serve, and gate frame.
+_PROJVOL_FALLBACK_COL: str = "MeanYr"
+
+# ``ratio_projvol`` denominator routing: scoring market -> the volume market
+# whose projected per-game total (the ``Player proj {vol} mean`` feature) is the
+# opportunity denominator. NBA/WNBA carry a single volume stat (MIN), so any
+# counting market routes to it via the per-league default below; NFL is
+# role-specific. MLB/NHL fold in by adding rows here once their cells activate
+# (volume_stats: MLB plateAppearances / pitches thrown, NHL timeOnIce /
+# shotsAgainst) — the resolver and the ``Player proj {vol} mean`` column builder
+# are league-agnostic, so a fold-in is a data edit, not a logic change.
+_PROJVOL_VOLUME_MARKET: dict[str, dict[str, str]] = {
+    "NFL": {
+        "completions": "attempts",
+        "passing yards": "attempts",
+        "passing tds": "attempts",
+        "rushing yards": "carries",
+        "receiving yards": "targets",
+        "receptions": "targets",
+    },
+}
+_PROJVOL_DEFAULT_VOLUME_MARKET: dict[str, str] = {"NBA": "MIN", "WNBA": "MIN"}
+
 
 def compute_eb_prior(
     player_mean: np.ndarray | pd.Series,
@@ -300,6 +325,53 @@ def _centered_mean10_offset_meta(global_mean: float, denom_col: str) -> dict:
     }
 
 
+def _projvol_denominator(X: pd.DataFrame, proj_col: str) -> np.ndarray:
+    """Projected-volume denominator with a per-row season-mean fallback.
+
+    Missing projections arrive as ``0`` (the ``fillna(0)`` sentinel in
+    ``stats/base.py``) or ``NaN`` (absent player join); both fall back to
+    :data:`_PROJVOL_FALLBACK_COL` so the rate target is always finite and
+    the decode stays exact.
+    """
+    proj = X[proj_col].replace(0, np.nan)
+    return proj.fillna(X[_PROJVOL_FALLBACK_COL]).clip(lower=_MEANYR_FLOOR).to_numpy()
+
+
+def _ratio_projvol_forward(
+    y: np.ndarray, X: pd.DataFrame, global_mean: float, denom_col: str
+) -> np.ndarray:
+    denom = _projvol_denominator(X, denom_col)
+    return np.clip(np.asarray(y, dtype=float) / denom, _RATIO_TARGET_FLOOR, None)
+
+
+def _ratio_projvol_decode_loc(
+    loc: np.ndarray, X: pd.DataFrame, global_mean: float, denom_col: str
+) -> np.ndarray:
+    return np.asarray(loc, dtype=float) * _projvol_denominator(X, denom_col)
+
+
+def _ratio_projvol_decode_scale(scale: np.ndarray, X: pd.DataFrame, denom_col: str) -> np.ndarray:
+    return np.asarray(scale, dtype=float) * _projvol_denominator(X, denom_col)
+
+
+def _ratio_projvol_encode_loc(
+    loc: np.ndarray, X: pd.DataFrame, global_mean: float, denom_col: str
+) -> np.ndarray:
+    return np.asarray(loc, dtype=float) / _projvol_denominator(X, denom_col)
+
+
+def _ratio_projvol_encode_scale(scale: np.ndarray, X: pd.DataFrame, denom_col: str) -> np.ndarray:
+    return np.asarray(scale, dtype=float) / _projvol_denominator(X, denom_col)
+
+
+def _ratio_projvol_offset_meta(global_mean: float, denom_col: str) -> dict:
+    return {
+        "method": "projvol_ratio",
+        "denom_col": denom_col,
+        "fallback_col": _PROJVOL_FALLBACK_COL,
+    }
+
+
 _TARGET_NORMALIZATIONS: dict[str, TargetNormalization] = {
     "ratio_meanyr": TargetNormalization(
         slug="ratio_meanyr",
@@ -331,6 +403,16 @@ _TARGET_NORMALIZATIONS: dict[str, TargetNormalization] = {
         _encode_scale=_centered_mean10_decode_scale,
         _offset_meta=_centered_mean10_offset_meta,
     ),
+    "ratio_projvol": TargetNormalization(
+        slug="ratio_projvol",
+        start_mode_flag="normalized",
+        _forward=_ratio_projvol_forward,
+        _decode_loc=_ratio_projvol_decode_loc,
+        _decode_scale=_ratio_projvol_decode_scale,
+        _encode_loc=_ratio_projvol_encode_loc,
+        _encode_scale=_ratio_projvol_encode_scale,
+        _offset_meta=_ratio_projvol_offset_meta,
+    ),
 }
 
 
@@ -353,3 +435,55 @@ def get_target_normalization(slug: str) -> TargetNormalization:
     if slug not in _TARGET_NORMALIZATIONS:
         raise ValueError(f"Unknown target strategy {slug!r}; valid: {TARGET_NORMALIZATION_SLUGS}")
     return _TARGET_NORMALIZATIONS[slug]
+
+
+def resolve_denom_col(
+    slug: str,
+    league: str,
+    market: str,
+    columns,
+    *,
+    zero_inflated: bool,
+) -> str:
+    """Resolve the denominator column a SkewNormal cell normalizes against.
+
+    ``ratio_projvol`` divides by a market-specific projected-volume feature
+    (``Player proj {vol} mean``); every other strategy uses the season mean
+    (``MeanYr_nonzero`` for zero-inflated cells, else ``MeanYr``). The chosen
+    column flows through ``pipeline._step_select_distribution`` to the model
+    pickle's ``offset_meta``, the served-predictive ``DenomCol`` dump, and the
+    Gate-4 scorecard decode, so train, serve, and gate share one denominator.
+
+    Args:
+        slug: Target-normalization slug.
+        league: League slug (e.g. ``"NFL"``).
+        market: Market slug; hyphens are normalized to spaces before lookup.
+        columns: Available feature columns (anything supporting ``in``).
+        zero_inflated: Whether the cell drops zero rows / serves against the
+            non-zero season mean.
+
+    Returns:
+        The denominator column name.
+
+    Raises:
+        ValueError: If ``ratio_projvol`` has no volume mapping for the cell, or
+            the projected-volume column is absent (a volume market's own matrix
+            or an un-regenerated cache) — the cell is not eligible.
+    """
+    if slug == "ratio_projvol":
+        market_key = market.replace("-", " ")
+        vol = _PROJVOL_VOLUME_MARKET.get(league, {}).get(
+            market_key
+        ) or _PROJVOL_DEFAULT_VOLUME_MARKET.get(league)
+        if vol is None:
+            raise ValueError(f"ratio_projvol: no projected-volume mapping for {league}/{market}")
+        col = f"Player proj {vol} mean"
+        if col not in columns:
+            raise ValueError(
+                f"ratio_projvol: projected-volume column {col!r} absent for {league}/{market} "
+                "— cell not eligible (volume market or un-regenerated training cache)"
+            )
+        return col
+    if zero_inflated and "MeanYr_nonzero" in columns:
+        return "MeanYr_nonzero"
+    return "MeanYr"
