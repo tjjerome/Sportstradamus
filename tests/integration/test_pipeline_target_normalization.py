@@ -29,8 +29,19 @@ from sportstradamus.training import baselines
 from sportstradamus.training.pipeline import (
     DETERMINISTIC_FIXED_PARAMS,
     DETERMINISTIC_SEED,
+    _step_build_splits,
     fit_predict_params,
 )
+
+# NBA projected-minutes column the FGA matrix carries; ratio_projvol's denominator.
+_PROJ_MIN = "Player proj MIN mean"
+
+
+def _load_full_matrix() -> pd.DataFrame:
+    parquet = pkg_resources.files(data) / "training_data/NBA_FGA.parquet"
+    if not parquet.is_file():
+        pytest.skip("cached NBA_FGA.parquet not present in this environment")
+    return pd.read_parquet(parquet).sort_values(["Date"]).head(GATE_N_ROWS).reset_index(drop=True)
 
 # Same fixed subsample size as the determinism gate so the two share state.
 GATE_N_ROWS = 4000
@@ -168,3 +179,52 @@ def test_centered_loc_meanyr_correlation_differs_from_ratio_loc():
     assert abs(corr_ratio - corr_centered) > 0.05, (
         f"corr(loc, MeanYr) barely moved: ratio={corr_ratio:.3f}, centered={corr_centered:.3f}"
     )
+
+
+@pytest.mark.integration
+def test_ratio_projvol_carries_proj_denominator_into_splits():
+    """``base_profile`` omits the projected-volume column from
+    ``get_stat_columns``, so the reindex in ``_step_build_splits`` would drop it.
+    ``ratio_projvol`` must carry it back from ``M`` (and only for that slug), or
+    the denominator is absent at train, dump, and gate time.
+    """
+    M = _load_full_matrix()
+    if _PROJ_MIN not in M.columns:
+        pytest.skip("fixture lacks the projected-volume column")
+    stat_data = StatsNBA()
+
+    projvol = _step_build_splits(M, stat_data, "FGA", "ratio_projvol")
+    ratio = _step_build_splits(M, stat_data, "FGA", "ratio_meanyr")
+
+    assert _PROJ_MIN in projvol["X_train"].columns
+    assert _PROJ_MIN in projvol["X_test"].columns
+    # The denominator is carried only for ratio_projvol — other cells are untouched.
+    assert _PROJ_MIN not in ratio["X_train"].columns
+
+
+@pytest.mark.integration
+def test_ratio_projvol_forward_diverges_from_ratio_meanyr():
+    """Switching to ``ratio_projvol`` must change the learned target — otherwise
+    the per-volume rate plumbing is a no-op. The target must also stay finite
+    (the missing-projection fallback to MeanYr holds coverage).
+    """
+    M = _load_full_matrix()
+    if _PROJ_MIN not in M.columns:
+        pytest.skip("fixture lacks the projected-volume column")
+    splits = _step_build_splits(M, StatsNBA(), "FGA", "ratio_projvol")
+    X_train = splits["X_train"]
+    y = splits["y_train_labels"].astype(float)
+    global_mean = float(y.mean())
+
+    denom_col = baselines.resolve_denom_col(
+        "ratio_projvol", "NBA", "FGA", X_train.columns, zero_inflated=False
+    )
+    projvol_target = baselines.get_target_normalization("ratio_projvol").forward(
+        y, X_train, global_mean, denom_col
+    )
+    meanyr_target = baselines.get_target_normalization("ratio_meanyr").forward(
+        y, X_train, global_mean, "MeanYr"
+    )
+
+    assert np.isfinite(projvol_target).all()
+    assert not np.allclose(projvol_target, meanyr_target)

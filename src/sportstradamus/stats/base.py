@@ -55,9 +55,12 @@ _COMP_EB_PRIOR_K: float = 10.0
 # Empirical-Bayes prior count for the career expanding-mean shrinkage toward the
 # per-position baseline (same K/(K+n) Efron-Morris form as _COMP_EB_PRIOR_K). K is
 # the game count at which a player's own career mean and the position prior carry
-# equal weight; placeholder 10.0 (the comp-K midpoint) until cross-validated per
-# league by held-out NLL of MeanYr_expanding_eb (see the §6.3 follow-up).
+# equal weight. Cross-validated 2026-06-20 (held-out purged GroupKFold OOF +
+# deterministic model confirm): NFL -> 1 (the fitted gates prefer the lighter
+# shrinkage; carries min_gate_slack +2.96 vs K=10), other leagues keep 10 (WNBA's
+# gates prefer the heavier prior, NBA near-inert). Per-league override below.
 _EXPANDING_EB_PRIOR_K: float = 10.0
+_EXPANDING_EB_PRIOR_K_BY_LEAGUE: dict[str, float] = {"NFL": 1.0}
 
 # Quantile bands for the ``comps p25`` / ``comps p75`` signals. Use the
 # distance-weighted comp distribution rather than the raw comp set: a
@@ -68,7 +71,9 @@ _COMP_QUANTILE_HI: float = 0.75
 # Half-life (days) for recency-weighting comp (comp, opponent) outcomes in the
 # matchup-conditional comp lookup. A comp's game decays as
 # ``exp(-days_ago / halflife)`` so recent matchups dominate the raw/z estimate.
-# ~45 days ≈ the trailing-window center of mass; cross-validate per league later.
+# Cross-validated 2026-06-20 (held-out OOF): inert -- ``Player comps z recent`` is a
+# recency-reweighted convex combination, so H only re-weights within the mean (OOF
+# R² spread <= 0.0006 across H in {14..180}, all leagues); kept at 45.
 _COMP_RECENCY_HALFLIFE_DAYS: float = 45.0
 
 # Clip bounds for per-player projection scale ratios in get_volume_stats.
@@ -1472,9 +1477,9 @@ class Stats:
     def _schedule_context(self, stats, date, teams):
         """Hook: attach league-specific schedule-context columns. No-op on base.
 
-        NFL overrides this to emit Weekday / PrimeTime / RestDiff from the schedule
-        carried on the gamelog (historical) or ``upcoming_games`` (upcoming). Called
-        at the end of :meth:`_game_context` so it shares the same date branch.
+        NFL overrides this to emit the Weekday feature (game date day-of-week) from
+        the gamelog (historical) or ``upcoming_games`` (upcoming). Called at the end
+        of :meth:`_game_context` so it shares the same date branch.
         """
 
     def _playoff_flag(self, stats, date, teams):
@@ -1603,7 +1608,8 @@ class Stats:
         expanding = stats["MeanYr_expanding_shifted"]
         pos_baseline = expanding.groupby(stats["Player position"]).transform("mean")
         pos_baseline = pos_baseline.fillna(expanding.mean())
-        shrink = n_career / (n_career + _EXPANDING_EB_PRIOR_K)
+        k = _EXPANDING_EB_PRIOR_K_BY_LEAGUE.get(self.league, _EXPANDING_EB_PRIOR_K)
+        shrink = n_career / (n_career + k)
         stats["MeanYr_expanding_eb"] = (
             shrink * expanding.fillna(pos_baseline) + (1.0 - shrink) * pos_baseline
         )

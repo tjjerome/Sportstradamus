@@ -429,7 +429,7 @@ consult.
 - `shape_ratio` ≈ 1.0 ⇒ well-calibrated dispersion;
   `dispersion_cal = 1.0` ⇒ no fix needed; `< 1.0` ⇒ model over-dispersed.
 - `model_weight` near 0 ⇒ bookmaker dominates; near 1 ⇒ model dominates.
-- `ship == True` ⇔ all five offline gates pass on the most recent
+- `ship == True` ⇔ all six offline gates pass on the most recent
   test-set CSV; see `docs/ship_gate.md` for the threshold rationale.
 
 **Standalone A/B-test harness** for testing model updates without

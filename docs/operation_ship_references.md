@@ -2,7 +2,7 @@
 
 > **The evidence appendix for [`model_improvement_track.md`](handoffs/model_improvement_track.md):**
 > research verdicts (P0–A1.6), branch/commit refs, the critical-files map, and citations
-> [1]–[71]. Preserves the load-bearing facts from the deprecated
+> [1]–[75]. Preserves the load-bearing facts from the deprecated
 > [`gbdt_mean_regression_plan.md`](archive/gbdt_mean_regression_plan.md) /
 > [`gbdt_mean_regression_context.md`](archive/gbdt_mean_regression_context.md); full
 > prose for any item below lives in the archived docs at the line
@@ -460,6 +460,10 @@ Renumbered from the deprecated context doc.
 [69] Arnold, S., Walz, E.-M., Ziegel, J., Gneiting, T. (2024). Decompositions of the mean CRPS. *Electronic Journal of Statistics* 18, 4992–5044.
 [70] Chernozhukov, V., Wüthrich, K., Zhu, Y. (2021). Distributional conformal prediction. *PNAS* 118(48). *(arXiv:1909.07889)*
 [71] López de Prado, M. (2018). *Advances in Financial Machine Learning.* Wiley (ch. 7 purging/embargo, ch. 12 CPCV).
+[72] Dmochowski, J. P. (2023). A statistical theory of optimal decision-making in sports betting. *PLOS ONE* 18(6): e0287601. DOI 10.1371/journal.pone.0287601. *(book single point: median sufficient for side, extra quantiles necessary for shape — §6.5 book-distribution audit)*
+[73] Shin, H. S. (1993). Measuring the incidence of insider trading in a market for state-contingent claims. *Economic Journal* 103(420), 1141–1153. DOI 10.2307/2234240. *(endogenous favourite-longshot de-vig — a location refinement for the Pooling-half de-vig sub-item)*
+[74] Gneiting, T., Raftery, A. E., Westveld, A. H., Goldman, T. (2005). Calibrated probabilistic forecasting using ensemble model output statistics and minimum CRPS estimation. *Monthly Weather Review* 133(5), 1098–1118. DOI 10.1175/MWR2904.1. *(EMOS/NGR location-scale combination — structure A's ancestor — is fit by minimum CRPS, never PIT-KS; grounds the §6.5 Pooling-half probe's verdict that A-fit-to-PIT-KS is ill-posed)*
+[75] Gneiting, T., Balabdaoui, F., Raftery, A. E. (2007). Probabilistic forecasts, calibration and sharpness. *JRSS-B* 69(2), 243–268. DOI 10.1111/j.1467-9868.2007.00587.x. *(maximize sharpness subject to calibration — the lens exposing structure A's location distortion: a g4 number bought by sacrificing CRPS/sharpness)*
 
 ---
 
