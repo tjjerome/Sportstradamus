@@ -89,11 +89,14 @@ Options:
                                   picks the sharpest that clears the Gate-4
                                   threshold (sharpness subject to calibration);
                                   a Ship 75 axis.  [default: auto]
-  --count-dispersion-objective [crps|pit_ks]
+  --count-dispersion-objective [auto|crps|pit_ks]
                                   Objective the count branch (NegBin/ZINB/Gamma)
                                   minimizes when fitting the dispersion scale.
-                                  'crps' (default) is current production;
-                                  'pit_ks' targets the served Gate-4 randomized-
-                                  PIT KS directly, mirroring the SkewNormal
-                                  branch; a Ship 75 axis.  [default: crps]
+                                  'auto' (default) honors each cell's stat_meta
+                                  count_dispersion_objective (else 'crps',
+                                  current production); an explicit
+                                  'crps'/'pit_ks' overrides every cell. 'pit_ks'
+                                  targets the served Gate-4 randomized-PIT KS
+                                  directly, mirroring the SkewNormal branch; a
+                                  Ship 75 axis.  [default: auto]
   --help                          Show this message and exit.

@@ -500,9 +500,10 @@
     "WNBA": {
         "AST": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "cdf_recal_isotonic",
+            "hpo_selection": "calibrated"
         },
         "BLK": {
             "dist": "ZINB",
@@ -514,14 +515,16 @@
             "dist": "ZINB",
             "shipped": "withheld",
             "target_normalization": "none",
-            "posthoc": "prob_recal_isotonic"
+            "posthoc": "prob_recal_isotonic",
+            "count_dispersion_objective": "pit_ks"
         },
         "DREB": {
             "dist": "SkewNormal",
             "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
-            "posthoc": "none",
-            "blending": "crps"
+            "posthoc": "cdf_recal_isotonic",
+            "blending": "crps",
+            "hpo_selection": "calibrated"
         },
         "FG3M": {
             "dist": "ZINB",
@@ -531,15 +534,17 @@
         },
         "FGA": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "isotonic_mean",
+            "hpo_selection": "calibrated"
         },
         "FTM": {
             "dist": "ZINB",
             "shipped": "withheld",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "count_dispersion_objective": "pit_ks"
         },
         "MIN": {
             "dist": "SkewNormal",
@@ -549,21 +554,23 @@
         },
         "OREB": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "count_dispersion_objective": "pit_ks"
         },
         "PA": {
             "dist": "SkewNormal",
             "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "cdf_recal_isotonic"
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "cdf_recal_isotonic",
+            "hpo_selection": "calibrated"
         },
         "PR": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "centered_additive_mean10",
-            "posthoc": "none",
+            "posthoc": "cdf_recal_isotonic",
             "hpo_selection": "calibrated"
         },
         "PRA": {
@@ -580,9 +587,10 @@
         },
         "RA": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "none",
+            "hpo_selection": "calibrated"
         },
         "REB": {
             "dist": "SkewNormal",

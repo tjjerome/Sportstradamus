@@ -142,12 +142,22 @@ def test_clamp_seed_params_rescues_sub_floor_log_param():
 
 
 def test_resolve_cell_knob_persists_per_cell_selection_and_honors_flag_override():
-    """Lever-1 durability: a cell's stat_meta hpo_selection is what the production cron applies
-    under the default 'auto' flag, so a calibrated-selected ship reproduces on retrain instead of
-    darking out; an explicit flag forces every cell for a one-shot A/B."""
+    """Durability: a cell's stat_meta training knob (hpo_selection, blending,
+    count_dispersion_objective) is what the production cron applies under the default 'auto' flag,
+    so a tuned ship reproduces on retrain instead of darking out; an explicit flag forces every
+    cell for a one-shot A/B."""
     from sportstradamus.training.cli import LOSS_AUTO, _resolve_cell_knob
 
-    sm = {"WNBA": {"PR": {"hpo_selection": "calibrated"}}}
+    sm = {
+        "WNBA": {
+            "PR": {"hpo_selection": "calibrated"},
+            "OREB": {"count_dispersion_objective": "pit_ks"},
+        }
+    }
     assert _resolve_cell_knob(sm, "WNBA", "PR", "hpo_selection", "loss", LOSS_AUTO) == "calibrated"
     assert _resolve_cell_knob(sm, "WNBA", "PA", "hpo_selection", "loss", LOSS_AUTO) == "loss"
     assert _resolve_cell_knob(sm, "WNBA", "PR", "hpo_selection", "loss", "loss") == "loss"
+    # count_dispersion_objective persists identically, so OREB's pit_ks ship reproduces on the cron
+    assert _resolve_cell_knob(sm, "WNBA", "OREB", "count_dispersion_objective", "crps", LOSS_AUTO) == "pit_ks"
+    assert _resolve_cell_knob(sm, "WNBA", "BLST", "count_dispersion_objective", "crps", LOSS_AUTO) == "crps"
+    assert _resolve_cell_knob(sm, "WNBA", "OREB", "count_dispersion_objective", "crps", "crps") == "crps"

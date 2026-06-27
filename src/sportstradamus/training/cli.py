@@ -237,13 +237,15 @@ def _resolve_cell_knob(stat_meta_full, lg, market, key, default, flag_value):
 )
 @click.option(
     "--count-dispersion-objective",
-    type=click.Choice(["crps", "pit_ks"]),
-    default="crps",
+    type=click.Choice([LOSS_AUTO, "crps", "pit_ks"]),
+    default=LOSS_AUTO,
     show_default=True,
     help=(
         "Objective the count branch (NegBin/ZINB/Gamma) minimizes when fitting the dispersion "
-        "scale. 'crps' (default) is current production; 'pit_ks' targets the served Gate-4 "
-        "randomized-PIT KS directly, mirroring the SkewNormal branch; a Ship 75 axis."
+        "scale. 'auto' (default) honors each cell's stat_meta count_dispersion_objective (else "
+        "'crps', current production); an explicit 'crps'/'pit_ks' overrides every cell. 'pit_ks' "
+        "targets the served Gate-4 randomized-PIT KS directly, mirroring the SkewNormal branch; a "
+        "Ship 75 axis."
     ),
 )
 def meditate(
@@ -418,8 +420,8 @@ def meditate(
             if cell_target_norm == TARGET_NORM_NONE:
                 cell_target_norm = target_normalization
             cell_posthoc = stat_meta_full.get(lg, {}).get(market, {}).get("posthoc", "none")
-            # --blending-loss-fn / --hpo-selection override the per-cell stat_meta value for the
-            # search axis; 'auto' leaves each cell on its configured knob.
+            # Each search-axis flag (blending, hpo_selection, count_dispersion_objective):
+            # 'auto' leaves each cell on its configured stat_meta knob; an explicit slug overrides.
             cell_blending = _resolve_cell_knob(
                 stat_meta_full,
                 lg,
@@ -430,6 +432,9 @@ def meditate(
             )
             cell_hpo_selection = _resolve_cell_knob(
                 stat_meta_full, lg, market, "hpo_selection", "loss", hpo_selection
+            )
+            cell_count_dispersion = _resolve_cell_knob(
+                stat_meta_full, lg, market, "count_dispersion_objective", "crps", count_dispersion_objective
             )
             train_market(
                 lg,
@@ -446,7 +451,7 @@ def meditate(
                 dist_training_loss=dist_training_loss,
                 stabilization=stabilization,
                 hpo_selection=cell_hpo_selection,
-                count_dispersion_objective=count_dispersion_objective,
+                count_dispersion_objective=cell_count_dispersion,
             )
 
     if not deterministic:
