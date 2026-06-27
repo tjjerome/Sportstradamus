@@ -146,15 +146,16 @@ def _resolve_cell_knob(stat_meta_full, lg, market, key, default, flag_value):
 )
 @click.option(
     "--zinb-mode",
-    type=click.Choice(["joint", "hurdle"]),
-    default="joint",
+    type=click.Choice([LOSS_AUTO, "joint", "hurdle"]),
+    default=LOSS_AUTO,
     show_default=True,
     help=(
-        "Model architecture for ZINB markets. 'joint' is the legacy "
-        "jointly-fit LightGBMLSS ZINB. 'hurdle' uses the two-stage "
-        "HurdleZINB (calibrated zero classifier + NegBin on positives + "
-        "derived-pi gate; see docs/OVERCONFIDENCE_INVESTIGATION.md §2). "
-        "Default 'joint' is byte-identical to pre-P2.B production."
+        "Model architecture for ZINB markets. 'auto' (default) honors each "
+        "cell's stat_meta zinb_mode (else 'joint'); an explicit slug overrides "
+        "every cell. 'joint' is the legacy jointly-fit LightGBMLSS ZINB. "
+        "'hurdle' uses the two-stage HurdleZINB (calibrated zero classifier + "
+        "NegBin on positives + derived-pi gate; see "
+        "docs/OVERCONFIDENCE_INVESTIGATION.md §2)."
     ),
 )
 @click.option(
@@ -436,6 +437,9 @@ def meditate(
             cell_count_dispersion = _resolve_cell_knob(
                 stat_meta_full, lg, market, "count_dispersion_objective", "crps", count_dispersion_objective
             )
+            cell_zinb_mode = _resolve_cell_knob(
+                stat_meta_full, lg, market, "zinb_mode", "joint", zinb_mode
+            )
             train_market(
                 lg,
                 market,
@@ -447,7 +451,7 @@ def meditate(
                 target_normalization=cell_target_norm,
                 posthoc_slug=cell_posthoc,
                 blending=cell_blending,
-                zinb_mode=zinb_mode,
+                zinb_mode=cell_zinb_mode,
                 dist_training_loss=dist_training_loss,
                 stabilization=stabilization,
                 hpo_selection=cell_hpo_selection,

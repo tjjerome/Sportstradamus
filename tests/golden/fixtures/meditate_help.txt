@@ -28,14 +28,16 @@ Options:
                                   experiments (run under --deterministic); the
                                   default 'ratio_meanyr' is current production
                                   behavior.  [default: ratio_meanyr]
-  --zinb-mode [joint|hurdle]      Model architecture for ZINB markets. 'joint'
-                                  is the legacy jointly-fit LightGBMLSS ZINB.
-                                  'hurdle' uses the two-stage HurdleZINB
-                                  (calibrated zero classifier + NegBin on
-                                  positives + derived-pi gate; see
-                                  docs/OVERCONFIDENCE_INVESTIGATION.md §2).
-                                  Default 'joint' is byte-identical to pre-P2.B
-                                  production.  [default: joint]
+  --zinb-mode [auto|joint|hurdle]
+                                  Model architecture for ZINB markets. 'auto'
+                                  (default) honors each cell's stat_meta
+                                  zinb_mode (else 'joint'); an explicit slug
+                                  overrides every cell. 'joint' is the legacy
+                                  jointly-fit LightGBMLSS ZINB. 'hurdle' uses
+                                  the two-stage HurdleZINB (calibrated zero
+                                  classifier + NegBin on positives + derived-pi
+                                  gate; see docs/OVERCONFIDENCE_INVESTIGATION.md
+                                  §2).  [default: auto]
   --dist-training-loss [auto|nll|crps]
                                   Training loss for the LightGBMLSS
                                   distribution. 'auto' (default) keeps the per-
