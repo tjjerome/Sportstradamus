@@ -541,10 +541,11 @@
         },
         "FTM": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
             "posthoc": "none",
-            "count_dispersion_objective": "pit_ks"
+            "count_dispersion_objective": "pit_ks",
+            "zinb_mode": "hurdle"
         },
         "MIN": {
             "dist": "SkewNormal",
@@ -608,7 +609,9 @@
             "dist": "ZINB",
             "shipped": "withheld",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "count_dispersion_objective": "pit_ks",
+            "zinb_mode": "hurdle"
         },
         "fantasy points prizepicks": {
             "dist": "SkewNormal",

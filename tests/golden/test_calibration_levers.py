@@ -143,7 +143,7 @@ def test_clamp_seed_params_rescues_sub_floor_log_param():
 
 def test_resolve_cell_knob_persists_per_cell_selection_and_honors_flag_override():
     """Durability: a cell's stat_meta training knob (hpo_selection, blending,
-    count_dispersion_objective) is what the production cron applies under the default 'auto' flag,
+    count_dispersion_objective, zinb_mode) is what the production cron applies under the default 'auto' flag,
     so a tuned ship reproduces on retrain instead of darking out; an explicit flag forces every
     cell for a one-shot A/B."""
     from sportstradamus.training.cli import LOSS_AUTO, _resolve_cell_knob
@@ -152,6 +152,7 @@ def test_resolve_cell_knob_persists_per_cell_selection_and_honors_flag_override(
         "WNBA": {
             "PR": {"hpo_selection": "calibrated"},
             "OREB": {"count_dispersion_objective": "pit_ks"},
+            "FTM": {"zinb_mode": "hurdle"},
         }
     }
     assert _resolve_cell_knob(sm, "WNBA", "PR", "hpo_selection", "loss", LOSS_AUTO) == "calibrated"
@@ -161,3 +162,7 @@ def test_resolve_cell_knob_persists_per_cell_selection_and_honors_flag_override(
     assert _resolve_cell_knob(sm, "WNBA", "OREB", "count_dispersion_objective", "crps", LOSS_AUTO) == "pit_ks"
     assert _resolve_cell_knob(sm, "WNBA", "BLST", "count_dispersion_objective", "crps", LOSS_AUTO) == "crps"
     assert _resolve_cell_knob(sm, "WNBA", "OREB", "count_dispersion_objective", "crps", "crps") == "crps"
+    # zinb_mode persists so a hurdle ship reproduces on the cron instead of darking back to joint
+    assert _resolve_cell_knob(sm, "WNBA", "FTM", "zinb_mode", "joint", LOSS_AUTO) == "hurdle"
+    assert _resolve_cell_knob(sm, "WNBA", "PA", "zinb_mode", "joint", LOSS_AUTO) == "joint"
+    assert _resolve_cell_knob(sm, "WNBA", "FTM", "zinb_mode", "joint", "joint") == "joint"
