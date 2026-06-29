@@ -11,6 +11,10 @@ collapsing only bit-identical duplicates. DuckDB's ``UNION`` does exactly that;
 re-sorting in the same statement restores the on-disk order zone-map pruning
 relies on (same table-rebuild as ``migrate_archive_to_duckdb``).
 
+The odds union dedups on the observation identity (not the full row) so the WS1 shape-free
+quote columns (``under_prob``/``line``, derived from ``ev``) survive a merge of a migrated
+target with a not-yet-migrated source — see ``_odds_select``.
+
 The source is attached read-only and never modified. The target is rebuilt in
 place (a timestamped ``.bak-<epoch>`` is written first) unless ``--output``
 directs the union to a fresh file instead.
@@ -32,7 +36,10 @@ from pathlib import Path
 import click
 import duckdb
 
-_ODDS_COLS = "league, market, game_date, entity, book, ev, observed_at"
+# The observation identity. WS1 added shape-free quote columns (under_prob, line) to odds;
+# those are derived from ev and are NOT part of the identity, so the union dedups on this key
+# and reconciles the quote columns separately (see _odds_select).
+_ODDS_KEY = "league, market, game_date, entity, book, ev, observed_at"
 _LINES_COLS = "league, market, game_date, entity, line, observed_at"
 # ev is omitted from the sort: equal-ev rows with different observed_at are distinct
 # observations and sort order only needs the key fields.
@@ -71,18 +78,49 @@ def _require_tables(con: duckdb.DuckDBPyConnection, alias: str) -> None:
             ) from exc
 
 
+def _has_shapefree(con: duckdb.DuckDBPyConnection, table_ref: str) -> bool:
+    """Whether ``table_ref`` (``odds`` or ``src.odds``) carries the WS1 quote columns."""
+    cols = {row[0] for row in con.execute(f"DESCRIBE {table_ref}").fetchall()}
+    return "under_prob" in cols and "line" in cols
+
+
+def _odds_select(con: duckdb.DuckDBPyConnection) -> str:
+    """Build the odds union-select, preserving the shape-free (under_prob, line) quotes.
+
+    Output schema follows the target: a migrated dev archive carries the quote columns, a
+    not-yet-migrated prod source still has the 7-column schema. When the target has them, dedup
+    on the observation identity and keep the populated (non-NULL) quote via ``MAX`` — so a sync
+    never drops the dev backfill, and prod's ev-only rows merge in with NULL quotes (a reader
+    falls back to ev for those). When the target predates WS1, fall back to the plain union.
+    """
+    if not _has_shapefree(con, "odds"):
+        return f"SELECT {_ODDS_KEY} FROM odds UNION SELECT {_ODDS_KEY} FROM src.odds"
+    src_quote = (
+        "under_prob, line"
+        if _has_shapefree(con, "src.odds")
+        else "CAST(NULL AS DOUBLE) AS under_prob, CAST(NULL AS DOUBLE) AS line"
+    )
+    union = (
+        f"SELECT {_ODDS_KEY}, under_prob, line FROM odds "
+        f"UNION ALL SELECT {_ODDS_KEY}, {src_quote} FROM src.odds"
+    )
+    return (
+        f"SELECT {_ODDS_KEY}, MAX(under_prob) AS under_prob, MAX(line) AS line "
+        f"FROM ({union}) AS u GROUP BY {_ODDS_KEY}"
+    )
+
+
 def _merge_table(
-    con: duckdb.DuckDBPyConnection, table: str, cols: str, sort: str, dry_run: bool
+    con: duckdb.DuckDBPyConnection, table: str, select_sql: str, sort: str, dry_run: bool
 ) -> dict[str, int]:
-    """Perform (or simulate) the UNION-rebuild and return before/after row counts."""
+    """Perform (or simulate) the union-rebuild from ``select_sql`` and return row counts."""
     target_before = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
     source_count = con.execute(f"SELECT COUNT(*) FROM src.{table}").fetchone()[0]
-    union_sql = f"SELECT {cols} FROM {table} UNION SELECT {cols} FROM src.{table}"
 
     if dry_run:
-        merged = con.execute(f"SELECT COUNT(*) FROM ({union_sql}) AS u").fetchone()[0]
+        merged = con.execute(f"SELECT COUNT(*) FROM ({select_sql}) AS u").fetchone()[0]
     else:
-        con.execute(f"CREATE TABLE {table}_merged AS {union_sql} ORDER BY {sort}")
+        con.execute(f"CREATE TABLE {table}_merged AS {select_sql} ORDER BY {sort}")
         con.execute(f"DROP TABLE {table}")
         con.execute(f"ALTER TABLE {table}_merged RENAME TO {table}")
         merged = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
@@ -140,9 +178,10 @@ def merge_archives(
         con.execute(f"ATTACH '{safe_source}' AS src (READ_ONLY)")
         _require_tables(con, "src")
 
+        lines_select = f"SELECT {_LINES_COLS} FROM lines UNION SELECT {_LINES_COLS} FROM src.lines"
         report = {
-            "odds": _merge_table(con, "odds", _ODDS_COLS, _ODDS_SORT, dry_run),
-            "lines": _merge_table(con, "lines", _LINES_COLS, _LINES_COLS, dry_run),
+            "odds": _merge_table(con, "odds", _odds_select(con), _ODDS_SORT, dry_run),
+            "lines": _merge_table(con, "lines", lines_select, _LINES_COLS, dry_run),
         }
 
         if not dry_run:
@@ -152,14 +191,6 @@ def merge_archives(
     finally:
         con.close()
     return report
-
-
-def _print_report(report: dict[str, dict[str, int]]) -> None:
-    for table, r in report.items():
-        click.echo(
-            f"{table + ':':7} target {r['target_before']:,} + source {r['source']:,} "
-            f"-> merged {r['merged']:,} (added {r['added']:,}; shared {r['shared']:,})"
-        )
 
 
 @click.command()
@@ -193,7 +224,11 @@ def main(source: Path, target: Path, output: Path | None, dry_run: bool, no_back
     report = merge_archives(source, target, output, dry_run=dry_run, backup=not no_backup)
     if dry_run:
         click.echo("DRY RUN — no changes written.")
-    _print_report(report)
+    for table, r in report.items():
+        click.echo(
+            f"{table + ':':7} target {r['target_before']:,} + source {r['source']:,} "
+            f"-> merged {r['merged']:,} (added {r['added']:,}; shared {r['shared']:,})"
+        )
     if not dry_run:
         click.echo(f"Merged into {output if output is not None else target}.")
 
