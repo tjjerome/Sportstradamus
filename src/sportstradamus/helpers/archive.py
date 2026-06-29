@@ -86,6 +86,12 @@ _LOCK_BACKOFF_MAX: float = 16.0
 # so the auto-migration path below can backfill in place against pre-rework
 # DBs without rebuilding the table; the standalone migration script tightens
 # it to NOT NULL when run.
+#
+# ``under_prob`` / ``line`` are the shape-free book quote (the de-vigged
+# under-probability and the line it was quoted at), stored so the distribution
+# shape need not be baked into ``ev``. They are nullable: pre-migration rows and
+# team-market writes leave them NULL, and readers fall back to ``ev``. Forward
+# player-prop writes populate them; the migration backfills history.
 _SCHEMA_DDL = """
 CREATE TABLE IF NOT EXISTS odds (
     league       TEXT NOT NULL,
@@ -94,7 +100,9 @@ CREATE TABLE IF NOT EXISTS odds (
     entity       TEXT NOT NULL,
     book         TEXT NOT NULL,
     ev           DOUBLE,
-    observed_at  TIMESTAMP
+    observed_at  TIMESTAMP,
+    under_prob   DOUBLE,
+    line         DOUBLE
 );
 CREATE TABLE IF NOT EXISTS lines (
     league       TEXT NOT NULL,
@@ -292,6 +300,7 @@ class Archive:
         self._connection = self._connect_with_wal_recovery(db_path)
         self._connection.execute(_SCHEMA_DDL)
         self._auto_migrate_observed_at()
+        self._auto_migrate_shapefree_columns()
 
         self.default_totals = {
             "MLB": 4.671,
@@ -339,6 +348,18 @@ class Archive:
                 )
             if "sample_ts" in self._table_columns(table):
                 self._connection.execute(f"ALTER TABLE {table} DROP COLUMN sample_ts")
+        self._connection.commit()
+
+    def _auto_migrate_shapefree_columns(self) -> None:
+        """Add the nullable shape-free ``under_prob`` / ``line`` columns to ``odds``.
+
+        Idempotent. The columns stay NULL until the standalone migration backfills
+        history; readers fall back to ``ev`` while they are NULL.
+        """
+        cols = self._table_columns("odds")
+        for col in ("under_prob", "line"):
+            if col not in cols:
+                self._connection.execute(f"ALTER TABLE odds ADD COLUMN {col} DOUBLE")
         self._connection.commit()
 
     def _weighted_book_ev(self, league: str, market: str, rows: list[tuple[str, float]]) -> float:
@@ -806,11 +827,15 @@ class Archive:
         book: str,
         ev: float,
         observed_at: datetime.datetime | None = None,
+        under_prob: float | None = None,
+        line: float | None = None,
     ) -> None:
         """Buffer a per-book EV observation; flushed by :meth:`write`.
 
         ``observed_at`` defaults to now; the historical backfill passes the
         snapshot's as-of time so point-in-time training reads pick it up.
+        ``under_prob`` / ``line`` are the shape-free book quote; left NULL when
+        the caller has only the encoded ``ev`` (readers fall back to ``ev``).
         """
         self._pending_odds.append(
             (
@@ -821,6 +846,8 @@ class Archive:
                 book,
                 float(ev),
                 observed_at or datetime.datetime.utcnow(),
+                None if under_prob is None else float(under_prob),
+                None if line is None else float(line),
             )
         )
 
@@ -922,7 +949,9 @@ class Archive:
             odds = no_vig_odds(over, _dfs_under_boost(over, o.get("Boost_Under")))
             ev = get_ev(line, odds[1], cv, dist=dist, gate=gate)
 
-            self._stage_book_ev(league, market, d, player, platform, ev)
+            self._stage_book_ev(
+                league, market, d, player, platform, ev, under_prob=odds[1], line=line
+            )
             self._stage_line(league, market, d, player, line)
 
     def merge_player_books(
@@ -934,22 +963,29 @@ class Archive:
         book_evs: dict[str, float],
         lines: list[float] | None = None,
         observed_at: datetime.datetime | None = None,
+        book_quotes: dict[str, tuple[float, float]] | None = None,
     ) -> None:
         """Append per-book EVs and any new lines for one player entry.
 
         Append-only under the time-series schema: every call adds new
         ``observed_at`` rows; the latest-per-book reader returns the
         freshest observations. ``observed_at`` defaults to now; the
-        historical backfill passes the snapshot's as-of time.
+        historical backfill passes the snapshot's as-of time. ``book_quotes``
+        maps each book to its ``(line, under_prob)`` shape-free quote; when
+        present the per-book row stores it so readers need not invert ``ev``.
         """
         d = _safe_date(date)
         if d is None:
             return
         player = remove_accents(player)
+        book_quotes = book_quotes or {}
         for book, ev in book_evs.items():
             if ev is None:
                 continue
-            self._stage_book_ev(league, market, d, player, book, ev, observed_at)
+            q_line, q_under = book_quotes.get(book, (None, None))
+            self._stage_book_ev(
+                league, market, d, player, book, ev, observed_at, under_prob=q_under, line=q_line
+            )
         for line in lines or []:
             if line is None:
                 continue
@@ -993,11 +1029,22 @@ class Archive:
         con = self._connection
 
         if self._pending_odds:
+            _odds_cols = [
+                "league",
+                "market",
+                "game_date",
+                "entity",
+                "book",
+                "ev",
+                "observed_at",
+                "under_prob",
+                "line",
+            ]
             odds_df = pd.DataFrame(  # noqa: F841 — referenced via DuckDB DataFrame replacement
                 self._pending_odds,
-                columns=["league", "market", "game_date", "entity", "book", "ev", "observed_at"],
+                columns=_odds_cols,
             )
-            con.execute("INSERT INTO odds SELECT * FROM odds_df")
+            con.execute(f"INSERT INTO odds ({', '.join(_odds_cols)}) SELECT * FROM odds_df")
 
         if self._pending_lines:
             lines_df = pd.DataFrame(  # noqa: F841 — referenced via DuckDB DataFrame replacement

@@ -107,11 +107,15 @@ _GAME = {
 class _FakeArchive:
     def __init__(self):
         self.player_books = []
+        self.player_quotes = []
         self.team_books = []
         self.ladder_calls = []
 
-    def merge_player_books(self, league, market, gameDate, player, ev, lines, observed_at=None):
+    def merge_player_books(
+        self, league, market, gameDate, player, ev, lines, observed_at=None, book_quotes=None
+    ):
         self.player_books.append((league, market, gameDate, player, ev, lines, observed_at))
+        self.player_quotes.append((player, book_quotes))
 
     def set_team_books(self, league, market, gameDate, team, books):
         self.team_books.append((league, market, gameDate, team, books))
@@ -159,6 +163,12 @@ def test_archive_event_props_parses_event() -> None:
         *exp_head, exp_ev, exp_line, exp_obs = exp
         assert (got_head, got_line, got_obs) == (exp_head, exp_line, exp_obs)
         assert got_ev == pytest.approx(exp_ev, rel=0.15)
+    # Each player's shape-free quotes cover exactly the books in its EV dict, with a real
+    # (line, under-prob) pair -- the per-book plumbing WS1 threads through to the archive.
+    for (_player, quotes), pb in zip(archive.player_quotes, archive.player_books, strict=True):
+        assert set(quotes) == set(pb[4])
+        for q_line, q_under in quotes.values():
+            assert q_line >= 0 and 0.0 <= q_under <= 1.0
     assert archive.team_books == _EXPECTED_TEAM
 
 

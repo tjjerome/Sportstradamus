@@ -165,7 +165,7 @@ def _bulk_insert_odds(con: duckdb.DuckDBPyConnection, rows: list[tuple]) -> int:
         subset=["league", "market", "game_date", "entity", "book", "observed_at"], keep="last"
     )
     before = con.execute("SELECT COUNT(*) FROM odds").fetchone()[0]
-    con.execute("INSERT INTO odds SELECT * FROM df")
+    con.execute(f"INSERT INTO odds ({', '.join(_ODDS_COLS)}) SELECT * FROM df")
     after = con.execute("SELECT COUNT(*) FROM odds").fetchone()[0]
     return after - before
 

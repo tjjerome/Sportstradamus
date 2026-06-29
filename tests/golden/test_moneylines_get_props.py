@@ -82,7 +82,9 @@ class _FakeArchive:
         self.player_books = []
         self.ladder_calls = []
 
-    def merge_player_books(self, league, market, gameDate, player, ev, lines, observed_at=None):
+    def merge_player_books(
+        self, league, market, gameDate, player, ev, lines, observed_at=None, book_quotes=None
+    ):
         self.player_books.append((league, market, gameDate, player, ev, lines, observed_at))
 
     def add_ladder(self, league, market, gameDate, player, book, rungs, observed_at=None):

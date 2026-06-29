@@ -26,7 +26,9 @@ class _CaptureArchive:
     def __init__(self):
         self.book_evs = {}
 
-    def merge_player_books(self, league, market, date, player, book_evs, lines, observed_at=None):
+    def merge_player_books(
+        self, league, market, date, player, book_evs, lines, observed_at=None, book_quotes=None
+    ):
         self.book_evs[(market, player)] = dict(book_evs)
 
     def set_team_books(self, *args, **kwargs):
