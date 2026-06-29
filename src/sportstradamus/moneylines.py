@@ -556,7 +556,9 @@ def _event_player_props(book, market, league, props, odds):
 
     for player, lines in groupby(outcomes, itemgetter("description")):
         player = remove_accents(player).replace(" Total", "")
-        entry = odds[market_name].setdefault(player, {"EV": {}, "Lines": [], "Ladder": {}})
+        entry = odds[market_name].setdefault(
+            player, {"EV": {}, "Lines": [], "Ladder": {}, "Quotes": {}}
+        )
         lines = list(lines)
         rungs = _devig_ladder(lines)
         if rungs:
@@ -574,6 +576,7 @@ def _event_player_props(book, market, league, props, odds):
             gate=book_gate(league, market_name, dist),
         )
         entry["EV"][book["key"]] = ev
+        entry["Quotes"][book["key"]] = (line, price[1])
 
 
 def _event_totals_book(market, book, totals):
@@ -654,7 +657,14 @@ def _archive_event_props(archive, game, league, props, gameDate, observed_at=Non
         for player, entry in odds[market].items():
             line = np.median(entry["Lines"])
             archive.merge_player_books(
-                league, market, gameDate, player, entry["EV"], [line], observed_at=observed_at
+                league,
+                market,
+                gameDate,
+                player,
+                entry["EV"],
+                [line],
+                observed_at=observed_at,
+                book_quotes=entry["Quotes"],
             )
             for book, rungs in entry["Ladder"].items():
                 archive.add_ladder(

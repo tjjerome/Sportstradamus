@@ -108,7 +108,9 @@ class _CaptureArchive:
         self.book_evs: list[tuple] = []
         self.lines: list[tuple] = []
 
-    def _stage_book_ev(self, league, market, date, entity, book, ev, observed_at=None):
+    def _stage_book_ev(
+        self, league, market, date, entity, book, ev, observed_at=None, under_prob=None, line=None
+    ):
         self.book_evs.append((league, market, entity, book, ev))
 
     def _stage_line(self, league, market, date, entity, line, observed_at=None):
