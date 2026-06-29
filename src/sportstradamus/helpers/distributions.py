@@ -130,7 +130,7 @@ SN_MAX_MEAN_FACTOR = 5.0
 # Clamp a target skew just inside it so the moment-match's alpha stays finite; a count cell's
 # low-mean right-skew that exceeds the bound is met in variance and finished by the integer PMF
 # correction (WS2 research brief, /tmp/researcher_ws2_book_shape.md Findings 2-3).
-_SN_SKEW_MAX = 0.9952
+_SN_SKEW_MAX = 0.9952  # a hair below the 0.99527 bound on purpose: at the bound delta=±1 and alpha=±inf
 _SN_SKEW_C23 = ((4 - np.pi) / 2) ** (2 / 3)
 
 
@@ -177,6 +177,15 @@ def skewnormal_params_from_moments(
     SkewNormal bound) so ``alpha`` stays finite — a target past the bound is met in variance with
     the maximal feasible skew. This is the WS2 book-shape moment-match feeding
     ``book_skewnormal_shape``; ``skew == 0`` yields ``alpha == 0, sigma == sqrt(var)`` (Normal).
+
+    Args:
+        var: Target variance (positive). Broadcast-compatible with ``skew``.
+        skew: Target standardized skewness (dimensionless). Clamped to
+            ``±_SN_SKEW_MAX`` before inversion.
+
+    Returns:
+        ``(sigma, alpha)`` — scale (same units as ``sqrt(var)``) and shape
+        parameter for ``scipy.stats.skewnorm(alpha, loc=..., scale=sigma)``.
     """
     gamma = np.clip(np.asarray(skew, dtype=float), -_SN_SKEW_MAX, _SN_SKEW_MAX)
     b = np.abs(gamma) ** (2.0 / 3.0) / _SN_SKEW_C23
