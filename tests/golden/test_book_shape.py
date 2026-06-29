@@ -14,7 +14,12 @@ import pytest
 from scipy.stats import skewnorm
 
 from sportstradamus.helpers import config
-from sportstradamus.helpers.distributions import get_odds, skewnormal_loc_from_mean
+from sportstradamus.helpers.distributions import (
+    fused_loc,
+    get_ev,
+    get_odds,
+    skewnormal_loc_from_mean,
+)
 from sportstradamus.training.calibration import fit_book_shape
 
 
@@ -107,3 +112,48 @@ def test_book_skewnormal_shape_clamps_infeasible_skew(monkeypatch):
     _, v, s = skewnorm.stats(float(alpha), loc=loc, scale=float(sigma), moments="mvs")
     assert float(v) == pytest.approx(coeffs["a"] * mean ** coeffs["b"], abs=2e-3)
     assert -0.9953 < float(s) < 0.0
+
+
+# --- Step 2a: the distributions.py shape-injection contract -------------------
+# get_ev accepts a fixed book sigma (evaluated once at the quoted line); fused_loc
+# accepts a fitted book (sigma, skew) for the blend. Both default to today's shape.
+
+
+def test_get_ev_fixed_sigma_round_trips():
+    line, under, sigma, skew = 2.5, 0.62, 1.4, -0.4
+    ev = get_ev(line, under, dist="SkewNormal", sigma=sigma, skew_alpha=skew)
+    assert get_odds(line, ev, "SkewNormal", sigma=sigma, skew_alpha=skew) == pytest.approx(
+        under, abs=1e-7
+    )
+
+
+def test_fused_loc_skewnormal_default_unchanged():
+    ev, sig, skew, gate = fused_loc(
+        0.3, np.array([10.0]), np.array([11.0]), 0.4, "SkewNormal",
+        sigma=np.array([3.5]), skew_alpha=np.array([1.2]),
+    )
+    assert float(ev[0]) == pytest.approx(10.82731187571877, abs=1e-9)
+    assert float(sig[0]) == pytest.approx(4.060653952180996, abs=1e-9)
+    assert float(skew[0]) == pytest.approx(0.36, abs=1e-9)
+    assert gate is None
+
+
+def test_fused_loc_book_shape_noop_matches_default():
+    args = (0.3, np.array([10.0]), np.array([11.0]), 0.4, "SkewNormal")
+    kw = {"sigma": np.array([3.5]), "skew_alpha": np.array([1.2])}
+    default = fused_loc(*args, **kw)
+    explicit_noop = fused_loc(
+        *args, **kw, book_sigma=np.array([11.0 * 0.4]), book_skew_alpha=np.array([0.0])
+    )
+    for a, b in zip(default[:3], explicit_noop[:3], strict=True):
+        assert float(a[0]) == pytest.approx(float(b[0]), abs=1e-9)
+
+
+def test_fused_loc_blends_book_skew():
+    w, model_skew, book_skew = 0.3, 1.2, -0.8
+    _, _, skew, _ = fused_loc(
+        w, np.array([10.0]), np.array([11.0]), 0.4, "SkewNormal",
+        sigma=np.array([3.5]), skew_alpha=np.array([model_skew]),
+        book_sigma=np.array([4.0]), book_skew_alpha=np.array([book_skew]),
+    )
+    assert float(skew[0]) == pytest.approx(w * model_skew + (1 - w) * book_skew, abs=1e-9)
