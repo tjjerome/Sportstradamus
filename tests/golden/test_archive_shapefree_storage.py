@@ -212,3 +212,65 @@ def test_migration_recovers_floored_cv_cell(archive, monkeypatch):
         ).fetchone()
         assert u == pytest.approx(u0, abs=1e-6) and ln == line
         assert stored_ev == pytest.approx(evs[i])  # ev never rewritten
+
+
+def test_confer_prop_write_keeps_shapefree_quote(archive):
+    """Durability guard: the live confer prop-write path must keep the shape-free scheme.
+
+    Runs a synthetic Odds-API event through the real parser (``_archive_event_props`` ->
+    ``merge_player_books``) into a real archive, flushes, and asserts every player-prop row
+    persists a ``(under_prob, line)`` quote that round-trips to its stored ``ev``. The
+    migration is only durable if new odds keep landing in this shape — were the write path to
+    regress to ev-only, migrated cells would silently erode. One row per (player, book): each
+    book stores its OWN line (LeBron is priced at 25.5 on DK, 26.5 on FD). Team markets stay
+    ev-only by design (the migration skips ``_TEAM_ONLY_MARKETS``) and are not asserted here.
+    """
+    from sportstradamus import moneylines
+
+    props = {"NBA": {"player_points": "PTS"}}
+    game = {
+        "home_team": "Los Angeles Lakers",
+        "away_team": "Boston Celtics",
+        "bookmakers": [
+            {
+                "key": "draftkings",
+                "markets": [
+                    {
+                        "key": "player_points",
+                        "outcomes": [
+                            {"description": "LeBron James", "name": "Over", "point": 25.5, "price": 1.91},
+                            {"description": "LeBron James", "name": "Under", "point": 25.5, "price": 1.95},
+                            {"description": "Anthony Davis", "name": "Over", "point": 18.5, "price": 1.83},
+                            {"description": "Anthony Davis", "name": "Under", "point": 18.5, "price": 2.05},
+                        ],
+                    }
+                ],
+            },
+            {
+                "key": "fanduel",
+                "markets": [
+                    {
+                        "key": "player_points",
+                        "outcomes": [
+                            {"description": "LeBron James", "name": "Over", "point": 26.5, "price": 2.0},
+                            {"description": "LeBron James", "name": "Under", "point": 26.5, "price": 1.87},
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+
+    moneylines._archive_event_props(archive, game, "NBA", props, "2026-06-04")
+    archive.write()
+
+    dist, cv, gate = _shape("NBA", "PTS")
+    rows = archive._connection.execute(
+        "SELECT entity, book, ev, under_prob, line FROM odds WHERE league='NBA' AND market='PTS'"
+    ).fetchall()
+
+    assert len(rows) == 3  # Davis@DK, LeBron@DK, LeBron@FD
+    for ent, book, ev, under_prob, line in rows:
+        assert under_prob is not None and line is not None, f"{ent}/{book} wrote ev-only"
+        assert 0.0 <= under_prob <= 1.0 and line > 0
+        assert get_ev(line, under_prob, cv, dist=dist, gate=gate) == pytest.approx(ev, abs=1e-6)
