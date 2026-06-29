@@ -4,7 +4,7 @@ import warnings
 
 import numpy as np
 from scipy.optimize import minimize
-from scipy.stats import fit, gamma, nbinom, norm, poisson, skewnorm
+from scipy.stats import fit, gamma, nbinom, norm, poisson, skew, skewnorm
 
 from sportstradamus.helpers import (
     fused_loc,
@@ -46,6 +46,14 @@ _ZAGAMMA_ZERO_INFLATION_THRESHOLD: float = 0.05
 # are fit. With fewer, the fit overfits a handful of games, so the caller keeps
 # the prior weights instead.
 _MIN_SAMPLES_FOR_BOOK_FIT: int = 9
+
+# Minimum graded rows in a single line bin before that bin's conditional moments are
+# trusted for the book-shape fit. Below it the bin's variance/skew are too noisy.
+_MIN_ROWS_PER_SHAPE_BIN: int = 120
+
+# Minimum usable line bins before a per-cell shape curve is fit. Two points pin a line
+# with zero residual freedom; three is the floor for a fit with any room to disagree.
+_MIN_BINS_FOR_SHAPE_FIT: int = 3
 
 
 def _extract_result_and_test_df(market, df, stat_data):
@@ -205,6 +213,59 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
 
         return {k: res.x[i] for i, k in enumerate(test_df.columns)}
     return {}
+
+
+def fit_book_shape(league: str, market: str, results, lines) -> dict | None:
+    """Fit the book's conditional ``(variance, skewness)`` curves from a cell's history.
+
+    Bins realized ``results`` by the book ``line`` they were graded against, keeps the bins
+    clearing ``_MIN_ROWS_PER_SHAPE_BIN``, and over each bin's conditional mean ``μ`` fits:
+
+    * ``var = a·μ^b`` (Taylor's power law) by sqrt(n)-weighted least squares in log space.
+      ``b`` is free to cross the Poisson line ``var = μ`` — sub-Poisson count cells (WNBA
+      DREB, ``b ≈ 0.34``) are real and must not be forced to ``b ≥ 1``.
+    * ``γ = skew_c + skew_d·μ`` (linear) under the same weighting. Evaluation clamps γ to the
+      SkewNormal-admissible band downstream (in :func:`book_skewnormal_shape` via
+      ``skewnormal_params_from_moments``), so the raw linear is never extrapolated into an
+      infeasible skew.
+
+    Returns ``{a, b, skew_c, skew_d, n_bins}``, or ``None`` when fewer than
+    ``_MIN_BINS_FOR_SHAPE_FIT`` bins clear the row floor (the caller keeps the cell's
+    constant-CV symmetric shape). Pure fit — persisting the coefficients and wiring them
+    into ``meditate`` land in a later WS2 step.
+    """
+    results = np.asarray(results, dtype=float)
+    lines = np.asarray(lines, dtype=float)
+    mu, var, bin_skew, weight = [], [], [], []
+    for line in np.unique(lines):
+        bin_results = results[lines == line]
+        if len(bin_results) < _MIN_ROWS_PER_SHAPE_BIN:
+            continue
+        mu.append(bin_results.mean())
+        var.append(bin_results.var(ddof=1))
+        bin_skew.append(float(skew(bin_results)))
+        weight.append(np.sqrt(len(bin_results)))
+
+    if len(mu) < _MIN_BINS_FOR_SHAPE_FIT:
+        logger.info(
+            "Book shape fit - %s, %s: %d usable line bins (< %d) — constant-CV fallback",
+            league,
+            market,
+            len(mu),
+            _MIN_BINS_FOR_SHAPE_FIT,
+        )
+        return None
+
+    mu, var, bin_skew, weight = map(np.asarray, (mu, var, bin_skew, weight))
+    b, log_a = np.polyfit(np.log(mu), np.log(var), 1, w=weight)
+    skew_d, skew_c = np.polyfit(mu, bin_skew, 1, w=weight)
+    return {
+        "a": float(np.exp(log_a)),
+        "b": float(b),
+        "skew_c": float(skew_c),
+        "skew_d": float(skew_d),
+        "n_bins": len(mu),
+    }
 
 
 def _minimize_weight(objective) -> float:
