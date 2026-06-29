@@ -44,7 +44,8 @@ def archive(tmp_path, monkeypatch):
 
 def _insert_odds(archive, *, league, market, d, entity, book, ev, observed_at):
     archive._connection.execute(
-        "INSERT INTO odds VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO odds (league, market, game_date, entity, book, ev, observed_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
         [league, market, d, entity, book, float(ev), observed_at],
     )
 

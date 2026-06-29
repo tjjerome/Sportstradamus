@@ -114,7 +114,9 @@ class _CaptureArchive:
     def __init__(self):
         self.evs = []
 
-    def _stage_book_ev(self, league, market, date, entity, book, ev, observed_at=None):
+    def _stage_book_ev(
+        self, league, market, date, entity, book, ev, observed_at=None, under_prob=None, line=None
+    ):
         self.evs.append(ev)
 
     def _stage_line(self, *args, **kwargs):
