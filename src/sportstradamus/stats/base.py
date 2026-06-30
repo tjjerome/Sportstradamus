@@ -2006,7 +2006,12 @@ class Stats:
             lines.append(line)
             _cv = stat_cv[self.league].get(market, 1)
             _dist = stat_dist.get(self.league, {}).get(market, "Gamma")
-            under = archive.get_composite_under_prob(self.league, market, date, player, at=target_at)
+            # Shape-free: reads the stored under_prob directly rather than inverting ev through
+            # get_odds, so the training feature is distribution-family-agnostic and Jensen-free.
+            # Falls back to get_odds when under_prob was not stored (pre-migration rows).
+            under = archive.get_composite_under_prob(
+                self.league, market, date, player, at=target_at
+            )
             if np.isnan(under):
                 under = get_odds(line, ev, _dist, cv=_cv)
             odds.append(1 - under)
