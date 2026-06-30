@@ -36,7 +36,10 @@ mp = importlib.import_module("sportstradamus.prediction.model_prob")
 def _book_over(dist, line, book_ev, cv, step, gate):
     """Over-probability the fallback assigns — the real ``_book_over_prob``."""
     offer_df = pd.DataFrame({"Line": [line], "Market Projection": [book_ev]})
-    return mp._book_over_prob(offer_df, dist, cv, step, gate).to_numpy()
+    # Synthetic, never-fitted cell: the SkewNormal book shape stays the symmetric
+    # constant-CV (mean*cv) read the w=0 reference uses, so the parity holds at the
+    # passed cv regardless of any production cell that gains a fitted book_shape.
+    return mp._book_over_prob(offer_df, dist, cv, step, gate, "PARITY", "UNFITTED").to_numpy()
 
 
 def _blend0_over(dist, line, model_ev, book_ev, cv, step, *, shape, gate=None):
