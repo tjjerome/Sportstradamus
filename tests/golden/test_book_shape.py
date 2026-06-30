@@ -201,3 +201,37 @@ def test_book_over_prob_fitted_uses_shape(monkeypatch):
         sigma=float(sigma), skew_alpha=float(skew), gate=None,
     )
     assert float(got.iloc[0]) == pytest.approx(expected, abs=1e-12)
+
+
+# --- Settling verdict: the served blend collapses-to-cv (book shape does NOT enter) -------
+# The WS2 settling experiment found the shaped book loses the served blend OOS, so
+# _blend_with_book keeps the symmetric book leg — its output must be independent of a fitted
+# book_shape, even though the book-only _book_over_prob path does read the shape.
+
+
+def _sn_blend_df():
+    return pd.DataFrame({
+        "Projection": [2.2, 5.0],
+        "Market Projection": [2.0, 4.5],
+        "Line": [2.5, 4.5],
+        "Model Sigma": [1.3, 2.1],
+        "Model Skew": [0.4, -0.2],
+    })
+
+
+def test_blend_with_book_collapses_to_cv(monkeypatch):
+    from sportstradamus.prediction.model_prob import _blend_with_book
+
+    league, market = "WNBA", "AST"
+    cv = config.stat_cv[league][market]
+
+    df0 = _sn_blend_df()
+    base0 = _blend_with_book(df0, "SkewNormal", 0.6, cv, 0.0, league, market)
+
+    monkeypatch.setitem(config.stat_meta[league][market], "book_shape", _OVER_SHAPE)
+    df1 = _sn_blend_df()
+    base1 = _blend_with_book(df1, "SkewNormal", 0.6, cv, 0.0, league, market)
+
+    assert list(base0) == pytest.approx(list(base1), abs=1e-12)
+    assert list(df0["Model Sigma"]) == pytest.approx(list(df1["Model Sigma"]), abs=1e-12)
+    assert list(df0["Model Skew"]) == pytest.approx(list(df1["Model Skew"]), abs=1e-12)
