@@ -2006,7 +2006,10 @@ class Stats:
             lines.append(line)
             _cv = stat_cv[self.league].get(market, 1)
             _dist = stat_dist.get(self.league, {}).get(market, "Gamma")
-            odds.append(1 - get_odds(line, ev, _dist, cv=_cv))
+            under = archive.get_composite_under_prob(self.league, market, date, player, at=target_at)
+            if np.isnan(under):
+                under = get_odds(line, ev, _dist, cv=_cv)
+            odds.append(1 - under)
             evs.append(ev)
             archived.append(a)
         return lines, odds, evs, archived
