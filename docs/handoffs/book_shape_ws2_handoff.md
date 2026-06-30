@@ -109,14 +109,25 @@ unfitted today) and turns on per-cell with the retrain.
   blend-shape ship is the research bet). Only takes effect on the next `meditate`, so it validates with
   the Unit B retrain.
 
-`fused_loc` book side itself is **done** in the contract (`af25e90`) — callers just pass
-`book_sigma`/`book_skew_alpha`.
+`fused_loc`'s `book_sigma`/`book_skew_alpha` contract stays (`af25e90`, harmless behavior-preserving
+default), but per the SPLIT verdict the **blend collapses-to-cv** — `_blend_with_book` should stop passing
+the shaped book (Unit B reverts the 2c pass-through). The API is just unused by the blend, not removed.
 
-### 2.5 Unit B — turn it on (`meditate` wiring + retrain)
+### 2.5 Unit B — turn it on (`meditate` wiring + retrain), **re-scoped by the SPLIT verdict**
 Wire `fit_book_shape` into `meditate` to compute + persist per-cell `book_shape` coeffs into
-`stat_calibration.json` (a `save_book_shape_config` in `training/config.py`, mirroring `save_zi_config`);
-ship 2d; retrain affected SkewNormal cells. Only then do the gated read/predict paths activate. Validate
-per step 4 (gates + Cardoso 84.5% → ~79%).
+`stat_calibration.json` (a `save_book_shape_config` in `training/config.py`, mirroring `save_zi_config`).
+Then route the fitted shape per the verdict:
+- **Book-only fallback (`_book_over_prob` / `book_fallback_prob`): SHIP the shaped book.** 2c already wires
+  this (gated on fitted `book_shape`, `e2967ad`) — keep. This is the Cardoso fix.
+- **Served blend (`_blend_with_book`): COLLAPSE-TO-CV.** Revert / gate-off the 2c `book_sigma`/`book_skew_alpha`
+  pass-through so the blend keeps the symmetric book leg. The shaped book is NOT the served lever
+  ([[ws2-settling-split-verdict]]).
+- **Scope the 2b `get_ev` re-encode to the book-only consumer.** The settling A/B blended off the *symmetric*
+  `ev_b`, so the blend must read the symmetric mean; only the book-only fallback prices at the shaped mean.
+  (Today `get_ev` re-encodes for all consumers when fitted — fine while unfitted; split it before a cell is
+  fitted.)
+- ship 2d (kept regardless); retrain affected SkewNormal cells; validate per step 4 (gates +
+  Cardoso 84.5% → ~79% on the fallback path).
 
 ### 3. WS2 consensus
 `helpers/archive.py` `_weighted_book_ev` → WLS-on-CDF one-point fit with inverse-binomial-variance weights
@@ -126,12 +137,15 @@ is empty (0 rows vs 19.2M odds), so WS2 consensus ≈ today's + the shape shift.
 ### 4. WS2 validate (the load-bearing gate)
 - Round-trip invertibility across the `(line, under)` domain + real archived samples (fail loud, never
   write a garbage EV).
-- **Open-Q1 settling experiment — do this BEFORE the full build:** co-fit `(shape, w)` over ≥8 folds via the
-  reusable invert-blend A/B harness; **require the shaped book to beat the symmetric baseline OOS at the
-  refit `w`, else collapse to constant-cv.** The served-gate lift is a research bet decoupled at `w≈0.90`
-  ([[book_distribution_audit_nogo]], [[pooling_half_blp_nogo]]); the book-leg/Cardoso fix is CERTAIN.
+- **Open-Q1 settling experiment — DONE; verdict = SPLIT.** Brief
+  `/tmp/researcher_ws2_settling.md`; durable in [[ws2-settling-split-verdict]]. The shaped book wins the
+  **book-only leg** (book-PIT-KS 5/7, large on skewed low-mean counts; the Cardoso fix — GO) but **loses the
+  served blend OOS 6/7** two ways (co-fit drives `w_shp`→floor and still loses; hurts at the served weight) —
+  so **collapse-to-cv in the blend.** Confirms the `w≈0.90` decoupling ([[book_distribution_audit_nogo]],
+  [[pooling_half_blp_nogo]]) for WS2's conditional fit: the model's per-row SN already carries the shape.
 - Gate revalidation (g4/g5/PIT-KS) via `training/scorecard.py` A/B on the SkewNormal cohort; retrain affected
-  cells; live spot-check **Cardoso AST u2.5 84.5% → ~79%**, Kelly shrinks, no new "implausible book EV" warns.
+  cells; live spot-check **Cardoso AST u2.5 84.5% → ~79%** (the book-only fallback path), Kelly shrinks, no
+  new "implausible book EV" warns.
 - Then `refactoring-specialist` on every touched `.py`, the three gates, and merge to `devel`.
 
 ### 5. WS3 — shape-free team markets (queued)
