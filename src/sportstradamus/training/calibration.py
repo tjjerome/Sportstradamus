@@ -231,8 +231,8 @@ def fit_book_shape(league: str, market: str, results, lines) -> dict | None:
 
     Returns ``{a, b, skew_c, skew_d, n_bins}``, or ``None`` when fewer than
     ``_MIN_BINS_FOR_SHAPE_FIT`` bins clear the row floor (the caller keeps the cell's
-    constant-CV symmetric shape). Pure fit — persisting the coefficients and wiring them
-    into ``meditate`` land in a later WS2 step.
+    constant-CV symmetric shape). ``train_market`` calls this for each SkewNormal cell and
+    persists the result via :func:`~sportstradamus.training.config.save_book_shape_config`.
     """
     results = np.asarray(results, dtype=float)
     lines = np.asarray(lines, dtype=float)
