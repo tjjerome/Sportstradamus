@@ -10,6 +10,7 @@ is bit-identical to today's book read.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 from scipy.stats import skewnorm
 
@@ -157,3 +158,46 @@ def test_fused_loc_blends_book_skew():
         book_sigma=np.array([4.0]), book_skew_alpha=np.array([book_skew]),
     )
     assert float(skew[0]) == pytest.approx(w * model_skew + (1 - w) * book_skew, abs=1e-9)
+
+
+# --- Step 2c: model_prob book-over-prob uses the per-cell shape (at the book mean) -----
+# Evaluating book_skewnormal_shape at the book mean (Market Projection) makes the unfitted
+# no-op (mean*cv, 0) bit-identical to the legacy symmetric read — the behavior opts in per
+# fitted cell with no explicit gate.
+
+_OVER_SHAPE = {"a": 1.3, "b": 1.1, "skew_c": 0.6, "skew_d": -0.1, "n_bins": 9}
+
+
+def test_book_over_prob_unfitted_is_legacy_symmetric():
+    from sportstradamus.prediction.model_prob import _book_over_prob
+
+    league, market = "WNBA", "AST"
+    cv = config.stat_cv[league][market]
+    assert config.stat_meta[league][market].get("book_shape") is None
+    df = pd.DataFrame({"Line": [2.5, 1.5], "Market Projection": [2.2, 1.1]})
+
+    got = _book_over_prob(df, "SkewNormal", cv, 0.5, None, league, market)
+
+    expected = [
+        1 - get_odds(ln, mp, "SkewNormal", cv=cv, step=0.5, sigma=mp * cv, skew_alpha=0, gate=None)
+        for ln, mp in zip(df["Line"], df["Market Projection"], strict=True)
+    ]
+    assert list(got) == pytest.approx(expected, abs=1e-12)
+
+
+def test_book_over_prob_fitted_uses_shape(monkeypatch):
+    from sportstradamus.prediction.model_prob import _book_over_prob
+
+    league, market = "WNBA", "AST"
+    cv = config.stat_cv[league][market]
+    monkeypatch.setitem(config.stat_meta[league][market], "book_shape", _OVER_SHAPE)
+    df = pd.DataFrame({"Line": [2.5], "Market Projection": [2.2]})
+
+    got = _book_over_prob(df, "SkewNormal", cv, 0.5, None, league, market)
+
+    sigma, skew = config.book_skewnormal_shape(league, market, 2.2)
+    expected = 1 - get_odds(
+        2.5, 2.2, "SkewNormal", cv=cv, step=0.5,
+        sigma=float(sigma), skew_alpha=float(skew), gate=None,
+    )
+    assert float(got.iloc[0]) == pytest.approx(expected, abs=1e-12)

@@ -116,24 +116,35 @@ def book_gate(league: str, market: str, dist: str) -> float | None:
     return stat_zi.get(league, {}).get(market, 0) or None
 
 
-def book_skewnormal_shape(league: str, market: str, mean):
+def book_skewnormal_shape(
+    league: str, market: str, mean: float | np.ndarray, cv: float | None = None
+) -> tuple[np.ndarray, float]:
     """The book's SkewNormal ``(sigma, skew_alpha)`` at conditional mean ``mean`` for a cell.
 
     Evaluates the per-cell shape curves fitted by
     :func:`sportstradamus.training.calibration.fit_book_shape` — ``var = a·μ^b`` and
     ``γ = skew_c + skew_d·μ`` — and moment-matches them via
     :func:`~sportstradamus.helpers.distributions.skewnormal_params_from_moments`, which
-    clamps γ to the SkewNormal-admissible band. ``mean`` may be a scalar or an array.
+    clamps γ to the SkewNormal-admissible band.
 
-    Cells with no fitted ``book_shape`` (every cell until the meditate wiring lands) fall
-    back to the constant-CV symmetric shape ``(μ·cv, 0.0)`` — bit-identical to today's
-    book read, so surfacing this helper is behavior-preserving on its own.
+    Cells with no fitted ``book_shape`` fall back to the symmetric constant-CV shape
+    ``(μ·cv, 0.0)`` — bit-identical to the legacy book read.
+
+    Args:
+        league: League key (e.g. ``"NBA"``).
+        market: Market key (e.g. ``"points"``).
+        mean: Conditional book mean; scalar or array.
+        cv: CV to use for the unfitted fallback. ``None`` reads the cell's configured CV.
+            Pass the caller-held CV to decouple the fallback from config drift.
+
+    Returns:
+        ``(sigma, skew_alpha)`` tuple; sigma has the same shape as ``mean``.
     """
     cell = stat_meta.get(league, {}).get(market, {})
     mu = np.asarray(mean, dtype=float)
     coeffs = cell.get("book_shape")
     if coeffs is None:
-        return mu * cell.get("cv", 1.0), 0.0
+        return mu * (cv if cv is not None else cell.get("cv", 1.0)), 0.0
     var = coeffs["a"] * mu ** coeffs["b"]
     return skewnormal_params_from_moments(var, coeffs["skew_c"] + coeffs["skew_d"] * mu)
 
