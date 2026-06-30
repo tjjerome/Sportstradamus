@@ -745,7 +745,10 @@ def _blend_with_book(
     )
     zi = _zi_kwargs(offer_df, dist, hist_gate)
     if dist == "SkewNormal":
-        book_sigma, book_skew = book_skewnormal_shape(league, market, books_ev, cv)
+        # The book leg stays the symmetric constant-CV shape (fused_loc default). The WS2
+        # settling experiment found the per-cell shaped book loses in the served blend OOS
+        # (the model's per-row SkewNormal already carries the shape); the shaped book ships
+        # only on the book-only fallback leg. See docs/handoffs/book_shape_ws2_handoff.md.
         base_mean, sigma_blend, skew_blend, gate_blend = fused_loc(
             model_weight,
             model_ev,
@@ -754,8 +757,6 @@ def _blend_with_book(
             "SkewNormal",
             sigma=_col_or_none(offer_df, "Model Sigma"),
             skew_alpha=_col_or_none(offer_df, "Model Skew"),
-            book_sigma=book_sigma,
-            book_skew_alpha=book_skew,
             **zi,
         )
         offer_df["Model Sigma"] = sigma_blend
