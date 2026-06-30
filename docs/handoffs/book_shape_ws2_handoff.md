@@ -119,15 +119,24 @@ Wire `fit_book_shape` into `meditate` to compute + persist per-cell `book_shape`
 Then route the fitted shape per the verdict:
 - **Book-only fallback (`_book_over_prob` / `book_fallback_prob`): SHIP the shaped book.** 2c already wires
   this (gated on fitted `book_shape`, `e2967ad`) — keep. This is the Cardoso fix.
-- **Served blend (`_blend_with_book`): COLLAPSE-TO-CV.** Revert / gate-off the 2c `book_sigma`/`book_skew_alpha`
-  pass-through so the blend keeps the symmetric book leg. The shaped book is NOT the served lever
-  ([[ws2-settling-split-verdict]]).
-- **Scope the 2b `get_ev` re-encode to the book-only consumer.** The settling A/B blended off the *symmetric*
-  `ev_b`, so the blend must read the symmetric mean; only the book-only fallback prices at the shaped mean.
-  (Today `get_ev` re-encodes for all consumers when fitted — fine while unfitted; split it before a cell is
-  fitted.)
-- ship 2d (kept regardless); retrain affected SkewNormal cells; validate per step 4 (gates +
-  Cardoso 84.5% → ~79% on the fallback path).
+- **Served blend (`_blend_with_book`): COLLAPSE-TO-CV — DONE (`2fd92a2`).** Reverted the 2c
+  `book_sigma`/`book_skew_alpha` pass-through; the blend keeps the symmetric book leg. The shaped book is NOT
+  the served lever ([[ws2-settling-split-verdict]]). Invariant pinned: the blend is independent of a fitted
+  `book_shape`.
+- **Revert the 2b `get_ev` re-encode (NOT a mean-split).** Q1 validated the book-only fix as the shaped
+  SHAPE at the **symmetric** mean (`book_only_scores(ev_b=symmetric, shaped σ/skew)` — wins book-PIT-KS 5/7),
+  and `_book_over_prob` (2c) already applies the shaped shape at `Market Projection` (=`get_ev`). So BOTH the
+  blend and the book-only path want `get_ev` to return the **symmetric** mean — the shaped-mean re-encode is
+  unnecessary for either. Revert `fa385dd`: remove `_reencode_ev` + `_book_shape_fitted` + the
+  `_book_rows`/`to_pandas` re-encode calls; **keep** the WS1 `(under_prob,line)` storage. Update the WS2 read
+  tests in `test_archive_shapefree_storage.py` to pin `get_ev` == stored ev regardless of `book_shape`.
+- **2d (kept regardless).** Add `Archive.get_composite_under_prob(league, market, date, entity)` — the
+  book-weighted mean of per-book `under_prob` (mirrors `_weighted_book_ev`). `stats/base.py:2009` reads
+  `line = archive.get_line` (the book's OWN line), so replace `1 - get_odds(line, ev, dist, cv)` with
+  `1 - archive.get_composite_under_prob(...)` — the devigged under at the book's own line, shape-invariant +
+  Jensen-free (~10-30bp).
+- retrain affected SkewNormal cells (user-gated); validate per step 4 (gates + Cardoso 84.5% → ~79% on the
+  fallback path).
 
 ### 3. WS2 consensus
 `helpers/archive.py` `_weighted_book_ev` → WLS-on-CDF one-point fit with inverse-binomial-variance weights
