@@ -18,7 +18,7 @@ distribution shape only at read time).
 |---|---|---|
 | `devel` (prod-tracking) | WS1 (`aaa0431` storage+migration, `298236f` confer pin, `391c5ee` research verdict) + `4c7d393` merge_archives fix + `37ff4c5` correlation synthetic-c_map fix | **pushed** |
 | `model-research` | the same 6 book-shape commits cherry-picked + `3d00d7a` keystone doc polish | **pushed** |
-| `ws2-book-shape` (off `devel`@391c5ee) | WS2 keystone `0c4aefd` + `f85069e` doc polish; foundation `a1acda6` (fit + eval); read-path contract `af25e90` (get_ev sigma, fused_loc book shape); archive re-encode `fa385dd` (gated) | **local only — WS2 continues here** |
+| `ws2-book-shape` (off `devel`@391c5ee) | WS2 keystone `0c4aefd` + `f85069e` doc polish; foundation `a1acda6` (fit + eval); read-path contract `af25e90` (get_ev sigma, fused_loc book shape); archive re-encode `fa385dd` (gated); model_prob book paths `e2967ad` (gated, cv-param) | **local only — wiring phase done; Unit B next** |
 
 WS2 lands on `devel` **only after** it is validated as one unit (gates + retrain). The keystone is
 deliberately not on `devel` yet.
@@ -53,6 +53,18 @@ deliberately not on `devel` yet.
   populates coeffs. (The plan wanted always-on for cv-drift immunity; that becomes a follow-on once cells
   are fitted, e.g. by dropping the gate.) `to_pandas` skips its whole-cell loop for unfitted cells.
   Pinned in `tests/golden/test_archive_shapefree_storage.py` (WS2 read section).
+- **WS2 model_prob book paths** (`e2967ad`, **gated → behavior-preserving until a cell is fitted**).
+  `_book_over_prob` (the `Market EV` feature + book-fallback pricing) and `_blend_with_book`'s
+  SkewNormal `fused_loc` now read the per-cell shape via `book_skewnormal_shape(lg, mkt, mean)` — the
+  book mean (not the line), since both legacy sites already used `mean·cv`. Both thread `league`/`market`;
+  `_blend_with_book` swapped its `cell=""` log param for `league`/`market`. `book_skewnormal_shape`
+  exported from the helpers package and gained an optional `cv` so the **unfitted fallback honors the
+  caller-held CV** — keeps `(mean·cv, 0)` bit-identical to the legacy read AND decoupled from the config
+  CV copy, so the train/serve parity invariant (book-fallback == weight-0 blend) holds at an arbitrary
+  passed CV, not just the config value. No explicit gate needed: the unfitted no-op reproduces today's
+  symmetric read, the fitted curve turns on per-cell with the retrain. Existing blend-guard / parity
+  callers updated for the signature; parity test pins the symmetric contract with a synthetic never-fitted
+  cell. Pinned by the `book_over_prob` tests in `tests/golden/test_book_shape.py`.
 - **WS2 read-path contract** (`af25e90`, additive, behavior-preserving defaults). The per-cell shape is
   **injected by callers**, never pulled inside `distributions.py` (config imports distributions → the
   reverse cycles). `get_ev` gains a fixed `sigma`; `fused_loc` gains `book_sigma`/`book_skew_alpha` for
@@ -81,16 +93,21 @@ unfitted today) and turns on per-cell with the retrain.
   averages the already-re-encoded per-book means (the CDF-fit consensus is the deferred step 3). Other ev
   read sites (`get_ev_history`/`get_movement`/`get_closing_line`) are **not yet** re-encoded — fine while
   unfitted; revisit for CLV consistency once a cell is fitted.
-- `prediction/model_prob.py` (2c, next subagent) — the book **mean** already arrives re-encoded via
-  `archive.get_ev` (2b). Still to wire: (a) `_book_over_prob` (the fallback/feature pricing) currently
-  passes `sigma = Market Projection·cv, skew_alpha=0` — switch to `book_skewnormal_shape(lg, mkt, Line)`
-  for fitted cells (threads `league`/`market` into its signature; it is called by `model_prob` and
-  `book_fallback_prob`); (b) the SkewNormal `fused_loc` blend call (~L737) passes the book
-  `book_sigma`/`book_skew_alpha` from the helper (model side + pickle decode untouched). Gate both on
-  fitted `book_shape`.
-- `stats/base.py:2009` training feature (2d) → prob-space `1 - composite_under_prob` (mandatory in WS2;
-  ~10-30bp Jensen change, shape-invariant thereafter). Lands with Unit B (it only takes effect on the next
-  `meditate`, and needs the retrain to validate).
+- **`prediction/model_prob.py` — DONE** (`e2967ad`). `_book_over_prob` + `_blend_with_book` read the
+  per-cell shape via `book_skewnormal_shape(lg, mkt, mean)` (at the book **mean**, not the line — both
+  legacy sites used `mean·cv`, so the unfitted no-op is bit-identical without an explicit gate). The
+  optional `cv` on the helper carries the caller's per-cell CV through the unfitted fallback. See the
+  WS2 model_prob book-paths entry under **Done**.
+- **`stats/base.py:2009` training feature (2d) — still to do; lands with Unit B.** Replace the mean→prob
+  round-trip `1 - get_odds(line, ev, dist, cv)` (where `ev = archive.get_ev`, the re-encoded consensus
+  **mean**) with the prob-space `1 - composite_under_prob` read **directly** from the stored quotes —
+  shape-invariant + Jensen-free (~10-30bp). **Discovery:** the archive has no composite-under-prob
+  accessor yet (`get_ev`/`_weighted_book_ev` average per-book *means*); 2d needs a new prob-space
+  consensus reader (weighted mean of per-book `under_prob`, mirroring `_weighted_book_ev`), which is the
+  shallow end of the deferred step-3 consensus (CDF-fit lift stays deferred — ladder empty). 2d is
+  **mandatory + kept regardless of the settling-experiment fork** (it is shape-invariant; only the
+  blend-shape ship is the research bet). Only takes effect on the next `meditate`, so it validates with
+  the Unit B retrain.
 
 `fused_loc` book side itself is **done** in the contract (`af25e90`) — callers just pass
 `book_sigma`/`book_skew_alpha`.
