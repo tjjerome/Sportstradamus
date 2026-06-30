@@ -279,7 +279,11 @@ def test_confer_prop_write_keeps_shapefree_quote(archive):
         assert get_ev(line, under_prob, cv, dist=dist, gate=gate) == pytest.approx(ev, abs=1e-6)
 
 
-# --- WS2 read re-encode -------------------------------------------------------
+# --- WS2 read: NO shape re-encode (collapse-to-cv per the settling verdict) ---
+# The settling experiment routed the shaped book to the book-only prediction leg
+# (model_prob._book_over_prob), not the archive. get_ev / to_pandas return the stored
+# (symmetric-devigged) ev regardless of a fitted book_shape; the WS1 (under_prob, line)
+# columns stay for the 2d prob-space feature, not a mean re-encode.
 
 _PLANTED_SHAPE = {"a": 1.3, "b": 1.1, "skew_c": 0.6, "skew_d": -0.1, "n_bins": 9}
 
@@ -292,56 +296,25 @@ def _insert_book_row(archive, league, market, entity, book, ev, under_prob, line
     )
 
 
-def _expected_reencode(league, market, under, line):
-    sigma, skew = config.book_skewnormal_shape(league, market, line)
-    return get_ev(
-        line, under, dist="SkewNormal", sigma=float(sigma), skew_alpha=float(skew),
-        gate=book_gate(league, market, "SkewNormal"),
-    )
-
-
-def test_read_reencode_noop_for_unfitted_cell(archive):
-    """No fitted book_shape -> get_ev returns the stored ev bit-identically."""
+def test_get_ev_ignores_book_shape(archive, monkeypatch):
+    """get_ev returns the stored ev whether or not a book_shape is fitted (no read re-encode)."""
     league, market = "WNBA", "AST"
     assert stat_dist[league][market] == "SkewNormal"
-    assert config.stat_meta[league][market].get("book_shape") is None
     _insert_book_row(archive, league, market, "P", "pinnacle", 2.4, 0.55, 1.5)
     assert archive.get_ev(league, market, "2026-05-08", "P") == 2.4
 
-
-def test_read_reencode_uses_fitted_shape(archive, monkeypatch):
-    """A fitted book_shape -> get_ev re-inverts (under_prob, line) at sigma(line)/skew(line),
-    ignoring the stored ev (here deliberately wrong)."""
-    league, market = "WNBA", "AST"
-    under, line = 0.62, 1.5
     monkeypatch.setitem(config.stat_meta[league][market], "book_shape", _PLANTED_SHAPE)
-    _insert_book_row(archive, league, market, "P", "pinnacle", 5.0, under, line)
-
-    ev = archive.get_ev(league, market, "2026-05-08", "P")
-
-    assert ev == pytest.approx(_expected_reencode(league, market, under, line), abs=1e-9)
-    sigma, skew = config.book_skewnormal_shape(league, market, line)
-    assert get_odds(line, ev, "SkewNormal", sigma=float(sigma), skew_alpha=float(skew)) == (
-        pytest.approx(under, abs=1e-7)
-    )
+    assert archive.get_ev(league, market, "2026-05-08", "P") == 2.4
 
 
-def test_to_pandas_reencode_gated(archive, monkeypatch):
-    """to_pandas re-encodes per-book ev for a fitted cell, leaves an unfitted cell identical."""
+def test_to_pandas_ignores_book_shape(archive, monkeypatch):
+    """to_pandas returns the stored ev whether or not a book_shape is fitted."""
     league, market = "WNBA", "AST"
-    under, line = 0.62, 1.5
-    _insert_book_row(archive, league, market, "P", "pinnacle", 5.0, under, line)
-    archive._connection.execute(
-        "INSERT INTO lines (league, market, game_date, entity, line, observed_at) "
-        "VALUES (?, ?, DATE '2026-05-08', 'P', ?, ?)",
-        [league, market, line, _TS],
-    )
+    _insert_book_row(archive, league, market, "P", "pinnacle", 5.0, 0.62, 1.5)
 
     df0 = archive.to_pandas(league, market)
     assert float(df0.loc[("2026-05-08", "P"), "pinnacle"]) == 5.0
 
     monkeypatch.setitem(config.stat_meta[league][market], "book_shape", _PLANTED_SHAPE)
     df1 = archive.to_pandas(league, market)
-    assert float(df1.loc[("2026-05-08", "P"), "pinnacle"]) == pytest.approx(
-        _expected_reencode(league, market, under, line), abs=1e-9
-    )
+    assert float(df1.loc[("2026-05-08", "P"), "pinnacle"]) == 5.0

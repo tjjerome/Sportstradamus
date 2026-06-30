@@ -35,14 +35,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 
-from sportstradamus.helpers.config import (
-    book_gate,
-    book_skewnormal_shape,
-    book_weights,
-    stat_cv,
-    stat_dist,
-    stat_meta,
-)
+from sportstradamus.helpers.config import book_gate, book_weights, stat_cv, stat_dist
 from sportstradamus.helpers.distributions import get_ev, get_odds, no_vig_odds
 from sportstradamus.helpers.text import remove_accents
 
@@ -382,37 +375,6 @@ class Archive:
             return float("nan")
         return float(np.average(evs, weights=ws))
 
-    @staticmethod
-    def _book_shape_fitted(league, market) -> bool:
-        """True when the cell has fitted WS2 ``book_shape`` coefficients in ``stat_meta``."""
-        return (
-            stat_dist.get(league, {}).get(market) == "SkewNormal"
-            and stat_meta.get(league, {}).get(market, {}).get("book_shape") is not None
-        )
-
-    def _reencode_ev(self, league, market, ev, under_prob, line) -> float | None:
-        """Rebuild the book mean from its ``(under_prob, line)`` quote via the fitted SkewNormal shape.
-
-        Falls back to the stored ``ev`` for unfitted cells (see :meth:`_book_shape_fitted`)
-        or rows whose shape-free quote is absent — bit-identical to the pre-WS2 read until
-        ``book_shape`` coefficients exist for the cell.
-        """
-        if under_prob is None or line is None:
-            return ev
-        if not (np.isfinite(under_prob) and np.isfinite(line)):
-            return ev
-        if not self._book_shape_fitted(league, market):
-            return ev
-        sigma, skew = book_skewnormal_shape(league, market, line)
-        return get_ev(
-            line,
-            under_prob,
-            dist="SkewNormal",
-            sigma=float(sigma),
-            skew_alpha=float(skew),
-            gate=book_gate(league, market, "SkewNormal"),
-        )
-
     def _book_rows(
         self,
         league: str,
@@ -424,9 +386,6 @@ class Archive:
         case_insensitive_entity: bool = False,
     ) -> list[tuple[str, float]]:
         """Return ``[(book, ev), ...]`` — latest observation per book at-or-before ``at``.
-
-        ``ev`` is the WS2 re-encode of each book's ``(under_prob, line)`` quote at the fitted
-        per-cell shape (:meth:`_reencode_ev`); unfitted cells return the stored ``ev`` as-is.
 
         ``at=None`` means "latest available", i.e. as-of-now.
 
@@ -446,8 +405,8 @@ class Archive:
         params: list = [league, market, d, entity]
         entity_clause = "UPPER(entity)=UPPER(?)" if case_insensitive_entity else "entity=?"
         sql = (
-            "SELECT book, ev, under_prob, line FROM ("
-            "  SELECT book, ev, under_prob, line, observed_at, "
+            "SELECT book, ev FROM ("
+            "  SELECT book, ev, observed_at, "
             "         ROW_NUMBER() OVER (PARTITION BY book ORDER BY observed_at DESC) AS rn "
             "  FROM odds "
             f"  WHERE league=? AND market=? AND game_date=? AND {entity_clause}"
@@ -456,10 +415,7 @@ class Archive:
             sql += " AND observed_at <= ?"
             params.append(at)
         sql += ") WHERE rn = 1"
-        return [
-            (book, self._reencode_ev(league, market, ev, under_prob, line))
-            for book, ev, under_prob, line in self._connection.execute(sql, params).fetchall()
-        ]
+        return [(book, ev) for book, ev in self._connection.execute(sql, params).fetchall()]
 
     def get_ev(self, league, market, date, player, *, at: datetime.datetime | None = None):
         """Weighted-average player-prop EV across books for one slate entry.
@@ -612,8 +568,8 @@ class Archive:
         """
         cutoff = pd.Timestamp("2023-05-03")
         odds_df = self._connection.execute(
-            "SELECT game_date, entity, book, ev, under_prob, line FROM ("
-            "  SELECT game_date, entity, book, ev, under_prob, line, "
+            "SELECT game_date, entity, book, ev FROM ("
+            "  SELECT game_date, entity, book, ev, "
             "         ROW_NUMBER() OVER ("
             "             PARTITION BY game_date, entity, book "
             "             ORDER BY observed_at DESC"
@@ -631,13 +587,6 @@ class Archive:
             if odds_df.empty:
                 return pd.DataFrame()
 
-        if self._book_shape_fitted(league, market):
-            odds_df["ev"] = [
-                self._reencode_ev(league, market, ev, up, ln)
-                for ev, up, ln in zip(
-                    odds_df["ev"], odds_df["under_prob"], odds_df["line"], strict=True
-                )
-            ]
         odds_df["game_date"] = odds_df["game_date"].dt.strftime("%Y-%m-%d")
         wide = odds_df.pivot_table(
             index=["game_date", "entity"], columns="book", values="ev", aggfunc="first"
