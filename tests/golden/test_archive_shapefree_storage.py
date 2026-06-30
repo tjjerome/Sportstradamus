@@ -6,10 +6,11 @@ calibration-*invariant*: they assert the round trip ``get_ev(line, stored_under,
 stored_ev`` rather than any frozen EV, and that un-invertible rows (``ev`` beyond
 ``SN_MAX_MEAN_FACTOR*line``) and team markets stay NULL so readers fall back to ``ev``.
 
-**Read re-encode (WS2):** reads rebuild ``ev`` from the stored ``(under_prob, line)`` at the
-per-cell fitted SkewNormal shape, **gated on a fitted ``book_shape``** — unfitted cells (every
-cell today) read the stored ``ev`` bit-identically, so the wiring is behavior-preserving until
-a retrain populates the coefficients.
+**Reads (WS2):** ``get_ev`` / ``to_pandas`` return the stored (symmetric-devigged) ``ev``
+regardless of a fitted ``book_shape`` — the settling verdict routed the shaped book to the
+book-only prediction leg, not the archive. The stored ``(under_prob, line)`` columns instead
+back :meth:`Archive.get_composite_under_prob`, the book-weighted consensus de-vigged
+under-probability the WS2 2d training feature reads shape-free.
 """
 
 from __future__ import annotations
@@ -318,3 +319,22 @@ def test_to_pandas_ignores_book_shape(archive, monkeypatch):
     monkeypatch.setitem(config.stat_meta[league][market], "book_shape", _PLANTED_SHAPE)
     df1 = archive.to_pandas(league, market)
     assert float(df1.loc[("2026-05-08", "P"), "pinnacle"]) == 5.0
+
+
+def test_composite_under_prob_weights_books(archive):
+    """get_composite_under_prob returns the book-weighted mean of the stored under_prob."""
+    league, market = "WNBA", "AST"
+    _insert_book_row(archive, league, market, "P", "pinnacle", 2.4, 0.55, 1.5)
+    _insert_book_row(archive, league, market, "P", "fanduel", 2.6, 0.65, 1.5)
+
+    weights = config.book_weights.get(league, {}).get(market, {})
+    wp, wf = weights.get("pinnacle", 1), weights.get("fanduel", 1)
+    expected = (wp * 0.55 + wf * 0.65) / (wp + wf)
+
+    got = archive.get_composite_under_prob(league, market, "2026-05-08", "P")
+    assert got == pytest.approx(expected)
+
+
+def test_composite_under_prob_nan_when_absent(archive):
+    """No book quote -> NaN, so the caller falls back to the symmetric get_odds feature."""
+    assert np.isnan(archive.get_composite_under_prob("WNBA", "AST", "2026-05-08", "ghost"))
