@@ -29,7 +29,10 @@ legacy ``.get(..., default)`` call sites already tolerate.
 import importlib.resources as pkg_resources
 import json
 
+import numpy as np
+
 from sportstradamus import creds, data
+from sportstradamus.helpers.distributions import skewnormal_params_from_moments
 
 # --- API keys ---------------------------------------------------------------
 
@@ -76,6 +79,7 @@ for _league, _markets in _stat_meta_committed.items():
             "cv": _cal_cell.get("cv", 1.0),
             "std": _cal_cell.get("std"),
             "zi": _cal_cell.get("zi"),
+            "book_shape": _cal_cell.get("book_shape"),
         }
 
 # Derived per-field views of the merged stat_meta map, kept so existing
@@ -110,6 +114,39 @@ def book_gate(league: str, market: str, dist: str) -> float | None:
     if dist not in ("ZINB", "ZAGamma"):
         return None
     return stat_zi.get(league, {}).get(market, 0) or None
+
+
+def book_skewnormal_shape(
+    league: str, market: str, mean: float | np.ndarray, cv: float | None = None
+) -> tuple[np.ndarray, float]:
+    """The book's SkewNormal ``(sigma, skew_alpha)`` at conditional mean ``mean`` for a cell.
+
+    Evaluates the per-cell shape curves fitted by
+    :func:`sportstradamus.training.calibration.fit_book_shape` — ``var = a·μ^b`` and
+    ``γ = skew_c + skew_d·μ`` — and moment-matches them via
+    :func:`~sportstradamus.helpers.distributions.skewnormal_params_from_moments`, which
+    clamps γ to the SkewNormal-admissible band.
+
+    Cells with no fitted ``book_shape`` fall back to the symmetric constant-CV shape
+    ``(μ·cv, 0.0)`` — bit-identical to the legacy book read.
+
+    Args:
+        league: League key (e.g. ``"NBA"``).
+        market: Market key (e.g. ``"points"``).
+        mean: Conditional book mean; scalar or array.
+        cv: CV to use for the unfitted fallback. ``None`` reads the cell's configured CV.
+            Pass the caller-held CV to decouple the fallback from config drift.
+
+    Returns:
+        ``(sigma, skew_alpha)`` tuple; sigma has the same shape as ``mean``.
+    """
+    cell = stat_meta.get(league, {}).get(market, {})
+    mu = np.asarray(mean, dtype=float)
+    coeffs = cell.get("book_shape")
+    if coeffs is None:
+        return mu * (cv if cv is not None else cell.get("cv", 1.0)), 0.0
+    var = coeffs["a"] * mu ** coeffs["b"]
+    return skewnormal_params_from_moments(var, coeffs["skew_c"] + coeffs["skew_d"] * mu)
 
 
 with (_config_dir / "stat_map.json").open() as infile:

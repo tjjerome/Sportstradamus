@@ -130,3 +130,21 @@ def save_cv_std_config(cv_config: dict, std_config: dict) -> None:
             )
             cell["std"] = std
     _write(_STAT_CAL_PATH, cal)
+
+
+def save_book_shape_config(config: dict) -> None:
+    """Persist a full ``{league: {market: book_shape}}`` map into ``stat_calibration.json``.
+
+    Mirrors :func:`save_zi_config`: every cell in ``config`` has its ``book_shape`` field
+    overwritten with the ``fit_book_shape`` coeff dict (or ``None`` when the cell has too few
+    line bins for a fit — the reader then keeps the constant-CV symmetric shape). Other
+    calibration fields (``cv``, ``std``, ``zi``) are preserved.
+    """
+    cal = _load(_STAT_CAL_PATH)
+    for league, markets in config.items():
+        for market, book_shape in markets.items():
+            cell = cal.setdefault(league, {}).setdefault(
+                market, {"cv": 1.0, "std": None, "zi": None}
+            )
+            cell["book_shape"] = book_shape
+    _write(_STAT_CAL_PATH, cal)

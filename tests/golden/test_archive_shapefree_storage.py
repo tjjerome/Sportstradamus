@@ -1,13 +1,16 @@
-"""WS1 shape-free storage: the ``odds`` table carries the book's ``(under_prob, line)``
-quote alongside the legacy ``ev``, and every write/backfill stays an exact inverse of
-``get_ev``.
+"""WS1 shape-free storage + WS2 read re-encode for the ``odds`` table.
 
-These pin the storage layer, not the read path — WS1 leaves reads on ``ev`` untouched, so
-the invariants here are calibration-*invariant*: they assert the round trip
-``get_ev(line, stored_under, shape) == stored_ev`` (true for whatever ``cv``/``gate`` are
-current) rather than any frozen EV, and that un-invertible rows (stored ``ev`` beyond
-``get_ev``'s ``SN_MAX_MEAN_FACTOR*line`` cap) and team markets are left NULL so readers
-fall back to ``ev``.
+**Storage (WS1):** the table carries the book's ``(under_prob, line)`` quote alongside the
+legacy ``ev``, and every write/backfill stays an exact inverse of ``get_ev``. Those pins are
+calibration-*invariant*: they assert the round trip ``get_ev(line, stored_under, shape) ==
+stored_ev`` rather than any frozen EV, and that un-invertible rows (``ev`` beyond
+``SN_MAX_MEAN_FACTOR*line``) and team markets stay NULL so readers fall back to ``ev``.
+
+**Reads (WS2):** ``get_ev`` / ``to_pandas`` return the stored (symmetric-devigged) ``ev``
+regardless of a fitted ``book_shape`` — the settling verdict routed the shaped book to the
+book-only prediction leg, not the archive. The stored ``(under_prob, line)`` columns instead
+back :meth:`Archive.get_composite_under_prob`, the book-weighted consensus de-vigged
+under-probability the WS2 2d training feature reads shape-free.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ import duckdb
 import numpy as np
 import pytest
 
+from sportstradamus.helpers import config
 from sportstradamus.helpers.archive import Archive
 from sportstradamus.helpers.config import book_gate, stat_cv, stat_dist
 from sportstradamus.helpers.distributions import SN_MAX_MEAN_FACTOR, get_ev, get_odds
@@ -274,3 +278,63 @@ def test_confer_prop_write_keeps_shapefree_quote(archive):
         assert under_prob is not None and line is not None, f"{ent}/{book} wrote ev-only"
         assert 0.0 <= under_prob <= 1.0 and line > 0
         assert get_ev(line, under_prob, cv, dist=dist, gate=gate) == pytest.approx(ev, abs=1e-6)
+
+
+# --- WS2 read: NO shape re-encode (collapse-to-cv per the settling verdict) ---
+# The settling experiment routed the shaped book to the book-only prediction leg
+# (model_prob._book_over_prob), not the archive. get_ev / to_pandas return the stored
+# (symmetric-devigged) ev regardless of a fitted book_shape; the WS1 (under_prob, line)
+# columns stay for the 2d prob-space feature, not a mean re-encode.
+
+_PLANTED_SHAPE = {"a": 1.3, "b": 1.1, "skew_c": 0.6, "skew_d": -0.1, "n_bins": 9}
+
+
+def _insert_book_row(archive, league, market, entity, book, ev, under_prob, line):
+    archive._connection.execute(
+        "INSERT INTO odds (league, market, game_date, entity, book, ev, observed_at, "
+        "under_prob, line) VALUES (?, ?, DATE '2026-05-08', ?, ?, ?, ?, ?, ?)",
+        [league, market, entity, book, float(ev), _TS, float(under_prob), float(line)],
+    )
+
+
+def test_get_ev_ignores_book_shape(archive, monkeypatch):
+    """get_ev returns the stored ev whether or not a book_shape is fitted (no read re-encode)."""
+    league, market = "WNBA", "AST"
+    assert stat_dist[league][market] == "SkewNormal"
+    _insert_book_row(archive, league, market, "P", "pinnacle", 2.4, 0.55, 1.5)
+    assert archive.get_ev(league, market, "2026-05-08", "P") == 2.4
+
+    monkeypatch.setitem(config.stat_meta[league][market], "book_shape", _PLANTED_SHAPE)
+    assert archive.get_ev(league, market, "2026-05-08", "P") == 2.4
+
+
+def test_to_pandas_ignores_book_shape(archive, monkeypatch):
+    """to_pandas returns the stored ev whether or not a book_shape is fitted."""
+    league, market = "WNBA", "AST"
+    _insert_book_row(archive, league, market, "P", "pinnacle", 5.0, 0.62, 1.5)
+
+    df0 = archive.to_pandas(league, market)
+    assert float(df0.loc[("2026-05-08", "P"), "pinnacle"]) == 5.0
+
+    monkeypatch.setitem(config.stat_meta[league][market], "book_shape", _PLANTED_SHAPE)
+    df1 = archive.to_pandas(league, market)
+    assert float(df1.loc[("2026-05-08", "P"), "pinnacle"]) == 5.0
+
+
+def test_composite_under_prob_weights_books(archive):
+    """get_composite_under_prob returns the book-weighted mean of the stored under_prob."""
+    league, market = "WNBA", "AST"
+    _insert_book_row(archive, league, market, "P", "pinnacle", 2.4, 0.55, 1.5)
+    _insert_book_row(archive, league, market, "P", "fanduel", 2.6, 0.65, 1.5)
+
+    weights = config.book_weights.get(league, {}).get(market, {})
+    wp, wf = weights.get("pinnacle", 1), weights.get("fanduel", 1)
+    expected = (wp * 0.55 + wf * 0.65) / (wp + wf)
+
+    got = archive.get_composite_under_prob(league, market, "2026-05-08", "P")
+    assert got == pytest.approx(expected)
+
+
+def test_composite_under_prob_nan_when_absent(archive):
+    """No book quote -> NaN, so the caller falls back to the symmetric get_odds feature."""
+    assert np.isnan(archive.get_composite_under_prob("WNBA", "AST", "2026-05-08", "ghost"))

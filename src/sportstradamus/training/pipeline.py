@@ -51,6 +51,7 @@ from sportstradamus.training import baselines, calibration, posthoc
 from sportstradamus.training.calibration import fit_book_weights
 from sportstradamus.training.config import (
     load_distribution_config,
+    save_book_shape_config,
     save_cv_std_config,
     save_zi_config,
 )
@@ -2471,6 +2472,15 @@ def train_market(
     hist_gate = dist_info["hist_gate"]
     shape_ceiling = dist_info["shape_ceiling"]
     use_hurdle = dist == "ZINB" and zinb_mode == "hurdle"
+
+    # WS2: fit the book's conditional (var, skew) curves and persist them for the book-only
+    # fallback leg; book_skewnormal_shape reads them there only — the served blend stays
+    # symmetric per the settling verdict. fit_book_shape's per-line-bin row floor self-filters
+    # the synthetic fallback lines, so binning all rows still conditions on real book lines.
+    if not deterministic and dist == "SkewNormal":
+        save_book_shape_config(
+            {league: {market: calibration.fit_book_shape(league, market, M["Result"], M["Line"])}}
+        )
 
     model = _step_build_lss_model(
         dist,
