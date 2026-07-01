@@ -8,6 +8,8 @@ zero-variance fallback, no-alpha Gaussian path, ratio/cap clipping). The scaler
 is pure DataFrame math, so no cached game logs are needed.
 """
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -139,3 +141,18 @@ def test_zero_variance_fallback():
         }
     )
     _assert_match(df, "PTS")
+
+
+def test_no_alpha_column_float32_preserves_dtype_no_warning():
+    """Real model output is float32 (PyTorch); the no-alpha fallback must not
+    silently promote it to float64 and trip pandas' incompatible-dtype warning."""
+    df = _synthetic(3, market="TOI", with_alpha=False).astype(
+        dict.fromkeys(["proj TOI loc", "proj TOI scale"], "float32")
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        scale_team_volume_to_budget(df, "TOI", **_PARAMS)
+    assert df["proj TOI loc"].dtype == np.float32
+    assert df["proj TOI scale"].dtype == np.float32
+    assert df["proj TOI mean"].dtype == np.float32
+    assert df["proj TOI std"].dtype == np.float32
