@@ -31,6 +31,7 @@ from sportstradamus.training.ship_config import (
     load_ship_config,
     load_stat_meta,
     resolve_cell_target_normalization,
+    resolve_flag_target_normalization,
 )
 
 warnings.simplefilter("ignore", UserWarning)
@@ -135,13 +136,15 @@ def _resolve_cell_knob(stat_meta_full, lg, market, key, default, flag_value):
 )
 @click.option(
     "--target-normalization",
-    type=click.Choice(list(baselines.TARGET_NORMALIZATION_SLUGS)),
-    default="ratio_meanyr",
+    type=click.Choice([LOSS_AUTO, *sorted(baselines.TARGET_NORMALIZATION_SLUGS)]),
+    default=LOSS_AUTO,
     show_default=True,
     help=(
-        "Target-normalization transform for SkewNormal markets. "
-        "Non-default values are A/B experiments (run under --deterministic); "
-        "the default 'ratio_meanyr' is current production behavior."
+        "Target-normalization transform for SkewNormal markets. 'auto' (default) "
+        "honors each cell's stat_meta target_normalization; an explicit slug "
+        "overrides every selected cell, in a real run or under --deterministic — "
+        "an Operation Ship 75 search axis and how to confirm a candidate "
+        "normalization before persisting it to stat_meta.json."
     ),
 )
 @click.option(
@@ -404,7 +407,9 @@ def meditate(
                     # so TARGET_NORM_NONE is fine and the next clause will
                     # substitute the run-wide default for the pipeline call.
                     cell_target_norm = (
-                        target_normalization if cell_dist == SKEW_NORMAL_DIST else TARGET_NORM_NONE
+                        resolve_flag_target_normalization(target_normalization)
+                        if cell_dist == SKEW_NORMAL_DIST
+                        else TARGET_NORM_NONE
                     )
                     click.echo(
                         f"[{lg}] {market}: BYPASS withhold "
@@ -419,7 +424,7 @@ def meditate(
             # the slug anyway, so substitute the CLI default — the run-wide
             # target_normalization — to keep baselines.get_target_normalization() satisfied.
             if cell_target_norm == TARGET_NORM_NONE:
-                cell_target_norm = target_normalization
+                cell_target_norm = resolve_flag_target_normalization(target_normalization)
             cell_posthoc = stat_meta_full.get(lg, {}).get(market, {}).get("posthoc", "none")
             # Each search-axis flag (blending, hpo_selection, count_dispersion_objective):
             # 'auto' leaves each cell on its configured stat_meta knob; an explicit slug overrides.
@@ -435,7 +440,12 @@ def meditate(
                 stat_meta_full, lg, market, "hpo_selection", "loss", hpo_selection
             )
             cell_count_dispersion = _resolve_cell_knob(
-                stat_meta_full, lg, market, "count_dispersion_objective", "crps", count_dispersion_objective
+                stat_meta_full,
+                lg,
+                market,
+                "count_dispersion_objective",
+                "crps",
+                count_dispersion_objective,
             )
             cell_zinb_mode = _resolve_cell_knob(
                 stat_meta_full, lg, market, "zinb_mode", "joint", zinb_mode
