@@ -297,7 +297,7 @@ def scale_team_volume_to_budget(
         sn_alpha = (
             team_df[f"proj {market} alpha"].copy()
             if f"proj {market} alpha" in team_df.columns
-            else pd.Series(0, index=loc.index)
+            else pd.Series(0, index=loc.index, dtype=loc.dtype)
         )
         N = len(team_df)
 
