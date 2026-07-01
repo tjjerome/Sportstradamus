@@ -14,13 +14,49 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 import pytest
+from scipy.stats import skewnorm
 
 from sportstradamus.helpers.distributions import (
     SN_MAX_MEAN_FACTOR,
     get_ev,
     get_odds,
     set_model_start_values,
+    skewnormal_loc_from_mean,
+    skewnormal_params_from_moments,
 )
+
+
+@pytest.mark.parametrize(
+    "mean,var,skew,sigma_ref,alpha_ref",
+    [
+        (4.262, 2.179, -0.631, 2.235, -2.784),  # WS2 brief: WNBA DREB line 6.0 (solved exactly)
+        (4.110, 2.345, -0.557, 2.266, -2.413),  # WS2 brief: NBA DREB line 5.5
+    ],
+)
+def test_skewnormal_params_from_moments_matches_brief(mean, var, skew, sigma_ref, alpha_ref):
+    """The book-shape moment-match reproduces the research brief's hand-solved DREB bins, and
+    round-trips: a mean-pinned SkewNormal with the solved (sigma, alpha) has the target moments."""
+    sigma, alpha = skewnormal_params_from_moments(var, skew)
+    assert float(sigma) == pytest.approx(sigma_ref, abs=2e-3)
+    assert float(alpha) == pytest.approx(alpha_ref, abs=2e-3)
+    loc = float(skewnormal_loc_from_mean(mean, sigma, alpha))
+    m, v, s = skewnorm.stats(float(alpha), loc=loc, scale=float(sigma), moments="mvs")
+    assert (float(m), float(v), float(s)) == pytest.approx((mean, var, skew), abs=2e-3)
+
+
+def test_skewnormal_params_from_moments_edges():
+    """skew=0 -> symmetric Normal (alpha=0, sigma=sqrt(var)); a skew past the SkewNormal bound
+    clamps alpha finite while preserving the target variance (the low-mean count regime)."""
+    sigma0, alpha0 = skewnormal_params_from_moments(4.0, 0.0)
+    assert float(alpha0) == pytest.approx(0.0, abs=1e-9)
+    assert float(sigma0) == pytest.approx(2.0, abs=1e-9)
+    # skew 1.26 > 0.9953 bound: alpha finite, realized skew clamps, variance still met
+    sigma1, alpha1 = skewnormal_params_from_moments(1.354, 1.26)
+    assert np.isfinite(float(alpha1))
+    loc = float(skewnormal_loc_from_mean(1.04, sigma1, alpha1))
+    _, v, s = skewnorm.stats(float(alpha1), loc=loc, scale=float(sigma1), moments="mvs")
+    assert float(v) == pytest.approx(1.354, abs=2e-3)
+    assert float(s) < 0.9953
 
 
 def test_get_ev_by_family():

@@ -22,6 +22,7 @@ from sportstradamus.helpers import (
     LazyArchive,
     apply_temperature,
     book_gate,
+    book_skewnormal_shape,
     decode_predictive_mean,
     fused_loc,
     get_ev,
@@ -253,30 +254,37 @@ def _book_cell_params(
 
 
 def _book_over_prob(
-    offer_df: pd.DataFrame, dist: str, cv: float, step: float, gate: float | None
+    offer_df: pd.DataFrame,
+    dist: str,
+    cv: float,
+    step: float,
+    gate: float | None,
+    league: str,
+    market: str,
 ) -> pd.Series:
     """Devigged book probability of the over per row, inverted from ``Market Projection``.
 
-    Inverts the composite book EV through the cell distribution at each row's
-    line. Shared by :func:`model_prob` and :func:`book_fallback_prob`.
+    Inverts the composite book EV through the cell distribution at each row's line. Shared by
+    :func:`model_prob` and :func:`book_fallback_prob`. For SkewNormal the book ``(sigma, skew)``
+    comes from the per-cell fitted shape evaluated at the book mean (:func:`book_skewnormal_shape`);
+    an unfitted cell returns ``(mean*cv, 0)``, the legacy symmetric constant-CV read.
     """
     if dist == "SkewNormal":
-        return offer_df.apply(
-            lambda x: (
-                1
-                - get_odds(
-                    x["Line"],
-                    x["Market Projection"],
-                    dist,
-                    cv=cv,
-                    step=step,
-                    sigma=x["Market Projection"] * cv,
-                    skew_alpha=0,
-                    gate=gate,
-                )
-            ),
-            axis=1,
-        )
+
+        def _sn_over(x):
+            sigma, skew = book_skewnormal_shape(league, market, x["Market Projection"], cv)
+            return 1 - get_odds(
+                x["Line"],
+                x["Market Projection"],
+                dist,
+                cv=cv,
+                step=step,
+                sigma=float(sigma),
+                skew_alpha=float(skew),
+                gate=gate,
+            )
+
+        return offer_df.apply(_sn_over, axis=1)
     return offer_df.apply(
         lambda x: 1 - get_odds(x["Line"], x["Market Projection"], dist, cv, step=step, gate=gate),
         axis=1,
@@ -726,14 +734,21 @@ def _blend_with_book(
     model_weight: float,
     cv: float,
     hist_gate: float,
-    cell: str = "",
+    league: str,
+    market: str,
 ) -> np.ndarray:
     model_ev = offer_df["Projection"].to_numpy()
     books_ev = offer_df["Market Projection"].fillna(offer_df["Projection"]).to_numpy()
     model_sd = _model_predictive_sd(offer_df, dist, model_ev)
-    books_ev = _sanitize_book_ev(books_ev, offer_df["Line"].to_numpy(), model_ev, model_sd, cell)
+    books_ev = _sanitize_book_ev(
+        books_ev, offer_df["Line"].to_numpy(), model_ev, model_sd, f"{league} {market}"
+    )
     zi = _zi_kwargs(offer_df, dist, hist_gate)
     if dist == "SkewNormal":
+        # The book leg stays the symmetric constant-CV shape (fused_loc default). The WS2
+        # settling experiment found the per-cell shaped book loses in the served blend OOS
+        # (the model's per-row SkewNormal already carries the shape); the shaped book ships
+        # only on the book-only fallback leg. See docs/handoffs/book_shape_ws2_handoff.md.
         base_mean, sigma_blend, skew_blend, gate_blend = fused_loc(
             model_weight,
             model_ev,
@@ -896,7 +911,9 @@ def model_prob(
     if offer_df.empty:
         return []
 
-    offer_df["Market EV"] = _book_over_prob(offer_df, dist, cv, step, hist_gate or None)
+    offer_df["Market EV"] = _book_over_prob(
+        offer_df, dist, cv, step, hist_gate or None, league, market
+    )
     _clamp_shape_ceiling(offer_df, dist, shape_ceiling)
     # Mean-stage post-hoc correction before blending, mirroring train_market so
     # live predictions match the offline test CSV event-for-event.
@@ -905,7 +922,7 @@ def model_prob(
     )
     _sanitize_model_ev(offer_df, dist)
 
-    base_mean = _blend_with_book(offer_df, dist, model_weight, cv, hist_gate, f"{league} {market}")
+    base_mean = _blend_with_book(offer_df, dist, model_weight, cv, hist_gate, league, market)
 
     # ZI dists: book reports the non-zero component EV; scale to marginal EV.
     if hist_gate and dist in ("ZINB", "ZAGamma", "SkewNormal"):
@@ -980,7 +997,7 @@ def book_fallback_prob(
         offer_df = offer_df.join(playerStats)
     offer_df = offer_df.reset_index(drop=True)
 
-    offer_df["Market EV"] = _book_over_prob(offer_df, dist, cv, step, gate_arg)
+    offer_df["Market EV"] = _book_over_prob(offer_df, dist, cv, step, gate_arg, league, market)
     _base_ev = offer_df["Market Projection"].to_numpy()
     offer_df["Push Prob"] = np.asarray(
         get_push_prob(offer_df["Line"].to_numpy(), _base_ev, dist, cv=cv, gate=gate_arg),

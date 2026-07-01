@@ -87,7 +87,9 @@ def _blend(model_ev, decoded, line, books_ev):
             "Model Gate": np.asarray(decoded.gate, dtype=float),
         }
     )
-    base_mean = mp._blend_with_book(offer_df, "ZINB", model_weight=0.85, cv=0.566, hist_gate=0.337)
+    base_mean = mp._blend_with_book(
+        offer_df, "ZINB", model_weight=0.85, cv=0.566, hist_gate=0.337, league="NBA", market="FG3M"
+    )
     return offer_df["Projection"].to_numpy(), np.asarray(base_mean, dtype=float)
 
 

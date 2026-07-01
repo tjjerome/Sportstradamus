@@ -126,6 +126,13 @@ def no_vig_odds(over, under=None, method="proportional"):
 # under-prob the inversion would exceed it, so the line is used instead.
 SN_MAX_MEAN_FACTOR = 5.0
 
+# A SkewNormal's standardized skewness is bounded to |gamma| < 0.99527 (Azzalini 1985 [82]).
+# Clamp a target skew just inside it so the moment-match's alpha stays finite; a count cell's
+# low-mean right-skew that exceeds the bound is met in variance and finished by the integer PMF
+# correction (WS2 research brief, /tmp/researcher_ws2_book_shape.md Findings 2-3).
+_SN_SKEW_MAX = 0.9952  # a hair below the 0.99527 bound on purpose: at the bound delta=±1 and alpha=±inf
+_SN_SKEW_C23 = ((4 - np.pi) / 2) ** (2 / 3)
+
 
 def skewnormal_loc_from_mean(
     mean: np.ndarray | float,
@@ -154,6 +161,38 @@ def skewnormal_loc_from_mean(
     skew = np.asarray(skew, dtype=float)
     delta = skew / np.sqrt(1.0 + skew**2)
     return mean - sigma * delta * np.sqrt(2.0 / np.pi)
+
+
+def skewnormal_params_from_moments(
+    var: np.ndarray | float, skew: np.ndarray | float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Solve the SkewNormal ``(scale, shape)`` reproducing a target variance and skewness.
+
+    The mean is pinned separately (:func:`skewnormal_loc_from_mean`), so this returns only
+    ``(sigma, alpha)``. Inverts the standardized-skewness map (Azzalini 1985 [82]): with
+    ``delta = alpha / sqrt(1 + alpha**2)`` and ``t = delta**2 * 2/pi``,
+    ``gamma = ((4-pi)/2) * t**1.5 / (1-t)**1.5``; letting ``b = |gamma|**(2/3) / ((4-pi)/2)**(2/3)``
+    gives ``t = b/(1+b)``, hence ``alpha = delta / sqrt(1-delta**2)`` and
+    ``sigma = sqrt(var * (1+b))``. ``skew`` is clamped to ``+/-_SN_SKEW_MAX`` (just inside the
+    SkewNormal bound) so ``alpha`` stays finite — a target past the bound is met in variance with
+    the maximal feasible skew. This is the WS2 book-shape moment-match feeding
+    ``book_skewnormal_shape``; ``skew == 0`` yields ``alpha == 0, sigma == sqrt(var)`` (Normal).
+
+    Args:
+        var: Target variance (positive). Broadcast-compatible with ``skew``.
+        skew: Target standardized skewness (dimensionless). Clamped to
+            ``±_SN_SKEW_MAX`` before inversion.
+
+    Returns:
+        ``(sigma, alpha)`` — scale (same units as ``sqrt(var)``) and shape
+        parameter for ``scipy.stats.skewnorm(alpha, loc=..., scale=sigma)``.
+    """
+    gamma = np.clip(np.asarray(skew, dtype=float), -_SN_SKEW_MAX, _SN_SKEW_MAX)
+    b = np.abs(gamma) ** (2.0 / 3.0) / _SN_SKEW_C23
+    delta = np.copysign(np.sqrt(np.pi / 2.0 * (b / (1.0 + b))), gamma)
+    alpha = delta / np.sqrt(np.clip(1.0 - delta**2, 1e-12, None))
+    sigma = np.sqrt(np.asarray(var, dtype=float) * (1.0 + b))
+    return sigma, alpha
 
 
 def _crps_grid_bound(y: np.ndarray, mean: np.ndarray) -> float:
@@ -232,7 +271,7 @@ def skewnorm_crps(y, loc, scale, alpha, gate=None) -> np.ndarray:
     return np.sum((cdf - indicator) ** 2, axis=0) * dx
 
 
-def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None):
+def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None, sigma=None):
     """Invert the book's ``(line, under-prob)`` to the implied mean.
 
     The exact numerical inverse of :func:`get_odds`: returns the mean ``ev`` for
@@ -256,6 +295,9 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None):
             ev == line at an even-money price; game lines pin here).
         gate: Zero-inflation probability; ``None`` disables ZI handling.
         skew_alpha: SkewNormal skewness; ``None`` → 0 (symmetric).
+        sigma: SkewNormal scale held fixed across the inversion; ``None`` → ``ev*cv``.
+            WS2 passes the per-cell fitted scale evaluated once at the quoted line, so
+            the bracket stays monotone (the shape does not move with the solved mean).
 
     Returns:
         The mean that reproduces the book's ``under`` under :func:`get_odds`.
@@ -264,7 +306,9 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None):
     step = 1.0 if dist in ("NegBin", "ZINB", "Poisson") else 0.5
 
     def p_under(ev):
-        return get_odds(line, ev, dist, cv=cv, step=step, gate=gate, skew_alpha=skew_alpha)
+        return get_odds(
+            line, ev, dist, cv=cv, step=step, gate=gate, skew_alpha=skew_alpha, sigma=sigma
+        )
 
     lo = 1e-6
     hi = max(SN_MAX_MEAN_FACTOR * float(line), 1.0)
@@ -532,6 +576,8 @@ def fused_loc(
     skew_alpha=None,
     gate_model=None,
     gate_book=None,
+    book_sigma=None,
+    book_skew_alpha=None,
 ):
     """Blend model and bookmaker distribution parameters with weight ``w``.
 
@@ -546,8 +592,10 @@ def fused_loc(
       per-observation ``alpha``; the book's ``alpha`` is ``1/cv²``.
       Returns ``(alpha, beta, gate_blend)``.
     * **SkewNormal**: precision-weighted blend of ``loc`` / ``sigma``,
-      linear blend of ``alpha``. Book side uses ``alpha=0`` (symmetric
-      Normal). Returns ``(ev, sigma, alpha, gate_blend)``.
+      linear blend of ``alpha``. The book side uses the fitted
+      ``(book_sigma, book_skew_alpha)`` when supplied, else the legacy
+      symmetric constant-CV normal (``sigma = ev*cv``, ``alpha = 0``).
+      Returns ``(ev, sigma, alpha, gate_blend)``.
 
     When ``gate_model`` and ``gate_book`` are supplied (zero-inflated
     distributions), the gate itself is blended linearly and appended as
@@ -566,6 +614,10 @@ def fused_loc(
         skew_alpha: SkewNormal per-observation skewness from the model.
         gate_model: Model's per-observation zero-inflation gate.
         gate_book: Historical zero-inflation gate for the book side.
+        book_sigma: Per-observation book SkewNormal scale (WS2 fitted shape,
+            evaluated at the quoted line). ``None`` → legacy ``ev_b*cv``.
+        book_skew_alpha: Per-observation book SkewNormal skewness. ``None`` → 0
+            (symmetric), paired with the legacy ``book_sigma`` default.
 
     Returns:
         NegBin → ``(r_blend, p, gate_blend)``,
@@ -594,20 +646,25 @@ def fused_loc(
         model_sigma = np.clip(np.asarray(sigma, dtype=float), 1e-6, None)
         model_skew = np.asarray(skew_alpha, dtype=float)
 
-        # Book side: symmetric normal (alpha=0), sigma = ev * cv.
-        book_sigma = np.clip(ev_b * cv, 1e-6, None)
+        if book_sigma is None:
+            book_scale = ev_b * cv
+            book_skew = np.zeros_like(ev_b)
+        else:
+            book_scale = np.asarray(book_sigma, dtype=float)
+            book_skew = np.asarray(book_skew_alpha, dtype=float)
+        book_scale = np.clip(book_scale, 1e-6, None)
 
-        # Derive loc from EV: loc = EV - sigma * delta * sqrt(2/pi).
         model_delta = model_skew / np.sqrt(1 + model_skew**2)
         model_loc = ev_a - model_sigma * model_delta * np.sqrt(2 / np.pi)
-        book_loc = ev_b  # alpha=0 → delta=0 → loc = EV.
+        book_delta = book_skew / np.sqrt(1 + book_skew**2)
+        book_loc = ev_b - book_scale * book_delta * np.sqrt(2 / np.pi)
 
         prec_m = 1.0 / model_sigma**2
-        prec_b = 1.0 / book_sigma**2
+        prec_b = 1.0 / book_scale**2
         total_prec = w * prec_m + (1 - w) * prec_b
         blended_loc = (w * model_loc * prec_m + (1 - w) * book_loc * prec_b) / total_prec
         blended_sigma = 1.0 / np.sqrt(total_prec)
-        blended_skew = w * model_skew  # book alpha=0, so blend reduces to w * model.
+        blended_skew = w * model_skew + (1 - w) * book_skew
 
         bl_delta = blended_skew / np.sqrt(1 + blended_skew**2)
         blended_ev = blended_loc + blended_sigma * bl_delta * np.sqrt(2 / np.pi)

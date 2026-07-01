@@ -384,8 +384,12 @@ class Archive:
         *,
         at: datetime.datetime | None = None,
         case_insensitive_entity: bool = False,
+        value_col: str = "ev",
     ) -> list[tuple[str, float]]:
-        """Return ``[(book, ev), ...]`` — latest observation per book at-or-before ``at``.
+        """Return ``[(book, value), ...]`` — latest ``value_col`` observation per book at-or-before ``at``.
+
+        ``value_col`` selects the per-book column to read: ``"ev"`` (the consensus mean) or the
+        shape-free ``"under_prob"`` (backs :meth:`get_composite_under_prob`).
 
         ``at=None`` means "latest available", i.e. as-of-now.
 
@@ -405,8 +409,8 @@ class Archive:
         params: list = [league, market, d, entity]
         entity_clause = "UPPER(entity)=UPPER(?)" if case_insensitive_entity else "entity=?"
         sql = (
-            "SELECT book, ev FROM ("
-            "  SELECT book, ev, observed_at, "
+            f"SELECT book, {value_col} FROM ("
+            f"  SELECT book, {value_col}, observed_at, "
             "         ROW_NUMBER() OVER (PARTITION BY book ORDER BY observed_at DESC) AS rn "
             "  FROM odds "
             f"  WHERE league=? AND market=? AND game_date=? AND {entity_clause}"
@@ -415,7 +419,7 @@ class Archive:
             sql += " AND observed_at <= ?"
             params.append(at)
         sql += ") WHERE rn = 1"
-        return [(book, ev) for book, ev in self._connection.execute(sql, params).fetchall()]
+        return [(book, val) for book, val in self._connection.execute(sql, params).fetchall()]
 
     def get_ev(self, league, market, date, player, *, at: datetime.datetime | None = None):
         """Weighted-average player-prop EV across books for one slate entry.
@@ -426,6 +430,20 @@ class Archive:
         rows = self._book_rows(league, market, date, player, at=at)
         if not rows:
             return np.nan
+        return self._weighted_book_ev(league, market, rows)
+
+    def get_composite_under_prob(
+        self, league, market, date, player, *, at: datetime.datetime | None = None
+    ):
+        """Book-weighted consensus de-vigged under-probability for one slate entry.
+
+        Reads the stored shape-free ``under_prob`` per book directly — no distribution
+        round-trip — so the training feature it backs (``1 - p_under``) is shape-invariant
+        and Jensen-free. Books whose quote was un-invertible (NULL ``under_prob``) drop out;
+        returns ``np.nan`` when none remain, so the caller falls back to the legacy
+        ``get_odds(line, ev)`` feature.
+        """
+        rows = self._book_rows(league, market, date, player, at=at, value_col="under_prob")
         return self._weighted_book_ev(league, market, rows)
 
     def get_team_market(self, league, market, date, team, *, at: datetime.datetime | None = None):
