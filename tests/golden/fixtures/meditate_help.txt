@@ -22,12 +22,15 @@ Options:
                                   the compression eval harness. NEVER publish a
                                   model trained with this flag — it is
                                   deliberately low quality.
-  --target-normalization [ratio_meanyr|centered_additive_eb_meanyr_k10|centered_additive_mean10|ratio_projvol]
+  --target-normalization [auto|centered_additive_eb_meanyr_k10|centered_additive_mean10|ratio_meanyr|ratio_projvol]
                                   Target-normalization transform for SkewNormal
-                                  markets. Non-default values are A/B
-                                  experiments (run under --deterministic); the
-                                  default 'ratio_meanyr' is current production
-                                  behavior.  [default: ratio_meanyr]
+                                  markets. 'auto' (default) honors each cell's
+                                  stat_meta target_normalization; an explicit
+                                  slug overrides every selected cell, in a real
+                                  run or under --deterministic — an Operation
+                                  Ship 75 search axis and how to confirm a
+                                  candidate normalization before persisting it
+                                  to stat_meta.json.  [default: auto]
   --zinb-mode [auto|joint|hurdle]
                                   Model architecture for ZINB markets. 'auto'
                                   (default) honors each cell's stat_meta
