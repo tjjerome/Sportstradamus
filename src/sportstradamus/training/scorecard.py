@@ -1338,8 +1338,9 @@ def _resolve_decode_strategy(league: str, market_stem: str) -> str:
     ship-config projection: :func:`load_ship_config` collapses every withheld
     cell to the ``WITHHELD`` sentinel, which hides the ``ratio_meanyr``
     transform the cell actually trained under and leaves the g4 IQR decode in
-    normalized ratio-units. A ``none`` value means the cell took the
-    ``--target-normalization`` default — ``ratio_meanyr``.
+    normalized ratio-units. A ``none`` value means the cell trained under the
+    historic ``ratio_meanyr`` fallback (see
+    ``ship_config.resolve_flag_target_normalization``).
     """
     market_with_spaces = market_stem.replace("-", " ")
     target_norm = (

@@ -66,6 +66,17 @@ TARGET_NORM_NONE = "none"
 # Reserved shipped value: cell is not shipped on any branch.
 WITHHELD = "withheld"
 
+# Sentinel meaning "honor each cell's stat_meta value; don't override."
+# Same literal as training.pipeline.LOSS_AUTO — duplicated, not imported:
+# pipeline.py already imports TARGET_NORM_NONE from this module, so importing
+# LOSS_AUTO back from pipeline would create an import cycle.
+_AUTO_SENTINEL = "auto"
+
+# Historic CLI default, applied only when a cell has no stat_meta entry to
+# honor (an empty --deterministic config, or a market missing from
+# stat_meta.json) and --target-normalization was left on _AUTO_SENTINEL.
+_UNMAPPED_TARGET_NORMALIZATION_FALLBACK = "ratio_meanyr"
+
 # Distribution family name for the custom PyTorch SkewNormal; used in ship-gate
 # logic to detect which cells need a real strategy slug vs. TARGET_NORM_NONE.
 SKEW_NORMAL_DIST: str = "SkewNormal"
@@ -176,6 +187,22 @@ def load_ship_config(branch: str = "devel", path: Path | None = None) -> ShipCon
     return config
 
 
+def resolve_flag_target_normalization(flag_strategy: str) -> str:
+    """Materialize ``flag_strategy`` to a concrete slug with no cell to defer to.
+
+    Passes an explicit slug through unchanged; substitutes the historic
+    production default when left on the auto sentinel. Used both by
+    :func:`resolve_cell_target_normalization`'s unmapped-cell case and by
+    ``training.cli.meditate``'s count-branch / bypass-withholding
+    substitutions, which need the same "make it concrete" step.
+    """
+    return (
+        flag_strategy
+        if flag_strategy != _AUTO_SENTINEL
+        else _UNMAPPED_TARGET_NORMALIZATION_FALLBACK
+    )
+
+
 def resolve_cell_target_normalization(
     league: str,
     market: str,
@@ -184,21 +211,23 @@ def resolve_cell_target_normalization(
 ) -> str:
     """Resolve the training strategy for one cell.
 
-    The map is authoritative when it lists the cell; otherwise the run's
-    ``--target-strategy`` flag value fills the gap, so an empty map
-    reproduces today's behavior exactly.
-
-    A returned value of :data:`TARGET_NORM_NONE` means "this cell does not
-    opt into any pipeline strategy." :mod:`training.cli` substitutes the
-    CLI's ``--target-strategy`` value at the call site, so the underlying
-    training pipeline always receives a real slug (count-branch training
-    ignores the slug anyway).
+    ``flag_strategy`` of ``"auto"`` (the CLI default) honors the cell's
+    stat_meta ``target_normalization`` when the map lists one — the
+    production cron path. An explicit slug overrides that cell's
+    normalization outright, even in a real (non-``--deterministic``) run —
+    mirrors ``training.cli._resolve_cell_knob``'s auto-sentinel pattern for
+    the other search-axis knobs (blending/hpo_selection/etc). A cell absent
+    from the map (an empty ``--deterministic`` config, or a market genuinely
+    missing from ``stat_meta.json``) has no per-cell opinion to honor or
+    override, so ``flag_strategy`` is materialized via
+    :func:`resolve_flag_target_normalization` instead. :data:`WITHHELD` and
+    :data:`TARGET_NORM_NONE` always pass through unchanged; the caller
+    (``training.cli.meditate``) owns bypass and count-branch substitution.
 
     Args:
         league: League code (e.g. ``"NBA"``).
         market: Market stem.
-        flag_strategy: The run-wide ``--target-normalization`` value (fallback
-            for cells absent from the map).
+        flag_strategy: The run-wide ``--target-normalization`` value.
         config: A loaded :func:`load_ship_config` map.
 
     Returns:
@@ -206,4 +235,8 @@ def resolve_cell_target_normalization(
         caller prunes the pickle and skips training in the last case).
     """
     mapped = config.get(league, {}).get(market)
-    return mapped if mapped is not None else flag_strategy
+    if mapped is None:
+        return resolve_flag_target_normalization(flag_strategy)
+    if mapped in (WITHHELD, TARGET_NORM_NONE):
+        return mapped
+    return mapped if flag_strategy == _AUTO_SENTINEL else flag_strategy
