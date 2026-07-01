@@ -4,13 +4,14 @@ decomposition of :func:`find_correlation`.
 Two complementary fixtures, because the function has two output halves with
 different determinism:
 
-* **offer_df correlation columns** are a pure function of the stratified corr
-  parquets + each leg's Model P / Boost — fully deterministic. Pinned exactly
-  on a real NBA slate (``NYK/SAS``, 2026-06-03) lifted from
-  ``data/runtime/current_offers.parquet``. Real columns are used verbatim; the
-  three find_correlation *input* columns the snapshot projection drops
-  (``Books P``, ``K``, ``Player position``) are reconstructed deterministically
-  here and documented in :data:`_NBA_OFFERS`.
+* **offer_df correlation columns** are a pure function of the c_map + each leg's
+  Model P / Boost — fully deterministic for a *fixed* c_map. The real NBA offer
+  slate (``NYK/SAS``, 2026-06-03 from ``current_offers.parquet``) is the input,
+  but the correlation source is a FIXED synthetic c_map (:func:`_synthetic_offer_cmap`),
+  not the gitignored, periodically-regenerated corr parquets — pinning against those
+  made the old ``_real_nba`` test a chronic false positive (boundary-sensitive 2-dp
+  drift whenever the parquets were rebuilt). Three snapshot-dropped input columns
+  (``Books P``, ``K``, ``Player position``) are reconstructed in :func:`_nba_offers`.
 
 * **parlay_df** depends on ``beam_search_parlays`` → SciPy's multivariate-normal
   CDF, which uses a randomized (unseeded) Genz–Bretz estimator whenever the leg
@@ -35,6 +36,7 @@ import pandas as pd
 import pytest
 
 from sportstradamus import data
+from sportstradamus.prediction import correlation
 from sportstradamus.prediction.correlation import (
     _build_correlation_matrices,
     _build_game_corr_map,
@@ -150,50 +152,106 @@ def _nba_offers() -> list[dict]:
     ]
 
 
-# Characterization snapshot of the offer_df correlation annotations.
-#
-# Originally captured on HEAD 340e178 (pre half-2 decomposition); re-pinned
-# 2026-06-05, then again 2026-06-11. The output is deterministic (pure-numpy EV
-# grid, no SciPy randomness) but boundary-sensitive: upstream ~1e-12 EV shifts
-# land on opposite sides of the 2-dp multiplier rounding and the display/ranking
-# cutoffs, so the opp legs re-rank (Fox STL / Wembanyama BLK across Robinson's
-# PRA/REB), a few (x.xx) multipliers tick by 0.01, and the near-threshold
-# Wembanyama-BLST / Robinson-PRA pair drops out. This 2026-06-11 drift predates
-# the P2 dashboard work and reproduces on the lane HEAD with those edits stashed
-# (the Game column + opt-in corr_sink are inert on this offer-corr path) —
-# boundary sensitivity, not a logic break in the correlation assembly.
+# The 12 cMarket tokens the NBA offer slate resolves to (position prefix from the fake usage
+# profile in _stats_for + the market map — a stable code path, independent of any data file). A
+# FIXED synthetic correlation per token-pair makes the offer-corr annotation deterministic,
+# decoupled from the gitignored corr parquets whose periodic regeneration drifted the old pin.
+_OFFER_CORR_TOKENS = (
+    "C1.PTS",
+    "C1.STL",
+    "F1.PRA",
+    "F1.REB",
+    "P1.AST",
+    "P1.FTM",
+    "_OPP_B1.PR",
+    "_OPP_B1.REB",
+    "_OPP_P1.BLK",
+    "_OPP_P1.BLST",
+    "_OPP_W1.AST",
+    "_OPP_W1.STL",
+)
+
+
+def _synthetic_offer_cmap() -> dict[tuple[str, str], float]:
+    """A fixed symmetric correlation for every ordered token-pair (spans -0.45..+0.45)."""
+
+    def value(a: str, b: str) -> float:
+        lo, hi = sorted((_OFFER_CORR_TOKENS.index(a), _OFFER_CORR_TOKENS.index(b)))
+        return round(((lo * 31 + hi * 17) % 19 - 9) / 20, 4)
+
+    return {(a, b): value(a, b) for a in _OFFER_CORR_TOKENS for b in _OFFER_CORR_TOKENS if a != b}
+
+
+# Characterization snapshot of the offer_df correlation annotations under the synthetic c_map
+# above. Deterministic (pure-numpy EV grid, no SciPy randomness) and stable run-to-run because
+# the c_map is fixed — 8/12 legs annotate, with the Team and Opp columns both exercised.
 _EXPECTED_OFFER_CORR = [
-    ("De'Aaron Fox", "AST", "", ""),
-    ("De'Aaron Fox", "STL", "", "Mitchell Robinson Over 5.5 REB - 64.0%, 1.17x (1.03x)"),
+    (
+        "De'Aaron Fox",
+        "AST",
+        "Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.11x), Luke Kornet Over 3.5 REB - 57.8%, 1.34x (1.02x)",
+        "Mitchell Robinson Over 9.5 PRA - 68.4%, 1.02x (1.06x)",
+    ),
+    (
+        "De'Aaron Fox",
+        "STL",
+        "Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.09x), Luke Kornet Over 5.5 PR - 74.0%, 0.97x (1.03x)",
+        "Mitchell Robinson Over 5.5 REB - 64.0%, 1.17x (1.06x)",
+    ),
     ("Jalen Brunson", "AST", "", ""),
     ("Jalen Brunson", "FTM", "", ""),
     ("Jose Alvarado", "PTS", "", ""),
     ("Jose Alvarado", "STL", "", ""),
-    ("Luke Kornet", "PR", "", ""),
-    ("Luke Kornet", "REB", "", "Mitchell Robinson Over 5.5 REB - 64.0%, 1.17x (1.02x)"),
+    (
+        "Luke Kornet",
+        "PR",
+        "Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.09x), De'Aaron Fox Over 1.5 STL - 58.0%, 1.42x (1.03x)",
+        "Mitchell Robinson Over 9.5 PRA - 68.4%, 1.02x (1.03x)",
+    ),
+    (
+        "Luke Kornet",
+        "REB",
+        "De'Aaron Fox Under 5.5 AST - 58.5%, 1.11x (1.02x), Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.02x)",
+        "",
+    ),
     (
         "Mitchell Robinson",
         "PRA",
         "",
-        "Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.03x), "
-        "De'Aaron Fox Over 1.5 STL - 58.0%, 1.42x (1.01x)",
+        "De'Aaron Fox Under 5.5 AST - 58.5%, 1.11x (1.06x), Victor Wembanyama Under 4.5 BLST - 73.6%, 1.05x (1.03x), Luke Kornet Over 5.5 PR - 74.0%, 0.97x (1.03x)",
+    ),
+    ("Mitchell Robinson", "REB", "", "De'Aaron Fox Over 1.5 STL - 58.0%, 1.42x (1.06x)"),
+    (
+        "Victor Wembanyama",
+        "BLK",
+        "De'Aaron Fox Under 5.5 AST - 58.5%, 1.11x (1.11x), Luke Kornet Over 5.5 PR - 74.0%, 0.97x (1.09x)",
+        "",
     ),
     (
-        "Mitchell Robinson",
-        "REB",
-        "",
-        "Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.03x), "
-        "De'Aaron Fox Over 1.5 STL - 58.0%, 1.42x (1.03x), "
-        "Luke Kornet Over 3.5 REB - 57.8%, 1.34x (1.02x)",
+        "Victor Wembanyama",
+        "BLST",
+        "De'Aaron Fox Under 5.5 AST - 58.5%, 1.11x (1.03x)",
+        "Mitchell Robinson Over 9.5 PRA - 68.4%, 1.02x (1.03x)",
     ),
-    ("Victor Wembanyama", "BLK", "", "Mitchell Robinson Over 5.5 REB - 64.0%, 1.17x (1.03x)"),
-    ("Victor Wembanyama", "BLST", "", ""),
 ]
 
 
-@_needs_nba_corr
-def test_find_correlation_offer_correlations_real_nba() -> None:
-    """Pin the deterministic offer_df correlation annotation on a real slate."""
+def test_find_correlation_offer_correlations_synthetic(monkeypatch) -> None:
+    """Pin the deterministic offer_df correlation annotation: the real NBA offer slate driven by
+    a FIXED synthetic c_map (and a stubbed corr-parquet read), so it no longer false-positives on
+    the drifting, gitignored correlation parquets and runs everywhere (no real data needed)."""
+    monkeypatch.setattr(
+        correlation, "_build_game_corr_map", lambda *a, **k: _synthetic_offer_cmap()
+    )
+    real_read = pd.read_parquet
+
+    def _stub_corr_read(path, *args, **kwargs):
+        if str(path).endswith(("corr_same_team.parquet", "corr_opposing.parquet")):
+            return pd.DataFrame({0: []}, index=pd.MultiIndex.from_arrays([[], [], []]))
+        return real_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(pd, "read_parquet", _stub_corr_read)
+
     offers = _nba_offers()
     stats = {"NBA": _stats_for([o["Player"] for o in offers], "MIN short", "USG_PCT short")}
 
