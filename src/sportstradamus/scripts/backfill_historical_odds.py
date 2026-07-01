@@ -37,7 +37,7 @@ import pytz
 
 from sportstradamus import data
 from sportstradamus.helpers import Archive
-from sportstradamus.moneylines import OddsAPIAuthError, get_props
+from sportstradamus.moneylines import OddsAPIAuthError, get_props, get_moneylines
 
 # Matches Archive's default DB location (resolved relative to the repo cwd).
 ARCHIVE_DB = Path("archive/archive.duckdb")
@@ -71,12 +71,14 @@ class _CaptureArchive:
         pass
 
 
-def _load_keys_and_props(league, markets):
+def _load_keys_and_props(league, markets=None):
     """Return ``(apikey, props_subset)`` filtered to the requested markets."""
     with open(pkg_resources.files("sportstradamus.creds") / "keys.json") as f:
-        apikey = json.load(f)["odds_api_plus"]
+        apikey = json.load(f)
     with open(pkg_resources.files(data) / "config" / "stat_map.json") as f:
         full = json.load(f)["Odds API"][league]
+    if markets is None:
+        return apikey, {league: full}
     want = {m.strip() for m in markets.split(",")}
     subset = {key: name for key, name in full.items() if name in want}
     missing = want - set(subset.values())
@@ -87,9 +89,9 @@ def _load_keys_and_props(league, markets):
     return apikey, {league: subset}
 
 
-def _game_dates(league, markets, start, end):
+def _game_dates(league, props, start, end):
     """Distinct archived game-dates for the league in ``[start, end]``."""
-    want = [m.strip() for m in markets.split(",")]
+    want = [m.strip() for m in props[league].values()]
     con = duckdb.connect(str(ARCHIVE_DB), read_only=True)
     rows = con.execute(
         "SELECT DISTINCT game_date FROM odds "
@@ -169,8 +171,11 @@ def _backfill(apikey, props, league, sport_key, dates, snapshot_hour):
             f"  [{i}/{len(remaining)}] {d} (as-of {_as_of(d, snapshot_hour):%Y-%m-%d %H:%MZ})"
         )
         try:
+            get_moneylines(
+                archive, apikey, date=_as_of(d, snapshot_hour), sport=league, key=sport_key
+            )
             get_props(
-                archive, apikey, props, date=_as_of(d, snapshot_hour), sport=league, key=sport_key
+                archive, apikey["odds_api_plus"], props, date=_as_of(d, snapshot_hour), sport=league, key=sport_key
             )
         except OddsAPIAuthError as e:
             click.echo(f"STOP (401): {e}")
@@ -187,13 +192,14 @@ def _backfill(apikey, props, league, sport_key, dates, snapshot_hour):
 
 @click.command()
 @click.option("--league", default="NFL", help="League whose props to backfill.")
-@click.option("--markets", required=True, help="Comma-separated market names (stat_map values).")
+@click.option("--markets", required=False, default=None, help="Comma-separated market names (stat_map values).")
 @click.option("--start", required=True, help="First game-date, YYYY-MM-DD.")
 @click.option("--end", required=True, help="Last game-date, YYYY-MM-DD.")
 @click.option("--snapshot-hour", default=6, help="UTC hour for the as-of API snapshot.")
 @click.option("--max-dates", default=0, help="Process at most N game-dates this run (0 = all).")
+@click.option("--check-all", is_flag=True, help="Check all dates even if not in archive.")
 @click.option("--dry-run", is_flag=True, help="Fetch + parse but do not write (prints ev spread).")
-def main(league, markets, start, end, snapshot_hour, max_dates, dry_run):
+def main(league, markets, start, end, snapshot_hour, max_dates, check_all, dry_run):
     """Re-fetch real historical book EVs for degenerate-seed markets.
 
     Resumable: completed game-dates are logged to ``PROGRESS_PATH`` after each
@@ -202,7 +208,10 @@ def main(league, markets, start, end, snapshot_hour, max_dates, dry_run):
     """
     apikey, props = _load_keys_and_props(league, markets)
     sport_key = ODDS_API_SPORT_KEYS[league]
-    dates = _game_dates(league, markets, start, end)
+    if check_all:
+        dates = [datetime.datetime.strptime(start, "%Y-%m-%d") + datetime.timedelta(days=i) for i in range((datetime.datetime.strptime(end, "%Y-%m-%d") - datetime.datetime.strptime(start, "%Y-%m-%d")).days + 1)]
+    else:
+        dates = _game_dates(league, props, start, end)
     click.echo(
         f"{league}: {len(dates)} archived game-date(s) {start}..{end}, markets={list(props[league].values())}"
     )
