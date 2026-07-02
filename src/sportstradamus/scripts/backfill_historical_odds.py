@@ -37,7 +37,7 @@ import pytz
 
 from sportstradamus import data
 from sportstradamus.helpers import Archive
-from sportstradamus.moneylines import OddsAPIAuthError, get_props, get_moneylines
+from sportstradamus.moneylines import OddsAPIAuthError, get_moneylines, get_props
 
 # Matches Archive's default DB location (resolved relative to the repo cwd).
 ARCHIVE_DB = Path("archive/archive.duckdb")

@@ -39,7 +39,9 @@ mp = importlib.import_module("sportstradamus.prediction.model_prob")
 
 _LEAGUE, _MARKET, _PLATFORM = "NBA", "DREB", "Underdog"
 _N_TRAIN_ROWS = 4000
-_N_OFFERS = 12
+# 12 only left ~4 rows unclamped against the current cached fixture (needs >=5 below); 25
+# gives comfortable headroom against future NBA_DREB.parquet regens shifting the fit.
+_N_OFFERS = 25
 _BOOK_EV = 6.0
 
 

@@ -74,9 +74,13 @@ def test_ratio_projvol_live_decode_uses_persisted_projected_volume():
         seed=DETERMINISTIC_SEED,
     )
 
-    raw_loc = prob_params["loc"].to_numpy().copy()
-    raw_scale = prob_params["scale"].to_numpy().copy()
-    raw_alpha = prob_params["alpha"].to_numpy().copy()
+    # loc/scale/alpha come back float32 (LightGBMLSS/torch); decode_loc/decode_scale and
+    # decode_predictive_mean each widen to float64 (`np.asarray(x, dtype=float)`) before
+    # combining terms, so summing them here in float32 first would round differently than
+    # production and desync from `atol=1e-9` on ~1% of rows. Match production's precision.
+    raw_loc = prob_params["loc"].to_numpy().astype(np.float64)
+    raw_scale = prob_params["scale"].to_numpy().astype(np.float64)
+    raw_alpha = prob_params["alpha"].to_numpy().astype(np.float64)
 
     offset_meta = {"method": "projvol_ratio", "denom_col": denom_col, "fallback_col": "MeanYr"}
     decoded = _decode_skewnormal(
