@@ -61,7 +61,12 @@ _BASELINE_MIN_GAMES: int = 4
 
 @dataclass(frozen=True)
 class Leg:
-    """One enriched parlay leg the archetype router reads (no DataFrame access)."""
+    """One enriched parlay leg the archetype router reads (no DataFrame access).
+
+    ``negative`` marks a market whose Under is the thriving side (narrative
+    valence flips); ``win_prob`` is the offer's model hit probability, the
+    anchor-conviction tiebreaker.
+    """
 
     player: str
     bet: str
@@ -71,6 +76,8 @@ class Leg:
     team: str | None = None
     position: str | None = None
     category: str = "production"
+    negative: bool = False
+    win_prob: float | None = None
 
 
 @dataclass(frozen=True)

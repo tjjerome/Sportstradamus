@@ -10,10 +10,18 @@ alphabetical "star".
 
 from __future__ import annotations
 
+from itertools import combinations
+
 import pandas as pd
 
+from sportstradamus.prediction.stories import engine
 from sportstradamus.prediction.stories.context import GameCtx, Leg
-from sportstradamus.prediction.stories.engine import route
+from sportstradamus.prediction.stories.engine import (
+    _direction,
+    _stack_focus,
+    _subject_legs,
+    route,
+)
 from sportstradamus.prediction.stories.legs import enrich_legs
 
 
@@ -60,10 +68,31 @@ def test_enrich_legs_unmatched_falls_back_to_parsed():
 
 
 def _legs(*specs: tuple) -> list[Leg]:
-    return [
-        Leg(player=p, bet=b, line=ln, market=m, game=g, team=t, position=pos, category=c)
-        for p, b, ln, m, g, t, pos, c in specs
-    ]
+    out = []
+    for spec in specs:
+        p, b, ln, m, g, t, pos, c, *extra = spec
+        out.append(
+            Leg(
+                player=p,
+                bet=b,
+                line=ln,
+                market=m,
+                game=g,
+                team=t,
+                position=pos,
+                category=c,
+                negative=extra[0] if extra else False,
+                win_prob=extra[1] if len(extra) > 1 else None,
+            )
+        )
+    return out
+
+
+def _stack_ctxs(legs: list[Leg], rho: float = 0.3) -> dict[str, GameCtx]:
+    ids = [f"{leg.player}|{leg.market}|{leg.bet}" for leg in legs]
+    pairs = {frozenset({a, b}): rho for a, b in combinations(ids, 2)}
+    game = legs[0].game
+    return {game: GameCtx(league="NBA", game=game, shape="even", rho=pairs)}
 
 
 def test_route_player_archetype_on_clear_star():
@@ -129,3 +158,151 @@ def test_route_unit_on_shared_position_group_edge():
 def test_route_empty_legs_is_game_script():
     archetype, _subject = route([], {})
     assert archetype == "game-script"
+
+
+def test_enrich_legs_carries_valence_and_win_prob():
+    offers = pd.DataFrame(
+        [
+            {
+                "Player": "Guarded Guy",
+                "Bet": "Under",
+                "Line": 2.5,
+                "Market": "TOV",
+                "Game": "X/Y",
+                "Team": "X",
+                "Position": "G1",
+                "Win Prob": 0.62,
+            }
+        ]
+    )
+    leg = enrich_legs(
+        [{"Player": "Guarded Guy", "Bet": "Under", "Line": 2.5, "Market": "Turnovers"}], offers
+    )[0]
+    assert leg.negative is True
+    assert leg.win_prob == 0.62
+    assert leg.category == "mistakes"
+    ghost = enrich_legs(
+        [{"Player": "Ghost", "Bet": "Over", "Line": 20.5, "Market": "PTS"}], offers
+    )[0]
+    assert ghost.negative is False and ghost.win_prob is None
+
+
+def test_player_direction_is_valence_unanimous():
+    """Overs plus a TOV Under all thrive together — Over, not Mixed."""
+    legs = _legs(
+        ("Star", "Over", 25.5, "PTS", "X/Y", "X", "G1", "scoring"),
+        ("Star", "Over", 6.5, "AST", "X/Y", "X", "G1", "playmaking"),
+        ("Star", "Under", 2.5, "TOV", "X/Y", "X", "G1", "mistakes", True),
+    )
+    archetype, subject = route(legs, {"X/Y": GameCtx(league="NBA", game="X/Y")})
+    assert archetype == "player" and subject["p"] == "Star"
+    assert _direction(legs) == "Over"
+
+
+def test_player_direction_mixed_when_own_legs_split():
+    legs = _legs(
+        ("Star", "Over", 25.5, "PTS", "X/Y", "X", "G1", "scoring"),
+        ("Star", "Over", 2.5, "TOV", "X/Y", "X", "G1", "mistakes", True),
+    )
+    archetype, _subject = route(legs, {"X/Y": GameCtx(league="NBA", game="X/Y")})
+    assert archetype == "player"
+    assert _direction(legs) == "Mixed"
+
+
+def test_route_stack_contrast_over_names_the_lone_thriver():
+    """One player leans Over against an Under field — that player fronts the prose."""
+    legs = _legs(
+        ("Star", "Over", 25.5, "PTS", "X/Y", "X", "G1", "scoring", False, 0.55),
+        ("Field A", "Under", 8.5, "REB", "X/Y", "Y", "F1", "boards", False, 0.70),
+        ("Field B", "Under", 4.5, "AST", "X/Y", "Y", "G2", "playmaking", False, 0.72),
+    )
+    archetype, subject = route(legs, _stack_ctxs(legs))
+    assert archetype == "stack"
+    assert subject["dir"] == "ContrastOver"
+    assert subject["p"] == "Star"
+
+
+def test_stack_focus_contrast_under_inverse():
+    legs = _legs(
+        ("Fader", "Under", 25.5, "PTS", "X/Y", "X", "G1", "scoring", False, 0.60),
+        ("Field A", "Over", 8.5, "REB", "X/Y", "Y", "F1", "boards", False, 0.70),
+        ("Field B", "Over", 4.5, "AST", "X/Y", "Y", "G2", "playmaking", False, 0.72),
+    )
+    assert _stack_focus(legs) == ("ContrastUnder", "Fader")
+
+
+def test_stack_focus_head_to_head_anchor_is_conviction_not_alphabet():
+    """Both sides single-player: conviction picks the anchor even when the
+    alphabet and the leg count both point at the other player (anti-Fox)."""
+    legs = _legs(
+        ("Aaron Early", "Over", 25.5, "PTS", "X/Y", "X", "G1", "scoring", False, 0.55),
+        ("Aaron Early", "Over", 8.5, "REB", "X/Y", "X", "G1", "boards", False, 0.58),
+        ("Zed Late", "Under", 30.5, "PTS", "X/Y", "Y", "C1", "scoring", False, 0.80),
+    )
+    assert _stack_focus(legs) == ("ContrastUnder", "Zed Late")
+
+
+def test_stack_focus_two_v_two_is_mixed():
+    legs = _legs(
+        ("A", "Over", 25.5, "PTS", "X/Y", "X", "G1", "scoring", False, 0.55),
+        ("B", "Over", 8.5, "REB", "X/Y", "X", "F1", "boards", False, 0.60),
+        ("C", "Under", 30.5, "PTS", "X/Y", "Y", "C1", "scoring", False, 0.75),
+        ("D", "Under", 6.5, "AST", "X/Y", "Y", "G1", "playmaking", False, 0.65),
+    )
+    direction, anchor = _stack_focus(legs)
+    assert direction == "Mixed"
+    assert anchor == "C"  # counts tie, so conviction picks the anchor
+
+
+def test_stack_focus_straddler_is_mixed():
+    """A player on both narrative sides muddies the contrast — Mixed, not Contrast."""
+    legs = _legs(
+        ("Star", "Over", 25.5, "PTS", "X/Y", "X", "G1", "scoring", False, 0.60),
+        ("Star", "Under", 8.5, "REB", "X/Y", "X", "G1", "boards", False, 0.58),
+        ("Field", "Under", 30.5, "PTS", "X/Y", "Y", "C1", "scoring", False, 0.70),
+    )
+    direction, _anchor_name = _stack_focus(legs)
+    assert direction == "Mixed"
+
+
+def test_anchor_conviction_breaks_leg_count_ties():
+    """Equal leg counts: the higher-conviction player anchors, not the first name."""
+    legs = _legs(
+        ("Aaron Early", "Over", 25.5, "PTS", "X/Y", "X", "G1", "scoring", False, 0.55),
+        ("Zed Late", "Over", 8.5, "REB", "X/Y", "Y", "F1", "boards", False, 0.80),
+    )
+    assert engine._anchor(legs) == "Zed Late"
+
+
+def test_unit_subject_filters_group_and_maps_display():
+    legs = _legs(
+        ("A", "Over", 25.5, "PTS", "X/Y", "X", "P1", "scoring"),
+        ("B", "Over", 18.5, "PTS", "X/Y", "X", "P2", "scoring"),
+        ("C", "Under", 8.5, "REB", "X/Y", "Y", "C1", "boards"),
+    )
+    ctx = GameCtx(league="NBA", game="X/Y", pos_edges={"X": {"P": {"dvpoa": 0.12, "n": 2}}})
+    archetype, subject = route(legs, {"X/Y": ctx})
+    assert archetype == "unit"
+    assert subject["grp"] == "point guard"  # NBA "P" mapped for display
+    assert subject["dir"] == "Over"  # the group's narrative side, not the bystander's
+    sub = _subject_legs(legs, "X/Y", "unit", subject)
+    assert [leg.player for leg in sub] == ["A", "B"]
+
+
+def test_thesis_variants_uses_stack_focus_direction(monkeypatch):
+    """The routed subject's direction reaches the bank — anchor and direction can't split."""
+    calls = {}
+
+    def fake_bank_cell(voice, archetype, shape, direction, category):
+        calls.update(archetype=archetype, direction=direction)
+        return ["{p} against the grain in {g}"]
+
+    monkeypatch.setattr(engine, "bank_cell", fake_bank_cell)
+    legs = _legs(
+        ("Star", "Over", 25.5, "PTS", "X/Y", "X", "G1", "scoring", False, 0.55),
+        ("Field A", "Under", 8.5, "REB", "X/Y", "Y", "F1", "boards", False, 0.70),
+        ("Field B", "Under", 4.5, "AST", "X/Y", "Y", "G2", "playmaking", False, 0.72),
+    )
+    variants, vi, _subject = engine.thesis_variants(legs, _stack_ctxs(legs))
+    assert calls == {"archetype": "stack", "direction": "ContrastOver"}
+    assert variants[vi] == "Star against the grain in X/Y"

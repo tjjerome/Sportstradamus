@@ -179,14 +179,14 @@ def _theses_by_family(parlays: pd.DataFrame, offers: pd.DataFrame) -> dict[tuple
 
 
 def test_version_present():
-    assert STORIES_VERSION == "p3a"
+    assert STORIES_VERSION == "p3b"
 
 
 def test_thesis_exact_strings():
     assert _theses_by_family(_PARLAYS, _OFFERS) == {
-        ("BOS/PHI", 1.0): "The BOS/PHI blowout lets Jayson Tatum hunt points unopposed",
-        ("BOS/PHI", 2.0): "The scoring in BOS/PHI comes from everywhere",
-        ("DEN/MIA", 1.0): ("In a DEN/MIA toss-up, Nikola Jokic keeps creating the next good look"),
+        ("BOS/PHI", 1.0): "Jayson Tatum piles on before the BOS/PHI bench empties",
+        ("BOS/PHI", 2.0): "edges on both sides of the ledger in BOS/PHI",
+        ("DEN/MIA", 1.0): ("The closer DEN/MIA gets, the better Nikola Jokic's passes become"),
     }
 
 
@@ -209,15 +209,17 @@ def test_why_exact_strings():
     out = attach_offer_why(_OFFERS.copy())
     whys = {(r["Player"], r["Market"], r["Bet"]): r["Why"] for _, r in out.iterrows()}
     assert whys[("Jayson Tatum", "PTS", "Over")] == (
-        "3.5 above a 28.5 line over his last 5, and 2 above it head-to-head, "
-        "a favorable matchup on paper, model 59% vs book 52% on the over, a 7-pt edge."
+        "Running 3.5 past a 28.5 line over his last 5, with 2 of daylight above it "
+        "head-to-head, the matchup grades out friendly, a 7-pt gap on the over: "
+        "model 59%, book 52%."
     )
     assert whys[("Joel Embiid", "PTS", "Under")] == (
-        "2 below a 30.5 line over his last 5, and 1.5 below it head-to-head, "
-        "a favorable matchup on paper, model 57% vs book 51% on the under, a 6-pt edge."
+        "2 below a 30.5 line over his last 5, and 1.5 short of it when these two meet, "
+        "a matchup that leans the right way, model 57%, book 51% — the under carries "
+        "a 6-pt edge."
     )
     assert whys[("Jayson Tatum", "REB", "Over")] == (
-        "1 above a 8.5 line over his last 5, model 56% vs book 50% on the over, a 6-pt edge."
+        "1 above a 8.5 line over his last 5, a 6-pt gap on the over: model 56%, book 50%."
     )
 
 
@@ -414,6 +416,114 @@ def test_thesis_without_game_context_degrades_gracefully():
     )
     thesis = _theses_by_family(parlays, offers_no_game)[("L/M", 1.0)]
     assert thesis  # a game-script "even"-shape headline still renders, no crash
+
+
+def _mini_offer(game: str, team: str, player: str, market: str, bet: str, line: float) -> dict:
+    return {
+        "League": "NBA",
+        "Game": game,
+        "Date": _DATE,
+        "Team": team,
+        "Player": player,
+        "Market": market,
+        "Bet": bet,
+        "Line": line,
+        "O/U": 112.0,
+        "Moneyline": 0.5,
+    }
+
+
+def test_contrast_slip_headline_names_the_star(monkeypatch):
+    """Correlated star-Over / field-Under slip: the stack anchors on the lone thriver."""
+    from sportstradamus.prediction.stories import engine as engine_mod
+
+    monkeypatch.setattr(engine_mod, "bank_cell", lambda *_k: ["{p} against the grain in {g}"])
+    offers = pd.DataFrame(
+        [
+            _mini_offer("X/Y", "X", "Star Q", "PTS", "Over", 25.5),
+            _mini_offer("X/Y", "Y", "Field A", "REB", "Under", 8.5),
+            _mini_offer("X/Y", "Y", "Field B", "AST", "Under", 4.5),
+        ]
+    )
+    corr = [
+        {"Game": "X/Y", "leg_a": "Star Q|PTS|Over", "leg_b": "Field A|REB|Under", "rho": 0.3},
+        {"Game": "X/Y", "leg_a": "Star Q|PTS|Over", "leg_b": "Field B|AST|Under", "rho": 0.3},
+        {"Game": "X/Y", "leg_a": "Field A|REB|Under", "leg_b": "Field B|AST|Under", "rho": 0.3},
+    ]
+    parlays = pd.DataFrame(
+        [
+            {
+                "League": "NBA",
+                "Game": "X/Y",
+                "Date": _DATE,
+                "Family": 1.0,
+                "Leg 1": "Star Q Over 25.5 PTS - 60.0%, 1.0x",
+                "Leg 2": "Field A Under 8.5 REB - 58.0%, 1.0x",
+                "Leg 3": "Field B Under 4.5 AST - 57.0%, 1.0x",
+            }
+        ]
+    )
+    out = attach_parlay_theses(parlays, offers, corr=corr)
+    thesis = out["Thesis"].iloc[0]
+    assert "Star Q" in thesis
+    assert "Field A" not in thesis and "Field B" not in thesis
+
+
+def test_muddled_mixed_slip_names_nobody(monkeypatch):
+    """Uncorrelated two-a-side split with mixed directions: game-script, no name."""
+    from sportstradamus.prediction.stories import engine as engine_mod
+
+    monkeypatch.setattr(engine_mod, "bank_cell", lambda *_k: ["{g} refuses to pick a lane"])
+    offers = pd.DataFrame(
+        [
+            _mini_offer("X/Y", "X", "Alpha", "PTS", "Over", 25.5),
+            _mini_offer("X/Y", "X", "Alpha", "REB", "Under", 8.5),
+            _mini_offer("X/Y", "Y", "Zeta", "PTS", "Under", 22.5),
+            _mini_offer("X/Y", "Y", "Zeta", "AST", "Over", 6.5),
+        ]
+    )
+    parlays = pd.DataFrame(
+        [
+            {
+                "League": "NBA",
+                "Game": "X/Y",
+                "Date": _DATE,
+                "Family": 1.0,
+                "Leg 1": "Alpha Over 25.5 PTS - 60.0%, 1.0x",
+                "Leg 2": "Alpha Under 8.5 REB - 58.0%, 1.0x",
+                "Leg 3": "Zeta Under 22.5 PTS - 57.0%, 1.0x",
+                "Leg 4": "Zeta Over 6.5 AST - 56.0%, 1.0x",
+            }
+        ]
+    )
+    thesis = attach_parlay_theses(parlays, offers)["Thesis"].iloc[0]
+    assert thesis
+    assert "Alpha" not in thesis and "Zeta" not in thesis
+
+
+def test_wnba_why_uses_her():
+    row = pd.DataFrame(
+        [
+            {
+                "League": "WNBA",
+                "Player": "A. Wilson",
+                "Market": "PTS",
+                "Bet": "Over",
+                "Line": 22.5,
+                "Avg 5": 3.0,
+                "Date": _DATE,
+            }
+        ]
+    )
+    why = attach_offer_why(row)["Why"].iloc[0]
+    assert "her last 5" in why
+
+
+def test_why_rotation_deterministic():
+    """The md5 variant rotation is a pure function of the row — reruns are identical."""
+    a = attach_offer_why(_OFFERS.copy())["Why"].tolist()
+    b = attach_offer_why(_OFFERS.copy())["Why"].tolist()
+    assert a == b
 
 
 def test_parse_leg_round_trip():
