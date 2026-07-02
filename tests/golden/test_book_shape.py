@@ -168,12 +168,15 @@ def test_fused_loc_blends_book_skew():
 _OVER_SHAPE = {"a": 1.3, "b": 1.1, "skew_c": 0.6, "skew_d": -0.1, "n_bins": 9}
 
 
-def test_book_over_prob_unfitted_is_legacy_symmetric():
+def test_book_over_prob_unfitted_is_legacy_symmetric(monkeypatch):
     from sportstradamus.prediction.model_prob import _book_over_prob
 
     league, market = "WNBA", "AST"
     cv = config.stat_cv[league][market]
-    assert config.stat_meta[league][market].get("book_shape") is None
+    # Force the unfitted precondition rather than assume it: book_shape is read from the
+    # gitignored, meditate-recomputed stat_calibration.json, so a real local fit for this
+    # cell (e.g. from WS2 Step D) would otherwise make this pin calibration-coupled.
+    monkeypatch.setitem(config.stat_meta[league][market], "book_shape", None)
     df = pd.DataFrame({"Line": [2.5, 1.5], "Market Projection": [2.2, 1.1]})
 
     got = _book_over_prob(df, "SkewNormal", cv, 0.5, None, league, market)
