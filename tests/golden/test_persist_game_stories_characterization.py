@@ -48,6 +48,7 @@ def test_writer_passes_frame_through_untouched(monkeypatch):
                 "kelly_stake": 0.13,
                 "bet_size": 2,
                 "Date": "2026-06-12",
+                "dek": "These 2 legs move together",
             }
         ]
     )

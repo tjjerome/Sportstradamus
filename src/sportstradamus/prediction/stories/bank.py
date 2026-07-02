@@ -1,11 +1,16 @@
-"""Voice-bank lookup for prophecy theses: JSON-backed cells plus the fallback chain.
+"""Phrase-bank lookups for prophecy prose: JSON-backed cells plus the fallback chain.
 
-The template strings live in ``data/config/voice_bank.json`` — a phrase bank
-is data, not code — nested ``voice → archetype → shape → direction →
-category → [variants]``. Voices are ``basketball`` (NBA and WNBA),
-``football``, ``hockey``, ``baseball``, and the league-neutral ``shared``
-safety net every chain ends on. This module is the only reader and stays
-pure stdlib so the dashboard can import it live.
+Template strings live in ``data/config/`` JSON — a phrase bank is data, not
+code. ``voice_bank.json`` holds thesis cells nested ``voice → archetype →
+shape → direction → category → [variants]``; voices are ``basketball`` (NBA
+and WNBA), ``football``, ``hockey``, ``baseball``, and the league-neutral
+``shared`` safety net every chain ends on. Direction keys are *narrative*
+(thrive/fade), not bet-literal: "Over" cells describe a thriving subject even
+when a negative-market leg's actual bet is Under, so templates outside the
+``mistakes`` category must carry mood, never literal bet-side words.
+``why_bank.json`` holds the per-offer case clauses and story-dek clauses
+(``{clause: {branch: [variants]}}`` plus the pronoun map). This module is the
+only reader and stays pure stdlib so the dashboard can import it live.
 """
 
 import functools
@@ -16,10 +21,15 @@ from sportstradamus import data
 
 
 @functools.cache
-def _bank() -> dict:
-    """Load and memoize the nested voice-bank dict from the packaged JSON."""
-    resource = pkg_resources.files(data) / "config" / "voice_bank.json"
+def _bank(filename: str = "voice_bank.json") -> dict:
+    """Load and memoize a packaged phrase-bank JSON by filename."""
+    resource = pkg_resources.files(data) / "config" / filename
     return json.loads(resource.read_text(encoding="utf-8"))
+
+
+def why_bank() -> dict:
+    """The why/dek phrase bank: pronoun map plus clause → branch → variants."""
+    return _bank("why_bank.json")
 
 
 def bank_cell(voice: str, archetype: str, shape: str, direction: str, category: str) -> list[str]:

@@ -92,13 +92,23 @@ def _dedupe_slate(picks: dict[tuple, _Pick]) -> None:
             seen.add(pick.text)
 
 
+def next_unique_variant(variants: list[str], idx: int, seen: set[str]) -> str:
+    """First variant at/after ``idx`` (wrapping) not in ``seen``; the seeded pick
+    when every variant collides. Shared by the slate pass here and the story
+    menu's within-game headline dedup.
+    """
+    for step in range(len(variants)):
+        candidate = variants[(idx + step) % len(variants)]
+        if candidate not in seen:
+            return candidate
+    return variants[idx]
+
+
 def _bump_until_unique(pick: _Pick, seen: set[str]) -> None:
-    for step in range(len(pick.variants)):
-        idx = (pick.index + step) % len(pick.variants)
-        if pick.variants[idx] not in seen:
-            pick.index, pick.text = idx, pick.variants[idx]
-            return
-    suffix = 2
-    while f"{pick.text} ({suffix})" in seen:
-        suffix += 1
-    pick.text = f"{pick.text} ({suffix})"
+    text = next_unique_variant(pick.variants, pick.index, seen)
+    if text in seen:  # cell exhausted — fall back to a numeric suffix
+        suffix = 2
+        while f"{pick.text} ({suffix})" in seen:
+            suffix += 1
+        text = f"{pick.text} ({suffix})"
+    pick.text = text

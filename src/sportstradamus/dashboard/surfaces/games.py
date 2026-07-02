@@ -89,6 +89,10 @@ def _render_story_preloader(
         key="cascade_story",
     )
     rows = sub.loc[sub["story_id"] == story_id]
+    # dek is story-level (identical on both objective rows); pre-dek snapshots lack it.
+    dek = str(rows.iloc[0]["dek"]) if "dek" in rows.columns and rows.iloc[0]["dek"] else ""
+    if dek:
+        st.caption(dek)
     objective = st.radio(
         "Start from",
         ["builder", "moon"],
@@ -100,7 +104,7 @@ def _render_story_preloader(
     if orow.empty:
         return
     o = orow.iloc[0]
-    st.caption(f"{o['headline']} · {int(o['bet_size'])} legs · EV {o['model_ev'] - 1:+.1%}")
+    st.caption(f"{int(o['bet_size'])} legs · EV {o['model_ev'] - 1:+.1%}")
     if st.button("Seed builder", key="cascade_seed", type="primary"):
         seed_from_story(o["legs"], platform, offers)
         st.rerun()

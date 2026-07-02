@@ -223,3 +223,4 @@ src/sportstradamus/data/leagues/nba/corr_metadata.json
 src/sportstradamus/data/leagues/nfl/corr_metadata.json
 src/sportstradamus/data/leagues/wnba/corr_metadata.json
 src/sportstradamus/data/runtime/*
+docs/superpowers/plans/*
