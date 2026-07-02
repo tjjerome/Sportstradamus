@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from itertools import combinations
 
 import numpy as np
@@ -26,11 +27,13 @@ from sportstradamus.prediction.parlay import (
     _payout_curve_for,
     _psd_or_none,
 )
+from sportstradamus.prediction.stories import menu as menu_mod
 from sportstradamus.prediction.stories.legs import validate_parlay_legs
 from sportstradamus.prediction.stories.menu import (
     _MENU_EDGE_FLOOR,
     _log_growth,
     _score_subset,
+    _story_prose,
     build_game_stories,
 )
 
@@ -94,6 +97,8 @@ def _ctx(
                 "Game": game,
                 "Team": teams[i],
                 "Position": "",
+                "Avg 5": 2.0,
+                "DVPOA": 0.10,
             }
             for i in range(n)
         ]
@@ -293,3 +298,72 @@ def test_single_team_clusters_in_two_team_game_emit_no_story():
     corr = _block_diag_corr([2, 2], 0.4)
     sctx, offers = _ctx([0.66, 0.65, 0.64, 0.63], corr, teams=["AAA", "AAA", "BBB", "BBB"])
     assert build_game_stories([sctx], offers, pd.DataFrame(), None).empty
+
+
+def test_builder_and_moon_share_headline_and_dek():
+    """One story, one headline, one dek — the mode chip must never swap the prose."""
+    corr = _block_diag_corr([3], 0.1)
+    sctx, offers = _ctx([0.90, 0.55, 0.54], corr)
+    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    builder = out[out["objective"] == "builder"].iloc[0]
+    moon = out[out["objective"] == "moon"].iloc[0]
+    assert set(json.loads(builder["legs"])) != set(json.loads(moon["legs"]))  # divergent presets
+    for _sid, grp in out.groupby("story_id"):
+        assert grp["headline"].nunique() == 1
+        assert grp["dek"].nunique() == 1
+
+
+def test_headline_names_only_players_shared_by_both_presets():
+    corr = _block_diag_corr([3], 0.1)
+    sctx, offers = _ctx([0.90, 0.55, 0.54], corr)
+    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    for _sid, grp in out.groupby("story_id"):
+        shared = set.intersection(*(set(_row_players(legs)) for legs in grp["legs"]))
+        named = set(re.findall(r"Player\d+", grp["headline"].iloc[0]))
+        assert named <= shared
+
+
+def test_empty_core_guard_blanks_foreign_subject(monkeypatch):
+    """Disjoint presets: a headline naming a player the two leg-sets don't share is blanked."""
+    monkeypatch.setattr(
+        menu_mod, "thesis_variants", lambda _legs, _ctxs: (["Ghost rules"], 0, {"p": "Ghost"})
+    )
+    sctx, offers = _ctx([0.66, 0.64], np.eye(2))
+    headline, dek = _story_prose({"bet_id": (0,)}, {"bet_id": (1,)}, sctx, offers, {}, set())
+    assert headline == ""
+    assert dek == ""  # a sub-2-leg core carries no cluster clause and no anchor row facts
+    # An unnamed (game-script) subject survives the same disjoint presets.
+    monkeypatch.setattr(
+        menu_mod, "thesis_variants", lambda _legs, _ctxs: (["The game tilts over"], 0, {"g": "X/Y"})
+    )
+    headline, _dek = _story_prose({"bet_id": (0,)}, {"bet_id": (1,)}, sctx, offers, {}, set())
+    assert headline == "The game tilts over"
+
+
+def test_within_game_headline_dedup(monkeypatch):
+    """Two stories seeded onto the same variant: the second bumps to the next one."""
+    monkeypatch.setattr(
+        menu_mod,
+        "thesis_variants",
+        lambda _legs, _ctxs: (["Same story", "Second story"], 0, {}),
+    )
+    corr = _block_diag_corr([2, 2], 0.4)
+    sctx, offers = _ctx([0.66] * 4, corr, teams=["AAA", "BBB"] * 2)
+    out = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    assert out["story_id"].nunique() == 2
+    assert out.drop_duplicates("story_id")["headline"].tolist() == ["Same story", "Second story"]
+
+
+def test_dek_is_deterministic_and_reads_core_correlation():
+    corr = np.eye(2)
+    corr[0, 1] = corr[1, 0] = 0.45
+    sctx, offers = _ctx([0.62, 0.60], corr)
+    first = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    second = build_game_stories([sctx], offers, pd.DataFrame(), None)
+    assert first["dek"].tolist() == second["dek"].tolist()
+    dek = first["dek"].iloc[0]
+    assert dek
+    assert "0.45" in dek  # the 2-leg core's mean pairwise rho, slot-formatted :.2f
+    # The anchor's form/matchup clauses render only if offer_index keeps the
+    # "Avg 5"/"DVPOA" facts — Player0 (max p_model) is the dek's subject.
+    assert "Player0" in dek

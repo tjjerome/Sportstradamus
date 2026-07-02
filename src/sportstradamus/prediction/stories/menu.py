@@ -40,6 +40,8 @@ from sportstradamus.prediction.parlay import (
 from sportstradamus.prediction.stories.context import GameCtx, ctxs_from_frame
 from sportstradamus.prediction.stories.engine import thesis_variants
 from sportstradamus.prediction.stories.legs import enrich_legs, parse_leg, validate_parlay_legs
+from sportstradamus.prediction.stories.thesis import next_unique_variant
+from sportstradamus.prediction.stories.why import story_dek
 
 # A leg qualifies as a story seed when its per-$1 model EV clears this edge — the
 # same 0.05 the unit-thesis gate and per-offer "why" already use.
@@ -70,6 +72,7 @@ _STORY_COLS = [
     "kelly_stake",
     "bet_size",
     "Date",
+    "dek",
 ]
 
 
@@ -118,10 +121,12 @@ def _stories_for_game(
         )
     )
     rows: list[dict] = []
+    seen: set[str] = set()
     for rank, (_cluster, builder, moon) in enumerate(scored[:_MAX_STORIES]):
         story_id = f"{sctx.game}#{rank}"
-        rows.append(_row(sctx, story_id, "builder", builder, offers, ctxs))
-        rows.append(_row(sctx, story_id, "moon", moon, offers, ctxs))
+        headline, dek = _story_prose(builder, moon, sctx, offers, ctxs, seen)
+        rows.append(_row(sctx, story_id, "builder", builder, headline, dek))
+        rows.append(_row(sctx, story_id, "moon", moon, headline, dek))
     return rows
 
 
@@ -290,8 +295,8 @@ def _row(
     story_id: str,
     objective: str,
     sub: Mapping,
-    offers: pd.DataFrame,
-    ctxs: Mapping[str, GameCtx],
+    headline: str,
+    dek: str,
 ) -> dict:
     return {
         "platform": sctx.platform,
@@ -299,23 +304,48 @@ def _row(
         "Game": sctx.game,
         "story_id": story_id,
         "objective": objective,
-        "headline": _headline(sub["bet_id"], sctx, offers, ctxs),
+        "headline": headline,
         "legs": json.dumps(sub["legs"]),
         "joint_p": sub["win_prob"],
         "model_ev": sub["model_ev"],
         "kelly_stake": sub["kelly_stake"],
         "bet_size": sub["bet_size"],
         "Date": sctx.date,
+        "dek": dek,
     }
 
 
-def _headline(
-    bet_id: Sequence[int],
+def _story_prose(
+    builder: Mapping,
+    moon: Mapping,
     sctx: GameScoringContext,
     offers: pd.DataFrame,
     ctxs: Mapping[str, GameCtx],
-) -> str:
-    """The P2 thesis headline for a chosen parlay (game-script fallback labels, never seeds)."""
-    parsed = [p for p in (parse_leg(sctx.bet_df[i]["Desc"]) for i in bet_id) if p]
-    variants, vi, _ = thesis_variants(enrich_legs(parsed, offers), ctxs)
-    return variants[vi] if variants else ""
+    seen: set[str],
+) -> tuple[str, str]:
+    """One (headline, dek) per story — the mode chips swap legs, never the prose.
+
+    The headline renders from the legs the two presets share, so a player it
+    names is on whichever preset loads; disjoint presets (rare) render from
+    the union and blank rather than name a player only one side carries.
+    ``seen`` dedupes headlines within the (platform, game) menu.
+    """
+    per_sub = [
+        [p for p in (parse_leg(sctx.bet_df[i]["Desc"]) for i in sub["bet_id"]) if p]
+        for sub in (builder, moon)
+    ]
+    core = sorted(set(builder["bet_id"]) & set(moon["bet_id"]))
+    parsed = (
+        [p for p in (parse_leg(sctx.bet_df[i]["Desc"]) for i in core) if p]
+        if core
+        else per_sub[0] + per_sub[1]
+    )
+    variants, vi, subject = thesis_variants(enrich_legs(parsed, offers), ctxs)
+    dek = story_dek(core, sctx, offers)
+    named = subject.get("p")
+    if named and any(named not in {leg["Player"] for leg in legs} for legs in per_sub):
+        return "", dek
+    headline = next_unique_variant(variants, vi, seen) if variants else ""
+    if headline:
+        seen.add(headline)
+    return headline, dek
