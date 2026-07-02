@@ -1,0 +1,169 @@
+{
+  "pronouns": {
+    "WNBA": "her",
+    "combo": "their",
+    "default": "his"
+  },
+  "why": {
+    "form": {
+      "above": [
+        "{dev} above a {line} line over {pronoun} last 5",
+        "clearing a {line} line by {dev} across {pronoun} last 5",
+        "{dev} clear of a {line} line over {pronoun} last 5",
+        "running {dev} past a {line} line over {pronoun} last 5",
+        "a {line} line, beaten by {dev} on average over {pronoun} last 5",
+        "{dev} of daylight above a {line} line across {pronoun} last 5"
+      ],
+      "below": [
+        "{dev} below a {line} line over {pronoun} last 5",
+        "trailing a {line} line by {dev} across {pronoun} last 5",
+        "{dev} shy of a {line} line over {pronoun} last 5",
+        "running {dev} short of a {line} line over {pronoun} last 5",
+        "a {line} line, missed by {dev} on average over {pronoun} last 5",
+        "{dev} of slack below a {line} line across {pronoun} last 5"
+      ],
+      "at_line": [
+        "sitting right on a {line} line over {pronoun} last 5",
+        "living right at the {line} number across {pronoun} last 5",
+        "dead even with a {line} line over {pronoun} last 5",
+        "tracking a {line} line almost exactly over {pronoun} last 5",
+        "square on the {line} number through {pronoun} last 5",
+        "running level with a {line} line across {pronoun} last 5"
+      ]
+    },
+    "form_h2h": {
+      "above": [
+        "and {dev} above it head-to-head",
+        "and {dev} clear of it head-to-head",
+        "with {dev} of daylight above it head-to-head",
+        "and beating it by {dev} head-to-head",
+        "plus {dev} over it in the head-to-head history",
+        "and {dev} past it when these two meet"
+      ],
+      "below": [
+        "and {dev} below it head-to-head",
+        "and {dev} shy of it head-to-head",
+        "with {dev} of slack below it head-to-head",
+        "and missing it by {dev} head-to-head",
+        "plus {dev} under it in the head-to-head history",
+        "and {dev} short of it when these two meet"
+      ],
+      "at_line": [
+        "and sitting right on it head-to-head",
+        "and dead even with it head-to-head",
+        "and level with it head-to-head",
+        "and square on it when these two meet",
+        "and tracking it exactly head-to-head",
+        "and right at the number in the head-to-head history"
+      ]
+    },
+    "matchup": {
+      "favorable": [
+        "a favorable matchup on paper",
+        "a soft matchup on paper",
+        "a matchup that leans the right way",
+        "a matchup the numbers like",
+        "the matchup grades out friendly",
+        "a defense that gives this stat away"
+      ],
+      "tough": [
+        "into a tough matchup",
+        "into a stingy matchup",
+        "against a matchup that leans wrong",
+        "into a matchup the numbers dislike",
+        "the matchup grades out hostile",
+        "against a defense that takes this stat away"
+      ]
+    },
+    "edge": {
+      "model_ahead": [
+        "model {model_pct}% vs book {book_pct}% on the {side}, a {gap}-pt edge",
+        "the model reads the {side} {model_pct}% to the book's {book_pct}% — {gap} pts of daylight",
+        "{model_pct}% from the model against {book_pct}% from the book on the {side}, a {gap}-pt lean",
+        "a {gap}-pt gap on the {side}: model {model_pct}%, book {book_pct}%",
+        "the model likes the {side} at {model_pct}% where the book sits {book_pct}% — {gap} pts of edge",
+        "model {model_pct}%, book {book_pct}% — the {side} carries a {gap}-pt edge"
+      ],
+      "book_back": [
+        "model {model_pct}% vs book {book_pct}% on the {side}, the book pushing back by {gap} pts",
+        "the model reads the {side} {model_pct}% but the book counters at {book_pct}% — {gap} pts apart",
+        "{model_pct}% from the model on the {side} against a {book_pct}% book, {gap} pts of disagreement",
+        "a {gap}-pt standoff on the {side}: model {model_pct}%, book {book_pct}%",
+        "the model sees the {side} at {model_pct}% while the book holds {book_pct}% — a {gap}-pt dispute",
+        "model {model_pct}%, book {book_pct}% — the book leans {gap} pts the other way on the {side}"
+      ]
+    },
+    "ev": {
+      "solo": [
+        "priced at {ev}x by the model",
+        "a {ev}x payout in the model's ledger",
+        "the model's number comes back {ev}x",
+        "the model prices it at {ev}x",
+        "worth {ev}x by the model's math",
+        "the model makes it a {ev}x proposition"
+      ],
+      "vs_book": [
+        "the model prices it at {ev}x against the book's {book_ev}x",
+        "{ev}x by the model's math against a {book_ev}x book price",
+        "the model says {ev}x where the book says {book_ev}x",
+        "priced {ev}x by the model, {book_ev}x by the book",
+        "a {ev}x model read on a {book_ev}x book number",
+        "the model's {ev}x stands against the book's {book_ev}x"
+      ]
+    }
+  },
+  "dek": {
+    "cluster": [
+      "these {n} legs move together — {rho} average correlation",
+      "{n} legs, one current — {rho} average correlation",
+      "a {n}-leg cluster holding {rho} average correlation",
+      "{n} legs that rise and fall together at {rho} correlation",
+      "correlation {rho} across the {n} core legs",
+      "{n} legs tied at {rho} — they tend to land together"
+    ],
+    "form": {
+      "above": [
+        "{p} is {dev} clear of the {line} number lately",
+        "{p} runs {dev} past the {line} number lately",
+        "{p} has beaten the {line} number by {dev} of late",
+        "recent form puts {p} {dev} above the {line} line",
+        "{p} carries {dev} of cushion on the {line} number",
+        "the {line} number sits {dev} below {p}'s recent pace"
+      ],
+      "below": [
+        "{p} sits {dev} shy of the {line} number lately",
+        "{p} runs {dev} short of the {line} number lately",
+        "{p} has missed the {line} number by {dev} of late",
+        "recent form leaves {p} {dev} below the {line} line",
+        "{p} carries a {dev} deficit to the {line} number",
+        "the {line} number sits {dev} above {p}'s recent pace"
+      ],
+      "at_line": [
+        "{p} lives right at the {line} number",
+        "{p} tracks the {line} number almost exactly",
+        "{p} runs dead even with the {line} line",
+        "the {line} number reads like {p}'s recent average",
+        "{p} and the {line} line have been inseparable",
+        "{p} lands square on the {line} number night after night"
+      ]
+    },
+    "matchup": {
+      "favorable": [
+        "{p} draws a soft matchup",
+        "{p} draws a matchup that leans friendly",
+        "the matchup tilts {p}'s way",
+        "{p} gets a defense that gives this stat up",
+        "paper says {p} has the edge tonight",
+        "{p} lines up against a giving matchup"
+      ],
+      "tough": [
+        "{p} draws a tough cover",
+        "{p} draws a matchup that leans hostile",
+        "the matchup tilts against {p}",
+        "{p} gets a defense that guards this stat well",
+        "paper says {p} works uphill tonight",
+        "{p} lines up against a stingy matchup"
+      ]
+    }
+  }
+}

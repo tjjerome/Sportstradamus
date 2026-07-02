@@ -16,6 +16,24 @@ import pandas as pd
 
 from sportstradamus.prediction.stories.context import Leg
 
+# Bet-Under is the thriving side for these markets (mistake / damage-allowed
+# counts), so narrative valence flips relative to the bet direction. Exact
+# lowercase internal slugs; batter "walks" and "pitcher strikeouts" stay positive.
+_NEGATIVE_MARKETS: frozenset[str] = frozenset(
+    {
+        "tov",
+        "interceptions",
+        "sacks taken",
+        "fumbles lost",
+        "goalsagainst",
+        "walks allowed",
+        "runs allowed",
+        "hits allowed",
+        "1st inning hits allowed",
+        "batter strikeouts",
+    }
+)
+
 # Map a leg market to a coarse stat category so the bank can pick imagery that
 # fits the stat. Needles cover every leg vocabulary in play: canonical codes
 # ("PRA", "FG3M"), Underdog display names ("Pts + Rebs + Asts"), and Sleeper
@@ -94,13 +112,18 @@ _STAT_CATEGORY = {
     ),
 }
 
-# Offer columns enrich_legs joins onto a parsed leg, beyond the (Player, Bet,
-# Line) match key.
-_OFFER_ENRICH_COLS = ("Market", "Game", "Team", "Position")
+# Offer columns kept per offer_index record, beyond the (Player, Bet, Line)
+# match key — read by enrich_legs and the story dek's anchor clauses
+# ("Avg 5" / "DVPOA" exist only for the latter).
+_OFFER_ENRICH_COLS = ("Market", "Game", "Team", "Position", "Win Prob", "Avg 5", "DVPOA")
 
 
 def _stat_category(market: str) -> str:
     m = (market or "").lower()
+    # Negative markets resolve first: their substrings ("goal", "runs", "hits",
+    # "interception", ...) would otherwise collide with thriving-stat needles.
+    if m in _NEGATIVE_MARKETS:
+        return "mistakes"
     for cat, needles in _STAT_CATEGORY.items():
         if any(n in m for n in needles):
             return cat
@@ -114,11 +137,12 @@ def enrich_legs(parsed: list[dict], offers: pd.DataFrame) -> list[Leg]:
     offers frame. A leg with no matching offer keeps its parsed display market
     and carries no game/team/position (it simply can't anchor a unit/stack).
     """
-    idx = _offer_index(offers)
+    idx = offer_index(offers)
     out: list[Leg] = []
     for leg in parsed:
         match = idx.get((leg["Player"], leg["Bet"], leg["Line"]))
         market = (match.get("Market") if match else None) or leg["Market"]
+        win_prob = match.get("Win Prob") if match else None
         out.append(
             Leg(
                 player=leg["Player"],
@@ -129,12 +153,19 @@ def enrich_legs(parsed: list[dict], offers: pd.DataFrame) -> list[Leg]:
                 team=match.get("Team") if match else None,
                 position=match.get("Position") if match else None,
                 category=_stat_category(market),
+                negative=market.lower() in _NEGATIVE_MARKETS,
+                win_prob=None if win_prob is None or pd.isna(win_prob) else float(win_prob),
             )
         )
     return out
 
 
-def _offer_index(offers: pd.DataFrame) -> dict[tuple, dict]:
+def offer_index(offers: pd.DataFrame) -> dict[tuple, dict]:
+    """Map ``(Player, Bet, Line)`` to its first matching offer record.
+
+    Shared by :func:`enrich_legs` here and the story dek's anchor lookup in
+    ``why.py``. ``setdefault`` keeps the first offer on a duplicate key.
+    """
     if offers is None or offers.empty or not {"Player", "Bet", "Line"}.issubset(offers.columns):
         return {}
     keep = ["Player", "Bet", "Line", *(c for c in _OFFER_ENRICH_COLS if c in offers.columns)]
