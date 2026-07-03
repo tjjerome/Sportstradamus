@@ -4,7 +4,7 @@ Runs after games finish to:
 1. Fetch latest stats from league APIs (update)
 2. Fill in Actual column in history (parquet primary, .dat fallback)
 3. Fill in Close Books P / Market CLV / Model CLV per offer
-4. Fill in Legs/Misses columns in parlay_hist
+4. Fill in Legs Resolved/Misses columns in parlay_hist
 5. Write resolve_meta.json with last-run timestamp
 6. Compute and persist per-(league, market) live metrics (Gate 2)
 
@@ -332,7 +332,7 @@ def _precompute_profit_sim(history):
     help="Verbosity for the structured JSONL log.",
 )
 def run(league, skip_update, history_only, log_level):
-    """Nightly resolution: update stats, fill Actual/Legs/Misses, save."""
+    """Nightly resolution: update stats, fill Actual/Legs Resolved/Misses, save."""
     logger.setLevel(log_level)
     logger.info(
         "reflect invoked",
@@ -436,7 +436,7 @@ def _resolve_parlays(stats, history_only):
         parlays = read_parlay_hist()
         stat_map = json.loads((pkg_resources.files(data) / "config" / "stat_map.json").read_text())
 
-        unresolved = parlays.loc[parlays["Legs"].isna()]
+        unresolved = parlays.loc[parlays["Legs Resolved"].isna()]
         n_before_parl = len(unresolved)
         logger.info(f"Resolving {n_before_parl} pending parlay rows")
 
@@ -445,7 +445,7 @@ def _resolve_parlays(stats, history_only):
             results = unresolved.progress_apply(
                 lambda bet: check_bet(bet, stats, stat_map), axis=1
             ).tolist()
-            parlays.loc[parlays["Legs"].isna(), ["Legs", "Misses"]] = results
+            parlays.loc[parlays["Legs Resolved"].isna(), ["Legs Resolved", "Misses"]] = results
             write_parlay_hist(parlays)
             n_resolved_parl = sum(
                 1 for legs, _ in results if not (isinstance(legs, float) and np.isnan(legs))

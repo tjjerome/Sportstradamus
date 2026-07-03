@@ -5,10 +5,10 @@ Reads ``data/parlay_hist.parquet`` (written by ``prophecize`` and resolved by
 parlays, recovers each parlay's predicted joint probability from
 ``Model EV`` and the platform payout table, buckets by predicted
 probability deciles, and computes the empirical hit rate per decile from
-the resolved ``Legs`` / ``Misses`` columns.
+the resolved ``Legs Resolved`` / ``Misses`` columns.
 
 A "hit" is a parlay where every counted leg covered (``Misses == 0`` and
-``Legs == Bet Size``) — pushed legs are excluded by ``check_bet`` in
+``Legs Resolved == Bet Size``) — pushed legs are excluded by ``check_bet`` in
 :mod:`sportstradamus.analysis` before the row is counted.
 
 Outputs (timestamped with today's date):
@@ -119,7 +119,7 @@ def _wilson_bounds(hits: int, n: int, z: float = 1.96) -> tuple[float, float]:
 def _load_resolved_parlays(window_start: date) -> pd.DataFrame:
     """Load ``parlay_hist.parquet`` and filter to resolved rows in the window.
 
-    A resolved row has non-null ``Legs`` and ``Misses`` (filled by
+    A resolved row has non-null ``Legs Resolved`` and ``Misses`` (filled by
     ``reflect``). Rows whose ``Date`` is before ``window_start`` or whose
     platform/bet-size is unknown are dropped.
     """
@@ -127,7 +127,15 @@ def _load_resolved_parlays(window_start: date) -> pd.DataFrame:
     if df.empty:
         return df
 
-    required = {"Date", "Platform", "Bet Size", "Boost", "Model EV", "Legs", "Misses"}
+    required = {
+        "Date",
+        "Platform",
+        "Bet Size",
+        "Boost",
+        "Model EV",
+        "Legs Resolved",
+        "Misses",
+    }
     missing = required - set(df.columns)
     if missing:
         raise RuntimeError(f"parlay_hist.parquet missing columns: {sorted(missing)}")
@@ -135,14 +143,14 @@ def _load_resolved_parlays(window_start: date) -> pd.DataFrame:
     df = df.copy()
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
     df = df.loc[df["Date"].notna() & (df["Date"] >= window_start)]
-    df = df.loc[df["Legs"].notna() & df["Misses"].notna()]
+    df = df.loc[df["Legs Resolved"].notna() & df["Misses"].notna()]
     df["Joint P"] = df.apply(_recover_joint_prob, axis=1)
     df = df.loc[df["Joint P"].between(0.0, 1.0, inclusive="both")]
     if "Indep P" in df.columns:
         df["Indep Joint P"] = df.apply(_recover_indep_joint_prob, axis=1)
     else:
         df["Indep Joint P"] = float("nan")
-    df["Hit"] = ((df["Misses"] == 0) & (df["Legs"] == df["Bet Size"])).astype(int)
+    df["Hit"] = ((df["Misses"] == 0) & (df["Legs Resolved"] == df["Bet Size"])).astype(int)
     return df
 
 
