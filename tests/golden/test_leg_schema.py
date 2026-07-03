@@ -53,3 +53,13 @@ def test_legs_round_trip_parquet(tmp_path):
     back = pd.read_parquet(p)["legs"].iloc[0]
     assert set(back[0].keys()) == set(LEG_FIELDS)
     assert back[0]["line"] == 26.5
+
+
+def test_build_leg_defaults_nan_and_missing_numeric():
+    leg = build_leg({**OFFER_ROW, "Boost": float("nan")})
+    assert leg["boost"] == 1.0
+
+    row = {k: v for k, v in OFFER_ROW.items() if k not in ("Stat", "Kelly")}
+    leg = build_leg(row)
+    assert leg["stat"] == "PTS"
+    assert leg["kelly"] == 0.0
