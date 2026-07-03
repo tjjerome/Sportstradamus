@@ -28,7 +28,7 @@ from sportstradamus.prediction.parlay import (
     GameArrays,
     GameScoringContext,
     _payout_curve_for,
-    assign_parlay_families,
+    _resolve_leg_stat,
     beam_search_parlays,
 )
 from sportstradamus.spiderLogger import logger
@@ -62,9 +62,8 @@ _DISPLAY_MODEL_EV_FLOOR: float = 0.95
 _DISPLAY_CORR_FLOOR: float = 0.05
 _DISPLAY_BOOKS_EV_FLOOR: float = 0.9
 
-# Top-N retained per sort key (Model EV / Rec Bet / Fun) before family
-# clustering. Three sort views deduped → up to ~3× this many survivors.
-# (Family clustering itself lives in ``parlay.assign_parlay_families``.)
+# Top-N retained per sort key (Model EV / Rec Bet / Fun) before dedup.
+# Three sort views deduped → up to ~3× this many survivors.
 _PARLAY_TOP_N_PER_SORT: int = 300
 
 # Per-league player-position resolution (consumed by _resolve_player_positions):
@@ -319,8 +318,8 @@ def _resolve_player_positions(league_df, league, stat_data):
     return league_df
 
 
-def _build_cmarket_desc(league_df, league, new_map):
-    """Add the ``cMarket`` (position.corr-name) and ``Desc`` display columns.
+def _build_cmarket(league_df, league, new_map):
+    """Add the ``cMarket`` (position.corr-name) display column.
 
     Mutates the shared ``new_map`` with the league's correlation-name overrides
     (accumulating across leagues, matching the legacy single-dict behavior), then
@@ -334,32 +333,11 @@ def _build_cmarket_desc(league_df, league, new_map):
 
     league_df["cMarket"] = league_df.apply(
         lambda x: (
-            [
-                x["Player position"]
-                + "."
-                + new_map.get(x["Market"].replace("H2H ", ""), x["Market"].replace("H2H ", ""))
-            ]
+            [x["Player position"] + "." + _resolve_leg_stat(x["Market"], new_map)]
             if isinstance(x["Player position"], str)
-            else [
-                p
-                + "."
-                + new_map.get(x["Market"].replace("H2H ", ""), x["Market"].replace("H2H ", ""))
-                for p in x["Player position"]
-            ]
+            else [p + "." + _resolve_leg_stat(x["Market"], new_map) for p in x["Player position"]]
         ),
         axis=1,
-    )
-
-    league_df["Desc"] = (
-        league_df[["Player", "Bet", "Line", "Market"]].astype(str).agg(" ".join, axis=1)
-    )
-    league_df["Desc"] = (
-        league_df["Desc"]
-        + " - "
-        + league_df["Win Prob"].multiply(100).round(1).astype(str)
-        + "%, "
-        + league_df["Boost"].round(2).astype(str)
-        + "x"
     )
     return league_df
 
@@ -390,7 +368,7 @@ def _assemble_game_frame(league_df, team):
             axis=1,
         )
     game_df = pd.concat([team_df, opp_df, split_df])
-    game_df.drop_duplicates(subset="Desc", inplace=True)
+    game_df.drop_duplicates(subset=["Player", "Market", "Bet", "Line"], inplace=True)
     return game_df, opp, date
 
 
@@ -422,6 +400,18 @@ def _select_bet_offers(game_df):
     )
 
 
+def _leg_display_label(legs: pd.DataFrame) -> pd.Series:
+    """Render ``"{Player} {Bet} {Line} {Market}"`` for each row — display-only.
+
+    ``DataFrame.agg`` on zero rows returns an (empty) DataFrame rather than a
+    Series, since there is nothing to reduce over — guard it explicitly so an
+    empty correlation slice still yields a joinable empty Series.
+    """
+    if legs.empty:
+        return pd.Series([], dtype=str)
+    return legs[["Player", "Bet", "Line", "Market"]].astype(str).agg(" ".join, axis=1)
+
+
 def _annotate_correlation_columns(df, game_df, g):
     """Fill each offer's ``Team`` / ``Opp Correlation`` display columns in ``df``.
 
@@ -440,18 +430,18 @@ def _annotate_correlation_columns(df, game_df, g):
         corr = corr.sort_values("Corr Mult", ascending=False).groupby("Player").head(1)
         same = corr.loc[corr["Team"] == offer["Team"]]
         other = corr.loc[corr["Team"] != offer["Team"]]
+        same_label = _leg_display_label(same) + " (" + same["Corr Mult"].round(2).astype(str) + "x)"
+        other_label = (
+            _leg_display_label(other) + " (" + other["Corr Mult"].round(2).astype(str) + "x)"
+        )
         df.loc[
             (df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]),
             "Team Correlation",
-        ] = ", ".join(
-            (same["Desc"] + " (" + same["Corr Mult"].round(2).astype(str) + "x)").to_list()
-        )
+        ] = ", ".join(same_label.to_list())
         df.loc[
             (df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]),
             "Opp Correlation",
-        ] = ", ".join(
-            (other["Desc"] + " (" + other["Corr Mult"].round(2).astype(str) + "x)").to_list()
-        )
+        ] = ", ".join(other_label.to_list())
 
 
 def _collect_game_corr(game_df, C, league, game_label, market_map):
@@ -486,11 +476,11 @@ def _collect_game_corr(game_df, C, league, game_label, market_map):
     return rows
 
 
-def _append_parlay_rows(parlay_df, best_bets, C):
-    """Dedup beam-search bets across the three sort views, label families, append.
+def _append_parlay_rows(parlay_df, best_bets):
+    """Dedup beam-search bets across the three sort views and append.
 
     Keeps the top ``_PARLAY_TOP_N_PER_SORT`` by Model EV / Rec Bet / Fun, dedups
-    the union, assigns parlay families, and concatenates onto ``parlay_df``.
+    the union on parlay identity (``Bet ID``), and concatenates onto ``parlay_df``.
     """
     bets = pd.DataFrame(best_bets)
     df5 = (
@@ -501,10 +491,11 @@ def _append_parlay_rows(parlay_df, best_bets, C):
                 bets.sort_values("Fun", ascending=False).head(_PARLAY_TOP_N_PER_SORT),
             ]
         )
-        .drop_duplicates()
+        # subset=["Bet ID"]: a parlay's identity is its leg-index tuple. Full-row
+        # dedup no longer works once ``legs`` (list[dict]) rides along — unhashable.
+        .drop_duplicates(subset=["Bet ID"])
         .sort_values("Model EV", ascending=False)
     )
-    df5["Family"] = assign_parlay_families(df5["Bet ID"].to_list(), C)
     return pd.concat([parlay_df, df5.drop(columns="Bet ID")], ignore_index=True)
 
 
@@ -619,11 +610,12 @@ def _process_league_games(
             info,
             team,
             opp,
+            stat_map,
             contest_variant=contest_variant,
             legacy=legacy,
         )
         if best_bets:
-            parlay_df = _append_parlay_rows(parlay_df, best_bets, g.C)
+            parlay_df = _append_parlay_rows(parlay_df, best_bets)
     return parlay_df
 
 
@@ -707,17 +699,16 @@ def find_correlation(
             "Market EV",
             "Boost",
             "Rec Bet",
-            "Leg 1",
-            "Leg 2",
-            "Leg 3",
-            "Leg 4",
-            "Leg 5",
-            "Leg 6",
-            "Legs",
+            "legs",
+            "Bet ID",
             "P",
             "PB",
             "Fun",
             "Bet Size",
+            "Corr Pairs",
+            "Boost Pairs",
+            "Indep P",
+            "Indep PB",
         ]
     )
     # ``search_payouts`` is the single-multiplier-per-size list used inside the
@@ -747,7 +738,7 @@ def find_correlation(
         # persist the depth-chart labels onto the returned frame (combos absent
         # from its index keep "") so build_game_context can read Position.
         df.loc[league_df.index, "Position"] = league_df["Player position"]
-        league_df = _build_cmarket_desc(league_df, league, new_map)
+        league_df = _build_cmarket(league_df, league, new_map)
         parlay_df = _process_league_games(
             df,
             league_df,

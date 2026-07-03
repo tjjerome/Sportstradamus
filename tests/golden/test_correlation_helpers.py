@@ -36,6 +36,7 @@ import pandas as pd
 import pytest
 
 from sportstradamus import data
+from sportstradamus.leg_schema import LEG_FIELDS
 from sportstradamus.prediction import correlation
 from sportstradamus.prediction.correlation import (
     _build_correlation_matrices,
@@ -189,14 +190,14 @@ _EXPECTED_OFFER_CORR = [
     (
         "De'Aaron Fox",
         "AST",
-        "Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.11x), Luke Kornet Over 3.5 REB - 57.8%, 1.34x (1.02x)",
-        "Mitchell Robinson Over 9.5 PRA - 68.4%, 1.02x (1.06x)",
+        "Victor Wembanyama Over 3.5 BLK (1.11x), Luke Kornet Over 3.5 REB (1.02x)",
+        "Mitchell Robinson Over 9.5 PRA (1.06x)",
     ),
     (
         "De'Aaron Fox",
         "STL",
-        "Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.09x), Luke Kornet Over 5.5 PR - 74.0%, 0.97x (1.03x)",
-        "Mitchell Robinson Over 5.5 REB - 64.0%, 1.17x (1.06x)",
+        "Victor Wembanyama Over 3.5 BLK (1.09x), Luke Kornet Over 5.5 PR (1.03x)",
+        "Mitchell Robinson Over 5.5 REB (1.06x)",
     ),
     ("Jalen Brunson", "AST", "", ""),
     ("Jalen Brunson", "FTM", "", ""),
@@ -205,33 +206,34 @@ _EXPECTED_OFFER_CORR = [
     (
         "Luke Kornet",
         "PR",
-        "Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.09x), De'Aaron Fox Over 1.5 STL - 58.0%, 1.42x (1.03x)",
-        "Mitchell Robinson Over 9.5 PRA - 68.4%, 1.02x (1.03x)",
+        "Victor Wembanyama Over 3.5 BLK (1.09x), De'Aaron Fox Over 1.5 STL (1.03x)",
+        "Mitchell Robinson Over 9.5 PRA (1.03x)",
     ),
     (
         "Luke Kornet",
         "REB",
-        "De'Aaron Fox Under 5.5 AST - 58.5%, 1.11x (1.02x), Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.02x)",
+        "De'Aaron Fox Under 5.5 AST (1.02x), Victor Wembanyama Over 3.5 BLK (1.02x)",
         "",
     ),
     (
         "Mitchell Robinson",
         "PRA",
         "",
-        "De'Aaron Fox Under 5.5 AST - 58.5%, 1.11x (1.06x), Victor Wembanyama Under 4.5 BLST - 73.6%, 1.05x (1.03x), Luke Kornet Over 5.5 PR - 74.0%, 0.97x (1.03x)",
+        "De'Aaron Fox Under 5.5 AST (1.06x), Victor Wembanyama Under 4.5 BLST (1.03x), "
+        "Luke Kornet Over 5.5 PR (1.03x)",
     ),
-    ("Mitchell Robinson", "REB", "", "De'Aaron Fox Over 1.5 STL - 58.0%, 1.42x (1.06x)"),
+    ("Mitchell Robinson", "REB", "", "De'Aaron Fox Over 1.5 STL (1.06x)"),
     (
         "Victor Wembanyama",
         "BLK",
-        "De'Aaron Fox Under 5.5 AST - 58.5%, 1.11x (1.11x), Luke Kornet Over 5.5 PR - 74.0%, 0.97x (1.09x)",
+        "De'Aaron Fox Under 5.5 AST (1.11x), Luke Kornet Over 5.5 PR (1.09x)",
         "",
     ),
     (
         "Victor Wembanyama",
         "BLST",
-        "De'Aaron Fox Under 5.5 AST - 58.5%, 1.11x (1.03x)",
-        "Mitchell Robinson Over 9.5 PRA - 68.4%, 1.02x (1.03x)",
+        "De'Aaron Fox Under 5.5 AST (1.03x)",
+        "Mitchell Robinson Over 9.5 PRA (1.03x)",
     ),
 ]
 
@@ -305,7 +307,10 @@ def test_find_correlation_builds_parlays_wnba() -> None:
     """find_correlation wires beam_search + assembles a well-formed parlay_df.
 
     Structural only (parlay EVs are non-deterministic on correlated legs); the
-    guard is that the assembly path runs and produces sane rows.
+    guard is that the assembly path runs and produces sane rows. ``legs`` (the
+    P8 structured-leg schema) replaces the retired ``Leg 1..6`` / ``Legs`` /
+    ``Desc`` / ``Family`` columns; ``Fun`` survives as a transient sort key that
+    ``persist._PARLAY_DROP_COLS`` strips before ``current_parlays.parquet``.
     """
     offers = _wnba_offers()
     stats = {"WNBA": _stats_for([o["Player"] for o in offers], "MIN short", "USG_PCT short")}
@@ -313,20 +318,23 @@ def test_find_correlation_builds_parlays_wnba() -> None:
     _, parlay_df = find_correlation(offers, stats, "Underdog", contest_variant="power")
 
     assert not parlay_df.empty
-    for col in (
-        "Game",
-        "League",
-        "Platform",
-        "Model EV",
-        "Market EV",
-        "Legs",
-        "Bet Size",
-        "Family",
-    ):
+    for col in ("Game", "League", "Platform", "Model EV", "Market EV", "legs", "Bet Size"):
         assert col in parlay_df.columns
+    assert "Family" not in parlay_df.columns
+    for col in ("Leg 1", "Legs", "Desc"):
+        assert col not in parlay_df.columns
     assert set(parlay_df["Bet Size"].astype(int)).issubset({2, 3, 4, 5, 6})
     assert (parlay_df["League"] == "WNBA").all()
     assert (parlay_df["Game"] == "LVA/NYL").all()
+
+    first_legs = parlay_df["legs"].iloc[0]
+    assert isinstance(first_legs, list) and len(first_legs) >= 2
+    assert all(set(leg.keys()) == set(LEG_FIELDS) for leg in first_legs)
+    # PTS/PRA/AST/REB aren't in stat_map["Underdog"], so identity-fallback (stat
+    # == market) is the *correct* answer for this fixture's markets — the
+    # remap-actually-fires case (WNBA "Fantasy Points") is pinned directly on
+    # _resolve_leg_stat in test_parlay_search.py, not fixture-dependent here.
+    assert all(leg["stat"] == leg["market"] for row in parlay_df["legs"] for leg in row)
 
 
 @_needs_wnba_corr
