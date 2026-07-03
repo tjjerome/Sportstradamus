@@ -329,8 +329,13 @@ def _render_nav() -> None:
 
 
 def _render_corr_tab(row: pd.Series, filtered: pd.DataFrame) -> None:
-    same_items = row.get("Corr Same") or []
-    opp_items = row.get("Corr Opp") or []
+    # A parquet round-trip decodes a list<struct> cell to a numpy ndarray, not a
+    # list — `x or []` on a >1-element ndarray raises (ambiguous truth value), so
+    # branch on identity and convert explicitly instead of relying on truthiness.
+    raw_same = row.get("Corr Same")
+    raw_opp = row.get("Corr Opp")
+    same_items = [] if raw_same is None else list(raw_same)
+    opp_items = [] if raw_opp is None else list(raw_opp)
     platform = row.get("Platform")
     _render_corr_cards(same_items, f"Same team — {row['Team']}", filtered, "corr_same", platform)
     _render_corr_cards(opp_items, f"Opponent — {row['Opponent']}", filtered, "corr_opp", platform)

@@ -13,6 +13,7 @@ from __future__ import annotations
 import importlib.resources as pkg_resources
 import json
 
+import numpy as np
 import pandas as pd
 
 from sportstradamus import data as data_pkg
@@ -113,17 +114,40 @@ def test_edge_badge_sign_color():
     assert ":red[" in _edge_badge(0.95) and "-5%" in _edge_badge(0.95)
 
 
+def _extract_corr_items(raw):
+    """Mirrors ``_render_corr_tab``'s ``Corr Same``/``Corr Opp`` extraction."""
+    return [] if raw is None else list(raw)
+
+
 def test_corr_same_opp_none_safe_extraction():
-    """``_render_corr_tab`` reads ``row.get("Corr Same") or []`` — a ``None`` cell
-    (an offer with no correlated partners on that side) must degrade to an empty
-    list, not crash on ``_render_corr_cards``'s ``if not items: return`` guard."""
+    """A ``None`` cell (an offer with no correlated partners on that side) must
+    degrade to an empty list, not crash on ``_render_corr_cards``'s
+    ``if not items: return`` guard."""
     row = pd.Series({"Corr Same": None, "Corr Opp": None, "Team": "NYK", "Opponent": "SAS"})
-    assert (row.get("Corr Same") or []) == []
-    assert (row.get("Corr Opp") or []) == []
+    assert _extract_corr_items(row.get("Corr Same")) == []
+    assert _extract_corr_items(row.get("Corr Opp")) == []
 
     populated = pd.Series({"Corr Same": [{"player": "X"}], "Corr Opp": None})
-    assert (populated.get("Corr Same") or []) == [{"player": "X"}]
-    assert (populated.get("Corr Opp") or []) == []
+    assert _extract_corr_items(populated.get("Corr Same")) == [{"player": "X"}]
+    assert _extract_corr_items(populated.get("Corr Opp")) == []
+
+
+def test_corr_items_survive_parquet_ndarray_roundtrip(tmp_path):
+    """Regression: a list<struct> cell decodes to a numpy ndarray after a parquet
+    round-trip, not a Python list — every real dashboard read of ``current_offers``
+    goes through exactly this round-trip. ``x or []`` raises ValueError ("truth value
+    of an array with more than one element is ambiguous") the moment an offer has 2+
+    correlated partners on one side, which is the common case, not an edge case —
+    caught here by actually writing+reading parquet rather than constructing an
+    in-memory list that would mask the bug."""
+    partners = [{"player": "A", "mult": 1.1}, {"player": "B", "mult": 1.2}]
+    path = tmp_path / "corr_roundtrip.parquet"
+    pd.DataFrame({"Corr Same": [partners], "Corr Opp": [None]}).to_parquet(path)
+    row = pd.read_parquet(path).iloc[0]
+
+    assert isinstance(row.get("Corr Same"), np.ndarray)  # confirms the round-trip shape
+    assert _extract_corr_items(row.get("Corr Same")) == partners
+    assert _extract_corr_items(row.get("Corr Opp")) == []
 
 
 def test_corr_partner_lookup_pins_platform_across_markets_and_lines():
