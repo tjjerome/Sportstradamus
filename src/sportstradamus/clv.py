@@ -2,7 +2,7 @@
 
 Reads the closing snapshot from the time-series archive — the latest
 observation per book at-or-before the row's nominal kickoff — and folds
-it into each offer in ``history`` as ``Close Books P``, ``Market CLV``,
+it into each offer row in ``history`` as ``Close Market Prob``, ``Market CLV``,
 and ``Model CLV``. The ``commence_time`` used as the ``at=`` cutoff is
 derived from the row date; until per-row kickoff timestamps are wired in
 the default sits at game-day evening UTC, which guarantees the cutoff is
@@ -11,8 +11,8 @@ after every league's kickoff window.
 Definitions, in no-vig probability units:
 
     sign       = +1 if Bet in {"Over",  "Higher"} else -1
-    Market CLV = sign * (Close Books P - Open Books P)
-    Model CLV  = sign * (Close Books P - Open Model P)
+    Market CLV = sign * (Close Market Prob - Market Prob)
+    Model CLV  = sign * (Close Market Prob - Win Prob)
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ import pandas as pd
 
 from sportstradamus import data as _data_pkg
 from sportstradamus.helpers.logging import get_logger
-from sportstradamus.history_schema import LEGACY_OFFER_ARITY, OFFER_ARITY
+from sportstradamus.history_schema import PREDICTION_KEY
 
 # Per-(League, Market, Platform) CLV summary segments require this many legs
 # to be reported. Smaller segments are statistical noise.
@@ -68,60 +68,55 @@ def _signed_clv(open_p: float, close_p: float, bet: str) -> float:
     return sign * (float(close_p) - float(open_p))
 
 
-def _fill_offer(offer, close_p: float):
-    """Rewrite one offer tuple with the closing trio; pass-through if already filled."""
-    if isinstance(offer, tuple | list) and len(offer) == LEGACY_OFFER_ARITY:
-        offer = (*tuple(offer), np.nan, np.nan, np.nan)
-    elif not (isinstance(offer, tuple | list) and len(offer) == OFFER_ARITY):
-        return offer
-    line, boost, platform, bet, model_p, books_p, prev_close, _, _ = offer
-    if not pd.isna(prev_close):
-        return tuple(offer)
-    market_clv = _signed_clv(books_p, close_p, bet)
-    model_clv = _signed_clv(model_p, close_p, bet)
-    return (line, boost, platform, bet, model_p, books_p, close_p, market_clv, model_clv)
+def _fill_offer_rows(history: pd.DataFrame, idx, close_p: float) -> None:
+    """Assign the closing trio onto ``history.loc[idx]`` in place."""
+    rows = history.loc[idx]
+    market_clv = rows.apply(
+        lambda r: _signed_clv(r["Market Prob"], close_p, r["Bet"]), axis=1
+    )
+    model_clv = rows.apply(lambda r: _signed_clv(r["Win Prob"], close_p, r["Bet"]), axis=1)
+    history.loc[idx, "Close Market Prob"] = close_p
+    history.loc[idx, "Market CLV"] = market_clv
+    history.loc[idx, "Model CLV"] = model_clv
 
 
 def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
-    """Populate the closing trio in each ``Offers`` tuple from ``archive``.
+    """Populate the closing trio on every offer row from ``archive``.
 
-    For every offer in every history row, query
+    Groups rows whose ``Close Market Prob`` is still NaN by
+    :data:`~sportstradamus.history_schema.PREDICTION_KEY`, queries
     ``archive.get_ev(league, market, date, player, at=commence_time)`` once
-    and rewrite the 9-tuple in-place with ``Close Books P``, ``Market CLV``,
-    and ``Model CLV``. Pinning ``at=commence_time`` makes the closing read
-    reproducible regardless of when ``reflect`` runs. Offers whose archive
-    lookup returns NaN are left with NaN closing fields and excluded from
-    CLV aggregates downstream.
+    per group, and assigns ``Close Market Prob``, ``Market CLV``, and
+    ``Model CLV`` to every offer row in that group. Pinning
+    ``at=commence_time`` makes the closing read reproducible regardless of
+    when ``reflect`` runs. Groups whose archive lookup returns NaN are left
+    with NaN closing fields and excluded from CLV aggregates downstream.
 
-    Skips offers that already carry a non-NaN ``Close Books P`` so a
+    Skips rows that already carry a non-NaN ``Close Market Prob`` so a
     re-run doesn't redundantly hit archive.
 
     Args:
-        history: DataFrame in the normalized 9-tuple ``Offers`` schema.
+        history: Flat one-row-per-offer DataFrame.
         archive: A loaded ``Archive`` instance.
 
     Returns:
         The same DataFrame, mutated in place. Returned for chaining.
     """
-    if "Offers" not in history.columns or history.empty:
+    if history.empty or "Close Market Prob" not in history.columns:
         return history
 
-    for idx, row in history.iterrows():
-        offers = row.get("Offers")
-        if not isinstance(offers, list) or not offers:
-            continue
-        league = row.get("League")
-        market = row.get("Market")
-        date = row.get("Date")
-        player = row.get("Player")
+    pending = history.loc[history["Close Market Prob"].isna()]
+    if pending.empty:
+        return history
+
+    for key, idx in pending.groupby(PREDICTION_KEY, dropna=False).groups.items():
+        player, league, date, market = key
         if not (isinstance(league, str) and isinstance(market, str)):
             continue
-
         date_str = _normalize_date(date)
         commence_at = _commence_time(date_str)
         close_p = _safe_get_ev(archive, league, market, date_str, player, at=commence_at)
-
-        history.at[idx, "Offers"] = [_fill_offer(offer, close_p) for offer in offers]
+        _fill_offer_rows(history, idx, close_p)
 
     return history
 
@@ -144,19 +139,19 @@ def _row_movement(archive, league_val, market_val, date_val, player_val, movemen
     return movement_cache[cache_key]
 
 
-def _offer_to_leg(offer, league_val, market_val, platform_default, movement):
-    if not (isinstance(offer, tuple | list) and len(offer) >= OFFER_ARITY):
-        return None
-    _, _, platform, bet, model_p, _, close_p, market_clv, _model_clv = offer[:OFFER_ARITY]
+def _offer_to_leg(row, movement) -> dict | None:
+    close_p = row.get("Close Market Prob")
+    market_clv = row.get("Market CLV")
     if pd.isna(close_p) or pd.isna(market_clv):
         return None
-    aligned = _movement_alignment(movement, model_p, bet)
+    model_clv = row.get("Model CLV")
+    aligned = _movement_alignment(movement, row.get("Win Prob"), row.get("Bet"))
     return {
-        "League": league_val,
-        "Market": market_val,
-        "Platform": platform or platform_default,
+        "League": row.get("League"),
+        "Market": row.get("Market"),
+        "Platform": row.get("Platform"),
         "Market CLV": float(market_clv),
-        "Model CLV": float(_model_clv) if not pd.isna(_model_clv) else np.nan,
+        "Model CLV": float(model_clv) if not pd.isna(model_clv) else np.nan,
         "MoveAligned": aligned,
     }
 
@@ -165,10 +160,6 @@ def _collect_clv_legs(history: pd.DataFrame, archive) -> list[dict]:
     legs: list[dict] = []
     movement_cache: dict = {}
     for _, row in history.iterrows():
-        offers = row.get("Offers")
-        if not isinstance(offers, list):
-            continue
-        platform_default = row.get("Platform")
         league_val = row.get("League")
         market_val = row.get("Market")
         date_val = _normalize_date(row.get("Date"))
@@ -176,10 +167,9 @@ def _collect_clv_legs(history: pd.DataFrame, archive) -> list[dict]:
         movement = _row_movement(
             archive, league_val, market_val, date_val, player_val, movement_cache
         )
-        for offer in offers:
-            leg = _offer_to_leg(offer, league_val, market_val, platform_default, movement)
-            if leg is not None:
-                legs.append(leg)
+        leg = _offer_to_leg(row, movement)
+        if leg is not None:
+            legs.append(leg)
     return legs
 
 
@@ -227,9 +217,9 @@ def _aggregate_clv_segments(legs: list[dict], archive) -> dict:
 def summarize(history: pd.DataFrame, archive=None) -> dict:
     """Return aggregate CLV stats for logging by ``reflect``.
 
-    Iterates exploded offers and computes overall n / mean Market CLV /
-    mean Model CLV / fraction of legs that beat the close. Drops legs
-    with NaN closing values from the count.
+    Iterates offer rows and computes overall n / mean Market CLV / mean
+    Model CLV / fraction of legs that beat the close. Drops legs with NaN
+    closing values from the count.
 
     When ``archive`` is supplied, augments segments with
     ``frac_lines_moved_toward_model`` — fraction of legs where the line

@@ -1,14 +1,20 @@
-"""Canonical schema for the normalized prediction-history frame.
+"""Canonical schema for the flat prediction-history frame.
 
 `prophecize` (``prediction/cli.py``) writes player predictions to the history
-parquet as one row per ``(Player, League, Date, Market)`` group, with the
-per-offer rows collapsed into an ``Offers`` list of fixed-arity tuples.
-`reflect` (``clv.py`` and ``analysis.py``) reads that frame back to fold in
-closing-line value and to explode offers for scoring. The writer and both
-readers must agree on the exact column set and offer-tuple shape; this module
-is the single source of truth so a schema change lands in one place instead of
-three.
+parquet as one row per ``(Player, League, Date, Market)`` x book offer —
+prediction-level columns (Team, Projection, Dist, ...) are duplicated across
+every offer row for the same prediction. `reflect` (``clv.py`` and
+``analysis.py``) reads that frame back to fold in closing-line value and to
+compute per-offer outcomes. The writer and both readers must agree on the
+exact column set; this module is the single source of truth so a schema
+change lands in one place instead of three.
+
+A single ``(Player, League, Date, Market)`` never spans more than one
+``Team`` in production history (verified against 14,776 real groups), so
+``Team`` is a prediction-level column, not part of the identity key.
 """
+
+PREDICTION_KEY = ["Player", "League", "Date", "Market"]
 
 PREDICTION_LEVEL_COLS = [
     "Team",
@@ -23,17 +29,7 @@ PREDICTION_LEVEL_COLS = [
     "Step",
 ]
 
-# ``Team`` is hoisted next to the identity key; the rest of the prediction-level
-# block follows the (Player, League, Team, Date, Market) prefix.
-HISTORY_COLS = (
-    ["Player", "League", "Team", "Date", "Market"]
-    + [c for c in PREDICTION_LEVEL_COLS if c != "Team"]
-    + ["Offers", "Actual"]
-)
-
-# The trailing three (the closing trio) are NaN at prediction time and filled by
-# `reflect` once the line closes.
-OFFER_FIELDS = [
+OFFER_LEVEL_COLS = [
     "Line",
     "Boost",
     "Platform",
@@ -43,9 +39,8 @@ OFFER_FIELDS = [
     "Close Market Prob",
     "Market CLV",
     "Model CLV",
+    # |Line - Consensus Line| > tolerance, stamped at write time (cli.py).
+    "Alt Line",
 ]
-OFFER_ARITY = len(OFFER_FIELDS)
-# Offers written before the CLV migration carried only the first six fields.
-LEGACY_OFFER_ARITY = 6
-# Tuple positions of the closing trio (Close Market Prob, Market CLV, Model CLV).
-CLOSING_FIELD_INDICES = tuple(range(LEGACY_OFFER_ARITY, OFFER_ARITY))
+
+HISTORY_COLS = PREDICTION_KEY + PREDICTION_LEVEL_COLS + OFFER_LEVEL_COLS + ["Actual"]

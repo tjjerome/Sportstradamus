@@ -46,7 +46,6 @@ from scipy.stats import nbinom as _scipy_nbinom
 from scipy.stats import skewnorm as _scipy_skewnorm
 
 from sportstradamus import data
-from sportstradamus.analysis import explode_offers
 from sportstradamus.helpers.distributions import skewnormal_loc_from_mean
 from sportstradamus.helpers.io import read_history
 from sportstradamus.helpers.provenance import git_sha
@@ -2229,9 +2228,7 @@ def _history_to_eval_frame(
     """
     if history.empty:
         return pd.DataFrame(columns=list(_LIVE_EVAL_COLUMNS))
-    exploded = explode_offers(history)
-    if exploded.empty:
-        return pd.DataFrame(columns=list(_LIVE_EVAL_COLUMNS))
+    exploded = history.copy()
     cutoff = pd.Timestamp(datetime.now(UTC).date()) - pd.Timedelta(days=window_days)
     exploded["_date"] = pd.to_datetime(exploded["Date"], errors="coerce")
     mask = (
@@ -2342,10 +2339,7 @@ def _resolve_live_cells(
     """Return distinct ``(league, market)`` pairs present in history matching filters."""
     if history.empty:
         return []
-    exploded = explode_offers(history)
-    if exploded.empty:
-        return []
-    settled = exploded[exploded["Actual"].notna()]
+    settled = history[history["Actual"].notna()]
     if settled.empty:
         return []
     if league:

@@ -1579,7 +1579,18 @@ from sportstradamus.training.scorecard import (
 
 
 def _build_live_offer(line, bet, model_p, books_p):
-    return (line, 1.0, "Underdog", bet, model_p, books_p, float("nan"), float("nan"), float("nan"))
+    """Return the offer-level columns for one flat history row (closing trio unfilled)."""
+    return {
+        "Line": line,
+        "Boost": 1.0,
+        "Platform": "Underdog",
+        "Bet": bet,
+        "Win Prob": model_p,
+        "Market Prob": books_p,
+        "Close Market Prob": float("nan"),
+        "Market CLV": float("nan"),
+        "Model CLV": float("nan"),
+    }
 
 
 def _build_live_history_fixture(n: int = 60, market: str = "PTS") -> pd.DataFrame:
@@ -1611,7 +1622,7 @@ def _build_live_history_fixture(n: int = 60, market: str = "PTS") -> pd.DataFram
                 "Temperature": 1.0,
                 "Disp Cal": 1.0,
                 "Step": "test",
-                "Offers": [_build_live_offer(line, bet, model_p, books_p)],
+                **_build_live_offer(line, bet, model_p, books_p),
                 "Actual": actual,
             }
         )
@@ -1657,7 +1668,7 @@ def test_history_to_eval_frame_filters_to_league_market_and_window():
                 "Date": today.strftime("%Y-%m-%d"),
                 "Market": "PTS",
                 "Projection": 20.0,
-                "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)],
+                **_build_live_offer(20.0, "Over", 0.55, 0.50),
                 "Actual": 22.0,
             }
         )
@@ -1669,7 +1680,7 @@ def test_history_to_eval_frame_filters_to_league_market_and_window():
             "Date": today.strftime("%Y-%m-%d"),
             "Market": "PTS",
             "Projection": 20.0,
-            "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)],
+            **_build_live_offer(20.0, "Over", 0.55, 0.50),
             "Actual": 22.0,
         }
     )
@@ -1681,7 +1692,7 @@ def test_history_to_eval_frame_filters_to_league_market_and_window():
             "Date": today.strftime("%Y-%m-%d"),
             "Market": "REB",
             "Projection": 20.0,
-            "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)],
+            **_build_live_offer(20.0, "Over", 0.55, 0.50),
             "Actual": 22.0,
         }
     )
@@ -1693,7 +1704,7 @@ def test_history_to_eval_frame_filters_to_league_market_and_window():
             "Date": (today - timedelta(days=120)).strftime("%Y-%m-%d"),
             "Market": "PTS",
             "Projection": 20.0,
-            "Offers": [_build_live_offer(20.0, "Over", 0.55, 0.50)],
+            **_build_live_offer(20.0, "Over", 0.55, 0.50),
             "Actual": 22.0,
         }
     )
