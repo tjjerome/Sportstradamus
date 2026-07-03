@@ -185,55 +185,143 @@ def _synthetic_offer_cmap() -> dict[tuple[str, str], float]:
 
 # Characterization snapshot of the offer_df correlation annotations under the synthetic c_map
 # above. Deterministic (pure-numpy EV grid, no SciPy randomness) and stable run-to-run because
-# the c_map is fixed — 8/12 legs annotate, with the Team and Opp columns both exercised.
+# the c_map is fixed — 8/12 legs annotate, with the Corr Same and Corr Opp columns both
+# exercised. Each partner is the structured record ``_annotate_correlation_columns`` writes
+# (player/market/bet/line/mult) — ``leg_schema.leg_label`` renders it to a string on demand,
+# so the test pins the structured fields directly rather than a formatted label.
 _EXPECTED_OFFER_CORR = [
     (
         "De'Aaron Fox",
         "AST",
-        "Victor Wembanyama Over 3.5 BLK (1.11x), Luke Kornet Over 3.5 REB (1.02x)",
-        "Mitchell Robinson Over 9.5 PRA (1.06x)",
+        [
+            {
+                "player": "Victor Wembanyama",
+                "market": "BLK",
+                "bet": "Over",
+                "line": 3.5,
+                "mult": 1.11,
+            },
+            {"player": "Luke Kornet", "market": "REB", "bet": "Over", "line": 3.5, "mult": 1.02},
+        ],
+        [
+            {
+                "player": "Mitchell Robinson",
+                "market": "PRA",
+                "bet": "Over",
+                "line": 9.5,
+                "mult": 1.06,
+            }
+        ],
     ),
     (
         "De'Aaron Fox",
         "STL",
-        "Victor Wembanyama Over 3.5 BLK (1.09x), Luke Kornet Over 5.5 PR (1.03x)",
-        "Mitchell Robinson Over 5.5 REB (1.06x)",
+        [
+            {
+                "player": "Victor Wembanyama",
+                "market": "BLK",
+                "bet": "Over",
+                "line": 3.5,
+                "mult": 1.09,
+            },
+            {"player": "Luke Kornet", "market": "PR", "bet": "Over", "line": 5.5, "mult": 1.03},
+        ],
+        [
+            {
+                "player": "Mitchell Robinson",
+                "market": "REB",
+                "bet": "Over",
+                "line": 5.5,
+                "mult": 1.06,
+            }
+        ],
     ),
-    ("Jalen Brunson", "AST", "", ""),
-    ("Jalen Brunson", "FTM", "", ""),
-    ("Jose Alvarado", "PTS", "", ""),
-    ("Jose Alvarado", "STL", "", ""),
+    ("Jalen Brunson", "AST", [], []),
+    ("Jalen Brunson", "FTM", [], []),
+    ("Jose Alvarado", "PTS", [], []),
+    ("Jose Alvarado", "STL", [], []),
     (
         "Luke Kornet",
         "PR",
-        "Victor Wembanyama Over 3.5 BLK (1.09x), De'Aaron Fox Over 1.5 STL (1.03x)",
-        "Mitchell Robinson Over 9.5 PRA (1.03x)",
+        [
+            {
+                "player": "Victor Wembanyama",
+                "market": "BLK",
+                "bet": "Over",
+                "line": 3.5,
+                "mult": 1.09,
+            },
+            {"player": "De'Aaron Fox", "market": "STL", "bet": "Over", "line": 1.5, "mult": 1.03},
+        ],
+        [
+            {
+                "player": "Mitchell Robinson",
+                "market": "PRA",
+                "bet": "Over",
+                "line": 9.5,
+                "mult": 1.03,
+            }
+        ],
     ),
     (
         "Luke Kornet",
         "REB",
-        "De'Aaron Fox Under 5.5 AST (1.02x), Victor Wembanyama Over 3.5 BLK (1.02x)",
-        "",
+        [
+            {"player": "De'Aaron Fox", "market": "AST", "bet": "Under", "line": 5.5, "mult": 1.02},
+            {
+                "player": "Victor Wembanyama",
+                "market": "BLK",
+                "bet": "Over",
+                "line": 3.5,
+                "mult": 1.02,
+            },
+        ],
+        [],
     ),
     (
         "Mitchell Robinson",
         "PRA",
-        "",
-        "De'Aaron Fox Under 5.5 AST (1.06x), Victor Wembanyama Under 4.5 BLST (1.03x), "
-        "Luke Kornet Over 5.5 PR (1.03x)",
+        [],
+        [
+            {"player": "De'Aaron Fox", "market": "AST", "bet": "Under", "line": 5.5, "mult": 1.06},
+            {
+                "player": "Victor Wembanyama",
+                "market": "BLST",
+                "bet": "Under",
+                "line": 4.5,
+                "mult": 1.03,
+            },
+            {"player": "Luke Kornet", "market": "PR", "bet": "Over", "line": 5.5, "mult": 1.03},
+        ],
     ),
-    ("Mitchell Robinson", "REB", "", "De'Aaron Fox Over 1.5 STL (1.06x)"),
+    (
+        "Mitchell Robinson",
+        "REB",
+        [],
+        [{"player": "De'Aaron Fox", "market": "STL", "bet": "Over", "line": 1.5, "mult": 1.06}],
+    ),
     (
         "Victor Wembanyama",
         "BLK",
-        "De'Aaron Fox Under 5.5 AST (1.11x), Luke Kornet Over 5.5 PR (1.09x)",
-        "",
+        [
+            {"player": "De'Aaron Fox", "market": "AST", "bet": "Under", "line": 5.5, "mult": 1.11},
+            {"player": "Luke Kornet", "market": "PR", "bet": "Over", "line": 5.5, "mult": 1.09},
+        ],
+        [],
     ),
     (
         "Victor Wembanyama",
         "BLST",
-        "De'Aaron Fox Under 5.5 AST (1.03x)",
-        "Mitchell Robinson Over 9.5 PRA (1.03x)",
+        [{"player": "De'Aaron Fox", "market": "AST", "bet": "Under", "line": 5.5, "mult": 1.03}],
+        [
+            {
+                "player": "Mitchell Robinson",
+                "market": "PRA",
+                "bet": "Over",
+                "line": 9.5,
+                "mult": 1.03,
+            }
+        ],
     ),
 ]
 
@@ -260,8 +348,8 @@ def test_find_correlation_offer_correlations_synthetic(monkeypatch) -> None:
     offer_df, _ = find_correlation(offers, stats, "Underdog", contest_variant="power")
 
     actual = sorted(
-        (r["Player"], r["Market"], r["Team Correlation"], r["Opp Correlation"])
-        for _, r in offer_df[["Player", "Market", "Team Correlation", "Opp Correlation"]].iterrows()
+        (r["Player"], r["Market"], r["Corr Same"] or [], r["Corr Opp"] or [])
+        for _, r in offer_df[["Player", "Market", "Corr Same", "Corr Opp"]].iterrows()
     )
     assert actual == sorted(_EXPECTED_OFFER_CORR)
 

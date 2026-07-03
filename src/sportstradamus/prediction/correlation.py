@@ -400,23 +400,27 @@ def _select_bet_offers(game_df):
     )
 
 
-def _leg_display_label(legs: pd.DataFrame) -> pd.Series:
-    """Render ``"{Player} {Bet} {Line} {Market}"`` for each row — display-only.
-
-    ``DataFrame.agg`` on zero rows returns an (empty) DataFrame rather than a
-    Series, since there is nothing to reduce over — guard it explicitly so an
-    empty correlation slice still yields a joinable empty Series.
-    """
-    if legs.empty:
-        return pd.Series([], dtype=str)
-    return legs[["Player", "Bet", "Line", "Market"]].astype(str).agg(" ".join, axis=1)
+def _corr_partners(legs: pd.DataFrame) -> list[dict]:
+    """One structured record per correlated partner: player/market/bet/line/mult."""
+    return [
+        {
+            "player": r["Player"],
+            "market": r["Market"],
+            "bet": r["Bet"],
+            "line": float(r["Line"]),
+            "mult": round(float(r["Corr Mult"]), 2),
+        }
+        for _, r in legs.iterrows()
+    ]
 
 
 def _annotate_correlation_columns(df, game_df, g):
-    """Fill each offer's ``Team`` / ``Opp Correlation`` display columns in ``df``.
+    """Fill each offer's ``Corr Same`` / ``Corr Opp`` correlated-partner columns in ``df``.
 
     For every leg, surface its top correlated same-team and opponent partners
-    (one per player) that clear the display EV / correlation gates.
+    (one per player) that clear the display EV / correlation gates. Each partner
+    is a structured record (player/market/bet/line/mult), not a display string —
+    ``leg_schema.leg_label`` renders it on demand.
     """
     EV, EVb, C, V = g.EV, g.EVb, g.C, g.V
     for i, offer in game_df.iterrows():
@@ -430,18 +434,15 @@ def _annotate_correlation_columns(df, game_df, g):
         corr = corr.sort_values("Corr Mult", ascending=False).groupby("Player").head(1)
         same = corr.loc[corr["Team"] == offer["Team"]]
         other = corr.loc[corr["Team"] != offer["Team"]]
-        same_label = _leg_display_label(same) + " (" + same["Corr Mult"].round(2).astype(str) + "x)"
-        other_label = (
-            _leg_display_label(other) + " (" + other["Corr Mult"].round(2).astype(str) + "x)"
-        )
-        df.loc[
-            (df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]),
-            "Team Correlation",
-        ] = ", ".join(same_label.to_list())
-        df.loc[
-            (df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"]),
-            "Opp Correlation",
-        ] = ", ".join(other_label.to_list())
+        # A (Player, Market) pair can span more than one row (Sleeper alt lines).
+        # Broadcasting via a same-length Series (not a bare list, which numpy casts
+        # to a 2D array and mis-shapes on an empty partner list) mirrors the old
+        # scalar-string assignment's broadcast-to-every-matched-row semantics.
+        mask = (df["Player"] == offer["Player"]) & (df["Market"] == offer["Market"])
+        same_partners = _corr_partners(same)
+        other_partners = _corr_partners(other)
+        df.loc[mask, "Corr Same"] = pd.Series([same_partners] * mask.sum(), index=df.index[mask])
+        df.loc[mask, "Corr Opp"] = pd.Series([other_partners] * mask.sum(), index=df.index[mask])
 
 
 def _collect_game_corr(game_df, C, league, game_label, market_map):
@@ -634,8 +635,8 @@ def find_correlation(
     """Annotate offers with correlation info and build parlay candidates.
 
     Groups scored offers by game, loads the league correlation parquets, computes
-    pairwise boost modifiers, fills ``Team Correlation`` / ``Opp Correlation``
-    columns, and calls :func:`beam_search_parlays` for each game.
+    pairwise boost modifiers, fills ``Corr Same`` / ``Corr Opp`` columns, and
+    calls :func:`beam_search_parlays` for each game.
 
     Args:
         offers: List of scored offer dicts from :func:`process_offers`.
@@ -681,8 +682,8 @@ def find_correlation(
     df.loc[combo_mask, "Team"] = df.loc[combo_mask, "Team"].apply(lambda x: x.split("/")[0])
     df.loc[combo_mask, "Opponent"] = df.loc[combo_mask, "Opponent"].apply(lambda x: x.split("/")[0])
 
-    df["Team Correlation"] = ""
-    df["Opp Correlation"] = ""
+    df["Corr Same"] = None
+    df["Corr Opp"] = None
     # Depth-chart labels resolved per league below; combo legs keep "".
     df["Position"] = ""
     # Canonical matchup key shared by offers, parlays, and the corr slice so the
