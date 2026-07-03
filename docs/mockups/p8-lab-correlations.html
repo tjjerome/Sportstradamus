@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P8 · Model Lab — Correlations</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Cinzel:wght@600&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#0E1117;--surface:#1A1D24;--text:#E6E9EF;--border:#2A2E37;--primary:#2E6BE6;--link:#5B8DEF;
+    --green:#1F9D55;--red:#E5484D;--orange:#F5A524;--gray:#8A91A0;--gold:#C9A227;
+    --neg2:#9A2B2B;--neg1:#C0453E;--pos1:#7FAAE8;--pos2:#2351B4}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;font-size:14px;line-height:1.5}
+  .starfield{position:fixed;inset:0;z-index:0;pointer-events:none}
+  .page{position:relative;z-index:1;max-width:1000px;margin:0 auto;padding:26px 24px 80px}
+  .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+  .kicker{font-family:'Cinzel',serif;font-weight:600;font-size:10.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--gold)}
+  h1{font-size:22px;margin:1px 0 1px}
+  .updated{color:var(--gray);font-size:12px}
+  .seclab{font-family:'Cinzel',serif;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--gray);margin:22px 0 8px;display:flex;align-items:center;gap:9px}
+  .seclab::after{content:"";flex:1;height:1px;background:var(--border)}
+  .dim{color:var(--gray);font-size:12px}
+  .tk{opacity:.4}
+  @media (prefers-reduced-motion:no-preference){@keyframes tw{0%,100%{opacity:.18}50%{opacity:.85}}
+    .tk{animation:tw 4.4s ease-in-out infinite}.tk:nth-child(2n){animation-duration:6s}.tk:nth-child(3n){animation-duration:3.6s}}
+
+  /* shared filter bar (collapsed — full panel lives on Diagnostics) */
+  .fbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border:1px solid var(--border);border-radius:6px;background:var(--surface);padding:8px 12px;margin-top:14px;font-size:11.5px}
+  .fbar .ft{font-family:'Cinzel',serif;font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--gold)}
+  .fbar .chip{font-family:'IBM Plex Mono',monospace;color:var(--gray);background:#20242d;border:1px solid var(--border);border-radius:3px;padding:1px 7px}
+  .fbar .exp{margin-left:auto;color:var(--link);cursor:pointer}
+
+  .weak{border:1px solid rgba(245,165,36,.4);background:rgba(245,165,36,.06);border-radius:5px;padding:8px 12px;margin:12px 0;font-size:12.5px;color:#e9c06a}
+  .weak b{color:var(--orange)}
+
+  .ptitle{font-size:12.5px;font-weight:600;margin-bottom:6px}
+  .panel{border:1px solid var(--border);border-radius:5px;background:var(--surface);padding:12px 14px}
+  .panelrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .axt{font-family:'IBM Plex Mono',monospace;font-size:9px;fill:#8A91A0}
+
+  /* correlation heatmap */
+  .heat{display:inline-grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:2px}
+  .hc{width:52px;height:34px;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:11px;border-radius:2px}
+  .hh{color:var(--gray);font-size:10px;height:22px}
+  .hself{background:#242833;color:#5f6b80}
+  .hb{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--gray);margin-top:8px}
+  .hb i{width:16px;height:10px;display:inline-block;border-radius:2px}
+
+  .gridwrap{border:1px solid var(--border);border-radius:5px;overflow:hidden;background:var(--surface)}
+  table{border-collapse:collapse;width:100%;font-size:12.5px}
+  thead th{background:#20242d;color:var(--gray);font-weight:500;font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)}
+  thead th.r{text-align:right}
+  tbody td{padding:7px 12px;border-bottom:1px solid var(--border)}
+  td.num{font-family:'IBM Plex Mono',monospace;text-align:right}
+  .pos{color:var(--green)} .neg{color:var(--red)}
+  .metric{display:flex;gap:26px;margin:10px 0 2px;flex-wrap:wrap}
+  .metric .k{font-family:'Cinzel',serif;font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--gray)}
+  .metric .v{font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:600}
+  .leg{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--gray);margin-right:12px}
+  .leg i{width:10px;height:10px;display:inline-block;border-radius:50%}
+  .note{color:var(--gray);font-size:12px;margin-top:18px;line-height:1.6;border-top:1px solid var(--border);padding-top:12px}
+</style>
+</head>
+<body>
+
+<div class="starfield">
+  <svg width="100%" height="100%" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice">
+    <defs><symbol id="spk" viewBox="0 0 10 10"><path d="M5 0.3 L6.05 3.95 L9.7 5 L6.05 6.05 L5 9.7 L3.95 6.05 L0.3 5 L3.95 3.95 Z"/></symbol></defs>
+    <g fill="#aeb9cc">
+      <use class="tk" href="#spk" x="60" y="120" width="9" height="9"/><use class="tk" href="#spk" x="40" y="700" width="8" height="8"/>
+      <use class="tk" href="#spk" x="1360" y="180" width="9" height="9"/><use class="tk" href="#spk" x="1390" y="760" width="8" height="8"/>
+      <circle class="tk" cx="90" cy="260" r="1.3"/><circle class="tk" cx="150" cy="600" r="1.1"/><circle class="tk" cx="30" cy="380" r="1.4"/>
+      <circle class="tk" cx="1340" cy="300" r="1.3"/><circle class="tk" cx="1280" cy="680" r="1.1"/><circle class="tk" cx="1400" cy="440" r="1.4"/>
+      <circle class="tk" cx="720" cy="16" r="1.1"/><circle class="tk" cx="70" cy="520" r="1.1"/><circle class="tk" cx="1370" cy="620" r="1.1"/>
+    </g>
+  </svg>
+</div>
+
+<div class="page">
+<div class="kicker">◈ Model Lab · Correlations</div>
+<h1>Correlations &amp; Parlays</h1>
+<div class="updated">is the correlation model paying — and where is it wrong</div>
+
+<div class="fbar">
+  <span class="ft">◈ Diagnostic filters</span>
+  <span class="chip">League NBA·WNBA +3</span><span class="chip">Platform Underdog·Sleeper</span><span class="chip">Window 90d</span>
+  <span class="chip">SkewNormal·ZINB</span><span class="chip">withheld·devel</span><span class="chip">47/99 cells</span>
+  <span class="exp">expand ▾ (same panel as Diagnostics)</span>
+</div>
+
+<div class="weak">⚠ <b>correlation isn't paying here:</b> boosted parlays hit <b>47.2%</b> vs <b>50.9%</b> unboosted — the copula may be over-adjusting. AST↔TOV +.42 is the strongest driver; check it first.</div>
+
+<!-- CORRELATION MATRIX (the canonical diverging artifact) -->
+<div class="seclab">Stat-pair correlation matrix <span class="dim" style="text-transform:none;letter-spacing:0">— NBA (empirical ρ)</span></div>
+<div class="panel" style="display:inline-block">
+  <div class="heat">
+    <div class="hc hh"></div><div class="hc hh">PTS</div><div class="hc hh">REB</div><div class="hc hh">AST</div><div class="hc hh">3PM</div><div class="hc hh">STL</div><div class="hc hh">TOV</div>
+    <div class="hc hh" style="width:auto;justify-content:flex-end;padding-right:6px">PTS</div>
+      <div class="hc hself">1.0</div><div class="hc" style="background:var(--pos1)">.15</div><div class="hc" style="background:var(--pos1)">.28</div><div class="hc" style="background:var(--pos2)">.55</div><div class="hc" style="color:#6b7688">.05</div><div class="hc" style="background:var(--pos1)">.22</div>
+    <div class="hc hh" style="width:auto;justify-content:flex-end;padding-right:6px">REB</div>
+      <div class="hc" style="background:var(--pos1)">.15</div><div class="hc hself">1.0</div><div class="hc" style="color:#6b7688">.10</div><div class="hc" style="color:#6b7688">−.12</div><div class="hc" style="color:#6b7688">.08</div><div class="hc" style="color:#6b7688">.14</div>
+    <div class="hc hh" style="width:auto;justify-content:flex-end;padding-right:6px">AST</div>
+      <div class="hc" style="background:var(--pos1)">.28</div><div class="hc" style="color:#6b7688">.10</div><div class="hc hself">1.0</div><div class="hc" style="background:var(--pos1)">.18</div><div class="hc" style="background:var(--pos1)">.20</div><div class="hc" style="background:var(--pos2)">.42</div>
+    <div class="hc hh" style="width:auto;justify-content:flex-end;padding-right:6px">3PM</div>
+      <div class="hc" style="background:var(--pos2)">.55</div><div class="hc" style="color:#6b7688">−.12</div><div class="hc" style="background:var(--pos1)">.18</div><div class="hc hself">1.0</div><div class="hc" style="color:#6b7688">.04</div><div class="hc" style="color:#6b7688">.06</div>
+    <div class="hc hh" style="width:auto;justify-content:flex-end;padding-right:6px">STL</div>
+      <div class="hc" style="color:#6b7688">.05</div><div class="hc" style="color:#6b7688">.08</div><div class="hc" style="background:var(--pos1)">.20</div><div class="hc" style="color:#6b7688">.04</div><div class="hc hself">1.0</div><div class="hc" style="color:#6b7688">.09</div>
+    <div class="hc hh" style="width:auto;justify-content:flex-end;padding-right:6px">TOV</div>
+      <div class="hc" style="background:var(--pos1)">.22</div><div class="hc" style="color:#6b7688">.14</div><div class="hc" style="background:var(--pos2)">.42</div><div class="hc" style="color:#6b7688">.06</div><div class="hc" style="color:#6b7688">.09</div><div class="hc hself">1.0</div>
+  </div>
+  <div class="hb"><span>strong −</span><i style="background:var(--neg2)"></i><i style="background:var(--neg1)"></i><i style="background:#242833"></i><i style="background:var(--pos1)"></i><i style="background:var(--pos2)"></i><span>strong +</span><span class="dim" style="margin-left:8px">diverging red↔blue, never gold</span></div>
+</div>
+<div class="dim" style="margin-top:6px"><b>New for the lab</b> — the correlation structure itself (from <span class="mono">{LEAGUE}_corr.csv</span>). Later: overlay empirical vs model ρ to catch pairs the copula mis-prices.</div>
+
+<!-- CORRELATION VALUE-ADD -->
+<div class="seclab">Correlation value-add</div>
+<div class="panelrow">
+  <div class="panel">
+    <div class="ptitle">Independent vs correlated probability</div>
+    <svg viewBox="0 0 340 200" width="100%">
+      <line x1="34" y1="176" x2="200" y2="14" stroke="#8A91A0" stroke-dasharray="3 4" stroke-width="1" opacity=".7"/>
+      <line x1="34" y1="14" x2="34" y2="176" stroke="#2A2E37"/><line x1="34" y1="176" x2="330" y2="176" stroke="#2A2E37"/>
+      <!-- hits (green) / misses (red) -->
+      <g fill="var(--green)" opacity=".6"><circle cx="70" cy="150" r="3.5"/><circle cx="96" cy="120" r="3.5"/><circle cx="120" cy="96" r="3.5"/><circle cx="150" cy="70" r="3.5"/><circle cx="176" cy="48" r="3.5"/><circle cx="110" cy="118" r="3"/><circle cx="140" cy="88" r="3"/></g>
+      <g fill="var(--red)" opacity=".6"><circle cx="84" cy="150" r="3.5"/><circle cx="112" cy="138" r="3.5"/><circle cx="150" cy="112" r="3.5"/><circle cx="92" cy="156" r="3"/><circle cx="130" cy="126" r="3"/></g>
+      <g class="axt" text-anchor="middle"><text x="34" y="190">0</text><text x="200" y="190">max</text><text x="120" y="199">independent P →</text></g>
+      <text class="axt" x="10" y="90" transform="rotate(-90 10 90)" text-anchor="middle">correlated P</text>
+    </svg>
+    <div style="margin-top:2px"><span class="leg"><i style="background:var(--green)"></i>Hit</span><span class="leg"><i style="background:var(--red)"></i>Miss</span><span class="dim">above line = correlation boosted it</span></div>
+    <div class="metric"><span><span class="k">Boosted</span><div class="v">312</div></span><span><span class="k">Hit (boosted)</span><div class="v neg">47.2%</div></span><span><span class="k">Hit (not)</span><div class="v">50.9%</div></span></div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Boost vs hit rate</div>
+    <svg viewBox="0 0 340 200" width="100%">
+      <g stroke="#2A2E37"><line x1="34" y1="24" x2="330" y2="24" opacity=".4"/><line x1="34" y1="100" x2="330" y2="100" opacity=".4"/><line x1="34" y1="164" x2="330" y2="164"/></g>
+      <g class="axt" text-anchor="end"><text x="30" y="27">60%</text><text x="30" y="103">40%</text><text x="30" y="167">20%</text></g>
+      <g fill="var(--primary)">
+        <rect x="46" y="70" width="46" height="94"/><rect x="106" y="60" width="46" height="104"/><rect x="166" y="76" width="46" height="88"/><rect x="226" y="92" width="46" height="72"/><rect x="286" y="104" width="46" height="60"/>
+      </g>
+      <g class="axt" text-anchor="middle" fill="#dfe6f2"><text x="69" y="180">1.5×</text><text x="129" y="180">2×</text><text x="189" y="180">3×</text><text x="249" y="180">5×</text><text x="309" y="180">10×</text></g>
+    </svg>
+    <div class="dim" style="margin-top:2px">Hit rate falls as boost climbs — expected; the question is whether it falls <i>faster</i> than the payout rises.</div>
+  </div>
+</div>
+
+<!-- HIT RATE BY PARLAY SIZE -->
+<div class="seclab">Hit rate by parlay size <span class="dim" style="text-transform:none;letter-spacing:0">— Underdog</span></div>
+<div class="panelrow">
+  <div class="panel" style="padding:0"><div class="gridwrap" style="border:none">
+    <table>
+      <thead><tr><th>Size</th><th class="r">n</th><th class="r">Hit %</th><th class="r">Pred P</th><th class="r">Indep P</th></tr></thead>
+      <tbody>
+        <tr><td>2</td><td class="num">1,880</td><td class="num">38.1%</td><td class="num">.372</td><td class="num">.361</td></tr>
+        <tr><td>3</td><td class="num">1,204</td><td class="num">21.4%</td><td class="num">.208</td><td class="num">.201</td></tr>
+        <tr><td>4</td><td class="num">642</td><td class="num">11.2%</td><td class="num">.118</td><td class="num">.112</td></tr>
+        <tr><td>5</td><td class="num">288</td><td class="num">5.9%</td><td class="num">.061</td><td class="num">.058</td></tr>
+      </tbody>
+    </table>
+  </div></div>
+  <div class="panel">
+    <div class="ptitle">Miss breakdown by size</div>
+    <svg viewBox="0 0 340 190" width="100%">
+      <g stroke="#2A2E37"><line x1="34" y1="20" x2="330" y2="20" opacity=".4"/><line x1="34" y1="158" x2="330" y2="158"/></g>
+      <!-- stacked: hit all (green), missed1 (orange), missed2+ (red) -->
+      <g>
+        <rect x="60" y="120" width="46" height="38" fill="var(--green)"/><rect x="60" y="78" width="46" height="42" fill="var(--orange)"/><rect x="60" y="24" width="46" height="54" fill="var(--red)"/>
+        <rect x="150" y="132" width="46" height="26" fill="var(--green)"/><rect x="150" y="86" width="46" height="46" fill="var(--orange)"/><rect x="150" y="30" width="46" height="56" fill="var(--red)"/>
+        <rect x="240" y="142" width="46" height="16" fill="var(--green)"/><rect x="240" y="96" width="46" height="46" fill="var(--orange)"/><rect x="240" y="34" width="46" height="62" fill="var(--red)"/>
+      </g>
+      <g class="axt" text-anchor="middle" fill="#dfe6f2"><text x="83" y="172">2-leg</text><text x="173" y="172">3-leg</text><text x="263" y="172">4-leg</text></g>
+    </svg>
+    <div style="margin-top:2px"><span class="leg"><i style="background:var(--green)"></i>Hit all</span><span class="leg"><i style="background:var(--orange)"></i>Missed 1</span><span class="leg"><i style="background:var(--red)"></i>Missed 2+</span></div>
+  </div>
+</div>
+
+<!-- PARLAY CALIBRATION -->
+<div class="seclab">Parlay calibration curve</div>
+<div class="panel">
+  <div class="ptitle">Predicted correlated P vs actual hit rate</div>
+  <svg viewBox="0 0 680 210" width="100%">
+    <line x1="46" y1="180" x2="360" y2="20" stroke="#8A91A0" stroke-dasharray="3 4" stroke-width="1" opacity=".7"/>
+    <line x1="46" y1="20" x2="46" y2="180" stroke="#2A2E37"/><line x1="46" y1="180" x2="672" y2="180" stroke="#2A2E37"/>
+    <polyline points="70,168 120,150 170,124 220,108 270,86 320,72" fill="none" stroke="var(--gold)" stroke-width="1.8"/>
+    <g fill="var(--gold)"><circle cx="70" cy="168" r="4"/><circle cx="120" cy="150" r="5"/><circle cx="170" cy="124" r="5"/><circle cx="220" cy="108" r="4.5"/><circle cx="270" cy="86" r="4"/><circle cx="320" cy="72" r="3.5"/></g>
+    <g class="axt" text-anchor="end"><text x="42" y="183">0</text><text x="42" y="103">.25</text><text x="42" y="24">.50</text></g>
+    <g class="axt" text-anchor="middle"><text x="46" y="196">0</text><text x="203" y="196">.25</text><text x="360" y="196">.50</text><text x="360" y="206">predicted correlated P →</text></g>
+    <text class="axt" x="500" y="60" fill="#e9c06a">slightly above the line at high P → parlays a touch under-confident</text>
+  </svg>
+</div>
+
+<div class="note">
+  <b>Correlations lab</b> — same sober workbench + shared filter bar + retheme to DESIGN tokens (Hit/Miss green/red, miss-breakdown green/orange/red, all from the token set; the old <span class="mono">#2ecc71/#e74c3c/#f39c12</span> gone). Diagnostic framing up top: a "correlation isn't paying" callout points you at the driver pair. <b>New:</b> a stat-pair correlation heatmap (the canonical diverging red↔blue artifact) — later overlay empirical vs model ρ to find pairs the copula mis-prices. Numbers Plex-mono right-aligned; charts carry real ticks + legends.
+</div>
+</div>
+
+<script>
+const v0=fetch('/version.txt').then(r=>r.text()).catch(()=>'');
+setInterval(async()=>{try{const a=await v0;const b=await fetch('/version.txt?'+Date.now()).then(r=>r.text());if(a&&a!==b)location.reload()}catch(e){}},2000);
+</script>
+</body>
+</html>

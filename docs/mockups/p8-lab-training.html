@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P8 · Model Lab — Training</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Cinzel:wght@600&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#0E1117;--surface:#1A1D24;--text:#E6E9EF;--border:#2A2E37;--primary:#2E6BE6;--link:#5B8DEF;
+    --green:#1F9D55;--red:#E5484D;--orange:#F5A524;--gray:#8A91A0;--gold:#C9A227;
+    --neg1:#C0453E;--pos2:#2351B4}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;font-size:14px;line-height:1.5}
+  .starfield{position:fixed;inset:0;z-index:0;pointer-events:none}
+  .page{position:relative;z-index:1;max-width:1000px;margin:0 auto;padding:26px 24px 80px}
+  .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+  .kicker{font-family:'Cinzel',serif;font-weight:600;font-size:10.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--gold)}
+  h1{font-size:22px;margin:1px 0 1px}
+  .updated{color:var(--gray);font-size:12px}
+  .seclab{font-family:'Cinzel',serif;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--gray);margin:22px 0 8px;display:flex;align-items:center;gap:9px}
+  .seclab::after{content:"";flex:1;height:1px;background:var(--border)}
+  .dim{color:var(--gray);font-size:12px}
+  .tk{opacity:.4}
+  @media (prefers-reduced-motion:no-preference){@keyframes tw{0%,100%{opacity:.18}50%{opacity:.85}}
+    .tk{animation:tw 4.4s ease-in-out infinite}.tk:nth-child(2n){animation-duration:6s}.tk:nth-child(3n){animation-duration:3.6s}}
+
+  .fbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border:1px solid var(--border);border-radius:6px;background:var(--surface);padding:8px 12px;margin-top:14px;font-size:11.5px}
+  .fbar .ft{font-family:'Cinzel',serif;font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--gold)}
+  .fbar .chip{font-family:'IBM Plex Mono',monospace;color:var(--gray);background:#20242d;border:1px solid var(--border);border-radius:3px;padding:1px 7px}
+  .fbar .exp{margin-left:auto;color:var(--link);cursor:pointer}
+
+  /* run at a glance */
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
+  .tile{border:1px solid var(--border);border-radius:6px;background:var(--surface);padding:11px 13px}
+  .tile .k{font-family:'Cinzel',serif;font-size:8.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--gray)}
+  .tile .v{font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:600;margin-top:2px}
+  .tile.flag{border-color:rgba(245,165,36,.5)}
+  .tile.flag .v{color:var(--orange)}
+  /* lifecycle funnel */
+  .funnel{display:flex;height:12px;border-radius:3px;overflow:hidden;margin-top:12px;border:1px solid var(--border)}
+  .funnel span{display:block}
+  .flabels{display:flex;gap:16px;margin-top:6px;font-size:11px;color:var(--gray);flex-wrap:wrap}
+  .flabels i{width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:4px;vertical-align:-1px}
+
+  .weak{border:1px solid rgba(245,165,36,.4);background:rgba(245,165,36,.06);border-radius:5px;padding:8px 12px;margin:14px 0 4px;font-size:12.5px;color:#e9c06a}
+  .weak b{color:var(--orange)}
+
+  /* gate matrix */
+  .gridwrap{border:1px solid var(--border);border-radius:5px;overflow:hidden;background:var(--surface)}
+  table{border-collapse:collapse;width:100%;font-size:12.5px}
+  thead th{background:#20242d;color:var(--gray);font-weight:500;font-size:10px;letter-spacing:.05em;text-transform:uppercase;padding:8px 10px;text-align:left;border-bottom:1px solid var(--border)}
+  thead th.c{text-align:center;width:40px}
+  thead th.r{text-align:right}
+  tbody td{padding:6px 10px;border-bottom:1px solid var(--border)}
+  tbody tr.flag td:first-child{box-shadow:inset 3px 0 0 var(--orange)}
+  tbody tr.bad td:first-child{box-shadow:inset 3px 0 0 var(--red)}
+  td.g{text-align:center}
+  td.num{font-family:'IBM Plex Mono',monospace;text-align:right}
+  .cell{font-family:'IBM Plex Mono',monospace}
+  .pass{color:var(--green)} .fail{color:var(--red)} .pos{color:var(--green)} .negv{color:var(--red)}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%}
+  .dp{background:var(--green)} .df{background:transparent;border:1.5px solid var(--red)}
+  .badge{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:10px;padding:1px 6px;border-radius:3px}
+  .b-ship{color:var(--green);border:1px solid rgba(31,157,85,.5)}
+  .b-hold{color:var(--gray);border:1px solid var(--border)}
+  .lc{font-family:'IBM Plex Mono',monospace;font-size:10.5px}
+
+  /* metric-family tab strip */
+  .tabs{display:flex;gap:2px;margin-top:6px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
+  .tab{font-size:11.5px;color:var(--gray);padding:6px 11px;border:1px solid transparent;border-bottom:none;cursor:pointer;border-radius:4px 4px 0 0}
+  .tab.on{color:var(--text);background:var(--surface);border-color:var(--border)}
+  .note{color:var(--gray);font-size:12px;margin-top:18px;line-height:1.6;border-top:1px solid var(--border);padding-top:12px}
+</style>
+</head>
+<body>
+
+<div class="starfield">
+  <svg width="100%" height="100%" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice">
+    <defs><symbol id="spk" viewBox="0 0 10 10"><path d="M5 0.3 L6.05 3.95 L9.7 5 L6.05 6.05 L5 9.7 L3.95 6.05 L0.3 5 L3.95 3.95 Z"/></symbol></defs>
+    <g fill="#aeb9cc">
+      <use class="tk" href="#spk" x="58" y="130" width="9" height="9"/><use class="tk" href="#spk" x="44" y="710" width="8" height="8"/>
+      <use class="tk" href="#spk" x="1360" y="170" width="9" height="9"/><use class="tk" href="#spk" x="1392" y="770" width="8" height="8"/>
+      <circle class="tk" cx="88" cy="270" r="1.3"/><circle class="tk" cx="150" cy="600" r="1.1"/><circle class="tk" cx="30" cy="390" r="1.4"/>
+      <circle class="tk" cx="1342" cy="300" r="1.3"/><circle class="tk" cx="1284" cy="680" r="1.1"/><circle class="tk" cx="1402" cy="440" r="1.4"/>
+      <circle class="tk" cx="720" cy="16" r="1.1"/><circle class="tk" cx="70" cy="520" r="1.1"/><circle class="tk" cx="1372" cy="620" r="1.1"/>
+    </g>
+  </svg>
+</div>
+
+<div class="page">
+<div class="kicker">◈ Model Lab · Training</div>
+<h1>Model Training Diagnostics</h1>
+<div class="updated">the last forging — 99 cells, what shipped, what's one gate short · last meditated Fri Jun 27, 04:12</div>
+
+<div class="fbar">
+  <span class="ft">◈ Diagnostic filters</span>
+  <span class="chip">League all 5</span><span class="chip">SkewNormal·ZINB</span><span class="chip">norm all</span>
+  <span class="chip">withheld·devel</span><span class="chip">lifecycle all</span><span class="chip">99/99 cells</span>
+  <span class="exp">expand ▾ (same panel as Diagnostics)</span>
+</div>
+
+<!-- RUN AT A GLANCE -->
+<div class="tiles">
+  <div class="tile"><div class="k">Cells trained</div><div class="v">99</div></div>
+  <div class="tile"><div class="k">Shipping (6/6)</div><div class="v pos">27</div></div>
+  <div class="tile flag"><div class="k">One gate short</div><div class="v">12</div></div>
+  <div class="tile"><div class="k">Withheld</div><div class="v">72</div></div>
+</div>
+<div class="funnel">
+  <span style="width:100%;background:#3a4150" title="trained"></span>
+  <span style="width:62%;background:#4a5570" title="G1 pass"></span>
+  <span style="width:38%;background:var(--pos2)" title="all gates"></span>
+  <span style="width:27%;background:var(--green)" title="graduated live"></span>
+</div>
+<div class="flabels">
+  <span><i style="background:#3a4150"></i>Trained 99</span>
+  <span><i style="background:#4a5570"></i>Gate-1 pass 61</span>
+  <span><i style="background:var(--pos2)"></i>All 6 gates 27</span>
+  <span><i style="background:var(--green)"></i>Graduated live 18</span>
+</div>
+
+<div class="weak">⚠ <b>start here:</b> <b>12 cells</b> fail exactly one gate — the cheapest wins on the board. Most are <b>g4</b> (dispersion) and <b>g5</b> (ECE) bound. Sorted to the top of the matrix below.</div>
+
+<!-- SHIP-GATE MATRIX (the find-weak-spots hero) -->
+<div class="seclab">Ship-gate matrix <span class="dim" style="text-transform:none;letter-spacing:0">— worst-first · ● pass ○ fail</span></div>
+<div class="gridwrap">
+  <table>
+    <thead><tr>
+      <th>Cell</th><th class="c">G1</th><th class="c">G2</th><th class="c">G3</th><th class="c">G4</th><th class="c">G5</th><th class="c">G6</th>
+      <th class="r">BSS</th><th>Lifecycle</th><th>Ship</th>
+    </tr></thead>
+    <tbody>
+      <!-- one-gate-short (amber) first -->
+      <tr class="flag"><td class="cell">WNBA · DREB</td>
+        <td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot df"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td>
+        <td class="num pos">+.009</td><td class="lc">gate1 · watch</td><td><span class="badge b-hold">g4 short</span></td></tr>
+      <tr class="flag"><td class="cell">WNBA · PA</td>
+        <td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot df"></i></td><td class="g"><i class="dot dp"></i></td>
+        <td class="num pos">+.014</td><td class="lc">gate1 · watch</td><td><span class="badge b-hold">g5 short</span></td></tr>
+      <tr class="flag"><td class="cell">NBA · 3-Pt Made</td>
+        <td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot df"></i></td>
+        <td class="num pos">+.012</td><td class="lc">gate1 · watch</td><td><span class="badge b-hold">g6 short</span></td></tr>
+      <!-- shipping (all pass) -->
+      <tr><td class="cell">NBA · Points</td>
+        <td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td>
+        <td class="num pos">+.031</td><td class="lc">graduated</td><td><span class="badge b-ship">ship ✓</span></td></tr>
+      <tr><td class="cell">WNBA · Points</td>
+        <td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td>
+        <td class="num pos">+.024</td><td class="lc">graduated</td><td><span class="badge b-ship">ship ✓</span></td></tr>
+      <tr><td class="cell">NFL · Completions</td>
+        <td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td>
+        <td class="num pos">+.028</td><td class="lc">graduated</td><td><span class="badge b-ship">ship ✓</span></td></tr>
+      <!-- multi-fail (red) -->
+      <tr class="bad"><td class="cell">WNBA · TOV</td>
+        <td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot df"></i></td><td class="g"><i class="dot df"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td>
+        <td class="num pos">+.004</td><td class="lc">withheld</td><td><span class="badge b-hold">2 short</span></td></tr>
+      <tr class="bad"><td class="cell">WNBA · Steals</td>
+        <td class="g"><i class="dot df"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot df"></i></td><td class="g"><i class="dot df"></i></td><td class="g"><i class="dot dp"></i></td>
+        <td class="num negv">−.014</td><td class="lc">training</td><td><span class="badge b-hold">3 short</span></td></tr>
+      <tr class="bad"><td class="cell">MLB · Total Bases</td>
+        <td class="g"><i class="dot df"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot df"></i></td><td class="g"><i class="dot df"></i></td><td class="g"><i class="dot dp"></i></td><td class="g"><i class="dot df"></i></td>
+        <td class="num negv">−.021</td><td class="lc">training</td><td><span class="badge b-hold">4 short</span></td></tr>
+    </tbody>
+  </table>
+</div>
+<div class="dim" style="margin-top:6px">G1 paired-Brier CI vs book · G2/G3 tail bias-z · G4 IQR ratio (dispersion) · G5 debiased ECE · G6 anti-shrinkage. Ship = AND of all six. Amber rail = one gate short; red rail = multi-fail.</div>
+
+<!-- METRIC-FAMILY LEDGER (the reference tables, kept) -->
+<div class="seclab">Per-cell ledger</div>
+<div class="tabs" id="ledgertabs">
+  <span class="tab" data-t="ov">Overview</span><span class="tab" data-t="stub">Scoring rules</span><span class="tab" data-t="stub">Discrimination</span><span class="tab" data-t="stub">Rates</span><span class="tab" data-t="stub">EV &amp; lines</span><span class="tab" data-t="stub">Kelly &amp; blending</span><span class="tab" data-t="stub">Dispersion</span><span class="tab" data-t="stub">Ship gates</span><span class="tab on" data-t="hp">Hyperparameters</span>
+</div>
+<div class="gridwrap" style="border-top:none;border-radius:0 0 5px 5px">
+  <!-- Hyperparameters (default) -->
+  <div id="tab-hp">
+    <table style="font-size:12px">
+      <thead><tr>
+        <th>League</th><th>Market</th><th>Dist</th><th>Surface</th>
+        <th class="r">rounds</th><th class="r">leaves</th><th class="r">lr</th><th class="r">min_child</th><th class="r">L1</th><th class="r">L2</th><th class="r">cv</th><th class="r">std</th><th class="r">hist 0%</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>NBA</td><td>Points</td><td class="cell">SkewNormal</td><td class="cell">devel</td>
+          <td class="num">420</td><td class="num">31</td><td class="num">.0180</td><td class="num">24</td><td class="num">0.00</td><td class="num">1.42</td><td class="num">.284</td><td class="num">7.31</td><td class="num">0.0%</td></tr>
+        <tr><td>WNBA</td><td>Points</td><td class="cell">SkewNormal</td><td class="cell">devel</td>
+          <td class="num">360</td><td class="num">24</td><td class="num">.0220</td><td class="num">18</td><td class="num">0.12</td><td class="num">0.85</td><td class="num">.301</td><td class="num">6.90</td><td class="num">0.0%</td></tr>
+        <tr><td>NFL</td><td>Completions</td><td class="cell">SkewNormal</td><td class="cell">devel</td>
+          <td class="num">280</td><td class="num">20</td><td class="num">.0300</td><td class="num">30</td><td class="num">0.00</td><td class="num">2.10</td><td class="num">.225</td><td class="num">5.44</td><td class="num">0.0%</td></tr>
+        <tr class="flag"><td>WNBA</td><td>DREB</td><td class="cell">SkewNormal</td><td class="cell">withheld</td>
+          <td class="num">510</td><td class="num">39</td><td class="num">.0140</td><td class="num">16</td><td class="num">0.34</td><td class="num">0.60</td><td class="num">.418</td><td class="num">2.80</td><td class="num">4.2%</td></tr>
+        <tr class="flag"><td>NBA</td><td>3-Pt Made</td><td class="cell">ZINB</td><td class="cell">withheld</td>
+          <td class="num">640</td><td class="num">47</td><td class="num">.0120</td><td class="num">12</td><td class="num">0.00</td><td class="num">3.20</td><td class="num">.512</td><td class="num">1.44</td><td class="num">22.6%</td></tr>
+        <tr class="bad"><td>WNBA</td><td>Steals</td><td class="cell">SkewNormal</td><td class="cell">withheld</td>
+          <td class="num">300</td><td class="num">31</td><td class="num">.0250</td><td class="num">20</td><td class="num">0.05</td><td class="num">1.00</td><td class="num">.552</td><td class="num">1.35</td><td class="num">8.9%</td></tr>
+        <tr class="bad"><td>MLB</td><td>Total Bases</td><td class="cell">ZINB</td><td class="cell">withheld</td>
+          <td class="num">700</td><td class="num">51</td><td class="num">.0110</td><td class="num">10</td><td class="num">0.00</td><td class="num">4.05</td><td class="num">.607</td><td class="num">1.12</td><td class="num">14.1%</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <!-- Overview -->
+  <div id="tab-ov" style="display:none">
+    <table>
+      <thead><tr>
+        <th>League</th><th>Market</th><th>Dist</th><th>Norm</th><th>Surface</th><th>Lifecycle</th><th class="r">n val</th><th class="r">BSS ↑</th><th class="r">Kelly ↑</th><th>Ship</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>NBA</td><td>Points</td><td class="cell">SkewNormal</td><td class="cell">mean10</td><td class="cell">devel</td><td class="lc">graduated</td><td class="num">2,140</td><td class="num pos">+.031</td><td class="num">.031</td><td><span class="badge b-ship">✓</span></td></tr>
+        <tr><td>WNBA</td><td>Points</td><td class="cell">SkewNormal</td><td class="cell">mean10</td><td class="cell">devel</td><td class="lc">graduated</td><td class="num">1,180</td><td class="num pos">+.024</td><td class="num">.024</td><td><span class="badge b-ship">✓</span></td></tr>
+        <tr><td>NFL</td><td>Completions</td><td class="cell">SkewNormal</td><td class="cell">none</td><td class="cell">devel</td><td class="lc">graduated</td><td class="num">880</td><td class="num pos">+.028</td><td class="num">.028</td><td><span class="badge b-ship">✓</span></td></tr>
+        <tr class="flag"><td>WNBA</td><td>DREB</td><td class="cell">SkewNormal</td><td class="cell">ratio_meanyr</td><td class="cell">withheld</td><td class="lc">gate1 · watch</td><td class="num">640</td><td class="num pos">+.009</td><td class="num">.009</td><td><span class="badge b-hold">g4</span></td></tr>
+        <tr class="flag"><td>NBA</td><td>3-Pt Made</td><td class="cell">ZINB</td><td class="cell">none</td><td class="cell">withheld</td><td class="lc">gate1 · watch</td><td class="num">1,520</td><td class="num pos">+.012</td><td class="num">.012</td><td><span class="badge b-hold">g6</span></td></tr>
+        <tr class="bad"><td>WNBA</td><td>Steals</td><td class="cell">SkewNormal</td><td class="cell">none</td><td class="cell">withheld</td><td class="lc">training</td><td class="num">590</td><td class="num negv">−.014</td><td class="num">.000</td><td><span class="badge b-hold">3 short</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <!-- other tabs -->
+  <div id="tab-stub" style="display:none"><div style="padding:20px 14px;color:var(--gray);font-size:12.5px">Same one-row-per-cell ledger, columns for this metric family (see <span class="mono">TAB_COLUMNS</span> in <span class="mono">lab_training.py</span>). Weak-cell rails carry across every tab.</div></div>
+</div>
+<div class="dim" style="margin-top:6px">Nine metric-family tabs (unchanged) — the full model_stats.parquet ledger. Hyperparameters: Optuna-tuned LightGBMLSS knobs + per-market scale refs (cv/std) + historical zero-rate. All informational. <span class="mono">L1 0.00</span> is real — LightGBM's default floor; warm-starts read it back as a hard zero.</div>
+
+<div class="note">
+  <b>Training lab</b> — reference ledger, not a chart surface, so the 9 metric-family tabs stay. What P8 adds: sober lab chrome + starfield + shared filter bar (the sidebar filters move up to the shared panel used across all 3 lab surfaces); a <b>run-at-a-glance</b> strip + lifecycle funnel (trained → G1 → all-6 → graduated live); and the <b>ship-gate matrix</b> — the find-weak-spots hero. Cells sort worst-first with one-gate-short pinned to the top (amber rail) so the cheapest wins are obvious; G6 (anti-shrinkage) joins the matrix per the current model_stats schema. Green ●/red ○ only, no gold on data.
+</div>
+</div>
+
+<script>
+document.querySelectorAll('#ledgertabs .tab').forEach(t=>t.addEventListener('click',()=>{
+  document.querySelectorAll('#ledgertabs .tab').forEach(x=>x.classList.remove('on'));
+  t.classList.add('on');
+  ['hp','ov','stub'].forEach(id=>document.getElementById('tab-'+id).style.display='none');
+  document.getElementById('tab-'+t.dataset.t).style.display='';
+}));
+const v0=fetch('/version.txt').then(r=>r.text()).catch(()=>'');
+setInterval(async()=>{try{const a=await v0;const b=await fetch('/version.txt?'+Date.now()).then(r=>r.text());if(a&&a!==b)location.reload()}catch(e){}},2000);
+</script>
+</body>
+</html>

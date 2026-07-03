@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P8 · Games — constellation builder (rev 1)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Cinzel:wght@500;600&family=Cormorant+Garamond:ital,wght@0,600;1,600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0E1117; --surface:#1A1D24; --text:#E6E9EF; --border:#2A2E37;
+    --primary:#2E6BE6; --link:#5B8DEF; --green:#1F9D55; --red:#E5484D;
+    --orange:#F5A524; --gray:#8A91A0; --gold:#C9A227;
+    --lva:#C8102E; --ind:#26436E;                 /* team fills (from team_assets.json) — never gold */
+    --lva-dim:#7c4a52; --ind-dim:#48505f;         /* candidate = desaturated toward gray */
+  }
+  *{box-sizing:border-box}
+  body{margin:0 auto;max-width:1000px;background:var(--bg);color:var(--text);
+    font-family:'IBM Plex Sans',sans-serif;font-size:14px;line-height:1.5;padding:26px 24px 72px}
+  .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+  .kicker{font-family:'Cinzel',serif;font-weight:600;font-size:10.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--gold)}
+  .headline{font-family:'Cormorant Garamond',serif;font-style:italic;font-weight:600;color:var(--gold)}
+  h1{font-size:23px;margin:1px 0 1px;font-weight:700}
+  .updated{color:var(--gray);font-size:12px}
+  svg.ic{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-0.12em}
+
+  /* control row */
+  .controls{display:flex;gap:10px;margin:16px 0 12px;flex-wrap:wrap}
+  .sel{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:7px 11px;font-size:13px;color:var(--text);display:flex;align-items:center;gap:9px;min-width:150px;justify-content:space-between}
+  .sel .lab{color:var(--gray);font-size:11px}
+  .sel svg{color:var(--gray)}
+
+  /* nebula game hero */
+  .hero{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:5px;padding:16px 18px;
+    background:
+      radial-gradient(ellipse at 82% -10%, rgba(46,107,230,.16), transparent 46%),
+      radial-gradient(ellipse at 12% 120%, rgba(201,162,39,.07), transparent 45%),
+      var(--surface)}
+  .hero .glyphwrap{position:absolute;top:8px;right:14px;width:74px;height:74px;opacity:.9}
+  .hero .match{font-size:20px;font-weight:700;letter-spacing:.01em}
+  .hero .sub{margin-top:2px}
+  .hero .stats{display:flex;gap:22px;margin-top:12px}
+  .stat .k{font-family:'Cinzel',serif;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--gray)}
+  .stat .v{font-family:'IBM Plex Mono',monospace;font-size:16px;font-weight:600;margin-top:1px}
+
+  /* story preloader */
+  .preload{display:flex;align-items:center;gap:14px;flex-wrap:wrap;border:1px solid var(--border);border-left:2px solid var(--gold);
+    border-radius:4px;padding:9px 13px;margin:12px 0;background:rgba(26,29,36,.6)}
+  .preload .lab{font-family:'Cinzel',serif;font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--gray)}
+  .preload .pick{color:var(--text);font-size:13px}
+  .toggle{display:inline-flex;border:1px solid var(--border);border-radius:4px;overflow:hidden}
+  .toggle span{padding:4px 11px;font-size:12px;color:var(--gray);cursor:pointer}
+  .toggle span.on{background:rgba(201,162,39,.13);color:var(--gold)}
+  .btn{border:none;border-radius:4px;padding:6px 13px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit}
+  .btn.primary{background:var(--primary);color:#fff}
+  .btn.ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
+  .dim{color:var(--gray);font-size:12px}
+
+  /* constellation sky */
+  .skywrap{position:relative;border:1px solid var(--border);border-radius:5px;margin:6px 0 4px;overflow:hidden;
+    background:radial-gradient(ellipse at 30% 30%, rgba(46,107,230,.08), transparent 55%),
+              radial-gradient(ellipse at 72% 68%, rgba(201,162,39,.05), transparent 52%),
+              #12151c}
+  .teamtag{position:absolute;top:10px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:.14em;font-weight:600}
+  .teamtag.l{left:14px;color:#e2909b} .teamtag.r{right:14px;color:#8ea6c9}
+  .slab{font-family:'IBM Plex Mono',monospace;font-size:10.5px}
+  /* floating hover card */
+  .hovercard{position:absolute;width:214px;background:var(--surface);border:1px solid var(--border);border-radius:5px;
+    box-shadow:0 10px 30px rgba(0,0,0,.55);padding:11px 12px 10px;font-size:12px}
+  .hovercard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--ind);border-radius:5px 0 0 5px}
+  .hovercard .hp{font-weight:700;font-size:13px}
+  .hovercard .hm{color:var(--gray);margin:1px 0 7px}
+  .hovercard .hstat{font-family:'IBM Plex Mono',monospace;font-size:11.5px}
+  .hovercard .hfoot{display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:7px;border-top:1px solid var(--border)}
+  .hovercard .inslip{font-size:10px;color:var(--gold);font-family:'Cinzel',serif;letter-spacing:.08em}
+  .hovercard .detail{color:var(--link);font-size:12px;font-weight:600;cursor:pointer}
+
+  /* slip summary */
+  .slip{border:1px solid var(--border);border-radius:5px;padding:14px 16px;margin:12px 0;background:var(--surface)}
+  .metrics{display:flex;gap:0;margin:10px 0 6px;border:1px solid var(--border);border-radius:4px;overflow:hidden}
+  .metric{flex:1;padding:9px 12px;border-right:1px solid var(--border)}
+  .metric:last-child{border-right:none}
+  .metric .k{font-family:'Cinzel',serif;font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--gray)}
+  .metric .v{font-family:'IBM Plex Mono',monospace;font-size:17px;font-weight:600;margin-top:2px}
+  .metric .d{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--green);margin-top:1px}
+  .lockrow{display:flex;gap:10px;margin-top:10px}
+
+  /* satellites */
+  .exp{border:1px solid var(--border);border-radius:4px;margin:8px 0;overflow:hidden}
+  .exp>.eh{padding:9px 13px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;cursor:pointer;background:rgba(255,255,255,.015)}
+  .exp>.eh .chev{margin-left:auto;color:var(--gray)}
+  .exp>.eb{padding:10px 13px;border-top:1px solid var(--border)}
+  .satgame{font-size:11px;color:var(--gray);margin:6px 0 5px;font-family:'IBM Plex Mono',monospace}
+  .chips{display:flex;gap:8px;flex-wrap:wrap}
+  .chip{border:1px solid var(--border);border-radius:4px;padding:5px 10px;font-size:12px;font-family:'IBM Plex Mono',monospace;color:var(--text);cursor:pointer;background:var(--surface)}
+  .chip:hover{border-color:var(--gold);background:rgba(201,162,39,.06)}
+  /* satellite popover (mirrors hover card) */
+  .pop{width:250px;border:1px solid var(--border);border-radius:5px;background:var(--surface);box-shadow:0 10px 30px rgba(0,0,0,.5);padding:12px;margin-top:8px}
+  .offercard{display:flex;gap:10px;align-items:flex-start}
+  .avatar{width:30px;height:30px;border-radius:50%;background:#242833;display:flex;align-items:center;justify-content:center;color:var(--gray);flex:0 0 auto}
+  .offercard .op{font-weight:700;font-size:13px}
+  .offercard .obl{color:var(--gray);font-size:12px}
+  .ostats{display:flex;gap:14px;margin:8px 0 6px;font-family:'IBM Plex Mono',monospace;font-size:11.5px}
+  .scar{color:var(--gray);font-size:11px;font-style:italic;opacity:.8}
+  .poprow{display:flex;gap:8px;margin-top:9px}
+
+  .note{color:var(--gray);font-size:12px;margin-top:18px;line-height:1.6;border-top:1px solid var(--border);padding-top:12px}
+  h2{font-size:14px;margin:20px 0 4px;font-weight:600;font-family:'Cinzel',serif;letter-spacing:.04em}
+  @media (prefers-reduced-motion:no-preference){
+    @keyframes tw{0%,100%{opacity:.25}50%{opacity:.9}}
+    .twk{animation:tw 3.6s ease-in-out infinite}
+    .twk:nth-child(3n){animation-duration:5s} .twk:nth-child(4n){animation-duration:4.3s}
+  }
+</style>
+</head>
+<body>
+
+<div class="kicker">◈ The constellation</div>
+<h1>Games</h1>
+<div class="updated">generated 2026-07-03 11:50 AM</div>
+
+<div class="controls">
+  <span class="sel"><span class="lab">Platform</span><span>Underdog <svg class="ic" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span></span>
+  <span class="sel" style="min-width:250px"><span class="lab">Game</span><span>Las Vegas vs Indiana · Jul 3 <svg class="ic" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span></span>
+</div>
+
+<!-- nebula game hero -->
+<div class="hero">
+  <div class="glyphwrap">
+    <!-- shootout = comet (matches Tonight glyph vocabulary) -->
+    <svg viewBox="0 0 74 74" width="74" height="74">
+      <defs><radialGradient id="ch" cx="72%" cy="28%" r="60%">
+        <stop offset="0%" stop-color="#fff"/><stop offset="35%" stop-color="var(--gold)"/><stop offset="100%" stop-color="#7a5f18"/>
+      </radialGradient></defs>
+      <path d="M50 22 L20 52" stroke="var(--gold)" stroke-width="2.4" stroke-linecap="round" opacity=".8"/>
+      <path d="M54 20 L16 50" stroke="var(--gold)" stroke-width="1.1" stroke-linecap="round" opacity=".45"/>
+      <path d="M52 26 L24 54" stroke="var(--gold)" stroke-width="1.1" stroke-linecap="round" opacity=".4"/>
+      <circle cx="52" cy="22" r="7" fill="url(#ch)"/>
+    </svg>
+  </div>
+  <div class="match">Las Vegas <span class="dim" style="font-size:15px;font-weight:400">vs</span> Indiana</div>
+  <div class="sub"><span class="headline" style="font-size:17px">The Aces set a track meet the Fever can't match.</span></div>
+  <div class="stats">
+    <span class="stat"><span class="k">Total</span><span class="v">168.5</span></span>
+    <span class="stat"><span class="k">Spread</span><span class="v">LVA -5.5</span></span>
+    <span class="stat"><span class="k">Shape</span><span class="v" style="font-family:'IBM Plex Sans';font-size:14px">Shootout</span></span>
+  </div>
+</div>
+
+<!-- story preloader -->
+<div class="preload">
+  <span class="lab">Preload a story</span>
+  <span class="pick">The Aces pull away late ▾</span>
+  <span class="toggle"><span class="on">Bankroll Builder</span><span>Shoot the Moon</span></span>
+  <span class="dim mono">3 legs · EV +12.4%</span>
+  <button class="btn primary">Seed builder</button>
+</div>
+
+<h2>Star map</h2>
+<div class="dim" style="margin:2px 0 6px">Every model-liked leg is a star, sized by edge. Tap to add/remove. Gold ties appear only between two picked legs — dashed if the pair fights the thesis.</div>
+
+<!-- constellation sky -->
+<div class="skywrap">
+  <span class="teamtag l">LAS VEGAS</span><span class="teamtag r">INDIANA</span>
+  <svg viewBox="0 0 760 380" width="100%" style="display:block">
+    <defs>
+      <symbol id="star5" viewBox="0 0 24 24"><path d="M12 1.6l3.09 6.9 7.51.7-5.66 5.02 1.68 7.38L12 17.9l-6.62 3.7 1.68-7.38L1.4 9.2l7.51-.7z"/></symbol>
+      <symbol id="spk" viewBox="0 0 10 10"><path d="M5 0 L5.9 4.1 L10 5 L5.9 5.9 L5 10 L4.1 5.9 L0 5 L4.1 4.1 Z"/></symbol>
+    </defs>
+
+    <!-- faint decorative starfield (4-pt sparkles + dots) -->
+    <g fill="#9fb0c8">
+      <use class="twk" href="#spk" x="88" y="60" width="7" height="7" opacity=".5"/>
+      <use class="twk" href="#spk" x="300" y="40" width="5" height="5" opacity=".4"/>
+      <use class="twk" href="#spk" x="560" y="330" width="6" height="6" opacity=".45"/>
+      <use class="twk" href="#spk" x="690" y="150" width="5" height="5" opacity=".4"/>
+      <circle cx="200" cy="340" r="1.2" opacity=".5"/><circle cx="420" cy="330" r="1" opacity=".4"/>
+      <circle cx="640" cy="250" r="1.2" opacity=".5"/><circle cx="150" cy="60" r="1" opacity=".4"/>
+      <circle cx="480" cy="55" r="1.1" opacity=".45"/><circle cx="360" cy="200" r="1" opacity=".35"/>
+    </g>
+
+    <!-- correlation edges (only among the 3 picked legs) -->
+    <!-- Wilson(150,200) — Boston(500,255) : cross-team, moderate + -->
+    <line x1="150" y1="200" x2="500" y2="255" stroke="var(--gold)" stroke-width="3.6" opacity=".55"/>
+    <!-- Clark(605,190) — Boston(500,255) : same-team IND, strong + -->
+    <line x1="605" y1="190" x2="500" y2="255" stroke="var(--gold)" stroke-width="6" opacity=".8"/>
+    <!-- Wilson(150,200) — Clark(605,190) : negative, dashed "fights thesis" -->
+    <line x1="150" y1="200" x2="605" y2="190" stroke="var(--gold)" stroke-width="1.4" stroke-dasharray="3 4" opacity=".4"/>
+
+    <!-- candidate stars (desaturated + dim) -->
+    <use href="#star5" x="94" y="88"  width="26" height="26" fill="var(--lva-dim)" opacity=".45"/>
+    <use href="#star5" x="104" y="286" width="24" height="24" fill="var(--lva-dim)" opacity=".45"/>
+    <use href="#star5" x="632" y="80"  width="24" height="24" fill="var(--ind-dim)" opacity=".45"/>
+    <use href="#star5" x="638" y="292" width="26" height="26" fill="var(--ind-dim)" opacity=".45"/>
+    <text x="107" y="84" fill="var(--gray)" opacity=".55" class="slab" text-anchor="middle">Plum Points o18.5</text>
+    <text x="116" y="282" fill="var(--gray)" opacity=".55" class="slab" text-anchor="middle">Young Assists o5.5</text>
+    <text x="644" y="76" fill="var(--gray)" opacity=".55" class="slab" text-anchor="middle">Smith Rebounds o6.5</text>
+    <text x="651" y="288" fill="var(--gray)" opacity=".55" class="slab" text-anchor="middle">Mitchell Points u17.5</text>
+
+    <!-- active stars (full team color, bright labels) -->
+    <use href="#star5" x="120" y="170" width="60" height="60" fill="var(--lva)"/>
+    <use href="#star5" x="580" y="165" width="50" height="50" fill="var(--ind)"/>
+    <use href="#star5" x="476" y="231" width="48" height="48" fill="var(--ind)"/>
+    <text x="150" y="248" fill="#e9ecf2" class="slab" text-anchor="middle" font-weight="600">Wilson Points o23.5</text>
+    <text x="605" y="150" fill="#e9ecf2" class="slab" text-anchor="middle" font-weight="600">Clark Assists u8.5</text>
+    <text x="500" y="300" fill="#e9ecf2" class="slab" text-anchor="middle" font-weight="600">Boston Rebounds o8.5</text>
+  </svg>
+
+  <!-- floating hover card on the Boston star -->
+  <div class="hovercard" style="left:520px;top:150px">
+    <div class="hp">Aliyah Boston</div>
+    <div class="hm">Rebounds · Over 8.5</div>
+    <div class="hstat">Win 58% · 1.85x · Kelly 6%</div>
+    <div class="hfoot"><span class="inslip">◆ IN SLIP · TAP TO REMOVE</span><span class="detail">Full detail →</span></div>
+  </div>
+</div>
+
+<!-- live slip summary -->
+<div class="slip">
+  <div class="headline" style="font-size:19px;margin-bottom:2px">The Aces set the pace; Boston owns the glass beneath.</div>
+  <div class="dim">3 legs · Las Vegas + Indiana</div>
+  <div class="metrics">
+    <span class="metric"><span class="k">Legs</span><span class="v">3 · Flex</span></span>
+    <span class="metric"><span class="k">Independent</span><span class="v">18.2%</span></span>
+    <span class="metric"><span class="k">With correlation</span><span class="v">21.0%</span><span class="d">+2.8%</span></span>
+    <span class="metric"><span class="k">Payout</span><span class="v">6.00x</span></span>
+    <span class="metric"><span class="k">EV</span><span class="v" style="color:var(--green)">+14.5%</span></span>
+  </div>
+  <div class="dim">Kelly stake <span class="mono">$12</span> of <span class="mono">$1,000</span> &middot; pairing-block risk arrives with the correlation-block model.</div>
+  <div class="lockrow"><button class="btn primary">Lock it in!</button><button class="btn ghost">Clear</button></div>
+</div>
+
+<!-- satellites -->
+<div class="exp">
+  <div class="eh">Add a leg from another game <span class="chev">▾</span></div>
+  <div class="eb">
+    <div class="satgame">NYK vs SAS</div>
+    <div class="chips"><span class="chip">Brunson Points o25.5</span><span class="chip">Wembanyama Rebounds o11.5</span></div>
+    <!-- one popover open, mirroring the constellation hover card -->
+    <div class="pop">
+      <div class="offercard">
+        <span class="avatar"><svg class="ic" viewBox="0 0 24 24" style="width:16px;height:16px"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></span>
+        <div><div class="op">Jalen Brunson</div><div class="obl">Over 25.5 Points</div></div>
+      </div>
+      <div class="ostats"><span>Win <b>58%</b></span><span>1.85x</span><span>Kelly <b>4%</b></span></div>
+      <div class="scar">Last 5 — coming soon</div>
+      <div class="poprow"><button class="btn primary" style="flex:1">Add to slip</button><button class="btn ghost" style="flex:1">Full detail →</button></div>
+    </div>
+    <div class="satgame" style="margin-top:12px">MIA vs ORL</div>
+    <div class="chips"><span class="chip">Herro 3-Pt Made o2.5</span></div>
+  </div>
+</div>
+<div class="exp">
+  <div class="eh">Add a leg the model doesn't like <span class="chev">▸</span></div>
+</div>
+
+<div class="note">
+  <b>P8 decisions on this surface:</b>
+  <br>• <b>Team fills from <span class="mono">team_assets.json</span></b> (previewed: LVA red, IND navy) — the constellation's core grammar (star fill = team). <b>Never gold</b>: gold is the correlation-edge color, so a gold-branded team (Fever/Warriors) maps to its non-gold primary. Candidate = same hue desaturated + dimmed (no ring).
+  <br>• <b>Hover / detail card</b> restyled to the celestial skin: team-rail, Plex name, verbose market, mono stats, blue "Full detail". <b>Satellite popover cards mirror it</b> (same card language).
+  <br>• <b>Nebula game hero</b> (matchup-first, shape glyph from the Tonight vocabulary, Cormorant-italic gold prophecy subline, Total/Spread/Shape stats).
+  <br>• <b>Verbose market names here too</b> — incl. star labels (<span class="mono">Points</span>, not <span class="mono">PTS</span>). <i>Open q:</i> combos (<span class="mono">Pts+Rebs+Asts</span>) get long in a tight star label — want an optional short form in the display map for constrained contexts, or truncate?
+  <br>• Thesis headline = live deterministic, Cormorant italic gold.
+</div>
+
+<script>
+const v0=fetch('/version.txt').then(r=>r.text()).catch(()=>'');
+setInterval(async()=>{try{const a=await v0;const b=await fetch('/version.txt?'+Date.now()).then(r=>r.text());if(a&&a!==b)location.reload()}catch(e){}},2000);
+</script>
+</body>
+</html>

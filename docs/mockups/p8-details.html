@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P8 · Details dialog — Themed workbench vs Prophecy dossier</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Cinzel:wght@500;600&family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0E1117; --surface:#1A1D24; --text:#E6E9EF; --border:#2A2E37;
+    --primary:#2E6BE6; --link:#5B8DEF; --green:#1F9D55; --red:#E5484D;
+    --orange:#F5A524; --gray:#8A91A0; --gold:#C9A227;
+  }
+  *{box-sizing:border-box}
+  body{margin:0 auto;max-width:1060px;background:var(--bg);color:var(--text);
+    font-family:'IBM Plex Sans',sans-serif;font-size:14px;line-height:1.5;padding:28px 24px 64px}
+  h1{font-size:21px;margin:0 0 4px;font-weight:700}
+  .sub{color:var(--gray);margin:0 0 8px;max-width:74ch}
+  .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+  .kicker{font-family:'Cinzel',serif;font-weight:600;letter-spacing:.26em;text-transform:uppercase;color:var(--gold)}
+  .goldrule{height:1px;border:0;background:linear-gradient(90deg,var(--gold),transparent)}
+  svg.ic{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-0.12em}
+  .badge{font-family:'IBM Plex Mono',monospace;padding:1px 7px;border-radius:3px;font-size:13px;border:1px solid;white-space:nowrap}
+  .badge.g{color:var(--green);border-color:var(--green)} .badge.r{color:var(--red);border-color:var(--red)}
+
+  .variant-tag{font-family:'Cinzel',serif;font-size:11px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--gray);margin:30px 0 8px;display:flex;align-items:center;gap:10px}
+  .variant-tag b{color:var(--gold)}
+  .variant-tag::after{content:"";flex:1;height:1px;background:var(--border)}
+
+  /* ---- the modal ---- */
+  .modal{background:var(--surface);border:1px solid var(--border);border-radius:4px;
+    box-shadow:0 18px 60px rgba(0,0,0,.5);overflow:hidden;max-width:860px}
+  .nav{display:flex;gap:6px;padding:10px 16px 0}
+  .navbtn{display:inline-flex;align-items:center;gap:5px;background:transparent;border:1px solid var(--border);
+    color:var(--gray);border-radius:4px;padding:3px 9px;font-size:12px;font-family:inherit;cursor:pointer}
+  .body{padding:6px 20px 20px}
+
+  /* ---- header bands ---- */
+  .head{padding:12px 0 0}
+  .head .top{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
+  .head .name-plex{font-size:21px;font-weight:700;margin:2px 0 1px}
+  .head .name-corm{font-family:'Cormorant Garamond',serif;font-weight:600;font-size:33px;line-height:1.02;margin:1px 0}
+  .head .facts{color:var(--gray);font-size:13px}
+  .band-nebula{position:relative;overflow:hidden;border-radius:4px;padding:12px 14px 6px;margin-top:2px;
+    background:
+      radial-gradient(ellipse at 16% -40%, rgba(46,107,230,.16), transparent 52%),
+      radial-gradient(ellipse at 92% 0%, rgba(201,162,39,.10), transparent 46%)}
+
+  /* ---- case ---- */
+  .case{display:flex;gap:11px;margin:14px 0 4px;padding:10px 12px;background:var(--bg);
+    border:1px solid var(--border);border-left:3px solid var(--gold);border-radius:4px}
+  .case .lab{font-family:'Cinzel',serif;font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--gold);flex:0 0 46px;padding-top:2px}
+  .case p{margin:0;font-size:13px}
+
+  /* ---- context strip ---- */
+  .ctx{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:14px 0}
+  .metric{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:9px 11px}
+  .metric .k{font-family:'Cinzel',serif;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--gray)}
+  .metric .v{font-family:'IBM Plex Mono',monospace;font-size:19px;font-weight:500;margin-top:2px}
+  .metric .d{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--gray);margin-top:1px}
+
+  /* ---- tab bar ---- */
+  .tabs{display:flex;gap:22px;border-bottom:1px solid var(--border);margin-top:6px}
+  .tab{font-family:'Cinzel',serif;font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--gray);
+    padding:8px 0;position:relative;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  .tab.on{color:var(--gold)}
+  .tab.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--gold)}
+  .tabbody{padding:16px 2px 2px;color:var(--gray);font-size:12px}
+  .stub{border:1px dashed var(--border);border-radius:4px;padding:22px;text-align:center;color:var(--gray);font-size:12px}
+  .note{color:var(--gray);font-size:12px;margin-top:10px;line-height:1.5}
+  .diffmark{color:var(--gold);font-family:'IBM Plex Mono',monospace;font-size:11px}
+</style>
+</head>
+<body>
+
+<span class="kicker" style="font-size:10.5px">Sportstradamus &middot; Stage P8 &middot; Details</span>
+<h1>Details dialog — two header treatments to choose between</h1>
+<p class="sub">Same <b>case</b>, <b>context strip</b> and <b>tab bar</b> in both (already themed). Only the
+<span class="diffmark">header band</span> differs — that's your pick. Tab bodies are stubbed; I'll mock the five tabs
+in whichever header style you choose.</p>
+
+<!-- ================= THEMED WORKBENCH ================= -->
+<div class="variant-tag">Option 1 &middot; <b>Themed workbench</b> &nbsp;— sober header, Cinzel kicker + gold hairline, no nebula</div>
+<div class="modal">
+  <div class="nav">
+    <button class="navbtn"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>Close</button>
+    <button class="navbtn" style="opacity:.5"><svg class="ic" viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Back</button>
+  </div>
+  <div class="body">
+    <div class="head">
+      <div class="kicker" style="font-size:10px"><span class="diffmark">◈</span> WNBA &middot; Underdog</div>
+      <div class="top">
+        <div>
+          <div class="name-plex">A'ja Wilson &mdash; Points</div>
+          <div class="facts">Over 23.5 &middot; Las Vegas vs Indiana &middot; 7:00</div>
+        </div>
+        <span class="badge g">+11% edge</span>
+      </div>
+      <hr class="goldrule" style="margin:11px 0 0">
+    </div>
+
+    <div class="case">
+      <div class="lab">The case</div>
+      <p>Cleared 23.5 in 8 of 10. Fever allow +9% to opposing forwards. Model 61% vs book 52% &mdash; the edge is the disagreement.</p>
+    </div>
+
+    <div class="ctx">
+      <div class="metric"><div class="k">Implied team total</div><div class="v">88.2</div><div class="d">+3.1 vs avg</div></div>
+      <div class="metric"><div class="k">Moneyline</div><div class="v">&minus;180</div><div class="d">&nbsp;</div></div>
+      <div class="metric"><div class="k">Game shape</div><div class="v" style="font-size:15px">Shootout</div><div class="d">fast total</div></div>
+      <div class="metric"><div class="k">DVPOA</div><div class="v">+9.0%</div><div class="d">vs forwards</div></div>
+    </div>
+
+    <div class="tabs">
+      <span class="tab on"><svg class="ic" viewBox="0 0 24 24"><path d="M3 3v18h18M7 15l4-4 3 3 5-6"/></svg>History</span>
+      <span class="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 16v-5M12 16V8M16 16v-3"/></svg>Model</span>
+      <span class="tab"><svg class="ic" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><circle cx="17.5" cy="9" r="2.2"/></svg>Comps</span>
+      <span class="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M4 14l4-4 3 3 6-7M14 5h4v4"/></svg>Other</span>
+      <span class="tab"><svg class="ic" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="9" r="2.5"/><circle cx="9" cy="18" r="2.5"/><path d="M8 7l8 1.5M8 16l1-8"/></svg>Correlated</span>
+    </div>
+    <div class="tabbody">
+      <div class="stub">History tab &middot; last-10 bars vs line + opponent filter<br><span style="opacity:.7">(tab bodies mocked next, in your chosen header style)</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= PROPHECY DOSSIER ================= -->
+<div class="variant-tag">Option 2 &middot; <b>Prophecy dossier</b> &nbsp;— nebula header band + Cormorant player name + oracle kicker</div>
+<div class="modal">
+  <div class="nav">
+    <button class="navbtn"><svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>Close</button>
+    <button class="navbtn" style="opacity:.5"><svg class="ic" viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>Back</button>
+  </div>
+  <div class="body">
+    <div class="band-nebula">
+      <div class="kicker" style="font-size:10px"><span class="diffmark">◈</span> The oracle reads</div>
+      <div class="top">
+        <div>
+          <div class="name-corm">A'ja Wilson</div>
+          <div class="facts mono" style="font-family:'IBM Plex Mono',monospace">Points &middot; Over 23.5 &middot; Las Vegas vs Indiana</div>
+        </div>
+        <span class="badge g">+11% edge</span>
+      </div>
+      <hr class="goldrule" style="margin:10px 0 0">
+    </div>
+
+    <div class="case">
+      <div class="lab">The case</div>
+      <p>Cleared 23.5 in 8 of 10. Fever allow +9% to opposing forwards. Model 61% vs book 52% &mdash; the edge is the disagreement.</p>
+    </div>
+
+    <div class="ctx">
+      <div class="metric"><div class="k">Implied team total</div><div class="v">88.2</div><div class="d">+3.1 vs avg</div></div>
+      <div class="metric"><div class="k">Moneyline</div><div class="v">&minus;180</div><div class="d">&nbsp;</div></div>
+      <div class="metric"><div class="k">Game shape</div><div class="v" style="font-size:15px">Shootout</div><div class="d">fast total</div></div>
+      <div class="metric"><div class="k">DVPOA</div><div class="v">+9.0%</div><div class="d">vs forwards</div></div>
+    </div>
+
+    <div class="tabs">
+      <span class="tab on"><svg class="ic" viewBox="0 0 24 24"><path d="M3 3v18h18M7 15l4-4 3 3 5-6"/></svg>History</span>
+      <span class="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 16v-5M12 16V8M16 16v-3"/></svg>Model</span>
+      <span class="tab"><svg class="ic" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5"/><circle cx="17.5" cy="9" r="2.2"/></svg>Comps</span>
+      <span class="tab"><svg class="ic" viewBox="0 0 24 24"><path d="M4 14l4-4 3 3 6-7M14 5h4v4"/></svg>Other</span>
+      <span class="tab"><svg class="ic" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="9" r="2.5"/><circle cx="9" cy="18" r="2.5"/><path d="M8 7l8 1.5M8 16l1-8"/></svg>Correlated</span>
+    </div>
+    <div class="tabbody">
+      <div class="stub">History tab &middot; last-10 bars vs line + opponent filter<br><span style="opacity:.7">(tab bodies mocked next, in your chosen header style)</span></div>
+    </div>
+  </div>
+</div>
+
+<p class="note"><b>What actually differs:</b> the dossier adds a faint nebula wash behind the header, an evocative
+Cinzel kicker ("The oracle reads"), and renders the player name in Cormorant. Everything else is shared and
+identical. <br><b>Content honesty:</b> there is no per-offer prophecy <i>sentence</i> (the p3b engine writes those
+per parlay, not per leg), and DESIGN.md forbids numerals in Cormorant — so the dossier's display face is the player
+name only; the market/line/pick stay in Plex. If you want a real per-offer poetic line later, that's a new
+generator, not a styling choice.</p>
+
+<script>
+const v0=fetch('/version.txt').then(r=>r.text()).catch(()=>'');
+setInterval(async()=>{try{const a=await v0;const b=await fetch('/version.txt?'+Date.now()).then(r=>r.text());if(a&&a!==b)location.reload()}catch(e){}},2000);
+</script>
+</body>
+</html>
