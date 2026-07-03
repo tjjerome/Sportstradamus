@@ -21,7 +21,6 @@ the expensive MC stays bounded.
 
 from __future__ import annotations
 
-import json
 import math
 from collections.abc import Mapping, Sequence
 from itertools import combinations
@@ -29,6 +28,9 @@ from itertools import combinations
 import numpy as np
 import pandas as pd
 
+from sportstradamus.analysis import _leg_market_map
+from sportstradamus.helpers import stat_map
+from sportstradamus.leg_schema import build_leg
 from sportstradamus.prediction.parlay import (
     _PAYOUT_CLIP_HI,
     _PAYOUT_CLIP_LO,
@@ -36,10 +38,11 @@ from sportstradamus.prediction.parlay import (
     GameScoringContext,
     _parlay_payout_prob,
     _psd_or_none,
+    _resolve_leg_stat,
 )
 from sportstradamus.prediction.stories.context import GameCtx, ctxs_from_frame
 from sportstradamus.prediction.stories.engine import thesis_variants
-from sportstradamus.prediction.stories.legs import enrich_legs, parse_leg, validate_parlay_legs
+from sportstradamus.prediction.stories.legs import enrich_legs, validate_parlay_legs
 from sportstradamus.prediction.stories.thesis import next_unique_variant
 from sportstradamus.prediction.stories.why import story_dek
 
@@ -108,16 +111,17 @@ def _stories_for_game(
     require_both = (
         len({sctx.bet_df[i].get("Team") for i in edge if sctx.bet_df[i].get("Team")}) >= 2
     )
+    new_map = _leg_market_map(sctx.league, sctx.platform, stat_map)
     scored = []
     for cluster in _cluster_strong_legs(edge, sctx.g.C):
-        builder, moon = _best_subsets(cluster, sctx, require_both_teams=require_both)
+        builder, moon = _best_subsets(cluster, sctx, new_map, require_both_teams=require_both)
         if builder is not None:
             scored.append((cluster, builder, moon))
     scored.sort(
         key=lambda cb: (
             -cb[2]["model_ev"],
             -max(edge[i] for i in cb[0]),
-            tuple(sorted(cb[2]["legs"])),
+            cb[2]["bet_id"],
         )
     )
     rows: list[dict] = []
@@ -184,7 +188,11 @@ def _grow_cluster(
 
 
 def _best_subsets(
-    cluster: Sequence[int], sctx: GameScoringContext, *, require_both_teams: bool = True
+    cluster: Sequence[int],
+    sctx: GameScoringContext,
+    new_map: dict,
+    *,
+    require_both_teams: bool = True,
 ) -> tuple[dict | None, dict | None]:
     """The (Builder, Moon) parlays for one cluster, or (None, None) if degenerate.
 
@@ -205,9 +213,9 @@ def _best_subsets(
     ]
     if not proxies:
         return None, None
-    scored = [_score_subset(bet_id, sctx) for bet_id in _shortlist(proxies)]
-    builder = min(scored, key=lambda s: (-s["G"], s["bet_size"], tuple(sorted(s["legs"]))))
-    moon = min(scored, key=lambda s: (-s["model_ev"], -s["bet_size"], tuple(sorted(s["legs"]))))
+    scored = [_score_subset(bet_id, sctx, new_map) for bet_id in _shortlist(proxies)]
+    builder = min(scored, key=lambda s: (-s["G"], s["bet_size"], s["bet_id"]))
+    moon = min(scored, key=lambda s: (-s["model_ev"], -s["bet_size"], s["bet_id"]))
     if moon["model_ev"] <= _MENU_MIN_MOON_EV:
         return None, None
     return builder, moon
@@ -229,7 +237,7 @@ def _independent(bet_id: Sequence[int], sctx: GameScoringContext) -> tuple[float
     return p_ind * payout, _log_growth(p_ind, payout)
 
 
-def _score_subset(bet_id: Sequence[int], sctx: GameScoringContext) -> dict:
+def _score_subset(bet_id: Sequence[int], sctx: GameScoringContext, new_map: dict) -> dict:
     """Exact copula score for one subset (reuses parlay's gate-free scorer)."""
     size = len(bet_id)
     g = sctx.g
@@ -257,7 +265,19 @@ def _score_subset(bet_id: Sequence[int], sctx: GameScoringContext) -> dict:
         "win_prob": win_prob,
         "G": _log_growth(win_prob, payout),
         "kelly_stake": _kelly_fraction(win_prob, payout),
-        "legs": [sctx.bet_df[i]["Desc"] for i in bet_id],
+        "legs": [
+            build_leg(
+                {
+                    **sctx.bet_df[i],
+                    "League": sctx.league,
+                    "Game": sctx.game,
+                    "Date": sctx.date,
+                    "Platform": sctx.platform,
+                    "Stat": _resolve_leg_stat(sctx.bet_df[i]["Market"], new_map),
+                }
+            )
+            for i in bet_id
+        ],
     }
 
 
@@ -271,6 +291,12 @@ def _boost_payout(bet_id: Sequence[int], sctx: GameScoringContext) -> tuple[floa
         np.clip(boost * sctx.payout_base_by_size[size], _PAYOUT_CLIP_LO, _PAYOUT_CLIP_HI)
     )
     return boost, payout
+
+
+def _leg_dict(sctx: GameScoringContext, i: int) -> dict:
+    """Minimal lowercase leg dict for ``enrich_legs`` — no ``build_leg`` needed here."""
+    row = sctx.bet_df[i]
+    return {"player": row["Player"], "bet": row["Bet"], "line": row["Line"], "market": row["Market"]}
 
 
 def _kelly_fraction(p: float, payout: float) -> float:
@@ -305,7 +331,7 @@ def _row(
         "story_id": story_id,
         "objective": objective,
         "headline": headline,
-        "legs": json.dumps(sub["legs"]),
+        "legs": sub["legs"],
         "joint_p": sub["win_prob"],
         "model_ev": sub["model_ev"],
         "kelly_stake": sub["kelly_stake"],
@@ -330,20 +356,13 @@ def _story_prose(
     the union and blank rather than name a player only one side carries.
     ``seen`` dedupes headlines within the (platform, game) menu.
     """
-    per_sub = [
-        [p for p in (parse_leg(sctx.bet_df[i]["Desc"]) for i in sub["bet_id"]) if p]
-        for sub in (builder, moon)
-    ]
+    per_sub = [[_leg_dict(sctx, i) for i in sub["bet_id"]] for sub in (builder, moon)]
     core = sorted(set(builder["bet_id"]) & set(moon["bet_id"]))
-    parsed = (
-        [p for p in (parse_leg(sctx.bet_df[i]["Desc"]) for i in core) if p]
-        if core
-        else per_sub[0] + per_sub[1]
-    )
+    parsed = [_leg_dict(sctx, i) for i in core] if core else per_sub[0] + per_sub[1]
     variants, vi, subject = thesis_variants(enrich_legs(parsed, offers), ctxs)
     dek = story_dek(core, sctx, offers)
     named = subject.get("p")
-    if named and any(named not in {leg["Player"] for leg in legs} for legs in per_sub):
+    if named and any(named not in {leg["player"] for leg in legs} for legs in per_sub):
         return "", dek
     headline = next_unique_variant(variants, vi, seen) if variants else ""
     if headline:

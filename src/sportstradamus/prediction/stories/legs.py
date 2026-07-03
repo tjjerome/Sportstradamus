@@ -131,23 +131,25 @@ def _stat_category(market: str) -> str:
 
 
 def enrich_legs(parsed: list[dict], offers: pd.DataFrame) -> list[Leg]:
-    """Attach each parsed leg's offer context (canonical market, game, team, position).
+    """Attach each leg's offer context (canonical market, game, team, position).
 
-    Joins on ``(Player, Bet, Line)`` — shared verbatim by the leg string and the
-    offers frame. A leg with no matching offer keeps its parsed display market
-    and carries no game/team/position (it simply can't anchor a unit/stack).
+    Joins on ``(Player, Bet, Line)`` against the offers frame's uppercase
+    columns; ``parsed`` legs carry the canonical lowercase schema keys
+    (``player``/``bet``/``line``/``market``). A leg with no matching offer
+    keeps its own market and carries no game/team/position (it simply can't
+    anchor a unit/stack).
     """
     idx = offer_index(offers)
     out: list[Leg] = []
     for leg in parsed:
-        match = idx.get((leg["Player"], leg["Bet"], leg["Line"]))
-        market = (match.get("Market") if match else None) or leg["Market"]
+        match = idx.get((leg["player"], leg["bet"], leg["line"]))
+        market = (match.get("Market") if match else None) or leg["market"]
         win_prob = match.get("Win Prob") if match else None
         out.append(
             Leg(
-                player=leg["Player"],
-                bet=leg["Bet"],
-                line=leg["Line"],
+                player=leg["player"],
+                bet=leg["bet"],
+                line=leg["line"],
                 market=market,
                 game=match.get("Game") if match else None,
                 team=match.get("Team") if match else None,
