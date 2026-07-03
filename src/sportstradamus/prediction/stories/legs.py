@@ -1,10 +1,13 @@
 """Parlay-leg parsing, stat-category vocabulary, and offer enrichment.
 
-``parse_leg`` recovers a leg's Player/Bet/Line/Market from its display string
-(``"{Player} {Bet} {Line} {Market} - {Model P}%, {Boost}x"``, built in
-``prediction/correlation.py``). ``enrich_legs`` joins those parsed legs back to
-the scored offers frame to attach each leg's canonical market, game, team, and
-depth-chart position — the fields the archetype engine routes on. ``_stat_category``
+``enrich_legs`` joins canonical lowercase-keyed legs (from ``lower_leg`` here
+or ``sportstradamus.leg_schema.build_leg``) back to the scored offers frame to
+attach each leg's canonical market, game, team, and depth-chart position — the
+fields the archetype engine routes on. ``parse_leg`` recovers a leg's
+Player/Bet/Line/Market from the retired display-string encoding
+(``"{Player} {Bet} {Line} {Market} - {Model P}%, {Boost}x"``) — no longer built
+by the parlay pipeline, but still the shape of the dashboard's own slip-state
+``Desc`` field, so this stays live until that path migrates. ``_stat_category``
 maps a market to the coarse category the phrase bank is keyed by.
 """
 
