@@ -18,7 +18,7 @@ import pandas as pd
 
 from sportstradamus.leg_schema import leg_label
 from sportstradamus.prediction.stories.bank import why_bank
-from sportstradamus.prediction.stories.legs import offer_index
+from sportstradamus.prediction.stories.legs import lower_leg, offer_index
 
 # Implied-probability gap (model vs book hit prob) below which the two sides
 # effectively agree and the edge clause is dropped.
@@ -167,17 +167,7 @@ def story_dek(core_bet_ids: Sequence[int], sctx, offers: pd.DataFrame) -> str:
     sub-2-leg core carries no cluster clause and missing offer facts drop
     their clauses; everything deterministic via the md5 rotation.
     """
-    descs = [
-        leg_label(
-            {
-                "player": sctx.bet_df[i]["Player"],
-                "bet": sctx.bet_df[i]["Bet"],
-                "line": sctx.bet_df[i]["Line"],
-                "market": sctx.bet_df[i]["Market"],
-            }
-        )
-        for i in core_bet_ids
-    ]
+    descs = [leg_label(lower_leg(sctx.bet_df[i])) for i in core_bet_ids]
     seed_tail = "|".join(sorted(descs)) + f"|{sctx.date}"
     clauses = _cluster_clause(core_bet_ids, sctx, seed_tail)
     anchor = _dek_anchor(core_bet_ids, sctx, offers)

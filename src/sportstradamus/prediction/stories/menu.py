@@ -42,7 +42,7 @@ from sportstradamus.prediction.parlay import (
 )
 from sportstradamus.prediction.stories.context import GameCtx, ctxs_from_frame
 from sportstradamus.prediction.stories.engine import thesis_variants
-from sportstradamus.prediction.stories.legs import enrich_legs, validate_parlay_legs
+from sportstradamus.prediction.stories.legs import enrich_legs, lower_leg, validate_parlay_legs
 from sportstradamus.prediction.stories.thesis import next_unique_variant
 from sportstradamus.prediction.stories.why import story_dek
 
@@ -293,12 +293,6 @@ def _boost_payout(bet_id: Sequence[int], sctx: GameScoringContext) -> tuple[floa
     return boost, payout
 
 
-def _leg_dict(sctx: GameScoringContext, i: int) -> dict:
-    """Minimal lowercase leg dict for ``enrich_legs`` — no ``build_leg`` needed here."""
-    row = sctx.bet_df[i]
-    return {"player": row["Player"], "bet": row["Bet"], "line": row["Line"], "market": row["Market"]}
-
-
 def _kelly_fraction(p: float, payout: float) -> float:
     """Full-Kelly fraction of bankroll for a single bet; 0 when there's no edge."""
     b = payout - 1.0
@@ -356,9 +350,9 @@ def _story_prose(
     the union and blank rather than name a player only one side carries.
     ``seen`` dedupes headlines within the (platform, game) menu.
     """
-    per_sub = [[_leg_dict(sctx, i) for i in sub["bet_id"]] for sub in (builder, moon)]
+    per_sub = [[lower_leg(sctx.bet_df[i]) for i in sub["bet_id"]] for sub in (builder, moon)]
     core = sorted(set(builder["bet_id"]) & set(moon["bet_id"]))
-    parsed = [_leg_dict(sctx, i) for i in core] if core else per_sub[0] + per_sub[1]
+    parsed = [lower_leg(sctx.bet_df[i]) for i in core] if core else per_sub[0] + per_sub[1]
     variants, vi, subject = thesis_variants(enrich_legs(parsed, offers), ctxs)
     dek = story_dek(core, sctx, offers)
     named = subject.get("p")

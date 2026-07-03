@@ -130,6 +130,16 @@ def _stat_category(market: str) -> str:
     return "production"
 
 
+def lower_leg(row: Mapping) -> dict:
+    """Map a canonical uppercase-keyed leg row to the lowercase keys ``enrich_legs`` wants."""
+    return {
+        "player": row["Player"],
+        "bet": row["Bet"],
+        "line": row["Line"],
+        "market": row["Market"],
+    }
+
+
 def enrich_legs(parsed: list[dict], offers: pd.DataFrame) -> list[Leg]:
     """Attach each leg's offer context (canonical market, game, team, position).
 

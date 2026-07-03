@@ -39,7 +39,7 @@ from sportstradamus.prediction.parlay import (
     _psd_or_none,
 )
 from sportstradamus.prediction.stories.engine import thesis_variants
-from sportstradamus.prediction.stories.legs import enrich_legs, parse_leg
+from sportstradamus.prediction.stories.legs import enrich_legs, lower_leg, parse_leg
 from sportstradamus.strategies.kelly import fractional_kelly_stake
 
 # norm.ppf blows up at the open-interval ends; clip win probs just inside.
@@ -152,9 +152,6 @@ def slip_headline(legs: Sequence[Mapping], offers: pd.DataFrame, ctxs: Mapping) 
     # Canonicalize leg order so the headline is a pure function of the leg-set:
     # the engine's md5 seed already sorts, but routing tie-breaks can read order.
     parsed.sort(key=lambda p: (p["Player"], p["Market"], p["Bet"], p["Line"]))
-    lowered = [
-        {"player": p["Player"], "bet": p["Bet"], "line": p["Line"], "market": p["Market"]}
-        for p in parsed
-    ]
+    lowered = [lower_leg(p) for p in parsed]
     variants, vi, _ = thesis_variants(enrich_legs(lowered, offers), ctxs)
     return variants[vi] if variants else ""
