@@ -18,12 +18,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from sportstradamus.leg_schema import leg_label
 from sportstradamus.prediction.parlay import (
     _PSD_EIG_TOLERANCE,
     GameArrays,
     _expected_payout_with_pushes,
     _nearest_psd,
     _payout_curve_for,
+    _resolve_leg_stat,
     assign_parlay_families,
     beam_search_parlays,
 )
@@ -290,7 +292,9 @@ def _beam_inputs() -> dict:
         i: {
             "Player": f"P{i}",
             "Team": "A" if i < 2 else "B",
-            "Desc": f"P{i} Over 1.5 Market{i}",
+            "League": "NBA",
+            "Game": "A/B",
+            "Date": "2026-01-01",
             "Line": 1.5,
             "Market": f"Market{i}",
             "Bet": "Over",
@@ -322,7 +326,21 @@ def _beam_inputs() -> dict:
         "info": {"Game": "A/B", "Date": "2026-01-01", "League": "NBA", "Platform": "Underdog"},
         "team": "A",
         "opp": "B",
+        "stat_map": {"Underdog": {}},
     }
+
+
+def test_resolve_leg_stat_uses_market_map_when_present() -> None:
+    """A remapped market resolves through ``new_map``; an unmapped one falls back."""
+    new_map = {"Fantasy Points": "fantasy points prizepicks"}
+    assert _resolve_leg_stat("Fantasy Points", new_map) == "fantasy points prizepicks"
+    assert _resolve_leg_stat("PTS", new_map) == "PTS"
+
+
+def test_resolve_leg_stat_strips_h2h_prefix_before_lookup() -> None:
+    """``"H2H "`` is stripped before the map lookup, mirroring the cMarket idiom."""
+    new_map = {"Points": "points"}
+    assert _resolve_leg_stat("H2H Points", new_map) == "points"
 
 
 def test_beam_search_characterization() -> None:
@@ -347,10 +365,10 @@ def test_beam_search_characterization() -> None:
     )
     assert sorted(map(sig, res)) == sorted(expected)
     # Each size-2 parlay must span both teams (covers-team/opp gate).
-    legs2 = {r["Legs"] for r in res if r["Bet Size"] == 2}
+    legs2 = {tuple(leg_label(leg) for leg in r["legs"]) for r in res if r["Bet Size"] == 2}
     assert legs2 == {
-        "P0 Over 1.5 Market0, P2 Over 1.5 Market2",
-        "P0 Over 1.5 Market0, P3 Over 1.5 Market3",
-        "P1 Over 1.5 Market1, P2 Over 1.5 Market2",
-        "P1 Over 1.5 Market1, P3 Over 1.5 Market3",
+        ("P0 Over 1.5 Market0", "P2 Over 1.5 Market2"),
+        ("P0 Over 1.5 Market0", "P3 Over 1.5 Market3"),
+        ("P1 Over 1.5 Market1", "P2 Over 1.5 Market2"),
+        ("P1 Over 1.5 Market1", "P3 Over 1.5 Market3"),
     }

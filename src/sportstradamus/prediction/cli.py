@@ -257,9 +257,12 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     snapshot_offers = pd.concat(all_offers) if all_offers else pd.DataFrame()
     if not parlay_df.empty:
         parlay_df.sort_values("Model EV", ascending=False, inplace=True)
-        parlay_df.drop_duplicates(inplace=True)
+        # subset excludes "legs" (list[dict]) — unhashable, so a full-row dedup
+        # would raise; every other column agreeing implies the same legs too.
+        dedup_cols = [c for c in parlay_df.columns if c != "legs"]
+        parlay_df.drop_duplicates(subset=dedup_cols, inplace=True)
         parlay_df.reset_index(drop=True, inplace=True)
-        parlay_df[["Legs", "Misses", "Profit"]] = np.nan
+        parlay_df[["Legs Resolved", "Misses", "Profit"]] = np.nan
 
     if not snapshot_offers.empty and "O/U" in snapshot_offers.columns:
         snapshot_offers["O/U"] = snapshot_offers.apply(
