@@ -3,7 +3,10 @@
 Mirrors the ``_resolve_parlays`` characterization but over per-leg
 ``analysis._resolve_leg`` (a slip may span games): Power is all-or-nothing,
 Flex/Sleeper cash a partial-hit floor, and a slip whose game has not been played
-stays ``pending``. ``USER_SLIPS_PATH`` is monkeypatched to a tmp file.
+stays ``pending``. Per-leg dicts use the canonical structured-leg shape
+(``player``/``bet``/``line``/``stat`` plus ``league``/``game``/``date``), not
+the retired ``desc`` display-string shape. ``USER_SLIPS_PATH`` is monkeypatched
+to a tmp file.
 """
 
 from __future__ import annotations
@@ -42,12 +45,15 @@ def _slip(slip_id, play_type, legs, date="2026-06-10"):
         "legs": json.dumps(
             [
                 {
-                    "desc": f"{p} {b} {ln:.10g} {m} - 75.0%, 1.00x",
+                    "player": p,
+                    "bet": b,
+                    "line": ln,
+                    "stat": stat_key,
                     "league": "WNBA",
                     "game": g,
                     "date": date,
                 }
-                for p, b, ln, m, g in legs
+                for p, b, ln, stat_key, g in legs
             ]
         ),
     }
