@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from sportstradamus.leg_schema import LEG_FIELDS, build_leg, leg_label
+from sportstradamus.leg_schema import LEG_FIELDS, build_leg, leg_field, leg_label
 
 OFFER_ROW = {
     "Player": "Luka Doncic",
@@ -63,3 +63,22 @@ def test_build_leg_defaults_nan_and_missing_numeric():
     leg = build_leg(row)
     assert leg["stat"] == "PTS"
     assert leg["kelly"] == 0.0
+
+
+def test_leg_field_reads_canonical_lowercase_leg():
+    leg = build_leg(OFFER_ROW)
+    assert leg_field(leg, "player") == "Luka Doncic"
+    assert leg_field(leg, "team") == "LAL"
+    assert leg_field(leg, "line") == 26.5
+
+
+def test_leg_field_reads_raw_offer_row():
+    assert leg_field(OFFER_ROW, "player") == "Luka Doncic"
+    assert leg_field(OFFER_ROW, "market") == "PTS"
+    assert leg_field(OFFER_ROW, "bet") == "Over"
+    assert leg_field(OFFER_ROW, "line") == 26.5
+
+
+def test_leg_field_defaults_when_missing():
+    assert leg_field({"Player": "Luka Doncic"}, "team") is None
+    assert leg_field({"Player": "Luka Doncic"}, "team", "N/A") == "N/A"

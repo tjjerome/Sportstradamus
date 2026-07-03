@@ -139,7 +139,7 @@ def _game_picker(
     (and the selectbox, when listed) to its own game so the map keeps matching the slip;
     clearing the slip frees the picker. Otherwise the Tonight "View game" handoff wins.
     """
-    slip_game = legs[0]["Game"] if legs else ""
+    slip_game = legs[0]["game"] if legs else ""
     if not games:
         if not slip_game:
             st.info("No model-liked legs on this platform right now.")
@@ -150,7 +150,7 @@ def _game_picker(
         _apply_game_preselect(list(games))
     choice = st.selectbox("Game", list(games), key="game_select")
     if slip_game:
-        focus_game, date = slip_game, str(legs[0]["Date"])
+        focus_game, date = slip_game, str(legs[0]["date"])
     else:
         focus_game, date = games[choice]["game"], games[choice]["date"]
     _render_banner(game_context, focus_game, date)

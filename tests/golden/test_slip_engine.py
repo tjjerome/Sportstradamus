@@ -26,14 +26,14 @@ from sportstradamus.prediction.parlay import (
 
 def _leg(player, market, bet, line, p, boost, game, push=0.0):
     return {
-        "Player": player,
-        "Market": market,
-        "Bet": bet,
-        "Line": line,
-        "Win Prob": p,
-        "Push Prob": push,
-        "Boost": boost,
-        "Game": game,
+        "player": player,
+        "market": market,
+        "bet": bet,
+        "line": line,
+        "win_prob": p,
+        "push_prob": push,
+        "boost": boost,
+        "game": game,
     }
 
 

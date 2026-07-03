@@ -12,7 +12,6 @@ re-reads the frame.
 
 from __future__ import annotations
 
-import json
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import datetime
@@ -20,19 +19,16 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from sportstradamus.dashboard.legs import find_offer_idx, parse_leg
+from sportstradamus.dashboard.legs import find_offer_idx
 from sportstradamus.dashboard.slip_engine import SlipScore
 from sportstradamus.helpers.io import upsert_user_slip
+from sportstradamus.leg_schema import build_leg
 
 _LEGS = "slip_legs"
 _PLATFORM = "slip_platform"
 _BUILDER = "slip_builder"  # "constellation" | "simple"
 _BANKROLL = "slip_bankroll"
 _EDIT_ID = "edit_slip_id"
-
-# Leg fields snapshotted from an offer row; the rest of the app reads these.
-# Team feeds the constellation's both-teams validity gate; K its star-size edge.
-_SNAPSHOT_COLS = ("Player", "Market", "Bet", "Game", "League", "Platform", "Date", "Team", "Kelly")
 
 
 def init_slip_state() -> None:
@@ -61,39 +57,31 @@ def bankroll_input() -> None:
     st.session_state[_BANKROLL] = value
 
 
-def _leg_from_offer(row: Mapping) -> dict:
-    """The Desc carries the pipeline's ``- {pct}%, {boost}x`` tail so it parses the
-    same way parlay legs do (``parse_leg`` for headlines, the grading
-    ``LEG_PATTERN`` for outcomes).
+def _legs_from_records(
+    records: Sequence[Mapping], platform: str, offers: pd.DataFrame
+) -> list[dict]:
+    """Re-resolve stored canonical legs against current offers, dropping any that moved.
+
+    Refreshes every field (win_prob/boost/kelly drift as the market moves) from the
+    live offer row rather than trusting the stored snapshot, matching the
+    seed/add-time snapshot semantics everywhere else in this module.
     """
-    line = float(row["Line"])
-    model_p = float(row["Win Prob"])
-    boost = float(row.get("Boost", 1.0) or 1.0)
-    leg = {col: row[col] for col in _SNAPSHOT_COLS}
-    leg["Line"] = line
-    leg["Win Prob"] = model_p
-    leg["Push Prob"] = float(row.get("Push Prob", 0.0) or 0.0)
-    leg["Boost"] = boost
-    leg["Desc"] = (
-        f"{row['Player']} {row['Bet']} {line:.10g} {row['Market']} - {model_p * 100:.1f}%, {boost:.2f}x"
-    )
-    return leg
-
-
-def _legs_from_descs(descs: Sequence[str], platform: str, offers: pd.DataFrame) -> list[dict]:
-    """Resolve stored leg-desc strings against current offers, dropping any that moved."""
     out: list[dict] = []
-    for desc in descs:
-        parsed = parse_leg(desc)
-        idx = find_offer_idx(parsed, offers, platform) if parsed else None
+    for record in records:
+        idx = find_offer_idx(record, offers, platform)
         if idx is not None:
-            out.append(_leg_from_offer(offers.loc[idx]))
+            out.append(build_leg(offers.loc[idx]))
     return out
 
 
-def seed_from_story(legs_json: str, platform: str, offers: pd.DataFrame) -> None:
-    """Populate the constellation builder from a story objective's leg list."""
-    st.session_state[_LEGS] = _legs_from_descs(json.loads(legs_json), platform, offers)
+def seed_from_story(story_legs: Sequence[Mapping], platform: str, offers: pd.DataFrame) -> None:
+    """Populate the constellation builder from a story objective's leg list.
+
+    ``story_legs`` is ``current_game_stories.parquet``'s ``legs`` cell — a list of
+    canonical structured legs (``prediction.stories.menu.build_leg`` output), not a
+    JSON string.
+    """
+    st.session_state[_LEGS] = _legs_from_records(story_legs, platform, offers)
     st.session_state[_PLATFORM] = platform
     st.session_state[_BUILDER] = "constellation"
     st.session_state[_EDIT_ID] = None
@@ -104,7 +92,7 @@ def seed_from_legs(rows: Sequence[Mapping], platform: str, builder: str) -> None
 
     A slip is single-platform; rows off ``platform`` are dropped.
     """
-    st.session_state[_LEGS] = [_leg_from_offer(r) for r in rows if r["Platform"] == platform]
+    st.session_state[_LEGS] = [build_leg(r) for r in rows if r["Platform"] == platform]
     st.session_state[_PLATFORM] = platform
     st.session_state[_BUILDER] = builder
     st.session_state[_EDIT_ID] = None
@@ -113,8 +101,7 @@ def seed_from_legs(rows: Sequence[Mapping], platform: str, builder: str) -> None
 def load_slip(slip_row: Mapping, offers: pd.DataFrame) -> None:
     """Reopen a locked slip in its builder for editing (re-lock updates in place)."""
     platform = slip_row["platform"]
-    descs = [leg["desc"] for leg in json.loads(slip_row["legs"])]
-    st.session_state[_LEGS] = _legs_from_descs(descs, platform, offers)
+    st.session_state[_LEGS] = _legs_from_records(slip_row["legs"], platform, offers)
     st.session_state[_PLATFORM] = platform
     st.session_state[_BUILDER] = slip_row["builder_type"]
     st.session_state[_EDIT_ID] = slip_row["slip_id"]
@@ -134,7 +121,7 @@ def add_to_simple_slip(row: Mapping) -> None:
         ss[_PLATFORM] = row["Platform"]
     if row["Platform"] != ss[_PLATFORM]:
         return
-    ss[_LEGS].append(_leg_from_offer(row))
+    ss[_LEGS].append(build_leg(row))
 
 
 def remove_leg(i: int) -> None:
@@ -149,10 +136,15 @@ def clear_slip() -> None:
 
 
 def lock_in(score: SlipScore, headline: str, shrinkage: float) -> None:
-    """Persist the active slip (pending) and reset the builder; the shelf re-reads it."""
+    """Persist the active slip (pending) and reset the builder; the shelf re-reads it.
+
+    ``legs`` is stored as the canonical structured-leg records themselves (the
+    same shape ``nightly._grade_slip`` reads back for grading), not a
+    display-string projection.
+    """
     legs = st.session_state[_LEGS]
-    games = {leg["Game"] for leg in legs}
-    leagues = {leg["League"] for leg in legs}
+    games = {leg["game"] for leg in legs}
+    leagues = {leg["league"] for leg in legs}
     row = {
         "slip_id": st.session_state[_EDIT_ID] or str(uuid.uuid4()),
         "saved_at": datetime.now().isoformat(timespec="seconds"),
@@ -160,17 +152,7 @@ def lock_in(score: SlipScore, headline: str, shrinkage: float) -> None:
         "platform": st.session_state[_PLATFORM],
         "League": leagues.pop() if len(leagues) == 1 else "MULTI",
         "Game": games.pop() if len(games) == 1 else "MULTI",
-        "legs": json.dumps(
-            [
-                {
-                    "desc": leg["Desc"],
-                    "league": leg["League"],
-                    "game": leg["Game"],
-                    "date": str(leg["Date"]),
-                }
-                for leg in legs
-            ]
-        ),
+        "legs": legs,
         "bet_size": int(score.bet_size),
         "play_type": score.play_type,
         "indep_p": score.indep_p,

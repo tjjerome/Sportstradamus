@@ -39,7 +39,7 @@ from sportstradamus.prediction.parlay import (
     _psd_or_none,
 )
 from sportstradamus.prediction.stories.engine import thesis_variants
-from sportstradamus.prediction.stories.legs import enrich_legs, lower_leg, parse_leg
+from sportstradamus.prediction.stories.legs import enrich_legs
 from sportstradamus.strategies.kelly import fractional_kelly_stake
 
 # norm.ppf blows up at the open-interval ends; clip win probs just inside.
@@ -70,11 +70,11 @@ def score_slip(
 ) -> SlipScore:
     """Price a user slip by reusing the parlay copula scorer.
 
-    ``legs`` are snapshotted leg dicts (``Win Prob``/``Push Prob``/``Boost``/``Game``
-    + ``Player|Market|Bet`` fields); ``corr`` is the ``current_game_corr`` slice.
+    ``legs`` are canonical structured legs (``sportstradamus.leg_schema.LEG_FIELDS``);
+    ``corr`` is the ``current_game_corr`` slice.
     """
     n = len(legs)
-    p = np.clip(np.array([float(leg["Win Prob"]) for leg in legs]), _PROB_EPS, 1 - _PROB_EPS)
+    p = np.clip(np.array([float(leg["win_prob"]) for leg in legs]), _PROB_EPS, 1 - _PROB_EPS)
     indep_p = float(np.prod(p))
     play_type, full_payouts, base, payout_approximate = _platform_pricing(platform, n)
     if n < 2 or base <= 0.0:
@@ -82,9 +82,9 @@ def score_slip(
 
     sig = _psd_or_none(_block_diagonal_sig(legs, corr), legacy=False)
     joint_p = float(multivariate_normal.cdf(norm.ppf(p), np.zeros(n), sig))
-    boost = float(np.prod([float(leg["Boost"]) for leg in legs]))
+    boost = float(np.prod([float(leg["boost"]) for leg in legs]))
     payout = float(np.clip(boost * base, _PAYOUT_CLIP_LO, _PAYOUT_CLIP_HI))
-    push = np.array([float(leg.get("Push Prob", 0.0) or 0.0) for leg in legs])
+    push = np.array([float(leg.get("push_prob", 0.0) or 0.0) for leg in legs])
     model_ev = float(_parlay_payout_prob(p, push, sig, n, boost, payout, full_payouts, base, False))
     kelly_win = model_ev / payout if payout > 0 else 0.0
     stake = fractional_kelly_stake(
@@ -119,7 +119,7 @@ def _block_diagonal_sig(legs: Sequence[Mapping], corr: pd.DataFrame) -> np.ndarr
     if corr is None or corr.empty:
         return sig
     keys = [corr_key(leg) for leg in legs]
-    games = [str(leg.get("Game", "")) for leg in legs]
+    games = [str(leg.get("game", "")) for leg in legs]
     rho_by_game = _rho_lookup(corr, set(games))
     for i in range(n):
         for j in range(i + 1, n):
@@ -146,12 +146,10 @@ def slip_headline(legs: Sequence[Mapping], offers: pd.DataFrame, ctxs: Mapping) 
     leg-set, so identical legs always yield the identical string regardless of
     edit history. ``ctxs`` is the caller's ``ctxs_from_frame`` mapping.
     """
-    parsed = [p for p in (parse_leg(leg["Desc"]) for leg in legs) if p]
-    if not parsed:
+    if not legs:
         return ""
     # Canonicalize leg order so the headline is a pure function of the leg-set:
     # the engine's md5 seed already sorts, but routing tie-breaks can read order.
-    parsed.sort(key=lambda p: (p["Player"], p["Market"], p["Bet"], p["Line"]))
-    lowered = [lower_leg(p) for p in parsed]
-    variants, vi, _ = thesis_variants(enrich_legs(lowered, offers), ctxs)
+    ordered = sorted(legs, key=lambda leg: (leg["player"], leg["market"], leg["bet"], leg["line"]))
+    variants, vi, _ = thesis_variants(enrich_legs(ordered, offers), ctxs)
     return variants[vi] if variants else ""

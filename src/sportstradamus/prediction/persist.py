@@ -161,10 +161,12 @@ def write_current_game_stories(stories: pd.DataFrame) -> None:
 
     ``stories`` is the ``stories.build_game_stories`` frame: up to five stories
     per ``(platform, game)``, each with a Bankroll Builder and a Shoot-the-Moon
-    parlay (one row per ``objective``). ``legs`` is a JSON list of leg-desc
-    strings (round-trips through ``parse_leg`` for the dashboard's live thesis
-    regen); ``kelly_stake`` is a standalone full-Kelly bankroll *fraction* — the
-    dashboard rail re-sizes it into Decimal dollars against the live bankroll.
+    parlay (one row per ``objective``). ``legs`` is a list of canonical
+    structured legs (``sportstradamus.leg_schema.build_leg`` output, stored as a
+    ``list<struct>`` parquet column) that the dashboard's ``seed_from_story``
+    re-resolves against current offers; ``kelly_stake`` is a standalone
+    full-Kelly bankroll *fraction* — the dashboard rail re-sizes it into
+    Decimal dollars against the live bankroll.
     ``build_game_stories`` returns a column-stable frame even with no stories, so
     an empty slate still writes a header-only snapshot the dashboard can read.
     """
