@@ -67,9 +67,9 @@ if filters["leagues"]:
 if filters["platforms"]:
     pf = pf.loc[pf["Platform"].isin(filters["platforms"])]
 
-resolved = pf.dropna(subset=["Legs"]).copy()
+resolved = pf.dropna(subset=["Legs Resolved"]).copy()
 if not resolved.empty:
-    resolved[["Legs", "Misses"]] = resolved[["Legs", "Misses"]].astype(int)
+    resolved[["Legs Resolved", "Misses"]] = resolved[["Legs Resolved", "Misses"]].astype(int)
     resolved["Hit"] = (resolved["Misses"] == 0).astype(int)
 
 if resolved.empty:

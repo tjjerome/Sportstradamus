@@ -827,14 +827,14 @@ def _prep_parlays(parlays, stats, stat_map, today):
     parlays = parlays.loc[parlays["_date"].notna()].copy()
     parlays = parlays.loc[parlays["_date"] >= today - timedelta(days=365)].copy()
 
-    unresolved = parlays.loc[parlays["Legs"].isna()]
+    unresolved = parlays.loc[parlays["Legs Resolved"].isna()]
     if not unresolved.empty:
         results = unresolved.progress_apply(
             lambda bet: check_bet(bet, stats, stat_map), axis=1
         ).to_list()
-        parlays.loc[parlays["Legs"].isna(), ["Legs", "Misses"]] = results
+        parlays.loc[parlays["Legs Resolved"].isna(), ["Legs Resolved", "Misses"]] = results
 
-    parlays.dropna(subset=["Legs"], inplace=True)
+    parlays.dropna(subset=["Legs Resolved"], inplace=True)
     return parlays
 
 
@@ -848,7 +848,7 @@ def _parlay_profit_df(parlays, today):
     ud_parlays["Profit"] = ud_parlays.apply(
         lambda x: (
             np.clip(
-                PAYOUT_TABLE["Underdog"][x.Legs][x.Misses]
+                PAYOUT_TABLE["Underdog"][x["Legs Resolved"]][x.Misses]
                 * (x.Boost if x.Boost < _UNDERDOG_PERFECT_BOOST_MULT or x.Misses == 0 else 1),
                 None,
                 _UNDERDOG_PAYOUT_CAP,
@@ -1001,7 +1001,7 @@ def compute_parlay_metrics(parlays, stats, stat_map):
     if len(parlays) == 0:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    parlays[["Legs", "Misses"]] = parlays[["Legs", "Misses"]].astype(int)
+    parlays[["Legs Resolved", "Misses"]] = parlays[["Legs Resolved", "Misses"]].astype(int)
     parlays["Hit"] = (parlays["Misses"] == 0).astype(int)
 
     profit_df = _parlay_profit_df(parlays, today)
