@@ -5,6 +5,7 @@ metrics (CRPS, Brier Skill Score, Murphy decomposition, prediction intervals).
 """
 
 import re
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -121,25 +122,14 @@ def _leg_result_value(game, ls, player, market):
         return None
 
 
-def _resolve_leg(game, ls, new_map, leg):
-    """Resolve one leg string to ``1`` (miss), ``0`` (hit), or ``None`` (skip).
-
-    ``None`` covers an unparseable leg, an unavailable result, and a push
-    (``result == line``).
-    """
-    m = LEG_PATTERN.match(leg)
-    if not m:
+def _resolve_leg(game, ls, leg: Mapping):
+    """Resolve one structured leg to 1 (miss), 0 (hit), or None (skip/push)."""
+    stat = leg.get("stat") or leg.get("market")
+    result_val = _leg_result_value(game, ls, leg["player"], stat)
+    if result_val is None or result_val == leg["line"]:
         return None
-    player, direction, line_str, market = m.groups()
-    over = direction == "Over"
-    line = float(line_str)
-    market = market.replace("H2H ", "")
-    market = new_map.get(market, market)
-
-    result_val = _leg_result_value(game, ls, player, market)
-    if result_val is None or result_val == line:
-        return None
-    missed = (over and result_val < line) or (not over and result_val > line)
+    over = leg["bet"] == "Over"
+    missed = (over and result_val < leg["line"]) or (not over and result_val > leg["line"])
     return 1 if missed else 0
 
 
@@ -154,7 +144,6 @@ def check_bet(bet, stats, stat_map):
 
     stat_obj = stats[bet.League]
     ls = stat_obj.log_strings
-    new_map = _leg_market_map(bet.League, bet.Platform, stat_map)
 
     game = _bet_gameday_rows(stat_obj.gamelog, ls, bet)
     if game.empty:
@@ -162,11 +151,8 @@ def check_bet(bet, stats, stat_map):
 
     legs = 0
     misses = 0
-    for col in [c for c in bet.index if c.startswith("Leg ") and c[4:].strip().isdigit()]:
-        leg = bet[col]
-        if not isinstance(leg, str) or leg == "":
-            continue
-        outcome = _resolve_leg(game, ls, new_map, leg)
+    for leg in bet.legs:
+        outcome = _resolve_leg(game, ls, leg)
         if outcome is None:
             continue
         legs += 1

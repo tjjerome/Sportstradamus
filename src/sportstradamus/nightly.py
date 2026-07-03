@@ -23,7 +23,6 @@ from tqdm import tqdm
 
 from sportstradamus import clv, data
 from sportstradamus.analysis import (
-    _leg_market_map,
     _resolve_leg,
     check_bet,
     compute_book_brier_skill_score,
@@ -474,10 +473,9 @@ def _resolve_user_slips(stats, history_only):
     pending = slips.loc[slips["status"] == "pending"]
     if pending.empty:
         return 0
-    stat_map = json.loads((pkg_resources.files(data) / "config" / "stat_map.json").read_text())
     graded = 0
     for idx, row in pending.iterrows():
-        outcome = _grade_slip(row, stats, stat_map)
+        outcome = _grade_slip(row, stats)
         if outcome is None:
             continue
         for col, value in outcome.items():
@@ -489,7 +487,7 @@ def _resolve_user_slips(stats, history_only):
     return graded
 
 
-def _grade_slip(row, stats, stat_map):
+def _grade_slip(row, stats):
     """Resolve one slip; return the writeback dict, or ``None`` while a game is unplayed."""
     per_leg = []
     for leg in json.loads(row["legs"]):
@@ -501,8 +499,7 @@ def _grade_slip(row, stats, stat_map):
         game_rows = _gameday_rows_for(stat_obj.gamelog, ls, leg["date"], leg["game"])
         if game_rows.empty:
             return None
-        new_map = _leg_market_map(league, row["platform"], stat_map)
-        per_leg.append(_resolve_leg(game_rows, ls, new_map, leg["desc"]))
+        per_leg.append(_resolve_leg(game_rows, ls, leg))
     hits = sum(1 for o in per_leg if o == 0)
     effective = sum(1 for o in per_leg if o is not None)
     status = _slip_status(row["play_type"], hits, effective)
