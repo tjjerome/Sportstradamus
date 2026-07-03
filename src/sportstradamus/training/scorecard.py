@@ -2228,17 +2228,17 @@ def _history_to_eval_frame(
     """
     if history.empty:
         return pd.DataFrame(columns=list(_LIVE_EVAL_COLUMNS))
-    exploded = history.copy()
+    dated = history.copy()
     cutoff = pd.Timestamp(datetime.now(UTC).date()) - pd.Timedelta(days=window_days)
-    exploded["_date"] = pd.to_datetime(exploded["Date"], errors="coerce")
+    dated["_date"] = pd.to_datetime(dated["Date"], errors="coerce")
     mask = (
-        (exploded["League"] == league)
-        & (exploded["Market"] == market)
-        & exploded["Actual"].notna()
-        & exploded["_date"].notna()
-        & (exploded["_date"] >= cutoff)
+        (dated["League"] == league)
+        & (dated["Market"] == market)
+        & dated["Actual"].notna()
+        & dated["_date"].notna()
+        & (dated["_date"] >= cutoff)
     )
-    subset = exploded.loc[mask].copy()
+    subset = dated.loc[mask].copy()
     if subset.empty:
         return pd.DataFrame(columns=list(_LIVE_EVAL_COLUMNS))
 
