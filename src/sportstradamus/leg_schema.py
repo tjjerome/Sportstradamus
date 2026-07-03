@@ -36,6 +36,11 @@ _OFFER_KEYS = {
     "platform": "Platform",
 }
 
+# Only the fields the dual-shape helpers below actually read off a raw offer
+# row. The rest of LEG_FIELDS (stat/league/game/date/platform/push_prob) is
+# canonical-only — every call site that needs one of those only ever holds a
+# canonical leg, never a raw offer row, so it indexes directly (leg["game"])
+# instead of going through leg_field.
 _FIELD_TO_OFFER_COL = {
     "player": "Player",
     "team": "Team",
@@ -48,24 +53,24 @@ _FIELD_TO_OFFER_COL = {
 }
 
 
-def leg_field(x: Mapping, field: str, default=None):
+def leg_field(leg: Mapping, field: str, default=None):
     """Read one leg field off either a canonical leg (lowercase) or a raw
     current_offers row (Title-Case) — the shared identity/display helpers
     (corr_key, find_offer_idx, validate_parlay_legs, the constellation's node
     fields) run on both a slip's own legs and not-yet-picked offer-row
     candidates from the same pool.
     """
-    if field in x:
-        return x[field]
-    return x.get(_FIELD_TO_OFFER_COL[field], default)
+    if field in leg:
+        return leg[field]
+    return leg.get(_FIELD_TO_OFFER_COL[field], default)
 
 
-def is_model_liked(x: Mapping) -> bool:
+def is_model_liked(leg: Mapping) -> bool:
     """Whether a leg's Kelly edge is positive — the star-vs-satellite split
     the constellation, satellite picker, and slip builder all filter on.
     Runs on either a canonical leg or a raw current_offers row via leg_field.
     """
-    return float(leg_field(x, "kelly", 0.0) or 0.0) > 0
+    return float(leg_field(leg, "kelly", 0.0) or 0.0) > 0
 
 
 def _numeric_or_default(row: Mapping, col: str, default: float) -> float:
