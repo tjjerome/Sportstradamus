@@ -4,11 +4,6 @@ All writers stage to a ``<path>.tmp`` and then ``os.replace()`` to the target
 path, so the dashboard never reads a torn file when a pipeline writes
 mid-render.
 
-The ``Offers`` column in history is in-memory ``list[tuple]`` of mixed types.
-PyArrow needs a ``list<struct>`` for that, so the converters round-trip
-tuple <-> dict at the parquet boundary. Every other consumer of the column
-keeps its tuple-indexed semantics.
-
 Writes target parquet only. The legacy ``.dat`` klepto pickles have been
 removed from the data package; readers no longer fall back to them.
 """
@@ -57,22 +52,6 @@ USER_SLIPS_PATH = _RUNTIME_DIR / "user_slips.parquet"
 # Root for trained model pickles. model_pickle_path builds the per-cell path
 # from this root; prune_model_pickle deletes one to dark-out a withheld cell.
 MODELS_DIR = pkg_resources.files(data) / "models"
-
-# Field order for the Offers struct must match the in-memory tuple positions.
-# CLV adds the trailing three (close_books_p, market_clv, model_clv); legacy
-# six-tuples are zero-padded with NaN on read.
-_OFFER_FIELDS = (
-    "line",
-    "boost",
-    "platform",
-    "bet",
-    "model_p",
-    "books_p",
-    "close_books_p",
-    "market_clv",
-    "model_clv",
-)
-_LEGACY_OFFER_LEN = 6
 
 # Tuple-typed columns in parlay_hist that round-trip as homogeneous float lists.
 _PARLAY_LIST_COLS = ("Leg Probs", "Corr Pairs", "Boost Pairs", "Markets", "Players")
@@ -173,62 +152,18 @@ def read_parquet_safe(path) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# History.Offers <-> parquet struct
+# History parquet (flat, one row per prediction x book offer)
 # ---------------------------------------------------------------------------
-
-
-def _pad_legacy_offer(offer):
-    if len(offer) == _LEGACY_OFFER_LEN:
-        return (*tuple(offer), np.nan, np.nan, np.nan)
-    return tuple(offer)
-
-
-def _offer_tuple_to_dict(offer):
-    if not isinstance(offer, tuple | list):
-        return None
-    if len(offer) == _LEGACY_OFFER_LEN:
-        offer = _pad_legacy_offer(offer)
-    if len(offer) != len(_OFFER_FIELDS):
-        return None
-    return dict(zip(_OFFER_FIELDS, offer, strict=False))
-
-
-def _offer_dict_to_tuple(offer):
-    if not isinstance(offer, dict):
-        if isinstance(offer, tuple | list) and len(offer) == _LEGACY_OFFER_LEN:
-            return _pad_legacy_offer(offer)
-        return offer
-    return tuple(offer.get(f, np.nan) for f in _OFFER_FIELDS)
-
-
-def _offers_for_parquet(offers):
-    if not isinstance(offers, list):
-        return []
-    return [d for d in (_offer_tuple_to_dict(o) for o in offers) if d is not None]
-
-
-def _offers_from_parquet(offers):
-    if offers is None:
-        return []
-    return [_offer_dict_to_tuple(o) for o in offers]
 
 
 def write_history(df: pd.DataFrame) -> None:
     """Atomically write the prediction history parquet."""
-    out = df.copy()
-    if "Offers" in out.columns:
-        out["Offers"] = out["Offers"].apply(_offers_for_parquet)
-    _atomic_write_parquet(out, HISTORY_PATH)
+    _atomic_write_parquet(df, HISTORY_PATH)
 
 
 def read_history() -> pd.DataFrame:
     """Read the prediction history."""
-    df = read_parquet_safe(HISTORY_PATH)
-    if df.empty:
-        return df
-    if "Offers" in df.columns:
-        df["Offers"] = df["Offers"].apply(_offers_from_parquet)
-    return df
+    return read_parquet_safe(HISTORY_PATH)
 
 
 # ---------------------------------------------------------------------------

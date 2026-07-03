@@ -24,9 +24,9 @@ from tqdm import tqdm
 from sportstradamus import clv, data
 from sportstradamus.analysis import (
     _resolve_leg,
+    annotate_offer_outcomes,
     check_bet,
     compute_book_brier_skill_score,
-    explode_offers,
     precompute_profit_sim_summary,
     resolve_history,
 )
@@ -256,10 +256,10 @@ def _enforce_live_metrics_dtypes(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _settled_offers(history: pd.DataFrame):
-    """Explode history to settled offers with a parsed ``_date``; None if none remain."""
+    """Annotate history with per-offer outcomes and parse ``_date``; None if none settled."""
     if history.empty:
         return None
-    exploded = explode_offers(history)
+    exploded = annotate_offer_outcomes(history)
     if exploded.empty or "Actual" not in exploded.columns:
         return None
     settled = exploded[exploded["Actual"].notna()].copy()
@@ -307,7 +307,7 @@ def _compute_live_metrics(history: pd.DataFrame, *, now: datetime | None = None)
 
 
 def _precompute_profit_sim(history):
-    summary = precompute_profit_sim_summary(explode_offers(history))
+    summary = precompute_profit_sim_summary(annotate_offer_outcomes(history))
     _atomic_write_parquet(summary, PROFIT_SIM_SUMMARY_PATH)
     logger.info(
         f"Profit sim: wrote {len(summary)} strategy-horizon rows to {PROFIT_SIM_SUMMARY_PATH.name}"
@@ -389,12 +389,6 @@ def _resolve_and_clv_history(stats):
     if history.empty:
         logger.error("history.parquet is empty or missing. Aborting.")
         raise SystemExit(1)
-
-    if "Offers" not in history.columns:
-        from sportstradamus.analysis import _migrate_flat_history
-
-        logger.info("Migrating history to normalized schema")
-        history = _migrate_flat_history(history)
 
     if "Actual" not in history.columns:
         history["Actual"] = np.nan

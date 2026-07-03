@@ -43,7 +43,7 @@ def test_signed_clv_returns_nan_when_close_is_nan():
 
 
 def _build_history():
-    """One Over leg with archive coverage, one Under leg without."""
+    """One Over offer with archive coverage, one Under offer without."""
     return pd.DataFrame(
         [
             {
@@ -51,18 +51,30 @@ def _build_history():
                 "League": "NBA",
                 "Date": "2026-05-04",
                 "Market": "points",
-                "Offers": [
-                    (10.5, 1.0, "Underdog", "Over", 0.60, 0.55, np.nan, np.nan, np.nan),
-                ],
+                "Line": 10.5,
+                "Boost": 1.0,
+                "Platform": "Underdog",
+                "Bet": "Over",
+                "Win Prob": 0.60,
+                "Market Prob": 0.55,
+                "Close Market Prob": np.nan,
+                "Market CLV": np.nan,
+                "Model CLV": np.nan,
             },
             {
                 "Player": "Player B",
                 "League": "NBA",
                 "Date": "2026-05-04",
                 "Market": "points",
-                "Offers": [
-                    (12.5, 1.0, "Underdog", "Under", 0.48, 0.50, np.nan, np.nan, np.nan),
-                ],
+                "Line": 12.5,
+                "Boost": 1.0,
+                "Platform": "Underdog",
+                "Bet": "Under",
+                "Win Prob": 0.48,
+                "Market Prob": 0.50,
+                "Close Market Prob": np.nan,
+                "Market CLV": np.nan,
+                "Model CLV": np.nan,
             },
         ]
     )
@@ -72,41 +84,31 @@ def test_fill_from_archive_writes_close_and_clv_for_resolved_leg():
     archive = _StubArchive({("NBA", "points", "2026-05-04", "Player A"): 0.62})
     df = clv.fill_from_archive(_build_history(), archive)
 
-    offer = df.loc[0, "Offers"][0]
-    assert offer[6] == pytest.approx(0.62)
+    row = df.loc[0]
+    assert row["Close Market Prob"] == pytest.approx(0.62)
     # Market CLV = +1 * (0.62 - 0.55) = 0.07
-    assert offer[7] == pytest.approx(0.07)
+    assert row["Market CLV"] == pytest.approx(0.07)
     # Model CLV = +1 * (0.62 - 0.60) = 0.02
-    assert offer[8] == pytest.approx(0.02)
+    assert row["Model CLV"] == pytest.approx(0.02)
 
 
 def test_fill_from_archive_leaves_unresolved_leg_nan():
     archive = _StubArchive({("NBA", "points", "2026-05-04", "Player A"): 0.62})
     df = clv.fill_from_archive(_build_history(), archive)
 
-    offer = df.loc[1, "Offers"][0]
-    assert math.isnan(offer[6])
-    assert math.isnan(offer[7])
-    assert math.isnan(offer[8])
+    row = df.loc[1]
+    assert math.isnan(row["Close Market Prob"])
+    assert math.isnan(row["Market CLV"])
+    assert math.isnan(row["Model CLV"])
 
 
-def test_fill_from_archive_pads_legacy_six_tuple():
-    archive = _StubArchive({("NBA", "points", "2026-05-04", "Player A"): 0.60})
-    legacy = pd.DataFrame(
-        [
-            {
-                "Player": "Player A",
-                "League": "NBA",
-                "Date": "2026-05-04",
-                "Market": "points",
-                "Offers": [(10.5, 1.0, "Underdog", "Over", 0.55, 0.50)],
-            }
-        ]
-    )
-    out = clv.fill_from_archive(legacy, archive)
-    offer = out.loc[0, "Offers"][0]
-    assert len(offer) == 9
-    assert offer[6] == pytest.approx(0.60)
+def test_fill_from_archive_skips_rows_already_closed():
+    """A row with a non-NaN Close Market Prob is not re-queried against archive."""
+    history = _build_history()
+    history.loc[0, "Close Market Prob"] = 0.99
+    archive = _StubArchive({("NBA", "points", "2026-05-04", "Player A"): 0.62})
+    df = clv.fill_from_archive(history, archive)
+    assert df.loc[0, "Close Market Prob"] == pytest.approx(0.99)
 
 
 def test_summarize_drops_unresolved_legs():
@@ -121,6 +123,21 @@ def test_summarize_drops_unresolved_legs():
 
 
 def test_summarize_returns_zero_n_when_no_legs():
-    summary = clv.summarize(pd.DataFrame({"Offers": [[]], "League": ["NBA"], "Market": ["points"]}))
+    summary = clv.summarize(
+        pd.DataFrame(
+            {
+                "League": pd.Series(dtype=str),
+                "Market": pd.Series(dtype=str),
+                "Platform": pd.Series(dtype=str),
+                "Bet": pd.Series(dtype=str),
+                "Win Prob": pd.Series(dtype=float),
+                "Close Market Prob": pd.Series(dtype=float),
+                "Market CLV": pd.Series(dtype=float),
+                "Model CLV": pd.Series(dtype=float),
+                "Date": pd.Series(dtype=str),
+                "Player": pd.Series(dtype=str),
+            }
+        )
+    )
     assert summary["n"] == 0
     assert math.isnan(summary["market_clv_mean"])
