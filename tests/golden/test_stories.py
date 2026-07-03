@@ -23,6 +23,18 @@ from sportstradamus.prediction.stories import (
 
 _DATE = "2026-06-13"
 
+
+def _legs(*specs: tuple[str, str, float, str]) -> list[dict]:
+    """A ``legs`` column value from ``(player, bet, line, market)`` tuples.
+
+    ``enrich_legs`` only reads the four lowercase keys, so fixtures don't need
+    full ``build_leg`` structs — this mirrors the old ``"{Player} {Bet} {Line}
+    {Market} - ..."`` ``Leg N`` strings these tests used to encode.
+    """
+    return [
+        {"player": p, "bet": b, "line": ln, "market": m} for p, b, ln, m in specs
+    ]
+
 # Two games. BOS/PHI: half-totals 120+118 = 238, BOS favored 0.74 → blowout.
 # DEN/MIA: 112+112 = 224, ML ~ coin flip (0.55) → coinflip. ``Moneyline`` is the
 # team's implied win probability; ``Position`` is the resolved depth-chart label.
@@ -146,27 +158,31 @@ _PARLAYS = pd.DataFrame(
             "Game": "BOS/PHI",
             "Date": _DATE,
             "Family": 1.0,
-            "Leg 1": "Jayson Tatum Over 28.5 PTS - 59.0%, 1.0x",
-            "Leg 2": "Jayson Tatum Over 8.5 REB - 56.0%, 1.0x",
-            "Leg 3": "Joel Embiid Under 30.5 PTS - 57.0%, 1.0x",
+            "legs": _legs(
+                ("Jayson Tatum", "Over", 28.5, "PTS"),
+                ("Jayson Tatum", "Over", 8.5, "REB"),
+                ("Joel Embiid", "Under", 30.5, "PTS"),
+            ),
         },
         {
             "League": "NBA",
             "Game": "BOS/PHI",
             "Date": _DATE,
             "Family": 2.0,
-            "Leg 1": "Joel Embiid Under 30.5 PTS - 57.0%, 1.0x",
-            "Leg 2": "Jayson Tatum Over 28.5 PTS - 59.0%, 1.0x",
-            "Leg 3": None,
+            "legs": _legs(
+                ("Joel Embiid", "Under", 30.5, "PTS"),
+                ("Jayson Tatum", "Over", 28.5, "PTS"),
+            ),
         },
         {
             "League": "NBA",
             "Game": "DEN/MIA",
             "Date": _DATE,
             "Family": 1.0,
-            "Leg 1": "Nikola Jokic Over 9.5 AST - 60.0%, 1.0x",
-            "Leg 2": "Nikola Jokic Over 12.5 REB - 58.0%, 1.0x",
-            "Leg 3": None,
+            "legs": _legs(
+                ("Nikola Jokic", "Over", 9.5, "AST"),
+                ("Nikola Jokic", "Over", 12.5, "REB"),
+            ),
         },
     ]
 )
@@ -270,20 +286,31 @@ def test_slate_uniqueness_guaranteed():
             _star_offer("EEE/FFF", "EEE", "FFF", "Star Three", "G1"),
         ]
     )
-    legs = lambda p: {  # noqa: E731
-        "Leg 1": f"{p} Over 25.5 PTS - 60.0%, 1.0x",
-        "Leg 2": f"{p} Over 5.5 REB - 55.0%, 1.0x",
-    }
+    def star_legs(p: str) -> list[dict]:
+        return _legs((p, "Over", 25.5, "PTS"), (p, "Over", 5.5, "REB"))
+
     parlays = pd.DataFrame(
         [
-            {"League": "NBA", "Game": "AAA/BBB", "Date": _DATE, "Family": 1.0, **legs("Star One")},
-            {"League": "NBA", "Game": "CCC/DDD", "Date": _DATE, "Family": 1.0, **legs("Star Two")},
+            {
+                "League": "NBA",
+                "Game": "AAA/BBB",
+                "Date": _DATE,
+                "Family": 1.0,
+                "legs": star_legs("Star One"),
+            },
+            {
+                "League": "NBA",
+                "Game": "CCC/DDD",
+                "Date": _DATE,
+                "Family": 1.0,
+                "legs": star_legs("Star Two"),
+            },
             {
                 "League": "NBA",
                 "Game": "EEE/FFF",
                 "Date": _DATE,
                 "Family": 1.0,
-                **legs("Star Three"),
+                "legs": star_legs("Star Three"),
             },
         ]
     )
@@ -365,10 +392,12 @@ def test_clear_star_headlines_not_the_benchwarmer():
                 "Game": "X/Y",
                 "Date": _DATE,
                 "Family": 1.0,
-                "Leg 1": "Star Wing Over 28.5 PTS - 60.0%, 1.0x",
-                "Leg 2": "Star Wing Over 9.5 REB - 58.0%, 1.0x",
-                "Leg 3": "Star Wing Over 6.5 AST - 57.0%, 1.0x",
-                "Leg 4": "Bench Guy Under 3.5 REB - 70.0%, 1.0x",
+                "legs": _legs(
+                    ("Star Wing", "Over", 28.5, "PTS"),
+                    ("Star Wing", "Over", 9.5, "REB"),
+                    ("Star Wing", "Over", 6.5, "AST"),
+                    ("Bench Guy", "Under", 3.5, "REB"),
+                ),
             },
         ]
     )
@@ -384,7 +413,7 @@ def test_deterministic_across_calls():
 
 
 def test_empty_inputs_get_columns():
-    empty_parlays = pd.DataFrame(columns=["League", "Game", "Family", "Date", "Leg 1"])
+    empty_parlays = pd.DataFrame(columns=["League", "Game", "Family", "Date", "legs"])
     empty_offers = pd.DataFrame(columns=["League", "Game", "Player", "Market", "Bet", "Line"])
     assert "Thesis" in attach_parlay_theses(empty_parlays, empty_offers).columns
     assert "Why" in attach_offer_why(empty_offers).columns
@@ -392,7 +421,7 @@ def test_empty_inputs_get_columns():
 
 def test_no_parseable_legs_yields_blank_thesis():
     parlays = pd.DataFrame(
-        [{"League": "NBA", "Game": "X/Y", "Date": _DATE, "Family": 1.0, "Leg 1": None}]
+        [{"League": "NBA", "Game": "X/Y", "Date": _DATE, "Family": 1.0, "legs": None}]
     )
     out = attach_parlay_theses(parlays, pd.DataFrame())
     assert out["Thesis"].iloc[0] == ""
@@ -410,7 +439,7 @@ def test_thesis_without_game_context_degrades_gracefully():
                 "Game": "L/M",
                 "Date": _DATE,
                 "Family": 1.0,
-                "Leg 1": "Lone Star Over 25.5 PTS - 60.0%, 1.0x",
+                "legs": _legs(("Lone Star", "Over", 25.5, "PTS")),
             }
         ]
     )
@@ -457,9 +486,11 @@ def test_contrast_slip_headline_names_the_star(monkeypatch):
                 "Game": "X/Y",
                 "Date": _DATE,
                 "Family": 1.0,
-                "Leg 1": "Star Q Over 25.5 PTS - 60.0%, 1.0x",
-                "Leg 2": "Field A Under 8.5 REB - 58.0%, 1.0x",
-                "Leg 3": "Field B Under 4.5 AST - 57.0%, 1.0x",
+                "legs": _legs(
+                    ("Star Q", "Over", 25.5, "PTS"),
+                    ("Field A", "Under", 8.5, "REB"),
+                    ("Field B", "Under", 4.5, "AST"),
+                ),
             }
         ]
     )
@@ -489,10 +520,12 @@ def test_muddled_mixed_slip_names_nobody(monkeypatch):
                 "Game": "X/Y",
                 "Date": _DATE,
                 "Family": 1.0,
-                "Leg 1": "Alpha Over 25.5 PTS - 60.0%, 1.0x",
-                "Leg 2": "Alpha Under 8.5 REB - 58.0%, 1.0x",
-                "Leg 3": "Zeta Under 22.5 PTS - 57.0%, 1.0x",
-                "Leg 4": "Zeta Over 6.5 AST - 56.0%, 1.0x",
+                "legs": _legs(
+                    ("Alpha", "Over", 25.5, "PTS"),
+                    ("Alpha", "Under", 8.5, "REB"),
+                    ("Zeta", "Under", 22.5, "PTS"),
+                    ("Zeta", "Over", 6.5, "AST"),
+                ),
             }
         ]
     )

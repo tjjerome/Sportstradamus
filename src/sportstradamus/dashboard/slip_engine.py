@@ -152,5 +152,9 @@ def slip_headline(legs: Sequence[Mapping], offers: pd.DataFrame, ctxs: Mapping) 
     # Canonicalize leg order so the headline is a pure function of the leg-set:
     # the engine's md5 seed already sorts, but routing tie-breaks can read order.
     parsed.sort(key=lambda p: (p["Player"], p["Market"], p["Bet"], p["Line"]))
-    variants, vi, _ = thesis_variants(enrich_legs(parsed, offers), ctxs)
+    lowered = [
+        {"player": p["Player"], "bet": p["Bet"], "line": p["Line"], "market": p["Market"]}
+        for p in parsed
+    ]
+    variants, vi, _ = thesis_variants(enrich_legs(lowered, offers), ctxs)
     return variants[vi] if variants else ""
