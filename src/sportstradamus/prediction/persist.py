@@ -35,7 +35,7 @@ from sportstradamus.prediction.stories import STORIES_VERSION
 # - Scoring: Win Prob (hit probability), Model EV (edge), Market EV, Projection (stat mean),
 #   Kelly, Projection STD, Push Prob
 # - Context: Avg 5, Avg H2H, Moneyline, O/U, DVPOA, Position (depth-chart label)
-# - Correlations: Team Correlation, Opp Correlation
+# - Correlations: Corr Same, Corr Opp
 # - Narrative: Why (precomputed "the case" string, prediction/stories)
 # - Stat key: Stat (for history lookups)
 # - Distribution (for PDF/PMF): Dist, CV, Gate, and shape parameters (Model R, Alpha, Sigma, Skew)
@@ -69,8 +69,8 @@ _OFFER_KEEP_COLS = [
     "O/U",
     "DVPOA",
     "Position",
-    "Team Correlation",
-    "Opp Correlation",
+    "Corr Same",
+    "Corr Opp",
     "Why",
     "Stat",
     "Dist",

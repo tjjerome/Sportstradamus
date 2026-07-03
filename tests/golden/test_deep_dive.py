@@ -1,9 +1,11 @@
 """Pure helpers behind the deep-dive dialog (sidecar decode, detail-row lookup, edge
-badge) and the page-change dialog reset.
+badge, correlated-partner resolution) and the page-change dialog reset.
 
-The Streamlit render itself is exercised by the dashboard AppTest smoke; these pin the
-unit logic the render depends on — JSON decode, the five-key join, and the cross-page
-detail-stack reset.
+Render paths (``show_detail`` and its tab renderers) call ``st.*`` directly and are
+Streamlit-runtime — verified manually, per the dashboard-wide precedent (see
+``test_satellite_picker.py``, ``test_constellation.py``); these pin the unit logic
+the render depends on — JSON decode, the five-key join, the cross-page detail-stack
+reset, and the ``Corr Same``/``Corr Opp`` → ``find_offer_idx`` platform-pinned lookup.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from sportstradamus.dashboard.components.deep_dive import (
     _edge_badge,
     drop_detail_on_page_change,
 )
+from sportstradamus.dashboard.legs import find_offer_idx
 
 
 def test_stat_tooltips_config_well_formed():
@@ -108,3 +111,49 @@ def test_detail_row_five_key_join():
 def test_edge_badge_sign_color():
     assert ":green[" in _edge_badge(1.12) and "+12%" in _edge_badge(1.12)
     assert ":red[" in _edge_badge(0.95) and "-5%" in _edge_badge(0.95)
+
+
+def test_corr_same_opp_none_safe_extraction():
+    """``_render_corr_tab`` reads ``row.get("Corr Same") or []`` — a ``None`` cell
+    (an offer with no correlated partners on that side) must degrade to an empty
+    list, not crash on ``_render_corr_cards``'s ``if not items: return`` guard."""
+    row = pd.Series({"Corr Same": None, "Corr Opp": None, "Team": "NYK", "Opponent": "SAS"})
+    assert (row.get("Corr Same") or []) == []
+    assert (row.get("Corr Opp") or []) == []
+
+    populated = pd.Series({"Corr Same": [{"player": "X"}], "Corr Opp": None})
+    assert (populated.get("Corr Same") or []) == [{"player": "X"}]
+    assert (populated.get("Corr Opp") or []) == []
+
+
+def test_corr_partner_lookup_pins_platform_across_markets_and_lines():
+    """Regression for the retired ``_find_corr_row_idx``: it matched a correlated
+    partner back to an offer row by player-name substring alone, with no market/line
+    check — two different props on the same player would collide (and, since
+    ``filtered`` can hold both platforms at once on Board, so could two books' rows).
+    The structured partner record now carries player/market/bet/line, and
+    ``_render_corr_cards`` resolves it via ``find_offer_idx`` pinned to the
+    *displayed offer's own* platform — the fix threaded through in this task."""
+    filtered = pd.DataFrame(
+        {
+            "Player": ["Mitchell Robinson", "Mitchell Robinson", "Mitchell Robinson"],
+            "Market": ["PRA", "REB", "PRA"],
+            "Bet": ["Over", "Over", "Over"],
+            "Line": [9.5, 5.5, 9.5],
+            "Platform": ["Underdog", "Underdog", "Sleeper"],
+            "Boost": [1.03, 1.06, 1.85],
+        }
+    )
+    partner = {"player": "Mitchell Robinson", "market": "PRA", "bet": "Over", "line": 9.5}
+
+    # Same player, same market/line, but two different books at different Boosts —
+    # the platform-blind old code would grab whichever row's index came first.
+    assert find_offer_idx(partner, filtered, platform="Underdog") == 0
+    assert find_offer_idx(partner, filtered, platform="Sleeper") == 2
+
+    # Same player, different market (REB vs PRA) — a substring match on "Mitchell
+    # Robinson Over ... " alone (the old _find_corr_row_idx logic) couldn't tell
+    # these apart; the structured lookup must not resolve the REB row for a PRA partner.
+    reb_partner = {"player": "Mitchell Robinson", "market": "REB", "bet": "Over", "line": 5.5}
+    assert find_offer_idx(reb_partner, filtered, platform="Underdog") == 1
+    assert find_offer_idx(partner, filtered, platform="Underdog") != 1

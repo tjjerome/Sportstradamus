@@ -32,7 +32,9 @@ from sportstradamus.dashboard.data import (
     load_current_offer_details,
     load_stat_tooltips,
 )
+from sportstradamus.dashboard.legs import find_offer_idx
 from sportstradamus.dashboard.narrative import SHAPE_HELP, context_strip
+from sportstradamus.leg_schema import leg_label
 
 _DETAIL_KEY = ["League", "Date", "Player", "Market", "Opponent"]
 
@@ -213,45 +215,27 @@ def _render_other_stats_tab(detail: pd.Series | None, row: pd.Series) -> None:
         _render_stat_row(entry, tips.get(entry["stat"]))
 
 
-def _parse_corr(s: str, max_n: int = 3) -> list[tuple[str, float]]:
-    if not isinstance(s, str) or not s.strip():
-        return []
-    out = []
-    for item in s.split(",")[:max_n]:
-        item = item.strip()
-        if "(" in item and item.endswith(")"):
-            desc, raw = item.rsplit("(", 1)
-            try:
-                mult = float(raw.rstrip("x)"))
-            except ValueError:
-                mult = 1.0
-            out.append((desc.strip(), mult))
-        else:
-            out.append((item, 1.0))
-    return out
-
-
-def _find_corr_row_idx(desc: str, filtered: pd.DataFrame) -> int | None:
-    for direction in ("Over", "Under"):
-        if direction in desc:
-            player_name = desc.split(direction)[0].strip()
-            matches = filtered[filtered["Player"].str.lower() == player_name.lower()]
-            if not matches.empty:
-                return matches.index[0]
-    return None
-
-
 def _render_corr_cards(
-    items: list[tuple[str, float]], group_label: str, filtered: pd.DataFrame, tab_key_prefix: str
+    items: list[dict],
+    group_label: str,
+    filtered: pd.DataFrame,
+    tab_key_prefix: str,
+    platform: str | None,
 ) -> None:
+    """Render one correlated-partner group. ``platform`` pins the offer-row lookup to
+    the displayed offer's own book: ``find_correlation`` runs once per platform, so a
+    partner's platform always matches the row it was attached to, but ``filtered`` (the
+    Board's grid selection) can hold both Underdog and Sleeper rows for the same game —
+    an unpinned match could resolve to the other book's row and show its Boost instead.
+    """
     if not items:
         return
     st.markdown(f"**{group_label}**")
-    for i, (desc, mult) in enumerate(items):
+    for i, item in enumerate(items):
         col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
-        col1.markdown(f"**{desc}**")
-        col2.markdown(strength_badge(mult) + f" {mult:.2f}×")
-        idx = _find_corr_row_idx(desc, filtered)
+        col1.markdown(f"**{leg_label(item)}**")
+        col2.markdown(strength_badge(item["mult"]) + f" {item['mult']:.2f}×")
+        idx = find_offer_idx(item, filtered, platform=platform)
         if col3.button("View", icon=":material/arrow_forward:", key=f"{tab_key_prefix}_view_{i}"):
             if idx is not None:
                 st.session_state.detail_stack.append(idx)
@@ -345,10 +329,11 @@ def _render_nav() -> None:
 
 
 def _render_corr_tab(row: pd.Series, filtered: pd.DataFrame) -> None:
-    same_items = _parse_corr(row.get("Team Correlation"))
-    opp_items = _parse_corr(row.get("Opp Correlation"))
-    _render_corr_cards(same_items, f"Same team — {row['Team']}", filtered, "corr_same")
-    _render_corr_cards(opp_items, f"Opponent — {row['Opponent']}", filtered, "corr_opp")
+    same_items = row.get("Corr Same") or []
+    opp_items = row.get("Corr Opp") or []
+    platform = row.get("Platform")
+    _render_corr_cards(same_items, f"Same team — {row['Team']}", filtered, "corr_same", platform)
+    _render_corr_cards(opp_items, f"Opponent — {row['Opponent']}", filtered, "corr_opp", platform)
     if not same_items and not opp_items:
         st.caption("No correlated legs cleared the display thresholds for this offer.")
 
