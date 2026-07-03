@@ -490,7 +490,7 @@ def _resolve_user_slips(stats, history_only):
 def _grade_slip(row, stats):
     """Resolve one slip; return the writeback dict, or ``None`` while a game is unplayed."""
     per_leg = []
-    for leg in json.loads(row["legs"]):
+    for leg in row["legs"]:
         league = leg["league"]
         if league not in stats:
             return None

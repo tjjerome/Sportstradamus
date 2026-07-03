@@ -5,10 +5,11 @@ or ``sportstradamus.leg_schema.build_leg``) back to the scored offers frame to
 attach each leg's canonical market, game, team, and depth-chart position — the
 fields the archetype engine routes on. ``parse_leg`` recovers a leg's
 Player/Bet/Line/Market from the retired display-string encoding
-(``"{Player} {Bet} {Line} {Market} - {Model P}%, {Boost}x"``) — no longer built
-by the parlay pipeline, but still the shape of the dashboard's own slip-state
-``Desc`` field, so this stays live until that path migrates. ``_stat_category``
-maps a market to the coarse category the phrase bank is keyed by.
+(``"{Player} {Bet} {Line} {Market} - {Model P}%, {Boost}x"``) — every producer
+(parlay search, story menu, the dashboard slip path) now emits structured legs
+directly, so ``parse_leg`` has no production caller left; kept for now with its
+own unit pins since nothing has asked to retire it yet. ``_stat_category`` maps
+a market to the coarse category the phrase bank is keyed by.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from collections.abc import Mapping, Sequence
 
 import pandas as pd
 
+from sportstradamus.leg_schema import leg_field
 from sportstradamus.prediction.stories.context import Leg
 
 # Bet-Under is the thriving side for these markets (mistake / damage-allowed
@@ -224,17 +226,18 @@ def validate_parlay_legs(
     Underdog/Sleeper reject a same-game parlay that repeats a player (two markets
     on one name) or sits entirely on one team. Shared by the dashboard slip
     editor's lock-in gate and the story-menu preset generator, so a seeded preset
-    is valid by construction. Legs carry the offer-row ``Player``/``Team``; a leg
-    without a ``Team`` can't satisfy the both-sides rule on its own.
+    is valid by construction. ``leg_field`` reads player/team off either a
+    canonical lowercase leg or a raw uppercase ``current_offers`` row; a leg
+    without a team can't satisfy the both-sides rule on its own.
 
     ``require_both_teams=False`` relaxes only the both-sides rule (never the
     distinct-player rule): the menu sets it for a game whose model edge is entirely
     one-sided, so it can still offer that team's preset — the user adds the second
     team from another game (a satellite leg) in the editor.
     """
-    players = [leg["Player"] for leg in legs]
+    players = [leg_field(leg, "player") for leg in legs]
     if len(set(players)) < len(players):
         return False, "Two legs share a player — each leg needs a distinct player."
-    if require_both_teams and len({leg.get("Team") for leg in legs if leg.get("Team")}) < 2:
+    if require_both_teams and len({t for leg in legs if (t := leg_field(leg, "team"))}) < 2:
         return False, "Add a leg from the other team — a parlay needs both sides."
     return True, ""

@@ -11,8 +11,6 @@ to a tmp file.
 
 from __future__ import annotations
 
-import json
-
 import pandas as pd
 
 from sportstradamus import nightly
@@ -42,20 +40,18 @@ def _slip(slip_id, play_type, legs, date="2026-06-10"):
         "play_type": play_type,
         "payout_multiplier": 3.0,
         "status": "pending",
-        "legs": json.dumps(
-            [
-                {
-                    "player": p,
-                    "bet": b,
-                    "line": ln,
-                    "stat": stat_key,
-                    "league": "WNBA",
-                    "game": g,
-                    "date": date,
-                }
-                for p, b, ln, stat_key, g in legs
-            ]
-        ),
+        "legs": [
+            {
+                "player": p,
+                "bet": b,
+                "line": ln,
+                "stat": stat_key,
+                "league": "WNBA",
+                "game": g,
+                "date": date,
+            }
+            for p, b, ln, stat_key, g in legs
+        ],
     }
 
 
