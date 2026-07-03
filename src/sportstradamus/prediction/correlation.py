@@ -545,6 +545,7 @@ def _process_league_games(
     corr_sink,
     story_sink,
     market_map,
+    stat_map,
 ):
     """Annotate correlations and beam-search parlays for every game in a league.
 
@@ -756,6 +757,7 @@ def find_correlation(
             corr_sink,
             story_sink,
             stat_map[platform],
+            stat_map,
         )
 
     if legacy and platform == "Underdog":

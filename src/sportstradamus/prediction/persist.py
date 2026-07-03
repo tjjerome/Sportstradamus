@@ -91,7 +91,7 @@ _OFFER_SIGNAL_COLS = ["Boost", "Model EV", "Market EV"]
 # joint probability) so users can compare against the correlation-aware joint.
 # `Bet ID` is an internal join key (leg-index tuple), not useful for human
 # review; `Fun` only drives the beam-search ranking sort, not display.
-_PARLAY_DROP_COLS = ["Leg Probs", "Corr Pairs", "Boost Pairs", "Indep PB", "Bet ID", "Fun"]
+_PARLAY_DROP_COLS = ["Corr Pairs", "Boost Pairs", "Indep PB", "Bet ID", "Fun"]
 
 
 def write_current_offers(
