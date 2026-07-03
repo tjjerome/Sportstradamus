@@ -39,9 +39,10 @@ def test_find_offer_idx_hit_and_miss():
             "Line": [9.5, 10.5],
         }
     )
-    hit = find_offer_idx({"player": "Ayo Dosunmu", "bet": "Over", "market": "Points", "line": 9.5}, offers)
+    leg = {"player": "Ayo Dosunmu", "bet": "Over", "market": "Points", "line": 9.5}
+    hit = find_offer_idx(leg, offers)
     assert hit == 0
-    miss = find_offer_idx({"player": "Ayo Dosunmu", "bet": "Over", "market": "Points", "line": 12.5}, offers)
+    miss = find_offer_idx(leg | {"line": 12.5}, offers)
     assert miss is None
     assert find_offer_idx(None, offers) is None
 
