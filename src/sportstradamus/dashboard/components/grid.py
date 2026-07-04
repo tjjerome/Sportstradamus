@@ -14,6 +14,7 @@ import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 
 from sportstradamus.dashboard import theme
+from sportstradamus.dashboard.narrative import bet_arrow
 
 _MONO = "IBM Plex Mono, monospace"
 # Static right-aligned mono style for non-heatmap numeric columns (no JS needed).
@@ -36,6 +37,32 @@ _POS, _POS_STRONG = theme.DIVERGING_COLORS[7], theme.DIVERGING_COLORS[8]
 # Fractions of the column's max deviation that split mild/strong and the neutral band.
 _HEAT_STRONG_FRAC = 0.6
 _HEAT_NEUTRAL_FRAC = 0.2
+
+# Client-side row hover (spec §4.3): a gold left-rail + faint gold wash, painted by AG
+# Grid's own row-hover class so hovering never triggers a Streamlit rerun.
+_HOVER_CSS = {
+    ".ag-row-hover": {
+        "box-shadow": "inset 3px 0 0 #C9A227 !important",
+        "background-color": "rgba(201,162,39,.06) !important",
+    }
+}
+
+
+def _arrow_cellrenderer() -> JsCode:
+    """Prefix the row's ``Bet``-keyed Over/Under arrow ahead of the cell's own value.
+
+    ``narrative.bet_arrow`` is the one source for the SVG strings; baking both branches
+    in as JS literals here keeps that Python string the source of truth without a
+    second SVG definition living in JS.
+    """
+    up, down = bet_arrow("Over"), bet_arrow("Under")
+    return JsCode(
+        "function(params){return (params.data.Bet==='Over'?"
+        + repr(up)
+        + ":"
+        + repr(down)
+        + ")+params.value;}"
+    )
 
 
 def _heat_expr(bg: str) -> str:
@@ -87,6 +114,34 @@ def _heatmap_cellstyle(values: pd.Series, center: float) -> JsCode | dict:
     return JsCode("function(params) { return (" + expr + "); }")
 
 
+def _numeric_col_kwargs(
+    df: pd.DataFrame,
+    col: str,
+    *,
+    heatmap_col: str | None,
+    heatmap_center: float,
+    pct: set[str],
+    arrow_col: str | None,
+    has_bet: bool,
+    tip: str | None,
+) -> dict:
+    """``configure_column`` kwargs for one numeric column: heatmap-or-plain cellStyle,
+    an optional "%" formatter, an optional arrow cellRenderer, an optional tooltip.
+    """
+    if col == heatmap_col:
+        cell_style = _heatmap_cellstyle(df[col], heatmap_center)
+    else:
+        cell_style = dict(_RIGHT_STYLE)
+    kwargs = {"cellStyle": cell_style}
+    if col in pct:
+        kwargs["valueFormatter"] = _PERCENT_FORMATTER
+    if col == arrow_col and has_bet:
+        kwargs["cellRenderer"] = _arrow_cellrenderer()
+    if tip:
+        kwargs["headerTooltip"] = tip
+    return kwargs
+
+
 def build_themed_grid_options(
     df: pd.DataFrame,
     *,
@@ -97,14 +152,23 @@ def build_themed_grid_options(
     selection_mode: str = "single",
     sparkline_col: str | None = None,  # L1 scar hook — line-movement sparklines, not built
     percent_cols: Sequence[str] = (),
+    arrow_col: str | None = None,
+    hidden_cols: Sequence[str] = (),
 ) -> dict:
     """Token-themed ``gridOptions``: right-aligned mono numerals, an optional diverging
     heatmap on ``heatmap_col``, per-column header tooltips, and a "%" display suffix on
     ``percent_cols`` (kept numeric underneath). Pure — no Streamlit call.
+
+    ``arrow_col`` prefixes that column's cells with the row's Over/Under arrow, keyed
+    off a ``Bet`` column in the row data. ``hidden_cols`` stays in the row data (so
+    selection callbacks and JS renderers can still read it) without rendering as its
+    own grid column — e.g. ``Bet`` for the arrow renderer, or a logic-only slug column
+    that a display column already covers.
     """
     help_map = dict(header_help or {})
     pct = set(percent_cols)
     present = set(df.columns)
+    has_bet = "Bet" in present
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_selection(selection_mode=selection_mode, use_checkbox=False)
     # enableBrowserTooltips renders the header tooltips as native browser titles (reliable;
@@ -113,19 +177,23 @@ def build_themed_grid_options(
     for col in numeric_cols:
         if col not in present:
             continue
-        if col == heatmap_col:
-            cell_style = _heatmap_cellstyle(df[col], heatmap_center)
-        else:
-            cell_style = dict(_RIGHT_STYLE)
-        kwargs = {"cellStyle": cell_style}
-        if col in pct:
-            kwargs["valueFormatter"] = _PERCENT_FORMATTER
-        if help_map.get(col):
-            kwargs["headerTooltip"] = help_map[col]
+        kwargs = _numeric_col_kwargs(
+            df,
+            col,
+            heatmap_col=heatmap_col,
+            heatmap_center=heatmap_center,
+            pct=pct,
+            arrow_col=arrow_col,
+            has_bet=has_bet,
+            tip=help_map.get(col),
+        )
         gb.configure_column(col, **kwargs)
     for col, tip in help_map.items():
         if col not in numeric_cols and col in present:
             gb.configure_column(col, headerTooltip=tip)
+    for col in hidden_cols:
+        if col in present:
+            gb.configure_column(col, hide=True)
     return gb.build()
 
 
@@ -138,12 +206,15 @@ def render_themed_grid(
     header_help: Mapping[str, str] | None = None,
     selection_mode: str = "single",
     percent_cols: Sequence[str] = (),
+    arrow_col: str | None = None,
+    hidden_cols: Sequence[str] = (),
     height: int = 720,
     key: str | None = None,
 ) -> list[dict]:
     """Render the themed grid; return the selected rows as dicts (empty when none).
 
-    ``key`` disambiguates multiple grids rendered on one page.
+    ``key`` disambiguates multiple grids rendered on one page. Row hover is a
+    client-side gold rail (``_HOVER_CSS``) — it never triggers a Streamlit rerun.
     """
     options = build_themed_grid_options(
         df,
@@ -153,6 +224,8 @@ def render_themed_grid(
         header_help=header_help,
         selection_mode=selection_mode,
         percent_cols=percent_cols,
+        arrow_col=arrow_col,
+        hidden_cols=hidden_cols,
     )
     grid = AgGrid(
         df,
@@ -160,6 +233,7 @@ def render_themed_grid(
         update_mode=GridUpdateMode.SELECTION_CHANGED,
         fit_columns_on_grid_load=True,
         allow_unsafe_jscode=True,
+        custom_css=_HOVER_CSS,
         height=height,
         width="stretch",
         key=key,
