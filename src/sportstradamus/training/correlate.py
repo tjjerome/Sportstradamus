@@ -440,12 +440,32 @@ def _build_cache_key(league: str, stat_data) -> dict:
 
 
 def _corr_outputs_present(league: str) -> bool:
-    """Return True when all three correlate outputs exist for the league."""
+    """Return True when the three correlate outputs and a healthy warm-start cache exist.
+
+    "Healthy" means the intermediate cache (``training_data/{league}_corr.parquet``)
+    holds at least as many rows as the metadata's own
+    ``total_team_game_observations``. The cache isn't consumed by the outputs
+    directly, but a degenerate one (emptied by some earlier failure) can never
+    repair itself once the cache key otherwise matches -- ``correlate`` would keep
+    taking the skip path forever without ever calling ``_build_team_game_records``
+    again. Comparing against the metadata's own recorded count (rather than a bare
+    non-empty check) correctly treats "genuinely zero games ever recorded" as
+    healthy while still catching a populated cache that collapsed to fewer rows
+    than it should have.
+    """
     league_dir = pkg_resources.files(data) / "leagues" / league.lower()
+    metadata_path = league_dir / "corr_metadata.json"
     for name in ("corr_same_team.parquet", "corr_opposing.parquet", "corr_metadata.json"):
         if not (league_dir / name).is_file():
             return False
-    return True
+    raw_filepath = pkg_resources.files(data) / "training_data" / f"{league}_corr.parquet"
+    if not raw_filepath.is_file():
+        return False
+    try:
+        expected_rows = json.loads(metadata_path.read_text())["total_team_game_observations"]
+    except (OSError, json.JSONDecodeError, KeyError):
+        return False
+    return len(pd.read_parquet(raw_filepath)) >= expected_rows
 
 
 def _cache_key_matches(league: str, cache_key: dict) -> bool:
@@ -808,12 +828,20 @@ def _load_or_warmstart_matrix(raw_filepath, force):
 
 
 def _append_new_records(league, log, matrix, latest_date, raw_filepath):
+    prior_rows = len(matrix)
     new_records = _build_team_game_records(league, log, latest_date)
     matrix = pd.concat([matrix, pd.json_normalize(new_records)], ignore_index=True)
     if "DATE" in matrix.columns:
         # Keep DATE as pandas datetime64 for stable parquet writes across
         # pyarrow versions/environments.
         matrix["DATE"] = pd.to_datetime(matrix["DATE"], errors="coerce")
+    if prior_rows > 0 and len(matrix) == 0:
+        logger.warning(
+            "%s: rebuild produced 0 rows (had %d) - writing anyway, investigate "
+            "_build_team_game_records",
+            league,
+            prior_rows,
+        )
     matrix.to_parquet(raw_filepath, compression="zstd")
     return matrix
 
