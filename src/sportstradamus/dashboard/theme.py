@@ -127,16 +127,24 @@ APP_CSS = """
   background:
     radial-gradient(ellipse at 18% 4%, rgba(46,107,230,.10), transparent 46%),
     radial-gradient(ellipse at 86% 22%, rgba(201,162,39,.05), transparent 42%),
-    radial-gradient(ellipse at 50% 96%, rgba(46,107,230,.06), transparent 55%)}
+    radial-gradient(ellipse at 50% 96%, rgba(46,107,230,.06), transparent 55%),
+    #0E1117}
 .starfield svg{position:absolute;inset:0}
+/* Streamlit paints backgroundColor (#0E1117) as an opaque fill on its own root
+   containers, which sits above this fixed z-index:-1 layer and hides it outright.
+   Dropping just these two containers to transparent reveals the starfield (which
+   now carries that same #0E1117 base itself) in the gutters; every card/table/
+   metric widget keeps its own secondaryBackgroundColor fill untouched, so stars
+   still don't bleed into content. */
+.stApp, [data-testid="stAppViewContainer"]{background:transparent}
 @keyframes tw{0%,100%{opacity:.2}50%{opacity:.64}}
 @media (prefers-reduced-motion: no-preference){.tw{animation:tw 4s ease-in-out infinite}}
 @media (prefers-reduced-motion: reduce){.tw{animation:none;opacity:.15}}
 </style>
 """
 
-# primary (layered z-index:-1 SVG) — injection wiring curl-verified; live visual/stacking-context
-# confirmation pending owner's browser check
+# layered z-index:-1 SVG, visible in the gutters via the .stApp/stAppViewContainer
+# transparency rule above (Streamlit's own opaque backgroundColor fill was hiding it)
 STARFIELD_SVG = """
 <div class="starfield" aria-hidden="true">
   <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" width="100%" height="100%">
