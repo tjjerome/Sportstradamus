@@ -6,14 +6,22 @@ normalized, optional Alt Line / closing-prob backfill from the archive),
 and the current_* snapshots. Idempotent: each frame is gated on an
 unambiguous old-schema marker and skipped when already migrated.
 
-The ``current_offers`` / ``current_game_stories`` conversion is not
-reverting a live-writer regression — Task 0.7 already rewired
-``prediction/correlation.py`` to emit ``Corr Same`` / ``Corr Opp`` structs
-directly, so no current run produces the old ``Team Correlation`` /
-``Opp Correlation`` display strings. This step exists only because a
-snapshot written by the *pre-Task-0.7* code may still be sitting on disk
-(these files are overwritten in place by every ``prophecize`` run, but a
-stale copy could persist through a skipped run or a restore).
+None of the current_* conversions are reverting a live-writer regression —
+Task 0.6/0.7 already rewired the writers (``prediction/parlay.py`` emits
+``legs`` structs directly, ``prediction/correlation.py`` emits ``Corr Same`` /
+``Corr Opp`` structs directly), so no current run produces the old shapes
+below. Each step exists only because a snapshot written by pre-migration
+code may still be sitting on disk (these files are overwritten in place by
+every ``prophecize`` run, but a stale copy could persist through a skipped
+run or a restore):
+
+- ``current_offers.parquet`` — old ``Team Correlation`` / ``Opp Correlation``
+  display strings (pre-Task-0.7).
+- ``current_parlays.parquet`` — old ``Leg 1``..``Leg 6`` display strings, the
+  same shape ``parlay_hist.parquet`` carried (pre-Task-0.6). It never carried
+  ``Team Correlation`` / ``Opp Correlation`` — those were always offer-only.
+- ``current_game_stories.parquet`` — old ``desc``-keyed ``legs`` dicts, the
+  same shape ``user_slips.parquet`` carried (pre-Task-0.3).
 
 Usage
 -----
@@ -73,6 +81,21 @@ def _is_nonempty_legs(legs) -> bool:
     reads a ``legs`` cell.
     """
     return isinstance(legs, list | np.ndarray) and len(legs) > 0
+
+
+def _has_desc_legs(df: pd.DataFrame) -> bool:
+    """Whether ``df["legs"]`` still holds Sheets-era ``desc``-keyed dicts.
+
+    Shared old-schema marker for every frame whose ``legs`` column round-trips
+    through the ``desc`` display-string shape (``user_slips.parquet``,
+    ``current_game_stories.parquet``) — both the "already migrated" gate in
+    each frame's migrator and :func:`_is_partially_migrated`'s post-run check
+    read the same first-nonempty-row probe.
+    """
+    if df.empty or "legs" not in df.columns:
+        return False
+    first_legs = next((legs for legs in df["legs"] if _is_nonempty_legs(legs)), None)
+    return first_legs is not None and "desc" in first_legs[0]
 
 
 def _parse_desc(desc, league, game, date, platform):
@@ -156,11 +179,7 @@ def _migrate_user_slips(path: Path, *, dry_run: bool) -> int:
         return 0
 
     df = pd.read_parquet(path)
-    if df.empty or "legs" not in df.columns:
-        click.echo(f"{name:32s} already migrated")
-        return 0
-    first_legs = next((legs for legs in df["legs"] if _is_nonempty_legs(legs)), None)
-    if first_legs is None or "desc" not in first_legs[0]:
+    if not _has_desc_legs(df):
         click.echo(f"{name:32s} already migrated")
         return 0
 
@@ -376,6 +395,43 @@ def _migrate_current_offers(path: Path, *, dry_run: bool) -> int:
     return len(df)
 
 
+def _migrate_current_parlays(path: Path, *, dry_run: bool) -> int:
+    """Rename ``Leg 1..6`` display strings to ``legs`` structs. Returns rows touched.
+
+    Same on-disk shape ``parlay_hist.parquet`` carried pre-Task-0.6 (built by
+    the same ``_evaluate_parlay`` dict literal before it was rewired to emit
+    ``legs`` directly) — reuses :func:`_row_legacy_legs`. Unlike
+    ``parlay_hist.parquet``, this frame's legacy ``Legs`` column held a
+    joined-``Desc`` display string, not a resolved leg count, so it is
+    dropped outright rather than renamed to ``Legs Resolved``.
+    """
+    name = "current_parlays.parquet"
+    if not path.exists():
+        click.echo(f"{name:32s} absent")
+        return 0
+    if "Leg 1" not in pq.read_schema(path).names:
+        click.echo(f"{name:32s} already migrated")
+        return 0
+
+    df = pd.read_parquet(path)
+    leg_cols = [f"Leg {i}" for i in range(1, _MAX_LEGACY_LEGS + 1) if f"Leg {i}" in df.columns]
+    prob_col = "Leg Probs" if "Leg Probs" in df.columns else None
+
+    if dry_run:
+        click.echo(f"{name:32s} would convert {leg_cols} -> legs ({len(df)} rows)")
+        return len(df)
+
+    df["legs"] = df.apply(lambda r: _row_legacy_legs(r, leg_cols, prob_col), axis=1)
+    drop_cols = [*leg_cols, "Legs"]
+    if prob_col:
+        drop_cols.append(prob_col)
+    df = df.drop(columns=[c for c in drop_cols if c in df.columns])
+
+    _atomic_write_parquet(df, path)
+    click.echo(f"{name:32s} converted {len(df)} rows")
+    return len(df)
+
+
 def _row_game_story_legs(row) -> list[dict]:
     """One current-game-story row's ``desc``-keyed legs -> canonical leg structs."""
     league, game = row.get("League"), row.get("Game")
@@ -395,11 +451,7 @@ def _migrate_current_game_stories(path: Path, *, dry_run: bool) -> int:
         click.echo(f"{name:32s} absent")
         return 0
     df = pd.read_parquet(path)
-    if df.empty or "legs" not in df.columns:
-        click.echo(f"{name:32s} already migrated")
-        return 0
-    first_legs = next((legs for legs in df["legs"] if _is_nonempty_legs(legs)), None)
-    if first_legs is None or "desc" not in first_legs[0]:
+    if not _has_desc_legs(df):
         click.echo(f"{name:32s} already migrated")
         return 0
 
@@ -447,6 +499,9 @@ def main(
         "current_offers.parquet": _migrate_current_offers(
             base / "current_offers.parquet", dry_run=dry_run
         ),
+        "current_parlays.parquet": _migrate_current_parlays(
+            base / "current_parlays.parquet", dry_run=dry_run
+        ),
         "current_game_stories.parquet": _migrate_current_game_stories(
             base / "current_game_stories.parquet", dry_run=dry_run
         ),
@@ -461,24 +516,41 @@ def main(
 
     partial = [
         fname
-        for fname in ("parlay_hist.parquet", "history.parquet", "user_slips.parquet")
+        for fname in (
+            "parlay_hist.parquet",
+            "history.parquet",
+            "user_slips.parquet",
+            "current_offers.parquet",
+            "current_parlays.parquet",
+            "current_game_stories.parquet",
+        )
         if (base / fname).exists() and _is_partially_migrated(base / fname)
     ]
     if partial:
         raise SystemExit(f"partially migrated after run: {partial}")
 
 
+# Filenames whose old-schema marker is Leg 1..6 display-string columns
+# (the same shape ``_migrate_parlay_hist``/``_migrate_current_parlays`` convert).
+_LEG_COLUMN_FILES = ("parlay_hist.parquet", "current_parlays.parquet")
+
+# Filenames whose ``legs`` column round-trips through Sheets-era ``desc`` dicts
+# (the shape ``_has_desc_legs`` detects).
+_DESC_LEGS_FILES = ("user_slips.parquet", "current_game_stories.parquet")
+
+
 def _is_partially_migrated(path: Path) -> bool:
     """Whether an old-schema marker still survives a completed (non-dry-run) migration."""
     names = set(pq.read_schema(path).names)
-    if path.name == "parlay_hist.parquet":
+    if path.name in _LEG_COLUMN_FILES:
         return "Leg 1" in names
     if path.name == "history.parquet":
         return "Offers" in names
-    if path.name == "user_slips.parquet":
+    if path.name == "current_offers.parquet":
+        return "Team Correlation" in names
+    if path.name in _DESC_LEGS_FILES:
         df = pd.read_parquet(path, columns=["legs"]) if "legs" in names else pd.DataFrame()
-        first_legs = next((legs for legs in df.get("legs", []) if _is_nonempty_legs(legs)), None)
-        return first_legs is not None and "desc" in first_legs[0]
+        return _has_desc_legs(df)
     return False
 
 

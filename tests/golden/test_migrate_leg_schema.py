@@ -481,6 +481,177 @@ def test_migrate_current_offers_dry_run_writes_nothing(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# current_game_stories.parquet: per-leg "desc" strings -> legs structs
+# ---------------------------------------------------------------------------
+
+
+def _seed_current_game_stories(path):
+    df = pd.DataFrame(
+        [
+            {
+                "Platform": "Underdog",
+                "Game": "BOS/MIA",
+                "League": "NBA",
+                "Date": "2026-01-15",
+                "objective": "Bankroll Builder",
+                "legs": [
+                    {"desc": "Jayson Tatum Over 28.5 PTS - 59.0%, 1.03x"},
+                    {"desc": "Jimmy Butler Under 22.5 PTS - 55.0%, 1.05x"},
+                ],
+                "kelly_stake": 0.02,
+            }
+        ]
+    )
+    df.to_parquet(path, engine="pyarrow", index=False)
+
+
+def test_migrate_current_game_stories_converts_desc_to_structs(tmp_path):
+    path = tmp_path / "current_game_stories.parquet"
+    _seed_current_game_stories(path)
+
+    result = _invoke(tmp_path)
+    assert result.exit_code == 0, result.output
+
+    out = pd.read_parquet(path)
+    legs = out["legs"].iloc[0]
+    assert len(legs) == 2
+    for leg in legs:
+        assert set(leg.keys()) == set(LEG_FIELDS)
+        assert "desc" not in leg
+    tatum = next(leg for leg in legs if leg["player"] == "Jayson Tatum")
+    assert tatum["bet"] == "Over"
+    assert tatum["line"] == 28.5
+    assert tatum["market"] == "PTS"
+    assert tatum["platform"] == "Underdog"
+    assert tatum["date"] == "2026-01-15"
+
+
+def test_migrate_current_game_stories_idempotent(tmp_path):
+    path = tmp_path / "current_game_stories.parquet"
+    _seed_current_game_stories(path)
+
+    first = _invoke(tmp_path)
+    assert first.exit_code == 0, first.output
+    after_first = _file_bytes(path)
+
+    second = _invoke(tmp_path)
+    assert second.exit_code == 0, second.output
+    after_second = _file_bytes(path)
+
+    assert after_first == after_second
+    assert "already migrated" in second.output
+
+
+def test_migrate_current_game_stories_dry_run_writes_nothing(tmp_path):
+    path = tmp_path / "current_game_stories.parquet"
+    _seed_current_game_stories(path)
+    before_mtime = path.stat().st_mtime_ns
+    before_bytes = _file_bytes(path)
+
+    result = _invoke(tmp_path, "--dry-run")
+    assert result.exit_code == 0, result.output
+    assert "would convert desc legs" in result.output
+
+    assert path.stat().st_mtime_ns == before_mtime
+    assert _file_bytes(path) == before_bytes
+    stale_legs = pd.read_parquet(path)["legs"].iloc[0]
+    assert "desc" in stale_legs[0]
+
+
+# ---------------------------------------------------------------------------
+# current_parlays.parquet: Leg 1..6 display strings -> legs structs
+# ---------------------------------------------------------------------------
+
+
+def _seed_current_parlays(path):
+    df = pd.DataFrame(
+        [
+            {
+                "Game": "BOS/MIA",
+                "Date": "2026-01-15",
+                "League": "NBA",
+                "Platform": "Underdog",
+                "Model EV": 1.12,
+                "Market EV": 1.05,
+                "Boost": 1.0,
+                "Rec Bet": 0.5,
+                "Leg 1": "Jayson Tatum Over 28.5 PTS - 59.0%, 1.03x",
+                "Leg 2": "Jimmy Butler Under 22.5 PTS - 55.0%, 1.05x",
+                "Leg 3": "",
+                "Leg 4": "",
+                "Leg 5": "",
+                "Leg 6": "",
+                "Legs": (
+                    "Jayson Tatum Over 28.5 PTS - 59.0%, 1.03x, "
+                    "Jimmy Butler Under 22.5 PTS - 55.0%, 1.05x"
+                ),
+                "P": 0.61,
+                "PB": 0.56,
+                "Bet Size": 2,
+                "Leg Probs": (0.61, 0.56),
+                "Indep P": 0.34,
+            }
+        ]
+    )
+    df.to_parquet(path, engine="pyarrow", index=False)
+
+
+def test_migrate_current_parlays_converts_legs_to_structs(tmp_path):
+    path = tmp_path / "current_parlays.parquet"
+    _seed_current_parlays(path)
+
+    result = _invoke(tmp_path)
+    assert result.exit_code == 0, result.output
+
+    out = pd.read_parquet(path)
+    assert "Leg 1" not in out.columns
+    assert "Leg Probs" not in out.columns
+    assert "Legs" not in out.columns
+
+    legs = out["legs"].iloc[0]
+    assert len(legs) == 2
+    assert {leg["player"] for leg in legs} == {"Jayson Tatum", "Jimmy Butler"}
+    for leg in legs:
+        assert set(leg.keys()) == set(LEG_FIELDS)
+    tatum = next(leg for leg in legs if leg["player"] == "Jayson Tatum")
+    assert tatum["bet"] == "Over"
+    assert tatum["line"] == 28.5
+    assert tatum["market"] == "PTS"
+    assert tatum["win_prob"] == 0.61  # folded in from Leg Probs[0]
+
+
+def test_migrate_current_parlays_idempotent(tmp_path):
+    path = tmp_path / "current_parlays.parquet"
+    _seed_current_parlays(path)
+
+    first = _invoke(tmp_path)
+    assert first.exit_code == 0, first.output
+    after_first = _file_bytes(path)
+
+    second = _invoke(tmp_path)
+    assert second.exit_code == 0, second.output
+    after_second = _file_bytes(path)
+
+    assert after_first == after_second
+    assert "already migrated" in second.output
+
+
+def test_migrate_current_parlays_dry_run_writes_nothing(tmp_path):
+    path = tmp_path / "current_parlays.parquet"
+    _seed_current_parlays(path)
+    before_mtime = path.stat().st_mtime_ns
+    before_bytes = _file_bytes(path)
+
+    result = _invoke(tmp_path, "--dry-run")
+    assert result.exit_code == 0, result.output
+    assert "would convert" in result.output
+
+    assert path.stat().st_mtime_ns == before_mtime
+    assert _file_bytes(path) == before_bytes
+    assert "Leg 1" in pd.read_parquet(path).columns
+
+
+# ---------------------------------------------------------------------------
 # Absent files: every step reports "absent" and the run still exits clean.
 # ---------------------------------------------------------------------------
 
@@ -488,4 +659,4 @@ def test_migrate_current_offers_dry_run_writes_nothing(tmp_path):
 def test_migrate_reports_absent_files_and_exits_clean(tmp_path):
     result = _invoke(tmp_path)
     assert result.exit_code == 0, result.output
-    assert result.output.count("absent") == 5
+    assert result.output.count("absent") == 6
