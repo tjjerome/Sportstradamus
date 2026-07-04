@@ -1,5 +1,8 @@
 """Non-Streamlit mirror of the dashboard design tokens (DESIGN.md §2)."""
 
+import plotly.graph_objects as go
+import plotly.io as pio
+
 # Celestial gold accent — display faces and ambient art only, never data ink
 # (DESIGN.md celestial layer; pinned by tests/golden/test_design_tokens.py).
 GOLD = "#C9A227"
@@ -53,9 +56,6 @@ def register_plotly_template() -> None:
     covers st.plotly_chart when a figure's own template/colors aren't set, but ad-hoc
     go.Figure() traces (e.g. profit_sim's per-strategy lines) need an explicit default.
     """
-    import plotly.graph_objects as go
-    import plotly.io as pio
-
     pio.templates["sportstradamus"] = go.layout.Template(
         layout={
             "paper_bgcolor": "rgba(0,0,0,0)",
