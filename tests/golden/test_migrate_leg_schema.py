@@ -13,6 +13,7 @@ from __future__ import annotations
 import pandas as pd
 from click.testing import CliRunner
 
+import sportstradamus.scripts.migrate_leg_schema as migrate_mod
 from sportstradamus.leg_schema import LEG_FIELDS
 from sportstradamus.scripts.migrate_leg_schema import main
 
@@ -256,6 +257,75 @@ def test_migrate_history_quarantines_close_prob_over_one(tmp_path):
 
     good_row = out.loc[out["Boost"] == 1.03].iloc[0]
     assert good_row["Close Market Prob"] == 0.57  # untouched, in range
+
+
+class _FakeArchive:
+    """Stub ``Archive.get_line`` keyed on ``(league, market, date, player)``."""
+
+    def __init__(self, lines: dict):
+        self._lines = lines
+
+    def get_line(self, league, market, date, player):
+        return self._lines.get((league, market, date, player))
+
+
+def test_backfill_alt_lines_routes_tolerance_by_distribution_family(monkeypatch):
+    """Count and continuous stats use different tolerances, exactly like
+    ``prediction.cli._stamp_alt_line`` — a diff that clears the (wrong) flat
+    0.5 tolerance but not the real per-family one must not be flagged."""
+    monkeypatch.setattr(
+        migrate_mod,
+        "stat_dist",
+        {"NBA": {"AST": "ZINB"}, "NFL": {"Yds": "Gamma"}},
+    )
+    flat = pd.DataFrame(
+        [
+            # Count stat: diff 0.6 clears the old flat 0.5 tolerance but not
+            # the real count tolerance (0.75) -> must NOT be flagged alt.
+            {
+                "League": "NBA",
+                "Market": "AST",
+                "Date": "2026-01-15",
+                "Player": "Jayson Tatum",
+                "Line": 10.0,
+                "Alt Line": None,
+            },
+            # Continuous stat: diff 1.6 clears the old flat 0.5 tolerance but
+            # not the real continuous tolerance (2.5) -> must NOT be flagged.
+            {
+                "League": "NFL",
+                "Market": "Yds",
+                "Date": "2026-01-15",
+                "Player": "Some Rusher",
+                "Line": 100.0,
+                "Alt Line": None,
+            },
+            # Count stat, genuinely alt: diff 2.0 clears even the real 0.75
+            # count tolerance.
+            {
+                "League": "NBA",
+                "Market": "AST",
+                "Date": "2026-01-15",
+                "Player": "Jimmy Butler",
+                "Line": 10.0,
+                "Alt Line": None,
+            },
+        ]
+    )
+    archive = _FakeArchive(
+        {
+            ("NBA", "AST", "2026-01-15", "Jayson Tatum"): 10.6,
+            ("NFL", "Yds", "2026-01-15", "Some Rusher"): 101.6,
+            ("NBA", "AST", "2026-01-15", "Jimmy Butler"): 12.0,
+        }
+    )
+
+    out = migrate_mod._backfill_alt_lines(flat, archive)
+
+    by_player = out.set_index("Player")["Alt Line"]
+    assert not by_player["Jayson Tatum"]
+    assert not by_player["Some Rusher"]
+    assert by_player["Jimmy Butler"]
 
 
 # ---------------------------------------------------------------------------

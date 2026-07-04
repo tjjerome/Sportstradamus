@@ -35,8 +35,13 @@ from tqdm import tqdm
 
 from sportstradamus import clv
 from sportstradamus.analysis import _leg_market_map
-from sportstradamus.helpers import Archive, stat_map
+from sportstradamus.helpers import Archive, stat_dist, stat_map
 from sportstradamus.helpers.io import PARLAY_HIST_PATH, _atomic_write_parquet
+from sportstradamus.prediction.cli import (
+    _ALT_LINE_TOL_CONTINUOUS,
+    _ALT_LINE_TOL_COUNT,
+    _COUNT_DISTS,
+)
 from sportstradamus.prediction.parlay import _resolve_leg_stat
 
 # Sheets-era display-leg encoding: "{Player} {Bet} {Line} {Market} - {Model P}%, {Boost}x".
@@ -297,13 +302,15 @@ def _migrate_history(
     return len(flat)
 
 
-# |Line - Consensus Line| beyond this many points is a genuine alt line, not book noise —
-# mirrors the tolerance ``prediction/cli.py`` uses to stamp ``Alt Line`` at write time.
-_ALT_LINE_TOLERANCE = 0.5
-
-
 def _backfill_alt_lines(flat: pd.DataFrame, archive) -> pd.DataFrame:
-    """Stamp ``Alt Line`` from the archived consensus line where recoverable."""
+    """Stamp ``Alt Line`` from the archived consensus line where recoverable.
+
+    Tolerance routes on distribution family exactly like
+    ``prediction.cli._stamp_alt_line`` (count stats move in coarser steps than
+    continuous ones) — reusing those live constants directly, not a frozen
+    copy, so a backfilled historical flag means the same thing as one stamped
+    at write time even if the tolerances are retuned later.
+    """
     if "Alt Line" not in flat.columns:
         flat["Alt Line"] = False
     pending = flat.loc[flat["Alt Line"].isna()]
@@ -317,8 +324,10 @@ def _backfill_alt_lines(flat: pd.DataFrame, archive) -> pd.DataFrame:
         consensus = archive.get_line(league, market, date, player)
         if not consensus:
             continue
+        dist = stat_dist.get(league, {}).get(market)
+        tol = _ALT_LINE_TOL_COUNT if dist in _COUNT_DISTS else _ALT_LINE_TOL_CONTINUOUS
         rows = flat.loc[idx]
-        is_alt = (rows["Line"] - consensus).abs() > _ALT_LINE_TOLERANCE
+        is_alt = (rows["Line"] - consensus).abs() > tol
         flat.loc[idx, "Alt Line"] = is_alt
     return flat
 
