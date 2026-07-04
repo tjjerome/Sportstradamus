@@ -21,7 +21,9 @@ def test_starfield_respects_ambient_rules():
     # flagged question -- not this gate's scope, see the P8 Phase A code review)
     starfield_rule = re.search(r"\.starfield\{(.*?)\}", theme.APP_CSS, re.DOTALL)
     assert starfield_rule is not None
-    for m in re.finditer(r"rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*(\.?[\d.]+)\s*\)", starfield_rule.group(1)):
+    for m in re.finditer(
+        r"rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*(\.?[\d.]+)\s*\)", starfield_rule.group(1)
+    ):
         assert float(m.group(1)) <= 0.20
 
 

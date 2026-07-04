@@ -190,7 +190,13 @@ APP_CSS = """
 .sp10{left:92.2%;top:51.2%;animation-duration:4.1s;animation-delay:1.5s}
 .sp11{left:87.2%;top:6.2%;animation-duration:4.5s;animation-delay:3s}
 @keyframes tw{0%,100%{opacity:.2}50%{opacity:.64}}
-@media (prefers-reduced-motion: no-preference){.tw{animation:tw 4s ease-in-out infinite}}
+/* Longhands only, no animation-duration -- the .spN rules above set that per
+   star. The old SVG version stashed per-star timing in an inline style=
+   attribute (highest specificity, order-proof); as a class rule it collides
+   with any later same-specificity animation shorthand, which resets every
+   longhand it doesn't restate. Splitting this one keeps the two rule sets on
+   disjoint properties so declaration order stops mattering. */
+@media (prefers-reduced-motion: no-preference){.tw{animation-name:tw;animation-timing-function:ease-in-out;animation-iteration-count:infinite}}
 @media (prefers-reduced-motion: reduce){.tw{animation:none;opacity:.15}}
 </style>
 """
