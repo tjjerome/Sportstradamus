@@ -9,6 +9,8 @@ from collections.abc import Mapping
 
 import pandas as pd
 
+from sportstradamus.helpers import market_display_name
+
 LEG_FIELDS = (
     "player",
     "team",
@@ -95,4 +97,5 @@ def build_leg(row: Mapping) -> dict:
 
 def leg_label(leg: Mapping) -> str:
     """Human display string for a leg. Render-only — never parsed back."""
-    return f"{leg['player']} {leg['bet']} {leg['line']:.10g} {leg['market']}"
+    market = market_display_name(leg.get("league", ""), leg["market"])
+    return f"{leg['player']} {leg['bet']} {leg['line']:.10g} {market}"

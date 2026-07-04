@@ -24,8 +24,13 @@ because this module re-exports the full public surface below. Prefer the
 submodule path in new code.
 """
 
+import importlib.resources as pkg_resources
+import json
+from functools import cache
+
 import requests
 
+from sportstradamus import data
 from sportstradamus.helpers.archive import Archive, LazyArchive, clean_archive
 from sportstradamus.helpers.config import (
     abbreviations,
@@ -85,6 +90,18 @@ from sportstradamus.helpers.text import (
 # ``correlation.py``) divide it back out.
 UNDERDOG_BOOST_BASELINE: float = 1.78
 
+
+@cache
+def _market_display() -> dict:
+    with (pkg_resources.files(data) / "config/market_display.json").open() as f:
+        return json.load(f)
+
+
+def market_display_name(league: str, slug: str) -> str:
+    """Display label for a market slug; the slug stays the logic key everywhere."""
+    return _market_display().get(league, {}).get(slug, slug)
+
+
 __all__ = [
     "GATE_PUBLISH_THRESHOLD",
     "NONZERO_DENOM_GATE",
@@ -115,6 +132,7 @@ __all__ = [
     "get_push_prob",
     "get_trends",
     "hmean",
+    "market_display_name",
     "merge_dict",
     "name_map",
     "negbin_crps",

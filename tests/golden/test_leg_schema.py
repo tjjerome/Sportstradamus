@@ -42,7 +42,7 @@ def test_build_leg_accepts_series():
 
 def test_leg_label_renders_without_stored_string():
     leg = build_leg(OFFER_ROW)
-    assert leg_label(leg) == "Luka Doncic Over 26.5 PTS"
+    assert leg_label(leg) == "Luka Doncic Over 26.5 Points"
 
 
 def test_legs_round_trip_parquet(tmp_path):
