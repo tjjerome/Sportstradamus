@@ -44,9 +44,7 @@ prophecy-voice naming map (stories→prophecies, etc.) lives in
 | Prophecy / celestial accent | `goldColor` | `#C9A227` |
 
 Semantic colors are used **only by intent** in tables/badges/sparklines. Red is reserved for
-negative/bad values — never a brand accent. Gold is the *oracle's* color: kickers, prophecy
-headlines, constellation highlights, correlation strength — never body text, never primary buttons
-(primary stays electric blue), never a substitute for green/red semantics.
+negative/bad values — never a brand accent. Gold is the *oracle's* color and marks **active/selected/hovered** states: table row hover, active lens, active filter chip, active tab underline, active segmented-control segment. Gold also highlights kickers, prophecy headlines, constellation highlights, and correlation strength. Primary blue `#2E6BE6` is reserved for primary buttons and links only — it is no longer used as a generic "active/selected" accent. Gold is **never a data mark** — never a bar, heatmap cell, plotted line/point encoding a value, or team-color star (the gold correlation edge in the constellation is the sole pre-existing exception, DESIGN §4a) — never body text, never primary button fill, never a substitute for green/red semantics.
 
 Streamlit's `[theme]` block has no free-form keys, so `config.toml` mirrors only the tokens
 Streamlit understands; `goldColor`, the display fonts, and the ambient-image rules are mirrored in
