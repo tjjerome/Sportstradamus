@@ -1,7 +1,13 @@
 """Non-Streamlit mirror of the dashboard design tokens (DESIGN.md §2)."""
 
+import importlib.resources as pkg_resources
+import json
+from functools import cache
+
 import plotly.graph_objects as go
 import plotly.io as pio
+
+from sportstradamus import data
 
 # Celestial gold accent — oracle decoration (kickers, prophecy, constellation) and
 # interactive-highlight (active/selected/hovered UI states); never a data mark except
@@ -11,6 +17,10 @@ GOLD = "#C9A227"
 # Neutral gray (DESIGN.md §2 grayColor) — context/secondary marks, e.g. the
 # constellation's non-slip legs against the gold thesis stars.
 GRAY = "#8A91A0"
+
+# Fallback secondary for an unmapped team_colors() code — darker neutral than GRAY
+# so the (primary, secondary) fallback pair still reads as two distinct tones.
+GRAY_SECONDARY = "#5A6070"
 
 # Diverging heatmap ramp (red ↔ neutral ↔ blue) for above/below-centre table cells
 # — mirrors config.toml chartDivergingColors so runtime grid code reaches it without a
@@ -48,6 +58,25 @@ SEQUENTIAL_COLORS = [
     "#183A82",
     "#0E2350",
 ]
+
+
+@cache
+def _team_assets() -> dict:
+    with (pkg_resources.files(data) / "config/team_assets.json").open() as f:
+        return json.load(f)
+
+
+def team_colors(league: str, code: str) -> tuple[str, str]:
+    """(primary, secondary) for a team; unknown codes get the neutral gray pair.
+
+    A past incident had the same WNBA Portland franchise recorded as ``PDX`` on
+    one book and ``POR`` on another, producing duplicate slate cards — this must
+    never KeyError on an unrecognized code.
+    """
+    entry = _team_assets().get(league, {}).get(code)
+    if not entry:
+        return (GRAY, GRAY_SECONDARY)
+    return (entry["primary"], entry["secondary"])
 
 
 def register_plotly_template() -> None:
