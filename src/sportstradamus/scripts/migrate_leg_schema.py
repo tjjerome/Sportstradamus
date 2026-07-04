@@ -44,7 +44,7 @@ from tqdm import tqdm
 from sportstradamus import clv
 from sportstradamus.analysis import _leg_market_map
 from sportstradamus.helpers import Archive, stat_dist, stat_map
-from sportstradamus.helpers.io import PARLAY_HIST_PATH, _atomic_write_parquet
+from sportstradamus.helpers.io import PARLAY_HIST_PATH, _atomic_tmp, _atomic_write_parquet
 from sportstradamus.prediction.cli import (
     _ALT_LINE_TOL_CONTINUOUS,
     _ALT_LINE_TOL_COUNT,
@@ -467,6 +467,35 @@ def _migrate_current_game_stories(path: Path, *, dry_run: bool) -> int:
     return len(df)
 
 
+# The 6 real on-disk frames this script ever migrates — every filename `main`
+# builds `counts` from, checked up front by `_refuse_if_writer_active`.
+_TARGET_FILENAMES = (
+    "parlay_hist.parquet",
+    "history.parquet",
+    "user_slips.parquet",
+    "current_offers.parquet",
+    "current_parlays.parquet",
+    "current_game_stories.parquet",
+)
+
+
+def _refuse_if_writer_active(base: Path, filenames: tuple[str, ...]) -> None:
+    """Exit before reading or writing anything if a writer may be mid-flight.
+
+    ``_atomic_write_parquet`` stages to ``<path>.tmp`` then renames onto the
+    target. A ``.tmp`` sibling existing means either a concurrent writer
+    (``prophecize``/``reflect``, see ``scripts/run_job.sh``) is between those
+    two steps right now, or a prior run crashed mid-write. Proceeding either
+    way risks a TOCTOU clobber: this script reads the current (possibly
+    stale) target, a live writer finishes and replaces it with fresh data,
+    then this script's own write overwrites that fresh data with output
+    derived from the stale read it started with.
+    """
+    active = [f for f in filenames if _atomic_tmp(base / f)[1].exists()]
+    if active:
+        raise SystemExit(f"writer active (stale or in-flight .tmp present): {active}")
+
+
 @click.command()
 @click.option(
     "--runtime-dir",
@@ -489,6 +518,7 @@ def main(
     runtime_dir: Path | None, dry_run: bool, backfill_close: bool, backfill_alt_lines: bool
 ) -> None:
     base = runtime_dir or Path(str(PARLAY_HIST_PATH)).parent
+    _refuse_if_writer_active(base, _TARGET_FILENAMES)
     counts = {
         "parlay_hist.parquet": _migrate_parlay_hist(base / "parlay_hist.parquet", dry_run=dry_run),
         "history.parquet": _migrate_history(

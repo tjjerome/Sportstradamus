@@ -660,3 +660,37 @@ def test_migrate_reports_absent_files_and_exits_clean(tmp_path):
     result = _invoke(tmp_path)
     assert result.exit_code == 0, result.output
     assert result.output.count("absent") == 6
+
+
+# ---------------------------------------------------------------------------
+# Writer-active guard: a stale or in-flight .tmp sibling refuses the whole run.
+# ---------------------------------------------------------------------------
+
+
+def test_migrate_refuses_when_tmp_file_present(tmp_path):
+    """A live ``.tmp`` sibling means a concurrent writer (prophecize/reflect,
+    scripts/run_job.sh) may be mid-flight, or a prior run crashed mid-write.
+    Either way the migration must refuse before touching anything, not race it."""
+    path = tmp_path / "parlay_hist.parquet"
+    _seed_parlay_hist(path)
+    before_bytes = _file_bytes(path)
+    (tmp_path / "parlay_hist.parquet.tmp").write_bytes(b"in-flight write")
+
+    result = _invoke(tmp_path)
+
+    assert result.exit_code != 0
+    assert "parlay_hist.parquet" in result.output
+    assert _file_bytes(path) == before_bytes  # untouched -- refused before migrating anything
+
+
+def test_migrate_refuses_when_tmp_file_present_even_under_dry_run(tmp_path):
+    """The guard fires regardless of --dry-run -- the plan calls for the script to
+    refuse to *run*, not just refuse to write."""
+    path = tmp_path / "history.parquet"
+    _seed_history(path)
+    (tmp_path / "history.parquet.tmp").write_bytes(b"in-flight write")
+
+    result = _invoke(tmp_path, "--dry-run")
+
+    assert result.exit_code != 0
+    assert "history.parquet" in result.output
