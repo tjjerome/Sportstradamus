@@ -12,6 +12,23 @@ That workaround is only needed for ``AppTest.from_string``. ``AppTest.from_file`
 given an absolute, existing path runs the script in place (no temp copy), so
 ``switch_page`` — which resolves relative to ``AppTest``'s own script path — works
 against it directly; the Board test below uses ``from_file`` for that reason.
+
+``switch_page`` itself has a second, separate gap for any page whose registered
+``url_path=`` differs from its filename slug: it computes the target page hash as
+``calc_hash(page_icon_and_name(script_path))`` (a filename-derived name — the old
+pages/ directory convention), but the real ``StreamlitPage._script_hash`` a running
+``st.navigation()`` matches against is ``calc_hash(self._url_path)``. Board/Games/
+Receipts/Tonight all register a ``url_path`` equal to their filename stem, so the
+two computations coincidentally agree and ``switch_page`` "just works" for them.
+The three Model Lab pages register hyphenated ``url_path``s (``lab-correlations``
+vs the filename ``lab_correlations``), so the hashes never match and
+``switch_page`` silently no-ops — the run after it looks identical to never having
+switched at all (no exception, title stays on the previous page). The Lab
+Correlations test below overrides ``AppTest._page_hash`` directly with the correct
+``calc_hash(url_path)`` right after calling ``switch_page`` (which still does its
+other job of validating the file exists and copying it into the tree) to route
+around this; any future AppTest smoke test for lab_diagnostics.py/lab_training.py
+needs the identical override.
 """
 
 from __future__ import annotations
@@ -20,6 +37,7 @@ from pathlib import Path
 
 import pandas as pd
 from streamlit.testing.v1 import AppTest
+from streamlit.util import calc_hash
 
 _APP = Path("src/sportstradamus/dashboard/app.py").resolve()
 _WRAPPER = f"import runpy; runpy.run_path(r'{_APP}', run_name='__main__')"
@@ -106,3 +124,66 @@ def test_board_renders_condensed_grid(monkeypatch, tmp_path):
     at.run()
     assert not at.exception
     assert at.title[0].value == "Today's Predictions"
+
+
+# Mirrors prediction/parlay.py's row-construction contract: legs is a
+# list[dict] of leg_schema.LEG_FIELDS-shaped records, and Corr Pairs/Boost
+# Pairs are flat tuples over itertools.combinations(legs, 2) order.
+_PARLAY_ROWS = [
+    {
+        "League": "NBA",
+        "Platform": "Underdog",
+        "Date": "2026-07-01",
+        "Bet Size": 2,
+        "Legs Resolved": 2,
+        "Misses": 0,
+        "Boost": 3.0,
+        "P": 0.42,
+        "Indep P": 0.35,
+        "legs": [
+            {"player": "J. Brunson", "market": "PTS", "league": "NBA"},
+            {"player": "K. Towns", "market": "REB", "league": "NBA"},
+        ],
+        "Corr Pairs": (0.12,),
+        "Boost Pairs": (1.1,),
+    },
+    {
+        "League": "NBA",
+        "Platform": "Underdog",
+        "Date": "2026-07-02",
+        "Bet Size": 2,
+        "Legs Resolved": 2,
+        "Misses": 1,
+        "Boost": 3.0,
+        "P": 0.55,
+        "Indep P": 0.40,
+        "legs": [
+            {"player": "A. Wilson", "market": "AST", "league": "NBA"},
+            {"player": "A. Wilson", "market": "TOV", "league": "NBA"},
+        ],
+        "Corr Pairs": (0.42,),
+        "Boost Pairs": (1.5,),
+    },
+]
+
+
+def test_lab_correlations_renders_heatmap_and_panels(monkeypatch, tmp_path):
+    """P8 Task B3 smoke: Lab Correlations navigates clean with the new heatmap section.
+
+    ``load_parlays`` reads through ``helpers.io.read_parlay_hist``, which reads
+    ``io``'s own ``PARLAY_HIST_PATH`` binding directly rather than the name
+    ``dashboard.data`` imports — both bindings need patching, or the real
+    ~1.7M-row production ``parlay_hist.parquet`` loads instead of the fixture.
+    """
+    fixture = tmp_path / "parlay_hist.parquet"
+    pd.DataFrame(_PARLAY_ROWS).to_parquet(fixture)
+    monkeypatch.setattr("sportstradamus.helpers.io.PARLAY_HIST_PATH", fixture)
+    monkeypatch.setattr("sportstradamus.dashboard.data.PARLAY_HIST_PATH", fixture)
+
+    at = AppTest.from_file(str(_APP), default_timeout=30)
+    at.run()
+    at.switch_page("surfaces/lab_correlations.py")
+    at._page_hash = calc_hash("lab-correlations")  # see module docstring
+    at.run()
+    assert not at.exception
+    assert at.title[0].value == "Correlations & Parlays"
