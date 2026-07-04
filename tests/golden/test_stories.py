@@ -18,7 +18,6 @@ from sportstradamus.prediction.stories import (
     STORIES_VERSION,
     attach_offer_why,
     attach_parlay_theses,
-    parse_leg,
 )
 
 _DATE = "2026-06-13"
@@ -31,9 +30,8 @@ def _legs(*specs: tuple[str, str, float, str]) -> list[dict]:
     full ``build_leg`` structs — this mirrors the old ``"{Player} {Bet} {Line}
     {Market} - ..."`` ``Leg N`` strings these tests used to encode.
     """
-    return [
-        {"player": p, "bet": b, "line": ln, "market": m} for p, b, ln, m in specs
-    ]
+    return [{"player": p, "bet": b, "line": ln, "market": m} for p, b, ln, m in specs]
+
 
 # Two games. BOS/PHI: half-totals 120+118 = 238, BOS favored 0.74 → blowout.
 # DEN/MIA: 112+112 = 224, ML ~ coin flip (0.55) → coinflip. ``Moneyline`` is the
@@ -286,6 +284,7 @@ def test_slate_uniqueness_guaranteed():
             _star_offer("EEE/FFF", "EEE", "FFF", "Star Three", "G1"),
         ]
     )
+
     def star_legs(p: str) -> list[dict]:
         return _legs((p, "Over", 25.5, "PTS"), (p, "Over", 5.5, "REB"))
 
@@ -557,20 +556,3 @@ def test_why_rotation_deterministic():
     a = attach_offer_why(_OFFERS.copy())["Why"].tolist()
     b = attach_offer_why(_OFFERS.copy())["Why"].tolist()
     assert a == b
-
-
-def test_parse_leg_round_trip():
-    assert parse_leg("Jayson Tatum Over 28.5 PTS - 59.0%, 1.03x") == {
-        "Player": "Jayson Tatum",
-        "Bet": "Over",
-        "Line": 28.5,
-        "Market": "PTS",
-    }
-    assert parse_leg("Pts + Rebs Guy Under 17.5 Pts + Rebs + Asts - 58.9%, 1.17x") == {
-        "Player": "Pts + Rebs Guy",
-        "Bet": "Under",
-        "Line": 17.5,
-        "Market": "Pts + Rebs + Asts",
-    }
-    assert parse_leg("") is None
-    assert parse_leg("no bet token here") is None

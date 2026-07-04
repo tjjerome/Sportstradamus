@@ -3,13 +3,8 @@
 ``enrich_legs`` joins canonical lowercase-keyed legs (from ``lower_leg`` here
 or ``sportstradamus.leg_schema.build_leg``) back to the scored offers frame to
 attach each leg's canonical market, game, team, and depth-chart position — the
-fields the archetype engine routes on. ``parse_leg`` recovers a leg's
-Player/Bet/Line/Market from the retired display-string encoding
-(``"{Player} {Bet} {Line} {Market} - {Model P}%, {Boost}x"``) — every producer
-(parlay search, story menu, the dashboard slip path) now emits structured legs
-directly, so ``parse_leg`` has no production caller left; kept for now with its
-own unit pins since nothing has asked to retire it yet. ``_stat_category`` maps
-a market to the coarse category the phrase bank is keyed by.
+fields the archetype engine routes on. ``_stat_category`` maps a market to the
+coarse category the phrase bank is keyed by.
 """
 
 from __future__ import annotations
@@ -190,32 +185,6 @@ def offer_index(offers: pd.DataFrame) -> dict[tuple, dict]:
     for rec in offers[keep].to_dict("records"):
         idx.setdefault((rec["Player"], rec["Bet"], rec["Line"]), rec)
     return idx
-
-
-def parse_leg(leg: str) -> dict | None:
-    """Splitting on ``" Over "`` / ``" Under "`` yields the player name even when
-    it contains spaces.  Returns ``None`` for anything that does not parse.
-    """
-    if not isinstance(leg, str) or not leg.strip():
-        return None
-    head = leg.split(" - ", 1)[0].strip()
-    for bet in ("Over", "Under"):
-        token = f" {bet} "
-        if token not in head:
-            continue
-        player, rest = head.split(token, 1)
-        rest = rest.strip().split()
-        if not rest:
-            return None
-        try:
-            line = float(rest[0])
-        except ValueError:
-            return None
-        market = " ".join(rest[1:]).strip()
-        if not player.strip() or not market:
-            return None
-        return {"Player": player.strip(), "Bet": bet, "Line": line, "Market": market}
-    return None
 
 
 def validate_parlay_legs(
