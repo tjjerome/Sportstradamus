@@ -303,6 +303,70 @@ def test_fill_from_archive_falls_back_to_composite_under_prob_when_dist_cv_nan()
     assert row["Market CLV"] == pytest.approx(expected_close_p - 0.50)
 
 
+def test_fill_from_archive_resolves_each_distinct_line_independently():
+    """Two offer rows share one PREDICTION_KEY group (same Player/League/Date/Market)
+    but quote different Lines — e.g. two books, or a Alt Line sitting beside the
+    consensus offer. Each row's Close Market Prob must be computed at its OWN Line,
+    not copy-pasted from whichever row happens to be first in the group."""
+    close_ev = 11.2
+    cv = 0.35
+    history = pd.DataFrame(
+        [
+            {
+                "Player": "Player G",
+                "League": "NBA",
+                "Date": "2026-05-04",
+                "Market": "points",
+                "Line": 10.5,
+                "Boost": 1.0,
+                "Platform": "BookOne",
+                "Bet": "Over",
+                "Win Prob": 0.60,
+                "Market Prob": 0.55,
+                "Dist": "Gamma",
+                "CV": cv,
+                "Gate": np.nan,
+                "Step": 0.5,
+                "Close Market Prob": np.nan,
+                "Market CLV": np.nan,
+                "Model CLV": np.nan,
+            },
+            {
+                "Player": "Player G",
+                "League": "NBA",
+                "Date": "2026-05-04",
+                "Market": "points",
+                "Line": 12.5,
+                "Boost": 1.0,
+                "Platform": "BookTwo",
+                "Bet": "Over",
+                "Win Prob": 0.60,
+                "Market Prob": 0.45,
+                "Dist": "Gamma",
+                "CV": cv,
+                "Gate": np.nan,
+                "Step": 0.5,
+                "Close Market Prob": np.nan,
+                "Market CLV": np.nan,
+                "Model CLV": np.nan,
+            },
+        ]
+    )
+    archive = _StubArchive({("NBA", "points", "2026-05-04", "Player G"): close_ev})
+    df = clv.fill_from_archive(history, archive)
+
+    expected_under_row0 = get_odds(10.5, close_ev, "Gamma", cv=cv, gate=None, step=0.5)
+    expected_under_row1 = get_odds(12.5, close_ev, "Gamma", cv=cv, gate=None, step=0.5)
+    expected_close_p_row0 = 1.0 - expected_under_row0
+    expected_close_p_row1 = 1.0 - expected_under_row1
+
+    assert expected_close_p_row0 != pytest.approx(expected_close_p_row1)
+    assert df.loc[0, "Close Market Prob"] == pytest.approx(expected_close_p_row0)
+    assert df.loc[1, "Close Market Prob"] == pytest.approx(expected_close_p_row1)
+    assert df.loc[0, "Market CLV"] == pytest.approx(expected_close_p_row0 - 0.55)
+    assert df.loc[1, "Market CLV"] == pytest.approx(expected_close_p_row1 - 0.45)
+
+
 def test_fill_from_archive_quarantines_out_of_range_close_p(monkeypatch):
     """A conversion result outside [0, 1] must never be written — clamp to NaN instead,
     consistent with migrate_leg_schema.py's existing Close Market Prob > 1 quarantine."""
