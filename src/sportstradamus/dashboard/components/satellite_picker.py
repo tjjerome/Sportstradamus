@@ -26,6 +26,7 @@ import streamlit as st
 from sportstradamus.dashboard.components.constellation import star_label
 from sportstradamus.dashboard.components.deep_dive import render_offer_card
 from sportstradamus.dashboard.legs import corr_key, find_offer_idx
+from sportstradamus.leg_schema import is_model_liked, leg_label
 from sportstradamus.prediction.stories.legs import validate_parlay_legs
 
 # Top legs offered per other game — enough to grab a small second cluster, few enough
@@ -84,7 +85,7 @@ def render_satellites(
     action — it owns the slip state. The expander auto-opens while the slip can't yet be
     locked in (single-team / one leg) and stays collapsed once it is valid.
     """
-    satellites = [(i, leg) for i, leg in enumerate(legs) if leg["Game"] != focus_game]
+    satellites = [(i, leg) for i, leg in enumerate(legs) if leg["game"] != focus_game]
     exclude = {corr_key(leg) for leg in legs}
     groups = satellite_groups(
         offers, focus_game=focus_game, platform=platform, exclude_keys=exclude
@@ -147,7 +148,7 @@ def _render_added(
     action: dict | None = None
     for i, leg in items:
         text_col, rm_col = st.columns([8, 1])
-        text_col.write(leg["Desc"])
+        text_col.write(leg_label(leg))
         if rm_col.button(":material/close:", key=f"{key_prefix}_{infix}_rm_{i}", help="Remove leg"):
             action = {"remove": i}
     return action
@@ -175,7 +176,7 @@ def render_disliked_legs(
     added = [
         (i, leg)
         for i, leg in enumerate(legs)
-        if leg["Game"] == focus_game and float(leg.get("Kelly", 0.0) or 0.0) <= 0
+        if leg["game"] == focus_game and not is_model_liked(leg)
     ]
     exclude = {corr_key(leg) for leg in legs}
     kelly = pd.to_numeric(offers["Kelly"], errors="coerce")

@@ -44,10 +44,15 @@ def _history():
             "League": ["NBA", "NBA"],
             "Market": ["PTS", "REB"],
             "Date": ["2025-01-01", "2025-01-02"],
-            "Offers": [
-                [(10.0, 1.0, "Underdog", "Over", 0.6, 0.5, 0.0, 0.0, 0.0)],
-                [(8.0, 1.0, "Underdog", "Under", 0.55, 0.5, 0.0, 0.0, 0.0)],
-            ],
+            "Line": [10.0, 8.0],
+            "Boost": [1.0, 1.0],
+            "Platform": ["Underdog", "Underdog"],
+            "Bet": ["Over", "Under"],
+            "Win Prob": [0.6, 0.55],
+            "Market Prob": [0.5, 0.5],
+            "Close Market Prob": [0.0, 0.0],
+            "Market CLV": [0.0, 0.0],
+            "Model CLV": [0.0, 0.0],
             "Actual": [np.nan, np.nan],
         }
     )
@@ -70,7 +75,9 @@ def meta(monkeypatch):
     monkeypatch.setattr(nightly.clv, "summarize", lambda h, archive=None: {"n": 0})
     monkeypatch.setattr(nightly.clv, "persist_segments", lambda s: None)
     monkeypatch.setattr(
-        nightly, "read_parlay_hist", lambda: pd.DataFrame({"Legs": [np.nan], "Misses": [np.nan]})
+        nightly,
+        "read_parlay_hist",
+        lambda: pd.DataFrame({"Legs Resolved": [np.nan], "Misses": [np.nan]}),
     )
     monkeypatch.setattr(nightly, "write_parlay_hist", lambda p: None)
     monkeypatch.setattr(nightly, "check_bet", lambda bet, stats, stat_map: (1, 0))

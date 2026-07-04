@@ -36,7 +36,6 @@ from sportstradamus.dashboard.components.slip_state import (
     _BUILDER,
     _LEGS,
     _PLATFORM,
-    _leg_from_offer,
     clear_slip,
     lock_in,
     remove_leg,
@@ -44,6 +43,7 @@ from sportstradamus.dashboard.components.slip_state import (
 from sportstradamus.dashboard.data import load_model_stats
 from sportstradamus.dashboard.legs import corr_key
 from sportstradamus.dashboard.slip_engine import SlipScore, score_slip, slip_headline
+from sportstradamus.leg_schema import build_leg, is_model_liked, leg_label
 from sportstradamus.prediction.stories.legs import validate_parlay_legs
 
 
@@ -53,7 +53,7 @@ def _slip_shrinkage(legs: Sequence[Mapping]) -> float:
         return 1.0
     vals = []
     for leg in legs:
-        cell = stats.loc[(stats["league"] == leg["League"]) & (stats["market"] == leg["Market"])]
+        cell = stats.loc[(stats["league"] == leg["league"]) & (stats["market"] == leg["market"])]
         if not cell.empty and pd.notna(cell.iloc[0]["kelly_shrinkage"]):
             vals.append(float(cell.iloc[0]["kelly_shrinkage"]))
     return min(vals) if vals else 1.0
@@ -81,10 +81,10 @@ def render_constellation_builder(
     legs = st.session_state[_LEGS]
     platform = st.session_state[_PLATFORM]
     pool = offers.loc[(offers["Game"] == focus_game) & (offers["Platform"] == platform)]
-    focus_legs = [leg for leg in legs if leg["Game"] == focus_game]
+    focus_legs = [leg for leg in legs if leg["game"] == focus_game]
     # Only the model-liked legs are stars; a manually-added model-passed leg (Kelly ≤ 0)
     # rides in the slip like a satellite — listed by the picker, never drawn on the map.
-    star_legs = [leg for leg in focus_legs if float(leg.get("Kelly", 0.0) or 0.0) > 0]
+    star_legs = [leg for leg in focus_legs if is_model_liked(leg)]
     _render_constellation(star_legs, corr, pool, key_prefix)
     _render_leg_list(key_prefix, focus_game=focus_game, removable=False)
     _render_supplemental_pickers(
@@ -149,11 +149,9 @@ def _render_leg_list(
     """
     legs = st.session_state[_LEGS]
     for i, leg in enumerate(legs):
-        if focus_game is not None and (
-            leg["Game"] != focus_game or float(leg.get("Kelly", 0.0) or 0.0) <= 0
-        ):
+        if focus_game is not None and (leg["game"] != focus_game or not is_model_liked(leg)):
             continue
-        line = f"{leg['Desc']}  ·  {leg['League']}"
+        line = f"{leg_label(leg)}  ·  {leg['league']}"
         if not removable:
             st.write(line)
             continue
@@ -255,7 +253,7 @@ def _apply_satellite_action(action: Mapping | None, legs: list[dict]) -> bool:
     if not action:
         return False
     if "add" in action:
-        legs.append(_leg_from_offer(action["add"]))
+        legs.append(build_leg(action["add"]))
         return True
     if "remove" in action:
         remove_leg(action["remove"])
@@ -279,7 +277,7 @@ def _toggle_leg(key: str, pool: pd.DataFrame) -> bool:
     match = _pool_match_for_key(pool, key)
     if match is None:
         return False
-    legs.append(_leg_from_offer(match[1]))
+    legs.append(build_leg(match[1]))
     return True
 
 

@@ -60,7 +60,7 @@ class _MovementArchive:
 
 
 def _filled_history():
-    """One row, two filled Over offers (close_p + market_clv present so legs count)."""
+    """One prediction, two filled Over offer rows (close_p + market_clv present so legs count)."""
     return pd.DataFrame(
         [
             {
@@ -68,12 +68,31 @@ def _filled_history():
                 "League": "NBA",
                 "Date": "2026-05-04",
                 "Market": "points",
+                "Line": 10.5,
+                "Boost": 1.0,
                 "Platform": "Underdog",
-                "Offers": [
-                    (10.5, 1.0, "Underdog", "Over", 0.60, 0.55, 0.58, 0.03, 0.02),
-                    (11.5, 1.0, "Underdog", "Over", 0.62, 0.54, 0.57, 0.04, 0.03),
-                ],
-            }
+                "Bet": "Over",
+                "Win Prob": 0.60,
+                "Market Prob": 0.55,
+                "Close Market Prob": 0.58,
+                "Market CLV": 0.03,
+                "Model CLV": 0.02,
+            },
+            {
+                "Player": "Player A",
+                "League": "NBA",
+                "Date": "2026-05-04",
+                "Market": "points",
+                "Line": 11.5,
+                "Boost": 1.0,
+                "Platform": "Underdog",
+                "Bet": "Over",
+                "Win Prob": 0.62,
+                "Market Prob": 0.54,
+                "Close Market Prob": 0.57,
+                "Market CLV": 0.04,
+                "Model CLV": 0.03,
+            },
         ]
     )
 
