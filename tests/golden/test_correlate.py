@@ -8,6 +8,7 @@ Stats class so they can run without league-API credentials.
 
 from __future__ import annotations
 
+import importlib
 import importlib.resources as pkg_resources
 import json
 from datetime import date
@@ -147,32 +148,34 @@ def _models_snapshot() -> dict[str, float]:
 
 
 @pytest.fixture
-def _preserve_nba_correlate_outputs():
-    """Snapshot + restore the per-league correlate outputs around each test.
+def _preserve_nba_correlate_outputs(monkeypatch, tmp_path):
+    """Redirect correlate()'s package-data reads/writes to an isolated tmp_path.
 
-    These tests call ``correlate("NBA", stub, ...)``, which writes to the
-    real package data directory at ``data/leagues/nba/``. Without this
-    fixture the empty-gamelog stub would leave a ``cache_key`` of
-    ``row_count=0`` / ``max_date=null`` behind, making the next real
-    ``meditate`` run see a cache mismatch against its populated gamelog
-    and rebuild from scratch — the test pollution the user hit on
-    2026-05-29.
+    ``correlate`` resolves every output path through ``pkg_resources.files(data)``
+    against the real installed package. Earlier versions of this fixture instead
+    snapshotted + restored the real ``data/leagues/nba/`` files around each test,
+    which (a) missed the raw warm-start cache at
+    ``data/training_data/NBA_corr.parquet`` entirely — almost certainly why the
+    real file was independently found empty — and (b) still raced against any
+    other test doing the same thing concurrently under pytest-xdist, since a
+    snapshot/restore around one test can't stop a *different* worker's test from
+    writing to the same real path in between. Redirecting to a per-test tmp_path
+    removes both problems at once: nothing ever touches real package data, and
+    each test gets its own directory, so there's nothing left to race on.
     """
-    league_dir = Path(str(pkg_resources.files(data) / "leagues" / "nba"))
-    targets = ["corr_metadata.json", "corr_same_team.parquet", "corr_opposing.parquet"]
-    saved: dict[str, bytes | None] = {}
-    for name in targets:
-        path = league_dir / name
-        saved[name] = path.read_bytes() if path.is_file() else None
-    try:
-        yield
-    finally:
-        for name, blob in saved.items():
-            path = league_dir / name
-            if blob is None:
-                path.unlink(missing_ok=True)
-            else:
-                path.write_bytes(blob)
+    # sportstradamus.training's __init__ re-exports the `correlate` *function*
+    # at the package level, shadowing the `correlate` submodule on attribute
+    # access -- so a string-path monkeypatch.setattr (which resolves dotted
+    # names via getattr) lands on the function, not the module. Resolve the
+    # real module through import machinery instead, and patch its
+    # `pkg_resources` object directly.
+    correlate_module = importlib.import_module("sportstradamus.training.correlate")
+    real_files = correlate_module.pkg_resources.files
+
+    def _fake_files(pkg):
+        return tmp_path if pkg is data else real_files(pkg)
+
+    monkeypatch.setattr(correlate_module.pkg_resources, "files", _fake_files)
 
 
 def test_metadata_written_with_required_keys(_preserve_nba_correlate_outputs) -> None:

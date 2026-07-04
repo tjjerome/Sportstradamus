@@ -1846,8 +1846,8 @@ class Stats:
         ``models/{league}_{market}.mdl`` pickle, predicts the per-player
         distribution parameters, and joins them into ``self.playerProfile`` under
         ``rename_map`` (the per-league difference besides ``market``). Returns
-        ``True`` on success, ``False`` when the pickle is absent so callers with
-        post-join work (NHL/NFL budget scaling) can abort.
+        ``True`` on success, ``False`` when the gamelog is empty or the pickle is
+        absent so callers with post-join work (NHL/NFL budget scaling) can abort.
 
         Args:
             offers: Sportsbook offers dict or list passed through from the caller.
@@ -1875,6 +1875,10 @@ class Stats:
         self.profile_market(market, date)
         self.get_depth(flat_offers, date)
         playerStats = self.get_stats(market, flat_offers, date)
+
+        if playerStats.empty:
+            logger.warning(f"Gamelog missing - {date}")
+            return False
 
         filename = "_".join([self.league, market]).replace(" ", "-")
         filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
