@@ -12,16 +12,15 @@ known per-(team, game) records, then asserts the exact ``corr_same_team`` /
 Every R is shrunk by overlap/MIN_OVERLAP_FOR_FULL_WEIGHT = 6/30 = 0.2 (only 6
 games per team); the diagonal self-correlations (1.0 -> 0.2 after shrink) and the
 same-team/opposing split on the ``_OPP_`` prefix are part of the pinned behavior.
-Writes to the real package ``leagues/nba`` dir, restored by the fixture.
+Writes are redirected to a per-test tmp_path (see the ``outputs`` fixture) so this
+never touches real package data or races other tests under pytest-xdist.
 """
 
 from __future__ import annotations
 
 import datetime as _dt
 import importlib
-import importlib.resources as pkg_resources
 import json
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -63,32 +62,28 @@ def _records(league, log, latest_date):
 
 
 @pytest.fixture
-def outputs(monkeypatch):
-    league_dir = Path(str(pkg_resources.files(_data) / "leagues" / "nba"))
-    raw = Path(str(pkg_resources.files(_data) / "training_data" / "NBA_corr.parquet"))
-    targets = ["corr_metadata.json", "corr_same_team.parquet", "corr_opposing.parquet"]
-    saved = {
-        n: (league_dir / n).read_bytes() if (league_dir / n).is_file() else None for n in targets
-    }
-    saved_raw = raw.read_bytes() if raw.is_file() else None
+def outputs(monkeypatch, tmp_path):
+    """Redirect correlate()'s package-data reads/writes to an isolated tmp_path.
+
+    Mirrors ``test_correlate.py``'s ``_preserve_nba_correlate_outputs``: the old
+    snapshot/restore of the real ``leagues/nba`` dir missed the raw warm-start
+    cache and still raced against other tests writing the same real path
+    concurrently under pytest-xdist. Redirecting removes both problems.
+    """
+    real_files = corr_mod.pkg_resources.files
+
+    def _fake_files(pkg):
+        return tmp_path if pkg is _data else real_files(pkg)
+
+    monkeypatch.setattr(corr_mod.pkg_resources, "files", _fake_files)
     monkeypatch.setattr(corr_mod, "_build_team_game_records", _records)
-    try:
-        corr_mod.correlate("NBA", _Stub(), force=True)
-        same = pd.read_parquet(league_dir / "corr_same_team.parquet")["R"].to_dict()
-        opp = pd.read_parquet(league_dir / "corr_opposing.parquet")["R"].to_dict()
-        meta = json.loads((league_dir / "corr_metadata.json").read_text())
-        yield {"same": same, "opp": opp, "meta": meta}
-    finally:
-        for n, b in saved.items():
-            p = league_dir / n
-            if b is None:
-                p.unlink(missing_ok=True)
-            else:
-                p.write_bytes(b)
-        if saved_raw is None:
-            raw.unlink(missing_ok=True)
-        else:
-            raw.write_bytes(saved_raw)
+
+    corr_mod.correlate("NBA", _Stub(), force=True)
+    league_dir = tmp_path / "leagues" / "nba"
+    same = pd.read_parquet(league_dir / "corr_same_team.parquet")["R"].to_dict()
+    opp = pd.read_parquet(league_dir / "corr_opposing.parquet")["R"].to_dict()
+    meta = json.loads((league_dir / "corr_metadata.json").read_text())
+    return {"same": same, "opp": opp, "meta": meta}
 
 
 def test_same_team_blocks(outputs):
