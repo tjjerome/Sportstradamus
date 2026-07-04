@@ -15,6 +15,7 @@ import streamlit as st
 
 from sportstradamus import data
 from sportstradamus.analysis import annotate_offer_outcomes
+from sportstradamus.dashboard.components.lab_filters import FILTER_AXES
 from sportstradamus.helpers.io import (
     CURRENT_GAME_CONTEXT_PATH,
     CURRENT_GAME_CORR_PATH,
@@ -340,6 +341,36 @@ def load_stat_map() -> dict:
     """Load the stat name mapping config (static, long-lived cache)."""
     with open(pkg_resources.files(data) / "config" / "stat_map.json") as f:
         return json.load(f)
+
+
+# Axes that are always present on a stat_meta.json cell; the rest of
+# FILTER_AXES (blending, hpo_selection, count_dispersion_objective, zinb_mode)
+# are sparse Optuna search axes that default to "none" when absent.
+_ALWAYS_PRESENT_AXES = ("dist", "target_normalization", "posthoc", "shipped")
+
+
+@st.cache_data(ttl=_STATIC_CONFIG_TTL_SECONDS, show_spinner="Loading stat meta...")
+def load_stat_meta() -> pd.DataFrame:
+    """One row per ``(league, market)`` cell of ``stat_meta.json``, sparse axes defaulted.
+
+    Columns: ``league, market`` + :data:`~sportstradamus.dashboard.components.lab_filters.FILTER_AXES`
+    — ``dist, target_normalization, posthoc, blending, hpo_selection,
+    count_dispersion_objective, zinb_mode, shipped``. Feeds the shared Lab
+    filter panel (``lab_filters.render_lab_filters``); a committed-config read,
+    so no archive/pipeline dependency.
+    """
+    with open(pkg_resources.files(data) / "config" / "stat_meta.json") as f:
+        raw: dict[str, dict[str, dict]] = json.load(f)
+
+    rows = []
+    for league, markets in raw.items():
+        for market, cell in markets.items():
+            row = {"league": league, "market": market}
+            for axis in FILTER_AXES:
+                row[axis] = cell[axis] if axis in _ALWAYS_PRESENT_AXES else cell.get(axis, "none")
+            rows.append(row)
+
+    return pd.DataFrame(rows, columns=["league", "market", *FILTER_AXES])
 
 
 @st.cache_data(ttl=_STATIC_CONFIG_TTL_SECONDS, show_spinner=False)
