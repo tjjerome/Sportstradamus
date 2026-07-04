@@ -8,6 +8,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from sportstradamus.dashboard import theme
 from sportstradamus.dashboard.data import (
     TIMEFRAME_OPTIONS,
     format_ts,
@@ -99,7 +100,7 @@ if has_indep and has_corr_p:
         x="Indep P",
         y="P",
         color="Outcome",
-        color_discrete_map={"Hit": "#2ecc71", "Miss": "#e74c3c"},
+        color_discrete_map={"Hit": theme.GREEN, "Miss": theme.RED},
         opacity=0.5,
         labels={
             "Indep P": "Independent Probability (no correlation)",
@@ -212,9 +213,9 @@ for platform in sorted(resolved["Platform"].unique()):
             color="Outcome",
             barmode="stack",
             color_discrete_map={
-                "Hit All": "#2ecc71",
-                "Missed 1": "#f39c12",
-                "Missed 2+": "#e74c3c",
+                "Hit All": theme.GREEN,
+                "Missed 1": theme.ORANGE,
+                "Missed 2+": theme.RED,
             },
             labels={"Size": "Parlay Size", "Count": "Parlays"},
         )
