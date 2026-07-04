@@ -16,8 +16,18 @@ import pandas as pd
 import pytest
 
 from sportstradamus.dashboard import theme
-from sportstradamus.dashboard.columns import CONSENSUS_EDGE, MODEL_EDGE, add_edges
-from sportstradamus.dashboard.components.grid import _HEAT_TEXT, build_themed_grid_options
+from sportstradamus.dashboard.columns import (
+    CONSENSUS_EDGE,
+    MODEL_EDGE,
+    add_edges,
+    add_market_display,
+    add_match_column,
+)
+from sportstradamus.dashboard.components.grid import (
+    _HEAT_TEXT,
+    _HOVER_CSS,
+    build_themed_grid_options,
+)
 from sportstradamus.dashboard.lenses import LENSES, apply_lens
 
 _HEX = re.compile(r"#[0-9A-Fa-f]{6}")
@@ -108,6 +118,7 @@ def test_apply_lens_each_narrows() -> None:
             "Model EV": [1.20, 0.95, 1.05, 1.40, 1.01],
             "Market EV": [1.02, 1.00, 1.05, 0.90, 0.98],
             "Boost": [1.0, 1.0, 1.0, 3.0, 1.0],
+            "Date": ["2026-07-04", "2026-07-04", "2026-07-05", "2026-07-04", "2026-07-05"],
         }
     )
     assert apply_lens(df, "All").equals(df)
@@ -121,12 +132,22 @@ def test_apply_lens_each_narrows() -> None:
     # Consensus = both the model and the book score it over break-even.
     assert set(apply_lens(df, "Contrarian").index) == {3, 4}
     assert set(apply_lens(df, "Consensus").index) == {0, 2}
+    # Tonight = the soonest slate date present, so it degrades without wall-clock/timezone
+    # parsing — here the minimum Date is 2026-07-04.
+    assert set(apply_lens(df, "Tonight").index) == {0, 1, 3}
 
 
 def test_apply_lens_missing_cols_unchanged() -> None:
     df = pd.DataFrame({"Model EV": [1.2, 1.0]})
     assert apply_lens(df, "Sharp edges").equals(df)
     assert apply_lens(df, "nonsense-lens").equals(df)
+
+
+def test_tonight_lens_missing_date_col_unchanged() -> None:
+    df = pd.DataFrame(
+        {"Model EV": [1.2, 1.0], "Market EV": [1.0, 1.0], "Boost": [1.0, 1.0]}
+    )
+    assert apply_lens(df, "Tonight").equals(df)
 
 
 def test_add_edges_are_ev_minus_one() -> None:
@@ -139,3 +160,48 @@ def test_add_edges_are_ev_minus_one() -> None:
     assert CONSENSUS_EDGE not in add_edges(df.drop(columns=["Market EV"])).columns
     assert CONSENSUS_EDGE in add_edges(df.drop(columns=["Model EV"])).columns
     assert MODEL_EDGE not in add_edges(df.drop(columns=["Model EV"])).columns
+
+
+def test_add_match_column_player_team_first() -> None:
+    df = pd.DataFrame(
+        {
+            "Team": ["LVA", "NYK"],
+            "Opponent": ["IND", "SAS"],
+            "Home": [True, False],
+        }
+    )
+    out = add_match_column(df)
+    assert out["Match"].tolist() == ["LVA v IND", "NYK @ SAS"]
+
+
+def test_add_market_display_keeps_slug_column() -> None:
+    df = pd.DataFrame({"League": ["NBA", "NFL"], "Market": ["PTS", "qb-yards"]})
+    out = add_market_display(df)
+    assert "Market" in out.columns and out["Market"].tolist() == ["PTS", "qb-yards"]
+    assert "Market Display" in out.columns
+    # An unmapped slug falls back to itself (helpers.market_display_name's own contract).
+
+
+def test_arrow_col_adds_cellrenderer_and_hidden_cols_hide() -> None:
+    df = pd.DataFrame({"Line": [23.5, 8.5], "Bet": ["Over", "Under"], "Market": ["PTS", "AST"]})
+    options = build_themed_grid_options(
+        df, numeric_cols=["Line"], arrow_col="Line", hidden_cols=["Bet", "Market"]
+    )
+    defs = _column_defs(options)
+    assert hasattr(defs["Line"]["cellRenderer"], "js_code")
+    assert "Bet" in defs["Line"]["cellRenderer"].js_code
+    assert defs["Bet"]["hide"] is True
+    assert defs["Market"]["hide"] is True
+
+
+def test_arrow_col_noop_without_bet_column() -> None:
+    df = pd.DataFrame({"Line": [23.5, 8.5]})
+    options = build_themed_grid_options(df, numeric_cols=["Line"], arrow_col="Line")
+    defs = _column_defs(options)
+    assert "cellRenderer" not in defs["Line"]
+    assert "Bet" not in defs
+
+
+def test_hover_css_is_gold_rail_client_side() -> None:
+    assert _HOVER_CSS[".ag-row-hover"]["box-shadow"] == "inset 3px 0 0 #C9A227 !important"
+    assert _HOVER_CSS[".ag-row-hover"]["background-color"] == "rgba(201,162,39,.06) !important"
