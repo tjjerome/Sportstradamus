@@ -20,7 +20,7 @@ MODEL_EDGE = "Model Edge"
 CONSENSUS_EDGE = "Consensus Edge"
 _EV_BREAK_EVEN = 1.0
 
-LABELS = {"Win Prob": "Win %", CONSENSUS_EDGE: "Cons Edge"}
+LABELS = {"Win Prob": "Win %", CONSENSUS_EDGE: "Cons Edge", "Market Display": "Market"}
 
 HELP = {
     "Win %": "Model's probability the pick hits.",

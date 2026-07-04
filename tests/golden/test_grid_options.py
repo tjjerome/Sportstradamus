@@ -18,6 +18,7 @@ import pytest
 from sportstradamus.dashboard import theme
 from sportstradamus.dashboard.columns import (
     CONSENSUS_EDGE,
+    LABELS,
     MODEL_EDGE,
     add_edges,
     add_market_display,
@@ -205,3 +206,51 @@ def test_arrow_col_noop_without_bet_column() -> None:
 def test_hover_css_is_gold_rail_client_side() -> None:
     assert _HOVER_CSS[".ag-row-hover"]["box-shadow"] == "inset 3px 0 0 #C9A227 !important"
     assert _HOVER_CSS[".ag-row-hover"]["background-color"] == "rgba(201,162,39,.06) !important"
+
+
+def test_market_display_labels_back_to_market_header() -> None:
+    """Market Display carries the slug's prose label but the grid header reads "Market"
+    (mockup ``docs/mockups/p8-board.html:104``) — columns.LABELS renames it back, same
+    mechanism as Consensus Edge -> Cons Edge and Win Prob -> Win %.
+    """
+    assert LABELS["Market Display"] == "Market"
+    df = pd.DataFrame({"Market Display": ["Points", "Assists"]}).rename(columns=LABELS)
+    options = build_themed_grid_options(df, numeric_cols=[])
+    defs = _column_defs(options)
+    assert "Market" in defs and "Market Display" not in defs
+
+
+def test_board_grid_omits_team_opponent_kelly_date() -> None:
+    """Board 14->10: Team/Opponent/Bet/Kelly/Date must never resurface as displayed
+    grid columns — Match/Market/Platform/League already cover what a viewer needs
+    (Tonight lens covers the recency Date carried). Mirrors surfaces/board.py's own
+    MAIN_COLS + hidden-cols contract without executing the Streamlit script (importing
+    board.py runs the whole page against real snapshot data).
+    """
+    main_cols = [
+        "League", "Match", "Player", "Market Display", "Line", "Boost",
+        "Win Prob", "Model Edge", "Consensus Edge", "Platform",
+    ]
+    df = pd.DataFrame(
+        {
+            **{c: ["x", "y"] for c in main_cols},
+            "Bet": ["Over", "Under"],
+            "Market": ["PTS", "AST"],
+            # Columns that must NOT survive into display_cols even if present upstream.
+            "Team": ["NYK", "LVA"],
+            "Opponent": ["SAS", "IND"],
+            "Kelly": [0.1, 0.2],
+            "Date": ["2026-07-04", "2026-07-05"],
+        }
+    )
+    display_cols = [c for c in [*main_cols, "Bet", "Market"] if c in df.columns]
+    grid_df = df[display_cols].rename(columns={"Market": "Market Slug"})
+    grid_df = grid_df.rename(columns=LABELS)
+    options = build_themed_grid_options(
+        grid_df, numeric_cols=["Line", "Boost"], arrow_col="Line",
+        hidden_cols=["Bet", "Market Slug"],
+    )
+    defs = _column_defs(options)
+    for dropped in ("Team", "Opponent", "Kelly", "Date"):
+        assert dropped not in defs, f"{dropped} leaked into the Board grid's columnDefs"
+    assert "Match" in defs and "Market" in defs
