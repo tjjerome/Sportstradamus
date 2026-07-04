@@ -111,7 +111,8 @@ Golden pins: null-file slot → fallback byte-identical to today's gradient; opa
 ### Task E3: Favicon — interim generated mark, wired now
 
 **Files:**
-- Create: `src/sportstradamus/dashboard/assets/favicon.svg`
+- Create: `src/sportstradamus/dashboard/static/favicon.svg` (`static/`, not `assets/` — the
+  `assets.py` module from E2 lives beside it and a same-named data dir would shadow-confuse)
 - Modify: `src/sportstradamus/dashboard/app.py` (line 22)
 - Test: extend `tests/golden/test_app_injections.py`
 
@@ -122,7 +123,7 @@ the licensing rule (starfield precedent, spec §2). Keep it legible at 16×16: o
 ```python
 st.set_page_config(
     page_title="Sportstradamus Dashboard",
-    page_icon=str(Path(__file__).parent / "assets/favicon.svg"),
+    page_icon=str(Path(__file__).parent / "static/favicon.svg"),
     layout="wide",
 )
 ```
@@ -172,8 +173,8 @@ App slot, live now with an honest fallback (`st.logo` renders ~24px tall; `icon_
 the collapsed sidebar):
 
 ```python
-_LOGO = Path(__file__).parent / "assets/logo_wordmark.png"
-_MARK = Path(__file__).parent / "assets/logo_mark.png"
+_LOGO = Path(__file__).parent / "static/logo_wordmark.png"
+_MARK = Path(__file__).parent / "static/logo_mark.png"
 if _LOGO.exists():
     st.logo(str(_LOGO), icon_image=str(_MARK) if _MARK.exists() else None)
 ```

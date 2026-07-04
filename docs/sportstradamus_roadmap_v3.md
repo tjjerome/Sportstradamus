@@ -153,11 +153,6 @@ sketches live in the archived v2.
   v2 §Phase 6.
 - **Streamlit → FastAPI rewrite** — only if real-time push ever becomes the
   product (archived v2 §Suggestions).
-- **Loose constellation shapes** — Skyrim-style sports-shape outlines over the
-  star map; own lane after P8 (P8 spec §6.1).
-- **Art-slot licensing audit** — walk every licensed-art slot (astrolabe,
-  glyphs, team marks, outlines) → owner acquisition list (P8 spec §6.2; colors
-  ship in P8 via `team_assets.json`, marks/logos do not).
 - **Empirical-vs-model ρ overlay** — Correlations Lab heatmap overlay flagging
   pairs the copula mis-prices (P8 spec §6.4).
 - **Idea backlog** — archived v2 §Suggestions for Further Improvement.
@@ -179,6 +174,6 @@ sketches live in the archived v2.
 
 ## Changelog
 
-- P8 planned (spec + 4 phase plans in `docs/superpowers/`); Sheets-era data retirement folded into dashboard-ux as Phase 0; §8 gains 3 P8 follow-ups.
+- P8 planned (spec + 6 phase plans in `docs/superpowers/`, incl. D constellation shapes + E art catalog); Sheets-era data retirement folded into dashboard-ux as Phase 0; §8 gains the ρ-overlay follow-up.
 - model-track lane consolidated: ship75/ship90/feature-plan/brief merged into `model_improvement_track.md`; lane row + doc map repointed.
 - v3 replaces v2: swimlane structure, briefs in `docs/handoffs/`, change-absorption protocol, Sleeper parity + ledger + league-activation lanes added.
