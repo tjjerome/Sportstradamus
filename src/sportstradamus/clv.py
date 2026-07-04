@@ -25,6 +25,8 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus import data as _data_pkg
+from sportstradamus.helpers.config import book_skewnormal_shape
+from sportstradamus.helpers.distributions import get_odds
 from sportstradamus.helpers.logging import get_logger
 from sportstradamus.history_schema import PREDICTION_KEY
 
@@ -68,29 +70,129 @@ def _signed_clv(open_p: float, close_p: float, bet: str) -> float:
     return sign * (float(close_p) - float(open_p))
 
 
-def _fill_offer_rows(history: pd.DataFrame, idx, close_p: float) -> None:
-    """Assign the closing trio onto ``history.loc[idx]`` in place."""
+def _fill_offer_rows(history: pd.DataFrame, idx, close_under: float) -> None:
+    """Assign the closing trio onto ``history.loc[idx]`` in place.
+
+    ``close_under`` is ``P(under offer_line)``, shared by every offer row in the
+    ``PREDICTION_KEY`` group; each row flips it to its own side via ``Bet`` before
+    computing CLV, since a single prediction can carry both Over and Under offers
+    across platforms.
+    """
     rows = history.loc[idx]
-    market_clv = rows.apply(
-        lambda r: _signed_clv(r["Market Prob"], close_p, r["Bet"]), axis=1
+    close_p = rows["Bet"].apply(
+        lambda bet: close_under if bet not in _OVER_BETS else 1.0 - close_under
     )
-    model_clv = rows.apply(lambda r: _signed_clv(r["Win Prob"], close_p, r["Bet"]), axis=1)
+    market_clv = [
+        _signed_clv(mp, cp, bet)
+        for mp, cp, bet in zip(rows["Market Prob"], close_p, rows["Bet"], strict=True)
+    ]
+    model_clv = [
+        _signed_clv(wp, cp, bet)
+        for wp, cp, bet in zip(rows["Win Prob"], close_p, rows["Bet"], strict=True)
+    ]
     history.loc[idx, "Close Market Prob"] = close_p
     history.loc[idx, "Market CLV"] = market_clv
     history.loc[idx, "Model CLV"] = model_clv
+
+
+def _close_prob_from_archive(
+    archive,
+    league: str,
+    market: str,
+    date_str: str,
+    player,
+    *,
+    at: datetime | None,
+    offer_line: float,
+    dist,
+    cv,
+    gate,
+    step,
+) -> float:
+    """Convert the archived closing snapshot into a probability at ``offer_line``.
+
+    Mirrors the book-EV-to-probability conversion the live pipeline already runs at
+    open (:func:`sportstradamus.prediction.model_prob._book_over_prob`): the archive
+    holds a book stat-mean, not a probability, so it must be inverted through
+    ``get_odds`` at the offer's own line under the prediction's stored ``(Dist, CV)``.
+    Returns ``P(under offer_line)`` — sign-flipping for Over vs. Under is the caller's
+    job (``fill_from_archive`` needs the raw under-probability once per group, not
+    once per offer row).
+
+    ``Dist``/``CV`` are NaN for book-fallback cells with no trained model; those fall
+    back to :meth:`Archive.get_composite_under_prob`, which reads the book-weighted
+    consensus under-probability directly with no line/distribution round-trip. That
+    fallback is line-INEXACT when books have moved off the offer's own line by ``at``
+    — accepted here because it only fires when the line-exact path has no shape to
+    invert against.
+
+    Returns NaN when neither path resolves (archive miss, or NaN fallback too).
+    """
+    if pd.isna(dist) or pd.isna(cv):
+        return _safe_get_composite_under_prob(archive, league, market, date_str, player, at=at)
+
+    close_ev = _safe_get_ev(archive, league, market, date_str, player, at=at)
+    if pd.isna(close_ev):
+        return np.nan
+
+    gate_val = None if pd.isna(gate) else float(gate)
+    step_val = 1.0 if pd.isna(step) else float(step)
+    if dist == "SkewNormal":
+        sigma, skew_alpha = book_skewnormal_shape(league, market, close_ev, float(cv))
+        return get_odds(
+            offer_line,
+            close_ev,
+            dist,
+            cv=float(cv),
+            gate=gate_val,
+            step=step_val,
+            sigma=float(sigma),
+            skew_alpha=float(skew_alpha),
+        )
+    return get_odds(offer_line, close_ev, dist, cv=float(cv), gate=gate_val, step=step_val)
+
+
+def _fill_one_group(history: pd.DataFrame, archive, key, idx) -> None:
+    """Resolve one ``PREDICTION_KEY`` group's closing probability and write it in place.
+
+    No-op (leaves the group NaN) when the key isn't a real (league, market) pair, the
+    archive lookup misses, or the resolved probability falls outside ``[0, 1]`` — the
+    last case is a clamp-to-NaN quarantine, matching ``migrate_leg_schema.py``'s
+    existing handling of out-of-range ``Close Market Prob`` values.
+    """
+    player, league, date, market = key
+    if not (isinstance(league, str) and isinstance(market, str)):
+        return
+    date_str = _normalize_date(date)
+    group = history.loc[idx]
+    close_under = _close_prob_from_archive(
+        archive,
+        league,
+        market,
+        date_str,
+        player,
+        at=_commence_time(date_str),
+        offer_line=float(group["Line"].iloc[0]),
+        dist=group["Dist"].iloc[0],
+        cv=group["CV"].iloc[0],
+        gate=group["Gate"].iloc[0],
+        step=group["Step"].iloc[0],
+    )
+    if pd.isna(close_under) or not 0.0 <= close_under <= 1.0:
+        return
+    _fill_offer_rows(history, idx, close_under)
 
 
 def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
     """Populate the closing trio on every offer row from ``archive``.
 
     Groups rows whose ``Close Market Prob`` is still NaN by
-    :data:`~sportstradamus.history_schema.PREDICTION_KEY`, queries
-    ``archive.get_ev(league, market, date, player, at=commence_time)`` once
-    per group, and assigns ``Close Market Prob``, ``Market CLV``, and
-    ``Model CLV`` to every offer row in that group. Pinning
-    ``at=commence_time`` makes the closing read reproducible regardless of
-    when ``reflect`` runs. Groups whose archive lookup returns NaN are left
-    with NaN closing fields and excluded from CLV aggregates downstream.
+    :data:`~sportstradamus.history_schema.PREDICTION_KEY` and resolves each group's
+    closing probability via :func:`_fill_one_group` (see :func:`_close_prob_from_archive`
+    for the archive-EV-to-probability conversion). Pinning ``at=commence_time`` makes
+    the closing read reproducible regardless of when ``reflect`` runs. Groups whose
+    archive lookup returns NaN, or resolves outside ``[0, 1]``, are left with NaN
+    closing fields and excluded from CLV aggregates downstream.
 
     Skips rows that already carry a non-NaN ``Close Market Prob`` so a
     re-run doesn't redundantly hit archive.
@@ -110,13 +212,7 @@ def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
         return history
 
     for key, idx in pending.groupby(PREDICTION_KEY, dropna=False).groups.items():
-        player, league, date, market = key
-        if not (isinstance(league, str) and isinstance(market, str)):
-            continue
-        date_str = _normalize_date(date)
-        commence_at = _commence_time(date_str)
-        close_p = _safe_get_ev(archive, league, market, date_str, player, at=commence_at)
-        _fill_offer_rows(history, idx, close_p)
+        _fill_one_group(history, archive, key, idx)
 
     return history
 
@@ -379,6 +475,24 @@ def _safe_get_ev(
         return np.nan
     try:
         return float(archive.get_ev(league, market, date, player, at=at))
+    except (KeyError, ValueError, TypeError):
+        return np.nan
+
+
+def _safe_get_composite_under_prob(
+    archive,
+    league: str,
+    market: str,
+    date: str,
+    player,
+    *,
+    at: datetime | None = None,
+) -> float:
+    """Wrap ``archive.get_composite_under_prob`` so any lookup miss surfaces as NaN."""
+    if not date or not isinstance(player, str):
+        return np.nan
+    try:
+        return float(archive.get_composite_under_prob(league, market, date, player, at=at))
     except (KeyError, ValueError, TypeError):
         return np.nan
 
