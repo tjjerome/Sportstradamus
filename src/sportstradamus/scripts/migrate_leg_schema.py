@@ -98,6 +98,14 @@ def _has_desc_legs(df: pd.DataFrame) -> bool:
     return first_legs is not None and "desc" in first_legs[0]
 
 
+def _report_absent(path: Path, name: str) -> bool:
+    """Print the "absent" line for a missing snapshot file. Returns whether it was missing."""
+    if path.exists():
+        return False
+    click.echo(f"{name:32s} absent")
+    return True
+
+
 def _parse_desc(desc, league, game, date, platform):
     """One canonical leg dict from a Sheets-era ``desc`` display string, or None."""
     m = _LEG_PATTERN.match(desc or "")
@@ -126,8 +134,7 @@ def _parse_desc(desc, league, game, date, platform):
 def _migrate_parlay_hist(path: Path, *, dry_run: bool) -> int:
     """Rename ``Leg 1..6`` display strings to ``legs`` structs. Returns rows touched."""
     name = "parlay_hist.parquet"
-    if not path.exists():
-        click.echo(f"{name:32s} absent")
+    if _report_absent(path, name):
         return 0
     if "Leg 1" not in pq.read_schema(path).names:
         click.echo(f"{name:32s} already migrated")
@@ -174,8 +181,7 @@ def _row_legacy_legs(row, leg_cols: list[str], prob_col: str | None) -> list[dic
 def _migrate_user_slips(path: Path, *, dry_run: bool) -> int:
     """Convert per-leg ``desc`` strings to canonical leg structs. Returns rows touched."""
     name = "user_slips.parquet"
-    if not path.exists():
-        click.echo(f"{name:32s} absent")
+    if _report_absent(path, name):
         return 0
 
     df = pd.read_parquet(path)
@@ -289,8 +295,7 @@ def _migrate_history(
 ) -> int:
     """Explode nested ``Offers`` to the flat schema. Returns rows touched."""
     name = "history.parquet"
-    if not path.exists():
-        click.echo(f"{name:32s} absent")
+    if _report_absent(path, name):
         return 0
     if "Offers" not in pq.read_schema(path).names:
         click.echo(f"{name:32s} already migrated")
@@ -374,8 +379,7 @@ def _parse_corr_partners(text: str) -> list[dict]:
 def _migrate_current_offers(path: Path, *, dry_run: bool) -> int:
     """Rename ``Team Correlation`` / ``Opp Correlation`` strings to struct columns."""
     name = "current_offers.parquet"
-    if not path.exists():
-        click.echo(f"{name:32s} absent")
+    if _report_absent(path, name):
         return 0
     names = set(pq.read_schema(path).names)
     if "Team Correlation" not in names:
@@ -406,8 +410,7 @@ def _migrate_current_parlays(path: Path, *, dry_run: bool) -> int:
     dropped outright rather than renamed to ``Legs Resolved``.
     """
     name = "current_parlays.parquet"
-    if not path.exists():
-        click.echo(f"{name:32s} absent")
+    if _report_absent(path, name):
         return 0
     if "Leg 1" not in pq.read_schema(path).names:
         click.echo(f"{name:32s} already migrated")
@@ -447,8 +450,7 @@ def _row_game_story_legs(row) -> list[dict]:
 def _migrate_current_game_stories(path: Path, *, dry_run: bool) -> int:
     """Rename legacy stringly ``legs`` (Sheets-era ``desc`` shape) to canonical structs."""
     name = "current_game_stories.parquet"
-    if not path.exists():
-        click.echo(f"{name:32s} absent")
+    if _report_absent(path, name):
         return 0
     df = pd.read_parquet(path)
     if not _has_desc_legs(df):
@@ -516,14 +518,7 @@ def main(
 
     partial = [
         fname
-        for fname in (
-            "parlay_hist.parquet",
-            "history.parquet",
-            "user_slips.parquet",
-            "current_offers.parquet",
-            "current_parlays.parquet",
-            "current_game_stories.parquet",
-        )
+        for fname in counts
         if (base / fname).exists() and _is_partially_migrated(base / fname)
     ]
     if partial:
