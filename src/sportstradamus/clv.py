@@ -147,9 +147,9 @@ def _close_prob_at_line(
     under-probability (NaN-Dist/CV fallback), it's returned as-is — line-invariant by
     construction, so ``offer_line`` isn't used on that path.
 
-    Returns ``P(under offer_line)`` — sign-flipping for Over vs. Under is the caller's
-    job (``_fill_one_group`` needs the raw under-probability once per distinct line,
-    not once per offer row).
+    Returns ``P(under offer_line)`` — sign-flipping for Over vs. Under happens later,
+    in :func:`_fill_offer_rows`. This function only needs to run once per distinct
+    line in the group, not once per offer row.
 
     Returns NaN when ``fetched`` is NaN (archive miss).
     """
@@ -223,10 +223,9 @@ def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
     :data:`~sportstradamus.history_schema.PREDICTION_KEY` and resolves each group's
     closing probability via :func:`_fill_one_group` (see :func:`_fetch_close_ev_or_composite`
     and :func:`_close_prob_at_line` for the archive-EV-to-probability conversion). Pinning
-    ``at=commence_time`` makes
-    the closing read reproducible regardless of when ``reflect`` runs. Groups whose
-    archive lookup returns NaN, or resolves outside ``[0, 1]``, are left with NaN
-    closing fields and excluded from CLV aggregates downstream.
+    ``at=commence_time`` makes the closing read reproducible regardless of when ``reflect``
+    runs. Groups whose archive lookup returns NaN, or resolves outside ``[0, 1]``, are left
+    with NaN closing fields and excluded from CLV aggregates downstream.
 
     Skips rows that already carry a non-NaN ``Close Market Prob`` so a
     re-run doesn't redundantly hit archive.
