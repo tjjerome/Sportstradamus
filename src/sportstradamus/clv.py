@@ -95,7 +95,7 @@ def _fill_offer_rows(history: pd.DataFrame, idx, close_under: float) -> None:
     history.loc[idx, "Model CLV"] = model_clv
 
 
-def _close_prob_from_archive(
+def _fetch_close_ev_or_composite(
     archive,
     league: str,
     market: str,
@@ -103,38 +103,60 @@ def _close_prob_from_archive(
     player,
     *,
     at: datetime | None,
+    dist,
+    cv,
+) -> tuple[float, bool]:
+    """Fetch the archive's closing read for one ``PREDICTION_KEY`` group, once.
+
+    Returns ``(value, is_composite_under_prob)``. ``Dist``/``CV`` are NaN for
+    book-fallback cells with no trained model; those read
+    :meth:`Archive.get_composite_under_prob` directly (a line-INEXACT devigged
+    under-probability, accepted only because there's no shape to invert against).
+    Otherwise reads :meth:`Archive.get_ev` (a book stat-mean, still needing the
+    per-line ``get_odds`` inversion the caller applies afterwards).
+
+    Both values are group-invariant — one consensus archive read per player/market/
+    date regardless of how many distinct offer lines the group's rows quote — so this
+    runs once per group, not once per line.
+
+    Returns ``(nan, False)`` when the lookup misses.
+    """
+    if pd.isna(dist) or pd.isna(cv):
+        composite = _safe_get_composite_under_prob(archive, league, market, date_str, player, at=at)
+        return composite, True
+    return _safe_get_ev(archive, league, market, date_str, player, at=at), False
+
+
+def _close_prob_at_line(
+    fetched: float,
+    is_composite: bool,
+    league: str,
+    market: str,
     offer_line: float,
     dist,
     cv,
     gate,
     step,
 ) -> float:
-    """Convert the archived closing snapshot into a probability at ``offer_line``.
+    """Convert one group's fetched archive value into a probability at ``offer_line``.
 
     Mirrors the book-EV-to-probability conversion the live pipeline already runs at
-    open (:func:`sportstradamus.prediction.model_prob._book_over_prob`): the archive
-    holds a book stat-mean, not a probability, so it must be inverted through
-    ``get_odds`` at the offer's own line under the prediction's stored ``(Dist, CV)``.
+    open (:func:`sportstradamus.prediction.model_prob._book_over_prob`): a book
+    stat-mean must be inverted through ``get_odds`` at the offer's own line under the
+    prediction's stored ``(Dist, CV)``. When ``fetched`` is already the composite
+    under-probability (NaN-Dist/CV fallback), it's returned as-is — line-invariant by
+    construction, so ``offer_line`` isn't used on that path.
+
     Returns ``P(under offer_line)`` — sign-flipping for Over vs. Under is the caller's
-    job (``fill_from_archive`` needs the raw under-probability once per group, not
-    once per offer row).
+    job (``_fill_one_group`` needs the raw under-probability once per distinct line,
+    not once per offer row).
 
-    ``Dist``/``CV`` are NaN for book-fallback cells with no trained model; those fall
-    back to :meth:`Archive.get_composite_under_prob`, which reads the book-weighted
-    consensus under-probability directly with no line/distribution round-trip. That
-    fallback is line-INEXACT when books have moved off the offer's own line by ``at``
-    — accepted here because it only fires when the line-exact path has no shape to
-    invert against.
-
-    Returns NaN when neither path resolves (archive miss, or NaN fallback too).
+    Returns NaN when ``fetched`` is NaN (archive miss).
     """
-    if pd.isna(dist) or pd.isna(cv):
-        return _safe_get_composite_under_prob(archive, league, market, date_str, player, at=at)
+    if is_composite or pd.isna(fetched):
+        return fetched
 
-    close_ev = _safe_get_ev(archive, league, market, date_str, player, at=at)
-    if pd.isna(close_ev):
-        return np.nan
-
+    close_ev = fetched
     gate_val = None if pd.isna(gate) else float(gate)
     step_val = 1.0 if pd.isna(step) else float(step)
     if dist == "SkewNormal":
@@ -155,32 +177,43 @@ def _close_prob_from_archive(
 def _fill_one_group(history: pd.DataFrame, archive, key, idx) -> None:
     """Resolve one ``PREDICTION_KEY`` group's closing probability and write it in place.
 
-    No-op (leaves the group NaN) when the key isn't a real (league, market) pair, the
+    ``Dist``/``CV``/``Gate``/``Step`` are prediction-level columns (constant across the
+    whole group), but ``Line`` is offer-level — different offer rows in the same group
+    (different books, or an explicit Alt Line) can legitimately quote different lines.
+    The archive fetch (:func:`_fetch_close_ev_or_composite`) is genuinely group-invariant
+    and runs once; the mean-to-probability conversion
+    (:func:`_close_prob_at_line`) depends on the line, so it re-runs once per distinct
+    ``Line`` in the group, each writing only its own matching subset of rows.
+
+    No-op (leaves a row NaN) when the key isn't a real (league, market) pair, the
     archive lookup misses, or the resolved probability falls outside ``[0, 1]`` — the
     last case is a clamp-to-NaN quarantine, matching ``migrate_leg_schema.py``'s
-    existing handling of out-of-range ``Close Market Prob`` values.
+    existing handling of out-of-range ``Close Market Prob`` values. A bad conversion at
+    one line does not blank out other lines in the same group that resolved fine.
     """
     player, league, date, market = key
     if not (isinstance(league, str) and isinstance(market, str)):
         return
     date_str = _normalize_date(date)
     group = history.loc[idx]
-    close_under = _close_prob_from_archive(
-        archive,
-        league,
-        market,
-        date_str,
-        player,
-        at=_commence_time(date_str),
-        offer_line=float(group["Line"].iloc[0]),
-        dist=group["Dist"].iloc[0],
-        cv=group["CV"].iloc[0],
-        gate=group["Gate"].iloc[0],
-        step=group["Step"].iloc[0],
+    dist = group["Dist"].iloc[0]
+    cv = group["CV"].iloc[0]
+    gate = group["Gate"].iloc[0]
+    step = group["Step"].iloc[0]
+    fetched, is_composite = _fetch_close_ev_or_composite(
+        archive, league, market, date_str, player, at=_commence_time(date_str), dist=dist, cv=cv
     )
-    if pd.isna(close_under) or not 0.0 <= close_under <= 1.0:
+    if pd.isna(fetched):
         return
-    _fill_offer_rows(history, idx, close_under)
+
+    for offer_line in group["Line"].unique():
+        close_under = _close_prob_at_line(
+            fetched, is_composite, league, market, float(offer_line), dist, cv, gate, step
+        )
+        if pd.isna(close_under) or not 0.0 <= close_under <= 1.0:
+            continue
+        line_idx = group.index[group["Line"] == offer_line]
+        _fill_offer_rows(history, line_idx, close_under)
 
 
 def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
@@ -188,8 +221,9 @@ def fill_from_archive(history: pd.DataFrame, archive) -> pd.DataFrame:
 
     Groups rows whose ``Close Market Prob`` is still NaN by
     :data:`~sportstradamus.history_schema.PREDICTION_KEY` and resolves each group's
-    closing probability via :func:`_fill_one_group` (see :func:`_close_prob_from_archive`
-    for the archive-EV-to-probability conversion). Pinning ``at=commence_time`` makes
+    closing probability via :func:`_fill_one_group` (see :func:`_fetch_close_ev_or_composite`
+    and :func:`_close_prob_at_line` for the archive-EV-to-probability conversion). Pinning
+    ``at=commence_time`` makes
     the closing read reproducible regardless of when ``reflect`` runs. Groups whose
     archive lookup returns NaN, or resolves outside ``[0, 1]``, are left with NaN
     closing fields and excluded from CLV aggregates downstream.
