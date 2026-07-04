@@ -4,7 +4,6 @@ Extracted from analyze_parlay_hist.py with additional professional forecasting
 metrics (CRPS, Brier Skill Score, Murphy decomposition, prediction intervals).
 """
 
-import re
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 
@@ -21,8 +20,6 @@ from sportstradamus.strategies.profit_sim import (
     simulate_strategy,
     summarize_runs,
 )
-
-LEG_PATTERN = re.compile(r"^(.+?)\s+(Over|Under)\s+([\d.]+)\s+(.+?)\s+-\s+[\d.]+%")
 
 PAYOUT_TABLE = {
     "Underdog": [

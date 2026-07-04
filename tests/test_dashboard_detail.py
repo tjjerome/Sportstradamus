@@ -1,33 +1,8 @@
-"""Unit tests for the dashboard parlay-leg helpers (offer lookup + re-exported parse)."""
+"""Unit tests for the dashboard parlay-leg helpers (offer lookup)."""
 
 import pandas as pd
 
-from sportstradamus.dashboard.legs import find_offer_idx, parse_leg
-
-
-def test_parse_leg_well_formed():
-    assert parse_leg("Ayo Dosunmu Over 9.5 Points - 78.1%, 1.0x") == {
-        "Player": "Ayo Dosunmu",
-        "Bet": "Over",
-        "Line": 9.5,
-        "Market": "Points",
-    }
-
-
-def test_parse_leg_multiword_market_and_under():
-    assert parse_leg("Cade Cunningham Under 6.5 Pass + Rush Yds - 55%, 1.04x") == {
-        "Player": "Cade Cunningham",
-        "Bet": "Under",
-        "Line": 6.5,
-        "Market": "Pass + Rush Yds",
-    }
-
-
-def test_parse_leg_malformed_returns_none():
-    assert parse_leg("") is None
-    assert parse_leg(None) is None
-    assert parse_leg("just some text with no side") is None
-    assert parse_leg("Player Over notanumber Points - 1%") is None
+from sportstradamus.dashboard.legs import find_offer_idx
 
 
 def test_find_offer_idx_hit_and_miss():

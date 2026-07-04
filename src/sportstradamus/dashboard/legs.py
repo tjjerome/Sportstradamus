@@ -1,19 +1,12 @@
-"""Offer-lookup helpers for parlay legs.
-
-The leg-string parser ``parse_leg`` lives in ``prediction/stories.py`` and is
-re-exported here; no dashboard surface still calls it (every leg producer now
-emits structured legs directly) but its own unit pins keep importing it from
-this module.
-"""
+"""Offer-lookup helpers for parlay legs."""
 
 from collections.abc import Mapping
 
 import pandas as pd
 
 from sportstradamus.leg_schema import leg_field
-from sportstradamus.prediction.stories import parse_leg
 
-__all__ = ["corr_key", "find_offer_idx", "parse_leg"]
+__all__ = ["corr_key", "find_offer_idx"]
 
 
 def corr_key(leg: Mapping) -> str:

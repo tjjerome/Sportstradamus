@@ -16,7 +16,6 @@ offers measures how lopsided the matchup is.
 """
 
 from sportstradamus.prediction.stories.context import build_game_context
-from sportstradamus.prediction.stories.legs import parse_leg
 from sportstradamus.prediction.stories.menu import build_game_stories
 from sportstradamus.prediction.stories.thesis import attach_parlay_theses
 from sportstradamus.prediction.stories.why import attach_offer_why
@@ -29,5 +28,4 @@ __all__ = [
     "attach_parlay_theses",
     "build_game_context",
     "build_game_stories",
-    "parse_leg",
 ]
