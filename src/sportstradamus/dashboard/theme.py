@@ -58,21 +58,21 @@ STARFIELD_SVG = """
   <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" width="100%" height="100%">
     <defs><symbol id="spk" viewBox="0 0 10 10"><path d="M5 0.3 L6.05 3.95 L9.7 5 L6.05 6.05 L5 9.7 L3.95 6.05 L0.3 5 L3.95 3.95 Z"/></symbol></defs>
     <g fill="#E6E9EF">
-      <circle cx="4" cy="7" r="0.3" fill-opacity=".30"/><circle cx="11" cy="19" r="0.22" fill-opacity=".24"/>
-      <circle cx="14" cy="60" r="0.24" fill-opacity=".28"/><circle cx="6" cy="76" r="0.3" fill-opacity=".32"/>
-      <circle cx="19" cy="88" r="0.2" fill-opacity=".22"/><circle cx="23" cy="11" r="0.28" fill-opacity=".3"/>
-      <circle cx="27" cy="34" r="0.2" fill-opacity=".24"/><circle cx="31" cy="68" r="0.24" fill-opacity=".26"/>
-      <circle cx="39" cy="14" r="0.22" fill-opacity=".24"/><circle cx="37" cy="58" r="0.2" fill-opacity=".22"/>
-      <circle cx="45" cy="77" r="0.26" fill-opacity=".28"/><circle cx="47" cy="92" r="0.2" fill-opacity=".22"/>
-      <circle cx="55" cy="9" r="0.28" fill-opacity=".3"/><circle cx="59" cy="37" r="0.24" fill-opacity=".26"/>
-      <circle cx="53" cy="81" r="0.2" fill-opacity=".22"/><circle cx="67" cy="19" r="0.26" fill-opacity=".28"/>
-      <circle cx="73" cy="71" r="0.22" fill-opacity=".24"/><circle cx="66" cy="89" r="0.2" fill-opacity=".2"/>
-      <circle cx="77" cy="29" r="0.28" fill-opacity=".3"/><circle cx="81" cy="57" r="0.24" fill-opacity=".26"/>
-      <circle cx="84" cy="14" r="0.3" fill-opacity=".32"/><circle cx="88" cy="43" r="0.22" fill-opacity=".24"/>
-      <circle cx="80" cy="80" r="0.26" fill-opacity=".28"/><circle cx="90" cy="67" r="0.2" fill-opacity=".22"/>
-      <circle cx="96" cy="86" r="0.2" fill-opacity=".22"/><circle cx="3" cy="52" r="0.24" fill-opacity=".26"/>
-      <circle cx="2" cy="28" r="0.2" fill-opacity=".2"/><circle cx="58" cy="95" r="0.22" fill-opacity=".24"/>
-      <circle cx="33" cy="5" r="0.2" fill-opacity=".22"/><circle cx="70" cy="10" r="0.22" fill-opacity=".24"/>
+      <circle cx="4" cy="7" r="0.3" fill-opacity=".18"/><circle cx="11" cy="19" r="0.22" fill-opacity=".12"/>
+      <circle cx="14" cy="60" r="0.24" fill-opacity=".16"/><circle cx="6" cy="76" r="0.3" fill-opacity=".20"/>
+      <circle cx="19" cy="88" r="0.2" fill-opacity=".10"/><circle cx="23" cy="11" r="0.28" fill-opacity=".18"/>
+      <circle cx="27" cy="34" r="0.2" fill-opacity=".12"/><circle cx="31" cy="68" r="0.24" fill-opacity=".14"/>
+      <circle cx="39" cy="14" r="0.22" fill-opacity=".12"/><circle cx="37" cy="58" r="0.2" fill-opacity=".10"/>
+      <circle cx="45" cy="77" r="0.26" fill-opacity=".16"/><circle cx="47" cy="92" r="0.2" fill-opacity=".10"/>
+      <circle cx="55" cy="9" r="0.28" fill-opacity=".18"/><circle cx="59" cy="37" r="0.24" fill-opacity=".14"/>
+      <circle cx="53" cy="81" r="0.2" fill-opacity=".10"/><circle cx="67" cy="19" r="0.26" fill-opacity=".16"/>
+      <circle cx="73" cy="71" r="0.22" fill-opacity=".12"/><circle cx="66" cy="89" r="0.2" fill-opacity=".08"/>
+      <circle cx="77" cy="29" r="0.28" fill-opacity=".18"/><circle cx="81" cy="57" r="0.24" fill-opacity=".14"/>
+      <circle cx="84" cy="14" r="0.3" fill-opacity=".20"/><circle cx="88" cy="43" r="0.22" fill-opacity=".12"/>
+      <circle cx="80" cy="80" r="0.26" fill-opacity=".16"/><circle cx="90" cy="67" r="0.2" fill-opacity=".10"/>
+      <circle cx="96" cy="86" r="0.2" fill-opacity=".10"/><circle cx="3" cy="52" r="0.24" fill-opacity=".14"/>
+      <circle cx="2" cy="28" r="0.2" fill-opacity=".08"/><circle cx="58" cy="95" r="0.22" fill-opacity=".12"/>
+      <circle cx="33" cy="5" r="0.2" fill-opacity=".10"/><circle cx="70" cy="10" r="0.22" fill-opacity=".12"/>
     </g>
     <use href="#spk" x="7.35" y="37.35" width="1.3" height="1.3" fill="#E6E9EF" class="tw" style="animation-duration:3.8s;animation-delay:.1s"/>
     <use href="#spk" x="42.35" y="43.35" width="1.3" height="1.3" fill="#E6E9EF" class="tw" style="animation-duration:5.1s;animation-delay:1.3s"/>
