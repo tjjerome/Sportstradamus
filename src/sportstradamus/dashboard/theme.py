@@ -125,58 +125,91 @@ APP_CSS = """
   color:white;margin-bottom:14px;font-size:14px}
 .starfield{position:fixed;inset:0;z-index:-1;pointer-events:none;
   background:
+    radial-gradient(circle at 4% 7%, rgba(230,233,239,.18) 0 2px, transparent 2px),
+    radial-gradient(circle at 11% 19%, rgba(230,233,239,.12) 0 2px, transparent 2px),
+    radial-gradient(circle at 14% 60%, rgba(230,233,239,.16) 0 2px, transparent 2px),
+    radial-gradient(circle at 6% 76%, rgba(230,233,239,.20) 0 2px, transparent 2px),
+    radial-gradient(circle at 19% 88%, rgba(230,233,239,.10) 0 2px, transparent 2px),
+    radial-gradient(circle at 23% 11%, rgba(230,233,239,.18) 0 2px, transparent 2px),
+    radial-gradient(circle at 27% 34%, rgba(230,233,239,.12) 0 2px, transparent 2px),
+    radial-gradient(circle at 31% 68%, rgba(230,233,239,.14) 0 2px, transparent 2px),
+    radial-gradient(circle at 39% 14%, rgba(230,233,239,.12) 0 2px, transparent 2px),
+    radial-gradient(circle at 37% 58%, rgba(230,233,239,.10) 0 2px, transparent 2px),
+    radial-gradient(circle at 45% 77%, rgba(230,233,239,.16) 0 2px, transparent 2px),
+    radial-gradient(circle at 47% 92%, rgba(230,233,239,.10) 0 2px, transparent 2px),
+    radial-gradient(circle at 55% 9%, rgba(230,233,239,.18) 0 2px, transparent 2px),
+    radial-gradient(circle at 59% 37%, rgba(230,233,239,.14) 0 2px, transparent 2px),
+    radial-gradient(circle at 53% 81%, rgba(230,233,239,.10) 0 2px, transparent 2px),
+    radial-gradient(circle at 67% 19%, rgba(230,233,239,.16) 0 2px, transparent 2px),
+    radial-gradient(circle at 73% 71%, rgba(230,233,239,.12) 0 2px, transparent 2px),
+    radial-gradient(circle at 66% 89%, rgba(230,233,239,.08) 0 2px, transparent 2px),
+    radial-gradient(circle at 77% 29%, rgba(230,233,239,.18) 0 2px, transparent 2px),
+    radial-gradient(circle at 81% 57%, rgba(230,233,239,.14) 0 2px, transparent 2px),
+    radial-gradient(circle at 84% 14%, rgba(230,233,239,.20) 0 2px, transparent 2px),
+    radial-gradient(circle at 88% 43%, rgba(230,233,239,.12) 0 2px, transparent 2px),
+    radial-gradient(circle at 80% 80%, rgba(230,233,239,.16) 0 2px, transparent 2px),
+    radial-gradient(circle at 90% 67%, rgba(230,233,239,.10) 0 2px, transparent 2px),
+    radial-gradient(circle at 96% 86%, rgba(230,233,239,.10) 0 2px, transparent 2px),
+    radial-gradient(circle at 3% 52%, rgba(230,233,239,.14) 0 2px, transparent 2px),
+    radial-gradient(circle at 2% 28%, rgba(230,233,239,.08) 0 2px, transparent 2px),
+    radial-gradient(circle at 58% 95%, rgba(230,233,239,.12) 0 2px, transparent 2px),
+    radial-gradient(circle at 33% 5%, rgba(230,233,239,.10) 0 2px, transparent 2px),
+    radial-gradient(circle at 70% 10%, rgba(230,233,239,.12) 0 2px, transparent 2px),
     radial-gradient(ellipse at 18% 4%, rgba(46,107,230,.10), transparent 46%),
     radial-gradient(ellipse at 86% 22%, rgba(201,162,39,.05), transparent 42%),
     radial-gradient(ellipse at 50% 96%, rgba(46,107,230,.06), transparent 55%),
     #0E1117}
-.starfield svg{position:absolute;inset:0}
 /* Streamlit paints backgroundColor (#0E1117) as an opaque fill on its own root
    containers, which sits above this fixed z-index:-1 layer and hides it outright.
    Dropping just these two containers to transparent reveals the starfield (which
    now carries that same #0E1117 base itself) in the gutters; every card/table/
    metric widget keeps its own secondaryBackgroundColor fill untouched, so stars
-   still don't bleed into content. */
-.stApp, [data-testid="stAppViewContainer"]{background:transparent}
+   still don't bleed into content. !important because Streamlit's own theme CSS
+   mounts via its frontend bundle after this injected <style> tag and otherwise
+   wins the same-specificity tiebreak on source order. */
+.stApp, [data-testid="stAppViewContainer"]{background:transparent !important}
+/* app.py's st.html() runs every fragment through DOMPurify with
+   USE_PROFILES:{html:true} and no svg addition (confirmed in the bundled
+   frontend's Html.*.js) -- it silently strips <svg> outright, so the original
+   SVG-based starfield rendered an empty .starfield with zero children. The dust
+   above is plain radial-gradient layers for exactly that reason; these 11
+   twinkle accents are plain divs shaped with clip-path instead of <svg><use>,
+   since both survive that sanitizer. */
+.tw{position:absolute;width:1.4vmin;height:1.4vmin;background:#E6E9EF;
+  clip-path:polygon(50% 3%,60.5% 39.5%,97% 50%,60.5% 60.5%,50% 97%,39.5% 60.5%,3% 50%,39.5% 39.5%)}
+.tw.gold{width:1.7vmin;height:1.7vmin;background:#C9A227}
+.sp1{left:7.35%;top:37.35%;animation-duration:3.8s;animation-delay:.1s}
+.sp2{left:42.35%;top:43.35%;animation-duration:5.1s;animation-delay:1.3s}
+.sp3{left:48.35%;top:23.35%;animation-duration:4.4s;animation-delay:.7s}
+.sp4{left:62.35%;top:64.35%;animation-duration:5.6s;animation-delay:2.1s}
+.sp5{left:93.35%;top:26.35%;animation-duration:3.3s;animation-delay:1.8s}
+.sp6{left:34.35%;top:85.35%;animation-duration:4.7s;animation-delay:.4s}
+.sp7{left:24.2%;top:51.2%;animation-duration:4.9s;animation-delay:.9s}
+.sp8{left:51.2%;top:54.2%;animation-duration:3.6s;animation-delay:2.4s}
+.sp9{left:67.2%;top:46.2%;animation-duration:5.3s;animation-delay:.2s}
+.sp10{left:92.2%;top:51.2%;animation-duration:4.1s;animation-delay:1.5s}
+.sp11{left:87.2%;top:6.2%;animation-duration:4.5s;animation-delay:3s}
 @keyframes tw{0%,100%{opacity:.2}50%{opacity:.64}}
 @media (prefers-reduced-motion: no-preference){.tw{animation:tw 4s ease-in-out infinite}}
 @media (prefers-reduced-motion: reduce){.tw{animation:none;opacity:.15}}
 </style>
 """
 
-# layered z-index:-1 SVG, visible in the gutters via the .stApp/stAppViewContainer
-# transparency rule above (Streamlit's own opaque backgroundColor fill was hiding it)
-STARFIELD_SVG = """
+# Dust + wash render via .starfield's own CSS background above; these 11 divs are
+# just the twinkling accents (see the .tw comment in APP_CSS for why plain divs
+# instead of <svg>). Position/timing per star lives in the .sp1..sp11 rules above.
+STARFIELD_HTML = """
 <div class="starfield" aria-hidden="true">
-  <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" width="100%" height="100%">
-    <defs><symbol id="spk" viewBox="0 0 10 10"><path d="M5 0.3 L6.05 3.95 L9.7 5 L6.05 6.05 L5 9.7 L3.95 6.05 L0.3 5 L3.95 3.95 Z"/></symbol></defs>
-    <g fill="#E6E9EF">
-      <circle cx="4" cy="7" r="0.3" fill-opacity=".18"/><circle cx="11" cy="19" r="0.22" fill-opacity=".12"/>
-      <circle cx="14" cy="60" r="0.24" fill-opacity=".16"/><circle cx="6" cy="76" r="0.3" fill-opacity=".20"/>
-      <circle cx="19" cy="88" r="0.2" fill-opacity=".10"/><circle cx="23" cy="11" r="0.28" fill-opacity=".18"/>
-      <circle cx="27" cy="34" r="0.2" fill-opacity=".12"/><circle cx="31" cy="68" r="0.24" fill-opacity=".14"/>
-      <circle cx="39" cy="14" r="0.22" fill-opacity=".12"/><circle cx="37" cy="58" r="0.2" fill-opacity=".10"/>
-      <circle cx="45" cy="77" r="0.26" fill-opacity=".16"/><circle cx="47" cy="92" r="0.2" fill-opacity=".10"/>
-      <circle cx="55" cy="9" r="0.28" fill-opacity=".18"/><circle cx="59" cy="37" r="0.24" fill-opacity=".14"/>
-      <circle cx="53" cy="81" r="0.2" fill-opacity=".10"/><circle cx="67" cy="19" r="0.26" fill-opacity=".16"/>
-      <circle cx="73" cy="71" r="0.22" fill-opacity=".12"/><circle cx="66" cy="89" r="0.2" fill-opacity=".08"/>
-      <circle cx="77" cy="29" r="0.28" fill-opacity=".18"/><circle cx="81" cy="57" r="0.24" fill-opacity=".14"/>
-      <circle cx="84" cy="14" r="0.3" fill-opacity=".20"/><circle cx="88" cy="43" r="0.22" fill-opacity=".12"/>
-      <circle cx="80" cy="80" r="0.26" fill-opacity=".16"/><circle cx="90" cy="67" r="0.2" fill-opacity=".10"/>
-      <circle cx="96" cy="86" r="0.2" fill-opacity=".10"/><circle cx="3" cy="52" r="0.24" fill-opacity=".14"/>
-      <circle cx="2" cy="28" r="0.2" fill-opacity=".08"/><circle cx="58" cy="95" r="0.22" fill-opacity=".12"/>
-      <circle cx="33" cy="5" r="0.2" fill-opacity=".10"/><circle cx="70" cy="10" r="0.22" fill-opacity=".12"/>
-    </g>
-    <use href="#spk" x="7.35" y="37.35" width="1.3" height="1.3" fill="#E6E9EF" class="tw" style="animation-duration:3.8s;animation-delay:.1s"/>
-    <use href="#spk" x="42.35" y="43.35" width="1.3" height="1.3" fill="#E6E9EF" class="tw" style="animation-duration:5.1s;animation-delay:1.3s"/>
-    <use href="#spk" x="48.35" y="23.35" width="1.3" height="1.3" fill="#E6E9EF" class="tw" style="animation-duration:4.4s;animation-delay:.7s"/>
-    <use href="#spk" x="62.35" y="64.35" width="1.3" height="1.3" fill="#E6E9EF" class="tw" style="animation-duration:5.6s;animation-delay:2.1s"/>
-    <use href="#spk" x="93.35" y="26.35" width="1.3" height="1.3" fill="#E6E9EF" class="tw" style="animation-duration:3.3s;animation-delay:1.8s"/>
-    <use href="#spk" x="34.35" y="85.35" width="1.3" height="1.3" fill="#E6E9EF" class="tw" style="animation-duration:4.7s;animation-delay:.4s"/>
-    <use href="#spk" x="24.2" y="51.2" width="1.6" height="1.6" fill="#C9A227" class="tw" style="animation-duration:4.9s;animation-delay:.9s"/>
-    <use href="#spk" x="51.2" y="54.2" width="1.6" height="1.6" fill="#C9A227" class="tw" style="animation-duration:3.6s;animation-delay:2.4s"/>
-    <use href="#spk" x="67.2" y="46.2" width="1.6" height="1.6" fill="#C9A227" class="tw" style="animation-duration:5.3s;animation-delay:.2s"/>
-    <use href="#spk" x="92.2" y="51.2" width="1.6" height="1.6" fill="#C9A227" class="tw" style="animation-duration:4.1s;animation-delay:1.5s"/>
-    <use href="#spk" x="87.2" y="6.2" width="1.6" height="1.6" fill="#C9A227" class="tw" style="animation-duration:4.5s;animation-delay:3s"/>
-  </svg>
+  <div class="tw sp1"></div>
+  <div class="tw sp2"></div>
+  <div class="tw sp3"></div>
+  <div class="tw sp4"></div>
+  <div class="tw sp5"></div>
+  <div class="tw sp6"></div>
+  <div class="tw gold sp7"></div>
+  <div class="tw gold sp8"></div>
+  <div class="tw gold sp9"></div>
+  <div class="tw gold sp10"></div>
+  <div class="tw gold sp11"></div>
 </div>
 """
