@@ -15,11 +15,14 @@ if _src_dir not in sys.path:
 
 import streamlit as st
 
+from sportstradamus.dashboard import theme
 from sportstradamus.dashboard.components.deep_dive import drop_detail_on_page_change
 from sportstradamus.dashboard.components.locked_shelf import render_locked_shelf
 from sportstradamus.dashboard.components.slip_state import init_slip_state
 
 st.set_page_config(page_title="Sportstradamus Dashboard", layout="wide")
+
+st.html(theme.APP_CSS + theme.STARFIELD_SVG)
 
 # Slip state is shared across surfaces; seed it before any surface renders.
 init_slip_state()

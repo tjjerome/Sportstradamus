@@ -75,9 +75,6 @@ GAMELOG_SCHEMA = {
     },
 }
 
-PRED_BANNER_COLOR = "#1f4e79"  # deep teal
-STATS_BANNER_COLOR = "#2d6a4f"  # forest green
-
 # Stats-page time-window menu: label -> lookback days (None = all time).
 TIMEFRAME_OPTIONS = {
     "All time": None,
@@ -328,14 +325,12 @@ def load_model_stats() -> pd.DataFrame:
 def render_banner(kind: Literal["predictions", "stats"], subtitle: str = "") -> None:
     """Render a colored section banner so Predictions vs Stats are visually distinct."""
     if kind == "predictions":
-        color, label = PRED_BANNER_COLOR, "Predictions"
+        css_class, label = "banner-predictions", "Predictions"
     else:
-        color, label = STATS_BANNER_COLOR, "Stats"
+        css_class, label = "banner-stats", "Stats"
     sub = f" — {subtitle}" if subtitle else ""
     st.markdown(
-        f'<div style="background:{color};padding:10px 14px;border-radius:6px;'
-        f'color:white;margin-bottom:14px;font-size:14px">'
-        f"<b>{label}</b>{sub}</div>",
+        f'<div class="{css_class}"><b>{label}</b>{sub}</div>',
         unsafe_allow_html=True,
     )
 
