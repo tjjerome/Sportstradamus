@@ -16,8 +16,9 @@ def test_celestial_classes_defined():
 
 def test_starfield_respects_ambient_rules():
     assert "prefers-reduced-motion" in theme.APP_CSS
-    # every starfield opacity stays under the DESIGN §3 ambient ceiling
-    for m in re.finditer(r"opacity:\s*\.?([\d.]+)", theme.STARFIELD_SVG):
+    # every starfield opacity stays under the DESIGN §3 ambient ceiling; covers
+    # both CSS opacity:.2 and SVG fill-opacity=".2" syntax (the dots use the latter)
+    for m in re.finditer(r'(?:fill-)?opacity[:=]\s*"?(\.?[\d.]+)"?', theme.STARFIELD_SVG):
         assert float(m.group(1)) <= 0.20 or float(m.group(1)) >= 1  # 1 = container reset
 
 
