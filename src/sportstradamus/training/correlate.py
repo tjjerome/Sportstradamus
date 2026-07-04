@@ -891,11 +891,11 @@ def _market_summary(blocks: pd.Series, scope: str) -> pd.DataFrame:
 
     df = blocks.rename("R").reset_index()
     df.columns = ["team", "market_a", "market_b", "R"]
-    for c in ("market_a", "market_b"):
-        df[c] = df[c].str.split(".").str[-1]
-    g = df.groupby(["market_a", "market_b"])["R"]
-    out = g.mean().rename("rho_mean").reset_index()
-    out["n_teams"] = g.size().values
+    for market_col in ("market_a", "market_b"):
+        df[market_col] = df[market_col].str.split(".").str[-1]
+    grouped = df.groupby(["market_a", "market_b"])["R"]
+    out = grouped.mean().rename("rho_mean").reset_index()
+    out["n_teams"] = grouped.size().to_numpy()
     out["scope"] = scope
     return out[columns]
 
@@ -906,9 +906,7 @@ def _write_corr_outputs(league, same_team_blocks, opposing_blocks):
     same_path = league_dir / "corr_same_team.parquet"
     opposing_path = league_dir / "corr_opposing.parquet"
     same_series = pd.concat(same_team_blocks) if same_team_blocks else pd.Series(dtype="float64")
-    opposing_series = (
-        pd.concat(opposing_blocks) if opposing_blocks else pd.Series(dtype="float64")
-    )
+    opposing_series = pd.concat(opposing_blocks) if opposing_blocks else pd.Series(dtype="float64")
     if same_team_blocks:
         same_series.to_frame("R").to_parquet(same_path, compression="zstd")
     else:
