@@ -120,11 +120,14 @@ filtered = columns.add_match_column(filtered)
 filtered = columns.add_market_display(filtered)
 
 # Bet rides along hidden (grid.py's arrow_col auto-hides it) for the Line arrow
-# cellRenderer's params.data.Bet; Market (the slug, not the display label) rides along
-# for the row-selection/slip-building code below, which matches offers by slug. Neither
-# is one of the displayed MAIN_COLS.
+# cellRenderer's params.data.Bet; the Market slug rides along, renamed out of the way,
+# for the row-selection/slip-building code below (which matches offers by slug) — it
+# would otherwise collide with Market Display's LABELS rename to the same "Market"
+# header. Neither is one of the displayed MAIN_COLS.
 display_cols = [c for c in [*MAIN_COLS, "Bet", "Market"] if c in filtered.columns]
 grid_df = filtered[display_cols].copy()
+if "Market" in grid_df.columns:
+    grid_df = grid_df.rename(columns={"Market": "Market Slug"})
 
 if "Win Prob" in grid_df.columns:
     grid_df["Win Prob"] = (grid_df["Win Prob"] * 100).apply(
@@ -156,7 +159,7 @@ selected_rows = render_themed_grid(
     header_help=columns.HELP,
     percent_cols=[columns.MODEL_EDGE, "Cons Edge"],
     arrow_col="Line",
-    hidden_cols=["Bet", "Market"],
+    hidden_cols=["Bet", "Market Slug"],
 )
 st.caption("Trend sparklines arrive with the L1 line-movement export.")
 
@@ -165,10 +168,10 @@ if st.session_state.corr_nav:
     st.session_state.corr_nav = False
 elif selected_rows:
     r = selected_rows[0]
-    current_key = (r.get("Player"), r.get("Market"))
+    current_key = (r.get("Player"), r.get("Market Slug"))
     if current_key != st.session_state.last_grid_key:
         st.session_state.last_grid_key = current_key
-        player, market = r["Player"], r.get("Market")
+        player, market = r["Player"], r.get("Market Slug")
         mask = filtered["Player"] == player
         if market:
             mask &= filtered["Market"] == market
@@ -192,7 +195,7 @@ if selected_rows:
     sel = selected_rows[0]
     mask = (
         (filtered["Player"] == sel.get("Player"))
-        & (filtered["Market"] == sel.get("Market"))
+        & (filtered["Market"] == sel.get("Market Slug"))
         & (filtered["Bet"] == sel.get("Bet"))
         & (filtered["Platform"] == sel.get("Platform"))
     )
