@@ -31,7 +31,7 @@ prophecy-voice naming map (stories→prophecies, etc.) lives in
 
 | Role | Token | Hex |
 |---|---|---|
-| Primary (buttons, links, active) | `primaryColor` | `#2E6BE6` electric blue |
+| Primary (buttons, links) | `primaryColor` | `#2E6BE6` electric blue |
 | Background (main) | `backgroundColor` | `#0E1117` |
 | Surface (cards, widgets, code) | `secondaryBackgroundColor` | `#1A1D24` |
 | Text | `textColor` | `#E6E9EF` |
