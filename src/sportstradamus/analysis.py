@@ -4,7 +4,7 @@ Extracted from analyze_parlay_hist.py with additional professional forecasting
 metrics (CRPS, Brier Skill Score, Murphy decomposition, prediction intervals).
 """
 
-import re
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -20,8 +20,6 @@ from sportstradamus.strategies.profit_sim import (
     simulate_strategy,
     summarize_runs,
 )
-
-LEG_PATTERN = re.compile(r"^(.+?)\s+(Over|Under)\s+([\d.]+)\s+(.+?)\s+-\s+[\d.]+%")
 
 PAYOUT_TABLE = {
     "Underdog": [
@@ -115,25 +113,14 @@ def _leg_result_value(game, ls, player, market):
         return None
 
 
-def _resolve_leg(game, ls, new_map, leg):
-    """Resolve one leg string to ``1`` (miss), ``0`` (hit), or ``None`` (skip).
-
-    ``None`` covers an unparseable leg, an unavailable result, and a push
-    (``result == line``).
-    """
-    m = LEG_PATTERN.match(leg)
-    if not m:
+def _resolve_leg(game, ls, leg: Mapping):
+    """Resolve one structured leg to 1 (miss), 0 (hit), or None (skip/push)."""
+    stat = leg.get("stat") or leg.get("market")
+    result_val = _leg_result_value(game, ls, leg["player"], stat)
+    if result_val is None or result_val == leg["line"]:
         return None
-    player, direction, line_str, market = m.groups()
-    over = direction == "Over"
-    line = float(line_str)
-    market = market.replace("H2H ", "")
-    market = new_map.get(market, market)
-
-    result_val = _leg_result_value(game, ls, player, market)
-    if result_val is None or result_val == line:
-        return None
-    missed = (over and result_val < line) or (not over and result_val > line)
+    over = leg["bet"] == "Over"
+    missed = (over and result_val < leg["line"]) or (not over and result_val > leg["line"])
     return 1 if missed else 0
 
 
@@ -148,7 +135,6 @@ def check_bet(bet, stats, stat_map):
 
     stat_obj = stats[bet.League]
     ls = stat_obj.log_strings
-    new_map = _leg_market_map(bet.League, bet.Platform, stat_map)
 
     game = _bet_gameday_rows(stat_obj.gamelog, ls, bet)
     if game.empty:
@@ -156,11 +142,8 @@ def check_bet(bet, stats, stat_map):
 
     legs = 0
     misses = 0
-    for col in [c for c in bet.index if c.startswith("Leg ") and c[4:].strip().isdigit()]:
-        leg = bet[col]
-        if not isinstance(leg, str) or leg == "":
-            continue
-        outcome = _resolve_leg(game, ls, new_map, leg)
+    for leg in bet.legs:
+        outcome = _resolve_leg(game, ls, leg)
         if outcome is None:
             continue
         legs += 1
@@ -181,29 +164,6 @@ def _offer_result(actual, line, player):
         diff = actual + line
         return "Over" if diff > 0 else ("Under" if diff < 0 else "Push")
     return "Over" if actual > line else ("Under" if actual < line else "Push")
-
-
-def _offer_row(pred, pred_cols, offer):
-    line, boost, platform, bet, model_p, books_p, close_p, market_clv, model_clv = _pad_legacy(
-        offer
-    )
-    result = _offer_result(pred.get("Actual"), line, pred.get("Player", ""))
-    row = {col: pred[col] for col in pred_cols}
-    row.update(
-        {
-            "Line": line,
-            "Boost": boost,
-            "Platform": platform,
-            "Bet": bet,
-            "Win Prob": model_p,
-            "Market Prob": books_p,
-            "Close Market Prob": close_p,
-            "Market CLV": market_clv,
-            "Model CLV": model_clv,
-            "Result": result,
-        }
-    )
-    return row
 
 
 def _add_kelly_columns(exploded):
@@ -230,29 +190,20 @@ def _add_kelly_columns(exploded):
     return exploded
 
 
-def explode_offers(history):
-    """Expand Offers column into one row per offer, inheriting prediction-level cols.
+def annotate_offer_outcomes(history):
+    """Add Result / Hit / Model EV / Market EV / Kelly to an already-flat history frame.
 
-    Returns DataFrame with columns: all prediction-level cols + Line, Boost,
-    Platform, Bet, Win Prob, Market Prob, Close Market Prob, Market CLV, Model CLV,
-    Result, Hit. Legacy 6-tuples are read transparently — the closing trio
-    surfaces as NaN.
+    ``history`` is one row per (prediction x book offer); this computes each
+    row's Over/Under/Push ``Result`` from ``Actual`` vs ``Line`` and folds in
+    the Kelly-relevant columns. Returns an empty frame unchanged.
     """
-    if "Offers" not in history.columns:
+    if history.empty:
         return history
-
-    pred_cols = [c for c in history.columns if c not in ("Offers",)]
-    rows = []
-    for _, pred in history.iterrows():
-        offers = pred.get("Offers")
-        if not isinstance(offers, list) or not offers:
-            continue
-        for offer in offers:
-            rows.append(_offer_row(pred, pred_cols, offer))
-
-    if not rows:
-        return pd.DataFrame()
-    return _add_kelly_columns(pd.DataFrame(rows))
+    out = history.copy()
+    out["Result"] = out.apply(
+        lambda r: _offer_result(r.get("Actual"), r.get("Line"), r.get("Player", "")), axis=1
+    )
+    return _add_kelly_columns(out)
 
 
 def _player_date_value(gamelog, ls, player, market, date):
@@ -299,7 +250,7 @@ def resolve_history(history, stats):
     """Fill in Actual column for predictions in history.parquet.
 
     Only sets the Actual numeric value. Result (Over/Under/Push) is derived
-    per-offer in explode_offers() from Actual vs Line.
+    per-offer in annotate_offer_outcomes() from Actual vs Line.
     """
     if "Actual" not in history.columns:
         history["Actual"] = np.nan
@@ -706,14 +657,14 @@ def _prep_parlays(parlays, stats, stat_map, today):
     parlays = parlays.loc[parlays["_date"].notna()].copy()
     parlays = parlays.loc[parlays["_date"] >= today - timedelta(days=365)].copy()
 
-    unresolved = parlays.loc[parlays["Legs"].isna()]
+    unresolved = parlays.loc[parlays["Legs Resolved"].isna()]
     if not unresolved.empty:
         results = unresolved.progress_apply(
             lambda bet: check_bet(bet, stats, stat_map), axis=1
         ).to_list()
-        parlays.loc[parlays["Legs"].isna(), ["Legs", "Misses"]] = results
+        parlays.loc[parlays["Legs Resolved"].isna(), ["Legs Resolved", "Misses"]] = results
 
-    parlays.dropna(subset=["Legs"], inplace=True)
+    parlays.dropna(subset=["Legs Resolved"], inplace=True)
     return parlays
 
 
@@ -727,7 +678,7 @@ def _parlay_profit_df(parlays, today):
     ud_parlays["Profit"] = ud_parlays.apply(
         lambda x: (
             np.clip(
-                PAYOUT_TABLE["Underdog"][x.Legs][x.Misses]
+                PAYOUT_TABLE["Underdog"][x["Legs Resolved"]][x.Misses]
                 * (x.Boost if x.Boost < _UNDERDOG_PERFECT_BOOST_MULT or x.Misses == 0 else 1),
                 None,
                 _UNDERDOG_PAYOUT_CAP,
@@ -880,7 +831,7 @@ def compute_parlay_metrics(parlays, stats, stat_map):
     if len(parlays) == 0:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    parlays[["Legs", "Misses"]] = parlays[["Legs", "Misses"]].astype(int)
+    parlays[["Legs Resolved", "Misses"]] = parlays[["Legs Resolved", "Misses"]].astype(int)
     parlays["Hit"] = (parlays["Misses"] == 0).astype(int)
 
     profit_df = _parlay_profit_df(parlays, today)

@@ -8,8 +8,6 @@ touch the real runtime artifact.
 
 from __future__ import annotations
 
-import json
-
 from sportstradamus.helpers import io
 
 
@@ -19,16 +17,17 @@ def _row(slip_id, builder_type="constellation", stake=5.0):
         "saved_at": "2026-06-12T10:00:00",
         "builder_type": builder_type,
         "platform": "Underdog",
-        "legs": json.dumps(
-            [
-                {
-                    "desc": "A. Wilson Over 23.5 PTS - 80.0%, 1.00x",
-                    "league": "WNBA",
-                    "game": "LV",
-                    "date": "2026-06-12",
-                }
-            ]
-        ),
+        "legs": [
+            {
+                "player": "A. Wilson",
+                "bet": "Over",
+                "line": 23.5,
+                "market": "PTS",
+                "league": "WNBA",
+                "game": "LV",
+                "date": "2026-06-12",
+            }
+        ],
         "stake": stake,
         "status": "pending",
     }
@@ -69,7 +68,7 @@ def test_both_builder_types_round_trip(tmp_path, monkeypatch):
     io.upsert_user_slip(_row("s1", builder_type="simple"))
     df = io.read_user_slips()
     assert set(df["builder_type"]) == {"constellation", "simple"}
-    legs = json.loads(df.loc[df["slip_id"] == "c1", "legs"].iloc[0])
+    legs = df.loc[df["slip_id"] == "c1", "legs"].iloc[0]
     assert legs[0]["league"] == "WNBA"
 
 

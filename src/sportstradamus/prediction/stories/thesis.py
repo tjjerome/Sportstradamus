@@ -16,7 +16,7 @@ import pandas as pd
 
 from sportstradamus.prediction.stories.context import build_game_context, ctxs_from_frame
 from sportstradamus.prediction.stories.engine import thesis_variants
-from sportstradamus.prediction.stories.legs import enrich_legs, parse_leg
+from sportstradamus.prediction.stories.legs import enrich_legs
 
 
 @dataclass
@@ -49,14 +49,11 @@ def attach_parlay_theses(
     if context is None:
         context = build_game_context(offers, {})
     ctxs = ctxs_from_frame(context, corr)
-    leg_cols = [c for c in parlays.columns if c.startswith("Leg ")]
 
     picks: dict[tuple, _Pick] = {}
     row_keys: list[tuple] = []
     for _, row in parlays.iterrows():
-        legs = enrich_legs(
-            [leg for leg in (parse_leg(row.get(c)) for c in leg_cols) if leg], offers
-        )
+        legs = enrich_legs(row.get("legs") or [], offers)
         key = (
             row["League"],
             str(row.get("Date", "")),

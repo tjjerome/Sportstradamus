@@ -1,6 +1,6 @@
 Usage: run [OPTIONS]
 
-  Nightly resolution: update stats, fill Actual/Legs/Misses, save.
+  Nightly resolution: update stats, fill Actual/Legs Resolved/Misses, save.
 
 Options:
   --league TEXT                   Resolve only this league (default: all).

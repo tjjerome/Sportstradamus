@@ -3,18 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from itertools import combinations
 from operator import itemgetter
 from typing import Literal
 
 import numpy as np
-from scipy.cluster.hierarchy import fcluster, linkage
-from scipy.spatial.distance import squareform
 from scipy.stats import multivariate_normal, norm
-from sklearn.metrics import silhouette_score
 from tqdm import tqdm
 
+from sportstradamus.analysis import _leg_market_map
 from sportstradamus.helpers import stat_cv, stat_std, underdog_payouts
+from sportstradamus.leg_schema import build_leg
 
 
 @dataclass(frozen=True)
@@ -101,24 +99,6 @@ _KELLY_BANKROLL_FRACTION: float = 0.05
 # Pooled-variant split: slips of this size or smaller pay on the all-or-nothing
 # ``power`` schedule; larger slips pay on the partial-hit ``flex`` schedule.
 _POWER_MAX_SIZE: int = 3
-
-# --- Parlay family clustering -----------------------------------------------
-
-# Upper bound on independence families per game. Auto-selected count (by
-# silhouette) may be anywhere in [1, this]; keeps the dashboard picker short.
-_PARLAY_MAX_FAMILIES: int = 4
-
-# Silhouette floor: a k>=2 split must separate at least this well, otherwise
-# the survivors are one blob and we honestly report a single family.
-_PARLAY_MIN_SILHOUETTE: float = 0.15
-
-# Below this many survivor parlays, clustering is noise — all one family.
-_PARLAY_MIN_FOR_CLUSTERING: int = 5
-
-# Self-kernel floor: a parlay whose 1ᵀC1 is at/below this is treated as having
-# no usable correlation signal (distance 1 to everything) instead of dividing
-# by ~0.
-_KERNEL_SELF_FLOOR: float = 1e-9
 
 
 def _pooled_underdog_curve() -> dict[int, list[float]]:
@@ -234,85 +214,6 @@ def _nearest_psd(sigma: np.ndarray, tol: float = _PSD_EIG_TOLERANCE) -> np.ndarr
     repaired = (eigvecs * eigvals) @ eigvecs.T
     diag_scale = 1.0 / np.sqrt(np.diag(repaired))
     return repaired * diag_scale[:, None] * diag_scale[None, :]
-
-
-def _parlay_distance_matrix(idx, Cpsd, self_k, n):
-    """Pairwise RKHS-cosine distance between parlays; non-finite entries floored to 1."""
-    dist = np.zeros((n, n))
-    for i in range(n):
-        bi = idx[i]
-        for j in range(i + 1, n):
-            denom = np.sqrt(self_k[i] * self_k[j])
-            sim = Cpsd[np.ix_(bi, idx[j])].sum() / denom if denom > 0 else np.nan
-            d = 1.0 - np.clip(sim, -1.0, 1.0)
-            if not np.isfinite(d):
-                d = 1.0
-            dist[i, j] = dist[j, i] = d
-    return dist
-
-
-def _select_family_count(z, dist, n, max_families):
-    """Silhouette-select the family count k in [1, max_families], smallest k on ties."""
-    best_k, best_score = 1, -1.0
-    for k in range(2, min(max_families, n - 1) + 1):
-        labels = fcluster(z, k, criterion="maxclust")
-        if len(set(labels)) < 2:
-            continue
-        # Ascending k with strict-improvement keeps the smallest k on ties.
-        score = silhouette_score(dist, labels, metric="precomputed")
-        if score > best_score:
-            best_score, best_k = score, k
-    return best_k, best_score
-
-
-def assign_parlay_families(
-    bet_ids: list[tuple[int, ...]],
-    C: np.ndarray,
-    *,
-    max_families: int = _PARLAY_MAX_FAMILIES,
-) -> np.ndarray:
-    """Cluster a game's survivor parlays into independence families.
-
-    Each parlay is the indicator vector ``1_p`` over its legs; parlay
-    similarity is the RKHS cosine ``(1_pᵀ C 1_q) / sqrt((1_pᵀ C 1_p)·(1_qᵀ C
-    1_q))`` — the diagonal enters numerator-self and denominator consistently,
-    so it is a true bounded cosine (unlike the legacy mean-with-diagonal vs.
-    mean-without). ``C`` is projected to the nearest PSD first so every
-    self-kernel is non-negative and the cosine is well defined; non-finite
-    distances are floored to 1. Families are formed by average-linkage
-    hierarchical clustering and the cluster count is silhouette-selected in
-    ``[1, max_families]`` — weak separation honestly collapses to one family.
-
-    Args:
-        bet_ids: One tuple of integer leg indices into ``C`` per parlay.
-        C: Per-game leg×leg signed correlation matrix (unit diagonal).
-        max_families: Upper bound on the auto-selected family count.
-
-    Returns:
-        np.ndarray: Integer labels ``1..k`` (length ``len(bet_ids)``).
-    """
-    n = len(bet_ids)
-    single = np.ones(n, dtype=int)
-    if n <= _PARLAY_MIN_FOR_CLUSTERING:
-        return single
-
-    Cpsd = _nearest_psd(np.asarray(C, dtype=float))
-    idx = [np.asarray(b, dtype=int) for b in bet_ids]
-    self_k = np.array([Cpsd[np.ix_(b, b)].sum() for b in idx])
-    self_k = np.where(np.isfinite(self_k) & (self_k > _KERNEL_SELF_FLOOR), self_k, np.nan)
-
-    dist = _parlay_distance_matrix(idx, Cpsd, self_k, n)
-
-    condensed = squareform(dist, checks=False)
-    if not np.all(np.isfinite(condensed)):
-        return single
-
-    z = linkage(condensed, method="average")
-    best_k, best_score = _select_family_count(z, dist, n, max_families)
-
-    if best_k >= 2 and best_score >= _PARLAY_MIN_SILHOUETTE:
-        return fcluster(z, best_k, criterion="maxclust").astype(int)
-    return single
 
 
 def _expected_payout_with_pushes(
@@ -456,14 +357,20 @@ def _parlay_fun(bet, league):
     return np.sum(
         [
             3 - (np.abs(leg["Line"]) / stat_std.get(league, {}).get(leg["Market"], 1))
-            if ("H2H" in leg["Desc"])
+            if ("H2H" in leg["Market"])
             else 2
             - 1 / stat_cv.get(league, {}).get(leg["Market"], 1)
             + leg["Line"] / stat_std.get(league, {}).get(leg["Market"], 1)
             for leg in bet
-            if (leg["Bet"] == "Over") or ("H2H" in leg["Desc"])
+            if (leg["Bet"] == "Over") or ("H2H" in leg["Market"])
         ]
     )
+
+
+def _resolve_leg_stat(market: str, new_map: dict) -> str:
+    """Gamelog stat key for a leg's display ``Market``, mirroring the ``cMarket`` idiom."""
+    stripped = market.replace("H2H ", "")
+    return new_map.get(stripped, stripped)
 
 
 def _evaluate_parlay(
@@ -479,6 +386,7 @@ def _evaluate_parlay(
     opp,
     leg_teams,
     legacy,
+    new_map,
 ):
     """Score one parlay candidate; return its row dict, or None if it fails a gate."""
     C, M, p_model, p_books, p_push, boosts = g.C, g.M, g.p_model, g.p_books, g.p_push, g.boosts
@@ -515,32 +423,34 @@ def _evaluate_parlay(
     # line-498 overwrite multiplies by per-size payout); otherwise the
     # payout-inclusive value so the column matches the EV that drove ranking.
     display_boost = boost if legacy else payout
-    parlay_dict = info | {
+    legs = [
+        build_leg(
+            {
+                **leg,
+                "Platform": info["Platform"],
+                "Stat": _resolve_leg_stat(leg["Market"], new_map),
+            }
+        )
+        for leg in bet
+    ]
+    return info | {
         "Model EV": p,
         "Market EV": pb,
         "Boost": display_boost,
         "Rec Bet": units,
-        "Leg 1": "",
-        "Leg 2": "",
-        "Leg 3": "",
-        "Leg 4": "",
-        "Leg 5": "",
-        "Leg 6": "",
-        "Legs": ", ".join([leg["Desc"] for leg in bet]),
+        "legs": legs,
         "Bet ID": bet_id,
         "P": prev_p,
         "PB": prev_pb,
+        # Transient — used only for the Fun sort in _append_parlay_rows and
+        # dropped by persist._PARLAY_DROP_COLS before current_parlays.parquet.
         "Fun": _parlay_fun(bet, info["League"]),
         "Bet Size": bet_size,
-        "Leg Probs": tuple(bet_df[i]["Win Prob"] for i in bet_id),
         "Corr Pairs": tuple(SIG[np.triu_indices(bet_size, 1)]),
         "Boost Pairs": tuple(M[np.ix_(bet_id, bet_id)][np.triu_indices(bet_size, 1)]),
         "Indep P": float(np.prod(p_model[np.ix_(bet_id)]) * payout),
         "Indep PB": float(np.prod(p_books[np.ix_(bet_id)]) * payout),
     }
-    for j, leg in enumerate(bet, 1):
-        parlay_dict["Leg " + str(j)] = leg["Desc"]
-    return parlay_dict
 
 
 def beam_search_parlays(
@@ -553,6 +463,7 @@ def beam_search_parlays(
     info,
     team,
     opp,
+    stat_map,
     *,
     contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"] = "pooled",
     legacy: bool = False,
@@ -577,6 +488,9 @@ def beam_search_parlays(
         info: ``{Game, Date, League, Platform}`` metadata dict.
         team: Home team abbreviation.
         opp: Away team abbreviation.
+        stat_map: ``{platform: {display_market: gamelog_stat}}`` — resolved once
+            per game into the league-specific leg ``Stat`` lookup via
+            :func:`sportstradamus.analysis._leg_market_map`.
         contest_variant: Underdog contest variant. Affects payout curve
             interpretation in :func:`_expected_payout_with_pushes`.
         legacy: When True, reproduce pre-2026.05 scoring (no PSD repair, no
@@ -590,6 +504,7 @@ def beam_search_parlays(
     leg_indices = sorted(idx.index.to_numpy())
     leg_players = {i: bet_df[i]["Player"] for i in leg_indices}
     leg_teams = {i: bet_df[i]["Team"] for i in leg_indices}
+    new_map = _leg_market_map(info["League"], info["Platform"], stat_map)
 
     candidates = [(i,) for i in leg_indices]
     all_results = []
@@ -615,6 +530,7 @@ def beam_search_parlays(
                 opp,
                 leg_teams,
                 legacy,
+                new_map,
             )
             if result is not None:
                 all_results.append(result)

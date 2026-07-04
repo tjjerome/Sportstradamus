@@ -42,7 +42,14 @@ def test_writer_passes_frame_through_untouched(monkeypatch):
                 "story_id": "AAA/BBB#0",
                 "objective": "builder",
                 "headline": "AAA/BBB tilts toward points",
-                "legs": '["Player0 Over 5.5 Points - 60.0%, 1.0x"]',
+                "legs": [
+                    {
+                        "player": "Player0", "team": "AAA", "market": "Points", "stat": "PTS",
+                        "bet": "Over", "line": 5.5, "league": "NBA", "game": "AAA/BBB",
+                        "date": "2026-06-12", "platform": "Underdog", "win_prob": 0.60,
+                        "boost": 1.0, "push_prob": 0.0, "kelly": 0.13,
+                    }
+                ],
                 "joint_p": 0.42,
                 "model_ev": 1.26,
                 "kelly_stake": 0.13,

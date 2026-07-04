@@ -11,7 +11,6 @@ real copula scorer (not a reimplementation).
 
 from __future__ import annotations
 
-import json
 import math
 import re
 from itertools import combinations
@@ -20,6 +19,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from sportstradamus.analysis import _leg_market_map
+from sportstradamus.helpers import stat_map
 from sportstradamus.prediction.parlay import (
     GameArrays,
     GameScoringContext,
@@ -36,6 +37,10 @@ from sportstradamus.prediction.stories.menu import (
     _story_prose,
     build_game_stories,
 )
+
+
+def _leg_keys(legs: list[dict]) -> frozenset:
+    return frozenset((leg["player"], leg["bet"], leg["line"], leg["market"]) for leg in legs)
 
 
 def _ctx(
@@ -61,13 +66,13 @@ def _ctx(
     )
     bet_df = {
         i: {
-            "Desc": f"Player{i} Over {5 + i}.5 {markets[i]} - {probs[i] * 100:.1f}%, 1.0x",
             "Model EV": edges[i],
             "Bet": "Over",
             "Team": teams[i],
             "Player": f"Player{i}",
             "Market": markets[i],
             "Line": 5.5 + i,
+            "Win Prob": probs[i],
         }
         for i in range(n)
     }
@@ -146,8 +151,8 @@ def test_edge_floor_excludes_weak_leg():
     corr[0, 3] = corr[3, 0] = 0.4
     sctx, offers = _ctx([0.66, 0.65, 0.64, 0.66], corr, edges=[1.30, 1.30, 1.30, 1.00])
     out = build_game_stories([sctx], offers, pd.DataFrame(), None)
-    legs = {leg for row in out["legs"] for leg in json.loads(row)}
-    assert not any("Player3 " in leg for leg in legs)  # sub-floor leg never appears
+    legs = [leg for row in out["legs"] for leg in row]
+    assert not any(leg["player"] == "Player3" for leg in legs)  # sub-floor leg never appears
 
 
 def test_correlation_cluster_forms_over_exact_legs():
@@ -157,7 +162,7 @@ def test_correlation_cluster_forms_over_exact_legs():
     out = build_game_stories([sctx], offers, pd.DataFrame(), None)
     assert out["story_id"].nunique() == 1
     for row in out["legs"]:
-        assert {leg.split(" Over ")[0] for leg in json.loads(row)} == {"Player0", "Player1"}
+        assert {leg["player"] for leg in row} == {"Player0", "Player1"}
 
 
 def test_objectives_are_true_argmaxes_and_share_legs():
@@ -176,19 +181,20 @@ def test_objectives_are_true_argmaxes_and_share_legs():
     # not exact EV. The 2-leg vs 3-leg EV gap here is ~0.24, far above the noise.
     # The menu argmaxes over *valid* subsets only, so the oracle must too —
     # otherwise a single-team subset could pose as the "expected" argmax.
+    new_map = _leg_market_map(sctx.league, sctx.platform, stat_map)
     all_scores = [
-        _score_subset(c, sctx)
+        _score_subset(c, sctx, new_map)
         for size in range(2, min(len(sctx.leg_indices), sctx.max_size) + 1)
         for c in combinations(sctx.leg_indices, size)
         if validate_parlay_legs([sctx.bet_df[i] for i in c])[0]
     ]
-    builder_legs = set(json.loads(builder["legs"]))
-    moon_legs = set(json.loads(moon["legs"]))
+    builder_legs = _leg_keys(builder["legs"])
+    moon_legs = _leg_keys(moon["legs"])
     assert builder["model_ev"] <= moon["model_ev"]  # both from one scoring pass: Moon EV ≥ Builder
-    assert moon_legs == set(
+    assert moon_legs == _leg_keys(
         max(all_scores, key=lambda s: s["model_ev"])["legs"]
     )  # global EV argmax
-    assert builder_legs == set(
+    assert builder_legs == _leg_keys(
         max(all_scores, key=lambda s: s["G"])["legs"]
     )  # global log-growth argmax
     # This fixture diverges: tight strong pair builds, wider set shoots the moon.
@@ -232,7 +238,8 @@ def test_model_ev_is_the_real_copula_scorer():
     corr = _block_diag_corr([2], 0.4)
     sctx, _ = _ctx([0.66, 0.64], corr)
     bet_id = (0, 1)
-    scored = _score_subset(bet_id, sctx)
+    new_map = _leg_market_map(sctx.league, sctx.platform, stat_map)
+    scored = _score_subset(bet_id, sctx, new_map)
     g = sctx.g
     arr = np.asarray(bet_id)
     boost = float(g.M[0, 1] * g.boosts[0] * g.boosts[1])
@@ -258,8 +265,8 @@ def test_edge_floor_value_is_owner_locked():
     assert _MENU_EDGE_FLOOR == 0.05
 
 
-def _row_players(legs_json: str) -> list[str]:
-    return [leg.split(" Over ")[0].split(" Under ")[0] for leg in json.loads(legs_json)]
+def _row_players(legs: list[dict]) -> list[str]:
+    return [leg["player"] for leg in legs]
 
 
 def test_presets_are_valid_parlays():
@@ -270,8 +277,8 @@ def test_presets_are_valid_parlays():
     out = build_game_stories([sctx], offers, pd.DataFrame(), None)
     assert not out.empty
     team_of = dict(zip(offers["Player"], offers["Team"], strict=True))
-    for legs_json in out["legs"]:
-        players = _row_players(legs_json)
+    for legs in out["legs"]:
+        players = _row_players(legs)
         assert len(set(players)) == len(players)  # no repeated player
         assert len({team_of[p] for p in players}) >= 2  # both teams covered
 
@@ -284,8 +291,8 @@ def test_single_team_game_emits_single_team_story():
     out = build_game_stories([sctx], offers, pd.DataFrame(), None)
     assert not out.empty
     team_of = dict(zip(offers["Player"], offers["Team"], strict=True))
-    for legs_json in out["legs"]:
-        players = _row_players(legs_json)
+    for legs in out["legs"]:
+        players = _row_players(legs)
         assert len(set(players)) == len(players)  # distinct players still required
         assert {team_of[p] for p in players} == {
             "AAA"
@@ -307,7 +314,7 @@ def test_builder_and_moon_share_headline_and_dek():
     out = build_game_stories([sctx], offers, pd.DataFrame(), None)
     builder = out[out["objective"] == "builder"].iloc[0]
     moon = out[out["objective"] == "moon"].iloc[0]
-    assert set(json.loads(builder["legs"])) != set(json.loads(moon["legs"]))  # divergent presets
+    assert _leg_keys(builder["legs"]) != _leg_keys(moon["legs"])  # divergent presets
     for _sid, grp in out.groupby("story_id"):
         assert grp["headline"].nunique() == 1
         assert grp["dek"].nunique() == 1

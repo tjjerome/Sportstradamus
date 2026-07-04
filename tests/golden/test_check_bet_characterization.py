@@ -1,13 +1,13 @@
 """Characterization of :func:`analysis.check_bet`.
 
 ``check_bet`` resolves one parlay row against game logs and returns
-``(legs, misses)``. It reads only ``stats[league].gamelog`` /
-``log_strings`` so it is pinned here with synthetic fakes (no real data),
-decomposed from a single CC-24 function into an orchestrator plus leg
-helpers. The fixtures exercise every branch: the league-absent and
-empty-gameday short-circuits, the NHL / NBA market-name overrides, combo
-(``" + "``) and matchup (``" vs. "``) legs, single legs, a push
-(``result == line`` skips the leg), and unparseable / empty legs.
+``(legs, misses)``. It reads ``bet.legs`` (a list of structured leg dicts,
+already resolved to gamelog column names by the parlay-write path) plus
+``stats[league].gamelog`` / ``log_strings``, so it is pinned here with
+synthetic fakes (no real data). The fixtures exercise every branch: the
+league-absent and empty-gameday short-circuits, combo (``" + "``) and
+matchup (``" vs. "``) legs, single legs, and a push (``result == line``
+skips the leg).
 """
 
 from __future__ import annotations
@@ -54,60 +54,75 @@ def _nhl_stats() -> dict[str, _FakeStats]:
     return {"NHL": _FakeStats(gamelog, _LS)}
 
 
-def _bet(**legs) -> pd.Series:
-    row = {"League": "NBA", "Platform": "PrizePicks", "Date": "2025-01-15", "Game": "LAL/GSW"}
-    row.update(legs)
+def _bet(legs, **overrides) -> pd.Series:
+    row = {
+        "League": "NBA",
+        "Platform": "PrizePicks",
+        "Date": "2025-01-15",
+        "Game": "LAL/GSW",
+        "legs": legs,
+    }
+    row.update(overrides)
     return pd.Series(row)
 
 
 def test_mixed_legs_hit_miss_push_and_combo():
-    bet = _bet(
-        **{
-            "Leg 1": "LeBron James Over 25.5 Points - 52.0%",  # 30 > 25.5 -> hit
-            "Leg 2": "Stephen Curry Under 6.5 Assists - 48.0%",  # 5 < 6.5 -> hit
-            "Leg 3": "Anthony Davis Over 12.5 Points - 50.0%",  # 10 < 12.5 -> miss
-            "Leg 4": "LeBron James Over 30 Points - 50.0%",  # 30 == 30 -> push (skip)
-            "Leg 5": "LeBron James + Anthony Davis Over 35.5 Points - 55.0%",  # 40 > 35.5 -> hit
-        }
-    )
+    legs = [
+        {"player": "LeBron James", "bet": "Over", "line": 25.5, "stat": "points"},  # 30>25.5 hit
+        {"player": "Stephen Curry", "bet": "Under", "line": 6.5, "stat": "assists"},  # 5<6.5 hit
+        {"player": "Anthony Davis", "bet": "Over", "line": 12.5, "stat": "points"},  # 10<12.5 miss
+        {"player": "LeBron James", "bet": "Over", "line": 30, "stat": "points"},  # 30==30 push
+        {
+            "player": "LeBron James + Anthony Davis",
+            "bet": "Over",
+            "line": 35.5,
+            "stat": "points",
+        },  # 40>35.5 hit
+    ]
+    bet = _bet(legs)
     assert check_bet(bet, _nba_stats(), _STAT_MAP) == (4, 1)
 
 
 def test_versus_combo_leg():
-    bet = _bet(**{"Leg 1": "LeBron James vs. Stephen Curry Over 55.5 Points - 50.0%"})  # 58 > 55.5
-    assert check_bet(bet, _nba_stats(), _STAT_MAP) == (1, 0)
-
-
-def test_unparseable_and_empty_legs_are_skipped():
-    bet = _bet(
-        **{
-            "Leg 1": "",
-            "Leg 2": "garbage leg no pattern",
-            "Leg 3": "LeBron James Over 25.5 Points - 52.0%",  # only this one counts
-        }
-    )
+    legs = [
+        {
+            "player": "LeBron James vs. Stephen Curry",
+            "bet": "Over",
+            "line": 55.5,
+            "stat": "points",
+        }  # 58 > 55.5
+    ]
+    bet = _bet(legs)
     assert check_bet(bet, _nba_stats(), _STAT_MAP) == (1, 0)
 
 
 def test_nhl_market_overrides():
-    bet = _bet(
-        League="NHL",
-        Game="EDM/COL",
-        **{
-            "Leg 1": "Connor McDavid Over 1.5 Points - 50.0%",  # 2 > 1.5 -> hit
-            "Leg 2": "Cale Makar Under 2.5 Blocked Shots - 50.0%",  # 4 > 2.5 -> miss
-        },
-    )
+    """End-to-end check that check_bet resolves NHL-shaped gamelog data.
+
+    The market-name translation this test was originally named for (e.g.
+    "Blocked Shots" -> "blocked") now happens once at parlay-write time
+    (``_resolve_leg_stat`` / ``_leg_market_map``, see
+    ``tests/golden/test_parlay_search.py``); by the time a leg reaches
+    ``check_bet`` its ``stat`` is already the resolved gamelog column name.
+    """
+    legs = [
+        {"player": "Connor McDavid", "bet": "Over", "line": 1.5, "stat": "points"},  # 2>1.5 hit
+        {"player": "Cale Makar", "bet": "Under", "line": 2.5, "stat": "blocked"},  # 4>2.5 miss
+    ]
+    bet = _bet(legs, League="NHL", Game="EDM/COL")
     assert check_bet(bet, _nhl_stats(), _STAT_MAP) == (2, 1)
 
 
 def test_league_absent_returns_nan():
-    bet = _bet(League="MLB", **{"Leg 1": "X Over 1.5 Points - 50.0%"})
+    bet = _bet([{"player": "X", "bet": "Over", "line": 1.5, "stat": "points"}], League="MLB")
     legs, misses = check_bet(bet, _nba_stats(), _STAT_MAP)
     assert pd.isna(legs) and pd.isna(misses)
 
 
 def test_no_gameday_rows_returns_nan():
-    bet = _bet(Date="2025-02-01", **{"Leg 1": "LeBron James Over 1.5 Points - 50.0%"})
+    bet = _bet(
+        [{"player": "LeBron James", "bet": "Over", "line": 1.5, "stat": "points"}],
+        Date="2025-02-01",
+    )
     legs, misses = check_bet(bet, _nba_stats(), _STAT_MAP)
     assert pd.isna(legs) and pd.isna(misses)

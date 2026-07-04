@@ -1,3 +1,14 @@
+# ARCHIVED 2026-07-03 from src/sportstradamus/scripts/migrate_archive_to_duckdb.py
+# Reason: the last live `klepto` import in the package; the klepto->DuckDB
+#   migration it performs is complete in production and the dependency is
+#   being dropped (P8 Task 0.8).
+# Last live SHA: f80d659
+# Original imports (now unresolved here):
+#   import duckdb
+#   import pandas as pd
+#   from klepto.archives import hdfdir_archive
+#   from tqdm import tqdm
+#   from sportstradamus.helpers.text import remove_accents
 """One-shot migration: klepto HDF archive -> DuckDB single-file archive.
 
 Walks every existing ``archive/<LEAGUE>/`` klepto tree, flattens the four-level
