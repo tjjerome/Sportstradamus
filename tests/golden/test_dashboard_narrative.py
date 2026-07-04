@@ -8,7 +8,14 @@ from __future__ import annotations
 
 import pandas as pd
 
-from sportstradamus.dashboard.narrative import context_strip, home_away, top_thesis
+from sportstradamus.dashboard import theme
+from sportstradamus.dashboard.narrative import (
+    bet_arrow,
+    context_strip,
+    home_away,
+    match_label,
+    top_thesis,
+)
 
 
 def test_home_away_orders_home_first_from_home_flag():
@@ -131,3 +138,24 @@ def test_context_strip_doubleheader_splits_on_date():
     strip = context_strip(ctx, game="DAL/POR", date="2026-06-14")
     assert strip["fav_team"] == "DAL"
     assert strip["shape"] == "coinflip"
+
+
+def test_bet_arrow_over_is_up_and_on_token_green():
+    arrow = bet_arrow("Over")
+    assert arrow == bet_arrow("Over")  # stable constant, not regenerated per call
+    assert theme.GREEN in arrow
+    assert "M4.5 0 9 10 0 10Z" in arrow
+
+
+def test_bet_arrow_under_is_down_and_on_token_red():
+    arrow = bet_arrow("Under")
+    assert theme.RED in arrow
+    assert "M4.5 10 9 0 0 0Z" in arrow
+
+
+def test_match_label_away_uses_at_sign():
+    assert match_label("LVA", "IND", home=False) == "LVA @ IND"
+
+
+def test_match_label_home_uses_v():
+    assert match_label("LVA", "IND", home=True) == "LVA v IND"
