@@ -3,8 +3,9 @@
 import plotly.graph_objects as go
 import plotly.io as pio
 
-# Celestial gold accent — display faces and ambient art only, never data ink
-# (DESIGN.md celestial layer; pinned by tests/golden/test_design_tokens.py).
+# Celestial gold accent — oracle decoration (kickers, prophecy, constellation) and
+# interactive-highlight (active/selected/hovered UI states); never a data mark except
+# the constellation correlation edge (DESIGN §4a).
 GOLD = "#C9A227"
 
 # Neutral gray (DESIGN.md §2 grayColor) — context/secondary marks, e.g. the
