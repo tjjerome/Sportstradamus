@@ -4,7 +4,7 @@ Runs after games finish to:
 1. Fetch latest stats from league APIs (update)
 2. Fill in Actual column in history (parquet primary, .dat fallback)
 3. Fill in Close Books P / Market CLV / Model CLV per offer
-4. Fill in Legs/Misses columns in parlay_hist
+4. Fill in Legs Resolved/Misses columns in parlay_hist
 5. Write resolve_meta.json with last-run timestamp
 6. Compute and persist per-(league, market) live metrics (Gate 2)
 
@@ -23,11 +23,10 @@ from tqdm import tqdm
 
 from sportstradamus import clv, data
 from sportstradamus.analysis import (
-    _leg_market_map,
     _resolve_leg,
+    annotate_offer_outcomes,
     check_bet,
     compute_book_brier_skill_score,
-    explode_offers,
     precompute_profit_sim_summary,
     resolve_history,
 )
@@ -257,10 +256,10 @@ def _enforce_live_metrics_dtypes(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _settled_offers(history: pd.DataFrame):
-    """Explode history to settled offers with a parsed ``_date``; None if none remain."""
+    """Annotate history with per-offer outcomes and parse ``_date``; None if none settled."""
     if history.empty:
         return None
-    exploded = explode_offers(history)
+    exploded = annotate_offer_outcomes(history)
     if exploded.empty or "Actual" not in exploded.columns:
         return None
     settled = exploded[exploded["Actual"].notna()].copy()
@@ -308,7 +307,7 @@ def _compute_live_metrics(history: pd.DataFrame, *, now: datetime | None = None)
 
 
 def _precompute_profit_sim(history):
-    summary = precompute_profit_sim_summary(explode_offers(history))
+    summary = precompute_profit_sim_summary(annotate_offer_outcomes(history))
     _atomic_write_parquet(summary, PROFIT_SIM_SUMMARY_PATH)
     logger.info(
         f"Profit sim: wrote {len(summary)} strategy-horizon rows to {PROFIT_SIM_SUMMARY_PATH.name}"
@@ -333,7 +332,7 @@ def _precompute_profit_sim(history):
     help="Verbosity for the structured JSONL log.",
 )
 def run(league, skip_update, history_only, log_level):
-    """Nightly resolution: update stats, fill Actual/Legs/Misses, save."""
+    """Nightly resolution: update stats, fill Actual/Legs Resolved/Misses, save."""
     logger.setLevel(log_level)
     logger.info(
         "reflect invoked",
@@ -391,12 +390,6 @@ def _resolve_and_clv_history(stats):
         logger.error("history.parquet is empty or missing. Aborting.")
         raise SystemExit(1)
 
-    if "Offers" not in history.columns:
-        from sportstradamus.analysis import _migrate_flat_history
-
-        logger.info("Migrating history to normalized schema")
-        history = _migrate_flat_history(history)
-
     if "Actual" not in history.columns:
         history["Actual"] = np.nan
 
@@ -437,7 +430,7 @@ def _resolve_parlays(stats, history_only):
         parlays = read_parlay_hist()
         stat_map = json.loads((pkg_resources.files(data) / "config" / "stat_map.json").read_text())
 
-        unresolved = parlays.loc[parlays["Legs"].isna()]
+        unresolved = parlays.loc[parlays["Legs Resolved"].isna()]
         n_before_parl = len(unresolved)
         logger.info(f"Resolving {n_before_parl} pending parlay rows")
 
@@ -446,7 +439,7 @@ def _resolve_parlays(stats, history_only):
             results = unresolved.progress_apply(
                 lambda bet: check_bet(bet, stats, stat_map), axis=1
             ).tolist()
-            parlays.loc[parlays["Legs"].isna(), ["Legs", "Misses"]] = results
+            parlays.loc[parlays["Legs Resolved"].isna(), ["Legs Resolved", "Misses"]] = results
             write_parlay_hist(parlays)
             n_resolved_parl = sum(
                 1 for legs, _ in results if not (isinstance(legs, float) and np.isnan(legs))
@@ -474,10 +467,9 @@ def _resolve_user_slips(stats, history_only):
     pending = slips.loc[slips["status"] == "pending"]
     if pending.empty:
         return 0
-    stat_map = json.loads((pkg_resources.files(data) / "config" / "stat_map.json").read_text())
     graded = 0
     for idx, row in pending.iterrows():
-        outcome = _grade_slip(row, stats, stat_map)
+        outcome = _grade_slip(row, stats)
         if outcome is None:
             continue
         for col, value in outcome.items():
@@ -489,10 +481,10 @@ def _resolve_user_slips(stats, history_only):
     return graded
 
 
-def _grade_slip(row, stats, stat_map):
+def _grade_slip(row, stats):
     """Resolve one slip; return the writeback dict, or ``None`` while a game is unplayed."""
     per_leg = []
-    for leg in json.loads(row["legs"]):
+    for leg in row["legs"]:
         league = leg["league"]
         if league not in stats:
             return None
@@ -501,8 +493,7 @@ def _grade_slip(row, stats, stat_map):
         game_rows = _gameday_rows_for(stat_obj.gamelog, ls, leg["date"], leg["game"])
         if game_rows.empty:
             return None
-        new_map = _leg_market_map(league, row["platform"], stat_map)
-        per_leg.append(_resolve_leg(game_rows, ls, new_map, leg["desc"]))
+        per_leg.append(_resolve_leg(game_rows, ls, leg))
     hits = sum(1 for o in per_leg if o == 0)
     effective = sum(1 for o in per_leg if o is not None)
     status = _slip_status(row["play_type"], hits, effective)

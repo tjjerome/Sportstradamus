@@ -14,10 +14,7 @@ import pandas as pd
 import streamlit as st
 
 from sportstradamus import data
-from sportstradamus.analysis import (
-    _migrate_flat_history,
-    explode_offers,
-)
+from sportstradamus.analysis import annotate_offer_outcomes
 from sportstradamus.helpers.io import (
     CURRENT_GAME_CONTEXT_PATH,
     CURRENT_GAME_CORR_PATH,
@@ -35,8 +32,8 @@ from sportstradamus.helpers.io import (
     read_parlay_hist,
     read_parquet_safe,
     read_user_slips,
-    write_history,
 )
+from sportstradamus.history_schema import PREDICTION_KEY
 
 # Column names that differ across league gamelog parquets.
 # Keys: player, date, opp (None if not available), home (None if not available).
@@ -143,10 +140,6 @@ def _load_history_cached(mtime: float) -> pd.DataFrame:
     if history.empty:
         return history
 
-    if "Offers" not in history.columns:
-        history = _migrate_flat_history(history)
-        write_history(history)
-
     # Ensure prediction-level columns exist for backward compatibility
     for col in ["Dist", "CV", "Model Param", "Gate", "Temperature", "Disp Cal", "Step", "Actual"]:
         if col not in history.columns:
@@ -157,9 +150,8 @@ def _load_history_cached(mtime: float) -> pd.DataFrame:
 def load_history() -> pd.DataFrame:
     """Load prediction history from parquet (mtime-keyed cache).
 
-    Migrates old flat schema (no Offers column) to the normalized one-row-per-
-    prediction shape with an Offers list, then writes the migrated frame back.
-    Offers round-trip as list[tuple] (CLV-aware 9-tuples; 6-tuples padded).
+    Flat one-row-per-(prediction x book offer) schema; prediction-level
+    columns are duplicated across every offer row for the same prediction.
     """
     return _load_history_cached(_mtime(HISTORY_PATH))
 
@@ -397,12 +389,12 @@ def get_filtered_history(
     date_range: tuple | None = None,
     min_model_p: float | None = None,
 ) -> pd.DataFrame:
-    """Explode offers and apply sidebar filters.
+    """Annotate offer outcomes and apply sidebar filters.
 
     Returns a per-offer DataFrame with columns: all prediction-level cols +
     Line, Boost, Platform, Bet, Win Prob, Market Prob, Result, Hit, Model EV, Market EV, Kelly.
     """
-    df = explode_offers(history)
+    df = annotate_offer_outcomes(history)
     if df.empty:
         return df
 
@@ -432,9 +424,10 @@ def get_prediction_history(
     leagues: list | None = None,
     date_range: tuple | None = None,
 ) -> pd.DataFrame:
-    """Return prediction-level rows (no explosion) for CRPS/coverage analysis.
+    """Return one row per prediction (deduped on the identity key) for CRPS/coverage analysis.
 
-    Filters by league and date range but does NOT explode offers.
+    Filters by league and date range, then collapses the flat one-row-per-offer
+    frame down to one row per :data:`~sportstradamus.history_schema.PREDICTION_KEY`.
     """
     df = history.copy()
 
@@ -444,21 +437,11 @@ def get_prediction_history(
         df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
         df = df.loc[(df["_date"] >= date_range[0]) & (df["_date"] <= date_range[1])]
 
-    return df
+    return df.drop_duplicates(subset=PREDICTION_KEY, keep="last")
 
 
 def _extract_platforms(history):
-    """Extract unique platform names from the Offers column (or legacy Platform)."""
-    if "Offers" in history.columns:
-        return sorted(
-            {
-                str(offer[2])
-                for offers in history["Offers"].dropna()
-                if isinstance(offers, list)
-                for offer in offers
-                if len(offer) >= 3 and offer[2]
-            }
-        )
+    """Extract unique platform names from the Platform column."""
     if "Platform" in history.columns:
         return sorted(set(history["Platform"].dropna().unique()))
     return []

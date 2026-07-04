@@ -20,9 +20,19 @@ from sportstradamus.nightly import (
 NOW = datetime(2026, 5, 20, 12, 0, 0)
 
 
-def _build_offer(line: float, bet: str, model_p: float, books_p: float) -> tuple:
-    """Return a 9-field Offers tuple matching helpers/io.py's _OFFER_FIELDS layout."""
-    return (line, 1.0, "Underdog", bet, model_p, books_p, float("nan"), float("nan"), float("nan"))
+def _build_offer(line: float, bet: str, model_p: float, books_p: float) -> dict:
+    """Return the offer-level columns for one flat history row (closing trio unfilled)."""
+    return {
+        "Line": line,
+        "Boost": 1.0,
+        "Platform": "Underdog",
+        "Bet": bet,
+        "Win Prob": model_p,
+        "Market Prob": books_p,
+        "Close Market Prob": float("nan"),
+        "Market CLV": float("nan"),
+        "Model CLV": float("nan"),
+    }
 
 
 def _build_history_fixture(now: datetime = NOW, n_per_cell: int = 18) -> pd.DataFrame:
@@ -62,7 +72,7 @@ def _build_history_fixture(now: datetime = NOW, n_per_cell: int = 18) -> pd.Data
                     "Temperature": 1.0,
                     "Disp Cal": 1.0,
                     "Step": "test",
-                    "Offers": [_build_offer(line, bet, model_p, books_p)],
+                    **_build_offer(line, bet, model_p, books_p),
                     "Actual": actual,
                 }
             )
@@ -118,7 +128,7 @@ def test_compute_live_metrics_handles_empty_window():
                 "Temperature": 1.0,
                 "Disp Cal": 1.0,
                 "Step": "test",
-                "Offers": [_build_offer(line, "Over", 0.55, 0.50)],
+                **_build_offer(line, "Over", 0.55, 0.50),
                 "Actual": float(rng.normal(line, 2.0)),
             }
         )
@@ -149,7 +159,7 @@ def test_compute_live_metrics_no_settled_returns_empty():
                 "League": "NBA",
                 "Date": NOW.strftime("%Y-%m-%d"),
                 "Market": "PTS",
-                "Offers": [_build_offer(10.0, "Over", 0.55, 0.50)],
+                **_build_offer(10.0, "Over", 0.55, 0.50),
                 "Actual": np.nan,
             }
         )
@@ -172,7 +182,7 @@ def test_compute_live_metrics_profit_sim_yield_signs():
                 "Date": date,
                 "Market": "PTS",
                 "Projection": line,
-                "Offers": [_build_offer(line, "Over", 0.60, 0.50)],
+                **_build_offer(line, "Over", 0.60, 0.50),
                 "Actual": line + 2.0,
             }
         )
@@ -183,7 +193,7 @@ def test_compute_live_metrics_profit_sim_yield_signs():
                 "Date": date,
                 "Market": "PTS",
                 "Projection": line,
-                "Offers": [_build_offer(line, "Over", 0.60, 0.50)],
+                **_build_offer(line, "Over", 0.60, 0.50),
                 "Actual": line - 2.0,
             }
         )

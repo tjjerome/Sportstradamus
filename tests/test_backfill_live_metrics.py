@@ -16,7 +16,17 @@ NOW = datetime(2026, 5, 20, 0, 0, 0)
 
 
 def _offer(line, bet, model_p, books_p):
-    return (line, 1.0, "Underdog", bet, model_p, books_p, float("nan"), float("nan"), float("nan"))
+    return {
+        "Line": line,
+        "Boost": 1.0,
+        "Platform": "Underdog",
+        "Bet": bet,
+        "Win Prob": model_p,
+        "Market Prob": books_p,
+        "Close Market Prob": float("nan"),
+        "Market CLV": float("nan"),
+        "Model CLV": float("nan"),
+    }
 
 
 def _build_history(span_days: int = 100, n_per_cell: int = 8) -> pd.DataFrame:
@@ -34,7 +44,7 @@ def _build_history(span_days: int = 100, n_per_cell: int = 8) -> pd.DataFrame:
                     "Date": date,
                     "Market": market,
                     "Projection": line,
-                    "Offers": [_offer(line, "Over", 0.55, 0.50)],
+                    **_offer(line, "Over", 0.55, 0.50),
                     "Actual": float(rng.normal(line, 2.0)),
                 }
             )

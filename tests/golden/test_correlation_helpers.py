@@ -36,6 +36,7 @@ import pandas as pd
 import pytest
 
 from sportstradamus import data
+from sportstradamus.leg_schema import LEG_FIELDS
 from sportstradamus.prediction import correlation
 from sportstradamus.prediction.correlation import (
     _build_correlation_matrices,
@@ -184,54 +185,143 @@ def _synthetic_offer_cmap() -> dict[tuple[str, str], float]:
 
 # Characterization snapshot of the offer_df correlation annotations under the synthetic c_map
 # above. Deterministic (pure-numpy EV grid, no SciPy randomness) and stable run-to-run because
-# the c_map is fixed — 8/12 legs annotate, with the Team and Opp columns both exercised.
+# the c_map is fixed — 8/12 legs annotate, with the Corr Same and Corr Opp columns both
+# exercised. Each partner is the structured record ``_annotate_correlation_columns`` writes
+# (player/market/bet/line/mult) — ``leg_schema.leg_label`` renders it to a string on demand,
+# so the test pins the structured fields directly rather than a formatted label.
 _EXPECTED_OFFER_CORR = [
     (
         "De'Aaron Fox",
         "AST",
-        "Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.11x), Luke Kornet Over 3.5 REB - 57.8%, 1.34x (1.02x)",
-        "Mitchell Robinson Over 9.5 PRA - 68.4%, 1.02x (1.06x)",
+        [
+            {
+                "player": "Victor Wembanyama",
+                "market": "BLK",
+                "bet": "Over",
+                "line": 3.5,
+                "mult": 1.11,
+            },
+            {"player": "Luke Kornet", "market": "REB", "bet": "Over", "line": 3.5, "mult": 1.02},
+        ],
+        [
+            {
+                "player": "Mitchell Robinson",
+                "market": "PRA",
+                "bet": "Over",
+                "line": 9.5,
+                "mult": 1.06,
+            }
+        ],
     ),
     (
         "De'Aaron Fox",
         "STL",
-        "Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.09x), Luke Kornet Over 5.5 PR - 74.0%, 0.97x (1.03x)",
-        "Mitchell Robinson Over 5.5 REB - 64.0%, 1.17x (1.06x)",
+        [
+            {
+                "player": "Victor Wembanyama",
+                "market": "BLK",
+                "bet": "Over",
+                "line": 3.5,
+                "mult": 1.09,
+            },
+            {"player": "Luke Kornet", "market": "PR", "bet": "Over", "line": 5.5, "mult": 1.03},
+        ],
+        [
+            {
+                "player": "Mitchell Robinson",
+                "market": "REB",
+                "bet": "Over",
+                "line": 5.5,
+                "mult": 1.06,
+            }
+        ],
     ),
-    ("Jalen Brunson", "AST", "", ""),
-    ("Jalen Brunson", "FTM", "", ""),
-    ("Jose Alvarado", "PTS", "", ""),
-    ("Jose Alvarado", "STL", "", ""),
+    ("Jalen Brunson", "AST", [], []),
+    ("Jalen Brunson", "FTM", [], []),
+    ("Jose Alvarado", "PTS", [], []),
+    ("Jose Alvarado", "STL", [], []),
     (
         "Luke Kornet",
         "PR",
-        "Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.09x), De'Aaron Fox Over 1.5 STL - 58.0%, 1.42x (1.03x)",
-        "Mitchell Robinson Over 9.5 PRA - 68.4%, 1.02x (1.03x)",
+        [
+            {
+                "player": "Victor Wembanyama",
+                "market": "BLK",
+                "bet": "Over",
+                "line": 3.5,
+                "mult": 1.09,
+            },
+            {"player": "De'Aaron Fox", "market": "STL", "bet": "Over", "line": 1.5, "mult": 1.03},
+        ],
+        [
+            {
+                "player": "Mitchell Robinson",
+                "market": "PRA",
+                "bet": "Over",
+                "line": 9.5,
+                "mult": 1.03,
+            }
+        ],
     ),
     (
         "Luke Kornet",
         "REB",
-        "De'Aaron Fox Under 5.5 AST - 58.5%, 1.11x (1.02x), Victor Wembanyama Over 3.5 BLK - 70.3%, 1.1x (1.02x)",
-        "",
+        [
+            {"player": "De'Aaron Fox", "market": "AST", "bet": "Under", "line": 5.5, "mult": 1.02},
+            {
+                "player": "Victor Wembanyama",
+                "market": "BLK",
+                "bet": "Over",
+                "line": 3.5,
+                "mult": 1.02,
+            },
+        ],
+        [],
     ),
     (
         "Mitchell Robinson",
         "PRA",
-        "",
-        "De'Aaron Fox Under 5.5 AST - 58.5%, 1.11x (1.06x), Victor Wembanyama Under 4.5 BLST - 73.6%, 1.05x (1.03x), Luke Kornet Over 5.5 PR - 74.0%, 0.97x (1.03x)",
+        [],
+        [
+            {"player": "De'Aaron Fox", "market": "AST", "bet": "Under", "line": 5.5, "mult": 1.06},
+            {
+                "player": "Victor Wembanyama",
+                "market": "BLST",
+                "bet": "Under",
+                "line": 4.5,
+                "mult": 1.03,
+            },
+            {"player": "Luke Kornet", "market": "PR", "bet": "Over", "line": 5.5, "mult": 1.03},
+        ],
     ),
-    ("Mitchell Robinson", "REB", "", "De'Aaron Fox Over 1.5 STL - 58.0%, 1.42x (1.06x)"),
+    (
+        "Mitchell Robinson",
+        "REB",
+        [],
+        [{"player": "De'Aaron Fox", "market": "STL", "bet": "Over", "line": 1.5, "mult": 1.06}],
+    ),
     (
         "Victor Wembanyama",
         "BLK",
-        "De'Aaron Fox Under 5.5 AST - 58.5%, 1.11x (1.11x), Luke Kornet Over 5.5 PR - 74.0%, 0.97x (1.09x)",
-        "",
+        [
+            {"player": "De'Aaron Fox", "market": "AST", "bet": "Under", "line": 5.5, "mult": 1.11},
+            {"player": "Luke Kornet", "market": "PR", "bet": "Over", "line": 5.5, "mult": 1.09},
+        ],
+        [],
     ),
     (
         "Victor Wembanyama",
         "BLST",
-        "De'Aaron Fox Under 5.5 AST - 58.5%, 1.11x (1.03x)",
-        "Mitchell Robinson Over 9.5 PRA - 68.4%, 1.02x (1.03x)",
+        [{"player": "De'Aaron Fox", "market": "AST", "bet": "Under", "line": 5.5, "mult": 1.03}],
+        [
+            {
+                "player": "Mitchell Robinson",
+                "market": "PRA",
+                "bet": "Over",
+                "line": 9.5,
+                "mult": 1.03,
+            }
+        ],
     ),
 ]
 
@@ -258,8 +348,8 @@ def test_find_correlation_offer_correlations_synthetic(monkeypatch) -> None:
     offer_df, _ = find_correlation(offers, stats, "Underdog", contest_variant="power")
 
     actual = sorted(
-        (r["Player"], r["Market"], r["Team Correlation"], r["Opp Correlation"])
-        for _, r in offer_df[["Player", "Market", "Team Correlation", "Opp Correlation"]].iterrows()
+        (r["Player"], r["Market"], r["Corr Same"] or [], r["Corr Opp"] or [])
+        for _, r in offer_df[["Player", "Market", "Corr Same", "Corr Opp"]].iterrows()
     )
     assert actual == sorted(_EXPECTED_OFFER_CORR)
 
@@ -305,7 +395,10 @@ def test_find_correlation_builds_parlays_wnba() -> None:
     """find_correlation wires beam_search + assembles a well-formed parlay_df.
 
     Structural only (parlay EVs are non-deterministic on correlated legs); the
-    guard is that the assembly path runs and produces sane rows.
+    guard is that the assembly path runs and produces sane rows. ``legs`` (the
+    P8 structured-leg schema) replaces the retired ``Leg 1..6`` / ``Legs`` /
+    ``Desc`` / ``Family`` columns; ``Fun`` survives as a transient sort key that
+    ``persist._PARLAY_DROP_COLS`` strips before ``current_parlays.parquet``.
     """
     offers = _wnba_offers()
     stats = {"WNBA": _stats_for([o["Player"] for o in offers], "MIN short", "USG_PCT short")}
@@ -313,20 +406,23 @@ def test_find_correlation_builds_parlays_wnba() -> None:
     _, parlay_df = find_correlation(offers, stats, "Underdog", contest_variant="power")
 
     assert not parlay_df.empty
-    for col in (
-        "Game",
-        "League",
-        "Platform",
-        "Model EV",
-        "Market EV",
-        "Legs",
-        "Bet Size",
-        "Family",
-    ):
+    for col in ("Game", "League", "Platform", "Model EV", "Market EV", "legs", "Bet Size"):
         assert col in parlay_df.columns
+    assert "Family" not in parlay_df.columns
+    for col in ("Leg 1", "Legs", "Desc"):
+        assert col not in parlay_df.columns
     assert set(parlay_df["Bet Size"].astype(int)).issubset({2, 3, 4, 5, 6})
     assert (parlay_df["League"] == "WNBA").all()
     assert (parlay_df["Game"] == "LVA/NYL").all()
+
+    first_legs = parlay_df["legs"].iloc[0]
+    assert isinstance(first_legs, list) and len(first_legs) >= 2
+    assert all(set(leg.keys()) == set(LEG_FIELDS) for leg in first_legs)
+    # PTS/PRA/AST/REB aren't in stat_map["Underdog"], so identity-fallback (stat
+    # == market) is the *correct* answer for this fixture's markets — the
+    # remap-actually-fires case (WNBA "Fantasy Points") is pinned directly on
+    # _resolve_leg_stat in test_parlay_search.py, not fixture-dependent here.
+    assert all(leg["stat"] == leg["market"] for row in parlay_df["legs"] for leg in row)
 
 
 @_needs_wnba_corr

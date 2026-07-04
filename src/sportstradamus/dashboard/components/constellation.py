@@ -35,6 +35,7 @@ import plotly.graph_objects as go
 
 from sportstradamus.dashboard.legs import corr_key
 from sportstradamus.dashboard.theme import GOLD, GRAY
+from sportstradamus.leg_schema import is_model_liked, leg_field
 
 # |ρ| floor to draw an edge or weight the layout — the story-menu edge floor.
 _MIN_EDGE_RHO = 0.05
@@ -75,37 +76,45 @@ def _bet_word(bet) -> str:
 
 
 def star_label(leg: Mapping) -> str:
-    """Compact star caption: ``Lastname MKT o/u Line`` (e.g. ``Brunson PTS o25.5``)."""
-    ou = "o" if _bet_word(leg["Bet"]) == "Over" else "u"
-    return f"{_last_name(str(leg['Player']))} {leg['Market']} {ou}{float(leg['Line']):.10g}"
+    """Compact star caption: ``Lastname MKT o/u Line`` (e.g. ``Brunson PTS o25.5``).
+
+    ``leg`` is a canonical lowercase leg or a raw uppercase ``current_offers``
+    row — ``leg_field`` bridges the two shapes (the constellation draws both a
+    game's candidate pool and the slip's own legs on one map).
+    """
+    ou = "o" if _bet_word(leg_field(leg, "bet")) == "Over" else "u"
+    return f"{_last_name(str(leg_field(leg, 'player')))} {leg_field(leg, 'market')} {ou}{float(leg_field(leg, 'line')):.10g}"
 
 
 def _hover_text(leg: Mapping) -> str:
-    p = float(leg.get("Win Prob", 0.0) or 0.0)
-    boost = float(leg.get("Boost", 1.0) or 1.0)
-    k = float(leg.get("Kelly", 0.0) or 0.0)
-    head = f"{leg['Player']} — {leg['Market']} {_bet_word(leg['Bet'])} {float(leg['Line']):.10g}"
+    p = float(leg_field(leg, "win_prob", 0.0) or 0.0)
+    boost = float(leg_field(leg, "boost", 1.0) or 1.0)
+    k = float(leg_field(leg, "kelly", 0.0) or 0.0)
+    head = (
+        f"{leg_field(leg, 'player')} — {leg_field(leg, 'market')} "
+        f"{_bet_word(leg_field(leg, 'bet'))} {float(leg_field(leg, 'line')):.10g}"
+    )
     return f"{head}<br>Win {p:.0%} · {boost:.2f}x · Kelly {k:.0%}"
 
 
 def _card_fields(leg: Mapping) -> list:
     """Structured fields the hover card reads from a node's ``customdata`` (after the key)."""
     return [
-        str(leg["Player"]),
-        str(leg["Market"]),
-        _bet_word(leg["Bet"]),
-        float(leg["Line"]),
-        float(leg.get("Win Prob", 0.0) or 0.0),
-        float(leg.get("Boost", 1.0) or 1.0),
-        float(leg.get("Kelly", 0.0) or 0.0),
+        str(leg_field(leg, "player")),
+        str(leg_field(leg, "market")),
+        _bet_word(leg_field(leg, "bet")),
+        float(leg_field(leg, "line")),
+        float(leg_field(leg, "win_prob", 0.0) or 0.0),
+        float(leg_field(leg, "boost", 1.0) or 1.0),
+        float(leg_field(leg, "kelly", 0.0) or 0.0),
     ]
 
 
 def _node_info(leg: Mapping) -> dict:
     return {
         "label": star_label(leg),
-        "team": leg.get("Team"),
-        "edge": float(leg.get("Kelly", 0.0) or 0.0),
+        "team": leg_field(leg, "team"),
+        "edge": float(leg_field(leg, "kelly", 0.0) or 0.0),
         "hover": _hover_text(leg),
         "card": _card_fields(leg),
     }
@@ -161,7 +170,7 @@ def _universe(pool: pd.DataFrame | None, slip_legs: Sequence[Mapping]) -> dict[s
     info: dict[str, dict] = {}
     if pool is not None and not pool.empty:
         for row in pool.to_dict("records"):
-            if float(row.get("Kelly", 0.0) or 0.0) > 0:
+            if is_model_liked(row):
                 info.setdefault(corr_key(row), _node_info(row))
     for leg in slip_legs:
         info.setdefault(corr_key(leg), _node_info(leg))
@@ -203,7 +212,7 @@ def _game_of(pool: pd.DataFrame | None, slip_legs: Sequence[Mapping]) -> str:
         if not games.empty:
             return str(games.iloc[0])
     for leg in slip_legs:
-        game = leg.get("Game")
+        game = leg.get("game")
         if game:
             return str(game)
     return ""

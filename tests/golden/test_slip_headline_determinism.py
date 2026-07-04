@@ -74,20 +74,20 @@ _CTXS = {
 }
 
 
-def _leg(desc):
-    return {"Desc": desc}
+def _leg(player, bet, line, market):
+    return {"player": player, "bet": bet, "line": line, "market": market}
 
 
 # A: a Tatum-driven BOS/PHI family → "player" archetype (subject = Jayson Tatum).
 _SLIP_A = [
-    _leg("Jayson Tatum Over 28.5 PTS - 59.0%, 1.00x"),
-    _leg("Jayson Tatum Over 8.5 REB - 56.0%, 1.00x"),
-    _leg("Joel Embiid Under 30.5 PTS - 57.0%, 1.00x"),
+    _leg("Jayson Tatum", "Over", 28.5, "PTS"),
+    _leg("Jayson Tatum", "Over", 8.5, "REB"),
+    _leg("Joel Embiid", "Under", 30.5, "PTS"),
 ]
 # B: a different leg-set entirely (Jokic in DEN/MIA) → a different subject/string.
 _SLIP_B = [
-    _leg("Nikola Jokic Over 9.5 AST - 60.0%, 1.00x"),
-    _leg("Nikola Jokic Over 12.5 REB - 58.0%, 1.00x"),
+    _leg("Nikola Jokic", "Over", 9.5, "AST"),
+    _leg("Nikola Jokic", "Over", 12.5, "REB"),
 ]
 
 

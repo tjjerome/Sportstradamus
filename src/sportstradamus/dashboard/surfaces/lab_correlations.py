@@ -67,9 +67,9 @@ if filters["leagues"]:
 if filters["platforms"]:
     pf = pf.loc[pf["Platform"].isin(filters["platforms"])]
 
-resolved = pf.dropna(subset=["Legs"]).copy()
+resolved = pf.dropna(subset=["Legs Resolved"]).copy()
 if not resolved.empty:
-    resolved[["Legs", "Misses"]] = resolved[["Legs", "Misses"]].astype(int)
+    resolved[["Legs Resolved", "Misses"]] = resolved[["Legs Resolved", "Misses"]].astype(int)
     resolved["Hit"] = (resolved["Misses"] == 0).astype(int)
 
 if resolved.empty:
@@ -186,9 +186,13 @@ for platform in sorted(resolved["Platform"].unique()):
             row["Predicted P"] = round(sdf["P"].mean(), 4)
         if "Indep P" in sdf.columns and sdf["Indep P"].notna().any():
             row["Independent P"] = round(sdf["Indep P"].mean(), 4)
-        elif "Leg Probs" in sdf.columns and sdf["Leg Probs"].notna().any():
-            indep = sdf["Leg Probs"].apply(
-                lambda lp: np.prod(lp) if isinstance(lp, list | tuple) and len(lp) > 0 else np.nan
+        elif "legs" in sdf.columns and sdf["legs"].notna().any():
+            indep = sdf["legs"].apply(
+                lambda legs: (
+                    np.prod([leg["win_prob"] for leg in legs])
+                    if isinstance(legs, list | tuple | np.ndarray) and len(legs) > 0
+                    else np.nan
+                )
             )
             row["Independent P"] = round(indep.mean(), 4)
         size_data.append(row)

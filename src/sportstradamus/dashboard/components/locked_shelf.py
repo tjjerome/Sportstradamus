@@ -10,7 +10,6 @@ filled in by nightly ``reflect``.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 
 import pandas as pd
@@ -19,6 +18,7 @@ import streamlit as st
 from sportstradamus.dashboard.components.slip_state import bankroll_input, load_slip
 from sportstradamus.dashboard.data import load_current_offers, load_user_slips
 from sportstradamus.helpers.io import delete_user_slip
+from sportstradamus.leg_schema import leg_label
 
 # Headline characters shown before truncation in the narrow sidebar.
 _SHELF_HEADLINE_CHARS = 48
@@ -71,8 +71,8 @@ def _slip_dialog(row: Mapping) -> None:
         f"**{row['platform']} {row.get('play_type', '')}** · "
         f"{int(row['bet_size'])} legs · {row.get('status') or 'pending'}".replace("  ", " ")
     )
-    for leg in json.loads(row["legs"]):
-        st.write(f"- {leg['desc']}  ·  {leg.get('league', '')}")
+    for leg in row["legs"]:
+        st.write(f"- {leg_label(leg)}  ·  {leg.get('league', '')}")
     c1, c2, c3 = st.columns(3)
     c1.metric("Payout", f"{_fnum(row.get('payout_multiplier')):.2f}x")
     c2.metric("EV", f"{_fnum(row.get('model_ev'), 1.0) - 1:+.1%}")
