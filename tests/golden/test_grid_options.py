@@ -145,9 +145,7 @@ def test_apply_lens_missing_cols_unchanged() -> None:
 
 
 def test_tonight_lens_missing_date_col_unchanged() -> None:
-    df = pd.DataFrame(
-        {"Model EV": [1.2, 1.0], "Market EV": [1.0, 1.0], "Boost": [1.0, 1.0]}
-    )
+    df = pd.DataFrame({"Model EV": [1.2, 1.0], "Market EV": [1.0, 1.0], "Boost": [1.0, 1.0]})
     assert apply_lens(df, "Tonight").equals(df)
 
 
@@ -228,8 +226,16 @@ def test_board_grid_omits_team_opponent_kelly_date() -> None:
     board.py runs the whole page against real snapshot data).
     """
     main_cols = [
-        "League", "Match", "Player", "Market Display", "Line", "Boost",
-        "Win Prob", "Model Edge", "Consensus Edge", "Platform",
+        "League",
+        "Match",
+        "Player",
+        "Market Display",
+        "Line",
+        "Boost",
+        "Win Prob",
+        "Model Edge",
+        "Consensus Edge",
+        "Platform",
     ]
     df = pd.DataFrame(
         {
@@ -247,7 +253,9 @@ def test_board_grid_omits_team_opponent_kelly_date() -> None:
     grid_df = df[display_cols].rename(columns={"Market": "Market Slug"})
     grid_df = grid_df.rename(columns=LABELS)
     options = build_themed_grid_options(
-        grid_df, numeric_cols=["Line", "Boost"], arrow_col="Line",
+        grid_df,
+        numeric_cols=["Line", "Boost"],
+        arrow_col="Line",
         hidden_cols=["Bet", "Market Slug"],
     )
     defs = _column_defs(options)

@@ -54,8 +54,7 @@ def add_match_column(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
     df["Match"] = [
-        match_label(t, o, h)
-        for t, o, h in zip(df["Team"], df["Opponent"], df["Home"], strict=True)
+        match_label(t, o, h) for t, o, h in zip(df["Team"], df["Opponent"], df["Home"], strict=True)
     ]
     return df
 
@@ -66,7 +65,6 @@ def add_market_display(df: pd.DataFrame) -> pd.DataFrame:
     """
     df = df.copy()
     df["Market Display"] = [
-        market_display_name(lg, m)
-        for lg, m in zip(df["League"], df["Market"], strict=True)
+        market_display_name(lg, m) for lg, m in zip(df["League"], df["Market"], strict=True)
     ]
     return df
