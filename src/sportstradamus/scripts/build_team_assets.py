@@ -48,7 +48,7 @@ def _print_league(league: str) -> None:
     if league == "MLB":
         click.echo(
             f"{league}: no teamlog.parquet or gamelog.parquet in this repo — "
-            "use config/abbreviations.json's \"MLB\" section (name -> code map) instead."
+            'use config/abbreviations.json\'s "MLB" section (name -> code map) instead.'
         )
         return
 
@@ -58,8 +58,10 @@ def _print_league(league: str) -> None:
 
     click.echo(f"{league}: {len(codes)} unique code(s)")
     click.echo(f"  {codes}")
-    if teamlog_codes is not None and gamelog_codes is not None and (
-        set(teamlog_codes) != set(gamelog_codes)
+    if (
+        teamlog_codes is not None
+        and gamelog_codes is not None
+        and (set(teamlog_codes) != set(gamelog_codes))
     ):
         click.echo(
             f"  note: teamlog ({len(teamlog_codes)}) and gamelog ({len(gamelog_codes)}) "
