@@ -23,6 +23,7 @@ from sportstradamus.dashboard.components.slip_state import init_slip_state
 st.set_page_config(page_title="Sportstradamus Dashboard", layout="wide")
 
 st.html(theme.APP_CSS + theme.STARFIELD_SVG)
+theme.register_plotly_template()
 
 # Slip state is shared across surfaces; seed it before any surface renders.
 init_slip_state()

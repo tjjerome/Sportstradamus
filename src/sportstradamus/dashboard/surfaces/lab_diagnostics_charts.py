@@ -5,6 +5,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
+from sportstradamus.dashboard import theme
+
 # Bias thresholds for Over/Under balance: < 3% is well-calibrated, 3–7% is
 # marginal, > 7% is a notable prediction bias worth investigating.
 _BIAS_OK = 0.03
@@ -19,7 +21,7 @@ def bias_bar(bias_df: pd.DataFrame) -> go.Figure:
         y="Label",
         orientation="h",
         color="Color",
-        color_discrete_map={"green": "#2ecc71", "orange": "#f39c12", "red": "#e74c3c"},
+        color_discrete_map={"green": theme.GREEN, "orange": theme.ORANGE, "red": theme.RED},
         labels={"Balance": "Over Bias (Predicted − Actual)", "Label": ""},
     )
     fig.update_layout(showlegend=False, height=max(300, len(bias_df) * 22))
@@ -106,7 +108,7 @@ def bss_bar(bss_df: pd.DataFrame) -> go.Figure:
         y="Label",
         orientation="h",
         color="BSS",
-        color_continuous_scale="RdYlGn",
+        color_continuous_scale=theme.DIVERGING_COLORS,
         color_continuous_midpoint=0,
         labels={"BSS": "Brier Skill Score", "Label": ""},
     )
@@ -124,7 +126,7 @@ def murphy_decomp_bar(decomp_df: pd.DataFrame) -> go.Figure:
             x=decomp_df["Reliability"],
             name="Reliability (lower=better)",
             orientation="h",
-            marker_color="#e74c3c",
+            marker_color=theme.RED,
         )
     )
     fig.add_trace(
@@ -133,7 +135,7 @@ def murphy_decomp_bar(decomp_df: pd.DataFrame) -> go.Figure:
             x=-decomp_df["Resolution"],
             name="Resolution (higher=better)",
             orientation="h",
-            marker_color="#2ecc71",
+            marker_color=theme.GREEN,
         )
     )
     fig.update_layout(

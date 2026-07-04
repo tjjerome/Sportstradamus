@@ -129,3 +129,56 @@ def test_design_lint_hook_registered() -> None:
     assert any("design-lint.py" in c for c in commands), (
         "design-lint.py hook is not registered in .claude/settings.json PostToolUse"
     )
+
+
+# Off-token chart hexes: the pre-token-system placeholder colors (plain Bootstrap-ish
+# green/red/orange) and Plotly's built-in RdYlGn diverging scale — both bypass
+# theme.GREEN/RED/ORANGE/DIVERGING_COLORS and drift from config.toml on a palette change.
+_BANNED_CHART_COLORS = ("#2ecc71", "#e74c3c", "#f39c12", "RdYlGn")
+
+
+def test_no_off_token_chart_colors() -> None:
+    offenders = [
+        f"{path.name}: {banned}"
+        for path in _dashboard_files()
+        for banned in _BANNED_CHART_COLORS
+        if banned.lower() in path.read_text(encoding="utf-8").lower()
+    ]
+    assert not offenders, f"Off-token chart colors bypass theme.py: {offenders}"
+
+
+def test_semantic_colors_mirror_config() -> None:
+    """theme.GREEN/RED/ORANGE are the non-Streamlit mirror of config.toml's semantic palette.
+
+    Runtime chart code (lab_diagnostics_charts.py etc.) bakes these from theme.py without a
+    TOML read, so they must stay byte-equal to the config — same pattern as
+    test_diverging_ramp_mirrors_config above.
+    """
+    from sportstradamus.dashboard import theme
+
+    t = _theme()
+    assert t["greenColor"] == theme.GREEN, "theme.GREEN drifted from config.toml greenColor"
+    assert t["redColor"] == theme.RED, "theme.RED drifted from config.toml redColor"
+    assert t["orangeColor"] == theme.ORANGE, "theme.ORANGE drifted from config.toml orangeColor"
+
+
+def test_sequential_ramp_mirrors_config() -> None:
+    """theme.SEQUENTIAL_COLORS is the non-Streamlit mirror of config.toml chartSequentialColors."""
+    from sportstradamus.dashboard.theme import SEQUENTIAL_COLORS
+
+    assert _theme()["chartSequentialColors"] == SEQUENTIAL_COLORS, (
+        "dashboard/theme.SEQUENTIAL_COLORS drifted from config.toml chartSequentialColors"
+    )
+
+
+def test_plotly_template_registered_with_categorical_colorway() -> None:
+    """register_plotly_template() must set the default template with config's categorical colorway."""
+    from sportstradamus.dashboard import theme
+
+    theme.register_plotly_template()
+
+    import plotly.io as pio
+
+    assert pio.templates.default == "sportstradamus"
+    template = pio.templates["sportstradamus"]
+    assert list(template.layout.colorway) == _theme()["chartCategoricalColors"]

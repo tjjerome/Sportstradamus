@@ -24,6 +24,60 @@ DIVERGING_COLORS = [
     "#142C66",
 ]
 
+# Semantic chart colors — mirror config.toml greenColor/redColor/orangeColor so ad-hoc
+# Plotly figures reach the same good/bad/warn hues Streamlit widgets use, instead of the
+# off-token placeholder hexes tests/golden/test_design_tokens.py bans.
+GREEN = "#1F9D55"
+RED = "#E5484D"
+ORANGE = "#F5A524"
+
+# Sequential heatmap ramp — mirrors config.toml chartSequentialColors verbatim.
+SEQUENTIAL_COLORS = [
+    "#EAF1FC",
+    "#CBDDF7",
+    "#A6C5F0",
+    "#7FAAE8",
+    "#5B8DE0",
+    "#3D72D6",
+    "#2E6BE6",
+    "#2351B4",
+    "#183A82",
+    "#0E2350",
+]
+
+
+def register_plotly_template() -> None:
+    """Register + default the token template so ad-hoc Plotly figures inherit DESIGN.md.
+
+    Mirrors config.toml chartCategoricalColors as the colorway; Streamlit's own theming
+    covers st.plotly_chart when a figure's own template/colors aren't set, but ad-hoc
+    go.Figure() traces (e.g. profit_sim's per-strategy lines) need an explicit default.
+    """
+    import plotly.graph_objects as go
+    import plotly.io as pio
+
+    pio.templates["sportstradamus"] = go.layout.Template(
+        layout={
+            "paper_bgcolor": "rgba(0,0,0,0)",
+            "plot_bgcolor": "rgba(0,0,0,0)",
+            "font": {"family": "IBM Plex Sans", "color": "#E6E9EF", "size": 12},
+            "colorway": [
+                "#2E6BE6",
+                "#1F9D55",
+                "#E69F00",
+                "#E5484D",
+                "#56B4E9",
+                "#CC79A7",
+                "#0072B2",
+                "#F0E442",
+            ],
+            "xaxis": {"gridcolor": "#2A2E37", "zerolinecolor": "#2A2E37"},
+            "yaxis": {"gridcolor": "#2A2E37", "zerolinecolor": "#2A2E37"},
+        }
+    )
+    pio.templates.default = "sportstradamus"
+
+
 # The one sanctioned CSS injection site for the whole dashboard (DESIGN.md §3):
 # display-only celestial fonts (.celestial-kicker / .celestial-headline), the
 # banner classes render_banner() uses, and the ambient starfield layer.
