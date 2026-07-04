@@ -493,7 +493,10 @@ def _refuse_if_writer_active(base: Path, filenames: tuple[str, ...]) -> None:
     """
     active = [f for f in filenames if _atomic_tmp(base / f)[1].exists()]
     if active:
-        raise SystemExit(f"writer active (stale or in-flight .tmp present): {active}")
+        raise SystemExit(
+            f"writer active (stale or in-flight .tmp present): {active} — "
+            "if no cron job is running, delete the .tmp file(s) and retry"
+        )
 
 
 @click.command()
