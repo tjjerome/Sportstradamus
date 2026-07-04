@@ -297,6 +297,33 @@ def load_gamelog(league: str) -> pd.DataFrame:
     return _load_gamelog_cached(league, _mtime(gamelog_path) if gamelog_path else 0.0)
 
 
+_CORR_MARKET_SUMMARY_COLUMNS = ["market_a", "market_b", "rho_mean", "n_teams", "scope"]
+
+
+def _corr_market_summary_path(league: str) -> Path:
+    league_dir = pkg_resources.files(data) / "leagues" / league.lower()
+    return Path(str(league_dir / "corr_market_summary.parquet"))
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
+def _load_corr_market_summary_cached(league: str, mtime: float) -> pd.DataFrame:
+    df = read_parquet_safe(_corr_market_summary_path(league))
+    return df if not df.empty else pd.DataFrame(columns=_CORR_MARKET_SUMMARY_COLUMNS)
+
+
+def load_corr_market_summary(league: str) -> pd.DataFrame:
+    """Market-pair mean-correlation summary for a league (mtime-keyed cache).
+
+    Columns ``market_a, market_b, rho_mean, n_teams, scope`` (scope is
+    ``same_team`` or ``opposing``), written by ``training.correlate``'s
+    ``_write_corr_outputs`` alongside the dashboard-forbidden per-team corr
+    parquets. Returns an empty DataFrame for a league with no corr data
+    generated yet — callers caption that rather than crash.
+    """
+    path = _corr_market_summary_path(league)
+    return _load_corr_market_summary_cached(league, _mtime(path))
+
+
 @st.cache_data(ttl=_CACHE_TTL_SECONDS)
 def _load_current_meta_cached(mtime: float) -> dict:
     if not CURRENT_META_PATH.is_file():
