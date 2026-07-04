@@ -82,7 +82,9 @@ def render_lab_filters(meta: pd.DataFrame, *, collapsed: bool) -> dict[str, list
     return _render_collapsed(meta) if collapsed else _render_full(meta)
 
 
-def apply_lab_filters(df: pd.DataFrame, meta: pd.DataFrame, sel: dict) -> pd.DataFrame:
+def apply_lab_filters(
+    df: pd.DataFrame, meta: pd.DataFrame, sel: dict[str, list[str]]
+) -> pd.DataFrame:
     """Filter ``df`` to rows whose ``(league, market)`` cell matches every selection.
 
     Joins ``df`` to ``meta`` on ``(league, market)`` — ``df`` may use either
