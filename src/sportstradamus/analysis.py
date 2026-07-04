@@ -4,7 +4,7 @@ Extracted from analyze_parlay_hist.py with additional professional forecasting
 metrics (CRPS, Brier Skill Score, Murphy decomposition, prediction intervals).
 """
 
-import re
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -15,19 +15,11 @@ from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
 from tqdm import tqdm
 
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, get_odds
-from sportstradamus.history_schema import (
-    CLOSING_FIELD_INDICES,
-    LEGACY_OFFER_ARITY,
-    OFFER_FIELDS,
-    PREDICTION_LEVEL_COLS,
-)
 from sportstradamus.strategies.profit_sim import (
     N_MONTE_CARLO_DEFAULT,
     simulate_strategy,
     summarize_runs,
 )
-
-LEG_PATTERN = re.compile(r"^(.+?)\s+(Over|Under)\s+([\d.]+)\s+(.+?)\s+-\s+[\d.]+%")
 
 PAYOUT_TABLE = {
     "Underdog": [
@@ -121,25 +113,14 @@ def _leg_result_value(game, ls, player, market):
         return None
 
 
-def _resolve_leg(game, ls, new_map, leg):
-    """Resolve one leg string to ``1`` (miss), ``0`` (hit), or ``None`` (skip).
-
-    ``None`` covers an unparseable leg, an unavailable result, and a push
-    (``result == line``).
-    """
-    m = LEG_PATTERN.match(leg)
-    if not m:
+def _resolve_leg(game, ls, leg: Mapping):
+    """Resolve one structured leg to 1 (miss), 0 (hit), or None (skip/push)."""
+    stat = leg.get("stat") or leg.get("market")
+    result_val = _leg_result_value(game, ls, leg["player"], stat)
+    if result_val is None or result_val == leg["line"]:
         return None
-    player, direction, line_str, market = m.groups()
-    over = direction == "Over"
-    line = float(line_str)
-    market = market.replace("H2H ", "")
-    market = new_map.get(market, market)
-
-    result_val = _leg_result_value(game, ls, player, market)
-    if result_val is None or result_val == line:
-        return None
-    missed = (over and result_val < line) or (not over and result_val > line)
+    over = leg["bet"] == "Over"
+    missed = (over and result_val < leg["line"]) or (not over and result_val > leg["line"])
     return 1 if missed else 0
 
 
@@ -154,7 +135,6 @@ def check_bet(bet, stats, stat_map):
 
     stat_obj = stats[bet.League]
     ls = stat_obj.log_strings
-    new_map = _leg_market_map(bet.League, bet.Platform, stat_map)
 
     game = _bet_gameday_rows(stat_obj.gamelog, ls, bet)
     if game.empty:
@@ -162,146 +142,14 @@ def check_bet(bet, stats, stat_map):
 
     legs = 0
     misses = 0
-    for col in [c for c in bet.index if c.startswith("Leg ") and c[4:].strip().isdigit()]:
-        leg = bet[col]
-        if not isinstance(leg, str) or leg == "":
-            continue
-        outcome = _resolve_leg(game, ls, new_map, leg)
+    for leg in bet.legs:
+        outcome = _resolve_leg(game, ls, leg)
         if outcome is None:
             continue
         legs += 1
         misses += outcome
 
     return legs, misses
-
-
-def _migrate_flat_history(history):
-    """Convert old flat history schema (one row per offer) to normalized schema.
-
-    Groups by (Player, League, Date, Market) and collects per-offer columns
-    into an Offers list of 9-tuples: (Line, Boost, Platform, Bet, Win Prob, Market Prob,
-    Close Market Prob, Market CLV, Model CLV). The trailing three are NaN-padded for
-    pre-CLV rows; ``reflect`` populates them from the archive on resolution.
-    """
-    pred_cols = [*PREDICTION_LEVEL_COLS, "Actual"]
-    _prep_legacy_columns(history)
-
-    rows = []
-    for key, grp in history.groupby(["Player", "League", "Date", "Market"], dropna=False):
-        player, league, date, market = key
-        # Prediction-level cols come from the most recent row (last in group).
-        latest = grp.iloc[-1]
-        row = {
-            "Player": player,
-            "League": league,
-            "Date": date,
-            "Market": market,
-            "Offers": _group_offers(grp),
-        }
-        for col in pred_cols:
-            row[col] = latest.get(col, np.nan)
-        rows.append(row)
-
-    return pd.DataFrame(rows)
-
-
-def _prep_legacy_columns(history):
-    """Ensure offer/prediction columns exist and back-fill Model P / Books P.
-
-    The legacy flat schema stored boosted ``Model EV`` / ``Market EV``; the normalized
-    schema wants de-boosted per-offer ``Win Prob`` / ``Market Prob``. Mutates
-    ``history`` in place.
-    """
-    offer_cols = OFFER_FIELDS[:LEGACY_OFFER_ARITY]
-    pred_cols = [*PREDICTION_LEVEL_COLS, "Actual"]
-    for col in offer_cols + pred_cols + ["Actual"]:
-        if col not in history.columns:
-            history[col] = np.nan
-
-    if "Win Prob" not in history.columns or history["Win Prob"].isna().all():
-        if "Model EV" in history.columns:
-            history["Win Prob"] = history["Model EV"] / history.get("Boost", 1)
-    if "Market Prob" not in history.columns or history["Market Prob"].isna().all():
-        if "Market EV" in history.columns:
-            history["Market Prob"] = history["Market EV"] / history.get("Boost", 1)
-
-
-def _offer_tuple(r):
-    """Build one normalized 9-tuple offer from a legacy flat row, or None.
-
-    Returns None when the row has no line (NaN). The trailing closing trio
-    (Close Market Prob, Market CLV, Model CLV) is NaN-padded; ``reflect`` fills it.
-    """
-    line = r.get("Line")
-    if pd.isna(line):
-        return None
-    return (
-        float(line),
-        float(r.get("Boost", 1)),
-        str(r.get("Platform", "")),
-        str(r.get("Bet", "")),
-        float(r["Win Prob"]) if pd.notna(r.get("Win Prob")) else np.nan,
-        float(r["Market Prob"]) if pd.notna(r.get("Market Prob")) else np.nan,
-        np.nan,  # Close Market Prob — populated by reflect.
-        np.nan,  # Market CLV
-        np.nan,  # Model CLV
-    )
-
-
-def _group_offers(grp):
-    """Collect a prediction group's rows into a deduped Offers list."""
-    offers = [t for _, r in grp.iterrows() if (t := _offer_tuple(r)) is not None]
-    return _dedup_offers(offers)
-
-
-def _dedup_offers(offers):
-    """Deduplicate offers by (Line, Platform), keeping the last occurrence."""
-    seen = {}
-    for offer in offers:
-        key = (offer[0], offer[2])  # (Line, Platform)
-        seen[key] = offer
-    return list(seen.values())
-
-
-def _merge_offers(old_offers, new_offers):
-    """Merge old and new offer lists, deduplicating by (Line, Platform).
-
-    New offers overwrite old ones with the same (Line, Platform) key, except
-    in the closing-trio positions (CloseMarketProb, MarketCLV, ModelCLV): a
-    captured non-NaN closing value on the old offer is preserved when the
-    new offer is NaN there. Without this, the next ``prophecize`` run would
-    clobber any close-line snapshot ``reflect`` had already filled in.
-    """
-    merged = {}
-    if old_offers:
-        for offer in old_offers:
-            key = (offer[0], offer[2])  # (Line, Platform)
-            merged[key] = _pad_legacy(offer)
-    for offer in new_offers:
-        key = (offer[0], offer[2])
-        new_padded = _pad_legacy(offer)
-        if key in merged:
-            old_padded = merged[key]
-            merged[key] = _preserve_closing(old_padded, new_padded)
-        else:
-            merged[key] = new_padded
-    return list(merged.values())
-
-
-def _pad_legacy(offer):
-    """Return ``offer`` padded to the canonical 9-field shape with NaN."""
-    if isinstance(offer, tuple | list) and len(offer) == LEGACY_OFFER_ARITY:
-        return (*tuple(offer), np.nan, np.nan, np.nan)
-    return tuple(offer)
-
-
-def _preserve_closing(old_offer, new_offer):
-    """Carry old closing-trio values forward when ``new_offer`` lacks them."""
-    merged = list(new_offer)
-    for idx in CLOSING_FIELD_INDICES:
-        if idx < len(merged) and pd.isna(merged[idx]) and idx < len(old_offer):
-            merged[idx] = old_offer[idx]
-    return tuple(merged)
 
 
 def _offer_result(actual, line, player):
@@ -316,29 +164,6 @@ def _offer_result(actual, line, player):
         diff = actual + line
         return "Over" if diff > 0 else ("Under" if diff < 0 else "Push")
     return "Over" if actual > line else ("Under" if actual < line else "Push")
-
-
-def _offer_row(pred, pred_cols, offer):
-    line, boost, platform, bet, model_p, books_p, close_p, market_clv, model_clv = _pad_legacy(
-        offer
-    )
-    result = _offer_result(pred.get("Actual"), line, pred.get("Player", ""))
-    row = {col: pred[col] for col in pred_cols}
-    row.update(
-        {
-            "Line": line,
-            "Boost": boost,
-            "Platform": platform,
-            "Bet": bet,
-            "Win Prob": model_p,
-            "Market Prob": books_p,
-            "Close Market Prob": close_p,
-            "Market CLV": market_clv,
-            "Model CLV": model_clv,
-            "Result": result,
-        }
-    )
-    return row
 
 
 def _add_kelly_columns(exploded):
@@ -365,29 +190,20 @@ def _add_kelly_columns(exploded):
     return exploded
 
 
-def explode_offers(history):
-    """Expand Offers column into one row per offer, inheriting prediction-level cols.
+def annotate_offer_outcomes(history):
+    """Add Result / Hit / Model EV / Market EV / Kelly to an already-flat history frame.
 
-    Returns DataFrame with columns: all prediction-level cols + Line, Boost,
-    Platform, Bet, Win Prob, Market Prob, Close Market Prob, Market CLV, Model CLV,
-    Result, Hit. Legacy 6-tuples are read transparently — the closing trio
-    surfaces as NaN.
+    ``history`` is one row per (prediction x book offer); this computes each
+    row's Over/Under/Push ``Result`` from ``Actual`` vs ``Line`` and folds in
+    the Kelly-relevant columns. Returns an empty frame unchanged.
     """
-    if "Offers" not in history.columns:
+    if history.empty:
         return history
-
-    pred_cols = [c for c in history.columns if c not in ("Offers",)]
-    rows = []
-    for _, pred in history.iterrows():
-        offers = pred.get("Offers")
-        if not isinstance(offers, list) or not offers:
-            continue
-        for offer in offers:
-            rows.append(_offer_row(pred, pred_cols, offer))
-
-    if not rows:
-        return pd.DataFrame()
-    return _add_kelly_columns(pd.DataFrame(rows))
+    out = history.copy()
+    out["Result"] = out.apply(
+        lambda r: _offer_result(r.get("Actual"), r.get("Line"), r.get("Player", "")), axis=1
+    )
+    return _add_kelly_columns(out)
 
 
 def _player_date_value(gamelog, ls, player, market, date):
@@ -434,7 +250,7 @@ def resolve_history(history, stats):
     """Fill in Actual column for predictions in history.parquet.
 
     Only sets the Actual numeric value. Result (Over/Under/Push) is derived
-    per-offer in explode_offers() from Actual vs Line.
+    per-offer in annotate_offer_outcomes() from Actual vs Line.
     """
     if "Actual" not in history.columns:
         history["Actual"] = np.nan
@@ -841,14 +657,14 @@ def _prep_parlays(parlays, stats, stat_map, today):
     parlays = parlays.loc[parlays["_date"].notna()].copy()
     parlays = parlays.loc[parlays["_date"] >= today - timedelta(days=365)].copy()
 
-    unresolved = parlays.loc[parlays["Legs"].isna()]
+    unresolved = parlays.loc[parlays["Legs Resolved"].isna()]
     if not unresolved.empty:
         results = unresolved.progress_apply(
             lambda bet: check_bet(bet, stats, stat_map), axis=1
         ).to_list()
-        parlays.loc[parlays["Legs"].isna(), ["Legs", "Misses"]] = results
+        parlays.loc[parlays["Legs Resolved"].isna(), ["Legs Resolved", "Misses"]] = results
 
-    parlays.dropna(subset=["Legs"], inplace=True)
+    parlays.dropna(subset=["Legs Resolved"], inplace=True)
     return parlays
 
 
@@ -862,7 +678,7 @@ def _parlay_profit_df(parlays, today):
     ud_parlays["Profit"] = ud_parlays.apply(
         lambda x: (
             np.clip(
-                PAYOUT_TABLE["Underdog"][x.Legs][x.Misses]
+                PAYOUT_TABLE["Underdog"][x["Legs Resolved"]][x.Misses]
                 * (x.Boost if x.Boost < _UNDERDOG_PERFECT_BOOST_MULT or x.Misses == 0 else 1),
                 None,
                 _UNDERDOG_PAYOUT_CAP,
@@ -1015,7 +831,7 @@ def compute_parlay_metrics(parlays, stats, stat_map):
     if len(parlays) == 0:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    parlays[["Legs", "Misses"]] = parlays[["Legs", "Misses"]].astype(int)
+    parlays[["Legs Resolved", "Misses"]] = parlays[["Legs Resolved", "Misses"]].astype(int)
     parlays["Hit"] = (parlays["Misses"] == 0).astype(int)
 
     profit_df = _parlay_profit_df(parlays, today)

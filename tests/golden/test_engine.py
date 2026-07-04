@@ -48,7 +48,7 @@ def test_enrich_legs_joins_offer_context():
             },
         ]
     )
-    parsed = [{"Player": "Jokic", "Bet": "Over", "Line": 9.5, "Market": "Assists"}]
+    parsed = [{"player": "Jokic", "bet": "Over", "line": 9.5, "market": "Assists"}]
     legs = enrich_legs(parsed, offers)
     assert len(legs) == 1
     leg = legs[0]
@@ -59,7 +59,7 @@ def test_enrich_legs_joins_offer_context():
 
 def test_enrich_legs_unmatched_falls_back_to_parsed():
     legs = enrich_legs(
-        [{"Player": "Ghost", "Bet": "Under", "Line": 3.5, "Market": "Points"}],
+        [{"player": "Ghost", "bet": "Under", "line": 3.5, "market": "Points"}],
         pd.DataFrame(columns=["Player", "Bet", "Line"]),
     )
     leg = legs[0]
@@ -176,13 +176,13 @@ def test_enrich_legs_carries_valence_and_win_prob():
         ]
     )
     leg = enrich_legs(
-        [{"Player": "Guarded Guy", "Bet": "Under", "Line": 2.5, "Market": "Turnovers"}], offers
+        [{"player": "Guarded Guy", "bet": "Under", "line": 2.5, "market": "Turnovers"}], offers
     )[0]
     assert leg.negative is True
     assert leg.win_prob == 0.62
     assert leg.category == "mistakes"
     ghost = enrich_legs(
-        [{"Player": "Ghost", "Bet": "Over", "Line": 20.5, "Market": "PTS"}], offers
+        [{"player": "Ghost", "bet": "Over", "line": 20.5, "market": "PTS"}], offers
     )[0]
     assert ghost.negative is False and ghost.win_prob is None
 

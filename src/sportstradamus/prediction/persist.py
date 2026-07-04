@@ -35,7 +35,7 @@ from sportstradamus.prediction.stories import STORIES_VERSION
 # - Scoring: Win Prob (hit probability), Model EV (edge), Market EV, Projection (stat mean),
 #   Kelly, Projection STD, Push Prob
 # - Context: Avg 5, Avg H2H, Moneyline, O/U, DVPOA, Position (depth-chart label)
-# - Correlations: Team Correlation, Opp Correlation
+# - Correlations: Corr Same, Corr Opp
 # - Narrative: Why (precomputed "the case" string, prediction/stories)
 # - Stat key: Stat (for history lookups)
 # - Distribution (for PDF/PMF): Dist, CV, Gate, and shape parameters (Model R, Alpha, Sigma, Skew)
@@ -69,8 +69,8 @@ _OFFER_KEEP_COLS = [
     "O/U",
     "DVPOA",
     "Position",
-    "Team Correlation",
-    "Opp Correlation",
+    "Corr Same",
+    "Corr Opp",
     "Why",
     "Stat",
     "Dist",
@@ -89,7 +89,9 @@ _OFFER_SIGNAL_COLS = ["Boost", "Model EV", "Market EV"]
 # Internal correlation cols dropped from current_parlays.parquet — these are
 # scoring artifacts not useful for human review. `Indep P` is kept (independence
 # joint probability) so users can compare against the correlation-aware joint.
-_PARLAY_DROP_COLS = ["Leg Probs", "Corr Pairs", "Boost Pairs", "Indep PB"]
+# `Bet ID` is an internal join key (leg-index tuple), not useful for human
+# review; `Fun` only drives the beam-search ranking sort, not display.
+_PARLAY_DROP_COLS = ["Corr Pairs", "Boost Pairs", "Indep PB", "Bet ID", "Fun"]
 
 
 def write_current_offers(
@@ -159,10 +161,12 @@ def write_current_game_stories(stories: pd.DataFrame) -> None:
 
     ``stories`` is the ``stories.build_game_stories`` frame: up to five stories
     per ``(platform, game)``, each with a Bankroll Builder and a Shoot-the-Moon
-    parlay (one row per ``objective``). ``legs`` is a JSON list of leg-desc
-    strings (round-trips through ``parse_leg`` for the dashboard's live thesis
-    regen); ``kelly_stake`` is a standalone full-Kelly bankroll *fraction* — the
-    dashboard rail re-sizes it into Decimal dollars against the live bankroll.
+    parlay (one row per ``objective``). ``legs`` is a list of canonical
+    structured legs (``sportstradamus.leg_schema.build_leg`` output, stored as a
+    ``list<struct>`` parquet column) that the dashboard's ``seed_from_story``
+    re-resolves against current offers; ``kelly_stake`` is a standalone
+    full-Kelly bankroll *fraction* — the dashboard rail re-sizes it into
+    Decimal dollars against the live bankroll.
     ``build_game_stories`` returns a column-stable frame even with no stories, so
     an empty slate still writes a header-only snapshot the dashboard can read.
     """

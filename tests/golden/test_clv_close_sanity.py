@@ -82,7 +82,14 @@ def test_persist_segments_writes_parquet(_isolated_segments_parquet):
                 "Date": "2026-05-04",
                 "Market": "points",
                 "Platform": "Underdog",
-                "Offers": [(18.5, 1.0, "Underdog", "Over", 0.6, 0.5, 0.7, 0.2, 0.1)],
+                "Line": 18.5,
+                "Boost": 1.0,
+                "Bet": "Over",
+                "Win Prob": 0.6,
+                "Market Prob": 0.5,
+                "Close Market Prob": 0.7,
+                "Market CLV": 0.2,
+                "Model CLV": 0.1,
             }
         )
     df = pd.DataFrame(rows)

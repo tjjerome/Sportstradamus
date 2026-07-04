@@ -24,16 +24,21 @@ import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import creds, data
-from sportstradamus.analysis import _merge_offers
 from sportstradamus.books import get_sleeper, get_ud
-from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, LazyArchive, get_logger, stat_map
+from sportstradamus.helpers import (
+    UNDERDOG_BOOST_BASELINE,
+    LazyArchive,
+    get_logger,
+    stat_dist,
+    stat_map,
+)
 from sportstradamus.helpers.io import (
     read_history,
     read_parlay_hist,
     write_history,
     write_parlay_hist,
 )
-from sportstradamus.history_schema import HISTORY_COLS, PREDICTION_LEVEL_COLS
+from sportstradamus.history_schema import HISTORY_COLS, PREDICTION_KEY
 from sportstradamus.prediction.persist import (
     write_current_game_context,
     write_current_game_corr,
@@ -62,6 +67,14 @@ os.environ["LINE_PROFILE"] = "0"
 archive = LazyArchive()
 
 _HISTORY_RETENTION_DAYS = 365
+
+# Alt-Line flag ladder/alt rungs vs the standard line: count stats move in 0.5
+# steps, continuous (yardage) lines drift +/-1-2 without being a different rung.
+_ALT_LINE_TOL_COUNT = 0.75
+_ALT_LINE_TOL_CONTINUOUS = 2.5
+# Count-stat distribution families (per stat_meta.json "dist"); everything else
+# routes to the continuous tolerance.
+_COUNT_DISTS = {"NegBin", "ZINB", "Poisson"}
 
 # Per-league gamelog volume-stat column for the deep-dive volume trend. NFL maps by
 # base position (the snapshot's depth-rank suffix is stripped before lookup) so each
@@ -120,6 +133,20 @@ def _offer_details_frame(snapshot_offers: pd.DataFrame, stats: dict) -> pd.DataF
     return build_offer_details(
         snapshot_offers, league_data, importances, exclude=frozenset(), today=today
     )
+
+
+def _stamp_alt_line(offers: pd.DataFrame) -> pd.DataFrame:
+    """Flag rows whose ``Line`` diverges from ``Consensus Line`` beyond tolerance.
+
+    Tolerance is picked per-row from the cell's distribution family in
+    ``stat_meta.json`` (count stats move in coarser steps than continuous ones);
+    NaN ``Consensus Line`` (no archive line yet) leaves ``Alt Line`` False.
+    """
+    dist = offers.apply(lambda r: stat_dist.get(r["League"], {}).get(r["Market"]), axis=1)
+    tol = np.where(dist.isin(_COUNT_DISTS), _ALT_LINE_TOL_COUNT, _ALT_LINE_TOL_CONTINUOUS)
+    diff = (offers["Line"] - offers["Consensus Line"]).abs()
+    offers["Alt Line"] = (diff > tol).where(offers["Consensus Line"].notna(), False)
+    return offers
 
 
 @click.command()
@@ -257,9 +284,12 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     snapshot_offers = pd.concat(all_offers) if all_offers else pd.DataFrame()
     if not parlay_df.empty:
         parlay_df.sort_values("Model EV", ascending=False, inplace=True)
-        parlay_df.drop_duplicates(inplace=True)
+        # subset excludes "legs" (list[dict]) — unhashable, so a full-row dedup
+        # would raise; every other column agreeing implies the same legs too.
+        dedup_cols = [c for c in parlay_df.columns if c != "legs"]
+        parlay_df.drop_duplicates(subset=dedup_cols, inplace=True)
         parlay_df.reset_index(drop=True, inplace=True)
-        parlay_df[["Legs", "Misses", "Profit"]] = np.nan
+        parlay_df[["Legs Resolved", "Misses", "Profit"]] = np.nan
 
     if not snapshot_offers.empty and "O/U" in snapshot_offers.columns:
         snapshot_offers["O/U"] = snapshot_offers.apply(
@@ -313,53 +343,35 @@ def main(progress, legacy_correlation, contest_variant, log_level):
 
     archive.write()
     logger.info("Checking historical predictions")
-    from sportstradamus.analysis import _migrate_flat_history, _offer_tuple
 
     history = read_history()
-    if not history.empty:
-        if "Offers" not in history.columns:
-            history = _migrate_flat_history(history)
-    else:
+    if history.empty:
         history = pd.DataFrame(columns=HISTORY_COLS)
-
-    pred_key = ["Player", "League", "Date", "Market"]
 
     if all_offers:
         all_df = pd.concat(all_offers)
+        if not snapshot_offers.empty and "Consensus Line" in snapshot_offers.columns:
+            all_df = all_df.merge(
+                snapshot_offers[[*PREDICTION_KEY, "Consensus Line"]].drop_duplicates(PREDICTION_KEY),
+                on=PREDICTION_KEY,
+                how="left",
+            )
         all_df.loc[(all_df["Market"] == "AST") & (all_df["League"] == "NHL"), "Market"] = "assists"
         all_df.loc[(all_df["Market"] == "PTS") & (all_df["League"] == "NHL"), "Market"] = "points"
         all_df.loc[(all_df["Market"] == "BLK") & (all_df["League"] == "NHL"), "Market"] = "blocked"
         all_df.dropna(subset="Market", inplace=True, ignore_index=True)
+        if "Consensus Line" in all_df.columns:
+            all_df = _stamp_alt_line(all_df)
+        else:
+            all_df["Alt Line"] = False
+        # Freshly scored offers always start unresolved; reflect fills these in.
+        for col in ("Actual", "Close Market Prob", "Market CLV", "Model CLV"):
+            all_df[col] = np.nan
+        new_df = all_df[HISTORY_COLS].copy() if not all_df.empty else pd.DataFrame()
     else:
-        all_df = pd.DataFrame()
+        new_df = pd.DataFrame()
 
-    new_preds = []
-    if not all_df.empty:
-        for key, grp in all_df.groupby(pred_key):
-            player, league, date, market = key
-            latest = grp.iloc[-1]
-            offers = [t for _, r in grp.iterrows() if (t := _offer_tuple(r)) is not None]
-            row = {
-                "Player": player,
-                "League": league,
-                "Date": date,
-                "Market": market,
-                "Offers": offers,
-            }
-            for col in PREDICTION_LEVEL_COLS:
-                row[col] = latest.get(col, np.nan)
-            new_preds.append(row)
-
-    new_df = pd.DataFrame(new_preds)
-
-    if not history.empty and not new_df.empty:
-        history = history.set_index(pred_key)
-        new_df = new_df.set_index(pred_key)
-        for idx in new_df.index:
-            _merge_prediction_row(history, new_df, idx)
-        history = history.reset_index()
-    elif not new_df.empty:
-        history = new_df
+    history = _upsert_history(history, new_df)
 
     if "Actual" not in history.columns:
         history["Actual"] = np.nan
@@ -399,24 +411,32 @@ def _write_pickem_snapshot(scored_ud: pd.DataFrame | None, stats: dict) -> None:
         logger.exception("Failed to build pickem snapshot")
 
 
-def _merge_prediction_row(history, new_df, idx):
-    """Merge one new prediction (both indexed by pred_key) into history at ``idx``.
+def _upsert_history(history: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFrame:
+    """Upsert freshly scored offer rows into ``history``, deduped by (key, Line, Platform).
 
-    Existing rows keep their Offers merged via ``_merge_offers`` and have their
-    prediction-level columns overwritten only where the new value is non-NaN; a
-    new ``idx`` inserts the whole row. Mutates ``history`` in place.
+    A naive ``drop_duplicates(keep="last")`` on the concat would let a fresh
+    unclosed row (``Close Market Prob`` always NaN at prophecize-time) evict an
+    already-closed row from a prior ``reflect`` run on the same ``(Line,
+    Platform)`` key, silently destroying captured CLV data. Sorting on
+    "has a closed Close Market Prob" before the stable dedup makes a closed row
+    win regardless of old/new; among rows with the same closed-status, concat
+    order (old-before-new) plus a stable sort keeps the newer one. This also
+    covers prediction-level freshness (Team/Projection/etc.) for the offer-keys
+    touched this run, since those columns are just duplicated across every
+    offer row for a prediction and ``keep="last"`` prefers the newer row.
     """
-    if idx not in history.index:
-        history.loc[idx] = new_df.loc[idx]
-        return
-    old_offers = history.at[idx, "Offers"]
-    if not isinstance(old_offers, list):
-        old_offers = []
-    history.at[idx, "Offers"] = _merge_offers(old_offers, new_df.at[idx, "Offers"])
-    for col in PREDICTION_LEVEL_COLS:
-        val = new_df.at[idx, col]
-        if pd.notna(val):
-            history.at[idx, col] = val
+    if new_df.empty:
+        return history
+    if history.empty:
+        return new_df
+
+    combined = pd.concat([history, new_df], ignore_index=True)
+    combined["_closed"] = combined["Close Market Prob"].notna()
+    return (
+        combined.sort_values("_closed", kind="stable")
+        .drop_duplicates(subset=[*PREDICTION_KEY, "Line", "Platform"], keep="last")
+        .drop(columns="_closed")
+    )
 
 
 if __name__ == "__main__":
