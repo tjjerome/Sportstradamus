@@ -148,7 +148,8 @@ grid_df = grid_df.rename(columns=columns.LABELS)
 # frame, so every lookup below keys off the post-rename name, same as "Win %" already
 # does for Win Prob.
 numeric_cols = [
-    c for c in ("Line", "Boost", "Win %", columns.MODEL_EDGE, "Cons Edge", "Kelly")
+    c
+    for c in ("Line", "Boost", "Win %", columns.MODEL_EDGE, "Cons Edge", "Kelly")
     if c in grid_df.columns
 ]
 selected_rows = render_themed_grid(
