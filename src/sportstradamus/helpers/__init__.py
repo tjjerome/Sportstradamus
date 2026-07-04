@@ -18,19 +18,16 @@ Split into submodules by concern:
 * :mod:`sportstradamus.helpers.archive` — the ``Archive`` singleton that
   persists odds/EV data to a DuckDB archive, plus the ``clean_archive``
   housekeeping helper.
+* :mod:`sportstradamus.helpers.market_display` — ``market_display_name``, the
+  render-only market-slug-to-prose lookup.
 
 Every legacy ``from sportstradamus.helpers import <name>`` keeps working
 because this module re-exports the full public surface below. Prefer the
 submodule path in new code.
 """
 
-import importlib.resources as pkg_resources
-import json
-from functools import cache
-
 import requests
 
-from sportstradamus import data
 from sportstradamus.helpers.archive import Archive, LazyArchive, clean_archive
 from sportstradamus.helpers.config import (
     abbreviations,
@@ -73,6 +70,7 @@ from sportstradamus.helpers.distributions import (
     skewnormal_loc_from_mean,
 )
 from sportstradamus.helpers.logging import JsonFormatter, get_logger
+from sportstradamus.helpers.market_display import market_display_name
 from sportstradamus.helpers.scraping import Scrape
 from sportstradamus.helpers.text import (
     get_mlb_pitchers,
@@ -89,17 +87,6 @@ from sportstradamus.helpers.text import (
 # (dashboard display, ``nightly.py`` profit-sim, parlay-search arithmetic in
 # ``correlation.py``) divide it back out.
 UNDERDOG_BOOST_BASELINE: float = 1.78
-
-
-@cache
-def _market_display() -> dict:
-    with (pkg_resources.files(data) / "config/market_display.json").open() as f:
-        return json.load(f)
-
-
-def market_display_name(league: str, slug: str) -> str:
-    """Display label for a market slug; the slug stays the logic key everywhere."""
-    return _market_display().get(league, {}).get(slug, slug)
 
 
 __all__ = [
