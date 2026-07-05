@@ -95,6 +95,8 @@ def meta(monkeypatch):
         assert result.exit_code == 0, result.output
         out = json.loads(meta_path.read_text())
         out["_live_rows"] = written.get("live_metrics_per_market.parquet")
+        out["_profit_sim_rows"] = written.get("profit_sim_summary.parquet")
+        out["_cal_rows"] = written.get("calibration_summary.parquet")
         out["_output"] = result.output
         yield out
     finally:
@@ -119,6 +121,19 @@ def test_history_totals(meta):
 
 def test_live_metrics_written(meta):
     assert meta["_live_rows"] == 3
+
+
+def test_profit_sim_precompute_written(meta):
+    # Fixture rows are dated 2025-01-01/02, long outside every profit-sim horizon
+    # window (max 1y) relative to real "now" — grid is real, just empty.
+    assert meta["_profit_sim_rows"] == 0
+
+
+def test_calibration_precompute_written(meta):
+    # calibration_summary has no horizon window (unlike profit-sim): the one
+    # resolved row (Actual filled by _resolve_history) survives its
+    # resolved-rows-only filter and bins into exactly one (Alt Line, bin) row.
+    assert meta["_cal_rows"] == 1
 
 
 def test_echo_summary(meta):
