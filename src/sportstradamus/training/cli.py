@@ -328,24 +328,27 @@ def meditate(
     ) or league == "NBA":
         click.echo("[NBA] loading cached gamelogs...")
         nba.load()
-        click.echo("[NBA] updating from league API (this hits stats.nba.com - may take 30-60s)...")
-        nba.update()
+        if not deterministic:
+            click.echo("[NBA] updating from league API (this hits stats.nba.com - may take 30-60s)...")
+            nba.update()
         stat_structs.update({"NBA": nba})
     if (
         league == "All" and datetime.today().date() > (nfl.season_start - timedelta(days=7))
     ) or league == "NFL":
         click.echo("[NFL] loading cached gamelogs...")
         nfl.load()
-        click.echo("[NFL] updating from league API...")
-        nfl.update()
+        if not deterministic:
+            click.echo("[NFL] updating from league API...")
+            nfl.update()
         stat_structs.update({"NFL": nfl})
     if (
         league == "All" and datetime.today().date() > (wnba.season_start - timedelta(days=7))
     ) or league == "WNBA":
         click.echo("[WNBA] loading cached gamelogs...")
         wnba.load()
-        click.echo("[WNBA] updating from league API...")
-        wnba.update()
+        if not deterministic:
+            click.echo("[WNBA] updating from league API...")
+            wnba.update()
         stat_structs.update({"WNBA": wnba})
 
     active_markets = dict(ALL_MARKETS)
