@@ -16,6 +16,7 @@ from sklearn.metrics import brier_score_loss
 from sportstradamus import clv
 from sportstradamus.analysis import (
     JUICE_PAYOUT,
+    TIMEFRAMES,
     compute_book_brier_skill_score,
     dedup_bets,
     ev_threshold_record,
@@ -28,6 +29,7 @@ from sportstradamus.dashboard.components.profit_sim import (
     render_profit_sim,
     render_profit_sim_summary,
 )
+from sportstradamus.dashboard.components.tickets import build_tickets, render_tickets
 from sportstradamus.dashboard.data import (
     filtered_history_or_stop,
     format_ts,
@@ -42,6 +44,22 @@ from sportstradamus.dashboard.data import (
     sport_filtered,
 )
 from sportstradamus.dashboard.surfaces.receipts_charts import reliability_diagram
+
+# Window filter re-scoping the hero + by-dimension grid only (every other df-consuming
+# section keeps reading the full, unwindowed df). Four of TIMEFRAMES' five labels map to
+# the spec's five named options (skip 6m — not one of them) plus "All", which isn't a
+# TIMEFRAMES entry at all: no day-cutoff, the unfiltered case. Default is "All" so the
+# page's default view is unchanged from before this filter existed.
+_RECEIPTS_WINDOW_LABELS = {
+    "7d": "Last week",
+    "30d": "Last month",
+    "3m": "Last 3 mo",
+    "1y": "Last year",
+}
+_RECEIPTS_WINDOW_DAYS = {
+    label: days for label, days in TIMEFRAMES if label in _RECEIPTS_WINDOW_LABELS
+}
+_RECEIPTS_WINDOW_OPTIONS = [*_RECEIPTS_WINDOW_LABELS, "All"]
 
 st.title("Receipts")
 render_banner("stats", "the track record, with the losers shown")
@@ -77,8 +95,26 @@ df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
 df["Hit"] = (df["Bet"] == df["Result"]).astype(int)
 df["Profit Unit"] = df["Hit"] * JUICE_PAYOUT - (1 - df["Hit"])
 
+# Every other df-consuming section below (skeptic checks, slips, trends/calibration,
+# CLV, sim, CSV export) keeps reading the full, unwindowed df.
+window = (
+    st.segmented_control(
+        "Window",
+        _RECEIPTS_WINDOW_OPTIONS,
+        default="All",
+        format_func=lambda w: _RECEIPTS_WINDOW_LABELS.get(w, w),
+        key="receipts_window",
+    )
+    or "All"
+)
+if window == "All":
+    df_windowed = df
+else:
+    cutoff = pd.Timestamp.today().normalize() - pd.Timedelta(days=_RECEIPTS_WINDOW_DAYS[window])
+    df_windowed = df.loc[df["_date"] >= cutoff.date()]
+
 st.subheader("If you'd tailed every rec")
-record = tailed_record(df)
+record = tailed_record(df_windowed)
 h1, h2, h3 = st.columns(3)
 h1.metric("ROI", f"{record['roi']:+.1%}")
 h2.metric("Win rate", f"{record['win_pct']:.1%}")
@@ -153,7 +189,7 @@ dim = (
     )
     or "League"
 )
-grid_df = record_grid(df, dim)
+grid_df = record_grid(df_windowed, dim)
 if grid_df.empty:
     st.caption("No resolved recs in this slice.")
 else:
@@ -187,25 +223,8 @@ else:
         )
     else:
         st.caption(f"{pending_n} pending — graded nightly by `reflect`.")
-    slip_cols = [
-        c
-        for c in [
-            "saved_at",
-            "platform",
-            "play_type",
-            "headline",
-            "bet_size",
-            "model_ev",
-            "stake",
-            "status",
-        ]
-        if c in user_slips.columns
-    ]
-    st.dataframe(
-        user_slips.sort_values("saved_at", ascending=False)[slip_cols],
-        hide_index=True,
-        width="stretch",
-    )
+    tickets = build_tickets(user_slips.sort_values("saved_at", ascending=False))
+    render_tickets(tickets)
 
 trend_col, cal_col = st.columns(2)
 
@@ -274,14 +293,19 @@ if clv_summary["n"] == 0:
         "runs against archives that contain post-lock odds."
     )
 else:
+    coverage = clv_summary["n"] / len(history) if len(history) else 0.0
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Resolved legs (with close)", f"{clv_summary['n']:,}")
+    c1.metric("Close coverage", f"{coverage:.1%}", f"{clv_summary['n']:,} of {len(history):,} legs")
     c2.metric("Mean Market CLV", f"{clv_summary['market_clv_mean']:+.3f}")
     c3.metric(
         "Mean Model CLV",
         f"{clv_summary['model_clv_mean']:+.3f}" if pd.notna(clv_summary["model_clv_mean"]) else "—",
     )
     c4.metric("Beat-close rate", f"{clv_summary['frac_beat_close']:.1%}")
+    st.caption(
+        "Model CLV compares the model's win probability to the closing probability at "
+        "lock; Market CLV does the same for the market's own price."
+    )
 
     segments = clv_summary["segments"]
     if not segments.empty:
@@ -294,11 +318,12 @@ else:
             hide_index=True,
         )
 
-st.subheader("Strategy simulator")
+st.subheader("Strategy simulator — retrospective (hindsight)")
 st.caption(
     "If you'd staked the model's positive-edge bets under each strategy. Computed nightly — "
     "ROI / Sharpe / drawdown / win-rate over each look-back window."
 )
+st.caption("Forward paper-trading ledger lands with the sim-bettor-ledger lane.")
 render_profit_sim_summary(load_profit_sim_summary())
 with st.expander("Customize & run a live backtest"):
     render_profit_sim(history)
