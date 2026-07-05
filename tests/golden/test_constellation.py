@@ -18,11 +18,11 @@ import pandas as pd
 from sportstradamus.dashboard.components.constellation import (
     _INACTIVE_ALPHA,
     _SIZE_MAX,
-    _TEAM_PALETTE,
     constellation_figure,
 )
+from sportstradamus.dashboard.theme import GOLD, GRAY, team_colors
 
-_TEAMS = ("NYK", "SAS")  # sorted -> NYK anchors left (-x), SAS right (+x)
+_TEAMS = ("NYK", "SAS")  # sorted -> NYK anchors left (-x), SAS right (+x); real NBA codes
 
 
 def _row(i: int, key: str, k: float) -> dict:
@@ -33,6 +33,7 @@ def _row(i: int, key: str, k: float) -> dict:
         "Bet": bet,
         "Line": 10.5,
         "Game": "NYK/SAS",
+        "League": "NBA",
         "Team": _TEAMS[i % 2],
         "Kelly": k,
         "Win Prob": 0.6,
@@ -107,11 +108,41 @@ def test_active_full_color_candidate_desaturated_and_dim():
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.2))  # B = SAS candidate
     fig = constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.3)), pool)
     active, cand = _trace(fig, "active"), _trace(fig, "candidate")
+    nyk_primary = team_colors("NBA", "NYK")[0]
     assert active.marker.symbol == "star"
     assert active.marker.opacity == 1.0
-    assert list(active.marker.color) == [_TEAM_PALETTE[0]]  # full NYK fill
+    assert list(active.marker.color) == [nyk_primary]  # full NYK fill
     assert cand.marker.opacity == _INACTIVE_ALPHA
-    assert cand.marker.color[0] not in _TEAM_PALETTE  # blended toward gray, not a raw team color
+    assert cand.marker.color[0] != team_colors("NBA", "SAS")[0]  # blended toward gray, not raw
+
+
+def test_two_team_fixture_resolves_two_distinct_team_primaries():
+    legs = _slip("A|PTS|Over", "B|PTS|Over")  # A = NYK, B = SAS, both active
+    pool = _pool(("A|PTS|Over", 0.4), ("B|PTS|Over", 0.3))
+    fig = constellation_figure(legs, _corr(("A|PTS|Over", "B|PTS|Over", 0.5)), pool)
+    active = _trace(fig, "active")
+    colors = dict(zip((cd[0] for cd in active.customdata), active.marker.color, strict=True))
+    assert colors["A|PTS|Over"] == team_colors("NBA", "NYK")[0]
+    assert colors["B|PTS|Over"] == team_colors("NBA", "SAS")[0]
+    assert colors["A|PTS|Over"] != colors["B|PTS|Over"]
+
+
+def test_unknown_team_falls_back_to_gray():
+    # A team code absent from team_assets.json for the league resolves to GRAY,
+    # never a KeyError (theme.team_colors' own contract).
+    legs = [{**_row(0, "A|PTS|Over", 0.3), "Team": "ZZZ"}]
+    pool = pd.DataFrame([{**_row(0, "A|PTS|Over", 0.4), "Team": "ZZZ"}])
+    active = _trace(constellation_figure(legs, _corr(), pool), "active")
+    assert active.marker.color[0] == GRAY
+
+
+def test_no_node_marker_color_equals_gold():
+    # Team fills are NEVER gold (DESIGN §4a) — gold is reserved for correlation edges.
+    legs = _slip("A|PTS|Over", "B|PTS|Over")
+    pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3), ("B|PTS|Over", 0.2))
+    fig = constellation_figure(legs, _corr(("A|PTS|Over", "B|PTS|Over", 0.5)), pool)
+    for trace in _node_traces(fig):
+        assert all(c != GOLD for c in trace.marker.color)
 
 
 def test_active_and_candidate_stars_both_carry_labels():

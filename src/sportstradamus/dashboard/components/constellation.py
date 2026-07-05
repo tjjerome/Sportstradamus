@@ -22,7 +22,8 @@ index 0 — a plotly click turns into an add/remove), and each edge carries its 
 endpoint keys in ``meta`` so the component's JS can dim-in a star's incident ties on
 hover. It locks its own axes (no zoom/pan) — the builder hides the modebar. Layout is
 force-directed (networkx, always present via torch); plotly draws.
-Team fills are an on-token placeholder until ``team_assets.json`` lands (P8).
+Team fills read ``theme.team_colors(league, team)`` — real per-team primaries from
+``team_assets.json``, never gold (gold is the correlation-edge color).
 """
 
 from __future__ import annotations
@@ -34,13 +35,11 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from sportstradamus.dashboard.legs import corr_key
-from sportstradamus.dashboard.theme import GOLD, GRAY
+from sportstradamus.dashboard.theme import GOLD, GRAY, team_colors
 from sportstradamus.leg_schema import is_model_liked, leg_field
 
 # |ρ| floor to draw an edge or weight the layout — the story-menu edge floor.
 _MIN_EDGE_RHO = 0.05
-# Team fills (chartCategoricalColors[0]/[2]) — placeholder until team_assets.json (P8).
-_TEAM_PALETTE = ("#2E6BE6", "#E69F00")
 
 _NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 
@@ -139,10 +138,11 @@ def constellation_figure(
     keys = sorted(info)
     active = {corr_key(leg) for leg in slip_legs} & set(keys)
     game = _game_of(pool, slip_legs)
+    league = _league_of(pool, slip_legs)
     rho = _rho_map(corr, game)
 
     teams = _teams_of(game)
-    team_color = {team: _TEAM_PALETTE[i % len(_TEAM_PALETTE)] for i, team in enumerate(teams)}
+    team_color = {team: team_colors(league, team)[0] for team in teams}
     node_team = {k: info[k]["team"] for k in keys}
     edges = _edges(keys, rho)
     pos = _layout(keys, node_team, teams, [(a, b, abs(r)) for a, b, r in edges])
@@ -215,6 +215,26 @@ def _game_of(pool: pd.DataFrame | None, slip_legs: Sequence[Mapping]) -> str:
         game = leg.get("game")
         if game:
             return str(game)
+    return ""
+
+
+def _league_of(pool: pd.DataFrame | None, slip_legs: Sequence[Mapping]) -> str:
+    """The matchup's league, for ``theme.team_colors`` — same read shape as :func:`_game_of`.
+
+    A single ``Game`` key never spans two leagues (team codes don't collide across
+    leagues), so the first non-null value is always the right one. Reads the raw
+    ``pool["League"]`` column directly rather than bridging through ``leg_field``:
+    ``leg_schema._FIELD_TO_OFFER_COL`` deliberately excludes ``"league"`` (every
+    existing call site holds a canonical leg for that field, never a raw offer row).
+    """
+    if pool is not None and not pool.empty and "League" in pool.columns:
+        leagues = pool["League"].dropna()
+        if not leagues.empty:
+            return str(leagues.iloc[0])
+    for leg in slip_legs:
+        league = leg.get("league")
+        if league:
+            return str(league)
     return ""
 
 
