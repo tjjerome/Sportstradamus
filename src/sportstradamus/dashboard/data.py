@@ -17,6 +17,7 @@ from sportstradamus import data
 from sportstradamus.analysis import annotate_offer_outcomes
 from sportstradamus.dashboard.components.lab_filters import FILTER_AXES
 from sportstradamus.helpers.io import (
+    CALIBRATION_SUMMARY_PATH,
     CURRENT_GAME_CONTEXT_PATH,
     CURRENT_GAME_CORR_PATH,
     CURRENT_GAME_STORIES_PATH,
@@ -236,6 +237,21 @@ def load_profit_sim_summary() -> pd.DataFrame:
     ``reflect`` has not written it yet.
     """
     return _load_profit_sim_summary_cached(_mtime(PROFIT_SIM_SUMMARY_PATH))
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
+def _load_calibration_summary_cached(mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(CALIBRATION_SUMMARY_PATH)
+
+
+def load_calibration_summary() -> pd.DataFrame:
+    """Precomputed reliability (prob bin x alt-line split) grid from the latest ``reflect`` run.
+
+    Columns ``Alt Line, Bin, Predicted, Actual, N, ECE, ROI``. Receipts reads this
+    instead of re-binning history at page load; empty when ``reflect`` has not
+    written it yet.
+    """
+    return _load_calibration_summary_cached(_mtime(CALIBRATION_SUMMARY_PATH))
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading game context...")
