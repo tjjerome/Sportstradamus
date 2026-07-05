@@ -94,6 +94,7 @@ def _feature_frame(players, player_position=1):
             "Defense position": [0.1] * len(players),
             "Player position": [player_position] * len(players),
             "Moneyline": [0.5] * len(players),
+            "Home": [True] * len(players),
         },
         index=players,
     )
@@ -117,6 +118,7 @@ def test_full_parity_model_mirrors_book(monkeypatch):
     assert isinstance(rec["Player position"], (int, np.integer))
     assert rec["Player position"] == 1
     assert rec["Avg 5"] == pytest.approx(20.0 - _LINE)
+    assert rec["Home"] is True
     # Probability equals the devigged book over/under at the line.
     over = 1 - get_odds(_LINE, _BOOK_EV, "NegBin", _CV, step=1.0, gate=None)
     assert rec["Win Prob"] == pytest.approx(max(over, 1 - over))
@@ -136,6 +138,8 @@ def test_neutral_fill_when_no_feature_matrix(monkeypatch):
     assert rec["Player position"] == -1
     assert isinstance(rec["Player position"], (int, np.integer))
     assert np.isnan(rec["Avg 5"])
+    # Home defaults to False, not NaN (NaN is truthy and would render the row as host).
+    assert rec["Home"] is False
 
 
 def test_returns_empty_when_market_unknown(monkeypatch):

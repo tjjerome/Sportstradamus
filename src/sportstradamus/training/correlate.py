@@ -879,19 +879,50 @@ def _correlate_teams(matrix_for_corr):
     return same_team_blocks, opposing_blocks, per_team_obs
 
 
+def _market_summary(blocks: pd.Series, scope: str) -> pd.DataFrame:
+    """Aggregate (team, market_a, market_b) → R across teams to market-pair means.
+
+    Position prefixes strip (B1.AST → AST) so the pair grid is market-level;
+    n_teams lets the dashboard filter thin pairs honestly.
+    """
+    columns = ["market_a", "market_b", "rho_mean", "n_teams", "scope"]
+    if blocks.empty:
+        return pd.DataFrame(columns=columns)
+
+    df = blocks.rename("R").reset_index()
+    df.columns = ["team", "market_a", "market_b", "R"]
+    for market_col in ("market_a", "market_b"):
+        df[market_col] = df[market_col].str.split(".").str[-1]
+    grouped = df.groupby(["market_a", "market_b"])["R"]
+    out = grouped.mean().rename("rho_mean").reset_index()
+    out["n_teams"] = grouped.size().to_numpy()
+    out["scope"] = scope
+    return out[columns]
+
+
 def _write_corr_outputs(league, same_team_blocks, opposing_blocks):
     league_dir = pkg_resources.files(data) / "leagues" / league.lower()
     league_dir.mkdir(parents=True, exist_ok=True)
     same_path = league_dir / "corr_same_team.parquet"
     opposing_path = league_dir / "corr_opposing.parquet"
+    same_series = pd.concat(same_team_blocks) if same_team_blocks else pd.Series(dtype="float64")
+    opposing_series = pd.concat(opposing_blocks) if opposing_blocks else pd.Series(dtype="float64")
     if same_team_blocks:
-        pd.concat(same_team_blocks).to_frame("R").to_parquet(same_path, compression="zstd")
+        same_series.to_frame("R").to_parquet(same_path, compression="zstd")
     else:
         pd.DataFrame(columns=["R"]).to_parquet(same_path, compression="zstd")
     if opposing_blocks:
-        pd.concat(opposing_blocks).to_frame("R").to_parquet(opposing_path, compression="zstd")
+        opposing_series.to_frame("R").to_parquet(opposing_path, compression="zstd")
     else:
         pd.DataFrame(columns=["R"]).to_parquet(opposing_path, compression="zstd")
+
+    parts = [
+        _market_summary(same_series, "same_team"),
+        _market_summary(opposing_series, "opposing"),
+    ]
+    non_empty = [p for p in parts if not p.empty]
+    summary = pd.concat(non_empty, ignore_index=True) if non_empty else parts[0]
+    summary.to_parquet(league_dir / "corr_market_summary.parquet", compression="zstd")
 
 
 def _write_corr_metadata(league, matrix, per_team_obs, cache_key):

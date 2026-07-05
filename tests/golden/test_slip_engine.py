@@ -6,6 +6,9 @@ contract, and sizes a ``Decimal`` fractional-Kelly stake — the one sanctioned
 live calc. Exact equality is asserted only at two legs, where
 ``multivariate_normal.cdf`` is the closed-form bivariate normal (≥3 legs is
 randomized QMC, ~1e-4 jitter, so those assertions stay structural).
+
+``ev_lift`` and ``astrolabe_payload`` are thin reads on top of the same
+``score_slip`` path (spec §4.1, §4.4c), pinned below.
 """
 
 from __future__ import annotations
@@ -16,7 +19,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sportstradamus.dashboard.slip_engine import _block_diagonal_sig, score_slip
+from sportstradamus.dashboard.slip_engine import (
+    _block_diagonal_sig,
+    astrolabe_payload,
+    ev_lift,
+    score_slip,
+)
 from sportstradamus.prediction.parlay import (
     _parlay_payout_prob,
     _payout_curve_for,
@@ -138,3 +146,86 @@ def test_push_leg_routes_finite_ev():
     score = score_slip(legs, corr, platform="Underdog", bankroll=Decimal("1000"))
     assert np.isfinite(score.model_ev)
     assert score.bet_size == 3
+
+
+def test_ev_lift_matches_hand_built_pair_minus_solo():
+    """The reuse pin: ``ev_lift`` equals a hand-built pair/solo ``score_slip`` diff."""
+    focus = _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y")
+    candidate = _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y")
+    corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
+
+    lift = ev_lift(focus, candidate, corr, platform="Underdog", bankroll=0.0)
+
+    pair = score_slip([focus, candidate], corr, platform="Underdog", bankroll=Decimal("0"))
+    solo = score_slip([focus], corr, platform="Underdog", bankroll=Decimal("0"))
+    assert lift == pytest.approx(pair.model_ev - solo.model_ev, rel=1e-9)
+    # score_slip's single-leg early return hardcodes model_ev=0.0 (it's a parlay
+    # scorer), so the solo term is always zero and the lift equals the pair EV.
+    assert solo.model_ev == 0.0
+    assert lift == pytest.approx(pair.model_ev, rel=1e-9)
+
+
+def test_ev_lift_positive_rho_exceeds_zero_rho():
+    focus = _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y")
+    candidate = _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y")
+
+    positive_rho = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
+    zero_rho = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.0)])
+
+    lift_positive = ev_lift(focus, candidate, positive_rho, platform="Underdog", bankroll=0.0)
+    lift_zero = ev_lift(focus, candidate, zero_rho, platform="Underdog", bankroll=0.0)
+
+    assert lift_positive > lift_zero
+    # Zero-rho collapses to the independent-joint case: same lift as an empty
+    # corr slice and as a cross-game candidate (both default to rho=0).
+    lift_empty_corr = ev_lift(focus, candidate, _corr([]), platform="Underdog", bankroll=0.0)
+    assert lift_zero == pytest.approx(lift_empty_corr, rel=1e-9)
+
+
+def test_astrolabe_payload_shape_and_crowns():
+    focus = _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y")
+    candidate = _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y")
+    corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
+    score = score_slip([focus, candidate], corr, platform="Underdog", bankroll=Decimal("1000"))
+
+    payload = astrolabe_payload(score, nonce=3)
+
+    assert payload == {
+        "legs": 2,
+        "play_type": "Power",
+        "payout": pytest.approx(3.0),
+        "payout_approximate": False,
+        "win_corr": pytest.approx(score.joint_p),
+        "win_indep": pytest.approx(score.indep_p),
+        "ev": pytest.approx(score.model_ev - 1),
+        "kelly": pytest.approx((score.model_ev - 1) / (score.payout - 1)),
+        "crowns": {"win": 0.30, "ev": 0.12, "kelly": 0.03},
+        "nonce": 3,
+    }
+
+
+def test_astrolabe_payload_clamps_negative_kelly():
+    legs = [
+        _leg("A", "PTS", "Over", 20.5, 0.2, 1.0, "X/Y"),
+        _leg("B", "REB", "Over", 8.5, 0.2, 1.0, "X/Y"),
+    ]
+    score = score_slip(legs, _corr([]), platform="Underdog", bankroll=Decimal("1000"))
+    raw_kelly = (score.model_ev - 1) / (score.payout - 1)
+    assert raw_kelly < 0.0
+
+    payload = astrolabe_payload(score, nonce=1)
+    assert payload["kelly"] == 0.0
+
+
+def test_astrolabe_payload_sleeper_payout_approximate_passes_through():
+    legs = [
+        _leg("A", "PTS", "Over", 20.5, 0.6, 1.8, "X/Y"),
+        _leg("B", "REB", "Over", 8.5, 0.55, 2.0, "X/Y"),
+    ]
+    corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
+    score = score_slip(legs, corr, platform="Sleeper", bankroll=Decimal("1000"))
+    assert score.payout_approximate
+
+    payload = astrolabe_payload(score, nonce=9)
+    assert payload["payout_approximate"] is True
+    assert payload["play_type"] == "Sleeper"

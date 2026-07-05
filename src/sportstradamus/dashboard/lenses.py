@@ -45,8 +45,18 @@ def _consensus(df: pd.DataFrame) -> pd.DataFrame:
     return df[(df["Model EV"] > _EV_BREAK_EVEN) & (df["Market EV"] > _EV_BREAK_EVEN)]
 
 
+def _tonight(df: pd.DataFrame) -> pd.DataFrame:
+    """The soonest slate date in the frame — avoids wall-clock/timezone parsing
+    entirely and degrades gracefully when the board spans more than one date.
+    """
+    if "Date" not in df.columns:
+        return df
+    return df[df["Date"] == df["Date"].min()]
+
+
 LENSES: dict[str, Callable[[pd.DataFrame], pd.DataFrame]] = {
     "All": lambda df: df,
+    "Tonight": _tonight,
     "Sharp edges": _sharp,
     "Longshots": _longshots,
     "Contrarian": _contrarian,

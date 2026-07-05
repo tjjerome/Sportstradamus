@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P8 · Details tab bodies — Themed workbench (rev 3)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Cinzel:wght@500;600&family=Cormorant+Garamond:ital,wght@0,500;0,600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0E1117; --surface:#1A1D24; --text:#E6E9EF; --border:#2A2E37;
+    --primary:#2E6BE6; --link:#5B8DEF; --green:#1F9D55; --red:#E5484D;
+    --orange:#F5A524; --gray:#8A91A0; --gold:#C9A227;
+  }
+  *{box-sizing:border-box}
+  body{margin:0 auto;max-width:900px;background:var(--bg);color:var(--text);
+    font-family:'IBM Plex Sans',sans-serif;font-size:14px;line-height:1.5;padding:28px 24px 64px}
+  h1{font-size:21px;margin:0 0 4px;font-weight:700}
+  .sub{color:var(--gray);margin:0 0 8px;max-width:74ch}
+  .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+  .kicker{font-family:'Cinzel',serif;font-weight:600;letter-spacing:.24em;text-transform:uppercase;color:var(--gold)}
+  .goldrule{height:1px;border:0;background:linear-gradient(90deg,var(--gold),transparent)}
+  svg.ic{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-0.12em}
+  .badge{font-family:'IBM Plex Mono',monospace;padding:1px 7px;border-radius:3px;font-size:13px;border:1px solid;white-space:nowrap}
+  .badge.g{color:var(--green);border-color:var(--green)}
+  .btn{display:inline-flex;align-items:center;gap:5px;background:var(--primary);color:#fff;border:none;border-radius:4px;
+    padding:4px 10px;font-size:12px;font-family:inherit;cursor:pointer}
+  .btn.ghost{background:transparent;border:1px solid var(--border);color:var(--gray)}
+
+  .modalhead{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:12px 16px 10px;margin-bottom:6px}
+  .modalhead .top{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
+  .modalhead .name{font-size:19px;font-weight:700;margin:2px 0 1px}
+  .modalhead .facts{color:var(--gray);font-size:13px}
+
+  .tabpanel{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:0 16px 16px;margin:14px 0}
+  .tabbar{display:flex;gap:18px;border-bottom:1px solid var(--border);margin-bottom:2px}
+  .t{font-family:'Cinzel',serif;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--gray);padding:9px 0;position:relative}
+  .t.on{color:var(--gold)}.t.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--gold)}
+  .body{padding-top:14px}
+
+  .segwrap{display:inline-flex;border:1px solid var(--border);border-radius:4px;overflow:hidden;margin-bottom:12px}
+  .seg{background:transparent;color:var(--gray);border:none;padding:5px 13px;font-family:inherit;font-size:12px;cursor:pointer}
+  .seg.on{background:rgba(201,162,39,.13);color:var(--gold)}
+  .seg+.seg{border-left:1px solid var(--border)}
+
+  .chartwrap{background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:12px}
+  .legend{color:var(--gray);font-size:11.5px;margin-top:9px;display:flex;gap:16px;flex-wrap:wrap;font-family:'IBM Plex Mono',monospace}
+  .swline{display:inline-block;width:16px;height:0;border-top:2px solid;vertical-align:middle;margin-right:5px}
+
+  table{border-collapse:collapse;width:100%;font-size:13px}
+  thead th{background:var(--surface);text-align:left;color:var(--gray);font-weight:500;font-size:10.5px;
+    letter-spacing:.08em;text-transform:uppercase;padding:7px 10px;border-bottom:1px solid var(--border)}
+  thead th.r{text-align:right}
+  tbody td{padding:7px 10px;border-bottom:1px solid var(--border)}
+  tbody tr:nth-child(even){background:rgba(255,255,255,.015)}
+  .num{font-family:'IBM Plex Mono',monospace;text-align:right;font-variant-numeric:tabular-nums}
+  td.heat{font-family:'IBM Plex Mono',monospace;text-align:right;border-radius:3px}
+
+  .statrow{display:flex;align-items:center;gap:14px;padding:11px 0;border-top:1px solid var(--border)}
+  .statrow:first-child{border-top:0}
+  .statmeta{flex:0 0 220px;display:flex;align-items:center;gap:12px}
+  .gauge{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:2px;width:24px}
+  .gauge .g2{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--gray)}
+  .statname{font-size:12px;color:var(--gray);display:flex;align-items:center;gap:5px}
+  .statval{font-family:'IBM Plex Mono',monospace;font-size:22px;font-weight:500;line-height:1.05;margin-top:1px}
+  .spark{flex:1}
+  .infodot{width:13px;height:13px;border:1px solid var(--gray);border-radius:50%;color:var(--gray);font-size:9px;
+    display:inline-flex;align-items:center;justify-content:center;cursor:help}
+  .scalekey{display:flex;align-items:center;gap:8px;color:var(--gray);font-size:11px;margin-top:12px}
+  .scalebar{width:90px;height:8px;border-radius:4px;background:linear-gradient(0deg,#8A91A0,#A89150,#C9A227)}
+
+  .corrgroup{font-family:'Cinzel',serif;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold);margin:14px 0 2px}
+  .corrgroup:first-child{margin-top:0}
+  .corrrow{display:flex;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--border)}
+  .corrrow .desc{flex:1;min-width:0}.corrrow .desc small{color:var(--gray);display:block;font-size:11px}
+  .evlift{font-family:'IBM Plex Mono',monospace;color:var(--green);font-size:13px;flex:0 0 auto}
+  .note{color:var(--gray);font-size:12px;margin-top:8px}
+</style>
+</head>
+<body>
+
+<span class="kicker" style="font-size:10.5px">Sportstradamus &middot; Stage P8 &middot; Details</span>
+<h1>Details tab bodies — Themed workbench (rev 3)</h1>
+<p class="sub">Feedback applied. One tab shows at a time live; stacked here to scan together.</p>
+
+<div class="modalhead">
+  <div class="kicker" style="font-size:10px">◈ WNBA &middot; Underdog</div>
+  <div class="top">
+    <div><div class="name">A'ja Wilson &mdash; Points</div><div class="facts">Over 23.5 &middot; Las Vegas vs Indiana</div></div>
+    <span class="badge g">+11% edge</span>
+  </div>
+  <hr class="goldrule" style="margin:10px 0 0">
+  <div class="mono" style="color:var(--gray);font-size:11px;margin-top:8px">context strip: 88.2 team total (+3.1) &middot; 64% win prob &middot; Shootout &middot; DVPOA +9.0%</div>
+</div>
+
+<!-- HISTORY -->
+<div class="tabpanel">
+  <div class="tabbar"><span class="t on">History</span><span class="t">Model</span><span class="t">Comps</span><span class="t">Other</span><span class="t">Correlated</span></div>
+  <div class="body">
+    <div class="segwrap"><button class="seg on">All games</button><button class="seg">vs Indiana</button></div>
+    <div class="chartwrap">
+      <svg viewBox="0 0 460 164" width="100%" height="164" font-family="IBM Plex Mono">
+        <rect x="14"  y="40" width="30" height="98"  fill="#1F9D55"/>
+        <rect x="58"  y="74" width="30" height="64"  fill="#E5484D"/>
+        <rect x="102" y="30" width="30" height="108" fill="#1F9D55"/>
+        <rect x="146" y="22" width="30" height="116" fill="#1F9D55"/>
+        <rect x="190" y="66" width="30" height="72"  fill="#E5484D"/>
+        <rect x="234" y="18" width="30" height="120" fill="#1F9D55"/>
+        <rect x="278" y="34" width="30" height="104" fill="#1F9D55"/>
+        <rect x="322" y="70" width="30" height="68"  fill="#E5484D"/>
+        <rect x="366" y="26" width="30" height="112" fill="#1F9D55"/>
+        <rect x="410" y="14" width="30" height="124" fill="#1F9D55"/>
+        <!-- line drawn in FRONT of the bars, full opacity -->
+        <line x1="0" y1="58" x2="460" y2="58" stroke="#E6E9EF" stroke-width="1.75" stroke-dasharray="6 3"/>
+        <rect x="6" y="46" width="66" height="18" rx="3" fill="#1A1D24" stroke="#2A2E37"/>
+        <text x="14" y="59" fill="#C9A227" font-size="11" font-weight="500">line 23.5</text>
+        <!-- game-date xticks -->
+        <g fill="#8A91A0" font-size="8" text-anchor="middle">
+          <text x="29"  y="149">11/02</text><text x="29"  y="159">@ SEA</text>
+          <text x="73"  y="149">11/05</text><text x="73"  y="159">vs. DAL</text>
+          <text x="117" y="149">11/08</text><text x="117" y="159">@ PHX</text>
+          <text x="161" y="149">11/11</text><text x="161" y="159">vs. CON</text>
+          <text x="205" y="149">11/14</text><text x="205" y="159">@ NYL</text>
+          <text x="249" y="149">11/17</text><text x="249" y="159">vs. MIN</text>
+          <text x="293" y="149">11/20</text><text x="293" y="159">@ CHI</text>
+          <text x="337" y="149">11/23</text><text x="337" y="159">vs. ATL</text>
+          <text x="381" y="149">11/26</text><text x="381" y="159">@ WAS</text>
+          <text x="425" y="149">11/29</text><text x="425" y="159">vs. IND</text>
+        </g>
+      </svg>
+    </div>
+    <div class="legend"><span><span class="swline" style="border-color:#1F9D55"></span>over</span><span><span class="swline" style="border-color:#E5484D"></span>under</span></div>
+  </div>
+</div>
+
+<!-- MODEL — continuous -->
+<div class="tabpanel">
+  <div class="tabbar"><span class="t">History</span><span class="t on">Model</span><span class="t">Comps</span><span class="t">Other</span><span class="t">Correlated</span></div>
+  <div class="body">
+    <div class="chartwrap">
+      <svg viewBox="0 0 460 168" width="100%" height="168" font-family="IBM Plex Mono">
+        <defs>
+          <clipPath id="cL"><rect x="0" y="0" width="204" height="168"/></clipPath>
+          <clipPath id="cR"><rect x="204" y="0" width="256" height="168"/></clipPath>
+        </defs>
+        <!-- area split at the line: red below, green above -->
+        <path d="M12,150 C95,148 150,124 205,66 C232,38 258,34 284,58 C330,100 392,142 448,148 L448,150 L12,150 Z" fill="rgba(229,72,77,.22)" clip-path="url(#cL)"/>
+        <path d="M12,150 C95,148 150,124 205,66 C232,38 258,34 284,58 C330,100 392,142 448,148 L448,150 L12,150 Z" fill="rgba(31,157,85,.22)" clip-path="url(#cR)"/>
+        <path d="M12,150 C95,148 150,124 205,66 C232,38 258,34 284,58 C330,100 392,142 448,148" fill="none" stroke="#8A91A0" stroke-width="1.4"/>
+        <!-- book consensus (solid gray) + line (dashed white) -->
+        <line x1="192" y1="34" x2="192" y2="150" stroke="#8A91A0" stroke-width="1.5"/>
+        <line x1="204" y1="26" x2="204" y2="150" stroke="#E6E9EF" stroke-dasharray="5 3" stroke-opacity=".85"/>
+        <!-- model projection = mean (dot only) -->
+        <circle cx="256" cy="41" r="5.5" fill="#C9A227"/>
+        <!-- bare numbers -->
+        <text x="187" y="20" fill="#8A91A0" font-size="11" text-anchor="end">23.0</text>
+        <text x="209" y="20" fill="#E6E9EF" font-size="11">23.5</text>
+        <text x="266" y="45" fill="#C9A227" font-size="11">25.1</text>
+        <text x="352" y="54" fill="#1F9D55" font-size="12">P(over) 61%</text>
+      </svg>
+    </div>
+    <div class="legend">
+      <span><span class="swline" style="border-color:#E6E9EF;border-top-style:dashed"></span>line</span>
+      <span><span class="swline" style="border-color:#8A91A0"></span>book consensus</span>
+      <span style="color:var(--gold)"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#C9A227;margin-right:5px"></span>model projection</span>
+    </div>
+  </div>
+</div>
+
+<!-- MODEL — count -->
+<div class="tabpanel">
+  <div class="tabbar"><span class="t">History</span><span class="t on">Model</span><span class="t">Comps</span><span class="t">Other</span><span class="t">Correlated</span></div>
+  <div class="body">
+    <div class="chartwrap">
+      <svg viewBox="0 0 460 168" width="100%" height="168" font-family="IBM Plex Mono">
+        <!-- histogram bars, wide + nearly touching; ≥ line green, < line red -->
+        <rect x="5"   y="132" width="50" height="18" fill="#E5484D"/>
+        <rect x="60"  y="95"  width="50" height="55" fill="#E5484D"/>
+        <rect x="115" y="55"  width="50" height="95" fill="#E5484D"/>
+        <rect x="170" y="62"  width="50" height="88" fill="#1F9D55"/>
+        <rect x="225" y="90"  width="50" height="60" fill="#1F9D55"/>
+        <rect x="280" y="118" width="50" height="32" fill="#1F9D55"/>
+        <rect x="335" y="136" width="50" height="14" fill="#1F9D55"/>
+        <rect x="390" y="144" width="50" height="6"  fill="#1F9D55"/>
+        <g fill="#8A91A0" font-size="10" text-anchor="middle">
+          <text x="30" y="164">0</text><text x="85" y="164">1</text><text x="140" y="164">2</text><text x="195" y="164">3</text>
+          <text x="250" y="164">4</text><text x="305" y="164">5</text><text x="360" y="164">6</text><text x="415" y="164">7</text>
+        </g>
+        <!-- book consensus (solid gray) + line (dashed white) in front -->
+        <line x1="162" y1="26" x2="162" y2="150" stroke="#8A91A0" stroke-width="1.5"/>
+        <line x1="167" y1="20" x2="167" y2="150" stroke="#E6E9EF" stroke-dasharray="5 3" stroke-opacity=".85"/>
+        <!-- model projection = mean 2.9 (gold dot) -->
+        <circle cx="189" cy="52" r="5.5" fill="#C9A227"/>
+        <!-- bare numbers -->
+        <text x="157" y="18" fill="#8A91A0" font-size="11" text-anchor="end">2.4</text>
+        <text x="172" y="18" fill="#E6E9EF" font-size="11">2.5</text>
+        <text x="198" y="49" fill="#C9A227" font-size="11">2.9</text>
+        <text x="352" y="54" fill="#1F9D55" font-size="12">P(over) 58%</text>
+      </svg>
+    </div>
+    <div class="legend">
+      <span><span class="swline" style="border-color:#E6E9EF;border-top-style:dashed"></span>line</span>
+      <span><span class="swline" style="border-color:#8A91A0"></span>book consensus</span>
+      <span style="color:var(--gold)"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#C9A227;margin-right:5px"></span>model projection</span>
+    </div>
+  </div>
+</div>
+
+<!-- COMPS -->
+<div class="tabpanel">
+  <div class="tabbar"><span class="t">History</span><span class="t">Model</span><span class="t on">Comps</span><span class="t">Other</span><span class="t">Correlated</span></div>
+  <div class="body">
+    <table>
+      <thead><tr><th>Comp</th><th class="r">Games</th><th class="r">Avg vs IND</th><th class="r">vs their avg</th></tr></thead>
+      <tbody>
+        <tr><td>N. Ogwumike</td><td class="num">4</td><td class="num">21.8</td><td class="heat" style="background:rgba(61,114,214,.30)">+14%</td></tr>
+        <tr><td>B. Griner</td><td class="num">6</td><td class="num">19.2</td><td class="heat" style="background:rgba(61,114,214,.16)">+6%</td></tr>
+        <tr><td>A. Thomas</td><td class="num">3</td><td class="num">17.5</td><td class="heat" style="background:rgba(238,227,220,.10)">+1%</td></tr>
+        <tr><td>J. Jones</td><td class="num">5</td><td class="num">14.9</td><td class="heat" style="background:rgba(192,69,62,.26)">&minus;9%</td></tr>
+      </tbody>
+    </table>
+    <div class="note">Strongest comp first (KNN similarity). Right-aligned Plex Mono, zebra, diverging heatmap on the tails.</div>
+  </div>
+</div>
+
+<!-- OTHER -->
+<div class="tabpanel">
+  <div class="tabbar"><span class="t">History</span><span class="t">Model</span><span class="t">Comps</span><span class="t on">Other</span><span class="t">Correlated</span></div>
+  <div class="body">
+    <div class="statrow">
+      <div class="statmeta">
+        <div class="gauge"><svg viewBox="0 0 10 30" width="10" height="30"><rect x="2" y="2" width="6" height="26" rx="3" fill="#2A2E37"/><rect x="2" y="6.94" width="6" height="21.06" rx="3" fill="#C3A02E"/></svg><span class="g2">81</span></div>
+        <div><div class="statname">Minutes L10 <span class="infodot">i</span></div><div class="statval">34.2</div></div>
+      </div>
+      <div class="spark"><svg viewBox="0 0 260 40" width="100%" height="40"><polyline points="4,28 32,24 60,30 88,18 116,20 144,12 172,16 200,10 228,14 256,8" fill="none" stroke="#1F9D55" stroke-width="1.8"/></svg></div>
+    </div>
+    <div class="statrow">
+      <div class="statmeta">
+        <div class="gauge"><svg viewBox="0 0 10 30" width="10" height="30"><rect x="2" y="2" width="6" height="26" rx="3" fill="#2A2E37"/><rect x="2" y="11.62" width="6" height="16.38" rx="3" fill="#A89150"/></svg><span class="g2">63</span></div>
+        <div><div class="statname">True shooting % <span class="infodot">i</span></div><div class="statval">0.612</div></div>
+      </div>
+      <div class="spark"><svg viewBox="0 0 260 40" width="100%" height="40"><polyline points="4,22 32,26 60,20 88,24 116,16 144,18 172,12 200,15 228,10 256,13" fill="none" stroke="#1F9D55" stroke-width="1.8"/></svg></div>
+    </div>
+    <div class="statrow">
+      <div class="statmeta">
+        <div class="gauge"><svg viewBox="0 0 10 30" width="10" height="30"><rect x="2" y="2" width="6" height="26" rx="3" fill="#2A2E37"/><rect x="2" y="4.08" width="6" height="23.92" rx="3" fill="#C9A227"/></svg><span class="g2">92</span></div>
+        <div><div class="statname">Field-goal attempts <span class="infodot">i</span></div><div class="statval">18.5</div></div>
+      </div>
+      <div class="spark"><svg viewBox="0 0 260 40" width="100%" height="40"><polyline points="4,26 32,20 60,22 88,14 116,18 144,10 172,13 200,8 228,12 256,9" fill="none" stroke="#1F9D55" stroke-width="1.8"/></svg></div>
+    </div>
+    <div class="statrow">
+      <div class="statmeta">
+        <div class="gauge"><svg viewBox="0 0 10 30" width="10" height="30"><rect x="2" y="2" width="6" height="26" rx="3" fill="#2A2E37"/><rect x="2" y="20.46" width="6" height="7.54" rx="3" fill="#8A91A0"/></svg><span class="g2">29</span></div>
+        <div><div class="statname">Turnovers L10 <span class="infodot">i</span></div><div class="statval">2.1</div></div>
+      </div>
+      <div class="spark"><svg viewBox="0 0 260 40" width="100%" height="40"><polyline points="4,14 32,18 60,12 88,20 116,16 144,22 172,18 200,24 228,20 256,26" fill="none" stroke="#1F9D55" stroke-width="1.8"/></svg></div>
+    </div>
+    <div class="scalekey">percentile among same-position slate players <span class="scalebar"></span> low &rarr; high</div>
+  </div>
+</div>
+
+<!-- CORRELATED -->
+<div class="tabpanel">
+  <div class="tabbar"><span class="t">History</span><span class="t">Model</span><span class="t">Comps</span><span class="t">Other</span><span class="t on">Correlated</span></div>
+  <div class="body">
+    <div class="corrgroup">Same team — Las Vegas</div>
+    <div class="corrrow"><span class="desc"><b>J. Young</b> Over 2.5 3PM<small>same run, spacing opens up</small></span><span class="evlift">+4.2% EV</span><button class="btn ghost">View &rarr;</button><button class="btn"><svg class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>slip</button></div>
+    <div class="corrrow"><span class="desc"><b>Aces</b> Team Total Over 82.5<small>the thesis itself</small></span><span class="evlift">+3.1% EV</span><button class="btn ghost">View &rarr;</button><button class="btn"><svg class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>slip</button></div>
+    <div class="corrgroup">Opponent — Indiana</div>
+    <div class="corrrow"><span class="desc"><b>A. Boston</b> Over 18.5 Points<small>shootout lifts both sides</small></span><span class="evlift">+2.4% EV</span><button class="btn ghost">View &rarr;</button><button class="btn"><svg class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>slip</button></div>
+    <div class="note">EV lift = copula-scored parlay EV of {this pick + candidate} vs the pick alone; positive-lift legs only.
+    <b>Code note:</b> needs a pairwise 2-leg EV compute (precompute at prophecize or live).</div>
+  </div>
+</div>
+
+<script>
+const v0=fetch('/version.txt').then(r=>r.text()).catch(()=>'');
+setInterval(async()=>{try{const a=await v0;const b=await fetch('/version.txt?'+Date.now()).then(r=>r.text());if(a&&a!==b)location.reload()}catch(e){}},2000);
+</script>
+</body>
+</html>

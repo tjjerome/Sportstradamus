@@ -17,6 +17,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from sportstradamus.analysis import PROFIT_SIM_STRATEGIES, filter_bet_universe
+from sportstradamus.dashboard import theme
 from sportstradamus.dashboard.data import get_filtered_history, sport_filtered
 from sportstradamus.strategies.profit_sim import (
     N_MONTE_CARLO_DEFAULT,
@@ -231,7 +232,7 @@ def _render_pnl_drawdown(all_results: dict) -> None:
         x="date",
         y="daily_pnl",
         color=daily_pnl_agg["daily_pnl"].apply(lambda x: "Profit" if x >= 0 else "Loss"),
-        color_discrete_map={"Profit": "#2ecc71", "Loss": "#e74c3c"},
+        color_discrete_map={"Profit": theme.GREEN, "Loss": theme.RED},
         labels={"date": "Date", "daily_pnl": "Daily P&L ($)"},
     )
     fig_pnl.update_layout(height=400, showlegend=False)
@@ -246,7 +247,7 @@ def _render_pnl_drawdown(all_results: dict) -> None:
         x="date",
         y="Drawdown",
         labels={"date": "Date", "Drawdown": "Drawdown (%)"},
-        color_discrete_sequence=["#e74c3c"],
+        color_discrete_sequence=[theme.RED],
     )
     fig_dd.update_layout(height=350, yaxis_tickformat=".0%")
     st.plotly_chart(fig_dd, width="stretch")

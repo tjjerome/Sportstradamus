@@ -8,19 +8,33 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from sportstradamus.dashboard import theme
+from sportstradamus.dashboard.components.lab_filters import render_lab_filters
 from sportstradamus.dashboard.data import (
     TIMEFRAME_OPTIONS,
     format_ts,
+    load_corr_market_summary,
     load_history,
     load_parlays,
     load_resolve_meta,
+    load_stat_meta,
     render_banner,
     sidebar_filters,
     sport_filtered,
 )
+from sportstradamus.dashboard.surfaces.lab_correlations_charts import (
+    corr_heatmap,
+    worst_driver_pair,
+)
 
 st.title("Correlations & Parlays")
 render_banner("stats", "correlation lift, hit rates, parlay calibration")
+
+# Mounted for session consistency with the other two Lab pages (widget keys are
+# shared across all three); this page's frames are one-row-per-parlay or a
+# market-pair grid, neither of which fits apply_lab_filters' (league, market)
+# join contract, so no frame here is re-filtered through the selection.
+render_lab_filters(load_stat_meta(), collapsed=True)
 
 history = load_history()
 parlays = load_parlays()
@@ -76,6 +90,47 @@ if resolved.empty:
     st.info("No resolved parlays match the current filters.")
     st.stop()
 
+has_indep = "Indep P" in resolved.columns and resolved["Indep P"].notna().any()
+has_corr_p = "P" in resolved.columns and resolved["P"].notna().any()
+
+# Hoisted so the diagnostic callout below and "Correlation Value-Add" further
+# down share one boosted/not-boosted split instead of computing it twice.
+scatter_df = pd.DataFrame()
+above_line = pd.DataFrame()
+below_line = pd.DataFrame()
+if has_indep and has_corr_p:
+    scatter_df = resolved.dropna(subset=["Indep P", "P"]).copy()
+    scatter_df["Outcome"] = scatter_df["Hit"].map({1: "Hit", 0: "Miss"})
+    above_line = scatter_df.loc[scatter_df["P"] > scatter_df["Indep P"]]
+    below_line = scatter_df.loc[scatter_df["P"] <= scatter_df["Indep P"]]
+
+if len(above_line) > 0 and len(below_line) > 0:
+    boosted_rate = above_line["Hit"].mean()
+    unboosted_rate = below_line["Hit"].mean()
+    if boosted_rate < unboosted_rate:
+        driver = worst_driver_pair(above_line)
+        driver_note = (
+            f" {driver[0]} ↔ {driver[1]} is the most frequent driver pair — check it first."
+            if driver is not None
+            else ""
+        )
+        st.warning(
+            f"Correlation isn't paying here: boosted parlays hit {boosted_rate:.1%} vs "
+            f"{unboosted_rate:.1%} unboosted — the copula may be over-adjusting.{driver_note}"
+        )
+
+st.header("Stat-Pair Correlation Matrix")
+heatmap_leagues = sorted(parlays["League"].unique())
+heatmap_league = st.selectbox("League", heatmap_leagues, key="corr_heatmap_league")
+corr_summary = load_corr_market_summary(heatmap_league)
+
+if corr_summary.empty:
+    st.caption(f"No correlation matrices generated yet for {heatmap_league} — run `correlate`.")
+else:
+    scope = st.radio("Scope", ["same_team", "opposing"], horizontal=True, key="corr_heatmap_scope")
+    # Empirical-vs-model rho overlay is the §6.4 follow-up — not built here.
+    st.plotly_chart(corr_heatmap(corr_summary, heatmap_league, scope), width="stretch")
+
 st.download_button(
     "Export parlays (CSV)",
     resolved.drop(columns=["Corr Pairs", "Boost Pairs", "Leg Probs"], errors="ignore").to_csv(
@@ -87,19 +142,13 @@ st.download_button(
 
 st.header("Correlation Value-Add")
 
-has_indep = "Indep P" in resolved.columns and resolved["Indep P"].notna().any()
-has_corr_p = "P" in resolved.columns and resolved["P"].notna().any()
-
 if has_indep and has_corr_p:
-    scatter_df = resolved.dropna(subset=["Indep P", "P"]).copy()
-    scatter_df["Outcome"] = scatter_df["Hit"].map({1: "Hit", 0: "Miss"})
-
     fig_scatter = px.scatter(
         scatter_df,
         x="Indep P",
         y="P",
         color="Outcome",
-        color_discrete_map={"Hit": "#2ecc71", "Miss": "#e74c3c"},
+        color_discrete_map={"Hit": theme.GREEN, "Miss": theme.RED},
         opacity=0.5,
         labels={
             "Indep P": "Independent Probability (no correlation)",
@@ -118,9 +167,6 @@ if has_indep and has_corr_p:
     )
     fig_scatter.update_layout(height=500)
     st.plotly_chart(fig_scatter, width="stretch")
-
-    above_line = scatter_df.loc[scatter_df["P"] > scatter_df["Indep P"]]
-    below_line = scatter_df.loc[scatter_df["P"] <= scatter_df["Indep P"]]
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Correlation boosted parlays", f"{len(above_line)}")
@@ -212,9 +258,9 @@ for platform in sorted(resolved["Platform"].unique()):
             color="Outcome",
             barmode="stack",
             color_discrete_map={
-                "Hit All": "#2ecc71",
-                "Missed 1": "#f39c12",
-                "Missed 2+": "#e74c3c",
+                "Hit All": theme.GREEN,
+                "Missed 1": theme.ORANGE,
+                "Missed 2+": theme.RED,
             },
             labels={"Size": "Parlay Size", "Count": "Parlays"},
         )

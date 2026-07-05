@@ -18,6 +18,8 @@ Split into submodules by concern:
 * :mod:`sportstradamus.helpers.archive` — the ``Archive`` singleton that
   persists odds/EV data to a DuckDB archive, plus the ``clean_archive``
   housekeeping helper.
+* :mod:`sportstradamus.helpers.market_display` — ``market_display_name``, the
+  render-only market-slug-to-prose lookup.
 
 Every legacy ``from sportstradamus.helpers import <name>`` keeps working
 because this module re-exports the full public surface below. Prefer the
@@ -68,6 +70,7 @@ from sportstradamus.helpers.distributions import (
     skewnormal_loc_from_mean,
 )
 from sportstradamus.helpers.logging import JsonFormatter, get_logger
+from sportstradamus.helpers.market_display import market_display_name
 from sportstradamus.helpers.scraping import Scrape
 from sportstradamus.helpers.text import (
     get_mlb_pitchers,
@@ -84,6 +87,7 @@ from sportstradamus.helpers.text import (
 # (dashboard display, ``nightly.py`` profit-sim, parlay-search arithmetic in
 # ``correlation.py``) divide it back out.
 UNDERDOG_BOOST_BASELINE: float = 1.78
+
 
 __all__ = [
     "GATE_PUBLISH_THRESHOLD",
@@ -115,6 +119,7 @@ __all__ = [
     "get_push_prob",
     "get_trends",
     "hmean",
+    "market_display_name",
     "merge_dict",
     "name_map",
     "negbin_crps",

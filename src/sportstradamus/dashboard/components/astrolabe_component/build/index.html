@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>astrolabe</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600&family=IBM+Plex+Mono:wght@500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* Token values mirror DESIGN.md §2 — the iframe can't read .streamlit/config.toml,
+         so the surface/border/text/gold/green/red hexes are restated here verbatim. */
+      :root {
+        --bg: #0e1117;
+        --surface: #1a1d24;
+        --border: #2a2e37;
+        --text: #e6e9ef;
+        --gray: #8a91a0;
+        --gold: #c9a227;
+        --green: #1f9d55;
+        --red: #e5484d;
+        --primary: #2e6be6;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+        color: var(--text);
+        overflow: visible;
+      }
+      .slrow {
+        display: flex;
+        gap: 24px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .fixed {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        min-width: 118px;
+      }
+      .fixed .k {
+        font-family: "Cinzel", serif;
+        font-size: 9px;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+        color: var(--gray);
+      }
+      .fixed .v {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 23px;
+        font-weight: 600;
+        margin-top: 1px;
+      }
+      .readouts {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 176px;
+      }
+      .ro {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .ro .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        flex: 0 0 auto;
+      }
+      .ro .rk {
+        font-family: "Cinzel", serif;
+        font-size: 9.5px;
+        letter-spacing: 0.11em;
+        text-transform: uppercase;
+        color: var(--gray);
+        width: 44px;
+      }
+      .ro .rv {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .rstack {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.12;
+      }
+      .rindep {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 10.5px;
+        color: var(--gray);
+      }
+
+      /* Transition timings ported verbatim from p8-constellation-lab.html rev 5.
+         main.js sets these elements' transform/opacity/stroke inline every render;
+         a CSS transition on an element fires on any style change regardless of how
+         it's set, so this alone is what makes the dials sweep. main.js suppresses
+         the sweep only on the very first mount via the .no-anim override below —
+         after that, every value change (a real nonce change) eases; an incidental
+         rerun with the same nonce just re-applies identical values (no-op, no
+         visible motion either way). */
+      .grp {
+        transform-box: view-box;
+        transform-origin: 150px 150px;
+        transition: transform 0.9s cubic-bezier(0.2, 0.72, 0.15, 1);
+      }
+      .band,
+      .bandglow {
+        transform-box: view-box;
+        transform-origin: 150px 150px;
+        transition:
+          transform 0.9s cubic-bezier(0.2, 0.72, 0.15, 1),
+          stroke-dasharray 0.9s ease,
+          stroke 0.9s ease;
+      }
+      .gem {
+        transform-box: view-box;
+        transform-origin: 150px 150px;
+        transform: scale(0.66);
+        opacity: 0.55;
+        transition:
+          transform 0.9s cubic-bezier(0.2, 0.72, 0.15, 1),
+          opacity 0.9s ease;
+      }
+      .thread,
+      .halo,
+      .ovf-win,
+      .ovf-ev,
+      .evbead {
+        transition:
+          opacity 0.9s ease,
+          fill 0.9s ease;
+      }
+      /* The astrolabe only ever mounts over a real (already-in-progress) slip, so
+         it always reads as the mockup's "selected/strong" pose for the parts that
+         pose toggled in the demo but this task doesn't name as a JS-driven readout
+         (thread/halo brightness) -- fixed here rather than invented a formula for. */
+      .thread {
+        opacity: 0.65;
+      }
+      .halo {
+        opacity: 0.5;
+      }
+      /* First-mount override: main.js adds this for one frame so the initial pose
+         paints without a sweep-in, then removes it before any later render. */
+      #astro.no-anim,
+      #astro.no-anim * {
+        transition: none !important;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition: none !important;
+        }
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        @keyframes tw {
+          0%,
+          100% {
+            opacity: 0.2;
+          }
+          50% {
+            opacity: 0.8;
+          }
+        }
+        .spk {
+          animation: tw 4s ease-in-out infinite;
+        }
+        .spk:nth-child(2n) {
+          animation-duration: 5.4s;
+        }
+        .spk:nth-child(3n) {
+          animation-duration: 3.3s;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="slrow">
+      <div class="fixed">
+        <div><div class="k">Legs</div><div class="v" id="ro-legs">—</div></div>
+        <div><div class="k">Payout</div><div class="v" id="ro-pay">—</div></div>
+      </div>
+
+      <div id="astro">
+        <svg viewBox="0 0 300 300" width="272" height="272">
+          <defs>
+            <radialGradient id="core" cx="42%" cy="36%" r="66%">
+              <stop offset="0" stop-color="#fff" />
+              <stop offset=".4" stop-color="var(--gold)" />
+              <stop offset="1" stop-color="#6f560f" />
+            </radialGradient>
+            <radialGradient id="orb" cx="40%" cy="35%" r="65%">
+              <stop offset="0" stop-color="#fff" />
+              <stop offset=".45" stop-color="#8fb4ff" />
+              <stop offset="1" stop-color="#274a86" />
+            </radialGradient>
+            <radialGradient id="orbdim" cx="40%" cy="35%" r="65%">
+              <stop offset="0" stop-color="#c9cfda" />
+              <stop offset=".5" stop-color="#7f8794" />
+              <stop offset="1" stop-color="#3a4150" />
+            </radialGradient>
+            <linearGradient id="bandGreen" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#eafff2" />
+              <stop offset=".5" stop-color="#1F9D55" />
+              <stop offset="1" stop-color="#C9A227" />
+            </linearGradient>
+            <linearGradient id="bandRed" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#ffd9da" />
+              <stop offset=".5" stop-color="#E5484D" />
+              <stop offset="1" stop-color="#C9A227" />
+            </linearGradient>
+            <filter id="soft" x="-80%" y="-80%" width="260%" height="260%">
+              <feGaussianBlur stdDeviation="6" />
+            </filter>
+            <filter id="glowsm" x="-120%" y="-120%" width="340%" height="340%">
+              <feGaussianBlur stdDeviation="2.3" />
+            </filter>
+          </defs>
+
+          <!-- engraved bezel (decorative engraving only, no data binding) -->
+          <circle cx="150" cy="150" r="130" fill="none" stroke="var(--gold)" stroke-width="1" opacity=".1" />
+          <circle cx="150" cy="150" r="124" fill="none" stroke="var(--gold)" stroke-width="1" opacity=".2" />
+          <circle
+            cx="150"
+            cy="150"
+            r="124"
+            fill="none"
+            stroke="var(--gold)"
+            stroke-width="6"
+            stroke-dasharray="1 7.4"
+            opacity=".28"
+          />
+          <g stroke="var(--gold)" stroke-width="1.4" opacity=".55">
+            <line x1="150" y1="20" x2="150" y2="32" />
+            <line x1="150" y1="268" x2="150" y2="280" />
+            <line x1="20" y1="150" x2="32" y2="150" />
+            <line x1="268" y1="150" x2="280" y2="150" />
+            <line x1="58" y1="58" x2="66" y2="66" />
+            <line x1="242" y1="58" x2="234" y2="66" />
+            <line x1="58" y1="242" x2="66" y2="234" />
+            <line x1="242" y1="242" x2="234" y2="234" />
+          </g>
+          <g fill="#cfd6e2">
+            <path class="spk" d="M96 96 l.9 3 3 .9 -3 .9 -.9 3 -.9-3 -3-.9 3-.9z" opacity=".5" />
+            <path class="spk" d="M212 108 l.8 2.6 2.6 .8 -2.6 .8 -.8 2.6 -.8-2.6 -2.6-.8 2.6-.8z" opacity=".45" />
+            <path class="spk" d="M120 214 l.8 2.6 2.6 .8 -2.6 .8 -.8 2.6 -.8-2.6 -2.6-.8 2.6-.8z" opacity=".4" />
+            <circle class="spk" cx="196" cy="206" r="1.1" opacity=".5" />
+          </g>
+
+          <!-- win orbital r=112 -->
+          <circle cx="150" cy="150" r="112" fill="none" stroke="var(--gold)" stroke-width="1" opacity=".15" />
+          <circle class="ovf-win" cx="150" cy="150" r="112" fill="none" stroke="var(--gold)" stroke-width="3" filter="url(#soft)" opacity="0" />
+          <text x="150" y="16" fill="var(--gold)" font-family="Cinzel" font-size="8" letter-spacing="1.6" text-anchor="middle" opacity=".8">CROWN</text>
+
+          <!-- EV orbital r=74 -->
+          <circle cx="150" cy="150" r="74" fill="none" stroke="var(--gold)" stroke-width="1" opacity=".13" />
+          <circle class="ovf-ev" cx="150" cy="150" r="74" fill="none" stroke="var(--gold)" stroke-width="3" filter="url(#soft)" opacity="0" />
+
+          <!-- crown reticle (fixed target, decorative) -->
+          <g opacity=".85">
+            <path d="M139 30 a11 11 0 0 1 22 0" fill="none" stroke="var(--gold)" stroke-width="1.6" />
+            <path
+              d="M150 22 l1.1 3.4 3.6 0 -2.9 2.2 1.1 3.4 -2.9-2.1 -2.9 2.1 1.1-3.4 -2.9-2.2 3.6 0z"
+              fill="var(--gold)"
+            />
+          </g>
+
+          <!-- Kelly halo -->
+          <circle class="halo" cx="150" cy="150" r="30" fill="var(--gold)" filter="url(#soft)" opacity="0" />
+
+          <!-- lift = arc between the two win dots; green if corr>indep, red otherwise -->
+          <circle
+            class="bandglow"
+            cx="150"
+            cy="150"
+            r="112"
+            pathLength="360"
+            fill="none"
+            stroke-width="8"
+            stroke-linecap="round"
+            filter="url(#soft)"
+          />
+          <circle class="band" cx="150" cy="150" r="112" pathLength="360" fill="none" stroke-width="5" stroke-linecap="round" />
+
+          <!-- correlated win (blue) + thread to the core; thread rotates with the dot
+               since it lives inside the same rotating <g> -->
+          <g class="grp wincorr">
+            <path class="thread" d="M150 38 Q137 94 150 150" fill="none" stroke="var(--gold)" stroke-width="1.6" filter="url(#glowsm)" />
+            <circle cx="150" cy="38" r="12" fill="url(#orb)" filter="url(#soft)" opacity=".55" />
+            <circle cx="150" cy="38" r="7" fill="url(#orb)" />
+            <circle cx="148.5" cy="36.5" r="2" fill="#fff" opacity=".9" />
+          </g>
+          <!-- independent win (gray) -->
+          <g class="grp winindep">
+            <circle cx="150" cy="38" r="9" fill="url(#orbdim)" filter="url(#glowsm)" opacity=".5" />
+            <circle cx="150" cy="38" r="5.2" fill="url(#orbdim)" />
+          </g>
+
+          <!-- EV -->
+          <g class="grp ev">
+            <path class="thread" d="M150 76 Q140 113 150 150" fill="none" stroke="var(--gold)" stroke-width="1.6" filter="url(#glowsm)" />
+            <circle class="evbead" cx="150" cy="76" r="11" filter="url(#soft)" opacity=".5" />
+            <circle class="evbead" cx="150" cy="76" r="6.4" />
+            <circle cx="148.6" cy="74.6" r="1.9" fill="#fff" opacity=".85" />
+          </g>
+
+          <!-- Kelly core gem -->
+          <g class="gem">
+            <circle cx="150" cy="150" r="26" fill="none" stroke="var(--gold)" stroke-width="1" opacity=".4" />
+            <circle cx="150" cy="150" r="19" fill="var(--gold)" filter="url(#soft)" opacity=".5" />
+            <circle cx="150" cy="150" r="15" fill="url(#core)" />
+            <circle cx="146" cy="145" r="4.5" fill="#fff" opacity=".9" />
+          </g>
+        </svg>
+      </div>
+
+      <div class="readouts">
+        <div class="ro">
+          <span class="dot" style="background: #8fb4ff"></span><span class="rk">Win</span>
+          <span class="rstack"
+            ><span class="rv" id="ro-win">—</span><span class="rindep">indep <span id="ro-indep">—</span></span></span
+          >
+        </div>
+        <div class="ro">
+          <span class="dot" style="background: var(--gold)"></span><span class="rk">Lift</span
+          ><span class="rv" id="ro-lift">—</span>
+        </div>
+        <div class="ro">
+          <span class="dot" style="background: var(--green)"></span><span class="rk">EV</span
+          ><span class="rv" id="ro-ev">—</span>
+        </div>
+        <div class="ro">
+          <span class="dot" style="background: var(--gold)"></span><span class="rk">Kelly</span
+          ><span class="rv" id="ro-kelly">—</span>
+        </div>
+      </div>
+    </div>
+    <script src="./main.js"></script>
+  </body>
+</html>

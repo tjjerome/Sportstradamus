@@ -16,8 +16,19 @@ import pandas as pd
 import pytest
 
 from sportstradamus.dashboard import theme
-from sportstradamus.dashboard.columns import CONSENSUS_EDGE, MODEL_EDGE, add_edges
-from sportstradamus.dashboard.components.grid import _HEAT_TEXT, build_themed_grid_options
+from sportstradamus.dashboard.columns import (
+    CONSENSUS_EDGE,
+    LABELS,
+    MODEL_EDGE,
+    add_edges,
+    add_market_display,
+    add_match_column,
+)
+from sportstradamus.dashboard.components.grid import (
+    _HEAT_TEXT,
+    _HOVER_CSS,
+    build_themed_grid_options,
+)
 from sportstradamus.dashboard.lenses import LENSES, apply_lens
 
 _HEX = re.compile(r"#[0-9A-Fa-f]{6}")
@@ -108,6 +119,7 @@ def test_apply_lens_each_narrows() -> None:
             "Model EV": [1.20, 0.95, 1.05, 1.40, 1.01],
             "Market EV": [1.02, 1.00, 1.05, 0.90, 0.98],
             "Boost": [1.0, 1.0, 1.0, 3.0, 1.0],
+            "Date": ["2026-07-04", "2026-07-04", "2026-07-05", "2026-07-04", "2026-07-05"],
         }
     )
     assert apply_lens(df, "All").equals(df)
@@ -121,12 +133,20 @@ def test_apply_lens_each_narrows() -> None:
     # Consensus = both the model and the book score it over break-even.
     assert set(apply_lens(df, "Contrarian").index) == {3, 4}
     assert set(apply_lens(df, "Consensus").index) == {0, 2}
+    # Tonight = the soonest slate date present, so it degrades without wall-clock/timezone
+    # parsing — here the minimum Date is 2026-07-04.
+    assert set(apply_lens(df, "Tonight").index) == {0, 1, 3}
 
 
 def test_apply_lens_missing_cols_unchanged() -> None:
     df = pd.DataFrame({"Model EV": [1.2, 1.0]})
     assert apply_lens(df, "Sharp edges").equals(df)
     assert apply_lens(df, "nonsense-lens").equals(df)
+
+
+def test_tonight_lens_missing_date_col_unchanged() -> None:
+    df = pd.DataFrame({"Model EV": [1.2, 1.0], "Market EV": [1.0, 1.0], "Boost": [1.0, 1.0]})
+    assert apply_lens(df, "Tonight").equals(df)
 
 
 def test_add_edges_are_ev_minus_one() -> None:
@@ -139,3 +159,206 @@ def test_add_edges_are_ev_minus_one() -> None:
     assert CONSENSUS_EDGE not in add_edges(df.drop(columns=["Market EV"])).columns
     assert CONSENSUS_EDGE in add_edges(df.drop(columns=["Model EV"])).columns
     assert MODEL_EDGE not in add_edges(df.drop(columns=["Model EV"])).columns
+
+
+def test_add_match_column_player_team_first() -> None:
+    df = pd.DataFrame(
+        {
+            "Team": ["LVA", "NYK"],
+            "Opponent": ["IND", "SAS"],
+            "Home": [True, False],
+        }
+    )
+    out = add_match_column(df)
+    assert out["Match"].tolist() == ["LVA v IND", "NYK @ SAS"]
+
+
+def test_add_match_column_missing_home_defaults_to_away() -> None:
+    # current_offers.parquet snapshots predating the upstream Home passthrough
+    # fix lack the column entirely; must degrade to "@", not crash.
+    df = pd.DataFrame({"Team": ["LVA", "NYK"], "Opponent": ["IND", "SAS"]})
+    out = add_match_column(df)
+    assert out["Match"].tolist() == ["LVA @ IND", "NYK @ SAS"]
+
+
+def test_add_market_display_keeps_slug_column() -> None:
+    df = pd.DataFrame({"League": ["NBA", "NFL"], "Market": ["PTS", "qb-yards"]})
+    out = add_market_display(df)
+    assert "Market" in out.columns and out["Market"].tolist() == ["PTS", "qb-yards"]
+    assert "Market Display" in out.columns
+    # An unmapped slug falls back to itself (helpers.market_display_name's own contract).
+
+
+def test_arrow_col_adds_cellrenderer_and_hidden_cols_hide() -> None:
+    df = pd.DataFrame({"Line": [23.5, 8.5], "Bet": ["Over", "Under"], "Market": ["PTS", "AST"]})
+    options = build_themed_grid_options(
+        df, numeric_cols=["Line"], arrow_col="Line", hidden_cols=["Bet", "Market"]
+    )
+    defs = _column_defs(options)
+    assert hasattr(defs["Line"]["cellRenderer"], "js_code")
+    assert "Bet" in defs["Line"]["cellRenderer"].js_code
+    assert defs["Bet"]["hide"] is True
+    assert defs["Market"]["hide"] is True
+
+
+def test_arrow_col_noop_without_bet_column() -> None:
+    df = pd.DataFrame({"Line": [23.5, 8.5]})
+    options = build_themed_grid_options(df, numeric_cols=["Line"], arrow_col="Line")
+    defs = _column_defs(options)
+    assert "cellRenderer" not in defs["Line"]
+    assert "Bet" not in defs
+
+
+def test_hover_css_is_gold_rail_client_side() -> None:
+    assert _HOVER_CSS[".ag-row-hover"]["box-shadow"] == "inset 3px 0 0 #C9A227 !important"
+    assert _HOVER_CSS[".ag-row-hover"]["background-color"] == "rgba(201,162,39,.06) !important"
+
+
+def test_flag_col_adds_get_row_style_jscode() -> None:
+    """Lab Diagnostics' amber rail (P8 Task B4): a row-conditional style needs AG Grid's
+    ``getRowStyle`` callback, since the existing ``rowStyle`` dict is static/uniform.
+    """
+    df = pd.DataFrame({"Market": ["A", "B"], "BSS": [-0.02, 0.03]})
+    options = build_themed_grid_options(df, numeric_cols=["BSS"], flag_col="BSS", flag_below=0.0)
+    assert hasattr(options["getRowStyle"], "js_code")
+    assert theme.ORANGE in options["getRowStyle"].js_code
+    assert "boxShadow" in options["getRowStyle"].js_code
+
+
+def test_flag_col_omitted_by_default() -> None:
+    df = pd.DataFrame({"Market": ["A", "B"], "BSS": [-0.02, 0.03]})
+    options = build_themed_grid_options(df, numeric_cols=["BSS"])
+    assert "getRowStyle" not in options
+
+
+def test_rail_col_adds_get_row_style_jscode_for_each_mapped_value() -> None:
+    """Gate matrix's 3-state rail (P8 Task B5): a categorical string column, unlike
+    ``flag_col``'s numeric threshold — needs its own ``getRowStyle`` keyed off a
+    precomputed ``rail`` value rather than a live comparison.
+    """
+    df = pd.DataFrame({"Market": ["A", "B", "C"], "rail": ["amber", "red", "none"]})
+    options = build_themed_grid_options(
+        df,
+        numeric_cols=[],
+        rail_col="rail",
+        rail_colors={"amber": theme.ORANGE, "red": theme.RED},
+    )
+    assert hasattr(options["getRowStyle"], "js_code")
+    assert theme.ORANGE in options["getRowStyle"].js_code
+    assert theme.RED in options["getRowStyle"].js_code
+    assert "boxShadow" in options["getRowStyle"].js_code
+
+
+def test_rail_col_survives_as_row_data_when_also_hidden() -> None:
+    """A ``hide``-configured column still rides along in AG Grid's row data (only its own
+    visible grid column is suppressed) — ``getRowStyle`` reads ``params.data[rail_col]``
+    from that row data, so a caller that both hides ``rail`` (it's not meant to display)
+    and uses it as ``rail_col`` must not lose the value the callback depends on. Regression
+    for a real P8 Task B5 bug: an earlier ``gate_matrix.render_gate_matrix`` dropped the
+    ``rail`` column from the frame entirely before calling ``AgGrid``, so the rail never
+    painted despite ``getRowStyle`` being wired correctly — `hide=True` keeps the column
+    (and its data) present, unlike dropping it from the DataFrame outright.
+    """
+    df = pd.DataFrame({"Market": ["A", "B"], "rail": ["amber", "none"]})
+    options = build_themed_grid_options(
+        df,
+        numeric_cols=[],
+        hidden_cols=["rail"],
+        rail_col="rail",
+        rail_colors={"amber": theme.ORANGE},
+    )
+    defs = _column_defs(options)
+    assert defs["rail"]["hide"] is True
+    assert hasattr(options["getRowStyle"], "js_code")
+    assert theme.ORANGE in options["getRowStyle"].js_code
+
+
+def test_rail_col_omitted_by_default() -> None:
+    df = pd.DataFrame({"Market": ["A", "B"], "rail": ["amber", "none"]})
+    options = build_themed_grid_options(df, numeric_cols=[])
+    assert "getRowStyle" not in options
+
+
+def test_glyph_cols_color_pass_fail_glyphs_green_red() -> None:
+    """Gate matrix's ●/○ pass/fail glyphs (P8 Task B5) get a boolean-keyed cellStyle —
+    green for the pass glyph, red for the fail glyph — never the gold accent, since
+    this is a data mark (DESIGN §4a binds gold to decoration/interactive-highlight only).
+    """
+    df = pd.DataFrame({"g1_pass": ["●", "○"], "g2_pass": ["○", "●"]})
+    options = build_themed_grid_options(
+        df,
+        numeric_cols=[],
+        glyph_cols=["g1_pass", "g2_pass"],
+        glyph_colors={"●": theme.GREEN, "○": theme.RED},
+    )
+    defs = _column_defs(options)
+    for col in ("g1_pass", "g2_pass"):
+        style = _cellstyle_text(defs[col]["cellStyle"])
+        assert theme.GREEN in style
+        assert theme.RED in style
+        assert theme.GOLD not in style
+
+
+def test_glyph_cols_noop_without_kwarg() -> None:
+    df = pd.DataFrame({"g1_pass": ["●", "○"]})
+    options = build_themed_grid_options(df, numeric_cols=[])
+    defs = _column_defs(options)
+    assert "cellStyle" not in defs["g1_pass"]
+
+
+def test_market_display_labels_back_to_market_header() -> None:
+    """Market Display carries the slug's prose label but the grid header reads "Market"
+    (mockup ``docs/mockups/p8-board.html:104``) — columns.LABELS renames it back, same
+    mechanism as Consensus Edge -> Cons Edge and Win Prob -> Win %.
+    """
+    assert LABELS["Market Display"] == "Market"
+    df = pd.DataFrame({"Market Display": ["Points", "Assists"]}).rename(columns=LABELS)
+    options = build_themed_grid_options(df, numeric_cols=[])
+    defs = _column_defs(options)
+    assert "Market" in defs and "Market Display" not in defs
+
+
+def test_board_grid_omits_team_opponent_kelly_date() -> None:
+    """Board 14->10: Team/Opponent/Bet/Kelly/Date must never resurface as displayed
+    grid columns — Match/Market/Platform/League already cover what a viewer needs
+    (Tonight lens covers the recency Date carried). Mirrors surfaces/board.py's own
+    MAIN_COLS + hidden-cols contract without executing the Streamlit script (importing
+    board.py runs the whole page against real snapshot data).
+    """
+    main_cols = [
+        "League",
+        "Match",
+        "Player",
+        "Market Display",
+        "Line",
+        "Boost",
+        "Win Prob",
+        "Model Edge",
+        "Consensus Edge",
+        "Platform",
+    ]
+    df = pd.DataFrame(
+        {
+            **{c: ["x", "y"] for c in main_cols},
+            "Bet": ["Over", "Under"],
+            "Market": ["PTS", "AST"],
+            # Columns that must NOT survive into display_cols even if present upstream.
+            "Team": ["NYK", "LVA"],
+            "Opponent": ["SAS", "IND"],
+            "Kelly": [0.1, 0.2],
+            "Date": ["2026-07-04", "2026-07-05"],
+        }
+    )
+    display_cols = [c for c in [*main_cols, "Bet", "Market"] if c in df.columns]
+    grid_df = df[display_cols].rename(columns={"Market": "Market Slug"})
+    grid_df = grid_df.rename(columns=LABELS)
+    options = build_themed_grid_options(
+        grid_df,
+        numeric_cols=["Line", "Boost"],
+        arrow_col="Line",
+        hidden_cols=["Bet", "Market Slug"],
+    )
+    defs = _column_defs(options)
+    for dropped in ("Team", "Opponent", "Kelly", "Date"):
+        assert dropped not in defs, f"{dropped} leaked into the Board grid's columnDefs"
+    assert "Match" in defs and "Market" in defs

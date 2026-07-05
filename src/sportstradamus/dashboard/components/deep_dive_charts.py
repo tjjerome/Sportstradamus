@@ -7,7 +7,7 @@ import streamlit as st
 from scipy import stats
 
 from sportstradamus.dashboard.data import GAMELOG_SCHEMA, load_gamelog
-from sportstradamus.dashboard.theme import GOLD, GRAY
+from sportstradamus.dashboard.theme import GOLD, GRAY, GREEN, RED
 
 # Distribution families, mirrored from the prediction pipeline.
 _CONTINUOUS = ("Gamma", "ZAGamma", "SkewNormal")
@@ -22,21 +22,18 @@ DIST_PARAM_COLS = {
     "Gate": "gate",
 }
 
-# Correlation-strength badge thresholds: a leg whose multiplier on the base edge
-# clears these earns the Strong / Moderate badge in the offer-detail view.
-_CORR_STRONG_MULT = 1.25
-_CORR_MODERATE_MULT = 1.1
-
 
 def history_chart(df: pd.DataFrame, line: float) -> alt.Chart:
-    """Bar chart of recent games with a dotted betting-line rule.
+    """Bar chart of recent games with a dashed betting-line rule and gold line tag.
 
     ``df`` must have columns ``Label`` (ordered x-axis string),
     ``StatValue`` (y), and ``Hit`` (bool).  The most-recent game should be
-    last so the bars read left-to-right chronologically.
+    last so the bars read left-to-right chronologically.  Bars over the line
+    read green, under it red (``Hit`` is ``StatValue >= line``); the white
+    dashed rule sits in front, gold-tagged with its value.
     """
     df = df.copy()
-    df["color"] = np.where(df["Hit"], "Hit", "Miss")
+    df["color"] = np.where(df["Hit"], "Over", "Under")
     bars = (
         alt.Chart(df)
         .mark_bar()
@@ -45,7 +42,7 @@ def history_chart(df: pd.DataFrame, line: float) -> alt.Chart:
             y=alt.Y("StatValue:Q", title=""),
             color=alt.Color(
                 "color:N",
-                scale=alt.Scale(domain=["Hit", "Miss"], range=["#4CAF50", "#F44336"]),
+                scale=alt.Scale(domain=["Over", "Under"], range=[GREEN, RED]),
                 legend=None,
             ),
             tooltip=["Label:N", "StatValue:Q"],
@@ -56,7 +53,16 @@ def history_chart(df: pd.DataFrame, line: float) -> alt.Chart:
         .mark_rule(strokeDash=[6, 3], color="#FFFFFF", strokeWidth=1.5)
         .encode(y="Line:Q")
     )
-    return bars + rule
+    # Gold "line {x}" callout anchored to the leftmost bar at the line's height.
+    tag_df = pd.DataFrame(
+        {"Label": [df["Label"].iloc[0]], "Line": [line], "tag": [f"line {line:.10g}"]}
+    )
+    tag = (
+        alt.Chart(tag_df)
+        .mark_text(align="left", baseline="bottom", dx=-14, dy=-3, color=GOLD, fontWeight="bold")
+        .encode(x=alt.X("Label:N", sort=None), y="Line:Q", text="tag:N")
+    )
+    return bars + rule + tag
 
 
 def _continuous_curve(dist: str, ev: float, std: float, params: dict):
@@ -160,10 +166,12 @@ def distribution_chart(
     projection: float | None = None,
     consensus_line: float | None = None,
 ) -> alt.Chart:
+    # Over green / under red keys off position relative to the line, so the color
+    # legend is redundant chart junk (mockup rev 3) — drop it, keep the mass split.
     color_enc = alt.Color(
         "Side:N",
-        scale=alt.Scale(domain=["Over", "Under"], range=["#2196F3", "#FF7043"]),
-        legend=alt.Legend(orient="top"),
+        scale=alt.Scale(domain=["Over", "Under"], range=[GREEN, RED]),
+        legend=None,
     )
     if is_continuous:
         x_enc = alt.X("x:Q", title=market)
@@ -296,12 +304,3 @@ def sparkline(series: list[float], *, height: int = 44) -> alt.Chart:
         .encode(x=alt.X("i:Q", axis=None), y=alt.Y("v:Q", axis=None), tooltip=["v:Q"])
         .properties(height=height)
     )
-
-
-def strength_badge(mult: float) -> str:
-    """Return a semantic colored badge for correlation strength (color paired with text)."""
-    if mult >= _CORR_STRONG_MULT:
-        return ":red[Strong]"
-    if mult >= _CORR_MODERATE_MULT:
-        return ":orange[Moderate]"
-    return ":gray[Mild]"

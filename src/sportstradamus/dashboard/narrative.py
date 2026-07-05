@@ -10,11 +10,35 @@ from __future__ import annotations
 
 import pandas as pd
 
+from sportstradamus.dashboard import theme
+
 # Game-shape gloss, shared by the Games banner and the deep-dive context strip.
 SHAPE_HELP = (
     "Projected game script: shootout (high total), grind (low total), blowout "
     "(lopsided), or coinflip (tight). It tilts which counting stats run hot."
 )
+
+# Colorblind-safe side cues (spec §3.2): shape (up/down triangle) plus color both
+# carry Over/Under, so the aggrid JsCode cell renderer in Phase B can key off shape
+# alone if color is unavailable. Sourced from theme.GREEN/RED, not re-hardcoded.
+_ARROW_UP = (
+    f'<svg class="ar" viewBox="0 0 9 10" width="9" height="10">'
+    f'<path d="M4.5 0 9 10 0 10Z" fill="{theme.GREEN}"/></svg>'
+)
+_ARROW_DOWN = (
+    f'<svg class="ar" viewBox="0 0 9 10" width="9" height="10">'
+    f'<path d="M4.5 10 9 0 0 0Z" fill="{theme.RED}"/></svg>'
+)
+
+
+def bet_arrow(bet: str) -> str:
+    """Colorblind-safe side cue: shape + color both carry Over/Under."""
+    return _ARROW_UP if bet == "Over" else _ARROW_DOWN
+
+
+def match_label(team: str, opp: str, home: bool) -> str:
+    """Player-team-first matchup: 'LVA @ IND' away, 'LVA v IND' home (spec §3.4)."""
+    return f"{team} {'v' if home else '@'} {opp}"
 
 
 def top_thesis(parlays: pd.DataFrame, *, game: str, date) -> str:
@@ -54,10 +78,11 @@ def home_away(group: pd.DataFrame) -> tuple[str, str]:
 
 
 def context_strip(ctx_df: pd.DataFrame, *, game: str, date) -> dict | None:
-    """Total / derived spread / favorite / shape for one game, or ``None`` if absent.
+    """Total / derived spread / favorite / shape / favorite win prob for one game.
 
-    ``ctx_df`` is ``current_game_context`` (keyed ``League, Game, Date``). The
-    caller formats — ``fav_team`` may be ``None`` on an even game (spread 0).
+    ``None`` if the game is absent. ``ctx_df`` is ``current_game_context`` (keyed
+    ``League, Game, Date``). The caller formats — ``fav_team`` may be ``None`` and
+    ``ml_fav_prob`` NaN on a game with no moneyline (an even game has spread 0).
     """
     if ctx_df.empty:
         return None
@@ -71,4 +96,5 @@ def context_strip(ctx_df: pd.DataFrame, *, game: str, date) -> dict | None:
         "fav_team": row["fav_team"],
         "shape": row["shape"],
         "baseline_total": float(row["baseline_total"]),
+        "ml_fav_prob": float(row["ml_fav_prob"]),
     }

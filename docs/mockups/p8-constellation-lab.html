@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P8 · Astrolabe rev4 + loose shapes</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Cinzel:wght@600&family=Cormorant+Garamond:ital,wght@1,600&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#0E1117;--surface:#1A1D24;--text:#E6E9EF;--border:#2A2E37;--primary:#2E6BE6;--link:#5B8DEF;
+    --green:#1F9D55;--red:#E5484D;--gray:#8A91A0;--gold:#C9A227;--lva:#C8102E;--ind:#26436E}
+  *{box-sizing:border-box}
+  body{margin:0 auto;max-width:1000px;background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;font-size:14px;line-height:1.5;padding:26px 24px 72px}
+  .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+  .kicker{font-family:'Cinzel',serif;font-weight:600;font-size:10.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--gold)}
+  h1{font-size:22px;margin:1px 0 2px}
+  h2{font-size:14px;margin:26px 0 6px;font-weight:600;font-family:'Cinzel',serif;letter-spacing:.05em}
+  .dim{color:var(--gray);font-size:12px}
+  .btn{border:none;border-radius:4px;padding:6px 13px;font-size:12.5px;font-weight:600;cursor:pointer;font-family:inherit}
+  .btn.primary{background:var(--primary);color:#fff} .btn.ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
+
+  .slip{border:1px solid var(--border);border-radius:6px;padding:16px 18px;background:radial-gradient(ellipse at 70% -20%, rgba(46,107,230,.08), transparent 50%), var(--surface)}
+  .slrow{display:flex;gap:24px;align-items:center;flex-wrap:wrap}
+  .fixed{display:flex;flex-direction:column;gap:12px;min-width:118px}
+  .fixed .k{font-family:'Cinzel',serif;font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--gray)}
+  .fixed .v{font-family:'IBM Plex Mono',monospace;font-size:23px;font-weight:600;margin-top:1px}
+  .readouts{display:flex;flex-direction:column;gap:10px;min-width:176px}
+  .ro{display:flex;align-items:center;gap:9px}
+  .ro .dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
+  .ro .rk{font-family:'Cinzel',serif;font-size:9.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--gray);width:44px}
+  .ro .rv{font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600}
+  .ro .rsub{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--gray)}
+  .rstack{display:flex;flex-direction:column;line-height:1.12}
+  .rindep{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--gray)}
+
+  /* transitions fire only on select/deselect (.sel toggle) */
+  .grp{transform-box:view-box;transform-origin:150px 150px;transition:transform .9s cubic-bezier(.2,.72,.15,1)}
+  .band,.bandglow{transform-box:view-box;transform-origin:150px 150px;transition:transform .9s cubic-bezier(.2,.72,.15,1),stroke-dasharray .9s ease,stroke .9s ease}
+  .gem{transform-box:view-box;transform-origin:150px 150px;transform:scale(.66);opacity:.55;transition:transform .9s cubic-bezier(.2,.72,.15,1),opacity .9s ease}
+  .thread,.halo,.ovf,.evbead{transition:opacity .9s ease,fill .9s ease}
+  /* weak (deselected) defaults */
+  .wincorr{transform:rotate(112.3deg)} .winindep{transform:rotate(108deg)} .ev{transform:rotate(-120deg)}
+  .band,.bandglow{transform:rotate(18deg);stroke-dasharray:4.3 355.7;stroke:url(#bandRed)}
+  .thread{opacity:.1} .halo{opacity:0} .ovf{opacity:0} .evbead{fill:var(--red)}
+  /* strong (selected) */
+  #astro.sel .wincorr{transform:rotate(54deg)} #astro.sel .winindep{transform:rotate(70.7deg)} #astro.sel .ev{transform:rotate(0deg)}
+  #astro.sel .band,#astro.sel .bandglow{transform:rotate(-36deg);stroke-dasharray:16.7 343.3;stroke:url(#bandGreen)}
+  #astro.sel .gem{transform:scale(1.08);opacity:1}
+  #astro.sel .thread{opacity:.65} #astro.sel .halo{opacity:.5} #astro.sel .evbead{fill:var(--green)}
+  #astro.sel .ovf{opacity:.55}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+  @media (prefers-reduced-motion:no-preference){
+    @keyframes tw{0%,100%{opacity:.2}50%{opacity:.8}}
+    .spk{animation:tw 4s ease-in-out infinite}.spk:nth-child(2n){animation-duration:5.4s}.spk:nth-child(3n){animation-duration:3.3s}
+  }
+
+  .skywrap{position:relative;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:radial-gradient(ellipse at 50% 42%, rgba(46,107,230,.06), transparent 62%), #12151c}
+  .slab{font-family:'IBM Plex Mono',monospace;font-size:10.5px}
+  .teamtag{position:absolute;top:10px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:.14em;font-weight:600}
+  .teamtag.l{left:14px;color:#e2909b} .teamtag.r{right:14px;color:#8ea6c9}
+  .note{color:var(--gray);font-size:12px;margin-top:14px;line-height:1.6;border-top:1px solid var(--border);padding-top:12px}
+  .pill{display:inline-block;border:1px solid var(--border);border-radius:3px;padding:1px 7px;font-size:11px;color:var(--gray);font-family:'IBM Plex Mono',monospace}
+</style>
+</head>
+<body>
+
+<div class="kicker">◈ Constellation lab</div>
+<h1>Parlay astrolabe (rev 4) + loose shapes</h1>
+<div class="dim">Add/remove a star with the button. Blue = correlated win (carries the thread to the core), gray = independent; the arc between them is the lift.</div>
+
+<h2>Parlay astrolabe</h2>
+<div class="slip">
+  <div class="slrow">
+    <div class="fixed">
+      <div><div class="k">Legs</div><div class="v" id="ro-legs">3 · Flex</div></div>
+      <div><div class="k">Payout</div><div class="v" id="ro-pay">6.00x</div></div>
+    </div>
+
+    <div id="astro" class="sel">
+      <svg viewBox="0 0 300 300" width="272" height="272">
+        <defs>
+          <radialGradient id="core" cx="42%" cy="36%" r="66%"><stop offset="0" stop-color="#fff"/><stop offset=".4" stop-color="var(--gold)"/><stop offset="1" stop-color="#6f560f"/></radialGradient>
+          <radialGradient id="orb" cx="40%" cy="35%" r="65%"><stop offset="0" stop-color="#fff"/><stop offset=".45" stop-color="#8fb4ff"/><stop offset="1" stop-color="#274a86"/></radialGradient>
+          <radialGradient id="orbdim" cx="40%" cy="35%" r="65%"><stop offset="0" stop-color="#c9cfda"/><stop offset=".5" stop-color="#7f8794"/><stop offset="1" stop-color="#3a4150"/></radialGradient>
+          <linearGradient id="bandGreen" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#eafff2"/><stop offset=".5" stop-color="#1F9D55"/><stop offset="1" stop-color="#C9A227"/></linearGradient>
+          <linearGradient id="bandRed" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffd9da"/><stop offset=".5" stop-color="#E5484D"/><stop offset="1" stop-color="#C9A227"/></linearGradient>
+          <filter id="soft" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="6"/></filter>
+          <filter id="glowsm" x="-120%" y="-120%" width="340%" height="340%"><feGaussianBlur stdDeviation="2.3"/></filter>
+        </defs>
+
+        <!-- engraved bezel -->
+        <circle cx="150" cy="150" r="130" fill="none" stroke="var(--gold)" stroke-width="1" opacity=".1"/>
+        <circle cx="150" cy="150" r="124" fill="none" stroke="var(--gold)" stroke-width="1" opacity=".2"/>
+        <circle cx="150" cy="150" r="124" fill="none" stroke="var(--gold)" stroke-width="6" stroke-dasharray="1 7.4" opacity=".28"/>
+        <g stroke="var(--gold)" stroke-width="1.4" opacity=".55">
+          <line x1="150" y1="20" x2="150" y2="32"/><line x1="150" y1="268" x2="150" y2="280"/>
+          <line x1="20" y1="150" x2="32" y2="150"/><line x1="268" y1="150" x2="280" y2="150"/>
+          <line x1="58" y1="58" x2="66" y2="66"/><line x1="242" y1="58" x2="234" y2="66"/>
+          <line x1="58" y1="242" x2="66" y2="234"/><line x1="242" y1="242" x2="234" y2="234"/>
+        </g>
+        <g fill="#cfd6e2">
+          <path class="spk" d="M96 96 l.9 3 3 .9 -3 .9 -.9 3 -.9-3 -3-.9 3-.9z" opacity=".5"/>
+          <path class="spk" d="M212 108 l.8 2.6 2.6 .8 -2.6 .8 -.8 2.6 -.8-2.6 -2.6-.8 2.6-.8z" opacity=".45"/>
+          <path class="spk" d="M120 214 l.8 2.6 2.6 .8 -2.6 .8 -.8 2.6 -.8-2.6 -2.6-.8 2.6-.8z" opacity=".4"/>
+          <circle class="spk" cx="196" cy="206" r="1.1" opacity=".5"/>
+        </g>
+
+        <!-- orbitals -->
+        <circle cx="150" cy="150" r="112" fill="none" stroke="var(--gold)" stroke-width="1" opacity=".15"/>
+        <circle cx="150" cy="150" r="74"  fill="none" stroke="var(--gold)" stroke-width="1" opacity=".13"/>
+        <circle class="ovf" cx="150" cy="150" r="74" fill="none" stroke="var(--gold)" stroke-width="3" filter="url(#soft)"/>
+        <text x="150" y="16" fill="var(--gold)" font-family="Cinzel" font-size="8" letter-spacing="1.6" text-anchor="middle" opacity=".8">CROWN</text>
+
+        <!-- crown reticle (fixed target) -->
+        <g opacity=".85"><path d="M139 30 a11 11 0 0 1 22 0" fill="none" stroke="var(--gold)" stroke-width="1.6"/>
+          <path d="M150 22 l1.1 3.4 3.6 0 -2.9 2.2 1.1 3.4 -2.9-2.1 -2.9 2.1 1.1-3.4 -2.9-2.2 3.6 0z" fill="var(--gold)"/></g>
+
+        <!-- Kelly halo -->
+        <circle class="halo" cx="150" cy="150" r="30" fill="var(--gold)" filter="url(#soft)"/>
+
+        <!-- ===== lift = arc between the two win dots (grows/shrinks; green if corr>indep, red if below) ===== -->
+        <circle class="bandglow" cx="150" cy="150" r="112" pathLength="360" fill="none" stroke-width="8" stroke-linecap="round" filter="url(#soft)"/>
+        <circle class="band"     cx="150" cy="150" r="112" pathLength="360" fill="none" stroke-width="5" stroke-linecap="round"/>
+
+        <!-- correlated win (blue) + thread to the core -->
+        <g class="grp wincorr">
+          <path class="thread" d="M150 38 Q137 94 150 150" fill="none" stroke="var(--gold)" stroke-width="1.6" filter="url(#glowsm)"/>
+          <circle cx="150" cy="38" r="12" fill="url(#orb)" filter="url(#soft)" opacity=".55"/>
+          <circle cx="150" cy="38" r="7" fill="url(#orb)"/>
+          <circle cx="148.5" cy="36.5" r="2" fill="#fff" opacity=".9"/>
+        </g>
+        <!-- independent win (gray) -->
+        <g class="grp winindep">
+          <circle cx="150" cy="38" r="9" fill="url(#orbdim)" filter="url(#glowsm)" opacity=".5"/>
+          <circle cx="150" cy="38" r="5.2" fill="url(#orbdim)"/>
+        </g>
+
+        <!-- EV -->
+        <g class="grp ev">
+          <path class="thread" d="M150 76 Q140 113 150 150" fill="none" stroke="var(--gold)" stroke-width="1.6" filter="url(#glowsm)"/>
+          <circle class="evbead" cx="150" cy="76" r="11" filter="url(#soft)" opacity=".5"/>
+          <circle class="evbead" cx="150" cy="76" r="6.4"/>
+          <circle cx="148.6" cy="74.6" r="1.9" fill="#fff" opacity=".85"/>
+        </g>
+
+        <!-- Kelly core -->
+        <g class="gem">
+          <circle cx="150" cy="150" r="26" fill="none" stroke="var(--gold)" stroke-width="1" opacity=".4"/>
+          <circle cx="150" cy="150" r="19" fill="var(--gold)" filter="url(#soft)" opacity=".5"/>
+          <circle cx="150" cy="150" r="15" fill="url(#core)"/>
+          <circle cx="146" cy="145" r="4.5" fill="#fff" opacity=".9"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="readouts">
+      <div class="ro"><span class="dot" style="background:#8fb4ff"></span><span class="rk">Win</span>
+        <span class="rstack"><span class="rv" id="ro-win">21.0%</span><span class="rindep">indep <span id="ro-indep">18.2%</span></span></span></div>
+      <div class="ro"><span class="dot" style="background:var(--gold)"></span><span class="rk">Lift</span><span class="rv" id="ro-lift" style="color:var(--green)">+2.8%</span></div>
+      <div class="ro"><span class="dot" style="background:var(--green)"></span><span class="rk">EV</span><span class="rv" id="ro-ev" style="color:var(--green)">+14.5%</span></div>
+      <div class="ro"><span class="dot" style="background:var(--gold)"></span><span class="rk">Kelly</span><span class="rv" id="ro-kelly">1.2%</span></div>
+    </div>
+  </div>
+  <div class="dim" style="margin-top:12px">Two separate dots ride the <b>Win orbital</b>: <span style="color:#8fb4ff">blue = correlated</span> (its thread feeds the core), <span style="color:#a9b0bd">gray = independent</span>. The <b>arc between them is the lift</b> — it grows as they separate and flips <span style="color:var(--green)">green</span> (corr above indep) ↔ <span style="color:var(--red)">red</span> (corr below). EV is past its +12 crown here, so its orbital ignites.</div>
+  <div style="display:flex;gap:10px;margin-top:12px;align-items:center">
+    <button class="btn primary" id="toggle">Remove a star</button>
+    <span class="dim">← eases the dials; toggling flips the lift red↔green</span>
+  </div>
+</div>
+
+<h2>Loose shapes — the intent, not a stencil</h2>
+<div class="dim" style="margin-bottom:6px">A faint background silhouette signals the shape; the stars land loosely on it — a vertex or two missing, a few filler stars where the count spills over.</div>
+<div class="skywrap">
+  <span class="teamtag l">LAS VEGAS</span><span class="teamtag r">INDIANA</span>
+  <svg viewBox="0 0 520 360" width="100%" style="display:block">
+    <defs>
+      <symbol id="star5" viewBox="0 0 24 24"><path d="M12 1.6l3.09 6.9 7.51.7-5.66 5.02 1.68 7.38L12 17.9l-6.62 3.7 1.68-7.38L1.4 9.2l7.51-.7z"/></symbol>
+      <filter id="glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="3.4"/></filter>
+    </defs>
+    <g opacity=".13">
+      <path d="M182 66 H338 V162 H182 Z" fill="none" stroke="#C9A227" stroke-width="10"/>
+      <ellipse cx="260" cy="182" rx="60" ry="16" fill="none" stroke="#C9A227" stroke-width="10"/>
+      <path d="M210 190 L248 252 L272 252 L310 190 Z" fill="#C9A227"/>
+    </g>
+    <g fill="#9fb0c8"><circle cx="72" cy="60" r="1.1" opacity=".5"/><circle cx="452" cy="70" r="1" opacity=".4"/><circle cx="92" cy="300" r="1.1" opacity=".5"/><circle cx="440" cy="300" r="1" opacity=".4"/></g>
+    <g stroke="var(--gold)">
+      <g filter="url(#glow)" opacity=".55" fill="none" stroke-width="5"><path d="M186 70 L334 66 L332 160 L188 163 Z"/><path d="M206 179 Q262 206 314 178"/></g>
+      <g fill="none" stroke-width="1.7" opacity=".92"><path d="M186 70 L334 66 L332 160 L188 163 Z"/><path d="M206 179 Q262 206 314 178"/><line x1="246" y1="161" x2="214" y2="179"/><line x1="276" y1="160" x2="306" y2="178"/></g>
+    </g>
+    <g stroke="var(--gold)" stroke-width="1.3" opacity=".2" fill="none"><line x1="214" y1="182" x2="250" y2="250"/><line x1="306" y1="182" x2="272" y2="250"/><line x1="250" y1="250" x2="272" y2="250"/></g>
+    <use href="#star5" x="174" y="56"  width="24" height="24" fill="var(--lva)"/>
+    <use href="#star5" x="178" y="150" width="17" height="17" fill="var(--lva)"/>
+    <use href="#star5" x="188" y="160" width="44" height="44" fill="var(--lva)"/>
+    <use href="#star5" x="320" y="150" width="18" height="18" fill="var(--ind)"/>
+    <use href="#star5" x="296" y="162" width="30" height="30" fill="var(--ind)"/>
+    <use href="#star5" x="248" y="238" width="22" height="22" fill="var(--ind)" opacity=".85"/>
+    <circle cx="352" cy="88" r="1.8" fill="var(--ind)" opacity=".7"/><circle cx="238" cy="214" r="1.6" fill="var(--gold)" opacity=".6"/><circle cx="300" cy="206" r="1.5" fill="var(--gold)" opacity=".5"/>
+    <text x="210" y="222" fill="#e9ecf2" class="slab" text-anchor="middle" font-weight="600">Wilson Points o23.5</text>
+    <text x="336" y="146" fill="#e9ecf2" class="slab" text-anchor="middle" font-weight="600">Clark Assists u8.5</text>
+  </svg>
+</div>
+<div class="dim" style="margin-top:5px">Abstract on purpose — the faint silhouette carries the "hoop." Same rules underneath: size ∝ edge, each team seeds its side.</div>
+
+<div class="note">
+  <b>Win orbital</b>: blue (correlated) + gray (independent) are separate dots; the thread to the core comes off the blue one; the <b>lift arc</b> between them grows/shrinks and flips green↔red on their order, drawn with a magical gradient. <b>Crowns</b> fixed shared constants (Win 30 / EV +12 / Kelly 3); past crown → pin + orbital glow. <span class="pill">art-slot audit still pending</span>.
+</div>
+
+<script>
+  const A=document.getElementById('astro'), B=document.getElementById('toggle');
+  const strong={win:'21.0%',indep:'18.2%',lift:'+2.8%',ev:'+14.5%',evsub:'▲ past /12 crown',kelly:'1.2%',legs:'3 · Flex',pay:'6.00x'};
+  const weak  ={win:'11.4%',indep:'12.0%',lift:'−0.6%',ev:'−3.2%',evsub:'below crown',kelly:'0.0%',legs:'2 · Flex',pay:'3.00x'};
+  const set=s=>{ro_win.textContent=s.win;ro_indep.textContent=s.indep;ro_lift.textContent=s.lift;
+    ro_lift.style.color=s.lift[0]==='+'?'var(--green)':'var(--red)';ro_ev.textContent=s.ev;
+    ro_ev.style.color=s.ev[0]==='+'?'var(--green)':'var(--red)';ro_kelly.textContent=s.kelly;
+    ro_legs.textContent=s.legs;ro_pay.textContent=s.pay;};
+  B.onclick=()=>{const on=A.classList.toggle('sel');B.textContent=on?'Remove a star':'Add a star';set(on?strong:weak);};
+  const v0=fetch('/version.txt').then(r=>r.text()).catch(()=>'');
+  setInterval(async()=>{try{const a=await v0;const b=await fetch('/version.txt?'+Date.now()).then(r=>r.text());if(a&&a!==b)location.reload()}catch(e){}},2000);
+</script>
+</body>
+</html>
