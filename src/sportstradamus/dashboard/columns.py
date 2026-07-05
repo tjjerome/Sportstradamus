@@ -51,10 +51,13 @@ def add_edges(df: pd.DataFrame) -> pd.DataFrame:
 def add_match_column(df: pd.DataFrame) -> pd.DataFrame:
     """Append ``Match`` (``"LVA v IND"`` / ``"LVA @ IND"``), the player-team-first
     matchup label ``match_label`` builds from ``Team``/``Opponent``/``Home``.
+    ``Home`` defaults to away (``False``) when the column is absent, matching
+    ``narrative.py``'s existing guard for the same optional-shaped column.
     """
     df = df.copy()
+    home = df["Home"] if "Home" in df.columns else pd.Series(False, index=df.index)
     df["Match"] = [
-        match_label(t, o, h) for t, o, h in zip(df["Team"], df["Opponent"], df["Home"], strict=True)
+        match_label(t, o, h) for t, o, h in zip(df["Team"], df["Opponent"], home, strict=True)
     ]
     return df
 

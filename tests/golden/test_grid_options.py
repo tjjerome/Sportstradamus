@@ -173,6 +173,14 @@ def test_add_match_column_player_team_first() -> None:
     assert out["Match"].tolist() == ["LVA v IND", "NYK @ SAS"]
 
 
+def test_add_match_column_missing_home_defaults_to_away() -> None:
+    # current_offers.parquet snapshots predating the upstream Home passthrough
+    # fix lack the column entirely; must degrade to "@", not crash.
+    df = pd.DataFrame({"Team": ["LVA", "NYK"], "Opponent": ["IND", "SAS"]})
+    out = add_match_column(df)
+    assert out["Match"].tolist() == ["LVA @ IND", "NYK @ SAS"]
+
+
 def test_add_market_display_keeps_slug_column() -> None:
     df = pd.DataFrame({"League": ["NBA", "NFL"], "Market": ["PTS", "qb-yards"]})
     out = add_market_display(df)

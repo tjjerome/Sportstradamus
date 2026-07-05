@@ -371,6 +371,10 @@ def _finalize_records(
     for _col in ("Avg5", "AvgH2H", "H2HPlayed", "Total", "Defense position", "Moneyline"):
         if _col not in offer_df.columns:
             offer_df[_col] = np.nan
+    if "Home" not in offer_df.columns:
+        # Bool, not NaN: dashboard/narrative.py's match_label does `'v' if home else '@'`,
+        # and NaN is truthy in Python — it would render every no-Home row as the host.
+        offer_df["Home"] = False
 
     offer_df["Model Over"] = offer_df["Model Over"].clip(upper=_MAX_CONFIDENCE)
     offer_df["Model Under"] = offer_df["Model Under"].clip(upper=_MAX_CONFIDENCE)
@@ -437,6 +441,7 @@ def _finalize_records(
             "Date",
             "Team",
             "Opponent",
+            "Home",
             "Player",
             "Market",
             "Line",
