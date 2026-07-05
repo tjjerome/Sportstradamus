@@ -136,8 +136,9 @@ read plus a **Full detail** link into the offer dialog, slip preserved) — with
 zoom/pan off (it's a map, not a chart). This is the one piece of decoration that *is* data: use it on the slip
 editor, Game pages, and parlay detail, keep it on `backgroundColor`, never let it crowd a table. It
 is the brand's signature; treat its grammar — star = leg, **fill = team**, **size = edge**,
-**brightness = in the slip**, edge = correlation — as FIXED. Team fills are an on-token placeholder
-(`chartCategoricalColors`) until `team_assets.json` (P8).
+**brightness = in the slip**, edge = correlation — as FIXED. Team fills come from
+`team_assets.json` via `theme.team_colors(league, code)`; an unmapped code gets the neutral
+gray fallback. Team fills are never gold — gold is the correlation-edge color.
 
 ## 5. Iconography
 
