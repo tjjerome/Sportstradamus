@@ -318,14 +318,11 @@ def _add_wider_leg(key: str, wider_groups: list[tuple[str, list[dict]]] | None) 
     docstring): ``satellite_groups`` already excludes in-slip keys from its own output,
     so a wider dot's key can never belong to an already-added leg.
     """
-    if not wider_groups:
+    row = _wider_row_for_key(wider_groups, key)
+    if row is None:
         return False
-    for _, rows in wider_groups:
-        for row in rows:
-            if corr_key(row) == key:
-                st.session_state[_LEGS].append(build_leg(row))
-                return True
-    return False
+    st.session_state[_LEGS].append(build_leg(row))
+    return True
 
 
 def _open_offer_detail(

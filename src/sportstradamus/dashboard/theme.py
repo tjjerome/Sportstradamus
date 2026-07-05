@@ -111,7 +111,8 @@ def register_plotly_template() -> None:
 
 # The one sanctioned CSS injection site for the whole dashboard (DESIGN.md §3):
 # display-only celestial fonts (.celestial-kicker / .celestial-headline), the
-# banner classes render_banner() uses, and the ambient starfield layer.
+# banner classes render_banner() uses, the Games surface lens toggles
+# (.st-key-lens_deep_on / .st-key-lens_wider_on), and the ambient starfield layer.
 # app.py injects this once, right after st.set_page_config.
 APP_CSS = """
 <style>
