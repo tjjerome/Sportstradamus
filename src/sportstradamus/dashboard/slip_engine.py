@@ -123,8 +123,10 @@ def ev_lift(
 
 
 def astrolabe_payload(score: SlipScore, *, nonce: int) -> dict:
-    """JSON contract for the astrolabe component. Crowns are the fixed shared
-    reference maxima (spec §4.4c): Win 30% / EV +12% / Kelly 3%.
+    """JSON contract for the astrolabe component.
+
+    Crowns are the fixed shared reference maxima (spec §4.4c): Win 30% /
+    EV +12% / Kelly 3%.
     """
     kelly = (score.model_ev - 1) / (score.payout - 1) if score.payout > 1 else 0.0
     return {
