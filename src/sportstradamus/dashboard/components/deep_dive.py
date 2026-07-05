@@ -7,8 +7,6 @@ stats, Correlated). The Comps / Other-stats tabs read the ``current_offer_detail
 sidecar prerendered at ``prophecize`` time so the server never recomputes them live.
 """
 
-from collections.abc import Mapping
-
 import pandas as pd
 import streamlit as st
 
@@ -56,22 +54,6 @@ def drop_detail_on_page_change(state, page_id: str) -> None:
         state["detail_stack"] = []
         state["last_grid_key"] = None
         state["_active_page"] = page_id
-
-
-def render_offer_card(row: Mapping) -> None:
-    """Compact offer card — the Streamlit twin of the constellation's JS hover card.
-
-    Player + bet/line/market + win/boost/Kelly. The headshot (a person icon) and
-    the last-5 line are scarred placeholders, matching the constellation card: the
-    offer snapshot carries no player-id or gamelog columns to fill them yet.
-    """
-    win = float(row.get("Win Prob", 0.0) or 0.0)
-    boost = float(row.get("Boost", 1.0) or 1.0)
-    kelly = float(row.get("Kelly", 0.0) or 0.0)
-    st.markdown(f":material/account_circle: **{row['Player']}**")
-    st.caption(f"{row['Bet']} {float(row['Line']):.10g} {row['Market']}")
-    st.markdown(f"Win **{win:.0%}** · **{boost:.2f}×** · Kelly **{kelly:.0%}**")
-    st.caption(":gray[Last 5 — coming soon]")
 
 
 def _edge_badge(model_ev: float) -> str:

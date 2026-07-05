@@ -120,7 +120,15 @@ def render_constellation_builder(
     deep_pool, wider_groups = _active_lenses(
         offers, legs, pool, focus_game=focus_game, platform=platform
     )
-    _render_constellation(offers, star_legs, corr, pool, key_prefix, deep_pool, wider_groups)
+    _render_constellation(
+        offers,
+        star_legs,
+        corr=corr,
+        pool=pool,
+        key_prefix=key_prefix,
+        deep_pool=deep_pool,
+        wider_groups=wider_groups,
+    )
     _render_leg_list(key_prefix, focus_game=focus_game, removable=False)
     _render_non_star_legs(legs, focus_game=focus_game, key_prefix=key_prefix)
     _draw_detail_dialog(offers)
@@ -217,6 +225,7 @@ def _render_non_star_legs(legs: list[dict], *, focus_game: str, key_prefix: str)
 def _render_constellation(
     offers: pd.DataFrame,
     legs: list[dict],
+    *,
     corr: pd.DataFrame,
     pool: pd.DataFrame,
     key_prefix: str,
