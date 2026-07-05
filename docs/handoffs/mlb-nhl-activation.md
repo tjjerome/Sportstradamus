@@ -10,7 +10,7 @@ D1 (MLB activation, ~Jul 2026) and D2 (NHL activation, ~Sep 2026). Post-GO,
 grind the cells through the standard ship lifecycle.
 
 Money logic: two entire slates of app-priced markets at marginal cost. The
-modeling machinery, the five offline gates, the Gate-2 lifecycle, and the
+modeling machinery, the six offline gates, the Gate-2 lifecycle, and the
 decision engines (kelly, pickem-build, parlay pricing) are league-agnostic and
 already built; what MLB/NHL need is model-quality work + data-freshness repair
 plus a small, known CLI-wiring delta (§3 findings) — not new architecture. No
