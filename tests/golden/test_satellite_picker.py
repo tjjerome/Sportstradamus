@@ -1,7 +1,7 @@
 """Satellite picker — the pure other-game candidate query.
 
-Render paths (the expander, chips, auto-open) are Streamlit-runtime and verified
-manually; only the grouping query is unit-pinned here.
+``render_added_legs`` (the shared non-star leg list) is Streamlit-runtime and
+verified manually; only the grouping query is unit-pinned here.
 """
 
 import pandas as pd

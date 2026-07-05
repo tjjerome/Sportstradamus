@@ -124,6 +124,13 @@ APP_CSS = """
   color:white;margin-bottom:14px;font-size:14px}
 .banner-stats{background:#2d6a4f;padding:10px 14px;border-radius:6px;
   color:white;margin-bottom:14px;font-size:14px}
+/* Games surface lens toggles (P8 Task C6): active = gold, the app's owner-highlight
+   convention. Streamlit's config.toml [theme] has no gold slot (primaryColor is the
+   app's blue accent) so this reaches the celestial-gold token the same narrow,
+   key=-scoped way .celestial-kicker/.celestial-headline already do for the same
+   reason (DESIGN.md §3). */
+.st-key-lens_deep_on button, .st-key-lens_wider_on button{
+  color:#C9A227;border-color:#C9A227;background:rgba(201,162,39,.12)}
 .starfield{position:fixed;inset:0;z-index:-1;pointer-events:none;
   background:
     radial-gradient(circle at 4% 7%, rgba(230,233,239,.18) 0 2px, transparent 2px),
