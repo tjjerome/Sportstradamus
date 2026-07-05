@@ -40,6 +40,7 @@ from pathlib import Path
 import click
 import numpy as np
 import pandas as pd
+import tabulate
 from scipy.optimize import minimize, minimize_scalar
 from scipy.stats import gamma as _scipy_gamma
 from scipy.stats import nbinom as _scipy_nbinom
@@ -118,6 +119,7 @@ _GATE1_NONINF_MARGIN: float = 0.005  # ~2% of the ~0.25 book Brier (~1 SE): max 
 _GATE1_CI_HI_MAX: float = 0.0  # reported-only g1_has_edge threshold (provable superiority)
 _GATE2_STAR_Z_MAX: float = 0.5
 _GATE3_BENCH_Z_MAX: float = 0.5
+_SHIP_GATES: tuple[str, ...] = ("g1", "g2", "g3", "g4", "g5", "g6")
 # Gate 4 is the predictive-shape gate: KS distance of the randomized PIT from Uniform.
 # PIT-KS = sup|F_model - F_true| = the worst-case probability error across all quantiles =
 # the worst-case alt-line mispricing. δ = 0.05 is the effect-size floor (worst-case
@@ -1835,6 +1837,30 @@ def _print_breadth_rollup(scorecard_df: pd.DataFrame) -> None:
         )
 
 
+def _print_ship_summary(rows: list[dict[str, object]]) -> None:
+    """Bottom-line SHIP/KILL verdict per cell, so a sweep's result reads without
+    scrolling back through the per-cell decile tables. ANSI-styled cells misalign
+    inside a tabulate table, so the table stays plain text and only the tally is colored.
+    """
+    summary = []
+    for row in rows:
+        ships = bool(row["ship"])
+        failed = [g for g in _SHIP_GATES if not row.get(f"{g}_pass", True)]
+        summary.append(
+            [
+                f"{row['league']}_{row['market']}",
+                "SHIP" if ships else "KILL",
+                "-" if ships else " ".join(failed),
+            ]
+        )
+    click.echo("\nSHIP SUMMARY")
+    click.echo(
+        tabulate.tabulate(summary, headers=["cell", "verdict", "failed gates"], tablefmt="github")
+    )
+    n_ship = sum(bool(row["ship"]) for row in rows)
+    click.secho(f"{n_ship}/{len(rows)} cells ship", fg="green" if n_ship == len(rows) else "red")
+
+
 def _gate_headline(row: dict[str, object]) -> str:
     """One-line per-cell gate summary for stdout, with SHIP / KILL verdict.
 
@@ -1862,9 +1888,7 @@ def _gate_headline(row: dict[str, object]) -> str:
         if row["ship"]:
             head += "  [SHIP]"
         else:
-            failed = [
-                g for g in ("g1", "g2", "g3", "g4", "g5", "g6") if not row.get(f"{g}_pass", True)
-            ]
+            failed = [g for g in _SHIP_GATES if not row.get(f"{g}_pass", True)]
             head += f"  [KILL: {' '.join(failed)}]"
     return head
 
@@ -2524,6 +2548,9 @@ def main(
             click.echo(f"scatter: {out}")
         if not no_log:
             append_run_log(card, log_path)
+
+    if rows:
+        _print_ship_summary(rows)
 
     # Gate scorecard snapshot. Only a FULL audit (no league/market filter) auto-writes
     # the sandbox scorecard, so a filtered run can't clobber it down to a subset; a

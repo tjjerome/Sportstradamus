@@ -124,9 +124,9 @@ Findings verified 2026-06-10 (each re-derivable above — re-verify, don't trust
   (gitignored — freshness is only checkable where the data lives).
 - `meditate` skips + pickle-prunes withheld cells; audit training needs
   `--bypass-withholding` or a `--deterministic` sandbox run (writes to
-  `research/models/deterministic/`, never production). The strategy driver
+  `research/models/deterministic/`, never production). The strategy sweep
   lives on `model-research` only (model_improvement_track.md §6 branch
-  asymmetry) — `ls src/sportstradamus/training/model_strategy_driver.py`
+  asymmetry) — `ls src/sportstradamus/training/model_strategy_sweep.py`
   before planning around it.
 
 ### Volatile product assumptions

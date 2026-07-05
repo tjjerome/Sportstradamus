@@ -263,8 +263,7 @@ A served predictive is built in four independently-swappable stages,
 | **Calibration** (auto-fit, not searched) | location (`roe_mean`/`isotonic_mean`); scale+shape (`dispersion_cal` + joint `skew_cal`; count PIT-KS retarget); full-CDF (isotonic-PIT / IDR) | location + scale+shape shipped; count PIT-KS retarget via `--count-dispersion-objective pit_ks` (§6.1 Rung B′) | isotonic-PIT / IDR full-CDF recal (§6.1 Rung C) |
 
 **The search interface.** The per-market searcher is
-`training/model_strategy_driver.py` (entry point `model-strategy-driver`;
-`model_strategy_search.py` underneath). `--board` searches the covered-league board and appends
+`training/model_strategy_sweep.py` (entry point `model-strategy-sweep`). `--board` searches the covered-league board and appends
 the ranked result to `data/research/strategy_research_board.csv` after each cell (an interrupt
 keeps partial progress); `--league L --market M [--out PATH]` runs one cell. Each corner trains
 one `meditate --deterministic --target-normalization … --dist-training-loss {nll|crps}
@@ -272,15 +271,15 @@ one `meditate --deterministic --target-normalization … --dist-training-loss {n
 hyperparameters and writes to a sandbox (`research/models/deterministic/` +
 `data/test_sets/deterministic/`) so a trial never clobbers a production market.
 
-> **Branch asymmetry — check before you start.** The driver pair lives on the
-> `model-research` branch only (`ls src/sportstradamus/training/model_strategy_driver.py`).
+> **Branch asymmetry — check before you start.** The sweep lives on the
+> `model-research` branch only (`ls src/sportstradamus/training/model_strategy_sweep.py`).
 > On `devel` the fallback is manual ranking from `model_stats.csv` (sort withheld cells by
 > min-gate slack / `pit_ks` distance to threshold) plus per-cell `meditate --deterministic`
-> A/Bs via the scorecard CLI. Porting the driver to devel is a §6.0 task — until it lands,
+> A/Bs via the scorecard CLI. Porting the sweep to devel is a §6.0 task — until it lands,
 > board generation happens on model-research and ships are confirmed wherever the cell will
 > ship from.
 
-The driver searches only the **retrain** axes (normalization × dist-loss × blend-loss) as an
+The sweep searches only the **retrain** axes (normalization × dist-loss × blend-loss) as an
 Optuna `GridSampler` grid (≤12 discrete corners, exhaustive and deterministic; the
 `[kind, spec, stage]` `SEARCH_SPACE` flips to TPE the moment a continuous axis lands).
 Calibration is auto-fit per corner — a post-hoc transform fit in milliseconds never sits in the
@@ -289,7 +288,7 @@ training loop; that cost asymmetry is the design's core. The objective is the ne
 across all six gates at once — it optimizes "ships, with margin," not Gate 4 alone.
 
 Each corner is scored by the **honest val-fit→test gate row**
-(`model_strategy_search._score_normalization`): the deterministic dump already carries the
+(`model_strategy_sweep._score_normalization`): the deterministic dump already carries the
 pipeline's own validation-fit joint calibration, so the ranker calls `scorecard.gate_row` on it —
 the *same* code production ships on. No test re-fit (an earlier build re-fit calibration on test
 rows and oversold the screen; removed in `10306ee`). The driver is a faithful fixed-HP replica of
@@ -316,7 +315,7 @@ sweeps."
 
 The deterministic study only **ranks**; the real-HPO scorecard **ships**. Fixed workflow:
 
-1. **Board = candidate generator.** `model-strategy-driver` (or the devel manual fallback above)
+1. **Board = candidate generator.** `model-strategy-sweep` (or the devel manual fallback above)
    returns the ranked board, one deterministic train per corner, scored on the honest
    val-fit→test gate row. A `ships=True` row is a *candidate flag*, never a ship.
 
@@ -417,8 +416,8 @@ Entry: none — most of this recurs.
    NFL stalls. *Registered decision rule:* if ≥3 of 5 cells move `ci_hi` below threshold → NFL
    path runs through Stage 1 alone; if ≤1 does → pull Stage 3 features and §6.6 per-position
    forward for NFL immediately.
-6. **Port the strategy driver to devel (small code PR, separate session).**
-   `model_strategy_driver.py` + `model_strategy_search.py` are research-branch-only (branch
+6. **Port the strategy sweep to devel (small code PR, separate session).**
+   `model_strategy_sweep.py` is research-branch-only (branch
    asymmetry note above); porting removes the branch asymmetry and lets devel sessions generate
    boards. Until then the manual fallback applies.
 

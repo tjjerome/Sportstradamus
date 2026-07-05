@@ -465,7 +465,7 @@ def _compute_metrics(probs: np.ndarray, y: np.ndarray) -> dict[str, float]:
     }
 
 
-def _step_init_market(league: str, market: str, stat_data, archive) -> dict:
+def _step_init_market(league: str, market: str, stat_data, archive, *, deterministic: bool) -> dict:
     """Validate, load distribution config + book weights + existing pickle.
 
     Args:
@@ -473,6 +473,10 @@ def _step_init_market(league: str, market: str, stat_data, archive) -> dict:
         market: Market name.
         stat_data: League-specific ``Stats`` instance.
         archive: ``Archive`` singleton (passed through to book-weight fitting).
+        deterministic: When True, skip the archive-hitting book-weight fit and
+            the config write — ``train_market`` never consumes
+            ``init["book_weights"]``, and a deterministic run must not mutate
+            production config.
 
     Returns:
         Dict with: ``filedict`` (loaded model state or {}), ``dist`` (existing
@@ -490,13 +494,14 @@ def _step_init_market(league: str, market: str, stat_data, archive) -> dict:
     else:
         book_weights = {}
 
-    book_weights.setdefault(league, {}).setdefault(market, {})
-    book_weights[league][market] = fit_book_weights(
-        league, market, stat_data, archive, book_weights
-    )
+    if not deterministic:
+        book_weights.setdefault(league, {}).setdefault(market, {})
+        book_weights[league][market] = fit_book_weights(
+            league, market, stat_data, archive, book_weights
+        )
 
-    with open(pkg_resources.files(data) / "config" / "book_weights.json", "w") as outfile:
-        json.dump(book_weights, outfile, indent=4)
+        with open(pkg_resources.files(data) / "config" / "book_weights.json", "w") as outfile:
+            json.dump(book_weights, outfile, indent=4)
 
     filename = market_file_slug(league, market)
     filepath = model_pickle_path(league, market)
@@ -2430,7 +2435,7 @@ def train_market(
     if zinb_mode not in {"joint", "hurdle"}:
         raise ValueError(f"zinb_mode must be 'joint' or 'hurdle', got {zinb_mode!r}")
 
-    init = _step_init_market(league, market, stat_data, archive)
+    init = _step_init_market(league, market, stat_data, archive, deterministic=deterministic)
     filedict = init["filedict"]
     dist = init["dist"]
     cv = init["cv"]
