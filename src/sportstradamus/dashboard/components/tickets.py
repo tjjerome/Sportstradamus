@@ -108,13 +108,24 @@ _OUTCOME_COLOR_KEYWORD = {"hit": "green", "miss": "red", "push": "gray", "": "gr
 
 _TICKETS_PER_ROW = 2
 
+# Status rail: a colored strip distinct from the stamp badge (mirrors the rail concept
+# gate_matrix.py/grid.py use for AG-Grid rows, adapted here since st.container(border=True)
+# has no per-side/per-color border of its own — a top strip is the plain-HTML equivalent
+# that still nests inside the container ahead of the native st.* calls below it).
+_RAIL_HEIGHT_PX = 4
+
 
 def render_tickets(tickets: list[dict]) -> None:
-    """Render the ticket grid: 2 cards per row, status-colored stamp badge."""
+    """Render the ticket grid: 2 cards per row, status-colored rail + stamp badge."""
     for i in range(0, len(tickets), _TICKETS_PER_ROW):
         cols = st.columns(_TICKETS_PER_ROW)
         for col, ticket in zip(cols, tickets[i : i + _TICKETS_PER_ROW], strict=False):
             with col, st.container(border=True):
+                st.markdown(
+                    f'<div style="height:{_RAIL_HEIGHT_PX}px;margin:-1px -1px 10px -1px;'
+                    f'border-radius:3px 3px 0 0;background:{ticket["color"]}"></div>',
+                    unsafe_allow_html=True,
+                )
                 badge = _BADGE_COLOR_KEYWORD.get(ticket["color"], "gray")
                 st.markdown(f":{badge}[**{ticket['stamp']}**]  {ticket['headline']}")
                 st.caption(ticket["meta"])
