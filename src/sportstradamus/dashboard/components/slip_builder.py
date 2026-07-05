@@ -29,8 +29,8 @@ from sportstradamus.dashboard.components.constellation import constellation_figu
 from sportstradamus.dashboard.components.constellation_component import render_constellation
 from sportstradamus.dashboard.components.deep_dive import init_detail_state, show_detail
 from sportstradamus.dashboard.components.satellite_picker import (
-    render_disliked_legs,
-    render_satellites,
+    render_added_legs,
+    satellite_groups,
 )
 from sportstradamus.dashboard.components.slip_state import (
     _BANKROLL,
@@ -42,7 +42,7 @@ from sportstradamus.dashboard.components.slip_state import (
     remove_leg,
 )
 from sportstradamus.dashboard.data import load_model_stats
-from sportstradamus.dashboard.legs import corr_key
+from sportstradamus.dashboard.legs import corr_key, find_offer_idx
 from sportstradamus.dashboard.slip_engine import (
     SlipScore,
     astrolabe_payload,
@@ -65,6 +65,30 @@ def _slip_shrinkage(legs: Sequence[Mapping]) -> float:
     return min(vals) if vals else 1.0
 
 
+def _active_lenses(
+    offers: pd.DataFrame,
+    legs: list[dict],
+    pool: pd.DataFrame,
+    *,
+    focus_game: str,
+    platform: str,
+) -> tuple[pd.DataFrame | None, list[tuple[str, list[dict]]] | None]:
+    """The two lens overlays for ``constellation_figure``, read off ``games.py``'s toggles.
+
+    "Look deeper" reuses the same unfiltered ``pool`` frame the map already has (the
+    figure itself picks out the model-passed rows) — no separate query. "Look wider"
+    reruns the existing ``satellite_groups`` query. Either lens off resolves ``None``.
+    """
+    deep_pool = pool if st.session_state.get("lens_deep", False) else None
+    if not st.session_state.get("lens_wider", False):
+        return deep_pool, None
+    exclude = {corr_key(leg) for leg in legs}
+    wider_groups = satellite_groups(
+        offers, focus_game=focus_game, platform=platform, exclude_keys=exclude
+    )
+    return deep_pool, wider_groups
+
+
 def render_constellation_builder(
     offers: pd.DataFrame,
     corr: pd.DataFrame,
@@ -79,7 +103,9 @@ def render_constellation_builder(
     (model-liked, Kelly > 0) leg is a clickable star, so a slip can be built from
     scratch by clicking or pre-seeded from a story; a star's hover card opens the
     full offer detail without disturbing the slip. Other-game slip legs show as
-    satellites. The caller draws the game's context banner above this.
+    satellites. Two lens toggles (``games.py``'s ``lens_deep`` / ``lens_wider``
+    session-state bools) turn on the map's "look deeper" / "look wider" overlays.
+    The caller draws the game's context banner above this.
     """
     if not focus_game:
         st.info("Pick a game above to see its constellation.")
@@ -91,11 +117,12 @@ def render_constellation_builder(
     # Only the model-liked legs are stars; a manually-added model-passed leg (Kelly ≤ 0)
     # rides in the slip like a satellite — listed by the picker, never drawn on the map.
     star_legs = [leg for leg in focus_legs if is_model_liked(leg)]
-    _render_constellation(star_legs, corr, pool, key_prefix)
-    _render_leg_list(key_prefix, focus_game=focus_game, removable=False)
-    _render_supplemental_pickers(
-        offers, focus_game=focus_game, platform=platform, legs=legs, key_prefix=key_prefix
+    deep_pool, wider_groups = _active_lenses(
+        offers, legs, pool, focus_game=focus_game, platform=platform
     )
+    _render_constellation(offers, star_legs, corr, pool, key_prefix, deep_pool, wider_groups)
+    _render_leg_list(key_prefix, focus_game=focus_game, removable=False)
+    _render_non_star_legs(legs, focus_game=focus_game, key_prefix=key_prefix)
     _draw_detail_dialog(offers)
     if len(legs) < 2:
         if legs:
@@ -168,55 +195,57 @@ def _render_leg_list(
             st.rerun()
 
 
-def _render_supplemental_pickers(
-    offers: pd.DataFrame,
-    *,
-    focus_game: str,
-    platform: str,
-    legs: list[dict],
-    key_prefix: str,
-) -> None:
-    """Non-star leg pickers below the map: other-game satellites (only once the slip has
-    a leg to complete) and same-game model-passed legs; rerun when either changes the slip.
+def _render_non_star_legs(legs: list[dict], *, focus_game: str, key_prefix: str) -> None:
+    """List every slip leg that isn't a star on the map — other-game satellites and
+    same-game model-passed legs — with a remove control.
+
+    Neither kind is ever drawn as a star, so this list is their only removal path; it's
+    also the only place they're still visible once the lens that revealed them (deep or
+    wider) toggles back off, since that lens's trace vanishes from the figure.
     """
-    if legs:
-        act = render_satellites(
-            offers, focus_game=focus_game, platform=platform, legs=legs, key_prefix=key_prefix
-        )
-        if _apply_satellite_action(act, legs):
-            st.rerun()
-    dis = render_disliked_legs(
-        offers, focus_game=focus_game, platform=platform, legs=legs, key_prefix=key_prefix
-    )
-    if _apply_satellite_action(dis, legs):
+    non_star = [
+        (i, leg)
+        for i, leg in enumerate(legs)
+        if leg["game"] != focus_game or not is_model_liked(leg)
+    ]
+    action = render_added_legs(non_star, key_prefix, caption="Other slip legs", infix="added")
+    if action and "remove" in action:
+        remove_leg(action["remove"])
         st.rerun()
 
 
 def _render_constellation(
-    legs: list[dict], corr: pd.DataFrame, pool: pd.DataFrame, key_prefix: str
+    offers: pd.DataFrame,
+    legs: list[dict],
+    corr: pd.DataFrame,
+    pool: pd.DataFrame,
+    key_prefix: str,
+    deep_pool: pd.DataFrame | None,
+    wider_groups: list[tuple[str, list[dict]]] | None,
 ) -> None:
     """Draw the interactive star map and act on the component's click/detail callback.
 
     A star click toggles its leg (rerun to refresh the map); the hover card's **Full
-    detail** seeds the offer dialog, drawn by ``_draw_detail_dialog`` once the map and
-    the satellite picker have both rendered (so a satellite's detail opens the same
-    way). The component re-sends its last action on every rerun, so each is deduped by
-    nonce and fires once.
+    detail** seeds the offer dialog, drawn by ``_draw_detail_dialog`` once the map has
+    rendered. The component re-sends its last action on every rerun, so each is deduped
+    by nonce and fires once. ``deep_pool``/``wider_groups`` are the two lens overlays —
+    a clicked deep star resolves the same way as any pool star (its key is drawn from
+    that same ``pool`` frame); a clicked wider dot falls back to the satellite add path.
     """
     action = render_constellation(
-        constellation_figure(legs, corr, pool), key=f"{key_prefix}_constellation"
+        constellation_figure(legs, corr, pool, deep_pool=deep_pool, wider_groups=wider_groups),
+        key=f"{key_prefix}_constellation",
     )
-    if _apply_constellation_action(action, pool, key_prefix):
+    if _apply_constellation_action(action, offers, pool, wider_groups, key_prefix):
         st.rerun()
 
 
 def _draw_detail_dialog(offers: pd.DataFrame) -> None:
     """Draw the offer-detail dialog for whichever offer is on the detail stack.
 
-    Shared by the constellation stars and the satellite picks — both push an
-    offers-frame index. The dialog's correlation-nav is scoped to that offer's own
-    game pool; correlated legs are same-game, so the scope holds across the reruns
-    navigation triggers.
+    Shared by every star on the map, including a wider dot from another game —
+    ``_open_offer_detail`` always resolves to a full ``offers``-frame index before
+    pushing it, so this reads the same way regardless of which lens revealed the star.
     """
     stack = st.session_state.get("detail_stack")
     if not stack or stack[-1] not in offers.index:
@@ -229,13 +258,20 @@ def _draw_detail_dialog(offers: pd.DataFrame) -> None:
 
 
 def _apply_constellation_action(
-    action: Mapping | None, pool: pd.DataFrame, key_prefix: str
+    action: Mapping | None,
+    offers: pd.DataFrame,
+    pool: pd.DataFrame,
+    wider_groups: list[tuple[str, list[dict]]] | None,
+    key_prefix: str,
 ) -> bool:
     """Process the component's last action once; return True if the slip changed.
 
     A ``click`` toggles the star's leg (caller reruns); a ``detail`` seeds the offer
     dialog and leaves the slip alone. The nonce is deduped against the last handled,
-    since the component re-sends the same value until the user acts again.
+    since the component re-sends the same value until the user acts again. A key
+    ``_toggle_leg`` can't resolve (an ordinary or deep star) falls back to
+    ``wider_groups`` — the only other trace on the figure — for the satellite
+    add-only path.
     """
     if not action:
         return False
@@ -245,28 +281,9 @@ def _apply_constellation_action(
     st.session_state[nonce_key] = action.get("nonce")
     key = action.get("key")
     if action.get("action") == "detail":
-        _open_offer_detail(key, pool)
+        _open_offer_detail(key, offers, pool, wider_groups)
         return False
-    return _toggle_leg(key, pool)
-
-
-def _apply_satellite_action(action: Mapping | None, legs: list[dict]) -> bool:
-    """Apply the satellite picker's action; return True if the slip changed.
-
-    ``add``/``remove`` mutate the slip (caller reruns); ``detail`` seeds the offer
-    dialog and leaves the slip alone (``_draw_detail_dialog`` draws it).
-    """
-    if not action:
-        return False
-    if "add" in action:
-        legs.append(build_leg(action["add"]))
-        return True
-    if "remove" in action:
-        remove_leg(action["remove"])
-        return True
-    init_detail_state()
-    st.session_state.detail_stack = [action["detail"]]
-    return False
+    return _toggle_leg(key, pool) or _add_wider_leg(key, wider_groups)
 
 
 def _toggle_leg(key: str, pool: pd.DataFrame) -> bool:
@@ -287,15 +304,55 @@ def _toggle_leg(key: str, pool: pd.DataFrame) -> bool:
     return True
 
 
-def _open_offer_detail(key: str, pool: pd.DataFrame) -> None:
+def _add_wider_leg(key: str, wider_groups: list[tuple[str, list[dict]]] | None) -> bool:
+    """Add-only path for a clicked "look wider" dot — never a toggle (see the module
+    docstring): ``satellite_groups`` already excludes in-slip keys from its own output,
+    so a wider dot's key can never belong to an already-added leg.
+    """
+    if not wider_groups:
+        return False
+    for _, rows in wider_groups:
+        for row in rows:
+            if corr_key(row) == key:
+                st.session_state[_LEGS].append(build_leg(row))
+                return True
+    return False
+
+
+def _open_offer_detail(
+    key: str,
+    offers: pd.DataFrame,
+    pool: pd.DataFrame,
+    wider_groups: list[tuple[str, list[dict]]] | None,
+) -> None:
     """Reuses the Board's ``deep_dive`` dialog and its ``detail_stack`` navigation; the
-    slip lives in session state, so opening detail never clears the parlay.
+    slip lives in session state, so opening detail never clears the parlay. A wider
+    dot's row came from ``satellite_groups``'s own ``to_dict("records")`` (no frame
+    index attached), so it's re-resolved against the full ``offers`` frame by its
+    fields, the same way the old satellite popover's "Full detail" button did.
     """
     match = _pool_match_for_key(pool, key)
-    if match is None:
+    if match is not None:
+        init_detail_state()
+        st.session_state.detail_stack = [match[0]]
         return
-    init_detail_state()
-    st.session_state.detail_stack = [match[0]]
+    row = _wider_row_for_key(wider_groups, key)
+    if row is None:
+        return
+    idx = find_offer_idx(row, offers, str(row["Platform"]))
+    if idx is not None:
+        init_detail_state()
+        st.session_state.detail_stack = [idx]
+
+
+def _wider_row_for_key(wider_groups: list[tuple[str, list[dict]]] | None, key: str) -> dict | None:
+    if not wider_groups:
+        return None
+    for _, rows in wider_groups:
+        for row in rows:
+            if corr_key(row) == key:
+                return row
+    return None
 
 
 def _pool_match_for_key(pool: pd.DataFrame, key: str) -> tuple | None:

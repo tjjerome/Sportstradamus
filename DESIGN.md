@@ -81,9 +81,11 @@ Altair / Vega-Lite inherit these automatically.
 
 - **Theming**: always via `config.toml`. Reserve `st.html` / `unsafe_allow_html` CSS for targeted
   *structural* gaps only, scoped through a widget's `key=`-generated `.st-key-…` class — never for
-  colors/fonts/backgrounds that a token already covers. Two named exceptions, both injected once in
-  `dashboard/app.py`: the display-font CSS (`.celestial-kicker` / `.celestial-headline`, §2) and the
-  ambient-image layer (below).
+  colors/fonts/backgrounds that a token already covers. Named exceptions, all injected once in
+  `dashboard/app.py`'s `APP_CSS`: the display-font CSS (`.celestial-kicker` / `.celestial-headline`,
+  §2), the ambient-image layer (below), and the Games surface lens toggles (`.st-key-lens_deep_on` /
+  `.st-key-lens_wider_on`, §4a) — `config.toml`'s `[theme]` has no gold slot, so a widget that must
+  read celestial-gold when active reaches the token the same narrow way the other two do.
 - **Nebula wash**: a faint radial gradient inside the surface palette (blue-family stops drawn from
   `chartSequentialColors`, gold highlights ≤ 12% opacity) is permitted on **hero/prophecy cards
   only**. The purple/violet gradient ban (§6) stands untouched.

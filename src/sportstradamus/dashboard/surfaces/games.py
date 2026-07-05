@@ -219,6 +219,29 @@ def _game_picker(
     return focus_game
 
 
+# Lens toggles (P8 Task C6): plain (session_state key, widget label) pairs — the widget
+# key itself flips between an "_on"/"_off" suffix by which state is active, so the
+# static gold CSS in theme.APP_CSS only ever matches the currently-active render.
+_LENSES = (("lens_deep", "Look deeper"), ("lens_wider", "Look wider"))
+
+
+def _render_lens_toggles() -> None:
+    """Two independent gold-when-active toggles above the map (either, both, neither).
+
+    Replaces the old "Add a leg from another game" / "Add a leg the model doesn't
+    like" expanders — both are now modes of the constellation figure itself
+    (``constellation_figure``'s ``deep_pool`` / ``wider_groups``), read directly off
+    these two session-state keys by ``render_constellation_builder``.
+    """
+    cols = st.columns(len(_LENSES))
+    for col, (state_key, label) in zip(cols, _LENSES, strict=True):
+        active = st.session_state.get(state_key, False)
+        suffix = "on" if active else "off"
+        if col.button(label, key=f"{state_key}_{suffix}", type="secondary"):
+            st.session_state[state_key] = not active
+            st.rerun()
+
+
 st.title("Games")
 meta = load_current_meta()
 render_banner("predictions", f"generated {format_ts(meta.get('generated_at', 'no run on record'))}")
@@ -243,4 +266,6 @@ else:
     focus_game = _game_picker(games, game_context, stories, offers, parlays, legs)
 
 st.divider()
+if focus_game:
+    _render_lens_toggles()
 render_constellation_builder(offers, corr, ctxs, focus_game=focus_game)
