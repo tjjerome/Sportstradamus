@@ -14,10 +14,11 @@ dashboard. Supports MLB, NBA, NFL, NHL, and WNBA.
 4. [API Keys and Credentials](#api-keys-and-credentials)
 5. [First-Run Setup](#first-run-setup)
 6. [CLI Commands](#cli-commands)
-7. [Daily Workflow](#daily-workflow)
-8. [Configuration Files](#configuration-files)
-9. [Data Storage Layout](#data-storage-layout)
-10. [Deferred / Archived Code](#deferred--archived-code)
+7. [Training and Shipping a New Model](#training-and-shipping-a-new-model)
+8. [Daily Workflow](#daily-workflow)
+9. [Configuration Files](#configuration-files)
+10. [Data Storage Layout](#data-storage-layout)
+11. [Deferred / Archived Code](#deferred--archived-code)
 
 ---
 
@@ -222,6 +223,93 @@ poetry run kelly --bankroll 500 --from data/recommendations/2026-05-08.yaml
 cvxpy (SCS solver), pyyaml, and tabulate are required base dependencies
 installed by `poetry install`; the `kelly` / `pickem-build` paths import
 them at module top.
+
+---
+
+## Training and Shipping a New Model
+
+Each model covers one **cell** — a single league-and-market pair, such as *NBA points*. Before a
+cell's model is allowed to serve real recommendations it has to clear the **ship gates**: a fixed
+battery of automatic quality checks (Is it as accurate as the sportsbook? Are its predictions
+unbiased and well-calibrated?). A cell's release status is the `shipped` field in `stat_meta.json`,
+and it moves through three stages:
+
+- `withheld` — not served; still being worked on.
+- `devel` — served on the tracking server and watched on real settled bets.
+- `main` — fully live.
+
+The path from "I want to improve a cell" to "it's live" is five steps.
+
+### 1. Sweep the cell's strategy options
+
+`model-strategy-sweep` trains a quick throwaway model for every combination of training strategy
+(target shape × training loss × blend loss) and ranks them by how comfortably each would clear the
+ship gates — the margin it calls **slack**.
+
+```bash
+poetry run model-strategy-sweep --league NBA --market points   # one cell
+poetry run model-strategy-sweep --board                        # the default list of cells
+```
+
+As it runs it prints one line per combination, then a short table per cell with the winning
+strategy marked `SHIP` (green) or `KILL` (red). The full ranked results are saved to
+`data/research/strategy_research_board.csv`. **Nothing ships from this step** — the throwaway
+models only *rank* the options so you know which one to train for real.
+
+### 2. Confirm the winner with a real training run
+
+Copy the winning strategy into that cell's entry in
+`src/sportstradamus/data/config/stat_meta.json` (the `target_normalization` and `blending` fields),
+**then** train it properly:
+
+```bash
+poetry run meditate --league NBA --market points --bypass-withholding
+```
+
+Set the strategy fields *before* you run `meditate` — the training run reads them. A real training
+run (unlike the sweep) is the one whose result actually counts.
+
+### 3. Read the ship-gate scorecard
+
+`meditate` writes each cell's gate results into `model_stats.csv` (and its `.parquet` twin). To see
+the verdict for one cell on its own:
+
+```bash
+poetry run python -m sportstradamus.training.scorecard --league NBA --market points
+```
+
+It prints a **SHIP SUMMARY** naming any gate the cell fails. A cell that passes every gate is ready
+to ship. In plain terms the gates check:
+
+- **Accuracy** — the model is at least as good as the sportsbook.
+- **Star / bench bias** — predictions aren't systematically too high or too low for the best or the
+  lowest-usage players.
+- **Calibration** — the whole predicted distribution matches what actually happens.
+- **Confidence** — the model is neither over- nor under-confident.
+- **No shrinkage** — it doesn't quietly pull star players back toward the average.
+
+The exact thresholds behind each gate are in [docs/ship_gate.md](docs/ship_gate.md).
+
+### 4. Ship it to devel
+
+Change the cell's `shipped` field from `"withheld"` to `"devel"` in `stat_meta.json`, then
+sanity-check the config:
+
+```bash
+poetry run generate-ship-config --branch devel   # validates and summarizes; changes nothing
+```
+
+On `devel` the server serves the model and records how it does on real settled bets.
+
+### 5. Graduate to main
+
+Once a cell has proven itself on live bets, `check-graduation` shows where every cell stands and
+`generate-ship-config` promotes the ones that passed:
+
+```bash
+poetry run check-graduation                      # status of every cell
+poetry run generate-ship-config --branch main    # promote graduated cells to fully live
+```
 
 ---
 

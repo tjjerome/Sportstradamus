@@ -329,7 +329,9 @@ def meditate(
         click.echo("[NBA] loading cached gamelogs...")
         nba.load()
         if not deterministic:
-            click.echo("[NBA] updating from league API (this hits stats.nba.com - may take 30-60s)...")
+            click.echo(
+                "[NBA] updating from league API (this hits stats.nba.com - may take 30-60s)..."
+            )
             nba.update()
         stat_structs.update({"NBA": nba})
     if (
@@ -372,30 +374,37 @@ def meditate(
         if stat_data is None:
             continue
 
-        # Fit book weights for moneylines and totals before per-market loop
-        book_weights.setdefault(lg, {}).setdefault("Moneyline", {})
-        book_weights[lg]["Moneyline"] = fit_book_weights(
-            lg, "Moneyline", stat_data, archive, book_weights
-        )
-        book_weights.setdefault(lg, {}).setdefault("Totals", {})
-        book_weights[lg]["Totals"] = fit_book_weights(
-            lg, "Totals", stat_data, archive, book_weights
-        )
+        # --deterministic freezes the training matrix to the cached parquet
+        # (new_M empty), so book weights, player comps, and correlation matrices
+        # are never consumed by the train — skip the whole per-league setup
+        # (including correlate's per-run rebuild). Only trim_gamelog, which
+        # yields league_start_date, is still needed.
+        if not deterministic:
+            # Fit book weights for moneylines and totals before per-market loop
+            book_weights.setdefault(lg, {}).setdefault("Moneyline", {})
+            book_weights[lg]["Moneyline"] = fit_book_weights(
+                lg, "Moneyline", stat_data, archive, book_weights
+            )
+            book_weights.setdefault(lg, {}).setdefault("Totals", {})
+            book_weights[lg]["Totals"] = fit_book_weights(
+                lg, "Totals", stat_data, archive, book_weights
+            )
 
-        if lg == "MLB":
-            for extra_market in ("1st 1 innings", "pitcher win", "triples"):
-                book_weights.setdefault(lg, {}).setdefault(extra_market, {})
-                book_weights[lg][extra_market] = fit_book_weights(
-                    lg, extra_market, stat_data, archive, book_weights
-                )
-        elif lg == "NHL":
-            stat_data.dump_goalie_list()
+            if lg == "MLB":
+                for extra_market in ("1st 1 innings", "pitcher win", "triples"):
+                    book_weights.setdefault(lg, {}).setdefault(extra_market, {})
+                    book_weights[lg][extra_market] = fit_book_weights(
+                        lg, extra_market, stat_data, archive, book_weights
+                    )
+            elif lg == "NHL":
+                stat_data.dump_goalie_list()
 
-        with open(pkg_resources.files(data) / "config" / "book_weights.json", "w") as outfile:
-            json.dump(book_weights, outfile, indent=4)
+            with open(pkg_resources.files(data) / "config" / "book_weights.json", "w") as outfile:
+                json.dump(book_weights, outfile, indent=4)
 
-        stat_data.update_player_comps()
-        correlate(lg, stat_data, force=force)
+            stat_data.update_player_comps()
+            correlate(lg, stat_data, force=force)
+
         league_start_date = stat_data.trim_gamelog()
 
         for market in markets:

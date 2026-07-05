@@ -29,6 +29,7 @@ import json
 import warnings
 
 import numpy as np
+import tabulate
 from scipy.optimize import differential_evolution
 from scipy.stats import spearmanr
 from sklearn.neighbors import BallTree
@@ -51,6 +52,11 @@ _MIN_SPEARMAN_OBSERVATIONS: int = 50
 # while still allowing one feature to dominate at 4× the average weight.
 _DE_WEIGHT_LO: float = 0.1
 _DE_WEIGHT_HI: float = 8.0
+
+# Deadband on the composite-score delta below which the final verdict table
+# reports "~same". A Spearman shift under this floor is an order of magnitude
+# below the 0.05-0.10 signal band that counts as a meaningful comp feature.
+_VERDICT_DEADBAND: float = 0.001
 
 
 def build_weighted_comps(z_profile, weights, min_comps=5, max_comps=15):
@@ -1019,22 +1025,6 @@ def main():
 
         optimized["NHL"] = nhl_weights
 
-    # ── Summary ──
-    if score_report:
-        print("\n" + "=" * 60)
-        print("COMPOSITE SCORE SUMMARY")
-        print("=" * 60)
-        print(f"  {'Group':<15s}  {'Current':>10s}  {'Optimized':>10s}  {'Change':>10s}")
-        print(f"  {'-' * 15}  {'-' * 10}  {'-' * 10}  {'-' * 10}")
-        for group, (cur, opt) in sorted(score_report.items()):
-            delta = opt - cur
-            print(f"  {group:<15s}  {cur:>10.5f}  {opt:>10.5f}  {delta:>+10.5f}")
-        print()
-        print("  Note: Scores are sqrt(n)-weighted mean Spearman correlations.")
-        print("  A score of 0.05-0.10 across thousands of games is statistically")
-        print("  significant (p << 0.001) and meaningful as one feature among 30+.")
-        print("  Per-market p-values shown above (* p<.05, ** p<.01, *** p<.001).")
-
     # ── Weight comparison ──
     if optimized and not args.diagnostic_only:
         print("\n" + "=" * 60)
@@ -1077,6 +1067,27 @@ def main():
         else:
             print("\nOptimized weights JSON:")
             print(output_json)
+
+    if score_report:
+        rows = []
+        for group, (cur, opt) in sorted(score_report.items()):
+            delta = opt - cur
+            if delta > _VERDICT_DEADBAND:
+                marker = "improved"
+            elif delta < -_VERDICT_DEADBAND:
+                marker = "worse"
+            else:
+                marker = "~same"
+            rows.append([group, f"{cur:.5f}", f"{opt:.5f}", f"{delta:+.5f}", marker])
+
+        print("\nComposite score verdict (sqrt(n)-weighted mean Spearman):")
+        print(
+            tabulate.tabulate(
+                rows,
+                headers=["group", "current", "optimized", "delta", "result"],
+                tablefmt="github",
+            )
+        )
 
 
 if __name__ == "__main__":

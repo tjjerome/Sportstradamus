@@ -21,6 +21,7 @@ import json
 from pathlib import Path
 
 import click
+import tabulate
 
 from sportstradamus.helpers.io import (
     LIVE_METRICS_PATH,
@@ -51,6 +52,26 @@ def _write_meta(path: Path, meta: dict) -> None:
     with open(path, "w") as fh:
         json.dump(meta, fh, indent=4)
         fh.write("\n")
+
+
+def _print_changes(changes: list[tuple[str, str, str, str]], n_cells: int) -> None:
+    """Render the promotion/demotion change log as a table plus a one-line tally.
+
+    Table stays plain so ``tabulate`` keeps its columns aligned; only the tally
+    is colored (green when anything promoted, per check_graduation's state map).
+    """
+    if changes:
+        rows = [
+            [f"{league} {market}", old, new, "promoted" if new == "main" else "demoted"]
+            for league, market, old, new in changes
+        ]
+        click.echo(
+            tabulate.tabulate(rows, headers=["cell", "from", "to", "reason"], tablefmt="github")
+        )
+    n_promoted = sum(1 for *_, new in changes if new == "main")
+    n_demoted = len(changes) - n_promoted
+    tally = f"{n_promoted} promoted, {n_demoted} demoted, {n_cells - len(changes)} unchanged"
+    click.secho(tally, fg="green" if n_promoted else "yellow")
 
 
 def promote_for_main(
@@ -140,14 +161,9 @@ def main(branch, prune, meta, model_stats, live_metrics, dry_run) -> None:
     if branch == "main":
         graduated = graduated_cells(model_stats_path, live_metrics_path)
         meta_map, changes = promote_for_main(meta_map, graduated)
-        if not changes:
-            click.echo(f"# branch=main: no shipping changes (graduated={len(graduated)} cells)")
-        else:
-            for league, market, old, new in changes:
-                click.echo(f"  {league}/{market}: shipped {old} -> {new}")
-            click.echo(
-                f"# branch=main: {len(changes)} shipping changes (graduated={len(graduated)} cells)"
-            )
+        n_cells = sum(len(markets) for markets in meta_map.values())
+        click.secho(f"# branch=main (graduated={len(graduated)} cells)", bold=True)
+        _print_changes(changes, n_cells)
         if not dry_run and changes:
             _write_meta(meta_path, meta_map)
             click.echo(f"wrote {meta_path}")
