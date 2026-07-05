@@ -1,16 +1,15 @@
 """Offer-detail dialog and navigation for the dashboard.
 
-The evidence-chain view a user opens on any offer: a header edge badge, the model's
-"case" (the per-offer ``Why``), a game-context strip, and five tabs (History, Model,
-Comps, Other stats, Correlated). The Comps / Other-stats tabs read the
-``current_offer_details`` sidecar prerendered at ``prophecize`` time so the server never
-recomputes them live.
+The evidence-chain view a user opens on any offer: a themed header (Cinzel kicker,
+player + market, side line, edge badge, gold rule), the model's "case" (the per-offer
+``Why``), a one-line game-context strip, and five tabs (History, Model, Comps, Other
+stats, Correlated). The Comps / Other-stats tabs read the ``current_offer_details``
+sidecar prerendered at ``prophecize`` time so the server never recomputes them live.
 """
 
 import json
 from collections.abc import Mapping
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -25,6 +24,7 @@ from sportstradamus.dashboard.components.deep_dive_charts import (
     sparkline,
     strength_badge,
 )
+from sportstradamus.dashboard.components.glyphs import game_shape_glyph
 from sportstradamus.dashboard.components.slip_state import add_to_simple_slip
 from sportstradamus.dashboard.data import (
     GAMELOG_SCHEMA,
@@ -33,10 +33,14 @@ from sportstradamus.dashboard.data import (
     load_stat_tooltips,
 )
 from sportstradamus.dashboard.legs import find_offer_idx
-from sportstradamus.dashboard.narrative import SHAPE_HELP, context_strip
+from sportstradamus.dashboard.narrative import SHAPE_HELP, bet_arrow, context_strip
+from sportstradamus.dashboard.theme import GOLD, GRAY
 from sportstradamus.leg_schema import leg_label
 
 _DETAIL_KEY = ["League", "Date", "Player", "Market", "Opponent"]
+
+# Compact glyph for the one-line context strip — smaller than Tonight's cards.
+_STRIP_GLYPH_SIZE = 22
 
 
 def init_detail_state() -> None:
@@ -64,15 +68,6 @@ def drop_detail_on_page_change(state, page_id: str) -> None:
         state["_active_page"] = page_id
 
 
-def to_american(p: float) -> str:
-    """Format a win probability as American odds, or ``"N/A"`` outside (0, 1)."""
-    if not isinstance(p, float) or np.isnan(p) or p <= 0 or p >= 1:
-        return "N/A"
-    if p >= 0.5:
-        return f"-{round(p / (1 - p) * 100)}"
-    return f"+{round((1 - p) / p * 100)}"
-
-
 def render_offer_card(row: Mapping) -> None:
     """Compact offer card — the Streamlit twin of the constellation's JS hover card.
 
@@ -96,17 +91,46 @@ def _edge_badge(model_ev: float) -> str:
     return f":{color}[**{edge:+.0%} edge**]"
 
 
+def _p_over(row: pd.Series) -> float | None:
+    """Model P(outcome over the line), or ``None`` if ``Win Prob`` is absent.
+
+    ``Win Prob`` is ``max(Model Over, Model Under)`` with ``Bet`` its argmax, so it
+    approximates P(over) on an Over pick and its complement on an Under pick. The raw
+    ``Model Over`` is not persisted to the offer snapshot; this recovers it. Note:
+    ``_finalize_records`` clips each side to 90% independently before taking the max,
+    so on a >90%-confidence Under pick the derived complement can slightly overstate
+    true P(over).
+    """
+    win = row.get("Win Prob")
+    if not pd.notna(win):
+        return None
+    return float(win) if row.get("Bet") == "Over" else 1.0 - float(win)
+
+
 def _render_header(row: pd.Series) -> None:
+    """Themed-workbench header: Cinzel kicker, Plex name + market, side line, gold rule."""
+    market = row.get("Market Display", row.get("Market", "?"))
+    bet = row.get("Bet", "?")
+    arrow = bet_arrow(bet) if bet in ("Over", "Under") else ""
     head, badge = st.columns([4, 1])
-    head.subheader(f"{row.get('Player', '?')} — {row.get('Market', '?')}")
-    head.caption(
-        f"**{row.get('Bet', '?')} {row.get('Line', '?')}** · "
-        f"{row.get('Team', '?')} vs {row.get('Opponent', '?')} · "
-        f"{row.get('League', '?')} · {row.get('Platform', '?')}"
+    head.markdown(
+        f'<div class="celestial-kicker">◈ {row.get("League", "?")} · '
+        f"{row.get('Platform', '?')}</div>"
+        f'<div style="font-size:19px;font-weight:700;margin:2px 0 1px">'
+        f"{row.get('Player', '?')} — {market}</div>"
+        f'<div style="color:{GRAY};font-size:13px">{arrow} '
+        f"{bet} {row.get('Line', '?')} · {row.get('Team', '?')} vs "
+        f"{row.get('Opponent', '?')}</div>",
+        unsafe_allow_html=True,
     )
     model_ev = row.get("Model EV")
     if pd.notna(model_ev):
         badge.markdown(_edge_badge(float(model_ev)))
+    st.markdown(
+        f'<hr style="height:1px;border:0;margin:10px 0 4px;'
+        f'background:linear-gradient(90deg,{GOLD},transparent)">',
+        unsafe_allow_html=True,
+    )
 
 
 def _render_case(row: pd.Series) -> None:
@@ -120,14 +144,21 @@ def _pct(v) -> str:
     return f"{v * 100:+.1f}%" if pd.notna(v) and isinstance(v, int | float) else "N/A"
 
 
-def _team_total_metric(col, ou, strip: dict | None) -> None:
+def _team_total_text(ou, strip: dict | None) -> str:
+    """``"88.2 team total (+3.1)"`` — implied team total and its delta vs the season avg."""
     if not (pd.notna(ou) and isinstance(ou, int | float)):
-        col.metric("Implied team total", "N/A")
-        return
-    delta = None
+        return "team total N/A"
     if strip and not pd.isna(strip["baseline_total"]):
-        delta = f"{ou - strip['baseline_total'] / 2:+.1f} vs avg"
-    col.metric("Implied team total", f"{ou:.1f}", delta=delta, delta_color="off")
+        return f"{ou:.1f} team total ({ou - strip['baseline_total'] / 2:+.1f})"
+    return f"{ou:.1f} team total"
+
+
+def _win_prob_text(strip: dict | None) -> str:
+    """``"64% win prob"`` from the game moneyline favorite prob, or ``"win prob N/A"``."""
+    prob = strip["ml_fav_prob"] if strip else None
+    if prob is not None and pd.notna(prob):
+        return f"{prob:.0%} win prob"
+    return "win prob N/A"
 
 
 def _render_context_strip(row: pd.Series, game_context: pd.DataFrame) -> None:
@@ -136,13 +167,22 @@ def _render_context_strip(row: pd.Series, game_context: pd.DataFrame) -> None:
         if not game_context.empty
         else None
     )
-    c1, c2, c3, c4 = st.columns(4)
-    _team_total_metric(c1, row.get("O/U"), strip)
-    ml = row.get("Moneyline")
-    c2.metric("Moneyline", to_american(ml) if pd.notna(ml) else "N/A")
     shape = strip["shape"] if strip else None
-    c3.metric("Game shape", str(shape).title() if shape else "N/A", help=SHAPE_HELP)
-    c4.metric("DVPOA", _pct(row.get("DVPOA")))
+    glyph = (
+        game_shape_glyph(str(shape), size=_STRIP_GLYPH_SIZE)
+        if shape
+        else f'<span style="color:{GRAY}">shape N/A</span>'
+    )
+    st.markdown(
+        f'<div title="{SHAPE_HELP}" style="font-family:\'IBM Plex Mono\',monospace;'
+        f"color:{GRAY};font-size:12px;display:flex;align-items:center;gap:8px;"
+        f'flex-wrap:wrap;margin:2px 0 6px">'
+        f"<span>{_team_total_text(row.get('O/U'), strip)}</span><span>·</span>"
+        f"<span>{_win_prob_text(strip)}</span><span>·</span>"
+        f"{glyph}<span>·</span>"
+        f"<span>DVPOA {_pct(row.get('DVPOA'))}</span></div>",
+        unsafe_allow_html=True,
+    )
 
 
 def _detail_row(row: pd.Series, details: pd.DataFrame) -> pd.Series | None:
@@ -191,7 +231,7 @@ def _render_comps_tab(detail: pd.Series | None, row: pd.Series) -> None:
 
 def _render_stat_row(entry: dict, tooltip: str | None) -> None:
     """``delta_color="off"`` places the percentile chip below the metric without
-    coloring it green/red — same trick as ``_team_total_metric``.
+    coloring it green/red.
     """
     num_col, spark_col = st.columns([1, 1])
     pct = entry.get("percentile")
@@ -253,10 +293,10 @@ def _select_history_df(
 ) -> pd.DataFrame:
     if hist_df.empty or league == "NFL" or h2h_df.empty:
         return hist_df
-    filter_opt = st.radio(
-        "Filter by opponent:",
+    filter_opt = st.segmented_control(
+        "Filter by opponent",
         options=["All games", f"vs {opponent}"],
-        horizontal=True,
+        default="All games",
         key=f"h2h_filter_{row_id}",
     )
     return h2h_df if filter_opt == f"vs {opponent}" else hist_df
@@ -308,9 +348,12 @@ def _render_model_tab(row: pd.Series) -> None:
             consensus_line=row.get("Consensus Line"),
         )
         st.altair_chart(chart, width="stretch")
+        p_over = _p_over(row)
+        if p_over is not None:
+            st.markdown(f":green[**P(over) {p_over:.0%}**]")
         st.caption(
-            ":material/circle: app line (dashed) · :gray[consensus line (solid)] · "
-            ":orange[model projection (dot)]"
+            ":green[over] / :red[under] mass · app line (dashed white) · "
+            ":gray[consensus line (solid)] · model projection (gold dot)"
         )
     except Exception as e:
         st.error(f"Error computing distribution: {e}")

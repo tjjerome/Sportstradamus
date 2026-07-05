@@ -1,9 +1,10 @@
-"""Deep-dive Model-tab distribution chart: the three line/point labels.
+"""Deep-dive History/Model chart pins: colors, line overlays, gold tag.
 
 ``distribution_chart`` overlays three references on the predictive curve — the app
 betting line (white dashed rule, unchanged), the consensus market line (a distinct
 solid rule), and the model projection (a dot + numeric label, not a rule). These pins
-assert the altair layer spec carries each without re-shading the over/under split.
+assert the altair layer spec carries each without re-shading the over/under split, and
+that both charts encode over/under with the theme green/red (P8 Phase C rev-3 recolor).
 """
 
 from __future__ import annotations
@@ -14,9 +15,10 @@ import pytest
 from sportstradamus.dashboard.components.deep_dive_charts import (
     distribution_chart,
     distribution_frame,
+    history_chart,
     resolve_std,
 )
-from sportstradamus.dashboard.theme import GOLD
+from sportstradamus.dashboard.theme import GOLD, GREEN, RED
 
 _APP_LINE = "#FFFFFF"
 
@@ -125,3 +127,80 @@ def test_nan_overlays_skipped():
     # NaN projection + missing consensus collapse back to just the app line.
     assert len(_rules(_layers(chart))) == 1
     assert not _marks_of_type(_layers(chart), "point", "circle")
+
+
+def _side_color_range(chart) -> list[str]:
+    """The green/red range of the Side color scale, wherever it sits in the layer tree."""
+    spec = chart.to_dict()
+    stack = list(spec.get("layer", [spec]))
+    while stack:
+        node = stack.pop()
+        if "layer" in node:
+            stack.extend(node["layer"])
+        scale = node.get("encoding", {}).get("color", {}).get("scale")
+        if isinstance(scale, dict) and "range" in scale:
+            return scale["range"]
+    raise AssertionError("no Side color scale found")
+
+
+def _color_legend_shown(chart) -> bool:
+    spec = chart.to_dict()
+    stack = list(spec.get("layer", [spec]))
+    while stack:
+        node = stack.pop()
+        if "layer" in node:
+            stack.extend(node["layer"])
+        color = node.get("encoding", {}).get("color", {})
+        if "scale" in color and color.get("legend") is not None:
+            return True
+    return False
+
+
+def _history_df() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "Label": ["@BOS", "vs NYK", "@PHI"],
+            "StatValue": [22.0, 18.0, 26.0],
+            "Hit": [True, False, True],
+        }
+    )
+
+
+def test_history_bars_green_over_red_under():
+    chart = history_chart(_history_df(), 20.0)
+    # Over reads green, under red — keyed on Hit (StatValue >= line), theme tokens.
+    assert _side_color_range(chart) == [GREEN, RED]
+
+
+def test_history_gold_line_tag_present():
+    chart = history_chart(_history_df(), 23.5)
+    texts = _marks_of_type(_layers(chart), "text")
+    assert texts and texts[0]["mark"].get("color") == GOLD
+    # The tag reads "line {x}" with the app line value, %.10g-formatted (no trailing zero).
+    tag_row = texts[0]["encoding"]["text"]
+    assert tag_row["field"] == "tag"
+
+
+def test_history_app_line_still_white_dashed():
+    rules = _rules(_layers(history_chart(_history_df(), 20.0)))
+    assert len(rules) == 1
+    assert rules[0]["mark"]["color"] == _APP_LINE and rules[0]["mark"].get("strokeDash")
+
+
+def test_distribution_side_recolored_green_red_continuous():
+    df_pdf, y_title, is_cont = distribution_frame("SkewNormal", 20.0, 5.0, {}, 18.5)
+    chart = distribution_chart(df_pdf, is_cont, 18.5, "PTS", y_title)
+    assert _side_color_range(chart) == [GREEN, RED]
+
+
+def test_distribution_side_recolored_green_red_discrete():
+    df_pdf, y_title, is_cont = distribution_frame("NegBin", 6.0, 3.0, {"r": 4.0}, 5.5)
+    chart = distribution_chart(df_pdf, is_cont, 5.5, "AST", y_title)
+    assert _side_color_range(chart) == [GREEN, RED]
+
+
+def test_distribution_drops_redundant_over_under_legend():
+    # The fixed green-above/red-below split makes the color legend chart junk (rev 3).
+    df_pdf, y_title, is_cont = distribution_frame("SkewNormal", 20.0, 5.0, {}, 18.5)
+    chart = distribution_chart(df_pdf, is_cont, 18.5, "PTS", y_title, projection=20.0)
+    assert not _color_legend_shown(chart)

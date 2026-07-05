@@ -78,10 +78,11 @@ def home_away(group: pd.DataFrame) -> tuple[str, str]:
 
 
 def context_strip(ctx_df: pd.DataFrame, *, game: str, date) -> dict | None:
-    """Total / derived spread / favorite / shape for one game, or ``None`` if absent.
+    """Total / derived spread / favorite / shape / favorite win prob for one game.
 
-    ``ctx_df`` is ``current_game_context`` (keyed ``League, Game, Date``). The
-    caller formats — ``fav_team`` may be ``None`` on an even game (spread 0).
+    ``None`` if the game is absent. ``ctx_df`` is ``current_game_context`` (keyed
+    ``League, Game, Date``). The caller formats — ``fav_team`` may be ``None`` and
+    ``ml_fav_prob`` NaN on a game with no moneyline (an even game has spread 0).
     """
     if ctx_df.empty:
         return None
@@ -95,4 +96,5 @@ def context_strip(ctx_df: pd.DataFrame, *, game: str, date) -> dict | None:
         "fav_team": row["fav_team"],
         "shape": row["shape"],
         "baseline_total": float(row["baseline_total"]),
+        "ml_fav_prob": float(row["ml_fav_prob"]),
     }
