@@ -223,6 +223,81 @@ def test_flag_col_omitted_by_default() -> None:
     assert "getRowStyle" not in options
 
 
+def test_rail_col_adds_get_row_style_jscode_for_each_mapped_value() -> None:
+    """Gate matrix's 3-state rail (P8 Task B5): a categorical string column, unlike
+    ``flag_col``'s numeric threshold — needs its own ``getRowStyle`` keyed off a
+    precomputed ``rail`` value rather than a live comparison.
+    """
+    df = pd.DataFrame({"Market": ["A", "B", "C"], "rail": ["amber", "red", "none"]})
+    options = build_themed_grid_options(
+        df,
+        numeric_cols=[],
+        rail_col="rail",
+        rail_colors={"amber": theme.ORANGE, "red": theme.RED},
+    )
+    assert hasattr(options["getRowStyle"], "js_code")
+    assert theme.ORANGE in options["getRowStyle"].js_code
+    assert theme.RED in options["getRowStyle"].js_code
+    assert "boxShadow" in options["getRowStyle"].js_code
+
+
+def test_rail_col_survives_as_row_data_when_also_hidden() -> None:
+    """A ``hide``-configured column still rides along in AG Grid's row data (only its own
+    visible grid column is suppressed) — ``getRowStyle`` reads ``params.data[rail_col]``
+    from that row data, so a caller that both hides ``rail`` (it's not meant to display)
+    and uses it as ``rail_col`` must not lose the value the callback depends on. Regression
+    for a real P8 Task B5 bug: an earlier ``gate_matrix.render_gate_matrix`` dropped the
+    ``rail`` column from the frame entirely before calling ``AgGrid``, so the rail never
+    painted despite ``getRowStyle`` being wired correctly — `hide=True` keeps the column
+    (and its data) present, unlike dropping it from the DataFrame outright.
+    """
+    df = pd.DataFrame({"Market": ["A", "B"], "rail": ["amber", "none"]})
+    options = build_themed_grid_options(
+        df,
+        numeric_cols=[],
+        hidden_cols=["rail"],
+        rail_col="rail",
+        rail_colors={"amber": theme.ORANGE},
+    )
+    defs = _column_defs(options)
+    assert defs["rail"]["hide"] is True
+    assert hasattr(options["getRowStyle"], "js_code")
+    assert theme.ORANGE in options["getRowStyle"].js_code
+
+
+def test_rail_col_omitted_by_default() -> None:
+    df = pd.DataFrame({"Market": ["A", "B"], "rail": ["amber", "none"]})
+    options = build_themed_grid_options(df, numeric_cols=[])
+    assert "getRowStyle" not in options
+
+
+def test_glyph_cols_color_pass_fail_glyphs_green_red() -> None:
+    """Gate matrix's ●/○ pass/fail glyphs (P8 Task B5) get a boolean-keyed cellStyle —
+    green for the pass glyph, red for the fail glyph — never the gold accent, since
+    this is a data mark (DESIGN §4a binds gold to decoration/interactive-highlight only).
+    """
+    df = pd.DataFrame({"g1_pass": ["●", "○"], "g2_pass": ["○", "●"]})
+    options = build_themed_grid_options(
+        df,
+        numeric_cols=[],
+        glyph_cols=["g1_pass", "g2_pass"],
+        glyph_colors={"●": theme.GREEN, "○": theme.RED},
+    )
+    defs = _column_defs(options)
+    for col in ("g1_pass", "g2_pass"):
+        style = _cellstyle_text(defs[col]["cellStyle"])
+        assert theme.GREEN in style
+        assert theme.RED in style
+        assert theme.GOLD not in style
+
+
+def test_glyph_cols_noop_without_kwarg() -> None:
+    df = pd.DataFrame({"g1_pass": ["●", "○"]})
+    options = build_themed_grid_options(df, numeric_cols=[])
+    defs = _column_defs(options)
+    assert "cellStyle" not in defs["g1_pass"]
+
+
 def test_market_display_labels_back_to_market_header() -> None:
     """Market Display carries the slug's prose label but the grid header reads "Market"
     (mockup ``docs/mockups/p8-board.html:104``) — columns.LABELS renames it back, same

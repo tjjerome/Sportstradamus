@@ -160,6 +160,78 @@ def _get_row_style(flag_col: str, flag_below: float) -> JsCode:
     )
 
 
+def _get_row_style_for_rail(rail_col: str, rail_colors: Mapping[str, str]) -> JsCode:
+    """A per-row ``getRowStyle`` callback painting a rail color keyed off a precomputed
+    categorical ``rail_col`` value (e.g. the gate matrix's ``amber``/``red``/``none``).
+
+    Same inset-box-shadow shape as :func:`_get_row_style`, but a value lookup rather
+    than a numeric threshold — ``flag_col``'s single-color/single-threshold contract
+    doesn't fit a multi-state category, so this is a separate callback rather than a
+    ``flag_col`` generalization.
+    """
+    branches = "".join(
+        "params.data[" + repr(rail_col) + "]===" + repr(value) + " ? {boxShadow: "
+        "'inset 3px 0 0 " + color + "'} : "
+        for value, color in rail_colors.items()
+    )
+    return JsCode("function(params){return params.data ? " + branches + "null : null;}")
+
+
+def _glyph_cellstyle(glyph_colors: Mapping[str, str]) -> JsCode:
+    """A ``cellStyle`` ``JsCode`` coloring a cell by its own literal glyph value (e.g.
+    ``●``/``○``), right-aligned mono like every other cell in these grids.
+    """
+    branches = "".join(
+        "params.value===" + repr(glyph) + " ? " + _heat_expr(color) + " : "
+        for glyph, color in glyph_colors.items()
+    )
+    return JsCode("function(params) { return (" + branches + _RIGHT_EXPR + "); }")
+
+
+def _row_style_options(
+    flag_col: str | None,
+    flag_below: float,
+    rail_col: str | None,
+    rail_colors: Mapping[str, str] | None,
+) -> dict:
+    """The ``getRowStyle`` grid-options fragment for whichever rail kind was requested.
+
+    ``flag_col`` (numeric threshold) and ``rail_col`` (categorical lookup) both paint a
+    row rail but via different callbacks; a caller passing both gets ``rail_col``'s
+    style — checked first, always the winner regardless of kwarg order — rather than
+    a silent combination of the two.
+    """
+    if rail_col is not None:
+        return {"getRowStyle": _get_row_style_for_rail(rail_col, rail_colors or {})}
+    if flag_col is not None:
+        return {"getRowStyle": _get_row_style(flag_col, flag_below)}
+    return {}
+
+
+def _configure_remaining_columns(
+    gb: GridOptionsBuilder,
+    present: set[str],
+    *,
+    numeric_cols: Sequence[str],
+    glyph_cols: Sequence[str],
+    glyph_colors: Mapping[str, str] | None,
+    help_map: Mapping[str, str],
+    hidden_cols: Sequence[str],
+) -> None:
+    """The non-numeric column passes: glyph cellStyles, header tooltips on columns
+    ``numeric_cols`` didn't already cover, and ``hide`` on ``hidden_cols``.
+    """
+    for col in glyph_cols:
+        if col in present:
+            gb.configure_column(col, cellStyle=_glyph_cellstyle(glyph_colors or {}))
+    for col, tip in help_map.items():
+        if col not in numeric_cols and col in present:
+            gb.configure_column(col, headerTooltip=tip)
+    for col in hidden_cols:
+        if col in present:
+            gb.configure_column(col, hide=True)
+
+
 def build_themed_grid_options(
     df: pd.DataFrame,
     *,
@@ -174,6 +246,10 @@ def build_themed_grid_options(
     hidden_cols: Sequence[str] = (),
     flag_col: str | None = None,
     flag_below: float = 0.0,
+    rail_col: str | None = None,
+    rail_colors: Mapping[str, str] | None = None,
+    glyph_cols: Sequence[str] = (),
+    glyph_colors: Mapping[str, str] | None = None,
 ) -> dict:
     """Token-themed ``gridOptions``: right-aligned mono numerals, an optional diverging
     heatmap on ``heatmap_col``, per-column header tooltips, and a "%" display suffix on
@@ -185,7 +261,14 @@ def build_themed_grid_options(
     own grid column — e.g. ``Bet`` for the arrow renderer, or a logic-only slug column
     that a display column already covers. ``flag_col`` paints an amber left-rail on any
     row whose value in that column is below ``flag_below`` (e.g. a negative Brier Skill
-    Score) via AG Grid's ``getRowStyle``.
+    Score) via AG Grid's ``getRowStyle``. ``rail_col``/``rail_colors`` is the categorical
+    sibling of ``flag_col`` — a precomputed string column (e.g. ``amber``/``red``/``none``)
+    mapped straight to a rail color, for cases a single numeric threshold can't express.
+    Only one of ``flag_col``/``rail_col`` should be passed per call — both set
+    ``getRowStyle`` and ``rail_col`` always wins if both are given, regardless of
+    kwarg order (a fixed precedence, not "last kwarg wins").
+    ``glyph_cols``/``glyph_colors`` color cells by their own literal value (e.g. a
+    ●/○ pass/fail glyph) rather than by a numeric heatmap.
     """
     help_map = dict(header_help or {})
     pct = set(percent_cols)
@@ -196,8 +279,7 @@ def build_themed_grid_options(
     # enableBrowserTooltips renders the header tooltips as native browser titles (reliable;
     # AG Grid's own tooltip component otherwise needs extra wiring and a long show delay).
     grid_opts = {"rowStyle": {"cursor": "pointer"}, "enableBrowserTooltips": True}
-    if flag_col is not None:
-        grid_opts["getRowStyle"] = _get_row_style(flag_col, flag_below)
+    grid_opts.update(_row_style_options(flag_col, flag_below, rail_col, rail_colors))
     gb.configure_grid_options(**grid_opts)
     for col in numeric_cols:
         if col not in present:
@@ -213,12 +295,15 @@ def build_themed_grid_options(
             tip=help_map.get(col),
         )
         gb.configure_column(col, **kwargs)
-    for col, tip in help_map.items():
-        if col not in numeric_cols and col in present:
-            gb.configure_column(col, headerTooltip=tip)
-    for col in hidden_cols:
-        if col in present:
-            gb.configure_column(col, hide=True)
+    _configure_remaining_columns(
+        gb,
+        present,
+        numeric_cols=numeric_cols,
+        glyph_cols=glyph_cols,
+        glyph_colors=glyph_colors,
+        help_map=help_map,
+        hidden_cols=hidden_cols,
+    )
     return gb.build()
 
 
@@ -235,6 +320,10 @@ def render_themed_grid(
     hidden_cols: Sequence[str] = (),
     flag_col: str | None = None,
     flag_below: float = 0.0,
+    rail_col: str | None = None,
+    rail_colors: Mapping[str, str] | None = None,
+    glyph_cols: Sequence[str] = (),
+    glyph_colors: Mapping[str, str] | None = None,
     height: int = 720,
     key: str | None = None,
 ) -> list[dict]:
@@ -255,6 +344,10 @@ def render_themed_grid(
         hidden_cols=hidden_cols,
         flag_col=flag_col,
         flag_below=flag_below,
+        rail_col=rail_col,
+        rail_colors=rail_colors,
+        glyph_cols=glyph_cols,
+        glyph_colors=glyph_colors,
     )
     grid = AgGrid(
         df,

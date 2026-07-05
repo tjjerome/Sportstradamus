@@ -41,10 +41,23 @@ to this one instead of a fresh read of the newly patched path. Call
 data comes through a cached loader whose path constant this test patches — it makes
 the test's outcome independent of what ran earlier in the session instead of chasing
 which specific prior test caused the staleness.
+
+A fourth gap, hit by the Lab Training test (P8 Task B5): ``lab_training.py`` imports
+``MODEL_STATS_PATH``/``LIVE_METRICS_PATH`` directly from ``helpers.io``
+(``from sportstradamus.helpers.io import LIVE_METRICS_PATH, MODEL_STATS_PATH``)
+rather than going through ``dashboard.data`` at all — a *third* module-level binding
+of ``MODEL_STATS_PATH`` beyond ``helpers.io`` itself and ``dashboard.data``'s own
+`from ... import MODEL_STATS_PATH`. The page reads its own bound name directly
+(``MODEL_STATS_PATH.stat().st_mtime``, ``lifecycle_table(MODEL_STATS_PATH, ...)``),
+so all three locations need patching — plus ``dashboard.data.MODEL_STATS_PATH`` for
+``load_model_stats()``'s own cached read. Any page that imports a path constant by
+name into its own module (rather than only calling a `dashboard.data` loader function)
+needs this same triple-binding treatment.
 """
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 import pandas as pd
@@ -273,3 +286,94 @@ def test_lab_diagnostics_renders_market_table_and_start_here_strip(monkeypatch, 
     assert any("Start here" in c.value for c in at.caption)
     tile_labels = {m.label for m in at.metric}
     assert {"NBA - PTS", "NBA - AST"} <= tile_labels
+
+
+def _training_cell(league: str, market: str, *, ship: bool, n_fails: int) -> dict:
+    """One ``model_stats.parquet`` row with exactly ``n_fails`` gates set to False,
+    starting from ``g6_pass`` backward so a 1-fail cell fails only g6 (the newest
+    gate this task wires up), matching the real schema's full gate + g6 column set.
+    """
+    gate_cols = ["g1_pass", "g2_pass", "g3_pass", "g4_pass", "g5_pass", "g6_pass"]
+    fail_set = set(gate_cols[len(gate_cols) - n_fails :]) if n_fails else set()
+    row = {
+        "league": league,
+        "market": market,
+        "distribution": "SkewNormal",
+        "shipped": "devel",
+        "n_validation": 500,
+        "brier_skill_score": 0.10 if ship else -0.02,
+        "kelly_shrinkage": 0.10 if ship else 0.0,
+        "g1_brier_diff_mean": -0.05,
+        "g1_brier_diff_ci_lo": -0.08,
+        "g1_brier_diff_ci_hi": -0.02,
+        "g2_star_z": 0.5,
+        "g3_bench_z": 0.5,
+        "g4_iqr_ratio": 1.0,
+        "g5_ece_debiased": 0.01,
+        "g6_star_ci_hi": 0.90,
+        "g6_star_ref": 0.94,
+        "g6_recent_corr": 0.40,
+        "ship": ship,
+    }
+    for col in gate_cols:
+        row[col] = col not in fail_set
+    return row
+
+
+_TRAINING_ROWS = [
+    _training_cell("NBA", "PTS", ship=True, n_fails=0),
+    _training_cell("NBA", "AST", ship=False, n_fails=1),
+]
+
+
+def test_lab_training_renders_gate_matrix_and_glance_strip(monkeypatch, tmp_path):
+    """P8 Task B5 smoke: Lab Training navigates clean with the g6 Ship-gates columns,
+    the run-at-a-glance strip, and the gate matrix.
+
+    ``MODEL_STATS_PATH`` is imported directly into ``lab_training.py`` (not via
+    ``dashboard.data``) — a third binding beyond ``helpers.io`` and ``dashboard.data``
+    themselves, see the module docstring's fourth gap. ``LIVE_METRICS_PATH`` points at
+    a nonexistent path; ``read_gate2`` tolerates that (empty frame, every cell
+    ``in-test``) so only ``MODEL_STATS_PATH`` needs a real fixture.
+
+    A fifth gap, hit only in full-suite ordering (not in isolation): if
+    ``test_dashboard_no_archive_lock.py``'s import-every-dashboard-module sweep ran
+    earlier in the same session, its manual ``sys.modules`` delete/restore dance
+    (clearing every ``sportstradamus.dashboard*`` entry, walking + reimporting them
+    all under a stubbed ``read_parquet_safe``, then restoring the pre-sweep entries)
+    can leave ``sys.modules['sportstradamus.dashboard.data']`` transiently
+    inconsistent with what a plain ``import sportstradamus.dashboard.data`` statement
+    resolves to — pytest monkeypatch's dotted-string form (``resolve()``) reads
+    ``sys.modules`` directly and can therefore patch a *different* module object than
+    the one ``load_model_stats()`` ends up calling through, silently discarding the
+    patch. Getting every module via ``importlib.import_module`` and patching the
+    returned object directly (never the dotted-string form) sidesteps that
+    ``sys.modules`` divergence entirely, for the same reason the ``lab_training``
+    binding above needs it.
+    """
+    fixture = tmp_path / "model_stats.parquet"
+    pd.DataFrame(_TRAINING_ROWS).to_parquet(fixture)
+    missing_live_metrics = tmp_path / "live_metrics_per_market.parquet"
+    st.cache_data.clear()
+
+    io_module = importlib.import_module("sportstradamus.helpers.io")
+    data_module = importlib.import_module("sportstradamus.dashboard.data")
+    lab_training_module = importlib.import_module(
+        "sportstradamus.dashboard.surfaces.lab_training"
+    )
+    monkeypatch.setattr(io_module, "MODEL_STATS_PATH", fixture)
+    monkeypatch.setattr(data_module, "MODEL_STATS_PATH", fixture)
+    monkeypatch.setattr(lab_training_module, "MODEL_STATS_PATH", fixture)
+    monkeypatch.setattr(lab_training_module, "LIVE_METRICS_PATH", missing_live_metrics)
+
+    at = AppTest.from_file(str(_APP), default_timeout=30)
+    at.run()
+    at.switch_page("surfaces/lab_training.py")
+    at._page_hash = calc_hash("lab-training")  # see module docstring
+    at.run()
+    assert not at.exception
+    assert at.title[0].value == "Model Training Diagnostics"
+    tile_labels = {m.label: m.value for m in at.metric}
+    assert tile_labels.get("Cells trained") == "2"
+    assert tile_labels.get("Shipping (all gates)") == "1"
+    assert tile_labels.get("One gate short") == "1"
