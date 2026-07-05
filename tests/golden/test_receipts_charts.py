@@ -62,7 +62,7 @@ def test_marker_label_shows_units_and_abbreviated_month():
 
 def test_empty_worst_month_produces_no_marker_trace():
     fig = cumulative_profit_chart(_daily_profit(), {})
-    assert all(t.mode != "markers" for t in fig.data)
+    assert not any(t.mode and "markers" in t.mode for t in fig.data)
 
 
 def test_axes_carry_signed_units_and_month_tick_format():
