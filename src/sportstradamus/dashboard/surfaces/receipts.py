@@ -8,7 +8,6 @@ able to verify profitability unaided.
 """
 
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from sklearn.metrics import brier_score_loss
@@ -43,7 +42,19 @@ from sportstradamus.dashboard.data import (
     sidebar_filters,
     sport_filtered,
 )
-from sportstradamus.dashboard.surfaces.receipts_charts import reliability_diagram
+from sportstradamus.dashboard.surfaces.receipts_charts import (
+    cumulative_profit_chart,
+    reliability_diagram,
+)
+from sportstradamus.dashboard.theme import GOLD, GRAY
+
+# Nebula wash (DESIGN.md §3): blue radial stop + gold held at 7% opacity, both well under
+# the hero-card 12% gold ceiling — literal values ported from the mockup's own .hero
+# background (docs/mockups/p8-receipts.html:29-30).
+_HERO_BG = (
+    "radial-gradient(ellipse at 88% -20%, rgba(46,107,230,.15), transparent 48%),"
+    "radial-gradient(ellipse at 8% 130%, rgba(201,162,39,.07), transparent 46%),#1A1D24"
+)
 
 # Window filter re-scoping the hero + by-dimension grid only (every other df-consuming
 # section keeps reading the full, unwindowed df). Four of TIMEFRAMES' five labels map to
@@ -60,6 +71,25 @@ _RECEIPTS_WINDOW_DAYS = {
     label: days for label, days in TIMEFRAMES if label in _RECEIPTS_WINDOW_LABELS
 }
 _RECEIPTS_WINDOW_OPTIONS = [*_RECEIPTS_WINDOW_LABELS, "All"]
+
+
+def _hero_stat(label: str, value: str, *, size: str, color: str = "") -> str:
+    """One Cinzel-kicker / Plex-mono-value stat span for the hero's stats row.
+
+    ``size`` is ``"xl"`` (38px, gold) for the single hero number or ``"lg"`` (26px,
+    default text color) for the supporting stats beside it — the mockup's own
+    ``.v.xl``/``.v.lg`` weight split (only ROI gets the hero treatment; Win rate/Record
+    read as normal-weight context).
+    """
+    font_size = 38 if size == "xl" else 26
+    color_style = f"color:{color};" if color else ""
+    return (
+        f"<span><div style=\"font-family:'Cinzel',serif;font-size:9px;"
+        f'letter-spacing:.13em;text-transform:uppercase;color:{GRAY}">{label}</div>'
+        f"<div style=\"font-family:'IBM Plex Mono',monospace;font-weight:600;"
+        f'line-height:1;font-size:{font_size}px;{color_style}">{value}</div></span>'
+    )
+
 
 st.title("Receipts")
 render_banner("stats", "the track record, with the losers shown")
@@ -113,15 +143,26 @@ else:
     cutoff = pd.Timestamp.today().normalize() - pd.Timedelta(days=_RECEIPTS_WINDOW_DAYS[window])
     df_windowed = df.loc[df["_date"] >= cutoff.date()]
 
-st.subheader("If you'd tailed every rec")
 record = tailed_record(df_windowed)
-h1, h2, h3 = st.columns(3)
-h1.metric("ROI", f"{record['roi']:+.1%}")
-h2.metric("Win rate", f"{record['win_pct']:.1%}")
-h3.metric("Record", f"{record['wins']:,}–{record['losses']:,}")
-st.caption(
+wm = worst_month(df)
+hero_stats = "".join(
+    (
+        _hero_stat("ROI", f"{record['roi']:+.1%}", size="xl", color=GOLD),
+        _hero_stat("Win rate", f"{record['win_pct']:.1%}", size="lg"),
+        _hero_stat("Record", f"{record['wins']:,}–{record['losses']:,}", size="lg"),
+    )
+)
+st.markdown(
+    f'<div style="position:relative;overflow:hidden;border:1px solid #2A2E37;'
+    f'border-radius:6px;padding:18px 20px;background:{_HERO_BG}">'
+    f"<div style=\"font-family:'Cinzel',serif;font-size:9.5px;letter-spacing:.18em;"
+    f"text-transform:uppercase;color:{GOLD}\">If you'd tailed every rec</div>"
+    f'<div style="display:flex;gap:34px;align-items:flex-end;flex-wrap:wrap;'
+    f'margin-top:6px">{hero_stats}</div>'
+    f'<div style="color:{GRAY};font-size:12px;margin-top:12px">'
     f"+{record['units']:.0f} units across {record['n']:,} unique resolved recs — flat -110 "
-    "(win +0.91u, loss -1u), deduped across books, pushes excluded."
+    "(win +0.91u, loss -1u), deduped across books, pushes excluded.</div></div>",
+    unsafe_allow_html=True,
 )
 
 daily_profit = (
@@ -131,14 +172,7 @@ daily_profit = (
     .sort_values("_date")
 )
 daily_profit["Cumulative Profit"] = daily_profit["Profit"].cumsum()
-fig_profit = px.area(
-    daily_profit,
-    x="_date",
-    y="Cumulative Profit",
-    labels={"_date": "Date", "Cumulative Profit": "Units"},
-)
-fig_profit.update_layout(height=360)
-st.plotly_chart(fig_profit, width="stretch")
+st.plotly_chart(cumulative_profit_chart(daily_profit, wm), width="stretch")
 
 st.download_button(
     "Export filtered history (CSV)",
@@ -154,7 +188,6 @@ clv_summary = clv.summarize(history)
 ev_rec = ev_threshold_record(df)
 brier = brier_score_loss(df["Hit"], df[prob_col].clip(0, 1))
 book_skill = compute_book_brier_skill_score(df)
-wm = worst_month(df)
 
 s1, s2, s3, s4 = st.columns(4)
 s1.metric(
