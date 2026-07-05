@@ -45,6 +45,11 @@ from sportstradamus.strategies.kelly import fractional_kelly_stake
 # norm.ppf blows up at the open-interval ends; clip win probs just inside.
 _PROB_EPS: float = 1e-6
 
+# Astrolabe crown reference maxima — fixed shared axis scale, spec §4.4c.
+_CROWN_WIN: float = 0.30
+_CROWN_EV: float = 0.12
+_CROWN_KELLY: float = 0.03
+
 
 @dataclass(frozen=True)
 class SlipScore:
@@ -94,6 +99,48 @@ def score_slip(
         model_shrinkage=shrinkage,
     )
     return SlipScore(indep_p, joint_p, payout, model_ev, n, play_type, stake, payout_approximate)
+
+
+def ev_lift(
+    focus: Mapping,
+    candidate: Mapping,
+    corr: pd.DataFrame,
+    *,
+    platform: str,
+    bankroll: float = 0.0,
+    shrinkage: float = 1.0,
+) -> float:
+    """EV of {focus + candidate} minus focus alone (spec §4.1 Correlated tab).
+
+    Both scored through the same copula path as the slip rail; ~milliseconds
+    per candidate, so the Details tab computes live (no precompute).
+    """
+    pair = score_slip(
+        [focus, candidate], corr, platform=platform, bankroll=bankroll, shrinkage=shrinkage
+    )
+    solo = score_slip([focus], corr, platform=platform, bankroll=bankroll, shrinkage=shrinkage)
+    return pair.model_ev - solo.model_ev
+
+
+def astrolabe_payload(score: SlipScore, *, nonce: int) -> dict:
+    """JSON contract for the astrolabe component.
+
+    Crowns are the fixed shared reference maxima (spec §4.4c): Win 30% /
+    EV +12% / Kelly 3%.
+    """
+    kelly = (score.model_ev - 1) / (score.payout - 1) if score.payout > 1 else 0.0
+    return {
+        "legs": score.bet_size,
+        "play_type": score.play_type,
+        "payout": score.payout,
+        "payout_approximate": score.payout_approximate,
+        "win_corr": score.joint_p,
+        "win_indep": score.indep_p,
+        "ev": score.model_ev - 1,
+        "kelly": max(kelly, 0.0),
+        "crowns": {"win": _CROWN_WIN, "ev": _CROWN_EV, "kelly": _CROWN_KELLY},
+        "nonce": nonce,
+    }
 
 
 def _platform_pricing(platform: str, n: int) -> tuple[str, dict, float, bool]:

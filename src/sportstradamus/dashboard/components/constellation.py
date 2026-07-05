@@ -16,17 +16,35 @@ The *layout* still springs on the full correlation web, so a star's placement re
 every tie. Each team's most-connected leg is pinned to its side, so a cross-matchup leg
 floats toward the centre and an unrepresented side leaves its half empty.
 
+Two optional lenses layer onto the same figure (P8 Task C6) instead of living as
+separate expanders below the map:
+
+* ``deep_pool`` — "look deeper": this game's model-passed legs (``K`` ≤ 0) as dim,
+  unconnected background stars on a ring just outside the normal layout. They carry
+  no edges and never join the spring layout, so revealing them can't reshuffle the
+  lit constellation.
+* ``wider_groups`` — "look wider": the focus layout shrinks toward the centre and
+  other games' best legs orbit the edge in per-game clusters, each labelled with its
+  game key.
+
+Both lens node sets are positioned by list index around a ring, never by hashing a
+key — Python's ``hash()`` on a ``str`` is per-process randomized (``PYTHONHASHSEED``)
+unless seeded, so index-based placement is what keeps a golden position pin honest
+across separate test runs.
+
 The figure is pure (no Streamlit, no Archive): each node carries its
 ``Player|Market|Bet`` key plus its hover-card fields as ``customdata`` (the key at
 index 0 — a plotly click turns into an add/remove), and each edge carries its two
 endpoint keys in ``meta`` so the component's JS can dim-in a star's incident ties on
 hover. It locks its own axes (no zoom/pan) — the builder hides the modebar. Layout is
 force-directed (networkx, always present via torch); plotly draws.
-Team fills are an on-token placeholder until ``team_assets.json`` lands (P8).
+Team fills read ``theme.team_colors(league, team)`` — real per-team primaries from
+``team_assets.json``, never gold (gold is the correlation-edge color).
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 
 import networkx as nx
@@ -34,13 +52,11 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from sportstradamus.dashboard.legs import corr_key
-from sportstradamus.dashboard.theme import GOLD, GRAY
+from sportstradamus.dashboard.theme import GOLD, GRAY, team_colors
 from sportstradamus.leg_schema import is_model_liked, leg_field
 
 # |ρ| floor to draw an edge or weight the layout — the story-menu edge floor.
 _MIN_EDGE_RHO = 0.05
-# Team fills (chartCategoricalColors[0]/[2]) — placeholder until team_assets.json (P8).
-_TEAM_PALETTE = ("#2E6BE6", "#E69F00")
 
 _NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 
@@ -56,6 +72,29 @@ _SIZE_MAX = 30
 # A candidate (not-in-slip) star is the team color blended toward gray and dimmed.
 _INACTIVE_DESAT = 0.55
 _INACTIVE_ALPHA = 0.45
+
+# "Look deeper" lens (p8-games-lenses.html): the game's model-passed legs as a dim,
+# unconnected background field. Flat cool-gray port of the mockup's own literal hex —
+# distinct from both a team color and GRAY (reserved for the unknown-team fallback and
+# text labels), so a deep star reads as "model passes," not a desaturated candidate.
+_DEEP_COLOR = "#5f6b80"
+_DEEP_ALPHA = 0.35
+# Ring radius just outside the normal layout's own footprint (_LAYOUT_TARGET) so deep
+# stars never overlap the lit constellation.
+_DEEP_RADIUS = 1.25
+# Alternating +/- radius offset (as a fraction of the ring radius, so it co-scales
+# with the ring rather than becoming disproportionate once "look wider" shrinks it)
+# so the ring isn't mechanically flat.
+_RING_WOBBLE_FRAC = 0.04
+
+# "Look wider" lens: the focus constellation shrinks toward the centre and other games'
+# best legs (satellite_picker.satellite_groups) orbit an outer ring, grouped by matchup.
+_WIDER_SCALE = 0.55
+_WIDER_RADIUS = 1.55  # clearly outside _DEEP_RADIUS so "deeper" and "wider" read as
+# concentric rings, not one overlapping band, when both lenses are on at once.
+_WIDER_LABEL_OFFSET = 0.12  # radial offset of a cluster's game-key label past its dots
+_WIDER_CLUSTER_SPAN = 0.06  # small fixed spacing between legs within one game's cluster
+_WIDER_ALPHA = 0.75  # dimmer than an active star so periphery legs read as background
 
 _EDGE_WIDTH_MIN = 1.0
 _EDGE_WIDTH_SPAN = 6.0  # width at |ρ|=1 ≈ 7px; weak ties stay hairlines for contrast
@@ -124,6 +163,9 @@ def constellation_figure(
     slip_legs: Sequence[Mapping],
     corr: pd.DataFrame | None,
     pool: pd.DataFrame | None = None,
+    *,
+    deep_pool: pd.DataFrame | None = None,
+    wider_groups: list[tuple[str, list[dict]]] | None = None,
 ) -> go.Figure:
     """Static star map of the game's model-liked legs, the slip's legs lit up.
 
@@ -131,6 +173,11 @@ def constellation_figure(
     legs; ``slip_legs`` are the ones currently in the slip (drawn active). ``corr``
     is a ``current_game_corr`` slice. Each node carries its ``Player|Market|Bet`` key
     as customdata for click handling; the layout never depends on the selection.
+
+    ``deep_pool`` (the "look deeper" lens) and ``wider_groups`` (the "look wider"
+    lens) are both ``None`` by default, which reproduces today's figure byte-for-byte
+    — they are optional overlays, not a change to the base map. See the module
+    docstring for what each draws.
     """
     fig = _blank_figure()
     info = _universe(pool, slip_legs)
@@ -138,16 +185,22 @@ def constellation_figure(
         return fig
     keys = sorted(info)
     active = {corr_key(leg) for leg in slip_legs} & set(keys)
-    game = _game_of(pool, slip_legs)
+    game = _pool_field(pool, slip_legs, column="Game", key="game")
+    league = _pool_field(pool, slip_legs, column="League", key="league")
     rho = _rho_map(corr, game)
 
     teams = _teams_of(game)
-    team_color = {team: _TEAM_PALETTE[i % len(_TEAM_PALETTE)] for i, team in enumerate(teams)}
+    team_color = {team: team_colors(league, team)[0] for team in teams}
     node_team = {k: info[k]["team"] for k in keys}
     edges = _edges(keys, rho)
     pos = _layout(keys, node_team, teams, [(a, b, abs(r)) for a, b, r in edges])
     sizes = _star_sizes(keys, info)
 
+    focus_scale = _WIDER_SCALE if wider_groups is not None else 1.0
+    pos = {k: (x * focus_scale, y * focus_scale) for k, (x, y) in pos.items()}
+
+    if deep_pool is not None:
+        _add_deep_trace(fig, deep_pool, slip_legs, radius=_DEEP_RADIUS * focus_scale)
     for a, b, r in edges:
         _add_edge(fig, a, b, pos[a], pos[b], r, active=active)
     _add_node_trace(
@@ -156,6 +209,8 @@ def constellation_figure(
     _add_node_trace(
         fig, [k for k in keys if k in active], pos, info, sizes, team_color, active=True
     )
+    if wider_groups is not None:
+        _add_wider_trace(fig, wider_groups)
     return fig
 
 
@@ -175,6 +230,123 @@ def _universe(pool: pd.DataFrame | None, slip_legs: Sequence[Mapping]) -> dict[s
     for leg in slip_legs:
         info.setdefault(corr_key(leg), _node_info(leg))
     return info
+
+
+def _ring_positions(keys: list[str], *, radius: float) -> dict[str, tuple[float, float]]:
+    """Evenly distribute ``keys`` (already sorted) around a ring by index.
+
+    Never hashes a key — ``hash()`` on a ``str`` is per-process randomized unless
+    ``PYTHONHASHSEED`` is pinned, so index order is what keeps this reproducible
+    across separate runs (including two golden-test invocations in CI). A small
+    alternating radius wobble keeps the ring from reading as mechanically uniform.
+    """
+    n = len(keys)
+    wobble = radius * _RING_WOBBLE_FRAC
+    pos = {}
+    for i, key in enumerate(keys):
+        angle = 2 * math.pi * i / n
+        r = radius + (wobble if i % 2 == 0 else -wobble)
+        pos[key] = (r * math.cos(angle), r * math.sin(angle))
+    return pos
+
+
+def _add_deep_trace(
+    fig: go.Figure,
+    deep_pool: pd.DataFrame,
+    slip_legs: Sequence[Mapping],
+    *,
+    radius: float,
+) -> None:
+    """The "look deeper" lens: this game's model-passed legs as dim, unconnected background stars.
+
+    Drawn before any edge or the two node traces, so it sits at the bottom of the
+    z-order. Never joins the spring-layout graph — its positions come from
+    ``_ring_positions``, entirely independent of ``_layout`` — so revealing it can
+    never move an existing star.
+    """
+    exclude = {corr_key(leg) for leg in slip_legs}
+    info = {
+        corr_key(row): _node_info(row)
+        for row in deep_pool.to_dict("records")
+        if not is_model_liked(row) and corr_key(row) not in exclude
+    }
+    if not info:
+        return
+    keys = sorted(info)
+    pos = _ring_positions(keys, radius=radius)
+    fig.add_trace(
+        go.Scatter(
+            x=[pos[k][0] for k in keys],
+            y=[pos[k][1] for k in keys],
+            mode="markers",
+            name="deep",
+            marker={
+                "symbol": "star",
+                "size": [_SIZE_MIN] * len(keys),
+                "color": _DEEP_COLOR,
+                "opacity": _DEEP_ALPHA,
+            },
+            customdata=[[k, *info[k]["card"]] for k in keys],
+            hovertext=[info[k]["hover"] for k in keys],
+            hoverinfo="none",
+        )
+    )
+
+
+def _add_wider_trace(fig: go.Figure, wider_groups: list[tuple[str, list[dict]]]) -> None:
+    """The "look wider" lens: other games' best legs, clustered by matchup on an outer ring.
+
+    One angular slot per game (evenly spaced by group index — same index-based
+    determinism as ``_ring_positions``); legs within one game sit close together near
+    that slot. A separate text trace labels each cluster with its game key, offset
+    outward so it doesn't overlap the dots. These are real legs (not de-emphasized
+    model-passes), so they carry their own team colors like an active star, just
+    dimmer to read as periphery.
+    """
+    n = len(wider_groups)
+    if n == 0:
+        return
+    xs, ys, colors, customdata, hovers = [], [], [], [], []
+    label_x, label_y, label_text = [], [], []
+    for i, (game, rows) in enumerate(wider_groups):
+        angle = 2 * math.pi * i / n
+        cx, cy = _WIDER_RADIUS * math.cos(angle), _WIDER_RADIUS * math.sin(angle)
+        for j, row in enumerate(rows):
+            offset = (j - (len(rows) - 1) / 2) * _WIDER_CLUSTER_SPAN
+            xs.append(cx + offset * math.cos(angle + math.pi / 2))
+            ys.append(cy + offset * math.sin(angle + math.pi / 2))
+            info = _node_info(row)
+            colors.append(team_colors(str(row["League"]), str(row["Team"]))[0])
+            customdata.append([corr_key(row), *info["card"]])
+            hovers.append(info["hover"])
+        label_r = _WIDER_RADIUS + _WIDER_LABEL_OFFSET
+        label_x.append(label_r * math.cos(angle))
+        label_y.append(label_r * math.sin(angle))
+        label_text.append(game)
+    fig.add_trace(
+        go.Scatter(
+            x=xs,
+            y=ys,
+            mode="markers",
+            name="wider",
+            marker={"symbol": "star", "size": [_SIZE_MIN] * len(xs), "color": colors},
+            opacity=_WIDER_ALPHA,
+            customdata=customdata,
+            hovertext=hovers,
+            hoverinfo="none",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=label_x,
+            y=label_y,
+            mode="text",
+            name="wider_labels",
+            text=label_text,
+            textfont={"color": GRAY, "size": _LABEL_FONT_SIZE},
+            hoverinfo="skip",
+        )
+    )
 
 
 def _star_sizes(keys: list[str], info: dict[str, dict]) -> dict[str, float]:
@@ -202,19 +374,29 @@ def _blank_figure() -> go.Figure:
     return fig
 
 
-def _game_of(pool: pd.DataFrame | None, slip_legs: Sequence[Mapping]) -> str:
-    """The matchup this map draws — read from the candidate ``pool`` so the layout is
-    static per game and the field renders before any leg is picked; falls back to the
-    slip's game when there is no pool (e.g. an active leg whose offer has expired).
+def _pool_field(
+    pool: pd.DataFrame | None, slip_legs: Sequence[Mapping], *, column: str, key: str
+) -> str:
+    """A single-valued matchup field — read from the candidate ``pool`` so it's
+    static per game and renders before any leg is picked; falls back to the slip's
+    own legs when there is no pool (e.g. an active leg whose offer has expired).
+
+    ``column`` names the raw ``pool`` column (``"Game"`` / ``"League"``); ``key``
+    names the matching canonical-leg key (``"game"`` / ``"league"``). Reads the raw
+    pool column directly rather than bridging through ``leg_field``: a single
+    ``Game`` key never spans two leagues (team codes don't collide across leagues),
+    so the first non-null value is always right, and ``leg_schema._FIELD_TO_OFFER_COL``
+    deliberately excludes ``"league"`` (every existing call site holds a canonical
+    leg for that field, never a raw offer row).
     """
-    if pool is not None and not pool.empty and "Game" in pool.columns:
-        games = pool["Game"].dropna()
-        if not games.empty:
-            return str(games.iloc[0])
+    if pool is not None and not pool.empty and column in pool.columns:
+        values = pool[column].dropna()
+        if not values.empty:
+            return str(values.iloc[0])
     for leg in slip_legs:
-        game = leg.get("game")
-        if game:
-            return str(game)
+        value = leg.get(key)
+        if value:
+            return str(value)
     return ""
 
 

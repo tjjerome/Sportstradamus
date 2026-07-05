@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P8 · Receipts (rev 2)</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Cinzel:wght@600&family=Cormorant+Garamond:ital,wght@1,600&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#0E1117;--surface:#1A1D24;--text:#E6E9EF;--border:#2A2E37;--primary:#2E6BE6;--link:#5B8DEF;
+    --green:#1F9D55;--red:#E5484D;--orange:#F5A524;--gray:#8A91A0;--gold:#C9A227;
+    --neg2:#9A2B2B;--neg1:#C0453E;--pos1:#7FAAE8;--pos2:#2351B4}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;font-size:14px;line-height:1.5}
+  /* global starfield: fixed behind everything, shows through the side gutters + block gaps; data blocks are opaque and mask it */
+  .starfield{position:fixed;inset:0;z-index:0;pointer-events:none}
+  .page{position:relative;z-index:1;max-width:1000px;margin:0 auto;padding:26px 24px 80px}
+  .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+  .kicker{font-family:'Cinzel',serif;font-weight:600;font-size:10.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--gold)}
+  h1{font-size:23px;margin:1px 0 1px}
+  .updated{color:var(--gray);font-size:12px}
+  .seclab{font-family:'Cinzel',serif;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--gray);margin:26px 0 8px;display:flex;align-items:center;gap:9px}
+  .seclab::after{content:"";flex:1;height:1px;background:var(--border)}
+  .dim{color:var(--gray);font-size:12px}
+  .tk{opacity:.4}
+  @media (prefers-reduced-motion:no-preference){@keyframes tw{0%,100%{opacity:.18}50%{opacity:.85}}
+    .tk{animation:tw 4.4s ease-in-out infinite}.tk:nth-child(2n){animation-duration:6s}.tk:nth-child(3n){animation-duration:3.6s}.tk:nth-child(5n){animation-duration:5.2s}}
+
+  .hero{position:relative;overflow:hidden;border:1px solid var(--border);border-radius:6px;padding:18px 20px;margin-top:14px;
+    background:radial-gradient(ellipse at 88% -20%, rgba(46,107,230,.15), transparent 48%),
+              radial-gradient(ellipse at 8% 130%, rgba(201,162,39,.07), transparent 46%), var(--surface)}
+  .hk{font-family:'Cinzel',serif;font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--gold)}
+  .heurow{display:flex;gap:34px;align-items:flex-end;flex-wrap:wrap;margin-top:6px}
+  .big .k{font-family:'Cinzel',serif;font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--gray)}
+  .big .v{font-family:'IBM Plex Mono',monospace;font-weight:600;line-height:1}
+  .big .v.xl{font-size:38px;color:var(--gold)} .big .v.lg{font-size:26px}
+  .hero .cap{color:var(--gray);font-size:12px;margin-top:12px}
+
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .tile{border:1px solid var(--border);border-radius:5px;padding:11px 13px;background:var(--surface)}
+  .tile .k{font-family:'Cinzel',serif;font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--gray)}
+  .tile .v{font-family:'IBM Plex Mono',monospace;font-size:21px;font-weight:600;margin-top:3px}
+  .tile .d{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--gray);margin-top:2px}
+  .tile.scar{border-color:rgba(229,72,77,.4)} .tile.scar .v{color:var(--red)}
+  .pos{color:var(--green)} .neg{color:var(--red)}
+
+  .panel{border:1px solid var(--border);border-radius:5px;background:var(--surface);padding:12px 14px}
+  .seg{display:inline-flex;border:1px solid var(--border);border-radius:4px;overflow:hidden}
+  .seg span{padding:4px 12px;font-size:12px;color:var(--gray);cursor:pointer} .seg span.on{background:rgba(201,162,39,.12);color:var(--gold)}
+  .controls{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+  .ctl-lab{font-family:'Cinzel',serif;font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--gray);margin-right:2px}
+  .gridwrap{border:1px solid var(--border);border-radius:5px;overflow:hidden;background:var(--surface)}
+  table{border-collapse:collapse;width:100%;font-size:12.5px}
+  thead th{background:#20242d;color:var(--gray);font-weight:500;font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)}
+  thead th.r{text-align:right}
+  tbody td{padding:7px 12px;border-bottom:1px solid var(--border)}
+  td.num{font-family:'IBM Plex Mono',monospace;text-align:right}
+  td.heat{font-family:'IBM Plex Mono',monospace;text-align:right;border-radius:2px}
+  .axt{font-family:'IBM Plex Mono',monospace;font-size:9px;fill:#8A91A0}
+  .leg{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--gray);margin-right:12px}
+  .leg i{width:14px;height:2px;display:inline-block;border-radius:2px}
+
+  .tickets{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .ticket{position:relative;border:1px solid var(--border);border-radius:6px;background:var(--surface);overflow:hidden;padding:13px 15px 12px 17px}
+  .ticket::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
+  .ticket.won::before{background:var(--green)} .ticket.lost::before{background:var(--red)} .ticket.pend::before{background:var(--gold)}
+  .stamp{float:right;font-family:'Cinzel',serif;font-size:10px;letter-spacing:.16em;padding:2px 8px;border-radius:3px;border:1px solid}
+  .stamp.won{color:var(--green);border-color:rgba(31,157,85,.5);background:rgba(31,157,85,.08)}
+  .stamp.lost{color:var(--red);border-color:rgba(229,72,77,.5);background:rgba(229,72,77,.08)}
+  .stamp.pend{color:var(--gold);border-color:rgba(201,162,39,.5);background:rgba(201,162,39,.08)}
+  .thead{font-weight:700;font-size:14px} .tmeta{color:var(--gray);font-size:11.5px;margin-top:1px}
+  .tlegs{font-family:'IBM Plex Mono',monospace;font-size:11px;color:#c4cad4;margin:8px 0 9px;line-height:1.5}
+  .tfoot{display:flex;gap:16px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;border-top:1px solid var(--border);padding-top:8px}
+  .tfoot .fk{color:var(--gray)}
+  .watermark{position:absolute;right:10px;bottom:6px;opacity:.13}
+
+  .panelrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .comingscar{border:1px dashed rgba(201,162,39,.45);border-radius:5px;padding:12px 14px;margin-top:12px;background:rgba(201,162,39,.03)}
+  .comingscar .t{font-family:'Cinzel',serif;font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--gold)}
+  .note{color:var(--gray);font-size:12px;margin-top:18px;line-height:1.6;border-top:1px solid var(--border);padding-top:12px}
+</style>
+</head>
+<body>
+
+<!-- ===== global starfield (behind all screens) ===== -->
+<div class="starfield">
+  <svg width="100%" height="100%" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice">
+    <defs><symbol id="spk" viewBox="0 0 10 10"><path d="M5 0.3 L6.05 3.95 L9.7 5 L6.05 6.05 L5 9.7 L3.95 6.05 L0.3 5 L3.95 3.95 Z"/></symbol></defs>
+    <g fill="#aeb9cc">
+      <use class="tk" href="#spk" x="60" y="120" width="9" height="9"/><use class="tk" href="#spk" x="120" y="460" width="7" height="7"/>
+      <use class="tk" href="#spk" x="40" y="700" width="8" height="8"/><use class="tk" href="#spk" x="1360" y="180" width="9" height="9"/>
+      <use class="tk" href="#spk" x="1300" y="540" width="7" height="7"/><use class="tk" href="#spk" x="1390" y="760" width="8" height="8"/>
+      <use class="tk" href="#spk" x="200" y="60" width="6" height="6"/><use class="tk" href="#spk" x="1240" y="80" width="6" height="6"/>
+      <g>
+        <circle class="tk" cx="90" cy="260" r="1.3"/><circle class="tk" cx="150" cy="600" r="1.1"/><circle class="tk" cx="30" cy="380" r="1.4"/>
+        <circle class="tk" cx="200" cy="820" r="1.2"/><circle class="tk" cx="1340" cy="300" r="1.3"/><circle class="tk" cx="1280" cy="680" r="1.1"/>
+        <circle class="tk" cx="1400" cy="440" r="1.4"/><circle class="tk" cx="1230" cy="860" r="1.2"/><circle class="tk" cx="110" cy="40" r="1"/>
+        <circle class="tk" cx="1180" cy="30" r="1"/><circle class="tk" cx="720" cy="16" r="1.1"/><circle class="tk" cx="680" cy="884" r="1.1"/>
+        <circle class="tk" cx="420" cy="30" r="1"/><circle class="tk" cx="1020" cy="880" r="1"/><circle class="tk" cx="70" cy="520" r="1.1"/><circle class="tk" cx="1370" cy="620" r="1.1"/>
+      </g>
+    </g>
+  </svg>
+</div>
+
+<div class="page">
+<div class="kicker">◈ Receipts</div>
+<h1>Receipts</h1>
+<div class="updated">the track record — losers shown, never hidden &middot; resolved 2026-07-03 02:14 AM</div>
+
+<!-- HERO VERDICT -->
+<div class="hero">
+  <div class="hk">If you'd tailed every rec</div>
+  <div class="heurow">
+    <span class="big"><div class="k">ROI</div><div class="v xl">+7.8%</div></span>
+    <span class="big"><div class="k">Win rate</div><div class="v lg">54.1%</div></span>
+    <span class="big"><div class="k">Record</div><div class="v lg">4,812–4,081</div></span>
+  </div>
+  <div class="cap"><span class="mono">+694</span> units across <span class="mono">8,893</span> unique resolved recs — flat -110 (win +0.91u, loss -1u), deduped across books, pushes excluded. <span style="color:var(--link);cursor:pointer">Export filtered history (CSV)</span></div>
+</div>
+
+<!-- CUMULATIVE PROFIT (proper axes) -->
+<div class="panel" style="margin-top:12px">
+  <div class="dim" style="margin-bottom:6px">Cumulative units — tailing every rec</div>
+  <svg viewBox="0 0 680 250" width="100%">
+    <!-- gridlines + y ticks -->
+    <g stroke="#2A2E37" stroke-width="1">
+      <line x1="46" y1="210" x2="672" y2="210"/><line x1="46" y1="145" x2="672" y2="145" opacity=".5"/><line x1="46" y1="80" x2="672" y2="80" opacity=".5"/><line x1="46" y1="18" x2="672" y2="18" opacity=".5"/>
+    </g>
+    <g class="axt" text-anchor="end"><text x="40" y="213">0</text><text x="40" y="148">+250</text><text x="40" y="83">+500</text><text x="40" y="21">+700</text></g>
+    <!-- x ticks (months) -->
+    <g class="axt" text-anchor="middle"><text x="70" y="228">Nov</text><text x="170" y="228">Jan</text><text x="270" y="228">Feb</text><text x="370" y="228">Mar</text><text x="470" y="228">May</text><text x="570" y="228">Jun</text><text x="655" y="228">Jul</text></g>
+    <!-- area + line (with a Feb drawdown, shown) -->
+    <defs><linearGradient id="pf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#C9A227" stop-opacity=".32"/><stop offset="1" stop-color="#C9A227" stop-opacity="0"/></linearGradient></defs>
+    <path d="M46 205 L110 190 L170 150 L230 168 L270 182 L330 150 L390 120 L450 96 L510 104 L570 60 L640 30 L672 22 L672 210 L46 210 Z" fill="url(#pf)"/>
+    <path d="M46 205 L110 190 L170 150 L230 168 L270 182 L330 150 L390 120 L450 96 L510 104 L570 60 L640 30 L672 22" fill="none" stroke="#C9A227" stroke-width="1.8"/>
+    <!-- worst-month drawdown marker -->
+    <circle cx="270" cy="182" r="3" fill="var(--red)"/><text class="axt" x="270" y="198" text-anchor="middle" fill="#E5484D">−41u Feb</text>
+  </svg>
+</div>
+
+<!-- SKEPTIC CHECKS -->
+<div class="seclab">The scars — skeptic checks</div>
+<div class="tiles">
+  <div class="tile"><div class="k">Record at EV &gt; 5%</div><div class="v pos">56.9%</div><div class="d">1,204 bets · +38.2u</div></div>
+  <div class="tile"><div class="k">CLV beat rate</div><div class="v">61.4%</div><div class="d">7,880 legs with close</div></div>
+  <div class="tile"><div class="k">Brier</div><div class="v">0.2402</div><div class="d pos">+3.1% vs book</div></div>
+  <div class="tile scar"><div class="k">Worst month</div><div class="v" style="font-size:16px;font-family:'IBM Plex Sans'">Feb 2026</div><div class="d neg">−41.3u · 612 bets</div></div>
+</div>
+
+<!-- BY DIMENSION GRID + time-window filter -->
+<div class="seclab">By league / market / platform</div>
+<div class="controls">
+  <span class="ctl-lab">Group</span><span class="seg"><span class="on">League</span><span>Market</span><span>Platform</span></span>
+  <span class="ctl-lab">Window</span><span class="seg"><span>Last week</span><span>Last month</span><span class="on">Last 3 mo</span><span>Last year</span><span>All</span></span>
+</div>
+<div class="gridwrap">
+  <table>
+    <thead><tr><th>League</th><th class="r">Bets</th><th class="r">Win %</th><th class="r">Units</th><th class="r">ROI</th></tr></thead>
+    <tbody>
+      <tr><td>NBA</td><td class="num">1,020</td><td class="num">55.6%</td><td class="heat" style="background:var(--pos2)">+118</td><td class="num pos">+11.6%</td></tr>
+      <tr><td>WNBA</td><td class="num">742</td><td class="num">54.9%</td><td class="heat" style="background:var(--pos1)">+64</td><td class="num pos">+8.6%</td></tr>
+      <tr><td>NHL</td><td class="num">438</td><td class="num">52.5%</td><td class="num">+12</td><td class="num pos">+2.7%</td></tr>
+      <tr><td>MLB</td><td class="num">516</td><td class="num">50.2%</td><td class="heat" style="background:var(--neg1)">−18</td><td class="num neg">−3.5%</td></tr>
+    </tbody>
+  </table>
+</div>
+<div class="dim" style="margin-top:6px">Diverging heatmap on Units (red ↔ neutral ↔ blue, centered 0) — never gold. Window filter re-scopes every number in this section.</div>
+
+<!-- YOUR SLIPS -->
+<div class="seclab">Your slips</div>
+<div class="dim" style="margin:-2px 0 10px">14 graded · 8 won · 3 pending — your record vs the model's.</div>
+<div class="tickets">
+  <div class="ticket won">
+    <span class="stamp won">WON</span>
+    <div class="thead">The Aces set the pace</div>
+    <div class="tmeta">Underdog · Flex · 3 legs · Jun 30</div>
+    <div class="tlegs">Wilson Points o23.5 ✓<br>Boston Rebounds o8.5 ✓<br>Clark Assists u8.5 ✓</div>
+    <div class="tfoot"><span><span class="fk">EV</span> +14.5%</span><span><span class="fk">Stake</span> $12</span><span><span class="fk">Return</span> <span class="pos">$72</span></span></div>
+    <svg class="watermark" viewBox="0 0 60 40" width="60" height="40"><g fill="#C9A227"><circle cx="10" cy="28" r="3"/><circle cx="30" cy="12" r="4.5"/><circle cx="50" cy="24" r="3.5"/></g><g stroke="#C9A227" stroke-width="1"><line x1="10" y1="28" x2="30" y2="12"/><line x1="30" y1="12" x2="50" y2="24"/></g></svg>
+  </div>
+  <div class="ticket lost">
+    <span class="stamp lost">LOST</span>
+    <div class="thead">Wemby erases the paint</div>
+    <div class="tmeta">Sleeper · Power · 2 legs · Jun 29</div>
+    <div class="tlegs">Wembanyama Blocks o3.5 ✓<br>Wembanyama Rebounds o11.5 ✗</div>
+    <div class="tfoot"><span><span class="fk">EV</span> +9.1%</span><span><span class="fk">Stake</span> $10</span><span><span class="fk">Return</span> <span class="neg">$0</span></span></div>
+  </div>
+  <div class="ticket pend">
+    <span class="stamp pend">PENDING</span>
+    <div class="thead">Brunson carries the Knicks</div>
+    <div class="tmeta">Underdog · Flex · 3 legs · tonight</div>
+    <div class="tlegs">Brunson Points o25.5 · pending<br>Hart Rebounds o7.5 · pending<br>Divincenzo 3-Pt Made o2.5 · pending</div>
+    <div class="tfoot"><span><span class="fk">EV</span> +11.8%</span><span><span class="fk">Stake</span> $14</span><span><span class="fk">To win</span> $70</span></div>
+  </div>
+</div>
+
+<!-- TRENDS + CLV -->
+<div class="seclab">Trends &amp; closing-line value</div>
+<div class="panelrow">
+  <div class="panel">
+    <div class="dim" style="margin-bottom:4px">Rolling 30-day accuracy by league</div>
+    <svg viewBox="0 0 340 150" width="100%">
+      <g stroke="#2A2E37"><line x1="34" y1="20" x2="330" y2="20" opacity=".4"/><line x1="34" y1="65" x2="330" y2="65" opacity=".4"/><line x1="34" y1="110" x2="330" y2="110"/></g>
+      <line x1="34" y1="65" x2="330" y2="65" stroke="#8A91A0" stroke-dasharray="3 4" stroke-width="1" opacity=".6"/>
+      <g class="axt" text-anchor="end"><text x="30" y="23">60%</text><text x="30" y="68">50%</text><text x="30" y="113">40%</text></g>
+      <g class="axt" text-anchor="middle"><text x="60" y="128">Apr</text><text x="150" y="128">May</text><text x="240" y="128">Jun</text><text x="320" y="128">Jul</text></g>
+      <path d="M34 60 C90 44 130 52 190 40 S280 34 330 30" fill="none" stroke="#2E6BE6" stroke-width="1.7"/>
+      <path d="M34 74 C90 68 130 60 190 66 S280 56 330 52" fill="none" stroke="#7FAAE8" stroke-width="1.7"/>
+      <path d="M34 80 C90 84 130 78 190 82 S280 74 330 78" fill="none" stroke="#C9A227" stroke-width="1.5"/>
+    </svg>
+    <div style="margin-top:4px"><span class="leg"><i style="background:#2E6BE6"></i>NBA</span><span class="leg"><i style="background:#7FAAE8"></i>WNBA</span><span class="leg"><i style="background:#C9A227"></i>NFL</span></div>
+  </div>
+  <div class="panel">
+    <div class="dim" style="margin-bottom:4px">Calibration — predicted vs realized hit rate</div>
+    <div style="display:flex;gap:14px;align-items:center">
+      <svg viewBox="0 0 180 180" width="176" style="flex:0 0 auto">
+        <!-- perfect-calibration diagonal -->
+        <line x1="24" y1="156" x2="168" y2="12" stroke="#8A91A0" stroke-dasharray="3 4" stroke-width="1" opacity=".7"/>
+        <!-- axes -->
+        <line x1="24" y1="12" x2="24" y2="156" stroke="#2A2E37"/><line x1="24" y1="156" x2="168" y2="156" stroke="#2A2E37"/>
+        <g class="axt" text-anchor="end"><text x="20" y="159">0</text><text x="20" y="87">50</text><text x="20" y="15">100</text></g>
+        <g class="axt" text-anchor="middle"><text x="24" y="170">0</text><text x="96" y="170">50</text><text x="168" y="170">100</text></g>
+        <text class="axt" x="96" y="179" text-anchor="middle">predicted %</text>
+        <!-- standard-line bins (blue), sized by volume -->
+        <g fill="#5B8DEF" opacity=".92"><circle cx="52.8" cy="128.6" r="5"/><circle cx="74.4" cy="104.2" r="6"/><circle cx="96" cy="82.6" r="6"/><circle cx="113.3" cy="69.6" r="5"/><circle cx="132" cy="45.1" r="4.5"/></g>
+        <!-- alt-line / ladder bins (gold) — reach the tails, still on the line -->
+        <g fill="#C9A227" opacity=".95"><circle cx="35.5" cy="141.6" r="3"/><circle cx="45.6" cy="135.8" r="3.5"/><circle cx="96" cy="85.4" r="4"/><circle cx="146.4" cy="32.2" r="3.5"/><circle cx="156.5" cy="26.4" r="3"/></g>
+      </svg>
+      <div style="flex:1;min-width:0">
+        <div class="leg"><i style="background:#5B8DEF;width:8px;height:8px;border-radius:50%"></i>Standard line</div>
+        <div class="leg"><i style="background:#C9A227;width:8px;height:8px;border-radius:50%"></i>Alt line / ladder</div>
+        <div class="mono" style="font-size:12px;margin:10px 0 2px"><span class="dim">Realized ECE</span> <b>1.8%</b></div>
+        <div class="mono" style="font-size:12px"><span class="dim">Standard ROI</span> <b class="pos">+7.2%</b></div>
+        <div class="mono" style="font-size:12px"><span class="dim">Alt / ladder ROI</span> <b class="pos">+9.4%</b></div>
+      </div>
+    </div>
+    <div class="dim" style="margin-top:4px">On the diagonal = honest probabilities. Alt legs reach the tails and sit on it too — calibrated across the whole ladder, and profitable there.</div>
+  </div>
+</div>
+<div class="tiles" style="margin-top:12px">
+  <div class="tile"><div class="k">Close coverage</div><div class="v">88.6%</div><div class="d">7,880 of 8,893 legs</div></div>
+  <div class="tile"><div class="k">Mean Market CLV</div><div class="v pos">+0.041</div></div>
+  <div class="tile"><div class="k">Mean Model CLV</div><div class="v pos">+0.028</div></div>
+  <div class="tile"><div class="k">Beat-close rate</div><div class="v">61.4%</div></div>
+</div>
+
+<!-- STRATEGY SIMULATOR -->
+<div class="seclab">Strategy simulator</div>
+<div class="dim" style="margin:-2px 0 8px"><b>Retrospective</b> — Monte Carlo over resolved history. Carries hindsight + selection effects: exploration, not forward proof.</div>
+<div class="gridwrap">
+  <table>
+    <thead><tr><th>Strategy</th><th class="r">ROI</th><th class="r">Sharpe</th><th class="r">Max DD</th><th class="r">Win %</th></tr></thead>
+    <tbody>
+      <tr><td>Flat 1u</td><td class="num pos">+7.8%</td><td class="num">1.42</td><td class="num neg">−11.2%</td><td class="num">54.1%</td></tr>
+      <tr><td>Kelly ¼</td><td class="num pos">+12.4%</td><td class="num">1.31</td><td class="num neg">−18.6%</td><td class="num">54.1%</td></tr>
+      <tr><td>EV &gt; 5% only</td><td class="num pos">+9.6%</td><td class="num">1.58</td><td class="num neg">−8.9%</td><td class="num">56.9%</td></tr>
+    </tbody>
+  </table>
+</div>
+<div class="comingscar">
+  <div class="t">◈ Forward paper-trading ledger — coming (D6)</div>
+  <div class="dim" style="margin-top:5px">The honest forward answer: a <b>pre-registered</b> ledger commits entries at decision time, settles nightly, no hindsight. Will add a <b>walk-forward bankroll curve</b>, <b>ROI / CLV per segment</b>, and a <b>circuit breaker</b> (−20% from peak halves stakes, −30% halts) — platform-aware (Underdog + Sleeper). Distinct from the retrospective sim above; that one stays load-bearing for the ship gate.</div>
+</div>
+
+<div class="note">
+  <b>rev 2 fixes:</b> every chart carries real axis ticks + a legend (legibility over decoration); the by-dimension section gets a <b>Window</b> filter (week / month / 3 mo / year / all) that re-scopes its numbers; CLV shows <b>close coverage as a rate</b>, not a raw count; the recs/day chart is replaced by a live <b>calibration</b> panel (realized reliability diagram) proving probabilities are honest across the whole line ladder — standard + alt legs both on the diagonal, both positive ROI; the sim is labeled <b>retrospective</b> with the forward <b>Simulated-Bettor Ledger</b> scarred in (bankroll curve + circuit breaker, D6).
+  <br><b>Global starfield</b> — the Tonight field is now a fixed layer behind every screen, showing through the side gutters + block gaps; data tables/panels are opaque so it never sits behind a grid. (Spec: injected once in <span class="mono">app.py</span>; reduced-motion drops the twinkle.)
+</div>
+</div>
+
+<script>
+const v0=fetch('/version.txt').then(r=>r.text()).catch(()=>'');
+setInterval(async()=>{try{const a=await v0;const b=await fetch('/version.txt?'+Date.now()).then(r=>r.text());if(a&&a!==b)location.reload()}catch(e){}},2000);
+</script>
+</body>
+</html>

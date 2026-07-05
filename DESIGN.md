@@ -31,7 +31,7 @@ prophecy-voice naming map (stories→prophecies, etc.) lives in
 
 | Role | Token | Hex |
 |---|---|---|
-| Primary (buttons, links, active) | `primaryColor` | `#2E6BE6` electric blue |
+| Primary (buttons, links) | `primaryColor` | `#2E6BE6` electric blue |
 | Background (main) | `backgroundColor` | `#0E1117` |
 | Surface (cards, widgets, code) | `secondaryBackgroundColor` | `#1A1D24` |
 | Text | `textColor` | `#E6E9EF` |
@@ -44,9 +44,18 @@ prophecy-voice naming map (stories→prophecies, etc.) lives in
 | Prophecy / celestial accent | `goldColor` | `#C9A227` |
 
 Semantic colors are used **only by intent** in tables/badges/sparklines. Red is reserved for
-negative/bad values — never a brand accent. Gold is the *oracle's* color: kickers, prophecy
-headlines, constellation highlights, correlation strength — never body text, never primary buttons
-(primary stays electric blue), never a substitute for green/red semantics.
+negative/bad values — never a brand accent. Gold is the *oracle's* color and marks
+**active/selected/hovered** states: table row hover, active lens, active filter chip, active tab
+underline, active segmented-control segment. Gold also highlights kickers, prophecy headlines,
+constellation highlights, and correlation strength. Primary blue `#2E6BE6` is reserved for
+primary buttons and links only — it is no longer used as a generic "active/selected" accent.
+Gold is **never a data mark** — never a bar, heatmap cell, plotted line/point encoding a value,
+or team-color star — never body text, never primary button fill, never a substitute for
+green/red semantics. Two sanctioned exceptions: the gold correlation edge in the constellation
+(DESIGN §4a); and the Receipts reliability diagram's alt-line/ladder series marker, where gold
+identifies *which population* a point belongs to (standard line vs. alt/ladder), not the point's
+own value — the same role as a legend swatch. Both mark identity/strength, never a plotted
+value on their own axis; don't generalize either into license to use gold on other charts.
 
 Streamlit's `[theme]` block has no free-form keys, so `config.toml` mirrors only the tokens
 Streamlit understands; `goldColor`, the display fonts, and the ambient-image rules are mirrored in
@@ -72,9 +81,11 @@ Altair / Vega-Lite inherit these automatically.
 
 - **Theming**: always via `config.toml`. Reserve `st.html` / `unsafe_allow_html` CSS for targeted
   *structural* gaps only, scoped through a widget's `key=`-generated `.st-key-…` class — never for
-  colors/fonts/backgrounds that a token already covers. Two named exceptions, both injected once in
-  `dashboard/app.py`: the display-font CSS (`.celestial-kicker` / `.celestial-headline`, §2) and the
-  ambient-image layer (below).
+  colors/fonts/backgrounds that a token already covers. Named exceptions, all injected once in
+  `dashboard/app.py`'s `APP_CSS`: the display-font CSS (`.celestial-kicker` / `.celestial-headline`,
+  §2), the ambient-image layer (below), and the Games surface lens toggles (`.st-key-lens_deep_on` /
+  `.st-key-lens_wider_on`, §4a) — `config.toml`'s `[theme]` has no gold slot, so a widget that must
+  read celestial-gold when active reaches the token the same narrow way the other two do.
 - **Nebula wash**: a faint radial gradient inside the surface palette (blue-family stops drawn from
   `chartSequentialColors`, gold highlights ≤ 12% opacity) is permitted on **hero/prophecy cards
   only**. The purple/violet gradient ban (§6) stands untouched.
@@ -127,8 +138,9 @@ read plus a **Full detail** link into the offer dialog, slip preserved) — with
 zoom/pan off (it's a map, not a chart). This is the one piece of decoration that *is* data: use it on the slip
 editor, Game pages, and parlay detail, keep it on `backgroundColor`, never let it crowd a table. It
 is the brand's signature; treat its grammar — star = leg, **fill = team**, **size = edge**,
-**brightness = in the slip**, edge = correlation — as FIXED. Team fills are an on-token placeholder
-(`chartCategoricalColors`) until `team_assets.json` (P8).
+**brightness = in the slip**, edge = correlation — as FIXED. Team fills come from
+`team_assets.json` via `theme.team_colors(league, code)`; an unmapped code gets the neutral
+gray fallback. Team fills are never gold — gold is the correlation-edge color.
 
 ## 5. Iconography
 

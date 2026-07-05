@@ -14,6 +14,7 @@ import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 
 from sportstradamus.dashboard import theme
+from sportstradamus.dashboard.narrative import bet_arrow
 
 _MONO = "IBM Plex Mono, monospace"
 # Static right-aligned mono style for non-heatmap numeric columns (no JS needed).
@@ -36,6 +37,32 @@ _POS, _POS_STRONG = theme.DIVERGING_COLORS[7], theme.DIVERGING_COLORS[8]
 # Fractions of the column's max deviation that split mild/strong and the neutral band.
 _HEAT_STRONG_FRAC = 0.6
 _HEAT_NEUTRAL_FRAC = 0.2
+
+# Client-side row hover (spec §4.3): a gold left-rail + faint gold wash, painted by AG
+# Grid's own row-hover class so hovering never triggers a Streamlit rerun.
+_HOVER_CSS = {
+    ".ag-row-hover": {
+        "box-shadow": "inset 3px 0 0 #C9A227 !important",
+        "background-color": "rgba(201,162,39,.06) !important",
+    }
+}
+
+
+def _arrow_cellrenderer() -> JsCode:
+    """Prefix the row's ``Bet``-keyed Over/Under arrow ahead of the cell's own value.
+
+    ``narrative.bet_arrow`` is the one source for the SVG strings; baking both branches
+    in as JS literals here keeps that Python string the source of truth without a
+    second SVG definition living in JS.
+    """
+    up, down = bet_arrow("Over"), bet_arrow("Under")
+    return JsCode(
+        "function(params){return (params.data.Bet==='Over'?"
+        + repr(up)
+        + ":"
+        + repr(down)
+        + ")+params.value;}"
+    )
 
 
 def _heat_expr(bg: str) -> str:
@@ -87,6 +114,124 @@ def _heatmap_cellstyle(values: pd.Series, center: float) -> JsCode | dict:
     return JsCode("function(params) { return (" + expr + "); }")
 
 
+def _numeric_col_kwargs(
+    df: pd.DataFrame,
+    col: str,
+    *,
+    heatmap_col: str | None,
+    heatmap_center: float,
+    pct: set[str],
+    arrow_col: str | None,
+    has_bet: bool,
+    tip: str | None,
+) -> dict:
+    """``configure_column`` kwargs for one numeric column: heatmap-or-plain cellStyle,
+    an optional "%" formatter, an optional arrow cellRenderer, an optional tooltip.
+    """
+    if col == heatmap_col:
+        cell_style = _heatmap_cellstyle(df[col], heatmap_center)
+    else:
+        cell_style = dict(_RIGHT_STYLE)
+    kwargs = {"cellStyle": cell_style}
+    if col in pct:
+        kwargs["valueFormatter"] = _PERCENT_FORMATTER
+    if col == arrow_col and has_bet:
+        kwargs["cellRenderer"] = _arrow_cellrenderer()
+    if tip:
+        kwargs["headerTooltip"] = tip
+    return kwargs
+
+
+def _get_row_style(flag_col: str, flag_below: float) -> JsCode:
+    """A per-row ``getRowStyle`` callback painting the amber rail when ``flag_col`` is low.
+
+    Mirrors ``_HOVER_CSS``'s gold rail shape (inset box-shadow), orange and
+    row-conditional instead of gold and hover-conditional — AG Grid's ``rowStyle`` is a
+    static dict applied to every row, so a data-dependent style needs this callback form.
+    """
+    return JsCode(
+        "function(params){return params.data && params.data["
+        + repr(flag_col)
+        + "] < "
+        + repr(flag_below)
+        + " ? {boxShadow: 'inset 3px 0 0 "
+        + theme.ORANGE
+        + "'} : null;}"
+    )
+
+
+def _get_row_style_for_rail(rail_col: str, rail_colors: Mapping[str, str]) -> JsCode:
+    """A per-row ``getRowStyle`` callback painting a rail color keyed off a precomputed
+    categorical ``rail_col`` value (e.g. the gate matrix's ``amber``/``red``/``none``).
+
+    Same inset-box-shadow shape as :func:`_get_row_style`, but a value lookup rather
+    than a numeric threshold — ``flag_col``'s single-color/single-threshold contract
+    doesn't fit a multi-state category, so this is a separate callback rather than a
+    ``flag_col`` generalization.
+    """
+    branches = "".join(
+        "params.data[" + repr(rail_col) + "]===" + repr(value) + " ? {boxShadow: "
+        "'inset 3px 0 0 " + color + "'} : "
+        for value, color in rail_colors.items()
+    )
+    return JsCode("function(params){return params.data ? " + branches + "null : null;}")
+
+
+def _glyph_cellstyle(glyph_colors: Mapping[str, str]) -> JsCode:
+    """A ``cellStyle`` ``JsCode`` coloring a cell by its own literal glyph value (e.g.
+    ``●``/``○``), right-aligned mono like every other cell in these grids.
+    """
+    branches = "".join(
+        "params.value===" + repr(glyph) + " ? " + _heat_expr(color) + " : "
+        for glyph, color in glyph_colors.items()
+    )
+    return JsCode("function(params) { return (" + branches + _RIGHT_EXPR + "); }")
+
+
+def _row_style_options(
+    flag_col: str | None,
+    flag_below: float,
+    rail_col: str | None,
+    rail_colors: Mapping[str, str] | None,
+) -> dict:
+    """The ``getRowStyle`` grid-options fragment for whichever rail kind was requested.
+
+    ``flag_col`` (numeric threshold) and ``rail_col`` (categorical lookup) both paint a
+    row rail but via different callbacks; a caller passing both gets ``rail_col``'s
+    style — checked first, always the winner regardless of kwarg order — rather than
+    a silent combination of the two.
+    """
+    if rail_col is not None:
+        return {"getRowStyle": _get_row_style_for_rail(rail_col, rail_colors or {})}
+    if flag_col is not None:
+        return {"getRowStyle": _get_row_style(flag_col, flag_below)}
+    return {}
+
+
+def _configure_remaining_columns(
+    gb: GridOptionsBuilder,
+    present: set[str],
+    *,
+    numeric_cols: Sequence[str],
+    glyph_cols: Sequence[str],
+    glyph_colors: Mapping[str, str] | None,
+    help_map: Mapping[str, str],
+    hidden_cols: Sequence[str],
+) -> None:
+    """The non-numeric column passes: glyph cellStyles, header tooltips on columns
+    ``numeric_cols`` didn't already cover, and ``hide`` on ``hidden_cols``.
+    """
+    for col in glyph_cols:
+        if col in present:
+            gb.configure_column(col, cellStyle=_glyph_cellstyle(glyph_colors or {}))
+    for col, tip in help_map.items():
+        if col not in numeric_cols and col in present:
+            gb.configure_column(col, headerTooltip=tip)
+    for col in hidden_cols:
+        if col in present:
+            gb.configure_column(col, hide=True)
+
+
 def build_themed_grid_options(
     df: pd.DataFrame,
     *,
@@ -97,35 +242,68 @@ def build_themed_grid_options(
     selection_mode: str = "single",
     sparkline_col: str | None = None,  # L1 scar hook — line-movement sparklines, not built
     percent_cols: Sequence[str] = (),
+    arrow_col: str | None = None,
+    hidden_cols: Sequence[str] = (),
+    flag_col: str | None = None,
+    flag_below: float = 0.0,
+    rail_col: str | None = None,
+    rail_colors: Mapping[str, str] | None = None,
+    glyph_cols: Sequence[str] = (),
+    glyph_colors: Mapping[str, str] | None = None,
 ) -> dict:
     """Token-themed ``gridOptions``: right-aligned mono numerals, an optional diverging
     heatmap on ``heatmap_col``, per-column header tooltips, and a "%" display suffix on
     ``percent_cols`` (kept numeric underneath). Pure — no Streamlit call.
+
+    ``arrow_col`` prefixes that column's cells with the row's Over/Under arrow, keyed
+    off a ``Bet`` column in the row data. ``hidden_cols`` stays in the row data (so
+    selection callbacks and JS renderers can still read it) without rendering as its
+    own grid column — e.g. ``Bet`` for the arrow renderer, or a logic-only slug column
+    that a display column already covers. ``flag_col`` paints an amber left-rail on any
+    row whose value in that column is below ``flag_below`` (e.g. a negative Brier Skill
+    Score) via AG Grid's ``getRowStyle``. ``rail_col``/``rail_colors`` is the categorical
+    sibling of ``flag_col`` — a precomputed string column (e.g. ``amber``/``red``/``none``)
+    mapped straight to a rail color, for cases a single numeric threshold can't express.
+    Only one of ``flag_col``/``rail_col`` should be passed per call — both set
+    ``getRowStyle`` and ``rail_col`` always wins if both are given, regardless of
+    kwarg order (a fixed precedence, not "last kwarg wins").
+    ``glyph_cols``/``glyph_colors`` color cells by their own literal value (e.g. a
+    ●/○ pass/fail glyph) rather than by a numeric heatmap.
     """
     help_map = dict(header_help or {})
     pct = set(percent_cols)
     present = set(df.columns)
+    has_bet = "Bet" in present
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_selection(selection_mode=selection_mode, use_checkbox=False)
     # enableBrowserTooltips renders the header tooltips as native browser titles (reliable;
     # AG Grid's own tooltip component otherwise needs extra wiring and a long show delay).
-    gb.configure_grid_options(rowStyle={"cursor": "pointer"}, enableBrowserTooltips=True)
+    grid_opts = {"rowStyle": {"cursor": "pointer"}, "enableBrowserTooltips": True}
+    grid_opts.update(_row_style_options(flag_col, flag_below, rail_col, rail_colors))
+    gb.configure_grid_options(**grid_opts)
     for col in numeric_cols:
         if col not in present:
             continue
-        if col == heatmap_col:
-            cell_style = _heatmap_cellstyle(df[col], heatmap_center)
-        else:
-            cell_style = dict(_RIGHT_STYLE)
-        kwargs = {"cellStyle": cell_style}
-        if col in pct:
-            kwargs["valueFormatter"] = _PERCENT_FORMATTER
-        if help_map.get(col):
-            kwargs["headerTooltip"] = help_map[col]
+        kwargs = _numeric_col_kwargs(
+            df,
+            col,
+            heatmap_col=heatmap_col,
+            heatmap_center=heatmap_center,
+            pct=pct,
+            arrow_col=arrow_col,
+            has_bet=has_bet,
+            tip=help_map.get(col),
+        )
         gb.configure_column(col, **kwargs)
-    for col, tip in help_map.items():
-        if col not in numeric_cols and col in present:
-            gb.configure_column(col, headerTooltip=tip)
+    _configure_remaining_columns(
+        gb,
+        present,
+        numeric_cols=numeric_cols,
+        glyph_cols=glyph_cols,
+        glyph_colors=glyph_colors,
+        help_map=help_map,
+        hidden_cols=hidden_cols,
+    )
     return gb.build()
 
 
@@ -138,12 +316,21 @@ def render_themed_grid(
     header_help: Mapping[str, str] | None = None,
     selection_mode: str = "single",
     percent_cols: Sequence[str] = (),
+    arrow_col: str | None = None,
+    hidden_cols: Sequence[str] = (),
+    flag_col: str | None = None,
+    flag_below: float = 0.0,
+    rail_col: str | None = None,
+    rail_colors: Mapping[str, str] | None = None,
+    glyph_cols: Sequence[str] = (),
+    glyph_colors: Mapping[str, str] | None = None,
     height: int = 720,
     key: str | None = None,
 ) -> list[dict]:
     """Render the themed grid; return the selected rows as dicts (empty when none).
 
-    ``key`` disambiguates multiple grids rendered on one page.
+    ``key`` disambiguates multiple grids rendered on one page. Row hover is a
+    client-side gold rail (``_HOVER_CSS``) — it never triggers a Streamlit rerun.
     """
     options = build_themed_grid_options(
         df,
@@ -153,6 +340,14 @@ def render_themed_grid(
         header_help=header_help,
         selection_mode=selection_mode,
         percent_cols=percent_cols,
+        arrow_col=arrow_col,
+        hidden_cols=hidden_cols,
+        flag_col=flag_col,
+        flag_below=flag_below,
+        rail_col=rail_col,
+        rail_colors=rail_colors,
+        glyph_cols=glyph_cols,
+        glyph_colors=glyph_colors,
     )
     grid = AgGrid(
         df,
@@ -160,6 +355,7 @@ def render_themed_grid(
         update_mode=GridUpdateMode.SELECTION_CHANGED,
         fit_columns_on_grid_load=True,
         allow_unsafe_jscode=True,
+        custom_css=_HOVER_CSS,
         height=height,
         width="stretch",
         key=key,

@@ -15,7 +15,9 @@ import streamlit as st
 
 from sportstradamus import data
 from sportstradamus.analysis import annotate_offer_outcomes
+from sportstradamus.dashboard.components.lab_filters import FILTER_AXES
 from sportstradamus.helpers.io import (
+    CALIBRATION_SUMMARY_PATH,
     CURRENT_GAME_CONTEXT_PATH,
     CURRENT_GAME_CORR_PATH,
     CURRENT_GAME_STORIES_PATH,
@@ -74,9 +76,6 @@ GAMELOG_SCHEMA = {
         "home": None,
     },
 }
-
-PRED_BANNER_COLOR = "#1f4e79"  # deep teal
-STATS_BANNER_COLOR = "#2d6a4f"  # forest green
 
 # Stats-page time-window menu: label -> lookback days (None = all time).
 TIMEFRAME_OPTIONS = {
@@ -240,6 +239,21 @@ def load_profit_sim_summary() -> pd.DataFrame:
     return _load_profit_sim_summary_cached(_mtime(PROFIT_SIM_SUMMARY_PATH))
 
 
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
+def _load_calibration_summary_cached(mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(CALIBRATION_SUMMARY_PATH)
+
+
+def load_calibration_summary() -> pd.DataFrame:
+    """Precomputed reliability (prob bin x alt-line split) grid from the latest ``reflect`` run.
+
+    Columns ``Alt Line, Bin, Predicted, Actual, N, ECE, ROI``. Receipts reads this
+    instead of re-binning history at page load; empty when ``reflect`` has not
+    written it yet.
+    """
+    return _load_calibration_summary_cached(_mtime(CALIBRATION_SUMMARY_PATH))
+
+
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading game context...")
 def _load_current_game_context_cached(mtime: float) -> pd.DataFrame:
     return read_parquet_safe(CURRENT_GAME_CONTEXT_PATH)
@@ -299,6 +313,33 @@ def load_gamelog(league: str) -> pd.DataFrame:
     return _load_gamelog_cached(league, _mtime(gamelog_path) if gamelog_path else 0.0)
 
 
+_CORR_MARKET_SUMMARY_COLUMNS = ["market_a", "market_b", "rho_mean", "n_teams", "scope"]
+
+
+def _corr_market_summary_path(league: str) -> Path:
+    league_dir = pkg_resources.files(data) / "leagues" / league.lower()
+    return Path(str(league_dir / "corr_market_summary.parquet"))
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
+def _load_corr_market_summary_cached(league: str, mtime: float) -> pd.DataFrame:
+    df = read_parquet_safe(_corr_market_summary_path(league))
+    return df if not df.empty else pd.DataFrame(columns=_CORR_MARKET_SUMMARY_COLUMNS)
+
+
+def load_corr_market_summary(league: str) -> pd.DataFrame:
+    """Market-pair mean-correlation summary for a league (mtime-keyed cache).
+
+    Columns ``market_a, market_b, rho_mean, n_teams, scope`` (scope is
+    ``same_team`` or ``opposing``), written by ``training.correlate``'s
+    ``_write_corr_outputs`` alongside the dashboard-forbidden per-team corr
+    parquets. Returns an empty DataFrame for a league with no corr data
+    generated yet — callers caption that rather than crash.
+    """
+    path = _corr_market_summary_path(league)
+    return _load_corr_market_summary_cached(league, _mtime(path))
+
+
 @st.cache_data(ttl=_CACHE_TTL_SECONDS)
 def _load_current_meta_cached(mtime: float) -> dict:
     if not CURRENT_META_PATH.is_file():
@@ -328,14 +369,12 @@ def load_model_stats() -> pd.DataFrame:
 def render_banner(kind: Literal["predictions", "stats"], subtitle: str = "") -> None:
     """Render a colored section banner so Predictions vs Stats are visually distinct."""
     if kind == "predictions":
-        color, label = PRED_BANNER_COLOR, "Predictions"
+        css_class, label = "banner-predictions", "Predictions"
     else:
-        color, label = STATS_BANNER_COLOR, "Stats"
+        css_class, label = "banner-stats", "Stats"
     sub = f" — {subtitle}" if subtitle else ""
     st.markdown(
-        f'<div style="background:{color};padding:10px 14px;border-radius:6px;'
-        f'color:white;margin-bottom:14px;font-size:14px">'
-        f"<b>{label}</b>{sub}</div>",
+        f'<div class="{css_class}"><b>{label}</b>{sub}</div>',
         unsafe_allow_html=True,
     )
 
@@ -345,6 +384,36 @@ def load_stat_map() -> dict:
     """Load the stat name mapping config (static, long-lived cache)."""
     with open(pkg_resources.files(data) / "config" / "stat_map.json") as f:
         return json.load(f)
+
+
+# Axes that are always present on a stat_meta.json cell; the rest of
+# FILTER_AXES (blending, hpo_selection, count_dispersion_objective, zinb_mode)
+# are sparse Optuna search axes that default to "none" when absent.
+_ALWAYS_PRESENT_AXES = ("dist", "target_normalization", "posthoc", "shipped")
+
+
+@st.cache_data(ttl=_STATIC_CONFIG_TTL_SECONDS, show_spinner="Loading stat meta...")
+def load_stat_meta() -> pd.DataFrame:
+    """One row per ``(league, market)`` cell of ``stat_meta.json``, sparse axes defaulted.
+
+    Columns: ``league, market`` + :data:`~sportstradamus.dashboard.components.lab_filters.FILTER_AXES`
+    — ``dist, target_normalization, posthoc, blending, hpo_selection,
+    count_dispersion_objective, zinb_mode, shipped``. Feeds the shared Lab
+    filter panel (``lab_filters.render_lab_filters``); a committed-config read,
+    so no archive/pipeline dependency.
+    """
+    with open(pkg_resources.files(data) / "config" / "stat_meta.json") as f:
+        raw: dict[str, dict[str, dict]] = json.load(f)
+
+    rows = []
+    for league, markets in raw.items():
+        for market, cell in markets.items():
+            row = {"league": league, "market": market}
+            for axis in FILTER_AXES:
+                row[axis] = cell[axis] if axis in _ALWAYS_PRESENT_AXES else cell.get(axis, "none")
+            rows.append(row)
+
+    return pd.DataFrame(rows, columns=["league", "market", *FILTER_AXES])
 
 
 @st.cache_data(ttl=_STATIC_CONFIG_TTL_SECONDS, show_spinner=False)

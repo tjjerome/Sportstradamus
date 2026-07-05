@@ -457,7 +457,7 @@ production data.
 | `config/playerCompStats.json` | Learned player comp weights per league/position |
 | `config/book_weights.json` | **Gitignored.** Sportsbook reliability weights for consensus lines |
 | `config/prop_books.json` | List of sportsbooks consulted for player-prop consensus |
-| `{LEAGUE}_corr.csv` | Pre-computed player stat correlation matrices |
+| `leagues/{league}/corr_same_team.parquet` + `corr_opposing.parquet` | Pre-computed player stat correlation matrices (written by `training/correlate.py`; never loaded by the dashboard — NBA is 2.85M rows, per-game slices only) |
 
 ### Data Storage
 

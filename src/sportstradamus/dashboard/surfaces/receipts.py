@@ -2,12 +2,12 @@
 
 Hero ("if you'd tailed every rec" units + record), skeptic checks (EV>5% record, CLV beat
 rate, calibration, worst month — losers shown, never hidden), a by-league/market/platform
-grid, your tracked slips, accuracy/profit/volume trends, the full CLV breakdown, and the
-folded-in strategy simulator. A skeptic should be able to verify profitability unaided.
+grid, your tracked slips, accuracy trends alongside the standard-vs-alt-line reliability
+diagram, the full CLV breakdown, and the folded-in strategy simulator. A skeptic should be
+able to verify profitability unaided.
 """
 
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from sklearn.metrics import brier_score_loss
@@ -15,6 +15,7 @@ from sklearn.metrics import brier_score_loss
 from sportstradamus import clv
 from sportstradamus.analysis import (
     JUICE_PAYOUT,
+    TIMEFRAMES,
     compute_book_brier_skill_score,
     dedup_bets,
     ev_threshold_record,
@@ -27,9 +28,11 @@ from sportstradamus.dashboard.components.profit_sim import (
     render_profit_sim,
     render_profit_sim_summary,
 )
+from sportstradamus.dashboard.components.tickets import build_tickets, render_tickets
 from sportstradamus.dashboard.data import (
     filtered_history_or_stop,
     format_ts,
+    load_calibration_summary,
     load_history,
     load_parlays,
     load_profit_sim_summary,
@@ -39,6 +42,54 @@ from sportstradamus.dashboard.data import (
     sidebar_filters,
     sport_filtered,
 )
+from sportstradamus.dashboard.surfaces.receipts_charts import (
+    cumulative_profit_chart,
+    reliability_diagram,
+)
+from sportstradamus.dashboard.theme import GOLD, GRAY
+
+# Nebula wash (DESIGN.md §3): blue radial stop + gold held at 7% opacity, both well under
+# the hero-card 12% gold ceiling — literal values ported from the mockup's own .hero
+# background (docs/mockups/p8-receipts.html:29-30).
+_HERO_BG = (
+    "radial-gradient(ellipse at 88% -20%, rgba(46,107,230,.15), transparent 48%),"
+    "radial-gradient(ellipse at 8% 130%, rgba(201,162,39,.07), transparent 46%),#1A1D24"
+)
+
+# Window filter re-scoping the hero + by-dimension grid only (every other df-consuming
+# section keeps reading the full, unwindowed df). Four of TIMEFRAMES' five labels map to
+# the spec's five named options (skip 6m — not one of them) plus "All", which isn't a
+# TIMEFRAMES entry at all: no day-cutoff, the unfiltered case. Default is "All" so the
+# page's default view is unchanged from before this filter existed.
+_RECEIPTS_WINDOW_LABELS = {
+    "7d": "Last week",
+    "30d": "Last month",
+    "3m": "Last 3 mo",
+    "1y": "Last year",
+}
+_RECEIPTS_WINDOW_DAYS = {
+    label: days for label, days in TIMEFRAMES if label in _RECEIPTS_WINDOW_LABELS
+}
+_RECEIPTS_WINDOW_OPTIONS = [*_RECEIPTS_WINDOW_LABELS, "All"]
+
+
+def _hero_stat(label: str, value: str, *, size: str, color: str = "") -> str:
+    """One Cinzel-kicker / Plex-mono-value stat span for the hero's stats row.
+
+    ``size`` is ``"xl"`` (38px, gold) for the single hero number or ``"lg"`` (26px,
+    default text color) for the supporting stats beside it — the mockup's own
+    ``.v.xl``/``.v.lg`` weight split (only ROI gets the hero treatment; Win rate/Record
+    read as normal-weight context).
+    """
+    font_size = 38 if size == "xl" else 26
+    color_style = f"color:{color};" if color else ""
+    return (
+        f"<span><div style=\"font-family:'Cinzel',serif;font-size:9px;"
+        f'letter-spacing:.13em;text-transform:uppercase;color:{GRAY}">{label}</div>'
+        f"<div style=\"font-family:'IBM Plex Mono',monospace;font-weight:600;"
+        f'line-height:1;font-size:{font_size}px;{color_style}">{value}</div></span>'
+    )
+
 
 st.title("Receipts")
 render_banner("stats", "the track record, with the losers shown")
@@ -74,15 +125,44 @@ df["_date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
 df["Hit"] = (df["Bet"] == df["Result"]).astype(int)
 df["Profit Unit"] = df["Hit"] * JUICE_PAYOUT - (1 - df["Hit"])
 
-st.subheader("If you'd tailed every rec")
-record = tailed_record(df)
-h1, h2, h3 = st.columns(3)
-h1.metric("ROI", f"{record['roi']:+.1%}")
-h2.metric("Win rate", f"{record['win_pct']:.1%}")
-h3.metric("Record", f"{record['wins']:,}–{record['losses']:,}")
-st.caption(
+# Every other df-consuming section below (skeptic checks, slips, trends/calibration,
+# CLV, sim, CSV export) keeps reading the full, unwindowed df.
+window = (
+    st.segmented_control(
+        "Window",
+        _RECEIPTS_WINDOW_OPTIONS,
+        default="All",
+        format_func=lambda w: _RECEIPTS_WINDOW_LABELS.get(w, w),
+        key="receipts_window",
+    )
+    or "All"
+)
+if window == "All":
+    df_windowed = df
+else:
+    cutoff = pd.Timestamp.today().normalize() - pd.Timedelta(days=_RECEIPTS_WINDOW_DAYS[window])
+    df_windowed = df.loc[df["_date"] >= cutoff.date()]
+
+record = tailed_record(df_windowed)
+wm = worst_month(df)
+hero_stats = "".join(
+    (
+        _hero_stat("ROI", f"{record['roi']:+.1%}", size="xl", color=GOLD),
+        _hero_stat("Win rate", f"{record['win_pct']:.1%}", size="lg"),
+        _hero_stat("Record", f"{record['wins']:,}–{record['losses']:,}", size="lg"),
+    )
+)
+st.markdown(
+    f'<div style="position:relative;overflow:hidden;border:1px solid #2A2E37;'
+    f'border-radius:6px;padding:18px 20px;background:{_HERO_BG}">'
+    f"<div style=\"font-family:'Cinzel',serif;font-size:9.5px;letter-spacing:.18em;"
+    f"text-transform:uppercase;color:{GOLD}\">If you'd tailed every rec</div>"
+    f'<div style="display:flex;gap:34px;align-items:flex-end;flex-wrap:wrap;'
+    f'margin-top:6px">{hero_stats}</div>'
+    f'<div style="color:{GRAY};font-size:12px;margin-top:12px">'
     f"+{record['units']:.0f} units across {record['n']:,} unique resolved recs — flat -110 "
-    "(win +0.91u, loss -1u), deduped across books, pushes excluded."
+    "(win +0.91u, loss -1u), deduped across books, pushes excluded.</div></div>",
+    unsafe_allow_html=True,
 )
 
 daily_profit = (
@@ -92,14 +172,7 @@ daily_profit = (
     .sort_values("_date")
 )
 daily_profit["Cumulative Profit"] = daily_profit["Profit"].cumsum()
-fig_profit = px.area(
-    daily_profit,
-    x="_date",
-    y="Cumulative Profit",
-    labels={"_date": "Date", "Cumulative Profit": "Units"},
-)
-fig_profit.update_layout(height=360)
-st.plotly_chart(fig_profit, width="stretch")
+st.plotly_chart(cumulative_profit_chart(daily_profit, wm), width="stretch")
 
 st.download_button(
     "Export filtered history (CSV)",
@@ -115,7 +188,6 @@ clv_summary = clv.summarize(history)
 ev_rec = ev_threshold_record(df)
 brier = brier_score_loss(df["Hit"], df[prob_col].clip(0, 1))
 book_skill = compute_book_brier_skill_score(df)
-wm = worst_month(df)
 
 s1, s2, s3, s4 = st.columns(4)
 s1.metric(
@@ -150,7 +222,7 @@ dim = (
     )
     or "League"
 )
-grid_df = record_grid(df, dim)
+grid_df = record_grid(df_windowed, dim)
 if grid_df.empty:
     st.caption("No resolved recs in this slice.")
 else:
@@ -184,71 +256,68 @@ else:
         )
     else:
         st.caption(f"{pending_n} pending — graded nightly by `reflect`.")
-    slip_cols = [
-        c
-        for c in [
-            "saved_at",
-            "platform",
-            "play_type",
-            "headline",
-            "bet_size",
-            "model_ev",
-            "stake",
-            "status",
-        ]
-        if c in user_slips.columns
-    ]
-    st.dataframe(
-        user_slips.sort_values("saved_at", ascending=False)[slip_cols],
-        hide_index=True,
-        width="stretch",
-    )
+    tickets = build_tickets(user_slips.sort_values("saved_at", ascending=False))
+    render_tickets(tickets)
 
-st.subheader("Rolling 30-Day Accuracy by League")
-daily_league = (
-    df.groupby(["_date", "League"])
-    .agg(
-        Hits=("Hit", "sum"),
-        Bets=("Hit", "count"),
-    )
-    .reset_index()
-)
-daily_league.sort_values("_date", inplace=True)
+trend_col, cal_col = st.columns(2)
 
-fig_acc = go.Figure()
-for league in sorted(daily_league["League"].unique()):
-    ld = daily_league.loc[daily_league["League"] == league].copy()
-    ld["Roll30_Hits"] = ld["Hits"].rolling(30, min_periods=1).sum()
-    ld["Roll30_Bets"] = ld["Bets"].rolling(30, min_periods=1).sum()
-    ld["Roll30_Acc"] = ld["Roll30_Hits"] / ld["Roll30_Bets"]
-    fig_acc.add_trace(
-        go.Scatter(
-            x=ld["_date"],
-            y=ld["Roll30_Acc"],
-            mode="lines",
-            name=league,
+with trend_col:
+    st.subheader("Rolling 30-Day Accuracy by League")
+    daily_league = (
+        df.groupby(["_date", "League"])
+        .agg(
+            Hits=("Hit", "sum"),
+            Bets=("Hit", "count"),
         )
+        .reset_index()
     )
+    daily_league.sort_values("_date", inplace=True)
 
-fig_acc.add_hline(y=0.5, line_dash="dash", line_color="gray", annotation_text="50%")
-fig_acc.update_layout(yaxis_title="Accuracy", xaxis_title="Date", height=400)
-st.plotly_chart(fig_acc, width="stretch")
+    fig_acc = go.Figure()
+    for league in sorted(daily_league["League"].unique()):
+        ld = daily_league.loc[daily_league["League"] == league].copy()
+        ld["Roll30_Hits"] = ld["Hits"].rolling(30, min_periods=1).sum()
+        ld["Roll30_Bets"] = ld["Bets"].rolling(30, min_periods=1).sum()
+        ld["Roll30_Acc"] = ld["Roll30_Hits"] / ld["Roll30_Bets"]
+        fig_acc.add_trace(
+            go.Scatter(
+                x=ld["_date"],
+                y=ld["Roll30_Acc"],
+                mode="lines",
+                name=league,
+            )
+        )
 
-st.subheader("Prediction Volume")
-volume = df.groupby(["_date", "League"]).size().reset_index(name="Count")
-volume_pivot = volume.pivot_table(index="League", columns="_date", values="Count", fill_value=0)
+    fig_acc.add_hline(y=0.5, line_dash="dash", line_color="gray", annotation_text="50%")
+    fig_acc.update_layout(yaxis_title="Accuracy", xaxis_title="Date", height=400)
+    st.plotly_chart(fig_acc, width="stretch")
 
-if not volume_pivot.empty:
-    fig_heat = px.imshow(
-        volume_pivot.values,
-        x=[str(d) for d in volume_pivot.columns],
-        y=volume_pivot.index.tolist(),
-        labels={"x": "Date", "y": "League", "color": "Predictions"},
-        aspect="auto",
-        color_continuous_scale="Blues",
-    )
-    fig_heat.update_layout(height=300)
-    st.plotly_chart(fig_heat, width="stretch")
+with cal_col:
+    st.subheader("Calibration — predicted vs realized hit rate")
+    cal_summary = load_calibration_summary()
+    if cal_summary.empty:
+        st.info("No calibration data yet. Populates after `reflect` runs against resolved history.")
+    else:
+        st.plotly_chart(reliability_diagram(cal_summary), width="stretch")
+        std_split = cal_summary.loc[~cal_summary["Alt Line"]]
+        alt_split = cal_summary.loc[cal_summary["Alt Line"]]
+        e1, e2, e3 = st.columns(3)
+        e1.metric(
+            "Realized ECE",
+            f"{std_split['ECE'].iloc[0]:.1%}" if not std_split.empty else "—",
+        )
+        e2.metric(
+            "Standard ROI",
+            f"{std_split['ROI'].iloc[0]:+.1%}" if not std_split.empty else "—",
+        )
+        e3.metric(
+            "Alt / ladder ROI",
+            f"{alt_split['ROI'].iloc[0]:+.1%}" if not alt_split.empty else "—",
+        )
+        st.caption(
+            "On the diagonal = honest probabilities. Alt legs reach the tails and sit "
+            "on it too — calibrated across the whole ladder, and profitable there."
+        )
 
 st.subheader("Closing Line Value")
 if clv_summary["n"] == 0:
@@ -257,14 +326,19 @@ if clv_summary["n"] == 0:
         "runs against archives that contain post-lock odds."
     )
 else:
+    coverage = clv_summary["n"] / len(history) if len(history) else 0.0
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Resolved legs (with close)", f"{clv_summary['n']:,}")
+    c1.metric("Close coverage", f"{coverage:.1%}", f"{clv_summary['n']:,} of {len(history):,} legs")
     c2.metric("Mean Market CLV", f"{clv_summary['market_clv_mean']:+.3f}")
     c3.metric(
         "Mean Model CLV",
         f"{clv_summary['model_clv_mean']:+.3f}" if pd.notna(clv_summary["model_clv_mean"]) else "—",
     )
     c4.metric("Beat-close rate", f"{clv_summary['frac_beat_close']:.1%}")
+    st.caption(
+        "Model CLV compares the model's win probability to the closing probability at "
+        "lock; Market CLV does the same for the market's own price."
+    )
 
     segments = clv_summary["segments"]
     if not segments.empty:
@@ -277,11 +351,12 @@ else:
             hide_index=True,
         )
 
-st.subheader("Strategy simulator")
+st.subheader("Strategy simulator — retrospective (hindsight)")
 st.caption(
     "If you'd staked the model's positive-edge bets under each strategy. Computed nightly — "
     "ROI / Sharpe / drawdown / win-rate over each look-back window."
 )
+st.caption("Forward paper-trading ledger lands with the sim-bettor-ledger lane.")
 render_profit_sim_summary(load_profit_sim_summary())
 with st.expander("Customize & run a live backtest"):
     render_profit_sim(history)

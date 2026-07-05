@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P8 · Board — condensed sober grid (rev 4)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Cinzel:wght@500;600&family=Cormorant+Garamond:ital,wght@0,600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0E1117; --surface:#1A1D24; --text:#E6E9EF; --border:#2A2E37;
+    --primary:#2E6BE6; --link:#5B8DEF; --green:#1F9D55; --red:#E5484D;
+    --orange:#F5A524; --gray:#8A91A0; --gold:#C9A227;
+    --neg2:#9A2B2B; --neg1:#C0453E; --pos1:#7FAAE8; --pos2:#2351B4;
+  }
+  *{box-sizing:border-box}
+  body{margin:0 auto;max-width:1040px;background:var(--bg);color:var(--text);
+    font-family:'IBM Plex Sans',sans-serif;font-size:14px;line-height:1.5;padding:26px 24px 64px}
+  .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+  svg.ic{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-0.12em}
+  .ar{width:9px;height:10px;display:inline-block;vertical-align:-0.02em;margin-right:6px}
+  .up{fill:var(--green)} .dn{fill:var(--red)}
+  .sep{color:var(--gray);font-weight:400;padding:0 2px}
+
+  .head{position:relative;overflow:hidden;border-radius:4px;padding:14px 16px 4px;margin-bottom:6px;
+    background:radial-gradient(ellipse at 12% -40%, rgba(46,107,230,.10), transparent 52%),
+              radial-gradient(ellipse at 90% 0%, rgba(201,162,39,.05), transparent 44%)}
+  .kicker{font-family:'Cinzel',serif;font-weight:600;font-size:10.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--gold)}
+  h1{font-size:23px;margin:1px 0 1px;font-weight:700}
+  .updated{color:var(--gray);font-size:12px}
+
+  .lensrow{display:flex;align-items:center;gap:8px;margin:14px 0 10px;flex-wrap:wrap}
+  .lenslab{font-family:'Cinzel',serif;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--gray);margin-right:4px}
+  .lens,.segb{font-size:12px;color:var(--gray);border:1px solid var(--border);border-radius:4px;padding:4px 11px;cursor:pointer;background:var(--surface)}
+  /* active/selected highlight = gold (owner rule); blue reserved for primary buttons/links */
+  .lens.on,.segb.on{color:var(--gold);border-color:var(--gold);background:rgba(201,162,39,.13)}
+  .segb{padding:4px 12px}
+  .seggroup{display:inline-flex;align-items:center;gap:6px}
+
+  .filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;align-items:center}
+  .field{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:6px 9px;font-size:12px;color:var(--gray);display:flex;align-items:center;gap:7px}
+  .pill{background:rgba(46,107,230,.14);border:1px solid var(--primary);color:#bcd3f7;border-radius:3px;padding:0 6px;font-size:11px}
+  .slider{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--gray);min-width:140px}
+  .track{height:4px;border-radius:2px;background:var(--border);position:relative}
+  .track::after{content:"";position:absolute;left:12%;right:18%;top:0;bottom:0;background:var(--primary);border-radius:2px}
+  .showing{color:var(--gray);font-size:12px;margin:6px 0 8px}
+  .showing b{color:var(--text)}
+
+  .gridwrap{border:1px solid var(--border);border-radius:4px;overflow-x:auto;background:var(--surface)}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;min-width:820px}
+  thead th{position:sticky;top:0;background:#20242d;color:var(--gray);font-weight:500;font-size:10px;
+    letter-spacing:.07em;text-transform:uppercase;padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);white-space:nowrap}
+  thead th.r{text-align:right}
+  thead th.help::after{content:"i";display:inline-flex;align-items:center;justify-content:center;width:11px;height:11px;
+    border:1px solid var(--gray);border-radius:50%;font-size:8px;margin-left:5px;vertical-align:middle;font-family:'IBM Plex Sans'}
+  tbody td{padding:7px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+  tbody tr{cursor:pointer}
+  tbody tr:nth-child(even){background:rgba(255,255,255,.014)}
+  /* hover = gold left-rail + faint gold wash (client-side .ag-row-hover CSS; no rerun) */
+  tbody tr:hover{background:rgba(201,162,39,.09);box-shadow:inset 3px 0 0 var(--gold)}
+  td.num{font-family:'IBM Plex Mono',monospace;text-align:right;font-variant-numeric:tabular-nums}
+  td.line{font-family:'IBM Plex Mono',monospace}
+  td.heat{font-family:'IBM Plex Mono',monospace;text-align:right;color:#E6E9EF;border-radius:2px}
+  .plat{font-size:11px;color:var(--gray)}
+
+  .cap{color:var(--gray);font-size:12px;margin:8px 0}
+  .note{color:var(--gray);font-size:12px;margin-top:14px;line-height:1.55}
+  h2{font-size:15px;margin:22px 0 6px;font-weight:600}
+</style>
+</head>
+<body>
+
+<div class="head">
+  <div class="kicker">◈ The board</div>
+  <h1>Today's Predictions</h1>
+  <div class="updated">generated 2026-07-03 11:50 AM</div>
+</div>
+
+<div class="lensrow">
+  <span class="lenslab">Prophecy lens</span>
+  <span class="lens">All</span>
+  <span class="lens on">Tonight</span>
+  <span class="lens">Sharp edges</span>
+  <span class="lens">Longshots</span>
+  <span class="lens">Contrarian</span>
+  <span class="lens">Consensus</span>
+</div>
+
+<div class="filters">
+  <span class="seggroup"><span class="lenslab" style="margin:0 2px 0 0">Side</span><span class="segb on">All</span><span class="segb">Over</span><span class="segb">Under</span></span>
+  <span class="field">League <span class="pill">WNBA</span><span class="pill">NBA</span></span>
+  <span class="field">Platform <span class="pill">Underdog</span><span class="pill">Sleeper</span></span>
+  <span class="field">Market <span class="pill">Points</span><span class="pill">+ 24</span></span>
+  <span class="field"><svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg> Player search…</span>
+  <span class="slider">Model Edge<span class="track"></span></span>
+</div>
+
+<div class="showing">Showing <b>7</b> of 1,204 offers &middot; <span class="mono">Tonight</span> lens · today's games only</div>
+
+<div class="gridwrap">
+  <table>
+    <thead><tr>
+      <th>League</th><th>Match</th><th>Player</th><th>Market</th><th>Line</th>
+      <th class="r">Boost</th><th class="r help">Win %</th>
+      <th class="r help">Model Edge</th><th class="r help">Cons Edge</th><th>Platform</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>WNBA</td><td class="mono">LVA <span class="sep">v</span> IND</td><td>A'ja Wilson</td><td>Points</td><td class="line"><svg class="ar up" viewBox="0 0 10 10"><path d="M5 1.3l4 7.4H1z"/></svg>23.5</td><td class="num">1.90</td><td class="num">61.1%</td><td class="heat" style="background:var(--pos2)">+11.4%</td><td class="num">+3.2%</td><td class="plat">Underdog</td></tr>
+      <tr><td>NBA</td><td class="mono">NYK <span class="sep">@</span> SAS</td><td>J. Brunson</td><td>Points</td><td class="line"><svg class="ar up" viewBox="0 0 10 10"><path d="M5 1.3l4 7.4H1z"/></svg>25.5</td><td class="num">1.85</td><td class="num">58.0%</td><td class="heat" style="background:var(--pos2)">+9.2%</td><td class="num">+1.8%</td><td class="plat">Underdog</td></tr>
+      <tr><td>NBA</td><td class="mono">MIA <span class="sep">v</span> ORL</td><td>T. Herro</td><td>3-Pt Made</td><td class="line"><svg class="ar up" viewBox="0 0 10 10"><path d="M5 1.3l4 7.4H1z"/></svg>2.5</td><td class="num">1.78</td><td class="num">57.3%</td><td class="heat" style="background:var(--pos1)">+6.1%</td><td class="num">+0.4%</td><td class="plat">Sleeper</td></tr>
+      <tr><td>WNBA</td><td class="mono">IND <span class="sep">@</span> LVA</td><td>C. Clark</td><td>Assists</td><td class="line"><svg class="ar dn" viewBox="0 0 10 10"><path d="M5 8.7l4-7.4H1z"/></svg>8.5</td><td class="num">1.72</td><td class="num">55.9%</td><td class="num">+3.4%</td><td class="num">+0.9%</td><td class="plat">Underdog</td></tr>
+      <tr><td>NBA</td><td class="mono">SAS <span class="sep">v</span> NYK</td><td>V. Wembanyama</td><td>Rebounds</td><td class="line"><svg class="ar up" viewBox="0 0 10 10"><path d="M5 1.3l4 7.4H1z"/></svg>11.5</td><td class="num">1.95</td><td class="num">54.1%</td><td class="num">+1.1%</td><td class="num">&minus;0.6%</td><td class="plat">Sleeper</td></tr>
+      <tr><td>NBA</td><td class="mono">ORL <span class="sep">@</span> MIA</td><td>P. Banchero</td><td>Assists</td><td class="line"><svg class="ar up" viewBox="0 0 10 10"><path d="M5 1.3l4 7.4H1z"/></svg>4.5</td><td class="num">1.88</td><td class="num">52.0%</td><td class="heat" style="background:var(--neg1)">&minus;2.5%</td><td class="num">&minus;1.9%</td><td class="plat">Underdog</td></tr>
+      <tr><td>WNBA</td><td class="mono">IND <span class="sep">@</span> LVA</td><td>K. Mitchell</td><td>Points</td><td class="line"><svg class="ar dn" viewBox="0 0 10 10"><path d="M5 8.7l4-7.4H1z"/></svg>17.5</td><td class="num">3.20</td><td class="num">49.5%</td><td class="heat" style="background:var(--neg2)">&minus;4.8%</td><td class="num">&minus;3.1%</td><td class="plat">Sleeper</td></tr>
+    </tbody>
+  </table>
+</div>
+<div class="cap"><svg class="ar up" viewBox="0 0 10 10"><path d="M5 1.3l4 7.4H1z"/></svg>over &middot; <svg class="ar dn" viewBox="0 0 10 10"><path d="M5 8.7l4-7.4H1z"/></svg>under. Match = player's team first, <span class="mono">@</span> away / <span class="mono">v</span> home. Hover a row → gold trim (it's clickable); click → the themed Details dialog. Trend arrives with L1.</div>
+
+<h2>Build a cross-game slip</h2>
+<div class="cap">Select a row, add it to the sidebar slip; the simple (any-game, grade-only) builder lives here — unchanged.</div>
+
+<div class="note">
+  <b>Condensed 14 → 10 columns:</b> cut <b>Kelly</b>, merged <b>Team + Opp → Match</b> (<span class="mono">{team} {@|v} {opp}</span>,
+  player's team first), folded <b>Bet into Line</b> (green ▲ over / red ▼ under), dropped the empty <b>Trend</b> column until L1.
+  <i>Could go tighter:</i> fold Market into the pick or drop League → 8–9 cols.
+  <br><b>Highlight rule (resolved):</b> gold = highlight (row <b>hover</b> trim, active lens, active Side); blue = primary
+  buttons/links only. Hover trim is client-side CSS (no rerun). Owner override of DESIGN's blue-for-active → a DESIGN.md
+  amendment in the spec.
+  <br><b>Market names (cross-surface):</b> verbose display titles (<span class="mono">3-Pt Made</span>, not <span class="mono">FG3M</span>)
+  on every screen, all leagues — a display-name map keyed by (league?, market-slug). Spec item; wiring TBD after I trace where
+  the strings live now.
+</div>
+
+<script>
+const v0=fetch('/version.txt').then(r=>r.text()).catch(()=>'');
+setInterval(async()=>{try{const a=await v0;const b=await fetch('/version.txt?'+Date.now()).then(r=>r.text());if(a&&a!==b)location.reload()}catch(e){}},2000);
+</script>
+</body>
+</html>
