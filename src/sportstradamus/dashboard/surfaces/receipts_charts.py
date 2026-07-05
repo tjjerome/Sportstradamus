@@ -1,6 +1,7 @@
-"""Chart builders for the Receipts calibration panel."""
+"""Chart builders for the Receipts calibration + cumulative-units panels."""
 
 import pandas as pd
+import plotly.express as px
 import plotly.graph_objects as go
 
 from sportstradamus.dashboard import theme
@@ -62,4 +63,47 @@ def reliability_diagram(cal_summary: pd.DataFrame) -> go.Figure:
         yaxis={"title": "Actual Hit Rate", "range": [0.40, 1.0]},
         height=380,
     )
+    return fig
+
+
+# Cumulative-units chart height (px) — unchanged from receipts.py's prior px.area default.
+_PROFIT_CHART_HEIGHT = 360
+
+
+def cumulative_profit_chart(daily_profit: pd.DataFrame, wm: dict) -> go.Figure:
+    """Cumulative-units area chart with month/signed-unit axes + a worst-drawdown marker.
+
+    ``daily_profit`` is the surface's own per-day ``(_date, Profit, Cumulative Profit)``
+    frame. ``wm`` is a ``worst_month()`` result (``{}`` when nothing resolved yet, in
+    which case no marker is drawn). The marker lands on the *last* daily row that falls
+    in ``wm["month"]`` — the running total once that month finished, the real-data
+    analogue of the mockup's monthly-vertex illustration.
+    """
+    fig = px.area(
+        daily_profit,
+        x="_date",
+        y="Cumulative Profit",
+        labels={"_date": "Date", "Cumulative Profit": "Units"},
+    )
+    fig.update_xaxes(dtick="M1", tickformat="%b '%y")
+    fig.update_yaxes(tickformat="+d")
+    fig.update_layout(height=_PROFIT_CHART_HEIGHT)
+
+    if wm:
+        month_key = pd.to_datetime(daily_profit["_date"]).dt.strftime("%Y-%m")
+        month_end = daily_profit.loc[month_key == wm["month"]].iloc[-1]
+        month_abbrev = pd.to_datetime(wm["month"]).strftime("%b")
+        fig.add_trace(
+            go.Scatter(
+                x=[month_end["_date"]],
+                y=[month_end["Cumulative Profit"]],
+                mode="markers+text",
+                marker={"size": 8, "color": theme.RED},
+                text=[f"{wm['units']:+.0f}u {month_abbrev}"],
+                textposition="bottom center",
+                textfont={"color": theme.RED},
+                showlegend=False,
+                hovertemplate=f"Worst month: {wm['month']}<br>{wm['units']:+.1f}u",
+            )
+        )
     return fig
