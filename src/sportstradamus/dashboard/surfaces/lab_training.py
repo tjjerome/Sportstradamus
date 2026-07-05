@@ -12,7 +12,10 @@ import datetime as dt
 import pandas as pd
 import streamlit as st
 
-from sportstradamus.dashboard.data import format_ts, load_model_stats, render_banner
+from sportstradamus.dashboard.components.gate_matrix import gate_matrix_frame, render_gate_matrix
+from sportstradamus.dashboard.components.lab_filters import apply_lab_filters, render_lab_filters
+from sportstradamus.dashboard.data import format_ts, load_model_stats, load_stat_meta, render_banner
+from sportstradamus.dashboard.surfaces.lab_training_charts import lifecycle_funnel
 from sportstradamus.helpers.io import LIVE_METRICS_PATH, MODEL_STATS_PATH
 from sportstradamus.training.graduation import lifecycle_table
 
@@ -68,11 +71,15 @@ DIRECTIONS: dict[str, str] = {
     "g3_bench_z": LOWER,
     "g4_iqr_ratio": INFO,
     "g5_ece_debiased": LOWER,
+    "g6_star_ci_hi": LOWER,
+    "g6_star_ref": INFO,
+    "g6_recent_corr": LOWER,
     "g1_pass": INFO,
     "g2_pass": INFO,
     "g3_pass": INFO,
     "g4_pass": INFO,
     "g5_pass": INFO,
+    "g6_pass": INFO,
     "ship": INFO,
     # Hyperparameters
     "hp_rounds": INFO,
@@ -146,11 +153,15 @@ TAB_COLUMNS: dict[str, list[str]] = {
         "g3_bench_z",
         "g4_iqr_ratio",
         "g5_ece_debiased",
+        "g6_star_ci_hi",
+        "g6_star_ref",
+        "g6_recent_corr",
         "g1_pass",
         "g2_pass",
         "g3_pass",
         "g4_pass",
         "g5_pass",
+        "g6_pass",
         "ship",
     ],
     "Hyperparameters": [
@@ -196,10 +207,11 @@ TAB_CAPTIONS: dict[str, str] = {
         " matches the empirical outcome dispersion. Columns are informational."
     ),
     "Ship gates": (
-        "Five offline ship gates (training.scorecard.compute_gates). G1 = paired"
+        "Six offline ship gates (training.scorecard.compute_gates). G1 = paired"
         " Brier CI vs book (ci_hi < 0 ⇒ model wins). G2/G3 = top-decile/bottom-quartile"
         " bias-over-spread z. G4 = predicted vs realized IQR ratio (≈1.0 ideal)."
-        " G5 = Roelofs-debiased equal-mass ECE. `ship` is the AND of all five gates."
+        " G5 = Roelofs-debiased equal-mass ECE. G6 = anti-shrinkage (recent-form CI"
+        " vs. a league reference ratio). `ship` is the AND of all six gates."
     ),
     "Hyperparameters": (
         "Optuna-tuned LightGBMLSS hyperparameters and per-market scale references."
@@ -255,43 +267,56 @@ if not lifecycle.empty:
 else:
     stats["lifecycle_state"] = pd.NA
 
-with st.sidebar:
-    st.header("Filters")
-    leagues = sorted(stats["league"].dropna().unique())
-    markets = sorted(stats["market"].dropna().unique())
-    if "lab_leagues" not in st.session_state:
-        st.session_state["lab_leagues"] = leagues
-    if "lab_markets" not in st.session_state:
-        st.session_state["lab_markets"] = markets
-    sel_leagues = st.multiselect("Leagues", leagues, key="lab_leagues")
-    sel_markets = st.multiselect("Markets", markets, key="lab_markets")
-    distributions = sorted(stats["distribution"].dropna().unique())
-    sel_dists = st.multiselect("Distributions", distributions, default=distributions)
-    shipped_states = (
-        sorted(stats["shipped"].dropna().unique()) if "shipped" in stats.columns else []
-    )
-    sel_shipped = (
-        st.multiselect("Shipped", shipped_states, default=shipped_states) if shipped_states else []
-    )
-    lifecycle_states = sorted(stats["lifecycle_state"].dropna().unique())
-    sel_lifecycle = (
-        st.multiselect("Lifecycle", lifecycle_states, default=lifecycle_states)
-        if lifecycle_states
-        else []
-    )
-
-scope = (
-    stats["league"].isin(sel_leagues)
-    & stats["market"].isin(sel_markets)
-    & stats["distribution"].isin(sel_dists)
+leagues = sorted(stats["league"].dropna().unique())
+markets = sorted(stats["market"].dropna().unique())
+lifecycle_states = sorted(stats["lifecycle_state"].dropna().unique())
+if "lab_leagues" not in st.session_state:
+    st.session_state["lab_leagues"] = leagues
+if "lab_markets" not in st.session_state:
+    st.session_state["lab_markets"] = markets
+col_league, col_market, col_lifecycle = st.columns(3)
+sel_leagues = col_league.multiselect("Leagues", leagues, key="lab_leagues")
+sel_markets = col_market.multiselect("Markets", markets, key="lab_markets")
+sel_lifecycle = (
+    col_lifecycle.multiselect("Lifecycle", lifecycle_states, default=lifecycle_states)
+    if lifecycle_states
+    else []
 )
-if sel_shipped:
-    scope &= stats["shipped"].isin(sel_shipped)
+
+scope = stats["league"].isin(sel_leagues) & stats["market"].isin(sel_markets)
 if sel_lifecycle:
     scope &= stats["lifecycle_state"].isin(sel_lifecycle)
 view = stats.loc[scope]
 
+stat_meta = load_stat_meta()
+lab_sel = render_lab_filters(stat_meta, collapsed=True)
+view = apply_lab_filters(view, stat_meta, lab_sel)
+
 st.caption(f"Showing **{len(view):,}** cells.")
+
+matrix = gate_matrix_frame(view)
+one_gate_short = int((matrix["n_fails"] == 1).sum())
+
+st.subheader("Run at a Glance")
+tile_cells, tile_ship, tile_short, tile_withheld = st.columns(4)
+tile_cells.metric("Cells trained", f"{len(view):,}")
+tile_ship.metric("Shipping (all gates)", f"{int(view['ship'].eq(True).sum()):,}")
+tile_short.metric("One gate short", f"{one_gate_short:,}")
+tile_withheld.metric("Withheld", f"{int(view['shipped'].eq('withheld').sum()):,}")
+
+st.plotly_chart(
+    lifecycle_funnel(
+        trained=len(view),
+        g1_pass=int(view["g1_pass"].eq(True).sum()),
+        all_gates=int(view["ship"].eq(True).sum()),
+        graduated=int(view["lifecycle_state"].eq("graduated").sum()),
+    ),
+    width="stretch",
+)
+
+st.subheader("Gate Matrix")
+if not matrix.empty:
+    render_gate_matrix(matrix)
 
 tabs = st.tabs(list(TAB_COLUMNS.keys()))
 for tab, name in zip(tabs, TAB_COLUMNS.keys(), strict=True):
