@@ -29,6 +29,18 @@ Correlations test below overrides ``AppTest._page_hash`` directly with the corre
 other job of validating the file exists and copying it into the tree) to route
 around this; any future AppTest smoke test for lab_diagnostics.py/lab_training.py
 needs the identical override.
+
+A third gap, hit by the Lab Diagnostics test: patching a ``@st.cache_data``-backed
+loader's path constant (e.g. ``HISTORY_PATH``) is not reliably enough on its own when
+an earlier test in the same session already ran an AppTest against a page that reads
+through the same cached loader — Streamlit's script runner does not always re-execute
+the loader's module fresh on ``switch_page``, so a stale (possibly empty) cache entry
+from an earlier test can outlive that test's own monkeypatch teardown and get served
+to this one instead of a fresh read of the newly patched path. Call
+``st.cache_data.clear()`` right before constructing the ``AppTest`` for any page whose
+data comes through a cached loader whose path constant this test patches — it makes
+the test's outcome independent of what ran earlier in the session instead of chasing
+which specific prior test caused the staleness.
 """
 
 from __future__ import annotations
@@ -36,6 +48,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 from streamlit.util import calc_hash
 
@@ -187,3 +200,76 @@ def test_lab_correlations_renders_heatmap_and_panels(monkeypatch, tmp_path):
     at.run()
     assert not at.exception
     assert at.title[0].value == "Correlations & Parlays"
+
+
+def _diag_row(league: str, market: str, i: int) -> dict:
+    """One resolved-offer row for the Lab Diagnostics fixture below.
+
+    Alternates Over/Under and win/loss by ``i`` so both the market table (n>=5) and
+    the Murphy-decomposition panel (n>=20) have a real accuracy/calibration spread
+    per cell instead of a degenerate all-hit or all-miss column.
+    """
+    over = i % 2 == 0
+    line = 20.0
+    actual = line + 3 if (over == (i % 4 == 0)) else line - 3
+    return {
+        "Player": f"Player {i}",
+        "League": league,
+        "Date": f"2026-06-{(i % 27) + 1:02d}",
+        "Market": market,
+        "Team": "NYK",
+        "Projection": line + 1,
+        "Market Projection": line,
+        "Dist": "SkewNormal",
+        "CV": 0.3,
+        "Model Param": None,
+        "Gate": None,
+        "Temperature": None,
+        "Disp Cal": None,
+        "Step": None,
+        "Line": line,
+        "Boost": 1.0,
+        "Platform": "Underdog",
+        "Bet": "Over" if over else "Under",
+        "Win Prob": 0.55 + (0.01 * (i % 5)),
+        "Market Prob": 0.52,
+        "Close Market Prob": None,
+        "Market CLV": None,
+        "Model CLV": None,
+        "Alt Line": False,
+        "Actual": actual,
+    }
+
+
+# 25 rows/cell so the market table (n>=5), the sharpness view, and the Murphy
+# decomposition panel (n>=20) all render real content for both cells.
+_DIAG_ROWS = [_diag_row("NBA", "PTS", i) for i in range(25)] + [
+    _diag_row("NBA", "AST", i) for i in range(25)
+]
+
+
+def test_lab_diagnostics_renders_market_table_and_start_here_strip(monkeypatch, tmp_path):
+    """P8 Task B4 smoke: Lab Diagnostics navigates clean with the worst-BSS-first table,
+    the "start here" tiles, and the Family/Norm meta columns.
+
+    ``load_history`` reads through ``helpers.io.read_history``, which reads ``io``'s own
+    ``HISTORY_PATH`` binding directly rather than the name ``dashboard.data`` imports —
+    both need patching, same two-binding shape as Lab Correlations' ``PARLAY_HIST_PATH``
+    above. Also needs ``st.cache_data.clear()`` — see the module docstring's third gap.
+    """
+    fixture = tmp_path / "history.parquet"
+    pd.DataFrame(_DIAG_ROWS).to_parquet(fixture)
+    monkeypatch.setattr("sportstradamus.helpers.io.HISTORY_PATH", fixture)
+    monkeypatch.setattr("sportstradamus.dashboard.data.HISTORY_PATH", fixture)
+    st.cache_data.clear()
+
+    at = AppTest.from_file(str(_APP), default_timeout=30)
+    at.run()
+    at.switch_page("surfaces/lab_diagnostics.py")
+    at._page_hash = calc_hash("lab-diagnostics")  # see module docstring
+    at.run()
+    assert not at.exception
+    assert at.title[0].value == "Market Diagnostics & Forecast Quality"
+    assert any("Start here" in c.value for c in at.caption)
+    tile_labels = {m.label for m in at.metric}
+    assert {"NBA - PTS", "NBA - AST"} <= tile_labels
