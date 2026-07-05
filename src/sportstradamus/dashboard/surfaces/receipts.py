@@ -2,8 +2,9 @@
 
 Hero ("if you'd tailed every rec" units + record), skeptic checks (EV>5% record, CLV beat
 rate, calibration, worst month — losers shown, never hidden), a by-league/market/platform
-grid, your tracked slips, accuracy/profit/volume trends, the full CLV breakdown, and the
-folded-in strategy simulator. A skeptic should be able to verify profitability unaided.
+grid, your tracked slips, accuracy trends alongside the standard-vs-alt-line reliability
+diagram, the full CLV breakdown, and the folded-in strategy simulator. A skeptic should be
+able to verify profitability unaided.
 """
 
 import pandas as pd
@@ -30,6 +31,7 @@ from sportstradamus.dashboard.components.profit_sim import (
 from sportstradamus.dashboard.data import (
     filtered_history_or_stop,
     format_ts,
+    load_calibration_summary,
     load_history,
     load_parlays,
     load_profit_sim_summary,
@@ -39,6 +41,7 @@ from sportstradamus.dashboard.data import (
     sidebar_filters,
     sport_filtered,
 )
+from sportstradamus.dashboard.surfaces.receipts_charts import reliability_diagram
 
 st.title("Receipts")
 render_banner("stats", "the track record, with the losers shown")
@@ -204,51 +207,65 @@ else:
         width="stretch",
     )
 
-st.subheader("Rolling 30-Day Accuracy by League")
-daily_league = (
-    df.groupby(["_date", "League"])
-    .agg(
-        Hits=("Hit", "sum"),
-        Bets=("Hit", "count"),
-    )
-    .reset_index()
-)
-daily_league.sort_values("_date", inplace=True)
+trend_col, cal_col = st.columns(2)
 
-fig_acc = go.Figure()
-for league in sorted(daily_league["League"].unique()):
-    ld = daily_league.loc[daily_league["League"] == league].copy()
-    ld["Roll30_Hits"] = ld["Hits"].rolling(30, min_periods=1).sum()
-    ld["Roll30_Bets"] = ld["Bets"].rolling(30, min_periods=1).sum()
-    ld["Roll30_Acc"] = ld["Roll30_Hits"] / ld["Roll30_Bets"]
-    fig_acc.add_trace(
-        go.Scatter(
-            x=ld["_date"],
-            y=ld["Roll30_Acc"],
-            mode="lines",
-            name=league,
+with trend_col:
+    st.subheader("Rolling 30-Day Accuracy by League")
+    daily_league = (
+        df.groupby(["_date", "League"])
+        .agg(
+            Hits=("Hit", "sum"),
+            Bets=("Hit", "count"),
         )
+        .reset_index()
     )
+    daily_league.sort_values("_date", inplace=True)
 
-fig_acc.add_hline(y=0.5, line_dash="dash", line_color="gray", annotation_text="50%")
-fig_acc.update_layout(yaxis_title="Accuracy", xaxis_title="Date", height=400)
-st.plotly_chart(fig_acc, width="stretch")
+    fig_acc = go.Figure()
+    for league in sorted(daily_league["League"].unique()):
+        ld = daily_league.loc[daily_league["League"] == league].copy()
+        ld["Roll30_Hits"] = ld["Hits"].rolling(30, min_periods=1).sum()
+        ld["Roll30_Bets"] = ld["Bets"].rolling(30, min_periods=1).sum()
+        ld["Roll30_Acc"] = ld["Roll30_Hits"] / ld["Roll30_Bets"]
+        fig_acc.add_trace(
+            go.Scatter(
+                x=ld["_date"],
+                y=ld["Roll30_Acc"],
+                mode="lines",
+                name=league,
+            )
+        )
 
-st.subheader("Prediction Volume")
-volume = df.groupby(["_date", "League"]).size().reset_index(name="Count")
-volume_pivot = volume.pivot_table(index="League", columns="_date", values="Count", fill_value=0)
+    fig_acc.add_hline(y=0.5, line_dash="dash", line_color="gray", annotation_text="50%")
+    fig_acc.update_layout(yaxis_title="Accuracy", xaxis_title="Date", height=400)
+    st.plotly_chart(fig_acc, width="stretch")
 
-if not volume_pivot.empty:
-    fig_heat = px.imshow(
-        volume_pivot.values,
-        x=[str(d) for d in volume_pivot.columns],
-        y=volume_pivot.index.tolist(),
-        labels={"x": "Date", "y": "League", "color": "Predictions"},
-        aspect="auto",
-        color_continuous_scale="Blues",
-    )
-    fig_heat.update_layout(height=300)
-    st.plotly_chart(fig_heat, width="stretch")
+with cal_col:
+    st.subheader("Calibration — predicted vs realized hit rate")
+    cal_summary = load_calibration_summary()
+    if cal_summary.empty:
+        st.info("No calibration data yet. Populates after `reflect` runs against resolved history.")
+    else:
+        st.plotly_chart(reliability_diagram(cal_summary), width="stretch")
+        std_split = cal_summary.loc[~cal_summary["Alt Line"]]
+        alt_split = cal_summary.loc[cal_summary["Alt Line"]]
+        e1, e2, e3 = st.columns(3)
+        e1.metric(
+            "Realized ECE",
+            f"{std_split['ECE'].iloc[0]:.1%}" if not std_split.empty else "—",
+        )
+        e2.metric(
+            "Standard ROI",
+            f"{std_split['ROI'].iloc[0]:+.1%}" if not std_split.empty else "—",
+        )
+        e3.metric(
+            "Alt / ladder ROI",
+            f"{alt_split['ROI'].iloc[0]:+.1%}" if not alt_split.empty else "—",
+        )
+        st.caption(
+            "On the diagonal = honest probabilities. Alt legs reach the tails and sit "
+            "on it too — calibrated across the whole ladder, and profitable there."
+        )
 
 st.subheader("Closing Line Value")
 if clv_summary["n"] == 0:

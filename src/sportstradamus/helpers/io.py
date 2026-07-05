@@ -46,6 +46,9 @@ LIVE_METRICS_PATH = _RUNTIME_DIR / "live_metrics_per_market.parquet"
 # Precomputed strategy x horizon profit-sim grid (Receipts reads it instead of
 # running the Monte-Carlo backtest at page load). Written nightly by reflect.
 PROFIT_SIM_SUMMARY_PATH = _RUNTIME_DIR / "profit_sim_summary.parquet"
+# Precomputed reliability (prob bin x alt-line split) grid (Receipts reads it instead
+# of re-binning history at page load). Written nightly by reflect.
+CALIBRATION_SUMMARY_PATH = _RUNTIME_DIR / "calibration_summary.parquet"
 # User-built slips saved from the dashboard ("Lock it in"); graded by nightly.
 USER_SLIPS_PATH = _RUNTIME_DIR / "user_slips.parquet"
 

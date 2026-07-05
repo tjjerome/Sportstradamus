@@ -50,9 +50,12 @@ underline, active segmented-control segment. Gold also highlights kickers, proph
 constellation highlights, and correlation strength. Primary blue `#2E6BE6` is reserved for
 primary buttons and links only — it is no longer used as a generic "active/selected" accent.
 Gold is **never a data mark** — never a bar, heatmap cell, plotted line/point encoding a value,
-or team-color star (the gold correlation edge in the constellation is the sole pre-existing
-exception, DESIGN §4a) — never body text, never primary button fill, never a substitute for
-green/red semantics.
+or team-color star — never body text, never primary button fill, never a substitute for
+green/red semantics. Two sanctioned exceptions: the gold correlation edge in the constellation
+(DESIGN §4a); and the Receipts reliability diagram's alt-line/ladder series marker, where gold
+identifies *which population* a point belongs to (standard line vs. alt/ladder), not the point's
+own value — the same role as a legend swatch. Both mark identity/strength, never a plotted
+value on their own axis; don't generalize either into license to use gold on other charts.
 
 Streamlit's `[theme]` block has no free-form keys, so `config.toml` mirrors only the tokens
 Streamlit understands; `goldColor`, the display fonts, and the ambient-image rules are mirrored in

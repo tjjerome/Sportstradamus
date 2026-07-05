@@ -25,6 +25,7 @@ from sportstradamus import clv, data
 from sportstradamus.analysis import (
     _resolve_leg,
     annotate_offer_outcomes,
+    calibration_summary,
     check_bet,
     compute_book_brier_skill_score,
     precompute_profit_sim_summary,
@@ -32,6 +33,7 @@ from sportstradamus.analysis import (
 )
 from sportstradamus.helpers import Archive, get_logger
 from sportstradamus.helpers.io import (
+    CALIBRATION_SUMMARY_PATH,
     LIVE_METRICS_PATH,
     PROFIT_SIM_SUMMARY_PATH,
     _atomic_write_parquet,
@@ -314,6 +316,14 @@ def _precompute_profit_sim(history):
     )
 
 
+def _precompute_calibration(history):
+    summary = calibration_summary(annotate_offer_outcomes(history))
+    _atomic_write_parquet(summary, CALIBRATION_SUMMARY_PATH)
+    logger.info(
+        f"Calibration: wrote {len(summary)} bin-split rows to {CALIBRATION_SUMMARY_PATH.name}"
+    )
+
+
 @click.command()
 @click.option("--league", default=None, help="Resolve only this league (default: all).")
 @click.option(
@@ -349,6 +359,7 @@ def run(league, skip_update, history_only, log_level):
     logger.info(f"Live metrics: wrote {len(metrics)} rows to {LIVE_METRICS_PATH.name}")
 
     _precompute_profit_sim(history)
+    _precompute_calibration(history)
 
 
 def _load_one_league(lg, cls, skip_update):

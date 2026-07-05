@@ -73,6 +73,11 @@ _BET_KEY = ["Date", "Player", "Market", "Line", "Bet"]
 # well before this, so the cap only guards pathological (huge-EV) inputs.
 _CRPS_NEGBIN_SUM_CAP = 500
 
+# Reliability-diagram bin edges for calibration_summary — wider than
+# _daily_calibration_tables's [0.5, 1.0] floor to give the alt/ladder split room to
+# show tail bins (alt lines carry more extreme predicted probabilities).
+_CAL_BINS = np.arange(0.40, 1.01, 0.05)
+
 
 def _leg_market_map(league, platform, stat_map):
     """Per-platform market-name map plus the league-specific leg-name overrides."""
@@ -527,6 +532,62 @@ def record_grid(exploded, by: str) -> pd.DataFrame:
     grouped["Win%"] = grouped["wins"] / grouped["Bets"]
     grouped["ROI"] = grouped["Units"] / grouped["Bets"]
     return grouped.sort_values("Units", ascending=False)[cols].reset_index(drop=True)
+
+
+_CAL_SUMMARY_COLS = ["Alt Line", "Bin", "Predicted", "Actual", "N", "ECE", "ROI"]
+
+
+def _split_calibration_rows(split: pd.DataFrame, prob_col: str, alt_line: bool) -> pd.DataFrame:
+    """One split's binned reliability rows, each carrying that split's ECE and ROI.
+
+    ``ECE`` is computed over the binned rows only (values outside ``_CAL_BINS`` after
+    clipping get no bin and drop out via ``groupby(observed=True)``); ``ROI`` is flat
+    -110 accounting over every resolved row in the split, whether or not it landed in
+    a bin — the two denominators can legitimately differ.
+    """
+    binned = split.assign(_bin=pd.cut(split[prob_col].clip(0, 1), bins=_CAL_BINS))
+    table = (
+        binned.groupby("_bin", observed=True)
+        .agg(Predicted=(prob_col, "mean"), Actual=("Hit", "mean"), N=("Hit", "count"))
+        .reset_index()
+    )
+    if table.empty:
+        return pd.DataFrame(columns=_CAL_SUMMARY_COLS)
+    ece = float(
+        (table["N"] / table["N"].sum() * (table["Predicted"] - table["Actual"]).abs()).sum()
+    )
+    roi = float(split["Profit Unit"].sum() / len(split))
+    table["Bin"] = table["_bin"].astype(str)
+    table["Alt Line"] = alt_line
+    table["ECE"] = ece
+    table["ROI"] = roi
+    return table[_CAL_SUMMARY_COLS]
+
+
+def calibration_summary(exploded: pd.DataFrame) -> pd.DataFrame:
+    """Reliability frame: one row per (prob bin x alt split), resolved rows only.
+
+    Carries the bin's ``Predicted`` mean / ``Actual`` hit rate / ``N`` count plus
+    each split's ``ECE`` and flat-juice ``ROI``. Pure — nightly persists it,
+    Receipts renders it.
+    """
+    if exploded.empty:
+        return pd.DataFrame(columns=_CAL_SUMMARY_COLS)
+    resolved = exploded.dropna(subset=["Result"])
+    if resolved.empty:
+        return pd.DataFrame(columns=_CAL_SUMMARY_COLS)
+
+    df = _with_profit_units(resolved)
+    prob_col = (
+        "Win Prob" if "Win Prob" in df.columns and df["Win Prob"].notna().any() else "Model EV"
+    )
+    splits = [
+        _split_calibration_rows(split, prob_col, alt_line)
+        for alt_line, split in df.groupby("Alt Line")
+    ]
+    return (
+        pd.concat(splits, ignore_index=True) if splits else pd.DataFrame(columns=_CAL_SUMMARY_COLS)
+    )
 
 
 # Reference bankroll for the precomputed grid. ROI / Sharpe / drawdown / win-rate are

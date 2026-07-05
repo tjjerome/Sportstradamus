@@ -11,7 +11,8 @@ from sportstradamus import data
 
 # Celestial gold accent — oracle decoration (kickers, prophecy, constellation) and
 # interactive-highlight (active/selected/hovered UI states); never a data mark except
-# the constellation correlation edge (DESIGN §4a).
+# the constellation correlation edge (DESIGN §4a) and the Receipts reliability
+# diagram's alt-line/ladder series marker (series identity, not a value encoding).
 GOLD = "#C9A227"
 
 # Neutral gray (DESIGN.md §2 grayColor) — context/secondary marks, e.g. the

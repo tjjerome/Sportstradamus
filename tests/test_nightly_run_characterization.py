@@ -53,6 +53,7 @@ def _history():
             "Close Market Prob": [0.0, 0.0],
             "Market CLV": [0.0, 0.0],
             "Model CLV": [0.0, 0.0],
+            "Alt Line": [False, False],
             "Actual": [np.nan, np.nan],
         }
     )
@@ -84,7 +85,7 @@ def meta(monkeypatch):
     written = {}
     monkeypatch.setattr(nightly, "_compute_live_metrics", lambda h: pd.DataFrame({"a": [1, 2, 3]}))
     monkeypatch.setattr(
-        nightly, "_atomic_write_parquet", lambda df, path: written.update({"rows": len(df)})
+        nightly, "_atomic_write_parquet", lambda df, path: written.update({path.name: len(df)})
     )
 
     meta_path = Path(str(pkg_resources.files(data) / "runtime" / "resolve_meta.json"))
@@ -93,7 +94,7 @@ def meta(monkeypatch):
         result = CliRunner().invoke(nightly.run, ["--league", "NBA", "--skip-update"])
         assert result.exit_code == 0, result.output
         out = json.loads(meta_path.read_text())
-        out["_live_rows"] = written.get("rows")
+        out["_live_rows"] = written.get("live_metrics_per_market.parquet")
         out["_output"] = result.output
         yield out
     finally:
