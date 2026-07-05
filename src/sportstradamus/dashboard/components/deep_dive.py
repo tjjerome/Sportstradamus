@@ -7,35 +7,25 @@ stats, Correlated). The Comps / Other-stats tabs read the ``current_offer_detail
 sidecar prerendered at ``prophecize`` time so the server never recomputes them live.
 """
 
-import json
 from collections.abc import Mapping
 
 import pandas as pd
 import streamlit as st
 
-from sportstradamus.dashboard.components.deep_dive_charts import (
-    DIST_PARAM_COLS,
-    build_h2h_history,
-    build_recent_history,
-    distribution_chart,
-    distribution_frame,
-    history_chart,
-    resolve_std,
-    sparkline,
-    strength_badge,
+from sportstradamus.dashboard.components.deep_dive_tabs import (
+    render_comps_tab,
+    render_corr_tab,
+    render_history_tab,
+    render_model_tab,
+    render_other_stats_tab,
 )
 from sportstradamus.dashboard.components.glyphs import game_shape_glyph
-from sportstradamus.dashboard.components.slip_state import add_to_simple_slip
 from sportstradamus.dashboard.data import (
-    GAMELOG_SCHEMA,
     load_current_game_context,
     load_current_offer_details,
-    load_stat_tooltips,
 )
-from sportstradamus.dashboard.legs import find_offer_idx
 from sportstradamus.dashboard.narrative import SHAPE_HELP, bet_arrow, context_strip
 from sportstradamus.dashboard.theme import GOLD, GRAY
-from sportstradamus.leg_schema import leg_label
 
 _DETAIL_KEY = ["League", "Date", "Player", "Market", "Opponent"]
 
@@ -89,22 +79,6 @@ def _edge_badge(model_ev: float) -> str:
     edge = model_ev - 1.0
     color = "green" if edge >= 0 else "red"
     return f":{color}[**{edge:+.0%} edge**]"
-
-
-def _p_over(row: pd.Series) -> float | None:
-    """Model P(outcome over the line), or ``None`` if ``Win Prob`` is absent.
-
-    ``Win Prob`` is ``max(Model Over, Model Under)`` with ``Bet`` its argmax, so it
-    approximates P(over) on an Over pick and its complement on an Under pick. The raw
-    ``Model Over`` is not persisted to the offer snapshot; this recovers it. Note:
-    ``_finalize_records`` clips each side to 90% independently before taking the max,
-    so on a >90%-confidence Under pick the derived complement can slightly overstate
-    true P(over).
-    """
-    win = row.get("Win Prob")
-    if not pd.notna(win):
-        return None
-    return float(win) if row.get("Bet") == "Over" else 1.0 - float(win)
 
 
 def _render_header(row: pd.Series) -> None:
@@ -196,169 +170,6 @@ def _detail_row(row: pd.Series, details: pd.DataFrame) -> pd.Series | None:
     return sub.iloc[0] if not sub.empty else None
 
 
-def _decode(detail: pd.Series | None, col: str):
-    """Parse a sidecar JSON column. ``[]`` when absent/empty; the payload otherwise
-    (a list for comps/other_stats, a single dict for volume_trend, ``None`` for null).
-    """
-    if detail is None:
-        return []
-    raw = detail.get(col)
-    return json.loads(raw) if isinstance(raw, str) and raw else []
-
-
-def _render_comps_tab(detail: pd.Series | None, row: pd.Series) -> None:
-    comps = _decode(detail, "comps_vs_opp")
-    opp = row.get("Opponent", "")
-    if not comps:
-        st.caption(f"No comparable player has faced {opp} in the last 300 days.")
-        return
-    df = pd.DataFrame(comps)
-    df["pct_diff"] = (df["pct_diff"] * 100).map(lambda v: f"{v:+.0f}%")
-    df = df.rename(
-        columns={
-            "comp": "Comp",
-            "n_games": "Games",
-            "avg_vs_opp": f"Avg vs {opp}",
-            "pct_diff": "vs their avg",
-        }
-    )
-    st.caption(
-        f"KNN comps who faced {opp} in the last 300 days — their average then, "
-        "against their own 300-day norm."
-    )
-    st.dataframe(df, hide_index=True, width="stretch")
-
-
-def _render_stat_row(entry: dict, tooltip: str | None) -> None:
-    """``delta_color="off"`` places the percentile chip below the metric without
-    coloring it green/red.
-    """
-    num_col, spark_col = st.columns([1, 1])
-    pct = entry.get("percentile")
-    delta = f"{pct:.0%} pctile" if pct is not None else None
-    num_col.metric(
-        entry["stat"], f"{entry['value']:.3g}", delta=delta, delta_color="off", help=tooltip
-    )
-    if entry.get("series"):
-        spark_col.altair_chart(sparkline(entry["series"]), width="stretch")
-
-
-def _render_other_stats_tab(detail: pd.Series | None, row: pd.Series) -> None:
-    volume = _decode(detail, "volume_trend")
-    volume = volume if isinstance(volume, dict) else None
-    others = _decode(detail, "other_stats")
-    if not volume and not others:
-        st.caption("No prerendered supporting-stat detail — re-run `prophecize` to refresh.")
-        return
-    tips = load_stat_tooltips().get(row.get("League", ""), {})
-    for entry in ([volume] if volume else []) + list(others):
-        _render_stat_row(entry, tips.get(entry["stat"]))
-
-
-def _render_corr_cards(
-    items: list[dict],
-    group_label: str,
-    filtered: pd.DataFrame,
-    tab_key_prefix: str,
-    platform: str | None,
-) -> None:
-    """Render one correlated-partner group. ``platform`` pins the offer-row lookup to
-    the displayed offer's own book: ``find_correlation`` runs once per platform, so a
-    partner's platform always matches the row it was attached to, but ``filtered`` (the
-    Board's grid selection) can hold both Underdog and Sleeper rows for the same game —
-    an unpinned match could resolve to the other book's row and show its Boost instead.
-    """
-    if not items:
-        return
-    st.markdown(f"**{group_label}**")
-    for i, item in enumerate(items):
-        col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
-        col1.markdown(f"**{leg_label(item)}**")
-        col2.markdown(strength_badge(item["mult"]) + f" {item['mult']:.2f}×")
-        idx = find_offer_idx(item, filtered, platform=platform)
-        if col3.button("View", icon=":material/arrow_forward:", key=f"{tab_key_prefix}_view_{i}"):
-            if idx is not None:
-                st.session_state.detail_stack.append(idx)
-                st.session_state.corr_nav = True
-                st.rerun()
-        if idx is not None and col4.button(
-            "+ slip", icon=":material/add:", key=f"{tab_key_prefix}_slip_{i}"
-        ):
-            add_to_simple_slip(filtered.loc[idx])
-            st.toast(f"Added {filtered.loc[idx]['Player']} to slip")
-
-
-def _select_history_df(
-    hist_df: pd.DataFrame, h2h_df: pd.DataFrame, league: str, opponent: str, row_id: int
-) -> pd.DataFrame:
-    if hist_df.empty or league == "NFL" or h2h_df.empty:
-        return hist_df
-    filter_opt = st.segmented_control(
-        "Filter by opponent",
-        options=["All games", f"vs {opponent}"],
-        default="All games",
-        key=f"h2h_filter_{row_id}",
-    )
-    return h2h_df if filter_opt == f"vs {opponent}" else hist_df
-
-
-def _render_history_tab(row: pd.Series) -> None:
-    stat_key = row.get("Stat") or row.get("Market")
-    line = row.get("Line")
-    league = row.get("League", "")
-    opponent = row.get("Opponent", "")
-    schema = GAMELOG_SCHEMA.get(league, {})
-
-    hist_df = pd.DataFrame()
-    h2h_df = pd.DataFrame()
-    if stat_key and schema:
-        hist_df = build_recent_history(row, league, stat_key, line, schema)
-        if league != "NFL" and opponent:
-            h2h_df = build_h2h_history(row, league, stat_key, line, opponent, schema)
-
-    display_df = _select_history_df(hist_df, h2h_df, league, opponent, id(row))
-    if not display_df.empty:
-        st.altair_chart(history_chart(display_df, line), width="stretch")
-    elif hist_df.empty:
-        st.caption("No history available for this player/stat.")
-
-
-def _render_model_tab(row: pd.Series) -> None:
-    dist = row.get("Dist")
-    ev = row.get("Projection")
-    cv = row.get("CV")
-    line = row.get("Line")
-    if not (pd.notna(dist) and pd.notna(ev) and pd.notna(cv)):
-        st.caption("Distribution parameters unavailable — re-run `prophecize` to refresh.")
-        return
-
-    params = {
-        param: row.get(col) for col, param in DIST_PARAM_COLS.items() if pd.notna(row.get(col))
-    }
-    std = resolve_std(row.get("Projection STD"), ev, cv)
-    try:
-        df_pdf, y_title, is_continuous = distribution_frame(dist, ev, std, params, line)
-        chart = distribution_chart(
-            df_pdf,
-            is_continuous,
-            line,
-            row["Market"],
-            y_title,
-            projection=ev,
-            consensus_line=row.get("Consensus Line"),
-        )
-        st.altair_chart(chart, width="stretch")
-        p_over = _p_over(row)
-        if p_over is not None:
-            st.markdown(f":green[**P(over) {p_over:.0%}**]")
-        st.caption(
-            ":green[over] / :red[under] mass · app line (dashed white) · "
-            ":gray[consensus line (solid)] · model projection (gold dot)"
-        )
-    except Exception as e:
-        st.error(f"Error computing distribution: {e}")
-
-
 def _render_nav() -> None:
     nav = st.columns([1, 1, 6])
     if nav[0].button("Close", icon=":material/close:"):
@@ -369,21 +180,6 @@ def _render_nav() -> None:
         if nav[1].button("Back", icon=":material/arrow_back:"):
             st.session_state.detail_stack.pop()
             st.rerun()
-
-
-def _render_corr_tab(row: pd.Series, filtered: pd.DataFrame) -> None:
-    # A parquet round-trip decodes a list<struct> cell to a numpy ndarray, not a
-    # list — `x or []` on a >1-element ndarray raises (ambiguous truth value), so
-    # branch on identity and convert explicitly instead of relying on truthiness.
-    raw_same = row.get("Corr Same")
-    raw_opp = row.get("Corr Opp")
-    same_items = [] if raw_same is None else list(raw_same)
-    opp_items = [] if raw_opp is None else list(raw_opp)
-    platform = row.get("Platform")
-    _render_corr_cards(same_items, f"Same team — {row['Team']}", filtered, "corr_same", platform)
-    _render_corr_cards(opp_items, f"Opponent — {row['Opponent']}", filtered, "corr_opp", platform)
-    if not same_items and not opp_items:
-        st.caption("No correlated legs cleared the display thresholds for this offer.")
 
 
 @st.dialog("Offer detail", width="large")
@@ -404,12 +200,12 @@ def show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
         ]
     )
     with tabs[0]:
-        _render_history_tab(row)
+        render_history_tab(row)
     with tabs[1]:
-        _render_model_tab(row)
+        render_model_tab(row)
     with tabs[2]:
-        _render_comps_tab(detail, row)
+        render_comps_tab(detail, row)
     with tabs[3]:
-        _render_other_stats_tab(detail, row)
+        render_other_stats_tab(detail, row)
     with tabs[4]:
-        _render_corr_tab(row, filtered)
+        render_corr_tab(row, filtered)

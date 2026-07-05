@@ -22,11 +22,6 @@ DIST_PARAM_COLS = {
     "Gate": "gate",
 }
 
-# Correlation-strength badge thresholds: a leg whose multiplier on the base edge
-# clears these earns the Strong / Moderate badge in the offer-detail view.
-_CORR_STRONG_MULT = 1.25
-_CORR_MODERATE_MULT = 1.1
-
 
 def history_chart(df: pd.DataFrame, line: float) -> alt.Chart:
     """Bar chart of recent games with a dashed betting-line rule and gold line tag.
@@ -309,12 +304,3 @@ def sparkline(series: list[float], *, height: int = 44) -> alt.Chart:
         .encode(x=alt.X("i:Q", axis=None), y=alt.Y("v:Q", axis=None), tooltip=["v:Q"])
         .properties(height=height)
     )
-
-
-def strength_badge(mult: float) -> str:
-    """Return a semantic colored badge for correlation strength (color paired with text)."""
-    if mult >= _CORR_STRONG_MULT:
-        return ":red[Strong]"
-    if mult >= _CORR_MODERATE_MULT:
-        return ":orange[Moderate]"
-    return ":gray[Mild]"
