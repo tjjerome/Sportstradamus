@@ -3,14 +3,40 @@
 import pandas as pd
 import streamlit as st
 
+from sportstradamus.dashboard.components.glyphs import game_shape_glyph
 from sportstradamus.dashboard.data import (
     format_ts,
+    load_current_game_context,
     load_current_meta,
     load_current_offers,
     load_current_parlays,
     sport_filtered,
 )
-from sportstradamus.dashboard.narrative import home_away, top_thesis
+from sportstradamus.dashboard.narrative import context_strip, home_away, top_thesis
+
+# Legend glyph size: smaller than the default (40px) card glyph so five fit across
+# one row of st.columns(5).
+_LEGEND_GLYPH_SIZE = 28
+
+# (shape, display name, mockup .sub caption) for the legend row, in the same order
+# as docs/mockups/p8-glyphs.html.
+_SHAPE_LEGEND = [
+    ("shootout", "Shootout", "comet · fast total"),
+    ("blowout", "Blowout", "supernova · lopsided"),
+    ("coinflip", "Coinflip", "scales · close ML"),
+    ("even", "Even", "lone star · neutral"),
+    ("grind", "Grind", "hourglass · low total"),
+]
+
+
+def _render_shape_legend() -> None:
+    """Compact 5-column glyph + name + caption row, shared vocabulary for the cards below."""
+    cols = st.columns(len(_SHAPE_LEGEND))
+    for col, (shape, name, sub) in zip(cols, _SHAPE_LEGEND, strict=False):
+        with col:
+            st.markdown(game_shape_glyph(shape, size=_LEGEND_GLYPH_SIZE), unsafe_allow_html=True)
+            st.caption(f"**{name}**  \n{sub}")
+
 
 st.title("Tonight")
 
@@ -20,11 +46,15 @@ st.caption(f"Last updated: {generated}")
 
 offers = sport_filtered(load_current_offers())
 parlays = load_current_parlays()
+game_context = load_current_game_context()
 
 if offers.empty:
     st.info("No current predictions. Run `poetry run prophecize` to generate offers.")
     st.caption("Prophecies arrive with the next data wave.")
     st.stop()
+
+_render_shape_legend()
+st.divider()
 
 # Group on the canonical Game key (not Team/Opponent) so a matchup's two
 # per-team orderings collapse to one card.
@@ -56,6 +86,8 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
     edges = pd.to_numeric(group["Model EV"], errors="coerce") - 1 if "Model EV" in group else None
     top_edge = edges.max() if edges is not None and edges.notna().any() else None
     headline = top_thesis(parlays, game=group["Game"].iloc[0], date=date_raw)
+    strip = context_strip(game_context, game=key_dict["Game"], date=date_raw)
+    shape = strip["shape"] if strip else ""
 
     with st.container(border=True):
         left, right = st.columns([4, 1])
@@ -71,6 +103,7 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
             if top_edge is not None and pd.notna(top_edge):
                 st.caption(f"Top edge: {top_edge:+.1%}")
         with right:
+            st.markdown(game_shape_glyph(shape), unsafe_allow_html=True)
             game_label = f"{home} vs {away}"
             # Date keeps doubleheaders distinct; format must match the Games
             # page's game-picker labels.
