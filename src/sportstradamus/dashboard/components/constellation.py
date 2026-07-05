@@ -137,8 +137,8 @@ def constellation_figure(
         return fig
     keys = sorted(info)
     active = {corr_key(leg) for leg in slip_legs} & set(keys)
-    game = _game_of(pool, slip_legs)
-    league = _league_of(pool, slip_legs)
+    game = _pool_field(pool, slip_legs, column="Game", key="game")
+    league = _pool_field(pool, slip_legs, column="League", key="league")
     rho = _rho_map(corr, game)
 
     teams = _teams_of(game)
@@ -202,39 +202,29 @@ def _blank_figure() -> go.Figure:
     return fig
 
 
-def _game_of(pool: pd.DataFrame | None, slip_legs: Sequence[Mapping]) -> str:
-    """The matchup this map draws — read from the candidate ``pool`` so the layout is
-    static per game and the field renders before any leg is picked; falls back to the
-    slip's game when there is no pool (e.g. an active leg whose offer has expired).
+def _pool_field(
+    pool: pd.DataFrame | None, slip_legs: Sequence[Mapping], *, column: str, key: str
+) -> str:
+    """A single-valued matchup field — read from the candidate ``pool`` so it's
+    static per game and renders before any leg is picked; falls back to the slip's
+    own legs when there is no pool (e.g. an active leg whose offer has expired).
+
+    ``column`` names the raw ``pool`` column (``"Game"`` / ``"League"``); ``key``
+    names the matching canonical-leg key (``"game"`` / ``"league"``). Reads the raw
+    pool column directly rather than bridging through ``leg_field``: a single
+    ``Game`` key never spans two leagues (team codes don't collide across leagues),
+    so the first non-null value is always right, and ``leg_schema._FIELD_TO_OFFER_COL``
+    deliberately excludes ``"league"`` (every existing call site holds a canonical
+    leg for that field, never a raw offer row).
     """
-    if pool is not None and not pool.empty and "Game" in pool.columns:
-        games = pool["Game"].dropna()
-        if not games.empty:
-            return str(games.iloc[0])
+    if pool is not None and not pool.empty and column in pool.columns:
+        values = pool[column].dropna()
+        if not values.empty:
+            return str(values.iloc[0])
     for leg in slip_legs:
-        game = leg.get("game")
-        if game:
-            return str(game)
-    return ""
-
-
-def _league_of(pool: pd.DataFrame | None, slip_legs: Sequence[Mapping]) -> str:
-    """The matchup's league, for ``theme.team_colors`` — same read shape as :func:`_game_of`.
-
-    A single ``Game`` key never spans two leagues (team codes don't collide across
-    leagues), so the first non-null value is always the right one. Reads the raw
-    ``pool["League"]`` column directly rather than bridging through ``leg_field``:
-    ``leg_schema._FIELD_TO_OFFER_COL`` deliberately excludes ``"league"`` (every
-    existing call site holds a canonical leg for that field, never a raw offer row).
-    """
-    if pool is not None and not pool.empty and "League" in pool.columns:
-        leagues = pool["League"].dropna()
-        if not leagues.empty:
-            return str(leagues.iloc[0])
-    for leg in slip_legs:
-        league = leg.get("league")
-        if league:
-            return str(league)
+        value = leg.get(key)
+        if value:
+            return str(value)
     return ""
 
 
