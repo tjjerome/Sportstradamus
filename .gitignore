@@ -12,6 +12,7 @@ build/
 # Hand-authored static Streamlit component (no npm in repo/prod — index.html + main.js
 # ARE the source, not generated output); the generic build/ rule above must not drop them.
 !/src/sportstradamus/dashboard/components/constellation_component/build/
+!/src/sportstradamus/dashboard/components/astrolabe_component/build/
 develop-eggs/
 dist/
 downloads/

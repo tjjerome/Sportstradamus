@@ -24,6 +24,7 @@ from decimal import Decimal
 import pandas as pd
 import streamlit as st
 
+from sportstradamus.dashboard.components.astrolabe_component import render_astrolabe
 from sportstradamus.dashboard.components.constellation import constellation_figure
 from sportstradamus.dashboard.components.constellation_component import render_constellation
 from sportstradamus.dashboard.components.deep_dive import init_detail_state, show_detail
@@ -42,7 +43,12 @@ from sportstradamus.dashboard.components.slip_state import (
 )
 from sportstradamus.dashboard.data import load_model_stats
 from sportstradamus.dashboard.legs import corr_key
-from sportstradamus.dashboard.slip_engine import SlipScore, score_slip, slip_headline
+from sportstradamus.dashboard.slip_engine import (
+    SlipScore,
+    astrolabe_payload,
+    score_slip,
+    slip_headline,
+)
 from sportstradamus.leg_schema import build_leg, is_model_liked, leg_label
 from sportstradamus.prediction.stories.legs import validate_parlay_legs
 
@@ -112,7 +118,7 @@ def render_constellation_builder(
     headline = slip_headline(focus_legs, offers, ctxs)
     if headline:
         st.markdown(f"#### {headline}")
-    _render_metrics(score, correlated=True)
+    _render_metrics(score, legs, key_prefix=key_prefix)
     st.caption("Pairing-block risk arrives with the correlation-block model.")
     _render_lock_in(score, headline, shrink, key_prefix, can_lock=valid)
 
@@ -136,7 +142,7 @@ def render_simple_builder(
         bankroll=Decimal(str(st.session_state[_BANKROLL])),
         shrinkage=shrink,
     )
-    _render_metrics(score, correlated=False)
+    _render_metrics(score, legs, key_prefix=key_prefix)
     _render_lock_in(score, "", shrink, key_prefix)
 
 
@@ -299,20 +305,16 @@ def _pool_match_for_key(pool: pd.DataFrame, key: str) -> tuple | None:
     return None
 
 
-def _render_metrics(score: SlipScore, *, correlated: bool) -> None:
-    cols = st.columns(5)
-    cols[0].metric("Legs", f"{score.bet_size} · {score.play_type}")
-    cols[1].metric("Independent", f"{score.indep_p:.1%}")
-    if correlated:
-        cols[2].metric(
-            "With correlation",
-            f"{score.joint_p:.1%}",
-            f"{score.joint_p - score.indep_p:+.1%}",
-        )
-    else:
-        cols[2].metric("Joint", f"{score.joint_p:.1%}")
-    cols[3].metric("Payout", f"{score.payout:.2f}x")
-    cols[4].metric("EV", f"{score.model_ev - 1:+.1%}")
+def _render_metrics(score: SlipScore, legs: Sequence[Mapping], *, key_prefix: str) -> None:
+    """Draw the astrolabe readout in place of the old flat metric row.
+
+    The nonce is derived from the current leg-set (not a session-state counter) so the
+    component's CSS dials sweep only on a real add/remove — an unrelated rerun recomputes
+    the identical ``SlipScore`` from the same legs and hashes to the same nonce.
+    """
+    nonce = hash(tuple(sorted(corr_key(leg) for leg in legs)))
+    payload = astrolabe_payload(score, nonce=nonce)
+    render_astrolabe(payload, key=f"{key_prefix}_astrolabe")
     bankroll = float(st.session_state[_BANKROLL])
     st.caption(f"Kelly stake ${score.stake} of ${bankroll:,.0f}")
     if score.payout_approximate:
