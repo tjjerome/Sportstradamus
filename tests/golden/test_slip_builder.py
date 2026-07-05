@@ -16,6 +16,7 @@ import pandas as pd
 import streamlit as st
 
 from sportstradamus.dashboard.components.slip_builder import (
+    _active_lenses,
     _add_wider_leg,
     _apply_constellation_action,
     _open_offer_detail,
@@ -108,6 +109,45 @@ def test_add_wider_leg_returns_false_when_key_not_in_any_group():
 
 def test_add_wider_leg_returns_false_when_no_groups():
     assert _add_wider_leg("A|PTS|Over", None) is False
+
+
+def test_active_lenses_both_off_resolves_none_and_none():
+    offers = _pool_df(_offer("A", "PTS", "Over", 25.5, "NYK/SAS", "NYK", "Underdog", 0.3))
+    pool = offers[offers["Game"] == "NYK/SAS"]
+    st.session_state["lens_deep"] = False
+    st.session_state["lens_wider"] = False
+    deep_pool, wider_groups = _active_lenses(
+        offers, [], pool, focus_game="NYK/SAS", platform="Underdog"
+    )
+    assert deep_pool is None
+    assert wider_groups is None
+
+
+def test_active_lenses_deep_only_passes_pool_through_and_skips_wider_query():
+    offers = _pool_df(_offer("A", "PTS", "Over", 25.5, "NYK/SAS", "NYK", "Underdog", 0.3))
+    pool = offers[offers["Game"] == "NYK/SAS"]
+    st.session_state["lens_deep"] = True
+    st.session_state["lens_wider"] = False
+    deep_pool, wider_groups = _active_lenses(
+        offers, [], pool, focus_game="NYK/SAS", platform="Underdog"
+    )
+    assert deep_pool is pool
+    assert wider_groups is None
+
+
+def test_active_lenses_wider_only_runs_satellite_groups_and_skips_deep():
+    offers = _pool_df(
+        _offer("A", "PTS", "Over", 25.5, "NYK/SAS", "NYK", "Underdog", 0.3),
+        _offer("B", "AST", "Over", 6.5, "MIA/ORL", "MIA", "Underdog", 0.4),
+    )
+    pool = offers[offers["Game"] == "NYK/SAS"]
+    st.session_state["lens_deep"] = False
+    st.session_state["lens_wider"] = True
+    deep_pool, wider_groups = _active_lenses(
+        offers, [], pool, focus_game="NYK/SAS", platform="Underdog"
+    )
+    assert deep_pool is None
+    assert wider_groups == [("MIA/ORL", [offers.iloc[1].to_dict()])]
 
 
 def test_apply_constellation_action_click_resolves_pool_key_via_toggle():
