@@ -15,12 +15,16 @@ import json
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from sportstradamus import data as data_pkg
 from sportstradamus.dashboard.components.deep_dive import (
     _decode,
     _detail_row,
     _edge_badge,
+    _p_over,
+    _team_total_text,
+    _win_prob_text,
     drop_detail_on_page_change,
 )
 from sportstradamus.dashboard.legs import find_offer_idx
@@ -112,6 +116,34 @@ def test_detail_row_five_key_join():
 def test_edge_badge_sign_color():
     assert ":green[" in _edge_badge(1.12) and "+12%" in _edge_badge(1.12)
     assert ":red[" in _edge_badge(0.95) and "-5%" in _edge_badge(0.95)
+
+
+def test_team_total_text_with_delta():
+    # Delta vs season avg is ou - baseline_total / 2 (88.2 - 170.2/2 = +3.1).
+    strip = {"baseline_total": 170.2}
+    assert _team_total_text(88.2, strip) == "88.2 team total (+3.1)"
+    # No baseline → total alone, no delta.
+    assert _team_total_text(88.2, {"baseline_total": float("nan")}) == "88.2 team total"
+    assert _team_total_text(88.2, None) == "88.2 team total"
+    # Missing O/U → the N/A form, never a crash.
+    assert _team_total_text(float("nan"), strip) == "team total N/A"
+    assert _team_total_text(None, strip) == "team total N/A"
+
+
+def test_win_prob_text_from_ml_fav_prob():
+    assert _win_prob_text({"ml_fav_prob": 0.64}) == "64% win prob"
+    # NaN prob (no moneyline) and a missing strip both degrade to N/A, not a crash.
+    assert _win_prob_text({"ml_fav_prob": float("nan")}) == "win prob N/A"
+    assert _win_prob_text(None) == "win prob N/A"
+
+
+def test_p_over_flips_on_bet_side():
+    # Win Prob is max(Model Over, Model Under); on an Over pick it *is* P(over)...
+    assert _p_over(pd.Series({"Win Prob": 0.61, "Bet": "Over"})) == pytest.approx(0.61)
+    # ...and on an Under pick P(over) is its complement.
+    assert _p_over(pd.Series({"Win Prob": 0.61, "Bet": "Under"})) == pytest.approx(0.39)
+    # Book-fallback rows with no Win Prob yield None (caller hides the line).
+    assert _p_over(pd.Series({"Bet": "Over"})) is None
 
 
 def _extract_corr_items(raw):

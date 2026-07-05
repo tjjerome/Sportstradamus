@@ -80,6 +80,7 @@ def test_context_strip_returns_fields():
                 "fav_team": "SAS",
                 "shape": "coinflip",
                 "baseline_total": 220.0,
+                "ml_fav_prob": 0.64,
             }
         ]
     )
@@ -89,6 +90,7 @@ def test_context_strip_returns_fields():
         "fav_team": "SAS",
         "shape": "coinflip",
         "baseline_total": 220.0,
+        "ml_fav_prob": 0.64,
     }
 
 
@@ -122,6 +124,7 @@ def test_context_strip_doubleheader_splits_on_date():
                 "fav_team": None,
                 "shape": "even",
                 "baseline_total": 165.6,
+                "ml_fav_prob": float("nan"),
             },
             {
                 "League": "WNBA",
@@ -132,12 +135,14 @@ def test_context_strip_doubleheader_splits_on_date():
                 "fav_team": "DAL",
                 "shape": "coinflip",
                 "baseline_total": 165.6,
+                "ml_fav_prob": 0.58,
             },
         ]
     )
     strip = context_strip(ctx, game="DAL/POR", date="2026-06-14")
     assert strip["fav_team"] == "DAL"
     assert strip["shape"] == "coinflip"
+    assert strip["ml_fav_prob"] == 0.58
 
 
 def test_bet_arrow_over_is_up_and_on_token_green():
