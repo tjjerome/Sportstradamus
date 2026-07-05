@@ -349,7 +349,12 @@ def test_lab_training_renders_gate_matrix_and_glance_strip(monkeypatch, tmp_path
     patch. Getting every module via ``importlib.import_module`` and patching the
     returned object directly (never the dotted-string form) sidesteps that
     ``sys.modules`` divergence entirely, for the same reason the ``lab_training``
-    binding above needs it.
+    binding above needs it. This workaround is local to this test — it does not
+    change ``test_dashboard_no_archive_lock.py``'s own dotted-string monkeypatch
+    (its ``read_parquet_safe`` target isn't cleared/restored by its sweep, so it
+    isn't known to hit this divergence today), so a future test whose patched
+    symbol *is* cleared by that sweep could still hit the same class of bug and
+    would need the same ``importlib.import_module`` treatment.
     """
     fixture = tmp_path / "model_stats.parquet"
     pd.DataFrame(_TRAINING_ROWS).to_parquet(fixture)
@@ -358,9 +363,7 @@ def test_lab_training_renders_gate_matrix_and_glance_strip(monkeypatch, tmp_path
 
     io_module = importlib.import_module("sportstradamus.helpers.io")
     data_module = importlib.import_module("sportstradamus.dashboard.data")
-    lab_training_module = importlib.import_module(
-        "sportstradamus.dashboard.surfaces.lab_training"
-    )
+    lab_training_module = importlib.import_module("sportstradamus.dashboard.surfaces.lab_training")
     monkeypatch.setattr(io_module, "MODEL_STATS_PATH", fixture)
     monkeypatch.setattr(data_module, "MODEL_STATS_PATH", fixture)
     monkeypatch.setattr(lab_training_module, "MODEL_STATS_PATH", fixture)
