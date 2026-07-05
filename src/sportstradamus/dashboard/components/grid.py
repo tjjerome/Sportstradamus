@@ -142,6 +142,24 @@ def _numeric_col_kwargs(
     return kwargs
 
 
+def _get_row_style(flag_col: str, flag_below: float) -> JsCode:
+    """A per-row ``getRowStyle`` callback painting the amber rail when ``flag_col`` is low.
+
+    Mirrors ``_HOVER_CSS``'s gold rail shape (inset box-shadow), orange and
+    row-conditional instead of gold and hover-conditional — AG Grid's ``rowStyle`` is a
+    static dict applied to every row, so a data-dependent style needs this callback form.
+    """
+    return JsCode(
+        "function(params){return params.data && params.data["
+        + repr(flag_col)
+        + "] < "
+        + repr(flag_below)
+        + " ? {boxShadow: 'inset 3px 0 0 "
+        + theme.ORANGE
+        + "'} : null;}"
+    )
+
+
 def build_themed_grid_options(
     df: pd.DataFrame,
     *,
@@ -154,6 +172,8 @@ def build_themed_grid_options(
     percent_cols: Sequence[str] = (),
     arrow_col: str | None = None,
     hidden_cols: Sequence[str] = (),
+    flag_col: str | None = None,
+    flag_below: float = 0.0,
 ) -> dict:
     """Token-themed ``gridOptions``: right-aligned mono numerals, an optional diverging
     heatmap on ``heatmap_col``, per-column header tooltips, and a "%" display suffix on
@@ -163,7 +183,9 @@ def build_themed_grid_options(
     off a ``Bet`` column in the row data. ``hidden_cols`` stays in the row data (so
     selection callbacks and JS renderers can still read it) without rendering as its
     own grid column — e.g. ``Bet`` for the arrow renderer, or a logic-only slug column
-    that a display column already covers.
+    that a display column already covers. ``flag_col`` paints an amber left-rail on any
+    row whose value in that column is below ``flag_below`` (e.g. a negative Brier Skill
+    Score) via AG Grid's ``getRowStyle``.
     """
     help_map = dict(header_help or {})
     pct = set(percent_cols)
@@ -173,7 +195,10 @@ def build_themed_grid_options(
     gb.configure_selection(selection_mode=selection_mode, use_checkbox=False)
     # enableBrowserTooltips renders the header tooltips as native browser titles (reliable;
     # AG Grid's own tooltip component otherwise needs extra wiring and a long show delay).
-    gb.configure_grid_options(rowStyle={"cursor": "pointer"}, enableBrowserTooltips=True)
+    grid_opts = {"rowStyle": {"cursor": "pointer"}, "enableBrowserTooltips": True}
+    if flag_col is not None:
+        grid_opts["getRowStyle"] = _get_row_style(flag_col, flag_below)
+    gb.configure_grid_options(**grid_opts)
     for col in numeric_cols:
         if col not in present:
             continue
@@ -208,6 +233,8 @@ def render_themed_grid(
     percent_cols: Sequence[str] = (),
     arrow_col: str | None = None,
     hidden_cols: Sequence[str] = (),
+    flag_col: str | None = None,
+    flag_below: float = 0.0,
     height: int = 720,
     key: str | None = None,
 ) -> list[dict]:
@@ -226,6 +253,8 @@ def render_themed_grid(
         percent_cols=percent_cols,
         arrow_col=arrow_col,
         hidden_cols=hidden_cols,
+        flag_col=flag_col,
+        flag_below=flag_below,
     )
     grid = AgGrid(
         df,

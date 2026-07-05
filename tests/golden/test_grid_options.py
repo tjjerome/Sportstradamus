@@ -206,6 +206,23 @@ def test_hover_css_is_gold_rail_client_side() -> None:
     assert _HOVER_CSS[".ag-row-hover"]["background-color"] == "rgba(201,162,39,.06) !important"
 
 
+def test_flag_col_adds_get_row_style_jscode() -> None:
+    """Lab Diagnostics' amber rail (P8 Task B4): a row-conditional style needs AG Grid's
+    ``getRowStyle`` callback, since the existing ``rowStyle`` dict is static/uniform.
+    """
+    df = pd.DataFrame({"Market": ["A", "B"], "BSS": [-0.02, 0.03]})
+    options = build_themed_grid_options(df, numeric_cols=["BSS"], flag_col="BSS", flag_below=0.0)
+    assert hasattr(options["getRowStyle"], "js_code")
+    assert theme.ORANGE in options["getRowStyle"].js_code
+    assert "boxShadow" in options["getRowStyle"].js_code
+
+
+def test_flag_col_omitted_by_default() -> None:
+    df = pd.DataFrame({"Market": ["A", "B"], "BSS": [-0.02, 0.03]})
+    options = build_themed_grid_options(df, numeric_cols=["BSS"])
+    assert "getRowStyle" not in options
+
+
 def test_market_display_labels_back_to_market_header() -> None:
     """Market Display carries the slug's prose label but the grid header reads "Market"
     (mockup ``docs/mockups/p8-board.html:104``) — columns.LABELS renames it back, same

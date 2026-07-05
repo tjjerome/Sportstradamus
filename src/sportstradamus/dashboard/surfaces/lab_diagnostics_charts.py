@@ -12,19 +12,31 @@ from sportstradamus.dashboard import theme
 _BIAS_OK = 0.03
 _BIAS_WARN = 0.07
 
+# Descriptive legend labels for the green/orange/red buckets bias_color() assigns,
+# mapped straight to their design token — plotting the raw hex-name strings as the
+# color dimension produces a legend reading literally "green"/"orange"/"red", not
+# something a viewer can use.
+_BIAS_LEVEL_COLORS = {
+    "Well-calibrated": theme.GREEN,
+    "Marginal": theme.ORANGE,
+    "Notable bias": theme.RED,
+}
+_BIAS_LEVEL_LABELS = {"green": "Well-calibrated", "orange": "Marginal", "red": "Notable bias"}
+
 
 def bias_bar(bias_df: pd.DataFrame) -> go.Figure:
     """Horizontal bar chart of Over/Under bias by league-market."""
+    bias_df = bias_df.assign(**{"Bias Level": bias_df["Color"].map(_BIAS_LEVEL_LABELS)})
     fig = px.bar(
         bias_df,
         x="Balance",
         y="Label",
         orientation="h",
-        color="Color",
-        color_discrete_map={"green": theme.GREEN, "orange": theme.ORANGE, "red": theme.RED},
+        color="Bias Level",
+        color_discrete_map=_BIAS_LEVEL_COLORS,
         labels={"Balance": "Over Bias (Predicted − Actual)", "Label": ""},
     )
-    fig.update_layout(showlegend=False, height=max(300, len(bias_df) * 22))
+    fig.update_layout(height=max(300, len(bias_df) * 22))
     fig.add_vline(x=0, line_dash="dash", line_color="gray")
     return fig
 
@@ -160,7 +172,14 @@ def crps_line(crps_daily: pd.DataFrame) -> go.Figure:
 
 
 def coverage_bar(cov_league_df: pd.DataFrame) -> go.Figure:
-    """Grouped bar chart of prediction interval coverage by league and nominal level."""
+    """Grouped bar chart of prediction interval coverage by league and nominal level.
+
+    ``Nominal`` is cast to ``str`` before coloring — as a raw float, ``px.bar`` treats
+    it as a continuous dimension (one trace, a colorbar instead of a legend), so
+    ``barmode="group"`` has nothing to group and only the last nominal level per
+    league survives on-screen.
+    """
+    cov_league_df = cov_league_df.assign(Nominal=cov_league_df["Nominal"].astype(str))
     fig = px.bar(
         cov_league_df,
         x="League",

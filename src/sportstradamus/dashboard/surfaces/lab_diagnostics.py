@@ -16,11 +16,14 @@ from sportstradamus.analysis import (
     compute_coverage,
     murphy_decomposition,
 )
+from sportstradamus.dashboard.components.grid import render_themed_grid
+from sportstradamus.dashboard.components.lab_filters import apply_lab_filters, render_lab_filters
 from sportstradamus.dashboard.data import (
     TIMEFRAME_OPTIONS,
     filtered_history_or_stop,
     get_prediction_history,
     load_resolved_history_or_stop,
+    load_stat_meta,
     render_banner,
     sidebar_filters,
     sport_filtered,
@@ -41,8 +44,15 @@ from sportstradamus.dashboard.surfaces.lab_diagnostics_charts import (
 # to discriminate, flagged as likely under-dispersed.
 _LOW_SHARPNESS_STD = 0.04
 
+# "Start here" strip width: the worst-BSS cells surfaced as metric tiles above the
+# market table (spec: find-the-weak-spots framing, the opposite intent from Receipts).
+_START_HERE_COUNT = 3
+
 st.title("Market Diagnostics & Forecast Quality")
 render_banner("stats", "per-market accuracy, calibration, CRPS")
+
+stat_meta = load_stat_meta()
+lab_sel = render_lab_filters(stat_meta, collapsed=False)
 
 history = load_resolved_history_or_stop()
 
@@ -64,6 +74,10 @@ if TIMEFRAME_OPTIONS[time_window] is not None:
 filters = sidebar_filters(history, key_prefix="mkt_")
 
 df = filtered_history_or_stop(history, filters)
+df = apply_lab_filters(df, stat_meta, lab_sel)
+if df.empty:
+    st.info("No data matches the current Lab filter selection.")
+    st.stop()
 
 prob_col = "Win Prob" if "Win Prob" in df.columns and df["Win Prob"].notna().any() else "Model EV"
 df["Hit"] = (df["Bet"] == df["Result"]).astype(int)
@@ -83,6 +97,7 @@ pred_df = get_prediction_history(
     leagues=filters["leagues"],
     date_range=filters["date_range"],
 )
+pred_df = apply_lab_filters(pred_df, stat_meta, lab_sel)
 pred_df["_date"] = pd.to_datetime(pred_df["Date"], errors="coerce").dt.date
 if cutoff is not None:
     pred_df = pred_df.loc[pred_df["_date"] >= cutoff]
@@ -126,10 +141,33 @@ for (league, market), grp in df.groupby(["League", "Market"]):
 
 market_df = pd.DataFrame(market_rows)
 if not market_df.empty:
-    st.dataframe(
-        market_df.sort_values("Accuracy", ascending=False),
-        width="stretch",
-        hide_index=True,
+    market_df = market_df.merge(
+        stat_meta[["league", "market", "dist", "target_normalization"]],
+        left_on=["League", "Market"],
+        right_on=["league", "market"],
+        how="left",
+    ).rename(columns={"dist": "Family", "target_normalization": "Norm"})
+    market_df = market_df.drop(columns=["league", "market"])
+    market_df = market_df.sort_values("BSS", ascending=True, na_position="last")
+
+    worst_cells = market_df.dropna(subset=["BSS"]).head(_START_HERE_COUNT)
+    if not worst_cells.empty:
+        st.caption("Start here — lowest Brier Skill Score in the current filter:")
+        tiles = st.columns(len(worst_cells))
+        for tile, (_, cell) in zip(tiles, worst_cells.iterrows(), strict=True):
+            tile.metric(f"{cell['League']} - {cell['Market']}", f"{cell['BSS']:+.3f} BSS")
+
+    numeric_cols = [
+        c
+        for c in ("Accuracy", "Balance", "Brier", "BSS", "CRPS", "Samples")
+        if c in market_df.columns
+    ]
+    render_themed_grid(
+        market_df,
+        numeric_cols=numeric_cols,
+        flag_col="BSS",
+        flag_below=0.0,
+        height=min(720, max(200, 40 + 32 * len(market_df))),
     )
     st.download_button(
         "Export market table (CSV)",
