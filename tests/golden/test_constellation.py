@@ -129,9 +129,12 @@ def test_two_team_fixture_resolves_two_distinct_team_primaries():
 
 def test_unknown_team_falls_back_to_gray():
     # A team code absent from team_assets.json for the league resolves to GRAY,
-    # never a KeyError (theme.team_colors' own contract).
-    legs = [{**_row(0, "A|PTS|Over", 0.3), "Team": "ZZZ"}]
-    pool = pd.DataFrame([{**_row(0, "A|PTS|Over", 0.4), "Team": "ZZZ"}])
+    # never a KeyError (theme.team_colors' own contract). "ZZZ" must be one of the
+    # matchup's own two sides (derived from Game, not the row's Team field) so
+    # team_colors("NBA", "ZZZ") is actually invoked, not just missed by the node
+    # dict's own .get(..., GRAY) fallback.
+    legs = [{**_row(0, "A|PTS|Over", 0.3), "Game": "NYK/ZZZ", "Team": "ZZZ"}]
+    pool = pd.DataFrame([{**_row(0, "A|PTS|Over", 0.4), "Game": "NYK/ZZZ", "Team": "ZZZ"}])
     active = _trace(constellation_figure(legs, _corr(), pool), "active")
     assert active.marker.color[0] == GRAY
 
