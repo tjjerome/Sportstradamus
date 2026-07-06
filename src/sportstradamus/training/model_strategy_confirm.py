@@ -31,7 +31,7 @@ import tabulate
 
 from sportstradamus.helpers.io import MODEL_STATS_PATH, market_file_slug, prune_model_pickle
 from sportstradamus.training.model_strategy_sweep import _FAMILIES, _GATES, FamilySpec
-from sportstradamus.training.ship_config import STAT_META_PATH, load_stat_meta
+from sportstradamus.training.ship_config import STAT_META_PATH, WITHHELD, load_stat_meta
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 _STAT_META = pathlib.Path(str(STAT_META_PATH))
@@ -178,42 +178,80 @@ def _confirm_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
     return (lg, mkt, "REVERTED", failed)
 
 
-def run_confirm(board: pd.DataFrame, *, yes: bool = False) -> None:
-    """Persist each cell's best persistable corner, confirm it at full HPO, keep passers, revert failures.
+def _split_shippable(ready: list[dict], meta: dict) -> tuple[list[dict], list[dict]]:
+    """Partition candidates into withheld (auto-shippable, fresh) and already-shipped (skip).
 
-    ``board`` is the in-memory sweep result (a row per corner, ``ships`` bool). ``yes`` skips the
-    interactive prompt for unattended runs.
+    Only a withheld cell is safe to auto-ship: a fresh cell has no live pickle, so a failed confirm's
+    revert+prune restores its original dark state. An already-shipped cell's confirm would overwrite a
+    live pickle and its revert would dark-out a serving cell — that is the supersession test's job, so
+    the board ranks it but the confirm skips it.
     """
-    cands = _candidates(board)
-    ready = [c for c in cands if c["status"] == "candidate"]
+    fresh, shipped = [], []
+    for c in ready:
+        target = fresh if meta[c["league"]][c["market"]].get("shipped") == WITHHELD else shipped
+        target.append(c)
+    return fresh, shipped
+
+
+def _announce_ranks_only(cands: list[dict]) -> None:
     for c in (c for c in cands if c["status"] == "ranks_only"):
         click.secho(
             f"  RANKS-ONLY {c['league']} {c['market']} — best shipping corner needs a non-default "
             "dist loss (not persistable); skipping.",
             fg="yellow",
         )
+
+
+def _announce_already_shipped(shipped: list[dict], meta: dict) -> None:
+    for c in shipped:
+        surface = meta[c["league"]][c["market"]].get("shipped")
+        click.secho(
+            f"  ALREADY-SHIPPED {c['league']} {c['market']} (on {surface}) — ranked, but re-shipping a "
+            "live cell is a manual supersession call; skipping.",
+            fg="yellow",
+        )
+
+
+def run_confirm(board: pd.DataFrame, *, yes: bool = False) -> None:
+    """Persist each withheld cell's best persistable corner, confirm at full HPO, keep passers, revert failures.
+
+    ``board`` is the in-memory sweep result (a row per corner, ``ships`` bool). Only withheld cells are
+    auto-shipped; already-shipped cells (present when the sweep ran ``--include-shipped``) are ranked
+    but left to the manual supersession test. ``yes`` skips the interactive prompt for unattended runs.
+    """
+    cands = _candidates(board)
+    ready = [c for c in cands if c["status"] == "candidate"]
+    _announce_ranks_only(cands)
     if not ready:
         click.echo("no fully-persistable shipping candidates to confirm.")
         return
 
-    click.secho(f"\n{len(ready)} candidate(s) to persist + confirm:", bold=True)
-    for c in ready:
+    meta = load_stat_meta(_STAT_META)
+    fresh, shipped = _split_shippable(ready, meta)
+    _announce_already_shipped(shipped, meta)
+    if not fresh:
+        click.echo(
+            "no withheld candidates to confirm (shipped cells need the manual supersession test)."
+        )
+        return
+
+    click.secho(f"\n{len(fresh)} candidate(s) to persist + confirm:", bold=True)
+    for c in fresh:
         click.echo(
             f"  {c['league']} {c['market']}: "
             + ", ".join(f"{k}={v}" for k, v in c["edits"].items())
         )
     prompt = (
-        f"\nPersist {len(ready)} config(s) to stat_meta.json and confirm each with a full-HPO "
+        f"\nPersist {len(fresh)} config(s) to stat_meta.json and confirm each with a full-HPO "
         "retrain (~1h each)? Failures auto-revert"
     )
     if not yes and not click.confirm(prompt):
         click.echo("aborted; stat_meta.json unchanged.")
         return
 
-    meta = load_stat_meta(_STAT_META)
     backup = _backup_stat_meta()
     click.echo(f"stat_meta.json backed up to {backup}")
-    results = [_confirm_one(meta, c) for c in ready]
+    results = [_confirm_one(meta, c) for c in fresh]
     _print_confirm_report(results, backup)
 
 
