@@ -249,16 +249,22 @@ clear the ship gates — the margin it calls **slack**.
 
 ```bash
 poetry run model-strategy-sweep --league NBA --market FGM   # one cell
-poetry run model-strategy-sweep --board                     # every withheld cell (both families)
+poetry run model-strategy-sweep --board                     # every withheld cell with cached data
 poetry run model-strategy-sweep --board --league WNBA       # just one league's withheld cells
+poetry run model-strategy-sweep --board --include-shipped   # also re-check already-shipped cells
 ```
 
-`--board` sweeps **every withheld cell** in `stat_meta.json` — both SkewNormal and ZINB — and prints
-an up-front count of how many cells (and trainings) that is; `--league` narrows it, and naming a
-single `--league` / `--market` sweeps just that cell. As it runs it prints one line per combination,
-then a short table per cell with the winning strategy marked `SHIP` (green) or `KILL` (red). The
-full ranked results are saved to `data/research/strategy_research_board.csv`. **Nothing ships from
-this step** — the throwaway models only *rank* the options so you know which one to train for real.
+`--board` sweeps every **withheld** cell in `stat_meta.json` — both SkewNormal and ZINB — that has a
+cached training matrix, and prints an up-front count of how many cells (and trainings) that is;
+`--league` narrows it, and naming a single `--league` / `--market` sweeps just that cell. A cell with
+no cached matrix is **skipped with a yellow warning** rather than swept — the throwaway trainings
+reuse the cached matrix and never rebuild one, so train the cell for real once first if you want it in
+the board. Add `--include-shipped` to also rank already-shipped (devel/main) cells when hunting a
+better strategy for a live cell; that path is judged by the supersession test, and `--confirm` never
+auto-re-ships a live cell. As it runs it prints one line per combination, then a short table per cell
+with the winning strategy marked `SHIP` (green) or `KILL` (red). The full ranked results are saved to
+`data/research/strategy_research_board.csv`. **Nothing ships from this step** — the throwaway models
+only *rank* the options so you know which one to train for real.
 
 Prefer to skip the manual walkthrough below? Add `--confirm`: for each cell it persists the best
 reproducible winner to `stat_meta.json`, retrains it for real, and keeps or reverts it on the

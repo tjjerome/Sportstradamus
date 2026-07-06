@@ -38,6 +38,7 @@ import tabulate
 from sportstradamus import data as _data_pkg
 from sportstradamus.helpers.io import market_file_slug
 from sportstradamus.training import calibration
+from sportstradamus.training.markets import ALL_MARKETS
 from sportstradamus.training.scorecard import (
     _DECODE_FALLBACK_STRATEGY,
     apply_thresholds,
@@ -45,11 +46,7 @@ from sportstradamus.training.scorecard import (
     load_test_set,
     min_gate_slack,
 )
-from sportstradamus.training.ship_config import (
-    STAT_META_PATH,
-    WITHHELD,
-    load_stat_meta,
-)
+from sportstradamus.training.ship_config import STAT_META_PATH, WITHHELD, load_stat_meta
 
 # The normalization corners the SkewNormal gate can decode (and therefore score). The EB slug
 # `centered_additive_eb_meanyr_k10` decodes off the dumped `GlobalMean` column (the gate re-adds
@@ -71,6 +68,7 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 _TEST_SETS_ROOT = pathlib.Path(str(pkg_resources.files(_data_pkg) / "test_sets"))
 _DETERMINISTIC_MODEL_ROOT = _REPO_ROOT / "research" / "models" / "deterministic"
 _DETERMINISTIC_LOG_ROOT = _REPO_ROOT / "research" / "logs" / "deterministic"
+_TRAINING_DATA_ROOT = pathlib.Path(str(pkg_resources.files(_data_pkg) / "training_data"))
 # 30-minute ceiling; a deterministic meditate run is fast-HP, but cells with large datasets can
 # take ~10 min, so 1800 s keeps CI from hanging without cutting off valid runs.
 _MEDITATE_TRIAL_TIMEOUT_S = 1800
@@ -393,11 +391,23 @@ def search_cell(league: str, market: str) -> pd.DataFrame:
     return ranked.reindex(columns=_BOARD_COLUMNS)
 
 
-def _board_cells(league: str | None = None) -> list[tuple[str, str]]:
-    """Every withheld cell of a registered family in stat_meta.json, optionally one league.
+def _has_training_data(league: str, market: str) -> bool:
+    """True iff the cell's cached training matrix exists.
 
-    The board is self-maintaining: it follows ``shipped == "withheld"`` in stat_meta.json rather
-    than a hardcoded list, so a cell shipped to devel drops out automatically.
+    The deterministic sweep freezes input to this parquet and never rebuilds it, so a cell without
+    one is skipped rather than triggering an expensive matrix rebuild mid-board.
+    """
+    return (_TRAINING_DATA_ROOT / f"{market_file_slug(league, market)}.parquet").is_file()
+
+
+def _candidate_cells(
+    league: str | None = None, include_shipped: bool = False
+) -> list[tuple[str, str]]:
+    """Registered-family cells eligible for the board, before the trainable/data filters.
+
+    Withheld only by default (the ship path); ``include_shipped`` adds already-shipped cells so the
+    board can hunt a better strategy for a live cell (evaluated by the separate supersession test,
+    not the fresh-ship confirm). Self-maintaining — it follows stat_meta's ``shipped`` field.
     """
     meta = load_stat_meta(pathlib.Path(str(STAT_META_PATH)))
     return [
@@ -405,8 +415,28 @@ def _board_cells(league: str | None = None) -> list[tuple[str, str]]:
         for lg, markets in meta.items()
         if league is None or lg == league
         for mkt, cell in markets.items()
-        if cell.get("dist") in _FAMILIES and cell.get("shipped") == WITHHELD
+        if cell.get("dist") in _FAMILIES and (include_shipped or cell.get("shipped") == WITHHELD)
     ]
+
+
+def _select_board_cells(
+    league: str | None = None, include_shipped: bool = False
+) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """Split eligible family cells into ``(sweepable, missing_data)``.
+
+    Sweepable = eligible (see :func:`_candidate_cells`), present in the trainable ``ALL_MARKETS``
+    registry (stat_meta carries non-market entries like inning props that meditate rejects), and with
+    a cached training matrix. ``missing_data`` are eligible registry cells whose matrix is absent —
+    the deterministic sweep can't build one, so they are surfaced as a warning rather than swept.
+    """
+    in_registry = [
+        (lg, mkt)
+        for lg, mkt in _candidate_cells(league, include_shipped)
+        if mkt in ALL_MARKETS.get(lg, [])
+    ]
+    sweepable = [c for c in in_registry if _has_training_data(*c)]
+    missing = [c for c in in_registry if not _has_training_data(*c)]
+    return sweepable, missing
 
 
 def _corner_count(cells: list[tuple[str, str]]) -> int:
@@ -541,6 +571,29 @@ def _print_board_rollup(board: pd.DataFrame) -> None:
     )
 
 
+def _run_board_mode(league: str | None, include_shipped: bool, out: str) -> pd.DataFrame:
+    """Derive the board, warn per cell skipped for a missing training matrix, print the scope, sweep."""
+    cells, missing = _select_board_cells(league, include_shipped)
+    for lg, mkt in missing:
+        click.secho(
+            f"  skip {lg} {mkt}: no cached training matrix — train it first "
+            "(the deterministic sweep won't rebuild it)",
+            fg="yellow",
+        )
+    if not cells:
+        raise click.UsageError(
+            f"no trainable cells with cached data to sweep{f' in {league}' if league else ''}."
+        )
+    scope = f" ({league})" if league else ""
+    note = f" · {len(missing)} skipped (no cached matrix)" if missing else ""
+    click.echo(
+        f"board{scope}: {len(cells)} cells{note} · ~{_corner_count(cells)} deterministic trainings"
+    )
+    result = run_board(cells, out=out)
+    _print_board_rollup(result)
+    return result
+
+
 @click.command(name="model-strategy-sweep")
 @click.option(
     "--league", default=None, help="League code, e.g. WNBA. Single-cell mode, or narrows --board."
@@ -549,7 +602,15 @@ def _print_board_rollup(board: pd.DataFrame) -> None:
 @click.option(
     "--board/--no-board",
     default=False,
-    help="Sweep every withheld cell (both families) from stat_meta.json instead of one cell; --league narrows it.",
+    help="Sweep every withheld cell with cached training data (both families) instead of one cell; "
+    "--league narrows it.",
+)
+@click.option(
+    "--include-shipped",
+    is_flag=True,
+    default=False,
+    help="Also sweep already-shipped (devel/main) cells to hunt a better strategy — evaluated by the "
+    "supersession test, not the fresh-ship --confirm (which only auto-ships withheld cells). Off by default.",
 )
 @click.option(
     "--confirm",
@@ -572,7 +633,13 @@ def _print_board_rollup(board: pd.DataFrame) -> None:
     "(data/research/strategy_research_board.csv): --board overwrites it, a single cell upserts.",
 )
 def main(
-    league: str | None, market: str | None, board: bool, confirm: bool, yes: bool, out: str | None
+    league: str | None,
+    market: str | None,
+    board: bool,
+    include_shipped: bool,
+    confirm: bool,
+    yes: bool,
+    out: str | None,
 ) -> None:
     """Operation Ship 75 strategy sweep — a per-cell GridSampler over the cell's family grid, one
     honest val-fit→test gate row per corner. ``--confirm`` then ships the winners end-to-end.
@@ -581,17 +648,7 @@ def main(
     out = out or str(STRATEGY_RESEARCH_BOARD)
     pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
     if board:
-        cells = _board_cells(league)
-        if not cells:
-            raise click.UsageError(
-                f"no withheld cells to sweep{f' in {league}' if league else ''}."
-            )
-        scope = f" ({league})" if league else ""
-        click.echo(
-            f"board{scope}: {len(cells)} cells · ~{_corner_count(cells)} deterministic trainings"
-        )
-        result = run_board(cells, out=out)
-        _print_board_rollup(result)
+        result = _run_board_mode(league, include_shipped, out)
     else:
         if not (league and market):
             raise click.UsageError("pass --league and --market, or --board")

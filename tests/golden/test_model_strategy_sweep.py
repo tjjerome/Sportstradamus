@@ -258,20 +258,60 @@ def test_run_deterministic_meditate_builds_corner_flags(monkeypatch, tmp_path):
 # --- board derivation from stat_meta ---------------------------------------------------------
 
 
-def test_board_cells_derives_withheld_families(monkeypatch):
+def test_select_board_cells_withheld_default_shipped_flag_and_data_filter(monkeypatch):
+    """Default board = withheld × registered-family × trainable (`ALL_MARKETS`) × has-cached-data.
+    `--include-shipped` adds already-shipped cells; a cell without a cached matrix is set aside as
+    missing-data (warned, not swept); unswept families and non-market stems are dropped.
+    """
     fake = {
         "WNBA": {
-            "AST": {"dist": "SkewNormal", "shipped": "withheld"},
-            "PTS": {"dist": "SkewNormal", "shipped": "devel"},  # excluded: already shipped
+            "AST": {"dist": "SkewNormal", "shipped": "withheld"},  # default board
+            "PTS": {"dist": "SkewNormal", "shipped": "devel"},  # only with --include-shipped
+            "STL": {"dist": "ZINB", "shipped": "withheld"},  # withheld but no cached matrix → missing
         },
         "MLB": {
-            "pitcher strikeouts": {"dist": "ZINB", "shipped": "withheld"},
+            "pitcher strikeouts": {"dist": "ZINB", "shipped": "withheld"},  # default board
             "hits allowed": {"dist": "Gamma", "shipped": "withheld"},  # excluded: unswept family
+            "1st inning hits allowed": {"dist": "ZINB", "shipped": "withheld"},  # excluded: not a market
         },
     }
+    fake_markets = {"WNBA": ["AST", "PTS", "STL"], "MLB": ["pitcher strikeouts", "hits allowed"]}
+    has_data = {("WNBA", "AST"), ("WNBA", "PTS"), ("MLB", "pitcher strikeouts")}
     monkeypatch.setattr(sweep, "load_stat_meta", lambda path: fake)
-    assert set(sweep._board_cells()) == {("WNBA", "AST"), ("MLB", "pitcher strikeouts")}
-    assert sweep._board_cells("WNBA") == [("WNBA", "AST")]
+    monkeypatch.setattr(sweep, "ALL_MARKETS", fake_markets)
+    monkeypatch.setattr(sweep, "_has_training_data", lambda lg, mkt: (lg, mkt) in has_data)
+
+    sweepable, missing = sweep._select_board_cells()
+    assert set(sweepable) == {("WNBA", "AST"), ("MLB", "pitcher strikeouts")}
+    assert missing == [("WNBA", "STL")]  # withheld + registry, but no cached matrix
+    # --include-shipped pulls in the devel cell (it has data); STL still missing.
+    incl, _ = sweep._select_board_cells(include_shipped=True)
+    assert ("WNBA", "PTS") in incl
+    # League filter narrows to that league's sweepable cells.
+    sweepable_wnba, _ = sweep._select_board_cells("WNBA")
+    assert sweepable_wnba == [("WNBA", "AST")]
+
+
+def test_run_board_mode_warns_missing_data_and_passes_include_shipped(monkeypatch, capsys):
+    """The board runner warns per cell skipped for a missing matrix and forwards --include-shipped."""
+    captured = {}
+
+    def fake_select(league, include_shipped):
+        captured["incl"] = include_shipped
+        return [("WNBA", "AST")], [("WNBA", "STL")]
+
+    monkeypatch.setattr(sweep, "_select_board_cells", fake_select)
+    monkeypatch.setattr(sweep, "_corner_count", lambda cells: 12)
+    monkeypatch.setattr(
+        sweep, "run_board", lambda cells, out: pd.DataFrame({"league": ["WNBA"], "market": ["AST"], "ships": [False]})
+    )
+    monkeypatch.setattr(sweep, "_print_board_rollup", lambda b: None)
+
+    sweep._run_board_mode("WNBA", True, "/tmp/board.csv")
+    assert captured["incl"] is True
+    out = capsys.readouterr().out
+    assert "skip WNBA STL: no cached training matrix" in out
+    assert "1 skipped (no cached matrix)" in out
 
 
 # --- family-aware actionable summary ---------------------------------------------------------

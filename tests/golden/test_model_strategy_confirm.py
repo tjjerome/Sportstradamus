@@ -154,6 +154,32 @@ def test_run_confirm_yes_persists_and_confirms(monkeypatch, capsys):
     assert "SHIPPED" in capsys.readouterr().out
 
 
+def test_run_confirm_skips_already_shipped(monkeypatch, capsys):
+    """A cell the sweep ranked (via --include-shipped) but which is already on devel is reported and
+    skipped — never re-shipped by the confirm loop (that is the manual supersession test's job).
+    """
+    board = pd.DataFrame([_sn_row("centered_additive_mean10", "crps", "crps", True, 0.25)])
+    meta = {
+        "WNBA": {
+            "AST": {
+                "dist": "SkewNormal",
+                "shipped": "devel",
+                "target_normalization": "ratio_meanyr",
+                "blending": "nll",
+            }
+        }
+    }
+    monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
+    touched = []
+    monkeypatch.setattr(mc, "_backup_stat_meta", lambda: touched.append("backup"))
+    monkeypatch.setattr(mc, "_atomic_write_meta", lambda m: touched.append("write"))
+
+    mc.run_confirm(board, yes=True)
+    assert touched == []  # never persisted a live cell
+    assert meta["WNBA"]["AST"]["shipped"] == "devel"  # untouched
+    assert "ALREADY-SHIPPED" in capsys.readouterr().out
+
+
 def test_run_confirm_ranks_only_never_persists(monkeypatch, capsys):
     """A cell whose only shipping corner is non-persistable is reported and skipped — the loop never
     reaches the backup/persist step.
