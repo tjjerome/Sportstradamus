@@ -266,9 +266,14 @@ with the winning strategy marked `SHIP` (green) or `KILL` (red). The full ranked
 `data/research/strategy_research_board.csv`. **Nothing ships from this step** — the throwaway models
 only *rank* the options so you know which one to train for real.
 
-Prefer to skip the manual walkthrough below? Add `--confirm`: for each cell it persists the best
-reproducible winner to `stat_meta.json`, retrains it for real, and keeps or reverts it on the
-official gates — steps 2–4 automated, with a prompt before it touches anything (`--yes` to skip it).
+Prefer to skip the manual walkthrough below? Add `--confirm`: for each **withheld** cell it persists
+the best reproducible winner to `stat_meta.json`, retrains it for real, and keeps or reverts it on
+the official gates — steps 2–4 automated, with a prompt before it touches anything (`--yes` to skip
+it). For an already-shipped cell (only present under `--include-shipped`), `--confirm` runs the
+supersession test: it snapshots the incumbent, retrains the candidate in place, and scores S1/S2/S3
+(candidate clears the six gates standalone, is paired-Brier sharper, and paired-Sharpe sharper). It
+prints the comparison and swaps the live cell only when all three pass **and** you confirm the
+promotion; a loss (or a declined prompt) restores the incumbent byte-identical and it keeps serving.
 
 ### 2. Confirm the winner with a real training run
 
