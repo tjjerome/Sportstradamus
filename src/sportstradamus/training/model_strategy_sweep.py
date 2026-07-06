@@ -1,23 +1,26 @@
-"""Operation Ship 75 strategy sweep: a per-cell Optuna study over the retrain grid.
+"""Operation Ship 75 strategy sweep: a per-cell Optuna study over a family's retrain grid.
 
-For each ``(league, market)`` cell the sweep runs an Optuna study over the retrain axes
-(normalization × dist-loss × blend-loss), training one deterministic ``meditate`` trial per grid
-corner and scoring it through the *honest* production gate: the deterministic dump already carries
-the pipeline's validation-fit joint calibration, and :func:`_score_normalization` runs the same
+For each ``(league, market)`` cell the sweep runs an Optuna study over the cell's distribution
+family axes — SkewNormal sweeps ``normalization × dist-loss × blend-loss``; ZINB sweeps
+``zinb-mode × count-dispersion-objective × blend-loss`` — training one deterministic ``meditate``
+trial per grid corner and scoring it through the *honest* production gate: the deterministic dump
+already carries the pipeline's validation-fit calibration, and :func:`_score_corner` runs the same
 :func:`scorecard.gate_row` the production scorecard does — no test re-fit. The sweep is a fixed-HP
 replica of the production HPO pipeline: same calibration, same gate, same dump decode; the *only*
 differences are fixed hyperparameters in place of the Optuna search and the deterministic sandbox
 write locations (so a trial never clobbers a real trained market). The objective minimizes the
 negative ship slack, so the study's best trial is the most-shippable corner.
 
-The retrain grid is enumerable and categorical today, so the sampler is
-:class:`optuna.samplers.GridSampler` — exhaustive and deterministic, the right tool for a discrete
-space (no TPE guessing over a dozen corners). The ``[kind, spec, stage]`` :data:`SEARCH_SPACE`
-mirrors ``pipeline.py``'s ``hp_search_space`` (with a ``stage`` tag; every axis retrains today), so a
-continuous retrain axis (a blend weight, say) is a one-line addition that flips the sampler to TPE.
+Families live in :data:`_FAMILIES`, a small registry keyed by the cell's ``dist``. Each
+:class:`FamilySpec` names its grid axes, the ``stat_meta.json`` fields a winning corner persists,
+and the shipped defaults for any non-persistable axis. Adding a family (or a future
+distribution-family axis) is a registry entry, not an engine change. Every axis is categorical, so
+the sampler is :class:`optuna.samplers.GridSampler` — exhaustive and deterministic, the right tool
+for a discrete space.
 
-Research scaffolding: the deterministic trials *rank* only — nothing ships off them. The top corner
-is the real-HPO confirm candidate; a clean 5/5 on the official (full-HPO) scorecard is what ships.
+Research scaffolding: the deterministic trials *rank* only — nothing ships off them. The confirm
+loop (``--confirm``, :mod:`sportstradamus.training.model_strategy_confirm`) persists a winner and a
+clean full-HPO 5/5 on the official scorecard is what actually ships.
 """
 
 import importlib.resources as pkg_resources
@@ -25,6 +28,7 @@ import math
 import pathlib
 import subprocess
 import time
+from dataclasses import dataclass
 
 import click
 import optuna
@@ -34,12 +38,17 @@ import tabulate
 from sportstradamus import data as _data_pkg
 from sportstradamus.helpers.io import market_file_slug
 from sportstradamus.training import calibration
-from sportstradamus.training.pipeline import LOSS_AUTO
 from sportstradamus.training.scorecard import (
+    _DECODE_FALLBACK_STRATEGY,
     apply_thresholds,
     gate_row,
     load_test_set,
     min_gate_slack,
+)
+from sportstradamus.training.ship_config import (
+    STAT_META_PATH,
+    WITHHELD,
+    load_stat_meta,
 )
 
 # The normalization corners the SkewNormal gate can decode (and therefore score). The EB slug
@@ -50,60 +59,94 @@ _DECODABLE_SN_NORMS: tuple[str, ...] = (
     "centered_additive_mean10",
     "centered_additive_eb_meanyr_k10",
 )
+_BLENDING: tuple[str, ...] = tuple(sorted(calibration.BLENDING_SLUGS))
+
+# The SkewNormal family default training loss (the one that ships). A corner won under the other
+# dist-loss can't be reproduced from stat_meta.json — dist-loss is a training-time knob that does
+# not persist — so the actionable summary flags it and the confirm loop skips it.
+_SN_DEFAULT_DIST_LOSS = "crps"
 
 _SHIP_PRED_COL = "Blended_EV"
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 _TEST_SETS_ROOT = pathlib.Path(str(pkg_resources.files(_data_pkg) / "test_sets"))
 _DETERMINISTIC_MODEL_ROOT = _REPO_ROOT / "research" / "models" / "deterministic"
 _DETERMINISTIC_LOG_ROOT = _REPO_ROOT / "research" / "logs" / "deterministic"
-# 30-minute ceiling; a deterministic meditate run is fast-HP, but SN cells with large datasets
-# can take ~10 min, so 1800 s keeps CI from hanging without cutting off valid runs.
+# 30-minute ceiling; a deterministic meditate run is fast-HP, but cells with large datasets can
+# take ~10 min, so 1800 s keeps CI from hanging without cutting off valid runs.
 _MEDITATE_TRIAL_TIMEOUT_S = 1800
-# Gates surfaced on the board / verdict (g6 is not scored here); a corner ships iff all pass.
-_GATES: tuple[str, ...] = ("g1", "g2", "g3", "g4", "g5")
+# The six offline ship gates (value + pass); a corner ships iff all pass. Mirrors
+# scorecard._SHIP_GATES — apply_thresholds sets `ship` and min_gate_slack folds in all six.
+_GATES: tuple[str, ...] = ("g1", "g2", "g3", "g4", "g5", "g6")
 
-# Search axes in the ``[kind, spec, stage]`` shape — ``[kind, spec]`` mirrors pipeline's
-# hp_search_space, ``stage`` tags the retrain grid the GridSampler enumerates. Every axis retrains:
-# normalization and both loss axes change the trained model (the blend weight is fit *inside*
-# meditate, so a ``crps`` blend needs a train). Calibration is deliberately NOT an axis: the
-# pipeline auto-fits the joint ``(dispersion_cal, skew_cal)`` on validation per corner and the
-# honest gate reads that fit off the dump — re-fitting calibration modes on the test dump would be
-# the in-sample artifact the honest scorer exists to avoid. A continuous retrain axis would read
-# ``["float", {"low": ...}, "retrain"]`` and require a ``suggest_float`` branch in
-# :func:`_retrain_grid` plus a TPE sampler.
-SEARCH_SPACE: dict[str, list] = {
-    "normalization": ["categorical", list(_DECODABLE_SN_NORMS), "retrain"],
-    "dist_training_loss": ["categorical", ["crps", "nll"], "retrain"],
-    "blending_loss_fn": ["categorical", sorted(calibration.BLENDING_SLUGS), "retrain"],
+# Each swept axis' meditate CLI flag. A corner is realized by appending `--flag value` per axis;
+# an axis a family doesn't sweep is simply absent (e.g. ZINB never forces --target-normalization,
+# so meditate resolves it to the ratio_meanyr fallback — see _dump_subdir).
+_AXIS_FLAG: dict[str, str] = {
+    "normalization": "--target-normalization",
+    "dist_training_loss": "--dist-training-loss",
+    "blending_loss_fn": "--blending-loss-fn",
+    "zinb_mode": "--zinb-mode",
+    "count_dispersion_objective": "--count-dispersion-objective",
 }
 
-# Default board: the covered-league withheld SkewNormal cells this lever can reach. NFL's
-# passing-degenerate family and sharp-yardage cells are g1-blocked by any normalization
-# (documented dead in docs/operation_ship_75.md), excluded on purpose.
-DEFAULT_BOARD_CELLS: tuple[tuple[str, str], ...] = (
-    ("WNBA", "AST"),
-    ("WNBA", "PTS"),
-    ("WNBA", "RA"),
-    ("WNBA", "REB"),
-    ("WNBA", "DREB"),
-    ("WNBA", "fantasy points prizepicks"),
-    ("NBA", "AST"),
-    ("NBA", "DREB"),
-    ("NBA", "FG3A"),
-    ("NBA", "FGM"),
-    ("NBA", "FGA"),
-    ("NBA", "fantasy points prizepicks"),
-    ("NFL", "carries"),
-    ("NFL", "sacks taken"),
-    ("NFL", "receptions"),
-)
 
+@dataclass(frozen=True)
+class FamilySpec:
+    """One distribution family's sweep definition.
+
+    Attributes:
+        axes: Grid axes ``{axis: choices}`` the GridSampler enumerates (all categorical today).
+        persist: ``{axis: stat_meta.json field}`` a winning corner writes to ship the cell.
+        defaults: ``{axis: shipped value}`` for each swept axis that does *not* persist — the value
+            production actually ships. A corner is confirmable only when its non-persistable axes
+            sit at these defaults (the confirm loop's reproducibility check).
+    """
+
+    axes: dict[str, tuple[str, ...]]
+    persist: dict[str, str]
+    defaults: dict[str, str]
+
+
+_FAMILIES: dict[str, FamilySpec] = {
+    "SkewNormal": FamilySpec(
+        axes={
+            "normalization": _DECODABLE_SN_NORMS,
+            "dist_training_loss": ("crps", "nll"),
+            "blending_loss_fn": _BLENDING,
+        },
+        persist={"normalization": "target_normalization", "blending_loss_fn": "blending"},
+        defaults={"dist_training_loss": _SN_DEFAULT_DIST_LOSS},
+    ),
+    "ZINB": FamilySpec(
+        axes={
+            "zinb_mode": ("joint", "hurdle"),
+            "count_dispersion_objective": ("crps", "pit_ks"),
+            "blending_loss_fn": _BLENDING,
+        },
+        persist={
+            "zinb_mode": "zinb_mode",
+            "count_dispersion_objective": "count_dispersion_objective",
+            "blending_loss_fn": "blending",
+        },
+        defaults={},
+    ),
+}
+
+# One wide board schema across both families: a cell fills only its family's axis columns, the rest
+# are blank. Kept as a fixed superset so the board CSV has a stable header regardless of which
+# families were swept.
+_AXIS_COLUMNS: list[str] = [
+    "normalization",
+    "dist_training_loss",
+    "zinb_mode",
+    "count_dispersion_objective",
+    "blending_loss_fn",
+]
 _BOARD_COLUMNS: list[str] = [
     "league",
     "market",
-    "normalization",
-    "dist_training_loss",
-    "blending_loss_fn",
+    "family",
+    *_AXIS_COLUMNS,
     "slack",
     "ships",
     "g1_pass",
@@ -118,6 +161,7 @@ _BOARD_COLUMNS: list[str] = [
     "g4_pit_ks_max",
     "g5_pass",
     "g5_ece_debiased",
+    "g6_pass",
     "central50_coverage",
     "dispersion_cal",
     "skew_cal",
@@ -130,51 +174,75 @@ STRATEGY_RESEARCH_BOARD: pathlib.Path = pathlib.Path(
 )
 
 
-def _dump_paths(league: str, market: str, norm: str) -> tuple[pathlib.Path, pathlib.Path]:
-    """CSV under ``test_sets/deterministic/<norm>/`` and pickle under ``research/models/deterministic/<norm>/``."""
+def _cell_family(league: str, market: str) -> str:
+    """The registered sweep family for a cell, from its stat_meta ``dist``; loud on an unswept dist."""
+    meta = load_stat_meta(pathlib.Path(str(STAT_META_PATH)))
+    dist = meta.get(league, {}).get(market, {}).get("dist")
+    if dist not in _FAMILIES:
+        raise click.UsageError(
+            f"{league} {market}: dist {dist!r} is not a swept family; known: {sorted(_FAMILIES)}"
+        )
+    return dist
+
+
+def _dump_subdir(corner: dict[str, str]) -> str:
+    """The deterministic dump subdir meditate keys a corner by: ``{target_normalization}{_hurdle}``.
+
+    SkewNormal corners force a ``normalization`` slug; ZINB corners force none, so meditate resolves
+    the count-branch target-normalization to the ``ratio_meanyr`` fallback (cli.meditate, via
+    :func:`ship_config.resolve_flag_target_normalization`), and a ``hurdle`` mode appends ``_hurdle``
+    (pipeline.py). This mirrors that formula exactly so scoring reads the file the trial wrote.
+    """
+    norm = corner.get("normalization", _DECODE_FALLBACK_STRATEGY)
+    suffix = "_hurdle" if corner.get("zinb_mode") == "hurdle" else ""
+    return f"{norm}{suffix}"
+
+
+def _decode_strategy(corner: dict[str, str]) -> str:
+    """The gate's decode strategy for a corner: the swept SN normalization, or ratio_meanyr for a count cell."""
+    return corner.get("normalization", _DECODE_FALLBACK_STRATEGY)
+
+
+def _dump_paths(
+    league: str, market: str, corner: dict[str, str]
+) -> tuple[pathlib.Path, pathlib.Path]:
+    """CSV under ``test_sets/deterministic/<subdir>/`` and pickle under ``research/models/deterministic/<subdir>/``."""
+    subdir = _dump_subdir(corner)
     filename = market_file_slug(league, market)
-    csv = _TEST_SETS_ROOT / "deterministic" / norm / f"{filename}.csv"
-    mdl = _DETERMINISTIC_MODEL_ROOT / norm / f"{filename}.mdl"
+    csv = _TEST_SETS_ROOT / "deterministic" / subdir / f"{filename}.csv"
+    mdl = _DETERMINISTIC_MODEL_ROOT / subdir / f"{filename}.mdl"
     return csv, mdl
 
 
-def _log_path(
-    league: str,
-    market: str,
-    norm: str,
-    dist_training_loss: str = LOSS_AUTO,
-    blending_loss_fn: str = LOSS_AUTO,
-) -> pathlib.Path:
-    """Per-corner meditate log under ``research/logs/deterministic/<norm>/``.
+def _corner_label(corner: dict[str, str]) -> str:
+    """Human-scannable ``axis=value · axis=value`` for the trial's progress + log lines."""
+    return " · ".join(f"{axis}={value}" for axis, value in corner.items())
 
-    Keyed by the full corner (norm + both losses) so two loss corners of the same normalization
-    don't overwrite each other's log — unlike the model/CSV dump, which meditate keys by
-    normalization alone and each corner therefore retrains and scores before the next overwrites it.
+
+def _log_path(league: str, market: str, corner: dict[str, str]) -> pathlib.Path:
+    """Per-corner meditate log under ``research/logs/deterministic/<subdir>/``.
+
+    Keyed by the full corner so two corners sharing a dump subdir (e.g. the loss axes of one
+    normalization) don't overwrite each other's log — unlike the model/CSV dump, which meditate keys
+    by subdir alone and each corner therefore retrains and scores before the next overwrites it.
     """
     filename = market_file_slug(league, market)
-    return (
-        _DETERMINISTIC_LOG_ROOT / norm / f"{filename}__{dist_training_loss}_{blending_loss_fn}.log"
-    )
+    tag = "_".join(f"{axis}={corner[axis]}" for axis in sorted(corner))
+    return _DETERMINISTIC_LOG_ROOT / _dump_subdir(corner) / f"{filename}__{tag}.log"
 
 
 def _log_tail(path: pathlib.Path, n: int = 25) -> str:
     return "\n".join(path.read_text().splitlines()[-n:])
 
 
-def _run_deterministic_meditate(
-    league: str,
-    market: str,
-    norm: str,
-    dist_training_loss: str = LOSS_AUTO,
-    blending_loss_fn: str = LOSS_AUTO,
-) -> None:
-    """Train one deterministic ``(cell, normalization, dist-loss, blend-loss)`` trial via meditate.
+def _run_deterministic_meditate(league: str, market: str, corner: dict[str, str]) -> None:
+    """Train one deterministic ``(cell, corner)`` trial via meditate.
 
     ``--deterministic`` pins RNGs and the fixed fast hyperparameters and dumps to the research
-    sandbox (never production); ``--bypass-withholding`` lets a withheld cell train under the
-    forced ``--target-normalization``. Non-``auto`` losses are forwarded as ``--dist-training-loss``
-    / ``--blending-loss-fn`` so the sweep can vary them; ``auto`` leaves that arg off. The trained
-    model is a *ranking* stand-in.
+    sandbox (never production); ``--bypass-withholding`` lets a withheld cell train. Each corner axis
+    is forwarded as its ``--flag value`` (:data:`_AXIS_FLAG`) so the sweep varies it; an axis the
+    family doesn't sweep is left off and meditate resolves its default. The trained model is a
+    *ranking* stand-in.
 
     meditate's full training log is captured to a per-corner file rather than streamed, so the
     sweep's own progress and verdict stay readable; on a failed trial the log's tail is surfaced.
@@ -189,15 +257,11 @@ def _run_deterministic_meditate(
         market,
         "--deterministic",
         "--bypass-withholding",
-        "--target-normalization",
-        norm,
     ]
-    if dist_training_loss != LOSS_AUTO:
-        cmd += ["--dist-training-loss", dist_training_loss]
-    if blending_loss_fn != LOSS_AUTO:
-        cmd += ["--blending-loss-fn", blending_loss_fn]
+    for axis, value in corner.items():
+        cmd += [_AXIS_FLAG[axis], value]
 
-    log_path = _log_path(league, market, norm, dist_training_loss, blending_loss_fn)
+    log_path = _log_path(league, market, corner)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w") as log:
         try:
@@ -214,23 +278,34 @@ def _run_deterministic_meditate(
             raise
 
 
-def _score_normalization(league: str, market: str, norm: str) -> dict[str, object]:
-    """Score a trained trial's dump; ``dispersion_cal`` / ``skew_cal`` are read from the pickle for context only."""
-    csv_path, mdl_path = _dump_paths(league, market, norm)
+def _score_corner(league: str, market: str, corner: dict[str, str]) -> dict[str, object]:
+    """Score a trained corner's dump through the honest production gate.
+
+    The dump's distribution is inferred from its columns (SkewNormal vs the count R/NB_P/Gate
+    triple), so one gate path scores both families; ``decode_strategy`` is the swept SN
+    normalization or the ratio_meanyr count fallback. ``dispersion_cal`` / ``skew_cal`` are read
+    from the pickle for context only (a count cell dumps ``skew_cal`` absent → 0.0).
+    """
+    csv_path, mdl_path = _dump_paths(league, market, corner)
     df = load_test_set(csv_path, _SHIP_PRED_COL)
     filedict = pd.read_pickle(mdl_path)
+    decode = _decode_strategy(corner)
     row = apply_thresholds(
         gate_row(
-            df, _SHIP_PRED_COL, league=league, market=market, strategy=norm, decode_strategy=norm
+            df,
+            _SHIP_PRED_COL,
+            league=league,
+            market=market,
+            strategy=decode,
+            decode_strategy=decode,
         )
     )
     return {
-        "normalization": norm,
+        **corner,
         "slack": min_gate_slack(row),
         "ships": bool(row.get("ship")),
-        # All five gates (value + pass), not just g4 — so a normalization/loss choice's cost on
-        # g1 (Brier non-inferiority) or g5 (ECE) is visible on the board, and g2/g3 + g1 brier
-        # skill + central-50 coverage show how close the served EV sits to the outcome.
+        # All six gates (value + pass) so a corner's cost on any gate — g1 Brier non-inferiority,
+        # g4 PIT-KS dispersion, g5 ECE, g6 anti-shrinkage — is visible on the board.
         "g1_pass": bool(row.get("g1_pass")),
         "g1_brier_diff_ci_hi": row.get("g1_brier_diff_ci_hi"),
         "g1_brier_skill": row.get("g1_brier_skill_score"),
@@ -243,6 +318,7 @@ def _score_normalization(league: str, market: str, norm: str) -> dict[str, objec
         "g4_pit_ks_max": row.get("g4_pit_ks_max"),
         "g5_pass": bool(row.get("g5_pass")),
         "g5_ece_debiased": row.get("g5_ece_debiased"),
+        "g6_pass": bool(row.get("g6_pass")),
         "central50_coverage": row.get("central50_coverage"),
         "dispersion_cal": filedict.get("dispersion_cal", 1.0),
         "skew_cal": filedict.get("skew_cal") or 0.0,
@@ -264,77 +340,43 @@ def _verdict(row: object) -> str:
 
 
 def _run_and_score(
-    league: str,
-    market: str,
-    *,
-    normalization: str,
-    dist_training_loss: str,
-    blending_loss_fn: str,
+    league: str, market: str, family: str, corner: dict[str, str]
 ) -> list[dict[str, object]]:
-    """Train the ``(normalization × dist_training_loss × blending_loss_fn)`` retrain corner and score it.
+    """Train the ``corner`` retrain trial and score it; tag the row with its family.
 
-    Calibration is not re-fit here: the dump already carries the pipeline's validation-fit joint
-    calibration, and :func:`_score_normalization` reads it off the dump via the production
-    :func:`scorecard.gate_row` — no test re-fit. The dump is keyed by normalization, so scoring
-    right after this trial's train — before the next sequential trial overwrites it — keeps the
-    loss/blend axes honest without a loss-keyed dump path (which is also why the sweep always
-    retrains rather than reusing a dump). Returns a one-row list so the GridSampler objective and
-    board assembly read uniformly.
+    Calibration is not re-fit here: the dump already carries the pipeline's validation-fit
+    calibration, and :func:`_score_corner` reads it off the dump via the production
+    :func:`scorecard.gate_row` — no test re-fit. The dump is keyed by subdir, so scoring right after
+    this trial's train — before the next sequential trial overwrites it — keeps the loss/mode axes
+    honest without a per-corner dump path (which is also why the sweep always retrains rather than
+    reusing a dump). Returns a one-row list so the GridSampler objective and board assembly read
+    uniformly.
     """
-    corner = f"{normalization} · {dist_training_loss}/{blending_loss_fn}"
-    click.echo(f"  training  {corner} …")
+    label = _corner_label(corner)
+    click.echo(f"  training  {label} …")
     start = time.monotonic()
-    _run_deterministic_meditate(
-        league,
-        market,
-        normalization,
-        dist_training_loss=dist_training_loss,
-        blending_loss_fn=blending_loss_fn,
-    )
-    row = _score_normalization(league, market, normalization)
-    row["dist_training_loss"] = dist_training_loss
-    row["blending_loss_fn"] = blending_loss_fn
+    _run_deterministic_meditate(league, market, corner)
+    row = _score_corner(league, market, corner)
+    row["family"] = family
     verdict = click.style(_verdict(row), fg="green" if row["ships"] else "red")
     elapsed = f"{time.monotonic() - start:.0f}s"
-    click.echo(f"  {verdict}  {corner}  slack {float(row['slack']):+.3f}  ({elapsed})")
+    click.echo(f"  {verdict}  {label}  slack {float(row['slack']):+.3f}  ({elapsed})")
     return [row]
 
 
-def _retrain_grid(space: dict[str, list]) -> dict[str, list]:
-    """Loud on any non-categorical retrain axis — the only kind the GridSampler wires today."""
-    grid: dict[str, list] = {}
-    for name, (kind, spec, stage) in space.items():
-        if stage != "retrain":
-            continue
-        if kind != "categorical":
-            raise ValueError(
-                f"model_strategy_sweep retrain axis {name!r} has unsupported kind {kind!r}; only "
-                "'categorical' is wired — add the suggest_* branch + a TPE sampler when a "
-                "continuous axis lands."
-            )
-        grid[name] = spec
-    return grid
+def search_cell(league: str, market: str) -> pd.DataFrame:
+    """Run the per-cell Optuna GridSampler study over the cell's family grid, ranked by ship slack.
 
-
-def search_cell(league: str, market: str, *, space: dict[str, list] = SEARCH_SPACE) -> pd.DataFrame:
-    """Run the per-cell Optuna GridSampler study and return its board, ranked by ship slack.
-
-    One honest row per retrain corner (normalization × dist-loss × blend-loss); the board carries
-    each corner's slack / ship verdict / Gate-4 PIT-KS so the top row is the real-HPO confirm
-    candidate. Sorted by ``slack`` descending.
+    One honest row per retrain corner; the board carries each corner's slack / ship verdict / gate
+    passes so the top row is the real-HPO confirm candidate. Sorted by ``slack`` descending.
     """
-    grid = _retrain_grid(space)
+    family = _cell_family(league, market)
+    grid = {axis: list(choices) for axis, choices in _FAMILIES[family].axes.items()}
     study = optuna.create_study(direction="minimize", sampler=optuna.samplers.GridSampler(grid))
 
     def objective(trial: optuna.Trial) -> float:
-        params = {name: trial.suggest_categorical(name, choices) for name, choices in grid.items()}
-        rows = _run_and_score(
-            league,
-            market,
-            normalization=params["normalization"],
-            dist_training_loss=params["dist_training_loss"],
-            blending_loss_fn=params["blending_loss_fn"],
-        )
+        corner = {axis: trial.suggest_categorical(axis, choices) for axis, choices in grid.items()}
+        rows = _run_and_score(league, market, family, corner)
         trial.set_user_attr("rows", rows)
         return -max(float(row["slack"]) for row in rows)
 
@@ -347,12 +389,35 @@ def search_cell(league: str, market: str, *, space: dict[str, list] = SEARCH_SPA
             for row in trial.user_attrs["rows"]
         ]
     )
-    return board.sort_values("slack", ascending=False, ignore_index=True)[_BOARD_COLUMNS]
+    ranked = board.sort_values("slack", ascending=False, ignore_index=True)
+    return ranked.reindex(columns=_BOARD_COLUMNS)
 
 
-def run_board(
-    cells: tuple[tuple[str, str], ...] = DEFAULT_BOARD_CELLS, out: str | None = None
-) -> pd.DataFrame:
+def _board_cells(league: str | None = None) -> list[tuple[str, str]]:
+    """Every withheld cell of a registered family in stat_meta.json, optionally one league.
+
+    The board is self-maintaining: it follows ``shipped == "withheld"`` in stat_meta.json rather
+    than a hardcoded list, so a cell shipped to devel drops out automatically.
+    """
+    meta = load_stat_meta(pathlib.Path(str(STAT_META_PATH)))
+    return [
+        (lg, mkt)
+        for lg, markets in meta.items()
+        if league is None or lg == league
+        for mkt, cell in markets.items()
+        if cell.get("dist") in _FAMILIES and cell.get("shipped") == WITHHELD
+    ]
+
+
+def _corner_count(cells: list[tuple[str, str]]) -> int:
+    """Total deterministic trainings a board run will do — each cell's family grid size."""
+    return sum(
+        math.prod(len(c) for c in _FAMILIES[_cell_family(lg, mkt)].axes.values())
+        for lg, mkt in cells
+    )
+
+
+def run_board(cells: list[tuple[str, str]], out: str | None = None) -> pd.DataFrame:
     """Search every cell in ``cells``, printing each cell's verdict as it lands; write an
     incremental CSV after each so an interrupt keeps partial progress. Returns the concatenated
     board.
@@ -383,27 +448,55 @@ def _upsert_cell(cell_board: pd.DataFrame, out: str) -> pd.DataFrame:
     return cell_board
 
 
-def _print_cell_summary(board: pd.DataFrame) -> None:
-    """One cell's verdict: a colored best-corner headline over a narrow per-corner table.
+def _stat_meta_edit(row: object) -> str:
+    """The exact stat_meta.json fields to persist a winning corner, resolved for its family.
 
-    The board CSV keeps all ~24 columns; the screen shows only what a human scans (the winning
-    corner, each corner's slack, and which gate blocks the losers).
+    Reads the family's ``persist`` map so the operator doesn't have to translate board columns to
+    field names: SkewNormal → ``target_normalization=…, blending=…``; ZINB → ``zinb_mode=…,
+    count_dispersion_objective=…, blending=…``. A non-persistable axis (SN's dist-loss) is
+    intentionally omitted — the shipped model uses the family default.
+    """
+    persist = _FAMILIES[row["family"]].persist
+    return ", ".join(f"{field}={row[axis]}" for axis, field in persist.items())
+
+
+def _repro_note(row: object) -> str:
+    """Warn when the winning corner used a non-default axis it can't carry into stat_meta.
+
+    Only SkewNormal's dist-loss is non-persistable today; a count corner's value is NaN (float), so
+    the ``isinstance`` str guard keeps this quiet for families whose every axis persists.
+    """
+    dist_loss = row.get("dist_training_loss")
+    if isinstance(dist_loss, str) and dist_loss != _SN_DEFAULT_DIST_LOSS:
+        return (
+            f"won under dist-loss={dist_loss}, which is not saved — "
+            f"confirm under the default {_SN_DEFAULT_DIST_LOSS}"
+        )
+    return ""
+
+
+def _print_cell_summary(board: pd.DataFrame) -> None:
+    """One cell's verdict + the exact stat_meta.json edit to ship it, over a narrow per-corner table.
+
+    The board CSV keeps all columns; the screen shows the verdict, what to change in stat_meta.json
+    (for a shipping cell), and each corner's family axes / slack / blocking gate.
     """
     best = board.iloc[0]
-    headline = (
-        f"\n{best['league']} {best['market']} — best: {best['normalization']} · "
-        f"{best['dist_training_loss']}/{best['blending_loss_fn']} · slack "
-        f"{float(best['slack']):+.3f} · "
-    )
+    ships = bool(best["ships"])
+    axes = list(_FAMILIES[best["family"]].axes)
     click.echo(
-        click.style(headline, bold=True)
-        + click.style(_verdict(best), fg="green" if best["ships"] else "red", bold=True)
+        click.style(f"\n{best['league']} {best['market']} — ", bold=True)
+        + click.style(_verdict(best), fg="green" if ships else "red", bold=True)
+        + click.style(f" (best slack {float(best['slack']):+.3f})", bold=True)
     )
+    if ships:
+        note = _repro_note(best)
+        click.echo(
+            f"  → stat_meta.json: {_stat_meta_edit(best)}" + (f"   ⚠ {note}" if note else "")
+        )
     table = [
         [
-            r["normalization"],
-            r["dist_training_loss"],
-            r["blending_loss_fn"],
+            *(r[axis] for axis in axes),
             f"{float(r['slack']):+.3f}",
             "yes" if r["ships"] else "no",
             " ".join(_failed_gates(r)) or "-",
@@ -412,37 +505,64 @@ def _print_cell_summary(board: pd.DataFrame) -> None:
     ]
     click.echo(
         tabulate.tabulate(
-            table,
-            headers=["normalization", "dist", "blend", "slack", "ships", "failed gates"],
-            tablefmt="github",
+            table, headers=[*axes, "slack", "ships", "failed gates"], tablefmt="github"
         )
     )
 
 
 def _print_board_rollup(board: pd.DataFrame) -> None:
-    """Board-wide tally: how many cells have a shipping corner, and each winner."""
+    """Board-wide tally + a scannable 'what to edit' table: one row per shipping cell naming the
+    exact stat_meta.json fields to set. This is the takeaway — no cross-referencing the board CSV.
+    """
     cells = list(board.groupby(["league", "market"], sort=False))
     shipping = [(lg, mkt, sub) for (lg, mkt), sub in cells if bool(sub["ships"].any())]
     click.echo(f"\n{len(cells)} cells swept · {len(shipping)} with a shipping corner")
+    if not shipping:
+        return
+    click.echo("\nTo ship a cell, set these fields in its data/config/stat_meta.json entry:")
+    rows = []
     for lg, mkt, sub in shipping:
         best = sub.sort_values("slack", ascending=False).iloc[0]
-        click.echo(
-            click.style(
-                f"  SHIP {lg} {mkt}: {best['normalization']} · "
-                f"{best['dist_training_loss']}/{best['blending_loss_fn']} "
-                f"(slack {float(best['slack']):+.3f})",
-                fg="green",
-            )
+        rows.append(
+            [
+                f"{lg} {mkt}",
+                best["family"],
+                _stat_meta_edit(best),
+                f"{float(best['slack']):+.3f}",
+                _repro_note(best),
+            ]
         )
+    click.echo(
+        tabulate.tabulate(
+            rows,
+            headers=["cell", "family", "set in stat_meta.json", "slack", "note"],
+            tablefmt="github",
+        )
+    )
 
 
 @click.command(name="model-strategy-sweep")
-@click.option("--league", default=None, help="League code, e.g. WNBA (single-cell mode).")
+@click.option(
+    "--league", default=None, help="League code, e.g. WNBA. Single-cell mode, or narrows --board."
+)
 @click.option("--market", default=None, help="Market stem, e.g. AST (single-cell mode).")
 @click.option(
     "--board/--no-board",
     default=False,
-    help="Sweep the default covered-league board instead of one cell.",
+    help="Sweep every withheld cell (both families) from stat_meta.json instead of one cell; --league narrows it.",
+)
+@click.option(
+    "--confirm",
+    is_flag=True,
+    default=False,
+    help="After ranking, persist each cell's best persistable corner to stat_meta.json and confirm "
+    "it with a full-HPO retrain; failures auto-revert (stat_meta + pickle).",
+)
+@click.option(
+    "--yes",
+    is_flag=True,
+    default=False,
+    help="Skip the --confirm prompt (unattended). No effect without --confirm.",
 )
 @click.option(
     "--out",
@@ -451,23 +571,39 @@ def _print_board_rollup(board: pd.DataFrame) -> None:
     help="Board CSV path. Defaults to the package data dir "
     "(data/research/strategy_research_board.csv): --board overwrites it, a single cell upserts.",
 )
-def main(league: str | None, market: str | None, board: bool, out: str | None) -> None:
-    """Operation Ship 75 strategy sweep — a per-cell GridSampler over the retrain grid
-    (normalization × dist-loss × blend-loss), one honest val-fit→test gate row per corner.
+def main(
+    league: str | None, market: str | None, board: bool, confirm: bool, yes: bool, out: str | None
+) -> None:
+    """Operation Ship 75 strategy sweep — a per-cell GridSampler over the cell's family grid, one
+    honest val-fit→test gate row per corner. ``--confirm`` then ships the winners end-to-end.
     """
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     out = out or str(STRATEGY_RESEARCH_BOARD)
     pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
     if board:
-        result = run_board(out=out)
+        cells = _board_cells(league)
+        if not cells:
+            raise click.UsageError(
+                f"no withheld cells to sweep{f' in {league}' if league else ''}."
+            )
+        scope = f" ({league})" if league else ""
+        click.echo(
+            f"board{scope}: {len(cells)} cells · ~{_corner_count(cells)} deterministic trainings"
+        )
+        result = run_board(cells, out=out)
         _print_board_rollup(result)
     else:
         if not (league and market):
             raise click.UsageError("pass --league and --market, or --board")
-        cell_board = search_cell(league, market)
-        result = _upsert_cell(cell_board, out)
-        _print_cell_summary(cell_board)
+        result = search_cell(league, market)
+        _upsert_cell(result, out)
+        _print_cell_summary(result)
     click.echo(f"\nboard: {out}")
+
+    if confirm:
+        from sportstradamus.training.model_strategy_confirm import run_confirm
+
+        run_confirm(result, yes=yes)
 
 
 if __name__ == "__main__":

@@ -242,32 +242,62 @@ The path from "I want to improve a cell" to "it's live" is five steps.
 
 ### 1. Sweep the cell's strategy options
 
-`model-strategy-sweep` trains a quick throwaway model for every combination of training strategy
-(target shape × training loss × blend loss) and ranks them by how comfortably each would clear the
-ship gates — the margin it calls **slack**.
+`model-strategy-sweep` trains a quick throwaway model for every combination of the knobs that move
+the cell's distribution family (SkewNormal sweeps target shape × training loss × blend loss; ZINB
+sweeps count mode × dispersion objective × blend loss) and ranks them by how comfortably each would
+clear the ship gates — the margin it calls **slack**.
 
 ```bash
-poetry run model-strategy-sweep --league NBA --market points   # one cell
-poetry run model-strategy-sweep --board                        # the default list of cells
+poetry run model-strategy-sweep --league NBA --market FGM   # one cell
+poetry run model-strategy-sweep --board                     # every withheld cell (both families)
+poetry run model-strategy-sweep --board --league WNBA       # just one league's withheld cells
 ```
 
-As it runs it prints one line per combination, then a short table per cell with the winning
-strategy marked `SHIP` (green) or `KILL` (red). The full ranked results are saved to
-`data/research/strategy_research_board.csv`. **Nothing ships from this step** — the throwaway
-models only *rank* the options so you know which one to train for real.
+`--board` sweeps **every withheld cell** in `stat_meta.json` — both SkewNormal and ZINB — and prints
+an up-front count of how many cells (and trainings) that is; `--league` narrows it, and naming a
+single `--league` / `--market` sweeps just that cell. As it runs it prints one line per combination,
+then a short table per cell with the winning strategy marked `SHIP` (green) or `KILL` (red). The
+full ranked results are saved to `data/research/strategy_research_board.csv`. **Nothing ships from
+this step** — the throwaway models only *rank* the options so you know which one to train for real.
+
+Prefer to skip the manual walkthrough below? Add `--confirm`: for each cell it persists the best
+reproducible winner to `stat_meta.json`, retrains it for real, and keeps or reverts it on the
+official gates — steps 2–4 automated, with a prompt before it touches anything (`--yes` to skip it).
 
 ### 2. Confirm the winner with a real training run
 
-Copy the winning strategy into that cell's entry in
-`src/sportstradamus/data/config/stat_meta.json` (the `target_normalization` and `blending` fields),
-**then** train it properly:
+The board's top row names the winner in three columns, but only two of them get saved. Match them
+to that cell's entry in `src/sportstradamus/data/config/stat_meta.json`:
 
-```bash
-poetry run meditate --league NBA --market points --bypass-withholding
+| Board column | What it is | Where it goes in `stat_meta.json` |
+|---|---|---|
+| `normalization` | the target shape | the `target_normalization` field |
+| `blend` | how the model and book are combined | the `blending` field (add it if it's missing; leaving it out means the `nll` default) |
+| `dist` | the training loss — a training-time knob | **nothing** — the shipped model always uses the family default, so ignore this column |
+
+Watch the name clash: the `dist` **field** already in `stat_meta.json` is the *distribution family*
+(`SkewNormal`, `ZINB`, …) — a different thing from the board's `dist` column. Leave the `dist` field
+alone. (A ZINB cell has no `normalization`; its persistable columns are `zinb_mode` and
+`count_dispersion_objective`, plus the same `blend` → `blending`.) You don't have to map columns by
+hand either way — the sweep prints the exact `field=value` line to copy for each shipping cell.
+
+So a board winner of `centered_additive_mean10 · crps/crps` for NBA FGM makes the cell read:
+
+```json
+"FGM": { "dist": "SkewNormal", "shipped": "withheld",
+         "target_normalization": "centered_additive_mean10", "blending": "crps", "posthoc": "none" }
 ```
 
-Set the strategy fields *before* you run `meditate` — the training run reads them. A real training
-run (unlike the sweep) is the one whose result actually counts.
+Set those fields *before* you train — `meditate` reads them:
+
+```bash
+poetry run meditate --league NBA --market FGM --bypass-withholding
+```
+
+A real training run (unlike the sweep) is the one whose result actually counts. One caveat: if the
+winning row's `dist` column is `nll` rather than `crps`, that exact corner can't be reproduced from
+`stat_meta.json` — only the `crps` default is saved — so prefer a `crps` row, or accept that you're
+confirming under `crps`.
 
 ### 3. Read the ship-gate scorecard
 
@@ -275,7 +305,7 @@ run (unlike the sweep) is the one whose result actually counts.
 the verdict for one cell on its own:
 
 ```bash
-poetry run python -m sportstradamus.training.scorecard --league NBA --market points
+poetry run python -m sportstradamus.training.scorecard --league NBA --market FGM
 ```
 
 It prints a **SHIP SUMMARY** naming any gate the cell fails. A cell that passes every gate is ready
