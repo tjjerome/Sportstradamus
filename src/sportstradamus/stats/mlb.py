@@ -988,6 +988,11 @@ class StatsMLB(Stats):
             date = datetime.strptime(date, "%Y-%m-%d").date()
         profile = self.playerProfile
 
+        # playerProfile["team"] is the fillna(0) sentinel at projection time; the live
+        # team assignment lives in the offers, so key team/home lookups off them.
+        records = offers if isinstance(offers, list) else list(offers.values())
+        team_of = {r["Player"]: r["Team"] for r in records}
+
         if date < datetime.today().date():
             day = self.gamelog[pd.to_datetime(self.gamelog["gameDate"]).dt.date == date]
             home_map = (
@@ -995,11 +1000,10 @@ class StatsMLB(Stats):
             )
         else:
             home_map = {
-                p: self.upcoming_games.get(t, {}).get("Home")
-                for p, t in profile["team"].items()
+                p: self.upcoming_games.get(t, {}).get("Home") for p, t in team_of.items()
             }
 
-        teams = set(profile["team"].dropna())
+        teams = set(team_of.values())
         adjustment = self._mlb_offense_adjustment(teams, offers, date, home_map)
 
         means, stds = {}, {}
@@ -1012,8 +1016,7 @@ class StatsMLB(Stats):
                 continue
             is_home = home_map.get(player)
             curve = SLOT_PA_ALL if is_home is None else SLOT_PA_HOME if is_home else SLOT_PA_AWAY
-            team = profile.at[player, "team"]
-            means[player] = curve[slot - 1] * adjustment.get(team, 1.0)
+            means[player] = curve[slot - 1] * adjustment.get(team_of.get(player), 1.0)
             stds[player] = SLOT_STD[slot - 1]
 
         profile["proj plateAppearances mean"] = pd.Series(means)

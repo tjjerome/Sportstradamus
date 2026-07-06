@@ -47,8 +47,9 @@ def test_projector_maps_slot_to_home_away_curve_and_fallback(monkeypatch):
     stats = _bare_mlb()
     game_day = date(2024, 5, 1)
     # get_depth output: A leadoff, B nine-hole, C unresolved (bench/no history).
+    # "team" is the real fillna(0) sentinel -- the live team must come from offers.
     stats.playerProfile = pd.DataFrame(
-        {"team": ["NYY", "NYY", "BOS"], "depth": [1.0, 9.0, 0.0]},
+        {"team": [0, 0, 0], "depth": [1.0, 9.0, 0.0]},
         index=["A", "B", "C"],
     )
     # gamelog supplies the home/away flag for the settled game day.
@@ -79,7 +80,9 @@ def test_projector_maps_slot_to_home_away_curve_and_fallback(monkeypatch):
 
 def test_projector_applies_team_offense_multiplier(monkeypatch):
     stats = _bare_mlb()
-    stats.playerProfile = pd.DataFrame({"team": ["NYY"], "depth": [1.0]}, index=["A"])
+    # "team" is the fillna(0) sentinel; the NYY multiplier must be keyed from the
+    # offer's Team, so reading profile["team"] (== 0) would drop it and fail here.
+    stats.playerProfile = pd.DataFrame({"team": [0], "depth": [1.0]}, index=["A"])
     stats.gamelog = pd.DataFrame(
         {"playerName": ["A"], "gameDate": ["2024-05-01"], "home": [True]}
     )
