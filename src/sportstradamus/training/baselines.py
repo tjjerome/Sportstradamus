@@ -74,9 +74,10 @@ _PROJVOL_FALLBACK_COL: str = "MeanYr"
 # opportunity denominator. NBA/WNBA carry a single volume stat (MIN), so any
 # counting market routes to it via the per-league default below; NFL is
 # role-specific. MLB/NHL fold in by adding rows here once their cells activate
-# (volume_stats: MLB plateAppearances / pitches thrown, NHL timeOnIce /
-# shotsAgainst) — the resolver and the ``Player proj {vol} mean`` column builder
-# are league-agnostic, so a fold-in is a data edit, not a logic change.
+# (volume_stats: MLB pitches thrown, NHL timeOnIce / shotsAgainst — MLB
+# plateAppearances is now a structural projection, not a trained cell) — the
+# resolver and the ``Player proj {vol} mean`` column builder are league-agnostic,
+# so a fold-in is a data edit, not a logic change.
 _PROJVOL_VOLUME_MARKET: dict[str, dict[str, str]] = {
     "NFL": {
         "completions": "attempts",

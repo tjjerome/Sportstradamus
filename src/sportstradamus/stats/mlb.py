@@ -168,7 +168,7 @@ class StatsMLB(Stats):
             "fielding": ["DER"],
             "pitching": ["FIP", "WHIP", "ERA", "K9", "BB9", "PA9", "IP"],
         }
-        self.volume_stats = ["plateAppearances", "pitches thrown"]
+        self.volume_stats = ["pitches thrown"]
         self.default_total = 4.671
         self.log_strings = {
             "game": "gameId",

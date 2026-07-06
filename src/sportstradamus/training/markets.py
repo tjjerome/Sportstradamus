@@ -69,7 +69,6 @@ ALL_MARKETS: dict[str, list[str]] = {
         "fantasy points prizepicks",
     ],
     "MLB": [
-        "plateAppearances",
         "pitches thrown",
         "pitching outs",
         "pitcher strikeouts",
