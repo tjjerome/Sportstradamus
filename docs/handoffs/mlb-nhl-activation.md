@@ -302,4 +302,5 @@ at the roadmap v3 §4 swimlane index for the next lane.
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- `2026-07-06 · built · MLB volume-norm (own spec+plan): plateAppearances retired as trained cell -> structural slot-PA projector + bounded OBP/market offense adj; team sourced from offers (fixed all-0 profile["team"] sentinel: crashed get_total + killed adj); rebuilt total-bases matrix carries Player proj plateAppearances mean/std (no .mdl); withheld unchanged, no training · next: activation Phase 5 wrap-up (wiring/backfill still stashed)`
 - `2026-06-10 · created · brief drafted from roadmap-v3 migration · next: stage 0a MLB packet (D1 window ~Jul)`
