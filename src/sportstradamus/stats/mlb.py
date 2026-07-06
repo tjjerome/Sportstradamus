@@ -1024,7 +1024,76 @@ class StatsMLB(Stats):
         )
 
     def _mlb_offense_adjustment(self, teams, offers, date, home_map):
-        return {}
+        """Bounded per-team PA multiplier (nominal 1.0).
+
+        Blends an OBP-driven factor (team on-base talent x opposing-starter
+        OBP-allowed x park) with a market anchor (book-implied team runs), then
+        clips to +/-8%. A team missing OBP history falls back to the market factor
+        alone; an unquoted game yields a neutral market factor via the archive default.
+        """
+        records = offers if isinstance(offers, list) else list(offers.values())
+        opponent_of = {r["Team"]: r["Opponent"] for r in records}
+        home_by_team = {
+            r["Team"]: home_map.get(r["Player"]) for r in records
+        }
+
+        if date < datetime.today().date():
+            day = self.gamelog[pd.to_datetime(self.gamelog["gameDate"]).dt.date == date]
+            starter_of = {}
+            for team in teams:
+                named = day.loc[day[self.log_strings["team"]] == team, "opponent pitcher"]
+                starter_of[team] = named.mode().iloc[0] if not named.mode().empty else None
+        else:
+            starter_of = {
+                team: self.upcoming_games.get(team, {}).get("Opponent Pitcher")
+                for team in teams
+            }
+
+        adjustment = {}
+        for team in teams:
+            obp = self._obp_factor(
+                team, opponent_of.get(team), home_by_team.get(team), starter_of.get(team), date
+            )
+            market = self._market_factor(team, date)
+            blended = (
+                OBP_ADJ_WEIGHT * obp + MARKET_ADJ_WEIGHT * market if obp is not None else market
+            )
+            adjustment[team] = float(np.clip(blended, *OFFENSE_ADJ_CLIP))
+        return adjustment
+
+    def _obp_factor(self, team, opponent, is_home, opp_starter, date):
+        """Expected-OBP PA factor: team talent x park x opposing-starter OBP-allowed.
+
+        Returns ``None`` when the team has no recent OBP so the caller can fall back
+        to the market anchor alone.
+        """
+        if team not in self.teamProfile.index:
+            return None
+        obp_exp = self.teamProfile.at[team, "OBP"]
+        park_team = team if is_home else opponent
+        obp_exp *= self.park_factors.get(park_team, {}).get("OBP", 1.0)
+        if opp_starter:
+            # The gamelog OBP column is ~0 on pitcher rows (it holds the pitcher's own
+            # batting), so compute OBP-allowed from the populated counting columns.
+            starts = self.gamelog[
+                (self.gamelog["playerName"] == opp_starter)
+                & self.gamelog["starting pitcher"]
+                & (pd.to_datetime(self.gamelog["gameDate"]).dt.date < date)
+            ].tail(_TEAM_OBP_WINDOW)
+            faced = pd.to_numeric(starts["batters faced"], errors="coerce").sum()
+            if faced > 0:
+                on_base = (
+                    pd.to_numeric(starts["hits allowed"], errors="coerce").sum()
+                    + pd.to_numeric(starts["walks allowed"], errors="coerce").sum()
+                )
+                obp_exp *= (on_base / faced) / LG_AVG_OBP
+        obp_exp = min(obp_exp, _OBP_POLE_GUARD)
+        return (1 - LG_AVG_OBP) / (1 - obp_exp)
+
+    def _market_factor(self, team, date):
+        """Book-implied team runs relative to league average (neutral 1.0 when unquoted)."""
+        date_str = date.strftime("%Y-%m-%d") if not isinstance(date, str) else date
+        return archive.get_total(self.league, date_str, team) / LG_AVG_TEAM_TOTAL
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):
         player_games = self.short_gamelog.loc[
