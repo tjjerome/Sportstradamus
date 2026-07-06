@@ -183,3 +183,36 @@ def test_get_volume_stats_routes_hitter_to_structural(monkeypatch):
     assert "pitcher" in calls and "hitter" not in calls
     # pitcher track still loads the "pitches thrown" model
     assert calls["pitcher"][0][1] == "pitches thrown"
+
+
+def test_plate_appearances_retired_but_pitches_thrown_kept():
+    from sportstradamus.training.markets import ALL_MARKETS
+
+    assert "plateAppearances" not in ALL_MARKETS["MLB"]
+    assert "pitches thrown" in ALL_MARKETS["MLB"]
+
+
+def test_dispatch_routes_markets_correctly(monkeypatch):
+    stats = _bare_mlb()
+    stats.volume_stats = ["pitches thrown"]
+    seen = {}
+    monkeypatch.setattr(stats, "get_depth", lambda offers, d: seen.__setitem__("depth", True))
+    monkeypatch.setattr(
+        stats, "get_volume_stats",
+        lambda offers, d, pitcher: seen.__setitem__("volume", pitcher),
+    )
+    offers = [{"Player": "A", "Team": "NYY", "Opponent": "BOS"}]
+
+    # a trained volume market -> get_depth only
+    stats._dispatch_volume_stats(offers, date(2024, 5, 1), "pitches thrown")
+    assert seen == {"depth": True}
+
+    # a hitter market -> get_volume_stats(pitcher=False)
+    seen.clear()
+    stats._dispatch_volume_stats(offers, date(2024, 5, 1), "total bases")
+    assert seen == {"volume": False}
+
+    # a pitcher market -> get_volume_stats(pitcher=True)
+    seen.clear()
+    stats._dispatch_volume_stats(offers, date(2024, 5, 1), "hits allowed")
+    assert seen == {"volume": True}

@@ -90,12 +90,6 @@
             "target_normalization": "none",
             "posthoc": "none"
         },
-        "plateAppearances": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
         "rbi": {
             "dist": "SkewNormal",
             "shipped": "withheld",
