@@ -31,7 +31,7 @@ packet by ~Sep.
    lens), §3.3 (the failure-mode-census pattern stage 0 copies), §6 operating
    loop + §6 lever stages (the post-GO method, reused wholesale — never
    restated here).
-3. [`../ship_gate.md`](../ship_gate.md) — g1–g5 thresholds the packets score
+3. [`../ship_gate.md`](../ship_gate.md) — g1–g6 thresholds the packets score
    against.
 4. [`CONTRIBUTING.md`](../../CONTRIBUTING.md) §Package Map, §Adding a New
    League, §Adding a New Market, §Shipping to Production — the mechanics this
@@ -203,7 +203,7 @@ reference it, don't restate it.
   4. Wiring-delta list (§3 findings) with cost estimate.
   5. `meditate --league MLB --bypass-withholding --market <subset>` smoke on a
      scratch branch (or `--deterministic` sandbox) + full scorecard sweep →
-     free-passer count (cells already clearing g1–g5) + a failure-mode census
+     free-passer count (cells already clearing g1–g6) + a failure-mode census
      table à la model_improvement_track.md §3.3.
   6. Recommended GO/NO-GO with reasons + a proposed breadth target for the
      owner to lock at D1.
