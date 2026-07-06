@@ -58,6 +58,35 @@ _MLB_POSTSEASON_GAME_TYPES: frozenset[str] = frozenset({"F", "D", "L", "W", "P"}
 _MLB_SERIES_GAMES_TO_WIN: dict[str, int] = {"F": 2, "D": 3, "L": 4, "W": 4, "P": 3}
 _MLB_DEFAULT_SERIES_WINS: int = 3
 
+# Batting-order plate-appearance structure, measured from the backfilled ~2-season
+# MLB gamelog (scripts/measure_mlb_volume_constants.py). The batting slot fixes a
+# hitter's PA regardless of who fills it, so a missing starter's PAs go to his
+# replacement in the same slot -- no team budget redistribution is needed. Away
+# teams bat a full ninth every game; home teams skip the bottom 9th when leading,
+# so away slots carry ~0.18 PA more. Index 0 = leadoff (slot 1) .. index 8 = slot 9.
+SLOT_PA_HOME = (4.404, 4.291, 4.208, 4.110, 3.971, 3.831, 3.688, 3.533, 3.358)
+SLOT_PA_AWAY = (4.584, 4.488, 4.377, 4.284, 4.149, 4.008, 3.862, 3.705, 3.543)
+SLOT_PA_ALL = tuple((h + a) / 2 for h, a in zip(SLOT_PA_HOME, SLOT_PA_AWAY, strict=True))
+# Within-slot game-to-game PA spread (extra innings, blowouts, early removal): the
+# genuinely unpredictable part of PA, so it stays in std and is not offense-adjusted.
+SLOT_STD = (0.712, 0.698, 0.685, 0.662, 0.693, 0.731, 0.764, 0.784, 0.799)
+# Fallback for a priced hitter whose slot cannot be resolved (no lineup, no history):
+# mean starting-batter PA across slots, with a deliberately wide spread.
+SLOT_PA_LEAGUE_AVG = sum(SLOT_PA_ALL) / len(SLOT_PA_ALL)
+SLOT_STD_UNKNOWN = 1.0
+
+# Team offense adjustment: a bounded per-team PA multiplier (nominal 1.0). OBP is the
+# mechanistic driver (more base-runners -> more lineup turnover -> more PA); the
+# book-implied team total is a sanity anchor. Clipped to +/-8% because the predictable
+# offense signal is only ~1-2 PA on a ~36 PA base -- the rest is unpredictable (-> std).
+LG_AVG_OBP = 0.315  # mean team OBP (teamlog scale; matches teamProfile["OBP"] the offense adjustment reads)
+LG_AVG_TEAM_TOTAL = 4.671  # mirrors archive default_totals["MLB"] so unquoted games -> neutral 1.0
+OBP_ADJ_WEIGHT = 0.70
+MARKET_ADJ_WEIGHT = 0.30
+OFFENSE_ADJ_CLIP = (0.92, 1.08)
+_OBP_POLE_GUARD = 0.5  # cap expected OBP so the 1/(1-OBP) PA law stays finite
+_TEAM_OBP_WINDOW = 10  # recent starts for opposing-starter OBP-allowed (matches teamProfile last-10)
+
 
 def _mlb_team_abbr(mlb_teams, team_id):
     return next(
