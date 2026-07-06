@@ -160,3 +160,26 @@ def test_offense_adjustment_degrades_without_obp_history(monkeypatch):
         {"NYY"}, [{"Player": "A", "Team": "NYY", "Opponent": "BOS"}], date(2024, 5, 1), {}
     )
     assert adj["NYY"] == pytest.approx(1.0)
+
+
+def test_get_volume_stats_routes_hitter_to_structural(monkeypatch):
+    stats = _bare_mlb()
+    calls = {}
+    monkeypatch.setattr(
+        stats, "_project_plate_appearances",
+        lambda offers, d: calls.__setitem__("hitter", (offers, d)),
+    )
+    monkeypatch.setattr(
+        stats, "load_volume_model_params",
+        lambda *a, **k: calls.__setitem__("pitcher", (a, k)),
+    )
+    offers = [{"Player": "A", "Team": "NYY", "Opponent": "BOS"}]
+
+    stats.get_volume_stats(offers, date(2024, 5, 1), pitcher=False)
+    assert "hitter" in calls and "pitcher" not in calls
+
+    calls.clear()
+    stats.get_volume_stats(offers, date(2024, 5, 1), pitcher=True)
+    assert "pitcher" in calls and "hitter" not in calls
+    # pitcher track still loads the "pitches thrown" model
+    assert calls["pitcher"][0][1] == "pitches thrown"
