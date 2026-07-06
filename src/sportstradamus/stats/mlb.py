@@ -971,6 +971,61 @@ class StatsMLB(Stats):
             },
         )
 
+    def _project_plate_appearances(self, offers, date=datetime.today().date()):
+        """Structural batting-order plate-appearance projection (no trained model).
+
+        ``get_depth`` resolves each hitter's slot into ``playerProfile["depth"]``
+        (actual for settled games, posted-lineup or modal slot upcoming). This maps
+        that slot through the measured home/away PA curve, scales by a bounded
+        per-team offense multiplier, and writes ``proj plateAppearances mean/std``
+        into ``playerProfile`` -- the same contract the pitcher volume model produces.
+        """
+        self.get_depth(offers, date)
+        if isinstance(date, str):
+            date = datetime.strptime(date, "%Y-%m-%d").date()
+        profile = self.playerProfile
+
+        if date < datetime.today().date():
+            day = self.gamelog[pd.to_datetime(self.gamelog["gameDate"]).dt.date == date]
+            home_map = (
+                day.drop_duplicates("playerName").set_index("playerName")["home"].to_dict()
+            )
+        else:
+            home_map = {
+                p: self.upcoming_games.get(t, {}).get("Home")
+                for p, t in profile["team"].items()
+            }
+
+        teams = set(profile["team"].dropna())
+        adjustment = self._mlb_offense_adjustment(teams, offers, date, home_map)
+
+        means, stds = {}, {}
+        for player in profile.index:
+            raw = profile.at[player, "depth"]
+            slot = int(raw) if pd.notna(raw) and 1 <= raw <= 9 else 0
+            if slot == 0:
+                means[player] = SLOT_PA_LEAGUE_AVG
+                stds[player] = SLOT_STD_UNKNOWN
+                continue
+            is_home = home_map.get(player)
+            curve = SLOT_PA_ALL if is_home is None else SLOT_PA_HOME if is_home else SLOT_PA_AWAY
+            team = profile.at[player, "team"]
+            means[player] = curve[slot - 1] * adjustment.get(team, 1.0)
+            stds[player] = SLOT_STD[slot - 1]
+
+        profile["proj plateAppearances mean"] = pd.Series(means)
+        profile["proj plateAppearances std"] = pd.Series(stds)
+        profile.fillna(
+            {
+                "proj plateAppearances mean": SLOT_PA_LEAGUE_AVG,
+                "proj plateAppearances std": SLOT_STD_UNKNOWN,
+            },
+            inplace=True,
+        )
+
+    def _mlb_offense_adjustment(self, teams, offers, date, home_map):
+        return {}
+
     def check_combo_markets(self, market, player, date=datetime.today().date()):
         player_games = self.short_gamelog.loc[
             self.short_gamelog[self.log_strings["player"]] == player
