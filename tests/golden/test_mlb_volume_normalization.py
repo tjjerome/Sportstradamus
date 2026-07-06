@@ -91,3 +91,72 @@ def test_projector_applies_team_offense_multiplier(monkeypatch):
     assert stats.playerProfile.at["A", "proj plateAppearances mean"] == pytest.approx(
         mlb.SLOT_PA_HOME[0] * 1.05
     )
+
+
+class _FakeArchive:
+    """Stand-in for the module-level ``archive`` singleton. The real one is a
+    LazyArchive proxy (``__slots__ = ()``) that opens a DuckDB connection on any
+    attribute access, so tests swap the module name rather than patch a method."""
+
+    def __init__(self, total):
+        self._total = total
+
+    def get_total(self, league, date, team):
+        return self._total
+
+
+def test_offense_adjustment_blends_obp_and_market(monkeypatch):
+    stats = _bare_mlb()
+    stats.park_factors = {"NYY": {"OBP": 1.00}, "BOS": {"OBP": 1.00}}
+    stats.teamProfile = pd.DataFrame({"OBP": [0.320]}, index=["NYY"])
+    stats.gamelog = pd.DataFrame(
+        {
+            "playerName": ["Ace", "Ace", "A"],
+            "team": ["BOS", "BOS", "NYY"],
+            "gameDate": ["2024-04-01", "2024-04-08", "2024-05-01"],
+            "starting pitcher": [True, True, False],
+            "hits allowed": [5, 5, 0],
+            "walks allowed": [3, 3, 0],
+            "batters faced": [25, 25, 0],
+            "opponent pitcher": ["", "", "Ace"],
+        }
+    )
+    monkeypatch.setattr(mlb, "archive", _FakeArchive(4.90))
+
+    offers = [{"Player": "A", "Team": "NYY", "Opponent": "BOS"}]
+    home_map = {"A": True}
+    adj = stats._mlb_offense_adjustment({"NYY"}, offers, date(2024, 5, 1), home_map)
+
+    team_obp = 0.320
+    park_obp = 1.00  # NYY home -> NYY park
+    starter_obp = (5 + 3 + 5 + 3) / (25 + 25)  # pooled (H+BB)/BF over recent starts
+    obp_exp = team_obp * park_obp * (starter_obp / mlb.LG_AVG_OBP)
+    obp_factor = (1 - mlb.LG_AVG_OBP) / (1 - obp_exp)
+    market_factor = 4.90 / mlb.LG_AVG_TEAM_TOTAL
+    expected = float(
+        np.clip(
+            mlb.OBP_ADJ_WEIGHT * obp_factor + mlb.MARKET_ADJ_WEIGHT * market_factor,
+            *mlb.OFFENSE_ADJ_CLIP,
+        )
+    )
+    assert adj["NYY"] == pytest.approx(expected)
+    lo, hi = mlb.OFFENSE_ADJ_CLIP
+    assert lo < adj["NYY"] < hi
+
+
+def test_offense_adjustment_degrades_without_obp_history(monkeypatch):
+    stats = _bare_mlb()
+    stats.park_factors = {}
+    stats.teamProfile = pd.DataFrame({"OBP": []}, index=pd.Index([], name="team"))
+    stats.gamelog = pd.DataFrame(
+        {
+            "playerName": [], "team": [], "gameDate": [], "starting pitcher": [],
+            "hits allowed": [], "walks allowed": [], "batters faced": [],
+            "opponent pitcher": [],
+        }
+    )
+    monkeypatch.setattr(mlb, "archive", _FakeArchive(mlb.LG_AVG_TEAM_TOTAL))
+    adj = stats._mlb_offense_adjustment(
+        {"NYY"}, [{"Player": "A", "Team": "NYY", "Opponent": "BOS"}], date(2024, 5, 1), {}
+    )
+    assert adj["NYY"] == pytest.approx(1.0)
