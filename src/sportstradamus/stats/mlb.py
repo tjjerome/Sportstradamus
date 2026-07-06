@@ -959,7 +959,10 @@ class StatsMLB(Stats):
         self.playerProfile.fillna(0.0, inplace=True)
 
     def get_volume_stats(self, offers, date=datetime.today().date(), pitcher=False):
-        market = "pitches thrown" if pitcher else "plateAppearances"
+        if not pitcher:
+            self._project_plate_appearances(offers, date)
+            return
+        market = "pitches thrown"
         self.load_volume_model_params(
             offers,
             market,
