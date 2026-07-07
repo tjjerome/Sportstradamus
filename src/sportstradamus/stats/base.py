@@ -1694,6 +1694,17 @@ class Stats:
             stats.loc[player, "Player comps z"] = opp_comp_games.mean()
             defstats.loc[player, "comp n"] = opp_comp_games.count()
 
+    @staticmethod
+    def _mlb_comp_ids(pool: dict, pid) -> list:
+        """Comp id list for ``pid`` from a discretized ``{"comps": [...]}`` comp pool.
+
+        Falls back to ``[pid]`` (self-comp) when the pool has no entry, matching the
+        legacy bare-list ``pool.get(pid, [pid])`` behavior now that MLB affinity pools
+        carry the ``{"comps": ..., "distances": ...}`` shape shared with the other
+        leagues' KNN comps.
+        """
+        return pool.get(pid, {"comps": [pid]})["comps"]
+
     def _mlb_comp_games(self, player, market, is_pitch_market, stats):
         """Comp games backing one MLB player's comp-z, or ``None`` to skip the player.
 
@@ -1706,13 +1717,13 @@ class Stats:
             return None
         pid = playerGames["playerId"].mode()[0]
         if is_pitch_market:
-            comps = self.comps["pitchers"].get(pid, [pid])
+            comps = self._mlb_comp_ids(self.comps["pitchers"], pid)
             compGames = self.short_gamelog.loc[
                 self.short_gamelog["playerId"].isin(comps) & self.short_gamelog["starting pitcher"]
             ].copy()
             return None if compGames.empty else compGames
 
-        comps = self.comps["hitters"].get(pid, [pid])
+        comps = self._mlb_comp_ids(self.comps["hitters"], pid)
         compGames = self.short_gamelog.loc[
             self.short_gamelog["playerId"].isin(comps) & self.short_gamelog["starting batter"]
         ].copy()
@@ -1726,7 +1737,7 @@ class Stats:
             return None
 
         pitch_id = pitch_id.mode()[0]
-        pitchComps = self.comps["pitchers"].get(pitch_id, [pitch_id])
+        pitchComps = self._mlb_comp_ids(self.comps["pitchers"], pitch_id)
         pitchGames = playerGames.loc[playerGames["opponent pitcher id"].isin(pitchComps)]
         if pitchGames.empty or pitchGames[market].mean() == 0:
             stats.loc[player, "Pitcher comps"] = 0

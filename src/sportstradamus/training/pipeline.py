@@ -2387,6 +2387,7 @@ def train_market(
     stabilization: str = "None",
     hpo_selection: str = "loss",
     count_dispersion_objective: str = "crps",
+    matrix_only: bool = False,
 ) -> None:
     """Train or retrain one LightGBMLSS model for a single league/market pair.
 
@@ -2459,6 +2460,8 @@ def train_market(
     M = _step_persist_matrix_and_comps(
         M, training_data_path, stat_data, deterministic=deterministic
     )
+    if matrix_only:
+        return
 
     splits = _step_build_splits(M, stat_data, market, target_normalization)
     dist_info = _step_select_distribution(

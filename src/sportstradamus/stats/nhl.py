@@ -6,13 +6,11 @@ import os.path
 import pickle
 import warnings
 from datetime import date, datetime, timedelta
-from io import StringIO
 from time import sleep
 
 import line_profiler
 import numpy as np
 import pandas as pd
-import requests
 from scipy.stats import iqr, norm, poisson
 from sklearn.neighbors import BallTree
 from tqdm import tqdm
@@ -62,7 +60,7 @@ class StatsNHL(Stats):
 
     def __init__(self):
         super().__init__()
-        self.season_start = datetime(2024, 10, 4).date()
+        self.season_start = datetime(2025, 10, 7).date()
         self.skater_stats = [
             "GOE",
             "Fenwick",
@@ -266,12 +264,11 @@ class StatsNHL(Stats):
         teamlog = []
         game = scraper.get(f"https://api-web.nhle.com/v1/gamecenter/{gameId}/boxscore")
         season = game["season"]
-        res = requests.get(
+        game_df = scraper.get_csv(
             f"https://moneypuck.com/moneypuck/playerData/games/{season}/{gameId}.csv"
         )
-        if res.status_code != 200:
+        if game_df.empty:
             return gamelog, teamlog
-        game_df = pd.read_csv(StringIO(res.text))
         pp_df = game_df.loc[game_df.situation == "5on4"]
         game_df = game_df.loc[game_df.situation == "all"]
         if game and not game_df.empty:
@@ -630,10 +627,11 @@ class StatsNHL(Stats):
 
     def _fetch_player_bios_nhl(self):
         """All-players bio lookup (height/weight/bmi/age/position) from moneypuck."""
-        res = requests.get(
+        player_df = scraper.get_csv(
             "https://moneypuck.com/moneypuck/playerData/playerBios/allPlayersLookup.csv"
         )
-        player_df = pd.read_csv(StringIO(res.text))
+        if player_df.empty:
+            return player_df
         player_df.rename(columns={"name": "playerName"}, inplace=True)
         player_df.height = (
             player_df.height.str[:-1]
@@ -651,12 +649,11 @@ class StatsNHL(Stats):
 
     def _fetch_skater_summary(self, player_df):
         """Per-60 / per-attempt skater rates from the moneypuck season summary."""
-        res = requests.get(
+        skater_df = scraper.get_csv(
             f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{self.season_start.year}/regular/skaters.csv"
         )
-        if res.status_code != 200:
+        if skater_df.empty:
             return pd.DataFrame()
-        skater_df = pd.read_csv(StringIO(res.text))
         skater_df.rename(columns={"name": "playerName"}, inplace=True)
         skater_df = skater_df.loc[skater_df["situation"] == "all"]
         skater_df["Fenwick"] = (
@@ -725,12 +722,11 @@ class StatsNHL(Stats):
 
     def _fetch_goalie_summary(self, player_df):
         """Per-save / per-shot goalie rates from the moneypuck season summary."""
-        res = requests.get(
+        goalie_df = scraper.get_csv(
             f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{self.season_start.year}/regular/goalies.csv"
         )
-        if res.status_code != 200:
+        if goalie_df.empty:
             return pd.DataFrame()
-        goalie_df = pd.read_csv(StringIO(res.text))
         goalie_df.rename(columns={"name": "playerName"}, inplace=True)
         goalie_df = goalie_df.loc[goalie_df["situation"] == "all"]
         goalie_df["timePerGame"] = goalie_df["icetime"] / goalie_df["games_played"] / 60
