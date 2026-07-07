@@ -41,6 +41,7 @@ from sportstradamus.training.model_strategy_sweep import (
     _SHIP_PRED_COL,
     _TEST_SETS_ROOT,
     FamilySpec,
+    _run_meditate_with_lock_retry,
 )
 from sportstradamus.training.scorecard import _supersede_headline, load_test_set, supersede_verdict
 from sportstradamus.training.ship_config import STAT_META_PATH, WITHHELD, load_stat_meta
@@ -176,10 +177,6 @@ def _restore_cell(
     _atomic_write_meta(meta)
 
 
-def _log_tail(path: pathlib.Path, n: int = 25) -> str:
-    return "\n".join(path.read_text().splitlines()[-n:])
-
-
 def _ship_from_model_stats(league: str, market: str) -> bool:
     """The official ``ship`` verdict report() wrote for a cell; False if the row is absent."""
     stats = pd.read_parquet(MODEL_STATS_PATH, columns=["league", "market", "ship"])
@@ -202,28 +199,16 @@ def _run_meditate(league: str, market: str) -> bool:
     """Full-HPO retrain of a cell from its just-persisted stat_meta strategy; True iff meditate exits clean.
 
     ``--force`` is required or a cell with no new gamedays skips silently and never rewrites its
-    outputs. A non-zero exit or a timeout returns False (don't trust a possibly-stale model_stats row).
+    outputs. A non-zero exit or a timeout returns False (don't trust a possibly-stale model_stats
+    row); a transient archive-lock clash is retried first (:func:`_run_meditate_with_lock_retry`).
     """
     cmd = ["poetry", "run", "meditate", "--league", league, "--market", market, "--force"]
     log_path = _CONFIRM_LOG_ROOT / f"{market_file_slug(league, market)}.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
     click.echo(f"  retraining {league} {market} (full HPO, ~1h) …")
-    with log_path.open("w") as log:
-        try:
-            subprocess.run(
-                cmd,
-                cwd=_REPO_ROOT,
-                check=True,
-                timeout=_CONFIRM_TIMEOUT_S,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-            )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
-            click.echo(
-                f"  meditate {type(exc).__name__} — tail of {log_path}:\n{_log_tail(log_path)}",
-                err=True,
-            )
-            return False
+    try:
+        _run_meditate_with_lock_retry(cmd, log_path, timeout=_CONFIRM_TIMEOUT_S)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return False
     return True
 
 

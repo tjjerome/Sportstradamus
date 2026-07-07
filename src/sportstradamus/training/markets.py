@@ -75,8 +75,6 @@ ALL_MARKETS: dict[str, list[str]] = {
         "hits allowed",
         "runs allowed",
         "walks allowed",
-        "hitter fantasy score",
-        "pitcher fantasy score",
         "hitter fantasy points underdog",
         "pitcher fantasy points underdog",
         "hits+runs+rbi",

@@ -1,144 +1,4 @@
 {
-    "MLB": {
-        "1st inning hits allowed": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "1st inning runs allowed": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "batter strikeouts": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "doubles": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "hits": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "hits allowed": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "hits+runs+rbi": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "hitter fantasy points underdog": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "hitter fantasy score": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "home runs": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "pitcher fantasy points underdog": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "pitcher fantasy score": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "pitcher strikeouts": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "pitches thrown": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "pitching outs": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "rbi": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "runs": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "runs allowed": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "singles": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "stolen bases": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "total bases": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "walks": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "walks allowed": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        }
-    },
     "NBA": {
         "AST": {
             "dist": "SkewNormal",
@@ -395,25 +255,19 @@
     },
     "NHL": {
         "assists": {
-            "dist": "SkewNormal",
+            "dist": "ZINB",
             "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
         "blocked": {
-            "dist": "SkewNormal",
+            "dist": "ZINB",
             "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
         "faceOffWins": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
-        },
-        "fantasy points prizepicks": {
-            "dist": "SkewNormal",
+            "dist": "ZINB",
             "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
@@ -425,31 +279,31 @@
             "posthoc": "none"
         },
         "goals": {
-            "dist": "SkewNormal",
+            "dist": "ZINB",
             "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
         "goalsAgainst": {
-            "dist": "SkewNormal",
+            "dist": "ZINB",
             "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
         "hits": {
-            "dist": "SkewNormal",
+            "dist": "ZINB",
             "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
         "points": {
-            "dist": "SkewNormal",
+            "dist": "ZINB",
             "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
         "powerPlayPoints": {
-            "dist": "SkewNormal",
+            "dist": "ZINB",
             "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
@@ -461,7 +315,7 @@
             "posthoc": "none"
         },
         "shots": {
-            "dist": "SkewNormal",
+            "dist": "ZINB",
             "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
@@ -611,6 +465,122 @@
             "dist": "SkewNormal",
             "shipped": "devel",
             "target_normalization": "ratio_meanyr",
+            "posthoc": "none"
+        }
+    },
+    "MLB": {
+        "batter strikeouts": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
+        },
+        "doubles": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
+        },
+        "hits": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
+        },
+        "hits allowed": {
+            "dist": "SkewNormal",
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
+        },
+        "hits+runs+rbi": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
+        },
+        "hitter fantasy points underdog": {
+            "dist": "SkewNormal",
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
+        },
+        "home runs": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
+        },
+        "pitcher fantasy points underdog": {
+            "dist": "SkewNormal",
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
+        },
+        "pitcher strikeouts": {
+            "dist": "SkewNormal",
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
+        },
+        "pitches thrown": {
+            "dist": "SkewNormal",
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
+        },
+        "pitching outs": {
+            "dist": "SkewNormal",
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
+        },
+        "rbi": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
+        },
+        "runs": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
+        },
+        "runs allowed": {
+            "dist": "SkewNormal",
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
+        },
+        "singles": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
+        },
+        "stolen bases": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
+        },
+        "total bases": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
+        },
+        "walks": {
+            "dist": "ZINB",
+            "shipped": "withheld",
+            "target_normalization": "none",
+            "posthoc": "none"
+        },
+        "walks allowed": {
+            "dist": "SkewNormal",
+            "shipped": "withheld",
+            "target_normalization": "none",
             "posthoc": "none"
         }
     }
