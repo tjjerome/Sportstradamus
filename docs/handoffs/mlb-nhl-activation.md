@@ -302,5 +302,6 @@ at the roadmap v3 §4 swimlane index for the next lane.
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- `2026-07-06 · assembled · Phase-5 matrix batch (matrix-only, no training, per-league isolated archive copies): 31 new withheld matrices — NHL 15/15; MLB 17/21 (11/11 assembled hitter cells carry structural Player proj plateAppearances; 4 gaps: pitches-thrown + pitcher-fantasy-score have no archived odds [MLB keeps Archived rows only, base.py:2107], hitter fantasy score + hitter fantasy points underdog crash brentq NaN in _mlb_hits_proportional_ev mlb.py:1183) · next: fix hitter-fantasy EV derivation + activation Phase-5 code wrap-up`
 - `2026-07-06 · built · MLB volume-norm (own spec+plan): plateAppearances retired as trained cell -> structural slot-PA projector + bounded OBP/market offense adj; team sourced from offers (fixed all-0 profile["team"] sentinel: crashed get_total + killed adj); rebuilt total-bases matrix carries Player proj plateAppearances mean/std (no .mdl); withheld unchanged, no training · next: activation Phase 5 wrap-up (wiring/backfill still stashed)`
 - `2026-06-10 · created · brief drafted from roadmap-v3 migration · next: stage 0a MLB packet (D1 window ~Jul)`
