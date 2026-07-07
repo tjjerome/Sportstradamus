@@ -323,11 +323,17 @@ def _live_load(config: PickemConfig) -> tuple[dict[str, pd.DataFrame], pd.DataFr
     """Re-run the prophecize loader and search per variant. Heavy."""
     from sportstradamus.books import get_ud
     from sportstradamus.prediction.scoring import process_offers
-    from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
+    from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 
     stats: dict[str, Any] = {}
     today = datetime.date.today()
-    for cls, key in ((StatsNBA, "NBA"), (StatsNFL, "NFL"), (StatsWNBA, "WNBA")):
+    for cls, key in (
+        (StatsNBA, "NBA"),
+        (StatsNFL, "NFL"),
+        (StatsWNBA, "WNBA"),
+        (StatsMLB, "MLB"),
+        (StatsNHL, "NHL"),
+    ):
         s = cls()
         s.load()
         if today > (s.season_start - datetime.timedelta(days=7)):
