@@ -56,7 +56,7 @@ from sportstradamus.prediction.stories import (
 )
 from sportstradamus.prediction.stories.details import build_offer_details
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
+from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 
 pd.set_option("mode.chained_assignment", None)
 pd.set_option("future.no_silent_downcasting", True)
@@ -192,29 +192,20 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     tqdm.__init__ = partialmethod(tqdm.__init__, disable=(not progress))
 
     sports = []
-    nba = StatsNBA()
-    nba.load()
-    if datetime.datetime.today().date() > (nba.season_start - datetime.timedelta(days=7)):
-        sports.append("NBA")
-    nfl = StatsNFL()
-    nfl.load()
-    if datetime.datetime.today().date() > (nfl.season_start - datetime.timedelta(days=7)):
-        sports.append("NFL")
-    wnba = StatsWNBA()
-    wnba.load()
-    if datetime.datetime.today().date() > (wnba.season_start - datetime.timedelta(days=7)):
-        sports.append("WNBA")
-
     stats = {}
-    if "NBA" in sports:
-        nba.update()
-        stats.update({"NBA": nba})
-    if "NFL" in sports:
-        nfl.update()
-        stats.update({"NFL": nfl})
-    if "WNBA" in sports:
-        wnba.update()
-        stats.update({"WNBA": wnba})
+    for lg_name, cls in (
+        ("NBA", StatsNBA),
+        ("NFL", StatsNFL),
+        ("WNBA", StatsWNBA),
+        ("MLB", StatsMLB),
+        ("NHL", StatsNHL),
+    ):
+        struct = cls()
+        struct.load()
+        if datetime.datetime.today().date() > (struct.season_start - datetime.timedelta(days=7)):
+            struct.update()
+            stats[lg_name] = struct
+            sports.append(lg_name)
 
     all_offers: list[pd.DataFrame] = []
     parlay_df = pd.DataFrame()
