@@ -79,13 +79,17 @@ SLOT_STD_UNKNOWN = 1.0
 # mechanistic driver (more base-runners -> more lineup turnover -> more PA); the
 # book-implied team total is a sanity anchor. Clipped to +/-8% because the predictable
 # offense signal is only ~1-2 PA on a ~36 PA base -- the rest is unpredictable (-> std).
-LG_AVG_OBP = 0.315  # mean team OBP (teamlog scale; matches teamProfile["OBP"] the offense adjustment reads)
+LG_AVG_OBP = (
+    0.315  # mean team OBP (teamlog scale; matches teamProfile["OBP"] the offense adjustment reads)
+)
 LG_AVG_TEAM_TOTAL = 4.671  # mirrors archive default_totals["MLB"] so unquoted games -> neutral 1.0
 OBP_ADJ_WEIGHT = 0.70
 MARKET_ADJ_WEIGHT = 0.30
 OFFENSE_ADJ_CLIP = (0.92, 1.08)
 _OBP_POLE_GUARD = 0.5  # cap expected OBP so the 1/(1-OBP) PA law stays finite
-_TEAM_OBP_WINDOW = 10  # recent starts for opposing-starter OBP-allowed (matches teamProfile last-10)
+_TEAM_OBP_WINDOW = (
+    10  # recent starts for opposing-starter OBP-allowed (matches teamProfile last-10)
+)
 
 
 def _mlb_team_abbr(mlb_teams, team_id):
@@ -154,7 +158,7 @@ class StatsMLB(Stats):
     def __init__(self):
         """Initialize the StatsMLB instance."""
         super().__init__()
-        self.season_start = datetime(2024, 3, 28).date()
+        self.season_start = datetime(2026, 3, 25).date()
         self.pitchers = get_mlb_pitchers()
         self.gameIds = []
         self.gamelog = pd.DataFrame()
@@ -174,6 +178,7 @@ class StatsMLB(Stats):
             "game": "gameId",
             "date": "gameDate",
             "player": "playerName",
+            "usage": "plateAppearances",
             "position": "position",
             "team": "team",
             "opponent": "opponent",
@@ -650,32 +655,37 @@ class StatsMLB(Stats):
             with open(filepath) as infile:
                 self.park_factors = json.load(infile)
 
-        filepath = (
-            pkg_resources.files(data) / "player_data/MLB/affinity_pitchersBySHV_matchScores.csv"
+        self.comps["pitchers"] = self._load_affinity_csv("affinity_pitchersBySHV_matchScores.csv")
+        self.comps["hitters"] = self._load_affinity_csv(
+            "affinity_hittersByHittingProfile_matchScores.csv"
         )
-        if os.path.isfile(filepath):
-            df = pd.read_csv(filepath)
-            df = df.loc[
-                (df.key1.str[-1] == df.key2.str[-1])
-                & (df.match_score >= _COMP_MATCH_SCORE_THRESHOLD)
-            ]
-            df.key1 = df.key1.str[:-2].astype(int)
-            df.key2 = df.key2.str[:-2].astype(int)
-            self.comps["pitchers"] = df.groupby("key1").apply(lambda x: x.key2.to_list()).to_dict()
 
-        filepath = (
-            pkg_resources.files(data)
-            / "player_data/MLB/affinity_hittersByHittingProfile_matchScores.csv"
-        )
-        if os.path.isfile(filepath):
-            df = pd.read_csv(filepath)
-            df = df.loc[
-                (df.key1.str[-1] == df.key2.str[-1])
-                & (df.match_score >= _COMP_MATCH_SCORE_THRESHOLD)
-            ]
-            df.key1 = df.key1.str[:-2].astype(int)
-            df.key2 = df.key2.str[:-2].astype(int)
-            self.comps["hitters"] = df.groupby("key1").apply(lambda x: x.key2.to_list()).to_dict()
+    def _load_affinity_csv(self, filename):
+        """Reshape a baseballsavant affinity match-score CSV into discretized comps.
+
+        Returns ``{pid: {"comps": [pid, ...], "distances": [float, ...]}}`` with
+        comps ordered closest-first (``distance = 1 - match_score``), keeping only
+        same-handedness pairs at or above the match-score threshold. This is the
+        same ``{"comps", "distances"}`` shape the other leagues' KNN comps carry,
+        so MLB writes a uniform ``comps.json`` even though its affinities come from
+        a static Statcast table rather than a fitted BallTree.
+        """
+        filepath = pkg_resources.files(data) / "player_data" / "MLB" / filename
+        if not os.path.isfile(filepath):
+            return {}
+        df = pd.read_csv(filepath)
+        df = df.loc[
+            (df.key1.str[-1] == df.key2.str[-1]) & (df.match_score >= _COMP_MATCH_SCORE_THRESHOLD)
+        ]
+        df = df.assign(
+            pid=df.key1.str[:-2].astype(int),
+            comp=df.key2.str[:-2].astype(int),
+            distance=1 - df.match_score,
+        ).sort_values("distance")
+        return {
+            pid: {"comps": grp.comp.to_list(), "distances": grp.distance.to_list()}
+            for pid, grp in df.groupby("pid", sort=False)
+        }
 
     def update_player_comps(self, year=None):
         url = "https://baseballsavant.mlb.com/app/affinity/affinity_hittersByHittingProfile_matchScores.csv"
@@ -995,13 +1005,9 @@ class StatsMLB(Stats):
 
         if date < datetime.today().date():
             day = self.gamelog[pd.to_datetime(self.gamelog["gameDate"]).dt.date == date]
-            home_map = (
-                day.drop_duplicates("playerName").set_index("playerName")["home"].to_dict()
-            )
+            home_map = day.drop_duplicates("playerName").set_index("playerName")["home"].to_dict()
         else:
-            home_map = {
-                p: self.upcoming_games.get(t, {}).get("Home") for p, t in team_of.items()
-            }
+            home_map = {p: self.upcoming_games.get(t, {}).get("Home") for p, t in team_of.items()}
 
         teams = set(team_of.values())
         adjustment = self._mlb_offense_adjustment(teams, offers, date, home_map)
@@ -1039,9 +1045,7 @@ class StatsMLB(Stats):
         """
         records = offers if isinstance(offers, list) else list(offers.values())
         opponent_of = {r["Team"]: r["Opponent"] for r in records}
-        home_by_team = {
-            r["Team"]: home_map.get(r["Player"]) for r in records
-        }
+        home_by_team = {r["Team"]: home_map.get(r["Player"]) for r in records}
 
         if date < datetime.today().date():
             day = self.gamelog[pd.to_datetime(self.gamelog["gameDate"]).dt.date == date]
@@ -1051,8 +1055,7 @@ class StatsMLB(Stats):
                 starter_of[team] = named.mode().iloc[0] if not named.mode().empty else None
         else:
             starter_of = {
-                team: self.upcoming_games.get(team, {}).get("Opponent Pitcher")
-                for team in teams
+                team: self.upcoming_games.get(team, {}).get("Opponent Pitcher") for team in teams
             }
 
         adjustment = {}

@@ -10,9 +10,11 @@ import importlib.resources as pkg_resources
 import json
 import random
 from http import HTTPStatus
+from io import StringIO
 from time import sleep
 
 import numpy as np
+import pandas as pd
 import requests
 from tqdm.contrib.logging import logging_redirect_tqdm
 
@@ -119,3 +121,29 @@ class Scrape:
 
             logger.warning("Max Attempts Reached")
             return {}
+
+    def get_csv(self, url, max_attempts=3):
+        """GET a CSV endpoint with header rotation, returning a DataFrame.
+
+        Hosts like moneypuck answer the default requests UA with an HTML
+        "data license" bot-block page (HTTP 200) but return the real CSV to a
+        rotated browser header, so an HTML content-type is treated as a soft
+        block and retried. Returns an empty frame once retries are exhausted;
+        callers treat the empty frame as "no data".
+        """
+        with logging_redirect_tqdm():
+            for i in range(1, max_attempts + 1):
+                if i > 1:
+                    self._new_headers()
+                    sleep(random.uniform(1, 3))
+                try:
+                    response = requests.get(url, headers=self.header)
+                    content_type = response.headers.get("content-type", "")
+                    if response.status_code == HTTPStatus.OK and "html" not in content_type.lower():
+                        return pd.read_csv(StringIO(response.text))
+                    logger.debug(f"Attempt {i}, CSV block status={response.status_code}")
+                except Exception:
+                    logger.exception(f"Attempt {i},")
+
+            logger.warning(f"Max Attempts Reached (csv): {url}")
+            return pd.DataFrame()
