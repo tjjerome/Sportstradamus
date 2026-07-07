@@ -12,6 +12,7 @@ cell's family grid once, scores each by the honest gate, and ranks the board by 
 import subprocess
 
 import pandas as pd
+import pytest
 
 from sportstradamus.training import model_strategy_sweep as sweep
 
@@ -193,6 +194,25 @@ def test_run_and_score_tags_family_and_uses_honest_gate(monkeypatch):
     assert rows[0]["slack"] == 0.1
 
 
+def test_run_and_score_records_failed_corner_non_shipping(monkeypatch):
+    """A corner whose meditate errors is caught and returned as one non-shipping row — never scored."""
+
+    def boom(*a, **k):
+        raise subprocess.CalledProcessError(1, "meditate")
+
+    monkeypatch.setattr(sweep, "_run_deterministic_meditate", boom)
+    monkeypatch.setattr(
+        sweep, "_score_corner", lambda *a, **k: pytest.fail("a failed corner must not be scored")
+    )
+    corner = {"normalization": "ratio_meanyr", "dist_training_loss": "crps", "blending_loss_fn": "nll"}
+    rows = sweep._run_and_score("NHL", "blocked", "SkewNormal", corner)
+    assert len(rows) == 1
+    assert rows[0]["ships"] is False
+    assert rows[0]["slack"] == sweep._FAILED_CORNER_SLACK
+    assert rows[0]["family"] == "SkewNormal"
+    assert rows[0]["normalization"] == "ratio_meanyr"  # corner axes preserved for the board
+
+
 # --- per-cell study over the family grid -----------------------------------------------------
 
 
@@ -227,6 +247,30 @@ def test_search_cell_enumerates_zinb_grid(monkeypatch):
     assert board["normalization"].isna().all()
 
 
+def test_search_cell_survives_a_failing_corner(monkeypatch):
+    """One corner erroring does not abort the study: every corner lands, the bad one non-shipping.
+
+    Mirrors the NHL `blocked` case — the SkewNormal grid's `dist_training_loss=crps` corners crash
+    when the cell trains as ZINB, but the `nll` corners score fine and the board still ranks them.
+    """
+    monkeypatch.setattr(sweep, "_cell_family", lambda lg, mkt: "SkewNormal")
+
+    def maybe_fail(league, market, corner):
+        if corner["dist_training_loss"] == "crps":
+            raise subprocess.CalledProcessError(1, "meditate")
+
+    monkeypatch.setattr(sweep, "_run_deterministic_meditate", maybe_fail)
+    monkeypatch.setattr(
+        sweep, "_score_corner", lambda lg, mkt, corner: {**corner, "slack": 0.1, "ships": True}
+    )
+    board = sweep.search_cell("NHL", "blocked")
+
+    assert len(board) == 12  # all corners recorded; no crash aborted the grid
+    failed = board[board["slack"] == sweep._FAILED_CORNER_SLACK]
+    assert len(failed) == 6 and not failed["ships"].astype(bool).any()  # the 6 crps corners
+    assert int(board["ships"].astype(bool).sum()) == 6  # the 6 nll corners scored + shipped
+
+
 def test_run_deterministic_meditate_builds_corner_flags(monkeypatch, tmp_path):
     """Each corner axis is forwarded as its flag; a ZINB corner omits --target-normalization and the
     output is captured to a per-corner log under the research log root.
@@ -253,6 +297,76 @@ def test_run_deterministic_meditate_builds_corner_flags(monkeypatch, tmp_path):
     assert "--target-normalization" not in z
     assert z[z.index("--zinb-mode") + 1] == "hurdle"
     assert z[z.index("--count-dispersion-objective") + 1] == "pit_ks"
+
+
+# --- archive-lock retry ----------------------------------------------------------------------
+
+
+def _fake_meditate_run(*, lock_error, succeed_on_call=None):
+    """A ``subprocess.run`` stand-in that writes to the captured log, then succeeds or raises.
+
+    ``lock_error`` writes the DuckDB lock signature so the retry fires; otherwise a generic traceback
+    so the run re-raises at once. ``succeed_on_call`` (1-indexed) is the first call that exits clean —
+    ``None`` never succeeds. Returns ``(run, calls)`` where ``calls["n"]`` counts invocations.
+    """
+    calls = {"n": 0}
+
+    def run(cmd, **kw):
+        calls["n"] += 1
+        log = kw["stdout"]
+        if succeed_on_call is not None and calls["n"] >= succeed_on_call:
+            log.write("trained ok\n")
+            log.flush()
+            return subprocess.CompletedProcess(cmd, 0)
+        log.write("Could not set lock on file\n" if lock_error else "ValueError: boom\n")
+        log.flush()
+        raise subprocess.CalledProcessError(1, cmd)
+
+    return run, calls
+
+
+def test_lock_retry_retries_on_lock_then_succeeds(monkeypatch, tmp_path):
+    """A lock-error trial waits per the back-off schedule and re-runs until one attempt exits clean."""
+    monkeypatch.setattr(sweep, "_LOCK_RETRY_WAITS_S", (1, 2, 3))
+    run, calls = _fake_meditate_run(lock_error=True, succeed_on_call=3)
+    monkeypatch.setattr(sweep.subprocess, "run", run)
+    slept = []
+    monkeypatch.setattr(sweep.time, "sleep", slept.append)
+
+    sweep._run_meditate_with_lock_retry(["meditate"], tmp_path / "x.log", timeout=10)
+
+    assert calls["n"] == 3  # two lock failures, third attempt succeeds
+    assert slept == [1, 2]  # waited before each retry
+
+
+def test_lock_retry_reraises_nonlock_without_retrying(monkeypatch, tmp_path):
+    """A non-lock failure is a real error: re-raise on the first try, no wait."""
+    monkeypatch.setattr(sweep, "_LOCK_RETRY_WAITS_S", (1, 2, 3))
+    run, calls = _fake_meditate_run(lock_error=False)
+    monkeypatch.setattr(sweep.subprocess, "run", run)
+    slept = []
+    monkeypatch.setattr(sweep.time, "sleep", slept.append)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        sweep._run_meditate_with_lock_retry(["meditate"], tmp_path / "x.log", timeout=10)
+
+    assert calls["n"] == 1
+    assert slept == []
+
+
+def test_lock_retry_reraises_after_exhausting_waits(monkeypatch, tmp_path):
+    """A lock that never clears exhausts the schedule (one final no-wait attempt) then re-raises."""
+    monkeypatch.setattr(sweep, "_LOCK_RETRY_WAITS_S", (1, 2, 3))
+    run, calls = _fake_meditate_run(lock_error=True)
+    monkeypatch.setattr(sweep.subprocess, "run", run)
+    slept = []
+    monkeypatch.setattr(sweep.time, "sleep", slept.append)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        sweep._run_meditate_with_lock_retry(["meditate"], tmp_path / "x.log", timeout=10)
+
+    assert calls["n"] == 4  # three retries + a final attempt
+    assert slept == [1, 2, 3]
 
 
 # --- board derivation from stat_meta ---------------------------------------------------------

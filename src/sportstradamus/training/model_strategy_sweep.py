@@ -72,9 +72,25 @@ _TRAINING_DATA_ROOT = pathlib.Path(str(pkg_resources.files(_data_pkg) / "trainin
 # 30-minute ceiling; a deterministic meditate run is fast-HP, but cells with large datasets can
 # take ~10 min, so 1800 s keeps CI from hanging without cutting off valid runs.
 _MEDITATE_TRIAL_TIMEOUT_S = 1800
+# A DuckDB read-write connection takes a process-exclusive lock on archive.duckdb; a meditate that
+# opens the archive while a cron job holds it fails immediately with this line (DuckDB throws rather
+# than blocking). A --deterministic trial trains from the cached matrix and never opens the archive,
+# so this only bites a real-HPO confirm run racing a cron archive job — retry with back-off until the
+# holder releases. Lives here because the confirm loop imports its meditate runner from this module.
+_LOCK_ERROR_SIGNATURE = "Could not set lock on file"
+# Back-off waits (seconds) between archive-lock retries; exhausting them re-raises so a genuinely
+# stuck lock fails loud instead of looping forever.
+_LOCK_RETRY_WAITS_S: tuple[int, ...] = (15, 30, 60, 120, 240)
 # The six offline ship gates (value + pass); a corner ships iff all pass. Mirrors
 # scorecard._SHIP_GATES — apply_thresholds sets `ship` and min_gate_slack folds in all six.
 _GATES: tuple[str, ...] = ("g1", "g2", "g3", "g4", "g5", "g6")
+
+# A retrain corner can error mid-sweep — an invalid family/loss combo for the cell's data-driven
+# dist (e.g. a SkewNormal `dist_training_loss=crps` corner on a low-mean cell the pipeline trains as
+# ZINB), a timeout, or a numerical blow-up. A sweep over hundreds of corners records the bad one
+# non-shipping and continues rather than losing the whole board; -inf slack sorts it last and keeps
+# it out of every ship/candidate filter.
+_FAILED_CORNER_SLACK: float = float("-inf")
 
 # Each swept axis' meditate CLI flag. A corner is realized by appending `--flag value` per axis;
 # an axis a family doesn't sweep is simply absent (e.g. ZINB never forces --target-normalization,
@@ -233,6 +249,53 @@ def _log_tail(path: pathlib.Path, n: int = 25) -> str:
     return "\n".join(path.read_text().splitlines()[-n:])
 
 
+def _is_archive_lock_error(log_path: pathlib.Path) -> bool:
+    """True iff the run's log tail shows the DuckDB archive write-lock collision (a retryable failure)."""
+    return _LOCK_ERROR_SIGNATURE in _log_tail(log_path)
+
+
+def _run_meditate_with_lock_retry(cmd: list[str], log_path: pathlib.Path, *, timeout: int) -> None:
+    """Run a ``meditate`` subprocess, capturing output to ``log_path``, retrying an archive-lock clash.
+
+    A non-zero exit whose log shows the DuckDB write-lock collision (:data:`_LOCK_ERROR_SIGNATURE`)
+    is transient — a cron archive job holds the lock — so wait per :data:`_LOCK_RETRY_WAITS_S` and
+    retry (each attempt truncates the log, so a final tail reflects the last try). Every other failure
+    — a real non-zero exit, a timeout, or exhausted lock retries — surfaces the log tail and re-raises,
+    so the deterministic sweep stays fail-loud (the crash kills the Optuna study) and the confirm loop
+    can turn the raise into a HELD/REVERTED verdict.
+    """
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    n_attempts = len(_LOCK_RETRY_WAITS_S) + 1  # each wait buys one retry, plus the first attempt
+    for attempt in range(n_attempts):
+        with log_path.open("w") as log:
+            try:
+                subprocess.run(
+                    cmd,
+                    cwd=_REPO_ROOT,
+                    check=True,
+                    timeout=timeout,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                )
+                return
+            except subprocess.CalledProcessError:
+                retries_left = attempt < len(_LOCK_RETRY_WAITS_S)
+                if retries_left and _is_archive_lock_error(log_path):
+                    wait = _LOCK_RETRY_WAITS_S[attempt]
+                    click.echo(f"  archive write-locked; retrying in {wait}s …", err=True)
+                    time.sleep(wait)
+                    continue
+                click.echo(
+                    f"  meditate failed — tail of {log_path}:\n{_log_tail(log_path)}", err=True
+                )
+                raise
+            except subprocess.TimeoutExpired:
+                click.echo(
+                    f"  meditate timed out — tail of {log_path}:\n{_log_tail(log_path)}", err=True
+                )
+                raise
+
+
 def _run_deterministic_meditate(league: str, market: str, corner: dict[str, str]) -> None:
     """Train one deterministic ``(cell, corner)`` trial via meditate.
 
@@ -242,8 +305,9 @@ def _run_deterministic_meditate(league: str, market: str, corner: dict[str, str]
     family doesn't sweep is left off and meditate resolves its default. The trained model is a
     *ranking* stand-in.
 
-    meditate's full training log is captured to a per-corner file rather than streamed, so the
-    sweep's own progress and verdict stay readable; on a failed trial the log's tail is surfaced.
+    meditate's full training log is captured to a per-corner file rather than streamed, so the sweep's
+    own progress and verdict stay readable; :func:`_run_meditate_with_lock_retry` surfaces a failed
+    trial's tail and retries a transient archive-lock clash.
     """
     cmd = [
         "poetry",
@@ -258,22 +322,9 @@ def _run_deterministic_meditate(league: str, market: str, corner: dict[str, str]
     ]
     for axis, value in corner.items():
         cmd += [_AXIS_FLAG[axis], value]
-
-    log_path = _log_path(league, market, corner)
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("w") as log:
-        try:
-            subprocess.run(
-                cmd,
-                cwd=_REPO_ROOT,
-                check=True,
-                timeout=_MEDITATE_TRIAL_TIMEOUT_S,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-            )
-        except subprocess.CalledProcessError:
-            click.echo(f"  meditate failed — tail of {log_path}:\n{_log_tail(log_path)}", err=True)
-            raise
+    _run_meditate_with_lock_retry(
+        cmd, _log_path(league, market, corner), timeout=_MEDITATE_TRIAL_TIMEOUT_S
+    )
 
 
 def _score_corner(league: str, market: str, corner: dict[str, str]) -> dict[str, object]:
@@ -348,13 +399,22 @@ def _run_and_score(
     this trial's train — before the next sequential trial overwrites it — keeps the loss/mode axes
     honest without a per-corner dump path (which is also why the sweep always retrains rather than
     reusing a dump). Returns a one-row list so the GridSampler objective and board assembly read
-    uniformly.
+    uniformly. A corner whose meditate errors or times out is caught, echoed, and returned as a
+    single non-shipping row (:data:`_FAILED_CORNER_SLACK`) so one bad corner never aborts the board.
     """
     label = _corner_label(corner)
     click.echo(f"  training  {label} …")
     start = time.monotonic()
-    _run_deterministic_meditate(league, market, corner)
-    row = _score_corner(league, market, corner)
+    try:
+        _run_deterministic_meditate(league, market, corner)
+        row = _score_corner(league, market, corner)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        click.secho(
+            f"  FAILED    {label} — {type(exc).__name__}; recorded non-shipping, continuing",
+            fg="yellow",
+            err=True,
+        )
+        return [{**corner, "family": family, "slack": _FAILED_CORNER_SLACK, "ships": False}]
     row["family"] = family
     verdict = click.style(_verdict(row), fg="green" if row["ships"] else "red")
     elapsed = f"{time.monotonic() - start:.0f}s"

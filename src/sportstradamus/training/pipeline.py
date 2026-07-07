@@ -93,6 +93,10 @@ _TRAIN_FRACTION: float = 0.7
 # distributions (NegBin/ZINB).  Stats with global_mean < 2 are integer-like
 # enough that a count family fits better than SkewNormal.
 _SKEWNORMAL_MEAN_THRESHOLD: float = 2.0
+# Families a cell may pin in stat_meta.json `dist` to force its training branch; an unset / "auto"
+# cell defers to the data-driven rule (_data_driven_dist). ZAGamma/Gamma are not produced by
+# _step_select_distribution, so they are not forceable here.
+_FORCEABLE_DISTS: frozenset[str] = frozenset({"SkewNormal", "ZINB", "NegBin"})
 # Minimum coefficient of variation for the SkewNormal branch.  Prevents
 # degenerate near-zero CV when all players have nearly identical outcomes.
 _SKEWNORMAL_CV_FLOOR: float = 0.05
@@ -2213,6 +2217,51 @@ def _step_fuse_predictions(
     return _fuse_gamma(out, decoded, splits, model_weight, cv, hist_gate, dist)
 
 
+def _data_driven_dist(global_mean: float, hist_gate: float) -> str:
+    """The distribution the data implies: ``SkewNormal`` at ``global_mean >= _SKEWNORMAL_MEAN_THRESHOLD``,
+    else the count branch — ``ZINB`` when the zero rate clears ``GATE_PUBLISH_THRESHOLD``, else ``NegBin``.
+    """
+    if global_mean >= _SKEWNORMAL_MEAN_THRESHOLD:
+        return "SkewNormal"
+    return "ZINB" if hist_gate > GATE_PUBLISH_THRESHOLD else "NegBin"
+
+
+def _resolve_dist(
+    configured: str | None,
+    data_dist: str,
+    global_mean: float,
+    hist_gate: float,
+    league: str,
+    market: str,
+) -> str:
+    """The distribution family to train: the stat_meta-configured one (authoritative), or ``data_dist``
+    when the cell pins nothing / ``"auto"``.
+
+    A configured family that disagrees with the data still trains (the operator's call) but logs a loud
+    warning — forcing ``SkewNormal`` on a low-mean count stat mis-preps the target, forcing a count
+    family on a high-mean stat is usually harmless. An unrecognized family is a config error: fail loud.
+    """
+    if configured in (None, "auto"):
+        return data_dist
+    if configured not in _FORCEABLE_DISTS:
+        raise ValueError(
+            f"{league} {market}: stat_meta dist {configured!r} is not a forceable family; "
+            f"use one of {sorted(_FORCEABLE_DISTS)} or 'auto'"
+        )
+    if configured != data_dist:
+        logger.warning(
+            "%s %s: training forced dist=%s from stat_meta (data-driven pick is %s: "
+            "global_mean=%.2f, zero_rate=%.2f)",
+            league,
+            market,
+            configured,
+            data_dist,
+            global_mean,
+            hist_gate,
+        )
+    return configured
+
+
 def _step_select_distribution(
     splits: dict,
     stat_data,
@@ -2227,10 +2276,12 @@ def _step_select_distribution(
 ) -> dict:
     """Choose distribution family + apply target transform + compute shape priors.
 
-    Branch logic: ``global_mean >= _SKEWNORMAL_MEAN_THRESHOLD`` → SkewNormal, otherwise
-    NegBin (escalated to ZINB when ``hist_gate > GATE_PUBLISH_THRESHOLD``). For SkewNormal,
-    drops zero rows when ``hist_gate > NONZERO_DENOM_GATE`` and applies the
-    strategy's forward transform.
+    Family selection: the cell's stat_meta ``dist`` is authoritative when set (:func:`_resolve_dist`
+    forces that branch and warns if it disagrees with the data); an unset / ``"auto"`` cell falls back
+    to the data-driven rule (:func:`_data_driven_dist`): ``global_mean >= _SKEWNORMAL_MEAN_THRESHOLD``
+    → SkewNormal, else NegBin escalated to ZINB when ``hist_gate > GATE_PUBLISH_THRESHOLD``. For
+    SkewNormal, drops zero rows when ``hist_gate > NONZERO_DENOM_GATE`` and applies the strategy's
+    forward transform.
 
     Mutates ``splits["X_train"]`` and ``splits["y_train_labels"]`` for the
     SkewNormal nonzero path. Also writes ``stat_zi[league][market]`` and
@@ -2280,8 +2331,15 @@ def _step_select_distribution(
     strategy = baselines.get_target_normalization(target_normalization)
     dist_obj = None
 
-    if global_mean >= _SKEWNORMAL_MEAN_THRESHOLD:
-        dist = "SkewNormal"
+    dist = _resolve_dist(
+        load_distribution_config().get(league, {}).get(market),
+        _data_driven_dist(global_mean, hist_gate),
+        global_mean,
+        hist_gate,
+        league,
+        market,
+    )
+    if dist == "SkewNormal":
         dist_obj = SkewNormalDist(
             stabilization=stabilization, loss_fn=_resolve_loss_fn("crps", dist_training_loss)
         )
@@ -2314,9 +2372,7 @@ def _step_select_distribution(
         offset_mode = strategy.start_mode_flag == "offset"
         y_train_labels = strategy.forward(y_train_labels, X_train, global_mean, denom_col)
     else:
-        dist = "NegBin"
-        if hist_gate > GATE_PUBLISH_THRESHOLD:
-            dist = "ZINB"
+        # dist is already resolved to "ZINB" or "NegBin" (forced, or the data-driven zero-rate pick).
         if dist == "NegBin":
             dist_obj = NegativeBinomial(
                 stabilization=stabilization, loss_fn=_resolve_loss_fn("nll", dist_training_loss)
