@@ -220,6 +220,17 @@ def _zscore_within_player(df: pd.DataFrame, player_col: str, market: str) -> pd.
     return ((df[market] - groups.transform("mean")) / std).fillna(0)
 
 
+# Substrings that mark an MLB market as pitcher-side ("earned runs allowed",
+# "pitches thrown", "1st inning allowed", ...) rather than batter-side. Shared
+# by every MLB pitcher/batter branch point across base.py and mlb.py.
+_MLB_PITCHER_MARKET_TOKENS: tuple[str, ...] = ("allowed", "pitch")
+
+
+def is_mlb_pitcher_market(market: str) -> bool:
+    """Return True if ``market`` is an MLB pitcher-side stat, False for batter-side."""
+    return any(token in market for token in _MLB_PITCHER_MARKET_TOKENS)
+
+
 def flatten_offers(offers: dict | list, market: str) -> dict | list:
     """Flatten a nested ``{group: {player: ...}}`` offers mapping to ``{player: ...}``.
 
@@ -1460,7 +1471,7 @@ class Stats:
 
     def _h2h_features(self, stats, market, opponents, pitchers):
         """Attach head-to-head Avg/Mean/Played against this opponent (MLB: vs the pitcher)."""
-        if self.league == "MLB" and not any(string in market for string in ["allowed", "pitch"]):
+        if self.league == "MLB" and not is_mlb_pitcher_market(market):
             h2hgames = self.short_gamelog.loc[
                 self.short_gamelog["opponent pitcher"]
                 == self.short_gamelog[self.log_strings["player"]].map(pitchers)
@@ -1683,7 +1694,7 @@ class Stats:
         """MLB per-player comp-z: z-score each comp's outcome vs this opponent."""
         player_col = self.log_strings["player"]
         opp_col = self.log_strings["opponent"]
-        is_pitch_market = any(s in market for s in ["allowed", "pitch"])
+        is_pitch_market = is_mlb_pitcher_market(market)
         for player in stats.index:
             compGames = self._mlb_comp_games(player, market, is_pitch_market, stats)
             if compGames is None:
@@ -1985,7 +1996,7 @@ class Stats:
             self.get_volume_stats(
                 offers,
                 gameDate,
-                pitcher=any(string in market for string in ["allowed", "pitch"]),
+                pitcher=is_mlb_pitcher_market(market),
             )
         elif self.league == "NHL":
             self.get_volume_stats(
@@ -2045,6 +2056,7 @@ class Stats:
             y (pd.DataFrame): The target labels.
         """
         matrix = []
+        mlb_bookless = []
 
         if cutoff_date is None:
             cutoff_date = (datetime.today() - timedelta(days=850)).date()
@@ -2060,8 +2072,15 @@ class Stats:
             & (gamelog[self.log_strings["date"]] < datetime.today().date())
         ]
         gamelog = self._market_position_filter(gamelog, market)
-        if self.league != "MLB":
-            usage_cutoff = gamelog[self.usage_stat].quantile(0.15)
+        # MLB never set self.usage_stat (its usage path used to be skipped entirely), so read
+        # the participation column explicitly: pitcher markets accrue on the mound (batters
+        # faced), hitter markets at the plate (log_strings["usage"] == plateAppearances).
+        usage_stat = self.usage_stat
+        if self.league == "MLB":
+            usage_stat = (
+                "batters faced" if is_mlb_pitcher_market(market) else self.log_strings["usage"]
+            )
+        usage_cutoff = gamelog[usage_stat].quantile(0.15)
 
         gamedays = gamelog.groupby(self.log_strings["date"])
         offerKeys = {
@@ -2084,11 +2103,10 @@ class Stats:
             self._dispatch_volume_stats(offers, gameDate, market)
 
             stats = self.get_stats(market, offers, gameDate)
-            if self.league != "MLB":
-                usage = players[self.usage_stat]
-                usage.index = players[self.log_strings["player"]]
-                usage = usage.loc[stats.index]
-                usage = usage[~usage.index.duplicated(keep="first")]
+            usage = players[usage_stat]
+            usage.index = players[self.log_strings["player"]]
+            usage = usage.loc[stats.index]
+            usage = usage[~usage.index.duplicated(keep="first")]
 
             date = gameDate.strftime("%Y-%m-%d")
 
@@ -2115,11 +2133,22 @@ class Stats:
 
             if stats["Home"].dtype == bool:
                 if self.league == "MLB":
+                    # Book-first: keep only real-odds rows so book-quoted MLB cells stay
+                    # Archived-only. Hold participation rows aside as a fallback used only
+                    # when the market turns out to have no archived odds at all (below).
                     matrix.extend(stats.loc[stats["Archived"]].to_dict("records"))
+                    if not matrix:
+                        mlb_bookless.extend(stats.loc[usage > usage_cutoff].to_dict("records"))
                 else:
                     matrix.extend(
                         stats.loc[stats["Archived"] | (usage > usage_cutoff)].to_dict("records")
                     )
+
+        if not matrix:
+            # No archived odds anywhere for this MLB market — assemble the book-less cell
+            # (pitches thrown, pitcher fantasy score) on median-fallback lines instead of
+            # returning an empty frame. Empty for every other league (mlb_bookless stays []).
+            matrix = mlb_bookless
 
         return (
             pd.DataFrame(matrix).fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)

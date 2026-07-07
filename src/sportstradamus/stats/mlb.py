@@ -34,7 +34,7 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.helpers.io import write_gamelog
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats.base import Stats, archive, clean_data, scraper
+from sportstradamus.stats.base import Stats, archive, clean_data, is_mlb_pitcher_market, scraper
 
 # Minimum Savant affinity match_score to include a player as a comparable.
 # Scores below this are weak matches that add noise to comp feature sets.
@@ -822,7 +822,7 @@ class StatsMLB(Stats):
         self.pitcherProfile = pd.DataFrame(columns=["z", "home", "moneyline gain", "totals gain"])
 
         # Filter non-starting pitchers or non-starting batters depending on the market
-        if any(string in market for string in ["allowed", "pitch"]):
+        if is_mlb_pitcher_market(market):
             gamelog = self.short_gamelog[self.short_gamelog["starting pitcher"]].copy()
         else:
             gamelog = self.short_gamelog[self.short_gamelog["starting batter"]].copy()
@@ -958,7 +958,7 @@ class StatsMLB(Stats):
                 )[0]
             )
 
-        if not any(string in market for string in ["allowed", "pitch"]):
+        if not is_mlb_pitcher_market(market):
             self.pitcherProfile = self.pitcherProfile.join(
                 self.playerProfile[self.stat_types["pitching"]]
             )
@@ -1177,6 +1177,10 @@ class StatsMLB(Stats):
         hits_dist = stat_dist.get("MLB", {}).get("hits", "Gamma")
         v = archive.get_ev("MLB", "hits", date, player)
         subline = archive.get_line("MLB", "hits", date, player)
+        # No archived hits market to scale from: a missing hits EV is NaN and would make
+        # get_ev invert a NaN under-prob (brentq raises); a 0 line is a degenerate source.
+        if np.isnan(v) or subline == 0:
+            return 0
         v = get_ev(subline, get_odds(subline, v, hits_dist, cv=hits_cv), cv=cv, dist=dist)
         share = (
             player_games[submarket].sum() / player_games["hits"].sum()
