@@ -64,9 +64,15 @@ class _CaptureArchive:
 
     def __init__(self):
         self.book_evs = {}
+        self.ladder_rungs = {}
 
-    def merge_player_books(self, league, market, date, player, book_evs, lines, observed_at=None):
+    def merge_player_books(
+        self, league, market, date, player, book_evs, lines, observed_at=None, book_quotes=None
+    ):
         self.book_evs.setdefault(market, {})[(date, player)] = dict(book_evs)
+
+    def add_ladder(self, league, market, date, entity, book, rungs, observed_at=None):
+        self.ladder_rungs[market] = self.ladder_rungs.get(market, 0) + len(rungs)
 
     def set_team_books(self, *args, **kwargs):
         pass
@@ -122,6 +128,8 @@ def _report_dry_run(capture):
         )
         sample = next(iter(entries.items()))
         click.echo(f"    sample {sample[0][1]}: {sample[1]}")
+    for market, n in capture.ladder_rungs.items():
+        click.echo(f"  ladder rungs {market}: {n}")
 
 
 def _job_sig(league, props):
