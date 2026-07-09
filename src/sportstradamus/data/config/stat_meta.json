@@ -46,7 +46,7 @@
         },
         "FGM": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "none",
             "blending": "crps"
@@ -152,15 +152,17 @@
         },
         "fantasy points prizepicks": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_eb_meanyr_k10",
+            "posthoc": "none",
+            "blending": "nll"
         },
         "fantasy points underdog": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "centered_additive_mean10",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_eb_meanyr_k10",
+            "posthoc": "none",
+            "blending": "nll"
         },
         "interceptions": {
             "dist": "ZINB",
@@ -170,9 +172,10 @@
         },
         "passing first downs": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_eb_meanyr_k10",
+            "posthoc": "none",
+            "blending": "nll"
         },
         "passing tds": {
             "dist": "ZINB",
@@ -200,9 +203,12 @@
         },
         "receiving tds": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "zinb_mode": "hurdle",
+            "count_dispersion_objective": "crps",
+            "blending": "crps"
         },
         "receiving yards": {
             "dist": "SkewNormal",
@@ -230,9 +236,10 @@
         },
         "sacks taken": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "none",
+            "blending": "crps"
         },
         "targets": {
             "dist": "SkewNormal",

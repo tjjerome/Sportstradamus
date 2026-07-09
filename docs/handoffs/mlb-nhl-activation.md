@@ -1,8 +1,9 @@
 # MLB / NHL activation
 
-> Status: ACTIVE — matrices + serve-wiring done; audit packets + post-D1/D2 grind remain. NO
-> shipping before D1/D2. **3 NHL cells are `shipped: "devel"` pre-D2** (a confirm-loop no-guard
-> slip — the sweep engine's league guard now blocks it) awaiting owner reconciliation (§8).
+> Status: ACTIVE — **D1/D2 = GO** (owner, 2026-07-09: ship + paid backfill authorized,
+> deepest-data path). Execution underway: archive book repair → deep matrices → sweep/confirm.
+> The 3 pre-D2 NHL devel flips are reconciled — reverted to withheld (§8); they re-earn via
+> the clean confirm.
 
 ## 1. Mission & money logic
 
@@ -280,11 +281,8 @@ acceptance and kill criteria.
 - cron / production-box changes of any kind — owner-only;
 - two consecutive sessions with no acceptance criterion moving (grind detector).
 
-**OWNER RECONCILIATION PENDING — the 3 pre-D2 NHL `devel` cells.** A confirm-loop run before the
-league guard existed flipped 3 NHL cells `withheld → devel` ahead of D2. No live impact (NHL is
-dark until October) but it breaches the no-ship-before-D2 decision. Owner decides: revert the 3
-flips now, or keep them and let the ~Sep D2 packet ratify. The sweep engine's league guard
-(`model_strategy_confirm._drop_activation_gated`) prevents any recurrence.
+No reconciliation pending — the pre-D2 NHL devel-flip slip is resolved (reverted to withheld,
+pickles pruned, re-earn via confirm; see the status line + §10 ledger).
 
 **PARK AND PIVOT when blocked externally:** append a ledger line with the
 blocking reason, set the status line to `BLOCKED (on: …)`, and point the owner
@@ -315,6 +313,7 @@ at the roadmap v3 §4 swimlane index for the next lane.
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- `2026-07-09 · GO · owner declared D1+D2 GO (ship + 5M-credit Odds API backfill, deepest-data path); 3 pre-D2 NHL devel flips reverted to withheld + pickles pruned (re-earn via confirm). Archive audit: gap 2025-03-28→2026-03-15 both leagues, 2026 = app books only, 2022 + NHL-2023 = klepto seed junk, MLB-2023–2025/NHL-2024–2025 pre-gap real sharp books. Plan: seed cleanup → full-slate backfill (all leagues alt-line enrichment) → 2-season matrices (trim_gamelog ROWS lever) → sweep/confirm · next: backfill (blocked on new Odds API key)`
 - `2026-07-07 · rescoped · activation folded into model_improvement_track.md WS-2 (§6.7). Status QUEUED→ACTIVE (matrices+serve-wiring done; audit packets + post-D1/D2 grind remain). Counts re-derived: MLB 19 all-withheld, NHL 15 (12 withheld + 3 devel). Sweep-engine league guard (_drop_activation_gated + goldens) now blocks any withheld MLB/NHL auto-flip; the 3 pre-guard NHL devel flips flagged for owner reconciliation (§8). Stale "five gates"/"24-16 counts"/model-research-branch text fixed. NHL inherits the R1 Double-Poisson count verdict on activation · next: MLB D1 audit packet (§3.2 book-honesty repair is the critical path)`
 - `2026-07-07 · wired · MLB+NHL serve paths (commit 15dc64e): prediction/cli.py prophecize now registers all 5 leagues via one load/update loop (was 3 unrolled NBA/NFL/WNBA blocks); underdog_pickem.py _live_load uses a 5-league tuple. NBA/NFL/WNBA bit-identical, MLB/NHL additive. Ready-not-live: prophecize load+updates MLB/NHL + pulls their book offers every run, but the ship-gate serves nothing until cells ship (all withheld). Dev scripts optimize_comp_weights/evaluate_comp_features still 3-league (offline tooling, left). Gates: ruff clean, integration 24/24 (test_end_to_end drives the loop), golden clean bar the concurrent sweep's stat_meta count · next: training the withheld cells (owner-gated D1/D2)`
 - `2026-07-07 · completed · last 4 MLB cells assembled -> MLB 21/21 (commit 6d1d9e9, matrix-only, no training): brentq guard in _mlb_hits_proportional_ev (missing archived hits EV -> NaN under-prob -> get_ev/brentq raised) + book-less fallback in get_training_matrix (an MLB market with zero archived odds keeps participation rows via market-aware usage: batters-faced for pitcher markets, plateAppearances for hitters; book-quoted cells stay Archived-only) behind is_mlb_pitcher_market helper. Rows: pitches-thrown 1890, pitcher-fantasy-score 1983, hitter-fantasy-score 17260 (all book-less -> median-fallback lines), hitter-fantasy-points-underdog 3524 (real Underdog odds). 3/4 are degenerate-book until real odds land · next: serve-path wiring (underdog_pickem) + training-time decision on the 3 book-less cells`
