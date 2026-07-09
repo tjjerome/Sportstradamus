@@ -207,9 +207,16 @@ def test_run_confirm_mixed_board_routes_withheld_and_shipped(monkeypatch, capsys
     assert "SHIPPED" in out and "SUPERSEDED" in out
 
 
+def test_activation_gate_empty_post_go():
+    """MLB+NHL D1/D2 went GO 2026-07-09 — production gates no league. The guard machinery
+    stays for the next onboarding; the tests below monkeypatch it to stay covered."""
+    assert mc._ACTIVATION_GATED_LEAGUES == ()
+
+
 def test_run_confirm_skips_activation_gated_league(monkeypatch, capsys):
-    """A withheld MLB/NHL board-passer is announced and dropped — never persisted or retrained —
-    while a covered-league candidate in the same run still confirms (D1/D2 owner gates)."""
+    """A withheld board-passer in a gated league is announced and dropped — never persisted or
+    retrained — while a covered-league candidate in the same run still confirms."""
+    monkeypatch.setattr(mc, "_ACTIVATION_GATED_LEAGUES", ("MLB", "NHL"))
     mlb_row = {
         "league": "MLB",
         "market": "total bases",
@@ -240,6 +247,7 @@ def test_run_confirm_skips_activation_gated_league(monkeypatch, capsys):
 
 def test_run_confirm_all_gated_returns_before_backup(monkeypatch, capsys):
     """When every candidate is activation-gated the loop exits before the backup/persist step."""
+    monkeypatch.setattr(mc, "_ACTIVATION_GATED_LEAGUES", ("MLB", "NHL"))
     nhl_row = {
         "league": "NHL",
         "market": "saves",

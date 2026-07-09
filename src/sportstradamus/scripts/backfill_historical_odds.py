@@ -45,6 +45,10 @@ ARCHIVE_DB = Path("archive/archive.duckdb")
 # credit-exhausted run can be re-launched and skip what already landed.
 PROGRESS_PATH = Path("archive/backfill_progress.json")
 
+# creds/keys.json entry funding paid historical fetches; get_props takes the
+# key string itself while get_moneylines takes the whole creds dict.
+HISTORICAL_KEY_NAME = "odds_api_plus"
+
 # Odds API sport keys for the leagues whose player props we archive.
 ODDS_API_SPORT_KEYS = {
     "NFL": "americanfootball_nfl",
@@ -151,7 +155,12 @@ def _probe(apikey, props, league, sport_key, dates, snapshot_hour):
     for d in dates:
         click.echo(f"  fetching {d} (as-of {_as_of(d, snapshot_hour):%Y-%m-%d %H:%MZ})")
         get_props(
-            archive, apikey, props, date=_as_of(d, snapshot_hour), sport=league, key=sport_key
+            archive,
+            apikey[HISTORICAL_KEY_NAME],
+            props,
+            date=_as_of(d, snapshot_hour),
+            sport=league,
+            key=sport_key,
         )
     click.echo("DRY RUN — per-market book-ev spread:")
     _report_dry_run(archive)
@@ -175,7 +184,12 @@ def _backfill(apikey, props, league, sport_key, dates, snapshot_hour):
                 archive, apikey, date=_as_of(d, snapshot_hour), sport=league, key=sport_key
             )
             get_props(
-                archive, apikey["odds_api_plus"], props, date=_as_of(d, snapshot_hour), sport=league, key=sport_key
+                archive,
+                apikey[HISTORICAL_KEY_NAME],
+                props,
+                date=_as_of(d, snapshot_hour),
+                sport=league,
+                key=sport_key,
             )
         except OddsAPIAuthError as e:
             click.echo(f"STOP (401): {e}")
