@@ -37,7 +37,7 @@ from sportstradamus.prediction.stories import STORIES_VERSION
 # - Context: Avg 5, Avg H2H, Moneyline, O/U, DVPOA, Position (depth-chart label)
 # - Correlations: Corr Same, Corr Opp
 # - Narrative: Why (precomputed "the case" string, prediction/stories)
-# - Stat key: Stat (for history lookups)
+# - Stat key: Stat (for history lookups); Model Version (identity of the model that scored the leg)
 # - Distribution (for PDF/PMF): Dist, CV, Gate, and shape parameters (Model R, Alpha, Sigma, Skew)
 #
 # Dropped internal columns: Model Param (generic workaround), Temperature, Disp Cal, Step,
@@ -73,6 +73,7 @@ _OFFER_KEEP_COLS = [
     "Corr Opp",
     "Why",
     "Stat",
+    "Model Version",
     "Dist",
     "CV",
     "Gate",

@@ -207,6 +207,62 @@ def test_run_confirm_mixed_board_routes_withheld_and_shipped(monkeypatch, capsys
     assert "SHIPPED" in out and "SUPERSEDED" in out
 
 
+def test_run_confirm_skips_activation_gated_league(monkeypatch, capsys):
+    """A withheld MLB/NHL board-passer is announced and dropped — never persisted or retrained —
+    while a covered-league candidate in the same run still confirms (D1/D2 owner gates)."""
+    mlb_row = {
+        "league": "MLB",
+        "market": "total bases",
+        "family": "ZINB",
+        "zinb_mode": "hurdle",
+        "count_dispersion_objective": "pit_ks",
+        "blending_loss_fn": "crps",
+        "ships": True,
+        "slack": 0.04,
+    }
+    board = pd.DataFrame([_sn_row("centered_additive_mean10", "crps", "crps", True, 0.25), mlb_row])
+    meta = {
+        "WNBA": {"AST": _sn_original()},
+        "MLB": {"total bases": {"dist": "ZINB", "shipped": "withheld"}},
+    }
+    monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
+    monkeypatch.setattr(mc, "_backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
+    confirmed = []
+    monkeypatch.setattr(
+        mc, "_confirm_one", lambda m, c: confirmed.append(c["market"]) or ("WNBA", "AST", "SHIPPED", [])
+    )
+
+    mc.run_confirm(board, yes=True)
+    assert confirmed == ["AST"]
+    assert meta["MLB"]["total bases"]["shipped"] == "withheld"
+    assert "ACTIVATION-GATED MLB total bases" in capsys.readouterr().out
+
+
+def test_run_confirm_all_gated_returns_before_backup(monkeypatch, capsys):
+    """When every candidate is activation-gated the loop exits before the backup/persist step."""
+    nhl_row = {
+        "league": "NHL",
+        "market": "saves",
+        "family": "SkewNormal",
+        "normalization": "centered_additive_mean10",
+        "dist_training_loss": "crps",
+        "blending_loss_fn": "nll",
+        "ships": True,
+        "slack": 0.04,
+    }
+    board = pd.DataFrame([nhl_row])
+    meta = {"NHL": {"saves": {"dist": "SkewNormal", "shipped": "withheld"}}}
+    monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
+    touched = []
+    monkeypatch.setattr(mc, "_backup_stat_meta", lambda: touched.append("backup"))
+
+    mc.run_confirm(board, yes=True)
+    assert touched == []
+    out = capsys.readouterr().out
+    assert "ACTIVATION-GATED NHL saves" in out
+    assert "no confirmable candidates" in out
+
+
 def test_run_confirm_ranks_only_never_persists(monkeypatch, capsys):
     """A cell whose only shipping corner is non-persistable is reported and skipped — the loop never
     reaches the backup/persist step.

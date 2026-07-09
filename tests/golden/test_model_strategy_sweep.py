@@ -417,15 +417,84 @@ def test_run_board_mode_warns_missing_data_and_passes_include_shipped(monkeypatc
     monkeypatch.setattr(sweep, "_select_board_cells", fake_select)
     monkeypatch.setattr(sweep, "_corner_count", lambda cells: 12)
     monkeypatch.setattr(
-        sweep, "run_board", lambda cells, out: pd.DataFrame({"league": ["WNBA"], "market": ["AST"], "ships": [False]})
+        sweep,
+        "run_board",
+        lambda cells, out, resume: pd.DataFrame(
+            {"league": ["WNBA"], "market": ["AST"], "ships": [False]}
+        ),
     )
     monkeypatch.setattr(sweep, "_print_board_rollup", lambda b: None)
 
-    sweep._run_board_mode("WNBA", True, "/tmp/board.csv")
+    sweep._run_board_mode("WNBA", True, "/tmp/board.csv", False, False)
     assert captured["incl"] is True
     out = capsys.readouterr().out
     assert "skip WNBA STL: no cached training matrix" in out
     assert "1 skipped (no cached matrix)" in out
+
+
+def _cell_frame(league, market):
+    """A one-row board frame for a cell — the shape ``search_cell`` returns for the run_board tests."""
+    return pd.DataFrame({"league": [league], "market": [market], "slack": [0.1], "ships": [True]})
+
+
+def test_run_board_upserts_per_cell_preserving_other_leagues(monkeypatch, tmp_path):
+    """A ``--league``-scoped board run upserts each cell and leaves foreign-league rows intact
+    (the pre-fix concat-overwrite wiped them)."""
+    out = str(tmp_path / "board.csv")
+    pd.DataFrame({"league": ["NFL"], "market": ["sacks"], "slack": [0.3], "ships": [True]}).to_csv(
+        out, index=False
+    )
+    monkeypatch.setattr(sweep, "search_cell", _cell_frame)
+    monkeypatch.setattr(sweep, "_print_cell_summary", lambda b: None)
+
+    sweep.run_board([("WNBA", "AST")], out=out)
+    board = pd.read_csv(out)
+    assert set(zip(board["league"], board["market"], strict=True)) == {
+        ("NFL", "sacks"),
+        ("WNBA", "AST"),
+    }
+
+
+def test_run_board_resume_skips_cells_already_on_board(monkeypatch, tmp_path):
+    """``resume`` skips a cell already on the CSV (keeping its rows) and only sweeps the new one."""
+    out = str(tmp_path / "board.csv")
+    pd.DataFrame({"league": ["WNBA"], "market": ["AST"], "slack": [0.9], "ships": [True]}).to_csv(
+        out, index=False
+    )
+    swept = []
+
+    def spy(league, market):
+        swept.append((league, market))
+        return _cell_frame(league, market)
+
+    monkeypatch.setattr(sweep, "search_cell", spy)
+    monkeypatch.setattr(sweep, "_print_cell_summary", lambda b: None)
+
+    board = sweep.run_board([("WNBA", "AST"), ("NBA", "FGA")], out=out, resume=True)
+    assert swept == [("NBA", "FGA")]  # the on-board cell was skipped
+    assert set(zip(board["league"], board["market"], strict=True)) == {
+        ("WNBA", "AST"),
+        ("NBA", "FGA"),
+    }
+
+
+def test_cli_board_dry_run_trains_nothing(monkeypatch, tmp_path):
+    """``--board --dry-run`` prints the scope and exits without sweeping a single cell."""
+    from click.testing import CliRunner
+
+    monkeypatch.setattr(
+        sweep, "_select_board_cells", lambda lg, incl: ([("WNBA", "AST")], [])
+    )
+    monkeypatch.setattr(sweep, "_corner_count", lambda cells: 12)
+
+    def boom(*a, **k):
+        raise AssertionError("run_board must not be called on a dry run")
+
+    monkeypatch.setattr(sweep, "run_board", boom)
+    out = str(tmp_path / "board.csv")
+    result = CliRunner().invoke(sweep.main, ["--board", "--dry-run", "--out", out])
+    assert result.exit_code == 0, result.output
+    assert "[dry-run]" in result.output
 
 
 # --- family-aware actionable summary ---------------------------------------------------------

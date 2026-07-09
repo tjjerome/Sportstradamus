@@ -19,7 +19,7 @@ flowchart TD
     G --> H["temperature scaling<br/>fit T on validation Brier"]
     H --> I["diagnostics baked into the model pickle"]
     I --> J["save pickle<br/>data/models/{LEAGUE}_{market}.pkl"]
-    J --> K["report.report → data/training/model_stats.parquet<br/>scorecard.compute_gates → 5 offline ship gates g1–g5"]
+    J --> K["report.report → data/training/model_stats.parquet<br/>scorecard.compute_gates → 6 offline ship gates g1–g6"]
 
     style G fill:#f9d77e,stroke:#d4a017
     style H fill:#f9d77e,stroke:#d4a017

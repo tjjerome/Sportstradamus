@@ -50,6 +50,11 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 _STAT_META = pathlib.Path(str(STAT_META_PATH))
 _CONFIRM_LOG_ROOT = _REPO_ROOT / "research" / "logs" / "confirm"
 _SHIPPED_DEVEL = "devel"
+# MLB/NHL ship only after their owner activation gates (D1/D2 — docs/handoffs/mlb-nhl-activation.md).
+# A board-passing withheld cell in a gated league is announced and skipped, never auto-flipped; on a
+# GO the owner removes the league here in the same PR that ships its first cells. Already-live cells
+# in these leagues still supersession-test (a strategy swap never changes the release surface).
+_ACTIVATION_GATED_LEAGUES: tuple[str, ...] = ("MLB", "NHL")
 # A full-HPO meditate confirm is ~1 h; a large cell can run longer, so a 4 h ceiling keeps a hung
 # run from blocking the loop forever. A timeout is treated as a failure (the cell auto-reverts).
 _CONFIRM_TIMEOUT_S = 4 * 3600
@@ -292,6 +297,21 @@ def _split_shippable(ready: list[dict], meta: dict) -> tuple[list[dict], list[di
     return fresh, shipped
 
 
+def _drop_activation_gated(fresh: list[dict]) -> list[dict]:
+    """Announce and drop withheld candidates in activation-gated leagues — they never auto-ship."""
+    kept = []
+    for c in fresh:
+        if c["league"] in _ACTIVATION_GATED_LEAGUES:
+            click.secho(
+                f"  ACTIVATION-GATED {c['league']} {c['market']} — withheld {c['league']} cells ship "
+                "only after the D1/D2 owner gate; skipping.",
+                fg="yellow",
+            )
+        else:
+            kept.append(c)
+    return kept
+
+
 def _announce_ranks_only(cands: list[dict]) -> None:
     for c in (c for c in cands if c["status"] == "ranks_only"):
         click.secho(
@@ -334,6 +354,10 @@ def run_confirm(board: pd.DataFrame, *, yes: bool = False) -> None:
 
     meta = load_stat_meta(_STAT_META)
     fresh, shipped = _split_shippable(ready, meta)
+    fresh = _drop_activation_gated(fresh)
+    if not fresh and not shipped:
+        click.echo("no confirmable candidates after the activation gate.")
+        return
     _announce_plan(fresh, shipped)
     prompt = (
         f"\nPersist {len(fresh)} withheld config(s) and supersession-test {len(shipped)} live cell(s) "

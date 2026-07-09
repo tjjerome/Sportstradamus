@@ -27,6 +27,10 @@ PREDICTION_LEVEL_COLS = [
     "Temperature",
     "Disp Cal",
     "Step",
+    # Identity of the model that produced this prediction (train-time stamp, or a
+    # synthesized ``legacy.<sha>`` for pre-stamp pickles). WS-1 era-aware live reads
+    # join on it; pre-stamp history rows carry NaN and fall back to the era backfill.
+    "Model Version",
 ]
 
 OFFER_LEVEL_COLS = [

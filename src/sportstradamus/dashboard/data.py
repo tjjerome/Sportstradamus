@@ -35,7 +35,7 @@ from sportstradamus.helpers.io import (
     read_parquet_safe,
     read_user_slips,
 )
-from sportstradamus.history_schema import PREDICTION_KEY
+from sportstradamus.history_schema import PREDICTION_KEY, PREDICTION_LEVEL_COLS
 
 # Column names that differ across league gamelog parquets.
 # Keys: player, date, opp (None if not available), home (None if not available).
@@ -140,7 +140,7 @@ def _load_history_cached(mtime: float) -> pd.DataFrame:
         return history
 
     # Ensure prediction-level columns exist for backward compatibility
-    for col in ["Dist", "CV", "Model Param", "Gate", "Temperature", "Disp Cal", "Step", "Actual"]:
+    for col in [*PREDICTION_LEVEL_COLS, "Actual"]:
         if col not in history.columns:
             history[col] = np.nan
     return history
