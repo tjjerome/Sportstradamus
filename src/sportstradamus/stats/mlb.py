@@ -12,7 +12,6 @@ from time import sleep
 import line_profiler
 import numpy as np
 import pandas as pd
-import requests
 import statsapi as mlb
 from scipy.stats import iqr, norm, poisson
 from sklearn.neighbors import BallTree
@@ -688,22 +687,14 @@ class StatsMLB(Stats):
         }
 
     def update_player_comps(self, year=None):
-        url = "https://baseballsavant.mlb.com/app/affinity/affinity_hittersByHittingProfile_matchScores.csv"
-        res = requests.get(url)
-        filepath = (
-            pkg_resources.files(data)
-            / "player_data/MLB/affinity_hittersByHittingProfile_matchScores.csv"
-        )
-        with open(filepath, "w") as outfile:
-            outfile.write(res.text)
-
-        url = "https://baseballsavant.mlb.com/app/affinity/affinity_pitchersBySHV_matchScores.csv"
-        res = requests.get(url)
-        filepath = (
-            pkg_resources.files(data) / "player_data/MLB/affinity_pitchersBySHV_matchScores.csv"
-        )
-        with open(filepath, "w") as outfile:
-            outfile.write(res.text)
+        """Refresh the Savant affinity CSVs, keeping the cached copy on a bot-block."""
+        for filename in (
+            "affinity_hittersByHittingProfile_matchScores.csv",
+            "affinity_pitchersBySHV_matchScores.csv",
+        ):
+            df = scraper.get_csv(f"https://baseballsavant.mlb.com/app/affinity/{filename}")
+            if not df.empty:
+                df.to_csv(pkg_resources.files(data) / "player_data/MLB" / filename, index=False)
 
     def update(self):
         """Fetch and append new MLB game logs, then trim to the rolling 4-year window.

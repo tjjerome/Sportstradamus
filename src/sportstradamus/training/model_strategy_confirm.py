@@ -50,11 +50,11 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 _STAT_META = pathlib.Path(str(STAT_META_PATH))
 _CONFIRM_LOG_ROOT = _REPO_ROOT / "research" / "logs" / "confirm"
 _SHIPPED_DEVEL = "devel"
-# MLB/NHL ship only after their owner activation gates (D1/D2 — docs/handoffs/mlb-nhl-activation.md).
-# A board-passing withheld cell in a gated league is announced and skipped, never auto-flipped; on a
-# GO the owner removes the league here in the same PR that ships its first cells. Already-live cells
-# in these leagues still supersession-test (a strategy swap never changes the release surface).
-_ACTIVATION_GATED_LEAGUES: tuple[str, ...] = ("MLB", "NHL")
+# Leagues whose withheld cells confirm may never auto-flip: a board-passing cell is announced and
+# skipped until the owner's activation gates (D1/D2) go GO, then the league is removed here in the
+# same PR that ships its first cells. Empty since the MLB+NHL GO (2026-07-09,
+# docs/handoffs/mlb-nhl-activation.md); machinery stays for the next league onboarding.
+_ACTIVATION_GATED_LEAGUES: tuple[str, ...] = ()
 # A full-HPO meditate confirm is ~1 h; a large cell can run longer, so a 4 h ceiling keeps a hung
 # run from blocking the loop forever. A timeout is treated as a failure (the cell auto-reverts).
 _CONFIRM_TIMEOUT_S = 4 * 3600

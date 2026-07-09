@@ -144,6 +144,14 @@ _SERIES_LOOKBACK_DAYS: int = 30
 _SERIES_DEFAULT_GAMES_TO_WIN: int = 4
 _SERIES_FEATURE_COLS = ("SeriesWins", "SeriesLosses", "FacingElimination", "CanClinch")
 
+# trim_gamelog keeps this many most-recent usable player-rows as the training
+# window; rows/day differ wildly per league, so equal rows != equal seasons.
+# Targets ~2 seasons each: NFL ~50k (few games, many players/game), MLB ~95k,
+# NHL ~110k (dense daily slates). Other leagues keep the historical 21,500
+# (~1 season NBA). min(ROWS, usable) self-clamps on shallow gamelogs.
+_TRAINING_WINDOW_ROWS = {"NFL": 50_000, "MLB": 95_000, "NHL": 110_000}
+_TRAINING_WINDOW_ROWS_DEFAULT = 21_500
+
 
 # Columns of the empty per-player feature frame get_stats seeds before populating
 # rows -- and the frame it returns when no requested player has game history.
@@ -2155,8 +2163,8 @@ class Stats:
         )
 
     def trim_gamelog(self):
-        """Trims the gamelog to the most recent 21500 rows of data plus one year."""
-        ROWS = 50000 if self.league == "NFL" else 21500
+        """Trims the gamelog to the league's training-window rows plus one year."""
+        ROWS = _TRAINING_WINDOW_ROWS.get(self.league, _TRAINING_WINDOW_ROWS_DEFAULT)
 
         usable_gamelog = self.gamelog[
             self.gamelog[self.log_strings["usage"]]
