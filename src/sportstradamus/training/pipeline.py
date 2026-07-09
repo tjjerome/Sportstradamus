@@ -1,11 +1,13 @@
 """Per-market training pipeline: data loading, model fitting, calibration, diagnostics."""
 
+import hashlib
 import importlib.resources as pkg_resources
 import json
 import os
 import pickle
 import random
 import warnings
+from datetime import UTC, datetime
 from pathlib import Path
 
 import lightgbm as lgb
@@ -1357,6 +1359,19 @@ def _build_y_proba_raw(B_test, decoded: dict, dist: str, step) -> np.ndarray:
     return np.array([under, 1 - under]).transpose()
 
 
+def _model_version(trained_at: str, opt_params: dict, dist: str, cv: float, step, norm: str) -> str:
+    """Deterministic ``{yyyymmdd}.{norm-slug}.{sha8}`` identity for a trained model.
+
+    ``sha8`` is a sha1 over the sorted repr of the model's stable identity
+    (hyperparams + distribution + cv + step), so re-running :func:`train_market`
+    on the same data and config reproduces the same version. WS-1 joins live
+    reads on this string to attribute predictions to the model that made them.
+    """
+    identity = repr(sorted((*opt_params.items(), ("distribution", dist), ("cv", cv), ("step", step))))
+    sha8 = hashlib.sha1(identity.encode()).hexdigest()[:8]
+    return f"{trained_at[:10].replace('-', '')}.{norm or 'none'}.{sha8}"
+
+
 def _build_filedict(
     *,
     model,
@@ -1388,6 +1403,7 @@ def _build_filedict(
     X,
 ) -> dict:
     """Assemble the model pickle dict. Key order is load-bearing for byte parity."""
+    trained_at = datetime.now(UTC).isoformat()
     return {
         "model": model,
         "step": step,
@@ -1451,6 +1467,10 @@ def _build_filedict(
         "zinb_mode": zinb_mode,
         "is_hurdle": bool(getattr(model, "is_hurdle", False)),
         "expected_columns": list(X.columns),
+        "trained_at": trained_at,
+        "model_version": _model_version(
+            trained_at, opt_params, dist, cv, step, target_normalization
+        ),
     }
 
 

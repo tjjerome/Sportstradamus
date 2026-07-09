@@ -23,12 +23,14 @@ loop (``--confirm``, :mod:`sportstradamus.training.model_strategy_confirm`) pers
 clean full-HPO 5/5 on the official scorecard is what actually ships.
 """
 
+import functools
 import importlib.resources as pkg_resources
 import math
 import pathlib
 import subprocess
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import click
 import optuna
@@ -180,6 +182,8 @@ _BOARD_COLUMNS: list[str] = [
     "dispersion_cal",
     "skew_cal",
     "n",
+    "swept_at",
+    "code_rev",
 ]
 
 # Default output path for the living board — both CLI modes write here unless --out overrides.
@@ -197,6 +201,21 @@ def _cell_family(league: str, market: str) -> str:
             f"{league} {market}: dist {dist!r} is not a swept family; known: {sorted(_FAMILIES)}"
         )
     return dist
+
+
+@functools.lru_cache(maxsize=1)
+def _code_rev() -> str:
+    """Short git SHA of the tree a board run was swept at — attribution stamped onto every row."""
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=_REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "unknown"
 
 
 def _dump_subdir(corner: dict[str, str]) -> str:
@@ -448,6 +467,8 @@ def search_cell(league: str, market: str) -> pd.DataFrame:
         ]
     )
     ranked = board.sort_values("slack", ascending=False, ignore_index=True)
+    ranked["swept_at"] = datetime.now(UTC).isoformat(timespec="seconds")
+    ranked["code_rev"] = _code_rev()
     return ranked.reindex(columns=_BOARD_COLUMNS)
 
 
@@ -507,18 +528,34 @@ def _corner_count(cells: list[tuple[str, str]]) -> int:
     )
 
 
-def run_board(cells: list[tuple[str, str]], out: str | None = None) -> pd.DataFrame:
-    """Search every cell in ``cells``, printing each cell's verdict as it lands; write an
-    incremental CSV after each so an interrupt keeps partial progress. Returns the concatenated
-    board.
+def _board_done_cells(out: str | None) -> set[tuple[str, str]]:
+    """The ``(league, market)`` cells already on the board CSV — what ``--resume`` skips."""
+    if out is None or not pathlib.Path(out).exists():
+        return set()
+    prior = pd.read_csv(out)
+    return set(map(tuple, prior[["league", "market"]].drop_duplicates().to_numpy()))
+
+
+def run_board(
+    cells: list[tuple[str, str]], out: str | None = None, resume: bool = False
+) -> pd.DataFrame:
+    """Search every cell in ``cells``, printing each verdict as it lands and upserting the board CSV
+    per cell so an interrupt keeps partial progress and a ``--league``-scoped run leaves other
+    leagues' rows intact. With ``resume``, cells already on the CSV are skipped and their rows carry
+    through, so a crashed multi-hour run picks up where it stopped. Returns the full board.
     """
     boards: list[pd.DataFrame] = []
+    done = _board_done_cells(out) if resume else set()
+    if resume and out is not None and pathlib.Path(out).exists():
+        boards.append(pd.read_csv(out))
     for league, market in cells:
+        if (league, market) in done:
+            continue
         cell_board = search_cell(league, market)
         boards.append(cell_board)
         _print_cell_summary(cell_board)
         if out is not None:
-            pd.concat(boards, ignore_index=True).to_csv(out, index=False)
+            _upsert_cell(cell_board, out)
     return pd.concat(boards, ignore_index=True)
 
 
@@ -631,8 +668,14 @@ def _print_board_rollup(board: pd.DataFrame) -> None:
     )
 
 
-def _run_board_mode(league: str | None, include_shipped: bool, out: str) -> pd.DataFrame:
-    """Derive the board, warn per cell skipped for a missing training matrix, print the scope, sweep."""
+def _run_board_mode(
+    league: str | None, include_shipped: bool, out: str, resume: bool, dry_run: bool
+) -> pd.DataFrame:
+    """Derive the board, warn per cell skipped for a missing training matrix, print the scope, sweep.
+
+    ``resume`` skips cells already on the board CSV; ``dry_run`` prints the resolved scope (and what
+    resume would skip) then returns without training a single corner.
+    """
     cells, missing = _select_board_cells(league, include_shipped)
     for lg, mkt in missing:
         click.secho(
@@ -644,12 +687,19 @@ def _run_board_mode(league: str | None, include_shipped: bool, out: str) -> pd.D
         raise click.UsageError(
             f"no trainable cells with cached data to sweep{f' in {league}' if league else ''}."
         )
+    done = _board_done_cells(out) if resume else set()
+    todo = [c for c in cells if c not in done]
     scope = f" ({league})" if league else ""
     note = f" · {len(missing)} skipped (no cached matrix)" if missing else ""
+    resumed = f" · {len(done & set(cells))} already on board (resume)" if resume else ""
     click.echo(
-        f"board{scope}: {len(cells)} cells{note} · ~{_corner_count(cells)} deterministic trainings"
+        f"board{scope}: {len(todo)}/{len(cells)} cells to sweep{note}{resumed} "
+        f"· ~{_corner_count(todo)} deterministic trainings"
     )
-    result = run_board(cells, out=out)
+    if dry_run:
+        click.secho("  [dry-run] no corners trained", fg="cyan")
+        return pd.DataFrame(columns=_BOARD_COLUMNS)
+    result = run_board(cells, out=out, resume=resume)
     _print_board_rollup(result)
     return result
 
@@ -686,11 +736,25 @@ def _run_board_mode(league: str | None, include_shipped: bool, out: str) -> pd.D
     help="Skip the --confirm prompt (unattended). No effect without --confirm.",
 )
 @click.option(
+    "--resume",
+    is_flag=True,
+    default=False,
+    help="Board mode: skip cells already on the board CSV and keep their rows — resume a crashed "
+    "multi-hour run instead of re-sweeping from scratch.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Print the resolved scope (cells, ~trainings, what --resume would skip) and exit without "
+    "training a single corner.",
+)
+@click.option(
     "--out",
     type=click.Path(dir_okay=False),
     default=None,
     help="Board CSV path. Defaults to the package data dir "
-    "(data/research/strategy_research_board.csv): --board overwrites it, a single cell upserts.",
+    "(data/research/strategy_research_board.csv): --board upserts per cell, a single cell upserts.",
 )
 def main(
     league: str | None,
@@ -699,6 +763,8 @@ def main(
     include_shipped: bool,
     confirm: bool,
     yes: bool,
+    resume: bool,
+    dry_run: bool,
     out: str | None,
 ) -> None:
     """Operation Ship 75 strategy sweep — a per-cell GridSampler over the cell's family grid, one
@@ -708,16 +774,24 @@ def main(
     out = out or str(STRATEGY_RESEARCH_BOARD)
     pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
     if board:
-        result = _run_board_mode(league, include_shipped, out)
+        result = _run_board_mode(league, include_shipped, out, resume, dry_run)
     else:
         if not (league and market):
             raise click.UsageError("pass --league and --market, or --board")
+        if dry_run:
+            family = _cell_family(league, market)
+            click.secho(
+                f"[dry-run] {league} {market}: family {family} "
+                f"· {math.prod(len(c) for c in _FAMILIES[family].axes.values())} corners",
+                fg="cyan",
+            )
+            return
         result = search_cell(league, market)
         _upsert_cell(result, out)
         _print_cell_summary(result)
     click.echo(f"\nboard: {out}")
 
-    if confirm:
+    if confirm and not dry_run:
         from sportstradamus.training.model_strategy_confirm import run_confirm
 
         run_confirm(result, yes=yes)

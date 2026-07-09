@@ -1,32 +1,44 @@
 # Model Improvement Track
 
-> Status: ACTIVE — Ship-75 rung
+> Status: ACTIVE — live-alignment P1 + standing breadth harvest (Ship-75 feeds D3)
 >
 > **The single home of record for the model improvement track** — the lead lane of
-> [`sportstradamus_roadmap_v3.md`](../sportstradamus_roadmap_v3.md). Every lever, stage,
-> per-league path, validation recipe, and session rule for pushing market cells through the
-> offline ship gates lives here, from the current Ship-75 rung through the D5 decision to the
-> Ship-90 rung.
+> [`sportstradamus_roadmap_v3.md`](../sportstradamus_roadmap_v3.md). Every workstream, lever,
+> per-league path, validation recipe, and session rule for making the market models profitable —
+> live alignment, the standing breadth harvest, MLB/NHL activation execution, family escalation,
+> and ladder/tail calibration — lives here, through the D3/D5 decisions.
 >
 > Consolidated 2026-06-12 from four docs, now archived: `operation_ship_75.md`,
 > `operation_ship_90.md`, `feature_improvement_plan.md`, `handoffs/model-track.md`
 > (see [`../archive/`](../archive/); pre-consolidation text recoverable via
 > `git show 805cea7:docs/operation_ship_75.md` on devel and
 > `git show 46338ef:docs/operation_ship_75.md` on model-research, whose operating-loop
-> refinements are folded in below). Three companions stay canonical and are **not** restated
+> refinements are folded in below). Reworked 2026-07-07 to the profit-first workstream layout
+> (owner reframing; supporting briefs
+> `/tmp/researcher_{count_family,continuous_family,copula_stage0,sweep_ux_versioning}.md`).
+> Three companions stay canonical and are **not** restated
 > here: [`../ship_gate.md`](../ship_gate.md) (gate thresholds — owner-only),
 > [`../operation_ship_references.md`](../operation_ship_references.md) (research verdicts,
-> citations [1]–[71], commit refs), and the roadmap (program index, other lanes, deferred
+> citations, commit refs), and the roadmap (program index, other lanes, deferred
 > register).
 
 ## 1. Mission & money logic
 
-**Get ≥ 75% of each covered league's markets past the six offline ship gates (g1–g6) in
-[`training/scorecard.py`](../../src/sportstradamus/training/scorecard.py), then take the
-Ship-90 rung when gate D5 fires.** This is the lead lane: calibrated full predictive
-distributions are the input every decision engine consumes, breadth is the number of +EV
-opportunities per slate, and Gate-4 PIT-KS calibration *is* alt-line pricing accuracy. Nothing
-downstream out-earns its marginals.
+**Make the served models money: beat the DFS apps (Underdog, Sleeper) and books mispriced
+against consensus, live, with calibrated full predictive distributions.** This is the lead lane:
+calibrated distributions are the input every decision engine consumes, and Gate-4 PIT-KS
+calibration *is* alt-line pricing accuracy — the alt-line/Ladders/Rivals surfaces where the
+profit concentrates. The six offline ship gates (g1–g6 in
+[`training/scorecard.py`](../../src/sportstradamus/training/scorecard.py)) certify
+**deployable**; the live Gate-2 soak certifies **profitable**; the live evidence says the
+deployable→profitable gap — selection, sizing, benchmark alignment — is now the binding
+constraint (§3.3, §6.10). Breadth stays instrumented (targets below) because breadth is the
+number of +EV opportunities per slate and the D3/D5 gate input — but it is an input, not the
+goal. Work is ordered by payoff-to-effort per the §6 workstream table; individual levers are
+expected to fail, and every workstream carries pre-written escalation branches.
+
+Breadth targets (D3/D5 inputs; MLB/NHL targets are set by the D1/D2 activation packets —
+[`mlb-nhl-activation.md`](mlb-nhl-activation.md)):
 
 | League | Ship-75 target | Ship-90 target |
 |---|---|---|
@@ -86,10 +98,15 @@ than the line alone. A tie passes — that is the entire point. It follows that:
 | Fact | Canonical home |
 |---|---|
 | Gate thresholds g1–g6, Gate-2, S1–S3, tighten/loosen | [`../ship_gate.md`](../ship_gate.md) |
+| Gate-2 live-soak thresholds (n, book-BSS, precision) — owner-only | [`graduation.py`](../../src/sportstradamus/training/graduation.py) |
 | Release surface per cell | `stat_meta.json` `shipped` (git carries flip history) |
 | Per-cell gate numbers | `data/training/model_stats.csv` (mirror of the parquet) |
+| Sweep board (per-cell best corner + gate slacks) | `data/research/strategy_research_board.csv` |
+| Live telemetry / recorded picks / graduation | `data/runtime/*.parquet` + `poetry run check-graduation` |
+| Served-offer snapshots the dashboard reads | `data/runtime/{current_pickem,current_offers,history}.parquet` |
+| Product-payout rules (Rivals, Ladders, multipliers) | the decision lanes (`strategies/`, `books.py`), **not** this track |
 | Lever stack, stages, per-league routing, session rules | **this doc** |
-| Research verdicts, citations [1]–[71], commit refs | [`../operation_ship_references.md`](../operation_ship_references.md) |
+| Research verdicts, citations, commit refs | [`../operation_ship_references.md`](../operation_ship_references.md) |
 | Program index, other lanes, decision gates D1–D7, deferred register | [`../sportstradamus_roadmap_v3.md`](../sportstradamus_roadmap_v3.md) |
 | Ship mechanics how-to, package map | `CONTRIBUTING.md` |
 | Session law (gates, subagents, hard rules) | `CLAUDE.md` |
@@ -100,17 +117,42 @@ Numbers drift on every ship and every `meditate`. Per-cell standings are **never
 prose anywhere in this doc; derive them:
 
 ```bash
+# Concurrency guard — a running sweep OWNS stat_meta.json; never meditate or edit it under one
+# (bracket on [m] so pgrep's own command line doesn't self-match)
+pgrep -af "[m]editate|model.strategy.(sweep|confirm)" || echo "no sweep/train running — safe to edit stat_meta"
+
 # What production tracks
 git fetch origin && git log --oneline origin/devel -5
 
 # Shipped counts per league (withheld / devel / main)
 python3 -c "import json,collections; m=json.load(open('src/sportstradamus/data/config/stat_meta.json')); [print(l, dict(collections.Counter(c['shipped'] for c in v.values()))) for l,v in m.items()]"
 
+# Board rollup — cells with a passing corner per league (offline headroom)
+python3 -c "
+import pandas as pd
+b = pd.read_csv('src/sportstradamus/data/research/strategy_research_board.csv')
+best = b.sort_values('slack').groupby(['league','market']).tail(1)
+print(best.assign(pass_=best.ships).groupby('league').agg(passing=('ships','sum'), cells=('market','nunique')))"
+
 # Per-cell gate numbers (g1–g6, pit_ks slack, ship) — rewritten by every meditate
 ls -la data/training/model_stats.csv   # stale ⇒ re-run meditate before trusting
 
 # Lifecycle per (league, market): not-shipped / in-test / graduated / demoted
 poetry run check-graduation
+
+# Recorded live picks (Bet populated) per league — the era-aware WS-1 spine (§6.10)
+python3 -c "
+import pandas as pd
+h = pd.read_parquet('src/sportstradamus/data/runtime/history.parquet')
+p = h[h['Bet'].notna() & h['Actual'].notna() & h['Line'].notna()]
+print('recorded picks per league:', dict(p.groupby('League').size()))"
+
+# Ladder / alt-line accrual (silent breakage compounds — was ~0 rows at the 2026-06 audit)
+python3 -c "
+import duckdb
+con = duckdb.connect('archive/archive.duckdb', read_only=True)
+print('ladder rows:', con.execute('select count(*) from ladder').fetchone()[0])
+print(con.execute('select league, count(*) from ladder group by league').fetchall())"
 
 # Feature-importance hygiene (cells per league, stale rows, active features per cell)
 python3 -c "
@@ -138,8 +180,16 @@ Column dictionary for `model_stats.csv` / `.parquet`: CLAUDE.md §Training stats
 
 ### Volatile product assumptions
 
-None directly — this track prices stats, not app products. App-side payout drift is the
-decision lanes' problem.
+This track prices stats, not app products — but three product-surface facts feed the money
+lens (§1.1) and go stale silently, so verify them at the start of any WS-1/WS-4 session:
+
+- **App coverage** — which apps/markets are actually served today (`current_offers` platform
+  split); a market we model but nobody serves earns nothing.
+- **Sleeper multipliers / Underdog boosts** — the payout curves live in the decision lanes
+  (`books.py`, `strategies/`); a multiplier change moves EV without any model change.
+- **Ladder / alt-line accrual** — the `ladder` archive table must keep filling (the §3 probe);
+  it was ~0 rows at the 2026-06 audit and silent breakage compounds. The right tail those rows
+  price is Gate-4's job (§6.11).
 
 ### 3.1 The gates are trustworthy (audits closed)
 
@@ -166,14 +216,27 @@ also confirmed how sharp the asset is: honest continuous NFL volume lines sit at
 ingredients, not walls. NFL is the hard league because its small samples (≈300–1000 rows/cell)
 make the *don't-regress-the-blend* bar harder to clear — not because any market is unwinnable.
 
-### 3.3 Diagnosis — under-dispersion is the dominant symptom
+The **same repair recipe is MLB's activation gate** (§6.7, WS-2): MLB's archived book prices
+carry the same klepto-era seed, so its cells fail g1 on a degenerate book, not a bad model. The
+audit → Odds API sign-off → `backfill_historical_odds.py` → `inject_backfilled_odds.py` →
+matrix rebuild → re-sweep sequence is the D1 critical path; nothing MLB ships until it grades
+against an honest book.
 
-The 2026-06-03 full-board re-score (every test CSV through `compute_gates`, the exact production
-path) found failure modes overwhelmingly concentrated on Gate 4, pointing one direction: **too
-narrow**. Census of the then-40 withheld cells (evidence snapshot — regenerate from
-`model_stats.csv`, never cite these counts as current):
+### 3.3 Diagnosis — two-sided: offline shape and live alignment
 
-| Primary failure | Count | Routed to |
+Diagnose from both ends now. The offline board says where predictive **shape** is still wrong;
+the era-aware live read says whether the shape that ships actually **makes money** — and the two
+no longer agree.
+
+**Offline (board).** The dominant offline symptom is still Gate-4 under-calibration, and the
+residual no-pass cohort has a known structure: the ZINB count cells over-cover at the NegBin
+variance≥mean floor and the shape-bound SkewNormal cells rail their skew head — the §6.6 family
+escalation, research-done (§3.4) and unbuilt. Regenerate the cohort from the §3 board rollup;
+never cite fixed counts as current. The 2026-06-03 full-board re-score that launched the
+calibration ladder (every test CSV through `compute_gates`, the production path) is preserved as
+the **founding snapshot** — evidence of the shape of the problem, not a live census:
+
+| Primary failure (2026-06-03 snapshot) | Count | Routed to |
 |---|---|---|
 | Gate 4 only (g1/g2/g3/g5 all pass) | 24 | calibration (§6.1) / normalization (§6.2) |
 | Gate 4 + marginal Gate 1 (`ci_hi` 0.007–0.018) | 6 (all NFL) | calibration → features (§6.3) / blend (§6.5) |
@@ -182,8 +245,22 @@ narrow**. Census of the then-40 withheld cells (evidence snapshot — regenerate
 | Gate 1 only / Gate 1+5 (edge) | 2 (WNBA STL; NBA PF) | features (§6.3) |
 | Pass now, un-promoted | 3 (WNBA BLK, FG3M, TOV) | promoted since — free-passer sweep is §6.0 |
 
-The two modeling **heads fail in opposite directions** (Czado-Gneiting-Held 2009) — there is no
-single "widen everything" fix:
+**Live (era-aware) — the benchmarks disagree (WS-1, §6.10).** Reading recent windows rather than
+the 5-month aggregate (which mixes model generations) surfaces a conflict the offline gates can't
+see: recent recorded picks (~last 30 days, WNBA, n≈492 resolved) hit **~64% against the app
+lines**, and even the cells the live soak **demoted** (PTS/REB) hit ~67%, with pick calibration
+monotone and slightly **under**-confident — yet the live Gate-2 soak, which keys on **sharp-book
+BSS** rather than app-line profit, demoted five WNBA cells at scale. Older mixed-era aggregates
+show the opposite tail: weak-edge adverse selection (bottom deciles ~37% vs ~50% predicted). So
+three benchmarks — app-line hit rate (the money), book-BSS (the graduation criterion), and CLV —
+point different ways, and reconciling them is WS-1's job. Two hard constraints on that work:
+Gate-2's thresholds are **owner-only** (findings become a decision packet, never a session edit),
+and there is **no model-version stamp on live rows today** (the `Step` column is line
+granularity), so era attribution must be built (Stage-0) or approximated by the per-cell
+calibration fingerprint until it is.
+
+The two modeling **heads still fail in opposite offline directions** (Czado-Gneiting-Held 2009) —
+there is no single "widen everything" fix:
 
 - **Continuous (SkewNormal)** — *under-dispersed* (PIT U-shaped, central-50 below nominal:
   shipped cells sat at ≈0.44–0.46, withheld ones as low as 0.23–0.38 in the snapshot). Needs
@@ -213,19 +290,25 @@ width fix is fit to a calibration target and guard-railed on g1/g5 (§6.1 go/no-
 
 | Lever | Verdict | Evidence |
 |---|---|---|
+| Strategy sweep + confirm engine (`model_strategy_sweep.py` + `model_strategy_confirm.py`) | **Alive & automated** — `model-strategy-sweep --board --confirm` ranks corners by min-gate slack, walks the best persistable corner through full-HPO meditate, and keeps-on-ship / auto-reverts+prunes. Deterministic ranks, real-HPO ships (§6). Stage-0 hardens it (registry, resume, queue, family axis) | §6 + R4 brief |
+| Forceable distribution family (`dist` via `stat_meta.json`) | **Alive** — `_resolve_dist` reads the cell's `dist` as authoritative input (SkewNormal / ZINB / NegBin); makes family a one-line sweep axis, no code edit per cell. The data-driven mean≥2 / zero-rate rule is now only the fallback | `[[dist_selection_forceable_via_stat_meta]]` |
 | Centered-target normalization (`centered_additive_mean10`) | **Alive & shipping** — out-calibrates `ratio_meanyr` on Gate 4 for several cells the scalar width fix can't reach (run the §3 shipped-counts block; several cells carry it in `stat_meta.json` today). The old P1 "dead" call judged it as a *mean-compression* fix under the pre-PIT-KS gate — superseded | refs §3 + sweep board |
+| Calibrated HP-selection search-gate (Lever-1, `--hpo-selection calibrated`) | **Alive & validated** — Optuna selects on CRPS + a PIT-KS penalty; ship-deciding knobs persist per-cell so cron re-fits reproduce them | `[[calibration_hp_selection_lever]]` |
 | `init_score` warm-start baseline | **Dead** — byte-identical to plain NegBin | refs §3 |
 | ZTNB-hurdle likelihood | **Refuted** — incompatible with the derived-π decode; would regress the shipped hurdle markets | refs §6 |
 | T5 multiplicative factorization (volume × efficiency) | **Killed** — Goodman variance-of-products gives +27% predictive-variance inflation on the priced cell | refs §9 |
-| Family build (CMP / GenPoisson; SHASH / JSU; skew-t) | **On the table — research-gated** (§6.6). Top-decile *mean* compression is family-invariant (the leaf average itself), but a both-directions count family fixes the over-covering count cells NegBin can't, and SHASH/JSU fixes heavy-kurtosis continuous cells | refs §7 |
+| Family build — count wall + shape-bound | **Research done, build unstarted** (§6.6, R1/R2). Count: **exact-normalized Double Poisson** (Efron 1986) — mean-parametrized, both dispersion directions unbounded; verified in-venv (normalizer 1.000000, finite grads). Also found ZINB is a misroute on all 20 count cells — **plain-NB (one stat_meta edit) never tried**, the cheapest lever left. Continuous: **centered-parametrization SkewNormal** — the α-head is frozen at the Fisher singularity live (railed skew_cal on 9–12/12 yards-family corners), SHASH only on pilot evidence for the kurtosis class | R1/R2 briefs; §6.6 |
 | HurdleZINB (per-cell `zinb_mode`) | **Alive & shipped** — 6/8 NBA ZINB markets | refs §4 |
 | Post-hoc mean correction (`roe_mean` / `isotonic_mean`) | **Alive & shipped** — `MEAN_STAGE` in [`posthoc.py`](../../src/sportstradamus/training/posthoc.py); use skeptically (§6.1 Rung A) | refs §8 |
 | Post-hoc probability recalibration (`prob_recal_*`) | **Alive** — `PROB_STAGE` built, available per-cell | posthoc.py |
 | Post-hoc scale/dispersion (joint `(c, skew_cal)` vs PIT-KS) | **Shipped** — route 1a-hybrid; Levi closed-form σ-scaling is a dead end (diverges 5–7000× on skewed cells) | §6.1 Rung B |
-| Player-level features (expanding-mean, EB-shrunk, opp-defense) | **Alive, unbuilt** — RANK 2/3 in the breadth verdict; §6.3 M-1 | refs §8 |
+| Player-level features (expanding-mean, EB-shrunk, opp-defense) | **Alive, unbuilt — narrowed** (§6.3 M-1). Pilots WNBA STL + NBA PF; NFL volume cells are **not** feature-starved (485 candidate cols) — their negative BSS is target-shape, not features, so NFL runs 1–2 falsification pilots only, routing the rest to §6.6/§6.1 | `[[nfl_volume_cells_feature_mature]]` |
 | Per-position model split (NFL, T11) | **Alive, on the table** — a live lever now, not held for Ship-90 | refs §9 |
-| Context-conditioned book `cv` scale law (Fitting-half, no-ladder) | **Refuted** — 0% out-of-sample book-PIT-KS gain on 45/45 cells (the context slope fits to 0); same class as `ratio_projvol`/WS2. The book CDF *is* mis-shaped (≈30/45 fail a book-only PIT-KS, magnitudes directional per the `EV`≠`ev_b` caveat) but is decoupled from the served gate at the CRPS-fit `w≈0.90` ⇒ both a standalone book rebuild and the Pooling-half blend rebuild are NO-GO (next row); residual routes to §6.6/§6.1 | audit brief `/tmp/researcher_book_distribution.md`; §10 2026-06-26 |
-| Pooling-half blend-structure rebuild (BLP + decoupled location/shape) | **Refuted (this cohort)** — a two-structure honest-OOS probe (12 SkewNormal cells, 8 folds): decoupled (A) is ill-posed (PIT-KS-fit overfits location, CRPS-fit explodes PIT-KS — no common feasible region; EMOS/NGR fits by CRPS, never PIT-KS); BLP (B) is a wash (cohort-median OOS ΔKS ≈ 0; single-fold wins evaporate on resampling — `[[deterministic_ab_g4_oversell]]`; the lone g4-failer rescued 0/8). At `w≈0.90` the served predictive is already calibrated ⇒ no decalibration for the beta wrapper to repair; over-wide cells are family/shape-bound → §6.6 / §6.1. Probe-v2 (operator weight-challenge — raw dispersion-freed leg, weight+dispersion jointly refit by CRPS) hardens it: low weights explored (`λ`→0.63, `w_mix`→0.40) but 0/9 OOS gate wins. Re-probe per cohort; pre-committed design in §6.5 if reopened | probe brief `/tmp/researcher_blp_pooling.md`; §10 2026-06-26 |
+| TabPFN / tabular foundation model | **Deferred backlog** — potential prior-data-fit alternative to per-cell GBDT; not researched, not scheduled; parked until the family and live-alignment lanes resolve | roadmap deferred register |
+| Shaped-book leg in the served blend (WS2) | **Split verdict** — GO as a **book-only fallback** leg (shipped, WS1/WS3/WS4 kept), NO-GO **inside the served blend** (co-fit drives the shape weight to the floor; worsens g4). Never re-add to the blend without new evidence | `[[ws2_settling_split_verdict]]`, `[[book_skew_shape_borrow_refuted]]` |
+| Whole-CDF isotonic-PIT recal on count cells (Rung-C-on-count) | **Dead** — the monotone CDF map degrades low-mean count cells; Rung C ships on continuous cells only (PA), count residual routes to §6.6 | `[[rung_c_whole_cdf_recal]]` |
+| Context-conditioned book `cv` scale law | **Refuted** — 0% OOS book-PIT-KS gain (45/45; slope fits to 0). Book CDF is mis-shaped but decoupled from the served gate at `w≈0.90` ⇒ standalone book rebuild NO-GO | `[[book_distribution_audit_nogo]]`; refs |
+| Pooling-half blend rebuild (BLP + decoupled location/shape) | **Refuted (this cohort)** — decoupled (A) ill-posed, BLP (B) a wash (OOS ΔKS≈0); at `w≈0.90` nothing for the wrapper to repair; over-wide cells are family/shape-bound → §6.6. Re-probe per cohort; design in §6.5 | `[[pooling_half_blp_nogo]]`; refs |
 
 ## 4. Locked decisions
 
@@ -236,6 +319,16 @@ width fix is fit to a calibration target and guard-railed on g1/g5 (§6.1 go/no-
   don't hold ships for batches.
 - Standing — new external data is free sources only; all five leagues get equal feature-effort
   budget (refinement for NBA/WNBA/NFL, foundation parity for MLB/NHL).
+- 2026-07-07 — mission reframed profit-first: beat the DFS apps and mispriced books **live** with
+  calibrated distributions; calibration is the product; breadth is a D3/D5 input, not the goal.
+  Live alignment (§6.10, WS-1) is Priority 1.
+- 2026-07-07 — MLB and NHL activation is folded into this track (WS-2, §6.7/§6.9); no MLB/NHL
+  cell ships before its owner gate (D1/D2 — [`mlb-nhl-activation.md`](mlb-nhl-activation.md)).
+- 2026-07-07 — a Fable **Stage 0** cleans the sweep/confirm engine and builds structure (corner
+  registry + family axis, resume/queue, version stamping, new-family scaffold, this doc rework)
+  before any Sonnet grunt work; the execution queue after it is Sonnet-sized.
+- 2026-07-07 — research for this rework was done by Fable and folded in before the doc edits;
+  standing research-first still binds every distribution-family / dispersion build (§7, §8.2).
 
 **Conflict order:** command output > `CLAUDE.md` / `CONTRIBUTING.md` > this doc > roadmap v3.
 If command output contradicts prose here, the output wins — fix the doc in place (minor) or stop
@@ -243,13 +336,20 @@ and ask (material).
 
 ## 5. Module footprint & canonical paths
 
-`sportstradamus.training` (pipeline, scorecard, report, calibration, strategy driver),
-`sportstradamus.stats` (feature columns), `data/config/{stat_meta.json, ship_config.json}`,
-`tests/golden/`. Prediction-side edits only via §7.3.
+Breadth / family / calibration work: `sportstradamus.training` (pipeline, scorecard, report,
+calibration, `model_strategy_sweep.py` + `model_strategy_confirm.py`), `sportstradamus.stats`
+(feature columns), `data/config/{stat_meta.json, ship_config.json}`, `tests/golden/`.
+Prediction-side edits only via §7.3.
+
+WS-1 (live alignment, §6.10) footprint: `strategies/kelly.py` (selection-aware sizing),
+`strategies/profit_sim.py` (replay harness — validate before any code change),
+`data/runtime/*.parquet` (**read-only** — the dashboard's snapshots), and
+`training/graduation.py`. The **Gate-2 thresholds in `graduation.py` are owner-only** — WS-1
+produces decision packets against them, never session edits.
 
 ## 6. Stage plan
 
-### The four axes and the strategy search
+### The four axes and the sweep + confirm engine
 
 A served predictive is built in four independently-swappable stages,
 `normalization → model/loss → blend → calibration`
@@ -260,112 +360,139 @@ A served predictive is built in four independently-swappable stages,
 | **Normalization** (retrain) | `ratio_meanyr`, `centered_additive_mean10`, `centered_additive_eb_meanyr_k10`, `ratio_projvol` | 3 of 4 carry a Gate-4 SkewNormal decode (`scorecard._decode_sn_loc_scale`; EB off the dumped `GlobalMean`) | `ratio_projvol` refuted → §6.9 count offset (§6.2) |
 | **Model/loss** (retrain) | dist-loss `nll`/`crps`; variance / soft-cal regularizer; calibration-constrained HP selection; σ-head stabilization | dist-loss via `--dist-training-loss`; HP selection via `--hpo-selection calibrated`; stabilization via `--stabilization MAD\|L2` (§6.1) | in-training PIT regularizer / decoupled-σ fit (§6.5) |
 | **Blend** (retrain weight + research-gated structure) | blend-loss `nll`/`crps`; `fused_loc` pool; book recovery; BLP wrapper; p_book noise | blend-loss via `--blending-loss-fn` (`fit_model_weight_crps` built); current `fused_loc` pool | density-LOP fix, power de-vig, book recovery, p_book noise, free post-hoc `w`-refit (§6.5); **BLP + decoupled blend probed NO-GO** (§3.4, §10 2026-06-26) |
-| **Calibration** (auto-fit, not searched) | location (`roe_mean`/`isotonic_mean`); scale+shape (`dispersion_cal` + joint `skew_cal`; count PIT-KS retarget); full-CDF (isotonic-PIT / IDR) | location + scale+shape shipped; count PIT-KS retarget via `--count-dispersion-objective pit_ks` (§6.1 Rung B′) | isotonic-PIT / IDR full-CDF recal (§6.1 Rung C) |
+| **Calibration** (auto-fit, not searched) | location (`roe_mean`/`isotonic_mean`); scale+shape (`dispersion_cal` + joint `skew_cal`; count PIT-KS retarget); full-CDF (isotonic-PIT / IDR) | location + scale+shape shipped; count PIT-KS retarget via `--count-dispersion-objective pit_ks` (§6.1 Rung B′); whole-CDF isotonic-PIT recal shipped on **continuous** cells (§6.1 Rung C — PA ships, `[[rung_c_whole_cdf_recal]]`) | Rung-C-on-**count** dead (`[[rung_c_whole_cdf_recal]]`); IDR variant unbuilt |
 
-**The search interface.** The per-market searcher is
-`training/model_strategy_sweep.py` (entry point `model-strategy-sweep`). `--board` searches the covered-league board and appends
-the ranked result to `data/research/strategy_research_board.csv` after each cell (an interrupt
-keeps partial progress); `--league L --market M [--out PATH]` runs one cell. Each corner trains
-one `meditate --deterministic --target-normalization … --dist-training-loss {nll|crps}
---blending-loss-fn {nll|crps} --bypass-withholding`; `--deterministic` pins RNGs and fixed fast
-hyperparameters and writes to a sandbox (`research/models/deterministic/` +
-`data/test_sets/deterministic/`) so a trial never clobbers a production market.
+**The sweep + confirm engine.** One entry point on devel:
+`model-strategy-sweep` (`training/model_strategy_sweep.py`, with
+`training/model_strategy_confirm.py` for the ship half). It replaces the retired
+`model_strategy_driver.py` / `model-research`-branch split — everything is on devel now.
 
-> **Branch asymmetry — check before you start.** The sweep lives on the
-> `model-research` branch only (`ls src/sportstradamus/training/model_strategy_sweep.py`).
-> On `devel` the fallback is manual ranking from `model_stats.csv` (sort withheld cells by
-> min-gate slack / `pit_ks` distance to threshold) plus per-cell `meditate --deterministic`
-> A/Bs via the scorecard CLI. Porting the sweep to devel is a §6.0 task — until it lands,
-> board generation happens on model-research and ships are confirmed wherever the cell will
-> ship from.
+- `--board` sweeps every withheld cell that has cached training data, **both distribution
+  families**, and appends the ranked result to `data/research/strategy_research_board.csv` after
+  each cell (interrupt keeps partial progress); `--league L` narrows it. `--league L --market M`
+  runs one cell and upserts its row. `--include-shipped` also sweeps shipped cells to hunt a
+  better strategy (evaluated by the supersession test below, not the fresh-ship path).
+- Per cell the sweep is an Optuna `GridSampler` over the cell's **family grid** (normalization ×
+  dist-loss × blend-loss × the family's own knobs — `zinb_mode`, `count_dispersion_objective`),
+  exhaustive and deterministic. Each corner trains one `meditate --deterministic … --bypass-
+  withholding` into a sandbox (`research/models/deterministic/` + `data/test_sets/deterministic/`)
+  so a trial never clobbers a production market. `--deterministic` pins RNGs + fast fixed HPs.
+- Each corner is scored by the **honest val-fit→test gate row** — the deterministic dump carries
+  the pipeline's own validation-fit joint calibration, so the ranker calls `scorecard.gate_row`
+  on it, the same code production ships on (no test re-fit; that oversold the screen and was
+  removed in `10306ee`). The objective is negative **min-gate slack**: one scalar, positive iff
+  the corner ships, larger with more headroom across all six gates — "ships, with margin," not
+  Gate 4 alone.
+- `--confirm` then ships end-to-end: for each cell it persists the **best persistable corner** to
+  `stat_meta.json` and runs a full-HPO `meditate`; a clean official **5/5** keeps the flip
+  (`withheld → devel`), anything less **auto-reverts** both `stat_meta.json` and the pickle
+  (prune). `--yes` runs it unattended.
 
-The sweep searches only the **retrain** axes (normalization × dist-loss × blend-loss) as an
-Optuna `GridSampler` grid (≤12 discrete corners, exhaustive and deterministic; the
-`[kind, spec, stage]` `SEARCH_SPACE` flips to TPE the moment a continuous axis lands).
-Calibration is auto-fit per corner — a post-hoc transform fit in milliseconds never sits in the
-training loop; that cost asymmetry is the design's core. The objective is the negative
-**min-gate slack**: a single scalar, positive iff the corner ships, larger with more headroom
-across all six gates at once — it optimizes "ships, with margin," not Gate 4 alone.
+**Persistable-corner rule (why the board's top row isn't always shippable).** Only a corner whose
+knobs *persist* in `stat_meta.json` can be reproduced by the plain server cron: `target_
+normalization`, `posthoc`, `blending`, `dist`, `zinb_mode`, `count_dispersion_objective`, and
+(SkewNormal) `hpo_selection` all persist — but **`--dist-training-loss` does not**, so an
+`nll`-dist corner is **ranks-only**: it can top the board yet silently retrain to the family
+default on the server. Confirm walks *down* the persistable top-K, shipping the first that clears.
 
-Each corner is scored by the **honest val-fit→test gate row**
-(`model_strategy_sweep._score_normalization`): the deterministic dump already carries the
-pipeline's own validation-fit joint calibration, so the ranker calls `scorecard.gate_row` on it —
-the *same* code production ships on. No test re-fit (an earlier build re-fit calibration on test
-rows and oversold the screen; removed in `10306ee`). The driver is a faithful fixed-HP replica of
-the production HPO pipeline; the only differences are fixed hyperparameters and sandbox write
-locations.
+**Deterministic ranks, real-HPO ships — the law.** A `ships=True` board row is a candidate flag,
+never a ship; the val→test discount tips knife-edge cells both ways, so the full-HPO confirm is
+mandatory and a deterministic score is never shipped.
 
-**Nothing is deferred. Every withheld cell and every lever is a live Ship-75 candidate.** The
-old `deferred-90` / "defer" / lever-cap tags are retired — they were per-axis verdicts (almost
-always the calibration axis under a single normalization), and the honest sweep showed cells
-stamped `deferred-90` ship under a *different* normalization. A cell leaves the board **only**
-on matrix-wide exhaustion (§8) or the operator's explicit, documented denominator call.
+**League activation guard.** `--confirm` **never** auto-flips a withheld MLB or NHL cell — those
+ship only after their owner gate (D1/D2, §6.7); a board-passing withheld cell in a gated league
+is announced and skipped (`model_strategy_confirm._drop_activation_gated`). Already-live cells in
+those leagues still supersession-test (a strategy swap never changes the release surface).
 
-**Two caveats on "wire in a new parameter."** (a) **Research-gate** — a parameter that changes
-a *distribution family or dispersion mechanism* needs a `research-analyst` brief before it is
-wired or built (§8.2); a plain knob (a normalization slug, a loss choice) does not.
-(b) **Wiring an axis-value ≠ it sweeps.** A value can sit in `SEARCH_SPACE` yet not sweep
-until its machinery exists, and its cost tier can shift once it does (`blending_loss_fn` carried
-`crps` before `fit_model_weight_crps` existed; building it made it sweepable — on the *retrain*
-tier, because the deterministic dump doesn't carry the pre-blend components a free `w`-refit
-needs). "Wire it in" is sometimes "wire the axis, build the value, decide the tier — then it
-sweeps."
+**Shipped cell with a better corner → supersede, not auto-ship.** `--include-shipped` routes a
+shipped cell through the higher §7.1 bar (S1+S2+S3), never the fresh-ship flip.
 
-### The operating loop (per cell)
+**Nothing is deferred. Every withheld cell and every lever is a live candidate.** The old
+`deferred-90` / lever-cap tags are retired — they were per-axis verdicts under a single
+normalization, and the honest sweep showed such cells ship under a *different* corner. A cell
+leaves the board **only** on matrix-wide exhaustion (§8) or the operator's documented denominator
+call.
 
-The deterministic study only **ranks**; the real-HPO scorecard **ships**. Fixed workflow:
+**Stage-0 hardened the engine (owner requirement — the sweep was a bottleneck run by hand).**
+Landed: the declarative **corner/axis registry** (`FamilySpec` in `model_strategy_sweep.py` —
+grid axes, persist fields, defaults per family); **resumable board runs** (`--resume` with
+per-cell upsert keyed on `(league, market)` — an interrupted cell re-sweeps its corners) carrying
+`swept_at`/`code_rev` columns; `--dry-run` scope preview; and **model-version stamping**
+(`model_version = yyyymmdd.norm-slug.sha8`, train→serve→history→dashboard, plus
+`scripts/backfill_history_eras.py` for legacy rows — the §6.10 era-attribution spine).
+Not built, deferred with WS-3: the confirm **queue manifest** (ETA + outcome journal; per-cell
+logs in `research/logs/confirm/` cover today's need), the automatic archive **snapshot copy** per
+confirm run (a manual `cp` + `SPORTSTRADAMUS_ARCHIVE_DB` is the current recipe), and **family as
+a swept axis** (a new family is one `FamilySpec` literal, but `dist` does not sweep yet).
+**Research-gate still binds** a family/dispersion-mechanism value
+(`research-analyst` brief first, §8.2); a plain knob (normalization slug, loss choice) does not.
+And **wiring an axis-value ≠ it sweeps** — a value can sit in the grid yet not sweep until its
+machinery exists (`blending_loss_fn` carried `crps` before `fit_model_weight_crps` was built).
 
-1. **Board = candidate generator.** `model-strategy-sweep` (or the devel manual fallback above)
-   returns the ranked board, one deterministic train per corner, scored on the honest
-   val-fit→test gate row. A `ships=True` row is a *candidate flag*, never a ship.
+### The operating loop — three manual residues on top of the engine
 
-2. **Carry forward the top-K (2–3) production-reproducible corners — including near-misses.**
-   Include corners that *fail* the deterministic gate by ≤3% of threshold
-   (`min_gate_slack ≥ −0.03`): the val→test discount tips knife-edge cells in *either* direction
-   (a board passer can fail HPO; a board near-miss can clear it). **Reproducible** means the
-   corner survives the server's plain `meditate`: `target_normalization`, `posthoc`, `blending`,
-   and (SkewNormal) `hpo_selection` persist per-cell in `stat_meta.json`, but `--dist-training-loss`
-   does **not** — so for a SkewNormal cell only the family-default `crps` dist-loss is shippable; an
-   `nll`-dist corner can clear the run yet will silently retrain to `crps` on the server. The top board
-   corner is not always the one that survives HPO (evidence: NBA DREB — `eb` topped the board,
-   `mean10` is the corner that shipped), which is why the list is walked, not just its head.
+`--confirm` automates the persist → full-HPO → keep-on-5/5 / auto-revert loop. Three judgment
+calls the automation cannot fully encode still need an operator:
 
-3. **Withheld cell → real-HPO confirm → ship to devel.** Set the corner's
-   `target_normalization`, `posthoc`, and `blending` in `stat_meta.json` **before** the full-HPO
-   `meditate` — `scorecard._resolve_decode_strategy` reads `stat_meta.json`, not the CLI flag,
-   so a stale strategy there yields a spurious Gate-4 miss. Pass the corner's
-   `--target-normalization` / `--blending-loss-fn` flags to match during the confirm. Read the
-   official scorecard (`model_stats.csv`). A clean **5/5** → flip
-   `shipped: "withheld" → "devel"`. Walk down the reproducible top-K, shipping the first that
-   clears; list exhausted ⇒ route the cell to the calibration ladder (§6.1) and record the axis
-   attempt (§8). If the winner is the cell's current default strategy it is a straight confirm
-   (no strategy edit). Knife-edge cells (g4 within ~0.003 of 0.05) are exactly where the
-   val→test discount bites — the confirm is mandatory; never ship the deterministic score.
-   **HP-selection is a confirm-time axis the board cannot see.** The deterministic study fixes one
-   HP set, so it never runs the search `--hpo-selection calibrated` gates on validation PIT-KS
-   (§6.1 Lever 1); the selection policy is therefore orthogonal to the board's
-   normalization pick and decided only here. **Confirm every SkewNormal candidate under `calibrated`
-   first** — it picks the sharpest trial that *clears* Gate-4, so it weakly dominates `loss` on g4 at
-   a small g1-sharpness cost; a clean 5/5 ships with `hpo_selection: "calibrated"` persisted in
-   `stat_meta.json` so the plain cron reproduces the calibrated trial instead of retraining to the
-   sharper, g4-failing one. **If calibrated does not ship** (its wider σ tips g1, or no trial clears
-   g4 and the logged fallback fires), **re-confirm under the default `loss`** and ship that if it
-   clears, leaving `hpo_selection` unset so the cell rides the production default. Neither clears ⇒
-   route to §6.1 Rung C / §6.6. (Worked example — the PA/PR/DREB re-confirm: PR shipped *only* under
-   calibrated, g4 0.0516 → 0.0423, and carries the persisted field; PA was a calibrated no-op
-   — fallback fired, g4 ≈ 0.058 either way — and DREB a 0.0508 near-miss, both held.)
+1. **Near-miss walks.** Confirm the reproducible top-K (2–3), including corners that *fail* the
+   deterministic gate by ≤3% of threshold (`min_gate_slack ≥ −0.03`): the val→test discount tips
+   knife-edge cells in *either* direction (a board passer can fail HPO; a board near-miss can
+   clear it), and the board's top row isn't always the one that survives HPO (NBA DREB — `eb`
+   topped the board, `mean10` is what shipped). List exhausted ⇒ route the cell to the calibration
+   ladder (§6.1) and record the axis attempt (§8).
 
-4. **Incumbent cell with a better corner → supersede.** The higher bar of §7.1 (S1+S2+S3)
-   applies. Sweep the **whole** board, shipped cells included — a shipped cell may have a better
-   corner than the scale-only default it settled for.
+2. **Calibrated-first `hpo_selection` policy (a confirm-time axis the board cannot see).** The
+   deterministic study fixes one HP set, so it never runs the search `--hpo-selection calibrated`
+   gates on validation PIT-KS (§6.1 Lever 1); the selection policy is orthogonal to the board's
+   normalization pick and decided only here. **Confirm every SkewNormal candidate under
+   `calibrated` first** — it picks the sharpest trial that *clears* Gate-4, so it weakly dominates
+   `loss` on g4 at a small g1-sharpness cost; a clean 5/5 ships with `hpo_selection: "calibrated"`
+   persisted in `stat_meta.json` so the plain cron reproduces the calibrated trial instead of
+   retraining to the sharper, g4-failing one. **If calibrated does not ship** (its wider σ tips g1,
+   or no trial clears g4 and the logged fallback fires), **re-confirm under the default `loss`**
+   and ship that if it clears, leaving `hpo_selection` unset so the cell rides the production
+   default. Neither clears ⇒ route to §6.1 Rung C / §6.6. (Worked example — the PA/PR/DREB
+   re-confirm: PR shipped *only* under calibrated, g4 0.0516 → 0.0423, and carries the persisted
+   field; PA was a calibrated no-op — fallback fired, g4 ≈ 0.058 either way — and DREB a 0.0508
+   near-miss, both held.)
+
+3. **Supersede shipped cells (S1+S2+S3).** `--include-shipped` routes a shipped cell through the
+   higher §7.1 bar — a shipped cell may have a better corner than the scale-only default it
+   settled for, but a strategy swap on a live cell needs the incumbent-supersede evidence, not the
+   fresh-ship flip.
 
 Exploration runs always use `meditate --deterministic` (sandboxed writes) with `--market`
 scoping; full-league retrains are expensive — don't run one to answer a one-cell question. Every
 target cell that is withheld needs `--bypass-withholding` or the run silently skips it.
 
-### §6.0 Stage 0 — Bookkeeping & trust (standing + one-time, all small)
+### Workstream priority (payoff-to-effort — the order work is pulled)
 
-Entry: none — most of this recurs.
+Work is pulled by payoff-to-effort, not section number. The stage subsections below hold the
+mechanics; this table is the priority overlay.
+
+| WS | Name | Payoff/Effort | Home |
+|---|---|---|---|
+| WS-1 | **Live alignment** (era-aware profitability, benchmark reconciliation, selection/sizing) | Highest / M | §6.10 |
+| WS-0 | Standing breadth harvest (monthly registry sweep + confirm, free-passer, near-miss walks) | High / Low | §6.0 |
+| WS-2 | MLB (now) + NHL (by Sep) activation | High / M | §6.7 |
+| WS-3 | Family escalation — count wall (Double Poisson) + shape-bound (centered-SN / SHASH) | High / High | §6.6 |
+| WS-4 | Ladder/tail + Rivals difference-pricer + D3 | High / Low-M | §6.11 |
+| WS-5 | Targeted features (M-1), narrowed | Med / M-High | §6.3 |
+
+WS-1 is Priority 1 (§4, 2026-07-07). Breadth (WS-0/WS-3) stays a standing harvest feeding D3/D5;
+it is an input, not the goal (§1).
+
+### §6.0 WS-0 — Standing breadth harvest & bookkeeping (automated, high-payoff, low-effort)
+
+The breadth engine, run on a cadence rather than a campaign. **Cadence:** a registry-driven
+`model-strategy-sweep --board --confirm` monthly and after any lever or data change, plus the
+free-passer sweep below; NFL candidates first (the binding league, §6.9). **Scope guard:** a
+running sweep OWNS `stat_meta.json` — never `meditate` or hand-edit it while one runs (the §3
+concurrency probe). **Counts:** always re-derive from the §3 board-rollup and shipped-counts
+blocks; this section never restates them. Ships flow through the deterministic-ranks / real-HPO-
+ships law and the devel-ship-curator PR.
+
+Entry: none — this recurs.
 
 1. **Free-passer re-score sweep (standing, monthly).** The Gate-4 redefinition was applied as
    demotions only; cells the old gate killed but the new gate passes were never auto-promoted
@@ -407,19 +534,10 @@ Entry: none — most of this recurs.
    shared state so they cannot mask the divergence. **Every later feature batch extends it**
    (the in-file parity-surface extension point) — per §7.2 step 2, a new per-gameday feature
    that does not extend this gate does not ship.
-5. **Pre-register the NFL g1×dispersion experiment (hole #4 — the difference between NFL
-   reaching 10 and reaching 15).** Before/after paired Brier-CI on the five g1+g4 NFL volume
-   cells (attempts, carries, completions, receiving-yards, rushing-yards) under a candidate §6.1
-   scale fit: does calibrating dispersion pull the marginal `ci_hi` (0.007–0.018 at the
-   2026-06-03 snapshot) under 0.005 as a side effect? Run it as soon as a candidate fit exists
-   for one of the five — the answer reorders the NFL queue (§6.9), so measure early, not when
-   NFL stalls. *Registered decision rule:* if ≥3 of 5 cells move `ci_hi` below threshold → NFL
-   path runs through Stage 1 alone; if ≤1 does → pull Stage 3 features and §6.6 per-position
-   forward for NFL immediately.
-6. **Port the strategy sweep to devel (small code PR, separate session).**
-   `model_strategy_sweep.py` is research-branch-only (branch
-   asymmetry note above); porting removes the branch asymmetry and lets devel sessions generate
-   boards. Until then the manual fallback applies.
+The two one-time items that used to live here are resolved: the strategy engine is on devel (no
+more branch asymmetry), and the NFL g1×dispersion question is answered — NFL volume cells are
+feature-mature, their negative BSS is target-shape not dispersion, so they route to §6.6/§6.1
+(`[[nfl_volume_cells_feature_mature]]`), not to a scale-fit side-effect.
 
 ### §6.1 Stage 1 — Calibration axis: the post-hoc ladder (location → scale+shape → full-CDF)
 
@@ -463,8 +581,11 @@ Entry: cell fails g4 (either direction) or g2/g3.
   on count cells (§8.2 open-Q). The count miscalibration is
   *uniform* (over-wide on both central-50 and central-80, 7/7), exactly the regime a single
   scale clears.
-- **Rung C — full CDF (isotonic-PIT / IDR, build, free) — now the recommended fix for the
-  mixed-direction SkewNormal cohort.** The scalar `(c, s)` is the bottom of
+- **Rung C — full CDF (isotonic-PIT / IDR, BUILT & shipped on continuous cells; dead on count) —
+  the recommended fix for the mixed-direction SkewNormal cohort.** Shipped: WNBA PA rides the
+  whole-CDF isotonic-PIT recal; on count cells the monotone map degrades the low-mean lattice, so
+  count is a confirmed dead end there (`[[rung_c_whole_cdf_recal]]`) and its residual routes to
+  §6.6. The scalar `(c, s)` is the bottom of
   an expressiveness ladder: a monotone spline on the PIT (Kuleshov 2018) or isotonic
   distributional regression (Henzi, Ziegel & Gneiting 2021) recalibrates the *whole* predictive
   CDF — the entire alt-line ladder — not just the single-line over-probability
@@ -542,11 +663,12 @@ cells trading g4 for g1 to features (§6.3 — signal, not width); residual *sha
 can't reach by `(c, s)` → normalization (§6.2) and blend (§6.5); family rebuild (§6.6) only on
 matrix-wide exhaustion. Do not pre-tag cells dead.
 
-### §6.2 Stage 2 — Strategy sweep: normalization × loss
+### §6.2 Stage 2 — Normalization axis (reference)
 
-Entry: driver (or fallback) available; cell on the board.
+Entry: cell on the board.
 
-The retrain axes, searched per above. Normalization is **often decisive over calibration**: the
+The normalization axis of the sweep engine above. Normalization is **often decisive over
+calibration**: the
 honest sweep ships moderate/severe cells under `centered_additive_mean10` that no scalar width
 fix reaches — a centered/rate target reshapes the residual so the predictive is calibratable at
 all. The EB / hierarchical-shrinkage strategy (`centered_additive_eb_meanyr_k10`) is built and
@@ -573,25 +695,23 @@ SkewNormal decode. The `proj_*` volume features it divided by are sound (proj-MI
 realized minutes); ignoring their projection uncertainty under-states dispersion ~20–40% (fold the
 volume *distribution*, not its mean, into any future opportunity head).
 
-**Confirm selection — only confirm what can change served state.** The deterministic board ranks
-every cell, but a real-HPO confirm (~1 h each) is spent only where it can move the served set:
-(a) a `withheld` cell whose top *reproducible* corner ships — a net-new ship candidate; (b) a
-shipped (`devel`/`main`) cell whose board-best corner is a *different* persistable config than its
-current one **and** improves it — a supersede candidate (§7.1 S1–S3). **Skip** a shipped cell whose
-board-best corner equals its current config: the served pickle already encodes it, so the confirm
-only reproduces a known ship. Match configs on the persistable axes only (`target_normalization` +
-`blending` + `posthoc`); `--dist-training-loss` does not persist, so treat it as the family default
-(`crps` for SkewNormal) when comparing.
+The confirm-selection economics (only confirm what can change served state; skip a shipped cell
+already on its board-best config; match on persistable axes only) are the engine's `--confirm`
+semantics — see the sweep+confirm spec atop §6.
 
 **Acceptance:** per the operating loop above — official 5/5 on the full-HPO confirm (withheld)
 or S1–S3 (incumbent). **If it fails:** the cell records the normalization axis as tried (§8) and
 routes to features (§6.3) or blend (§6.5).
 
-### §6.3 Stage 3 — Feature batch 1: quick wins + the pre-registered build
+### §6.3 WS-5 — Targeted features (narrowed): quick wins + the pre-registered build
 
-Entry: §6.0 parity harness green. Targets the cells that need *signal*, not width: the NFL
-g1+g4 volume five, WNBA STL, NBA PF — Gate-4 under-dispersion belongs to §6.1/§6.2, and feature
-work complements, never replaces it.
+Entry: §6.0 parity harness green; WS-1 underway. Targets the cells that need *signal*, not width:
+**WNBA STL and NBA PF are the primary pilots.** The NFL g1+g4 volume five are **feature-mature**
+(485 candidate columns already carry game-script, interactions, multi-window recency), so their
+negative BSS is target-shape not missing features (`[[nfl_volume_cells_feature_mature]]`); NFL
+therefore gets **1–2 falsification pilots only**, and the rest of the volume cohort routes to
+§6.6/§6.1. Gate-4 under-dispersion belongs to §6.1/§6.2, and feature work complements, never
+replaces it.
 
 All items follow the §7.2 validation protocol (leakage test → parity → regen → deterministic
 A/B → real-HPO confirm) and the batching policy (features land per-league in batches — one regen
@@ -635,7 +755,11 @@ feature that doesn't carry g1 for an NFL cell escalates to the per-position spli
 the model still can't improve leans harder on the book in the blend — rides the sharp line and
 ships if calibration holds; never "unwinnable."
 
-### §6.4 Stage 4 — Feature batch 2 + the feature-count ablation
+### §6.4 Deferred feature backlog (batch 2 + the feature-count ablation)
+
+Deferred behind WS-1/WS-3/WS-5 — this is the standing reference list of feature levers not yet
+pulled, each reusing WS-5's regen + parity infrastructure. Pull one only when a cell's routing
+(§6.9) points here and the higher-payoff workstreams are underway.
 
 Entry: Stage-3 batch confirmed (its regen + parity infrastructure is reused).
 
@@ -673,217 +797,143 @@ Entry: Stage-3 batch confirmed (its regen + parity infrastructure is reused).
    |ρ| > 0.98 pairs only where one column is derived from the other by construction, and only
    through the standard A/B.
 
-### §6.5 Stage 5 — Structural width fixes: blend rebuild + training-time regularizer (research-gated)
+### §6.5 Stage 5 — Structural width fixes: blend rebuild (CLOSED this cohort — research-gated to reopen)
 
-Entry: a cell where §6.1–§6.3 left the served predictive miscalibrated, or NFL needs the
-blend-side escalation (§6.9). **Structure changes here alter the dispersion mechanism →
-`research-analyst` brief first (§8.2).**
+Entry: a cell where §6.1–§6.3 left the served predictive miscalibrated. **Structure changes here
+alter the dispersion mechanism → `research-analyst` brief first (§8.2).**
 
-**Why the blend is the under-built axis.** `fused_loc`
-([`helpers/distributions.py`](../../src/sportstradamus/helpers/distributions.py)) blends summary
-*parameters*, with five measured immaturities: (1) parameter blend ≠ density pool — the NegBin
-path log-blends `(μ, r)` but a true logarithmic opinion pool multiplies the PMFs pointwise and
-renormalizes (parameter-blending coincides with the LOP only in the Gaussian case, so the
-SkewNormal loc/σ precision-blend is correct, NegBin/ZINB is an approximation wearing the label);
-(2) the book side is a crude symmetric `N(ev_b, (ev_b·cv)²)` with a single per-cell `cv` from
-`stat_calibration.json`, skew forced to 0; (3) skew is a linear shrink (`w·model_skew`); (4) the
-pool can only sharpen, never widen — widening is bolted on afterward as the scalar `c_opt`; (5)
-no noise model on `p_book`. The de-vig (`no_vig_odds`) is proportional, and one-sided lines
-fabricate a flat 6.5% under.
+**Status — both halves probed NO-GO for the current SkewNormal cohort; the blend is not the lever
+at `w≈0.90`.** The full narrative and citations live in the references doc (Ship-75 sweep-era
+verdicts) and memory; the durable conclusions:
 
-**Fitting half — turn one de-vigged point into a distribution. Power de-vig (a) + count-tail reg
-(c) BUILT + committed; the shape-borrow book-skew mechanism (b) was BUILT, A/B-REFUTED, and
-REVERTED** — production books are symmetric (skew=0), as before this track, until real alt-line
-ladder data (WS1) accrues. (a) Replace proportional
-de-vig with the **power (logarithmic) method** — preserves [0,1], handles favourite-longshot
-bias on asymmetric / anytime-TD lines (Clarke, Kovalchik & Ingram 2017); flag cells with
-`|p_over − 0.5| > 0.3` for extra downstream shrinkage. (b) The book *distribution* recovery —
-fix the model's shape `(σ̂, α̂)` / `(θ̂, π̂)` and solve the single location so the model-shaped
-CDF passes through the de-vigged point (the line is a *median*, not a mean — that is why skew
-matters) — was built closed-form (no root-find) with a **non-circular** per-cell skew prior
-(each player's standardized residuals of *realized* outcomes → SkewNormal α, **not** the live
-model row's shape, which would flatter the model in g4 per Ranjan-Gneiting). **A/B-refuted and
-reverted:** the within-player *marginal* residual skew (α≈3–4 on NBA PTS/REB) over-states the
-book's *conditional* skew — which the model already carries — so it shifts the blended mean 8–11%
-and **worsens g4/g2 on every tested cell even at w=0.9** (g4: PTS 0.016→0.063, REB 0.027→0.083,
-MIN 0.031→0.053). The right source is a per-line ladder fit (WS1, once rungs accrue), not the
-marginal residual; until then the book stays symmetric. (c) Count tail case (anytime-TD):
-`λ = −log(1−p)` / NegBin `μ = θ((1−p)^(−1/θ)−1)` are ill-conditioned as p→1 — regularize toward
-the model's `μ̂` and cap `|μ_book − μ̂| ≤ K·SD` (`_sanitize_book_ev`, BUILT + committed).
+- **Built + committed:** power (logarithmic) de-vig (favourite-longshot bias on asymmetric /
+  anytime-TD lines, Clarke-Kovalchik-Ingram 2017) and the count-tail regularizer `_sanitize_book_ev`
+  (caps `|μ_book − μ̂| ≤ K·SD` as p→1).
+- **Fitting half (book-shape rebuild) — REFUTED.** The shape-borrow book-skew mechanism was built,
+  A/B-refuted and reverted (marginal residual skew over-states the book's *conditional* skew;
+  worsens g4/g2 even at w=0.9) — production books stay symmetric until the WS1 ladder accrues
+  (`[[book_skew_shape_borrow_refuted]]`). A standalone book rebuild is decoupled from the served
+  gate at `w≈0.90` and a context-conditioned `cv` scale law is 0% OOS (`[[book_distribution_audit_nogo]]`).
+- **Pooling half (BLP + decoupled location/shape) — REFUTED this cohort** across two probes
+  including an operator weight-challenge (low weights explored, 0/9 OOS gate wins) —
+  `[[pooling_half_blp_nogo]]`. At `w≈0.90` the served predictive is already the model's and
+  near-calibrated, so the beta wrapper has no decalibration to repair; over-wide cells are
+  family/shape-bound → §6.6.
+- The five `fused_loc` immaturities (parameter-blend ≠ density pool; symmetric book; linear-shrink
+  skew; sharpen-only pool; no `p_book` noise) are documented in the references doc.
 
-**The book reconstruction itself is audited and exonerated as a standalone rebuild.** Turning one
-de-vigged point into a full book distribution is genuinely mis-shaped (≈30/45 cells fail a
-book-only PIT-KS — SkewNormal book too narrow, count too wide, the same directions as the served
-heads), but the mis-shape is **decoupled from the served gate** at the CRPS-fit `w≈0.90` (the
-served blend passes ≈15/18 where the book fails; the lone book-dominated cell, NFL attempts
-w=0.05, has served g4 0.214 ≫ book 0.088). A context-conditioned `cv = f(STDYr/MeanYr)` scale law
-is **refuted** (0% out-of-sample on 45/45 — a single point is sufficient for *location* but cannot
-carry *shape*: Dmochowski 2023; Ranjan-Gneiting 2010 Thm 1 puts a mis-shaped input's fix in the
-**pool**, not the input). So the book's mis-shape pointed to the **Pooling half** (probed next,
-below) rather than a standalone Fitting-half rebuild — the only legitimate book-shape source being
-the WS1 ladder, a year+ out; the exoneration is conditional on `w≈0.90`, so a Pooling-half `w`-refit
-that trusts the book more must re-audit at the new weights. **Caveat (recorded 2026-06-26):** the
-audit's `book_calib.py` used the dumped `EV` column as the book mean, but `EV` is the *model* base
-mean ([pipeline.py:1497](../../src/sportstradamus/training/pipeline.py#L1497)); the true `ev_b`
-(recovered from `Odds`) differs by ≈1.3–2.7 points/cell, so the audit's *verdict* stands (a
-more-mislocated book is even less the lever) but its book-only PIT-KS / coverage *magnitudes* are
-directional, not exact. Any future book audit recovers `ev_b` from `Odds`, never reads `EV`. SkewNormal residual after the best constant `cv` is *shape* not
-scale (→ §6.1 Rung C); count over-coverage is the NegBin variance-≥-mean floor (→ §6.6 count
-family, which fixes the book leg for free). Report-only carve-out: a `book_pit_ks` companion to
-`brier_book` (never a gate). Detail: §10 (2026-06-26).
+**Reopen only for a genuinely over-wide cohort at `w<0.9`** (post-§6.6, or NHL/MLB on activation),
+re-probing per cohort — never generalize the NO-GO. **If reopened, the design is settled:** fit
+`(w, α, β)` by **CRPS (+ a PIT-KS hinge), never PIT-KS** (PIT-KS overfits location for the decoupled
+variant and generates the `[[deterministic_ab_g4_oversell]]` for the BLP); bounds `α,β∈[0.5,3]`;
+**ship guard = the raw linear pool `α=β=1` must sit inside the CI** (the fitted beta must strictly
+beat the un-warped mix OOS, else collapse to `α=β=1`, which must itself beat the scalar blend); XOR
+with §6.1 Rung C per cell (both are monotone CDF maps — stacking double-fits the held-out PIT). Do
+**not** substitute a raw *linear* pool (disagreement-driven widening degrades the KS/ECE gates —
+Gneiting & Ranjan 2013), and **co-fit** the book-shape choice with the BLP / learned `w` on one
+held-out objective (Ranjan & Gneiting 2010 Thm 1 — never sequence the two halves).
 
-**The Pooling-half rebuild is probed across both candidate structures and NO-GO this pass.** A cheap
-two-structure honest-OOS probe (reconstruct `F_model` by inverting the precision blend at the
-pickle's `w`, `F_book` from `Odds`; re-blend reproduces the served CDF to 3e-16) scored a **decoupled
-location/shape blend** (A: a free location-trust `λ` toward the book line, dispersion from the model)
-and the **beta-transformed CDF-mixture BLP** (B) against the served incumbent over a 12-cell
-SkewNormal cohort across 8 resampled folds. Both fail. **A is ill-posed:** a PIT-KS-fit `λ` overfits
-the fit-half mean (loc shift 2–7 units, ΔCRPS −0.5 to −3.7, g1 −0.01 to −0.11); fit to CRPS instead
-(the correct EMOS objective, Gneiting 2005) its PIT-KS explodes — the two objectives share no
-feasible region (Gneiting 2007 calibration-vs-sharpness). **B is a wash:** cohort-median OOS ΔKS ≈ 0;
-its best single-fold wins (NFL carries, WNBA REB) flip sign / evaporate on resampling (the
-`[[deterministic_ab_g4_oversell]]` signature), and the lone genuinely g4-failing cell (NFL fantasy
-underdog, g4 0.082) is rescued by neither (0/8). Root cause matches the book audit: at `w≈0.90` the
-served predictive is already the model's and near-calibrated, so the beta wrapper has no
-decalibration to repair (Ranjan-Gneiting's premise unmet), and the over-wide cells are over-wide
-because their *family/shape* is wrong — a pool of a wrong-shape model and a symmetric book cannot
-manufacture the right shape. A follow-up probe closing the *weight* objection (that v1 tested at a
-fixed `w` carrying the current dispersion-cal) — recover the **raw** dispersion-freed model leg (undo
-`dispersion_cal` before inverting the blend; sanity 5e-16, `frac_ok`→~1.0 on the book-heavy cells)
-and re-fit weight *and* dispersion **jointly by CRPS+hinge** — **hardens** the verdict: the joint fit
-explores the low-weight operating points (`λ` to 0.63, `w_mix` to 0.40 on the book-heavy NBA
-RA/PR/AST) but **0/9 cells** clear the gate OOS, and v1's lone fragile positive (NFL targets) reverses
-sign (+0.013 → −0.017) under the correct objective. The weight *can* differ; it does not win.
-**Route the residual to §6.6 (centered-param / count family) + §6.1 Rung C, not the pool.** Detail:
-§10 (2026-06-26).
+**Model/loss adjunct (research-gated, deferred behind §6.1 Lever 1 + Rung C).** The training-time
+variance / soft-calibration regularizer (MMD-to-uniform-PIT, Chung 2021; `CRPS + λ·CumKL(PIT‖U)`,
+Utpala & Rai 2020) is untried, not refuted — but Dheur 2023 finds in-training regularization does
+not beat *post-hoc* on calibration itself, so the free moves (Lever-1 selection, whole-CDF Rung C)
+come first. It is the genuine escalation only for a cell needing a properly-curved σ surface no
+first-order CRPS trial can produce (LightGBMLSS's CRPS path sets the Hessian to 1).
 
-**Pooling half.** (a) Keep the log pool as base operator but fix NegBin/ZINB to a **real density
-LOP** (grid-multiply the PMFs, renormalize). (b) The **beta-transformed linear pool (BLP)**
-wrapper `F^BLP = B_{α,β}(w·F_model + (1−w)·F_book)` (Ranjan & Gneiting 2010) — flexibly dispersive
-(narrows *or* widens), fit **outside** the five gate calculations — and its decoupled location/shape
-cousin are the pre-committed structures, **both probed NO-GO this pass** (above). Revisit only for a
-*genuinely over-wide* cohort at `w<0.9` (post-§6.6, or NHL/MLB on activation), re-probing per cohort
-— never generalize the NO-GO. **If reopened, the design is settled:** fit `(w, α, β)` by **CRPS
-(+ a PIT-KS hinge), never PIT-KS** (PIT-KS overfits location for the decoupled variant and generates
-the `[[deterministic_ab_g4_oversell]]` for the BLP); bounds `α,β∈[0.5,3]`; **ship guard = the raw
-linear pool `α=β=1` must sit inside the CI** (the fitted beta must strictly beat the un-warped mix
-OOS, else collapse to `α=β=1`, which must itself beat the scalar blend); XOR with §6.1 Rung C per
-cell (both are monotone CDF maps — stacking double-fits the held-out PIT). **Do not** substitute a
-raw *linear* pool: its widening is disagreement-driven and degrades sharpness and the KS/ECE gates
-(Gneiting & Ranjan 2013; Hora 2004). **Coupling — do
-not sequence the two halves.** The BLP's beta transform absorbs a misshapen book input (Ranjan &
-Gneiting 2010, Thm 1: a linear pool of calibrated forecasts is necessarily uncalibrated, and the
-beta wrapper is precisely what re-calibrates it), so the book-shape choice (Fitting half) and the
-BLP / learned `w` must be **co-fit on one held-out objective** — a book-input change must not
-presume a later independent pool fit, and a pool rebuild must not presume a frozen book shape.
-(c) Conjugate
-noise on `p_book`: treat `logit(p_book)` as a Gaussian observation on the model's logit-CDF at
-the line, per-cell variance from residual studies → precision weight. (d) Learn `w` by CRPS
-(continuous) / log-score (count), shrunk per-cell toward a global prior ∝ 1/n_cell; never
-hard-code book = truth. (e) Time-varying `w_book` ramp toward close (the de-vigged close is the
-best probability estimate, but at close). The CLV-edge dashboard defers to roadmap v3 §8; the
-weight schedule lives here.
+**Acceptance:** `pit_ks` below threshold with g1 BSS drop ≤ 0.01 and g5 < 0.075, on validation,
+before ship; an inference-path round-trip test for every new served object (§7.3). **If it fails:**
+signal-starved → features (§6.3); genuine heavy tail → family (§6.6).
 
-**Model/loss adjunct (research-gated — dispersion mechanism).** The training-time variance /
-soft-calibration regularizer (untried, not refuted): an MMD-to-uniform-PIT penalty (Chung 2021)
-or held-out variance penalty that widens σ where the model is overconfident — attacking
-under-dispersion at the source. Pick it up if normalization + blend leave a cell overconfident.
-CRPS-stacking the model's own CDF variants across loss × transform via a log / beta-transformed
-pool (never raw linear) is the cheap cousin. Honest caveat for both: LightGBMLSS's CRPS path
-sets the Hessian to 1 (first-order), which is why a properly-curved CRPS head (NGBoost-style)
-is a narrow-use Hail-Mary, not the default.
+### §6.6 WS-3 — Family escalation: count wall + shape-bound (research DONE, build unstarted)
 
-**Why this stays deferred behind §6.1 Lever 1 + Rung C.** The
-in-training calibration-regularization line is real — `CRPS + λ·CumKL(PIT‖U)` (Utpala & Rai 2020,
-arXiv:2002.12860) and Dheur & Ben Taieb 2024's "Quantile Recalibration Training" (arXiv:2403.11964)
-report single-digit-% CRPS for a large PIT gain. But Dheur 2023 (arXiv:2306.02738) finds in-training
-regularization wins the calibration-*sharpness trade-off* yet does **not** beat *post-hoc* on
-calibration itself, and two-stage / decoupled-σ estimation is statistically dominated by joint MLE —
-so the expected value over the *free* moves (Lever-1 selection, which spends zero new training, and
-the free whole-CDF Rung C) is low while the build cost (a custom LightGBMLSS objective with a
-differentiable PIT penalty, or a second library) is high. Exhaust Lever 1 + Rung C per cell before
-funding this; it is the genuine escalation only for a cell that needs a properly-*curved* σ surface
-no first-order CRPS trial can produce.
+Entry: a cell whose cheaper axes are recorded-tried (§8), or a whole cohort the sweep leaves at
+the family ceiling. **This is the main funded build.** The two research questions are answered —
+briefs `/tmp/researcher_count_family.md` (R1) and `/tmp/researcher_continuous_family.md` (R2) —
+so this section carries the *verdicts*, not options. Each family is built against the Stage-0
+distribution scaffold, then **swept via the registry over its residual cohort** (a family is a
+grid axis, not a manual per-cell edit); pilots first, then registry entry → board run. Standing
+research-gate still binds each new family (§8.2) — the R1/R2 briefs discharge it for the two
+below; a third family needs its own.
 
-**Acceptance:** `pit_ks` below threshold with g1 BSS drop ≤ 0.01 and g5 < 0.075, on
-validation, before ship; an inference-path round-trip test for every new served object (de-vig
-method, recovered book params, BLP coefficients — §7.3). **If it fails:** a cell the blend can't
-widen into calibration without a g1 hit is signal-starved → features (§6.3) or normalization
-(§6.2); a genuine heavy tail the BLP can't reach → family (§6.6).
+**Continuous — centered-parametrization SkewNormal (R2 verdict; ~2 sessions, zero serving delta).**
+The headline diagnosis: the trained α-head is **frozen at ~0 on every SkewNormal cell** — raw
+`SN_Alpha ≈ 0` after subtracting `skew_cal`, which **rails at the ±3 clamp on 9–12/12 corners** of
+the yards/fantasy family. That is the α=0 Fisher-information singularity (Arellano-Valle & Azzalini
+2008; Hallin & Ley 2014) live in production; the centered parametrization is the designed fix. New
+distribution class with a closed-form (mean, sd, γ1)→(ξ, ω, α) map, γ1 response `0.9952·tanh`,
+centered seed, per-cell `sn_param` knob; `predict_dist` re-emits direct `loc/scale/alpha` so
+`model_prob`/`fused_loc`/`get_ev`/scorecard are untouched (§7.3 "training-only" — byte-identical
+round-trip test only). Build order: **(0) re-baseline the 5 decode-drift `model_stats` rows first**
+(NFL receptions/targets, WNBA DREB/PA, NBA DREB — g4≈0.46–0.50 are decode-drift artifacts, not
+model failures); (1) centered-SN + **pilots WNBA PA and NFL receptions** (expect PA KS 0.088→0.03–
+0.05); (2) riders on NBA FGA + NFL receiving/rushing-yards (retrains only); (3) **SHASH gated on
+pilot evidence** (3–4 sessions, hand-rolled on the `skew_normal.py` pattern, n≳1000 cells) — the
+**WNBA DREB kurtosis class** (+10.4 z) routes to SHASH, *not* a centered pilot; NFL targets (pure
+kurtosis) to StudentT/SHASH after g5/g6. **skew-t deferred indefinitely** (density embeds t-CDF;
+torch lacks `betainc`; SHASH δ<1 covers the regime). **Kill (per cell, after calibrated-HPO
+confirm):** val PIT-KS gain <15% vs incumbent, or γ1(x) degenerate, or g1 BSS drop >0.01 / g5 ≥0.075
+= no-ship; 0/2 pilots ⇒ cohort → SHASH. Stacking: centered-SN supersedes `skew_cal`'s role but the
+joint (c, s) stays as residual polisher; never carry a Rung-C blob across a family swap; per cell max
+= parametric (c,s) **or** one monotone CDF map, never both (enforced pipeline.py:1730).
 
-### §6.6 Stage 6 — Research-gated escalations: family, hierarchical, per-position
+**Count — exact-normalized Double Poisson (R1 verdict; ~3 build sessions + 1 pilot).** A repo-local
+custom LightGBMLSS distribution mirroring `skew_normal.py` (torch `Distribution` + ~70-line
+`DistributionClass`; autograd supplies grad/hess; no lightgbmlss fork). Natively **mean-parametrized**
+(µ trees move only the mean — the property whose absence broke joint-ZINB) with **both dispersion
+directions unbounded**; verified in-venv (normalizer = 1.000000, finite gradients, V/M 0.36–1.45 at
+target means; the µ-vs-true-mean gap neutralized by exact-series mean decode + Newton inversion).
+**Key finding — ZINB is a confirmed misroute on all 20 count cells:** `_data_driven_dist` escalates
+on raw zero-rate >0.02 but measured zeros ≈ NB-implied on every cell (four are zero-*deflated*), and
+**plain-NB — a one-line stat_meta `dist` edit — has never been tried on any of the 20.** That is the
+cheapest lever in the cohort, now a registry family axis. **Per-cell screen (pre-build):** a
+non-asymptotic zero test under the NB null → route {no-modification → plain-NB; inflation → hurdle;
+**deflation → DP mandatory** (gates can't subtract zeros)}; escalation bar = Dunn–Smyth RQR variance
+<0.70 + Poisson-GBM-tracks-top-decile-while-NB-compresses; then fit {plain-NB, hurdle-NB}×{crps,
+pit_ks} + the DP arm on honest val→test PIT, cheapest passing corner wins, DP must beat the best NB
+corner without g1/g5 regression. **Pilots:** NBA PF (cleanest under-dispersion), WNBA TOV (hurdle+
+pit_ks already pinned — clean A/B), NHL points (low-mean 0.5 stress test). **Kill:** all 3 pilots
+fail honest val→test g4 AND close <50% of the central-50 gap after dispersion cal → family dead for
+the cohort via `supersede_verdict()`, residual routes §6.1/§6.3, no extension to borderline cells.
+Runner-up mean-parametrized CMP and rejected GenPoisson/Gamma-count/Tweedie rationale is in the R1
+brief.
 
-Entry: per-cell, when the cheaper axes are recorded-tried (§8); for NFL, when §6.9's escalation
-fires. **Every family / dispersion item needs a `research-analyst` brief before build (§8.2).**
-Each family swap is a one-field `stat_meta.json` edit + retrain behind `supersede_verdict()`.
+**Small-sample / hierarchical layer (the NFL wall), cheapest-first.** Partial pooling dominates at
+n ≈ 300–1000/group (Gelman & Hill 2007). (a) **EB-shrink the distributional parameters** per player
+toward a per-position mean, cross-validated — stays in the LightGBMLSS stack. (b) **TabPFN v2
+head-to-head** on the small-n cells (Hollmann 2025; ≤~10k rows), recalibrated through the PIT gate —
+try before the full hierarchical build; GBDTs stay the backbone. (c) **Hierarchical-Bayes** only if
+(a)+(b) fall short.
 
-- **Continuous family ladder, escalating expressiveness.** (a) **Centered-parametrization
-  SkewNormal / skew-t** (Arellano-Valle & Azzalini 2008) — a loss-function change that removes
-  the `alpha = 0` Fisher-information singularity at the source (distinct from, complementary to,
-  the post-hoc `skew_cal` patch); try first; fixes the singularity, **not** the tails.
-  (b) **SHASH / Johnson-SU** (Jones & Pewsey 2009) — 4-parameter, separate skew and kurtosis —
-  for heavy-kurtosis cells the centered family leaves too thin. (c) **skew-t / Student-t** for
-  the heaviest tails. **Tweedie / compound-Poisson-Gamma**
-  (Smyth & Jørgensen 2002) with a **`log(volume)` offset** for zero-mass continuous cells (NFL
-  rushing/receiving yards) — the preserved efficiency × opportunity fork after the SkewNormal
-  `ratio_projvol` form was refuted (§6.2: the ratio target manufactures a zero-inflated low-volume
-  tail SkewNormal can't shape, and no dispersion-scale law clears Gate 4). Validate the offset
-  plumbing on `carries` (NB) first; gate on the **low-carry-quartile PIT-KS-max** — the stratum
-  `ratio_projvol` couldn't reach — not just global PIT-KS. Research
-  `/tmp/researcher_projvol_dispersion.md`.
-- **Count family — the structural ceiling.** Over-covering count cells that won't narrow under
-  recalibration (NegBin variance ≥ mean) need a both-directions family: **COM-Poisson** (Sellers
-  & Shmueli 2010; truncate and round-trip-test the infinite `Z(λ,ν)`), **Generalized Poisson**
-  (Harris 2012 — cheaper, no infinite normalizing constant), or **Double Poisson** (Efron 1986).
-  Run a per-cell **plain-NB vs hurdle vs ZINB vs COM-Poisson screen** on the honest val→test
-  PIT; stop defaulting ZINB on cells that aren't genuinely zero-inflated (a ZINB mixture
-  inflates variance to fit zeros a single process explains, feeding the over-coverage). Hurdle
-  already exists per-cell via `zinb_mode`. Re-entry evidence bar from the §7a pre-check
-  (refs §7): build a count family only on a cell that still kills after the cheap fixes AND
-  conditional Dunn–Smyth RQR variance < 0.70 AND a Poisson GBM tracks the top decile while NB
-  compresses.
-- **Small-sample / hierarchical layer (the NFL wall), cheapest-first.** Partial pooling
-  dominates no-pooling and complete-pooling at n ≈ 300–1000/group (Gelman & Hill 2007).
-  (a) **EB-shrink the distributional parameters** (μ, σ, ν, τ) per player toward a per-position
-  mean, cross-validated shrinkage — stays in the LightGBMLSS stack. (b) **TabPFN v2
-  head-to-head** on the small-n NFL/WNBA cells (Hollmann 2025): native full predictive
-  distribution, no per-cell tuning, sweet-spot ≤ ~10k rows; recalibrate through the existing
-  PIT gate; judge on the same honest val→test criterion; try *before* the full hierarchical
-  build. GBDTs stay the backbone (Grinsztajn 2022; McElfresh 2023). (c) **Hierarchical-Bayes**
-  (player ⊂ position ⊂ team) — escalation if (a)+(b) are insufficient. (The multi-task
-  shared-trunk NN defers to roadmap v3 §8.)
-- **Per-position model split (T11, NFL).** Train separate model per (position, market) where
-  eligible-position marginals diverge materially (rushing-yards QB-scramble ~19 vs RB-workhorse
-  ~37); selective, never wholesale — tight receiving stays pooled; min-row guard + fallback to
-  pooled+categorical. Enabled by the Stage-A1.6 position-scoping work (refs §9).
-- **Monotone priors** (`monotone_priors.json`, layered default→league→market) for NFL small-n
-  volume cells — commit only priors with mechanical meaning; a wrong-sign prior is worse than
-  none.
-- **Research-brief-flagged feature items** (the brief settles the leakage / information-boundary
-  design before any build): **C-3 line-movement & book-disagreement features**
-  (`Archive.get_movement()` / `get_ev_history()` exist, never fed to models; brief must
-  pre-register whether g1 gain may come from book echo — the X/B-frame boundary is deliberate —
-  and resolve at `target_at`, never scrape-time; depends on B-5 or a per-feature NaN exemption).
-  **B-5 missing-value semantics** (both fill sites `fillna(0)` — training matrix tail in
-  `base.py`, live fill in `model_prob.py`; exempting a curated subset (H2H, comps, movement) is
-  strictly more expressive but changes every cell's input distribution → brief + per-league
-  deterministic A/B on 2–3 cells first; both files in one PR — parity rule). **L-3
-  injuries/inactives + usage vacuum** (brief must settle report-timestamp leakage —
-  announcement time vs `target_at` — and backfill honesty). **D-4 weather** (brief-note level:
-  Open-Meteo free, NFL/MLB outdoor; train on realized, archive forecasts forward, document the
-  forecast-vs-realized serve skew; needs the M-3 stadium table). **D-5 referee/umpire** (lowest
-  priority; single-cell targets — MLB K/BB umpire zones, NBA PF crew rates — only after the
-  owning league's medium items are exhausted).
+**Per-position model split (T11, NFL)** where eligible-position marginals diverge materially
+(rushing-yards QB ~19 vs RB ~37); selective, min-row guard + pooled fallback. **Monotone priors**
+(`monotone_priors.json`) for NFL small-n volume cells — only priors with mechanical meaning.
 
-### §6.7 Stage 7 — Foundation leagues (MLB / NHL)
+**Research-brief-flagged feature items** (brief settles the leakage / information boundary before
+build): **C-3** line-movement & book-disagreement (`get_movement`/`get_ev_history` exist, resolve at
+`target_at`); **B-5** missing-value semantics (both `fillna(0)` sites, one PR — parity rule); **L-3**
+injuries/inactives + usage vacuum (report-timestamp leakage); **D-4** weather (Open-Meteo, needs the
+M-3 stadium table); **D-5** referee/umpire (lowest priority).
+
+### §6.7 WS-2 — MLB (now) + NHL (by Sep) activation
 
 Entry: matrix/feature builds proceed **now**; training ships only post-D1 (MLB) / post-D2 (NHL)
 — gates owned by [`mlb-nhl-activation.md`](mlb-nhl-activation.md) (data freshness, book
 honesty, GO/NO-GO; not restated here).
 
-MLB/NHL are not "efficient cells with nothing to learn" — they are starved of inputs (raw
+**Reality (re-derive counts from §3).** MLB is in season with **0 cells served**; its board cells
+fail mostly on **g1**, which is the known book-price degeneracy, not a bad model — so **MLB's
+critical path is the book-honesty repair** (§3.2 recipe: audit → Odds API sign-off → `backfill_
+historical_odds.py` → `inject_backfilled_odds.py` → matrix rebuild → re-sweep → **D1 packet**). NHL
+has a few passing corners pre-staged but is **dark until October**, so its **D2 packet lands ~Sep**.
+**No MLB or NHL cell flips before its gate** — the sweep engine's league-activation guard
+(`model_strategy_confirm._drop_activation_gated`) announces and skips any withheld MLB/NHL board
+passer, and the D1/D2 packets (owned by the activation doc) are where the owner removes the league
+from the guard in the same PR that ships its first cells. Kill: unfixable data → a NO-GO packet is
+a valid deliverable.
+
+MLB/NHL are also not "efficient cells with nothing to learn" — they are starved of inputs (raw
 `stat_types`: MLB 13, NHL 14, vs NBA 138; ~100–120 matrix columns vs ~460–480). Closing that
-input gap is this stage:
+input gap is the parity build:
 
 1. **L-1 / D-1 — MLB statcast breadth via pybaseball (the MLB parity centerpiece, XL).**
    Barrel%, exit velocity, xBA/xwOBA, hard-hit%, whiff%, chase%, pitcher
@@ -947,9 +997,13 @@ full §6 ladder is exhausted on every cell — not the case while zero cells are
 
 ### §6.9 Per-league routing
 
-Live counts: §3 block. Per-cell gate numbers and current candidates: `model_stats.csv` + the
-sweep board. What follows is the durable routing — which lever classes plausibly flip which
-cell classes — not a snapshot.
+Read routing from **both** the offline board (§3 board rollup — where predictive shape is wrong)
+and the live lifecycle (`check-graduation` — what actually earns), not counts alone. Per-cell gate
+numbers and current candidates: `model_stats.csv` + the sweep board; live graduation/demotion:
+`check-graduation`. A demotion is a §6.10 (WS-1) input, not automatically a routing verdict — the
+benchmarks disagree (§3.3), so a book-BSS demotion is reconciled there before it reorders a queue.
+What follows is the durable routing — which lever classes plausibly flip which cell classes — not a
+snapshot.
 
 #### NBA — comfortable
 
@@ -971,6 +1025,12 @@ cell classes — not a snapshot.
   board, never an in-sample floor.
 - **Features (§6.3)** on STL (g1 edge). Small-n caveats: half NBA's games — EB-shrunk feature
   variants preferred, affine ROE over isotonic (§7.4.9).
+- **Live-demotion cross-ref (§6.10, WS-1):** the live soak demoted PTS/REB/PA/PR/FGA on 30-day
+  book-BSS, yet recent recorded picks on the *app line* hit ~64–67% including the demoted cells —
+  the benchmark disagreement (§3.3). Do **not** re-route a demoted WNBA cell to a family/feature
+  build on the demotion alone; WS-1 reconciles book-BSS vs app-line profit first (owner packet).
+- **Count-family (§6.6 Double Poisson) / centered-SN** on the shape-bound residual (BLST/FTM/TOV
+  count; DREB/PA shape) once the family lands — the built-lever lane is closed for WNBA at 13/18.
 - Verdict: six of the eight realistic calibration/normalization cells.
 
 #### NFL — the binding league, with a real failure mode
@@ -1007,6 +1067,72 @@ Feature foundations are §6.7 and proceed now; training/shipping is gated on D1/
 ([`mlb-nhl-activation.md`](mlb-nhl-activation.md)). First targets when active: MLB hitter
 volume markets (batting order), Ks later (umpire); NHL goalie SV + skater shots/points.
 
+### §6.10 WS-1 — Live alignment (Priority 1)
+
+The highest-payoff workstream: the offline gates certify **deployable**, but the live evidence
+says the deployable→profitable gap — selection, sizing, and *which benchmark you optimize* — is
+now the binding constraint (§3.3). Read live from recent windows, reconcile the benchmarks, and
+fix selection/sizing in the replay harness before any code change.
+
+Entry: recorded-pick history exists (§3 probe — currently WNBA n≈492). **Footprint (§5):**
+`strategies/kelly.py`, `strategies/profit_sim.py`, `data/runtime/*.parquet` (read-only). The
+**Gate-2 thresholds in `graduation.py` are owner-only** — WS-1's benchmark findings become a
+decision packet, never a session edit.
+
+1. **Era-aware profitability read.** Never aggregate the 5-month history (it mixes model
+   generations). Segment by model era and read recent windows. Era attribution comes from the
+   model-version stamp Stage-0 adds (`model_version = yyyymmdd.norm-slug.sha8`, stamped in
+   `persist.py` → flows to `history.parquet`); until legacy rows carry it, approximate with the
+   per-cell **calibration fingerprint** `(Dist, CV, Temperature, Disp Cal, Step)` + `stat_meta.json`
+   git flip dates (one-shot `scripts/backfill_history_eras.py` → `history_eras.parquet`).
+2. **Benchmark reconciliation (the core finding → owner packet).** Three benchmarks disagree
+   (§3.3): app-line hit rate (the money), sharp-book BSS (the graduation criterion), CLV. The five
+   demoted WNBA cells hit ~67% on app lines while the book-BSS soak demoted them. **Autopsy each
+   demotion** — is Gate-2's book-BSS criterion mis-aligned with app-line profit? — and **re-check
+   weak-edge adverse selection** on the *recorded-pick* era (older mixed-era aggregates showed
+   bottom-decile ~37% vs ~50% predicted). The output is an owner decision packet against the
+   owner-only Gate-2 thresholds, never a session flip.
+3. **Selection/sizing fixes, replay-validated first.** Validate every change in
+   `strategies/profit_sim.py` (replay over resolved history) **before** touching code: an EV
+   threshold by decile, selection-aware shrinkage in `strategies/kelly.py`, a CLV / time-decay
+   discount. Ship the config change through refactoring-specialist + the devel-ship-curator PR.
+
+**Kill:** replay too confounded to adjudicate → a pre-registered **live A/B via the sim-bettor
+ledger** (roadmap D6). A serving-side *mechanism* implicated (not just sizing) → `research-analyst`
+brief first (§8.2 — live serving-distribution changes are research-gated).
+
+### §6.11 WS-4 — Ladder / tail calibration + Rivals + D3
+
+The product-EV surface where calibration pays off directly: alt-line ladders, the right tail, and
+Rivals head-to-heads. Copula research is **done** (R3 brief `/tmp/researcher_copula_stage0.md`).
+
+- **Rivals difference-pricer — the cheap early product win.** Rivals is 2-dimensional; cross-game
+  pairings are independence-correct (edge = the certified marginals alone) and same-game needs a
+  single ρ the **incumbent correlation matrix already supplies at d=2**. Ingestion exists
+  (`books.py` `rival_lines`, payout curve, `"vs."` flip); the only missing piece is a small
+  **P(A−B>k) difference pricer** with push handling. Audit Rivals margin behavior first, then build
+  the pricer — a cheaper early win than full parlay pricing.
+- **Ladder / tail read (query, not build).** The `ladder` archive table is accruing (§3 probe —
+  4863 rows, WNBA-only at plan time; confirm it fills for other leagues as they serve). Stand up a
+  standing tail read on `g4_tail_pit_ks` + central50/80 to watch alt-line pricing accuracy; this is
+  a query over existing gate outputs, not a new build.
+- **Parlay dependence (copula) — R3 verdict.** Gaussian copula default; **t-copula only as a
+  tested branch** (adopt iff pooled exceedance-Spearman clears a simulated Gaussian null in both
+  tails AND pooled pseudo-MLE with one ν per league gives ΔAIC≥10, ν̂≤15 — never per-pair ν). EB
+  shrinkage is **two-level hierarchical in Fisher-z** (team → pair-type mean → 0), not the
+  incumbent's shrink-thin-pairs-toward-zero (a bias against the lane's own edge). Reuse
+  `correlate.py` (`_residualize_gamelog`, the cache, matmul Spearman, `2·sin(πρ_S/6)` remap,
+  `_nearest_psd`). **Census script** `census_parlay_pairs.py` (read-only Sonnet task over the
+  `{LEAGUE}_corr.parquet` caches); **kill rule: a league is viable iff ≥15 fit-eligible pair-types
+  reach N≥300.** PIT source = re-score holdout rows through the production pickle + serving decode
+  (randomized PIT for discrete/hurdle), same-game grouped by (Player, Date). **Stage acceptance:**
+  (1) per-cell randomized-PIT KS p≥0.01 to enter, ≥90% of shipped cells p≥0.05, >30% failing ⇒
+  kill; (2) OOS joint log-lik ≥+0.01 nats/pair vs independence (block-bootstrap CI>0) AND >0 vs
+  incumbent; (3) decile joint-reliability gap ↓≥20% vs incumbent, parlay Brier not worse.
+- **D3 packet** when breadth + the stage-0 copula brief (done) + **sleeper-parity** all exist.
+  Sleeper-parity is a hard D3 blocker serialized with parlay-dependence in the same files
+  ([`parlay-dependence.md`](parlay-dependence.md)) — it **needs owner scheduling** (Risks, §8).
+
 ## 7. Working rules
 
 ### §7.1 The bar — six gates, lifecycle, supersession
@@ -1037,7 +1163,11 @@ CRPS reliability decomposition (Arnold et al. 2024).
 **Lifecycle.** Six offline gates (Gate 1) certify a first ship → `shipped: "withheld" → "devel"`
 (one-line `stat_meta.json` edit; production tracks devel) → 14-day live Gate-2 soak →
 `check-graduation` classifies {not-shipped, in-test, graduated, demoted} → the monthly
-`gate-status` cron promotes graduates to `main` via PR. Demotions flow back the same way.
+`gate-status` cron promotes graduates to `main` via PR. Demotions flow back the same way — but a
+Gate-2 **demotion is a §6.10 (WS-1) input, not automatically a routing verdict**: the soak keys on
+sharp-book BSS while the money is the app line, and the two disagree (§3.3), so reconcile a
+demotion in WS-1 before it reorders a queue. The Gate-2 thresholds in `graduation.py` are
+**owner-only** — a reconciliation becomes a decision packet, never a session edit.
 
 **Supersession (Tier 1).** A *baselined* (already-shipped) cell never re-ships on a fresh 6/6 —
 the candidate must beat the incumbent via `scorecard.supersede_verdict(baseline, candidate)`:
@@ -1182,6 +1312,10 @@ the code before relying on the list.
   scaffolding.
 - **`refactoring-specialist`** runs on every touched Python file before any push / PR / review
   (CLAUDE.md hard rule, five triggers).
+- **A running sweep OWNS `stat_meta.json`.** `model-strategy-sweep --confirm` persists and reverts
+  per-cell strategy fields live; never `meditate`, hand-edit `stat_meta.json`, or start a second
+  sweep while one runs. Check the §3 concurrency probe (`pgrep`) before any training or config
+  edit — a concurrent write races the confirm's revert and can strand a cell mid-flip.
 
 ## 8. Escalation & stop conditions
 
@@ -1216,18 +1350,19 @@ the code before relying on the list.
 **Dispatch `research-analyst` before** (CLAUDE.md research-first; the research-gate hook
 enforces the file-level cases): any §6.6 family/distribution change; any §6.5 blend-structure
 change or training-time dispersion regularizer; §6.6 hierarchical/TabPFN escalation; the
-§6.6-flagged feature items C-3 / B-5 / L-3 (D-4 brief-note level); any hole below before
-betting the plan on it. Plain knobs (normalization slug, loss choice, ordinary features) need
-no brief. To proceed without a brief on a hook-gated edit, write a one-line justification to
-`.claude/.state/research_waiver`.
+§6.6-flagged feature items C-3 / B-5 / L-3 (D-4 brief-note level); **any §6.10 (WS-1) change to a
+live serving distribution or its dispersion — not the sizing/selection config, which is a plain
+knob**; any hole below before betting the plan on it. Plain knobs (normalization slug, loss choice,
+ordinary features, Kelly/selection config) need no brief. The four rework briefs
+`/tmp/researcher_{count_family,continuous_family,copula_stage0,sweep_ux_versioning}.md` discharge
+the gate for WS-3's two families, the copula, and the sweep/versioning build. To proceed without a
+brief on a hook-gated edit, write a one-line justification to `.claude/.state/research_waiver`.
 
 **Open holes:**
 
 - **#0b — Gate-4 baseline hysteresis** (highest priority; owner call). §6.0.2 carries the
   decision packet and the recommendation (ship the scale fit first; hysteresis only if churn
   persists). It gates trust in the ship-incrementally premise.
-- **#4 — do the marginal NFL g1s improve when dispersion is calibrated?** Pre-registered as
-  §6.0.5 with its decision rule. The difference between NFL reaching 10 and reaching 15.
 - **#6 — the block-bootstrap / clustered-g1 backlog.** Test-set CSVs still lack `game_date` on
   combined-stat cells, blocking the player-clustered Gate-1 recheck and a closing-line-value
   gate. The concrete method is CPCV + a player/date embargo (López de Prado 2018) — a
@@ -1250,19 +1385,35 @@ no brief. To proceed without a brief on a hook-gated edit, write a one-line just
   incumbents with the proj column and verify current ship states first.
   [research: `/tmp/researcher_projvol_dispersion.md`]
 - **#9 — do the calibration-aware HP levers (§6.1 Lever 1 / Rung B′ / Lever 4) move the served
-  set, or only re-rank trials that ship/fail together?** Built + opt-in; unanswered until run on
-  real cells. (a) Lever 1 is now the **search-gate** (the objective steers the TPE study toward the
-  calibrated region, not just a top-K re-rank); the open question is the **scale-bound vs shape-bound
-  mix** across the live g4-failing SN cohort — the cheap cov50/cov80 gate-row query decides
-  search-gate-vs-§6.6 ROI before any retrain. Confirm on the scale-bound near-miss WNBA DREB (g4
-  0.0651 → 0.0508 under the old re-rank; the search-gate should close the last 0.001); shape-bound
-  cells (cov ≈ nominal, KS wandering — PA) are a search-gate no-op and route to §6.6. (b) Rung B′'s PIT-KS count objective
+  set, or only re-rank trials that ship/fail together?** Lever 1 **validated** as a per-cell
+  search-gate (`[[calibration_hp_selection_lever]]`); Rung B′ / Lever 4 built + opt-in. (a) The
+  **scale-bound vs shape-bound mix** is now **read** — R2 routed every SN cell by normal-scores z
+  of the gate-matched PIT (`/tmp/researcher_continuous_family.md`): the shape/kurtosis cohort is
+  §6.6-bound (centered-SN / SHASH), the scale-bound residual is the search-gate's. So the cheap
+  cov50/cov80 query is no longer the open question — it is answered per cell in R2's routing table;
+  what remains is executing the confirms. (b) Rung B′'s PIT-KS count objective
   has no sharpness brake — watch g6's over-leg and the g1 acceptance for over-tightening. (c) only
   promote `--stabilization` to a swept axis if MAD/L2 ever wins on ≥1 cell (YAGNI). (d) the
   under-wide-AND-mislocated NFL SkewNormal cells (attempts/carries, central-50 ≈ 0.27/0.34) are out
   of reach for any selection/post-hoc width fix — that defect is signal/family, not width; confirm
   via §6.3 features and/or the §6.9 `log(volume)` offset before spending a calibration lever on
   them. [research: `/tmp/researcher_calibration_hp.md`, `/tmp/researcher_hpo_objective.md`]
+- **#10 — the benchmark disagreement (WS-1, §6.10, highest live priority).** App-line hit rate,
+  sharp-book BSS, and CLV point different ways: recent WNBA picks hit ~64% (demoted cells ~67%)
+  on the app line while the book-BSS soak demoted five cells. Root cause unknown — is Gate-2's
+  book-BSS criterion mis-aligned with app-line profit, or is the app-line hit rate selection-biased
+  (only the picks we bet resolve)? WS-1 autopsies it into an owner packet; the Gate-2 thresholds
+  are owner-only (#12).
+- **#11 — the MLB book-repair cost (WS-2, §6.7).** MLB's g1 failures are the klepto-era book seed,
+  fixable by the §3.2 recipe — but the Odds API spend is unknown until audited and needs owner
+  sign-off, and the D1 activation option decays weekly. Read-only audit first; then the packet.
+- **#12 — Gate-2 criteria are owner-only (standing constraint, not a hole to close).** WS-1 may
+  find the live-soak demotion criterion misaligned with app-line profit; the finding is a decision
+  packet against `graduation.py`, never a session edit (§4, 2026-06-10).
+- **#13 — sleeper-parity is the live D3 blocker (needs owner scheduling).** D3 needs {breadth,
+  the copula stage-0 brief (done), sleeper-parity}. Sleeper-parity is serialized with
+  parlay-dependence in the same files ([`parlay-dependence.md`](parlay-dependence.md)) and has no
+  session owner — the owner must schedule it or D3 cannot fire.
 
 **Resolved (one-liners; detail in [`../operation_ship_references.md`](../operation_ship_references.md)):**
 post-hoc scale moves PIT-KS without breaking g1/g5, but only under the right normalization and
@@ -1274,7 +1425,10 @@ screen oversells the honest val→test gate (nothing ships on an in-sample floor
 is a first-class ship axis, often decisive; the variance regularizer is untried, not refuted; the
 ZINB hurdle-hyperinflation π-cap was considered and parked — `decode_predictive_mean` returns the
 base NB mean `r·p/(1−p)` with the gate `π` separate, so the model-EV winsorize already bounds the
-decoded mean and a high gate cannot hide an inflated μ; the failure mode is not observed live (owner call).
+decoded mean and a high gate cannot hide an inflated μ; the failure mode is not observed live (owner call);
+the NFL g1×dispersion question (old hole #4) is answered — the volume five are feature-mature, their
+negative BSS is target-shape not dispersion, so a scale fit does not pull g1 under threshold and they
+route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]]`).
 
 **STOP and ask the owner when:**
 
@@ -1301,39 +1455,23 @@ decoded mean and a high gate cannot hide an inflated μ; the failure mode is not
   green; extend it to WNBA + NFL before any cross-league lever ship (§7.4.5). Cross-league
   testing policy: smoke (1–2 markets/league) before full verification; a smoke regression is a
   hard stop.
+- Counts re-derived from the §3 blocks (shipped-counts + board rollup + `check-graduation`), never
+  carried forward as prose — a ledger line that cites a count cites the command that produced it.
 - One ledger line appended to §10; status line updated if a stage boundary was crossed.
 - Never push `devel` directly — devel-ship-curator carves ship PRs.
 - Durable non-obvious lesson? Offer a memory capture (CLAUDE.md §Agentic workflow conventions).
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
-- 2026-06-28 · **WS2 book-shape research gate cleared — fit per-cell mean-dependent SkewNormal ENTIRELY in-family; the prior brief's DREB family-swap was an extrapolation artifact.** Brief [`/tmp/researcher_ws2_book_shape.md`]; re-binned `.regen_backup/{NBA,WNBA}_{AST,DREB}.parquet` live. **Corrects the prior WS2 brief** (`/tmp/researcher_book_shape.md`): its "DREB book needs COM-Poisson §6.6" rested on a *linear-extrapolated* skew −1.55 at μ≈6 (DREB tops out μ≈4.26); the **measured** worst DREB conditional skew is −0.63/−0.56 ≪ the SkewNormal bound 0.9953, and an exact `skewnorm(α,loc,scale)` moment-match reproduces the worst bin — so the **book** DREB reconstruction stays SkewNormal (distinct from §10's model-predictive DREB→§6.6 routing; this is the book leg, no model retrain). The real SN-violation is the **opposite end** (low-mean right-skew, AST line 0.5 skew 1.26 ≈ the Poisson(1) floor): clamp `α` + the existing integer PMF correction ([calibration.py:453](../../src/sportstradamus/training/calibration.py#L453)), cost ~1.7pt P(under) vs the **variance** fix's ~22pt (14×). **Form (Q1):** `var=a·μ^b` (Taylor), `b` FREE to cross `var=μ` (DREB b≈0.34 sub-Poisson); **REJECT** NegBin/Gamma `var=μ+kμ²` (k<0 inadmissible on DREB); `γ(μ)` clamped/splined in `[max(δ−1/δ,−0.99),0.99]`, never extrapolate the raw linear. **Binning (Q3, the named top risk):** line-binning is the correct target (the line *is* the book's posterior mean), within/between-player inflation only 5–7% (<15% Mundlak trigger). **Consensus (Q4):** WLS-on-CDF with **inverse-binomial-variance** weights `n/(p(1−p))` + isotonic monotonicity (Breeden–Litzenberger); the `ladder` table is **empty (0 rows vs 19.2M odds)** ⇒ the ladder lift is DEFERRED, WS2-now consensus ≈ today's + the shape shift. **REALITY:** the book-leg/fallback fix is CERTAIN (Cardoso AST u2.5 84.5%→~79%), but the **served-gate** lift is a research bet decoupled at `w≈0.90` ([[book_distribution_audit_nogo]]/[[pooling_half_blp_nogo]]). **Open Q1 — settle BEFORE any build:** co-fit `(shape,w)` over ≥8 folds via the reusable invert-blend A/B harness; require the shaped book to beat the symmetric baseline OOS at the refit `w`, else collapse to constant-cv. Refs [82]–[85] (Azzalini/Taylor/Cobain/Busetti) appended. · next: the Open-Q1 settling experiment, then WS2(c) per-cell shape fit + WS2(a) one-point WLS consensus.
-- 2026-06-27 · **WNBA Ship-75: 7→12/18 on built non-family levers; the un-pulled-lever brainstorm paid where the doc predicted, the rest confirmed §6.6-bound.** Walked the 11 withheld cells cheapest-lever-first (capped at built levers + book-lean, **no §6.6 family work** per scope). **+5 ships:** PR/RA/AST (g6 over-shrink → `centered_additive_mean10` Mean10-anchor antidote; AST stacks calibrated HP-sel + Rung C), OREB (ZINB over-coverage → `--count-dispersion-objective pit_ks` Rung-B′ retarget), FGA (g6 stars 0.898→pass via `posthoc isotonic_mean`, §8.2 hole #7 confirmed; real-HPO **6/6**, g4 0.047, bss +0.145). **Brainstorm (no new families) → 3 un-pulled levers, Tier-1 confirm 1/4:** FGA isotonic_mean **ships**; **Rung-C-on-count REFUTED** — BLST broke g1 (whole-CDF reshape worsens the book-blend non-inferiority), FTM g4 0.0511→0.0523 (wrong way); DREB loss+RungC fixed g4 (0.035) but g5 0.081 stays (calibrated+RungC's 0.0776 was closer) → **shape-bound**. **Built non-family levers now EXHAUSTED on the last 6:** BLST/FTM at the **ZINB variance≥mean floor** (g4 0.056/0.051, can't narrow) → §6.6 count family; DREB/PA **shape-bound** (g4-fix breaks g5) → §6.6 centered-param SN; TOV g4+g5 → §6.6; STL g1 signal-starved → §6.3 features (caps WNBA at 13 — 14 needs §6.6 regardless; deferred). **Code:** `count_dispersion_objective` now persists per-cell (`cli._resolve_cell_knob` + OREB stat_meta field + extended golden pin) so the pit_ks ship reproduces on the warm devel cron instead of darking out; `--count-dispersion-objective` default `crps`→`auto` (mirrors hpo_selection/blending), CLI-help snapshot regen. Gates: refactoring-specialist clean; ruff clean, golden 1937 pass (lone red = pre-existing `test_find_correlation_offer_correlations_real_nba` NBA-correlation fixture, untouched by this WNBA/cli change), integration 24 pass. 5 stat_meta flips + cli.py carved to devel via curator. · next: a focused §6.6 families session (centered-param SkewNormal for DREB/PA, COM-Poisson/count family for BLST/FTM/TOV) + §6.3 STL features — the built-lever lane is closed for WNBA at 12/18.
-- 2026-06-26 · **§6.5 Pooling-half NO-GO HARDENED by Probe-v2 — the operator's weight challenge tested and also fails.** Operator pushed back that v1 scored at a fixed `w≈0.90` carrying the current dispersion-cal, under-testing a *jointly-refit sharper blend* on the book-heavy cells (where v1's reconstruction dropped rows). Probe-v2 recovers the **raw** dispersion-freed model leg (undo `dispersion_cal` BEFORE inverting the blend — re-apply+re-blend sanity **5e-16**; `frac_ok`→~1.0, so the book-heavy NBA AST 0.60→0.99 / NFL carries 0.87→1.00 are now FULLY reconstructed — the drop concern fixed) and re-fits weight AND dispersion jointly by **CRPS+hinge** (the correct retrain objective; the LightGBM model is blend-independent so the raw leg is what a retrain blends). The joint fit DID explore the low-weight regime the operator wanted (`λ_A`→0.63, `w_mix`→0.40 on the book-heavy cells, B discarding the model) and **every one still loses OOS** (dA, dB < 0); freed dispersion shaves KS only on NFL fantasy-underdog (dA +0.023) but A/B still pass **0/6** (shape/family-bound → §6.6/§6.1); v1's lone fragile positive (NFL targets) **reverses sign** (+0.013→−0.017) under CRPS — [[deterministic_ab_g4_oversell]] made explicit; on model-dominated cells the joint fit is actively harmful (NBA PTS dA −0.036, WNBA REB −0.031). Incidental: `c>1` on 9/12 cells (the served predictive RELIES on dispcal-widening — raw model under-dispersed, consistent with the under-dispersion-is-the-disease theme). **0/9 cells produce a robust OOS g4 win — NO-GO confirmed and firmer**, closing the "you didn't test a jointly-refit sharper blend" objection in the record. No production code (probe-only; `scratchpad/blp_v2_*.py`). · next: §6.6 centered-param / count family for the over-wide cohort — the pool is closed, jointly-refit or not.
-- 2026-06-26 · **§6.5 Pooling-half blend-structure rebuild PROBED across both candidate structures → NO-GO on both; routes to §6.6/§6.1.** Operator's design call (a scalar `w` couples location-trust and shape-trust; a CDF-mixture widens, fighting the book's sharp line) reframed the lever as a 2+-param structure decoupling location from shape, then chose "probe both, data decides." Cheap two-structure honest-OOS probe (brief `/tmp/researcher_blp_pooling.md`; `scratchpad/blp_*.py`): reconstruct `F_model` by inverting the `fused_loc` precision blend at the pickle's `w`, `F_book` from `Odds` — **re-blend reproduces the served CDF to 3e-16** (machine epsilon, the WS2 1e-14 bar) on all 11 reconstructable cells; score **(A) decoupled location/shape** (free location-trust `λ`, dispersion from the model) and **(B) beta-transformed CDF-mixture BLP** `B_{α,β}(w·F_model+(1−w)·F_book)` vs the served incumbent over a 12-cell SkewNormal cohort, 8 resampled 50/50 within-test folds. **(A) ill-posed:** a PIT-KS-fit `λ` overfits the fit-half mean (loc shift 2–7 units, ΔCRPS −0.5 to −3.7, g1 −0.01 to −0.11); fit to CRPS instead (the correct EMOS objective, Gneiting 2005 [74]) PIT-KS explodes (NBA AST 0.047→0.47) — the two objectives share no feasible region (Gneiting 2007 [75] calibration-vs-sharpness). **(B) wash:** cohort-median OOS ΔKS ≈ 0; its best single-fold wins (NFL carries +0.018, WNBA REB fail→pass) **flip sign / evaporate** across folds (carries → −0.017 mean, B 6/8 vs serv 8/8 — would REGRESS it; WNBA REB rescue not reproduced) — the [[deterministic_ab_g4_oversell]] signature a third time; the lone genuinely g4-failing cell (NFL fantasy-underdog, g4 0.082) rescued by **neither** (B 0/8). Root cause = the book audit's: at the CRPS-fit `w≈0.90` the served predictive is already the model's and near-calibrated, so the beta wrapper has no decalibration to repair (Ranjan-Gneiting 2010 Thm 1 premise unmet); the over-wide cells are over-wide because their *family/shape* is wrong — a pool of a wrong-shape model and a symmetric book cannot manufacture the right shape. **Routes the cohort to §6.6 (centered-param / count family) + §6.1 Rung C, not the pool.** Pre-committed design recorded (§6.5/§3.4) should a future genuinely-over-wide cohort at `w<0.9` reopen it (fit by CRPS+PIT-hinge never PIT-KS; bounds `α,β∈[0.5,3]`; ship guard = raw pool `α=β=1` in CI; XOR with Rung C). **Caveat surfaced — corrects the book-audit entry below:** that audit's `book_calib.py` used the dumped `EV` column as the book mean, but `EV` is the *model* base mean ([pipeline.py:1497](../../src/sportstradamus/training/pipeline.py#L1497)) — the true `ev_b` (recovered from `Odds`) differs by ≈1.3–2.7 pts/cell; the audit's NO-GO verdict is unaffected (a more-mislocated book is even less the lever) but its book-only PIT-KS / coverage magnitudes are directional, not exact. No production code changed (probe-only; .md doc + refs [74][75]); blend-structure rebuild recorded tried-refuted (§3.4/§8). · next: §6.6 centered-parametrization SkewNormal for the over-wide cohort (NFL fantasy-underdog/carries g4, WNBA DREB) — the binding under-dispersion wall, research-gated; the Pooling half is closed for this cohort.
-- 2026-06-26 · **§6.5 Step 1 book-distribution audit RAN → NO-GO on a standalone book rebuild; redirects to the Pooling-half BLP.** Operator re-sequenced §6.5: audit how one de-vigged point becomes a full book distribution *before* pooling ("don't blend into garbage"). Built the missing book-only-CDF diagnostic (`scratchpad/book_calib.py`, exact scorecard randomized-PIT machinery, all 45 cells); brief `/tmp/researcher_book_distribution.md`. **Verdict = qualified exoneration.** Book IS genuinely mis-shaped — **30/45 fail a book-only PIT-KS**, SkewNormal book too narrow (cov50/80 ~0.51/0.79), count book too wide (~0.81/0.96), the SAME two directions as the served heads — so the suspicion is confirmed at the standalone-CDF level. **But it does not propagate to the served gate:** where the book fails g4 the served blend already passes **15/18** (book-fail∧served-fail=3, book-pass∧served-fail=0), because `model_weight` pins to its 0.90 cap on 17/22 cells (the CRPS `w`-fit rides the model); Spearman(book PIT-KS, served g4)=0.35 SN (n.s.)/0.09 count. The lone book-dominated cell (NFL attempts w=0.05) has served g4 **0.214 ≫ book 0.088** — fixing the book is not the lever even there. **The within-constraint fix is refuted:** a context-conditioned `cv=a+b·(STDYr/MeanYr)` (book-observable only) gives **0% out-of-sample book-PIT-KS gain on 45/45** (optimizer drives b→0) — same failure class as `ratio_projvol` and WS2. Theory agrees: a single point is sufficient for *location* but not *shape* (Dmochowski 2023 [72]); a mis-shaped pool input is the **pool's** problem, the beta wrapper recalibrates it (Ranjan-Gneiting 2010 Thm 1). So the mis-shape is the **Pooling-half BLP's** job (co-fit with `w`), the true shape source is the WS1 ladder (a year+ out) — §6.5 sequencing vindicated, not overturned. SkewNormal post-constant-cv residual is *shape* not scale (→ §6.1 Rung C); count over-coverage is the NegBin variance-≥-mean floor (→ §6.6 count family, fixes the book leg free). Exoneration **conditional on w≈0.90** — a Pooling-half `w`-refit must re-run this audit. No production code changed (audit-only; .md doc + refs [72][73]). Recorded: context-book-cv scale-law tried-refuted (§3.4/§8); `book_pit_ks` report-only diagnostic carved (unbuilt, optional). · next: operator call — build the report-only `book_pit_ks` companion (low-risk, ~1 file), or pivot to the §6.5 Pooling-half BLP (the vindicated move).
-- 2026-06-25 · **NFL §6.1→§6.2 rung RAN + feature audit reframes the volume-cell lever — hole #4 NEGATIVE, `centered_additive_mean10` decisive but real-HPO 5/6, 0 ships.** **hole #4 (§6.0.5) = NEGATIVE:** dispersion calibration does NOT pull the volume cells' g1 `ci_hi` under 0.005 — `carries` full ladder (Lever 1 calibrated + Rung C, both confirmed applied: `pit_recal_blob lam:1.0` in pickle) real-HPO g1 0.0087; deterministic screen 0/5; bss signal-starved (attempts −0.11, completions −0.04, passing −0.12). **§6.1 calibration ladder EXHAUSTED for the g1-passing cells** (`targets`, `fantasy-points-underdog` on `ratio_meanyr`): Lever 1 + Rung C real-HPO = 0/3, g4 floors 0.07–0.13 (val→test discount — Rung C reshapes the val PIT, the test KS keeps the gap). **§6.2 `centered_additive_mean10` = the decisive axis:** deterministic `carries` 6/6 (g1 flips to beat book), `targets`/`fantasy` 5/6; real-HPO **cold-calibrated confirm = 0/3 ship but all 5/6** — `carries` **beats the book at real-HPO** (bss +0.036, g1 ci_hi 0.0039 < 0.005 — was g1+g4+g6-fail under ratio), `targets` **passes g4** (the gate the ratio ladder never cleared); blocking gates split clean — carries/fantasy **g4** (PIT-KS ~0.08 floor, calibrated fallback logged "best 0.0812"), targets **g6** (over-shrinks stable stars even centered). Kept `centered` as the withheld config (strictly better, sets up the last-gate push); **0 devel flips.** **FEATURE AUDIT (owner ask — "better features from existing data, not more data"):** the NFL volume cells are **NOT feature-starved** — the 485-col candidate set already carries full game-script (`Total`/`OppTotal`/`GameTotal`/`Spread`/`Moneyline`, all trained-`Common`), pre-built interactions (`PlayerExp_x_DefAvg`, `PlayerZ_x_DefPos`, `Player`/`Defense moneyline gain`/`totals gain`), multi-window recency (`Avg1/3/5/10/Yr` + `short`+`growth`+`_asof` point-in-time + EB + vs-opp); `Line`/`Odds` are correctly **excluded** from the trained X (training on the line just echoes the book — `get_stat_columns` omits them, they live in the matrix only for the gate). So negative bss is **target-shape + capacity, not missing features** → **corrected the §6.9 routing: volume five → §6.2 normalization + §6.6 family/regularization, NOT §6.3 raw-feature build.** The `carries` g1 flip on a pure target transform (zero new features) is the proof. **BUG (latent, production-relevant):** warm-start `study.enqueue_trial(seed_params)` (`hyperparams.py:155`) crashes `ValueError: 0.0 invalid for log=True` when a pickle stored `lambda_l1/l2 = 0.0` (LightGBM default, below the 1e-6 search floor, both `log=True`) — killed both --force confirm runs on `carries`; deterministic unaffected (fixed HP, no enqueue). Workaround = delete the pickle → cold start (`initial_params=None`); proper fix = clamp/drop sub-floor log-params from the seed before enqueue. Budget gotcha logged: cold = 3600s/300-trial (`pipeline.py:951`), warm = 300s/150-trial (line 964) — splits on cold-vs-warm, NOT calibrated-vs-loss. Only `stat_meta.json` touched (3 norm flips, no .py ⇒ no refactoring-specialist). Gates: ruff clean (no .py), golden 1936 pass (the 1 red = pre-existing `test_find_correlation_offer_correlations_real_nba`, an NBA-correlation fixture untouched by this NFL-only change), integration 24 pass. · next: §6.6 family / centered-param SkewNormal for carries/fantasy **g4** + targets **g6** (research-gated — the calibration axis is closed for these); the volume-five work is target-shape/regularization per the audit, not new columns; fix the warm-start seed clamp; production-faithful re-confirm under warm-300s once the seed clamp lands.
-- 2026-06-23 · **Lever 1 reworked — HP *search-gate* replaces the top-8 re-rank (research-gated build).** Brief `/tmp/researcher_hpo_objective.md`: keep CV-CRPS as the base selection score (do NOT switch to NLL — it loses g1–g4 + EV in-house and is tail-fragile); the change is the constraint *form*. The old Lever 1 re-ranked only the top-8 lowest-CRPS trials — structurally blind to the wider-σ corner CRPS never samples (PA's whole top-8 was under-dispersed). Now the Optuna objective is **search-gated**: `CRPS + 10·max(0, val_PIT-KS − τ)`, a one-sided hinge (zero once calibrated ⇒ the feasible region stays ranked by pure CRPS, the GBR degeneracy guard) so the TPE sampler *explores* the calibrated region; final pick unchanged (`_pick_calibrated_candidate`). **Inert by default** — no-op unless `hpo_selection: calibrated` + SkewNormal; `calibration_penalty is None` reproduces plain CV-CRPS byte-for-byte. `hyperparams.run_hyper_opt(calibration_penalty=…)` + `_penalized_objective` + `_collect_calibrated_candidates`; `pipeline._calibration_penalty` closure replaces the removed `_select_calibrated_hp`/`_calibrated_top_k`; cost = one extra refit/trial (`return_cvbooster` OOF variant deferred). **Brief reframe:** PA was the wrong poster child — it is **shape-bound** (cov50/cov80 ≈ nominal, PIT supremum wanders → family-misspecified), a search-gate no-op routing to §6.6 **manual per-cell** family; **DREB** is the **scale-bound** beneficiary (0.0651 → 0.0508, the gate should now close it). TDD (`_penalized_objective` golden), gates: ruff clean, golden 1908 pass (1 pre-existing correlation red), integration 22 pass, refactoring-specialist clean. · next: cov50/cov80-stratify the live g4-failing SN cohort (scale-vs-shape mix = search-gate-vs-§6.6 ROI, open-Q #9); real-HPO confirm DREB under the search-gate; re-confirm PR (it shipped under the old re-rank, PR #84).
-- 2026-06-23 · **PA/PR/DREB calibrated re-confirm — Lever 1 VALIDATED, ships WNBA PR; per-cell `hpo_selection` persistence + §6.2 confirm policy.** Ran the 3 in-regime g4-bound WNBA SkewNormal cells (PA/PR net-new, DREB the knife-edge) as a controlled **loss-vs-calibrated A/B** (same `ca_mean10` norm, full cold HPO, differing only in `--hpo-selection`). **PR RESCUED** — loss g4 **0.0516 (fail) → calibrated 0.0423 (pass)**, ships 6/6: calibrated selection traded a hair of sharpness for the wider-σ trial that clears Gate-4, exactly the Lever-1 mechanism. **DREB near-miss** (0.0651 → 0.0508; slack −0.302 → −0.016 — a Rung-C candidate now), **PA no-op** (0.0581 → 0.0583 — the logged fallback fired, no calibratable trial in the top-K). All three fail **g4-only** under loss (gates `111011`), the exact regime Lever 1 targets. **Durability gap found + fixed:** `--hpo-selection` was a *run-wide* flag, not per-cell, so PR's calibrated ship would **dark out on the next devel cron** (warm HPO walks back to the sharper g4-failing trial → `_enforce_ship_gate` prunes). Made it per-cell like `blending`: new `cli._resolve_cell_knob` consolidates the blending + hpo_selection reads, `--hpo-selection` default `loss`→`auto` (honors stat_meta, explicit slug still forces a run-wide A/B), and WNBA PR carries `hpo_selection: "calibrated"`. **§6.2 operating loop updated** — HP-selection is a confirm-time axis the deterministic board can't see (it fixes one HP set, no trial spread to re-rank); **confirm every SN candidate under `calibrated` first** (weakly dominates loss on g4), fall back to `loss` if its wider σ tips g1, persist the winner per-cell. **Ships WNBA PR + PRA → devel** (PRA durable under the default loss from the prior confirm; +2 WNBA served). Gates: ruff clean, golden green (+ `_resolve_cell_knob` persistence test), integration green, refactoring-specialist clean. · next: §6.1 Rung C (whole-CDF PIT recal) for DREB's 0.0508 near-miss + the mixed-direction SN cohort; persist `stabilization`/`count_dispersion_objective` per-cell only if a cell ever ships on Lever 2/4 (YAGNI until then).
-- 2026-06-22 · **`centered_additive_mean10`-over-`ratio_meanyr` confirm queue RAN (full HPO) + three calibration-aware HP levers BUILT.** Confirm queue (6 cells, the `ca_mean10`-board-best-differs set): 3 supersede (NBA RA/PR, WNBA fantasy) + 3 net-new (WNBA PA/PR/PRA). **Only WNBA PRA SHIPS** (net-new, real `min_gate_slack` +0.068 — the tiny det board margin +0.036 survived full HPO), the other 5 HOLD: the deterministic board oversold g4 again ([[deterministic_ab_g4_oversell]]) — WNBA PA/PR det g4 margins +0.33/+0.32 **evaporated** at full HPO; supersede trio failed S2/S3. WNBA 7→8. **The HPO-vs-deterministic g4 paradox** (sharp μ surface ≠ calibrated σ surface; μ/σ share one LightGBMLSS HP set so standard knobs move both together) was researched (`/tmp/researcher_calibration_hp.md`) → **3 cheap opt-in levers built, defaults = production:** **Lever 1** `--hpo-selection calibrated` ([`hyperparams.run_hyper_opt(top_k)`](../../src/sportstradamus/training/hyperparams.py) returns top-K lowest-CRPS trials → [`pipeline._select_calibrated_hp`](../../src/sportstradamus/training/pipeline.py) refits each + re-ranks by validation PIT-KS, picks sharpest that clears g4, logged fallback; SkewNormal only); **Lever 2** `--count-dispersion-objective pit_ks` (count `dispersion_cal` CRPS→PIT-KS via `_dispersion_pit_ks_loss`; §6.1 Rung B′); **Lever 4** `--stabilization MAD|L2` (σ-head gradient damping; the only in-API per-param knob). Levers 3 (whole-CDF Rung C) + 5 (in-training PIT reg) folded to §6.1/§6.5 as next/deferred; the g4-failing SN cells are **mixed-direction** (WNBA fantasy over-wide, NFL attempts/carries under-wide) so a scalar `c` can't fix them — Rung C re-ranked above family rebuilds. Gates: ruff clean, refactoring-specialist clean, golden 1905 pass (1 pre-existing real-NBA correlation red), integration 22 pass. WNBA PRA flip staged (uncommitted). · next: re-confirm the 5 HOLD SN cells (NBA RA/PR, WNBA PA/PR/fantasy) with `--hpo-selection calibrated` (does calibrated selection rescue any?); commit WNBA PRA + any new winners → devel via devel-ship-curator.
-- 2026-06-22 · **§6.2 all-cells CV re-sweep vs the reworked Gate 6 + `ratio_projvol` — g6 VALIDATED, projvol REFUTED.** Re-scored all 59 cells' existing deterministic dumps against the 3-leg g6 (instant — g6 changed scoring, not training): g6 fires on exactly **4 corners via the right legs** — NBA fantasy-points `ratio_meanyr` via **CITL** at corr 0.556 (*below* the 0.58 recent-form anchor, the σ-laundered case the rework targets), WNBA FGA + NFL targets/rushing-yards via recent-form; **0 served cells false-flag**; shippable set unchanged (all 4 g6-fails were already non-shipping corners). Trained `ratio_projvol` on 41 eligible cells (39 ok, 2 NFL timeouts = same low-mean data-prep hang): **0/40 ship, g4 fails 39/40**, −5 to −16 `min_gate_slack` worse than every incumbent. Research (`/tmp/researcher_projvol_dispersion.md`): the linear `scale × volume` dispersion decode is a real symptom but **NOT the binding defect** — no `volume^p` or compound-variance scale clears the volume-stratified PIT-KS-max (≥ 0.111 NBA / 0.148 WNBA / 0.342 NFL rushing-yards); the binding defect is the **ratio-induced high-skew, zero-inflated low-volume tail SkewNormal can't shape** (low-q actual skew +0.99/+1.30/+2.90, `outcome ≤ 0.5` up to 33%) → **scoped abandonment of the projvol implementation**, efficiency × opportunity preserved only as the §6.9 count-branch `log(volume)` NB/Tweedie offset. proj-MIN itself is sound (corr 0.79 with realized minutes); ignoring its uncertainty under-states dispersion ~20–40% but doesn't clear g4 alone. `ratio_projvol` recorded tried-refuted (§6.2/§8). · next: NFL `log(volume)` NB/Tweedie offset folded into §6.6 as a deep-end family escalation (revisit only if features/blend can't ship NFL yards); firing the `centered_additive_mean10`-over-`ratio_meanyr` confirm queue on full HPO now.
-- 2026-06-22 · **Gate 6 REDESIGNED — one recent-form leg → OR of three one-sided legs + anchor hysteresis** (research `/tmp/researcher_gate6_scope_and_drift.md`; spec `docs/superpowers/specs/2026-06-21-gate6-outcome-directional-legs-design.md`). `_gate6_star_ratio → _gate6_legs` (dict return); `_gate6_passes` ORs the legs; `gate_row`/`apply_thresholds`/`compute_gates`/`report.write_model_stats` threaded with `prior_g6_fired`. **(a) recent-form** (unchanged statistic) now anchored with a **`0.58/0.52` hysteresis deadband** — fire-on `0.58`, keep-on `0.52` if it fired last run, seeded from the prior `model_stats` row's `g6_star_ci_hi`/`g6_star_ref` (cold-start safe) — so a cell whose `corr` straddles the old hard `0.55` can't flip ship state on a retrain wobble; retained because it is the only leg that catches the `ratio_meanyr` holdout-corruption class (the held-out `Result` is itself suppressed, so an outcome-scored leg is structurally blind to it). **(b) CITL-under** `Σpred/ΣResult` on the same stable stars, **every cell**, fail `citl_hi < 1 − 0.03` — the σ-denominator-free counterpart to g2 that catches outcome-confirmed proportional under-prediction (NBA fantasy-points, `0.88×` recent form, g2 `z=0.22`). **(c) over** `Σpred/ΣResult` on the stable bottom-MeanYr quartile, **count/ZINB only**, guarded `mean(Result) ≥ 1`, fail `over_lo > 1 + 0.03` — owner asked to also catch systematic bench over-shooting. **Methods ruled OUT (research):** *graded* continuous-corr tolerance — over-shrinkers cluster *just above* the anchor, so a graded knob relaxes exactly where it should bite (hysteresis instead); the *sign test* — reads mean-vs-median skew not bias, false-flags shipped NBA PTS/PRA/REB. `g6_pass` now nullable-cast in the parquet (`_GATE_PASS_COLS` + `_wide_row` placeholder) — completes the wiring the original g6 left half-done. Gates: ruff clean, golden green (the 2 real-NBA correlation `ArrowInvalid` reds are pre-existing — stash-verified), integration 20 pass. · next: the all-cells CV run confirms the blast radius (expect NBA fantasy-points to fail g6 via recent-form + CITL; re-score the 6 shipped count cells against the new over-leg before any demote).
-- 2026-06-21 · **Gate 6 scope WIDENED to all cells** (owner call). Was the `ratio_meanyr` SkewNormal cohort only; the anti-shrinkage check reads only the served `Blended_EV` vs `Mean10`, so it is normalization- and family-agnostic — the `corr(Mean10,Result) ≥ 0.55` anchor (not the cohort) scopes it. Motivated by g2 being insufficient: g2's bias `z` divides by the outcome σ, so a real proportional star shrinkage launders into a tiny `z` on high-variance stats. **Floor relaxed `0.98→0.95`** (`_GATE6_STAR_REF_BASKETBALL`; allow ~5% star shrinkage). Blast radius (force-scored all 11 shipped non-`ratio_meanyr` cells): exactly ONE flips — shipped **NBA fantasy-points** now fails g6 (stable stars served at `0.88×` recent form, the `z=0.22` that passed g2) → routes to demotion; NBA AST / WNBA PTS / WNBA REB pass, NBA FG3A + all 6 count cells anchor-skip (corr 0.22–0.49 `<` 0.55). `scorecard.py`: dropped the `decode_strategy`/SkewNormal guard from `_gate6_star_ratio` (param removed); golden pins updated. · next: let the NBA fantasy-points demotion flow on the next gate-status run, or investigate a composite-stat floor (fantasy points is a sum of individually-regressing stats, may warrant a floor below the single-stat 0.95).
-- 2026-06-21 · §6.2 full strategy board GENERATED (first run) + the three 06-20 `next:` items closed. **Confirm-selection rule now canonical in §6.2** (spend a ~1 h real-HPO confirm only where it can move the served set: a `withheld` cell whose top *reproducible* corner ships, or a shipped cell whose board-best persistable config differs AND improves; skip a shipped cell already on its board-best config; match on `target_normalization`+`blending`+`posthoc`, dist-loss treated as the family default since it doesn't persist). **Board** (`model-strategy-driver --board`, deterministic GridSampler, 3 norms × {nll,crps}dist × {nll,crps}blend = 12 corners/cell): **13/15 cells swept**; `centered_additive_mean10` is the decisive normalization (top corner for 7/8 WNBA+NBA cells) and **blend-loss is gate-inert** (crps≡nll per cell on g1–g5, so blending stays the family default). The confirm filter cut 13→4 real-HPO confirms. **2 NFL cells EXCLUDED — `receptions`+`sacks-taken` HANG in deterministic `meditate`** (>30 min, killed at the 1800 s per-corner ceiling; stuck in DATA-PREP, not training — progress bar frozen ~1442/1693 with `2025 done`/`Downcasting floats` looping; NFL-low-mean-specific, `carries` swept fine), both book-wall non-shippers (`carries` board slack −0.064; `sacks-taken` 06-19 ship=False [[project_passing_book_degenerate]]) so **no ship lost** — logged as a separate deterministic-meditate tooling bug, normalization axis recorded tried (§8). **Real-HPO confirms (4):** (1) WNBA **fantasy-points** (the omitted 06-19 next-item) SHIPS 6/6 on `ratio_meanyr`, brier_skill +0.110 → `withheld→devel`; (2) NBA **fantasy-points** SHIPS 6/6 (`none→centered_additive_mean10`+`blending:crps`; board slack 0.194 → real brier +0.044 / g4 0.041) → `devel`; (3) NBA **FG3A** SHIPS 6/6 (`ratio_meanyr→centered_additive_eb_meanyr_k10`; board 0.174 → brier +0.044 / g4 0.043) → `devel`; (4) WNBA **DREB** NO-SHIP — g4 pit_ks **0.0597 > 0.05** (5/6); the knife-edge board slack 0.034 (det g4 0.0483) did NOT survive full HPO — [[deterministic_ab_g4_oversell]] held exactly; stays withheld, routes §6.6 centered-param SN. **WNBA RA supersede = HOLD:** candidate `centered_additive_mean10` ships standalone 6/6 and beats the `ratio_meanyr` incumbent on Brier (S2 d_mean +0.0259, CI [+0.0155,+0.0363]) and g4 (0.0342 vs 0.0446), but **S3 paired-Sharpe z +0.33 < 1.645** (and S1-on-intersection fails) → not decisive → incumbent preserved (stat_meta reverted, pickle/CSV restored byte-identical from backup). **The 4 06-19 regressors (next-item-3):** only `receiving-tds` was shipped → re-confirmed full-HPO, **REGRESSED** (g2 star z 0.83), demoted `devel→withheld`, surfaced to owner (fix fork: §6.1 `roe_mean` affine-ROE vs per-cell M-1 feature exclusion); NBA_STL / WNBA_OREB / NFL qb-yards were multi-gate KILLs in baseline too (deterministic-oversell signature) → no ship, routed (§6.6 count family / per-position). scorecard-fixture date time-bomb (next-item-1) already closed by `aff75a1`. **Net: +3 net-new ships − 1 demote.** devel served **19→21**: NBA 10→12, WNBA 6→7, NFL 3→2 — no league at 75% yet (NBA short 4, WNBA short 7, NFL short 13; the memory's "30/59" predated the serve-iff-ship prune to 19). Gates: ruff clean, golden 1873 pass (the 2 real-NBA correlation reds are pre-existing — stash-verified identical with my changes removed), integration 17 pass. devel-ship-curator carves the PR (4 stat_meta flips + this doc; human approves, never pushes). · next: §6.6 centered-parametrization SkewNormal for the `centered_additive_mean10` g4 cohort (WNBA DREB + the QW-1 volume cells — the binding under-dispersion wall, research-gated); fix the deterministic-meditate NFL low-mean data-prep hang so `receptions`/`sacks-taken` can be swept; §6.1 affine-ROE re-confirm for `receiving-tds`
-- 2026-06-20 · §6.3 CV the two placeholder feature constants + revert `PrimeTime`/`RestDiff` **DONE** (closes two prior `next:` items; the "do not invent a value" discipline). **EB `_EXPANDING_EB_PRIOR_K` → per-league `{NFL: 1.0}`, else keep 10.0** (`base.py`): tiered held-out CV via the new dev-only driver `scripts/cv_feature_constants.py` (devel-denylisted like `regen_ab_batch.py`). **Tier-1** cheap 1-feature OOF (purged GroupKFold-by-player, low-`n_career` stratum where the shrink bites) said K=1 globally — but the **Tier-2 deterministic `meditate` confirm (NFL+WNBA, K∈{1,2} vs 10, `min_gate_slack` Δ) DIVERGED**: NFL **carries +2.96** (both low-K agree, large — though nothing ships either way, book-wall [[project_passing_book_degenerate]]), WNBA **uniformly prefers K=10** and **K=1 flips WNBA MIN out of ship** (the univariate OOF oversold K=1; the fitted gates caught the variance cost the OOF couldn't see). NBA scoped out (lown_frac 0.4–2.6%, inert) → keep 10. Per-league dict per the plan's divergence rule; latent (no net-shippable gain today — the only cell that moves is book-walled NFL volume). **Recency `_COMP_RECENCY_HALFLIFE_DAYS` = keep 45 (CV-inert)**: `Player comps z recent` is a recency-reweighted **convex combination**, so H only re-weights *within* the mean — held-out OOF R² spread ≤ 0.0006 across H∈{14..180}, all 7 cells / 3 leagues. (Driver faithfulness bug fixed along the way: the comp step fires 2×/gameday — the `_dispatch_volume_stats` volume pass + the served `get_stats` — and the matrix keeps the LAST, so the recency capture must `drop_duplicates(keep="last")`, not `pivot_table` mean; the mean corrupted the faithful-replay check 0→1.72.) **`PrimeTime`/`RestDiff` REVERTED** (`nfl.py` / `feature_filter.json` / `test_nfl_schedule_features`, keep `Weekday`): both dead — zero `feature_importances` (0 variance), and their `gametime`/`own rest`/`opp rest` inputs were 100% NaN on all 33,303 history rows (the QW-4 schedule backfill was deferred and never run). That all-NaN col ALSO **broke `StatsNFL.update()` perf** — the `gamelog.isna().any(axis=1)` backfill selector matched 100% of rows every run, reprocessing the full pbp history (minutes, hourly in-season once NFL starts); dropping the cols + an `update()` cleanup that sheds them from any pre-revert cache (gamelog is gitignored → per-env, the server self-heals on pull) collapses the selection **33303→0** (verified read-only). Gates: refactoring-specialist clean (base.py+nfl.py, 0 refactors), ruff clean, integration 17 pass; golden = my code clean — the 5 reds all reproduce with my changes stashed (2 known correlation reds + **3 NEW pre-existing time-bombs unrelated to this work**: `_build_live_history_fixture` hardcodes `today=2026-05-20` while `_history_to_eval_frame` filters by the *real* `datetime.now()` 30-day window → the 06-19→06-20 calendar rollover pushed the fixture's newest row outside the window → empty eval frame; flagged for a separate 1-line fixture fix). · next: fix the scorecard-fixture date time-bomb (separate, not this landing); re-confirm WNBA fantasy-points (still omitted); investigate the 4 A/B regressors (NBA_STL, WNBA_OREB, NFL qb-yards/receiving-tds)
-- 2026-06-19 · **Gate 6 (anti-shrinkage) ADDED** — sixth offline ship gate, `ratio_meanyr` SkewNormal cohort only (auto-pass elsewhere). Catches the MeanYr over-shrinkage g1–g5 are blind to: the 365-day MeanYr denominator teaches a high-volume regression real games don't show, the model fits the holdout faithfully (top-decile pred/Result≈1.0) so every outcome-scored gate passes — a relative-bias g2/g3 rework is **equally blind** (the holdout's own stable stars are suppressed; verified). Gate 6 instead scores the *stable* (`|Mean10/MeanYr−1|≤0.12`) top-MeanYr-quartile `Σ Blended_EV / Σ Mean10` (player-clustered bootstrap 97.5% upper bound) vs the **causal recent-form floor** (~0.99 bball / ~0.94 NFL, off 6 gamelog seasons), anchored on `corr(Mean10,Result)≥0.55` (exempts MIN + bursty counts), **star-side only** (the ratio_meanyr denom deflates the whole distribution → never inflates the bench; the bench leg was research-refuted — would false-flag NBA PA). `scorecard.py`: `_gate6_star_ratio` + `_bootstrap_ratio_ci_clustered` + `_gate6_passes`, wired into `apply_thresholds` (`ship`) + `min_gate_slack`; 3 golden pins. **Pulled back WNBA FGA/PR/PRA** (`shipped:devel→withheld`) — gate-confirmed over-shrinkers (live symptom: FGA projecting a stable 13.4-shooter at 10.1, Win-Prob pinned at the 0.90 clamp); NBA PTS/PA/PRA/REB clear, WNBA/NBA MIN + NBA RA exempt (anchor). Research `/tmp/researcher_overshrinkage_gate.md`. worktree off origin/devel → PR. Gates: ruff clean, golden 1859 pass (the 3 live-window failures are a **pre-existing** date-fixture time-bomb — identical on stashed origin/devel, NOT mine), integration green. · next: the §8.2 root-cause fix (MeanYr-denominator artifact → recency-weighted baseline) to re-ship FGA/PR/PRA — a SEPARATE session; PR/PRA may return faster than FGA (their flag is partly real even by outcome gates)
-- 2026-06-19 · §6.3 real-HPO ship-confirm + serving guards **DONE** (the deterministic A/B's follow-up verdict). Walked the 17 deterministic flippers through full production `meditate` (official 5-gate scorecard on the fused `Blended_EV` = `report._SHIP_PRED_COL`), thread-bumped serial tail (NFL + WNBA-ratio + WNBA-centered + NBA-ratio + NBA-centered, all `rc=0`, ~08:07→15:37). **16 of 17 confirmed** — WNBA **fantasy-points** was omitted from the confirm groups (gap, re-run next). **Verdict = 6 net-new promotes** (`shipped:withheld` ∧ ship=True, fresh `M_cand` pickle today): NBA **AST/PR/RA**, WNBA **PTS/RA/REB**; the 9 already-`devel` cells (NBA MIN/PA/PRA/PTS/REB, WNBA FGA/MIN/PR/PRA) re-confirm ship=True; NFL **sacks-taken** = ship=False (g1 book-wall, [[project_passing_book_degenerate]]). **Brier caveat:** the NBA trio passes all 5 gates but `brier_skill_score ≤ 0` (AST −0.021, PR −0.017, RA −0.00002) → `kelly_shrinkage≈0` (served, ~no bet); only the WNBA trio carries positive Brier skill (+0.017 / +0.033 / +0.010). So the deterministic A/B oversold 17→6 net-new, exactly the [[operation_ship_75_state]] caveat — direction was the deliverable, the real-HPO confirm is the verdict. Process note: the already-`devel` warm cells did NOT re-train (only the withheld/cold cells logged BYPASS-withhold + got fresh pickles); already shipped ⇒ no action, their §6.3 re-fit rides the devel server's next `meditate`. **Serving guards committed (model-research):** model-EV runaway winsorize `_sanitize_model_ev`+`_drop_no_history_offers` (book-independent clamp toward `K=10·max(MeanYr,Mean10,STDYr)`, SkewNormal `Sigma` rescaled to hold CV; symmetric with `_sanitize_book_ev`; research `/tmp/researcher_model_ev_runaway.md`) [`46461dd`]; scorecard `DEFAULT_PRED_COL` EV→`Blended_EV` to match the ship gate, with `--live-window` scoped back to raw `EV` (history.parquet carries no fused column, only `Model EV`→`EV`) [`46461dd`+`fa02f84`]; LightGBM `num_threads` default 1→8, `--deterministic` forces 1 (behaviorally neutral — non-deterministic HPO already forced 8 via the `_suggest_params` search space; the bump just documents the default) [`c44a6f7`]. **Curator:** `devel-ship-curator` dispatched (worktree-isolated) to carve the production delta + the 6 stat_meta flips — prepares the devel PR, human approves, never pushes. Gates: ruff clean, golden 263 pass (same pre-existing `test_find_correlation_offer_correlations_real_nba` red), integration 17 pass. · next: CV `_EXPANDING_EB_PRIOR_K`+`_COMP_RECENCY_HALFLIFE_DAYS` per league; revert-or-backfill `PrimeTime`/`RestDiff`; re-confirm WNBA fantasy-points (omitted); investigate the 4 A/B regressors (NBA_STL, WNBA_OREB, NFL qb-yards/receiving-tds)
-- 2026-06-19 · §6.3 batch 1 + Playoff/series — per-league regen + deterministic §7.2 A/B **DONE** (the three BUILT entries' follow-up). **3 pre-regen gap fixes** (base.py/nfl.py, refactoring-specialist clean): (a) `comps trend` was all-zero — it read the per-player `{market} growth` col, which `_profile_stat_types` only emits for the 37 efficiency stats and never for a market → rewired to a shared `_player_recent_slope` over the MARKET, threaded as a new `_all_trend` arg to `_apply_comp_features` (`test_comp_aggregates` updated to the new contract); nunique 1→1031 on NFL passing-yards. (b) QW-4 `_schedule_context` KeyError'd on cached gamelog rows predating `gametime`/`own rest`/`opp rest` → graceful-degrade to NaN/empty (`Weekday` still derives off the always-present gameday). (c) a recent gameday whose players are all off the depth chart empties `stats` at the `Player depth>0` filter inside `_join_profiles` → `.iloc[:,[]]` crash → 2-part guard (early-return after `_join_profiles` + `len(stats)` guard on the position diag). Rebuilt NFL `attempts`/`carries` volume models (deterministic → data/models/) so `proj_*` survives the direct-`get_training_matrix` regen — they'd been ship-pruned and `get_volume_stats` early-returns on the first missing model, so all 10 `proj_*` were GONE; restored (total_GONE=0). **Regen** all 59 cells (NBA 21 @ `cutoff=2025-01-01` to skip the 2-yr-gamelog cold start; NFL 20 + WNBA 18 default 850d); clean isolation = drop-new-cols baseline (`M_base`=`M_cand`−the 16 NBA/WNBA or 19 NFL new cols, identical rows). **3 leagues regen'd in PARALLEL** via per-process `SPORTSTRADAMUS_ARCHIVE_DB` archive copies (sidesteps DuckDB's process-lifetime exclusive lock; `get_training_matrix` only reads odds); Phase B SERIAL (book_weights.json is a shared read-modify-write — though Phase B safely overlapped the remaining Phase A since `book_weights` is an in-memory module global immune to disk writes). New driver `scripts/regen_ab_batch.py` (resumable). **A/B** (deterministic, both arms identical `target_normalization`): **17 cells flip baseline-KILL(g4)→candidate-SHIP** — NBA AST/MIN/PA/PR/PRA/PTS/RA/REB (PR also SUPERSEDEs), WNBA FGA/MIN/PR/PRA/PTS/RA/REB/fantasy-points, NFL sacks-taken; ~6 more g4-fixed (NFL passing family — g4 fixed, g1 book-wall remains; WNBA BLK; NBA DREB/TOV); **4 REGRESS** (NBA_STL, WNBA_OREB, NFL qb-yards, NFL receiving-tds); rest HOLD. **CAVEAT — effect inflated by the deterministic small-HP**: the feature-poor `M_base` under-fits variance (iqr_ratio 0.005–0.72; NFL passing-yards 0.005, WNBA_MIN 0.032) and the variance-signal cols (`MeanYr_expanding_*`, `comps std`/`trend`) rescue it to ~0.87–1.23; real HPO would partly close that baseline gap, so the proxy oversells ([[operation_ship_75_state]]) — direction is the deliverable, the real-HPO ship-confirm is the verdict. **Inert** (model-agnostic variance across the 59 candidate matrices): `PrimeTime`+`RestDiff` globally inert (0 variance, NFL-only) — DORMANT pending the gametime/rest schedule backfill (deferred), not useless; `SeriesWins`/`SeriesLosses` inert for NFL (single-elim, correct) but active in 39 NBA+WNBA cells; the other 15 batch cols carry signal in every cell they appear. Benign: `Odds_synthetic` drops from 7 sparse-odds NFL/NBA cells (a train-pipeline artifact baked into the old cache, not a `get_training_matrix` output; both arms identical). Gates: ruff clean, golden green save the 1 **pre-existing** fixture-based `test_find_correlation_offer_correlations_real_nba` red (NOT mine — the test never calls `get_stats`), integration 17 pass. Artifacts: `/tmp/regen_ab/` (sidecars + 59 scorecards + `AB_SUMMARY.txt`); canonical training_data parquets now = `M_cand` (gitignored), `.regen_backup/` preserves originals. · next: real-HPO ship-confirm on the g4-flippers (`supersede_verdict` for incumbents) → devel flips; revert-or-backfill `PrimeTime`/`RestDiff`; investigate the 4 regressors; CV `_EXPANDING_EB_PRIOR_K`+`_COMP_RECENCY_HALFLIFE_DAYS` per league
-- 2026-06-18 · Playoff **series-context** feature **BUILT (code+tests only)** — owner ask after the `Playoff` flag, scope "Elimination only" (build-only; regen + MLB backfill PENDING). Emits `SeriesWins`/`SeriesLosses` + `FacingElimination`/`CanClinch`. The within-series W-L record is tallied from the **teamlog** (the clean game-result source — `WL` + opponent + date present every league, unlike the player gamelog which lacks `WL` for NHL/MLB/NFL) over prior playoff games vs the same opponent inside `_SERIES_LOOKBACK_DAYS`=30 (two teams meet in ≤1 series/postseason, so the window isolates the current series from any prior-season meeting). Flags derive from a per-league wins-to-clinch (`_series_games_to_win`): **NBA/NHL** best-of-7 (base const 4); **MLB** by round via `game type` (WC `F`→bo3, LDS `D`→bo5, LCS/WS `L`/`W`→bo7) — game_type now stamped onto BOTH gamelog and teamlog in `update()` (+ carried on the upcoming dict for the serve-branch round), 60-day window/run so historical backfill rides the regen follow-up (pre-backfill → regular/0); **WNBA** round-detected (bo3 first round, bo5 later — round = distinct prior-postseason opponents within `_POSTSEASON_LOOKBACK_DAYS`=75, since the WNBA game ID carries no round and the format drifts); **NFL** single-elimination → `FacingElimination`=`CanClinch`=`Playoff`, no record. Architecture: base `_series_context` orchestrator (short-circuits to 0 when nobody on the slate is in the postseason) + shared `_tally_series_record` + hooks `_playoff_teamlog` (game-ID scope) / `_series_games_to_win`; NFL overrides the orchestrator, MLB overrides both hooks, WNBA overrides `_series_games_to_win` (R0801-clean per the specialist — genuinely different per-league knowledge). 4 cols seeded in `_BASE_STAT_COLUMNS` + registered in all 5 `Common`. Tests: new `test_series_context_features.py` (10 — record tally, the 30-day window, bo7/bo3/bo5/per-MLB-round elimination+clinch arithmetic, non-playoff short-circuit, MLB serve-from-upcoming) + the 4 cols added to the parity `_game_context` pin. Gates: ruff clean, golden 263 pass (same pre-existing correlation red), integration 17 pass. · next: folds into the §6.3 regen follow-up (MLB needs the game_type backfill on gamelog+teamlog before the series cols carry signal).
-- 2026-06-18 · Cross-league `Playoff` context flag **BUILT (code+tests only)** — added alongside §6.3 (owner ask), same build-only scope (regen + the MLB historical backfill below are PENDING). Source per league chosen for accuracy: **NBA/WNBA/NHL decode the native game-ID season-type code** (`_PLAYOFF_GAMEID_CODE`, verified vs cached gamelogs: NBA `GAME_ID[2]` 4=playoffs/5=play-in, WNBA `[2]` 4=playoffs (5=Commissioner's Cup, NOT playoff), NHL `gameId[4:6]` 03=playoffs) — exact and **inherently excludes** preseason/All-Star/NBA Cup/Commissioner's Cup/4-Nations, which a date-window or game-count would mislabel (owner first suggested game-count; the same per-game type signal needed to drop exhibitions makes counting redundant, and WNBA's regular-season length drifts 40→44, so the code is strictly better). Historical reads the realized row's ID; the serve branch (upcoming schedule carries no ID) infers the phase from **the season's latest completed game's code** — games-based, no calendar window, no drift-prone length constant. **NFL** override: `season type == "POST"` historical, `week > NFL_REGULAR_SEASON_WEEKS` serve (plumbed `week`→`playoff` through `_compute_upcoming_games`). **MLB** override: `_MLB_POSTSEASON_GAME_TYPES`={F,D,L,W,P}; MLB IDs carry no code so `game type` is stamped onto the gamelog in `update()` (gameId→type map + fillna-preserve across incremental runs) — only the 60-day window per run, so **historical backfill = a full-range schedule fetch in the regen follow-up**; pre-backfill rows read regular (0). Base `_playoff_flag` hook after `_schedule_context` in `_game_context`; `Playoff` seeded in `_BASE_STAT_COLUMNS` + registered in all 5 `Common` (5 adds). The 3 `_playoff_flag` impls stay parallel (R0801 clean — genuinely different per-league encodings, refactoring-specialist confirmed). Tests: new `test_playoff_features.py` (14 — per-league decode incl. the special-event exclusions, games-based serve inference, historical↔serve agreement, MLB missing-column degrade) + `Playoff` added to the parity-harness `_game_context` pin. Gates: ruff clean, golden 263 pass (same pre-existing correlation red), integration 17 pass. · next: folds into the §6.3 regen follow-up below (MLB needs the game_type backfill before its column carries signal).
-- 2026-06-18 · §6.3 Feature batch 1 (QW-4 + QW-5 + M-1) **BUILT (code+tests only)** — co-batched across all 5 leagues per the amortization rule; per-league cache regen + deterministic A/B + real-HPO ship-confirm are the explicit PENDING follow-up (build-only scope, owner call). QW-1 was already done/A/B'd (kept as candidate). **QW-5 comp-pool harvest** (NBA/WNBA/NFL/NHL; MLB auto-excluded via empty `_comp_pairs`): `comps std`/`comps trend` (profile-level in `_apply_comp_features`, reuse `_comp_wmean`/`_wcnt_p` and the `{market} growth` cols) + opp-conditional `Player comps raw` (raw-scale mean) and `Player comps z recent` (recency-weighted z **sibling**, leaves shipped `comps z` untouched), recency `exp(-days_ago/_COMP_RECENCY_HALFLIFE_DAYS=45)`. **No feature_filter edits** for QW-5 — profile-prefixed cols auto-register via `get_stat_columns`; opp-conditional ones use the `comps z` trick (init `playerProfile[[…]]=0.0`). **M-1 player-level build** (all 5 leagues for expanding/eb; interaction non-MLB): `MeanYr_expanding_shifted` = career mean over the FULL gamelog strict-`<` date (distinct from the 1yr-window `MeanYr`), `_vsopp` career H2H variant, `_eb` Efron-Morris `K/(K+n)` shrink toward the per-position baseline (`_EXPANDING_EB_PRIOR_K=10` documented placeholder, per-league CV deferred), opp-defense×player interaction `PlayerExp_x_DefAvg`/`PlayerZ_x_DefPos`; new `_expanding_features`/`_interaction_features` called after `_join_profiles`. **QW-4 NFL schedule** (NFL only): `Weekday` from the gameday **dayofweek** (NOT the ragged `weekday.str[:-3]` slice — R2), `PrimeTime` = kickoff ≥ `_NFL_PRIMETIME_HOUR`=20, `RestDiff` = own−opp rest; plumbed `gametime`/`own rest`/`opp rest` through the `_assemble_gamelog_frame` merge + `rest_diff` into `upcoming_games` (R1, required for serve parity); new NFL `_schedule_context` via a no-op base hook at the end of `_game_context`. Registration: M-1 bare-stats + QW-4 in per-league `Common` (26 adds, `MeanYr_expanding_*` also seeded in `_BASE_STAT_COLUMNS`); the `_n` EB-input cols deliberately unregistered. Tests: leakage extended (full-gamelog strict-`<` sentinel reading >300d back + vsopp + static `<` source check), parity harness extended (explicit M-1 pin), 3 new derivation-pin files (`test_player_expanding_features`/`test_comp_aggregates`/`test_nfl_schedule_features`). Gates: ruff clean, golden 263 pass + the **pre-existing** `test_find_correlation_offer_correlations_real_nba` red (proven pre-existing via stash, NOT mine), integration 17 pass. refactoring-specialist: 1 consistency fix — added `comps std`/`comps trend` to the `profile_market` zero-init (closes a same-date cross-market staleness gap, matching `comps mean`). · next: §6.3 follow-up — preserve baselines → per-league regen (NBA incremental-cutoff per [[training-matrix-regen-concat]]) → deterministic A/B → inert-revert SHAP<0.001 → real-HPO ship-confirm; then CV `_EXPANDING_EB_PRIOR_K` + `_COMP_RECENCY_HALFLIFE_DAYS` per league
-- 2026-06-18 · §6.5 Fitting-half book-input track — final state: WS1/WS3/WS4 committed, WS2 (book-skew) BUILT→A/B-REFUTED→**REVERTED**. Committed correctness: WS3 power de-vig `no_vig_odds(method="power")` (lopsided-only, `|p_over−0.5|>_DEVIG_LOPSIDED_FLAG`=0.3; proportional on the body, byte-identical at even money); WS4 count-tail reg `_sanitize_book_ev` shrinks a runaway book EV to `μ̂+K·SD` (`_BOOK_EV_MODEL_SD_CAP`, keeps the 5×line corruption trigger); WS1 ingest alt-line ladder capture `archive.add_ladder` (per-rung de-vigged, accrues the §1.1 asset — invisible to the gates, usable only once accumulated). WS2 was the shape-borrow book recovery (closed-form book `loc` holding the de-vigged median, skew from a non-circular within-player standardized-residual prior, threaded serve+train-blend via a pickle `book_skew`). A/B (deterministic §7.2; NBA PTS/REB/MIN; faithful: invert the baseline blend → re-blend both arms through production `fused_loc`, book_skew=0 reproduces the CSV to 1e-14) **REFUTED** it: the within-player *marginal* residual skew (α≈3–4) over-states the book's CONDITIONAL skew (which the model already carries) → shifts the blended mean +8/+11/−1% and **worsens g4 on all three** (PTS 0.016→0.063, REB 0.027→0.083, MIN 0.031→0.053) plus g2, even at w=0.9. Operator call: assume skew=0 for books until real ladder data, so WS2 fully reverted (`_book_loc_with_skew`/`skewnorm_alpha_from_skewness`/`_within_player_book_skew`/`_BOOK_SKEW_PRIOR_ENABLED`/the `fused_loc(line=, book_skew=)` params/the pickle `book_skew` key/the train-blend threading all removed; commits `eaa19a7`/`dffc855`/`2018199`/`10ee215`/`0233a75`/`9605d41` hold the build history); production books are symmetric `N(ev_b,(ev_b·cv)²)`, byte-unchanged from before the track. Coupling RECORDED (Pooling half): the BLP / learned `w` must be co-fit with the book-shape, never sequenced (Ranjan-Gneiting 2010 Thm 1). · next: let WS1 alt-line ladders accrue, then fit the book skew per-line from the ladder (the marginal residual is the wrong quantity), co-fit with the pool (Ranjan-Gneiting)
-- 2026-06-17 · §6.0 Stage 0 finished off (the two remaining actionable items; #4 parity harness + #6 driver-on-devel already done per audit — driver pair present on origin/devel; #2 hysteresis + #5 NFL g1×dispersion stay deferred/pre-registered, blocked on the §6.6 centered-SN modeling fix per the entry below). **#6.0.3 stale-importances purge DONE:** the 155 all-zero `Player Player *_asof` residue rows (every one ends `_asof`, has a single-prefix counterpart, 0 non-zero cells) dropped from BOTH `feature_importances.csv` + `feature_correlations.csv`; new `tests/golden/test_feature_importances_hygiene.py` pins absence in both (skips when the gitignored CSVs are absent). Gotcha: the CSVs are gitignored/runtime-recomputed and locally only 19 of 83 cells are pickled, so the doc's `see_features()` full-rebuild would CLOBBER 64 cells' drift history here → used a byte-preserving line-drop (server still uses `see_features()` after a full meditate); `compute_market_importance`'s `how="outer"` join re-accumulates stale rows across runs, so only an explicit drop or full rebuild clears them. **#6.0.1 free-passer detector WIRED (report-only):** `graduation.free_passer_cells` (mirror of `served_cells_failing_ship`, predicate inverted to `ship==True ∧ shipped=withheld`, NA/missing→[]) echoed by `generate-ship-config` on BOTH branches, so the monthly `gate-status` cron (`--branch main`) logs `FREE-PASSER` lines; NEVER auto-flips (manual scorecard re-confirm; a sweep pass disagreeing with the scorecard is a scorer bug). 0 free-passers today. TDD throughout (unit + CLI tests). · next: §6.6 centered-parametrization SkewNormal for the `centered_additive_mean10` g4 cohort (real under-dispersion, research-gated), or §6.3 QW-4/QW-5/M-1 feature batch
-- 2026-06-17 · §6.5 g4 dispersion lever CLOSED — root cause was NOT a missing dispersion mechanism, and NOT (as a same-day investigation first concluded) a skew fit "gated off" by `_DISPERSION_SKEW_MIN_GAIN` needing a per-cell val→test discount. That earlier read was a wrong-PIT-space artifact: the served fit's `_served_sn_pit_ks` scores in observed/`NONE` space (the fit's own objective, e.g. 0.0403), which for a zero-inflated cell ≠ the gate's decoded score (0.1225) until the denom matches — the fit was fine, the GATE was wrong. The real cause is a GATE-ONLY decode bug: the scorecard's `_decode_sn_loc_scale` hardcoded `denom_col="MeanYr"`, but a zero-inflated SkewNormal cell (`hist_gate > NONZERO_DENOM_GATE`=0.05) encodes — and the betting path serves (`model_prob.py:122`) — against `MeanYr_nonzero`. So encode↔decode was not identity and g4 scored a predictive ×`MeanYr/MeanYr_nonzero` too narrow → spurious under-dispersion. Tell: `g4_iqr_ratio` == that denom ratio (WNBA_AST 0.766; g4 0.1225 → 0.0403 with the right denom = the served fit's own value). Serving was always correct ⇒ no mispricing; the bug only blocked the offline ship gate. FIX: persist the cell's `denom_col` as a constant `DenomCol` column (`_step_persist_artifacts`, mirrors the `GlobalMean` persist), read it back in `_decode_sn_loc_scale` (fallback `MeanYr` ⇒ zero regression on legacy CSVs, exact on retrain); regression pin `test_scorecard.py::test_decode_sn_loc_scale_uses_persisted_denom_col`. NOT a gate loosening — it is *stricter* on some NFL `ratio` cells the bug had been flattering (yards 0.086→0.119). Blast radius (fresh re-score of all 33 test_sets, not cached): flips exactly ONE cell fail→pass — WNBA_AST (its other 4 gates already pass → ships on next retrain); the `centered_additive_mean10` cells (NBA AST/DREB/FGM, WNBA PTS/REB/DREB, NFL receptions) are UNAFFECTED (their `decode_scale` ignores the denom) and fail g4 at 0.08–0.18 for GENUINE under-dispersion. Process lesson: `report()` is end-of-meditate, not per-market — a killed meditate leaves fresh per-market test CSVs but a stale `model_stats`; re-score the CSV, never trust `model_stats` after a partial run. · next: the remaining g4 wall is the `centered_additive_mean10` cohort (real under-dispersion, not a bug) → §6.6 centered-parametrization SkewNormal, a modeling fix (research-gated)
-- 2026-06-17 · §6.3 QW-1 game-script A/B (deterministic, §7.2) across 15 volume cells / 3 leagues = NO SHIP, NO SUPERSEDE anywhere (all 15 `supersede`=HOLD). Method: baseline = the 4 QW-1 cols dropped from `feature_filter` {league}/Common (cache untouched; `get_stat_columns` stops selecting them — isolates the feature, no prune ambiguity); candidate = with them; both `--deterministic --target-normalization ratio_meanyr` (production for the devel cells, default for withheld norm=none placeholders — normalization held identical across arms). NFL five (carries/completions/attempts/receiving-yards/rushing-yards): candidate equal-or-worse, all KILL g1+g4; attempts NOT revived (book-axis death [[project_passing_book_degenerate]] holds on the feature axis). NBA five (MIN/PTS/REB/AST/FGA): faint **+** lean — AST significant on S2 (d_mean +0.0012, CI excludes 0) AND S3 sharpe (z+2.33), FGA S3 sharpe z+11.18, MIN +0.0014; REB worse (sharpe z−3.13) — but every cell still HOLD and KILL g4. WNBA five: leans **−** (PTS d_mean −0.0028, AST −0.0012, FGA −0.0023, all CIs exclude 0). The NBA/WNBA run froze `comps.json` across arms to kill a deterministic-write float-jitter seen on the NFL run. **g4 status — VERIFIED by re-running the scorecard on the production test_sets (not cached `model_stats`):** the withheld good-discrimination volume cells genuinely FAIL g4 in production — NBA AST `g4_pit_ks` 0.135 / FGA 0.097, WNBA PTS 0.077 / REB 0.088 / AST 0.110, NFL carries 0.133 / completions 0.146 / attempts 0.214 (all above the `max(δ, 1.36/√n)` threshold); the served dispersion calibration (`fit_skewnorm_dispersion_c`/`_skew`) is insufficient for them. The devel-shipped cells DO pass g4 (NBA MIN/PTS/REB 0.016–0.031, WNBA MIN/FGA 0.030/0.049) — for those alone the deterministic A/B's g4-KILL was an artifact (fast fixed-HP skips the calibration). NFL additionally fails g1 (book wall, [[project_passing_book_degenerate]]). So g4 under-dispersion IS the binding wall for the withheld volume cells, and QW-1 does not move it. Lesson: cached `model_stats` held only the last local meditate's cells (the withheld ones absent), which nearly led to a wrong "g4 is just an artifact" read — resolve a gate-data conflict by RE-RUNNING the scorecard on production test_sets, never cached stats alone. Deviation: the drop-cols baseline stands in for the pre-regen baseline (bit-identical for the concat-backfill leagues). · operator call: KEEP QW-1 as a candidate (no revert; faint+ on NBA AST/FGA; no-filter philosophy). · next: the g4 dispersion lever — the served calibration clears the easy cells but not the withheld good-discrimination volume cells; improving it is research-gated → `research-analyst` brief before any dispersion-mechanism change
-- 2026-06-17 · QW-1 cache regen DONE (all 5 leagues). WNBA (18) + NFL (20) via concat-backfill — `OppTotal`/`Spread`/`GameTotal`/`Blowout` reconstructed per (Player, Date) from the gamelog, validated faithful by cached `Total` == reconstruction at rate 1.0 outside the corruption window; `fillna(0)` order + zstd/index=True match production. NBA needed more (totals corruption propagated into the date-varying `Player`/`Defense totals gain` slopes, corr 0.925, mean|Δ| ≈ 70% of IQR → only a per-gameday `get_training_matrix` reproduces them), but a full COLD rebuild hits two pre-existing crashes (empty-comps `KeyError`, zero-std `ZeroDivisionError`). Resolved via the operator's INCREMENTAL-CUTOFF third path: keep the pre-March warm rows (+ backfill the 4 cols from the corrected gamelog) and refill only March-onward via `get_training_matrix(cutoff=2026-02-28)`. The warm cutoff sidesteps both crashes — recent gamedays have mature comp pools, so no empty-comps and no zero-std column. All 21 NBA cells regenerated: corruption-window `Total` mean 114.6 (corrected; corrupt was ~165 = ×1/ln 2), blowout ≈ 0.26, the 4 QW-1 cols present, fantasy cell included. See [[training-matrix-regen-concat]]. · next: §6.3 deterministic A/B + ship-confirm on the regenerated cells (§7.2; NFL volume five first, co-batch QW-4/QW-5/M-1 to amortize)
-- 2026-06-17 · gamelog re-baked from corrected archive + blowout thresholds DATA-DERIVED. (1) NBA `gamelog.parquet` `totals` re-read from the fixed archive over the corruption window (2026-03-14→04-24): the 2308 inflated rows (old>135) deflated at ratio 1.4435 ≈ 1/ln 2, the 3274 `default_total` rows held or improved, window mean 133.8→114.7, max 194.3→134.8 (realistic), zero rows >145 remain, neighbors untouched — scoped to the window (inflation provably doesn't leak outside) so historical rows aren't degraded to default. (2) `_BLOWOUT_SPREAD_THRESHOLD` retuned from per-player-normalized starter playing-time vs |spread| knees (MIN/snap-pct/TimeShare): **the effect is FAVORITE-ONLY** (favorite rests starters; underdog starters play full/more, chasing) — the signed `Spread` feature carries the asymmetry so `Blowout` stays |spread|-based. NBA/WNBA 11→10 (knee ~10 ≈ p80), NFL 10→11 (snaps resist past p80), NHL 1→1.5 (TimeShare flat/rising in blowouts ⇒ NO effect, value nominal, expect Blowout inert + reverted at validation), MLB 2.5 unchanged (0% local line coverage, undated default). · next: apply `ev *= ln(2)` window fix to the PRODUCTION server archive, then the QW-1 per-league matrix regen picks up the corrected gamelog totals
-- 2026-06-17 · archive NBA `Totals` corruption ROOT-CAUSED + stopgapped + guardrailed (found while validating QW-1's `OppTotal`/`Total`, which read archived totals). Mechanism: `get_ev`'s default flipped to `"Gamma"` in `83c4b43` (3-12); Gamma at cv=1 is exponential (mean = median/ln 2 ≈ 1.4427×), so every NBA team total written 2026-03-14→04-24 inflated ×1.4427 until `a323049` (4-24) reset the default to SkewNormal. Moneyline clean (never calls `get_ev`); NBA-only; all books uniform. Recovery validated WITHOUT the paid API (corrected median 230.1 sits between clean neighbors; raw was 0.5% outside realistic range). Stopgap applied to local `archive.duckdb`: `ev *= ln(2)` over the window with an `ev>135` idempotency guard — window mean 165.6→114.8, clean neighbors untouched. Guardrail (operator ask, "game-line EV always normal"): new symmetric `dist="Normal"` branch in `get_odds` (forced alpha=0) + `moneylines._GAME_LINE_DIST="Normal"` pinning all four game-line `get_ev` calls, immune to any future default flip; pinned by `tests/golden/test_book_round_trip.py` (even-money price → line; Gamma diverges ×1.44). · next: apply the same `ev *= ln(2)` window fix to the PRODUCTION server archive, and re-bake gamelog `totals` from the corrected archive at QW-1 regen time
-- 2026-06-17 · §6.3 QW-1 game-script features BUILT (code+tests only): `OppTotal` + derived `Spread`/`GameTotal`/`Blowout` in `_game_context` both branches (historical = gamelog team→total map, upcoming = symmetric `archive.get_total(opp)`; existing `Total` untouched, doc's "two get_total calls" satisfied via the archive-baked gamelog), `_BLOWOUT_SPREAD_THRESHOLD` per-league constant, registered in `feature_filter` Common ×5 leagues. Parity harness extended + new `test_game_context_features.py` derivation pins (both blowout sides); 3 brittle integration fixtures fixed `M[cols]`→`M.reindex(columns=cols)` to match production `_step_build_splits` stale-cache resilience (QW-1 exposed the latent gap; determinism gate already did this). Real-NBA eyeball: `totals` = implied team total confirmed (2731 games, 13.9% equal, median spread 5.55, GameTotal ≈223, OppTotal non-null 1.0). All gates green (1 pre-existing golden red = untracked 0-byte `nba/corr_same_team.parquet`, unrelated). · next: §6.3 per-league regen + deterministic A/B on the NFL volume five (co-batch QW-4/QW-5/M-1 to amortize regen), then ship-confirm
-- 2026-06-17 · §6.0.4 train/live parity harness BUILT (`tests/golden/test_train_live_feature_parity.py`, ~3.5 s, sanity-flip verified) — Stage-3/4 feature work now unblocked. Free-passer sweep null (0 ship-True∧withheld in the 19 fresh `model_stats` rows); hole-#0b deferred (cycle-1 g4 churn only). also synced model-research `stat_meta.json` to origin/devel — demoted WNBA PA + NBA BLST `devel`→`withheld` (fail g4; `test_ship_gate_invariant` now green; served set == production). · next: §6.0.3 stale-importances purge or §6.3 QW-1 features
-- 2026-06-15 · INBOUND BUG (from dashboard-ux) · `strategies/profit_sim.py` has a payout/Kelly accounting bug that feeds the **S3 paired-Sharpe gate** (`training/scorecard.py`) and **Gate-2 Kelly yield** (`nightly._profit_sim_kelly_yield`): Sleeper `compute_payout` returns the gross boost (median 1.74) but `_settle_day` adds it as NET profit (should be `boost − 1`); the Kelly branch's `if payout <= 1: continue` skips every Underdog bet (payout 0.909) so Kelly mode bets only the overpaid Sleeper legs → MC bankroll explodes (+3.2M%); snapshot also carries `inf` boosts. Owner: fix the canonical engine (no duplicate sim), but it moves gate outputs ⇒ this lane + owner sign-off (§8). Fix payout-net + Kelly net/decimal + inf-guard, AND add optional staking params (flat-off-initial / daily-exposure cap / fractional-Kelly+cap) with **defaults = current behavior**, then revalidate S3 + Gate-2 and curate. Unblocks the dashboard-ux Strategy-simulator rework. Full diagnosis: memory `profit-sim-payout-kelly-bug`.
+- 2026-07-09 · Stage-0 engine work LANDED (§6 status revised in place): version stamping train→serve→history→dashboard + `backfill_history_eras.py`; board `--resume`/per-cell upsert/`swept_at`/`code_rev`/`--dry-run`; FamilySpec registry live. Residue → WS-3: confirm queue-manifest, auto archive-snapshot, family-as-swept-axis. Owner declared D1/D2 GO with 5M-credit backfill — WS-2 activation execution starts (plan: `~/.claude/plans/review-the-model-improvement-track-md-ha-lexical-storm.md`).
+- 2026-07-07 · plan reworked profit-first (owner reframe). WS-1 live-alignment = P1; MLB+NHL activation folded in (WS-2); family research DONE (WS-3: Double Poisson count + centered-SN continuous); copula stage-0 DONE (WS-4); sweep-engine Stage-0 spec written. §6 restructured to workstreams; sweep-era verdicts → refs §15. Confirm league-guard added — withheld MLB/NHL never auto-flip pre-D1/D2 (`_drop_activation_gated` + goldens).
+- 2026-06-28 · WS2 book-shape gate cleared but served-gate lift decoupled at w≈0.90 (research bet); book DREB stays in-family SkewNormal (measured skew ≪ bound), ladder table empty → ladder lift deferred. detail refs §15.
+- 2026-06-27 · WNBA 7→13/18 on built non-family levers (FTM hurdle+pit_ks; PR/RA/AST/OREB/FGA). built-lever lane closed; residual §6.6-bound (count family / centered-SN) + STL §6.3.
+- 2026-06-26 · §6.5 book-distribution audit + Pooling-half BLP + decoupled + weight-challenge probe-v2 all NO-GO; blend not the lever at w≈0.90; residual → §6.6/§6.1. refs §15.
+- 2026-06-25 · NFL hole #4 NEGATIVE — volume five feature-mature (485 cols), negative BSS = target-shape not features; `centered_additive_mean10` decisive (carries g1 flips on pure target transform) → §6.2/§6.6, not §6.3.
+- 2026-06-23 · Lever 1 reworked to calibrated HP search-gate + VALIDATED (ships WNBA PR); per-cell `hpo_selection` persists so cron reproduces.
+- 2026-06-22 · Gate 6 redesigned (OR of 3 one-sided legs + anchor hysteresis) + widened to all cells; `ratio_projvol` REFUTED 0/40, g6 validated; first full strategy board generated.
+- 2026-06-19 · Gate 6 added (anti-shrinkage); §6.3 feature batch 1 + Playoff/series shipped via §7.2 A/B.
+- 2026-06-17 · §6.0 train/live parity harness built; archive NBA Totals ×1.4427 corruption root-caused+fixed+guardrailed; QW-1 game-script A/B NO-SHIP across 15 cells.
+- 2026-06-15 · profit_sim payout/Kelly bug (inbound dashboard-ux) FIXED on `ship/profit-sim-net-fix` — feeds S3 paired-Sharpe + Gate-2 Kelly yield; memory `profit_sim_payout_kelly_bug`.
+- older lines live in git (`git log docs/handoffs/model_improvement_track.md`); durable sweep-era verdicts consolidated in [`../operation_ship_references.md`](../operation_ship_references.md) §15.

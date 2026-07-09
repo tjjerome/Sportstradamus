@@ -27,7 +27,7 @@ file's):
 # Shipped counts per league (withheld / devel / main)
 python3 -c "import json,collections; m=json.load(open('src/sportstradamus/data/config/stat_meta.json')); [print(l, dict(collections.Counter(c['shipped'] for c in v.values()))) for l,v in m.items()]"
 
-# Per-cell gate numbers (g1–g5, ship) — fresh after every meditate
+# Per-cell gate numbers (g1–g6, ship) — fresh after every meditate
 ls -la data/training/model_stats.csv
 
 # What production tracks
@@ -56,7 +56,7 @@ ledgers, not here):
   integration test — `tests/integration/test_end_to_end.py`.
 - Dashboard — `pages/` incl. Pick'em and Parlays recommendation views reading
   parquet snapshots only.
-- Model lifecycle — five offline gates ([`ship_gate.md`](ship_gate.md)),
+- Model lifecycle — six offline gates ([`ship_gate.md`](ship_gate.md)),
   live Gate-2 graduation (`check-graduation`, `gate-status` cron),
   `stat_meta.json` `shipped` release control (CONTRIBUTING §Shipping).
 
@@ -68,11 +68,11 @@ an exception. A session works one lane and reads that lane's brief.
 
 | Lane | Mission | Status | Entry gate | Brief |
 |---|---|---|---|---|
-| `model-track` | Ship-75 breadth → Ship-90; the lead lane | ACTIVE | — | [model_improvement_track.md](handoffs/model_improvement_track.md) |
+| `model-track` | Profit-first: beat the DFS apps/mispriced books live (WS-1) + standing breadth harvest → D3/D5; the lead lane | ACTIVE | — | [model_improvement_track.md](handoffs/model_improvement_track.md) |
 | `sim-bettor-ledger` | Pre-registered paper-trading ledger + circuit breakers | QUEUED | D6 policy sign-off | [handoffs/sim-bettor-ledger.md](handoffs/sim-bettor-ledger.md) |
 | `sleeper-parity` | Full Sleeper decision-layer parity | QUEUED | stage-0 product verification | [handoffs/sleeper-parity.md](handoffs/sleeper-parity.md) |
 | `parlay-dependence` | Copula on PIT residuals — biggest product-EV lever | BLOCKED (on: D3) | D3 | [handoffs/parlay-dependence.md](handoffs/parlay-dependence.md) |
-| `mlb-nhl-activation` | Audit, then activate the two withheld leagues | QUEUED | stage-0 audit → D1/D2 | [handoffs/mlb-nhl-activation.md](handoffs/mlb-nhl-activation.md) |
+| `mlb-nhl-activation` | Audit, then activate the two withheld leagues (matrices + serve-wiring done) | ACTIVE | D1/D2 to ship | [handoffs/mlb-nhl-activation.md](handoffs/mlb-nhl-activation.md) |
 | `dashboard-ux` | Narrative-first dashboard: six surfaces, slip builder, receipts, celestial skin | ACTIVE | — | [handoffs/dashboard-ux.md](handoffs/dashboard-ux.md) |
 | `bestball-2027` | Draft products for the 2027 season | BLOCKED (on: D4) | D4 | [handoffs/bestball-2027.md](handoffs/bestball-2027.md) |
 | `hygiene-closeout` | Triage, calibration re-run, drift fixes, recurring checks | ACTIVE | — | [handoffs/hygiene-closeout.md](handoffs/hygiene-closeout.md) |
@@ -95,7 +95,7 @@ Everything not listed here is pivot-free.
 
 | Window | In season | Best-fit lanes |
 |---|---|---|
-| Jun–Aug | WNBA, MLB | ledger (live slates to log), MLB audit (D1 decays with the season), Sleeper parity before NFL |
+| Jun–Aug | WNBA, MLB | model-track live-alignment (WS-1 — WNBA is the only live feedback pre-Sep), ledger (live slates to log), MLB audit (D1 decays with the season), Sleeper parity before NFL |
 | Sep–Jan | NFL, NBA, NHL | NFL cell grind (Gate-2 soak needs live games), Sleeper payoff, NHL activation if D2=GO |
 | Feb–May | NBA | parlay-dependence, Ship-90, Best Ball foundations (D4) |
 
@@ -162,7 +162,7 @@ sketches live in the archived v2.
 | Fact | Home |
 |---|---|
 | Shipped counts / release surface | `src/sportstradamus/data/config/stat_meta.json` (`shipped`) |
-| Gate thresholds g1–g5, Gate 2 | [`ship_gate.md`](ship_gate.md) |
+| Gate thresholds g1–g6, Gate 2 | [`ship_gate.md`](ship_gate.md) |
 | Model lever stack, per-league path, stop rules | [`model_improvement_track.md`](handoffs/model_improvement_track.md) §6–§8 |
 | Per-cell gate numbers | `data/training/model_stats.csv` (mirror of the parquet) |
 | Lane procedure, locked decisions, status | `docs/handoffs/{lane}.md` (model track: [`model_improvement_track.md`](handoffs/model_improvement_track.md)) |
@@ -174,6 +174,7 @@ sketches live in the archived v2.
 
 ## Changelog
 
+- model-track reframed profit-first: WS-1 live-alignment = P1, MLB/NHL activation folded in (ACTIVE), family research done (WS-3), copula stage-0 done (WS-4); g1–g5→g1–g6; seasonality Jun–Aug += live-alignment.
 - P8 planned (spec + 6 phase plans in `docs/superpowers/`, incl. D constellation shapes + E art catalog); Sheets-era data retirement folded into dashboard-ux as Phase 0; §8 gains the ρ-overlay follow-up.
 - model-track lane consolidated: ship75/ship90/feature-plan/brief merged into `model_improvement_track.md`; lane row + doc map repointed.
 - v3 replaces v2: swimlane structure, briefs in `docs/handoffs/`, change-absorption protocol, Sleeper parity + ledger + league-activation lanes added.

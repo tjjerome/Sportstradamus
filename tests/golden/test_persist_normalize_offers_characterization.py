@@ -128,3 +128,23 @@ def test_position_label_retained_when_present():
 
     assert "Position" in out.columns
     assert out.loc[0, "Position"] == "G1"
+
+
+def test_model_version_retained_when_present():
+    """The WS-1 model-version stamp survives the projection into current_offers."""
+    df = pd.DataFrame(
+        {
+            "Player": ["P"],
+            "Model Version": ["20260708.ratio_meanyr.deadbeef"],
+            "Boost": [1.0],
+            "Model EV": [0.5],
+            "Market EV": [0.0],
+            "Dist": ["Gamma"],
+            "Model Param": [2.0],
+        }
+    )
+
+    out = _normalize_offers(df)
+
+    assert "Model Version" in out.columns
+    assert out.loc[0, "Model Version"] == "20260708.ratio_meanyr.deadbeef"

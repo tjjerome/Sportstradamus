@@ -1,6 +1,9 @@
 # Parlay Dependence — copula on PIT residuals
 
-> Status: BLOCKED (on: D3 — see roadmap v3 §7)
+> Status: BLOCKED (on: D3 — see roadmap v3 §7). Of D3's three inputs the stage-0 research brief is
+> **done** (R3, §6 Stage 0) and the census is a one-session Sonnet task; **sleeper-parity is the
+> live blocker** — serialized with this lane in the same files (§5.1) and unscheduled, so it needs
+> owner scheduling before D3 can fire (model_improvement_track.md §8.2 hole #13).
 
 ## 1. Mission & money logic
 
@@ -130,19 +133,23 @@ outside this footprint is a stop condition (§8).
 
 ## 6. Stage plan
 
-**Stage 0 — Research dive + data census.**
+**Stage 0 — Research dive + data census. Research half DONE (R3); census remains.**
 - Goal: an Opus statistician's brief answering the §4 questions, plus a
   census of usable history.
-- Entry: none — read-only; may run early pre-D3 if the owner wants (it is a
-  D3 input). Does not touch `prediction/`.
-- Scope: `research-analyst` dispatch (definition:
-  `.claude/agents/research-analyst.md`; Opus-backed per its frontmatter;
-  output `/tmp/researcher_{topic}.md`); census script against gamelogs.
-- Acceptance: brief exists with an implementable verdict (durable verdict
-  pointer committed to the §10 ledger); a census **table** — historical
-  same-game leg-pair counts per league and market-pair, from the same
-  gamelog window `correlate.py` uses.
-- Est. 1–2 sessions.
+- **Research verdict (done early, Fable R3 — `/tmp/researcher_copula_stage0.md`):** Gaussian
+  copula default; **t-copula only as a tested branch** (adopt iff pooled exceedance-Spearman clears
+  a simulated Gaussian null in both tails AND pooled pseudo-MLE with one ν per league gives ΔAIC≥10,
+  ν̂≤15 — never per-pair ν). EB shrinkage is **two-level hierarchical in Fisher-z** (team → pair-type
+  mean → 0), not the incumbent's shrink-thin-pairs-toward-zero. Rivals-first is a YES (2-dim,
+  incumbent ρ suffices at d=2 — the cheap early product win, model_improvement_track.md §6.11).
+  Full stage-acceptance gates and the PIT-source recipe are in the brief and mirrored in §6.11.
+- **Remaining Stage-0 work: the census script** `census_parlay_pairs.py` (read-only Sonnet task
+  over the `{LEAGUE}_corr.parquet` caches). **Kill rule: a league is viable iff ≥15 fit-eligible
+  pair-types reach N≥300.**
+- Entry: none — read-only; may run early pre-D3 (it is a D3 input). Does not touch `prediction/`.
+- Acceptance: a census **table** — historical same-game leg-pair counts per league and market-pair,
+  from the same gamelog window `correlate.py` uses; the R3 verdict pointer is committed to §10.
+- Est. 1 session (census only; research done).
 - Kill: census shows pair counts too thin to beat the incumbent's shrunk
   matrix in any league → record verdict, close lane DONE(no-ship).
 
@@ -250,4 +257,5 @@ blocking reason, set the status line to BLOCKED (on: …), flip the roadmap v3
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-07 · research done early · Fable R3 copula brief (`/tmp/researcher_copula_stage0.md`) settles the §4 questions — Gaussian default + t-branch test, hierarchical Fisher-z EB, Rivals-first YES. Stage 0 research half DONE; census script `census_parlay_pairs.py` is the remaining Stage-0 work. Verdict mirrored in model_improvement_track.md §6.11 (WS-4). sleeper-parity named the live D3 blocker (needs owner scheduling) · next: census script (early, owner-optional); D3 still owner-gated
 - 2026-06-10 · created · brief drafted from roadmap-v3 migration · next: wait for D3; stage-0 census can run early if owner wants

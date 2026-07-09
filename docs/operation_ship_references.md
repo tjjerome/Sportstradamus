@@ -27,6 +27,7 @@
 12. [Per-change-type inference-path checklist](#12-per-change-type-inference-path-checklist)
 13. [Cross-league caveats](#13-cross-league-caveats)
 14. [References [1]–[48]](#14-references)
+15. [Ship-75 sweep-era verdicts](#15-ship-75-sweep-era-verdicts)
 
 ---
 
@@ -472,6 +473,36 @@ Renumbered from the deprecated context doc.
 [83] Taylor, L. R. (1961). Aggregation, variance and the mean. *Nature* 189, 732–735. DOI 10.1038/189732a0. *(mean-variance power law var=a·μ^b; b<1 = ordering/sub-Poisson — WS2 Q1 σ²(μ) form, DREB b≈0.34)*
 [84] Cobain, M. R. D. et al. (2019). Taylor's power law captures the effects of environmental variability on community structure. *J. Animal Ecology* 88(2), 290–301. DOI 10.1111/1365-2656.12923. *(temporal Taylor's-law exponent interpretation: clustering vs ordering regime)*
 [85] Busetti, F. (2017). Quantile aggregation of density forecasts. *Oxford Bulletin of Economics and Statistics* 79(4), 495–512. DOI 10.1111/obes.12163. *(quantile/Vincentization vs linear pool — WS2(a) consensus aggregation alternative)*
+
+---
+
+## 15. Ship-75 sweep-era verdicts
+
+Durable verdicts from the Ship-75 strategy sweep, consolidated here as the citable home for the
+trimmed `model_improvement_track.md` §10 ledger. Full narrative is in git
+(`git log docs/handoffs/model_improvement_track.md`); the memory links carry the operational
+lesson. The live plan-body homes are §3.4 (lever table), §6.5 (blend closed-status), §8.2
+(resolved holes).
+
+**Rework briefs.** The profit-first rework is supported by four briefs — count family (Double
+Poisson), continuous family (centered-SN), copula stage-0 (Gaussian + t-branch), and sweep UX +
+version attribution — at
+`/tmp/researcher_{count_family,continuous_family,copula_stage0,sweep_ux_versioning}.md`, mirrored
+under `~/.claude/plans/review-the-current-state-partitioned-taco-agent-*.md`.
+
+| Verdict | Status | Anchor |
+|---|---|---|
+| Gate 6 anti-shrinkage redesigned → OR of 3 one-sided legs, widened to all cells | Built, live | `[[gate6_anti_shrinkage_holdout_blind]]`; track §7.1 |
+| `ratio_projvol` normalization | Refuted 0/40 (manufactured zero-inflated low-volume tail) | `[[ratio_projvol_refuted]]`; track §6.2 |
+| Lever 1 calibrated HP search-gate | Validated (ships WNBA PR); per-cell `hpo_selection` persists | `[[calibration_hp_selection_lever]]`; track §6.1 |
+| WNBA built-lever lane | Closed at 13/18 (FTM hurdle+pit_ks; PR/RA/AST/OREB/FGA); rest §6.6-bound | `[[operation_ship_75_state]]`; track §6.9 |
+| §6.5 book-distribution audit | NO-GO standalone rebuild (decoupled from served gate at w≈0.90) | `[[book_distribution_audit_nogo]]` |
+| §6.5 Pooling-half BLP + decoupled | NO-GO both structures + weight-challenge probe-v2 (0/9 OOS) | `[[pooling_half_blp_nogo]]` |
+| WS2 shaped-book leg | Split — book-only fallback GO, served-blend NO-GO | `[[ws2_settling_split_verdict]]`, `[[book_skew_shape_borrow_refuted]]` |
+| Rung-C whole-CDF isotonic-PIT | Ships continuous (PA); dead on count | `[[rung_c_whole_cdf_recal]]` |
+| NFL volume five | Feature-mature (485 cols); negative BSS = target-shape → §6.2/§6.6 | `[[nfl_volume_cells_feature_mature]]` |
+| Deterministic A/B g4 gains | Oversell (feature-poor baseline underfits variance); read direction not magnitude | `[[deterministic_ab_g4_oversell]]` |
+| Warm-start `enqueue_trial` on `λ=0` pickle | Crashes `--force`/warm; workaround = move pickle aside → cold start | `[[warm_start_enqueue_lambda_zero_crash]]` |
 
 ---
 
