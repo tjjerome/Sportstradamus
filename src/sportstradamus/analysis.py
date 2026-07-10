@@ -1085,16 +1085,20 @@ def compute_brier_skill_score(subset, base_rate=0.5):
     """Compute Brier Skill Score: 1 - Brier/Brier_ref.
 
     base_rate: climatological base rate (default 0.5 for Over/Under).
-    Returns NaN if subset is empty.
+    Rows with no bet placed (``Bet`` NaN) or a NaN model probability are
+    excluded before scoring. Returns NaN if nothing is left to score.
     """
     if len(subset) == 0:
         return np.nan
-    hits = (subset["Bet"] == subset["Result"]).astype(int)
     prob_col = (
         "Win Prob"
         if "Win Prob" in subset.columns and subset["Win Prob"].notna().any()
         else "Model EV"
     )
+    subset = subset[subset["Bet"].notna() & subset[prob_col].notna()]
+    if len(subset) == 0:
+        return np.nan
+    hits = (subset["Bet"] == subset["Result"]).astype(int)
     brier = brier_score_loss(hits, subset[prob_col].clip(0, 1))
     brier_ref = base_rate * (1 - base_rate)
     if brier_ref == 0:
@@ -1107,20 +1111,26 @@ def compute_book_brier_skill_score(subset):
 
     Mirrors training-side ``brier_skill_score``: ``1 - brier(model)/brier(book)``.
     Hits are ``(Bet == Result)``; the model probability column is ``Win Prob`` with
-    a fallback to ``Model EV``; the book probability column is ``Market Prob``. Returns
-    NaN if subset is empty, ``Market Prob`` is missing or all-NaN, or the book's
-    Brier is zero (degenerate baseline).
+    a fallback to ``Model EV``; the book probability column is ``Market Prob``. Rows
+    with no bet placed or a NaN model/book probability are excluded before scoring.
+    Returns NaN if nothing is left to score, ``Market Prob`` is missing or all-NaN,
+    or the book's Brier is zero (degenerate baseline).
     """
     if len(subset) == 0:
         return np.nan
     if "Market Prob" not in subset.columns or subset["Market Prob"].isna().all():
         return np.nan
-    hits = (subset["Bet"] == subset["Result"]).astype(int)
     prob_col = (
         "Win Prob"
         if "Win Prob" in subset.columns and subset["Win Prob"].notna().any()
         else "Model EV"
     )
+    subset = subset[
+        subset["Bet"].notna() & subset[prob_col].notna() & subset["Market Prob"].notna()
+    ]
+    if len(subset) == 0:
+        return np.nan
+    hits = (subset["Bet"] == subset["Result"]).astype(int)
     brier_model = brier_score_loss(hits, subset[prob_col].clip(0, 1))
     brier_book = brier_score_loss(hits, subset["Market Prob"].clip(0, 1))
     if brier_book == 0:
