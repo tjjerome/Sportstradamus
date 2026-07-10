@@ -1,0 +1,11 @@
+{
+  "cycle_credits": 20000,
+  "cycle_reset_day": 1,
+  "enforce": false,
+  "broad_slots_per_day": 2,
+  "floor_safety_factor": 1.25,
+  "floor_min_per_day": 400,
+  "default_league_run_cost": 500,
+  "estimate_window_days": 7,
+  "league_priority": ["NBA", "MLB", "NFL", "NHL", "WNBA"]
+}

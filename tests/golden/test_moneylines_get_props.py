@@ -28,6 +28,10 @@ _GAME_DATE = (_DATE + timedelta(days=1)).astimezone(_CHICAGO).strftime("%Y-%m-%d
 
 _PROPS = {"NBA": {"player_points": "PTS"}}
 _SPORTS = [{"key": "basketball_nba", "title": "NBA", "active": True}]
+_SPORTS_TWO_LEAGUES = [
+    {"key": "basketball_nba", "title": "NBA", "active": True},
+    {"key": "basketball_wnba", "title": "WNBA", "active": True},
+]
 _EVENTS = [{"id": "ev1", "commence_time": _COMMENCE}]
 _GAME = {
     "home_team": "Los Angeles Lakers",
@@ -121,3 +125,31 @@ def test_get_props_live_path(monkeypatch, assert_player_books_close) -> None:
     assert returned is archive
     assert_player_books_close(archive.player_books, _EXPECTED_PLAYER)
     assert written == [_EXPECTED_LEDGER]
+
+
+def test_get_props_leagues_filter(monkeypatch) -> None:
+    routes = {
+        moneylines.ODDS_API_SPORTS_URL: _SPORTS_TWO_LEAGUES,
+        moneylines.ODDS_API_EVENTS_URL.format(sport="basketball_nba"): _EVENTS,
+        moneylines.ODDS_API_EVENT_ODDS_URL.format(sport="basketball_nba", eventId="ev1"): _GAME,
+    }
+    calls = []
+
+    def fake_get(url, params=None):
+        calls.append(url)
+        return _FakeResponse(routes[url])
+
+    monkeypatch.setattr(moneylines, "_get_with_retry", fake_get)
+    monkeypatch.setattr(moneylines, "read_upcoming_events", list)
+    monkeypatch.setattr(moneylines, "write_upcoming_events", lambda events: None)
+    archive = _FakeArchive()
+
+    moneylines.get_props(archive, "kp", _PROPS, date=_DATE, leagues=("NBA",))
+
+    # WNBA is active in the index but excluded by the governor's allowance:
+    # its events endpoint is never hit.
+    assert calls == [
+        moneylines.ODDS_API_SPORTS_URL,
+        moneylines.ODDS_API_EVENTS_URL.format(sport="basketball_nba"),
+        moneylines.ODDS_API_EVENT_ODDS_URL.format(sport="basketball_nba", eventId="ev1"),
+    ]

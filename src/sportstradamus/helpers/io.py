@@ -251,6 +251,7 @@ def delete_user_slip(slip_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 UPCOMING_EVENTS_PATH = _RUNTIME_DIR / "upcoming_events.json"
+ODDS_USAGE_LEDGER_PATH = _RUNTIME_DIR / "odds_api_usage.jsonl"
 
 
 def read_upcoming_events() -> list[dict]:
