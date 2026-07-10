@@ -47,7 +47,51 @@ PROGRESS_PATH = Path("archive/backfill_progress.json")
 
 # creds/keys.json entry funding paid historical fetches; get_props takes the
 # key string itself while get_moneylines takes the whole creds dict.
-HISTORICAL_KEY_NAME = "odds_api_plus"
+HISTORICAL_KEY_NAME = "odds_api_max"
+
+# Historical *_alternate market keys (availability probed 2026-07-09, all
+# five leagues) mapped onto the primary market's stat_map name so their rungs
+# merge into the same ladder. Deliberately NOT in stat_map: live confer must
+# never request them.
+ALT_MARKET_KEYS = {
+    "MLB": {
+        "batter_home_runs_alternate": "home runs",
+        "batter_hits_alternate": "hits",
+        "batter_total_bases_alternate": "total bases",
+        "pitcher_strikeouts_alternate": "pitcher strikeouts",
+    },
+    "NHL": {
+        "player_points_alternate": "points",
+        "player_assists_alternate": "assists",
+        "player_shots_on_goal_alternate": "shots",
+        "player_goals_alternate": "goals",
+    },
+    "NBA": {
+        "player_points_alternate": "PTS",
+        "player_rebounds_alternate": "REB",
+        "player_assists_alternate": "AST",
+        "player_threes_alternate": "FG3M",
+    },
+    "WNBA": {
+        "player_points_alternate": "PTS",
+        "player_rebounds_alternate": "REB",
+        "player_assists_alternate": "AST",
+        "player_threes_alternate": "FG3M",
+    },
+    "NFL": {
+        "player_pass_yds_alternate": "passing yards",
+        "player_rush_yds_alternate": "rushing yards",
+        "player_reception_yds_alternate": "receiving yards",
+        "player_receptions_alternate": "receptions",
+    },
+}
+
+# Close-layer rows stamp game-day 23:00 UTC — after every pre-game training
+# read, so the layer is evaluation-only (CLV / movement) by construction.
+CLOSE_LAYER_HOUR = 23
+# Feature-layer content must predate the 12:00 UTC training read or backfilled
+# lines would leak information the live pipeline never had.
+FEATURE_SNAPSHOT_MAX_HOUR = 12
 
 # Odds API sport keys for the leagues whose player props we archive.
 ODDS_API_SPORT_KEYS = {
@@ -81,21 +125,27 @@ class _CaptureArchive:
         pass
 
 
-def _load_keys_and_props(league, markets=None):
-    """Return ``(apikey, props_subset)`` filtered to the requested markets."""
+def _load_keys_and_props(league, markets=None, alt_mode=None):
+    """Return ``(apikey, props_subset)`` for the requested markets and alt mode."""
     with open(pkg_resources.files("sportstradamus.creds") / "keys.json") as f:
         apikey = json.load(f)
     with open(pkg_resources.files(data) / "config" / "stat_map.json") as f:
         full = json.load(f)["Odds API"][league]
     if markets is None:
-        return apikey, {league: full}
-    want = {m.strip() for m in markets.split(",")}
-    subset = {key: name for key, name in full.items() if name in want}
-    missing = want - set(subset.values())
-    if missing:
-        raise click.ClickException(
-            f"markets not in stat_map[Odds API][{league}]: {sorted(missing)}"
-        )
+        subset = dict(full)
+    else:
+        want = {m.strip() for m in markets.split(",")}
+        subset = {key: name for key, name in full.items() if name in want}
+        missing = want - set(subset.values())
+        if missing:
+            raise click.ClickException(
+                f"markets not in stat_map[Odds API][{league}]: {sorted(missing)}"
+            )
+    if alt_mode:
+        alt = ALT_MARKET_KEYS.get(league)
+        if not alt:
+            raise click.ClickException(f"no alternate market keys defined for {league}")
+        subset = dict(alt) if alt_mode == "altonly" else {**subset, **alt}
     return apikey, {league: subset}
 
 
@@ -132,9 +182,19 @@ def _report_dry_run(capture):
         click.echo(f"  ladder rungs {market}: {n}")
 
 
-def _job_sig(league, props):
-    """Stable key for the resume log: league + the exact market set."""
-    return f"{league}|{','.join(sorted(props[league].values()))}"
+def _job_sig(league, props, alt_mode=None, layer="feature"):
+    """Stable key for the resume log: league + market set, tagged by mode.
+
+    Alt-mode and close-layer runs fetch different data for the same market
+    names, so they must not share resume state with the plain feature job
+    (whose historical sig format stays untouched).
+    """
+    sig = f"{league}|{','.join(sorted(props[league].values()))}"
+    if alt_mode:
+        sig += f"|{alt_mode}"
+    if layer != "feature":
+        sig += f"|{layer}"
+    return sig
 
 
 def _load_done(job_sig):
@@ -157,9 +217,10 @@ def _as_of(d, snapshot_hour):
     return pytz.utc.localize(datetime.datetime(d.year, d.month, d.day, snapshot_hour))
 
 
-def _probe(apikey, props, league, sport_key, dates, snapshot_hour):
+def _probe(apikey, props, league, sport_key, dates, snapshot_hour, layer="feature"):
     """Dry run: fetch + parse into a capturing stub, print ev spread, no write."""
     archive = _CaptureArchive()
+    observed_at_hour = CLOSE_LAYER_HOUR if layer == "close" else None
     for d in dates:
         click.echo(f"  fetching {d} (as-of {_as_of(d, snapshot_hour):%Y-%m-%d %H:%MZ})")
         get_props(
@@ -169,28 +230,33 @@ def _probe(apikey, props, league, sport_key, dates, snapshot_hour):
             date=_as_of(d, snapshot_hour),
             sport=league,
             key=sport_key,
+            observed_at_hour=observed_at_hour,
         )
     click.echo("DRY RUN — per-market book-ev spread:")
     _report_dry_run(archive)
 
 
-def _backfill(apikey, props, league, sport_key, dates, snapshot_hour):
+def _backfill(
+    apikey, props, league, sport_key, dates, snapshot_hour, alt_mode=None, layer="feature"
+):
     """Fetch each date, flushing + checkpointing per date so a credit-out exit
     is safe and the same command resumes from where it stopped."""
-    job_sig = _job_sig(league, props)
+    job_sig = _job_sig(league, props, alt_mode, layer)
     done = _load_done(job_sig)
     remaining = [d for d in dates if d.isoformat() not in done]
     click.echo(f"{league}: {len(done)} done, {len(remaining)} to fetch this run")
 
     archive = Archive()
+    observed_at_hour = CLOSE_LAYER_HOUR if layer == "close" else None
     for i, d in enumerate(remaining, 1):
         click.echo(
             f"  [{i}/{len(remaining)}] {d} (as-of {_as_of(d, snapshot_hour):%Y-%m-%d %H:%MZ})"
         )
         try:
-            get_moneylines(
-                archive, apikey, date=_as_of(d, snapshot_hour), sport=league, key=sport_key
-            )
+            if layer == "feature":
+                get_moneylines(
+                    archive, apikey, date=_as_of(d, snapshot_hour), sport=league, key=sport_key
+                )
             get_props(
                 archive,
                 apikey[HISTORICAL_KEY_NAME],
@@ -198,6 +264,7 @@ def _backfill(apikey, props, league, sport_key, dates, snapshot_hour):
                 date=_as_of(d, snapshot_hour),
                 sport=league,
                 key=sport_key,
+                observed_at_hour=observed_at_hour,
             )
         except OddsAPIAuthError as e:
             click.echo(f"STOP (401): {e}")
@@ -214,24 +281,69 @@ def _backfill(apikey, props, league, sport_key, dates, snapshot_hour):
 
 @click.command()
 @click.option("--league", default="NFL", help="League whose props to backfill.")
-@click.option("--markets", required=False, default=None, help="Comma-separated market names (stat_map values).")
+@click.option(
+    "--markets",
+    required=False,
+    default=None,
+    help="Comma-separated market names (stat_map values).",
+)
 @click.option("--start", required=True, help="First game-date, YYYY-MM-DD.")
 @click.option("--end", required=True, help="Last game-date, YYYY-MM-DD.")
 @click.option("--snapshot-hour", default=6, help="UTC hour for the as-of API snapshot.")
 @click.option("--max-dates", default=0, help="Process at most N game-dates this run (0 = all).")
 @click.option("--check-all", is_flag=True, help="Check all dates even if not in archive.")
 @click.option("--dry-run", is_flag=True, help="Fetch + parse but do not write (prints ev spread).")
-def main(league, markets, start, end, snapshot_hour, max_dates, check_all, dry_run):
+@click.option(
+    "--alternates",
+    "alt_mode",
+    flag_value="alt",
+    default=None,
+    help="Also fetch *_alternate market keys (ladder rungs only).",
+)
+@click.option(
+    "--alternates-only",
+    "alt_mode",
+    flag_value="altonly",
+    help="Fetch ONLY *_alternate market keys (ladder rungs only).",
+)
+@click.option(
+    "--layer",
+    type=click.Choice(["feature", "close"]),
+    default="feature",
+    help="feature: pre-read snapshot (observed_at 01:00, includes game lines). "
+    "close: evaluation-only closing snapshot (observed_at 23:00, props only).",
+)
+def main(
+    league, markets, start, end, snapshot_hour, max_dates, check_all, dry_run, alt_mode, layer
+):
     """Re-fetch real historical book EVs for degenerate-seed markets.
 
     Resumable: completed game-dates are logged to ``PROGRESS_PATH`` after each
     date's write, so a run that hits the Odds API credit limit (HTTP 401) exits
     cleanly and the same invocation picks up where it left off.
     """
-    apikey, props = _load_keys_and_props(league, markets)
+    if layer == "feature" and snapshot_hour > FEATURE_SNAPSHOT_MAX_HOUR:
+        raise click.ClickException(
+            f"feature-layer snapshots must be <= {FEATURE_SNAPSHOT_MAX_HOUR}:00 UTC "
+            "(the training read hour) — later content would leak post-read lines"
+        )
+    if layer == "close" and snapshot_hour <= FEATURE_SNAPSHOT_MAX_HOUR:
+        raise click.ClickException(
+            f"close-layer snapshots belong late in the day (hour > {FEATURE_SNAPSHOT_MAX_HOUR})"
+        )
+    apikey, props = _load_keys_and_props(league, markets, alt_mode)
     sport_key = ODDS_API_SPORT_KEYS[league]
     if check_all:
-        dates = [datetime.datetime.strptime(start, "%Y-%m-%d") + datetime.timedelta(days=i) for i in range((datetime.datetime.strptime(end, "%Y-%m-%d") - datetime.datetime.strptime(start, "%Y-%m-%d")).days + 1)]
+        dates = [
+            datetime.datetime.strptime(start, "%Y-%m-%d") + datetime.timedelta(days=i)
+            for i in range(
+                (
+                    datetime.datetime.strptime(end, "%Y-%m-%d")
+                    - datetime.datetime.strptime(start, "%Y-%m-%d")
+                ).days
+                + 1
+            )
+        ]
     else:
         dates = _game_dates(league, props, start, end)
     click.echo(
@@ -239,14 +351,16 @@ def main(league, markets, start, end, snapshot_hour, max_dates, check_all, dry_r
     )
 
     if dry_run:
-        _probe(apikey, props, league, sport_key, dates[: max_dates or len(dates)], snapshot_hour)
+        _probe(
+            apikey, props, league, sport_key, dates[: max_dates or len(dates)], snapshot_hour, layer
+        )
         return
 
     if max_dates:
-        job_sig = _job_sig(league, props)
+        job_sig = _job_sig(league, props, alt_mode, layer)
         done = _load_done(job_sig)
         dates = [d for d in dates if d.isoformat() not in done][:max_dates]
-    _backfill(apikey, props, league, sport_key, dates, snapshot_hour)
+    _backfill(apikey, props, league, sport_key, dates, snapshot_hour, alt_mode, layer)
 
 
 if __name__ == "__main__":

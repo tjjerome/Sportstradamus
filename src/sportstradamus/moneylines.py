@@ -10,8 +10,9 @@ Two internal workhorses:
   no-vig EV per book, and writes them to the per-market archive buckets.
 
 Both support a historical mode (``date != today``) that routes the request
-through ``the-odds-api.com``'s historical endpoints; that path uses the
-paid ``odds_api_plus`` key because the free tier doesn't include history.
+through ``the-odds-api.com``'s historical endpoints; that path spends from
+the dedicated high-limit ``odds_api_max`` backfill key (the free tier has
+no history), while live confer/close-lines stay on ``odds_api``/``odds_api_plus``.
 
 The ``--close-lines`` flag swaps the broad pipeline for a cheap targeted
 pass: it reads ``data/upcoming_events.json`` (refreshed by every broad
@@ -220,11 +221,13 @@ def _moneyline_sports(apikey, sport, key, historical):
 def _moneyline_request(apikey, date, historical, low_on_credits):
     markets = ["h2h", "totals", "spreads"]
     if historical:
+        # Historical fetches are the backfill path — funded by the dedicated
+        # high-limit key, never the live confer/close-lines keys.
         return (
             ODDS_API_HISTORICAL_ODDS_URL,
             _HIST_DAY_WINDOW,
             {
-                "apiKey": apikey["odds_api_plus"],
+                "apiKey": apikey["odds_api_max"],
                 "regions": "us",
                 "date": date.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "markets": ",".join(markets),
@@ -395,7 +398,7 @@ def _props_request(apikey, date, historical):
     )
 
 
-def _store_sport_props(archive, ledger, sport, league, props, date, req):
+def _store_sport_props(archive, ledger, sport, league, props, date, req, observed_at_hour=None):
     """Fetch and archive one sport's events.
 
     Returns ``False`` when a per-event odds endpoint 404s (the caller aborts the
@@ -424,7 +427,7 @@ def _store_sport_props(archive, ledger, sport, league, props, date, req):
         if res.status_code != HTTPStatus.OK:
             continue
 
-        observed_at = _historical_observed_at(req.historical, gameDate)
+        observed_at = _historical_observed_at(req.historical, gameDate, observed_at_hour)
         _archive_event_props(
             archive,
             res.json()["data"] if req.historical else res.json(),
@@ -452,8 +455,14 @@ def get_props(
     sport="All",
     key=None,
     fixture_dir: Path | None = None,
+    observed_at_hour=None,
 ):
-    """Fetch per-event player-prop markets and store book-level EVs."""
+    """Fetch per-event player-prop markets and store book-level EVs.
+
+    ``observed_at_hour`` overrides the historical snapshot stamp (default
+    game-day 01:00): close-layer backfills stamp a post-read hour so their
+    rows are evaluation-only by construction.
+    """
     stat_cv["NCAAB"] = stat_cv["NBA"]
     stat_cv["NCAAF"] = stat_cv["NFL"]
     historical = date.date() != datetime.today().date()
@@ -468,7 +477,9 @@ def get_props(
     req = _props_request(apikey, date, historical)
     ledger = {(e["sport_key"], e["event_id"]): e for e in read_upcoming_events()}
     for sport, league in sports:
-        if not _store_sport_props(archive, ledger, sport, league, props, date, req):
+        if not _store_sport_props(
+            archive, ledger, sport, league, props, date, req, observed_at_hour
+        ):
             return archive
 
     if not historical:
@@ -477,16 +488,18 @@ def get_props(
     return archive
 
 
-def _historical_observed_at(historical, gameDate):
+def _historical_observed_at(historical, gameDate, hour=None):
     """Snapshot stamp for backfilled rows, or ``None`` for live runs.
 
     Live writes default to ``utcnow()``. Backfilled rows stamp game-day
     01:00 so they beat the migrated midnight (``00:00``) rows on recency
     while staying before any ``kickoff - 8h`` point-in-time training read.
+    ``hour`` overrides that for close-layer backfills, whose rows must land
+    AFTER every pre-game read (evaluation-only layer).
     """
     if not historical:
         return None
-    return datetime(gameDate.year, gameDate.month, gameDate.day, 1, 0, 0)
+    return datetime(gameDate.year, gameDate.month, gameDate.day, hour or 1, 0, 0)
 
 
 _PROP_SIDE_RENAME = {"Yes": "Over", "No": "Under"}
@@ -545,8 +558,15 @@ def _devig_ladder(rows):
 
 
 def _event_player_props(book, market, league, props, odds):
-    """Accumulate one book's player-prop market into ``odds`` (mutated)."""
+    """Accumulate one book's player-prop market into ``odds`` (mutated).
+
+    ``*_alternate`` market keys (requested only by close-layer backfills; they
+    map onto the same market name as their primary key) contribute their rungs
+    to the ladder and nothing else — pricing an alt rung as the book's EV would
+    corrupt the consensus.
+    """
     market_name = props[league].get(market["key"])
+    is_alternate = market["key"].endswith("_alternate")
     odds.setdefault(market_name, {})
 
     outcomes = [
@@ -562,7 +582,9 @@ def _event_player_props(book, market, league, props, odds):
         lines = list(lines)
         rungs = _devig_ladder(lines)
         if rungs:
-            entry["Ladder"][book["key"]] = rungs
+            entry["Ladder"].setdefault(book["key"], []).extend(rungs)
+        if is_alternate:
+            continue
         lines = _resolve_prop_lines(lines)
         line = lines[0].get("point", 0.5)
         entry["Lines"].append(line)
@@ -655,17 +677,18 @@ def _archive_event_props(archive, game, league, props, gameDate, observed_at=Non
 
     for market in odds:
         for player, entry in odds[market].items():
-            line = np.median(entry["Lines"])
-            archive.merge_player_books(
-                league,
-                market,
-                gameDate,
-                player,
-                entry["EV"],
-                [line],
-                observed_at=observed_at,
-                book_quotes=entry["Quotes"],
-            )
+            if entry["EV"]:
+                line = np.median(entry["Lines"])
+                archive.merge_player_books(
+                    league,
+                    market,
+                    gameDate,
+                    player,
+                    entry["EV"],
+                    [line],
+                    observed_at=observed_at,
+                    book_quotes=entry["Quotes"],
+                )
             for book, rungs in entry["Ladder"].items():
                 archive.add_ladder(
                     league, market, gameDate, player, book, rungs, observed_at=observed_at
