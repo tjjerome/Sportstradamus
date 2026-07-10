@@ -147,8 +147,12 @@ def _league_activity_record(prev, commences, now):
 
     ``last_game`` is the most recent commence seen slip into the past —
     rolled forward from the previous record — and is what keeps
-    ``Stats.update`` running through the post-season ingest tail. Returns
-    ``None`` for a league with nothing scheduled and nothing to remember.
+    ``Stats.update`` running through the post-season ingest tail.
+    ``opener`` is the season's first game: tracked live off the feed while
+    the league is still preseason (the earliest upcoming game IS opening
+    night), then frozen for the season so ``Stats`` can adopt it as
+    ``season_start``. Returns ``None`` for a league with nothing scheduled
+    and nothing to remember.
     """
     past = [c for c in (prev.get("next_game"), prev.get("last_game")) if c is not None]
     past += commences
@@ -161,6 +165,9 @@ def _league_activity_record(prev, commences, now):
     tier = odds_budget.classify_tier(days_to_next, prev.get("tier"), odds_budget.BUDGET_CFG)
     if tier is not None:
         record = {"tier": tier, "next_game": commences[0]}
+        opener = commences[0] if tier == "preseason" else prev.get("opener")
+        if opener is not None:
+            record["opener"] = opener
     elif prev or last_game:
         record = {"tier": "idle"}
     else:

@@ -239,6 +239,30 @@ def test_update_window_open_force_env_bypasses(monkeypatch, tmp_path) -> None:
     assert odds_budget.update_window_open("NBA", date(2099, 1, 1))
 
 
+def test_season_opener_converts_to_chicago_date(monkeypatch, tmp_path) -> None:
+    snapshot = {
+        "updated": datetime.now(UTC).isoformat(),
+        "leagues": {
+            # 00:15Z is the prior evening in America/Chicago.
+            "NFL": {"tier": "preseason", "opener": "2026-09-10T00:15:00Z"},
+            "MLB": {"tier": "live", "next_game": "2026-07-10T22:41:00Z"},
+        },
+    }
+    _write_activity(monkeypatch, tmp_path, snapshot)
+    assert odds_budget.season_opener("NFL") == date(2026, 9, 9)
+    assert odds_budget.season_opener("MLB") is None  # mid-season, opener never observed
+    assert odds_budget.season_opener("NBA") is None
+
+
+def test_season_opener_stale_snapshot_returns_none(monkeypatch, tmp_path) -> None:
+    snapshot = {
+        "updated": (datetime.now(UTC) - timedelta(days=4)).isoformat(),
+        "leagues": {"NFL": {"tier": "preseason", "opener": "2026-09-10T00:15:00Z"}},
+    }
+    _write_activity(monkeypatch, tmp_path, snapshot)
+    assert odds_budget.season_opener("NFL") is None
+
+
 def test_broad_run_allowance_admits_all() -> None:
     decision = odds_budget.broad_run_allowance(
         _TEN_DAYS_LEFT,

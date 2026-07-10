@@ -56,8 +56,7 @@ class StatsNBA(Stats):
         super().__init__()
         self.league = "NBA"
         self.positions = ["P", "C", "F", "W", "B"]
-        self.season_start = datetime(2025, 10, 21).date()
-        self.season = "2025-26"
+        self._set_season_start(datetime(2025, 10, 21).date())
         cols = [
             "SEASON_YEAR",
             "PLAYER_ID",
@@ -564,6 +563,10 @@ class StatsNBA(Stats):
             comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=20)
 
         self.comps = comps
+
+    def _set_season_start(self, day):
+        self.season_start = day
+        self.season = f"{day.year}-{(day.year + 1) % 100:02d}"
 
     def _update(self) -> None:
         """Update data from the web API."""

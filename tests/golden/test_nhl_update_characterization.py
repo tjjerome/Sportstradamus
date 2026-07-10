@@ -208,6 +208,7 @@ def nhl_update(monkeypatch):
     monkeypatch.setattr(
         base_mod.odds_budget, "update_window_open", lambda league, season_start: True
     )
+    monkeypatch.setattr(base_mod.odds_budget, "season_opener", lambda league: None)
     monkeypatch.setattr(StatsNHL, "parse_game", _fake_parse_game)
 
     captured: dict = {}
