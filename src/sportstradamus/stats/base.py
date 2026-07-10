@@ -31,6 +31,7 @@ from sportstradamus.helpers import (
     get_ev,
     get_mlb_pitchers,
     get_odds,
+    odds_budget,
     remove_accents,
     set_model_start_values,
     stat_cv,
@@ -487,9 +488,19 @@ class Stats:
     def update(self):
         """Fetch new game data from the league API and append to ``self.gamelog``.
 
-        Returns:
-            None
+        Skipped outside the league's season window — open from 10 days
+        before the next scheduled game to 10 days after the last one, per
+        the feed-derived :func:`odds_budget.update_window_open`. Set
+        ``SPORTSTRADAMUS_FORCE_UPDATE=1`` to run an offseason update anyway
+        (full rebuilds, historical backfills).
         """
+        if not odds_budget.update_window_open(self.league, self.season_start):
+            logger.info(f"{self.league} update skipped: outside season window")
+            return
+        self._update()
+
+    def _update(self):
+        """League-specific fetch behind the :meth:`update` season gate."""
 
     def _enrich_team_markets(
         self,

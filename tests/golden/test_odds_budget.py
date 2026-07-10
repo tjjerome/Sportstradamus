@@ -1,6 +1,7 @@
 """Golden pins for ``helpers.odds_budget`` — the Odds API credit-budget governor.
 
-Covers the monthly cycle arithmetic (``cycle_bounds``), the broad-run
+Covers the monthly cycle arithmetic (``cycle_bounds``), the activity tiers
+(``classify_tier`` and the ``league_is_live`` update gate), the broad-run
 league-admission decision (``broad_run_allowance``), the JSONL usage-ledger
 writer (``record_response``), and the ledger-derived cost estimator
 (``estimate_costs``). Allowance/estimator configs are built inline so the
@@ -11,10 +12,10 @@ is pinned once against ``BUDGET_CFG``.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from sportstradamus import moneylines
-from sportstradamus.helpers import odds_budget
+from sportstradamus.helpers import io, odds_budget
 from sportstradamus.helpers.odds_budget import BudgetDecision
 
 # Cycle end 2026-08-01 makes days_left exactly 10.0, so every reserve /
@@ -87,6 +88,8 @@ def test_budget_cfg_schema() -> None:
         "floor_min_per_day",
         "default_league_run_cost",
         "estimate_window_days",
+        "poll_horizon_days",
+        "promote_within_days",
         "league_priority",
         "league_seed_costs",
     }
@@ -131,11 +134,116 @@ def test_cycle_bounds_january_rolls_back_to_december() -> None:
     )
 
 
+_TIER_CFG = {"poll_horizon_days": 14, "promote_within_days": 1}
+
+
+def test_classify_tier_by_days_to_next_game() -> None:
+    assert odds_budget.classify_tier(0.5, None, _TIER_CFG) == "live"
+    assert odds_budget.classify_tier(-0.1, None, _TIER_CFG) == "live"  # in-progress game
+    assert odds_budget.classify_tier(5.0, None, _TIER_CFG) == "preseason"
+    assert odds_budget.classify_tier(14.0, None, _TIER_CFG) == "preseason"
+    assert odds_budget.classify_tier(14.1, None, _TIER_CFG) is None
+    assert odds_budget.classify_tier(None, None, _TIER_CFG) is None
+
+
+def test_classify_tier_live_is_sticky_within_horizon() -> None:
+    # NFL weekdays / all-star breaks: a live league with its next game days
+    # out stays live; a preseason league only promotes at the 1-day mark.
+    assert odds_budget.classify_tier(5.0, "live", _TIER_CFG) == "live"
+    assert odds_budget.classify_tier(5.0, "preseason", _TIER_CFG) == "preseason"
+    assert odds_budget.classify_tier(20.0, "live", _TIER_CFG) is None
+
+
+def _write_activity(monkeypatch, tmp_path, snapshot) -> None:
+    path = tmp_path / "league_activity.json"
+    monkeypatch.setattr(io, "LEAGUE_ACTIVITY_PATH", path)
+    if snapshot is not None:
+        path.write_text(json.dumps(snapshot))
+
+
+def test_league_is_live_reads_fresh_snapshot(monkeypatch, tmp_path) -> None:
+    snapshot = {
+        "updated": datetime.now(UTC).isoformat(),
+        "leagues": {
+            "MLB": {"tier": "live"},
+            "NFL": {"tier": "preseason"},
+            "NHL": {"tier": "idle", "last_game": "2026-06-20T00:00:00Z"},
+        },
+    }
+    _write_activity(monkeypatch, tmp_path, snapshot)
+    # Both active tiers poll; idle or absent leagues don't, even if
+    # season_start says live.
+    assert odds_budget.league_is_live("MLB", date(2099, 1, 1))
+    assert odds_budget.league_is_live("NFL", date(2099, 1, 1))
+    assert not odds_budget.league_is_live("NHL", date(2000, 1, 1))
+    assert not odds_budget.league_is_live("NBA", date(2000, 1, 1))
+
+
+def test_league_is_live_stale_snapshot_falls_back_to_season_start(monkeypatch, tmp_path) -> None:
+    snapshot = {
+        "updated": (datetime.now(UTC) - timedelta(days=4)).isoformat(),
+        "leagues": {"NBA": {"tier": "live"}},
+    }
+    _write_activity(monkeypatch, tmp_path, snapshot)
+    today = datetime.now(UTC).date()
+    assert not odds_budget.league_is_live("NBA", today + timedelta(days=30))
+    assert odds_budget.league_is_live("MLB", today + timedelta(days=6))
+
+
+def test_league_is_live_missing_snapshot_falls_back_to_season_start(monkeypatch, tmp_path) -> None:
+    _write_activity(monkeypatch, tmp_path, None)
+    today = datetime.now(UTC).date()
+    assert odds_budget.league_is_live("NBA", today - timedelta(days=100))
+    assert not odds_budget.league_is_live("NFL", today + timedelta(days=30))
+
+
+def _game_ts(days: float) -> str:
+    return (datetime.now(UTC) + timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def test_update_window_open_around_scheduled_games(monkeypatch, tmp_path) -> None:
+    snapshot = {
+        "updated": datetime.now(UTC).isoformat(),
+        "leagues": {
+            "MLB": {"tier": "live", "next_game": _game_ts(0.3)},
+            "NFL": {"tier": "preseason", "next_game": _game_ts(12)},
+            "WNBA": {"tier": "preseason", "next_game": _game_ts(9)},
+            "NHL": {"tier": "idle", "last_game": _game_ts(-5)},
+            "NBA": {"tier": "idle", "last_game": _game_ts(-11)},
+        },
+    }
+    _write_activity(monkeypatch, tmp_path, snapshot)
+    far_start = datetime.now(UTC).date() + timedelta(days=60)
+    assert odds_budget.update_window_open("MLB", far_start)
+    assert not odds_budget.update_window_open("NFL", far_start)  # opener 12d out, window is 10
+    assert odds_budget.update_window_open("WNBA", far_start)
+    assert odds_budget.update_window_open("NHL", far_start)  # post-season ingest tail
+    assert not odds_budget.update_window_open("NBA", far_start)  # tail expired
+    # Never-seen league is closed even when season_start would allow it.
+    assert not odds_budget.update_window_open("XFL", datetime.now(UTC).date())
+
+
+def test_update_window_open_stale_snapshot_falls_back_to_season_start(
+    monkeypatch, tmp_path
+) -> None:
+    _write_activity(monkeypatch, tmp_path, None)
+    today = datetime.now(UTC).date()
+    assert odds_budget.update_window_open("NBA", today + timedelta(days=9))
+    assert not odds_budget.update_window_open("NBA", today + timedelta(days=11))
+
+
+def test_update_window_open_force_env_bypasses(monkeypatch, tmp_path) -> None:
+    snapshot = {"updated": datetime.now(UTC).isoformat(), "leagues": {}}
+    _write_activity(monkeypatch, tmp_path, snapshot)
+    monkeypatch.setenv("SPORTSTRADAMUS_FORCE_UPDATE", "1")
+    assert odds_budget.update_window_open("NBA", date(2099, 1, 1))
+
+
 def test_broad_run_allowance_admits_all() -> None:
     decision = odds_budget.broad_run_allowance(
         _TEN_DAYS_LEFT,
         5000,
-        ("NBA", "WNBA"),
+        {"NBA": "live", "WNBA": "live"},
         100.0,
         {"NBA": 120.0, "WNBA": 60.0},
         _allowance_cfg(),
@@ -145,28 +253,49 @@ def test_broad_run_allowance_admits_all() -> None:
 
 def test_broad_run_allowance_floor_reserve() -> None:
     decision = odds_budget.broad_run_allowance(
-        _TEN_DAYS_LEFT, 1000, ("NBA",), 100.0, {"NBA": 1.0}, _allowance_cfg()
+        _TEN_DAYS_LEFT, 1000, {"NBA": "live"}, 100.0, {"NBA": 1.0}, _allowance_cfg()
     )
     assert decision == BudgetDecision((), "floor_reserve", 1000.0, 0.0, 0.0)
+
+
+def test_broad_run_allowance_all_idle() -> None:
+    decision = odds_budget.broad_run_allowance(
+        _TEN_DAYS_LEFT, 5000, {}, 100.0, {"NBA": 1.0}, _allowance_cfg()
+    )
+    assert decision == BudgetDecision((), "idle", 0.0, 0.0, 0.0)
 
 
 def test_broad_run_allowance_partial_respects_priority() -> None:
     decision = odds_budget.broad_run_allowance(
         _TEN_DAYS_LEFT,
         5000,
-        ("NFL", "MLB", "NBA"),
+        {"NFL": "live", "MLB": "live", "NBA": "live"},
         100.0,
         {"NBA": 150.0, "MLB": 100.0, "NFL": 40.0},
         _allowance_cfg(),
     )
     # per_slot 200: NBA (150) admits leaving 50, MLB (100) no longer fits, NFL
-    # (40) still does — admission order comes from cfg, not the active tuple.
+    # (40) still does — admission order comes from cfg, not the tiers dict.
     assert decision == BudgetDecision(("NBA", "NFL"), "partial", 1000.0, 200.0, 4000.0)
+
+
+def test_broad_run_allowance_preseason_rides_the_bottom() -> None:
+    decision = odds_budget.broad_run_allowance(
+        _TEN_DAYS_LEFT,
+        5000,
+        {"NBA": "preseason", "MLB": "live", "WNBA": "live"},
+        100.0,
+        {"NBA": 40.0, "MLB": 100.0, "WNBA": 90.0},
+        _allowance_cfg(),
+    )
+    # per_slot 200: live MLB (100) and WNBA (90) admit first despite NBA
+    # leading the priority list; preseason NBA (40) no longer fits.
+    assert decision == BudgetDecision(("MLB", "WNBA"), "partial", 1000.0, 200.0, 4000.0)
 
 
 def test_broad_run_allowance_no_fit() -> None:
     decision = odds_budget.broad_run_allowance(
-        _TEN_DAYS_LEFT, 5000, ("NBA",), 100.0, {"NBA": 300.0}, _allowance_cfg()
+        _TEN_DAYS_LEFT, 5000, {"NBA": "live"}, 100.0, {"NBA": 300.0}, _allowance_cfg()
     )
     assert decision == BudgetDecision((), "no_fit", 1000.0, 200.0, 4000.0)
 
@@ -175,7 +304,7 @@ def test_broad_run_allowance_unknown_league_uses_default_cost() -> None:
     decision = odds_budget.broad_run_allowance(
         _TEN_DAYS_LEFT,
         5000,
-        ("NBA", "MLB"),
+        {"NBA": "live", "MLB": "live"},
         100.0,
         {},
         _allowance_cfg(default_league_run_cost=150),
@@ -187,13 +316,13 @@ def test_broad_run_allowance_unknown_league_uses_default_cost() -> None:
 def test_broad_run_allowance_rolls_skipped_league_forward() -> None:
     cfg = _allowance_cfg()
     early = odds_budget.broad_run_allowance(
-        _TEN_DAYS_LEFT, 4000, ("NBA",), 0.0, {"NBA": 500.0}, cfg
+        _TEN_DAYS_LEFT, 4000, {"NBA": "live"}, 0.0, {"NBA": 500.0}, cfg
     )
     assert early == BudgetDecision((), "no_fit", 0.0, 200.0, 4000.0)
     # Nothing spent, but fewer slots left in the cycle -> a bigger per-slot
     # share admits the league skipped eight days earlier.
     late = odds_budget.broad_run_allowance(
-        datetime(2026, 7, 30, tzinfo=UTC), 4000, ("NBA",), 0.0, {"NBA": 500.0}, cfg
+        datetime(2026, 7, 30, tzinfo=UTC), 4000, {"NBA": "live"}, 0.0, {"NBA": 500.0}, cfg
     )
     assert late == BudgetDecision(("NBA",), "ok", 0.0, 1000.0, 4000.0)
 
@@ -201,7 +330,7 @@ def test_broad_run_allowance_rolls_skipped_league_forward() -> None:
 def test_broad_run_allowance_end_of_cycle_slot_floor() -> None:
     now = datetime(2026, 7, 31, 18, 0, tzinfo=UTC)  # 0.25 days -> 0.5 slots, floored to 1.0
     decision = odds_budget.broad_run_allowance(
-        now, 4000, ("NBA",), 0.0, {"NBA": 3000.0}, _allowance_cfg()
+        now, 4000, {"NBA": "live"}, 0.0, {"NBA": 3000.0}, _allowance_cfg()
     )
     assert decision.per_slot == decision.spendable == 4000.0
     assert decision.allowed_leagues == ("NBA",)

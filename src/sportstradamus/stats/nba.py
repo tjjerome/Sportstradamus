@@ -565,7 +565,7 @@ class StatsNBA(Stats):
 
         self.comps = comps
 
-    def update(self) -> None:
+    def _update(self) -> None:
         """Update data from the web API."""
         self._clean_player_positions()
 

@@ -29,6 +29,7 @@ from sportstradamus.helpers import (
     UNDERDOG_BOOST_BASELINE,
     LazyArchive,
     get_logger,
+    odds_budget,
     stat_dist,
     stat_map,
 )
@@ -202,7 +203,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     ):
         struct = cls()
         struct.load()
-        if datetime.datetime.today().date() > (struct.season_start - datetime.timedelta(days=7)):
+        if odds_budget.league_is_live(lg_name, struct.season_start):
             struct.update()
             stats[lg_name] = struct
             sports.append(lg_name)

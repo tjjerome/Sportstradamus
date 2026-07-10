@@ -496,7 +496,7 @@ class StatsNHL(Stats):
         )
         return n | stats
 
-    def update(self):
+    def _update(self):
         """Updates the NHL skater and goalie data."""
         latest_date = self.season_start
         if not self.gamelog.empty:

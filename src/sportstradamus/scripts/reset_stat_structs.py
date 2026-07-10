@@ -1,9 +1,14 @@
+import os
 from datetime import datetime
 
 import click
 from tqdm import tqdm
 
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
+
+# Full-rebuild tool: replaying historical seasons must update regardless of
+# the Stats.update season window.
+os.environ.setdefault("SPORTSTRADAMUS_FORCE_UPDATE", "1")
 
 
 @click.command()

@@ -274,6 +274,27 @@ def _has_nan(values) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# League-activity snapshot (feed-derived season windows)
+# ---------------------------------------------------------------------------
+
+LEAGUE_ACTIVITY_PATH = _RUNTIME_DIR / "league_activity.json"
+
+
+def read_league_activity() -> dict:
+    """Return the league-activity snapshot, or empty dict if the file is absent."""
+    p = Path(str(LEAGUE_ACTIVITY_PATH))
+    if not p.is_file():
+        return {}
+    with p.open() as f:
+        return json.load(f)
+
+
+def write_league_activity(activity: dict) -> None:
+    """Atomically write the league-activity snapshot as JSON."""
+    _atomic_write_json(activity, LEAGUE_ACTIVITY_PATH)
+
+
+# ---------------------------------------------------------------------------
 # Per-league gamelog: parquet for the two DataFrames + JSON/parquet sidecar
 # for the heterogeneous ``players`` payload.
 # ---------------------------------------------------------------------------
