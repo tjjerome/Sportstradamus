@@ -147,7 +147,7 @@ h = pd.read_parquet('src/sportstradamus/data/runtime/history.parquet')
 p = h[h['Bet'].notna() & h['Actual'].notna() & h['Line'].notna()]
 print('recorded picks per league:', dict(p.groupby('League').size()))"
 
-# Ladder / alt-line accrual (silent breakage compounds — was ~0 rows at the 2026-06 audit)
+# Ladder / alt-line accrual (seeded 15.5M rows by the 2026-07 backfill; must keep growing)
 python3 -c "
 import duckdb
 con = duckdb.connect('archive/archive.duckdb', read_only=True)
@@ -187,9 +187,12 @@ lens (§1.1) and go stale silently, so verify them at the start of any WS-1/WS-4
   split); a market we model but nobody serves earns nothing.
 - **Sleeper multipliers / Underdog boosts** — the payout curves live in the decision lanes
   (`books.py`, `strategies/`); a multiplier change moves EV without any model change.
-- **Ladder / alt-line accrual** — the `ladder` archive table must keep filling (the §3 probe);
-  it was ~0 rows at the 2026-06 audit and silent breakage compounds. The right tail those rows
-  price is Gate-4's job (§6.11).
+- **Ladder / alt-line accrual** — the `ladder` archive table must keep filling (the §3 probe).
+  Seeded to 15.5M rungs across all five leagues by the 2026-07 historical backfill; live accrual
+  adds only primary-market rungs (the `*_alternate` keys are backfill-only by design —
+  `ALT_MARKET_KEYS` in `scripts/backfill_historical_odds.py`, deliberately not in `stat_map`), so
+  a live-side alternate fetch is a future cost decision. The right tail those rows price is
+  Gate-4's job (§6.11).
 
 ### 3.1 The gates are trustworthy (audits closed)
 
@@ -1112,10 +1115,16 @@ Rivals head-to-heads. Copula research is **done** (R3 brief `/tmp/researcher_cop
   (`books.py` `rival_lines`, payout curve, `"vs."` flip); the only missing piece is a small
   **P(A−B>k) difference pricer** with push handling. Audit Rivals margin behavior first, then build
   the pricer — a cheaper early win than full parlay pricing.
-- **Ladder / tail read (query, not build).** The `ladder` archive table is accruing (§3 probe —
-  4863 rows, WNBA-only at plan time; confirm it fills for other leagues as they serve). Stand up a
-  standing tail read on `g4_tail_pit_ks` + central50/80 to watch alt-line pricing accuracy; this is
-  a query over existing gate outputs, not a new build.
+- **Ladder / tail read (query, not build).** The `ladder` table holds **15.5M historical rungs
+  across all five leagues**: MLB 7.0M (18 markets, 4 alt-enriched: hits / total bases / home runs
+  / pitcher strikeouts), NBA 4.2M (PTS/REB/AST/FG3M alternates, 2024-10→2026-06), NHL 3.5M (7
+  markets, 2023-10→2026-06), NFL 523k (yardage + receptions alternates, two seasons), WNBA 314k.
+  MLB/NHL additionally carry a **close-layer dual snapshot** (`observed_at` 23:00,
+  evaluation-only vs the 01:00 feature layer) over their core windows — open→close movement and
+  CLV are computable per slot (C-3's raw material; the feature build stays §8.2-gated). The
+  standing tail read on `g4_tail_pit_ks` + central50/80 is runnable at scale, and the
+  §6.5-deferred ladder-lift re-test (book-CDF fit on real rungs, previously blocked on an empty
+  ladder table) is unblocked.
 - **Parlay dependence (copula) — R3 verdict.** Gaussian copula default; **t-copula only as a
   tested branch** (adopt iff pooled exceedance-Spearman clears a simulated Gaussian null in both
   tails AND pooled pseudo-MLE with one ν per league gives ΔAIC≥10, ν̂≤15 — never per-pair ν). EB
@@ -1463,6 +1472,7 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-10 · WS-2/WS-4 backfill program done (1.76M credits of 5M): MLB+NHL feature gap closed (7-11 sharp books, NHL 2023-24 refilled), `ladder` seeded 15.5M rungs all five leagues (alt keys backfill-only), MLB/NHL close-layer dual snapshots (23Z eval-only) → CLV/movement computable; §6.11 tail read + §6.5 ladder-lift re-test unblocked. MLB matrices rebuilt 19/19 at 2 seasons; NHL rebuild + both sweeps in flight.
 - 2026-07-09 · WS-2 Track A (key-independent) done: MLB/NHL klepto seed purged (3.1M junk odds rows), backfill `_probe` key bugfix, per-league `trim_gamelog` windows (MLB 95k / NHL 110k rows = 2-season matrices), Savant affinity bot-block fix, activation guard emptied per GO. Gates clean. Backfill + rebuild + sweep/confirm blocked on the activated Odds API key (detail: mlb-nhl-activation.md §10).
 - 2026-07-09 · Stage-0 engine work LANDED (§6 status revised in place): version stamping train→serve→history→dashboard + `backfill_history_eras.py`; board `--resume`/per-cell upsert/`swept_at`/`code_rev`/`--dry-run`; FamilySpec registry live. Residue → WS-3: confirm queue-manifest, auto archive-snapshot, family-as-swept-axis. Owner declared D1/D2 GO with 5M-credit backfill — WS-2 activation execution starts (plan: `~/.claude/plans/review-the-model-improvement-track-md-ha-lexical-storm.md`).
 - 2026-07-07 · plan reworked profit-first (owner reframe). WS-1 live-alignment = P1; MLB+NHL activation folded in (WS-2); family research DONE (WS-3: Double Poisson count + centered-SN continuous); copula stage-0 DONE (WS-4); sweep-engine Stage-0 spec written. §6 restructured to workstreams; sweep-era verdicts → refs §15. Confirm league-guard added — withheld MLB/NHL never auto-flip pre-D1/D2 (`_drop_activation_gated` + goldens).
