@@ -3,14 +3,19 @@
 import importlib.resources as pkg_resources
 import json
 import warnings
-from datetime import datetime, timedelta
 
 import click
 import numpy as np
 import pandas as pd
 
 from sportstradamus import data
-from sportstradamus.helpers import LazyArchive, book_weights, feature_filter, get_logger
+from sportstradamus.helpers import (
+    LazyArchive,
+    book_weights,
+    feature_filter,
+    get_logger,
+    odds_budget,
+)
 from sportstradamus.helpers.io import MODEL_STATS_PATH, prune_model_pickle
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 from sportstradamus.training import baselines, calibration
@@ -338,8 +343,7 @@ def meditate(
         if league not in ("All", lg_name):
             continue
         struct = cls()
-        in_window = datetime.today().date() > (struct.season_start - timedelta(days=7))
-        if league == "All" and not in_window:
+        if league == "All" and not odds_budget.league_is_live(lg_name, struct.season_start):
             continue
         click.echo(f"[{lg_name}] loading cached gamelogs...")
         struct.load()

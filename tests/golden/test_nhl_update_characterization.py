@@ -203,6 +203,11 @@ def nhl_update(monkeypatch):
     )
     monkeypatch.setattr(nhl_mod, "clean_data", False)
     monkeypatch.setattr(base_mod, "archive", _FakeArchive())
+    # Pin the season gate open so the pipeline runs regardless of the host's
+    # real league_activity.json snapshot or the calendar.
+    monkeypatch.setattr(
+        base_mod.odds_budget, "update_window_open", lambda league, season_start: True
+    )
     monkeypatch.setattr(StatsNHL, "parse_game", _fake_parse_game)
 
     captured: dict = {}

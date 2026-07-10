@@ -100,7 +100,7 @@ class StatsWNBA(StatsNBA):
         self.gamelog = wnba_data["gamelog"]
         self.teamlog = wnba_data["teamlog"]
 
-    def update(self) -> None:
+    def _update(self) -> None:
         """Fetch new WNBA game logs from stats.wnba.com and merge into stored data."""
         player_df = self._fetch_player_index()
         playerBios, shotData = self._fetch_player_bios()

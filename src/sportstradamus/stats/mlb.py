@@ -696,7 +696,7 @@ class StatsMLB(Stats):
             if not df.empty:
                 df.to_csv(pkg_resources.files(data) / "player_data/MLB" / filename, index=False)
 
-    def update(self):
+    def _update(self):
         """Fetch and append new MLB game logs, then trim to the rolling 4-year window.
 
         Queries a 60-day schedule window starting from the last logged date (or

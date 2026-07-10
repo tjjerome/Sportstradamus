@@ -56,7 +56,12 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
-from sportstradamus.helpers.io import read_upcoming_events, write_upcoming_events
+from sportstradamus.helpers.io import (
+    read_league_activity,
+    read_upcoming_events,
+    write_league_activity,
+    write_upcoming_events,
+)
 from sportstradamus.spiderLogger import logger
 
 # Closing-line capture window. Run `confer --close-lines` every 10 minutes
@@ -137,13 +142,77 @@ def _get_with_retry(url, params=None):
     return res
 
 
+def _league_activity_record(prev, commences, now):
+    """Build one league's snapshot record from its feed commence times.
+
+    ``last_game`` is the most recent commence seen slip into the past —
+    rolled forward from the previous record — and is what keeps
+    ``Stats.update`` running through the post-season ingest tail. Returns
+    ``None`` for a league with nothing scheduled and nothing to remember.
+    """
+    past = [c for c in (prev.get("next_game"), prev.get("last_game")) if c is not None]
+    past += commences
+    past = [c for c in past if datetime.fromisoformat(c.replace("Z", "+00:00")) <= now]
+    last_game = max(past, default=None)
+    days_to_next = None
+    if commences:
+        next_game = datetime.fromisoformat(commences[0].replace("Z", "+00:00"))
+        days_to_next = (next_game - now).total_seconds() / 86400
+    tier = odds_budget.classify_tier(days_to_next, prev.get("tier"), odds_budget.BUDGET_CFG)
+    if tier is not None:
+        record = {"tier": tier, "next_game": commences[0]}
+    elif prev or last_game:
+        record = {"tier": "idle"}
+    else:
+        return None
+    if last_game is not None:
+        record["last_game"] = last_game
+    return record
+
+
+def _classify_league_activity(key, sports):
+    """Tier each index-active league of interest via its free events feed.
+
+    Fetches ``/events`` (cost 0) per league, tiers by days to the earliest
+    commence time (:func:`odds_budget.classify_tier` — sticky through
+    mid-season gaps), and persists the snapshot the prophecize/meditate/
+    pickem-build gates read. Leagues that go idle keep an ``idle`` record
+    (season-end memory for the ``Stats.update`` window), including leagues
+    the sports index no longer lists. A non-OK events response carries the
+    league's previous record forward so one bad response can't silently
+    black out a league.
+    """
+    previous = read_league_activity().get("leagues", {})
+    now = datetime.now(pytz.utc)
+    leagues = {}
+    for sport in sports:
+        league = sport["title"]
+        res = _get_with_retry(
+            ODDS_API_EVENTS_URL.format(sport=sport["key"]), params={"apiKey": key}
+        )
+        if res.status_code != HTTPStatus.OK:
+            if league in previous:
+                leagues[league] = previous[league]
+            continue
+        record = _league_activity_record(
+            previous.get(league, {}), sorted(e["commence_time"] for e in res.json()), now
+        )
+        if record is not None:
+            leagues[league] = record
+    for league in previous.keys() - {s["title"] for s in sports}:
+        leagues[league] = _league_activity_record(previous[league], [], now)
+    write_league_activity({"updated": now.isoformat(), "leagues": leagues})
+    return {lg: rec["tier"] for lg, rec in leagues.items() if rec["tier"] != "idle"}
+
+
 def _resolve_broad_run_leagues(keys, cli_log):
     """Probe the sports index and decide which leagues a broad run may fetch.
 
     Returns ``(leagues, skip_run)``: ``leagues`` is ``None`` for an
     unrestricted run (probe failure, or the governor not enforcing) or the
     governor's allowed-leagues tuple; ``skip_run`` is ``True`` only when
-    enforcement is on and the floor reserve consumes every remaining credit.
+    enforcement is on and nothing is admitted (floor reserve exhausted, or
+    every league idle).
     """
     # The sports index is a free endpoint; its quota headers feed the governor.
     res = _get_with_retry(ODDS_API_SPORTS_URL, params={"apiKey": keys["odds_api_plus"]})
@@ -153,18 +222,20 @@ def _resolve_broad_run_leagues(keys, cli_log):
         )
         return None, False
 
-    active = [s["title"] for s in res.json() if _active_in_scope(s)]
+    active = [s for s in res.json() if _active_in_scope(s)]
     remaining = int(res.headers["X-Requests-Remaining"])
     cfg = odds_budget.BUDGET_CFG
+    tiers = _classify_league_activity(keys["odds_api_plus"], active)
     now = datetime.now(pytz.utc)
     floor_per_day, league_costs = odds_budget.estimate_costs(now, cfg)
     decision = odds_budget.broad_run_allowance(
-        now, remaining, active, floor_per_day, league_costs, cfg
+        now, remaining, tiers, floor_per_day, league_costs, cfg
     )
     cli_log.info(
         "budget decision",
         extra={
             "enforce": cfg["enforce"],
+            "tiers": tiers,
             "allowed": list(decision.allowed_leagues),
             "reason": decision.reason,
             "reserve": round(decision.reserve),
@@ -176,7 +247,7 @@ def _resolve_broad_run_leagues(keys, cli_log):
     )
     if cfg["enforce"] and not decision.allowed_leagues:
         # Exit 0: a governor skip is success, not a healthchecks FAIL.
-        cli_log.info("budget skip: floor reserve consumes remaining credits")
+        cli_log.info("budget skip: nothing admitted", extra={"reason": decision.reason})
         return None, True
     return (decision.allowed_leagues if cfg["enforce"] else None), False
 

@@ -19,7 +19,7 @@ from typing import Any
 import click
 import pandas as pd
 
-from sportstradamus.helpers import stat_map
+from sportstradamus.helpers import odds_budget, stat_map
 from sportstradamus.helpers.logging import get_logger
 from sportstradamus.strategies._pickem_emit import emit_yaml, rank_and_dedupe
 from sportstradamus.strategies.kelly import (
@@ -326,7 +326,6 @@ def _live_load(config: PickemConfig) -> tuple[dict[str, pd.DataFrame], pd.DataFr
     from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 
     stats: dict[str, Any] = {}
-    today = datetime.date.today()
     for cls, key in (
         (StatsNBA, "NBA"),
         (StatsNFL, "NFL"),
@@ -336,7 +335,7 @@ def _live_load(config: PickemConfig) -> tuple[dict[str, pd.DataFrame], pd.DataFr
     ):
         s = cls()
         s.load()
-        if today > (s.season_start - datetime.timedelta(days=7)):
+        if odds_budget.league_is_live(key, s.season_start):
             s.update()
             stats[key] = s
     offers_df, _ = process_offers(

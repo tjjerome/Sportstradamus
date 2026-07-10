@@ -7,6 +7,8 @@
   "floor_min_per_day": 300,
   "default_league_run_cost": 150,
   "estimate_window_days": 7,
+  "poll_horizon_days": 14,
+  "promote_within_days": 1,
   "league_priority": ["NBA", "WNBA", "NFL", "MLB", "NHL"],
   "league_seed_costs": {
     "NBA": 100,
