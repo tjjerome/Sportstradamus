@@ -24,6 +24,8 @@ rather than silently produce wrong answers deep inside a training run.
 fresh clone before the first meditate run, in which case calibration
 fields default to safe values (cv=1.0, std=None, zi missing) that the
 legacy ``.get(..., default)`` call sites already tolerate.
+
+``odds_api_budget.json`` is loaded by ``helpers/odds_budget.py``, not here.
 """
 
 import importlib.resources as pkg_resources

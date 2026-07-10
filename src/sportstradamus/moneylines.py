@@ -14,6 +14,9 @@ through ``the-odds-api.com``'s historical endpoints; that path spends from
 the dedicated high-limit ``odds_api_max`` backfill key (the free tier has
 no history), while live confer/close-lines stay on ``odds_api``/``odds_api_plus``.
 
+Credit budgeting — the usage ledger and the broad-run pacing governor —
+lives in ``sportstradamus.helpers.odds_budget``.
+
 The ``--close-lines`` flag swaps the broad pipeline for a cheap targeted
 pass: it reads ``data/upcoming_events.json`` (refreshed by every broad
 ``confer`` run) and only fires per-event endpoint calls for games starting
@@ -21,7 +24,7 @@ within the closing window. If the window is empty, it exits before
 touching the archive or the network. The intended cron schedule —
 American-sports start hours only — is::
 
-    */5 11-23,0-1 * * * cd <repo> && poetry run confer --close-lines
+    */10 11-23,0-1 * * * cd <repo> && poetry run confer --close-lines
 """
 
 import importlib.resources as pkg_resources
@@ -48,6 +51,7 @@ from sportstradamus.helpers import (
     get_ev,
     get_logger,
     no_vig_odds,
+    odds_budget,
     remove_accents,
     stat_cv,
     stat_dist,
@@ -55,7 +59,7 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.io import read_upcoming_events, write_upcoming_events
 from sportstradamus.spiderLogger import logger
 
-# Closing-line capture window. Run `confer --close-lines` every 5 minutes
+# Closing-line capture window. Run `confer --close-lines` every 10 minutes
 # during American-sports hours; only events commencing inside this window
 # get a per-event endpoint hit, so the worst-case token cost per tick is
 # bounded by `len(upcoming_events.json) * markets_per_event` and most ticks
@@ -78,10 +82,6 @@ ODDS_API_HISTORICAL_EVENT_ODDS_URL = (
     f"{_ODDS_API_BASE}/historical/sports/{{sport}}/events/{{eventId}}/odds"
 )
 ODDS_API_HISTORICAL_ODDS_URL = f"{_ODDS_API_BASE}/sports/{{sport}}/odds-history/"
-
-# Warn when the Odds API account drops below this many remaining requests so the
-# season-long token budget doesn't silently run dry mid-slate.
-_LOW_API_CREDITS_THRESHOLD = 50
 
 # How many days ahead of the run date to ingest games for. Live runs sweep a
 # multi-day slate; historical backfill is anchored to a single day.
@@ -106,21 +106,79 @@ class OddsAPIAuthError(RuntimeError):
     """
 
 
+def _active_in_scope(sport, leagues=None):
+    """True if an Odds API ``/sports`` entry is active and league-of-interest.
+
+    Shared by the budget probe and the two ``*_sports`` resolvers so the
+    ``LEAGUES_OF_INTEREST`` / ``leagues`` filter logic lives in one place.
+    """
+    allowed = LEAGUES_OF_INTEREST if leagues is None else leagues
+    return sport["title"] in allowed and sport["active"]
+
+
 def _get_with_retry(url, params=None):
     """GET ``url`` with one 429-retry. Returns the ``requests.Response``.
 
     The Odds API hands back 429s under bursty load; a single 1-second
-    retry clears them in practice. A ``401`` (out of credits / bad key)
-    raises :class:`OddsAPIAuthError`; other non-200 statuses propagate back
-    so callers can decide whether to ``continue`` or bail.
+    retry clears them in practice. As the single chokepoint for all Odds API
+    HTTP, every response is fed to the :mod:`odds_budget` usage ledger. A
+    ``401`` (out of credits / bad key) raises :class:`OddsAPIAuthError`;
+    other non-200 statuses propagate back so callers can decide whether to
+    ``continue`` or bail.
     """
     res = requests.get(url, params=params)
     if res.status_code == HTTPStatus.TOO_MANY_REQUESTS:
         sleep(1)
         res = requests.get(url, params=params)
+    # Before the 401 raise so exhausted-key responses still hit the ledger.
+    odds_budget.record_response(url, params, res)
     if res.status_code == HTTPStatus.UNAUTHORIZED:
         raise OddsAPIAuthError(f"Odds API 401 at {url}: {res.text[:200]}")
     return res
+
+
+def _resolve_broad_run_leagues(keys, cli_log):
+    """Probe the sports index and decide which leagues a broad run may fetch.
+
+    Returns ``(leagues, skip_run)``: ``leagues`` is ``None`` for an
+    unrestricted run (probe failure, or the governor not enforcing) or the
+    governor's allowed-leagues tuple; ``skip_run`` is ``True`` only when
+    enforcement is on and the floor reserve consumes every remaining credit.
+    """
+    # The sports index is a free endpoint; its quota headers feed the governor.
+    res = _get_with_retry(ODDS_API_SPORTS_URL, params={"apiKey": keys["odds_api_plus"]})
+    if res.status_code != HTTPStatus.OK:
+        cli_log.warning(
+            "budget probe failed, proceeding ungoverned", extra={"status": res.status_code}
+        )
+        return None, False
+
+    active = [s["title"] for s in res.json() if _active_in_scope(s)]
+    remaining = int(res.headers["X-Requests-Remaining"])
+    cfg = odds_budget.BUDGET_CFG
+    now = datetime.now(pytz.utc)
+    floor_per_day, league_costs = odds_budget.estimate_costs(now, cfg)
+    decision = odds_budget.broad_run_allowance(
+        now, remaining, active, floor_per_day, league_costs, cfg
+    )
+    cli_log.info(
+        "budget decision",
+        extra={
+            "enforce": cfg["enforce"],
+            "allowed": list(decision.allowed_leagues),
+            "reason": decision.reason,
+            "reserve": round(decision.reserve),
+            "per_slot": round(decision.per_slot),
+            "spendable": round(decision.spendable),
+            "remaining": remaining,
+            "floor_per_day": round(floor_per_day),
+        },
+    )
+    if cfg["enforce"] and not decision.allowed_leagues:
+        # Exit 0: a governor skip is success, not a healthchecks FAIL.
+        cli_log.info("budget skip: floor reserve consumes remaining credits")
+        return None, True
+    return (decision.allowed_leagues if cfg["enforce"] else None), False
 
 
 @click.command()
@@ -171,54 +229,63 @@ def confer(close_lines: bool, fixture_dir: Path | None, log_level: str):
         stat_map = json.load(infile)
 
     if close_lines:
-        _close_lines_pass(keys["odds_api_plus"], stat_map["Odds API"])
+        odds_budget.set_run_context("close_lines")
+        _close_lines_pass(keys, stat_map["Odds API"])
+        cli_log.info("run usage", extra=odds_budget.run_summary())
         return
+
+    leagues = None
+    if fixture_dir is None:
+        odds_budget.set_run_context("broad")
+        leagues, skip_run = _resolve_broad_run_leagues(keys, cli_log)
+        if skip_run:
+            return
 
     archive = Archive()
     logger.info("Archive loaded")
 
     if fixture_dir is None:
-        archive = get_moneylines(archive, keys)
+        archive = get_moneylines(archive, keys, leagues=leagues)
         logger.info("Game data complete")
 
     archive = get_props(
-        archive, keys["odds_api_plus"], stat_map["Odds API"], fixture_dir=fixture_dir
+        archive,
+        keys["odds_api_plus"],
+        stat_map["Odds API"],
+        fixture_dir=fixture_dir,
+        leagues=leagues,
     )
     logger.info("Player data complete, writing to file...")
 
     archive.write()
     logger.info("Success!")
+    cli_log.info("run usage", extra=odds_budget.run_summary())
 
 
-def _moneyline_sports(apikey, sport, key, historical):
-    """Resolve ``[(odds_api_sport_key, league), ...]`` and the low-credit flag.
+def _moneyline_sports(apikey, sport, key, historical, leagues=None):
+    """Resolve ``[(odds_api_sport_key, league), ...]`` for the game-line fetch.
 
-    Returns ``(None, False)`` to signal the caller to bail without touching the
+    Returns ``None`` to signal the caller to bail without touching the
     archive. ``sport="All"`` enumerates active leagues from the Odds API sports
-    index filtered to ``LEAGUES_OF_INTEREST``; an explicit ``sport`` requires the
-    caller to pass the Odds API ``key`` directly (used by the backfill script).
+    index filtered to ``LEAGUES_OF_INTEREST`` (or ``leagues`` when the budget
+    governor narrows the slate); an explicit ``sport`` requires the caller to
+    pass the Odds API ``key`` directly (used by the backfill script).
     """
     if sport != "All":
         if key is None:
             logger.warning("Key needed for sports other than All")
-            return None, False
-        return [(key, sport)], False
+            return None
+        return [(key, sport)]
     if historical:
         logger.warning("All sports only supported if date is today")
-        return None, False
-    res = _get_with_retry(ODDS_API_SPORTS_URL, params={"apiKey": apikey["odds_api"]})
+        return None
+    res = _get_with_retry(ODDS_API_SPORTS_URL, params={"apiKey": apikey["odds_api_plus"]})
     if res.status_code != HTTPStatus.OK:
-        return None, False
-    low_on_credits = int(res.headers.get("X-Requests-Remaining")) < _LOW_API_CREDITS_THRESHOLD
-    sports = [
-        (s["key"], s["title"])
-        for s in res.json()
-        if s["title"] in LEAGUES_OF_INTEREST and s["active"]
-    ]
-    return sports, low_on_credits
+        return None
+    return [(s["key"], s["title"]) for s in res.json() if _active_in_scope(s, leagues)]
 
 
-def _moneyline_request(apikey, date, historical, low_on_credits):
+def _moneyline_request(apikey, date, historical):
     markets = ["h2h", "totals", "spreads"]
     if historical:
         # Historical fetches are the backfill path — funded by the dedicated
@@ -237,7 +304,7 @@ def _moneyline_request(apikey, date, historical, low_on_credits):
         ODDS_API_ODDS_URL,
         _LIVE_DAY_WINDOW,
         {
-            "apiKey": apikey["odds_api_plus"] if low_on_credits else apikey["odds_api"],
+            "apiKey": apikey["odds_api_plus"],
             "regions": "us",
             "markets": ",".join(markets),
         },
@@ -320,21 +387,23 @@ def get_moneylines(
     date=datetime.now().astimezone(pytz.timezone("America/Chicago")),
     sport="All",
     key=None,
+    leagues=None,
 ):
     """Fetch h2h / totals / spreads into archive's Moneyline & Totals buckets.
 
     When ``sport="All"`` (the ``confer`` default), enumerates active leagues
-    from the Odds API sports index and filters to ``LEAGUES_OF_INTEREST``.
+    from the Odds API sports index and filters to ``LEAGUES_OF_INTEREST`` —
+    or to ``leagues`` when the broad-run budget governor passes an allowance.
     When called with an explicit ``sport`` + ``key`` the caller supplies
     the Odds API sport key directly (used by ``scripts/moneylines_hist.py``
     for backfills).
     """
     historical = date.date() != datetime.today().date()
-    sports, low_on_credits = _moneyline_sports(apikey, sport, key, historical)
+    sports = _moneyline_sports(apikey, sport, key, historical, leagues)
     if sports is None:
         return archive
 
-    url_template, dayDelta, params = _moneyline_request(apikey, date, historical, low_on_credits)
+    url_template, dayDelta, params = _moneyline_request(apikey, date, historical)
     for sport, league in sports:
         res = _get_with_retry(url_template.format(sport=sport), params=params)
         if res.status_code != HTTPStatus.OK:
@@ -346,13 +415,14 @@ def get_moneylines(
     return archive
 
 
-def _props_sports(apikey, sport, key, historical):
+def _props_sports(apikey, sport, key, historical, leagues=None):
     """Resolve ``[(odds_api_sport_key, league), ...]`` for the prop fetch.
 
     Returns ``None`` to signal the caller to bail without touching the archive.
     ``sport="All"`` enumerates active leagues from the Odds API sports index
-    filtered to ``LEAGUES_OF_INTEREST``; an explicit ``sport`` requires the
-    caller to pass the Odds API ``key`` directly.
+    filtered to ``LEAGUES_OF_INTEREST`` (or ``leagues`` when the budget governor
+    narrows the slate); an explicit ``sport`` requires the caller to pass the
+    Odds API ``key`` directly.
     """
     if sport != "All":
         if key is None:
@@ -365,11 +435,7 @@ def _props_sports(apikey, sport, key, historical):
     res = _get_with_retry(ODDS_API_SPORTS_URL, params={"apiKey": apikey})
     if res.status_code != HTTPStatus.OK:
         return None
-    return [
-        (s["key"], s["title"])
-        for s in res.json()
-        if s["title"] in LEAGUES_OF_INTEREST and s["active"]
-    ]
+    return [(s["key"], s["title"]) for s in res.json() if _active_in_scope(s, leagues)]
 
 
 class _PropsRequest(NamedTuple):
@@ -456,12 +522,14 @@ def get_props(
     key=None,
     fixture_dir: Path | None = None,
     observed_at_hour=None,
+    leagues=None,
 ):
     """Fetch per-event player-prop markets and store book-level EVs.
 
     ``observed_at_hour`` overrides the historical snapshot stamp (default
     game-day 01:00): close-layer backfills stamp a post-read hour so their
-    rows are evaluation-only by construction.
+    rows are evaluation-only by construction. ``leagues`` narrows the
+    ``sport="All"`` slate (the broad-run budget governor passes its allowance).
     """
     stat_cv["NCAAB"] = stat_cv["NBA"]
     stat_cv["NCAAF"] = stat_cv["NFL"]
@@ -470,7 +538,7 @@ def get_props(
     if fixture_dir is not None:
         return _get_props_from_fixtures(archive, props, Path(fixture_dir), date)
 
-    sports = _props_sports(apikey, sport, key, historical)
+    sports = _props_sports(apikey, sport, key, historical, leagues)
     if sports is None:
         return archive
 
@@ -775,17 +843,21 @@ def _prune_upcoming_events(events):
     return keep
 
 
-def _close_lines_pass(apikey, props):
+def _close_lines_pass(keys, props):
     """Per-event close-line scrape. Exits early when the window is empty.
 
     Loads ``data/upcoming_events.json``, filters to events with a
     ``commence_time`` between ``CLOSING_LEAD_MIN`` and ``CLOSING_LEAD_MAX``
     minutes from now, and only then opens ``Archive`` and hits the per-event
-    Odds API endpoint for each. Past-commence entries are pruned on the way
-    out so the ledger stays small. The five-minute cron tick yields no
-    archive read, no API call, and no log noise on empty windows — the
-    intended common case.
+    Odds API endpoint for each — spending from ``keys["odds_api_plus"]``,
+    with a one-shot fallback to the ``odds_api`` margin key if the plus key
+    exhausts mid-run. Past-commence entries are pruned on the way out so the
+    ledger stays small. The ten-minute cron tick yields no archive read, no
+    API call, and no log noise on empty windows — the intended common case.
     """
+    # style: allow-complexity — flat close-lines pass (CC 11): window filter,
+    # then a per-event fetch loop whose one-shot margin-key fallback adds the
+    # two branches over the limit; extracting it would scatter the key-flip state.
     ledger = read_upcoming_events()
     ledger = _prune_upcoming_events(ledger)
 
@@ -809,7 +881,7 @@ def _close_lines_pass(apikey, props):
 
     logger.info(f"close-lines: {len(due)} event(s) due")
     archive = Archive()
-    params = {"apiKey": apikey, "regions": "us"}
+    params = {"apiKey": keys["odds_api_plus"], "regions": "us"}
 
     for e in due:
         sport_key = e["sport_key"]
@@ -819,10 +891,18 @@ def _close_lines_pass(apikey, props):
         if not markets:
             continue
         event_params = {**params, "markets": ",".join(markets)}
-        res = _get_with_retry(
-            ODDS_API_EVENT_ODDS_URL.format(sport=sport_key, eventId=event_id),
-            params=event_params,
-        )
+        url = ODDS_API_EVENT_ODDS_URL.format(sport=sport_key, eventId=event_id)
+        try:
+            res = _get_with_retry(url, params=event_params)
+        except OddsAPIAuthError:
+            # One fallback per run: after the flip every later event builds its
+            # params from the mutated dict, and a margin-key 401 propagates.
+            if params["apiKey"] == keys["odds_api"]:
+                raise
+            logger.warning("close-lines: plus key exhausted, falling back to margin key")
+            params["apiKey"] = keys["odds_api"]
+            event_params = {**params, "markets": ",".join(markets)}
+            res = _get_with_retry(url, params=event_params)
         if res.status_code != HTTPStatus.OK:
             logger.warning(f"close-lines: {league} {event_id} returned status {res.status_code}")
             continue
