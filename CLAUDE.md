@@ -273,7 +273,7 @@ Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
 
   ```cron
   50 8-20 * * *          /home/sportstradamus/Sportstradamus/scripts/run_job.sh prophecize
-  30 8,12 * * *          /home/sportstradamus/Sportstradamus/scripts/run_job.sh confer
+  30 8,11,14,17,20 * * * /home/sportstradamus/Sportstradamus/scripts/run_job.sh confer
   0 1 * * 5              /home/sportstradamus/Sportstradamus/scripts/run_job.sh meditate
   0 23 * * *             /home/sportstradamus/Sportstradamus/scripts/run_job.sh reflect
   */10 11-23,0-1 * * *   /home/sportstradamus/Sportstradamus/scripts/run_job.sh close-lines
@@ -453,6 +453,7 @@ production data.
 | `config/stat_meta.json` | **Committed.** Per-cell `{dist, shipped, strategy}` (distribution family, release surface — `"withheld"` / `"devel"` / `"main"`, training strategy slug) |
 | `config/stat_calibration.json` | **Gitignored.** Per-cell `{cv, std, zi}` — runtime-recomputed by `meditate` each run |
 | `config/stat_map.json` | Stat name mappings across APIs/sportsbooks |
+| `config/odds_api_budget.json` | **Committed.** Odds API credit governor knobs: cycle quota/reset day, `enforce` kill switch, slots/day (must match the confer crontab), floor safety factor, per-league seed costs + priority. Consumed by `helpers/odds_budget.py`; ledger at `data/runtime/odds_api_usage.jsonl` |
 | `config/feature_filter.json` | League-shared (`Common`) + per-market locked-in (`Always`) feature lists. The historical `Filtered` SHAP-ranked buckets were removed in the 2026-05-27 no-filter rewire; production trains on the full candidate set |
 | `config/playerCompStats.json` | Learned player comp weights per league/position |
 | `config/book_weights.json` | **Gitignored.** Sportsbook reliability weights for consensus lines |

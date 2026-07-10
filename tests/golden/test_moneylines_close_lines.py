@@ -38,8 +38,8 @@ def _event_url(event_id):
 
 
 class _FakeResponse:
-    def __init__(self, payload):
-        self.status_code = HTTPStatus.OK
+    def __init__(self, payload, status_code=HTTPStatus.OK):
+        self.status_code = status_code
         self._payload = payload
 
     def json(self):
@@ -165,3 +165,50 @@ def test_close_lines_margin_key_exhaustion_propagates(monkeypatch, tmp_path) -> 
         moneylines._close_lines_pass(_KEYS, _PROPS)
 
     assert archives[0].write_calls == 0
+
+
+def test_close_lines_skips_already_stamped_events(monkeypatch, tmp_path) -> None:
+    stamped = _event(10, "done")
+    stamped["close_fetched"] = "2026-07-10T00:00:00+00:00"
+    events = [stamped, _event(20, "due2")]
+    calls = []
+
+    def fake_get(url, params=None):
+        calls.append(url)
+        return _FakeResponse({"url": url})
+
+    written, _, _ = _wire(monkeypatch, tmp_path, events, fake_get)
+
+    moneylines._close_lines_pass(_KEYS, _PROPS)
+
+    assert calls == [_event_url("due2")]
+    assert written == [events]  # stamped entry stays in the ledger, untouched
+
+
+def test_close_lines_stamps_fetched_events(monkeypatch, tmp_path) -> None:
+    events = [_event(10, "due1"), _event(40, "later")]
+
+    def fake_get(url, params=None):
+        return _FakeResponse({"url": url})
+
+    written, _, _ = _wire(monkeypatch, tmp_path, events, fake_get)
+
+    moneylines._close_lines_pass(_KEYS, _PROPS)
+
+    assert "close_fetched" in events[0]
+    assert "close_fetched" not in events[1]
+    assert written == [events]  # stamp persisted via the written-back ledger
+
+
+def test_close_lines_failed_fetch_stays_unstamped(monkeypatch, tmp_path) -> None:
+    events = [_event(10, "due1")]
+
+    def fake_get(url, params=None):
+        return _FakeResponse({}, status_code=HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    _wire(monkeypatch, tmp_path, events, fake_get)
+
+    moneylines._close_lines_pass(_KEYS, _PROPS)
+
+    # No stamp on a failed fetch: the next tick inside the window retries.
+    assert "close_fetched" not in events[0]
