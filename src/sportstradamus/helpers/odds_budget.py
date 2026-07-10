@@ -19,8 +19,9 @@ governed. Before a broad confer run, :func:`broad_run_allowance` reserves
 the projected floor spend to cycle end (recent close-lines cost/day x days
 left x ``floor_safety_factor``), splits what remains across the broad slots
 left in the cycle, and admits leagues in ``league_priority`` order while
-their estimated per-run cost (recent-ledger mean per league, else
-``default_league_run_cost``) still fits the slot share. Config lives in
+their estimated per-run cost (recent-ledger mean per league, else the
+config's ``league_seed_costs`` estimate, else ``default_league_run_cost``)
+still fits the slot share. Config lives in
 ``data/config/odds_api_budget.json`` — loaded eagerly here, not by
 ``helpers.config``.
 """
@@ -195,7 +196,9 @@ def estimate_costs(now: datetime, cfg: dict) -> tuple[float, dict[str, float]]:
     Returns ``(floor_per_day, league_costs)``: recent close-lines burn per day
     (floored at ``floor_min_per_day``) and the mean broad-run cost per league,
     both over the last ``estimate_window_days`` of ``odds_api_plus`` records.
-    Opportunistically prunes records older than the retention horizon.
+    ``league_seed_costs`` from the config bootstrap leagues the ledger hasn't
+    seen yet (fresh deploy, season start); a ledger mean always wins over its
+    seed. Opportunistically prunes records older than the retention horizon.
     """
     ledger = Path(str(ODDS_USAGE_LEDGER_PATH))
     entries = _read_ledger(ledger)
@@ -204,7 +207,7 @@ def estimate_costs(now: datetime, cfg: dict) -> tuple[float, dict[str, float]]:
     recent = [r for ts, _, r in entries if ts >= window_start and r["key"] == "odds_api_plus"]
     close_total = sum(r["cost"] for r in recent if r["kind"] == "close_lines")
     floor_per_day = max(close_total / cfg["estimate_window_days"], cfg["floor_min_per_day"])
-    league_costs = _league_run_means(recent)
+    league_costs = {**cfg.get("league_seed_costs", {}), **_league_run_means(recent)}
 
     keep_cutoff = now - timedelta(days=_LEDGER_RETENTION_DAYS)
     if any(ts < keep_cutoff for ts, _, _ in entries):

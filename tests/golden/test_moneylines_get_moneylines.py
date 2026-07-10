@@ -89,6 +89,7 @@ def _fake_get_with_retry(calls):
     routes = {
         moneylines.ODDS_API_SPORTS_URL: _SPORTS,
         moneylines.ODDS_API_ODDS_URL.format(sport="basketball_nba"): _GAMES,
+        moneylines.ODDS_API_ODDS_URL.format(sport="icehockey_nhl"): [],
         moneylines.ODDS_API_ODDS_URL.format(sport="basketball_wnba"): [],
     }
 
@@ -125,9 +126,11 @@ def test_get_moneylines_writes_team_books(monkeypatch) -> None:
     assert returned is archive
     assert archive.calls == _EXPECTED
     # The sports-index probe and every odds request spend from the plus key.
+    # NHL rides the 5-league LEAGUES_OF_INTEREST even with an empty slate.
     assert [(url, params["apiKey"]) for url, params in calls] == [
         (moneylines.ODDS_API_SPORTS_URL, "kp"),
         (moneylines.ODDS_API_ODDS_URL.format(sport="basketball_nba"), "kp"),
+        (moneylines.ODDS_API_ODDS_URL.format(sport="icehockey_nhl"), "kp"),
         (moneylines.ODDS_API_ODDS_URL.format(sport="basketball_wnba"), "kp"),
     ]
 

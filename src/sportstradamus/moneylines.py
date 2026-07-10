@@ -67,10 +67,10 @@ from sportstradamus.spiderLogger import logger
 CLOSING_LEAD_MIN = 5
 CLOSING_LEAD_MAX = 25
 
-# Leagues with live odds we care about. The Odds API also surfaces NHL / MLB
-# but their prop coverage is thin enough that we get those from the direct
-# book scrapers in sportstradamus.books instead.
-LEAGUES_OF_INTEREST = ("NBA", "NFL", "WNBA")
+# Leagues with live odds we care about. All five tracked leagues since the
+# 2026-07 MLB/NHL activation; the budget governor decides which get fetched
+# on a given broad run, so an expensive slate throttles itself.
+LEAGUES_OF_INTEREST = ("NBA", "NFL", "WNBA", "MLB", "NHL")
 
 _ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 ODDS_API_SPORTS_URL = f"{_ODDS_API_BASE}/sports/"
@@ -503,14 +503,28 @@ def _store_sport_props(archive, ledger, sport, league, props, date, req, observe
             observed_at,
         )
         if not req.historical:
-            ledger[(sport, event["id"])] = {
-                "sport_key": sport,
-                "event_id": event["id"],
-                "league": league,
-                "commence_time": event["commence_time"],
-                "markets": list(props[league].keys()),
-            }
+            _record_upcoming_event(ledger, sport, event, league, props)
     return True
+
+
+def _record_upcoming_event(ledger, sport, event, league, props):
+    """Refresh an event's ledger entry, carrying the close-lines dedupe stamp.
+
+    A broad-run rebuild must not wipe ``close_fetched``, or a broad slot
+    landing inside an event's closing window would re-arm a second paid
+    close fetch.
+    """
+    entry = {
+        "sport_key": sport,
+        "event_id": event["id"],
+        "league": league,
+        "commence_time": event["commence_time"],
+        "markets": list(props[league].keys()),
+    }
+    stamp = ledger.get((sport, event["id"]), {}).get("close_fetched")
+    if stamp:
+        entry["close_fetched"] = stamp
+    ledger[(sport, event["id"])] = entry
 
 
 def get_props(
@@ -851,9 +865,12 @@ def _close_lines_pass(keys, props):
     minutes from now, and only then opens ``Archive`` and hits the per-event
     Odds API endpoint for each — spending from ``keys["odds_api_plus"]``,
     with a one-shot fallback to the ``odds_api`` margin key if the plus key
-    exhausts mid-run. Past-commence entries are pruned on the way out so the
-    ledger stays small. The ten-minute cron tick yields no archive read, no
-    API call, and no log noise on empty windows — the intended common case.
+    exhausts mid-run. Each event is fetched once: a successful parse stamps
+    ``close_fetched`` on its ledger entry, so later ticks inside the same
+    20-minute window skip it (a failed fetch stays unstamped and retries next
+    tick). Past-commence entries are pruned on the way out so the ledger
+    stays small. The ten-minute cron tick yields no archive read, no API
+    call, and no log noise on empty windows — the intended common case.
     """
     # style: allow-complexity — flat close-lines pass (CC 11): window filter,
     # then a per-event fetch loop whose one-shot margin-key fallback adds the
@@ -867,6 +884,8 @@ def _close_lines_pass(keys, props):
 
     due = []
     for e in ledger:
+        if "close_fetched" in e:
+            continue
         try:
             ts = datetime.fromisoformat(e["commence_time"].replace("Z", "+00:00"))
         except (ValueError, KeyError, AttributeError):
@@ -913,6 +932,7 @@ def _close_lines_pass(keys, props):
             .strftime("%Y-%m-%d")
         )
         _archive_event_props(archive, game, league, props, gameDate)
+        e["close_fetched"] = now.isoformat()
 
     archive.write()
     write_upcoming_events(_prune_upcoming_events(ledger))

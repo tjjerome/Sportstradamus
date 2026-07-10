@@ -88,7 +88,11 @@ def test_budget_cfg_schema() -> None:
         "default_league_run_cost",
         "estimate_window_days",
         "league_priority",
+        "league_seed_costs",
     }
+    assert set(odds_budget.BUDGET_CFG["league_seed_costs"]) == set(
+        odds_budget.BUDGET_CFG["league_priority"]
+    )
 
 
 def test_cycle_bounds_mid_cycle() -> None:
@@ -309,6 +313,15 @@ def test_estimate_costs_excludes_stale_offkey_and_unknown(monkeypatch, tmp_path)
     floor_per_day, league_costs = odds_budget.estimate_costs(_NOW, _ESTIMATE_CFG)
     assert floor_per_day == 20.0  # only the first line counts
     assert league_costs == {}
+
+
+def test_estimate_costs_seeds_bootstrap_unseen_leagues(monkeypatch, tmp_path) -> None:
+    ledger = _governed(monkeypatch, tmp_path)
+    ledger.write_text(_ledger_line(1, "broad", 80, run="r1", league="NBA"))
+    cfg = {**_ESTIMATE_CFG, "league_seed_costs": {"NBA": 100, "MLB": 300}}
+    _, league_costs = odds_budget.estimate_costs(_NOW, cfg)
+    # Ledger mean beats the seed; a league the ledger hasn't seen keeps its seed.
+    assert league_costs == {"NBA": 80.0, "MLB": 300}
 
 
 def test_estimate_costs_skips_torn_final_line(monkeypatch, tmp_path) -> None:
