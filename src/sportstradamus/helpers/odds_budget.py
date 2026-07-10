@@ -54,6 +54,8 @@ from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import urlsplit
 
+import pytz
+
 from sportstradamus import creds, data
 from sportstradamus.helpers.io import ODDS_USAGE_LEDGER_PATH, read_league_activity
 
@@ -295,6 +297,25 @@ def league_is_live(league: str, season_start) -> bool:
 
 def _feed_ts(commence: str) -> datetime:
     return datetime.fromisoformat(commence.replace("Z", "+00:00"))
+
+
+def season_opener(league: str):
+    """Feed-observed opening-night date for the league's current season.
+
+    Captured by the activity classifier during the preseason window and
+    frozen once play starts; ``Stats.update`` adopts it as ``season_start``
+    when it is newer than the hand-set constant. The commence timestamp is
+    converted to an America/Chicago date to match the archive's game-date
+    convention. ``None`` when unobserved (league seen only mid-season) or
+    the snapshot is stale.
+    """
+    leagues = _fresh_leagues()
+    if leagues is None:
+        return None
+    opener = leagues.get(league, {}).get("opener")
+    if opener is None:
+        return None
+    return _feed_ts(opener).astimezone(pytz.timezone("America/Chicago")).date()
 
 
 def update_window_open(league: str, season_start) -> bool:

@@ -254,6 +254,7 @@ def captured_update(monkeypatch):
     monkeypatch.setattr(
         base_mod.odds_budget, "update_window_open", lambda league, season_start: True
     )
+    monkeypatch.setattr(base_mod.odds_budget, "season_opener", lambda league: None)
 
     captured: dict = {}
     monkeypatch.setattr(

@@ -80,8 +80,10 @@ def test_classify_tiers_and_persist_snapshot(monkeypatch, tmp_path) -> None:
     snapshot = json.loads(path.read_text())
     assert set(snapshot) == {"updated", "leagues"}
     assert snapshot["leagues"] == {
+        # Mid-season MLB never saw its opener; preseason NFL's earliest
+        # upcoming game IS opening night.
         "MLB": {"tier": "live", "next_game": _commence(0.2)},
-        "NFL": {"tier": "preseason", "next_game": _commence(10)},
+        "NFL": {"tier": "preseason", "next_game": _commence(10), "opener": _commence(10)},
     }
 
 
@@ -100,11 +102,40 @@ def test_classify_live_is_sticky_through_midweek_gap(monkeypatch, tmp_path) -> N
     assert tiers == {"NFL": "live"}
 
 
+def test_classify_opener_freezes_at_promotion_to_live(monkeypatch, tmp_path) -> None:
+    events = {
+        _events_url("americanfootball_nfl"): _FakeResponse([{"commence_time": _commence(0.5)}])
+    }
+    previous = {
+        "updated": _NOW.isoformat(),
+        "leagues": {
+            "NFL": {"tier": "preseason", "next_game": _commence(0.5), "opener": _commence(0.5)}
+        },
+    }
+    path = _wire(monkeypatch, tmp_path, events, previous=previous)
+
+    moneylines._classify_league_activity("k", [_sport("americanfootball_nfl", "NFL")])
+
+    # Live records carry the preseason-observed opener instead of tracking
+    # the (now mid-season) earliest upcoming game.
+    assert json.loads(path.read_text())["leagues"]["NFL"] == {
+        "tier": "live",
+        "next_game": _commence(0.5),
+        "opener": _commence(0.5),
+    }
+
+
 def test_classify_season_end_leaves_idle_record_with_last_game(monkeypatch, tmp_path) -> None:
     events = {_events_url("basketball_wnba"): _FakeResponse([])}
     previous = {
         "updated": _NOW.isoformat(),
-        "leagues": {"WNBA": {"tier": "live", "next_game": _commence(-0.5)}},
+        "leagues": {
+            "WNBA": {
+                "tier": "live",
+                "next_game": _commence(-0.5),
+                "opener": _commence(-60),
+            }
+        },
     }
     path = _wire(monkeypatch, tmp_path, events, previous=previous)
 

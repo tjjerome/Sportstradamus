@@ -485,6 +485,12 @@ class Stats:
         self.teamlog = league_data["teamlog"]
         self.players = league_data["players"]
 
+    def _set_season_start(self, day):
+        """Adopt a season start date. Leagues with a derived season label
+        (NBA's ``"2025-26"`` string, WNBA's year) override to re-derive it.
+        """
+        self.season_start = day
+
     def update(self):
         """Fetch new game data from the league API and append to ``self.gamelog``.
 
@@ -492,11 +498,22 @@ class Stats:
         before the next scheduled game to 10 days after the last one, per
         the feed-derived :func:`odds_budget.update_window_open`. Set
         ``SPORTSTRADAMUS_FORCE_UPDATE=1`` to run an offseason update anyway
-        (full rebuilds, historical backfills).
+        (full rebuilds, historical backfills); the bypass also pins
+        ``season_start``, so replay tools keep manual control.
+
+        When the activity feed has observed the season's opening night
+        (:func:`odds_budget.season_opener`) and it is newer than the
+        hand-set constant, it is adopted before fetching — season-year API
+        params, ``DaysIntoSeason``, and the early-season scoring gate then
+        track the real calendar without an annual code edit.
         """
         if not odds_budget.update_window_open(self.league, self.season_start):
             logger.info(f"{self.league} update skipped: outside season window")
             return
+        if not os.environ.get("SPORTSTRADAMUS_FORCE_UPDATE"):
+            opener = odds_budget.season_opener(self.league)
+            if opener is not None and opener > self.season_start:
+                self._set_season_start(opener)
         self._update()
 
     def _update(self):

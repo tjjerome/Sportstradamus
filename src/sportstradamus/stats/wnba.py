@@ -65,13 +65,15 @@ class StatsWNBA(StatsNBA):
         super().__init__()
         self.league = "WNBA"
         self.positions = ["G", "F", "C"]
-        self.season_start = datetime(2026, 5, 15).date()
+        self._set_season_start(datetime(2026, 5, 15).date())
         self.default_total = 81.667
 
         self.gamelog.columns = [stat.replace("_48", "_40") for stat in self.gamelog.columns]
         self.stat_types = [stat.replace("_48", "_40") for stat in self.stat_types]
 
-        self.season = self.season_start.year
+    def _set_season_start(self, day):
+        self.season_start = day
+        self.season = day.year
 
     def _series_games_to_win(self, playoff_teamlog, team, opp, date):
         """Wins to clinch this WNBA series: best-of-3 in the first round, best-of-5 in
