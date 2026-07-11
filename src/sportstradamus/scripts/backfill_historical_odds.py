@@ -101,7 +101,6 @@ CLOSE_LAYER_HOUR = 23
 # lines would leak information the live pipeline never had.
 FEATURE_SNAPSHOT_MAX_HOUR = 12
 
-# Odds API sport keys for the leagues whose player props we archive.
 ODDS_API_SPORT_KEYS = {
     "NFL": "americanfootball_nfl",
     "NBA": "basketball_nba",
