@@ -138,12 +138,12 @@ live-money finding of the audit**: every parlay recommendation is sized from the
 copula probability with no model-confidence discount, exactly the overbetting failure
 mode the shrinkage machinery exists to prevent.
 
-Disposition — **owner routing decision required** (recorded here, deliberately not
-added to any lane's scope unilaterally): the fix is small but `parlay.py` is
-conflict-gated (roadmap §5.1). Options: (a) land it inside sleeper-parity's parlay.py
-rebuild, (b) fold it into parlay-dependence stage 3, (c) authorize a surgical
-standalone PR ahead of both (accepting the file-conflict exception). Recommendation:
-(a) if sleeper-parity is scheduled soon, else (c).
+Disposition — **routed by owner (2026-07-10, option a)**: lands inside
+sleeper-parity's `parlay.py` rebuild — recorded as a stage-1 scope line in that
+brief. Spec: route the parlay path through `fractional_kelly_stake` conventions
+(shrinkage blend + cap) instead of the inline formula. Until that stage lands,
+parlay recommendations remain sized without shrinkage — treat their stake column
+as optimistic.
 
 ---
 
@@ -183,7 +183,7 @@ it early.
 | Cross-game ρ=0 (§1.1) | accepted for player-only slips | mixed-slip case → dfs-products | here + dfs-products brief |
 | PSD-repair distortion (§2.2) | drop-bias fixed; distortion unmeasured | YES — read-only rider on production re-run | hygiene-closeout stage 2 + here |
 | Payout staleness (§2.4) | known; homes exist | already homed | hygiene stage 3 + sleeper-parity stage 0 |
-| Parlay-path Kelly no-shrinkage (§2.6) | **highest live-money finding** | small fix, conflict-gated → owner routing decision | here §2.6 |
+| Parlay-path Kelly no-shrinkage (§2.6) | **highest live-money finding** | routed (owner 2026-07-10) → sleeper-parity stage 1 | here §2.6 + sleeper-parity stage 1 |
 | Substring same-player guard (§1.2) | minor correctness | parked | here + parlay-dependence stage-3 scope |
 | Shrink-to-zero credibility (§1.1) | superseded by R3 hierarchical Fisher-z EB | resolved-by-design pending D3 | R3 brief / model track §6.11 |
 | Production calibration never run (§3) | only empirical check + D3 stage-4 baseline | YES (owner-assisted) | hygiene-closeout stage 2 + here |

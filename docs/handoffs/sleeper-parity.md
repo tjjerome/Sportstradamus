@@ -133,7 +133,11 @@ inference-path compatibility checklist in
 
 - **Goal:** per-leg payout-vector pricing in `prediction/parlay.py` — EV from
   the product of the selected legs' multipliers, push-aware per stage-0
-  semantics, `Decimal` at money boundaries (§4).
+  semantics, `Decimal` at money boundaries (§4). Owner-routed into this stage
+  (2026-07-10, PARLAY_AUDIT §2.6 option a): replace the inline parlay-path
+  Kelly at [`parlay.py:416`](../../src/sportstradamus/prediction/parlay.py)
+  with `strategies/kelly.py::fractional_kelly_stake` conventions (shrinkage
+  blend + cap) — highest live-money audit finding.
 - **Entry:** stage 0 complete.
 - **Scope:** `sportstradamus.prediction.parlay` + its golden tests.
 - **Acceptance:** new golden unit tests pass against hand-computed 2- and
@@ -251,5 +255,6 @@ refactoring-specialist per the five [`CLAUDE.md`](../../CLAUDE.md) triggers.
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-10 · owner decision · PARLAY_AUDIT §2.6 parlay-path Kelly fix routed into stage 1 (option a — shrinkage-aware sizing lands with the parlay.py rebuild) · next: unchanged
 - 2026-07-10 · heads-up · new dfs-products lane may touch books.py Sleeper ingestion (alt-line de-vig, its stage 2a) — books.py is read-only in THIS lane so no footprint collision, but re-verify this brief's stage-0 payload facts if that lands first; PARLAY_AUDIT.md §2.6 flags parlay-path Kelly for possible routing into this lane's parlay.py rebuild (owner call) · next: unchanged
 - 2026-06-10 · created · brief drafted from roadmap-v3 migration · next: stage 0 product verification with owner
