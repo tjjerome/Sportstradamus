@@ -79,10 +79,14 @@ relevant stage-0 capture, revise this brief in place, resume.
   your fantasy picks until your prediction settles"; $10 → $9 prediction + $1 reservation);
   sequential settle — prediction payout + held amount fund the fantasy entry; outcome
   branches: all-correct = q(k)·(reservation + roll), fantasy-only = q(k)·reservation,
-  **prediction-only = $0** (the roll rides and dies with the fantasy legs). Open
-  reconciliation: live Padres slip displayed "Roll over to player picks ~$4.08" vs
-  $5 × 90% × 1.79x = $8.06 expected — winnings + reservation ≈ $4.06 matches the display
-  but not the 6.11x total; capture the "Payout details" screen.
+  **prediction-only = $0** (the roll rides and dies with the fantasy legs).
+  Prediction-side fee mechanics (`ud_prediction_payout_details_fees.png`): integer
+  contract lots at market ask + **$0.02/contract exchange fee**, unspent residue returns
+  (sample $5 → 8 contracts, $4.48 cost + $0.16 fee, $8 payout); the displayed leg
+  multiplier EXCLUDES the fee (1.79x = 8/4.48; effective 8/4.64 ≈ 1.72x) — every
+  prediction-leg EV must fee-adjust. Slip totals reconcile with the full prediction
+  payout rolling into the fantasy stake; the "~$4.08 roll" tile reads as winnings +
+  reservation (display convention only).
 - **Ladders — core rules VERIFIED in-app (owner screenshots 2026-07-10,
   `docs/archive/evidence/ud_ladder*.png`).** Min-rung payout confirmed verbatim ("pays out
   based on the highest level achieved by ALL picks; if one pick stops at level 1 … your
@@ -91,8 +95,9 @@ relevant stage-0 capture, revise this brief in place, resume.
   top tier; thresholds are integer "N+" with ≥ semantics (no push question); rungs can sit
   below the current median line (rung-1 deep ITM); picks are pre-built per-player alt-line
   sets, rung lines app-fixed; same-game and same-team picks allowed; max entry $250; no
-  per-leg multipliers (tier table only). Still open: DNP/rescue-rung handling (capture the
-  "All rules" page), API payload existence (VERIFY-6).
+  per-leg multipliers (tier table only). Still open: DNP/rescue-rung handling — rules
+  page is `app.underdogsports.com/rules/ladders`, Cloudflare-blocked to non-browser
+  fetch, owner screenshot/paste needed — and API payload existence (VERIFY-6).
 - **Sleeper: team-line × player pairing NOT allowed yet (owner verified in-app
   2026-07-10)** — Sleeper sub-lane is standalone-contract + player-parlay only for now,
   though player×player correlation repricing exists there too. Contract shape + $0.02 fee
@@ -126,6 +131,12 @@ relevant stage-0 capture, revise this brief in place, resume.
 - 2026-07-10 — **Book-implied game-line marginals only; no team-market model training.**
   `model_improvement_track.md` §1.1 — the sharp de-vigged consensus is the truth estimate;
   this lane never trains a team-outcome model.
+- 2026-07-10 — **No automated authed quote probing on the owner's account** (owner, after
+  mitm confirmed slip quotes are computed server-side). Modifier extraction runs as:
+  passive parse of mitm flows from the owner's normal app usage + script-designed manual
+  probe slips (owner builds them by hand, enters quotes) + δ(ρ̂) interpolation for
+  unobserved pair-types with uncertainty flags. No scripted requests against authed
+  endpoints.
 - 2026-07-10 — **Serve-time budget (owner).** `prophecize` stays a few minutes typical, 15
   minutes MAX end-to-end on a heavy day. Every stage's acceptance includes measured
   wall-time impact. Per-stage compute-budget targets from the stage-0 briefs: Ladders
@@ -332,6 +343,11 @@ at the swimlane index for the next lane.
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-10 · stage-0 · quote path is server-side (owner mitm); authed auto-probing
+  rejected (locked, §4) → extraction = passive flow harvest + manual probes +
+  interpolation; prediction fees decoded ($0.02/contract, integer lots, displayed
+  multiplier excludes fee) · next: owner exports mitm flows + ladders rules-page text;
+  flow-parser script.
 - 2026-07-10 · stage-0 evidence · 9 screenshots → `docs/archive/evidence/` (combo 90/10 +
   roll + payout branches; ladders min-rung rules + per-slip tier tables; corr A/B slips);
   §3 adjudicated in place; `banned_combos.json` = the modifier map · next:
