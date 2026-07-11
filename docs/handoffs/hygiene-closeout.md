@@ -69,10 +69,13 @@ edits to), `src/sportstradamus/scripts/` (read/run), `pyproject.toml`
    deletion in this stage.
 2. **Parlay calibration re-run** (owner-assisted). Run
    `audit_parlay_calibration.py` against production archive data; commit the
-   real plot + CSV over the placeholder. Acceptance: committed artifacts
-   derive from production data (dates + row counts in the ledger line).
-   1 session + owner time. *If production data can't be exported:* park the
-   stage, note in ledger, move on.
+   real plot + CSV over the placeholder, and report PSD-repair distortion
+   stats alongside the reliability deciles (PARLAY_AUDIT.md §2.2 rider). The
+   populated artifacts double as the incumbent baseline
+   [`parlay-dependence.md`](parlay-dependence.md) stage 4 must beat.
+   Acceptance: committed artifacts derive from production data (dates + row
+   counts in the ledger line). 1 session + owner time. *If production data
+   can't be exported:* park the stage, note in ledger, move on.
 3. **Drift sweeps + recurring checks.** (a) `deferred-90` drift grep (§3
    block) — the tag is retired
    ([`model_improvement_track.md`](model_improvement_track.md) §8);
@@ -121,4 +124,5 @@ product-change protocol for affected lanes).
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
+- 2026-07-10 · stage 2 scope+ · calibration re-run gains PSD-distortion rider + parlay-dependence stage-4 baseline role (PARLAY_AUDIT.md refresh dispositions) · next: unchanged
 - 2026-06-10 · stage 0 · roadmap v3 + 7 briefs + v2 archived + pointers repointed (this migration) · next: stage 1 deprecated triage

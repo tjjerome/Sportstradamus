@@ -1113,8 +1113,9 @@ Rivals head-to-heads. Copula research is **done** (R3 brief `/tmp/researcher_cop
   pairings are independence-correct (edge = the certified marginals alone) and same-game needs a
   single ρ the **incumbent correlation matrix already supplies at d=2**. Ingestion exists
   (`books.py` `rival_lines`, payout curve, `"vs."` flip); the only missing piece is a small
-  **P(A−B>k) difference pricer** with push handling. Audit Rivals margin behavior first, then build
-  the pricer — a cheaper early win than full parlay pricing.
+  **P(A−B>k) difference pricer** with push handling. The pricer **build is homed in the
+  `dfs-products` lane, stage 1** ([`dfs-products.md`](dfs-products.md)); this track keeps the
+  tail/ladder read below.
 - **Ladder / tail read (query, not build).** The `ladder` table holds **15.5M historical rungs
   across all five leagues**: MLB 7.0M (18 markets, 4 alt-enriched: hits / total bases / home runs
   / pitcher strikeouts), NBA 4.2M (PTS/REB/AST/FG3M alternates, 2024-10→2026-06), NHL 3.5M (7
@@ -1472,6 +1473,7 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-10 · dfs-products lane created (decision-engine expansion: game-line combos verify-first, Ladders, alt-line hardening) · §6.11 Rivals pricer build repointed there (tail read stays); ladders + gamelines stage-0 briefs in docs/archive/; serve-time budget locked ≤15 min heavy day · next: unchanged
 - 2026-07-10 · WS-2/WS-4 backfill program done (1.76M credits of 5M): MLB+NHL feature gap closed (7-11 sharp books, NHL 2023-24 refilled), `ladder` seeded 15.5M rungs all five leagues (alt keys backfill-only), MLB/NHL close-layer dual snapshots (23Z eval-only) → CLV/movement computable; §6.11 tail read + §6.5 ladder-lift re-test unblocked. MLB matrices rebuilt 19/19 at 2 seasons; NHL rebuild + both sweeps in flight.
 - 2026-07-09 · WS-2 Track A (key-independent) done: MLB/NHL klepto seed purged (3.1M junk odds rows), backfill `_probe` key bugfix, per-league `trim_gamelog` windows (MLB 95k / NHL 110k rows = 2-season matrices), Savant affinity bot-block fix, activation guard emptied per GO. Gates clean. Backfill + rebuild + sweep/confirm blocked on the activated Odds API key (detail: mlb-nhl-activation.md §10).
 - 2026-07-09 · Stage-0 engine work LANDED (§6 status revised in place): version stamping train→serve→history→dashboard + `backfill_history_eras.py`; board `--resume`/per-cell upsert/`swept_at`/`code_rev`/`--dry-run`; FamilySpec registry live. Residue → WS-3: confirm queue-manifest, auto archive-snapshot, family-as-swept-axis. Owner declared D1/D2 GO with 5M-credit backfill — WS-2 activation execution starts (plan: `~/.claude/plans/review-the-model-improvement-track-md-ha-lexical-storm.md`).

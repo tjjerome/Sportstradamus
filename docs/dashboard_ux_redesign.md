@@ -44,10 +44,17 @@ Platform taxonomy (binding for all display copy and slip logic):
   platform or contest grouping.
 - Internal pipeline names (`contest_variant` in pickem emit/parquet) are unchanged; the taxonomy
   governs UI language and slip-engine rules only.
-- **Underdog game lines** (Total / Spread / Moneyline) exist as offers but get **no model**
-  (sharp lines). They are scarred into the UI (game-line rows on the Game board, team nodes in
-  the constellation, slip accepts them) and join the correlation engine in a later stage with
-  book-implied probabilities only.
+- **Game lines are event-contract legs, not pick'em legs.** Underdog "Prediction Picks" and
+  Sleeper "Sleeper Markets" (Total / Spread / Moneyline) are CFTC event contracts at market
+  prices; on Underdog they combine with player picks only via a **Combo Entry** (contract +
+  fantasy picks, compounded payout). Product mechanics + engine live in
+  [handoffs/dfs-products.md](handoffs/dfs-products.md) §3/§6 — this doc owns presentation only
+  (§5b). Game lines get **no model** (book-implied probabilities — locked, dfs-products §4);
+  they are scarred into the UI (game-line rows on the Game board, team nodes in the
+  constellation, slip accepts them) and join the correlation engine at dfs-products stage 5.
+- **Ladders is a play type** (Underdog: 3–5 picks × 3 rungs, payout keyed to the lowest rung
+  reached). Display-name candidates for the prophecy voice — **owner picks on build, none
+  locked**: Ladder → "Ascension"; Combo Entry → "Conjunction"; game-line leg → "Omen".
 
 ## 3. The six surfaces (`st.navigation`, Material icons, sport switch on every page)
 
@@ -106,6 +113,51 @@ rail — placeholder until the pairing-rule model lands.
 remaining legs × edge; each row shows the slip-EV delta if swapped in; anti-correlated
 candidates are shown but flagged "fights the thesis".
 
+## 5b. New bet-type presentation (game-line combos · Ladders · alt lines)
+
+Presentation design for the dfs-products lane's surfaces. Data producers and engine
+math live in [handoffs/dfs-products.md](handoffs/dfs-products.md); every element here
+is a scar (§8) until its snapshot artifact exists, and builds queue behind the lane
+brief's current phase.
+
+**Ladders** (Slips surface + Game board):
+- Per-pick rung display: the 3 rung lines with model survival probability each; a rung
+  selector only if stage-0 capture finds rungs user-selectable (VERIFY — dfs-products §3).
+- Slip-level payout-distribution strip: P(lowest rung = r) × payout for r ∈
+  {fail, 1, 2, 3} — the discrete outcome vector, not a single EV number.
+- Live rung-progress on graded/pending entries: each pick shows the highest rung
+  reached; the entry grades at the minimum. Receipts grades ladders per-rung (payout
+  tier reached), never binary win/loss.
+- Rail: ladder slip mode shows payout preview = f(lowest rung) and the discrete-Kelly
+  stake from dfs-products stage 3.
+
+**Game-line / combo legs** (rail + Game board + Slips):
+- Contract chip on an event leg: market price (the probability the exchange charges) +
+  our de-vigged consensus beside it; divergence badge when the dfs-products B4 trigger
+  fires. Provenance stated honestly: "market price, not model."
+- Combo Entry in the rail: fee-split EV breakdown (contract stake vs fantasy
+  reservation, compounded payout); correlation-aware combo EV appears only after
+  dfs-products stage 5; cash-out is not valued (lane brief §4).
+- Evidence chain for an event leg: no projected-distribution tab (no model);
+  shows consensus source, price history when the line-movement artifact exists.
+
+**Alt-line markers** (Board + rail + Receipts):
+- Alt-line flag chip on any offer row whose `Alt Line` is true (flag already stamped
+  at scoring; needs the snapshot column — scar). Receipts can then split record by
+  standard-vs-alt line using the sanctioned gold identity swatch (DESIGN.md §4a
+  exception — identity, never a plotted value).
+- Rung-price provenance chip once dfs-products stage 2 lands: whether the book prob at
+  an alt line came from a real archived rung or dist-inversion.
+
+**Constellation application** (grammar home stays DESIGN.md §4a; changes owner-only):
+- Moneyline/spread star fills with that team's color — grammar-consistent, no change.
+- Game-total star has no single team: **PROPOSAL** (owner decision) — neutral-gray
+  fallback fill, centre-anchored between the team clusters.
+- Ladder picks render as one star per pick (no new mark grammar); rung detail lives in
+  the hover card and rail only.
+- Edges to game-line stars appear only when player×game-line ρ exists (dfs-products
+  stage 5); until then game-line stars render edge-less.
+
 ## 6. Asset layer
 
 - **Player assets**: `reflect` writes `data/runtime/player_assets.parquet` (league, player,
@@ -150,6 +202,9 @@ Owned by the pipeline (canonical detail in code; this table is the UI's reading 
 | `data/training/feature_importances.csv` | existing, newly wired | deep-dive chip ranking |
 | `data/runtime/live_metrics_per_market.parquet` | existing, newly wired | market-trust lines, Model Lab |
 | `data/runtime/line_movement.parquet` | later stage (archive export cron) | line-movement tab (scarred) |
+| game-line offer rows (provenance=book-implied) in `current_offers` | later stage (dfs-products stage 4) | Game board rows, rail, §5b chips |
+| `Alt Line` flag column in `current_offers`/`current_pickem` | later stage (dfs-products stage 2c; `persist.py` `_OFFER_KEEP_COLS`) | §5b alt markers, Receipts split |
+| ladder entry/rung columns (new snapshot artifact) | later stage (dfs-products stage 3) | §5b Ladders views, Receipts per-rung grading |
 
 ## 8. Placeholder register (scars — visible, honest, roadmap-backed)
 
@@ -159,12 +214,18 @@ Every scar renders a real panel with "coming" microcopy, feature-detects its dat
 1. Line-movement timeline (per-offer dialog tab) — needs `export-line-movement` cron.
 2. Comps panel + comps stat chip — needs comp outputs persisted at prophecize time.
 3. Correlation-block risk chip on the rail — needs UD/Sleeper pairing-rule model.
-4. Game-line rows on the Game board + team nodes in the constellation — needs game lines in the
-   correlation engine (book-implied probs only; **no modeling engine** — locked decision, see
-   lane brief §4).
+4. Game-line rows on the Game board + team nodes in the constellation — book-implied probs only
+   (**no modeling engine** — locked, [handoffs/dfs-products.md](handoffs/dfs-products.md) §4;
+   Combo-Entry mechanics live there §3); joins the correlation engine at dfs-products stage 5.
 5. Ambient-image slots — need acquired art (manifest fill-in).
 6. Optional free-LLM prose rewriter seam — documented only; templates are the contract.
+7. Ladders views (§5b) — flip on the ladder snapshot artifact (dfs-products stage 3).
+8. Alt-line markers + per-rung Receipts grading (§5b) — flip on the `Alt Line` snapshot column
+   (dfs-products stage 2c).
+9. Combo-EV chips on the rail (§5b) — flip on game-line offer rows (dfs-products stage 4;
+   correlation-aware EV at stage 5).
 
 ## Changelog
 
+- 2026-07-10 — §5b new bet-type presentation added (Ladders, game-line combos, alt-line markers); taxonomy + contracts + scars extended; producers = dfs-products lane.
 - 2026-06-11 — spec created from owner-approved mockup review (P0 of the dashboard-ux lane).

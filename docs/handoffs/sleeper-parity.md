@@ -251,4 +251,5 @@ refactoring-specialist per the five [`CLAUDE.md`](../../CLAUDE.md) triggers.
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-10 · heads-up · new dfs-products lane may touch books.py Sleeper ingestion (alt-line de-vig, its stage 2a) — books.py is read-only in THIS lane so no footprint collision, but re-verify this brief's stage-0 payload facts if that lands first; PARLAY_AUDIT.md §2.6 flags parlay-path Kelly for possible routing into this lane's parlay.py rebuild (owner call) · next: unchanged
 - 2026-06-10 · created · brief drafted from roadmap-v3 migration · next: stage 0 product verification with owner
