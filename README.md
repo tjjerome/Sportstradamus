@@ -16,9 +16,10 @@ dashboard. Supports MLB, NBA, NFL, NHL, and WNBA.
 6. [CLI Commands](#cli-commands)
 7. [Training and Shipping a New Model](#training-and-shipping-a-new-model)
 8. [Daily Workflow](#daily-workflow)
-9. [Configuration Files](#configuration-files)
-10. [Data Storage Layout](#data-storage-layout)
-11. [Deferred / Archived Code](#deferred--archived-code)
+9. [Recommended Cron](#recommended-cron)
+10. [Configuration Files](#configuration-files)
+11. [Data Storage Layout](#data-storage-layout)
+12. [Deferred / Archived Code](#deferred--archived-code)
 
 ---
 
@@ -365,9 +366,49 @@ weekly (or when model accuracy drops):
   poetry run meditate        # retrain stale models
 ```
 
-If a new season has started and the season-start date in the relevant Stats class
-has not been updated, `meditate` will skip the league. Update
-`src/sportstradamus/stats/{league}.py` → `Stats{League}.season_start`.
+League activity — which leagues `confer` polls and `prophecize`/`meditate` update —
+is derived automatically from the Odds API events feed, so season starts and ends
+need no manual edits. The hand-set `season_start` constants in the Stats classes
+are only fallback seeds. To force a gamelog update in the offseason, set
+`SPORTSTRADAMUS_FORCE_UPDATE=1`.
+
+---
+
+## Recommended Cron
+
+All jobs run through `scripts/run_job.sh`, which adds a per-job `flock`
+(an overlapping run of the same job is skipped), a shared archive lock
+(DuckDB allows one writer), and Healthchecks.io start/fail/success pings.
+
+```cron
+50 8-20 * * *          /home/sportstradamus/Sportstradamus/scripts/run_job.sh prophecize
+30 8,11,14,17,20 * * * /home/sportstradamus/Sportstradamus/scripts/run_job.sh confer
+0 1 * * 5              /home/sportstradamus/Sportstradamus/scripts/run_job.sh meditate
+0 23 * * *             /home/sportstradamus/Sportstradamus/scripts/run_job.sh reflect
+*/10 11-23,0-1 * * *   /home/sportstradamus/Sportstradamus/scripts/run_job.sh close-lines
+0 2 1 * *              /home/sportstradamus/Sportstradamus/scripts/run_job.sh gate-status
+0 10 * * 3             /home/sportstradamus/Sportstradamus/scripts/run_job.sh fp-fetch
+```
+
+| Job | Cadence | Purpose |
+|---|---|---|
+| `prophecize` | hourly, 8am–8pm | score offers, write dashboard snapshots |
+| `confer` | 5 slots/day | broad odds/props fetch; the credit governor decides which leagues each slot fetches |
+| `meditate` | Fri 1am | retrain models |
+| `reflect` | nightly 11pm | grade history, profit-sim + calibration summaries |
+| `close-lines` | every 10 min, game hours | closing-line capture for games starting in 5–25 min; no-op tick when nothing is due |
+| `gate-status` | monthly | Gate-2 promote/demote PR against `main`; needs `gh` auth and `HEALTHCHECK_URL_GATE_STATUS` |
+| `fp-fetch` | Wed 10am (NFL season) | Fantasy Points endpoint snapshots; needs a fresh session cookie and `HEALTHCHECK_URL_FP_FETCH` |
+
+Couplings to keep in sync:
+
+- The number of `confer` slots must match `broad_slots_per_day` in
+  `data/config/odds_api_budget.json` (currently 5). Fewer real slots than the
+  config claims underspends the monthly credit budget; more overspends it.
+- `close-lines` is the per-game data floor and is never throttled by the
+  governor — don't widen its hours without re-checking the credit budget.
+- Season starts/ends never require cron edits: idle leagues cost one free
+  events call per broad run, and `prophecize`/`meditate` skip them.
 
 ---
 

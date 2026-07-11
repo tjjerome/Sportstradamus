@@ -269,17 +269,10 @@ Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
     single-writer lock so jobs don't collide on `archive.duckdb`),
   - Healthchecks.io `/start` / `/fail` / success pings,
   - structured `START` / `OK` / `FAIL` / `WAIT` log lines per job.
-* **Production crontab** (run as `sportstradamus@<host>`):
-
-  ```cron
-  50 8-20 * * *          /home/sportstradamus/Sportstradamus/scripts/run_job.sh prophecize
-  30 8,11,14,17,20 * * * /home/sportstradamus/Sportstradamus/scripts/run_job.sh confer
-  0 1 * * 5              /home/sportstradamus/Sportstradamus/scripts/run_job.sh meditate
-  0 23 * * *             /home/sportstradamus/Sportstradamus/scripts/run_job.sh reflect
-  */10 11-23,0-1 * * *   /home/sportstradamus/Sportstradamus/scripts/run_job.sh close-lines
-  0 2 1 * *              /home/sportstradamus/Sportstradamus/scripts/run_job.sh gate-status
-  0 10 * * 3             /home/sportstradamus/Sportstradamus/scripts/run_job.sh fp-fetch
-  ```
+* **Production crontab** (run as `sportstradamus@<host>`): the canonical
+  schedule lives in [README.md §Recommended Cron](README.md#recommended-cron).
+  Key coupling: the number of confer slots must match `broad_slots_per_day`
+  in `data/config/odds_api_budget.json`.
 
   The `fp-fetch` job runs weekly during NFL season: it walks the
   Fantasy Points Data Suite endpoint catalog
