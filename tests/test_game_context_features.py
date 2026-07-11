@@ -19,7 +19,7 @@ from datetime import date
 
 import pandas as pd
 
-from sportstradamus.stats import StatsNBA
+from sportstradamus.stats import StatsNBA, base
 from sportstradamus.stats.base import _BLOWOUT_SPREAD_THRESHOLD
 
 # Two past-date games: a 20-point implied blowout (AAA/BBB) and a 4-point coin-flip
@@ -74,3 +74,42 @@ def test_blowout_flag_matches_threshold_on_both_sides():
     assert out.loc["P4", "Blowout"] == 0
     for player in PLAYER_TEAM:
         assert out.loc[player, "Blowout"] == int(abs(out.loc[player, "Spread"]) > thr)
+
+
+class _StubArchive:
+    """Minimal archive stub for the upcoming ``_game_context`` branch -- avoids DuckDB."""
+
+    def get_moneyline(self, league, game_date, team, **_):
+        return -110.0
+
+    def get_total(self, league, game_date, team, **_):
+        return 100.0
+
+
+def test_home_defaults_false_and_stays_bool_when_team_missing_from_upcoming_games(monkeypatch):
+    """Regression: a team absent from ``upcoming_games`` (e.g. an MLB doubleheader team
+    whose only qualifying entry got a game-2 suffix key -- ``mlb.py``
+    ``_build_mlb_upcoming_games``) must default ``Home`` to ``False``, not leak ``None``.
+    ``get_stats``'s blanket ``fillna(0)`` turns a stray ``None`` into an *int* ``0``,
+    poisoning an otherwise-bool column to ``object`` dtype and crashing pyarrow's
+    parquet write (mixed bool/int in a column it infers as ``boolean``).
+    """
+    monkeypatch.setattr(base, "archive", _StubArchive())
+    stats = StatsNBA()
+    stats.gamelog = pd.DataFrame(
+        {stats.log_strings["date"]: ["2098-01-01"], stats.log_strings["game"]: ["0022400001"]}
+    )
+    stats.upcoming_games = {"AAA": {"Home": True}}  # "BBB" deliberately absent
+    frame = pd.DataFrame(index=["P1", "P2"])
+    teams = {"P1": "AAA", "P2": "BBB"}
+    opponents = {"P1": "BBB", "P2": "AAA"}
+    offers = [
+        {"Player": "P1", "Team": "AAA", "Opponent": "BBB", "Date": "2099-01-01"},
+        {"Player": "P2", "Team": "BBB", "Opponent": "AAA", "Date": "2099-01-01"},
+    ]
+    out, *_ = stats._game_context(frame, offers, "PTS", date(2099, 1, 1), teams, opponents)
+    # dtype pins the actual regression: a leaked None/int forces object dtype, which is
+    # exactly what pyarrow rejects -- a clean bool dtype means nothing but bool got in.
+    assert out["Home"].dtype == bool
+    assert out.loc["P1", "Home"]  # AAA is present -> real Home value (True)
+    assert not out.loc["P2", "Home"]  # BBB missing from upcoming_games -> default False

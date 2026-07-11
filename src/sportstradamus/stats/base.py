@@ -1485,7 +1485,12 @@ class Stats:
                     dates[split_players[1]] = dates[player]
                     dates.pop(player)
 
-            stats["Home"] = [self.upcoming_games.get(teams[x], {}).get("Home") for x in stats.index]
+            # Explicit False (not the blanket fillna(0) below) keeps a missing
+            # upcoming_games entry from writing an int into this otherwise-bool
+            # column -- pyarrow rejects a mixed bool/int object column at parquet write.
+            stats["Home"] = [
+                self.upcoming_games.get(teams[x], {}).get("Home", False) for x in stats.index
+            ]
             stats["Moneyline"] = [
                 archive.get_moneyline(self.league, dates[x], teams[x]) for x in stats.index
             ]
