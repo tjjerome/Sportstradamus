@@ -287,9 +287,12 @@
         },
         "goals": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "zinb_mode": "hurdle",
+            "count_dispersion_objective": "crps",
+            "blending": "nll"
         },
         "goalsAgainst": {
             "dist": "ZINB",
@@ -299,9 +302,12 @@
         },
         "hits": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "zinb_mode": "hurdle",
+            "count_dispersion_objective": "crps",
+            "blending": "nll"
         },
         "points": {
             "dist": "ZINB",
@@ -329,9 +335,10 @@
         },
         "shotsAgainst": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "none",
+            "blending": "crps"
         },
         "skater fantasy points underdog": {
             "dist": "SkewNormal",
@@ -347,9 +354,10 @@
         },
         "timeOnIce": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "none",
+            "blending": "crps"
         }
     },
     "WNBA": {
