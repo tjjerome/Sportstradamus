@@ -288,6 +288,14 @@ Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
   `docs/fantasypoints.md`) and `HEALTHCHECK_URL_FP_FETCH` set so
   cookie-expiry surfaces as an immediate alert.
 
+  The `ctg-fetch` (NBA, Cleaning the Glass) and `savant-fetch` (MLB,
+  Baseball Savant) collectors are **dev-side**, not prod-cron: run them on
+  the dev box beside the manual weekly `meditate`, then `sync_to_prod.sh`
+  pushes their date-stamped snapshots up. They share the `fp-fetch`
+  framework (`sportstradamus.collectors`); `StatsNBA`/`StatsMLB` fold the
+  snapshots in via the `_join_fp_*_features` hooks once each source's join
+  schema is pinned. Canonical guide: `docs/data_collectors.md`.
+
   The `gate-status` job runs monthly: it promotes/demotes cells in `main`'s
   `stat_meta.json` based on live Gate-2 graduation and opens a PR (a human
   merges — `main` is the public branch). It needs `gh` authenticated on

@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
-# Push this dev machine's trained model pickles UP to the production server,
-# mirroring the models dir (replace existing, delete prod-only orphans). Run
-# from the dev box after a local `meditate`:
+# Push this dev machine's locally-produced data UP to the production server. Run
+# from the dev box after a local `meditate` and/or a collector run (`ctg-fetch`,
+# `savant-fetch`):
 #
-#   scripts/sync_to_prod.sh             # mirror models to prod
+#   scripts/sync_to_prod.sh             # sync models + collector snapshots to prod
 #   scripts/sync_to_prod.sh --dry-run   # show what would change, touch nothing
 #
-# Only the top-level *.mdl files are synced; the models/deterministic/ research
-# subdir is excluded (and prod's copy of it is protected from --delete). Before
-# deleting any prod model that is NOT present on dev, the script lists those
-# files and asks for confirmation; with no such orphans it proceeds silently.
+# Two kinds of pass:
+#   * MODELS (mirror, --delete): the models dir is mirrored — prod-only orphans
+#     are deleted so a retired cell's pickle doesn't linger. The research subdir
+#     models/deterministic/ is excluded (and prod's copy protected from --delete).
+#     Before deleting any prod model absent on dev, the script lists them and asks
+#     for confirmation; with no orphans it proceeds silently.
+#   * COLLECTOR SNAPSHOTS (additive, NO --delete): the Cleaning the Glass (NBA)
+#     and Baseball Savant (MLB) dated-snapshot dirs are pushed additively. They
+#     live under player_data/ and team_data/ beside prod-only siblings
+#     (nba_players_*.csv, affinity_*.csv, gamelogs) — a --delete there would wipe
+#     those. Hard rule: NEVER --delete on a player_data/ or team_data/ path.
+#     A collector dir absent on dev (catalog not yet populated) is skipped.
 #
-# NOTE: prod's weekly `meditate` cron (Fri 01:00) rewrites this same dir. Don't
+# NOTE: prod's weekly `meditate` cron (Fri 01:00) rewrites the models dir. Don't
 # run this during that window or you may race its model writes.
 #
 # Environment (optional overrides):
@@ -40,11 +48,15 @@ case "${1:-}" in
 esac
 
 MODELS_REL="src/sportstradamus/data/models"
-SRC="$LOCAL_DIR/$MODELS_REL"
-DEST="$PROD_SSH:$PROD_DIR/$MODELS_REL"
+# Collector snapshot dirs — synced additively (NO --delete; see header).
+COLLECTOR_RELS=(
+    "src/sportstradamus/data/player_data/NBA/cleaningtheglass"
+    "src/sportstradamus/data/team_data/NBA/cleaningtheglass"
+    "src/sportstradamus/data/player_data/MLB/baseballsavant"
+    "src/sportstradamus/data/team_data/MLB/baseballsavant"
+)
 SSH_OPTS=(-o "ConnectTimeout=$SSH_CONNECT_TIMEOUT" -o BatchMode=yes)
 RSYNC_SSH="ssh -o ConnectTimeout=$SSH_CONNECT_TIMEOUT -o BatchMode=yes"
-RSYNC_FILTER=(--delete --exclude='deterministic/')
 
 run() {
     printf '+ %s\n' "$*"
@@ -52,10 +64,57 @@ run() {
     "$@"
 }
 
-echo ">> sync_to_prod: $SRC/ -> $DEST/"
+# One rsync pass. $1 = repo-relative dir, $2 = 1 to mirror (--delete), 0 additive.
+sync_pass() {
+    local src_rel="$1" use_delete="$2"
+    local src="$LOCAL_DIR/$src_rel"
+    local dest="$PROD_SSH:$PROD_DIR/$src_rel"
+    if [[ ! -d "$src" ]]; then
+        echo ">> skip $src_rel (not present on dev)"
+        return 0
+    fi
+    local filter=(--timeout="$RSYNC_TIMEOUT" -e "$RSYNC_SSH")
+    [[ "$use_delete" -eq 1 ]] && filter+=(--delete --exclude='deterministic/')
+
+    echo ">> sync: $src/ -> $dest/"
+    # shellcheck disable=SC2029  # expand $src_rel locally into the remote mkdir
+    run ssh "${SSH_OPTS[@]}" "$PROD_SSH" "mkdir -p '$PROD_DIR/$src_rel'"
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        echo ">> itemized preview ($src_rel):"
+        rsync -ain "${filter[@]}" "$src/" "$dest/"
+        return 0
+    fi
+
+    # Mirror passes confirm before deleting prod-only files (present on prod,
+    # absent on dev). rsync itemizes those as "*deleting <path>".
+    if [[ "$use_delete" -eq 1 ]]; then
+        local preview deletions
+        preview="$(rsync -ain "${filter[@]}" "$src/" "$dest/")"
+        deletions="$(printf '%s\n' "$preview" | sed -n 's/^\*deleting[[:space:]]*//p')"
+        if [[ -n "$deletions" ]]; then
+            echo
+            echo "These prod files under $src_rel are NOT on dev and WILL BE DELETED:"
+            # shellcheck disable=SC2086  # intentional split: one filename per line
+            printf '   %s\n' $deletions
+            echo
+            read -r -p "Delete the above and mirror dev onto prod? [y/N] " reply < /dev/tty
+            if [[ ! "$reply" =~ ^[Yy]$ ]]; then
+                echo ">> aborted; prod unchanged."
+                exit 1
+            fi
+        else
+            echo ">> no prod-only files to delete; mirroring without confirmation."
+        fi
+    fi
+
+    run rsync -av "${filter[@]}" "$src/" "$dest/"
+}
+
+echo ">> sync_to_prod -> $PROD_SSH:$PROD_DIR"
 [[ "$DRY_RUN" -eq 1 ]] && echo ">> DRY RUN (no changes)"
 
-# 1. Fail fast if prod is off / off the LAN / outbound ssh not set up.
+# Fail fast if prod is off / off the LAN / outbound ssh not set up.
 if ! probe_err="$(ssh "${SSH_OPTS[@]}" "$PROD_SSH" true 2>&1)"; then
     if [[ "$probe_err" == *"Permission denied"* ]]; then
         echo "ERROR: prod refused non-interactive auth at $PROD_SSH." >&2
@@ -69,41 +128,9 @@ if ! probe_err="$(ssh "${SSH_OPTS[@]}" "$PROD_SSH" true 2>&1)"; then
     exit 1
 fi
 
-# 2. Make sure the destination dir exists so the first-ever push can't fail.
-# shellcheck disable=SC2029
-run ssh "${SSH_OPTS[@]}" "$PROD_SSH" "mkdir -p '$PROD_DIR/$MODELS_REL'"
+sync_pass "$MODELS_REL" 1
+for rel in "${COLLECTOR_RELS[@]}"; do
+    sync_pass "$rel" 0
+done
 
-# 3. Dry-run the mirror to find prod models that would be DELETED and not
-#    replaced (present on prod, absent on dev). rsync itemizes these as
-#    "*deleting <path>"; that set is exactly the orphans we must warn about.
-preview="$(rsync -ain "${RSYNC_FILTER[@]}" --timeout="$RSYNC_TIMEOUT" \
-    -e "$RSYNC_SSH" "$SRC/" "$DEST/")"
-deletions="$(printf '%s\n' "$preview" | sed -n 's/^\*deleting[[:space:]]*//p')"
-
-if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo ">> itemized preview (no changes made):"
-    printf '%s\n' "$preview"
-    exit 0
-fi
-
-# 4. Confirm only if the mirror would delete prod-only models.
-if [[ -n "$deletions" ]]; then
-    echo
-    echo "These prod models are NOT on dev and WILL BE DELETED:"
-    # shellcheck disable=SC2086  # intentional split: one model filename per line
-    printf '   %s\n' $deletions
-    echo
-    read -r -p "Delete the above and mirror dev's models onto prod? [y/N] " reply < /dev/tty
-    if [[ ! "$reply" =~ ^[Yy]$ ]]; then
-        echo ">> aborted; prod unchanged."
-        exit 1
-    fi
-else
-    echo ">> no prod-only models to delete; mirroring without confirmation."
-fi
-
-# 5. Real push: mirror dev's models onto prod.
-run rsync -av "${RSYNC_FILTER[@]}" --timeout="$RSYNC_TIMEOUT" \
-    -e "$RSYNC_SSH" "$SRC/" "$DEST/"
-
-echo ">> push complete."
+[[ "$DRY_RUN" -eq 1 ]] && echo ">> dry run complete." || echo ">> push complete."

@@ -1,34 +1,29 @@
-"""Bearer-token-authenticated HTTP client for data.fantasypoints.com.
+"""Cookie/bearer-authenticated HTTP client for collector sources.
 
-Reads the ``Authorization:`` header value (and optionally a
-``Cookie:`` header) from ``creds/keys.json``. Both can be captured
-from any logged-in XHR in DevTools and pasted verbatim. The
-constructor also honours ``FANTASYPOINTS_AUTHORIZATION`` /
-``FANTASYPOINTS_COOKIE`` env vars so CI / dev runs can stub
-credentials without writing to the shared keys file.
+A single-page data app exposes JSON XHR endpoints behind a login. Once a
+user has logged in via a browser, the ``Authorization`` header (and often
+a session ``Cookie``) captured from DevTools is enough to call those
+endpoints directly. This client receives already-resolved credentials —
+resolution from env / keys.json lives in :mod:`collectors.auth` — plus the
+source's ``Referer`` / ``Origin`` (the app's own origin).
 
-Both GET and POST are supported. POST is used by the FP Data Suite
-v2 endpoints, which carry their per-tool query as a JSON request
-body. Inter-request sleep keeps the catalog walk well under any
-natural browsing rate; retries on 429 and 5xx use exponential
-backoff; 401/403 raise :class:`FantasyPointsAuthError` so the caller
-can prompt the user to refresh the token.
+Both GET and POST are supported; POST carries the per-tool query as a JSON
+body. Inter-request sleep keeps a catalog walk well under any natural
+browsing rate; retries on 429 and 5xx use exponential backoff; 401/403
+raise :class:`CollectorAuthError` so the caller can prompt for a fresh
+token.
 """
 
 from __future__ import annotations
 
-import importlib.resources as pkg_resources
-import json
-import os
 from time import sleep
 from typing import Literal
 
 import requests
 
-from sportstradamus import creds
 from sportstradamus.spiderLogger import logger
 
-# Conservative defaults: a realistic Firefox UA so requests look like a
+# Conservative default: a realistic Firefox UA so requests look like a
 # logged-in browser, and a 2 s pause between catalog endpoints so a
 # weekly walk of ~50 tools stays well under any plausible rate ceiling.
 _DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0"
@@ -47,106 +42,72 @@ Accept = Literal["json", "text", "bytes"]
 # Body preview length in decode-failure diagnostics. Long enough to
 # identify HTML error pages ("<!DOCTYPE html>...Cloudflare...") or
 # compressed binary blobs (leading magic bytes); short enough not to
-# spam logs with a 200 KB FP payload that happened to start mid-token.
+# spam logs with a 200 KB payload that happened to start mid-token.
 _DECODE_PREVIEW_CHARS = 300
 
 
-class FantasyPointsAuthError(RuntimeError):
-    """FP returned 401/403; the stored Authorization token is expired."""
+class CollectorAuthError(RuntimeError):
+    """Source returned 401/403; the stored Authorization token is expired."""
 
 
-class FantasyPointsDecodeError(RuntimeError):
-    """FP returned 2xx but the body couldn't be decoded as JSON.
+class CollectorDecodeError(RuntimeError):
+    """Source returned 2xx but the body couldn't be decoded as JSON.
 
     Most common cause: the catalog entry kept ``Accept-Encoding: br, zstd``
-    from the original DevTools curl, so FP responded with brotli/zstd —
-    which ``requests`` can't transparently decompress without the
-    optional ``brotli`` / ``zstandard`` extras. Re-running
-    ``fp-fetch import-curl`` against a fresh curl regenerates the
-    catalog entry without the offending header.
+    from the original DevTools curl, so the server responded with
+    brotli/zstd — which ``requests`` can't transparently decompress without
+    the optional ``brotli`` / ``zstandard`` extras. Re-importing the
+    endpoint from a fresh curl regenerates the catalog entry without the
+    offending header.
     """
 
 
-class FantasyPointsClient:
-    """Bearer-auth HTTP client for the FP Data Suite v2 API."""
+class CookieClient:
+    """Cookie/bearer-auth HTTP client for a single-page data API."""
 
     def __init__(
         self,
         *,
-        authorization: str | None = None,
-        cookie: str | None = None,
-        user_agent: str | None = None,
+        authorization: str | None,
+        cookie: str | None,
+        user_agent: str | None,
+        referer: str,
+        origin: str,
         inter_request_sleep_s: float | None = None,
     ) -> None:
-        """Initialise the client.
+        """Initialise the client from already-resolved credentials.
 
         Args:
             authorization: Raw ``Authorization:`` header value (e.g.
-                ``"Bearer eyJ..."``). When ``None``, read from the
-                ``FANTASYPOINTS_AUTHORIZATION`` env var, falling back
-                to ``fantasypoints_authorization`` in ``creds/keys.json``.
-            cookie: Optional ``Cookie:`` header value. Some endpoints
-                still want analytics/session cookies alongside the
-                Authorization header.
-            user_agent: Override the default Firefox UA string.
+                ``"Bearer eyJ..."``), or ``None``/empty if unset.
+            cookie: Optional ``Cookie:`` header value.
+            user_agent: UA string; falls back to a default Firefox UA.
+            referer: ``Referer`` header — the source app's page origin.
+            origin: ``Origin`` header — the source app's origin.
             inter_request_sleep_s: Pause between successive requests.
                 Defaults to :data:`_INTER_REQUEST_SLEEP_S`; tests pass 0.
         """
-        authorization, cookie, user_agent = self._resolve_credentials(
-            authorization=authorization,
-            cookie=cookie,
-            user_agent=user_agent,
-        )
         self._authorization = authorization or ""
         self._cookie = cookie or ""
         self._user_agent = user_agent or _DEFAULT_UA
+        self._referer = referer
+        self._origin = origin
         self._sleep_s = (
             inter_request_sleep_s if inter_request_sleep_s is not None else _INTER_REQUEST_SLEEP_S
         )
         self._first_call = True
-        if not self._authorization:
+        if not self._authorization and not self._cookie:
             logger.warning(
-                "fantasypoints_authorization missing — see docs/fantasypoints.md "
-                "for how to capture the Authorization header from your browser."
+                "collector credentials missing — capture the Authorization header "
+                "(and/or session Cookie) from a logged-in browser session."
             )
-
-    @classmethod
-    def _resolve_credentials(
-        cls,
-        *,
-        authorization: str | None,
-        cookie: str | None,
-        user_agent: str | None,
-    ) -> tuple[str | None, str | None, str | None]:
-        if authorization is None:
-            authorization = os.environ.get("FANTASYPOINTS_AUTHORIZATION")
-        if cookie is None:
-            cookie = os.environ.get("FANTASYPOINTS_COOKIE")
-        if authorization is None or cookie is None or user_agent is None:
-            keys = cls._load_keys()
-            if authorization is None:
-                authorization = keys.get("fantasypoints_authorization", "")
-            if cookie is None:
-                cookie = keys.get("fantasypoints_cookie", "")
-            if user_agent is None:
-                user_agent = keys.get("fantasypoints_user_agent", "") or None
-        return authorization, cookie, user_agent
-
-    @staticmethod
-    def _load_keys() -> dict[str, str]:
-        path = pkg_resources.files(creds) / "keys.json"
-        try:
-            with open(path) as f:
-                return json.load(f)
-        except FileNotFoundError:
-            return {}
 
     def _default_headers(self) -> dict[str, str]:
         h = {
             "User-Agent": self._user_agent,
             "Accept": "*/*",
-            "Referer": "https://data.fantasypoints.com/",
-            "Origin": "https://data.fantasypoints.com",
+            "Referer": self._referer,
+            "Origin": self._origin,
         }
         if self._authorization:
             h["Authorization"] = self._authorization
@@ -173,10 +134,10 @@ class FantasyPointsClient:
     ) -> None:
         """Swap in fresh auth values in-place; subsequent calls use them.
 
-        Used by the CLI's interactive auth-refresh path: when a long-
-        running ``fp-fetch run`` hits a 401 mid-batch, the user pastes
-        a fresh DevTools curl, the CLI parses out the new headers and
-        calls this — no need to recreate the client or restart the run.
+        Used by the interactive auth-refresh path: when a long-running run
+        hits a 401 mid-batch, the user pastes a fresh DevTools curl, the
+        CLI parses out the new headers and calls this — no need to recreate
+        the client or restart the run.
         """
         if authorization is not None:
             self._authorization = authorization
@@ -233,16 +194,15 @@ class FantasyPointsClient:
             Decoded body per ``accept``.
 
         Raises:
-            FantasyPointsAuthError: When FP returns 401 or 403.
+            CollectorAuthError: When the source returns 401 or 403.
             requests.HTTPError: When retries are exhausted on another
                 non-2xx status.
         """
-        if not self._authorization:
-            raise FantasyPointsAuthError(
-                "fantasypoints_authorization is empty. Paste the Authorization "
-                "header value from a logged-in DevTools session into "
-                "creds/keys.json (or set the FANTASYPOINTS_AUTHORIZATION env "
-                "var). See docs/fantasypoints.md."
+        if not self._authorization and not self._cookie:
+            raise CollectorAuthError(
+                "collector credentials are empty — no Authorization or Cookie set. "
+                "Paste them from a logged-in DevTools session into creds/keys.json "
+                "(or set the source's env var)."
             )
         if not self._first_call:
             sleep(self._sleep_s)
@@ -267,7 +227,7 @@ class FantasyPointsClient:
     def _send_with_retries(self, method, url, merged, params, json_body, accept):
         """Issue the request, retrying retryable statuses on the backoff schedule.
 
-        Returns the decoded 2xx body; raises FantasyPointsAuthError on 401/403 and
+        Returns the decoded 2xx body; raises CollectorAuthError on 401/403 and
         requests.HTTPError once retries are exhausted (or on a non-retryable status).
         """
         attempts = (*_RETRY_BACKOFF_S, None)
@@ -282,11 +242,10 @@ class FantasyPointsClient:
             )
             last_response = response
             if response.status_code in _AUTH_STATUSES:
-                raise FantasyPointsAuthError(
-                    f"FP returned {response.status_code} for {method} {url} — "
-                    "Authorization token is expired or missing. Refresh "
-                    "fantasypoints_authorization in creds/keys.json; see "
-                    "docs/fantasypoints.md."
+                raise CollectorAuthError(
+                    f"Source returned {response.status_code} for {method} {url} — "
+                    "Authorization token is expired or missing. Refresh the "
+                    "source's auth credentials in creds/keys.json."
                 )
             if 200 <= response.status_code < 300:
                 return self._decode(response, accept)
@@ -294,7 +253,7 @@ class FantasyPointsClient:
             if not is_retryable or backoff is None:
                 response.raise_for_status()
             logger.warning(
-                "FP %s %s returned %s, retrying in %.1fs",
+                "collector %s %s returned %s, retrying in %.1fs",
                 method,
                 url,
                 response.status_code,
@@ -311,7 +270,7 @@ class FantasyPointsClient:
             try:
                 return response.json()
             except ValueError as e:
-                raise FantasyPointsDecodeError(_format_decode_failure(response, e)) from e
+                raise CollectorDecodeError(_format_decode_failure(response, e)) from e
         if accept == "text":
             return response.text
         return response.content
@@ -335,11 +294,11 @@ def _format_decode_failure(response: requests.Response, error: Exception) -> str
     except UnicodeDecodeError:
         preview_str = repr(preview)
     return (
-        f"FP returned {response.status_code} {response.request.method} "
+        f"Source returned {response.status_code} {response.request.method} "
         f"{response.url} but body is not JSON ({error}). "
         f"Content-Type={content_type!r} Content-Encoding={content_encoding!r} "
         f"body_len={len(body)} preview={preview_str!r}. "
         "If Content-Encoding is br/zstd, the catalog entry has a stale "
-        "Accept-Encoding header — re-run `fp-fetch import-curl` with a "
-        "fresh DevTools curl. See docs/fantasypoints.md."
+        "Accept-Encoding header — re-import the endpoint from a fresh "
+        "DevTools curl."
     )

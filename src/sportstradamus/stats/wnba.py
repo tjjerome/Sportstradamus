@@ -447,3 +447,11 @@ class StatsWNBA(StatsNBA):
         compare against the int keys in ``self.players``.
         """
         return target_game_date.year
+
+    # Cleaning the Glass covers NBA only; WNBA has no such source, so both hooks
+    # fall back to the base no-op instead of inheriting StatsNBA's CTG wiring.
+    def _join_fp_player_features(self, date):
+        return None
+
+    def _join_fp_team_features(self, date):
+        return None, None

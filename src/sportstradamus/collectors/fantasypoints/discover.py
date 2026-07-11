@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import re
 
-from sportstradamus.fantasypoints.catalog import EndpointSpec
+from sportstradamus.collectors.catalog import EndpointSpec
 
 # Registry endpoint — same across leagues; the per-tool URLs use the
 # ``league`` segment (``nfl`` here). The body filters out tools that

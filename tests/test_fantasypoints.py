@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
 
 import pandas as pd
@@ -11,25 +10,24 @@ import pytest
 import requests
 from click.testing import CliRunner
 
-from sportstradamus.fantasypoints.catalog import (
+from sportstradamus.collectors.catalog import (
     EndpointSpec,
     load_catalog,
     save_catalog,
 )
-from sportstradamus.fantasypoints.cli import (
-    fp_fetch,
-    parse_curl_to_spec,
+from sportstradamus.collectors.fantasypoints.cli import fp_fetch
+from sportstradamus.collectors.fantasypoints.import_curl import parse_curl_to_spec
+from sportstradamus.collectors.fantasypoints.source import FP_SOURCE
+from sportstradamus.collectors.transport import (
+    CollectorAuthError,
+    CollectorDecodeError,
+    CookieClient,
 )
-from sportstradamus.fantasypoints.client import (
-    FantasyPointsAuthError,
-    FantasyPointsClient,
-    FantasyPointsDecodeError,
-)
-from sportstradamus.fantasypoints.discover import (
+from sportstradamus.collectors.fantasypoints.discover import (
     _camel_to_kebab,
     expand_registry,
 )
-from sportstradamus.fantasypoints.transform import (
+from sportstradamus.collectors.fantasypoints.transform import (
     parquet_path_for_spec,
     parse_table_response,
     write_parquet,
@@ -75,35 +73,37 @@ class FakeResponse:
             raise err
 
 
-def _client() -> FantasyPointsClient:
-    return FantasyPointsClient(
+def _client() -> CookieClient:
+    return CookieClient(
         authorization="Bearer test-token",
         cookie="_shopify_y=abc",
         user_agent="UA",
+        referer="https://data.fantasypoints.com/",
+        origin="https://data.fantasypoints.com",
         inter_request_sleep_s=0.0,
     )
 
 
 def _patch_request(monkeypatch, handler):
-    from sportstradamus.fantasypoints import client as client_mod
+    from sportstradamus.collectors import transport as client_mod
 
     monkeypatch.setattr(client_mod.requests, "request", handler)
 
 
 def test_client_raises_on_401(monkeypatch):
     _patch_request(monkeypatch, lambda *a, **k: FakeResponse(401))
-    with pytest.raises(FantasyPointsAuthError, match="Authorization token"):
+    with pytest.raises(CollectorAuthError, match="Authorization token"):
         _client().get("https://example/")
 
 
 def test_client_raises_on_403(monkeypatch):
     _patch_request(monkeypatch, lambda *a, **k: FakeResponse(403))
-    with pytest.raises(FantasyPointsAuthError):
+    with pytest.raises(CollectorAuthError):
         _client().get("https://example/")
 
 
 def test_client_retries_on_429_then_succeeds(monkeypatch):
-    from sportstradamus.fantasypoints import client as client_mod
+    from sportstradamus.collectors import transport as client_mod
 
     responses = [FakeResponse(429), FakeResponse(200, body={"ok": True})]
     _patch_request(monkeypatch, lambda *a, **k: responses.pop(0))
@@ -112,7 +112,7 @@ def test_client_retries_on_429_then_succeeds(monkeypatch):
 
 
 def test_client_retries_on_500_then_gives_up(monkeypatch):
-    from sportstradamus.fantasypoints import client as client_mod
+    from sportstradamus.collectors import transport as client_mod
 
     _patch_request(monkeypatch, lambda *a, **k: FakeResponse(500))
     monkeypatch.setattr(client_mod, "_RETRY_BACKOFF_S", (0.0, 0.0, 0.0))
@@ -139,7 +139,7 @@ def test_client_env_var_overrides_keys(monkeypatch):
         return FakeResponse(200, body={})
 
     _patch_request(monkeypatch, capture)
-    FantasyPointsClient(inter_request_sleep_s=0.0).get("https://example/")
+    FP_SOURCE.client(inter_request_sleep_s=0.0).get("https://example/")
     assert captured["headers"]["Authorization"] == "Bearer from-env"
     assert captured["headers"]["Cookie"] == "from_env=1"
 
@@ -191,12 +191,12 @@ def test_client_raises_decode_error_with_diagnostic_on_non_json_body(monkeypatch
         )
 
     _patch_request(monkeypatch, respond_with_garbage)
-    with pytest.raises(FantasyPointsDecodeError) as exc_info:
+    with pytest.raises(CollectorDecodeError) as exc_info:
         _client().post("https://example/", json_body={"x": 1})
     msg = str(exc_info.value)
     assert "Content-Encoding" in msg and "zstd" in msg
     assert "body_len=" in msg
-    assert "fp-fetch import-curl" in msg
+    assert "re-import" in msg.lower()
 
 
 def test_client_fails_fast_when_authorization_empty(monkeypatch):
@@ -209,13 +209,15 @@ def test_client_fails_fast_when_authorization_empty(monkeypatch):
         return FakeResponse(200, body={})
 
     _patch_request(monkeypatch, fail_if_called)
-    client = FantasyPointsClient(
+    client = CookieClient(
         authorization="",
         cookie="",
         user_agent="UA",
+        referer="https://data.fantasypoints.com/",
+        origin="https://data.fantasypoints.com",
         inter_request_sleep_s=0.0,
     )
-    with pytest.raises(FantasyPointsAuthError, match="empty"):
+    with pytest.raises(CollectorAuthError, match="empty"):
         client.get("https://example/")
     assert called["n"] == 0, "no HTTP request should have been attempted"
 
@@ -370,7 +372,7 @@ def test_endpoint_spec_renders_template_in_body(tmp_path):
     }
 
 
-def test_endpoint_spec_renders_template_and_path(tmp_path):
+def test_endpoint_spec_renders_params_template(tmp_path):
     spec = EndpointSpec(
         name="line_matchups",
         url="https://example/",
@@ -383,24 +385,11 @@ def test_endpoint_spec_renders_template_and_path(tmp_path):
         "season": "2025",
         "static": "abc",
     }
-    path = spec.output_path(base=tmp_path, season=2025, week=5)
-    assert path == tmp_path / "2025" / "week_05" / "team" / "line_matchups.json"
-
-
-def test_endpoint_spec_season_long_path(tmp_path):
-    spec = EndpointSpec(
-        name="season_summary",
-        url="https://example/",
-        output_subdir="summary",
-        weekly=False,
-    )
-    path = spec.output_path(base=tmp_path, season=2025, week=5)
-    assert path == tmp_path / "2025" / "season" / "summary.json"
 
 
 def _redirect_parquet_dirs(monkeypatch, tmp_path):
     """Point PLAYER_DATA_BASE / TEAM_DATA_BASE at tmp_path so tests don't write to the package."""
-    from sportstradamus.fantasypoints import transform as transform_mod
+    from sportstradamus.collectors.fantasypoints import transform as transform_mod
 
     monkeypatch.setattr(transform_mod, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(transform_mod, "TEAM_DATA_BASE", tmp_path / "team_data")
@@ -440,7 +429,7 @@ def test_cli_run_dry_run_prints_method_and_url(tmp_path):
 
 
 def test_cli_run_writes_parquet_via_post(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints import client as client_mod
+    from sportstradamus.collectors import transport as client_mod
 
     _redirect_parquet_dirs(monkeypatch, tmp_path)
     catalog_path = tmp_path / "catalog.json"
@@ -512,7 +501,7 @@ def test_cli_run_skips_when_nonempty_parquet_already_on_disk(monkeypatch, tmp_pa
     re-execute after a partial failure without paying for the calls
     that succeeded the first time.
     """
-    from sportstradamus.fantasypoints import client as client_mod
+    from sportstradamus.collectors import transport as client_mod
 
     _redirect_parquet_dirs(monkeypatch, tmp_path)
     catalog_path = tmp_path / "catalog.json"
@@ -556,7 +545,7 @@ def test_cli_run_skips_when_nonempty_parquet_already_on_disk(monkeypatch, tmp_pa
 
 def test_cli_run_refetch_flag_overrides_skip(monkeypatch, tmp_path):
     """``--refetch`` ignores the on-disk parquet and re-fetches anyway."""
-    from sportstradamus.fantasypoints import client as client_mod
+    from sportstradamus.collectors import transport as client_mod
 
     _redirect_parquet_dirs(monkeypatch, tmp_path)
     catalog_path = tmp_path / "catalog.json"
@@ -606,7 +595,7 @@ def test_cli_run_refetch_flag_overrides_skip(monkeypatch, tmp_path):
 
 def test_cli_run_zero_row_parquet_does_not_skip(monkeypatch, tmp_path):
     """A 0-row parquet (previous failed fetch) is treated as not-yet-fetched."""
-    from sportstradamus.fantasypoints import client as client_mod
+    from sportstradamus.collectors import transport as client_mod
 
     _redirect_parquet_dirs(monkeypatch, tmp_path)
     catalog_path = tmp_path / "catalog.json"
@@ -647,7 +636,7 @@ def test_cli_run_zero_row_parquet_does_not_skip(monkeypatch, tmp_path):
 
 
 def test_cli_run_auth_error_exits_nonzero(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints import client as client_mod
+    from sportstradamus.collectors import transport as client_mod
 
     _redirect_parquet_dirs(monkeypatch, tmp_path)
     catalog_path = tmp_path / "catalog.json"
@@ -1115,7 +1104,7 @@ def test_expand_registry_skips_published_table_missing_prop_or_contexts():
 
 
 def test_cli_discover_dry_run_lists_new_endpoints(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints import client as client_mod
+    from sportstradamus.collectors import transport as client_mod
 
     catalog_path = tmp_path / "catalog.json"
 
@@ -1139,7 +1128,7 @@ def test_cli_discover_dry_run_lists_new_endpoints(monkeypatch, tmp_path):
 
 
 def test_cli_discover_writes_catalog_and_skips_existing(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints import client as client_mod
+    from sportstradamus.collectors import transport as client_mod
 
     catalog_path = tmp_path / "catalog.json"
     save_catalog(
@@ -1274,7 +1263,7 @@ def test_data_base_resolves_to_filesystem_path_not_multiplexed_repr():
     directory the user can't find. Using `data.__path__[0]` instead
     gives the real path.
     """
-    from sportstradamus.fantasypoints.transform import (
+    from sportstradamus.collectors.fantasypoints.transform import (
         PLAYER_DATA_BASE,
         TEAM_DATA_BASE,
     )
@@ -1286,7 +1275,7 @@ def test_data_base_resolves_to_filesystem_path_not_multiplexed_repr():
 
 
 def test_parquet_path_routes_player_to_player_data(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints import transform as tm
+    from sportstradamus.collectors.fantasypoints import transform as tm
 
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
@@ -1295,7 +1284,7 @@ def test_parquet_path_routes_player_to_player_data(monkeypatch, tmp_path):
 
 
 def test_parquet_path_routes_team_to_team_data(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints import transform as tm
+    from sportstradamus.collectors.fantasypoints import transform as tm
 
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
@@ -1304,7 +1293,7 @@ def test_parquet_path_routes_team_to_team_data(monkeypatch, tmp_path):
 
 
 def test_parquet_path_routes_opponent_with_opp_suffix(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints import transform as tm
+    from sportstradamus.collectors.fantasypoints import transform as tm
 
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
@@ -1314,7 +1303,7 @@ def test_parquet_path_routes_opponent_with_opp_suffix(monkeypatch, tmp_path):
 
 def test_parquet_path_falls_back_to_url_for_legacy_unprefixed_name(monkeypatch, tmp_path):
     """Hand-imported entries without the discover-prefix still route via URL path."""
-    from sportstradamus.fantasypoints import transform as tm
+    from sportstradamus.collectors.fantasypoints import transform as tm
 
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
@@ -1328,7 +1317,7 @@ def test_parquet_path_falls_back_to_url_for_legacy_unprefixed_name(monkeypatch, 
 
 
 def test_parquet_path_falls_back_to_output_subdir_when_url_is_opaque(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints import transform as tm
+    from sportstradamus.collectors.fantasypoints import transform as tm
 
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
@@ -1352,17 +1341,24 @@ def test_parquet_path_rejects_unrouted_spec():
         parquet_path_for_spec(spec, season=2025, week=1)
 
 
-def _read_latest_report() -> dict:
-    """Find the most recent fp_fetch_report_*.json in tempdir and load it."""
-    tmpdir = Path(tempfile.gettempdir())
-    candidates = sorted(tmpdir.glob("fp_fetch_report_*.json"))
-    assert candidates, f"no report file found in {tmpdir}"
-    return json.loads(candidates[-1].read_text())
+def _read_report(result) -> dict:
+    """Load the report this CLI run wrote, from its ``Report: <path>`` line.
+
+    Parsing the path out of the run's own output (rather than globbing the
+    shared tempdir) keeps the read deterministic under parallel xdist
+    workers, which otherwise interleave same-second report filenames.
+    """
+    for line in result.output.splitlines():
+        marker = "Report: "
+        if marker in line:
+            path = line.split(marker, 1)[1].strip()
+            return json.loads(Path(path).read_text())
+    raise AssertionError(f"no 'Report:' line in output:\n{result.output}")
 
 
 def test_cli_run_writes_report_with_per_spec_outcomes(monkeypatch, tmp_path):
     """Run with a mix of ok/empty/failed specs and verify the report captures each."""
-    from sportstradamus.fantasypoints import client as client_mod
+    from sportstradamus.collectors import transport as client_mod
 
     _redirect_parquet_dirs(monkeypatch, tmp_path)
     catalog_path = tmp_path / "catalog.json"
@@ -1429,7 +1425,7 @@ def test_cli_run_writes_report_with_per_spec_outcomes(monkeypatch, tmp_path):
     # still written and the report still got dumped.
     assert result.exit_code != 0
     assert "Report:" in result.output
-    report = _read_latest_report()
+    report = _read_report(result)
     assert report["command"] == "run"
     assert report["summary"]["total"] == 3
     assert report["summary"]["ok"] == 1
@@ -1450,7 +1446,7 @@ def test_cli_run_writes_report_with_per_spec_outcomes(monkeypatch, tmp_path):
 
 def test_cli_run_records_routing_failure_in_report_without_aborting_batch(monkeypatch, tmp_path):
     """A spec with an unroutable name fails alone; other specs still write."""
-    from sportstradamus.fantasypoints import client as client_mod
+    from sportstradamus.collectors import transport as client_mod
 
     _redirect_parquet_dirs(monkeypatch, tmp_path)
     catalog_path = tmp_path / "catalog.json"
@@ -1489,7 +1485,7 @@ def test_cli_run_records_routing_failure_in_report_without_aborting_batch(monkey
         ["run", "--season", "2025", "--week", "5", "--catalog", str(catalog_path)],
     )
     assert result.exit_code != 0  # one routing failure
-    report = _read_latest_report()
+    report = _read_report(result)
     by_name = {r["name"]: r for r in report["results"]}
     assert by_name["misc_thing"]["status"] == "routing_failed"
     # The OTHER spec still wrote its parquet:
@@ -1518,8 +1514,8 @@ def test_client_refresh_credentials_updates_in_place(monkeypatch):
 
 def test_cli_run_interactive_refresh_resumes_after_401(monkeypatch, tmp_path):
     """On 401, the interactive refresh hook runs, updates the client, and the retry succeeds."""
-    from sportstradamus.fantasypoints import cli as cli_mod
-    from sportstradamus.fantasypoints import client as client_mod
+    from sportstradamus.collectors import dispatch as dispatch_mod
+    from sportstradamus.collectors import transport as client_mod
 
     _redirect_parquet_dirs(monkeypatch, tmp_path)
     catalog_path = tmp_path / "catalog.json"
@@ -1557,12 +1553,12 @@ def test_cli_run_interactive_refresh_resumes_after_401(monkeypatch, tmp_path):
     # fresh token via refresh_credentials.
     refresh_calls = {"n": 0}
 
-    def fake_prompt(client):
+    def fake_prompt(source, client):
         refresh_calls["n"] += 1
         client.refresh_credentials(authorization="Bearer NEW", cookie="new=1")
         return True
 
-    monkeypatch.setattr(cli_mod, "_refresh_auth_interactively", fake_prompt)
+    monkeypatch.setattr(dispatch_mod, "_refresh_auth_interactively", fake_prompt)
 
     runner = CliRunner()
     result = runner.invoke(
@@ -1625,12 +1621,12 @@ def test_cli_backfill_dry_run_reports_call_count(tmp_path):
 
 
 def _patch_backfill_pacing(monkeypatch):
-    """Replace random.uniform + time.sleep in cli with no-op recorders.
+    """Replace random.uniform + time.sleep in the runner with no-op recorders.
 
     Returns the lists each gets appended to so tests can assert on
     the pacing ranges and number of sleeps.
     """
-    from sportstradamus.fantasypoints import cli as cli_mod
+    from sportstradamus.collectors import runner as runner_mod
 
     uniform_calls: list[tuple[float, float]] = []
     sleep_calls: list[float] = []
@@ -1639,13 +1635,13 @@ def _patch_backfill_pacing(monkeypatch):
         uniform_calls.append((a, b))
         return (a + b) / 2
 
-    monkeypatch.setattr(cli_mod.random, "uniform", fake_uniform)
-    monkeypatch.setattr(cli_mod.time, "sleep", sleep_calls.append)
+    monkeypatch.setattr(runner_mod.random, "uniform", fake_uniform)
+    monkeypatch.setattr(runner_mod.time, "sleep", sleep_calls.append)
     return uniform_calls, sleep_calls
 
 
 def test_cli_backfill_writes_parquets_for_each_week(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints import client as client_mod
+    from sportstradamus.collectors import transport as client_mod
 
     _redirect_parquet_dirs(monkeypatch, tmp_path)
     _patch_backfill_pacing(monkeypatch)
@@ -1715,7 +1711,7 @@ def test_cli_backfill_writes_parquets_for_each_week(monkeypatch, tmp_path):
 
 def test_cli_backfill_uses_week_pause_on_week_transition(monkeypatch, tmp_path):
     """One spec x 3 weeks → 0 same-week pauses, 2 week-transition pauses."""
-    from sportstradamus.fantasypoints import client as client_mod
+    from sportstradamus.collectors import transport as client_mod
 
     _redirect_parquet_dirs(monkeypatch, tmp_path)
     uniform_calls, sleep_calls = _patch_backfill_pacing(monkeypatch)
@@ -1765,7 +1761,7 @@ def test_cli_backfill_uses_week_pause_on_week_transition(monkeypatch, tmp_path):
 
 def test_cli_backfill_uses_request_pause_within_a_week(monkeypatch, tmp_path):
     """Two specs x 2 weeks → 1 same-week pause per week + 1 week pause = 3 sleeps."""
-    from sportstradamus.fantasypoints import client as client_mod
+    from sportstradamus.collectors import transport as client_mod
 
     _redirect_parquet_dirs(monkeypatch, tmp_path)
     uniform_calls, sleep_calls = _patch_backfill_pacing(monkeypatch)
@@ -1849,7 +1845,7 @@ def _v2_body():
 
 
 def test_substitute_runtime_replaces_int_sentinels():
-    from sportstradamus.fantasypoints.body_substitute import substitute_runtime
+    from sportstradamus.collectors.fantasypoints.body_substitute import substitute_runtime
 
     out = substitute_runtime(_v2_body(), season=2023, week=8, mode="weekly")
     assert out["context"]["weeks"] == {"REG": [8]}
@@ -1860,21 +1856,21 @@ def test_substitute_runtime_replaces_int_sentinels():
 
 
 def test_substitute_runtime_s2d_expands_weeks_to_range():
-    from sportstradamus.fantasypoints.body_substitute import substitute_runtime
+    from sportstradamus.collectors.fantasypoints.body_substitute import substitute_runtime
 
     out = substitute_runtime(_v2_body(), season=2023, week=8, mode="season_to_date")
     assert out["context"]["weeks"] == {"REG": [1, 2, 3, 4, 5, 6, 7, 8]}
 
 
 def test_substitute_runtime_postseason_uses_post_block():
-    from sportstradamus.fantasypoints.body_substitute import substitute_runtime
+    from sportstradamus.collectors.fantasypoints.body_substitute import substitute_runtime
 
     out = substitute_runtime(_v2_body(), season=2023, week=3, mode="postseason")
     assert out["context"]["weeks"] == {"POST": [3]}
 
 
 def test_substitute_runtime_does_not_mutate_input():
-    from sportstradamus.fantasypoints.body_substitute import substitute_runtime
+    from sportstradamus.collectors.fantasypoints.body_substitute import substitute_runtime
 
     src = _v2_body()
     snapshot = json.dumps(src, sort_keys=True)
@@ -1884,7 +1880,7 @@ def test_substitute_runtime_does_not_mutate_input():
 
 def test_substitute_runtime_passes_through_legacy_body_without_sentinels():
     """Legacy hand-imported entries with no v2 sentinels are untouched."""
-    from sportstradamus.fantasypoints.body_substitute import substitute_runtime
+    from sportstradamus.collectors.fantasypoints.body_substitute import substitute_runtime
 
     legacy = {"context": {"week": "5"}, "useCache": True}
     out = substitute_runtime(legacy, season=2023, week=8, mode="weekly")
@@ -1897,7 +1893,7 @@ def test_substitute_runtime_passes_through_legacy_body_without_sentinels():
 
 
 def test_parquet_path_weekly_mode_has_no_suffix(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints import transform as tm
+    from sportstradamus.collectors.fantasypoints import transform as tm
 
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
@@ -1906,7 +1902,7 @@ def test_parquet_path_weekly_mode_has_no_suffix(monkeypatch, tmp_path):
 
 
 def test_parquet_path_s2d_mode_adds_s2d_suffix(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints import transform as tm
+    from sportstradamus.collectors.fantasypoints import transform as tm
 
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
@@ -1918,7 +1914,7 @@ def test_parquet_path_s2d_mode_adds_s2d_suffix(monkeypatch, tmp_path):
 
 def test_parquet_path_postseason_mode_uses_continuation_week_folder(monkeypatch, tmp_path):
     """Postseason rounds 1-4 map to folder weeks 19-22; no filename suffix."""
-    from sportstradamus.fantasypoints import transform as tm
+    from sportstradamus.collectors.fantasypoints import transform as tm
 
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
@@ -1931,7 +1927,7 @@ def test_parquet_path_postseason_mode_uses_continuation_week_folder(monkeypatch,
 
 def test_parquet_path_postseason_mode_round_one_is_week_19(monkeypatch, tmp_path):
     """Wildcard round (postseason week 1) writes to ``week_19/`` folder."""
-    from sportstradamus.fantasypoints import transform as tm
+    from sportstradamus.collectors.fantasypoints import transform as tm
 
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
@@ -1941,7 +1937,7 @@ def test_parquet_path_postseason_mode_round_one_is_week_19(monkeypatch, tmp_path
 
 
 def test_parquet_path_rejects_unknown_mode(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints import transform as tm
+    from sportstradamus.collectors.fantasypoints import transform as tm
 
     monkeypatch.setattr(tm, "PLAYER_DATA_BASE", tmp_path / "player_data")
     monkeypatch.setattr(tm, "TEAM_DATA_BASE", tmp_path / "team_data")
@@ -1956,7 +1952,7 @@ def test_parquet_path_rejects_unknown_mode(monkeypatch, tmp_path):
 
 def test_cli_run_mode_s2d_sends_expanded_weeks(monkeypatch, tmp_path):
     """`--mode season_to_date` rewrites context.weeks to [1..N] and writes _s2d filename."""
-    from sportstradamus.fantasypoints import client as client_mod
+    from sportstradamus.collectors import transport as client_mod
 
     _redirect_parquet_dirs(monkeypatch, tmp_path)
     catalog_path = tmp_path / "catalog.json"
@@ -2011,7 +2007,7 @@ def test_cli_run_mode_s2d_sends_expanded_weeks(monkeypatch, tmp_path):
 
 
 def test_cli_discover_replace_flag_discards_existing_catalog(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints import client as client_mod
+    from sportstradamus.collectors import transport as client_mod
 
     catalog_path = tmp_path / "catalog.json"
     # Seed catalog with a legacy entry that --replace should evict.
@@ -2071,14 +2067,14 @@ def _write_fake_parquet(
 
 
 def test_verify_spec_passes_when_data_matches(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints.verify import verify_spec
+    from sportstradamus.collectors.fantasypoints.verify import verify_spec
 
     spec, _ = _write_fake_parquet(monkeypatch, tmp_path)
     assert verify_spec(spec, season=2023, week=5) == []
 
 
 def test_verify_spec_flags_missing_file(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints.verify import verify_spec
+    from sportstradamus.collectors.fantasypoints.verify import verify_spec
 
     _redirect_parquet_dirs(monkeypatch, tmp_path)
     spec = _spec(name="player_passing_basic", output_subdir="player/passing_basic")
@@ -2090,7 +2086,7 @@ def test_verify_spec_flags_missing_file(monkeypatch, tmp_path):
 
 def test_verify_spec_flags_wrong_week_in_data(monkeypatch, tmp_path):
     """The original bug: parquet at week_05 path but rows are gameWeek=18."""
-    from sportstradamus.fantasypoints.verify import verify_spec
+    from sportstradamus.collectors.fantasypoints.verify import verify_spec
 
     spec, _ = _write_fake_parquet(
         monkeypatch,
@@ -2104,7 +2100,7 @@ def test_verify_spec_flags_wrong_week_in_data(monkeypatch, tmp_path):
 
 
 def test_verify_spec_s2d_accepts_week_range(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints.verify import verify_spec
+    from sportstradamus.collectors.fantasypoints.verify import verify_spec
 
     spec, _ = _write_fake_parquet(
         monkeypatch,
@@ -2116,7 +2112,7 @@ def test_verify_spec_s2d_accepts_week_range(monkeypatch, tmp_path):
 
 
 def test_verify_spec_s2d_flags_week_beyond_requested(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints.verify import verify_spec
+    from sportstradamus.collectors.fantasypoints.verify import verify_spec
 
     spec, _ = _write_fake_parquet(
         monkeypatch,
@@ -2129,7 +2125,7 @@ def test_verify_spec_s2d_flags_week_beyond_requested(monkeypatch, tmp_path):
 
 
 def test_verify_spec_flags_wrong_season(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints.verify import verify_spec
+    from sportstradamus.collectors.fantasypoints.verify import verify_spec
 
     spec, _ = _write_fake_parquet(
         monkeypatch,
@@ -2141,7 +2137,7 @@ def test_verify_spec_flags_wrong_season(monkeypatch, tmp_path):
 
 
 def test_verify_spec_warns_on_empty_parquet(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints.verify import verify_spec
+    from sportstradamus.collectors.fantasypoints.verify import verify_spec
 
     _redirect_parquet_dirs(monkeypatch, tmp_path)
     spec = _spec(name="player_passing_basic", output_subdir="player/passing_basic")
@@ -2155,7 +2151,7 @@ def test_verify_spec_warns_on_empty_parquet(monkeypatch, tmp_path):
 
 
 def test_verify_spec_flags_postseason_mode_seeing_regular_game_type(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints.verify import verify_spec
+    from sportstradamus.collectors.fantasypoints.verify import verify_spec
 
     spec, _ = _write_fake_parquet(
         monkeypatch,
@@ -2169,7 +2165,7 @@ def test_verify_spec_flags_postseason_mode_seeing_regular_game_type(monkeypatch,
 
 
 def test_verify_catalog_returns_dict_keyed_by_name(monkeypatch, tmp_path):
-    from sportstradamus.fantasypoints.verify import verify_catalog
+    from sportstradamus.collectors.fantasypoints.verify import verify_catalog
 
     spec_ok, _ = _write_fake_parquet(monkeypatch, tmp_path)
     spec_missing = _spec(name="player_other", output_subdir="player/other")

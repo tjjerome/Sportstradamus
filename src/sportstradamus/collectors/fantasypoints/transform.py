@@ -32,7 +32,7 @@ from urllib.parse import urlsplit
 import pandas as pd
 
 from sportstradamus import data
-from sportstradamus.fantasypoints.catalog import EndpointSpec
+from sportstradamus.collectors.catalog import EndpointSpec
 
 # Base of the package data tree. ``sportstradamus.data`` is a namespace
 # package — its ``importlib.resources.files()`` returns a
@@ -85,8 +85,8 @@ _MODE_SUFFIX = {
 # divisional, conference, super bowl) are surfaced as continuation
 # weeks 19..22 on disk so the per-week folder structure stays flat.
 # Mirrors the ``NFL_REGULAR_SEASON_WEEKS`` constant in
-# :mod:`fantasypoints.cli` — duplicated here rather than imported to
-# keep ``transform`` free of CLI dependencies.
+# :mod:`collectors.fantasypoints.source` — duplicated here rather than
+# imported to keep ``transform`` free of source/CLI dependencies.
 _REGULAR_SEASON_WEEKS = 18
 
 

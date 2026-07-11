@@ -410,6 +410,13 @@ Couplings to keep in sync:
 - Season starts/ends never require cron edits: idle leagues cost one free
   events call per broad run, and `prophecize`/`meditate` skip them.
 
+Dev-side collectors (`ctg-fetch` NBA, `savant-fetch` MLB) are **not** in the prod
+crontab — they run on the dev box beside the manual weekly `meditate`, then
+`scripts/sync_to_prod.sh` uploads their snapshots (additive, never `--delete`).
+Both are `run_job.sh` cases, so scheduling either (with a
+`HEALTHCHECK_URL_CTG_FETCH` / `HEALTHCHECK_URL_SAVANT_FETCH` set) is possible.
+See [docs/data_collectors.md](docs/data_collectors.md).
+
 ---
 
 ## Configuration Files

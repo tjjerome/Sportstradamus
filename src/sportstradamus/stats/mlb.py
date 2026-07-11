@@ -142,6 +142,18 @@ def _mlb_final_game_ids(mlb_games, prev_game_ids):
     ]
 
 
+# Baseball Savant (MLB) dated-snapshot roots + join schema. The key/meta lists are
+# pinned from a real savant leaderboard capture (see docs/baseballsavant.md); they
+# stay empty until the endpoint catalog + a snapshot exist, which makes the feature
+# hooks below return None and MLB features stay gamelog-only.
+_SAVANT_PLAYER_DIR = "player_data/MLB/baseballsavant"
+_SAVANT_TEAM_DIR = "team_data/MLB/baseballsavant"
+_SAVANT_PLAYER_KEY_COL = ""
+_SAVANT_PLAYER_META_COLS: frozenset[str] = frozenset()
+_SAVANT_TEAM_KEY_COL = ""
+_SAVANT_TEAM_META_COLS: frozenset[str] = frozenset()
+
+
 class StatsMLB(Stats):
     """A class for handling and analyzing MLB statistics.
     Inherits from the Stats parent class.
@@ -186,6 +198,19 @@ class StatsMLB(Stats):
             "score": "runs",
         }
         self._volume_model_cache = None
+
+    def _join_fp_player_features(self, date):
+        """MLB hook: Baseball Savant per-player season-to-date features as of ``date``."""
+        return self._collector_asof_features(
+            _SAVANT_PLAYER_DIR, _SAVANT_PLAYER_KEY_COL, _SAVANT_PLAYER_META_COLS, date.year, date
+        )
+
+    def _join_fp_team_features(self, date):
+        """MLB hook: savant team-grain features as of ``date`` (defense split deferred)."""
+        team = self._collector_asof_features(
+            _SAVANT_TEAM_DIR, _SAVANT_TEAM_KEY_COL, _SAVANT_TEAM_META_COLS, date.year, date
+        )
+        return team, None
 
     def parse_game(self, gameId):
         """Fetch a baseballsavant box score and append rows to gamelog and teamlog."""

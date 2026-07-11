@@ -29,9 +29,9 @@ from typing import Literal
 
 import pandas as pd
 
-from sportstradamus.fantasypoints.body_substitute import DEFAULT_MODE, Mode
-from sportstradamus.fantasypoints.catalog import EndpointSpec
-from sportstradamus.fantasypoints.transform import parquet_path_for_spec
+from sportstradamus.collectors.catalog import EndpointSpec
+from sportstradamus.collectors.fantasypoints.body_substitute import DEFAULT_MODE, Mode
+from sportstradamus.collectors.fantasypoints.transform import parquet_path_for_spec
 
 # Columns every FP /values response carries on each row. The verify
 # checks key off these — if they're absent we report it as an error
