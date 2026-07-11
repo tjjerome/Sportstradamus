@@ -40,6 +40,7 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.archive import TRAINING_LOOKBACK
 from sportstradamus.helpers.io import read_gamelog
 from sportstradamus.spiderLogger import logger
+from sportstradamus.stats.collector_snapshots import DatedSnapshotStore, load_asof_features
 
 # Safety ceiling for comp z-scores. Anything beyond ±5σ is already noise;
 # ±10 is generous and acts as a guard against near-zero (but non-NaN) stds
@@ -804,6 +805,28 @@ class Stats:
         ``Player {name}_asof`` keys the feature filter expects.
         """
         return None
+
+    def _collector_asof_features(
+        self, grain_dir, key_col, meta_cols, season, date, *, key_transform=remove_accents
+    ):
+        """Cached as-of collector feature frame for one grain (player or team).
+
+        Shared body for the CTG (NBA) / savant (MLB) hook overrides: builds a
+        :class:`DatedSnapshotStore` for ``grain_dir`` and returns the merged
+        ``{col}_asof`` frame from :func:`load_asof_features`, memoized per
+        ``(grain_dir, season, date)`` like the NFL FP as-of cache. An unset
+        ``key_col`` (join schema not yet captured for the source) short-circuits
+        inside ``load_asof_features`` to ``None`` — gamelog-only features.
+        """
+        if getattr(self, "_collector_asof_cache", None) is None:
+            self._collector_asof_cache: dict = {}
+        cache_key = (grain_dir, season, str(date))
+        if cache_key not in self._collector_asof_cache:
+            store = DatedSnapshotStore(grain_dir, grain_dir)
+            self._collector_asof_cache[cache_key] = load_asof_features(
+                store, season, date, key_col, meta_cols, key_transform=key_transform
+            )
+        return self._collector_asof_cache[cache_key]
 
     def _profile_stat_types(self):
         if self.league in ("NBA", "WNBA"):

@@ -64,7 +64,9 @@ check-graduation = "sportstradamus.scripts.check_graduation:main"
 generate-ship-config = "sportstradamus.scripts.generate_ship_config:main"
 merge-archives = "sportstradamus.scripts.merge_archives:main"
 sweep-runaway-odds = "sportstradamus.scripts.sweep_runaway_odds:main"
-fp-fetch = "sportstradamus.fantasypoints.cli:fp_fetch"
+fp-fetch = "sportstradamus.collectors.fantasypoints.cli:fp_fetch"
+ctg-fetch = "sportstradamus.collectors.cleaningtheglass.cli:ctg_fetch"
+savant-fetch = "sportstradamus.collectors.baseballsavant.cli:savant_fetch"
 model-strategy-sweep = "sportstradamus.training.model_strategy_sweep:main"
 
 [tool.poetry.group.dev.dependencies]

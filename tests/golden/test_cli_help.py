@@ -17,6 +17,9 @@ import os
 import pytest
 from click.testing import CliRunner
 
+from sportstradamus.collectors.baseballsavant.cli import savant_fetch as savant_fetch_cli
+from sportstradamus.collectors.cleaningtheglass.cli import ctg_fetch as ctg_fetch_cli
+from sportstradamus.collectors.fantasypoints.cli import fp_fetch as fp_fetch_cli
 from sportstradamus.dashboard import run as dashboard_cli
 from sportstradamus.moneylines import confer as confer_cli
 from sportstradamus.nightly import run as reflect_cli
@@ -32,6 +35,9 @@ CLI_CASES = [
     ("dashboard", dashboard_cli, "dashboard_help.txt"),
     ("confer", confer_cli, "confer_help.txt"),
     ("kelly", kelly_cli, "kelly_help.txt"),
+    ("fp-fetch", fp_fetch_cli, "fp_fetch_help.txt"),
+    ("ctg-fetch", ctg_fetch_cli, "ctg_fetch_help.txt"),
+    ("savant-fetch", savant_fetch_cli, "savant_fetch_help.txt"),
 ]
 
 

@@ -12,6 +12,8 @@
 #   reflect            poetry run reflect
 #   gate-status        scripts/gate_status_update.sh (monthly: refresh main ship_config, open PR)
 #   fp-fetch           poetry run fp-fetch run (weekly: snapshot Fantasy Points Data Suite)
+#   ctg-fetch          poetry run ctg-fetch run (snapshot Cleaning the Glass NBA tables)
+#   savant-fetch       poetry run savant-fetch run (snapshot Baseball Savant MLB leaderboards)
 #
 # Environment (optional):
 #   HEALTHCHECK_URL_<JOB>   per-job healthchecks.io URL (e.g. HEALTHCHECK_URL_PROPHECIZE)
@@ -40,7 +42,7 @@ LOG_DIR="${LOG_DIR:-$PROJECT_DIR/logs}"
 LOCK_DIR="${LOCK_DIR:-/tmp}"
 
 if [[ $# -lt 1 ]]; then
-    echo "usage: $(basename "$0") <prophecize|confer|close-lines|meditate|reflect|gate-status|fp-fetch> [args...]" >&2
+    echo "usage: $(basename "$0") <prophecize|confer|close-lines|meditate|reflect|gate-status|fp-fetch|ctg-fetch|savant-fetch> [args...]" >&2
     exit 64
 fi
 
@@ -55,6 +57,8 @@ case "$JOB" in
     reflect)      CMD=(poetry run reflect) ;;
     gate-status)  CMD=(bash "$SCRIPT_DIR/gate_status_update.sh") ;;
     fp-fetch)     CMD=(poetry run fp-fetch run) ;;
+    ctg-fetch)    CMD=(poetry run ctg-fetch run) ;;
+    savant-fetch) CMD=(poetry run savant-fetch run) ;;
     *)
         echo "unknown job: $JOB" >&2
         exit 64
