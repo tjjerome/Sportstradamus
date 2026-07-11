@@ -95,9 +95,14 @@ relevant stage-0 capture, revise this brief in place, resume.
   top tier; thresholds are integer "N+" with ≥ semantics (no push question); rungs can sit
   below the current median line (rung-1 deep ITM); picks are pre-built per-player alt-line
   sets, rung lines app-fixed; same-game and same-team picks allowed; max entry $250; no
-  per-leg multipliers (tier table only). Still open: DNP/rescue-rung handling — rules
-  page is `app.underdogsports.com/rules/ladders`, Cloudflare-blocked to non-browser
-  fetch, owner screenshot/paste needed — and API payload existence (VERIFY-6).
+  per-leg multipliers (tier table only). Void/DNP rules (owner-pasted from
+  `app.underdogsports.com/rules/ladders`; verbatim in
+  `docs/archive/evidence/ud_ladders_void_rules.md`): a tied/voided pick that breaks
+  lineup restrictions voids the entry, fee refunded; a void plus any lost pick ⇒ Loss;
+  a void with all others won ⇒ Win paid at the REDUCED pick-count table (4-pick with
+  one void pays as a 3-pick win); a 3-pick ladder with void(s) refunds — the pricer
+  carries P(void) per pick and re-tiers the payout table on void. Still open: API
+  payload existence (VERIFY-6).
 - **Sleeper: team-line × player pairing NOT allowed yet (owner verified in-app
   2026-07-10)** — Sleeper sub-lane is standalone-contract + player-parlay only for now,
   though player×player correlation repricing exists there too. Contract shape + $0.02 fee
@@ -132,11 +137,13 @@ relevant stage-0 capture, revise this brief in place, resume.
   `model_improvement_track.md` §1.1 — the sharp de-vigged consensus is the truth estimate;
   this lane never trains a team-outcome model.
 - 2026-07-10 — **No automated authed quote probing on the owner's account** (owner, after
-  mitm confirmed slip quotes are computed server-side). Modifier extraction runs as:
-  passive parse of mitm flows from the owner's normal app usage + script-designed manual
-  probe slips (owner builds them by hand, enters quotes) + δ(ρ̂) interpolation for
-  unobserved pair-types with uncertainty flags. No scripted requests against authed
-  endpoints.
+  mitm confirmed slip quotes are computed server-side). Modifier extraction runs through
+  the expected-vs-actual quote reconciler (`scripts/calibrate_parlay_modifiers.py`,
+  owner-designed): it prices a slip from leg multipliers × parlay rake
+  (`parlay_rake.json`) × known `banned_combos.json` modifiers, the owner enters the
+  app's actual quote, and the tool solves the single unknown pair modifier (or
+  recalibrates the rake on all-cross-game slips) and writes the json. No scripted
+  requests against authed endpoints.
 - 2026-07-10 — **Serve-time budget (owner).** `prophecize` stays a few minutes typical, 15
   minutes MAX end-to-end on a heavy day. Every stage's acceptance includes measured
   wall-time impact. Per-stage compute-budget targets from the stage-0 briefs: Ladders
@@ -343,6 +350,10 @@ at the swimlane index for the next lane.
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-10 · stage-0 tool + ladders rules · `scripts/calibrate_parlay_modifiers.py`
+  built (+ unit tests; `parlay_rake.json` seeded rake[3]=0.962 from the owner A/B);
+  ladders void rules adjudicated (re-tier on void, min-3 refund) · next: owner runs the
+  reconciler on real slips — MLB team×pitcher pair-types first.
 - 2026-07-10 · stage-0 · quote path is server-side (owner mitm); authed auto-probing
   rejected (locked, §4) → extraction = passive flow harvest + manual probes +
   interpolation; prediction fees decoded ($0.02/contract, integer lots, displayed
