@@ -1,9 +1,9 @@
 # MLB / NHL activation
 
-> Status: ACTIVE — **D1/D2 = GO** (owner, 2026-07-09: ship + paid backfill authorized,
-> deepest-data path). Execution underway: archive book repair → deep matrices → sweep/confirm.
-> The 3 pre-D2 NHL devel flips are reconciled — reverted to withheld (§8); they re-earn via
-> the clean confirm.
+> Status: ACTIVE — **D1/D2 = GO**; backfill + repair DONE; **first 5 MLB cells SHIPPED to
+> devel** (stolen bases, home runs, pitcher strikeouts, walks allowed, hits allowed — full-HPO
+> confirm 6/6 on 2-season matrices). NHL rebuild → sweep → confirm in flight. The 3 pre-D2 NHL
+> devel flips were reverted (§8) and re-earn via the clean confirm.
 
 ## 1. Mission & money logic
 
@@ -313,6 +313,7 @@ at the roadmap v3 §4 swimlane index for the next lane.
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- `2026-07-10 · SHIPPED · first MLB cells to devel: stolen bases + home runs (ZINB hurdle) + pitcher strikeouts + walks allowed (SN centered_additive_mean10) + hits allowed (SN ratio_meanyr) — deterministic board 5/19 shippers → full-HPO confirm 6/6 each; doubles near-miss (-0.016). Backfill program complete at 2.39M credits: feature gap closed (MLB 336 + NHL 622 dates), NHL 2023-24 refilled, big-3 honesty purge (NBA 974k / NFL 88k / WNBA 3k junk rows; NBA 2023 re-priced 73%→6.6%), close layers all 5 leagues, ladder seeded 15.5M→NBA 8.2M w/ combo alternates. 2-season matrices: MLB 19/19 (hitter cells 55-66k rows). batter-Ks: API has no MLB 2025 history at any hour — cell honestly thin · next: NHL rebuild → sweep → confirm`
 - `2026-07-09 · hardened · Track A (key-independent) done: klepto seed purge (MLB 1,014,522 + NHL 2,103,111 odds rows deleted, dry-run==real, 2022 gone, residual degeneracy ≈0 through 2025; 2026 residual = live app-book agreement, benign); backfill _probe apikey bugfix (passed whole creds dict → guaranteed 401; now apikey[HISTORICAL_KEY_NAME], one constant to repoint for the new key); per-league trim_gamelog windows (MLB 95k / NHL 110k / NFL 50k rows, default 21.5k) = the 2-season matrix-depth lever — reverting it later silently re-trims deep matrices on the next meditate; Savant affinity CSVs via scraper.get_csv (bot-block keeps cache); _ACTIVATION_GATED_LEAGUES=() per GO, guard machinery + goldens kept. Gates: ruff + golden 3421 + integration 24 clean. Live 1-date probe (old key, NFL passing yards 2023-10-29): key ALIVE, 29/29 players real de-vig across 10 sharp books — probe path validated end-to-end; _CaptureArchive stub caught up to Archive API (book_quotes, add_ladder). Ladder finding: historical fetch already ingests rungs via add_ladder (271 landed), but stat_map carries zero *_alternate market keys → alt-line program needs request-side keys only, ingestion exists · next: Track B backfill (blocked on activated Odds API key)`
 - `2026-07-09 · GO · owner declared D1+D2 GO (ship + 5M-credit Odds API backfill, deepest-data path); 3 pre-D2 NHL devel flips reverted to withheld + pickles pruned (re-earn via confirm). Archive audit: gap 2025-03-28→2026-03-15 both leagues, 2026 = app books only, 2022 + NHL-2023 = klepto seed junk, MLB-2023–2025/NHL-2024–2025 pre-gap real sharp books. Plan: seed cleanup → full-slate backfill (all leagues alt-line enrichment) → 2-season matrices (trim_gamelog ROWS lever) → sweep/confirm · next: backfill (blocked on new Odds API key)`
 - `2026-07-07 · rescoped · activation folded into model_improvement_track.md WS-2 (§6.7). Status QUEUED→ACTIVE (matrices+serve-wiring done; audit packets + post-D1/D2 grind remain). Counts re-derived: MLB 19 all-withheld, NHL 15 (12 withheld + 3 devel). Sweep-engine league guard (_drop_activation_gated + goldens) now blocks any withheld MLB/NHL auto-flip; the 3 pre-guard NHL devel flips flagged for owner reconciliation (§8). Stale "five gates"/"24-16 counts"/model-research-branch text fixed. NHL inherits the R1 Double-Poisson count verdict on activation · next: MLB D1 audit packet (§3.2 book-honesty repair is the critical path)`
