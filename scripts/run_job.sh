@@ -19,9 +19,12 @@
 #   SPORTSTRADAMUS_DIR      project root (default: parent of this script)
 #   LOG_DIR                 log directory (default: $SPORTSTRADAMUS_DIR/logs)
 #   ARCHIVE_LOCK_TIMEOUT    seconds to wait for the shared archive lock (default: 900)
+#   GIT_PULL                set 0 to skip the pre-job devel pull (default: 1)
 #
 # Concurrency model:
 #   - Per-job flock (-n): a second invocation of the *same* job is skipped.
+#   - Pull flock (-n): only one job pulls devel at a time; concurrent jobs skip
+#     the pull and run the checkout as-is. A failed pull never blocks the job.
 #   - Shared archive flock (-w): all jobs serialize on the DuckDB archive so
 #     they don't fight over the single-writer lock. A queued job waits up to
 #     ARCHIVE_LOCK_TIMEOUT seconds, then logs FAIL_LOCK and exits 75 (EX_TEMPFAIL).
@@ -64,6 +67,14 @@ LOG_FILE="$LOG_DIR/${JOB}.log"
 LOCK_FILE="$LOCK_DIR/sportstradamus-${JOB}.lock"
 ARCHIVE_LOCK_FILE="$LOCK_DIR/sportstradamus-archive.lock"
 ARCHIVE_LOCK_TIMEOUT="${ARCHIVE_LOCK_TIMEOUT:-900}"
+PULL_LOCK_FILE="$LOCK_DIR/sportstradamus-git-pull.lock"
+# Nightly-folded dashboard modifier corrections dirty these two tracked files;
+# they are reproducible from HEAD + data/runtime/modifier_overrides.json, so
+# the pull path resets them and re-folds after (see pull_devel).
+MODIFIER_CONFIGS=(
+    src/sportstradamus/data/config/banned_combos.json
+    src/sportstradamus/data/config/parlay_rake.json
+)
 
 # Resolve the healthcheck URL: per-job override wins, fall back to the shared one.
 job_upper="$(echo "$JOB" | tr '[:lower:]-' '[:upper:]_')"
@@ -78,6 +89,28 @@ ping_hc() {
 
 log() {
     printf '[%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*" >>"$LOG_FILE"
+}
+
+pull_devel() {
+    (
+        if ! flock -n 7; then
+            log "PULL_SKIP job=$JOB reason=pull_in_progress"
+            exit 0
+        fi
+        git checkout -- "${MODIFIER_CONFIGS[@]}" >>"$LOG_FILE" 2>&1 || true
+        if ! git pull --ff-only origin devel >>"$LOG_FILE" 2>&1; then
+            log "PULL_WARN job=$JOB reason=pull_failed action=run_existing_checkout"
+            exit 0
+        fi
+        # Re-apply overlay corrections onto the fresh configs; entries devel
+        # now carries are pruned from the overlay.
+        if poetry run python -m sportstradamus.scripts.fold_modifier_overrides --prune \
+            >>"$LOG_FILE" 2>&1; then
+            log "PULL job=$JOB ok"
+        else
+            log "PULL_WARN job=$JOB reason=fold_failed"
+        fi
+    ) 7>"$PULL_LOCK_FILE"
 }
 
 run() {
@@ -115,6 +148,10 @@ if ! flock -n 9; then
     log "SKIP job=$JOB reason=already_running"
     exit 0
 fi
+
+# Self-deploy: refresh the checkout from devel before running (GIT_PULL=0 to
+# skip). Never blocks the job — a failed pull runs the existing checkout.
+[[ "${GIT_PULL:-1}" == "1" ]] && pull_devel
 
 # Shared archive lock: serialize against any other job touching the DuckDB
 # archive so we don't crash on DuckDB's single-writer constraint. Wait up to

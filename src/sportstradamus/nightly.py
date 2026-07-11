@@ -44,6 +44,7 @@ from sportstradamus.helpers.io import (
     write_parlay_hist,
     write_user_slips,
 )
+from sportstradamus.helpers.parlay_modifiers import fold_overlay
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 
 logger = get_logger("reflect")
@@ -360,6 +361,14 @@ def run(league, skip_update, history_only, log_level):
 
     _precompute_profit_sim(history)
     _precompute_calibration(history)
+
+    folded = fold_overlay()
+    if folded["pairs"] or folded["rakes"]:
+        logger.info(
+            "Modifier overlay: folded %d pair modifiers + %d rakes into the committed configs",
+            folded["pairs"],
+            folded["rakes"],
+        )
 
 
 def _load_one_league(lg, cls, skip_update):

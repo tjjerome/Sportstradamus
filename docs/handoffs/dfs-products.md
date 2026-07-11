@@ -138,12 +138,17 @@ relevant stage-0 capture, revise this brief in place, resume.
   this lane never trains a team-outcome model.
 - 2026-07-10 — **No automated authed quote probing on the owner's account** (owner, after
   mitm confirmed slip quotes are computed server-side). Modifier extraction runs through
-  the expected-vs-actual quote reconciler (`scripts/calibrate_parlay_modifiers.py`,
-  owner-designed): it prices a slip from leg multipliers × parlay rake
-  (`parlay_rake.json`) × known `banned_combos.json` modifiers, the owner enters the
-  app's actual quote, and the tool solves the single unknown pair modifier (or
-  recalibrates the rake on all-cross-game slips) and writes the json. No scripted
-  requests against authed endpoints.
+  the expected-vs-actual quote reconciler (owner-designed), dashboard-only since
+  2026-07-11: the Model Lab "Modifiers" page prices a dashboard-built slip (rail or
+  locked) from leg multipliers × parlay rake (`parlay_rake.json`) × known
+  `banned_combos.json` modifiers, the owner enters the app's actual quote, and the page
+  solves the single unknown pair modifier (or recalibrates the rake on all-cross-game
+  slips) into `data/runtime/modifier_overrides.json`. `helpers/parlay_modifiers.py`
+  owns the math and the fold: `helpers.config` merges the overlay at load (scoring sees
+  corrections immediately), the nightly `reflect` run folds it into the committed
+  configs, and pulls re-fold with `--prune` (`run_job.sh` self-deploy,
+  `sync_from_prod.sh` dev-side) so corrections survive git resets without ever blocking
+  a pull. No scripted requests against authed endpoints.
 - 2026-07-10 — **Serve-time budget (owner).** `prophecize` stays a few minutes typical, 15
   minutes MAX end-to-end on a heavy day. Every stage's acceptance includes measured
   wall-time impact. Per-stage compute-budget targets from the stage-0 briefs: Ladders
@@ -350,6 +355,14 @@ at the swimlane index for the next lane.
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-11 · reconciler dashboard-only + fold pipeline · interactive CLI deleted (core
+  → `helpers/parlay_modifiers.py`); Modifiers page prices dashboard slips only (league
+  auto-derived; ambiguity prompts a leg add/remove with concrete removal hints); Games
+  tab "Payout incorrect?" chip links in; overlay folds into the committed configs
+  nightly (reflect) and `--prune` after pulls — `run_job.sh` now self-deploys (ff-only
+  devel pull under a pull flock, modifier configs reset→re-fold, `GIT_PULL=0` opt-out)
+  and `sync_from_prod.sh` folds pulled corrections into dev's configs for review ·
+  next: owner reports real slips through the page.
 - 2026-07-10 · reconciler → dashboard · Model Lab "Modifiers" page
   (`dashboard/surfaces/lab_modifiers.py`) prices session/locked slips and writes solved
   modifiers to `data/runtime/modifier_overrides.json` (production checkout stays clean;

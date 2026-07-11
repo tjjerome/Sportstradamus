@@ -9,8 +9,10 @@
 # never torn mid-write), pulled here, then merged into dev's archive via
 # `merge-archives` (which backs up dev's archive first and never drops the local
 # backfill). The runtime parquet/json outputs are rsync'd in update mode
-# (added / refreshed, never deleted). Every ssh/rsync uses a connect timeout so
-# a powered-off prod fails fast instead of hanging.
+# (added / refreshed, never deleted); dashboard modifier corrections riding in
+# with them are folded into dev's committed configs (review + commit the dirty
+# files). Every ssh/rsync uses a connect timeout so a powered-off prod fails
+# fast instead of hanging.
 #
 # Environment (optional overrides):
 #   PROD_SSH             ssh target for prod  (default: sportstradamus@192.168.1.84)
@@ -90,6 +92,12 @@ run rsync -a --timeout="$RSYNC_TIMEOUT" -e "$RSYNC_SSH" \
 #    form avoids needing a fresh `poetry install` to register the entry point.
 cd "$LOCAL_DIR"
 run poetry run python -m sportstradamus.scripts.merge_archives --source "$SNAPSHOT"
+
+# 5b. Fold dashboard-captured modifier corrections (modifier_overrides.json
+#     rode in with data/runtime/ above) into dev's committed configs, pruning
+#     entries devel already carries. May leave banned_combos.json /
+#     parlay_rake.json dirty — review and commit them.
+run poetry run python -m sportstradamus.scripts.fold_modifier_overrides --prune
 
 # 6. Clean up the temp snapshots (remote and local).
 # shellcheck disable=SC2029
