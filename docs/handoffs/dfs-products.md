@@ -85,9 +85,20 @@ relevant stage-0 capture, revise this brief in place, resume.
 - **Sleeper Markets contract shape + $0.02 fee; no confirmed fantasy-pairing combo
   analogue.** Re-verify at Stage-0 capture; if Sleeper has no combo, that sub-lane is
   standalone-contract-only for Sleeper.
-- **App pairing / banned-combo rules** (event×pick correlation repricing — B7-P4, the
-  single load-bearing fact for Stage 4) and **UD alt-rung API breadth** (`get_ud`).
-  Re-verify by attempting to construct a correlated combo in a real payload.
+- **App pairing / banned-combo rules — B7-P4 preliminary answer (owner field test,
+  2026-07-10): UD DOES reprice event×pick correlation.** MLB 3-leg A/B: ML 1.79x +
+  same-team pitcher-Ks-over 1.62x + other-game filler 2.33x quoted 6.11x; correlated
+  leg swapped for an uncorrelated 1.62x leg quoted 6.50x (leg product 6.76x) ⇒ base
+  parlay haircut ~3.8%, correlation penalty ~6.0% ≈ implied pair ρ ~0.08. Pairing is
+  ALLOWED but requires an unrelated filler leg (game line + correlated player alone is
+  refused — same shape as the single-team player rule); legs quote as unified
+  multipliers, so whether the contract+roll structure (B1) or a plain multiplicative
+  parlay applies is still open (checkout fee-split screenshot owed). Stage-4 edge
+  thesis narrows: hunt tax-vs-true-ρ mismatch per pair-type (B2 sources (i)-residual +
+  (iv)), not an untaxed coupling — B8's "taxed ⇒ kill" is NOT triggered until the
+  tax-curve sweep (weak/strong/negative-ρ pairs, filler variation) prices the mismatch.
+  Single sample; screenshots + sweep owed to `docs/archive/`. **UD alt-rung API
+  breadth** (`get_ud`) still unverified.
 - **Payout tables are consumed, not owned.** UD per-season table drift is a
   `hygiene-closeout` housekeeping item, not this lane's; Sleeper's table lives in
   `sleeper-parity` stage 0. This lane reads whatever those lanes/stage-0 captures land.
@@ -151,8 +162,10 @@ in-app-only facts.
   pairing restrictions, cash-out, per-contract fee — gamelines brief B7 checklist in full);
   Ladders offer payloads (rung structure, per-slip payout table — never hardcode); `get_ud`
   alt-rung breadth; Sleeper Markets payloads + alt-line shape; app pairing/banned-combo
-  ground truth. **The load-bearing capture is B7-P4** (does the Combo Entry reprice
-  event×pick correlation).
+  ground truth. **The load-bearing capture is B7-P4** — preliminarily answered TAXED
+  (§3, owner field test 2026-07-10); remaining capture = evidence artifacts + the
+  tax-curve sweep that decides whether the penalty is flat (exploitable mismatch) or
+  pair-specific (B8 kill).
 - Acceptance: §3 volatile-assumptions table fully adjudicated with evidence pointers
   (payload samples committed under `docs/archive/`); a game-line go/no-go packet built on
   B7-P4 + the B8 kill conditions, ready for owner sign-off.
@@ -305,6 +318,10 @@ at the swimlane index for the next lane.
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-10 · stage-0 field result · B7-P4 = TAXED, preliminary (owner MLB A/B: ~6.0%
+  correlation penalty over a ~3.8% base haircut; pairing allowed w/ filler-leg
+  requirement); §3 bullet revised in place · next: evidence screenshots + tax-curve
+  sweep before any Stage-4 go/no-go.
 - 2026-07-10 · lane created · stage-0 research done during planning (Opus research-analysts):
   ladders brief (`docs/archive/researcher_ladders_stage0.md`) + gamelines brief
   (`docs/archive/researcher_gamelines_stage0.md`) committed; audit dispositions cross-checked
