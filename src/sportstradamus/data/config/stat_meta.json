@@ -496,9 +496,10 @@
         },
         "hits allowed": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none",
+            "blending": "crps"
         },
         "hits+runs+rbi": {
             "dist": "ZINB",
@@ -514,9 +515,12 @@
         },
         "home runs": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "zinb_mode": "hurdle",
+            "count_dispersion_objective": "pit_ks",
+            "blending": "nll"
         },
         "pitcher fantasy points underdog": {
             "dist": "SkewNormal",
@@ -526,9 +530,10 @@
         },
         "pitcher strikeouts": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "none",
+            "blending": "crps"
         },
         "pitches thrown": {
             "dist": "SkewNormal",
@@ -568,9 +573,12 @@
         },
         "stolen bases": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "zinb_mode": "hurdle",
+            "count_dispersion_objective": "crps",
+            "blending": "nll"
         },
         "total bases": {
             "dist": "ZINB",
@@ -586,9 +594,10 @@
         },
         "walks allowed": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "none",
+            "blending": "nll"
         }
     }
 }
