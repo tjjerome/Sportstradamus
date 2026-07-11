@@ -37,7 +37,7 @@ from sportstradamus.helpers.io import MODIFIER_OVERRIDES_PATH
 # them at 2 decimals, so a third digit is already at the noise floor.
 MODIFIER_DECIMALS = 3
 # Quotes within half a percent of expected carry no signal worth writing.
-_MATCH_TOLERANCE = 0.005
+MATCH_TOLERANCE = 0.005
 
 
 class Leg(NamedTuple):
@@ -56,6 +56,7 @@ class Pair(NamedTuple):
     disk_key: str | None
     slot: int
     value: float | None
+    legs: tuple[int, int]
 
     def group_key(self) -> tuple[str, str, str, int]:
         """Identity used to attribute a residual to this pair's modifier slot."""
@@ -83,7 +84,7 @@ def slip_pairs(legs: list[Leg], platform_mods: dict) -> list[Pair]:
             None,
         )
         value = table[disk_key][slot] if disk_key else None
-        pairs.append(Pair(a.league, relation, f"{a.key} & {b.key}", disk_key, slot, value))
+        pairs.append(Pair(a.league, relation, f"{a.key} & {b.key}", disk_key, slot, value, (i, j)))
     return pairs
 
 
@@ -92,7 +93,7 @@ def reconcile(legs, pairs, rake, actual, expected):
 
     kind: "match" | "rake" | "solve" | "drift" | "ambiguous" | "uncalibrated"
     """
-    if abs(actual / expected - 1) < _MATCH_TOLERANCE:
+    if abs(actual / expected - 1) < MATCH_TOLERANCE:
         return "match", None, None
     if not pairs:
         return "rake", len(legs), actual / math.prod(leg.mult for leg in legs)

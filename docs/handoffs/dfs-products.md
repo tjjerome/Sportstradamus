@@ -361,8 +361,13 @@ at the swimlane index for the next lane.
   tab "Payout incorrect?" chip links in; overlay folds into the committed configs
   nightly (reflect) and `--prune` after pulls — `run_job.sh` now self-deploys (ff-only
   devel pull under a pull flock, modifier configs reset→re-fold, `GIT_PULL=0` opt-out)
-  and `sync_from_prod.sh` folds pulled corrections into dev's configs for review ·
-  next: owner reports real slips through the page.
+  and `sync_from_prod.sh` folds pulled corrections into dev's configs for review.
+  Save is two-click (owner): quick leg-multiplier recheck before any write — odds move
+  constantly, modifiers rarely — with a rake-recheck hint only on `TEAM.`-leg slips
+  (player-only slips ride the fixed pick'em tables); an all-known-pairs residual opens
+  pairwise isolation — per-pair 2-leg app quotes re-solve each modifier directly
+  (rake[2] calibrated inline from a cross-game pair when missing) · next: owner reports
+  real slips through the page.
 - 2026-07-10 · reconciler → dashboard · Model Lab "Modifiers" page
   (`dashboard/surfaces/lab_modifiers.py`) prices session/locked slips and writes solved
   modifiers to `data/runtime/modifier_overrides.json` (production checkout stays clean;

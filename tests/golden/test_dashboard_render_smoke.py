@@ -58,6 +58,7 @@ needs this same triple-binding treatment.
 from __future__ import annotations
 
 import importlib
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -434,3 +435,115 @@ def test_games_rail_shows_reconciler_chip(monkeypatch, tmp_path):
     assert not at.exception
     chips = [pl for pl in at.get("page_link") if pl.page == "lab-modifiers"]
     assert chips and chips[0].label == "Payout incorrect? Report it"
+
+
+def test_lab_modifiers_two_click_save_writes_overlay(monkeypatch, tmp_path):
+    """Save → leg-recheck confirmation → Confirm save solves the pair into the overlay.
+
+    Exercises the two-step save guard: the first click only arms the
+    quick-check prompt (a stale leg multiplier, not a modifier change, is the
+    likeliest cause of a residual); the write happens on the second click.
+    """
+    offers_fixture = tmp_path / "current_offers.parquet"
+    pd.DataFrame(_OFFER_ROWS).assign(Position="G").to_parquet(offers_fixture)
+    monkeypatch.setattr("sportstradamus.helpers.io.CURRENT_OFFERS_PATH", offers_fixture)
+    monkeypatch.setattr("sportstradamus.dashboard.data.CURRENT_OFFERS_PATH", offers_fixture)
+    monkeypatch.setattr(
+        "sportstradamus.helpers.io.USER_SLIPS_PATH", tmp_path / "user_slips.parquet"
+    )
+    overlay_path = tmp_path / "modifier_overrides.json"
+    monkeypatch.setattr("sportstradamus.helpers.io.MODIFIER_OVERRIDES_PATH", overlay_path)
+    st.cache_data.clear()
+
+    at = AppTest.from_file(str(_APP), default_timeout=30)
+    at.run()
+    at.session_state["slip_legs"] = [
+        build_leg(_OFFER_ROWS[0]),
+        build_leg(dict(_OFFER_ROWS[0], Player="M. Bridges", Market="AST", Line=5.5)),
+        build_leg(_OFFER_ROWS[1]),
+    ]
+    at.session_state["slip_platform"] = "Underdog"
+    at.switch_page("surfaces/lab_modifiers.py")
+    at._page_hash = calc_hash("lab-modifiers")  # see module docstring
+    at.run()
+
+    expected = float(at.metric[0].value.rstrip("x"))
+    at.number_input(key="mod_actual_rail").set_value(round(expected * 0.9, 2)).run()
+    next(b for b in at.button if b.label == "Save corrected modifiers").click().run()
+    assert not at.exception
+    assert any("Quick check" in i.value for i in at.info)
+    assert not overlay_path.exists()
+
+    next(b for b in at.button if b.label == "Confirm save").click().run()
+    assert not at.exception
+    solved = json.loads(overlay_path.read_text())["modifiers"]["Underdog"]["NBA"]["team"]
+    assert list(solved.values()) == [[0.9, 1.0]]
+
+
+def test_lab_modifiers_pairwise_isolation_updates_stale_pair(monkeypatch, tmp_path):
+    """All-known-pair residual opens pairwise isolation; a pair quote updates its modifier.
+
+    Three same-game legs whose pair modifiers are all on record (seeded through the
+    overlay) leave the residual with no unique attribution — confirming the save opens
+    the per-pair payout inputs, and one entered pair quote re-solves just that modifier.
+    """
+    offers_fixture = tmp_path / "current_offers.parquet"
+    rows = [
+        _OFFER_ROWS[0],
+        dict(_OFFER_ROWS[0], Player="M. Bridges", Market="AST", Line=5.5),
+        dict(_OFFER_ROWS[0], Player="K. Towns", Market="REB", Line=11.5),
+    ]
+    pd.DataFrame(rows).assign(Position="G").to_parquet(offers_fixture)
+    monkeypatch.setattr("sportstradamus.helpers.io.CURRENT_OFFERS_PATH", offers_fixture)
+    monkeypatch.setattr("sportstradamus.dashboard.data.CURRENT_OFFERS_PATH", offers_fixture)
+    monkeypatch.setattr(
+        "sportstradamus.helpers.io.USER_SLIPS_PATH", tmp_path / "user_slips.parquet"
+    )
+    overlay_path = tmp_path / "modifier_overrides.json"
+    overlay_path.write_text(
+        json.dumps(
+            {
+                "modifiers": {
+                    "Underdog": {
+                        "NBA": {
+                            "team": {
+                                "G.PTS & G.AST": [0.9, 1.0],
+                                "G.PTS & G.REB": [0.95, 1.0],
+                                "G.AST & G.REB": [0.92, 1.0],
+                            }
+                        }
+                    }
+                },
+                "rake": {"Underdog": {"2": 0.98}},
+            }
+        )
+    )
+    monkeypatch.setattr("sportstradamus.helpers.io.MODIFIER_OVERRIDES_PATH", overlay_path)
+    st.cache_data.clear()
+
+    at = AppTest.from_file(str(_APP), default_timeout=30)
+    at.run()
+    at.session_state["slip_legs"] = [
+        build_leg(_OFFER_ROWS[0]),
+        build_leg(dict(_OFFER_ROWS[0], Player="M. Bridges", Market="AST", Line=5.5)),
+        build_leg(dict(_OFFER_ROWS[0], Player="K. Towns", Market="REB", Line=11.5)),
+    ]
+    at.session_state["slip_platform"] = "Underdog"
+    at.switch_page("surfaces/lab_modifiers.py")
+    at._page_hash = calc_hash("lab-modifiers")  # see module docstring
+    at.run()
+
+    expected = float(at.metric[0].value.rstrip("x"))
+    at.number_input(key="mod_actual_rail").set_value(round(expected * 0.9, 2)).run()
+    next(b for b in at.button if b.label == "Save corrected modifiers").click().run()
+    next(b for b in at.button if b.label == "Confirm save").click().run()
+    assert any("Quote each pair alone" in i.value for i in at.info)
+
+    # Pair 0 is PTS & AST (legs 0+1, 1.85 x 1.85); quote implies its modifier moved to 0.85.
+    pair_quote = round(0.98 * 1.85 * 1.85 * 0.85, 3)
+    at.number_input(key="mod_pairq_rail_0").set_value(pair_quote).run()
+    next(b for b in at.button if b.label == "Update stale modifiers").click().run()
+    assert not at.exception
+    solved = json.loads(overlay_path.read_text())["modifiers"]["Underdog"]["NBA"]["team"]
+    assert solved["G.PTS & G.AST"] == [0.85, 1.0]
+    assert solved["G.PTS & G.REB"] == [0.95, 1.0]

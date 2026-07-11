@@ -14,6 +14,7 @@ correction up immediately; the nightly ``reflect`` run folds it into
 import json
 import math
 from importlib import resources
+from itertools import combinations
 
 import streamlit as st
 
@@ -27,6 +28,7 @@ from sportstradamus.helpers.io import (
     write_modifier_overrides,
 )
 from sportstradamus.helpers.parlay_modifiers import (
+    MATCH_TOLERANCE,
     MODIFIER_DECIMALS,
     Leg,
     reconcile,
@@ -85,6 +87,33 @@ def _ambiguity_warning(n_unknown: int, hints: list[str]) -> str:
     if hints:
         return f"{msg} Remove {' or '.join(hints)} to isolate a single unknown, then report again."
     return f"{msg} Add or remove a leg so exactly one unknown pair remains, then report again."
+
+
+def _slot_name(slot: int) -> str:
+    """Human label for a pair modifier's same-direction (0) / opposite-direction (1) slot."""
+    return "same-dir" if slot == 0 else "opp-dir"
+
+
+def _write_pair_override(
+    platform: str, combos_platform: dict, group: tuple[str, str, str, int], value: float
+) -> None:
+    """Upsert one solved pair-modifier slot into the runtime overlay."""
+    league, relation, key_str, slot = group
+    league_mods = combos_platform.get(league, {"team": {}, "opponent": {}})
+    entry = list(league_mods.get(relation, {}).get(key_str, [1.0, 1.0]))
+    entry[slot] = value
+    overlay = read_modifier_overrides()
+    overlay.setdefault("modifiers", {}).setdefault(platform, {}).setdefault(league, {}).setdefault(
+        relation, {}
+    )[key_str] = entry
+    write_modifier_overrides(overlay)
+
+
+def _write_rake_override(platform: str, n_legs: int, value: float) -> None:
+    """Upsert one solved parlay-rake entry into the runtime overlay."""
+    overlay = read_modifier_overrides()
+    overlay.setdefault("rake", {}).setdefault(platform, {})[str(n_legs)] = value
+    write_modifier_overrides(overlay)
 
 
 st.title("Modifier Reconciler")
@@ -163,9 +192,8 @@ known = math.prod(p.value for p in pairs if p.value is not None)
 expected = (rake if rake is not None else 1.0) * product * known
 
 for p in pairs:
-    slot_name = "same-dir" if p.slot == 0 else "opp-dir"
     shown = "UNKNOWN" if p.value is None else f"{p.value}"
-    st.caption(f"pair [{p.league}/{p.relation}/{slot_name}] {p.display_key}: {shown}")
+    st.caption(f"pair [{p.league}/{p.relation}/{_slot_name(p.slot)}] {p.display_key}: {shown}")
 rake_note = (
     f"rake[{len(legs_input)}]={rake}"
     if rake is not None
@@ -185,38 +213,139 @@ if len(unknown_groups) > 1:
         )
     )
 
-actual = st.number_input("Actual quoted payout (x)", min_value=0.0, value=0.0, step=0.01)
+actual = st.number_input(
+    "Actual quoted payout (x)",
+    min_value=0.0,
+    value=0.0,
+    step=0.01,
+    key=f"mod_actual_{source_id}",
+)
+pending_key = f"mod_pending_{source_id}"
+pairwise_key = f"mod_pairwise_{source_id}"
 if st.button("Save corrected modifiers", type="primary", disabled=actual <= 0):
-    kind, target, value = reconcile(legs_input, pairs, rake, actual, expected)
-    if kind == "match":
-        st.info("Matches expected — nothing to learn.")
-    elif kind == "uncalibrated":
-        st.warning(
-            f"rake[{target}] unknown — report a {target}-leg slip with no same-game pairs first."
+    st.session_state[pending_key] = True
+
+if st.session_state.get(pending_key):
+    # A stale leg multiplier is the likeliest cause of a residual — odds move
+    # constantly, modifiers rarely. Rake staleness only reaches the quote when
+    # a prediction (TEAM.) leg puts the slip on the parlay-rake structure;
+    # player-only slips ride the fixed pick'em payout tables.
+    check_msg = (
+        "Quick check: do the leg multipliers above match what the app shows right now? "
+        "Odds move — edit any leg that changed and the expected quote updates."
+    )
+    if any(leg.key.startswith("TEAM.") for leg in legs_input):
+        check_msg += (
+            f" Team-line slips also ride rake[{len(legs_input)}] — if the legs check out "
+            f"and the quote is still off, report a {len(legs_input)}-leg slip with no "
+            "same-game pairs first to re-verify it."
         )
-    elif kind == "ambiguous":
-        st.warning(
-            _ambiguity_warning(len(target), _removal_hints(legs_input, leg_labels, combos_platform))
+    st.info(check_msg)
+    cancel_col, confirm_col = st.columns(2)
+    if cancel_col.button("Cancel"):
+        st.session_state.pop(pending_key, None)
+        st.rerun()
+    if confirm_col.button("Confirm save", type="primary", disabled=actual <= 0):
+        st.session_state.pop(pending_key, None)
+        kind, target, value = reconcile(legs_input, pairs, rake, actual, expected)
+        if kind == "match":
+            st.info("Matches expected — nothing to learn.")
+        elif kind == "uncalibrated":
+            st.warning(
+                f"rake[{target}] unknown — report a {target}-leg slip "
+                "with no same-game pairs first."
+            )
+        elif kind == "ambiguous" and unknown_groups:
+            st.warning(
+                _ambiguity_warning(
+                    len(target), _removal_hints(legs_input, leg_labels, combos_platform)
+                )
+            )
+        elif kind == "ambiguous":
+            st.session_state[pairwise_key] = True
+        elif kind == "rake":
+            value = round(value, MODIFIER_DECIMALS)
+            _write_rake_override(platform, target, value)
+            st.success(f"Saved rake[{target}] = {value} for {platform} to the overlay.")
+        else:
+            league, relation, key_str, slot = target
+            value = round(value, MODIFIER_DECIMALS)
+            _write_pair_override(platform, combos_platform, target, value)
+            st.success(
+                f"Saved [{league}/{relation}/{_slot_name(slot)}] {key_str} = {value} to the overlay."
+            )
+
+# Pairwise isolation: every pair modifier on the slip is already on record and
+# legs + rake were just confirmed, so the residual has no unique attribution.
+# Each pair's own 2-leg quote solves its modifier directly.
+if st.session_state.get(pairwise_key):
+    st.info(
+        "Every pair modifier here is already on record, so one quote can't say which went "
+        "stale. Quote each pair alone in the app and enter the payouts below — any modifier "
+        "that moved gets updated. If the app refuses a pair as a bare 2-leg slip (e.g. team "
+        "line + same-team player), rebuild it as pair + one cross-game filler and report "
+        "that slip separately — a single known pair solves exactly."
+    )
+    rake2 = rakes.get("2")
+    cross = next(
+        (
+            (i, j)
+            for i, j in combinations(range(len(legs_input)), 2)
+            if legs_input[i].game != legs_input[j].game
+        ),
+        None,
+    )
+    rake2_quote = 0.0
+    if rake2 is None and cross is not None:
+        rake2_quote = st.number_input(
+            f"2-leg cross-game payout — {leg_labels[cross[0]]} + {leg_labels[cross[1]]} "
+            "(calibrates rake[2])",
+            min_value=0.0,
+            value=0.0,
+            step=0.01,
+            key=f"mod_rake2_{source_id}",
         )
-    elif kind == "rake":
-        value = round(value, MODIFIER_DECIMALS)
-        overlay = read_modifier_overrides()
-        overlay.setdefault("rake", {}).setdefault(platform, {})[str(target)] = value
-        write_modifier_overrides(overlay)
-        st.success(f"Saved rake[{target}] = {value} for {platform} to the overlay.")
-    else:
-        league, relation, key_str, slot = target
-        value = round(value, MODIFIER_DECIMALS)
-        league_mods = combos_platform.get(league, {"team": {}, "opponent": {}})
-        entry = list(league_mods.get(relation, {}).get(key_str, [1.0, 1.0]))
-        entry[slot] = value
-        overlay = read_modifier_overrides()
-        overlay.setdefault("modifiers", {}).setdefault(platform, {}).setdefault(
-            league, {}
-        ).setdefault(relation, {})[key_str] = entry
-        write_modifier_overrides(overlay)
-        slot_name = "same-dir" if slot == 0 else "opp-dir"
-        st.success(f"Saved [{league}/{relation}/{slot_name}] {key_str} = {value} to the overlay.")
+    pair_quotes = [
+        st.number_input(
+            f"Pair payout — {leg_labels[p.legs[0]]} + {leg_labels[p.legs[1]]}",
+            min_value=0.0,
+            value=0.0,
+            step=0.01,
+            key=f"mod_pairq_{source_id}_{n}",
+        )
+        for n, p in enumerate(pairs)
+    ]
+    update_col, done_col = st.columns(2)
+    if done_col.button("Done"):
+        st.session_state.pop(pairwise_key, None)
+        st.rerun()
+    if update_col.button("Update stale modifiers", type="primary"):
+        if rake2 is None and rake2_quote > 0:
+            rake2 = round(
+                rake2_quote / (legs_input[cross[0]].mult * legs_input[cross[1]].mult),
+                MODIFIER_DECIMALS,
+            )
+            _write_rake_override(platform, 2, rake2)
+            st.success(f"Calibrated rake[2] = {rake2} from the cross-game pair.")
+        if rake2 is None:
+            st.warning(
+                "rake[2] unknown — enter the cross-game 2-leg payout above (or report any "
+                "2-leg slip with no same-game pair) first."
+            )
+        else:
+            for p, quote in zip(pairs, pair_quotes, strict=True):
+                if quote <= 0:
+                    continue
+                mult = legs_input[p.legs[0]].mult * legs_input[p.legs[1]].mult
+                new = round(quote / (rake2 * mult), MODIFIER_DECIMALS)
+                if p.value and abs(new / p.value - 1) < MATCH_TOLERANCE:
+                    st.caption(f"{p.display_key}: unchanged ({p.value}).")
+                    continue
+                _write_pair_override(platform, combos_platform, p.group_key(), new)
+                st.success(
+                    f"Updated [{p.league}/{p.relation}/{_slot_name(p.slot)}] {p.display_key} = "
+                    f"{new} in the overlay."
+                )
 
 overlay_now = read_modifier_overrides()
 n_pending = sum(
