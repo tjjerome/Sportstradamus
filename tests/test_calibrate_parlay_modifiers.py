@@ -119,3 +119,62 @@ def test_leg_namedtuple_direction_parsing():
     legs = parse_slip("1:SD:B.hits:over:1.5 1:SD:B.runs:U:1.6")
     assert legs[0] == Leg("1", "SD", "B.hits", True, 1.5)
     assert legs[1].higher is False
+    assert parse_slip("1:SD:TEAM.moneyline:h:1.79", min_legs=1)[0].key == "TEAM.moneyline"
+
+
+def test_fold_overlay_migrates_and_clears(config_paths, tmp_path):
+    combos, rake = config_paths
+    overlay = tmp_path / "modifier_overrides.json"
+    overlay.write_text(
+        json.dumps(
+            {
+                "modifiers": {
+                    "Underdog": {
+                        "MLB": {"team": {"TEAM.moneyline & P.pitcher strikeouts": [0.94, 1.0]}}
+                    }
+                },
+                "rake": {"Underdog": {"4": 0.95}},
+            }
+        )
+    )
+    result = CliRunner().invoke(
+        calibrate_parlay_modifiers,
+        [
+            "--fold-overlay",
+            "--combos-path",
+            str(combos),
+            "--rake-path",
+            str(rake),
+            "--overlay-path",
+            str(overlay),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "folded 1 pair modifiers + 1 rakes" in result.output
+    combos_d = json.loads(combos.read_text())
+    assert combos_d["Underdog"]["MLB"]["team"]["TEAM.moneyline & P.pitcher strikeouts"] == [
+        0.94,
+        1.0,
+    ]
+    rake_d = json.loads(rake.read_text())
+    assert rake_d["Underdog"] == {"3": 0.962, "4": 0.95}
+    assert json.loads(overlay.read_text()) == {"modifiers": {}, "rake": {}}
+
+
+def test_apply_modifier_overrides_merges_in_place():
+    from sportstradamus.helpers.config import apply_modifier_overrides
+
+    base = {"Underdog": {"MLB": {"team": {"B.hits & B.runs": [0.9, 1.05]}, "opponent": {}}}}
+    apply_modifier_overrides(
+        base,
+        {
+            "Underdog": {
+                "MLB": {"team": {"B.hits & B.runs": [0.85, 1.05], "P.walks & B.hits": [0.7, 1.2]}},
+                "NBA": {"opponent": {"G.points & G.assists": [0.8, 1.1]}},
+            }
+        },
+    )
+    assert base["Underdog"]["MLB"]["team"]["B.hits & B.runs"] == [0.85, 1.05]
+    assert base["Underdog"]["MLB"]["team"]["P.walks & B.hits"] == [0.7, 1.2]
+    assert base["Underdog"]["NBA"]["opponent"]["G.points & G.assists"] == [0.8, 1.1]
+    assert base["Underdog"]["NBA"]["team"] == {}

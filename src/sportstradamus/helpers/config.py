@@ -169,6 +169,31 @@ with (_config_dir / "feature_filter.json").open() as infile:
 with (_config_dir / "banned_combos.json").open() as infile:
     banned = json.load(infile)
 
+
+def apply_modifier_overrides(base: dict, overrides: dict) -> None:
+    """Overlay dashboard-captured pair modifiers onto the committed baseline.
+
+    The dashboard runs on the production host, whose git checkout must stay
+    clean for cron pulls, so its modifier reconciler writes
+    ``data/runtime/modifier_overrides.json`` (path constant:
+    ``helpers.io.MODIFIER_OVERRIDES_PATH``) instead of ``banned_combos.json``;
+    ``calibrate_parlay_modifiers --fold-overlay`` migrates entries into the
+    committed file.
+    """
+    for platform_name, leagues in overrides.items():
+        for league_name, relations in leagues.items():
+            slot = base.setdefault(platform_name, {}).setdefault(
+                league_name, {"team": {}, "opponent": {}}
+            )
+            for relation, pairs in relations.items():
+                slot.setdefault(relation, {}).update(pairs)
+
+
+_overrides_path = _config_dir.parent / "runtime" / "modifier_overrides.json"
+if _overrides_path.is_file():
+    with _overrides_path.open() as infile:
+        apply_modifier_overrides(banned, json.load(infile).get("modifiers", {}))
+
 # Banned combos ship with player-name keys joined by " & "; rewrite as
 # frozensets so parlay-leg comparisons are order-independent.
 for platform in banned:

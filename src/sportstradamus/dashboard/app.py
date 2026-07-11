@@ -91,6 +91,12 @@ pg = st.navigation(
                 icon=":material/model_training:",
                 url_path="lab-training",
             ),
+            st.Page(
+                str(_surfaces / "lab_modifiers.py"),
+                title="Modifiers",
+                icon=":material/tune:",
+                url_path="lab-modifiers",
+            ),
         ],
     }
 )

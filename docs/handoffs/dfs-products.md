@@ -350,6 +350,13 @@ at the swimlane index for the next lane.
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-10 · reconciler → dashboard · Model Lab "Modifiers" page
+  (`dashboard/surfaces/lab_modifiers.py`) prices session/locked slips and writes solved
+  modifiers to `data/runtime/modifier_overrides.json` (production checkout stays clean;
+  `helpers.config` merges the overlay at load; fold with `--fold-overlay`). One
+  owner-directed dashboard-surface touch while dashboard-ux Phase R runs — heads-up
+  ledgered there. Multi-module round done in-session (shared overlay schema, <200
+  lines) rather than per-module subagents.
 - 2026-07-10 · stage-0 tool + ladders rules · `scripts/calibrate_parlay_modifiers.py`
   built (+ unit tests; `parlay_rake.json` seeded rake[3]=0.962 from the owner A/B);
   ladders void rules adjudicated (re-tier on void, min-3 refund) · next: owner runs the
