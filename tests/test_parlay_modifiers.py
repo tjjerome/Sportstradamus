@@ -43,6 +43,7 @@ def test_slip_pairs_classifies_relation_slot_and_lookup():
     assert pairs[0].disk_key == "B.hits & B.runs"
     assert pairs[0].value == 1.05
     assert pairs[0].group_key() == ("MLB", "team", "B.hits & B.runs", 1)
+    assert [p.legs for p in pairs] == [(0, 1), (0, 2), (1, 2)]
     assert pairs[1].value is None
 
 
