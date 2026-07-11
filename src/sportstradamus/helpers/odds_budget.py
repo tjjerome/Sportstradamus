@@ -292,7 +292,7 @@ def league_is_live(league: str, season_start) -> bool:
     leagues = _fresh_leagues()
     if leagues is not None:
         return leagues.get(league, {}).get("tier") in ("live", "preseason")
-    return datetime.today().date() > season_start - timedelta(days=_SEASON_START_LEAD_DAYS)
+    return datetime.now(UTC).date() > season_start - timedelta(days=_SEASON_START_LEAD_DAYS)
 
 
 def _feed_ts(commence: str) -> datetime:
@@ -333,7 +333,7 @@ def update_window_open(league: str, season_start) -> bool:
         return True
     leagues = _fresh_leagues()
     if leagues is None:
-        return datetime.today().date() > season_start - timedelta(days=_UPDATE_WINDOW_DAYS)
+        return datetime.now(UTC).date() > season_start - timedelta(days=_UPDATE_WINDOW_DAYS)
     record = leagues.get(league, {})
     window = timedelta(days=_UPDATE_WINDOW_DAYS)
     now = datetime.now(UTC)
