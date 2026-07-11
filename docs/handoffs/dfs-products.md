@@ -74,31 +74,45 @@ head -3 docs/handoffs/sleeper-parity.md
 Each re-verify step is a stage-0 recapture, not a spot-check — on drift, stop, re-run the
 relevant stage-0 capture, revise this brief in place, resume.
 
-- **Combo fee split ~90/10, roll-into-fantasy-stake, partial-payout floor.** CONDITIONAL,
-  web-sourced 2026-07 (gamelines brief B7 P2/P3). Re-verify: place/inspect a real Combo
-  Entry payload; the whole B1 EV algebra rescales on drift.
-- **Ladders: 3–5 picks, 3 rungs, payout keyed to lowest rung reached, rung-1 = 1× refund,
-  ≥2 teams required, rung lines app-fixed (not user-chosen).** Web-sourced (ladders brief
-  VERIFY-1..8). Re-verify: capture a live Ladders slip payload. **Never hardcode a
-  multiplier table** — read it per-slip (VERIFY-4/5); the "1000×" marketing figure does not
-  reconcile against the derived Pick-3/4/5 table.
-- **Sleeper Markets contract shape + $0.02 fee; no confirmed fantasy-pairing combo
-  analogue.** Re-verify at Stage-0 capture; if Sleeper has no combo, that sub-lane is
-  standalone-contract-only for Sleeper.
-- **App pairing / banned-combo rules — B7-P4 preliminary answer (owner field test,
-  2026-07-10): UD DOES reprice event×pick correlation.** MLB 3-leg A/B: ML 1.79x +
-  same-team pitcher-Ks-over 1.62x + other-game filler 2.33x quoted 6.11x; correlated
-  leg swapped for an uncorrelated 1.62x leg quoted 6.50x (leg product 6.76x) ⇒ base
-  parlay haircut ~3.8%, correlation penalty ~6.0% ≈ implied pair ρ ~0.08. Pairing is
-  ALLOWED but requires an unrelated filler leg (game line + correlated player alone is
-  refused — same shape as the single-team player rule); legs quote as unified
-  multipliers, so whether the contract+roll structure (B1) or a plain multiplicative
-  parlay applies is still open (checkout fee-split screenshot owed). Stage-4 edge
-  thesis narrows: hunt tax-vs-true-ρ mismatch per pair-type (B2 sources (i)-residual +
-  (iv)), not an untaxed coupling — B8's "taxed ⇒ kill" is NOT triggered until the
-  tax-curve sweep (weak/strong/negative-ρ pairs, filler variation) prices the mismatch.
-  Single sample; screenshots + sweep owed to `docs/archive/`. **UD alt-rung API
-  breadth** (`get_ud`) still unverified.
+- **Combo mechanics — P2/P3 VERIFIED in-app (owner screenshots 2026-07-10,
+  `docs/archive/evidence/ud_combo_*.png`).** 90/10 split confirmed ("10% is reserved for
+  your fantasy picks until your prediction settles"; $10 → $9 prediction + $1 reservation);
+  sequential settle — prediction payout + held amount fund the fantasy entry; outcome
+  branches: all-correct = q(k)·(reservation + roll), fantasy-only = q(k)·reservation,
+  **prediction-only = $0** (the roll rides and dies with the fantasy legs). Open
+  reconciliation: live Padres slip displayed "Roll over to player picks ~$4.08" vs
+  $5 × 90% × 1.79x = $8.06 expected — winnings + reservation ≈ $4.06 matches the display
+  but not the 6.11x total; capture the "Payout details" screen.
+- **Ladders — core rules VERIFIED in-app (owner screenshots 2026-07-10,
+  `docs/archive/evidence/ud_ladder*.png`).** Min-rung payout confirmed verbatim ("pays out
+  based on the highest level achieved by ALL picks; if one pick stops at level 1 … your
+  payout is at level 1"); 3 levels; per-slip tier tables (3-pick WNBA: 1.5×/3×/100×;
+  5-pick sample: 2.5×/10×/1000×) — **rung-1 is NOT a 1× refund** and 1000× is the 5-pick
+  top tier; thresholds are integer "N+" with ≥ semantics (no push question); rungs can sit
+  below the current median line (rung-1 deep ITM); picks are pre-built per-player alt-line
+  sets, rung lines app-fixed; same-game and same-team picks allowed; max entry $250; no
+  per-leg multipliers (tier table only). Still open: DNP/rescue-rung handling (capture the
+  "All rules" page), API payload existence (VERIFY-6).
+- **Sleeper: team-line × player pairing NOT allowed yet (owner verified in-app
+  2026-07-10)** — Sleeper sub-lane is standalone-contract + player-parlay only for now,
+  though player×player correlation repricing exists there too. Contract shape + $0.02 fee
+  still unverified.
+- **App pairing / correlation repricing — B7-P4 answered: UD DOES reprice event×pick
+  correlation** (owner MLB A/B verified 2026-07-10; slips in `docs/archive/evidence/`).
+  Correlated 3-leg (ML 1.79x + same-team pitcher-Ks 1.62x + other-game filler 2.33x)
+  quoted 6.11x vs 6.50x with the correlated leg swapped for an uncorrelated 1.62x leg
+  (leg product 6.76x) ⇒ base parlay haircut ~3.8%, correlation penalty ~6.0% ≈ implied
+  pair ρ ~0.08. Pairing is allowed but requires an unrelated filler leg (game line +
+  correlated player alone is refused, like the single-team player rule). The same
+  modifier mechanism applies to plain fantasy parlays; the hand-documented map is
+  `data/config/banned_combos.json` (platform × league × team/opponent ×
+  `"POS.market & POS.market"` → `[same-direction, opposite-direction]` modifiers,
+  `0.0` = hard ban) — it drifts and has no prediction-market pairs yet; the stage-0
+  modifier-extraction harness owns refreshing it. Stage-4 edge thesis is therefore
+  tax-vs-true-ρ mismatch per pair-type, not an untaxed coupling; B8's "taxed ⇒ kill"
+  fires only if the tax-curve sweep (weak/strong/negative-ρ pairs, filler variation)
+  shows no exploitable mismatch. **UD alt-rung API breadth** (`get_ud`) still
+  unverified.
 - **Payout tables are consumed, not owned.** UD per-season table drift is a
   `hygiene-closeout` housekeeping item, not this lane's; Sleeper's table lives in
   `sleeper-parity` stage 0. This lane reads whatever those lanes/stage-0 captures land.
@@ -318,6 +332,10 @@ at the swimlane index for the next lane.
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-10 · stage-0 evidence · 9 screenshots → `docs/archive/evidence/` (combo 90/10 +
+  roll + payout branches; ladders min-rung rules + per-slip tier tables; corr A/B slips);
+  §3 adjudicated in place; `banned_combos.json` = the modifier map · next:
+  modifier-extraction harness + "$4.08" payout-details reconciliation.
 - 2026-07-10 · stage-0 field result · B7-P4 = TAXED, preliminary (owner MLB A/B: ~6.0%
   correlation penalty over a ~3.8% base haircut; pairing allowed w/ filler-leg
   requirement); §3 bullet revised in place · next: evidence screenshots + tax-curve
