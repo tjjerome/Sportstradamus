@@ -269,3 +269,12 @@ st.divider()
 if focus_game:
     _render_lens_toggles()
 render_constellation_builder(offers, corr, ctxs, focus_game=focus_game)
+
+# Reconciler handoff: the Modifiers page defaults to the session rail, so the
+# current slip arrives loaded. Two legs is the reconciler's minimum.
+if len(st.session_state[_LEGS]) >= 2:
+    st.page_link(
+        "surfaces/lab_modifiers.py",
+        label="Payout incorrect? Report it",
+        icon=":material/report:",
+    )

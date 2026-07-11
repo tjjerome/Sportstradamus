@@ -173,12 +173,12 @@ with (_config_dir / "banned_combos.json").open() as infile:
 def apply_modifier_overrides(base: dict, overrides: dict) -> None:
     """Overlay dashboard-captured pair modifiers onto the committed baseline.
 
-    The dashboard runs on the production host, whose git checkout must stay
-    clean for cron pulls, so its modifier reconciler writes
+    The dashboard's modifier reconciler writes
     ``data/runtime/modifier_overrides.json`` (path constant:
-    ``helpers.io.MODIFIER_OVERRIDES_PATH``) instead of ``banned_combos.json``;
-    ``calibrate_parlay_modifiers --fold-overlay`` migrates entries into the
-    committed file.
+    ``helpers.io.MODIFIER_OVERRIDES_PATH``) instead of ``banned_combos.json``,
+    so scoring picks corrections up on the next load without dirtying the
+    committed file; ``helpers.parlay_modifiers.fold_overlay`` folds entries
+    into the committed configs (nightly reflect, post-pull, dev sync).
     """
     for platform_name, leagues in overrides.items():
         for league_name, relations in leagues.items():

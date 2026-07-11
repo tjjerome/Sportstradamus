@@ -65,6 +65,8 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 from streamlit.util import calc_hash
 
+from sportstradamus.leg_schema import build_leg
+
 _APP = Path("src/sportstradamus/dashboard/app.py").resolve()
 _WRAPPER = f"import runpy; runpy.run_path(r'{_APP}', run_name='__main__')"
 
@@ -411,3 +413,24 @@ def test_lab_modifiers_renders_empty_state(monkeypatch, tmp_path):
     at.run()
     assert not at.exception
     assert at.title[0].value == "Modifier Reconciler"
+
+
+def test_games_rail_shows_reconciler_chip(monkeypatch, tmp_path):
+    """A ≥2-leg rail renders the "Payout incorrect?" page_link to lab-modifiers."""
+    fixture = tmp_path / "current_offers.parquet"
+    pd.DataFrame(_OFFER_ROWS).to_parquet(fixture)
+    monkeypatch.setattr("sportstradamus.dashboard.data.CURRENT_OFFERS_PATH", fixture)
+    st.cache_data.clear()
+
+    at = AppTest.from_file(str(_APP), default_timeout=30)
+    at.run()
+    at.session_state["slip_legs"] = [
+        build_leg(_OFFER_ROWS[0]),
+        build_leg(dict(_OFFER_ROWS[0], Player="M. Bridges", Market="AST", Line=5.5)),
+    ]
+    at.session_state["slip_platform"] = "Underdog"
+    at.switch_page("surfaces/games.py")
+    at.run()
+    assert not at.exception
+    chips = [pl for pl in at.get("page_link") if pl.page == "lab-modifiers"]
+    assert chips and chips[0].label == "Payout incorrect? Report it"

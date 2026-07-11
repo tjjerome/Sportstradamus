@@ -265,10 +265,15 @@ Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
   matches `main`; check `devel` HEAD when reasoning about server behavior.
 * **All cron jobs go through `scripts/run_job.sh`.** The wrapper adds:
   - per-job `flock -n` (a second invocation of the same job is skipped),
+  - a self-deploy `git pull --ff-only origin devel` before each job (own
+    `flock -n`; a failed pull runs the existing checkout; the two modifier
+    configs are reset then re-folded from `modifier_overrides.json` with
+    `--prune` so dashboard-captured corrections never block the pull;
+    `GIT_PULL=0` skips),
   - a shared archive `flock -w 900` (serializes against DuckDB's
     single-writer lock so jobs don't collide on `archive.duckdb`),
   - Healthchecks.io `/start` / `/fail` / success pings,
-  - structured `START` / `OK` / `FAIL` / `WAIT` log lines per job.
+  - structured `START` / `OK` / `FAIL` / `WAIT` / `PULL` log lines per job.
 * **Production crontab** (run as `sportstradamus@<host>`): the canonical
   schedule lives in [README.md §Recommended Cron](README.md#recommended-cron).
   Key coupling: the number of confer slots must match `broad_slots_per_day`
