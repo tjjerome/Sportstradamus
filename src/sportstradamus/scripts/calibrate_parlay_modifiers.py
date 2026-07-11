@@ -43,10 +43,14 @@ from typing import NamedTuple
 import click
 
 from sportstradamus import data
+from sportstradamus.helpers.config import apply_modifier_overrides
+from sportstradamus.helpers.io import MODIFIER_OVERRIDES_PATH
 
 # A learned modifier is a ratio of two operator-read quotes; the app displays
-# them at 2 decimals, so a third digit is already at the noise floor.
-_MODIFIER_DECIMALS = 3
+# them at 2 decimals, so a third digit is already at the noise floor. Public
+# (no leading underscore) — dashboard/surfaces/lab_modifiers.py imports it to
+# keep its rounding policy in sync with this CLI's.
+MODIFIER_DECIMALS = 3
 # Quotes within half a percent of expected carry no signal worth writing.
 _MATCH_TOLERANCE = 0.005
 
@@ -74,7 +78,7 @@ class Pair(NamedTuple):
         return self.relation, self.disk_key or self.display_key, self.slot
 
 
-def parse_slip(text: str) -> list[Leg]:
+def parse_slip(text: str, *, min_legs: int = 2) -> list[Leg]:
     """Parse a whitespace-separated slip spec into legs (see module doc)."""
     legs = []
     for tok in shlex.split(text):
@@ -92,8 +96,8 @@ def parse_slip(text: str) -> list[Leg]:
         except ValueError as exc:
             raise ValueError(f"leg '{tok}': bad multiplier '{mult}'") from exc
         legs.append(Leg(game, team, key, d in _HIGHER_WORDS, multiplier))
-    if len(legs) < 2:
-        raise ValueError("a slip needs at least 2 legs")
+    if len(legs) < min_legs:
+        raise ValueError(f"a slip needs at least {min_legs} legs")
     return legs
 
 
@@ -135,7 +139,36 @@ def _write_rake(path: Path, platform: str, n_legs: int, value: float) -> None:
     path.write_text(json.dumps(config, indent=4) + "\n")
 
 
-def _reconcile(legs, pairs, rake, actual, expected):
+def _fold_overlay(overlay_path: Path, combos_path: Path, rake_path: Path) -> None:
+    """Migrate dashboard-captured overrides into the committed configs."""
+    if not overlay_path.is_file():
+        click.echo(f"no overlay at {overlay_path}")
+        return
+    overlay = json.loads(overlay_path.read_text())
+    modifiers = overlay.get("modifiers", {})
+    rake_overrides = overlay.get("rake", {})
+
+    combos = json.loads(combos_path.read_text())
+    apply_modifier_overrides(combos, modifiers)
+    combos_path.write_text(json.dumps(combos, indent=4) + "\n")
+
+    rake_config = json.loads(rake_path.read_text()) if rake_path.exists() else {}
+    for platform_name, table in rake_overrides.items():
+        rake_config.setdefault(platform_name, {}).update(table)
+    rake_path.write_text(json.dumps(rake_config, indent=4) + "\n")
+
+    overlay_path.write_text(json.dumps({"modifiers": {}, "rake": {}}, indent=4) + "\n")
+    n_pairs = sum(
+        len(entries)
+        for leagues in modifiers.values()
+        for relations in leagues.values()
+        for entries in relations.values()
+    )
+    n_rakes = sum(len(t) for t in rake_overrides.values())
+    click.echo(f"folded {n_pairs} pair modifiers + {n_rakes} rakes; overlay cleared")
+
+
+def reconcile(legs, pairs, rake, actual, expected):
     """Return (kind, target, value) for what the actual quote teaches.
 
     kind: "match" | "rake" | "solve" | "drift" | "ambiguous" | "uncalibrated"
@@ -163,7 +196,7 @@ def _reconcile(legs, pairs, rake, actual, expected):
 
 @click.command()
 @click.option("--platform", default="Underdog", show_default=True)
-@click.option("--league", required=True, help="League section of banned_combos.json, e.g. MLB")
+@click.option("--league", default=None, help="League section of banned_combos.json, e.g. MLB")
 @click.option(
     "--combos-path",
     type=click.Path(path_type=Path),
@@ -176,13 +209,33 @@ def _reconcile(legs, pairs, rake, actual, expected):
     default=None,
     help="Override parlay_rake.json location (tests/maintenance).",
 )
-def calibrate_parlay_modifiers(platform, league, combos_path, rake_path):
+@click.option(
+    "--fold-overlay",
+    is_flag=True,
+    help="Fold data/runtime/modifier_overrides.json (dashboard captures) into the committed configs, then clear it.",
+)
+@click.option(
+    "--overlay-path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Override modifier_overrides.json location (tests/maintenance).",
+)
+def calibrate_parlay_modifiers(
+    platform, league, combos_path, rake_path, fold_overlay, overlay_path
+):
     """Solve unknown pair modifiers from expected-vs-actual slip quotes."""
-    league = league.upper()
     config_dir = resources.files(data) / "config"
     combos_path = combos_path or Path(str(config_dir / "banned_combos.json"))
     rake_path = rake_path or Path(str(config_dir / "parlay_rake.json"))
 
+    if fold_overlay:
+        overlay_path = overlay_path or Path(str(MODIFIER_OVERRIDES_PATH))
+        _fold_overlay(overlay_path, combos_path, rake_path)
+        return
+
+    if league is None:
+        raise click.UsageError("--league is required in interactive mode")
+    league = league.upper()
     combos = json.loads(combos_path.read_text())
     if platform not in combos or league not in combos[platform]:
         raise click.UsageError(f"{platform}/{league} not present in {combos_path}")
@@ -222,7 +275,7 @@ def calibrate_parlay_modifiers(platform, league, combos_path, rake_path):
         if not actual:
             continue
 
-        kind, target, value = _reconcile(legs, pairs, rake, actual, expected)
+        kind, target, value = reconcile(legs, pairs, rake, actual, expected)
         if kind == "match":
             click.echo("  matches expected — nothing to learn")
         elif kind == "uncalibrated":
@@ -232,13 +285,13 @@ def calibrate_parlay_modifiers(platform, league, combos_path, rake_path):
         elif kind == "ambiguous":
             click.echo(f"  cannot attribute residual across multiple pair groups: {target}")
         elif kind == "rake":
-            value = round(value, _MODIFIER_DECIMALS)
+            value = round(value, MODIFIER_DECIMALS)
             if click.confirm(f"  write rake[{target}] = {value} for {platform}?"):
                 _write_rake(rake_path, platform, target, value)
                 rakes[str(target)] = value
         else:
             relation, key, slot = target
-            value = round(value, _MODIFIER_DECIMALS)
+            value = round(value, MODIFIER_DECIMALS)
             verb = "solve" if kind == "solve" else "drift-update"
             slot_name = "same-dir" if slot == 0 else "opp-dir"
             pair = next(p for p in pairs if p.group_key() == target)

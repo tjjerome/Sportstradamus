@@ -51,6 +51,9 @@ PROFIT_SIM_SUMMARY_PATH = _RUNTIME_DIR / "profit_sim_summary.parquet"
 CALIBRATION_SUMMARY_PATH = _RUNTIME_DIR / "calibration_summary.parquet"
 # User-built slips saved from the dashboard ("Lock it in"); graded by nightly.
 USER_SLIPS_PATH = _RUNTIME_DIR / "user_slips.parquet"
+# Dashboard-captured correlation modifiers/rakes awaiting fold-in to the
+# committed configs (helpers.config merges it at load; the CLI folds it).
+MODIFIER_OVERRIDES_PATH = _RUNTIME_DIR / "modifier_overrides.json"
 
 # Root for trained model pickles. model_pickle_path builds the per-cell path
 # from this root; prune_model_pickle deletes one to dark-out a withheld cell.
@@ -292,6 +295,26 @@ def read_league_activity() -> dict:
 def write_league_activity(activity: dict) -> None:
     """Atomically write the league-activity snapshot as JSON."""
     _atomic_write_json(activity, LEAGUE_ACTIVITY_PATH)
+
+
+# ---------------------------------------------------------------------------
+# Modifier overrides (dashboard-captured correlation modifiers/rakes awaiting
+# fold-in to the committed configs — see MODIFIER_OVERRIDES_PATH above).
+# ---------------------------------------------------------------------------
+
+
+def read_modifier_overrides() -> dict:
+    """Return the modifier-overrides overlay, or the empty shape if absent."""
+    p = Path(str(MODIFIER_OVERRIDES_PATH))
+    if not p.is_file():
+        return {"modifiers": {}, "rake": {}}
+    with p.open() as f:
+        return json.load(f)
+
+
+def write_modifier_overrides(overlay: dict) -> None:
+    """Atomically write the modifier-overrides overlay as JSON."""
+    _atomic_write_json(overlay, MODIFIER_OVERRIDES_PATH)
 
 
 # ---------------------------------------------------------------------------

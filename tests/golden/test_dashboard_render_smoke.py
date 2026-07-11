@@ -380,3 +380,34 @@ def test_lab_training_renders_gate_matrix_and_glance_strip(monkeypatch, tmp_path
     assert tile_labels.get("Cells trained") == "2"
     assert tile_labels.get("Shipping (all gates)") == "1"
     assert tile_labels.get("One gate short") == "1"
+
+
+def test_lab_modifiers_renders_empty_state(monkeypatch, tmp_path):
+    """Modifier reconciler navigates clean and stops on the empty-slip guard.
+
+    ``lab_modifiers.py`` re-executes as a page script every run, so its
+    ``from helpers.io import ...`` bindings re-read the (patched) module
+    attributes — the single ``helpers.io`` patch per path suffices here, plus
+    ``dashboard.data``'s own ``CURRENT_OFFERS_PATH`` binding for the cached
+    offers loader.
+    """
+    offers_fixture = tmp_path / "current_offers.parquet"
+    pd.DataFrame(_OFFER_ROWS).to_parquet(offers_fixture)
+    monkeypatch.setattr("sportstradamus.helpers.io.CURRENT_OFFERS_PATH", offers_fixture)
+    monkeypatch.setattr("sportstradamus.dashboard.data.CURRENT_OFFERS_PATH", offers_fixture)
+    monkeypatch.setattr(
+        "sportstradamus.helpers.io.USER_SLIPS_PATH", tmp_path / "user_slips.parquet"
+    )
+    monkeypatch.setattr(
+        "sportstradamus.helpers.io.MODIFIER_OVERRIDES_PATH",
+        tmp_path / "modifier_overrides.json",
+    )
+    st.cache_data.clear()
+
+    at = AppTest.from_file(str(_APP), default_timeout=30)
+    at.run()
+    at.switch_page("surfaces/lab_modifiers.py")
+    at._page_hash = calc_hash("lab-modifiers")  # see module docstring
+    at.run()
+    assert not at.exception
+    assert at.title[0].value == "Modifier Reconciler"
