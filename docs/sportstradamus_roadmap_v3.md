@@ -72,6 +72,7 @@ an exception. A session works one lane and reads that lane's brief.
 | `sim-bettor-ledger` | Pre-registered paper-trading ledger + circuit breakers | QUEUED | D6 policy sign-off | [handoffs/sim-bettor-ledger.md](handoffs/sim-bettor-ledger.md) |
 | `sleeper-parity` | Full Sleeper decision-layer parity | QUEUED | stage-0 product verification | [handoffs/sleeper-parity.md](handoffs/sleeper-parity.md) |
 | `parlay-dependence` | Copula on PIT residuals — biggest product-EV lever | BLOCKED (on: D3) | D3 | [handoffs/parlay-dependence.md](handoffs/parlay-dependence.md) |
+| `dfs-products` | New bet-type decision engines: game-line combos (verify-first) + Underdog Ladders + alt-line hardening + Rivals difference-pricer | QUEUED | stage-0 product verification (stages 0–1 conflict-free, startable now) | [handoffs/dfs-products.md](handoffs/dfs-products.md) |
 | `mlb-nhl-activation` | Audit, then activate the two withheld leagues (matrices + serve-wiring done) | ACTIVE | D1/D2 to ship | [handoffs/mlb-nhl-activation.md](handoffs/mlb-nhl-activation.md) |
 | `dashboard-ux` | Narrative-first dashboard: six surfaces, slip builder, receipts, celestial skin | ACTIVE | — | [handoffs/dashboard-ux.md](handoffs/dashboard-ux.md) |
 | `bestball-2027` | Draft products for the 2027 season | BLOCKED (on: D4) | D4 | [handoffs/bestball-2027.md](handoffs/bestball-2027.md) |
@@ -90,6 +91,10 @@ Everything not listed here is pivot-free.
    (preferred, not strict) — so Sleeper logs into the ledger from day one.
 4. Review bandwidth is real: one owner. Advisory, not a rule — keep at most
    one code-heavy lane in flight beside `model-track`.
+5. `dfs-products` stages touching `parlay.py` / `correlation.py` /
+   `correlate.py` — or sleeper-parity's declared footprint (`prediction/cli.py`,
+   `persist.py`, pick'em `strategies/`) — queue behind constraint 1's pair;
+   its ingestion / new-module / docs stages are pivot-free.
 
 ### Seasonality (advisory — best windows, never a schedule)
 
@@ -141,8 +146,10 @@ sketches live in the archived v2.
 - **Alerts / push** — deferred; revisit only if polling cadence < ~10s, a
   websocket feed lands, or high-edge windows are demonstrably missed
   (archived v2 §4.1).
-- **Streaks / Ladders** — deferred; sequential-decision problem needing its
-  own design pass (archived v2 §3.5).
+- **Streaks** — deferred; sequential-decision problem needing its own design
+  pass (archived v2 §3.5). Ladders graduated to `dfs-products` (not
+  sequential — lowest-shared-rung pricing; stage-0 brief in
+  `archive/researcher_ladders_stage0.md`).
 - **Pick'em Champions** — removed; pari-mutuel ≠ static-line arbitrage
   (archived v2 §3.4).
 - **Placed-bet logging / `tracking/` package** — **replaced by**
@@ -174,6 +181,7 @@ sketches live in the archived v2.
 
 ## Changelog
 
+- dfs-products lane added (game-line combos verify-first, Ladders graduated from §8, alt-line hardening, Rivals pricer); §5 gains its serialization rule; PARLAY_AUDIT refreshed w/ dispositions; stage-0 briefs in docs/archive.
 - model-track reframed profit-first: WS-1 live-alignment = P1, MLB/NHL activation folded in (ACTIVE), family research done (WS-3), copula stage-0 done (WS-4); g1–g5→g1–g6; seasonality Jun–Aug += live-alignment.
 - P8 planned (spec + 6 phase plans in `docs/superpowers/`, incl. D constellation shapes + E art catalog); Sheets-era data retirement folded into dashboard-ux as Phase 0; §8 gains the ρ-overlay follow-up.
 - model-track lane consolidated: ship75/ship90/feature-plan/brief merged into `model_improvement_track.md`; lane row + doc map repointed.

@@ -183,6 +183,9 @@ outside this footprint is a stop condition (§8).
   move).
 - Acceptance: offline A/B vs incumbent on cached test sets shows a
   joint-calibration gain; golden tests pin both flag paths.
+- Also in scope per PARLAY_AUDIT.md §4 dispositions: explicit
+  `multivariate_normal.cdf` tolerances (or MC routing) at d≥5; bound/replace
+  the unbounded beam pseudo-EV; ID-based same-player guard.
 - Est. 2–3 sessions.
 - Kill: A/B flat or negative → lane-level if-it-fails (below).
 
@@ -257,5 +260,6 @@ blocking reason, set the status line to BLOCKED (on: …), flip the roadmap v3
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-10 · audit refresh inbound · PARLAY_AUDIT.md refreshed (dispositions table): stage 3 gains MVN-tolerance/beam-bound/ID-guard scope lines; copula brief rescued to docs/archive/researcher_copula_stage0.md; parlay-path Kelly no-shrinkage flagged for owner routing (audit §2.6); mixed player×game-line slips owned by new dfs-products lane · next: unchanged (D3 owner-gated)
 - 2026-07-07 · research done early · Fable R3 copula brief (`/tmp/researcher_copula_stage0.md`) settles the §4 questions — Gaussian default + t-branch test, hierarchical Fisher-z EB, Rivals-first YES. Stage 0 research half DONE; census script `census_parlay_pairs.py` is the remaining Stage-0 work. Verdict mirrored in model_improvement_track.md §6.11 (WS-4). sleeper-parity named the live D3 blocker (needs owner scheduling) · next: census script (early, owner-optional); D3 still owner-gated
 - 2026-06-10 · created · brief drafted from roadmap-v3 migration · next: wait for D3; stage-0 census can run early if owner wants
