@@ -22,8 +22,9 @@ calibration work (model-track) and actual entries on Underdog/Sleeper.
    replaced (loaders, dialog, phrase bank).
 6. `tests/golden/test_design_tokens.py` + `test_dashboard_no_archive_lock.py` — the two hard
    gates this lane must keep green and extend.
-7. `src/sportstradamus/prediction/parlay.py` — copula pricing + `_payout_curve_for` the slip
-   engine reuses.
+7. `src/sportstradamus/prediction/joint.py` (copula pricing) +
+   `prediction/payouts.py` (`payout_curve_for`) — the seams the slip engine
+   reuses (post parlay.py split; beam search stays in `parlay.py`).
 8. [docs/mockups/](../mockups/) — approved wireframes; the eight `p8-*.html` files are the locked
    P8 pixel truth (`p8-celestial-refresh.html` is exploratory, not locked).
 9. P8 work: the spec

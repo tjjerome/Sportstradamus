@@ -1,7 +1,7 @@
 """Live slip scoring for the dashboard builders — the one sanctioned live calc.
 
 ``score_slip`` prices an arbitrary ≤6-leg user slip by reusing the prediction
-layer's Gaussian-copula scorer (``parlay._parlay_payout_prob``) over a
+layer's Gaussian-copula scorer (``joint.parlay_payout_prob``) over a
 **block-diagonal** correlation matrix: within-game leg pairs take their ρ from
 the ``current_game_corr`` slice, cross-game pairs are independent (ρ=0). This is
 exactly the "pure numpy/scipy on ≤6 legs" exception the redesign spec carves out
@@ -30,13 +30,12 @@ import pandas as pd
 from scipy.stats import multivariate_normal, norm
 
 from sportstradamus.dashboard.legs import corr_key
-from sportstradamus.prediction.parlay import (
-    _PAYOUT_CLIP_HI,
-    _PAYOUT_CLIP_LO,
-    _POWER_MAX_SIZE,
-    _parlay_payout_prob,
-    _payout_curve_for,
-    _psd_or_none,
+from sportstradamus.prediction.joint import parlay_payout_prob, psd_or_none
+from sportstradamus.prediction.payouts import (
+    PAYOUT_CLIP_HI,
+    PAYOUT_CLIP_LO,
+    POWER_MAX_SIZE,
+    payout_curve_for,
 )
 from sportstradamus.prediction.stories.engine import thesis_variants
 from sportstradamus.prediction.stories.legs import enrich_legs
@@ -85,12 +84,12 @@ def score_slip(
     if n < 2 or base <= 0.0:
         return SlipScore(indep_p, indep_p, 0.0, 0.0, n, play_type, Decimal("0"), payout_approximate)
 
-    sig = _psd_or_none(_block_diagonal_sig(legs, corr), legacy=False)
+    sig = psd_or_none(_block_diagonal_sig(legs, corr), legacy=False)
     joint_p = float(multivariate_normal.cdf(norm.ppf(p), np.zeros(n), sig))
     boost = float(np.prod([float(leg["boost"]) for leg in legs]))
-    payout = float(np.clip(boost * base, _PAYOUT_CLIP_LO, _PAYOUT_CLIP_HI))
+    payout = float(np.clip(boost * base, PAYOUT_CLIP_LO, PAYOUT_CLIP_HI))
     push = np.array([float(leg.get("push_prob", 0.0) or 0.0) for leg in legs])
-    model_ev = float(_parlay_payout_prob(p, push, sig, n, boost, payout, full_payouts, base, False))
+    model_ev = float(parlay_payout_prob(p, push, sig, n, boost, payout, full_payouts, base, False))
     kelly_win = model_ev / payout if payout > 0 else 0.0
     stake = fractional_kelly_stake(
         bankroll=bankroll,
@@ -153,9 +152,9 @@ def _platform_pricing(platform: str, n: int) -> tuple[str, dict, float, bool]:
     """
     if platform == "Sleeper":
         return "Sleeper", {n: [1.0, 0.0]}, 1.0, True
-    search, full_curve = _payout_curve_for("Underdog", "pooled", legacy=False)
+    search, full_curve = payout_curve_for("Underdog", "pooled", legacy=False)
     base = search[n - 2] if 0 <= n - 2 < len(search) else 0.0
-    play_type = "Power" if n <= _POWER_MAX_SIZE else "Flex"
+    play_type = "Power" if n <= POWER_MAX_SIZE else "Flex"
     return play_type, full_curve, float(base), False
 
 

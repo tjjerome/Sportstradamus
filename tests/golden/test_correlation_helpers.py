@@ -421,7 +421,7 @@ def test_find_correlation_builds_parlays_wnba() -> None:
     # PTS/PRA/AST/REB aren't in stat_map["Underdog"], so identity-fallback (stat
     # == market) is the *correct* answer for this fixture's markets — the
     # remap-actually-fires case (WNBA "Fantasy Points") is pinned directly on
-    # _resolve_leg_stat in test_parlay_search.py, not fixture-dependent here.
+    # resolve_leg_stat in test_parlay_search.py, not fixture-dependent here.
     assert all(leg["stat"] == leg["market"] for row in parlay_df["legs"] for leg in row)
 
 

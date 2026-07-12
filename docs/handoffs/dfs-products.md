@@ -1,6 +1,8 @@
 # DFS Products — game lines, Ladders, Rivals, alt-line hardening
 
-> Status: QUEUED (entry: stage-0 product verification; stages 0–1 startable now)
+> Status: ACTIVE — stage 0 substantially complete (B7-P4 TAXED verified in-app; residue:
+> tax-curve sweep + owner packet); stages 1/2a startable now; 2b/2c/5 queue behind
+> sleeper-parity (roadmap §5); stage 4 owner-gated
 
 ## 1. Mission & money logic
 
@@ -355,6 +357,8 @@ at the swimlane index for the next lane.
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-11 · status trued · roadmap audit: QUEUED→ACTIVE (stage 0 near-done per the
+  entries below; residue = tax-curve sweep + owner packet) · next: unchanged
 - 2026-07-11 · reconciler dashboard-only + fold pipeline · interactive CLI deleted (core
   → `helpers/parlay_modifiers.py`); Modifiers page prices dashboard slips only (league
   auto-derived; ambiguity prompts a leg add/remove with concrete removal hints); Games

@@ -84,6 +84,8 @@ edits to), `src/sportstradamus/scripts/` (read/run), `pyproject.toml`
    record results: per-season `underdog_payouts.json` verification vs the
    live product (archived v2 §3.2 mandate); monthly free-passer re-score
    reminder to the model-track lane (model_improvement_track.md §6.0).
+   (d) Docs relative-link sweep across `docs/` — every relative link
+   resolves; no stale paths.
    Acceptance: each check's result in the ledger. ~1 session each visit;
    repeats.
 
@@ -124,5 +126,6 @@ product-change protocol for affected lanes).
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
+- 2026-07-11 · stage 3 scope+ · recurring checks gain (d) docs relative-link sweep (roadmap audit found a stale model_stats path in v3 §2/§9) · next: unchanged
 - 2026-07-10 · stage 2 scope+ · calibration re-run gains PSD-distortion rider + parlay-dependence stage-4 baseline role (PARLAY_AUDIT.md refresh dispositions) · next: unchanged
 - 2026-06-10 · stage 0 · roadmap v3 + 7 briefs + v2 archived + pointers repointed (this migration) · next: stage 1 deprecated triage

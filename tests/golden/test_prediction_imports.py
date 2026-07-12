@@ -23,13 +23,13 @@ def test_beam_search_parlays_package_reexport() -> None:
 
 
 def test_parlay_helpers_canonical_import() -> None:
-    """Parlay helpers live in parlay.py — correlation.py is not their home."""
-    from sportstradamus.prediction.parlay import (
-        _expected_payout_with_pushes,
-        _nearest_psd,
-        _payout_curve_for,
+    """Parlay helpers live in payouts.py / joint.py — correlation.py is not their home."""
+    from sportstradamus.prediction.joint import _nearest_psd
+    from sportstradamus.prediction.payouts import (
+        expected_payout_with_pushes,
+        payout_curve_for,
     )
 
-    assert callable(_payout_curve_for)
+    assert callable(payout_curve_for)
     assert callable(_nearest_psd)
-    assert callable(_expected_payout_with_pushes)
+    assert callable(expected_payout_with_pushes)
