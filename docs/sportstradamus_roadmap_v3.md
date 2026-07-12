@@ -73,7 +73,7 @@ an exception. A session works one lane and reads that lane's brief.
 | Lane | Mission | Status | Entry gate | Brief |
 |---|---|---|---|---|
 | `model-track` | Profit-first: beat the DFS apps/mispriced books live (WS-1) + standing breadth harvest → D3/D5 + MLB/NHL post-GO grind (WS-2); the lead lane | ACTIVE | — | [model_improvement_track.md](handoffs/model_improvement_track.md) |
-| `sim-bettor-ledger` | Pre-registered paper-trading ledger + circuit breakers | QUEUED | D6 policy sign-off | [handoffs/sim-bettor-ledger.md](handoffs/sim-bettor-ledger.md) |
+| `sim-bettor-ledger` | Pre-registered paper-trading ledger + circuit breakers | ACTIVE | — (D6 resolved; stage 1 commit path next) | [handoffs/sim-bettor-ledger.md](handoffs/sim-bettor-ledger.md) |
 | `sleeper-parity` | Full Sleeper decision-layer parity | QUEUED — **CRITICAL PATH** (blocks D3 + dfs-products 2b/2c/5); recommended next code-heavy lane, target merge ~Aug 2026 (pre NFL Wk 1) | stage-0 product verification | [handoffs/sleeper-parity.md](handoffs/sleeper-parity.md) |
 | `parlay-dependence` | Copula on PIT residuals — biggest product-EV lever | BLOCKED (on: D3) | D3 | [handoffs/parlay-dependence.md](handoffs/parlay-dependence.md) |
 | `dfs-products` | New bet-type decision engines: game-line combos (verify-first) + Underdog Ladders + alt-line hardening + Rivals difference-pricer | ACTIVE | — (stage 0 near-done; 1/2a startable now; 2b/2c/5 queue per §5; stage 4 owner go/no-go) | [handoffs/dfs-products.md](handoffs/dfs-products.md) |
@@ -248,7 +248,7 @@ flip a gate.
 | D3 | Start `parlay-dependence` | ≥2 leagues at target + Opus research brief + sleeper-parity merged | when inputs exist |
 | D4 | Start `bestball-2027` | calendar ≥ ~Nov 2026 + model-track health | before 2027 drafts open |
 | D5 | Declare Ship-90 | Ship-75 targets met; [`model_improvement_track.md`](handoffs/model_improvement_track.md) §6.8 decision packet | at 75% breadth |
-| D6 | Ledger policy spec v1 sign-off | `sim-bettor-ledger` stage-0 spec | unblocks the lane |
+| D6 | Ledger policy spec v1 sign-off | `sim-bettor-ledger` stage-0 spec | RESOLVED — GO 2026-07-12 |
 | D7 | Real-stake scaling | ledger CLV/ROI over a meaningful sample | outside repo scope; named so the ledger has a customer |
 
 ## 8. Deferred & not-doing register
