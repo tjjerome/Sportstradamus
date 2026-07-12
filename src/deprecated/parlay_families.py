@@ -13,7 +13,7 @@ from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import squareform
 from sklearn.metrics import silhouette_score
 
-from sportstradamus.prediction.parlay import _nearest_psd
+from sportstradamus.prediction.joint import _nearest_psd
 
 # Upper bound on independence families per game. Auto-selected count (by
 # silhouette) may be anywhere in [1, this]; keeps the dashboard picker short.

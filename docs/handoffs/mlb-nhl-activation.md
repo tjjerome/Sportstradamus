@@ -1,10 +1,10 @@
 # MLB / NHL activation
 
-> Status: ACTIVE — **activation operation COMPLETE**; D1/D2 = GO; backfill + repair DONE;
-> **9 cells live on devel: 5 MLB** (stolen bases, home runs, pitcher strikeouts, walks allowed,
-> hits allowed) **+ 4 NHL** (goals, hits, shotsAgainst, timeOnIce) — all full-HPO confirm on
-> 2-season matrices. The 3 pre-D2 slip cells re-earned honestly. Remaining: post-GO grind on
-> the no-ship cells via the §6 operating loop.
+> Status: DONE (absorbed: model-track WS-2 — post-GO grind on the no-ship cells runs
+> there; this brief holds the per-league detail). D1/D2 = GO; **9 cells live on devel:
+> 5 MLB** (stolen bases, home runs, pitcher strikeouts, walks allowed, hits allowed)
+> **+ 4 NHL** (goals, hits, shotsAgainst, timeOnIce) — all full-HPO confirm on
+> 2-season matrices; the 3 pre-D2 slip cells re-earned honestly.
 
 ## 1. Mission & money logic
 
@@ -314,6 +314,7 @@ at the roadmap v3 §4 swimlane index for the next lane.
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- `2026-07-11 · status trued · roadmap audit: ACTIVE→DONE (absorbed into model-track WS-2; its §6 loop owns the post-GO grind); roadmap §4/§7 updated to match (D1/D2 RESOLVED — GO 2026-07-09) · next: —`
 - `2026-07-11 · SHIPPED · first NHL cells to devel (commit 3635a20): goals + hits (ZINB hurdle/crps, blending nll) + shotsAgainst + timeOnIce (SN centered_additive_mean10, blending crps) — board 6/15 shippers on 2.3-season matrices (coin-flip rows gone) → full-HPO confirm; powerPlayPoints failed confirm (auto-reverted), saves ranks-only (best corner needs non-persistable dist-loss). All 3 pre-D2 slip cells re-earned. Confirm's live-cell supersession leg re-tested 2 MLB cells (hits allowed HOLD, home runs SUPERSEDE verdict but promote prompt aborted — background run has no stdin; incumbents restored byte-identical, verified vs pickle mtimes + model_stats). Operation complete: 9 cells live (5 MLB + 4 NHL), 2.39M of 5M credits · next: post-GO grind on no-ship cells (§6 loop); owner requests the devel-ship-curator PR carve`
 - `2026-07-10 · SHIPPED · first MLB cells to devel: stolen bases + home runs (ZINB hurdle) + pitcher strikeouts + walks allowed (SN centered_additive_mean10) + hits allowed (SN ratio_meanyr) — deterministic board 5/19 shippers → full-HPO confirm 6/6 each; doubles near-miss (-0.016). Backfill program complete at 2.39M credits: feature gap closed (MLB 336 + NHL 622 dates), NHL 2023-24 refilled, big-3 honesty purge (NBA 974k / NFL 88k / WNBA 3k junk rows; NBA 2023 re-priced 73%→6.6%), close layers all 5 leagues, ladder seeded 15.5M→NBA 8.2M w/ combo alternates. 2-season matrices: MLB 19/19 (hitter cells 55-66k rows). batter-Ks: API has no MLB 2025 history at any hour — cell honestly thin · next: NHL rebuild → sweep → confirm`
 - `2026-07-09 · hardened · Track A (key-independent) done: klepto seed purge (MLB 1,014,522 + NHL 2,103,111 odds rows deleted, dry-run==real, 2022 gone, residual degeneracy ≈0 through 2025; 2026 residual = live app-book agreement, benign); backfill _probe apikey bugfix (passed whole creds dict → guaranteed 401; now apikey[HISTORICAL_KEY_NAME], one constant to repoint for the new key); per-league trim_gamelog windows (MLB 95k / NHL 110k / NFL 50k rows, default 21.5k) = the 2-season matrix-depth lever — reverting it later silently re-trims deep matrices on the next meditate; Savant affinity CSVs via scraper.get_csv (bot-block keeps cache); _ACTIVATION_GATED_LEAGUES=() per GO, guard machinery + goldens kept. Gates: ruff + golden 3421 + integration 24 clean. Live 1-date probe (old key, NFL passing yards 2023-10-29): key ALIVE, 29/29 players real de-vig across 10 sharp books — probe path validated end-to-end; _CaptureArchive stub caught up to Archive API (book_quotes, add_ladder). Ladder finding: historical fetch already ingests rungs via add_ladder (271 landed), but stat_map carries zero *_alternate market keys → alt-line program needs request-side keys only, ingestion exists · next: Track B backfill (blocked on activated Odds API key)`

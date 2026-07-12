@@ -27,10 +27,10 @@ from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, banned, stat_map
 from sportstradamus.prediction.parlay import (
     GameArrays,
     GameScoringContext,
-    _payout_curve_for,
-    _resolve_leg_stat,
     beam_search_parlays,
+    resolve_leg_stat,
 )
+from sportstradamus.prediction.payouts import payout_curve_for
 from sportstradamus.spiderLogger import logger
 
 # Legacy weighting from the unified-matrix era: same-team and cross pairs
@@ -333,9 +333,9 @@ def _build_cmarket(league_df, league, new_map):
 
     league_df["cMarket"] = league_df.apply(
         lambda x: (
-            [x["Player position"] + "." + _resolve_leg_stat(x["Market"], new_map)]
+            [x["Player position"] + "." + resolve_leg_stat(x["Market"], new_map)]
             if isinstance(x["Player position"], str)
-            else [p + "." + _resolve_leg_stat(x["Market"], new_map) for p in x["Player position"]]
+            else [p + "." + resolve_leg_stat(x["Market"], new_map) for p in x["Player position"]]
         ),
         axis=1,
     )
@@ -716,7 +716,7 @@ def find_correlation(
     # ``search_payouts`` is the single-multiplier-per-size list used inside the
     # beam-search ranking; ``full_payouts`` is the per-(size, miss-count) lookup
     # driving push-aware EV and the display Boost column.
-    search_payouts, full_payouts = _payout_curve_for(platform, contest_variant, legacy=legacy)
+    search_payouts, full_payouts = payout_curve_for(platform, contest_variant, legacy=legacy)
 
     for league in ["NFL", "NBA", "WNBA", "MLB", "NHL"]:
         league_df = df.loc[df["League"] == league]

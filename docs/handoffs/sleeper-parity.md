@@ -1,6 +1,8 @@
 # Sleeper decision-layer parity
 
-> Status: QUEUED (entry: stage-0 product-rules verification with the owner)
+> Status: QUEUED (entry: stage-0 product-rules verification with the owner) —
+> CRITICAL PATH: blocks D3/parlay-dependence + dfs-products 2b/2c/5; recommended next
+> code-heavy lane, target merge ~Aug 2026 (pre NFL Wk 1)
 
 ## 1. Mission & money logic
 
@@ -35,7 +37,7 @@ EV path — new code, not a config entry beside the legacy stub
 2. [`CONTRIBUTING.md`](../../CONTRIBUTING.md) §Package Map + §Shipping to Production (`devel`) — canonical import paths and the devel-ship-curator PR mechanics.
 3. [`sportstradamus_roadmap_v3.md`](../sportstradamus_roadmap_v3.md) §5 — cross-lane constraints: this lane lands **before** `parlay-dependence`; the `sim-bettor-ledger` schema preferably lands before this lane finishes.
 4. [`books.py`](../../src/sportstradamus/books.py) — the Sleeper scrape (`get_sleeper`, `_sleeper_prop_offers`, the four `SLEEPER_*_URL` endpoints at :31-34). Read-only in this lane (§4).
-5. [`prediction/parlay.py`](../../src/sportstradamus/prediction/parlay.py) — the payout engine to extend: `_payout_curve_for` (:123), `_expected_payout_with_pushes` (:293), `beam_search_parlays` (:521).
+5. [`prediction/payouts.py`](../../src/sportstradamus/prediction/payouts.py) — the payout engine to extend: `payout_curve_for`, `expected_payout_with_pushes` (post parlay.py seam-split; `beam_search_parlays` stays in [`parlay.py`](../../src/sportstradamus/prediction/parlay.py), joint pricing in [`joint.py`](../../src/sportstradamus/prediction/joint.py)).
 6. [`prediction/correlation.py`](../../src/sportstradamus/prediction/correlation.py) — `find_correlation(offers, stats, platform, ...)` (:548), the platform plumb-through point.
 7. [`strategies/underdog_pickem.py`](../../src/sportstradamus/strategies/underdog_pickem.py) + [`strategies/README.md`](../../src/sportstradamus/strategies/README.md) — the decision layer to generalize (`_live_load` :322 calls `get_ud()` only; `find_correlation(..., "Underdog")` :296).
 8. [`archive/sportstradamus_roadmap_v2.md`](../archive/sportstradamus_roadmap_v2.md) — background only; status claims stale.
@@ -104,10 +106,10 @@ condition (§8).
 
 | Module | Role in this lane |
 |---|---|
-| `sportstradamus.prediction` — [`parlay.py`](../../src/sportstradamus/prediction/parlay.py), [`correlation.py`](../../src/sportstradamus/prediction/correlation.py), [`cli.py`](../../src/sportstradamus/prediction/cli.py), [`persist.py`](../../src/sportstradamus/prediction/persist.py) | New per-leg-payout-vector EV path; platform plumb-through; snapshot hook (today [`cli.py:275`](../../src/sportstradamus/prediction/cli.py) builds the pick'em snapshot from Underdog offers only) |
+| `sportstradamus.prediction` — [`payouts.py`](../../src/sportstradamus/prediction/payouts.py) + [`joint.py`](../../src/sportstradamus/prediction/joint.py) (post seam-split; the per-leg-payout-vector EV path lands here, not in `parlay.py`), [`correlation.py`](../../src/sportstradamus/prediction/correlation.py), [`cli.py`](../../src/sportstradamus/prediction/cli.py), [`persist.py`](../../src/sportstradamus/prediction/persist.py) | New per-leg-payout-vector EV path; platform plumb-through; snapshot hook (today [`cli.py:275`](../../src/sportstradamus/prediction/cli.py) builds the pick'em snapshot from Underdog offers only) |
 | `sportstradamus.strategies` — [`underdog_pickem.py`](../../src/sportstradamus/strategies/underdog_pickem.py), [`_pickem_emit.py`](../../src/sportstradamus/strategies/_pickem_emit.py), [`kelly.py`](../../src/sportstradamus/strategies/kelly.py) | Generalize the pick'em orchestrator (platform parameter) **or** add a sibling module — naming decision flagged for the owner at stage 2; Kelly is consumed, not rewritten |
 | `sportstradamus.books` | **READ-ONLY** (locked, §4) — the scrape already delivers everything the decision layer needs |
-| [`pages/`](../../src/sportstradamus/pages/) | Snapshot-reading dashboard view (extend [`2_Predictions_Pickem.py`](../../src/sportstradamus/pages/2_Predictions_Pickem.py) or sibling) |
+| [`dashboard/`](../../src/sportstradamus/dashboard/) | Snapshot-reading dashboard view (new surface or extension — legacy `pages/` retired by dashboard-ux P1) |
 | [`tests/golden/`](../../tests/golden/) | New EV-engine and orchestrator tests; existing pickem/kelly/dashboard gates stay green |
 
 This lane touches the serving path (`prophecize` → snapshots): see the
@@ -255,6 +257,7 @@ refactoring-specialist per the five [`CLAUDE.md`](../../CLAUDE.md) triggers.
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-11 · flagged critical path · roadmap audit: this lane blocks both D3 (parlay-dependence) and dfs-products 2b/2c/5; owner marked it the recommended next code-heavy lane, target merge ~Aug (pre NFL Wk 1) · next: stage 0
 - 2026-07-10 · owner decision · PARLAY_AUDIT §2.6 parlay-path Kelly fix routed into stage 1 (option a — shrinkage-aware sizing lands with the parlay.py rebuild) · next: unchanged
 - 2026-07-10 · heads-up · new dfs-products lane may touch books.py Sleeper ingestion (alt-line de-vig, its stage 2a) — books.py is read-only in THIS lane so no footprint collision, but re-verify this brief's stage-0 payload facts if that lands first; PARLAY_AUDIT.md §2.6 flags parlay-path Kelly for possible routing into this lane's parlay.py rebuild (owner call) · next: unchanged
 - 2026-06-10 · created · brief drafted from roadmap-v3 migration · next: stage 0 product verification with owner

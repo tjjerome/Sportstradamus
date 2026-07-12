@@ -50,7 +50,7 @@ from sportstradamus.prediction.cli import (
     _ALT_LINE_TOL_COUNT,
     _COUNT_DISTS,
 )
-from sportstradamus.prediction.parlay import _resolve_leg_stat
+from sportstradamus.prediction.parlay import resolve_leg_stat
 
 # Sheets-era display-leg encoding: "{Player} {Bet} {Line} {Market} - {Model P}%, {Boost}x".
 _LEG_PATTERN = re.compile(r"^(.+?)\s+(Over|Under)\s+([\d.]+)\s+(.+?)\s+-\s+[\d.]+%")
@@ -117,7 +117,7 @@ def _parse_desc(desc, league, game, date, platform):
         "player": player,
         "team": "",
         "market": market.replace("H2H ", ""),
-        "stat": _resolve_leg_stat(market, new_map),
+        "stat": resolve_leg_stat(market, new_map),
         "bet": bet,
         "line": float(line),
         "league": league,

@@ -15,14 +15,15 @@ style guide is the mechanical source of truth; this document gives you the map.
 2. [Package Map](#package-map)
 3. [Data Flow](#data-flow)
 4. [Where to Find Things](#where-to-find-things)
-5. [Making Changes](#making-changes)
-6. [Style Rules Summary](#style-rules-summary)
-7. [Adding a New League](#adding-a-new-league)
-8. [Adding a New Market](#adding-a-new-market)
-9. [Modifying the Training Pipeline](#modifying-the-training-pipeline)
-10. [Shipping to Production (devel)](#shipping-to-production-devel)
-11. [Tests](#tests)
-12. [Archived / Deprecated Code](#archived--deprecated-code)
+5. [Stable Seams — Import, Don't Edit](#stable-seams--import-dont-edit)
+6. [Making Changes](#making-changes)
+7. [Style Rules Summary](#style-rules-summary)
+8. [Adding a New League](#adding-a-new-league)
+9. [Adding a New Market](#adding-a-new-market)
+10. [Modifying the Training Pipeline](#modifying-the-training-pipeline)
+11. [Shipping to Production (devel)](#shipping-to-production-devel)
+12. [Tests](#tests)
+13. [Archived / Deprecated Code](#archived--deprecated-code)
 
 ---
 
@@ -111,7 +112,9 @@ Sportstradamus/
 | `model_prob.py` | `model_prob` — loads a trained model, computes blended probability distributions for every offer |
 | `scoring.py` | `process_offers`, `match_offers` — offer-level EV scoring and deduplication |
 | `correlation.py` | `find_correlation` — loads correlation CSVs, scores parlay legs (calls `parlay.beam_search_parlays`) |
-| `parlay.py` | `beam_search_parlays` plus its helpers `_payout_curve_for`, `_expected_payout_with_pushes`, `_nearest_psd`, and the per-search constants. Re-exported at the package level. |
+| `parlay.py` | `beam_search_parlays` (beam-search core), `GameArrays`, `GameScoringContext`, `resolve_leg_stat`. Re-exported at the package level. |
+| `payouts.py` | `payout_curve_for`, `expected_payout_with_pushes`, clip constants — platform payout tables/curves (see §Stable Seams) |
+| `joint.py` | `parlay_payout_prob`, `psd_or_none` — Gaussian-copula joint pricing, the swappable Σ seam (see §Stable Seams) |
 | `persist.py` | `save_data` — writes scored offers to disk |
 | `__init__.py` | Re-exports the public API (including `beam_search_parlays` from `parlay.py`) |
 
@@ -220,6 +223,25 @@ a gate before `optimize_comp_weights.py --save`.
 | Change book reliability weights | `training/calibration.py` → `fit_book_weights`, or edit `data/book_weights.json` directly |
 | Find why a comp feature has a certain weight | `data/playerCompStats.json` + `scripts/optimize_comp_weights.py` |
 | Read archived / removed code | `src/deprecated/` |
+
+---
+
+## Stable Seams — Import, Don't Edit
+
+Every roadmap lane plugs into these boundaries. New work **imports** a seam;
+it edits one only when the lane's brief explicitly owns that seam. This is
+what keeps parallel lanes off each other's files.
+
+| Seam | Home | Who imports it |
+|---|---|---|
+| Data collectors | `collectors/` — subclass `Source`, wire with `build_source_cli` | any new data source (fp-fetch, ctg-fetch, savant-fetch pattern) |
+| Cell lifecycle | `data/config/stat_meta.json` `shipped` flag; a ship PR touches 3 files: `stat_meta.json`, `training/baselines.py`, `prediction/model_prob.py` (decode) | model-track ships/demotes |
+| Serving strategies | `training/baselines.py` registry — add a slug + forward/decode pair; no pipeline edit | new target normalizations |
+| Payout curves | `prediction/payouts.py` (`payout_curve_for`, clip constants) + `data/underdog_payouts.json`. Sleeper is a per-leg-multiplier EV path (sleeper-parity stage 1), not a table entry | every product pricer |
+| Joint pricing (Σ/copula seam) | `prediction/joint.py` — Σ is assembled only in `correlation.py:_build_correlation_matrices` (→ `GameArrays`); joint slip pricing is consumed only via `joint.parlay_payout_prob`; alternative dependence models swap in behind a flag mirroring `legacy` | parlay-dependence stage 3, dfs-products stage 5; dashboard/stories read-only |
+| Money sizing | `strategies/kelly.py` — `resolve_shrinkage`, `fractional_kelly_stake` | every new pricer sizes through these |
+| Dashboard snapshots | `prediction/persist.py` atomic parquet writers; the dashboard reads parquet only (golden-enforced — never `Archive`) | sleeper-parity stage 3, dfs-products stage 2c, dashboard-ux |
+| Game scoring bundle | `prediction/parlay.py:GameScoringContext` (subset re-pricing); pure shared helpers live in `helpers/` | story menu, slip engine, future product engines |
 
 ---
 

@@ -38,10 +38,12 @@ every entry on both apps.
 3. [`PARLAY_AUDIT.md`](../PARLAY_AUDIT.md) — prior audit of
    `find_correlation` / `beam_search_parlays`; its line cites predate the
    `parlay.py` split but the logic analysis stands.
-4. `src/sportstradamus/prediction/parlay.py` — incumbent pricing: analytical
-   `multivariate_normal.cdf` path (parlay.py:426), 50K-draw MC push/flex path
-   (`_PUSH_MC_SAMPLES`, parlay.py:71; parlay.py:323), `_nearest_psd` repair
-   (parlay.py:193), the `legacy` flag pattern to mirror (parlay.py:533).
+4. `src/sportstradamus/prediction/joint.py` — incumbent pricing (the swap
+   seam, post parlay.py split): analytical `multivariate_normal.cdf` path in
+   `parlay_payout_prob`, `_nearest_psd` repair, the `legacy` flag pattern to
+   mirror. The 50K-draw MC push/flex path (`_PUSH_MC_SAMPLES`,
+   `expected_payout_with_pushes`) lives in `prediction/payouts.py`; beam
+   search stays in `prediction/parlay.py`.
 5. `src/sportstradamus/prediction/correlation.py` — how Σ is assembled today:
    stratified parquet lookups (correlation.py:632–638) →
    `_build_game_corr_map` (correlation.py:120) → per-leg-pair sums in
@@ -88,7 +90,7 @@ ls -la data/parlay_hist.parquet 2>/dev/null
   at stage 0 and stage 4: the audit harness's `gap_indep` vs `gap_copula`
   split shows what the apps' pricing already absorbs.
 - **Payout curves / leg caps** (`data/underdog_payouts.json`, Sleeper 3-leg
-  cap) feed `_payout_curve_for` (parlay.py:123). On drift: stop, re-verify
+  cap) feed `payout_curve_for` (`prediction/payouts.py`). On drift: stop, re-verify
   stage-0 facts, revise this brief in place, resume. The decision lanes own
   the payout tables; this lane only consumes them.
 
@@ -103,8 +105,10 @@ ls -la data/parlay_hist.parquet 2>/dev/null
   discrete/hurdle marginals (randomized PIT). No waiver — do not use
   `.claude/.state/research_waiver` for this lane.
 - 2026-06-10 — The incumbent path stays behind a flag until the offline A/B
-  verdict; mirror the existing `legacy` flag pattern (parlay.py:533,
-  correlation.py:554). Default stays incumbent until stage 3 acceptance.
+  verdict; mirror the existing `legacy` flag pattern
+  (`beam_search_parlays(legacy=…)` in parlay.py, `psd_or_none` /
+  `parlay_payout_prob` in joint.py, correlation.py:554). Default stays
+  incumbent until stage 3 acceptance.
 - 2026-06-10 — Never loosen gates, harness thresholds, or test tolerances to
   pass (model_improvement_track.md §1/§8 discipline).
 - 2026-06-10 — Vine copulas are out of scope at dims 2–6 (archived v2 §1.2);
@@ -112,9 +116,10 @@ ls -la data/parlay_hist.parquet 2>/dev/null
 
 ## 5. Module footprint & canonical paths
 
-- `sportstradamus.prediction` — `prediction/parlay.py` (pricing, sampling,
-  PSD repair), `prediction/correlation.py` (Σ/group assembly,
-  `find_correlation`).
+- `sportstradamus.prediction` — `prediction/joint.py` (pricing, sampling, PSD
+  repair — the swap seam; CONTRIBUTING §Stable Seams),
+  `prediction/payouts.py` (payout curves, consumed not owned),
+  `prediction/correlation.py` (Σ/group assembly, `find_correlation`).
 - `sportstradamus.training` — `training/correlate.py`. The residual machinery
   already lives here (`_residualize_gamelog` 8-game rolling residualization;
   stratified same-team/opposing/cross-game matrices) — **REUSE it, don't

@@ -101,7 +101,7 @@ def test_nhl_market_overrides():
 
     The market-name translation this test was originally named for (e.g.
     "Blocked Shots" -> "blocked") now happens once at parlay-write time
-    (``_resolve_leg_stat`` / ``_leg_market_map``, see
+    (``resolve_leg_stat`` / ``_leg_market_map``, see
     ``tests/golden/test_parlay_search.py``); by the time a leg reaches
     ``check_bet`` its ``stat`` is already the resolved gamelog column name.
     """

@@ -4,7 +4,7 @@ Covers the four targets from ``docs/PARLAY_AUDIT.md`` remediation:
 
 * :func:`_nearest_psd` repairs non-PSD correlation submatrices instead of
   dropping them.
-* :func:`_expected_payout_with_pushes` produces hand-checkable EV for a
+* :func:`expected_payout_with_pushes` produces hand-checkable EV for a
   small parlay with known win/push/lose probabilities.
 * Switching ``contest_variant`` from "power" to "flex" changes EV in the
   expected direction (flex pays at non-zero misses; power doesn't).
@@ -19,15 +19,13 @@ import pandas as pd
 import pytest
 
 from sportstradamus.leg_schema import leg_label
+from sportstradamus.prediction.joint import _PSD_EIG_TOLERANCE, _nearest_psd
 from sportstradamus.prediction.parlay import (
-    _PSD_EIG_TOLERANCE,
     GameArrays,
-    _expected_payout_with_pushes,
-    _nearest_psd,
-    _payout_curve_for,
-    _resolve_leg_stat,
     beam_search_parlays,
+    resolve_leg_stat,
 )
+from sportstradamus.prediction.payouts import expected_payout_with_pushes, payout_curve_for
 
 
 def test_nearest_psd_repairs_negative_eigenvalue() -> None:
@@ -81,7 +79,7 @@ def test_push_aware_payout_independent_two_leg_power() -> None:
     payout_curve = {2: [3.0, 0.0]}
 
     rng = np.random.default_rng(42)
-    ev = _expected_payout_with_pushes(
+    ev = expected_payout_with_pushes(
         p_win,
         p_push,
         sigma,
@@ -109,7 +107,7 @@ def test_push_aware_payout_one_leg_pushes_promotes_to_refund() -> None:
     payout_curve = {2: [3.0, 0.0]}
 
     rng = np.random.default_rng(7)
-    ev = _expected_payout_with_pushes(
+    ev = expected_payout_with_pushes(
         p_win,
         p_push,
         sigma,
@@ -134,7 +132,7 @@ def test_flex_vs_power_diverges_under_misses() -> None:
 
     rng_a = np.random.default_rng(11)
     rng_b = np.random.default_rng(11)
-    ev_power = _expected_payout_with_pushes(
+    ev_power = expected_payout_with_pushes(
         p_win,
         p_push,
         sigma,
@@ -143,7 +141,7 @@ def test_flex_vs_power_diverges_under_misses() -> None:
         payout_curve=power_curve,
         rng=rng_a,
     )
-    ev_flex = _expected_payout_with_pushes(
+    ev_flex = expected_payout_with_pushes(
         p_win,
         p_push,
         sigma,
@@ -159,9 +157,9 @@ def test_flex_vs_power_diverges_under_misses() -> None:
 
 
 def test_payout_curve_loader_returns_power_by_default() -> None:
-    """``_payout_curve_for("Underdog", "power", legacy=False)`` reads the
+    """``payout_curve_for("Underdog", "power", legacy=False)`` reads the
     JSON config and returns the 0-misses entries as the search list."""
-    search, full = _payout_curve_for("Underdog", "power", legacy=False)
+    search, full = payout_curve_for("Underdog", "power", legacy=False)
     assert search[0] == pytest.approx(3.0)  # 2-leg power
     assert full[2][0] == pytest.approx(3.0)
     assert full[2][1] == 0.0  # power: no payout at 1 miss
@@ -170,7 +168,7 @@ def test_payout_curve_loader_returns_power_by_default() -> None:
 def test_payout_curve_legacy_underdog_matches_audit() -> None:
     """Legacy mode returns the audit-documented insurance line for ranking
     and the mixed insurance/power overwrite for display."""
-    search, full = _payout_curve_for("Underdog", "power", legacy=True)
+    search, full = payout_curve_for("Underdog", "power", legacy=True)
     assert search == [3.5, 6.5, 10.9, 20.2, 39.9]
     # Mixed regime: 4-leg display = 6.0 (power), 5-leg = 10.0 (power).
     assert full[4][0] == pytest.approx(6.0)
@@ -251,14 +249,14 @@ def _beam_inputs() -> dict:
 def test_resolve_leg_stat_uses_market_map_when_present() -> None:
     """A remapped market resolves through ``new_map``; an unmapped one falls back."""
     new_map = {"Fantasy Points": "fantasy points prizepicks"}
-    assert _resolve_leg_stat("Fantasy Points", new_map) == "fantasy points prizepicks"
-    assert _resolve_leg_stat("PTS", new_map) == "PTS"
+    assert resolve_leg_stat("Fantasy Points", new_map) == "fantasy points prizepicks"
+    assert resolve_leg_stat("PTS", new_map) == "PTS"
 
 
 def test_resolve_leg_stat_strips_h2h_prefix_before_lookup() -> None:
     """``"H2H "`` is stripped before the map lookup, mirroring the cMarket idiom."""
     new_map = {"Points": "points"}
-    assert _resolve_leg_stat("H2H Points", new_map) == "points"
+    assert resolve_leg_stat("H2H Points", new_map) == "points"
 
 
 def test_beam_search_characterization() -> None:
