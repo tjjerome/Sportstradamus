@@ -457,7 +457,7 @@ code.**
 |---|---|
 | `baselines.py`, pipeline dispatch, `model_prob` decode, `training/scorecard.py` (inline-called by `report()`) | `training/scorecard.py` standalone-CLI A/B mode (single/diff/live-window flags) — keep the module, leave the research CLI exercises off |
 | `ship_config.py` + `helpers/io.py` model-pickle helpers + `meditate` wiring | `zinb-routing-diagnostics` + the **`statsmodels`** dependency it pulls in |
-| `nightly` live-metrics, `check-graduation`, `backfill-live-metrics` | `icc-diagnostics` |
+| `nightly` live-metrics, `check-graduation`, `backfill-live-metrics` | `icc-diagnostics`, `count-family-screen` (WS-3 §6.6 entry bar) |
 | Production data / feature fixes | the diagnostics' test suites; any `/tmp` harness |
 
 The `--target-strategy` / `--zinb-mode` / `--deterministic` flags default to

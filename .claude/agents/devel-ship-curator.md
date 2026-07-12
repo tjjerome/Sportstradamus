@@ -59,16 +59,16 @@ server.
    for a Phase B ship.
 3. **Hard-exclude the denylist** (mirror CONTRIBUTING's keep/drop table):
    - never bring `src/sportstradamus/scripts/zinb_routing_diagnostics.py`,
-     `icc_diagnostics.py`, or their tests;
+     `icc_diagnostics.py`, `count_family_screen.py`, or their tests;
    - never add the `statsmodels` dependency or the `zinb-routing-diagnostics` /
-     `icc-diagnostics` console-script entries to `pyproject.toml`;
+     `icc-diagnostics` / `count-family-screen` console-script entries to `pyproject.toml`;
    - never bring a `/tmp` harness or a heavy determinism integration test that is
      pure dev scaffolding;
    - `training/scorecard.py` is **production** (inline-called by `report()`, which
      runs after every `meditate`) and ships — do **not** exclude it. Only its
      standalone-CLI A/B exercises (`--baseline` / `--candidate` / `--live-window`)
      stay a dev workflow, never committed harness runs.
-4. **Verify no leak.** `grep -rn "zinb_routing_diagnostics\|icc_diagnostics" src/
+4. **Verify no leak.** `grep -rn "zinb_routing_diagnostics\|icc_diagnostics\|count_family_screen" src/
    tests/` on the new branch must show only docstring/comment mentions, never an
    `import`. `git diff origin/devel --stat` must contain **zero**
    denylist paths. `git diff origin/devel -- pyproject.toml` must add **no** dev-only dep
