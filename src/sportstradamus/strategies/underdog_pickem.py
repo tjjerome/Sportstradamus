@@ -77,13 +77,13 @@ class RecommendedEntry:
     extras: dict[str, Any] = field(default_factory=dict)
 
 
-def _filter_legs(offers: pd.DataFrame, config: PickemConfig) -> pd.DataFrame:
+def filter_legs(offers: pd.DataFrame, config: PickemConfig) -> pd.DataFrame:
     """Apply leg-level filters: model & sharp coverage + edge + disagreement."""
     if offers.empty:
         return offers
     required = {"Win Prob", "Market Prob"}
     if not required.issubset(offers.columns):
-        msg = f"_filter_legs needs columns {required}; got {set(offers.columns)}"
+        msg = f"filter_legs needs columns {required}; got {set(offers.columns)}"
         raise ValueError(msg)
 
     df = offers.dropna(subset=["Win Prob", "Market Prob"]).copy()
@@ -169,7 +169,18 @@ def _row_to_entry(
     )
 
 
-def _resolve_market_shrinkage(league: str, market: str) -> tuple[float, str]:
+def resolve_market_shrinkage(league: str, market: str) -> tuple[float, str]:
+    """Resolve Kelly shrinkage for one ``(league, market)`` cell.
+
+    Blends live CLV-segment calibration with offline training calibration per
+    ``kelly.resolve_shrinkage``'s explicit>blended>training>clv_segment>fallback
+    chain; the returned source label tells a caller which rung of that chain
+    fired for this cell.
+
+    Returns:
+        ``(shrinkage, source)`` where ``source`` is one of ``"blended"``,
+        ``"training"``, ``"clv_segment"``, or ``"fallback"``.
+    """
     # Lazy imports keep torch (via training.report) out of the dashboard import
     # path — do NOT hoist clv or get_market_calibration to module level.
     from sportstradamus import clv as _clv
@@ -203,9 +214,9 @@ def construct_entries(
     """
     config = config or PickemConfig()
     if parlay_dfs is None:
-        parlay_dfs, offers_df = _live_load(config)
+        parlay_dfs, offers_df = live_load(config)
     offers_df = pd.DataFrame() if offers_df is None else offers_df
-    filtered_offers = _filter_legs(offers_df, config) if not offers_df.empty else offers_df
+    filtered_offers = filter_legs(offers_df, config) if not offers_df.empty else offers_df
 
     entries: list[RecommendedEntry] = []
     for variant in config.contest_variants:
@@ -241,7 +252,7 @@ def _canonical_markets_by_player(filtered_offers: pd.DataFrame) -> dict[str, set
 
     Offer ``Market`` is the raw Underdog name (a ``stat_map["Underdog"]`` key);
     mapping it gives the canonical cell key (``REB``, ``BLST``, …) that
-    ``_resolve_market_shrinkage`` resolves against. The leg display strings
+    ``resolve_market_shrinkage`` resolves against. The leg display strings
     can't drive this — they carry a third, lossy namespace (``blocks_and_steals``).
     """
     if filtered_offers.empty or not {"Player", "Market"}.issubset(filtered_offers.columns):
@@ -267,13 +278,13 @@ def _parlay_shrinkage(
     """
     markets: set[str] = set()
     for i in range(1, int(row["Bet Size"]) + 1):
-        markets |= market_by_player.get(_leg_player(str(row.get(f"Leg {i}", ""))), set())
+        markets |= market_by_player.get(leg_player(str(row.get(f"Leg {i}", ""))), set())
     if not markets:
         return 1.0, "fallback"
-    return min((_resolve_market_shrinkage(league, m) for m in markets), key=lambda r: r[0])
+    return min((resolve_market_shrinkage(league, m) for m in markets), key=lambda r: r[0])
 
 
-def _leg_player(leg: str) -> str:
+def leg_player(leg: str) -> str:
     """Player name from a leg string ``"{Player} Over|Under {Line} {Market} - …"``."""
     for token in (" Over ", " Under "):
         if token in leg:
@@ -319,7 +330,7 @@ def build_entries_from_scored(
     )
 
 
-def _live_load(config: PickemConfig) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:
+def live_load(config: PickemConfig) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:
     """Re-run the prophecize loader and search per variant. Heavy."""
     from sportstradamus.books import get_ud
     from sportstradamus.prediction.scoring import process_offers

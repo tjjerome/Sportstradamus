@@ -12,10 +12,10 @@ import pytest
 from sportstradamus.strategies._pickem_emit import emit_yaml
 from sportstradamus.strategies.underdog_pickem import (
     PickemConfig,
-    _filter_legs,
     _filter_parlays,
     _validate_rivals_coverage,
     construct_entries,
+    filter_legs,
 )
 
 
@@ -55,14 +55,14 @@ def test_filter_legs_drops_below_model_edge():
             ("A'ja Wilson", "LV", "PTS", "Over", 0.52, 0.51),
         ]
     )
-    out = _filter_legs(df, cfg)
+    out = filter_legs(df, cfg)
     assert list(out["Player"]) == ["Caitlin Clark"]
 
 
 def test_filter_legs_drops_below_sharp_edge():
     cfg = PickemConfig(min_model_edge=0.0, min_sharp_edge=0.10)
     df = _offers([("X", "T", "M", "Over", 0.60, 0.55)])
-    assert _filter_legs(df, cfg).empty
+    assert filter_legs(df, cfg).empty
 
 
 def test_filter_legs_disagreement():
@@ -73,7 +73,7 @@ def test_filter_legs_disagreement():
             ("Diverge", "T", "M", "Over", 0.70, 0.55),
         ]
     )
-    out = _filter_legs(df, cfg)
+    out = filter_legs(df, cfg)
     assert list(out["Player"]) == ["Agree"]
 
 
@@ -145,7 +145,7 @@ def test_rivals_both_sides_kept():
 @pytest.fixture
 def fake_market_calibration(monkeypatch):
     monkeypatch.setattr(
-        "sportstradamus.strategies.underdog_pickem._resolve_market_shrinkage",
+        "sportstradamus.strategies.underdog_pickem.resolve_market_shrinkage",
         lambda league, market: (0.5, "training"),
     )
 
@@ -264,7 +264,7 @@ def test_parlay_shrinkage_min_over_canonical_leg_markets(monkeypatch):
     shrink = {"REB": (0.80, "training"), "STL": (0.20, "training")}
     monkeypatch.setattr(
         up,
-        "_resolve_market_shrinkage",
+        "resolve_market_shrinkage",
         lambda league, market: shrink.get(market, (1.0, "fallback")),
     )
     row = pd.Series(
