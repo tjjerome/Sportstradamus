@@ -27,7 +27,6 @@ from sportstradamus.strategies.underdog_pickem import PickemConfig, construct_en
 _logger = get_logger("ledger-commit")
 
 POLICY_VERSION = "policy_v1"
-BANKROLL_PER_REPLICATE = Decimal("5000")
 
 _SHARED_CONFIG = PickemConfig(
     entry_sizes=(2, 3, 4, 5, 6),
@@ -74,7 +73,7 @@ def build_candidate_universe(
             _ledger_selection.from_recommended_entry(e)
             for e in construct_entries(
                 date,
-                BANKROLL_PER_REPLICATE,
+                _ledger_selection.BANKROLL_PER_REPLICATE,
                 _SHARED_CONFIG,
                 parlay_dfs=parlay_dfs,
                 offers_df=offers_df,
@@ -103,6 +102,7 @@ def _committed_record(
     return {
         "id": candidate.id,
         "legs": list(candidate.legs),
+        "canonical_legs": list(candidate.canonical_legs),
         "legs_players": sorted(candidate.players),
         "lines": list(candidate.lines),
         "model_probs": list(candidate.model_probs),
@@ -144,7 +144,7 @@ def _resize_kelly_growth(
         for c in drawn
     ]
     stakes = joint_kelly_portfolio(
-        BANKROLL_PER_REPLICATE, kelly_candidates, fraction=remaining_fraction
+        _ledger_selection.BANKROLL_PER_REPLICATE, kelly_candidates, fraction=remaining_fraction
     )
     return [dataclasses.replace(c, stake=stakes[c.id]) for c in drawn if c.id in stakes]
 
@@ -205,9 +205,7 @@ def ledger_commit(run_slot: str, date: str) -> None:
     """Twice-daily policy_v1 commit: build candidates, draw, size, append."""
     slate_date = datetime.date.today() if date == "today" else datetime.date.fromisoformat(date)
     appended = run_commit(slate_date, run_slot)
-    click.echo(
-        f"committed {appended} new entries -> data/ledger/entries/{slate_date.isoformat()}.jsonl"
-    )
+    click.echo(f"committed {appended} new entries -> {_ledger_store.entries_path(slate_date)}")
 
 
 if __name__ == "__main__":

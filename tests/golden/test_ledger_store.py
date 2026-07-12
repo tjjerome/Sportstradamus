@@ -66,7 +66,7 @@ def test_append_entries_idempotent_on_repeat_call(monkeypatch, tmp_path) -> None
 
     assert first == 2
     assert second == 0
-    stored = _ledger_store._read_records(DATE)
+    stored = _ledger_store.read_records(DATE)
     assert sorted(rec["id"] for rec in stored) == ["id-1", "id-2"]
 
 
@@ -75,7 +75,7 @@ def test_decode_stake_round_trips_decimal_exactly(monkeypatch, tmp_path) -> None
     record = _record("id-1", stake="12.34")
     _ledger_store.append_entries(DATE, [record])
 
-    stored = _ledger_store._read_records(DATE)[0]
+    stored = _ledger_store.read_records(DATE)[0]
     decoded = _ledger_store.decode_stake(stored)
 
     assert decoded == Decimal("12.34")
@@ -105,7 +105,7 @@ def test_already_committed_entries_spans_both_run_slots(monkeypatch, tmp_path) -
 def test_missing_file_returns_empty_without_error(monkeypatch, tmp_path) -> None:
     _redirect(monkeypatch, tmp_path)
 
-    assert _ledger_store._read_records(DATE) == []
+    assert _ledger_store.read_records(DATE) == []
     assert (
         _ledger_store.already_committed_ids(
             DATE, run_slot="morning", persona="safe", replicate_id=0

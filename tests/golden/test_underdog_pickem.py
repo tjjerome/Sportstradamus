@@ -24,6 +24,25 @@ def _offers(rows):
     return pd.DataFrame(rows, columns=cols)
 
 
+def _canonical_leg(desc, *, league, game):
+    return {
+        "player": desc,
+        "team": "",
+        "market": "",
+        "stat": "PTS",
+        "bet": "Over",
+        "line": 4.5,
+        "league": league,
+        "game": game,
+        "date": "2026-05-08",
+        "platform": "Underdog",
+        "win_prob": 0.6,
+        "boost": 1.0,
+        "push_prob": 0.0,
+        "kelly": 0.0,
+    }
+
+
 def _parlay(legs, *, bet_size=None, model_ev=2.5, payout=3.0, league="WNBA", game="A/B"):
     bet_size = bet_size or len(legs)
     row = {
@@ -36,6 +55,7 @@ def _parlay(legs, *, bet_size=None, model_ev=2.5, payout=3.0, league="WNBA", gam
         "Boost": payout,
         "Rec Bet": 1.0,
         "Bet Size": bet_size,
+        "legs": [_canonical_leg(leg, league=league, game=game) for leg in legs],
     }
     for i, leg in enumerate(legs, 1):
         row[f"Leg {i}"] = leg

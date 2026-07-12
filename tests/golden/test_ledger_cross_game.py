@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from sportstradamus.helpers import stat_map
 from sportstradamus.prediction.payouts import expected_payout_with_pushes
 from sportstradamus.strategies import _ledger_cross_game as xg
 from sportstradamus.strategies.underdog_pickem import PickemConfig
@@ -90,6 +91,24 @@ def test_produces_at_least_one_two_leg_cross_game_candidate() -> None:
     two_leg = next(c for c in candidates if c.entry_size == 2)
     assert two_leg.game_span == 2
     assert two_leg.players == frozenset({"Player A", "Player B"})
+
+
+def test_canonical_legs_stat_field_is_canonicalized_not_raw_market() -> None:
+    offers = _offers_df(
+        [
+            _offer_row("Player A", "BOS/MIA", market="Rebounds"),
+            _offer_row("Player B", "LAL/DEN", market="Rebounds"),
+        ]
+    )
+    config = PickemConfig(min_ev=-1.0)
+
+    candidates = xg.build_cross_game_candidates(offers, config, DATE, "morning")
+
+    canonical_market = stat_map["Underdog"]["Rebounds"]
+    assert candidates
+    for candidate in candidates:
+        for leg in candidate.canonical_legs:
+            assert leg["stat"] == canonical_market
 
 
 # --- hand-computed no-push 2-leg sanity check -----------------------------------
