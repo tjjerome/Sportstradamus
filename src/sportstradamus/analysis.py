@@ -95,6 +95,18 @@ def _bet_gameday_rows(gamelog, ls, bet):
     return gamelog.loc[(game_dates == bet_date) & (gamelog[ls["team"]].isin(bet.Game.split("/")))]
 
 
+def _gameday_rows_for(gamelog, ls, date, game):
+    """Gamelog rows for a leg's game on its date.
+
+    Same lookup as :func:`_bet_gameday_rows` for callers holding plain
+    ``date``/``game`` scalars (a dict-derived leg) rather than a row-like
+    ``bet`` object with ``.Date``/``.Game`` attributes.
+    """
+    game_dates = pd.to_datetime(gamelog[ls["date"]]).dt.date
+    leg_date = pd.to_datetime(date).date()
+    return gamelog.loc[(game_dates == leg_date) & (gamelog[ls["team"]].isin(str(game).split("/")))]
+
+
 def _leg_result_value(game, ls, player, market):
     """Realized ``market`` value for a leg's player(s), or ``None`` if unavailable.
 

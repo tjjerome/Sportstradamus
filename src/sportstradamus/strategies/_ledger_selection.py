@@ -49,6 +49,7 @@ class LedgerCandidate:
     contest_variant: str
     entry_size: int
     legs: tuple[str, ...]
+    canonical_legs: tuple[dict, ...]
     players: frozenset[str]
     game_span: int
     joint_prob: float
@@ -71,6 +72,7 @@ def from_recommended_entry(entry: RecommendedEntry) -> LedgerCandidate:
         contest_variant=entry.contest_variant,
         entry_size=entry.entry_size,
         legs=entry.legs,
+        canonical_legs=entry.canonical_legs,
         players=players,
         game_span=1,
         joint_prob=entry.joint_prob,

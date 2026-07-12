@@ -24,7 +24,11 @@ import pandas as pd
 from sportstradamus.helpers import stat_map
 from sportstradamus.leg_schema import build_leg, leg_label
 from sportstradamus.prediction.payouts import expected_payout_with_pushes, payout_curve_for
-from sportstradamus.strategies._ledger_selection import LedgerCandidate, _entropy_from
+from sportstradamus.strategies._ledger_selection import (
+    BANKROLL_PER_REPLICATE,
+    LedgerCandidate,
+    _entropy_from,
+)
 from sportstradamus.strategies.kelly import fractional_kelly_stake
 from sportstradamus.strategies.underdog_pickem import (
     PickemConfig,
@@ -34,11 +38,6 @@ from sportstradamus.strategies.underdog_pickem import (
 
 _CROSS_GAME_BEAM_WIDTH: int = 200  # v1 default, narrower than the same-game search's beam
 _MAX_ENTRY_SIZE: int = 6
-
-# Fixed per-replicate bankroll (policy v1, §10) -- matches
-# _ledger_selection.BANKROLL_PER_REPLICATE; kept here too since importing it
-# would pull in _ledger_selection's numpy/RNG machinery just for one constant.
-BANKROLL_PER_REPLICATE = Decimal("5000")
 
 _, _POOLED_CURVE = payout_curve_for("Underdog", "pooled", legacy=False)
 
@@ -54,6 +53,7 @@ class _ScoredLeg:
     line: float
     boost: float
     display: str  # leg_label(leg) -- canonical rendering, do not reformat it yourself
+    canonical_leg: dict  # build_leg() output, with leg["stat"] patched to the canonical market
 
 
 def _score_legs(eligible: pd.DataFrame) -> list[_ScoredLeg]:
@@ -61,6 +61,8 @@ def _score_legs(eligible: pd.DataFrame) -> list[_ScoredLeg]:
     for i, row in eligible.reset_index(drop=True).iterrows():
         leg = build_leg(row)
         canonical_market = stat_map["Underdog"].get(row["Market"])
+        if canonical_market:
+            leg["stat"] = canonical_market
         shrinkage, _source = resolve_market_shrinkage(str(row["League"]), canonical_market)
         adj_p = 0.5 + (leg["win_prob"] - 0.5) * max(0.0, min(1.0, shrinkage))
         out.append(
@@ -74,6 +76,7 @@ def _score_legs(eligible: pd.DataFrame) -> list[_ScoredLeg]:
                 line=leg["line"],
                 boost=leg["boost"],
                 display=leg_label(leg),
+                canonical_leg=leg,
             )
         )
     return out
@@ -186,6 +189,7 @@ def build_cross_game_candidates(
                     contest_variant="power" if size <= 3 else "flex",
                     entry_size=size,
                     legs=tuple(leg.display for leg in combo_legs),
+                    canonical_legs=tuple(leg.canonical_leg for leg in combo_legs),
                     players=frozenset(leg.player for leg in combo_legs),
                     game_span=len(games),
                     joint_prob=joint_prob,

@@ -1,6 +1,6 @@
 # Simulated-Bettor Ledger
 
-> Status: ACTIVE (stage 1 commit path built locally, unpushed — owner review next)
+> Status: ACTIVE (stage 1 + stage 2 built locally, unpushed — owner review next)
 
 ## 1. Mission & money logic
 
@@ -399,6 +399,30 @@ LEDGER_REPLICATES = 40              # ensemble-mean knee (1+1/M law); replicate 
 
 ## 11. Ledger (append-only, newest first, cap ~15)
 
+- 2026-07-12 · stage 2 settlement built (local, unpushed): additive
+  prerequisite patch first — entries stored legs as rendered display
+  strings, not this codebase's canonical structured-leg schema
+  (`leg_schema.py`; `leg_label`'s own docstring: "never parsed back").
+  Threaded `canonical_legs` (the `build_leg`-shaped dicts already sitting
+  on the parlay search DataFrame, previously dropped) through
+  `RecommendedEntry` → `LedgerCandidate` → the JSONL record, and fixed a
+  latent bug where `_ledger_cross_game.py` left `stat` as the raw platform
+  market name instead of the canonical key. Free to amend — zero live
+  entries existed anywhere on disk. Settlement itself: 2 new modules
+  (`_ledger_settlement.py` — dedup/resolve/CLV-join/payout,
+  `_ledger_bankroll.py` — parquet persistence + compounding bankroll), a
+  thin `nightly.py:reflect` hook (`_resolve_ledger`), `_gameday_rows_for`
+  relocated `nightly.py` → `analysis.py` (removes a backwards
+  `strategies/ → nightly` import). Resolves the day's distinct legs once
+  and broadcasts outcomes across every citing entry, not per-entry, per
+  §10; CLV joined via one `clv.fill_from_archive` call over the
+  deduplicated set, with `Dist`/`CV`/`Gate`/`Step` bridged from
+  `history.parquet` (the likely source of the "≥90%, not 100%" acceptance
+  bar). `README.md` §Recommended Cron gained the `ledger-commit` lines
+  stage 1 never added. refactoring-specialist + all 3 gates green (ruff,
+  3549/3550 golden [same pre-existing dashboard-render flake noted in the
+  stage-1 entry below], 24/24 integration) · next: owner review + push,
+  then stage 3 (analytics + dashboard, circuit breaker)
 - 2026-07-12 · stage 1 commit path built (local, unpushed): 4 new modules
   (`_ledger_store.py` JSONL append+idempotency, `_ledger_selection.py`
   `LedgerCandidate`+RNG+Jaccard-draw+personas, `_ledger_cross_game.py`

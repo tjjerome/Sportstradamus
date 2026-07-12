@@ -28,6 +28,25 @@ def _redirect_store(monkeypatch, tmp_path) -> None:
     )
 
 
+def _canonical_leg(player: str) -> dict:
+    return {
+        "player": player,
+        "team": "",
+        "market": "",
+        "stat": "PTS",
+        "bet": "Over",
+        "line": 4.5,
+        "league": "NBA",
+        "game": "",
+        "date": "2026-07-12",
+        "platform": "Underdog",
+        "win_prob": 0.6,
+        "boost": 1.0,
+        "push_prob": 0.0,
+        "kelly": 0.0,
+    }
+
+
 def _candidate(
     cand_id: str,
     players: frozenset[str],
@@ -43,6 +62,7 @@ def _candidate(
         contest_variant=contest_variant,
         entry_size=entry_size,
         legs=tuple(f"{p} Over 4.5 rebounds - 60.0%, 1.6x" for p in players),
+        canonical_legs=tuple(_canonical_leg(p) for p in players),
         players=players,
         game_span=1,
         joint_prob=joint_prob,
@@ -96,6 +116,7 @@ def test_committed_record_has_full_schema_with_correct_types(monkeypatch, tmp_pa
     required_fields = {
         "id",
         "legs",
+        "canonical_legs",
         "legs_players",
         "lines",
         "model_probs",

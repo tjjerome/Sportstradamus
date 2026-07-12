@@ -383,6 +383,8 @@ All jobs run through `scripts/run_job.sh`, which adds a per-job `flock`
 ```cron
 50 8-20 * * *          /home/sportstradamus/Sportstradamus/scripts/run_job.sh prophecize
 30 8,11,14,17,20 * * * /home/sportstradamus/Sportstradamus/scripts/run_job.sh confer
+55 8 * * *             /home/sportstradamus/Sportstradamus/scripts/run_job.sh ledger-commit --run-slot morning
+55 14 * * *            /home/sportstradamus/Sportstradamus/scripts/run_job.sh ledger-commit --run-slot afternoon
 0 1 * * 5              /home/sportstradamus/Sportstradamus/scripts/run_job.sh meditate
 0 23 * * *             /home/sportstradamus/Sportstradamus/scripts/run_job.sh reflect
 */10 11-23,0-1 * * *   /home/sportstradamus/Sportstradamus/scripts/run_job.sh close-lines
@@ -394,8 +396,9 @@ All jobs run through `scripts/run_job.sh`, which adds a per-job `flock`
 |---|---|---|
 | `prophecize` | hourly, 8am–8pm | score offers, write dashboard snapshots |
 | `confer` | 5 slots/day | broad odds/props fetch; the credit governor decides which leagues each slot fetches |
+| `ledger-commit` | 2×/day (morning + afternoon) | simulated-bettor ledger commit (policy_v1) |
 | `meditate` | Fri 1am | retrain models |
-| `reflect` | nightly 11pm | grade history, profit-sim + calibration summaries |
+| `reflect` | nightly 11pm | grade history, profit-sim + calibration summaries + simulated-bettor ledger |
 | `close-lines` | every 10 min, game hours | closing-line capture for games starting in 5–25 min; no-op tick when nothing is due |
 | `gate-status` | monthly | Gate-2 promote/demote PR against `main`; needs `gh` auth and `HEALTHCHECK_URL_GATE_STATUS` |
 | `fp-fetch` | Wed 10am (NFL season) | Fantasy Points endpoint snapshots; needs a fresh session cookie and `HEALTHCHECK_URL_FP_FETCH` |

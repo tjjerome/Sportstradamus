@@ -72,6 +72,7 @@ class RecommendedEntry:
     payout_multiplier: float
     ev: float
     recommended_stake: Decimal
+    canonical_legs: tuple[dict, ...] = ()
     shrinkage_source: str = "training"
     shrinkage: float = 1.0
     extras: dict[str, Any] = field(default_factory=dict)
@@ -142,6 +143,7 @@ def _row_to_entry(
     ev = model_ev - 1.0
     bet_size = int(row["Bet Size"])
     legs = tuple(str(row.get(f"Leg {i}", "")) for i in range(1, bet_size + 1))
+    canonical_legs = tuple(row["legs"])
     shrinkage, source = shrinkage_info
 
     stake = fractional_kelly_stake(
@@ -163,6 +165,7 @@ def _row_to_entry(
         payout_multiplier=payout,
         ev=ev,
         recommended_stake=stake,
+        canonical_legs=canonical_legs,
         shrinkage=shrinkage,
         shrinkage_source=source,
         extras={"league": str(row.get("League", "")), "game": str(row.get("Game", ""))},

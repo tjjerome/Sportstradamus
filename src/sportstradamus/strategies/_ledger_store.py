@@ -12,12 +12,14 @@ import json
 from decimal import Decimal
 from pathlib import Path
 
+ENTRIES_DIR = Path("data") / "ledger" / "entries"
+
 
 def entries_path(date: datetime.date) -> Path:
-    return Path("data") / "ledger" / "entries" / f"{date.isoformat()}.jsonl"
+    return ENTRIES_DIR / f"{date.isoformat()}.jsonl"
 
 
-def _read_records(date: datetime.date) -> list[dict]:
+def read_records(date: datetime.date) -> list[dict]:
     path = entries_path(date)
     if not path.exists():
         return []
@@ -34,7 +36,7 @@ def already_committed_ids(
     """
     return {
         rec["id"]
-        for rec in _read_records(date)
+        for rec in read_records(date)
         if rec["run_slot"] == run_slot
         and rec["persona"] == persona
         and rec["replicate_id"] == replicate_id
@@ -52,7 +54,7 @@ def already_committed_entries(date: datetime.date, persona: str, replicate_id: i
     """
     return [
         rec
-        for rec in _read_records(date)
+        for rec in read_records(date)
         if rec["persona"] == persona and rec["replicate_id"] == replicate_id
     ]
 
@@ -64,7 +66,7 @@ def append_entries(date: datetime.date, records: list[dict]) -> int:
     writing -- belt-and-suspenders idempotency that closes the gap even if a
     caller forgets to pre-filter via :func:`already_committed_ids`.
     """
-    existing_ids = {rec["id"] for rec in _read_records(date)}
+    existing_ids = {rec["id"] for rec in read_records(date)}
     to_write = [rec for rec in records if rec["id"] not in existing_ids]
     if not to_write:
         return 0
