@@ -1,6 +1,6 @@
 # Simulated-Bettor Ledger
 
-> Status: ACTIVE (policy v1 locked, D6 resolved — stage 1 commit path next)
+> Status: ACTIVE (stage 1 commit path built locally, unpushed — owner review next)
 
 ## 1. Mission & money logic
 
@@ -399,6 +399,19 @@ LEDGER_REPLICATES = 40              # ensemble-mean knee (1+1/M law); replicate 
 
 ## 11. Ledger (append-only, newest first, cap ~15)
 
+- 2026-07-12 · stage 1 commit path built (local, unpushed): 4 new modules
+  (`_ledger_store.py` JSONL append+idempotency, `_ledger_selection.py`
+  `LedgerCandidate`+RNG+Jaccard-draw+personas, `_ledger_cross_game.py`
+  independence-assumed cross-game builder pricing via
+  `prediction.payouts.expected_payout_with_pushes` not a hand-rolled
+  Poisson-binomial, `strategies/ledger.py` orchestrator) + 4 helpers in
+  `underdog_pickem.py` promoted public for reuse; one live scrape shared
+  across same-game+cross-game paths; `ledger-commit` CLI wired into
+  `pyproject.toml`+`run_job.sh` (crontab lines proposed only, NOT
+  activated — owner-gated per §8); refactoring-specialist + all 3 gates
+  green (ruff, 3516/3517 golden [1 pre-existing unrelated dashboard-render
+  flake], 24/24 integration) · next: owner review + push, then stage 2
+  settlement (`nightly.py:reflect` extension)
 - 2026-07-12 · stage 0 refinement · research-analyst (Opus) verdict on MC
   ensemble sizing folded into policy v1: 40 replicates/persona (120 total,
   not the originally floated 300) at the ensemble-mean convergence knee;
