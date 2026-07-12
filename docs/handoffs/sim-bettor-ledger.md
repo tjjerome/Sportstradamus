@@ -108,13 +108,23 @@ snapshots only — never DuckDB (CLAUDE.md §Hard rules;
 2. **Settlement.** Extend `nightly.py:reflect`: resolve each ledger entry's
    legs, apply push/void rules and the payout curve, join per-leg CLV via
    `clv.fill_from_archive`, write `data/ledger/bankroll.parquet` (daily
-   series) + settled-entry parquet. Acceptance: hand-checked settlement of a
-   known day matches; CLV populated for ≥ 90% of settled legs. 2 sessions.
+   series) + settled-entry parquet. Resolve the *union of distinct legs*
+   once per day and map outcomes onto every replicate entry that cites
+   them — never per entry (§10 Ensemble sizing; keeps settlement cost flat
+   across the 40-replicate ensemble). Acceptance: hand-checked settlement
+   of a known day matches; CLV populated for ≥ 90% of settled legs.
+   2 sessions.
 3. **Analytics + dashboard.** New page (parquet only): bankroll curve, ROI,
    CLV per segment, drawdown; circuit-breaker state written to a small file
    the daily job reads — drawdown > 20% from peak ⇒ policy halves stakes,
-   > 30% ⇒ halt new entries until owner reset. Acceptance: breaker state
-   flips on a synthetic drawdown fixture. 1–2 sessions.
+   > 30% ⇒ halt new entries until owner reset (reads **replicate 0's**
+   lived drawdown, never the ensemble mean — §10 Ensemble sizing). Reports
+   each persona's ensemble-mean ROI/CLV/bankroll plus an IQR/±1 SE spread
+   band, labeled as selection-policy spread, not outcome uncertainty; a
+   one-time knee-check (ensemble-mean ROI vs `M` at `M ∈ {10,20,40,80,160}`,
+   after ~2 weeks live) validates or revises `LEDGER_REPLICATES = 40`.
+   Acceptance: breaker state flips on a synthetic drawdown fixture.
+   1–2 sessions.
 4. **Hindsight-proofing tests.** Golden tests: `committed_at` strictly before
    the earliest leg's game start; settlement is append/derive-only (entry
    files byte-identical after settle); no code path writes a past date's
@@ -162,18 +172,23 @@ the five CLAUDE.md triggers.
 
 ## 10. Policy v1
 
-Three independent simulated-bettor personas, each running its own fixed
-$5,000 paper bankroll. All three read the same candidate universe but
-differ in how they score and select from it. Decisions commit twice daily.
-Any future change is a new version (`policy_v2`, …) appended below policy
-v1, never an in-place edit of this section (§4 locked decision).
+Three independent simulated-bettor personas, each run as a **40-replicate
+Monte Carlo ensemble** (§ Ensemble sizing) against its own fixed $5,000
+paper bankroll per replicate. All three read the same candidate universe
+but differ in how they score and select from it. Decisions commit twice
+daily. Any future change is a new version (`policy_v2`, …) appended below
+policy v1, never an in-place edit of this section (§4 locked decision).
 
-**Bankroll.** $5,000 fixed per persona — three independent bankrolls, not a
-shared pool. Passed to `construct_entries` as a constant
-`bankroll=Decimal("5000")` on every run — never recomputed against a
-persona's drifting settled balance. Keeps stake sizing from fighting the
-stage-3 circuit breaker's drawdown response (a compounding bankroll would
-shrink stakes mid-drawdown right when the breaker is also halving them).
+**Bankroll.** $5,000 fixed per persona, per replicate — every one of the 40
+replicates tracks its own independent bankroll trajectory (needed for a
+well-defined per-replicate ROI). Passed to `construct_entries` as a
+constant `bankroll=Decimal("5000")` on every run — never recomputed against
+a replicate's drifting settled balance. Keeps stake sizing from fighting
+the stage-3 circuit breaker's drawdown response (a compounding bankroll
+would shrink stakes mid-drawdown right when the breaker is also halving
+them). Only **replicate 0's** bankroll is the canonical pre-registered
+capital path (§ Ensemble sizing); replicates 1–39 are notional, for
+variance measurement only.
 
 **Candidate universe (shared).** Power (2–3 legs) + Flex (4+ legs) only —
 Rivals excluded (unpriced leg type, not a contest — `dfs-products.md` Stage
@@ -277,25 +292,87 @@ Kelly-fraction budget (original fraction minus what morning's entries
 already allocated) — true portfolio accounting across the whole day, not
 two independent half-days. This supersedes the original draft's "one
 decision snapshot per day" language; §6 stage 1 picks up the matching
-update when that stage is built.
+update when that stage is built. The cadence and shared daily budget apply
+independently within each of the 40 replicates — a replicate's afternoon
+run only checks dissimilarity against, and shares budget with, its *own*
+morning run, never another replicate's.
+
+**Ensemble sizing (Monte Carlo replicates).** Each persona runs as a
+**40-replicate ensemble** (`LEDGER_REPLICATES = 40`; 120 replicate-ledgers
+total), not the single realized draw the first cut of this policy
+specified. A `research-analyst` review
+(`docs/archive/researcher_sim_bettor_mc_ensemble.md`, 2026-07-12) found
+that framing this as a finite ensemble of a stochastic selection policy —
+not "more Monte Carlo is safer" — puts the knee of the ensemble-mean
+convergence curve near `M ≈ 40` (proper-score convergence goes as
+`1 + 1/M`; 40→100 replicates buys under 1%, invisible against real-world
+ROI noise at this bankroll/entry-cap scale), while a 5th/95th-percentile
+**range** off any live-forward ensemble this size would need 2,000+
+replicates to stabilize and would just reintroduce noisy-path jitter one
+level up. Two consequences:
+
+- **Replicate 0 is the canonical pre-registered ledger** — seeded exactly
+  as § RNG/idempotency specifies, and the *only* replicate that drives the
+  stage-3 circuit breaker and the stage-4 hindsight-proofing tests.
+  Replicates 1–39 exist solely to quantify selection-variance around it;
+  the breaker must never read the ensemble mean (a fragile policy's
+  occasional bad draw would wash out in an average that never lives
+  replicate 0's actual bad week).
+- **Reporting is mean + central-spread, never tail percentiles.** Stage-3
+  analytics report each persona's ensemble-mean ROI/CLV/bankroll as the
+  headline skill estimate, plus a ±1 SE band and the replicate
+  distribution's IQR (25th–75th) as the selection-variance envelope —
+  explicitly *not* 5/95 or min/max, which are unstable at `M = 40`. The
+  band must be labeled "spread across equivalent policy draws," not "range
+  of outcomes" — it is selection-algorithm noise, not uncertainty about
+  whether the system makes money. The full tail-distribution question is
+  deferred to a retrospective, `profit_sim.py`-style large-`N`
+  characterization run on the *accumulated real ledger* once enough has
+  settled — that is what `profit_sim.py` already exists for (§1); the live
+  ledger stays lean.
+
+Within a given `(date, run_slot, replicate_id)`, all three personas draw
+from **one shared random stream, consumed in a fixed order** (Safe, then
+High-EV, then Kelly-growth) — common random numbers, so the day's shared
+slate noise cancels out of the cross-persona *comparison*, which is the
+lane's actual deliverable. Different `replicate_id`s get independent
+streams (§ RNG/idempotency). This trades a small, bias-free coupling
+between personas for a real variance reduction on the contrast between
+them — flag to the owner if "three independent personas" (as phrased
+above) should instead mean fully independent randomness; the tradeoff is
+standard CRN practice, not a free lunch. A one-time knee-check (stage 3,
+after ~2 weeks live: plot ensemble-mean ROI vs `M ∈ {10,20,40,80,160}` per
+persona) validates or revises `LEDGER_REPLICATES = 40` via `policy_v2` —
+not a recurring job.
 
 **EV floor.** Unchanged: reuse `PickemConfig.min_ev = 0.05`, enforced
 upstream in `construct_entries`; no second ledger-only threshold.
 
-**RNG / idempotency.** Each run's draw is seeded deterministically from
-`(date, persona, run_slot)` — not a single fixed constant like
-`profit_sim.py`'s backtest seed (`42`) — so a retry of an already-simulated
-run reproduces the same draw instead of drifting, preserving the
+**RNG / idempotency.** Each replicate's draw is seeded deterministically
+from `(date, run_slot, replicate_id)` — shared across all three personas
+within that tuple (the CRN mechanic above), not a single fixed constant
+like `profit_sim.py`'s backtest seed (`42`). Streams are derived via
+`numpy.random.default_rng(...).spawn(...)`-style independent spawning, one
+child per `replicate_id`, never seed-plus-`replicate_id` arithmetic (which
+can silently correlate streams). A retry of an already-simulated run
+reproduces the same draw instead of drifting, preserving the
 append-only/no-backfill requirement (§4 locked decision) even under a job
 retry.
 
 **Schema additions stage 1 will need** (beyond what §6 stage 1 already
 lists — legs, lines, model probs, book devig, stake, policy version, git
 SHA, `committed_at`): `persona` (`safe` / `high_ev` / `kelly_growth`),
-`run_slot` (`morning` / `afternoon`), `game_span` (int; see Cross-game
-above). These feed the stage-3 analytics split (same-game vs. cross-game
-profit, per-persona ROI/CLV) — not built this session, only tagged at
-commit time so it's available later.
+`run_slot` (`morning` / `afternoon`), `replicate_id` (int, 0–39; 0 is
+canonical — § Ensemble sizing), `game_span` (int; see Cross-game above).
+These feed the stage-3 analytics split (same-game vs. cross-game profit,
+per-persona ROI/CLV, ensemble mean/spread) — not built this session, only
+tagged at commit time so it's available later. Stage 2's settlement must
+resolve the *union of distinct legs* once per day and map outcomes onto
+every replicate entry that cites them, never resolve leg-by-leg per entry
+— verified against `clv.py`'s already-group-invariant fill and
+`analysis.py`'s per-(player, date) resolution, this keeps nightly
+settlement cost flat in replicate count (~3,000 entries/day at `M = 40` is
+sub-second additional work, not a bottleneck).
 
 **Config shape for stage 1** (illustrative — not yet wired):
 ```
@@ -309,16 +386,29 @@ shared = PickemConfig(
     max_overlap=2,                  # coarse backstop only; the Jaccard draw is the real dissimilarity control
 )
 PERSONAS = ("safe", "high_ev", "kelly_growth")
-bankroll_per_persona = Decimal("5000")
-max_entries_per_day = 5             # shared across the morning + afternoon runs
+bankroll_per_replicate = Decimal("5000")
+max_entries_per_day = 5             # shared across the morning + afternoon runs, per replicate
 RUN_SLOTS = ("morning", "afternoon")
-# per run: fresh candidates -> partition filter -> cross-game module (independence-assumed)
-#          -> persona priority score -> Jaccard-decay weighted draw (seeded on date+persona+run_slot)
+LEDGER_REPLICATES = 40              # ensemble-mean knee (1+1/M law); replicate 0 = canonical path
+# per (date, run_slot, replicate_id): one shared RNG stream (CRN across personas, fixed order)
+# per persona, per replicate: fresh candidates -> partition filter -> cross-game module (independence-assumed)
+#          -> persona priority score -> Jaccard-decay weighted draw
 #          -> Kelly-growth only: joint_kelly_portfolio over the draw, remaining-budget-aware
+# replicate 0 drives the circuit breaker + hindsight tests; 1-39 are the variance envelope only
 ```
 
 ## 11. Ledger (append-only, newest first, cap ~15)
 
+- 2026-07-12 · stage 0 refinement · research-analyst (Opus) verdict on MC
+  ensemble sizing folded into policy v1: 40 replicates/persona (120 total,
+  not the originally floated 300) at the ensemble-mean convergence knee;
+  replicate 0 canonical (drives breaker + hindsight tests), 1–39 variance
+  envelope only; common random numbers across personas per replicate;
+  mean + IQR/SE reporting, never 5/95 percentiles; tail-distribution
+  question deferred to a retrospective `profit_sim.py`-style study on
+  accumulated real data · brief:
+  `docs/archive/researcher_sim_bettor_mc_ensemble.md` · next: stage 1
+  commit path unchanged in shape, sized for 120 replicate-ledgers
 - 2026-07-12 · stage 0 · policy v1 drafted + owner-approved via plan review
   (D6 resolved): 3 personas (safe / high-ev / kelly-growth) over a shared
   candidate universe, Jaccard-similarity-weighted MC selection replacing
