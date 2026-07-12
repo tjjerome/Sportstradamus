@@ -1,6 +1,6 @@
 # Simulated-Bettor Ledger
 
-> Status: QUEUED (entry: D6 — owner signs off policy spec v1)
+> Status: ACTIVE (policy v1 locked, D6 resolved — stage 1 commit path next)
 
 ## 1. Mission & money logic
 
@@ -160,6 +160,172 @@ the five CLAUDE.md triggers.
 - Never push `devel` directly — the curator carves ship PRs.
 - Durable non-obvious lesson? Offer a memory capture.
 
-## 10. Ledger (append-only, newest first, cap ~15)
+## 10. Policy v1
+
+Three independent simulated-bettor personas, each running its own fixed
+$5,000 paper bankroll. All three read the same candidate universe but
+differ in how they score and select from it. Decisions commit twice daily.
+Any future change is a new version (`policy_v2`, …) appended below policy
+v1, never an in-place edit of this section (§4 locked decision).
+
+**Bankroll.** $5,000 fixed per persona — three independent bankrolls, not a
+shared pool. Passed to `construct_entries` as a constant
+`bankroll=Decimal("5000")` on every run — never recomputed against a
+persona's drifting settled balance. Keeps stake sizing from fighting the
+stage-3 circuit breaker's drawdown response (a compounding bankroll would
+shrink stakes mid-drawdown right when the breaker is also halving them).
+
+**Candidate universe (shared).** Power (2–3 legs) + Flex (4+ legs) only —
+Rivals excluded (unpriced leg type, not a contest — `dfs-products.md` Stage
+1 still owes it a `P(A−B>k)` difference-pricer); Ladders and Game Lines out
+of scope (unimplemented — `dfs-products.md` Stages 3/4). **Scar:** when
+either ships, policy_v2 decides whether to admit it. `PickemConfig
+.entry_sizes = (2, 3, 4, 5, 6)` (widened from the live dashboard's `(3, 5)`
+default), `contest_variants = ("power", "flex")`, `min_ev = 0.05` (upstream
+default, unchanged), `top_k = 100` (raised from the live default of 20 so
+the size/variant partition — keep `power` + size∈{2,3}, keep `flex` +
+size≥4, drop everything else, including any rivals-tagged candidate — never
+truncates a valid candidate before it's evaluated; `underdog_payouts.json`
+currently defines a flex-3 tier this partition treats as not applicable to
+selection, flagged not fixed).
+
+**Cross-game / cross-league candidates (new, additive).** The same-game-only
+limitation is real, but it lives in
+`prediction/correlation.py:_process_league_games`, which partitions legs by
+team/game before `beam_search_parlays` ever runs — not in the beam search
+itself, which has no game-awareness and would combine legs from anywhere if
+given the chance. Natively fixing this means editing
+`correlation.py`/`parlay.py`/`joint.py`'s Σ assembly, which both
+`dfs-products.md` ("No `parlay.py`/`correlation.py` edits at v1... an edit
+to either file is a stop condition, not a judgment call") and the roadmap's
+file-conflict-queueing rule (§5.1) gate behind cross-lane coordination this
+lane doesn't have. Instead, a new module in the stage-1
+`strategies/ledger.py` footprint (import-only against
+`prediction.scoring.process_offers`) builds cross-game/cross-league
+candidates directly from the day's already-scored single-leg offers — the
+same input `_parlays_per_variant` starts from, upstream of the per-game
+split — and treats every cross-game leg pair as independent (ρ = 0). This
+is the same fallback the current code already applies to any leg pair with
+no correlation-matrix entry, so it's a conservative extension of existing
+behavior, not a new modeling claim (same-game correlation is the entire
+reason the copula machinery exists; cross-game correlation between
+unrelated players/games is presumably close to zero anyway). A cross-game
+candidate's probability is the plain product of its legs' individual
+(shrinkage-adjusted) win probabilities — no MVN/copula machinery needed.
+Every committed entry carries a `game_span` field (count of distinct games)
+so stage-3 analytics can split same-game vs. cross-game profit.
+
+**Personas.**
+- *Safe* — priority score = `joint_prob` (win probability), descending.
+  Skews toward smaller, higher-hit-rate entries, since joint probability
+  falls as leg count grows.
+- *High-EV* — priority score = today's existing `rank_and_dedupe` key,
+  `(ev * joint_prob) / stake` (EV-per-dollar-staked). Chases edge magnitude
+  regardless of size or hit rate.
+- *Kelly-growth* — candidates are first de-overlapped by the same
+  Jaccard-decay draw used for selection (below), then sized by
+  `strategies/kelly.py:joint_kelly_portfolio` — the existing cvxpy/SCS
+  portfolio log-growth optimizer — instead of independent per-entry Kelly
+  stakes. This is a genuinely different *selection*, not a relabeled
+  ranking: the portfolio solve can allocate zero to a candidate simple
+  EV-ranking would take, if funding it doesn't improve joint log-growth
+  enough relative to spending that budget elsewhere.
+  `joint_kelly_portfolio`'s own docstring assumes independent candidates
+  ("callers should de-overlap legs before invocation") — the Jaccard draw
+  is what satisfies that precondition; the two are complementary, not
+  duplicated machinery.
+
+**Selection (Monte Carlo, Jaccard-similarity-weighted).** Within a run,
+candidates are drawn one at a time, without replacement, from the
+remaining pool — sequential weighted sampling, rhyming with the pattern in
+`strategies/profit_sim.py:_pick_day_bets` (not imported — that function is
+private, in a file this lane doesn't touch; policy_v1 uses the same
+*shape* in new code). Each candidate's draw weight is its persona-specific
+priority score, percentile-normalized against the day's full pool, decayed
+by similarity to what's already been drawn:
+
+```
+effective_weight = percentile_score * exp(-K * max_jaccard * (1 - percentile_score))
+```
+
+`max_jaccard` is the highest Jaccard similarity — on player sets, not legs
+or markets — between this candidate and any already-selected entry,
+checked against both this run's picks so far and anything the same persona
+already committed earlier today (see Cadence). A high-percentile candidate
+tolerates more overlap than a marginal one, matching "if the shared legs
+rank highly, they'd still take both." `K` is a single named module
+constant — an explicit v1 default, not a fitted value; this doc's own §7
+already invites tuning knobs like this later. The number of entries
+actually taken per draw is itself stochastic, not a hard target of 5 — a
+small, mean-reverting-to-the-cap distribution, so a persona doesn't
+robotically fill its budget every run. That's the v1 lever for "a real
+bettor misses some opportunities"; simulating literal intraday check-in
+timing would need offer-arrival timestamps `construct_entries` doesn't
+expose today, and is out of scope.
+
+**Cadence.** Two decision runs per day per persona: morning and
+mid-afternoon (exact clock times are a stage-1/owner-approved cron
+decision, not fixed here). Each run queries fresh live data — it does not
+replay the morning's candidate list. The **daily entry budget (5) is
+shared across both runs, not five per run**: before drawing, the afternoon
+run reads what that persona already committed today and (a) folds those
+entries' players into the similarity-decay "already chosen" set, so it
+won't stack a near-duplicate parlay on a morning pick, and (b) draws only
+up to the remaining budget. For the Kelly-growth persona specifically, the
+afternoon run re-solves `joint_kelly_portfolio` using the *remaining*
+Kelly-fraction budget (original fraction minus what morning's entries
+already allocated) — true portfolio accounting across the whole day, not
+two independent half-days. This supersedes the original draft's "one
+decision snapshot per day" language; §6 stage 1 picks up the matching
+update when that stage is built.
+
+**EV floor.** Unchanged: reuse `PickemConfig.min_ev = 0.05`, enforced
+upstream in `construct_entries`; no second ledger-only threshold.
+
+**RNG / idempotency.** Each run's draw is seeded deterministically from
+`(date, persona, run_slot)` — not a single fixed constant like
+`profit_sim.py`'s backtest seed (`42`) — so a retry of an already-simulated
+run reproduces the same draw instead of drifting, preserving the
+append-only/no-backfill requirement (§4 locked decision) even under a job
+retry.
+
+**Schema additions stage 1 will need** (beyond what §6 stage 1 already
+lists — legs, lines, model probs, book devig, stake, policy version, git
+SHA, `committed_at`): `persona` (`safe` / `high_ev` / `kelly_growth`),
+`run_slot` (`morning` / `afternoon`), `game_span` (int; see Cross-game
+above). These feed the stage-3 analytics split (same-game vs. cross-game
+profit, per-persona ROI/CLV) — not built this session, only tagged at
+commit time so it's available later.
+
+**Config shape for stage 1** (illustrative — not yet wired):
+```
+shared = PickemConfig(
+    entry_sizes=(2, 3, 4, 5, 6),
+    contest_variants=("power", "flex"),
+    min_ev=0.05,
+    kelly_fraction=0.25,            # Safe/High-EV personas; Kelly-growth uses joint_kelly_portfolio directly
+    max_stake_pct_bankroll=0.005,
+    top_k=100,
+    max_overlap=2,                  # coarse backstop only; the Jaccard draw is the real dissimilarity control
+)
+PERSONAS = ("safe", "high_ev", "kelly_growth")
+bankroll_per_persona = Decimal("5000")
+max_entries_per_day = 5             # shared across the morning + afternoon runs
+RUN_SLOTS = ("morning", "afternoon")
+# per run: fresh candidates -> partition filter -> cross-game module (independence-assumed)
+#          -> persona priority score -> Jaccard-decay weighted draw (seeded on date+persona+run_slot)
+#          -> Kelly-growth only: joint_kelly_portfolio over the draw, remaining-budget-aware
+```
+
+## 11. Ledger (append-only, newest first, cap ~15)
+
+- 2026-07-12 · stage 0 · policy v1 drafted + owner-approved via plan review
+  (D6 resolved): 3 personas (safe / high-ev / kelly-growth) over a shared
+  candidate universe, Jaccard-similarity-weighted MC selection replacing
+  strict top-N, twice-daily (morning + afternoon) cadence sharing one daily
+  budget, cross-game/cross-league via a new independence-assumed module (no
+  correlation.py/parlay.py edits) · next: stage 1 commit path
+  (`strategies/ledger.py`, `data/ledger/entries/{date}.jsonl` append,
+  `run_job.sh` two-slot cron wiring — owner approves crontab lines)
 
 - 2026-06-10 · created · brief drafted from roadmap-v3 migration · next: stage 0 policy spec v1 for D6
