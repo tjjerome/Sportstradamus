@@ -10,10 +10,20 @@ import numpy as np
 from tqdm import tqdm
 
 from sportstradamus.analysis import _leg_market_map
-from sportstradamus.helpers import stat_cv, stat_std
+from sportstradamus.helpers import no_vig_odds, sleeper_payouts, stat_cv, stat_std
 from sportstradamus.leg_schema import build_leg
 from sportstradamus.prediction.joint import parlay_payout_prob, psd_or_none
-from sportstradamus.prediction.payouts import PAYOUT_CLIP_HI, PAYOUT_CLIP_LO
+from sportstradamus.prediction.payouts import (
+    PAYOUT_CLIP_HI,
+    PAYOUT_CLIP_LO,
+    SLEEPER_FLEX_MIN_SIZE,
+    sleeper_flex_payout_curve,
+)
+from sportstradamus.strategies.kelly import (
+    DEFAULT_KELLY_FRACTION,
+    MAX_FRACTION_OF_BANKROLL,
+    kelly_edge,
+)
 
 
 @dataclass(frozen=True)
@@ -33,6 +43,8 @@ class GameArrays:
     p_books: np.ndarray
     p_push: np.ndarray
     boosts: np.ndarray
+    shrinkage: np.ndarray  # per-leg Kelly shrinkage weight, resolve_shrinkage output
+    opp_boost: np.ndarray  # opposite-side payout multiplier; nan unless Sleeper
 
 
 @dataclass(frozen=True)
@@ -77,10 +89,13 @@ _MIN_PRODUCT_BOOST: float = 0.7
 _BOOKS_EV_FLOOR: float = 0.9
 _MODEL_EV_PRECHECK_FLOOR: float = 1.5
 _MODEL_EV_FINAL_FLOOR: float = 2.0
-_KELLY_UNITS_FLOOR: float = 0.5
 
-# Kelly sizing denominator: 5% bankroll per unit. Legacy.
-_KELLY_BANKROLL_FRACTION: float = 0.05
+# Minimum Kelly-fraction multiple of the hard bankroll cap (MAX_FRACTION_OF_BANKROLL)
+# required to keep a candidate. NOTE: this constant's meaning shifted with the
+# sleeper-parity §5 shrinkage-aware Kelly-gate rewrite -- it used to mean "how
+# many 5%-bankroll units," now means "how many multiples of the 0.5% hard cap."
+# Value kept unchanged this stage; revisiting the threshold itself is a follow-up.
+_KELLY_UNITS_FLOOR: float = 0.5
 
 
 def _expand_candidates(candidates, leg_indices, leg_players, EV, target_size, k):
@@ -141,6 +156,84 @@ def resolve_leg_stat(market: str, new_map: dict) -> str:
     return new_map.get(stripped, stripped)
 
 
+def _is_sleeper_flex_candidate(info, bet_size):
+    return info["Platform"] == "Sleeper" and bet_size >= SLEEPER_FLEX_MIN_SIZE
+
+
+def _sleeper_flex_payout(g, bet_id, bet_size, payout_base, p, SIG, legacy):
+    """Price a Sleeper Flex candidate: devig each leg, then K(n,k)/P_devigged.
+
+    boost/M's running-product mechanism does not apply here -- devig already
+    consumes the same per-leg multipliers as pricing input, so folding boost
+    in on top would double-count that information (sleeper-parity §4b-iv).
+    boost=1.0 passed to parlay_payout_prob is an inert signature placeholder.
+    """
+    boosts_leg = g.boosts[np.ix_(bet_id)]
+    devigged_p = np.array(
+        [
+            no_vig_odds(float(over), float(under))[0]
+            for over, under in zip(boosts_leg, g.opp_boost[np.ix_(bet_id)], strict=True)
+        ]
+    )
+    flex_curve = sleeper_flex_payout_curve(devigged_p, sleeper_payouts["flex_k"])
+    payout = flex_curve[bet_size][0]
+    p = parlay_payout_prob(
+        p, np.zeros(bet_size), SIG, bet_size, 1.0, payout, flex_curve, payout_base, legacy
+    )
+    return payout, p
+
+
+def _leg_boost_payout(
+    g,
+    bet_id,
+    bet_size,
+    boost,
+    payout,
+    p,
+    SIG,
+    full_payouts,
+    payout_base,
+    legacy,
+    full_refund_below_size,
+):
+    """Price a Max/Underdog candidate via the per-leg boost array push-repricing path."""
+    boosts_leg = g.boosts[np.ix_(bet_id)]
+    leg_boost = boosts_leg.copy()
+    # Fold M's pairwise product into one slot so prod(leg_boost) == boost
+    # exactly when no leg pushes. Division is safe: _parlay_admissible
+    # already gated boost > _MIN_PRODUCT_BOOST (0.7), so no boosts_leg entry
+    # can be zero here without the candidate already rejected.
+    leg_boost[0] *= boost / np.prod(boosts_leg)
+    return parlay_payout_prob(
+        p,
+        g.p_push[np.ix_(bet_id)],
+        SIG,
+        bet_size,
+        leg_boost,
+        payout,
+        full_payouts,
+        payout_base,
+        legacy,
+        full_refund_below_size=full_refund_below_size,
+    )
+
+
+def _parlay_kelly_units(g, bet_id, p, payout):
+    """Shrinkage-aware Kelly ranking score for one evaluated candidate.
+
+    win_prob is exact on the no-push analytical fast path (p = payout *
+    P(all hit) there, so division recovers P(all hit) exactly) but only an
+    approximation on the push-aware MC path. units is a ranking/filter score,
+    not a final stake, so the approximation is acceptable here.
+    """
+    parlay_shrinkage = float(np.min(g.shrinkage[np.ix_(bet_id)]))
+    win_prob = p / payout
+    raw_kelly = kelly_edge(win_prob, payout, parlay_shrinkage)
+    if raw_kelly <= 0:
+        return -1.0
+    return raw_kelly * DEFAULT_KELLY_FRACTION / MAX_FRACTION_OF_BANKROLL
+
+
 def _evaluate_parlay(
     bet_id,
     bet_size,
@@ -155,9 +248,10 @@ def _evaluate_parlay(
     leg_teams,
     legacy,
     new_map,
+    full_refund_below_size=None,
 ):
     """Score one parlay candidate; return its row dict, or None if it fails a gate."""
-    C, M, p_model, p_books, p_push, boosts = g.C, g.M, g.p_model, g.p_books, g.p_push, g.boosts
+    C, M, p_model, p_books, boosts = g.C, g.M, g.p_model, g.p_books, g.boosts
     boost = _parlay_admissible(bet_id, leg_teams, team, opp, M, boosts, bet_size, max_boost)
     if boost is None:
         return None
@@ -177,12 +271,25 @@ def _evaluate_parlay(
         return None
 
     payout = np.clip(payout_base * boost, PAYOUT_CLIP_LO, PAYOUT_CLIP_HI)
-    p = parlay_payout_prob(
-        p, p_push[np.ix_(bet_id)], SIG, bet_size, boost, payout, full_payouts, payout_base, legacy
-    )
+    if _is_sleeper_flex_candidate(info, bet_size):
+        payout, p = _sleeper_flex_payout(g, bet_id, bet_size, payout_base, p, SIG, legacy)
+    else:
+        p = _leg_boost_payout(
+            g,
+            bet_id,
+            bet_size,
+            boost,
+            payout,
+            p,
+            SIG,
+            full_payouts,
+            payout_base,
+            legacy,
+            full_refund_below_size,
+        )
     pb = p / prev_p * prev_pb
-    units = (p - 1) / (payout - 1) / _KELLY_BANKROLL_FRACTION
 
+    units = _parlay_kelly_units(g, bet_id, p, payout)
     if units < _KELLY_UNITS_FLOOR or p < _MODEL_EV_FINAL_FLOOR or pb < _BOOKS_EV_FLOOR:
         return None
 
@@ -235,6 +342,7 @@ def beam_search_parlays(
     *,
     contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"] = "pooled",
     legacy: bool = False,
+    full_refund_below_size: int | None = None,
 ):
     """Enumerate top parlay combinations via beam search.
 
@@ -263,6 +371,10 @@ def beam_search_parlays(
             interpretation in :func:`payouts.expected_payout_with_pushes`.
         legacy: When True, reproduce pre-2026.05 scoring (no PSD repair, no
             push-aware EV, bare modifier-product Boost in the output).
+        full_refund_below_size: Threaded to :func:`payouts.expected_payout_with_pushes`
+            — entries at or below this size refund in full on any push
+            (Sleeper's 2-pick divergence). ``None`` keeps the generic
+            drop-and-reprice rule at every size.
 
     Returns:
         list[dict]: Parlay candidate dicts ready for DataFrame construction.
@@ -299,6 +411,7 @@ def beam_search_parlays(
                 leg_teams,
                 legacy,
                 new_map,
+                full_refund_below_size,
             )
             if result is not None:
                 all_results.append(result)

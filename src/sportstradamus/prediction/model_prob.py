@@ -476,6 +476,8 @@ def _finalize_records(
             "Market",
             "Line",
             "Boost",
+            "Boost_Over",
+            "Boost_Under",
             "Bet",
             "Market EV",
             "Model EV",

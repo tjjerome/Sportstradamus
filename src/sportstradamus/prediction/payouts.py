@@ -7,7 +7,7 @@ from typing import Literal
 import numpy as np
 from scipy.stats import norm
 
-from sportstradamus.helpers import underdog_payouts
+from sportstradamus.helpers import sleeper_payouts, underdog_payouts
 
 # Payout multiplier clip. Caps runaway boost products; matches legacy.
 PAYOUT_CLIP_LO: float = 1.0
@@ -19,6 +19,16 @@ _PUSH_MC_SAMPLES: int = 50_000
 # Pooled-variant split: slips of this size or smaller pay on the all-or-nothing
 # ``power`` schedule; larger slips pay on the partial-hit ``flex`` schedule.
 POWER_MAX_SIZE: int = 3
+
+# Sleeper Max/Flex split: OUR recommendation-construction convention (not a
+# platform rule -- the real app allows toggling either mode up to 8 legs).
+# Mirrors POWER_MAX_SIZE's Underdog split. See docs/handoffs/sleeper-parity.md.
+SLEEPER_MAX_SIZE: int = 3
+SLEEPER_FLEX_CAP: int = 6
+SLEEPER_FLEX_MIN_SIZE: int = SLEEPER_MAX_SIZE + 1
+
+# Sleeper's own documented minimum Flex payout (support.sleeper.com/en/articles/9261402).
+SLEEPER_FLEX_MIN_MULTIPLIER: float = 1.25
 
 
 def _pooled_underdog_curve() -> dict[int, list[float]]:
@@ -42,6 +52,39 @@ def _pooled_underdog_curve() -> dict[int, list[float]]:
         sz = int(sz_str)
         if sz > POWER_MAX_SIZE:
             curve[sz] = [float(v) for v in row]
+    return curve
+
+
+def _sleeper_curve() -> dict[int, list[float]]:
+    """Sleeper payout curve keyed by bet size.
+
+    Max (2..SLEEPER_MAX_SIZE): the real per-entry payout is dominated by the
+    live per-leg payout_multiplier product, threaded through as the `boost`
+    argument, not payout_base -- but it is NOT a bare product. Confirmed
+    from two independent in-app trials: size 3 carries a
+    real ~1.0797x bonus on top of the raw product; size 2 does not (1.0x).
+    `sleeper_payouts["power"]` holds this confirmed, fully-populated
+    two-entry table (mirrors underdog_payouts["power"]'s scalar-per-size
+    shape). payout_base is this bonus, not a placeholder -- ranking still
+    multiplies the boost product in, it's just no longer assumed neutral.
+
+    Flex (SLEEPER_MAX_SIZE+1..SLEEPER_FLEX_CAP): pulls from
+    sleeper_payouts["flex"] -- NOT the priced value (see sleeper_flex_payout_curve),
+    just a coarse composition-independent stand-in (sum of the real K(n,k)
+    constants) used by beam search's pre-filter ranking before the exact
+    per-candidate price is computed. Unpopulated sizes pad to [0.0] so beam
+    search's EV floors reject them instead of mispricing on invented
+    numbers -- not exercised today since sizes 4-6 are populated, but kept
+    as the safety behavior if a future size is ever added unpopulated.
+    """
+    curve: dict[int, list[float]] = {}
+    power = sleeper_payouts.get("power", {})
+    for sz in range(2, SLEEPER_MAX_SIZE + 1):
+        curve[sz] = [float(power[sz]), 0.0]
+    flex = sleeper_payouts.get("flex", {})
+    for sz in range(SLEEPER_MAX_SIZE + 1, SLEEPER_FLEX_CAP + 1):
+        row = flex.get(sz)
+        curve[sz] = [float(v) for v in row] if row else [0.0]
     return curve
 
 
@@ -78,10 +121,14 @@ def payout_curve_for(
         full_curve = {sz: [legacy_overwrite[sz], 0.0] for sz in legacy_overwrite}
         return search, full_curve
 
+    if platform == "Sleeper":
+        full_curve = _sleeper_curve()
+        max_size = max(full_curve.keys())
+        search = [full_curve[sz][0] for sz in range(2, max_size + 1)]
+        return search, full_curve
+
     legacy_tables: dict[str, list[float]] = {
         "PrizePicks": [3.0, 5.3, 10.0, 20.8, 38.8],
-        # Sleeper caps real parlays at 3 legs — sizes 4-6 not enumerated.
-        "Sleeper": [1.0, 1.0],
         "ParlayPlay": [1.0, 1.0, 1.0, 1.0, 1.0],
         "Chalkboard": [1.0, 1.0, 1.0, 1.0, 1.0],
     }
@@ -120,9 +167,11 @@ def expected_payout_with_pushes(
     p_push: np.ndarray,
     sigma: np.ndarray,
     bet_size: int,
-    boost: float,
+    boost: float | np.ndarray,
     payout_curve: dict[int, list[float]],
     rng: np.random.Generator | None = None,
+    *,
+    full_refund_below_size: int | None = None,
 ) -> float:
     """Expected payout for a parlay where some legs may push.
 
@@ -137,9 +186,19 @@ def expected_payout_with_pushes(
         p_push: Per-leg push probability. Zeros where push is impossible.
         sigma: PSD-repaired correlation matrix for the parlay's legs.
         bet_size: Number of legs (``len(p_win)``).
-        boost: Modifier-product boost for this parlay.
+        boost: Modifier-product boost for this parlay. Pass a per-leg
+            ``np.ndarray`` (shape ``(bet_size,)``) to reprice a pushed leg's
+            multiplier out of the sample instead of applying one fused
+            scalar to every sample regardless of which legs actually
+            survived — see ``sportstradamus.prediction.parlay``'s
+            ``leg_boost`` construction for how callers fold a pairwise
+            modifier product into this array losslessly.
         payout_curve: ``{size: [mult_at_0_misses, mult_at_1_miss, ...]}``.
         rng: Optional ``np.random.Generator`` for deterministic tests.
+        full_refund_below_size: When set, any sample with at least one push
+            and effective size at or below this threshold refunds in full
+            (×1) regardless of losses — Sleeper's 2-pick divergence from the
+            generic drop-and-reprice rule (docs/handoffs/sleeper-parity.md §4).
 
     Returns:
         float: Expected payout, ready to be compared against the EV floor.
@@ -159,6 +218,12 @@ def expected_payout_with_pushes(
         0,
         np.where(samples < cut_push_top, 1, 2),
     )
+
+    if isinstance(boost, np.ndarray):
+        surviving = np.where(classification == 1, 1.0, boost)
+        sample_boost = np.clip(surviving.prod(axis=1), 0.0, PAYOUT_CLIP_HI)
+    else:
+        sample_boost = np.clip(boost, 0.0, PAYOUT_CLIP_HI)
 
     pushes = (classification == 1).sum(axis=1)
     losses = (classification == 0).sum(axis=1)
@@ -186,4 +251,57 @@ def expected_payout_with_pushes(
     # Sub-minimum size with at least one loss → bust.
     payouts = np.where((eff_size < 2) & (losses > 0), 0.0, payouts)
 
-    return float(np.clip(boost, 0.0, PAYOUT_CLIP_HI) * payouts.mean())
+    if full_refund_below_size is not None and bet_size <= full_refund_below_size:
+        payouts = np.where(pushes >= 1, 1.0, payouts)
+
+    return float(np.mean(sample_boost * payouts))
+
+
+def poisson_binomial_pmf(probs: np.ndarray) -> np.ndarray:
+    """Distribution of successes over independent Bernoulli trials with
+    per-trial probabilities ``probs`` (n <= SLEEPER_FLEX_CAP=6 here, so the
+    O(n^2) DP fold is negligible).
+
+    Returns:
+        np.ndarray: ``pmf``, shape ``(len(probs) + 1,)``, ``pmf[k]`` = P(exactly k successes).
+    """
+    pmf = np.array([1.0])
+    for p in probs:
+        new = np.zeros(len(pmf) + 1)
+        new[:-1] += pmf * (1.0 - p)
+        new[1:] += pmf * p
+        pmf = new
+    return pmf
+
+
+def sleeper_flex_payout_curve(
+    devigged_p: np.ndarray, flex_k: dict[int, list[float]]
+) -> dict[int, list[float]]:
+    """Per-candidate Sleeper Flex payout curve: K(n,k) / P_devigged(exactly n-k hit).
+
+    Unlike payout_curve_for()'s output, this is NOT reusable across other
+    candidates of the same size -- it is keyed to this specific candidate's
+    devigged leg probabilities and must be rebuilt per candidate.
+    """
+    n = len(devigged_p)
+    k_row = flex_k.get(n)
+    if k_row is None:
+        return {n: [0.0] * (n + 1)}
+    pmf = poisson_binomial_pmf(devigged_p)
+    row = []
+    for misses, k_val in enumerate(k_row):
+        p_exact = pmf[n - misses]
+        if p_exact <= 0.0:
+            row.append(0.0)  # tier this candidate's legs will never realize
+            continue
+        # Absolute ceiling, not a hold-ratio clamp: k_val/p_exact is exact by
+        # construction (Context's sum_k K(n,k) identity), so any per-tier
+        # "implied hold" derived from the same p_exact used to build
+        # raw_payout cancels out algebraically (1 - p_exact*(k_val/p_exact)
+        # == 1-k_val always) and can never actually bound a thin-tier blowup.
+        # PAYOUT_CLIP_HI is the same runaway-payout guard used everywhere
+        # else in this pipeline (expected_payout_with_pushes, _evaluate_parlay).
+        raw_payout = min(float(k_val) / float(p_exact), PAYOUT_CLIP_HI)
+        row.append(max(raw_payout, SLEEPER_FLEX_MIN_MULTIPLIER))
+    row += [0.0] * (n + 1 - len(row))
+    return {n: row}
