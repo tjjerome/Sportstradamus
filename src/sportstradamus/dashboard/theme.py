@@ -2,6 +2,7 @@
 
 import importlib.resources as pkg_resources
 import json
+import random
 from functools import cache
 
 import plotly.graph_objects as go
@@ -109,22 +110,61 @@ def register_plotly_template() -> None:
     pio.templates.default = "sportstradamus"
 
 
+# Starfield dust is built from a seeded PRNG (below) rather than hand-listed so ~80
+# dots stay readable under layout="wide" without an 80-line literal.
+_STARFIELD_SEED = 20260705  # fixed so dust positions are identical across reruns/deploys
+_STARFIELD_DUST_COUNT = 80  # ~30 was too sparse to read in a wide layout's whitespace
+_STARFIELD_MAX_ALPHA = 0.20  # DESIGN §3 static-ambient ceiling (twinkles exempt, see @keyframes)
+
+
+def _starfield_background() -> str:
+    """CSS ``background`` layers for ``.starfield``: dust dots + nebula washes + base.
+
+    Positions come from a seeded PRNG so the field is deterministic (no import-time
+    randomness); every static dust/wash alpha stays <= the DESIGN §3 0.20 ceiling.
+    """
+    rng = random.Random(_STARFIELD_SEED)
+    dot_template = (
+        "radial-gradient(circle at {x}% {y}%, rgba(230,233,239,{a}) 0 {r}px, transparent {r}px)"
+    )
+    dots = [
+        dot_template.format(
+            x=round(rng.uniform(1, 99), 2),
+            y=round(rng.uniform(2, 97), 2),
+            a=round(rng.uniform(0.06, _STARFIELD_MAX_ALPHA), 2),
+            r=round(rng.uniform(1.5, 2.5), 1),
+        )
+        for _ in range(_STARFIELD_DUST_COUNT)
+    ]
+    washes = [
+        "radial-gradient(ellipse at 18% 4%, rgba(46,107,230,.10), transparent 46%)",
+        "radial-gradient(ellipse at 86% 22%, rgba(201,162,39,.05), transparent 42%)",
+        "radial-gradient(ellipse at 50% 96%, rgba(46,107,230,.06), transparent 55%)",
+    ]
+    return ",\n    ".join([*dots, *washes]) + ",\n    #0E1117"
+
+
 # The one sanctioned CSS injection site for the whole dashboard (DESIGN.md §3):
 # display-only celestial fonts (.celestial-kicker / .celestial-headline), the
-# banner classes render_banner() uses, the Games surface lens toggles
-# (.st-key-lens_deep_on / .st-key-lens_wider_on), and the ambient starfield layer.
-# app.py injects this once, right after st.set_page_config.
-APP_CSS = """
+# page-hero header block, the gold active-state accents (Games lens toggles + the
+# segmented controls), and the ambient starfield layer.
+# app.py injects this once, right after st.set_page_config; the __STARFIELD_DUST__
+# sentinel below is filled by _starfield_background() when APP_CSS is built.
+_APP_CSS_TEMPLATE = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=Cormorant+Garamond:ital,wght@1,600&display=swap');
 .celestial-kicker{font-family:'Cinzel',serif;font-weight:600;font-size:10.5px;
   letter-spacing:.26em;text-transform:uppercase;color:#C9A227}
 .celestial-headline{font-family:'Cormorant Garamond',serif;font-style:italic;
   font-weight:600;color:#C9A227}
-.banner-predictions{background:#1f4e79;padding:10px 14px;border-radius:6px;
-  color:white;margin-bottom:14px;font-size:14px}
-.banner-stats{background:#2d6a4f;padding:10px 14px;border-radius:6px;
-  color:white;margin-bottom:14px;font-size:14px}
+/* Page-hero header (mockup .head block): gold Cinzel kicker over a plain sans display
+   title and a quiet updated line, on a faint two-stop nebula wash (blue + gold <= 12%,
+   DESIGN §3). Replaces the retired render_banner() Sheets-era banners. */
+.page-hero{position:relative;overflow:hidden;border-radius:4px;padding:14px 16px 4px;
+  margin-bottom:6px;background:radial-gradient(ellipse at 12% -40%, rgba(46,107,230,.10), transparent 52%),
+    radial-gradient(ellipse at 90% 0%, rgba(201,162,39,.05), transparent 44%)}
+.page-hero .hero-title{font-size:23px;margin:1px 0;font-weight:700;color:#E6E9EF}
+.hero-updated{color:#8A91A0;font-size:12px}
 /* Games surface lens toggles (P8 Task C6): active = gold, the app's owner-highlight
    convention. Streamlit's config.toml [theme] has no gold slot (primaryColor is the
    app's blue accent) so this reaches the celestial-gold token the same narrow,
@@ -132,42 +172,16 @@ APP_CSS = """
    reason (DESIGN.md §3). */
 .st-key-lens_deep_on button, .st-key-lens_wider_on button{
   color:#C9A227;border-color:#C9A227;background:rgba(201,162,39,.12)}
+/* DESIGN §2: gold also marks the selected segment of a segmented_control (the global
+   sport switch, Board lens/side, Receipts window). Streamlit has no token slot for the
+   active segment, so reach the gold token on its kind-scoped testid. The
+   segmented_controlActive kind is Streamlit-1.58 internal -- reconfirm in-browser after
+   any Streamlit bump. */
+button[data-testid="stBaseButton-segmented_controlActive"]{
+  color:#C9A227 !important;border-color:#C9A227 !important;background:rgba(201,162,39,.13) !important}
 .starfield{position:fixed;inset:0;z-index:-1;pointer-events:none;
   background:
-    radial-gradient(circle at 4% 7%, rgba(230,233,239,.18) 0 2px, transparent 2px),
-    radial-gradient(circle at 11% 19%, rgba(230,233,239,.12) 0 2px, transparent 2px),
-    radial-gradient(circle at 14% 60%, rgba(230,233,239,.16) 0 2px, transparent 2px),
-    radial-gradient(circle at 6% 76%, rgba(230,233,239,.20) 0 2px, transparent 2px),
-    radial-gradient(circle at 19% 88%, rgba(230,233,239,.10) 0 2px, transparent 2px),
-    radial-gradient(circle at 23% 11%, rgba(230,233,239,.18) 0 2px, transparent 2px),
-    radial-gradient(circle at 27% 34%, rgba(230,233,239,.12) 0 2px, transparent 2px),
-    radial-gradient(circle at 31% 68%, rgba(230,233,239,.14) 0 2px, transparent 2px),
-    radial-gradient(circle at 39% 14%, rgba(230,233,239,.12) 0 2px, transparent 2px),
-    radial-gradient(circle at 37% 58%, rgba(230,233,239,.10) 0 2px, transparent 2px),
-    radial-gradient(circle at 45% 77%, rgba(230,233,239,.16) 0 2px, transparent 2px),
-    radial-gradient(circle at 47% 92%, rgba(230,233,239,.10) 0 2px, transparent 2px),
-    radial-gradient(circle at 55% 9%, rgba(230,233,239,.18) 0 2px, transparent 2px),
-    radial-gradient(circle at 59% 37%, rgba(230,233,239,.14) 0 2px, transparent 2px),
-    radial-gradient(circle at 53% 81%, rgba(230,233,239,.10) 0 2px, transparent 2px),
-    radial-gradient(circle at 67% 19%, rgba(230,233,239,.16) 0 2px, transparent 2px),
-    radial-gradient(circle at 73% 71%, rgba(230,233,239,.12) 0 2px, transparent 2px),
-    radial-gradient(circle at 66% 89%, rgba(230,233,239,.08) 0 2px, transparent 2px),
-    radial-gradient(circle at 77% 29%, rgba(230,233,239,.18) 0 2px, transparent 2px),
-    radial-gradient(circle at 81% 57%, rgba(230,233,239,.14) 0 2px, transparent 2px),
-    radial-gradient(circle at 84% 14%, rgba(230,233,239,.20) 0 2px, transparent 2px),
-    radial-gradient(circle at 88% 43%, rgba(230,233,239,.12) 0 2px, transparent 2px),
-    radial-gradient(circle at 80% 80%, rgba(230,233,239,.16) 0 2px, transparent 2px),
-    radial-gradient(circle at 90% 67%, rgba(230,233,239,.10) 0 2px, transparent 2px),
-    radial-gradient(circle at 96% 86%, rgba(230,233,239,.10) 0 2px, transparent 2px),
-    radial-gradient(circle at 3% 52%, rgba(230,233,239,.14) 0 2px, transparent 2px),
-    radial-gradient(circle at 2% 28%, rgba(230,233,239,.08) 0 2px, transparent 2px),
-    radial-gradient(circle at 58% 95%, rgba(230,233,239,.12) 0 2px, transparent 2px),
-    radial-gradient(circle at 33% 5%, rgba(230,233,239,.10) 0 2px, transparent 2px),
-    radial-gradient(circle at 70% 10%, rgba(230,233,239,.12) 0 2px, transparent 2px),
-    radial-gradient(ellipse at 18% 4%, rgba(46,107,230,.10), transparent 46%),
-    radial-gradient(ellipse at 86% 22%, rgba(201,162,39,.05), transparent 42%),
-    radial-gradient(ellipse at 50% 96%, rgba(46,107,230,.06), transparent 55%),
-    #0E1117}
+    __STARFIELD_DUST__}
 /* Streamlit paints backgroundColor (#0E1117) as an opaque fill on its own root
    containers, which sits above this fixed z-index:-1 layer and hides it outright.
    Dropping just these two containers to transparent reveals the starfield (which
@@ -177,13 +191,19 @@ APP_CSS = """
    mounts via its frontend bundle after this injected <style> tag and otherwise
    wins the same-specificity tiebreak on source order. */
 .stApp, [data-testid="stAppViewContainer"]{background:transparent !important}
-/* app.py's st.html() runs every fragment through DOMPurify with
-   USE_PROFILES:{html:true} and no svg addition (confirmed in the bundled
-   frontend's Html.*.js) -- it silently strips <svg> outright, so the original
-   SVG-based starfield rendered an empty .starfield with zero children. The dust
-   above is plain radial-gradient layers for exactly that reason; these 11
-   twinkle accents are plain divs shaped with clip-path instead of <svg><use>,
-   since both survive that sanitizer. */
+/* Selective occlusion: the field shines through page whitespace and cards everywhere,
+   occluded only behind a dense data table so its numbers stay readable (owner: "shine
+   through everything except the data tables"). The AG Grid host is already an opaque
+   iframe; st.dataframe is the one that needs a solid fill (DESIGN §3 "never behind dense
+   tables or stat grids"). */
+[data-testid="stDataFrame"]{background:#12151C}
+/* app.py injects this via st.markdown(unsafe_allow_html=True) -- its DOMPurify allows
+   <style>/<script> (ADD_TAGS) but still strips <svg> outright, so the original
+   SVG-based starfield rendered an empty .starfield with zero children. (st.html is
+   worse: USE_PROFILES:{html:true} drops <style> too, which is why this can't inject
+   through st.html.) The dust above is plain radial-gradient layers for exactly that
+   reason; these 11 twinkle accents are plain divs shaped with clip-path instead of
+   <svg><use>, since both survive that sanitizer. */
 .tw{position:absolute;width:1.4vmin;height:1.4vmin;background:#E6E9EF;
   clip-path:polygon(50% 3%,60.5% 39.5%,97% 50%,60.5% 60.5%,50% 97%,39.5% 60.5%,3% 50%,39.5% 39.5%)}
 .tw.gold{width:1.7vmin;height:1.7vmin;background:#C9A227}
@@ -209,6 +229,8 @@ APP_CSS = """
 @media (prefers-reduced-motion: reduce){.tw{animation:none;opacity:.15}}
 </style>
 """
+
+APP_CSS = _APP_CSS_TEMPLATE.replace("__STARFIELD_DUST__", _starfield_background())
 
 # Dust + wash render via .starfield's own CSS background above; these 11 divs are
 # just the twinkling accents (see the .tw comment in APP_CSS for why plain divs

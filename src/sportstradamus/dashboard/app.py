@@ -22,7 +22,10 @@ from sportstradamus.dashboard.components.slip_state import init_slip_state
 
 st.set_page_config(page_title="Sportstradamus Dashboard", layout="wide")
 
-st.html(theme.APP_CSS + theme.STARFIELD_HTML)
+# APP_CSS is a <style> block: it must go through st.markdown with unsafe HTML,
+# NOT st.html — st.html's DOMPurify (USE_PROFILES {html:true}) strips <style>/<svg>
+# outright, so the whole celestial CSS layer silently no-ops (renders flat).
+st.markdown(theme.APP_CSS + theme.STARFIELD_HTML, unsafe_allow_html=True)
 theme.register_plotly_template()
 
 # Slip state is shared across surfaces; seed it before any surface renders.

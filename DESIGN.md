@@ -95,6 +95,10 @@ Altair / Vega-Lite inherit these automatically.
   slots without art render token-palette gradients. Rules: opacity ≤ 20% over `backgroundColor`,
   body text on top must keep WCAG AA contrast, **never behind dense tables or stat grids**, and art
   is stock or commissioned only — no AI-generated images, license recorded in the manifest.
+  The ambient **starfield** layer (`theme.APP_CSS`, wide layout) obeys these rules: static dust and
+  nebula washes stay ≤ 20% alpha and are occluded behind grids, dataframes, dialogs, and the sidebar.
+  One sanctioned exception: the animated twinkle accents (`.tw`) may exceed the 0.20 static ceiling,
+  capped at **0.70 peak** alpha and **≤ 12 instances**; static ambient layers remain ≤ 0.20.
 - **Tables**: `streamlit-aggrid` (already a dependency), themed to these tokens, for the main stat
   grids; native `st.dataframe` + `column_config` / `ProgressColumn` for simpler ones. See §4.
 - **Metrics**: establish hierarchy — one hero number + smaller supporting metrics with context
