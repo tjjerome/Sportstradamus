@@ -12,7 +12,7 @@ import pandas as pd
 import pytest
 
 from sportstradamus.helpers import stat_map
-from sportstradamus.prediction.payouts import expected_payout_with_pushes
+from sportstradamus.prediction.payouts import expected_payout_with_pushes, payout_curve_for
 from sportstradamus.strategies import _ledger_cross_game as xg
 from sportstradamus.strategies.underdog_pickem import PickemConfig
 
@@ -30,6 +30,7 @@ def _offer_row(
     line: float = 4.5,
     boost: float = 1.0,
     push_prob: float = 0.0,
+    platform: str = "Underdog",
 ) -> dict:
     team, opp = game.split("/")
     return {
@@ -39,7 +40,7 @@ def _offer_row(
         "Market": market,
         "League": league,
         "Game": game,
-        "Platform": "Underdog",
+        "Platform": platform,
         "Date": DATE.isoformat(),
         "Line": line,
         "Bet": "Over",
@@ -111,6 +112,39 @@ def test_canonical_legs_stat_field_is_canonicalized_not_raw_market() -> None:
             assert leg["stat"] == canonical_market
 
 
+# --- platform tagging -----------------------------------------------------------
+
+
+def test_build_cross_game_candidates_tags_sleeper_platform() -> None:
+    offers = _offers_df(
+        [
+            _offer_row("Player A", "BOS/MIA", platform="Sleeper"),
+            _offer_row("Player B", "LAL/DEN", platform="Sleeper"),
+        ]
+    )
+    config = PickemConfig(min_ev=-1.0)
+
+    candidates = xg.build_cross_game_candidates(offers, config, DATE, "morning", platform="Sleeper")
+
+    assert candidates
+    assert all(c.platform == "Sleeper" for c in candidates)
+
+
+def test_build_cross_game_candidates_defaults_to_underdog_platform() -> None:
+    offers = _offers_df(
+        [
+            _offer_row("Player A", "BOS/MIA"),
+            _offer_row("Player B", "LAL/DEN"),
+        ]
+    )
+    config = PickemConfig(min_ev=-1.0)
+
+    candidates = xg.build_cross_game_candidates(offers, config, DATE, "morning")
+
+    assert candidates
+    assert all(c.platform == "Underdog" for c in candidates)
+
+
 # --- hand-computed no-push 2-leg sanity check -----------------------------------
 
 
@@ -142,15 +176,64 @@ def test_price_combo_wiring_matches_direct_call() -> None:
     )
     config = PickemConfig(min_ev=-1.0)
     eligible = offers  # both legs clear filter_legs at these edges/thresholds
-    legs = xg._score_legs(eligible)
+    legs = xg._score_legs(eligible, "Underdog")
     rng_direct = xg._pricing_rng(DATE, "morning")
-    joint_prob, ev_payout = xg._price_combo(tuple(legs), rng_direct)
+    joint_prob, ev_payout = xg._price_combo(tuple(legs), rng_direct, "Underdog")
 
     candidates = xg.build_cross_game_candidates(offers, config, DATE, "morning")
     two_leg = next(c for c in candidates if c.entry_size == 2)
 
     assert joint_prob == pytest.approx(two_leg.joint_prob, abs=1e-9)
     assert two_leg.ev == pytest.approx(ev_payout - 1.0, abs=0.05)
+
+
+# --- Sleeper 2-pick full-refund-on-push divergence --------------------------------
+
+
+def _guaranteed_push_and_loss_legs() -> tuple[xg._ScoredLeg, xg._ScoredLeg]:
+    push_leg = xg._ScoredLeg(
+        idx=0,
+        player="Player A",
+        game="BOS/MIA",
+        win_prob=0.0,
+        push_prob=1.0,
+        book_devig=0.5,
+        line=4.5,
+        boost=1.0,
+        display="Player A BOS/MIA Rebounds Over 4.5",
+        canonical_leg={},
+    )
+    loss_leg = xg._ScoredLeg(
+        idx=1,
+        player="Player B",
+        game="LAL/DEN",
+        win_prob=0.0,
+        push_prob=0.0,
+        book_devig=0.5,
+        line=4.5,
+        boost=1.0,
+        display="Player B LAL/DEN Rebounds Over 4.5",
+        canonical_leg={},
+    )
+    return push_leg, loss_leg
+
+
+def test_price_combo_sleeper_two_leg_push_refunds_in_full() -> None:
+    legs = _guaranteed_push_and_loss_legs()
+    rng = np.random.default_rng(12345)
+
+    _joint_prob, ev_payout = xg._price_combo(legs, rng, "Sleeper")
+
+    assert ev_payout == pytest.approx(1.0, abs=0.02)
+
+
+def test_price_combo_underdog_two_leg_push_with_loss_still_busts() -> None:
+    legs = _guaranteed_push_and_loss_legs()
+    rng = np.random.default_rng(12345)
+
+    _joint_prob, ev_payout = xg._price_combo(legs, rng, "Underdog")
+
+    assert ev_payout == pytest.approx(0.0, abs=0.02)
 
 
 # --- _pricing_rng / _entropy_from determinism -----------------------------------
@@ -189,7 +272,7 @@ def test_beam_width_cap_holds_with_monkeypatched_narrow_width(monkeypatch) -> No
         game = f"G{i}A/G{i}B"
         rows.append(_offer_row(f"Player {i}", game, win_prob=0.55 + i * 0.01))
     offers = _offers_df(rows)
-    legs = xg._score_legs(offers)
+    legs = xg._score_legs(offers, "Underdog")
 
     by_size = xg._enumerate_cross_game_combos(legs)
 
@@ -215,3 +298,24 @@ def test_candidates_below_min_ev_are_dropped() -> None:
 
     assert lenient
     assert strict == []
+
+
+# --- Sleeper payout curve wired through end-to-end --------------------------------
+
+
+def test_build_cross_game_candidates_sleeper_uses_sleeper_curve_for_payout_multiplier() -> None:
+    offers = _offers_df(
+        [
+            _offer_row("Player A", "BOS/MIA", platform="Sleeper"),
+            _offer_row("Player B", "LAL/DEN", platform="Sleeper"),
+        ]
+    )
+    config = PickemConfig(min_ev=-1.0)
+
+    candidates = xg.build_cross_game_candidates(offers, config, DATE, "morning", platform="Sleeper")
+    two_leg = next(c for c in candidates if c.entry_size == 2)
+
+    _, sleeper_curve = payout_curve_for("Sleeper", "pooled", legacy=False)
+    assert two_leg.payout_multiplier == pytest.approx(sleeper_curve[2][0])
+    _, underdog_curve = payout_curve_for("Underdog", "pooled", legacy=False)
+    assert two_leg.payout_multiplier != pytest.approx(underdog_curve[2][0])

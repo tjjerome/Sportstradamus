@@ -1,13 +1,13 @@
 """Cross-game candidate builder for the simulated-bettor ledger (Policy v1).
 
-Builds Underdog Pick'em combinations that span >=2 distinct games directly
-from already-scored single-leg offers, under an explicit independence
-(rho=0) assumption between legs from different games. The existing
-same-game parlay search (``prediction.parlay`` / ``prediction.correlation``)
-structurally cannot produce these -- it only ever combines legs sharing one
-``Game`` -- so this module is a deliberately separate, independence-assumed
-path, not a duplicate of that search. See ``docs/handoffs/sim-bettor-ledger.md``
-for the surrounding Policy v1 design.
+Builds Underdog- or Sleeper-style Pick'em combinations that span >=2 distinct
+games directly from already-scored single-leg offers, under an explicit
+independence (rho=0) assumption between legs from different games. The
+existing same-game parlay search (``prediction.parlay`` /
+``prediction.correlation``) structurally cannot produce these -- it only ever
+combines legs sharing one ``Game`` -- so this module is a deliberately
+separate, independence-assumed path, not a duplicate of that search. See
+``docs/handoffs/sim-bettor-ledger.md`` for the surrounding Policy v1 design.
 """
 
 from __future__ import annotations
@@ -23,7 +23,11 @@ import pandas as pd
 
 from sportstradamus.helpers import stat_map
 from sportstradamus.leg_schema import build_leg, leg_label
-from sportstradamus.prediction.payouts import expected_payout_with_pushes, payout_curve_for
+from sportstradamus.prediction.payouts import (
+    SLEEPER_FULL_REFUND_MAX_SIZE,
+    expected_payout_with_pushes,
+    payout_curve_for,
+)
 from sportstradamus.strategies._ledger_selection import (
     BANKROLL_PER_REPLICATE,
     LedgerCandidate,
@@ -39,7 +43,10 @@ from sportstradamus.strategies.underdog_pickem import (
 _CROSS_GAME_BEAM_WIDTH: int = 200  # v1 default, narrower than the same-game search's beam
 _MAX_ENTRY_SIZE: int = 6
 
-_, _POOLED_CURVE = payout_curve_for("Underdog", "pooled", legacy=False)
+_POOLED_CURVES: dict[str, dict[int, list[float]]] = {
+    "Underdog": payout_curve_for("Underdog", "pooled", legacy=False)[1],
+    "Sleeper": payout_curve_for("Sleeper", "pooled", legacy=False)[1],
+}
 
 
 @dataclass(frozen=True)
@@ -56,11 +63,11 @@ class _ScoredLeg:
     canonical_leg: dict  # build_leg() output, with leg["stat"] patched to the canonical market
 
 
-def _score_legs(eligible: pd.DataFrame) -> list[_ScoredLeg]:
+def _score_legs(eligible: pd.DataFrame, platform: str) -> list[_ScoredLeg]:
     out = []
     for i, row in eligible.reset_index(drop=True).iterrows():
         leg = build_leg(row)
-        canonical_market = stat_map["Underdog"].get(row["Market"])
+        canonical_market = stat_map[platform].get(row["Market"])
         if canonical_market:
             leg["stat"] = canonical_market
         shrinkage, _source = resolve_market_shrinkage(str(row["League"]), canonical_market)
@@ -118,7 +125,9 @@ def _pricing_rng(date: datetime.date, run_slot: str) -> np.random.Generator:
     return np.random.default_rng(seed_seq)
 
 
-def _price_combo(legs: tuple[_ScoredLeg, ...], rng: np.random.Generator) -> tuple[float, float]:
+def _price_combo(
+    legs: tuple[_ScoredLeg, ...], rng: np.random.Generator, platform: str
+) -> tuple[float, float]:
     """Returns (joint_prob, model_ev). joint_prob is the plain product of
     shrinkage-adjusted win probs (the "all legs hit" probability -- correct on
     its own, but NOT sufficient to price flex's partial-payout tiers, which is
@@ -136,21 +145,27 @@ def _price_combo(legs: tuple[_ScoredLeg, ...], rng: np.random.Generator) -> tupl
         sigma=np.eye(n),
         bet_size=n,
         boost=boost,
-        payout_curve=_POOLED_CURVE,
+        payout_curve=_POOLED_CURVES[platform],
         rng=rng,
+        full_refund_below_size=SLEEPER_FULL_REFUND_MAX_SIZE if platform == "Sleeper" else None,
     )
     return joint_prob, ev_payout
 
 
 def build_cross_game_candidates(
-    offers_df: pd.DataFrame, config: PickemConfig, date: datetime.date, run_slot: str
+    offers_df: pd.DataFrame,
+    config: PickemConfig,
+    date: datetime.date,
+    run_slot: str,
+    platform: str = "Underdog",
 ) -> list[LedgerCandidate]:
     """Build independence-assumed (rho=0) parlay candidates spanning >=2 games.
 
     Filters ``offers_df`` through the same leg gate ``construct_entries`` uses,
     beam-expands cross-game combos up to ``_MAX_ENTRY_SIZE`` legs, prices each
-    via the pooled payout curve, and drops anything below ``config.min_ev``.
-    See the module docstring for why this independence assumption is safe.
+    via the pooled payout curve for ``platform``, and drops anything below
+    ``config.min_ev``. See the module docstring for why this independence
+    assumption is safe.
 
     Returns:
         One :class:`LedgerCandidate` per surviving combo, in no particular
@@ -159,17 +174,17 @@ def build_cross_game_candidates(
     eligible = filter_legs(offers_df, config)
     if eligible.empty:
         return []
-    legs = _score_legs(eligible)
+    legs = _score_legs(eligible, platform)
     rng = _pricing_rng(date, run_slot)
     by_size = _enumerate_cross_game_combos(legs)
     by_idx = {leg.idx: leg for leg in legs}
 
     out: list[LedgerCandidate] = []
     for size, combos in by_size.items():
-        payout_mult = _POOLED_CURVE[size][0]
+        payout_mult = _POOLED_CURVES[platform][size][0]
         for combo in combos:
             combo_legs = tuple(by_idx[i] for i in combo)
-            joint_prob, ev_payout = _price_combo(combo_legs, rng)
+            joint_prob, ev_payout = _price_combo(combo_legs, rng, platform)
             ev = ev_payout - 1.0
             if ev < config.min_ev:
                 continue
@@ -196,6 +211,7 @@ def build_cross_game_candidates(
                     payout_multiplier=payout_mult,
                     ev=ev,
                     stake=stake,
+                    platform=platform,
                     lines=tuple(leg.line for leg in combo_legs),
                     model_probs=tuple(leg.win_prob for leg in combo_legs),
                     book_devig=tuple(leg.book_devig for leg in combo_legs),

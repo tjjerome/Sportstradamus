@@ -63,9 +63,11 @@ job; cron edits are owner-approved.
 - Underdog payout multipliers + push/void rules
   (`data/config/underdog_payouts.json`) — re-verify against the live product
   each season; settlement math inherits them.
-- Sleeper payout/push rules once the `sleeper-parity` lane lands — this
-  ledger's schema is platform-aware from day one and starts logging Sleeper
-  entries the day that lane ships.
+- Sleeper payout/push rules: `sleeper-parity` stage 4 landed 2026-07-14 (local
+  `feature/sleeper-parity`, not yet merged `devel`) — `build_candidate_universe`
+  now pulls both platforms into one shared candidate pool/budget per persona;
+  see `sleeper-parity.md` §10 stage-4 line for the merge-design rationale and
+  two push-refund pricing bugs it fixed along the way.
 
 ## 4. Locked decisions
 
@@ -399,6 +401,21 @@ LEDGER_REPLICATES = 40              # ensemble-mean knee (1+1/M law); replicate 
 
 ## 11. Ledger (append-only, newest first, cap ~15)
 
+- 2026-07-14 · cross-lane note (sleeper-parity stage 4, landed on
+  `feature/sleeper-parity`, not yet merged `devel`) · Sleeper candidates now
+  flow through this ledger: `build_candidate_universe`/`run_commit` draw both
+  platforms from one shared pool/budget per persona — no bankroll-schema
+  change needed (`_ledger_bankroll.py`'s `(persona, replicate_id)` grouping
+  was already platform-agnostic), but the committed-record schema gained an
+  additive `platform` field (pre-existing records on disk have none;
+  `settle_entry` reads it via `.get("platform", "Underdog")`, never
+  `record["platform"]`, since settlement never rewrites old append-only
+  entries) · fixed two latent push-refund pricing bugs on the Sleeper path
+  found while wiring this in (cross-game combo pricing, settlement's
+  `realized_multiplier`) — detail in `sleeper-parity.md` §10 · covered by new
+  `tests/golden/test_ledger_cross_platform.py` +
+  `tests/integration/test_ledger_fake_mode.py` · next: unchanged — this
+  lane's own stage 1+2 still await owner review + push, then stage 3
 - 2026-07-12 · stage 2 settlement built (local, unpushed): additive
   prerequisite patch first — entries stored legs as rendered display
   strings, not this codebase's canonical structured-leg schema
