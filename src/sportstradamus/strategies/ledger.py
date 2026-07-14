@@ -1,9 +1,10 @@
 """Twice-daily commit orchestrator for the simulated-bettor ledger (Policy v1).
 
 Implements ``docs/handoffs/sim-bettor-ledger.md`` §10: builds the shared
-same-game + cross-game candidate universe once per run, then draws and sizes
-entries for 3 personas × 40 Monte-Carlo replicates and appends them to the
-append-only JSONL ledger. Pure orchestration over
+same-game + cross-game candidate universe once per run -- one live scrape per
+platform (Underdog and Sleeper), combined into a single pool -- then draws and
+sizes entries for 3 personas × 40 Monte-Carlo replicates and appends them to
+the append-only JSONL ledger. Pure orchestration over
 :mod:`sportstradamus.strategies._ledger_selection`,
 :mod:`sportstradamus.strategies._ledger_cross_game`, and
 :mod:`sportstradamus.strategies._ledger_store` — no selection/pricing logic
@@ -39,6 +40,7 @@ _SHARED_CONFIG = PickemConfig(
 )
 _POWER_SIZES = frozenset({2, 3})
 _FLEX_SIZES = frozenset({4, 5, 6})
+_PLATFORMS: tuple[str, ...] = ("Underdog", "Sleeper")
 
 
 def _partition_by_size_rule(
@@ -63,27 +65,33 @@ def _partition_by_size_rule(
 def build_candidate_universe(
     date: datetime.date, run_slot: str
 ) -> list[_ledger_selection.LedgerCandidate]:
-    """Exactly ONE live scrape (via live_load), reused by both candidate
-    sources. Do not call construct_entries without parlay_dfs/offers_df here
-    -- that would trigger a second, redundant scrape.
+    """One live scrape per platform (via live_load), reused by that
+    platform's own same-game and cross-game candidate builders. Do not call
+    construct_entries without parlay_dfs/offers_df here -- that would
+    trigger a second, redundant scrape for whichever platform it's called
+    under.
     """
-    parlay_dfs, offers_df = live_load(_SHARED_CONFIG)
-    same_game = _partition_by_size_rule(
-        [
-            _ledger_selection.from_recommended_entry(e)
-            for e in construct_entries(
-                date,
-                _ledger_selection.BANKROLL_PER_REPLICATE,
-                _SHARED_CONFIG,
-                parlay_dfs=parlay_dfs,
-                offers_df=offers_df,
-            )
-        ]
-    )
-    cross_game = _ledger_cross_game.build_cross_game_candidates(
-        offers_df, _SHARED_CONFIG, date, run_slot
-    )
-    return same_game + cross_game
+    universe: list[_ledger_selection.LedgerCandidate] = []
+    for platform in _PLATFORMS:
+        parlay_dfs, offers_df = live_load(_SHARED_CONFIG, platform)
+        same_game = _partition_by_size_rule(
+            [
+                _ledger_selection.from_recommended_entry(e)
+                for e in construct_entries(
+                    date,
+                    _ledger_selection.BANKROLL_PER_REPLICATE,
+                    _SHARED_CONFIG,
+                    parlay_dfs=parlay_dfs,
+                    offers_df=offers_df,
+                    platform=platform,
+                )
+            ]
+        )
+        cross_game = _ledger_cross_game.build_cross_game_candidates(
+            offers_df, _SHARED_CONFIG, date, run_slot, platform=platform
+        )
+        universe.extend(same_game + cross_game)
+    return universe
 
 
 def _committed_record(
@@ -121,6 +129,7 @@ def _committed_record(
         "payout_multiplier": candidate.payout_multiplier,
         "ev": candidate.ev,
         "date": date.isoformat(),
+        "platform": candidate.platform,
     }
 
 

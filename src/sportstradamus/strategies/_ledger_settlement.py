@@ -21,7 +21,7 @@ import pandas as pd
 from sportstradamus import clv
 from sportstradamus.analysis import _gameday_rows_for, _resolve_leg
 from sportstradamus.helpers.io import read_history
-from sportstradamus.prediction.payouts import payout_curve_for
+from sportstradamus.prediction.payouts import SLEEPER_FULL_REFUND_MAX_SIZE, payout_curve_for
 from sportstradamus.strategies import _ledger_bankroll, _ledger_store
 
 # CLV frame columns fill_from_archive needs but LEG_FIELDS doesn't carry;
@@ -182,7 +182,12 @@ def join_clv(distinct_legs: dict[tuple, dict], archive) -> dict[tuple, dict]:
 
 
 def realized_multiplier(
-    contest_variant: str, entry_size: int, effective_size: int, misses: int
+    contest_variant: str,
+    entry_size: int,
+    effective_size: int,
+    misses: int,
+    *,
+    platform: str = "Underdog",
 ) -> float:
     """Deterministic realized payout multiplier -- no unknown outcome, no RNG.
 
@@ -193,10 +198,22 @@ def realized_multiplier(
     function's push edge cases: an entry reduced below the 2-leg minimum by
     pushes refunds (x1) if nothing was lost, else busts (x0); a lookup past
     the curve's recorded miss count also busts.
+
+    Sleeper diverges from this generic rule at its 2-pick minimum: any push
+    on an entry sized at or below ``SLEEPER_FULL_REFUND_MAX_SIZE`` refunds
+    the whole entry unconditionally, before the surviving leg's outcome even
+    matters (docs/handoffs/sleeper-parity.md §3 item 3).
     """
+    pushes = entry_size - effective_size
+    # Must precede the generic effective_size<2 branch: it is strictly
+    # narrower (Sleeper + <=2 legs + >=1 push) and must win the cases where
+    # both would otherwise fire, e.g. entry_size=2/effective_size=1/misses=1
+    # refunds in full under this rule but would bust under the generic one.
+    if platform == "Sleeper" and entry_size <= SLEEPER_FULL_REFUND_MAX_SIZE and pushes >= 1:
+        return 1.0
     if effective_size < 2:
         return 0.0 if misses > 0 else 1.0
-    _, curve = payout_curve_for("Underdog", contest_variant, legacy=False)
+    _, curve = payout_curve_for(platform, contest_variant, legacy=False)
     row = curve.get(effective_size)
     if row is None or misses >= len(row):
         return 0.0
@@ -242,8 +259,15 @@ def settle_entry(
         elif outcome == 1:
             misses += 1
     effective_size = record["entry_size"] - pushes
+    # .get() with a default, not record["platform"]: pre-existing immutable
+    # records committed before the platform field existed have no such key,
+    # and the append-only ledger must settle those old records forever.
     mult = realized_multiplier(
-        record["contest_variant"], record["entry_size"], effective_size, misses
+        record["contest_variant"],
+        record["entry_size"],
+        effective_size,
+        misses,
+        platform=record.get("platform", "Underdog"),
     )
     stake = Decimal(record["stake"])
     payout = Decimal(str(mult)) * stake

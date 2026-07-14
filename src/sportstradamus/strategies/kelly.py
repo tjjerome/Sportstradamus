@@ -111,6 +111,19 @@ def _blend_shrinkage(training_bss: float, live_bss: float, live_n: int) -> float
     return _clip01(blended)
 
 
+def kelly_edge(win_prob: float, payout_multiplier: float, model_shrinkage: float = 1.0) -> float:
+    """Shrinkage-adjusted raw Kelly fraction ``f* = (bp - q) / b``.
+
+    Returns ``-1.0`` (not clamped to 0) when ``payout_multiplier <= 1`` —
+    callers decide their own reject threshold, same as a negative edge.
+    """
+    p = 0.5 + (win_prob - 0.5) * _clip01(model_shrinkage)
+    b = payout_multiplier - 1.0
+    if b <= 0.0:
+        return -1.0
+    return (b * p - (1.0 - p)) / b
+
+
 def fractional_kelly_stake(
     bankroll: Decimal,
     win_prob: float,
@@ -144,13 +157,7 @@ def fractional_kelly_stake(
     bankroll = Decimal(bankroll)
     payout_multiplier = Decimal(payout_multiplier)
 
-    p = 0.5 + (float(win_prob) - 0.5) * _clip01(model_shrinkage)
-    b = float(payout_multiplier) - 1.0
-    if b <= 0.0:
-        return Decimal("0")
-
-    q = 1.0 - p
-    raw_kelly = (b * p - q) / b  # f* = (bp - q) / b
+    raw_kelly = kelly_edge(float(win_prob), float(payout_multiplier), model_shrinkage)
     if raw_kelly <= 0.0:
         return Decimal("0")
 

@@ -56,6 +56,7 @@ class LedgerCandidate:
     payout_multiplier: float
     ev: float
     stake: Decimal
+    platform: str = "Underdog"
     lines: tuple[float, ...] = ()
     model_probs: tuple[float, ...] = ()
     book_devig: tuple[float, ...] = ()
@@ -79,6 +80,7 @@ def from_recommended_entry(entry: RecommendedEntry) -> LedgerCandidate:
         payout_multiplier=entry.payout_multiplier,
         ev=entry.ev,
         stake=entry.recommended_stake,
+        platform=entry.platform,
     )
 
 

@@ -19,6 +19,7 @@ import pytest
 from sportstradamus import clv
 from sportstradamus.helpers import io as helpers_io
 from sportstradamus.helpers import underdog_payouts
+from sportstradamus.prediction.payouts import SLEEPER_FULL_REFUND_MAX_SIZE, payout_curve_for
 from sportstradamus.strategies import _ledger_bankroll, _ledger_settlement, _ledger_store
 
 DATE = datetime.date(2026, 7, 12)
@@ -49,6 +50,7 @@ def _leg(
     league: str = "NBA",
     date: str = "2026-07-12",
     win_prob: float = 0.6,
+    platform: str = "Underdog",
 ) -> dict:
     return {
         "player": player,
@@ -60,7 +62,7 @@ def _leg(
         "league": league,
         "game": game,
         "date": date,
-        "platform": "Underdog",
+        "platform": platform,
         "win_prob": win_prob,
         "boost": 1.0,
         "push_prob": 0.0,
@@ -78,6 +80,7 @@ def _record(
     persona: str = "safe",
     run_slot: str = "morning",
     replicate_id: int = 0,
+    platform: str = "Underdog",
 ) -> dict:
     return {
         "id": rec_id,
@@ -101,6 +104,7 @@ def _record(
         "payout_multiplier": 3.0,
         "ev": 0.1,
         "date": DATE.isoformat(),
+        "platform": platform,
     }
 
 
@@ -192,6 +196,57 @@ def test_push_reduces_effective_size_and_uses_reduced_curve(monkeypatch, tmp_pat
     assert row["effective_size"] == 2  # 3 - 1 push
     expected_mult = float(underdog_payouts["power"][2])
     assert row["realized_multiplier"] == pytest.approx(expected_mult)
+
+
+def test_settle_entry_reads_platform_from_record_and_passes_to_realized_multiplier(
+    monkeypatch, tmp_path
+) -> None:
+    _redirect(monkeypatch, tmp_path)
+    stats = {"NBA": _StubStats(_GAMELOG)}
+    legs = [
+        _leg("Player A", "PTS", 25.0, "Over", "BOS/LAL", platform="Sleeper"),  # 25==line -> push
+        _leg("Player B", "AST", 5.5, "Over", "BOS/LAL", platform="Sleeper"),  # 4 -> miss
+    ]
+    record = _record(
+        "sleeper-push-refund",
+        legs,
+        contest_variant="power",
+        entry_size=2,
+        stake="10",
+        platform="Sleeper",
+    )
+    _ledger_store.append_entries(DATE, [record])
+
+    settled = _ledger_settlement.settle_day(DATE, stats, _NoopArchive())
+
+    assert len(settled) == 1
+    row = settled[0]
+    assert row["pushes"] == 1
+    assert row["misses"] == 1
+    assert row["realized_multiplier"] == pytest.approx(1.0)
+    assert row["payout"] == row["stake"]
+    assert row["pnl"] == Decimal("0")
+
+
+def test_settle_entry_missing_platform_key_defaults_to_underdog(monkeypatch, tmp_path) -> None:
+    _redirect(monkeypatch, tmp_path)
+    stats = {"NBA": _StubStats(_GAMELOG)}
+    legs = [
+        _leg("Player A", "PTS", 25.0, "Over", "BOS/LAL"),  # 25 == line -> push
+        _leg("Player B", "AST", 5.5, "Over", "BOS/LAL"),  # 4 -> miss
+    ]
+    record = _record("no-platform-key", legs, contest_variant="power", entry_size=2, stake="10")
+    del record["platform"]
+    _ledger_store.append_entries(DATE, [record])
+
+    settled = _ledger_settlement.settle_day(DATE, stats, _NoopArchive())
+
+    assert len(settled) == 1
+    row = settled[0]
+    assert row["pushes"] == 1
+    assert row["misses"] == 1
+    assert row["realized_multiplier"] == pytest.approx(0.0)
+    assert row["payout"] == Decimal("0")
 
 
 # --- 2. CLV coverage: >=90% of distinct legs resolve a non-NaN Model CLV -------
@@ -322,6 +377,36 @@ def test_realized_multiplier_sub_minimum_size_with_loss_is_bust() -> None:
 
 def test_realized_multiplier_out_of_range_misses_is_bust() -> None:
     assert _ledger_settlement.realized_multiplier("flex", 6, 6, 6) == pytest.approx(0.0)
+
+
+# --- 4.5 realized_multiplier: Sleeper 2-pick full-refund divergence ------------
+
+
+def test_realized_multiplier_sleeper_two_leg_push_with_surviving_miss_refunds_in_full() -> None:
+    assert _ledger_settlement.realized_multiplier(
+        "power", 2, 1, 1, platform="Sleeper"
+    ) == pytest.approx(1.0)
+
+
+def test_realized_multiplier_sleeper_two_leg_push_no_surviving_miss_still_refunds() -> None:
+    assert _ledger_settlement.realized_multiplier(
+        "power", 2, 1, 0, platform="Sleeper"
+    ) == pytest.approx(1.0)
+
+
+def test_realized_multiplier_underdog_two_leg_push_with_surviving_miss_still_busts() -> None:
+    assert _ledger_settlement.realized_multiplier(
+        "power", 2, 1, 1, platform="Underdog"
+    ) == pytest.approx(0.0)
+
+
+def test_realized_multiplier_sleeper_three_leg_push_uses_generic_rule_not_full_refund() -> None:
+    assert SLEEPER_FULL_REFUND_MAX_SIZE == 2
+    _, curve = payout_curve_for("Sleeper", "power", legacy=False)
+    expected = curve[2][0]
+    assert _ledger_settlement.realized_multiplier(
+        "power", 3, 2, 0, platform="Sleeper"
+    ) == pytest.approx(expected)
 
 
 # --- 5. Entries JSONL immutability ----------------------------------------------

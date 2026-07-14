@@ -15,7 +15,8 @@ import datetime
 from decimal import Decimal
 
 from sportstradamus.strategies import _ledger_store, ledger
-from sportstradamus.strategies._ledger_selection import LedgerCandidate
+from sportstradamus.strategies._ledger_selection import LedgerCandidate, from_recommended_entry
+from sportstradamus.strategies.underdog_pickem import RecommendedEntry
 
 DATE = datetime.date(2026, 7, 12)
 
@@ -28,7 +29,7 @@ def _redirect_store(monkeypatch, tmp_path) -> None:
     )
 
 
-def _canonical_leg(player: str) -> dict:
+def _canonical_leg(player: str, platform: str = "Underdog") -> dict:
     return {
         "player": player,
         "team": "",
@@ -39,7 +40,7 @@ def _canonical_leg(player: str) -> dict:
         "league": "NBA",
         "game": "",
         "date": "2026-07-12",
-        "platform": "Underdog",
+        "platform": platform,
         "win_prob": 0.6,
         "boost": 1.0,
         "push_prob": 0.0,
@@ -56,19 +57,21 @@ def _candidate(
     joint_prob: float = 0.5,
     ev: float = 0.1,
     stake: Decimal = Decimal("10"),
+    platform: str = "Underdog",
 ) -> LedgerCandidate:
     return LedgerCandidate(
         id=cand_id,
         contest_variant=contest_variant,
         entry_size=entry_size,
         legs=tuple(f"{p} Over 4.5 rebounds - 60.0%, 1.6x" for p in players),
-        canonical_legs=tuple(_canonical_leg(p) for p in players),
+        canonical_legs=tuple(_canonical_leg(p, platform=platform) for p in players),
         players=players,
         game_span=1,
         joint_prob=joint_prob,
         payout_multiplier=3.0,
         ev=ev,
         stake=stake,
+        platform=platform,
         lines=tuple(4.5 for _ in players),
         model_probs=tuple(0.6 for _ in players),
         book_devig=tuple(0.55 for _ in players),
@@ -86,6 +89,46 @@ def _small_universe() -> list[LedgerCandidate]:
 
 def _patch_universe(monkeypatch, universe: list[LedgerCandidate]) -> None:
     monkeypatch.setattr(ledger, "build_candidate_universe", lambda date, run_slot: universe)
+
+
+# --- from_recommended_entry platform threading ----------------------------------
+
+
+def test_from_recommended_entry_preserves_sleeper_platform() -> None:
+    entry = RecommendedEntry(
+        id="entry-1",
+        contest_variant="power",
+        entry_size=2,
+        legs=("Player A Over 4.5 rebounds - 60.0%, 1.6x",),
+        joint_prob=0.5,
+        payout_multiplier=3.0,
+        ev=0.1,
+        recommended_stake=Decimal("10"),
+        canonical_legs=(_canonical_leg("Player A", platform="Sleeper"),),
+        platform="Sleeper",
+    )
+
+    result = from_recommended_entry(entry)
+
+    assert result.platform == "Sleeper"
+
+
+def test_from_recommended_entry_defaults_to_underdog_platform() -> None:
+    entry = RecommendedEntry(
+        id="entry-2",
+        contest_variant="power",
+        entry_size=2,
+        legs=("Player A Over 4.5 rebounds - 60.0%, 1.6x",),
+        joint_prob=0.5,
+        payout_multiplier=3.0,
+        ev=0.1,
+        recommended_stake=Decimal("10"),
+        canonical_legs=(_canonical_leg("Player A"),),
+    )
+
+    result = from_recommended_entry(entry)
+
+    assert result.platform == "Underdog"
 
 
 # --- acceptance criterion: repeat run_commit is idempotent ---------------------
@@ -135,6 +178,7 @@ def test_committed_record_has_full_schema_with_correct_types(monkeypatch, tmp_pa
         "payout_multiplier",
         "ev",
         "date",
+        "platform",
     }
     assert required_fields.issubset(record.keys())
 
@@ -145,6 +189,31 @@ def test_committed_record_has_full_schema_with_correct_types(monkeypatch, tmp_pa
     assert record["policy_version"] == ledger.POLICY_VERSION
     assert record["date"] == DATE.isoformat()
     assert record["legs_players"] == sorted(candidate.players)
+    assert record["platform"] in {"Underdog", "Sleeper"}
+
+
+def test_committed_record_includes_platform_field(monkeypatch, tmp_path) -> None:
+    _redirect_store(monkeypatch, tmp_path)
+    candidate = _candidate("cand-sleeper", frozenset({"Player A", "Player B"}), platform="Sleeper")
+
+    record = ledger._committed_record(
+        candidate, date=DATE, run_slot="morning", persona="safe", replicate_id=3
+    )
+
+    assert record["platform"] == "Sleeper"
+
+
+def test_committed_record_defaults_to_underdog_when_candidate_platform_unset(
+    monkeypatch, tmp_path
+) -> None:
+    _redirect_store(monkeypatch, tmp_path)
+    candidate = _candidate("cand-default", frozenset({"Player A", "Player B"}))
+
+    record = ledger._committed_record(
+        candidate, date=DATE, run_slot="morning", persona="safe", replicate_id=3
+    )
+
+    assert record["platform"] == "Underdog"
 
 
 # --- invalid run_slot ------------------------------------------------------------

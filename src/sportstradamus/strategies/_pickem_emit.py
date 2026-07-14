@@ -80,6 +80,7 @@ def emit_yaml(
                 "shrinkage": float(e.shrinkage),
                 "shrinkage_source": e.shrinkage_source,
                 "extras": e.extras,
+                "platform": e.platform,
             }
             for e in entries
         ],
@@ -101,6 +102,7 @@ _PICKEM_FRAME_COLS = [
     "shrinkage_source",
     "league",
     "game",
+    "platform",
 ]
 
 
@@ -126,6 +128,7 @@ def entries_to_frame(entries: list[RecommendedEntry]) -> pd.DataFrame:
                 "shrinkage_source": e.shrinkage_source,
                 "league": e.extras.get("league", ""),
                 "game": e.extras.get("game", ""),
+                "platform": e.platform,
             }
             for e in entries
         ]

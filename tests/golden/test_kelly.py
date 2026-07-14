@@ -16,6 +16,7 @@ from sportstradamus.strategies.kelly import (
     KellyCandidate,
     fractional_kelly_stake,
     joint_kelly_portfolio,
+    kelly_edge,
     resolve_shrinkage,
 )
 
@@ -138,25 +139,6 @@ def test_size_candidates_shrinks_filters_and_pairs():
     assert sized_b == pytest.approx([2.0, 2.0])
 
 
-def test_size_candidates_shrinks_filters_and_pairs():
-    # Direct (cvxpy-free) pin of the sizing step: shrinkage-adjusted p, net odds
-    # b, and the floor/EV drops. Expected values derived by hand from the
-    # effective_p = 0.5 + (win_prob - 0.5) * shrinkage rule.
-    sized_p, sized_b, bet_ids = kelly._size_candidates(
-        [
-            KellyCandidate("a", win_prob=0.6, payout_multiplier=Decimal("3")),
-            KellyCandidate("bad", win_prob=0.2, payout_multiplier=Decimal("2")),
-            KellyCandidate(
-                "floor", win_prob=0.6, payout_multiplier=Decimal("3"), model_shrinkage=0.0
-            ),
-            KellyCandidate("b", win_prob=0.65, payout_multiplier=Decimal("3"), model_shrinkage=0.5),
-        ]
-    )
-    assert bet_ids == ["a", "b"]
-    assert sized_p == pytest.approx([0.6, 0.575])
-    assert sized_b == pytest.approx([2.0, 2.0])
-
-
 def test_portfolio_drops_floor_shrinkage_candidate():
     # A candidate whose shrinkage is at/below SHRINKAGE_FLOOR is dropped during
     # sizing even when its raw odds are +EV.
@@ -218,3 +200,53 @@ def test_resolution_chain_via_fractional_kelly_stake():
     # Final fallback.
     s = resolve_shrinkage(training_bss=None, live_bss=None, live_n=0)
     assert s == 1.0
+
+
+# --------------------------------------------------------------------------- #
+# kelly_edge (sleeper-parity §5 extraction) + parlay.py's units formula
+
+
+def test_kelly_edge_matches_fractional_kelly_stake_core():
+    # Same (win_prob, payout_multiplier, model_shrinkage) through both: kelly_edge's
+    # raw fraction, scaled by fraction and bankroll (cap not binding here), must
+    # reproduce fractional_kelly_stake's stake -- proves the §5 extraction didn't
+    # change fractional_kelly_stake's math. b=1, p=0.505 -> raw_kelly=0.01.
+    raw = kelly_edge(win_prob=0.505, payout_multiplier=2.0, model_shrinkage=1.0)
+    assert raw == pytest.approx(0.01)
+
+    stake = fractional_kelly_stake(
+        bankroll=Decimal("1000"),
+        win_prob=0.505,
+        payout_multiplier=Decimal("2"),
+        fraction=DEFAULT_KELLY_FRACTION,
+    )
+    assert stake == Decimal("2.50")
+
+
+def test_kelly_units_uses_shrinkage_and_max_fraction_cap():
+    # Direct test of parlay.py's units formula's pure-math half: shrinkage
+    # genuinely discounts the edge vs full trust, and units scale by
+    # DEFAULT_KELLY_FRACTION / MAX_FRACTION_OF_BANKROLL.
+    raw_full_trust = kelly_edge(win_prob=0.7, payout_multiplier=3.0, model_shrinkage=1.0)
+    raw_half_trust = kelly_edge(win_prob=0.7, payout_multiplier=3.0, model_shrinkage=0.5)
+    assert raw_half_trust < raw_full_trust
+    assert raw_half_trust == pytest.approx(0.4)
+
+    units = raw_half_trust * DEFAULT_KELLY_FRACTION / MAX_FRACTION_OF_BANKROLL
+    assert units == pytest.approx(20.0)
+
+
+def test_kelly_units_floors_shrinkage_zero_to_reject():
+    # Zero shrinkage collapses win_prob to a coin flip regardless of edge.
+    # At payout=3x a coin flip is still +EV (raw_kelly=0.25 > 0) -- shrinkage
+    # alone doesn't reject a big-enough payout. At payout=1.5x a coin flip is
+    # -EV (b=0.5; raw_kelly=(0.5*0.5-0.5)/0.5=-0.5 < 0): the candidate is
+    # correctly rejected despite win_prob=0.9's apparent edge, proving the
+    # audit's stated failure mode (no model-confidence discount reaching
+    # parlay sizing) is fixed.
+    raw = kelly_edge(win_prob=0.9, payout_multiplier=3.0, model_shrinkage=0.0)
+    assert raw == pytest.approx(0.25)
+
+    raw_losing = kelly_edge(win_prob=0.9, payout_multiplier=1.5, model_shrinkage=0.0)
+    assert raw_losing == pytest.approx(-0.5)
+    assert raw_losing < 0

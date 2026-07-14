@@ -59,7 +59,17 @@ def psd_or_none(SIG, legacy):
 
 
 def parlay_payout_prob(
-    p, push_legs, SIG, bet_size, boost, payout, full_payouts, payout_base, legacy
+    p,
+    push_legs,
+    SIG,
+    bet_size,
+    boost,
+    payout,
+    full_payouts,
+    payout_base,
+    legacy,
+    *,
+    full_refund_below_size=None,
 ):
     """Expected payout for a parlay, routing to the analytical or push-aware path.
 
@@ -68,6 +78,10 @@ def parlay_payout_prob(
     or any leg with a non-floor push probability must route to the Monte-Carlo
     :func:`expected_payout_with_pushes` path instead — under ``legacy=True``
     the analytical path always runs, matching pre-2026.05 scoring.
+
+    ``boost`` may be a per-leg ``np.ndarray`` (push-repricing, see
+    :func:`expected_payout_with_pushes`) as well as a scalar; ``full_refund_below_size``
+    passes straight through to that function unchanged.
     """
     has_pushes = bool(np.any(push_legs > _PUSH_PROB_FLOOR))
     # Curves with payouts at multiple miss-counts (e.g. Underdog flex and
@@ -77,6 +91,12 @@ def parlay_payout_prob(
     multi_tier = sum(1 for v in curve if v > 0) > 1
     if (has_pushes or multi_tier) and not legacy:
         return expected_payout_with_pushes(
-            p, push_legs, SIG, bet_size, boost=boost, payout_curve=full_payouts
+            p,
+            push_legs,
+            SIG,
+            bet_size,
+            boost=boost,
+            payout_curve=full_payouts,
+            full_refund_below_size=full_refund_below_size,
         )
     return payout * multivariate_normal.cdf(norm.ppf(p), np.zeros(bet_size), SIG)

@@ -9,8 +9,9 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from sportstradamus.strategies._pickem_emit import emit_yaml
+from sportstradamus.strategies._pickem_emit import emit_yaml, entries_to_frame
 from sportstradamus.strategies.underdog_pickem import (
+    PLATFORM_CONTEST_VARIANTS,
     PickemConfig,
     _filter_parlays,
     _validate_rivals_coverage,
@@ -24,7 +25,7 @@ def _offers(rows):
     return pd.DataFrame(rows, columns=cols)
 
 
-def _canonical_leg(desc, *, league, game):
+def _canonical_leg(desc, *, league, game, platform="Underdog"):
     return {
         "player": desc,
         "team": "",
@@ -35,7 +36,7 @@ def _canonical_leg(desc, *, league, game):
         "league": league,
         "game": game,
         "date": "2026-05-08",
-        "platform": "Underdog",
+        "platform": platform,
         "win_prob": 0.6,
         "boost": 1.0,
         "push_prob": 0.0,
@@ -43,19 +44,28 @@ def _canonical_leg(desc, *, league, game):
     }
 
 
-def _parlay(legs, *, bet_size=None, model_ev=2.5, payout=3.0, league="WNBA", game="A/B"):
+def _parlay(
+    legs,
+    *,
+    bet_size=None,
+    model_ev=2.5,
+    payout=3.0,
+    league="WNBA",
+    game="A/B",
+    platform="Underdog",
+):
     bet_size = bet_size or len(legs)
     row = {
         "Game": game,
         "Date": "2026-05-08",
         "League": league,
-        "Platform": "Underdog",
+        "Platform": platform,
         "Model EV": model_ev,
         "Market EV": model_ev * 0.95,
         "Boost": payout,
         "Rec Bet": 1.0,
         "Bet Size": bet_size,
-        "legs": [_canonical_leg(leg, league=league, game=game) for leg in legs],
+        "legs": [_canonical_leg(leg, league=league, game=game, platform=platform) for leg in legs],
     }
     for i, leg in enumerate(legs, 1):
         row[f"Leg {i}"] = leg
@@ -297,3 +307,162 @@ def test_parlay_shrinkage_min_over_canonical_leg_markets(monkeypatch):
     shrinkage, source = up._parlay_shrinkage(row, "WNBA", by_player)
     assert shrinkage == 0.20  # min(REB=0.80, STL=0.20) — least-calibrated leg
     assert source == "training"
+
+
+# --- Sleeper platform threading ------------------------------------------------
+
+
+def test_canonical_markets_by_player_sleeper_uses_sleeper_stat_map():
+    from sportstradamus.strategies import underdog_pickem as up
+
+    # Real Sleeper stat_map raw keys (disjoint namespace from Underdog's
+    # "Rebounds"/"Steals"): rebounds->REB, steals->STL.
+    offers = pd.DataFrame(
+        {
+            "Player": ["A. Player", "B. Player"],
+            "Market": ["rebounds", "steals"],
+            "Win Prob": [0.60, 0.60],
+            "Market Prob": [0.55, 0.55],
+        }
+    )
+    by_player = up._canonical_markets_by_player(offers, platform="Sleeper")
+    assert by_player == {"A. Player": {"REB"}, "B. Player": {"STL"}}
+
+    # Underdog's stat_map has no "rebounds"/"steals" (lowercase, snake_case)
+    # keys, so the same offers under the Underdog platform resolve to nothing.
+    assert up._canonical_markets_by_player(offers, platform="Underdog") == {}
+
+
+def test_canonical_markets_by_player_unknown_platform_returns_empty():
+    from sportstradamus.strategies import underdog_pickem as up
+
+    offers = pd.DataFrame(
+        {
+            "Player": ["A. Player"],
+            "Market": ["rebounds"],
+            "Win Prob": [0.60],
+            "Market Prob": [0.55],
+        }
+    )
+    assert up._canonical_markets_by_player(offers, platform="DraftKings") == {}
+
+
+def test_construct_entries_sleeper_excludes_rivals(fake_market_calibration):
+    cfg = PickemConfig(
+        min_model_edge=0.0,
+        min_sharp_edge=0.0,
+        disagreement_threshold=1.0,
+        min_ev=0.0,
+        entry_sizes=(3,),
+        contest_variants=PLATFORM_CONTEST_VARIANTS["Sleeper"],
+        top_k=10,
+        max_overlap=2,
+    )
+    offers = _offers(
+        [
+            ("Clark", "IND", "PTS", "Over", 0.55, 0.54),
+            ("Wilson", "LV", "PTS", "Over", 0.55, 0.54),
+        ]
+    )
+    parlay_dfs = {
+        "power": pd.DataFrame([_parlay(["P1", "P2", "P3"], model_ev=1.4, platform="Sleeper")]),
+        "flex": pd.DataFrame([_parlay(["F1", "F2", "F3"], model_ev=1.3, platform="Sleeper")]),
+        # If a rivals frame ever leaked in it must never surface in the output
+        # because "rivals" isn't in Sleeper's contest_variants.
+        "rivals": pd.DataFrame(
+            [_parlay(["Clark vs. Wilson"], bet_size=2, model_ev=1.5, platform="Sleeper")]
+        ),
+    }
+    out = construct_entries(
+        datetime.date(2026, 5, 8),
+        Decimal("500"),
+        cfg,
+        parlay_dfs=parlay_dfs,
+        offers_df=offers,
+        platform="Sleeper",
+    )
+    variants = {e.contest_variant for e in out}
+    assert variants == {"power", "flex"}
+    assert "rivals" not in variants
+    assert all(e.platform == "Sleeper" for e in out)
+
+
+def test_construct_entries_sleeper_push_case_sizes(fake_market_calibration):
+    """Size-2 Sleeper Max (full-refund push) and size-6 Sleeper Flex.
+
+    The PickemConfig default entry_sizes=(3, 5) never reaches either edge;
+    this exercises both explicitly per the stage acceptance criteria.
+    """
+    cfg = PickemConfig(
+        min_model_edge=0.0,
+        min_sharp_edge=0.0,
+        disagreement_threshold=1.0,
+        min_ev=0.0,
+        entry_sizes=(2, 3, 4, 5, 6),
+        contest_variants=PLATFORM_CONTEST_VARIANTS["Sleeper"],
+        top_k=10,
+        max_overlap=5,
+    )
+    parlay_dfs = {
+        "power": pd.DataFrame(
+            [_parlay(["P1", "P2"], bet_size=2, model_ev=1.5, platform="Sleeper")]
+        ),
+        "flex": pd.DataFrame(
+            [
+                _parlay(
+                    ["F1", "F2", "F3", "F4", "F5", "F6"],
+                    bet_size=6,
+                    model_ev=1.5,
+                    platform="Sleeper",
+                )
+            ]
+        ),
+    }
+    out = construct_entries(
+        datetime.date(2026, 5, 8),
+        Decimal("500"),
+        cfg,
+        parlay_dfs=parlay_dfs,
+        platform="Sleeper",
+    )
+    sizes_by_variant = {e.contest_variant: e.entry_size for e in out}
+    assert sizes_by_variant.get("power") == 2
+    assert sizes_by_variant.get("flex") == 6
+    assert all(e.platform == "Sleeper" for e in out)
+
+
+@pytest.mark.parametrize("platform", ["Underdog", "Sleeper"])
+def test_recommended_entry_platform_roundtrips_yaml_and_frame(
+    tmp_path: Path, fake_market_calibration, platform
+):
+    cfg = PickemConfig(
+        min_model_edge=0.0,
+        min_sharp_edge=0.0,
+        disagreement_threshold=1.0,
+        min_ev=0.0,
+        entry_sizes=(3,),
+        contest_variants=("power",),
+    )
+    offers = _offers([("Clark", "IND", "PTS", "Over", 0.6, 0.58)])
+    parlay_dfs = {
+        "power": pd.DataFrame([_parlay(["L1", "L2", "L3"], model_ev=1.5, platform=platform)])
+    }
+    entries = construct_entries(
+        datetime.date(2026, 5, 8),
+        Decimal("500"),
+        cfg,
+        parlay_dfs=parlay_dfs,
+        offers_df=offers,
+        platform=platform,
+    )
+    assert len(entries) == 1
+    assert entries[0].platform == platform
+
+    yaml = pytest.importorskip("yaml")
+    out_path = tmp_path / "rec.yaml"
+    emit_yaml(entries, datetime.date(2026, 5, 8), Decimal("500"), cfg, out_path)
+    payload = yaml.safe_load(out_path.read_text())
+    assert payload["entries"][0]["platform"] == platform
+
+    frame = entries_to_frame(entries)
+    assert frame["platform"].iloc[0] == platform

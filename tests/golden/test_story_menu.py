@@ -59,6 +59,8 @@ def _ctx(
         p_books=probs.copy(),
         p_push=np.zeros(n),
         boosts=np.ones(n),
+        shrinkage=np.ones(n),
+        opp_boost=np.full(n, np.nan),
     )
     bet_df = {
         i: {
