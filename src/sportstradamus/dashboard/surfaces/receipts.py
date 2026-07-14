@@ -24,6 +24,7 @@ from sportstradamus.analysis import (
     worst_month,
 )
 from sportstradamus.dashboard.components.grid import render_themed_grid
+from sportstradamus.dashboard.components.hero import page_hero
 from sportstradamus.dashboard.components.profit_sim import (
     render_profit_sim,
     render_profit_sim_summary,
@@ -38,7 +39,6 @@ from sportstradamus.dashboard.data import (
     load_profit_sim_summary,
     load_resolve_meta,
     load_user_slips,
-    render_banner,
     sidebar_filters,
     sport_filtered,
 )
@@ -91,8 +91,7 @@ def _hero_stat(label: str, value: str, *, size: str, color: str = "") -> str:
     )
 
 
-st.title("Receipts")
-render_banner("stats", "the track record, with the losers shown")
+page_hero("THE RECEIPTS", "Receipts")
 
 history = load_history()
 parlays = load_parlays()

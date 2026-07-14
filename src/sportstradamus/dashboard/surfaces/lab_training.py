@@ -13,8 +13,9 @@ import pandas as pd
 import streamlit as st
 
 from sportstradamus.dashboard.components.gate_matrix import gate_matrix_frame, render_gate_matrix
+from sportstradamus.dashboard.components.hero import page_hero
 from sportstradamus.dashboard.components.lab_filters import apply_lab_filters, render_lab_filters
-from sportstradamus.dashboard.data import format_ts, load_model_stats, load_stat_meta, render_banner
+from sportstradamus.dashboard.data import format_ts, load_model_stats, load_stat_meta
 from sportstradamus.dashboard.surfaces.lab_training_charts import lifecycle_funnel
 from sportstradamus.helpers.io import LIVE_METRICS_PATH, MODEL_STATS_PATH
 from sportstradamus.training.graduation import lifecycle_table
@@ -237,8 +238,6 @@ def _render_tab(tab_name: str, metric_cols: list[str], view: pd.DataFrame) -> No
     )
 
 
-st.title("Model Training Diagnostics")
-
 mtime = (
     format_ts(
         dt.datetime.fromtimestamp(MODEL_STATS_PATH.stat().st_mtime).isoformat(timespec="seconds")
@@ -246,7 +245,7 @@ mtime = (
     if MODEL_STATS_PATH.is_file()
     else "no meditate run on record"
 )
-render_banner("stats", f"last meditated {mtime}")
+page_hero("MODEL LAB · TRAINING", "Model Training Diagnostics", mtime)
 
 stats = load_model_stats()
 if stats.empty:

@@ -7,7 +7,6 @@ import importlib.resources as pkg_resources
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -378,19 +377,6 @@ def _load_model_stats_cached(path: Path, mtime: float) -> pd.DataFrame:
 def load_model_stats() -> pd.DataFrame:
     """Per-(league, market, metric_row) training diagnostics from ``meditate``."""
     return _load_model_stats_cached(MODEL_STATS_PATH, _mtime(MODEL_STATS_PATH))
-
-
-def render_banner(kind: Literal["predictions", "stats"], subtitle: str = "") -> None:
-    """Render a colored section banner so Predictions vs Stats are visually distinct."""
-    if kind == "predictions":
-        css_class, label = "banner-predictions", "Predictions"
-    else:
-        css_class, label = "banner-stats", "Stats"
-    sub = f" — {subtitle}" if subtitle else ""
-    st.markdown(
-        f'<div class="{css_class}"><b>{label}</b>{sub}</div>',
-        unsafe_allow_html=True,
-    )
 
 
 @st.cache_data(ttl=_STATIC_CONFIG_TTL_SECONDS, show_spinner="Loading stat map...")

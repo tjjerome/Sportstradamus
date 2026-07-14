@@ -6,6 +6,7 @@ import streamlit as st
 from sportstradamus.dashboard import columns
 from sportstradamus.dashboard.components.deep_dive import init_detail_state, show_detail
 from sportstradamus.dashboard.components.grid import render_themed_grid
+from sportstradamus.dashboard.components.hero import page_hero
 from sportstradamus.dashboard.components.slip_builder import render_simple_builder
 from sportstradamus.dashboard.components.slip_state import add_to_simple_slip
 from sportstradamus.dashboard.data import (
@@ -13,16 +14,13 @@ from sportstradamus.dashboard.data import (
     load_current_game_corr,
     load_current_meta,
     load_current_offers,
-    render_banner,
     sport_filtered,
 )
 from sportstradamus.dashboard.lenses import LENSES, apply_lens
 
-st.title("Today's Predictions")
-
 meta = load_current_meta()
 generated = format_ts(meta.get("generated_at", "no run on record"))
-render_banner("predictions", f"generated {generated}")
+page_hero("THE BOARD", "Today's Predictions", generated)
 
 offers = sport_filtered(load_current_offers())
 

@@ -17,6 +17,7 @@ from sportstradamus.analysis import (
     murphy_decomposition,
 )
 from sportstradamus.dashboard.components.grid import render_themed_grid
+from sportstradamus.dashboard.components.hero import page_hero
 from sportstradamus.dashboard.components.lab_filters import apply_lab_filters, render_lab_filters
 from sportstradamus.dashboard.data import (
     TIMEFRAME_OPTIONS,
@@ -24,7 +25,6 @@ from sportstradamus.dashboard.data import (
     get_prediction_history,
     load_resolved_history_or_stop,
     load_stat_meta,
-    render_banner,
     sidebar_filters,
     sport_filtered,
 )
@@ -48,8 +48,7 @@ _LOW_SHARPNESS_STD = 0.04
 # market table (spec: find-the-weak-spots framing, the opposite intent from Receipts).
 _START_HERE_COUNT = 3
 
-st.title("Market Diagnostics & Forecast Quality")
-render_banner("stats", "per-market accuracy, calibration, CRPS")
+page_hero("MODEL LAB · DIAGNOSTICS", "Market Diagnostics & Forecast Quality")
 
 stat_meta = load_stat_meta()
 lab_sel = render_lab_filters(stat_meta, collapsed=False)

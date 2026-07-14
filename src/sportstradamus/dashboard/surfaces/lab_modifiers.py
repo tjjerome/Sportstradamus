@@ -19,7 +19,8 @@ from itertools import combinations
 import streamlit as st
 
 from sportstradamus import data
-from sportstradamus.dashboard.data import load_current_offers, render_banner
+from sportstradamus.dashboard.components.hero import page_hero
+from sportstradamus.dashboard.data import load_current_offers
 from sportstradamus.dashboard.legs import find_offer_idx
 from sportstradamus.helpers.config import apply_modifier_overrides
 from sportstradamus.helpers.io import (
@@ -116,8 +117,7 @@ def _write_rake_override(platform: str, n_legs: int, value: float) -> None:
     write_modifier_overrides(overlay)
 
 
-st.title("Modifier Reconciler")
-render_banner("stats", "expected vs actual quote — solves platform correlation modifiers")
+page_hero("MODEL LAB · MODIFIERS", "Modifier Reconciler")
 
 slips = read_user_slips()
 source_options = ["Current slip"] + ([] if slips.empty else ["Locked slip"])

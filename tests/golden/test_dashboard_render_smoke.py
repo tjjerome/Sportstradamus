@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -115,12 +116,26 @@ _OFFER_ROWS = [
 ]
 
 
+def _hero_title(at: AppTest) -> str:
+    """The page_hero ``<h1 class="hero-title">`` text from the rendered app.
+
+    Surfaces open with ``components.hero.page_hero`` (an ``st.html`` block) instead of
+    ``st.title``; ``class="hero-title"`` uniquely tags the hero markup (the injected
+    APP_CSS carries a ``.hero-title`` selector but never that attribute form).
+    """
+    heroes = [h.body for h in at.get("html") if 'class="hero-title"' in h.body]
+    assert heroes, "no page-hero rendered"
+    match = re.search(r'class="hero-title">([^<]*)</h1>', heroes[0])
+    assert match, "hero-title h1 not found"
+    return match.group(1)
+
+
 def test_app_boots_and_tonight_renders():
     """Bare ``.run()`` with no navigation lands on Tonight (``app.py``'s default page)."""
     at = AppTest.from_string(_WRAPPER, default_timeout=30)
     at.run()
     assert not at.exception
-    assert at.title[0].value == "Tonight"
+    assert _hero_title(at) == "Tonight"
 
 
 def test_app_sport_switch_rerenders_without_exception():
@@ -153,7 +168,7 @@ def test_board_renders_condensed_grid(monkeypatch, tmp_path):
     at.switch_page("surfaces/board.py")
     at.run()
     assert not at.exception
-    assert at.title[0].value == "Today's Predictions"
+    assert _hero_title(at) == "Today's Predictions"
 
 
 # Mirrors prediction/parlay.py's row-construction contract: legs is a
@@ -216,7 +231,7 @@ def test_lab_correlations_renders_heatmap_and_panels(monkeypatch, tmp_path):
     at._page_hash = calc_hash("lab-correlations")  # see module docstring
     at.run()
     assert not at.exception
-    assert at.title[0].value == "Correlations & Parlays"
+    assert _hero_title(at) == "Correlations & Parlays"
 
 
 def _diag_row(league: str, market: str, i: int) -> dict:
@@ -286,7 +301,7 @@ def test_lab_diagnostics_renders_market_table_and_start_here_strip(monkeypatch, 
     at._page_hash = calc_hash("lab-diagnostics")  # see module docstring
     at.run()
     assert not at.exception
-    assert at.title[0].value == "Market Diagnostics & Forecast Quality"
+    assert _hero_title(at) == "Market Diagnostics & Forecast Quality"
     assert any("Start here" in c.value for c in at.caption)
     tile_labels = {m.label for m in at.metric}
     assert {"NBA - PTS", "NBA - AST"} <= tile_labels
@@ -379,7 +394,7 @@ def test_lab_training_renders_gate_matrix_and_glance_strip(monkeypatch, tmp_path
     at._page_hash = calc_hash("lab-training")  # see module docstring
     at.run()
     assert not at.exception
-    assert at.title[0].value == "Model Training Diagnostics"
+    assert _hero_title(at) == "Model Training Diagnostics"
     tile_labels = {m.label: m.value for m in at.metric}
     assert tile_labels.get("Cells trained") == "2"
     assert tile_labels.get("Shipping (all gates)") == "1"
@@ -414,7 +429,7 @@ def test_lab_modifiers_renders_empty_state(monkeypatch, tmp_path):
     at._page_hash = calc_hash("lab-modifiers")  # see module docstring
     at.run()
     assert not at.exception
-    assert at.title[0].value == "Modifier Reconciler"
+    assert _hero_title(at) == "Modifier Reconciler"
 
 
 def test_games_rail_shows_reconciler_chip(monkeypatch, tmp_path):

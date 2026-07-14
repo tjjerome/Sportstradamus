@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from sportstradamus.dashboard import theme
+from sportstradamus.dashboard.components.hero import page_hero
 from sportstradamus.dashboard.components.lab_filters import render_lab_filters
 from sportstradamus.dashboard.data import (
     TIMEFRAME_OPTIONS,
@@ -18,7 +19,6 @@ from sportstradamus.dashboard.data import (
     load_parlays,
     load_resolve_meta,
     load_stat_meta,
-    render_banner,
     sidebar_filters,
     sport_filtered,
 )
@@ -27,8 +27,7 @@ from sportstradamus.dashboard.surfaces.lab_correlations_charts import (
     worst_driver_pair,
 )
 
-st.title("Correlations & Parlays")
-render_banner("stats", "correlation lift, hit rates, parlay calibration")
+page_hero("MODEL LAB · CORRELATIONS", "Correlations & Parlays")
 
 # Mounted for session consistency with the other two Lab pages (widget keys are
 # shared across all three); this page's frames are one-row-per-parlay or a

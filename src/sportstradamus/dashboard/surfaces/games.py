@@ -10,6 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from sportstradamus.dashboard.components.glyphs import game_shape_glyph
+from sportstradamus.dashboard.components.hero import page_hero
 from sportstradamus.dashboard.components.slip_builder import render_constellation_builder
 from sportstradamus.dashboard.components.slip_state import (
     _BUILDER,
@@ -25,7 +26,6 @@ from sportstradamus.dashboard.data import (
     load_current_meta,
     load_current_offers,
     load_current_parlays,
-    render_banner,
     sport_filtered,
 )
 from sportstradamus.dashboard.narrative import SHAPE_HELP, context_strip, home_away, top_thesis
@@ -242,9 +242,8 @@ def _render_lens_toggles() -> None:
             st.rerun()
 
 
-st.title("Games")
 meta = load_current_meta()
-render_banner("predictions", f"generated {format_ts(meta.get('generated_at', 'no run on record'))}")
+page_hero("THE CONSTELLATION", "Games", format_ts(meta.get("generated_at", "no run on record")))
 
 offers = sport_filtered(load_current_offers()).reset_index(drop=True)
 corr = load_current_game_corr()

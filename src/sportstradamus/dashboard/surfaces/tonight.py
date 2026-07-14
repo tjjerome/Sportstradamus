@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from sportstradamus.dashboard.components.glyphs import game_shape_glyph
+from sportstradamus.dashboard.components.hero import page_hero
 from sportstradamus.dashboard.data import (
     format_ts,
     load_current_game_context,
@@ -38,11 +39,9 @@ def _render_shape_legend() -> None:
             st.caption(f"**{name}**  \n{sub}")
 
 
-st.title("Tonight")
-
 meta = load_current_meta()
 generated = format_ts(meta.get("generated_at", "no run on record"))
-st.caption(f"Last updated: {generated}")
+page_hero("TONIGHT'S SLATE", "Tonight", generated)
 
 offers = sport_filtered(load_current_offers())
 parlays = load_current_parlays()
