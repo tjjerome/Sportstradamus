@@ -26,18 +26,18 @@ from sportstradamus.stats.nhl import StatsNHL
 class _FakeDatetime(_dt.datetime):
     @classmethod
     def today(cls):
-        return _dt.datetime(2024, 11, 1, 12, 0, 0)
+        return _dt.datetime(2025, 11, 1, 12, 0, 0)
 
     @classmethod
     def now(cls, tz=None):
-        return _dt.datetime(2024, 11, 1, 12, 0, 0, tzinfo=tz)
+        return _dt.datetime(2025, 11, 1, 12, 0, 0, tzinfo=tz)
 
 
 def _fake_scraper_get(url):
     if "api-web.nhle.com/v1/schedule" in url:
         return {
-            "nextStartDate": "2024-11-02",
-            "gameWeek": [{"date": "2024-10-31", "games": [{"id": "G1"}]}],
+            "nextStartDate": "2025-11-02",
+            "gameWeek": [{"date": "2025-10-31", "games": [{"id": "G1"}]}],
         }
     if "weekly-schedule/weekly-games" in url:
         return {
@@ -61,7 +61,7 @@ def _fake_scraper_get(url):
     if "/v1/game/" in url:
         return {
             "data": {
-                "gameDate": "2024-11-05T19:00:00+00:00",
+                "gameDate": "2025-11-05T19:00:00+00:00",
                 "predictedGoalies": {"HOME": [{"goalie": {"fullName": "Goalie Two"}}]},
             }
         }
@@ -151,22 +151,14 @@ _GOALIES = pd.DataFrame(
 )
 
 
-class _Resp:
-    def __init__(self, df):
-        self.text = df.to_csv(index=False)
-        self.status_code = 200
-
-
-class _FakeRequests:
-    @staticmethod
-    def get(url, *a, **k):
-        if "allPlayersLookup" in url:
-            return _Resp(_BIOS)
-        if "skaters.csv" in url:
-            return _Resp(_SKATERS)
-        if "goalies.csv" in url:
-            return _Resp(_GOALIES)
-        raise AssertionError(f"unexpected requests url {url}")
+def _fake_scraper_get_csv(url):
+    if "allPlayersLookup" in url:
+        return _BIOS.copy()
+    if "skaters.csv" in url:
+        return _SKATERS.copy()
+    if "goalies.csv" in url:
+        return _GOALIES.copy()
+    raise AssertionError(f"unexpected get_csv url {url}")
 
 
 class _FakeArchive:
@@ -182,7 +174,7 @@ def _fake_parse_game(self, gameId, gameDate):
             {
                 "gameId": "G1",
                 "playerName": "Skater One",
-                "gameDate": "2024-10-31",
+                "gameDate": "2025-10-31",
                 "team": "BOS",
                 "position": "C",
                 "goals": 1,
@@ -190,7 +182,7 @@ def _fake_parse_game(self, gameId, gameDate):
                 "points": 3,
             }
         ],
-        [{"gameId": "G1", "team": "BOS", "gameDate": "2024-10-31", "goals": 3}],
+        [{"gameId": "G1", "team": "BOS", "gameDate": "2025-10-31", "goals": 3}],
     )
 
 
@@ -198,11 +190,25 @@ def _fake_parse_game(self, gameId, gameDate):
 def nhl_update(monkeypatch):
     monkeypatch.setattr(nhl_mod, "datetime", _FakeDatetime)
     monkeypatch.setattr(
-        nhl_mod, "scraper", type("S", (), {"get": staticmethod(_fake_scraper_get)})()
+        nhl_mod,
+        "scraper",
+        type(
+            "S",
+            (),
+            {
+                "get": staticmethod(_fake_scraper_get),
+                "get_csv": staticmethod(_fake_scraper_get_csv),
+            },
+        )(),
     )
-    monkeypatch.setattr(nhl_mod, "requests", _FakeRequests)
     monkeypatch.setattr(nhl_mod, "clean_data", False)
     monkeypatch.setattr(base_mod, "archive", _FakeArchive())
+    # Pin the season gate open so the pipeline runs regardless of the host's
+    # real league_activity.json snapshot or the calendar.
+    monkeypatch.setattr(
+        base_mod.odds_budget, "update_window_open", lambda league, season_start: True
+    )
+    monkeypatch.setattr(base_mod.odds_budget, "season_opener", lambda league: None)
     monkeypatch.setattr(StatsNHL, "parse_game", _fake_parse_game)
 
     captured: dict = {}
@@ -246,7 +252,7 @@ def test_nhl_update_teamlog_row(nhl_update):
     assert t.iloc[0].to_dict() == {
         "gameId": "G1",
         "team": "BOS",
-        "gameDate": "2024-10-31",
+        "gameDate": "2025-10-31",
         "goals": 3,
     }
 
@@ -258,7 +264,7 @@ def test_nhl_update_upcoming_games(nhl_update):
 
 
 def test_nhl_update_skater_profile(nhl_update):
-    skater = nhl_update["players"][2024][1001]
+    skater = nhl_update["players"][2025][1001]
     assert skater["playerName"] == "Skater One"
     assert skater["team"] == "BOS"
     assert skater["position"] == "C"
@@ -276,7 +282,7 @@ def test_nhl_update_skater_profile(nhl_update):
 
 
 def test_nhl_update_goalie_profile(nhl_update):
-    goalie = nhl_update["players"][2024][2002]
+    goalie = nhl_update["players"][2025][2002]
     assert goalie["playerName"] == "Goalie Two"
     assert goalie["position"] == "G"
     assert goalie["height"] == 76

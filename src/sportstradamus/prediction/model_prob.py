@@ -9,8 +9,10 @@ returns a list of scored offer dicts ready for :func:`find_correlation`.
 
 from __future__ import annotations
 
+import hashlib
 import os.path
 import pickle
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -95,6 +97,32 @@ _OWN_SCALE_MIN: float = 0.1
 
 # Maximum scored offers retained per player after boost-distance deduplication.
 _MAX_OFFERS_PER_PLAYER: int = 3
+
+# Serve-time model-version cache keyed by (pickle path, mtime): the legacy synthesis
+# hashes the whole pickle file, so it runs once per model per process. See resolve_model_version.
+_MODEL_VERSION_CACHE: dict[tuple[str, float], str] = {}
+
+# Attribution id for a leg scored off devigged book odds (no trained model pickle).
+_BOOK_FALLBACK_VERSION = "book_fallback"
+
+
+def resolve_model_version(filepath: str, filedict: dict) -> str:
+    """The stamped ``model_version``, or a stable ``legacy.<sha10>`` for pre-stamp pickles.
+
+    ~53 pickles trained before the train-time stamp carry no ``model_version``;
+    for those we synthesize one from a sha1 of the pickle bytes so each legacy
+    model still attributes to a distinct, reproducible id. Memoized per
+    ``(path, mtime)`` so the file-hash cost is paid once per model per process.
+    """
+    version = filedict.get("model_version")
+    if version is not None:
+        return version
+    key = (filepath, Path(filepath).stat().st_mtime)
+    cached = _MODEL_VERSION_CACHE.get(key)
+    if cached is None:
+        cached = "legacy." + hashlib.sha1(Path(filepath).read_bytes()).hexdigest()[:10]
+        _MODEL_VERSION_CACHE[key] = cached
+    return cached
 
 
 def normalize_market(league: str, market: str, platform: str) -> str:
@@ -356,6 +384,7 @@ def _finalize_records(
     step: float,
     temperature: float | None,
     dispersion_cal: float,
+    model_version: str,
 ) -> list[dict]:
     """Resolve the bet side, apply boosts, and project the export schema.
 
@@ -434,6 +463,7 @@ def _finalize_records(
     offer_df["Temperature"] = temperature
     offer_df["Disp Cal"] = dispersion_cal
     offer_df["Step"] = step
+    offer_df["Model Version"] = model_version
 
     return offer_df[
         [
@@ -446,6 +476,8 @@ def _finalize_records(
             "Market",
             "Line",
             "Boost",
+            "Boost_Over",
+            "Boost_Under",
             "Bet",
             "Market EV",
             "Model EV",
@@ -469,6 +501,7 @@ def _finalize_records(
             "Temperature",
             "Disp Cal",
             "Step",
+            "Model Version",
         ]
     ].to_dict("records")
 
@@ -870,6 +903,7 @@ def model_prob(
 
     with open(filepath, "rb") as infile:
         filedict = pickle.load(infile)
+    model_version = resolve_model_version(filepath, filedict)
     cv = filedict["cv"]
     model_weight = filedict["weight"]
     temperature = filedict.get("temperature", None)
@@ -946,7 +980,7 @@ def model_prob(
     offer_df["Model Over"] = 1 - offer_df["Model Under"]
 
     return _finalize_records(
-        offer_df, league, platform, dist, cv, step, temperature, dispersion_cal
+        offer_df, league, platform, dist, cv, step, temperature, dispersion_cal, model_version
     )
 
 
@@ -1016,4 +1050,6 @@ def book_fallback_prob(
     offer_df["Model Under"] = 1 - _over
     offer_df["Projection"] = offer_df["Market Projection"]
 
-    return _finalize_records(offer_df, league, platform, dist, cv, step, None, 1.0)
+    return _finalize_records(
+        offer_df, league, platform, dist, cv, step, None, 1.0, _BOOK_FALLBACK_VERSION
+    )

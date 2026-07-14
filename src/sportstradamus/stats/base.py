@@ -31,6 +31,7 @@ from sportstradamus.helpers import (
     get_ev,
     get_mlb_pitchers,
     get_odds,
+    odds_budget,
     remove_accents,
     set_model_start_values,
     stat_cv,
@@ -39,6 +40,7 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.archive import TRAINING_LOOKBACK
 from sportstradamus.helpers.io import read_gamelog
 from sportstradamus.spiderLogger import logger
+from sportstradamus.stats.collector_snapshots import DatedSnapshotStore, load_asof_features
 
 # Safety ceiling for comp z-scores. Anything beyond ±5σ is already noise;
 # ±10 is generous and acts as a guard against near-zero (but non-NaN) stds
@@ -144,6 +146,14 @@ _SERIES_LOOKBACK_DAYS: int = 30
 _SERIES_DEFAULT_GAMES_TO_WIN: int = 4
 _SERIES_FEATURE_COLS = ("SeriesWins", "SeriesLosses", "FacingElimination", "CanClinch")
 
+# trim_gamelog keeps this many most-recent usable player-rows as the training
+# window; rows/day differ wildly per league, so equal rows != equal seasons.
+# Targets ~2 seasons each: NFL ~50k (few games, many players/game), MLB ~95k,
+# NHL ~110k (dense daily slates). Other leagues keep the historical 21,500
+# (~1 season NBA). min(ROWS, usable) self-clamps on shallow gamelogs.
+_TRAINING_WINDOW_ROWS = {"NFL": 50_000, "MLB": 95_000, "NHL": 110_000}
+_TRAINING_WINDOW_ROWS_DEFAULT = 21_500
+
 
 # Columns of the empty per-player feature frame get_stats seeds before populating
 # rows -- and the frame it returns when no requested player has game history.
@@ -218,6 +228,17 @@ def _zscore_within_player(df: pd.DataFrame, player_col: str, market: str) -> pd.
     groups = df.groupby(player_col)[market]
     std = groups.transform("std").replace(0, np.nan)
     return ((df[market] - groups.transform("mean")) / std).fillna(0)
+
+
+# Substrings that mark an MLB market as pitcher-side ("earned runs allowed",
+# "pitches thrown", "1st inning allowed", ...) rather than batter-side. Shared
+# by every MLB pitcher/batter branch point across base.py and mlb.py.
+_MLB_PITCHER_MARKET_TOKENS: tuple[str, ...] = ("allowed", "pitch")
+
+
+def is_mlb_pitcher_market(market: str) -> bool:
+    """Return True if ``market`` is an MLB pitcher-side stat, False for batter-side."""
+    return any(token in market for token in _MLB_PITCHER_MARKET_TOKENS)
 
 
 def flatten_offers(offers: dict | list, market: str) -> dict | list:
@@ -465,12 +486,39 @@ class Stats:
         self.teamlog = league_data["teamlog"]
         self.players = league_data["players"]
 
+    def _set_season_start(self, day):
+        """Adopt a season start date. Leagues with a derived season label
+        (NBA's ``"2025-26"`` string, WNBA's year) override to re-derive it.
+        """
+        self.season_start = day
+
     def update(self):
         """Fetch new game data from the league API and append to ``self.gamelog``.
 
-        Returns:
-            None
+        Skipped outside the league's season window — open from 10 days
+        before the next scheduled game to 10 days after the last one, per
+        the feed-derived :func:`odds_budget.update_window_open`. Set
+        ``SPORTSTRADAMUS_FORCE_UPDATE=1`` to run an offseason update anyway
+        (full rebuilds, historical backfills); the bypass also pins
+        ``season_start``, so replay tools keep manual control.
+
+        When the activity feed has observed the season's opening night
+        (:func:`odds_budget.season_opener`) and it is newer than the
+        hand-set constant, it is adopted before fetching — season-year API
+        params, ``DaysIntoSeason``, and the early-season scoring gate then
+        track the real calendar without an annual code edit.
         """
+        if not odds_budget.update_window_open(self.league, self.season_start):
+            logger.info(f"{self.league} update skipped: outside season window")
+            return
+        if not os.environ.get("SPORTSTRADAMUS_FORCE_UPDATE"):
+            opener = odds_budget.season_opener(self.league)
+            if opener is not None and opener > self.season_start:
+                self._set_season_start(opener)
+        self._update()
+
+    def _update(self):
+        """League-specific fetch behind the :meth:`update` season gate."""
 
     def _enrich_team_markets(
         self,
@@ -757,6 +805,28 @@ class Stats:
         ``Player {name}_asof`` keys the feature filter expects.
         """
         return None
+
+    def _collector_asof_features(
+        self, grain_dir, key_col, meta_cols, season, date, *, key_transform=remove_accents
+    ):
+        """Cached as-of collector feature frame for one grain (player or team).
+
+        Shared body for the CTG (NBA) / savant (MLB) hook overrides: builds a
+        :class:`DatedSnapshotStore` for ``grain_dir`` and returns the merged
+        ``{col}_asof`` frame from :func:`load_asof_features`, memoized per
+        ``(grain_dir, season, date)`` like the NFL FP as-of cache. An unset
+        ``key_col`` (join schema not yet captured for the source) short-circuits
+        inside ``load_asof_features`` to ``None`` — gamelog-only features.
+        """
+        if getattr(self, "_collector_asof_cache", None) is None:
+            self._collector_asof_cache: dict = {}
+        cache_key = (grain_dir, season, str(date))
+        if cache_key not in self._collector_asof_cache:
+            store = DatedSnapshotStore(grain_dir, grain_dir)
+            self._collector_asof_cache[cache_key] = load_asof_features(
+                store, season, date, key_col, meta_cols, key_transform=key_transform
+            )
+        return self._collector_asof_cache[cache_key]
 
     def _profile_stat_types(self):
         if self.league in ("NBA", "WNBA"):
@@ -1438,7 +1508,12 @@ class Stats:
                     dates[split_players[1]] = dates[player]
                     dates.pop(player)
 
-            stats["Home"] = [self.upcoming_games.get(teams[x], {}).get("Home") for x in stats.index]
+            # Explicit False (not the blanket fillna(0) below) keeps a missing
+            # upcoming_games entry from writing an int into this otherwise-bool
+            # column -- pyarrow rejects a mixed bool/int object column at parquet write.
+            stats["Home"] = [
+                self.upcoming_games.get(teams[x], {}).get("Home", False) for x in stats.index
+            ]
             stats["Moneyline"] = [
                 archive.get_moneyline(self.league, dates[x], teams[x]) for x in stats.index
             ]
@@ -1460,7 +1535,7 @@ class Stats:
 
     def _h2h_features(self, stats, market, opponents, pitchers):
         """Attach head-to-head Avg/Mean/Played against this opponent (MLB: vs the pitcher)."""
-        if self.league == "MLB" and not any(string in market for string in ["allowed", "pitch"]):
+        if self.league == "MLB" and not is_mlb_pitcher_market(market):
             h2hgames = self.short_gamelog.loc[
                 self.short_gamelog["opponent pitcher"]
                 == self.short_gamelog[self.log_strings["player"]].map(pitchers)
@@ -1683,7 +1758,7 @@ class Stats:
         """MLB per-player comp-z: z-score each comp's outcome vs this opponent."""
         player_col = self.log_strings["player"]
         opp_col = self.log_strings["opponent"]
-        is_pitch_market = any(s in market for s in ["allowed", "pitch"])
+        is_pitch_market = is_mlb_pitcher_market(market)
         for player in stats.index:
             compGames = self._mlb_comp_games(player, market, is_pitch_market, stats)
             if compGames is None:
@@ -1693,6 +1768,17 @@ class Stats:
             opp_comp_games = compGames.loc[compGames[opp_col] == opponents[player], market]
             stats.loc[player, "Player comps z"] = opp_comp_games.mean()
             defstats.loc[player, "comp n"] = opp_comp_games.count()
+
+    @staticmethod
+    def _mlb_comp_ids(pool: dict, pid) -> list:
+        """Comp id list for ``pid`` from a discretized ``{"comps": [...]}`` comp pool.
+
+        Falls back to ``[pid]`` (self-comp) when the pool has no entry, matching the
+        legacy bare-list ``pool.get(pid, [pid])`` behavior now that MLB affinity pools
+        carry the ``{"comps": ..., "distances": ...}`` shape shared with the other
+        leagues' KNN comps.
+        """
+        return pool.get(pid, {"comps": [pid]})["comps"]
 
     def _mlb_comp_games(self, player, market, is_pitch_market, stats):
         """Comp games backing one MLB player's comp-z, or ``None`` to skip the player.
@@ -1706,13 +1792,13 @@ class Stats:
             return None
         pid = playerGames["playerId"].mode()[0]
         if is_pitch_market:
-            comps = self.comps["pitchers"].get(pid, [pid])
+            comps = self._mlb_comp_ids(self.comps["pitchers"], pid)
             compGames = self.short_gamelog.loc[
                 self.short_gamelog["playerId"].isin(comps) & self.short_gamelog["starting pitcher"]
             ].copy()
             return None if compGames.empty else compGames
 
-        comps = self.comps["hitters"].get(pid, [pid])
+        comps = self._mlb_comp_ids(self.comps["hitters"], pid)
         compGames = self.short_gamelog.loc[
             self.short_gamelog["playerId"].isin(comps) & self.short_gamelog["starting batter"]
         ].copy()
@@ -1726,7 +1812,7 @@ class Stats:
             return None
 
         pitch_id = pitch_id.mode()[0]
-        pitchComps = self.comps["pitchers"].get(pitch_id, [pitch_id])
+        pitchComps = self._mlb_comp_ids(self.comps["pitchers"], pitch_id)
         pitchGames = playerGames.loc[playerGames["opponent pitcher id"].isin(pitchComps)]
         if pitchGames.empty or pitchGames[market].mean() == 0:
             stats.loc[player, "Pitcher comps"] = 0
@@ -1974,7 +2060,7 @@ class Stats:
             self.get_volume_stats(
                 offers,
                 gameDate,
-                pitcher=any(string in market for string in ["allowed", "pitch"]),
+                pitcher=is_mlb_pitcher_market(market),
             )
         elif self.league == "NHL":
             self.get_volume_stats(
@@ -2034,6 +2120,7 @@ class Stats:
             y (pd.DataFrame): The target labels.
         """
         matrix = []
+        mlb_bookless = []
 
         if cutoff_date is None:
             cutoff_date = (datetime.today() - timedelta(days=850)).date()
@@ -2049,8 +2136,15 @@ class Stats:
             & (gamelog[self.log_strings["date"]] < datetime.today().date())
         ]
         gamelog = self._market_position_filter(gamelog, market)
-        if self.league != "MLB":
-            usage_cutoff = gamelog[self.usage_stat].quantile(0.15)
+        # MLB never set self.usage_stat (its usage path used to be skipped entirely), so read
+        # the participation column explicitly: pitcher markets accrue on the mound (batters
+        # faced), hitter markets at the plate (log_strings["usage"] == plateAppearances).
+        usage_stat = self.usage_stat
+        if self.league == "MLB":
+            usage_stat = (
+                "batters faced" if is_mlb_pitcher_market(market) else self.log_strings["usage"]
+            )
+        usage_cutoff = gamelog[usage_stat].quantile(0.15)
 
         gamedays = gamelog.groupby(self.log_strings["date"])
         offerKeys = {
@@ -2073,11 +2167,10 @@ class Stats:
             self._dispatch_volume_stats(offers, gameDate, market)
 
             stats = self.get_stats(market, offers, gameDate)
-            if self.league != "MLB":
-                usage = players[self.usage_stat]
-                usage.index = players[self.log_strings["player"]]
-                usage = usage.loc[stats.index]
-                usage = usage[~usage.index.duplicated(keep="first")]
+            usage = players[usage_stat]
+            usage.index = players[self.log_strings["player"]]
+            usage = usage.loc[stats.index]
+            usage = usage[~usage.index.duplicated(keep="first")]
 
             date = gameDate.strftime("%Y-%m-%d")
 
@@ -2104,19 +2197,30 @@ class Stats:
 
             if stats["Home"].dtype == bool:
                 if self.league == "MLB":
+                    # Book-first: keep only real-odds rows so book-quoted MLB cells stay
+                    # Archived-only. Hold participation rows aside as a fallback used only
+                    # when the market turns out to have no archived odds at all (below).
                     matrix.extend(stats.loc[stats["Archived"]].to_dict("records"))
+                    if not matrix:
+                        mlb_bookless.extend(stats.loc[usage > usage_cutoff].to_dict("records"))
                 else:
                     matrix.extend(
                         stats.loc[stats["Archived"] | (usage > usage_cutoff)].to_dict("records")
                     )
+
+        if not matrix:
+            # No archived odds anywhere for this MLB market — assemble the book-less cell
+            # (pitches thrown, pitcher fantasy score) on median-fallback lines instead of
+            # returning an empty frame. Empty for every other league (mlb_bookless stays []).
+            matrix = mlb_bookless
 
         return (
             pd.DataFrame(matrix).fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
         )
 
     def trim_gamelog(self):
-        """Trims the gamelog to the most recent 21500 rows of data plus one year."""
-        ROWS = 50000 if self.league == "NFL" else 21500
+        """Trims the gamelog to the league's training-window rows plus one year."""
+        ROWS = _TRAINING_WINDOW_ROWS.get(self.league, _TRAINING_WINDOW_ROWS_DEFAULT)
 
         usable_gamelog = self.gamelog[
             self.gamelog[self.log_strings["usage"]]

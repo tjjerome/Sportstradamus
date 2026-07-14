@@ -137,8 +137,8 @@ def _has_corr_market_summary(league: str) -> bool:
 
 
 def test_load_corr_market_summary_absent_league_returns_empty_shaped_frame() -> None:
-    """MLB/NHL have no corr data on disk today; the loader must not raise."""
-    out = load_corr_market_summary("MLB")
+    """A league with no corr data on disk must not raise — empty shaped frame."""
+    out = load_corr_market_summary("ABSENT")
     assert list(out.columns) == _SUMMARY_COLUMNS
     assert out.empty
 

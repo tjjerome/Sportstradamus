@@ -25,10 +25,12 @@ from sportstradamus.dashboard.slip_engine import (
     ev_lift,
     score_slip,
 )
-from sportstradamus.prediction.parlay import (
-    _parlay_payout_prob,
-    _payout_curve_for,
-    _psd_or_none,
+from sportstradamus.prediction.joint import parlay_payout_prob, psd_or_none
+from sportstradamus.prediction.payouts import (
+    PAYOUT_CLIP_LO,
+    SLEEPER_FULL_REFUND_MAX_SIZE,
+    expected_payout_with_pushes,
+    payout_curve_for,
 )
 
 
@@ -73,11 +75,11 @@ def test_two_leg_same_game_matches_direct_parlay_call():
 
     p = np.array([0.6, 0.55])
     push = np.zeros(2)
-    sig = _psd_or_none(np.array([[1.0, 0.4], [0.4, 1.0]]), legacy=False)
-    search, full = _payout_curve_for("Underdog", "pooled", legacy=False)
+    sig = psd_or_none(np.array([[1.0, 0.4], [0.4, 1.0]]), legacy=False)
+    search, full = payout_curve_for("Underdog", "pooled", legacy=False)
     base = float(search[0])
     payout = float(np.clip(1.0 * base, 1.0, 100.0))
-    expected = float(_parlay_payout_prob(p, push, sig, 2, 1.0, payout, full, base, False))
+    expected = float(parlay_payout_prob(p, push, sig, 2, 1.0, payout, full, base, False))
 
     assert score.model_ev == pytest.approx(expected, rel=1e-9)
     assert score.joint_p > score.indep_p  # positive within-game rho lifts the joint
@@ -102,9 +104,45 @@ def test_sleeper_payout_is_product_of_boosts():
     ]
     corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
     score = score_slip(legs, corr, platform="Sleeper", bankroll=Decimal("1000"))
-    assert score.payout == pytest.approx(1.8 * 2.0)
-    assert score.payout_approximate
-    assert score.play_type == "Sleeper"
+    assert score.payout == pytest.approx(1.8 * 2.0)  # size-2 Max carries no bonus
+    assert not score.payout_approximate
+    assert score.play_type == "Max"
+
+
+def test_sleeper_max_size3_applies_real_bonus():
+    """Stage-1's verified 3-leg bonus (sleeper_payouts.json) now flows through
+    the live rail instead of the pre-Stage-1 flat-1.0 stub."""
+    legs = [
+        _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y"),
+        _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y"),
+        _leg("C", "AST", "Over", 5.5, 0.5, 1.0, "X/Y"),
+    ]
+    score = score_slip(legs, _corr([]), platform="Sleeper", bankroll=Decimal("1000"))
+    search, _ = payout_curve_for("Sleeper", "pooled", legacy=False)
+    assert score.payout == pytest.approx(float(search[1]))  # size-3 index, boost=1.0
+    assert score.play_type == "Max"
+    assert not score.payout_approximate
+
+
+def test_sleeper_flex_size5_wiring():
+    """Pins play_type/payout_approximate wiring at Flex sizes. Flex's own
+    per-candidate pricing (sleeper_flex_payout_curve) is exercised in
+    test_parlay_search.py, not re-derived here — this cross-checks the same
+    coarse ``base`` payout_curve_for returns, matching the Max test above."""
+    legs = [
+        _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y"),
+        _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y"),
+        _leg("C", "AST", "Over", 5.5, 0.5, 1.0, "X/Y"),
+        _leg("D", "STL", "Over", 1.5, 0.5, 1.0, "X/Y"),
+        _leg("E", "BLK", "Over", 0.5, 0.5, 1.0, "X/Y"),
+    ]
+    score = score_slip(legs, _corr([]), platform="Sleeper", bankroll=Decimal("1000"))
+    search, _ = payout_curve_for("Sleeper", "pooled", legacy=False)
+    # base (search[3], size-5 index) is 0.751 < PAYOUT_CLIP_LO, so boost(1.0) * base
+    # clips up to the floor -- score_slip's existing clip, not this test's math.
+    assert score.payout == pytest.approx(max(float(search[3]), PAYOUT_CLIP_LO))
+    assert score.play_type == "Flex"
+    assert not score.payout_approximate
 
 
 def test_underdog_play_type_by_size():
@@ -146,6 +184,46 @@ def test_push_leg_routes_finite_ev():
     score = score_slip(legs, corr, platform="Underdog", bankroll=Decimal("1000"))
     assert np.isfinite(score.model_ev)
     assert score.bet_size == 3
+
+
+def test_sleeper_two_leg_slip_push_refunds_in_full_via_score_slip():
+    """Regression pin: score_slip must thread full_refund_below_size for
+    Sleeper (matching the beam-search path's rule at correlation.py:664), or a
+    2-leg slip with a push-eligible leg silently busts instead of refunding
+    (docs/handoffs/sleeper-parity.md §3 item 3)."""
+    legs = [
+        _leg("A", "PTS", "Over", 20.5, 0.0, 1.0, "X/Y", push=1.0),  # guaranteed push
+        _leg("B", "REB", "Over", 8.5, 0.0, 1.0, "X/Y"),  # guaranteed loss
+    ]
+    score = score_slip(legs, _corr([]), platform="Sleeper", bankroll=Decimal("1000"))
+
+    # Reference values for the two branches (mirrors test_parlay_search.py's
+    # test_sleeper_two_leg_push_refunds_in_full_even_with_a_loss): Sleeper's
+    # rule refunds in full; the generic Underdog-style rule busts instead.
+    p_win, p_push, sigma, curve = np.zeros(2), np.array([1.0, 0.0]), np.eye(2), {2: [1.0, 0.0]}
+    refunded = expected_payout_with_pushes(
+        p_win,
+        p_push,
+        sigma,
+        2,
+        boost=1.0,
+        payout_curve=curve,
+        rng=np.random.default_rng(13),
+        full_refund_below_size=SLEEPER_FULL_REFUND_MAX_SIZE,
+    )
+    busted = expected_payout_with_pushes(
+        p_win,
+        p_push,
+        sigma,
+        2,
+        boost=1.0,
+        payout_curve=curve,
+        rng=np.random.default_rng(13),
+        full_refund_below_size=None,
+    )
+    assert refunded == pytest.approx(1.0, abs=1e-6)
+    assert busted == pytest.approx(0.0, abs=1e-6)
+    assert score.model_ev == pytest.approx(refunded, abs=1e-4)
 
 
 def test_ev_lift_matches_hand_built_pair_minus_solo():
@@ -217,15 +295,16 @@ def test_astrolabe_payload_clamps_negative_kelly():
     assert payload["kelly"] == 0.0
 
 
-def test_astrolabe_payload_sleeper_payout_approximate_passes_through():
+def test_astrolabe_payload_sleeper_play_type_and_payout_passes_through():
     legs = [
         _leg("A", "PTS", "Over", 20.5, 0.6, 1.8, "X/Y"),
         _leg("B", "REB", "Over", 8.5, 0.55, 2.0, "X/Y"),
     ]
     corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
     score = score_slip(legs, corr, platform="Sleeper", bankroll=Decimal("1000"))
-    assert score.payout_approximate
+    assert not score.payout_approximate
 
     payload = astrolabe_payload(score, nonce=9)
-    assert payload["payout_approximate"] is True
-    assert payload["play_type"] == "Sleeper"
+    assert payload["payout"] == pytest.approx(1.8 * 2.0)
+    assert payload["payout_approximate"] is False
+    assert payload["play_type"] == "Max"

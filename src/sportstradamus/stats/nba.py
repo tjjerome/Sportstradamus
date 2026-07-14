@@ -48,6 +48,17 @@ _CATCHUP_THRESHOLD_DAYS: int = 150
 # Retention window: keep 4 seasons of logs to bound file growth
 _GAMELOG_RETENTION_DAYS: int = 1461
 
+# Cleaning the Glass (NBA) dated-snapshot roots + join schema. The key/meta lists
+# are pinned from a real authenticated CTG capture (see docs/cleaningtheglass.md);
+# they stay empty until the endpoint catalog + a snapshot exist, which makes the
+# feature hooks below return None and NBA features stay gamelog-only.
+_CTG_PLAYER_DIR = "player_data/NBA/cleaningtheglass"
+_CTG_TEAM_DIR = "team_data/NBA/cleaningtheglass"
+_CTG_PLAYER_KEY_COL = ""
+_CTG_PLAYER_META_COLS: frozenset[str] = frozenset()
+_CTG_TEAM_KEY_COL = ""
+_CTG_TEAM_META_COLS: frozenset[str] = frozenset()
+
 
 class StatsNBA(Stats):
     """NBA player statistics: game log loading, feature engineering, and prediction."""
@@ -56,8 +67,7 @@ class StatsNBA(Stats):
         super().__init__()
         self.league = "NBA"
         self.positions = ["P", "C", "F", "W", "B"]
-        self.season_start = datetime(2025, 10, 21).date()
-        self.season = "2025-26"
+        self._set_season_start(datetime(2025, 10, 21).date())
         cols = [
             "SEASON_YEAR",
             "PLAYER_ID",
@@ -498,6 +508,23 @@ class StatsNBA(Stats):
             return f"{year}-{(year + 1) % 100:02d}"
         return f"{year - 1}-{year % 100:02d}"
 
+    def _ctg_season(self, date) -> int:
+        """CTG's integer season label (starting year) for a game ``date``."""
+        return int(self._current_season_key(date)[:4])
+
+    def _join_fp_player_features(self, date):
+        """NBA hook: Cleaning the Glass per-player season-to-date features as of ``date``."""
+        return self._collector_asof_features(
+            _CTG_PLAYER_DIR, _CTG_PLAYER_KEY_COL, _CTG_PLAYER_META_COLS, self._ctg_season(date), date
+        )
+
+    def _join_fp_team_features(self, date):
+        """NBA hook: CTG team-grain features as of ``date`` (defense split deferred)."""
+        team = self._collector_asof_features(
+            _CTG_TEAM_DIR, _CTG_TEAM_KEY_COL, _CTG_TEAM_META_COLS, self._ctg_season(date), date
+        )
+        return team, None
+
     def _player_seasons_through(self, target_game_date: date) -> dict:
         """Merge ``self.players`` seasons whose key is ``<=`` ``target_game_date``'s season.
 
@@ -565,7 +592,11 @@ class StatsNBA(Stats):
 
         self.comps = comps
 
-    def update(self) -> None:
+    def _set_season_start(self, day):
+        self.season_start = day
+        self.season = f"{day.year}-{(day.year + 1) % 100:02d}"
+
+    def _update(self) -> None:
         """Update data from the web API."""
         self._clean_player_positions()
 

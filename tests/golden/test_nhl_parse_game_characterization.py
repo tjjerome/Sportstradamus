@@ -143,12 +143,6 @@ def _game_df():
     )
 
 
-class _Resp:
-    def __init__(self, df):
-        self.text = df.to_csv(index=False)
-        self.status_code = 200
-
-
 @pytest.fixture
 def parsed(monkeypatch):
     monkeypatch.setattr(
@@ -164,12 +158,10 @@ def parsed(monkeypatch):
                         "awayTeam": {"abbrev": "MTL", "score": 2},
                         "homeTeam": {"abbrev": "BOS", "score": 3},
                     }
-                )
+                ),
+                "get_csv": staticmethod(lambda url: _game_df()),
             },
         )(),
-    )
-    monkeypatch.setattr(
-        nhl_mod, "requests", type("R", (), {"get": staticmethod(lambda url: _Resp(_game_df()))})
     )
     gamelog, teamlog = StatsNHL().parse_game("G1", "2024-10-31")
     return {"gamelog": gamelog, "teamlog": teamlog}
@@ -233,18 +225,10 @@ def test_parse_game_empty_on_non_200(monkeypatch):
                         "awayTeam": {"abbrev": "MTL", "score": 2},
                         "homeTeam": {"abbrev": "BOS", "score": 3},
                     }
-                )
+                ),
+                "get_csv": staticmethod(lambda url: pd.DataFrame()),
             },
         )(),
-    )
-    monkeypatch.setattr(
-        nhl_mod,
-        "requests",
-        type(
-            "R",
-            (),
-            {"get": staticmethod(lambda url: type("E", (), {"status_code": 404, "text": ""})())},
-        ),
     )
     gamelog, teamlog = StatsNHL().parse_game("G1", "2024-10-31")
     assert gamelog == []

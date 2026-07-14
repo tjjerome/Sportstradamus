@@ -14,7 +14,7 @@ emits two starting parlays over its cluster's legs (legs may be shared):
 Pure and ``Archive``-free so the P3 dashboard rail can recompute it live. Subsets
 are enumerated but scored in two phases — a cheap independent-joint proxy ranks
 every subset, then only a shortlist is priced through the real Gaussian-copula
-scorer (``parlay._parlay_payout_prob``), whose flex branch runs a 50k-sample
+scorer (``joint.parlay_payout_prob``), whose flex branch runs a 50k-sample
 Monte-Carlo. The final argmax always uses the exact score, so fidelity holds while
 the expensive MC stays bounded.
 """
@@ -31,14 +31,12 @@ import pandas as pd
 from sportstradamus.analysis import _leg_market_map
 from sportstradamus.helpers import stat_map
 from sportstradamus.leg_schema import build_leg
-from sportstradamus.prediction.parlay import (
-    _PAYOUT_CLIP_HI,
-    _PAYOUT_CLIP_LO,
-    _POWER_MAX_SIZE,
-    GameScoringContext,
-    _parlay_payout_prob,
-    _psd_or_none,
-    _resolve_leg_stat,
+from sportstradamus.prediction.joint import parlay_payout_prob, psd_or_none
+from sportstradamus.prediction.parlay import GameScoringContext, resolve_leg_stat
+from sportstradamus.prediction.payouts import (
+    PAYOUT_CLIP_HI,
+    PAYOUT_CLIP_LO,
+    POWER_MAX_SIZE,
 )
 from sportstradamus.prediction.stories.context import GameCtx, ctxs_from_frame
 from sportstradamus.prediction.stories.engine import thesis_variants
@@ -225,7 +223,7 @@ def _shortlist(proxies: Sequence[tuple]) -> list[tuple[int, ...]]:
     """Distinct subsets worth an exact score: top-K by EV ∪ top-K by G ∪ all Power."""
     by_ev = sorted(proxies, key=lambda x: -x[1])[:_SHORTLIST_K]
     by_g = sorted(proxies, key=lambda x: -x[2])[:_SHORTLIST_K]
-    power = [p for p in proxies if len(p[0]) <= _POWER_MAX_SIZE]
+    power = [p for p in proxies if len(p[0]) <= POWER_MAX_SIZE]
     picked = {p[0]: None for p in (*by_ev, *by_g, *power)}
     return list(picked)
 
@@ -243,9 +241,9 @@ def _score_subset(bet_id: Sequence[int], sctx: GameScoringContext, new_map: dict
     g = sctx.g
     arr = np.asarray(bet_id)
     boost, payout = _boost_payout(bet_id, sctx)
-    sig = _psd_or_none(g.C[np.ix_(bet_id, bet_id)], legacy=False)
+    sig = psd_or_none(g.C[np.ix_(bet_id, bet_id)], legacy=False)
     model_ev = float(
-        _parlay_payout_prob(
+        parlay_payout_prob(
             g.p_model[arr],
             g.p_push[arr],
             sig,
@@ -273,7 +271,7 @@ def _score_subset(bet_id: Sequence[int], sctx: GameScoringContext, new_map: dict
                     "Game": sctx.game,
                     "Date": sctx.date,
                     "Platform": sctx.platform,
-                    "Stat": _resolve_leg_stat(sctx.bet_df[i]["Market"], new_map),
+                    "Stat": resolve_leg_stat(sctx.bet_df[i]["Market"], new_map),
                 }
             )
             for i in bet_id
@@ -287,9 +285,7 @@ def _boost_payout(bet_id: Sequence[int], sctx: GameScoringContext) -> tuple[floa
     g = sctx.g
     pairs = g.M[np.ix_(bet_id, bet_id)][np.triu_indices(size, 1)]
     boost = float(np.prod(pairs) * np.prod(g.boosts[np.asarray(bet_id)]))
-    payout = float(
-        np.clip(boost * sctx.payout_base_by_size[size], _PAYOUT_CLIP_LO, _PAYOUT_CLIP_HI)
-    )
+    payout = float(np.clip(boost * sctx.payout_base_by_size[size], PAYOUT_CLIP_LO, PAYOUT_CLIP_HI))
     return boost, payout
 
 

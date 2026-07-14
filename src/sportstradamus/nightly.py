@@ -14,7 +14,7 @@ Schedule with cron after games finish, e.g.:
 
 import importlib.resources as pkg_resources
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import click
 import numpy as np
@@ -23,6 +23,7 @@ from tqdm import tqdm
 
 from sportstradamus import clv, data
 from sportstradamus.analysis import (
+    _gameday_rows_for,
     _resolve_leg,
     annotate_offer_outcomes,
     calibration_summary,
@@ -44,7 +45,9 @@ from sportstradamus.helpers.io import (
     write_parlay_hist,
     write_user_slips,
 )
+from sportstradamus.helpers.parlay_modifiers import fold_overlay
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
+from sportstradamus.strategies import _ledger_bankroll, _ledger_settlement, _ledger_store
 
 logger = get_logger("reflect")
 
@@ -352,7 +355,10 @@ def run(league, skip_update, history_only, log_level):
     history, n_resolved_hist = _resolve_and_clv_history(stats)
     n_resolved_parl = _resolve_parlays(stats, history_only)
     n_resolved_slips = _resolve_user_slips(stats, history_only)
-    _write_resolve_meta(history, n_resolved_hist, n_resolved_parl, n_resolved_slips)
+    n_resolved_ledger = _resolve_ledger(stats, history_only)
+    _write_resolve_meta(
+        history, n_resolved_hist, n_resolved_parl, n_resolved_slips, n_resolved_ledger
+    )
 
     metrics = _compute_live_metrics(history)
     _atomic_write_parquet(metrics, LIVE_METRICS_PATH)
@@ -360,6 +366,14 @@ def run(league, skip_update, history_only, log_level):
 
     _precompute_profit_sim(history)
     _precompute_calibration(history)
+
+    folded = fold_overlay()
+    if folded["pairs"] or folded["rakes"]:
+        logger.info(
+            "Modifier overlay: folded %d pair modifiers + %d rakes into the committed configs",
+            folded["pairs"],
+            folded["rakes"],
+        )
 
 
 def _load_one_league(lg, cls, skip_update):
@@ -520,13 +534,6 @@ def _grade_slip(row, stats):
     }
 
 
-def _gameday_rows_for(gamelog, ls, date, game):
-    """Gamelog rows for a leg's game on its date (mirrors analysis._bet_gameday_rows)."""
-    game_dates = pd.to_datetime(gamelog[ls["date"]]).dt.date
-    leg_date = pd.to_datetime(date).date()
-    return gamelog.loc[(game_dates == leg_date) & (gamelog[ls["team"]].isin(str(game).split("/")))]
-
-
 def _slip_status(play_type, hits, effective):
     """Slip outcome from hits: Power all-or-nothing, Flex/Sleeper partial-cash."""
     if effective == 0:
@@ -538,12 +545,48 @@ def _slip_status(play_type, hits, effective):
     return "lost"
 
 
-def _write_resolve_meta(history, n_resolved_hist, n_resolved_parl, n_resolved_slips):
+_LEDGER_ENTRIES_DIR = _ledger_store.ENTRIES_DIR
+
+
+def _ledger_entry_dates() -> list[date]:
+    """Slate dates with an entries JSONL on disk, oldest first; ``[]`` before the ledger's first run."""
+    if not _LEDGER_ENTRIES_DIR.exists():
+        return []
+    return sorted(date.fromisoformat(p.stem) for p in _LEDGER_ENTRIES_DIR.glob("*.jsonl"))
+
+
+def _resolve_ledger(stats, history_only):
+    """Settle the simulated-bettor ledger's committed entries against final game logs.
+
+    Mirrors :func:`_resolve_user_slips`'s ``history_only`` gate; all
+    resolution/payout logic is delegated to ``_ledger_settlement`` /
+    ``_ledger_bankroll`` — this function is pure orchestration.
+    """
+    if history_only:
+        return 0
+    archive = Archive()
+    dates = _ledger_entry_dates()
+    total = 0
+    for day in dates:
+        rows = _ledger_settlement.settle_day(day, stats, archive)
+        if not rows:
+            continue
+        _ledger_bankroll.write_settled_entries(rows)
+        _ledger_bankroll.update_bankroll(day, rows)
+        total += len(rows)
+    logger.info(f"Ledger: settled {total} entries across {len(dates)} slate dates")
+    return total
+
+
+def _write_resolve_meta(
+    history, n_resolved_hist, n_resolved_parl, n_resolved_slips, n_resolved_ledger
+):
     meta = {
         "last_run": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "history_resolved": n_resolved_hist,
         "parlays_resolved": n_resolved_parl,
         "slips_resolved": n_resolved_slips,
+        "ledger_resolved": n_resolved_ledger,
         "history_total": len(history),
         "history_pending": int(history["Actual"].isna().sum()),
     }
@@ -554,5 +597,6 @@ def _write_resolve_meta(history, n_resolved_hist, n_resolved_parl, n_resolved_sl
         f"Done. History: {n_resolved_hist} resolved. "
         f"Parlays: {n_resolved_parl} resolved. "
         f"Slips: {n_resolved_slips} graded. "
+        f"Ledger: {n_resolved_ledger} settled. "
         f"Last run: {meta['last_run']}"
     )

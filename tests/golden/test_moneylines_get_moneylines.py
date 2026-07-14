@@ -7,8 +7,8 @@ coverage. This pins its archive writes on a synthetic Odds API payload that
 exercises the sports-index filter (active + league-of-interest), the
 non-historical request path, the per-game date-window + team-abbreviation
 resolution, and the h2h / totals / spreads book parse (including the
-totals+spread blend written to the ``Totals`` bucket) so the CC-24
-decomposition can be proven behavior preserving.
+totals+spread blend written to the ``Totals`` bucket), plus the plus-key
+routing on every request and the budget governor's ``leagues`` narrowing.
 """
 
 from __future__ import annotations
@@ -30,10 +30,13 @@ _DATE = _CHICAGO.localize(datetime(_TODAY.year, _TODAY.month, _TODAY.day, 12, 0)
 _COMMENCE = (_DATE + timedelta(days=1)).astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 _GAME_DATE = (_DATE + timedelta(days=1)).astimezone(_CHICAGO).strftime("%Y-%m-%d")
 
+_KEYS = {"odds_api": "k", "odds_api_plus": "kp"}
+
 _SPORTS = [
     {"key": "basketball_nba", "title": "NBA", "active": True},
     {"key": "americanfootball_nfl", "title": "NFL", "active": False},
     {"key": "icehockey_nhl", "title": "NHL", "active": True},
+    {"key": "basketball_wnba", "title": "WNBA", "active": True},
 ]
 
 _GAMES = [
@@ -74,21 +77,27 @@ _GAMES = [
 
 
 class _FakeResponse:
-    def __init__(self, payload, headers=None):
+    def __init__(self, payload):
         self.status_code = HTTPStatus.OK
-        self.headers = headers or {}
         self._payload = payload
 
     def json(self):
         return self._payload
 
 
-def _fake_get_with_retry(url, params=None):
-    if url == moneylines.ODDS_API_SPORTS_URL:
-        return _FakeResponse(_SPORTS, {"X-Requests-Remaining": "1000"})
-    if url == moneylines.ODDS_API_ODDS_URL.format(sport="basketball_nba"):
-        return _FakeResponse(_GAMES)
-    raise AssertionError(f"unexpected url {url}")
+def _fake_get_with_retry(calls):
+    routes = {
+        moneylines.ODDS_API_SPORTS_URL: _SPORTS,
+        moneylines.ODDS_API_ODDS_URL.format(sport="basketball_nba"): _GAMES,
+        moneylines.ODDS_API_ODDS_URL.format(sport="icehockey_nhl"): [],
+        moneylines.ODDS_API_ODDS_URL.format(sport="basketball_wnba"): [],
+    }
+
+    def _get(url, params=None):
+        calls.append((url, dict(params)))
+        return _FakeResponse(routes[url])
+
+    return _get
 
 
 class _FakeArchive:
@@ -108,12 +117,34 @@ _EXPECTED = [
 
 
 def test_get_moneylines_writes_team_books(monkeypatch) -> None:
-    monkeypatch.setattr(moneylines, "_get_with_retry", _fake_get_with_retry)
+    calls = []
+    monkeypatch.setattr(moneylines, "_get_with_retry", _fake_get_with_retry(calls))
     archive = _FakeArchive()
 
-    returned = moneylines.get_moneylines(
-        archive, {"odds_api": "k", "odds_api_plus": "kp"}, date=_DATE
-    )
+    returned = moneylines.get_moneylines(archive, _KEYS, date=_DATE)
 
     assert returned is archive
+    assert archive.calls == _EXPECTED
+    # The sports-index probe and every odds request spend from the plus key.
+    # NHL rides the 5-league LEAGUES_OF_INTEREST even with an empty slate.
+    assert [(url, params["apiKey"]) for url, params in calls] == [
+        (moneylines.ODDS_API_SPORTS_URL, "kp"),
+        (moneylines.ODDS_API_ODDS_URL.format(sport="basketball_nba"), "kp"),
+        (moneylines.ODDS_API_ODDS_URL.format(sport="icehockey_nhl"), "kp"),
+        (moneylines.ODDS_API_ODDS_URL.format(sport="basketball_wnba"), "kp"),
+    ]
+
+
+def test_get_moneylines_leagues_filter(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(moneylines, "_get_with_retry", _fake_get_with_retry(calls))
+    archive = _FakeArchive()
+
+    moneylines.get_moneylines(archive, _KEYS, date=_DATE, leagues=("NBA",))
+
+    # WNBA is active in the index but excluded by the governor's allowance.
+    assert [url for url, _ in calls] == [
+        moneylines.ODDS_API_SPORTS_URL,
+        moneylines.ODDS_API_ODDS_URL.format(sport="basketball_nba"),
+    ]
     assert archive.calls == _EXPECTED

@@ -114,6 +114,8 @@ def test_full_parity_model_mirrors_book(monkeypatch):
     assert rec["Model EV"] == pytest.approx(rec["Market EV"])
     assert rec["Projection"] == pytest.approx(_BOOK_EV)
     assert rec["Dist"] == "NegBin"
+    # A model-less devigged leg attributes to the book-fallback sentinel.
+    assert rec["Model Version"] == mp._BOOK_FALLBACK_VERSION
     # Feature-derived parity columns are populated; position mapped to an int.
     assert isinstance(rec["Player position"], (int, np.integer))
     assert rec["Player position"] == 1

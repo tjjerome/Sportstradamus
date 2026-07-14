@@ -65,13 +65,15 @@ class StatsWNBA(StatsNBA):
         super().__init__()
         self.league = "WNBA"
         self.positions = ["G", "F", "C"]
-        self.season_start = datetime(2026, 5, 15).date()
+        self._set_season_start(datetime(2026, 5, 15).date())
         self.default_total = 81.667
 
         self.gamelog.columns = [stat.replace("_48", "_40") for stat in self.gamelog.columns]
         self.stat_types = [stat.replace("_48", "_40") for stat in self.stat_types]
 
-        self.season = self.season_start.year
+    def _set_season_start(self, day):
+        self.season_start = day
+        self.season = day.year
 
     def _series_games_to_win(self, playoff_teamlog, team, opp, date):
         """Wins to clinch this WNBA series: best-of-3 in the first round, best-of-5 in
@@ -100,7 +102,7 @@ class StatsWNBA(StatsNBA):
         self.gamelog = wnba_data["gamelog"]
         self.teamlog = wnba_data["teamlog"]
 
-    def update(self) -> None:
+    def _update(self) -> None:
         """Fetch new WNBA game logs from stats.wnba.com and merge into stored data."""
         player_df = self._fetch_player_index()
         playerBios, shotData = self._fetch_player_bios()
@@ -445,3 +447,11 @@ class StatsWNBA(StatsNBA):
         compare against the int keys in ``self.players``.
         """
         return target_game_date.year
+
+    # Cleaning the Glass covers NBA only; WNBA has no such source, so both hooks
+    # fall back to the base no-op instead of inheriting StatsNBA's CTG wiring.
+    def _join_fp_player_features(self, date):
+        return None
+
+    def _join_fp_team_features(self, date):
+        return None, None

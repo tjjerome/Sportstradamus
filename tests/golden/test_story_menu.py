@@ -21,13 +21,9 @@ import pytest
 
 from sportstradamus.analysis import _leg_market_map
 from sportstradamus.helpers import stat_map
-from sportstradamus.prediction.parlay import (
-    GameArrays,
-    GameScoringContext,
-    _parlay_payout_prob,
-    _payout_curve_for,
-    _psd_or_none,
-)
+from sportstradamus.prediction.joint import parlay_payout_prob, psd_or_none
+from sportstradamus.prediction.parlay import GameArrays, GameScoringContext
+from sportstradamus.prediction.payouts import payout_curve_for
 from sportstradamus.prediction.stories import menu as menu_mod
 from sportstradamus.prediction.stories.legs import validate_parlay_legs
 from sportstradamus.prediction.stories.menu import (
@@ -63,6 +59,8 @@ def _ctx(
         p_books=probs.copy(),
         p_push=np.zeros(n),
         boosts=np.ones(n),
+        shrinkage=np.ones(n),
+        opp_boost=np.full(n, np.nan),
     )
     bet_df = {
         i: {
@@ -76,7 +74,7 @@ def _ctx(
         }
         for i in range(n)
     }
-    search, full = _payout_curve_for(platform, "pooled", legacy=False)
+    search, full = payout_curve_for(platform, "pooled", legacy=False)
     if max_size is not None:
         full = {s: full[s] for s in full if s <= max_size}
     pay_base = {s: search[s - 2] for s in range(2, len(search) + 2) if s <= max(full)}
@@ -244,9 +242,9 @@ def test_model_ev_is_the_real_copula_scorer():
     arr = np.asarray(bet_id)
     boost = float(g.M[0, 1] * g.boosts[0] * g.boosts[1])
     payout = float(np.clip(boost * sctx.payout_base_by_size[2], 1.0, 100.0))
-    sig = _psd_or_none(g.C[np.ix_(bet_id, bet_id)], legacy=False)
+    sig = psd_or_none(g.C[np.ix_(bet_id, bet_id)], legacy=False)
     direct = float(
-        _parlay_payout_prob(
+        parlay_payout_prob(
             g.p_model[arr],
             g.p_push[arr],
             sig,

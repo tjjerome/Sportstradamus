@@ -12,7 +12,6 @@ from time import sleep
 import line_profiler
 import numpy as np
 import pandas as pd
-import requests
 import statsapi as mlb
 from scipy.stats import iqr, norm, poisson
 from sklearn.neighbors import BallTree
@@ -34,7 +33,7 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.helpers.io import write_gamelog
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats.base import Stats, archive, clean_data, scraper
+from sportstradamus.stats.base import Stats, archive, clean_data, is_mlb_pitcher_market, scraper
 
 # Minimum Savant affinity match_score to include a player as a comparable.
 # Scores below this are weak matches that add noise to comp feature sets.
@@ -57,6 +56,39 @@ _MLB_POSTSEASON_GAME_TYPES: frozenset[str] = frozenset({"F", "D", "L", "W", "P"}
 # postseason code (P) and anything unmapped fall back to best-of-5.
 _MLB_SERIES_GAMES_TO_WIN: dict[str, int] = {"F": 2, "D": 3, "L": 4, "W": 4, "P": 3}
 _MLB_DEFAULT_SERIES_WINS: int = 3
+
+# Batting-order plate-appearance structure, measured from the backfilled ~2-season
+# MLB gamelog (scripts/measure_mlb_volume_constants.py). The batting slot fixes a
+# hitter's PA regardless of who fills it, so a missing starter's PAs go to his
+# replacement in the same slot -- no team budget redistribution is needed. Away
+# teams bat a full ninth every game; home teams skip the bottom 9th when leading,
+# so away slots carry ~0.18 PA more. Index 0 = leadoff (slot 1) .. index 8 = slot 9.
+SLOT_PA_HOME = (4.404, 4.291, 4.208, 4.110, 3.971, 3.831, 3.688, 3.533, 3.358)
+SLOT_PA_AWAY = (4.584, 4.488, 4.377, 4.284, 4.149, 4.008, 3.862, 3.705, 3.543)
+SLOT_PA_ALL = tuple((h + a) / 2 for h, a in zip(SLOT_PA_HOME, SLOT_PA_AWAY, strict=True))
+# Within-slot game-to-game PA spread (extra innings, blowouts, early removal): the
+# genuinely unpredictable part of PA, so it stays in std and is not offense-adjusted.
+SLOT_STD = (0.712, 0.698, 0.685, 0.662, 0.693, 0.731, 0.764, 0.784, 0.799)
+# Fallback for a priced hitter whose slot cannot be resolved (no lineup, no history):
+# mean starting-batter PA across slots, with a deliberately wide spread.
+SLOT_PA_LEAGUE_AVG = sum(SLOT_PA_ALL) / len(SLOT_PA_ALL)
+SLOT_STD_UNKNOWN = 1.0
+
+# Team offense adjustment: a bounded per-team PA multiplier (nominal 1.0). OBP is the
+# mechanistic driver (more base-runners -> more lineup turnover -> more PA); the
+# book-implied team total is a sanity anchor. Clipped to +/-8% because the predictable
+# offense signal is only ~1-2 PA on a ~36 PA base -- the rest is unpredictable (-> std).
+LG_AVG_OBP = (
+    0.315  # mean team OBP (teamlog scale; matches teamProfile["OBP"] the offense adjustment reads)
+)
+LG_AVG_TEAM_TOTAL = 4.671  # mirrors archive default_totals["MLB"] so unquoted games -> neutral 1.0
+OBP_ADJ_WEIGHT = 0.70
+MARKET_ADJ_WEIGHT = 0.30
+OFFENSE_ADJ_CLIP = (0.92, 1.08)
+_OBP_POLE_GUARD = 0.5  # cap expected OBP so the 1/(1-OBP) PA law stays finite
+_TEAM_OBP_WINDOW = (
+    10  # recent starts for opposing-starter OBP-allowed (matches teamProfile last-10)
+)
 
 
 def _mlb_team_abbr(mlb_teams, team_id):
@@ -110,6 +142,18 @@ def _mlb_final_game_ids(mlb_games, prev_game_ids):
     ]
 
 
+# Baseball Savant (MLB) dated-snapshot roots + join schema. The key/meta lists are
+# pinned from a real savant leaderboard capture (see docs/baseballsavant.md); they
+# stay empty until the endpoint catalog + a snapshot exist, which makes the feature
+# hooks below return None and MLB features stay gamelog-only.
+_SAVANT_PLAYER_DIR = "player_data/MLB/baseballsavant"
+_SAVANT_TEAM_DIR = "team_data/MLB/baseballsavant"
+_SAVANT_PLAYER_KEY_COL = ""
+_SAVANT_PLAYER_META_COLS: frozenset[str] = frozenset()
+_SAVANT_TEAM_KEY_COL = ""
+_SAVANT_TEAM_META_COLS: frozenset[str] = frozenset()
+
+
 class StatsMLB(Stats):
     """A class for handling and analyzing MLB statistics.
     Inherits from the Stats parent class.
@@ -125,7 +169,7 @@ class StatsMLB(Stats):
     def __init__(self):
         """Initialize the StatsMLB instance."""
         super().__init__()
-        self.season_start = datetime(2024, 3, 28).date()
+        self.season_start = datetime(2026, 3, 25).date()
         self.pitchers = get_mlb_pitchers()
         self.gameIds = []
         self.gamelog = pd.DataFrame()
@@ -139,12 +183,13 @@ class StatsMLB(Stats):
             "fielding": ["DER"],
             "pitching": ["FIP", "WHIP", "ERA", "K9", "BB9", "PA9", "IP"],
         }
-        self.volume_stats = ["plateAppearances", "pitches thrown"]
+        self.volume_stats = ["pitches thrown"]
         self.default_total = 4.671
         self.log_strings = {
             "game": "gameId",
             "date": "gameDate",
             "player": "playerName",
+            "usage": "plateAppearances",
             "position": "position",
             "team": "team",
             "opponent": "opponent",
@@ -153,6 +198,19 @@ class StatsMLB(Stats):
             "score": "runs",
         }
         self._volume_model_cache = None
+
+    def _join_fp_player_features(self, date):
+        """MLB hook: Baseball Savant per-player season-to-date features as of ``date``."""
+        return self._collector_asof_features(
+            _SAVANT_PLAYER_DIR, _SAVANT_PLAYER_KEY_COL, _SAVANT_PLAYER_META_COLS, date.year, date
+        )
+
+    def _join_fp_team_features(self, date):
+        """MLB hook: savant team-grain features as of ``date`` (defense split deferred)."""
+        team = self._collector_asof_features(
+            _SAVANT_TEAM_DIR, _SAVANT_TEAM_KEY_COL, _SAVANT_TEAM_META_COLS, date.year, date
+        )
+        return team, None
 
     def parse_game(self, gameId):
         """Fetch a baseballsavant box score and append rows to gamelog and teamlog."""
@@ -621,52 +679,49 @@ class StatsMLB(Stats):
             with open(filepath) as infile:
                 self.park_factors = json.load(infile)
 
-        filepath = (
-            pkg_resources.files(data) / "player_data/MLB/affinity_pitchersBySHV_matchScores.csv"
+        self.comps["pitchers"] = self._load_affinity_csv("affinity_pitchersBySHV_matchScores.csv")
+        self.comps["hitters"] = self._load_affinity_csv(
+            "affinity_hittersByHittingProfile_matchScores.csv"
         )
-        if os.path.isfile(filepath):
-            df = pd.read_csv(filepath)
-            df = df.loc[
-                (df.key1.str[-1] == df.key2.str[-1])
-                & (df.match_score >= _COMP_MATCH_SCORE_THRESHOLD)
-            ]
-            df.key1 = df.key1.str[:-2].astype(int)
-            df.key2 = df.key2.str[:-2].astype(int)
-            self.comps["pitchers"] = df.groupby("key1").apply(lambda x: x.key2.to_list()).to_dict()
 
-        filepath = (
-            pkg_resources.files(data)
-            / "player_data/MLB/affinity_hittersByHittingProfile_matchScores.csv"
-        )
-        if os.path.isfile(filepath):
-            df = pd.read_csv(filepath)
-            df = df.loc[
-                (df.key1.str[-1] == df.key2.str[-1])
-                & (df.match_score >= _COMP_MATCH_SCORE_THRESHOLD)
-            ]
-            df.key1 = df.key1.str[:-2].astype(int)
-            df.key2 = df.key2.str[:-2].astype(int)
-            self.comps["hitters"] = df.groupby("key1").apply(lambda x: x.key2.to_list()).to_dict()
+    def _load_affinity_csv(self, filename):
+        """Reshape a baseballsavant affinity match-score CSV into discretized comps.
+
+        Returns ``{pid: {"comps": [pid, ...], "distances": [float, ...]}}`` with
+        comps ordered closest-first (``distance = 1 - match_score``), keeping only
+        same-handedness pairs at or above the match-score threshold. This is the
+        same ``{"comps", "distances"}`` shape the other leagues' KNN comps carry,
+        so MLB writes a uniform ``comps.json`` even though its affinities come from
+        a static Statcast table rather than a fitted BallTree.
+        """
+        filepath = pkg_resources.files(data) / "player_data" / "MLB" / filename
+        if not os.path.isfile(filepath):
+            return {}
+        df = pd.read_csv(filepath)
+        df = df.loc[
+            (df.key1.str[-1] == df.key2.str[-1]) & (df.match_score >= _COMP_MATCH_SCORE_THRESHOLD)
+        ]
+        df = df.assign(
+            pid=df.key1.str[:-2].astype(int),
+            comp=df.key2.str[:-2].astype(int),
+            distance=1 - df.match_score,
+        ).sort_values("distance")
+        return {
+            pid: {"comps": grp.comp.to_list(), "distances": grp.distance.to_list()}
+            for pid, grp in df.groupby("pid", sort=False)
+        }
 
     def update_player_comps(self, year=None):
-        url = "https://baseballsavant.mlb.com/app/affinity/affinity_hittersByHittingProfile_matchScores.csv"
-        res = requests.get(url)
-        filepath = (
-            pkg_resources.files(data)
-            / "player_data/MLB/affinity_hittersByHittingProfile_matchScores.csv"
-        )
-        with open(filepath, "w") as outfile:
-            outfile.write(res.text)
+        """Refresh the Savant affinity CSVs, keeping the cached copy on a bot-block."""
+        for filename in (
+            "affinity_hittersByHittingProfile_matchScores.csv",
+            "affinity_pitchersBySHV_matchScores.csv",
+        ):
+            df = scraper.get_csv(f"https://baseballsavant.mlb.com/app/affinity/{filename}")
+            if not df.empty:
+                df.to_csv(pkg_resources.files(data) / "player_data/MLB" / filename, index=False)
 
-        url = "https://baseballsavant.mlb.com/app/affinity/affinity_pitchersBySHV_matchScores.csv"
-        res = requests.get(url)
-        filepath = (
-            pkg_resources.files(data) / "player_data/MLB/affinity_pitchersBySHV_matchScores.csv"
-        )
-        with open(filepath, "w") as outfile:
-            outfile.write(res.text)
-
-    def update(self):
+    def _update(self):
         """Fetch and append new MLB game logs, then trim to the rolling 4-year window.
 
         Queries a 60-day schedule window starting from the last logged date (or
@@ -783,7 +838,7 @@ class StatsMLB(Stats):
         self.pitcherProfile = pd.DataFrame(columns=["z", "home", "moneyline gain", "totals gain"])
 
         # Filter non-starting pitchers or non-starting batters depending on the market
-        if any(string in market for string in ["allowed", "pitch"]):
+        if is_mlb_pitcher_market(market):
             gamelog = self.short_gamelog[self.short_gamelog["starting pitcher"]].copy()
         else:
             gamelog = self.short_gamelog[self.short_gamelog["starting batter"]].copy()
@@ -919,7 +974,7 @@ class StatsMLB(Stats):
                 )[0]
             )
 
-        if not any(string in market for string in ["allowed", "pitch"]):
+        if not is_mlb_pitcher_market(market):
             self.pitcherProfile = self.pitcherProfile.join(
                 self.playerProfile[self.stat_types["pitching"]]
             )
@@ -930,7 +985,10 @@ class StatsMLB(Stats):
         self.playerProfile.fillna(0.0, inplace=True)
 
     def get_volume_stats(self, offers, date=datetime.today().date(), pitcher=False):
-        market = "pitches thrown" if pitcher else "plateAppearances"
+        if not pitcher:
+            self._project_plate_appearances(offers, date)
+            return
+        market = "pitches thrown"
         self.load_volume_model_params(
             offers,
             market,
@@ -941,6 +999,126 @@ class StatsMLB(Stats):
                 "scale": f"proj {market} std",
             },
         )
+
+    def _project_plate_appearances(self, offers, date=datetime.today().date()):
+        """Structural batting-order plate-appearance projection (no trained model).
+
+        ``get_depth`` resolves each hitter's slot into ``playerProfile["depth"]``
+        (actual for settled games, posted-lineup or modal slot upcoming). This maps
+        that slot through the measured home/away PA curve, scales by a bounded
+        per-team offense multiplier, and writes ``proj plateAppearances mean/std``
+        into ``playerProfile`` -- the same contract the pitcher volume model produces.
+        """
+        self.get_depth(offers, date)
+        if isinstance(date, str):
+            date = datetime.strptime(date, "%Y-%m-%d").date()
+        profile = self.playerProfile
+
+        # playerProfile["team"] is the fillna(0) sentinel at projection time; the live
+        # team assignment lives in the offers, so key team/home lookups off them.
+        records = offers if isinstance(offers, list) else list(offers.values())
+        team_of = {r["Player"]: r["Team"] for r in records}
+
+        if date < datetime.today().date():
+            day = self.gamelog[pd.to_datetime(self.gamelog["gameDate"]).dt.date == date]
+            home_map = day.drop_duplicates("playerName").set_index("playerName")["home"].to_dict()
+        else:
+            home_map = {p: self.upcoming_games.get(t, {}).get("Home") for p, t in team_of.items()}
+
+        teams = set(team_of.values())
+        adjustment = self._mlb_offense_adjustment(teams, offers, date, home_map)
+
+        means, stds = {}, {}
+        for player in profile.index:
+            raw = profile.at[player, "depth"]
+            slot = int(raw) if pd.notna(raw) and 1 <= raw <= 9 else 0
+            if slot == 0:
+                means[player] = SLOT_PA_LEAGUE_AVG
+                stds[player] = SLOT_STD_UNKNOWN
+                continue
+            is_home = home_map.get(player)
+            curve = SLOT_PA_ALL if is_home is None else SLOT_PA_HOME if is_home else SLOT_PA_AWAY
+            means[player] = curve[slot - 1] * adjustment.get(team_of.get(player), 1.0)
+            stds[player] = SLOT_STD[slot - 1]
+
+        profile["proj plateAppearances mean"] = pd.Series(means)
+        profile["proj plateAppearances std"] = pd.Series(stds)
+        profile.fillna(
+            {
+                "proj plateAppearances mean": SLOT_PA_LEAGUE_AVG,
+                "proj plateAppearances std": SLOT_STD_UNKNOWN,
+            },
+            inplace=True,
+        )
+
+    def _mlb_offense_adjustment(self, teams, offers, date, home_map):
+        """Bounded per-team PA multiplier (nominal 1.0).
+
+        Blends an OBP-driven factor (team on-base talent x opposing-starter
+        OBP-allowed x park) with a market anchor (book-implied team runs), then
+        clips to +/-8%. A team missing OBP history falls back to the market factor
+        alone; an unquoted game yields a neutral market factor via the archive default.
+        """
+        records = offers if isinstance(offers, list) else list(offers.values())
+        opponent_of = {r["Team"]: r["Opponent"] for r in records}
+        home_by_team = {r["Team"]: home_map.get(r["Player"]) for r in records}
+
+        if date < datetime.today().date():
+            day = self.gamelog[pd.to_datetime(self.gamelog["gameDate"]).dt.date == date]
+            starter_of = {}
+            for team in teams:
+                named = day.loc[day[self.log_strings["team"]] == team, "opponent pitcher"]
+                starter_of[team] = named.mode().iloc[0] if not named.mode().empty else None
+        else:
+            starter_of = {
+                team: self.upcoming_games.get(team, {}).get("Opponent Pitcher") for team in teams
+            }
+
+        adjustment = {}
+        for team in teams:
+            obp = self._obp_factor(
+                team, opponent_of.get(team), home_by_team.get(team), starter_of.get(team), date
+            )
+            market = self._market_factor(team, date)
+            blended = (
+                OBP_ADJ_WEIGHT * obp + MARKET_ADJ_WEIGHT * market if obp is not None else market
+            )
+            adjustment[team] = float(np.clip(blended, *OFFENSE_ADJ_CLIP))
+        return adjustment
+
+    def _obp_factor(self, team, opponent, is_home, opp_starter, date):
+        """Expected-OBP PA factor: team talent x park x opposing-starter OBP-allowed.
+
+        Returns ``None`` when the team has no recent OBP so the caller can fall back
+        to the market anchor alone.
+        """
+        if team not in self.teamProfile.index:
+            return None
+        obp_exp = self.teamProfile.at[team, "OBP"]
+        park_team = team if is_home else opponent
+        obp_exp *= self.park_factors.get(park_team, {}).get("OBP", 1.0)
+        if opp_starter:
+            # The gamelog OBP column is ~0 on pitcher rows (it holds the pitcher's own
+            # batting), so compute OBP-allowed from the populated counting columns.
+            starts = self.gamelog[
+                (self.gamelog["playerName"] == opp_starter)
+                & self.gamelog["starting pitcher"]
+                & (pd.to_datetime(self.gamelog["gameDate"]).dt.date < date)
+            ].tail(_TEAM_OBP_WINDOW)
+            faced = pd.to_numeric(starts["batters faced"], errors="coerce").sum()
+            if faced > 0:
+                on_base = (
+                    pd.to_numeric(starts["hits allowed"], errors="coerce").sum()
+                    + pd.to_numeric(starts["walks allowed"], errors="coerce").sum()
+                )
+                obp_exp *= (on_base / faced) / LG_AVG_OBP
+        obp_exp = min(obp_exp, _OBP_POLE_GUARD)
+        return (1 - LG_AVG_OBP) / (1 - obp_exp)
+
+    def _market_factor(self, team, date):
+        """Book-implied team runs relative to league average (neutral 1.0 when unquoted)."""
+        date_str = date.strftime("%Y-%m-%d") if not isinstance(date, str) else date
+        return archive.get_total(self.league, date_str, team) / LG_AVG_TEAM_TOTAL
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):
         player_games = self.short_gamelog.loc[
@@ -1015,6 +1193,10 @@ class StatsMLB(Stats):
         hits_dist = stat_dist.get("MLB", {}).get("hits", "Gamma")
         v = archive.get_ev("MLB", "hits", date, player)
         subline = archive.get_line("MLB", "hits", date, player)
+        # No archived hits market to scale from: a missing hits EV is NaN and would make
+        # get_ev invert a NaN under-prob (brentq raises); a 0 line is a degenerate source.
+        if np.isnan(v) or subline == 0:
+            return 0
         v = get_ev(subline, get_odds(subline, v, hits_dist, cv=hits_cv), cv=cv, dist=dist)
         share = (
             player_games[submarket].sum() / player_games["hits"].sum()

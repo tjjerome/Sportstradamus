@@ -1,11 +1,13 @@
 """Per-market training pipeline: data loading, model fitting, calibration, diagnostics."""
 
+import hashlib
 import importlib.resources as pkg_resources
 import json
 import os
 import pickle
 import random
 import warnings
+from datetime import UTC, datetime
 from pathlib import Path
 
 import lightgbm as lgb
@@ -93,6 +95,10 @@ _TRAIN_FRACTION: float = 0.7
 # distributions (NegBin/ZINB).  Stats with global_mean < 2 are integer-like
 # enough that a count family fits better than SkewNormal.
 _SKEWNORMAL_MEAN_THRESHOLD: float = 2.0
+# Families a cell may pin in stat_meta.json `dist` to force its training branch; an unset / "auto"
+# cell defers to the data-driven rule (_data_driven_dist). ZAGamma/Gamma are not produced by
+# _step_select_distribution, so they are not forceable here.
+_FORCEABLE_DISTS: frozenset[str] = frozenset({"SkewNormal", "ZINB", "NegBin"})
 # Minimum coefficient of variation for the SkewNormal branch.  Prevents
 # degenerate near-zero CV when all players have nearly identical outcomes.
 _SKEWNORMAL_CV_FLOOR: float = 0.05
@@ -465,7 +471,7 @@ def _compute_metrics(probs: np.ndarray, y: np.ndarray) -> dict[str, float]:
     }
 
 
-def _step_init_market(league: str, market: str, stat_data, archive) -> dict:
+def _step_init_market(league: str, market: str, stat_data, archive, *, deterministic: bool) -> dict:
     """Validate, load distribution config + book weights + existing pickle.
 
     Args:
@@ -473,6 +479,10 @@ def _step_init_market(league: str, market: str, stat_data, archive) -> dict:
         market: Market name.
         stat_data: League-specific ``Stats`` instance.
         archive: ``Archive`` singleton (passed through to book-weight fitting).
+        deterministic: When True, skip the archive-hitting book-weight fit and
+            the config write — ``train_market`` never consumes
+            ``init["book_weights"]``, and a deterministic run must not mutate
+            production config.
 
     Returns:
         Dict with: ``filedict`` (loaded model state or {}), ``dist`` (existing
@@ -490,13 +500,14 @@ def _step_init_market(league: str, market: str, stat_data, archive) -> dict:
     else:
         book_weights = {}
 
-    book_weights.setdefault(league, {}).setdefault(market, {})
-    book_weights[league][market] = fit_book_weights(
-        league, market, stat_data, archive, book_weights
-    )
+    if not deterministic:
+        book_weights.setdefault(league, {}).setdefault(market, {})
+        book_weights[league][market] = fit_book_weights(
+            league, market, stat_data, archive, book_weights
+        )
 
-    with open(pkg_resources.files(data) / "config" / "book_weights.json", "w") as outfile:
-        json.dump(book_weights, outfile, indent=4)
+        with open(pkg_resources.files(data) / "config" / "book_weights.json", "w") as outfile:
+            json.dump(book_weights, outfile, indent=4)
 
     filename = market_file_slug(league, market)
     filepath = model_pickle_path(league, market)
@@ -1348,6 +1359,19 @@ def _build_y_proba_raw(B_test, decoded: dict, dist: str, step) -> np.ndarray:
     return np.array([under, 1 - under]).transpose()
 
 
+def _model_version(trained_at: str, opt_params: dict, dist: str, cv: float, step, norm: str) -> str:
+    """Deterministic ``{yyyymmdd}.{norm-slug}.{sha8}`` identity for a trained model.
+
+    ``sha8`` is a sha1 over the sorted repr of the model's stable identity
+    (hyperparams + distribution + cv + step), so re-running :func:`train_market`
+    on the same data and config reproduces the same version. WS-1 joins live
+    reads on this string to attribute predictions to the model that made them.
+    """
+    identity = repr(sorted((*opt_params.items(), ("distribution", dist), ("cv", cv), ("step", step))))
+    sha8 = hashlib.sha1(identity.encode()).hexdigest()[:8]
+    return f"{trained_at[:10].replace('-', '')}.{norm or 'none'}.{sha8}"
+
+
 def _build_filedict(
     *,
     model,
@@ -1379,6 +1403,7 @@ def _build_filedict(
     X,
 ) -> dict:
     """Assemble the model pickle dict. Key order is load-bearing for byte parity."""
+    trained_at = datetime.now(UTC).isoformat()
     return {
         "model": model,
         "step": step,
@@ -1442,6 +1467,10 @@ def _build_filedict(
         "zinb_mode": zinb_mode,
         "is_hurdle": bool(getattr(model, "is_hurdle", False)),
         "expected_columns": list(X.columns),
+        "trained_at": trained_at,
+        "model_version": _model_version(
+            trained_at, opt_params, dist, cv, step, target_normalization
+        ),
     }
 
 
@@ -2208,6 +2237,51 @@ def _step_fuse_predictions(
     return _fuse_gamma(out, decoded, splits, model_weight, cv, hist_gate, dist)
 
 
+def _data_driven_dist(global_mean: float, hist_gate: float) -> str:
+    """The distribution the data implies: ``SkewNormal`` at ``global_mean >= _SKEWNORMAL_MEAN_THRESHOLD``,
+    else the count branch — ``ZINB`` when the zero rate clears ``GATE_PUBLISH_THRESHOLD``, else ``NegBin``.
+    """
+    if global_mean >= _SKEWNORMAL_MEAN_THRESHOLD:
+        return "SkewNormal"
+    return "ZINB" if hist_gate > GATE_PUBLISH_THRESHOLD else "NegBin"
+
+
+def _resolve_dist(
+    configured: str | None,
+    data_dist: str,
+    global_mean: float,
+    hist_gate: float,
+    league: str,
+    market: str,
+) -> str:
+    """The distribution family to train: the stat_meta-configured one (authoritative), or ``data_dist``
+    when the cell pins nothing / ``"auto"``.
+
+    A configured family that disagrees with the data still trains (the operator's call) but logs a loud
+    warning — forcing ``SkewNormal`` on a low-mean count stat mis-preps the target, forcing a count
+    family on a high-mean stat is usually harmless. An unrecognized family is a config error: fail loud.
+    """
+    if configured in (None, "auto"):
+        return data_dist
+    if configured not in _FORCEABLE_DISTS:
+        raise ValueError(
+            f"{league} {market}: stat_meta dist {configured!r} is not a forceable family; "
+            f"use one of {sorted(_FORCEABLE_DISTS)} or 'auto'"
+        )
+    if configured != data_dist:
+        logger.warning(
+            "%s %s: training forced dist=%s from stat_meta (data-driven pick is %s: "
+            "global_mean=%.2f, zero_rate=%.2f)",
+            league,
+            market,
+            configured,
+            data_dist,
+            global_mean,
+            hist_gate,
+        )
+    return configured
+
+
 def _step_select_distribution(
     splits: dict,
     stat_data,
@@ -2222,10 +2296,12 @@ def _step_select_distribution(
 ) -> dict:
     """Choose distribution family + apply target transform + compute shape priors.
 
-    Branch logic: ``global_mean >= _SKEWNORMAL_MEAN_THRESHOLD`` → SkewNormal, otherwise
-    NegBin (escalated to ZINB when ``hist_gate > GATE_PUBLISH_THRESHOLD``). For SkewNormal,
-    drops zero rows when ``hist_gate > NONZERO_DENOM_GATE`` and applies the
-    strategy's forward transform.
+    Family selection: the cell's stat_meta ``dist`` is authoritative when set (:func:`_resolve_dist`
+    forces that branch and warns if it disagrees with the data); an unset / ``"auto"`` cell falls back
+    to the data-driven rule (:func:`_data_driven_dist`): ``global_mean >= _SKEWNORMAL_MEAN_THRESHOLD``
+    → SkewNormal, else NegBin escalated to ZINB when ``hist_gate > GATE_PUBLISH_THRESHOLD``. For
+    SkewNormal, drops zero rows when ``hist_gate > NONZERO_DENOM_GATE`` and applies the strategy's
+    forward transform.
 
     Mutates ``splits["X_train"]`` and ``splits["y_train_labels"]`` for the
     SkewNormal nonzero path. Also writes ``stat_zi[league][market]`` and
@@ -2275,8 +2351,15 @@ def _step_select_distribution(
     strategy = baselines.get_target_normalization(target_normalization)
     dist_obj = None
 
-    if global_mean >= _SKEWNORMAL_MEAN_THRESHOLD:
-        dist = "SkewNormal"
+    dist = _resolve_dist(
+        load_distribution_config().get(league, {}).get(market),
+        _data_driven_dist(global_mean, hist_gate),
+        global_mean,
+        hist_gate,
+        league,
+        market,
+    )
+    if dist == "SkewNormal":
         dist_obj = SkewNormalDist(
             stabilization=stabilization, loss_fn=_resolve_loss_fn("crps", dist_training_loss)
         )
@@ -2309,9 +2392,7 @@ def _step_select_distribution(
         offset_mode = strategy.start_mode_flag == "offset"
         y_train_labels = strategy.forward(y_train_labels, X_train, global_mean, denom_col)
     else:
-        dist = "NegBin"
-        if hist_gate > GATE_PUBLISH_THRESHOLD:
-            dist = "ZINB"
+        # dist is already resolved to "ZINB" or "NegBin" (forced, or the data-driven zero-rate pick).
         if dist == "NegBin":
             dist_obj = NegativeBinomial(
                 stabilization=stabilization, loss_fn=_resolve_loss_fn("nll", dist_training_loss)
@@ -2382,6 +2463,7 @@ def train_market(
     stabilization: str = "None",
     hpo_selection: str = "loss",
     count_dispersion_objective: str = "crps",
+    matrix_only: bool = False,
 ) -> None:
     """Train or retrain one LightGBMLSS model for a single league/market pair.
 
@@ -2430,7 +2512,7 @@ def train_market(
     if zinb_mode not in {"joint", "hurdle"}:
         raise ValueError(f"zinb_mode must be 'joint' or 'hurdle', got {zinb_mode!r}")
 
-    init = _step_init_market(league, market, stat_data, archive)
+    init = _step_init_market(league, market, stat_data, archive, deterministic=deterministic)
     filedict = init["filedict"]
     dist = init["dist"]
     cv = init["cv"]
@@ -2454,6 +2536,8 @@ def train_market(
     M = _step_persist_matrix_and_comps(
         M, training_data_path, stat_data, deterministic=deterministic
     )
+    if matrix_only:
+        return
 
     splits = _step_build_splits(M, stat_data, market, target_normalization)
     dist_info = _step_select_distribution(

@@ -39,7 +39,7 @@ Most file_kinds publish per-player-per-game rows. Two kinds currently
 land as 1-row placeholders showing a single (team, opponent, position)
 tile with full-season-looking numbers -- see
 :data:`PLACEHOLDER_SINGLE_TILE_KINDS`. Their final semantics will be
-confirmed once the FP fetcher in :mod:`sportstradamus.fantasypoints`
+confirmed once the FP fetcher in :mod:`sportstradamus.collectors.fantasypoints`
 finishes parameterizing those endpoints.
 
 This module is read-only. It does NOT wire into ``build_comp_profile``

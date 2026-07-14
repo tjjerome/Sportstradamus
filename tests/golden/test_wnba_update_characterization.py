@@ -249,6 +249,12 @@ def captured_update(monkeypatch):
     monkeypatch.setattr(wnba_mod, "clean_data", False)
     monkeypatch.setattr(nba_client, "fetch", _fake_fetch)
     monkeypatch.setattr(base_mod, "archive", _FakeArchive())
+    # Pin the season gate open so the pipeline runs regardless of the host's
+    # real league_activity.json snapshot or the calendar.
+    monkeypatch.setattr(
+        base_mod.odds_budget, "update_window_open", lambda league, season_start: True
+    )
+    monkeypatch.setattr(base_mod.odds_budget, "season_opener", lambda league: None)
 
     captured: dict = {}
     monkeypatch.setattr(

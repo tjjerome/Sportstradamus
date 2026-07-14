@@ -265,21 +265,19 @@ Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
   matches `main`; check `devel` HEAD when reasoning about server behavior.
 * **All cron jobs go through `scripts/run_job.sh`.** The wrapper adds:
   - per-job `flock -n` (a second invocation of the same job is skipped),
+  - a self-deploy `git pull --ff-only origin devel` before each job (own
+    `flock -n`; a failed pull runs the existing checkout; the two modifier
+    configs are reset then re-folded from `modifier_overrides.json` with
+    `--prune` so dashboard-captured corrections never block the pull;
+    `GIT_PULL=0` skips),
   - a shared archive `flock -w 900` (serializes against DuckDB's
     single-writer lock so jobs don't collide on `archive.duckdb`),
   - Healthchecks.io `/start` / `/fail` / success pings,
-  - structured `START` / `OK` / `FAIL` / `WAIT` log lines per job.
-* **Production crontab** (run as `sportstradamus@<host>`):
-
-  ```cron
-  50 8-20 * * *          /home/sportstradamus/Sportstradamus/scripts/run_job.sh prophecize
-  30 8,12 * * *          /home/sportstradamus/Sportstradamus/scripts/run_job.sh confer
-  0 1 * * 5              /home/sportstradamus/Sportstradamus/scripts/run_job.sh meditate
-  0 23 * * *             /home/sportstradamus/Sportstradamus/scripts/run_job.sh reflect
-  */10 11-23,0-1 * * *   /home/sportstradamus/Sportstradamus/scripts/run_job.sh close-lines
-  0 2 1 * *              /home/sportstradamus/Sportstradamus/scripts/run_job.sh gate-status
-  0 10 * * 3             /home/sportstradamus/Sportstradamus/scripts/run_job.sh fp-fetch
-  ```
+  - structured `START` / `OK` / `FAIL` / `WAIT` / `PULL` log lines per job.
+* **Production crontab** (run as `sportstradamus@<host>`): the canonical
+  schedule lives in [README.md §Recommended Cron](README.md#recommended-cron).
+  Key coupling: the number of confer slots must match `broad_slots_per_day`
+  in `data/config/odds_api_budget.json`.
 
   The `fp-fetch` job runs weekly during NFL season: it walks the
   Fantasy Points Data Suite endpoint catalog
@@ -289,6 +287,14 @@ Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
   fresh session cookie in `creds/keys.json` (see
   `docs/fantasypoints.md`) and `HEALTHCHECK_URL_FP_FETCH` set so
   cookie-expiry surfaces as an immediate alert.
+
+  The `ctg-fetch` (NBA, Cleaning the Glass) and `savant-fetch` (MLB,
+  Baseball Savant) collectors are **dev-side**, not prod-cron: run them on
+  the dev box beside the manual weekly `meditate`, then `sync_to_prod.sh`
+  pushes their date-stamped snapshots up. They share the `fp-fetch`
+  framework (`sportstradamus.collectors`); `StatsNBA`/`StatsMLB` fold the
+  snapshots in via the `_join_fp_*_features` hooks once each source's join
+  schema is pinned. Canonical guide: `docs/data_collectors.md`.
 
   The `gate-status` job runs monthly: it promotes/demotes cells in `main`'s
   `stat_meta.json` based on live Gate-2 graduation and opens a PR (a human
@@ -453,6 +459,7 @@ production data.
 | `config/stat_meta.json` | **Committed.** Per-cell `{dist, shipped, strategy}` (distribution family, release surface — `"withheld"` / `"devel"` / `"main"`, training strategy slug) |
 | `config/stat_calibration.json` | **Gitignored.** Per-cell `{cv, std, zi}` — runtime-recomputed by `meditate` each run |
 | `config/stat_map.json` | Stat name mappings across APIs/sportsbooks |
+| `config/odds_api_budget.json` | **Committed.** Odds API credit governor knobs: cycle quota/reset day, `enforce` kill switch, slots/day (must match the confer crontab), floor safety factor, per-league seed costs + priority. Consumed by `helpers/odds_budget.py`; ledger at `data/runtime/odds_api_usage.jsonl` |
 | `config/feature_filter.json` | League-shared (`Common`) + per-market locked-in (`Always`) feature lists. The historical `Filtered` SHAP-ranked buckets were removed in the 2026-05-27 no-filter rewire; production trains on the full candidate set |
 | `config/playerCompStats.json` | Learned player comp weights per league/position |
 | `config/book_weights.json` | **Gitignored.** Sportsbook reliability weights for consensus lines |

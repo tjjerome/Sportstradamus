@@ -380,8 +380,6 @@ def _render_metrics(score: SlipScore, legs: Sequence[Mapping], *, key_prefix: st
     render_astrolabe(payload, key=f"{key_prefix}_astrolabe")
     bankroll = float(st.session_state[_BANKROLL])
     st.caption(f"Kelly stake ${score.stake} of ${bankroll:,.0f}")
-    if score.payout_approximate:
-        st.caption("Sleeper payout approximate — correlation factor pending.")
 
 
 def _render_lock_in(

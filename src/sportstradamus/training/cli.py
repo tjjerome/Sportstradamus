@@ -3,16 +3,21 @@
 import importlib.resources as pkg_resources
 import json
 import warnings
-from datetime import datetime, timedelta
 
 import click
 import numpy as np
 import pandas as pd
 
 from sportstradamus import data
-from sportstradamus.helpers import Archive, book_weights, feature_filter, get_logger
+from sportstradamus.helpers import (
+    LazyArchive,
+    book_weights,
+    feature_filter,
+    get_logger,
+    odds_budget,
+)
 from sportstradamus.helpers.io import MODEL_STATS_PATH, prune_model_pickle
-from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
+from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 from sportstradamus.training import baselines, calibration
 from sportstradamus.training.calibration import fit_book_weights
 from sportstradamus.training.correlate import correlate
@@ -252,6 +257,15 @@ def _resolve_cell_knob(stat_meta_full, lg, market, key, default, flag_value):
         "Ship 75 axis."
     ),
 )
+@click.option(
+    "--matrix-only/--no-matrix-only",
+    default=False,
+    help=(
+        "Assemble and persist each cell's training matrix (and comps), then stop before "
+        "distribution selection and model training. Warms data/training_data/ without training; "
+        "pair with --bypass-withholding to reach withheld cells."
+    ),
+)
 def meditate(
     force,
     league,
@@ -268,6 +282,7 @@ def meditate(
     stabilization,
     hpo_selection,
     count_dispersion_objective,
+    matrix_only,
 ):
     """Train or retrain LightGBMLSS models for each configured market."""
     # style: allow-complexity — meditate entrypoint: a flat training pipeline
@@ -317,36 +332,25 @@ def meditate(
     # (used by --bypass-withholding to pick a branch-appropriate normalization).
     stat_meta_full = load_stat_meta(STAT_META_PATH)
 
-    nba = StatsNBA()
-    nfl = StatsNFL()
-    wnba = StatsWNBA()
-
     stat_structs = {}
-
-    if (
-        league == "All" and datetime.today().date() > (nba.season_start - timedelta(days=7))
-    ) or league == "NBA":
-        click.echo("[NBA] loading cached gamelogs...")
-        nba.load()
-        click.echo("[NBA] updating from league API (this hits stats.nba.com - may take 30-60s)...")
-        nba.update()
-        stat_structs.update({"NBA": nba})
-    if (
-        league == "All" and datetime.today().date() > (nfl.season_start - timedelta(days=7))
-    ) or league == "NFL":
-        click.echo("[NFL] loading cached gamelogs...")
-        nfl.load()
-        click.echo("[NFL] updating from league API...")
-        nfl.update()
-        stat_structs.update({"NFL": nfl})
-    if (
-        league == "All" and datetime.today().date() > (wnba.season_start - timedelta(days=7))
-    ) or league == "WNBA":
-        click.echo("[WNBA] loading cached gamelogs...")
-        wnba.load()
-        click.echo("[WNBA] updating from league API...")
-        wnba.update()
-        stat_structs.update({"WNBA": wnba})
+    for lg_name, cls in (
+        ("NBA", StatsNBA),
+        ("NFL", StatsNFL),
+        ("WNBA", StatsWNBA),
+        ("MLB", StatsMLB),
+        ("NHL", StatsNHL),
+    ):
+        if league not in ("All", lg_name):
+            continue
+        struct = cls()
+        if league == "All" and not odds_budget.league_is_live(lg_name, struct.season_start):
+            continue
+        click.echo(f"[{lg_name}] loading cached gamelogs...")
+        struct.load()
+        if not deterministic:
+            click.echo(f"[{lg_name}] updating from league API...")
+            struct.update()
+        stat_structs[lg_name] = struct
 
     active_markets = dict(ALL_MARKETS)
     if league != "All":
@@ -362,37 +366,49 @@ def meditate(
             correlate(lg, stat_data, force=force)
         return
 
-    archive = Archive()
+    # LazyArchive defers the DuckDB connection until first attribute access. A --deterministic run
+    # trains from the cached matrix and never touches the archive (_step_init_market skips the
+    # archive-hitting book-weight fit), so it takes no write-lock and can run alongside other archive
+    # jobs; a real run hits fit_book_weights immediately and connects exactly as before.
+    archive = LazyArchive()
 
     for lg, markets in active_markets.items():
         stat_data = stat_structs.get(lg)
         if stat_data is None:
             continue
 
-        # Fit book weights for moneylines and totals before per-market loop
-        book_weights.setdefault(lg, {}).setdefault("Moneyline", {})
-        book_weights[lg]["Moneyline"] = fit_book_weights(
-            lg, "Moneyline", stat_data, archive, book_weights
-        )
-        book_weights.setdefault(lg, {}).setdefault("Totals", {})
-        book_weights[lg]["Totals"] = fit_book_weights(
-            lg, "Totals", stat_data, archive, book_weights
-        )
+        # --deterministic freezes the training matrix to the cached parquet
+        # (new_M empty), so book weights, player comps, and correlation matrices
+        # are never consumed by the train — skip the whole per-league setup
+        # (including correlate's per-run rebuild). Only trim_gamelog, which
+        # yields league_start_date, is still needed.
+        if not deterministic:
+            # Fit book weights for moneylines and totals before per-market loop
+            book_weights.setdefault(lg, {}).setdefault("Moneyline", {})
+            book_weights[lg]["Moneyline"] = fit_book_weights(
+                lg, "Moneyline", stat_data, archive, book_weights
+            )
+            book_weights.setdefault(lg, {}).setdefault("Totals", {})
+            book_weights[lg]["Totals"] = fit_book_weights(
+                lg, "Totals", stat_data, archive, book_weights
+            )
 
-        if lg == "MLB":
-            for extra_market in ("1st 1 innings", "pitcher win", "triples"):
-                book_weights.setdefault(lg, {}).setdefault(extra_market, {})
-                book_weights[lg][extra_market] = fit_book_weights(
-                    lg, extra_market, stat_data, archive, book_weights
-                )
-        elif lg == "NHL":
-            stat_data.dump_goalie_list()
+            if lg == "MLB":
+                for extra_market in ("1st 1 innings", "pitcher win", "triples"):
+                    book_weights.setdefault(lg, {}).setdefault(extra_market, {})
+                    book_weights[lg][extra_market] = fit_book_weights(
+                        lg, extra_market, stat_data, archive, book_weights
+                    )
+            elif lg == "NHL":
+                stat_data.dump_goalie_list()
 
-        with open(pkg_resources.files(data) / "config" / "book_weights.json", "w") as outfile:
-            json.dump(book_weights, outfile, indent=4)
+            with open(pkg_resources.files(data) / "config" / "book_weights.json", "w") as outfile:
+                json.dump(book_weights, outfile, indent=4)
 
-        stat_data.update_player_comps()
-        correlate(lg, stat_data, force=force)
+            stat_data.update_player_comps()
+            if not matrix_only:
+                correlate(lg, stat_data, force=force)
+
         league_start_date = stat_data.trim_gamelog()
 
         for market in markets:
@@ -466,9 +482,10 @@ def meditate(
                 stabilization=stabilization,
                 hpo_selection=cell_hpo_selection,
                 count_dispersion_objective=cell_count_dispersion,
+                matrix_only=matrix_only,
             )
 
-    if not deterministic:
+    if not deterministic and not matrix_only:
         demoted = _enforce_ship_gate(active_markets, ship_config, set(stat_structs), log)
         if demoted:
             click.echo(f"ship-gate: pruned {demoted} served cell(s) with ship=False")

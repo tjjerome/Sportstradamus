@@ -29,6 +29,7 @@ from sportstradamus.helpers import (
     UNDERDOG_BOOST_BASELINE,
     LazyArchive,
     get_logger,
+    odds_budget,
     stat_dist,
     stat_map,
 )
@@ -56,7 +57,7 @@ from sportstradamus.prediction.stories import (
 )
 from sportstradamus.prediction.stories.details import build_offer_details
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats import StatsNBA, StatsNFL, StatsWNBA
+from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 
 pd.set_option("mode.chained_assignment", None)
 pd.set_option("future.no_silent_downcasting", True)
@@ -192,29 +193,20 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     tqdm.__init__ = partialmethod(tqdm.__init__, disable=(not progress))
 
     sports = []
-    nba = StatsNBA()
-    nba.load()
-    if datetime.datetime.today().date() > (nba.season_start - datetime.timedelta(days=7)):
-        sports.append("NBA")
-    nfl = StatsNFL()
-    nfl.load()
-    if datetime.datetime.today().date() > (nfl.season_start - datetime.timedelta(days=7)):
-        sports.append("NFL")
-    wnba = StatsWNBA()
-    wnba.load()
-    if datetime.datetime.today().date() > (wnba.season_start - datetime.timedelta(days=7)):
-        sports.append("WNBA")
-
     stats = {}
-    if "NBA" in sports:
-        nba.update()
-        stats.update({"NBA": nba})
-    if "NFL" in sports:
-        nfl.update()
-        stats.update({"NFL": nfl})
-    if "WNBA" in sports:
-        wnba.update()
-        stats.update({"WNBA": wnba})
+    for lg_name, cls in (
+        ("NBA", StatsNBA),
+        ("NFL", StatsNFL),
+        ("WNBA", StatsWNBA),
+        ("MLB", StatsMLB),
+        ("NHL", StatsNHL),
+    ):
+        struct = cls()
+        struct.load()
+        if odds_budget.league_is_live(lg_name, struct.season_start):
+            struct.update()
+            stats[lg_name] = struct
+            sports.append(lg_name)
 
     all_offers: list[pd.DataFrame] = []
     parlay_df = pd.DataFrame()
@@ -222,6 +214,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     corr_sink: list[dict] = []
     story_sink: list = []
     scored_ud: pd.DataFrame | None = None
+    scored_sl: pd.DataFrame | None = None
 
     try:
         ud_dict = get_ud()
@@ -267,6 +260,9 @@ def main(progress, legacy_correlation, contest_variant, log_level):
             story_sink=story_sink,
         )
         parlay_df = pd.concat([parlay_df, sl5])
+        # Capture the raw scored frame (pre Market-remap) for the Pick'em
+        # snapshot — find_correlation expects the process_offers shape.
+        scored_sl = sl_offers.copy()
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
         sl_offers["Stat"] = sl_offers[
             "Market"
@@ -329,7 +325,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     write_current_game_stories(game_stories)
     write_current_offer_details(offer_details)
 
-    _write_pickem_snapshot(scored_ud, stats)
+    _write_pickem_snapshot({"Underdog": scored_ud, "Sleeper": scored_sl}, stats)
 
     if not parlay_df.empty:
         old_parlays = read_parlay_hist()
@@ -352,7 +348,9 @@ def main(progress, legacy_correlation, contest_variant, log_level):
         all_df = pd.concat(all_offers)
         if not snapshot_offers.empty and "Consensus Line" in snapshot_offers.columns:
             all_df = all_df.merge(
-                snapshot_offers[[*PREDICTION_KEY, "Consensus Line"]].drop_duplicates(PREDICTION_KEY),
+                snapshot_offers[[*PREDICTION_KEY, "Consensus Line"]].drop_duplicates(
+                    PREDICTION_KEY
+                ),
                 on=PREDICTION_KEY,
                 how="left",
             )
@@ -386,29 +384,42 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     logger.info("Success!")
 
 
-def _write_pickem_snapshot(scored_ud: pd.DataFrame | None, stats: dict) -> None:
-    """Build the Underdog Pick'em entries snapshot from already-scored offers.
+def _write_pickem_snapshot(scored_by_platform: dict[str, pd.DataFrame | None], stats: dict) -> None:
+    """Build the per-platform Pick'em entries snapshot from already-scored offers.
 
-    Reuses prophecize's scored Underdog frame — no second scrape, no extra
-    archive lock — and writes ``current_pickem.parquet`` for the dashboard.
-    Guarded so a pickem failure never breaks the core run.
+    Reuses prophecize's scored frames — no second scrape, no extra archive
+    lock — and writes one combined ``current_pickem.parquet`` for the
+    dashboard, tagged by ``platform``. Each platform's entry construction is
+    guarded independently so one platform's failure logs and continues
+    rather than blanking the other's entries.
     """
-    if scored_ud is None or scored_ud.empty:
-        return
-    try:
-        from sportstradamus.strategies._pickem_emit import entries_to_frame
-        from sportstradamus.strategies.underdog_pickem import (
-            REFERENCE_BANKROLL,
-            PickemConfig,
-            build_entries_from_scored,
-        )
+    from sportstradamus.strategies._pickem_emit import entries_to_frame
+    from sportstradamus.strategies.underdog_pickem import (
+        PLATFORM_CONTEST_VARIANTS,
+        REFERENCE_BANKROLL,
+        PickemConfig,
+        build_entries_from_scored,
+    )
 
-        entries = build_entries_from_scored(
-            datetime.date.today(), REFERENCE_BANKROLL, scored_ud, stats, PickemConfig()
-        )
-        write_current_pickem(entries_to_frame(entries))
-    except Exception:
-        logger.exception("Failed to build pickem snapshot")
+    all_entries = []
+    for platform, scored in scored_by_platform.items():
+        if scored is None or scored.empty:
+            continue
+        try:
+            config = PickemConfig(contest_variants=PLATFORM_CONTEST_VARIANTS[platform])
+            all_entries.extend(
+                build_entries_from_scored(
+                    datetime.date.today(),
+                    REFERENCE_BANKROLL,
+                    scored,
+                    stats,
+                    config,
+                    platform=platform,
+                )
+            )
+        except Exception:
+            logger.exception("Failed to build %s pickem snapshot", platform)
+    write_current_pickem(entries_to_frame(all_entries))
 
 
 def _upsert_history(history: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFrame:

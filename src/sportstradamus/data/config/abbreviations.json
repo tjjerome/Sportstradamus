@@ -21,6 +21,7 @@
         "New York Mets": "NYM",
         "New York Yankees": "NYY",
         "Athletics": "ATH",
+        "Oakland Athletics": "ATH",
         "Philadelphia Phillies": "PHI",
         "Pittsburgh Pirates": "PIT",
         "San Diego Padres": "SD",
@@ -65,6 +66,8 @@
         "St Louis Blues": "STL",
         "Tampa Bay Lightning": "TB",
         "Toronto Maple Leafs": "TOR",
+        "Utah Hockey Club": "UTA",
+        "Utah Mammoth": "UTA",
         "Vancouver Canucks": "VAN",
         "Vegas Golden Knights": "VGK",
         "Washington Capitals": "WAS",
@@ -1278,7 +1281,9 @@
         "Minnesota Lynx": "MIN",
         "New York Liberty": "NYL",
         "Phoenix Mercury": "PHX",
+        "Portland Fire": "PDX",
         "Seattle Storm": "SEA",
+        "Toronto Tempo": "TOR",
         "Washington Mystics": "WAS"
     }
 }

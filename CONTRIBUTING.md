@@ -15,14 +15,15 @@ style guide is the mechanical source of truth; this document gives you the map.
 2. [Package Map](#package-map)
 3. [Data Flow](#data-flow)
 4. [Where to Find Things](#where-to-find-things)
-5. [Making Changes](#making-changes)
-6. [Style Rules Summary](#style-rules-summary)
-7. [Adding a New League](#adding-a-new-league)
-8. [Adding a New Market](#adding-a-new-market)
-9. [Modifying the Training Pipeline](#modifying-the-training-pipeline)
-10. [Shipping to Production (devel)](#shipping-to-production-devel)
-11. [Tests](#tests)
-12. [Archived / Deprecated Code](#archived--deprecated-code)
+5. [Stable Seams — Import, Don't Edit](#stable-seams--import-dont-edit)
+6. [Making Changes](#making-changes)
+7. [Style Rules Summary](#style-rules-summary)
+8. [Adding a New League](#adding-a-new-league)
+9. [Adding a New Market](#adding-a-new-market)
+10. [Modifying the Training Pipeline](#modifying-the-training-pipeline)
+11. [Shipping to Production (devel)](#shipping-to-production-devel)
+12. [Tests](#tests)
+13. [Archived / Deprecated Code](#archived--deprecated-code)
 
 ---
 
@@ -69,6 +70,7 @@ Sportstradamus/
 | `config.py` | Loads every JSON config file at import time; exposes `stat_meta` (per-cell `{dist, shipped, strategy, cv, std, zi}` union of committed `stat_meta.json` and gitignored `stat_calibration.json`), the legacy per-field views `stat_cv` / `stat_dist` / `stat_std` / `stat_zi` derived from it, plus `stat_map`, `book_weights`, `books`, `feature_filter`, `banned`, `abbreviations`, `combo_props`, `nhl_goalies`, `name_map`, `odds_api` |
 | `archive.py` | `Archive` class — DuckDB singleton at `archive/archive.duckdb` with `odds(league, market, game_date, entity, book, ev)` and `lines(...)` tables. Public read methods: `get_ev`, `get_line`, `get_moneyline`, `get_total`, `get_team_market`, `to_pandas`, `archived_players_by_date`. Public write methods: `add_dfs`, `merge_player_books`, `set_team_books`, `write`. Module-level helper: `clean_archive`. |
 | `scraping.py` | `Scrape` class — `requests.Session` with ScrapeOps browser-header rotation and ScrapingFish proxy fallback |
+| `odds_budget.py` | Odds API credit-budget governor: per-response usage ledger (`record_response`), cycle math (`cycle_bounds`), ledger-driven cost estimates (`estimate_costs`), and the broad-run league-admission decision (`broad_run_allowance`). Loads `config/odds_api_budget.json` itself (the one exception to `config.py` owning config loads) |
 | `distributions.py` | `fused_loc`, `get_ev`, `get_odds`, `fit_distro`, `no_vig_odds`, `odds_to_prob`, `prob_to_odds`, `set_model_start_values` |
 | `text.py` | `remove_accents`, `merge_dict`, `hmean`, `get_trends`, `get_mlb_pitchers` |
 | `__init__.py` | Re-exports all of the above — existing code that does `from sportstradamus.helpers import X` keeps working |
@@ -110,7 +112,9 @@ Sportstradamus/
 | `model_prob.py` | `model_prob` — loads a trained model, computes blended probability distributions for every offer |
 | `scoring.py` | `process_offers`, `match_offers` — offer-level EV scoring and deduplication |
 | `correlation.py` | `find_correlation` — loads correlation CSVs, scores parlay legs (calls `parlay.beam_search_parlays`) |
-| `parlay.py` | `beam_search_parlays` plus its helpers `_payout_curve_for`, `_expected_payout_with_pushes`, `_nearest_psd`, and the per-search constants. Re-exported at the package level. |
+| `parlay.py` | `beam_search_parlays` (beam-search core), `GameArrays`, `GameScoringContext`, `resolve_leg_stat`. Re-exported at the package level. |
+| `payouts.py` | `payout_curve_for`, `expected_payout_with_pushes`, clip constants — platform payout tables/curves (see §Stable Seams) |
+| `joint.py` | `parlay_payout_prob`, `psd_or_none` — Gaussian-copula joint pricing, the swappable Σ seam (see §Stable Seams) |
 | `persist.py` | `save_data` — writes scored offers to disk |
 | `__init__.py` | Re-exports the public API (including `beam_search_parlays` from `parlay.py`) |
 
@@ -213,11 +217,31 @@ a gate before `optimize_comp_weights.py --save`.
 | Change the confidence cutoff for picks | `prediction/scoring.py` → `MIN_CONFIDENCE` |
 | Change the Optuna hyperparameter search space | `training/pipeline.py` → `train_market` objective |
 | Change how distributions are blended with bookmaker lines | `helpers/distributions.py` → `fused_loc` |
-| Update the season start date for a league | `stats/{league}.py` → `Stats{League}.season_start` |
+| Update the season start date for a league | Usually nothing: `Stats.update` adopts the feed-observed opening night (`helpers/odds_budget.py:season_opener`, captured in the preseason window) when it is newer than the `stats/{league}.py` → `Stats{League}.season_start` constant. The constant is the fallback seed (stale snapshot, league unseen since deploy) — keep it roughly current, no annual deadline. Live polling + update gates likewise derive from the feed (`league_is_live`, snapshot at `data/runtime/league_activity.json`) |
+| Run a `Stats.update()` in the offseason | `SPORTSTRADAMUS_FORCE_UPDATE=1` — bypasses the season window in `Stats.update` (10 days before next game to 10 days after last, `helpers/odds_budget.py:update_window_open`); `reset_stat_structs` sets it automatically |
 | Refresh per-cell SHAP diagnostic CSV from scratch | `training/shap.py:see_features` — re-runs SHAP on every saved pickle, rewrites `feature_importances.csv` + `feature_correlations.csv`. Does NOT change feature selection — selection is unfiltered since the 2026-05-27 rewire |
 | Change book reliability weights | `training/calibration.py` → `fit_book_weights`, or edit `data/book_weights.json` directly |
 | Find why a comp feature has a certain weight | `data/playerCompStats.json` + `scripts/optimize_comp_weights.py` |
 | Read archived / removed code | `src/deprecated/` |
+
+---
+
+## Stable Seams — Import, Don't Edit
+
+Every roadmap lane plugs into these boundaries. New work **imports** a seam;
+it edits one only when the lane's brief explicitly owns that seam. This is
+what keeps parallel lanes off each other's files.
+
+| Seam | Home | Who imports it |
+|---|---|---|
+| Data collectors | `collectors/` — subclass `Source`, wire with `build_source_cli` | any new data source (fp-fetch, ctg-fetch, savant-fetch pattern) |
+| Cell lifecycle | `data/config/stat_meta.json` `shipped` flag; a ship PR touches 3 files: `stat_meta.json`, `training/baselines.py`, `prediction/model_prob.py` (decode) | model-track ships/demotes |
+| Serving strategies | `training/baselines.py` registry — add a slug + forward/decode pair; no pipeline edit | new target normalizations |
+| Payout curves | `prediction/payouts.py` (`payout_curve_for`, clip constants) + `data/underdog_payouts.json`. Sleeper is a per-leg-multiplier EV path (sleeper-parity stage 1), not a table entry | every product pricer |
+| Joint pricing (Σ/copula seam) | `prediction/joint.py` — Σ is assembled only in `correlation.py:_build_correlation_matrices` (→ `GameArrays`); joint slip pricing is consumed only via `joint.parlay_payout_prob`; alternative dependence models swap in behind a flag mirroring `legacy` | parlay-dependence stage 3, dfs-products stage 5; dashboard/stories read-only |
+| Money sizing | `strategies/kelly.py` — `resolve_shrinkage`, `fractional_kelly_stake` | every new pricer sizes through these |
+| Dashboard snapshots | `prediction/persist.py` atomic parquet writers; the dashboard reads parquet only (golden-enforced — never `Archive`) | sleeper-parity stage 3, dfs-products stage 2c, dashboard-ux |
+| Game scoring bundle | `prediction/parlay.py:GameScoringContext` (subset re-pricing); pure shared helpers live in `helpers/` | story menu, slip engine, future product engines |
 
 ---
 

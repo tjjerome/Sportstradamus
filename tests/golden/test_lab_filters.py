@@ -165,7 +165,7 @@ def test_load_stat_meta_wnba_ftm_sparse_defaults():
 
 def test_load_stat_meta_shape_and_no_nulls():
     meta = load_stat_meta()
-    assert len(meta) == 99
+    assert len(meta) == 93
     assert list(meta.columns) == [
         "league",
         "market",

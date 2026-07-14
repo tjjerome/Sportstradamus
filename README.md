@@ -14,10 +14,12 @@ dashboard. Supports MLB, NBA, NFL, NHL, and WNBA.
 4. [API Keys and Credentials](#api-keys-and-credentials)
 5. [First-Run Setup](#first-run-setup)
 6. [CLI Commands](#cli-commands)
-7. [Daily Workflow](#daily-workflow)
-8. [Configuration Files](#configuration-files)
-9. [Data Storage Layout](#data-storage-layout)
-10. [Deferred / Archived Code](#deferred--archived-code)
+7. [Training and Shipping a New Model](#training-and-shipping-a-new-model)
+8. [Daily Workflow](#daily-workflow)
+9. [Recommended Cron](#recommended-cron)
+10. [Configuration Files](#configuration-files)
+11. [Data Storage Layout](#data-storage-layout)
+12. [Deferred / Archived Code](#deferred--archived-code)
 
 ---
 
@@ -225,6 +227,134 @@ them at module top.
 
 ---
 
+## Training and Shipping a New Model
+
+Each model covers one **cell** — a single league-and-market pair, such as *NBA points*. Before a
+cell's model is allowed to serve real recommendations it has to clear the **ship gates**: a fixed
+battery of automatic quality checks (Is it as accurate as the sportsbook? Are its predictions
+unbiased and well-calibrated?). A cell's release status is the `shipped` field in `stat_meta.json`,
+and it moves through three stages:
+
+- `withheld` — not served; still being worked on.
+- `devel` — served on the tracking server and watched on real settled bets.
+- `main` — fully live.
+
+The path from "I want to improve a cell" to "it's live" is five steps.
+
+### 1. Sweep the cell's strategy options
+
+`model-strategy-sweep` trains a quick throwaway model for every combination of the knobs that move
+the cell's distribution family (SkewNormal sweeps target shape × training loss × blend loss; ZINB
+sweeps count mode × dispersion objective × blend loss) and ranks them by how comfortably each would
+clear the ship gates — the margin it calls **slack**.
+
+```bash
+poetry run model-strategy-sweep --league NBA --market FGM   # one cell
+poetry run model-strategy-sweep --board                     # every withheld cell with cached data
+poetry run model-strategy-sweep --board --league WNBA       # just one league's withheld cells
+poetry run model-strategy-sweep --board --include-shipped   # also re-check already-shipped cells
+```
+
+`--board` sweeps every **withheld** cell in `stat_meta.json` — both SkewNormal and ZINB — that has a
+cached training matrix, and prints an up-front count of how many cells (and trainings) that is;
+`--league` narrows it, and naming a single `--league` / `--market` sweeps just that cell. A cell with
+no cached matrix is **skipped with a yellow warning** rather than swept — the throwaway trainings
+reuse the cached matrix and never rebuild one, so train the cell for real once first if you want it in
+the board. Add `--include-shipped` to also rank already-shipped (devel/main) cells when hunting a
+better strategy for a live cell; that path is judged by the supersession test, and `--confirm` never
+auto-re-ships a live cell. As it runs it prints one line per combination, then a short table per cell
+with the winning strategy marked `SHIP` (green) or `KILL` (red). The full ranked results are saved to
+`data/research/strategy_research_board.csv`. **Nothing ships from this step** — the throwaway models
+only *rank* the options so you know which one to train for real.
+
+Prefer to skip the manual walkthrough below? Add `--confirm`: for each **withheld** cell it persists
+the best reproducible winner to `stat_meta.json`, retrains it for real, and keeps or reverts it on
+the official gates — steps 2–4 automated, with a prompt before it touches anything (`--yes` to skip
+it). For an already-shipped cell (only present under `--include-shipped`), `--confirm` runs the
+supersession test: it snapshots the incumbent, retrains the candidate in place, and scores S1/S2/S3
+(candidate clears the six gates standalone, is paired-Brier sharper, and paired-Sharpe sharper). It
+prints the comparison and swaps the live cell only when all three pass **and** you confirm the
+promotion; a loss (or a declined prompt) restores the incumbent byte-identical and it keeps serving.
+
+### 2. Confirm the winner with a real training run
+
+The board's top row names the winner in three columns, but only two of them get saved. Match them
+to that cell's entry in `src/sportstradamus/data/config/stat_meta.json`:
+
+| Board column | What it is | Where it goes in `stat_meta.json` |
+|---|---|---|
+| `normalization` | the target shape | the `target_normalization` field |
+| `blend` | how the model and book are combined | the `blending` field (add it if it's missing; leaving it out means the `nll` default) |
+| `dist` | the training loss — a training-time knob | **nothing** — the shipped model always uses the family default, so ignore this column |
+
+Watch the name clash: the `dist` **field** already in `stat_meta.json` is the *distribution family*
+(`SkewNormal`, `ZINB`, …) — a different thing from the board's `dist` column. Leave the `dist` field
+alone. (A ZINB cell has no `normalization`; its persistable columns are `zinb_mode` and
+`count_dispersion_objective`, plus the same `blend` → `blending`.) You don't have to map columns by
+hand either way — the sweep prints the exact `field=value` line to copy for each shipping cell.
+
+So a board winner of `centered_additive_mean10 · crps/crps` for NBA FGM makes the cell read:
+
+```json
+"FGM": { "dist": "SkewNormal", "shipped": "withheld",
+         "target_normalization": "centered_additive_mean10", "blending": "crps", "posthoc": "none" }
+```
+
+Set those fields *before* you train — `meditate` reads them:
+
+```bash
+poetry run meditate --league NBA --market FGM --bypass-withholding
+```
+
+A real training run (unlike the sweep) is the one whose result actually counts. One caveat: if the
+winning row's `dist` column is `nll` rather than `crps`, that exact corner can't be reproduced from
+`stat_meta.json` — only the `crps` default is saved — so prefer a `crps` row, or accept that you're
+confirming under `crps`.
+
+### 3. Read the ship-gate scorecard
+
+`meditate` writes each cell's gate results into `model_stats.csv` (and its `.parquet` twin). To see
+the verdict for one cell on its own:
+
+```bash
+poetry run python -m sportstradamus.training.scorecard --league NBA --market FGM
+```
+
+It prints a **SHIP SUMMARY** naming any gate the cell fails. A cell that passes every gate is ready
+to ship. In plain terms the gates check:
+
+- **Accuracy** — the model is at least as good as the sportsbook.
+- **Star / bench bias** — predictions aren't systematically too high or too low for the best or the
+  lowest-usage players.
+- **Calibration** — the whole predicted distribution matches what actually happens.
+- **Confidence** — the model is neither over- nor under-confident.
+- **No shrinkage** — it doesn't quietly pull star players back toward the average.
+
+The exact thresholds behind each gate are in [docs/ship_gate.md](docs/ship_gate.md).
+
+### 4. Ship it to devel
+
+Change the cell's `shipped` field from `"withheld"` to `"devel"` in `stat_meta.json`, then
+sanity-check the config:
+
+```bash
+poetry run generate-ship-config --branch devel   # validates and summarizes; changes nothing
+```
+
+On `devel` the server serves the model and records how it does on real settled bets.
+
+### 5. Graduate to main
+
+Once a cell has proven itself on live bets, `check-graduation` shows where every cell stands and
+`generate-ship-config` promotes the ones that passed:
+
+```bash
+poetry run check-graduation                      # status of every cell
+poetry run generate-ship-config --branch main    # promote graduated cells to fully live
+```
+
+---
+
 ## Daily Workflow
 
 ```
@@ -236,9 +366,59 @@ weekly (or when model accuracy drops):
   poetry run meditate        # retrain stale models
 ```
 
-If a new season has started and the season-start date in the relevant Stats class
-has not been updated, `meditate` will skip the league. Update
-`src/sportstradamus/stats/{league}.py` → `Stats{League}.season_start`.
+League activity — which leagues `confer` polls and `prophecize`/`meditate` update —
+is derived automatically from the Odds API events feed, so season starts and ends
+need no manual edits. The hand-set `season_start` constants in the Stats classes
+are only fallback seeds. To force a gamelog update in the offseason, set
+`SPORTSTRADAMUS_FORCE_UPDATE=1`.
+
+---
+
+## Recommended Cron
+
+All jobs run through `scripts/run_job.sh`, which adds a per-job `flock`
+(an overlapping run of the same job is skipped), a shared archive lock
+(DuckDB allows one writer), and Healthchecks.io start/fail/success pings.
+
+```cron
+50 8-20 * * *          /home/sportstradamus/Sportstradamus/scripts/run_job.sh prophecize
+30 8,11,14,17,20 * * * /home/sportstradamus/Sportstradamus/scripts/run_job.sh confer
+55 8 * * *             /home/sportstradamus/Sportstradamus/scripts/run_job.sh ledger-commit --run-slot morning
+55 14 * * *            /home/sportstradamus/Sportstradamus/scripts/run_job.sh ledger-commit --run-slot afternoon
+0 1 * * 5              /home/sportstradamus/Sportstradamus/scripts/run_job.sh meditate
+0 23 * * *             /home/sportstradamus/Sportstradamus/scripts/run_job.sh reflect
+*/10 11-23,0-1 * * *   /home/sportstradamus/Sportstradamus/scripts/run_job.sh close-lines
+0 2 1 * *              /home/sportstradamus/Sportstradamus/scripts/run_job.sh gate-status
+0 10 * * 3             /home/sportstradamus/Sportstradamus/scripts/run_job.sh fp-fetch
+```
+
+| Job | Cadence | Purpose |
+|---|---|---|
+| `prophecize` | hourly, 8am–8pm | score offers, write dashboard snapshots |
+| `confer` | 5 slots/day | broad odds/props fetch; the credit governor decides which leagues each slot fetches |
+| `ledger-commit` | 2×/day (morning + afternoon) | simulated-bettor ledger commit (policy_v1) |
+| `meditate` | Fri 1am | retrain models |
+| `reflect` | nightly 11pm | grade history, profit-sim + calibration summaries + simulated-bettor ledger |
+| `close-lines` | every 10 min, game hours | closing-line capture for games starting in 5–25 min; no-op tick when nothing is due |
+| `gate-status` | monthly | Gate-2 promote/demote PR against `main`; needs `gh` auth and `HEALTHCHECK_URL_GATE_STATUS` |
+| `fp-fetch` | Wed 10am (NFL season) | Fantasy Points endpoint snapshots; needs a fresh session cookie and `HEALTHCHECK_URL_FP_FETCH` |
+
+Couplings to keep in sync:
+
+- The number of `confer` slots must match `broad_slots_per_day` in
+  `data/config/odds_api_budget.json` (currently 5). Fewer real slots than the
+  config claims underspends the monthly credit budget; more overspends it.
+- `close-lines` is the per-game data floor and is never throttled by the
+  governor — don't widen its hours without re-checking the credit budget.
+- Season starts/ends never require cron edits: idle leagues cost one free
+  events call per broad run, and `prophecize`/`meditate` skip them.
+
+Dev-side collectors (`ctg-fetch` NBA, `savant-fetch` MLB) are **not** in the prod
+crontab — they run on the dev box beside the manual weekly `meditate`, then
+`scripts/sync_to_prod.sh` uploads their snapshots (additive, never `--delete`).
+Both are `run_job.sh` cases, so scheduling either (with a
+`HEALTHCHECK_URL_CTG_FETCH` / `HEALTHCHECK_URL_SAVANT_FETCH` set) is possible.
+See [docs/data_collectors.md](docs/data_collectors.md).
 
 ---
 

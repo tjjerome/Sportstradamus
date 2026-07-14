@@ -1,6 +1,9 @@
 # Parlay Dependence — copula on PIT residuals
 
-> Status: BLOCKED (on: D3 — see roadmap v3 §7)
+> Status: BLOCKED (on: D3 — see roadmap v3 §7). Of D3's three inputs the stage-0 research brief is
+> **done** (R3, §6 Stage 0) and the census is a one-session Sonnet task; **sleeper-parity is the
+> live blocker** — serialized with this lane in the same files (§5.1) and unscheduled, so it needs
+> owner scheduling before D3 can fire (model_improvement_track.md §8.2 hole #13).
 
 ## 1. Mission & money logic
 
@@ -35,10 +38,12 @@ every entry on both apps.
 3. [`PARLAY_AUDIT.md`](../PARLAY_AUDIT.md) — prior audit of
    `find_correlation` / `beam_search_parlays`; its line cites predate the
    `parlay.py` split but the logic analysis stands.
-4. `src/sportstradamus/prediction/parlay.py` — incumbent pricing: analytical
-   `multivariate_normal.cdf` path (parlay.py:426), 50K-draw MC push/flex path
-   (`_PUSH_MC_SAMPLES`, parlay.py:71; parlay.py:323), `_nearest_psd` repair
-   (parlay.py:193), the `legacy` flag pattern to mirror (parlay.py:533).
+4. `src/sportstradamus/prediction/joint.py` — incumbent pricing (the swap
+   seam, post parlay.py split): analytical `multivariate_normal.cdf` path in
+   `parlay_payout_prob`, `_nearest_psd` repair, the `legacy` flag pattern to
+   mirror. The 50K-draw MC push/flex path (`_PUSH_MC_SAMPLES`,
+   `expected_payout_with_pushes`) lives in `prediction/payouts.py`; beam
+   search stays in `prediction/parlay.py`.
 5. `src/sportstradamus/prediction/correlation.py` — how Σ is assembled today:
    stratified parquet lookups (correlation.py:632–638) →
    `_build_game_corr_map` (correlation.py:120) → per-leg-pair sums in
@@ -85,7 +90,7 @@ ls -la data/parlay_hist.parquet 2>/dev/null
   at stage 0 and stage 4: the audit harness's `gap_indep` vs `gap_copula`
   split shows what the apps' pricing already absorbs.
 - **Payout curves / leg caps** (`data/underdog_payouts.json`, Sleeper 3-leg
-  cap) feed `_payout_curve_for` (parlay.py:123). On drift: stop, re-verify
+  cap) feed `payout_curve_for` (`prediction/payouts.py`). On drift: stop, re-verify
   stage-0 facts, revise this brief in place, resume. The decision lanes own
   the payout tables; this lane only consumes them.
 
@@ -100,8 +105,10 @@ ls -la data/parlay_hist.parquet 2>/dev/null
   discrete/hurdle marginals (randomized PIT). No waiver — do not use
   `.claude/.state/research_waiver` for this lane.
 - 2026-06-10 — The incumbent path stays behind a flag until the offline A/B
-  verdict; mirror the existing `legacy` flag pattern (parlay.py:533,
-  correlation.py:554). Default stays incumbent until stage 3 acceptance.
+  verdict; mirror the existing `legacy` flag pattern
+  (`beam_search_parlays(legacy=…)` in parlay.py, `psd_or_none` /
+  `parlay_payout_prob` in joint.py, correlation.py:554). Default stays
+  incumbent until stage 3 acceptance.
 - 2026-06-10 — Never loosen gates, harness thresholds, or test tolerances to
   pass (model_improvement_track.md §1/§8 discipline).
 - 2026-06-10 — Vine copulas are out of scope at dims 2–6 (archived v2 §1.2);
@@ -109,9 +116,10 @@ ls -la data/parlay_hist.parquet 2>/dev/null
 
 ## 5. Module footprint & canonical paths
 
-- `sportstradamus.prediction` — `prediction/parlay.py` (pricing, sampling,
-  PSD repair), `prediction/correlation.py` (Σ/group assembly,
-  `find_correlation`).
+- `sportstradamus.prediction` — `prediction/joint.py` (pricing, sampling, PSD
+  repair — the swap seam; CONTRIBUTING §Stable Seams),
+  `prediction/payouts.py` (payout curves, consumed not owned),
+  `prediction/correlation.py` (Σ/group assembly, `find_correlation`).
 - `sportstradamus.training` — `training/correlate.py`. The residual machinery
   already lives here (`_residualize_gamelog` 8-game rolling residualization;
   stratified same-team/opposing/cross-game matrices) — **REUSE it, don't
@@ -130,19 +138,23 @@ outside this footprint is a stop condition (§8).
 
 ## 6. Stage plan
 
-**Stage 0 — Research dive + data census.**
+**Stage 0 — Research dive + data census. Research half DONE (R3); census remains.**
 - Goal: an Opus statistician's brief answering the §4 questions, plus a
   census of usable history.
-- Entry: none — read-only; may run early pre-D3 if the owner wants (it is a
-  D3 input). Does not touch `prediction/`.
-- Scope: `research-analyst` dispatch (definition:
-  `.claude/agents/research-analyst.md`; Opus-backed per its frontmatter;
-  output `/tmp/researcher_{topic}.md`); census script against gamelogs.
-- Acceptance: brief exists with an implementable verdict (durable verdict
-  pointer committed to the §10 ledger); a census **table** — historical
-  same-game leg-pair counts per league and market-pair, from the same
-  gamelog window `correlate.py` uses.
-- Est. 1–2 sessions.
+- **Research verdict (done early, Fable R3 — `/tmp/researcher_copula_stage0.md`):** Gaussian
+  copula default; **t-copula only as a tested branch** (adopt iff pooled exceedance-Spearman clears
+  a simulated Gaussian null in both tails AND pooled pseudo-MLE with one ν per league gives ΔAIC≥10,
+  ν̂≤15 — never per-pair ν). EB shrinkage is **two-level hierarchical in Fisher-z** (team → pair-type
+  mean → 0), not the incumbent's shrink-thin-pairs-toward-zero. Rivals-first is a YES (2-dim,
+  incumbent ρ suffices at d=2 — the cheap early product win, model_improvement_track.md §6.11).
+  Full stage-acceptance gates and the PIT-source recipe are in the brief and mirrored in §6.11.
+- **Remaining Stage-0 work: the census script** `census_parlay_pairs.py` (read-only Sonnet task
+  over the `{LEAGUE}_corr.parquet` caches). **Kill rule: a league is viable iff ≥15 fit-eligible
+  pair-types reach N≥300.**
+- Entry: none — read-only; may run early pre-D3 (it is a D3 input). Does not touch `prediction/`.
+- Acceptance: a census **table** — historical same-game leg-pair counts per league and market-pair,
+  from the same gamelog window `correlate.py` uses; the R3 verdict pointer is committed to §10.
+- Est. 1 session (census only; research done).
 - Kill: census shows pair counts too thin to beat the incumbent's shrunk
   matrix in any league → record verdict, close lane DONE(no-ship).
 
@@ -176,6 +188,9 @@ outside this footprint is a stop condition (§8).
   move).
 - Acceptance: offline A/B vs incumbent on cached test sets shows a
   joint-calibration gain; golden tests pin both flag paths.
+- Also in scope per PARLAY_AUDIT.md §4 dispositions: explicit
+  `multivariate_normal.cdf` tolerances (or MC routing) at d≥5; bound/replace
+  the unbounded beam pseudo-EV; ID-based same-player guard.
 - Est. 2–3 sessions.
 - Kill: A/B flat or negative → lane-level if-it-fails (below).
 
@@ -250,4 +265,6 @@ blocking reason, set the status line to BLOCKED (on: …), flip the roadmap v3
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-10 · audit refresh inbound · PARLAY_AUDIT.md refreshed (dispositions table): stage 3 gains MVN-tolerance/beam-bound/ID-guard scope lines; copula brief rescued to docs/archive/researcher_copula_stage0.md; parlay-path Kelly no-shrinkage flagged for owner routing (audit §2.6); mixed player×game-line slips owned by new dfs-products lane · next: unchanged (D3 owner-gated)
+- 2026-07-07 · research done early · Fable R3 copula brief (`/tmp/researcher_copula_stage0.md`) settles the §4 questions — Gaussian default + t-branch test, hierarchical Fisher-z EB, Rivals-first YES. Stage 0 research half DONE; census script `census_parlay_pairs.py` is the remaining Stage-0 work. Verdict mirrored in model_improvement_track.md §6.11 (WS-4). sleeper-parity named the live D3 blocker (needs owner scheduling) · next: census script (early, owner-optional); D3 still owner-gated
 - 2026-06-10 · created · brief drafted from roadmap-v3 migration · next: wait for D3; stage-0 census can run early if owner wants

@@ -27,10 +27,10 @@ from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, banned, stat_map
 from sportstradamus.prediction.parlay import (
     GameArrays,
     GameScoringContext,
-    _payout_curve_for,
-    _resolve_leg_stat,
     beam_search_parlays,
+    resolve_leg_stat,
 )
+from sportstradamus.prediction.payouts import SLEEPER_FULL_REFUND_MAX_SIZE, payout_curve_for
 from sportstradamus.spiderLogger import logger
 
 # Legacy weighting from the unified-matrix era: same-team and cross pairs
@@ -43,6 +43,7 @@ _DEFENSIVE_PAIR_WEIGHT: float = 1.0 - _OFFENSIVE_PAIR_WEIGHT
 # via the ``max_boost`` arg). Underdog promo stacking is tighter than the rest.
 _MAX_BOOST_UNDERDOG: float = 2.5
 _MAX_BOOST_OTHER: float = 60.0
+
 
 # Pre-filter gates for offers entering the per-game beam search. Hand-tuned to
 # keep only book-supported, model-favored legs out of the cartesian explosion.
@@ -198,8 +199,59 @@ def _leg_pair_corr_boost(leg1, leg2, c_map, team_mod_map, opp_mod_map):
     return rho / len(cm1) / len(cm2), boost
 
 
+def _leg_opp_boost(game_df, platform):
+    """Opposite-side payout multiplier per leg — Sleeper Flex devig input only.
+
+    ``Boost_Over``/``Boost_Under`` mean different things per platform: for
+    Sleeper they are raw decimal odds (books.py::get_sleeper); for Underdog
+    they are baseline-scaled promo components (model_prob.py's
+    UNDERDOG_BOOST_BASELINE multiply). Gate on platform explicitly rather
+    than column presence alone, or Underdog's values would silently feed
+    no_vig_odds as if they were fair decimal odds.
+    """
+    if platform != "Sleeper" or "Boost_Over" not in game_df.columns:
+        return np.full(len(game_df), np.nan)
+    return np.where(
+        game_df["Bet"].to_numpy() == "Over",
+        game_df["Boost_Under"].to_numpy(),
+        game_df["Boost_Over"].to_numpy(),
+    )
+
+
+def _leg_shrinkage(game_df, platform, league, shrinkage_cache):
+    """Per-leg Kelly shrinkage weight, cached by ``(league, canonical market)``.
+
+    ``shrinkage_cache`` is caller-owned and shared across every game in one
+    league's processing loop — ``resolve_market_shrinkage`` hits training/CLV
+    I/O per call, and markets repeat heavily across a slate's legs, so this
+    avoids re-resolving the same cell hundreds of times per league. Legs
+    whose ``Market`` has no ``stat_map`` entry for this platform fall back to
+    ``1.0`` (full trust), matching ``resolve_shrinkage``'s own no-signal default.
+    """
+    from sportstradamus.strategies.underdog_pickem import resolve_market_shrinkage
+
+    canonical = game_df["Market"].map(stat_map.get(platform, {}))
+    out = np.ones(len(game_df), dtype=float)
+    for i, market in enumerate(canonical):
+        if not isinstance(market, str):
+            continue
+        key = (league, market)
+        if key not in shrinkage_cache:
+            shrinkage_cache[key] = resolve_market_shrinkage(league, market)[0]
+        out[i] = shrinkage_cache[key]
+    return out
+
+
 def _build_correlation_matrices(
-    game_df, game_dict, c_map, team_mod_map, opp_mod_map, search_payouts
+    game_df,
+    game_dict,
+    c_map,
+    team_mod_map,
+    opp_mod_map,
+    search_payouts,
+    platform,
+    league,
+    shrinkage_cache,
 ):
     """Per-game leg×leg correlation (C) / boost (M) matrices and EV grids.
 
@@ -219,6 +271,8 @@ def _build_correlation_matrices(
     else:
         p_push = np.zeros(len(game_df), dtype=float)
     boosts = game_df["Boost"].to_numpy()
+    opp_boost = _leg_opp_boost(game_df, platform)
+    shrinkage = _leg_shrinkage(game_df, platform, league, shrinkage_cache)
     V = p_model * (1 - p_model)
     V = V.reshape(len(game_dict), 1) * V
     V = np.sqrt(V)
@@ -258,6 +312,8 @@ def _build_correlation_matrices(
         p_books=p_books,
         p_push=p_push,
         boosts=boosts,
+        shrinkage=shrinkage,
+        opp_boost=opp_boost,
     )
 
 
@@ -333,9 +389,9 @@ def _build_cmarket(league_df, league, new_map):
 
     league_df["cMarket"] = league_df.apply(
         lambda x: (
-            [x["Player position"] + "." + _resolve_leg_stat(x["Market"], new_map)]
+            [x["Player position"] + "." + resolve_leg_stat(x["Market"], new_map)]
             if isinstance(x["Player position"], str)
-            else [p + "." + _resolve_leg_stat(x["Market"], new_map) for p in x["Player position"]]
+            else [p + "." + resolve_leg_stat(x["Market"], new_map) for p in x["Player position"]]
         ),
         axis=1,
     )
@@ -557,6 +613,10 @@ def _process_league_games(
     ``parlay_df`` (returned).
     """
     checked_teams = []
+    # Shared across every game this league processes below — resolve_market_shrinkage
+    # hits training/CLV I/O per (league, market), and markets repeat heavily
+    # across a slate, so caching here (not per-game) keeps it out of the hot path.
+    shrinkage_cache: dict[tuple[str, str], float] = {}
     teams = [team for team in league_df.Team.unique() if "/" not in team]
     for team in tqdm(teams, desc=f"Checking {league} games", unit="game"):
         if team in checked_teams:
@@ -572,7 +632,15 @@ def _process_league_games(
         bet_df = idx.to_dict("index")
 
         g = _build_correlation_matrices(
-            game_df, game_dict, c_map, team_mod_map, opp_mod_map, search_payouts
+            game_df,
+            game_dict,
+            c_map,
+            team_mod_map,
+            opp_mod_map,
+            search_payouts,
+            platform,
+            league,
+            shrinkage_cache,
         )
         _annotate_correlation_columns(df, game_df, g)
 
@@ -590,6 +658,7 @@ def _process_league_games(
             "Platform": platform,
         }
         max_boost = _MAX_BOOST_UNDERDOG if platform == "Underdog" else _MAX_BOOST_OTHER
+        full_refund_below_size = SLEEPER_FULL_REFUND_MAX_SIZE if platform == "Sleeper" else None
         _append_story_context(
             story_sink,
             platform,
@@ -615,6 +684,7 @@ def _process_league_games(
             stat_map,
             contest_variant=contest_variant,
             legacy=legacy,
+            full_refund_below_size=full_refund_below_size,
         )
         if best_bets:
             parlay_df = _append_parlay_rows(parlay_df, best_bets)
@@ -716,7 +786,7 @@ def find_correlation(
     # ``search_payouts`` is the single-multiplier-per-size list used inside the
     # beam-search ranking; ``full_payouts`` is the per-(size, miss-count) lookup
     # driving push-aware EV and the display Boost column.
-    search_payouts, full_payouts = _payout_curve_for(platform, contest_variant, legacy=legacy)
+    search_payouts, full_payouts = payout_curve_for(platform, contest_variant, legacy=legacy)
 
     for league in ["NFL", "NBA", "WNBA", "MLB", "NHL"]:
         league_df = df.loc[df["League"] == league]

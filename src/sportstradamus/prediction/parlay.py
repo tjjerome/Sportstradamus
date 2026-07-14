@@ -7,12 +7,23 @@ from operator import itemgetter
 from typing import Literal
 
 import numpy as np
-from scipy.stats import multivariate_normal, norm
 from tqdm import tqdm
 
 from sportstradamus.analysis import _leg_market_map
-from sportstradamus.helpers import stat_cv, stat_std, underdog_payouts
+from sportstradamus.helpers import no_vig_odds, sleeper_payouts, stat_cv, stat_std
 from sportstradamus.leg_schema import build_leg
+from sportstradamus.prediction.joint import parlay_payout_prob, psd_or_none
+from sportstradamus.prediction.payouts import (
+    PAYOUT_CLIP_HI,
+    PAYOUT_CLIP_LO,
+    SLEEPER_FLEX_MIN_SIZE,
+    sleeper_flex_payout_curve,
+)
+from sportstradamus.strategies.kelly import (
+    DEFAULT_KELLY_FRACTION,
+    MAX_FRACTION_OF_BANKROLL,
+    kelly_edge,
+)
 
 
 @dataclass(frozen=True)
@@ -32,6 +43,8 @@ class GameArrays:
     p_books: np.ndarray
     p_push: np.ndarray
     boosts: np.ndarray
+    shrinkage: np.ndarray  # per-leg Kelly shrinkage weight, resolve_shrinkage output
+    opp_boost: np.ndarray  # opposite-side payout multiplier; nan unless Sleeper
 
 
 @dataclass(frozen=True)
@@ -76,218 +89,13 @@ _MIN_PRODUCT_BOOST: float = 0.7
 _BOOKS_EV_FLOOR: float = 0.9
 _MODEL_EV_PRECHECK_FLOOR: float = 1.5
 _MODEL_EV_FINAL_FLOOR: float = 2.0
+
+# Minimum Kelly-fraction multiple of the hard bankroll cap (MAX_FRACTION_OF_BANKROLL)
+# required to keep a candidate. NOTE: this constant's meaning shifted with the
+# sleeper-parity §5 shrinkage-aware Kelly-gate rewrite -- it used to mean "how
+# many 5%-bankroll units," now means "how many multiples of the 0.5% hard cap."
+# Value kept unchanged this stage; revisiting the threshold itself is a follow-up.
 _KELLY_UNITS_FLOOR: float = 0.5
-
-# PSD repair: floor on minimum eigenvalue. Sub-floor matrices are projected
-# to the nearest PSD instead of dropped (audit §2.1, finding bullet 3).
-_PSD_EIG_TOLERANCE: float = 1e-4
-
-# Payout multiplier clip. Caps runaway boost products; matches legacy.
-_PAYOUT_CLIP_LO: float = 1.0
-_PAYOUT_CLIP_HI: float = 100.0
-
-# Push-handling thresholds.
-# Below this, a leg's push prob is treated as zero so the fast (analytical)
-# mvn.cdf path runs. Set just above floating-point noise from ``get_push_prob``.
-_PUSH_PROB_FLOOR: float = 1e-6
-# Monte-Carlo sample count for the push-aware copula (audit follow-up).
-_PUSH_MC_SAMPLES: int = 50_000
-
-# Kelly sizing denominator: 5% bankroll per unit. Legacy.
-_KELLY_BANKROLL_FRACTION: float = 0.05
-
-# Pooled-variant split: slips of this size or smaller pay on the all-or-nothing
-# ``power`` schedule; larger slips pay on the partial-hit ``flex`` schedule.
-_POWER_MAX_SIZE: int = 3
-
-
-def _pooled_underdog_curve() -> dict[int, list[float]]:
-    """Build the single combined Underdog payout pool keyed by bet size.
-
-    Underdog entries are not separate interchangeable contests: a 2- or
-    3-leg slip pays out on the all-or-nothing ``power`` schedule, while a
-    4+-leg slip pays out on the partial-hit ``flex`` schedule. ``rivals``
-    legs carry no special schedule — they sit in the same pool as any
-    other leg. The legacy ``insurance`` table is an old alias of ``flex``
-    and is intentionally not consulted here.
-    """
-    power = underdog_payouts["power"]
-    flex = underdog_payouts["flex"]
-    curve: dict[int, list[float]] = {}
-    for sz_str, mult in power.items():
-        sz = int(sz_str)
-        if sz <= _POWER_MAX_SIZE:
-            curve[sz] = [float(mult), 0.0]
-    for sz_str, row in flex.items():
-        sz = int(sz_str)
-        if sz > _POWER_MAX_SIZE:
-            curve[sz] = [float(v) for v in row]
-    return curve
-
-
-def _payout_curve_for(
-    platform: str,
-    contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"],
-    *,
-    legacy: bool,
-) -> tuple[list[float], dict[int, list[float]]]:
-    """Build the (per-size search list, per-(size,misses) payout table) for a platform.
-
-    The first return drives beam-search ranking (single multiplier per size,
-    indexed ``[bet_size - 2]``). The second drives push-aware EV and the
-    display ``Boost`` column (full payout curve indexed by miss count).
-
-    Underdog pulls from ``data/underdog_payouts.json``. The default
-    ``"pooled"`` variant builds one combined pool (``power`` for sizes 2-3,
-    ``flex`` for sizes 4+); the legacy single-variant names are still
-    accepted for the ``pickem-build`` path. Other platforms (PrizePicks,
-    Sleeper, ParlayPlay, Chalkboard) keep the legacy single-payout table.
-    """
-    # Deferred import: legacy shims live in ``correlation.py`` per
-    # CONTRIBUTING.md §Package Map; importing at module scope would create a
-    # cycle with ``correlation``'s top-level ``beam_search_parlays`` import.
-    from sportstradamus.prediction.correlation import (
-        _legacy_underdog_overwrite_payouts,
-        _legacy_underdog_search_payouts,
-    )
-
-    if legacy and platform == "Underdog":
-        search = _legacy_underdog_search_payouts()
-        # Display table mirrors the legacy line-498 overwrite (mixed regime).
-        legacy_overwrite = _legacy_underdog_overwrite_payouts()
-        full_curve = {sz: [legacy_overwrite[sz], 0.0] for sz in legacy_overwrite}
-        return search, full_curve
-
-    legacy_tables: dict[str, list[float]] = {
-        "PrizePicks": [3.0, 5.3, 10.0, 20.8, 38.8],
-        # Sleeper caps real parlays at 3 legs — sizes 4-6 not enumerated.
-        "Sleeper": [1.0, 1.0],
-        "ParlayPlay": [1.0, 1.0, 1.0, 1.0, 1.0],
-        "Chalkboard": [1.0, 1.0, 1.0, 1.0, 1.0],
-    }
-    if platform != "Underdog":
-        lst = legacy_tables[platform]
-        full = {i + 2: [lst[i], 0.0] for i in range(len(lst))}
-        return lst, full
-
-    if contest_variant == "pooled":
-        full_curve = _pooled_underdog_curve()
-        max_size = max(full_curve.keys())
-        for sz in range(2, max_size + 1):
-            full_curve.setdefault(sz, [0.0])
-        search = [full_curve[sz][0] for sz in range(2, max_size + 1)]
-        return search, full_curve
-
-    variant_table = underdog_payouts[contest_variant]
-    if contest_variant in ("flex", "insurance"):
-        full_curve = {int(sz): [float(v) for v in row] for sz, row in variant_table.items()}
-    else:
-        full_curve = {int(sz): [float(variant_table[sz]), 0.0] for sz in variant_table}
-
-    # Pad sizes below the variant's minimum with zero-payout placeholders so
-    # the beam-search ranking heuristic indexes by ``size - 2`` consistently
-    # and the EV pre-checks naturally reject those sizes (insurance only
-    # exists at 5/6, flex at 3-6).
-    max_size = max(full_curve.keys())
-    for sz in range(2, max_size + 1):
-        full_curve.setdefault(sz, [0.0])
-    search = [full_curve[sz][0] for sz in range(2, max_size + 1)]
-    return search, full_curve
-
-
-def _nearest_psd(sigma: np.ndarray, tol: float = _PSD_EIG_TOLERANCE) -> np.ndarray:
-    """Project a symmetric matrix to the nearest PSD via eigenvalue clipping.
-
-    Symmetrize, clip eigenvalues at ``tol``, then rescale the diagonal back to
-    1 so single-leg variances stay unit (the inputs are correlation matrices).
-
-    Args:
-        sigma: Symmetric ``(n, n)`` matrix from ``C[bet_id, bet_id]``.
-        tol: Eigenvalue floor; matches the PSD acceptance threshold elsewhere.
-
-    Returns:
-        np.ndarray: PSD ``(n, n)`` matrix with unit diagonal.
-    """
-    sigma = (sigma + sigma.T) / 2
-    eigvals, eigvecs = np.linalg.eigh(sigma)
-    eigvals = np.clip(eigvals, tol, None)
-    repaired = (eigvecs * eigvals) @ eigvecs.T
-    diag_scale = 1.0 / np.sqrt(np.diag(repaired))
-    return repaired * diag_scale[:, None] * diag_scale[None, :]
-
-
-def _expected_payout_with_pushes(
-    p_win: np.ndarray,
-    p_push: np.ndarray,
-    sigma: np.ndarray,
-    bet_size: int,
-    boost: float,
-    payout_curve: dict[int, list[float]],
-    rng: np.random.Generator | None = None,
-) -> float:
-    """Expected payout for a parlay where some legs may push.
-
-    Samples ``_PUSH_MC_SAMPLES`` draws from the multivariate normal copula,
-    classifies each leg as WIN / PUSH / LOSS via inverse-CDF cuts, and applies
-    the variant payout curve at the resulting (effective_size, misses) cell.
-    Pushes drop the parlay one leg per Underdog rules; an entry that pushes
-    below the minimum bet size with no losses is treated as a refund (×1).
-
-    Args:
-        p_win: Per-leg chosen-side probability (already direction-adjusted).
-        p_push: Per-leg push probability. Zeros where push is impossible.
-        sigma: PSD-repaired correlation matrix for the parlay's legs.
-        bet_size: Number of legs (``len(p_win)``).
-        boost: Modifier-product boost for this parlay.
-        payout_curve: ``{size: [mult_at_0_misses, mult_at_1_miss, ...]}``.
-        rng: Optional ``np.random.Generator`` for deterministic tests.
-
-    Returns:
-        float: Expected payout, ready to be compared against the EV floor.
-    """
-    rng = rng if rng is not None else np.random.default_rng()
-    samples = rng.multivariate_normal(np.zeros(bet_size), sigma, size=_PUSH_MC_SAMPLES)
-
-    # Per leg: cuts split the standard normal into LOSS / PUSH / WIN bands so
-    # the marginal probabilities match (p_lose, p_push, p_win) exactly.
-    p_lose = np.clip(1.0 - p_win - p_push, 0.0, 1.0)
-    cut_lose = norm.ppf(np.clip(p_lose, 1e-9, 1 - 1e-9))
-    cut_push_top = norm.ppf(np.clip(p_lose + p_push, 1e-9, 1 - 1e-9))
-
-    # Classification: 0 = LOSS, 1 = PUSH, 2 = WIN.
-    classification = np.where(
-        samples < cut_lose,
-        0,
-        np.where(samples < cut_push_top, 1, 2),
-    )
-
-    pushes = (classification == 1).sum(axis=1)
-    losses = (classification == 0).sum(axis=1)
-    eff_size = bet_size - pushes
-
-    # Flat lookup table: lookup[size, misses] → payout multiplier. Sizes below
-    # the parlay minimum are treated as refund (×1) iff there are no losses.
-    max_idx = bet_size + 1
-    lookup = np.zeros((max_idx, max_idx), dtype=float)
-    for sz in range(2, bet_size + 1):
-        curve = payout_curve.get(sz)
-        if curve is None:
-            continue
-        for miss_idx, mult in enumerate(curve):
-            if miss_idx < max_idx:
-                lookup[sz, miss_idx] = float(mult)
-
-    safe_size = np.clip(eff_size, 0, max_idx - 1)
-    safe_miss = np.clip(losses, 0, max_idx - 1)
-    payouts = lookup[safe_size, safe_miss]
-
-    # Special-case the "all pushes (no losses)" outcome: refund.
-    all_push_no_loss = (eff_size < 2) & (losses == 0)
-    payouts = np.where(all_push_no_loss, 1.0, payouts)
-    # Sub-minimum size with at least one loss → bust.
-    payouts = np.where((eff_size < 2) & (losses > 0), 0.0, payouts)
-
-    return float(np.clip(boost, 0.0, _PAYOUT_CLIP_HI) * payouts.mean())
 
 
 def _expand_candidates(candidates, leg_indices, leg_players, EV, target_size, k):
@@ -327,31 +135,6 @@ def _parlay_admissible(bet_id, leg_teams, team, opp, M, boosts, bet_size, max_bo
     return boost
 
 
-def _psd_or_none(SIG, legacy):
-    min_eig = np.min(np.linalg.eigvalsh(SIG))
-    if legacy:
-        return None if min_eig < _PSD_EIG_TOLERANCE else SIG
-    if min_eig < _PSD_EIG_TOLERANCE:
-        return _nearest_psd(SIG)
-    return SIG
-
-
-def _parlay_payout_prob(
-    p, push_legs, SIG, bet_size, boost, payout, full_payouts, payout_base, legacy
-):
-    has_pushes = bool(np.any(push_legs > _PUSH_PROB_FLOOR))
-    # Curves with payouts at multiple miss-counts (e.g. Underdog flex and
-    # insurance) need the MC path even with zero pushes — the analytical
-    # mvn.cdf only gives P(all hit), discarding the partial-hit tiers.
-    curve = full_payouts.get(bet_size, [payout_base, 0.0])
-    multi_tier = sum(1 for v in curve if v > 0) > 1
-    if (has_pushes or multi_tier) and not legacy:
-        return _expected_payout_with_pushes(
-            p, push_legs, SIG, bet_size, boost=boost, payout_curve=full_payouts
-        )
-    return payout * multivariate_normal.cdf(norm.ppf(p), np.zeros(bet_size), SIG)
-
-
 def _parlay_fun(bet, league):
     """Heuristic 'fun' score: line distance in std units, only Over / H2H legs count."""
     return np.sum(
@@ -367,10 +150,88 @@ def _parlay_fun(bet, league):
     )
 
 
-def _resolve_leg_stat(market: str, new_map: dict) -> str:
+def resolve_leg_stat(market: str, new_map: dict) -> str:
     """Gamelog stat key for a leg's display ``Market``, mirroring the ``cMarket`` idiom."""
     stripped = market.replace("H2H ", "")
     return new_map.get(stripped, stripped)
+
+
+def _is_sleeper_flex_candidate(info, bet_size):
+    return info["Platform"] == "Sleeper" and bet_size >= SLEEPER_FLEX_MIN_SIZE
+
+
+def _sleeper_flex_payout(g, bet_id, bet_size, payout_base, p, SIG, legacy):
+    """Price a Sleeper Flex candidate: devig each leg, then K(n,k)/P_devigged.
+
+    boost/M's running-product mechanism does not apply here -- devig already
+    consumes the same per-leg multipliers as pricing input, so folding boost
+    in on top would double-count that information (sleeper-parity §4b-iv).
+    boost=1.0 passed to parlay_payout_prob is an inert signature placeholder.
+    """
+    boosts_leg = g.boosts[np.ix_(bet_id)]
+    devigged_p = np.array(
+        [
+            no_vig_odds(float(over), float(under))[0]
+            for over, under in zip(boosts_leg, g.opp_boost[np.ix_(bet_id)], strict=True)
+        ]
+    )
+    flex_curve = sleeper_flex_payout_curve(devigged_p, sleeper_payouts["flex_k"])
+    payout = flex_curve[bet_size][0]
+    p = parlay_payout_prob(
+        p, np.zeros(bet_size), SIG, bet_size, 1.0, payout, flex_curve, payout_base, legacy
+    )
+    return payout, p
+
+
+def _leg_boost_payout(
+    g,
+    bet_id,
+    bet_size,
+    boost,
+    payout,
+    p,
+    SIG,
+    full_payouts,
+    payout_base,
+    legacy,
+    full_refund_below_size,
+):
+    """Price a Max/Underdog candidate via the per-leg boost array push-repricing path."""
+    boosts_leg = g.boosts[np.ix_(bet_id)]
+    leg_boost = boosts_leg.copy()
+    # Fold M's pairwise product into one slot so prod(leg_boost) == boost
+    # exactly when no leg pushes. Division is safe: _parlay_admissible
+    # already gated boost > _MIN_PRODUCT_BOOST (0.7), so no boosts_leg entry
+    # can be zero here without the candidate already rejected.
+    leg_boost[0] *= boost / np.prod(boosts_leg)
+    return parlay_payout_prob(
+        p,
+        g.p_push[np.ix_(bet_id)],
+        SIG,
+        bet_size,
+        leg_boost,
+        payout,
+        full_payouts,
+        payout_base,
+        legacy,
+        full_refund_below_size=full_refund_below_size,
+    )
+
+
+def _parlay_kelly_units(g, bet_id, p, payout):
+    """Shrinkage-aware Kelly ranking score for one evaluated candidate.
+
+    win_prob is exact on the no-push analytical fast path (p = payout *
+    P(all hit) there, so division recovers P(all hit) exactly) but only an
+    approximation on the push-aware MC path. units is a ranking/filter score,
+    not a final stake, so the approximation is acceptable here.
+    """
+    parlay_shrinkage = float(np.min(g.shrinkage[np.ix_(bet_id)]))
+    win_prob = p / payout
+    raw_kelly = kelly_edge(win_prob, payout, parlay_shrinkage)
+    if raw_kelly <= 0:
+        return -1.0
+    return raw_kelly * DEFAULT_KELLY_FRACTION / MAX_FRACTION_OF_BANKROLL
 
 
 def _evaluate_parlay(
@@ -387,9 +248,10 @@ def _evaluate_parlay(
     leg_teams,
     legacy,
     new_map,
+    full_refund_below_size=None,
 ):
     """Score one parlay candidate; return its row dict, or None if it fails a gate."""
-    C, M, p_model, p_books, p_push, boosts = g.C, g.M, g.p_model, g.p_books, g.p_push, g.boosts
+    C, M, p_model, p_books, boosts = g.C, g.M, g.p_model, g.p_books, g.boosts
     boost = _parlay_admissible(bet_id, leg_teams, team, opp, M, boosts, bet_size, max_boost)
     if boost is None:
         return None
@@ -404,17 +266,30 @@ def _evaluate_parlay(
     if prev_p < _MODEL_EV_PRECHECK_FLOOR:
         return None
 
-    SIG = _psd_or_none(C[np.ix_(bet_id, bet_id)], legacy)
+    SIG = psd_or_none(C[np.ix_(bet_id, bet_id)], legacy)
     if SIG is None:
         return None
 
-    payout = np.clip(payout_base * boost, _PAYOUT_CLIP_LO, _PAYOUT_CLIP_HI)
-    p = _parlay_payout_prob(
-        p, p_push[np.ix_(bet_id)], SIG, bet_size, boost, payout, full_payouts, payout_base, legacy
-    )
+    payout = np.clip(payout_base * boost, PAYOUT_CLIP_LO, PAYOUT_CLIP_HI)
+    if _is_sleeper_flex_candidate(info, bet_size):
+        payout, p = _sleeper_flex_payout(g, bet_id, bet_size, payout_base, p, SIG, legacy)
+    else:
+        p = _leg_boost_payout(
+            g,
+            bet_id,
+            bet_size,
+            boost,
+            payout,
+            p,
+            SIG,
+            full_payouts,
+            payout_base,
+            legacy,
+            full_refund_below_size,
+        )
     pb = p / prev_p * prev_pb
-    units = (p - 1) / (payout - 1) / _KELLY_BANKROLL_FRACTION
 
+    units = _parlay_kelly_units(g, bet_id, p, payout)
     if units < _KELLY_UNITS_FLOOR or p < _MODEL_EV_FINAL_FLOOR or pb < _BOOKS_EV_FLOOR:
         return None
 
@@ -428,7 +303,7 @@ def _evaluate_parlay(
             {
                 **leg,
                 "Platform": info["Platform"],
-                "Stat": _resolve_leg_stat(leg["Market"], new_map),
+                "Stat": resolve_leg_stat(leg["Market"], new_map),
             }
         )
         for leg in bet
@@ -467,6 +342,7 @@ def beam_search_parlays(
     *,
     contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"] = "pooled",
     legacy: bool = False,
+    full_refund_below_size: int | None = None,
 ):
     """Enumerate top parlay combinations via beam search.
 
@@ -492,9 +368,13 @@ def beam_search_parlays(
             per game into the league-specific leg ``Stat`` lookup via
             :func:`sportstradamus.analysis._leg_market_map`.
         contest_variant: Underdog contest variant. Affects payout curve
-            interpretation in :func:`_expected_payout_with_pushes`.
+            interpretation in :func:`payouts.expected_payout_with_pushes`.
         legacy: When True, reproduce pre-2026.05 scoring (no PSD repair, no
             push-aware EV, bare modifier-product Boost in the output).
+        full_refund_below_size: Threaded to :func:`payouts.expected_payout_with_pushes`
+            — entries at or below this size refund in full on any push
+            (Sleeper's 2-pick divergence). ``None`` keeps the generic
+            drop-and-reprice rule at every size.
 
     Returns:
         list[dict]: Parlay candidate dicts ready for DataFrame construction.
@@ -531,6 +411,7 @@ def beam_search_parlays(
                 leg_teams,
                 legacy,
                 new_map,
+                full_refund_below_size,
             )
             if result is not None:
                 all_results.append(result)

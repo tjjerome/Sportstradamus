@@ -421,7 +421,7 @@ def test_find_correlation_builds_parlays_wnba() -> None:
     # PTS/PRA/AST/REB aren't in stat_map["Underdog"], so identity-fallback (stat
     # == market) is the *correct* answer for this fixture's markets — the
     # remap-actually-fires case (WNBA "Fantasy Points") is pinned directly on
-    # _resolve_leg_stat in test_parlay_search.py, not fixture-dependent here.
+    # resolve_leg_stat in test_parlay_search.py, not fixture-dependent here.
     assert all(leg["stat"] == leg["market"] for row in parlay_df["legs"] for leg in row)
 
 
@@ -568,6 +568,9 @@ def _matrix_game() -> tuple[pd.DataFrame, dict]:
             "Player": ["A", "B", "C"],
             "Bet": ["Over", "Over", "Over"],
             "cMarket": [["G1.PTS"], ["G1.AST"], ["C1.REB"]],
+            # Deliberately not real stat_map["Underdog"] keys — keeps
+            # _leg_shrinkage on its no-I/O 1.0 fallback path in these tests.
+            "Market": ["Test1", "Test2", "Test3"],
         }
     )
     return game_df, game_df.to_dict("index")
@@ -578,7 +581,7 @@ def test_build_correlation_matrices_structure_and_values() -> None:
     game_df, game_dict = _matrix_game()
     c_map = {("G1.PTS", "G1.AST"): 0.4, ("G1.AST", "C1.REB"): 0.2}
 
-    g = _build_correlation_matrices(game_df, game_dict, c_map, {}, {}, [3.0])
+    g = _build_correlation_matrices(game_df, game_dict, c_map, {}, {}, [3.0], "Underdog", "NBA", {})
     C, M, EV, EVb, p_push = g.C, g.M, g.EV, g.EVb, g.p_push
 
     assert C.shape == (3, 3)
@@ -605,7 +608,9 @@ def test_build_correlation_matrices_honors_push_column() -> None:
     game_df, game_dict = _matrix_game()
     game_df["Push Prob"] = [0.1, np.nan, 0.2]
 
-    p_push = _build_correlation_matrices(game_df, game_dict, {}, {}, {}, [3.0]).p_push
+    p_push = _build_correlation_matrices(
+        game_df, game_dict, {}, {}, {}, [3.0], "Underdog", "NBA", {}
+    ).p_push
     assert p_push.tolist() == [0.1, 0.0, 0.2]
 
 

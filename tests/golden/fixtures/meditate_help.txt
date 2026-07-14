@@ -104,4 +104,11 @@ Options:
                                   targets the served Gate-4 randomized-PIT KS
                                   directly, mirroring the SkewNormal branch; a
                                   Ship 75 axis.  [default: auto]
+  --matrix-only / --no-matrix-only
+                                  Assemble and persist each cell's training
+                                  matrix (and comps), then stop before
+                                  distribution selection and model training.
+                                  Warms data/training_data/ without training;
+                                  pair with --bypass-withholding to reach
+                                  withheld cells.
   --help                          Show this message and exit.
