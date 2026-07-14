@@ -10,10 +10,12 @@ cross-game simple builder call it (a cross-game slip just makes the off-blocks
 zero, so the joint collapses to the independent product).
 
 Per-leg win/push probabilities and boosts are snapshotted from ``current_offers``
-into the leg dicts, so scoring never re-reads the offers frame. Platform pricing
-splits: Underdog uses the pooled Power/Flex payout table, Sleeper multiplies the
-per-leg boosts (its correlation-discount factor is deferred — see ``DESIGN``/lane
-brief — and surfaced as ``payout_approximate``). Money is ``Decimal``.
+into the leg dicts, so scoring never re-reads the offers frame. Platform pricing:
+both platforms read a real pooled payout schedule (Underdog Power/Flex, Sleeper
+Max/Flex) that the boost product multiplies on top of. Sleeper's
+correlation-discount question (its boost quotes may not price in intra-slip
+correlation the way a fixed table implicitly does) is tracked separately in the
+dashboard-ux lane, not represented in this scoring. Money is ``Decimal``.
 
 ``slip_headline`` reuses the P2 thesis engine so the constellation builder's live
 headline is a deterministic, path-independent function of the leg-set.
@@ -35,6 +37,8 @@ from sportstradamus.prediction.payouts import (
     PAYOUT_CLIP_HI,
     PAYOUT_CLIP_LO,
     POWER_MAX_SIZE,
+    SLEEPER_FULL_REFUND_MAX_SIZE,
+    SLEEPER_MAX_SIZE,
     payout_curve_for,
 )
 from sportstradamus.prediction.stories.engine import thesis_variants
@@ -59,9 +63,9 @@ class SlipScore:
     payout: float  # payout multiplier per $1 staked
     model_ev: float  # expected payout per $1 (push/flex-aware)
     bet_size: int
-    play_type: str  # Power | Flex | Sleeper
+    play_type: str  # Power | Max | Flex
     stake: Decimal  # fractional-Kelly stake in dollars
-    payout_approximate: bool  # Sleeper: correlation-discount factor pending
+    payout_approximate: bool  # always False; kept for the astrolabe JSON contract
 
 
 def score_slip(
@@ -89,7 +93,21 @@ def score_slip(
     boost = float(np.prod([float(leg["boost"]) for leg in legs]))
     payout = float(np.clip(boost * base, PAYOUT_CLIP_LO, PAYOUT_CLIP_HI))
     push = np.array([float(leg.get("push_prob", 0.0) or 0.0) for leg in legs])
-    model_ev = float(parlay_payout_prob(p, push, sig, n, boost, payout, full_payouts, base, False))
+    full_refund_below_size = SLEEPER_FULL_REFUND_MAX_SIZE if platform == "Sleeper" else None
+    model_ev = float(
+        parlay_payout_prob(
+            p,
+            push,
+            sig,
+            n,
+            boost,
+            payout,
+            full_payouts,
+            base,
+            False,
+            full_refund_below_size=full_refund_below_size,
+        )
+    )
     kelly_win = model_ev / payout if payout > 0 else 0.0
     stake = fractional_kelly_stake(
         bankroll=bankroll,
@@ -145,13 +163,19 @@ def astrolabe_payload(score: SlipScore, *, nonce: int) -> dict:
 def _platform_pricing(platform: str, n: int) -> tuple[str, dict, float, bool]:
     """(play_type, full payout curve, base multiplier, payout_approximate) for a platform/size.
 
-    Underdog reads the pooled Power/Flex schedule (base = the per-size multiplier
-    before the boost product). Sleeper has no per-size table — its payout is the
-    boost product alone, so the base schedule is a flat 1.0 and the boost carries
-    the multiplier (the correlation-discount factor is deferred).
+    Both platforms read a real pooled schedule (Underdog Power/Flex, Sleeper
+    Max/Flex, sportstradamus.prediction.payouts) — ``base`` is the per-size
+    multiplier ``score_slip``'s ``boost * base`` composition applies on top of.
+    Sizes above a platform's configured max (``SLEEPER_FLEX_CAP`` / Underdog's
+    payout-table max, both 6 today) silently return ``base=0.0``, which
+    ``score_slip``'s early-return guard turns into a zero-payout/zero-EV score
+    rather than an error — pre-existing, symmetric across both platforms.
     """
     if platform == "Sleeper":
-        return "Sleeper", {n: [1.0, 0.0]}, 1.0, True
+        search, full_curve = payout_curve_for("Sleeper", "pooled", legacy=False)
+        base = search[n - 2] if 0 <= n - 2 < len(search) else 0.0
+        play_type = "Max" if n <= SLEEPER_MAX_SIZE else "Flex"
+        return play_type, full_curve, float(base), False
     search, full_curve = payout_curve_for("Underdog", "pooled", legacy=False)
     base = search[n - 2] if 0 <= n - 2 < len(search) else 0.0
     play_type = "Power" if n <= POWER_MAX_SIZE else "Flex"

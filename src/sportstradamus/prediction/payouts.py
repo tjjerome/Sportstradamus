@@ -30,6 +30,11 @@ SLEEPER_FLEX_MIN_SIZE: int = SLEEPER_MAX_SIZE + 1
 # Sleeper's own documented minimum Flex payout (support.sleeper.com/en/articles/9261402).
 SLEEPER_FLEX_MIN_MULTIPLIER: float = 1.25
 
+# Sleeper's 2-pick divergence: ANY push refunds the entry in full, rather than
+# the generic drop-and-reprice rule every larger size uses. See
+# docs/handoffs/sleeper-parity.md §3 item 3.
+SLEEPER_FULL_REFUND_MAX_SIZE: int = 2
+
 
 def _pooled_underdog_curve() -> dict[int, list[float]]:
     """Build the single combined Underdog payout pool keyed by bet size.

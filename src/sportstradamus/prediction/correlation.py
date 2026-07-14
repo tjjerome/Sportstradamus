@@ -30,7 +30,7 @@ from sportstradamus.prediction.parlay import (
     beam_search_parlays,
     resolve_leg_stat,
 )
-from sportstradamus.prediction.payouts import payout_curve_for
+from sportstradamus.prediction.payouts import SLEEPER_FULL_REFUND_MAX_SIZE, payout_curve_for
 from sportstradamus.spiderLogger import logger
 
 # Legacy weighting from the unified-matrix era: same-team and cross pairs
@@ -44,9 +44,6 @@ _DEFENSIVE_PAIR_WEIGHT: float = 1.0 - _OFFENSIVE_PAIR_WEIGHT
 _MAX_BOOST_UNDERDOG: float = 2.5
 _MAX_BOOST_OTHER: float = 60.0
 
-# Sleeper-only divergence from Underdog's push rule (sleeper-parity §4):
-# 2-pick entries cancel/refund in full on ANY push, not just drops-below-minimum.
-_SLEEPER_MIN_SIZE_FULL_REFUND: int = 2
 
 # Pre-filter gates for offers entering the per-game beam search. Hand-tuned to
 # keep only book-supported, model-favored legs out of the cartesian explosion.
@@ -661,7 +658,7 @@ def _process_league_games(
             "Platform": platform,
         }
         max_boost = _MAX_BOOST_UNDERDOG if platform == "Underdog" else _MAX_BOOST_OTHER
-        full_refund_below_size = _SLEEPER_MIN_SIZE_FULL_REFUND if platform == "Sleeper" else None
+        full_refund_below_size = SLEEPER_FULL_REFUND_MAX_SIZE if platform == "Sleeper" else None
         _append_story_context(
             story_sink,
             platform,
