@@ -1,9 +1,9 @@
 # Sleeper decision-layer parity
 
-> Status: QUEUED (entry: stage-1 Sleeper EV engine — stage 0 complete
-> 2026-07-12) — CRITICAL PATH: blocks D3/parlay-dependence + dfs-products
-> 2b/2c/5; recommended next code-heavy lane, target merge ~Aug 2026 (pre NFL
-> Wk 1)
+> Status: QUEUED (entry: stage-3 dashboard + snapshots — stage 2
+> decision-layer plumb-through complete 2026-07-13) — CRITICAL PATH: blocks
+> D3/parlay-dependence + dfs-products 2b/2c/5; recommended next code-heavy
+> lane, target merge ~Aug 2026 (pre NFL Wk 1)
 
 ## 1. Mission & money logic
 
@@ -317,6 +317,7 @@ refactoring-specialist per the five [`CLAUDE.md`](../../CLAUDE.md) triggers.
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-13 · stage 2 complete · `platform: str = "Underdog"` threaded through 6 `strategies.underdog_pickem` functions + `RecommendedEntry` + `_pickem_emit.py`'s frame/YAML output, and `prediction.cli.py`'s pickem snapshot writer (per-platform try/except, one failure no longer blanks the other's entries) — explicit-param convention, not a config object, matching `find_correlation`/`process_offers`; new `PLATFORM_CONTEST_VARIANTS` constant (Sleeper has no Rivals); generalized in place, no sibling module (would trip `test_no_duplicate_code.py`) · found+fixed Finding 0 (stage-1 spillover bug, not this stage's scope but caught during design): `payout_curve_for`'s Sleeper branch ignored `contest_variant`, always building the full 2-6-leg curve and doubling beam-search cost per slate; fixed, hand-verified 3-leg Max (`[1.0, 1.0797]`, matches `sleeper_payouts.json` exactly, curve now correctly caps at size 3) and 5-leg Flex (`sleeper_flex_payout_curve` pricing confirmed orthogonal to the bug — same numbers before/after) · found+fixed one unrelated pre-existing bug along the way (owner-approved mid-session): `dashboard/data.py`'s 13 `st.cache_data` loaders keyed on file `mtime` alone; hardened to `(path, mtime)` so two tmp-path fixtures sharing a path constant across tests can't collide on a stale cache entry · hit one NOT-fixed pre-existing flake: `test_lab_modifiers_pairwise_isolation_updates_stale_pair` — proved via clean-baseline-plus-5-no-op-tests that it's order-dependent on pytest-xdist's worker distribution, not caused by any functional diff; 4 independent fix strategies (cache key as path object, as str, per-function `.clear()`, monkeypatching the loader function directly) all failed identically — the function object AppTest resolves inside its own rerun is provably the pre-patch original, meaning the bug is inside `streamlit.testing.v1`'s script-rerun internals, not reachable from dashboard code; `xfail(strict=False)` with the full trail in the marker reason · rename `underdog_pickem.py` → `pickem.py` still deferred (3 live cross-lane importers in `sim-bettor-ledger`) · breadcrumbs, not fixed: `_ledger_cross_game.py:63` hardcodes `stat_map["Underdog"]` (inert until the ledger lane passes `platform="Sleeper"`); `ledger.py:40-41`'s `_POWER_SIZES`/`_FLEX_SIZES` match Sleeper's split by coincidence, not a documented shared contract · all 3 gates clean (ruff clean; golden 3575 passed/1 xfailed; integration 24 passed, `integration_green` marked) · next: stage 3 — dashboard + snapshots
 - 2026-07-12 · stage 0 complete · owner-verified in-app: leg cap=8 (payouts.py:83 comment wrong, marked for correction into stage 1); our construction locks 2-3=Max/power + 4-6=Flex capped at 6 legs (new decision, mirrors `_pooled_underdog_curve`, bumps stage 1 est. to 3-4 sessions); multiplier=stake×product confirmed; push=leg-drop+reprice except 2-pick=full refund (Underdog divergence); kill-criteria passed (fixed multiplier, not pari-mutuel); fixed 10 stale file/line citations from the parlay.py→payouts.py seam-split drift · OPEN: Sleeper Flex payout table unpublished, needs §3.1 in-app test · next: stage 1 — run §3.1 test, then payouts.py/parlay.py:184 Kelly-gate work
 - 2026-07-11 · flagged critical path · roadmap audit: this lane blocks both D3 (parlay-dependence) and dfs-products 2b/2c/5; owner marked it the recommended next code-heavy lane, target merge ~Aug (pre NFL Wk 1) · next: stage 0
 - 2026-07-10 · owner decision · PARLAY_AUDIT §2.6 parlay-path Kelly fix routed into stage 1 (option a — shrinkage-aware sizing lands with the parlay.py rebuild) · next: unchanged

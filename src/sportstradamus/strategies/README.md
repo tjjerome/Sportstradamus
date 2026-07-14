@@ -8,21 +8,24 @@ prediction pipeline — no league-specific math lives here.
 | Module | Purpose |
 |---|---|
 | `kelly` | Fractional-Kelly stake sizing with CLV/training shrinkage blend. CLI `poetry run kelly`. |
-| `underdog_pickem` | Underdog Pick'em (Power/Flex/Rivals) entry construction. `prophecize` snapshots ranked entries to `current_pickem.parquet` for the dashboard's **Predictions — Pickem** page; CLI `poetry run pickem-build` emits a YAML for offline use. |
+| `underdog_pickem` | Pick'em (Power/Flex/Rivals) entry construction for Underdog and Sleeper. `prophecize` snapshots ranked entries to `current_pickem.parquet` for the dashboard's **Predictions — Pickem** page; CLI `poetry run pickem-build --platform {Underdog,Sleeper}` emits a YAML for offline use. |
 
 ## Pick'em entries (`underdog_pickem`)
 
-`construct_entries` ranks and Kelly-sizes Underdog Pick'em contest entries
-(Power/Flex/Rivals). Two front doors:
+`construct_entries` ranks and Kelly-sizes Pick'em contest entries
+(Power/Flex/Rivals — Rivals is Underdog-only, see `PLATFORM_CONTEST_VARIANTS`).
+Two front doors, both `platform`-parameterized (`"Underdog"` or `"Sleeper"`):
 
 - **Dashboard (primary).** The hourly `prophecize` run calls
-  `build_entries_from_scored` on the offers it already scored — no second
-  scrape, no extra archive lock — and writes `current_pickem.parquet`. The
-  **Predictions — Pickem** page reads it and sizes stakes live against a
-  user-entered bankroll via `fractional_kelly_stake`, replacing the offline
-  `kelly` CLI for interactive use.
-- **Offline CLI.** `poetry run pickem-build` re-runs the loader itself and
-  emits a recommendations YAML; `poetry run kelly` re-sizes that YAML.
+  `build_entries_from_scored` once per platform on the offers it already
+  scored — no second scrape, no extra archive lock — and writes one combined
+  `current_pickem.parquet` tagged by `platform`. The **Predictions — Pickem**
+  page reads it and sizes stakes live against a user-entered bankroll via
+  `fractional_kelly_stake`, replacing the offline `kelly` CLI for interactive
+  use.
+- **Offline CLI.** `poetry run pickem-build --platform {Underdog,Sleeper}`
+  re-runs the loader itself and emits a recommendations YAML; `poetry run
+  kelly` re-sizes that YAML.
 
 ## Shrinkage resolution (`kelly.resolve_shrinkage`)
 

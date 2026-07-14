@@ -55,7 +55,9 @@ def _pooled_underdog_curve() -> dict[int, list[float]]:
     return curve
 
 
-def _sleeper_curve() -> dict[int, list[float]]:
+def _sleeper_curve(
+    contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"],
+) -> dict[int, list[float]]:
     """Sleeper payout curve keyed by bet size.
 
     Max (2..SLEEPER_MAX_SIZE): the real per-entry payout is dominated by the
@@ -76,15 +78,33 @@ def _sleeper_curve() -> dict[int, list[float]]:
     search's EV floors reject them instead of mispricing on invented
     numbers -- not exercised today since sizes 4-6 are populated, but kept
     as the safety behavior if a future size is ever added unpopulated.
+
+    Like ``_pooled_underdog_curve``, ``"pooled"`` builds the full combined
+    curve (power range + flex range). A single-variant call restricts the
+    curve to only its own range: ``"power"`` returns keys
+    2..SLEEPER_MAX_SIZE and no keys above it at all, so
+    ``payout_curve_for``'s ``max(full_curve.keys())`` shrinks and
+    ``beam_search_parlays``'s ``max_bet_size`` stops at SLEEPER_MAX_SIZE
+    instead of exploring up through SLEEPER_FLEX_CAP on every variant call.
+    ``"flex"`` returns its own range plus zero-padded keys below
+    SLEEPER_MAX_SIZE+1 -- ``payout_curve_for``'s search list always indexes
+    from size 2, so those keys must exist, just priced at 0.0 so the EV
+    floor rejects them (mirrors the "unpopulated sizes pad to 0.0" behavior
+    above, applied below the variant's range instead of within it).
     """
     curve: dict[int, list[float]] = {}
-    power = sleeper_payouts.get("power", {})
-    for sz in range(2, SLEEPER_MAX_SIZE + 1):
-        curve[sz] = [float(power[sz]), 0.0]
-    flex = sleeper_payouts.get("flex", {})
-    for sz in range(SLEEPER_MAX_SIZE + 1, SLEEPER_FLEX_CAP + 1):
-        row = flex.get(sz)
-        curve[sz] = [float(v) for v in row] if row else [0.0]
+    if contest_variant in ("pooled", "power"):
+        power = sleeper_payouts.get("power", {})
+        for sz in range(2, SLEEPER_MAX_SIZE + 1):
+            curve[sz] = [float(power[sz]), 0.0]
+    if contest_variant in ("pooled", "flex"):
+        flex = sleeper_payouts.get("flex", {})
+        for sz in range(SLEEPER_MAX_SIZE + 1, SLEEPER_FLEX_CAP + 1):
+            row = flex.get(sz)
+            curve[sz] = [float(v) for v in row] if row else [0.0]
+        if contest_variant == "flex":
+            for sz in range(2, SLEEPER_MAX_SIZE + 1):
+                curve.setdefault(sz, [0.0])
     return curve
 
 
@@ -122,7 +142,7 @@ def payout_curve_for(
         return search, full_curve
 
     if platform == "Sleeper":
-        full_curve = _sleeper_curve()
+        full_curve = _sleeper_curve(contest_variant)
         max_size = max(full_curve.keys())
         search = [full_curve[sz][0] for sz in range(2, max_size + 1)]
         return search, full_curve

@@ -28,7 +28,10 @@ from sportstradamus.prediction.parlay import (
 )
 from sportstradamus.prediction.payouts import (
     PAYOUT_CLIP_HI,
+    SLEEPER_FLEX_CAP,
     SLEEPER_FLEX_MIN_MULTIPLIER,
+    SLEEPER_FLEX_MIN_SIZE,
+    SLEEPER_MAX_SIZE,
     expected_payout_with_pushes,
     payout_curve_for,
     poisson_binomial_pmf,
@@ -331,6 +334,36 @@ def test_sleeper_payout_curve_max_applies_power_bonus() -> None:
     assert full[3][0] == pytest.approx(1.0797)
 
 
+def test_sleeper_payout_curve_variant_zeroes_out_of_scope_sizes() -> None:
+    """A single-variant Sleeper call restricts the curve to its own size
+    range (Fix 0: previously ``_sleeper_curve`` ignored ``contest_variant``
+    and always returned the full 2-6 curve, which not only mispriced the
+    pre-check gate but left ``search`` at length 5 regardless of variant --
+    doubling ``beam_search_parlays``'s ``max_bet_size`` for every "power"
+    call). "power" must drop the flex sizes entirely (not just zero their
+    value) so ``max_bet_size`` actually shrinks; "flex" keeps the full range
+    but zero-pads the power sizes below it, since ``search`` always indexes
+    from size 2."""
+    search_power, full_power = payout_curve_for("Sleeper", "power", legacy=False)
+    assert set(full_power.keys()) == set(range(2, SLEEPER_MAX_SIZE + 1))
+    assert len(search_power) == SLEEPER_MAX_SIZE - 1
+    assert full_power[SLEEPER_MAX_SIZE][0] == pytest.approx(1.0797)
+
+    search_flex, full_flex = payout_curve_for("Sleeper", "flex", legacy=False)
+    assert set(full_flex.keys()) == set(range(2, SLEEPER_FLEX_CAP + 1))
+    assert len(search_flex) == SLEEPER_FLEX_CAP - 1
+    for sz in range(2, SLEEPER_FLEX_MIN_SIZE):
+        assert full_flex[sz][0] == 0.0
+    assert full_flex[SLEEPER_FLEX_MIN_SIZE][0] != 0.0
+    assert search_flex[0] == 0.0  # size 2 slot zeroed, not power's bonus
+
+    search_pooled, full_pooled = payout_curve_for("Sleeper", "pooled", legacy=False)
+    assert set(full_pooled.keys()) == set(range(2, SLEEPER_FLEX_CAP + 1))
+    assert len(search_pooled) == SLEEPER_FLEX_CAP - 1
+    assert full_pooled[SLEEPER_MAX_SIZE][0] == pytest.approx(1.0797)  # real, not zeroed
+    assert full_pooled[SLEEPER_FLEX_MIN_SIZE][0] != 0.0  # real, not zeroed
+
+
 def test_sleeper_payout_curve_flex_k_loads_from_config() -> None:
     """sleeper_payouts['flex_k'] loads with int size keys and the confirmed
     K(n,k) constants (n=5/6 high confidence, n=4 provisional)."""
@@ -449,14 +482,26 @@ def test_sleeper_two_leg_push_refunds_in_full_even_with_a_loss() -> None:
 
     rng = np.random.default_rng(13)
     ev_refund = expected_payout_with_pushes(
-        p_win, p_push, sigma, 2, boost=1.0, payout_curve=curve, rng=rng,
+        p_win,
+        p_push,
+        sigma,
+        2,
+        boost=1.0,
+        payout_curve=curve,
+        rng=rng,
         full_refund_below_size=2,
     )
     assert ev_refund == pytest.approx(1.0, abs=1e-6)
 
     rng2 = np.random.default_rng(13)
     ev_generic = expected_payout_with_pushes(
-        p_win, p_push, sigma, 2, boost=1.0, payout_curve=curve, rng=rng2,
+        p_win,
+        p_push,
+        sigma,
+        2,
+        boost=1.0,
+        payout_curve=curve,
+        rng=rng2,
         full_refund_below_size=None,
     )
     assert ev_generic == pytest.approx(0.0, abs=1e-6)
@@ -473,7 +518,13 @@ def test_sleeper_three_leg_push_drops_and_reprices_not_full_refund() -> None:
 
     rng = np.random.default_rng(17)
     ev = expected_payout_with_pushes(
-        p_win, p_push, sigma, 3, boost=1.0, payout_curve=curve, rng=rng,
+        p_win,
+        p_push,
+        sigma,
+        3,
+        boost=1.0,
+        payout_curve=curve,
+        rng=rng,
         full_refund_below_size=2,
     )
     assert ev == pytest.approx(5.0, abs=1e-6)

@@ -101,8 +101,12 @@ def _mtime(path) -> float:
     """Return the parquet/JSON file's mtime, or 0.0 if absent.
 
     Used as a cache key so Streamlit re-reads when cron rewrites a snapshot.
-    Passed by value into private ``_load_*_cached`` helpers; the function
-    body never touches the value, but Streamlit hashes it for the key.
+    Passed by value into private ``_load_*_cached`` helpers alongside the
+    path itself; mtime alone is not a unique cache key across tests, which
+    each point the same path constant at a different tmp file — two
+    ``_load_*_cached`` calls a test apart can otherwise collide on a stale
+    entry. The function body doesn't always touch either value directly,
+    but Streamlit hashes both as the key.
     """
     p = Path(str(path))
     return p.stat().st_mtime if p.is_file() else 0.0
@@ -129,11 +133,13 @@ def format_ts(ts: str) -> str:
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading prediction history...")
-def _load_history_cached(mtime: float) -> pd.DataFrame:
+def _load_history_cached(path: Path, mtime: float) -> pd.DataFrame:
     """Cached read of the prediction-history parquet.
 
-    ``mtime`` is the file modification time; Streamlit hashes it as part of
-    the cache key so a fresh cron write invalidates the entry.
+    ``path`` + ``mtime`` form the cache key: path alone so two different
+    paths (e.g. two tests' tmp fixtures) never share an entry; mtime so a
+    fresh cron write invalidates it. ``read_history()`` re-resolves the path
+    itself, so ``path`` isn't touched in the body beyond keying the cache.
     """
     history = read_history()
     if history.empty:
@@ -147,16 +153,16 @@ def _load_history_cached(mtime: float) -> pd.DataFrame:
 
 
 def load_history() -> pd.DataFrame:
-    """Load prediction history from parquet (mtime-keyed cache).
+    """Load prediction history from parquet (path+mtime-keyed cache).
 
     Flat one-row-per-(prediction x book offer) schema; prediction-level
     columns are duplicated across every offer row for the same prediction.
     """
-    return _load_history_cached(_mtime(HISTORY_PATH))
+    return _load_history_cached(HISTORY_PATH, _mtime(HISTORY_PATH))
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading parlay history...")
-def _load_parlays_cached(mtime: float) -> pd.DataFrame:
+def _load_parlays_cached(path: Path, mtime: float) -> pd.DataFrame:
     parlays = read_parlay_hist()
     if parlays.empty:
         return parlays
@@ -169,33 +175,33 @@ def _load_parlays_cached(mtime: float) -> pd.DataFrame:
 
 
 def load_parlays() -> pd.DataFrame:
-    """Parlay history from parquet, keyed on file mtime so cron rewrites invalidate the cache."""
-    return _load_parlays_cached(_mtime(PARLAY_HIST_PATH))
+    """Parlay history from parquet, keyed on path+mtime so cron rewrites invalidate the cache."""
+    return _load_parlays_cached(PARLAY_HIST_PATH, _mtime(PARLAY_HIST_PATH))
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading current offers...")
-def _load_current_offers_cached(mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(CURRENT_OFFERS_PATH)
+def _load_current_offers_cached(path: Path, mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(path)
 
 
 def load_current_offers() -> pd.DataFrame:
     """Today's scored offers from the latest ``prophecize`` snapshot."""
-    return _load_current_offers_cached(_mtime(CURRENT_OFFERS_PATH))
+    return _load_current_offers_cached(CURRENT_OFFERS_PATH, _mtime(CURRENT_OFFERS_PATH))
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading current parlays...")
-def _load_current_parlays_cached(mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(CURRENT_PARLAYS_PATH)
+def _load_current_parlays_cached(path: Path, mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(path)
 
 
 def load_current_parlays() -> pd.DataFrame:
     """Today's parlay candidates from the latest ``prophecize`` snapshot."""
-    return _load_current_parlays_cached(_mtime(CURRENT_PARLAYS_PATH))
+    return _load_current_parlays_cached(CURRENT_PARLAYS_PATH, _mtime(CURRENT_PARLAYS_PATH))
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading correlation slices...")
-def _load_current_game_corr_cached(mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(CURRENT_GAME_CORR_PATH)
+def _load_current_game_corr_cached(path: Path, mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(path)
 
 
 def load_current_game_corr() -> pd.DataFrame:
@@ -205,12 +211,12 @@ def load_current_game_corr() -> pd.DataFrame:
     joins ``current_offers`` on the canonical ``Game`` key. Feeds the slip rail
     copula, the constellation, and the swap dialog.
     """
-    return _load_current_game_corr_cached(_mtime(CURRENT_GAME_CORR_PATH))
+    return _load_current_game_corr_cached(CURRENT_GAME_CORR_PATH, _mtime(CURRENT_GAME_CORR_PATH))
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading story menu...")
-def _load_current_game_stories_cached(mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(CURRENT_GAME_STORIES_PATH)
+def _load_current_game_stories_cached(path: Path, mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(path)
 
 
 def load_current_game_stories() -> pd.DataFrame:
@@ -221,12 +227,14 @@ def load_current_game_stories() -> pd.DataFrame:
     ``bet_size`` per row. Seeds the Slips constellation builder (Bankroll
     Builder / Shoot the Moon).
     """
-    return _load_current_game_stories_cached(_mtime(CURRENT_GAME_STORIES_PATH))
+    return _load_current_game_stories_cached(
+        CURRENT_GAME_STORIES_PATH, _mtime(CURRENT_GAME_STORIES_PATH)
+    )
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
-def _load_profit_sim_summary_cached(mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(PROFIT_SIM_SUMMARY_PATH)
+def _load_profit_sim_summary_cached(path: Path, mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(path)
 
 
 def load_profit_sim_summary() -> pd.DataFrame:
@@ -236,12 +244,12 @@ def load_profit_sim_summary() -> pd.DataFrame:
     this instead of running the Monte-Carlo backtest at page load; empty when
     ``reflect`` has not written it yet.
     """
-    return _load_profit_sim_summary_cached(_mtime(PROFIT_SIM_SUMMARY_PATH))
+    return _load_profit_sim_summary_cached(PROFIT_SIM_SUMMARY_PATH, _mtime(PROFIT_SIM_SUMMARY_PATH))
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
-def _load_calibration_summary_cached(mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(CALIBRATION_SUMMARY_PATH)
+def _load_calibration_summary_cached(path: Path, mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(path)
 
 
 def load_calibration_summary() -> pd.DataFrame:
@@ -251,12 +259,14 @@ def load_calibration_summary() -> pd.DataFrame:
     instead of re-binning history at page load; empty when ``reflect`` has not
     written it yet.
     """
-    return _load_calibration_summary_cached(_mtime(CALIBRATION_SUMMARY_PATH))
+    return _load_calibration_summary_cached(
+        CALIBRATION_SUMMARY_PATH, _mtime(CALIBRATION_SUMMARY_PATH)
+    )
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading game context...")
-def _load_current_game_context_cached(mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(CURRENT_GAME_CONTEXT_PATH)
+def _load_current_game_context_cached(path: Path, mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(path)
 
 
 def load_current_game_context() -> pd.DataFrame:
@@ -265,12 +275,14 @@ def load_current_game_context() -> pd.DataFrame:
     One row per ``League, Game, Date``; feeds the live thesis regen in the
     constellation builder via ``slip_engine.slip_headline``.
     """
-    return _load_current_game_context_cached(_mtime(CURRENT_GAME_CONTEXT_PATH))
+    return _load_current_game_context_cached(
+        CURRENT_GAME_CONTEXT_PATH, _mtime(CURRENT_GAME_CONTEXT_PATH)
+    )
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading offer details...")
-def _load_current_offer_details_cached(mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(CURRENT_OFFER_DETAILS_PATH)
+def _load_current_offer_details_cached(path: Path, mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(path)
 
 
 def load_current_offer_details() -> pd.DataFrame:
@@ -280,17 +292,19 @@ def load_current_offer_details() -> pd.DataFrame:
     ``comps_vs_opp`` / ``volume_trend`` / ``other_stats`` columns the deep-dive
     Comps and Other-stats tabs decode. Empty when the sidecar is absent.
     """
-    return _load_current_offer_details_cached(_mtime(CURRENT_OFFER_DETAILS_PATH))
+    return _load_current_offer_details_cached(
+        CURRENT_OFFER_DETAILS_PATH, _mtime(CURRENT_OFFER_DETAILS_PATH)
+    )
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
-def _load_user_slips_cached(mtime: float) -> pd.DataFrame:
+def _load_user_slips_cached(path: Path, mtime: float) -> pd.DataFrame:
     return read_user_slips()
 
 
 def load_user_slips() -> pd.DataFrame:
-    """User-saved slips (dashboard 'Lock it in'); graded nightly. mtime-keyed cache."""
-    return _load_user_slips_cached(_mtime(USER_SLIPS_PATH))
+    """User-saved slips (dashboard 'Lock it in'); graded nightly. path+mtime-keyed cache."""
+    return _load_user_slips_cached(USER_SLIPS_PATH, _mtime(USER_SLIPS_PATH))
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
@@ -341,29 +355,29 @@ def load_corr_market_summary(league: str) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS)
-def _load_current_meta_cached(mtime: float) -> dict:
-    if not CURRENT_META_PATH.is_file():
+def _load_current_meta_cached(path: Path, mtime: float) -> dict:
+    if not path.is_file():
         return {}
     try:
-        with open(CURRENT_META_PATH) as f:
+        with open(path) as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
 
 def load_current_meta() -> dict:
-    """Snapshot metadata (timestamp, leagues, platforms, row counts; mtime-keyed)."""
-    return _load_current_meta_cached(_mtime(CURRENT_META_PATH))
+    """Snapshot metadata (timestamp, leagues, platforms, row counts; path+mtime-keyed)."""
+    return _load_current_meta_cached(CURRENT_META_PATH, _mtime(CURRENT_META_PATH))
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading model training stats...")
-def _load_model_stats_cached(mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(MODEL_STATS_PATH)
+def _load_model_stats_cached(path: Path, mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(path)
 
 
 def load_model_stats() -> pd.DataFrame:
     """Per-(league, market, metric_row) training diagnostics from ``meditate``."""
-    return _load_model_stats_cached(_mtime(MODEL_STATS_PATH))
+    return _load_model_stats_cached(MODEL_STATS_PATH, _mtime(MODEL_STATS_PATH))
 
 
 def render_banner(kind: Literal["predictions", "stats"], subtitle: str = "") -> None:
