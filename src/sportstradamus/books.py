@@ -76,6 +76,7 @@ def _ud_match_ids(games: list[dict], solo_games: list[dict], team_ids: dict) -> 
             "Away": team_ids.get(i["away_team_id"]),
             "League": i["sport_id"].replace("COMBOS", ""),
             "Date": _ud_date(i["scheduled_at"]),
+            "Commence": i["scheduled_at"],
         }
     for i in solo_games:
         if " vs " not in i["title"] and " @ " not in i["title"]:
@@ -87,6 +88,7 @@ def _ud_match_ids(games: list[dict], solo_games: list[dict], team_ids: dict) -> 
             "Away": i["title"].split(" @ ")[0],
             "League": i["sport_id"].replace("COMBOS", ""),
             "Date": _ud_date(i["scheduled_at"]),
+            "Commence": i["scheduled_at"],
         }
     return match_ids
 
@@ -106,6 +108,7 @@ def _ud_appearances(
             "Home": match_ids.get(i["match_id"], {"Home": ""})["Home"],
             "Away": match_ids.get(i["match_id"], {"Away": ""})["Away"],
             "Date": match_ids.get(i["match_id"], {"Date": ""})["Date"],
+            "Commence": match_ids.get(i["match_id"], {"Commence": ""})["Commence"],
         }
     return players, matches
 
@@ -127,6 +130,7 @@ def _ud_augment_from_rivals(
                 "Away": team_ids[i["away_team_id"]],
                 "League": i["sport_id"],
                 "Date": _ud_date(i["scheduled_at"]),
+                "Commence": i["scheduled_at"],
             }
     for i in rivals["appearances"]:
         if i["id"] not in players:
@@ -140,6 +144,7 @@ def _ud_augment_from_rivals(
                 "Home": match_ids.get(i["match_id"], {"Home": ""})["Home"],
                 "Away": match_ids.get(i["match_id"], {"Away": ""})["Away"],
                 "Date": match_ids.get(i["match_id"], {"Date": ""})["Date"],
+                "Commence": match_ids.get(i["match_id"], {"Commence": ""})["Commence"],
             }
 
 
@@ -181,6 +186,7 @@ def _ud_over_under_offer(o: dict, players: dict, matches: dict) -> tuple[dict | 
         "Team": ABBR_MAP.get(player["Team"], player["Team"]),
         "Opponent": ABBR_MAP.get(opponent, opponent),
         "Date": game["Date"],
+        "Commence": game["Commence"],
         "Market": market,
         "Line": float(o["stat_value"]),
         "Boost_Over": boosts[0],
@@ -211,6 +217,7 @@ def _ud_rival_offer(o: dict, players: dict, matches: dict, ou_market: str) -> tu
         + ABBR_MAP.get(player2["Team"], player2["Team"]),
         "Opponent": ABBR_MAP.get(opponent1, opponent1) + "/" + ABBR_MAP.get(opponent2, opponent2),
         "Date": game1["Date"],
+        "Commence": game1["Commence"],
         "Market": "H2H " + bet,
         "Line": float(o["options"][0]["spread"]) - float(o["options"][1]["spread"]),
         "Boost": 1,
@@ -236,9 +243,10 @@ def get_ud():
     Returns:
         dict: ``{league: {market: [offer, ...]}}`` where each offer contains
             ``Player``, ``League``, ``Team``, ``Opponent``, ``Date``,
-            ``Market``, ``Line``, ``Boost_Over``, and ``Boost_Under``.
-            Returns ``[]`` if the teams endpoint fails, ``{}`` if the lines
-            endpoint fails.
+            ``Commence`` (full tip-off ISO timestamp, for the dashboard's
+            "locks in" countdown), ``Market``, ``Line``, ``Boost_Over``, and
+            ``Boost_Under``. Returns ``[]`` if the teams endpoint fails, ``{}``
+            if the lines endpoint fails.
     """
     scraper = _get_scraper()
     logger.info("Getting Underdog Lines")

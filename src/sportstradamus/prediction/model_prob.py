@@ -404,6 +404,11 @@ def _finalize_records(
         # Bool, not NaN: dashboard/narrative.py's match_label does `'v' if home else '@'`,
         # and NaN is truthy in Python — it would render every no-Home row as the host.
         offer_df["Home"] = False
+    if "Commence" not in offer_df.columns:
+        # Only Underdog threads a tip-off timestamp (books.py::get_ud); Sleeper and
+        # book-fallback rows default to empty so the export projection stays uniform
+        # (the dashboard coerces "" → NaT → non-urgent countdown).
+        offer_df["Commence"] = ""
 
     offer_df["Model Over"] = offer_df["Model Over"].clip(upper=_MAX_CONFIDENCE)
     offer_df["Model Under"] = offer_df["Model Under"].clip(upper=_MAX_CONFIDENCE)
@@ -469,6 +474,7 @@ def _finalize_records(
         [
             "League",
             "Date",
+            "Commence",
             "Team",
             "Opponent",
             "Home",

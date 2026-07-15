@@ -45,6 +45,7 @@ from sportstradamus.prediction.stories import STORIES_VERSION
 _OFFER_KEEP_COLS = [
     "League",
     "Date",
+    "Commence",
     "Team",
     "Opponent",
     "Home",

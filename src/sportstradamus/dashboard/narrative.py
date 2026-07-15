@@ -58,6 +58,23 @@ def top_thesis(parlays: pd.DataFrame, *, game: str, date) -> str:
     return str(thesis) if pd.notna(thesis) else ""
 
 
+def game_headline(stories: pd.DataFrame, parlays: pd.DataFrame, *, game: str, date) -> str:
+    """Story-engine headline for one game: the highest-``model_ev`` story's ``headline``.
+
+    Falls back to ``top_thesis(parlays)`` when ``stories`` has no usable row for the game,
+    and ``""`` when both are empty. ``stories`` is ``current_game_stories`` (keyed
+    ``platform, League, Game, …`` with no ``Date``, so it matches on ``Game`` alone); the
+    ``date`` only scopes the Date-aware parlay fallback.
+    """
+    if not stories.empty and {"Game", "headline", "model_ev"} <= set(stories.columns):
+        sub = stories.loc[stories["Game"] == game].dropna(subset=["model_ev"])
+        if not sub.empty:
+            headline = sub.loc[sub["model_ev"].idxmax(), "headline"]
+            if pd.notna(headline) and str(headline):
+                return str(headline)
+    return top_thesis(parlays, game=game, date=date)
+
+
 def home_away(group: pd.DataFrame) -> tuple[str, str]:
     """``(home, away)`` team codes for one game's offer rows.
 

@@ -1,9 +1,10 @@
 """Bespoke celestial glyphs for game shape — the comet unification (P8 Phase C, Task C3).
 
 One construction rule across all five: strokes build the form, a glowing radial core
-marks the focus. Copied verbatim from ``docs/mockups/p8-glyphs.html`` (only the
-gradient/symbol ``id``s are renamed, namespaced per glyph type so two instances of
-different glyphs never collide on one page). These are bespoke inline SVG — the
+marks the focus. Ported from ``docs/mockups/p8-glyphs.html`` (gradient/symbol ``id``s
+renamed, namespaced per glyph type so two instances of different glyphs never collide
+on one page); the comet was later reworked (curved dust tail, larger coma) per owner
+so it reads as a meteor rather than a plain slash. These are bespoke inline SVG — the
 sanctioned exception to Material-icons-only (spec §2); render via
 ``st.markdown(..., unsafe_allow_html=True)``, never ``st.html()`` (see
 ``dashboard/theme.py``'s DOMPurify comment — ``st.html()`` strips ``<svg>`` outright).
@@ -12,16 +13,17 @@ sanctioned exception to Material-icons-only (spec §2); render via
 from __future__ import annotations
 
 _COMET = (
-    '<svg viewBox="0 0 60 60"><defs><radialGradient id="glyph-comet-core" cx="70%" '
-    'cy="30%" r="60%"><stop offset="0" stop-color="#fff"/><stop offset=".38" '
+    '<svg viewBox="0 0 60 60"><defs><radialGradient id="glyph-comet-core" cx="64%" '
+    'cy="34%" r="62%"><stop offset="0" stop-color="#fff"/><stop offset=".42" '
     'stop-color="#C9A227"/><stop offset="1" stop-color="#7a5f18"/></radialGradient></defs>'
-    '<path d="M43 19 L13 47" stroke="#C9A227" stroke-width="2.2" stroke-linecap="round" '
-    'opacity=".8"/>'
-    '<path d="M47 15 L11 45" stroke="#C9A227" stroke-width="1" stroke-linecap="round" '
-    'opacity=".42"/>'
-    '<path d="M45 24 L18 49" stroke="#C9A227" stroke-width="1" stroke-linecap="round" '
-    'opacity=".4"/>'
-    '<circle cx="45" cy="17" r="6" fill="url(#glyph-comet-core)"/></svg>'
+    '<path d="M43 17 Q27 27 9 50" stroke="#C9A227" stroke-width="2.8" stroke-linecap="round" '
+    'fill="none" opacity=".85"/>'
+    '<path d="M45 13 Q31 21 14 45" stroke="#C9A227" stroke-width="1.2" stroke-linecap="round" '
+    'fill="none" opacity=".5"/>'
+    '<path d="M42 22 Q30 33 16 51" stroke="#C9A227" stroke-width="1" stroke-linecap="round" '
+    'fill="none" opacity=".42"/>'
+    '<circle cx="44" cy="16" r="10" fill="#C9A227" opacity=".16"/>'
+    '<circle cx="44" cy="16" r="8" fill="url(#glyph-comet-core)"/></svg>'
 )
 
 _SUPERNOVA = (
@@ -101,5 +103,7 @@ def game_shape_glyph(shape: str, *, size: int = 40) -> str:
     """Inline SVG for a game shape; unknown shapes fall back to the lone star."""
     svg = _GLYPHS.get(shape, _LONE_STAR)
     return svg.replace(
-        'viewBox="0 0 60 60"', f'width="{size}" height="{size}" viewBox="0 0 60 60"', 1
+        'viewBox="0 0 60 60"',
+        f'class="glyph" width="{size}" height="{size}" viewBox="0 0 60 60"',
+        1,
     )

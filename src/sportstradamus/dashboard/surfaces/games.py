@@ -67,6 +67,10 @@ def _apply_game_preselect(labels: list[str]) -> None:
     so the picker falls back to the first game instead of an empty selection.
     """
     preselect = st.session_state.pop("nav_game", "") or st.query_params.get("game", "")
+    # Consume the ?game= deep link once (Tonight's whole-card links set it): left in the
+    # URL it would re-force game_select back to it every rerun, freezing the selectbox.
+    if "game" in st.query_params:
+        del st.query_params["game"]
     if preselect in labels:
         st.session_state["game_select"] = preselect
     if st.session_state.get("game_select") not in labels:

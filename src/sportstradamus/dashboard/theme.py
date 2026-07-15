@@ -165,6 +165,50 @@ _APP_CSS_TEMPLATE = """
     radial-gradient(ellipse at 90% 0%, rgba(201,162,39,.05), transparent 44%)}
 .page-hero .hero-title{font-size:23px;margin:1px 0;font-weight:700;color:#E6E9EF}
 .hero-updated{color:#8A91A0;font-size:12px}
+/* Tonight prophecy cards (mockup p8-tonight.html .card): matchup-first in sober Plex,
+   the oracle voice demoted to a gold Cormorant subline (DESIGN §1 broadcast-fact +
+   mystic-chrome split). Two-stop nebula wash over the surface so stars glow through
+   faintly; the game-shape glyph + Cinzel name ride the right rail. .muted is the
+   no-edge state. #3a3450 is the mockup's celestial border (solid, not a gradient). */
+.tonight-card{position:relative;overflow:hidden;display:flex;gap:14px;border:1px solid #3a3450;
+  border-radius:4px;padding:15px 17px;margin:12px 0;text-decoration:none;color:inherit;
+  cursor:pointer;transition:border-color .15s ease;
+  background:radial-gradient(ellipse at 16% -45%, rgba(46,107,230,.16), transparent 55%),
+    radial-gradient(ellipse at 93% 8%, rgba(201,162,39,.10), transparent 46%), rgba(26,29,36,.84)}
+/* The card shell is a <div> (a block tag st.markdown passes verbatim; an outer <a> is not a
+   CommonMark block tag, so the parser splits it into one box per child). A stretched, transparent
+   <a> overlay (.tc-cardlink) turns the whole card into the View-game link; gold border on hover
+   signals it clicks through. */
+.tonight-card:hover{border-color:#C9A227}
+.tc-cardlink{position:absolute;inset:0;z-index:1;border-radius:inherit}
+.tonight-card.muted{border-color:#2A2E37;background:rgba(26,29,36,.82)}
+.tonight-card .tc-main{flex:1;min-width:0}
+.tonight-card .tc-side{flex:0 0 72px;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:6px}
+.tc-kicker{font-family:'Cinzel',serif;font-weight:600;font-size:10px;letter-spacing:.2em;
+  text-transform:uppercase;color:#8A91A0}
+/* A game tipping off soon turns its kicker red as a "time running out" cue. */
+.tc-kicker.tc-urgent{color:#E5484D}
+.tc-matchup{font-size:22px;font-weight:700;line-height:1.12;margin:3px 0 1px;color:#E6E9EF}
+.tc-matchup .tc-vs{color:#8A91A0;font-weight:500}
+.tc-prophecy{font-family:'Cormorant Garamond',serif;font-style:italic;font-weight:600;
+  font-size:16px;color:#C9A227;margin:2px 0 0}
+.tc-prophecy.tc-dim{color:#8A91A0}
+.tc-foot{display:flex;align-items:center;gap:14px;margin-top:12px;flex-wrap:wrap}
+.tc-badge{font-family:'IBM Plex Mono',monospace;padding:1px 8px;border-radius:3px;font-size:13px;
+  border:1px solid;white-space:nowrap}
+.tc-badge.tc-g{color:#1F9D55;border-color:#1F9D55}
+.tc-badge.tc-gray{color:#8A91A0;border-color:#2A2E37}
+.tc-meta{font-family:'IBM Plex Mono',monospace;font-size:12px;color:#8A91A0}
+.tc-meta b{color:#E6E9EF;font-weight:500}
+/* "View game" cue pushed to the right edge of the foot (the card itself is the link). */
+.tc-viewcue{margin-left:auto;color:#C9A227;font-size:12px;font-weight:500;white-space:nowrap}
+.tonight-card:hover .tc-viewcue{text-decoration:underline}
+.tc-shapename{font-family:'Cinzel',serif;font-size:8.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:#8A91A0}
+/* A little transparency + a soft gold outer glow so the glyphs read as embedded in the
+   night sky rather than pasted on. Applied to every game-shape glyph (legend, cards, hero). */
+.glyph{opacity:.9;filter:drop-shadow(0 0 5px rgba(201,162,39,.35))}
 /* Games surface lens toggles (P8 Task C6): active = gold, the app's owner-highlight
    convention. Streamlit's config.toml [theme] has no gold slot (primaryColor is the
    app's blue accent) so this reaches the celestial-gold token the same narrow,
