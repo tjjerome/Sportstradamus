@@ -12,6 +12,20 @@ from sportstradamus.helpers import market_display_name
 # are too thin to trust — masked out of the heatmap rather than shown.
 _MIN_PAIR_OBSERVATIONS = 3
 
+# theme.DIVERGING_COLORS is light-centred (cream at rho ~ 0) for white backgrounds; on the
+# app's dark surface a full grid of near-zero cells reads as a jarring bright block. Re-anchor
+# the ramp's neutral at the page background so rho ~ 0 blends into the dark theme and only real
+# +/- correlations pick up red/blue — the "near-neutral stays dark" the board grid gets by
+# leaving those cells unpainted. Ends reuse the committed diverging tokens.
+_HEATMAP_SURFACE = "#0E1117"  # config.toml backgroundColor — the app page background
+_DARK_CENTERED_DIVERGING = [
+    [0.0, theme.DIVERGING_COLORS[0]],
+    [0.25, theme.DIVERGING_COLORS[2]],
+    [0.5, _HEATMAP_SURFACE],
+    [0.75, theme.DIVERGING_COLORS[7]],
+    [1.0, theme.DIVERGING_COLORS[9]],
+]
+
 
 def corr_heatmap(summary: pd.DataFrame, league: str, scope: str) -> go.Figure:
     """Diverging market x market correlation heatmap for one league/scope.
@@ -39,7 +53,7 @@ def corr_heatmap(summary: pd.DataFrame, league: str, scope: str) -> go.Figure:
             z=pivot.to_numpy(),
             x=labels,
             y=[market_display_name(league, slug) for slug in pivot.index],
-            colorscale=theme.DIVERGING_COLORS,
+            colorscale=_DARK_CENTERED_DIVERGING,
             zmid=0,
             zmin=-1,
             zmax=1,

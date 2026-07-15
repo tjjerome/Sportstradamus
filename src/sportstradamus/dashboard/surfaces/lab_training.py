@@ -15,7 +15,12 @@ import streamlit as st
 from sportstradamus.dashboard.components.gate_matrix import gate_matrix_frame, render_gate_matrix
 from sportstradamus.dashboard.components.hero import page_hero
 from sportstradamus.dashboard.components.lab_filters import apply_lab_filters, render_lab_filters
-from sportstradamus.dashboard.data import format_ts, load_model_stats, load_stat_meta
+from sportstradamus.dashboard.data import (
+    format_ts,
+    load_model_stats,
+    load_stat_meta,
+    sport_filtered,
+)
 from sportstradamus.dashboard.surfaces.lab_training_charts import lifecycle_funnel
 from sportstradamus.helpers.io import LIVE_METRICS_PATH, MODEL_STATS_PATH
 from sportstradamus.training.graduation import lifecycle_table
@@ -221,9 +226,19 @@ TAB_CAPTIONS: dict[str, str] = {
 }
 
 
-def _column_config(cols: list[str]) -> dict[str, st.column_config.Column]:
-    """Streamlit column_config with direction help for each annotated column."""
-    return {c: st.column_config.Column(help=DIRECTIONS[c]) for c in cols if c in DIRECTIONS}
+def _column_config(view: pd.DataFrame, cols: list[str]) -> dict[str, st.column_config.Column]:
+    """Streamlit column_config: a 3-decimal NumberColumn for float metric columns, a plain
+    Column (carrying the ↑/↓ direction help) for everything else. Float detection is by
+    dtype, so integer counts and boolean gate flags keep their natural rendering.
+    """
+    config: dict[str, st.column_config.Column] = {}
+    for c in cols:
+        help_str = DIRECTIONS.get(c)
+        if c in view.columns and pd.api.types.is_float_dtype(view[c]):
+            config[c] = st.column_config.NumberColumn(help=help_str, format="%.3f")
+        elif help_str:
+            config[c] = st.column_config.Column(help=help_str)
+    return config
 
 
 def _render_tab(tab_name: str, metric_cols: list[str], view: pd.DataFrame) -> None:
@@ -234,7 +249,7 @@ def _render_tab(tab_name: str, metric_cols: list[str], view: pd.DataFrame) -> No
         width="stretch",
         height=560,
         hide_index=True,
-        column_config=_column_config(cols),
+        column_config=_column_config(view, cols),
     )
 
 
@@ -252,6 +267,13 @@ if stats.empty:
     st.info("No model stats found. Run `poetry run meditate` to generate `model_stats.parquet`.")
     st.stop()
 
+# The global sport switch narrows every other surface; apply it here too so the training
+# board follows the selected league (stats carries the lowercase `league` column).
+stats = sport_filtered(stats)
+if stats.empty:
+    st.info("No model stats for the selected sport.")
+    st.stop()
+
 # Lifecycle state joins offline Gate-1 (this parquet) with live Gate-2
 # (live_metrics_per_market.parquet, written daily by `reflect`). Computed
 # at read time so the lifecycle classification reflects today's live data
@@ -266,26 +288,18 @@ if not lifecycle.empty:
 else:
     stats["lifecycle_state"] = pd.NA
 
-leagues = sorted(stats["league"].dropna().unique())
-markets = sorted(stats["market"].dropna().unique())
+# The former body Leagues/Markets multiselects duplicated the shared Lab filter panel
+# (rendered below) and defaulted to every market — a wall of chips. Keep only the
+# Lifecycle axis here; it isn't a stat_meta config dimension the shared panel covers.
 lifecycle_states = sorted(stats["lifecycle_state"].dropna().unique())
-if "lab_leagues" not in st.session_state:
-    st.session_state["lab_leagues"] = leagues
-if "lab_markets" not in st.session_state:
-    st.session_state["lab_markets"] = markets
-col_league, col_market, col_lifecycle = st.columns(3)
-sel_leagues = col_league.multiselect("Leagues", leagues, key="lab_leagues")
-sel_markets = col_market.multiselect("Markets", markets, key="lab_markets")
 sel_lifecycle = (
-    col_lifecycle.multiselect("Lifecycle", lifecycle_states, default=lifecycle_states)
+    st.multiselect("Lifecycle", lifecycle_states, default=lifecycle_states, key="lab_lifecycle")
     if lifecycle_states
     else []
 )
-
-scope = stats["league"].isin(sel_leagues) & stats["market"].isin(sel_markets)
+view = stats
 if sel_lifecycle:
-    scope &= stats["lifecycle_state"].isin(sel_lifecycle)
-view = stats.loc[scope]
+    view = stats.loc[stats["lifecycle_state"].isin(sel_lifecycle)]
 
 stat_meta = load_stat_meta()
 lab_sel = render_lab_filters(stat_meta, collapsed=True)

@@ -72,6 +72,7 @@ def render_gate_matrix(matrix: pd.DataFrame, *, height: int = 560) -> None:
     render_themed_grid(
         display,
         numeric_cols=["brier_skill_score", "n_fails"],
+        decimal_cols=["brier_skill_score"],
         glyph_cols=GATE_COLS,
         glyph_colors={"●": theme.GREEN, "○": theme.RED},
         hidden_cols=["rail"],

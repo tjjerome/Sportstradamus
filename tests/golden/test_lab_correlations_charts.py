@@ -116,13 +116,18 @@ def test_corr_heatmap_keeps_well_populated_pairs():
     assert z.loc[_AST, _AST] == pytest.approx(1.0)
 
 
-def test_corr_heatmap_uses_diverging_colorscale_never_gold():
+def test_corr_heatmap_is_dark_centered_diverging_never_gold():
     from sportstradamus.dashboard import theme
+    from sportstradamus.dashboard.surfaces.lab_correlations_charts import _HEATMAP_SURFACE
 
     fig = corr_heatmap(_SUMMARY, "NBA", "same_team")
     heat = fig.data[0]
     colorscale_hexes = {stop[1] for stop in heat.colorscale}
-    assert colorscale_hexes <= set(theme.DIVERGING_COLORS)
+    # Saturated ends stay on the committed diverging tokens; the neutral centre is re-anchored
+    # to the app background so rho ~ 0 blends into the dark theme instead of rendering as a
+    # jarring light-cream block. Never gold — this is a data heatmap, not decoration.
+    assert _HEATMAP_SURFACE in colorscale_hexes
+    assert (colorscale_hexes - {_HEATMAP_SURFACE}) <= set(theme.DIVERGING_COLORS)
     assert theme.GOLD not in colorscale_hexes
 
 

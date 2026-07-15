@@ -5,6 +5,7 @@ All surfaces import from here to get cached DataFrames and filters.
 
 import importlib.resources as pkg_resources
 import json
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -161,21 +162,28 @@ def load_history() -> pd.DataFrame:
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading parlay history...")
-def _load_parlays_cached(path: Path, mtime: float) -> pd.DataFrame:
-    parlays = read_parlay_hist()
+def _load_parlays_cached(path: Path, mtime: float, columns: tuple[str, ...] | None) -> pd.DataFrame:
+    parlays = read_parlay_hist(columns=list(columns) if columns else None)
     if parlays.empty:
         return parlays
 
-    # Backward compat: ensure correlation/Indep columns exist for older runs.
-    for col in ["Corr Pairs", "Boost Pairs", "Indep P", "Indep PB"]:
-        if col not in parlays.columns:
-            parlays[col] = np.nan
+    if columns is None:
+        # Full reads back-fill correlation/Indep columns absent from older runs; a
+        # projected read asks for an explicit, known-present column set, so it skips this.
+        for col in ["Corr Pairs", "Boost Pairs", "Indep P", "Indep PB"]:
+            if col not in parlays.columns:
+                parlays[col] = np.nan
     return parlays
 
 
-def load_parlays() -> pd.DataFrame:
-    """Parlay history from parquet, keyed on path+mtime so cron rewrites invalidate the cache."""
-    return _load_parlays_cached(PARLAY_HIST_PATH, _mtime(PARLAY_HIST_PATH))
+def load_parlays(columns: Sequence[str] | None = None) -> pd.DataFrame:
+    """Parlay history from parquet, keyed on path+mtime so cron rewrites invalidate the cache.
+
+    ``columns`` projects the read to a scalar subset (Lab Correlations does this — the
+    full 1.7M-row file carries multi-GB ``list<float>`` struct columns it never plots).
+    """
+    key = tuple(columns) if columns else None
+    return _load_parlays_cached(PARLAY_HIST_PATH, _mtime(PARLAY_HIST_PATH), key)
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading current offers...")
@@ -440,14 +448,17 @@ def load_resolve_meta() -> dict:
 def sport_filtered(df: pd.DataFrame) -> pd.DataFrame:
     """Narrow ``df`` to the app-level sport switch (``st.session_state["sport"]``).
 
-    Returns ``df`` unchanged when "All" is selected or there is no ``League``
-    column. Empty-result handling stays with the caller — each surface words
-    its own message.
+    Matches a ``League`` or lowercase ``league`` column (the training stats frame uses the
+    latter). Returns ``df`` unchanged when "All" is selected or neither column is present.
+    Empty-result handling stays with the caller — each surface words its own message.
     """
     sport = st.session_state.get("sport", "All")
-    if sport == "All" or "League" not in df.columns:
+    if sport == "All":
         return df
-    return df.loc[df["League"] == sport]
+    league_col = next((c for c in ("League", "league") if c in df.columns), None)
+    if league_col is None:
+        return df
+    return df.loc[df[league_col] == sport]
 
 
 def get_filtered_history(
@@ -518,10 +529,17 @@ def _extract_platforms(history):
 
 def sidebar_filters(
     history: pd.DataFrame,
-    parlays: pd.DataFrame | None = None,
     key_prefix: str = "",
+    *,
+    time_window_key: str | None = None,
 ) -> dict:
-    """Render sidebar filters and return filter values."""
+    """Render sidebar filters and return filter values.
+
+    When ``time_window_key`` is set, a Time-window selectbox renders under the same
+    Filters header and the returned dict's ``cutoff`` is the date that window starts at
+    (``None`` for "All time" or when no window is requested). This folds the two Lab
+    pages' formerly page-local time window into the one shared filter section.
+    """
     if st.sidebar.button(
         "Refresh data",
         key=f"{key_prefix}refresh_data",
@@ -530,6 +548,15 @@ def sidebar_filters(
         st.cache_data.clear()
         st.rerun()
     st.sidebar.header("Filters")
+
+    cutoff = None
+    if time_window_key is not None:
+        time_window = st.sidebar.selectbox(
+            "Time window", list(TIMEFRAME_OPTIONS.keys()), index=0, key=time_window_key
+        )
+        window_days = TIMEFRAME_OPTIONS[time_window]
+        if window_days is not None:
+            cutoff = datetime.today().date() - timedelta(days=window_days)
 
     if not history.empty:
         dates = pd.to_datetime(history["Date"], errors="coerce").dropna()
@@ -559,14 +586,11 @@ def sidebar_filters(
         "Platforms", platforms, default=platforms, key=f"{key_prefix}platforms"
     )
 
-    if not history.empty and "Dist" in history.columns:
-        coverage = history["Dist"].notna().mean()
-        st.sidebar.metric("Distribution Data Coverage", f"{coverage:.0%}")
-
     return {
         "date_range": date_range,
         "leagues": selected_leagues,
         "platforms": selected_platforms,
+        "cutoff": cutoff,
     }
 
 

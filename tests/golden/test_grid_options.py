@@ -121,6 +121,20 @@ def test_signed_percent_cols_get_a_sign_prefixed_formatter() -> None:
     assert "%" in signed and "%" in plain
 
 
+def test_decimal_cols_get_a_three_decimal_formatter_value_stays_numeric() -> None:
+    """Gate matrix's Brier Skill Score renders at 3 dp (P8 Task R5.e) via a ``toFixed(3)``
+    valueFormatter; the underlying value stays numeric so the grid still click-sorts on it.
+    Only ``decimal_cols`` get it — an integer count column (n_fails) stays formatter-free.
+    """
+    df = pd.DataFrame({"brier_skill_score": [0.123456, -0.05], "n_fails": [1, 2]})
+    options = build_themed_grid_options(
+        df, numeric_cols=["brier_skill_score", "n_fails"], decimal_cols=["brier_skill_score"]
+    )
+    defs = _column_defs(options)
+    assert "toFixed(3)" in defs["brier_skill_score"]["valueFormatter"].js_code
+    assert "valueFormatter" not in defs["n_fails"]
+
+
 def test_heatmap_thresholds_are_absolute_not_fraction_of_max() -> None:
     options = build_themed_grid_options(
         _GRID_DF, numeric_cols=_NUMERIC, heatmap_col=MODEL_EDGE, heatmap_center=0.0
@@ -335,6 +349,9 @@ def test_glyph_cols_color_pass_fail_glyphs_green_red() -> None:
         assert theme.GREEN in style
         assert theme.RED in style
         assert theme.GOLD not in style
+        # R5.d: the glyph is colored TEXT, not a filled cell — a background swatch would
+        # hide the ●/○ mark. The token must ride on 'color', never 'backgroundColor'.
+        assert "backgroundColor" not in style
 
 
 def test_glyph_cols_noop_without_kwarg() -> None:

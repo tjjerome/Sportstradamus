@@ -32,6 +32,11 @@ _SIGNED_PERCENT_FORMATTER = JsCode(
     "function(params){if(params.value==null||isNaN(params.value))return '';"
     "return (params.value>0?'+':'')+params.value.toFixed(1)+'%';}"
 )
+# Fixed 3-decimal display for score columns (e.g. the gate matrix's Brier Skill Score)
+# that otherwise render as long floats. The value stays numeric so the grid still sorts.
+_FIXED3_FORMATTER = JsCode(
+    "function(params){return (params.value==null||isNaN(params.value))?'':params.value.toFixed(3);}"
+)
 
 # Light text (textColor token) reads on every painted bucket because only the saturated
 # ramp ends are painted — the near-neutral band stays unpainted.
@@ -132,13 +137,14 @@ def _numeric_col_kwargs(
     heatmap_center: float,
     pct: set[str],
     signed_pct: set[str],
+    decimal: set[str],
     arrow_col: str | None,
     has_bet: bool,
     tip: str | None,
 ) -> dict:
     """``configure_column`` kwargs for one numeric column: heatmap-or-plain cellStyle, an
-    optional "%" formatter (signed for ``signed_pct``, plain for ``pct``), an optional arrow
-    cellRenderer, an optional tooltip.
+    optional "%" formatter (signed for ``signed_pct``, plain for ``pct``) or a 3-decimal
+    formatter (``decimal``), an optional arrow cellRenderer, an optional tooltip.
     """
     cell_style = _heatmap_cellstyle(heatmap_center) if col == heatmap_col else dict(_RIGHT_STYLE)
     kwargs = {"cellStyle": cell_style}
@@ -146,6 +152,8 @@ def _numeric_col_kwargs(
         kwargs["valueFormatter"] = _SIGNED_PERCENT_FORMATTER
     elif col in pct:
         kwargs["valueFormatter"] = _PERCENT_FORMATTER
+    elif col in decimal:
+        kwargs["valueFormatter"] = _FIXED3_FORMATTER
     if col == arrow_col and has_bet:
         kwargs["cellRenderer"] = _arrow_cellrenderer()
     if tip:
@@ -188,12 +196,24 @@ def _get_row_style_for_rail(rail_col: str, rail_colors: Mapping[str, str]) -> Js
     return JsCode("function(params){return params.data ? " + branches + "null : null;}")
 
 
+def _glyph_expr(color: str) -> str:
+    """Colored-text style for a glyph cell: the glyph itself is tinted, the cell stays
+    unfilled. Distinct from :func:`_heat_expr`, which paints the whole cell background —
+    a background swatch here would hide the ●/○ mark (DESIGN §4: the glyph is the datum).
+    """
+    return (
+        "{'color':'"
+        + color
+        + "','fontWeight':600,'textAlign':'right','fontFamily':'IBM Plex Mono, monospace'}"
+    )
+
+
 def _glyph_cellstyle(glyph_colors: Mapping[str, str]) -> JsCode:
-    """A ``cellStyle`` ``JsCode`` coloring a cell by its own literal glyph value (e.g.
-    ``●``/``○``), right-aligned mono like every other cell in these grids.
+    """A ``cellStyle`` ``JsCode`` coloring a cell's own literal glyph value (e.g. ``●``/``○``)
+    as tinted text — green pass / red fail — right-aligned mono, never a filled cell.
     """
     branches = "".join(
-        "params.value===" + repr(glyph) + " ? " + _heat_expr(color) + " : "
+        "params.value===" + repr(glyph) + " ? " + _glyph_expr(color) + " : "
         for glyph, color in glyph_colors.items()
     )
     return JsCode("function(params) { return (" + branches + _RIGHT_EXPR + "); }")
@@ -254,6 +274,7 @@ def build_themed_grid_options(
     sparkline_col: str | None = None,  # L1 scar hook — line-movement sparklines, not built
     percent_cols: Sequence[str] = (),
     signed_percent_cols: Sequence[str] = (),
+    decimal_cols: Sequence[str] = (),
     arrow_col: str | None = None,
     hidden_cols: Sequence[str] = (),
     flag_col: str | None = None,
@@ -266,8 +287,9 @@ def build_themed_grid_options(
     """Token-themed ``gridOptions``: right-aligned mono numerals, an optional diverging
     heatmap on ``heatmap_col``, per-column header tooltips, and a "%" display suffix on
     ``percent_cols`` (kept numeric underneath). ``signed_percent_cols`` is the same suffix
-    with a leading "+" on positives, for signed deltas like the edge columns. Pure — no
-    Streamlit call.
+    with a leading "+" on positives, for signed deltas like the edge columns.
+    ``decimal_cols`` renders at a fixed 3 decimals (e.g. a Brier Skill Score), value kept
+    numeric so sorting is unaffected. Pure — no Streamlit call.
 
     ``arrow_col`` prefixes that column's cells with the row's Over/Under arrow, keyed
     off a ``Bet`` column in the row data. ``hidden_cols`` stays in the row data (so
@@ -287,6 +309,7 @@ def build_themed_grid_options(
     help_map = dict(header_help or {})
     pct = set(percent_cols)
     signed_pct = set(signed_percent_cols)
+    decimal = set(decimal_cols)
     present = set(df.columns)
     has_bet = "Bet" in present
     gb = GridOptionsBuilder.from_dataframe(df)
@@ -305,6 +328,7 @@ def build_themed_grid_options(
             heatmap_center=heatmap_center,
             pct=pct,
             signed_pct=signed_pct,
+            decimal=decimal,
             arrow_col=arrow_col,
             has_bet=has_bet,
             tip=help_map.get(col),
@@ -332,6 +356,7 @@ def render_themed_grid(
     selection_mode: str = "single",
     percent_cols: Sequence[str] = (),
     signed_percent_cols: Sequence[str] = (),
+    decimal_cols: Sequence[str] = (),
     arrow_col: str | None = None,
     hidden_cols: Sequence[str] = (),
     flag_col: str | None = None,
@@ -357,6 +382,7 @@ def render_themed_grid(
         selection_mode=selection_mode,
         percent_cols=percent_cols,
         signed_percent_cols=signed_percent_cols,
+        decimal_cols=decimal_cols,
         arrow_col=arrow_col,
         hidden_cols=hidden_cols,
         flag_col=flag_col,

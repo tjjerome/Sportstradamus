@@ -1,7 +1,5 @@
 """Lab Correlations — correlation effectiveness, hit rates, parlay calibration."""
 
-from datetime import datetime, timedelta
-
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -12,7 +10,6 @@ from sportstradamus.dashboard import theme
 from sportstradamus.dashboard.components.hero import page_hero
 from sportstradamus.dashboard.components.lab_filters import render_lab_filters
 from sportstradamus.dashboard.data import (
-    TIMEFRAME_OPTIONS,
     format_ts,
     load_corr_market_summary,
     load_history,
@@ -27,6 +24,25 @@ from sportstradamus.dashboard.surfaces.lab_correlations_charts import (
     worst_driver_pair,
 )
 
+# Lab Correlations only ever plots/aggregates these scalar parlay columns; projecting the
+# read skips the multi-GB list<float> struct columns (legs, Corr/Boost Pairs) in the 1.7M-row
+# parlay_hist.parquet, turning a multi-second load into a fast one.
+_PARLAY_SCALAR_COLS = (
+    "Date",
+    "League",
+    "Platform",
+    "Legs Resolved",
+    "Misses",
+    "Indep P",
+    "P",
+    "Boost",
+    "Bet Size",
+)
+# The value-add scatter draws one point per resolved parlay; cap the plotted sample so a full
+# history (1.7M rows) can't choke the browser. The metrics below still use the full frame.
+_SCATTER_MAX = 20_000
+_SCATTER_SEED = 17
+
 page_hero("MODEL LAB · CORRELATIONS", "Correlations & Parlays")
 
 # Mounted for session consistency with the other two Lab pages (widget keys are
@@ -36,7 +52,7 @@ page_hero("MODEL LAB · CORRELATIONS", "Correlations & Parlays")
 render_lab_filters(load_stat_meta(), collapsed=True)
 
 history = load_history()
-parlays = load_parlays()
+parlays = load_parlays(columns=_PARLAY_SCALAR_COLS)
 
 if parlays.empty:
     st.warning("No parlay history found. Run `prophecize` first.")
@@ -54,15 +70,10 @@ meta = load_resolve_meta()
 if meta.get("last_run"):
     st.caption(f"Data last resolved: {format_ts(meta['last_run'])}")
 
-st.sidebar.header("Filters")
-time_window = st.sidebar.selectbox(
-    "Time window", list(TIMEFRAME_OPTIONS.keys()), index=0, key="corr_time"
+filters = sidebar_filters(
+    history if not history.empty else parlays, key_prefix="corr_", time_window_key="corr_time"
 )
-cutoff = None
-if TIMEFRAME_OPTIONS[time_window] is not None:
-    cutoff = datetime.today().date() - timedelta(days=TIMEFRAME_OPTIONS[time_window])
-
-filters = sidebar_filters(history if not history.empty else parlays, key_prefix="corr_")
+cutoff = filters["cutoff"]
 
 pf = parlays.copy()
 pf["_date"] = pd.to_datetime(pf["Date"], errors="coerce").dt.date
@@ -119,8 +130,14 @@ if len(above_line) > 0 and len(below_line) > 0:
         )
 
 st.header("Stat-Pair Correlation Matrix")
-heatmap_leagues = sorted(parlays["League"].unique())
-heatmap_league = st.selectbox("League", heatmap_leagues, key="corr_heatmap_league")
+# One matrix is per-league; reuse the sidebar's league selection instead of a second league
+# picker. With exactly one league in scope there's nothing to choose, so the selectbox only
+# appears when the sidebar leaves more than one league selected.
+matrix_leagues = filters["leagues"] or sorted(parlays["League"].unique())
+if len(matrix_leagues) == 1:
+    heatmap_league = matrix_leagues[0]
+else:
+    heatmap_league = st.selectbox("League", matrix_leagues, key="corr_heatmap_league")
 corr_summary = load_corr_market_summary(heatmap_league)
 
 if corr_summary.empty:
@@ -142,8 +159,15 @@ st.download_button(
 st.header("Correlation Value-Add")
 
 if has_indep and has_corr_p:
+    plot_df = scatter_df
+    if len(scatter_df) > _SCATTER_MAX:
+        plot_df = scatter_df.sample(n=_SCATTER_MAX, random_state=_SCATTER_SEED)
+        st.caption(
+            f"Scatter shows a random {_SCATTER_MAX:,} of {len(scatter_df):,} resolved parlays; "
+            "the metrics below use all of them."
+        )
     fig_scatter = px.scatter(
-        scatter_df,
+        plot_df,
         x="Indep P",
         y="P",
         color="Outcome",

@@ -141,3 +141,6 @@ def test_render_gate_matrix_keeps_rail_in_row_data_as_hidden_column():
     assert set(GATE_COLS) == set(kwargs.get("glyph_cols", ()))
     for col in GATE_COLS:
         assert set(displayed_df[col].unique()) <= {"●", "○"}, f"{col} not glyph-mapped"
+    assert "brier_skill_score" in kwargs.get("decimal_cols", ()), (
+        "Brier Skill Score must render at 3 dp (R5.e), not as a long float"
+    )
