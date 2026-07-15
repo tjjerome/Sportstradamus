@@ -28,8 +28,8 @@ from sportstradamus.dashboard.data import (
     load_current_parlays,
     sport_filtered,
 )
-from sportstradamus.dashboard.narrative import SHAPE_HELP, context_strip, home_away, top_thesis
-from sportstradamus.dashboard.theme import GOLD, GRAY, SEQUENTIAL_COLORS
+from sportstradamus.dashboard.narrative import SHAPE_HELP, context_strip, game_headline, home_away
+from sportstradamus.dashboard.theme import GOLD, GRAY, SEQUENTIAL_COLORS, team_name
 from sportstradamus.prediction.stories.context import ctxs_from_frame
 
 # Hero shape glyph — matches the mockup's 74px .glyphwrap.
@@ -91,6 +91,8 @@ def _hero_stat(label: str, value: str, *, title: str = "") -> str:
 def _render_hero(
     game_context: pd.DataFrame,
     parlays: pd.DataFrame,
+    stories: pd.DataFrame,
+    league: str,
     game: str,
     date: str,
     home: str,
@@ -99,14 +101,16 @@ def _render_hero(
     """Nebula game hero: matchup, shape glyph, prophecy subline, Total/Spread/Shape.
 
     Blank if the game has no context row (unknown game — same graceful no-op as the
-    banner this replaces).
+    banner this replaces). The matchup line speaks full team names
+    (:func:`theme.team_name`, abbrev fallback); the prophecy subline is the story
+    engine's headline for the game (:func:`narrative.game_headline`).
     """
     strip = context_strip(game_context, game=game, date=date)
     if not strip:
         return
     fav, spread = strip["fav_team"], strip["spread"]
     spread_text = f"{fav} -{spread:.1f}" if fav and spread > 0 else "Even"
-    headline = top_thesis(parlays, game=game, date=date)
+    headline = game_headline(stories, parlays, game=game, date=date)
     glyph = game_shape_glyph(str(strip["shape"]), size=_HERO_GLYPH_SIZE)
     subline = (
         f'<div class="celestial-headline" style="font-size:17px;margin-top:2px">{headline}</div>'
@@ -125,8 +129,10 @@ def _render_hero(
         f'border-radius:5px;padding:16px 18px;background:{_HERO_BG}">'
         f'<div style="position:absolute;top:8px;right:14px;width:{_HERO_GLYPH_SIZE}px;'
         f'height:{_HERO_GLYPH_SIZE}px;opacity:.9">{glyph}</div>'
-        f'<div style="font-size:20px;font-weight:700;letter-spacing:.01em">{away} '
-        f'<span style="color:{GRAY};font-size:15px;font-weight:400">@</span> {home}</div>'
+        f'<div style="font-size:20px;font-weight:700;letter-spacing:.01em">'
+        f'{team_name(league, away)} '
+        f'<span style="color:{GRAY};font-size:15px;font-weight:400">@</span> '
+        f"{team_name(league, home)}</div>"
         f"{subline}"
         f'<div style="display:flex;gap:22px;margin-top:12px">{stats}</div></div>',
         unsafe_allow_html=True,
@@ -167,7 +173,7 @@ def _render_story_preloader(
         return
     o = orow.iloc[0]
     st.caption(f"{int(o['bet_size'])} legs · EV {o['model_ev'] - 1:+.1%}")
-    if st.button("Seed builder", key="cascade_seed", type="primary"):
+    if st.button("Seed constellation", key="cascade_seed", type="primary"):
         seed_from_story(o["legs"], platform, offers)
         st.rerun()
 
@@ -188,62 +194,51 @@ def _select_slip_label(games: dict[str, dict], slip_game: str) -> None:
             return
 
 
-def _game_picker(
-    games: dict[str, dict],
-    game_context: pd.DataFrame,
-    stories: pd.DataFrame,
-    offers: pd.DataFrame,
-    parlays: pd.DataFrame,
-    legs: list[dict],
-) -> str:
-    """Render the game picker + hero + story preloader; return the focus game.
+def _game_select(games: dict[str, dict], legs: list[dict]) -> tuple[str, str]:
+    """The game selectbox; returns the focus ``(game, date)``.
 
-    The picker stays visible whether or not a slip is seeded. A live slip pins the focus
-    (and the selectbox, when listed) to its own game so the map keeps matching the slip;
-    clearing the slip frees the picker. Otherwise the Tonight "View game" handoff wins.
+    Stays visible whether or not a slip is seeded. A live slip pins the focus (and the
+    selectbox, when listed) to its own game so the map keeps matching the slip; clearing
+    the slip frees the picker. Otherwise the Tonight "View game" handoff wins.
     """
     slip_game = legs[0]["game"] if legs else ""
     if not games:
         if not slip_game:
             st.info("No model-liked legs on this platform right now.")
-        return slip_game
+        return slip_game, (str(legs[0]["date"]) if legs else "")
     if slip_game:
         _select_slip_label(games, slip_game)
     else:
         _apply_game_preselect(list(games))
     choice = st.selectbox("Game", list(games), key="game_select")
     if slip_game:
-        focus_game, date = slip_game, str(legs[0]["date"])
-    else:
-        focus_game, date = games[choice]["game"], games[choice]["date"]
-    group = offers.loc[(offers["Game"] == focus_game) & (offers["Date"].astype(str) == date)]
-    home, away = home_away(group) if not group.empty else ("", "")
-    _render_hero(game_context, parlays, focus_game, date, home, away)
-    _render_story_preloader(stories, st.session_state[_PLATFORM], focus_game, offers)
-    return focus_game
+        return slip_game, str(legs[0]["date"])
+    return games[choice]["game"], games[choice]["date"]
 
 
-# Lens toggles (P8 Task C6): plain (session_state key, widget label) pairs — the widget
-# key itself flips between an "_on"/"_off" suffix by which state is active, so the
-# static gold CSS in theme.APP_CSS only ever matches the currently-active render.
-_LENSES = (("lens_deep", "Look deeper"), ("lens_wider", "Look wider"))
+# Constellation lenses (P8 Task C6): a multi-select segmented control — tight, and gold
+# when active via theme's shared `segmented_controlActive` rule. Each option maps to a
+# session-state bool (`deep_pool` / `wider_groups`) that render_constellation_builder reads.
+_LENS_LABELS = {"lens_deep": "Look deeper", "lens_wider": "Look wider"}
 
 
 def _render_lens_toggles() -> None:
-    """Two independent gold-when-active toggles above the map (either, both, neither).
+    """Multi-select lens control over the map — either, both, or neither overlay.
 
     Replaces the old "Add a leg from another game" / "Add a leg the model doesn't
     like" expanders — both are now modes of the constellation figure itself
-    (``constellation_figure``'s ``deep_pool`` / ``wider_groups``), read directly off
-    these two session-state keys by ``render_constellation_builder``.
+    (``constellation_figure``'s ``deep_pool`` / ``wider_groups``). Sets the two
+    session-state bools ``render_constellation_builder`` reads.
     """
-    cols = st.columns(len(_LENSES))
-    for col, (state_key, label) in zip(cols, _LENSES, strict=True):
-        active = st.session_state.get(state_key, False)
-        suffix = "on" if active else "off"
-        if col.button(label, key=f"{state_key}_{suffix}", type="secondary"):
-            st.session_state[state_key] = not active
-            st.rerun()
+    selected = st.segmented_control(
+        "Lenses",
+        list(_LENS_LABELS),
+        format_func=_LENS_LABELS.get,
+        selection_mode="multi",
+        key="lens_seg",
+    )
+    for state_key in _LENS_LABELS:
+        st.session_state[state_key] = state_key in (selected or [])
 
 
 meta = load_current_meta()
@@ -256,17 +251,29 @@ ctxs = ctxs_from_frame(game_context, corr)
 stories = sport_filtered(load_current_game_stories())
 parlays = load_current_parlays()
 
-# The picker (platform + game + hero + story preloader) stays visible whether or not
-# a slip is seeded; a live slip pins it to that slip's game (see _game_picker).
+# The picker (platform + game selectboxes side by side, then hero + story preloader full
+# width) stays visible whether or not a slip is seeded; a live slip pins it to that slip's
+# game (see _game_select).
 legs = st.session_state[_LEGS]
 if offers.empty:
     st.info("No current predictions. Run `poetry run prophecize` to generate offers.")
     focus_game = ""
 else:
-    st.session_state[_PLATFORM] = _platform_selector(offers)
     st.session_state[_BUILDER] = "constellation"
+    pcol, gcol = st.columns([1, 2])
+    with pcol:
+        st.session_state[_PLATFORM] = _platform_selector(offers)
     games = _candidate_games(offers, st.session_state[_PLATFORM])
-    focus_game = _game_picker(games, game_context, stories, offers, parlays, legs)
+    with gcol:
+        focus_game, focus_date = _game_select(games, legs)
+    if focus_game:
+        group = offers.loc[
+            (offers["Game"] == focus_game) & (offers["Date"].astype(str) == focus_date)
+        ]
+        league = str(group["League"].iloc[0]) if not group.empty else ""
+        home, away = home_away(group) if not group.empty else ("", "")
+        _render_hero(game_context, parlays, stories, league, focus_game, focus_date, home, away)
+        _render_story_preloader(stories, st.session_state[_PLATFORM], focus_game, offers)
 
 st.divider()
 if focus_game:

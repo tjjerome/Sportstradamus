@@ -5,8 +5,8 @@ The node set is the game's **model-liked** legs (Kelly ``K`` > 0), fixed per gam
 selecting a leg never moves a star, it only lights it up. A slip leg renders active
 (full team color, opacity 1, labelled); a candidate renders desaturated + dim,
 labelled like the rest. Star size ∝ Kelly edge. Each team's hub anchors to its side. Every tie is a
-gold edge (width/opacity ∝ |ρ|, dashed when ρ < 0) that stays hidden (opacity 0)
-until both its stars are in the slip. These assert that grammar, the static layout,
+gold edge (width/opacity ∝ |ρ|, dashed when ρ < 0) drawn as a faint base web that
+brightens when both its stars are in the slip. These assert that grammar, the static layout,
 the size/selection encodings, the hover, the per-edge endpoint ``meta``, and the
 click-key + card-field ``customdata`` the in-app editor and its JS card rely on.
 """
@@ -18,6 +18,7 @@ import pytest
 
 from sportstradamus.dashboard.components.constellation import (
     _DEEP_ALPHA,
+    _EDGE_BASE_ALPHA,
     _INACTIVE_ALPHA,
     _SIZE_MAX,
     _WIDER_SCALE,
@@ -210,6 +211,25 @@ def test_candidate_layout_anchors_from_pool_without_a_slip():
     assert pos["A|PTS|Over"][0] < 0 < pos["B|PTS|Over"][0]
 
 
+def test_layout_bbox_is_centered_on_origin():
+    # A one-sided game (every leg on NYK, no SAS) piles the cloud against one anchor;
+    # _rescale re-centers on the bbox midpoint so it never mats against a frame edge.
+    rows = [
+        {**_row(0, k, 0.3), "Team": "NYK"}
+        for k in ("A|PTS|Over", "B|REB|Over", "C|AST|Over", "D|STL|Over")
+    ]
+    corr = _corr(
+        ("A|PTS|Over", "B|REB|Over", 0.5),
+        ("B|REB|Over", "C|AST|Over", 0.4),
+        ("C|AST|Over", "D|STL|Over", 0.3),
+    )
+    pos = _node_pos(constellation_figure([], corr, pd.DataFrame(rows)))
+    xs = [x for x, _ in pos.values()]
+    ys = [y for _, y in pos.values()]
+    assert abs((min(xs) + max(xs)) / 2) < 0.05
+    assert abs((min(ys) + max(ys)) / 2) < 0.05
+
+
 def _edge_by_pair(fig) -> dict:
     return {frozenset(e.meta): e for e in _edge_traces(fig)}
 
@@ -233,10 +253,10 @@ def test_all_ties_drawn_with_endpoint_meta_and_dashed_negative():
     assert edges[frozenset(("A|PTS|Over", "C|AST|Over"))].line.dash == "solid"  # positive
 
 
-def test_edges_show_only_between_two_slip_legs():
-    # Only a tie whose BOTH endpoints are in the slip is drawn — the slip's own
-    # correlations, never the ties out to candidates. A + B are in the slip, C is a
-    # candidate: A-B lights up; A-C and B-C stay hidden.
+def test_slip_edges_brighten_over_the_faint_base_web():
+    # Every tie is drawn at a faint base alpha (the base web); a tie whose BOTH endpoints
+    # are in the slip brightens above it. A + B are in the slip, C is a candidate: A-B
+    # brightens; A-C and B-C stay at the faint base.
     legs = _slip("A|PTS|Over", "B|REB|Under")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3), ("C|AST|Over", 0.3))
     corr = _corr(
@@ -245,29 +265,29 @@ def test_edges_show_only_between_two_slip_legs():
         ("B|REB|Under", "C|AST|Over", 0.5),
     )
     edges = _edge_by_pair(constellation_figure(legs, corr, pool))
-    assert edges[frozenset(("A|PTS|Over", "B|REB|Under"))].opacity > 0  # both in the slip
-    assert edges[frozenset(("A|PTS|Over", "C|AST|Over"))].opacity == 0  # C is a candidate
-    assert edges[frozenset(("B|REB|Under", "C|AST|Over"))].opacity == 0  # C is a candidate
+    assert edges[frozenset(("A|PTS|Over", "B|REB|Under"))].opacity > _EDGE_BASE_ALPHA  # both in slip
+    assert edges[frozenset(("A|PTS|Over", "C|AST|Over"))].opacity == _EDGE_BASE_ALPHA  # candidate
+    assert edges[frozenset(("B|REB|Under", "C|AST|Over"))].opacity == _EDGE_BASE_ALPHA  # candidate
 
 
-def test_single_slip_leg_draws_no_edges():
-    # One leg in the slip → no pair is fully in the slip → a clean field (ties preview
-    # only on hover, client-side). The B-C-less single-active case the old map lit up.
+def test_single_slip_leg_leaves_only_the_faint_base_web():
+    # One leg in the slip → no pair is fully in the slip → no edge brightens; every tie
+    # sits at the faint base alpha (bright ties preview only on hover, client-side).
     legs = _slip("A|PTS|Over")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3))
     edges = _edge_traces(
         constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.5)), pool)
     )
-    assert edges and all(e.opacity == 0 for e in edges)
+    assert edges and all(e.opacity == _EDGE_BASE_ALPHA for e in edges)
 
 
-def test_empty_active_set_hides_all_edges():
-    # The static field still exists (pool K>0 legs), but with nothing in the slip
-    # every edge is hidden — an empty slip is a clean field.
+def test_empty_slip_shows_the_faint_base_web():
+    # With nothing in the slip no edge brightens — but the whole web is still drawn at the
+    # faint base alpha so the correlation structure reads before any pick.
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3))
     edges = _edge_traces(constellation_figure([], _corr(("A|PTS|Over", "B|REB|Under", 0.5)), pool))
-    assert edges  # the tie is present as a (hidden) trace
-    assert all(e.opacity == 0 for e in edges)
+    assert edges  # the tie is present as a (base-web) trace
+    assert all(e.opacity == _EDGE_BASE_ALPHA for e in edges)
 
 
 def test_layout_is_deterministic():

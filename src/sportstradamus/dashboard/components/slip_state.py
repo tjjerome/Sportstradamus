@@ -68,7 +68,11 @@ def _legs_from_records(
     """
     out: list[dict] = []
     for record in records:
-        idx = find_offer_idx(record, offers, platform)
+        # Story legs carry the display market name in ``market`` but the canonical code in
+        # ``stat``; find_offer_idx matches offers["Market"] (the code), so look up by the
+        # code. A dashboard-built leg already has market == stat, so this is a no-op there.
+        lookup = {**record, "market": record.get("stat") or record["market"]}
+        idx = find_offer_idx(lookup, offers, platform)
         if idx is not None:
             out.append(build_leg(offers.loc[idx]))
     return out

@@ -81,6 +81,19 @@ def team_colors(league: str, code: str) -> tuple[str, str]:
     return (entry["primary"], entry["secondary"])
 
 
+def team_name(league: str, code: str) -> str:
+    """Full team name for a code (``("NBA", "GSW") -> "Golden State Warriors"``).
+
+    Falls back to the code itself when the team or its ``name`` is unmapped, so a new
+    or unknown team degrades to its abbreviation rather than KeyError-ing (same
+    unknown-code contract as :func:`team_colors`).
+    """
+    entry = _team_assets().get(league, {}).get(code)
+    if not entry or not entry.get("name"):
+        return code
+    return entry["name"]
+
+
 def register_plotly_template() -> None:
     """Register + default the token template so ad-hoc Plotly figures inherit DESIGN.md.
 
@@ -209,18 +222,11 @@ _APP_CSS_TEMPLATE = """
 /* A little transparency + a soft gold outer glow so the glyphs read as embedded in the
    night sky rather than pasted on. Applied to every game-shape glyph (legend, cards, hero). */
 .glyph{opacity:.9;filter:drop-shadow(0 0 5px rgba(201,162,39,.35))}
-/* Games surface lens toggles (P8 Task C6): active = gold, the app's owner-highlight
-   convention. Streamlit's config.toml [theme] has no gold slot (primaryColor is the
-   app's blue accent) so this reaches the celestial-gold token the same narrow,
-   key=-scoped way .celestial-kicker/.celestial-headline already do for the same
-   reason (DESIGN.md §3). */
-.st-key-lens_deep_on button, .st-key-lens_wider_on button{
-  color:#C9A227;border-color:#C9A227;background:rgba(201,162,39,.12)}
-/* DESIGN §2: gold also marks the selected segment of a segmented_control (the global
-   sport switch, Board lens/side, Receipts window). Streamlit has no token slot for the
-   active segment, so reach the gold token on its kind-scoped testid. The
-   segmented_controlActive kind is Streamlit-1.58 internal -- reconfirm in-browser after
-   any Streamlit bump. */
+/* DESIGN §2: gold marks the selected segment of a segmented_control (the global sport
+   switch, Board lens/side, Receipts window, and the Games constellation lenses). Streamlit
+   has no token slot for the active segment, so reach the gold token on its kind-scoped
+   testid. The segmented_controlActive kind is Streamlit-1.58 internal -- reconfirm
+   in-browser after any Streamlit bump. */
 button[data-testid="stBaseButton-segmented_controlActive"]{
   color:#C9A227 !important;border-color:#C9A227 !important;background:rgba(201,162,39,.13) !important}
 .starfield{position:fixed;inset:0;z-index:-1;pointer-events:none;
