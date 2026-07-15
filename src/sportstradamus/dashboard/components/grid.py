@@ -26,42 +26,56 @@ _RIGHT_EXPR = "{'textAlign':'right','fontFamily':'IBM Plex Mono, monospace'}"
 _PERCENT_FORMATTER = JsCode(
     "function(params){return (params.value==null||isNaN(params.value))?'':params.value.toFixed(1)+'%';}"
 )
+# Same as above but a leading "+" on positives — the edge columns read as signed deltas
+# (a +6.0% edge, a -3.5% edge). The plain formatter is for always-positive percents (Win %).
+_SIGNED_PERCENT_FORMATTER = JsCode(
+    "function(params){if(params.value==null||isNaN(params.value))return '';"
+    "return (params.value>0?'+':'')+params.value.toFixed(1)+'%';}"
+)
 
 # Light text (textColor token) reads on every painted bucket because only the saturated
 # ramp ends are painted — the near-neutral band stays unpainted.
 _HEAT_TEXT = "#E6E9EF"
 # Saturated diverging buckets from theme.DIVERGING_COLORS: strong/mild red below the
-# centre (negative edge), strong/mild blue above it. The pale middle is left unpainted.
-_NEG_STRONG, _NEG = theme.DIVERGING_COLORS[0], theme.DIVERGING_COLORS[1]
-_POS, _POS_STRONG = theme.DIVERGING_COLORS[7], theme.DIVERGING_COLORS[8]
-# Fractions of the column's max deviation that split mild/strong and the neutral band.
-_HEAT_STRONG_FRAC = 0.6
-_HEAT_NEUTRAL_FRAC = 0.2
+# centre (negative edge), mild/strong blue above it. The deepest ramp ends ([0]/[9]) and
+# the neutral middle stay unpainted so only genuine outliers carry a tint.
+_NEG_STRONG, _NEG_MILD = theme.DIVERGING_COLORS[1], theme.DIVERGING_COLORS[2]
+_POS_MILD, _POS_STRONG = theme.DIVERGING_COLORS[6], theme.DIVERGING_COLORS[7]
+# Absolute |edge − centre| thresholds (in the heatmap column's own units — percentage
+# points for the Board's Model Edge) that split the buckets: below MILD stays unpainted,
+# MILD..STRONG paints the mild bucket, at/beyond STRONG the saturated one. Absolute, not a
+# fraction of the column max — the old fraction scheme painted the whole first screen the
+# moment the board was edge-sorted (the max set the scale, so everything looked extreme).
+_HEAT_MILD_EDGE = 4.0
+_HEAT_STRONG_EDGE = 10.0
 
-# Client-side row hover (spec §4.3): a gold left-rail + faint gold wash, painted by AG
-# Grid's own row-hover class so hovering never triggers a Streamlit rerun.
+# Client-side row hover (spec §4.3): AG Grid v34 paints the row-hover background through an
+# absolutely-positioned ::before overlay that sits over any .ag-row-hover{background-color}
+# rule, so drive AG Grid's own --ag-row-hover-color variable instead, plus a gold left-rail
+# on the row's first cell. Painted by AG Grid's hover class, so it never triggers a rerun.
 _HOVER_CSS = {
-    ".ag-row-hover": {
-        "box-shadow": "inset 3px 0 0 #C9A227 !important",
-        "background-color": "rgba(201,162,39,.06) !important",
-    }
+    ".ag-root-wrapper": {"--ag-row-hover-color": "rgba(201,162,39,0.09)"},
+    ".ag-row-hover .ag-cell:first-child": {"box-shadow": "inset 3px 0 0 #C9A227"},
 }
 
 
 def _arrow_cellrenderer() -> JsCode:
-    """Prefix the row's ``Bet``-keyed Over/Under arrow ahead of the cell's own value.
+    """A class-based AG Grid cellRenderer prefixing the row's ``Bet``-keyed Over/Under arrow
+    ahead of the cell's own value.
 
-    ``narrative.bet_arrow`` is the one source for the SVG strings; baking both branches
-    in as JS literals here keeps that Python string the source of truth without a
-    second SVG definition living in JS.
+    Must be a class exposing ``getGui`` (not a plain function): a function renderer that
+    returns an SVG string renders it as an *escaped* text node in AG Grid 34 — the ``<svg>``
+    shows as literal markup — whereas ``getGui``'s DOM element takes the SVG through
+    ``innerHTML``. The cell value is left untouched, so the Line column still sorts
+    numerically. ``narrative.bet_arrow`` stays the one source of the SVG strings.
     """
     up, down = bet_arrow("Over"), bet_arrow("Under")
     return JsCode(
-        "function(params){return (params.data.Bet==='Over'?"
-        + repr(up)
-        + ":"
-        + repr(down)
-        + ")+params.value;}"
+        "class ArrowCellRenderer{init(p){"
+        "this.eGui=document.createElement('span');"
+        "this.eGui.innerHTML=(p.data.Bet==='Over'?" + repr(up) + ":" + repr(down) + ")"
+        "+(p.value==null?'':p.value);"
+        "}getGui(){return this.eGui;}}"
     )
 
 
@@ -75,20 +89,17 @@ def _heat_expr(bg: str) -> str:
     )
 
 
-def _heatmap_cellstyle(values: pd.Series, center: float) -> JsCode | dict:
-    """A diverging cellStyle ``JsCode`` over ``params.value``, bounds baked from the column.
+def _heatmap_cellstyle(center: float) -> JsCode:
+    """A diverging cellStyle ``JsCode`` over ``params.value``, thresholds baked absolutely.
 
-    Paints only the saturated tails (the outliers DESIGN §4 wants surfaced) so the
-    neutral band stays clean and the light text keeps contrast. Falls back to the plain
-    right-aligned style when the column has no spread. ``JsCode`` requires the AgGrid call
-    to pass ``allow_unsafe_jscode=True`` — without it st_aggrid drops the function.
+    Paints only the saturated tails (the outliers DESIGN §4 wants surfaced): a cell within
+    ``_HEAT_MILD_EDGE`` of ``center`` stays unpainted, the mild bucket runs out to
+    ``_HEAT_STRONG_EDGE``, and beyond that the saturated bucket — so an edge-sorted first
+    screen shows a few tinted outliers over a mostly-clean column. ``JsCode`` requires the
+    AgGrid call to pass ``allow_unsafe_jscode=True`` — without it st_aggrid drops the function.
     """
-    dev = (pd.to_numeric(values, errors="coerce") - center).abs()
-    span = float(dev.max()) if len(dev) else 0.0
-    if not span or pd.isna(span):
-        return dict(_RIGHT_STYLE)
-    lo2, lo1 = center - _HEAT_STRONG_FRAC * span, center - _HEAT_NEUTRAL_FRAC * span
-    hi1, hi2 = center + _HEAT_NEUTRAL_FRAC * span, center + _HEAT_STRONG_FRAC * span
+    lo2, lo1 = center - _HEAT_STRONG_EDGE, center - _HEAT_MILD_EDGE
+    hi1, hi2 = center + _HEAT_MILD_EDGE, center + _HEAT_STRONG_EDGE
     expr = (
         "params.value==null||isNaN(params.value) ? "
         + _RIGHT_EXPR
@@ -99,7 +110,7 @@ def _heatmap_cellstyle(values: pd.Series, center: float) -> JsCode | dict:
         + " : params.value <= "
         + repr(lo1)
         + " ? "
-        + _heat_expr(_NEG)
+        + _heat_expr(_NEG_MILD)
         + " : params.value < "
         + repr(hi1)
         + " ? "
@@ -107,7 +118,7 @@ def _heatmap_cellstyle(values: pd.Series, center: float) -> JsCode | dict:
         + " : params.value < "
         + repr(hi2)
         + " ? "
-        + _heat_expr(_POS)
+        + _heat_expr(_POS_MILD)
         + " : "
         + _heat_expr(_POS_STRONG)
     )
@@ -115,25 +126,25 @@ def _heatmap_cellstyle(values: pd.Series, center: float) -> JsCode | dict:
 
 
 def _numeric_col_kwargs(
-    df: pd.DataFrame,
     col: str,
     *,
     heatmap_col: str | None,
     heatmap_center: float,
     pct: set[str],
+    signed_pct: set[str],
     arrow_col: str | None,
     has_bet: bool,
     tip: str | None,
 ) -> dict:
-    """``configure_column`` kwargs for one numeric column: heatmap-or-plain cellStyle,
-    an optional "%" formatter, an optional arrow cellRenderer, an optional tooltip.
+    """``configure_column`` kwargs for one numeric column: heatmap-or-plain cellStyle, an
+    optional "%" formatter (signed for ``signed_pct``, plain for ``pct``), an optional arrow
+    cellRenderer, an optional tooltip.
     """
-    if col == heatmap_col:
-        cell_style = _heatmap_cellstyle(df[col], heatmap_center)
-    else:
-        cell_style = dict(_RIGHT_STYLE)
+    cell_style = _heatmap_cellstyle(heatmap_center) if col == heatmap_col else dict(_RIGHT_STYLE)
     kwargs = {"cellStyle": cell_style}
-    if col in pct:
+    if col in signed_pct:
+        kwargs["valueFormatter"] = _SIGNED_PERCENT_FORMATTER
+    elif col in pct:
         kwargs["valueFormatter"] = _PERCENT_FORMATTER
     if col == arrow_col and has_bet:
         kwargs["cellRenderer"] = _arrow_cellrenderer()
@@ -242,6 +253,7 @@ def build_themed_grid_options(
     selection_mode: str = "single",
     sparkline_col: str | None = None,  # L1 scar hook — line-movement sparklines, not built
     percent_cols: Sequence[str] = (),
+    signed_percent_cols: Sequence[str] = (),
     arrow_col: str | None = None,
     hidden_cols: Sequence[str] = (),
     flag_col: str | None = None,
@@ -253,7 +265,9 @@ def build_themed_grid_options(
 ) -> dict:
     """Token-themed ``gridOptions``: right-aligned mono numerals, an optional diverging
     heatmap on ``heatmap_col``, per-column header tooltips, and a "%" display suffix on
-    ``percent_cols`` (kept numeric underneath). Pure — no Streamlit call.
+    ``percent_cols`` (kept numeric underneath). ``signed_percent_cols`` is the same suffix
+    with a leading "+" on positives, for signed deltas like the edge columns. Pure — no
+    Streamlit call.
 
     ``arrow_col`` prefixes that column's cells with the row's Over/Under arrow, keyed
     off a ``Bet`` column in the row data. ``hidden_cols`` stays in the row data (so
@@ -272,6 +286,7 @@ def build_themed_grid_options(
     """
     help_map = dict(header_help or {})
     pct = set(percent_cols)
+    signed_pct = set(signed_percent_cols)
     present = set(df.columns)
     has_bet = "Bet" in present
     gb = GridOptionsBuilder.from_dataframe(df)
@@ -285,11 +300,11 @@ def build_themed_grid_options(
         if col not in present:
             continue
         kwargs = _numeric_col_kwargs(
-            df,
             col,
             heatmap_col=heatmap_col,
             heatmap_center=heatmap_center,
             pct=pct,
+            signed_pct=signed_pct,
             arrow_col=arrow_col,
             has_bet=has_bet,
             tip=help_map.get(col),
@@ -316,6 +331,7 @@ def render_themed_grid(
     header_help: Mapping[str, str] | None = None,
     selection_mode: str = "single",
     percent_cols: Sequence[str] = (),
+    signed_percent_cols: Sequence[str] = (),
     arrow_col: str | None = None,
     hidden_cols: Sequence[str] = (),
     flag_col: str | None = None,
@@ -340,6 +356,7 @@ def render_themed_grid(
         header_help=header_help,
         selection_mode=selection_mode,
         percent_cols=percent_cols,
+        signed_percent_cols=signed_percent_cols,
         arrow_col=arrow_col,
         hidden_cols=hidden_cols,
         flag_col=flag_col,

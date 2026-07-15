@@ -17,6 +17,7 @@ from sportstradamus.dashboard.data import (
     sport_filtered,
 )
 from sportstradamus.dashboard.lenses import LENSES, apply_lens
+from sportstradamus.helpers import market_display_name
 
 meta = load_current_meta()
 generated = format_ts(meta.get("generated_at", "no run on record"))
@@ -69,7 +70,15 @@ with col2:
     selected_platforms = st.multiselect("Platform", platforms, default=platforms)
 with col3:
     markets = sorted(offers["Market"].dropna().unique())
-    selected_markets = st.multiselect("Market", markets, default=markets)
+    # Chips show the prose market name; the stored value stays the slug the filter keys off.
+    market_labels = {
+        m: market_display_name(lg, m)
+        for lg, m in zip(offers["League"], offers["Market"], strict=True)
+        if pd.notna(m)
+    }
+    selected_markets = st.multiselect(
+        "Market", markets, default=markets, format_func=lambda s: market_labels.get(s, s)
+    )
 
 player_query = st.text_input("Player search", placeholder="e.g. Jokic")
 
@@ -128,27 +137,24 @@ if "Market" in grid_df.columns:
     grid_df = grid_df.rename(columns={"Market": "Market Slug"})
 
 if "Win Prob" in grid_df.columns:
-    grid_df["Win Prob"] = (grid_df["Win Prob"] * 100).apply(
-        lambda x: f"{x:.2f}%" if pd.notna(x) else ""
-    )
+    # Kept numeric (0–100) so the column click-sorts; the "%" is a display-only
+    # valueFormatter (percent_cols below), same as the edge columns.
+    grid_df["Win Prob"] = (pd.to_numeric(grid_df["Win Prob"], errors="coerce") * 100).round(1)
 # Model/Consensus Edge are edge-vs-DFS percentages (EV - 1, x100); kept numeric so the
 # heatmap can bucket Model Edge and the grid sorts them — the "%" is a display suffix
 # (percent_cols below), not baked into the value.
 for col in (columns.MODEL_EDGE, columns.CONSENSUS_EDGE):
     if col in grid_df.columns:
         grid_df[col] = (pd.to_numeric(grid_df[col], errors="coerce") * 100).round(1)
-for col in ("Boost", "Kelly"):
-    if col in grid_df.columns:
-        grid_df[col] = pd.to_numeric(grid_df[col], errors="coerce").round(2)
+if "Boost" in grid_df.columns:
+    grid_df["Boost"] = pd.to_numeric(grid_df["Boost"], errors="coerce").round(2)
 grid_df = grid_df.rename(columns=columns.LABELS)
 
 # columns.LABELS renames Consensus Edge -> Cons Edge before the grid ever sees the
 # frame, so every lookup below keys off the post-rename name, same as "Win %" already
 # does for Win Prob.
 numeric_cols = [
-    c
-    for c in ("Line", "Boost", "Win %", columns.MODEL_EDGE, "Cons Edge", "Kelly")
-    if c in grid_df.columns
+    c for c in ("Line", "Boost", "Win %", columns.MODEL_EDGE, "Cons Edge") if c in grid_df.columns
 ]
 selected_rows = render_themed_grid(
     grid_df,
@@ -156,7 +162,8 @@ selected_rows = render_themed_grid(
     heatmap_col=columns.MODEL_EDGE,
     heatmap_center=0.0,
     header_help=columns.HELP,
-    percent_cols=[columns.MODEL_EDGE, "Cons Edge"],
+    percent_cols=["Win %"],
+    signed_percent_cols=[columns.MODEL_EDGE, "Cons Edge"],
     arrow_col="Line",
     hidden_cols=["Bet", "Market Slug"],
 )

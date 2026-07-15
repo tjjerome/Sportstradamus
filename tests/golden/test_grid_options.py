@@ -25,6 +25,8 @@ from sportstradamus.dashboard.columns import (
     add_match_column,
 )
 from sportstradamus.dashboard.components.grid import (
+    _HEAT_MILD_EDGE,
+    _HEAT_STRONG_EDGE,
     _HEAT_TEXT,
     _HOVER_CSS,
     build_themed_grid_options,
@@ -101,6 +103,34 @@ def test_percent_cols_get_a_value_formatter_value_stays_numeric() -> None:
         fmt = defs[col].get("valueFormatter")
         assert fmt is not None and "%" in fmt.js_code  # display-only suffix
     assert "valueFormatter" not in defs["Kelly"]  # only percent_cols get it
+
+
+def test_signed_percent_cols_get_a_sign_prefixed_formatter() -> None:
+    options = build_themed_grid_options(
+        _GRID_DF,
+        numeric_cols=_NUMERIC,
+        signed_percent_cols=[MODEL_EDGE],
+        percent_cols=[CONSENSUS_EDGE],
+    )
+    defs = _column_defs(options)
+    signed = defs[MODEL_EDGE]["valueFormatter"].js_code
+    plain = defs[CONSENSUS_EDGE]["valueFormatter"].js_code
+    # The signed formatter (edge columns) prefixes a "+" on positives; the plain one doesn't.
+    assert ">0?'+'" in signed
+    assert ">0?'+'" not in plain
+    assert "%" in signed and "%" in plain
+
+
+def test_heatmap_thresholds_are_absolute_not_fraction_of_max() -> None:
+    options = build_themed_grid_options(
+        _GRID_DF, numeric_cols=_NUMERIC, heatmap_col=MODEL_EDGE, heatmap_center=0.0
+    )
+    js = _column_defs(options)[MODEL_EDGE]["cellStyle"].js_code
+    # Bucket boundaries are the fixed ±MILD/±STRONG edges baked absolutely, independent of
+    # the column's own max — so an edge-sorted first screen no longer paints solid (the old
+    # fraction-of-column-max bug, where the max set the scale and everything looked extreme).
+    assert repr(-_HEAT_STRONG_EDGE) in js and repr(_HEAT_STRONG_EDGE) in js
+    assert repr(-_HEAT_MILD_EDGE) in js
 
 
 def test_header_tooltips_attached() -> None:
@@ -195,8 +225,11 @@ def test_arrow_col_adds_cellrenderer_and_hidden_cols_hide() -> None:
         df, numeric_cols=["Line"], arrow_col="Line", hidden_cols=["Bet", "Market"]
     )
     defs = _column_defs(options)
-    assert hasattr(defs["Line"]["cellRenderer"], "js_code")
-    assert "Bet" in defs["Line"]["cellRenderer"].js_code
+    renderer = defs["Line"]["cellRenderer"].js_code
+    assert "Bet" in renderer
+    # Must be a class renderer exposing getGui — a plain-function renderer returning an SVG
+    # string renders it as escaped markup in AG Grid 34 (the exact P8 Board arrow bug).
+    assert "getGui" in renderer, "arrow renderer is not class-based (would escape the SVG)"
     assert defs["Bet"]["hide"] is True
     assert defs["Market"]["hide"] is True
 
@@ -210,8 +243,13 @@ def test_arrow_col_noop_without_bet_column() -> None:
 
 
 def test_hover_css_is_gold_rail_client_side() -> None:
-    assert _HOVER_CSS[".ag-row-hover"]["box-shadow"] == "inset 3px 0 0 #C9A227 !important"
-    assert _HOVER_CSS[".ag-row-hover"]["background-color"] == "rgba(201,162,39,.06) !important"
+    # AG Grid v34 paints the row-hover background through an absolutely-positioned ::before
+    # overlay that covers a .ag-row-hover{background-color} rule, so the hover wash must
+    # drive AG Grid's own --ag-row-hover-color variable; the gold rail is a first-cell inset.
+    assert _HOVER_CSS[".ag-root-wrapper"]["--ag-row-hover-color"] == "rgba(201,162,39,0.09)"
+    assert (
+        _HOVER_CSS[".ag-row-hover .ag-cell:first-child"]["box-shadow"] == "inset 3px 0 0 #C9A227"
+    )
 
 
 def test_flag_col_adds_get_row_style_jscode() -> None:
