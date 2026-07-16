@@ -23,6 +23,7 @@ from sportstradamus.training.calibration import fit_book_weights
 from sportstradamus.training.correlate import correlate
 from sportstradamus.training.markets import ALL_MARKETS, select_markets
 from sportstradamus.training.pipeline import (
+    _FORCEABLE_DISTS,
     DIST_TRAINING_LOSS_CHOICES,
     LOSS_AUTO,
     train_market,
@@ -178,6 +179,17 @@ def _resolve_cell_knob(stat_meta_full, lg, market, key, default, flag_value):
     ),
 )
 @click.option(
+    "--dist",
+    type=click.Choice([LOSS_AUTO, *sorted(_FORCEABLE_DISTS)]),
+    default=LOSS_AUTO,
+    show_default=True,
+    help=(
+        "Training distribution family. 'auto' (default) honors each cell's stat_meta dist "
+        "(else the data-driven mean>=2 / zero-rate pick); an explicit family (NegBin / ZINB / "
+        "SkewNormal) overrides every cell — a WS-3 family sweep axis."
+    ),
+)
+@click.option(
     "--blending-loss-fn",
     type=click.Choice([LOSS_AUTO, *sorted(calibration.BLENDING_SLUGS)]),
     default=LOSS_AUTO,
@@ -275,6 +287,7 @@ def meditate(
     target_normalization,
     zinb_mode,
     dist_training_loss,
+    dist,
     blending_loss_fn,
     market,
     branch,
@@ -479,6 +492,7 @@ def meditate(
                 blending=cell_blending,
                 zinb_mode=cell_zinb_mode,
                 dist_training_loss=dist_training_loss,
+                dist=dist,
                 stabilization=stabilization,
                 hpo_selection=cell_hpo_selection,
                 count_dispersion_objective=cell_count_dispersion,

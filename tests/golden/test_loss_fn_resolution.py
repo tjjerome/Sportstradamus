@@ -8,7 +8,9 @@ explicit nll/crps overrides every family.
 
 Distribution selection is likewise config-first: a cell's stat_meta ``dist`` is authoritative
 (``_resolve_dist``), with the data-driven ``global_mean`` / zero-rate rule (``_data_driven_dist``)
-as the fallback for an unset / ``"auto"`` cell.
+as the fallback for an unset / ``"auto"`` cell. The WS-3 ``meditate --dist`` axis threads a
+family override into that seam: ``"auto"`` defers to the cell config; an explicit family becomes
+``_resolve_dist``'s authoritative ``configured`` for every cell.
 """
 
 import logging
@@ -18,6 +20,7 @@ import pytest
 from sportstradamus.training.pipeline import (
     LOSS_AUTO,
     _data_driven_dist,
+    _deterministic_dump_suffix,
     _resolve_dist,
     _resolve_loss_fn,
 )
@@ -57,3 +60,40 @@ def test_resolve_dist_configured_is_authoritative_and_warns_only_on_disagreement
 def test_resolve_dist_unknown_family_raises():
     with pytest.raises(ValueError, match="not a forceable family"):
         _resolve_dist("Gamma", "ZINB", 0.7, 0.57, "NHL", "blocked")
+
+
+def _select_configured(dist_override: str, stat_meta_dist: str | None) -> str | None:
+    """The ``configured`` selection ``_step_select_distribution`` feeds ``_resolve_dist``.
+
+    Mirrors the seam expression so the --dist precedence is asserted without a full training run:
+    the override wins unless ``"auto"``, in which case the cell's stat_meta dist stands.
+    """
+    return dist_override if dist_override != LOSS_AUTO else stat_meta_dist
+
+
+def test_dist_override_forces_family_over_stat_meta_pin():
+    # --dist NegBin on a cell pinned ZINB in stat_meta trains NegBin (emits the disagree warning).
+    configured = _select_configured("NegBin", "ZINB")
+    assert _resolve_dist(configured, "ZINB", 0.7, 0.57, "WNBA", "TOV") == "NegBin"
+
+
+def test_dist_override_auto_defers_to_stat_meta_then_data():
+    # auto → cell config stands; an unset cell then falls through to the data-driven dist.
+    assert _select_configured(LOSS_AUTO, "ZINB") == "ZINB"
+    configured = _select_configured(LOSS_AUTO, None)
+    assert _resolve_dist(configured, "SkewNormal", 5.0, 0.0, "NBA", "PTS") == "SkewNormal"
+
+
+def test_dist_override_invalid_family_fails_loud():
+    configured = _select_configured("Gamma", "ZINB")
+    with pytest.raises(ValueError, match="not a forceable family"):
+        _resolve_dist(configured, "ZINB", 0.7, 0.57, "WNBA", "TOV")
+
+
+def test_deterministic_dump_suffix_keys_on_trained_arch_not_raw_zinb_mode():
+    # The bug: a --dist NegBin corner on a hurdle-pinned cell (e.g. WNBA TOV) trains plain NegBin
+    # and must dump to the non-hurdle path.
+    assert _deterministic_dump_suffix("NegBin", "hurdle") == ""
+    assert _deterministic_dump_suffix("ZINB", "hurdle") == "_hurdle"
+    assert _deterministic_dump_suffix("ZINB", "joint") == ""
+    assert _deterministic_dump_suffix("SkewNormal", "joint") == ""

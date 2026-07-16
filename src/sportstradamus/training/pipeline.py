@@ -1483,6 +1483,18 @@ def _persist_player_metadata(X_test: pd.DataFrame, splits: dict) -> None:
     X_test["Date"] = splits["dates_test"]
 
 
+def _deterministic_dump_suffix(dist: str, zinb_mode: str) -> str:
+    """Deterministic dump subdir suffix, keyed on the *trained* architecture.
+
+    The hurdle two-stage model engages only when ``dist == "ZINB" and zinb_mode == "hurdle"``
+    (see ``use_hurdle`` in :func:`train_market`). A cell pins ``zinb_mode`` in stat_meta
+    independent of its trained dist, so a ``--dist NegBin`` override on a hurdle-pinned cell
+    trains plain NegBin and must dump to the non-hurdle path — keying on the raw flag would
+    strand the sweep scorer on a stale ``_hurdle`` subdir.
+    """
+    return "_hurdle" if dist == "ZINB" and zinb_mode == "hurdle" else ""
+
+
 def _step_persist_artifacts(
     *,
     filedict: dict,
@@ -1579,7 +1591,7 @@ def _step_persist_artifacts(
     # pickle moves to the repo-root research dir so the package install
     # never carries the research artifacts.
     if deterministic:
-        suffix = "_hurdle" if zinb_mode == "hurdle" else ""
+        suffix = _deterministic_dump_suffix(dist, zinb_mode)
         strategy_subdir = f"{target_normalization}{suffix}"
         csv_subdir = f"deterministic/{strategy_subdir}/"
         mdl_dir = _DETERMINISTIC_MODEL_ROOT / strategy_subdir
@@ -2293,13 +2305,16 @@ def _step_select_distribution(
     deterministic: bool,
     dist_training_loss: str = LOSS_AUTO,
     stabilization: str = "None",
+    dist_override: str = LOSS_AUTO,
 ) -> dict:
     """Choose distribution family + apply target transform + compute shape priors.
 
-    Family selection: the cell's stat_meta ``dist`` is authoritative when set (:func:`_resolve_dist`
-    forces that branch and warns if it disagrees with the data); an unset / ``"auto"`` cell falls back
-    to the data-driven rule (:func:`_data_driven_dist`): ``global_mean >= _SKEWNORMAL_MEAN_THRESHOLD``
-    → SkewNormal, else NegBin escalated to ZINB when ``hist_gate > GATE_PUBLISH_THRESHOLD``. For
+    Family selection: ``dist_override`` (the ``meditate --dist`` sweep axis) wins over every cell when
+    not ``"auto"``; otherwise the cell's stat_meta ``dist`` is authoritative when set
+    (:func:`_resolve_dist` forces that branch and warns if it disagrees with the data); an unset /
+    ``"auto"`` cell falls back to the data-driven rule (:func:`_data_driven_dist`):
+    ``global_mean >= _SKEWNORMAL_MEAN_THRESHOLD`` → SkewNormal, else NegBin escalated to ZINB when
+    ``hist_gate > GATE_PUBLISH_THRESHOLD``. For
     SkewNormal, drops zero rows when ``hist_gate > NONZERO_DENOM_GATE`` and applies the strategy's
     forward transform.
 
@@ -2351,8 +2366,13 @@ def _step_select_distribution(
     strategy = baselines.get_target_normalization(target_normalization)
     dist_obj = None
 
+    configured = (
+        dist_override
+        if dist_override != LOSS_AUTO
+        else load_distribution_config().get(league, {}).get(market)
+    )
     dist = _resolve_dist(
-        load_distribution_config().get(league, {}).get(market),
+        configured,
         _data_driven_dist(global_mean, hist_gate),
         global_mean,
         hist_gate,
@@ -2460,6 +2480,7 @@ def train_market(
     blending: str = calibration.DEFAULT_BLENDING,
     zinb_mode: str = "joint",
     dist_training_loss: str = LOSS_AUTO,
+    dist: str = LOSS_AUTO,
     stabilization: str = "None",
     hpo_selection: str = "loss",
     count_dispersion_objective: str = "crps",
@@ -2504,6 +2525,10 @@ def train_market(
             docs/CENTERED_TARGET_NEGATIVE_RESULT.md for context). Only consulted
             when the count-branch chooses ``dist == "ZINB"``. ``"joint"`` is
             byte-identical to pre-P2.B production behavior.
+        dist: Distribution-family override (the WS-3 ``meditate --dist`` sweep axis).
+            ``"auto"`` (default) honors each cell's stat_meta ``dist`` (else the
+            data-driven rule); an explicit forceable family overrides every cell via
+            :func:`_resolve_dist`, byte-unchanged from production under ``"auto"``.
     """
     # style: allow-length  pre-existing research orchestrator (§2.8/§18.9): flag,
     # don't split. Already over the limit before the FBT keyword-only conversion.
@@ -2512,8 +2537,12 @@ def train_market(
     if zinb_mode not in {"joint", "hurdle"}:
         raise ValueError(f"zinb_mode must be 'joint' or 'hurdle', got {zinb_mode!r}")
 
+    dist_override = dist
     init = _step_init_market(league, market, stat_data, archive, deterministic=deterministic)
     filedict = init["filedict"]
+    # init["dist"] is the existing pickle's family, used only for the pre-selection odds synth
+    # below; the authoritative training dist (and the --dist override) is applied at
+    # _step_select_distribution, which overwrites this local.
     dist = init["dist"]
     cv = init["cv"]
     filename = init["filename"]
@@ -2550,6 +2579,7 @@ def train_market(
         deterministic=deterministic,
         dist_training_loss=dist_training_loss,
         stabilization=stabilization,
+        dist_override=dist_override,
     )
     dist = dist_info["dist"]
     cv = dist_info["cv"]
