@@ -42,10 +42,17 @@ _DOCK_CSS = """
 <style>
 .st-key-slip_dock{position:fixed;left:0;right:0;bottom:0;z-index:400;
   background:#1A1D24;border-top:1px solid rgba(201,162,39,.42);border-radius:4px 4px 0 0;
-  box-shadow:0 -4px 18px rgba(0,0,0,.45);padding:8px 12px;
-  max-height:70vh;overflow-y:auto}
+  box-shadow:0 -4px 18px rgba(0,0,0,.45);padding:8px 12px 10px !important;
+  max-height:70vh;overflow-y:auto;overflow-x:hidden}
 .st-key-slip_dock [data-testid="stVerticalBlock"]{gap:.35rem}
-.slip-dock-line{font-family:'IBM Plex Mono',monospace;font-size:13px;color:#E6E9EF;margin:2px 0}
+/* Streamlit stacks st.columns under ~640px (each column goes flex-basis:100%); the
+   summary+chevron bar must stay one row, so pin the row nowrap and re-flex the columns:
+   text column grows, control columns shrink to content. */
+.st-key-slip_dock [data-testid="stHorizontalBlock"]{flex-wrap:nowrap;align-items:center}
+.st-key-slip_dock [data-testid="stColumn"]{flex:0 0 auto;width:auto !important;min-width:0}
+.st-key-slip_dock [data-testid="stColumn"]:first-child{flex:1 1 auto}
+.slip-dock-line{font-family:'IBM Plex Mono',monospace;font-size:13px;color:#E6E9EF;margin:2px 0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 [data-testid="stMainBlockContainer"]{padding-bottom:120px}
 </style>
 """

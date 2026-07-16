@@ -591,3 +591,27 @@ def test_lab_modifiers_pairwise_isolation_updates_stale_pair(monkeypatch, tmp_pa
     solved = json.loads(overlay_path.read_text())["modifiers"]["Underdog"]["NBA"]["team"]
     assert solved["G.PTS & G.AST"] == [0.85, 1.0]
     assert solved["G.PTS & G.REB"] == [0.95, 1.0]
+
+
+def test_app_boots_mobile_with_dock():
+    """Forced-mobile boot: app renders, and a seeded slip mounts the dock bar."""
+    st.cache_data.clear()
+    at = AppTest.from_string(_WRAPPER, default_timeout=30)
+    at.session_state["_force_mobile"] = True
+    at.session_state["slip_legs"] = [
+        {
+            "player": "Jalen Brunson", "team": "NYK", "market": "PTS", "stat": "PTS",
+            "bet": "Over", "line": 25.5, "league": "NBA", "game": "NYK/BOS",
+            "date": "2026-07-16", "platform": "Underdog", "win_prob": 0.6,
+            "boost": 1.0, "push_prob": 0.0, "kelly": 0.05,
+        },
+        {
+            "player": "Jayson Tatum", "team": "BOS", "market": "PTS", "stat": "PTS",
+            "bet": "Over", "line": 27.5, "league": "NBA", "game": "NYK/BOS",
+            "date": "2026-07-16", "platform": "Underdog", "win_prob": 0.58,
+            "boost": 1.0, "push_prob": 0.0, "kelly": 0.04,
+        },
+    ]
+    at.run()
+    assert not at.exception
+    assert any(b.key == "slip_dock_toggle" for b in at.button)
