@@ -56,6 +56,12 @@ Market Prob` columns); `current_offers.parquet` still carries old corr-string co
 by `tests/test_nightly_run_characterization.py` through the real CLI path; an xdist
 save/restore race left them on disk).
 
+**R0 status — verify-only (revised plan).** By execution time the migration and `reflect` had
+already completed on the production box (Jul 10): `history.parquet`, `current_offers.parquet`, and
+`resolve_meta.json` all carry real migrated data. Step 3 (verify) passed and Step 6 (Receipts renders
+real resolved data) was confirmed in R5's live check; Steps 1, 2, 4, and 5 were therefore not run and
+the test-leak hardening was dropped. No R0 code shipped.
+
 - [ ] **Step 1: verify idempotency of the completed step.** Read `_migrate_parlay_hist` in the
   script and confirm it detects the already-migrated frame and skips (it should — the plan spec
   required idempotency). Only then rerun.
@@ -70,7 +76,7 @@ poetry run python -m sportstradamus.scripts.migrate_leg_schema --backfill-close 
   `--backfill-close` / `--backfill-alt-lines` archive loops), fix the cause, and add one
   `print(f"OK {step}", flush=True)` line after each top-level step so a future mid-run death is
   visible. Do not add resume machinery beyond that.
-- [ ] **Step 3: verify the data** (paste output into the commit body):
+- [x] **Step 3: verify the data** (paste output into the commit body):
 
 ```bash
 poetry run python -c "
@@ -90,7 +96,7 @@ print('close probs in (0,1):', ((cp>0)&(cp<1)).mean())
   `RESOLVE_META_PATH` (nightly.py currently builds it inline via pkg_resources), point
   `nightly.py` at it, and monkeypatch it to `tmp_path` in
   `tests/test_nightly_run_characterization.py` so the suite can never write the real file again.
-- [ ] **Step 6: live check** — Receipts shows resolved rows + real platforms + a truthful
+- [x] **Step 6: live check** — Receipts shows resolved rows + real platforms + a truthful
   resolved-at line; Diagnostics body renders; Receipts calibration/reliability panel renders.
   Record the verdict. Gates; commit `fix(p8-r): complete leg-schema migration + truthful resolve meta`.
 
@@ -130,13 +136,13 @@ it was tuned for centered-page gutters that `layout="wide"` doesn't have — 30 
    `test_app_injections.py:19-27`: pin static-layer alphas ≤ 0.20 **and** twinkle keyframe peak
    ≤ 0.70 (delete the "open question" comment).
 
-- [ ] Adjust CSS/HTML in theme.py; amend DESIGN §3; update the two goldens.
-- [ ] **The browser spike that never happened:** `poetry run dashboard`, all seven pages.
+- [x] Adjust CSS/HTML in theme.py; amend DESIGN §3; update the two goldens.
+- [x] **The browser spike that never happened:** `poetry run dashboard`, all seven pages.
   Verify: field visible in gutters/between blocks on every page, invisible behind Board's grid
   and the Lab tables, no text contrast loss, `prefers-reduced-motion` still kills animation.
   Record a three-line verdict in theme.py's module docstring (replacing the DOMPurify-only
   note) AND the commit body.
-- [ ] Gates; commit `feat(p8-r): starfield lives in the whitespace (wide layout)`.
+- [x] Gates; commit `feat(p8-r): starfield lives in the whitespace (wide layout)`.
 
 **R1.b — `page_hero` + adoption on all seven surfaces.** No P8 task ever assigned the mockups'
 header treatment; every page is `st.title` (`tonight.py:41`, `board.py:21`, `games.py:245`,
@@ -174,9 +180,9 @@ sport switch (`app.py:34`), Board's lens/side segmented controls, Receipts' wind
 Streamlit's segmented-control DOM varies — find the stable selector once, verify in-browser,
 and leave a one-line comment naming the Streamlit version it was verified against.
 
-- [ ] hero.py + CSS + seven adoptions + banner deletion + gold accents; extend
+- [x] hero.py + CSS + seven adoptions + banner deletion + gold accents; extend
   `test_app_injections.py` (hero classes present; banner classes gone).
-- [ ] Live check every page (kicker + headline + timestamp render, no double titles); record
+- [x] Live check every page (kicker + headline + timestamp render, no double titles); record
   verdict. Gates; commit `feat(p8-r): page heroes on every surface; sheets banners retired`.
 
 ---
@@ -245,7 +251,7 @@ _HOVER_CSS = {
 chips show raw slugs, `board.py:73-74`); (4) delete the dead `"Kelly"` branch in the rounding
 loop (`board.py:142-144`).
 
-- [ ] Goldens first (getGui pin, hover-var pin, threshold constants pin, Win % numeric dtype
+- [x] Goldens first (getGui pin, hover-var pin, threshold constants pin, Win % numeric dtype
   pin) → implement → **live check**: arrows render as arrows, first screen mostly unpainted
   with a few tinted outliers, hover shows gold wash + rail, Win % sorts numerically, market
   chips readable. Record verdict. Gates; commit
@@ -288,7 +294,7 @@ for nav; style it quiet).
 data wave." unconditionally under populated cards; the true empty-state at line 53 already
 covers the no-games case.
 
-- [ ] Fixture test for `game_headline` → implement → rebuild cards → delete footer → **live
+- [x] Fixture test for `game_headline` → implement → rebuild cards → delete footer → **live
   check** (cards show wash/kicker/headline/badge/glyph; headline text present for games with
   stories; no stray footer). Record verdict. Gates; commit
   `feat(p8-r): tonight prophecy cards + story-engine headlines`.
@@ -347,7 +353,7 @@ cx, cy = (max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2
    at the left/right edges (use `team_name`), brighter `textfont` on in-slip labels vs
    candidates. Widen the size spread while there: `_SIZE_MIN/MAX` 18–30 → 14–38.
 
-- [ ] Goldens first (re-center pin; candidate-alpha/base-edge constants pinned in figure
+- [x] Goldens first (re-center pin; candidate-alpha/base-edge constants pinned in figure
   traces; team-tag annotations present) → implement → **live check** on a real slate: stars
   team-colored and spread across the canvas, faint web visible pre-pick, team tags framing the
   map, hero speaks a prophecy over full team names, lens chips tight. Record verdict + a
@@ -401,7 +407,7 @@ every Training tab. Gate matrix: `toFixed(3)` valueFormatter for its numeric col
 (`gate_matrix.py:74` / `grid.py:117-142`). Tab tables: `st.column_config.NumberColumn(format="%.3f")`
 for float metric columns (`lab_training.py:223-225`).
 
-- [ ] Implement all five → **live check**: Correlations renders (heatmap + charts) in seconds;
+- [x] Implement all five → **live check**: Correlations renders (heatmap + charts) in seconds;
   Diagnostics has one Filters section + coverage in the body; Training shows zero default
   chips + one filter home; matrix shows colored glyphs on dark cells; three-decimal metrics.
   Record verdict + the Correlations timing. Gates; commit
@@ -411,14 +417,20 @@ for float metric columns (`lab_training.py:223-225`).
 
 ### Task R6: Exit — full walkthrough, ledger, checkboxes
 
-- [ ] Full seven-surface walkthrough against the mockups (`p8-tonight/board/games/
+**R6 status.** Each surface was live-checked by the owner during its own task (R1–R5) and again
+across the post-R5 polish batches (obsidian table, lens animations, games speed, 2-column legs
+panel, manuscript fonts) — all pass. The owner elected to close the lane on that incremental
+verification rather than run a separate consolidated walkthrough. Nothing pushed — devel review
+still owns the merge.
+
+- [x] Full seven-surface walkthrough against the mockups (`p8-tonight/board/games/
   games-lenses/receipts/lab-*.html`), with the migrated data live. For each surface, one line:
   matches / acceptable delta (named) / defect (file a follow-up in the handoff, don't silently
   fix out-of-scope things).
-- [ ] Tick every completed checkbox in THIS plan; append the §10 ledger entry to
+- [x] Tick every completed checkbox in THIS plan; append the §10 ledger entry to
   `docs/handoffs/dashboard-ux.md` (date, what shipped, live-check verdicts, gate results,
   what's still open for D/E).
-- [ ] Final gates + refactoring-specialist across every touched `.py` this phase; do not push —
+- [x] Final gates + refactoring-specialist across every touched `.py` this phase; do not push —
   the owner reviews first.
 
 ## Exit criteria
