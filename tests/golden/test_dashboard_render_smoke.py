@@ -185,6 +185,7 @@ _PARLAY_ROWS = [
         "Boost": 3.0,
         "P": 0.42,
         "Indep P": 0.35,
+        "Model EV": 0.44,  # p_corr = 0.44/3 > p_indep = 0.35/3 ⇒ scatter "above line"
         "legs": [
             {"player": "J. Brunson", "market": "PTS", "league": "NBA"},
             {"player": "K. Towns", "market": "REB", "league": "NBA"},
@@ -202,6 +203,7 @@ _PARLAY_ROWS = [
         "Boost": 3.0,
         "P": 0.55,
         "Indep P": 0.40,
+        "Model EV": 0.38,  # p_corr = 0.38/3 < p_indep = 0.40/3 ⇒ scatter "below line"
         "legs": [
             {"player": "A. Wilson", "market": "AST", "league": "NBA"},
             {"player": "A. Wilson", "market": "TOV", "league": "NBA"},

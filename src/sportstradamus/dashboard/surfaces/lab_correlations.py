@@ -33,6 +33,7 @@ _PARLAY_SCALAR_COLS = (
     "Platform",
     "Legs Resolved",
     "Misses",
+    "Model EV",
     "Indep P",
     "P",
     "Boost",
@@ -101,18 +102,28 @@ if resolved.empty:
     st.stop()
 
 has_indep = "Indep P" in resolved.columns and resolved["Indep P"].notna().any()
-has_corr_p = "P" in resolved.columns and resolved["P"].notna().any()
+has_corr = "Model EV" in resolved.columns and resolved["Model EV"].notna().any()
+# P, Indep P and Model EV are payout-scaled EVs — the payout is the Boost column for the
+# non-legacy parlays the resolved history holds — so dividing by Boost recovers the true joint
+# probabilities the charts want. p_indep prices the parlay as if its legs were independent
+# (prod of per-leg win probs); p_corr is the copula-adjusted joint probability. The old charts
+# read "correlated probability" off P, but P is the independence prescreen and equals Indep P
+# exactly (verified in-data: corr 1.0), so every value-add point sat on the y=x line.
+if has_corr:
+    resolved["p_corr"] = resolved["Model EV"] / resolved["Boost"]
+if has_indep:
+    resolved["p_indep"] = resolved["Indep P"] / resolved["Boost"]
 
 # Hoisted so the diagnostic callout below and "Correlation Value-Add" further
 # down share one boosted/not-boosted split instead of computing it twice.
 scatter_df = pd.DataFrame()
 above_line = pd.DataFrame()
 below_line = pd.DataFrame()
-if has_indep and has_corr_p:
-    scatter_df = resolved.dropna(subset=["Indep P", "P"]).copy()
+if has_indep and has_corr:
+    scatter_df = resolved.dropna(subset=["p_indep", "p_corr"]).copy()
     scatter_df["Outcome"] = scatter_df["Hit"].map({1: "Hit", 0: "Miss"})
-    above_line = scatter_df.loc[scatter_df["P"] > scatter_df["Indep P"]]
-    below_line = scatter_df.loc[scatter_df["P"] <= scatter_df["Indep P"]]
+    above_line = scatter_df.loc[scatter_df["p_corr"] > scatter_df["p_indep"]]
+    below_line = scatter_df.loc[scatter_df["p_corr"] <= scatter_df["p_indep"]]
 
 if len(above_line) > 0 and len(below_line) > 0:
     boosted_rate = above_line["Hit"].mean()
@@ -158,7 +169,7 @@ st.download_button(
 
 st.header("Correlation Value-Add")
 
-if has_indep and has_corr_p:
+if has_indep and has_corr:
     plot_df = scatter_df
     if len(scatter_df) > _SCATTER_MAX:
         plot_df = scatter_df.sample(n=_SCATTER_MAX, random_state=_SCATTER_SEED)
@@ -168,31 +179,32 @@ if has_indep and has_corr_p:
         )
     fig_scatter = px.scatter(
         plot_df,
-        x="Indep P",
-        y="P",
+        x="p_indep",
+        y="p_corr",
         color="Outcome",
         color_discrete_map={"Hit": theme.GREEN, "Miss": theme.RED},
         opacity=0.5,
         labels={
-            "Indep P": "Independent Probability (no correlation)",
-            "P": "Correlated Probability",
+            "p_indep": "Independent joint probability",
+            "p_corr": "Correlation-adjusted probability",
         },
-        title="Correlation Adjustment: Independent vs Correlated Probability",
+        title="Correlation Value-Add: independent vs correlation-adjusted joint probability",
     )
+    lim = float(scatter_df[["p_indep", "p_corr"]].to_numpy().max())
     fig_scatter.add_trace(
         go.Scatter(
-            x=[0, scatter_df[["Indep P", "P"]].max().max()],
-            y=[0, scatter_df[["Indep P", "P"]].max().max()],
+            x=[0, lim],
+            y=[0, lim],
             mode="lines",
             line={"dash": "dash", "color": "gray"},
-            name="No adjustment line",
+            name="No adjustment (independent)",
         )
     )
     fig_scatter.update_layout(height=500)
     st.plotly_chart(fig_scatter, width="stretch")
 
     col1, col2, col3 = st.columns(3)
-    col1.metric("Correlation boosted parlays", f"{len(above_line)}")
+    col1.metric("Correlation-boosted parlays", f"{len(above_line):,}")
     col2.metric(
         "Hit rate (boosted)", f"{above_line['Hit'].mean():.1%}" if len(above_line) > 0 else "N/A"
     )
@@ -201,11 +213,8 @@ if has_indep and has_corr_p:
         f"{below_line['Hit'].mean():.1%}" if len(below_line) > 0 else "N/A",
     )
 
-elif has_corr_p:
-    st.info(
-        "Indep P data not yet available (pre-update predictions). "
-        "Falling back to Leg Probs for independent rate estimation."
-    )
+elif has_corr:
+    st.info("Independent-probability data isn't available for these parlays yet.")
 
 st.subheader("Correlation Boost vs Hit Rate")
 if "Boost" in resolved.columns:
@@ -251,19 +260,10 @@ for platform in sorted(resolved["Platform"].unique()):
             "Missed 1": int((sdf["Misses"] == 1).sum()),
             "Missed 2+": int((sdf["Misses"] >= 2).sum()),
         }
-        if "P" in sdf.columns and sdf["P"].notna().any():
-            row["Predicted P"] = round(sdf["P"].mean(), 4)
-        if "Indep P" in sdf.columns and sdf["Indep P"].notna().any():
-            row["Independent P"] = round(sdf["Indep P"].mean(), 4)
-        elif "legs" in sdf.columns and sdf["legs"].notna().any():
-            indep = sdf["legs"].apply(
-                lambda legs: (
-                    np.prod([leg["win_prob"] for leg in legs])
-                    if isinstance(legs, list | tuple | np.ndarray) and len(legs) > 0
-                    else np.nan
-                )
-            )
-            row["Independent P"] = round(indep.mean(), 4)
+        if "p_corr" in sdf.columns and sdf["p_corr"].notna().any():
+            row["Predicted P"] = round(sdf["p_corr"].mean(), 4)
+        if "p_indep" in sdf.columns and sdf["p_indep"].notna().any():
+            row["Independent P"] = round(sdf["p_indep"].mean(), 4)
         size_data.append(row)
 
     if size_data:
@@ -290,15 +290,15 @@ for platform in sorted(resolved["Platform"].unique()):
         fig_miss.update_layout(height=350)
         st.plotly_chart(fig_miss, width="stretch")
 
-if "P" in resolved.columns and resolved["P"].notna().any():
+if "p_corr" in resolved.columns and resolved["p_corr"].notna().any():
     st.header("Parlay Calibration Curve")
-    cal_df = resolved.dropna(subset=["P"]).copy()
-    bins = np.linspace(0, cal_df["P"].quantile(0.95), 11)
-    cal_df["p_bin"] = pd.cut(cal_df["P"], bins=bins)
+    cal_df = resolved.dropna(subset=["p_corr"]).copy()
+    bins = np.linspace(0, cal_df["p_corr"].quantile(0.95), 11)
+    cal_df["p_bin"] = pd.cut(cal_df["p_corr"], bins=bins)
     cal_stats = (
         cal_df.groupby("p_bin", observed=False)
         .agg(
-            Predicted=("P", "mean"),
+            Predicted=("p_corr", "mean"),
             Actual=("Hit", "mean"),
             Count=("Hit", "count"),
         )

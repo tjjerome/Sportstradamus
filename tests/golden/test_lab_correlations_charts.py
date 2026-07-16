@@ -26,6 +26,19 @@ _LAB_CORRELATIONS_SRC = Path(
 ).read_text()
 
 
+def test_value_add_scatter_plots_correlation_adjusted_prob_not_the_independence_prescreen():
+    """The Correlation Value-Add scatter must plot the copula-adjusted joint probability
+    (``Model EV / Boost``) against the independent one (``Indep P / Boost``), never the ``P``
+    column: ``P`` is the independence prescreen and equals ``Indep P`` exactly (verified
+    in-data: corr 1.0), so plotting it drew a perfect y=x line (owner: "suspiciously linear").
+    """
+    src = _LAB_CORRELATIONS_SRC
+    assert "p_corr" in src and "p_indep" in src
+    assert 'resolved["Model EV"] / resolved["Boost"]' in src
+    assert 'y="p_corr"' in src, "value-add scatter no longer plots the correlation-adjusted prob"
+    assert 'y="P"' not in src, "scatter regressed to the P independence prescreen (perfect y=x)"
+
+
 def test_lab_correlations_never_reads_the_dashboard_forbidden_corr_parquets():
     """corr_same_team.parquet/corr_opposing.parquet are 2.85M-row NBA artifacts.
 
