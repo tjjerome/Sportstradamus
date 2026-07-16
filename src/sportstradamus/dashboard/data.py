@@ -36,6 +36,7 @@ from sportstradamus.helpers.io import (
     read_user_slips,
 )
 from sportstradamus.history_schema import PREDICTION_KEY, PREDICTION_LEVEL_COLS
+from sportstradamus.prediction.stories.context import ctxs_from_frame
 
 # Column names that differ across league gamelog parquets.
 # Keys: player, date, opp (None if not available), home (None if not available).
@@ -285,6 +286,22 @@ def load_current_game_context() -> pd.DataFrame:
     return _load_current_game_context_cached(
         CURRENT_GAME_CONTEXT_PATH, _mtime(CURRENT_GAME_CONTEXT_PATH)
     )
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
+def _load_game_ctxs_cached(ctx_mtime: float, corr_mtime: float) -> dict:
+    return ctxs_from_frame(load_current_game_context(), load_current_game_corr())
+
+
+def load_game_ctxs() -> dict:
+    """Per-game :class:`GameCtx` map, built once per snapshot instead of every rerun.
+
+    ``ctxs_from_frame`` walks the whole ``current_game_corr`` slice (tens of thousands of
+    rows) to attach each game's rho, so rebuilding it on every constellation click was the
+    Games surface's biggest per-rerun cost. Cache-keyed on both source files' mtimes so a
+    fresh ``prophecize`` snapshot still refreshes it.
+    """
+    return _load_game_ctxs_cached(_mtime(CURRENT_GAME_CONTEXT_PATH), _mtime(CURRENT_GAME_CORR_PATH))
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading offer details...")

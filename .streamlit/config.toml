@@ -27,10 +27,11 @@ buttonRadius = "small"
 showWidgetBorder = true
 showSidebarBorder = true
 
-# Typography — IBM Plex Sans reads well in dense numeric tables (AG Grid's own default);
-# IBM Plex Mono gives tabular numerals so stat columns align by place value.
-font = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
-headingFont = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@500;600;700&display=swap"
+# Typography — the "manuscript" treatment (DESIGN.md §2): Spectral, a screen-tuned serif, sets body
+# and headings; IBM Plex Mono still sets numerals so stat columns align by place value. The celestial
+# faces (Cinzel labels, Cormorant Garamond prophecy lines) ride on top via dashboard/theme.py CSS.
+font = "'Spectral':https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap"
+headingFont = "'Spectral':https://fonts.googleapis.com/css2?family=Spectral:wght@500;600;700&display=swap"
 codeFont = "'IBM Plex Mono':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap"
 baseFontSize = 14
 

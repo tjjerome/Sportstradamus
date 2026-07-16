@@ -52,6 +52,11 @@ from sportstradamus.dashboard.slip_engine import (
 from sportstradamus.leg_schema import build_leg, is_model_liked, leg_label
 from sportstradamus.prediction.stories.legs import validate_parlay_legs
 
+# The selected-legs list rides in a fixed-height scroll region so adding or removing a leg never
+# grows or shrinks the page under the constellation (owner: that reflow undercut the astrolabe
+# sweep). Sized for ~5 legs; a longer slip scrolls inside it.
+_LEG_PANEL_HEIGHT = 150
+
 
 def _slip_shrinkage(legs: Sequence[Mapping]) -> float:
     stats = load_model_stats()
@@ -129,8 +134,10 @@ def render_constellation_builder(
         deep_pool=deep_pool,
         wider_groups=wider_groups,
     )
-    _render_leg_list(key_prefix, focus_game=focus_game, removable=False)
-    _render_non_star_legs(legs, focus_game=focus_game, key_prefix=key_prefix)
+    if legs:
+        with st.container(height=_LEG_PANEL_HEIGHT, border=False, key="constellation_legpanel"):
+            _render_leg_list(key_prefix, focus_game=focus_game, removable=False, columns=2)
+            _render_non_star_legs(legs, focus_game=focus_game, key_prefix=key_prefix)
     _draw_detail_dialog(offers)
     if len(legs) < 2:
         if legs:
@@ -182,19 +189,23 @@ def render_simple_builder(
 
 
 def _render_leg_list(
-    key_prefix: str, *, focus_game: str | None = None, removable: bool = True
+    key_prefix: str, *, focus_game: str | None = None, removable: bool = True, columns: int = 1
 ) -> None:
     """List slip legs. ``focus_game`` shows only that game's **star** legs (Kelly > 0);
     satellites and same-game model-passed legs are listed by the pickers. ``removable=False``
-    drops the button column because a star leg is removed by clicking it on the map.
+    drops the button column because a star leg is removed by clicking it on the map, and
+    ``columns`` then flows that read-only list across that many side-by-side columns.
     """
     legs = st.session_state[_LEGS]
+    cols = st.columns(columns) if not removable and columns > 1 else None
+    shown = 0
     for i, leg in enumerate(legs):
         if focus_game is not None and (leg["game"] != focus_game or not is_model_liked(leg)):
             continue
         line = f"{leg_label(leg)}  ·  {leg['league']}"
         if not removable:
-            st.write(line)
+            (cols[shown % columns] if cols else st).write(line)
+            shown += 1
             continue
         text_col, rm_col = st.columns([8, 1])
         text_col.write(line)

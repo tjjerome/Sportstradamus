@@ -26,11 +26,11 @@ from sportstradamus.dashboard.data import (
     load_current_meta,
     load_current_offers,
     load_current_parlays,
+    load_game_ctxs,
     sport_filtered,
 )
 from sportstradamus.dashboard.narrative import SHAPE_HELP, context_strip, game_headline, home_away
 from sportstradamus.dashboard.theme import GOLD, GRAY, SEQUENTIAL_COLORS, team_name
-from sportstradamus.prediction.stories.context import ctxs_from_frame
 
 # Hero shape glyph — matches the mockup's 74px .glyphwrap.
 _HERO_GLYPH_SIZE = 74
@@ -77,13 +77,18 @@ def _apply_game_preselect(labels: list[str]) -> None:
         st.session_state.pop("game_select", None)
 
 
-def _hero_stat(label: str, value: str, *, title: str = "") -> str:
-    """One Cinzel-kicker / Plex-mono-value stat span for the hero's stats row."""
+def _hero_stat(label: str, value: str, *, title: str = "", mono: bool = True) -> str:
+    """One Cinzel-kicker stat span for the hero's stats row.
+
+    Numeric values (Total, Spread) stay Plex Mono; ``mono=False`` rides the Spectral body serif
+    instead, for a word value like the game shape that reads as prose, not a figure.
+    """
     attr = f' title="{title}"' if title else ""
+    value_font = "'IBM Plex Mono',monospace" if mono else "'Spectral',Georgia,serif"
     return (
         f"<span{attr}><div style=\"font-family:'Cinzel',serif;font-size:9px;"
         f'letter-spacing:.14em;text-transform:uppercase;color:{GRAY}">{label}</div>'
-        "<div style=\"font-family:'IBM Plex Mono',monospace;font-size:16px;"
+        f'<div style="font-family:{value_font};font-size:16px;'
         f'font-weight:600;margin-top:1px">{value}</div></span>'
     )
 
@@ -121,7 +126,7 @@ def _render_hero(
         (
             _hero_stat("Total", f"{strip['game_total']:.1f}"),
             _hero_stat("Spread", spread_text),
-            _hero_stat("Shape", str(strip["shape"]).title(), title=SHAPE_HELP),
+            _hero_stat("Shape", str(strip["shape"]).title(), title=SHAPE_HELP, mono=False),
         )
     )
     st.markdown(
@@ -130,7 +135,7 @@ def _render_hero(
         f'<div style="position:absolute;top:8px;right:14px;width:{_HERO_GLYPH_SIZE}px;'
         f'height:{_HERO_GLYPH_SIZE}px;opacity:.9">{glyph}</div>'
         f'<div style="font-size:20px;font-weight:700;letter-spacing:.01em">'
-        f'{team_name(league, away)} '
+        f"{team_name(league, away)} "
         f'<span style="color:{GRAY};font-size:15px;font-weight:400">@</span> '
         f"{team_name(league, home)}</div>"
         f"{subline}"
@@ -247,7 +252,7 @@ page_hero("THE CONSTELLATION", "Games", format_ts(meta.get("generated_at", "no r
 offers = sport_filtered(load_current_offers()).reset_index(drop=True)
 corr = load_current_game_corr()
 game_context = load_current_game_context()
-ctxs = ctxs_from_frame(game_context, corr)
+ctxs = load_game_ctxs()
 stories = sport_filtered(load_current_game_stories())
 parlays = load_current_parlays()
 

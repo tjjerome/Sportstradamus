@@ -62,12 +62,15 @@ Streamlit understands; `goldColor`, the display fonts, and the ambient-image rul
 `sportstradamus/dashboard/theme.py` instead. The two mirrors together are the machine-readable
 token set — edit DESIGN.md and the relevant mirror in the same commit.
 
-**Type** — `IBM Plex Sans` (body + headings), `IBM Plex Mono` (code + tabular numerals so stat
-columns align by place value). Base 14px. Hierarchy comes from size + weight + color, never size
-alone. **Display-only celestial faces**: `Cinzel` (kickers, small-caps labels) and
-`Cormorant Garamond` (prophecy/story headlines) — applied solely through the `.celestial-kicker` /
-`.celestial-headline` classes injected once in `dashboard/app.py`. Never for data, numerals,
-tables, body copy, or anything a user scans for a number.
+**Type** — the *manuscript* treatment. `Spectral` (a screen-tuned serif) sets body + prose;
+`IBM Plex Mono` sets **all data numerals** — metric values, table/grid cells, any tabular figure —
+so stat columns align by place value; the celestial faces carry the chrome: `Cinzel` for kickers,
+small-caps labels, and metric/table headers, `Cormorant Garamond` for prophecy/story headlines. Base
+14px. Hierarchy comes from size + weight + color, never size alone. Spectral is the `config.toml`
+base font; `Cinzel` + `Cormorant Garamond` load once in `dashboard/app.py`, reaching elements through
+the `.celestial-kicker` / `.celestial-headline` classes plus a few key-scoped label rules. The
+display faces are chrome only — Never for data, numerals, tables, or anything a user scans for a
+number — and a numeral is always Plex Mono, never the serif body face.
 
 **Spacing** — Streamlit's native scale; when adding custom gaps, stay on a 4 / 8 / 12 / 16 / 24 step.
 
@@ -116,7 +119,10 @@ Altair / Vega-Lite inherit these automatically.
 - 1px light separators or zebra striping — not heavy gridlines. Consistent number formatting
   (thousands separators, fixed decimals, % where due), tabular numerals.
 - Conditional formatting / heatmaps (use `chartSequentialColors`) and inline bars to surface
-  outliers; sortable + filterable columns.
+  outliers; sortable + filterable columns. A **diverging** heatmap (correlation, above/below
+  average) centers its neutral midpoint on `backgroundColor` with `chartDivergingColors` ends — never
+  a light/cream center, which reads as a bright block punched into the dark theme. Tint the outliers,
+  not every cell: absolute thresholds, a padded cell, the majority left unpainted.
 - Group row actions under a single kebab/dropdown — not a billboard of per-row icons.
 - Progressive disclosure: expandable rows, pagination, column hiding. Lead with the primary KPI
   (top-left, F-pattern), push detail into drill-downs.
@@ -139,12 +145,42 @@ unrepresented side leaves its half empty (the both-teams parlay rule, made visua
 second team through a separate satellite section beside the map, never by crowding the constellation.
 In the editor the map is interactive — click a star to add or remove its leg, and hover a star for a card (its
 read plus a **Full detail** link into the offer dialog, slip preserved) — with the modebar and
-zoom/pan off (it's a map, not a chart). This is the one piece of decoration that *is* data: use it on the slip
+zoom/pan off (it's a map, not a chart). Switching lenses (the deeper/wider toggles) animates the map
+in with a brief fade + scale settle; a bare restyle (lighting a star on a click) does not — the
+animation fires only when the lens actually changes the plotted trace set, and
+`prefers-reduced-motion` disables it. This is the one piece of decoration that *is* data: use it on the slip
 editor, Game pages, and parlay detail, keep it on `backgroundColor`, never let it crowd a table. It
 is the brand's signature; treat its grammar — star = leg, **fill = team**, **size = edge**,
 **brightness = in the slip**, edge = correlation — as FIXED. Team fills come from
 `team_assets.json` via `theme.team_colors(league, code)`; an unmapped code gets the neutral
 gray fallback. Team fills are never gold — gold is the correlation-edge color.
+
+## 4b. Table skin — the Obsidian Tablet, and the AG-Grid iframe
+
+The themed `streamlit-aggrid` stat grids (everything through `dashboard/components/grid.py`) wear the
+**Obsidian Tablet** skin (owner-selected): a polished dark-glass slab — a
+`secondaryBackgroundColor → backgroundColor` gradient — inside a gold hairline frame with corner
+brackets, under engraved small-caps headers, over 1px gold-etched row separators, with a faint top
+sheen. It introduces **no new colors**: the slab is the surface/background tokens; the frame, rules,
+and row hover are the gold token as *chrome* (never a data mark, §2); the header ink is the neutral
+gray token. The skin is a FLEXIBLE table treatment (§7) — which surfaces lean on it vs. `st.dataframe`
+stays open — but the FIXED tokens above still bind inside it.
+
+**AG-Grid renders in an iframe**, which drives the theming constraints below. The `grid.py` comments
+are the canonical detail; a designer needs the shape:
+- The skin is injected through st-aggrid's `custom_css` on `.ag-root-wrapper`, not a page-level
+  wrapper — CSS on the parent document can't reach inside the iframe, so the frame lives on the
+  grid's own DOM.
+- The app's `Cinzel` `@import` is in the parent document and **does not cross into the iframe**, so
+  the engraved header degrades to a generic serif; small-caps + tracking + the engrave text-shadow
+  carry it. Numerals still render mono and right-aligned (§4).
+- An SVG cellRenderer must be a **class exposing `getGui()`** — a plain-function renderer's SVG
+  renders as escaped text in AG-Grid 34. Row hover drives AG-Grid's own `--ag-row-hover-color`
+  variable (plus a gold first-cell rail), not `.ag-row-hover { background }` (v34's `::before`
+  overlay covers it).
+- A passing golden on the emitted `custom_css` / `gridOptions` is **necessary but not sufficient** —
+  the same dict can pass the test and still render wrong in the iframe. Every grid change needs a
+  live browser check.
 
 ## 5. Iconography
 
@@ -156,7 +192,8 @@ team/sport marks: inline SVG recolored via `currentColor`.
 
 ## 6. NEVER (these are the "AI slop" tells)
 
-- **NEVER** use Inter, Roboto, Arial, Open Sans, Lato, or bare system fonts. (IBM Plex only.)
+- **NEVER** use Inter, Roboto, Arial, Open Sans, Lato, or bare system fonts. (The sanctioned set is
+  Spectral body, Cinzel labels, Cormorant Garamond headlines, IBM Plex Mono numerals — nothing else.)
 - **NEVER** use purple/violet gradients (on light or dark).
 - **NEVER** use the default Streamlit red `#FF4B4B` as primary.
 - **NEVER** use emoji as icons or section headers.
@@ -165,15 +202,15 @@ team/sport marks: inline SVG recolored via `currentColor`.
 - **NEVER** center-align numeric columns.
 - **NEVER** invent off-scale spacing, radii, or colors — use the tokens.
 - **NEVER** theme via inline CSS when `config.toml` can do it.
-- **NEVER** set numeric/data content in the display faces (Cinzel/Cormorant) — numerals are always
-  Plex.
+- **NEVER** set numeric/data content in a text face — not the Spectral body serif, not the
+  Cinzel/Cormorant display faces. Numerals are always Plex Mono.
 - **NEVER** ship an AI-generated image; ambient art is stock/commissioned with a manifest license
   line.
 
 ## 7. FIXED vs FLEXIBLE
 
-**FIXED** (never alter): the color palette (gold included), the fonts (Plex for everything that
-isn't a `.celestial-*` class; Cinzel/Cormorant only through those classes), spacing scale, radius,
+**FIXED** (never alter): the color palette (gold included), the fonts (Spectral body + Plex Mono
+numerals; Cinzel labels + Cormorant Garamond headlines as the celestial chrome), spacing scale, radius,
 chart palettes, the constellation grammar (§4a), the ambient-imagery rules (§3), and every NEVER
 rule in §6.
 

@@ -54,13 +54,85 @@ _POS_MILD, _POS_STRONG = theme.DIVERGING_COLORS[6], theme.DIVERGING_COLORS[7]
 _HEAT_MILD_EDGE = 4.0
 _HEAT_STRONG_EDGE = 10.0
 
-# Client-side row hover (spec §4.3): AG Grid v34 paints the row-hover background through an
-# absolutely-positioned ::before overlay that sits over any .ag-row-hover{background-color}
-# rule, so drive AG Grid's own --ag-row-hover-color variable instead, plus a gold left-rail
-# on the row's first cell. Painted by AG Grid's hover class, so it never triggers a rerun.
-_HOVER_CSS = {
-    ".ag-root-wrapper": {"--ag-row-hover-color": "rgba(201,162,39,0.09)"},
-    ".ag-row-hover .ag-cell:first-child": {"box-shadow": "inset 3px 0 0 #C9A227"},
+# Obsidian Tablet — the owner-selected table treatment (2026-07-15). The themed grids render as a
+# polished dark-glass slab (a surface→background gradient) with a gold hairline frame + corner
+# brackets, engraved small-caps headers, gold-etched row separators, and a faint top sheen. It is
+# injected into AG Grid's OWN DOM through custom_css because the grid renders in an iframe — a
+# page-level wrapper div can't reach inside it, so the frame has to live on .ag-root-wrapper. The
+# app's Cinzel @import lives in the parent document and does NOT cross into the iframe, so the
+# engraved header degrades to a serif; small-caps + tracking + the engrave shadow carry it. Every
+# color is a design token: the slab is surface/background, gold is chrome only (frame, brackets,
+# rules, hover — never a data mark, DESIGN §2/§6), header ink is the neutral gray token.
+_SLAB_GRADIENT = "linear-gradient(158deg,#1A1D24 0%,#0E1117 100%)"  # surface → background tokens
+_FRAME_GOLD = "rgba(201,162,39,0.45)"  # 1px tablet frame (the GOLD token in rgba form)
+_FRAME_HALO = "rgba(201,162,39,0.12)"  # faint ring just outside the frame
+_HEADER_RULE_GOLD = "rgba(201,162,39,0.28)"  # heavier gold rule under the header band
+_ETCH_GOLD = "rgba(201,162,39,0.10)"  # hairline gold-etched row separators
+_ZEBRA_WASH = "rgba(255,255,255,0.018)"  # even-row lift, a hair above the slab
+_ROW_HOVER_GOLD = "rgba(201,162,39,0.09)"  # gold row hover, composited over the slab
+# Four L-shaped corner marks as a multi-stop background: a 12px horizontal + 12px vertical bar
+# at each corner. pointer-events:none on the ::after keeps it from swallowing a row click.
+_BRACKET_GOLD = "rgba(201,162,39,0.55)"
+_CORNER_BRACKETS = ", ".join(
+    f"linear-gradient({_BRACKET_GOLD},{_BRACKET_GOLD}) {corner} / {size} no-repeat"
+    for corner in ("left top", "right top", "left bottom", "right bottom")
+    for size in ("12px 1px", "1px 12px")
+)
+
+# AG Grid v34 paints row-hover through an absolutely-positioned ::before overlay that covers any
+# .ag-row-hover{background-color} rule, so hover is driven by AG Grid's own --ag-row-hover-color
+# variable (set on .ag-root-wrapper) plus a gold first-cell rail; both are painted by AG Grid's
+# hover class client-side, so they never trigger a Streamlit rerun.
+_OBSIDIAN_CSS = {
+    ".ag-root-wrapper": {
+        "background": _SLAB_GRADIENT,
+        "border": "1px solid " + _FRAME_GOLD,
+        "border-radius": "4px",
+        "box-shadow": "0 0 0 1px " + _FRAME_HALO + ", 0 14px 34px rgba(0,0,0,0.55)",
+        "position": "relative",
+        "overflow": "hidden",
+        "--ag-background-color": "transparent",
+        "--ag-header-background-color": "transparent",
+        "--ag-odd-row-background-color": "transparent",
+        "--ag-row-border-color": _ETCH_GOLD,
+        "--ag-row-hover-color": _ROW_HOVER_GOLD,
+    },
+    ".ag-root-wrapper::before": {
+        "content": "''",
+        "position": "absolute",
+        "top": "0",
+        "left": "0",
+        "right": "0",
+        "height": "38%",
+        "background": "linear-gradient(180deg,rgba(255,255,255,0.05),transparent)",
+        "pointer-events": "none",
+    },
+    ".ag-root-wrapper::after": {
+        "content": "''",
+        "position": "absolute",
+        "inset": "5px",
+        "background": _CORNER_BRACKETS,
+        "pointer-events": "none",
+    },
+    ".ag-header": {
+        "background": "transparent",
+        "border-bottom": "1px solid " + _HEADER_RULE_GOLD,
+    },
+    ".ag-header-cell-text": {
+        "font-family": "'Cinzel', Georgia, serif",
+        "font-weight": "600",
+        "letter-spacing": "0.13em",
+        "text-transform": "uppercase",
+        "color": theme.GRAY,
+        "text-shadow": "0 1px 0 rgba(0,0,0,0.7), 0 -1px 0 rgba(255,255,255,0.05)",
+    },
+    # Manuscript type (DESIGN §2): text cells take the serif body face; numeric cells carry their own
+    # inline Plex Mono (set per-column below), which beats this class rule so figures stay tabular.
+    # The grid runs in an isolated iframe the parent @import can't reach, so Spectral resolves to the
+    # web-safe Georgia serif here -- the same graceful degrade as the Cinzel headers.
+    ".ag-cell": {"font-family": "'Spectral', Georgia, serif"},
+    ".ag-row-even": {"background-color": _ZEBRA_WASH},
+    ".ag-row-hover .ag-cell:first-child": {"box-shadow": "inset 3px 0 0 " + theme.GOLD},
 }
 
 
@@ -164,7 +236,7 @@ def _numeric_col_kwargs(
 def _get_row_style(flag_col: str, flag_below: float) -> JsCode:
     """A per-row ``getRowStyle`` callback painting the amber rail when ``flag_col`` is low.
 
-    Mirrors ``_HOVER_CSS``'s gold rail shape (inset box-shadow), orange and
+    Mirrors ``_OBSIDIAN_CSS``'s row-hover gold rail shape (inset box-shadow), orange and
     row-conditional instead of gold and hover-conditional — AG Grid's ``rowStyle`` is a
     static dict applied to every row, so a data-dependent style needs this callback form.
     """
@@ -370,8 +442,8 @@ def render_themed_grid(
 ) -> list[dict]:
     """Render the themed grid; return the selected rows as dicts (empty when none).
 
-    ``key`` disambiguates multiple grids rendered on one page. Row hover is a
-    client-side gold rail (``_HOVER_CSS``) — it never triggers a Streamlit rerun.
+    ``key`` disambiguates multiple grids rendered on one page. The grid wears the Obsidian
+    tablet skin (``_OBSIDIAN_CSS``); row hover is a client-side gold rail that never reruns.
     """
     options = build_themed_grid_options(
         df,
@@ -398,7 +470,7 @@ def render_themed_grid(
         update_mode=GridUpdateMode.SELECTION_CHANGED,
         fit_columns_on_grid_load=True,
         allow_unsafe_jscode=True,
-        custom_css=_HOVER_CSS,
+        custom_css=_OBSIDIAN_CSS,
         height=height,
         width="stretch",
         key=key,

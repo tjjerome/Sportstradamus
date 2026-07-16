@@ -165,11 +165,18 @@ def _starfield_background() -> str:
 # sentinel below is filled by _starfield_background() when APP_CSS is built.
 _APP_CSS_TEMPLATE = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=Cormorant+Garamond:ital,wght@1,600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600&family=Cormorant+Garamond:ital,wght@1,600&family=Spectral:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap');
 .celestial-kicker{font-family:'Cinzel',serif;font-weight:600;font-size:10.5px;
   letter-spacing:.26em;text-transform:uppercase;color:#C9A227}
 .celestial-headline{font-family:'Cormorant Garamond',serif;font-style:italic;
   font-weight:600;color:#C9A227}
+/* Manuscript type (DESIGN §2): Spectral is the config.toml base for body + headings; these two
+   rules hold the line that a DATA numeral is never set in the serif body -- metric values/deltas
+   stay Plex Mono, metric labels take the Cinzel small-caps. !important because Streamlit's own theme
+   CSS mounts after this injected <style> and would otherwise win the source-order tie. Grid/table
+   numeric cells set their own inline mono, which already beats any class rule. */
+[data-testid="stMetricValue"],[data-testid="stMetricDelta"]{font-family:'IBM Plex Mono',monospace !important}
+[data-testid="stMetricLabel"]{font-family:'Cinzel',serif !important;letter-spacing:.06em}
 /* Page-hero header (mockup .head block): gold Cinzel kicker over a plain sans display
    title and a quiet updated line, on a faint two-stop nebula wash (blue + gold <= 12%,
    DESIGN §3). Replaces the retired render_banner() Sheets-era banners. */
@@ -222,6 +229,13 @@ _APP_CSS_TEMPLATE = """
 /* A little transparency + a soft gold outer glow so the glyphs read as embedded in the
    night sky rather than pasted on. Applied to every game-shape glyph (legend, cards, hero). */
 .glyph{opacity:.9;filter:drop-shadow(0 0 5px rgba(201,162,39,.35))}
+/* Games slip rail: the fixed-height selected-legs panel (slip_builder._LEG_PANEL_HEIGHT) framed as
+   a gold celestial tablet -- a hairline gold border, a faint outer ring + inset glow, and a top-lit
+   nebula wash (gold well under the §3 12% ceiling) so it reads as an inscribed plate, not a plain
+   scroll box. The two-column read-only leg list flows inside it. */
+.st-key-constellation_legpanel{border:1px solid rgba(201,162,39,.42);border-radius:4px;padding:8px 14px;
+  background:radial-gradient(ellipse at 50% -30%, rgba(201,162,39,.07), transparent 62%), rgba(26,29,36,.5);
+  box-shadow:0 0 0 3px rgba(201,162,39,.05), inset 0 0 12px rgba(201,162,39,.05), 0 2px 14px rgba(0,0,0,.35)}
 /* DESIGN §2: gold marks the selected segment of a segmented_control (the global sport
    switch, Board lens/side, Receipts window, and the Games constellation lenses). Streamlit
    has no token slot for the active segment, so reach the gold token on its kind-scoped

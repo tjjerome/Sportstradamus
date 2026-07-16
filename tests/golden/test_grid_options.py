@@ -28,7 +28,7 @@ from sportstradamus.dashboard.components.grid import (
     _HEAT_MILD_EDGE,
     _HEAT_STRONG_EDGE,
     _HEAT_TEXT,
-    _HOVER_CSS,
+    _OBSIDIAN_CSS,
     build_themed_grid_options,
 )
 from sportstradamus.dashboard.lenses import LENSES, apply_lens
@@ -256,13 +256,28 @@ def test_arrow_col_noop_without_bet_column() -> None:
     assert "Bet" not in defs
 
 
-def test_hover_css_is_gold_rail_client_side() -> None:
-    # AG Grid v34 paints the row-hover background through an absolutely-positioned ::before
-    # overlay that covers a .ag-row-hover{background-color} rule, so the hover wash must
-    # drive AG Grid's own --ag-row-hover-color variable; the gold rail is a first-cell inset.
-    assert _HOVER_CSS[".ag-root-wrapper"]["--ag-row-hover-color"] == "rgba(201,162,39,0.09)"
+def test_obsidian_skin_frames_the_grid_keeps_gold_as_chrome() -> None:
+    """Owner-selected "Obsidian Tablet" table treatment (2026-07-15): the themed grids wear a
+    dark-glass slab with a gold hairline frame, engraved small-caps headers, and gold-etched
+    rows, injected into AG Grid's own DOM via custom_css (it renders in an iframe, so a
+    page-level wrapper div can't reach it). Pin the shape only — the owner browser check is the
+    real gate, since custom_css can pass this assertion yet still not render inside the iframe.
+    """
+    wrap = _OBSIDIAN_CSS[".ag-root-wrapper"]
+    assert "linear-gradient" in wrap["background"], "no obsidian slab gradient"
+    assert wrap["border"] == "1px solid rgba(201,162,39,0.45)", "no gold frame"
+    assert "Cinzel" in _OBSIDIAN_CSS[".ag-header-cell-text"]["font-family"], "header not engraved"
+    # Every color is a design token: the slab is surface→background, header ink is the neutral
+    # gray token, gold appears only as chrome (frame/rules/hover) — no invented off-token colors.
+    assert "#1A1D24" in wrap["background"] and "#0E1117" in wrap["background"]
+    assert _OBSIDIAN_CSS[".ag-header-cell-text"]["color"] == theme.GRAY
+    # AG Grid v34 paints row-hover through an absolutely-positioned ::before overlay covering a
+    # .ag-row-hover{background-color} rule, so hover drives AG Grid's own --ag-row-hover-color
+    # variable; the gold rail is a first-cell inset. Gold stays chrome, never a data-cell fill.
+    assert wrap["--ag-row-hover-color"] == "rgba(201,162,39,0.09)"
     assert (
-        _HOVER_CSS[".ag-row-hover .ag-cell:first-child"]["box-shadow"] == "inset 3px 0 0 #C9A227"
+        _OBSIDIAN_CSS[".ag-row-hover .ag-cell:first-child"]["box-shadow"]
+        == "inset 3px 0 0 #C9A227"
     )
 
 
