@@ -20,7 +20,9 @@ from sportstradamus.dashboard.components.constellation import (
     _DEEP_ALPHA,
     _EDGE_BASE_ALPHA,
     _INACTIVE_ALPHA,
+    _LABEL_FONT_SIZE_MOBILE,
     _SIZE_MAX,
+    _SIZE_MIN_MOBILE,
     _WIDER_SCALE,
     constellation_figure,
 )
@@ -444,3 +446,28 @@ def test_both_lenses_together_produce_sane_nonoverlapping_geometry():
         (x**2 + y**2) ** 0.5 for x, y in zip(wider_trace.x, wider_trace.y, strict=True)
     )
     assert wider_r > deep_r  # wider ring sits clearly outside the deep ring
+
+
+def test_mobile_figure_raises_size_floor_and_flags_slip_membership():
+    """mobile=True lifts every star to the touch floor and appends the in-slip
+    flag to customdata; mobile=False stays byte-identical to the no-arg figure."""
+    legs = _slip("A|PTS|Over")
+    pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.2), ("C|AST|Over", 0.1))
+    corr = _corr(("A|PTS|Over", "B|REB|Under", 0.3))
+    baseline = constellation_figure(legs, corr, pool)
+    desktop = constellation_figure(legs, corr, pool, mobile=False)
+    assert desktop.to_json() == baseline.to_json()
+
+    fig = constellation_figure(legs, corr, pool, mobile=True)
+    node_traces = _node_traces(fig)
+    assert node_traces
+    for t in node_traces:
+        assert min(t.marker.size) >= _SIZE_MIN_MOBILE
+        assert t.textfont.size == _LABEL_FONT_SIZE_MOBILE
+        for cd in t.customdata:
+            assert len(cd) == 9
+            assert cd[8] in (0, 1)
+    active = _trace(fig, "active")
+    assert all(cd[8] == 1 for cd in active.customdata)
+    candidate = _trace(fig, "candidate")
+    assert all(cd[8] == 0 for cd in candidate.customdata)

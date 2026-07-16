@@ -108,6 +108,11 @@ _EDGE_ALPHA_MIN = 0.25
 _EDGE_BASE_ALPHA = 0.03
 _FIG_HEIGHT = 380
 _LABEL_FONT_SIZE = 11  # active-star caption — small enough to fit in a dense game
+
+# Phase M touch floors: a fingertip needs ~22px; the label lifts with it. The Kelly
+# ordering (size = edge) survives — the floor compresses the range, never reorders it.
+_SIZE_MIN_MOBILE = 22
+_LABEL_FONT_SIZE_MOBILE = 13
 _ACTIVE_LABEL_COLOR = "#C7CEDA"  # in-slip captions read brighter than gray candidate labels
 
 # Cinzel team tags framing the two sides of the map (docs/mockups/p8-games.html .teamtag).
@@ -178,6 +183,7 @@ def constellation_figure(
     *,
     deep_pool: pd.DataFrame | None = None,
     wider_groups: list[tuple[str, list[dict]]] | None = None,
+    mobile: bool = False,
 ) -> go.Figure:
     """Static star map of the game's model-liked legs, the slip's legs lit up.
 
@@ -189,7 +195,8 @@ def constellation_figure(
     ``deep_pool`` (the "look deeper" lens) and ``wider_groups`` (the "look wider"
     lens) are both ``None`` by default, which reproduces today's figure byte-for-byte
     — they are optional overlays, not a change to the base map. See the module
-    docstring for what each draws.
+    docstring for what each draws. ``mobile`` lifts star sizes and label fonts to
+    touch floors (positions untouched — DESIGN §4a grammar holds on both paths).
     """
     fig = _blank_figure()
     info = _universe(pool, slip_legs)
@@ -207,23 +214,39 @@ def constellation_figure(
     node_team = {k: info[k]["team"] for k in keys}
     edges = _edges(keys, rho)
     pos = _layout(keys, node_team, teams, [(a, b, abs(r)) for a, b, r in edges])
-    sizes = _star_sizes(keys, info)
+    floor = _SIZE_MIN_MOBILE if mobile else _SIZE_MIN
+    label_size = _LABEL_FONT_SIZE_MOBILE if mobile else _LABEL_FONT_SIZE
+    sizes = _star_sizes(keys, info, floor=floor)
 
     focus_scale = _WIDER_SCALE if wider_groups is not None else 1.0
     pos = {k: (x * focus_scale, y * focus_scale) for k, (x, y) in pos.items()}
 
     if deep_pool is not None:
-        _add_deep_trace(fig, deep_pool, slip_legs, radius=_DEEP_RADIUS * focus_scale)
+        _add_deep_trace(fig, deep_pool, slip_legs, radius=_DEEP_RADIUS * focus_scale, floor=floor)
     for a, b, r in edges:
         _add_edge(fig, a, b, pos[a], pos[b], r, active=active)
     _add_node_trace(
-        fig, [k for k in keys if k not in active], pos, info, sizes, team_color, active=False
+        fig,
+        [k for k in keys if k not in active],
+        pos,
+        info,
+        sizes,
+        team_color,
+        active=False,
+        label_size=label_size,
     )
     _add_node_trace(
-        fig, [k for k in keys if k in active], pos, info, sizes, team_color, active=True
+        fig,
+        [k for k in keys if k in active],
+        pos,
+        info,
+        sizes,
+        team_color,
+        active=True,
+        label_size=label_size,
     )
     if wider_groups is not None:
-        _add_wider_trace(fig, wider_groups)
+        _add_wider_trace(fig, wider_groups, floor=floor)
     return fig
 
 
@@ -269,6 +292,7 @@ def _add_deep_trace(
     slip_legs: Sequence[Mapping],
     *,
     radius: float,
+    floor: float = _SIZE_MIN,
 ) -> None:
     """The "look deeper" lens: this game's model-passed legs as dim, unconnected background stars.
 
@@ -295,18 +319,20 @@ def _add_deep_trace(
             name="deep",
             marker={
                 "symbol": "star",
-                "size": [_SIZE_MIN] * len(keys),
+                "size": [floor] * len(keys),
                 "color": _DEEP_COLOR,
                 "opacity": _DEEP_ALPHA,
             },
-            customdata=[[k, *info[k]["card"]] for k in keys],
+            customdata=[[k, *info[k]["card"], 0] for k in keys],
             hovertext=[info[k]["hover"] for k in keys],
             hoverinfo="none",
         )
     )
 
 
-def _add_wider_trace(fig: go.Figure, wider_groups: list[tuple[str, list[dict]]]) -> None:
+def _add_wider_trace(
+    fig: go.Figure, wider_groups: list[tuple[str, list[dict]]], *, floor: float = _SIZE_MIN
+) -> None:
     """The "look wider" lens: other games' best legs, clustered by matchup on an outer ring.
 
     One angular slot per game (evenly spaced by group index — same index-based
@@ -330,7 +356,7 @@ def _add_wider_trace(fig: go.Figure, wider_groups: list[tuple[str, list[dict]]])
             ys.append(cy + offset * math.sin(angle + math.pi / 2))
             info = _node_info(row)
             colors.append(team_colors(str(row["League"]), str(row["Team"]))[0])
-            customdata.append([corr_key(row), *info["card"]])
+            customdata.append([corr_key(row), *info["card"], 0])
             hovers.append(info["hover"])
         label_r = _WIDER_RADIUS + _WIDER_LABEL_OFFSET
         label_x.append(label_r * math.cos(angle))
@@ -342,7 +368,7 @@ def _add_wider_trace(fig: go.Figure, wider_groups: list[tuple[str, list[dict]]])
             y=ys,
             mode="markers",
             name="wider",
-            marker={"symbol": "star", "size": [_SIZE_MIN] * len(xs), "color": colors},
+            marker={"symbol": "star", "size": [floor] * len(xs), "color": colors},
             opacity=_WIDER_ALPHA,
             customdata=customdata,
             hovertext=hovers,
@@ -362,13 +388,15 @@ def _add_wider_trace(fig: go.Figure, wider_groups: list[tuple[str, list[dict]]])
     )
 
 
-def _star_sizes(keys: list[str], info: dict[str, dict]) -> dict[str, float]:
+def _star_sizes(
+    keys: list[str], info: dict[str, dict], *, floor: float = _SIZE_MIN
+) -> dict[str, float]:
     """Per-node star size ∝ Kelly edge, relative to the game's strongest leg."""
     top = max((info[k]["edge"] for k in keys), default=0.0)
     if top <= 0:
-        return dict.fromkeys(keys, float(_SIZE_MIN))
-    span = _SIZE_MAX - _SIZE_MIN
-    return {k: _SIZE_MIN + max(info[k]["edge"], 0.0) / top * span for k in keys}
+        return dict.fromkeys(keys, float(floor))
+    span = _SIZE_MAX - floor
+    return {k: floor + max(info[k]["edge"], 0.0) / top * span for k in keys}
 
 
 def _blank_figure() -> go.Figure:
@@ -593,6 +621,7 @@ def _add_node_trace(
     team_color: dict[str, str],
     *,
     active: bool,
+    label_size: int = _LABEL_FONT_SIZE,
 ) -> None:
     """One scatter trace of stars: active = full team color, candidate = desaturated/dim.
 
@@ -619,9 +648,9 @@ def _add_node_trace(
             textposition="top center",
             textfont={
                 "color": _ACTIVE_LABEL_COLOR if active else GRAY,
-                "size": _LABEL_FONT_SIZE,
+                "size": label_size,
             },
-            customdata=[[k, *info[k]["card"]] for k in keys],
+            customdata=[[k, *info[k]["card"], 1 if active else 0] for k in keys],
             hovertext=[info[k]["hover"] for k in keys],
             hoverinfo="none",  # the component draws the hover card; suppress the native tooltip
         )
