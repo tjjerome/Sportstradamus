@@ -300,7 +300,7 @@ width fix is fit to a calibration target and guard-railed on g1/g5 (§6.1 go/no-
 | `init_score` warm-start baseline | **Dead** — byte-identical to plain NegBin | refs §3 |
 | ZTNB-hurdle likelihood | **Refuted** — incompatible with the derived-π decode; would regress the shipped hurdle markets | refs §6 |
 | T5 multiplicative factorization (volume × efficiency) | **Killed** — Goodman variance-of-products gives +27% predictive-variance inflation on the priced cell | refs §9 |
-| Family build — count wall + shape-bound | **Research done, build unstarted** (§6.6, R1/R2). Count: **exact-normalized Double Poisson** (Efron 1986) — mean-parametrized, both dispersion directions unbounded; verified in-venv (normalizer 1.000000, finite grads). Also found ZINB is a misroute on all 20 count cells — **plain-NB (one stat_meta edit) never tried**, the cheapest lever left. Continuous: **centered-parametrization SkewNormal** — the α-head is frozen at the Fisher singularity live (railed skew_cal on 9–12/12 yards-family corners), SHASH only on pilot evidence for the kurtosis class | R1/R2 briefs; §6.6 |
+| Family build — count wall + shape-bound | **Registry landed (family-as-axis sweep, ZINB ∪ NegBin); DP + centered-SN model code next** (§6.6, R1/R2). Count: **exact-normalized Double Poisson** (Efron 1986) — mean-parametrized, both dispersion directions unbounded; verified in-venv (normalizer 1.000000, finite grads). Also found ZINB is a misroute on all 20 count cells — **plain-NB (one stat_meta edit) never tried**, the cheapest lever left. Continuous: **centered-parametrization SkewNormal** — the α-head is frozen at the Fisher singularity live (railed skew_cal on 9–12/12 yards-family corners), SHASH only on pilot evidence for the kurtosis class | R1/R2 briefs; §6.6 |
 | HurdleZINB (per-cell `zinb_mode`) | **Alive & shipped** — 6/8 NBA ZINB markets | refs §4 |
 | Post-hoc mean correction (`roe_mean` / `isotonic_mean`) | **Alive & shipped** — `MEAN_STAGE` in [`posthoc.py`](../../src/sportstradamus/training/posthoc.py); use skeptically (§6.1 Rung A) | refs §8 |
 | Post-hoc probability recalibration (`prob_recal_*`) | **Alive** — `PROB_STAGE` built, available per-cell | posthoc.py |
@@ -847,7 +847,7 @@ first-order CRPS trial can produce (LightGBMLSS's CRPS path sets the Hessian to 
 before ship; an inference-path round-trip test for every new served object (§7.3). **If it fails:**
 signal-starved → features (§6.3); genuine heavy tail → family (§6.6).
 
-### §6.6 WS-3 — Family escalation: count wall + shape-bound (research DONE, build unstarted)
+### §6.6 WS-3 — Family escalation: count wall + shape-bound (registry landed; DP + centered-SN model code next)
 
 Entry: a cell whose cheaper axes are recorded-tried (§8), or a whole cohort the sweep leaves at
 the family ceiling. **This is the main funded build.** The two research questions are answered —
@@ -857,6 +857,27 @@ distribution scaffold, then **swept via the registry over its residual cohort** 
 grid axis, not a manual per-cell edit); pilots first, then registry entry → board run. Standing
 research-gate still binds each new family (§8.2) — the R1/R2 briefs discharge it for the two
 below; a third family needs its own.
+
+**Build status — the registry half is landed; the DP model code is the remaining fix.** Branch
+`feature/model-improvement` (5 commits, unpushed) carries the *plumbing*: the `count-family-screen`
+CLI, the `meditate --dist [auto|SkewNormal|ZINB|NegBin]` override, the deterministic dump-suffix
+fix, **family as a swept axis** (`_CLASS_FAMILIES["count"] = (ZINB, NegBin)`; each count cell now
+sweeps 8 ZINB + 4 NegBin corners and the winning `dist` persists), and the cross-family confirm
+(`_candidate` takes the best persistable corner across families). Three gates green; the NBA PF
+single-cell sweep validated it on real data (all 12 count corners on the board, the new `dist`
+column populated per family, NegBin gate rows valid; NBA PF stays **g4-failing on every count
+corner**, best ZINB-hurdle slack −0.326). What is *not* built is the family that actually clears the
+wall: ZINB/NegBin are floored at V/M ≥ 1, so the zero-deflated / under-dispersed residual is
+unreachable by the two swept families — **Double Poisson is that build** (the Count verdict below;
+`double_poisson.py` + the numpy DP kernel + pipeline/scorecard/serving/live-path). Once DP lands it
+joins `_CLASS_FAMILIES["count"]` as the third axis (`DPO`) and the residual is re-swept +
+confirm-walked; then the continuous (centered-SN) track. The P0 screen already routed **NBA PF +
+NHL points → DP-mandatory** (zero-deflation) and **WNBA TOV → plain-NB**, so the DP cohort is
+non-empty. *Resume gotcha:* the count board sweep that backfills the NegBin corners across the ~28
+withheld count cells must run **without `--resume`** — resume keys on cell-*presence*, and every
+count cell except NBA PF is already on the board with stale ZINB-only rows, so `--resume` skips
+them. Full phase list: the approved plan (`~/.claude/plans/…delightful-volcano.md`); box + gotchas:
+`[[data_dir_under_package]]`, `[[ws3_phase0_count_screen_verdict]]`, `[[deterministic_ab_g4_oversell]]`.
 
 **Continuous — centered-parametrization SkewNormal (R2 verdict; ~2 sessions, zero serving delta).**
 The headline diagnosis: the trained α-head is **frozen at ~0 on every SkewNormal cell** — raw
