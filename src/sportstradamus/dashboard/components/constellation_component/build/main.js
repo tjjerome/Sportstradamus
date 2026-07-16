@@ -56,6 +56,11 @@
   let hideTimer = null;
   let nonce = 0;
   let activeKey = null; // key whose card is showing
+  let MOBILE = false; // set per render from Python's mobile prop (viewport.is_mobile)
+  let skyTap = true; // a plotly star tap clears this before the DOM click handler sees it
+  const COARSE_POINTER =
+    window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+  const MOBILE_CARD_PAD = 150; // extra frame height so the docked card clears the map
   let prevLensNames = null; // {name: true} lens traces shown last render — a new one marks a reveal
   let renderSeq = 0; // bumped each render so an in-flight lens fade from a stale render bails out
 
@@ -63,6 +68,7 @@
     hideCard();
     renderSeq += 1;
     const fig = JSON.parse(args.figure_json);
+    MOBILE = !!args.mobile || COARSE_POINTER;
     const config = { displayModeBar: false, scrollZoom: false, responsive: true };
     const curLensNames = lensNamesOf(fig.data);
     const freshLens = plotted && prevLensNames ? newLensTraces(fig.data, prevLensNames) : [];
@@ -85,7 +91,10 @@
     } else if (freshLens.length) {
       fadeInLensTraces(freshLens);
     }
-    const height = (fig.layout && fig.layout.height ? fig.layout.height : 380) + FRAME_PAD;
+    const height =
+      (fig.layout && fig.layout.height ? fig.layout.height : 380) +
+      FRAME_PAD +
+      (MOBILE ? MOBILE_CARD_PAD : 0);
     setFrameHeight(height);
   }
 
@@ -143,22 +152,49 @@
   function attachHandlers() {
     chartDiv.on("plotly_click", function (data) {
       const pt = pointFrom(data);
-      if (pt) emit("click", pt.customdata[0]);
+      if (!pt) return;
+      if (!MOBILE) {
+        emit("click", pt.customdata[0]);
+        return;
+      }
+      skyTap = false; // a star tap is never a dismiss
+      if (activeKey === pt.customdata[0]) {
+        emit("click", activeKey); // second tap on the focused star = toggle
+        hideCard();
+        restoreEdges();
+      } else {
+        previewEdges(pt.customdata[0]);
+        showCard(pt, data.event);
+      }
     });
     chartDiv.on("plotly_hover", function (data) {
+      if (MOBILE) return;
       const pt = pointFrom(data);
       if (!pt) return;
       previewEdges(pt.customdata[0]);
       showCard(pt, data.event);
     });
     chartDiv.on("plotly_unhover", function () {
+      if (MOBILE) return;
       restoreEdges();
       scheduleHide();
     });
     card.addEventListener("mouseenter", function () {
       clearTimeout(hideTimer);
     });
-    card.addEventListener("mouseleave", hideCard);
+    card.addEventListener("mouseleave", function () {
+      if (!MOBILE) hideCard();
+    });
+    // Empty-sky tap dismisses the docked card: plotly_click marks star taps via
+    // skyTap=false in the same event turn; any other tap on the map falls through here.
+    chartDiv.addEventListener("click", function () {
+      if (!MOBILE) return;
+      if (skyTap) {
+        restoreEdges();
+        hideCard();
+      }
+      skyTap = true;
+    });
   }
 
   // Only node traces carry customdata; edges are hoverinfo="skip" so never reach here.
@@ -202,15 +238,28 @@
   // --- Hover card --------------------------------------------------------------
   function showCard(pt, mouseEvent) {
     clearTimeout(hideTimer);
-    const cd = pt.customdata; // [key, player, market, bet, line, win, boost, kelly]
+    const cd = pt.customdata; // [key, player, market, bet, line, win, boost, kelly, inSlip]
     activeKey = cd[0];
     card.innerHTML = cardHtml(cd);
-    card.querySelector(".cst-btn").addEventListener("click", function () {
+    card.querySelector(".cst-btn.cst-detail").addEventListener("click", function () {
       emit("detail", activeKey);
     });
+    const toggle = card.querySelector(".cst-btn.cst-toggle");
+    if (toggle) {
+      toggle.addEventListener("click", function () {
+        emit("click", activeKey);
+        hideCard();
+        restoreEdges();
+      });
+    }
+    card.classList.toggle("cst-docked", MOBILE);
     card.classList.remove("cst-hidden");
     card.setAttribute("aria-hidden", "false");
-    positionCard(mouseEvent);
+    if (!MOBILE) {
+      positionCard(mouseEvent);
+    } else {
+      card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
   }
 
   function scheduleHide() {
@@ -283,7 +332,14 @@
       pct(kelly),
       "</span></div>",
       '<div class="cst-scar">Last 5 — coming soon</div>',
-      '<button class="cst-btn" type="button">Full detail →</button>',
+      '<div class="cst-actions">',
+      MOBILE
+        ? '<button class="cst-btn cst-toggle" type="button">' +
+          (cd[8] ? "Remove from slip" : "Add to slip") +
+          "</button>"
+        : "",
+      '<button class="cst-btn cst-detail" type="button">Full detail →</button>',
+      "</div>",
     ].join("");
   }
 

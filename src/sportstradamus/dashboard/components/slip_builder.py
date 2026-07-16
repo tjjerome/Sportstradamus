@@ -49,6 +49,7 @@ from sportstradamus.dashboard.slip_engine import (
     score_slip,
     slip_headline,
 )
+from sportstradamus.dashboard.viewport import is_mobile
 from sportstradamus.leg_schema import build_leg, is_model_liked, leg_label
 from sportstradamus.prediction.stories.legs import validate_parlay_legs
 
@@ -253,9 +254,13 @@ def _render_constellation(
     a clicked deep star resolves the same way as any pool star (its key is drawn from
     that same ``pool`` frame); a clicked wider dot falls back to the satellite add path.
     """
+    mobile = is_mobile()
     action = render_constellation(
-        constellation_figure(legs, corr, pool, deep_pool=deep_pool, wider_groups=wider_groups),
+        constellation_figure(
+            legs, corr, pool, deep_pool=deep_pool, wider_groups=wider_groups, mobile=mobile
+        ),
         key=f"{key_prefix}_constellation",
+        mobile=mobile,
     )
     if _apply_constellation_action(action, offers, pool, wider_groups, key_prefix):
         st.rerun()
