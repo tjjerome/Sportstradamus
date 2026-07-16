@@ -29,7 +29,7 @@ from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from itertools import combinations
 
-from sportstradamus.prediction.stories.bank import bank_cell
+from sportstradamus.prediction.stories.bank import bank_cell, team_assets
 from sportstradamus.prediction.stories.context import GameCtx, Leg
 
 # League → phrase-bank voice. NBA and WNBA share the basketball voice; an unknown
@@ -267,6 +267,73 @@ def _opponent(game: str, team: str) -> str:
     return others[0] if others else ""
 
 
+# {g} context resolution. In the phrase bank {g} reads either as a *place* (the home city:
+# "the points pile up in {g}") or as the *game* (the matchup itself: "the {g} shootout"). A
+# locative preposition just before it, or a venue/crowd noun just after, marks the place reading;
+# anything else is the matchup. Location {g} becomes the home team's city, game {g} stays the
+# matchup label — decided per occurrence since one variant can carry either. Home city is the
+# full team name minus its (1- or 2-word) nickname.
+_G_TOKEN = re.compile(r"\{g\}")
+# These read as prose word lists, not code collections — a one-token-per-line
+# list literal (SIM905's default autofix) drowns twelve words across sixteen
+# lines for no readability gain, so the space-separated form keeps the noqa.
+_LOC_PREPS = frozenset(
+    "in at to into through from across around inside onto within near".split()  # noqa: SIM905
+)
+_PLACE_NOUNS = frozenset(
+    "faithful crowd fans building barn arena ice floor court field park gym house".split()  # noqa: SIM905
+)
+_WORD_TRIM = "'\",.!?;:—-"
+_TWO_WORD_NICKNAMES = frozenset(
+    {
+        "trail blazers",
+        "red sox",
+        "white sox",
+        "blue jays",
+        "maple leafs",
+        "golden knights",
+        "red wings",
+        "blue jackets",
+    }
+)
+
+
+def _city_from_name(name: str) -> str:
+    """The city portion of a full team name — the name minus its 1- or 2-word nickname."""
+    parts = name.split()
+    if len(parts) >= 3 and " ".join(parts[-2:]).lower() in _TWO_WORD_NICKNAMES:
+        return " ".join(parts[:-2])
+    return " ".join(parts[:-1]) if len(parts) > 1 else name
+
+
+def _home_city(ctx: GameCtx | None, matchup: str) -> str:
+    """The home team's city for a location-context ``{g}``; the matchup when it can't resolve."""
+    if ctx is None or not ctx.home_team:
+        return matchup
+    entry = team_assets().get(ctx.league, {}).get(ctx.home_team)
+    return _city_from_name(entry["name"]) if entry and entry.get("name") else matchup
+
+
+def _localize_g(variant: str) -> str:
+    """Rewrite a location-context ``{g}`` to ``{home}``; leave a game-context ``{g}`` as is.
+
+    ``{g}`` reads as a place when a locative preposition precedes it or a venue/crowd noun
+    follows (the tells covering the phrase bank's location uses); otherwise it is the matchup.
+    Decided per occurrence so one variant string can carry both readings.
+    """
+
+    def repl(m: re.Match) -> str:
+        before = variant[: m.start()].split()
+        after = variant[m.end() :].split()
+        prev = before[-1].lower().strip(_WORD_TRIM) if before else ""
+        nxt = after[0].lower().strip(_WORD_TRIM) if after else ""
+        # else-branch returns the matched token itself (never a "{g}" literal, which the
+        # no-prose-in-source guard bans) — a game-context {g} passes through untouched.
+        return "{home}" if prev in _LOC_PREPS or nxt in _PLACE_NOUNS else m.group(0)
+
+    return _G_TOKEN.sub(repl, variant)
+
+
 def thesis_variants(
     legs: Sequence[Leg], ctxs: Mapping[str, GameCtx]
 ) -> tuple[list[str], int, dict]:
@@ -290,7 +357,8 @@ def thesis_variants(
         subject.get("dir") or _direction(sub_legs),
         _modal_category(sub_legs),
     )
-    rendered = [variant.format(**subject) for variant in cell]
+    fmt_subject = {**subject, "home": _home_city(ctx, subject.get("g", ""))}
+    rendered = [_localize_g(variant).format(**fmt_subject) for variant in cell]
     if not rendered:
         return [], 0, subject
     idx = int(hashlib.md5(_seed(game, legs, ctx, archetype).encode()).hexdigest(), 16) % len(

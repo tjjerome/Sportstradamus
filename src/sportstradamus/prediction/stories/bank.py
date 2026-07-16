@@ -32,6 +32,11 @@ def why_bank() -> dict:
     return _bank("why_bank.json")
 
 
+def team_assets() -> dict:
+    """Team display assets: ``{league: {abbrev: {primary, secondary, name}}}``."""
+    return _bank("team_assets.json")
+
+
 def bank_cell(voice: str, archetype: str, shape: str, direction: str, category: str) -> list[str]:
     """Return the template variants for a cell via the voice → shared fallback chain.
 
