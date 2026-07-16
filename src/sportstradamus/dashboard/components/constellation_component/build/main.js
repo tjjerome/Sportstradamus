@@ -36,6 +36,19 @@
   const FRAME_PAD = 8; // headroom so top-row star labels aren't clipped
   const HOVER_FAINT = 0.18; // faint opacity for a hidden edge previewed on hover
   const HIDE_DELAY_MS = 220; // hover-intent: keep the card while the cursor travels to it
+  // Lens toggles animate two different ways, because they change the map two different ways:
+  //   - "Look deeper" only ADDS a "deep" trace of background stars — the lit map doesn't move, so
+  //     fade in just that new trace and leave every existing star exactly where it is.
+  //   - "Look wider" RESTRUCTURES the map: the focus constellation shrinks toward centre while the
+  //     outer "wider"/"wider_labels" clusters appear. Fading only the new clusters would leave the
+  //     shrink as an ugly instant snap, so settle the whole map in with one opacity fade instead.
+  // A slip click adds no lens trace and never moves the focus, so it never animates. Respect
+  // prefers-reduced-motion.
+  const LENS_FADE_MS = 900; // "look deeper": new background stars materialize
+  const WIDER_FADE_MS = 1000; // "look wider": whole-map settle — a touch slower, hides the reshape
+  const LENS_TRACE_NAMES = { deep: true, wider: true, wider_labels: true };
+  const REDUCED_MOTION =
+    window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   let plotted = false;
   let baseOpacity = []; // per-trace baseline opacity (server-set: active-incident vs hidden)
   let edgeEndpoints = []; // per-trace [a, b] for edge traces, else null
@@ -43,12 +56,20 @@
   let hideTimer = null;
   let nonce = 0;
   let activeKey = null; // key whose card is showing
+  let prevLensNames = null; // {name: true} lens traces shown last render — a new one marks a reveal
+  let renderSeq = 0; // bumped each render so an in-flight lens fade from a stale render bails out
 
   function render(args) {
     hideCard();
+    renderSeq += 1;
     const fig = JSON.parse(args.figure_json);
     const config = { displayModeBar: false, scrollZoom: false, responsive: true };
+    const curLensNames = lensNamesOf(fig.data);
+    const freshLens = plotted && prevLensNames ? newLensTraces(fig.data, prevLensNames) : [];
+    const widerReshaped =
+      plotted && prevLensNames && !!prevLensNames.wider !== !!curLensNames.wider;
     Plotly.react(chartDiv, fig.data, fig.layout, config);
+    prevLensNames = curLensNames;
     baseOpacity = fig.data.map(function (t) {
       return t.opacity == null ? 1 : t.opacity;
     });
@@ -59,9 +80,64 @@
     if (!plotted) {
       attachHandlers();
       plotted = true;
+    } else if (widerReshaped) {
+      fadeInWholeMap();
+    } else if (freshLens.length) {
+      fadeInLensTraces(freshLens);
     }
     const height = (fig.layout && fig.layout.height ? fig.layout.height : 380) + FRAME_PAD;
     setFrameHeight(height);
+  }
+
+  // The lens traces present in a figure, as a {name: true} set (deep / wider / wider_labels).
+  function lensNamesOf(data) {
+    const names = {};
+    data.forEach(function (t) {
+      if (LENS_TRACE_NAMES[t.name]) names[t.name] = true;
+    });
+    return names;
+  }
+
+  // Indices of lens traces present now but absent last render — the genuinely new stars to fade in.
+  function newLensTraces(data, prev) {
+    const idx = [];
+    data.forEach(function (t, i) {
+      if (LENS_TRACE_NAMES[t.name] && !prev[t.name]) idx.push(i);
+    });
+    return idx;
+  }
+
+  // Fade ONLY the freshly-revealed lens traces up from transparent to their designed opacity, so a
+  // "look deeper" / "look wider" toggle reads as new stars materializing while every existing star
+  // holds still. Ramps trace-level opacity (which multiplies each marker's own alpha) over
+  // LENS_FADE_MS on requestAnimationFrame; the start-at-0 restyle runs in the same tick as
+  // Plotly.react, so the browser never paints the full-opacity first frame. A newer render bumps
+  // renderSeq and this fade bails, so a stale ramp can't fight the current figure's trace indices.
+  function fadeInLensTraces(indices) {
+    if (REDUCED_MOTION) return;
+    const targets = indices.map(function (i) {
+      return baseOpacity[i];
+    });
+    const seq = renderSeq;
+    let start = null;
+    Plotly.restyle(chartDiv, { opacity: indices.map(function () { return 0; }) }, indices);
+    function step(now) {
+      if (seq !== renderSeq) return; // a newer render superseded this fade
+      if (start === null) start = now;
+      const t = Math.min(1, (now - start) / LENS_FADE_MS);
+      const eased = 1 - Math.pow(1 - t, 3); // easeOutCubic — quick lift, gentle settle
+      Plotly.restyle(
+        chartDiv,
+        {
+          opacity: targets.map(function (v) {
+            return v * eased;
+          }),
+        },
+        indices
+      );
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
   }
 
   function attachHandlers() {
