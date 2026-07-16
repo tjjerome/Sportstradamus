@@ -2266,8 +2266,8 @@ def _resolve_dist(
     league: str,
     market: str,
 ) -> str:
-    """The distribution family to train: the stat_meta-configured one (authoritative), or ``data_dist``
-    when the cell pins nothing / ``"auto"``.
+    """The distribution family to train: the operator-configured one (authoritative — ``--dist`` flag
+    or stat_meta), or ``data_dist`` when nothing is pinned / ``"auto"``.
 
     A configured family that disagrees with the data still trains (the operator's call) but logs a loud
     warning — forcing ``SkewNormal`` on a low-mean count stat mis-preps the target, forcing a count
@@ -2282,7 +2282,7 @@ def _resolve_dist(
         )
     if configured != data_dist:
         logger.warning(
-            "%s %s: training forced dist=%s from stat_meta (data-driven pick is %s: "
+            "%s %s: training forced dist=%s (data-driven pick is %s: "
             "global_mean=%.2f, zero_rate=%.2f)",
             league,
             market,
