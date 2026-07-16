@@ -49,7 +49,7 @@
 - Create: `src/sportstradamus/dashboard/viewport.py`
 - Test: `tests/golden/test_viewport.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/golden/test_viewport.py`:
 
@@ -102,12 +102,12 @@ def test_force_key_beats_query_param():
     assert _run(force=False, query_m="1") == "mobile=False"
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `poetry run pytest tests/golden/test_viewport.py -n0 -v`
 Expected: 4 FAIL / ERROR with `ModuleNotFoundError: No module named 'sportstradamus.dashboard.viewport'`
 
-- [ ] **Step 3: Implement `viewport.py`**
+- [x] **Step 3: Implement `viewport.py`**
 
 Create `src/sportstradamus/dashboard/viewport.py`:
 
@@ -146,12 +146,12 @@ def is_mobile() -> bool:
     return ss[_CACHED]
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `poetry run pytest tests/golden/test_viewport.py -n0 -v`
 Expected: 4 PASS
 
-- [ ] **Step 5: Ruff + commit**
+- [x] **Step 5: Ruff + commit**
 
 ```bash
 poetry run ruff check src/sportstradamus/
@@ -167,7 +167,7 @@ git commit -m "feat(p-m): viewport.is_mobile — UA sniff with test/query overri
 - Modify: `src/sportstradamus/dashboard/theme.py` (constants ~line 128, template ~line 293)
 - Test: `tests/golden/test_design_tokens.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/golden/test_design_tokens.py`:
 
@@ -183,12 +183,12 @@ def test_mobile_media_block_present_and_resolved() -> None:
     assert "__STARFIELD_DUST__" not in theme.APP_CSS
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `poetry run pytest tests/golden/test_design_tokens.py::test_mobile_media_block_present_and_resolved -n0 -v`
 Expected: FAIL with `AttributeError: module ... has no attribute 'MOBILE_MAX_PX'`
 
-- [ ] **Step 3: Add the constant and media block**
+- [x] **Step 3: Add the constant and media block**
 
 In `src/sportstradamus/dashboard/theme.py`, after the `_STARFIELD_MAX_ALPHA` constant (line ~130), add:
 
@@ -223,12 +223,12 @@ APP_CSS = _APP_CSS_TEMPLATE.replace("__STARFIELD_DUST__", _starfield_background(
 )
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `poetry run pytest tests/golden/test_design_tokens.py -n0 -v`
 Expected: all PASS (the new test plus every existing token test — the media block adds no banned pattern).
 
-- [ ] **Step 5: Live check + commit**
+- [x] **Step 5: Live check + commit**
 
 Run `poetry run dashboard`, open devtools device mode (390px): Tonight cards stack single-column, hero shrinks, no horizontal scroll on Tonight. Record verdict.
 
@@ -250,12 +250,12 @@ The dock (Task 4) needs both; neither is reachable cleanly today.
 - Modify: `src/sportstradamus/dashboard/components/slip_builder.py:61` (`_slip_shrinkage` → `slip_shrinkage`, plus its two callers at ~lines 152 and 179)
 - Modify: `src/sportstradamus/dashboard/components/slip_state.py:44` (`bankroll_input` key param)
 
-- [ ] **Step 1: Find every `_slip_shrinkage` reference**
+- [x] **Step 1: Find every `_slip_shrinkage` reference**
 
 Run: `grep -rn "_slip_shrinkage" src/ tests/`
 Expected: definition + two callers in `slip_builder.py`; possibly monkeypatch references in `tests/golden/test_slip_builder.py`. Every hit found must be renamed in Step 2.
 
-- [ ] **Step 2: Rename to public**
+- [x] **Step 2: Rename to public**
 
 In `slip_builder.py`, rename the function and both call sites:
 
@@ -275,7 +275,7 @@ def slip_shrinkage(legs: Sequence[Mapping]) -> float:
 
 (Callers: `shrink = slip_shrinkage(legs)` in both `render_constellation_builder` and `render_simple_builder`; update any test references found in Step 1 the same way.)
 
-- [ ] **Step 3: Key param on `bankroll_input`**
+- [x] **Step 3: Key param on `bankroll_input`**
 
 In `slip_state.py`, change the signature and widget key (the docstring's convention note stays):
 
@@ -298,12 +298,12 @@ def bankroll_input(key: str = "_bankroll_widget") -> None:
     st.session_state[_BANKROLL] = value
 ```
 
-- [ ] **Step 4: Run the touched suites**
+- [x] **Step 4: Run the touched suites**
 
 Run: `poetry run pytest tests/golden/test_slip_builder.py tests/golden/test_slip_engine.py tests/golden/test_dashboard_render_smoke.py -n0 -v`
 Expected: all PASS (pure rename + default-preserving param).
 
-- [ ] **Step 5: Ruff + commit**
+- [x] **Step 5: Ruff + commit**
 
 ```bash
 poetry run ruff check src/sportstradamus/
@@ -319,7 +319,7 @@ git commit -m "refactor(p-m): public slip_shrinkage + keyed bankroll_input for t
 - Create: `src/sportstradamus/dashboard/components/slip_dock.py`
 - Test: `tests/golden/test_slip_dock.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/golden/test_slip_dock.py`:
 
@@ -396,12 +396,12 @@ def test_sheet_lists_legs_and_remove_works():
     assert len(at.session_state["slip_legs"]) == 1
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `poetry run pytest tests/golden/test_slip_dock.py -n0 -v`
 Expected: FAIL with `ModuleNotFoundError ... slip_dock`
 
-- [ ] **Step 3: Implement the dock**
+- [x] **Step 3: Implement the dock**
 
 Create `src/sportstradamus/dashboard/components/slip_dock.py`:
 
@@ -534,12 +534,12 @@ def _render_sheet(legs, score) -> None:
 
 Note the local `from decimal import Decimal` is wrong style — hoist it to the module imports (shown here inline only to flag it; the committed file imports `Decimal` at the top with the rest).
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `poetry run pytest tests/golden/test_slip_dock.py -n0 -v`
 Expected: 3 PASS. If `score_slip` needs a non-empty corr frame, `load_current_game_corr()` already degrades to empty; the two-leg fixture prices independent.
 
-- [ ] **Step 5: Ruff + commit**
+- [x] **Step 5: Ruff + commit**
 
 ```bash
 poetry run ruff check src/sportstradamus/
@@ -555,7 +555,7 @@ git commit -m "feat(p-m): slip dock — fixed bottom bar + expandable sheet"
 - Modify: `src/sportstradamus/dashboard/app.py` (imports; `st.navigation` call ~line 49; after `pg.run()` line 114)
 - Test: `tests/golden/test_dashboard_render_smoke.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/golden/test_dashboard_render_smoke.py` (reuse the module's existing `_WRAPPER`):
 
@@ -582,12 +582,12 @@ def test_app_boots_mobile_with_dock():
     assert any(b.key == "slip_dock_toggle" for b in at.button)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `poetry run pytest tests/golden/test_dashboard_render_smoke.py::test_app_boots_mobile_with_dock -n0 -v`
 Expected: FAIL on the `slip_dock_toggle` assertion (app boots, dock never mounted).
 
-- [ ] **Step 3: Wire `app.py`**
+- [x] **Step 3: Wire `app.py`**
 
 Add imports:
 
@@ -620,12 +620,12 @@ if _mobile:
     render_slip_dock()
 ```
 
-- [ ] **Step 4: Run the smoke suite**
+- [x] **Step 4: Run the smoke suite**
 
 Run: `poetry run pytest tests/golden/test_dashboard_render_smoke.py -n0 -v`
 Expected: all PASS — the new mobile test plus every existing desktop test (AppTest sends no UA, so they stay on the desktop branch; this is the desktop-unchanged pin).
 
-- [ ] **Step 5: Live check + commit**
+- [x] **Step 5: Live check + commit**
 
 `poetry run dashboard` in device mode: top nav bar shows the pages; add two legs from Games, then confirm the dock bar sits fixed at the viewport bottom on Tonight/Board/Games, expands, removes a leg, and Lock it in! saves (check the sidebar shelf afterward). Also confirm desktop (normal window) is pixel-identical: sidebar nav, no dock. Record verdict.
 
@@ -646,7 +646,7 @@ Live check: dock fixed-bottom on all surfaces, expands/locks; desktop unchanged 
 - Modify: `src/sportstradamus/dashboard/surfaces/board.py` (filters block lines ~55–116; grid/select block lines ~156–221)
 - Test: `tests/golden/test_offer_cards.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/golden/test_offer_cards.py`:
 
@@ -717,12 +717,12 @@ def test_detail_pushes_stack():
     assert at.session_state["detail_stack"] == [1]
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `poetry run pytest tests/golden/test_offer_cards.py -n0 -v`
 Expected: FAIL with `ModuleNotFoundError ... offer_cards`
 
-- [ ] **Step 3: Implement `offer_cards.py`**
+- [x] **Step 3: Implement `offer_cards.py`**
 
 Create `src/sportstradamus/dashboard/components/offer_cards.py`:
 
@@ -784,7 +784,7 @@ def _render_card(idx, row: pd.Series) -> None:
 
 (`Model Edge` arrives already ×100 on the Board's mobile path — see the Step 4 board wiring, which reuses the grid's own percent conversion block.)
 
-- [ ] **Step 4: Wire `board.py`**
+- [x] **Step 4: Wire `board.py`**
 
 Add imports at the top of `surfaces/board.py`:
 
@@ -870,12 +870,12 @@ elif not mobile:
     st.session_state.last_grid_key = None
 ```
 
-- [ ] **Step 5: Run tests**
+- [x] **Step 5: Run tests**
 
 Run: `poetry run pytest tests/golden/test_offer_cards.py tests/golden/test_dashboard_render_smoke.py -n0 -v`
 Expected: all PASS (desktop board smoke test unchanged — it never sets the force key).
 
-- [ ] **Step 6: Live check + commit**
+- [x] **Step 6: Live check + commit**
 
 Device mode → Board: filters collapsed in an expander, cards readable, no horizontal scroll, Detail opens the dialog near-fullscreen, Add feeds the dock bar, Show more pages. Desktop Board: identical to before (grid, filters open). Record verdict.
 
@@ -895,7 +895,7 @@ Live check: 390px cards + expander + detail/add; desktop grid unchanged — pass
 - Modify: `src/sportstradamus/dashboard/components/constellation.py` (constants ~line 71; `constellation_figure` ~line 174; `_star_sizes` ~line 365; `_add_node_trace` ~line 587; `_add_deep_trace` ~line 266; `_add_wider_trace` ~line 309; `_card_fields`/customdata assembly)
 - Test: `tests/golden/test_constellation.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/golden/test_constellation.py` (reuse the module's existing fixture frames — it already builds a pool/corr; follow its local naming):
 
@@ -926,12 +926,12 @@ def test_mobile_figure_raises_size_floor_and_flags_slip_membership():
 
 If `test_constellation.py` has no reusable fixture builder, add one mirroring its existing figure tests' pool/corr construction (two teams, ≥3 model-liked rows with `K` > 0, one leg active).
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `poetry run pytest tests/golden/test_constellation.py -n0 -v -k mobile`
 Expected: FAIL with `TypeError: constellation_figure() got an unexpected keyword argument 'mobile'`
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `constellation.py`, next to `_SIZE_MIN`/`_LABEL_FONT_SIZE` add:
 
@@ -1005,12 +1005,12 @@ Also append the flag (always `0` — neither trace can hold an in-slip leg) to t
             customdata.append([corr_key(row), *info["card"], 0])       # wider
 ```
 
-- [ ] **Step 4: Run the constellation suite**
+- [x] **Step 4: Run the constellation suite**
 
 Run: `poetry run pytest tests/golden/test_constellation.py -n0 -v`
 Expected: all PASS — the new mobile test AND every existing figure pin (desktop customdata grew one trailing element; if an existing golden pins customdata length/content exactly, update that pin in the same commit and say so in the message — the flag is additive, index 0–7 unchanged, and the component reads by index so desktop JS behavior is unaffected).
 
-- [ ] **Step 5: Ruff + commit**
+- [x] **Step 5: Ruff + commit**
 
 ```bash
 poetry run ruff check src/sportstradamus/
@@ -1030,7 +1030,7 @@ git commit -m "feat(p-m): constellation mobile floors + in-slip customdata flag"
 
 No JS test harness exists — the verification for this task is the recorded live-browser check (per DESIGN §4b: goldens can't see inside the iframe).
 
-- [ ] **Step 1: Python pass-through**
+- [x] **Step 1: Python pass-through**
 
 `constellation_component/__init__.py` — extend the render signature:
 
@@ -1063,7 +1063,7 @@ def _render_constellation(...):
     )
 ```
 
-- [ ] **Step 2: `index.html` docked-card CSS**
+- [x] **Step 2: `index.html` docked-card CSS**
 
 Add to the `<style>` block (token literals per the file's existing header comment):
 
@@ -1093,7 +1093,7 @@ Add to the `<style>` block (token literals per the file's existing header commen
       }
 ```
 
-- [ ] **Step 3: `main.js` touch flow**
+- [x] **Step 3: `main.js` touch flow**
 
 Apply these changes (complete replacements for each touched function):
 
@@ -1243,12 +1243,12 @@ Replace `showCard` and `cardHtml` — the card gains the toggle button on mobile
 
 (The desktop card markup changes only in wrapping the one button in `.cst-actions` and adding the `cst-detail` class — update the selector in `showCard` as shown so desktop keeps working.)
 
-- [ ] **Step 4: Python-side sanity run**
+- [x] **Step 4: Python-side sanity run**
 
 Run: `poetry run pytest tests/golden/test_constellation.py tests/golden/test_slip_builder.py tests/golden/test_dashboard_render_smoke.py -n0 -v`
 Expected: all PASS (JS/HTML aren't exercised; this catches the Python signature threading).
 
-- [ ] **Step 5: Live check (the real gate) + commit**
+- [x] **Step 5: Live check (the real gate) + commit**
 
 Device mode → Games:
 1. Tap a candidate star → docked card slides up with **Add to slip** + **Full detail**; incident edges faint-preview.
@@ -1275,7 +1275,7 @@ Live check: 6-point touch flow + desktop hover parity — pass."
 - Modify: `src/sportstradamus/dashboard/surfaces/lab_diagnostics.py`, `lab_correlations.py`, `lab_training.py`, `lab_modifiers.py`, `receipts.py` (one caption each)
 - Modify: `DESIGN.md` (§Mobile note), `docs/handoffs/dashboard-ux.md` (§6 Phase M entry + §10 ledger line)
 
-- [ ] **Step 1: Desk captions**
+- [x] **Step 1: Desk captions**
 
 In each of the five files, directly after its `page_hero(...)` call, add:
 
@@ -1286,7 +1286,7 @@ if is_mobile():
     st.caption("Best at a desk — this page keeps its desktop layout.")
 ```
 
-- [ ] **Step 2: DESIGN.md §Mobile note**
+- [x] **Step 2: DESIGN.md §Mobile note**
 
 Add a short section after §8 Accessibility:
 
@@ -1304,7 +1304,7 @@ desktop layouts. Desktop rendering is pixel-unchanged; every mobile difference g
 `is_mobile()` or the media block.
 ```
 
-- [ ] **Step 3: Handoff updates**
+- [x] **Step 3: Handoff updates**
 
 In `docs/handoffs/dashboard-ux.md` §6, after the Phase R bullet, add:
 
@@ -1326,7 +1326,7 @@ Update the §3 status line (`> Status: ...`) to name Phase M as the active step,
 - 2026-07-16 · **Phase M started** · mobile money-loop lane opened: spec+plan committed; viewport/theme/dock/board-cards/constellation-touch tasks queued.
 ```
 
-- [ ] **Step 4: Gates + commit**
+- [x] **Step 4: Gates + commit**
 
 Run: `poetry run pytest tests/golden/ && poetry run ruff check src/sportstradamus/`
 Expected: clean (the captions are render-only; smoke tests don't set the force key).
@@ -1340,12 +1340,12 @@ git commit -m "docs(p-m): DESIGN §8a mobile, handoff Phase M entry, desk captio
 
 ### Task 10: close-out — specialist, full gates, phone pass
 
-- [ ] **Step 1: refactoring-specialist (MANDATORY)**
+- [x] **Step 1: refactoring-specialist (MANDATORY)**
 
 Dispatch the `refactoring-specialist` subagent listing every `.py` touched this phase:
 `viewport.py`, `theme.py`, `slip_state.py`, `slip_builder.py`, `slip_dock.py`, `app.py`, `offer_cards.py`, `board.py`, `constellation.py`, `constellation_component/__init__.py`, the five caption surfaces, plus the new/modified test files. Address anything it raises before proceeding.
 
-- [ ] **Step 2: Full gates**
+- [x] **Step 2: Full gates**
 
 ```bash
 poetry run ruff check src/sportstradamus/
