@@ -58,7 +58,8 @@ from sportstradamus.prediction.stories.legs import validate_parlay_legs
 _LEG_PANEL_HEIGHT = 150
 
 
-def _slip_shrinkage(legs: Sequence[Mapping]) -> float:
+def slip_shrinkage(legs: Sequence[Mapping]) -> float:
+    """Worst-cell kelly_shrinkage across the slip's legs (1.0 when stats are absent)."""
     stats = load_model_stats()
     if stats.empty or "kelly_shrinkage" not in stats.columns:
         return 1.0
@@ -149,7 +150,7 @@ def render_constellation_builder(
     valid, reason = validate_parlay_legs(legs)
     if not valid:
         st.warning(reason)
-    shrink = _slip_shrinkage(legs)
+    shrink = slip_shrinkage(legs)
     score = score_slip(
         legs,
         corr,
@@ -176,7 +177,7 @@ def render_simple_builder(
     if len(legs) < 2:
         st.caption("Select at least two legs to price the slip.")
         return
-    shrink = _slip_shrinkage(legs)
+    shrink = slip_shrinkage(legs)
     score = score_slip(
         legs,
         corr,
