@@ -19,10 +19,9 @@ from itertools import combinations
 import streamlit as st
 
 from sportstradamus import data
-from sportstradamus.dashboard.components.hero import page_hero
+from sportstradamus.dashboard.components.hero import desk_only_notice, page_hero
 from sportstradamus.dashboard.data import load_current_offers
 from sportstradamus.dashboard.legs import find_offer_idx
-from sportstradamus.dashboard.viewport import is_mobile
 from sportstradamus.helpers.config import apply_modifier_overrides
 from sportstradamus.helpers.io import (
     read_modifier_overrides,
@@ -119,8 +118,7 @@ def _write_rake_override(platform: str, n_legs: int, value: float) -> None:
 
 
 page_hero("MODEL LAB · MODIFIERS", "Modifier Reconciler")
-if is_mobile():
-    st.caption("Best at a desk — this page keeps its desktop layout.")
+desk_only_notice()
 
 
 slips = read_user_slips()

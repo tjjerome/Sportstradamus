@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 
 from sportstradamus.dashboard.components.gate_matrix import gate_matrix_frame, render_gate_matrix
-from sportstradamus.dashboard.components.hero import page_hero
+from sportstradamus.dashboard.components.hero import desk_only_notice, page_hero
 from sportstradamus.dashboard.components.lab_filters import apply_lab_filters, render_lab_filters
 from sportstradamus.dashboard.data import (
     format_ts,
@@ -22,7 +22,6 @@ from sportstradamus.dashboard.data import (
     sport_filtered,
 )
 from sportstradamus.dashboard.surfaces.lab_training_charts import lifecycle_funnel
-from sportstradamus.dashboard.viewport import is_mobile
 from sportstradamus.helpers.io import LIVE_METRICS_PATH, MODEL_STATS_PATH
 from sportstradamus.training.graduation import lifecycle_table
 
@@ -262,8 +261,7 @@ mtime = (
     else "no meditate run on record"
 )
 page_hero("MODEL LAB · TRAINING", "Model Training Diagnostics", mtime)
-if is_mobile():
-    st.caption("Best at a desk — this page keeps its desktop layout.")
+desk_only_notice()
 
 
 stats = load_model_stats()

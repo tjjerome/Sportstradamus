@@ -24,7 +24,7 @@ from sportstradamus.analysis import (
     worst_month,
 )
 from sportstradamus.dashboard.components.grid import render_themed_grid
-from sportstradamus.dashboard.components.hero import page_hero
+from sportstradamus.dashboard.components.hero import desk_only_notice, page_hero
 from sportstradamus.dashboard.components.profit_sim import (
     render_profit_sim,
     render_profit_sim_summary,
@@ -46,7 +46,6 @@ from sportstradamus.dashboard.surfaces.receipts_charts import (
     reliability_diagram,
 )
 from sportstradamus.dashboard.theme import GOLD, GRAY
-from sportstradamus.dashboard.viewport import is_mobile
 
 # Nebula wash (DESIGN.md §3): blue radial stop + gold held at 7% opacity, both well under
 # the hero-card 12% gold ceiling — literal values ported from the mockup's own .hero
@@ -92,8 +91,7 @@ def _hero_stat(label: str, value: str, *, size: str, color: str = "") -> str:
 
 
 page_hero("THE RECEIPTS", "Receipts")
-if is_mobile():
-    st.caption("Best at a desk — this page keeps its desktop layout.")
+desk_only_notice()
 
 
 history = load_history()

@@ -267,7 +267,9 @@ def test_slip_edges_brighten_over_the_faint_base_web():
         ("B|REB|Under", "C|AST|Over", 0.5),
     )
     edges = _edge_by_pair(constellation_figure(legs, corr, pool))
-    assert edges[frozenset(("A|PTS|Over", "B|REB|Under"))].opacity > _EDGE_BASE_ALPHA  # both in slip
+    assert (
+        edges[frozenset(("A|PTS|Over", "B|REB|Under"))].opacity > _EDGE_BASE_ALPHA
+    )  # both in slip
     assert edges[frozenset(("A|PTS|Over", "C|AST|Over"))].opacity == _EDGE_BASE_ALPHA  # candidate
     assert edges[frozenset(("B|REB|Under", "C|AST|Over"))].opacity == _EDGE_BASE_ALPHA  # candidate
 
@@ -439,12 +441,8 @@ def test_both_lenses_together_produce_sane_nonoverlapping_geometry():
     groups = [("NYK/SAS", [_wider_row("Brunson", "PTS", "Over", "NYK/SAS", "NYK", "NBA", 0.5)])]
     fig = constellation_figure(legs, _corr(), pool, deep_pool=deep_pool, wider_groups=groups)
     deep_trace, wider_trace = _trace(fig, "deep"), _trace(fig, "wider")
-    deep_r = max(
-        (x**2 + y**2) ** 0.5 for x, y in zip(deep_trace.x, deep_trace.y, strict=True)
-    )
-    wider_r = max(
-        (x**2 + y**2) ** 0.5 for x, y in zip(wider_trace.x, wider_trace.y, strict=True)
-    )
+    deep_r = max((x**2 + y**2) ** 0.5 for x, y in zip(deep_trace.x, deep_trace.y, strict=True))
+    wider_r = max((x**2 + y**2) ** 0.5 for x, y in zip(wider_trace.x, wider_trace.y, strict=True))
     assert wider_r > deep_r  # wider ring sits clearly outside the deep ring
 
 

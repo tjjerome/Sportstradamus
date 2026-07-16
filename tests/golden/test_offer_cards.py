@@ -22,11 +22,24 @@ render_offer_cards(df)
 def _rows(n: int) -> list[dict]:
     return [
         {
-            "League": "NBA", "Match": "NYK vs BOS", "Player": f"Player {i}",
-            "Market": "PTS", "Stat": "PTS", "Market Display": "Points", "Bet": "Over",
-            "Line": 20.5 + i, "Boost": 1.0, "Win Prob": 0.55, "Model Edge": 4.0,
-            "Consensus Edge": 2.0, "Platform": "Underdog", "Game": "NYK/BOS",
-            "Team": "NYK", "Date": "2026-07-16", "Model EV": 1.05, "Kelly": 0.03,
+            "League": "NBA",
+            "Match": "NYK vs BOS",
+            "Player": f"Player {i}",
+            "Market": "PTS",
+            "Stat": "PTS",
+            "Market Display": "Points",
+            "Bet": "Over",
+            "Line": 20.5 + i,
+            "Boost": 1.0,
+            "Win Prob": 0.55,
+            "Model Edge": 4.0,
+            "Consensus Edge": 2.0,
+            "Platform": "Underdog",
+            "Game": "NYK/BOS",
+            "Team": "NYK",
+            "Date": "2026-07-16",
+            "Model EV": 1.05,
+            "Kelly": 0.03,
             "Push Prob": 0.0,
         }
         for i in range(n)

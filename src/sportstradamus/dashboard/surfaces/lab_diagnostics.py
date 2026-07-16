@@ -15,7 +15,7 @@ from sportstradamus.analysis import (
     murphy_decomposition,
 )
 from sportstradamus.dashboard.components.grid import render_themed_grid
-from sportstradamus.dashboard.components.hero import page_hero
+from sportstradamus.dashboard.components.hero import desk_only_notice, page_hero
 from sportstradamus.dashboard.components.lab_filters import apply_lab_filters, render_lab_filters
 from sportstradamus.dashboard.data import (
     filtered_history_or_stop,
@@ -36,7 +36,6 @@ from sportstradamus.dashboard.surfaces.lab_diagnostics_charts import (
     reliability_diagram,
     sharpness_histogram,
 )
-from sportstradamus.dashboard.viewport import is_mobile
 
 # Minimum predicted-probability std; markets below this cluster too tightly
 # to discriminate, flagged as likely under-dispersed.
@@ -47,8 +46,7 @@ _LOW_SHARPNESS_STD = 0.04
 _START_HERE_COUNT = 3
 
 page_hero("MODEL LAB · DIAGNOSTICS", "Market Diagnostics & Forecast Quality")
-if is_mobile():
-    st.caption("Best at a desk — this page keeps its desktop layout.")
+desk_only_notice()
 
 
 stat_meta = load_stat_meta()

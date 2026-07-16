@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from sportstradamus.dashboard import theme
-from sportstradamus.dashboard.components.hero import page_hero
+from sportstradamus.dashboard.components.hero import desk_only_notice, page_hero
 from sportstradamus.dashboard.components.lab_filters import render_lab_filters
 from sportstradamus.dashboard.data import (
     format_ts,
@@ -23,7 +23,6 @@ from sportstradamus.dashboard.surfaces.lab_correlations_charts import (
     corr_heatmap,
     worst_driver_pair,
 )
-from sportstradamus.dashboard.viewport import is_mobile
 
 # Lab Correlations only ever plots/aggregates these scalar parlay columns; projecting the
 # read skips the multi-GB list<float> struct columns (legs, Corr/Boost Pairs) in the 1.7M-row
@@ -46,8 +45,7 @@ _SCATTER_MAX = 20_000
 _SCATTER_SEED = 17
 
 page_hero("MODEL LAB · CORRELATIONS", "Correlations & Parlays")
-if is_mobile():
-    st.caption("Best at a desk — this page keeps its desktop layout.")
+desk_only_notice()
 
 
 # Mounted for session consistency with the other two Lab pages (widget keys are
