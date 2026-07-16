@@ -11,6 +11,7 @@ cell's family grid once, scores each by the honest gate, and ranks the board by 
 
 import subprocess
 
+import click
 import pandas as pd
 import pytest
 
@@ -76,11 +77,15 @@ def _fake_run_and_score(league, market, family, corner):
             + (0.05 if corner["dist_training_loss"] == "nll" else 0.0)
             + (0.02 if corner["blending_loss_fn"] == "crps" else 0.0)
         )
-    else:  # ZINB
+    elif family == "ZINB":
         slack = (
             {"joint": 0.0, "hurdle": 0.15}[corner["zinb_mode"]]
             + (0.05 if corner["count_dispersion_objective"] == "pit_ks" else 0.0)
             + (0.02 if corner["blending_loss_fn"] == "crps" else 0.0)
+        )
+    else:  # NegBin — kept below ZINB's best so cross-family ranking has an unambiguous winner
+        slack = (0.05 if corner["count_dispersion_objective"] == "pit_ks" else 0.0) + (
+            0.02 if corner["blending_loss_fn"] == "crps" else 0.0
         )
     return [_fake_row(family, corner, slack)]
 
@@ -89,21 +94,42 @@ def _fake_run_and_score(league, market, family, corner):
 
 
 def test_family_registry_grids_and_persist_maps():
-    """Two families with the agreed axes, corner counts, persist fields, and non-persistable defaults."""
+    """Three families with the agreed axes, corner counts, persist fields, and non-persistable defaults."""
     import math
 
-    sn, zinb = sweep._FAMILIES["SkewNormal"], sweep._FAMILIES["ZINB"]
+    sn = sweep._FAMILIES["SkewNormal"]
+    zinb = sweep._FAMILIES["ZINB"]
+    negbin = sweep._FAMILIES["NegBin"]
     assert math.prod(len(v) for v in sn.axes.values()) == 12
-    assert math.prod(len(v) for v in zinb.axes.values()) == 8
+    assert math.prod(len(v) for v in zinb.axes.values()) == 8  # 1 dist × 2 mode × 2 disp × 2 blend
+    assert math.prod(len(v) for v in negbin.axes.values()) == 4  # 1 dist × 2 disp × 2 blend
     assert sn.persist == {"normalization": "target_normalization", "blending_loss_fn": "blending"}
+    # Count families persist their single-choice dist so a winner's dist writes to stat_meta.
     assert zinb.persist == {
+        "dist": "dist",
         "zinb_mode": "zinb_mode",
         "count_dispersion_objective": "count_dispersion_objective",
         "blending_loss_fn": "blending",
     }
-    # Only SkewNormal's dist-loss is non-persistable (the family default ships); every ZINB axis persists.
+    assert negbin.persist == {
+        "dist": "dist",
+        "count_dispersion_objective": "count_dispersion_objective",
+        "blending_loss_fn": "blending",
+    }
+    assert zinb.axes["dist"] == ("ZINB",) and negbin.axes["dist"] == ("NegBin",)
+    # Only SkewNormal's dist-loss is non-persistable (the family default ships); every count axis persists.
     assert sn.defaults == {"dist_training_loss": "crps"}
-    assert zinb.defaults == {}
+    assert zinb.defaults == {} and negbin.defaults == {}
+
+
+def test_dist_axis_flag_and_class_maps():
+    """The dist axis forwards --dist; the class maps route count/continuous cells to their families."""
+    assert sweep._AXIS_FLAG["dist"] == "--dist"
+    assert sweep._DIST_CLASS == {"SkewNormal": "continuous", "ZINB": "count", "NegBin": "count"}
+    assert sweep._CLASS_FAMILIES == {"continuous": ("SkewNormal",), "count": ("ZINB", "NegBin")}
+    # dist leads the swept-axis columns and rides in the board schema.
+    assert sweep._AXIS_COLUMNS[0] == "dist"
+    assert "dist" in sweep._BOARD_COLUMNS
 
 
 def test_dump_subdir_matches_meditate_keying():
@@ -113,6 +139,38 @@ def test_dump_subdir_matches_meditate_keying():
     assert sweep._dump_subdir({"normalization": "centered_additive_mean10"}) == "centered_additive_mean10"
     assert sweep._dump_subdir({"zinb_mode": "joint"}) == "ratio_meanyr"
     assert sweep._dump_subdir({"zinb_mode": "hurdle"}) == "ratio_meanyr_hurdle"
+    # A NegBin corner carries no zinb_mode key → the non-hurdle fallback subdir, matching what the
+    # pipeline.py --dist fix writes (keyed on the trained dist, not raw zinb_mode).
+    assert sweep._dump_subdir({"dist": "NegBin", "count_dispersion_objective": "crps"}) == "ratio_meanyr"
+
+
+def test_cell_families_routes_by_distribution_class(monkeypatch):
+    """A count cell sweeps both count families (even one pinned NegBin); a SN cell sweeps one; loud on
+    an unknown dist.
+    """
+    fake = {
+        "MLB": {
+            "pitcher strikeouts": {"dist": "ZINB"},
+            "pitches thrown": {"dist": "NegBin"},  # already flipped to NegBin — still sweeps both
+            "hits allowed": {"dist": "Gamma"},  # unswept family
+        },
+        "WNBA": {"AST": {"dist": "SkewNormal"}},
+    }
+    monkeypatch.setattr(sweep, "load_stat_meta", lambda path: fake)
+    assert sweep._cell_families("MLB", "pitcher strikeouts") == ("ZINB", "NegBin")
+    assert sweep._cell_families("MLB", "pitches thrown") == ("ZINB", "NegBin")
+    assert sweep._cell_families("WNBA", "AST") == ("SkewNormal",)
+    with pytest.raises(click.UsageError):
+        sweep._cell_families("MLB", "hits allowed")
+
+
+def test_corner_count_sums_families_per_cell(monkeypatch):
+    """A count cell's corner count is ZINB + NegBin (8+4); a SN cell's is its single grid (12)."""
+    families = {("MLB", "pitcher strikeouts"): ("ZINB", "NegBin"), ("WNBA", "AST"): ("SkewNormal",)}
+    monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: families[(lg, mkt)])
+    assert sweep._cell_corner_count("MLB", "pitcher strikeouts") == 12  # 8 + 4
+    assert sweep._cell_corner_count("WNBA", "AST") == 12
+    assert sweep._corner_count([("MLB", "pitcher strikeouts"), ("WNBA", "AST")]) == 24
 
 
 def test_decode_strategy_is_norm_for_sn_and_fallback_for_count():
@@ -217,7 +275,7 @@ def test_run_and_score_records_failed_corner_non_shipping(monkeypatch):
 
 
 def test_search_cell_enumerates_sn_grid_and_ranks(monkeypatch):
-    monkeypatch.setattr(sweep, "_cell_family", lambda lg, mkt: "SkewNormal")
+    monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
     monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
     board = sweep.search_cell("WNBA", "AST")
 
@@ -229,21 +287,36 @@ def test_search_cell_enumerates_sn_grid_and_ranks(monkeypatch):
     assert board["slack"].is_monotonic_decreasing
     assert (board["family"] == "SkewNormal").all()
     assert (board["league"] == "WNBA").all() and (board["market"] == "AST").all()
+    # A continuous cell leaves the count-only dist column blank.
+    assert board["dist"].isna().all()
     # g6 is surfaced on the board.
     assert "g6_pass" in board.columns
 
 
-def test_search_cell_enumerates_zinb_grid(monkeypatch):
-    monkeypatch.setattr(sweep, "_cell_family", lambda lg, mkt: "ZINB")
+def test_search_cell_count_cell_sweeps_both_families_and_unions(monkeypatch):
+    """A count cell studies ZINB *and* plain NegBin; the boards union, slack-ranked across families.
+
+    The closure must bind ``family`` per study — a bare loop-variable capture would score every study
+    as the last family, collapsing both boards onto one dist. This asserts each family's full corner
+    set lands with its own ``dist`` (8 ZINB + 4 NegBin) and the union is one slack-sorted board.
+    """
+    monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("ZINB", "NegBin"))
     monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
     board = sweep.search_cell("MLB", "pitcher strikeouts")
 
-    assert len(board) == 8  # 2 modes × 2 disp-objective × 2 blend
-    # Best ZINB corner: hurdle + pit_ks + crps (0.15 + 0.05 + 0.02).
-    assert board.iloc[0]["zinb_mode"] == "hurdle"
+    assert len(board) == 12  # 8 ZINB (2×2×2) + 4 NegBin (2×2)
+    assert board["family"].value_counts().to_dict() == {"ZINB": 8, "NegBin": 4}
+    # Per-family closure binding: each family's rows carry its own single-choice dist (no bleed).
+    assert (board.loc[board["family"] == "ZINB", "dist"] == "ZINB").all()
+    assert (board.loc[board["family"] == "NegBin", "dist"] == "NegBin").all()
+    # Union is slack-sorted; ZINB's hurdle+pit_ks+crps (0.15+0.05+0.02) tops NegBin's best (0.05+0.02).
+    assert board["slack"].is_monotonic_decreasing
+    assert board.iloc[0]["family"] == "ZINB" and board.iloc[0]["zinb_mode"] == "hurdle"
     assert board.iloc[0]["count_dispersion_objective"] == "pit_ks"
     assert board.iloc[0]["blending_loss_fn"] == "crps"
-    # SN-only axes are blank on a ZINB board (the schema is a shared superset).
+    # NegBin corners never carry a zinb_mode key → its column stays blank for them (schema superset).
+    assert board.loc[board["family"] == "NegBin", "zinb_mode"].isna().all()
+    # SN-only axis is blank on a count board (the schema is a shared superset).
     assert board["normalization"].isna().all()
 
 
@@ -253,7 +326,7 @@ def test_search_cell_survives_a_failing_corner(monkeypatch):
     Mirrors the NHL `blocked` case — the SkewNormal grid's `dist_training_loss=crps` corners crash
     when the cell trains as ZINB, but the `nll` corners score fine and the board still ranks them.
     """
-    monkeypatch.setattr(sweep, "_cell_family", lambda lg, mkt: "SkewNormal")
+    monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
 
     def maybe_fail(league, market, corner):
         if corner["dist_training_loss"] == "crps":
@@ -406,12 +479,37 @@ def test_select_board_cells_withheld_default_shipped_flag_and_data_filter(monkey
     assert sweepable_wnba == [("WNBA", "AST")]
 
 
-def test_run_board_mode_warns_missing_data_and_passes_include_shipped(monkeypatch, capsys):
-    """The board runner warns per cell skipped for a missing matrix and forwards --include-shipped."""
+def test_select_board_cells_dist_class_filter(monkeypatch):
+    """--dist-class narrows the cohort: `count` → ZINB/NegBin cells, `continuous` → SkewNormal, `all`
+    → both.
+    """
+    fake = {
+        "WNBA": {"AST": {"dist": "SkewNormal", "shipped": "withheld"}},  # continuous
+        "MLB": {
+            "pitcher strikeouts": {"dist": "ZINB", "shipped": "withheld"},  # count (ZINB)
+            "pitches thrown": {"dist": "NegBin", "shipped": "withheld"},  # count (NegBin)
+        },
+    }
+    fake_markets = {"WNBA": ["AST"], "MLB": ["pitcher strikeouts", "pitches thrown"]}
+    monkeypatch.setattr(sweep, "load_stat_meta", lambda path: fake)
+    monkeypatch.setattr(sweep, "ALL_MARKETS", fake_markets)
+    monkeypatch.setattr(sweep, "_has_training_data", lambda lg, mkt: True)
+
+    count, _ = sweep._select_board_cells(dist_class="count")
+    assert set(count) == {("MLB", "pitcher strikeouts"), ("MLB", "pitches thrown")}
+    continuous, _ = sweep._select_board_cells(dist_class="continuous")
+    assert continuous == [("WNBA", "AST")]
+    every, _ = sweep._select_board_cells(dist_class="all")
+    assert set(every) == {("WNBA", "AST"), ("MLB", "pitcher strikeouts"), ("MLB", "pitches thrown")}
+
+
+def test_run_board_mode_warns_missing_data_and_passes_filters(monkeypatch, capsys):
+    """The board runner warns per cell skipped for a missing matrix and forwards its scope filters."""
     captured = {}
 
-    def fake_select(league, include_shipped):
+    def fake_select(league, include_shipped, dist_class):
         captured["incl"] = include_shipped
+        captured["dist_class"] = dist_class
         return [("WNBA", "AST")], [("WNBA", "STL")]
 
     monkeypatch.setattr(sweep, "_select_board_cells", fake_select)
@@ -425,8 +523,8 @@ def test_run_board_mode_warns_missing_data_and_passes_include_shipped(monkeypatc
     )
     monkeypatch.setattr(sweep, "_print_board_rollup", lambda b: None)
 
-    sweep._run_board_mode("WNBA", True, "/tmp/board.csv", False, False)
-    assert captured["incl"] is True
+    sweep._run_board_mode("WNBA", True, "count", "/tmp/board.csv", False, False)
+    assert captured["incl"] is True and captured["dist_class"] == "count"
     out = capsys.readouterr().out
     assert "skip WNBA STL: no cached training matrix" in out
     assert "1 skipped (no cached matrix)" in out
@@ -479,12 +577,18 @@ def test_run_board_resume_skips_cells_already_on_board(monkeypatch, tmp_path):
 
 
 def test_cli_board_dry_run_trains_nothing(monkeypatch, tmp_path):
-    """``--board --dry-run`` prints the scope and exits without sweeping a single cell."""
+    """``--board --dry-run`` prints the scope and exits without sweeping a single cell; --dist-class
+    threads through to the cell selection.
+    """
     from click.testing import CliRunner
 
-    monkeypatch.setattr(
-        sweep, "_select_board_cells", lambda lg, incl: ([("WNBA", "AST")], [])
-    )
+    seen = {}
+
+    def fake_select(lg, incl, dist_class):
+        seen["dist_class"] = dist_class
+        return [("WNBA", "AST")], []
+
+    monkeypatch.setattr(sweep, "_select_board_cells", fake_select)
     monkeypatch.setattr(sweep, "_corner_count", lambda cells: 12)
 
     def boom(*a, **k):
@@ -492,9 +596,12 @@ def test_cli_board_dry_run_trains_nothing(monkeypatch, tmp_path):
 
     monkeypatch.setattr(sweep, "run_board", boom)
     out = str(tmp_path / "board.csv")
-    result = CliRunner().invoke(sweep.main, ["--board", "--dry-run", "--out", out])
+    result = CliRunner().invoke(
+        sweep.main, ["--board", "--dry-run", "--dist-class", "count", "--out", out]
+    )
     assert result.exit_code == 0, result.output
     assert "[dry-run]" in result.output
+    assert seen["dist_class"] == "count"
 
 
 # --- family-aware actionable summary ---------------------------------------------------------
@@ -503,10 +610,26 @@ def test_cli_board_dry_run_trains_nothing(monkeypatch, tmp_path):
 def test_stat_meta_edit_is_family_aware():
     sn = {"family": "SkewNormal", "normalization": "centered_additive_mean10", "blending_loss_fn": "crps"}
     assert sweep._stat_meta_edit(sn) == "target_normalization=centered_additive_mean10, blending=crps"
-    zinb = {"family": "ZINB", "zinb_mode": "hurdle", "count_dispersion_objective": "pit_ks", "blending_loss_fn": "nll"}
+    # Count families persist dist first (pins the winning family, e.g. a ZINB→NegBin flip).
+    zinb = {
+        "family": "ZINB",
+        "dist": "ZINB",
+        "zinb_mode": "hurdle",
+        "count_dispersion_objective": "pit_ks",
+        "blending_loss_fn": "nll",
+    }
     assert (
         sweep._stat_meta_edit(zinb)
-        == "zinb_mode=hurdle, count_dispersion_objective=pit_ks, blending=nll"
+        == "dist=ZINB, zinb_mode=hurdle, count_dispersion_objective=pit_ks, blending=nll"
+    )
+    negbin = {
+        "family": "NegBin",
+        "dist": "NegBin",
+        "count_dispersion_objective": "crps",
+        "blending_loss_fn": "crps",
+    }
+    assert (
+        sweep._stat_meta_edit(negbin) == "dist=NegBin, count_dispersion_objective=crps, blending=crps"
     )
 
 
@@ -523,7 +646,7 @@ def test_repro_note_flags_nondefault_sn_dist_loss_only():
 def test_cli_runs_a_single_cell(monkeypatch, tmp_path):
     from click.testing import CliRunner
 
-    monkeypatch.setattr(sweep, "_cell_family", lambda lg, mkt: "SkewNormal")
+    monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
     monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
     out = str(tmp_path / "board.csv")
     result = CliRunner().invoke(sweep.main, ["--league", "WNBA", "--market", "AST", "--out", out])
@@ -537,7 +660,7 @@ def test_cli_confirm_invokes_run_confirm(monkeypatch, tmp_path):
 
     from sportstradamus.training import model_strategy_confirm
 
-    monkeypatch.setattr(sweep, "_cell_family", lambda lg, mkt: "SkewNormal")
+    monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
     monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
     seen = {}
     monkeypatch.setattr(model_strategy_confirm, "run_confirm", lambda board, *, yes: seen.update(n=len(board), yes=yes))
@@ -555,7 +678,7 @@ def test_cli_single_cell_upserts_into_existing_board(monkeypatch, tmp_path):
     """
     from click.testing import CliRunner
 
-    monkeypatch.setattr(sweep, "_cell_family", lambda lg, mkt: "SkewNormal")
+    monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
     monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
     out = str(tmp_path / "board.csv")
     runner = CliRunner()

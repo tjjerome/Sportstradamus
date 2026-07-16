@@ -65,11 +65,14 @@ def test_candidate_none_when_nothing_ships():
 
 
 def test_candidate_zinb_is_fully_persistable():
-    """Every ZINB axis persists (empty defaults), so its top shipping corner is always the candidate."""
+    """Every ZINB axis persists (empty defaults), so its top shipping corner is always the candidate;
+    the persisted edits include the swept ``dist`` (which pins the winning count family).
+    """
     row = {
         "league": "MLB",
         "market": "pitcher strikeouts",
         "family": "ZINB",
+        "dist": "ZINB",
         "zinb_mode": "hurdle",
         "count_dispersion_objective": "pit_ks",
         "blending_loss_fn": "crps",
@@ -79,6 +82,7 @@ def test_candidate_zinb_is_fully_persistable():
     }
     cand = mc._candidate(pd.DataFrame([row]))
     assert cand["edits"] == {
+        "dist": "ZINB",
         "zinb_mode": "hurdle",
         "count_dispersion_objective": "pit_ks",
         "blending": "crps",
@@ -221,6 +225,7 @@ def test_run_confirm_skips_activation_gated_league(monkeypatch, capsys):
         "league": "MLB",
         "market": "total bases",
         "family": "ZINB",
+        "dist": "ZINB",
         "zinb_mode": "hurdle",
         "count_dispersion_objective": "pit_ks",
         "blending_loss_fn": "crps",

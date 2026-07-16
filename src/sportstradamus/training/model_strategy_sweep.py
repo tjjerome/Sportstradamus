@@ -1,9 +1,11 @@
 """Operation Ship 75 strategy sweep: a per-cell Optuna study over a family's retrain grid.
 
-For each ``(league, market)`` cell the sweep runs an Optuna study over the cell's distribution
-family axes — SkewNormal sweeps ``normalization × dist-loss × blend-loss``; ZINB sweeps
-``zinb-mode × count-dispersion-objective × blend-loss`` — training one deterministic ``meditate``
-trial per grid corner and scoring it through the *honest* production gate: the deterministic dump
+For each ``(league, market)`` cell the sweep runs one Optuna study per family of the cell's
+distribution class — a SkewNormal cell sweeps ``normalization × dist-loss × blend-loss``; a count
+cell sweeps BOTH ``ZINB`` (``zinb-mode × count-dispersion-objective × blend-loss``) AND plain
+``NegBin`` (``count-dispersion-objective × blend-loss``), cross-family ranked by ship slack —
+training one deterministic ``meditate`` trial per grid corner and scoring it through the *honest*
+production gate: the deterministic dump
 already carries the pipeline's validation-fit calibration, and :func:`_score_corner` runs the same
 :func:`scorecard.gate_row` the production scorecard does — no test re-fit. The sweep is a fixed-HP
 replica of the production HPO pipeline: same calibration, same gate, same dump decode; the *only*
@@ -11,12 +13,14 @@ differences are fixed hyperparameters in place of the Optuna search and the dete
 write locations (so a trial never clobbers a real trained market). The objective minimizes the
 negative ship slack, so the study's best trial is the most-shippable corner.
 
-Families live in :data:`_FAMILIES`, a small registry keyed by the cell's ``dist``. Each
-:class:`FamilySpec` names its grid axes, the ``stat_meta.json`` fields a winning corner persists,
-and the shipped defaults for any non-persistable axis. Adding a family (or a future
-distribution-family axis) is a registry entry, not an engine change. Every axis is categorical, so
-the sampler is :class:`optuna.samplers.GridSampler` — exhaustive and deterministic, the right tool
-for a discrete space.
+Families live in :data:`_FAMILIES`, a small registry; :data:`_CLASS_FAMILIES` routes a cell's
+``dist`` (via its distribution class) to the families to sweep. Each :class:`FamilySpec` names its
+grid axes — a count family carries a single-choice ``dist`` axis so its winner persists ``dist`` and
+each corner forces ``--dist`` regardless of the cell's current pin — the ``stat_meta.json`` fields a
+winning corner persists, and the shipped defaults for any non-persistable axis. Adding a family
+(e.g. Double Poisson) is one :class:`FamilySpec` plus its :data:`_DIST_CLASS` entry, not an engine
+change. Every axis is categorical, so the sampler is :class:`optuna.samplers.GridSampler` —
+exhaustive and deterministic, the right tool for a discrete space.
 
 Research scaffolding: the deterministic trials *rank* only — nothing ships off them. The confirm
 loop (``--confirm``, :mod:`sportstradamus.training.model_strategy_confirm`) persists a winner and a
@@ -98,6 +102,7 @@ _FAILED_CORNER_SLACK: float = float("-inf")
 # an axis a family doesn't sweep is simply absent (e.g. ZINB never forces --target-normalization,
 # so meditate resolves it to the ratio_meanyr fallback — see _dump_subdir).
 _AXIS_FLAG: dict[str, str] = {
+    "dist": "--dist",
     "normalization": "--target-normalization",
     "dist_training_loss": "--dist-training-loss",
     "blending_loss_fn": "--blending-loss-fn",
@@ -135,12 +140,27 @@ _FAMILIES: dict[str, FamilySpec] = {
     ),
     "ZINB": FamilySpec(
         axes={
+            "dist": ("ZINB",),
             "zinb_mode": ("joint", "hurdle"),
             "count_dispersion_objective": ("crps", "pit_ks"),
             "blending_loss_fn": _BLENDING,
         },
         persist={
+            "dist": "dist",
             "zinb_mode": "zinb_mode",
+            "count_dispersion_objective": "count_dispersion_objective",
+            "blending_loss_fn": "blending",
+        },
+        defaults={},
+    ),
+    "NegBin": FamilySpec(
+        axes={
+            "dist": ("NegBin",),
+            "count_dispersion_objective": ("crps", "pit_ks"),
+            "blending_loss_fn": _BLENDING,
+        },
+        persist={
+            "dist": "dist",
             "count_dispersion_objective": "count_dispersion_objective",
             "blending_loss_fn": "blending",
         },
@@ -148,10 +168,23 @@ _FAMILIES: dict[str, FamilySpec] = {
     ),
 }
 
+# A cell's stat_meta `dist` names its distribution class; the sweep sweeps every family in that
+# class (cross-family ranked by slack). A count cell sweeps ZINB *and* plain NegBin regardless of
+# which one it is currently pinned to, so a re-sweep after a ZINB↔NegBin flip still evaluates both.
+# Adding a family (e.g. DPO) is one FamilySpec above plus its class entry here.
+_DIST_CLASS: dict[str, str] = {"SkewNormal": "continuous", "ZINB": "count", "NegBin": "count"}
+_CLASS_FAMILIES: dict[str, tuple[str, ...]] = {
+    "continuous": ("SkewNormal",),
+    "count": ("ZINB", "NegBin"),
+}
+# `--dist-class all` sweeps every class; the two real classes are _CLASS_FAMILIES' keys.
+_DIST_CLASS_ALL = "all"
+
 # One wide board schema across both families: a cell fills only its family's axis columns, the rest
 # are blank. Kept as a fixed superset so the board CSV has a stable header regardless of which
 # families were swept.
 _AXIS_COLUMNS: list[str] = [
+    "dist",
     "normalization",
     "dist_training_loss",
     "zinb_mode",
@@ -192,15 +225,20 @@ STRATEGY_RESEARCH_BOARD: pathlib.Path = pathlib.Path(
 )
 
 
-def _cell_family(league: str, market: str) -> str:
-    """The registered sweep family for a cell, from its stat_meta ``dist``; loud on an unswept dist."""
+def _cell_families(league: str, market: str) -> tuple[str, ...]:
+    """The sweep families for a cell's distribution class, from its stat_meta ``dist``.
+
+    A count cell sweeps both ``("ZINB", "NegBin")`` — even one already pinned ``dist: NegBin`` — so a
+    re-sweep after a ZINB↔NegBin flip re-evaluates both; a SkewNormal cell sweeps ``("SkewNormal",)``.
+    Loud on a dist with no registered family/class.
+    """
     meta = load_stat_meta(pathlib.Path(str(STAT_META_PATH)))
     dist = meta.get(league, {}).get(market, {}).get("dist")
-    if dist not in _FAMILIES:
+    if dist not in _DIST_CLASS:
         raise click.UsageError(
-            f"{league} {market}: dist {dist!r} is not a swept family; known: {sorted(_FAMILIES)}"
+            f"{league} {market}: dist {dist!r} is not a swept family; known: {sorted(_DIST_CLASS)}"
         )
-    return dist
+    return _CLASS_FAMILIES[_DIST_CLASS[dist]]
 
 
 @functools.lru_cache(maxsize=1)
@@ -441,31 +479,41 @@ def _run_and_score(
     return [row]
 
 
-def search_cell(league: str, market: str) -> pd.DataFrame:
-    """Run the per-cell Optuna GridSampler study over the cell's family grid, ranked by ship slack.
+def _run_family_study(league: str, market: str, family: str) -> list[dict[str, object]]:
+    """One GridSampler study over ``family``'s grid; the scored row of every corner it visits.
 
-    One honest row per retrain corner; the board carries each corner's slack / ship verdict / gate
-    passes so the top row is the real-HPO confirm candidate. Sorted by ``slack`` descending.
+    ``objective`` binds ``family`` as a default arg rather than a free variable — belt-and-suspenders
+    against the classic loop-closure-capture bug even though it can't fire here: ``family`` is this
+    function's parameter, fixed for the whole call, and :func:`search_cell` calls this function once
+    per family rather than defining ``objective`` itself inside its own family loop.
     """
-    family = _cell_family(league, market)
     grid = {axis: list(choices) for axis, choices in _FAMILIES[family].axes.items()}
     study = optuna.create_study(direction="minimize", sampler=optuna.samplers.GridSampler(grid))
 
-    def objective(trial: optuna.Trial) -> float:
+    def objective(trial: optuna.Trial, family: str = family) -> float:
         corner = {axis: trial.suggest_categorical(axis, choices) for axis, choices in grid.items()}
         rows = _run_and_score(league, market, family, corner)
         trial.set_user_attr("rows", rows)
         return -max(float(row["slack"]) for row in rows)
 
     study.optimize(objective, n_trials=math.prod(len(choices) for choices in grid.values()))
+    return [row for trial in study.trials for row in trial.user_attrs["rows"]]
 
-    board = pd.DataFrame(
-        [
-            {"league": league, "market": market, **row}
-            for trial in study.trials
-            for row in trial.user_attrs["rows"]
-        ]
-    )
+
+def search_cell(league: str, market: str) -> pd.DataFrame:
+    """Run one Optuna GridSampler study per family of the cell's distribution class, ranked by slack.
+
+    A count cell studies both ZINB and plain NegBin and the boards union; a SkewNormal cell studies
+    one family. One honest row per retrain corner across all families; the board carries each corner's
+    slack / ship verdict / gate passes so the top row is the real-HPO confirm candidate. Sorted by
+    ``slack`` descending.
+    """
+    rows = [
+        {"league": league, "market": market, **row}
+        for family in _cell_families(league, market)
+        for row in _run_family_study(league, market, family)
+    ]
+    board = pd.DataFrame(rows)
     ranked = board.sort_values("slack", ascending=False, ignore_index=True)
     ranked["swept_at"] = datetime.now(UTC).isoformat(timespec="seconds")
     ranked["code_rev"] = _code_rev()
@@ -482,13 +530,17 @@ def _has_training_data(league: str, market: str) -> bool:
 
 
 def _candidate_cells(
-    league: str | None = None, include_shipped: bool = False
+    league: str | None = None,
+    include_shipped: bool = False,
+    dist_class: str = _DIST_CLASS_ALL,
 ) -> list[tuple[str, str]]:
     """Registered-family cells eligible for the board, before the trainable/data filters.
 
     Withheld only by default (the ship path); ``include_shipped`` adds already-shipped cells so the
     board can hunt a better strategy for a live cell (evaluated by the separate supersession test,
-    not the fresh-ship confirm). Self-maintaining — it follows stat_meta's ``shipped`` field.
+    not the fresh-ship confirm). ``dist_class`` narrows to one distribution class (``count`` /
+    ``continuous``); the ``all`` default keeps every class. Self-maintaining — it follows stat_meta's
+    ``shipped`` field.
     """
     meta = load_stat_meta(pathlib.Path(str(STAT_META_PATH)))
     return [
@@ -496,12 +548,16 @@ def _candidate_cells(
         for lg, markets in meta.items()
         if league is None or lg == league
         for mkt, cell in markets.items()
-        if cell.get("dist") in _FAMILIES and (include_shipped or cell.get("shipped") == WITHHELD)
+        if cell.get("dist") in _FAMILIES
+        and (include_shipped or cell.get("shipped") == WITHHELD)
+        and (dist_class == _DIST_CLASS_ALL or _DIST_CLASS[cell["dist"]] == dist_class)
     ]
 
 
 def _select_board_cells(
-    league: str | None = None, include_shipped: bool = False
+    league: str | None = None,
+    include_shipped: bool = False,
+    dist_class: str = _DIST_CLASS_ALL,
 ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
     """Split eligible family cells into ``(sweepable, missing_data)``.
 
@@ -509,10 +565,12 @@ def _select_board_cells(
     registry (stat_meta carries non-market entries like inning props that meditate rejects), and with
     a cached training matrix. ``missing_data`` are eligible registry cells whose matrix is absent —
     the deterministic sweep can't build one, so they are surfaced as a warning rather than swept.
+    ``dist_class`` narrows the cohort to one distribution class (the WS-3 count residual runs
+    ``--dist-class count``).
     """
     in_registry = [
         (lg, mkt)
-        for lg, mkt in _candidate_cells(league, include_shipped)
+        for lg, mkt in _candidate_cells(league, include_shipped, dist_class)
         if mkt in ALL_MARKETS.get(lg, [])
     ]
     sweepable = [c for c in in_registry if _has_training_data(*c)]
@@ -520,12 +578,17 @@ def _select_board_cells(
     return sweepable, missing
 
 
-def _corner_count(cells: list[tuple[str, str]]) -> int:
-    """Total deterministic trainings a board run will do — each cell's family grid size."""
+def _cell_corner_count(league: str, market: str) -> int:
+    """The deterministic trainings one cell contributes — its family grids summed (count cells: ZINB + NegBin)."""
     return sum(
-        math.prod(len(c) for c in _FAMILIES[_cell_family(lg, mkt)].axes.values())
-        for lg, mkt in cells
+        math.prod(len(c) for c in _FAMILIES[f].axes.values())
+        for f in _cell_families(league, market)
     )
+
+
+def _corner_count(cells: list[tuple[str, str]]) -> int:
+    """Total deterministic trainings a board run will do — each cell's family grids summed."""
+    return sum(_cell_corner_count(lg, mkt) for lg, mkt in cells)
 
 
 def _board_done_cells(out: str | None) -> set[tuple[str, str]]:
@@ -579,8 +642,9 @@ def _stat_meta_edit(row: object) -> str:
     """The exact stat_meta.json fields to persist a winning corner, resolved for its family.
 
     Reads the family's ``persist`` map so the operator doesn't have to translate board columns to
-    field names: SkewNormal → ``target_normalization=…, blending=…``; ZINB → ``zinb_mode=…,
-    count_dispersion_objective=…, blending=…``. A non-persistable axis (SN's dist-loss) is
+    field names: SkewNormal → ``target_normalization=…, blending=…``; a count family →
+    ``dist=…, [zinb_mode=…,] count_dispersion_objective=…, blending=…`` (the persisted ``dist`` pins
+    the winning family, e.g. flipping a cell ZINB→NegBin). A non-persistable axis (SN's dist-loss) is
     intentionally omitted — the shipped model uses the family default.
     """
     persist = _FAMILIES[row["family"]].persist
@@ -669,14 +733,20 @@ def _print_board_rollup(board: pd.DataFrame) -> None:
 
 
 def _run_board_mode(
-    league: str | None, include_shipped: bool, out: str, resume: bool, dry_run: bool
+    league: str | None,
+    include_shipped: bool,
+    dist_class: str,
+    out: str,
+    resume: bool,
+    dry_run: bool,
 ) -> pd.DataFrame:
     """Derive the board, warn per cell skipped for a missing training matrix, print the scope, sweep.
 
-    ``resume`` skips cells already on the board CSV; ``dry_run`` prints the resolved scope (and what
-    resume would skip) then returns without training a single corner.
+    ``dist_class`` narrows the cohort to one distribution class; ``resume`` skips cells already on the
+    board CSV; ``dry_run`` prints the resolved scope (and what resume would skip) then returns without
+    training a single corner.
     """
-    cells, missing = _select_board_cells(league, include_shipped)
+    cells, missing = _select_board_cells(league, include_shipped, dist_class)
     for lg, mkt in missing:
         click.secho(
             f"  skip {lg} {mkt}: no cached training matrix — train it first "
@@ -723,6 +793,14 @@ def _run_board_mode(
     "supersession test, not the fresh-ship --confirm (which only auto-ships withheld cells). Off by default.",
 )
 @click.option(
+    "--dist-class",
+    type=click.Choice([*_CLASS_FAMILIES, _DIST_CLASS_ALL]),
+    default=_DIST_CLASS_ALL,
+    show_default=True,
+    help="Board mode: narrow to one distribution class — 'count' (ZINB + NegBin) sweeps the WS-3 "
+    "count residual, 'continuous' the SkewNormal cells.",
+)
+@click.option(
     "--confirm",
     is_flag=True,
     default=False,
@@ -761,6 +839,7 @@ def main(
     market: str | None,
     board: bool,
     include_shipped: bool,
+    dist_class: str,
     confirm: bool,
     yes: bool,
     resume: bool,
@@ -774,15 +853,15 @@ def main(
     out = out or str(STRATEGY_RESEARCH_BOARD)
     pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
     if board:
-        result = _run_board_mode(league, include_shipped, out, resume, dry_run)
+        result = _run_board_mode(league, include_shipped, dist_class, out, resume, dry_run)
     else:
         if not (league and market):
             raise click.UsageError("pass --league and --market, or --board")
         if dry_run:
-            family = _cell_family(league, market)
+            families = _cell_families(league, market)
             click.secho(
-                f"[dry-run] {league} {market}: family {family} "
-                f"· {math.prod(len(c) for c in _FAMILIES[family].axes.values())} corners",
+                f"[dry-run] {league} {market}: families {', '.join(families)} "
+                f"· {_cell_corner_count(league, market)} corners",
                 fg="cyan",
             )
             return
