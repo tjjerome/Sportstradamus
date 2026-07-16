@@ -182,3 +182,14 @@ def test_plotly_template_registered_with_categorical_colorway() -> None:
     assert pio.templates.default == "sportstradamus"
     template = pio.templates["sportstradamus"]
     assert list(template.layout.colorway) == _theme()["chartCategoricalColors"]
+
+
+def test_mobile_media_block_present_and_resolved() -> None:
+    """Phase M: theme.APP_CSS carries exactly one mobile media block, keyed to
+    MOBILE_MAX_PX, with every template sentinel resolved."""
+    from sportstradamus.dashboard import theme
+
+    assert theme.MOBILE_MAX_PX == 767
+    assert f"@media (max-width: {theme.MOBILE_MAX_PX}px)" in theme.APP_CSS
+    assert "__MOBILE_MAX__" not in theme.APP_CSS
+    assert "__STARFIELD_DUST__" not in theme.APP_CSS

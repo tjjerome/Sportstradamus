@@ -129,6 +129,10 @@ _STARFIELD_SEED = 20260705  # fixed so dust positions are identical across rerun
 _STARFIELD_DUST_COUNT = 80  # ~30 was too sparse to read in a wide layout's whitespace
 _STARFIELD_MAX_ALPHA = 0.20  # DESIGN §3 static-ambient ceiling (twinkles exempt, see @keyframes)
 
+# Phase M breakpoint — the CSS twin of viewport.is_mobile()'s UA branch. Style-only
+# rules reshape below this width; render-level differences go through is_mobile().
+MOBILE_MAX_PX = 767
+
 
 def _starfield_background() -> str:
     """CSS ``background`` layers for ``.starfield``: dust dots + nebula washes + base.
@@ -291,10 +295,24 @@ button[data-testid="stBaseButton-segmented_controlActive"]{
    disjoint properties so declaration order stops mattering. */
 @media (prefers-reduced-motion: no-preference){.tw{animation-name:tw;animation-timing-function:ease-in-out;animation-iteration-count:infinite}}
 @media (prefers-reduced-motion: reduce){.tw{animation:none;opacity:.15}}
+/* Phase M (spec §2.3): style-only phone reshaping. Render-level differences (nav,
+   dock, Board cards, constellation touch) branch on viewport.is_mobile() instead. */
+@media (max-width: __MOBILE_MAX__px){
+  .page-hero{padding:10px 12px 3px}
+  .page-hero .hero-title{font-size:19px}
+  .celestial-kicker{font-size:9.5px;letter-spacing:.2em}
+  .tonight-card{flex-direction:column;gap:8px;padding:12px 14px}
+  .tonight-card .tc-side{flex-direction:row;flex:0 0 auto;justify-content:flex-start}
+  .tc-matchup{font-size:19px}
+  .tc-foot{gap:10px;margin-top:8px}
+  .st-key-constellation_legpanel{padding:6px 10px}
+}
 </style>
 """
 
-APP_CSS = _APP_CSS_TEMPLATE.replace("__STARFIELD_DUST__", _starfield_background())
+APP_CSS = _APP_CSS_TEMPLATE.replace("__STARFIELD_DUST__", _starfield_background()).replace(
+    "__MOBILE_MAX__", str(MOBILE_MAX_PX)
+)
 
 # Dust + wash render via .starfield's own CSS background above; these 11 divs are
 # just the twinkling accents (see the .tw comment in APP_CSS for why plain divs
