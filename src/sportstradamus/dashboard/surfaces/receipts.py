@@ -46,6 +46,7 @@ from sportstradamus.dashboard.surfaces.receipts_charts import (
     reliability_diagram,
 )
 from sportstradamus.dashboard.theme import GOLD, GRAY
+from sportstradamus.dashboard.viewport import is_mobile
 
 # Nebula wash (DESIGN.md §3): blue radial stop + gold held at 7% opacity, both well under
 # the hero-card 12% gold ceiling — literal values ported from the mockup's own .hero
@@ -91,6 +92,9 @@ def _hero_stat(label: str, value: str, *, size: str, color: str = "") -> str:
 
 
 page_hero("THE RECEIPTS", "Receipts")
+if is_mobile():
+    st.caption("Best at a desk — this page keeps its desktop layout.")
+
 
 history = load_history()
 

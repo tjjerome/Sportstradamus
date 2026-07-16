@@ -23,6 +23,7 @@ from sportstradamus.dashboard.surfaces.lab_correlations_charts import (
     corr_heatmap,
     worst_driver_pair,
 )
+from sportstradamus.dashboard.viewport import is_mobile
 
 # Lab Correlations only ever plots/aggregates these scalar parlay columns; projecting the
 # read skips the multi-GB list<float> struct columns (legs, Corr/Boost Pairs) in the 1.7M-row
@@ -45,6 +46,9 @@ _SCATTER_MAX = 20_000
 _SCATTER_SEED = 17
 
 page_hero("MODEL LAB · CORRELATIONS", "Correlations & Parlays")
+if is_mobile():
+    st.caption("Best at a desk — this page keeps its desktop layout.")
+
 
 # Mounted for session consistency with the other two Lab pages (widget keys are
 # shared across all three); this page's frames are one-row-per-parlay or a

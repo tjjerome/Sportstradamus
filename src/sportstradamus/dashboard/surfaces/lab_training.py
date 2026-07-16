@@ -22,6 +22,7 @@ from sportstradamus.dashboard.data import (
     sport_filtered,
 )
 from sportstradamus.dashboard.surfaces.lab_training_charts import lifecycle_funnel
+from sportstradamus.dashboard.viewport import is_mobile
 from sportstradamus.helpers.io import LIVE_METRICS_PATH, MODEL_STATS_PATH
 from sportstradamus.training.graduation import lifecycle_table
 
@@ -261,6 +262,9 @@ mtime = (
     else "no meditate run on record"
 )
 page_hero("MODEL LAB · TRAINING", "Model Training Diagnostics", mtime)
+if is_mobile():
+    st.caption("Best at a desk — this page keeps its desktop layout.")
+
 
 stats = load_model_stats()
 if stats.empty:

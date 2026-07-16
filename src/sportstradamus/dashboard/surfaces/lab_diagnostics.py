@@ -36,6 +36,7 @@ from sportstradamus.dashboard.surfaces.lab_diagnostics_charts import (
     reliability_diagram,
     sharpness_histogram,
 )
+from sportstradamus.dashboard.viewport import is_mobile
 
 # Minimum predicted-probability std; markets below this cluster too tightly
 # to discriminate, flagged as likely under-dispersed.
@@ -46,6 +47,9 @@ _LOW_SHARPNESS_STD = 0.04
 _START_HERE_COUNT = 3
 
 page_hero("MODEL LAB · DIAGNOSTICS", "Market Diagnostics & Forecast Quality")
+if is_mobile():
+    st.caption("Best at a desk — this page keeps its desktop layout.")
+
 
 stat_meta = load_stat_meta()
 lab_sel = render_lab_filters(stat_meta, collapsed=False)

@@ -227,6 +227,19 @@ from the defined scale or ask — do not invent.
   surface.
 - Keep to the 2–3 semantic colors + neutral gray scale. Preserve visible focus states.
 
+## 8a. Mobile (Phase M)
+
+The money loop (Tonight → Games → slip → stakes) renders a phone experience behind
+`viewport.is_mobile()` (User-Agent; `?m=1` override) plus one `@media (max-width: 767px)`
+block in `theme.APP_CSS` — `theme.MOBILE_MAX_PX` is the single breakpoint. Mobile chrome:
+top nav (Streamlit natively collapses it into the sidebar drawer on phone-portrait widths),
+the slip dock (fixed bottom bar + sheet, gold hairline, surface tokens), Board offer cards
+in place of the AG-Grid, and the constellation touch flow (tap → docked card, second tap /
+card button toggles — selection stays alpha + saturation, §4a grammar unchanged; the touch
+size floor scales stars, never reorders them). Receipts/Lab keep desktop layouts. Desktop
+rendering is pixel-unchanged; every mobile difference gates on `is_mobile()` or the media
+block.
+
 ## 9. References
 
 - [docs/dashboard_ux_redesign.md](docs/dashboard_ux_redesign.md) — the UX redesign spec (six
