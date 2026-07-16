@@ -3,10 +3,13 @@
 The strategy sweep (:mod:`sportstradamus.training.model_strategy_sweep`) *ranks* corners on fixed-HP
 deterministic trials — it never ships. This module turns a ranked board into shipped cells:
 
-1. For each cell, pick the best-by-slack shipping corner whose config is **fully persistable** — every
-   swept axis it wins on has a ``stat_meta.json`` field. SkewNormal's ``dist_training_loss`` has no
-   field (the family default ships), so a corner that only wins under the non-default dist-loss is
-   reported ``RANKS-ONLY`` and skipped — never persist a config the confirm can't reproduce.
+1. For each cell, pick the best persistable shipping corner **across the cell's swept families** — a
+   count cell's slice carries both ZINB and NegBin corners, ranked together by ship slack. The winner
+   is the top-slack shipping corner whose every swept axis has a ``stat_meta.json`` field, and its own
+   family's ``persist`` map builds the edits (so a NegBin corner outranking ZINB persists ``dist=NegBin``
+   and flips the cell's family). SkewNormal's ``dist_training_loss`` has no field (the family default
+   ships), so a corner that only wins under the non-default dist-loss is reported ``RANKS-ONLY`` and
+   skipped — never persist a config the confirm can't reproduce.
 2. Prompt, then per candidate: write its persist fields + ``shipped="devel"`` to ``stat_meta.json``
    (so the confirm ``meditate`` reads the exact config being shipped), run a **full-HPO** ``meditate``,
    and read the official ``ship`` verdict from ``model_stats.parquet``.
@@ -74,28 +77,32 @@ def _is_persistable(row: pd.Series, spec: FamilySpec) -> bool:
 def _candidate(sub: pd.DataFrame) -> dict | None:
     """The confirm candidate for one cell's board slice: a persistable shipping corner, or a marker.
 
-    Returns ``None`` when the cell shipped no corner (nothing to confirm), a ``ranks_only`` marker
-    when it shipped only non-persistable corners, else a ``candidate`` with the stat_meta edits.
+    The slice may mix families (a count cell carries ZINB *and* NegBin corners), so each corner is
+    scored under its OWN family's spec. Walking shipping corners slack-desc, the first persistable one
+    wins and its family's ``persist`` map builds the edits. Returns ``None`` when nothing ships, a
+    ``ranks_only`` marker when only non-persistable corners ship, else a ``candidate``.
+
+    A ZINB→NegBin flip's edits carry no ``zinb_mode`` (NegBin's persist map omits it), leaving the
+    cell's pre-existing ``zinb_mode`` key an inert no-op: the pipeline sets ``is_hurdle`` only when the
+    trained ``dist == "ZINB"``, and ``_confirm_one`` restores the whole original entry on a revert.
     """
-    lg, mkt = sub["league"].iloc[0], sub["market"].iloc[0]
-    family = sub["family"].iloc[0]
-    spec = _FAMILIES[family]
     shipping = sub[sub["ships"].astype(bool)]
     if shipping.empty:
         return None
-    persistable = shipping[shipping.apply(lambda r: _is_persistable(r, spec), axis=1)]
-    if persistable.empty:
-        return {"league": lg, "market": mkt, "family": family, "status": "ranks_only"}
-    best = persistable.sort_values("slack", ascending=False).iloc[0]
-    edits = {spec.persist[axis]: str(best[axis]) for axis in spec.persist}
-    return {
-        "league": lg,
-        "market": mkt,
-        "family": family,
-        "status": "candidate",
-        "edits": edits,
-        "slack": float(best["slack"]),
-    }
+    lg, mkt = sub["league"].iloc[0], sub["market"].iloc[0]
+    ranked = shipping.sort_values("slack", ascending=False)
+    for _, row in ranked.iterrows():
+        spec = _FAMILIES[row["family"]]
+        if _is_persistable(row, spec):
+            return {
+                "league": lg,
+                "market": mkt,
+                "family": row["family"],
+                "status": "candidate",
+                "edits": {spec.persist[axis]: str(row[axis]) for axis in spec.persist},
+                "slack": float(row["slack"]),
+            }
+    return {"league": lg, "market": mkt, "family": ranked["family"].iloc[0], "status": "ranks_only"}
 
 
 def _candidates(board: pd.DataFrame) -> list[dict]:

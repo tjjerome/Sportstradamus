@@ -30,6 +30,40 @@ def _sn_original():
     return {"dist": "SkewNormal", "shipped": "withheld", "target_normalization": "none", "blending": "nll"}
 
 
+def _zinb_row(mode, disp, blend, ships, slack):
+    """A ZINB count corner, reindexed to the full board schema (SN-only columns blank)."""
+    return {
+        "league": "MLB",
+        "market": "pitcher strikeouts",
+        "family": "ZINB",
+        "dist": "ZINB",
+        "zinb_mode": mode,
+        "count_dispersion_objective": disp,
+        "blending_loss_fn": blend,
+        "normalization": float("nan"),
+        "dist_training_loss": float("nan"),
+        "ships": ships,
+        "slack": slack,
+    }
+
+
+def _negbin_row(disp, blend, ships, slack):
+    """A plain-NegBin count corner: no ``zinb_mode`` (its persist map omits it), other columns blank."""
+    return {
+        "league": "MLB",
+        "market": "pitcher strikeouts",
+        "family": "NegBin",
+        "dist": "NegBin",
+        "zinb_mode": float("nan"),
+        "count_dispersion_objective": disp,
+        "blending_loss_fn": blend,
+        "normalization": float("nan"),
+        "dist_training_loss": float("nan"),
+        "ships": ships,
+        "slack": slack,
+    }
+
+
 # --- candidate selection ---------------------------------------------------------------------
 
 
@@ -87,6 +121,45 @@ def test_candidate_zinb_is_fully_persistable():
         "count_dispersion_objective": "pit_ks",
         "blending": "crps",
     }
+
+
+def test_candidate_cross_family_negbin_wins():
+    """A count cell's slice mixes ZINB and NegBin corners; the top-slack shipping-and-persistable one
+    is NegBin, so the candidate flips the cell's family and its edits carry NO ``zinb_mode``.
+    """
+    board = pd.DataFrame(
+        [
+            _zinb_row("hurdle", "pit_ks", "crps", True, 0.10),
+            _negbin_row("crps", "nll", True, 0.22),  # top slack, ships, NegBin
+            _zinb_row("joint", "crps", "nll", False, -0.05),
+        ]
+    )
+    cand = mc._candidate(board)
+    assert cand["family"] == "NegBin"
+    assert cand["edits"] == {"dist": "NegBin", "count_dispersion_objective": "crps", "blending": "nll"}
+    assert "zinb_mode" not in cand["edits"]  # the flip never reads the NaN zinb_mode column
+    assert cand["slack"] == 0.22
+
+
+def test_candidate_cross_family_zinb_wins():
+    """Same ZINB+NegBin mix but a ZINB corner has the top slack, so the candidate stays ZINB and its
+    edits include ``dist=ZINB`` and ``zinb_mode`` — NegBin's blank columns are never consulted.
+    """
+    board = pd.DataFrame(
+        [
+            _zinb_row("hurdle", "pit_ks", "crps", True, 0.30),  # top slack, ships, ZINB
+            _negbin_row("crps", "nll", True, 0.18),
+        ]
+    )
+    cand = mc._candidate(board)
+    assert cand["family"] == "ZINB"
+    assert cand["edits"] == {
+        "dist": "ZINB",
+        "zinb_mode": "hurdle",
+        "count_dispersion_objective": "pit_ks",
+        "blending": "crps",
+    }
+    assert cand["slack"] == 0.30
 
 
 # --- meditate subprocess primitive ------------------------------------------------------------
