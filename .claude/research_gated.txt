@@ -2,4 +2,5 @@
 # A shipped: flip in stat_meta.json is also gated (handled in research-gate.py).
 # Add a post-hoc stage file here at creation if it introduces a new family.
 */skew_normal.py
+*/skew_normal_centered.py
 */double_poisson.py
