@@ -300,7 +300,7 @@ width fix is fit to a calibration target and guard-railed on g1/g5 (§6.1 go/no-
 | `init_score` warm-start baseline | **Dead** — byte-identical to plain NegBin | refs §3 |
 | ZTNB-hurdle likelihood | **Refuted** — incompatible with the derived-π decode; would regress the shipped hurdle markets | refs §6 |
 | T5 multiplicative factorization (volume × efficiency) | **Killed** — Goodman variance-of-products gives +27% predictive-variance inflation on the priced cell | refs §9 |
-| Family build — count wall + shape-bound | **Registry landed (family-as-axis sweep, ZINB ∪ NegBin); DP + centered-SN model code next** (§6.6, R1/R2). Count: **exact-normalized Double Poisson** (Efron 1986) — mean-parametrized, both dispersion directions unbounded; verified in-venv (normalizer 1.000000, finite grads). Also found ZINB is a misroute on all 20 count cells — **plain-NB (one stat_meta edit) never tried**, the cheapest lever left. Continuous: **centered-parametrization SkewNormal** — the α-head is frozen at the Fisher singularity live (railed skew_cal on 9–12/12 yards-family corners), SHASH only on pilot evidence for the kurtosis class | R1/R2 briefs; §6.6 |
+| Family build — count wall + shape-bound | **Both families BUILT + wired end-to-end** (§6.6): Double Poisson (`DPO`) in the count sweep (`ZINB ∪ NegBin ∪ DPO`, 16 corners/cell) and centered-SN behind the `sn_param` axis (SkewNormal 24 corners/cell); full-cohort screen routes 15 DP-mandatory / 8 hurdle / 18 plain-NB of 41 count cells. Pilots (NBA PF, WNBA TOV, NHL points; then WNBA PA + NFL receptions) decide ship/kill; SHASH still gated on centered-SN pilot evidence | R1/R2 briefs; §6.6 |
 | HurdleZINB (per-cell `zinb_mode`) | **Alive & shipped** — 6/8 NBA ZINB markets | refs §4 |
 | Post-hoc mean correction (`roe_mean` / `isotonic_mean`) | **Alive & shipped** — `MEAN_STAGE` in [`posthoc.py`](../../src/sportstradamus/training/posthoc.py); use skeptically (§6.1 Rung A) | refs §8 |
 | Post-hoc probability recalibration (`prob_recal_*`) | **Alive** — `PROB_STAGE` built, available per-cell | posthoc.py |
@@ -847,7 +847,7 @@ first-order CRPS trial can produce (LightGBMLSS's CRPS path sets the Hessian to 
 before ship; an inference-path round-trip test for every new served object (§7.3). **If it fails:**
 signal-starved → features (§6.3); genuine heavy tail → family (§6.6).
 
-### §6.6 WS-3 — Family escalation: count wall + shape-bound (registry landed; DP + centered-SN model code next)
+### §6.6 WS-3 — Family escalation: count wall + shape-bound (DPO live — first ship WNBA TOV; centered-SN pilots next)
 
 Entry: a cell whose cheaper axes are recorded-tried (§8), or a whole cohort the sweep leaves at
 the family ceiling. **This is the main funded build.** The two research questions are answered —
@@ -858,38 +858,45 @@ grid axis, not a manual per-cell edit); pilots first, then registry entry → bo
 research-gate still binds each new family (§8.2) — the R1/R2 briefs discharge it for the two
 below; a third family needs its own.
 
-**Build status — the registry half is landed; the DP model code is the remaining fix.** Branch
-`feature/model-improvement` (5 commits, unpushed) carries the *plumbing*: the `count-family-screen`
-CLI, the `meditate --dist [auto|SkewNormal|ZINB|NegBin]` override, the deterministic dump-suffix
-fix, **family as a swept axis** (`_CLASS_FAMILIES["count"] = (ZINB, NegBin)`; each count cell now
-sweeps 8 ZINB + 4 NegBin corners and the winning `dist` persists), and the cross-family confirm
-(`_candidate` takes the best persistable corner across families). Three gates green; the NBA PF
-single-cell sweep validated it on real data (all 12 count corners on the board, the new `dist`
-column populated per family, NegBin gate rows valid; NBA PF stays **g4-failing on every count
-corner**, best ZINB-hurdle slack −0.326). What is *not* built is the family that actually clears the
-wall: ZINB/NegBin are floored at V/M ≥ 1, so the zero-deflated / under-dispersed residual is
-unreachable by the two swept families — **Double Poisson is that build** (the Count verdict below;
-`double_poisson.py` + the numpy DP kernel + pipeline/scorecard/serving/live-path). Once DP lands it
-joins `_CLASS_FAMILIES["count"]` as the third axis (`DPO`) and the residual is re-swept +
-confirm-walked; then the continuous (centered-SN) track. The P0 screen already routed **NBA PF +
-NHL points → DP-mandatory** (zero-deflation) and **WNBA TOV → plain-NB**, so the DP cohort is
-non-empty. *Resume gotcha:* the count board sweep that backfills the NegBin corners across the ~28
-withheld count cells must run **without `--resume`** — resume keys on cell-*presence*, and every
-count cell except NBA PF is already on the board with stale ZINB-only rows, so `--resume` skips
-them. Full phase list: the approved plan (`~/.claude/plans/…delightful-volcano.md`); box + gotchas:
-`[[data_dir_under_package]]`, `[[ws3_phase0_count_screen_verdict]]`, `[[deterministic_ab_g4_oversell]]`.
+**Build status — both families are landed code; the remaining work is verdicts.** Branch
+`feature/model-improvement` carries: family as a swept axis (`_CLASS_FAMILIES["count"] =
+(ZINB, NegBin, DPO)` — count cells sweep 8+4+4 corners; SkewNormal cells 24 via the `sn_param`
+axis), `meditate --dist [auto|DPO|NegBin|ZINB|SkewNormal]` + `--sn-param [auto|direct|centered]`,
+the exact-normalized **Double Poisson** (`double_poisson.py` + a torch-free numpy serve kernel;
+the inverse-CDF `sample()` is mandatory — LightGBMLSS predict draws samples even for
+`pred_type="parameters"`), the **centered-SN class** (`skew_normal_centered.py`; as-built γ1
+response `0.99·tanh`, not R2's 0.9952 — at that rail the α radicand is ~4e-5, float32
+cancellation exploded hessians and killed boosting in ~4 rounds; stabilization defaults L2 for
+the same reason), DPO wiring end-to-end (pipeline / scorecard `DP_MU`/`DP_PHI` contract /
+model_prob + persist `Model Phi` / analysis / dashboard deep-dive; `fit_dpo_weight` lives in
+`training/calibration.py`), `sn_param` persisted per-cell (pickle + stat_meta + serve-side seed
+read with a call-site pin — the offset_mode drift class), cross-family confirm, and live-path
+integration tests for both families. Three gates green. The **full-cohort screen**
+(`count-family-screen --all-count`, 41 cells) routes **15 DP-mandatory (zero-deflated) / 8
+hurdle-NB / 18 plain-NB** — the DP cohort is far larger than the 3 pilots. *Resume gotcha
+unchanged:* board re-sweeps across a family/axis change must run **without `--resume`** (resume
+keys on cell-*presence*; stale pre-axis rows would carry through, and a stale-row confirm would
+persist `sn_param: "nan"`). *Second engine gotcha:* `--dist-class` classifies by the cell's
+**current meta dist**, so integer-count cells wearing `SkewNormal` meta (NFL
+receptions/targets/carries, NBA FGA, NHL sogBS) are invisible to a count-class board; the
+workaround is the family-as-input design itself — flip the withheld cell's `dist` to a count
+family pre-sweep, the winner persists honestly, a failed confirm auto-reverts. Refs:
+`[[ws3_phase0_count_screen_verdict]]`, `[[deterministic_ab_g4_oversell]]`,
+`[[data_dir_under_package]]`, `[[breadth75_campaign]]`.
 
 **Continuous — centered-parametrization SkewNormal (R2 verdict; ~2 sessions, zero serving delta).**
 The headline diagnosis: the trained α-head is **frozen at ~0 on every SkewNormal cell** — raw
 `SN_Alpha ≈ 0` after subtracting `skew_cal`, which **rails at the ±3 clamp on 9–12/12 corners** of
 the yards/fantasy family. That is the α=0 Fisher-information singularity (Arellano-Valle & Azzalini
 2008; Hallin & Ley 2014) live in production; the centered parametrization is the designed fix. New
-distribution class with a closed-form (mean, sd, γ1)→(ξ, ω, α) map, γ1 response `0.9952·tanh`,
+distribution class with a closed-form (mean, sd, γ1)→(ξ, ω, α) map, γ1 response `0.99·tanh`
+(as-built; see Build status for the 0.9952 float32 deviation),
 centered seed, per-cell `sn_param` knob; `predict_dist` re-emits direct `loc/scale/alpha` so
 `model_prob`/`fused_loc`/`get_ev`/scorecard are untouched (§7.3 "training-only" — byte-identical
 round-trip test only). Build order: **(0) re-baseline the 5 decode-drift `model_stats` rows first**
 (NFL receptions/targets, WNBA DREB/PA, NBA DREB — g4≈0.46–0.50 are decode-drift artifacts, not
-model failures); (1) centered-SN + **pilots WNBA PA and NFL receptions** (expect PA KS 0.088→0.03–
+model failures); (1) centered-SN + **pilots WNBA PA and NFL receiving-yards** (receptions rerouted to the
+count board via the meta-dist input — see the second engine gotcha above; expect PA KS 0.088→0.03–
 0.05); (2) riders on NBA FGA + NFL receiving/rushing-yards (retrains only); (3) **SHASH gated on
 pilot evidence** (3–4 sessions, hand-rolled on the `skew_normal.py` pattern, n≳1000 cells) — the
 **WNBA DREB kurtosis class** (+10.4 z) routes to SHASH, *not* a centered pilot; NFL targets (pure
@@ -914,12 +921,45 @@ non-asymptotic zero test under the NB null → route {no-modification → plain-
 **deflation → DP mandatory** (gates can't subtract zeros)}; escalation bar = Dunn–Smyth RQR variance
 <0.70 + Poisson-GBM-tracks-top-decile-while-NB-compresses; then fit {plain-NB, hurdle-NB}×{crps,
 pit_ks} + the DP arm on honest val→test PIT, cheapest passing corner wins, DP must beat the best NB
-corner without g1/g5 regression. **Pilots:** NBA PF (cleanest under-dispersion), WNBA TOV (hurdle+
-pit_ks already pinned — clean A/B), NHL points (low-mean 0.5 stress test). **Kill:** all 3 pilots
-fail honest val→test g4 AND close <50% of the central-50 gap after dispersion cal → family dead for
-the cohort via `supersede_verdict()`, residual routes §6.1/§6.3, no extension to borderline cells.
+corner without g1/g5 regression. **Pilot verdicts (dates: §10):** WNBA TOV = **first DPO ship** — all 4 DPO corners board-pass
+(best slack +0.122) while every NB-family corner dies g4; full-HPO confirm 5/5 → devel (BSS
++0.042, dispersion_cal 1.014 — the φ head fits dispersion natively, nothing left to calibrate).
+NBA PF = all-16-corner kill: DPO posts best-in-family coverage (0.663 vs hurdle 0.769 / plain-NB
+0.692, target 0.50) but closes only 15–39% of the central-50 gap and loses PIT-KS to hurdle
+(0.083 vs 0.066); with g5 co-failing, PF's binding constraint is not family — routes §6.1/§6.2.
+NHL points (low-mean 0.5 stress) in flight. The pre-registered kill rule is dead; DPO stays in
+`_CLASS_FAMILIES`. Lesson: screen labels are weak per-cell predictors — the ship came from the
+plain-NB *control* while the DP-mandatory pilot killed; the sweep decides, not the screen.
 Runner-up mean-parametrized CMP and rejected GenPoisson/Gamma-count/Tweedie rationale is in the R1
 brief.
+
+**Past families — model-class escalation (all §8.2-gated, pilot evidence first).** LightGBMLSS
+binds four ways: a pre-committed closed-form family per cell; weak per-row gradient to the
+scale/shape heads (why g4 is the graveyard gate); Fisher pathologies at singular points (the α=0
+saga); one loss and round schedule shared by all heads. When a cell exhausts families, go
+nonparametric on the axis serving actually needs: (1) **ordinal threshold stack** for counts — K
+binary `P(X≥k)` LightGBMs + isotonic de-crossing = a family-free conditional PMF; serve only
+needs `P(X > line)` at half-integer lines, and blend/push/mean/sims all work off the PMF; first
+pilot on the count residual (PF-class cells). (2) **Mixture head** for continuous — check the
+pinned lightgbmlss for Mixture support *before* any SHASH packet; a 2-component normal covers
+heavy tails + skew + bimodality (blowout/benching regimes no single-mode family represents) and
+likely supersedes the SHASH ask. (3) **Comp-weighted empirical PMF** as the cheap diagnostic: the
+KNN player-comp machinery already exists — if the comp-empirical distribution *also* fails
+coverage, the cell's problem is conditioning, not family; stop escalating families and route
+§6.2/§6.3. NGBoost skipped (natural gradients fix an optimization disease we already stabilized);
+global multi-task pooling across cells is the horizon item, not this push.
+
+**Machinery simplification track (owner-adopted; no-regression rule — nothing lands mid-sweep).**
+S1 *evidence-gated*: drop the dominated joint-ZINB sweep axis once the W1 boards confirm it never
+wins a cell (ZINB grid 8→4 corners; the mode stays supported for pinned cells). S2: retire
+`count_family_screen.py` to `src/deprecated/` post-campaign (verdict delivered; labels proved
+weak per-cell predictors). S3 *guard*: a knob-contract golden asserting stat_meta knob ↔ pickle
+filedict ↔ serve-side seed parity — the offset_mode / sn_param drift class, caught by hand twice.
+S4: persist `dist_training_loss` per cell, which deletes the ranks-only-corner concept from the
+confirm walk (the NHL saves trap). S5 *post-campaign*: consolidate the per-family serve branches
+(~6 files; DPO needed 9 sites) into one dispatch table in `helpers/distributions` behind the
+existing parity goldens — family #7 becomes one registry entry plus its torch class. The
+torch/numpy dual kernels stay as designed (serve-graph isolation).
 
 **Small-sample / hierarchical layer (the NFL wall), cheapest-first.** Partial pooling dominates at
 n ≈ 300–1000/group (Gelman & Hill 2007). (a) **EB-shrink the distributional parameters** per player
@@ -1036,7 +1076,9 @@ snapshot.
   scale fit).
 - **Rung A then Rung B (§6.1)** on the g2-bias + g4 cells (FGA, fantasy-points-prizepicks).
 - **Features (§6.3)** on PF (g1+g5 — the one genuinely hard NBA cell; also a D-5 referee
-  candidate, last).
+  candidate, last). The §6.6 DPO pilot confirmed family is not PF's constraint.
+- **Free re-earns:** BLST + OREB hold `ship=True` all-six-gate rows while `shipped: withheld` —
+  a fresh confirm re-earns the flip; queued in the breadth waves (`[[breadth75_campaign]]`).
 - Verdict: five of the seven calibration-class cells clear the target; FGA/FP/PF are backups,
   not load-bearing.
 
@@ -1082,6 +1124,22 @@ snapshot.
   game-script + interactions + recency (§10 audit); only *targeted* interactions (e.g.
   implied-total × usage) remain, not a broad build. Hardest cells (qb-yards, passing-first-downs
   multi-gate; receptions severe) sit at the ladder's deep end.
+- **Book state (audited): the big-7 book is real; the blockers are code-side.** The July archive
+  repair already re-priced attempts/completions/passing-yards etc. — their brier_book ≈ 0.250 is
+  a sharp book the model honestly loses to, not a coin flip. The Odds API has zero NFL prop
+  history before 2023-05-03 and post-cutoff refetch resolves to different entity names, so
+  further paid backfill is a dead end (probe-verified). Honest-g1 blockers, all code-side:
+  (a) **8 bookless cells** (qb-yards, qb-tds, yards, targets, sacks-taken, passing-first-downs,
+  rushing-tds, receiving-tds) grade against synthetic 0.5 rows — **owner ruling: that stands;
+  bookless markets must beat the coin flip** (no autopass; yards does, qb-yards honestly
+  doesn't); (b) 17–21% synthetic-row dilution on priced cells (`scorecard._priced_rows` counts
+  `Odds_synthetic`) — known measurement caveat, no gate change planned; (c) **live tds ev-clamp
+  bug** —
+  every confer run writes ev = 5×line for tds (all 20,840 rows since 2026-06; `under_prob` real,
+  `ev` garbage); encoder fix + tds matrix purge before any tds training; (d) count-cell book
+  decode round-trips ev→odds through drifting cv/zi — the matrix build should read the WS-1
+  `under_prob` column directly. Staged seed-row cleanup + regenerated matrices at
+  `staging_nfl_book_repair/` (apply-at-gap; `[[breadth75_campaign]]`).
 - For any cell the model can't improve: lean harder on the book in the blend — rides the sharp
   line, ships if calibration holds. No cell is shelved (§8); never loosen a gate.
 
@@ -1090,6 +1148,10 @@ snapshot.
 Feature foundations are §6.7 and proceed now; training/shipping is gated on D1/D2
 ([`mlb-nhl-activation.md`](mlb-nhl-activation.md)). First targets when active: MLB hitter
 volume markets (batting order), Ks later (umpire); NHL goalie SV + skater shots/points.
+Book-less MLB cells (pitches-thrown, both fantasy) grade against the synthetic coin-flip book —
+**owner ruling: they must beat it** (g1–g3 vs 0.5 baseline, no autopass); the
+continuous/centered-SN board is still their ship path, with g1 a real bar. MLB count matrices
+are the fattest in the system (55–65k rows); sample size is not MLB's blocker.
 
 ### §6.10 WS-1 — Live alignment (Priority 1)
 
@@ -1494,6 +1556,7 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-17 · WS-3 pilots + breadth-75 reframe (owner: 75% every league is the mission, not WS-3 step-following). DPO first ship — WNBA TOV full-HPO 5/5 → devel (4/4 DPO corners board-pass, all NB corners die g4, BSS +0.042); NBA PF all-kill (<50% gap-close, family not binding → §6.1/§6.2); NHL points in flight; kill rule dead. Gap: NBA +3 / NFL +8 / NHL +8 / MLB +10 (WNBA 14/18 done). Five waves: count boards (non-NFL first) → integer-meta reroute → centered-SN pilots + continuous board → NFL book repair (paid backfill agent in flight, apply-at-gap) → ECE recal. Found: NBA BLST/OREB ship=True-but-withheld (free re-earns); `--dist-class` meta-dist blindspot (§6.6 gotcha); book-less MLB trio auto-passes g1–g3 (owner rule). Model-class escalation past families → §6.6 (ordinal stack / mixture / comp-PMF, §8.2-gated). NFL book audit closed same day: July repair already real for the big-7, paid backfill dead (API hole pre-2023-05-03; 882 credits spent, probe-verified ~0 recovery) — blockers rerouted code-side (live tds ev-clamp confer bug since 2026-06 — owner ordered fix; under_prob matrix read); autopass RETRACTED same day — bookless cells must beat the coin flip; staged cleanup at staging_nfl_book_repair/, apply-at-gap. Simplification track S1–S5 adopted (§6.6). NHL points interim: DPO 6/6 deterministic +0.226, pit_ks 0.0153 (NB floor 0.083) — low-mean ceiling thesis validated; full-HPO confirm in flight.
 - 2026-07-11 · WS-2 activation COMPLETE: 9 cells live on devel — 5 MLB (2026-07-10) + 4 NHL (goals, hits, shotsAgainst, timeOnIce; commit 3635a20), all deterministic-board → full-HPO confirm on 2-season matrices; final spend 2.39M of 5M credits. NHL powerPlayPoints failed confirm, saves ranks-only (non-persistable dist-loss corner). Post-GO grind on no-ship cells moves to the §6 operating loop (detail: mlb-nhl-activation.md §10).
 - 2026-07-10 · dfs-products lane created (decision-engine expansion: game-line combos verify-first, Ladders, alt-line hardening) · §6.11 Rivals pricer build repointed there (tail read stays); ladders + gamelines stage-0 briefs in docs/archive/; serve-time budget locked ≤15 min heavy day · next: unchanged
 - 2026-07-10 · WS-2/WS-4 backfill program done (1.76M credits of 5M): MLB+NHL feature gap closed (7-11 sharp books, NHL 2023-24 refilled), `ladder` seeded 15.5M rungs all five leagues (alt keys backfill-only), MLB/NHL close-layer dual snapshots (23Z eval-only) → CLV/movement computable; §6.11 tail read + §6.5 ladder-lift re-test unblocked. MLB matrices rebuilt 19/19 at 2 seasons; NHL rebuild + both sweeps in flight.
@@ -1508,5 +1571,4 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 - 2026-06-22 · Gate 6 redesigned (OR of 3 one-sided legs + anchor hysteresis) + widened to all cells; `ratio_projvol` REFUTED 0/40, g6 validated; first full strategy board generated.
 - 2026-06-19 · Gate 6 added (anti-shrinkage); §6.3 feature batch 1 + Playoff/series shipped via §7.2 A/B.
 - 2026-06-17 · §6.0 train/live parity harness built; archive NBA Totals ×1.4427 corruption root-caused+fixed+guardrailed; QW-1 game-script A/B NO-SHIP across 15 cells.
-- 2026-06-15 · profit_sim payout/Kelly bug (inbound dashboard-ux) FIXED on `ship/profit-sim-net-fix` — feeds S3 paired-Sharpe + Gate-2 Kelly yield; memory `profit_sim_payout_kelly_bug`.
 - older lines live in git (`git log docs/handoffs/model_improvement_track.md`); durable sweep-era verdicts consolidated in [`../operation_ship_references.md`](../operation_ship_references.md) §15.
