@@ -574,12 +574,17 @@ def _build_prob_params(
         # set_model_start_values would treat it as a plain LSS and fail.
         model.set_model_start_values(playerStats)
     else:
+        # sn_param must match training: the seeds are per-row predict-time
+        # margins, so seeding a centered pickle in direct space shifts the
+        # gamma1 head (same drift class as the offset_mode fix above).
+        # Legacy pickles persist no key -> "direct".
         set_model_start_values(
             model,
             dist,
             playerStats,
             normalized=normalized,
             offset_mode=_serve_offset_mode(dist, target_normalization),
+            sn_param=filedict.get("sn_param", "direct"),
         )
     prob_params = model.predict(playerStats, pred_type="parameters")
     prob_params.index = playerStats.index

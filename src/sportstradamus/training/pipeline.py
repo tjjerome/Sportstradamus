@@ -52,6 +52,7 @@ from sportstradamus.helpers.distributions import _DP_PHI_CEILING, _DP_PHI_FLOOR,
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.hurdle import HurdleZINB
 from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
+from sportstradamus.skew_normal_centered import CenteredSkewNormal
 from sportstradamus.training import baselines, calibration, posthoc
 from sportstradamus.training.calibration import fit_book_weights
 from sportstradamus.training.config import (
@@ -219,6 +220,7 @@ def fit_lss_model(
     shape_ceiling: float,
     seed: int | None = None,
     offset_mode: bool = False,
+    sn_param: str = "direct",
 ) -> LightGBMLSS:
     """Build + train a LightGBMLSS model. Pure (no disk writes).
 
@@ -240,6 +242,10 @@ def fit_lss_model(
         offset_mode: SkewNormal-only — targets are an additive centered
             residual. Forwarded to ``set_model_start_values``; ignored for
             other distributions.
+        sn_param: SkewNormal-only head parametrization for start-value
+            seeding — ``"direct"`` or ``"centered"``. Must match
+            ``dist_obj``'s parametrization; forwarded to
+            ``set_model_start_values`` (no-op for other distributions).
 
     Returns:
         A trained ``LightGBMLSS`` model.
@@ -255,6 +261,7 @@ def fit_lss_model(
         shape_ceiling=shape_ceiling,
         normalized=normalized,
         offset_mode=offset_mode,
+        sn_param=sn_param,
     )
     model.train(params, dtrain, num_boost_round=params["opt_rounds"])
     return model
@@ -267,6 +274,7 @@ def predict_lss_params(
     *,
     normalized: bool,
     offset_mode: bool = False,
+    sn_param: str = "direct",
 ) -> pd.DataFrame:
     """Predict raw distribution parameters for X, preserving its index.
 
@@ -280,11 +288,17 @@ def predict_lss_params(
         offset_mode: SkewNormal-only — targets are an additive centered
             residual. Forwarded to ``set_model_start_values``; ignored for
             other distributions.
+        sn_param: SkewNormal-only head parametrization — ``"direct"`` or
+            ``"centered"``. Must match how the model was trained; the seeds
+            are per-row predict-time margins, so a mismatch shifts the skew
+            head. Forwarded to ``set_model_start_values``.
 
     Returns:
         DataFrame of raw predicted distribution parameters, indexed like ``X``.
     """
-    set_model_start_values(model, dist, X, normalized=normalized, offset_mode=offset_mode)
+    set_model_start_values(
+        model, dist, X, normalized=normalized, offset_mode=offset_mode, sn_param=sn_param
+    )
     preds = model.predict(X, pred_type="parameters")
     preds.index = X.index
     return preds
@@ -302,6 +316,7 @@ def fit_predict_params(
     shape_ceiling: float,
     seed: int | None = None,
     offset_mode: bool = False,
+    sn_param: str = "direct",
 ) -> pd.DataFrame:
     """Fit one LightGBMLSS model and return raw predicted params for X_predict.
 
@@ -323,6 +338,8 @@ def fit_predict_params(
         offset_mode: SkewNormal-only — targets are an additive centered
             residual. Forwarded to ``set_model_start_values``; ignored for
             other distributions.
+        sn_param: SkewNormal-only head parametrization — ``"direct"`` or
+            ``"centered"``. Forwarded to both the fit and predict seeding.
 
     Returns:
         DataFrame of raw predicted distribution parameters for ``X_predict``.
@@ -337,9 +354,10 @@ def fit_predict_params(
         shape_ceiling=shape_ceiling,
         seed=seed,
         offset_mode=offset_mode,
+        sn_param=sn_param,
     )
     return predict_lss_params(
-        model, dist, X_predict, normalized=normalized, offset_mode=offset_mode
+        model, dist, X_predict, normalized=normalized, offset_mode=offset_mode, sn_param=sn_param
     )
 
 
@@ -798,6 +816,7 @@ def _step_build_lss_model(
     normalize: bool,
     offset_mode: bool,
     use_hurdle: bool,
+    sn_param: str,
 ):
     """Apply the bounded shape response and build an unfit LightGBMLSS model.
 
@@ -824,6 +843,7 @@ def _step_build_lss_model(
         shape_ceiling=shape_ceiling,
         normalized=normalize,
         offset_mode=offset_mode,
+        sn_param=sn_param,
     )
     return model
 
@@ -876,6 +896,7 @@ def _calibration_penalty(splits: dict, dist_info: dict):
             normalized=dist_info["normalize"],
             shape_ceiling=dist_info["shape_ceiling"],
             offset_mode=dist_info["offset_mode"],
+            sn_param=dist_info["sn_param"],
         )
         sn_loc = strategy.decode_loc(preds["loc"].to_numpy(), X_val, global_mean, denom_col)
         sn_scale = strategy.decode_scale(preds["scale"].to_numpy(), X_val, denom_col)
@@ -1003,6 +1024,7 @@ def _step_fit_model(
     offset_mode: bool,
     shape_ceiling,
     deterministic: bool,
+    sn_param: str,
 ):
     """Dispatch ``fit_hurdle_model`` vs ``fit_lss_model`` based on ``use_hurdle``."""
     seed = DETERMINISTIC_SEED if deterministic else None
@@ -1020,11 +1042,12 @@ def _step_fit_model(
         shape_ceiling=shape_ceiling,
         seed=seed,
         offset_mode=offset_mode,
+        sn_param=sn_param,
     )
 
 
 def _step_predict_splits(
-    model, dist: str, splits: dict, *, normalize: bool, offset_mode: bool
+    model, dist: str, splits: dict, *, normalize: bool, offset_mode: bool, sn_param: str
 ) -> dict:
     """Predict raw distribution params on train/validation/test splits.
 
@@ -1039,7 +1062,7 @@ def _step_predict_splits(
         if getattr(model, "is_hurdle", False):
             return predict_hurdle_params(model, X_part)
         return predict_lss_params(
-            model, dist, X_part, normalized=normalize, offset_mode=offset_mode
+            model, dist, X_part, normalized=normalize, offset_mode=offset_mode, sn_param=sn_param
         )
 
     prob_params_train = _predict(splits["X_train"])
@@ -1420,6 +1443,7 @@ def _build_filedict(
     posthoc_blob: dict | None,
     pit_recal_blob: dict | None,
     zinb_mode: str,
+    sn_param: str,
     X,
 ) -> dict:
     """Assemble the model pickle dict. Key order is load-bearing for byte parity."""
@@ -1485,6 +1509,7 @@ def _build_filedict(
         "posthoc_blob": posthoc_blob,
         "pit_recal_blob": pit_recal_blob,
         "zinb_mode": zinb_mode,
+        "sn_param": sn_param,
         "is_hurdle": bool(getattr(model, "is_hurdle", False)),
         "expected_columns": list(X.columns),
         "trained_at": trained_at,
@@ -2446,6 +2471,24 @@ def _resolve_dist(
     return configured
 
 
+def _skewnormal_dist_obj(sn_param: str, stabilization: str, dist_training_loss: str):
+    """The continuous-branch distribution object for the requested parametrization.
+
+    ``"centered"`` boosts (mean, sd, gamma1) heads via :class:`CenteredSkewNormal`,
+    whose ``predict_dist`` re-emits direct (loc, scale, alpha) columns — the family
+    string and every ``dist == "SkewNormal"`` consumer downstream stay unchanged.
+    """
+    loss_fn = _resolve_loss_fn("crps", dist_training_loss)
+    if sn_param == "centered":
+        # Unstabilized centered heads NaN out within ~4 rounds (mapped-alpha hessians
+        # explode near the gamma1 bound), so the module-default "None" upgrades to the
+        # family's own L2 default; an explicit MAD/L2 from the caller is honored.
+        if stabilization == "None":
+            stabilization = "L2"
+        return CenteredSkewNormal(stabilization=stabilization, loss_fn=loss_fn)
+    return SkewNormalDist(stabilization=stabilization, loss_fn=loss_fn)
+
+
 def _step_select_distribution(
     splits: dict,
     stat_data,
@@ -2458,6 +2501,7 @@ def _step_select_distribution(
     dist_training_loss: str = LOSS_AUTO,
     stabilization: str = "None",
     dist_override: str = LOSS_AUTO,
+    sn_param: str = "direct",
 ) -> dict:
     """Choose distribution family + apply target transform + compute shape priors.
 
@@ -2481,12 +2525,15 @@ def _step_select_distribution(
         league: League slug.
         target_normalization: Slug for ``baselines.get_target_normalization``.
         deterministic: If True, skip persisting cv/zi to stat_calibration.json.
+        sn_param: ``"direct"`` or ``"centered"`` — SkewNormal head
+            parametrization (see :func:`_skewnormal_dist_obj`); ignored by the
+            count families.
 
     Returns:
         Dict with: ``dist``, ``dist_obj`` (None on hurdle path until built),
         ``cv``, ``shape_ceiling``, ``marginal_shape``, ``normalize``,
         ``offset_mode``, ``denom_col``, ``strategy``, ``hist_gate``,
-        ``player_stats``, ``global_mean``.
+        ``player_stats``, ``global_mean``, ``sn_param``.
     """
     y_train_labels = splits["y_train_labels"]
     X_train = splits["X_train"]
@@ -2532,9 +2579,7 @@ def _step_select_distribution(
         market,
     )
     if dist == "SkewNormal":
-        dist_obj = SkewNormalDist(
-            stabilization=stabilization, loss_fn=_resolve_loss_fn("crps", dist_training_loss)
-        )
+        dist_obj = _skewnormal_dist_obj(sn_param, stabilization, dist_training_loss)
 
         cv = (
             player_stats.std()
@@ -2629,6 +2674,7 @@ def _step_select_distribution(
         "hist_gate": hist_gate,
         "player_stats": player_stats,
         "global_mean": global_mean,
+        "sn_param": sn_param,
     }
 
 
@@ -2650,6 +2696,7 @@ def train_market(
     stabilization: str = "None",
     hpo_selection: str = "loss",
     count_dispersion_objective: str = "crps",
+    sn_param: str = "direct",
     matrix_only: bool = False,
 ) -> None:
     """Train or retrain one LightGBMLSS model for a single league/market pair.
@@ -2695,6 +2742,12 @@ def train_market(
             ``"auto"`` (default) honors each cell's stat_meta ``dist`` (else the
             data-driven rule); an explicit forceable family overrides every cell via
             :func:`_resolve_dist`, byte-unchanged from production under ``"auto"``.
+        sn_param: SkewNormal parametrization — ``"direct"`` (loc/scale/alpha heads;
+            the production default) or ``"centered"`` (mean/sd/gamma1 heads via
+            :class:`CenteredSkewNormal`, re-emitting direct params at predict —
+            zero serving delta). Arrives resolved: the CLI maps ``"auto"`` to the
+            cell's stat_meta before calling. Consulted only on the SkewNormal
+            branch and in start-value seeding; persisted in the pickle.
     """
     # style: allow-length  pre-existing research orchestrator (§2.8/§18.9): flag,
     # don't split. Already over the limit before the FBT keyword-only conversion.
@@ -2746,6 +2799,7 @@ def train_market(
         dist_training_loss=dist_training_loss,
         stabilization=stabilization,
         dist_override=dist_override,
+        sn_param=sn_param,
     )
     dist = dist_info["dist"]
     cv = dist_info["cv"]
@@ -2770,6 +2824,7 @@ def train_market(
         normalize=dist_info["normalize"],
         offset_mode=dist_info["offset_mode"],
         use_hurdle=use_hurdle,
+        sn_param=sn_param,
     )
     dtrain = lgb.Dataset(splits["X_train"], label=splits["y_train_labels"])
     opt_params_in = filedict.get("params")
@@ -2802,10 +2857,16 @@ def train_market(
         offset_mode=dist_info["offset_mode"],
         shape_ceiling=shape_ceiling,
         deterministic=deterministic,
+        sn_param=sn_param,
     )
 
     preds = _step_predict_splits(
-        model, dist, splits, normalize=dist_info["normalize"], offset_mode=dist_info["offset_mode"]
+        model,
+        dist,
+        splits,
+        normalize=dist_info["normalize"],
+        offset_mode=dist_info["offset_mode"],
+        sn_param=sn_param,
     )
     prob_params = preds["prob_params"]
 
@@ -2924,6 +2985,7 @@ def train_market(
         posthoc_blob=posthoc_blob,
         pit_recal_blob=calibrated.get("pit_recal_blob"),
         zinb_mode=zinb_mode,
+        sn_param=sn_param,
         X=splits["X"],
     )
 

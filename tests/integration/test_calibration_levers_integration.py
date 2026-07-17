@@ -112,6 +112,7 @@ def test_calibration_penalty_scores_skewnormal_then_pick_selects():
         "normalize": True,
         "offset_mode": False,
         "shape_ceiling": None,
+        "sn_param": "direct",
     }
     n_feat = X.shape[1]
     served_pit_ks = _calibration_penalty(splits, dist_info)

@@ -1,9 +1,10 @@
 """Operation Ship 75 strategy sweep: a per-cell Optuna study over a family's retrain grid.
 
 For each ``(league, market)`` cell the sweep runs one Optuna study per family of the cell's
-distribution class — a SkewNormal cell sweeps ``normalization × dist-loss × blend-loss``; a count
-cell sweeps BOTH ``ZINB`` (``zinb-mode × count-dispersion-objective × blend-loss``) AND plain
-``NegBin`` (``count-dispersion-objective × blend-loss``), cross-family ranked by ship slack —
+distribution class — a SkewNormal cell sweeps ``normalization × dist-loss × sn-param ×
+blend-loss``; a count cell sweeps BOTH ``ZINB`` (``zinb-mode × count-dispersion-objective ×
+blend-loss``) AND plain ``NegBin`` (``count-dispersion-objective × blend-loss``), cross-family
+ranked by ship slack —
 training one deterministic ``meditate`` trial per grid corner and scoring it through the *honest*
 production gate: the deterministic dump
 already carries the pipeline's validation-fit calibration, and :func:`_score_corner` runs the same
@@ -105,6 +106,7 @@ _AXIS_FLAG: dict[str, str] = {
     "dist": "--dist",
     "normalization": "--target-normalization",
     "dist_training_loss": "--dist-training-loss",
+    "sn_param": "--sn-param",
     "blending_loss_fn": "--blending-loss-fn",
     "zinb_mode": "--zinb-mode",
     "count_dispersion_objective": "--count-dispersion-objective",
@@ -133,9 +135,14 @@ _FAMILIES: dict[str, FamilySpec] = {
         axes={
             "normalization": _DECODABLE_SN_NORMS,
             "dist_training_loss": ("crps", "nll"),
+            "sn_param": ("direct", "centered"),
             "blending_loss_fn": _BLENDING,
         },
-        persist={"normalization": "target_normalization", "blending_loss_fn": "blending"},
+        persist={
+            "normalization": "target_normalization",
+            "sn_param": "sn_param",
+            "blending_loss_fn": "blending",
+        },
         defaults={"dist_training_loss": _SN_DEFAULT_DIST_LOSS},
     ),
     "ZINB": FamilySpec(
@@ -205,6 +212,7 @@ _AXIS_COLUMNS: list[str] = [
     "dist",
     "normalization",
     "dist_training_loss",
+    "sn_param",
     "zinb_mode",
     "count_dispersion_objective",
     "blending_loss_fn",
@@ -660,7 +668,7 @@ def _stat_meta_edit(row: object) -> str:
     """The exact stat_meta.json fields to persist a winning corner, resolved for its family.
 
     Reads the family's ``persist`` map so the operator doesn't have to translate board columns to
-    field names: SkewNormal → ``target_normalization=…, blending=…``; a count family →
+    field names: SkewNormal → ``target_normalization=…, sn_param=…, blending=…``; a count family →
     ``dist=…, [zinb_mode=…,] count_dispersion_objective=…, blending=…`` (the persisted ``dist`` pins
     the winning family, e.g. flipping a cell ZINB→NegBin). A non-persistable axis (SN's dist-loss) is
     intentionally omitted — the shipped model uses the family default.

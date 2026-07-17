@@ -75,6 +75,7 @@ def _minimal_filedict_kwargs() -> dict:
         "posthoc_blob": None,
         "pit_recal_blob": None,
         "zinb_mode": "auto",
+        "sn_param": "direct",
         "X": pd.DataFrame({"f0": [1], "f1": [2]}),
     }
 

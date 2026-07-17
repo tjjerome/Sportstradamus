@@ -75,6 +75,7 @@ def _fake_run_and_score(league, market, family, corner):
                 corner["normalization"]
             ]
             + (0.05 if corner["dist_training_loss"] == "nll" else 0.0)
+            + (0.01 if corner["sn_param"] == "centered" else 0.0)
             + (0.02 if corner["blending_loss_fn"] == "crps" else 0.0)
         )
     elif family == "ZINB":
@@ -101,11 +102,16 @@ def test_family_registry_grids_and_persist_maps():
     zinb = sweep._FAMILIES["ZINB"]
     negbin = sweep._FAMILIES["NegBin"]
     dpo = sweep._FAMILIES["DPO"]
-    assert math.prod(len(v) for v in sn.axes.values()) == 12
+    # SN: 3 norms × 2 dist-loss × 2 sn-param × 2 blend.
+    assert math.prod(len(v) for v in sn.axes.values()) == 24
     assert math.prod(len(v) for v in zinb.axes.values()) == 8  # 1 dist × 2 mode × 2 disp × 2 blend
     assert math.prod(len(v) for v in negbin.axes.values()) == 4  # 1 dist × 2 disp × 2 blend
     assert math.prod(len(v) for v in dpo.axes.values()) == 4  # 1 dist × 2 disp × 2 blend
-    assert sn.persist == {"normalization": "target_normalization", "blending_loss_fn": "blending"}
+    assert sn.persist == {
+        "normalization": "target_normalization",
+        "sn_param": "sn_param",
+        "blending_loss_fn": "blending",
+    }
     # Count families persist their single-choice dist so a winner's dist writes to stat_meta.
     assert zinb.persist == {
         "dist": "dist",
@@ -144,6 +150,22 @@ def test_dist_axis_flag_and_class_maps():
     assert "dist" in sweep._BOARD_COLUMNS
 
 
+def test_sn_param_axis_swept_persisted_and_dump_inert():
+    """SkewNormal sweeps sn_param (direct vs centered parametrization) and persists it per-cell —
+    a ship-deciding knob without a stat_meta field would be pruned by the warm cron retrain. The
+    axis forwards --sn-param, rides the board schema, and does NOT key the deterministic dump
+    subdir (like the loss axes, corners sharing a subdir train+score sequentially).
+    """
+    sn = sweep._FAMILIES["SkewNormal"]
+    assert sn.axes["sn_param"] == ("direct", "centered")
+    assert sn.persist["sn_param"] == "sn_param"
+    assert "sn_param" not in sn.defaults  # persistable — a centered winner must be confirmable
+    assert sweep._AXIS_FLAG["sn_param"] == "--sn-param"
+    assert "sn_param" in sweep._AXIS_COLUMNS and "sn_param" in sweep._BOARD_COLUMNS
+    corner = {"normalization": "ratio_meanyr", "sn_param": "centered"}
+    assert sweep._dump_subdir(corner) == "ratio_meanyr"
+
+
 def test_dump_subdir_matches_meditate_keying():
     """The dump subdir mirrors pipeline.py: SN uses the normalization; a ZINB corner uses the
     ratio_meanyr count fallback, with a ``_hurdle`` suffix in hurdle mode.
@@ -178,15 +200,15 @@ def test_cell_families_routes_by_distribution_class(monkeypatch):
 
 
 def test_corner_count_sums_families_per_cell(monkeypatch):
-    """A count cell's corner count is ZINB + NegBin + DPO (8+4+4); a SN cell's is its single grid (12)."""
+    """A count cell's corner count is ZINB + NegBin + DPO (8+4+4); a SN cell's is its single grid (24)."""
     families = {
         ("MLB", "pitcher strikeouts"): ("ZINB", "NegBin", "DPO"),
         ("WNBA", "AST"): ("SkewNormal",),
     }
     monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: families[(lg, mkt)])
     assert sweep._cell_corner_count("MLB", "pitcher strikeouts") == 16  # 8 + 4 + 4
-    assert sweep._cell_corner_count("WNBA", "AST") == 12
-    assert sweep._corner_count([("MLB", "pitcher strikeouts"), ("WNBA", "AST")]) == 28
+    assert sweep._cell_corner_count("WNBA", "AST") == 24
+    assert sweep._corner_count([("MLB", "pitcher strikeouts"), ("WNBA", "AST")]) == 40
 
 
 def test_decode_strategy_is_norm_for_sn_and_fallback_for_count():
@@ -295,10 +317,11 @@ def test_search_cell_enumerates_sn_grid_and_ranks(monkeypatch):
     monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
     board = sweep.search_cell("WNBA", "AST")
 
-    assert len(board) == 12  # 3 norms × 2 dist-loss × 2 blend
-    # Best corner: centered-mean10 + nll + crps blend (0.20 + 0.05 + 0.02).
+    assert len(board) == 24  # 3 norms × 2 dist-loss × 2 sn-param × 2 blend
+    # Best corner: centered-mean10 + nll + centered + crps blend (0.20 + 0.05 + 0.01 + 0.02).
     assert board.iloc[0]["normalization"] == "centered_additive_mean10"
     assert board.iloc[0]["dist_training_loss"] == "nll"
+    assert board.iloc[0]["sn_param"] == "centered"
     assert board.iloc[0]["blending_loss_fn"] == "crps"
     assert board["slack"].is_monotonic_decreasing
     assert (board["family"] == "SkewNormal").all()
@@ -332,8 +355,9 @@ def test_search_cell_count_cell_sweeps_both_families_and_unions(monkeypatch):
     assert board.iloc[0]["blending_loss_fn"] == "crps"
     # NegBin corners never carry a zinb_mode key → its column stays blank for them (schema superset).
     assert board.loc[board["family"] == "NegBin", "zinb_mode"].isna().all()
-    # SN-only axis is blank on a count board (the schema is a shared superset).
+    # SN-only axes are blank on a count board (the schema is a shared superset).
     assert board["normalization"].isna().all()
+    assert board["sn_param"].isna().all()
 
 
 def test_search_cell_survives_a_failing_corner(monkeypatch):
@@ -354,10 +378,10 @@ def test_search_cell_survives_a_failing_corner(monkeypatch):
     )
     board = sweep.search_cell("NHL", "blocked")
 
-    assert len(board) == 12  # all corners recorded; no crash aborted the grid
+    assert len(board) == 24  # all corners recorded; no crash aborted the grid
     failed = board[board["slack"] == sweep._FAILED_CORNER_SLACK]
-    assert len(failed) == 6 and not failed["ships"].astype(bool).any()  # the 6 crps corners
-    assert int(board["ships"].astype(bool).sum()) == 6  # the 6 nll corners scored + shipped
+    assert len(failed) == 12 and not failed["ships"].astype(bool).any()  # the 12 crps corners
+    assert int(board["ships"].astype(bool).sum()) == 12  # the 12 nll corners scored + shipped
 
 
 def test_run_deterministic_meditate_builds_corner_flags(monkeypatch, tmp_path):
@@ -372,11 +396,17 @@ def test_run_deterministic_meditate_builds_corner_flags(monkeypatch, tmp_path):
         lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0),
     )
 
-    sn = {"normalization": "ratio_meanyr", "dist_training_loss": "nll", "blending_loss_fn": "crps"}
+    sn = {
+        "normalization": "ratio_meanyr",
+        "dist_training_loss": "nll",
+        "sn_param": "centered",
+        "blending_loss_fn": "crps",
+    }
     sweep._run_deterministic_meditate("WNBA", "AST", sn)
     last = calls[-1]
     assert last[last.index("--target-normalization") + 1] == "ratio_meanyr"
     assert last[last.index("--dist-training-loss") + 1] == "nll"
+    assert last[last.index("--sn-param") + 1] == "centered"
     assert last[last.index("--blending-loss-fn") + 1] == "crps"
     assert sweep._log_path("WNBA", "AST", sn).exists()
 
@@ -384,6 +414,7 @@ def test_run_deterministic_meditate_builds_corner_flags(monkeypatch, tmp_path):
     sweep._run_deterministic_meditate("MLB", "pitcher strikeouts", zinb)
     z = calls[-1]
     assert "--target-normalization" not in z
+    assert "--sn-param" not in z
     assert z[z.index("--zinb-mode") + 1] == "hurdle"
     assert z[z.index("--count-dispersion-objective") + 1] == "pit_ks"
 
@@ -624,8 +655,16 @@ def test_cli_board_dry_run_trains_nothing(monkeypatch, tmp_path):
 
 
 def test_stat_meta_edit_is_family_aware():
-    sn = {"family": "SkewNormal", "normalization": "centered_additive_mean10", "blending_loss_fn": "crps"}
-    assert sweep._stat_meta_edit(sn) == "target_normalization=centered_additive_mean10, blending=crps"
+    sn = {
+        "family": "SkewNormal",
+        "normalization": "centered_additive_mean10",
+        "sn_param": "centered",
+        "blending_loss_fn": "crps",
+    }
+    assert (
+        sweep._stat_meta_edit(sn)
+        == "target_normalization=centered_additive_mean10, sn_param=centered, blending=crps"
+    )
     # Count families persist dist first (pins the winning family, e.g. a ZINB→NegBin flip).
     zinb = {
         "family": "ZINB",
@@ -685,7 +724,7 @@ def test_cli_confirm_invokes_run_confirm(monkeypatch, tmp_path):
         sweep.main, ["--league", "WNBA", "--market", "AST", "--out", out, "--confirm", "--yes"]
     )
     assert result.exit_code == 0, result.output
-    assert seen == {"n": 12, "yes": True}
+    assert seen == {"n": 24, "yes": True}
 
 
 def test_cli_single_cell_upserts_into_existing_board(monkeypatch, tmp_path):

@@ -270,6 +270,17 @@ def _resolve_cell_knob(stat_meta_full, lg, market, key, default, flag_value):
     ),
 )
 @click.option(
+    "--sn-param",
+    type=click.Choice([LOSS_AUTO, "direct", "centered"]),
+    default=LOSS_AUTO,
+    show_default=True,
+    help=(
+        "SkewNormal parametrization. 'auto' (default) honors each cell's stat_meta sn_param "
+        "(else 'direct', current production); 'centered' boosts (mean, sd, gamma1) heads and "
+        "re-emits direct params at predict — zero serving delta; a WS-3 family sweep axis."
+    ),
+)
+@click.option(
     "--matrix-only/--no-matrix-only",
     default=False,
     help=(
@@ -295,6 +306,7 @@ def meditate(
     stabilization,
     hpo_selection,
     count_dispersion_objective,
+    sn_param,
     matrix_only,
 ):
     """Train or retrain LightGBMLSS models for each configured market."""
@@ -479,6 +491,9 @@ def meditate(
             cell_zinb_mode = _resolve_cell_knob(
                 stat_meta_full, lg, market, "zinb_mode", "joint", zinb_mode
             )
+            cell_sn_param = _resolve_cell_knob(
+                stat_meta_full, lg, market, "sn_param", "direct", sn_param
+            )
             train_market(
                 lg,
                 market,
@@ -496,6 +511,7 @@ def meditate(
                 stabilization=stabilization,
                 hpo_selection=cell_hpo_selection,
                 count_dispersion_objective=cell_count_dispersion,
+                sn_param=cell_sn_param,
                 matrix_only=matrix_only,
             )
 

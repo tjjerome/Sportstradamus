@@ -907,7 +907,17 @@ def _softplus_inv(x):
     )
 
 
-def _skewnormal_start_values(mu, std, n, offset_mode, normalized):
+# Mirrors skew_normal_centered._GAMMA1_MAX (the tanh response bound on the
+# centered gamma1 head); duplicated so this module's import graph stays
+# torch-free, cross-pinned by tests/golden/test_centered_sn_seed.py.
+_SN_CENTERED_GAMMA1_BOUND = 0.99
+# Exactly-0 gamma1 has an infinite cube-root gradient in the CP→DP inversion
+# (R2 brief risk iii), so the centered seed starts slightly off-zero; positive
+# because X carries no skew-sign information.
+_SN_CENTERED_GAMMA1_SEED = 0.05
+
+
+def _skewnormal_start_values(mu, std, n, offset_mode, normalized, sn_param):
     if offset_mode:
         # Additive centered residual target (y - baseline): residual mean
         # ≈ 0 per row; scale starts at per-player STDYr. Explicit per-row
@@ -924,8 +934,14 @@ def _skewnormal_start_values(mu, std, n, offset_mode, normalized):
     else:
         loc = mu.copy()
         scale = std.copy()
+    log_scale = np.log(np.clip(scale, 1e-6, None))
+    if sn_param == "centered":
+        # The direct alpha seed is 0, so loc/scale above are exactly the
+        # predictive mean/sd — the centered (mean, sd) heads reuse them as is.
+        gamma1_raw = np.arctanh(_SN_CENTERED_GAMMA1_SEED / _SN_CENTERED_GAMMA1_BOUND)
+        return np.column_stack([loc, log_scale, np.full(n, gamma1_raw)])
     alpha_skew = np.zeros(n)  # Start symmetric.
-    return np.column_stack([loc, np.log(np.clip(scale, 1e-6, None)), alpha_skew])
+    return np.column_stack([loc, log_scale, alpha_skew])
 
 
 def _negbin_start_values(mu, std, hist_gate, dist, _r_upper):
@@ -956,7 +972,13 @@ def _gamma_start_values(mu, std, hist_gate, dist, _a_upper):
 
 
 def set_model_start_values(
-    model, dist, X_data, shape_ceiling=None, normalized=False, offset_mode=False
+    model,
+    dist,
+    X_data,
+    shape_ceiling=None,
+    normalized=False,
+    offset_mode=False,
+    sn_param: str = "direct",
 ):
     """Initialize LightGBMLSS start values from per-player historical moments.
 
@@ -968,7 +990,9 @@ def set_model_start_values(
     * Gamma / ZAGamma: ``concentration`` → softplus, ``rate`` → softplus,
       ``gate`` → sigmoid.
     * DPO: ``mu`` → softplus, ``phi`` → softplus.
-    * SkewNormal: ``loc`` → identity, ``scale`` → exp, ``alpha`` → identity.
+    * SkewNormal: ``loc`` → identity, ``scale`` → exp, ``alpha`` → identity;
+      with ``sn_param="centered"``: ``mean`` → identity, ``sd`` → exp,
+      ``gamma1`` → ``0.99·tanh``.
 
     Args:
         model: The LightGBMLSS model whose ``start_values`` gets assigned.
@@ -985,6 +1009,13 @@ def set_model_start_values(
             zero per row and ``scale`` at per-player STDYr (residual
             dispersion ≈ per-player std). Mutually exclusive with
             ``normalized``; ignored for non-SkewNormal distributions.
+        sn_param: SkewNormal-only head parametrization — ``"direct"``
+            (loc, scale, alpha) or ``"centered"`` (``CenteredSkewNormal``'s
+            mean, sd, gamma1). The direct alpha seed is 0, so the direct
+            loc/scale seeds are already the predictive mean/sd; the centered
+            variant reuses them and seeds gamma1 just off zero
+            (``_SN_CENTERED_GAMMA1_SEED``). Ignored for every other
+            distribution.
     """
     sv = X_data[["MeanYr", "STDYr", "ZeroYr"]].to_numpy()
     n = len(sv)
@@ -997,7 +1028,7 @@ def set_model_start_values(
     _a_upper = shape_ceiling if shape_ceiling is not None else 100
 
     if dist == "SkewNormal":
-        sv = _skewnormal_start_values(mu, std, n, offset_mode, normalized)
+        sv = _skewnormal_start_values(mu, std, n, offset_mode, normalized, sn_param)
     elif dist in ["NegBin", "ZINB"]:
         sv, hist_gate = _negbin_start_values(mu, std, hist_gate, dist, _r_upper)
     elif dist == "DPO":

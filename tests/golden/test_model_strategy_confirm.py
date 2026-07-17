@@ -13,13 +13,14 @@ import pytest
 from sportstradamus.training import model_strategy_confirm as mc
 
 
-def _sn_row(norm, dist_loss, blend, ships, slack):
+def _sn_row(norm, dist_loss, blend, ships, slack, sn_param="direct"):
     return {
         "league": "WNBA",
         "market": "AST",
         "family": "SkewNormal",
         "normalization": norm,
         "dist_training_loss": dist_loss,
+        "sn_param": sn_param,
         "blending_loss_fn": blend,
         "ships": ships,
         "slack": slack,
@@ -42,6 +43,7 @@ def _zinb_row(mode, disp, blend, ships, slack):
         "blending_loss_fn": blend,
         "normalization": float("nan"),
         "dist_training_loss": float("nan"),
+        "sn_param": float("nan"),
         "ships": ships,
         "slack": slack,
     }
@@ -59,6 +61,7 @@ def _negbin_row(disp, blend, ships, slack):
         "blending_loss_fn": blend,
         "normalization": float("nan"),
         "dist_training_loss": float("nan"),
+        "sn_param": float("nan"),
         "ships": ships,
         "slack": slack,
     }
@@ -69,18 +72,23 @@ def _negbin_row(disp, blend, ships, slack):
 
 def test_candidate_picks_best_persistable_corner():
     """The best-slack corner wins under nll (non-persistable dist-loss); the candidate is the next-
-    best corner that is fully persistable (crps), not the top row.
+    best corner that is fully persistable (crps), not the top row. sn_param persists (it has a
+    stat_meta field), so a centered corner is persistable and its edits carry sn_param=centered.
     """
     board = pd.DataFrame(
         [
             _sn_row("centered_additive_mean10", "nll", "crps", True, 0.30),  # top slack, but nll
-            _sn_row("centered_additive_mean10", "crps", "crps", True, 0.25),  # persistable
+            _sn_row("centered_additive_mean10", "crps", "crps", True, 0.25, sn_param="centered"),
             _sn_row("ratio_meanyr", "crps", "nll", False, -0.10),
         ]
     )
     cand = mc._candidate(board)
     assert cand["status"] == "candidate"
-    assert cand["edits"] == {"target_normalization": "centered_additive_mean10", "blending": "crps"}
+    assert cand["edits"] == {
+        "target_normalization": "centered_additive_mean10",
+        "sn_param": "centered",
+        "blending": "crps",
+    }
     assert cand["slack"] == 0.25
 
 
@@ -110,7 +118,8 @@ def test_candidate_zinb_is_fully_persistable():
         "zinb_mode": "hurdle",
         "count_dispersion_objective": "pit_ks",
         "blending_loss_fn": "crps",
-        "dist_training_loss": float("nan"),  # mirrors the reindexed board (SN-only column blank)
+        "dist_training_loss": float("nan"),  # mirrors the reindexed board (SN-only columns blank)
+        "sn_param": float("nan"),
         "ships": True,
         "slack": 0.2,
     }
@@ -192,12 +201,18 @@ def test_confirm_one_pass_keeps_devel(monkeypatch):
     cand = {
         "league": "WNBA",
         "market": "AST",
-        "edits": {"target_normalization": "centered_additive_mean10", "blending": "crps"},
+        "edits": {
+            "target_normalization": "centered_additive_mean10",
+            "sn_param": "centered",
+            "blending": "crps",
+        },
     }
     assert mc._confirm_one(meta, cand) == ("WNBA", "AST", "SHIPPED", [])
-    # Persisted: the edits + shipped=devel; no revert, no prune.
+    # Persisted: the edits + shipped=devel; no revert, no prune. A shipping centered corner
+    # writes sn_param="centered" — the warm cron retrain reads it back from stat_meta.
     assert meta["WNBA"]["AST"]["shipped"] == "devel"
     assert meta["WNBA"]["AST"]["target_normalization"] == "centered_additive_mean10"
+    assert meta["WNBA"]["AST"]["sn_param"] == "centered"
     assert meta["WNBA"]["AST"]["blending"] == "crps"
     assert pruned == []
     assert len(writes) == 1  # one persist write, no revert write
@@ -245,6 +260,7 @@ def test_run_confirm_yes_persists_and_confirms(monkeypatch, capsys):
     mc.run_confirm(board, yes=True)
     assert meta["WNBA"]["AST"]["shipped"] == "devel"
     assert meta["WNBA"]["AST"]["target_normalization"] == "centered_additive_mean10"
+    assert meta["WNBA"]["AST"]["sn_param"] == "direct"  # the swept default persists explicitly too
     assert "SHIPPED" in capsys.readouterr().out
 
 
@@ -260,6 +276,7 @@ def test_run_confirm_mixed_board_routes_withheld_and_shipped(monkeypatch, capsys
                 "family": "SkewNormal",
                 "normalization": "centered_additive_mean10",
                 "dist_training_loss": "crps",
+                "sn_param": "direct",
                 "blending_loss_fn": "crps",
                 "ships": True,
                 "slack": 0.30,
@@ -332,6 +349,7 @@ def test_run_confirm_all_gated_returns_before_backup(monkeypatch, capsys):
         "family": "SkewNormal",
         "normalization": "centered_additive_mean10",
         "dist_training_loss": "crps",
+        "sn_param": "direct",
         "blending_loss_fn": "nll",
         "ships": True,
         "slack": 0.04,

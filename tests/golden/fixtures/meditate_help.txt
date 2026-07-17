@@ -111,6 +111,13 @@ Options:
                                   targets the served Gate-4 randomized-PIT KS
                                   directly, mirroring the SkewNormal branch; a
                                   Ship 75 axis.  [default: auto]
+  --sn-param [auto|direct|centered]
+                                  SkewNormal parametrization. 'auto' (default)
+                                  honors each cell's stat_meta sn_param (else
+                                  'direct', current production); 'centered'
+                                  boosts (mean, sd, gamma1) heads and re-emits
+                                  direct params at predict — zero serving delta;
+                                  a WS-3 family sweep axis.  [default: auto]
   --matrix-only / --no-matrix-only
                                   Assemble and persist each cell's training
                                   matrix (and comps), then stop before

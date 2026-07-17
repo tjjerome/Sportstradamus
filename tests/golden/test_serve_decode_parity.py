@@ -105,7 +105,9 @@ def test_build_prob_params_seeds_offset_mode_from_strategy(monkeypatch, slug, ex
     monkeypatch.setattr(
         _MP,
         "set_model_start_values",
-        lambda model, dist, X, normalized, offset_mode: captured.update(offset_mode=offset_mode),
+        lambda model, dist, X, normalized, offset_mode, sn_param: captured.update(
+            offset_mode=offset_mode
+        ),
     )
     _MP._build_prob_params(
         {"model": _FakeModel()},
@@ -117,3 +119,34 @@ def test_build_prob_params_seeds_offset_mode_from_strategy(monkeypatch, slug, ex
         slug,
     )
     assert captured["offset_mode"] is expected
+
+
+@pytest.mark.parametrize(
+    "filedict_extra,expected",
+    [({}, "direct"), ({"sn_param": "centered"}, "centered")],
+)
+def test_build_prob_params_seeds_sn_param_from_pickle(monkeypatch, filedict_extra, expected):
+    """Call-site pin: serve seeding reads ``sn_param`` off the pickle filedict.
+
+    The seeds are per-row predict-time margins, so seeding a centered pickle in
+    direct space shifts the gamma1 head — the same serve-drift class as
+    offset_mode above. Legacy pickles persist no key and must seed "direct".
+    """
+    captured = {}
+    monkeypatch.setattr(
+        _MP,
+        "set_model_start_values",
+        lambda model, dist, X, normalized, offset_mode, sn_param: captured.update(
+            sn_param=sn_param
+        ),
+    )
+    _MP._build_prob_params(
+        {"model": _FakeModel(), **filedict_extra},
+        "PTS",
+        _FakeStats(),
+        pd.DataFrame({"Home": [0, 1]}),
+        "SkewNormal",
+        False,
+        "ratio_meanyr",
+    )
+    assert captured["sn_param"] == expected
