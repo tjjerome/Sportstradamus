@@ -310,10 +310,12 @@
             "blending": "nll"
         },
         "points": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "count_dispersion_objective": "crps",
+            "blending": "crps"
         },
         "powerPlayPoints": {
             "dist": "ZINB",
@@ -469,12 +471,13 @@
             "posthoc": "none"
         },
         "TOV": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
             "posthoc": "none",
             "count_dispersion_objective": "pit_ks",
-            "zinb_mode": "hurdle"
+            "zinb_mode": "hurdle",
+            "blending": "nll"
         },
         "fantasy points prizepicks": {
             "dist": "SkewNormal",
