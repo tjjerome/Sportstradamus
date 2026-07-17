@@ -268,10 +268,12 @@
             "posthoc": "none"
         },
         "blocked": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "count_dispersion_objective": "crps",
+            "blending": "crps"
         },
         "faceOffWins": {
             "dist": "ZINB",
@@ -319,9 +321,12 @@
         },
         "powerPlayPoints": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "zinb_mode": "hurdle",
+            "count_dispersion_objective": "pit_ks",
+            "blending": "nll"
         },
         "saves": {
             "dist": "SkewNormal",
@@ -330,10 +335,12 @@
             "posthoc": "none"
         },
         "shots": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "count_dispersion_objective": "crps",
+            "blending": "nll"
         },
         "shotsAgainst": {
             "dist": "SkewNormal",
