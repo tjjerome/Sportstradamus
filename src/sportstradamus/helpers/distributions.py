@@ -13,7 +13,7 @@ Three related jobs live here:
    remaining ``(1-gate)`` is the base distribution.
 3. **Model/book fusion**: ``fused_loc`` blends the model's per-observation
    distribution parameters with the bookmaker's implied distribution
-   using either a log-opinion pool (NegBin) or a precision-weighted
+   using either a log-opinion pool (NegBin, DPO) or a precision-weighted
    blend (Gamma, SkewNormal) with weight ``w`` on the model. See CLAUDE.md
    for the math and the diagnostic block that validates this.
 
@@ -27,7 +27,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.optimize import brentq, minimize
 from scipy.special import beta as beta_fn
-from scipy.special import expit, logit
+from scipy.special import expit, gammaln, logit, logsumexp, xlogy
 from scipy.stats import gamma, nbinom, norm, poisson, skewnorm
 
 # Grid resolution for the continuous CRPS integrands (SkewNormal, gated Gamma).
@@ -61,6 +61,24 @@ NONZERO_DENOM_GATE = 0.05
 
 # Logit-space clip keeping temperature scaling clear of the 0/1 singularities.
 LOGIT_CLIP_EPS = 1e-6
+
+# Double Poisson support-grid + parameter bounds. Mirror the torch constants in
+# ``sportstradamus.double_poisson`` (kept separate so this module's import graph
+# stays torch-free); cross-consistency is pinned by the numpy-vs-torch pmf
+# golden test.
+_DP_KMAX_MIN = 30
+_DP_GRID_SIGMAS = 12.0
+_DP_KMAX_CAP = 1024
+_DP_PHI_FLOOR = 0.02
+_DP_PHI_CEILING = 25.0
+# Newton (multiplicative fixed-point) inversion of the exact DP mean back to the
+# mu parameter: relative tolerance and iteration cap before the brentq fallback.
+_DP_NEWTON_RTOL = 1e-6
+_DP_NEWTON_MAX_ITER = 8
+# Moment start values seed phi at clip(mean/var, floor, ceiling): a moment
+# estimate outside this band is small-sample noise, not a real dispersion read.
+_DP_PHI_SEED_FLOOR = 0.25
+_DP_PHI_SEED_CEILING = 4.0
 
 
 def odds_to_prob(odds):
@@ -225,6 +243,132 @@ def negbin_crps(y, r, p, gate=None) -> np.ndarray:
     return np.sum((cdf - indicator) ** 2, axis=0)
 
 
+def _dp_log_pmf_grid(mu, phi):
+    """Normalized DP log-pmf over the support grid; returns ``(grid, log_pmf)``.
+
+    Efron's (1986) double Poisson kernel, exactly normalized by logsumexp over
+    a truncated grid (terms decay super-factorially past the mode, so the grid
+    spans ``mu + _DP_GRID_SIGMAS·sd`` capped at ``_DP_KMAX_CAP``). Canonical
+    shapes: ``mu``/``phi`` come in scalar or 1-D and leave broadcast to a
+    common ``(n,)``; output is ``grid (K,)``, ``log_pmf (K, n)``.
+    """
+    mu = np.clip(np.atleast_1d(np.asarray(mu, dtype=float)), 1e-6, None)
+    phi = np.clip(np.atleast_1d(np.asarray(phi, dtype=float)), _DP_PHI_FLOOR, _DP_PHI_CEILING)
+    mu, phi = np.broadcast_arrays(mu, phi)
+    span = np.max(mu + _DP_GRID_SIGMAS * np.sqrt(mu / phi))
+    kmax = int(np.clip(span + 1, _DP_KMAX_MIN, _DP_KMAX_CAP))
+    grid = np.arange(kmax + 1, dtype=float)
+    k = grid[:, None]
+    log_kernel = (
+        0.5 * np.log(phi)[None, :]
+        - (phi * mu)[None, :]
+        + (phi[None, :] - 1.0) * k
+        + (1.0 - phi[None, :]) * xlogy(k, k)
+        - gammaln(k + 1.0)
+        + phi[None, :] * k * np.log(mu)[None, :]
+    )
+    return grid, log_kernel - logsumexp(log_kernel, axis=0, keepdims=True)
+
+
+def _dp_mean(mu, phi):
+    """Exact predictive mean of the double Poisson; ``mu`` is only approximate.
+
+    Returns shape ``(n,)`` for any scalar/1-D input combination.
+    """
+    grid, log_pmf = _dp_log_pmf_grid(mu, phi)
+    return np.sum(grid[:, None] * np.exp(log_pmf), axis=0)
+
+
+def _dp_mu_from_mean(mean, phi):
+    """Invert the exact DP mean back to the ``mu`` parameter; returns ``(n,)``.
+
+    Multiplicative fixed-point (Newton on the log scale — d mean/d log mu ≈
+    mean near the solution, since mean ≈ mu); rows that miss the tolerance
+    fall back to a per-row brentq bracket.
+    """
+    mean = np.clip(np.atleast_1d(np.asarray(mean, dtype=float)), 1e-6, None)
+    phi = np.broadcast_to(np.atleast_1d(np.asarray(phi, dtype=float)), mean.shape)
+    mu = mean.copy()
+
+    def _converged(current):
+        err = np.abs(_dp_mean(current, phi) - mean)
+        return (err < np.abs(mean) * _DP_NEWTON_RTOL) | (err < 1e-9)
+
+    for _ in range(_DP_NEWTON_MAX_ITER):
+        ratio = mean / np.clip(_dp_mean(mu, phi), 1e-9, None)
+        if np.all(np.abs(ratio - 1.0) < _DP_NEWTON_RTOL):
+            return mu
+        mu = np.clip(mu * np.clip(ratio, 0.5, 2.0), 1e-6, None)
+    for i in np.flatnonzero(~_converged(mu)):
+        lo, hi = 1e-6, max(mean[i] * 4, 1.0)
+
+        def _gap(m, p=phi[i], t=mean[i]):
+            return float(_dp_mean(m, p)[0]) - t
+
+        f_lo, f_hi = _gap(lo), _gap(hi)
+        if f_lo * f_hi > 0:
+            # Target mean sits outside the achievable range (e.g. get_ev's
+            # 1e-6 floor probe, below the exact mean at the mu floor) —
+            # clamp to the nearer endpoint instead of failing the bracket.
+            mu[i] = lo if abs(f_lo) <= abs(f_hi) else hi
+        else:
+            mu[i] = brentq(_gap, lo, hi, xtol=1e-8)
+    return mu
+
+
+def _dp_cdf_pmf(x, mu, phi):
+    """Row-aligned DP ``(CDF(x), PMF(x))`` from one shared grid evaluation.
+
+    ``x`` is a scalar or an array broadcastable to the ``(n,)`` parameter
+    shape. CDF sums the normalized pmf up to ``floor(x)``; PMF is the point
+    mass at ``x`` (zero off the integer lattice or below zero).
+    """
+    grid, log_pmf = _dp_log_pmf_grid(mu, phi)
+    pmf_grid = np.exp(log_pmf)
+    cdf_grid = np.clip(np.cumsum(pmf_grid, axis=0), 0.0, 1.0)
+    n = pmf_grid.shape[1]
+    x_arr = np.broadcast_to(np.asarray(x, dtype=float), (n,))
+
+    floor_idx = np.floor(x_arr).astype(int)
+    cdf = np.where(
+        floor_idx < 0, 0.0, cdf_grid[np.clip(floor_idx, 0, len(grid) - 1), np.arange(n)]
+    )
+    on_lattice = np.isclose(x_arr - np.round(x_arr), 0.0) & (x_arr >= 0)
+    pmf = np.where(
+        on_lattice, pmf_grid[np.clip(np.round(x_arr).astype(int), 0, len(grid) - 1), np.arange(n)], 0.0
+    )
+    return cdf, pmf
+
+
+def _dp_ppf(q, mu, phi):
+    """Row-aligned DP quantile: smallest k with ``CDF(k) >= q``."""
+    grid, log_pmf = _dp_log_pmf_grid(mu, phi)
+    cdf_grid = np.clip(np.cumsum(np.exp(log_pmf), axis=0), 0.0, 1.0)
+    q_arr = np.broadcast_to(np.asarray(q, dtype=float), (cdf_grid.shape[1],))
+    hit = cdf_grid >= q_arr[None, :]
+    idx = np.where(hit.any(axis=0), hit.argmax(axis=0), len(grid) - 1)
+    return grid[idx]
+
+
+def dp_crps(y, mu, phi) -> np.ndarray:
+    """Per-row CRPS of a Double Poisson predictive: ``Σ_k (F(k) − 1{y≤k})²``.
+
+    ``mu``/``phi`` are the natural DP parameters (not the exact mean), matching
+    the raw LightGBMLSS param frame the dispersion calibration re-scores.
+    """
+    y = np.asarray(y, dtype=float)
+    grid, log_pmf = _dp_log_pmf_grid(mu, phi)
+    cdf_grid = np.clip(np.cumsum(np.exp(log_pmf), axis=0), 0.0, 1.0)
+    mean = np.sum(grid[:, None] * np.exp(log_pmf), axis=0)
+    k_max = int(max(y.max() * 2, np.mean(mean) * 4, _NEGBIN_CRPS_K_FLOOR))
+    k_vals = np.arange(k_max + 1)
+    # Past the internal grid the CDF has converged to 1 (the grid spans 12 sd);
+    # clip the index rather than re-summing a longer tail.
+    cdf = cdf_grid[np.clip(k_vals, 0, len(grid) - 1), :]
+    indicator = (y[None, :] <= k_vals[:, None]).astype(float)
+    return np.sum((cdf - indicator) ** 2, axis=0)
+
+
 def gamma_crps(y, alpha, scale, gate=None) -> np.ndarray:
     """Per-row CRPS of a (gated) Gamma predictive.
 
@@ -291,8 +435,8 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None, sig
         under: The bookmaker's implied probability that the outcome is under the line.
         cv: Coefficient of variation (shape source when alpha/r are not supplied).
         dist: Distribution family — ``"Gamma"``/``"ZAGamma"``/``"NegBin"``/
-            ``"ZINB"``/``"Poisson"``/``"SkewNormal"``/``"Normal"`` (symmetric,
-            ev == line at an even-money price; game lines pin here).
+            ``"ZINB"``/``"DPO"``/``"Poisson"``/``"SkewNormal"``/``"Normal"``
+            (symmetric, ev == line at an even-money price; game lines pin here).
         gate: Zero-inflation probability; ``None`` disables ZI handling.
         skew_alpha: SkewNormal skewness; ``None`` → 0 (symmetric).
         sigma: SkewNormal scale held fixed across the inversion; ``None`` → ``ev*cv``.
@@ -303,7 +447,7 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None, sig
         The mean that reproduces the book's ``under`` under :func:`get_odds`.
     """
     under = float(np.clip(under, 1e-6, 1 - 1e-6))
-    step = 1.0 if dist in ("NegBin", "ZINB", "Poisson") else 0.5
+    step = 1.0 if dist in ("NegBin", "ZINB", "Poisson", "DPO") else 0.5
 
     def p_under(ev):
         return get_odds(
@@ -335,6 +479,22 @@ def _negbin_odds(line, ev, cv, r, gate, dist):
     return base_cdf - base_pmf / 2
 
 
+def _dp_odds(line, ev, cv, phi):
+    """P(under ``line``) for a Double Poisson with exact mean ``ev``.
+
+    ``phi=None`` is the book fallback: match the NegBin book variance
+    convention ``var = ev + cv·ev²`` via ``phi = 1/(1 + cv·ev)``. The mean is
+    Newton-inverted to the ``mu`` parameter internally so every caller speaks
+    mean-space, like the other families.
+    """
+    ev_arr = np.atleast_1d(np.asarray(ev, dtype=float))
+    phi_arr = 1.0 / (1.0 + cv * ev_arr) if phi is None else np.asarray(phi, dtype=float)
+    mu = _dp_mu_from_mean(ev_arr, phi_arr)
+    cdf, pmf = _dp_cdf_pmf(line, mu, phi_arr)
+    out = cdf - pmf / 2
+    return float(out[0]) if np.ndim(ev) == 0 else out
+
+
 def _skewnormal_odds(high, low, ev, cv, sigma, skew_alpha, gate):
     sigma_val = sigma if sigma is not None else ev * cv
     a = skew_alpha if skew_alpha is not None else 0.0
@@ -364,7 +524,8 @@ def _gamma_odds(high, low, ev, cv, alpha, gate, dist):
 
 
 def get_odds(
-    line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1, sigma=None, skew_alpha=None
+    line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1, sigma=None, skew_alpha=None,
+    phi=None,
 ):
     """Return the raw probability that the outcome falls below ``line``.
 
@@ -374,14 +535,15 @@ def get_odds(
     Args:
         line: The line / cutoff value.
         ev: Expected value (base-distribution mean).
-        dist: Distribution family (same options as ``get_ev``).
-        cv: Coefficient of variation, used when ``alpha``/``r`` are not supplied.
+        dist: Distribution family (same options as ``get_ev``, plus ``"DPO"``).
+        cv: Coefficient of variation, used when ``alpha``/``r``/``phi`` are not supplied.
         alpha: Gamma shape; derived as ``1/cv²`` if ``None``.
         r: NegBin dispersion; derived as ``1/cv`` if ``None``.
         gate: Zero-inflation probability; ``None`` disables ZI handling.
         step: Bin width for the discrete half-point correction.
         sigma: SkewNormal scale; derived as ``ev*cv`` if ``None``.
         skew_alpha: SkewNormal skewness; defaults to ``0``.
+        phi: Double Poisson precision; derived as ``1/(1+cv·ev)`` if ``None``.
 
     Returns:
         Probability of outcome being under ``line``.
@@ -398,6 +560,8 @@ def get_odds(
         return poisson.cdf(line, ev) - poisson.pmf(line, ev) / 2
     if dist in ("NegBin", "ZINB"):
         return _negbin_odds(line, ev, cv, r, gate, dist)
+    if dist == "DPO":
+        return _dp_odds(line, ev, cv, phi)
     if dist == "SkewNormal":
         return _skewnormal_odds(high, low, ev, cv, sigma, skew_alpha, gate)
     if dist == "Normal":
@@ -408,11 +572,21 @@ def get_odds(
     return _gamma_odds(high, low, ev, cv, alpha, gate, dist)
 
 
-def get_push_prob(line, ev, dist, cv=1, alpha=None, r=None, gate=None, sigma=None, skew_alpha=None):
+def _dp_push_pmf(line_arr, ev_arr, cv, phi):
+    """Row-aligned Double Poisson point mass at the line, for ``get_push_prob``."""
+    line_1d, ev_1d = (np.atleast_1d(a) for a in np.broadcast_arrays(line_arr, ev_arr))
+    phi_1d = 1.0 / (1.0 + cv * ev_1d) if phi is None else np.asarray(phi, dtype=float)
+    _, pmf = _dp_cdf_pmf(line_1d, _dp_mu_from_mean(ev_1d, phi_1d), phi_1d)
+    return pmf if np.ndim(line_arr) or np.ndim(ev_arr) else float(pmf[0])
+
+
+def get_push_prob(
+    line, ev, dist, cv=1, alpha=None, r=None, gate=None, sigma=None, skew_alpha=None, phi=None
+):
     """Return P(stat == line) for a market.
 
     Push probability is non-zero only when ``line`` is an integer **and** the
-    distribution family is discrete (NegBin / ZINB / Poisson). Continuous
+    distribution family is discrete (NegBin / ZINB / DPO / Poisson). Continuous
     families (Gamma, ZAGamma, SkewNormal, Normal) return 0 because the point
     mass at any single value is zero. Used by parlay scoring to handle the
     Underdog "push drops one leg" rule.
@@ -420,16 +594,17 @@ def get_push_prob(line, ev, dist, cv=1, alpha=None, r=None, gate=None, sigma=Non
     Args:
         line: The bookmaker line. Push only fires for integer-valued lines.
         ev: Base-distribution mean (post fused_loc / dispersion calibration).
-        dist: Distribution family ("NegBin", "ZINB", "Poisson", "Gamma",
+        dist: Distribution family ("NegBin", "ZINB", "DPO", "Poisson", "Gamma",
             "ZAGamma", "SkewNormal", "Normal"). Anything not recognized as
             discrete returns 0.
-        cv: CV used as fallback when ``r`` is not supplied.
+        cv: CV used as fallback when ``r``/``phi`` is not supplied.
         alpha: Unused; included so the call signature parallels ``get_odds``.
         r: NegBin dispersion. Falls back to ``1/cv``.
         gate: Zero-inflation gate; ZI shrinks the base pmf by ``(1 - gate)``.
             For an integer line at 0, the gate contributes its full mass.
         sigma: Unused; parallels ``get_odds``.
         skew_alpha: Unused; parallels ``get_odds``.
+        phi: Double Poisson precision. Falls back to ``1/(1+cv·ev)``.
 
     Returns:
         np.ndarray | float: Push probability, broadcast to the shape of
@@ -443,6 +618,8 @@ def get_push_prob(line, ev, dist, cv=1, alpha=None, r=None, gate=None, sigma=Non
 
     if dist == "Poisson" or (dist in ("NegBin", "ZINB") and r is None and cv == 1):
         pmf = poisson.pmf(np.round(line_arr), ev_arr)
+    elif dist == "DPO":
+        pmf = _dp_push_pmf(line_arr, ev_arr, cv, phi)
     elif dist in ("NegBin", "ZINB"):
         r_val = r if r is not None else 1 / cv
         p = r_val / (r_val + ev_arr)
@@ -464,9 +641,10 @@ class DecodedParams:
     """Base-distribution mean plus the shape parameters ``get_odds`` consumes.
 
     Only the fields relevant to the family are populated: ``r`` for
-    NegBin/ZINB, ``alpha`` for Gamma/ZAGamma, ``sigma``/``skew`` for SkewNormal.
-    ``gate`` is the per-row zero-inflation gate (ZINB/ZAGamma) or the broadcast
-    historical gate (SkewNormal), and is ``None`` when the cell is not gated.
+    NegBin/ZINB, ``alpha`` for Gamma/ZAGamma, ``sigma``/``skew`` for SkewNormal,
+    ``phi`` for DPO. ``gate`` is the per-row zero-inflation gate (ZINB/ZAGamma)
+    or the broadcast historical gate (SkewNormal), and is ``None`` when the
+    cell is not gated.
     """
 
     ev: np.ndarray
@@ -475,6 +653,7 @@ class DecodedParams:
     sigma: np.ndarray | None = None
     skew: np.ndarray | None = None
     gate: np.ndarray | None = None
+    phi: np.ndarray | None = None
 
 
 def decode_predictive_mean(prob_params, dist, *, sn_loc=None, sn_scale=None, hist_gate=0.0):
@@ -492,7 +671,8 @@ def decode_predictive_mean(prob_params, dist, *, sn_loc=None, sn_scale=None, his
 
     Args:
         prob_params: Frame/dict-like with the raw distribution columns:
-            ``total_count``/``probs``/``gate`` (NegBin/ZINB),
+            ``total_count``/``probs``/``gate`` (NegBin/ZINB), ``mu``/``phi``
+            (DPO — the mean is decoded exactly by series, not read off ``mu``),
             ``concentration``/``rate``/``gate`` (Gamma/ZAGamma), or ``alpha``
             (SkewNormal skewness).
         dist: Distribution family name.
@@ -509,6 +689,11 @@ def decode_predictive_mean(prob_params, dist, *, sn_loc=None, sn_scale=None, his
         p = np.asarray(prob_params["probs"], dtype=float)
         gate = np.asarray(prob_params["gate"], dtype=float) if dist == "ZINB" else None
         return DecodedParams(ev=r * p / (1 - p), r=r, gate=gate)
+
+    if dist == "DPO":
+        mu = np.asarray(prob_params["mu"], dtype=float)
+        phi = np.asarray(prob_params["phi"], dtype=float)
+        return DecodedParams(ev=_dp_mean(mu, phi), phi=phi)
 
     if dist in ("Gamma", "ZAGamma"):
         alpha = np.asarray(prob_params["concentration"], dtype=float)
@@ -578,16 +763,21 @@ def fused_loc(
     gate_book=None,
     book_sigma=None,
     book_skew_alpha=None,
+    phi=None,
 ):
     """Blend model and bookmaker distribution parameters with weight ``w``.
 
     The blend is a logarithmic opinion pool (Genest & Zidek 1986) for
-    NegBin and a precision-weighted blend for Gamma / SkewNormal:
+    NegBin / DPO and a precision-weighted blend for Gamma / SkewNormal:
 
     * **NegBin**: geometric mean of both means *and* dispersion parameters.
       The model provides per-observation ``r``; the book's ``r`` is derived
       as ``1/cv``. Both ``μ`` and ``r`` are blended in log space with the
       same weight ``w``.
+    * **DPO**: same log-pool on the exact mean and the precision ``phi``;
+      the book's ``phi`` is ``1/(1+cv·ev_b)`` (matching the NegBin book
+      variance convention ``var = ev + cv·ev²``). Returns the blended
+      *mean* — ``get_odds`` Newton-inverts mean → ``mu`` internally.
     * **Gamma**: precision-weighted blend. The model provides
       per-observation ``alpha``; the book's ``alpha`` is ``1/cv²``.
       Returns ``(alpha, beta, gate_blend)``.
@@ -618,9 +808,11 @@ def fused_loc(
             evaluated at the quoted line). ``None`` → legacy ``ev_b*cv``.
         book_skew_alpha: Per-observation book SkewNormal skewness. ``None`` → 0
             (symmetric), paired with the legacy ``book_sigma`` default.
+        phi: DPO per-observation precision from the model.
 
     Returns:
         NegBin → ``(r_blend, p, gate_blend)``,
+        DPO → ``(blended_mean, phi_blend, gate_blend)``,
         Gamma → ``(alpha, beta, gate_blend)``,
         SkewNormal → ``(blended_ev, blended_sigma, blended_alpha, gate_blend)``.
         ``gate_blend`` is ``None`` when no gate parameters are supplied.
@@ -631,6 +823,16 @@ def fused_loc(
     elif gate_book is not None and gate_book > 0:
         # No model gate (hurdle model) — use book gate directly.
         gate_blend = gate_book
+
+    if dist == "DPO":
+        ev_a = np.clip(np.asarray(ev_a, dtype=float), 1e-9, None)
+        ev_b = np.clip(np.asarray(ev_b, dtype=float), 1e-9, None)
+        mean_blend = np.exp(w * np.log(ev_a) + (1 - w) * np.log(ev_b))
+        phi_book = 1.0 / (1.0 + cv * ev_b)
+        phi_blend = np.exp(
+            w * np.log(np.clip(phi, _DP_PHI_FLOOR, _DP_PHI_CEILING)) + (1 - w) * np.log(phi_book)
+        )
+        return mean_blend, phi_blend, gate_blend
 
     if dist == "NegBin":
         mu = np.exp(
@@ -727,6 +929,12 @@ def _negbin_start_values(mu, std, hist_gate, dist, _r_upper):
     return sv, hist_gate
 
 
+def _dp_start_values(mu, std):
+    """Raw-space (softplus) DP start values from per-player moments."""
+    phi = np.clip(mu / np.clip(std**2, 1e-6, None), _DP_PHI_SEED_FLOOR, _DP_PHI_SEED_CEILING)
+    return np.column_stack([_softplus_inv(mu), _softplus_inv(phi)])
+
+
 def _gamma_start_values(mu, std, hist_gate, dist, _a_upper):
     if dist == "ZAGamma":
         mu = mu / (1 - hist_gate)
@@ -747,12 +955,13 @@ def set_model_start_values(
       ``gate`` → sigmoid.
     * Gamma / ZAGamma: ``concentration`` → softplus, ``rate`` → softplus,
       ``gate`` → sigmoid.
+    * DPO: ``mu`` → softplus, ``phi`` → softplus.
     * SkewNormal: ``loc`` → identity, ``scale`` → exp, ``alpha`` → identity.
 
     Args:
         model: The LightGBMLSS model whose ``start_values`` gets assigned.
-        dist: Distribution name — ``"NegBin"``, ``"ZINB"``, ``"Gamma"``,
-            ``"ZAGamma"``, or ``"SkewNormal"``.
+        dist: Distribution name — ``"NegBin"``, ``"ZINB"``, ``"DPO"``,
+            ``"Gamma"``, ``"ZAGamma"``, or ``"SkewNormal"``.
         X_data: DataFrame; must contain ``"MeanYr"``, ``"STDYr"``, and
             ``"ZeroYr"`` columns.
         shape_ceiling: Upper bound on shape during training. When ``None``,
@@ -779,6 +988,8 @@ def set_model_start_values(
         sv = _skewnormal_start_values(mu, std, n, offset_mode, normalized)
     elif dist in ["NegBin", "ZINB"]:
         sv, hist_gate = _negbin_start_values(mu, std, hist_gate, dist, _r_upper)
+    elif dist == "DPO":
+        sv = _dp_start_values(mu, std)
     elif dist in ["Gamma", "ZAGamma"]:
         sv = _gamma_start_values(mu, std, hist_gate, dist, _a_upper)
 
