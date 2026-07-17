@@ -843,7 +843,7 @@ class Archive:
         date: datetime.date,
         entity: str,
         book: str,
-        ev: float,
+        ev: float | None,
         observed_at: datetime.datetime | None = None,
         under_prob: float | None = None,
         line: float | None = None,
@@ -854,6 +854,8 @@ class Archive:
         snapshot's as-of time so point-in-time training reads pick it up.
         ``under_prob`` / ``line`` are the shape-free book quote; left NULL when
         the caller has only the encoded ``ev`` (readers fall back to ``ev``).
+        ``ev=None`` stores a NULL — the gate-refuted-quote row from
+        ``merge_player_books`` — which the consensus reader's None-skip drops.
         """
         self._pending_odds.append(
             (
@@ -862,7 +864,7 @@ class Archive:
                 date,
                 entity,
                 book,
-                float(ev),
+                None if ev is None else float(ev),
                 observed_at or datetime.datetime.utcnow(),
                 None if under_prob is None else float(under_prob),
                 None if line is None else float(line),
@@ -978,7 +980,7 @@ class Archive:
         market: str,
         date: str | datetime.date,
         player: str,
-        book_evs: dict[str, float],
+        book_evs: dict[str, float | None],
         lines: list[float] | None = None,
         observed_at: datetime.datetime | None = None,
         book_quotes: dict[str, tuple[float, float]] | None = None,
@@ -991,6 +993,10 @@ class Archive:
         historical backfill passes the snapshot's as-of time. ``book_quotes``
         maps each book to its ``(line, under_prob)`` shape-free quote; when
         present the per-book row stores it so readers need not invert ``ev``.
+        A ``None`` value in ``book_evs`` is a gate-refuted quote, not a missing
+        one: it still writes a row (NULL ``ev``, real quote) as long as
+        ``book_quotes`` has that book's entry; a book absent from both is
+        skipped entirely.
         """
         d = _safe_date(date)
         if d is None:
@@ -998,9 +1004,13 @@ class Archive:
         player = remove_accents(player)
         book_quotes = book_quotes or {}
         for book, ev in book_evs.items():
-            if ev is None:
-                continue
             q_line, q_under = book_quotes.get(book, (None, None))
+            # A None ev with a real quote is a gate-refuted price (moneylines):
+            # the shape-free (under_prob, line) row still writes, ev stays NULL
+            # so the consensus reader skips the book. No quote either → nothing
+            # to store.
+            if ev is None and q_under is None:
+                continue
             self._stage_book_ev(
                 league, market, d, player, book, ev, observed_at, under_prob=q_under, line=q_line
             )

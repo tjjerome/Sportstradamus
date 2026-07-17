@@ -750,14 +750,20 @@ def _event_player_props(book, market, league, props, odds):
         entry["Lines"].append(line)
         price = no_vig_odds(*[x["price"] for x in lines])
         dist = stat_dist.get(league, {}).get(market_name, "SkewNormal")
-        ev = get_ev(
-            line,
-            price[1],
-            stat_cv[league].get(market_name, 1),
-            dist=dist,
-            gate=book_gate(league, market_name, dist),
-        )
-        entry["EV"][book["key"]] = ev
+        gate = book_gate(league, market_name, dist)
+        # A sharp quote whose under-prob sits at or below the calibrated gate
+        # refutes the population zero rate for this (selected) player — no mean
+        # reproduces it, and storing get_ev's clamp ceiling as a real mean is how
+        # every 2026-06+ NFL tds row went bad (population zi 0.78 vs quoted-star
+        # unders ~0.42). Store a NULL ev with the shape-free quote instead; the
+        # consensus reader None-skips the book. The DFS path (add_dfs) keeps its
+        # pinned clamp semantics — placeholders are guarded downstream.
+        if gate is not None and price[1] <= gate:
+            entry["EV"][book["key"]] = None
+        else:
+            entry["EV"][book["key"]] = get_ev(
+                line, price[1], stat_cv[league].get(market_name, 1), dist=dist, gate=gate
+            )
         entry["Quotes"][book["key"]] = (line, price[1])
 
 

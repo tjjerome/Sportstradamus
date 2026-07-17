@@ -1133,13 +1133,15 @@ snapshot.
   rushing-tds, receiving-tds) grade against synthetic 0.5 rows — **owner ruling: that stands;
   bookless markets must beat the coin flip** (no autopass; yards does, qb-yards honestly
   doesn't); (b) 17–21% synthetic-row dilution on priced cells (`scorecard._priced_rows` counts
-  `Odds_synthetic`) — known measurement caveat, no gate change planned; (c) **live tds ev-clamp
-  bug** —
-  every confer run writes ev = 5×line for tds (all 20,840 rows since 2026-06; `under_prob` real,
-  `ev` garbage); encoder fix + tds matrix purge before any tds training; (d) count-cell book
-  decode round-trips ev→odds through drifting cv/zi — the matrix build should read the WS-1
-  `under_prob` column directly. Staged seed-row cleanup + regenerated matrices at
-  `staging_nfl_book_repair/` (apply-at-gap; `[[breadth75_campaign]]`).
+  `Odds_synthetic`) — known measurement caveat, no gate change planned; (c) **tds ev-clamp bug — FIXED**:
+  the population zi (0.777) refutes every quoted-star tds price (selection: books quote likely
+  scorers), so `get_ev` clamped and confer persisted ev = 5×line on all 20,840 rows since
+  2026-06. Fix: the moneylines parser stores a NULL ev + shape-free quote for gate-refuted
+  prices (`_event_player_props`; both live confer and close-lines route through it; the DFS
+  clamp semantics stay pinned); the poisoned evs are NULLed in the archive (quotes kept) and
+  the tds matrix purged pending regen; (d) count-cell book decode round-trips ev→odds through
+  drifting cv/zi — the matrix build should read the WS-1 `under_prob` column directly. Seed-row
+  cleanup applied + matrices swapped from `staging_nfl_book_repair/` (`[[breadth75_campaign]]`).
 - For any cell the model can't improve: lean harder on the book in the blend — rides the sharp
   line, ships if calibration holds. No cell is shelved (§8); never loosen a gate.
 
@@ -1556,7 +1558,7 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
-- 2026-07-17 · WS-3 pilots + breadth-75 reframe (owner: 75% every league is the mission, not WS-3 step-following). DPO first ship — WNBA TOV full-HPO 5/5 → devel (4/4 DPO corners board-pass, all NB corners die g4, BSS +0.042); NBA PF all-kill (<50% gap-close, family not binding → §6.1/§6.2); NHL points in flight; kill rule dead. Gap: NBA +3 / NFL +8 / NHL +8 / MLB +10 (WNBA 14/18 done). Five waves: count boards (non-NFL first) → integer-meta reroute → centered-SN pilots + continuous board → NFL book repair (paid backfill agent in flight, apply-at-gap) → ECE recal. Found: NBA BLST/OREB ship=True-but-withheld (free re-earns); `--dist-class` meta-dist blindspot (§6.6 gotcha); book-less MLB trio auto-passes g1–g3 (owner rule). Model-class escalation past families → §6.6 (ordinal stack / mixture / comp-PMF, §8.2-gated). NFL book audit closed same day: July repair already real for the big-7, paid backfill dead (API hole pre-2023-05-03; 882 credits spent, probe-verified ~0 recovery) — blockers rerouted code-side (live tds ev-clamp confer bug since 2026-06 — owner ordered fix; under_prob matrix read); autopass RETRACTED same day — bookless cells must beat the coin flip; staged cleanup at staging_nfl_book_repair/, apply-at-gap. Simplification track S1–S5 adopted (§6.6). NHL points interim: DPO 6/6 deterministic +0.226, pit_ks 0.0153 (NB floor 0.083) — low-mean ceiling thesis validated; full-HPO confirm in flight.
+- 2026-07-17 · WS-3 pilots + breadth-75 reframe (owner: 75% every league is the mission, not WS-3 step-following). DPO first ship — WNBA TOV full-HPO 5/5 → devel (4/4 DPO corners board-pass, all NB corners die g4, BSS +0.042); NBA PF all-kill (<50% gap-close, family not binding → §6.1/§6.2); NHL points in flight; kill rule dead. Gap: NBA +3 / NFL +8 / NHL +8 / MLB +10 (WNBA 14/18 done). Five waves: count boards (non-NFL first) → integer-meta reroute → centered-SN pilots + continuous board → NFL book repair (paid backfill agent in flight, apply-at-gap) → ECE recal. Found: NBA BLST/OREB ship=True-but-withheld (free re-earns); `--dist-class` meta-dist blindspot (§6.6 gotcha); book-less MLB trio auto-passes g1–g3 (owner rule). Model-class escalation past families → §6.6 (ordinal stack / mixture / comp-PMF, §8.2-gated). NFL book audit closed same day: July repair already real for the big-7, paid backfill dead (API hole pre-2023-05-03; 882 credits spent, probe-verified ~0 recovery) — blockers rerouted code-side; tds ev-clamp bug root-caused (population zi 0.777 vs quoted-star prices, selection effect) + FIXED (gate-refuted quotes → NULL ev + shape-free quote; 20,840 poisoned evs NULLed; tds matrix purged) + repair applied (88k seed rows deleted, matrices swapped); autopass RETRACTED same day — bookless cells must beat the coin flip. Pilots 2/3 SHIP: NHL points confirm 5/5 → devel (BSS +0.012, n_val 11.8k). Simplification track S1–S5 adopted (§6.6). NHL points interim: DPO 6/6 deterministic +0.226, pit_ks 0.0153 (NB floor 0.083) — low-mean ceiling thesis validated; full-HPO confirm in flight.
 - 2026-07-11 · WS-2 activation COMPLETE: 9 cells live on devel — 5 MLB (2026-07-10) + 4 NHL (goals, hits, shotsAgainst, timeOnIce; commit 3635a20), all deterministic-board → full-HPO confirm on 2-season matrices; final spend 2.39M of 5M credits. NHL powerPlayPoints failed confirm, saves ranks-only (non-persistable dist-loss corner). Post-GO grind on no-ship cells moves to the §6 operating loop (detail: mlb-nhl-activation.md §10).
 - 2026-07-10 · dfs-products lane created (decision-engine expansion: game-line combos verify-first, Ladders, alt-line hardening) · §6.11 Rivals pricer build repointed there (tail read stays); ladders + gamelines stage-0 briefs in docs/archive/; serve-time budget locked ≤15 min heavy day · next: unchanged
 - 2026-07-10 · WS-2/WS-4 backfill program done (1.76M credits of 5M): MLB+NHL feature gap closed (7-11 sharp books, NHL 2023-24 refilled), `ladder` seeded 15.5M rungs all five leagues (alt keys backfill-only), MLB/NHL close-layer dual snapshots (23Z eval-only) → CLV/movement computable; §6.11 tail read + §6.5 ladder-lift re-test unblocked. MLB matrices rebuilt 19/19 at 2 seasons; NHL rebuild + both sweeps in flight.
