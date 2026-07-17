@@ -96,3 +96,24 @@ def test_lightgbmlss_loss_path():
     target = torch.tensor(rng.poisson(1.5, size=50).astype(np.float32))
     _, loss = dp.get_params_loss(predt, target, start_values=[0.5, 0.5], requires_grad=True)
     assert torch.isfinite(loss)
+
+
+def test_sample_shapes_and_moments():
+    mu = torch.tensor([0.7, 2.0, 6.0])
+    phi = torch.tensor([2.0, 1.0, 0.5])
+    dist = DoublePoissonTorch(mu, phi)
+    torch.manual_seed(3)
+    draws = dist.sample((4000,))
+    assert draws.shape == (4000, 3)
+    assert (draws >= 0).all() and draws.dtype == mu.dtype
+    assert torch.allclose(draws.mean(dim=0), dist.mean, rtol=0.1)
+    assert dist.sample().shape == (3,)
+
+
+def test_sample_deterministic_under_manual_seed():
+    dist = DoublePoissonTorch(torch.tensor([1.5]), torch.tensor([1.2]))
+    torch.manual_seed(11)
+    a = dist.sample((256,))
+    torch.manual_seed(11)
+    b = dist.sample((256,))
+    assert torch.equal(a, b)

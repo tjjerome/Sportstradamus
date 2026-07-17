@@ -14,7 +14,8 @@ from scipy.stats import nbinom
 from sklearn.metrics import accuracy_score, brier_score_loss, log_loss
 from tqdm import tqdm
 
-from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, get_odds
+from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, dp_crps, get_odds
+from sportstradamus.helpers.distributions import _dp_mu_from_mean, _dp_ppf
 from sportstradamus.strategies.profit_sim import (
     N_MONTE_CARLO_DEFAULT,
     simulate_strategy,
@@ -939,7 +940,8 @@ def reconstruct_prob(row, line=None):
     dist, cv, ev, param, gate = _dist_params(row)
     r = param if dist in ("NegBin", "ZINB") else None
     alpha = param if dist in ("Gamma", "ZAGamma") else None
-    return get_odds(line, ev, dist, cv, alpha=alpha, r=r, gate=gate, step=row.get("Step", 1))
+    phi = param if dist == "DPO" and not pd.isna(param) else None
+    return get_odds(line, ev, dist, cv, alpha=alpha, r=r, gate=gate, phi=phi, step=row.get("Step", 1))
 
 
 def reconstruct_quantile(row, q):
@@ -951,6 +953,8 @@ def reconstruct_quantile(row, q):
     if pd.isna(row.get("Dist")):
         return np.nan
     dist, cv, ev, param, gate = _dist_params(row)
+    if dist == "DPO":
+        return _dp_quantile(q, ev, param, cv)
     if dist in ("NegBin", "ZINB"):
         return _negbin_quantile(q, ev, param, cv, gate, dist)
     return _gamma_quantile(q, ev, param, cv, gate, dist)
@@ -965,6 +969,14 @@ def _negbin_quantile(q, ev, param, cv, gate, dist):
             return 0.0
         q = (q - gate) / (1 - gate)
     return nbinom.ppf(q, r, p)
+
+
+def _dp_quantile(q, ev, param, cv):
+    """q-th quantile of the double-Poisson count model."""
+    phi = param if not pd.isna(param) else 1.0 / (1.0 + cv * ev)
+    phi_arr = np.asarray([phi], dtype=float)
+    mu = _dp_mu_from_mean(np.asarray([ev], dtype=float), phi_arr)
+    return float(_dp_ppf(q, mu, phi_arr)[0])
 
 
 def _gamma_quantile(q, ev, param, cv, gate, dist):
@@ -990,6 +1002,8 @@ def compute_crps_row(row):
         return np.nan
     y = row["Actual"]
     dist, cv, ev, param, gate = _dist_params(row)
+    if dist == "DPO":
+        return _dp_crps_row(y, ev, param, cv)
     if dist in ("NegBin", "ZINB"):
         return _negbin_crps(y, ev, param, cv, gate, dist)
     return _gamma_crps(y, ev, param, cv, gate, dist)
@@ -1001,6 +1015,14 @@ def _zero_inflate_pmf(pmf, gate):
     pmf_zi[0] = gate + (1 - gate) * pmf[0]
     pmf_zi[1:] = (1 - gate) * pmf[1:]
     return pmf_zi
+
+
+def _dp_crps_row(y, ev, param, cv):
+    """CRPS of the double-Poisson via the shared truncated-series kernel."""
+    phi = param if not pd.isna(param) else 1.0 / (1.0 + cv * ev)
+    phi_arr = np.asarray([phi], dtype=float)
+    mu = _dp_mu_from_mean(np.asarray([ev], dtype=float), phi_arr)
+    return float(dp_crps(np.asarray([y], dtype=float), mu, phi_arr)[0])
 
 
 def _negbin_crps(y, ev, param, cv, gate, dist):

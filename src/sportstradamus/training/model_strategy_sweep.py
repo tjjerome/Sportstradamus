@@ -166,16 +166,34 @@ _FAMILIES: dict[str, FamilySpec] = {
         },
         defaults={},
     ),
+    "DPO": FamilySpec(
+        axes={
+            "dist": ("DPO",),
+            "count_dispersion_objective": ("crps", "pit_ks"),
+            "blending_loss_fn": _BLENDING,
+        },
+        persist={
+            "dist": "dist",
+            "count_dispersion_objective": "count_dispersion_objective",
+            "blending_loss_fn": "blending",
+        },
+        defaults={},
+    ),
 }
 
 # A cell's stat_meta `dist` names its distribution class; the sweep sweeps every family in that
-# class (cross-family ranked by slack). A count cell sweeps ZINB *and* plain NegBin regardless of
-# which one it is currently pinned to, so a re-sweep after a ZINB↔NegBin flip still evaluates both.
-# Adding a family (e.g. DPO) is one FamilySpec above plus its class entry here.
-_DIST_CLASS: dict[str, str] = {"SkewNormal": "continuous", "ZINB": "count", "NegBin": "count"}
+# class (cross-family ranked by slack). A count cell sweeps ZINB, plain NegBin *and* DPO regardless
+# of which one it is currently pinned to, so a re-sweep after any family flip still evaluates all.
+# Adding a family is one FamilySpec above plus its class entry here.
+_DIST_CLASS: dict[str, str] = {
+    "SkewNormal": "continuous",
+    "ZINB": "count",
+    "NegBin": "count",
+    "DPO": "count",
+}
 _CLASS_FAMILIES: dict[str, tuple[str, ...]] = {
     "continuous": ("SkewNormal",),
-    "count": ("ZINB", "NegBin"),
+    "count": ("ZINB", "NegBin", "DPO"),
 }
 # `--dist-class all` sweeps every class; the two real classes are _CLASS_FAMILIES' keys.
 _DIST_CLASS_ALL = "all"
@@ -228,9 +246,9 @@ STRATEGY_RESEARCH_BOARD: pathlib.Path = pathlib.Path(
 def _cell_families(league: str, market: str) -> tuple[str, ...]:
     """The sweep families for a cell's distribution class, from its stat_meta ``dist``.
 
-    A count cell sweeps both ``("ZINB", "NegBin")`` — even one already pinned ``dist: NegBin`` — so a
-    re-sweep after a ZINB↔NegBin flip re-evaluates both; a SkewNormal cell sweeps ``("SkewNormal",)``.
-    Loud on a dist with no registered family/class.
+    A count cell sweeps ``("ZINB", "NegBin", "DPO")`` — even one already pinned to a single family —
+    so a re-sweep after any family flip re-evaluates all; a SkewNormal cell sweeps
+    ``("SkewNormal",)``. Loud on a dist with no registered family/class.
     """
     meta = load_stat_meta(pathlib.Path(str(STAT_META_PATH)))
     dist = meta.get(league, {}).get(market, {}).get("dist")

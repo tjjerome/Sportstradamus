@@ -94,15 +94,17 @@ def _fake_run_and_score(league, market, family, corner):
 
 
 def test_family_registry_grids_and_persist_maps():
-    """Three families with the agreed axes, corner counts, persist fields, and non-persistable defaults."""
+    """Four families with the agreed axes, corner counts, persist fields, and non-persistable defaults."""
     import math
 
     sn = sweep._FAMILIES["SkewNormal"]
     zinb = sweep._FAMILIES["ZINB"]
     negbin = sweep._FAMILIES["NegBin"]
+    dpo = sweep._FAMILIES["DPO"]
     assert math.prod(len(v) for v in sn.axes.values()) == 12
     assert math.prod(len(v) for v in zinb.axes.values()) == 8  # 1 dist × 2 mode × 2 disp × 2 blend
     assert math.prod(len(v) for v in negbin.axes.values()) == 4  # 1 dist × 2 disp × 2 blend
+    assert math.prod(len(v) for v in dpo.axes.values()) == 4  # 1 dist × 2 disp × 2 blend
     assert sn.persist == {"normalization": "target_normalization", "blending_loss_fn": "blending"}
     # Count families persist their single-choice dist so a winner's dist writes to stat_meta.
     assert zinb.persist == {
@@ -116,17 +118,27 @@ def test_family_registry_grids_and_persist_maps():
         "count_dispersion_objective": "count_dispersion_objective",
         "blending_loss_fn": "blending",
     }
+    assert dpo.persist == negbin.persist  # same gate-free count-family persist surface
     assert zinb.axes["dist"] == ("ZINB",) and negbin.axes["dist"] == ("NegBin",)
+    assert dpo.axes["dist"] == ("DPO",)
     # Only SkewNormal's dist-loss is non-persistable (the family default ships); every count axis persists.
     assert sn.defaults == {"dist_training_loss": "crps"}
-    assert zinb.defaults == {} and negbin.defaults == {}
+    assert zinb.defaults == {} and negbin.defaults == {} and dpo.defaults == {}
 
 
 def test_dist_axis_flag_and_class_maps():
     """The dist axis forwards --dist; the class maps route count/continuous cells to their families."""
     assert sweep._AXIS_FLAG["dist"] == "--dist"
-    assert sweep._DIST_CLASS == {"SkewNormal": "continuous", "ZINB": "count", "NegBin": "count"}
-    assert sweep._CLASS_FAMILIES == {"continuous": ("SkewNormal",), "count": ("ZINB", "NegBin")}
+    assert sweep._DIST_CLASS == {
+        "SkewNormal": "continuous",
+        "ZINB": "count",
+        "NegBin": "count",
+        "DPO": "count",
+    }
+    assert sweep._CLASS_FAMILIES == {
+        "continuous": ("SkewNormal",),
+        "count": ("ZINB", "NegBin", "DPO"),
+    }
     # dist leads the swept-axis columns and rides in the board schema.
     assert sweep._AXIS_COLUMNS[0] == "dist"
     assert "dist" in sweep._BOARD_COLUMNS
@@ -139,38 +151,42 @@ def test_dump_subdir_matches_meditate_keying():
     assert sweep._dump_subdir({"normalization": "centered_additive_mean10"}) == "centered_additive_mean10"
     assert sweep._dump_subdir({"zinb_mode": "joint"}) == "ratio_meanyr"
     assert sweep._dump_subdir({"zinb_mode": "hurdle"}) == "ratio_meanyr_hurdle"
-    # A NegBin corner carries no zinb_mode key → the non-hurdle fallback subdir, matching what the
-    # pipeline.py --dist fix writes (keyed on the trained dist, not raw zinb_mode).
+    # A NegBin/DPO corner carries no zinb_mode key → the non-hurdle fallback subdir, matching what
+    # the pipeline.py --dist fix writes (keyed on the trained dist, not raw zinb_mode).
     assert sweep._dump_subdir({"dist": "NegBin", "count_dispersion_objective": "crps"}) == "ratio_meanyr"
+    assert sweep._dump_subdir({"dist": "DPO", "count_dispersion_objective": "pit_ks"}) == "ratio_meanyr"
 
 
 def test_cell_families_routes_by_distribution_class(monkeypatch):
-    """A count cell sweeps both count families (even one pinned NegBin); a SN cell sweeps one; loud on
+    """A count cell sweeps every count family (even one pinned NegBin); a SN cell sweeps one; loud on
     an unknown dist.
     """
     fake = {
         "MLB": {
             "pitcher strikeouts": {"dist": "ZINB"},
-            "pitches thrown": {"dist": "NegBin"},  # already flipped to NegBin — still sweeps both
+            "pitches thrown": {"dist": "NegBin"},  # already flipped to NegBin — still sweeps all
             "hits allowed": {"dist": "Gamma"},  # unswept family
         },
         "WNBA": {"AST": {"dist": "SkewNormal"}},
     }
     monkeypatch.setattr(sweep, "load_stat_meta", lambda path: fake)
-    assert sweep._cell_families("MLB", "pitcher strikeouts") == ("ZINB", "NegBin")
-    assert sweep._cell_families("MLB", "pitches thrown") == ("ZINB", "NegBin")
+    assert sweep._cell_families("MLB", "pitcher strikeouts") == ("ZINB", "NegBin", "DPO")
+    assert sweep._cell_families("MLB", "pitches thrown") == ("ZINB", "NegBin", "DPO")
     assert sweep._cell_families("WNBA", "AST") == ("SkewNormal",)
     with pytest.raises(click.UsageError):
         sweep._cell_families("MLB", "hits allowed")
 
 
 def test_corner_count_sums_families_per_cell(monkeypatch):
-    """A count cell's corner count is ZINB + NegBin (8+4); a SN cell's is its single grid (12)."""
-    families = {("MLB", "pitcher strikeouts"): ("ZINB", "NegBin"), ("WNBA", "AST"): ("SkewNormal",)}
+    """A count cell's corner count is ZINB + NegBin + DPO (8+4+4); a SN cell's is its single grid (12)."""
+    families = {
+        ("MLB", "pitcher strikeouts"): ("ZINB", "NegBin", "DPO"),
+        ("WNBA", "AST"): ("SkewNormal",),
+    }
     monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: families[(lg, mkt)])
-    assert sweep._cell_corner_count("MLB", "pitcher strikeouts") == 12  # 8 + 4
+    assert sweep._cell_corner_count("MLB", "pitcher strikeouts") == 16  # 8 + 4 + 4
     assert sweep._cell_corner_count("WNBA", "AST") == 12
-    assert sweep._corner_count([("MLB", "pitcher strikeouts"), ("WNBA", "AST")]) == 24
+    assert sweep._corner_count([("MLB", "pitcher strikeouts"), ("WNBA", "AST")]) == 28
 
 
 def test_decode_strategy_is_norm_for_sn_and_fallback_for_count():

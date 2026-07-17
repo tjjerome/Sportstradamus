@@ -350,6 +350,18 @@ def _dp_ppf(q, mu, phi):
     return grid[idx]
 
 
+def dp_pmf_curve(xs, ev, phi):
+    """DP pmf on an integer grid for one ``(exact mean, phi)`` pair.
+
+    Chart/diagnostic surface: inverts the mean once, then evaluates the
+    normalized pmf at each ``xs``.
+    """
+    mu = _dp_mu_from_mean(np.array([float(ev)]), np.array([float(phi)]))[0]
+    n = len(xs)
+    _, pmf = _dp_cdf_pmf(np.asarray(xs, dtype=float), np.full(n, mu), np.full(n, float(phi)))
+    return pmf
+
+
 def dp_crps(y, mu, phi) -> np.ndarray:
     """Per-row CRPS of a Double Poisson predictive: ``Σ_k (F(k) − 1{y≤k})²``.
 

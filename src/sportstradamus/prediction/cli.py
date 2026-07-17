@@ -75,7 +75,7 @@ _ALT_LINE_TOL_COUNT = 0.75
 _ALT_LINE_TOL_CONTINUOUS = 2.5
 # Count-stat distribution families (per stat_meta.json "dist"); everything else
 # routes to the continuous tolerance.
-_COUNT_DISTS = {"NegBin", "ZINB", "Poisson"}
+_COUNT_DISTS = {"NegBin", "ZINB", "Poisson", "DPO"}
 
 # Per-league gamelog volume-stat column for the deep-dive volume trend. NFL maps by
 # base position (the snapshot's depth-rank suffix is stripped before lookup) so each

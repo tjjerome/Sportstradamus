@@ -7,6 +7,7 @@ from scipy.optimize import minimize
 from scipy.stats import fit, gamma, nbinom, norm, poisson, skew, skewnorm
 
 from sportstradamus.helpers import (
+    dp_crps,
     fused_loc,
     gamma_crps,
     get_logger,
@@ -15,6 +16,11 @@ from sportstradamus.helpers import (
     skewnormal_loc_from_mean,
     stat_cv,
 )
+from sportstradamus.helpers.distributions import _dp_cdf_pmf, _dp_mu_from_mean
+
+# Per-observation log-likelihood clamp for the DPO blend-weight fit — mirrors the
+# -20 outlier clamp in fit_model_weight so w is fit on the same scale.
+_DPO_WEIGHT_LOGLIK_CLAMP: float = -20.0
 
 logger = get_logger(__name__)
 
@@ -130,7 +136,7 @@ def _make_book_objective(market, dist, cv):
     """Build the per-observation negative-log-likelihood objective for the fit.
 
     Moneyline uses log-loss over de-vigged win probabilities; count families
-    (NegBin/ZINB/Poisson) use the Poisson logpmf of a weighted geometric-mean
+    (NegBin/ZINB/Poisson/DPO) use the Poisson logpmf of a weighted geometric-mean
     projection; everything else uses a precision-weighted Normal logpdf.
     """
     if market == "Moneyline":
@@ -144,7 +150,7 @@ def _make_book_objective(market, dist, cv):
 
         return objective
 
-    if dist in ["NegBin", "ZINB", "Poisson"]:
+    if dist in ["NegBin", "ZINB", "Poisson", "DPO"]:
 
         def objective(w, x, y):
             proj = np.array(
@@ -477,6 +483,38 @@ def fit_model_weight_crps(
             gate_book=gate_book,
         )
         return np.mean(gamma_crps(result, alpha_bl, 1 / beta_bl, gate=g_blend))
+
+    return _minimize_weight(objective)
+
+
+def fit_dpo_weight(model_ev, book_ev, result, model_phi, cv, blending) -> float:
+    """Blend-weight fit for the DPO family, mirroring :func:`fit_model_weight`.
+
+    Not routed through :func:`fit_blend_weight` because that dispatcher's unknown-family
+    fallback is the Gamma branch — silently wrong for DPO. Same ``_minimize_weight`` bounds
+    and per-observation clamp; the objective is the blended DP log-pmf (``nll``) or
+    :func:`~sportstradamus.helpers.distributions.dp_crps` (``crps``).
+    """
+    result = np.asarray(result, dtype=float)
+
+    def _blended(w):
+        mean_bl, phi_bl, _ = fused_loc(w, model_ev, book_ev, cv, "DPO", phi=model_phi)
+        return _dp_mu_from_mean(mean_bl, phi_bl), phi_bl
+
+    if blending == "crps":
+
+        def objective(w):
+            mu_bl, phi_bl = _blended(w)
+            return float(np.mean(dp_crps(result, mu_bl, phi_bl)))
+
+    else:
+
+        def objective(w):
+            mu_bl, phi_bl = _blended(w)
+            _, pmf = _dp_cdf_pmf(result, mu_bl, phi_bl)
+            with np.errstate(divide="ignore"):
+                logpmf = np.log(pmf)
+            return float(-np.mean(np.clip(logpmf, _DPO_WEIGHT_LOGLIK_CLAMP, 0.0)))
 
     return _minimize_weight(objective)
 

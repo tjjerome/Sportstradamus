@@ -36,6 +36,7 @@ from sportstradamus.helpers import (
     stat_map,
     stat_zi,
 )
+from sportstradamus.helpers.distributions import _DP_PHI_CEILING
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.spiderLogger import logger
 from sportstradamus.training.baselines import get_target_normalization
@@ -277,7 +278,7 @@ def _book_cell_params(
         return None, None, None, None
     cv = stat_cv[league].get(market, 1)
     gate = book_gate(league, market, dist)
-    step = 1.0 if dist in ("NegBin", "ZINB", "Poisson") else 0.5
+    step = 1.0 if dist in ("NegBin", "ZINB", "Poisson", "DPO") else 0.5
     return dist, cv, gate, step
 
 
@@ -340,7 +341,7 @@ def _annotate_display_shape(offer_df: pd.DataFrame, dist: str) -> None:
     """Set the display-only ``Model Param`` and ``Projection STD`` columns in place.
 
     Reads the distribution-shape parameters the model emitted (``Model R`` /
-    ``Model Sigma`` / ``Model Alpha``); falls back to NaN when they are absent,
+    ``Model Phi`` / ``Model Sigma`` / ``Model Alpha``); falls back to NaN when they are absent,
     as on a book-fallback record. These columns feed the dashboard detail popup
     only — no scoring path reads them.
     """
@@ -348,6 +349,8 @@ def _annotate_display_shape(offer_df: pd.DataFrame, dist: str) -> None:
     # display variances; splitting duplicates the family/param-present guards.
     if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
         offer_df["Model Param"] = offer_df["Model R"]
+    elif dist == "DPO" and "Model Phi" in offer_df.columns:
+        offer_df["Model Param"] = offer_df["Model Phi"]
     elif dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
         offer_df["Model Param"] = offer_df["Model Sigma"]
     elif "Model Alpha" in offer_df.columns:
@@ -359,6 +362,9 @@ def _annotate_display_shape(offer_df: pd.DataFrame, dist: str) -> None:
     if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
         _r = offer_df["Model R"].to_numpy(dtype=float)
         offer_df["Projection STD"] = np.sqrt(np.clip(_m + _m**2 / np.clip(_r, 1e-6, None), 0, None))
+    elif dist == "DPO" and "Model Phi" in offer_df.columns:
+        _phi = offer_df["Model Phi"].to_numpy(dtype=float)
+        offer_df["Projection STD"] = np.sqrt(np.clip(_m / np.clip(_phi, 1e-6, None), 0, None))
     elif dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
         _sg = offer_df["Model Sigma"].to_numpy(dtype=float)
         _sk = (
@@ -622,27 +628,41 @@ def _decode_model_params(
     offset_meta,
     target_normalization: str,
 ) -> None:
-    # The column guards skip the volume_stats branch, which already set Projection
+    if dist == "SkewNormal":
+        if "loc" in prob_params.columns:
+            # Dispatch SkewNormal loc/scale through the baselines registry so the
+            # train-side forward transform and predict-side inverse cannot drift.
+            _decode_skewnormal(
+                prob_params, playerStats, hist_gate, offset_meta, target_normalization
+            )
+        return
+    # The raw-column guards skip the volume_stats branch, which already set Projection
     # from the player profile rather than a fitted distribution.
-    if dist in ("NegBin", "ZINB") and "total_count" in prob_params.columns:
-        decoded = decode_predictive_mean(prob_params, dist)
-        prob_params["Projection"] = decoded.ev
+    raw_col = {
+        "NegBin": "total_count",
+        "ZINB": "total_count",
+        "DPO": "mu",
+        "Gamma": "concentration",
+        "ZAGamma": "concentration",
+    }.get(dist)
+    if raw_col is None or raw_col not in prob_params.columns:
+        return
+    decoded = decode_predictive_mean(prob_params, dist)
+    prob_params["Projection"] = decoded.ev
+    if decoded.r is not None:
         prob_params["Model R"] = decoded.r
-        if decoded.gate is not None:
-            prob_params["Model Gate"] = decoded.gate
-    elif dist in ("Gamma", "ZAGamma") and "concentration" in prob_params.columns:
-        decoded = decode_predictive_mean(prob_params, dist)
-        prob_params["Projection"] = decoded.ev
+    elif decoded.phi is not None:
+        prob_params["Model Phi"] = decoded.phi
+    else:
         prob_params["Model Alpha"] = decoded.alpha
-        if decoded.gate is not None:
-            prob_params["Model Gate"] = decoded.gate
-    elif dist == "SkewNormal" and "loc" in prob_params.columns:
-        # Dispatch SkewNormal loc/scale through the baselines registry so the
-        # train-side forward transform and predict-side inverse cannot drift.
-        _decode_skewnormal(prob_params, playerStats, hist_gate, offset_meta, target_normalization)
+    if decoded.gate is not None:
+        prob_params["Model Gate"] = decoded.gate
 
 
 def _clamp_shape_ceiling(offer_df: pd.DataFrame, dist: str, shape_ceiling) -> None:
+    # DPO is deliberately absent: its phi is hard-bounded in-family (the DP kernel
+    # clips to _DP_PHI_CEILING), so the NB r-ceiling semantics do not apply and DPO
+    # pickles persist no shape_ceiling.
     if shape_ceiling is None:
         return
     if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
@@ -662,12 +682,16 @@ def _zi_kwargs(offer_df: pd.DataFrame, dist: str, hist_gate: float) -> dict:
 def _model_predictive_sd(offer_df: pd.DataFrame, dist: str, model_ev: np.ndarray) -> np.ndarray:
     """Per-row model predictive SD — the scale for the book-EV plausibility band.
 
-    Read off the model's pre-blend shape columns (``Model R`` / ``Model Alpha`` /
-    ``Model Sigma``); falls back to the mean when a shape column is absent.
+    Read off the model's pre-blend shape columns (``Model R`` / ``Model Phi`` /
+    ``Model Alpha`` / ``Model Sigma``); falls back to the mean when a shape column
+    is absent.
     """
     if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
         r = np.clip(offer_df["Model R"].to_numpy(), 1e-9, None)
         return np.sqrt(model_ev + model_ev**2 / r)
+    if dist == "DPO" and "Model Phi" in offer_df.columns:
+        phi = np.clip(offer_df["Model Phi"].to_numpy(), 1e-9, None)
+        return np.sqrt(model_ev / phi)
     if dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns:
         alpha = np.clip(offer_df["Model Alpha"].to_numpy(), 1e-9, None)
         return model_ev / np.sqrt(alpha)
@@ -809,6 +833,19 @@ def _blend_with_book(
         )
         base_mean = r_blend * (1 - p_blend) / p_blend
         offer_df["Model R"] = r_blend
+    elif dist == "DPO":
+        # fused_loc's DPO log-pool returns the exact blended mean directly;
+        # get_odds Newton-inverts mean -> mu internally.
+        base_mean, phi_blend, gate_blend = fused_loc(
+            model_weight,
+            model_ev,
+            books_ev,
+            cv,
+            "DPO",
+            phi=_col_or_none(offer_df, "Model Phi"),
+            **zi,
+        )
+        offer_df["Model Phi"] = phi_blend
     else:
         alpha_blend, beta_blend, gate_blend = fused_loc(
             model_weight,
@@ -837,18 +874,29 @@ def _dispersion_calibrate(
     # A skew-only cell (c == 1, s != 0) must still enter — guard on both knobs.
     if dispersion_cal == 1.0 and skew_cal == 0.0:
         return
-    if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
-        offer_df["Model R"] = offer_df["Model R"] * dispersion_cal
-    elif dist in ("Gamma", "ZAGamma") and "Model Alpha" in offer_df.columns:
-        offer_df["Model Alpha"] = offer_df["Model Alpha"] * dispersion_cal
-    elif dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
-        offer_df["Model Sigma"] = offer_df["Model Sigma"] * dispersion_cal
+    shape_col = {
+        "NegBin": "Model R",
+        "ZINB": "Model R",
+        "DPO": "Model Phi",
+        "Gamma": "Model Alpha",
+        "ZAGamma": "Model Alpha",
+        "SkewNormal": "Model Sigma",
+    }.get(dist)
+    if shape_col is None or shape_col not in offer_df.columns:
+        return
+    offer_df[shape_col] = offer_df[shape_col] * dispersion_cal
+    if dist == "DPO":
+        # phi is hard-bounded in-family; re-clip after scaling so a >1
+        # dispersion_cal can't push it past the DP kernel's supported band.
+        offer_df["Model Phi"] = np.minimum(offer_df["Model Phi"], _DP_PHI_CEILING)
+    elif dist == "SkewNormal":
         offer_df["Model Skew"] = offer_df["Model Skew"] + skew_cal
 
 
 def _model_over_and_push(offer_df: pd.DataFrame, dist: str, cv: float, step, base_mean):
     r = _col_or_none(offer_df, "Model R", dist in ("NegBin", "ZINB"))
     alpha = _col_or_none(offer_df, "Model Alpha", dist in ("Gamma", "ZAGamma"))
+    phi = _col_or_none(offer_df, "Model Phi", dist == "DPO")
     sigma = _col_or_none(offer_df, "Model Sigma", dist == "SkewNormal")
     skew = _col_or_none(offer_df, "Model Skew", dist == "SkewNormal")
     gate = _col_or_none(offer_df, "Model Gate", dist in ("ZINB", "ZAGamma", "SkewNormal"))
@@ -858,10 +906,14 @@ def _model_over_and_push(offer_df: pd.DataFrame, dist: str, cv: float, step, bas
             line, base_mean, dist, cv=cv, step=step, sigma=sigma, skew_alpha=skew, gate=gate
         )
     else:
-        raw_under = get_odds(line, base_mean, dist, cv, alpha=alpha, step=step, r=r, gate=gate)
+        raw_under = get_odds(
+            line, base_mean, dist, cv, alpha=alpha, step=step, r=r, gate=gate, phi=phi
+        )
     # Push prob for integer-line discrete markets (continuous dists return zero);
     # correlation.py uses it for the Underdog "push drops one leg" rule.
-    push = get_push_prob(line, base_mean, dist, cv=cv, r=r, sigma=sigma, skew_alpha=skew, gate=gate)
+    push = get_push_prob(
+        line, base_mean, dist, cv=cv, r=r, sigma=sigma, skew_alpha=skew, gate=gate, phi=phi
+    )
     return 1 - raw_under, push
 
 

@@ -47,7 +47,7 @@ from scipy.stats import nbinom as _scipy_nbinom
 from scipy.stats import skewnorm as _scipy_skewnorm
 
 from sportstradamus import data
-from sportstradamus.helpers.distributions import skewnormal_loc_from_mean
+from sportstradamus.helpers.distributions import _dp_cdf_pmf, _dp_ppf, skewnormal_loc_from_mean
 from sportstradamus.helpers.io import read_history
 from sportstradamus.helpers.provenance import git_sha
 from sportstradamus.training.baselines import get_target_normalization
@@ -310,7 +310,8 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
         priced columns (``P``, ``Odds``, ``Line``), and any per-row
         distribution parameters present (``SN_Loc`` / ``SN_Scale`` /
         ``SN_Alpha`` for SkewNormal, ``R`` / ``NB_P`` for NegBin/ZINB,
-        ``Alpha`` for Gamma/ZAGamma, ``Gate`` for the zero-inflated variants).
+        ``DP_MU`` / ``DP_PHI`` for DPO, ``Alpha`` for Gamma/ZAGamma,
+        ``Gate`` for the zero-inflated variants).
         Rows with non-finite values in any required column are dropped.
 
     Raises:
@@ -350,6 +351,8 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
         "GlobalMean",  # …shrunk toward this persisted global mean
         "R",
         "NB_P",
+        "DP_MU",
+        "DP_PHI",
         "Alpha",
         "Gate",
         "PITRecalKnots",  # §6.1 Rung C whole-CDF map g; Gate 4 warps the PIT through it
@@ -718,8 +721,8 @@ def _zinb_ppf(q: float, r: np.ndarray, nb_p: np.ndarray, gate: np.ndarray) -> np
 def _infer_dist_from_columns(df: pd.DataFrame) -> str | None:
     """Identify the distribution family from per-row parameter columns.
 
-    Returns one of ``"SkewNormal"``, ``"NegBin"``, ``"ZINB"``, ``"Gamma"``,
-    ``"ZAGamma"`` based on which params ``training/pipeline.py``
+    Returns one of ``"SkewNormal"``, ``"NegBin"``, ``"ZINB"``, ``"DPO"``,
+    ``"Gamma"``, ``"ZAGamma"`` based on which params ``training/pipeline.py``
     ``_step_persist_artifacts`` dumped into the test-set CSV (~lines
     1191-1212). ``None`` for legacy / synthetic frames missing every
     distribution param — those keep the back-compat point-IQR semantics.
@@ -727,6 +730,8 @@ def _infer_dist_from_columns(df: pd.DataFrame) -> str | None:
     cols = set(df.columns)
     if {"SN_Loc", "SN_Scale", "SN_Alpha"} <= cols:
         return "SkewNormal"
+    if {"DP_MU", "DP_PHI"} <= cols:
+        return "DPO"
     if {"Alpha", "EV"} <= cols and "R" not in cols:
         return "ZAGamma" if "Gate" in cols else "Gamma"
     if {"R", "NB_P"} <= cols:
@@ -805,6 +810,10 @@ def _pred_ppf(df: pd.DataFrame, dist: str, q: float, *, strategy: str) -> np.nda
         p = df["NB_P"].to_numpy(dtype=float)
         gate = df["Gate"].to_numpy(dtype=float)
         return _zinb_ppf(q, r, p, gate)
+    if dist == "DPO":
+        mu = df["DP_MU"].to_numpy(dtype=float)
+        phi = df["DP_PHI"].to_numpy(dtype=float)
+        return _dp_ppf(q, mu, phi)
     if dist == "Gamma":
         # rate = concentration / EV; scale = 1 / rate = EV / concentration.
         a = df["Alpha"].to_numpy(dtype=float)
@@ -861,6 +870,10 @@ def _pred_cdf_pmf(
             cdf = gate + (1.0 - gate) * cdf
             pmf = np.where(y == 0, gate + (1.0 - gate) * pmf, (1.0 - gate) * pmf)
         return cdf, pmf
+    if dist == "DPO":
+        mu = df["DP_MU"].to_numpy(dtype=float)
+        phi = df["DP_PHI"].to_numpy(dtype=float)
+        return _dp_cdf_pmf(y, mu, phi)
     if dist in ("Gamma", "ZAGamma"):
         a = df["Alpha"].to_numpy(dtype=float)
         ev = df["EV"].to_numpy(dtype=float)
@@ -1440,7 +1453,7 @@ def _gate6_legs(
                 _GATE6_STAR_REF_NFL if league == "NFL" else _GATE6_STAR_REF_BASKETBALL
             )
 
-    if _infer_dist_from_columns(df) in ("NegBin", "ZINB"):
+    if _infer_dist_from_columns(df) in ("NegBin", "ZINB", "DPO"):
         bench = stable & (meanyr <= np.quantile(meanyr, BOTTOM_QUARTILE_FRAC))
         if (
             int(bench.sum()) >= _GATE6_MIN_STAR_ROWS

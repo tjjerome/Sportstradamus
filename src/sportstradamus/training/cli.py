@@ -185,8 +185,8 @@ def _resolve_cell_knob(stat_meta_full, lg, market, key, default, flag_value):
     show_default=True,
     help=(
         "Training distribution family. 'auto' (default) honors each cell's stat_meta dist "
-        "(else the data-driven mean>=2 / zero-rate pick); an explicit family (NegBin / ZINB / "
-        "SkewNormal) overrides every cell — a WS-3 family sweep axis."
+        "(else the data-driven mean>=2 / zero-rate pick); an explicit family (DPO / NegBin / "
+        "ZINB / SkewNormal) overrides every cell — a WS-3 family sweep axis."
     ),
 )
 @click.option(

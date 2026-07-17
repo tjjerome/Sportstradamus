@@ -8,6 +8,7 @@ from scipy import stats
 
 from sportstradamus.dashboard.data import GAMELOG_SCHEMA, load_gamelog
 from sportstradamus.dashboard.theme import GOLD, GRAY, GREEN, RED
+from sportstradamus.helpers.distributions import dp_pmf_curve
 
 # Distribution families, mirrored from the prediction pipeline.
 _CONTINUOUS = ("Gamma", "ZAGamma", "SkewNormal")
@@ -19,6 +20,7 @@ DIST_PARAM_COLS = {
     "Model Alpha": "alpha",
     "Model Sigma": "sigma",
     "Model Skew": "skew_alpha",
+    "Model Phi": "phi",
     "Gate": "gate",
 }
 
@@ -88,6 +90,11 @@ def _discrete_curve(dist: str, ev: float, std: float, params: dict):
     xs = np.arange(0, hi + 1, dtype=int)
     if dist == "Poisson":
         return xs, stats.poisson.pmf(xs, ev)
+    if dist == "DPO":
+        phi = params.get("phi")
+        if not phi or phi <= 0:
+            raise ValueError("DPO requires Model Phi > 0")
+        return xs, dp_pmf_curve(xs, ev, phi)
     if dist not in ("NegBin", "ZINB"):
         raise ValueError(f"Unknown discrete dist: {dist}")
 

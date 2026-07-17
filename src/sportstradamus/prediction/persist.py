@@ -81,6 +81,7 @@ _OFFER_KEEP_COLS = [
     "Model Alpha",
     "Model Sigma",
     "Model Skew",
+    "Model Phi",
 ]
 
 # A row with no boost, no model edge, and no book edge carries no signal —
@@ -224,14 +225,16 @@ def _normalize_offers(offers: pd.DataFrame) -> pd.DataFrame:
 
 def _split_dist_params(df: pd.DataFrame) -> pd.DataFrame:
     """Split the generic "Model Param" shape value into distribution-specific
-    columns (Model R / Model Alpha / Model Sigma) the dashboard's scipy calls
-    expect. No-op when the scoring pipeline didn't attach Model Param / Dist.
+    columns (Model R / Model Alpha / Model Sigma / Model Phi) the dashboard's
+    distribution decodes expect. No-op when the scoring pipeline didn't attach
+    Model Param / Dist.
     """
     if "Model Param" not in df.columns or "Dist" not in df.columns:
         return df
     df["Model R"] = np.where(df["Dist"].isin(("NegBin", "ZINB")), df["Model Param"], np.nan)
     df["Model Alpha"] = np.where(df["Dist"].isin(("Gamma", "ZAGamma")), df["Model Param"], np.nan)
     df["Model Sigma"] = np.where(df["Dist"] == "SkewNormal", df["Model Param"], np.nan)
+    df["Model Phi"] = np.where(df["Dist"] == "DPO", df["Model Param"], np.nan)
     return df
 
 

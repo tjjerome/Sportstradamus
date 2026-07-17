@@ -123,12 +123,41 @@ class DoublePoissonTorch(D.Distribution):
         value = torch.as_tensor(value, dtype=self.mu.dtype, device=self.mu.device)
         return self._log_kernel(value) - self._log_normalizer()
 
-    def _grid_moments(self):
+    def _grid_log_pmf(self):
+        """Normalized log-PMF over the support grid, shape ``(K, *batch)``."""
         grid = self._support_grid()
         log_pmf = (
             self._log_kernel(grid.expand(*self.batch_shape, -1).movedim(-1, 0))
             - self._log_normalizer()
         )
+        return grid, log_pmf
+
+    def sample(self, sample_shape=torch.Size()):
+        """Inverse-CDF sampling over the truncated support grid.
+
+        Not reparameterized (no gradient path) — exists because
+        ``LightGBMLSS.predict`` unconditionally draws samples via
+        ``Distribution.sample`` even for ``pred_type="parameters"``.
+        """
+        with torch.no_grad():
+            grid, log_pmf = self._grid_log_pmf()
+            batch_numel = self.mu.numel()
+            cdf = torch.cumsum(torch.exp(log_pmf), dim=0).reshape(-1, batch_numel)
+            sample_shape = torch.Size(sample_shape)
+            u = torch.rand(
+                sample_shape.numel(), batch_numel,
+                dtype=self.mu.dtype, device=self.mu.device,
+            )
+            # searchsorted wants the sorted axis last: (B, K) vs (B, n). Scale u
+            # by the total truncated mass so u can never exceed cdf[-1].
+            idx = torch.searchsorted(
+                cdf.T.contiguous(), (u * cdf[-1]).T.contiguous()
+            ).T
+            out = idx.to(self.mu.dtype).clamp(max=grid[-1])
+            return out.reshape(sample_shape + self.batch_shape)
+
+    def _grid_moments(self):
+        grid, log_pmf = self._grid_log_pmf()
         pmf = torch.exp(log_pmf)
         shaped_grid = grid.reshape((-1,) + (1,) * len(self.batch_shape))
         mean = (shaped_grid * pmf).sum(dim=0)

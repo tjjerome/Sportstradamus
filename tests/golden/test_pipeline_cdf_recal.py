@@ -31,6 +31,8 @@ def test_calibrate_dispersion_rung_c_hands_served_val_params_downstream():
         "alpha_blend": None,
         "alpha_blend_val": None,
         "beta_blend_val": None,
+        "phi_test": None,
+        "phi_blend_val": None,
         "weighted_mean": mean,
         "weighted_mean_val": mean,
         "sn_sigma_blend_test": sigma,

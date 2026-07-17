@@ -48,13 +48,13 @@ Options:
                                   nll for the count branch. 'nll'/'crps'
                                   override every family; an Operation Ship 75
                                   search axis.  [default: auto]
-  --dist [auto|NegBin|SkewNormal|ZINB]
+  --dist [auto|DPO|NegBin|SkewNormal|ZINB]
                                   Training distribution family. 'auto' (default)
                                   honors each cell's stat_meta dist (else the
                                   data-driven mean>=2 / zero-rate pick); an
-                                  explicit family (NegBin / ZINB / SkewNormal)
-                                  overrides every cell — a WS-3 family sweep
-                                  axis.  [default: auto]
+                                  explicit family (DPO / NegBin / ZINB /
+                                  SkewNormal) overrides every cell — a WS-3
+                                  family sweep axis.  [default: auto]
   --blending-loss-fn [auto|crps|nll]
                                   Loss minimized when fitting the model↔book
                                   blend weight. 'auto' (default) honors each

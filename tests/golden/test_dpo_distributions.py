@@ -19,6 +19,7 @@ from sportstradamus.helpers.distributions import (
     _dp_ppf,
     decode_predictive_mean,
     dp_crps,
+    dp_pmf_curve,
     fused_loc,
     get_ev,
     get_odds,
@@ -117,6 +118,13 @@ def test_decode_predictive_mean_dpo():
     np.testing.assert_allclose(decoded.ev, _dp_mean(params["mu"], params["phi"]), rtol=1e-9)
     np.testing.assert_allclose(decoded.phi, params["phi"], rtol=1e-9)
     assert decoded.gate is None and decoded.r is None
+
+
+def test_dp_pmf_curve_matches_kernel_and_mean():
+    xs = np.arange(0, 20)
+    pmf = dp_pmf_curve(xs, ev=1.8, phi=1.4)
+    assert pmf.sum() == pytest.approx(1.0, abs=1e-6)
+    assert (xs * pmf).sum() == pytest.approx(1.8, abs=1e-4)
 
 
 def test_dp_crps_prefers_calibrated_dispersion():

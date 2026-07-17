@@ -55,6 +55,7 @@ def test_full_slate_drop_split_backfill_keep_sort():
         "Model Alpha",
         "Model Sigma",
         "Model Skew",
+        "Model Phi",
     ]
     assert "Model Param" not in out.columns
     assert "Temperature" not in out.columns
@@ -104,6 +105,7 @@ def test_game_k_why_retained_in_keep_order():
         "Model Alpha",
         "Model Sigma",
         "Model Skew",
+        "Model Phi",
     ]
     assert out.loc[0, "Game"] == "AAA/BBB"
     assert out.loc[0, "Kelly"] == 0.42
