@@ -262,10 +262,12 @@
     },
     "NHL": {
         "assists": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "count_dispersion_objective": "pit_ks",
+            "blending": "crps"
         },
         "blocked": {
             "dist": "DPO",
@@ -497,10 +499,12 @@
     },
     "MLB": {
         "batter strikeouts": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "count_dispersion_objective": "pit_ks",
+            "blending": "nll"
         },
         "doubles": {
             "dist": "DPO",
