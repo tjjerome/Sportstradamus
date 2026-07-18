@@ -3,6 +3,7 @@
 import importlib.resources as pkg_resources
 import json
 import warnings
+from pathlib import Path
 
 import click
 import numpy as np
@@ -101,6 +102,103 @@ def _resolve_cell_knob(stat_meta_full, lg, market, key, default, flag_value):
     """
     cell_value = stat_meta_full.get(lg, {}).get(market, {}).get(key, default)
     return cell_value if flag_value == LOSS_AUTO else flag_value
+
+
+# The six ship-gate booleans in model_stats.parquet (nullable BooleanDtype;
+# pd.NA means the scorecard never ran, which counts as not passing here).
+_GATE_COLS = ("g1_pass", "g2_pass", "g3_pass", "g4_pass", "g5_pass", "g6_pass")
+
+
+def _gate_passed(value) -> bool:
+    """NA-safe read of a nullable-boolean gate cell (``bool(pd.NA)`` raises)."""
+    return pd.notna(value) and bool(value)
+
+
+def _model_stats_row(lg: str, market: str) -> pd.Series | None:
+    """The cell's model_stats row (fresh after train_market — report() rewrote it), or None."""
+    if not MODEL_STATS_PATH.is_file():
+        return None
+    stats = pd.read_parquet(
+        MODEL_STATS_PATH,
+        columns=["league", "market", "distribution", "ship", *_GATE_COLS],
+    )
+    rows = stats[(stats["league"] == lg) & (stats["market"] == market)]
+    return None if rows.empty else rows.iloc[0]
+
+
+def _g4_only_retry_wanted(
+    row: pd.Series | None, cell_hpo_selection: str, cell_zinb_mode: str
+) -> bool:
+    """Whether a cell earns the one-shot calibrated-HPO retry.
+
+    Fires only for cells trained under ``loss`` selection whose fresh
+    model_stats row failed ship on Gate 4 alone — the dispersion-calibration
+    failure that calibrated trial selection targets. Hurdle-ZINB is excluded:
+    that path has no Optuna search, so calibrated selection is meaningless.
+    """
+    if row is None or cell_hpo_selection != "loss":
+        return False
+    if row["distribution"] == "ZINB" and cell_zinb_mode == "hurdle":
+        return False
+    if _gate_passed(row["ship"]) or _gate_passed(row["g4_pass"]):
+        return False
+    return all(_gate_passed(row[c]) for c in _GATE_COLS if c != "g4_pass")
+
+
+def _persist_calibrated_hpo(stat_meta_full: dict, lg: str, market: str) -> None:
+    """Pin ``hpo_selection="calibrated"`` into the cell's stat_meta entry, on disk and in memory.
+
+    The weekly warm cron retrains from stat_meta; without the pin the next
+    retrain would select by loss again and serve-iff-ship would prune the cell.
+    """
+    stat_meta_full.setdefault(lg, {}).setdefault(market, {})["hpo_selection"] = "calibrated"
+    meta_path = Path(str(STAT_META_PATH))
+    tmp = meta_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(stat_meta_full, indent=4) + "\n")
+    tmp.replace(meta_path)
+
+
+def _retry_calibrated_if_g4_only(
+    lg, market, stat_data, archive, league_start_date, train_kwargs, stat_meta_full, log
+) -> None:
+    """One-shot calibrated-HPO retry for a cell that failed ship on Gate 4 alone.
+
+    Reruns ``train_market`` with the same kwargs but ``hpo_selection="calibrated"``
+    and ``force=True`` (the first run consumed the new gamedays; without force the
+    input-freeze short-circuit would skip the retrain). The retry's ``report()``
+    overwrites the cell's model_stats row — the retry row wins. A shipped retry
+    persists the knob via :func:`_persist_calibrated_hpo`; a failed one just
+    echoes its failing gates. Never retries more than once.
+    """
+    if train_kwargs["deterministic"] or train_kwargs["matrix_only"]:
+        return
+    row = _model_stats_row(lg, market)
+    if not _g4_only_retry_wanted(row, train_kwargs["hpo_selection"], train_kwargs["zinb_mode"]):
+        return
+    click.echo(f"[{lg}] {market}: g4-only ship fail — retrying with hpo_selection=calibrated")
+    log.info("g4-only calibrated retry", extra={"league": lg, "market": market})
+    train_market(
+        lg,
+        market,
+        stat_data,
+        archive,
+        league_start_date,
+        **(train_kwargs | {"force": True, "hpo_selection": "calibrated"}),
+    )
+    row = _model_stats_row(lg, market)
+    if row is not None and _gate_passed(row["ship"]):
+        _persist_calibrated_hpo(stat_meta_full, lg, market)
+        click.echo(
+            f"[{lg}] {market}: SHIPPED via calibrated HPO — persisted hpo_selection to stat_meta"
+        )
+        log.info("calibrated retry shipped", extra={"league": lg, "market": market})
+    else:
+        failed = (
+            "no model_stats row"
+            if row is None
+            else ", ".join(c for c in _GATE_COLS if not _gate_passed(row[c]))
+        )
+        click.echo(f"[{lg}] {market}: calibrated retry still ship=False (failed gates: {failed})")
 
 
 @click.command()
@@ -250,10 +348,12 @@ def _resolve_cell_knob(stat_meta_full, lg, market, key, default, flag_value):
     default=LOSS_AUTO,
     show_default=True,
     help=(
-        "Optuna trial-selection rule for SkewNormal cells. 'auto' (default) honors each cell's "
-        "stat_meta hpo_selection (else 'loss'); an explicit slug overrides every cell. 'loss' picks "
-        "the lowest CV CRPS; 'calibrated' re-ranks the top trials by validation PIT-KS and picks the "
-        "sharpest that clears the Gate-4 threshold (sharpness subject to calibration); a Ship 75 axis."
+        "Optuna trial-selection rule for SkewNormal and LSS count/Gamma cells (hurdle-ZINB has no "
+        "Optuna search). 'auto' (default) honors each cell's stat_meta hpo_selection (else 'loss'); "
+        "an explicit slug overrides every cell. 'loss' picks the lowest CV loss; 'calibrated' "
+        "re-ranks the top trials by validation PIT-KS and picks the sharpest that clears the Gate-4 "
+        "threshold. A cell failing ship on Gate 4 alone under 'loss' is retrained once with "
+        "'calibrated', and the knob persists to stat_meta when the retry ships; a Ship 75 axis."
     ),
 )
 @click.option(
@@ -494,25 +594,26 @@ def meditate(
             cell_sn_param = _resolve_cell_knob(
                 stat_meta_full, lg, market, "sn_param", "direct", sn_param
             )
-            train_market(
-                lg,
-                market,
-                stat_data,
-                archive,
-                league_start_date,
-                force=force,
-                deterministic=deterministic,
-                target_normalization=cell_target_norm,
-                posthoc_slug=cell_posthoc,
-                blending=cell_blending,
-                zinb_mode=cell_zinb_mode,
-                dist_training_loss=dist_training_loss,
-                dist=dist,
-                stabilization=stabilization,
-                hpo_selection=cell_hpo_selection,
-                count_dispersion_objective=cell_count_dispersion,
-                sn_param=cell_sn_param,
-                matrix_only=matrix_only,
+            # Kwargs as a dict so the g4-only calibrated retry below reruns the
+            # exact same call with only force/hpo_selection overridden.
+            train_kwargs = {
+                "force": force,
+                "deterministic": deterministic,
+                "target_normalization": cell_target_norm,
+                "posthoc_slug": cell_posthoc,
+                "blending": cell_blending,
+                "zinb_mode": cell_zinb_mode,
+                "dist_training_loss": dist_training_loss,
+                "dist": dist,
+                "stabilization": stabilization,
+                "hpo_selection": cell_hpo_selection,
+                "count_dispersion_objective": cell_count_dispersion,
+                "sn_param": cell_sn_param,
+                "matrix_only": matrix_only,
+            }
+            train_market(lg, market, stat_data, archive, league_start_date, **train_kwargs)
+            _retry_calibrated_if_g4_only(
+                lg, market, stat_data, archive, league_start_date, train_kwargs, stat_meta_full, log
             )
 
     if not deterministic and not matrix_only:

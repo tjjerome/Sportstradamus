@@ -124,6 +124,18 @@ def _atomic_write_meta(meta: dict) -> None:
     tmp.replace(_STAT_META)
 
 
+def _sync_cell_from_disk(meta: dict, league: str, market: str) -> None:
+    """Re-read one cell's stat_meta entry after a meditate subprocess shipped it.
+
+    The g4-only calibrated retry inside meditate persists ``hpo_selection`` to disk
+    from the subprocess; without this re-sync the walk's next whole-file
+    ``_atomic_write_meta`` (another cell's persist or revert) would silently erase
+    that pin from confirm's stale in-memory copy.
+    """
+    with _STAT_META.open() as fh:
+        meta[league][market] = json.load(fh)[league][market]
+
+
 def _backup_stat_meta() -> pathlib.Path:
     """Copy the whole stat_meta.json to a timestamped sibling — the crash/abort recovery point."""
     backup = _STAT_META.with_name(f"stat_meta.{time.strftime('%Y%m%dT%H%M%S')}.bak.json")
@@ -241,6 +253,7 @@ def _confirm_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
     meta[lg][mkt]["shipped"] = _SHIPPED_DEVEL
     _atomic_write_meta(meta)
     if _confirm_meditate(lg, mkt):
+        _sync_cell_from_disk(meta, lg, mkt)
         click.secho(f"  SHIPPED (devel) {lg} {mkt}", fg="green")
         return (lg, mkt, "SHIPPED", [])
     meta[lg][mkt] = original
@@ -284,6 +297,7 @@ def _supersede_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
         if not click.confirm(f"  Promote {lg} {mkt} to {edits}?"):
             return (lg, mkt, "HELD", ["declined"])
         keep = True
+        _sync_cell_from_disk(meta, lg, mkt)
         return (lg, mkt, "SUPERSEDED", [])
     finally:
         if not keep:

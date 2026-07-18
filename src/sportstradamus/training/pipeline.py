@@ -871,12 +871,18 @@ def _pick_calibrated_candidate(candidates: list[dict], threshold: float) -> dict
 
 
 def _calibration_penalty(splits: dict, dist_info: dict):
-    """Build the per-trial served-PIT-KS evaluator that gates the SkewNormal HPO search (Lever 1).
+    """Build the per-trial served-PIT-KS evaluator that search-gates the HPO (Lever 1).
 
-    Returns a closure over ``splits``/``dist_info`` mapping a candidate param dict to the served
-    SkewNormal randomized-PIT KS on the validation split. Skips the book blend (the model dominates
-    failing SkewNormal cells, so the model-only KS closely proxies the served Gate-4 statistic while
-    keeping per-trial cost to one refit).
+    Returns a closure over ``splits``/``dist_info`` mapping a candidate param dict to the
+    served randomized-PIT KS on the validation split — SkewNormal via its joint
+    (scale, skew) fit, every other family (NegBin / ZINB joint / DPO / Gamma / ZAGamma)
+    via one refit + scalar dispersion-``c`` fit. Two deliberate proxy simplifications:
+    (a) both branches are model-only — the book blend is skipped (the model dominates
+    failing cells, so the model-only KS closely proxies the served Gate-4 statistic while
+    keeping per-trial cost to one refit); (b) the count branch always fits ``c`` on the
+    PIT-KS objective — a proxy for the production dispersion fit even when the cell's
+    ``count_dispersion_objective`` is crps — because the closure's output IS the
+    served-KS ranking statistic.
     """
     dist = dist_info["dist"]
     strategy = dist_info["target_normalization"]
@@ -905,7 +911,49 @@ def _calibration_penalty(splits: dict, dist_info: dict):
         c = fit_skewnorm_dispersion_c(mean, sn_scale, skew, y_val)
         return _served_sn_pit_ks(mean, sn_scale, skew, y_val, c, 0.0)
 
-    return served_pit_ks
+    def count_pit_ks(params: dict) -> float:
+        preds = fit_predict_params(
+            dist_info["dist_obj"],
+            dist,
+            splits["X_train"],
+            splits["y_train_labels"],
+            X_val,
+            params,
+            normalized=dist_info["normalize"],
+            shape_ceiling=dist_info["shape_ceiling"],
+            offset_mode=dist_info["offset_mode"],
+            sn_param=dist_info["sn_param"],
+        )
+        decoded = decode_predictive_mean(preds, dist)
+        shape_ceiling = dist_info["shape_ceiling"]
+        if dist == "DPO":
+            upper = min(10.0, _DP_PHI_CEILING / float(np.max(decoded.phi)))
+        else:
+            mean_shape = np.mean(decoded.r if dist in ("NegBin", "ZINB") else decoded.alpha)
+            if mean_shape > 0 and shape_ceiling is not None and not np.isnan(shape_ceiling):
+                upper = min(10.0, shape_ceiling / mean_shape)
+            else:
+                upper = 10.0
+        c_opt = minimize_scalar(
+            lambda c: _dispersion_pit_ks_loss(
+                c,
+                dist=dist,
+                y_val_arr=y_val,
+                val_weighted_mean=decoded.ev,
+                gate_blend_val=decoded.gate,
+                r_blend_val=decoded.r,
+                alpha_blend_val=decoded.alpha,
+                phi_blend_val=decoded.phi,
+            ),
+            bounds=(0.1, upper),
+            method="bounded",
+        ).x
+        frame = _count_pit_frame(
+            dist, c_opt, decoded.ev, decoded.gate, decoded.r, decoded.alpha, decoded.phi
+        )
+        return _randomized_pit_ks(frame, dist, y_val, strategy=TARGET_NORM_NONE)
+
+    return served_pit_ks if dist == "SkewNormal" else count_pit_ks
 
 
 def _step_select_hyperparams(
@@ -922,7 +970,7 @@ def _step_select_hyperparams(
 ) -> tuple[dict | list[dict], list[int]]:
     """Pick Optuna-tuned params, warm-start, or the deterministic fixed set.
 
-    When ``calibration_penalty`` is given (Lever 1, the SkewNormal calibrated path) the Optuna
+    When ``calibration_penalty`` is given (Lever 1, calibrated HP selection) the Optuna
     objective is search-gated on validation PIT-KS and the paths return every completed trial (a
     list) for the caller's :func:`_pick_calibrated_candidate` final pick; every other case returns
     the single best param dict as before.
@@ -1706,6 +1754,42 @@ def _dispersion_crps_loss(
     return np.mean(crps) + reg
 
 
+def _count_pit_frame(
+    dist: str,
+    c: float,
+    val_weighted_mean: np.ndarray,
+    gate_blend_val: np.ndarray | None,
+    r_blend_val: np.ndarray | None = None,
+    alpha_blend_val: np.ndarray | None = None,
+    phi_blend_val: np.ndarray | None = None,
+) -> pd.DataFrame:
+    """Scorecard param frame of the count/gamma predictive at dispersion scale ``c``.
+
+    Shared by the dispersion fit's KS objective and the Lever-1 per-trial evaluator: the
+    mean is held fixed while the family shape (NegBin ``r``, Gamma ``alpha``, DPO ``phi``)
+    scales by ``c``.
+    """
+    if dist == "DPO":
+        phi_cal = phi_blend_val * c
+        # DP_MU/DP_PHI is the scorecard's DPO param-frame contract; natural mu is
+        # re-inverted at each c so the served mean stays fixed (like NB_P below).
+        params = pd.DataFrame(
+            {"DP_MU": _dp_mu_from_mean(val_weighted_mean, phi_cal), "DP_PHI": phi_cal}
+        )
+    elif dist in ("NegBin", "ZINB"):
+        r_cal = r_blend_val * c
+        # `_pred_cdf_pmf` reads NB_P as the failure prob (scipy success = 1 − NB_P), so the
+        # served mean is r·NB_P/(1−NB_P); hold it at val_weighted_mean ⇒ NB_P = mean/(r+mean).
+        # (The CRPS path's `p_cal = r/(r+mean)` is `negbin_crps`'s reciprocal convention.)
+        nb_p = val_weighted_mean / (r_cal + val_weighted_mean)
+        params = pd.DataFrame({"R": r_cal, "NB_P": nb_p})
+    else:
+        params = pd.DataFrame({"Alpha": alpha_blend_val * c, "EV": val_weighted_mean})
+    if gate_blend_val is not None:
+        params["Gate"] = gate_blend_val
+    return params
+
+
 def _dispersion_pit_ks_loss(
     c: float,
     *,
@@ -1721,29 +1805,12 @@ def _dispersion_pit_ks_loss(
 
     The PIT-KS counterpart of :func:`_dispersion_crps_loss`: it minimizes the exact statistic
     Gate 4 scores instead of CRPS, mirroring the SkewNormal branch (which already fits its
-    scale on the served PIT-KS). The mean is held fixed and the shape (NegBin ``r``, Gamma
-    ``alpha``, DPO ``phi``) is scaled by ``c``; the same ``0.01·log(c)²`` brake as the CRPS
-    path keeps a flat objective from driving ``c`` to an extreme (research brief
-    open-question 2 guard).
+    scale on the served PIT-KS). The same ``0.01·log(c)²`` brake as the CRPS path keeps a
+    flat objective from driving ``c`` to an extreme (research brief open-question 2 guard).
     """
-    if dist == "DPO":
-        phi_cal = phi_blend_val * c
-        # DP_MU/DP_PHI is the scorecard's DPO param-frame contract; natural mu is
-        # re-inverted at each c so the served mean stays fixed (like NB_P above).
-        params = pd.DataFrame(
-            {"DP_MU": _dp_mu_from_mean(val_weighted_mean, phi_cal), "DP_PHI": phi_cal}
-        )
-    elif dist in ("NegBin", "ZINB"):
-        r_cal = r_blend_val * c
-        # `_pred_cdf_pmf` reads NB_P as the failure prob (scipy success = 1 − NB_P), so the
-        # served mean is r·NB_P/(1−NB_P); hold it at val_weighted_mean ⇒ NB_P = mean/(r+mean).
-        # (The CRPS path's `p_cal = r/(r+mean)` is `negbin_crps`'s reciprocal convention.)
-        nb_p = val_weighted_mean / (r_cal + val_weighted_mean)
-        params = pd.DataFrame({"R": r_cal, "NB_P": nb_p})
-    else:
-        params = pd.DataFrame({"Alpha": alpha_blend_val * c, "EV": val_weighted_mean})
-    if gate_blend_val is not None:
-        params["Gate"] = gate_blend_val
+    params = _count_pit_frame(
+        dist, c, val_weighted_mean, gate_blend_val, r_blend_val, alpha_blend_val, phi_blend_val
+    )
     ks = _randomized_pit_ks(params, dist, y_val_arr, strategy=TARGET_NORM_NONE)
     reg = 0.01 * np.log(c) ** 2
     return ks + reg
@@ -2829,7 +2896,8 @@ def train_market(
     dtrain = lgb.Dataset(splits["X_train"], label=splits["y_train_labels"])
     opt_params_in = filedict.get("params")
     penalty = penalty_threshold = None
-    if hpo_selection == "calibrated" and dist == "SkewNormal":
+    if hpo_selection == "calibrated" and not use_hurdle:
+        # Hurdle skips Optuna entirely (_step_select_hyperparams), so there is nothing to select.
         penalty = _calibration_penalty(splits, dist_info)
         penalty_threshold = _gate4_pit_ks_threshold(len(splits["y_validation"]))
     opt_params, _ = _step_select_hyperparams(

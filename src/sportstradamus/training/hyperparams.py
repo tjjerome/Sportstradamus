@@ -115,8 +115,8 @@ def run_hyper_opt(
     params are evaluated first, so the selected hyperparameters are unaffected.
 
     Default (``calibration_penalty is None``) returns the single best-CV-loss param dict and the
-    objective is plain CV-CRPS — unchanged. When ``calibration_penalty`` is given (Lever 1, the
-    SkewNormal calibrated path), the objective becomes the search-gating score
+    objective is plain CV-CRPS — unchanged. When ``calibration_penalty`` is given (Lever 1,
+    calibrated HP selection), the objective becomes the search-gating score
     ``CRPS + weight*max(0, pit_ks - penalty_threshold)`` — ``calibration_penalty(params)`` returns
     the trial's served validation PIT-KS — so the TPE sampler explores the wider-sigma region. The
     return is then every completed trial's param dict tagged with its raw ``cv_loss``

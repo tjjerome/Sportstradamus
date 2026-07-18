@@ -92,15 +92,19 @@ Options:
                                   Operation Ship 75 calibration search axis.
                                   [default: None]
   --hpo-selection [auto|loss|calibrated]
-                                  Optuna trial-selection rule for SkewNormal
-                                  cells. 'auto' (default) honors each cell's
-                                  stat_meta hpo_selection (else 'loss'); an
-                                  explicit slug overrides every cell. 'loss'
-                                  picks the lowest CV CRPS; 'calibrated' re-
+                                  Optuna trial-selection rule for SkewNormal and
+                                  LSS count/Gamma cells (hurdle-ZINB has no
+                                  Optuna search). 'auto' (default) honors each
+                                  cell's stat_meta hpo_selection (else 'loss');
+                                  an explicit slug overrides every cell. 'loss'
+                                  picks the lowest CV loss; 'calibrated' re-
                                   ranks the top trials by validation PIT-KS and
                                   picks the sharpest that clears the Gate-4
-                                  threshold (sharpness subject to calibration);
-                                  a Ship 75 axis.  [default: auto]
+                                  threshold. A cell failing ship on Gate 4 alone
+                                  under 'loss' is retrained once with
+                                  'calibrated', and the knob persists to
+                                  stat_meta when the retry ships; a Ship 75
+                                  axis.  [default: auto]
   --count-dispersion-objective [auto|crps|pit_ks]
                                   Objective the count branch (NegBin/ZINB/Gamma)
                                   minimizes when fitting the dispersion scale.

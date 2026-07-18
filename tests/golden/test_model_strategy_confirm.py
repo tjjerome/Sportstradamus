@@ -7,10 +7,31 @@ corner is a persistable candidate, and that a failure reverts the stat_meta entr
 pickle (reverting stat_meta alone would leave a failed cell serving).
 """
 
+import json
+
 import pandas as pd
 import pytest
 
 from sportstradamus.training import model_strategy_confirm as mc
+
+
+def _fake_meta_disk(monkeypatch, tmp_path):
+    """Route ``_atomic_write_meta`` to a tmp ``_STAT_META`` file.
+
+    The ship path re-reads the cell from disk after the meditate subprocess
+    (``_sync_cell_from_disk`` — the subprocess may have pinned ``hpo_selection``),
+    so a bare no-op write mock would make the sync read the real repo file and
+    clobber the in-memory candidate. Returns the write-call list.
+    """
+    meta_file = tmp_path / "stat_meta.json"
+    monkeypatch.setattr(mc, "_STAT_META", meta_file)
+    writes = []
+    monkeypatch.setattr(
+        mc,
+        "_atomic_write_meta",
+        lambda m: writes.append("w") or meta_file.write_text(json.dumps(m)),
+    )
+    return writes
 
 
 def _sn_row(norm, dist_loss, blend, ships, slack, sn_param="direct"):
@@ -190,10 +211,9 @@ def test_run_meditate_true_on_clean_exit_false_on_error(monkeypatch, tmp_path):
 # --- persist / confirm / revert --------------------------------------------------------------
 
 
-def test_confirm_one_pass_keeps_devel(monkeypatch):
+def test_confirm_one_pass_keeps_devel(monkeypatch, tmp_path):
     meta = {"WNBA": {"AST": _sn_original()}}
-    writes = []
-    monkeypatch.setattr(mc, "_atomic_write_meta", lambda m: writes.append("w"))
+    writes = _fake_meta_disk(monkeypatch, tmp_path)
     monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt: True)
     pruned = []
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)))
@@ -243,7 +263,7 @@ def test_confirm_one_fail_reverts_stat_meta_and_prunes_pickle(monkeypatch):
 # --- end-to-end loop -------------------------------------------------------------------------
 
 
-def test_run_confirm_yes_persists_and_confirms(monkeypatch, capsys):
+def test_run_confirm_yes_persists_and_confirms(monkeypatch, capsys, tmp_path):
     board = pd.DataFrame(
         [
             _sn_row("centered_additive_mean10", "crps", "crps", True, 0.25),
@@ -253,7 +273,7 @@ def test_run_confirm_yes_persists_and_confirms(monkeypatch, capsys):
     meta = {"WNBA": {"AST": _sn_original()}}
     monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
     monkeypatch.setattr(mc, "_backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
-    monkeypatch.setattr(mc, "_atomic_write_meta", lambda m: None)
+    _fake_meta_disk(monkeypatch, tmp_path)
     monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt: True)
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: False)
 
