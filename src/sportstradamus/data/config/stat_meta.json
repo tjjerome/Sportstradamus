@@ -501,16 +501,20 @@
             "posthoc": "none"
         },
         "doubles": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "count_dispersion_objective": "pit_ks",
+            "blending": "crps"
         },
         "hits": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "count_dispersion_objective": "pit_ks",
+            "blending": "crps"
         },
         "hits allowed": {
             "dist": "SkewNormal",
@@ -520,10 +524,12 @@
             "blending": "crps"
         },
         "hits+runs+rbi": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "count_dispersion_objective": "crps",
+            "blending": "crps"
         },
         "hitter fantasy points underdog": {
             "dist": "SkewNormal",
@@ -566,16 +572,20 @@
             "posthoc": "none"
         },
         "rbi": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "NegBin",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "count_dispersion_objective": "crps",
+            "blending": "crps"
         },
         "runs": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "count_dispersion_objective": "pit_ks",
+            "blending": "crps"
         },
         "runs allowed": {
             "dist": "SkewNormal",
@@ -584,10 +594,12 @@
             "posthoc": "none"
         },
         "singles": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "count_dispersion_objective": "pit_ks",
+            "blending": "crps"
         },
         "stolen bases": {
             "dist": "ZINB",
@@ -599,16 +611,20 @@
             "blending": "nll"
         },
         "total bases": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "NegBin",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "count_dispersion_objective": "pit_ks",
+            "blending": "crps"
         },
         "walks": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "count_dispersion_objective": "crps",
+            "blending": "crps"
         },
         "walks allowed": {
             "dist": "SkewNormal",
