@@ -847,7 +847,7 @@ first-order CRPS trial can produce (LightGBMLSS's CRPS path sets the Hessian to 
 before ship; an inference-path round-trip test for every new served object (§7.3). **If it fails:**
 signal-starved → features (§6.3); genuine heavy tail → family (§6.6).
 
-### §6.6 WS-3 — Family escalation: count wall + shape-bound (DPO live — first ship WNBA TOV; centered-SN pilots next)
+### §6.6 WS-3 — Family escalation: count wall + shape-bound (DPO live — 4 ships: WNBA TOV, NHL points/blocked/shots; centered-SN pilots next)
 
 Entry: a cell whose cheaper axes are recorded-tried (§8), or a whole cohort the sweep leaves at
 the family ceiling. **This is the main funded build.** The two research questions are answered —
@@ -927,9 +927,16 @@ corner without g1/g5 regression. **Pilot verdicts (dates: §10):** WNBA TOV = **
 NBA PF = all-16-corner kill: DPO posts best-in-family coverage (0.663 vs hurdle 0.769 / plain-NB
 0.692, target 0.50) but closes only 15–39% of the central-50 gap and loses PIT-KS to hurdle
 (0.083 vs 0.066); with g5 co-failing, PF's binding constraint is not family — routes §6.1/§6.2.
-NHL points (low-mean 0.5 stress) in flight. The pre-registered kill rule is dead; DPO stays in
+NHL points (low-mean 0.5 stress) shipped 5/5 (BSS +0.012, pit_ks 0.0153 vs the 0.083 NB floor —
+low-mean ceiling thesis validated). The pre-registered kill rule is dead; DPO stays in
 `_CLASS_FAMILIES`. Lesson: screen labels are weak per-cell predictors — the ship came from the
 plain-NB *control* while the DP-mandatory pilot killed; the sweep decides, not the screen.
+**W1 count boards (NBA, NHL — dates: §10):** NBA 6 cells → 0 board ships (FTM's lone passing
+corner, hurdle +0.02, reverted at full-HPO confirm on g4 alone; STL best −0.040 DPO; TOV −0.300);
+BLST + OREB shipped instead via direct full-HPO re-earn. NHL 6 cells → 3/3 confirms shipped:
+blocked (DPO crps/crps, BSS +0.024), powerPlayPoints (hurdle-ZINB pit_ks/nll, BSS +0.449), shots
+(DPO crps/nll, BSS +0.012); assists −0.058 (best corner DPO — calibrated-HPO retry candidate),
+goalsAgainst and faceOffWins killed. DPO ships now 4; hurdle 1; joint-ZINB 0.
 Runner-up mean-parametrized CMP and rejected GenPoisson/Gamma-count/Tweedie rationale is in the R1
 brief.
 
@@ -951,7 +958,9 @@ global multi-task pooling across cells is the horizon item, not this push.
 
 **Machinery simplification track (owner-adopted; no-regression rule — nothing lands mid-sweep).**
 S1 *evidence-gated*: drop the dominated joint-ZINB sweep axis once the W1 boards confirm it never
-wins a cell (ZINB grid 8→4 corners; the mode stays supported for pinned cells). S2: retire
+wins a cell (ZINB grid 8→4 corners; the mode stays supported for pinned cells). Evidence through
+the NBA + NHL boards: 132 joint corners on the board, 0 shipping, best slack −0.166 — MLB/WNBA
+boards are the last word before landing. S2: retire
 `count_family_screen.py` to `src/deprecated/` post-campaign (verdict delivered; labels proved
 weak per-cell predictors). S3 *guard*: a knob-contract golden asserting stat_meta knob ↔ pickle
 filedict ↔ serve-side seed parity — the offset_mode / sn_param drift class, caught by hand twice.
@@ -1558,6 +1567,7 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-17 · W1 count boards NBA + NHL closed. NBA: 0 board ships (FTM hurdle +0.02 corner reverted at full-HPO on g4 alone; STL −0.040 / TOV −0.300 kills) but BLST + OREB shipped via direct full-HPO re-earn → NBA 15/21. NHL: 3/3 confirms shipped — blocked (DPO, BSS +0.024), powerPlayPoints (hurdle-ZINB, BSS +0.449), shots (DPO, BSS +0.012) → NHL 8/15; assists −0.058 near-miss (best corner DPO). DPO ships now 4 (TOV, points, blocked, shots). S1 evidence: joint-ZINB 0/132 board corners, best −0.166. Hurdle path has no Optuna search (`_step_select_hyperparams` fixed/warm params) — calibrated HP selection can never apply to hurdle corners. Owner-ordered fallback BUILT same day: `_calibration_penalty` extended to the LSS count/Gamma families (refit → decode → per-trial dispersion-c → served PIT-KS; guard now `not use_hurdle`) and meditate auto-retries a cell once with `hpo_selection=calibrated` when ship fails on g4 alone under loss selection, pinning the knob to stat_meta on a shipped retry; confirm re-syncs subprocess-written pins from disk so later whole-file writes can't erase them. Three gates green + goldens (predicate matrix, persist, sync, count-closure live-path).
 - 2026-07-17 · WS-3 pilots + breadth-75 reframe (owner: 75% every league is the mission, not WS-3 step-following). DPO first ship — WNBA TOV full-HPO 5/5 → devel (4/4 DPO corners board-pass, all NB corners die g4, BSS +0.042); NBA PF all-kill (<50% gap-close, family not binding → §6.1/§6.2); NHL points in flight; kill rule dead. Gap: NBA +3 / NFL +8 / NHL +8 / MLB +10 (WNBA 14/18 done). Five waves: count boards (non-NFL first) → integer-meta reroute → centered-SN pilots + continuous board → NFL book repair (paid backfill agent in flight, apply-at-gap) → ECE recal. Found: NBA BLST/OREB ship=True-but-withheld (free re-earns); `--dist-class` meta-dist blindspot (§6.6 gotcha); book-less MLB trio auto-passes g1–g3 (owner rule). Model-class escalation past families → §6.6 (ordinal stack / mixture / comp-PMF, §8.2-gated). NFL book audit closed same day: July repair already real for the big-7, paid backfill dead (API hole pre-2023-05-03; 882 credits spent, probe-verified ~0 recovery) — blockers rerouted code-side; tds ev-clamp bug root-caused (population zi 0.777 vs quoted-star prices, selection effect) + FIXED (gate-refuted quotes → NULL ev + shape-free quote; 20,840 poisoned evs NULLed; tds matrix purged) + repair applied (88k seed rows deleted, matrices swapped); autopass RETRACTED same day — bookless cells must beat the coin flip. Pilots 2/3 SHIP: NHL points confirm 5/5 → devel (BSS +0.012, n_val 11.8k). Simplification track S1–S5 adopted (§6.6). NHL points interim: DPO 6/6 deterministic +0.226, pit_ks 0.0153 (NB floor 0.083) — low-mean ceiling thesis validated; full-HPO confirm in flight.
 - 2026-07-11 · WS-2 activation COMPLETE: 9 cells live on devel — 5 MLB (2026-07-10) + 4 NHL (goals, hits, shotsAgainst, timeOnIce; commit 3635a20), all deterministic-board → full-HPO confirm on 2-season matrices; final spend 2.39M of 5M credits. NHL powerPlayPoints failed confirm, saves ranks-only (non-persistable dist-loss corner). Post-GO grind on no-ship cells moves to the §6 operating loop (detail: mlb-nhl-activation.md §10).
 - 2026-07-10 · dfs-products lane created (decision-engine expansion: game-line combos verify-first, Ladders, alt-line hardening) · §6.11 Rivals pricer build repointed there (tail read stays); ladders + gamelines stage-0 briefs in docs/archive/; serve-time budget locked ≤15 min heavy day · next: unchanged
