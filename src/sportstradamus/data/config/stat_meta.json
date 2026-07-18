@@ -356,10 +356,12 @@
             "posthoc": "none"
         },
         "sogBS": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "count_dispersion_objective": "crps",
+            "blending": "nll"
         },
         "timeOnIce": {
             "dist": "SkewNormal",
