@@ -34,11 +34,9 @@ from sportstradamus.helpers.io import (
     market_file_slug,
 )
 from sportstradamus.training.config import (
-    load_distribution_config,
     load_shipped_config,
     load_zi_config,
     save_cv_std_config,
-    save_distribution_config,
     save_zi_config,
 )
 from sportstradamus.training.scorecard import (
@@ -85,9 +83,9 @@ def report() -> None:
         f.name for f in (pkg_resources.files(data) / "models/").iterdir() if ".mdl" in f.name
     )
     # cv/std/zi live in stat_calibration.json (gitignored, runtime-recomputed);
-    # dist + shipped live in stat_meta.json (committed). Read both via the
-    # training.config helpers so the on-disk layout can evolve in one place.
-    stat_dist = load_distribution_config()
+    # shipped lives in stat_meta.json (committed). stat_meta's dist is an INPUT
+    # this function must never write back: a pickle-derived dist sync here once
+    # reverted a pending family flip off a stale pickle mid-campaign.
     stat_shipped = load_shipped_config()
     stat_zi_local = load_zi_config()
     _cal_path = pkg_resources.files(data) / "config" / "stat_calibration.json"
@@ -111,17 +109,14 @@ def report() -> None:
         std = model.get("std", 0)
         league = name[0]
         market = name[1].replace("-", " ").replace(".mdl", "")
-        dist = model["distribution"]
         h_gate = model.get("hist_gate", 0)
 
         league_models.setdefault(league, {})[market] = model
         stat_cv.setdefault(league, {})[market] = float(cv)
         stat_std.setdefault(league, {})[market] = float(std)
-        stat_dist.setdefault(league, {})[market] = dist
         stat_zi_local.setdefault(league, {})[market] = h_gate
 
     save_cv_std_config(stat_cv, stat_std)
-    save_distribution_config(stat_dist)
     save_zi_config(stat_zi_local)
 
     write_model_stats(league_models, stat_cv, stat_std, stat_shipped)

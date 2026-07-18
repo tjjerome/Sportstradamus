@@ -3,8 +3,7 @@
 Two physical files back the per-cell config:
 
 * ``stat_meta.json`` (committed): per-cell ``{dist, shipped, strategy}``.
-  Hand-curated; runtime updates from meditate (e.g. dist re-derivation)
-  surface as git diffs for the human to commit.
+  Hand-curated; ``dist`` is an input meditate reads, never writes back.
 * ``stat_calibration.json`` (gitignored): per-cell ``{cv, std, zi}``.
   Runtime-recomputed every meditate run.
 
@@ -61,29 +60,6 @@ def load_shipped_config() -> dict:
     }
 
 
-def save_distribution_config(config: dict) -> None:
-    """Persist a full ``{league: {market: dist}}`` map into ``stat_meta.json``.
-
-    Overwrites the ``dist`` field on every (league, market) in ``config``;
-    cells absent from ``config`` are untouched. Other fields on existing
-    cells (``shipped``, ``target_normalization``, ``posthoc``) are preserved.
-    """
-    meta = _load(_STAT_META_PATH)
-    for league, markets in config.items():
-        for market, dist in markets.items():
-            cell = meta.setdefault(league, {}).setdefault(
-                market,
-                {
-                    "dist": "Gamma",
-                    "shipped": "withheld",
-                    "target_normalization": "none",
-                    "posthoc": "none",
-                },
-            )
-            cell["dist"] = dist
-    _write(_STAT_META_PATH, meta)
-
-
 def load_zi_config() -> dict:
     """Read ``{league: {market: zi}}`` (non-null entries) from ``stat_calibration.json``."""
     cal = _load(_STAT_CAL_PATH)
@@ -96,9 +72,8 @@ def load_zi_config() -> dict:
 def save_zi_config(config: dict) -> None:
     """Persist a full ``{league: {market: zi}}`` map into ``stat_calibration.json``.
 
-    Mirrors :func:`save_distribution_config`'s contract: every cell in
-    ``config`` has its ``zi`` field overwritten; other calibration fields
-    (``cv``, ``std``) are preserved.
+    Every cell in ``config`` has its ``zi`` field overwritten; other
+    calibration fields (``cv``, ``std``) are preserved.
     """
     cal = _load(_STAT_CAL_PATH)
     for league, markets in config.items():

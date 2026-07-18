@@ -101,7 +101,7 @@ Sportstradamus/
 | `data.py` | `count_training_rows`, `trim_matrix`, `_histogram_weights` |
 | `hyperparams.py` | `tune_hyperparameters`, `_BoundedResponseFn` |
 | `markets.py` | `ALL_MARKETS` — per-league market name lists |
-| `config.py` | `load/save_distribution_config`, `load_shipped_config`, `load/save_zi_config` |
+| `config.py` | `load_distribution_config`, `load_shipped_config`, `load/save_zi_config` |
 | `__init__.py` | Re-exports the public API |
 
 ### `prediction/` — The `prophecize` pipeline
