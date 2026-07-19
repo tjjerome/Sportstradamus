@@ -112,10 +112,12 @@
             "posthoc": "none"
         },
         "STL": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "none",
+            "count_dispersion_objective": "pit_ks",
+            "blending": "nll"
         },
         "TOV": {
             "dist": "ZINB",
