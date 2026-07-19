@@ -91,36 +91,25 @@ def _negbin_row(disp, blend, ships, slack):
 # --- candidate selection ---------------------------------------------------------------------
 
 
-def test_candidate_picks_best_persistable_corner():
-    """The best-slack corner wins under nll (non-persistable dist-loss); the candidate is the next-
-    best corner that is fully persistable (crps), not the top row. sn_param persists (it has a
-    stat_meta field), so a centered corner is persistable and its edits carry sn_param=centered.
+def test_candidate_picks_top_slack_corner():
+    """The top-slack shipping corner is the candidate, and every SkewNormal axis — including
+    dist_training_loss (S4) — lands in the persisted edits.
     """
     board = pd.DataFrame(
         [
-            _sn_row("centered_additive_mean10", "nll", "crps", True, 0.30),  # top slack, but nll
+            _sn_row("centered_additive_mean10", "nll", "crps", True, 0.30),
             _sn_row("centered_additive_mean10", "crps", "crps", True, 0.25, sn_param="centered"),
             _sn_row("ratio_meanyr", "crps", "nll", False, -0.10),
         ]
     )
     cand = mc._candidate(board)
-    assert cand["status"] == "candidate"
     assert cand["edits"] == {
         "target_normalization": "centered_additive_mean10",
-        "sn_param": "centered",
+        "dist_training_loss": "nll",
+        "sn_param": "direct",
         "blending": "crps",
     }
-    assert cand["slack"] == 0.25
-
-
-def test_candidate_ranks_only_when_only_nonpersistable_ships():
-    board = pd.DataFrame(
-        [
-            _sn_row("centered_additive_mean10", "nll", "crps", True, 0.30),  # only ships under nll
-            _sn_row("centered_additive_mean10", "crps", "crps", False, -0.05),
-        ]
-    )
-    assert mc._candidate(board)["status"] == "ranks_only"
+    assert cand["slack"] == 0.30
 
 
 def test_candidate_none_when_nothing_ships():
@@ -385,25 +374,6 @@ def test_run_confirm_all_gated_returns_before_backup(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "ACTIVATION-GATED NHL saves" in out
     assert "no confirmable candidates" in out
-
-
-def test_run_confirm_ranks_only_never_persists(monkeypatch, capsys):
-    """A cell whose only shipping corner is non-persistable is reported and skipped — the loop never
-    reaches the backup/persist step.
-    """
-    board = pd.DataFrame(
-        [
-            _sn_row("centered_additive_mean10", "nll", "crps", True, 0.30),
-            _sn_row("centered_additive_mean10", "crps", "crps", False, -0.05),
-        ]
-    )
-    touched = []
-    monkeypatch.setattr(mc, "_backup_stat_meta", lambda: touched.append("backup"))
-    monkeypatch.setattr(mc, "load_stat_meta", lambda path: touched.append("load") or {})
-
-    mc.run_confirm(board, yes=True)
-    assert touched == []  # never persisted anything
-    assert "RANKS-ONLY" in capsys.readouterr().out
 
 
 # --- cell-artifact snapshot / restore ----------------------------------------------------------

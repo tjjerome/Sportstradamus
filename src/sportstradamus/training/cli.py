@@ -271,8 +271,9 @@ def _retry_calibrated_if_g4_only(
     default=LOSS_AUTO,
     show_default=True,
     help=(
-        "Training loss for the LightGBMLSS distribution. 'auto' (default) keeps the "
-        "per-family production loss — crps for SkewNormal, nll for the count branch. "
+        "Training loss for the LightGBMLSS distribution. 'auto' (default) honors each "
+        "cell's persisted stat_meta dist_training_loss, falling back to the per-family "
+        "production loss — crps for SkewNormal, nll for the count branch. "
         "'nll'/'crps' override every family; an Operation Ship 75 search axis."
     ),
 )
@@ -594,6 +595,9 @@ def meditate(
             cell_sn_param = _resolve_cell_knob(
                 stat_meta_full, lg, market, "sn_param", "direct", sn_param
             )
+            cell_dist_training_loss = _resolve_cell_knob(
+                stat_meta_full, lg, market, "dist_training_loss", LOSS_AUTO, dist_training_loss
+            )
             # Kwargs as a dict so the g4-only calibrated retry below reruns the
             # exact same call with only force/hpo_selection overridden.
             train_kwargs = {
@@ -603,7 +607,7 @@ def meditate(
                 "posthoc_slug": cell_posthoc,
                 "blending": cell_blending,
                 "zinb_mode": cell_zinb_mode,
-                "dist_training_loss": dist_training_loss,
+                "dist_training_loss": cell_dist_training_loss,
                 "dist": dist,
                 "stabilization": stabilization,
                 "hpo_selection": cell_hpo_selection,

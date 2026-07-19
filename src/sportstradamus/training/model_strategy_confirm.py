@@ -3,13 +3,11 @@
 The strategy sweep (:mod:`sportstradamus.training.model_strategy_sweep`) *ranks* corners on fixed-HP
 deterministic trials — it never ships. This module turns a ranked board into shipped cells:
 
-1. For each cell, pick the best persistable shipping corner **across the cell's swept families** — a
-   count cell's slice carries both ZINB and NegBin corners, ranked together by ship slack. The winner
-   is the top-slack shipping corner whose every swept axis has a ``stat_meta.json`` field, and its own
-   family's ``persist`` map builds the edits (so a NegBin corner outranking ZINB persists ``dist=NegBin``
-   and flips the cell's family). SkewNormal's ``dist_training_loss`` has no field (the family default
-   ships), so a corner that only wins under the non-default dist-loss is reported ``RANKS-ONLY`` and
-   skipped — never persist a config the confirm can't reproduce.
+1. For each cell, pick the top-slack shipping corner **across the cell's swept families** — a
+   count cell's slice carries both ZINB and NegBin corners, ranked together by ship slack. Every
+   swept axis has a ``stat_meta.json`` field, and the winner's own family's ``persist`` map builds
+   the edits (so a NegBin corner outranking ZINB persists ``dist=NegBin`` and flips the cell's
+   family).
 2. Prompt, then per candidate: write its persist fields + ``shipped="devel"`` to ``stat_meta.json``
    (so the confirm ``meditate`` reads the exact config being shipped), run a **full-HPO** ``meditate``,
    and read the official ``ship`` verdict from ``model_stats.parquet``.
@@ -43,7 +41,6 @@ from sportstradamus.training.model_strategy_sweep import (
     _GATES,
     _SHIP_PRED_COL,
     _TEST_SETS_ROOT,
-    FamilySpec,
     _run_meditate_with_lock_retry,
 )
 from sportstradamus.training.scorecard import _supersede_headline, load_test_set, supersede_verdict
@@ -65,22 +62,11 @@ _CONFIRM_TIMEOUT_S = 4 * 3600
 _WIN_OUTCOMES: tuple[str, ...] = ("SHIPPED", "SUPERSEDED")
 
 
-def _is_persistable(row: pd.Series, spec: FamilySpec) -> bool:
-    """True iff every non-persistable axis of ``row`` sits at its shipped default.
-
-    ``spec.defaults`` is empty for a family whose every axis persists (ZINB), so all its corners are
-    persistable; SkewNormal's only non-persistable axis is ``dist_training_loss`` (default ``crps``).
-    """
-    return all(row[axis] == default for axis, default in spec.defaults.items())
-
-
 def _candidate(sub: pd.DataFrame) -> dict | None:
-    """The confirm candidate for one cell's board slice: a persistable shipping corner, or a marker.
+    """The confirm candidate for one cell's board slice: its top-slack shipping corner.
 
-    The slice may mix families (a count cell carries ZINB *and* NegBin corners), so each corner is
-    scored under its OWN family's spec. Walking shipping corners slack-desc, the first persistable one
-    wins and its family's ``persist`` map builds the edits. Returns ``None`` when nothing ships, a
-    ``ranks_only`` marker when only non-persistable corners ship, else a ``candidate``.
+    The slice may mix families (a count cell carries ZINB *and* NegBin corners), so the winner's
+    OWN family's ``persist`` map builds the edits. Returns ``None`` when nothing ships.
 
     A ZINB→NegBin flip's edits carry no ``zinb_mode`` (NegBin's persist map omits it), leaving the
     cell's pre-existing ``zinb_mode`` key an inert no-op: the pipeline sets ``is_hurdle`` only when the
@@ -90,23 +76,19 @@ def _candidate(sub: pd.DataFrame) -> dict | None:
     if shipping.empty:
         return None
     lg, mkt = sub["league"].iloc[0], sub["market"].iloc[0]
-    ranked = shipping.sort_values("slack", ascending=False)
-    for _, row in ranked.iterrows():
-        spec = _FAMILIES[row["family"]]
-        if _is_persistable(row, spec):
-            return {
-                "league": lg,
-                "market": mkt,
-                "family": row["family"],
-                "status": "candidate",
-                "edits": {spec.persist[axis]: str(row[axis]) for axis in spec.persist},
-                "slack": float(row["slack"]),
-            }
-    return {"league": lg, "market": mkt, "family": ranked["family"].iloc[0], "status": "ranks_only"}
+    row = shipping.sort_values("slack", ascending=False).iloc[0]
+    spec = _FAMILIES[row["family"]]
+    return {
+        "league": lg,
+        "market": mkt,
+        "family": row["family"],
+        "edits": {spec.persist[axis]: str(row[axis]) for axis in spec.persist},
+        "slack": float(row["slack"]),
+    }
 
 
 def _candidates(board: pd.DataFrame) -> list[dict]:
-    """One confirm candidate (or ranks-only marker) per cell that shipped at least one corner."""
+    """One confirm candidate per cell that shipped at least one corner."""
     out = []
     for _cell, sub in board.groupby(["league", "market"], sort=False):
         cand = _candidate(sub)
@@ -333,15 +315,6 @@ def _drop_activation_gated(fresh: list[dict]) -> list[dict]:
     return kept
 
 
-def _announce_ranks_only(cands: list[dict]) -> None:
-    for c in (c for c in cands if c["status"] == "ranks_only"):
-        click.secho(
-            f"  RANKS-ONLY {c['league']} {c['market']} — best shipping corner needs a non-default "
-            "dist loss (not persistable); skipping.",
-            fg="yellow",
-        )
-
-
 def _announce_plan(fresh: list[dict], shipped: list[dict]) -> None:
     """List the run's plan: which withheld cells get persisted+confirmed, which live cells get tested."""
     for label, group, verb in (
@@ -366,11 +339,9 @@ def run_confirm(board: pd.DataFrame, *, yes: bool = False) -> None:
     passing verdict AND an operator yes; any loss restores the incumbent. ``yes`` skips only the upfront
     gate — live-cell promotions always prompt individually.
     """
-    cands = _candidates(board)
-    ready = [c for c in cands if c["status"] == "candidate"]
-    _announce_ranks_only(cands)
+    ready = _candidates(board)
     if not ready:
-        click.echo("no fully-persistable shipping candidates to confirm.")
+        click.echo("no shipping candidates to confirm.")
         return
 
     meta = load_stat_meta(_STAT_META)

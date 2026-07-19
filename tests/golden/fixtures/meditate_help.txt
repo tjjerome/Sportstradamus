@@ -43,11 +43,13 @@ Options:
                                   §2).  [default: auto]
   --dist-training-loss [auto|nll|crps]
                                   Training loss for the LightGBMLSS
-                                  distribution. 'auto' (default) keeps the per-
-                                  family production loss — crps for SkewNormal,
-                                  nll for the count branch. 'nll'/'crps'
-                                  override every family; an Operation Ship 75
-                                  search axis.  [default: auto]
+                                  distribution. 'auto' (default) honors each
+                                  cell's persisted stat_meta dist_training_loss,
+                                  falling back to the per-family production loss
+                                  — crps for SkewNormal, nll for the count
+                                  branch. 'nll'/'crps' override every family; an
+                                  Operation Ship 75 search axis.  [default:
+                                  auto]
   --dist [auto|DPO|NegBin|SkewNormal|ZINB]
                                   Training distribution family. 'auto' (default)
                                   honors each cell's stat_meta dist (else the

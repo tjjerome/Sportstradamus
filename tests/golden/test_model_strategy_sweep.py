@@ -95,7 +95,7 @@ def _fake_run_and_score(league, market, family, corner):
 
 
 def test_family_registry_grids_and_persist_maps():
-    """Four families with the agreed axes, corner counts, persist fields, and non-persistable defaults."""
+    """Four families with the agreed axes, corner counts, and persist fields — every axis persists."""
     import math
 
     sn = sweep._FAMILIES["SkewNormal"]
@@ -109,6 +109,7 @@ def test_family_registry_grids_and_persist_maps():
     assert math.prod(len(v) for v in dpo.axes.values()) == 4  # 1 dist × 2 disp × 2 blend
     assert sn.persist == {
         "normalization": "target_normalization",
+        "dist_training_loss": "dist_training_loss",
         "sn_param": "sn_param",
         "blending_loss_fn": "blending",
     }
@@ -127,9 +128,10 @@ def test_family_registry_grids_and_persist_maps():
     assert dpo.persist == negbin.persist  # same gate-free count-family persist surface
     assert zinb.axes["dist"] == ("ZINB",) and negbin.axes["dist"] == ("NegBin",)
     assert dpo.axes["dist"] == ("DPO",)
-    # Only SkewNormal's dist-loss is non-persistable (the family default ships); every count axis persists.
-    assert sn.defaults == {"dist_training_loss": "crps"}
-    assert zinb.defaults == {} and negbin.defaults == {} and dpo.defaults == {}
+    # Every swept axis persists — a shipping corner is always reproducible from stat_meta alone
+    # (S4: dist_training_loss gained a stat_meta field, deleting the ranks-only corner concept).
+    for spec in (sn, zinb, negbin, dpo):
+        assert set(spec.persist) == set(spec.axes)
 
 
 def test_dist_axis_flag_and_class_maps():
@@ -159,7 +161,6 @@ def test_sn_param_axis_swept_persisted_and_dump_inert():
     sn = sweep._FAMILIES["SkewNormal"]
     assert sn.axes["sn_param"] == ("direct", "centered")
     assert sn.persist["sn_param"] == "sn_param"
-    assert "sn_param" not in sn.defaults  # persistable — a centered winner must be confirmable
     assert sweep._AXIS_FLAG["sn_param"] == "--sn-param"
     assert "sn_param" in sweep._AXIS_COLUMNS and "sn_param" in sweep._BOARD_COLUMNS
     corner = {"normalization": "ratio_meanyr", "sn_param": "centered"}
@@ -658,12 +659,13 @@ def test_stat_meta_edit_is_family_aware():
     sn = {
         "family": "SkewNormal",
         "normalization": "centered_additive_mean10",
+        "dist_training_loss": "nll",
         "sn_param": "centered",
         "blending_loss_fn": "crps",
     }
-    assert (
-        sweep._stat_meta_edit(sn)
-        == "target_normalization=centered_additive_mean10, sn_param=centered, blending=crps"
+    assert sweep._stat_meta_edit(sn) == (
+        "target_normalization=centered_additive_mean10, dist_training_loss=nll, "
+        "sn_param=centered, blending=crps"
     )
     # Count families persist dist first (pins the winning family, e.g. a ZINB→NegBin flip).
     zinb = {
@@ -686,13 +688,6 @@ def test_stat_meta_edit_is_family_aware():
     assert (
         sweep._stat_meta_edit(negbin) == "dist=NegBin, count_dispersion_objective=crps, blending=crps"
     )
-
-
-def test_repro_note_flags_nondefault_sn_dist_loss_only():
-    assert "nll" in sweep._repro_note({"family": "SkewNormal", "dist_training_loss": "nll"})
-    assert sweep._repro_note({"family": "SkewNormal", "dist_training_loss": "crps"}) == ""
-    # A count family has no dist_training_loss key → no note (NaN is not a str).
-    assert sweep._repro_note({"family": "ZINB", "dist_training_loss": float("nan")}) == ""
 
 
 # --- CLI -------------------------------------------------------------------------------------

@@ -65,11 +65,6 @@ _DECODABLE_SN_NORMS: tuple[str, ...] = (
 )
 _BLENDING: tuple[str, ...] = tuple(sorted(calibration.BLENDING_SLUGS))
 
-# The SkewNormal family default training loss (the one that ships). A corner won under the other
-# dist-loss can't be reproduced from stat_meta.json — dist-loss is a training-time knob that does
-# not persist — so the actionable summary flags it and the confirm loop skips it.
-_SN_DEFAULT_DIST_LOSS = "crps"
-
 _SHIP_PRED_COL = "Blended_EV"
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 _TEST_SETS_ROOT = pathlib.Path(str(pkg_resources.files(_data_pkg) / "test_sets"))
@@ -120,14 +115,12 @@ class FamilySpec:
     Attributes:
         axes: Grid axes ``{axis: choices}`` the GridSampler enumerates (all categorical today).
         persist: ``{axis: stat_meta.json field}`` a winning corner writes to ship the cell.
-        defaults: ``{axis: shipped value}`` for each swept axis that does *not* persist — the value
-            production actually ships. A corner is confirmable only when its non-persistable axes
-            sit at these defaults (the confirm loop's reproducibility check).
+            Every swept axis persists, so any shipping corner is reproducible from
+            ``stat_meta.json`` alone.
     """
 
     axes: dict[str, tuple[str, ...]]
     persist: dict[str, str]
-    defaults: dict[str, str]
 
 
 _FAMILIES: dict[str, FamilySpec] = {
@@ -140,10 +133,10 @@ _FAMILIES: dict[str, FamilySpec] = {
         },
         persist={
             "normalization": "target_normalization",
+            "dist_training_loss": "dist_training_loss",
             "sn_param": "sn_param",
             "blending_loss_fn": "blending",
         },
-        defaults={"dist_training_loss": _SN_DEFAULT_DIST_LOSS},
     ),
     "ZINB": FamilySpec(
         axes={
@@ -158,7 +151,6 @@ _FAMILIES: dict[str, FamilySpec] = {
             "count_dispersion_objective": "count_dispersion_objective",
             "blending_loss_fn": "blending",
         },
-        defaults={},
     ),
     "NegBin": FamilySpec(
         axes={
@@ -171,7 +163,6 @@ _FAMILIES: dict[str, FamilySpec] = {
             "count_dispersion_objective": "count_dispersion_objective",
             "blending_loss_fn": "blending",
         },
-        defaults={},
     ),
     "DPO": FamilySpec(
         axes={
@@ -184,7 +175,6 @@ _FAMILIES: dict[str, FamilySpec] = {
             "count_dispersion_objective": "count_dispersion_objective",
             "blending_loss_fn": "blending",
         },
-        defaults={},
     ),
 }
 
@@ -668,28 +658,13 @@ def _stat_meta_edit(row: object) -> str:
     """The exact stat_meta.json fields to persist a winning corner, resolved for its family.
 
     Reads the family's ``persist`` map so the operator doesn't have to translate board columns to
-    field names: SkewNormal → ``target_normalization=…, sn_param=…, blending=…``; a count family →
-    ``dist=…, [zinb_mode=…,] count_dispersion_objective=…, blending=…`` (the persisted ``dist`` pins
-    the winning family, e.g. flipping a cell ZINB→NegBin). A non-persistable axis (SN's dist-loss) is
-    intentionally omitted — the shipped model uses the family default.
+    field names: SkewNormal → ``target_normalization=…, dist_training_loss=…, sn_param=…,
+    blending=…``; a count family → ``dist=…, [zinb_mode=…,] count_dispersion_objective=…,
+    blending=…`` (the persisted ``dist`` pins the winning family, e.g. flipping a cell
+    ZINB→NegBin).
     """
     persist = _FAMILIES[row["family"]].persist
     return ", ".join(f"{field}={row[axis]}" for axis, field in persist.items())
-
-
-def _repro_note(row: object) -> str:
-    """Warn when the winning corner used a non-default axis it can't carry into stat_meta.
-
-    Only SkewNormal's dist-loss is non-persistable today; a count corner's value is NaN (float), so
-    the ``isinstance`` str guard keeps this quiet for families whose every axis persists.
-    """
-    dist_loss = row.get("dist_training_loss")
-    if isinstance(dist_loss, str) and dist_loss != _SN_DEFAULT_DIST_LOSS:
-        return (
-            f"won under dist-loss={dist_loss}, which is not saved — "
-            f"confirm under the default {_SN_DEFAULT_DIST_LOSS}"
-        )
-    return ""
 
 
 def _print_cell_summary(board: pd.DataFrame) -> None:
@@ -707,10 +682,7 @@ def _print_cell_summary(board: pd.DataFrame) -> None:
         + click.style(f" (best slack {float(best['slack']):+.3f})", bold=True)
     )
     if ships:
-        note = _repro_note(best)
-        click.echo(
-            f"  → stat_meta.json: {_stat_meta_edit(best)}" + (f"   ⚠ {note}" if note else "")
-        )
+        click.echo(f"  → stat_meta.json: {_stat_meta_edit(best)}")
     table = [
         [
             *(r[axis] for axis in axes),
@@ -746,13 +718,12 @@ def _print_board_rollup(board: pd.DataFrame) -> None:
                 best["family"],
                 _stat_meta_edit(best),
                 f"{float(best['slack']):+.3f}",
-                _repro_note(best),
             ]
         )
     click.echo(
         tabulate.tabulate(
             rows,
-            headers=["cell", "family", "set in stat_meta.json", "slack", "note"],
+            headers=["cell", "family", "set in stat_meta.json", "slack"],
             tablefmt="github",
         )
     )
