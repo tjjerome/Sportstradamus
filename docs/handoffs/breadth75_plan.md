@@ -34,19 +34,33 @@ whenever the queue changes; git holds the history.
 | NBA | 16/21 | 16 | **DONE** |
 | MLB | 14/19 | 15 | +1 needed |
 | NHL | 10/15 | 12 | +2 needed |
-| NFL | 7/20 | 15 | +8 needed — priority |
+| NFL | 9/20 | 15 | +6 needed — priority |
 
 ## In flight right now
 
-- **NFL board chain** (background): continuous-board full-HPO confirms walking five SN
-  candidates — carries (+0.078), receptions (+0.144), targets (+0.130), qb yards (+0.037),
-  yards (+0.115) — then the NFL_tds matrix regen tail. Count-board candidates (receptions
-  NegBin +0.196, targets NegBin +0.149, qb tds hurdle-ZINB +0.064) crashed on the flip bug
-  below and re-run after the chain.
-- **research-analyst** (background, read-only): NFL 15/20 strategy brief with the yards trio
-  as the priority target → `/tmp/researcher_nfl_breadth.md`.
-- Code freeze while the chain runs: no edits to training code (subprocesses re-import per
-  corner), no stat_meta writes outside the chain, no archive connections (single-writer lock).
+- **Mixture pilot RUN — verdict: PROMISING on receiving yards, g1-walled on rushing.**
+  Board-only (no confirm; the confirm walker hard-skips Mixture rows until the serving
+  path lands — serve-iff-ship). Deterministic 6-corner Mixture boards vs the cells' SN
+  boards:
+  - receiving yards: best Mixture corner (centered_additive_mean10 / crps blend) is the
+    cell's **rank-1 corner overall**, g4 pit_ks 0.0552 vs bar 0.050 (SN best 0.0629 —
+    60% of the g4 excess removed), g1 CI-hi +0.0064 (SN best +0.0050), g2/g3/g5/g6 all
+    pass. Deterministic undersells a new family (30 rounds, no HPO) — full-HPO confirm
+    is the decider once serving lands.
+  - rushing yards: Mixture also halves the g4 excess (0.0703 vs SN 0.0868) but g1 is a
+    real wall (CI-hi +0.0143, bss −0.0245 vs SN −0.0027) — book-bound beyond the family.
+  - Pre-registered sharp-book kill (g4 clears while g1 stays positive) NOT triggered.
+  - Build hardening that made it trainable: component-scale clamp to
+    [0.02, 20]×label-std (Hathaway-style — kills the σ→0 likelihood spike and the
+    dead-head exp-overflow), stabilization None→L2, and per-fit floors
+    min_child_weight≥0.1 / lambda_l2≥1.0 (near-dead components have ~zero hessian and
+    unregularized Newton leaf steps explode).
+  - Next: build the Mixture serve path (model_prob decode + blend + dashboard deep-dive
+    + live-path integration test), then full-HPO confirm receiving yards.
+- **NFL chain complete**: receptions + yards shipped to devel (committed) → NFL 9/20.
+  Revert gates now known: carries g1, qb yards g3 (not g4 — bss +0.118), targets g2.
+  Count-board candidates (targets NegBin +0.149, qb tds hurdle-ZINB +0.064) still queued
+  for the post-fix re-run; receptions NegBin is moot (SN ship banked).
 
 ## NFL end-game (7 → 15)
 
