@@ -11,12 +11,17 @@ logger = get_logger(__name__)
 class _BoundedResponseFn:
     """Picklable callable that clamps a response function's output."""
 
-    def __init__(self, orig_fn, ceiling):
+    # Class-level default: instances pickled before the floor existed carry no
+    # ``floor`` in their __dict__ and fall back here on unpickle.
+    floor = None
+
+    def __init__(self, orig_fn, ceiling, floor=None):
         self.orig_fn = orig_fn
         self.ceiling = float(ceiling)
+        self.floor = None if floor is None else float(floor)
 
     def __call__(self, predt):
-        return torch.clamp(self.orig_fn(predt), max=self.ceiling)
+        return torch.clamp(self.orig_fn(predt), min=self.floor, max=self.ceiling)
 
 
 def _suggest_params(trial, hp_dict):

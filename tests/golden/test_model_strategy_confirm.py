@@ -116,6 +116,22 @@ def test_candidate_none_when_nothing_ships():
     assert mc._candidate(pd.DataFrame([_sn_row("ratio_meanyr", "crps", "nll", False, -0.2)])) is None
 
 
+def test_candidate_skips_mixture_until_serving_lands():
+    """Serve-iff-ship: a Mixture corner may top the board but must not become the confirm
+    candidate while model_prob has no Mixture branch — the next-best non-Mixture shipping
+    corner wins instead, and an all-Mixture slice yields no candidate.
+    """
+    mix_row = {
+        **_sn_row("ratio_meanyr", float("nan"), "nll", True, 0.9),
+        "family": "Mixture",
+        "dist": "Mixture",
+    }
+    sn_row = _sn_row("centered_additive_mean10", "crps", "crps", True, 0.2)
+    cand = mc._candidate(pd.DataFrame([mix_row, sn_row]))
+    assert cand["family"] == "SkewNormal"
+    assert mc._candidate(pd.DataFrame([mix_row])) is None
+
+
 def test_candidate_zinb_is_fully_persistable():
     """Every ZINB axis persists (empty defaults), so its top shipping corner is always the candidate;
     the persisted edits include the swept ``dist`` (which pins the winning count family).

@@ -95,15 +95,18 @@ def _fake_run_and_score(league, market, family, corner):
 
 
 def test_family_registry_grids_and_persist_maps():
-    """Four families with the agreed axes, corner counts, and persist fields — every axis persists."""
+    """Five families with the agreed axes, corner counts, and persist fields — every axis persists."""
     import math
 
     sn = sweep._FAMILIES["SkewNormal"]
+    mix = sweep._FAMILIES["Mixture"]
     zinb = sweep._FAMILIES["ZINB"]
     negbin = sweep._FAMILIES["NegBin"]
     dpo = sweep._FAMILIES["DPO"]
     # SN: 3 norms × 2 dist-loss × 2 sn-param × 2 blend.
     assert math.prod(len(v) for v in sn.axes.values()) == 24
+    # Mixture: 1 dist × 3 norms × 2 blend — no loss axis (component loss pinned nll).
+    assert math.prod(len(v) for v in mix.axes.values()) == 6
     assert math.prod(len(v) for v in zinb.axes.values()) == 8  # 1 dist × 2 mode × 2 disp × 2 blend
     assert math.prod(len(v) for v in negbin.axes.values()) == 4  # 1 dist × 2 disp × 2 blend
     assert math.prod(len(v) for v in dpo.axes.values()) == 4  # 1 dist × 2 disp × 2 blend
@@ -111,6 +114,13 @@ def test_family_registry_grids_and_persist_maps():
         "normalization": "target_normalization",
         "dist_training_loss": "dist_training_loss",
         "sn_param": "sn_param",
+        "blending_loss_fn": "blending",
+    }
+    assert mix.axes["dist"] == ("Mixture",)
+    assert mix.axes["normalization"] == sn.axes["normalization"]
+    assert mix.persist == {
+        "dist": "dist",
+        "normalization": "target_normalization",
         "blending_loss_fn": "blending",
     }
     # Count families persist their single-choice dist so a winner's dist writes to stat_meta.
@@ -130,7 +140,7 @@ def test_family_registry_grids_and_persist_maps():
     assert dpo.axes["dist"] == ("DPO",)
     # Every swept axis persists — a shipping corner is always reproducible from stat_meta alone
     # (S4: dist_training_loss gained a stat_meta field, deleting the ranks-only corner concept).
-    for spec in (sn, zinb, negbin, dpo):
+    for spec in (sn, mix, zinb, negbin, dpo):
         assert set(spec.persist) == set(spec.axes)
 
 
@@ -139,12 +149,13 @@ def test_dist_axis_flag_and_class_maps():
     assert sweep._AXIS_FLAG["dist"] == "--dist"
     assert sweep._DIST_CLASS == {
         "SkewNormal": "continuous",
+        "Mixture": "continuous",
         "ZINB": "count",
         "NegBin": "count",
         "DPO": "count",
     }
     assert sweep._CLASS_FAMILIES == {
-        "continuous": ("SkewNormal",),
+        "continuous": ("SkewNormal", "Mixture"),
         "count": ("ZINB", "NegBin", "DPO"),
     }
     # dist leads the swept-axis columns and rides in the board schema.
@@ -181,8 +192,8 @@ def test_dump_subdir_matches_meditate_keying():
 
 
 def test_cell_families_routes_by_distribution_class(monkeypatch):
-    """A count cell sweeps every count family (even one pinned NegBin); a SN cell sweeps one; loud on
-    an unknown dist.
+    """A count cell sweeps every count family (even one pinned NegBin); a continuous cell sweeps
+    SkewNormal + Mixture; loud on an unknown dist.
     """
     fake = {
         "MLB": {
@@ -195,7 +206,7 @@ def test_cell_families_routes_by_distribution_class(monkeypatch):
     monkeypatch.setattr(sweep, "load_stat_meta", lambda path: fake)
     assert sweep._cell_families("MLB", "pitcher strikeouts") == ("ZINB", "NegBin", "DPO")
     assert sweep._cell_families("MLB", "pitches thrown") == ("ZINB", "NegBin", "DPO")
-    assert sweep._cell_families("WNBA", "AST") == ("SkewNormal",)
+    assert sweep._cell_families("WNBA", "AST") == ("SkewNormal", "Mixture")
     with pytest.raises(click.UsageError):
         sweep._cell_families("MLB", "hits allowed")
 

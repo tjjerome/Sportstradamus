@@ -138,6 +138,21 @@ _FAMILIES: dict[str, FamilySpec] = {
             "blending_loss_fn": "blending",
         },
     ),
+    "Mixture": FamilySpec(
+        # No dist_training_loss axis: lightgbmlss Mixture rejects crps components (the
+        # pipeline pins the Gaussian component loss to nll), so sweeping the loss axis
+        # would only manufacture failed corners.
+        axes={
+            "dist": ("Mixture",),
+            "normalization": _DECODABLE_SN_NORMS,
+            "blending_loss_fn": _BLENDING,
+        },
+        persist={
+            "dist": "dist",
+            "normalization": "target_normalization",
+            "blending_loss_fn": "blending",
+        },
+    ),
     "ZINB": FamilySpec(
         axes={
             "dist": ("ZINB",),
@@ -184,12 +199,13 @@ _FAMILIES: dict[str, FamilySpec] = {
 # Adding a family is one FamilySpec above plus its class entry here.
 _DIST_CLASS: dict[str, str] = {
     "SkewNormal": "continuous",
+    "Mixture": "continuous",
     "ZINB": "count",
     "NegBin": "count",
     "DPO": "count",
 }
 _CLASS_FAMILIES: dict[str, tuple[str, ...]] = {
-    "continuous": ("SkewNormal",),
+    "continuous": ("SkewNormal", "Mixture"),
     "count": ("ZINB", "NegBin", "DPO"),
 }
 # `--dist-class all` sweeps every class; the two real classes are _CLASS_FAMILIES' keys.

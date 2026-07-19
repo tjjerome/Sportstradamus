@@ -92,3 +92,26 @@ def test_unknown_blending_slug_rejected():
 def test_fit_blend_weight_rejects_unknown_slug():
     with pytest.raises(ValueError, match="Unknown blending slug"):
         calibration.fit_blend_weight("bogus", [1.0], [1.0], [1.0], "NegBin")
+
+
+def test_validate_cell_mixture_is_continuous():
+    """Mixture cells follow the continuous-family norm rules: a real slug is valid
+    (and required to ship); a count cell still cannot carry one.
+    """
+    from sportstradamus.training import ship_config
+
+    mix_cell = {
+        "shipped": "devel",
+        "dist": "Mixture",
+        "target_normalization": "ratio_meanyr",
+        "posthoc": "none",
+    }
+    ship_config._validate_cell("NFL", "yards", mix_cell)
+    with pytest.raises(ValueError, match="cannot ship"):
+        ship_config._validate_cell(
+            "NFL", "yards", {**mix_cell, "target_normalization": "none"}
+        )
+    with pytest.raises(ValueError, match="cannot carry"):
+        ship_config._validate_cell(
+            "NFL", "yards", {**mix_cell, "dist": "NegBin", "shipped": "withheld"}
+        )

@@ -39,6 +39,8 @@ def test_calibrate_dispersion_rung_c_hands_served_val_params_downstream():
         "sn_sigma_blend_val": sigma,
         "sn_alpha_blend_test": alpha,
         "sn_alpha_blend_val": alpha,
+        "mix_blend_test": None,
+        "mix_blend_val": None,
     }
     splits = {"y_validation": pd.DataFrame({"Result": rng.gamma(2.0, 3.0, n)})}
     out = _step_calibrate_dispersion(

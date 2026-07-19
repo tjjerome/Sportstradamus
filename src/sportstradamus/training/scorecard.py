@@ -44,6 +44,7 @@ import tabulate
 from scipy.optimize import minimize, minimize_scalar
 from scipy.stats import gamma as _scipy_gamma
 from scipy.stats import nbinom as _scipy_nbinom
+from scipy.stats import norm as _scipy_norm
 from scipy.stats import skewnorm as _scipy_skewnorm
 
 from sportstradamus import data
@@ -309,7 +310,9 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
         Frame with ``MeanYr``, ``Result``, the prediction column, optional
         priced columns (``P``, ``Odds``, ``Line``), and any per-row
         distribution parameters present (``SN_Loc`` / ``SN_Scale`` /
-        ``SN_Alpha`` for SkewNormal, ``R`` / ``NB_P`` for NegBin/ZINB,
+        ``SN_Alpha`` for SkewNormal, ``MIX_Loc1`` / ``MIX_Loc2`` /
+        ``MIX_Scale1`` / ``MIX_Scale2`` / ``MIX_W1`` for the 2-component
+        Gaussian mixture, ``R`` / ``NB_P`` for NegBin/ZINB,
         ``DP_MU`` / ``DP_PHI`` for DPO, ``Alpha`` for Gamma/ZAGamma,
         ``Gate`` for the zero-inflated variants).
         Rows with non-finite values in any required column are dropped.
@@ -346,6 +349,11 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
         "SN_Loc",
         "SN_Scale",
         "SN_Alpha",
+        "MIX_Loc1",
+        "MIX_Loc2",
+        "MIX_Scale1",
+        "MIX_Scale2",
+        "MIX_W1",
         "Mean10",  # centered_additive_mean10 SkewNormal decode re-adds this baseline to loc
         "GamesPlayed",  # centered_additive_eb decode re-adds an EB prior over (MeanYr, GamesPlayed)
         "GlobalMean",  # …shrunk toward this persisted global mean
@@ -718,16 +726,64 @@ def _zinb_ppf(q: float, r: np.ndarray, nb_p: np.ndarray, gate: np.ndarray) -> np
     return np.where(in_gate, 0.0, nb_q)
 
 
+def _mix_cdf(
+    y: np.ndarray,
+    w1: np.ndarray,
+    loc1: np.ndarray,
+    scale1: np.ndarray,
+    loc2: np.ndarray,
+    scale2: np.ndarray,
+) -> np.ndarray:
+    """CDF of the 2-component Gaussian mixture: ``w1·Φ₁(y) + (1−w1)·Φ₂(y)``."""
+    return w1 * _scipy_norm.cdf(y, loc=loc1, scale=scale1) + (1.0 - w1) * _scipy_norm.cdf(
+        y, loc=loc2, scale=scale2
+    )
+
+
+# Mixture-quantile bisection: every quantile lies within ±8·max(scale) of the component
+# locs (normal mass beyond 8σ ≈ 6e-16, under float64 CDF resolution), and 80 halvings
+# shrink that bracket past any further float64 refinement.
+_MIX_PPF_BRACKET_SIGMAS: float = 8.0
+_MIX_PPF_BISECT_ITERS: int = 80
+
+
+def _mix_ppf(
+    q: float,
+    w1: np.ndarray,
+    loc1: np.ndarray,
+    scale1: np.ndarray,
+    loc2: np.ndarray,
+    scale2: np.ndarray,
+) -> np.ndarray:
+    """Vectorized inverse CDF for the 2-component Gaussian mixture.
+
+    A mixture quantile has no closed form; the CDF is continuous and strictly
+    increasing, so bisect per row inside the ±8σ bracket around the components.
+    """
+    smax = np.maximum(scale1, scale2)
+    lo = np.minimum(loc1, loc2) - _MIX_PPF_BRACKET_SIGMAS * smax
+    hi = np.maximum(loc1, loc2) + _MIX_PPF_BRACKET_SIGMAS * smax
+    for _ in range(_MIX_PPF_BISECT_ITERS):
+        mid = 0.5 * (lo + hi)
+        below = _mix_cdf(mid, w1, loc1, scale1, loc2, scale2) < q
+        lo = np.where(below, mid, lo)
+        hi = np.where(below, hi, mid)
+    return 0.5 * (lo + hi)
+
+
 def _infer_dist_from_columns(df: pd.DataFrame) -> str | None:
     """Identify the distribution family from per-row parameter columns.
 
-    Returns one of ``"SkewNormal"``, ``"NegBin"``, ``"ZINB"``, ``"DPO"``,
-    ``"Gamma"``, ``"ZAGamma"`` based on which params ``training/pipeline.py``
-    ``_step_persist_artifacts`` dumped into the test-set CSV (~lines
-    1191-1212). ``None`` for legacy / synthetic frames missing every
-    distribution param — those keep the back-compat point-IQR semantics.
+    Returns one of ``"Mixture"``, ``"SkewNormal"``, ``"NegBin"``, ``"ZINB"``,
+    ``"DPO"``, ``"Gamma"``, ``"ZAGamma"`` based on which params
+    ``training/pipeline.py`` ``_step_persist_artifacts`` dumped into the
+    test-set CSV (~lines 1191-1212). ``None`` for legacy / synthetic frames
+    missing every distribution param — those keep the back-compat point-IQR
+    semantics.
     """
     cols = set(df.columns)
+    if {"MIX_Loc1", "MIX_Loc2", "MIX_Scale1", "MIX_Scale2", "MIX_W1"} <= cols:
+        return "Mixture"
     if {"SN_Loc", "SN_Scale", "SN_Alpha"} <= cols:
         return "SkewNormal"
     if {"DP_MU", "DP_PHI"} <= cols:
@@ -739,7 +795,7 @@ def _infer_dist_from_columns(df: pd.DataFrame) -> str | None:
     return None
 
 
-# SkewNormal strategies the gate can decode from the dumped params. ``ratio_meanyr``,
+# SkewNormal (and Mixture) strategies the gate can decode from the dumped params. ``ratio_meanyr``,
 # ``ratio_projvol``, and ``centered_additive_mean10`` ignore ``GlobalMean``;
 # ``ratio_projvol`` multiplies by the persisted ``DenomCol`` (a projected-volume column,
 # with the same per-row MeanYr fallback the served path uses);
@@ -788,6 +844,37 @@ def _decode_sn_loc_scale(df: pd.DataFrame, strategy: str) -> tuple[np.ndarray, n
     )
 
 
+def _decode_mix_params(
+    df: pd.DataFrame, strategy: str
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Decode 2-component Gaussian-mixture params to EV space per strategy.
+
+    Returns ``(w1, loc1, scale1, loc2, scale2)``. The pipeline persists the MIX
+    locs/scales in the cell's NORMALIZED space exactly like ``SN_Loc`` /
+    ``SN_Scale``, so both component locs run through ``decode_loc`` and both
+    scales through ``decode_scale`` with the same ``GlobalMean`` / ``DenomCol``
+    fallbacks as :func:`_decode_sn_loc_scale`. The component weight is a
+    probability — scale-free, returned as-is.
+    """
+    w1 = df["MIX_W1"].to_numpy(dtype=float)
+    loc1 = df["MIX_Loc1"].to_numpy(dtype=float)
+    scale1 = df["MIX_Scale1"].to_numpy(dtype=float)
+    loc2 = df["MIX_Loc2"].to_numpy(dtype=float)
+    scale2 = df["MIX_Scale2"].to_numpy(dtype=float)
+    if strategy not in _SN_DECODE_STRATEGIES:
+        return w1, loc1, scale1, loc2, scale2
+    global_mean = float(df["GlobalMean"].iloc[0]) if "GlobalMean" in df.columns else 0.0
+    denom_col = str(df["DenomCol"].iloc[0]) if "DenomCol" in df.columns else "MeanYr"
+    strat = get_target_normalization(strategy)
+    return (
+        w1,
+        strat.decode_loc(loc1, df, global_mean, denom_col),
+        strat.decode_scale(scale1, df, denom_col),
+        strat.decode_loc(loc2, df, global_mean, denom_col),
+        strat.decode_scale(scale2, df, denom_col),
+    )
+
+
 def _pred_ppf(df: pd.DataFrame, dist: str, q: float, *, strategy: str) -> np.ndarray:
     """Per-row inverse CDF ``F⁻¹(q)`` of the predictive distribution.
 
@@ -801,6 +888,8 @@ def _pred_ppf(df: pd.DataFrame, dist: str, q: float, *, strategy: str) -> np.nda
         loc, scale = _decode_sn_loc_scale(df, strategy)
         alpha = df["SN_Alpha"].to_numpy(dtype=float)
         return _scipy_skewnorm.ppf(q, alpha, loc=loc, scale=scale)
+    if dist == "Mixture":
+        return _mix_ppf(q, *_decode_mix_params(df, strategy))
     if dist == "NegBin":
         r = df["R"].to_numpy(dtype=float)
         p = df["NB_P"].to_numpy(dtype=float)
@@ -850,16 +939,18 @@ def _pred_cdf_pmf(
     """Per-row predictive CDF ``F(y)`` and outcome point-mass ``P(Y=y)``.
 
     The point mass is 0 everywhere for the continuous families (SkewNormal,
-    Gamma) and the per-row probability of the realized integer for the count /
-    zero-inflated families. Shared by the mid-PIT and the randomized PIT so both
-    read the same family parameterization; the zero-inflated mixtures fold the
-    gate into both terms.
+    Mixture, Gamma) and the per-row probability of the realized integer for the
+    count / zero-inflated families. Shared by the mid-PIT and the randomized PIT
+    so both read the same family parameterization; the zero-inflated mixtures
+    fold the gate into both terms.
     """
     y = np.asarray(y, dtype=float)
     if dist == "SkewNormal":
         loc, scale = _decode_sn_loc_scale(df, strategy)
         alpha = df["SN_Alpha"].to_numpy(dtype=float)
         return _scipy_skewnorm.cdf(y, alpha, loc=loc, scale=scale), np.zeros_like(y)
+    if dist == "Mixture":
+        return _mix_cdf(y, *_decode_mix_params(df, strategy)), np.zeros_like(y)
     if dist in ("NegBin", "ZINB"):
         r = df["R"].to_numpy(dtype=float)
         p = df["NB_P"].to_numpy(dtype=float)
@@ -1123,7 +1214,7 @@ def _dispersion_diagnostics(
     coverages name the *direction* a KS cannot: a coverage below its nominal level
     (0.50 / 0.80) means the predictive is too narrow (under-dispersed), above means too
     wide. Coverage is nominal-lumpy on the discrete count families (integer-quantile
-    endpoints), exact on the continuous SkewNormal cells.
+    endpoints), exact on the continuous SkewNormal / Mixture cells.
     """
     draws = _randomized_pit_draws(df, dist, actual, strategy=strategy)
     pit_ks = float(np.mean([_ks_uniform(u) for u in draws]))

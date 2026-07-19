@@ -535,9 +535,52 @@ def _gamma_odds(high, low, ev, cv, alpha, gate, dist):
     return cdf_high - push / 2
 
 
+# Mixture-normal quantile bisection: a ±8-sigma bracket around the component
+# locations contains any practical quantile, and 80 halvings resolve it far
+# past the 4-decimal CDF round-trip the golden test pins.
+_MIXNORM_BRACKET_SIGMAS = 8.0
+_MIXNORM_BISECT_ITERS = 80
+
+
+def _mixnorm_cdf(y, w1, loc1, scale1, loc2, scale2):
+    cdf1 = norm.cdf(y, loc=loc1, scale=scale1)
+    cdf2 = norm.cdf(y, loc=loc2, scale=scale2)
+    return w1 * cdf1 + (1 - w1) * cdf2
+
+
+def _mixnorm_ppf(q, w1, loc1, scale1, loc2, scale2):
+    """Scalar-q mixture quantile by per-row bisection (no closed-form inverse)."""
+    span = _MIXNORM_BRACKET_SIGMAS * np.maximum(scale1, scale2)
+    lo = np.minimum(loc1, loc2) - span
+    hi = np.maximum(loc1, loc2) + span
+    for _ in range(_MIXNORM_BISECT_ITERS):
+        mid = 0.5 * (lo + hi)
+        below = _mixnorm_cdf(mid, w1, loc1, scale1, loc2, scale2) < q
+        lo = np.where(below, mid, lo)
+        hi = np.where(below, hi, mid)
+    return 0.5 * (lo + hi)
+
+
+def _mixnorm_odds(high, low, w1, loc1, scale1, loc2, scale2):
+    cdf_high = _mixnorm_cdf(high, w1, loc1, scale1, loc2, scale2)
+    cdf_low = _mixnorm_cdf(low, w1, loc1, scale1, loc2, scale2)
+    push = cdf_high - cdf_low
+    return cdf_high - push / 2
+
+
 def get_odds(
-    line, ev, dist, cv=1, alpha=None, r=None, gate=None, step=1, sigma=None, skew_alpha=None,
+    line,
+    ev,
+    dist,
+    cv=1,
+    alpha=None,
+    r=None,
+    gate=None,
+    step=1,
+    sigma=None,
+    skew_alpha=None,
     phi=None,
+    mix=None,
 ):
     """Return the raw probability that the outcome falls below ``line``.
 
@@ -556,6 +599,8 @@ def get_odds(
         sigma: SkewNormal scale; derived as ``ev*cv`` if ``None``.
         skew_alpha: SkewNormal skewness; defaults to ``0``.
         phi: Double Poisson precision; derived as ``1/(1+cv·ev)`` if ``None``.
+        mix: Mixture params dict with keys ``w1``, ``loc1``, ``scale1``,
+            ``loc2``, ``scale2`` (arrays); required when ``dist == "Mixture"``.
 
     Returns:
         Probability of outcome being under ``line``.
@@ -581,6 +626,10 @@ def get_odds(
         # because the no-vig median price IS the implied value. Passing any skew
         # here would make the EV depend on the book's vig direction.
         return _skewnormal_odds(high, low, ev, cv, sigma, 0.0, gate)
+    if dist == "Mixture":
+        return _mixnorm_odds(
+            high, low, mix["w1"], mix["loc1"], mix["scale1"], mix["loc2"], mix["scale2"]
+        )
     return _gamma_odds(high, low, ev, cv, alpha, gate, dist)
 
 
@@ -599,8 +648,8 @@ def get_push_prob(
 
     Push probability is non-zero only when ``line`` is an integer **and** the
     distribution family is discrete (NegBin / ZINB / DPO / Poisson). Continuous
-    families (Gamma, ZAGamma, SkewNormal, Normal) return 0 because the point
-    mass at any single value is zero. Used by parlay scoring to handle the
+    families (Gamma, ZAGamma, SkewNormal, Normal, Mixture) return 0 because the
+    point mass at any single value is zero. Used by parlay scoring to handle the
     Underdog "push drops one leg" rule.
 
     Args:
@@ -971,6 +1020,37 @@ def _gamma_start_values(mu, std, hist_gate, dist, _a_upper):
     return np.column_stack([_softplus_inv(alpha), _softplus_inv(beta)])
 
 
+# Mixture seeds: the base component starts dominant at this softmax weight (the
+# raw logits are the two logs), and the component scales straddle the seeding
+# spread so the pair starts separated instead of collapsed onto one Gaussian.
+_MIX_BASE_WEIGHT = 0.75
+_MIX_SCALE_FACTORS = (0.8, 1.2)
+
+
+def _mixture_start_values(mu, std, n, offset_mode, normalized):
+    if offset_mode:
+        # Same centered-residual seeding as the SkewNormal offset mode: base
+        # component at residual 0, boom component one historical std above.
+        loc = np.zeros(n)
+        boom_loc = std
+        spread = std
+    elif normalized:
+        cv_player = np.clip(std / mu, 0.01, 10)
+        loc = np.ones(n)
+        boom_loc = 1.0 + cv_player
+        spread = cv_player
+    else:
+        loc = mu
+        boom_loc = mu + std
+        spread = std
+    base_f, boom_f = _MIX_SCALE_FACTORS
+    log_scale = np.log(np.clip(base_f * spread, 1e-6, None))
+    boom_log_scale = np.log(np.clip(boom_f * spread, 1e-6, None))
+    logit_base = np.full(n, np.log(_MIX_BASE_WEIGHT))
+    logit_boom = np.full(n, np.log(1.0 - _MIX_BASE_WEIGHT))
+    return np.column_stack([loc, boom_loc, log_scale, boom_log_scale, logit_base, logit_boom])
+
+
 def set_model_start_values(
     model,
     dist,
@@ -993,22 +1073,25 @@ def set_model_start_values(
     * SkewNormal: ``loc`` → identity, ``scale`` → exp, ``alpha`` → identity;
       with ``sn_param="centered"``: ``mean`` → identity, ``sd`` → exp,
       ``gamma1`` → ``0.99·tanh``.
+    * Mixture (2-component Gaussian): ``loc_1``/``loc_2`` → identity,
+      ``scale_1``/``scale_2`` → exp, ``mix_prob_1``/``mix_prob_2`` →
+      gumbel-softmax over the raw logit pair.
 
     Args:
         model: The LightGBMLSS model whose ``start_values`` gets assigned.
         dist: Distribution name — ``"NegBin"``, ``"ZINB"``, ``"DPO"``,
-            ``"Gamma"``, ``"ZAGamma"``, or ``"SkewNormal"``.
+            ``"Gamma"``, ``"ZAGamma"``, ``"SkewNormal"``, or ``"Mixture"``.
         X_data: DataFrame; must contain ``"MeanYr"``, ``"STDYr"``, and
             ``"ZeroYr"`` columns.
         shape_ceiling: Upper bound on shape during training. When ``None``,
             a conservative default is used (50 for NegBin, 100 for Gamma).
         normalized: If ``True``, targets are already normalized to
             ``Result/MeanYr ≈ 1.0`` and start values are set for that space.
-        offset_mode: SkewNormal-only. If ``True``, targets are an additive
-            centered residual (``y - baseline``), so ``loc`` is seeded at
-            zero per row and ``scale`` at per-player STDYr (residual
-            dispersion ≈ per-player std). Mutually exclusive with
-            ``normalized``; ignored for non-SkewNormal distributions.
+        offset_mode: SkewNormal / Mixture only. If ``True``, targets are an
+            additive centered residual (``y - baseline``), so ``loc`` is
+            seeded at zero per row and ``scale`` at per-player STDYr
+            (residual dispersion ≈ per-player std). Mutually exclusive with
+            ``normalized``; ignored for the other distributions.
         sn_param: SkewNormal-only head parametrization — ``"direct"``
             (loc, scale, alpha) or ``"centered"`` (``CenteredSkewNormal``'s
             mean, sd, gamma1). The direct alpha seed is 0, so the direct
@@ -1035,6 +1118,8 @@ def set_model_start_values(
         sv = _dp_start_values(mu, std)
     elif dist in ["Gamma", "ZAGamma"]:
         sv = _gamma_start_values(mu, std, hist_gate, dist, _a_upper)
+    elif dist == "Mixture":
+        sv = _mixture_start_values(mu, std, n, offset_mode, normalized)
 
     if dist in ["ZINB", "ZAGamma"]:
         gate_val = np.clip(hist_gate, 0.01, 0.99)

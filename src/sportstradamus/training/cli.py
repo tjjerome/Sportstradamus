@@ -30,7 +30,7 @@ from sportstradamus.training.pipeline import (
     train_market,
 )
 from sportstradamus.training.ship_config import (
-    SKEW_NORMAL_DIST,
+    CONTINUOUS_DISTS,
     STAT_META_PATH,
     TARGET_NORM_NONE,
     WITHHELD,
@@ -139,6 +139,10 @@ def _g4_only_retry_wanted(
     if row is None or cell_hpo_selection != "loss":
         return False
     if row["distribution"] == "ZINB" and cell_zinb_mode == "hurdle":
+        return False
+    if row["distribution"] == "Mixture":
+        # No per-trial served-KS closure for the mixture (see _calibration_penalty);
+        # a calibrated retry would silently re-run loss selection.
         return False
     if _gate_passed(row["ship"]) or _gate_passed(row["g4_pass"]):
         return False
@@ -544,13 +548,13 @@ def meditate(
             if cell_target_norm == WITHHELD:
                 if bypass_withholding:
                     cell_dist = stat_meta_full.get(lg, {}).get(market, {}).get("dist")
-                    # SkewNormal needs a real strategy slug; count-branch
-                    # families (ZINB/NegBin/Gamma/ZAGamma) ignore the slug,
-                    # so TARGET_NORM_NONE is fine and the next clause will
+                    # Continuous families (SkewNormal/Mixture) need a real strategy
+                    # slug; count-branch families (ZINB/NegBin/Gamma/ZAGamma) ignore
+                    # the slug, so TARGET_NORM_NONE is fine and the next clause will
                     # substitute the run-wide default for the pipeline call.
                     cell_target_norm = (
                         resolve_flag_target_normalization(target_normalization)
-                        if cell_dist == SKEW_NORMAL_DIST
+                        if cell_dist in CONTINUOUS_DISTS
                         else TARGET_NORM_NONE
                     )
                     click.echo(

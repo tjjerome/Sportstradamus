@@ -14,6 +14,8 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 import torch
+from lightgbmlss.distributions.Gaussian import Gaussian
+from lightgbmlss.distributions.Mixture import Mixture
 from lightgbmlss.distributions.NegativeBinomial import NegativeBinomial
 from lightgbmlss.distributions.ZINB import ZINB
 from lightgbmlss.model import LightGBMLSS
@@ -101,9 +103,28 @@ _TRAIN_FRACTION: float = 0.7
 _SKEWNORMAL_MEAN_THRESHOLD: float = 2.0
 # Families a cell may pin in stat_meta.json `dist` to force its training branch; an unset / "auto"
 # cell defers to the data-driven rule (_data_driven_dist). ZAGamma/Gamma are not produced by
-# _step_select_distribution, so they are not forceable here. DPO is force-only — no data-driven
-# rule routes to it (WS-3 §6.6 zero-deflation cells pin it in stat_meta or sweep it via --dist).
-_FORCEABLE_DISTS: frozenset[str] = frozenset({"SkewNormal", "ZINB", "NegBin", "DPO"})
+# _step_select_distribution, so they are not forceable here. DPO and Mixture are force-only —
+# no data-driven rule routes to them (WS-3 §6.6: zero-deflation count cells pin DPO; the
+# boom/bust heavy-right-tail continuous cells pin Mixture — 2-component Gaussian).
+_FORCEABLE_DISTS: frozenset[str] = frozenset({"SkewNormal", "ZINB", "NegBin", "DPO", "Mixture"})
+# Two Gaussian components: the Mixture family exists to add ONE extra mode for the
+# boom/bust upper tail; more components overfit the thin right tail the family targets.
+_MIXTURE_COMPONENTS: int = 2
+# Constrained-mixture guardrails (Hathaway-style scale constraint): component sigma is
+# clamped to [floor, ceiling] x the normalized-label std at fit time. The floor removes
+# the sigma->0 likelihood spike a Gaussian-mixture MLE is unbounded under (a component
+# collapses onto single points); the ceiling stops the near-dead component's unused
+# scale head exp-overflowing to inf, which the blend then propagates as NaN. Both sit
+# far outside any honest fit.
+_MIXTURE_SCALE_STD_FLOOR: float = 0.02
+_MIXTURE_SCALE_STD_CEILING: float = 20.0
+# LightGBM guardrails for the mixture fit: a near-dead component's rows carry ~zero
+# hessian, so an unregularized Newton leaf step (-G/(H+lambda)) explodes on any leaf
+# dominated by them — observed as loc heads at +-1e4 in normalized space. Floor the
+# per-leaf hessian mass and the L2 term; both floors sit inside the HPO search range,
+# so a searched corner is only ever tightened, never loosened.
+_MIXTURE_MIN_CHILD_WEIGHT: float = 0.1
+_MIXTURE_LAMBDA_L2_FLOOR: float = 1.0
 # Minimum coefficient of variation for the SkewNormal branch.  Prevents
 # degenerate near-zero CV when all players have nearly identical outcomes.
 _SKEWNORMAL_CV_FLOOR: float = 0.05
@@ -252,6 +273,12 @@ def fit_lss_model(
     """
     if seed is not None:
         params = {**params, **seed_everything(seed)}
+    if dist == "Mixture":
+        params = {
+            **params,
+            "min_child_weight": max(params.get("min_child_weight", 0.0), _MIXTURE_MIN_CHILD_WEIGHT),
+            "lambda_l2": max(params.get("lambda_l2", 0.0), _MIXTURE_LAMBDA_L2_FLOOR),
+        }
     dtrain = lgb.Dataset(X_train, label=y_train_labels)
     model = LightGBMLSS(dist_obj)
     set_model_start_values(
@@ -994,7 +1021,7 @@ def _step_select_hyperparams(
     """
     col_list = list(X_train.columns)
     monotone = [0] * len(col_list)
-    if dist in ("Gamma", "ZAGamma", "SkewNormal") and "MeanYr" in col_list:
+    if dist in ("Gamma", "ZAGamma", "SkewNormal", "Mixture") and "MeanYr" in col_list:
         monotone[col_list.index("MeanYr")] = 1
 
     hp_search_space = {
@@ -1251,6 +1278,19 @@ def _diag_shape(
         result_arr = y_test["Result"].to_numpy()
         diag_empirical_shape = float(result_arr.std() / max(result_arr.mean(), 1e-6))
         diag_shape_label = "scale"
+    elif dist == "Mixture":
+        diag_start_shape = float(cv)
+        _, sd_norm = _mixture_moments(
+            prob_params["mix_prob_1"].to_numpy(dtype=float),
+            prob_params["loc_1"].to_numpy(dtype=float),
+            prob_params["scale_1"].to_numpy(dtype=float),
+            prob_params["loc_2"].to_numpy(dtype=float),
+            prob_params["scale_2"].to_numpy(dtype=float),
+        )
+        diag_model_shape = float(sd_norm.mean()) * test_denom_mean
+        result_arr = y_test["Result"].to_numpy()
+        diag_empirical_shape = float(result_arr.std() / max(result_arr.mean(), 1e-6))
+        diag_shape_label = "scale"
     elif dist in ("Gamma", "ZAGamma"):
         diag_start_shape = float(np.clip((test_mean_yr / max(test_std_yr, 1e-6)) ** 2, 0.1, 100))
         diag_model_shape = float(prob_params["concentration"].mean())
@@ -1306,10 +1346,10 @@ def _diag_over_pcts(y_class, ev_minus_line_arr, y_proba_no_filt):
 def _diag_cf_over_pct(dist, diag_empirical_shape, weighted_mean, B_test, gate_blend_test, step):
     """Counterfactual over-rate if the model used the empirical (not fitted) shape.
 
-    NaN for SkewNormal (no counterfactual shape) and when the empirical shape is
-    unusable (NaN or non-positive) or too few confident rows clear the floor.
+    NaN for SkewNormal/Mixture (no counterfactual shape) and when the empirical shape
+    is unusable (NaN or non-positive) or too few confident rows clear the floor.
     """
-    if dist == "SkewNormal":
+    if dist in ("SkewNormal", "Mixture"):
         return float("nan")
     if np.isnan(diag_empirical_shape) or diag_empirical_shape <= 0:
         return float("nan")
@@ -1371,7 +1411,9 @@ def _step_compute_diagnostics(
 
     test_mean_yr = X_test["MeanYr"].mean()
     test_std_yr = X_test["STDYr"].mean()
-    test_denom_mean = X_test[denom_col].mean() if dist == "SkewNormal" else test_mean_yr
+    test_denom_mean = (
+        X_test[denom_col].mean() if dist in ("SkewNormal", "Mixture") else test_mean_yr
+    )
 
     diag_shape_label, diag_start_shape, diag_model_shape, diag_empirical_shape = _diag_shape(
         dist, cv, prob_params, test_mean_yr, test_std_yr, test_denom_mean, y_test, player_stats
@@ -1438,6 +1480,8 @@ def _build_y_proba_raw(B_test, decoded: dict, dist: str, step) -> np.ndarray:
             skew_alpha=decoded["sn_alpha_test"],
             gate=gate_test,
         )
+    elif dist == "Mixture":
+        under = get_odds(line, ev, dist, mix=decoded["mix_test"])
     elif dist in ("NegBin", "ZINB"):
         under = get_odds(line, ev, dist, r=decoded["r"], gate=gate_test)
     elif dist == "DPO":
@@ -1588,6 +1632,75 @@ def _deterministic_dump_suffix(dist: str, zinb_mode: str) -> str:
     return "_hurdle" if dist == "ZINB" and zinb_mode == "hurdle" else ""
 
 
+def _stage_family_shape_columns(
+    X_test: pd.DataFrame,
+    *,
+    dist: str,
+    prob_params: pd.DataFrame,
+    weighted_mean: np.ndarray,
+    sn_scale_test: np.ndarray | None,
+    sn_skew_test: np.ndarray | None,
+    mix_test: dict | None,
+    target_normalization: str,
+    global_mean: float,
+    denom_col: str,
+    hist_gate: float,
+) -> None:
+    """Stage the family's served shape columns onto the test-set frame.
+
+    Gate 4 must score the SERVED predictive (blended params × dispersion c), the
+    same distribution inference prices, so the continuous families re-encode the
+    served params to the model's normalized space — the scorecard's decode
+    recovers them byte-for-byte. Encode is the exact inverse of decode only when
+    both use this cell's denom_col, which the scorecard recovers from the
+    persisted DenomCol.
+    """
+    if dist == "SkewNormal":
+        # Derive scipy loc via skewnormal_loc_from_mean — the single authoritative
+        # formula shared with the betting path and the scorecard fit.
+        strat = baselines.get_target_normalization(target_normalization)
+        served_loc = skewnormal_loc_from_mean(weighted_mean, sn_scale_test, sn_skew_test)
+        X_test["SN_Loc"] = strat.encode_loc(served_loc, X_test, global_mean, denom_col)
+        X_test["SN_Scale"] = strat.encode_scale(sn_scale_test, X_test, denom_col)
+        X_test["SN_Alpha"] = sn_skew_test
+        # Zero-inflated cells encode against MeanYr_nonzero, not MeanYr; persist the
+        # choice so the scorecard's Gate-4 decode reads the same denominator the
+        # betting path serves with (else its dispersion is mis-scaled and g4 fails).
+        X_test["DenomCol"] = denom_col
+        # The EB-prior normalizations decode loc by re-adding an empirical-Bayes prior that
+        # shrinks toward global_mean; persist it so the scorecard's `_decode_sn_loc_scale`
+        # recovers the served loc instead of shrinking toward 0. Ratio/Mean10 decodes ignore it.
+        X_test["GlobalMean"] = global_mean
+        if hist_gate > GATE_PUBLISH_THRESHOLD:
+            X_test["Gate"] = hist_gate
+    elif dist == "Mixture":
+        # Same served-predictive contract as the SkewNormal branch; the mixture
+        # weight needs no encode — it is scale-free.
+        strat = baselines.get_target_normalization(target_normalization)
+        X_test["MIX_Loc1"] = strat.encode_loc(mix_test["loc1"], X_test, global_mean, denom_col)
+        X_test["MIX_Scale1"] = strat.encode_scale(mix_test["scale1"], X_test, denom_col)
+        X_test["MIX_Loc2"] = strat.encode_loc(mix_test["loc2"], X_test, global_mean, denom_col)
+        X_test["MIX_Scale2"] = strat.encode_scale(mix_test["scale2"], X_test, denom_col)
+        X_test["MIX_W1"] = mix_test["w1"]
+        X_test["DenomCol"] = denom_col
+        X_test["GlobalMean"] = global_mean
+    elif dist in ("NegBin", "ZINB"):
+        if dist == "ZINB":
+            X_test["Gate"] = prob_params["gate"]
+        X_test["R"] = prob_params["total_count"]
+        X_test["NB_P"] = prob_params["probs"]
+    elif dist == "DPO":
+        # Raw natural params, same staging as NegBin's R/NB_P (DP_MU is the mu
+        # parameter, not the mean — the scorecard's decode recovers the exact
+        # series mean itself). Gate-free family: no Gate column.
+        X_test["DP_MU"] = prob_params["mu"]
+        X_test["DP_PHI"] = prob_params["phi"]
+    elif dist in ("Gamma", "ZAGamma"):
+        if dist == "ZAGamma":
+            X_test["Gate"] = prob_params["gate"]
+        X_test["Alpha"] = prob_params["concentration"]
+
+
 def _step_persist_artifacts(
     *,
     filedict: dict,
@@ -1605,6 +1718,7 @@ def _step_persist_artifacts(
     zinb_mode: str,
     sn_scale_test: np.ndarray | None,
     sn_skew_test: np.ndarray | None,
+    mix_test: dict | None,
     global_mean: float,
     denom_col: str,
     pit_recal_blob: dict | None = None,
@@ -1630,44 +1744,19 @@ def _step_persist_artifacts(
     # The native shape columns below stay uncorrected — Gate 4 reads them and
     # measures dispersion, which the corrector intentionally leaves alone.
     X_test["EV"] = ev
-    if dist == "SkewNormal":
-        # Gate 4 must score the SERVED predictive (blended params × dispersion c),
-        # the same distribution inference prices. Derive scipy loc via
-        # skewnormal_loc_from_mean — the single authoritative formula shared with the
-        # betting path and the scorecard fit — then re-encode loc/scale to the model's
-        # normalized space so the scorecard's decode recovers the served EV params
-        # byte-for-byte. Encode is the exact inverse of decode only when both use this
-        # cell's denom_col, which the scorecard recovers from DenomCol persisted below.
-        strat = baselines.get_target_normalization(target_normalization)
-        served_loc = skewnormal_loc_from_mean(weighted_mean, sn_scale_test, sn_skew_test)
-        X_test["SN_Loc"] = strat.encode_loc(served_loc, X_test, global_mean, denom_col)
-        X_test["SN_Scale"] = strat.encode_scale(sn_scale_test, X_test, denom_col)
-        X_test["SN_Alpha"] = sn_skew_test
-        # Zero-inflated cells encode against MeanYr_nonzero, not MeanYr; persist the
-        # choice so the scorecard's Gate-4 decode reads the same denominator the
-        # betting path serves with (else its dispersion is mis-scaled and g4 fails).
-        X_test["DenomCol"] = denom_col
-        # The EB-prior normalizations decode loc by re-adding an empirical-Bayes prior that
-        # shrinks toward global_mean; persist it so the scorecard's `_decode_sn_loc_scale`
-        # recovers the served loc instead of shrinking toward 0. Ratio/Mean10 decodes ignore it.
-        X_test["GlobalMean"] = global_mean
-        if hist_gate > GATE_PUBLISH_THRESHOLD:
-            X_test["Gate"] = hist_gate
-    elif dist in ("NegBin", "ZINB"):
-        if dist == "ZINB":
-            X_test["Gate"] = prob_params["gate"]
-        X_test["R"] = prob_params["total_count"]
-        X_test["NB_P"] = prob_params["probs"]
-    elif dist == "DPO":
-        # Raw natural params, same staging as NegBin's R/NB_P (DP_MU is the mu
-        # parameter, not the mean — the scorecard's decode recovers the exact
-        # series mean itself). Gate-free family: no Gate column.
-        X_test["DP_MU"] = prob_params["mu"]
-        X_test["DP_PHI"] = prob_params["phi"]
-    elif dist in ("Gamma", "ZAGamma"):
-        if dist == "ZAGamma":
-            X_test["Gate"] = prob_params["gate"]
-        X_test["Alpha"] = prob_params["concentration"]
+    _stage_family_shape_columns(
+        X_test,
+        dist=dist,
+        prob_params=prob_params,
+        weighted_mean=weighted_mean,
+        sn_scale_test=sn_scale_test,
+        sn_skew_test=sn_skew_test,
+        mix_test=mix_test,
+        target_normalization=target_normalization,
+        global_mean=global_mean,
+        denom_col=denom_col,
+        hist_gate=hist_gate,
+    )
 
     if pit_recal_blob is not None:
         # §6.1 Rung C map, persisted as one constant JSON column so the CSV-only scorecard
@@ -1846,6 +1935,46 @@ def _blended_val_pit(fused: dict, y_val: np.ndarray) -> np.ndarray:
     )
 
 
+def _mixture_pit_frame(mix: dict) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "MIX_Loc1": mix["loc1"],
+            "MIX_Scale1": mix["scale1"],
+            "MIX_Loc2": mix["loc2"],
+            "MIX_Scale2": mix["scale2"],
+            "MIX_W1": mix["w1"],
+        }
+    )
+
+
+def _calibrate_mixture_dispersion(out: dict, fused: dict, y_val_arr: np.ndarray) -> dict:
+    """Mixture scalar dispersion fit: hold both locs, scale both component scales by ``c``.
+
+    Objective is the served Gate-4 randomized-PIT KS of the blended validation
+    predictive — the mixture has no closed-form CRPS, and g4 is the gate the family
+    exists to clear. One shared ``c`` preserves the fitted component structure
+    (separation and weights); per-component scaling would let the optimizer trade
+    tail mass between modes and undo the mixture fit.
+    """
+    mix_val = fused["mix_blend_val"]
+
+    def _served_pit_ks(c: float) -> float:
+        return _randomized_pit_ks(
+            _mixture_pit_frame(_scale_mixture(mix_val, c)),
+            "Mixture",
+            y_val_arr,
+            strategy=TARGET_NORM_NONE,
+        )
+
+    disp_result = minimize_scalar(_served_pit_ks, bounds=(0.1, 10.0), method="bounded")
+    c_opt = disp_result.x
+    out["c_opt"] = c_opt
+    out["mix_blend_test"] = _scale_mixture(fused["mix_blend_test"], c_opt)
+    out["mix_blend_val"] = _scale_mixture(mix_val, c_opt)
+    out["val_weighted_mean_val"] = fused["weighted_mean_val"]
+    return out
+
+
 def _calibrate_dpo_dispersion(
     out: dict, fused: dict, y_val_arr: np.ndarray, count_dispersion_objective: str
 ) -> dict:
@@ -1981,6 +2110,8 @@ def _step_calibrate_dispersion(
         "sn_sigma_blend_val": fused["sn_sigma_blend_val"],
         "sn_alpha_blend_test": fused["sn_alpha_blend_test"],
         "sn_alpha_blend_val": fused["sn_alpha_blend_val"],
+        "mix_blend_test": fused["mix_blend_test"],
+        "mix_blend_val": fused["mix_blend_val"],
         "val_weighted_mean": None,
         "val_weighted_mean_val": None,
         "pit_recal_blob": None,
@@ -2020,6 +2151,9 @@ def _step_calibrate_dispersion(
         out["val_weighted_mean_val"] = fused["weighted_mean_val"]
         return out
 
+    if dist == "Mixture":
+        return _calibrate_mixture_dispersion(out, fused, y_val_arr)
+
     if dist == "DPO":
         return _calibrate_dpo_dispersion(out, fused, y_val_arr, count_dispersion_objective)
     return _calibrate_count_dispersion(
@@ -2046,6 +2180,13 @@ def _step_compute_test_probabilities(
             sigma=calibrated["sn_sigma_blend_test"],
             skew_alpha=calibrated["sn_alpha_blend_test"],
             gate=fused["gate_blend_test"],
+        )
+    elif dist == "Mixture":
+        under = get_odds(
+            B_test["Line"].to_numpy(),
+            weighted_mean,
+            dist,
+            mix=calibrated["mix_blend_test"],
         )
     elif dist in ("NegBin", "ZINB"):
         under = get_odds(
@@ -2093,6 +2234,13 @@ def _step_calibrate_temperature(
             skew_alpha=calibrated["sn_alpha_blend_val"],
             gate=fused["gate_blend_val"],
         )
+    elif dist == "Mixture":
+        val_raw_under = get_odds(
+            B_validation["Line"].to_numpy(),
+            calibrated["val_weighted_mean_val"],
+            dist,
+            mix=calibrated["mix_blend_val"],
+        )
     else:
         _r_val = calibrated["r_blend_val"] if dist in ("NegBin", "ZINB") else None
         _alpha_val = calibrated["alpha_blend_val"] if dist in ("Gamma", "ZAGamma") else None
@@ -2121,6 +2269,43 @@ def _step_calibrate_temperature(
     val_calibrated = apply_temperature(1 - val_raw_under, T_opt)
     model_calib = 1 - np.mean((val_calibrated - y_class_val) ** 2)
     return T_opt, val_calibrated, model_calib, y_class_val
+
+
+def _mixture_moments(w1, loc1, scale1, loc2, scale2):
+    """Mean and sd of a 2-component Gaussian mixture (same-length arrays)."""
+    mean = w1 * loc1 + (1 - w1) * loc2
+    second = w1 * (scale1**2 + loc1**2) + (1 - w1) * (scale2**2 + loc2**2)
+    return mean, np.sqrt(np.clip(second - mean**2, 1e-12, None))
+
+
+def _decode_mixture_frame(prob_params, X, strategy, global_mean, denom_col) -> dict:
+    """Decode raw Mixture params to EV-space ``{w1, loc1, scale1, loc2, scale2}``.
+
+    Both component locations/scales run through the same strategy registry decode
+    the SkewNormal branch uses, so the mixture is expressed in the space the
+    gates and the betting path price.
+    """
+    return {
+        "w1": prob_params["mix_prob_1"].to_numpy(dtype=float),
+        "loc1": strategy.decode_loc(
+            prob_params["loc_1"].to_numpy(dtype=float), X, global_mean, denom_col
+        ),
+        "scale1": strategy.decode_scale(prob_params["scale_1"].to_numpy(dtype=float), X, denom_col),
+        "loc2": strategy.decode_loc(
+            prob_params["loc_2"].to_numpy(dtype=float), X, global_mean, denom_col
+        ),
+        "scale2": strategy.decode_scale(prob_params["scale_2"].to_numpy(dtype=float), X, denom_col),
+    }
+
+
+def _shift_mixture(mix: dict, shift: np.ndarray) -> dict:
+    """Location-shift a decoded mixture dict (blend moves the mean, shape stays)."""
+    return {**mix, "loc1": mix["loc1"] + shift, "loc2": mix["loc2"] + shift}
+
+
+def _scale_mixture(mix: dict, c: float) -> dict:
+    """Dispersion-calibrate a decoded mixture dict (both component scales by ``c``)."""
+    return {**mix, "scale1": mix["scale1"] * c, "scale2": mix["scale2"] * c}
 
 
 def _step_decode_predictions(
@@ -2168,7 +2353,21 @@ def _step_decode_predictions(
         "beta": None,
         "alpha_validation": None,
         "beta_validation": None,
+        "mix_test": None,
+        "mix_val": None,
     }
+    if dist == "Mixture":
+        mix_test = _decode_mixture_frame(prob_params, X_test, strategy, global_mean, denom_col)
+        mix_val = _decode_mixture_frame(
+            prob_params_validation, X_validation, strategy, global_mean, denom_col
+        )
+        out["mix_test"] = mix_test
+        out["mix_val"] = mix_val
+        out["ev"], _ = _mixture_moments(**mix_test)
+        out["ev_validation"], _ = _mixture_moments(**mix_val)
+        out["gate_test"] = None
+        out["gate_validation"] = None
+        return out
     if dist == "SkewNormal":
         # Location/scale come from the baselines registry (feature/strategy
         # dependent); the shared kernel applies the skew mean-adjustment and gate.
@@ -2272,6 +2471,63 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
             "sn_sigma_blend_val": sn_sigma_blend_val,
             "sn_alpha_blend_test": sn_alpha_blend_test,
             "sn_alpha_blend_val": sn_alpha_blend_val,
+        }
+    )
+    return out
+
+
+def _fuse_mixture(out, decoded, splits, cv, blending):
+    """Mixture branch: fit model_weight on moment-matched normals, blend by location shift.
+
+    The weight fit scores blended means through the SkewNormal machinery with the
+    mixture's per-row sd and zero skew — a moment-matched normal approximation used
+    ONLY to pick the scalar blend weight. The served predictive keeps the full
+    mixture shape: the blend moves both component locations by the pooled-mean
+    delta and leaves scales/weight untouched.
+    """
+    ev = decoded["ev"]
+    ev_validation = decoded["ev_validation"]
+    book_ev_test = splits["B_test"]["EV"].to_numpy()
+    book_ev_val = splits["B_validation"]["EV"].to_numpy()
+    y_val_result = splits["y_validation"]["Result"].to_numpy()
+    _, mix_sd_val = _mixture_moments(**decoded["mix_val"])
+    _, mix_sd_test = _mixture_moments(**decoded["mix_test"])
+
+    model_weight = calibration.fit_blend_weight(
+        blending,
+        ev_validation,
+        book_ev_val,
+        y_val_result,
+        "SkewNormal",
+        cv=cv,
+        model_sigma=mix_sd_val,
+        model_skew_alpha=np.zeros_like(mix_sd_val),
+    )
+    weighted_mean, _, _, _ = fused_loc(
+        model_weight,
+        ev,
+        book_ev_test,
+        cv,
+        "SkewNormal",
+        sigma=mix_sd_test,
+        skew_alpha=np.zeros_like(mix_sd_test),
+    )
+    weighted_mean_val, _, _, _ = fused_loc(
+        model_weight,
+        ev_validation,
+        book_ev_val,
+        cv,
+        "SkewNormal",
+        sigma=mix_sd_val,
+        skew_alpha=np.zeros_like(mix_sd_val),
+    )
+    out.update(
+        {
+            "model_weight": model_weight,
+            "weighted_mean": weighted_mean,
+            "weighted_mean_val": weighted_mean_val,
+            "mix_blend_test": _shift_mixture(decoded["mix_test"], weighted_mean - ev),
+            "mix_blend_val": _shift_mixture(decoded["mix_val"], weighted_mean_val - ev_validation),
         }
     )
     return out
@@ -2480,8 +2736,12 @@ def _step_fuse_predictions(
         "sn_sigma_blend_val": None,
         "sn_alpha_blend_test": None,
         "sn_alpha_blend_val": None,
+        "mix_blend_test": None,
+        "mix_blend_val": None,
     }
 
+    if dist == "Mixture":
+        return _fuse_mixture(out, decoded, splits, cv, blending)
     if dist == "SkewNormal":
         return _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending)
     if dist == "DPO":
@@ -2554,6 +2814,38 @@ def _skewnormal_dist_obj(sn_param: str, stabilization: str, dist_training_loss: 
             stabilization = "L2"
         return CenteredSkewNormal(stabilization=stabilization, loss_fn=loss_fn)
     return SkewNormalDist(stabilization=stabilization, loss_fn=loss_fn)
+
+
+def _continuous_dist_obj(
+    dist: str, sn_param: str, stabilization: str, dist_training_loss: str, y_train_labels
+):
+    """Distribution object for the continuous branch (SkewNormal or Mixture).
+
+    ``y_train_labels`` must already be in the strategy's normalized space — the
+    mixture's scale clamp is derived from its std (unused for SkewNormal).
+    """
+    if dist == "SkewNormal":
+        return _skewnormal_dist_obj(sn_param, stabilization, dist_training_loss)
+    # Unstabilized mixture heads run away — same failure mode and fix as the centered
+    # SkewNormal: upgrade the module-default "None" to L2, honor an explicit choice.
+    if stabilization == "None":
+        stabilization = "L2"
+    # Component loss must be nll — lightgbmlss Mixture rejects crps components, so a
+    # forced crps corner fails loudly in the ctor (DPO precedent), never silently remaps.
+    mix = Mixture(
+        Gaussian(
+            stabilization=stabilization,
+            loss_fn=_resolve_loss_fn("nll", dist_training_loss),
+        ),
+        M=_MIXTURE_COMPONENTS,
+    )
+    label_std = float(np.std(y_train_labels))
+    mix.param_dict["scale"] = _BoundedResponseFn(
+        mix.param_dict["scale"],
+        _MIXTURE_SCALE_STD_CEILING * label_std,
+        floor=_MIXTURE_SCALE_STD_FLOOR * label_std,
+    )
+    return mix
 
 
 def _step_select_distribution(
@@ -2645,9 +2937,7 @@ def _step_select_distribution(
         league,
         market,
     )
-    if dist == "SkewNormal":
-        dist_obj = _skewnormal_dist_obj(sn_param, stabilization, dist_training_loss)
-
+    if dist in ("SkewNormal", "Mixture"):
         cv = (
             player_stats.std()
             / player_stats.mean()
@@ -2675,6 +2965,9 @@ def _step_select_distribution(
         normalize = strategy.start_mode_flag == "normalized"
         offset_mode = strategy.start_mode_flag == "offset"
         y_train_labels = strategy.forward(y_train_labels, X_train, global_mean, denom_col)
+        dist_obj = _continuous_dist_obj(
+            dist, sn_param, stabilization, dist_training_loss, y_train_labels
+        )
     else:
         # dist is resolved to a count family: "ZINB"/"NegBin" (forced, or the data-driven
         # zero-rate pick) or the force-only "DPO".
@@ -2896,8 +3189,10 @@ def train_market(
     dtrain = lgb.Dataset(splits["X_train"], label=splits["y_train_labels"])
     opt_params_in = filedict.get("params")
     penalty = penalty_threshold = None
-    if hpo_selection == "calibrated" and not use_hurdle:
-        # Hurdle skips Optuna entirely (_step_select_hyperparams), so there is nothing to select.
+    if hpo_selection == "calibrated" and not use_hurdle and dist != "Mixture":
+        # Hurdle skips Optuna entirely (_step_select_hyperparams), so there is nothing to
+        # select. Mixture has no per-trial served-KS closure (its params frame doesn't fit
+        # either _calibration_penalty branch); calibrated falls back to loss selection.
         penalty = _calibration_penalty(splits, dist_info)
         penalty_threshold = _gate4_pit_ks_threshold(len(splits["y_validation"]))
     opt_params, _ = _step_select_hyperparams(
@@ -3073,6 +3368,7 @@ def train_market(
         zinb_mode=zinb_mode,
         sn_scale_test=calibrated["sn_sigma_blend_test"],
         sn_skew_test=calibrated["sn_alpha_blend_test"],
+        mix_test=calibrated["mix_blend_test"],
         global_mean=dist_info["global_mean"],
         denom_col=dist_info["denom_col"],
         pit_recal_blob=calibrated.get("pit_recal_blob"),

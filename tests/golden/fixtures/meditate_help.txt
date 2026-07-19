@@ -50,7 +50,7 @@ Options:
                                   branch. 'nll'/'crps' override every family; an
                                   Operation Ship 75 search axis.  [default:
                                   auto]
-  --dist [auto|DPO|NegBin|SkewNormal|ZINB]
+  --dist [auto|DPO|Mixture|NegBin|SkewNormal|ZINB]
                                   Training distribution family. 'auto' (default)
                                   honors each cell's stat_meta dist (else the
                                   data-driven mean>=2 / zero-rate pick); an

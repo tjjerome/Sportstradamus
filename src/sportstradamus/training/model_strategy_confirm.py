@@ -73,6 +73,10 @@ def _candidate(sub: pd.DataFrame) -> dict | None:
     trained ``dist == "ZINB"``, and ``_confirm_one`` restores the whole original entry on a revert.
     """
     shipping = sub[sub["ships"].astype(bool)]
+    # Serve-iff-ship: the Mixture serving path (model_prob/get_odds serve sites) is not
+    # built yet, so a Mixture winner must not flip a cell live — prophecize could not
+    # price its pickle. Board rows still rank; drop this filter when serving lands.
+    shipping = shipping[shipping["family"] != "Mixture"]
     if shipping.empty:
         return None
     lg, mkt = sub["league"].iloc[0], sub["market"].iloc[0]

@@ -77,9 +77,12 @@ _AUTO_SENTINEL = "auto"
 # stat_meta.json) and --target-normalization was left on _AUTO_SENTINEL.
 _UNMAPPED_TARGET_NORMALIZATION_FALLBACK = "ratio_meanyr"
 
-# Distribution family name for the custom PyTorch SkewNormal; used in ship-gate
-# logic to detect which cells need a real strategy slug vs. TARGET_NORM_NONE.
+# Distribution family name for the custom PyTorch SkewNormal; a CONTINUOUS_DISTS member.
 SKEW_NORMAL_DIST: str = "SkewNormal"
+
+# Continuous families train on a normalized target, so their cells carry a real
+# target_normalization slug; every other family requires TARGET_NORM_NONE.
+CONTINUOUS_DISTS: frozenset[str] = frozenset({SKEW_NORMAL_DIST, "Mixture"})
 
 # Allowed shipped values per training branch — a cell is "active" on branch
 # ``b`` iff ``cell["shipped"] in _ALLOWED_FOR_BRANCH[b]``.
@@ -132,16 +135,16 @@ def _validate_cell(league: str, market: str, cell: dict) -> None:
             f"stat_meta.json: cell {league}/{market} has unknown blending "
             f"value {blending!r}; valid: {sorted(BLENDING_SLUGS)}"
         )
-    if dist == SKEW_NORMAL_DIST and target_norm == TARGET_NORM_NONE and shipped != WITHHELD:
+    if dist in CONTINUOUS_DISTS and target_norm == TARGET_NORM_NONE and shipped != WITHHELD:
         raise ValueError(
-            f"stat_meta.json: SkewNormal cell {league}/{market} cannot ship "
-            f"with target_normalization=none (SkewNormal requires a real slug)"
+            f"stat_meta.json: continuous cell {league}/{market} (dist={dist!r}) cannot "
+            f"ship with target_normalization=none (the continuous branch requires a real slug)"
         )
-    if dist != SKEW_NORMAL_DIST and target_norm != TARGET_NORM_NONE:
+    if dist not in CONTINUOUS_DISTS and target_norm != TARGET_NORM_NONE:
         raise ValueError(
-            f"stat_meta.json: non-SkewNormal cell {league}/{market} (dist={dist!r}) "
+            f"stat_meta.json: non-continuous cell {league}/{market} (dist={dist!r}) "
             f"cannot carry target_normalization={target_norm!r}; the slug only applies "
-            f"to the SkewNormal branch. Use {TARGET_NORM_NONE!r}."
+            f"to the continuous branch. Use {TARGET_NORM_NONE!r}."
         )
 
 
