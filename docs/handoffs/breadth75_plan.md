@@ -17,8 +17,11 @@ whenever the queue changes; git holds the history.
    NFL cell (least popular market).
 4. No denominator pruning. Bookless cells must beat the coin flip (g1–g3 vs synthetic 0.5
    stand as computed).
-5. ≤5 distribution types in play (ZINB, NegBin, DPO, SkewNormal direct+centered). A 6th —
-   Mixture, SHASH, StudentT, or a ZAGamma revival — requires an owner ask with pilot evidence.
+5. ≤5 distribution types in play (ZINB, NegBin, DPO, SkewNormal direct+centered). Adding a
+   6th requires an owner ask with pilot evidence. Current standing: a 6th type is endorsed
+   in principle, contingent on the compositional-architecture smoke test (NFL end-game
+   step 4) — compound count×severity first; generic Mixture only as the fallback if the
+   compound test shows no merit. ZAGamma stays retired (dominated — fixes the wrong defect).
 6. The six offline ship gates are inviolable; deterministic boards rank, full-HPO confirms ship.
 7. Never push devel directly — devel-ship-curator PR, human approves. Review stat_meta diffs
    after any `--yes` confirm.
@@ -66,11 +69,16 @@ whenever the queue changes; git holds the history.
    - **receiving + rushing yards**: g4 fails on **upper-tail under-dispersion** (right-tail
      PIT mass 0.21–0.25 vs nominal 0.05; boom games land far more often than a single-mode
      SkewNormal tail allows). NOT the zero atom — positive-only KS ≈ full KS, so
-     ZAGamma/hurdle would fix the wrong defect (dominated, do not spend an ask on it). The
-     endorsed lever is a **Mixture head (2-component normal) = 6th distribution type →
-     owner ask**, piloted on these two cells; g1 is only marginally negative (bss −0.004 /
-     −0.007) so a g4 fix has a plausible-not-assured g1 crossing. Pre-registered kill: if
-     Mixture clears g4 but g1 stays positive, the cell is a sharp-book KILL — bank the
+     ZAGamma/hurdle would fix the wrong defect. **Active lever (owner-directed): the
+     compositional/compound architecture** — Y = Σ X_i over a modeled event count
+     (receiving yards = receptions-count predictive compounded with per-catch severity from
+     play-by-play; rushing yards = carries × per-carry). Smoke test in flight
+     (research-analyst; merit bar pre-registered: right-tail PIT ≤ 0.10 AND KS below the
+     failing corner on the same rows). Generalization targets if it works: attempts →
+     completions → passing yards, NBA FGA → FGM → PTS. Fallback if no merit: generic
+     Mixture head pilot (owner-endorsed 6th type). Either way g1 is only marginally
+     negative (bss −0.004 / −0.007) so a g4 fix has a plausible-not-assured g1 crossing;
+     pre-registered kill: g4 clears but g1 stays positive ⇒ sharp-book KILL — bank the
      evidence, do not chase.
    - **passing yards**: NOT reachable this cycle — ~0 zeros (different cell), most
      efficiently priced NFL prop market, g1 needs ~88× the current n with a point estimate
