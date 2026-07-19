@@ -68,7 +68,7 @@ def test_skewnormal_even_money_book_is_neutral(league, market, line):
     assert p_under == pytest.approx(0.5, abs=0.02)
 
 
-@pytest.mark.parametrize("league,market,line", [("NBA", "STL", 0.5), ("WNBA", "FG3M", 0.5)])
+@pytest.mark.parametrize("league,market,line", [("NBA", "FTM", 0.5), ("WNBA", "FG3M", 0.5)])
 def test_zinb_even_money_book_not_overconfident(league, market, line):
     """A high-zero-rate ZINB count at a 0.5 line must not manufacture a wildly
     overconfident Under from the round trip.
