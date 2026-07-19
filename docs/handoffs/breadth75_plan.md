@@ -69,15 +69,20 @@ whenever the queue changes; git holds the history.
    - **receiving + rushing yards**: g4 fails on **upper-tail under-dispersion** (right-tail
      PIT mass 0.21–0.25 vs nominal 0.05; boom games land far more often than a single-mode
      SkewNormal tail allows). NOT the zero atom — positive-only KS ≈ full KS, so
-     ZAGamma/hurdle would fix the wrong defect. **Active lever (owner-directed): the
-     compositional/compound architecture** — Y = Σ X_i over a modeled event count
-     (receiving yards = receptions-count predictive compounded with per-catch severity from
-     play-by-play; rushing yards = carries × per-carry). Smoke test in flight
-     (research-analyst; merit bar pre-registered: right-tail PIT ≤ 0.10 AND KS below the
-     failing corner on the same rows). Generalization targets if it works: attempts →
-     completions → passing yards, NBA FGA → FGM → PTS. Fallback if no merit: generic
-     Mixture head pilot (owner-endorsed 6th type). Either way g1 is only marginally
-     negative (bss −0.004 / −0.007) so a g4 fix has a plausible-not-assured g1 crossing;
+     ZAGamma/hurdle would fix the wrong defect. **Compound/compositional architecture
+     (count × per-event severity) SMOKE-TESTED — PARTIAL/NO-MERIT, not the lever.** With
+     real play-by-play severities and the pre-registered bar (right-tail PIT ≤ 0.10 AND
+     KS-beat on the same rows): receiving yards right-tail 0.206 → 0.180 (~13% of the
+     needed movement, still a g4 fail), rushing yards got WORSE (0.230 → 0.243). Root
+     cause: the tractable compound assumes count ⊥ severity, but boom games are
+     dependence-driven (pass-fest scripts raise catch count AND per-catch yardage
+     together) — the independent compound structurally understates the joint upper tail.
+     Compound is complementary-at-best; do not build it for yards.
+     **Active lever: Mixture head (2-component normal) pilot on receiving + rushing
+     yards** — owner-endorsed 6th type (endorsement was conditioned on smoke-testing
+     compound first; done). Mixture.py confirmed in pinned lightgbmlss; build follows the
+     DPO precedent; research brief satisfies the research-first gate. g1 is only marginally
+     negative (bss −0.004 / −0.007) so the g4 fix has a plausible-not-assured g1 crossing;
      pre-registered kill: g4 clears but g1 stays positive ⇒ sharp-book KILL — bank the
      evidence, do not chase.
    - **passing yards**: NOT reachable this cycle — ~0 zeros (different cell), most
