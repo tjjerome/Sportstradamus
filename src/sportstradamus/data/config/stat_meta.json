@@ -220,9 +220,13 @@
         },
         "receptions": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "centered_additive_mean10",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "none",
+            "dist_training_loss": "nll",
+            "sn_param": "direct",
+            "blending": "nll",
+            "hpo_selection": "calibrated"
         },
         "rushing tds": {
             "dist": "ZINB",
@@ -257,9 +261,13 @@
         },
         "yards": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_eb_meanyr_k10",
+            "posthoc": "none",
+            "dist_training_loss": "crps",
+            "sn_param": "centered",
+            "blending": "nll",
+            "hpo_selection": "calibrated"
         }
     },
     "NHL": {
