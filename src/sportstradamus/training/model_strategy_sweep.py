@@ -139,18 +139,18 @@ _FAMILIES: dict[str, FamilySpec] = {
         },
     ),
     "Mixture": FamilySpec(
-        # No dist_training_loss axis: lightgbmlss Mixture rejects crps components (the
-        # pipeline pins the Gaussian component loss to nll), so sweeping the loss axis
-        # would only manufacture failed corners.
+        # Mixture stays a minimal continuous fallback — it sweeps only dist × normalization.
+        # No dist_training_loss axis: lightgbmlss Mixture rejects crps components (the pipeline
+        # pins the Gaussian component loss to nll), so a loss axis only manufactures failed
+        # corners. No blending_loss_fn axis: its corners take the default blend rather than
+        # doubling the grid on an axis we don't tune for this off-ship-path family.
         axes={
             "dist": ("Mixture",),
             "normalization": _DECODABLE_SN_NORMS,
-            "blending_loss_fn": _BLENDING,
         },
         persist={
             "dist": "dist",
             "normalization": "target_normalization",
-            "blending_loss_fn": "blending",
         },
     ),
     "ZINB": FamilySpec(

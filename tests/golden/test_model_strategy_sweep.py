@@ -105,8 +105,9 @@ def test_family_registry_grids_and_persist_maps():
     dpo = sweep._FAMILIES["DPO"]
     # SN: 3 norms × 2 dist-loss × 2 sn-param × 2 blend.
     assert math.prod(len(v) for v in sn.axes.values()) == 24
-    # Mixture: 1 dist × 3 norms × 2 blend — no loss axis (component loss pinned nll).
-    assert math.prod(len(v) for v in mix.axes.values()) == 6
+    # Mixture: 1 dist × 3 norms — no loss axis (component loss pinned nll), no blend axis
+    # (off-ship-path fallback trains with the default blend).
+    assert math.prod(len(v) for v in mix.axes.values()) == 3
     assert math.prod(len(v) for v in zinb.axes.values()) == 8  # 1 dist × 2 mode × 2 disp × 2 blend
     assert math.prod(len(v) for v in negbin.axes.values()) == 4  # 1 dist × 2 disp × 2 blend
     assert math.prod(len(v) for v in dpo.axes.values()) == 4  # 1 dist × 2 disp × 2 blend
@@ -121,7 +122,6 @@ def test_family_registry_grids_and_persist_maps():
     assert mix.persist == {
         "dist": "dist",
         "normalization": "target_normalization",
-        "blending_loss_fn": "blending",
     }
     # Count families persist their single-choice dist so a winner's dist writes to stat_meta.
     assert zinb.persist == {
