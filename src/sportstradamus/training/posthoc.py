@@ -18,16 +18,19 @@ from scipy.stats import kstest
 from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 
+from sportstradamus.helpers.distributions import apply_cdf_recal
+
 # Correctors that transform a calibrated over-probability in [0, 1].
 PROB_STAGE: frozenset[str] = frozenset({"prob_recal_isotonic", "prob_recal_platt"})
 # Correctors that transform a decoded mean prediction (non-negative stat units).
 MEAN_STAGE: frozenset[str] = frozenset({"roe_mean", "isotonic_mean"})
 # §6.1 Rung C — whole-CDF recalibration. Where PROB_STAGE recalibrates a single-line
 # over-probability and MEAN_STAGE shifts the decoded mean, this reshapes the entire
-# predictive CDF via a monotone map on the PIT (fit by select_pit_recal, applied by
-# apply_cdf_recal), subsuming both the scalar dispersion calibration and prob_recal_*.
-# The posthoc field is single-valued, so selecting it is structurally exclusive with
-# every other corrector — at most one corrector per cell, never two stacked.
+# predictive CDF via a monotone map on the PIT (fit here by select_pit_recal, applied
+# by helpers.distributions.apply_cdf_recal), subsuming both the scalar dispersion
+# calibration and prob_recal_*. The posthoc field is single-valued, so selecting it is
+# structurally exclusive with every other corrector — at most one corrector per cell,
+# never two stacked.
 CDF_STAGE: frozenset[str] = frozenset({"cdf_recal_isotonic"})
 POSTHOC_SLUGS: frozenset[str] = PROB_STAGE | MEAN_STAGE | CDF_STAGE | {"none"}
 
@@ -127,14 +130,6 @@ def fit_isotonic_pit(
     x_knots.append(1.0)
     y_knots.append(1.0)
     return {"kind": "isotonic_pit", "x": x_knots, "y": y_knots}
-
-
-def apply_cdf_recal(blob: dict | None, u: np.ndarray) -> np.ndarray:
-    """Apply a Rung C map to CDF value(s) ``u = F(point)``; identity when ``blob`` is None."""
-    u = np.asarray(u, dtype=float)
-    if blob is None:
-        return u
-    return np.clip(np.interp(u, blob["x"], blob["y"]), 0.0, 1.0)
 
 
 def select_pit_recal(

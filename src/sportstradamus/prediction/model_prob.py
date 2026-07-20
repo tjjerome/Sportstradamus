@@ -10,6 +10,7 @@ returns a list of scored offer dicts ready for :func:`find_correlation`.
 from __future__ import annotations
 
 import hashlib
+import json
 import os.path
 import pickle
 from pathlib import Path
@@ -22,6 +23,7 @@ from sportstradamus.helpers import (
     NONZERO_DENOM_GATE,
     UNDERDOG_BOOST_BASELINE,
     LazyArchive,
+    apply_cdf_recal,
     apply_temperature,
     book_gate,
     book_skewnormal_shape,
@@ -40,12 +42,7 @@ from sportstradamus.helpers.distributions import _DP_PHI_CEILING
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.spiderLogger import logger
 from sportstradamus.training.baselines import get_target_normalization
-from sportstradamus.training.posthoc import (
-    MEAN_STAGE,
-    PROB_STAGE,
-    apply_cdf_recal,
-    apply_posthoc,
-)
+from sportstradamus.training.posthoc import MEAN_STAGE, PROB_STAGE, apply_posthoc
 
 # LazyArchive defers DuckDB lock acquisition until the first attribute
 # access. See LazyArchive docstring in helpers/archive.py.
@@ -391,6 +388,7 @@ def _finalize_records(
     temperature: float | None,
     dispersion_cal: float,
     model_version: str,
+    pit_recal_blob: dict | None = None,
 ) -> list[dict]:
     """Resolve the bet side, apply boosts, and project the export schema.
 
@@ -470,6 +468,10 @@ def _finalize_records(
     offer_df["Disp Cal"] = dispersion_cal
     offer_df["Step"] = step
     offer_df["Model Version"] = model_version
+    # §6.1 Rung C: the whole-CDF recal map g (a cdf_recal_isotonic cell's served
+    # warp) so the deep-dive can draw g∘F, the distribution the model actually
+    # serves. Null for every other cell — the raw parametric curve is exact there.
+    offer_df["Model PIT Recal"] = json.dumps(pit_recal_blob) if pit_recal_blob else None
 
     return offer_df[
         [
@@ -506,6 +508,7 @@ def _finalize_records(
             "Disp Cal",
             "Step",
             "Model Version",
+            "Model PIT Recal",
         ]
     ].to_dict("records")
 
@@ -1035,7 +1038,16 @@ def model_prob(
     offer_df["Model Over"] = 1 - offer_df["Model Under"]
 
     return _finalize_records(
-        offer_df, league, platform, dist, cv, step, temperature, dispersion_cal, model_version
+        offer_df,
+        league,
+        platform,
+        dist,
+        cv,
+        step,
+        temperature,
+        dispersion_cal,
+        model_version,
+        pit_recal_blob,
     )
 
 

@@ -204,3 +204,51 @@ def test_distribution_drops_redundant_over_under_legend():
     df_pdf, y_title, is_cont = distribution_frame("SkewNormal", 20.0, 5.0, {}, 18.5)
     chart = distribution_chart(df_pdf, is_cont, 18.5, "PTS", y_title, projection=20.0)
     assert not _color_legend_shown(chart)
+
+
+def _recal_blob():
+    """An isotonic PIT-recal map fit on a deliberately non-uniform PIT (a real g≠identity)."""
+    from scipy import stats
+
+    from sportstradamus.training import posthoc
+
+    pit = stats.beta.rvs(2.0, 2.0, size=4000, random_state=1)
+    blob, _ = posthoc.select_pit_recal(pit)
+    return blob
+
+
+def test_cdf_recal_curve_over_mass_matches_served_prob():
+    # For a cdf_recal_isotonic cell the deep-dive must draw g∘F — the distribution the
+    # model actually serves — so the shaded over-mass equals the served P(over) =
+    # 1 − g(F(line)). The raw parametric curve (what the old code drew) does not.
+    from scipy import stats
+    from scipy.integrate import trapezoid
+
+    from sportstradamus.training.posthoc import apply_cdf_recal
+
+    ev, sigma, skew, line = 25.0, 32.0, 4.0, 30.0
+    params = {"sigma": sigma, "skew_alpha": skew}
+    blob = _recal_blob()
+
+    served_over = 1.0 - float(
+        apply_cdf_recal(blob, [float(stats.skewnorm.cdf(line, skew, loc=ev, scale=sigma))])[0]
+    )
+
+    df_recal, _, _ = distribution_frame("SkewNormal", ev, sigma, params, line, blob)
+    over = df_recal[df_recal["x"] >= line]
+    recal_over_mass = trapezoid(over["P"], over["x"]) / trapezoid(df_recal["P"], df_recal["x"])
+    assert recal_over_mass == pytest.approx(served_over, abs=0.01)
+
+    # Sanity: the recal actually moved the curve off the raw parametric shape.
+    df_raw, _, _ = distribution_frame("SkewNormal", ev, sigma, params, line)
+    raw_over = df_raw[df_raw["x"] >= line]
+    raw_over_mass = trapezoid(raw_over["P"], raw_over["x"]) / trapezoid(df_raw["P"], df_raw["x"])
+    assert abs(raw_over_mass - recal_over_mass) > 0.02
+
+
+def test_cdf_recal_absent_leaves_curve_identical():
+    # No recal map (the 99% case) must render the exact legacy parametric curve.
+    params = {"sigma": 5.0, "skew_alpha": 2.0}
+    base, _, _ = distribution_frame("SkewNormal", 20.0, 5.0, params, 18.5)
+    with_none, _, _ = distribution_frame("SkewNormal", 20.0, 5.0, params, 18.5, None)
+    assert (base["P"].to_numpy() == with_none["P"].to_numpy()).all()

@@ -315,9 +315,11 @@ def render_model_tab(row: pd.Series) -> None:
     params = {
         param: row.get(col) for col, param in DIST_PARAM_COLS.items() if pd.notna(row.get(col))
     }
+    recal_raw = row.get("Model PIT Recal")
+    recal_blob = json.loads(recal_raw) if isinstance(recal_raw, str) and recal_raw else None
     std = resolve_std(row.get("Projection STD"), ev, cv)
     try:
-        df_pdf, y_title, is_continuous = distribution_frame(dist, ev, std, params, line)
+        df_pdf, y_title, is_continuous = distribution_frame(dist, ev, std, params, line, recal_blob)
         chart = distribution_chart(
             df_pdf,
             is_continuous,

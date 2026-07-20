@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.resources as pkg_resources
+import json
 import pickle
 
 import numpy as np
@@ -180,3 +181,10 @@ def test_cdf_recal_warps_served_win_prob_end_to_end(tmp_path, monkeypatch):
     )
     # Non-trivial on this slate (guards against a silently-skipped warp).
     assert not np.allclose(warp_over[interior], base_over[interior], atol=1e-3)
+
+    # The map itself is persisted on every offer so the dashboard can redraw the served
+    # g∘F (deep_dive_charts renders the recalibrated distribution, not the raw parametric
+    # one). A no-blob cell carries null — the raw curve is exact there.
+    assert warped["Model PIT Recal"].notna().all()
+    assert json.loads(warped["Model PIT Recal"].iloc[0]) == blob
+    assert base["Model PIT Recal"].isna().all()

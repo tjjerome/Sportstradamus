@@ -20,6 +20,8 @@ Three related jobs live here:
 ``set_model_start_values`` prepares LightGBMLSS start values from the
 training matrix's per-player historical moments; kept here because it
 shares the distribution-family dispatch with the inversion code.
+``apply_temperature`` / ``apply_cdf_recal`` apply a fitted calibration map at
+serve time; the fitters themselves live in ``training.posthoc``.
 """
 
 from dataclasses import dataclass
@@ -148,7 +150,9 @@ SN_MAX_MEAN_FACTOR = 5.0
 # Clamp a target skew just inside it so the moment-match's alpha stays finite; a count cell's
 # low-mean right-skew that exceeds the bound is met in variance and finished by the integer PMF
 # correction (WS2 research brief, /tmp/researcher_ws2_book_shape.md Findings 2-3).
-_SN_SKEW_MAX = 0.9952  # a hair below the 0.99527 bound on purpose: at the bound delta=±1 and alpha=±inf
+_SN_SKEW_MAX = (
+    0.9952  # a hair below the 0.99527 bound on purpose: at the bound delta=±1 and alpha=±inf
+)
 _SN_SKEW_C23 = ((4 - np.pi) / 2) ** (2 / 3)
 
 
@@ -330,12 +334,12 @@ def _dp_cdf_pmf(x, mu, phi):
     x_arr = np.broadcast_to(np.asarray(x, dtype=float), (n,))
 
     floor_idx = np.floor(x_arr).astype(int)
-    cdf = np.where(
-        floor_idx < 0, 0.0, cdf_grid[np.clip(floor_idx, 0, len(grid) - 1), np.arange(n)]
-    )
+    cdf = np.where(floor_idx < 0, 0.0, cdf_grid[np.clip(floor_idx, 0, len(grid) - 1), np.arange(n)])
     on_lattice = np.isclose(x_arr - np.round(x_arr), 0.0) & (x_arr >= 0)
     pmf = np.where(
-        on_lattice, pmf_grid[np.clip(np.round(x_arr).astype(int), 0, len(grid) - 1), np.arange(n)], 0.0
+        on_lattice,
+        pmf_grid[np.clip(np.round(x_arr).astype(int), 0, len(grid) - 1), np.arange(n)],
+        0.0,
     )
     return cdf, pmf
 
@@ -781,6 +785,21 @@ def apply_temperature(p_over, temperature):
         return p_over
     clipped = np.clip(p_over, LOGIT_CLIP_EPS, 1 - LOGIT_CLIP_EPS)
     return expit(logit(clipped) / temperature)
+
+
+def apply_cdf_recal(blob: dict | None, u):
+    """Apply a §6.1 Rung C whole-CDF recalibration map to CDF value(s) ``u = F(point)``.
+
+    ``blob`` is fit by :func:`sportstradamus.training.posthoc.fit_isotonic_pit` /
+    ``select_pit_recal`` on the validation PIT; shared here (not left in
+    ``training.posthoc``) because both prediction (:mod:`sportstradamus.prediction.model_prob`,
+    the dashboard deep-dive) and training (``pipeline``, ``scorecard``) apply the same fitted
+    map. Identity when ``blob`` is ``None`` (no map fitted, or a pre-Rung-C pickle).
+    """
+    u = np.asarray(u, dtype=float)
+    if blob is None:
+        return u
+    return np.clip(np.interp(u, blob["x"], blob["y"]), 0.0, 1.0)
 
 
 def fit_distro(mean, std, lower_bound, upper_bound, lower_tol=0.1, upper_tol=0.001):

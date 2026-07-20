@@ -82,6 +82,7 @@ _OFFER_KEEP_COLS = [
     "Model Sigma",
     "Model Skew",
     "Model Phi",
+    "Model PIT Recal",
 ]
 
 # A row with no boost, no model edge, and no book edge carries no signal —

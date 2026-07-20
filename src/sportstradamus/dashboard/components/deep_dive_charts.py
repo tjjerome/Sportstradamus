@@ -8,7 +8,7 @@ from scipy import stats
 
 from sportstradamus.dashboard.data import GAMELOG_SCHEMA, load_gamelog
 from sportstradamus.dashboard.theme import GOLD, GRAY, GREEN, RED
-from sportstradamus.helpers.distributions import dp_pmf_curve
+from sportstradamus.helpers.distributions import apply_cdf_recal, dp_pmf_curve
 
 # Distribution families, mirrored from the prediction pipeline.
 _CONTINUOUS = ("Gamma", "ZAGamma", "SkewNormal")
@@ -67,37 +67,52 @@ def history_chart(df: pd.DataFrame, line: float) -> alt.Chart:
     return bars + rule + tag
 
 
-def _continuous_curve(dist: str, ev: float, std: float, params: dict):
+def _recal_density(xs: np.ndarray, cdf: np.ndarray, recal_blob: dict) -> np.ndarray:
+    """Density of the recalibrated predictive ``g∘F`` on ``xs``: ``d/dx g(F(x))``.
+
+    A ``cdf_recal_isotonic`` cell serves ``F*(x) = g(F(x))``, so the honest curve is
+    the numerical gradient of that warp — not the raw parametric density. Finite
+    differences on the piecewise-linear ``g`` can dip slightly negative; clip so the
+    over/under area shades cleanly.
+    """
+    return np.clip(np.gradient(apply_cdf_recal(recal_blob, cdf), xs), 0.0, None)
+
+
+def _continuous_curve(
+    dist: str, ev: float, std: float, params: dict, recal_blob: dict | None = None
+) -> tuple[np.ndarray, np.ndarray]:
     xs = np.linspace(max(0.0, ev - 4 * std), ev + 4 * std, 300)
     if dist == "SkewNormal":
         sigma = params.get("sigma")
         if not sigma or sigma <= 0:
             sigma = ev * 0.3
         skew = params.get("skew_alpha") or 0
-        return xs, stats.skewnorm.pdf(xs, skew, loc=ev, scale=sigma)
+        pdf = stats.skewnorm.pdf(xs, skew, loc=ev, scale=sigma)
+        cdf = stats.skewnorm.cdf(xs, skew, loc=ev, scale=sigma)
+    else:
+        alpha = params.get("alpha")
+        if not alpha or alpha <= 0:
+            raise ValueError(f"{dist} requires Model Alpha > 0")
+        # gate is 0 for plain Gamma, so (1 - gate) collapses to the un-inflated curve.
+        gate = params.get("gate") or 0
+        pdf = (1 - gate) * stats.gamma.pdf(xs, alpha, scale=ev / alpha)
+        cdf = gate + (1 - gate) * stats.gamma.cdf(xs, alpha, scale=ev / alpha)
+    if recal_blob is not None:
+        return xs, _recal_density(xs, cdf, recal_blob)
+    return xs, pdf
 
-    alpha = params.get("alpha")
-    if not alpha or alpha <= 0:
-        raise ValueError(f"{dist} requires Model Alpha > 0")
-    pdf_vals = stats.gamma.pdf(xs, alpha, scale=ev / alpha)
-    if dist == "ZAGamma":
-        pdf_vals = (1 - (params.get("gate") or 0)) * pdf_vals
-    return xs, pdf_vals
 
-
-def _discrete_curve(dist: str, ev: float, std: float, params: dict):
-    hi = int(np.ceil(ev + 4 * std)) + 1
-    xs = np.arange(0, hi + 1, dtype=int)
+def _base_pmf(dist: str, xs: np.ndarray, ev: float, params: dict) -> np.ndarray:
+    """Raw predictive PMF on the integer grid ``xs`` for a discrete family."""
     if dist == "Poisson":
-        return xs, stats.poisson.pmf(xs, ev)
+        return stats.poisson.pmf(xs, ev)
     if dist == "DPO":
         phi = params.get("phi")
         if not phi or phi <= 0:
             raise ValueError("DPO requires Model Phi > 0")
-        return xs, dp_pmf_curve(xs, ev, phi)
+        return dp_pmf_curve(xs, ev, phi)
     if dist not in ("NegBin", "ZINB"):
         raise ValueError(f"Unknown discrete dist: {dist}")
-
     r = params.get("r")
     if not r or r <= 0:
         raise ValueError(f"{dist} requires Model R > 0")
@@ -105,16 +120,31 @@ def _discrete_curve(dist: str, ev: float, std: float, params: dict):
     if dist == "ZINB":
         gate = params.get("gate") or 0
         pmf = np.where(xs == 0, gate + (1 - gate) * pmf, (1 - gate) * pmf)
+    return pmf
+
+
+def _discrete_curve(
+    dist: str, ev: float, std: float, params: dict, recal_blob: dict | None = None
+) -> tuple[np.ndarray, np.ndarray]:
+    hi = int(np.ceil(ev + 4 * std)) + 1
+    xs = np.arange(0, hi + 1, dtype=int)
+    pmf = _base_pmf(dist, xs, ev, params)
+    if recal_blob is not None:
+        # Recalibrated bin masses g(F(k)) − g(F(k−1)); F is the running pmf sum.
+        warped = apply_cdf_recal(recal_blob, np.cumsum(pmf))
+        pmf = np.clip(np.diff(warped, prepend=0.0), 0.0, None)
     return xs, pmf
 
 
-def distribution_frame(dist: str, ev: float, std: float, params: dict, line: float):
+def distribution_frame(
+    dist: str, ev: float, std: float, params: dict, line: float, recal_blob: dict | None = None
+):
     is_continuous = dist in _CONTINUOUS
     if is_continuous:
-        xs, vals = _continuous_curve(dist, ev, std, params)
+        xs, vals = _continuous_curve(dist, ev, std, params, recal_blob)
         y_title = "Density"
     else:
-        xs, vals = _discrete_curve(dist, ev, std, params)
+        xs, vals = _discrete_curve(dist, ev, std, params, recal_blob)
         y_title = "Probability"
     df_pdf = pd.DataFrame(
         {
