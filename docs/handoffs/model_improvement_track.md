@@ -976,8 +976,9 @@ existing parity goldens — family #7 becomes one registry entry plus its torch 
 torch/numpy dual kernels stay as designed (serve-graph isolation).
 
 **Mixture (family #6, 2-component Gaussian) BUILT + board-piloted.** Continuous class is now
-(SkewNormal, Mixture); 6-corner FamilySpec (3 SN norms × 2 blend; component loss pinned nll —
-lightgbmlss Mixture rejects crps). Trainability needed three guardrails: Hathaway-style
+(SkewNormal, Mixture); 3-corner FamilySpec (3 SN norms; component loss pinned nll —
+lightgbmlss Mixture rejects crps; the 2-way blend axis was dropped 2026-07-19 / 20a630a —
+an off-ship-path fallback trains with the default blend). Trainability needed three guardrails: Hathaway-style
 component-scale response clamp to [0.02, 20]×label-std (kills the σ→0 likelihood spike and the
 dead-head exp-overflow), stabilization None→L2, and fit-time floors min_child_weight ≥ 0.1 /
 lambda_l2 ≥ 1.0 (a near-dead component's rows carry ~zero hessian, so unregularized Newton leaf
@@ -986,6 +987,18 @@ on both yards cells; receiving yards' Mixture corner is the cell's rank-1 overal
 0.050 bar, g1 CI-hi +0.0064, g2/g3/g5/g6 pass) — full-HPO confirm is gated on the serve path
 (model_prob decode/blend + deep-dive + live-path test; the confirm walker hard-skips Mixture rows
 until it lands). Rushing yards is g1-walled beyond the family (bss −0.0245 vs SN −0.0027).
+
+**StudentT/SHASH 6th-type escalation — NO-GO (R3 brief `/tmp/researcher_studentt_shash_escalation.md`,
+2026-07-19).** Receiving yards is a **2-gate fail (g1 AND g4)**: `roc_auc` 0.531, `g1_pass` False —
+an efficient book, no model edge, so it cannot ship on *any* family. Its g4 miss is
+**mean-conditional** PIT (heavy tail only in the low-mean bucket, `frac>.95` 0.24 vs 0.10), *not*
+the val→test time drift the earlier note claimed — a global recal or single global shape param
+can't track it (StudentT oracle KS ≥0.127, worse than SN; SHASH oracle 0.094 > bar; Mixture oracle
+0.062 is best but the g1 wall still blocks). StudentT is fittable in-venv; SHASH is a 3–4-session
+hand-roll. Verdict: leave receiving/rushing/passing yards on SkewNormal/withheld as documented
+efficient-book non-ships, **build no 6th type**, and redirect NFL breadth to real-edge cells
+(`targets`, `tds`). Retires the receiving-yards SHASH branch above; re-check g1 + per-mean-bucket
+PIT on DREB/targets before assuming *they* need a new family. `[[cdf_recal_nonstationary_pit]]`
 
 **Small-sample / hierarchical layer (the NFL wall), cheapest-first.** Partial pooling dominates at
 n ≈ 300–1000/group (Gelman & Hill 2007). (a) **EB-shrink the distributional parameters** per player
