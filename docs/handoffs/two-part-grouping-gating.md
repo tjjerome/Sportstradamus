@@ -170,7 +170,8 @@ serving beyond the recover-from-blob mirror, any distribution-family file
 
 ### Stage 1 — Implement the chosen direction
 - **Entry:** stage-0 brief cited. **Scope:** §5 primary files (one module per subagent).
-- **Acceptance:** NBA AST clears the support audit and reaches the OOF gate audit (a gate
+- **Acceptance:** NBA AST, WNBA DREB, and NFL passing-yards,
+  NHL saves, and MLB pitcher-strikeouts clear the support audit and reach the OOF gate audit (a gate
   verdict — pass or fail — not a support kill); NFL receiving/rushing pilots reproduce
   byte-identical (the four golden pins in §4 green); ruff + golden + integration green.
 - **Est.:** 1–2 sessions. **Kill branch:** if AST completes but the pilots drift, revert and
