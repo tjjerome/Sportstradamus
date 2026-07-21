@@ -9,6 +9,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from sportstradamus.training.model_strategy_artifacts import (
+    artifact_identity_columns,
+    build_artifact_identity,
+)
+from sportstradamus.training.model_strategy_registry import get_strategy, strategy_controls
 from sportstradamus.training.scorecard import (
     _GATE1_CI_HI_MAX,
     _GATE1_NONINF_MARGIN,
@@ -21,6 +26,7 @@ from sportstradamus.training.scorecard import (
     _GATE6_MARGIN,
     _GATE6_STAR_REF_BASKETBALL,
     _SUPERSEDE_S3_Z_MIN,
+    TARGET_NORM_NONE,
     _decode_sn_loc_scale,
     _dispersion_diagnostics,
     _ece_debias_offset,
@@ -34,16 +40,20 @@ from sportstradamus.training.scorecard import (
     _iqr_pred_analytical,
     _ks_uniform,
     _memmel_sharpe_z,
+    _pred_cdf_pmf,
     _pred_midpit,
     _pred_ppf,
+    _randomized_pit_draws,
     _randomized_pit_ks,
     _segment_masks,
+    _signed_decode_strategy,
     _supersede_paired_brier_ci,
     _supersede_paired_sharpe,
     _tail_ks_uniform,
     _test_set_to_bet_frame,
     _zinb_ppf,
     apply_thresholds,
+    compute_gates,
     decile_table,
     fit_skewnorm_dispersion_c,
     fit_skewnorm_dispersion_skew,
@@ -805,7 +815,9 @@ def _deadband_frame(n=2000, seed=0):
 def test_gate6_legs_recent_form_fires_when_anchored():
     from sportstradamus.training.scorecard import _gate6_legs
 
-    g6 = _gate6_legs(_legs_frame(ev_over_form=0.8), "Blended_EV", league="WNBA", prior_g6_fired=None)
+    g6 = _gate6_legs(
+        _legs_frame(ev_over_form=0.8), "Blended_EV", league="WNBA", prior_g6_fired=None
+    )
     assert g6["g6_recent_corr"] >= 0.58  # anchored at fire-on
     assert g6["g6_star_ci_hi"] is not None
     assert g6["g6_star_ci_hi"] < g6["g6_star_ref"] - _GATE6_MARGIN  # over-shrinks vs recent form
@@ -816,7 +828,10 @@ def test_gate6_legs_recent_form_exempt_below_keep_on():
 
     # Unanchored (Result independent of Mean10) ⇒ low corr ⇒ recent-form blank, but CITL still runs.
     g6 = _gate6_legs(
-        _legs_frame(ev_over_form=0.8, anchored=False), "Blended_EV", league="WNBA", prior_g6_fired=None
+        _legs_frame(ev_over_form=0.8, anchored=False),
+        "Blended_EV",
+        league="WNBA",
+        prior_g6_fired=None,
     )
     assert g6["g6_star_ci_hi"] is None  # recent-form exempt
     assert g6["g6_citl_ci_hi"] is not None  # CITL is not anchor-gated
@@ -827,7 +842,10 @@ def test_gate6_legs_citl_under_fires_against_outcome():
 
     # EV 0.85× the realized outcome on stable stars: CITL fires regardless of the recent-form leg.
     g6 = _gate6_legs(
-        _legs_frame(ev_over_form=0.85, anchored=True), "Blended_EV", league="NBA", prior_g6_fired=None
+        _legs_frame(ev_over_form=0.85, anchored=True),
+        "Blended_EV",
+        league="NBA",
+        prior_g6_fired=None,
     )
     assert g6["g6_citl_ci_hi"] is not None
     assert g6["g6_citl_ci_hi"] < 1.0 - _GATE6_MARGIN
@@ -850,7 +868,10 @@ def test_gate6_legs_over_leg_fires_on_count_bench():
     from sportstradamus.training.scorecard import _gate6_legs
 
     g6 = _gate6_legs(
-        _count_legs_frame(bench_ev_over_result=1.3), "Blended_EV", league="WNBA", prior_g6_fired=None
+        _count_legs_frame(bench_ev_over_result=1.3),
+        "Blended_EV",
+        league="WNBA",
+        prior_g6_fired=None,
     )
     assert g6["g6_over_ci_lo"] is not None
     assert g6["g6_over_ci_lo"] > 1.0 + _GATE6_MARGIN
@@ -909,8 +930,12 @@ def test_gate_row_threads_prior_g6_fired():
     df = _deadband_frame()
     corr = np.corrcoef(df["Mean10"], df["Result"])[0, 1]
     assert 0.52 <= corr < 0.58  # precondition: the frame sits in the deadband
-    judged = gate_row(df, "Blended_EV", league="WNBA", market="x", strategy="x", prior_g6_fired=True)
-    exempt = gate_row(df, "Blended_EV", league="WNBA", market="x", strategy="x", prior_g6_fired=None)
+    judged = gate_row(
+        df, "Blended_EV", league="WNBA", market="x", strategy="x", prior_g6_fired=True
+    )
+    exempt = gate_row(
+        df, "Blended_EV", league="WNBA", market="x", strategy="x", prior_g6_fired=None
+    )
     assert judged["g6_star_ci_hi"] is not None  # prior fired ⇒ kept on in the band
     assert exempt["g6_star_ci_hi"] is None  # no prior ⇒ exempt in the band
 
@@ -1334,6 +1359,7 @@ def test_load_test_set_keeps_optional_columns_when_present(tmp_path):
             "Result": [11.0, 13.0, 15.0],
             "EV": [10.5, 12.5, 14.5],
             "P": [0.55, 0.60, 0.50],
+            "P_PrePool": [0.56, 0.61, 0.51],
             "Odds": [0.45, 0.40, 0.50],
             "Line": [10.0, 12.0, 14.0],
         }
@@ -1341,7 +1367,7 @@ def test_load_test_set_keeps_optional_columns_when_present(tmp_path):
     p = tmp_path / "NBA_PTS.csv"
     df.to_csv(p, index=False)
     loaded = load_test_set(p, "EV")
-    assert {"P", "Odds", "Line"}.issubset(loaded.columns)
+    assert {"P", "P_PrePool", "Odds", "Line"}.issubset(loaded.columns)
     assert len(loaded) == 3
 
 
@@ -1357,6 +1383,44 @@ def test_load_test_set_handles_missing_optional_columns(tmp_path):
 # ---------------------------------------------------------------------------
 # Supersede gate — S1 + S2 + S3 (research -> devel, supersede an incumbent)
 # ---------------------------------------------------------------------------
+
+
+def _stamp_generic_identity(
+    frame: pd.DataFrame,
+    slug: str,
+    controls: dict[str, str],
+    *,
+    league: str = "NBA",
+    market: str = "PTS",
+) -> pd.DataFrame:
+    identity = build_artifact_identity(
+        slug,
+        league,
+        market,
+        controls,
+        matrix_hash="e" * 64,
+    )
+    stamped = frame.copy()
+    for column, value in artifact_identity_columns(identity.as_model_blob()).items():
+        stamped[column] = value
+    return stamped
+
+
+def _encode_signed_skew_candidate(frame: pd.DataFrame, normalization: str) -> pd.DataFrame:
+    encoded = frame.copy()
+    if normalization == "ratio_meanyr":
+        encoded["SN_Loc"] /= encoded["MeanYr"]
+        encoded["SN_Scale"] /= encoded["MeanYr"]
+    elif normalization == "centered_additive_mean10":
+        encoded["Mean10"] = encoded["MeanYr"]
+        encoded["SN_Loc"] -= encoded["Mean10"]
+    else:
+        raise ValueError(f"unsupported test normalization {normalization!r}")
+    spec = get_strategy("SkewNormal")
+    controls = next(
+        corner for corner in strategy_controls(spec) if corner["normalization"] == normalization
+    )
+    return _stamp_generic_identity(encoded, spec.slug, controls)
 
 
 def _supersede_pair(
@@ -1392,8 +1456,13 @@ def _supersede_pair(
     baseline_p = 0.5 + 0.4 * (p_true - 0.5)  # mid-regressed prob
     candidate_p = np.clip(p_true + rng.normal(0, candidate_calibration_noise, n), 1e-3, 1.0 - 1e-3)
     dist_cols = {"SN_Loc": meanyr, "SN_Scale": np.full(n, scale), "SN_Alpha": np.zeros(n)}
+    event_cols = {
+        "Player": [f"P{i % 80}" for i in range(n)],
+        "Date": pd.date_range("2020-01-01", periods=n, freq="D"),
+    }
     b_df = pd.DataFrame(
         {
+            **event_cols,
             "MeanYr": meanyr,
             "Result": result,
             "EV": baseline_ev,
@@ -1405,6 +1474,7 @@ def _supersede_pair(
     )
     c_df = pd.DataFrame(
         {
+            **event_cols,
             "MeanYr": meanyr,
             "Result": result,
             "EV": meanyr.copy(),
@@ -1447,11 +1517,62 @@ def test_paired_brier_ci_returns_none_when_inputs_lack_p():
     assert _supersede_paired_brier_ci(df, df) is None
 
 
-def test_paired_brier_ci_returns_none_on_empty_intersection():
+def test_paired_brier_ci_returns_none_on_disjoint_events():
     b_df, c_df = _supersede_pair(n=50)
-    # Disjoint indices — no shared events.
-    c_df.index = c_df.index + 1000
+    c_df["Player"] = "different-" + c_df["Player"]
     assert _supersede_paired_brier_ci(b_df, c_df) is None
+
+
+def test_supersede_pairing_ignores_row_order_and_range_index():
+    b_df, c_df = _supersede_pair(n=500)
+    expected_brier = _supersede_paired_brier_ci(b_df, c_df)
+    expected_sharpe = _supersede_paired_sharpe(b_df, c_df, "EV")
+    reordered = c_df.sample(frac=1.0, random_state=9).reset_index(drop=True)
+    b_df.index = b_df.index + 5000
+
+    actual_brier = _supersede_paired_brier_ci(b_df, reordered)
+    actual_sharpe = _supersede_paired_sharpe(b_df, reordered, "EV")
+
+    assert actual_brier == pytest.approx(expected_brier)
+    assert actual_sharpe == pytest.approx(expected_sharpe)
+
+
+def test_supersede_pairing_keeps_exact_shared_event_intersection():
+    b_df, c_df = _supersede_pair(n=60)
+    b_subset = b_df.iloc[:40].reset_index(drop=True)
+    c_subset = c_df.iloc[20:].sample(frac=1.0, random_state=4).reset_index(drop=True)
+
+    brier = _supersede_paired_brier_ci(b_subset, c_subset)
+    sharpe = _supersede_paired_sharpe(b_subset, c_subset, "EV")
+
+    assert brier is not None and brier[0] == 20
+    assert sharpe is not None
+
+
+@pytest.mark.parametrize("column", ["Player", "Date", "Line", "Result"])
+def test_supersede_pairing_holds_when_event_identity_is_missing(column):
+    b_df, c_df = _supersede_pair(n=50)
+    c_df = c_df.drop(columns=[column])
+
+    assert _supersede_paired_brier_ci(b_df, c_df) is None
+    assert _supersede_paired_sharpe(b_df, c_df, "EV") is None
+
+
+def test_supersede_pairing_does_not_pair_mismatched_outcomes():
+    b_df, c_df = _supersede_pair(n=50)
+    c_df["Result"] += 1.0
+
+    assert _supersede_paired_brier_ci(b_df, c_df) is None
+    assert _supersede_paired_sharpe(b_df, c_df, "EV") is None
+
+
+def test_supersede_pairing_holds_on_ambiguous_duplicate_event_identity():
+    b_df, c_df = _supersede_pair(n=50)
+    b_df = pd.concat([b_df, b_df.iloc[[0]]], ignore_index=True)
+    c_df = pd.concat([c_df, c_df.iloc[[0]]], ignore_index=True)
+
+    assert _supersede_paired_brier_ci(b_df, c_df) is None
+    assert _supersede_paired_sharpe(b_df, c_df, "EV") is None
 
 
 def test_test_set_to_bet_frame_picks_ev_side_and_decimal_payout():
@@ -1525,9 +1646,9 @@ def test_paired_sharpe_candidate_higher_when_better_calibrated():
     assert z > 0
 
 
-def test_paired_sharpe_returns_none_on_empty_intersection():
+def test_paired_sharpe_returns_none_on_disjoint_events():
     b_df, c_df = _supersede_pair(n=20)
-    c_df.index = c_df.index + 1000
+    c_df["Date"] = c_df["Date"] + pd.Timedelta(days=1000)
     assert _supersede_paired_sharpe(b_df, c_df, "EV") is None
 
 
@@ -1560,6 +1681,197 @@ def test_supersede_verdict_holds_when_baseline_unpriced():
     assert v["s2_pass"] is False
     assert v["s3_pass"] is False
     assert v["ship"] is False
+
+
+@pytest.mark.parametrize(
+    "normalization",
+    ["ratio_meanyr", "centered_additive_mean10"],
+)
+def test_supersede_verdict_decodes_signed_candidate_normalization(normalization):
+    baseline, candidate = _supersede_pair(n=1600, seed=31)
+    signed_candidate = _encode_signed_skew_candidate(candidate, normalization)
+
+    raw = apply_thresholds(
+        gate_row(
+            signed_candidate,
+            "EV",
+            league="NBA",
+            market="PTS",
+            strategy="candidate",
+            decode_strategy=TARGET_NORM_NONE,
+        )
+    )
+    verdict = supersede_verdict(
+        baseline,
+        signed_candidate,
+        "EV",
+        league="NBA",
+        market="PTS",
+        strategy="candidate",
+    )
+
+    assert raw["g4_pass"] is False
+    assert verdict["s1_pass"] is True
+
+
+def test_supersede_verdict_decodes_signed_centered_mixture():
+    baseline, candidate = _supersede_pair(n=1600, seed=43)
+    candidate = candidate.drop(columns=["SN_Loc", "SN_Scale", "SN_Alpha"])
+    candidate["Mean10"] = candidate["MeanYr"]
+    candidate["MIX_Loc1"] = 0.0
+    candidate["MIX_Loc2"] = 0.0
+    candidate["MIX_Scale1"] = 4.0
+    candidate["MIX_Scale2"] = 4.0
+    candidate["MIX_W1"] = 0.5
+    spec = get_strategy("Mixture")
+    controls = next(
+        corner
+        for corner in strategy_controls(spec)
+        if corner["normalization"] == "centered_additive_mean10"
+    )
+    signed_candidate = _stamp_generic_identity(candidate, spec.slug, controls)
+
+    raw = apply_thresholds(
+        gate_row(
+            signed_candidate,
+            "EV",
+            league="NBA",
+            market="PTS",
+            strategy="candidate",
+            decode_strategy=TARGET_NORM_NONE,
+        )
+    )
+    verdict = supersede_verdict(
+        baseline,
+        signed_candidate,
+        "EV",
+        league="NBA",
+        market="PTS",
+        strategy="candidate",
+    )
+
+    assert raw["g4_pass"] is False
+    assert verdict["s1_pass"] is True
+
+
+def test_supersede_verdict_legacy_candidate_uses_cell_stat_meta_decode(monkeypatch):
+    import sportstradamus.training.scorecard as sc
+
+    baseline, candidate = _supersede_pair(n=1600, seed=41)
+    candidate["SN_Loc"] /= candidate["MeanYr"]
+    candidate["SN_Scale"] /= candidate["MeanYr"]
+    decode_calls = []
+
+    def ratio_decode(league, market):
+        decode_calls.append((league, market))
+        return "ratio_meanyr"
+
+    monkeypatch.setattr(sc, "_resolve_decode_strategy", ratio_decode)
+    verdict = supersede_verdict(
+        baseline,
+        candidate,
+        "EV",
+        league="NBA",
+        market="PTS",
+        strategy="candidate",
+    )
+
+    assert decode_calls == [("NBA", "PTS")]
+    assert verdict["s1_pass"] is True
+
+
+def test_compute_gates_signed_identity_ignores_stale_stat_meta_decode(monkeypatch):
+    import sportstradamus.training.scorecard as sc
+
+    _, candidate = _supersede_pair(n=1600, seed=37)
+    signed_candidate = _encode_signed_skew_candidate(candidate, "centered_additive_mean10")
+    stat_meta_calls = []
+
+    def stale_decode(league, market):
+        stat_meta_calls.append((league, market))
+        return "ratio_meanyr"
+
+    monkeypatch.setattr(sc, "_resolve_decode_strategy", stale_decode)
+    computed = compute_gates(
+        signed_candidate,
+        league="NBA",
+        market="PTS",
+        pred_col="EV",
+    )
+    explicit = apply_thresholds(
+        gate_row(
+            signed_candidate,
+            "EV",
+            league="NBA",
+            market="PTS",
+            strategy="meditate",
+            decode_strategy="centered_additive_mean10",
+        )
+    )
+
+    assert stat_meta_calls == []
+    assert computed["g4_pit_ks"] == explicit["g4_pit_ks"]
+    assert computed["g4_iqr_ratio"] == explicit["g4_iqr_ratio"]
+
+
+def test_compute_gates_identity_absent_frame_uses_stat_meta_decode(monkeypatch):
+    import sportstradamus.training.scorecard as sc
+
+    _, candidate = _supersede_pair(n=800, seed=53)
+    candidate["SN_Loc"] /= candidate["MeanYr"]
+    candidate["SN_Scale"] /= candidate["MeanYr"]
+    decode_calls = []
+
+    def ratio_decode(league, market):
+        decode_calls.append((league, market))
+        return "ratio_meanyr"
+
+    monkeypatch.setattr(sc, "_resolve_decode_strategy", ratio_decode)
+    computed = compute_gates(candidate, league="NBA", market="PTS", pred_col="EV")
+
+    assert decode_calls == [("NBA", "PTS")]
+    assert computed["g4_pass"] is True
+
+
+def test_diff_cli_preprint_passes_signed_decode_strategy(monkeypatch, tmp_path):
+    import sportstradamus.training.scorecard as sc
+
+    baseline, candidate = _supersede_pair(n=600, seed=47)
+    baseline = _encode_signed_skew_candidate(baseline, "centered_additive_mean10")
+    candidate = _encode_signed_skew_candidate(candidate, "centered_additive_mean10")
+    baseline_path = tmp_path / "baseline.csv"
+    candidate_path = tmp_path / "candidate.csv"
+    baseline.to_csv(baseline_path, index=False)
+    candidate.to_csv(candidate_path, index=False)
+    decodes = []
+    original_gate_row = sc.gate_row
+
+    def capture_decode(*args, **kwargs):
+        decodes.append(kwargs.get("decode_strategy"))
+        return original_gate_row(*args, **kwargs)
+
+    monkeypatch.setattr(sc, "gate_row", capture_decode)
+    result = CliRunner().invoke(
+        main,
+        [
+            "--baseline",
+            str(baseline_path),
+            "--candidate",
+            str(candidate_path),
+            "--pred-col",
+            "EV",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert decodes[:2] == ["centered_additive_mean10", "centered_additive_mean10"]
+
+
+def test_signed_count_identity_uses_no_target_normalization():
+    spec = get_strategy("DPO")
+    frame = _stamp_generic_identity(pd.DataFrame(index=[0]), spec.slug, strategy_controls(spec)[0])
+
+    assert _signed_decode_strategy(frame) == TARGET_NORM_NONE
 
 
 # ---------------------------------------------------------------------------
@@ -1926,6 +2238,132 @@ def test_randomized_pit_ks_continuous_is_deterministic_ordinary_pit():
     y = df["Result"].to_numpy()
     expected = _ks_uniform(_pred_midpit(df, "SkewNormal", y, strategy="baseline"))
     assert _randomized_pit_ks(df, "SkewNormal", y, strategy="baseline") == pytest.approx(expected)
+
+
+def test_randomized_pit_applies_row_routed_cdf_maps():
+    """QB/RB calibration maps are selected per row, not from the first CSV row."""
+    import json
+
+    from scipy.stats import norm
+
+    from sportstradamus.training.nfl_yards_experiments import (
+        RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+    )
+
+    y = np.array([-1.0, 0.0, 1.0, 2.0])
+    identity = {"x": [0.0, 1.0], "y": [0.0, 1.0], "lam": 0.0}
+    lower_half = {"x": [0.0, 0.5, 1.0], "y": [0.0, 0.25, 1.0], "lam": 1.0}
+    frame = pd.DataFrame(
+        {
+            "SN_Loc": np.zeros(4),
+            "SN_Scale": np.ones(4),
+            "SN_Alpha": np.zeros(4),
+            "MeanYr": np.ones(4),
+            "P_PrePool": np.full(4, 0.5),
+            "NFLYardsExperiment": RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+            "NFLYardsRoute": ["QB", "RB", "QB", "RB"],
+            "NFLYardsFallback": False,
+            "PITRecalKnots": [
+                json.dumps(identity),
+                json.dumps(lower_half),
+                json.dumps(identity),
+                json.dumps(lower_half),
+            ],
+        }
+    )
+    spec = get_strategy(RUSHING_AFFINE_GROUPCDF_BOOK_POOL)
+    legacy_payload = {
+        "schema_version": spec.artifact_schema_version,
+        "status": "active",
+        "validation_audit": {"split_fingerprint_sha256": "c" * 64},
+    }
+    artifact_identity = build_artifact_identity(
+        spec.slug,
+        "NFL",
+        "rushing yards",
+        strategy_controls(spec)[0],
+        legacy_payload,
+        matrix_hash="d" * 64,
+    )
+    for column, value in artifact_identity_columns(artifact_identity.as_model_blob()).items():
+        frame[column] = value
+
+    draws = _randomized_pit_draws(frame, "SkewNormal", y, strategy="ratio_meanyr")
+    raw = norm.cdf(y)
+    expected = raw.copy()
+    expected[[1, 3]] = np.interp(
+        raw[[1, 3]],
+        lower_half["x"],
+        lower_half["y"],
+    )
+
+    assert len(draws) == 1
+    np.testing.assert_allclose(draws[0], expected)
+
+    mismatched_adapter = frame.assign(NFLYardsExperiment="none")
+    with pytest.raises(ValueError, match="adapter CSV identity mismatch"):
+        _randomized_pit_draws(
+            mismatched_adapter,
+            "SkewNormal",
+            y,
+            strategy="ratio_meanyr",
+        )
+
+
+def test_randomized_pit_ks_honors_skewnormal_zero_atom():
+    """A gated SkewNormal is discrete at zero even though its positive head is continuous.
+
+    This is the exact family served for high-zero NFL yardage cells.  Ignoring ``Gate``
+    turns the zero-adjusted sample into a badly non-uniform ordinary PIT; randomizing the
+    atom recovers calibration.
+    """
+    from scipy.stats import skewnorm
+
+    rng = np.random.default_rng(451)
+    n = 8000
+    loc, scale, alpha, gate = 18.0, 10.0, 2.0, 0.2
+    base = skewnorm.rvs(alpha, loc=loc, scale=scale, size=n, random_state=rng)
+    y = np.where(rng.random(n) < gate, 0.0, base)
+    frame = pd.DataFrame(
+        {
+            "SN_Loc": np.full(n, loc),
+            "SN_Scale": np.full(n, scale),
+            "SN_Alpha": np.full(n, alpha),
+            "Gate": np.full(n, gate),
+        }
+    )
+
+    gated_ks = _randomized_pit_ks(frame, "SkewNormal", y, strategy="none")
+    ungated_ks = _randomized_pit_ks(frame.drop(columns="Gate"), "SkewNormal", y, strategy="none")
+
+    assert gated_ks < 0.03
+    assert ungated_ks > gated_ks + 0.08
+    assert len(_randomized_pit_draws(frame, "SkewNormal", y, strategy="none")) == 25
+
+
+def test_skewnormal_zero_atom_cdf_pmf_and_ppf_are_coherent():
+    from scipy.stats import skewnorm
+
+    frame = pd.DataFrame(
+        {
+            "SN_Loc": [10.0],
+            "SN_Scale": [4.0],
+            "SN_Alpha": [1.5],
+            "Gate": [0.25],
+        }
+    )
+    y = np.array([0.0])
+    cdf, pmf = _pred_cdf_pmf(frame, "SkewNormal", y, strategy="none")
+    base_zero = skewnorm.cdf(0.0, 1.5, loc=10.0, scale=4.0)
+    assert cdf[0] == pytest.approx(0.25 + 0.75 * base_zero)
+    assert pmf[0] == pytest.approx(0.25)
+
+    # q=0.10 lies in the zero jump for these parameters; an upper quantile must
+    # invert the rescaled positive-component CDF.
+    assert _pred_ppf(frame, "SkewNormal", 0.10, strategy="none")[0] == 0.0
+    q = 0.80
+    expected = skewnorm.ppf((q - 0.25) / 0.75, 1.5, loc=10.0, scale=4.0)
+    assert _pred_ppf(frame, "SkewNormal", q, strategy="none")[0] == pytest.approx(expected)
 
 
 def test_gate4_pit_ks_threshold_takes_larger_of_delta_and_noise_floor():
@@ -2323,3 +2761,52 @@ def test_load_test_set_retains_eb_decode_columns(tmp_path):
     assert "GlobalMean" in out.columns
     # Curation still drops non-decode feature columns.
     assert "some_feature" not in out.columns
+
+
+def test_load_test_set_retains_nonzero_ratio_decode_contract(tmp_path):
+    """The curated official scoring frame must retain the denominator named by DenomCol."""
+    df = pd.DataFrame(
+        {
+            "MeanYr": [4.0, 5.0],
+            "MeanYr_nonzero": [8.0, 10.0],
+            "Result": [0.0, 9.0],
+            "Blended_EV": [7.0, 9.0],
+            "SN_Loc": [0.5, 0.6],
+            "SN_Scale": [0.2, 0.3],
+            "SN_Alpha": [1.0, 1.5],
+            "DenomCol": ["MeanYr_nonzero", "MeanYr_nonzero"],
+            "Gate": [0.2, 0.2],
+        }
+    )
+    path = tmp_path / "NFL_receiving-yards.csv"
+    df.to_csv(path, index=False)
+
+    loaded = load_test_set(path, "Blended_EV")
+    assert {"DenomCol", "MeanYr_nonzero"}.issubset(loaded.columns)
+    loc, scale = _decode_sn_loc_scale(loaded, "ratio_meanyr")
+    np.testing.assert_allclose(loc, df["SN_Loc"] * df["MeanYr_nonzero"])
+    np.testing.assert_allclose(scale, df["SN_Scale"] * df["MeanYr_nonzero"])
+
+
+def test_load_test_set_rejects_missing_or_variable_persisted_denom(tmp_path):
+    base = pd.DataFrame(
+        {
+            "MeanYr": [4.0, 5.0],
+            "Result": [3.0, 6.0],
+            "Blended_EV": [4.0, 5.0],
+            "SN_Loc": [0.5, 0.6],
+            "SN_Scale": [0.2, 0.3],
+            "SN_Alpha": [1.0, 1.5],
+        }
+    )
+    missing = base.assign(DenomCol="Player projected carries mean")
+    missing_path = tmp_path / "missing.csv"
+    missing.to_csv(missing_path, index=False)
+    with pytest.raises(ValueError, match="references missing column"):
+        load_test_set(missing_path, "Blended_EV")
+
+    variable = base.assign(DenomCol=["MeanYr", "MeanYr_nonzero"], MeanYr_nonzero=[8.0, 9.0])
+    variable_path = tmp_path / "variable.csv"
+    variable.to_csv(variable_path, index=False)
+    with pytest.raises(ValueError, match="exactly one DenomCol"):
+        load_test_set(variable_path, "Blended_EV")

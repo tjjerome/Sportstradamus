@@ -9,6 +9,7 @@ reads). ``fit_model_weight`` is monkeypatched to record its ``(base_dist,
 kwargs)`` and return a fixed 0.5 -- this freezes the per-family wiring without depending
 on the optimizer, while ``fused_loc`` / ``get_odds`` / ``_zero_inflated_outcome_mean``
 run for real. Expected values are literals captured from the pre-refactor code.
+
 """
 
 from __future__ import annotations
@@ -123,15 +124,16 @@ def test_fuse_skewnormal_no_gate(fit_calls):
 
 def test_fuse_skewnormal_with_gate(fit_calls):
     out = pipe._step_fuse_predictions(_decoded(), _splits(), "SkewNormal", 0.9, 0.3)
-    assert fit_calls[0]["kwargs"]["gate_book"] == 0.3
+    assert fit_calls[0]["kwargs"]["gate_model"] == pytest.approx(0.32)
+    assert fit_calls[0]["kwargs"]["gate_book"] == 0.0
     _assert_fuse(
         out,
         {
             "model_weight": 0.5,
             "weighted_mean": 11.40086223,
             "weighted_mean_val": 11.84094376,
-            "gate_blend_test": 0.3,
-            "gate_blend_val": 0.3,
+            "gate_blend_test": 0.15,
+            "gate_blend_val": 0.16,
             "sn_sigma_blend_test": 4.06124187,
             "sn_sigma_blend_val": 4.1882951,
             "sn_alpha_blend_test": 0.1,

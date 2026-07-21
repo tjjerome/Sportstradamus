@@ -1094,7 +1094,7 @@ def set_model_start_values(
       ``gamma1`` → ``0.99·tanh``.
     * Mixture (2-component Gaussian): ``loc_1``/``loc_2`` → identity,
       ``scale_1``/``scale_2`` → exp, ``mix_prob_1``/``mix_prob_2`` →
-      gumbel-softmax over the raw logit pair.
+      deterministic softmax over the raw logit pair.
 
     Args:
         model: The LightGBMLSS model whose ``start_values`` gets assigned.

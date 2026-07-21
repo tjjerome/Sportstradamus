@@ -59,6 +59,21 @@ def test_isotonic_pit_map_is_a_valid_cdf_transform():
     assert g.min() >= 0.0 and g.max() <= 1.0
 
 
+def test_isotonic_pit_map_does_not_duplicate_terminal_atom():
+    # Discrete predictives can put an entire final equal-mass bin at PIT=1. The
+    # bin itself then supplies the endpoint, so the explicit CDF anchor must not
+    # append a second 1.0 domain knot.
+    pit = np.concatenate((np.linspace(0.01, 0.89, 90), np.ones(10)))
+    blob = posthoc.fit_isotonic_pit(pit)
+
+    assert blob is not None
+    assert np.all(np.diff(blob["x"]) > 0.0)
+    assert blob["x"][-2] == np.nextafter(1.0, 0.0)
+    assert blob["y"][-2] < 1.0
+    assert blob["x"][-1] == 1.0
+    assert blob["y"][-1] == 1.0
+
+
 def test_isotonic_pit_lambda_zero_is_identity():
     # Convention g_lambda = lambda*g + (1-lambda)*identity: lambda=0 must be a pure
     # no-op (the scalar-replaced cell with no recalibration), lambda=1 full recal. The
@@ -68,6 +83,11 @@ def test_isotonic_pit_lambda_zero_is_identity():
     u = np.linspace(0.0, 1.0, 101)
     g0 = posthoc.apply_cdf_recal(posthoc.fit_isotonic_pit(pit, lam=0.0), u)
     np.testing.assert_allclose(g0, u, atol=1e-9)
+
+    terminal_pit = np.concatenate((np.linspace(0.01, 0.89, 90), np.ones(10)))
+    terminal_blob = posthoc.fit_isotonic_pit(terminal_pit, lam=0.0)
+    left_of_one = np.nextafter(1.0, 0.0)
+    assert posthoc.apply_cdf_recal(terminal_blob, np.array([left_of_one]))[0] == left_of_one
 
 
 def test_isotonic_pit_leaves_calibrated_pit_alone():
@@ -97,3 +117,25 @@ def test_select_pit_recal_cross_fit_ks_is_honest_not_in_sample():
     blob, cv_ks = posthoc.select_pit_recal(pit)
     in_sample = _ks_uniform(posthoc.apply_cdf_recal(blob, pit))
     assert cv_ks >= in_sample
+
+
+def test_crossfit_keeps_randomized_draws_grouped_by_source_row(monkeypatch):
+    n = 50
+    row_value = (np.arange(n) + 1.0) / (n + 2.0)
+    draws = np.vstack([row_value, row_value + 1e-5])
+    seen_train: list[np.ndarray] = []
+    real_fit = posthoc.fit_isotonic_pit
+
+    def recording_fit(pit, **kwargs):
+        seen_train.append(np.asarray(pit))
+        return real_fit(pit, **kwargs)
+
+    monkeypatch.setattr(posthoc, "fit_isotonic_pit", recording_fit)
+    posthoc._crossfit_pit_ks(draws, lam=0.5, k=5)
+
+    assert len(seen_train) == 5
+    for train in seen_train:
+        for first, second in zip(draws[0], draws[1], strict=True):
+            assert np.any(np.isclose(train, first, atol=1e-12, rtol=0.0)) == np.any(
+                np.isclose(train, second, atol=1e-12, rtol=0.0)
+            )

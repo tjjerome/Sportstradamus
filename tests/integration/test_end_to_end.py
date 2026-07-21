@@ -266,24 +266,29 @@ def _stub_stats_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
     ``meditate`` and ``prophecize`` instantiate every supported league's
     ``Stats`` class at startup and call ``load`` / ``update`` on the
     relevant ones; in fake mode we don't want any of those calls hitting
-    ``nba_api``, ``nfl_data_py``, or local CSV caches. The per-league
+    ``nba_api``, ``nfl_data_py``, ``statsapi``, or local CSV caches. The per-league
     update gate is pinned open so the run never consults the host's real
     ``league_activity.json`` snapshot (or the season calendar).
     """
+    import sportstradamus.stats.mlb as mlb_module
     import sportstradamus.stats.nba as nba_module
     import sportstradamus.stats.nfl as nfl_module
+    import sportstradamus.stats.nhl as nhl_module
     import sportstradamus.stats.wnba as wnba_module
     from sportstradamus.helpers import odds_budget
 
     monkeypatch.setattr(odds_budget, "league_is_live", lambda league, season_start: True)
     monkeypatch.setattr(odds_budget, "update_window_open", lambda league, season_start: True)
     monkeypatch.setattr(odds_budget, "season_opener", lambda league: None)
+    monkeypatch.setattr(mlb_module, "get_mlb_pitchers", dict)
 
-    for mod in (nba_module, nfl_module, wnba_module):
+    for mod in (nba_module, nfl_module, wnba_module, mlb_module, nhl_module):
         cls_name = {
             nba_module: "StatsNBA",
             nfl_module: "StatsNFL",
             wnba_module: "StatsWNBA",
+            mlb_module: "StatsMLB",
+            nhl_module: "StatsNHL",
         }[mod]
         cls = getattr(mod, cls_name)
         monkeypatch.setattr(cls, "load", lambda self: None)

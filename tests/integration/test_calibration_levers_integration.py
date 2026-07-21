@@ -109,6 +109,7 @@ def test_calibration_penalty_scores_skewnormal_then_pick_selects():
         "target_normalization": baselines.get_target_normalization("ratio_meanyr"),
         "global_mean": float(y_raw[:cut].mean()),
         "denom_col": "MeanYr",
+        "hist_gate": 0.0,
         "normalize": True,
         "offset_mode": False,
         "shape_ceiling": None,

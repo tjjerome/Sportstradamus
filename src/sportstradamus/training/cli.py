@@ -3,6 +3,7 @@
 import importlib.resources as pkg_resources
 import json
 import warnings
+from collections.abc import Mapping
 from pathlib import Path
 
 import click
@@ -23,6 +24,15 @@ from sportstradamus.training import baselines, calibration
 from sportstradamus.training.calibration import fit_book_weights
 from sportstradamus.training.correlate import correlate
 from sportstradamus.training.markets import ALL_MARKETS, select_markets
+from sportstradamus.training.model_strategy_registry import (
+    AUTO_STRUCTURAL_STRATEGY,
+    BASE_STRUCTURAL_STRATEGY,
+    CAP_DETERMINISTIC_TRAIN,
+    CAP_FULL_HPO,
+    distribution_class,
+    get_strategy,
+    registered_strategies,
+)
 from sportstradamus.training.pipeline import (
     _FORCEABLE_DISTS,
     DIST_TRAINING_LOSS_CHOICES,
@@ -47,6 +57,11 @@ np.seterr(divide="ignore", invalid="ignore")
 # Reproducibility seed for non-deterministic training runs. Not used under
 # --deterministic (which pins RNGs via seed_everything with a fixed value).
 _RNG_SEED: int = 69
+STRUCTURAL_STRATEGY_CHOICES: tuple[str, ...] = (
+    AUTO_STRUCTURAL_STRATEGY,
+    BASE_STRUCTURAL_STRATEGY,
+    *sorted(spec.slug for spec in registered_strategies() if spec.is_structural),
+)
 
 
 def _enforce_ship_gate(
@@ -104,6 +119,67 @@ def _resolve_cell_knob(stat_meta_full, lg, market, key, default, flag_value):
     return cell_value if flag_value == LOSS_AUTO else flag_value
 
 
+def _resolve_structural_strategy(
+    flag_value: str,
+    cell_meta: Mapping[str, object],
+    *,
+    league: str,
+    market: str,
+) -> str:
+    selected = (
+        cell_meta.get("structural_strategy", BASE_STRUCTURAL_STRATEGY)
+        if flag_value == AUTO_STRUCTURAL_STRATEGY
+        else flag_value
+    )
+    if not isinstance(selected, str):
+        raise ValueError("structural_strategy must be a string")
+    if selected == BASE_STRUCTURAL_STRATEGY:
+        return selected
+    spec = get_strategy(selected)
+    if not spec.is_structural:
+        raise ValueError(f"{selected!r} is not a structural strategy")
+    if spec.enrollments and (league, market) not in spec.enrollments:
+        raise ValueError(f"{selected} is not registered for {league}/{market}")
+    return selected
+
+
+def _validate_structural_controls(
+    structural_strategy: str,
+    *,
+    league: str,
+    market: str,
+    distribution: str,
+    settings: Mapping[str, object],
+    deterministic: bool,
+) -> None:
+    if structural_strategy == BASE_STRUCTURAL_STRATEGY:
+        return
+    spec = get_strategy(structural_strategy)
+    applicability = spec.applicability
+    cell_distribution_class = distribution_class(distribution)
+    if (
+        applicability.distribution_classes
+        and cell_distribution_class not in applicability.distribution_classes
+    ) or (applicability.distributions and distribution not in applicability.distributions):
+        raise ValueError(
+            f"{structural_strategy}: distribution {distribution!r} is not applicable "
+            f"for {league}/{market}"
+        )
+    required_capability = CAP_DETERMINISTIC_TRAIN if deterministic else CAP_FULL_HPO
+    if required_capability not in spec.capabilities:
+        raise ValueError(f"{structural_strategy}: strategy does not support {required_capability}")
+    required_settings = {**spec.fixed_controls, **spec.fixed_persist}
+    mismatches = [
+        f"{name}={settings.get(name)!r} (requires {expected!r})"
+        for name, expected in required_settings.items()
+        if settings.get(name) != expected
+    ]
+    if mismatches:
+        raise ValueError(
+            f"{structural_strategy} fixed-control recipe mismatch: {', '.join(mismatches)}"
+        )
+
+
 # The six ship-gate booleans in model_stats.parquet (nullable BooleanDtype;
 # pd.NA means the scorecard never ran, which counts as not passing here).
 _GATE_COLS = ("g1_pass", "g2_pass", "g3_pass", "g4_pass", "g5_pass", "g6_pass")
@@ -133,16 +209,14 @@ def _g4_only_retry_wanted(
 
     Fires only for cells trained under ``loss`` selection whose fresh
     model_stats row failed ship on Gate 4 alone — the dispersion-calibration
-    failure that calibrated trial selection targets. Hurdle-ZINB is excluded:
-    that path has no Optuna search, so calibrated selection is meaningless.
+    failure that calibrated trial selection targets. Hurdle-ZINB and Mixture
+    are excluded: those paths have no calibrated trial-selection closure.
     """
     if row is None or cell_hpo_selection != "loss":
         return False
-    if row["distribution"] == "ZINB" and cell_zinb_mode == "hurdle":
-        return False
     if row["distribution"] == "Mixture":
-        # No per-trial served-KS closure for the mixture (see _calibration_penalty);
-        # a calibrated retry would silently re-run loss selection.
+        return False
+    if row["distribution"] == "ZINB" and cell_zinb_mode == "hurdle":
         return False
     if _gate_passed(row["ship"]) or _gate_passed(row["g4_pass"]):
         return False
@@ -174,7 +248,11 @@ def _retry_calibrated_if_g4_only(
     persists the knob via :func:`_persist_calibrated_hpo`; a failed one just
     echoes its failing gates. Never retries more than once.
     """
-    if train_kwargs["deterministic"] or train_kwargs["matrix_only"]:
+    if (
+        train_kwargs["deterministic"]
+        or train_kwargs["matrix_only"]
+        or train_kwargs["structural_strategy"] != BASE_STRUCTURAL_STRATEGY
+    ):
         return
     row = _model_stats_row(lg, market)
     if not _g4_only_retry_wanted(row, train_kwargs["hpo_selection"], train_kwargs["zinb_mode"]):
@@ -394,6 +472,18 @@ def _retry_calibrated_if_g4_only(
         "pair with --bypass-withholding to reach withheld cells."
     ),
 )
+@click.option(
+    "--structural-strategy",
+    type=click.Choice(list(STRUCTURAL_STRATEGY_CHOICES)),
+    default=AUTO_STRUCTURAL_STRATEGY,
+    show_default=True,
+    help=(
+        "Structured post-processing strategy. 'auto' honors each cell's persisted "
+        "structural_strategy; 'none' disables structural processing. A named strategy "
+        "is accepted only for its registered cell and frozen controls, and only with "
+        "--deterministic. Full-HPO confirmation persists the strategy, then uses 'auto'."
+    ),
+)
 def meditate(
     force,
     league,
@@ -413,6 +503,7 @@ def meditate(
     count_dispersion_objective,
     sn_param,
     matrix_only,
+    structural_strategy,
 ):
     """Train or retrain LightGBMLSS models for each configured market."""
     # style: allow-complexity — meditate entrypoint: a flat training pipeline
@@ -425,6 +516,18 @@ def meditate(
     # rebuild. See docs/gbdt_mean_regression_plan.md "Bug to fix" note.
     if deterministic and not force:
         force = True
+    if (
+        structural_strategy
+        not in {
+            AUTO_STRUCTURAL_STRATEGY,
+            BASE_STRUCTURAL_STRATEGY,
+        }
+        and not deterministic
+    ):
+        raise click.UsageError(
+            f"explicit {structural_strategy} requires --deterministic; "
+            "full-HPO and warm runs resolve the persisted cell strategy with auto"
+        )
     log = get_logger("meditate")
     log.setLevel(log_level)
     log.info(
@@ -439,6 +542,7 @@ def meditate(
             "market": market,
             "branch": branch,
             "bypass_withholding": bypass_withholding,
+            "structural_strategy": structural_strategy,
         },
     )
     click.echo(
@@ -462,6 +566,34 @@ def meditate(
     # (used by --bypass-withholding to pick a branch-appropriate normalization).
     stat_meta_full = load_stat_meta(STAT_META_PATH)
 
+    active_markets = dict(ALL_MARKETS)
+    if league != "All":
+        active_markets = {league: ALL_MARKETS[league]}
+    active_markets = select_markets(active_markets, market)
+    resolved_structural_strategies = {}
+    try:
+        for lg, markets in active_markets.items():
+            for cell_market in markets:
+                cell_meta = stat_meta_full.get(lg, {}).get(cell_market, {})
+                resolved_structural_strategies[(lg, cell_market)] = _resolve_structural_strategy(
+                    structural_strategy,
+                    cell_meta,
+                    league=lg,
+                    market=cell_market,
+                )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+    selected_structural = {
+        selected
+        for selected in resolved_structural_strategies.values()
+        if selected != BASE_STRUCTURAL_STRATEGY
+    }
+    if selected_structural and (rebuild_correlations or matrix_only):
+        raise click.UsageError(
+            f"{', '.join(sorted(selected_structural))} requires model training; "
+            "--rebuild-correlations and --matrix-only are not valid"
+        )
+
     stat_structs = {}
     for lg_name, cls in (
         ("NBA", StatsNBA),
@@ -481,11 +613,6 @@ def meditate(
             click.echo(f"[{lg_name}] updating from league API...")
             struct.update()
         stat_structs[lg_name] = struct
-
-    active_markets = dict(ALL_MARKETS)
-    if league != "All":
-        active_markets = {league: ALL_MARKETS[league]}
-    active_markets = select_markets(active_markets, market)
 
     if rebuild_correlations:
         for lg in active_markets:
@@ -542,16 +669,16 @@ def meditate(
         league_start_date = stat_data.trim_gamelog()
 
         for market in markets:
+            cell_meta = stat_meta_full.get(lg, {}).get(market, {})
+            cell_structural_strategy = resolved_structural_strategies[(lg, market)]
+            cell_dist = cell_meta.get("dist") if dist == LOSS_AUTO else dist
             cell_target_norm = resolve_cell_target_normalization(
                 lg, market, target_normalization, ship_config
             )
             if cell_target_norm == WITHHELD:
                 if bypass_withholding:
-                    cell_dist = stat_meta_full.get(lg, {}).get(market, {}).get("dist")
-                    # Continuous families (SkewNormal/Mixture) need a real strategy
-                    # slug; count-branch families (ZINB/NegBin/Gamma/ZAGamma) ignore
-                    # the slug, so TARGET_NORM_NONE is fine and the next clause will
-                    # substitute the run-wide default for the pipeline call.
+                    # Continuous families need a transform; count families carry
+                    # canonical ``none`` because they never run normalization.
                     cell_target_norm = (
                         resolve_flag_target_normalization(target_normalization)
                         if cell_dist in CONTINUOUS_DISTS
@@ -565,13 +692,9 @@ def meditate(
                     prune_model_pickle(lg, market)
                     click.echo(f"[{lg}] {market}: withheld — pruned pickle, skipped training")
                     continue
-            # TARGET_NORM_NONE marks count-branch cells that don't opt into a
-            # SkewNormal strategy slug. The pipeline's count branch ignores
-            # the slug anyway, so substitute the CLI default — the run-wide
-            # target_normalization — to keep baselines.get_target_normalization() satisfied.
-            if cell_target_norm == TARGET_NORM_NONE:
-                cell_target_norm = resolve_flag_target_normalization(target_normalization)
-            cell_posthoc = stat_meta_full.get(lg, {}).get(market, {}).get("posthoc", "none")
+            if cell_dist is not None and cell_dist not in CONTINUOUS_DISTS:
+                cell_target_norm = TARGET_NORM_NONE
+            cell_posthoc = cell_meta.get("posthoc", "none")
             # Each search-axis flag (blending, hpo_selection, count_dispersion_objective):
             # 'auto' leaves each cell on its configured stat_meta knob; an explicit slug overrides.
             cell_blending = _resolve_cell_knob(
@@ -602,6 +725,33 @@ def meditate(
             cell_dist_training_loss = _resolve_cell_knob(
                 stat_meta_full, lg, market, "dist_training_loss", LOSS_AUTO, dist_training_loss
             )
+            try:
+                _validate_structural_controls(
+                    cell_structural_strategy,
+                    league=lg,
+                    market=market,
+                    distribution=cell_dist,
+                    settings={
+                        **cell_meta,
+                        "dist": cell_dist,
+                        "normalization": cell_target_norm,
+                        "posthoc": cell_posthoc,
+                        "dist_training_loss": (
+                            "crps"
+                            if cell_dist_training_loss == LOSS_AUTO
+                            else cell_dist_training_loss
+                        ),
+                        "sn_param": cell_sn_param,
+                        "blending_loss_fn": cell_blending,
+                        "zinb_mode": cell_zinb_mode,
+                        "count_dispersion_objective": cell_count_dispersion,
+                        "hpo_selection": cell_hpo_selection,
+                        "stabilization": stabilization,
+                    },
+                    deterministic=deterministic,
+                )
+            except ValueError as exc:
+                raise click.UsageError(str(exc)) from exc
             # Kwargs as a dict so the g4-only calibrated retry below reruns the
             # exact same call with only force/hpo_selection overridden.
             train_kwargs = {
@@ -618,6 +768,7 @@ def meditate(
                 "count_dispersion_objective": cell_count_dispersion,
                 "sn_param": cell_sn_param,
                 "matrix_only": matrix_only,
+                "structural_strategy": cell_structural_strategy,
             }
             train_market(lg, market, stat_data, archive, league_start_date, **train_kwargs)
             _retry_calibrated_if_g4_only(

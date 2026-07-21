@@ -93,7 +93,11 @@ class _FakeStats:
 
 @pytest.mark.parametrize(
     "slug,expected",
-    [("centered_additive_mean10", True), ("centered_additive_eb_meanyr_k10", True), ("ratio_meanyr", False)],
+    [
+        ("centered_additive_mean10", True),
+        ("centered_additive_eb_meanyr_k10", True),
+        ("ratio_meanyr", False),
+    ],
 )
 def test_build_prob_params_seeds_offset_mode_from_strategy(monkeypatch, slug, expected):
     """Call-site pin: ``_build_prob_params`` seeds ``set_model_start_values`` with the
@@ -117,6 +121,7 @@ def test_build_prob_params_seeds_offset_mode_from_strategy(monkeypatch, slug, ex
         "SkewNormal",
         False,
         slug,
+        "none",
     )
     assert captured["offset_mode"] is expected
 
@@ -148,5 +153,6 @@ def test_build_prob_params_seeds_sn_param_from_pickle(monkeypatch, filedict_extr
         "SkewNormal",
         False,
         "ratio_meanyr",
+        "none",
     )
     assert captured["sn_param"] == expected

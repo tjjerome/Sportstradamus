@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.stats import skewnorm
 
 from sportstradamus.helpers import (
     GATE_PUBLISH_THRESHOLD,
@@ -33,6 +34,7 @@ from sportstradamus.helpers import (
     get_odds,
     get_push_prob,
     set_model_start_values,
+    skewnormal_loc_from_mean,
     stat_cv,
     stat_dist,
     stat_map,
@@ -42,6 +44,43 @@ from sportstradamus.helpers.distributions import _DP_PHI_CEILING
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.spiderLogger import logger
 from sportstradamus.training.baselines import get_target_normalization
+from sportstradamus.training.group_conditional_cdf import (
+    RECEIVING_SCHEMA_VERSION as RECEIVING_CALIBRATION_SCHEMA_VERSION,
+)
+from sportstradamus.training.group_conditional_cdf import (
+    ROLE_VALUES as RECEIVING_ROLE_VALUES,
+)
+from sportstradamus.training.group_conditional_cdf import (
+    ReceivingLineOutput,
+    RushingPredictive,
+    apply_receiving_two_part_line,
+    apply_rushing_affine_groupcdf,
+    serialize_receiving_calibration,
+)
+from sportstradamus.training.model_strategy_artifacts import (
+    MODEL_STRATEGY_MODEL_KEY,
+    ArtifactIdentity,
+    InactiveStrategyArtifactError,
+)
+from sportstradamus.training.model_strategy_registry import (
+    BASE_STRUCTURAL_STRATEGY,
+    CAP_SERVE,
+    CellContext,
+    distribution_class,
+    get_strategy,
+    parse_controls,
+    validate_strategy_selection,
+)
+from sportstradamus.training.model_strategy_report_identity import resolve_report_identity
+from sportstradamus.training.nfl_yards_experiments import (
+    RECEIVING_POSITIONS,
+    RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
+    RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+    RUSHING_POSITIONS,
+)
+from sportstradamus.training.nfl_yards_experiments import (
+    ROLE_COLUMNS as RECEIVING_ROLE_COLUMNS,
+)
 from sportstradamus.training.posthoc import MEAN_STAGE, PROB_STAGE, apply_posthoc
 
 # LazyArchive defers DuckDB lock acquisition until the first attribute
@@ -102,6 +141,10 @@ _MODEL_VERSION_CACHE: dict[tuple[str, float], str] = {}
 
 # Attribution id for a leg scored off devigged book odds (no trained model pickle).
 _BOOK_FALLBACK_VERSION = "book_fallback"
+
+# The receiving-v3 validation operator settles every quoted line from these
+# adjacent integer CDF endpoints, independent of the pickle's generic step.
+_RECEIVING_SETTLEMENT_STEP = 1.0
 
 
 def resolve_model_version(filepath: str, filedict: dict) -> str:
@@ -296,6 +339,9 @@ def _book_over_prob(
     an unfitted cell returns ``(mean*cv, 0)``, the legacy symmetric constant-CV read.
     """
     if dist == "SkewNormal":
+        # The archive encodes SkewNormal sportsbook EVs without the model's
+        # external hurdle. Keep the book endpoint gate-free on decode too.
+        gate = None
 
         def _sn_over(x):
             sigma, skew = book_skewnormal_shape(league, market, x["Market Projection"], cv)
@@ -553,6 +599,7 @@ def _build_prob_params(
     dist: str,
     normalized: bool,
     target_normalization: str,
+    structural_strategy: str,
 ) -> pd.DataFrame:
     if market in stat_data.volume_stats:
         prob_params = pd.DataFrame(index=playerStats.index)
@@ -572,26 +619,78 @@ def _build_prob_params(
     for c in categories:
         playerStats[c] = playerStats[c].astype("category")
 
-    if getattr(model, "is_hurdle", False):
-        # HurdleZINB seeds its internal NegBin from its own X; the external
-        # set_model_start_values would treat it as a plain LSS and fail.
-        model.set_model_start_values(playerStats)
-    else:
-        # sn_param must match training: the seeds are per-row predict-time
-        # margins, so seeding a centered pickle in direct space shifts the
-        # gamma1 head (same drift class as the offset_mode fix above).
-        # Legacy pickles persist no key -> "direct".
-        set_model_start_values(
-            model,
-            dist,
-            playerStats,
-            normalized=normalized,
-            offset_mode=_serve_offset_mode(dist, target_normalization),
-            sn_param=filedict.get("sn_param", "direct"),
-        )
-    prob_params = model.predict(playerStats, pred_type="parameters")
-    prob_params.index = playerStats.index
+    def _predict(predict_model, rows: pd.DataFrame) -> pd.DataFrame:
+        if getattr(predict_model, "is_hurdle", False):
+            # HurdleZINB seeds its internal NegBin from its own X; the external
+            # set_model_start_values would treat it as a plain LSS and fail.
+            predict_model.set_model_start_values(rows)
+        else:
+            set_model_start_values(
+                predict_model,
+                dist,
+                rows,
+                normalized=normalized,
+                offset_mode=_serve_offset_mode(dist, target_normalization),
+                sn_param=filedict.get("sn_param", "direct"),
+            )
+        params = predict_model.predict(rows, pred_type="parameters")
+        params.index = rows.index
+        return params
+
+    prob_params = _predict(model, playerStats)
+    if structural_strategy == RUSHING_AFFINE_GROUPCDF_BOOK_POOL:
+        experts = filedict.get("expert_models")
+        if not isinstance(experts, dict) or any(code not in experts for code in RUSHING_POSITIONS):
+            raise ValueError("rushing candidate pickle is missing its QB/RB expert models")
+        position = pd.to_numeric(playerStats["Player position"], errors="coerce")
+        for code in RUSHING_POSITIONS:
+            rows = playerStats.loc[position.eq(code)]
+            if rows.empty:
+                continue
+            expert_params = _predict(experts[code], rows)
+            if list(expert_params.columns) != list(prob_params.columns):
+                raise ValueError("rushing expert parameter schema drifted from pooled model")
+            prob_params.loc[rows.index, :] = expert_params.to_numpy()
     return prob_params
+
+
+def _resolve_serving_strategy(filedict: dict, league: str, market: str) -> ArtifactIdentity:
+    """Validate the strategy identity before any strategy-specific serving work."""
+    identity = resolve_report_identity(filedict, league, market)
+    if MODEL_STRATEGY_MODEL_KEY not in filedict:
+        if identity.structural_strategy != BASE_STRUCTURAL_STRATEGY:
+            raise ValueError("structural adapter requires canonical generic strategy identity")
+        if CAP_SERVE not in get_strategy(identity.strategy_slug).capabilities:
+            raise ValueError(f"{identity.strategy_slug}: legacy strategy lacks serve capability")
+        return identity
+    if identity.status != "active":
+        raise InactiveStrategyArtifactError(
+            f"{identity.strategy_slug}: inactive strategy artifact cannot serve"
+        )
+    expected_columns = filedict.get("expected_columns")
+    if not isinstance(expected_columns, (list, tuple)) or any(
+        not isinstance(column, str) for column in expected_columns
+    ):
+        raise ValueError(f"{identity.strategy_slug}: generic strategy expected_columns are invalid")
+    distribution = filedict.get("distribution")
+    if not isinstance(distribution, str):
+        raise ValueError(f"{identity.strategy_slug}: generic strategy distribution is invalid")
+    controls = parse_controls(identity.controls_json)
+    spec = get_strategy(identity.strategy_slug)
+    if bool(spec.split_fingerprint_path) != bool(identity.split_fingerprint):
+        raise ValueError(
+            f"{identity.strategy_slug}: strategy split fingerprint is missing or stale"
+        )
+    cell = CellContext(
+        league,
+        market,
+        distribution,
+        distribution_class(distribution),
+        frozenset(expected_columns),
+        identity.matrix_hash,
+    )
+    validate_strategy_selection(cell, spec, controls, required_capabilities=(CAP_SERVE,))
+    return identity
 
 
 def _book_evs_for_players(
@@ -613,7 +712,8 @@ def _book_evs_for_players(
             ev = stat_data.check_combo_markets(market, player, date)
         if line <= 0:
             line = np.max([playerStats.loc[player, "Avg10"], 0.5])
-        if (ev <= 0 or np.isnan(ev)) and player in offer_df.index:
+        missing_ev = np.isnan(ev) or ev <= 0
+        if missing_ev and player in offer_df.index:
             o = offer_df.loc[player]
             if isinstance(o, pd.DataFrame):
                 o = o.iloc[0]
@@ -622,7 +722,7 @@ def _book_evs_for_players(
                 _odds_from_boost(o.to_dict())[0],
                 stat_cv[stat_data.league].get(market, 1),
                 dist=dist,
-                gate=hist_gate or None,
+                gate=(None if dist == "SkewNormal" else hist_gate or None),
             )
         evs.append(ev)
     return evs
@@ -681,10 +781,281 @@ def _clamp_shape_ceiling(offer_df: pd.DataFrame, dist: str, shape_ceiling) -> No
 
 def _zi_kwargs(offer_df: pd.DataFrame, dist: str, hist_gate: float) -> dict:
     if dist == "SkewNormal":
+        if "Model Gate" in offer_df.columns:
+            return {"gate_model": offer_df["Model Gate"].to_numpy(), "gate_book": 0.0}
         return {"gate_book": hist_gate} if hist_gate > GATE_PUBLISH_THRESHOLD else {}
     if dist in ("ZINB", "ZAGamma") and "Model Gate" in offer_df.columns:
         return {"gate_model": offer_df["Model Gate"].to_numpy(), "gate_book": hist_gate}
     return {}
+
+
+def _receiving_candidate_state(
+    experiment_blob: dict,
+) -> tuple[dict, dict]:
+    """Return the active receiving-v3 calibration and feature-routing state."""
+    if not isinstance(experiment_blob, dict):
+        raise ValueError("receiving-v3 candidate is missing its algorithm state")
+    if (
+        experiment_blob.get("schema_version") != RECEIVING_CALIBRATION_SCHEMA_VERSION
+        or experiment_blob.get("status") != "active"
+        or experiment_blob.get("line_probability_only") is not True
+    ):
+        raise ValueError("receiving-v3 candidate is not active on schema 3")
+
+    routing = experiment_blob.get("routing")
+    expected_positions = {str(code): label for code, label in RECEIVING_POSITIONS.items()}
+    expected_routing_keys = {
+        "kind",
+        "thresholds",
+        "role_columns",
+        "gate_rates",
+        "served_gate_rates",
+        "gate_model_weight",
+        "positions",
+    }
+    if (
+        not isinstance(routing, dict)
+        or set(routing) != expected_routing_keys
+        or routing.get("kind") != "pregame_role_by_position"
+        or routing.get("role_columns") != list(RECEIVING_ROLE_COLUMNS)
+        or routing.get("positions") != expected_positions
+    ):
+        raise ValueError("receiving-v3 candidate has invalid feature routing state")
+    thresholds = routing.get("thresholds")
+    if not isinstance(thresholds, dict) or set(thresholds) != set(expected_positions):
+        raise ValueError("receiving-v3 candidate requires WR/RB/TE role thresholds")
+    valid_thresholds = all(
+        isinstance(value, (int, float, np.integer, np.floating))
+        and not isinstance(value, (bool, np.bool_))
+        and np.isfinite(value)
+        for value in thresholds.values()
+    )
+    if not valid_thresholds:
+        raise ValueError("receiving-v3 role thresholds must be finite numbers")
+
+    raw_gate_rates = routing.get("gate_rates")
+    served_gate_rates = routing.get("served_gate_rates")
+    gate_model_weight = routing.get("gate_model_weight")
+    rate_maps = (raw_gate_rates, served_gate_rates)
+    valid_rates = all(
+        isinstance(rates, dict)
+        and set(rates) == set(RECEIVING_ROLE_VALUES)
+        and all(
+            isinstance(value, (int, float, np.integer, np.floating))
+            and not isinstance(value, (bool, np.bool_))
+            and np.isfinite(value)
+            and 0.0 <= float(value) < 1.0
+            for value in rates.values()
+        )
+        for rates in rate_maps
+    )
+    valid_weight = (
+        isinstance(gate_model_weight, (int, float, np.integer, np.floating))
+        and not isinstance(gate_model_weight, (bool, np.bool_))
+        and np.isfinite(gate_model_weight)
+        and 0.0 <= float(gate_model_weight) <= 1.0
+    )
+    if not valid_rates or not valid_weight:
+        raise ValueError("receiving-v3 routing requires finite low/high gate state")
+    if any(
+        float(served_gate_rates[role]) != float(gate_model_weight) * float(raw_gate_rates[role])
+        for role in RECEIVING_ROLE_VALUES
+    ):
+        raise ValueError("receiving-v3 served gates do not match their persisted model weight")
+
+    endpoint_contract = experiment_blob.get("endpoint_contract")
+    expected_endpoint_keys = {
+        "gate_source",
+        "gate_rates_are_model_endpoint",
+        "book_endpoint_gate",
+        "fallback_gate",
+        "dispersion",
+    }
+    fallback_gate = (
+        endpoint_contract.get("fallback_gate") if isinstance(endpoint_contract, dict) else None
+    )
+    book_endpoint_gate = (
+        endpoint_contract.get("book_endpoint_gate") if isinstance(endpoint_contract, dict) else None
+    )
+    valid_book_endpoint = (
+        isinstance(book_endpoint_gate, (int, float, np.integer, np.floating))
+        and not isinstance(book_endpoint_gate, (bool, np.bool_))
+        and np.isfinite(book_endpoint_gate)
+        and float(book_endpoint_gate) == 0.0
+    )
+    valid_fallback = (
+        isinstance(fallback_gate, (int, float, np.integer, np.floating))
+        and not isinstance(fallback_gate, (bool, np.bool_))
+        and np.isfinite(fallback_gate)
+        and 0.0 <= float(fallback_gate) < 1.0
+    )
+    if (
+        not isinstance(endpoint_contract, dict)
+        or set(endpoint_contract) != expected_endpoint_keys
+        or endpoint_contract.get("gate_source") != "train_result_eq_zero_by_role"
+        or endpoint_contract.get("gate_rates_are_model_endpoint") is not True
+        or not valid_book_endpoint
+        or endpoint_contract.get("dispersion") != "raw_fused_shape"
+        or not valid_fallback
+    ):
+        raise ValueError("receiving-v3 candidate has an invalid endpoint contract")
+
+    calibration = experiment_blob.get("calibration")
+    if not isinstance(calibration, dict):
+        raise ValueError("receiving-v3 candidate is missing calibration state")
+    serialize_receiving_calibration(calibration)
+    return calibration, routing
+
+
+def _receiving_candidate_routes(
+    offer_df: pd.DataFrame,
+    routing: dict,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply the persisted train-only role thresholds to live pregame features."""
+    missing = [column for column in RECEIVING_ROLE_COLUMNS if column not in offer_df]
+    if missing:
+        raise ValueError(f"missing receiving-v3 role column(s): {', '.join(missing)}")
+    features = offer_df.loc[:, RECEIVING_ROLE_COLUMNS].apply(pd.to_numeric, errors="coerce")
+    if not np.isfinite(features.to_numpy(dtype=float)).all():
+        raise ValueError("receiving-v3 role inputs must be finite")
+
+    if "Player position" not in offer_df:
+        raise ValueError("receiving-v3 candidate requires Player position")
+    raw_position = pd.to_numeric(offer_df["Player position"], errors="coerce").to_numpy()
+    if not np.isfinite(raw_position).all():
+        raise ValueError("receiving-v3 candidate requires WR/RB/TE position codes 2/3/4")
+    positions = raw_position.astype(int)
+    if (
+        not np.array_equal(raw_position, positions)
+        or not np.isin(positions, tuple(RECEIVING_POSITIONS)).all()
+    ):
+        raise ValueError("receiving-v3 candidate requires WR/RB/TE position codes 2/3/4")
+
+    role_score = (
+        features[RECEIVING_ROLE_COLUMNS[0]]
+        * features[RECEIVING_ROLE_COLUMNS[1]]
+        * features[RECEIVING_ROLE_COLUMNS[2]].clip(lower=0.0)
+        * features[RECEIVING_ROLE_COLUMNS[3]].clip(lower=0.0)
+    ).to_numpy(dtype=float)
+    thresholds = np.asarray([routing["thresholds"][str(code)] for code in positions], dtype=float)
+    roles = np.where(role_score < thresholds, "low", "high")
+    return roles, positions
+
+
+def _receiving_candidate_cdf(
+    offer_df: pd.DataFrame,
+    base_mean: np.ndarray,
+    points: np.ndarray,
+) -> np.ndarray:
+    """Evaluate the fitted gated SkewNormal CDF at row-aligned points."""
+    mean = np.asarray(base_mean, dtype=float)
+    point = np.asarray(points, dtype=float)
+    sigma = offer_df["Model Sigma"].to_numpy(dtype=float)
+    alpha = offer_df["Model Skew"].to_numpy(dtype=float)
+    gate = (
+        offer_df["Model Gate"].to_numpy(dtype=float)
+        if "Model Gate" in offer_df
+        else np.zeros(len(offer_df), dtype=float)
+    )
+    if (
+        any(array.shape != (len(offer_df),) for array in (mean, point, sigma, alpha, gate))
+        or not all(np.isfinite(array).all() for array in (mean, point, sigma, alpha, gate))
+        or np.any(sigma <= 0.0)
+        or np.any((gate < 0.0) | (gate >= 1.0))
+    ):
+        raise ValueError("receiving-v3 predictive inputs are invalid or not row-aligned")
+    loc = skewnormal_loc_from_mean(mean, sigma, alpha)
+    base_cdf = skewnorm.cdf(point, alpha, loc=loc, scale=sigma)
+    cdf = np.where(
+        point < 0.0,
+        (1.0 - gate) * base_cdf,
+        gate + (1.0 - gate) * base_cdf,
+    )
+    if not np.isfinite(cdf).all():
+        raise ValueError("receiving-v3 predictive CDF is nonfinite")
+    return cdf
+
+
+def _apply_receiving_candidate_distribution(
+    offer_df: pd.DataFrame,
+    base_mean: np.ndarray,
+    calibration: dict,
+    routing: dict,
+) -> ReceivingLineOutput:
+    """Apply receiving-v3 endpoint maps and its fixed authentic-book pool."""
+    roles, positions = _receiving_candidate_routes(offer_df, routing)
+    served_gate = np.asarray([routing["served_gate_rates"][role] for role in roles], dtype=float)
+    offer_df["Model Gate"] = served_gate
+    offer_df["Projection"] = (1.0 - served_gate) * np.asarray(base_mean, dtype=float)
+    line = offer_df["Line"].to_numpy(dtype=float)
+    if not np.isfinite(line).all():
+        raise ValueError("receiving-v3 candidate requires finite quoted lines")
+    low_point = np.ceil(line - _RECEIVING_SETTLEMENT_STEP)
+    high_point = np.floor(line + _RECEIVING_SETTLEMENT_STEP)
+    f0 = _receiving_candidate_cdf(offer_df, base_mean, np.zeros(len(offer_df)))
+    line_low = _receiving_candidate_cdf(offer_df, base_mean, low_point)
+    line_high = _receiving_candidate_cdf(offer_df, base_mean, high_point)
+    book_over = offer_df["Market EV"].to_numpy(dtype=float)
+    authentic = np.isfinite(book_over)
+    return apply_receiving_two_part_line(
+        calibration,
+        line_low,
+        line_high,
+        f0,
+        roles,
+        positions,
+        book_over,
+        authentic,
+    )
+
+
+def _rushing_candidate_calibration(experiment_blob: dict) -> dict:
+    """Return the active rushing calibration payload, rejecting partial pickles."""
+    if not isinstance(experiment_blob, dict):
+        raise ValueError("rushing candidate is missing its algorithm state")
+    if (
+        experiment_blob.get("status") != "active"
+        or experiment_blob.get("line_probability_only") is not True
+    ):
+        raise ValueError("rushing affine/group-CDF candidate is not active and complete")
+    calibration = experiment_blob.get("calibration")
+    if not isinstance(calibration, dict):
+        raise ValueError("rushing candidate pickle is missing calibration state")
+    return calibration
+
+
+def _apply_rushing_candidate_distribution(
+    offer_df: pd.DataFrame,
+    base_mean: np.ndarray,
+    calibration: dict,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply the affine/CDF head and return conditional mean plus final line P(over)."""
+    position = pd.to_numeric(offer_df["Player position"], errors="coerce").to_numpy()
+    if not np.isin(position, tuple(RUSHING_POSITIONS)).all():
+        raise ValueError("rushing candidate received a non-QB/RB offer")
+    gate = (
+        offer_df["Model Gate"].to_numpy(dtype=float)
+        if "Model Gate" in offer_df
+        else np.zeros(len(offer_df), dtype=float)
+    )
+    predictive = RushingPredictive(
+        marginal_mean=np.asarray(base_mean, dtype=float) * (1.0 - gate),
+        sigma=offer_df["Model Sigma"].to_numpy(dtype=float),
+        alpha=offer_df["Model Skew"].to_numpy(dtype=float),
+        gate=gate,
+    )
+    output = apply_rushing_affine_groupcdf(
+        calibration,
+        predictive,
+        offer_df["Line"].to_numpy(dtype=float),
+        offer_df["Market EV"].to_numpy(dtype=float),
+        position,
+    )
+    offer_df["Projection"] = output.marginal_mean
+    offer_df["Model Sigma"] = output.sigma
+    offer_df["Model Skew"] = output.alpha
+    offer_df["Model Gate"] = output.gate
+    return output.conditional_mean, output.pooled_over
 
 
 def _model_predictive_sd(offer_df: pd.DataFrame, dist: str, model_ev: np.ndarray) -> np.ndarray:
@@ -809,7 +1180,11 @@ def _blend_with_book(
     books_ev = offer_df["Market Projection"].fillna(offer_df["Projection"]).to_numpy()
     model_sd = _model_predictive_sd(offer_df, dist, model_ev)
     books_ev = _sanitize_book_ev(
-        books_ev, offer_df["Line"].to_numpy(), model_ev, model_sd, f"{league} {market}"
+        books_ev,
+        offer_df["Line"].to_numpy(),
+        model_ev,
+        model_sd,
+        f"{league} {market}",
     )
     zi = _zi_kwargs(offer_df, dist, hist_gate)
     if dist == "SkewNormal":
@@ -969,23 +1344,51 @@ def model_prob(
     skew_cal = filedict.get("skew_cal", 0.0)
     shape_ceiling = filedict.get("shape_ceiling")
     dist = filedict["distribution"]
+    strategy_identity = _resolve_serving_strategy(filedict, league, market)
+    structural_strategy = strategy_identity.structural_strategy
     step = filedict["step"]
     normalized = filedict.get("normalized", False)
     # Defaults keep legacy pickles (pre-P1, no offset_meta / target_normalization)
     # byte-identical; "target_strategy" is the pre-rename key.
     offset_meta = filedict.get("offset_meta")
-    target_normalization = filedict.get(
-        "target_normalization", filedict.get("target_strategy", "ratio_meanyr")
+    target_normalization = (
+        filedict.get("target_normalization", "ratio_meanyr")
+        if MODEL_STRATEGY_MODEL_KEY in filedict
+        else filedict.get("target_normalization", filedict.get("target_strategy", "ratio_meanyr"))
     )
     posthoc_slug = filedict.get("posthoc", "none")
     posthoc_blob = filedict.get("posthoc_blob", None)
     pit_recal_blob = filedict.get("pit_recal_blob", None)
+    nfl_yards_experiment = filedict.get("nfl_yards_experiment")
+    receiving_candidate_state = (
+        _receiving_candidate_state(nfl_yards_experiment)
+        if structural_strategy == RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR
+        else None
+    )
+    rushing_candidate_calibration = (
+        _rushing_candidate_calibration(nfl_yards_experiment)
+        if structural_strategy == RUSHING_AFFINE_GROUPCDF_BOOK_POOL
+        else None
+    )
+    if receiving_candidate_state is not None and (
+        league != "NFL" or market != "receiving yards" or dist != "SkewNormal"
+    ):
+        raise ValueError("receiving-v3 candidate is valid only for NFL receiving yards/SkewNormal")
+    if receiving_candidate_state is not None and (dispersion_cal != 1.0 or skew_cal != 0.0):
+        raise ValueError("receiving-v3 candidate requires its persisted raw fused shape")
     hist_gate = (
         stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma", "SkewNormal") else 0
     )
 
     prob_params = _build_prob_params(
-        filedict, market, stat_data, playerStats, dist, normalized, target_normalization
+        filedict,
+        market,
+        stat_data,
+        playerStats,
+        dist,
+        normalized,
+        target_normalization,
+        structural_strategy,
     )
     prob_params.sort_index(inplace=True)
     playerStats.sort_index(inplace=True)
@@ -1005,6 +1408,15 @@ def model_prob(
     offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
     offer_df = offer_df.loc[~offer_df[["Market Projection", "Projection"]].isna().all(axis=1)]
     offer_df = _drop_no_history_offers(offer_df)
+    if rushing_candidate_calibration is not None:
+        position = pd.to_numeric(offer_df.get("Player position"), errors="coerce")
+        supported = position.isin(RUSHING_POSITIONS)
+        if (~supported).any():
+            logger.warning(
+                f"dropped {int((~supported).sum())} non-QB/RB rushing offer(s) outside "
+                "the calibrated candidate support"
+            )
+            offer_df = offer_df.loc[supported]
     if offer_df.empty:
         return []
 
@@ -1018,13 +1430,28 @@ def model_prob(
         offer_df["Projection"].to_numpy(), posthoc_slug, posthoc_blob
     )
     _sanitize_model_ev(offer_df, dist)
-
     base_mean = _blend_with_book(offer_df, dist, model_weight, cv, hist_gate, league, market)
 
     # ZI dists: book reports the non-zero component EV; scale to marginal EV.
-    if hist_gate and dist in ("ZINB", "ZAGamma", "SkewNormal"):
+    if hist_gate and dist in ("ZINB", "ZAGamma"):
         offer_df["Market Projection"] = (1 - hist_gate) * offer_df["Market Projection"]
     _dispersion_calibrate(offer_df, dist, dispersion_cal, skew_cal)
+
+    receiving_candidate_output = None
+    if receiving_candidate_state is not None:
+        receiving_candidate_output = _apply_receiving_candidate_distribution(
+            offer_df,
+            base_mean,
+            *receiving_candidate_state,
+        )
+
+    rushing_candidate_over = None
+    if rushing_candidate_calibration is not None:
+        base_mean, rushing_candidate_over = _apply_rushing_candidate_distribution(
+            offer_df,
+            base_mean,
+            rushing_candidate_calibration,
+        )
 
     raw_over, push = _model_over_and_push(offer_df, dist, cv, step, base_mean)
     offer_df["Push Prob"] = np.asarray(push, dtype=float)
@@ -1034,6 +1461,10 @@ def model_prob(
     raw_over = _apply_cdf_recal_over(raw_over, pit_recal_blob)
     cal_over = apply_temperature(raw_over, temperature)
     cal_over = _apply_prob_posthoc(cal_over, posthoc_slug, posthoc_blob)
+    if receiving_candidate_output is not None:
+        cal_over = receiving_candidate_output.pooled_over
+    if rushing_candidate_over is not None:
+        cal_over = rushing_candidate_over
     offer_df["Model Under"] = 1 - cal_over
     offer_df["Model Over"] = 1 - offer_df["Model Under"]
 

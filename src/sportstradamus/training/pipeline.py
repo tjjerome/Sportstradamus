@@ -19,9 +19,10 @@ from lightgbmlss.distributions.Mixture import Mixture
 from lightgbmlss.distributions.NegativeBinomial import NegativeBinomial
 from lightgbmlss.distributions.ZINB import ZINB
 from lightgbmlss.model import LightGBMLSS
+from lightgbmlss.utils import softmax_fn
 from scipy.optimize import minimize_scalar
 from scipy.special import expit, logit
-from scipy.stats import norm, skewnorm
+from scipy.stats import norm
 from sklearn.metrics import (
     accuracy_score,
     brier_score_loss,
@@ -36,6 +37,7 @@ from sportstradamus.double_poisson import DoublePoisson
 from sportstradamus.helpers import (
     GATE_PUBLISH_THRESHOLD,
     NONZERO_DENOM_GATE,
+    apply_cdf_recal,
     apply_temperature,
     decode_predictive_mean,
     dp_crps,
@@ -64,8 +66,49 @@ from sportstradamus.training.config import (
     save_zi_config,
 )
 from sportstradamus.training.data import trim_matrix
+from sportstradamus.training.group_conditional_cdf import (
+    ReceivingCalibrationFit,
+    RushingCalibrationFit,
+    RushingPredictive,
+    rushing_cdf_endpoints,
+)
+from sportstradamus.training.group_conditional_cdf._pipeline_steps_receiving import (
+    _step_apply_receiving_two_part_groupcdf_candidate,
+)
+from sportstradamus.training.group_conditional_cdf._pipeline_steps_rushing import (
+    _step_apply_rushing_affine_groupcdf_candidate,
+)
+from sportstradamus.training.group_conditional_cdf._pipeline_steps_shared import (
+    _persist_structural_columns,
+)
 from sportstradamus.training.hyperparams import _BoundedResponseFn, run_hyper_opt
+from sportstradamus.training.model_strategy_artifacts import (
+    MODEL_STRATEGY_MODEL_KEY,
+    artifact_identity_columns,
+    build_artifact_identity,
+)
+from sportstradamus.training.model_strategy_execution import artifact_namespace
+from sportstradamus.training.model_strategy_registry import (
+    BASE_STRUCTURAL_STRATEGY,
+    CAP_DETERMINISTIC_TRAIN,
+    CAP_FULL_HPO,
+    CellContext,
+    distribution_class,
+    get_strategy,
+    validate_strategy_selection,
+)
+from sportstradamus.training.nfl_yards_context import (
+    build_receiving_role_context,
+    build_rushing_expert_context,
+)
+from sportstradamus.training.nfl_yards_experiments import (
+    RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
+    RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+    RUSHING_EXPERT_EXPERIMENTS,
+    RUSHING_POSITIONS,
+)
 from sportstradamus.training.report import report
+from sportstradamus.training.role_specs import role_spec_for
 from sportstradamus.training.scorecard import (
     _gate4_pit_ks_threshold,
     _randomized_pit_draws,
@@ -662,6 +705,11 @@ def _step_synthesize_odds(
     """
     step = M["Result"].drop_duplicates().sort_values().diff().min()
     _prep_gate = stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma") else 0
+    # Synthetic odds are a cv-based book stand-in for rows lacking a real line, generated
+    # BEFORE any model is fit — so there are no fitted mixture params to pass. Route Mixture
+    # through the SkewNormal cv-fallback (get_odds derives sigma=ev*cv, skew=0): a plain
+    # continuous prior, which is all a fabricated line needs.
+    synth_dist = "SkewNormal" if dist == "Mixture" else dist
     synthetic_mask = M.Odds.isna() | (M.Odds == 0)
     if "Odds_synthetic" in M.columns:
         synthetic_mask |= M["Odds_synthetic"].fillna(False)
@@ -669,12 +717,12 @@ def _step_synthesize_odds(
         if np.isnan(row["EV"]) or row["EV"] <= 0:
             M.loc[i, "Odds"] = 0.5
             M.loc[i, "EV"] = get_ev(
-                M.loc[i, "Line"], 0.5, cv=cv, dist=dist, gate=_prep_gate or None
+                M.loc[i, "Line"], 0.5, cv=cv, dist=synth_dist, gate=_prep_gate or None
             )
             M.loc[i, "Odds_synthetic"] = True
         else:
             M.loc[i, "Odds"] = 1 - get_odds(
-                row["Line"], row["EV"], dist, cv=cv, step=step, gate=_prep_gate or None
+                row["Line"], row["EV"], synth_dist, cv=cv, step=step, gate=_prep_gate or None
             )
             M.loc[i, "Odds_synthetic"] = False
     return M, step
@@ -730,7 +778,11 @@ def _prune_uninformative_features(X_train: pd.DataFrame, categorical_cols: list[
 
 
 def _step_build_splits(
-    M: pd.DataFrame, stat_data, market: str, target_normalization: str = "ratio_meanyr"
+    M: pd.DataFrame,
+    stat_data,
+    market: str,
+    target_normalization: str = "ratio_meanyr",
+    structural_strategy: str = BASE_STRUCTURAL_STRATEGY,
 ) -> dict:
     """Build feature matrix, temporal 70/30 split, then 50/50 test/validation.
 
@@ -746,6 +798,7 @@ def _step_build_splits(
         ``y_train``, ``y_test``, ``y_validation``, ``B_train``, ``B_test``,
         ``B_validation``, ``y_train_labels``.
     """
+    # style: allow-complexity -- orchestrates matrix build, temporal split, feature prune, and role-column protection
     y = M[["Result"]]
     # ``reindex`` over ``M[cols]`` so a stale cached parquet that hasn't been
     # regenerated since the last ``feature_filter.json`` schema addition fills
@@ -796,6 +849,12 @@ def _step_build_splits(
     # ``prediction/scoring.py``), so pruning at train time propagates
     # cleanly to serving without any inference-side change.
     kept_cols = _prune_uninformative_features(X_train, categories)
+    if structural_strategy == RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR:
+        # Routing is part of the candidate's auditable feature contract even
+        # when a cached train partition makes one role input constant.
+        for column in role_spec_for(stat_data.league, market).role_columns:
+            if column in X.columns and column not in kept_cols:
+                kept_cols.append(column)
     # The projvol denominator is load-bearing for decode even if its train-split
     # variance is low — never let pruning drop it.
     if projvol_denom is not None and projvol_denom not in kept_cols:
@@ -814,8 +873,22 @@ def _step_build_splits(
     B_validation = M.loc[X_validation.index, ["Line", "Odds", "EV"]]
 
     y_train_labels = np.ravel(y_train.to_numpy())
-    players_test = M.loc[X_test.index, "Player"].values if "Player" in M.columns else None
-    dates_test = M.loc[X_test.index, "Date"].values
+    # Keep metadata index-bearing: ``_step_predict_splits`` sorts ``X_test`` by
+    # index before persistence, and a positional array would silently attach
+    # each player/date to whichever row moved into that position.
+    players_train = M.loc[X_train.index, "Player"] if "Player" in M.columns else None
+    players_validation = M.loc[X_validation.index, "Player"] if "Player" in M.columns else None
+    players_test = M.loc[X_test.index, "Player"] if "Player" in M.columns else None
+    dates_validation = M.loc[X_validation.index, "Date"]
+    dates_test = M.loc[X_test.index, "Date"]
+    archived_validation = M.loc[X_validation.index, "Archived"] if "Archived" in M.columns else None
+    archived_test = M.loc[X_test.index, "Archived"] if "Archived" in M.columns else None
+    odds_synthetic_validation = (
+        M.loc[X_validation.index, "Odds_synthetic"] if "Odds_synthetic" in M.columns else None
+    )
+    odds_synthetic_test = (
+        M.loc[X_test.index, "Odds_synthetic"] if "Odds_synthetic" in M.columns else None
+    )
     return {
         "X": X,
         "y": y,
@@ -829,8 +902,15 @@ def _step_build_splits(
         "B_test": B_test,
         "B_validation": B_validation,
         "y_train_labels": y_train_labels,
+        "players_train": players_train,
+        "players_validation": players_validation,
         "players_test": players_test,
+        "dates_validation": dates_validation,
         "dates_test": dates_test,
+        "archived_validation": archived_validation,
+        "archived_test": archived_test,
+        "odds_synthetic_validation": odds_synthetic_validation,
+        "odds_synthetic_test": odds_synthetic_test,
     }
 
 
@@ -934,9 +1014,16 @@ def _calibration_penalty(splits: dict, dist_info: dict):
         sn_loc = strategy.decode_loc(preds["loc"].to_numpy(), X_val, global_mean, denom_col)
         sn_scale = strategy.decode_scale(preds["scale"].to_numpy(), X_val, denom_col)
         skew = preds["alpha"].to_numpy()
-        mean = decode_predictive_mean(preds, dist, sn_loc=sn_loc, sn_scale=sn_scale).ev
-        c = fit_skewnorm_dispersion_c(mean, sn_scale, skew, y_val)
-        return _served_sn_pit_ks(mean, sn_scale, skew, y_val, c, 0.0)
+        decoded = decode_predictive_mean(
+            preds,
+            dist,
+            sn_loc=sn_loc,
+            sn_scale=sn_scale,
+            hist_gate=dist_info["hist_gate"],
+        )
+        mean = decoded.ev
+        c = fit_skewnorm_dispersion_c(mean, sn_scale, skew, y_val, gate=decoded.gate)
+        return _served_sn_pit_ks(mean, sn_scale, skew, y_val, c, 0.0, decoded.gate)
 
     def count_pit_ks(params: dict) -> float:
         preds = fit_predict_params(
@@ -980,7 +1067,9 @@ def _calibration_penalty(splits: dict, dist_info: dict):
         )
         return _randomized_pit_ks(frame, dist, y_val, strategy=TARGET_NORM_NONE)
 
-    return served_pit_ks if dist == "SkewNormal" else count_pit_ks
+    if dist == "SkewNormal":
+        return served_pit_ks
+    return count_pit_ks
 
 
 def _step_select_hyperparams(
@@ -1121,8 +1210,199 @@ def _step_fit_model(
     )
 
 
+def _kill_experiment_context(context: dict, splits: dict, reason: str) -> dict:
+    """Mark a research candidate killed and route every split to its pooled fallback."""
+    return {
+        **context,
+        "status": "killed_fallback",
+        "kill_reason": reason,
+        "routes": {
+            split: pd.Series(
+                "pooled_fallback",
+                index=splits[f"X_{split}"].index,
+                dtype="object",
+            )
+            for split in ("train", "validation", "test")
+        },
+    }
+
+
+def _step_fit_rushing_experts(
+    context: dict,
+    *,
+    dist: str,
+    dist_obj,
+    splits: dict,
+    opt_params: dict,
+    use_hurdle: bool,
+    normalize: bool,
+    offset_mode: bool,
+    shape_ceiling,
+    deterministic: bool,
+    sn_param: str,
+) -> tuple[dict[int, object], dict]:
+    """Fit QB then RB with the pooled columns, labels, and selected parameters."""
+    if context["status"] != "active":
+        return {}, context
+
+    X_train = splits["X_train"]
+    positions = pd.to_numeric(X_train["Player position"], errors="coerce")
+    y_train_labels = np.asarray(splits["y_train_labels"])
+    expert_models: dict[int, object] = {}
+    for code in RUSHING_POSITIONS:
+        mask = positions.eq(code).to_numpy()
+        if not mask.any():
+            return {}, _kill_experiment_context(
+                context,
+                splits,
+                f"missing eligible train rows for rushing position code {code}",
+            )
+        expert_models[code] = _step_fit_model(
+            dist,
+            dist_obj,
+            X_train.loc[positions.eq(code)],
+            y_train_labels[mask],
+            opt_params,
+            use_hurdle=use_hurdle,
+            normalize=normalize,
+            offset_mode=offset_mode,
+            shape_ceiling=shape_ceiling,
+            deterministic=deterministic,
+            sn_param=sn_param,
+        )
+        if expert_models[code] is None:
+            return {}, _kill_experiment_context(
+                context,
+                splits,
+                f"missing fitted rushing expert for position code {code}",
+            )
+    return expert_models, context
+
+
+def _predict_split_params(
+    predict_model,
+    dist: str,
+    X_part: pd.DataFrame,
+    *,
+    normalize: bool,
+    offset_mode: bool,
+    sn_param: str,
+) -> pd.DataFrame:
+    """Raw distribution params for one split, routing hurdle vs LSS heads."""
+    if getattr(predict_model, "is_hurdle", False):
+        return predict_hurdle_params(predict_model, X_part)
+    return predict_lss_params(
+        predict_model,
+        dist,
+        X_part,
+        normalized=normalize,
+        offset_mode=offset_mode,
+        sn_param=sn_param,
+    )
+
+
+def _stitch_one_split(
+    split: str,
+    pooled: pd.DataFrame,
+    X_part: pd.DataFrame,
+    routes: pd.Series,
+    experts: dict[int, object],
+    dist: str,
+    *,
+    normalize: bool,
+    offset_mode: bool,
+    sn_param: str,
+) -> pd.DataFrame:
+    """Overlay each rushing position's expert params onto one pooled split."""
+    stitched = pooled.copy()
+    position = pd.to_numeric(X_part["Player position"], errors="coerce")
+    eligible_fallback = position.isin(RUSHING_POSITIONS) & routes.eq("pooled_fallback")
+    if eligible_fallback.any():
+        raise ValueError(f"eligible rushing fallback rows on {split}")
+
+    for code in RUSHING_POSITIONS:
+        eligible_index = X_part.index[position.eq(code)]
+        expert_params = _predict_split_params(
+            experts[code],
+            dist,
+            X_part.loc[eligible_index],
+            normalize=normalize,
+            offset_mode=offset_mode,
+            sn_param=sn_param,
+        )
+        valid = (
+            not expert_params.index.has_duplicates
+            and expert_params.index.equals(eligible_index)
+            and list(expert_params.columns) == list(pooled.columns)
+            and np.isfinite(expert_params.to_numpy(dtype=float)).all()
+        )
+        if not valid:
+            raise ValueError(f"invalid {RUSHING_POSITIONS[code]} expert parameters on {split}")
+        stitched.loc[eligible_index, :] = expert_params.to_numpy()
+    return stitched
+
+
+def _stitch_rushing_expert_params(
+    pooled_params: dict[str, pd.DataFrame],
+    dist: str,
+    splits: dict,
+    context: dict | None,
+    experts: dict[int, object],
+    *,
+    normalize: bool,
+    offset_mode: bool,
+    sn_param: str,
+) -> tuple[dict[str, pd.DataFrame], dict | None]:
+    """Overlay per-position rushing-expert params onto the pooled predictions.
+
+    Returns ``(stitched_params, context)``. When the candidate is not an active
+    rushing experiment, the pooled params pass through unchanged. A missing
+    expert or an invalid stitch kills the experiment and routes every split to
+    its pooled fallback.
+    """
+    if (
+        context is None
+        or context.get("slug") not in RUSHING_EXPERT_EXPERIMENTS
+        or context["status"] != "active"
+    ):
+        return pooled_params, context
+    if any(code not in experts for code in RUSHING_POSITIONS):
+        return pooled_params, _kill_experiment_context(
+            context,
+            splits,
+            "missing fitted QB/RB rushing expert",
+        )
+
+    try:
+        stitched = {
+            split: _stitch_one_split(
+                split,
+                pooled_params[split],
+                splits[f"X_{split}"],
+                context["routes"][split].reindex(splits[f"X_{split}"].index),
+                experts,
+                dist,
+                normalize=normalize,
+                offset_mode=offset_mode,
+                sn_param=sn_param,
+            )
+            for split in ("train", "validation", "test")
+        }
+    except ValueError as exc:
+        return pooled_params, _kill_experiment_context(context, splits, str(exc))
+    return stitched, context
+
+
 def _step_predict_splits(
-    model, dist: str, splits: dict, *, normalize: bool, offset_mode: bool, sn_param: str
+    model,
+    dist: str,
+    splits: dict,
+    *,
+    normalize: bool,
+    offset_mode: bool,
+    sn_param: str,
+    expert_models: dict[int, object] | None = None,
+    nfl_yards_context: dict | None = None,
 ) -> dict:
     """Predict raw distribution params on train/validation/test splits.
 
@@ -1132,17 +1412,32 @@ def _step_predict_splits(
     Returns:
         Dict with: ``prob_params_train``, ``prob_params_validation``, ``prob_params``.
     """
-
-    def _predict(X_part: pd.DataFrame) -> pd.DataFrame:
-        if getattr(model, "is_hurdle", False):
-            return predict_hurdle_params(model, X_part)
-        return predict_lss_params(
-            model, dist, X_part, normalized=normalize, offset_mode=offset_mode, sn_param=sn_param
+    experts = expert_models or {}
+    pooled_params = {
+        split: _predict_split_params(
+            model,
+            dist,
+            splits[f"X_{split}"],
+            normalize=normalize,
+            offset_mode=offset_mode,
+            sn_param=sn_param,
         )
+        for split in ("train", "validation", "test")
+    }
+    stitched_params, context = _stitch_rushing_expert_params(
+        pooled_params,
+        dist,
+        splits,
+        nfl_yards_context,
+        experts,
+        normalize=normalize,
+        offset_mode=offset_mode,
+        sn_param=sn_param,
+    )
 
-    prob_params_train = _predict(splits["X_train"])
-    prob_params_validation = _predict(splits["X_validation"])
-    prob_params = _predict(splits["X_test"])
+    prob_params_train = stitched_params["train"]
+    prob_params_validation = stitched_params["validation"]
+    prob_params = stitched_params["test"]
 
     prob_params_train.sort_index(inplace=True)
     prob_params_train["result"] = splits["y_train"]["Result"]
@@ -1169,6 +1464,7 @@ def _step_predict_splits(
         "prob_params_train": prob_params_train,
         "prob_params_validation": prob_params_validation,
         "prob_params": prob_params,
+        "nfl_yards_context": context,
     }
 
 
@@ -1254,15 +1550,16 @@ def _step_compute_mode_stats(
 def _zero_inflated_outcome_mean(
     base_mean: np.ndarray, dist: str, gate: np.ndarray | None
 ) -> np.ndarray:
-    """E[Y] = (1-π)·μ for zero-inflated count cells; the base mean otherwise.
+    """E[Y] = (1-π)·μ for zero-adjusted cells; the base mean otherwise.
 
     ZINB/ZAGamma store the base-distribution mean — the betting convention factors
     the gate out and reapplies it in ``get_odds``. The EV/bias diagnostics compare
-    against zero-INCLUSIVE outcomes (Result, Line), so they must reapply it. SkewNormal
-    EV is already a full mean and NegBin/Gamma carry no gate — both pass through. Mirrors
+    against zero-INCLUSIVE outcomes (Result, Line), so they must reapply it. Gated
+    SkewNormal is also trained on positive rows and carries a historical gate; plain
+    SkewNormal, NegBin, and Gamma pass through. Mirrors
     ``training.scorecard._zero_inflated_mean``.
     """
-    if dist in ("ZINB", "ZAGamma") and gate is not None:
+    if dist in ("ZINB", "ZAGamma", "SkewNormal") and gate is not None:
         return base_mean * (1.0 - gate)
     return base_mean
 
@@ -1492,7 +1789,16 @@ def _build_y_proba_raw(B_test, decoded: dict, dist: str, step) -> np.ndarray:
     return np.array([under, 1 - under]).transpose()
 
 
-def _model_version(trained_at: str, opt_params: dict, dist: str, cv: float, step, norm: str) -> str:
+def _model_version(
+    trained_at: str,
+    opt_params: dict,
+    dist: str,
+    cv: float,
+    step,
+    norm: str,
+    *,
+    structural_strategy: str = BASE_STRUCTURAL_STRATEGY,
+) -> str:
     """Deterministic ``{yyyymmdd}.{norm-slug}.{sha8}`` identity for a trained model.
 
     ``sha8`` is a sha1 over the sorted repr of the model's stable identity
@@ -1500,9 +1806,15 @@ def _model_version(trained_at: str, opt_params: dict, dist: str, cv: float, step
     on the same data and config reproduces the same version. WS-1 joins live
     reads on this string to attribute predictions to the model that made them.
     """
-    identity = repr(
-        sorted((*opt_params.items(), ("distribution", dist), ("cv", cv), ("step", step)))
-    )
+    identity_fields = [
+        *opt_params.items(),
+        ("distribution", dist),
+        ("cv", cv),
+        ("step", step),
+    ]
+    if structural_strategy != BASE_STRUCTURAL_STRATEGY:
+        identity_fields.append(("structural_strategy", structural_strategy))
+    identity = repr(sorted(identity_fields))
     sha8 = hashlib.sha1(identity.encode()).hexdigest()[:8]
     return f"{trained_at[:10].replace('-', '')}.{norm or 'none'}.{sha8}"
 
@@ -1537,10 +1849,17 @@ def _build_filedict(
     zinb_mode: str,
     sn_param: str,
     X,
+    league: str,
+    market: str,
+    matrix_hash: str,
+    selected_controls: dict[str, str],
+    structural_strategy: str = BASE_STRUCTURAL_STRATEGY,
+    algorithm_payload: dict | None = None,
+    expert_models: dict[int, object] | None = None,
 ) -> dict:
     """Assemble the model pickle dict. Key order is load-bearing for byte parity."""
     trained_at = datetime.now(UTC).isoformat()
-    return {
+    filedict = {
         "model": model,
         "step": step,
         "stats": {
@@ -1595,7 +1914,9 @@ def _build_filedict(
         "hist_gate": hist_gate,
         "shape_ceiling": shape_ceiling,
         "normalized": normalize,
-        "offset_meta": strategy.offset_meta(global_mean, denom_col),
+        "offset_meta": (
+            strategy.offset_meta(global_mean, denom_col) if strategy is not None else None
+        ),
         "target_normalization": target_normalization,
         "posthoc": posthoc_slug,
         "posthoc_blob": posthoc_blob,
@@ -1606,9 +1927,29 @@ def _build_filedict(
         "expected_columns": list(X.columns),
         "trained_at": trained_at,
         "model_version": _model_version(
-            trained_at, opt_params, dist, cv, step, target_normalization
+            trained_at,
+            opt_params,
+            dist,
+            cv,
+            step,
+            target_normalization,
+            structural_strategy=structural_strategy,
         ),
     }
+    if algorithm_payload is not None:
+        filedict["nfl_yards_experiment"] = algorithm_payload
+    strategy_slug = structural_strategy if structural_strategy != BASE_STRUCTURAL_STRATEGY else dist
+    filedict[MODEL_STRATEGY_MODEL_KEY] = build_artifact_identity(
+        strategy_slug,
+        league,
+        market,
+        selected_controls,
+        algorithm_payload,
+        matrix_hash=matrix_hash,
+    ).as_model_blob()
+    if expert_models is not None:
+        filedict["expert_models"] = expert_models
+    return filedict
 
 
 def _persist_player_metadata(X_test: pd.DataFrame, splits: dict) -> None:
@@ -1632,6 +1973,18 @@ def _deterministic_dump_suffix(dist: str, zinb_mode: str) -> str:
     return "_hurdle" if dist == "ZINB" and zinb_mode == "hurdle" else ""
 
 
+def _deterministic_dump_subdir(
+    dist: str,
+    zinb_mode: str,
+    target_normalization: str,
+    structural_strategy: str = BASE_STRUCTURAL_STRATEGY,
+) -> str:
+    """Research artifact namespace, preserving the legacy default exactly."""
+    subdir = f"{target_normalization}{_deterministic_dump_suffix(dist, zinb_mode)}"
+    strategy_slug = structural_strategy if structural_strategy != BASE_STRUCTURAL_STRATEGY else dist
+    return artifact_namespace(subdir, get_strategy(strategy_slug))
+
+
 def _stage_family_shape_columns(
     X_test: pd.DataFrame,
     *,
@@ -1641,6 +1994,9 @@ def _stage_family_shape_columns(
     sn_scale_test: np.ndarray | None,
     sn_skew_test: np.ndarray | None,
     mix_test: dict | None,
+    r_test: np.ndarray | None,
+    gate_blend_test: np.ndarray | float | None,
+    phi_test: np.ndarray | None,
     target_normalization: str,
     global_mean: float,
     denom_col: str,
@@ -1649,12 +2005,14 @@ def _stage_family_shape_columns(
     """Stage the family's served shape columns onto the test-set frame.
 
     Gate 4 must score the SERVED predictive (blended params × dispersion c), the
-    same distribution inference prices, so the continuous families re-encode the
-    served params to the model's normalized space — the scorecard's decode
-    recovers them byte-for-byte. Encode is the exact inverse of decode only when
-    both use this cell's denom_col, which the scorecard recovers from the
-    persisted DenomCol.
+    same distribution inference prices. Continuous families re-encode the served
+    params to the model's normalized space, while count families persist their
+    post-fusion, post-dispersion natural parameters directly. The scorecard's
+    decode therefore recovers the priced distribution byte-for-byte. Encode is
+    the exact inverse of decode only when both use this cell's denom_col, which
+    the scorecard recovers from the persisted DenomCol.
     """
+    # style: allow-complexity -- assembles per-family (SkewNormal/Mixture/ZINB) shape columns for scoring
     if dist == "SkewNormal":
         # Derive scipy loc via skewnormal_loc_from_mean — the single authoritative
         # formula shared with the betting path and the scorecard fit.
@@ -1671,8 +2029,8 @@ def _stage_family_shape_columns(
         # shrinks toward global_mean; persist it so the scorecard's `_decode_sn_loc_scale`
         # recovers the served loc instead of shrinking toward 0. Ratio/Mean10 decodes ignore it.
         X_test["GlobalMean"] = global_mean
-        if hist_gate > GATE_PUBLISH_THRESHOLD:
-            X_test["Gate"] = hist_gate
+        if gate_blend_test is not None:
+            X_test["Gate"] = gate_blend_test
     elif dist == "Mixture":
         # Same served-predictive contract as the SkewNormal branch; the mixture
         # weight needs no encode — it is scale-free.
@@ -1685,16 +2043,21 @@ def _stage_family_shape_columns(
         X_test["DenomCol"] = denom_col
         X_test["GlobalMean"] = global_mean
     elif dist in ("NegBin", "ZINB"):
+        if r_test is None:
+            raise ValueError(f"{dist} artifact persistence requires served r_test")
+        X_test["R"] = r_test
+        X_test["NB_P"] = weighted_mean / (r_test + weighted_mean)
         if dist == "ZINB":
-            X_test["Gate"] = prob_params["gate"]
-        X_test["R"] = prob_params["total_count"]
-        X_test["NB_P"] = prob_params["probs"]
+            if gate_blend_test is None:
+                raise ValueError("ZINB artifact persistence requires served gate_blend_test")
+            X_test["Gate"] = gate_blend_test
     elif dist == "DPO":
-        # Raw natural params, same staging as NegBin's R/NB_P (DP_MU is the mu
-        # parameter, not the mean — the scorecard's decode recovers the exact
-        # series mean itself). Gate-free family: no Gate column.
-        X_test["DP_MU"] = prob_params["mu"]
-        X_test["DP_PHI"] = prob_params["phi"]
+        if phi_test is None:
+            raise ValueError("DPO artifact persistence requires served phi_test")
+        # DP_MU is the natural parameter, not the mean. Invert the served mean
+        # after fusion while holding the served, dispersion-calibrated phi fixed.
+        X_test["DP_MU"] = _dp_mu_from_mean(weighted_mean, phi_test)
+        X_test["DP_PHI"] = phi_test
     elif dist in ("Gamma", "ZAGamma"):
         if dist == "ZAGamma":
             X_test["Gate"] = prob_params["gate"]
@@ -1719,11 +2082,26 @@ def _step_persist_artifacts(
     sn_scale_test: np.ndarray | None,
     sn_skew_test: np.ndarray | None,
     mix_test: dict | None,
+    r_test: np.ndarray | None,
+    gate_blend_test: np.ndarray | float | None,
+    phi_test: np.ndarray | None,
     global_mean: float,
     denom_col: str,
     pit_recal_blob: dict | None = None,
+    pit_recal_by_row: pd.Series | None = None,
+    prepool_over: np.ndarray | None = None,
+    receiving_calibration_payload: str | None = None,
+    receiving_f0: np.ndarray | None = None,
+    receiving_role: pd.Series | None = None,
+    receiving_position: pd.Series | None = None,
+    structural_strategy: str = BASE_STRUCTURAL_STRATEGY,
+    nfl_yards_routes: dict[str, pd.Series] | None = None,
 ) -> None:
-    """Write the test-set CSV and the model pickle.
+    """Write the scorecard-shaped test-set CSV and the model pickle.
+
+    ``B_test["Odds"]`` enters in the training-layer book-over convention and is
+    converted here to the scorecard's book-under convention. Family shape args
+    are the served post-fusion, post-dispersion values, not raw model outputs.
 
     Deterministic mode redirects the model pickle to
     ``research/models/deterministic/{strategy}{_hurdle?}/`` at the repo root so
@@ -1738,11 +2116,13 @@ def _step_persist_artifacts(
     X_test["Result"] = y_test["Result"]
     X_test["Line"] = B_test["Line"].values
     X_test["Blended_EV"] = weighted_mean
-    X_test["Odds"] = B_test["Odds"].values
+    # Internal B_* frames use book OVER probability for validation/blending;
+    # scorecard-shaped CSV artifacts define Odds as book UNDER probability.
+    X_test["Odds"] = 1.0 - B_test["Odds"].values
     # EV is the base mean the blend used, mean-corrected when a mean-stage
     # corrector is active, so the bias gates (Gate 2/3) read the corrected value.
-    # The native shape columns below stay uncorrected — Gate 4 reads them and
-    # measures dispersion, which the corrector intentionally leaves alone.
+    # The served shape columns below retain their separately calibrated
+    # dispersion, which the mean-stage corrector intentionally leaves alone.
     X_test["EV"] = ev
     _stage_family_shape_columns(
         X_test,
@@ -1752,23 +2132,47 @@ def _step_persist_artifacts(
         sn_scale_test=sn_scale_test,
         sn_skew_test=sn_skew_test,
         mix_test=mix_test,
+        r_test=r_test,
+        gate_blend_test=gate_blend_test,
+        phi_test=phi_test,
         target_normalization=target_normalization,
         global_mean=global_mean,
         denom_col=denom_col,
         hist_gate=hist_gate,
     )
 
-    if pit_recal_blob is not None:
+    if pit_recal_by_row is not None:
+        aligned_maps = pit_recal_by_row.reindex(X_test.index)
+        if aligned_maps.isna().any():
+            raise ValueError("rowwise PIT recalibration maps do not align to test rows")
+        X_test["PITRecalKnots"] = aligned_maps.to_numpy()
+    elif pit_recal_blob is not None:
         # §6.1 Rung C map, persisted as one constant JSON column so the CSV-only scorecard
         # can apply g to the PIT before the Gate-4 KS (mirrors DenomCol/GlobalMean). Absent
         # column => no warp => byte-identical to a pre-Rung-C cell.
         X_test["PITRecalKnots"] = json.dumps(pit_recal_blob)
 
     X_test["P"] = y_proba_filt[:, 1]
+    if prepool_over is not None:
+        prepool = np.asarray(prepool_over, dtype=float)
+        if prepool.shape != (len(X_test),) or not np.isfinite(prepool).all():
+            raise ValueError("pre-pool probability must be finite and row-aligned")
+        X_test["P_PrePool"] = prepool
     # Pre-blend (model-only) over-probability — lets the offline scorecard report a
     # standalone Gate-1 CI alongside the fused one, attributing the pass to model vs book.
     X_test["P_standalone"] = y_proba_raw[:, 1]
     _persist_player_metadata(X_test, splits)
+    for column, value in artifact_identity_columns(filedict[MODEL_STRATEGY_MODEL_KEY]).items():
+        X_test[column] = value
+    _persist_structural_columns(
+        X_test,
+        structural_strategy=structural_strategy,
+        nfl_yards_routes=nfl_yards_routes,
+        receiving_calibration_payload=receiving_calibration_payload,
+        receiving_f0=receiving_f0,
+        receiving_role=receiving_role,
+        receiving_position=receiving_position,
+    )
 
     # Under --deterministic, redirect to a `deterministic/` subdir so the
     # scorecard harness can score artifacts without overwriting production.
@@ -1779,8 +2183,12 @@ def _step_persist_artifacts(
     # pickle moves to the repo-root research dir so the package install
     # never carries the research artifacts.
     if deterministic:
-        suffix = _deterministic_dump_suffix(dist, zinb_mode)
-        strategy_subdir = f"{target_normalization}{suffix}"
+        strategy_subdir = _deterministic_dump_subdir(
+            dist,
+            zinb_mode,
+            target_normalization,
+            structural_strategy,
+        )
         csv_subdir = f"deterministic/{strategy_subdir}/"
         mdl_dir = _DETERMINISTIC_MODEL_ROOT / strategy_subdir
     else:
@@ -1930,9 +2338,13 @@ def _blended_val_pit(fused: dict, y_val: np.ndarray) -> np.ndarray:
             "SN_Alpha": alpha,
         }
     )
-    return np.mean(
-        _randomized_pit_draws(params, "SkewNormal", y_val, strategy=TARGET_NORM_NONE), axis=0
-    )
+    if fused.get("gate_blend_val") is not None:
+        params["Gate"] = fused["gate_blend_val"]
+    # A gated continuous head has a genuine atom at zero. Averaging randomized draws
+    # would collapse that jump back to a non-uniform mid-PIT. Preserve a draw-by-row
+    # matrix so Rung C can keep every row's draws together in cross-validation.
+    draws = _randomized_pit_draws(params, "SkewNormal", y_val, strategy=TARGET_NORM_NONE)
+    return draws[0] if len(draws) == 1 else np.stack(draws)
 
 
 def _mixture_pit_frame(mix: dict) -> pd.DataFrame:
@@ -2141,6 +2553,7 @@ def _step_calibrate_dispersion(
             fused["sn_sigma_blend_val"],
             fused["sn_alpha_blend_val"],
             y_val_arr,
+            gate=fused["gate_blend_val"],
         )
         out["c_opt"] = c_opt
         out["skew_cal"] = s_opt
@@ -2209,7 +2622,7 @@ def _step_compute_test_probabilities(
         )
     # §6.1 Rung C: serve the recalibrated CDF F*=g∘F, so the persisted over-prob (Gate 1/5)
     # matches what model_prob serves. Identity (no copy) for a cell without a map.
-    under = posthoc.apply_cdf_recal(calibrated.get("pit_recal_blob"), under)
+    under = apply_cdf_recal(calibrated.get("pit_recal_blob"), under)
     return np.array([under, 1 - under]).transpose()
 
 
@@ -2257,7 +2670,7 @@ def _step_calibrate_temperature(
             phi=_phi_val,
         )
     # §6.1 Rung C: temperature calibrates the SERVED over-prob, so fit it on the warped CDF.
-    val_raw_under = posthoc.apply_cdf_recal(calibrated.get("pit_recal_blob"), val_raw_under)
+    val_raw_under = apply_cdf_recal(calibrated.get("pit_recal_blob"), val_raw_under)
     val_raw_over_clipped = np.clip(1 - val_raw_under, 1e-6, 1 - 1e-6)
     val_logits = logit(val_raw_over_clipped)
     result_ts = minimize_scalar(
@@ -2321,8 +2734,8 @@ def _step_decode_predictions(
 ) -> dict:
     """Decode raw distribution parameters to per-row EVs and shape vectors.
 
-    SkewNormal: applies the strategy's decode_loc/decode_scale then adds the
-    skew-normal mean adjustment ``delta * sqrt(2/pi)``. NegBin/ZINB: EV = r·p/(1−p).
+    SkewNormal applies the strategy's decode_loc/decode_scale, then its family
+    mean adjustment. NegBin/ZINB: EV = r·p/(1−p).
     DPO: EV is the exact series mean (``mu`` is only approximate) with ``phi`` alongside.
     Gamma/ZAGamma: EV = α/β. Synthesizes a constant ``gate_*`` vector for
     SkewNormal when ``hist_gate > GATE_PUBLISH_THRESHOLD`` (no per-row gate from the model).
@@ -2428,7 +2841,14 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
     book_ev_val = splits["B_validation"]["EV"].to_numpy()
     y_val_result = splits["y_validation"]["Result"].to_numpy()
 
-    _zi_kwargs = {"gate_book": hist_gate} if hist_gate > GATE_PUBLISH_THRESHOLD else {}
+    # SkewNormal book EVs are archived without a zero gate. The external hurdle
+    # belongs to the positive-only model head, so the two blend endpoints are
+    # model_gate and zero. This preserves the ungated sportsbook endpoint at w=0.
+    _fit_gate_kwargs = (
+        {"gate_model": decoded["gate_validation"], "gate_book": 0.0}
+        if hist_gate > GATE_PUBLISH_THRESHOLD and decoded["gate_validation"] is not None
+        else {}
+    )
     model_weight = calibration.fit_blend_weight(
         blending,
         ev_validation,
@@ -2438,7 +2858,17 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
         cv=cv,
         model_sigma=decoded["sn_sigma_val"],
         model_skew_alpha=decoded["sn_alpha_val"],
-        **_zi_kwargs,
+        **_fit_gate_kwargs,
+    )
+    _test_gate_kwargs = (
+        {"gate_model": decoded["gate_test"], "gate_book": 0.0}
+        if hist_gate > GATE_PUBLISH_THRESHOLD and decoded["gate_test"] is not None
+        else {}
+    )
+    _val_gate_kwargs = (
+        {"gate_model": decoded["gate_validation"], "gate_book": 0.0}
+        if hist_gate > GATE_PUBLISH_THRESHOLD and decoded["gate_validation"] is not None
+        else {}
     )
     weighted_mean, sn_sigma_blend_test, sn_alpha_blend_test, gate_blend_test = fused_loc(
         model_weight,
@@ -2448,7 +2878,7 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
         "SkewNormal",
         sigma=decoded["sn_sigma_test"],
         skew_alpha=decoded["sn_alpha_test"],
-        **_zi_kwargs,
+        **_test_gate_kwargs,
     )
     weighted_mean_val, sn_sigma_blend_val, sn_alpha_blend_val, gate_blend_val = fused_loc(
         model_weight,
@@ -2458,7 +2888,7 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
         "SkewNormal",
         sigma=decoded["sn_sigma_val"],
         skew_alpha=decoded["sn_alpha_val"],
-        **_zi_kwargs,
+        **_val_gate_kwargs,
     )
     out.update(
         {
@@ -2819,7 +3249,7 @@ def _skewnormal_dist_obj(sn_param: str, stabilization: str, dist_training_loss: 
 def _continuous_dist_obj(
     dist: str, sn_param: str, stabilization: str, dist_training_loss: str, y_train_labels
 ):
-    """Distribution object for the continuous branch (SkewNormal or Mixture).
+    """Distribution object for the continuous branch.
 
     ``y_train_labels`` must already be in the strategy's normalized space — the
     mixture's scale clamp is derived from its std (unused for SkewNormal).
@@ -2839,6 +3269,11 @@ def _continuous_dist_obj(
         ),
         M=_MIXTURE_COMPONENTS,
     )
+    # LightGBMLSS defaults mixture weights to a sampled Gumbel-Softmax response,
+    # so an identical row receives different weights when its batch position
+    # changes. Replace it before the object reaches either fit or predict: the
+    # deterministic categorical probabilities must define both paths.
+    mix.param_dict["mix_prob"] = softmax_fn
     label_std = float(np.std(y_train_labels))
     mix.param_dict["scale"] = _BoundedResponseFn(
         mix.param_dict["scale"],
@@ -2882,7 +3317,8 @@ def _step_select_distribution(
         stat_data: Stats instance (gamelog + log_strings).
         market: Market name.
         league: League slug.
-        target_normalization: Slug for ``baselines.get_target_normalization``.
+        target_normalization: Continuous-family slug for
+            ``baselines.get_target_normalization``, or ``"none"`` for count families.
         deterministic: If True, skip persisting cv/zi to stat_calibration.json.
         sn_param: ``"direct"`` or ``"centered"`` — SkewNormal head
             parametrization (see :func:`_skewnormal_dist_obj`); ignored by the
@@ -2891,9 +3327,10 @@ def _step_select_distribution(
     Returns:
         Dict with: ``dist``, ``dist_obj`` (None on hurdle path until built),
         ``cv``, ``shape_ceiling``, ``marginal_shape``, ``normalize``,
-        ``offset_mode``, ``denom_col``, ``strategy``, ``hist_gate``,
+        ``offset_mode``, ``denom_col``, ``strategy`` (None for count families), ``hist_gate``,
         ``player_stats``, ``global_mean``, ``sn_param``.
     """
+    # style: allow-complexity -- selects the distribution family and its training controls across families
     y_train_labels = splits["y_train_labels"]
     X_train = splits["X_train"]
 
@@ -2921,7 +3358,7 @@ def _step_select_distribution(
     normalize = False
     offset_mode = False
     denom_col = "MeanYr"
-    strategy = baselines.get_target_normalization(target_normalization)
+    strategy = None
     dist_obj = None
 
     configured = (
@@ -2938,6 +3375,7 @@ def _step_select_distribution(
         market,
     )
     if dist in ("SkewNormal", "Mixture"):
+        strategy = baselines.get_target_normalization(target_normalization)
         cv = (
             player_stats.std()
             / player_stats.mean()
@@ -2950,7 +3388,8 @@ def _step_select_distribution(
         # float(None) raises TypeError in _wide_row's _diag() helper.
         marginal_shape = float("nan")
 
-        if hist_gate > NONZERO_DENOM_GATE:
+        zero_adjusted_continuous = dist in ("SkewNormal", "Mixture")
+        if zero_adjusted_continuous and hist_gate > NONZERO_DENOM_GATE:
             nonzero_mask = y_train_labels > 0
             X_train = X_train[nonzero_mask]
             y_train_labels = y_train_labels[nonzero_mask]
@@ -2960,7 +3399,7 @@ def _step_select_distribution(
             league,
             market,
             X_train.columns,
-            zero_inflated=hist_gate > NONZERO_DENOM_GATE,
+            zero_inflated=zero_adjusted_continuous and hist_gate > NONZERO_DENOM_GATE,
         )
         normalize = strategy.start_mode_flag == "normalized"
         offset_mode = strategy.start_mode_flag == "offset"
@@ -3038,6 +3477,105 @@ def _step_select_distribution(
     }
 
 
+def _structural_gate_inputs(
+    structural_strategy: str,
+    *,
+    calibrated: dict,
+    fused: dict,
+    splits: dict,
+    decoded: dict,
+    dist: str,
+    step,
+    experiment_context,
+    posthoc_slug: str,
+    mean_posthoc_blob,
+) -> dict:
+    """Return the unified gate-input tuple for the standard and structural paths.
+
+    The structural candidates carry their own already-pooled probabilities, so
+    they bypass ``_step_calibrate_temperature`` and the prob-stage post-hoc; the
+    standard path fits temperature and layers the post-hoc corrector. Both yield
+    the same keys the downstream scorecard consumes.
+    """
+    if structural_strategy == RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR:
+        calibrated, _ = _step_apply_receiving_two_part_groupcdf_candidate(
+            calibrated, fused, splits, experiment_context
+        )
+        receiving_fit: ReceivingCalibrationFit = calibrated["receiving_candidate_fit"]
+        receiving_test = calibrated["receiving_candidate_test"]
+        y_proba_no_filt = np.column_stack(
+            (receiving_test.mapped_under, 1.0 - receiving_test.mapped_under)
+        )
+        T_opt = float(receiving_fit.blob["temperature"])
+        val_calibrated = receiving_fit.oof_pooled_over
+        posthoc_blob = None
+        test_calibrated_over = receiving_test.pooled_over
+    elif structural_strategy == RUSHING_AFFINE_GROUPCDF_BOOK_POOL:
+        calibrated, experiment_context = _step_apply_rushing_affine_groupcdf_candidate(
+            calibrated, fused, splits, experiment_context
+        )
+        rushing_fit: RushingCalibrationFit = calibrated["rushing_candidate_fit"]
+        rushing_test = calibrated["rushing_candidate_test"]
+        test_positions = (
+            experiment_context["positions"]["test"]
+            .reindex(splits["X_test"].index)
+            .to_numpy(dtype=float)
+        )
+        base_predictive: RushingPredictive = calibrated["rushing_candidate_test_base"]
+        _, test_mapped_under = rushing_cdf_endpoints(
+            rushing_fit.blob,
+            base_predictive,
+            splits["B_test"]["Line"].to_numpy(dtype=float),
+            test_positions,
+        )
+        y_proba_no_filt = np.column_stack((test_mapped_under, 1.0 - test_mapped_under))
+        T_opt = float(rushing_fit.blob["temperature"])
+        val_calibrated = rushing_fit.oof_pooled_over
+        posthoc_blob = None
+        test_calibrated_over = rushing_test.pooled_over
+    else:
+        y_proba_no_filt = _step_compute_test_probabilities(
+            fused, calibrated, splits, decoded, dist, step
+        )
+        T_opt, val_calibrated, model_calib, y_class_val = _step_calibrate_temperature(
+            fused, calibrated, splits, decoded, dist, step
+        )
+        posthoc_blob = mean_posthoc_blob  # None unless the slug is a MEAN_STAGE corrector
+        if posthoc_slug in posthoc.PROB_STAGE:
+            posthoc_blob = posthoc.fit_posthoc(posthoc_slug, val_calibrated, y_class_val)
+            val_calibrated = posthoc.apply_posthoc(posthoc_slug, posthoc_blob, val_calibrated)
+        test_calibrated_over = apply_temperature(y_proba_no_filt[:, 1], T_opt)
+        if posthoc_slug in posthoc.PROB_STAGE:
+            test_calibrated_over = posthoc.apply_posthoc(
+                posthoc_slug, posthoc_blob, test_calibrated_over
+            )
+        return {
+            "calibrated": calibrated,
+            "y_proba_no_filt": y_proba_no_filt,
+            "T_opt": T_opt,
+            "val_calibrated": val_calibrated,
+            "model_calib": model_calib,
+            "y_class_val": y_class_val,
+            "posthoc_blob": posthoc_blob,
+            "test_calibrated_over": test_calibrated_over,
+        }
+    y_class_val = (
+        splits["y_validation"]["Result"].to_numpy(dtype=float)
+        >= splits["B_validation"]["Line"].to_numpy(dtype=float)
+    ).astype(int)
+    model_calib = 1.0 - float(np.mean((val_calibrated - y_class_val) ** 2))
+    return {
+        "calibrated": calibrated,
+        "y_proba_no_filt": y_proba_no_filt,
+        "T_opt": T_opt,
+        "val_calibrated": val_calibrated,
+        "model_calib": model_calib,
+        "y_class_val": y_class_val,
+        "posthoc_blob": posthoc_blob,
+        "test_calibrated_over": test_calibrated_over,
+    }
+
+
 def train_market(
     league: str,
     market: str,
@@ -3058,6 +3596,7 @@ def train_market(
     count_dispersion_objective: str = "crps",
     sn_param: str = "direct",
     matrix_only: bool = False,
+    structural_strategy: str = BASE_STRUCTURAL_STRATEGY,
 ) -> None:
     """Train or retrain one LightGBMLSS model for a single league/market pair.
 
@@ -3108,6 +3647,9 @@ def train_market(
             zero serving delta). Arrives resolved: the CLI maps ``"auto"`` to the
             cell's stat_meta before calling. Consulted only on the SkewNormal
             branch and in start-value seeding; persisted in the pickle.
+        structural_strategy: Resolved registered structural selector, or ``"none"``.
+            Structural methods must be applicable to this exact league/market and
+            match their fixed training controls.
     """
     # style: allow-length  pre-existing research orchestrator (§2.8/§18.9): flag,
     # don't split. Already over the limit before the FBT keyword-only conversion.
@@ -3115,6 +3657,10 @@ def train_market(
     # collapse is one more sequential stage, not nested logic.
     if zinb_mode not in {"joint", "hurdle"}:
         raise ValueError(f"zinb_mode must be 'joint' or 'hurdle', got {zinb_mode!r}")
+    if structural_strategy != BASE_STRUCTURAL_STRATEGY:
+        selected_spec = get_strategy(structural_strategy)
+        if not selected_spec.is_structural:
+            raise ValueError(f"{structural_strategy!r} is not a structural strategy selector")
 
     dist_override = dist
     init = _step_init_market(league, market, stat_data, archive, deterministic=deterministic)
@@ -3146,8 +3692,30 @@ def train_market(
     )
     if matrix_only:
         return
+    with open(training_data_path, "rb") as matrix_stream:
+        matrix_hash = hashlib.file_digest(matrix_stream, "sha256").hexdigest()
 
-    splits = _step_build_splits(M, stat_data, market, target_normalization)
+    splits = _step_build_splits(
+        M,
+        stat_data,
+        market,
+        target_normalization,
+        structural_strategy,
+    )
+    if structural_strategy == RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR:
+        experiment_context = build_receiving_role_context(
+            splits,
+            league=league,
+            market=market,
+            slug=structural_strategy,
+        )
+    elif structural_strategy in RUSHING_EXPERT_EXPERIMENTS:
+        experiment_context = build_rushing_expert_context(
+            splits,
+            slug=structural_strategy,
+        )
+    else:
+        experiment_context = None
     dist_info = _step_select_distribution(
         splits,
         stat_data,
@@ -3166,6 +3734,59 @@ def train_market(
     hist_gate = dist_info["hist_gate"]
     shape_ceiling = dist_info["shape_ceiling"]
     use_hurdle = dist == "ZINB" and zinb_mode == "hurdle"
+    strategy_slug = structural_strategy if structural_strategy != BASE_STRUCTURAL_STRATEGY else dist
+    selected_spec = get_strategy(strategy_slug)
+    runtime_controls = {
+        "dist": dist,
+        "normalization": target_normalization,
+        "dist_training_loss": _resolve_loss_fn("crps", dist_training_loss),
+        "sn_param": sn_param,
+        "blending_loss_fn": blending,
+        "zinb_mode": zinb_mode,
+        "count_dispersion_objective": count_dispersion_objective,
+        "hpo_selection": hpo_selection,
+        "stabilization": stabilization,
+    }
+    selected_controls = {
+        name: runtime_controls[name]
+        for name in (*selected_spec.fixed_controls, *selected_spec.axes)
+    }
+    cell = CellContext(
+        league=league,
+        market=market,
+        distribution=dist,
+        distribution_class=distribution_class(dist),
+        data_columns=frozenset(M.columns),
+        matrix_sha256=matrix_hash,
+    )
+    required_capability = CAP_DETERMINISTIC_TRAIN if deterministic else CAP_FULL_HPO
+    validate_strategy_selection(
+        cell,
+        selected_spec,
+        selected_controls,
+        required_capabilities={required_capability},
+    )
+    persisted_settings = {
+        "dist": dist,
+        "target_normalization": target_normalization,
+        "dist_training_loss": runtime_controls["dist_training_loss"],
+        "sn_param": sn_param,
+        "blending": blending,
+        "zinb_mode": zinb_mode,
+        "count_dispersion_objective": count_dispersion_objective,
+        "hpo_selection": hpo_selection,
+        "stabilization": stabilization,
+        "posthoc": posthoc_slug,
+    }
+    fixed_mismatches = [
+        f"{field}={persisted_settings[field]!r} (requires {expected!r})"
+        for field, expected in selected_spec.fixed_persist.items()
+        if persisted_settings[field] != expected
+    ]
+    if fixed_mismatches:
+        raise ValueError(
+            f"{selected_spec.slug} fixed-control recipe mismatch: {', '.join(fixed_mismatches)}"
+        )
 
     # WS2: fit the book's conditional (var, skew) curves and persist them for the book-only
     # fallback leg; book_skewnormal_shape reads them there only — the served blend stays
@@ -3222,6 +3843,21 @@ def train_market(
         deterministic=deterministic,
         sn_param=sn_param,
     )
+    expert_models: dict[int, object] = {}
+    if structural_strategy in RUSHING_EXPERT_EXPERIMENTS:
+        expert_models, experiment_context = _step_fit_rushing_experts(
+            experiment_context,
+            dist=dist,
+            dist_obj=dist_info["dist_obj"],
+            splits=splits,
+            opt_params=opt_params,
+            use_hurdle=use_hurdle,
+            normalize=dist_info["normalize"],
+            offset_mode=dist_info["offset_mode"],
+            shape_ceiling=shape_ceiling,
+            deterministic=deterministic,
+            sn_param=sn_param,
+        )
 
     preds = _step_predict_splits(
         model,
@@ -3230,7 +3866,15 @@ def train_market(
         normalize=dist_info["normalize"],
         offset_mode=dist_info["offset_mode"],
         sn_param=sn_param,
+        expert_models=(
+            expert_models if structural_strategy in RUSHING_EXPERT_EXPERIMENTS else None
+        ),
+        nfl_yards_context=(
+            experiment_context if structural_strategy in RUSHING_EXPERT_EXPERIMENTS else None
+        ),
     )
+    if structural_strategy in RUSHING_EXPERT_EXPERIMENTS:
+        experiment_context = preds["nfl_yards_context"]
     prob_params = preds["prob_params"]
 
     decoded = _step_decode_predictions(
@@ -3244,7 +3888,6 @@ def train_market(
         dist_info["denom_col"],
         hist_gate,
     )
-
     # Mean-stage post-hoc (orthogonal to target_normalization and to the
     # prob-stage corrector below): fit on the validation decoded mean, then
     # correct both test and validation means BEFORE fusion so the correction
@@ -3273,32 +3916,29 @@ def train_market(
         count_dispersion_objective=count_dispersion_objective,
         posthoc_slug=posthoc_slug,
     )
-
-    y_proba_no_filt = _step_compute_test_probabilities(
-        fused, calibrated, splits, decoded, dist, step
+    gate_inputs = _structural_gate_inputs(
+        structural_strategy,
+        calibrated=calibrated,
+        fused=fused,
+        splits=splits,
+        decoded=decoded,
+        dist=dist,
+        step=step,
+        experiment_context=experiment_context,
+        posthoc_slug=posthoc_slug,
+        mean_posthoc_blob=mean_posthoc_blob,
     )
-    T_opt, val_calibrated, model_calib, y_class_val = _step_calibrate_temperature(
-        fused, calibrated, splits, decoded, dist, step
-    )
-
-    # Post-hoc probability recalibration (orthogonal to target_normalization):
-    # fit on the temperature-calibrated validation over-probs, then layer it onto
-    # both the validation probs (so skill reflects it) and the persisted test
-    # probs (so the offline ship gates see the corrected cell). No-op when the
-    # cell's posthoc slug is "none" or not a probability-stage corrector.
-    posthoc_blob = mean_posthoc_blob  # None unless the slug is a MEAN_STAGE corrector
-    if posthoc_slug in posthoc.PROB_STAGE:
-        posthoc_blob = posthoc.fit_posthoc(posthoc_slug, val_calibrated, y_class_val)
-        val_calibrated = posthoc.apply_posthoc(posthoc_slug, posthoc_blob, val_calibrated)
+    calibrated = gate_inputs["calibrated"]
+    y_proba_no_filt = gate_inputs["y_proba_no_filt"]
+    T_opt = gate_inputs["T_opt"]
+    val_calibrated = gate_inputs["val_calibrated"]
+    model_calib = gate_inputs["model_calib"]
+    y_class_val = gate_inputs["y_class_val"]
+    posthoc_blob = gate_inputs["posthoc_blob"]
+    test_calibrated_over = gate_inputs["test_calibrated_over"]
 
     val_book_proba = splits["B_validation"]["Odds"].to_numpy(dtype=float)
     skill = _step_compute_skill_metrics(val_calibrated, y_class_val, val_book_proba, league, market)
-
-    test_calibrated_over = apply_temperature(y_proba_no_filt[:, 1], T_opt)
-    if posthoc_slug in posthoc.PROB_STAGE:
-        test_calibrated_over = posthoc.apply_posthoc(
-            posthoc_slug, posthoc_blob, test_calibrated_over
-        )
     y_proba_filt = np.array([1 - test_calibrated_over, test_calibrated_over]).transpose()
 
     y_class = np.ravel(
@@ -3307,10 +3947,11 @@ def train_market(
     y_proba_raw = _build_y_proba_raw(splits["B_test"], decoded, dist, step)
 
     mode_stats = _step_compute_mode_stats(y_proba_raw, y_proba_no_filt, y_proba_filt, y_class)
+    served_weighted_mean = fused["weighted_mean"]
     diag = _step_compute_diagnostics(
         splits,
         prob_params,
-        fused["weighted_mean"],
+        served_weighted_mean,
         y_proba_no_filt,
         y_class,
         fused["gate_blend_test"],
@@ -3350,6 +3991,15 @@ def train_market(
         zinb_mode=zinb_mode,
         sn_param=sn_param,
         X=splits["X"],
+        league=league,
+        market=market,
+        matrix_hash=matrix_hash,
+        selected_controls=selected_controls,
+        structural_strategy=structural_strategy,
+        algorithm_payload=calibrated.get("nfl_yards_experiment_blob"),
+        expert_models=(
+            expert_models if structural_strategy in RUSHING_EXPERT_EXPERIMENTS else None
+        ),
     )
 
     _step_persist_artifacts(
@@ -3357,7 +4007,7 @@ def train_market(
         splits=splits,
         prob_params=prob_params,
         decoded=decoded,
-        weighted_mean=fused["weighted_mean"],
+        weighted_mean=served_weighted_mean,
         y_proba_filt=y_proba_filt,
         y_proba_raw=y_proba_raw,
         dist=dist,
@@ -3369,9 +4019,28 @@ def train_market(
         sn_scale_test=calibrated["sn_sigma_blend_test"],
         sn_skew_test=calibrated["sn_alpha_blend_test"],
         mix_test=calibrated["mix_blend_test"],
+        r_test=calibrated["r_test"],
+        gate_blend_test=fused["gate_blend_test"],
+        phi_test=calibrated["phi_test"],
         global_mean=dist_info["global_mean"],
         denom_col=dist_info["denom_col"],
         pit_recal_blob=calibrated.get("pit_recal_blob"),
+        pit_recal_by_row=calibrated.get("nfl_yards_pit_maps"),
+        prepool_over=(
+            calibrated["receiving_candidate_test"].candidate_over
+            if structural_strategy == RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR
+            else (
+                calibrated["rushing_candidate_test"].candidate_over
+                if structural_strategy == RUSHING_AFFINE_GROUPCDF_BOOK_POOL
+                else None
+            )
+        ),
+        receiving_calibration_payload=calibrated.get("receiving_candidate_calibration_payload"),
+        receiving_f0=calibrated.get("receiving_candidate_test_f0"),
+        receiving_role=calibrated.get("receiving_candidate_test_role"),
+        receiving_position=calibrated.get("receiving_candidate_test_position"),
+        structural_strategy=structural_strategy,
+        nfl_yards_routes=calibrated.get("nfl_yards_routes"),
     )
 
     # Drift-monitoring SHAP: write per-cell |SHAP| + corr columns to the

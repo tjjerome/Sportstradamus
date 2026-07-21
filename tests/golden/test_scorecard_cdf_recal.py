@@ -17,7 +17,7 @@ from sportstradamus.training.scorecard import (
     ACTUAL_COL,
     DECILE_COL,
     DEFAULT_PRED_COL,
-    _pit_recal_blob,
+    _apply_pit_recal_by_row,
     _randomized_pit_draws,
     _randomized_pit_ks,
     load_test_set,
@@ -32,9 +32,7 @@ def _under_dispersed_skewnorm():
     # the served PIT piles into the tails (the under-dispersion signature Gate 4 fails on).
     rng = np.random.default_rng(0)
     y = skewnorm.rvs(_ALPHA, loc=_LOC, scale=_SCALE * 1.7, size=_N, random_state=rng)
-    df = pd.DataFrame(
-        {"SN_Loc": _LOC, "SN_Scale": _SCALE, "SN_Alpha": _ALPHA}, index=range(_N)
-    )
+    df = pd.DataFrame({"SN_Loc": _LOC, "SN_Scale": _SCALE, "SN_Alpha": _ALPHA}, index=range(_N))
     return df, y
 
 
@@ -83,4 +81,8 @@ def test_load_test_set_preserves_pit_recal_knots(tmp_path):
     path = tmp_path / "WNBA_PA.csv"
     df.to_csv(path, index=False)
     loaded = load_test_set(path, DEFAULT_PRED_COL)
-    assert _pit_recal_blob(loaded) == blob
+    probe = np.linspace(0.05, 0.95, n)
+    np.testing.assert_array_equal(
+        _apply_pit_recal_by_row(loaded, probe),
+        posthoc.apply_cdf_recal(blob, probe),
+    )

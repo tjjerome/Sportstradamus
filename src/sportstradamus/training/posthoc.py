@@ -127,6 +127,14 @@ def fit_isotonic_pit(
             continue
         x_knots.append(x)
         y_knots.append(lam * float(grp_cov.mean()) + (1.0 - lam) * x)
+    if x_knots[-1] == 1.0:
+        # A terminal atom can make the final equal-mass bin's mean exactly one.
+        # Preserve the bin's fitted coverage immediately to the left of one,
+        # then add the true CDF endpoint. This keeps the empirical map intact
+        # while giving np.interp the strictly increasing domain it requires.
+        left_of_one = float(np.nextafter(1.0, 0.0))
+        y_knots[-1] -= (1.0 - lam) * (1.0 - left_of_one)
+        x_knots[-1] = left_of_one
     x_knots.append(1.0)
     y_knots.append(1.0)
     return {"kind": "isotonic_pit", "x": x_knots, "y": y_knots}
@@ -146,33 +154,51 @@ def select_pit_recal(
     re-fit on the full split at that ``lam``. Returns ``(blob, cross_fit_ks)`` — ``cross_fit_ks``
     is the number to gate on; ``blob`` is ``None`` (apply nothing) below the fit-row floor.
     """
-    pit = np.asarray(pit, dtype=float)
-    pit = pit[np.isfinite(pit)]
-    if len(pit) < _MIN_FIT_ROWS:
+    draws = _pit_draw_matrix(pit)
+    if draws.shape[1] < _MIN_FIT_ROWS:
         return None, float("nan")
     best_lam, best_ks = lambdas[0], float("inf")
     for lam in lambdas:
-        ks = _crossfit_pit_ks(pit, lam, k)
+        ks = _crossfit_pit_ks(draws, lam, k)
         if ks < best_ks or (ks == best_ks and lam > best_lam):
             best_lam, best_ks = lam, ks
-    blob = fit_isotonic_pit(pit, lam=best_lam)
+    blob = fit_isotonic_pit(draws.reshape(-1), lam=best_lam)
     if blob is not None:
         blob["lam"] = best_lam
     return blob, best_ks
 
 
 def _crossfit_pit_ks(pit: np.ndarray, lam: float, k: int) -> float:
-    """Out-of-fold KS-from-Uniform of ``g_lam(Z)`` — the honest (non-in-sample) Gate-4 estimate."""
-    n = len(pit)
+    """Row-grouped out-of-fold KS of ``g_lam(Z)``.
+
+    ``pit`` may be one PIT per row or a ``(draw, row)`` matrix for a predictive
+    with atoms. Every randomized draw for a source row stays in the same fold;
+    otherwise duplicate positive-row PITs leak into the training folds and make
+    the cross-fit estimate optimistically pseudoreplicated.
+    """
+    draws = _pit_draw_matrix(pit)
+    n = draws.shape[1]
     folds_n = max(2, min(k, n // _MIN_FIT_ROWS))
     if folds_n < 2:
-        return _pit_ks(apply_cdf_recal(fit_isotonic_pit(pit, lam=lam), pit))
+        blob = fit_isotonic_pit(draws.reshape(-1), lam=lam)
+        return float(np.mean([_pit_ks(apply_cdf_recal(blob, draw)) for draw in draws]))
     rng = np.random.default_rng(_PIT_RECAL_CV_SEED)
-    oof = np.empty(n)
+    oof = np.empty_like(draws)
     for fold in np.array_split(rng.permutation(n), folds_n):
         train = np.setdiff1d(np.arange(n), fold, assume_unique=True)
-        oof[fold] = apply_cdf_recal(fit_isotonic_pit(pit[train], lam=lam), pit[fold])
-    return _pit_ks(oof)
+        blob = fit_isotonic_pit(draws[:, train].reshape(-1), lam=lam)
+        oof[:, fold] = apply_cdf_recal(blob, draws[:, fold])
+    return float(np.mean([_pit_ks(draw) for draw in oof]))
+
+
+def _pit_draw_matrix(pit: np.ndarray) -> np.ndarray:
+    """Return finite PIT values as ``(draw, source-row)`` without splitting row groups."""
+    draws = np.asarray(pit, dtype=float)
+    if draws.ndim == 1:
+        draws = draws[None, :]
+    elif draws.ndim != 2:
+        raise ValueError("PIT input must be one-dimensional or a (draw, row) matrix")
+    return draws[:, np.all(np.isfinite(draws), axis=0)]
 
 
 def _pit_ks(u: np.ndarray) -> float:

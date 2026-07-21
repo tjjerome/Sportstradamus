@@ -38,8 +38,9 @@ def _synth_results(lines, a, b, skew_c, skew_d, n_per_bin, rng):
         skew = skew_c + skew_d * line
         sigma, alpha = skewnormal_params_from_moments(var, skew)
         loc = skewnormal_loc_from_mean(line, sigma, alpha)
-        draws = skewnorm.rvs(float(alpha), loc=float(loc), scale=float(sigma),
-                             size=n_per_bin, random_state=rng)
+        draws = skewnorm.rvs(
+            float(alpha), loc=float(loc), scale=float(sigma), size=n_per_bin, random_state=rng
+        )
         out_results.append(draws)
         out_lines.append(np.full(n_per_bin, line))
     return np.concatenate(out_results), np.concatenate(out_lines)
@@ -130,8 +131,13 @@ def test_get_ev_fixed_sigma_round_trips():
 
 def test_fused_loc_skewnormal_default_unchanged():
     ev, sig, skew, gate = fused_loc(
-        0.3, np.array([10.0]), np.array([11.0]), 0.4, "SkewNormal",
-        sigma=np.array([3.5]), skew_alpha=np.array([1.2]),
+        0.3,
+        np.array([10.0]),
+        np.array([11.0]),
+        0.4,
+        "SkewNormal",
+        sigma=np.array([3.5]),
+        skew_alpha=np.array([1.2]),
     )
     assert float(ev[0]) == pytest.approx(10.82731187571877, abs=1e-9)
     assert float(sig[0]) == pytest.approx(4.060653952180996, abs=1e-9)
@@ -153,9 +159,15 @@ def test_fused_loc_book_shape_noop_matches_default():
 def test_fused_loc_blends_book_skew():
     w, model_skew, book_skew = 0.3, 1.2, -0.8
     _, _, skew, _ = fused_loc(
-        w, np.array([10.0]), np.array([11.0]), 0.4, "SkewNormal",
-        sigma=np.array([3.5]), skew_alpha=np.array([model_skew]),
-        book_sigma=np.array([4.0]), book_skew_alpha=np.array([book_skew]),
+        w,
+        np.array([10.0]),
+        np.array([11.0]),
+        0.4,
+        "SkewNormal",
+        sigma=np.array([3.5]),
+        skew_alpha=np.array([model_skew]),
+        book_sigma=np.array([4.0]),
+        book_skew_alpha=np.array([book_skew]),
     )
     assert float(skew[0]) == pytest.approx(w * model_skew + (1 - w) * book_skew, abs=1e-9)
 
@@ -200,8 +212,14 @@ def test_book_over_prob_fitted_uses_shape(monkeypatch):
 
     sigma, skew = config.book_skewnormal_shape(league, market, 2.2)
     expected = 1 - get_odds(
-        2.5, 2.2, "SkewNormal", cv=cv, step=0.5,
-        sigma=float(sigma), skew_alpha=float(skew), gate=None,
+        2.5,
+        2.2,
+        "SkewNormal",
+        cv=cv,
+        step=0.5,
+        sigma=float(sigma),
+        skew_alpha=float(skew),
+        gate=None,
     )
     assert float(got.iloc[0]) == pytest.approx(expected, abs=1e-12)
 
@@ -213,13 +231,15 @@ def test_book_over_prob_fitted_uses_shape(monkeypatch):
 
 
 def _sn_blend_df():
-    return pd.DataFrame({
-        "Projection": [2.2, 5.0],
-        "Market Projection": [2.0, 4.5],
-        "Line": [2.5, 4.5],
-        "Model Sigma": [1.3, 2.1],
-        "Model Skew": [0.4, -0.2],
-    })
+    return pd.DataFrame(
+        {
+            "Projection": [2.2, 5.0],
+            "Market Projection": [2.0, 4.5],
+            "Line": [2.5, 4.5],
+            "Model Sigma": [1.3, 2.1],
+            "Model Skew": [0.4, -0.2],
+        }
+    )
 
 
 def test_blend_with_book_collapses_to_cv(monkeypatch):
@@ -238,3 +258,32 @@ def test_blend_with_book_collapses_to_cv(monkeypatch):
     assert list(base0) == pytest.approx(list(base1), abs=1e-12)
     assert list(df0["Model Sigma"]) == pytest.approx(list(df1["Model Sigma"]), abs=1e-12)
     assert list(df0["Model Skew"]) == pytest.approx(list(df1["Model Skew"]), abs=1e-12)
+
+
+def test_skewnormal_model_gate_does_not_contaminate_book_endpoint():
+    from sportstradamus.prediction.model_prob import _blend_with_book
+
+    book = np.array([8.0, 15.0])
+    frame = pd.DataFrame(
+        {
+            "Projection": [11.0, 18.0],
+            "Market Projection": book,
+            "Line": [8.5, 15.5],
+            "Model Sigma": [4.0, 7.0],
+            "Model Skew": [1.0, 1.0],
+            "Model Gate": [0.2, 0.3],
+        }
+    )
+    base = _blend_with_book(
+        frame,
+        "SkewNormal",
+        model_weight=0.0,
+        cv=0.5,
+        hist_gate=0.25,
+        league="NFL",
+        market="receiving yards",
+    )
+
+    np.testing.assert_allclose(base, book)
+    np.testing.assert_allclose(frame["Projection"], book)
+    np.testing.assert_allclose(frame["Model Gate"], 0.0)

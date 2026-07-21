@@ -57,7 +57,21 @@ from sportstradamus.helpers.distributions import (
 from sportstradamus.helpers.io import read_history
 from sportstradamus.helpers.provenance import git_sha
 from sportstradamus.training.baselines import get_target_normalization
+from sportstradamus.training.group_conditional_cdf import (
+    deserialize_receiving_calibration,
+    receiving_two_part_cdf_endpoints,
+)
 from sportstradamus.training.markets import ALL_MARKETS
+from sportstradamus.training.model_strategy_artifacts import STRATEGY_IDENTITY_CSV_COLUMNS
+from sportstradamus.training.model_strategy_frame import validate_strategy_frame
+from sportstradamus.training.model_strategy_registry import (
+    BASE_STRUCTURAL_STRATEGY,
+    parse_controls,
+)
+from sportstradamus.training.nfl_yards_experiments import (
+    RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
+    RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+)
 from sportstradamus.training.ship_config import STAT_META_PATH, TARGET_NORM_NONE, load_stat_meta
 
 # Ship gates (see docs/ship_gate.md). The promotion lifecycle is a 2x2:
@@ -141,6 +155,28 @@ _GATE4_KS_NOISE_COEF: float = 1.358
 # over a seeded draw set so the gate stays reproducible.
 _RANDOMIZED_PIT_DRAWS: int = 25
 _RANDOMIZED_PIT_SEED: int = 4517
+_NFL_YARDS_EXPERIMENT_COL = "NFLYardsExperiment"
+_NFL_YARDS_CALIBRATION_COL = "NFLYardsCalibration"
+_NFL_YARDS_ROLE_COL = "NFLYardsRole"
+_NFL_YARDS_POSITION_COL = "NFLYardsPosition"
+_NFL_YARDS_F0_COL = "NFLYardsF0"
+_NFL_YARDS_ROUTE_COL = "NFLYardsRoute"
+_NFL_YARDS_FALLBACK_COL = "NFLYardsFallback"
+_RECEIVING_V3_CONTRACT_COLUMNS: frozenset[str] = frozenset(
+    {
+        _NFL_YARDS_EXPERIMENT_COL,
+        _NFL_YARDS_CALIBRATION_COL,
+        _NFL_YARDS_ROLE_COL,
+        _NFL_YARDS_POSITION_COL,
+        _NFL_YARDS_F0_COL,
+        "SN_Loc",
+        "SN_Scale",
+        "SN_Alpha",
+        "P",
+        "P_PrePool",
+        "Line",
+    }
+)
 # Search range for the SkewNormal dispersion scalar c (fit_skewnorm_dispersion_c). Lower
 # bound permits tightening an over-wide cell; upper bound matches the count branch's hard cap.
 _DISPERSION_C_BOUNDS: tuple[float, float] = (0.1, 10.0)
@@ -336,6 +372,7 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
     # reads ``EV`` as a distribution parameter.
     optional = {
         "P",
+        "P_PrePool",
         "P_standalone",
         "Odds",
         "Line",
@@ -349,32 +386,68 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
     # 1191-1212; older CSVs predating that dump simply leave them out and the
     # gate falls back to the point-IQR estimator via `_infer_dist_from_columns`
     # returning None.
-    dist_params = {
-        "SN_Loc",
-        "SN_Scale",
-        "SN_Alpha",
-        "MIX_Loc1",
-        "MIX_Loc2",
-        "MIX_Scale1",
-        "MIX_Scale2",
-        "MIX_W1",
-        "Mean10",  # centered_additive_mean10 SkewNormal decode re-adds this baseline to loc
-        "GamesPlayed",  # centered_additive_eb decode re-adds an EB prior over (MeanYr, GamesPlayed)
-        "GlobalMean",  # …shrunk toward this persisted global mean
-        "R",
-        "NB_P",
-        "DP_MU",
-        "DP_PHI",
-        "Alpha",
-        "Gate",
-        "PITRecalKnots",  # §6.1 Rung C whole-CDF map g; Gate 4 warps the PIT through it
-    } & set(df.columns)
+    decode_denom_cols: set[str] = set()
+    if "DenomCol" in df.columns:
+        denom_values = df["DenomCol"].dropna().astype(str).unique()
+        if len(denom_values) != 1:
+            raise ValueError(f"{path.name} must persist exactly one DenomCol value")
+        denom_col = str(denom_values[0])
+        if denom_col not in df.columns:
+            raise ValueError(f"{path.name} DenomCol references missing column {denom_col!r}")
+        decode_denom_cols = {"DenomCol", denom_col}
+
+    decode_strategy_cols: set[str] = set()
+    if "TargetNormalization" in df.columns:
+        strategy_values = df["TargetNormalization"].dropna().astype(str).unique()
+        if len(strategy_values) != 1:
+            raise ValueError(f"{path.name} must persist exactly one TargetNormalization value")
+        get_target_normalization(str(strategy_values[0]))
+        decode_strategy_cols.add("TargetNormalization")
+
+    dist_params = (
+        (
+            {
+                "SN_Loc",
+                "SN_Scale",
+                "SN_Alpha",
+                "MIX_Loc1",
+                "MIX_Loc2",
+                "MIX_Scale1",
+                "MIX_Scale2",
+                "MIX_W1",
+                "Mean10",  # centered_additive_mean10 SkewNormal decode re-adds this baseline to loc
+                "GamesPlayed",  # centered_additive_eb decode re-adds an EB prior over (MeanYr, GamesPlayed)
+                "GlobalMean",  # …shrunk toward this persisted global mean
+                "R",
+                "NB_P",
+                "DP_MU",
+                "DP_PHI",
+                "Alpha",
+                "Gate",
+                "PITRecalKnots",  # §6.1 Rung C whole-CDF map g; Gate 4 warps the PIT through it
+                _NFL_YARDS_EXPERIMENT_COL,
+                _NFL_YARDS_CALIBRATION_COL,
+                _NFL_YARDS_ROLE_COL,
+                _NFL_YARDS_POSITION_COL,
+                _NFL_YARDS_F0_COL,
+                _NFL_YARDS_ROUTE_COL,
+                _NFL_YARDS_FALLBACK_COL,
+                *STRATEGY_IDENTITY_CSV_COLUMNS,
+            }
+            & set(df.columns)
+        )
+        | decode_denom_cols
+        | decode_strategy_cols
+    )
     out = df[sorted(required | optional | dist_params)].copy()
     # Filter non-finite rows on required columns only — missing P/Odds/Line rows
     # are filtered locally inside _brier_skill_score so older CSVs that lack
     # those columns still pass the harness.
     required_view = out[list(required)].replace([np.inf, -np.inf], np.nan)
-    return out[required_view.notna().all(axis=1)]
+    out = out[required_view.notna().all(axis=1)]
+    validate_strategy_frame(out)
+    _receiving_v3_contract(out)
+    return out
 
 
 def decile_table(df: pd.DataFrame, pred_col: str, n_deciles: int = N_DECILES) -> pd.DataFrame:
@@ -778,7 +851,7 @@ def _mix_ppf(
 def _infer_dist_from_columns(df: pd.DataFrame) -> str | None:
     """Identify the distribution family from per-row parameter columns.
 
-    Returns one of ``"Mixture"``, ``"SkewNormal"``, ``"NegBin"``, ``"ZINB"``,
+    Returns one of ``"Mixture"``, ``"SkewNormal"``, ``"NegBin"`, ``"ZINB"``,
     ``"DPO"``, ``"Gamma"``, ``"ZAGamma"`` based on which params
     ``training/pipeline.py`` ``_step_persist_artifacts`` dumped into the
     test-set CSV (~lines 1191-1212). ``None`` for legacy / synthetic frames
@@ -891,7 +964,22 @@ def _pred_ppf(df: pd.DataFrame, dist: str, q: float, *, strategy: str) -> np.nda
     if dist == "SkewNormal":
         loc, scale = _decode_sn_loc_scale(df, strategy)
         alpha = df["SN_Alpha"].to_numpy(dtype=float)
-        return _scipy_skewnorm.ppf(q, alpha, loc=loc, scale=scale)
+        if "Gate" not in df.columns:
+            return _scipy_skewnorm.ppf(q, alpha, loc=loc, scale=scale)
+
+        # Exact inverse of the served zero-adjusted predictive.  The positive-component
+        # SkewNormal still has mathematical support below zero, so its CDF contributes to
+        # the left limit at the zero atom.  Quantiles inside that jump are exactly zero;
+        # quantiles on either side invert the appropriately rescaled base CDF.
+        gate = np.clip(df["Gate"].to_numpy(dtype=float), 0.0, 1.0)
+        base_at_zero = _scipy_skewnorm.cdf(0.0, alpha, loc=loc, scale=scale)
+        left = (1.0 - gate) * base_at_zero
+        right = left + gate
+        denom = np.maximum(1.0 - gate, 1e-12)
+        base_q = np.where(q < left, q / denom, (q - gate) / denom)
+        base_q = np.clip(base_q, 0.0, 1.0)
+        base_ppf = _scipy_skewnorm.ppf(base_q, alpha, loc=loc, scale=scale)
+        return np.where((q >= left) & (q <= right), 0.0, base_ppf)
     if dist == "Mixture":
         return _mix_ppf(q, *_decode_mix_params(df, strategy))
     if dist == "NegBin":
@@ -952,7 +1040,18 @@ def _pred_cdf_pmf(
     if dist == "SkewNormal":
         loc, scale = _decode_sn_loc_scale(df, strategy)
         alpha = df["SN_Alpha"].to_numpy(dtype=float)
-        return _scipy_skewnorm.cdf(y, alpha, loc=loc, scale=scale), np.zeros_like(y)
+        cdf = _scipy_skewnorm.cdf(y, alpha, loc=loc, scale=scale)
+        if "Gate" not in df.columns:
+            return cdf, np.zeros_like(y)
+
+        # SkewNormal yardage cells above the historical-zero threshold are trained on
+        # positive rows and served as gate·delta_0 + (1-gate)·SkewNormal.  For y >= 0 this
+        # is exactly the CDF used by helpers.get_odds; below zero the point mass has not
+        # occurred yet.  Randomizing the atom at y == 0 is required for an exact PIT.
+        gate = np.clip(df["Gate"].to_numpy(dtype=float), 0.0, 1.0)
+        cdf = np.where(y < 0.0, (1.0 - gate) * cdf, gate + (1.0 - gate) * cdf)
+        pmf = np.where(np.isclose(y, 0.0), gate, 0.0)
+        return cdf, pmf
     if dist == "Mixture":
         return _mix_cdf(y, *_decode_mix_params(df, strategy)), np.zeros_like(y)
     if dist in ("NegBin", "ZINB"):
@@ -1025,10 +1124,114 @@ def _tail_ks_uniform(values: np.ndarray, floor: float = _TAIL_PIT_FLOOR) -> floa
     return max(d_plus, d_minus)
 
 
-def _pit_recal_blob(df: pd.DataFrame) -> dict | None:
-    if "PITRecalKnots" not in df.columns:
+def _receiving_v3_contract(
+    df: pd.DataFrame,
+) -> tuple[Mapping[str, object], np.ndarray, np.ndarray, np.ndarray] | None:
+    """Validate and decode the receiving-v3 row contract when it is present."""
+    identity, _ = validate_strategy_frame(df)
+    if identity is None or (
+        identity.structural_strategy != RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR
+    ):
         return None
-    return json.loads(df["PITRecalKnots"].iloc[0])
+
+    missing = _RECEIVING_V3_CONTRACT_COLUMNS - set(df.columns)
+    if missing:
+        raise ValueError(f"receiving-v3 scorecard contract missing columns: {sorted(missing)}")
+    calibration = df[_NFL_YARDS_CALIBRATION_COL]
+    if calibration.isna().any() or calibration.astype(str).nunique() != 1:
+        raise ValueError("NFLYardsCalibration must be one constant nonmissing JSON value")
+    blob = deserialize_receiving_calibration(str(calibration.iloc[0]))
+
+    roles = df[_NFL_YARDS_ROLE_COL].to_numpy()
+    if (
+        not all(isinstance(value, str) for value in roles)
+        or not np.isin(roles, ("low", "high")).all()
+    ):
+        raise ValueError("NFLYardsRole must contain only nonmissing low/high strings")
+
+    raw_positions = pd.to_numeric(df[_NFL_YARDS_POSITION_COL], errors="coerce").to_numpy(
+        dtype=float
+    )
+    positions = raw_positions.astype(int, casting="unsafe", copy=False)
+    if (
+        not np.isfinite(raw_positions).all()
+        or not np.array_equal(raw_positions, positions)
+        or not np.isin(positions, (2, 3, 4)).all()
+    ):
+        raise ValueError("NFLYardsPosition must contain only WR/RB/TE codes 2/3/4")
+
+    f0 = pd.to_numeric(df[_NFL_YARDS_F0_COL], errors="coerce").to_numpy(dtype=float)
+    if not np.isfinite(f0).all() or np.any((f0 < 0.0) | (f0 > 1.0)):
+        raise ValueError("NFLYardsF0 must contain finite probabilities in [0, 1]")
+
+    for column in ("SN_Loc", "SN_Scale", "SN_Alpha", "P", "P_PrePool", "Line"):
+        values = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
+        if not np.isfinite(values).all():
+            raise ValueError(f"receiving-v3 {column} must be finite on every row")
+        if column == "SN_Scale" and np.any(values <= 0.0):
+            raise ValueError("receiving-v3 SN_Scale must be strictly positive")
+        if column in {"P", "P_PrePool"} and np.any((values < 0.0) | (values > 1.0)):
+            raise ValueError(f"receiving-v3 {column} must lie in [0, 1]")
+    if "Gate" in df.columns:
+        gate = pd.to_numeric(df["Gate"], errors="coerce").to_numpy(dtype=float)
+        if not np.isfinite(gate).all() or np.any((gate < 0.0) | (gate >= 1.0)):
+            raise ValueError("receiving-v3 Gate must be finite and lie in [0, 1)")
+    return blob, f0, roles.astype(str), positions
+
+
+def _receiving_v3_cdf_endpoints(
+    df: pd.DataFrame,
+    dist: str,
+    y: np.ndarray,
+    *,
+    strategy: str,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Rebuild and transform the two outcome CDF endpoints for receiving v3."""
+    contract = _receiving_v3_contract(df)
+    if contract is None:
+        return None
+    if dist != "SkewNormal":
+        raise ValueError("receiving-v3 scorecard contract requires SkewNormal row parameters")
+    if "PITRecalKnots" in df.columns:
+        raise ValueError("receiving-v3 must use NFLYardsCalibration, not PITRecalKnots")
+
+    blob, persisted_f0, roles, positions = contract
+    raw_f0, _ = _pred_cdf_pmf(
+        df,
+        dist,
+        np.zeros(len(df), dtype=float),
+        strategy=strategy,
+    )
+    if not np.allclose(persisted_f0, raw_f0, rtol=1e-12, atol=1e-12):
+        raise ValueError("NFLYardsF0 does not match the persisted served SkewNormal shape")
+
+    raw_upper, raw_mass = _pred_cdf_pmf(df, dist, y, strategy=strategy)
+    raw_lower = raw_upper - raw_mass
+    return receiving_two_part_cdf_endpoints(
+        blob,
+        raw_lower,
+        raw_upper,
+        persisted_f0,
+        roles,
+        positions,
+    )
+
+
+def _apply_pit_recal_by_row(df: pd.DataFrame, values: np.ndarray) -> np.ndarray:
+    """Apply either one cell-level PIT map or auditable row-routed maps."""
+    array = np.asarray(values, dtype=float)
+    if "PITRecalKnots" not in df.columns:
+        return array
+    payloads = df["PITRecalKnots"]
+    if payloads.isna().any():
+        raise ValueError("PITRecalKnots must be present on every scored row")
+    out = np.empty_like(array)
+    payload_strings = payloads.astype(str)
+    for payload in payload_strings.unique():
+        mask = payload_strings.eq(payload).to_numpy()
+        blob = json.loads(payload)
+        out[mask] = apply_cdf_recal(blob, array[mask])
+    return out
 
 
 def _randomized_pit_draws(
@@ -1043,18 +1246,37 @@ def _randomized_pit_draws(
     :data:`_RANDOMIZED_PIT_DRAWS` seeded draws so the statistics built on them stay
     reproducible.
     """
+    identity, _ = validate_strategy_frame(df)
+    structural_strategy = (
+        identity.structural_strategy if identity is not None else BASE_STRUCTURAL_STRATEGY
+    )
+    if structural_strategy == RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR:
+        receiving_endpoints = _receiving_v3_cdf_endpoints(df, dist, y, strategy=strategy)
+        assert receiving_endpoints is not None
+        lower, upper = receiving_endpoints
+        rng = np.random.default_rng(_RANDOMIZED_PIT_SEED)
+        return [
+            lower + rng.random(len(lower)) * (upper - lower) for _ in range(_RANDOMIZED_PIT_DRAWS)
+        ]
+    if structural_strategy not in {
+        BASE_STRUCTURAL_STRATEGY,
+        RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+    }:
+        raise ValueError(f"no scorecard adapter for structural strategy {structural_strategy!r}")
+
     cdf, pmf = _pred_cdf_pmf(df, dist, y, strategy=strategy)
     # §6.1 Rung C: warp each PIT draw through the served whole-CDF map g (identity unless the
     # cell persisted a PITRecalKnots column), so Gate 4 scores the recalibrated predictive.
-    recal = _pit_recal_blob(df)
+    upper = _apply_pit_recal_by_row(df, cdf)
     if not np.any(pmf > 0):
-        return [apply_cdf_recal(recal, cdf)]
+        return [upper]
+    # For F*=g∘F, map the two sides of a discrete jump before randomizing it:
+    # F*(y-) + V[P*(Y=y)] = g(F(y)-p) + V[g(F(y))-g(F(y)-p)].  Applying g after
+    # randomization is not equivalent when g is nonlinear across the atom.
+    lower = _apply_pit_recal_by_row(df, cdf - pmf)
     rng = np.random.default_rng(_RANDOMIZED_PIT_SEED)
     n = len(cdf)
-    return [
-        apply_cdf_recal(recal, cdf - (1.0 - rng.random(n)) * pmf)
-        for _ in range(_RANDOMIZED_PIT_DRAWS)
-    ]
+    return [lower + rng.random(n) * (upper - lower) for _ in range(_RANDOMIZED_PIT_DRAWS)]
 
 
 def _randomized_pit_ks(df: pd.DataFrame, dist: str, y: np.ndarray, *, strategy: str) -> float:
@@ -1076,6 +1298,7 @@ def _served_sn_pit_ks(
     y: np.ndarray,
     c: float,
     s: float,
+    gate: np.ndarray | float | None = None,
 ) -> float:
     """Gate-4 randomized-PIT KS of the served SkewNormal under scale ``c`` and skew shift ``s``.
 
@@ -1094,6 +1317,8 @@ def _served_sn_pit_ks(
             "SN_Alpha": alpha,
         }
     )
+    if gate is not None:
+        df["Gate"] = gate
     return _randomized_pit_ks(df, "SkewNormal", y, strategy=TARGET_NORM_NONE)
 
 
@@ -1104,6 +1329,7 @@ def fit_skewnorm_dispersion_c(
     y: np.ndarray,
     *,
     bounds: tuple[float, float] = _DISPERSION_C_BOUNDS,
+    gate: np.ndarray | float | None = None,
 ) -> float:
     """Fit the scale multiplier ``c`` that minimizes the Gate-4 randomized-PIT KS (Lever 1).
 
@@ -1117,7 +1343,7 @@ def fit_skewnorm_dispersion_c(
 
     return float(
         minimize_scalar(
-            lambda c: _served_sn_pit_ks(mean, sigma, skew, y, c, 0.0),
+            lambda c: _served_sn_pit_ks(mean, sigma, skew, y, c, 0.0, gate),
             bounds=bounds,
             method="bounded",
         ).x
@@ -1133,6 +1359,7 @@ def fit_skewnorm_dispersion_skew(
     bounds: tuple[float, float] = _DISPERSION_C_BOUNDS,
     skew_bounds: tuple[float, float] = _DISPERSION_SKEW_BOUNDS,
     joint: bool = True,
+    gate: np.ndarray | float | None = None,
 ) -> tuple[float, float]:
     """Fit the scale ``c`` and additive skew shift ``s`` minimizing the Gate-4 KS (Lever 4a).
 
@@ -1158,8 +1385,8 @@ def fit_skewnorm_dispersion_skew(
     sigma = np.asarray(sigma, dtype=float)
     skew = np.asarray(skew, dtype=float)
     y = np.asarray(y, dtype=float)
-    c0 = fit_skewnorm_dispersion_c(mean, sigma, skew, y, bounds=bounds)
-    ks_scale_only = _served_sn_pit_ks(mean, sigma, skew, y, c0, 0.0)
+    c0 = fit_skewnorm_dispersion_c(mean, sigma, skew, y, bounds=bounds, gate=gate)
+    ks_scale_only = _served_sn_pit_ks(mean, sigma, skew, y, c0, 0.0, gate)
 
     if joint:
 
@@ -1167,7 +1394,7 @@ def fit_skewnorm_dispersion_skew(
             c, s = params
             if not (bounds[0] <= c <= bounds[1] and skew_bounds[0] <= s <= skew_bounds[1]):
                 return 1.0
-            return _served_sn_pit_ks(mean, sigma, skew, y, c, s)
+            return _served_sn_pit_ks(mean, sigma, skew, y, c, s, gate)
 
         best = min(
             (
@@ -1184,13 +1411,13 @@ def fit_skewnorm_dispersion_skew(
         c, s = float(np.clip(best.x[0], *bounds)), float(np.clip(best.x[1], *skew_bounds))
     else:
         s_seq = minimize_scalar(
-            lambda s: _served_sn_pit_ks(mean, sigma, skew, y, c0, s),
+            lambda s: _served_sn_pit_ks(mean, sigma, skew, y, c0, s, gate),
             bounds=skew_bounds,
             method="bounded",
         ).x
         c, s = c0, float(np.clip(s_seq, *skew_bounds))
 
-    ks_cal = _served_sn_pit_ks(mean, sigma, skew, y, c, s)
+    ks_cal = _served_sn_pit_ks(mean, sigma, skew, y, c, s, gate)
     if ks_cal > ks_scale_only - _DISPERSION_SKEW_MIN_GAIN:
         return c0, 0.0
     return c, s
@@ -1461,18 +1688,34 @@ def _resolve_decode_strategy(league: str, market_stem: str) -> str:
     return _DECODE_FALLBACK_STRATEGY if target_norm == TARGET_NORM_NONE else target_norm
 
 
+def _signed_decode_strategy(df: pd.DataFrame) -> str | None:
+    identity, _ = validate_strategy_frame(df)
+    if identity is None:
+        return None
+    return parse_controls(identity.controls_json).get("normalization", TARGET_NORM_NONE)
+
+
+def _decode_strategy_for_frame(df: pd.DataFrame, league: str = "", market: str = "") -> str | None:
+    signed = _signed_decode_strategy(df)
+    if signed is not None:
+        return signed
+    if league and market:
+        return _resolve_decode_strategy(league, market.replace(" ", "-"))
+    return None
+
+
 def _zero_inflated_mean(df: pd.DataFrame, pred: np.ndarray) -> np.ndarray:
     """Recover E[Y] = (1 - π)·μ for the bias gates on zero-inflated count cells.
 
-    ZINB/ZAGamma store the BASE-distribution mean in ``EV``: the betting path factors
+    ZINB/ZAGamma and gated SkewNormal store the BASE-distribution mean in ``EV``: the betting path factors
     the zero-inflation gate out of EV and reapplies it only when pricing over/under
     probabilities (``get_odds``). Gates 2/3 compare the predicted mean against the
     zero-INCLUSIVE empirical mean, so they must reapply the gate too — otherwise the
     prediction is overstated by ``1/(1-π)``, inflating the bias most where the gate is
-    large (bench players; star goal-line backs). SkewNormal ``EV`` is already the full
-    mean and is returned unchanged.
+    large (bench players; star goal-line backs). An ungated SkewNormal has no ``Gate``
+    column and therefore remains unchanged.
     """
-    if _infer_dist_from_columns(df) in ("ZINB", "ZAGamma"):
+    if _infer_dist_from_columns(df) in ("ZINB", "ZAGamma", "SkewNormal") and "Gate" in df:
         return pred * (1.0 - df["Gate"].to_numpy(dtype=float))
     return pred
 
@@ -1524,7 +1767,7 @@ def _gate6_legs(
     meanyr = work[DECILE_COL].to_numpy()
     mean10 = work["Mean10"].to_numpy()
     result = work[ACTUAL_COL].to_numpy()
-    pred = work[pred_col].to_numpy()
+    pred = _zero_inflated_mean(work, work[pred_col].to_numpy(dtype=float))
     players = work["Player"].to_numpy()
     rng = np.random.default_rng(_GATE1_SEED)
     out = dict(_GATE6_BLANK_LEGS)
@@ -1583,6 +1826,14 @@ def gate_row(
     ``P`` + ``Line`` (not ``Odds``), so it still computes for book-unpriced cells; a
     blank Gate 5 means "couldn't compute" (no P or no Line), NOT auto-pass.
     """
+    identity, _ = validate_strategy_frame(df)
+    if identity is not None:
+        same_league = not league or league == identity.league
+        same_market = not market or market.replace(" ", "-") == identity.market.replace(" ", "-")
+        if not (same_league and same_market):
+            raise ValueError("scorecard cell does not match the generic model-strategy identity")
+        league = league or identity.league
+        market = market or identity.market
     actual = df[ACTUAL_COL].to_numpy()
     pred = df[pred_col].to_numpy()
     bias_pred = _zero_inflated_mean(df, pred)
@@ -1602,8 +1853,9 @@ def gate_row(
     # IQR-ratio + central-interval coverage ride along as reported diagnostics — coverage
     # names the direction (under/over-dispersion) the KS scalar can't. All route through the
     # per-row distribution params, so they're blank on legacy/synthetic frames that lack
-    # them. ``decode_strategy`` is the per-cell training strategy (stat_meta lookup);
-    # ``strategy`` is just the run label kept for the row.
+    # them. ``decode_strategy`` is the persisted training normalization (signed CSV
+    # controls, or stat_meta for an identity-absent legacy frame); ``strategy`` is only
+    # the run label kept for the row.
     g4_dist = _infer_dist_from_columns(df)
     decode_for_g4 = decode_strategy or strategy
     g_pit_ks = g_tail_pit_ks = g_cov50 = g_cov80 = None
@@ -1899,7 +2151,7 @@ def compute_gates(
         ``n_validation``.
     """
     market_stem = market.replace(" ", "-")
-    decode_strategy = _resolve_decode_strategy(league, market_stem)
+    decode_strategy = _decode_strategy_for_frame(test_set_df, league, market_stem)
     row = apply_thresholds(
         gate_row(
             test_set_df,
@@ -2020,12 +2272,72 @@ _SUPERSEDE_S3_INITIAL_BANKROLL: float = 1000.0
 # one-sided z > 1.645 test at α = 0.05 restores nominal coverage. Reference:
 # Memmel (2003), "Performance Hypothesis Testing with the Sharpe Ratio".
 _SUPERSEDE_S3_Z_MIN: float = 1.645
+_SUPERSEDE_EVENT_KEY_COLUMNS: tuple[str, ...] = ("Player", "Date", "Line", ACTUAL_COL)
+
+
+def _align_supersede_events(
+    baseline: pd.DataFrame, candidate: pd.DataFrame
+) -> tuple[pd.DataFrame, pd.DataFrame] | None:
+    """Return exact shared events in deterministic order, or ``None`` when identity is unsafe.
+
+    CSV row numbers are serialization details, not event identity. Pair on the
+    player, normalized event date, quoted line, and realized result instead. The
+    result belongs in the key so two rows whose outcomes disagree can never be
+    compared as the same event. A duplicate key in either side is ambiguous once
+    the original matrix index has been discarded, so fail closed rather than
+    manufacture an ordinal pairing that depends on row order.
+    """
+    required = set(_SUPERSEDE_EVENT_KEY_COLUMNS)
+    if not required.issubset(baseline.columns) or not required.issubset(candidate.columns):
+        return None
+
+    def event_keys(frame: pd.DataFrame) -> pd.MultiIndex | None:
+        players = frame["Player"].astype("string")
+        dates = pd.to_datetime(frame["Date"], errors="coerce", utc=True)
+        lines = pd.to_numeric(frame["Line"], errors="coerce")
+        results = pd.to_numeric(frame[ACTUAL_COL], errors="coerce")
+        if (
+            players.isna().any()
+            or players.str.len().eq(0).any()
+            or dates.isna().any()
+            or not np.isfinite(lines.to_numpy(dtype=float)).all()
+            or not np.isfinite(results.to_numpy(dtype=float)).all()
+        ):
+            return None
+        return pd.MultiIndex.from_arrays(
+            [players.astype(str), dates, lines.astype(float), results.astype(float)],
+            names=_SUPERSEDE_EVENT_KEY_COLUMNS,
+        )
+
+    baseline_keys = event_keys(baseline)
+    candidate_keys = event_keys(candidate)
+    if baseline_keys is None or candidate_keys is None:
+        return None
+    shared = baseline_keys.unique().intersection(candidate_keys.unique()).sort_values()
+    if shared.empty:
+        return None
+
+    baseline_mask = baseline_keys.isin(shared)
+    candidate_mask = candidate_keys.isin(shared)
+    baseline_shared_keys = baseline_keys[baseline_mask]
+    candidate_shared_keys = candidate_keys[candidate_mask]
+    if baseline_shared_keys.duplicated().any() or candidate_shared_keys.duplicated().any():
+        return None
+
+    baseline_aligned = baseline.loc[baseline_mask].copy()
+    candidate_aligned = candidate.loc[candidate_mask].copy()
+    baseline_aligned.index = baseline_shared_keys
+    candidate_aligned.index = candidate_shared_keys
+    return (
+        baseline_aligned.reindex(shared).reset_index(drop=True),
+        candidate_aligned.reindex(shared).reset_index(drop=True),
+    )
 
 
 def _supersede_paired_brier_ci(
     b_df: pd.DataFrame, c_df: pd.DataFrame
 ) -> tuple[int, float, float, float] | None:
-    """S2 — paired Brier CI on the row-aligned intersection of two test sets.
+    """S2 — paired Brier CI on exact shared events from two test sets.
 
     ``d_i = brier_baseline_i - brier_candidate_i`` per shared event. Positive ``d``
     ⇒ candidate has lower Brier; the gate fires when the 95% percentile CI of
@@ -2033,19 +2345,21 @@ def _supersede_paired_brier_ci(
     ``(n_shared, mean, ci_lo, ci_hi)`` or ``None`` if either frame lacks the
     requisite columns or the intersection is empty.
     """
-    if _calibration_inputs(b_df) is None or _calibration_inputs(c_df) is None:
+    if "P" not in b_df.columns or "P" not in c_df.columns:
         return None
-    shared = b_df.index.intersection(c_df.index)
-    if len(shared) == 0:
+    aligned = _align_supersede_events(b_df, c_df)
+    if aligned is None:
         return None
-    b_aligned = b_df.loc[shared]
-    c_aligned = c_df.loc[shared]
-    p_b = np.clip(b_aligned["P"].astype(float).to_numpy(), _PROBA_CLIP, 1.0 - _PROBA_CLIP)
-    p_c = np.clip(c_aligned["P"].astype(float).to_numpy(), _PROBA_CLIP, 1.0 - _PROBA_CLIP)
-    # Outcome ``y`` is event-level (Result vs Line), so the candidate frame's view
-    # is authoritative — the supersede test is "did the new model do better on the
-    # same events". If the two frames disagree on (Result, Line) for shared rows
-    # the alignment is moot; bias the comparison toward the candidate's labels.
+    b_aligned, c_aligned = aligned
+    p_b = pd.to_numeric(b_aligned["P"], errors="coerce").to_numpy(dtype=float)
+    p_c = pd.to_numeric(c_aligned["P"], errors="coerce").to_numpy(dtype=float)
+    usable = np.isfinite(p_b) & np.isfinite(p_c)
+    if not usable.any():
+        return None
+    b_aligned = b_aligned.loc[usable]
+    c_aligned = c_aligned.loc[usable]
+    p_b = np.clip(p_b[usable], _PROBA_CLIP, 1.0 - _PROBA_CLIP)
+    p_c = np.clip(p_c[usable], _PROBA_CLIP, 1.0 - _PROBA_CLIP)
     y = (
         c_aligned["Result"].astype(float).to_numpy() >= c_aligned["Line"].astype(float).to_numpy()
     ).astype(float)
@@ -2054,7 +2368,7 @@ def _supersede_paired_brier_ci(
     d = brier_b - brier_c
     rng = np.random.default_rng(_SUPERSEDE_S2_SEED)
     mean, lo, hi = _bootstrap_mean_ci(d, rng)
-    return len(shared), mean, lo, hi
+    return len(b_aligned), mean, lo, hi
 
 
 def _test_set_to_bet_frame(df: pd.DataFrame, pred_col: str) -> pd.DataFrame:
@@ -2178,11 +2492,22 @@ def _supersede_paired_sharpe(
     # supersede path is the only one that needs the profit-sim lib.
     from sportstradamus.strategies.profit_sim import extract_sim_returns, simulate_kelly_all
 
-    shared = b_df.index.intersection(c_df.index)
-    if len(shared) == 0:
+    aligned = _align_supersede_events(b_df, c_df)
+    if aligned is None:
         return None
-    b_bets = _test_set_to_bet_frame(b_df.loc[shared], pred_col)
-    c_bets = _test_set_to_bet_frame(c_df.loc[shared], pred_col)
+    b_aligned, c_aligned = aligned
+    needed = {"P", "Odds", "Line", ACTUAL_COL, pred_col}
+    if not needed.issubset(b_aligned.columns) or not needed.issubset(c_aligned.columns):
+        return None
+    b_numeric = b_aligned[list(needed)].apply(pd.to_numeric, errors="coerce")
+    c_numeric = c_aligned[list(needed)].apply(pd.to_numeric, errors="coerce")
+    usable = np.isfinite(b_numeric.to_numpy(dtype=float)).all(axis=1) & np.isfinite(
+        c_numeric.to_numpy(dtype=float)
+    ).all(axis=1)
+    if not usable.any():
+        return None
+    b_bets = _test_set_to_bet_frame(b_aligned.loc[usable], pred_col)
+    c_bets = _test_set_to_bet_frame(c_aligned.loc[usable], pred_col)
     if b_bets.empty or c_bets.empty:
         return None
     b_sim = simulate_kelly_all(
@@ -2215,8 +2540,16 @@ def supersede_verdict(
     table for the rules.
     """
     out: dict[str, object] = {}
+    decode_strategy = _decode_strategy_for_frame(c_df, league, market)
     c_row = apply_thresholds(
-        gate_row(c_df, pred_col, league=league, market=market, strategy=strategy)
+        gate_row(
+            c_df,
+            pred_col,
+            league=league,
+            market=market,
+            strategy=strategy,
+            decode_strategy=decode_strategy,
+        )
     )
     out["s1_pass"] = bool(c_row.get("ship", False))
 
@@ -2481,6 +2814,35 @@ def _resolve_live_cells(
     return sorted({(row.League, row.Market) for row in settled.itertuples(index=False)})
 
 
+def _resolve_diff_cell(
+    baseline: pd.DataFrame,
+    candidate: pd.DataFrame,
+    league: str | None,
+    market: str | None,
+) -> tuple[str, str]:
+    baseline_identity, _ = validate_strategy_frame(baseline)
+    candidate_identity, _ = validate_strategy_frame(candidate)
+    if (baseline_identity is None) != (candidate_identity is None):
+        raise click.UsageError("Diff mode cannot mix legacy and generic strategy identities.")
+    if baseline_identity is None:
+        return league or "", (market or "").replace(" ", "-")
+
+    baseline_cell = (
+        baseline_identity.league,
+        baseline_identity.market.replace(" ", "-"),
+    )
+    candidate_cell = (
+        candidate_identity.league,
+        candidate_identity.market.replace(" ", "-"),
+    )
+    if baseline_cell != candidate_cell:
+        raise click.UsageError("Diff mode requires baseline and candidate from the same cell.")
+    requested_cell = (league or baseline_cell[0], (market or baseline_cell[1]).replace(" ", "-"))
+    if requested_cell != baseline_cell:
+        raise click.UsageError("Diff mode cell does not match the generic strategy identity.")
+    return requested_cell
+
+
 @click.command()
 @click.option("--league", default=None, help="Filter test sets by league (e.g. NBA).")
 @click.option("--market", default=None, help="Single market stem (requires --league).")
@@ -2597,19 +2959,49 @@ def main(
     if baseline or candidate:
         if not (baseline and candidate):
             raise click.UsageError("--baseline and --candidate must be given together.")
+        if bool(league) != bool(market):
+            raise click.UsageError(
+                "Diff mode requires --league and --market together when identifying a cell."
+            )
         b_df = load_test_set(baseline, pred_col)
         c_df = load_test_set(candidate, pred_col)
+        diff_league, diff_market = _resolve_diff_cell(b_df, c_df, league, market)
+        baseline_decode = _decode_strategy_for_frame(b_df, diff_league, diff_market)
+        candidate_decode = _decode_strategy_for_frame(c_df, diff_league, diff_market)
         b_row = apply_thresholds(
-            gate_row(b_df, pred_col, league="", market="", strategy="baseline")
+            gate_row(
+                b_df,
+                pred_col,
+                league=diff_league,
+                market=diff_market,
+                strategy="baseline",
+                decode_strategy=baseline_decode,
+            )
         )
-        c_row = apply_thresholds(gate_row(c_df, pred_col, league="", market="", strategy=strategy))
+        c_row = apply_thresholds(
+            gate_row(
+                c_df,
+                pred_col,
+                league=diff_league,
+                market=diff_market,
+                strategy=strategy,
+                decode_strategy=candidate_decode,
+            )
+        )
         click.echo(f"baseline : {baseline.name}")
         _print_table(decile_table(b_df, pred_col, deciles))
         click.echo(_gate_headline(b_row))
         click.echo(f"\ncandidate: {candidate.name}")
         _print_table(decile_table(c_df, pred_col, deciles))
         click.echo(_gate_headline(c_row))
-        verdict = supersede_verdict(b_df, c_df, pred_col, strategy=strategy)
+        verdict = supersede_verdict(
+            b_df,
+            c_df,
+            pred_col,
+            league=diff_league,
+            market=diff_market,
+            strategy=strategy,
+        )
         click.echo(f"\nsupersede: {_supersede_headline(verdict)}")
         return
 
@@ -2626,10 +3018,7 @@ def main(
         lg, _, mkt = stem.partition("_")
         df = load_test_set(path, pred_col)
         card = scorecard(df, pred_col, strategy=strategy, league=lg, market=mkt, n_deciles=deciles)
-        # Per-cell training strategy comes from stat_meta (the source of
-        # truth for what `meditate` trained the cell with); the CLI
-        # `--strategy` value is just the run label written into the row.
-        decode_strategy = _resolve_decode_strategy(lg, mkt)
+        decode_strategy = _decode_strategy_for_frame(df, lg, mkt)
         row = apply_thresholds(
             gate_row(
                 df,

@@ -13,6 +13,45 @@ import pandas as pd
 import pytest
 
 from sportstradamus.training import model_strategy_confirm as mc
+from sportstradamus.training.model_strategy_artifacts import (
+    build_artifact_identity,
+)
+from sportstradamus.training.model_strategy_registry import (
+    CellContext,
+    controls_json,
+    distribution_class,
+    get_strategy,
+    registered_strategies,
+)
+from sportstradamus.training.nfl_yards_experiments import RUSHING_AFFINE_GROUPCDF_BOOK_POOL
+from sportstradamus.training.role_specs import role_spec_for
+
+_MATRIX_SHA = "matrix-123"
+_MATRIX_COLUMNS = frozenset(
+    column
+    for spec in registered_strategies()
+    for column in spec.applicability.required_data_columns
+)
+
+
+@pytest.fixture(autouse=True)
+def _fixed_cell_context(monkeypatch):
+    def context(league, market):
+        dist = "ZINB" if league == "MLB" else "SkewNormal"
+        columns = set(_MATRIX_COLUMNS)
+        spec = role_spec_for(league, market)
+        if spec is not None:
+            columns |= set(spec.all_columns)
+        return CellContext(
+            league,
+            market,
+            dist,
+            distribution_class(dist),
+            frozenset(columns),
+            _MATRIX_SHA,
+        )
+
+    monkeypatch.setattr(mc, "_cell_context", context)
 
 
 def _fake_meta_disk(monkeypatch, tmp_path):
@@ -34,58 +73,108 @@ def _fake_meta_disk(monkeypatch, tmp_path):
     return writes
 
 
-def _sn_row(norm, dist_loss, blend, ships, slack, sn_param="direct"):
+def _signed_row(league, market, strategy_slug, controls, ships, slack):
+    spec = get_strategy(strategy_slug)
+    legacy = (
+        {"validation_audit": {"split_fingerprint_sha256": "split-123"}}
+        if spec.is_structural
+        else None
+    )
+    identity = build_artifact_identity(
+        spec.slug, league, market, controls, legacy, matrix_hash=_MATRIX_SHA
+    )
     return {
-        "league": "WNBA",
-        "market": "AST",
-        "family": "SkewNormal",
-        "normalization": norm,
-        "dist_training_loss": dist_loss,
-        "sn_param": sn_param,
-        "blending_loss_fn": blend,
+        "league": league,
+        "market": market,
+        "family": spec.family,
+        "strategy_slug": identity.strategy_slug,
+        "structural_strategy": identity.structural_strategy,
+        "strategy_signature": identity.signature,
+        "strategy_implementation_version": identity.implementation_version,
+        "artifact_schema_version": identity.artifact_schema_version,
+        "strategy_status": identity.status,
+        "controls_json": controls_json(controls),
+        "corner_fingerprint": identity.corner_fingerprint,
+        "matrix_hash": _MATRIX_SHA,
+        "split_fingerprint": identity.split_fingerprint,
+        **controls,
         "ships": ships,
         "slack": slack,
     }
 
 
+def _sn_row(norm, dist_loss, blend, ships, slack, sn_param="direct"):
+    return _signed_row(
+        "WNBA",
+        "AST",
+        "SkewNormal",
+        {
+            "dist": "SkewNormal",
+            "normalization": norm,
+            "dist_training_loss": dist_loss,
+            "sn_param": sn_param,
+            "blending_loss_fn": blend,
+        },
+        ships,
+        slack,
+    )
+
+
 def _sn_original():
-    return {"dist": "SkewNormal", "shipped": "withheld", "target_normalization": "none", "blending": "nll"}
+    return {
+        "dist": "SkewNormal",
+        "shipped": "withheld",
+        "target_normalization": "none",
+        "blending": "nll",
+    }
 
 
 def _zinb_row(mode, disp, blend, ships, slack):
     """A ZINB count corner, reindexed to the full board schema (SN-only columns blank)."""
     return {
-        "league": "MLB",
-        "market": "pitcher strikeouts",
-        "family": "ZINB",
-        "dist": "ZINB",
-        "zinb_mode": mode,
-        "count_dispersion_objective": disp,
-        "blending_loss_fn": blend,
+        **_signed_row(
+            "MLB",
+            "pitcher strikeouts",
+            "ZINB",
+            {
+                "dist": "ZINB",
+                "zinb_mode": mode,
+                "count_dispersion_objective": disp,
+                "blending_loss_fn": blend,
+            },
+            ships,
+            slack,
+        ),
         "normalization": float("nan"),
         "dist_training_loss": float("nan"),
         "sn_param": float("nan"),
-        "ships": ships,
-        "slack": slack,
     }
 
 
 def _negbin_row(disp, blend, ships, slack):
     """A plain-NegBin count corner: no ``zinb_mode`` (its persist map omits it), other columns blank."""
     return {
-        "league": "MLB",
-        "market": "pitcher strikeouts",
-        "family": "NegBin",
-        "dist": "NegBin",
+        **_signed_row(
+            "MLB",
+            "pitcher strikeouts",
+            "NegBin",
+            {
+                "dist": "NegBin",
+                "count_dispersion_objective": disp,
+                "blending_loss_fn": blend,
+            },
+            ships,
+            slack,
+        ),
         "zinb_mode": float("nan"),
-        "count_dispersion_objective": disp,
-        "blending_loss_fn": blend,
         "normalization": float("nan"),
         "dist_training_loss": float("nan"),
         "sn_param": float("nan"),
-        "ships": ships,
-        "slack": slack,
     }
+
+
+def _structural_row(slug, market, ships=True, slack=0.4):
+    return _signed_row("NFL", market, slug, dict(get_strategy(slug).fixed_controls), ships, slack)
 
 
 # --- candidate selection ---------------------------------------------------------------------
@@ -104,16 +193,20 @@ def test_candidate_picks_top_slack_corner():
     )
     cand = mc._candidate(board)
     assert cand["edits"] == {
+        "dist": "SkewNormal",
         "target_normalization": "centered_additive_mean10",
         "dist_training_loss": "nll",
         "sn_param": "direct",
         "blending": "crps",
+        "structural_strategy": "none",
     }
     assert cand["slack"] == 0.30
 
 
 def test_candidate_none_when_nothing_ships():
-    assert mc._candidate(pd.DataFrame([_sn_row("ratio_meanyr", "crps", "nll", False, -0.2)])) is None
+    assert (
+        mc._candidate(pd.DataFrame([_sn_row("ratio_meanyr", "crps", "nll", False, -0.2)])) is None
+    )
 
 
 def test_candidate_skips_mixture_until_serving_lands():
@@ -121,11 +214,14 @@ def test_candidate_skips_mixture_until_serving_lands():
     candidate while model_prob has no Mixture branch — the next-best non-Mixture shipping
     corner wins instead, and an all-Mixture slice yields no candidate.
     """
-    mix_row = {
-        **_sn_row("ratio_meanyr", float("nan"), "nll", True, 0.9),
-        "family": "Mixture",
-        "dist": "Mixture",
-    }
+    mix_row = _signed_row(
+        "WNBA",
+        "AST",
+        "Mixture",
+        {"dist": "Mixture", "normalization": "ratio_meanyr"},
+        True,
+        0.9,
+    )
     sn_row = _sn_row("centered_additive_mean10", "crps", "crps", True, 0.2)
     cand = mc._candidate(pd.DataFrame([mix_row, sn_row]))
     assert cand["family"] == "SkewNormal"
@@ -136,25 +232,14 @@ def test_candidate_zinb_is_fully_persistable():
     """Every ZINB axis persists (empty defaults), so its top shipping corner is always the candidate;
     the persisted edits include the swept ``dist`` (which pins the winning count family).
     """
-    row = {
-        "league": "MLB",
-        "market": "pitcher strikeouts",
-        "family": "ZINB",
-        "dist": "ZINB",
-        "zinb_mode": "hurdle",
-        "count_dispersion_objective": "pit_ks",
-        "blending_loss_fn": "crps",
-        "dist_training_loss": float("nan"),  # mirrors the reindexed board (SN-only columns blank)
-        "sn_param": float("nan"),
-        "ships": True,
-        "slack": 0.2,
-    }
+    row = _zinb_row("hurdle", "pit_ks", "crps", True, 0.2)
     cand = mc._candidate(pd.DataFrame([row]))
     assert cand["edits"] == {
         "dist": "ZINB",
         "zinb_mode": "hurdle",
         "count_dispersion_objective": "pit_ks",
         "blending": "crps",
+        "structural_strategy": "none",
     }
 
 
@@ -171,7 +256,12 @@ def test_candidate_cross_family_negbin_wins():
     )
     cand = mc._candidate(board)
     assert cand["family"] == "NegBin"
-    assert cand["edits"] == {"dist": "NegBin", "count_dispersion_objective": "crps", "blending": "nll"}
+    assert cand["edits"] == {
+        "dist": "NegBin",
+        "count_dispersion_objective": "crps",
+        "blending": "nll",
+        "structural_strategy": "none",
+    }
     assert "zinb_mode" not in cand["edits"]  # the flip never reads the NaN zinb_mode column
     assert cand["slack"] == 0.22
 
@@ -193,8 +283,83 @@ def test_candidate_cross_family_zinb_wins():
         "zinb_mode": "hurdle",
         "count_dispersion_objective": "pit_ks",
         "blending": "crps",
+        "structural_strategy": "none",
     }
     assert cand["slack"] == 0.30
+
+
+def test_candidate_structural_method_persists_full_recipe_and_identity():
+    slug = RUSHING_AFFINE_GROUPCDF_BOOK_POOL
+    cand = mc._candidate(pd.DataFrame([_structural_row(slug, "rushing yards")]))
+    assert cand["strategy_slug"] == slug
+    assert cand["structural_strategy"] == slug
+    assert cand["edits"] == {
+        "dist": "SkewNormal",
+        "target_normalization": "ratio_meanyr",
+        "dist_training_loss": "crps",
+        "sn_param": "direct",
+        "blending": "nll",
+        "hpo_selection": "loss",
+        "posthoc": "none",
+        "structural_strategy": slug,
+    }
+
+
+def test_candidate_base_winner_clears_structural_method_without_stringifying_nan():
+    row = _signed_row(
+        "NFL",
+        "receiving yards",
+        "SkewNormal",
+        {
+            "dist": "SkewNormal",
+            "normalization": "ratio_meanyr",
+            "dist_training_loss": "crps",
+            "sn_param": "direct",
+            "blending_loss_fn": "nll",
+        },
+        True,
+        0.2,
+    )
+    cand = mc._candidate(pd.DataFrame([row]))
+    assert cand["structural_strategy"] == "none"
+    assert cand["edits"]["structural_strategy"] == "none"
+    assert "nan" not in cand["edits"].values()
+
+
+def test_candidate_rejects_missing_required_structural_axis():
+    slug = RUSHING_AFFINE_GROUPCDF_BOOK_POOL
+    row = _structural_row(slug, "rushing yards")
+    row["hpo_selection"] = float("nan")
+    with pytest.raises(ValueError, match="hpo_selection contradicts controls_json"):
+        mc._candidate(pd.DataFrame([row]))
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("strategy_slug", None, "missing strategy_slug"),
+        ("strategy_slug", "not-registered", "unknown model strategy"),
+        ("structural_strategy", None, "missing structural_strategy"),
+        ("strategy_signature", "stale", "stale or mismatched strategy identity"),
+        ("strategy_implementation_version", 999, "stale or mismatched strategy identity"),
+        ("artifact_schema_version", 999, "stale or mismatched strategy identity"),
+        ("strategy_status", "killed_fallback", "stale or mismatched strategy identity"),
+        ("matrix_hash", "old-matrix", "stale or mismatched strategy identity"),
+        ("corner_fingerprint", "stale", "stale strategy corner fingerprint"),
+    ],
+)
+def test_candidate_rejects_missing_or_stale_signed_identity(field, value, match):
+    row = _sn_row("ratio_meanyr", "crps", "nll", True, 0.2)
+    row[field] = value
+    with pytest.raises(ValueError, match=match):
+        mc._candidate(pd.DataFrame([row]))
+
+
+def test_candidate_rejects_noncanonical_controls_json():
+    row = _sn_row("ratio_meanyr", "crps", "nll", True, 0.2)
+    row["controls_json"] = json.dumps(json.loads(row["controls_json"]))
+    with pytest.raises(ValueError, match="stale or noncanonical strategy controls"):
+        mc._candidate(pd.DataFrame([row]))
 
 
 # --- meditate subprocess primitive ------------------------------------------------------------
@@ -203,14 +368,119 @@ def test_candidate_cross_family_zinb_wins():
 def test_run_meditate_true_on_clean_exit_false_on_error(monkeypatch, tmp_path):
     """`_run_meditate` reports subprocess success/failure only — it does not read the ship verdict."""
     monkeypatch.setattr(mc, "_CONFIRM_LOG_ROOT", tmp_path)
-    monkeypatch.setattr(mc.subprocess, "run", lambda *a, **k: None)
-    assert mc._run_meditate("NBA", "PTS") is True
+    commands = []
+    monkeypatch.setattr(
+        mc,
+        "_run_meditate_with_lock_retry",
+        lambda cmd, path, timeout: commands.append(cmd),
+    )
+    ordinary = mc._candidate(
+        pd.DataFrame(
+            [
+                _signed_row(
+                    "NBA",
+                    "PTS",
+                    "SkewNormal",
+                    {
+                        "dist": "SkewNormal",
+                        "normalization": "ratio_meanyr",
+                        "dist_training_loss": "crps",
+                        "sn_param": "direct",
+                        "blending_loss_fn": "nll",
+                    },
+                    True,
+                    0.2,
+                )
+            ]
+        )
+    )
+    assert mc._run_meditate("NBA", "PTS", ordinary) is True
+    # NBA/PTS is a registered role-registry cell, so the role×position two-part strategy is
+    # applicable there; the confirm full-HPO command stamps the structural selector as "auto"
+    # (meditate resolves it from stat_meta, which is "none" for this base corner).
+    assert commands[0][commands[0].index("--structural-strategy") + 1] == "auto"
+
+    structural = mc._candidate(
+        pd.DataFrame(
+            [
+                _structural_row(
+                    RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+                    "rushing yards",
+                )
+            ]
+        )
+    )
+    assert mc._run_meditate("NFL", "rushing yards", structural) is True
+    command = commands[-1]
+    assert command[command.index("--structural-strategy") + 1] == "auto"
+    assert command[command.index("--stabilization") + 1] == "None"
 
     def boom(*a, **k):
         raise mc.subprocess.CalledProcessError(1, "meditate")
 
-    monkeypatch.setattr(mc.subprocess, "run", boom)
-    assert mc._run_meditate("NBA", "PTS") is False
+    monkeypatch.setattr(mc, "_run_meditate_with_lock_retry", boom)
+    assert mc._run_meditate("NBA", "PTS", ordinary) is False
+
+
+def test_ship_verdict_is_bound_to_reported_structural_method(monkeypatch):
+    slug = RUSHING_AFFINE_GROUPCDF_BOOK_POOL
+    expected = build_artifact_identity(
+        slug,
+        "NFL",
+        "rushing yards",
+        dict(get_strategy(slug).fixed_controls),
+        matrix_hash=_MATRIX_SHA,
+    )
+    stats = pd.DataFrame(
+        {
+            "league": ["NFL"],
+            "market": ["rushing yards"],
+            "strategy_slug": [slug],
+            "structural_strategy": [slug],
+            "strategy_signature": [expected.signature],
+            "strategy_implementation_version": [expected.implementation_version],
+            "artifact_schema_version": [expected.artifact_schema_version],
+            "strategy_status": ["active"],
+            "strategy_controls_json": [expected.controls_json],
+            "strategy_corner_fingerprint": [expected.corner_fingerprint],
+            "strategy_matrix_hash": [expected.matrix_hash],
+            "strategy_split_fingerprint": [expected.split_fingerprint],
+            "ship": [True],
+        }
+    )
+    monkeypatch.setattr(mc.pd, "read_parquet", lambda *args, **kwargs: stats)
+
+    assert mc._ship_from_model_stats("NFL", "rushing yards", expected) is True
+    stats.loc[0, "strategy_controls_json"] = "{}"
+    assert mc._ship_from_model_stats("NFL", "rushing yards", expected) is False
+    stats.loc[0, "strategy_controls_json"] = expected.controls_json
+    wrong_controls = {
+        "dist": "SkewNormal",
+        "normalization": "ratio_meanyr",
+        "dist_training_loss": "crps",
+        "sn_param": "direct",
+        "blending_loss_fn": "nll",
+    }
+    wrong = build_artifact_identity(
+        "SkewNormal",
+        "NFL",
+        "rushing yards",
+        wrong_controls,
+        matrix_hash=_MATRIX_SHA,
+    )
+    assert mc._ship_from_model_stats("NFL", "rushing yards", wrong) is False
+
+
+def test_withheld_confirm_fails_closed_before_model_stats_when_artifacts_do_not_match(monkeypatch):
+    candidate = mc._candidate(pd.DataFrame([_sn_row("ratio_meanyr", "crps", "nll", True, 0.2)]))
+    monkeypatch.setattr(mc, "_run_meditate", lambda *args: True)
+    monkeypatch.setattr(mc, "_produced_artifacts_match", lambda *args: False)
+    monkeypatch.setattr(
+        mc,
+        "_ship_from_model_stats",
+        lambda *args: pytest.fail("unverified artifacts must never reach the ship verdict"),
+    )
+    assert mc._confirm_meditate("WNBA", "AST", candidate) is False
 
 
 # --- persist / confirm / revert --------------------------------------------------------------
@@ -219,7 +489,8 @@ def test_run_meditate_true_on_clean_exit_false_on_error(monkeypatch, tmp_path):
 def test_confirm_one_pass_keeps_devel(monkeypatch, tmp_path):
     meta = {"WNBA": {"AST": _sn_original()}}
     writes = _fake_meta_disk(monkeypatch, tmp_path)
-    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt: True)
+    monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
+    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt, candidate: True)
     pruned = []
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)))
 
@@ -250,7 +521,15 @@ def test_confirm_one_fail_reverts_stat_meta_and_prunes_pickle(monkeypatch):
     original = _sn_original()
     meta = {"WNBA": {"AST": dict(original)}}
     monkeypatch.setattr(mc, "_atomic_write_meta", lambda m: None)
-    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt: False)
+    monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: mc.pathlib.Path("/tmp/snapshot"))
+    restored = []
+
+    def restore(lg, mkt, backup, current_meta, prior):
+        restored.append((lg, mkt, backup))
+        current_meta[lg][mkt] = prior
+
+    monkeypatch.setattr(mc, "_restore_cell", restore)
+    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt, candidate: False)
     pruned = []
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)) or True)
     monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: ["g4"])
@@ -262,7 +541,49 @@ def test_confirm_one_fail_reverts_stat_meta_and_prunes_pickle(monkeypatch):
     }
     assert mc._confirm_one(meta, cand) == ("WNBA", "AST", "REVERTED", ["g4"])
     assert meta["WNBA"]["AST"] == original  # fully reverted
+    assert restored == [("WNBA", "AST", mc.pathlib.Path("/tmp/snapshot"))]
     assert pruned == [("WNBA", "AST")]  # pickle pruned — the cell cannot serve
+
+
+def test_confirm_one_exception_restores_once_after_single_candidate_transition(
+    monkeypatch, tmp_path
+):
+    original = _sn_original()
+    meta = {"WNBA": {"AST": dict(original)}}
+    states = []
+    monkeypatch.setattr(
+        mc,
+        "_atomic_write_meta",
+        lambda current: states.append(json.loads(json.dumps(current))),
+    )
+    monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
+
+    def restore(lg, mkt, backup, current_meta, prior):
+        current_meta[lg][mkt] = prior
+        mc._atomic_write_meta(current_meta)
+
+    monkeypatch.setattr(mc, "_restore_cell", restore)
+    monkeypatch.setattr(
+        mc,
+        "_confirm_meditate",
+        lambda lg, mkt, candidate: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    pruned = []
+    monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)))
+    candidate = {
+        "league": "WNBA",
+        "market": "AST",
+        "edits": {"target_normalization": "ratio_meanyr", "blending": "crps"},
+    }
+
+    with pytest.raises(RuntimeError, match="boom"):
+        mc._confirm_one(meta, candidate)
+
+    assert len(states) == 2
+    assert states[0]["WNBA"]["AST"]["shipped"] == "devel"
+    assert states[1]["WNBA"]["AST"] == original
+    assert meta["WNBA"]["AST"] == original
+    assert pruned == [("WNBA", "AST")]
 
 
 # --- end-to-end loop -------------------------------------------------------------------------
@@ -279,7 +600,8 @@ def test_run_confirm_yes_persists_and_confirms(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
     monkeypatch.setattr(mc, "_backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
     _fake_meta_disk(monkeypatch, tmp_path)
-    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt: True)
+    monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
+    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt, candidate: True)
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: False)
 
     mc.run_confirm(board, yes=True)
@@ -295,29 +617,46 @@ def test_run_confirm_mixed_board_routes_withheld_and_shipped(monkeypatch, capsys
     board = pd.DataFrame(
         [
             _sn_row("centered_additive_mean10", "crps", "crps", True, 0.25),  # WNBA AST (withheld)
-            {
-                "league": "NBA",
-                "market": "PTS",
-                "family": "SkewNormal",
-                "normalization": "centered_additive_mean10",
-                "dist_training_loss": "crps",
-                "sn_param": "direct",
-                "blending_loss_fn": "crps",
-                "ships": True,
-                "slack": 0.30,
-            },
+            _signed_row(
+                "NBA",
+                "PTS",
+                "SkewNormal",
+                {
+                    "dist": "SkewNormal",
+                    "normalization": "centered_additive_mean10",
+                    "dist_training_loss": "crps",
+                    "sn_param": "direct",
+                    "blending_loss_fn": "crps",
+                },
+                True,
+                0.30,
+            ),
         ]
     )
     meta = {
         "WNBA": {"AST": _sn_original()},  # withheld
-        "NBA": {"PTS": {"dist": "SkewNormal", "shipped": "devel",
-                        "target_normalization": "ratio_meanyr", "blending": "nll"}},
+        "NBA": {
+            "PTS": {
+                "dist": "SkewNormal",
+                "shipped": "devel",
+                "target_normalization": "ratio_meanyr",
+                "blending": "nll",
+            }
+        },
     }
     monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
     monkeypatch.setattr(mc, "_backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
     calls = {"confirm": [], "supersede": []}
-    monkeypatch.setattr(mc, "_confirm_one", lambda m, c: calls["confirm"].append(c["market"]) or ("WNBA", "AST", "SHIPPED", []))
-    monkeypatch.setattr(mc, "_supersede_one", lambda m, c: calls["supersede"].append(c["market"]) or ("NBA", "PTS", "SUPERSEDED", []))
+    monkeypatch.setattr(
+        mc,
+        "_confirm_one",
+        lambda m, c: calls["confirm"].append(c["market"]) or ("WNBA", "AST", "SHIPPED", []),
+    )
+    monkeypatch.setattr(
+        mc,
+        "_supersede_one",
+        lambda m, c: calls["supersede"].append(c["market"]) or ("NBA", "PTS", "SUPERSEDED", []),
+    )
 
     mc.run_confirm(board, yes=True)
     assert calls["confirm"] == ["AST"]
@@ -336,17 +675,19 @@ def test_run_confirm_skips_activation_gated_league(monkeypatch, capsys):
     """A withheld board-passer in a gated league is announced and dropped — never persisted or
     retrained — while a covered-league candidate in the same run still confirms."""
     monkeypatch.setattr(mc, "_ACTIVATION_GATED_LEAGUES", ("MLB", "NHL"))
-    mlb_row = {
-        "league": "MLB",
-        "market": "total bases",
-        "family": "ZINB",
-        "dist": "ZINB",
-        "zinb_mode": "hurdle",
-        "count_dispersion_objective": "pit_ks",
-        "blending_loss_fn": "crps",
-        "ships": True,
-        "slack": 0.04,
-    }
+    mlb_row = _signed_row(
+        "MLB",
+        "total bases",
+        "ZINB",
+        {
+            "dist": "ZINB",
+            "zinb_mode": "hurdle",
+            "count_dispersion_objective": "pit_ks",
+            "blending_loss_fn": "crps",
+        },
+        True,
+        0.04,
+    )
     board = pd.DataFrame([_sn_row("centered_additive_mean10", "crps", "crps", True, 0.25), mlb_row])
     meta = {
         "WNBA": {"AST": _sn_original()},
@@ -356,7 +697,9 @@ def test_run_confirm_skips_activation_gated_league(monkeypatch, capsys):
     monkeypatch.setattr(mc, "_backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
     confirmed = []
     monkeypatch.setattr(
-        mc, "_confirm_one", lambda m, c: confirmed.append(c["market"]) or ("WNBA", "AST", "SHIPPED", [])
+        mc,
+        "_confirm_one",
+        lambda m, c: confirmed.append(c["market"]) or ("WNBA", "AST", "SHIPPED", []),
     )
 
     mc.run_confirm(board, yes=True)
@@ -368,17 +711,20 @@ def test_run_confirm_skips_activation_gated_league(monkeypatch, capsys):
 def test_run_confirm_all_gated_returns_before_backup(monkeypatch, capsys):
     """When every candidate is activation-gated the loop exits before the backup/persist step."""
     monkeypatch.setattr(mc, "_ACTIVATION_GATED_LEAGUES", ("MLB", "NHL"))
-    nhl_row = {
-        "league": "NHL",
-        "market": "saves",
-        "family": "SkewNormal",
-        "normalization": "centered_additive_mean10",
-        "dist_training_loss": "crps",
-        "sn_param": "direct",
-        "blending_loss_fn": "nll",
-        "ships": True,
-        "slack": 0.04,
-    }
+    nhl_row = _signed_row(
+        "NHL",
+        "saves",
+        "SkewNormal",
+        {
+            "dist": "SkewNormal",
+            "normalization": "centered_additive_mean10",
+            "dist_training_loss": "crps",
+            "sn_param": "direct",
+            "blending_loss_fn": "nll",
+        },
+        True,
+        0.04,
+    )
     board = pd.DataFrame([nhl_row])
     meta = {"NHL": {"saves": {"dist": "SkewNormal", "shipped": "withheld"}}}
     monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
@@ -418,6 +764,21 @@ def test_snapshot_restore_round_trips_all_artifacts(monkeypatch, tmp_path):
     assert meta["NBA"]["PTS"] == {"target_normalization": "ratio_meanyr"}
 
 
+def test_restore_removes_candidate_artifact_absent_from_snapshot(monkeypatch, tmp_path):
+    artifact = tmp_path / "NFL_receiving-yards.mdl"
+    monkeypatch.setattr(mc, "_cell_artifacts", lambda lg, mkt: [artifact])
+    monkeypatch.setattr(mc, "_CONFIRM_LOG_ROOT", tmp_path / "logs")
+    backup = mc._snapshot_cell("NFL", "receiving yards")
+    artifact.write_text("candidate")
+    meta = {"NFL": {"receiving yards": {"shipped": "devel"}}}
+    monkeypatch.setattr(mc, "_atomic_write_meta", lambda current: None)
+
+    mc._restore_cell("NFL", "receiving yards", backup, meta, {"shipped": "withheld"})
+
+    assert not artifact.exists()
+    assert meta["NFL"]["receiving yards"] == {"shipped": "withheld"}
+
+
 def test_cell_artifacts_covers_serve_read_files():
     """The restore set must include every file serving reads back — the pickle (carries the
     calibrators), stat_calibration, and book_weights — else a HOLD could leave the incumbent serving
@@ -444,14 +805,26 @@ def _shipped_meta():
 
 
 def _supersede_cand():
-    return {
-        "league": "NBA",
-        "market": "PTS",
-        "family": "SkewNormal",
-        "status": "candidate",
-        "edits": {"target_normalization": "centered_additive_mean10", "blending": "crps"},
-        "slack": 0.2,
-    }
+    return mc._candidate(
+        pd.DataFrame(
+            [
+                _signed_row(
+                    "NBA",
+                    "PTS",
+                    "SkewNormal",
+                    {
+                        "dist": "SkewNormal",
+                        "normalization": "centered_additive_mean10",
+                        "dist_training_loss": "crps",
+                        "sn_param": "direct",
+                        "blending_loss_fn": "crps",
+                    },
+                    True,
+                    0.2,
+                )
+            ]
+        )
+    )
 
 
 def _verdict(*, ship, s1=True, s2=True, s3=True):
@@ -470,15 +843,23 @@ def _verdict(*, ship, s1=True, s2=True, s3=True):
     }
 
 
-def _patch_supersede_io(monkeypatch, *, verdict, meditate_ok=True):
+def _patch_supersede_io(monkeypatch, *, verdict, meditate_ok=True, model_stats_ok=True):
     """Patch the heavy IO of _supersede_one; return (restored, pruned) spy lists."""
     monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: mc.pathlib.Path("/tmp/bk"))
-    monkeypatch.setattr(mc, "_run_meditate", lambda lg, mkt: meditate_ok)
+    monkeypatch.setattr(mc, "_run_meditate", lambda lg, mkt, candidate: meditate_ok)
+    monkeypatch.setattr(mc, "_produced_artifacts_match", lambda lg, mkt, candidate: True)
+    monkeypatch.setattr(
+        mc,
+        "_ship_from_model_stats",
+        lambda lg, mkt, expected: model_stats_ok,
+    )
     monkeypatch.setattr(mc, "load_test_set", lambda path, col: pd.DataFrame())
     monkeypatch.setattr(mc, "supersede_verdict", lambda *a, **k: verdict)
     monkeypatch.setattr(mc, "_atomic_write_meta", lambda m: None)
     restored, pruned = [], []
-    monkeypatch.setattr(mc, "_restore_cell", lambda lg, mkt, bk, m, orig: restored.append((lg, mkt, orig)))
+    monkeypatch.setattr(
+        mc, "_restore_cell", lambda lg, mkt, bk, m, orig: restored.append((lg, mkt, orig))
+    )
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)))
     return restored, pruned
 
@@ -517,10 +898,62 @@ def test_supersede_pass_but_no_restores_incumbent(monkeypatch):
 
 def test_supersede_meditate_error_restores_incumbent(monkeypatch):
     meta = _shipped_meta()
-    restored, pruned = _patch_supersede_io(monkeypatch, verdict=_verdict(ship=True), meditate_ok=False)
+    restored, pruned = _patch_supersede_io(
+        monkeypatch, verdict=_verdict(ship=True), meditate_ok=False
+    )
     result = mc._supersede_one(meta, _supersede_cand())
     assert result[:3] == ("NBA", "PTS", "HELD")
     assert result[3] == ["retrain error"]
+    assert restored[0][:2] == ("NBA", "PTS")
+    assert pruned == []
+
+
+def test_supersede_artifact_identity_failure_restores_incumbent(monkeypatch):
+    meta = _shipped_meta()
+    restored, pruned = _patch_supersede_io(monkeypatch, verdict=_verdict(ship=True))
+    monkeypatch.setattr(mc, "_produced_artifacts_match", lambda *args: False)
+    result = mc._supersede_one(meta, _supersede_cand())
+    assert result == ("NBA", "PTS", "HELD", ["artifact identity"])
+    assert restored[0][:2] == ("NBA", "PTS")
+    assert pruned == []
+
+
+def test_supersede_model_stats_identity_or_ship_failure_restores_before_verdict_and_prompt(
+    monkeypatch,
+):
+    meta = _shipped_meta()
+    cand = _supersede_cand()
+    restored, pruned = _patch_supersede_io(
+        monkeypatch,
+        verdict=_verdict(ship=True),
+        model_stats_ok=False,
+    )
+    checked = []
+    monkeypatch.setattr(
+        mc,
+        "_ship_from_model_stats",
+        lambda lg, mkt, expected: checked.append((lg, mkt, expected)) or False,
+    )
+    monkeypatch.setattr(
+        mc,
+        "load_test_set",
+        lambda *args, **kwargs: pytest.fail("model_stats failure must stop before test-set load"),
+    )
+    monkeypatch.setattr(
+        mc,
+        "supersede_verdict",
+        lambda *args, **kwargs: pytest.fail("model_stats failure must stop before S1/S2/S3"),
+    )
+    monkeypatch.setattr(
+        mc.click,
+        "confirm",
+        lambda *args, **kwargs: pytest.fail("model_stats failure must never prompt"),
+    )
+
+    result = mc._supersede_one(meta, cand)
+
+    assert result == ("NBA", "PTS", "HELD", ["model_stats identity/ship"])
+    assert checked == [("NBA", "PTS", mc._candidate_identity(cand))]
     assert restored[0][:2] == ("NBA", "PTS")
     assert pruned == []
 

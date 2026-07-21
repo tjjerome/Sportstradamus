@@ -51,7 +51,11 @@ def _blend0_over(dist, line, model_ev, book_ev, cv, step, *, shape, gate=None):
     """
     a = np.array([float(model_ev)])
     b = np.array([float(book_ev)])
-    zi = {"gate_book": gate} if gate else {}
+    # Count/Gamma zero inflation belongs to both endpoints' historical book
+    # contract.  SkewNormal is different: its archived book EV is ungated, while
+    # a positive-only model head may still carry a model-side zero atom.  At
+    # w=0 that model gate must therefore blend to the ungated book endpoint.
+    zi = {"gate_book": gate} if gate and dist != "SkewNormal" else {}
     if dist in ("NegBin", "ZINB"):
         r_b, p_b, g_b = fused_loc(0.0, a, b, cv, "NegBin", r=np.array([shape]), **zi)
         mean = r_b * (1 - p_b) / p_b
@@ -62,6 +66,8 @@ def _blend0_over(dist, line, model_ev, book_ev, cv, step, *, shape, gate=None):
         under = get_odds(np.array([line]), mean, dist, cv, step=step, alpha=a_b, gate=g_b)
     else:
         sigma, skew = shape
+        if gate:
+            zi = {"gate_model": np.array([gate]), "gate_book": 0.0}
         ev_b, sig_b, sk_b, g_b = fused_loc(
             0.0, a, b, cv, "SkewNormal", sigma=np.array([sigma]), skew_alpha=np.array([skew]), **zi
         )

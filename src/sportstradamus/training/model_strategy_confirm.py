@@ -20,6 +20,7 @@ A whole-file ``stat_meta.json`` backup is taken before any write as the crash/ab
 """
 
 import json
+import math
 import pathlib
 import shutil
 import subprocess
@@ -36,11 +37,33 @@ from sportstradamus.helpers.io import (
     model_pickle_path,
     prune_model_pickle,
 )
+from sportstradamus.training.model_strategy_artifacts import (
+    ArtifactIdentity,
+    build_artifact_identity,
+    validate_strategy_artifacts,
+)
+from sportstradamus.training.model_strategy_execution import (
+    meditate_command,
+    strategy_full_hpo_cli_args,
+    strategy_persistence_edits,
+)
+from sportstradamus.training.model_strategy_registry import (
+    BASE_STRUCTURAL_STRATEGY,
+    CAP_CONFIRM,
+    CAP_FULL_HPO,
+    CAP_SCORE,
+    CAP_SERVE,
+    controls_json,
+    get_strategy,
+    parse_controls,
+    strategies_for_cell,
+    strategy_controls,
+)
 from sportstradamus.training.model_strategy_sweep import (
-    _FAMILIES,
     _GATES,
     _SHIP_PRED_COL,
     _TEST_SETS_ROOT,
+    _cell_context,
     _run_meditate_with_lock_retry,
 )
 from sportstradamus.training.scorecard import _supersede_headline, load_test_set, supersede_verdict
@@ -60,35 +83,127 @@ _ACTIVATION_GATED_LEAGUES: tuple[str, ...] = ()
 _CONFIRM_TIMEOUT_S = 4 * 3600
 # Confirm outcomes that leave a shippable cell on devel (vs REVERTED / HELD, which change nothing).
 _WIN_OUTCOMES: tuple[str, ...] = ("SHIPPED", "SUPERSEDED")
+_CONFIRM_CAPABILITIES = frozenset({CAP_CONFIRM, CAP_FULL_HPO, CAP_SCORE, CAP_SERVE})
 
 
 def _candidate(sub: pd.DataFrame) -> dict | None:
-    """The confirm candidate for one cell's board slice: its top-slack shipping corner.
-
-    The slice may mix families (a count cell carries ZINB *and* NegBin corners), so the winner's
-    OWN family's ``persist`` map builds the edits. Returns ``None`` when nothing ships.
-
-    A ZINB→NegBin flip's edits carry no ``zinb_mode`` (NegBin's persist map omits it), leaving the
-    cell's pre-existing ``zinb_mode`` key an inert no-op: the pipeline sets ``is_hurdle`` only when the
-    trained ``dist == "ZINB"``, and ``_confirm_one`` restores the whole original entry on a revert.
-    """
-    shipping = sub[sub["ships"].astype(bool)]
-    # Serve-iff-ship: the Mixture serving path (model_prob/get_odds serve sites) is not
-    # built yet, so a Mixture winner must not flip a cell live — prophecize could not
-    # price its pickle. Board rows still rank; drop this filter when serving lands.
-    shipping = shipping[shipping["family"] != "Mixture"]
+    """Return the top signed, reproducible, confirm-capable shipping corner for one cell."""
+    shipping = sub[sub["ships"].eq(True)].sort_values("slack", ascending=False)
     if shipping.empty:
         return None
     lg, mkt = sub["league"].iloc[0], sub["market"].iloc[0]
-    row = shipping.sort_values("slack", ascending=False).iloc[0]
-    spec = _FAMILIES[row["family"]]
-    return {
-        "league": lg,
-        "market": mkt,
-        "family": row["family"],
-        "edits": {spec.persist[axis]: str(row[axis]) for axis in spec.persist},
-        "slack": float(row["slack"]),
-    }
+    context = _cell_context(lg, mkt)
+    for _, row in shipping.iterrows():
+        family = _required_text(row, "family", lg, mkt)
+        strategy_slug = _required_text(row, "strategy_slug", lg, mkt)
+        structural = _required_text(row, "structural_strategy", lg, mkt)
+        spec = get_strategy(strategy_slug)
+        expected_structural = spec.slug if spec.is_structural else BASE_STRUCTURAL_STRATEGY
+        if spec.family != family or structural != expected_structural:
+            raise ValueError(f"{lg} {mkt}: strategy/family identity mismatch")
+        applicable = strategies_for_cell(context)
+        if spec not in applicable:
+            raise ValueError(f"{lg} {mkt}: strategy {spec.slug!r} is not enrolled/applicable")
+
+        controls = parse_controls(row.get("controls_json"))
+        if controls_json(controls) != row["controls_json"] or controls not in strategy_controls(
+            spec
+        ):
+            raise ValueError(f"{lg} {mkt}: stale or noncanonical strategy controls")
+        _validate_control_columns(row, controls, lg, mkt)
+        identity = build_artifact_identity(
+            spec.slug,
+            lg,
+            mkt,
+            controls,
+            matrix_hash=context.matrix_sha256,
+        )
+        split = _validate_board_identity(row, spec, controls, identity, lg, mkt)
+        if not spec.capabilities >= _CONFIRM_CAPABILITIES:
+            continue
+        slack = float(row["slack"])
+        if not math.isfinite(slack):
+            raise ValueError(f"{lg} {mkt}: candidate slack must be finite")
+        return {
+            "league": lg,
+            "market": mkt,
+            "family": spec.family,
+            "strategy_slug": spec.slug,
+            "structural_strategy": identity.structural_strategy,
+            "strategy_signature": identity.signature,
+            "strategy_implementation_version": identity.implementation_version,
+            "artifact_schema_version": identity.artifact_schema_version,
+            "strategy_status": identity.status,
+            "matrix_hash": identity.matrix_hash,
+            "split_fingerprint": split,
+            "controls": controls,
+            "corner_fingerprint": identity.corner_fingerprint,
+            "edits": strategy_persistence_edits(context, spec, controls),
+            "slack": slack,
+        }
+    return None
+
+
+def _required_text(row: pd.Series, field: str, league: str, market: str) -> str:
+    value = row.get(field)
+    if not isinstance(value, str) or not value or pd.isna(value):
+        raise ValueError(f"{league} {market}: candidate has missing {field}")
+    return value
+
+
+def _validate_control_columns(
+    row: pd.Series, controls: dict[str, str], league: str, market: str
+) -> None:
+    for name, expected in controls.items():
+        if name not in row.index:
+            continue
+        actual = row.get(name)
+        if pd.isna(actual) or str(actual) != expected:
+            raise ValueError(f"{league} {market}: control column {name} contradicts controls_json")
+
+
+def _validate_board_identity(
+    row: pd.Series,
+    spec,
+    controls: dict[str, str],
+    identity: ArtifactIdentity,
+    league: str,
+    market: str,
+) -> str | None:
+    strategy_slug = _required_text(row, "strategy_slug", league, market)
+    signature = _required_text(row, "strategy_signature", league, market)
+    status = _required_text(row, "strategy_status", league, market)
+    fingerprint = _required_text(row, "corner_fingerprint", league, market)
+    matrix_hash = _required_text(row, "matrix_hash", league, market)
+    implementation = row.get("strategy_implementation_version")
+    schema = row.get("artifact_schema_version")
+    try:
+        implementation_matches = (
+            not pd.isna(implementation) and float(implementation) == identity.implementation_version
+        )
+        schema_matches = not pd.isna(schema) and float(schema) == identity.artifact_schema_version
+    except (TypeError, ValueError):
+        implementation_matches = False
+        schema_matches = False
+    core_matches = (
+        strategy_slug == identity.strategy_slug
+        and signature == identity.signature
+        and implementation_matches
+        and schema_matches
+        and status == "active"
+        and matrix_hash == identity.matrix_hash
+    )
+    if not core_matches:
+        raise ValueError(f"{league} {market}: stale or mismatched strategy identity")
+    split = row.get("split_fingerprint")
+    split = None if pd.isna(split) else split
+    if spec.split_fingerprint_path and (not isinstance(split, str) or not split):
+        raise ValueError(f"{league} {market}: missing strategy split fingerprint")
+    if not spec.split_fingerprint_path and split is not None:
+        raise ValueError(f"{league} {market}: unexpected strategy split fingerprint")
+    if fingerprint != identity.corner_fingerprint:
+        raise ValueError(f"{league} {market}: stale strategy corner fingerprint")
+    return split
 
 
 def _candidates(board: pd.DataFrame) -> list[dict]:
@@ -183,15 +298,55 @@ def _restore_cell(
         saved = backup / art.name
         if saved.exists():
             shutil.copy2(saved, art)
+        elif art.exists():
+            art.unlink()
     meta[league][market] = original
     _atomic_write_meta(meta)
 
 
-def _ship_from_model_stats(league: str, market: str) -> bool:
-    """The official ``ship`` verdict report() wrote for a cell; False if the row is absent."""
-    stats = pd.read_parquet(MODEL_STATS_PATH, columns=["league", "market", "ship"])
-    hit = stats[(stats["league"] == league) & (stats["market"] == market)]
-    return bool(hit["ship"].iloc[0]) if not hit.empty else False
+def _ship_from_model_stats(league: str, market: str, expected: ArtifactIdentity) -> bool:
+    """The official ship verdict bound to the exact reported strategy contract."""
+    try:
+        stats = pd.read_parquet(
+            MODEL_STATS_PATH,
+            columns=[
+                "league",
+                "market",
+                "strategy_slug",
+                "structural_strategy",
+                "strategy_signature",
+                "strategy_implementation_version",
+                "artifact_schema_version",
+                "strategy_status",
+                "strategy_controls_json",
+                "strategy_corner_fingerprint",
+                "strategy_matrix_hash",
+                "strategy_split_fingerprint",
+                "ship",
+            ],
+        )
+        hit = stats[(stats["league"] == league) & (stats["market"] == market)]
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    if hit.empty:
+        return False
+    row = hit.iloc[0]
+    return bool(row["ship"]) and (
+        row["strategy_slug"] == expected.strategy_slug
+        and row["structural_strategy"] == expected.structural_strategy
+        and row["strategy_signature"] == expected.signature
+        and row["strategy_implementation_version"] == expected.implementation_version
+        and row["artifact_schema_version"] == expected.artifact_schema_version
+        and row["strategy_status"] == "active"
+        and row["strategy_controls_json"] == expected.controls_json
+        and row["strategy_corner_fingerprint"] == expected.corner_fingerprint
+        and row["strategy_matrix_hash"] == expected.matrix_hash
+        and (
+            pd.isna(row["strategy_split_fingerprint"])
+            if expected.split_fingerprint is None
+            else row["strategy_split_fingerprint"] == expected.split_fingerprint
+        )
+    )
 
 
 def _failed_gates_after(league: str, market: str) -> list[str]:
@@ -205,14 +360,21 @@ def _failed_gates_after(league: str, market: str) -> list[str]:
     return [g for g in _GATES if not bool(r[f"{g}_pass"])]
 
 
-def _run_meditate(league: str, market: str) -> bool:
+def _run_meditate(league: str, market: str, candidate: dict) -> bool:
     """Full-HPO retrain of a cell from its just-persisted stat_meta strategy; True iff meditate exits clean.
 
     ``--force`` is required or a cell with no new gamedays skips silently and never rewrites its
     outputs. A non-zero exit or a timeout returns False (don't trust a possibly-stale model_stats
     row); a transient archive-lock clash is retried first (:func:`_run_meditate_with_lock_retry`).
     """
-    cmd = ["poetry", "run", "meditate", "--league", league, "--market", market, "--force"]
+    spec = get_strategy(candidate["strategy_slug"])
+    context = _cell_context(league, market)
+    cmd = meditate_command(
+        league,
+        market,
+        "--force",
+        *strategy_full_hpo_cli_args(context, spec, candidate["controls"]),
+    )
     log_path = _CONFIRM_LOG_ROOT / f"{market_file_slug(league, market)}.log"
     click.echo(f"  retraining {league} {market} (full HPO, ~1h) …")
     try:
@@ -222,9 +384,52 @@ def _run_meditate(league: str, market: str) -> bool:
     return True
 
 
-def _confirm_meditate(league: str, market: str) -> bool:
+def _candidate_identity(candidate: dict) -> ArtifactIdentity:
+    return ArtifactIdentity(
+        strategy_slug=candidate["strategy_slug"],
+        structural_strategy=candidate["structural_strategy"],
+        signature=candidate["strategy_signature"],
+        implementation_version=candidate["strategy_implementation_version"],
+        artifact_schema_version=candidate["artifact_schema_version"],
+        league=candidate["league"],
+        market=candidate["market"],
+        status=candidate["strategy_status"],
+        controls_json=controls_json(candidate["controls"]),
+        corner_fingerprint=candidate["corner_fingerprint"],
+        matrix_hash=candidate["matrix_hash"],
+        split_fingerprint=candidate["split_fingerprint"],
+    )
+
+
+def _produced_artifacts_match(league: str, market: str, candidate: dict) -> bool:
+    """Fail closed unless the retrain produced the exact signed board strategy and cell."""
+    spec = get_strategy(candidate["strategy_slug"])
+    csv_path = _TEST_SETS_ROOT / f"{market_file_slug(league, market)}.csv"
+    try:
+        frame = pd.read_csv(csv_path, keep_default_na=False)
+        model = pd.read_pickle(model_pickle_path(league, market))
+        actual = validate_strategy_artifacts(
+            spec,
+            candidate["controls"],
+            frame,
+            model,
+            league=league,
+            market=market,
+            matrix_hash=candidate["matrix_hash"],
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return actual == _candidate_identity(candidate)
+
+
+def _confirm_meditate(league: str, market: str, candidate: dict) -> bool:
     """Withheld-path confirm: retrain, then True iff the official scorecard ships the cell."""
-    return _run_meditate(league, market) and _ship_from_model_stats(league, market)
+    expected = _candidate_identity(candidate)
+    return (
+        _run_meditate(league, market, candidate)
+        and _produced_artifacts_match(league, market, candidate)
+        and _ship_from_model_stats(league, market, expected)
+    )
 
 
 def _confirm_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
@@ -235,19 +440,27 @@ def _confirm_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
     """
     lg, mkt = cand["league"], cand["market"]
     original = deepcopy(meta[lg][mkt])
-    meta[lg][mkt].update(cand["edits"])
-    meta[lg][mkt]["shipped"] = _SHIPPED_DEVEL
-    _atomic_write_meta(meta)
-    if _confirm_meditate(lg, mkt):
-        _sync_cell_from_disk(meta, lg, mkt)
-        click.secho(f"  SHIPPED (devel) {lg} {mkt}", fg="green")
-        return (lg, mkt, "SHIPPED", [])
-    meta[lg][mkt] = original
-    _atomic_write_meta(meta)
-    prune_model_pickle(lg, mkt)
-    failed = _failed_gates_after(lg, mkt)
-    click.secho(f"  REVERTED {lg} {mkt} — failed {' '.join(failed) or '(retrain error)'}", fg="red")
-    return (lg, mkt, "REVERTED", failed)
+    backup = _snapshot_cell(lg, mkt)
+    keep = False
+    try:
+        meta[lg][mkt].update(cand["edits"])
+        meta[lg][mkt]["shipped"] = _SHIPPED_DEVEL
+        _atomic_write_meta(meta)
+        if _confirm_meditate(lg, mkt, cand):
+            _sync_cell_from_disk(meta, lg, mkt)
+            keep = True
+            click.secho(f"  SHIPPED (devel) {lg} {mkt}", fg="green")
+            return (lg, mkt, "SHIPPED", [])
+        failed = _failed_gates_after(lg, mkt)
+        click.secho(
+            f"  REVERTED {lg} {mkt} — failed {' '.join(failed) or '(retrain error)'}",
+            fg="red",
+        )
+        return (lg, mkt, "REVERTED", failed)
+    finally:
+        if not keep:
+            _restore_cell(lg, mkt, backup, meta, original)
+            prune_model_pickle(lg, mkt)
 
 
 def _failed_legs(verdict: dict) -> list[str]:
@@ -256,8 +469,9 @@ def _failed_legs(verdict: dict) -> list[str]:
 
 
 def _supersede_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
-    """Supersession-test one live cell: snapshot, retrain the candidate in place, run S1/S2/S3, and
-    promote it (on a passing verdict + operator yes) or restore the incumbent byte-identical.
+    """Supersession-test one live cell: snapshot, retrain the candidate in place, require its exact
+    artifact identity and official six-gate ``model_stats`` ship, then run S1/S2/S3 and promote it
+    (on a passing verdict + operator yes) or restore the incumbent byte-identical.
 
     A live-cell swap needs the test to pass AND an explicit promote confirmation; every other exit —
     HOLD, decline, retrain error, or an exception — hits the ``finally`` restore, which copies the
@@ -271,8 +485,12 @@ def _supersede_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
     try:
         meta[lg][mkt].update(cand["edits"])  # shipped left as-is; the cell stays live
         _atomic_write_meta(meta)
-        if not _run_meditate(lg, mkt):
+        if not _run_meditate(lg, mkt, cand):
             return (lg, mkt, "HELD", ["retrain error"])
+        if not _produced_artifacts_match(lg, mkt, cand):
+            return (lg, mkt, "HELD", ["artifact identity"])
+        if not _ship_from_model_stats(lg, mkt, _candidate_identity(cand)):
+            return (lg, mkt, "HELD", ["model_stats identity/ship"])
         baseline = load_test_set(backup / f"{slug}.csv", _SHIP_PRED_COL)
         candidate = load_test_set(_TEST_SETS_ROOT / f"{slug}.csv", _SHIP_PRED_COL)
         verdict = supersede_verdict(baseline, candidate, _SHIP_PRED_COL, league=lg, market=mkt)

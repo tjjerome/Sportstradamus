@@ -331,6 +331,7 @@ def fit_model_weight(
                 "SkewNormal",
                 sigma=model_sigma_arr,
                 skew_alpha=model_skew_arr,
+                gate_model=gate_model,
                 gate_book=gate_book,
             )
 
@@ -341,7 +342,7 @@ def fit_model_weight(
                 skewnorm.logpdf(result, bl_alpha, loc=bl_loc, scale=bl_sigma), -20, 0
             )
 
-            if has_hurdle_gate and g_blend is not None:
+            if (has_gate or has_hurdle_gate) and g_blend is not None:
                 loglik = np.where(
                     result == 0,
                     np.log(np.clip(g_blend, 1e-12, None)),
@@ -444,6 +445,7 @@ def fit_model_weight_crps(
                 "SkewNormal",
                 sigma=model_sigma_arr,
                 skew_alpha=model_skew_arr,
+                gate_model=gate_model,
                 gate_book=gate_book,
             )
             bl_loc = skewnormal_loc_from_mean(bl_ev, bl_sigma, bl_alpha)

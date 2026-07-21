@@ -293,7 +293,7 @@ width fix is fit to a calibration target and guard-railed on g1/g5 (§6.1 go/no-
 
 | Lever | Verdict | Evidence |
 |---|---|---|
-| Strategy sweep + confirm engine (`model_strategy_sweep.py` + `model_strategy_confirm.py`) | **Alive & automated** — `model-strategy-sweep --board --confirm` ranks corners by min-gate slack, walks the best persistable corner through full-HPO meditate, and keeps-on-ship / auto-reverts+prunes. Deterministic ranks, real-HPO ships (§6). Stage-0 hardens it (registry, resume, queue, family axis) | §6 + R4 brief |
+| Strategy sweep + confirm engine (`model_strategy_sweep.py` + `model_strategy_confirm.py`) | **Alive, registry-driven, identity-bound** — `model-strategy-sweep --board --confirm` ranks exact signed base/structural corners by min-gate slack; confirm reproduces the winner at full HPO, exact-checks model/CSV/model_stats, and keeps an all-six-gate ship or restores the prior cell. Deterministic ranks, real-HPO ships (§6); generic selector and serving validation landed. Final gate audit is recorded in §6 | §6 + R4 brief |
 | Forceable distribution family (`dist` via `stat_meta.json`) | **Alive** — `_resolve_dist` reads the cell's `dist` as authoritative input (SkewNormal / ZINB / NegBin); makes family a one-line sweep axis, no code edit per cell. The data-driven mean≥2 / zero-rate rule is now only the fallback | `[[dist_selection_forceable_via_stat_meta]]` |
 | Centered-target normalization (`centered_additive_mean10`) | **Alive & shipping** — out-calibrates `ratio_meanyr` on Gate 4 for several cells the scalar width fix can't reach (run the §3 shipped-counts block; several cells carry it in `stat_meta.json` today). The old P1 "dead" call judged it as a *mean-compression* fix under the pre-PIT-KS gate — superseded | refs §3 + sweep board |
 | Calibrated HP-selection search-gate (Lever-1, `--hpo-selection calibrated`) | **Alive & validated** — Optuna selects on CRPS + a PIT-KS penalty; ship-deciding knobs persist per-cell so cron re-fits reproduce them | `[[calibration_hp_selection_lever]]` |
@@ -370,33 +370,101 @@ A served predictive is built in four independently-swappable stages,
 `training/model_strategy_confirm.py` for the ship half). It replaces the retired
 `model_strategy_driver.py` / `model-research`-branch split — everything is on devel now.
 
-- `--board` sweeps every withheld cell that has cached training data, **both distribution
-  families**, and appends the ranked result to `data/research/strategy_research_board.csv` after
-  each cell (interrupt keeps partial progress); `--league L` narrows it. `--league L --market M`
-  runs one cell and upserts its row. `--include-shipped` also sweeps shipped cells to hunt a
-  better strategy (evaluated by the supersession test below, not the fresh-ship path).
-- Per cell the sweep is an Optuna `GridSampler` over the cell's **family grid** (normalization ×
-  dist-loss × blend-loss × the family's own knobs — `zinb_mode`, `count_dispersion_objective`),
-  exhaustive and deterministic. Each corner trains one `meditate --deterministic … --bypass-
-  withholding` into a sandbox (`research/models/deterministic/` + `data/test_sets/deterministic/`)
-  so a trial never clobbers a production market. `--deterministic` pins RNGs + fast fixed HPs.
+- `--board` enumerates every registered `StrategySpec` whose exact-cell enrollment, cached-matrix
+  schema, distribution-class applicability, and `deterministic_train`/`score` capabilities admit
+  the cell. Base distribution families and structural heads use the same registry contract; there
+  is no NFL-yard special branch. Results upsert into
+  `data/research/strategy_research_board.csv` after each cell, and `--include-shipped` still routes
+  live cells to supersession rather than fresh ship.
+- Every row carries the exact strategy slug/family and generic `structural_strategy` selector,
+  canonical spec signature, implementation/artifact-schema versions, status and cell, sorted
+  compact `controls_json`, cached-matrix SHA, corner fingerprint, and structural split fingerprint
+  where declared. The corner fingerprint SHA binds
+  `{strategy signature, family, exact controls, matrix SHA}`. The split fingerprint is a separate
+  exact identity from the structural artifact's validation audit; it is deliberately **not** folded
+  into the pre-training corner fingerprint. `--resume` reuses only the complete expected corner set
+  and rejects stale specs, controls, matrix/schema identity, or a missing/unexpected structural
+  split contract. It does not independently derive a future structural split; full-HPO confirm
+  separately exact-compares that split across board, pickle, CSV, and `model_stats`.
+- Per cell the sweep is an exhaustive deterministic Optuna `GridSampler` over each applicable
+  spec's registered controls. Each corner trains one
+  `meditate --deterministic … --bypass-withholding` into a sandbox
+  (`research/models/deterministic/` + `data/test_sets/deterministic/`) so a trial never clobbers a
+  production market. `--deterministic` pins RNGs + fast fixed HPs.
 - Each corner is scored by the **honest val-fit→test gate row** — the deterministic dump carries
   the pipeline's own validation-fit joint calibration, so the ranker calls `scorecard.gate_row`
   on it, the same code production ships on (no test re-fit; that oversold the screen and was
   removed in `10306ee`). The objective is negative **min-gate slack**: one scalar, positive iff
   the corner ships, larger with more headroom across all six gates — "ships, with margin," not
   Gate 4 alone.
-- `--confirm` then ships end-to-end: for each cell it persists the **best persistable corner** to
-  `stat_meta.json` and runs a full-HPO `meditate`; a clean official **5/5** keeps the flip
-  (`withheld → devel`), anything less **auto-reverts** both `stat_meta.json` and the pickle
-  (prune). `--yes` runs it unattended.
+- `--confirm` requires the selected spec to expose `confirm`, `full_hpo`, `score`, and `serve`; a
+  research-only family such as Mixture cannot slip through. It rejects noncanonical controls or
+  stale corner/matrix/split identity, persists the exact controls and structural selector, and
+  launches full HPO through `--structural-strategy auto`. It then exact-compares the pickle, test
+  CSV, and `model_stats.parquet` identities before accepting the official scorecard verdict. An
+  all-six-gate pass keeps `withheld → devel`; any failure auto-reverts the cell's config and
+  artifacts. `--yes` runs it unattended.
 
-**Persistable-corner rule (why the board's top row isn't always shippable).** Only a corner whose
-knobs *persist* in `stat_meta.json` can be reproduced by the plain server cron: `target_
-normalization`, `posthoc`, `blending`, `dist`, `zinb_mode`, `count_dispersion_objective`, and
-(SkewNormal) `hpo_selection` all persist — but **`--dist-training-loss` does not**, so an
-`nll`-dist corner is **ranks-only**: it can top the board yet silently retrain to the family
-default on the server. Confirm walks *down* the persistable top-K, shipping the first that clears.
+**Registered-corner reproducibility rule.** Every swept control, including
+`dist_training_loss`, either persists in `stat_meta.json` or is forwarded explicitly to full HPO.
+The old ranks-only exception and top-K workaround were deleted by S4. A board leader is eligible
+for confirm only when its registered exact corner can be reproduced and identity-checked
+end-to-end.
+
+**Generic selector and artifact identity.** `meditate --structural-strategy` accepts
+`none|auto|<registered structural slug>`: `auto` honors the cell's persisted selector, while an
+explicit slug is deterministic-only and must match its registered cell and fixed controls.
+The pickle stores `model_strategy`. CSV identity is constant in `ModelStrategy`,
+`StructuralStrategy`, `StrategySignature`, `StrategyImplementationVersion`,
+`StrategyArtifactSchemaVersion`, `StrategyStatus`, `StrategyLeague`, `StrategyMarket`,
+`StrategyControlsJSON`, `StrategyCornerFingerprint`, `StrategyMatrixHash`, and
+`StrategySplitFingerprint`. `model_stats` repeats the contract as `strategy_slug`,
+`structural_strategy`, `strategy_signature`, `strategy_implementation_version`,
+`artifact_schema_version`, `strategy_status`, `strategy_controls_json`,
+`strategy_corner_fingerprint`, `strategy_matrix_hash`, and `strategy_split_fingerprint` beside
+its normal `league`/`market`. The scorecard rejects malformed or adapter-inconsistent CSV identity.
+Serving validates active status, `serve` capability, exact cell, distribution class and canonical
+controls, the pickle's actual distribution and `expected_columns`, plus corner/matrix/split
+identity; a structural adapter dispatches only from that validated selector. Identity-absent
+base-family legacy artifacts remain compatible, but a legacy structural blob without generic
+identity fails closed. The signed recipe is also checked against every independently persisted
+runtime field (distribution, normalization/normalized semantics, SN parameterization, ZINB mode,
+and fixed posthoc settings). Live supersession requires the fresh candidate-bound `model_stats`
+row before S1/S2/S3, and S2/S3 pair exact shared events by Player + UTC Date + Line + Result
+rather than row number; missing, mismatched, or ambiguous identities hold the incumbent.
+
+**Scoped board-wiring verification (not lifecycle evidence).** The combined
+sweep/confirm/pipeline/report/scorecard/serving regression suites passed **431 tests** after the
+mandatory refactor and duplicate-code repair; the final line-cap extraction passed its 145-test
+affected suite. Real deterministic registry paths then returned
+receiving yards SHIP 6/6 (slack `+0.052371`, n=2,238) and rushing yards SHIP 6/6 (slack
+`+0.036703`, n=1,009).
+Receiving model/CSV SHA-256 were
+`50c94a77d4f0eca24c6142dc270633429d191670392e670c5665493f1a361153` /
+`fb9da6af6f67557fad00a0a2aa8d1537f75ab7f382b202c7c02bd0ef45406570`; rushing were
+`9a9c8f333a86b4e07a01da3349c89d68e97d7350dcf451e43fe6aa7ba8215740` /
+`696e2a78b6d7454156a4db1b988f9919b7f3eb313c926496bfffc446cc95752d`.
+Both pairs exactly matched canonical controls plus matrix, corner, and separate split identity;
+the pre/post production audit stayed byte-identical for `stat_meta.json`
+`5bcb1f46fc0fe4717e1f509f87c83b556e63c049e89127b45197ac34b4a3dff8`,
+`stat_calibration.json` `5bbb14b41e5a63522e24c0455055067a42b636ad6bfd7f99e9b37de7904cfffe`,
+`book_weights.json` `1ca7a3a182762ab827101b68d9b3701cb95495306ee62f30847346e334162926`,
+production `models/NFL_rushing-yards.mdl`
+`c9557e5a30f5909ceb1042b3544172b0831f5891a687c0fcbcd66e8310d433d1`, and production test CSVs
+receiving `027cf0387171ea8d0d7a631e7d136ed52d68d3016417060cc324ec94f3cb454b` / rushing
+`798cb685b1dbf09b2f10837d6e9c5052c31ee1c7cc3b3dd2c77a46e7b07e6738`. No production receiving
+model existed in the audited path, so none is claimed. No confirm or `stat_meta` persistence ran.
+These are scoped wiring smokes, not another full-HPO claim, enrollment, or ship-state change;
+the authoritative Ruff gate passed. The one full golden run finished 3,756 passed / 1 expected
+xfail / 2 failed: its task-owned R0801 failure was repaired and the focused duplicate gate then
+passed, while `test_ship_gate_invariant` remains red on the unchanged runtime-recomputed
+`model_stats.parquet` (SHA-256
+`e66f139871e5d8524dc99abe1de36b280d241bafd04199671e7ac8f414e0903a`) because eleven previously
+shipped cells currently report a failed gate. The one full fake integration run finished 28/30;
+both failures were fixture-contract defects (missing synthetic `hist_gate`, plus an MLB fake-mode
+network leak), were fixed without production-code changes, and passed directly 2/2 afterward.
+The full suites were not rerun; the stale prior `.claude/.state/integration_green` marker was
+removed, so the repository does not advertise a green integration state.
 
 **Deterministic ranks, real-HPO ships — the law.** A `ships=True` board row is a candidate flag,
 never a ship; the val→test discount tips knife-edge cells both ways, so the full-HPO confirm is
@@ -417,16 +485,17 @@ leaves the board **only** on matrix-wide exhaustion (§8) or the operator's docu
 call.
 
 **Stage-0 hardened the engine (owner requirement — the sweep was a bottleneck run by hand).**
-Landed: the declarative **corner/axis registry** (`FamilySpec` in `model_strategy_sweep.py` —
-grid axes, persist fields, defaults per family); **resumable board runs** (`--resume` with
-per-cell upsert keyed on `(league, market)` — an interrupted cell re-sweeps its corners) carrying
-`swept_at`/`code_rev` columns; `--dry-run` scope preview; and **model-version stamping**
+Landed: the declarative `StrategySpec` registry in `model_strategy_specs.py` /
+`model_strategy_registry.py` (base families and cell-scoped structural heads, capabilities,
+controls, persistence, selector, required columns, and artifact paths); exact cached-matrix schema
+and streamed-SHA scoping; signature/matrix/split-aware resumable board runs; `--dry-run` scope
+preview; and **model-version stamping**
 (`model_version = yyyymmdd.norm-slug.sha8`, train→serve→history→dashboard, plus
-`scripts/backfill_history_eras.py` for legacy rows — the §6.10 era-attribution spine).
-Not built, deferred with WS-3: the confirm **queue manifest** (ETA + outcome journal; per-cell
-logs in `research/logs/confirm/` cover today's need), the automatic archive **snapshot copy** per
-confirm run (a manual `cp` + `SPORTSTRADAMUS_ARCHIVE_DB` is the current recipe), and **family as
-a swept axis** (a new family is one `FamilySpec` literal, but `dist` does not sweep yet).
+`scripts/backfill_history_eras.py` for legacy rows — the §6.10 era-attribution spine). Family is a
+swept registry strategy today. Still deferred: the confirm **queue manifest** (ETA + outcome
+journal; per-cell logs in `research/logs/confirm/` cover today's need) and automatic archive
+**snapshot copy** per confirm run (a manual `cp` + `SPORTSTRADAMUS_ARCHIVE_DB` is the current
+recipe).
 **Research-gate still binds** a family/dispersion-mechanism value
 (`research-analyst` brief first, §8.2); a plain knob (normalization slug, loss choice) does not.
 And **wiring an axis-value ≠ it sweeps** — a value can sit in the grid yet not sweep until its
@@ -434,7 +503,7 @@ machinery exists (`blending_loss_fn` carried `crps` before `fit_model_weight_crp
 
 ### The operating loop — three manual residues on top of the engine
 
-`--confirm` automates the persist → full-HPO → keep-on-5/5 / auto-revert loop. Three judgment
+`--confirm` automates the persist → full-HPO → keep-on-all-six-gates / auto-revert loop. Three judgment
 calls the automation cannot fully encode still need an operator:
 
 1. **Near-miss walks.** Confirm the reproducible top-K (2–3), including corners that *fail* the
@@ -449,7 +518,8 @@ calls the automation cannot fully encode still need an operator:
    gates on validation PIT-KS (§6.1 Lever 1); the selection policy is orthogonal to the board's
    normalization pick and decided only here. **Confirm every SkewNormal candidate under
    `calibrated` first** — it picks the sharpest trial that *clears* Gate-4, so it weakly dominates
-   `loss` on g4 at a small g1-sharpness cost; a clean 5/5 ships with `hpo_selection: "calibrated"`
+   `loss` on g4 at a small g1-sharpness cost; a clean six-gate pass ships with
+   `hpo_selection: "calibrated"`
    persisted in `stat_meta.json` so the plain cron reproduces the calibrated trial instead of
    retraining to the sharper, g4-failing one. **If calibrated does not ship** (its wider σ tips g1,
    or no trial clears g4 and the logged fallback fires), **re-confirm under the default `loss`**
@@ -699,12 +769,12 @@ realized minutes); ignoring their projection uncertainty under-states dispersion
 volume *distribution*, not its mean, into any future opportunity head).
 
 The confirm-selection economics (only confirm what can change served state; skip a shipped cell
-already on its board-best config; match on persistable axes only) are the engine's `--confirm`
-semantics — see the sweep+confirm spec atop §6.
+already on its board-best config; match the complete signed registered identity) are the engine's
+`--confirm` semantics — see the sweep+confirm spec atop §6.
 
-**Acceptance:** per the operating loop above — official 5/5 on the full-HPO confirm (withheld)
-or S1–S3 (incumbent). **If it fails:** the cell records the normalization axis as tried (§8) and
-routes to features (§6.3) or blend (§6.5).
+**Acceptance:** per the operating loop above — official all-six-gate pass on the full-HPO confirm
+(withheld) or S1–S3 (incumbent). **If it fails:** the cell records the normalization axis as tried
+(§8) and routes to features (§6.3) or blend (§6.5).
 
 ### §6.3 WS-5 — Targeted features (narrowed): quick wins + the pre-registered build
 
@@ -858,10 +928,10 @@ grid axis, not a manual per-cell edit); pilots first, then registry entry → bo
 research-gate still binds each new family (§8.2) — the R1/R2 briefs discharge it for the two
 below; a third family needs its own.
 
-**Build status — both families are landed code; the remaining work is verdicts.** Branch
-`feature/model-improvement` carries: family as a swept axis (`_CLASS_FAMILIES["count"] =
-(ZINB, NegBin, DPO)` — count cells sweep 8+4+4 corners; SkewNormal cells 24 via the `sn_param`
-axis), `meditate --dist [auto|DPO|NegBin|ZINB|SkewNormal]` + `--sn-param [auto|direct|centered]`,
+**Build status — both families are landed code; the remaining work is verdicts.** The generic
+registry carries SkewNormal, Mixture, ZINB, NegBin, and DPO base strategies (count cells sweep
+8+4+4 corners; SkewNormal cells 24 via the `sn_param` axis),
+`meditate --dist [auto|DPO|NegBin|ZINB|SkewNormal]` + `--sn-param [auto|direct|centered]`,
 the exact-normalized **Double Poisson** (`double_poisson.py` + a torch-free numpy serve kernel;
 the inverse-CDF `sample()` is mandatory — LightGBMLSS predict draws samples even for
 `pred_type="parameters"`), the **centered-SN class** (`skew_normal_centered.py`; as-built γ1
@@ -871,12 +941,15 @@ the same reason), DPO wiring end-to-end (pipeline / scorecard `DP_MU`/`DP_PHI` c
 model_prob + persist `Model Phi` / analysis / dashboard deep-dive; `fit_dpo_weight` lives in
 `training/calibration.py`), `sn_param` persisted per-cell (pickle + stat_meta + serve-side seed
 read with a call-site pin — the offset_mode drift class), cross-family confirm, and live-path
-integration tests for both families. Three gates green. The **full-cohort screen**
+integration tests for both families. Family-scoped integration checks passed at that milestone;
+this section makes no claim about the campaign's still-pending authoritative repository-wide
+final gates. The **full-cohort screen**
 (`count-family-screen --all-count`, 41 cells) routes **15 DP-mandatory (zero-deflated) / 8
 hurdle-NB / 18 plain-NB** — the DP cohort is far larger than the 3 pilots. *Resume gotcha
-unchanged:* board re-sweeps across a family/axis change must run **without `--resume`** (resume
-keys on cell-*presence*; stale pre-axis rows would carry through, and a stale-row confirm would
-persist `sn_param: "nan"`). *Second engine gotcha:* `--dist-class` classifies by the cell's
+retired:* `--resume` now requires the exact current registered-corner set, spec signatures,
+matrix SHA, and the declared structural split presence/absence contract, so a family/axis or input
+change resweeps the cell; confirm, not resume, exact-compares the resulting split value.
+*Remaining cohort-filter gotcha:* `--dist-class` classifies by the cell's
 **current meta dist**, so integer-count cells wearing `SkewNormal` meta (NFL
 receptions/targets/carries, NBA FGA, NHL sogBS) are invisible to a count-class board; the
 workaround is the family-as-input design itself — flip the withheld cell's `dist` to a count
@@ -975,30 +1048,188 @@ thrown (+0.052), both previously skipped twice. S5 *post-campaign*: consolidate 
 existing parity goldens — family #7 becomes one registry entry plus its torch class. The
 torch/numpy dual kernels stay as designed (serve-graph isolation).
 
-**Mixture (family #6, 2-component Gaussian) BUILT + board-piloted.** Continuous class is now
-(SkewNormal, Mixture); 3-corner FamilySpec (3 SN norms; component loss pinned nll —
-lightgbmlss Mixture rejects crps; the 2-way blend axis was dropped 2026-07-19 / 20a630a —
-an off-ship-path fallback trains with the default blend). Trainability needed three guardrails: Hathaway-style
-component-scale response clamp to [0.02, 20]×label-std (kills the σ→0 likelihood spike and the
-dead-head exp-overflow), stabilization None→L2, and fit-time floors min_child_weight ≥ 0.1 /
-lambda_l2 ≥ 1.0 (a near-dead component's rows carry ~zero hessian, so unregularized Newton leaf
-steps explode). Pilot verdict (deterministic boards, direction-only): halves the served g4 excess
-on both yards cells; receiving yards' Mixture corner is the cell's rank-1 overall (g4 0.0552 vs
-0.050 bar, g1 CI-hi +0.0064, g2/g3/g5/g6 pass) — full-HPO confirm is gated on the serve path
-(model_prob decode/blend + deep-dive + live-path test; the confirm walker hard-skips Mixture rows
-until it lands). Rushing yards is g1-walled beyond the family (bss −0.0245 vs SN −0.0027).
+**NFL popular-market re-baseline (2026-07-20; evidence quarantined, no enrollment).** The old
+“efficient-book kill” conclusion for passing yards / passing TDs and the Mixture-first route for
+the yardage cells are superseded. All four popular markets now have fresh isolated full-HPO
+artifacts and independent heldout six-gate passes. None of these results changes `shipped`, the
+NFL numerator, or a live-test state.
 
-**StudentT/SHASH 6th-type escalation — NO-GO (R3 brief `/tmp/researcher_studentt_shash_escalation.md`,
-2026-07-19).** Receiving yards is a **2-gate fail (g1 AND g4)**: `roc_auc` 0.531, `g1_pass` False —
-an efficient book, no model edge, so it cannot ship on *any* family. Its g4 miss is
-**mean-conditional** PIT (heavy tail only in the low-mean bucket, `frac>.95` 0.24 vs 0.10), *not*
-the val→test time drift the earlier note claimed — a global recal or single global shape param
-can't track it (StudentT oracle KS ≥0.127, worse than SN; SHASH oracle 0.094 > bar; Mixture oracle
-0.062 is best but the g1 wall still blocks). StudentT is fittable in-venv; SHASH is a 3–4-session
-hand-roll. Verdict: leave receiving/rushing/passing yards on SkewNormal/withheld as documented
-efficient-book non-ships, **build no 6th type**, and redirect NFL breadth to real-edge cells
-(`targets`, `tds`). Retires the receiving-yards SHASH branch above; re-check g1 + per-mean-bucket
-PIT on DREB/targets before assuming *they* need a new family. `[[cdf_recal_nonstationary_pit]]`
+- **Passing yards — isolated full-HPO + independent heldout PASS.** The exact recipe was SkewNormal,
+  `ratio_meanyr`, distribution CRPS, blend NLL, loss-selected HPO, direct SN, no stabilization,
+  and no posthoc. On n=369: g1 Brier delta −0.0010, row CI [−0.0051, 0.0032] and
+  player-clustered CI-high 0.0033; g2 0.1206; g3 0.1211; g4 PIT-KS 0.0572 ≤ 0.0707 (tail
+  0.0332); g5 −0.0075; g6 CITL 0.9904 (CI-high 1.0697). Pickle version
+  `20260720.ratio_meanyr.e59505d4`, temperature 1.1540011, dispersion 0.9908284, model weight
+  0.1093457. Quarantine: `/tmp/NFL_passing-yards.full-hpo-pass-20260720.mdl` SHA-256
+  `6108de3a8aa90a90f34e4c0b13de7b003c6568129cf58a23c8ca183a1c9ca3bc`; scorecard
+  `/tmp/passing-yards-fresh-scorecard.csv` SHA-256
+  `f5d76a0fee5dc1229411d6f40382ee838baaf6bf4b9dbeb6c023ae4664c3a652`.
+
+  ```bash
+  poetry run meditate --league NFL --market "passing yards" --force \
+    --bypass-withholding --dist SkewNormal --target-normalization ratio_meanyr \
+    --dist-training-loss crps --blending-loss-fn nll --hpo-selection loss \
+    --sn-param direct --stabilization None
+  ```
+
+- **Passing TDs — isolated full-HPO + independent heldout PASS.** The evidence recipe was DPO,
+  legacy-labeled `ratio_meanyr`,
+  distribution NLL, blend NLL, loss-selected HPO, count-dispersion objective `pit_ks`, direct
+  invocation flag `--sn-param direct`, no stabilization, and **`roe_mean` posthoc** (affine a=0.2841855,
+  b=0.8736016). Canonical `stat_meta` now records `target_normalization: none`. This is an identity
+  cleanup, not a model change: the DPO count branch never applies the continuous target transform,
+  so `none` and legacy `ratio_meanyr` both train/decode the same raw count labels. Goldens
+  `test_dpo_count_path_target_normalization_is_probability_inert` and
+  `test_dpo_distribution_selection_accepts_canonical_none_without_transform` in
+  `tests/golden/test_pipeline_artifact_parity.py` pin bitwise-equal mean/dispersion arrays and
+  equal DPO CDF/PMF probabilities. The command and version below retain their historical
+  `ratio_meanyr` evidence identity. On n=373: g1 −0.0187, row CI [−0.0284, −0.0087] and
+  clustered CI-high −0.0087;
+  g2 0.1780; g3 0.1499; g4 0.0498 ≤ 0.0703 (tail 0.0187); g5 0.0439; g6 CITL 1.0479
+  (CI-high 1.2394) and over ratio 0.9103 (CI-low 0.7901). Pickle version
+  `20260720.ratio_meanyr.afa8f007`, temperature 1.3753360, dispersion 1.1951890, model weight
+  0.6822488. Quarantine: `/tmp/NFL_passing-tds.full-hpo-pass-20260720.mdl` SHA-256
+  `e00646834f2646ba2c304a863755608862396691df5c32302209f96d8242ab6b`; scorecard
+  `/tmp/passing-tds-fresh-scorecard.csv` SHA-256
+  `e8b16b4e05efc712f58d8f48749cf5a06f329d9bd37f3ad99012ef2b063232b2`.
+
+  ```bash
+  poetry run meditate --league NFL --market "passing tds" --force \
+    --bypass-withholding --dist DPO --target-normalization ratio_meanyr \
+    --dist-training-loss nll --blending-loss-fn nll --hpo-selection loss \
+    --count-dispersion-objective pit_ks --sn-param direct --stabilization None
+  ```
+
+- **Rushing yards — isolated cold full-HPO + independent heldout PASS.** Experiment
+  `rushing-qb-rb-affine-groupcdf-bookpool-v1` adds an affine marginal, separate QB/RB endpoint
+  CDF maps, line-only temperature, and a coherent model/book probability pool to the existing
+  SkewNormal `ratio_meanyr` / CRPS / blend-NLL / loss-selected / direct / no-stabilization /
+  no-posthoc path. The player-grouped conditional-OOF calibration audit passed on n=1010
+  (g1 −0.00315, row CI-high 0.000735, player CI-high 0.000566; PIT-KS 0.04586; QB 0.03583,
+  RB 0.05384). The isolated run completed 95 trials at 1:00:27, best trial 53 / validation loss
+  0.765541, version `20260720.ratio_meanyr.b45d9dae`; full-fit head
+  `4.4653484193 + 1.0039169446 × marginal`, QB/RB lambdas 1/1, temperature 1.6410711827,
+  pool weight 0.4211669563. Its untouched heldout then passed on n=1009: g1 −0.0024, row CI
+  [−0.0061, 0.0011], clustered CI-high 0.0011; g2 0.1913; g3 0.1098; g4 0.0368 ≤ 0.05
+  (tail 0.0367); g5 0.0272; g6 recent ratio 0.9309 (CI-high 0.9656) and CITL 0.9621
+  (CI-high 1.0473).
+
+  ```bash
+  MPLCONFIGDIR=/tmp/mpl-rushing-confirm \
+    poetry run python /tmp/run_rushing_full_hpo_confirm.py
+  ```
+
+  Evidence root `/tmp/rushing-full-hpo-confirm-k9md4fgm/`: confirmation SHA-256
+  `2e229934d8e7314e0872d16d8e91aa3a2ba46244713ea9f98c8d1d326a800aee`, scorecard
+  `a7d12f4fa6de30dacfd63f171ca968460403cef9ed2c9be447058c5e6e8c11bb`, model
+  `47d9576b78a43623d0cf5c614f7b8d75e4159948b8355590d5f99ed37d345479`, test CSV
+  `0dd6f0e730f5d76a5fa72be780207c17ed6997656d54d53419e9353778bb552a`. All ten protected
+  production targets retained their content hashes/sizes. The strict fingerprint is false only
+  because an external process rewrote `stat_calibration.json` with identical content but a new
+  mtime; the restoration-audit SHA-256 is
+  `324d754f0dbe86ba29350a38f6c1ba09a87250efb12625df55822c69f73e7da6`.
+
+- **Receiving yards — isolated cold full-HPO + independent heldout PASS.** Experiment
+  `receiving-role-position-two-part-groupcdf-fixedlinear-v3` uses two role boundary intercepts
+  plus an RB residual, six role×position positive CDF maps, two role nonpositive maps, shared
+  positive/nonpositive lambda selection, line-only temperature, exact endpoint-first settlement,
+  and a policy-fixed authentic-quote pool `0.8 × book + 0.2 × model` (missing/synthetic quotes
+  remain unpooled). The exact base recipe was SkewNormal, `ratio_meanyr`, distribution CRPS,
+  blend NLL, loss-selected HPO, direct SN, no stabilization, no posthoc, and the frozen cached
+  matrix. The 60-minute cold search used no initial parameters, completed 146 of 300 configured
+  trials, and selected trial 72 at the best logged output loss 0.629173; the final pickle version
+  is `20260720.ratio_meanyr.b9a6cba1` and its line temperature is 1.4702421.
+
+  Before heldout scoring, nested Player GroupKFold on the canonical 2,239 rows / 382 players
+  passed all ten named support guards and all 12 validation gate guards. The exact validation
+  audit was: g1 −0.0003677, row CI [−0.0020198, 0.0013740], player-clustered CI
+  [−0.0020539, 0.0013343]; g2 0.0927752; g3 0.2569047; g4 global 0.0432616, role full
+  high/low 0.0325552/0.0590294, role-positive 0.0344159/0.0715984, position full WR/RB/TE
+  0.0420076/0.0516557/0.0520554, and position-positive 0.0464157/0.0692140/0.0540941;
+  g5 debiased ECE 0.0173928 and rate error 0.0038382; g6 recent correlation 0.5605996 and
+  CITL ratio 0.9593831, CI [0.8978878, 1.0292329]. Fold lambdas (+/−) were (1/.5),
+  (1/.5), (1/.25), (1/.25), (1/.75); fold temperatures ranged 1.4551961–1.4956771.
+
+  Its untouched heldout then passed all six gates on n=2,238: g1 −0.0005, row CI
+  [−0.0022, 0.0012] and player-clustered CI-high 0.0012; g2 0.0239; g3 0.1932; g4
+  PIT-KS 0.0340 ≤ 0.05 (tail 0.0340; central-50/80 coverage 0.4960/0.7976); g5 debiased
+  ECE 0.0159 (raw 0.0423); g6 recent correlation 0.5508 and CITL ratio 0.9670
+  (CI-high 1.0240).
+
+  ```bash
+  MPLCONFIGDIR=/tmp/mpl-receiving-confirm \
+    poetry run python /tmp/run_receiving_full_hpo_confirm.py
+  ```
+
+  Canonical split fingerprint
+  `9589cedab5e06ad318bb4e7b4c6e4e6c75bc776e87a03e480c8f32836b49f10a`. Evidence root
+  `/tmp/receiving-full-hpo-confirm-k4ipe86a/`: confirmation SHA-256
+  `a83c6684b9f283572f0f7fc722069d604356b366d4f709cc2be9325362458afb`, scorecard
+  `9abd76d3e8e18793de4e3499746e288db1de76ee5ab1f5a170746feab63d4660`, model
+  `5706a153b77464ffcb00036bd122f4eb00c1a6194660ddfa8a97e8f165703607`, and test CSV
+  `8e22c48c12ad9cd80194946428426c1868b0038e9c32217f3230296ff43160bb`. The harness redirected
+  model/test/scorecard output into its isolated root, suppressed matrix/config/report/SHAP writes,
+  and verified all ten protected production targets content- and metadata-identical before/after;
+  restoration-audit SHA-256
+  `4b2200cbfc8103f28f3d9f665574ece0bbff66156e2aed04e0b04f05cab8998b`. The prior direct-read
+  result remains retired because 1,118 purported validation rows overlapped the heldout.
+
+**Research rationale.** Proper scoring keeps selection tied to the served distribution, while
+calibration is pursued without discarding sharpness and randomized PIT handles discrete TD
+outcomes ([Gneiting & Raftery 2007](https://doi.org/10.1198/016214506000001437), [Gneiting,
+Balabdaoui & Raftery 2007](https://doi.org/10.1111/j.1467-9868.2007.00587.x), [Brockwell
+2007](https://doi.org/10.1016/j.spl.2007.02.008)). Isotonic/PIT recalibration and the receiving
+two-part maps follow the recalibration literature, with fold-held fitting used to avoid
+in-sample calibration claims ([Ranjan & Gneiting
+2010](https://doi.org/10.1111/j.1467-9868.2009.00726.x), [Henzi, Ziegel & Gneiting
+2021](https://doi.org/10.1111/rssb.12450)). Forecast combination motivates the constrained
+book/model pools but does not replace the repository gates ([Bates & Granger
+1969](https://doi.org/10.1057/jors.1969.103), [Gneiting & Ranjan
+2013](https://doi.org/10.1214/13-EJS823)). The decisive acceptance evidence remains the untouched
+six-gate heldout, not a favorable validation screen.
+
+**Structured integer follow-on — research-only, owner-blocked.** An exact pure kernel now exists
+in `src/sportstradamus/helpers/integer_distribution.py`, with goldens in
+`tests/golden/test_integer_distribution.py`: it owns integer endpoints `F(y−1), F(y)`, seeded
+randomized PIT, and mutually exclusive whole-/half-line `(under, push, over)` settlement. It is
+deliberately **not production-wired** into training, scorecard, or serving. The owner must first
+select one book/score contract: the recommended push-void conditional binary comparison with a
+separately evaluated push, or a full three-category book/score contract. Until that selection,
+there is **NO model pilot, heldout-outcome access, registry enrollment, `shipped` flip, or live
+mutation**.
+
+The two research-only preregistrations are pinned as
+`/tmp/researcher_structured_count_transfer_20260720.md` SHA-256
+`413c7e2049ddd9a0918a7d315dd1340f6bc26f22ac9069a1434abae0c002edf2` and
+`/tmp/researcher_cross_sport_groupcdf_20260720.md` SHA-256
+`07cdcd5aae90f5301955cefd136e50b377de1131dae3cdff2946c42a08a4c16b`. They permit only these
+conditional next slugs:
+
+- NBA FGA: `nba-fga-role3-integer-affine-groupcdf-v1`, only after a fresh signature-checked base
+  control remains g4-bound under exact integer parity.
+- NFL carries: `carries-qb-rb-integer-affine-groupcdf-bookpool-v1`, only if its simpler registered
+  full-HPO control fails; a control ship stops the first-ship branch.
+- NFL receptions: `receptions-role-position-integer-two-part-groupcdf-fixedlinear-v1`, only as an
+  incumbent S1/S2/S3 supersession experiment.
+
+Applicability/support and a registered slug are not enrollment, and none of these three is a
+production or live-state action in this campaign.
+
+**Generic role registry (training infra landed).** The receiving role×position two-part corner
+(`receiving-role-position-two-part-groupcdf-fixedlinear-v3`) is no longer NFL-locked. Its role
+columns live in `training/role_specs.py` — one `RoleSpec` per continuous cell across NFL/NBA/WNBA/NHL
+(MLB excluded), each a small market-appropriate pick (basketball `PACE × PCT_* × rate`; NFL
+target/carry share × yards-per; NHL `Corsi × TimeShare × Shot60`); composites sum their components.
+Positions are **league-wide** (one roster per league, mirroring `Stats.positions`); the context
+builder tiers only the codes a market actually fields, so a QB-only cell tiers just QB and receiving
+just WR/RB/TE — NFL receiving stays byte-identical. The corner enrolls via `role_registry_gated`
+applicability, so the board sweep can now search the method on all 43 continuous cells; nothing
+ships without the six gates. Serving (`model_prob`) still validates the blob against the NFL
+receiving roster and **fails loud** on any other shape — a non-NFL ship first needs the deferred
+blob-driven serving generalization (no live gap: no non-NFL cell ships this method). The two NFL
+heads now share one config-driven engine in `training/group_conditional_cdf/`
+(`RECEIVING_CONFIG`/`RUSHING_CONFIG` → `fit_group_conditional_cdf`); the slugs and the persisted
+`nfl_yards_experiment` blob schema are byte-identical.
 
 **Small-sample / hierarchical layer (the NFL wall), cheapest-first.** Partial pooling dominates at
 n ≈ 300–1000/group (Gelman & Hill 2007). (a) **EB-shrink the distributional parameters** per player
@@ -1140,29 +1371,25 @@ snapshot.
 
 #### NFL — the binding league, with a real failure mode
 
-- **Calibration (§6.1), g1 already passes:** passing-tds, passing-yards, yards,
-  fantasy-points-underdog, sacks-taken (snapshot); receptions screened severe on the calibration
-  axis but stays live with the §6.9 count-branch `log(volume)` offset and blend (§6.5) untried
-  (`ratio_projvol` tried-refuted §6.2).
-- **Calibration + edge — the crux (hole #4 verdict: NEGATIVE — §10):** the continuous-volume five
-  (attempts, carries, completions, receiving-yards, rushing-yards) + qb-tds fail g4 plus a
-  *marginal* g1. The §6.1 scale fit does **not** pull g1 under threshold (`carries` full-ladder
-  real-HPO g1 0.0087; deterministic screen 0/5). The **§6.2 normalization axis does**: under
-  `centered_additive_mean10`, `carries` beats the book at real-HPO (bss +0.036, g1 passes) but
-  stays g4-bound (PIT-KS ~0.08 floor). g1 is reachable by target-shape, not by calibrating
-  dispersion; and these cells are **not feature-starved** (game-script + interactions + recency
-  already trained), so the lever is normalization + family/regularization, **not** a §6.3
-  raw-feature build.
-- **Escalation ladder, in order:** §6.1 scale fit → hole-#4 verdict → **§6.2 normalization**
-  (`centered_additive_mean10`, the decisive axis — gets carries/targets/fantasy to 5/6) → **§6.6
-  family / centered-param SkewNormal + regularization** (the binding g4/g6 wall once normalization
-  is in) → §6.5 blend rebuild → **count-branch `log(volume)` NB/Tweedie offset** (the preserved
-  efficiency × opportunity fork after `ratio_projvol` was refuted §6.2 — a family change at the
-  deep end, attempt only if normalization/family/blend can't ship NFL yards) / monotone priors /
-  TabPFN. **§6.3 raw-feature build is demoted** — the volume cells' 485-col set already carries
-  game-script + interactions + recency (§10 audit); only *targeted* interactions (e.g.
-  implied-total × usage) remain, not a broad build. Hardest cells (qb-yards, passing-first-downs
-  multi-gate; receptions severe) sit at the ladder's deep end.
+- **Popular-market status:** passing yards, passing TDs, rushing yards, and receiving yards all
+  have fresh isolated full-HPO artifacts and independent heldout six-gate passes. Exact recipes,
+  slugs, metrics, artifact hashes, commands, and evidence-scope caveats are in the 2026-07-20
+  re-baseline in §6.6. All four remain unenrolled in live config/lifecycle by this work.
+- **Board/confirm seam:** the generic `StrategySpec` registry, exact controls/corner/matrix/split
+  identity, `--structural-strategy`, confirm artifact parity, and scorecard validation are
+  implemented without NFL-yard branches in board/confirm. Serving dispatch begins only from the
+  centrally validated selector. The final focused regression suites passed 431 tests, and real
+  deterministic registry smokes returned receiving/rushing SHIP 6/6 with exact model/CSV identity
+  and unchanged protected production hashes. The authoritative-run status and remaining unrelated
+  runtime invariant are recorded once in §6. Until this seam is exercised through normal confirm
+  and lifecycle controls, each isolated pass remains evidence rather than enrollment or a
+  live-state change.
+- **Residual ladder:** apply §6.1 calibration → §6.2 normalization → §6.6 family/structural head →
+  §6.5 blend only to still-failing cells. The broad §6.3 raw-feature build remains demoted for the
+  audited volume cohort; use only pre-registered targeted interactions or the QB/RB/role structure
+  supported by clean validation. Never infer enrollment from conditional OOF, deterministic
+  screening, or a quarantined full-HPO artifact; normal board/confirm and lifecycle controls remain
+  binding even after an isolated heldout pass.
 - **Book state (audited): the big-7 book is real; the blockers are code-side.** The July archive
   repair already re-priced attempts/completions/passing-yards etc. — their brier_book ≈ 0.250 is
   a sharp book the model honestly loses to, not a coin flip. The Odds API has zero NFL prop
@@ -1597,6 +1824,44 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-07-21 · Role×position two-part method generalized off NFL. New `training/role_specs.py`
+  registers a `RoleSpec` for every continuous cell in NFL/NBA/WNBA/NHL (43 total, MLB excluded):
+  league-wide positions (mirror `Stats.positions`, tier only codes a market fields) + small
+  per-market column pick; NFL receiving byte-identical (`_role_score` flat-reduce preserved,
+  max-diff 0.0 on 14,923 rows). Corner enrolls via `role_registry_gated` so the board sweep can
+  search it everywhere; nothing ships without the six gates. Coverage golden
+  `tests/golden/test_role_specs.py` fails loud on any uncovered continuous cell. Serving stays
+  NFL-validating + fail-loud (blob-driven generalization deferred, no live gap). Pipeline cleanup:
+  the two NFL heads already share one config-driven `group_conditional_cdf` engine; collapsed
+  `train_market`'s structural if/elif into `_structural_gate_inputs`, split the 226-line receiving
+  support audit into six cohesive helpers, and pulled the structural branches out of
+  `_step_predict_splits`/`_step_persist_artifacts` — four transient complexity tags removed, all
+  honestly under CC 10. Gates: golden 3771 pass (only the pre-existing shipped-cell ship-gate
+  invariant red), integration 30, Ruff + complexity clean.
+- 2026-07-20 (2) · Generic board/confirm seam landed: declarative `StrategySpec` registry,
+  generic `--structural-strategy`, canonical controls JSON, spec/family/control/matrix-bound corner
+  fingerprint plus separate structural split fingerprint, and exact model/CSV/model_stats/
+  scorecard/serving identity. The final focused regression suites passed 431 tests; real
+  receiving/rushing deterministic paths both returned 6/6 with exact model/CSV identity and
+  unchanged protected production hashes, but no confirm ran. Authoritative Ruff passed; the full
+  golden/integration runs exposed one unchanged shipped-cell runtime invariant plus two repaired
+  fixture defects, so the integration marker remains unset (details: §6). The exact integer
+  PIT/settlement kernel is golden-tested but deliberately not production-wired. Research briefs
+  and hashes are pinned in §6.6; owner must select push-void
+  conditional versus full three-category semantics before any NBA FGA, NFL carries, or NFL
+  receptions candidate pilot. No integer-candidate pilot/heldout access, registry enrollment,
+  `shipped` flip, or live mutation occurred.
+- 2026-07-20 (1) · NFL popular-market re-baseline: passing yards
+  (SkewNormal/`ratio_meanyr`/CRPS, n=369), passing TDs (DPO canonical `none`; legacy evidence
+  identity `ratio_meanyr`/NLL/`pit_ks`/**`roe_mean`**, n=373), and rushing yards
+  (`rushing-qb-rb-affine-groupcdf-bookpool-v1`, cold 95-trial HPO, n=1009), plus receiving yards
+  (`receiving-role-position-two-part-groupcdf-fixedlinear-v3`, cold 146-trial HPO, n=2238), each
+  produced an isolated full-HPO artifact and passed all six gates on independent heldout evidence.
+  Receiving also passed every frozen
+  canonical validation/support guard on 2,239 rows / 382 players; its prior direct-read result
+  remains retired for 1,118-row heldout overlap. Evidence and commands are pinned in §6.6; all
+  artifacts remain quarantined, the generic board/confirm seam was not exercised for enrollment,
+  and there was no `shipped` flip, live enrollment, push, or numerator change.
 - 2026-07-19 (3) · Mixture family #6 built end-to-end + board-piloted same day (owner bumped it to the front). Ships first: NFL receptions (ratio_meanyr/nll/direct/nll) + yards (eb_meanyr_k10/crps/centered/nll) confirmed 5/5 → devel, NFL 9/20; carries g1 / qb yards g3 / targets g2 reverted. Build: pipeline branches (decode/fuse-by-location-shift/scalar-c dispersion on served PIT-KS/temperature/persist MIX_* via strategy encode), helpers kernels (_mixnorm cdf/ppf/odds + start values), scorecard gates (MIX decode + CDF/PPF), sweep FamilySpec (6 corners), validator continuous-aware (CONTINUOUS_DISTS), confirm hard-skips Mixture (serve-iff-ship). Three guardrails made it trainable (§6.6): scale clamp [0.02,20]×label-std, L2 stabilization, min_child_weight/lambda_l2 floors — root cause was σ→0 likelihood spikes + zero-hessian Newton blowup (probe-localized: fused_loc inf−inf → NaN). Pilots: receiving yards Mixture corner = rank-1, g4 0.0552 vs 0.050 (60% of SN's excess removed), g1 +0.0064 CI-hi, rest pass — serve path then full-HPO confirm; rushing g4 halved but g1-walled (bss −0.0245). Sharp-book kill NOT triggered. Scoreboard: WNBA 14/18 ✓ · NBA 16/21 ✓ · MLB 14/19 · NHL 10/15 · NFL 9/20.
 - 2026-07-19 (2) · NFL breadth research + first mandatory ship. research-analyst brief (research/briefs/researcher_nfl_breadth_20260719.md): board ceiling 13/20; receiving/rushing-yards g4 = upper-tail under-dispersion (right-tail PIT 0.21–0.25 vs 0.05, positive-only KS ≈ full KS — NOT the zero atom, ZAGamma dominated); passing yards + completions + passing tds = efficient-book kills (88×/8×/5× n at unfavorable point estimates); interceptions correction — DPO/NegBin corners PASS g1, wall is g4 over-dispersion; attempts = only favorable thin-n cell (1.5× effective n via EB-shrink). Owner: yards trio = priority, interceptions lowest; endorsed a 6th dist type conditional on smoke-testing the compound count×severity architecture first → smoke test run (real PBP severities, MC compound PIT): PARTIAL on receiving (right-tail 0.206→0.180, ~13% of needed), NO MERIT on rushing (worse) — independence assumption understates the dependence-driven joint upper tail; compound rejected for yards, **Mixture head pilot = active lever**. NFL receptions SHIPPED at confirm (SN ratio_meanyr, dist_training_loss=nll persisted — S4 live) → NFL 8/20; carries + qb yards (bss +0.118, g4-pass, other-gate fail) reverted, recovery queued. Living plan file created: docs/handoffs/breadth75_plan.md.
 - 2026-07-19 · Owner: NFL breadth = highest priority. NHL+MLB continuous boards closed: NHL saves +0.011 and MLB pitches thrown +0.052 both ships-but-RANKS-ONLY (dl=nll, third/second occurrence) → S4 BUILT same day (commit 4538861: dist_training_loss persists per cell, meditate resolves it per-cell, ranks-only machinery deleted; −87 LOC). MLB pitching outs REVERTED at full-HPO (g4; +0.057 ×2 corners remain for a manual walk), runs allowed re-swept to g1-only −0.040 (book-side, dead this wave), NHL skater fantasy best −0.230 g4-only on a persistable centered corner (posthoc-isotonic retry queued), goalie fantasy/hitter fantasy/pitcher fantasy dead. NBA STL's DPO ship stale-pinned the ZINB book round-trip golden → re-pinned to FTM. W4 NFL chain LIVE: receptions/targets/carries flipped ZINB (blindspot workaround) → count board+confirm → unshipped flips revert → continuous board+confirm → tds matrix regen. Post-chain queue: pitches thrown + saves re-confirms (S4-unlocked), pitching-outs walk, skater-fantasy retry. Scoreboard: WNBA 14/18 ✓ · NBA 16/21 ✓ · MLB 14/19 · NHL 10/15 · NFL 7/20.

@@ -17,6 +17,9 @@ upstream (suspenders).
 """
 
 import math
+from unittest import mock
+
+import pytest
 
 from sportstradamus.training.report import _wide_row
 
@@ -42,7 +45,7 @@ def test_wide_row_handles_none_marginal_shape():
         }
     )
 
-    row = _wide_row(model, "NBA", "FG3A", "devel", {}, {})
+    row, _identity = _wide_row(model, "NBA", "FG3A", "devel", {}, {})
 
     assert math.isnan(row["marginal_shape"])
     assert row["model_shape"] == 1.0
@@ -68,7 +71,7 @@ def test_wide_row_handles_none_in_every_diag_key():
     )
     model = _model_with_diag(dict.fromkeys(diag_keys))
 
-    row = _wide_row(model, "NBA", "FG3A", "devel", {}, {})
+    row, _identity = _wide_row(model, "NBA", "FG3A", "devel", {}, {})
 
     for col in ("marginal_shape", "model_ev", "dispersion_cal", "model_weight"):
         assert math.isnan(row[col]), f"{col} must be NaN when diag value is None"
@@ -89,7 +92,7 @@ def test_wide_row_handles_none_in_model_and_metrics_blocks():
         "hist_gate": None,
     }
 
-    row = _wide_row(model, "NBA", "FG3A", "devel", {}, {})
+    row, _identity = _wide_row(model, "NBA", "FG3A", "devel", {}, {})
 
     for col in (
         "historical_zero_rate",
@@ -116,10 +119,68 @@ def test_wide_row_still_passes_real_floats_through():
         "hist_gate": 0.18,
     }
 
-    row = _wide_row(model, "NBA", "BLK", "devel", {}, {})
+    row, _identity = _wide_row(model, "NBA", "BLK", "devel", {}, {})
 
     assert row["brier_book"] == 0.24
     assert row["brier_model"] == 0.21
     assert row["brier_skill_score"] == 0.13
     assert row["marginal_shape"] == 3.7
     assert row["historical_zero_rate"] == 0.18
+
+
+def test_wide_row_surfaces_generic_strategy_identity():
+    model = _model_with_diag({"model_shape": 1.0, "empirical_shape": 1.0})
+    identity = mock.Mock(
+        strategy_slug="rushing-qb-rb-affine-groupcdf-bookpool-v1",
+        structural_strategy="rushing-qb-rb-affine-groupcdf-bookpool-v1",
+        signature="canonical-signature",
+        implementation_version=2,
+        artifact_schema_version=3,
+        status="active",
+        controls_json='{"dist":"SkewNormal"}',
+        corner_fingerprint="corner-fingerprint",
+        matrix_hash="matrix-sha256",
+        split_fingerprint="split-sha256",
+    )
+    with mock.patch(
+        "sportstradamus.training.report.resolve_report_identity", return_value=identity
+    ) as resolve_identity:
+        row, returned_identity = _wide_row(model, "NFL", "rushing yards", "devel", {}, {})
+
+    resolve_identity.assert_called_once_with(model, league="NFL", market="rushing yards")
+    assert returned_identity is identity
+    assert {
+        "strategy_slug": row["strategy_slug"],
+        "structural_strategy": row["structural_strategy"],
+        "strategy_signature": row["strategy_signature"],
+        "strategy_implementation_version": row["strategy_implementation_version"],
+        "artifact_schema_version": row["artifact_schema_version"],
+        "strategy_status": row["strategy_status"],
+        "strategy_controls_json": row["strategy_controls_json"],
+        "strategy_corner_fingerprint": row["strategy_corner_fingerprint"],
+        "strategy_matrix_hash": row["strategy_matrix_hash"],
+        "strategy_split_fingerprint": row["strategy_split_fingerprint"],
+    } == {
+        "strategy_slug": identity.strategy_slug,
+        "structural_strategy": identity.structural_strategy,
+        "strategy_signature": identity.signature,
+        "strategy_implementation_version": identity.implementation_version,
+        "artifact_schema_version": identity.artifact_schema_version,
+        "strategy_status": identity.status,
+        "strategy_controls_json": identity.controls_json,
+        "strategy_corner_fingerprint": identity.corner_fingerprint,
+        "strategy_matrix_hash": identity.matrix_hash,
+        "strategy_split_fingerprint": identity.split_fingerprint,
+    }
+
+
+def test_wide_row_propagates_invalid_structural_identity():
+    model = _model_with_diag({"model_shape": 1.0, "empirical_shape": 1.0})
+    with (
+        mock.patch(
+            "sportstradamus.training.report.resolve_report_identity",
+            side_effect=ValueError("stale structural strategy identity"),
+        ),
+        pytest.raises(ValueError, match="stale structural strategy identity"),
+    ):
+        _wide_row(model, "NFL", "rushing yards", "devel", {}, {})

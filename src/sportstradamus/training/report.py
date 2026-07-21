@@ -39,6 +39,9 @@ from sportstradamus.training.config import (
     save_cv_std_config,
     save_zi_config,
 )
+from sportstradamus.training.model_strategy_artifacts import ArtifactIdentity
+from sportstradamus.training.model_strategy_frame import validate_strategy_frame
+from sportstradamus.training.model_strategy_report_identity import resolve_report_identity
 from sportstradamus.training.scorecard import (
     compute_gates,
     load_test_set,
@@ -129,13 +132,14 @@ def _wide_row(
     shipped: str,
     stat_cv: dict,
     stat_std: dict,
-) -> dict:
-    """Flatten one trained model's pickle into a single training-stats row."""
+) -> tuple[dict, ArtifactIdentity]:
+    """Flatten one model and retain its validated identity for test-set binding."""
     metrics_block = model.get("metrics") or {}
     model_m = metrics_block.get("model") or {}
     book_m = metrics_block.get("book_baseline") or {}
     diag = model.get("diagnostics") or {}
     params = model.get("params") or {}
+    strategy_identity = resolve_report_identity(model, league=league, market=market)
     has_book = bool(book_m)
 
     def _safe_float(value) -> float:
@@ -161,11 +165,21 @@ def _wide_row(
     def _param(key: str) -> float:
         return _safe_float(params.get(key))
 
-    return {
+    row = {
         # Identity
         "league": league,
         "market": market,
         "distribution": model.get("distribution"),
+        "strategy_slug": strategy_identity.strategy_slug,
+        "structural_strategy": strategy_identity.structural_strategy,
+        "strategy_signature": strategy_identity.signature,
+        "strategy_implementation_version": strategy_identity.implementation_version,
+        "artifact_schema_version": strategy_identity.artifact_schema_version,
+        "strategy_status": strategy_identity.status,
+        "strategy_controls_json": strategy_identity.controls_json,
+        "strategy_corner_fingerprint": strategy_identity.corner_fingerprint,
+        "strategy_matrix_hash": strategy_identity.matrix_hash,
+        "strategy_split_fingerprint": strategy_identity.split_fingerprint,
         "shipped": shipped,
         # Sample
         "n_validation": float("nan"),  # populated by training.scorecard.compute_gates
@@ -250,6 +264,7 @@ def _wide_row(
         "cv": float(stat_cv.get(league, {}).get(market, float("nan"))),
         "std": float(stat_std.get(league, {}).get(market, float("nan"))),
     }
+    return row, strategy_identity
 
 
 def _load_prior_g6_fired() -> dict[tuple[str, str], bool]:
@@ -266,9 +281,17 @@ def _load_prior_g6_fired() -> dict[tuple[str, str], bool]:
 
 
 def _layer_gates_from_test_set(
-    row: dict, league: str, market: str, *, prior_g6_fired: bool | None = None
+    row: dict,
+    expected_identity: ArtifactIdentity,
+    league: str,
+    market: str,
+    *,
+    prior_g6_fired: bool | None = None,
 ) -> None:
     """Overwrite the placeholder ship-gate columns on ``row`` if the test-set CSV is present.
+
+    Generic model and test-set identities must match exactly. Identity-absent
+    legacy artifacts are accepted only as a pair.
 
     Skips silently when the CSV is missing (the cell trained but its test_set
     wasn't dumped), empty (degenerate frame would crash ``pd.qcut``), or
@@ -277,6 +300,15 @@ def _layer_gates_from_test_set(
     test_set_path = Path(str(_TEST_SETS_DIR / f"{market_file_slug(league, market)}.csv"))
     if not test_set_path.is_file():
         return
+    test_identity, _spec = validate_strategy_frame(
+        pd.read_csv(test_set_path), league=league, market=market
+    )
+    model_is_legacy = expected_identity.controls_json is None
+    test_set_is_legacy = test_identity is None
+    if model_is_legacy != test_set_is_legacy:
+        raise ValueError(f"{league} {market}: mixed legacy/generic strategy artifacts")
+    if not model_is_legacy and test_identity != expected_identity:
+        raise ValueError(f"{league} {market}: model/test-set strategy identity mismatch")
     try:
         df = load_test_set(test_set_path, _SHIP_PRED_COL)
     except (ValueError, KeyError) as e:
@@ -318,9 +350,13 @@ def write_model_stats(
     for league, markets in league_models.items():
         for market, model in markets.items():
             shipped = shipped_map.get(league, {}).get(market, "withheld")
-            row = _wide_row(model, league, market, shipped, stat_cv, stat_std)
+            row, strategy_identity = _wide_row(model, league, market, shipped, stat_cv, stat_std)
             _layer_gates_from_test_set(
-                row, league, market, prior_g6_fired=prior_g6.get((league, market))
+                row,
+                strategy_identity,
+                league,
+                market,
+                prior_g6_fired=prior_g6.get((league, market)),
             )
             rows.append(row)
 

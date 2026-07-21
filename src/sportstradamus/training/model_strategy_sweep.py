@@ -1,69 +1,68 @@
-"""Operation Ship 75 strategy sweep: a per-cell Optuna study over a family's retrain grid.
+"""Per-cell deterministic strategy sweep ranked by six-gate ship slack.
 
-For each ``(league, market)`` cell the sweep runs one Optuna study per family of the cell's
-distribution class — a SkewNormal cell sweeps ``normalization × dist-loss × sn-param ×
-blend-loss``; a count cell sweeps BOTH ``ZINB`` (``zinb-mode × count-dispersion-objective ×
-blend-loss``) AND plain ``NegBin`` (``count-dispersion-objective × blend-loss``), cross-family
-ranked by ship slack —
-training one deterministic ``meditate`` trial per grid corner and scoring it through the *honest*
-production gate: the deterministic dump
-already carries the pipeline's validation-fit calibration, and :func:`_score_corner` runs the same
-:func:`scorecard.gate_row` the production scorecard does — no test re-fit. The sweep is a fixed-HP
-replica of the production HPO pipeline: same calibration, same gate, same dump decode; the *only*
-differences are fixed hyperparameters in place of the Optuna search and the deterministic sandbox
-write locations (so a trial never clobbers a real trained market). The objective minimizes the
-negative ship slack, so the study's best trial is the most-shippable corner.
+Every applicable, explicitly enrolled :class:`model_strategy_registry.StrategySpec` contributes
+its categorical grid. Each corner trains in a research-only namespace and is scored through the
+production scorecard with its validation-fit calibration intact. Canonical spec/control
+fingerprints make the board resumable without accepting stale or legacy strategy coverage.
 
-Families live in :data:`_FAMILIES`, a small registry; :data:`_CLASS_FAMILIES` routes a cell's
-``dist`` (via its distribution class) to the families to sweep. Each :class:`FamilySpec` names its
-grid axes — a count family carries a single-choice ``dist`` axis so its winner persists ``dist`` and
-each corner forces ``--dist`` regardless of the cell's current pin — the ``stat_meta.json`` fields a
-winning corner persists, and the shipped defaults for any non-persistable axis. Adding a family
-(e.g. Double Poisson) is one :class:`FamilySpec` plus its :data:`_DIST_CLASS` entry, not an engine
-change. Every axis is categorical, so the sampler is :class:`optuna.samplers.GridSampler` —
-exhaustive and deterministic, the right tool for a discrete space.
-
-Research scaffolding: the deterministic trials *rank* only — nothing ships off them. The confirm
-loop (``--confirm``, :mod:`sportstradamus.training.model_strategy_confirm`) persists a winner and a
-clean full-HPO 5/5 on the official scorecard is what actually ships.
+Deterministic trials rank only. ``--confirm`` persists the winner and requires a clean full-HPO
+6/6 before a withheld model can ship.
 """
 
 import functools
+import hashlib
 import importlib.resources as pkg_resources
 import math
 import pathlib
 import subprocess
 import time
-from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import click
 import optuna
 import pandas as pd
+import pyarrow.parquet as pq
 import tabulate
 
 from sportstradamus import data as _data_pkg
 from sportstradamus.helpers.io import market_file_slug
-from sportstradamus.training import calibration
 from sportstradamus.training.markets import ALL_MARKETS
+from sportstradamus.training.model_strategy_artifacts import (
+    InactiveStrategyArtifactError,
+    build_artifact_identity,
+    validate_strategy_artifacts,
+)
+from sportstradamus.training.model_strategy_execution import (
+    artifact_namespace,
+    meditate_command,
+    strategy_cli_args,
+    strategy_persistence_edits,
+)
+from sportstradamus.training.model_strategy_registry import (
+    BASE_STRUCTURAL_STRATEGY,
+    SWEEP_CAPABILITIES,
+    CellContext,
+    StrategySpec,
+    controls_json,
+    corner_fingerprint,
+    distribution_class,
+    get_strategy,
+    parse_controls,
+    strategies_for_cell,
+    strategy_controls,
+)
 from sportstradamus.training.scorecard import (
-    _DECODE_FALLBACK_STRATEGY,
     apply_thresholds,
     gate_row,
     load_test_set,
     min_gate_slack,
 )
-from sportstradamus.training.ship_config import STAT_META_PATH, WITHHELD, load_stat_meta
-
-# The normalization corners the SkewNormal gate can decode (and therefore score). The EB slug
-# `centered_additive_eb_meanyr_k10` decodes off the dumped `GlobalMean` column (the gate re-adds
-# the empirical-Bayes prior) — see docs/ship_gate.md.
-_DECODABLE_SN_NORMS: tuple[str, ...] = (
-    "ratio_meanyr",
-    "centered_additive_mean10",
-    "centered_additive_eb_meanyr_k10",
+from sportstradamus.training.ship_config import (
+    STAT_META_PATH,
+    TARGET_NORM_NONE,
+    WITHHELD,
+    load_stat_meta,
 )
-_BLENDING: tuple[str, ...] = tuple(sorted(calibration.BLENDING_SLUGS))
 
 _SHIP_PRED_COL = "Blended_EV"
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
@@ -94,126 +93,13 @@ _GATES: tuple[str, ...] = ("g1", "g2", "g3", "g4", "g5", "g6")
 # it out of every ship/candidate filter.
 _FAILED_CORNER_SLACK: float = float("-inf")
 
-# Each swept axis' meditate CLI flag. A corner is realized by appending `--flag value` per axis;
-# an axis a family doesn't sweep is simply absent (e.g. ZINB never forces --target-normalization,
-# so meditate resolves it to the ratio_meanyr fallback — see _dump_subdir).
-_AXIS_FLAG: dict[str, str] = {
-    "dist": "--dist",
-    "normalization": "--target-normalization",
-    "dist_training_loss": "--dist-training-loss",
-    "sn_param": "--sn-param",
-    "blending_loss_fn": "--blending-loss-fn",
-    "zinb_mode": "--zinb-mode",
-    "count_dispersion_objective": "--count-dispersion-objective",
-}
-
-
-@dataclass(frozen=True)
-class FamilySpec:
-    """One distribution family's sweep definition.
-
-    Attributes:
-        axes: Grid axes ``{axis: choices}`` the GridSampler enumerates (all categorical today).
-        persist: ``{axis: stat_meta.json field}`` a winning corner writes to ship the cell.
-            Every swept axis persists, so any shipping corner is reproducible from
-            ``stat_meta.json`` alone.
-    """
-
-    axes: dict[str, tuple[str, ...]]
-    persist: dict[str, str]
-
-
-_FAMILIES: dict[str, FamilySpec] = {
-    "SkewNormal": FamilySpec(
-        axes={
-            "normalization": _DECODABLE_SN_NORMS,
-            "dist_training_loss": ("crps", "nll"),
-            "sn_param": ("direct", "centered"),
-            "blending_loss_fn": _BLENDING,
-        },
-        persist={
-            "normalization": "target_normalization",
-            "dist_training_loss": "dist_training_loss",
-            "sn_param": "sn_param",
-            "blending_loss_fn": "blending",
-        },
-    ),
-    "Mixture": FamilySpec(
-        # Mixture stays a minimal continuous fallback — it sweeps only dist × normalization.
-        # No dist_training_loss axis: lightgbmlss Mixture rejects crps components (the pipeline
-        # pins the Gaussian component loss to nll), so a loss axis only manufactures failed
-        # corners. No blending_loss_fn axis: its corners take the default blend rather than
-        # doubling the grid on an axis we don't tune for this off-ship-path family.
-        axes={
-            "dist": ("Mixture",),
-            "normalization": _DECODABLE_SN_NORMS,
-        },
-        persist={
-            "dist": "dist",
-            "normalization": "target_normalization",
-        },
-    ),
-    "ZINB": FamilySpec(
-        axes={
-            "dist": ("ZINB",),
-            "zinb_mode": ("joint", "hurdle"),
-            "count_dispersion_objective": ("crps", "pit_ks"),
-            "blending_loss_fn": _BLENDING,
-        },
-        persist={
-            "dist": "dist",
-            "zinb_mode": "zinb_mode",
-            "count_dispersion_objective": "count_dispersion_objective",
-            "blending_loss_fn": "blending",
-        },
-    ),
-    "NegBin": FamilySpec(
-        axes={
-            "dist": ("NegBin",),
-            "count_dispersion_objective": ("crps", "pit_ks"),
-            "blending_loss_fn": _BLENDING,
-        },
-        persist={
-            "dist": "dist",
-            "count_dispersion_objective": "count_dispersion_objective",
-            "blending_loss_fn": "blending",
-        },
-    ),
-    "DPO": FamilySpec(
-        axes={
-            "dist": ("DPO",),
-            "count_dispersion_objective": ("crps", "pit_ks"),
-            "blending_loss_fn": _BLENDING,
-        },
-        persist={
-            "dist": "dist",
-            "count_dispersion_objective": "count_dispersion_objective",
-            "blending_loss_fn": "blending",
-        },
-    ),
-}
-
-# A cell's stat_meta `dist` names its distribution class; the sweep sweeps every family in that
-# class (cross-family ranked by slack). A count cell sweeps ZINB, plain NegBin *and* DPO regardless
-# of which one it is currently pinned to, so a re-sweep after any family flip still evaluates all.
-# Adding a family is one FamilySpec above plus its class entry here.
-_DIST_CLASS: dict[str, str] = {
-    "SkewNormal": "continuous",
-    "Mixture": "continuous",
-    "ZINB": "count",
-    "NegBin": "count",
-    "DPO": "count",
-}
-_CLASS_FAMILIES: dict[str, tuple[str, ...]] = {
-    "continuous": ("SkewNormal", "Mixture"),
-    "count": ("ZINB", "NegBin", "DPO"),
-}
-# `--dist-class all` sweeps every class; the two real classes are _CLASS_FAMILIES' keys.
+# `--dist-class all` sweeps every registered distribution class.
+_DIST_CLASSES: tuple[str, ...] = ("continuous", "count")
 _DIST_CLASS_ALL = "all"
 
-# One wide board schema across both families: a cell fills only its family's axis columns, the rest
-# are blank. Kept as a fixed superset so the board CSV has a stable header regardless of which
-# families were swept.
+# Common human-readable controls ride beside the canonical ``controls_json``. A future strategy can
+# add a control without changing this schema: the JSON remains authoritative even when the control
+# has no convenience column here.
 _AXIS_COLUMNS: list[str] = [
     "dist",
     "normalization",
@@ -222,11 +108,21 @@ _AXIS_COLUMNS: list[str] = [
     "zinb_mode",
     "count_dispersion_objective",
     "blending_loss_fn",
+    "hpo_selection",
+    "stabilization",
 ]
 _BOARD_COLUMNS: list[str] = [
     "league",
     "market",
     "family",
+    "strategy_slug",
+    "structural_strategy",
+    "strategy_signature",
+    "strategy_implementation_version",
+    "artifact_schema_version",
+    "strategy_status",
+    "controls_json",
+    "corner_fingerprint",
     *_AXIS_COLUMNS,
     "slack",
     "ships",
@@ -247,6 +143,8 @@ _BOARD_COLUMNS: list[str] = [
     "dispersion_cal",
     "skew_cal",
     "n",
+    "matrix_hash",
+    "split_fingerprint",
     "swept_at",
     "code_rev",
 ]
@@ -257,20 +155,66 @@ STRATEGY_RESEARCH_BOARD: pathlib.Path = pathlib.Path(
 )
 
 
-def _cell_families(league: str, market: str) -> tuple[str, ...]:
-    """The sweep families for a cell's distribution class, from its stat_meta ``dist``.
-
-    A count cell sweeps ``("ZINB", "NegBin", "DPO")`` — even one already pinned to a single family —
-    so a re-sweep after any family flip re-evaluates all; a SkewNormal cell sweeps
-    ``("SkewNormal",)``. Loud on a dist with no registered family/class.
-    """
+def _cell_context(league: str, market: str) -> CellContext:
+    """Build the registry context for one stat-meta cell."""
     meta = load_stat_meta(pathlib.Path(str(STAT_META_PATH)))
     dist = meta.get(league, {}).get(market, {}).get("dist")
-    if dist not in _DIST_CLASS:
+    if not isinstance(dist, str):
+        raise click.UsageError(f"{league} {market}: missing distribution family")
+    try:
+        dist_class = distribution_class(dist)
+    except ValueError as exc:
+        raise click.UsageError(f"{league} {market}: dist {dist!r} is not a swept family") from exc
+    data_columns, matrix_sha256 = _training_matrix_contract(league, market)
+    return CellContext(
+        league=league,
+        market=market,
+        distribution=dist,
+        distribution_class=dist_class,
+        data_columns=data_columns,
+        matrix_sha256=matrix_sha256,
+    )
+
+
+def _training_matrix_path(league: str, market: str) -> pathlib.Path:
+    return _TRAINING_DATA_ROOT / f"{market_file_slug(league, market)}.parquet"
+
+
+@functools.lru_cache(maxsize=256)
+def _read_training_matrix_contract(
+    path_text: str, mtime_ns: int, size: int
+) -> tuple[frozenset[str], str]:
+    """Read only a cached matrix's schema and stream its exact bytes into SHA256."""
+    del mtime_ns, size  # cache-key inputs; the path contents are read below
+    path = pathlib.Path(path_text)
+    columns = frozenset(pq.read_schema(path).names)
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return columns, digest.hexdigest()
+
+
+def _training_matrix_contract(league: str, market: str) -> tuple[frozenset[str], str]:
+    """Return cached-matrix schema + SHA, failing loud when the frozen input is unusable."""
+    path = _training_matrix_path(league, market)
+    try:
+        stat = path.stat()
+        return _read_training_matrix_contract(str(path), stat.st_mtime_ns, stat.st_size)
+    except (OSError, ValueError) as exc:
         raise click.UsageError(
-            f"{league} {market}: dist {dist!r} is not a swept family; known: {sorted(_DIST_CLASS)}"
+            f"{league} {market}: unreadable cached training matrix {path}"
+        ) from exc
+
+
+def _cell_families(league: str, market: str) -> tuple[str, ...]:
+    """Registered sweep strategies applicable and explicitly enrolled for a cell."""
+    return tuple(
+        spec.slug
+        for spec in strategies_for_cell(
+            _cell_context(league, market), required_capabilities=SWEEP_CAPABILITIES
         )
-    return _CLASS_FAMILIES[_DIST_CLASS[dist]]
+    )
 
 
 @functools.lru_cache(maxsize=1)
@@ -288,29 +232,24 @@ def _code_rev() -> str:
         return "unknown"
 
 
-def _dump_subdir(corner: dict[str, str]) -> str:
-    """The deterministic dump subdir meditate keys a corner by: ``{target_normalization}{_hurdle}``.
-
-    SkewNormal corners force a ``normalization`` slug; ZINB corners force none, so meditate resolves
-    the count-branch target-normalization to the ``ratio_meanyr`` fallback (cli.meditate, via
-    :func:`ship_config.resolve_flag_target_normalization`), and a ``hurdle`` mode appends ``_hurdle``
-    (pipeline.py). This mirrors that formula exactly so scoring reads the file the trial wrote.
-    """
-    norm = corner.get("normalization", _DECODE_FALLBACK_STRATEGY)
-    suffix = "_hurdle" if corner.get("zinb_mode") == "hurdle" else ""
-    return f"{norm}{suffix}"
+def _dump_subdir(corner: dict[str, str], spec: StrategySpec) -> str:
+    """Resolve the canonical deterministic namespace for one strategy corner."""
+    norm = corner.get("normalization", TARGET_NORM_NONE)
+    trained_dist = corner.get("dist", spec.family)
+    suffix = "_hurdle" if trained_dist == "ZINB" and corner.get("zinb_mode") == "hurdle" else ""
+    return artifact_namespace(f"{norm}{suffix}", spec)
 
 
 def _decode_strategy(corner: dict[str, str]) -> str:
-    """The gate's decode strategy for a corner: the swept SN normalization, or ratio_meanyr for a count cell."""
-    return corner.get("normalization", _DECODE_FALLBACK_STRATEGY)
+    """Use a registered continuous transform, or canonical no-transform for a count corner."""
+    return corner.get("normalization", TARGET_NORM_NONE)
 
 
 def _dump_paths(
-    league: str, market: str, corner: dict[str, str]
+    league: str, market: str, corner: dict[str, str], spec: StrategySpec
 ) -> tuple[pathlib.Path, pathlib.Path]:
     """CSV under ``test_sets/deterministic/<subdir>/`` and pickle under ``research/models/deterministic/<subdir>/``."""
-    subdir = _dump_subdir(corner)
+    subdir = _dump_subdir(corner, spec)
     filename = market_file_slug(league, market)
     csv = _TEST_SETS_ROOT / "deterministic" / subdir / f"{filename}.csv"
     mdl = _DETERMINISTIC_MODEL_ROOT / subdir / f"{filename}.mdl"
@@ -322,7 +261,7 @@ def _corner_label(corner: dict[str, str]) -> str:
     return " · ".join(f"{axis}={value}" for axis, value in corner.items())
 
 
-def _log_path(league: str, market: str, corner: dict[str, str]) -> pathlib.Path:
+def _log_path(league: str, market: str, corner: dict[str, str], spec: StrategySpec) -> pathlib.Path:
     """Per-corner meditate log under ``research/logs/deterministic/<subdir>/``.
 
     Keyed by the full corner so two corners sharing a dump subdir (e.g. the loss axes of one
@@ -330,8 +269,12 @@ def _log_path(league: str, market: str, corner: dict[str, str]) -> pathlib.Path:
     by subdir alone and each corner therefore retrains and scores before the next overwrites it.
     """
     filename = market_file_slug(league, market)
-    tag = "_".join(f"{axis}={corner[axis]}" for axis in sorted(corner))
-    return _DETERMINISTIC_LOG_ROOT / _dump_subdir(corner) / f"{filename}__{tag}.log"
+    tag = (
+        f"structural_strategy={spec.slug}"
+        if spec.is_structural
+        else "_".join(f"{axis}={corner[axis]}" for axis in sorted(corner))
+    )
+    return _DETERMINISTIC_LOG_ROOT / _dump_subdir(corner, spec) / f"{filename}__{tag}.log"
 
 
 def _log_tail(path: pathlib.Path, n: int = 25) -> str:
@@ -385,7 +328,9 @@ def _run_meditate_with_lock_retry(cmd: list[str], log_path: pathlib.Path, *, tim
                 raise
 
 
-def _run_deterministic_meditate(league: str, market: str, corner: dict[str, str]) -> None:
+def _run_deterministic_meditate(
+    league: str, market: str, corner: dict[str, str], spec: StrategySpec
+) -> None:
     """Train one deterministic ``(cell, corner)`` trial via meditate.
 
     ``--deterministic`` pins RNGs and the fixed fast hyperparameters and dumps to the research
@@ -398,35 +343,41 @@ def _run_deterministic_meditate(league: str, market: str, corner: dict[str, str]
     own progress and verdict stay readable; :func:`_run_meditate_with_lock_retry` surfaces a failed
     trial's tail and retries a transient archive-lock clash.
     """
-    cmd = [
-        "poetry",
-        "run",
-        "meditate",
-        "--league",
+    cmd = meditate_command(
         league,
-        "--market",
         market,
         "--deterministic",
         "--bypass-withholding",
-    ]
-    for axis, value in corner.items():
-        cmd += [_AXIS_FLAG[axis], value]
+    )
+    cmd += strategy_cli_args(_cell_context(league, market), spec, corner)
     _run_meditate_with_lock_retry(
-        cmd, _log_path(league, market, corner), timeout=_MEDITATE_TRIAL_TIMEOUT_S
+        cmd, _log_path(league, market, corner, spec), timeout=_MEDITATE_TRIAL_TIMEOUT_S
     )
 
 
-def _score_corner(league: str, market: str, corner: dict[str, str]) -> dict[str, object]:
+def _score_corner(
+    league: str, market: str, corner: dict[str, str], spec: StrategySpec
+) -> dict[str, object]:
     """Score a trained corner's dump through the honest production gate.
 
     The dump's distribution is inferred from its columns (SkewNormal vs the count R/NB_P/Gate
     triple), so one gate path scores both families; ``decode_strategy`` is the swept SN
-    normalization or the ratio_meanyr count fallback. ``dispersion_cal`` / ``skew_cal`` are read
+    normalization or the canonical no-transform count value. ``dispersion_cal`` / ``skew_cal`` are read
     from the pickle for context only (a count cell dumps ``skew_cal`` absent → 0.0).
     """
-    csv_path, mdl_path = _dump_paths(league, market, corner)
+    csv_path, mdl_path = _dump_paths(league, market, corner, spec)
     df = load_test_set(csv_path, _SHIP_PRED_COL)
     filedict = pd.read_pickle(mdl_path)
+    context = _cell_context(league, market)
+    artifact_identity = validate_strategy_artifacts(
+        spec,
+        corner,
+        df,
+        filedict,
+        league=league,
+        market=market,
+        matrix_hash=str(context.matrix_sha256),
+    )
     decode = _decode_strategy(corner)
     row = apply_thresholds(
         gate_row(
@@ -461,6 +412,8 @@ def _score_corner(league: str, market: str, corner: dict[str, str]) -> dict[str,
         "dispersion_cal": filedict.get("dispersion_cal", 1.0),
         "skew_cal": filedict.get("skew_cal") or 0.0,
         "n": row.get("n_rows"),
+        "matrix_hash": context.matrix_sha256,
+        "split_fingerprint": artifact_identity.split_fingerprint,
     }
 
 
@@ -478,7 +431,7 @@ def _verdict(row: object) -> str:
 
 
 def _run_and_score(
-    league: str, market: str, family: str, corner: dict[str, str]
+    league: str, market: str, strategy_slug: str, corner: dict[str, str]
 ) -> list[dict[str, object]]:
     """Train the ``corner`` retrain trial and score it; tag the row with its family.
 
@@ -491,40 +444,78 @@ def _run_and_score(
     uniformly. A corner whose meditate errors or times out is caught, echoed, and returned as a
     single non-shipping row (:data:`_FAILED_CORNER_SLACK`) so one bad corner never aborts the board.
     """
+    spec = get_strategy(strategy_slug)
+    context = _cell_context(league, market)
     label = _corner_label(corner)
+    identity = build_artifact_identity(
+        spec.slug,
+        league,
+        market,
+        corner,
+        matrix_hash=context.matrix_sha256,
+    )
     click.echo(f"  training  {label} …")
     start = time.monotonic()
     try:
-        _run_deterministic_meditate(league, market, corner)
-        row = _score_corner(league, market, corner)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        _run_deterministic_meditate(league, market, corner, spec)
+        row = _score_corner(league, market, corner, spec)
+    except (
+        InactiveStrategyArtifactError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ) as exc:
         click.secho(
             f"  FAILED    {label} — {type(exc).__name__}; recorded non-shipping, continuing",
             fg="yellow",
             err=True,
         )
-        return [{**corner, "family": family, "slack": _FAILED_CORNER_SLACK, "ships": False}]
-    row["family"] = family
+        row = {**corner, "slack": _FAILED_CORNER_SLACK, "ships": False}
+    row.update(
+        {
+            "family": spec.family,
+            "strategy_slug": identity.strategy_slug,
+            "structural_strategy": identity.structural_strategy,
+            "strategy_signature": identity.signature,
+            "strategy_implementation_version": identity.implementation_version,
+            "artifact_schema_version": identity.artifact_schema_version,
+            "strategy_status": identity.status,
+            "controls_json": controls_json(corner),
+            "matrix_hash": context.matrix_sha256,
+            "corner_fingerprint": corner_fingerprint(
+                spec,
+                corner,
+                str(context.matrix_sha256),
+            ),
+        }
+    )
+    if float(row["slack"]) == _FAILED_CORNER_SLACK:
+        return [row]
     verdict = click.style(_verdict(row), fg="green" if row["ships"] else "red")
     elapsed = f"{time.monotonic() - start:.0f}s"
     click.echo(f"  {verdict}  {label}  slack {float(row['slack']):+.3f}  ({elapsed})")
     return [row]
 
 
-def _run_family_study(league: str, market: str, family: str) -> list[dict[str, object]]:
-    """One GridSampler study over ``family``'s grid; the scored row of every corner it visits.
+def _run_family_study(league: str, market: str, strategy_slug: str) -> list[dict[str, object]]:
+    """One GridSampler study over a registered strategy; return every scored corner.
 
     ``objective`` binds ``family`` as a default arg rather than a free variable — belt-and-suspenders
     against the classic loop-closure-capture bug even though it can't fire here: ``family`` is this
     function's parameter, fixed for the whole call, and :func:`search_cell` calls this function once
     per family rather than defining ``objective`` itself inside its own family loop.
     """
-    grid = {axis: list(choices) for axis, choices in _FAMILIES[family].axes.items()}
+    spec = get_strategy(strategy_slug)
+    if not spec.axes:
+        return _run_and_score(league, market, strategy_slug, dict(spec.fixed_controls))
+    grid = {axis: list(choices) for axis, choices in spec.axes.items()}
     study = optuna.create_study(direction="minimize", sampler=optuna.samplers.GridSampler(grid))
 
-    def objective(trial: optuna.Trial, family: str = family) -> float:
-        corner = {axis: trial.suggest_categorical(axis, choices) for axis, choices in grid.items()}
-        rows = _run_and_score(league, market, family, corner)
+    def objective(trial: optuna.Trial, strategy_slug: str = strategy_slug) -> float:
+        corner = {
+            **spec.fixed_controls,
+            **{axis: trial.suggest_categorical(axis, choices) for axis, choices in grid.items()},
+        }
+        rows = _run_and_score(league, market, strategy_slug, corner)
         trial.set_user_attr("rows", rows)
         return -max(float(row["slack"]) for row in rows)
 
@@ -533,17 +524,11 @@ def _run_family_study(league: str, market: str, family: str) -> list[dict[str, o
 
 
 def search_cell(league: str, market: str) -> pd.DataFrame:
-    """Run one Optuna GridSampler study per family of the cell's distribution class, ranked by slack.
-
-    A count cell studies both ZINB and plain NegBin and the boards union; a SkewNormal cell studies
-    one family. One honest row per retrain corner across all families; the board carries each corner's
-    slack / ship verdict / gate passes so the top row is the real-HPO confirm candidate. Sorted by
-    ``slack`` descending.
-    """
+    """Score every registered corner for a cell and rank the unified board by slack."""
     rows = [
         {"league": league, "market": market, **row}
-        for family in _cell_families(league, market)
-        for row in _run_family_study(league, market, family)
+        for strategy_slug in _cell_families(league, market)
+        for row in _run_family_study(league, market, strategy_slug)
     ]
     board = pd.DataFrame(rows)
     ranked = board.sort_values("slack", ascending=False, ignore_index=True)
@@ -558,7 +543,7 @@ def _has_training_data(league: str, market: str) -> bool:
     The deterministic sweep freezes input to this parquet and never rebuilds it, so a cell without
     one is skipped rather than triggering an expensive matrix rebuild mid-board.
     """
-    return (_TRAINING_DATA_ROOT / f"{market_file_slug(league, market)}.parquet").is_file()
+    return _training_matrix_path(league, market).is_file()
 
 
 def _candidate_cells(
@@ -575,15 +560,27 @@ def _candidate_cells(
     ``shipped`` field.
     """
     meta = load_stat_meta(pathlib.Path(str(STAT_META_PATH)))
-    return [
-        (lg, mkt)
-        for lg, markets in meta.items()
-        if league is None or lg == league
-        for mkt, cell in markets.items()
-        if cell.get("dist") in _FAMILIES
-        and (include_shipped or cell.get("shipped") == WITHHELD)
-        and (dist_class == _DIST_CLASS_ALL or _DIST_CLASS[cell["dist"]] == dist_class)
-    ]
+    cells: list[tuple[str, str]] = []
+    unsupported: list[tuple[str, str, object]] = []
+    for lg, markets in meta.items():
+        if league is not None and lg != league:
+            continue
+        for mkt, cell in markets.items():
+            if mkt not in ALL_MARKETS.get(lg, []):
+                continue
+            if not include_shipped and cell.get("shipped") != WITHHELD:
+                continue
+            try:
+                cell_dist_class = distribution_class(cell.get("dist"))
+            except (TypeError, ValueError):
+                unsupported.append((lg, mkt, cell.get("dist")))
+                continue
+            if dist_class in (_DIST_CLASS_ALL, cell_dist_class):
+                cells.append((lg, mkt))
+    if unsupported:
+        rendered = ", ".join(f"{lg} {mkt} ({dist!r})" for lg, mkt, dist in unsupported)
+        raise click.UsageError(f"board contains unsupported distribution cells: {rendered}")
+    return cells
 
 
 def _select_board_cells(
@@ -600,21 +597,16 @@ def _select_board_cells(
     ``dist_class`` narrows the cohort to one distribution class (the WS-3 count residual runs
     ``--dist-class count``).
     """
-    in_registry = [
-        (lg, mkt)
-        for lg, mkt in _candidate_cells(league, include_shipped, dist_class)
-        if mkt in ALL_MARKETS.get(lg, [])
-    ]
+    in_registry = _candidate_cells(league, include_shipped, dist_class)
     sweepable = [c for c in in_registry if _has_training_data(*c)]
     missing = [c for c in in_registry if not _has_training_data(*c)]
     return sweepable, missing
 
 
 def _cell_corner_count(league: str, market: str) -> int:
-    """The deterministic trainings one cell contributes — its family grids summed (count cells: ZINB + NegBin)."""
+    """The deterministic trainings one cell contributes across all registered strategies."""
     return sum(
-        math.prod(len(c) for c in _FAMILIES[f].axes.values())
-        for f in _cell_families(league, market)
+        len(strategy_controls(get_strategy(slug))) for slug in _cell_families(league, market)
     )
 
 
@@ -624,11 +616,103 @@ def _corner_count(cells: list[tuple[str, str]]) -> int:
 
 
 def _board_done_cells(out: str | None) -> set[tuple[str, str]]:
-    """The ``(league, market)`` cells already on the board CSV — what ``--resume`` skips."""
+    """Cells carrying the exact current set of signed strategy-corner fingerprints."""
     if out is None or not pathlib.Path(out).exists():
         return set()
-    prior = pd.read_csv(out)
-    return set(map(tuple, prior[["league", "market"]].drop_duplicates().to_numpy()))
+    prior = _read_board(pathlib.Path(out))
+    complete: set[tuple[str, str]] = set()
+    for (league, market), cell_rows in prior.groupby(["league", "market"], sort=False):
+        try:
+            expected = _expected_corner_records(league, market)
+        except (click.UsageError, ValueError):
+            continue
+        if _cell_rows_match_expected(cell_rows, expected):
+            complete.add((league, market))
+    return complete
+
+
+def _read_board(path: pathlib.Path) -> pd.DataFrame:
+    """Load any legacy board into the current ordered schema."""
+    board = pd.read_csv(path, keep_default_na=False).replace("", pd.NA)
+    for column in _BOARD_COLUMNS:
+        if column not in board:
+            board[column] = pd.NA
+    return board.reindex(columns=_BOARD_COLUMNS)
+
+
+def _expected_corner_records(league: str, market: str) -> dict[str, dict[str, object]]:
+    """Current canonical board identity for every corner registered for one cell."""
+    expected: dict[str, dict[str, object]] = {}
+    context = _cell_context(league, market)
+    for slug in _cell_families(league, market):
+        spec = get_strategy(slug)
+        for controls in strategy_controls(spec):
+            identity = build_artifact_identity(
+                spec.slug,
+                league,
+                market,
+                controls,
+                matrix_hash=str(context.matrix_sha256),
+            )
+            key = controls_json({"strategy_slug": spec.slug, "controls": controls})
+            expected[key] = {
+                "family": spec.family,
+                "strategy_slug": identity.strategy_slug,
+                "structural_strategy": identity.structural_strategy,
+                "strategy_signature": identity.signature,
+                "strategy_implementation_version": identity.implementation_version,
+                "artifact_schema_version": identity.artifact_schema_version,
+                "strategy_status": identity.status,
+                "controls_json": controls_json(controls),
+                "matrix_hash": context.matrix_sha256,
+                **{name: value for name, value in controls.items() if name in _AXIS_COLUMNS},
+            }
+    return expected
+
+
+def _cell_rows_match_expected(rows: pd.DataFrame, expected: dict[str, dict[str, object]]) -> bool:
+    identity_columns = (
+        "corner_fingerprint",
+        "family",
+        "strategy_slug",
+        "structural_strategy",
+        "strategy_signature",
+        "strategy_implementation_version",
+        "artifact_schema_version",
+        "strategy_status",
+        "controls_json",
+        "matrix_hash",
+    )
+    if rows.empty or any(rows[column].isna().any() for column in identity_columns):
+        return False
+    if len(rows) != len(expected) or rows["corner_fingerprint"].duplicated().any():
+        return False
+    for _, source in rows.iterrows():
+        row = source.loc[list(identity_columns)].to_dict()
+        try:
+            controls = parse_controls(row["controls_json"])
+        except (TypeError, ValueError):
+            return False
+        key = controls_json({"strategy_slug": row["strategy_slug"], "controls": controls})
+        contract = expected.get(key)
+        if contract is None:
+            return False
+        for field, value in contract.items():
+            actual = source.get(field)
+            if pd.isna(actual) or str(actual) != str(value):
+                return False
+        spec = get_strategy(str(row["strategy_slug"]))
+        split = source.get("split_fingerprint")
+        if pd.isna(split):
+            split = None
+        if spec.split_fingerprint_path and not isinstance(split, str):
+            return False
+        if not spec.split_fingerprint_path and split is not None:
+            return False
+        fingerprint = corner_fingerprint(spec, controls, str(row["matrix_hash"]))
+        if row["corner_fingerprint"] != fingerprint:
+            return False
+    return True
 
 
 def run_board(
@@ -637,12 +721,16 @@ def run_board(
     """Search every cell in ``cells``, printing each verdict as it lands and upserting the board CSV
     per cell so an interrupt keeps partial progress and a ``--league``-scoped run leaves other
     leagues' rows intact. With ``resume``, cells already on the CSV are skipped and their rows carry
-    through, so a crashed multi-hour run picks up where it stopped. Returns the full board.
+    through only when they are in the requested scope, so confirmation cannot consume unrelated
+    prior winners. Returns the requested cells' board; CSV upserts preserve all unrelated rows.
     """
     boards: list[pd.DataFrame] = []
     done = _board_done_cells(out) if resume else set()
     if resume and out is not None and pathlib.Path(out).exists():
-        boards.append(pd.read_csv(out))
+        prior = _read_board(pathlib.Path(out))
+        prior_cells = pd.MultiIndex.from_frame(prior[["league", "market"]])
+        requested_done = done & set(cells)
+        boards.append(prior[prior_cells.isin(requested_done)])
     for league, market in cells:
         if (league, market) in done:
             continue
@@ -661,7 +749,7 @@ def _upsert_cell(cell_board: pd.DataFrame, out: str) -> pd.DataFrame:
     """
     path = pathlib.Path(out)
     if path.exists():
-        prior = pd.read_csv(path)
+        prior = _read_board(path)
         league, market = cell_board["league"].iloc[0], cell_board["market"].iloc[0]
         keep = prior[~((prior["league"] == league) & (prior["market"] == market))]
         pd.concat([keep, cell_board], ignore_index=True).to_csv(path, index=False)
@@ -679,8 +767,11 @@ def _stat_meta_edit(row: object) -> str:
     blending=…`` (the persisted ``dist`` pins the winning family, e.g. flipping a cell
     ZINB→NegBin).
     """
-    persist = _FAMILIES[row["family"]].persist
-    return ", ".join(f"{field}={row[axis]}" for axis, field in persist.items())
+    spec = get_strategy(row["strategy_slug"])
+    edits = strategy_persistence_edits(
+        _cell_context(row["league"], row["market"]), spec, parse_controls(row["controls_json"])
+    )
+    return ", ".join(f"{field}={value}" for field, value in edits.items())
 
 
 def _print_cell_summary(board: pd.DataFrame) -> None:
@@ -691,7 +782,6 @@ def _print_cell_summary(board: pd.DataFrame) -> None:
     """
     best = board.iloc[0]
     ships = bool(best["ships"])
-    axes = list(_FAMILIES[best["family"]].axes)
     click.echo(
         click.style(f"\n{best['league']} {best['market']} — ", bold=True)
         + click.style(_verdict(best), fg="green" if ships else "red", bold=True)
@@ -701,7 +791,9 @@ def _print_cell_summary(board: pd.DataFrame) -> None:
         click.echo(f"  → stat_meta.json: {_stat_meta_edit(best)}")
     table = [
         [
-            *(r[axis] for axis in axes),
+            r["strategy_slug"],
+            r["structural_strategy"],
+            r["controls_json"],
             f"{float(r['slack']):+.3f}",
             "yes" if r["ships"] else "no",
             " ".join(_failed_gates(r)) or "-",
@@ -710,7 +802,16 @@ def _print_cell_summary(board: pd.DataFrame) -> None:
     ]
     click.echo(
         tabulate.tabulate(
-            table, headers=[*axes, "slack", "ships", "failed gates"], tablefmt="github"
+            table,
+            headers=[
+                "strategy",
+                "structural strategy",
+                "controls",
+                "slack",
+                "ships",
+                "failed gates",
+            ],
+            tablefmt="github",
         )
     )
 
@@ -795,7 +896,7 @@ def _run_board_mode(
 @click.option(
     "--board/--no-board",
     default=False,
-    help="Sweep every withheld cell with cached training data (both families) instead of one cell; "
+    help="Sweep every withheld cell with cached training data (all strategies) instead of one cell; "
     "--league narrows it.",
 )
 @click.option(
@@ -807,7 +908,7 @@ def _run_board_mode(
 )
 @click.option(
     "--dist-class",
-    type=click.Choice([*_CLASS_FAMILIES, _DIST_CLASS_ALL]),
+    type=click.Choice([*_DIST_CLASSES, _DIST_CLASS_ALL]),
     default=_DIST_CLASS_ALL,
     show_default=True,
     help="Board mode: narrow to one distribution class — 'count' (ZINB + NegBin) sweeps the WS-3 "
@@ -859,7 +960,7 @@ def main(
     dry_run: bool,
     out: str | None,
 ) -> None:
-    """Operation Ship 75 strategy sweep — a per-cell GridSampler over the cell's family grid, one
+    """Operation Ship 75 strategy sweep — a per-cell GridSampler over the strategy catalog, one
     honest val-fit→test gate row per corner. ``--confirm`` then ships the winners end-to-end.
     """
     optuna.logging.set_verbosity(optuna.logging.WARNING)
