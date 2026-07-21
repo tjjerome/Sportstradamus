@@ -57,6 +57,7 @@ def _manual_blob():
             },
             "positive": positive,
             "rb_boundary_residual": 0.3,
+            "boundary_residual_positions": [3],
         },
         "probability_pool": fixed_pool_blob(),
     }
@@ -219,7 +220,7 @@ def test_portable_blob_round_trip_reproduces_cdf_and_line_application():
 
 def test_nested_player_cv_fit_returns_finite_reusable_outputs():
     inputs = _synthetic_validation()
-    fit = receiving.fit_two_part_groupcdf(*inputs)
+    fit = receiving.fit_two_part_groupcdf(*inputs, residual_positions=(3,))
     line = receiving.apply_two_part_line(
         fit.blob,
         inputs[3],

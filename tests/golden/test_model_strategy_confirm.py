@@ -414,6 +414,9 @@ def test_run_meditate_true_on_clean_exit_false_on_error(monkeypatch, tmp_path):
     command = commands[-1]
     assert command[command.index("--structural-strategy") + 1] == "auto"
     assert command[command.index("--stabilization") + 1] == "None"
+    # posthoc is fixed (not persisted), so full-HPO confirm still forces the structural lane's
+    # --posthoc none rather than deferring to the base cell's stat_meta posthoc.
+    assert command[command.index("--posthoc") + 1] == "none"
 
     def boom(*a, **k):
         raise mc.subprocess.CalledProcessError(1, "meditate")

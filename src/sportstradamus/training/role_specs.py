@@ -21,6 +21,11 @@ train rows actually carry.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import reduce
+from operator import add, mul
+
+import numpy as np
+import pandas as pd
 
 from sportstradamus.training.structural_strategies import ROLE_COLUMNS
 
@@ -53,11 +58,16 @@ class RoleSpec:
     ``efficiency_cols`` is either empty (volume/attempt markets, where the
     outcome *is* the usage) or aligned one-to-one with ``usage_share_cols``
     (each share pairs with its efficiency as one summed component).
+
+    ``boundary_residual_positions`` names the roster codes that share the
+    two-part boundary logit residual (heritage: the NFL RB code). Empty ⇒ no
+    residual, so every non-opted cell gets the plain per-role boundary.
     """
 
     volume_cols: tuple[str, ...]
     usage_share_cols: tuple[str, ...]
     efficiency_cols: tuple[str, ...] = ()
+    boundary_residual_positions: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         """Fail at import if a registry row's column tuples are misaligned."""
@@ -75,6 +85,38 @@ class RoleSpec:
     @property
     def all_columns(self) -> tuple[str, ...]:
         return (*self.role_columns, "Player position")
+
+    def role_score(self, frame: pd.DataFrame) -> pd.Series:
+        """Conditional-expectation surrogate Π(volume) × Σ(usage × efficiency) tiering players
+        within position.
+
+        Shared by the training role-context builder and the serving router so both
+        derive each row's tier from identical arithmetic.
+        """
+        missing = [column for column in self.role_columns if column not in frame.columns]
+        if missing:
+            raise ValueError(f"missing role column(s): {', '.join(missing)}")
+        values = frame.loc[:, self.role_columns].apply(pd.to_numeric, errors="coerce")
+        if not np.isfinite(values.to_numpy(dtype=float)).all():
+            raise ValueError("nonfinite role input")
+        volume = reduce(mul, (values[column] for column in self.volume_cols))
+        if len(self.usage_share_cols) == 1:
+            clipped = (
+                values[column].clip(lower=0)
+                for column in (*self.usage_share_cols, *self.efficiency_cols)
+            )
+            score = reduce(mul, clipped, volume)
+        else:
+            components = (
+                values[usage].clip(lower=0) * values[efficiency].clip(lower=0)
+                for usage, efficiency in zip(
+                    self.usage_share_cols, self.efficiency_cols, strict=True
+                )
+            )
+            score = volume * reduce(add, components)
+        if not np.isfinite(score.to_numpy(dtype=float)).all():
+            raise ValueError("nonfinite role score")
+        return score
 
 
 # NBA/WNBA share one column schema; a market picks its team-share × player-rate
@@ -116,7 +158,9 @@ _NFL_RUN_VOLUME = ("Team plays_per_game",)
 _NFL_QB_USAGE = ("Player snap pct",)
 _NFL_PASS_EFFICIENCY = ("Player pass yards per attempt",)
 _NFL_CELLS: dict[str, RoleSpec] = {
-    "receiving yards": RoleSpec(ROLE_COLUMNS[:2], ROLE_COLUMNS[2:3], ROLE_COLUMNS[3:4]),
+    "receiving yards": RoleSpec(
+        ROLE_COLUMNS[:2], ROLE_COLUMNS[2:3], ROLE_COLUMNS[3:4], boundary_residual_positions=(3,)
+    ),
     "targets": RoleSpec(_NFL_PASS_VOLUME, ("Player target share",)),
     "receptions": RoleSpec(_NFL_PASS_VOLUME, ("Player target share",)),
     "passing yards": RoleSpec(_NFL_PASS_VOLUME, _NFL_QB_USAGE, _NFL_PASS_EFFICIENCY),
@@ -126,7 +170,10 @@ _NFL_CELLS: dict[str, RoleSpec] = {
     "completions": RoleSpec(_NFL_PASS_VOLUME, _NFL_QB_USAGE),
     "sacks taken": RoleSpec(_NFL_PASS_VOLUME, _NFL_QB_USAGE),
     "rushing yards": RoleSpec(
-        _NFL_RUN_VOLUME, ("Player carry share",), ("Player yards per carry",)
+        _NFL_RUN_VOLUME,
+        ("Player carry share",),
+        ("Player yards per carry",),
+        boundary_residual_positions=(3,),
     ),
     "carries": RoleSpec(_NFL_RUN_VOLUME, ("Player carry share",)),
     "yards": RoleSpec(

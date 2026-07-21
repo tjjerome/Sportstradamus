@@ -9,10 +9,10 @@ from __future__ import annotations
 import numpy as np
 from sklearn.model_selection import GroupKFold
 
+from sportstradamus.training.group_conditional_cdf._config import discover_codes
 from sportstradamus.training.group_conditional_cdf._contracts import (
     ROLE_VALUES as TWO_PART_ROLE_VALUES,
 )
-from sportstradamus.training.group_conditional_cdf._contracts import TWO_PART_POSITION_CODES
 
 # Frozen two-part support protocol. These floors were checked across the
 # full/outer/inner Player-grouped fit partitions before the candidate was ever
@@ -89,7 +89,7 @@ def _two_part_positive_support(
     positive_support: dict[str, dict[str, int | str]] = {}
     positive_hold_support: dict[str, dict[str, int | str]] = {}
     for role in TWO_PART_ROLE_VALUES:
-        for position in TWO_PART_POSITION_CODES:
+        for position in discover_codes(positions):
             group = f"{role}_pos{position}"
             records = []
             for name, index in fit_partitions:
@@ -134,8 +134,9 @@ def _two_part_nonpositive_support(
     roles: np.ndarray,
     positions: np.ndarray,
     fit_partitions: list,
+    residual_positions,
 ) -> tuple[dict, dict]:
-    """Non-positive per-role support plus the RB boundary-cell minimums."""
+    """Non-positive per-role support plus the residual boundary-cell minimums."""
     nonpositive_support: dict[str, dict[str, int | str]] = {}
     for role in TWO_PART_ROLE_VALUES:
         records = []
@@ -159,7 +160,7 @@ def _two_part_nonpositive_support(
 
     rb_records = []
     for name, index in fit_partitions:
-        rb = positions[index] == 3
+        rb = np.isin(positions[index], residual_positions)
         positive = rb & (result[index] > 0.0)
         nonpositive = rb & (result[index] <= 0.0)
         rb_records.append(
@@ -238,7 +239,6 @@ def _two_part_rb_boundary_ok(rb_minimum: dict, floor: dict) -> bool:
 def _two_part_support_guards(
     players: np.ndarray,
     roles: np.ndarray,
-    positions: np.ndarray,
     authentic: np.ndarray,
     required_fit: list,
     positive_support: dict,
@@ -247,12 +247,12 @@ def _two_part_support_guards(
     rb_minimum: dict,
     temperature_support: list,
     authentic_holds: list,
+    residual_positions,
 ) -> dict:
     """Evaluate every two-part support floor against the computed partitions."""
     floor = _TWO_PART_SUPPORT_FLOORS
     return {
         "roles_exact": set(np.unique(roles)) == set(TWO_PART_ROLE_VALUES),
-        "positions_exact": set(np.unique(positions)) == set(TWO_PART_POSITION_CODES),
         "required_fit_size": all(
             values["rows"] >= floor["fit_rows"] and values["players"] >= floor["fit_players"]
             for values in required_fit
@@ -270,7 +270,8 @@ def _two_part_support_guards(
             and values["minimum_players"] >= floor["nonpositive_players"]
             for values in nonpositive_support.values()
         ),
-        "rb_boundary_support": _two_part_rb_boundary_ok(rb_minimum, floor),
+        "rb_boundary_support": not residual_positions
+        or _two_part_rb_boundary_ok(rb_minimum, floor),
         "temperature_support": all(
             values["players"] >= floor["temperature_players"]
             and min(values["class_0_rows"], values["class_1_rows"])
@@ -298,6 +299,7 @@ def _two_part_nested_support_audit(
     players: np.ndarray,
     roles: np.ndarray,
     positions: np.ndarray,
+    residual_positions,
 ) -> dict:
     """Audit every full/outer/inner Player-grouped partition used by two-part v3."""
     n_rows = len(result)
@@ -310,7 +312,7 @@ def _two_part_nested_support_audit(
         result, players, roles, positions, fit_partitions, hold_partitions
     )
     nonpositive_support, rb_minimum = _two_part_nonpositive_support(
-        result, players, roles, positions, fit_partitions
+        result, players, roles, positions, fit_partitions, residual_positions
     )
     temperature_support, authentic_holds = _two_part_temperature_support(
         outcome, players, authentic, top_partitions, outer
@@ -318,7 +320,6 @@ def _two_part_nested_support_audit(
     guards = _two_part_support_guards(
         players,
         roles,
-        positions,
         authentic,
         required_fit,
         positive_support,
@@ -327,6 +328,7 @@ def _two_part_nested_support_audit(
         rb_minimum,
         temperature_support,
         authentic_holds,
+        residual_positions,
     )
     audit = {
         "guards": guards,

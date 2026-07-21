@@ -31,6 +31,16 @@ Options:
                                   Ship 75 search axis and how to confirm a
                                   candidate normalization before persisting it
                                   to stat_meta.json.  [default: auto]
+  --posthoc [auto|cdf_recal_isotonic|isotonic_mean|none|prob_recal_isotonic|prob_recal_platt|roe_mean]
+                                  Post-hoc corrector applied after the
+                                  distribution is formed. 'auto' (default)
+                                  honors each cell's stat_meta posthoc; an
+                                  explicit slug overrides every selected cell,
+                                  in a real run or under --deterministic. The
+                                  model-strategy sweep passes '--posthoc none'
+                                  for structural candidates, which replace the
+                                  post-hoc stage with their own group-
+                                  conditional CDF calibration.  [default: auto]
   --zinb-mode [auto|joint|hurdle]
                                   Model architecture for ZINB markets. 'auto'
                                   (default) honors each cell's stat_meta

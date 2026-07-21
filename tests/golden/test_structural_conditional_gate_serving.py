@@ -24,14 +24,23 @@ from sportstradamus.training.group_conditional_cdf import (
     deserialize_two_part_calibration,
     serialize_two_part_calibration,
 )
+from sportstradamus.training.role_specs import (
+    league_position_codes,
+    position_label,
+    role_spec_for,
+)
 from sportstradamus.training.structural_strategies import (
     AFFINE_STRATEGY,
     ROLE_COLUMNS,
-    TWO_PART_POSITIONS,
     TWO_PART_STRATEGY,
 )
 
 model_prob_module = importlib.import_module("sportstradamus.prediction.model_prob")
+
+# The pilot two-part cell; serving derives its role score from this spec.
+_TWO_PART_SPEC = role_spec_for("NFL", "receiving yards")
+# The receiving pilot fields WR/RB/TE; its blob fixture keys on those codes.
+_RECEIVING_POSITIONS = {2: "WR", 3: "RB", 4: "TE"}
 
 
 def _endpoint_map(lam: float, midpoint: float) -> dict:
@@ -67,9 +76,10 @@ def _two_part_calibration_blob() -> dict:
             "positive": {
                 f"{role}_pos{position}": _endpoint_map(1.0, 0.55)
                 for role in ("low", "high")
-                for position in TWO_PART_POSITIONS
+                for position in _RECEIVING_POSITIONS
             },
             "rb_boundary_residual": 0.05,
+            "boundary_residual_positions": [3],
         },
         "probability_pool": {
             "kind": "fixed_linear_probability_pool",
@@ -97,7 +107,7 @@ def _two_part_candidate_blob(calibration: dict | None = None) -> dict:
             "gate_rates": {"low": 0.30, "high": 0.60},
             "served_gate_rates": {"low": 0.06, "high": 0.12},
             "gate_model_weight": 0.2,
-            "positions": {str(code): label for code, label in TWO_PART_POSITIONS.items()},
+            "positions": {str(code): label for code, label in _RECEIVING_POSITIONS.items()},
         },
         "endpoint_contract": {
             "gate_source": "train_result_eq_zero_by_role",
@@ -155,7 +165,7 @@ def test_receiving_candidate_live_endpoint_operator_matches_shared_application()
         np.array([True, True]),
     )
 
-    served = _apply_two_part_candidate_distribution(frame, mean, calibration, routing)
+    served = _apply_two_part_candidate_distribution(frame, mean, calibration, routing, _TWO_PART_SPEC)
 
     for field in expected.__dataclass_fields__:
         np.testing.assert_array_equal(getattr(served, field), getattr(expected, field))
@@ -171,8 +181,8 @@ def test_receiving_candidate_calibration_roundtrip_is_serve_exact():
     frame = _two_part_frame()
     mean = np.array([38.0, 27.0])
 
-    original = _apply_two_part_candidate_distribution(frame, mean, *original_state)
-    reloaded = _apply_two_part_candidate_distribution(frame, mean, *restored_state)
+    original = _apply_two_part_candidate_distribution(frame, mean, *original_state, _TWO_PART_SPEC)
+    reloaded = _apply_two_part_candidate_distribution(frame, mean, *restored_state, _TWO_PART_SPEC)
 
     for field in original.__dataclass_fields__:
         np.testing.assert_array_equal(getattr(original, field), getattr(reloaded, field))
@@ -187,6 +197,7 @@ def test_receiving_candidate_pools_only_finite_current_book_probability():
         np.array([38.0, 27.0]),
         calibration,
         routing,
+        _TWO_PART_SPEC,
     )
 
     assert served.pooled_over[0] == pytest.approx(
@@ -200,7 +211,7 @@ def test_receiving_candidate_pools_only_finite_current_book_probability():
     [
         (lambda blob: blob.update(schema_version=2), "schema 3"),
         (
-            lambda blob: blob["routing"].update(role_columns=list(ROLE_COLUMNS[:-1])),
+            lambda blob: blob["routing"].update(role_columns=[]),
             "feature routing",
         ),
         (
@@ -237,7 +248,93 @@ def test_receiving_candidate_fails_loud_for_invalid_eligible_route(mutate, messa
             np.array([38.0, 27.0]),
             calibration,
             routing,
+            _TWO_PART_SPEC,
         )
+
+
+def test_two_part_candidate_serves_on_non_nfl_cell_without_preauthoring():
+    """Market-agnostic proof: the two-part serving path self-configures from any cell's role spec.
+
+    An NBA blob (position codes 1-5, NBA role columns — none of which the receiving pilot uses)
+    validates and routes through the same serving operators, with no receiving-specific config. The
+    codes 1 and 5 the old serving path hard-rejected now tier and price cleanly.
+    """
+    spec = role_spec_for("NBA", "PTS")
+    codes = league_position_codes("NBA")
+    endpoint = _endpoint_map(1.0, 0.55)
+    calibration = {
+        "kind": TWO_PART_STRATEGY,
+        "schema_version": 3,
+        "line_probability_only": True,
+        "temperature_fit_scope": "pre_map_raw_endpoint_settlement",
+        "temperature": 1.2,
+        "cdf": {
+            "kind": "role_position_two_part_cdf",
+            "role_boundary": {
+                role: {
+                    "kind": "two_part_role_boundary",
+                    "intercept": 0.0,
+                    "nonpositive": _endpoint_map(0.75, 0.45),
+                }
+                for role in ("low", "high")
+            },
+            "positive": {
+                f"{role}_pos{code}": endpoint for role in ("low", "high") for code in codes
+            },
+            "rb_boundary_residual": 0.0,
+            "boundary_residual_positions": [],
+        },
+        "probability_pool": _two_part_calibration_blob()["probability_pool"],
+    }
+    gate_rates = {"low": 0.10, "high": 0.20}
+    served_gate_rates = {role: 0.2 * rate for role, rate in gate_rates.items()}
+    blob = {
+        "schema_version": 3,
+        "slug": TWO_PART_STRATEGY,
+        "status": "active",
+        "kill_reason": None,
+        "line_probability_only": True,
+        "routing": {
+            "kind": "pregame_role_by_position",
+            "thresholds": {str(code): 0.5 for code in codes},
+            "role_columns": list(spec.role_columns),
+            "gate_rates": gate_rates,
+            "served_gate_rates": served_gate_rates,
+            "gate_model_weight": 0.2,
+            "positions": {str(code): position_label("NBA", code) for code in codes},
+        },
+        "endpoint_contract": {
+            "gate_source": "train_result_eq_zero_by_role",
+            "gate_rates_are_model_endpoint": True,
+            "book_endpoint_gate": 0.0,
+            "fallback_gate": 0.15,
+            "dispersion": "raw_fused_shape",
+        },
+        "calibration": calibration,
+    }
+
+    calibration_state, routing = _two_part_candidate_state(blob)
+
+    frame = pd.DataFrame(
+        {
+            "Player position": [1, 5],
+            "Line": [24.5, 18.5],
+            "Market EV": [0.55, 0.47],
+            "Model Sigma": [8.0, 7.0],
+            "Model Skew": [0.3, 0.1],
+            "Model Gate": [0.0, 0.0],
+            spec.role_columns[0]: [100.0, 98.0],
+            spec.role_columns[1]: [0.30, 0.18],
+            spec.role_columns[2]: [0.58, 0.52],
+        }
+    )
+    served = _apply_two_part_candidate_distribution(
+        frame, np.array([26.0, 17.0]), calibration_state, routing, spec
+    )
+
+    assert np.isfinite(served.pooled_over).all()
+    assert (served.pooled_over >= 0.0).all() and (served.pooled_over <= 1.0).all()
+    assert set(frame["Model Gate"]) <= set(served_gate_rates.values())
 
 
 def _affine_candidate_blob() -> dict:

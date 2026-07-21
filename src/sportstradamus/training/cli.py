@@ -39,6 +39,7 @@ from sportstradamus.training.pipeline import (
     LOSS_AUTO,
     train_market,
 )
+from sportstradamus.training.posthoc import POSTHOC_SLUGS
 from sportstradamus.training.ship_config import (
     CONTINUOUS_DISTS,
     STAT_META_PATH,
@@ -334,6 +335,20 @@ def _retry_calibrated_if_g4_only(
     ),
 )
 @click.option(
+    "--posthoc",
+    type=click.Choice([LOSS_AUTO, *sorted(POSTHOC_SLUGS)]),
+    default=LOSS_AUTO,
+    show_default=True,
+    help=(
+        "Post-hoc corrector applied after the distribution is formed. 'auto' "
+        "(default) honors each cell's stat_meta posthoc; an explicit slug overrides "
+        "every selected cell, in a real run or under --deterministic. The "
+        "model-strategy sweep passes '--posthoc none' for structural candidates, "
+        "which replace the post-hoc stage with their own group-conditional CDF "
+        "calibration."
+    ),
+)
+@click.option(
     "--zinb-mode",
     type=click.Choice([LOSS_AUTO, "joint", "hurdle"]),
     default=LOSS_AUTO,
@@ -491,6 +506,7 @@ def meditate(
     log_level,
     deterministic,
     target_normalization,
+    posthoc,
     zinb_mode,
     dist_training_loss,
     dist,
@@ -510,6 +526,8 @@ def meditate(
     # (per-league load/update, book-weight fit, then the per-league/per-market
     # train loop with ship-config resolution). The residual CC is sequential
     # stages plus per-league/-cell guards, not nested logic.
+    # style: allow-length — grandfathered CLI orchestrator; the --posthoc knob adds one
+    # param line. Extracting _step_ helpers is a separate refactor, out of this change's scope.
     # --deterministic implies --force: the input-freeze (new_M = empty)
     # otherwise short-circuits train_market when a prior model pickle exists,
     # which is precisely when the eval harness needs a fresh deterministic
@@ -694,7 +712,9 @@ def meditate(
                     continue
             if cell_dist is not None and cell_dist not in CONTINUOUS_DISTS:
                 cell_target_norm = TARGET_NORM_NONE
-            cell_posthoc = cell_meta.get("posthoc", "none")
+            cell_posthoc = _resolve_cell_knob(
+                stat_meta_full, lg, market, "posthoc", "none", posthoc
+            )
             # Each search-axis flag (blending, hpo_selection, count_dispersion_objective):
             # 'auto' leaves each cell on its configured stat_meta knob; an explicit slug overrides.
             cell_blending = _resolve_cell_knob(

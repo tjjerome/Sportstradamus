@@ -205,6 +205,7 @@ def test_build_filedict_keeps_nfl_payload_as_structural_adapter_state():
                 "blending_loss_fn": "nll",
                 "hpo_selection": "loss",
                 "stabilization": "None",
+                "posthoc": "none",
             },
         }
     )

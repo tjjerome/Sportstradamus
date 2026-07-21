@@ -24,7 +24,6 @@ ROLE_COLUMNS: tuple[str, ...] = (
     "Player target share",
     "Player yards per target",
 )
-TWO_PART_POSITIONS: dict[int, str] = {2: "WR", 3: "RB", 4: "TE"}
 AFFINE_POSITIONS: dict[int, str] = {1: "QB", 3: "RB"}
 TWO_PART_SUPPORT: dict[str, int] = {
     "train_rows": 4000,

@@ -1148,12 +1148,8 @@ def _two_part_contract(
         dtype=float
     )
     positions = raw_positions.astype(int, casting="unsafe", copy=False)
-    if (
-        not np.isfinite(raw_positions).all()
-        or not np.array_equal(raw_positions, positions)
-        or not np.isin(positions, (2, 3, 4)).all()
-    ):
-        raise ValueError("StructuralPosition must contain only WR/RB/TE codes 2/3/4")
+    if not np.isfinite(raw_positions).all() or not np.array_equal(raw_positions, positions):
+        raise ValueError("StructuralPosition must contain integer league roster codes")
 
     f0 = pd.to_numeric(df[_STRUCTURAL_F0_COL], errors="coerce").to_numpy(dtype=float)
     if not np.isfinite(f0).all() or np.any((f0 < 0.0) | (f0 > 1.0)):

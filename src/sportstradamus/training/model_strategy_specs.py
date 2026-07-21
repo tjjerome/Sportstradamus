@@ -17,6 +17,7 @@ _CONTROL_FLAGS = {
     "count_dispersion_objective": "--count-dispersion-objective",
     "hpo_selection": "--hpo-selection",
     "stabilization": "--stabilization",
+    "posthoc": "--posthoc",
 }
 _SHIP = ("deterministic_train", "full_hpo", "score", "serve", "confirm")
 _RESEARCH = ("deterministic_train", "full_hpo", "score")
@@ -171,6 +172,7 @@ _YARDS_CONTROLS = {
     "blending_loss_fn": "nll",
     "hpo_selection": "loss",
     "stabilization": "None",
+    "posthoc": "none",
 }
 _YARDS_PERSIST = {
     "dist": "dist",

@@ -26,10 +26,8 @@ from sportstradamus.training.group_conditional_cdf._contracts import (
     MARGINAL_MEAN_FLOOR,
     PIT_LAMBDAS,
     PLAYER_CV_FOLDS,
-    POSITIVE_GROUPS,
     ROLE_VALUES,
     TEMPERATURE_BOUNDS,
-    TWO_PART_POSITION_CODES,
     TWO_PART_SCHEMA_VERSION,
     TWO_PART_STRATEGY_NAME,
     AffineCalibrationBlob,
@@ -110,11 +108,8 @@ def roles(values, length: int) -> np.ndarray:
 def two_part_positions(values, length: int) -> np.ndarray:
     raw = finite_vector(values, "position", length)
     position_array = raw.astype(int)
-    if (
-        not np.array_equal(raw, position_array)
-        or not np.isin(position_array, TWO_PART_POSITION_CODES).all()
-    ):
-        raise ValueError("position must contain only WR=2, RB=3, and TE=4 codes")
+    if not np.array_equal(raw, position_array):
+        raise ValueError("position must contain integer league roster codes")
     return position_array
 
 
@@ -235,23 +230,34 @@ def validated_two_part_blob(blob: Mapping[str, object]) -> TwoPartCalibrationBlo
         raise ValueError("two-part calibration has an unknown temperature fit scope")
     temperature(fitted.get("temperature"))
     models = fitted.get("cdf")
-    if not isinstance(models, dict) or models.get("kind") != (
-        "role_position_two_part_cdf"
-    ):
+    if not isinstance(models, dict) or models.get("kind") != ("role_position_two_part_cdf"):
         raise ValueError("two-part calibration requires the v3 CDF model")
     role_models = models.get("role_boundary")
     positive_maps = models.get("positive")
     if not isinstance(role_models, dict) or set(role_models) != set(ROLE_VALUES):
         raise ValueError("two-part calibration requires low and high role boundaries")
-    if not isinstance(positive_maps, dict) or set(positive_maps) != set(POSITIVE_GROUPS):
-        raise ValueError("two-part calibration requires all six positive CDF maps")
+    if not isinstance(positive_maps, dict) or not positive_maps:
+        raise ValueError("two-part calibration requires its role-by-position positive CDF maps")
+    try:
+        position_codes = sorted({int(str(key).rsplit("_pos", 1)[1]) for key in positive_maps})
+    except (IndexError, ValueError) as exc:
+        raise ValueError("two-part positive CDF maps carry malformed group keys") from exc
+    if set(positive_maps) != {
+        f"{role_name}_pos{code}" for role_name in ROLE_VALUES for code in position_codes
+    }:
+        raise ValueError("two-part calibration requires a positive CDF map per role and position")
     residual = models.get("rb_boundary_residual")
     if (
         not isinstance(residual, (int, float))
         or not np.isfinite(residual)
         or not INTERCEPT_BRACKET[0] <= float(residual) <= INTERCEPT_BRACKET[1]
     ):
-        raise ValueError("invalid two-part RB boundary residual")
+        raise ValueError("invalid two-part boundary residual")
+    residual_positions = models.get("boundary_residual_positions")
+    if not isinstance(residual_positions, list) or any(
+        not isinstance(code, int) or isinstance(code, bool) for code in residual_positions
+    ):
+        raise ValueError("two-part boundary residual positions must be a list of integer codes")
     nonpositive_lambdas: set[float] = set()
     for role_name in ROLE_VALUES:
         model = role_models[role_name]
@@ -272,7 +278,7 @@ def validated_two_part_blob(blob: Mapping[str, object]) -> TwoPartCalibrationBlo
     if len(nonpositive_lambdas) != 1:
         raise ValueError("two-part nonpositive maps must share one lambda")
     positive_lambdas: set[float] = set()
-    for group in POSITIVE_GROUPS:
+    for group in sorted(positive_maps):
         positive = positive_maps[group]
         if not isinstance(positive, dict):
             raise ValueError(f"missing positive CDF map for {group}")

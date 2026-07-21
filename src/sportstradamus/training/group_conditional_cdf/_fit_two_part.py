@@ -42,7 +42,7 @@ from sportstradamus.training.group_conditional_cdf._validation import (
 )
 
 
-def fit_two_part(config: StrategyConfig, *args) -> TwoPartCalibrationFit:
+def fit_two_part(config: StrategyConfig, *args, residual_positions=()) -> TwoPartCalibrationFit:
     """Fit the two-part strategy by nested five-fold Player CV."""
     position_codes = discover_codes(args[11])
     groups = positive_groups(position_codes)
@@ -66,9 +66,13 @@ def fit_two_part(config: StrategyConfig, *args) -> TwoPartCalibrationFit:
     for train, hold in splitter.split(np.zeros(n_rows), groups=rows.player):
         train_rows = subset_rows(rows, train)
         hold_rows = subset_rows(rows, hold)
-        selection = select_lambdas_crossfit(train_rows, uniforms[:, train], position_codes, groups)
+        selection = select_lambdas_crossfit(
+            train_rows, uniforms[:, train], position_codes, groups, residual_positions
+        )
         fold_temperature = fit_temperature_two_part(raw_over[train], rows.over_result[train])
-        models = fit_models(train_rows, uniforms[:, train], *selection.lambdas, groups)
+        models = fit_models(
+            train_rows, uniforms[:, train], *selection.lambdas, groups, residual_positions
+        )
         mapped_lower = apply_models(
             models,
             hold_rows.result_lower,
@@ -76,6 +80,7 @@ def fit_two_part(config: StrategyConfig, *args) -> TwoPartCalibrationFit:
             hold_rows.role,
             hold_rows.position,
             groups,
+            residual_positions,
         )
         mapped_upper = apply_models(
             models,
@@ -84,8 +89,11 @@ def fit_two_part(config: StrategyConfig, *args) -> TwoPartCalibrationFit:
             hold_rows.role,
             hold_rows.position,
             groups,
+            residual_positions,
         )
-        boundary = mapped_boundary(models, hold_rows.zero_cdf, hold_rows.role, hold_rows.position)
+        boundary = mapped_boundary(
+            models, hold_rows.zero_cdf, hold_rows.role, hold_rows.position, residual_positions
+        )
         mapped_line_low = apply_models(
             models,
             hold_rows.line_low,
@@ -93,6 +101,7 @@ def fit_two_part(config: StrategyConfig, *args) -> TwoPartCalibrationFit:
             hold_rows.role,
             hold_rows.position,
             groups,
+            residual_positions,
         )
         mapped_line_high = apply_models(
             models,
@@ -101,6 +110,7 @@ def fit_two_part(config: StrategyConfig, *args) -> TwoPartCalibrationFit:
             hold_rows.role,
             hold_rows.position,
             groups,
+            residual_positions,
         )
         mapped_under = 0.5 * (mapped_line_low + mapped_line_high)
         hold_candidate = apply_temperature(1.0 - mapped_under, fold_temperature)
@@ -132,9 +142,11 @@ def fit_two_part(config: StrategyConfig, *args) -> TwoPartCalibrationFit:
         fold_temperatures.append(fold_temperature)
         fold_selection_keys.append(selection.key)
 
-    final_selection = select_lambdas_crossfit(rows, uniforms, position_codes, groups)
+    final_selection = select_lambdas_crossfit(
+        rows, uniforms, position_codes, groups, residual_positions
+    )
     final_temperature = fit_temperature_two_part(raw_over, rows.over_result)
-    final_models = fit_models(rows, uniforms, *final_selection.lambdas, groups)
+    final_models = fit_models(rows, uniforms, *final_selection.lambdas, groups, residual_positions)
     blob: TwoPartCalibrationBlob = {
         "kind": config.candidate_name,
         "schema_version": config.schema_version,

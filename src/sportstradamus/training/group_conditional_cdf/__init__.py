@@ -76,6 +76,8 @@ def fit_two_part_groupcdf(
     player: np.ndarray,
     role: np.ndarray,
     position: np.ndarray,
+    *,
+    residual_positions: tuple[int, ...] = (),
 ) -> TwoPartCalibrationFit:
     """Fit v3 by nested five-fold Player CV on the validation split.
 
@@ -84,6 +86,9 @@ def fit_two_part_groupcdf(
     training fold on their raw arithmetic settlement, then applied only after
     both endpoints have been mapped. Only explicitly authentic book quotes use
     the fixed 80/20 pool; every other row remains model-only.
+
+    ``residual_positions`` names the roster codes sharing the boundary residual
+    (empty ⇒ none); the fit persists it in the blob so serving iterates the same set.
     """
     return fit_group_conditional_cdf(
         TWO_PART_CONFIG,
@@ -99,6 +104,7 @@ def fit_two_part_groupcdf(
         player,
         role,
         position,
+        residual_positions=residual_positions,
     )
 
 

@@ -26,7 +26,6 @@ AFFINE_SCHEMA_VERSION = 1
 ROLE_VALUES: tuple[str, str] = ("low", "high")
 TWO_PART_POSITION_CODES: tuple[int, int, int] = (2, 3, 4)
 AFFINE_POSITION_CODES: tuple[int, int] = (1, 3)
-RB_CODE = 3
 
 PLAYER_CV_FOLDS = 5
 PIT_BINS = 10
@@ -52,9 +51,6 @@ ROLE_FULL_PIT_GUARDS: dict[str, float] = {"low": 0.09, "high": 0.09}
 ROLE_POSITIVE_PIT_GUARDS: dict[str, float] = {"low": 0.08, "high": 0.09}
 POSITION_FULL_PIT_GUARD = 0.08
 POSITION_POSITIVE_PIT_GUARD = 0.09
-POSITIVE_GROUPS = tuple(
-    f"{role_name}_pos{code}" for role_name in ROLE_VALUES for code in TWO_PART_POSITION_CODES
-)
 
 
 class EndpointMapBlob(TypedDict):
@@ -84,12 +80,19 @@ class RoleBoundaryBlob(TypedDict):
 
 
 class TwoPartCdfBlob(TypedDict):
-    """The role-boundary and role-by-position positive CDF layer."""
+    """The role-boundary and role-by-position positive CDF layer.
+
+    ``rb_boundary_residual`` is one shared logit offset (heritage name: it was
+    first fit for the NFL RB position) applied to the roster codes persisted in
+    ``boundary_residual_positions``. An empty list ⇒ no residual, so cells that do
+    not opt in serve the plain per-role boundary.
+    """
 
     kind: Literal["role_position_two_part_cdf"]
     role_boundary: dict[str, RoleBoundaryBlob]
     positive: dict[str, EndpointMapBlob]
     rb_boundary_residual: float
+    boundary_residual_positions: list[int]
 
 
 class FixedProbabilityPoolBlob(TypedDict):

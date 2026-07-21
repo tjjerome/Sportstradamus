@@ -12,11 +12,11 @@ from sportstradamus.training.group_conditional_cdf._apply import (
     apply_two_part_line,
     serialize_two_part_calibration,
 )
+from sportstradamus.training.group_conditional_cdf._config import discover_codes
 from sportstradamus.training.group_conditional_cdf._contracts import (
     ROLE_VALUES as TWO_PART_ROLE_VALUES,
 )
 from sportstradamus.training.group_conditional_cdf._contracts import (
-    TWO_PART_POSITION_CODES,
     TwoPartCalibrationFit,
 )
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_shared import (
@@ -95,6 +95,7 @@ def _two_part_pit_diagnostics(
     positions: np.ndarray,
 ) -> dict:
     positive = result > 0.0
+    codes = discover_codes(positions)
 
     def mean_ks(draws: np.ndarray) -> float:
         return float(np.mean([_ks_uniform(draw) for draw in draws]))
@@ -110,11 +111,11 @@ def _two_part_pit_diagnostics(
         },
         "position_full": {
             str(position): mean_ks(fit.oof_pit_draws[:, positions == position])
-            for position in TWO_PART_POSITION_CODES
+            for position in codes
         },
         "position_positive": {
             str(position): _ks_uniform(fit.oof_positive_pit[(positions == position) & positive])
-            for position in TWO_PART_POSITION_CODES
+            for position in codes
         },
     }
 
@@ -234,6 +235,11 @@ def _step_apply_two_part_groupcdf_candidate(
     def _required_series(key: str, index: pd.Index, *, allow_missing: bool = False) -> pd.Series:
         series = splits.get(key)
         if series is None:
+            if allow_missing:
+                # A cell whose book coverage never triggered synthetic augmentation carries no
+                # ``Odds_synthetic``/``Archived`` column, so its split is absent; absent provenance
+                # reads as all-False (no synthetic row, nothing archived).
+                return pd.Series(False, index=index, dtype=bool)
             raise ValueError(f"two-part candidate requires {key} provenance")
         aligned = series.reindex(index)
         if not allow_missing and aligned.isna().any():
@@ -321,6 +327,7 @@ def _step_apply_two_part_groupcdf_candidate(
         _required_series("odds_synthetic_test", index_test, allow_missing=True), False
     )
     outcome = (result >= line_val).astype(float)
+    residual_positions = tuple(context["boundary_residual_positions"])
     support_audit = _two_part_nested_support_audit(
         result,
         outcome,
@@ -328,6 +335,7 @@ def _step_apply_two_part_groupcdf_candidate(
         players,
         roles_val,
         positions_val,
+        residual_positions,
     )
     fit = fit_two_part_groupcdf(
         result_upper,
@@ -342,6 +350,7 @@ def _step_apply_two_part_groupcdf_candidate(
         players,
         roles_val,
         positions_val,
+        residual_positions=residual_positions,
     )
     validation_audit = _two_part_candidate_oof_audit(
         fit, fused, splits, roles_val, positions_val, gate_val

@@ -279,6 +279,7 @@ def test_family_registry_grids_and_persist_maps():
             "blending_loss_fn": "nll",
             "hpo_selection": "loss",
             "stabilization": "None",
+            "posthoc": "none",
         }
         assert method.persist == {
             "dist": "dist",
@@ -946,6 +947,9 @@ def test_run_deterministic_meditate_builds_corner_flags(monkeypatch, tmp_path):
     assert last[last.index("--sn-param") + 1] == "centered"
     assert last[last.index("--blending-loss-fn") + 1] == "crps"
     assert "--structural-strategy" not in last
+    # The posthoc override is a structural-recipe control only — base families never emit it,
+    # so a swept SkewNormal corner honours each cell's stat_meta posthoc.
+    assert "--posthoc" not in last
     assert sweep._log_path("WNBA", "AST", sn, sn_spec).exists()
 
     sweep._run_deterministic_meditate("NFL", "receiving yards", sn, sn_spec)
@@ -992,6 +996,7 @@ def test_run_deterministic_meditate_builds_corner_flags(monkeypatch, tmp_path):
     assert structural[structural.index("--blending-loss-fn") + 1] == "nll"
     assert structural[structural.index("--hpo-selection") + 1] == "loss"
     assert structural[structural.index("--stabilization") + 1] == "None"
+    assert structural[structural.index("--posthoc") + 1] == "none"
     assert structural[structural.index("--structural-strategy") + 1] == RUSHING
 
 

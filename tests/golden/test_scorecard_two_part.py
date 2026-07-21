@@ -91,6 +91,7 @@ def _calibration_blob() -> dict[str, object]:
                 for position in receiving.POSITION_CODES
             },
             "rb_boundary_residual": 0.25,
+            "boundary_residual_positions": [3],
         },
         "probability_pool": fixed_pool_blob(),
     }
@@ -231,7 +232,7 @@ def test_load_test_set_rejects_nonconstant_or_wrong_schema_receiving_blob(tmp_pa
     ("column", "bad_value", "message"),
     [
         ("StructuralRole", "slot", "only nonmissing low/high"),
-        ("StructuralPosition", 1, "only WR/RB/TE codes"),
+        ("StructuralPosition", 2.5, "integer league roster codes"),
         ("StructuralF0", 1.2, "finite probabilities"),
         ("SN_Scale", 0.0, "strictly positive"),
         ("P_PrePool", np.nan, "P_PrePool must be finite"),

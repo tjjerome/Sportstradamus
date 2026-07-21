@@ -53,6 +53,10 @@ def _blob_positive_groups(blob: TwoPartCalibrationBlob):
     return tuple(blob["cdf"]["positive"].keys())
 
 
+def _blob_residual_positions(blob: TwoPartCalibrationBlob) -> list[int]:
+    return blob["cdf"]["boundary_residual_positions"]
+
+
 def _blob_position_codes(blob: AffineCalibrationBlob) -> tuple[int, ...]:
     return tuple(sorted(int(code) for code in blob["position_cdf"]))
 
@@ -73,7 +77,13 @@ def apply_two_part_cdf(
     fitted = validated_two_part_blob(blob)
     values, boundary, roles, positions = cdf_apply_inputs(cdf, f0, role, position)
     return apply_models(
-        fitted["cdf"], values, boundary, roles, positions, _blob_positive_groups(fitted)
+        fitted["cdf"],
+        values,
+        boundary,
+        roles,
+        positions,
+        _blob_positive_groups(fitted),
+        _blob_residual_positions(fitted),
     )
 
 

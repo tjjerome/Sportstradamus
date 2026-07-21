@@ -73,14 +73,11 @@ from sportstradamus.training.model_strategy_registry import (
 )
 from sportstradamus.training.model_strategy_report_identity import resolve_report_identity
 from sportstradamus.training.posthoc import MEAN_STAGE, PROB_STAGE, apply_posthoc
+from sportstradamus.training.role_specs import RoleSpec, role_spec_for
 from sportstradamus.training.structural_strategies import (
     AFFINE_POSITIONS,
     AFFINE_STRATEGY,
-    TWO_PART_POSITIONS,
     TWO_PART_STRATEGY,
-)
-from sportstradamus.training.structural_strategies import (
-    ROLE_COLUMNS as TWO_PART_ROLE_COLUMNS,
 )
 
 # LazyArchive defers DuckDB lock acquisition until the first attribute
@@ -789,10 +786,34 @@ def _zi_kwargs(offer_df: pd.DataFrame, dist: str, hist_gate: float) -> dict:
     return {}
 
 
+def _valid_two_part_routing_shape(routing: object) -> bool:
+    """Role-by-position routing with string role columns and integer-coded positions."""
+    if not isinstance(routing, dict) or routing.get("kind") != "pregame_role_by_position":
+        return False
+    role_columns = routing.get("role_columns")
+    positions = routing.get("positions")
+    valid_role_columns = (
+        isinstance(role_columns, list)
+        and bool(role_columns)
+        and all(isinstance(column, str) for column in role_columns)
+    )
+    valid_positions = (
+        isinstance(positions, dict)
+        and bool(positions)
+        and all(
+            isinstance(code, str) and code.isdigit() and isinstance(label, str)
+            for code, label in positions.items()
+        )
+    )
+    return valid_role_columns and valid_positions
+
+
 def _two_part_candidate_state(
     experiment_blob: dict,
 ) -> tuple[dict, dict]:
     """Return the active two-part calibration and feature-routing state."""
+    # style: allow-complexity -- flat serving-blob schema validator; each branch is one
+    # persisted-contract invariant, so splitting would only scatter one accept/reject decision.
     if not isinstance(experiment_blob, dict):
         raise ValueError("two-part candidate is missing its algorithm state")
     if (
@@ -803,7 +824,6 @@ def _two_part_candidate_state(
         raise ValueError("two-part candidate is not active on schema 3")
 
     routing = experiment_blob.get("routing")
-    expected_positions = {str(code): label for code, label in TWO_PART_POSITIONS.items()}
     expected_routing_keys = {
         "kind",
         "thresholds",
@@ -816,14 +836,12 @@ def _two_part_candidate_state(
     if (
         not isinstance(routing, dict)
         or set(routing) != expected_routing_keys
-        or routing.get("kind") != "pregame_role_by_position"
-        or routing.get("role_columns") != list(TWO_PART_ROLE_COLUMNS)
-        or routing.get("positions") != expected_positions
+        or not _valid_two_part_routing_shape(routing)
     ):
         raise ValueError("two-part candidate has invalid feature routing state")
     thresholds = routing.get("thresholds")
-    if not isinstance(thresholds, dict) or set(thresholds) != set(expected_positions):
-        raise ValueError("two-part candidate requires WR/RB/TE role thresholds")
+    if not isinstance(thresholds, dict) or set(thresholds) != set(routing["positions"]):
+        raise ValueError("two-part candidate requires one role threshold per persisted position")
     valid_thresholds = all(
         isinstance(value, (int, float, np.integer, np.floating))
         and not isinstance(value, (bool, np.bool_))
@@ -910,33 +928,22 @@ def _two_part_candidate_state(
 def _two_part_candidate_routes(
     offer_df: pd.DataFrame,
     routing: dict,
+    spec: RoleSpec,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Apply the persisted train-only role thresholds to live pregame features."""
-    missing = [column for column in TWO_PART_ROLE_COLUMNS if column not in offer_df]
-    if missing:
-        raise ValueError(f"missing two-part role column(s): {', '.join(missing)}")
-    features = offer_df.loc[:, TWO_PART_ROLE_COLUMNS].apply(pd.to_numeric, errors="coerce")
-    if not np.isfinite(features.to_numpy(dtype=float)).all():
-        raise ValueError("two-part role inputs must be finite")
-
+    """Tier live pregame rows by the persisted train-only role thresholds."""
+    if list(spec.role_columns) != routing["role_columns"]:
+        raise ValueError("two-part role columns do not match the persisted routing state")
     if "Player position" not in offer_df:
         raise ValueError("two-part candidate requires Player position")
     raw_position = pd.to_numeric(offer_df["Player position"], errors="coerce").to_numpy()
     if not np.isfinite(raw_position).all():
-        raise ValueError("two-part candidate requires WR/RB/TE position codes 2/3/4")
+        raise ValueError("two-part candidate requires integer position codes")
     positions = raw_position.astype(int)
-    if (
-        not np.array_equal(raw_position, positions)
-        or not np.isin(positions, tuple(TWO_PART_POSITIONS)).all()
-    ):
-        raise ValueError("two-part candidate requires WR/RB/TE position codes 2/3/4")
+    persisted_codes = {int(code) for code in routing["positions"]}
+    if not np.array_equal(raw_position, positions) or not set(positions.tolist()) <= persisted_codes:
+        raise ValueError("two-part candidate positions must be among its persisted routing position codes")
 
-    role_score = (
-        features[TWO_PART_ROLE_COLUMNS[0]]
-        * features[TWO_PART_ROLE_COLUMNS[1]]
-        * features[TWO_PART_ROLE_COLUMNS[2]].clip(lower=0.0)
-        * features[TWO_PART_ROLE_COLUMNS[3]].clip(lower=0.0)
-    ).to_numpy(dtype=float)
+    role_score = spec.role_score(offer_df).to_numpy(dtype=float)
     thresholds = np.asarray([routing["thresholds"][str(code)] for code in positions], dtype=float)
     roles = np.where(role_score < thresholds, "low", "high")
     return roles, positions
@@ -981,9 +988,10 @@ def _apply_two_part_candidate_distribution(
     base_mean: np.ndarray,
     calibration: dict,
     routing: dict,
+    spec: RoleSpec,
 ) -> TwoPartLineOutput:
     """Apply two-part endpoint maps and its fixed authentic-book pool."""
-    roles, positions = _two_part_candidate_routes(offer_df, routing)
+    roles, positions = _two_part_candidate_routes(offer_df, routing, spec)
     served_gate = np.asarray([routing["served_gate_rates"][role] for role in roles], dtype=float)
     offer_df["Model Gate"] = served_gate
     offer_df["Projection"] = (1.0 - served_gate) * np.asarray(base_mean, dtype=float)
@@ -1319,6 +1327,8 @@ def model_prob(
     Returns an empty list when no model file exists or when the joined
     DataFrame is empty after filtering.
     """
+    # style: allow-complexity -- top-level serving orchestrator: load pickle, build params,
+    # apply posthoc/dispersion/structural calibration, blend with book, emit scoring columns.
     dateMap = {x["Player"]: x["Date"] for x in offers}
     market = normalize_market(league, market, platform)
     filename = market_file_slug(league, market)
@@ -1360,21 +1370,22 @@ def model_prob(
     posthoc_blob = filedict.get("posthoc_blob", None)
     pit_recal_blob = filedict.get("pit_recal_blob", None)
     structural_calibration = filedict.get("structural_calibration")
-    receiving_candidate_state = (
+    two_part_candidate_state = (
         _two_part_candidate_state(structural_calibration)
         if structural_strategy == TWO_PART_STRATEGY
         else None
     )
-    rushing_candidate_calibration = (
+    affine_candidate_calibration = (
         _affine_candidate_calibration(structural_calibration)
         if structural_strategy == AFFINE_STRATEGY
         else None
     )
-    if receiving_candidate_state is not None and (
-        league != "NFL" or market != "receiving yards" or dist != "SkewNormal"
-    ):
-        raise ValueError("two-part candidate is valid only for NFL receiving yards/SkewNormal")
-    if receiving_candidate_state is not None and (dispersion_cal != 1.0 or skew_cal != 0.0):
+    two_part_role_spec = (
+        role_spec_for(league, market) if two_part_candidate_state is not None else None
+    )
+    if two_part_candidate_state is not None and (dist != "SkewNormal" or two_part_role_spec is None):
+        raise ValueError("two-part candidate requires a SkewNormal cell with a registered role spec")
+    if two_part_candidate_state is not None and (dispersion_cal != 1.0 or skew_cal != 0.0):
         raise ValueError("two-part candidate requires its persisted raw fused shape")
     hist_gate = (
         stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma", "SkewNormal") else 0
@@ -1408,7 +1419,7 @@ def model_prob(
     offer_df = offer_df.join(playerStats).join(prob_params).reset_index(drop=True)
     offer_df = offer_df.loc[~offer_df[["Market Projection", "Projection"]].isna().all(axis=1)]
     offer_df = _drop_no_history_offers(offer_df)
-    if rushing_candidate_calibration is not None:
+    if affine_candidate_calibration is not None:
         position = pd.to_numeric(offer_df.get("Player position"), errors="coerce")
         supported = position.isin(AFFINE_POSITIONS)
         if (~supported).any():
@@ -1437,20 +1448,21 @@ def model_prob(
         offer_df["Market Projection"] = (1 - hist_gate) * offer_df["Market Projection"]
     _dispersion_calibrate(offer_df, dist, dispersion_cal, skew_cal)
 
-    receiving_candidate_output = None
-    if receiving_candidate_state is not None:
-        receiving_candidate_output = _apply_two_part_candidate_distribution(
+    two_part_candidate_output = None
+    if two_part_candidate_state is not None:
+        two_part_candidate_output = _apply_two_part_candidate_distribution(
             offer_df,
             base_mean,
-            *receiving_candidate_state,
+            *two_part_candidate_state,
+            two_part_role_spec,
         )
 
-    rushing_candidate_over = None
-    if rushing_candidate_calibration is not None:
-        base_mean, rushing_candidate_over = _apply_affine_candidate_distribution(
+    affine_candidate_over = None
+    if affine_candidate_calibration is not None:
+        base_mean, affine_candidate_over = _apply_affine_candidate_distribution(
             offer_df,
             base_mean,
-            rushing_candidate_calibration,
+            affine_candidate_calibration,
         )
 
     raw_over, push = _model_over_and_push(offer_df, dist, cv, step, base_mean)
@@ -1461,10 +1473,10 @@ def model_prob(
     raw_over = _apply_cdf_recal_over(raw_over, pit_recal_blob)
     cal_over = apply_temperature(raw_over, temperature)
     cal_over = _apply_prob_posthoc(cal_over, posthoc_slug, posthoc_blob)
-    if receiving_candidate_output is not None:
-        cal_over = receiving_candidate_output.pooled_over
-    if rushing_candidate_over is not None:
-        cal_over = rushing_candidate_over
+    if two_part_candidate_output is not None:
+        cal_over = two_part_candidate_output.pooled_over
+    if affine_candidate_over is not None:
+        cal_over = affine_candidate_over
     offer_df["Model Under"] = 1 - cal_over
     offer_df["Model Over"] = 1 - offer_df["Model Under"]
 

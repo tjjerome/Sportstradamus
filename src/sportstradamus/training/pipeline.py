@@ -3746,6 +3746,7 @@ def train_market(
         "count_dispersion_objective": count_dispersion_objective,
         "hpo_selection": hpo_selection,
         "stabilization": stabilization,
+        "posthoc": posthoc_slug,
     }
     selected_controls = {
         name: runtime_controls[name]

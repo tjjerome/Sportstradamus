@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from functools import reduce
-from operator import add, mul
 
 import numpy as np
 import pandas as pd
@@ -22,32 +20,6 @@ from sportstradamus.training.structural_strategies import (
     TWO_PART_STRATEGY,
     TWO_PART_SUPPORT,
 )
-
-
-def _role_score(frame: pd.DataFrame, spec: RoleSpec) -> pd.Series:
-    columns = spec.role_columns
-    missing = [column for column in columns if column not in frame.columns]
-    if missing:
-        raise ValueError(f"missing role column(s): {', '.join(missing)}")
-    values = frame.loc[:, columns].apply(pd.to_numeric, errors="coerce")
-    if not np.isfinite(values.to_numpy(dtype=float)).all():
-        raise ValueError("nonfinite role input")
-    volume = reduce(mul, (values[column] for column in spec.volume_cols))
-    if len(spec.usage_share_cols) == 1:
-        clipped = (
-            values[column].clip(lower=0)
-            for column in (*spec.usage_share_cols, *spec.efficiency_cols)
-        )
-        score = reduce(mul, clipped, volume)
-    else:
-        components = (
-            values[usage].clip(lower=0) * values[efficiency].clip(lower=0)
-            for usage, efficiency in zip(spec.usage_share_cols, spec.efficiency_cols, strict=True)
-        )
-        score = volume * reduce(add, components)
-    if not np.isfinite(score.to_numpy(dtype=float)).all():
-        raise ValueError("nonfinite role score")
-    return score
 
 
 def _validated_positions(frame: pd.DataFrame, codes: tuple[int, ...]) -> pd.Series:
@@ -111,7 +83,7 @@ def build_two_part_context(
     gate_rates: dict[str, float] = {}
     fallback_gate: float | None = None
     try:
-        scores = {split: _role_score(frame, spec) for split, frame in frames.items()}
+        scores = {split: spec.role_score(frame) for split, frame in frames.items()}
         positions = {split: _validated_positions(frame, codes) for split, frame in frames.items()}
         for code in codes:
             position_scores = scores["train"].loc[positions["train"].eq(code)]
@@ -175,6 +147,7 @@ def build_two_part_context(
             "routes": _fallback_routes(frames),
             "role_columns": list(spec.role_columns),
             "positions": positions_map,
+            "boundary_residual_positions": list(spec.boundary_residual_positions),
         }
 
     return {
@@ -188,6 +161,7 @@ def build_two_part_context(
         "routes": routes,
         "role_columns": list(spec.role_columns),
         "positions": positions_map,
+        "boundary_residual_positions": list(spec.boundary_residual_positions),
     }
 
 
