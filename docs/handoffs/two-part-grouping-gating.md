@@ -1,6 +1,7 @@
 # Two-Part Grouping / Gating Generalization
 
-> Status: QUEUED (entry: research-analyst brief on the grouping direction — see §6 stage 0)
+> Status: STAGE 0 DONE — brief recommends the A+B hybrid (adaptive kept-set + role-only
+> fallback), rejects C. See §6 stage-0 verdict; Stage 1 awaiting owner GO.
 
 ## 1. Mission & money logic
 
@@ -167,13 +168,42 @@ serving beyond the recover-from-blob mirror, any distribution-family file
   expected effect on NBA AST and on the NFL pilots.
 - **Est.:** 1 session. **Kill branch:** if research says the floors are load-bearing and no
   direction preserves calibration validity, record the verdict in §10 and close the lane.
+- **Verdict (stage-0 brief `/tmp/researcher_two_part_grouping.md`):** build the **A+B
+  hybrid** — adaptive kept-set (A) as the mechanism with a whole-cell **role-only** fallback
+  (B) when any `role_posN` group fails the floor; one `cdf["grouping"]` tag branched across
+  the five §5 fit/serve sites, floors **unchanged**. **Reject C** — roster-scaled floors
+  break pilot byte-identity by construction (floor values enter the audit arithmetic on every
+  cell) and relax the one guard that catches an unestimable isotonic-PIT map. Effect: NBA AST
+  reaches a gate verdict, not a support kill (role-only support ~5× the floor); NFL pilots
+  stay byte-identical (all their codes clear the floor → kept-set unchanged). **Caveat (now
+  measured — brief addenda A0–A4 + the fit-size-floor brief):** the hybrid unblocks the
+  *granularity* class (dense matrix, thin nested cells), not the *volume* class. The real
+  cross-league gatekeeper is the **authentic/settlement calibration floor** (`authentic_*`:
+  ≥100 events + ≥50 players per outer-fold hold — the field-standard external-validation rule),
+  which grouping never touches (it pools across the whole tier). It legitimately kills WNBA DREB,
+  WNBA AST (authentic-hold class 31/100), NFL carries (authentic-hold + a zero-sparse high tier),
+  NFL passing-yds (~86 QBs); MLB is a hard structural kill (unwired). The fit-size-floor
+  reduction lane is **CLOSED/KILL** — `fit_players` was never the binding constraint
+  (`docs/handoffs/two-part-fit-size-floor.md`).
 
 ### Stage 1 — Implement the chosen direction
 - **Entry:** stage-0 brief cited. **Scope:** §5 primary files (one module per subagent).
-- **Acceptance:** NBA AST, WNBA DREB, and NFL passing-yards,
-  NHL saves, and MLB pitcher-strikeouts clear the support audit and reach the OOF gate audit (a gate
-  verdict — pass or fail — not a support kill); NFL receiving/rushing pilots reproduce
-  byte-identical (the four golden pins in §4 green); ruff + golden + integration green.
+- **Acceptance (cell list resolved — brief addenda A2–A4 + the fit-size-floor brief, all
+  measured on cached matrices):** these reach the OOF gate audit (a gate verdict — pass or
+  fail — not a support kill).
+  - **v1 role-only reachable now:** **NBA AST**, **NHL saves** (4-position in the data — not
+    single-position), **NHL skater fantasy points (UD)** (3 dense skater positions).
+  - **Accepted legit kills (not required):** **WNBA DREB** (thin-league fit floor); **MLB
+    pitcher-strikeouts** (MLB unwired for two-part — structural); **NFL passing-yards** (~86-QB
+    player universe); **WNBA AST** (authentic/settlement volume — worst-fold authentic-hold
+    class 31/100, *not* `fit_players`; re-instrument at season start — flips to reachable with
+    no code change once the authentic base grows); **NFL carries** (`authentic_hold` 75/100 +
+    `fit_rows` 620/1000, plus a zero-sparse high tier — workhorse RBs almost always carry —
+    that starves the hurdle non-positive branch; a non-hurdle family is its real home if
+    pursued, its own distribution-family gate; a rare WR-carry offer would also need the v2
+    partial-keep, but carries does not reach a verdict at fit regardless).
+  NFL receiving/rushing pilots reproduce byte-identical (four golden pins §4 green); ruff +
+  golden + integration green.
 - **Est.:** 1–2 sessions. **Kill branch:** if AST completes but the pilots drift, revert and
   escalate — byte-identity is a locked decision.
 
@@ -215,6 +245,26 @@ serving beyond the recover-from-blob mirror, any distribution-family file
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
+- 2026-07-21 · fit-floor lane KILLED · the queued fit-size-floor brief
+  (`/tmp/researcher_two_part_fit_floor.md`) ran the full audit conjunction on the real split:
+  `fit_players` is NON-binding — WNBA AST + NFL carries fail the **`authentic_*`/settlement**
+  guards (external-validation ≥100-event rule; WNBA AST authentic-hold class 31/100) and carries
+  also starves nonpositive (zero-sparse high tier). Relaxing fit floors changes no verdict →
+  floor lane CLOSED/KILL, zero code. Both cells flipped volume-close-contingent → accepted
+  kills; must-reach now = NBA AST, NHL saves, NHL skater FP-UD. next: owner GO on Stage 1.
+- 2026-07-21 · stage 0 follow-up · owner refined the Stage-1 cell list; research addendum
+  (brief A0–A4, all six matrices measured on the real split) resolved it: v1-reachable = NBA
+  AST, NHL saves (4-position, not single-position), NHL skater FP-UD; legit kills = WNBA DREB,
+  MLB pitcher-K (unwired), NFL passing-yds (~86 QBs). The fit-size floor (1000 rows / 150
+  players per fold), not grouping, is the real gatekeeper — WNBA AST (102) + NFL carries (109)
+  sit just under. Owner: keep those two must-reach (contingent) + queue a separate
+  fit-size-floor brief → `docs/handoffs/two-part-fit-size-floor.md`. next: owner GO on Stage 1.
+- 2026-07-21 · stage 0 DONE · research-analyst brief (`/tmp/researcher_two_part_grouping.md`)
+  recommends the **A+B hybrid** — adaptive kept-set + whole-cell role-only fallback, one
+  `cdf["grouping"]` tag across the five §5 sites, floors unchanged; **rejects C** (breaks
+  pilot byte-identity, relaxes the estimability guard). Expected: NBA AST → gate verdict not
+  support kill (role-only support ~5× floor); NFL pilots byte-identical by construction.
+  Verdict in §6. Docs-only session, no code touched. next: owner GO on Stage 1.
 - 2026-07-21 · stage 0 pending · Lane opened from the market-agnostic generalization
   (`cee7304`). Diagnosed the NBA AST kill as a floor/granularity artifact (10 groups vs
   NFL's 6), not missing data — instrumented audit shows 7/10 groups below the
