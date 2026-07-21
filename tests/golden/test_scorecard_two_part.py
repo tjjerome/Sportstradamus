@@ -116,13 +116,13 @@ def _candidate_frame() -> pd.DataFrame:
             "SN_Scale": scale,
             "SN_Alpha": alpha,
             "Gate": gate,
-            "NFLYardsExperiment": receiving.CANDIDATE_NAME,
-            "NFLYardsRoute": np.array(["low", "low", "high", "high", "low", "high"]),
-            "NFLYardsFallback": False,
-            "NFLYardsCalibration": receiving.serialize_two_part_calibration(_calibration_blob()),
-            "NFLYardsRole": np.array(["low", "low", "high", "high", "low", "high"]),
-            "NFLYardsPosition": np.array([2, 3, 4, 2, 3, 4]),
-            "NFLYardsF0": f0,
+            "StructuralAdapterStrategy": receiving.CANDIDATE_NAME,
+            "StructuralRoute": np.array(["low", "low", "high", "high", "low", "high"]),
+            "StructuralFallback": False,
+            "StructuralCalibration": receiving.serialize_two_part_calibration(_calibration_blob()),
+            "StructuralRole": np.array(["low", "low", "high", "high", "low", "high"]),
+            "StructuralPosition": np.array([2, 3, 4, 2, 3, 4]),
+            "StructuralF0": f0,
         }
     )
     for column, value in _strategy_identity_columns().items():
@@ -138,9 +138,9 @@ def test_receiving_v3_gate4_transforms_outcome_endpoints_before_randomization():
         _calibration_blob(),
         raw_upper - raw_mass,
         raw_upper,
-        frame["NFLYardsF0"].to_numpy(dtype=float),
-        frame["NFLYardsRole"].to_numpy(),
-        frame["NFLYardsPosition"].to_numpy(),
+        frame["StructuralF0"].to_numpy(dtype=float),
+        frame["StructuralRole"].to_numpy(),
+        frame["StructuralPosition"].to_numpy(),
     )
 
     scored = np.asarray(_randomized_pit_draws(frame, "SkewNormal", actual, strategy="none"))
@@ -160,15 +160,15 @@ def test_load_test_set_retains_and_validates_receiving_v3_contract(tmp_path):
     loaded = load_test_set(path, "Blended_EV")
 
     assert {
-        "NFLYardsExperiment",
-        "NFLYardsCalibration",
-        "NFLYardsRole",
-        "NFLYardsPosition",
-        "NFLYardsF0",
+        "StructuralAdapterStrategy",
+        "StructuralCalibration",
+        "StructuralRole",
+        "StructuralPosition",
+        "StructuralF0",
         "P_PrePool",
     }.issubset(loaded.columns)
     assert set(_strategy_identity_columns()).issubset(loaded.columns)
-    assert loaded["NFLYardsCalibration"].nunique() == 1
+    assert loaded["StructuralCalibration"].nunique() == 1
 
 
 def test_load_test_set_rejects_partial_or_identity_absent_receiving_contract(tmp_path):
@@ -204,23 +204,23 @@ def test_load_test_set_rejects_inactive_or_mismatched_structural_identity(tmp_pa
 
 def test_load_test_set_rejects_nonconstant_or_wrong_schema_receiving_blob(tmp_path):
     frame = _candidate_frame()
-    frame.loc[0, "NFLYardsExperiment"] = "none"
+    frame.loc[0, "StructuralAdapterStrategy"] = "none"
     path = tmp_path / "nonconstant-experiment.csv"
     frame.to_csv(path, index=False)
-    with pytest.raises(ValueError, match="one constant nonmissing NFLYardsExperiment"):
+    with pytest.raises(ValueError, match="one constant nonmissing StructuralAdapterStrategy"):
         load_test_set(path, "Blended_EV")
 
     frame = _candidate_frame()
-    frame.loc[0, "NFLYardsCalibration"] += " "
+    frame.loc[0, "StructuralCalibration"] += " "
     path = tmp_path / "nonconstant.csv"
     frame.to_csv(path, index=False)
     with pytest.raises(ValueError, match="one constant nonmissing JSON"):
         load_test_set(path, "Blended_EV")
 
     frame = _candidate_frame()
-    blob = json.loads(frame["NFLYardsCalibration"].iloc[0])
+    blob = json.loads(frame["StructuralCalibration"].iloc[0])
     blob["schema_version"] = 99
-    frame["NFLYardsCalibration"] = json.dumps(blob)
+    frame["StructuralCalibration"] = json.dumps(blob)
     path = tmp_path / "wrong-schema.csv"
     frame.to_csv(path, index=False)
     with pytest.raises(ValueError, match="unknown receiving calibration blob kind or schema"):
@@ -230,9 +230,9 @@ def test_load_test_set_rejects_nonconstant_or_wrong_schema_receiving_blob(tmp_pa
 @pytest.mark.parametrize(
     ("column", "bad_value", "message"),
     [
-        ("NFLYardsRole", "slot", "only nonmissing low/high"),
-        ("NFLYardsPosition", 1, "only WR/RB/TE codes"),
-        ("NFLYardsF0", 1.2, "finite probabilities"),
+        ("StructuralRole", "slot", "only nonmissing low/high"),
+        ("StructuralPosition", 1, "only WR/RB/TE codes"),
+        ("StructuralF0", 1.2, "finite probabilities"),
         ("SN_Scale", 0.0, "strictly positive"),
         ("P_PrePool", np.nan, "P_PrePool must be finite"),
     ],
@@ -250,17 +250,17 @@ def test_load_test_set_rejects_invalid_receiving_v3_row_fields(
 
 
 def test_load_test_set_rejects_partial_receiving_v3_contract(tmp_path):
-    frame = _candidate_frame().drop(columns="NFLYardsF0")
+    frame = _candidate_frame().drop(columns="StructuralF0")
     path = tmp_path / "partial.csv"
     frame.to_csv(path, index=False)
 
-    with pytest.raises(ValueError, match=r"artifact missing required columns.*NFLYardsF0"):
+    with pytest.raises(ValueError, match=r"artifact missing required columns.*StructuralF0"):
         load_test_set(path, "Blended_EV")
 
 
 def test_receiving_v3_gate4_rejects_f0_shape_drift():
     frame = _candidate_frame()
-    frame["NFLYardsF0"] += 1e-4
+    frame["StructuralF0"] += 1e-4
 
     with pytest.raises(ValueError, match="does not match the persisted served SkewNormal shape"):
         _randomized_pit_draws(
@@ -318,13 +318,13 @@ def test_diff_cli_rejects_mixed_legacy_and_generic_identity(tmp_path):
     legacy = candidate.drop(
         columns=[
             *list(_strategy_identity_columns()),
-            "NFLYardsExperiment",
-            "NFLYardsRoute",
-            "NFLYardsFallback",
-            "NFLYardsCalibration",
-            "NFLYardsF0",
-            "NFLYardsRole",
-            "NFLYardsPosition",
+            "StructuralAdapterStrategy",
+            "StructuralRoute",
+            "StructuralFallback",
+            "StructuralCalibration",
+            "StructuralF0",
+            "StructuralRole",
+            "StructuralPosition",
         ]
     )
     legacy_path = tmp_path / "legacy.csv"

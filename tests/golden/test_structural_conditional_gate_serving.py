@@ -343,7 +343,7 @@ def test_rushing_candidate_live_prediction_routes_qb_rb_experts(monkeypatch):
     filedict = {
         "model": _Model(10.0),
         "expert_models": {1: _Model(101.0), 3: _Model(303.0)},
-        "nfl_yards_experiment": _affine_candidate_blob(),
+        "structural_calibration": _affine_candidate_blob(),
         "sn_param": "direct",
     }
 

@@ -2260,9 +2260,9 @@ def test_randomized_pit_applies_row_routed_cdf_maps():
             "SN_Alpha": np.zeros(4),
             "MeanYr": np.ones(4),
             "P_PrePool": np.full(4, 0.5),
-            "NFLYardsExperiment": AFFINE_STRATEGY,
-            "NFLYardsRoute": ["QB", "RB", "QB", "RB"],
-            "NFLYardsFallback": False,
+            "StructuralAdapterStrategy": AFFINE_STRATEGY,
+            "StructuralRoute": ["QB", "RB", "QB", "RB"],
+            "StructuralFallback": False,
             "PITRecalKnots": [
                 json.dumps(identity),
                 json.dumps(lower_half),
@@ -2300,7 +2300,7 @@ def test_randomized_pit_applies_row_routed_cdf_maps():
     assert len(draws) == 1
     np.testing.assert_allclose(draws[0], expected)
 
-    mismatched_adapter = frame.assign(NFLYardsExperiment="none")
+    mismatched_adapter = frame.assign(StructuralAdapterStrategy="none")
     with pytest.raises(ValueError, match="adapter CSV identity mismatch"):
         _randomized_pit_draws(
             mismatched_adapter,

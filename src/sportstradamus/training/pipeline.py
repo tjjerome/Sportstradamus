@@ -1937,7 +1937,7 @@ def _build_filedict(
         ),
     }
     if algorithm_payload is not None:
-        filedict["nfl_yards_experiment"] = algorithm_payload
+        filedict["structural_calibration"] = algorithm_payload
     strategy_slug = structural_strategy if structural_strategy != BASE_STRUCTURAL_STRATEGY else dist
     filedict[MODEL_STRATEGY_MODEL_KEY] = build_artifact_identity(
         strategy_slug,
@@ -3996,7 +3996,7 @@ def train_market(
         matrix_hash=matrix_hash,
         selected_controls=selected_controls,
         structural_strategy=structural_strategy,
-        algorithm_payload=calibrated.get("nfl_yards_experiment_blob"),
+        algorithm_payload=calibrated.get("structural_calibration_blob"),
         expert_models=(
             expert_models if structural_strategy in AFFINE_EXPERT_EXPERIMENTS else None
         ),

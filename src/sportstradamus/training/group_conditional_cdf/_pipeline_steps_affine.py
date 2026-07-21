@@ -206,7 +206,7 @@ def _step_apply_affine_groupcdf_candidate(
                     for code in AFFINE_POSITIONS
                 }
             ),
-            "nfl_yards_experiment_blob": {
+            "structural_calibration_blob": {
                 "schema_version": 1,
                 "slug": AFFINE_STRATEGY,
                 "status": "active",

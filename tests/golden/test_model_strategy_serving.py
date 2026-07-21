@@ -51,7 +51,7 @@ def _receiving_model(*, status: str = "active", include_split: bool = True) -> d
         "normalized": True,
         "sn_param": "direct",
         "posthoc": "none",
-        "nfl_yards_experiment": adapter,
+        "structural_calibration": adapter,
         MODEL_STRATEGY_MODEL_KEY: identity.as_model_blob(),
     }
 

@@ -153,20 +153,20 @@ _SHIP_GATES: tuple[str, ...] = ("g1", "g2", "g3", "g4", "g5", "g6")
 # between- vs within-player spread and was fiat-blind on count cells (IQR(Result)=0).
 _GATE4_PIT_KS_DELTA: float = 0.05
 _GATE4_KS_NOISE_COEF: float = 1.358
-_NFL_YARDS_EXPERIMENT_COL = "NFLYardsExperiment"
-_NFL_YARDS_CALIBRATION_COL = "NFLYardsCalibration"
-_NFL_YARDS_ROLE_COL = "NFLYardsRole"
-_NFL_YARDS_POSITION_COL = "NFLYardsPosition"
-_NFL_YARDS_F0_COL = "NFLYardsF0"
-_NFL_YARDS_ROUTE_COL = "NFLYardsRoute"
-_NFL_YARDS_FALLBACK_COL = "NFLYardsFallback"
+_STRUCTURAL_ADAPTER_STRATEGY_COL = "StructuralAdapterStrategy"
+_STRUCTURAL_CALIBRATION_COL = "StructuralCalibration"
+_STRUCTURAL_ROLE_COL = "StructuralRole"
+_STRUCTURAL_POSITION_COL = "StructuralPosition"
+_STRUCTURAL_F0_COL = "StructuralF0"
+_STRUCTURAL_ROUTE_COL = "StructuralRoute"
+_STRUCTURAL_FALLBACK_COL = "StructuralFallback"
 _TWO_PART_CONTRACT_COLUMNS: frozenset[str] = frozenset(
     {
-        _NFL_YARDS_EXPERIMENT_COL,
-        _NFL_YARDS_CALIBRATION_COL,
-        _NFL_YARDS_ROLE_COL,
-        _NFL_YARDS_POSITION_COL,
-        _NFL_YARDS_F0_COL,
+        _STRUCTURAL_ADAPTER_STRATEGY_COL,
+        _STRUCTURAL_CALIBRATION_COL,
+        _STRUCTURAL_ROLE_COL,
+        _STRUCTURAL_POSITION_COL,
+        _STRUCTURAL_F0_COL,
         "SN_Loc",
         "SN_Scale",
         "SN_Alpha",
@@ -423,13 +423,13 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
                 "Alpha",
                 "Gate",
                 "PITRecalKnots",  # §6.1 Rung C whole-CDF map g; Gate 4 warps the PIT through it
-                _NFL_YARDS_EXPERIMENT_COL,
-                _NFL_YARDS_CALIBRATION_COL,
-                _NFL_YARDS_ROLE_COL,
-                _NFL_YARDS_POSITION_COL,
-                _NFL_YARDS_F0_COL,
-                _NFL_YARDS_ROUTE_COL,
-                _NFL_YARDS_FALLBACK_COL,
+                _STRUCTURAL_ADAPTER_STRATEGY_COL,
+                _STRUCTURAL_CALIBRATION_COL,
+                _STRUCTURAL_ROLE_COL,
+                _STRUCTURAL_POSITION_COL,
+                _STRUCTURAL_F0_COL,
+                _STRUCTURAL_ROUTE_COL,
+                _STRUCTURAL_FALLBACK_COL,
                 *STRATEGY_IDENTITY_CSV_COLUMNS,
             }
             & set(df.columns)
@@ -1135,19 +1135,19 @@ def _two_part_contract(
     missing = _TWO_PART_CONTRACT_COLUMNS - set(df.columns)
     if missing:
         raise ValueError(f"receiving-v3 scorecard contract missing columns: {sorted(missing)}")
-    calibration = df[_NFL_YARDS_CALIBRATION_COL]
+    calibration = df[_STRUCTURAL_CALIBRATION_COL]
     if calibration.isna().any() or calibration.astype(str).nunique() != 1:
-        raise ValueError("NFLYardsCalibration must be one constant nonmissing JSON value")
+        raise ValueError("StructuralCalibration must be one constant nonmissing JSON value")
     blob = deserialize_two_part_calibration(str(calibration.iloc[0]))
 
-    roles = df[_NFL_YARDS_ROLE_COL].to_numpy()
+    roles = df[_STRUCTURAL_ROLE_COL].to_numpy()
     if (
         not all(isinstance(value, str) for value in roles)
         or not np.isin(roles, ("low", "high")).all()
     ):
-        raise ValueError("NFLYardsRole must contain only nonmissing low/high strings")
+        raise ValueError("StructuralRole must contain only nonmissing low/high strings")
 
-    raw_positions = pd.to_numeric(df[_NFL_YARDS_POSITION_COL], errors="coerce").to_numpy(
+    raw_positions = pd.to_numeric(df[_STRUCTURAL_POSITION_COL], errors="coerce").to_numpy(
         dtype=float
     )
     positions = raw_positions.astype(int, casting="unsafe", copy=False)
@@ -1156,11 +1156,11 @@ def _two_part_contract(
         or not np.array_equal(raw_positions, positions)
         or not np.isin(positions, (2, 3, 4)).all()
     ):
-        raise ValueError("NFLYardsPosition must contain only WR/RB/TE codes 2/3/4")
+        raise ValueError("StructuralPosition must contain only WR/RB/TE codes 2/3/4")
 
-    f0 = pd.to_numeric(df[_NFL_YARDS_F0_COL], errors="coerce").to_numpy(dtype=float)
+    f0 = pd.to_numeric(df[_STRUCTURAL_F0_COL], errors="coerce").to_numpy(dtype=float)
     if not np.isfinite(f0).all() or np.any((f0 < 0.0) | (f0 > 1.0)):
-        raise ValueError("NFLYardsF0 must contain finite probabilities in [0, 1]")
+        raise ValueError("StructuralF0 must contain finite probabilities in [0, 1]")
 
     for column in ("SN_Loc", "SN_Scale", "SN_Alpha", "P", "P_PrePool", "Line"):
         values = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
@@ -1191,7 +1191,7 @@ def _two_part_cdf_endpoints(
     if dist != "SkewNormal":
         raise ValueError("receiving-v3 scorecard contract requires SkewNormal row parameters")
     if "PITRecalKnots" in df.columns:
-        raise ValueError("receiving-v3 must use NFLYardsCalibration, not PITRecalKnots")
+        raise ValueError("receiving-v3 must use StructuralCalibration, not PITRecalKnots")
 
     blob, persisted_f0, roles, positions = contract
     raw_f0, _ = _pred_cdf_pmf(
@@ -1201,7 +1201,7 @@ def _two_part_cdf_endpoints(
         strategy=strategy,
     )
     if not np.allclose(persisted_f0, raw_f0, rtol=1e-12, atol=1e-12):
-        raise ValueError("NFLYardsF0 does not match the persisted served SkewNormal shape")
+        raise ValueError("StructuralF0 does not match the persisted served SkewNormal shape")
 
     raw_upper, raw_mass = _pred_cdf_pmf(df, dist, y, strategy=strategy)
     raw_lower = raw_upper - raw_mass

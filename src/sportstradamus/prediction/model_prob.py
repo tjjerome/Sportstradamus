@@ -1359,14 +1359,14 @@ def model_prob(
     posthoc_slug = filedict.get("posthoc", "none")
     posthoc_blob = filedict.get("posthoc_blob", None)
     pit_recal_blob = filedict.get("pit_recal_blob", None)
-    nfl_yards_experiment = filedict.get("nfl_yards_experiment")
+    structural_calibration = filedict.get("structural_calibration")
     receiving_candidate_state = (
-        _two_part_candidate_state(nfl_yards_experiment)
+        _two_part_candidate_state(structural_calibration)
         if structural_strategy == TWO_PART_STRATEGY
         else None
     )
     rushing_candidate_calibration = (
-        _affine_candidate_calibration(nfl_yards_experiment)
+        _affine_candidate_calibration(structural_calibration)
         if structural_strategy == AFFINE_STRATEGY
         else None
     )

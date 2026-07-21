@@ -377,7 +377,7 @@ def _step_apply_two_part_groupcdf_candidate(
             "receiving_candidate_test_position": pd.Series(positions_test, index=index_test),
             "receiving_candidate_calibration_payload": calibration_payload,
             "nfl_yards_routes": context["routes"],
-            "nfl_yards_experiment_blob": {
+            "structural_calibration_blob": {
                 "schema_version": 3,
                 "slug": TWO_PART_STRATEGY,
                 "status": "active",

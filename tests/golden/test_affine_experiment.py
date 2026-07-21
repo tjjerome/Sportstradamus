@@ -261,7 +261,7 @@ def test_structural_selector_validates_registry_distribution_and_fixed_controls(
 
 
 def test_experiment_auto_honors_persisted_method_and_explicit_none_disables_it():
-    cell = {"nfl_yards_experiment": AFFINE_STRATEGY}
+    cell = {"structural_calibration": AFFINE_STRATEGY}
     assert resolve_experiment_selection(AUTO, cell) == AFFINE_STRATEGY
     assert resolve_experiment_selection(NONE, cell) == NONE
     assert resolve_experiment_selection(AUTO, {}) == NONE

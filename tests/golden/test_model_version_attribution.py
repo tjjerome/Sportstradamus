@@ -211,7 +211,7 @@ def test_build_filedict_keeps_nfl_payload_as_structural_adapter_state():
 
     fd = _build_filedict(**kwargs)
 
-    assert fd["nfl_yards_experiment"] is payload
+    assert fd["structural_calibration"] is payload
     identity = fd[MODEL_STRATEGY_MODEL_KEY]
     assert identity["strategy_slug"] == TWO_PART_STRATEGY
     assert identity["structural_strategy"] == TWO_PART_STRATEGY

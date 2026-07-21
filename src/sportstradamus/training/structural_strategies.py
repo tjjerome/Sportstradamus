@@ -71,9 +71,9 @@ def validate_experiment_selection(
 
 def resolve_experiment_selection(flag_value: str, cell: Mapping[str, object]) -> str:
     """Honor a persisted structural method only when the CLI selector is ``auto``."""
-    experiment = cell.get("nfl_yards_experiment", NONE) if flag_value == AUTO else flag_value
+    experiment = cell.get("structural_calibration", NONE) if flag_value == AUTO else flag_value
     if not isinstance(experiment, str):
-        raise ValueError("nfl_yards_experiment must be a string")
+        raise ValueError("structural_calibration must be a string")
     return experiment
 
 

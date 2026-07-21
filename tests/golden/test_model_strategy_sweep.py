@@ -440,7 +440,7 @@ def test_csv_identity_rejects_partial_adapter_and_nonintegral_contracts():
     with pytest.raises(ValueError, match="partial generic"):
         validate_strategy_frame(pd.DataFrame({"StrategySignature": ["orphan"]}))
     with pytest.raises(ValueError, match="adapter strategy columns"):
-        validate_strategy_frame(pd.DataFrame({"NFLYardsRoute": ["expert"]}))
+        validate_strategy_frame(pd.DataFrame({"StructuralRoute": ["expert"]}))
     assert validate_strategy_frame(pd.DataFrame({"P_PrePool": [0.5]})) == (None, None)
     assert validate_strategy_frame(pd.DataFrame({"PITRecalKnots": ["[]"]})) == (None, None)
 

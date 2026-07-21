@@ -37,9 +37,9 @@ def _persist_structural_columns(
         test_routes = nfl_yards_routes["test"].reindex(X_test.index)
         if test_routes.isna().any():
             raise ValueError("NFL-yards candidate routes do not align to test rows")
-        X_test["NFLYardsExperiment"] = structural_strategy
-        X_test["NFLYardsRoute"] = test_routes
-        X_test["NFLYardsFallback"] = test_routes.eq("pooled_fallback")
+        X_test["StructuralAdapterStrategy"] = structural_strategy
+        X_test["StructuralRoute"] = test_routes
+        X_test["StructuralFallback"] = test_routes.eq("pooled_fallback")
     receiving_metadata = (
         receiving_calibration_payload,
         receiving_f0,
@@ -56,10 +56,10 @@ def _persist_structural_columns(
         positions = receiving_position.reindex(X_test.index)
         if roles.isna().any() or positions.isna().any():
             raise ValueError("receiving-v3 role/position metadata does not align to test rows")
-        X_test["NFLYardsCalibration"] = receiving_calibration_payload
-        X_test["NFLYardsF0"] = f0
-        X_test["NFLYardsRole"] = roles.to_numpy()
-        X_test["NFLYardsPosition"] = positions.to_numpy(dtype=int)
+        X_test["StructuralCalibration"] = receiving_calibration_payload
+        X_test["StructuralF0"] = f0
+        X_test["StructuralRole"] = roles.to_numpy()
+        X_test["StructuralPosition"] = positions.to_numpy(dtype=int)
 
 
 def _ks_uniform(values: np.ndarray) -> float:
