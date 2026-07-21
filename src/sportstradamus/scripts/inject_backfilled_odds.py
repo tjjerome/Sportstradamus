@@ -20,6 +20,11 @@ against the real book.
 
     poetry run python -m sportstradamus.scripts.inject_backfilled_odds \
         --league NFL --markets "passing yards,attempts,completions" --dry-run
+
+Or refresh every cached matrix at once after a broad backfill (the ``*_corr``
+feature matrices carry no book columns and are skipped):
+
+    poetry run python -m sportstradamus.scripts.inject_backfilled_odds --all-cached
 """
 
 import datetime
@@ -60,8 +65,17 @@ def _is_blown(ev: float, line: float) -> bool:
     return ev > BLOWN_ABS_CEILING or (line > 0 and ev > BLOWN_LINE_FACTOR * line)
 
 
-def _resolve_row(archive, league, market, dist, cv, row, has_synth):
-    """Re-derived ``(line, ev, odds, synthetic)`` book columns for one cached row.
+def _resolve_row(
+    archive: Archive,
+    league: str,
+    market: str,
+    dist: str,
+    cv: float,
+    row: pd.Series,
+    has_synth: bool,
+) -> tuple[float, float, float, bool, bool]:
+    """Re-derived ``(line, ev, odds, synthetic, archived)`` book columns for one
+    cached row.
 
     A row the archive prices with a sane EV is recomputed from it (the backfill
     supersedes the seed); a row with no archived price keeps its clean cached
@@ -71,42 +85,57 @@ def _resolve_row(archive, league, market, dist, cv, row, has_synth):
     is synthesized: ``Odds`` set to ``_SYNTH_ODDS_SENTINEL``, ``EV`` left NaN
     for ``pipeline._step_synthesize_odds`` to fill canonically. No matrix row
     may carry a blown or NaN ``EV``; a NaN ``EV`` crashes the LightGBMLSS fit.
+
+    ``archived`` mirrors ``stats/base.py`` ``_resolve_player_market_odds``: a row
+    is authentic iff the archive holds a positive line for it (``line > 0``),
+    read *before* the no-price fallback overwrites ``line`` with the cached seed.
+    The authentic mask further excludes synthesized rows, so an archived-but-blown
+    row (``archived=True``, ``synthetic=True``) is correctly not counted.
     """
     game_date = pd.to_datetime(row["Date"]).date()
     at = _target_at(game_date)
     date = game_date.strftime("%Y-%m-%d")
     ev = archive.get_ev(league, market, date, row["Player"], at=at)
     line = archive.get_line(league, market, date, row["Player"], at=at)
+    archived = line > 0
     priced = not np.isnan(ev) and line > 0
     if not priced:
         line, ev = row["Line"], row["EV"]
     if np.isnan(ev) or _is_blown(ev, line):
-        return line, np.nan, _SYNTH_ODDS_SENTINEL, True
+        return line, np.nan, _SYNTH_ODDS_SENTINEL, True, archived
     if priced:
-        return line, ev, 1 - get_odds(line, ev, dist, cv=cv), False
+        return line, ev, 1 - get_odds(line, ev, dist, cv=cv), False, archived
     cached_synth = row["Odds_synthetic"] if has_synth else False
-    return line, ev, row["Odds"], cached_synth
+    return line, ev, row["Odds"], cached_synth, archived
 
 
-def _refresh_one(archive, league: str, market: str, M: pd.DataFrame):
-    """Re-derive ``Line``/``Odds``/``EV`` from the archive for every cached row.
+def _refresh_one(
+    archive: Archive, league: str, market: str, M: pd.DataFrame
+) -> tuple[int, float, float, int, int]:
+    """Re-derive ``Line``/``Odds``/``EV``/``Archived`` from the archive for every
+    cached row.
 
     Mirrors the ``Odds = 1 - get_odds(line, ev)`` derivation in ``stats/base.py``
     ``get_training_matrix`` so the injected columns equal a full rebuild's (see
-    ``_resolve_row`` for the per-row policy). Returns
-    ``(n_changed, frac_half_before, frac_half_after)`` where the coin-flip
-    fraction (``Odds == 0.5``) is the degeneracy fingerprint the backfill clears.
+    ``_resolve_row`` for the per-row policy). ``Archived`` is reconciled too so a
+    newly backfilled real line lifts the authentic count the two-part support
+    audit reads — refreshing prices without it leaves a real line flagged
+    synthetic. Returns
+    ``(n_changed, frac_half_before, frac_half_after, authentic_before, authentic_after)``
+    where the coin-flip fraction (``Odds == 0.5``) is the degeneracy fingerprint
+    the backfill clears and ``authentic = Archived & ~Odds_synthetic``.
     """
     cv = stat_cv[league].get(market, 1)
     dist = stat_dist.get(league, {}).get(market, "Gamma")
     has_synth = "Odds_synthetic" in M.columns
-    lines, evs, odds, synth = [], [], [], []
+    lines, evs, odds, synth, arch = [], [], [], [], []
     for _, row in tqdm(M.iterrows(), total=len(M), desc=f"{league} {market}", leave=False):
-        line, ev, od, sy = _resolve_row(archive, league, market, dist, cv, row, has_synth)
+        line, ev, od, sy, ar = _resolve_row(archive, league, market, dist, cv, row, has_synth)
         lines.append(line)
         evs.append(ev)
         odds.append(od)
         synth.append(sy)
+        arch.append(ar)
 
     new_odds = np.asarray(odds, dtype=float)
     old_odds = M["Odds"].to_numpy(dtype=float)
@@ -114,33 +143,67 @@ def _refresh_one(archive, league: str, market: str, M: pd.DataFrame):
     frac_before = float(np.isclose(old_odds, 0.5).mean())
     frac_after = float(np.isclose(new_odds, 0.5).mean())
 
+    old_synth = M["Odds_synthetic"].to_numpy(dtype=bool) if has_synth else np.zeros(len(M), bool)
+    new_arch = np.asarray(arch, dtype=bool)
+    auth_before = int((M["Archived"].to_numpy(dtype=bool) & ~old_synth).sum())
+    auth_after = int((new_arch & ~np.asarray(synth, dtype=bool)).sum())
+
     M["Line"] = lines
     M["EV"] = evs
     M["Odds"] = new_odds
     M["Odds_synthetic"] = synth
-    return n_changed, frac_before, frac_after
+    M["Archived"] = new_arch
+    return n_changed, frac_before, frac_after, auth_before, auth_after
+
+
+def _all_cached_cells() -> list[tuple[str, str]]:
+    """``(league, market)`` for every cached training matrix, recovered from its
+    filename slug — the inverse of ``market_file_slug``: split the league prefix
+    off the single underscore, turn hyphens back into spaces. The ``*_corr``
+    feature matrices reverse to a ``"corr"`` market that carries no book columns;
+    ``main`` skips them via its ``Odds``-column guard rather than by name."""
+    root = pkg_resources.files(data) / "training_data"
+    cells = []
+    for path in sorted(root.iterdir(), key=lambda p: p.name):
+        if not path.name.endswith(".parquet"):
+            continue
+        league, slug = path.name[: -len(".parquet")].split("_", 1)
+        cells.append((league, slug.replace("-", " ")))
+    return cells
 
 
 @click.command()
 @click.option("--league", default="NFL", help="League whose cached matrices to refresh.")
-@click.option("--markets", required=True, help="Comma-separated market names (stat_map values).")
+@click.option("--markets", default=None, help="Comma-separated market names (stat_map values).")
+@click.option(
+    "--all-cached",
+    is_flag=True,
+    help="Refresh every cached matrix across all leagues (ignores --league/--markets).",
+)
 @click.option("--dry-run", is_flag=True, help="Report the refresh delta; do not write the parquet.")
-def main(league, markets, dry_run):
+def main(league, markets, all_cached, dry_run):
     """Inject backfilled archive odds into cached training matrices (no feature
     rebuild). Follow with ``meditate --force`` to retrain against the real book."""
+    if not all_cached and not markets:
+        raise click.UsageError("provide --markets, or --all-cached to refresh every cached matrix")
     archive = Archive()
-    for market in (m.strip() for m in markets.split(",")):
-        path = (
-            pkg_resources.files(data) / f"training_data/{market_file_slug(league, market)}.parquet"
-        )
+    cells = _all_cached_cells() if all_cached else [(league, m.strip()) for m in markets.split(",")]
+    for lg, market in cells:
+        path = pkg_resources.files(data) / f"training_data/{market_file_slug(lg, market)}.parquet"
         if not path.is_file():
-            click.echo(f"  {market}: no cached matrix, skip")
+            click.echo(f"  {lg} {market}: no cached matrix, skip")
             continue
         M = pd.read_parquet(path)
-        n_changed, frac_before, frac_after = _refresh_one(archive, league, market, M)
+        if "Odds" not in M.columns:
+            click.echo(f"  {lg} {market}: not a book matrix (no Odds column), skip")
+            continue
+        n_changed, frac_before, frac_after, auth_before, auth_after = _refresh_one(
+            archive, lg, market, M
+        )
         click.echo(
-            f"  {market}: {n_changed}/{len(M)} rows changed; "
-            f"Odds==0.5 {frac_before:.1%} -> {frac_after:.1%}"
+            f"  {lg} {market}: {n_changed}/{len(M)} rows changed; "
+            f"Odds==0.5 {frac_before:.1%} -> {frac_after:.1%}; "
+            f"authentic {auth_before} -> {auth_after}"
         )
         if not dry_run:
             M.to_parquet(path, compression="zstd", index=True)
