@@ -7,6 +7,7 @@ import hashlib
 import numpy as np
 import pandas as pd
 
+from sportstradamus.training.group_conditional_cdf._maps import ks_supremum
 from sportstradamus.training.model_strategy_registry import BASE_STRUCTURAL_STRATEGY
 from sportstradamus.training.scorecard import (
     _bootstrap_mean_ci,
@@ -64,11 +65,9 @@ def _persist_structural_columns(
 def _ks_uniform(values: np.ndarray) -> float:
     """One-sample KS distance to Uniform(0, 1), without scipy fit state."""
     ordered = np.sort(np.clip(np.asarray(values, dtype=float), 0.0, 1.0))
-    n = len(ordered)
-    if n == 0:
+    if len(ordered) == 0:
         return float("nan")
-    rank = np.arange(1, n + 1, dtype=float)
-    return float(max(np.max(rank / n - ordered), np.max(ordered - (rank - 1) / n)))
+    return ks_supremum(ordered)
 
 
 def _validation_split_fingerprint(splits: dict) -> str:

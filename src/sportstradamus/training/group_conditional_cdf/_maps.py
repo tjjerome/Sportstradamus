@@ -58,32 +58,25 @@ def fit_pit_map(draws: np.ndarray, lam: float) -> GroupCdfBlob:
     return {"kind": "group_empirical_cdf", "lam": lam, "x": x_knots, "y": y_knots}
 
 
+def ks_supremum(ordered: np.ndarray) -> float:
+    """KS supremum of a sorted, unit-clipped sample against Uniform(0, 1)."""
+    n = len(ordered)
+    ranks = np.arange(1, n + 1)
+    return float(max(np.max(ranks / n - ordered), np.max(ordered - (ranks - 1) / n)))
+
+
 def ks_uniform_finite(values: np.ndarray) -> float:
-    """Receiving KS: drop nonfinite values, reject an empty draw."""
+    """KS distance to Uniform(0, 1) after dropping nonfinite values; empty is rejected."""
     finite = np.asarray(values, dtype=float)
     finite = finite[np.isfinite(finite)]
     if finite.size == 0:
         raise ValueError("PIT guard requires at least one finite value")
-    ordered = np.sort(np.clip(finite, 0.0, 1.0))
-    ranks = np.arange(1, len(ordered) + 1)
-    return float(
-        max(
-            np.max(ranks / len(ordered) - ordered),
-            np.max(ordered - (ranks - 1) / len(ordered)),
-        )
-    )
+    return ks_supremum(np.sort(np.clip(finite, 0.0, 1.0)))
 
 
 def ks_uniform(values: np.ndarray) -> float:
-    """Rushing KS: no finite filter, no empty check."""
-    ordered = np.sort(np.clip(values, 0.0, 1.0))
-    ranks = np.arange(1, len(ordered) + 1)
-    return float(
-        max(
-            np.max(ranks / len(ordered) - ordered),
-            np.max(ordered - (ranks - 1) / len(ordered)),
-        )
-    )
+    """KS distance to Uniform(0, 1) over the raw sample, with no finite filter."""
+    return ks_supremum(np.sort(np.clip(values, 0.0, 1.0)))
 
 
 def mean_ks(draws: np.ndarray) -> float:
