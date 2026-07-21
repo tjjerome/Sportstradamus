@@ -1,6 +1,6 @@
-"""Nested-CV fit body for the rushing affine corner.
+"""Nested-CV fit body for the affine strategy.
 
-Moved verbatim from the rushing calibrator: a five-fold Player-grouped outer CV
+Moved verbatim from the affine calibrator: a five-fold Player-grouped outer CV
 that fits the affine mean correction and per-position maps, then the line-only
 temperature and Brier-optimal book pool, scoring the honest out-of-fold arrays.
 Group codes are discovered from the position column and persisted as the
@@ -15,7 +15,7 @@ from sklearn.model_selection import GroupKFold
 from sportstradamus.helpers.distributions import apply_temperature
 from sportstradamus.training.group_conditional_cdf._affine import (
     apply_affine,
-    fit_affine,
+    fit_affine_mean,
     fit_group_maps,
     mapped_cdf_endpoints,
     mapped_over,
@@ -45,8 +45,8 @@ from sportstradamus.training.group_conditional_cdf.probability_pool import (
 )
 
 
-def fit_rushing(config: StrategyConfig, predictive, result, line, book_over, position, player):
-    """Fit the rushing affine corner by nested five-fold Player CV."""
+def fit_affine(config: StrategyConfig, predictive, result, line, book_over, position, player):
+    """Fit the affine strategy by nested five-fold Player CV."""
     codes = discover_codes(position)
     pred, y, lines, books, positions, players = affine_fit_inputs(
         predictive, result, line, book_over, position, player
@@ -65,7 +65,7 @@ def fit_rushing(config: StrategyConfig, predictive, result, line, book_over, pos
 
     splitter = GroupKFold(n_splits=PLAYER_CV_FOLDS)
     for train, hold in splitter.split(np.zeros(n_rows), groups=players):
-        affine = fit_affine(pred.marginal_mean[train], y[train])
+        affine = fit_affine_mean(pred.marginal_mean[train], y[train])
         corrected = apply_affine(pred, *affine)
         train_pred, hold_pred = (
             subset_predictive(corrected, train),
@@ -91,7 +91,7 @@ def fit_rushing(config: StrategyConfig, predictive, result, line, book_over, pos
         temperatures.append(temperature)
         rhos.append(pool["rho"])
 
-    final_affine = fit_affine(pred.marginal_mean, y)
+    final_affine = fit_affine_mean(pred.marginal_mean, y)
     corrected = apply_affine(pred, *final_affine)
     final_maps = fit_group_maps(corrected, y, positions, players, uniforms, codes)
     final_raw_over = mapped_over(corrected, lines, positions, final_maps, codes)

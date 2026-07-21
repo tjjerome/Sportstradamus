@@ -261,7 +261,7 @@ def test_blob_validation_rejects_malformed_map_and_policy_drift():
     blob = _manual_blob()
     blob["cdf"]["positive"]["high_pos4"]["x"] = [0.0, 1.0, 1.0]
     blob["cdf"]["positive"]["high_pos4"]["y"] = [0.0, 0.9, 1.0]
-    with pytest.raises(ValueError, match="invalid receiving conditional CDF map"):
+    with pytest.raises(ValueError, match="invalid two-part conditional CDF map"):
         receiving.serialize_two_part_calibration(blob)
 
     blob = _manual_blob()

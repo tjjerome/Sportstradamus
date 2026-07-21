@@ -1,9 +1,9 @@
 """Book/model probability pooling for the group-conditional engine.
 
-Two pool families sit behind ``pool_weight``. ``fixed_0.8`` is the receiving
-corner's auditable 80/20 policy prior, applied only to explicitly authentic
+Two pool families sit behind ``pool_weight``. ``fixed_0.8`` is the two-part
+variant's auditable 80/20 policy prior, applied only to explicitly authentic
 quotes and otherwise leaving the model probability untouched. ``fit`` is the
-rushing corner's Brier-optimal convex pool, delegated verbatim to the shared
+affine strategy's Brier-optimal convex pool, delegated verbatim to the shared
 probability-pool helper.
 """
 

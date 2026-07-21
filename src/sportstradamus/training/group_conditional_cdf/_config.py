@@ -1,9 +1,9 @@
 """Stage-selection config for the group-conditional CDF engine.
 
 One :class:`StrategyConfig` value fully determines which stages run and how each
-group is keyed. The receiving two-part corner and the rushing affine corner are
+group is keyed. The two-part strategy and the affine strategy are
 the two configs the engine ships; every other field combination is reserved for
-future corners. Group codes are discovered from the training data at fit time,
+future variants. Group codes are discovered from the training data at fit time,
 not frozen here — the config only names the column that forms the key and the
 kind of routing it drives.
 """
@@ -31,10 +31,10 @@ MapImpl = Literal["isotonic_pit", "group_empirical_cdf"]
 
 @dataclass(frozen=True)
 class StrategyConfig:
-    """Frozen switchboard for one group-conditional CDF corner.
+    """Frozen switchboard for one group-conditional CDF variant.
 
     Attributes:
-        candidate_name: The persisted blob slug (byte-stable per corner).
+        candidate_name: The persisted blob slug (byte-stable per variant).
         schema_version: The persisted blob schema version.
         affine_marginal: Run the affine mean-correction stage.
         boundary: Run the per-role logit-boundary stage. When on, the positive

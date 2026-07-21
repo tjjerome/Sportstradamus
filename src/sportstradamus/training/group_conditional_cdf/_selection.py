@@ -1,6 +1,6 @@
-"""Nested Player-CV lambda selection (receiving corner).
+"""Nested Player-CV lambda selection (two-part strategy).
 
-Moved verbatim from the receiving two-part calibrator: a grid search over the
+Moved verbatim from the two-part calibrator: a grid search over the
 positive/nonpositive shrink pair, scored by a guard-normalized KS key across the
 global, per-role, and per-position PIT. Position codes and the positive-group
 list are threaded in so the engine iterates the discovered/persisted set.

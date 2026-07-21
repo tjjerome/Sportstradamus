@@ -1,6 +1,6 @@
-"""Two-part logit-boundary and positive group-CDF kernels (receiving corner).
+"""Two-part logit-boundary and positive group-CDF kernels (two-part strategy).
 
-Moved verbatim from the receiving two-part calibrator. The per-role boundary
+Moved verbatim from the two-part calibrator. The per-role boundary
 intercept, RB-position residual, role nonpositive maps, and role-by-position
 positive maps together define the conditional split whose endpoints the positive
 group-CDF consumes. Position codes and the positive-group list are threaded in as
@@ -85,7 +85,7 @@ def fit_models(
             )
         )
     except ValueError as exc:
-        raise ValueError("receiving RB boundary residual is outside its fit bracket") from exc
+        raise ValueError("two-part RB boundary residual is outside its fit bracket") from exc
 
     groups = positive_group(rows.role, rows.position)
     positive_maps = {}
@@ -118,7 +118,7 @@ def fit_boundary_intercept(f0: np.ndarray, nonpositive: np.ndarray) -> float:
     try:
         return float(brentq(score, *INTERCEPT_BRACKET))
     except ValueError as exc:
-        raise ValueError("receiving boundary intercept is outside its fit bracket") from exc
+        raise ValueError("two-part boundary intercept is outside its fit bracket") from exc
 
 
 def apply_models(models, cdf, f0, roles, positions, positive_groups):

@@ -1,6 +1,6 @@
-"""Nested-CV fit body for the receiving two-part corner.
+"""Nested-CV fit body for the two-part strategy.
 
-Moved verbatim from the receiving calibrator: a five-fold Player-grouped outer CV
+Moved verbatim from the two-part calibrator: a five-fold Player-grouped outer CV
 that fits the boundary-plus-positive maps, settles the line endpoints, and scores
 the honest out-of-fold PIT and quoted-line arrays. Group codes are discovered from
 the position column and persisted as the positive-map keys.
@@ -42,8 +42,8 @@ from sportstradamus.training.group_conditional_cdf._validation import (
 )
 
 
-def fit_receiving(config: StrategyConfig, *args) -> TwoPartCalibrationFit:
-    """Fit the receiving two-part corner by nested five-fold Player CV."""
+def fit_two_part(config: StrategyConfig, *args) -> TwoPartCalibrationFit:
+    """Fit the two-part strategy by nested five-fold Player CV."""
     position_codes = discover_codes(args[11])
     groups = positive_groups(position_codes)
     rows = two_part_fit_inputs(*args, position_codes)
@@ -159,7 +159,7 @@ def fit_receiving(config: StrategyConfig, *args) -> TwoPartCalibrationFit:
         )
         or not np.isfinite(oof_positive[rows.result > 0.0]).all()
     ):
-        raise ValueError("nested receiving calibration produced nonfinite OOF output")
+        raise ValueError("nested two-part calibration produced nonfinite OOF output")
     if np.any(oof_line_low > oof_line_high + CDF_BRANCH_TOLERANCE):
         raise ValueError("mapped line lower endpoint exceeds upper endpoint")
     return TwoPartCalibrationFit(

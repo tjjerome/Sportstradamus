@@ -1125,7 +1125,9 @@ def _tail_ks_uniform(values: np.ndarray, floor: float = _TAIL_PIT_FLOOR) -> floa
 def _two_part_contract(
     df: pd.DataFrame,
 ) -> tuple[Mapping[str, object], np.ndarray, np.ndarray, np.ndarray] | None:
-    """Validate and decode the receiving-v3 row contract when it is present."""
+    """Validate and decode the two-part row contract when it is present."""
+    # style: allow-complexity — flat row-contract validator; each branch is one
+    # distinct contract rule, so splitting would only scatter the checks.
     identity, _ = validate_strategy_frame(df)
     if identity is None or (
         identity.structural_strategy != TWO_PART_STRATEGY
@@ -1134,7 +1136,7 @@ def _two_part_contract(
 
     missing = _TWO_PART_CONTRACT_COLUMNS - set(df.columns)
     if missing:
-        raise ValueError(f"receiving-v3 scorecard contract missing columns: {sorted(missing)}")
+        raise ValueError(f"two-part scorecard contract missing columns: {sorted(missing)}")
     calibration = df[_STRUCTURAL_CALIBRATION_COL]
     if calibration.isna().any() or calibration.astype(str).nunique() != 1:
         raise ValueError("StructuralCalibration must be one constant nonmissing JSON value")
@@ -1165,15 +1167,15 @@ def _two_part_contract(
     for column in ("SN_Loc", "SN_Scale", "SN_Alpha", "P", "P_PrePool", "Line"):
         values = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
         if not np.isfinite(values).all():
-            raise ValueError(f"receiving-v3 {column} must be finite on every row")
+            raise ValueError(f"two-part {column} must be finite on every row")
         if column == "SN_Scale" and np.any(values <= 0.0):
-            raise ValueError("receiving-v3 SN_Scale must be strictly positive")
+            raise ValueError("two-part SN_Scale must be strictly positive")
         if column in {"P", "P_PrePool"} and np.any((values < 0.0) | (values > 1.0)):
-            raise ValueError(f"receiving-v3 {column} must lie in [0, 1]")
+            raise ValueError(f"two-part {column} must lie in [0, 1]")
     if "Gate" in df.columns:
         gate = pd.to_numeric(df["Gate"], errors="coerce").to_numpy(dtype=float)
         if not np.isfinite(gate).all() or np.any((gate < 0.0) | (gate >= 1.0)):
-            raise ValueError("receiving-v3 Gate must be finite and lie in [0, 1)")
+            raise ValueError("two-part Gate must be finite and lie in [0, 1)")
     return blob, f0, roles.astype(str), positions
 
 
@@ -1184,14 +1186,14 @@ def _two_part_cdf_endpoints(
     *,
     strategy: str,
 ) -> tuple[np.ndarray, np.ndarray] | None:
-    """Rebuild and transform the two outcome CDF endpoints for receiving v3."""
+    """Rebuild and transform the two outcome CDF endpoints for the two-part strategy."""
     contract = _two_part_contract(df)
     if contract is None:
         return None
     if dist != "SkewNormal":
-        raise ValueError("receiving-v3 scorecard contract requires SkewNormal row parameters")
+        raise ValueError("two-part scorecard contract requires SkewNormal row parameters")
     if "PITRecalKnots" in df.columns:
-        raise ValueError("receiving-v3 must use StructuralCalibration, not PITRecalKnots")
+        raise ValueError("two-part must use StructuralCalibration, not PITRecalKnots")
 
     blob, persisted_f0, roles, positions = contract
     raw_f0, _ = _pred_cdf_pmf(

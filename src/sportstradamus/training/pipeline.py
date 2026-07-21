@@ -2095,7 +2095,7 @@ def _step_persist_artifacts(
     receiving_role: pd.Series | None = None,
     receiving_position: pd.Series | None = None,
     structural_strategy: str = BASE_STRUCTURAL_STRATEGY,
-    nfl_yards_routes: dict[str, pd.Series] | None = None,
+    structural_routes: dict[str, pd.Series] | None = None,
 ) -> None:
     """Write the scorecard-shaped test-set CSV and the model pickle.
 
@@ -2167,7 +2167,7 @@ def _step_persist_artifacts(
     _persist_structural_columns(
         X_test,
         structural_strategy=structural_strategy,
-        nfl_yards_routes=nfl_yards_routes,
+        structural_routes=structural_routes,
         receiving_calibration_payload=receiving_calibration_payload,
         receiving_f0=receiving_f0,
         receiving_role=receiving_role,
@@ -4025,7 +4025,7 @@ def train_market(
         global_mean=dist_info["global_mean"],
         denom_col=dist_info["denom_col"],
         pit_recal_blob=calibrated.get("pit_recal_blob"),
-        pit_recal_by_row=calibrated.get("nfl_yards_pit_maps"),
+        pit_recal_by_row=calibrated.get("structural_pit_maps"),
         prepool_over=(
             calibrated["receiving_candidate_test"].candidate_over
             if structural_strategy == TWO_PART_STRATEGY
@@ -4040,7 +4040,7 @@ def train_market(
         receiving_role=calibrated.get("receiving_candidate_test_role"),
         receiving_position=calibrated.get("receiving_candidate_test_position"),
         structural_strategy=structural_strategy,
-        nfl_yards_routes=calibrated.get("nfl_yards_routes"),
+        structural_routes=calibrated.get("structural_routes"),
     )
 
     # Drift-monitoring SHAP: write per-cell |SHAP| + corr columns to the

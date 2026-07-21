@@ -1,10 +1,10 @@
 """Constants and portable state contracts for group-conditional CDF calibration.
 
-This module unifies the frozen contracts of the two NFL yards calibrators. The
-scalar constants that genuinely differ between the receiving two-part corner and
-the rushing affine corner (candidate slug, group codes, schema version) carry a
-corner prefix; everything the two corners agree on is shared verbatim. The blob
-TypedDicts and dataclasses of both corners live here unchanged so their JSON and
+This module unifies the frozen contracts of the two structural calibrators. The
+scalar constants that genuinely differ between the two-part strategy and
+the affine strategy (candidate slug, group codes, schema version) carry a
+variant prefix; everything the two variants agree on is shared verbatim. The blob
+TypedDicts and dataclasses of both variants live here unchanged so their JSON and
 pickle layout is byte-identical to the packages this replaces.
 """
 

@@ -1,4 +1,4 @@
-"""Analytic bookmaker probability pooling shared by NFL yards calibrators.
+"""Analytic bookmaker probability pooling shared by structural calibrators.
 
 The pool operates on one quoted over-probability at a time.  It deliberately
 does not claim to define a full predictive CDF: callers that need arbitrary-line
@@ -12,7 +12,7 @@ from typing import Literal, TypedDict, cast
 
 import numpy as np
 
-PROBABILITY_POOL_KIND = "nfl_yards_probability_pool"
+PROBABILITY_POOL_KIND = "structural_probability_pool"
 PROBABILITY_POOL_SCHEMA_VERSION = 1
 RHO_FIT_BOUNDS: tuple[float, float] = (0.0, 1.0)
 RHO_STABILITY_BOUNDS: tuple[float, float] = (0.2, 0.8)
@@ -22,7 +22,7 @@ RHO_MAX_FOLD_RANGE = 0.2
 class ProbabilityPoolBlob(TypedDict):
     """JSON/pickle-safe state for a fitted line-probability pool."""
 
-    kind: Literal["nfl_yards_probability_pool"]
+    kind: Literal["structural_probability_pool"]
     schema_version: int
     rho: float
     raw_rho: float
@@ -94,7 +94,7 @@ def apply_probability_pool(
 
 
 def validate_probability_pool_weights(fold_rhos: Sequence[float], final_rho: float) -> None:
-    """Enforce the preregistered NFL-yards weight and fold-stability guards.
+    """Enforce the preregistered structural weight and fold-stability guards.
 
     Every outer-Player-CV weight and the full-validation weight must lie in
     ``[0.2, 0.8]``.  The outer-fold range must not exceed ``0.2``.  These guards

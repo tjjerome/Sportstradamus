@@ -1,4 +1,4 @@
-"""Train-market fit/gate/apply step for the rushing QB/RB affine group-CDF candidate."""
+"""Train-market fit/gate/apply step for the affine QB/RB affine group-CDF candidate."""
 
 from __future__ import annotations
 
@@ -36,8 +36,8 @@ def _affine_candidate_oof_audit(
     splits: dict,
     positions: np.ndarray,
 ) -> dict:
-    """Validate the rushing candidate without consulting the held-out test outcomes."""
-    # style: allow-complexity -- aggregates independent out-of-fold guards on the rushing candidate
+    """Validate the affine candidate without consulting the held-out test outcomes."""
+    # style: allow-complexity -- aggregates independent out-of-fold guards on the affine candidate
     result, players, outcome, _book, brier_delta, row_ci, player_ci = _oof_brier_arrays(fit, splits)
 
     pit_global = float(np.mean([_ks_uniform(draw) for draw in fit.oof_pit_draws]))
@@ -112,7 +112,7 @@ def _affine_candidate_oof_audit(
     audit["guards"] = guards
     failed = [name for name, passed in guards.items() if not passed]
     if failed:
-        raise ValueError("rushing candidate failed validation guard(s): " + ", ".join(failed))
+        raise ValueError("affine candidate failed validation guard(s): " + ", ".join(failed))
     return audit
 
 
@@ -124,7 +124,7 @@ def _step_apply_affine_groupcdf_candidate(
 ) -> tuple[dict, dict]:
     """Fit and apply the frozen QB/RB distribution and quoted-line probability heads."""
     if context.get("status") != "active":
-        raise ValueError("rushing affine/group-CDF candidate requires active QB/RB routing")
+        raise ValueError("affine/group-CDF candidate requires active QB/RB routing")
     index_val = splits["X_validation"].index
     index_test = splits["X_test"].index
     positions_val = context["positions"]["validation"].reindex(index_val).to_numpy(dtype=float)
@@ -138,7 +138,7 @@ def _step_apply_affine_groupcdf_candidate(
         if gate.ndim == 0:
             return np.full(length, float(gate), dtype=float)
         if gate.shape != (length,):
-            raise ValueError("rushing candidate gate is not row-aligned")
+            raise ValueError("affine candidate gate is not row-aligned")
         return gate
 
     gate_val = _gate_vector(fused["gate_blend_val"], len(index_val))
@@ -195,8 +195,8 @@ def _step_apply_affine_groupcdf_candidate(
             "rushing_candidate_test": test_output,
             "rushing_candidate_test_base": predictive_test,
             "rushing_candidate_validation": validation_output,
-            "nfl_yards_routes": context["routes"],
-            "nfl_yards_pit_maps": pd.Series(positions_test.astype(int), index=index_test).map(
+            "structural_routes": context["routes"],
+            "structural_pit_maps": pd.Series(positions_test.astype(int), index=index_test).map(
                 {
                     code: json.dumps(
                         fit.blob["position_cdf"][str(code)],

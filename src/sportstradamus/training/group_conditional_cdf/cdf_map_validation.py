@@ -1,4 +1,4 @@
-"""Shared portable-CDF validation for structural NFL-yards calibrators."""
+"""Shared portable-CDF validation for structural structural calibrators."""
 
 from __future__ import annotations
 

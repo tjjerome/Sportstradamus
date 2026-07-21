@@ -1,8 +1,8 @@
 """Unified group-conditional CDF calibration family.
 
-One staged, config-driven engine backs both NFL yards calibrators. A
-:class:`StrategyConfig` selects the stages: affine mean correction (rushing), the
-per-role logit boundary with RB residual (receiving), the always-on per-group
+One staged, config-driven engine backs both structural calibrators. A
+:class:`StrategyConfig` selects the stages: affine mean correction (affine), the
+per-role logit boundary with RB residual (two-part), the always-on per-group
 endpoint-preserving isotonic map, and the always-on line-only temperature plus
 book/model pool. Group codes are discovered from data and persisted as the map
 keys. The old ``two_part_groupcdf`` and ``affine_groupcdf``
@@ -109,7 +109,7 @@ def fit_affine_groupcdf(
     position: np.ndarray,
     player: np.ndarray,
 ) -> AffineCalibrationFit:
-    """Fit the rushing candidate by nested five-fold Player CV, then all validation rows.
+    """Fit the affine candidate by nested five-fold Player CV, then all validation rows.
 
     Outer folds generate honest mean, line-probability, and randomized-PIT arrays
     for the six-gate scorecard. Within each outer training partition, a second

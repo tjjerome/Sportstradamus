@@ -1,4 +1,4 @@
-"""Train-only routing and support contexts for structural NFL-yards strategies."""
+"""Train-only routing and support contexts for structural structural strategies."""
 
 from __future__ import annotations
 
@@ -99,7 +99,7 @@ def build_two_part_context(
     # style: allow-complexity — one try/except sequences threshold→route→support→gate
     # derivation so any single failure collapses to one killed_fallback payload.
     if slug != TWO_PART_STRATEGY:
-        raise ValueError(f"unsupported receiving experiment {slug!r}")
+        raise ValueError(f"unsupported two-part strategy {slug!r}")
     spec = role_spec_for(league, market)
     if spec is None:
         raise ValueError(f"no role spec registered for {league} {market}")
@@ -149,11 +149,11 @@ def build_two_part_context(
             if counts[key] < minimum
         ]
         if failures:
-            raise ValueError(f"receiving role support guard failed: {', '.join(failures)}")
+            raise ValueError(f"two-part role support guard failed: {', '.join(failures)}")
 
         train_result = splits["y_train"]["Result"].reindex(frames["train"].index)
         if train_result.isna().any():
-            raise ValueError("receiving train outcomes do not align to role routes")
+            raise ValueError("two-part train outcomes do not align to role routes")
         fallback_gate = float(train_result.eq(0.0).mean())
         gate_rates = {
             group: float(train_result.loc[routes["train"].eq(group)].eq(0.0).mean())
@@ -162,7 +162,7 @@ def build_two_part_context(
         if not np.isfinite([fallback_gate, *gate_rates.values()]).all() or not all(
             0.0 <= value < 1.0 for value in (fallback_gate, *gate_rates.values())
         ):
-            raise ValueError("receiving role gate rates must be finite in [0, 1)")
+            raise ValueError("two-part role gate rates must be finite in [0, 1)")
     except ValueError as exc:
         return {
             "slug": slug,
@@ -197,9 +197,9 @@ def build_affine_expert_context(
     support_floor: Mapping[str, int] = AFFINE_SUPPORT,
     slug: str = AFFINE_STRATEGY,
 ) -> dict:
-    """Route QB/RB rows and enforce support floors for the final rushing candidate."""
+    """Route QB/RB rows and enforce support floors for the final affine candidate."""
     if slug != AFFINE_STRATEGY:
-        raise ValueError(f"unsupported rushing experiment {slug!r}")
+        raise ValueError(f"unsupported affine strategy {slug!r}")
     frames = {split: splits[f"X_{split}"] for split in ("train", "validation", "test")}
     support: dict[str, dict[str, int]] = {}
     positions: dict[str, pd.Series] = {}
@@ -227,7 +227,7 @@ def build_affine_expert_context(
             if counts[key] < minimum
         ]
         if failures:
-            raise ValueError(f"rushing expert support guard failed: {', '.join(failures)}")
+            raise ValueError(f"affine expert support guard failed: {', '.join(failures)}")
     except ValueError as exc:
         return {
             "slug": slug,

@@ -1,9 +1,9 @@
 """Input and artifact validation for the group-conditional CDF engine.
 
-The two corners share the finite-array primitive verbatim but diverge on book
-handling (receiving tolerates a nonfinite book on non-authentic rows; rushing
+The two variants share the finite-array primitive verbatim but diverge on book
+handling (two-part tolerates a nonfinite book on non-authentic rows; affine
 requires every book probability finite in ``[0, 1]``), on the missing-identifier
-predicate, and on their blob schemas. Divergent helpers carry a corner suffix so
+predicate, and on their blob schemas. Divergent helpers carry a variant suffix so
 both survive behind config; identical helpers are shared.
 """
 
@@ -150,7 +150,7 @@ def two_part_fit_inputs(
     position,
     position_codes,
 ) -> CalibrationRows:
-    # style: allow-complexity — moved verbatim from the receiving corner; the
+    # style: allow-complexity — moved verbatim from the two-part strategy; the
     # flat guard chain is the byte-for-byte input contract and must not split.
     upper = probability_vector(result_upper, "result_cdf_upper")
     n_rows = len(upper)
@@ -215,11 +215,11 @@ def validate_endpoint_map(blob: Mapping[str, object]) -> None:
         allowed_lambdas=PIT_LAMBDAS,
     )
     if not valid:
-        raise ValueError("invalid receiving conditional CDF map")
+        raise ValueError("invalid two-part conditional CDF map")
 
 
 def validated_two_part_blob(blob: Mapping[str, object]) -> TwoPartCalibrationBlob:
-    # style: allow-complexity — moved verbatim from the receiving corner; the
+    # style: allow-complexity — moved verbatim from the two-part strategy; the
     # flat guard chain is the byte-for-byte schema contract and must not split.
     from sportstradamus.training.group_conditional_cdf._pool import fixed_pool_blob
 
@@ -227,31 +227,31 @@ def validated_two_part_blob(blob: Mapping[str, object]) -> TwoPartCalibrationBlo
         blob.get("kind") != TWO_PART_STRATEGY_NAME
         or blob.get("schema_version") != TWO_PART_SCHEMA_VERSION
     ):
-        raise ValueError("unknown receiving calibration blob kind or schema")
+        raise ValueError("unknown two-part calibration blob kind or schema")
     if blob.get("line_probability_only") is not True:
-        raise ValueError("receiving calibration must declare its line-only probability layer")
+        raise ValueError("two-part calibration must declare its line-only probability layer")
     fitted = cast(TwoPartCalibrationBlob, blob)
     if fitted.get("temperature_fit_scope") != "pre_map_raw_endpoint_settlement":
-        raise ValueError("receiving calibration has an unknown temperature fit scope")
+        raise ValueError("two-part calibration has an unknown temperature fit scope")
     temperature(fitted.get("temperature"))
     models = fitted.get("cdf")
     if not isinstance(models, dict) or models.get("kind") != (
         "role_position_two_part_cdf"
     ):
-        raise ValueError("receiving calibration requires the v3 CDF model")
+        raise ValueError("two-part calibration requires the v3 CDF model")
     role_models = models.get("role_boundary")
     positive_maps = models.get("positive")
     if not isinstance(role_models, dict) or set(role_models) != set(ROLE_VALUES):
-        raise ValueError("receiving calibration requires low and high role boundaries")
+        raise ValueError("two-part calibration requires low and high role boundaries")
     if not isinstance(positive_maps, dict) or set(positive_maps) != set(POSITIVE_GROUPS):
-        raise ValueError("receiving calibration requires all six positive CDF maps")
+        raise ValueError("two-part calibration requires all six positive CDF maps")
     residual = models.get("rb_boundary_residual")
     if (
         not isinstance(residual, (int, float))
         or not np.isfinite(residual)
         or not INTERCEPT_BRACKET[0] <= float(residual) <= INTERCEPT_BRACKET[1]
     ):
-        raise ValueError("invalid receiving RB boundary residual")
+        raise ValueError("invalid two-part RB boundary residual")
     nonpositive_lambdas: set[float] = set()
     for role_name in ROLE_VALUES:
         model = role_models[role_name]
@@ -270,7 +270,7 @@ def validated_two_part_blob(blob: Mapping[str, object]) -> TwoPartCalibrationBlo
         validate_endpoint_map(nonpositive)
         nonpositive_lambdas.add(float(nonpositive["lam"]))
     if len(nonpositive_lambdas) != 1:
-        raise ValueError("receiving nonpositive maps must share one lambda")
+        raise ValueError("two-part nonpositive maps must share one lambda")
     positive_lambdas: set[float] = set()
     for group in POSITIVE_GROUPS:
         positive = positive_maps[group]
@@ -279,7 +279,7 @@ def validated_two_part_blob(blob: Mapping[str, object]) -> TwoPartCalibrationBlo
         validate_endpoint_map(positive)
         positive_lambdas.add(float(positive["lam"]))
     if len(positive_lambdas) != 1:
-        raise ValueError("receiving positive maps must share one lambda")
+        raise ValueError("two-part positive maps must share one lambda")
     if fitted.get("probability_pool") != fixed_pool_blob():
-        raise ValueError("receiving probability pool must match the fixed policy prior")
+        raise ValueError("two-part probability pool must match the fixed policy prior")
     return fitted

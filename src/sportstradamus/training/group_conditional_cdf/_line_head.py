@@ -1,10 +1,10 @@
 """Line-only temperature fits for the group-conditional engine.
 
-The two corners fit a line-only Brier temperature with the same 0.01 anchor
-regularization but not by identical code: the receiving corner validates that the
+The two variants fit a line-only Brier temperature with the same 0.01 anchor
+regularization but not by identical code: the two-part strategy validates that the
 outcome is binary and wraps the optimizer output through the temperature bounds
-validator; the rushing corner does neither. Both are kept behind ``pool_weight``'s
-sibling switch so each corner reproduces its exact result.
+validator; the affine strategy does neither. Both are kept behind ``pool_weight``'s
+sibling switch so each variant reproduces its exact result.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ def fit_temperature_two_part(probability: np.ndarray, outcome: np.ndarray) -> fl
         raise ValueError("temperature outcome must contain only binary 0/1 values")
     logits = logit(np.clip(probabilities, PROBABILITY_CLIP, 1.0 - PROBABILITY_CLIP))
     return temperature(
-        _optimize_temperature(logits, outcomes, error="receiving temperature fit did not converge")
+        _optimize_temperature(logits, outcomes, error="two-part temperature fit did not converge")
     )
 
 

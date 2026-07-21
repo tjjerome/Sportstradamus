@@ -1,4 +1,4 @@
-"""Pure routing and support guards for the surviving NFL-yards candidates."""
+"""Pure routing and support guards for the surviving structural candidates."""
 
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ TWO_PART_STRATEGY = (
 )
 AFFINE_STRATEGY = "affine-groupcdf-bookpool-v1"
 
-NFL_YARDS_EXPERIMENTS: dict[str, tuple[str, str]] = {
+STRUCTURAL_STRATEGIES: dict[str, tuple[str, str]] = {
     TWO_PART_STRATEGY: ("NFL", "receiving yards"),
     AFFINE_STRATEGY: ("NFL", "rushing yards"),
 }
-EXPERIMENT_CHOICES: tuple[str, ...] = (AUTO, NONE, *NFL_YARDS_EXPERIMENTS)
+EXPERIMENT_CHOICES: tuple[str, ...] = (AUTO, NONE, *STRUCTURAL_STRATEGIES)
 AFFINE_EXPERT_EXPERIMENTS: frozenset[str] = frozenset({AFFINE_STRATEGY})
 
 ROLE_COLUMNS: tuple[str, ...] = (
@@ -52,11 +52,11 @@ def validate_experiment_selection(
     if experiment == NONE:
         return
     if experiment == AUTO:
-        raise ValueError("NFL-yards experiment must be resolved per cell before training")
-    if experiment not in NFL_YARDS_EXPERIMENTS:
-        raise ValueError(f"unknown NFL-yards experiment {experiment!r}")
+        raise ValueError("structural strategy must be resolved per cell before training")
+    if experiment not in STRUCTURAL_STRATEGIES:
+        raise ValueError(f"unknown structural strategy {experiment!r}")
 
-    registered_league, registered_market = NFL_YARDS_EXPERIMENTS[experiment]
+    registered_league, registered_market = STRUCTURAL_STRATEGIES[experiment]
     selected_markets = (
         []
         if market_selection is None
@@ -94,7 +94,7 @@ def validate_two_part_recipe(
     """Enforce the fixed paired-control recipe registered for a yards candidate."""
     if experiment == NONE:
         return
-    expected_cell = NFL_YARDS_EXPERIMENTS.get(experiment)
+    expected_cell = STRUCTURAL_STRATEGIES.get(experiment)
     if expected_cell != (league, market):
         raise ValueError(f"{experiment} is not registered for {league}/{market}")
 

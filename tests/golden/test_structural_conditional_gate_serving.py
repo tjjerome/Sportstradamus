@@ -260,7 +260,7 @@ def _affine_candidate_blob() -> dict:
         "position_cdf": {"1": identity, "3": identity},
         "temperature": 1.3,
         "probability_pool": {
-            "kind": "nfl_yards_probability_pool",
+            "kind": "structural_probability_pool",
             "schema_version": 1,
             "rho": 0.4,
             "raw_rho": 0.4,

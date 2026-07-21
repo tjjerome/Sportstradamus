@@ -45,7 +45,7 @@ def _manual_blob():
         },
         "temperature": 2.0,
         "probability_pool": {
-            "kind": "nfl_yards_probability_pool",
+            "kind": "structural_probability_pool",
             "schema_version": 1,
             "rho": 0.4,
             "raw_rho": 0.4,

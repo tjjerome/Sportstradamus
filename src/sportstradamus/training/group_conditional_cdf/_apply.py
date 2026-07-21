@@ -2,7 +2,7 @@
 
 Every public entry point recovers the discovered group set from the fitted blob
 (the ``position_cdf`` / ``positive`` map keys) so application iterates exactly the
-codes the fit persisted. The receiving and rushing corners keep their own apply
+codes the fit persisted. The two-part and affine strategies keep their own apply
 bodies — a two-part conditional transform and an affine-plus-grouped transform —
 selected by the blob kind.
 """
@@ -149,7 +149,7 @@ def deserialize_two_part_calibration(payload: str) -> TwoPartCalibrationBlob:
     """Load and validate portable JSON calibration state."""
     decoded = json.loads(payload)
     if not isinstance(decoded, dict):
-        raise ValueError("receiving calibration payload must contain a JSON object")
+        raise ValueError("two-part calibration payload must contain a JSON object")
     return validated_two_part_blob(decoded)
 
 
@@ -231,5 +231,5 @@ def deserialize_affine_calibration(payload: str) -> AffineCalibrationBlob:
     """Load and validate portable JSON calibration state."""
     decoded = json.loads(payload)
     if not isinstance(decoded, dict):
-        raise ValueError("rushing calibration payload must contain a JSON object")
+        raise ValueError("affine calibration payload must contain a JSON object")
     return validated_affine_blob(decoded)

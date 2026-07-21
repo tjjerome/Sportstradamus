@@ -1,10 +1,10 @@
-"""Input and artifact validation for the rushing affine corner.
+"""Input and artifact validation for the affine strategy.
 
-Split out of ``_validation`` so each corner's validators stay a focused module.
+Split out of ``_validation`` so each variant's validators stay a focused module.
 The only shared primitive is ``finite_vector``; everything here — the finite
 book-probability requirement, the casefold missing-identifier predicate, and the
-affine/pool blob schema — is rushing-specific and not byte-identical to the
-receiving corner's checks.
+affine/pool blob schema — is affine-specific and not byte-identical to the
+two-part strategy's checks.
 """
 
 from __future__ import annotations
@@ -87,7 +87,7 @@ def affine_fit_inputs(predictive, result, line, book_over, position, player):
 
 
 def validated_affine_blob(blob: Mapping[str, object]) -> AffineCalibrationBlob:
-    # style: allow-complexity — moved verbatim from the rushing corner; the flat
+    # style: allow-complexity — moved verbatim from the affine strategy; the flat
     # guard chain is the byte-for-byte schema contract and must not split.
     from sportstradamus.training.group_conditional_cdf.probability_pool import (
         apply_probability_pool,
@@ -97,9 +97,9 @@ def validated_affine_blob(blob: Mapping[str, object]) -> AffineCalibrationBlob:
         blob.get("kind") != AFFINE_STRATEGY_NAME
         or blob.get("schema_version") != AFFINE_SCHEMA_VERSION
     ):
-        raise ValueError("unknown rushing calibration blob kind or schema")
+        raise ValueError("unknown affine calibration blob kind or schema")
     if blob.get("line_probability_only") is not True:
-        raise ValueError("rushing calibration must declare its line-only probability layer")
+        raise ValueError("affine calibration must declare its line-only probability layer")
     fitted = cast(AffineCalibrationBlob, blob)
     affine = fitted.get("affine")
     maps = fitted.get("position_cdf")
@@ -115,14 +115,14 @@ def validated_affine_blob(blob: Mapping[str, object]) -> AffineCalibrationBlob:
     if floor != MARGINAL_MEAN_FLOOR:
         raise ValueError("affine floor does not match the calibration schema")
     if not isinstance(maps, dict) or set(maps) != {str(code) for code in AFFINE_POSITION_CODES}:
-        raise ValueError("rushing calibration requires QB and RB CDF maps")
+        raise ValueError("affine calibration requires QB and RB CDF maps")
     validate_map_blobs(maps)
     temperature_value = finite_scalar(fitted.get("temperature"), "temperature")
     if not TEMPERATURE_BOUNDS[0] <= temperature_value <= TEMPERATURE_BOUNDS[1]:
-        raise ValueError("invalid temperature in rushing calibration blob")
+        raise ValueError("invalid temperature in affine calibration blob")
     pool = fitted.get("probability_pool")
     if not isinstance(pool, dict):
-        raise ValueError("rushing calibration is missing its probability pool")
+        raise ValueError("affine calibration is missing its probability pool")
     apply_probability_pool(pool, np.array([0.5]), np.array([0.5]))
     rho = finite_scalar(pool.get("rho"), "probability-pool rho")
     raw_rho = finite_scalar(pool.get("raw_rho"), "probability-pool raw_rho")
@@ -144,7 +144,7 @@ def validate_map_blobs(maps: Mapping[str, GroupCdfBlob]) -> None:
 
 def finite_scalar(value: object, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not np.isfinite(value):
-        raise ValueError(f"invalid {name} in rushing calibration blob")
+        raise ValueError(f"invalid {name} in affine calibration blob")
     return float(value)
 
 

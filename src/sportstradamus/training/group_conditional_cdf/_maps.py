@@ -1,13 +1,13 @@
 """Endpoint-preserving CDF-map kernels for the group-conditional engine.
 
-Both NFL corners fit a monotone map from raw CDF quantiles to recalibrated ones,
-but by two non-interchangeable implementations. The receiving corner delegates to
+Both NFL variants fit a monotone map from raw CDF quantiles to recalibrated ones,
+but by two non-interchangeable implementations. The two-part strategy delegates to
 :func:`sportstradamus.training.posthoc.fit_isotonic_pit` (blob kind
-``isotonic_pit``); the rushing corner uses a hand-inlined empirical-CDF fit (blob
+``isotonic_pit``); the affine strategy uses a hand-inlined empirical-CDF fit (blob
 kind ``group_empirical_cdf``). Their terminal-knot handling differs, so they are
-not bit-identical and ``map_impl`` selects the one a corner needs. The two
-Kolmogorov-Smirnov helpers likewise differ: the receiving path filters nonfinite
-values and rejects an empty draw; the rushing path does neither.
+not bit-identical and ``map_impl`` selects the one a variant needs. The two
+Kolmogorov-Smirnov helpers likewise differ: the two-part path filters nonfinite
+values and rejects an empty draw; the affine path does neither.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from sportstradamus.training.posthoc import fit_isotonic_pit
 
 
 def fit_endpoint_map(samples: np.ndarray, lam: float) -> EndpointMapBlob:
-    """Fit the receiving ``isotonic_pit`` endpoint map at a shrink ``lam``."""
+    """Fit the two-part ``isotonic_pit`` endpoint map at a shrink ``lam``."""
     fitted = fit_isotonic_pit(samples, n_bins=PIT_BINS, lam=lam)
     if fitted is None:
         raise ValueError("two-part map has insufficient conditional support")
@@ -38,7 +38,7 @@ def apply_endpoint_map(blob: EndpointMapBlob, values: np.ndarray) -> np.ndarray:
 
 
 def fit_pit_map(draws: np.ndarray, lam: float) -> GroupCdfBlob:
-    """Fit the rushing ``group_empirical_cdf`` map from a draw-by-row matrix."""
+    """Fit the affine ``group_empirical_cdf`` map from a draw-by-row matrix."""
     pit = np.sort(np.asarray(draws, dtype=float).reshape(-1), kind="stable")
     coverage = (np.arange(len(pit)) + 0.5) / len(pit)
     x_knots, y_knots = [0.0], [0.0]

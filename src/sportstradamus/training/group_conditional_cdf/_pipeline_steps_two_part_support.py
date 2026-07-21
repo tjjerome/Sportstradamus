@@ -1,4 +1,4 @@
-"""Nested Player-grouped support audit for the receiving role×position candidate.
+"""Nested Player-grouped support audit for the two-part role×position candidate.
 
 Checked across the full/outer/inner CV partitions before the candidate is ever
 allowed to inspect the independent test outcomes.
@@ -14,7 +14,7 @@ from sportstradamus.training.group_conditional_cdf._contracts import (
 )
 from sportstradamus.training.group_conditional_cdf._contracts import TWO_PART_POSITION_CODES
 
-# Frozen receiving-v3 support protocol. These floors were checked across the
+# Frozen two-part support protocol. These floors were checked across the
 # full/outer/inner Player-grouped fit partitions before the candidate was ever
 # allowed to inspect the independent test outcomes.
 _TWO_PART_SUPPORT_FLOORS: dict[str, int] = {
@@ -40,7 +40,7 @@ _TWO_PART_SUPPORT_FLOORS: dict[str, int] = {
 
 
 def _two_part_group_partitions(players: np.ndarray, all_rows: np.ndarray):
-    """Build the nested Player-grouped CV partitions the receiving audit walks.
+    """Build the nested Player-grouped CV partitions the two-part audit walks.
 
     Returns ``(outer, top_partitions, fit_partitions, hold_partitions,
     required_fit)`` — the outer folds, the full/outer-train tops, and every
@@ -248,7 +248,7 @@ def _two_part_support_guards(
     temperature_support: list,
     authentic_holds: list,
 ) -> dict:
-    """Evaluate every receiving support floor against the computed partitions."""
+    """Evaluate every two-part support floor against the computed partitions."""
     floor = _TWO_PART_SUPPORT_FLOORS
     return {
         "roles_exact": set(np.unique(roles)) == set(TWO_PART_ROLE_VALUES),
@@ -299,7 +299,7 @@ def _two_part_nested_support_audit(
     roles: np.ndarray,
     positions: np.ndarray,
 ) -> dict:
-    """Audit every full/outer/inner Player-grouped partition used by receiving v3."""
+    """Audit every full/outer/inner Player-grouped partition used by two-part v3."""
     n_rows = len(result)
     all_rows = np.arange(n_rows)
 
@@ -350,5 +350,5 @@ def _two_part_nested_support_audit(
     }
     failed = [name for name, passed in guards.items() if not passed]
     if failed:
-        raise ValueError("receiving candidate failed support guard(s): " + ", ".join(failed))
+        raise ValueError("two-part candidate failed support guard(s): " + ", ".join(failed))
     return audit

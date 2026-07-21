@@ -142,7 +142,7 @@ _MODEL_VERSION_CACHE: dict[tuple[str, float], str] = {}
 # Attribution id for a leg scored off devigged book odds (no trained model pickle).
 _BOOK_FALLBACK_VERSION = "book_fallback"
 
-# The receiving-v3 validation operator settles every quoted line from these
+# The two-part validation operator settles every quoted line from these
 # adjacent integer CDF endpoints, independent of the pickle's generic step.
 _TWO_PART_SETTLEMENT_STEP = 1.0
 
@@ -641,7 +641,7 @@ def _build_prob_params(
     if structural_strategy == AFFINE_STRATEGY:
         experts = filedict.get("expert_models")
         if not isinstance(experts, dict) or any(code not in experts for code in AFFINE_POSITIONS):
-            raise ValueError("rushing candidate pickle is missing its QB/RB expert models")
+            raise ValueError("affine candidate pickle is missing its QB/RB expert models")
         position = pd.to_numeric(playerStats["Player position"], errors="coerce")
         for code in AFFINE_POSITIONS:
             rows = playerStats.loc[position.eq(code)]
@@ -649,7 +649,7 @@ def _build_prob_params(
                 continue
             expert_params = _predict(experts[code], rows)
             if list(expert_params.columns) != list(prob_params.columns):
-                raise ValueError("rushing expert parameter schema drifted from pooled model")
+                raise ValueError("affine expert parameter schema drifted from pooled model")
             prob_params.loc[rows.index, :] = expert_params.to_numpy()
     return prob_params
 
@@ -792,15 +792,15 @@ def _zi_kwargs(offer_df: pd.DataFrame, dist: str, hist_gate: float) -> dict:
 def _two_part_candidate_state(
     experiment_blob: dict,
 ) -> tuple[dict, dict]:
-    """Return the active receiving-v3 calibration and feature-routing state."""
+    """Return the active two-part calibration and feature-routing state."""
     if not isinstance(experiment_blob, dict):
-        raise ValueError("receiving-v3 candidate is missing its algorithm state")
+        raise ValueError("two-part candidate is missing its algorithm state")
     if (
         experiment_blob.get("schema_version") != TWO_PART_CALIBRATION_SCHEMA_VERSION
         or experiment_blob.get("status") != "active"
         or experiment_blob.get("line_probability_only") is not True
     ):
-        raise ValueError("receiving-v3 candidate is not active on schema 3")
+        raise ValueError("two-part candidate is not active on schema 3")
 
     routing = experiment_blob.get("routing")
     expected_positions = {str(code): label for code, label in TWO_PART_POSITIONS.items()}
@@ -820,10 +820,10 @@ def _two_part_candidate_state(
         or routing.get("role_columns") != list(TWO_PART_ROLE_COLUMNS)
         or routing.get("positions") != expected_positions
     ):
-        raise ValueError("receiving-v3 candidate has invalid feature routing state")
+        raise ValueError("two-part candidate has invalid feature routing state")
     thresholds = routing.get("thresholds")
     if not isinstance(thresholds, dict) or set(thresholds) != set(expected_positions):
-        raise ValueError("receiving-v3 candidate requires WR/RB/TE role thresholds")
+        raise ValueError("two-part candidate requires WR/RB/TE role thresholds")
     valid_thresholds = all(
         isinstance(value, (int, float, np.integer, np.floating))
         and not isinstance(value, (bool, np.bool_))
@@ -831,7 +831,7 @@ def _two_part_candidate_state(
         for value in thresholds.values()
     )
     if not valid_thresholds:
-        raise ValueError("receiving-v3 role thresholds must be finite numbers")
+        raise ValueError("two-part role thresholds must be finite numbers")
 
     raw_gate_rates = routing.get("gate_rates")
     served_gate_rates = routing.get("served_gate_rates")
@@ -856,12 +856,12 @@ def _two_part_candidate_state(
         and 0.0 <= float(gate_model_weight) <= 1.0
     )
     if not valid_rates or not valid_weight:
-        raise ValueError("receiving-v3 routing requires finite low/high gate state")
+        raise ValueError("two-part routing requires finite low/high gate state")
     if any(
         float(served_gate_rates[role]) != float(gate_model_weight) * float(raw_gate_rates[role])
         for role in TWO_PART_ROLE_VALUES
     ):
-        raise ValueError("receiving-v3 served gates do not match their persisted model weight")
+        raise ValueError("two-part served gates do not match their persisted model weight")
 
     endpoint_contract = experiment_blob.get("endpoint_contract")
     expected_endpoint_keys = {
@@ -898,11 +898,11 @@ def _two_part_candidate_state(
         or endpoint_contract.get("dispersion") != "raw_fused_shape"
         or not valid_fallback
     ):
-        raise ValueError("receiving-v3 candidate has an invalid endpoint contract")
+        raise ValueError("two-part candidate has an invalid endpoint contract")
 
     calibration = experiment_blob.get("calibration")
     if not isinstance(calibration, dict):
-        raise ValueError("receiving-v3 candidate is missing calibration state")
+        raise ValueError("two-part candidate is missing calibration state")
     serialize_two_part_calibration(calibration)
     return calibration, routing
 
@@ -914,22 +914,22 @@ def _two_part_candidate_routes(
     """Apply the persisted train-only role thresholds to live pregame features."""
     missing = [column for column in TWO_PART_ROLE_COLUMNS if column not in offer_df]
     if missing:
-        raise ValueError(f"missing receiving-v3 role column(s): {', '.join(missing)}")
+        raise ValueError(f"missing two-part role column(s): {', '.join(missing)}")
     features = offer_df.loc[:, TWO_PART_ROLE_COLUMNS].apply(pd.to_numeric, errors="coerce")
     if not np.isfinite(features.to_numpy(dtype=float)).all():
-        raise ValueError("receiving-v3 role inputs must be finite")
+        raise ValueError("two-part role inputs must be finite")
 
     if "Player position" not in offer_df:
-        raise ValueError("receiving-v3 candidate requires Player position")
+        raise ValueError("two-part candidate requires Player position")
     raw_position = pd.to_numeric(offer_df["Player position"], errors="coerce").to_numpy()
     if not np.isfinite(raw_position).all():
-        raise ValueError("receiving-v3 candidate requires WR/RB/TE position codes 2/3/4")
+        raise ValueError("two-part candidate requires WR/RB/TE position codes 2/3/4")
     positions = raw_position.astype(int)
     if (
         not np.array_equal(raw_position, positions)
         or not np.isin(positions, tuple(TWO_PART_POSITIONS)).all()
     ):
-        raise ValueError("receiving-v3 candidate requires WR/RB/TE position codes 2/3/4")
+        raise ValueError("two-part candidate requires WR/RB/TE position codes 2/3/4")
 
     role_score = (
         features[TWO_PART_ROLE_COLUMNS[0]]
@@ -963,7 +963,7 @@ def _two_part_candidate_cdf(
         or np.any(sigma <= 0.0)
         or np.any((gate < 0.0) | (gate >= 1.0))
     ):
-        raise ValueError("receiving-v3 predictive inputs are invalid or not row-aligned")
+        raise ValueError("two-part predictive inputs are invalid or not row-aligned")
     loc = skewnormal_loc_from_mean(mean, sigma, alpha)
     base_cdf = skewnorm.cdf(point, alpha, loc=loc, scale=sigma)
     cdf = np.where(
@@ -972,7 +972,7 @@ def _two_part_candidate_cdf(
         gate + (1.0 - gate) * base_cdf,
     )
     if not np.isfinite(cdf).all():
-        raise ValueError("receiving-v3 predictive CDF is nonfinite")
+        raise ValueError("two-part predictive CDF is nonfinite")
     return cdf
 
 
@@ -982,14 +982,14 @@ def _apply_two_part_candidate_distribution(
     calibration: dict,
     routing: dict,
 ) -> TwoPartLineOutput:
-    """Apply receiving-v3 endpoint maps and its fixed authentic-book pool."""
+    """Apply two-part endpoint maps and its fixed authentic-book pool."""
     roles, positions = _two_part_candidate_routes(offer_df, routing)
     served_gate = np.asarray([routing["served_gate_rates"][role] for role in roles], dtype=float)
     offer_df["Model Gate"] = served_gate
     offer_df["Projection"] = (1.0 - served_gate) * np.asarray(base_mean, dtype=float)
     line = offer_df["Line"].to_numpy(dtype=float)
     if not np.isfinite(line).all():
-        raise ValueError("receiving-v3 candidate requires finite quoted lines")
+        raise ValueError("two-part candidate requires finite quoted lines")
     low_point = np.ceil(line - _TWO_PART_SETTLEMENT_STEP)
     high_point = np.floor(line + _TWO_PART_SETTLEMENT_STEP)
     f0 = _two_part_candidate_cdf(offer_df, base_mean, np.zeros(len(offer_df)))
@@ -1010,17 +1010,17 @@ def _apply_two_part_candidate_distribution(
 
 
 def _affine_candidate_calibration(experiment_blob: dict) -> dict:
-    """Return the active rushing calibration payload, rejecting partial pickles."""
+    """Return the active affine calibration payload, rejecting partial pickles."""
     if not isinstance(experiment_blob, dict):
-        raise ValueError("rushing candidate is missing its algorithm state")
+        raise ValueError("affine candidate is missing its algorithm state")
     if (
         experiment_blob.get("status") != "active"
         or experiment_blob.get("line_probability_only") is not True
     ):
-        raise ValueError("rushing affine/group-CDF candidate is not active and complete")
+        raise ValueError("affine/group-CDF candidate is not active and complete")
     calibration = experiment_blob.get("calibration")
     if not isinstance(calibration, dict):
-        raise ValueError("rushing candidate pickle is missing calibration state")
+        raise ValueError("affine candidate pickle is missing calibration state")
     return calibration
 
 
@@ -1032,7 +1032,7 @@ def _apply_affine_candidate_distribution(
     """Apply the affine/CDF head and return conditional mean plus final line P(over)."""
     position = pd.to_numeric(offer_df["Player position"], errors="coerce").to_numpy()
     if not np.isin(position, tuple(AFFINE_POSITIONS)).all():
-        raise ValueError("rushing candidate received a non-QB/RB offer")
+        raise ValueError("affine candidate received a non-QB/RB offer")
     gate = (
         offer_df["Model Gate"].to_numpy(dtype=float)
         if "Model Gate" in offer_df
@@ -1373,9 +1373,9 @@ def model_prob(
     if receiving_candidate_state is not None and (
         league != "NFL" or market != "receiving yards" or dist != "SkewNormal"
     ):
-        raise ValueError("receiving-v3 candidate is valid only for NFL receiving yards/SkewNormal")
+        raise ValueError("two-part candidate is valid only for NFL receiving yards/SkewNormal")
     if receiving_candidate_state is not None and (dispersion_cal != 1.0 or skew_cal != 0.0):
-        raise ValueError("receiving-v3 candidate requires its persisted raw fused shape")
+        raise ValueError("two-part candidate requires its persisted raw fused shape")
     hist_gate = (
         stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma", "SkewNormal") else 0
     )
@@ -1413,7 +1413,7 @@ def model_prob(
         supported = position.isin(AFFINE_POSITIONS)
         if (~supported).any():
             logger.warning(
-                f"dropped {int((~supported).sum())} non-QB/RB rushing offer(s) outside "
+                f"dropped {int((~supported).sum())} non-QB/RB affine offer(s) outside "
                 "the calibrated candidate support"
             )
             offer_df = offer_df.loc[supported]

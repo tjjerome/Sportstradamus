@@ -223,7 +223,7 @@ def test_load_test_set_rejects_nonconstant_or_wrong_schema_receiving_blob(tmp_pa
     frame["StructuralCalibration"] = json.dumps(blob)
     path = tmp_path / "wrong-schema.csv"
     frame.to_csv(path, index=False)
-    with pytest.raises(ValueError, match="unknown receiving calibration blob kind or schema"):
+    with pytest.raises(ValueError, match="unknown two-part calibration blob kind or schema"):
         load_test_set(path, "Blended_EV")
 
 

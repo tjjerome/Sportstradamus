@@ -1,4 +1,4 @@
-"""Train-market fit/gate/apply step for the receiving role×position candidate."""
+"""Train-market fit/gate/apply step for the two-part role×position candidate."""
 
 from __future__ import annotations
 
@@ -56,9 +56,9 @@ def _two_part_gate_vector(value, length: int) -> np.ndarray:
     if gate.ndim == 0:
         gate = np.full(length, float(gate), dtype=float)
     if gate.shape != (length,) or not np.isfinite(gate).all():
-        raise ValueError("receiving candidate gate is not finite and row-aligned")
+        raise ValueError("two-part candidate gate is not finite and row-aligned")
     if np.any((gate < 0.0) | (gate >= 1.0)):
-        raise ValueError("receiving candidate gate must lie in [0, 1)")
+        raise ValueError("two-part candidate gate must lie in [0, 1)")
     return gate
 
 
@@ -71,11 +71,11 @@ def _skewnormal_cdf_endpoints(mean, sigma, alpha, gate, point) -> tuple[np.ndarr
     n_rows = len(means)
     gates = _two_part_gate_vector(gate, n_rows)
     if any(array.shape != (n_rows,) for array in (scales, shapes, points)):
-        raise ValueError("receiving predictive inputs must be row-aligned vectors")
+        raise ValueError("two-part predictive inputs must be row-aligned vectors")
     if not all(np.isfinite(array).all() for array in (means, scales, shapes, points)):
-        raise ValueError("receiving predictive inputs must be finite")
+        raise ValueError("two-part predictive inputs must be finite")
     if np.any(scales <= 0.0):
-        raise ValueError("receiving predictive scales must be positive")
+        raise ValueError("two-part predictive scales must be positive")
 
     loc = skewnormal_loc_from_mean(means, scales, shapes)
     base = skewnorm.cdf(points, shapes, loc=loc, scale=scales)
@@ -128,7 +128,7 @@ def _two_part_candidate_oof_audit(
     gate: np.ndarray,
 ) -> dict:
     """Run all six guards on nested OOF validation predictions before test access."""
-    # style: allow-complexity -- aggregates independent out-of-fold guards on the receiving candidate
+    # style: allow-complexity -- aggregates independent out-of-fold guards on the two-part candidate
     result, players, outcome, book, brier_delta, row_ci, player_ci = _oof_brier_arrays(fit, splits)
 
     marginal_mean = np.asarray(fused["weighted_mean_val"], dtype=float) * (1.0 - gate)
@@ -211,7 +211,7 @@ def _two_part_candidate_oof_audit(
     }
     failed = [name for name, passed in guards.items() if not passed]
     if failed:
-        raise ValueError("receiving candidate failed validation guard(s): " + ", ".join(failed))
+        raise ValueError("two-part candidate failed validation guard(s): " + ", ".join(failed))
     return audit
 
 
@@ -221,11 +221,11 @@ def _step_apply_two_part_groupcdf_candidate(
     splits: dict,
     context: dict,
 ) -> tuple[dict, dict]:
-    """Fit receiving v3 on validation OOF data, gate it, then price held-out lines."""
-    # style: allow-complexity -- linear fit -> gate -> price pipeline for the receiving two-part candidate
+    """Fit two-part v3 on validation OOF data, gate it, then price held-out lines."""
+    # style: allow-complexity -- linear fit -> gate -> price pipeline for the two-part candidate
     if context.get("status") != "active":
         raise ValueError(
-            "receiving role/position two-part candidate requires active routing: "
+            "two-part role/position two-part candidate requires active routing: "
             f"{context.get('kill_reason')}"
         )
     index_val = splits["X_validation"].index
@@ -234,10 +234,10 @@ def _step_apply_two_part_groupcdf_candidate(
     def _required_series(key: str, index: pd.Index, *, allow_missing: bool = False) -> pd.Series:
         series = splits.get(key)
         if series is None:
-            raise ValueError(f"receiving candidate requires {key} provenance")
+            raise ValueError(f"two-part candidate requires {key} provenance")
         aligned = series.reindex(index)
         if not allow_missing and aligned.isna().any():
-            raise ValueError(f"receiving candidate {key} does not align to its split")
+            raise ValueError(f"two-part candidate {key} does not align to its split")
         return aligned
 
     raw_players = _required_series("players_validation", index_val)
@@ -245,7 +245,7 @@ def _step_apply_two_part_groupcdf_candidate(
     player_missing = raw_players.astype(str).str.strip().isin(("", "nan", "None", "<NA>"))
     identity = pd.DataFrame({"Player": raw_players, "Date": dates}, index=index_val)
     if player_missing.any() or dates.isna().any() or identity.duplicated().any():
-        raise ValueError("receiving validation Player/Date identity must be complete and unique")
+        raise ValueError("two-part validation Player/Date identity must be complete and unique")
     players = raw_players.astype(str).to_numpy()
 
     roles_val = context["routes"]["validation"].reindex(index_val).astype(str).to_numpy()
@@ -257,16 +257,16 @@ def _step_apply_two_part_groupcdf_candidate(
         dtype=float
     )
     if not np.isfinite(positions_val).all() or not np.isfinite(positions_test).all():
-        raise ValueError("receiving candidate positions must be finite")
+        raise ValueError("two-part candidate positions must be finite")
     positions_val = positions_val.astype(int)
     positions_test = positions_test.astype(int)
 
     raw_gate_rates = context.get("gate_rates")
     if not isinstance(raw_gate_rates, dict) or set(raw_gate_rates) != set(TWO_PART_ROLE_VALUES):
-        raise ValueError("receiving candidate requires train-only low/high gate rates")
+        raise ValueError("two-part candidate requires train-only low/high gate rates")
     model_weight = float(fused["model_weight"])
     if not np.isfinite(model_weight) or not 0.0 <= model_weight <= 1.0:
-        raise ValueError("receiving candidate model weight must lie in [0, 1]")
+        raise ValueError("two-part candidate model weight must lie in [0, 1]")
     served_gate_rates = {
         role: model_weight * float(raw_gate_rates[role]) for role in TWO_PART_ROLE_VALUES
     }
@@ -376,7 +376,7 @@ def _step_apply_two_part_groupcdf_candidate(
             "receiving_candidate_test_role": pd.Series(roles_test, index=index_test),
             "receiving_candidate_test_position": pd.Series(positions_test, index=index_test),
             "receiving_candidate_calibration_payload": calibration_payload,
-            "nfl_yards_routes": context["routes"],
+            "structural_routes": context["routes"],
             "structural_calibration_blob": {
                 "schema_version": 3,
                 "slug": TWO_PART_STRATEGY,

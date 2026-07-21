@@ -1,6 +1,6 @@
-"""Affine mean-correction and raw grouped-CDF kernels (rushing corner).
+"""Affine mean-correction and raw grouped-CDF kernels (affine strategy).
 
-These functions are moved verbatim from the rushing affine calibrator. The only
+These functions are moved verbatim from the affine calibrator. The only
 change is that the position codes are threaded in as ``codes`` rather than read
 from a frozen module literal, so the engine iterates the set discovered from data
 (and persisted as the ``position_cdf`` keys) instead of a hard-coded tuple.
@@ -24,7 +24,7 @@ from sportstradamus.training.group_conditional_cdf._contracts import (
 from sportstradamus.training.group_conditional_cdf._maps import fit_pit_map, ks_uniform
 
 
-def fit_affine(mean: np.ndarray, result: np.ndarray) -> tuple[float, float]:
+def fit_affine_mean(mean: np.ndarray, result: np.ndarray) -> tuple[float, float]:
     slope, intercept = np.polyfit(mean, result, 1)
     return float(intercept), float(slope)
 
