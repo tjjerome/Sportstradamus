@@ -2246,7 +2246,7 @@ def test_randomized_pit_applies_row_routed_cdf_maps():
 
     from scipy.stats import norm
 
-    from sportstradamus.training.nfl_yards_experiments import (
+    from sportstradamus.training.structural_strategies import (
         RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
     )
 

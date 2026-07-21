@@ -2,7 +2,7 @@
 
 Single source of truth read by three consumers: the strategy applicability gate
 (`model_strategy_registry.Applicability.matches`), the training role-context
-builder (`nfl_yards_context.build_receiving_role_context`), and the pipeline
+builder (`structural_context.build_receiving_role_context`), and the pipeline
 prune-preservation step. A continuous cell is eligible for the two-part
 role×position method iff it has a registered ``RoleSpec`` whose columns its
 matrix carries.
@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sportstradamus.training.nfl_yards_experiments import ROLE_COLUMNS
+from sportstradamus.training.structural_strategies import ROLE_COLUMNS
 
 # Mirrors each league's ``Stats.positions`` list (position code == index + 1).
 # A league physical constant duplicated here so this module stays import-light

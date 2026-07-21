@@ -72,11 +72,11 @@ from sportstradamus.training.model_strategy_registry import (
     BASE_STRUCTURAL_STRATEGY,
     parse_controls,
 )
-from sportstradamus.training.nfl_yards_experiments import (
+from sportstradamus.training.ship_config import STAT_META_PATH, TARGET_NORM_NONE, load_stat_meta
+from sportstradamus.training.structural_strategies import (
     RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
     RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
 )
-from sportstradamus.training.ship_config import STAT_META_PATH, TARGET_NORM_NONE, load_stat_meta
 
 # Ship gates (see docs/ship_gate.md). The promotion lifecycle is a 2x2:
 # (set first baseline | supersede incumbent) x (research->devel offline |

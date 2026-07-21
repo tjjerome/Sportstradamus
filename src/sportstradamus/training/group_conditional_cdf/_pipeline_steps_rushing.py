@@ -18,16 +18,16 @@ from sportstradamus.training.group_conditional_cdf._pipeline_steps_shared import
     _oof_brier_arrays,
     _validation_split_fingerprint,
 )
-from sportstradamus.training.nfl_yards_experiments import (
-    RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
-    RUSHING_POSITIONS,
-)
 from sportstradamus.training.scorecard import (
     _bootstrap_ratio_ci_clustered,
     _gate4_pit_ks_threshold,
     _gate5_ece_debiased,
     _gate23_segment_match,
     _segment_masks,
+)
+from sportstradamus.training.structural_strategies import (
+    RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+    RUSHING_POSITIONS,
 )
 
 

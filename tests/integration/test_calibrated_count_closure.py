@@ -23,8 +23,8 @@ from sportstradamus import data
 from sportstradamus.stats import StatsNBA
 from sportstradamus.training.pipeline import (
     DETERMINISTIC_FIXED_PARAMS,
-    NegativeBinomial,
     ZINB,
+    NegativeBinomial,
     _calibration_penalty,
 )
 

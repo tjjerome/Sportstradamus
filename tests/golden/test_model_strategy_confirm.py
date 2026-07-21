@@ -23,8 +23,8 @@ from sportstradamus.training.model_strategy_registry import (
     get_strategy,
     registered_strategies,
 )
-from sportstradamus.training.nfl_yards_experiments import RUSHING_AFFINE_GROUPCDF_BOOK_POOL
 from sportstradamus.training.role_specs import role_spec_for
+from sportstradamus.training.structural_strategies import RUSHING_AFFINE_GROUPCDF_BOOK_POOL
 
 _MATRIX_SHA = "matrix-123"
 _MATRIX_COLUMNS = frozenset(

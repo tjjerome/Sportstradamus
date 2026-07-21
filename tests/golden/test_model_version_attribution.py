@@ -18,10 +18,10 @@ import pandas as pd
 
 from sportstradamus.training.model_strategy_artifacts import MODEL_STRATEGY_MODEL_KEY
 from sportstradamus.training.model_strategy_registry import corner_fingerprint, get_strategy
-from sportstradamus.training.nfl_yards_experiments import (
+from sportstradamus.training.pipeline import _build_filedict, _model_version
+from sportstradamus.training.structural_strategies import (
     RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
 )
-from sportstradamus.training.pipeline import _build_filedict, _model_version
 
 # ``sportstradamus.prediction`` re-exports ``model_prob`` the function, shadowing
 # the submodule under attribute access — import the module explicitly.

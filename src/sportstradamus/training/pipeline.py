@@ -97,16 +97,6 @@ from sportstradamus.training.model_strategy_registry import (
     get_strategy,
     validate_strategy_selection,
 )
-from sportstradamus.training.nfl_yards_context import (
-    build_receiving_role_context,
-    build_rushing_expert_context,
-)
-from sportstradamus.training.nfl_yards_experiments import (
-    RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
-    RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
-    RUSHING_EXPERT_EXPERIMENTS,
-    RUSHING_POSITIONS,
-)
 from sportstradamus.training.report import report
 from sportstradamus.training.role_specs import role_spec_for
 from sportstradamus.training.scorecard import (
@@ -119,6 +109,16 @@ from sportstradamus.training.scorecard import (
 )
 from sportstradamus.training.shap import compute_market_importance
 from sportstradamus.training.ship_config import TARGET_NORM_NONE
+from sportstradamus.training.structural_context import (
+    build_receiving_role_context,
+    build_rushing_expert_context,
+)
+from sportstradamus.training.structural_strategies import (
+    RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
+    RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+    RUSHING_EXPERT_EXPERIMENTS,
+    RUSHING_POSITIONS,
+)
 
 logger = get_logger(__name__)
 
@@ -1402,7 +1402,7 @@ def _step_predict_splits(
     offset_mode: bool,
     sn_param: str,
     expert_models: dict[int, object] | None = None,
-    nfl_yards_context: dict | None = None,
+    structural_context: dict | None = None,
 ) -> dict:
     """Predict raw distribution params on train/validation/test splits.
 
@@ -1428,7 +1428,7 @@ def _step_predict_splits(
         pooled_params,
         dist,
         splits,
-        nfl_yards_context,
+        structural_context,
         experts,
         normalize=normalize,
         offset_mode=offset_mode,
@@ -1464,7 +1464,7 @@ def _step_predict_splits(
         "prob_params_train": prob_params_train,
         "prob_params_validation": prob_params_validation,
         "prob_params": prob_params,
-        "nfl_yards_context": context,
+        "structural_context": context,
     }
 
 
@@ -3869,12 +3869,12 @@ def train_market(
         expert_models=(
             expert_models if structural_strategy in RUSHING_EXPERT_EXPERIMENTS else None
         ),
-        nfl_yards_context=(
+        structural_context=(
             experiment_context if structural_strategy in RUSHING_EXPERT_EXPERIMENTS else None
         ),
     )
     if structural_strategy in RUSHING_EXPERT_EXPERIMENTS:
-        experiment_context = preds["nfl_yards_context"]
+        experiment_context = preds["structural_context"]
     prob_params = preds["prob_params"]
 
     decoded = _step_decode_predictions(

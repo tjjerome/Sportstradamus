@@ -16,21 +16,21 @@ from sportstradamus.collectors.catalog import (
     save_catalog,
 )
 from sportstradamus.collectors.fantasypoints.cli import fp_fetch
-from sportstradamus.collectors.fantasypoints.import_curl import parse_curl_to_spec
-from sportstradamus.collectors.fantasypoints.source import FP_SOURCE
-from sportstradamus.collectors.transport import (
-    CollectorAuthError,
-    CollectorDecodeError,
-    CookieClient,
-)
 from sportstradamus.collectors.fantasypoints.discover import (
     _camel_to_kebab,
     expand_registry,
 )
+from sportstradamus.collectors.fantasypoints.import_curl import parse_curl_to_spec
+from sportstradamus.collectors.fantasypoints.source import FP_SOURCE
 from sportstradamus.collectors.fantasypoints.transform import (
     parquet_path_for_spec,
     parse_table_response,
     write_parquet,
+)
+from sportstradamus.collectors.transport import (
+    CollectorAuthError,
+    CollectorDecodeError,
+    CookieClient,
 )
 
 

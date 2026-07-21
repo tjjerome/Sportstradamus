@@ -17,7 +17,7 @@ from sportstradamus.training.model_strategy_registry import (
     get_strategy,
     strategy_controls,
 )
-from sportstradamus.training.nfl_yards_experiments import (
+from sportstradamus.training.structural_strategies import (
     RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
     ROLE_COLUMNS,
 )

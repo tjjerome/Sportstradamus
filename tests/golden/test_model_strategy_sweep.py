@@ -41,13 +41,13 @@ from sportstradamus.training.model_strategy_registry import (
     strategy_controls,
 )
 from sportstradamus.training.model_strategy_report_identity import resolve_report_identity
-from sportstradamus.training.nfl_yards_experiments import (
+from sportstradamus.training.role_specs import role_spec_for
+from sportstradamus.training.structural_strategies import (
     RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR as RECEIVING,
 )
-from sportstradamus.training.nfl_yards_experiments import (
+from sportstradamus.training.structural_strategies import (
     RUSHING_AFFINE_GROUPCDF_BOOK_POOL as RUSHING,
 )
-from sportstradamus.training.role_specs import role_spec_for
 
 _MATRIX_SHA = "matrix-123"
 _MATRIX_COLUMNS = frozenset(

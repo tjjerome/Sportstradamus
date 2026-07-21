@@ -21,8 +21,8 @@ from sportstradamus.training.model_strategy_registry import (
     BASE_STRUCTURAL_STRATEGY,
     get_strategy,
 )
-from sportstradamus.training.nfl_yards_context import build_rushing_expert_context
-from sportstradamus.training.nfl_yards_experiments import (
+from sportstradamus.training.structural_context import build_rushing_expert_context
+from sportstradamus.training.structural_strategies import (
     AUTO,
     NONE,
     RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
@@ -394,14 +394,14 @@ def test_prediction_dispatch_overwrites_by_index_and_keeps_unknown_pooled(monkey
         offset_mode=False,
         sn_param="direct",
         expert_models={1: "QB", 3: "RB"},
-        nfl_yards_context=context,
+        structural_context=context,
     )
 
     test_params = result["prob_params"]
     assert test_params.loc[21, "loc"] == 121.0
     assert test_params.loc[24, "loc"] == 224.0
     assert test_params.loc[25, "loc"] == 25.0
-    assert result["nfl_yards_context"]["status"] == "active"
+    assert result["structural_context"]["status"] == "active"
 
 
 def test_nonfinite_expert_prediction_kills_and_atomically_restores_all_pooled(monkeypatch):
@@ -424,11 +424,11 @@ def test_nonfinite_expert_prediction_kills_and_atomically_restores_all_pooled(mo
         offset_mode=False,
         sn_param="direct",
         expert_models={1: "QB", 3: "RB"},
-        nfl_yards_context=context,
+        structural_context=context,
     )
 
-    assert result["nfl_yards_context"]["status"] == "killed_fallback"
-    assert "invalid RB expert parameters on test" in result["nfl_yards_context"]["kill_reason"]
+    assert result["structural_context"]["status"] == "killed_fallback"
+    assert "invalid RB expert parameters on test" in result["structural_context"]["kill_reason"]
     for split, result_key in (
         ("train", "prob_params_train"),
         ("validation", "prob_params_validation"),
@@ -436,7 +436,7 @@ def test_nonfinite_expert_prediction_kills_and_atomically_restores_all_pooled(mo
     ):
         params = result[result_key]
         np.testing.assert_allclose(params["loc"], params.index.to_numpy(dtype=float))
-        assert result["nfl_yards_context"]["routes"][split].eq("pooled_fallback").all()
+        assert result["structural_context"]["routes"][split].eq("pooled_fallback").all()
 
 
 def test_rushing_candidate_has_separate_namespace_and_default_is_unchanged():

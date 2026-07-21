@@ -9,18 +9,18 @@ from operator import add, mul
 import numpy as np
 import pandas as pd
 
-from sportstradamus.training.nfl_yards_experiments import (
-    RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
-    RECEIVING_SUPPORT,
-    RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
-    RUSHING_POSITIONS,
-    RUSHING_SUPPORT,
-)
 from sportstradamus.training.role_specs import (
     RoleSpec,
     league_position_codes,
     position_label,
     role_spec_for,
+)
+from sportstradamus.training.structural_strategies import (
+    RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
+    RECEIVING_SUPPORT,
+    RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+    RUSHING_POSITIONS,
+    RUSHING_SUPPORT,
 )
 
 

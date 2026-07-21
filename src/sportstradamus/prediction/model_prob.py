@@ -72,16 +72,16 @@ from sportstradamus.training.model_strategy_registry import (
     validate_strategy_selection,
 )
 from sportstradamus.training.model_strategy_report_identity import resolve_report_identity
-from sportstradamus.training.nfl_yards_experiments import (
+from sportstradamus.training.posthoc import MEAN_STAGE, PROB_STAGE, apply_posthoc
+from sportstradamus.training.structural_strategies import (
     RECEIVING_POSITIONS,
     RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
     RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
     RUSHING_POSITIONS,
 )
-from sportstradamus.training.nfl_yards_experiments import (
+from sportstradamus.training.structural_strategies import (
     ROLE_COLUMNS as RECEIVING_ROLE_COLUMNS,
 )
-from sportstradamus.training.posthoc import MEAN_STAGE, PROB_STAGE, apply_posthoc
 
 # LazyArchive defers DuckDB lock acquisition until the first attribute
 # access. See LazyArchive docstring in helpers/archive.py.

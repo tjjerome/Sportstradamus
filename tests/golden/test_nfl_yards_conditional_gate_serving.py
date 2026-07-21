@@ -24,7 +24,7 @@ from sportstradamus.training.group_conditional_cdf import (
     deserialize_receiving_calibration,
     serialize_receiving_calibration,
 )
-from sportstradamus.training.nfl_yards_experiments import (
+from sportstradamus.training.structural_strategies import (
     RECEIVING_POSITIONS,
     RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
     ROLE_COLUMNS,

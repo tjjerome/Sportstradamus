@@ -10,8 +10,8 @@ from sportstradamus.helpers import skewnormal_loc_from_mean
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_receiving import (
     _skewnormal_cdf_endpoints,
 )
-from sportstradamus.training.nfl_yards_context import build_receiving_role_context
-from sportstradamus.training.nfl_yards_experiments import ROLE_COLUMNS
+from sportstradamus.training.structural_context import build_receiving_role_context
+from sportstradamus.training.structural_strategies import ROLE_COLUMNS
 
 
 def _role_frame(index: pd.Index, scores: list[float]) -> pd.DataFrame:
