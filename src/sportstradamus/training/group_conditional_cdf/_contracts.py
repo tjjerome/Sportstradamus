@@ -15,6 +15,7 @@ from typing import Literal, TypedDict
 
 import numpy as np
 
+from sportstradamus.helpers.integer_distribution import RANDOMIZED_PIT_DRAWS, RANDOMIZED_PIT_SEED
 from sportstradamus.training.group_conditional_cdf.probability_pool import ProbabilityPoolBlob
 
 RECEIVING_CANDIDATE_NAME = "receiving-role-position-two-part-groupcdf-fixedlinear-v3"
@@ -28,8 +29,6 @@ RUSHING_POSITION_CODES: tuple[int, int] = (1, 3)
 RB_CODE = 3
 
 PLAYER_CV_FOLDS = 5
-RANDOMIZED_PIT_DRAWS = 25
-RANDOMIZED_PIT_SEED = 4517
 PIT_BINS = 10
 PIT_LAMBDAS: tuple[float, ...] = (0.0, 0.25, 0.5, 0.75, 1.0)
 PIT_LAMBDA_TIE_TOLERANCE = 1e-4

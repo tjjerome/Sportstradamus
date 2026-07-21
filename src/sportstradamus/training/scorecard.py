@@ -54,6 +54,10 @@ from sportstradamus.helpers.distributions import (
     apply_cdf_recal,
     skewnormal_loc_from_mean,
 )
+from sportstradamus.helpers.integer_distribution import (
+    RANDOMIZED_PIT_DRAWS,
+    RANDOMIZED_PIT_SEED,
+)
 from sportstradamus.helpers.io import read_history
 from sportstradamus.helpers.provenance import git_sha
 from sportstradamus.training.baselines import get_target_normalization
@@ -149,12 +153,6 @@ _SHIP_GATES: tuple[str, ...] = ("g1", "g2", "g3", "g4", "g5", "g6")
 # between- vs within-player spread and was fiat-blind on count cells (IQR(Result)=0).
 _GATE4_PIT_KS_DELTA: float = 0.05
 _GATE4_KS_NOISE_COEF: float = 1.358
-# Randomized PIT (spread each integer's probability jump by V~U(0,1)) makes the PIT exactly
-# Uniform under calibration for discrete families too, so one KS threshold spans continuous
-# and count cells; the non-randomized mid-PIT is lattice-inflated on low counts. Averaged
-# over a seeded draw set so the gate stays reproducible.
-_RANDOMIZED_PIT_DRAWS: int = 25
-_RANDOMIZED_PIT_SEED: int = 4517
 _NFL_YARDS_EXPERIMENT_COL = "NFLYardsExperiment"
 _NFL_YARDS_CALIBRATION_COL = "NFLYardsCalibration"
 _NFL_YARDS_ROLE_COL = "NFLYardsRole"
@@ -1243,7 +1241,7 @@ def _randomized_pit_draws(
     ``F(y−1) + V·P(Y=y) = F(y) − (1−V)·P(Y=y)``, exactly Uniform(0, 1) under calibration
     for any discrete family (Brockwell 2007). Continuous families have ``P(Y=y)=0`` so a
     single deterministic PIT ``F(y)`` is returned; the count families return
-    :data:`_RANDOMIZED_PIT_DRAWS` seeded draws so the statistics built on them stay
+    :data:`RANDOMIZED_PIT_DRAWS` seeded draws so the statistics built on them stay
     reproducible.
     """
     identity, _ = validate_strategy_frame(df)
@@ -1254,9 +1252,9 @@ def _randomized_pit_draws(
         receiving_endpoints = _receiving_v3_cdf_endpoints(df, dist, y, strategy=strategy)
         assert receiving_endpoints is not None
         lower, upper = receiving_endpoints
-        rng = np.random.default_rng(_RANDOMIZED_PIT_SEED)
+        rng = np.random.default_rng(RANDOMIZED_PIT_SEED)
         return [
-            lower + rng.random(len(lower)) * (upper - lower) for _ in range(_RANDOMIZED_PIT_DRAWS)
+            lower + rng.random(len(lower)) * (upper - lower) for _ in range(RANDOMIZED_PIT_DRAWS)
         ]
     if structural_strategy not in {
         BASE_STRUCTURAL_STRATEGY,
@@ -1274,9 +1272,9 @@ def _randomized_pit_draws(
     # F*(y-) + V[P*(Y=y)] = g(F(y)-p) + V[g(F(y))-g(F(y)-p)].  Applying g after
     # randomization is not equivalent when g is nonlinear across the atom.
     lower = _apply_pit_recal_by_row(df, cdf - pmf)
-    rng = np.random.default_rng(_RANDOMIZED_PIT_SEED)
+    rng = np.random.default_rng(RANDOMIZED_PIT_SEED)
     n = len(cdf)
-    return [lower + rng.random(n) * (upper - lower) for _ in range(_RANDOMIZED_PIT_DRAWS)]
+    return [lower + rng.random(n) * (upper - lower) for _ in range(RANDOMIZED_PIT_DRAWS)]
 
 
 def _randomized_pit_ks(df: pd.DataFrame, dist: str, y: np.ndarray, *, strategy: str) -> float:
