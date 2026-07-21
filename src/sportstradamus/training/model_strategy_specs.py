@@ -250,6 +250,5 @@ BUILTIN_SPEC_DATA = (
             "distribution_classes": ("continuous",),
             "required_data_columns": ("Player position",),
         },
-        enrollments=(("NFL", "rushing yards"),),
     ),
 )

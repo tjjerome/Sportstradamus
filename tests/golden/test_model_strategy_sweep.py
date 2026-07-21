@@ -545,6 +545,7 @@ def test_cell_families_routes_by_distribution_class(monkeypatch):
         "SkewNormal",
         "Mixture",
         RECEIVING,
+        RUSHING,
     )
     assert sweep._cell_families("NFL", "rushing yards") == (
         "SkewNormal",
@@ -557,31 +558,37 @@ def test_cell_families_routes_by_distribution_class(monkeypatch):
         sweep._cell_families("MLB", "hits allowed")
 
 
-def test_two_part_strategy_enrolls_across_leagues_via_role_registry():
-    """The role×position two-part strategy is gated by the per-(league, market) role registry:
-    any registered cell whose matrix carries the role columns offers the corner, so the board can
-    search it across markets and leagues. The NFL rushing-affine strategy stays cell-pinned.
+def test_structural_strategies_are_market_agnostic_sweep_candidates():
+    """Neither structural strategy is cell-pinned; both are applicability-gated so the board can
+    give them a good-faith search on any qualifying cell. The role×position two-part strategy needs
+    a per-(league, market) role-registry entry plus its role columns; the affine strategy needs only
+    a continuous cell whose matrix carries ``Player position``.
     """
     two_part = get_strategy(RECEIVING)
-    rushing = get_strategy(RUSHING)
+    affine = get_strategy(RUSHING)
     nba_pts_columns = frozenset(role_spec_for("NBA", "PTS").all_columns)
     registered = CellContext("NBA", "PTS", "SkewNormal", "continuous", nba_pts_columns, _MATRIX_SHA)
     missing_columns = CellContext(
         "NBA", "PTS", "SkewNormal", "continuous", frozenset({"unrelated"}), _MATRIX_SHA
     )
-    unregistered = CellContext(
-        "NBA", "STL", "SkewNormal", "continuous", nba_pts_columns, _MATRIX_SHA
+    position_only = CellContext(
+        "NBA", "STL", "SkewNormal", "continuous", frozenset({"Player position"}), _MATRIX_SHA
     )
 
     assert two_part in strategies_for_cell(registered, required_capabilities=SWEEP_CAPABILITIES)
     assert two_part not in strategies_for_cell(
         missing_columns, required_capabilities=SWEEP_CAPABILITIES
     )
+    # two-part needs the role columns of the cell's own role-registry entry, absent here
     assert two_part not in strategies_for_cell(
-        unregistered, required_capabilities=SWEEP_CAPABILITIES
+        position_only, required_capabilities=SWEEP_CAPABILITIES
     )
-    # the affine strategy is pinned to NFL rushing yards, not applicability-gated across leagues
-    assert rushing not in strategies_for_cell(registered, required_capabilities=SWEEP_CAPABILITIES)
+    # the affine strategy offers a good-faith corner on any continuous cell carrying Player position
+    assert affine in strategies_for_cell(registered, required_capabilities=SWEEP_CAPABILITIES)
+    assert affine in strategies_for_cell(position_only, required_capabilities=SWEEP_CAPABILITIES)
+    assert affine not in strategies_for_cell(
+        missing_columns, required_capabilities=SWEEP_CAPABILITIES
+    )
 
 
 def test_cached_matrix_contract_reads_schema_and_changes_sha_when_parquet_changes(
