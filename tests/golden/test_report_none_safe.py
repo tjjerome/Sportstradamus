@@ -131,8 +131,8 @@ def test_wide_row_still_passes_real_floats_through():
 def test_wide_row_surfaces_generic_strategy_identity():
     model = _model_with_diag({"model_shape": 1.0, "empirical_shape": 1.0})
     identity = mock.Mock(
-        strategy_slug="rushing-qb-rb-affine-groupcdf-bookpool-v1",
-        structural_strategy="rushing-qb-rb-affine-groupcdf-bookpool-v1",
+        strategy_slug="affine-groupcdf-bookpool-v1",
+        structural_strategy="affine-groupcdf-bookpool-v1",
         signature="canonical-signature",
         implementation_version=2,
         artifact_schema_version=3,

@@ -2247,7 +2247,7 @@ def test_randomized_pit_applies_row_routed_cdf_maps():
     from scipy.stats import norm
 
     from sportstradamus.training.structural_strategies import (
-        RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+        AFFINE_STRATEGY,
     )
 
     y = np.array([-1.0, 0.0, 1.0, 2.0])
@@ -2260,7 +2260,7 @@ def test_randomized_pit_applies_row_routed_cdf_maps():
             "SN_Alpha": np.zeros(4),
             "MeanYr": np.ones(4),
             "P_PrePool": np.full(4, 0.5),
-            "NFLYardsExperiment": RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+            "NFLYardsExperiment": AFFINE_STRATEGY,
             "NFLYardsRoute": ["QB", "RB", "QB", "RB"],
             "NFLYardsFallback": False,
             "PITRecalKnots": [
@@ -2271,7 +2271,7 @@ def test_randomized_pit_applies_row_routed_cdf_maps():
             ],
         }
     )
-    spec = get_strategy(RUSHING_AFFINE_GROUPCDF_BOOK_POOL)
+    spec = get_strategy(AFFINE_STRATEGY)
     legacy_payload = {
         "schema_version": spec.artifact_schema_version,
         "status": "active",

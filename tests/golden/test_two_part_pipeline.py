@@ -7,10 +7,10 @@ import pandas as pd
 from scipy.stats import skewnorm
 
 from sportstradamus.helpers import skewnormal_loc_from_mean
-from sportstradamus.training.group_conditional_cdf._pipeline_steps_receiving import (
+from sportstradamus.training.group_conditional_cdf._pipeline_steps_two_part import (
     _skewnormal_cdf_endpoints,
 )
-from sportstradamus.training.structural_context import build_receiving_role_context
+from sportstradamus.training.structural_context import build_two_part_context
 from sportstradamus.training.structural_strategies import ROLE_COLUMNS
 
 
@@ -54,7 +54,7 @@ def test_receiving_context_fits_role_gate_rates_from_train_outcomes_only():
         "validation_players": 1,
     }
 
-    context = build_receiving_role_context(
+    context = build_two_part_context(
         splits, league="NFL", market="receiving yards", support_floor=tiny_floor
     )
 

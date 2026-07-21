@@ -28,36 +28,36 @@ from sportstradamus.training.group_conditional_cdf._contracts import (
     CDF_BRANCH_TOLERANCE,
     RANDOMIZED_PIT_DRAWS,
     RANDOMIZED_PIT_SEED,
-    ReceivingCalibrationBlob,
-    ReceivingLineOutput,
-    RushingCalibrationBlob,
-    RushingCalibrationOutput,
-    RushingPredictive,
+    AffineCalibrationBlob,
+    AffineCalibrationOutput,
+    AffinePredictive,
+    TwoPartCalibrationBlob,
+    TwoPartLineOutput,
 )
 from sportstradamus.training.group_conditional_cdf._pool import pooled_probability
 from sportstradamus.training.group_conditional_cdf._validation import (
     authentic_vector,
     cdf_apply_inputs,
     optional_book_vector,
-    validated_receiving_blob,
+    validated_two_part_blob,
 )
-from sportstradamus.training.group_conditional_cdf._validation_rushing import (
+from sportstradamus.training.group_conditional_cdf._validation_affine import (
+    affine_apply_inputs,
     distribution_inputs,
-    rushing_apply_inputs,
-    validated_rushing_blob,
+    validated_affine_blob,
 )
 from sportstradamus.training.group_conditional_cdf.probability_pool import apply_probability_pool
 
 
-def _blob_positive_groups(blob: ReceivingCalibrationBlob):
+def _blob_positive_groups(blob: TwoPartCalibrationBlob):
     return tuple(blob["cdf"]["positive"].keys())
 
 
-def _blob_position_codes(blob: RushingCalibrationBlob) -> tuple[int, ...]:
+def _blob_position_codes(blob: AffineCalibrationBlob) -> tuple[int, ...]:
     return tuple(sorted(int(code) for code in blob["position_cdf"]))
 
 
-def apply_receiving_two_part_cdf(
+def apply_two_part_cdf(
     blob: Mapping[str, object],
     cdf: np.ndarray,
     f0: np.ndarray,
@@ -70,14 +70,14 @@ def apply_receiving_two_part_cdf(
     not apply temperature or the bookmaker pool, both of which are calibrated
     only for a quoted binary over probability.
     """
-    fitted = validated_receiving_blob(blob)
+    fitted = validated_two_part_blob(blob)
     values, boundary, roles, positions = cdf_apply_inputs(cdf, f0, role, position)
     return apply_models(
         fitted["cdf"], values, boundary, roles, positions, _blob_positive_groups(fitted)
     )
 
 
-def receiving_two_part_cdf_endpoints(
+def two_part_cdf_endpoints(
     blob: Mapping[str, object],
     lower_cdf: np.ndarray,
     upper_cdf: np.ndarray,
@@ -86,14 +86,14 @@ def receiving_two_part_cdf_endpoints(
     position: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Transform lower and upper endpoints separately, preserving the zero atom."""
-    lower = apply_receiving_two_part_cdf(blob, lower_cdf, f0, role, position)
-    upper = apply_receiving_two_part_cdf(blob, upper_cdf, f0, role, position)
+    lower = apply_two_part_cdf(blob, lower_cdf, f0, role, position)
+    upper = apply_two_part_cdf(blob, upper_cdf, f0, role, position)
     if np.any(lower > upper + CDF_BRANCH_TOLERANCE):
         raise ValueError("transformed lower CDF endpoint exceeds upper endpoint")
     return lower, upper
 
 
-def receiving_two_part_randomized_pit(
+def two_part_randomized_pit(
     blob: Mapping[str, object],
     lower_cdf: np.ndarray,
     upper_cdf: np.ndarray,
@@ -102,12 +102,12 @@ def receiving_two_part_randomized_pit(
     position: np.ndarray,
 ) -> np.ndarray:
     """Generate the exact seeded 25-draw PIT matrix scored by Gate 4."""
-    lower, upper = receiving_two_part_cdf_endpoints(blob, lower_cdf, upper_cdf, f0, role, position)
+    lower, upper = two_part_cdf_endpoints(blob, lower_cdf, upper_cdf, f0, role, position)
     uniforms = np.random.default_rng(RANDOMIZED_PIT_SEED).random((RANDOMIZED_PIT_DRAWS, len(lower)))
     return lower[None, :] + uniforms * (upper - lower)[None, :]
 
 
-def apply_receiving_two_part_line(
+def apply_two_part_line(
     blob: Mapping[str, object],
     line_cdf_low: np.ndarray,
     line_cdf_high: np.ndarray,
@@ -116,15 +116,15 @@ def apply_receiving_two_part_line(
     position: np.ndarray,
     book_over: np.ndarray,
     authentic: np.ndarray,
-) -> ReceivingLineOutput:
+) -> TwoPartLineOutput:
     """Apply the CDF, fixed temperature, and quoted-line probability pool.
 
     ``pooled_over`` is a per-quote binary head. It is not the survival function
     of the two-part distribution and must not be used to compute PIT or means.
     """
-    fitted = validated_receiving_blob(blob)
-    mapped_low = apply_receiving_two_part_cdf(fitted, line_cdf_low, f0, role, position)
-    mapped_high = apply_receiving_two_part_cdf(fitted, line_cdf_high, f0, role, position)
+    fitted = validated_two_part_blob(blob)
+    mapped_low = apply_two_part_cdf(fitted, line_cdf_low, f0, role, position)
+    mapped_high = apply_two_part_cdf(fitted, line_cdf_high, f0, role, position)
     if np.any(mapped_low > mapped_high + CDF_BRANCH_TOLERANCE):
         raise ValueError("mapped line lower endpoint exceeds upper endpoint")
     mapped_under = 0.5 * (mapped_low + mapped_high)
@@ -136,39 +136,39 @@ def apply_receiving_two_part_line(
         raise ValueError("authentic book_over must be finite and strictly inside (0, 1)")
     candidate = apply_temperature(1.0 - mapped_under, fitted["temperature"])
     pooled = pooled_probability(candidate, books, authentic_rows)
-    return ReceivingLineOutput(mapped_low, mapped_high, mapped_under, candidate, pooled)
+    return TwoPartLineOutput(mapped_low, mapped_high, mapped_under, candidate, pooled)
 
 
-def serialize_receiving_calibration(blob: Mapping[str, object]) -> str:
+def serialize_two_part_calibration(blob: Mapping[str, object]) -> str:
     """Serialize validated calibration state to deterministic portable JSON."""
-    fitted = validated_receiving_blob(blob)
+    fitted = validated_two_part_blob(blob)
     return json.dumps(fitted, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
-def deserialize_receiving_calibration(payload: str) -> ReceivingCalibrationBlob:
+def deserialize_two_part_calibration(payload: str) -> TwoPartCalibrationBlob:
     """Load and validate portable JSON calibration state."""
     decoded = json.loads(payload)
     if not isinstance(decoded, dict):
         raise ValueError("receiving calibration payload must contain a JSON object")
-    return validated_receiving_blob(decoded)
+    return validated_two_part_blob(decoded)
 
 
-def apply_rushing_affine_groupcdf(
+def apply_affine_groupcdf(
     blob: Mapping[str, object],
-    predictive: RushingPredictive,
+    predictive: AffinePredictive,
     line: np.ndarray,
     book_over: np.ndarray,
     position: np.ndarray,
-) -> RushingCalibrationOutput:
+) -> AffineCalibrationOutput:
     """Apply the frozen validation fit to validation, held-out test, or live arrays.
 
     The returned ``candidate_over`` includes the grouped CDF map and temperature;
     ``pooled_over`` additionally includes the posted-line book pool. The reported
     mean and distribution parameters stop before those probability-only layers.
     """
-    fitted = validated_rushing_blob(blob)
+    fitted = validated_affine_blob(blob)
     codes = _blob_position_codes(fitted)
-    pred, lines, books, positions = rushing_apply_inputs(predictive, line, book_over, position)
+    pred, lines, books, positions = affine_apply_inputs(predictive, line, book_over, position)
     affine = fitted["affine"]
     corrected = apply_affine(pred, affine["intercept"], affine["slope"], affine["floor"])
     candidate = apply_temperature(
@@ -178,7 +178,7 @@ def apply_rushing_affine_groupcdf(
     pooled = apply_probability_pool(fitted["probability_pool"], candidate, books)
     conditional = corrected.marginal_mean / (1.0 - corrected.gate)
     loc = skewnormal_loc_from_mean(conditional, corrected.sigma, corrected.alpha)
-    return RushingCalibrationOutput(
+    return AffineCalibrationOutput(
         marginal_mean=corrected.marginal_mean,
         conditional_mean=conditional,
         loc=loc,
@@ -190,9 +190,9 @@ def apply_rushing_affine_groupcdf(
     )
 
 
-def rushing_cdf_endpoints(
+def affine_cdf_endpoints(
     blob: Mapping[str, object],
-    predictive: RushingPredictive,
+    predictive: AffinePredictive,
     point: np.ndarray,
     position: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -201,7 +201,7 @@ def rushing_cdf_endpoints(
     Mapping the two endpoints separately preserves the transformed mass of the
     zero atom. Temperature and the line-only book pool are intentionally absent.
     """
-    fitted = validated_rushing_blob(blob)
+    fitted = validated_affine_blob(blob)
     codes = _blob_position_codes(fitted)
     pred, points, positions = distribution_inputs(predictive, point, position)
     affine = fitted["affine"]
@@ -209,27 +209,27 @@ def rushing_cdf_endpoints(
     return mapped_cdf_endpoints(corrected, points, positions, fitted["position_cdf"], codes)
 
 
-def rushing_randomized_pit(
+def affine_randomized_pit(
     blob: Mapping[str, object],
-    predictive: RushingPredictive,
+    predictive: AffinePredictive,
     result: np.ndarray,
     position: np.ndarray,
 ) -> np.ndarray:
     """Generate the exact seeded 25-draw PIT matrix scored by Gate 4."""
-    lower, upper = rushing_cdf_endpoints(blob, predictive, result, position)
+    lower, upper = affine_cdf_endpoints(blob, predictive, result, position)
     uniforms = np.random.default_rng(RANDOMIZED_PIT_SEED).random((RANDOMIZED_PIT_DRAWS, len(lower)))
     return lower[None, :] + uniforms * (upper - lower)[None, :]
 
 
-def serialize_rushing_calibration(blob: Mapping[str, object]) -> str:
+def serialize_affine_calibration(blob: Mapping[str, object]) -> str:
     """Serialize validated calibration state to deterministic portable JSON."""
-    fitted = validated_rushing_blob(blob)
+    fitted = validated_affine_blob(blob)
     return json.dumps(fitted, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
-def deserialize_rushing_calibration(payload: str) -> RushingCalibrationBlob:
+def deserialize_affine_calibration(payload: str) -> AffineCalibrationBlob:
     """Load and validate portable JSON calibration state."""
     decoded = json.loads(payload)
     if not isinstance(decoded, dict):
         raise ValueError("rushing calibration payload must contain a JSON object")
-    return validated_rushing_blob(decoded)
+    return validated_affine_blob(decoded)

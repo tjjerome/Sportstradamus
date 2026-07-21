@@ -76,10 +76,10 @@ def _calibration_blob() -> dict[str, object]:
         "temperature_fit_scope": "pre_map_raw_endpoint_settlement",
         "temperature": 1.4,
         "cdf": {
-            "kind": "receiving_role_position_two_part_cdf",
+            "kind": "role_position_two_part_cdf",
             "role_boundary": {
                 role: {
-                    "kind": "receiving_two_part_role_boundary",
+                    "kind": "two_part_role_boundary",
                     "intercept": -0.3 if role == "low" else 0.2,
                     "nonpositive": _identity_map(0.75),
                 }
@@ -119,7 +119,7 @@ def _candidate_frame() -> pd.DataFrame:
             "NFLYardsExperiment": receiving.CANDIDATE_NAME,
             "NFLYardsRoute": np.array(["low", "low", "high", "high", "low", "high"]),
             "NFLYardsFallback": False,
-            "NFLYardsCalibration": receiving.serialize_receiving_calibration(_calibration_blob()),
+            "NFLYardsCalibration": receiving.serialize_two_part_calibration(_calibration_blob()),
             "NFLYardsRole": np.array(["low", "low", "high", "high", "low", "high"]),
             "NFLYardsPosition": np.array([2, 3, 4, 2, 3, 4]),
             "NFLYardsF0": f0,
@@ -134,7 +134,7 @@ def test_receiving_v3_gate4_transforms_outcome_endpoints_before_randomization():
     frame = _candidate_frame()
     actual = frame["Result"].to_numpy(dtype=float)
     raw_upper, raw_mass = _pred_cdf_pmf(frame, "SkewNormal", actual, strategy="none")
-    expected = receiving.receiving_two_part_randomized_pit(
+    expected = receiving.two_part_randomized_pit(
         _calibration_blob(),
         raw_upper - raw_mass,
         raw_upper,

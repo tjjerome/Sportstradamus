@@ -62,8 +62,8 @@ from sportstradamus.helpers.io import read_history
 from sportstradamus.helpers.provenance import git_sha
 from sportstradamus.training.baselines import get_target_normalization
 from sportstradamus.training.group_conditional_cdf import (
-    deserialize_receiving_calibration,
-    receiving_two_part_cdf_endpoints,
+    deserialize_two_part_calibration,
+    two_part_cdf_endpoints,
 )
 from sportstradamus.training.markets import ALL_MARKETS
 from sportstradamus.training.model_strategy_artifacts import STRATEGY_IDENTITY_CSV_COLUMNS
@@ -74,8 +74,8 @@ from sportstradamus.training.model_strategy_registry import (
 )
 from sportstradamus.training.ship_config import STAT_META_PATH, TARGET_NORM_NONE, load_stat_meta
 from sportstradamus.training.structural_strategies import (
-    RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
-    RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+    AFFINE_STRATEGY,
+    TWO_PART_STRATEGY,
 )
 
 # Ship gates (see docs/ship_gate.md). The promotion lifecycle is a 2x2:
@@ -160,7 +160,7 @@ _NFL_YARDS_POSITION_COL = "NFLYardsPosition"
 _NFL_YARDS_F0_COL = "NFLYardsF0"
 _NFL_YARDS_ROUTE_COL = "NFLYardsRoute"
 _NFL_YARDS_FALLBACK_COL = "NFLYardsFallback"
-_RECEIVING_V3_CONTRACT_COLUMNS: frozenset[str] = frozenset(
+_TWO_PART_CONTRACT_COLUMNS: frozenset[str] = frozenset(
     {
         _NFL_YARDS_EXPERIMENT_COL,
         _NFL_YARDS_CALIBRATION_COL,
@@ -444,7 +444,7 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
     required_view = out[list(required)].replace([np.inf, -np.inf], np.nan)
     out = out[required_view.notna().all(axis=1)]
     validate_strategy_frame(out)
-    _receiving_v3_contract(out)
+    _two_part_contract(out)
     return out
 
 
@@ -1122,23 +1122,23 @@ def _tail_ks_uniform(values: np.ndarray, floor: float = _TAIL_PIT_FLOOR) -> floa
     return max(d_plus, d_minus)
 
 
-def _receiving_v3_contract(
+def _two_part_contract(
     df: pd.DataFrame,
 ) -> tuple[Mapping[str, object], np.ndarray, np.ndarray, np.ndarray] | None:
     """Validate and decode the receiving-v3 row contract when it is present."""
     identity, _ = validate_strategy_frame(df)
     if identity is None or (
-        identity.structural_strategy != RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR
+        identity.structural_strategy != TWO_PART_STRATEGY
     ):
         return None
 
-    missing = _RECEIVING_V3_CONTRACT_COLUMNS - set(df.columns)
+    missing = _TWO_PART_CONTRACT_COLUMNS - set(df.columns)
     if missing:
         raise ValueError(f"receiving-v3 scorecard contract missing columns: {sorted(missing)}")
     calibration = df[_NFL_YARDS_CALIBRATION_COL]
     if calibration.isna().any() or calibration.astype(str).nunique() != 1:
         raise ValueError("NFLYardsCalibration must be one constant nonmissing JSON value")
-    blob = deserialize_receiving_calibration(str(calibration.iloc[0]))
+    blob = deserialize_two_part_calibration(str(calibration.iloc[0]))
 
     roles = df[_NFL_YARDS_ROLE_COL].to_numpy()
     if (
@@ -1177,7 +1177,7 @@ def _receiving_v3_contract(
     return blob, f0, roles.astype(str), positions
 
 
-def _receiving_v3_cdf_endpoints(
+def _two_part_cdf_endpoints(
     df: pd.DataFrame,
     dist: str,
     y: np.ndarray,
@@ -1185,7 +1185,7 @@ def _receiving_v3_cdf_endpoints(
     strategy: str,
 ) -> tuple[np.ndarray, np.ndarray] | None:
     """Rebuild and transform the two outcome CDF endpoints for receiving v3."""
-    contract = _receiving_v3_contract(df)
+    contract = _two_part_contract(df)
     if contract is None:
         return None
     if dist != "SkewNormal":
@@ -1205,7 +1205,7 @@ def _receiving_v3_cdf_endpoints(
 
     raw_upper, raw_mass = _pred_cdf_pmf(df, dist, y, strategy=strategy)
     raw_lower = raw_upper - raw_mass
-    return receiving_two_part_cdf_endpoints(
+    return two_part_cdf_endpoints(
         blob,
         raw_lower,
         raw_upper,
@@ -1248,8 +1248,8 @@ def _randomized_pit_draws(
     structural_strategy = (
         identity.structural_strategy if identity is not None else BASE_STRUCTURAL_STRATEGY
     )
-    if structural_strategy == RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR:
-        receiving_endpoints = _receiving_v3_cdf_endpoints(df, dist, y, strategy=strategy)
+    if structural_strategy == TWO_PART_STRATEGY:
+        receiving_endpoints = _two_part_cdf_endpoints(df, dist, y, strategy=strategy)
         assert receiving_endpoints is not None
         lower, upper = receiving_endpoints
         rng = np.random.default_rng(RANDOMIZED_PIT_SEED)
@@ -1258,7 +1258,7 @@ def _randomized_pit_draws(
         ]
     if structural_strategy not in {
         BASE_STRUCTURAL_STRATEGY,
-        RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+        AFFINE_STRATEGY,
     }:
         raise ValueError(f"no scorecard adapter for structural strategy {structural_strategy!r}")
 

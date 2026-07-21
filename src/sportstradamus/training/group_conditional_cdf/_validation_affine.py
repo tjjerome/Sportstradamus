@@ -16,31 +16,31 @@ import numpy as np
 
 from sportstradamus.training.group_conditional_cdf._contracts import (
     AFFINE_INTERCEPT_BOUNDS,
+    AFFINE_POSITION_CODES,
+    AFFINE_SCHEMA_VERSION,
     AFFINE_SLOPE_BOUNDS,
+    AFFINE_STRATEGY_NAME,
     MARGINAL_MEAN_FLOOR,
     PIT_LAMBDAS,
     PLAYER_CV_FOLDS,
-    RUSHING_CANDIDATE_NAME,
-    RUSHING_POSITION_CODES,
-    RUSHING_SCHEMA_VERSION,
     TEMPERATURE_BOUNDS,
+    AffineCalibrationBlob,
+    AffinePredictive,
     GroupCdfBlob,
-    RushingCalibrationBlob,
-    RushingPredictive,
 )
 from sportstradamus.training.group_conditional_cdf._validation import finite_vector
 from sportstradamus.training.group_conditional_cdf.cdf_map_validation import cdf_map_blob_is_valid
 
 
-def rushing_positions(values, length: int) -> np.ndarray:
+def affine_positions(values, length: int) -> np.ndarray:
     raw = finite_vector(values, "position", length)
     positions = raw.astype(int)
-    if not np.array_equal(raw, positions) or not np.isin(positions, RUSHING_POSITION_CODES).all():
+    if not np.array_equal(raw, positions) or not np.isin(positions, AFFINE_POSITION_CODES).all():
         raise ValueError("position must contain only QB=1 and RB=3 codes")
     return positions
 
 
-def validated_predictive(predictive: RushingPredictive) -> RushingPredictive:
+def validated_predictive(predictive: AffinePredictive) -> AffinePredictive:
     mean = finite_vector(predictive.marginal_mean, "marginal_mean")
     n_rows = len(mean)
     sigma = finite_vector(predictive.sigma, "sigma", n_rows)
@@ -50,43 +50,43 @@ def validated_predictive(predictive: RushingPredictive) -> RushingPredictive:
         raise ValueError("marginal means must be nonnegative and sigma must be positive")
     if np.any((gate < 0.0) | (gate >= 1.0)):
         raise ValueError("gate must lie in [0, 1)")
-    return RushingPredictive(mean, sigma, alpha, gate)
+    return AffinePredictive(mean, sigma, alpha, gate)
 
 
-def rushing_apply_inputs(predictive, line, book_over, position):
+def affine_apply_inputs(predictive, line, book_over, position):
     pred = validated_predictive(predictive)
     n_rows = len(pred.marginal_mean)
     lines = finite_vector(line, "line", n_rows)
     books = finite_vector(book_over, "book_over", n_rows)
     if np.any((books < 0.0) | (books > 1.0)):
         raise ValueError("book_over must lie in [0, 1]")
-    return pred, lines, books, rushing_positions(position, n_rows)
+    return pred, lines, books, affine_positions(position, n_rows)
 
 
 def distribution_inputs(predictive, point, position):
     pred = validated_predictive(predictive)
     n_rows = len(pred.marginal_mean)
-    return pred, finite_vector(point, "point", n_rows), rushing_positions(position, n_rows)
+    return pred, finite_vector(point, "point", n_rows), affine_positions(position, n_rows)
 
 
-def rushing_fit_inputs(predictive, result, line, book_over, position, player):
-    pred, lines, books, positions = rushing_apply_inputs(predictive, line, book_over, position)
+def affine_fit_inputs(predictive, result, line, book_over, position, player):
+    pred, lines, books, positions = affine_apply_inputs(predictive, line, book_over, position)
     y = finite_vector(result, "result", len(lines))
     raw_players = np.asarray(player)
     if raw_players.ndim != 1 or len(raw_players) != len(lines):
         raise ValueError("player must be a row-aligned one-dimensional array")
-    if any(missing_identifier_rushing(value) for value in raw_players):
+    if any(missing_identifier_affine(value) for value in raw_players):
         raise ValueError("player identifiers must be nonempty")
     players = raw_players.astype(str)
     if len(np.unique(players)) < PLAYER_CV_FOLDS:
         raise ValueError("nested calibration requires at least five validation players")
-    for code in RUSHING_POSITION_CODES:
+    for code in AFFINE_POSITION_CODES:
         if len(np.unique(players[positions == code])) < PLAYER_CV_FOLDS:
             raise ValueError(f"position {code} requires at least five validation players")
     return pred, y, lines, books, positions, players
 
 
-def validated_rushing_blob(blob: Mapping[str, object]) -> RushingCalibrationBlob:
+def validated_affine_blob(blob: Mapping[str, object]) -> AffineCalibrationBlob:
     # style: allow-complexity — moved verbatim from the rushing corner; the flat
     # guard chain is the byte-for-byte schema contract and must not split.
     from sportstradamus.training.group_conditional_cdf.probability_pool import (
@@ -94,13 +94,13 @@ def validated_rushing_blob(blob: Mapping[str, object]) -> RushingCalibrationBlob
     )
 
     if (
-        blob.get("kind") != RUSHING_CANDIDATE_NAME
-        or blob.get("schema_version") != RUSHING_SCHEMA_VERSION
+        blob.get("kind") != AFFINE_STRATEGY_NAME
+        or blob.get("schema_version") != AFFINE_SCHEMA_VERSION
     ):
         raise ValueError("unknown rushing calibration blob kind or schema")
     if blob.get("line_probability_only") is not True:
         raise ValueError("rushing calibration must declare its line-only probability layer")
-    fitted = cast(RushingCalibrationBlob, blob)
+    fitted = cast(AffineCalibrationBlob, blob)
     affine = fitted.get("affine")
     maps = fitted.get("position_cdf")
     if not isinstance(affine, dict) or affine.get("kind") != "affine_marginal_mean":
@@ -114,7 +114,7 @@ def validated_rushing_blob(blob: Mapping[str, object]) -> RushingCalibrationBlob
         raise ValueError("affine slope is outside the calibrated bounds")
     if floor != MARGINAL_MEAN_FLOOR:
         raise ValueError("affine floor does not match the calibration schema")
-    if not isinstance(maps, dict) or set(maps) != {str(code) for code in RUSHING_POSITION_CODES}:
+    if not isinstance(maps, dict) or set(maps) != {str(code) for code in AFFINE_POSITION_CODES}:
         raise ValueError("rushing calibration requires QB and RB CDF maps")
     validate_map_blobs(maps)
     temperature_value = finite_scalar(fitted.get("temperature"), "temperature")
@@ -148,7 +148,7 @@ def finite_scalar(value: object, name: str) -> float:
     return float(value)
 
 
-def missing_identifier_rushing(value: object) -> bool:
+def missing_identifier_affine(value: object) -> bool:
     if value is None:
         return True
     text = str(value).strip()

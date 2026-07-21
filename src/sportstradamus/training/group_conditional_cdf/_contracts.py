@@ -18,14 +18,14 @@ import numpy as np
 from sportstradamus.helpers.integer_distribution import RANDOMIZED_PIT_DRAWS, RANDOMIZED_PIT_SEED
 from sportstradamus.training.group_conditional_cdf.probability_pool import ProbabilityPoolBlob
 
-RECEIVING_CANDIDATE_NAME = "receiving-role-position-two-part-groupcdf-fixedlinear-v3"
-RECEIVING_SCHEMA_VERSION = 3
-RUSHING_CANDIDATE_NAME = "rushing-qb-rb-affine-groupcdf-bookpool-v1"
-RUSHING_SCHEMA_VERSION = 1
+TWO_PART_STRATEGY_NAME = "role-position-two-part-groupcdf-fixedlinear-v3"
+TWO_PART_SCHEMA_VERSION = 3
+AFFINE_STRATEGY_NAME = "affine-groupcdf-bookpool-v1"
+AFFINE_SCHEMA_VERSION = 1
 
 ROLE_VALUES: tuple[str, str] = ("low", "high")
-RECEIVING_POSITION_CODES: tuple[int, int, int] = (2, 3, 4)
-RUSHING_POSITION_CODES: tuple[int, int] = (1, 3)
+TWO_PART_POSITION_CODES: tuple[int, int, int] = (2, 3, 4)
+AFFINE_POSITION_CODES: tuple[int, int] = (1, 3)
 RB_CODE = 3
 
 PLAYER_CV_FOLDS = 5
@@ -53,7 +53,7 @@ ROLE_POSITIVE_PIT_GUARDS: dict[str, float] = {"low": 0.08, "high": 0.09}
 POSITION_FULL_PIT_GUARD = 0.08
 POSITION_POSITIVE_PIT_GUARD = 0.09
 POSITIVE_GROUPS = tuple(
-    f"{role_name}_pos{code}" for role_name in ROLE_VALUES for code in RECEIVING_POSITION_CODES
+    f"{role_name}_pos{code}" for role_name in ROLE_VALUES for code in TWO_PART_POSITION_CODES
 )
 
 
@@ -78,15 +78,15 @@ class GroupCdfBlob(TypedDict):
 class RoleBoundaryBlob(TypedDict):
     """Portable boundary intercept and nonpositive conditional map."""
 
-    kind: Literal["receiving_two_part_role_boundary"]
+    kind: Literal["two_part_role_boundary"]
     intercept: float
     nonpositive: EndpointMapBlob
 
 
-class ReceivingCdfBlob(TypedDict):
+class TwoPartCdfBlob(TypedDict):
     """The role-boundary and role-by-position positive CDF layer."""
 
-    kind: Literal["receiving_role_position_two_part_cdf"]
+    kind: Literal["role_position_two_part_cdf"]
     role_boundary: dict[str, RoleBoundaryBlob]
     positive: dict[str, EndpointMapBlob]
     rb_boundary_residual: float
@@ -104,15 +104,15 @@ class FixedProbabilityPoolBlob(TypedDict):
     missing_book: Literal["unpooled_model_fallback"]
 
 
-class ReceivingCalibrationBlob(TypedDict):
+class TwoPartCalibrationBlob(TypedDict):
     """JSON/pickle-safe state fitted only from the full validation split."""
 
-    kind: Literal["receiving-role-position-two-part-groupcdf-fixedlinear-v3"]
+    kind: Literal["role-position-two-part-groupcdf-fixedlinear-v3"]
     schema_version: int
     line_probability_only: bool
     temperature_fit_scope: Literal["pre_map_raw_endpoint_settlement"]
     temperature: float
-    cdf: ReceivingCdfBlob
+    cdf: TwoPartCdfBlob
     probability_pool: FixedProbabilityPoolBlob
 
 
@@ -125,10 +125,10 @@ class AffineMeanBlob(TypedDict):
     floor: float
 
 
-class RushingCalibrationBlob(TypedDict):
+class AffineCalibrationBlob(TypedDict):
     """JSON/pickle-safe state fitted only from the full validation split."""
 
-    kind: Literal["rushing-qb-rb-affine-groupcdf-bookpool-v1"]
+    kind: Literal["affine-groupcdf-bookpool-v1"]
     schema_version: int
     line_probability_only: bool
     affine: AffineMeanBlob
@@ -138,7 +138,7 @@ class RushingCalibrationBlob(TypedDict):
 
 
 @dataclass(frozen=True)
-class ReceivingLineOutput:
+class TwoPartLineOutput:
     """Mapped quoted-line probabilities before and after bookmaker pooling."""
 
     mapped_low: np.ndarray
@@ -149,7 +149,7 @@ class ReceivingLineOutput:
 
 
 @dataclass(frozen=True)
-class RushingPredictive:
+class AffinePredictive:
     """Row-aligned pre-calibration zero-inflated SkewNormal parameters.
 
     ``marginal_mean`` includes the zero gate. ``sigma`` and ``alpha`` describe
@@ -163,7 +163,7 @@ class RushingPredictive:
 
 
 @dataclass(frozen=True)
-class RushingCalibrationOutput:
+class AffineCalibrationOutput:
     """Applied distribution parameters and quoted-line probabilities."""
 
     marginal_mean: np.ndarray
@@ -177,10 +177,10 @@ class RushingCalibrationOutput:
 
 
 @dataclass(frozen=True)
-class ReceivingCalibrationFit:
+class TwoPartCalibrationFit:
     """Full-validation blob plus honest outer-Player-CV scorecard inputs."""
 
-    blob: ReceivingCalibrationBlob
+    blob: TwoPartCalibrationBlob
     oof_pit_draws: np.ndarray
     oof_positive_pit: np.ndarray
     oof_mapped_low: np.ndarray
@@ -195,10 +195,10 @@ class ReceivingCalibrationFit:
 
 
 @dataclass(frozen=True)
-class RushingCalibrationFit:
+class AffineCalibrationFit:
     """Full-validation blob plus honest outer-Player-CV gate inputs."""
 
-    blob: RushingCalibrationBlob
+    blob: AffineCalibrationBlob
     oof_marginal_mean: np.ndarray
     oof_candidate_over: np.ndarray
     oof_pooled_over: np.ndarray

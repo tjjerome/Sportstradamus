@@ -67,19 +67,19 @@ from sportstradamus.training.config import (
 )
 from sportstradamus.training.data import trim_matrix
 from sportstradamus.training.group_conditional_cdf import (
-    ReceivingCalibrationFit,
-    RushingCalibrationFit,
-    RushingPredictive,
-    rushing_cdf_endpoints,
+    AffineCalibrationFit,
+    AffinePredictive,
+    TwoPartCalibrationFit,
+    affine_cdf_endpoints,
 )
-from sportstradamus.training.group_conditional_cdf._pipeline_steps_receiving import (
-    _step_apply_receiving_two_part_groupcdf_candidate,
-)
-from sportstradamus.training.group_conditional_cdf._pipeline_steps_rushing import (
-    _step_apply_rushing_affine_groupcdf_candidate,
+from sportstradamus.training.group_conditional_cdf._pipeline_steps_affine import (
+    _step_apply_affine_groupcdf_candidate,
 )
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_shared import (
     _persist_structural_columns,
+)
+from sportstradamus.training.group_conditional_cdf._pipeline_steps_two_part import (
+    _step_apply_two_part_groupcdf_candidate,
 )
 from sportstradamus.training.hyperparams import _BoundedResponseFn, run_hyper_opt
 from sportstradamus.training.model_strategy_artifacts import (
@@ -110,14 +110,14 @@ from sportstradamus.training.scorecard import (
 from sportstradamus.training.shap import compute_market_importance
 from sportstradamus.training.ship_config import TARGET_NORM_NONE
 from sportstradamus.training.structural_context import (
-    build_receiving_role_context,
-    build_rushing_expert_context,
+    build_affine_expert_context,
+    build_two_part_context,
 )
 from sportstradamus.training.structural_strategies import (
-    RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
-    RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
-    RUSHING_EXPERT_EXPERIMENTS,
-    RUSHING_POSITIONS,
+    AFFINE_EXPERT_EXPERIMENTS,
+    AFFINE_POSITIONS,
+    AFFINE_STRATEGY,
+    TWO_PART_STRATEGY,
 )
 
 logger = get_logger(__name__)
@@ -849,7 +849,7 @@ def _step_build_splits(
     # ``prediction/scoring.py``), so pruning at train time propagates
     # cleanly to serving without any inference-side change.
     kept_cols = _prune_uninformative_features(X_train, categories)
-    if structural_strategy == RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR:
+    if structural_strategy == TWO_PART_STRATEGY:
         # Routing is part of the candidate's auditable feature contract even
         # when a cached train partition makes one role input constant.
         for column in role_spec_for(stat_data.league, market).role_columns:
@@ -1227,7 +1227,7 @@ def _kill_experiment_context(context: dict, splits: dict, reason: str) -> dict:
     }
 
 
-def _step_fit_rushing_experts(
+def _step_fit_affine_experts(
     context: dict,
     *,
     dist: str,
@@ -1249,7 +1249,7 @@ def _step_fit_rushing_experts(
     positions = pd.to_numeric(X_train["Player position"], errors="coerce")
     y_train_labels = np.asarray(splits["y_train_labels"])
     expert_models: dict[int, object] = {}
-    for code in RUSHING_POSITIONS:
+    for code in AFFINE_POSITIONS:
         mask = positions.eq(code).to_numpy()
         if not mask.any():
             return {}, _kill_experiment_context(
@@ -1316,11 +1316,11 @@ def _stitch_one_split(
     """Overlay each rushing position's expert params onto one pooled split."""
     stitched = pooled.copy()
     position = pd.to_numeric(X_part["Player position"], errors="coerce")
-    eligible_fallback = position.isin(RUSHING_POSITIONS) & routes.eq("pooled_fallback")
+    eligible_fallback = position.isin(AFFINE_POSITIONS) & routes.eq("pooled_fallback")
     if eligible_fallback.any():
         raise ValueError(f"eligible rushing fallback rows on {split}")
 
-    for code in RUSHING_POSITIONS:
+    for code in AFFINE_POSITIONS:
         eligible_index = X_part.index[position.eq(code)]
         expert_params = _predict_split_params(
             experts[code],
@@ -1337,12 +1337,12 @@ def _stitch_one_split(
             and np.isfinite(expert_params.to_numpy(dtype=float)).all()
         )
         if not valid:
-            raise ValueError(f"invalid {RUSHING_POSITIONS[code]} expert parameters on {split}")
+            raise ValueError(f"invalid {AFFINE_POSITIONS[code]} expert parameters on {split}")
         stitched.loc[eligible_index, :] = expert_params.to_numpy()
     return stitched
 
 
-def _stitch_rushing_expert_params(
+def _stitch_affine_expert_params(
     pooled_params: dict[str, pd.DataFrame],
     dist: str,
     splits: dict,
@@ -1362,11 +1362,11 @@ def _stitch_rushing_expert_params(
     """
     if (
         context is None
-        or context.get("slug") not in RUSHING_EXPERT_EXPERIMENTS
+        or context.get("slug") not in AFFINE_EXPERT_EXPERIMENTS
         or context["status"] != "active"
     ):
         return pooled_params, context
-    if any(code not in experts for code in RUSHING_POSITIONS):
+    if any(code not in experts for code in AFFINE_POSITIONS):
         return pooled_params, _kill_experiment_context(
             context,
             splits,
@@ -1424,7 +1424,7 @@ def _step_predict_splits(
         )
         for split in ("train", "validation", "test")
     }
-    stitched_params, context = _stitch_rushing_expert_params(
+    stitched_params, context = _stitch_affine_expert_params(
         pooled_params,
         dist,
         splits,
@@ -3497,11 +3497,11 @@ def _structural_gate_inputs(
     standard path fits temperature and layers the post-hoc corrector. Both yield
     the same keys the downstream scorecard consumes.
     """
-    if structural_strategy == RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR:
-        calibrated, _ = _step_apply_receiving_two_part_groupcdf_candidate(
+    if structural_strategy == TWO_PART_STRATEGY:
+        calibrated, _ = _step_apply_two_part_groupcdf_candidate(
             calibrated, fused, splits, experiment_context
         )
-        receiving_fit: ReceivingCalibrationFit = calibrated["receiving_candidate_fit"]
+        receiving_fit: TwoPartCalibrationFit = calibrated["receiving_candidate_fit"]
         receiving_test = calibrated["receiving_candidate_test"]
         y_proba_no_filt = np.column_stack(
             (receiving_test.mapped_under, 1.0 - receiving_test.mapped_under)
@@ -3510,19 +3510,19 @@ def _structural_gate_inputs(
         val_calibrated = receiving_fit.oof_pooled_over
         posthoc_blob = None
         test_calibrated_over = receiving_test.pooled_over
-    elif structural_strategy == RUSHING_AFFINE_GROUPCDF_BOOK_POOL:
-        calibrated, experiment_context = _step_apply_rushing_affine_groupcdf_candidate(
+    elif structural_strategy == AFFINE_STRATEGY:
+        calibrated, experiment_context = _step_apply_affine_groupcdf_candidate(
             calibrated, fused, splits, experiment_context
         )
-        rushing_fit: RushingCalibrationFit = calibrated["rushing_candidate_fit"]
+        rushing_fit: AffineCalibrationFit = calibrated["rushing_candidate_fit"]
         rushing_test = calibrated["rushing_candidate_test"]
         test_positions = (
             experiment_context["positions"]["test"]
             .reindex(splits["X_test"].index)
             .to_numpy(dtype=float)
         )
-        base_predictive: RushingPredictive = calibrated["rushing_candidate_test_base"]
-        _, test_mapped_under = rushing_cdf_endpoints(
+        base_predictive: AffinePredictive = calibrated["rushing_candidate_test_base"]
+        _, test_mapped_under = affine_cdf_endpoints(
             rushing_fit.blob,
             base_predictive,
             splits["B_test"]["Line"].to_numpy(dtype=float),
@@ -3702,15 +3702,15 @@ def train_market(
         target_normalization,
         structural_strategy,
     )
-    if structural_strategy == RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR:
-        experiment_context = build_receiving_role_context(
+    if structural_strategy == TWO_PART_STRATEGY:
+        experiment_context = build_two_part_context(
             splits,
             league=league,
             market=market,
             slug=structural_strategy,
         )
-    elif structural_strategy in RUSHING_EXPERT_EXPERIMENTS:
-        experiment_context = build_rushing_expert_context(
+    elif structural_strategy in AFFINE_EXPERT_EXPERIMENTS:
+        experiment_context = build_affine_expert_context(
             splits,
             slug=structural_strategy,
         )
@@ -3844,8 +3844,8 @@ def train_market(
         sn_param=sn_param,
     )
     expert_models: dict[int, object] = {}
-    if structural_strategy in RUSHING_EXPERT_EXPERIMENTS:
-        expert_models, experiment_context = _step_fit_rushing_experts(
+    if structural_strategy in AFFINE_EXPERT_EXPERIMENTS:
+        expert_models, experiment_context = _step_fit_affine_experts(
             experiment_context,
             dist=dist,
             dist_obj=dist_info["dist_obj"],
@@ -3867,13 +3867,13 @@ def train_market(
         offset_mode=dist_info["offset_mode"],
         sn_param=sn_param,
         expert_models=(
-            expert_models if structural_strategy in RUSHING_EXPERT_EXPERIMENTS else None
+            expert_models if structural_strategy in AFFINE_EXPERT_EXPERIMENTS else None
         ),
         structural_context=(
-            experiment_context if structural_strategy in RUSHING_EXPERT_EXPERIMENTS else None
+            experiment_context if structural_strategy in AFFINE_EXPERT_EXPERIMENTS else None
         ),
     )
-    if structural_strategy in RUSHING_EXPERT_EXPERIMENTS:
+    if structural_strategy in AFFINE_EXPERT_EXPERIMENTS:
         experiment_context = preds["structural_context"]
     prob_params = preds["prob_params"]
 
@@ -3998,7 +3998,7 @@ def train_market(
         structural_strategy=structural_strategy,
         algorithm_payload=calibrated.get("nfl_yards_experiment_blob"),
         expert_models=(
-            expert_models if structural_strategy in RUSHING_EXPERT_EXPERIMENTS else None
+            expert_models if structural_strategy in AFFINE_EXPERT_EXPERIMENTS else None
         ),
     )
 
@@ -4028,10 +4028,10 @@ def train_market(
         pit_recal_by_row=calibrated.get("nfl_yards_pit_maps"),
         prepool_over=(
             calibrated["receiving_candidate_test"].candidate_over
-            if structural_strategy == RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR
+            if structural_strategy == TWO_PART_STRATEGY
             else (
                 calibrated["rushing_candidate_test"].candidate_over
-                if structural_strategy == RUSHING_AFFINE_GROUPCDF_BOOK_POOL
+                if structural_strategy == AFFINE_STRATEGY
                 else None
             )
         ),

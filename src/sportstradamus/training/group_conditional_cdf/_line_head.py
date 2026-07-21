@@ -39,7 +39,7 @@ def _optimize_temperature(logits: np.ndarray, outcome: np.ndarray, *, error: str
     return float(result.x)
 
 
-def fit_temperature_receiving(probability: np.ndarray, outcome: np.ndarray) -> float:
+def fit_temperature_two_part(probability: np.ndarray, outcome: np.ndarray) -> float:
     probabilities = probability_vector(probability, "temperature probability")
     outcomes = probability_vector(outcome, "temperature outcome", len(probabilities))
     if not np.isin(outcomes, (0.0, 1.0)).all():
@@ -50,6 +50,6 @@ def fit_temperature_receiving(probability: np.ndarray, outcome: np.ndarray) -> f
     )
 
 
-def fit_temperature_rushing(probability: np.ndarray, outcome: np.ndarray) -> float:
+def fit_temperature_affine(probability: np.ndarray, outcome: np.ndarray) -> float:
     logits = logit(np.clip(probability, PROBABILITY_CLIP, 1.0 - PROBABILITY_CLIP))
     return _optimize_temperature(logits, outcome, error="temperature optimization failed")

@@ -11,24 +11,24 @@ from scipy.stats import skewnorm
 
 from sportstradamus.helpers import skewnormal_loc_from_mean
 from sportstradamus.prediction.model_prob import (
-    _apply_receiving_candidate_distribution,
-    _apply_rushing_candidate_distribution,
+    _affine_candidate_calibration,
+    _apply_affine_candidate_distribution,
+    _apply_two_part_candidate_distribution,
     _build_prob_params,
-    _receiving_candidate_state,
-    _rushing_candidate_calibration,
+    _two_part_candidate_state,
 )
 from sportstradamus.training.group_conditional_cdf import (
-    RushingPredictive,
-    apply_receiving_two_part_line,
-    apply_rushing_affine_groupcdf,
-    deserialize_receiving_calibration,
-    serialize_receiving_calibration,
+    AffinePredictive,
+    apply_affine_groupcdf,
+    apply_two_part_line,
+    deserialize_two_part_calibration,
+    serialize_two_part_calibration,
 )
 from sportstradamus.training.structural_strategies import (
-    RECEIVING_POSITIONS,
-    RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
+    AFFINE_STRATEGY,
     ROLE_COLUMNS,
-    RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+    TWO_PART_POSITIONS,
+    TWO_PART_STRATEGY,
 )
 
 model_prob_module = importlib.import_module("sportstradamus.prediction.model_prob")
@@ -43,23 +43,23 @@ def _endpoint_map(lam: float, midpoint: float) -> dict:
     }
 
 
-def _receiving_calibration_blob() -> dict:
+def _two_part_calibration_blob() -> dict:
     return {
-        "kind": RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
+        "kind": TWO_PART_STRATEGY,
         "schema_version": 3,
         "line_probability_only": True,
         "temperature_fit_scope": "pre_map_raw_endpoint_settlement",
         "temperature": 1.4,
         "cdf": {
-            "kind": "receiving_role_position_two_part_cdf",
+            "kind": "role_position_two_part_cdf",
             "role_boundary": {
                 "low": {
-                    "kind": "receiving_two_part_role_boundary",
+                    "kind": "two_part_role_boundary",
                     "intercept": -0.15,
                     "nonpositive": _endpoint_map(0.75, 0.45),
                 },
                 "high": {
-                    "kind": "receiving_two_part_role_boundary",
+                    "kind": "two_part_role_boundary",
                     "intercept": 0.1,
                     "nonpositive": _endpoint_map(0.75, 0.45),
                 },
@@ -67,7 +67,7 @@ def _receiving_calibration_blob() -> dict:
             "positive": {
                 f"{role}_pos{position}": _endpoint_map(1.0, 0.55)
                 for role in ("low", "high")
-                for position in RECEIVING_POSITIONS
+                for position in TWO_PART_POSITIONS
             },
             "rb_boundary_residual": 0.05,
         },
@@ -83,10 +83,10 @@ def _receiving_calibration_blob() -> dict:
     }
 
 
-def _receiving_candidate_blob(calibration: dict | None = None) -> dict:
+def _two_part_candidate_blob(calibration: dict | None = None) -> dict:
     return {
         "schema_version": 3,
-        "slug": RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
+        "slug": TWO_PART_STRATEGY,
         "status": "active",
         "kill_reason": None,
         "line_probability_only": True,
@@ -97,7 +97,7 @@ def _receiving_candidate_blob(calibration: dict | None = None) -> dict:
             "gate_rates": {"low": 0.30, "high": 0.60},
             "served_gate_rates": {"low": 0.06, "high": 0.12},
             "gate_model_weight": 0.2,
-            "positions": {str(code): label for code, label in RECEIVING_POSITIONS.items()},
+            "positions": {str(code): label for code, label in TWO_PART_POSITIONS.items()},
         },
         "endpoint_contract": {
             "gate_source": "train_result_eq_zero_by_role",
@@ -106,11 +106,11 @@ def _receiving_candidate_blob(calibration: dict | None = None) -> dict:
             "fallback_gate": 0.45,
             "dispersion": "raw_fused_shape",
         },
-        "calibration": calibration or _receiving_calibration_blob(),
+        "calibration": calibration or _two_part_calibration_blob(),
     }
 
 
-def _receiving_frame(book_over=(0.58, 0.44)) -> pd.DataFrame:
+def _two_part_frame(book_over=(0.58, 0.44)) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "Player position": [2, 3],
@@ -128,8 +128,8 @@ def _receiving_frame(book_over=(0.58, 0.44)) -> pd.DataFrame:
 
 
 def test_receiving_candidate_live_endpoint_operator_matches_shared_application():
-    calibration, routing = _receiving_candidate_state(_receiving_candidate_blob())
-    frame = _receiving_frame()
+    calibration, routing = _two_part_candidate_state(_two_part_candidate_blob())
+    frame = _two_part_frame()
     mean = np.array([38.0, 27.0])
     line = frame["Line"].to_numpy()
     sigma = frame["Model Sigma"].to_numpy()
@@ -144,7 +144,7 @@ def test_receiving_candidate_live_endpoint_operator_matches_shared_application()
     low = gated_cdf(np.ceil(line - 1.0))
     high = gated_cdf(np.floor(line + 1.0))
     f0 = gated_cdf(np.zeros(len(frame)))
-    expected = apply_receiving_two_part_line(
+    expected = apply_two_part_line(
         calibration,
         low,
         high,
@@ -155,7 +155,7 @@ def test_receiving_candidate_live_endpoint_operator_matches_shared_application()
         np.array([True, True]),
     )
 
-    served = _apply_receiving_candidate_distribution(frame, mean, calibration, routing)
+    served = _apply_two_part_candidate_distribution(frame, mean, calibration, routing)
 
     for field in expected.__dataclass_fields__:
         np.testing.assert_array_equal(getattr(served, field), getattr(expected, field))
@@ -164,25 +164,25 @@ def test_receiving_candidate_live_endpoint_operator_matches_shared_application()
 
 
 def test_receiving_candidate_calibration_roundtrip_is_serve_exact():
-    calibration = _receiving_calibration_blob()
-    restored = deserialize_receiving_calibration(serialize_receiving_calibration(calibration))
-    original_state = _receiving_candidate_state(_receiving_candidate_blob(calibration))
-    restored_state = _receiving_candidate_state(_receiving_candidate_blob(restored))
-    frame = _receiving_frame()
+    calibration = _two_part_calibration_blob()
+    restored = deserialize_two_part_calibration(serialize_two_part_calibration(calibration))
+    original_state = _two_part_candidate_state(_two_part_candidate_blob(calibration))
+    restored_state = _two_part_candidate_state(_two_part_candidate_blob(restored))
+    frame = _two_part_frame()
     mean = np.array([38.0, 27.0])
 
-    original = _apply_receiving_candidate_distribution(frame, mean, *original_state)
-    reloaded = _apply_receiving_candidate_distribution(frame, mean, *restored_state)
+    original = _apply_two_part_candidate_distribution(frame, mean, *original_state)
+    reloaded = _apply_two_part_candidate_distribution(frame, mean, *restored_state)
 
     for field in original.__dataclass_fields__:
         np.testing.assert_array_equal(getattr(original, field), getattr(reloaded, field))
 
 
 def test_receiving_candidate_pools_only_finite_current_book_probability():
-    calibration, routing = _receiving_candidate_state(_receiving_candidate_blob())
-    frame = _receiving_frame(book_over=(0.62, np.nan))
+    calibration, routing = _two_part_candidate_state(_two_part_candidate_blob())
+    frame = _two_part_frame(book_over=(0.62, np.nan))
 
-    served = _apply_receiving_candidate_distribution(
+    served = _apply_two_part_candidate_distribution(
         frame,
         np.array([38.0, 27.0]),
         calibration,
@@ -214,11 +214,11 @@ def test_receiving_candidate_pools_only_finite_current_book_probability():
     ],
 )
 def test_receiving_candidate_rejects_partial_artifact_state(mutate, message):
-    experiment = _receiving_candidate_blob()
+    experiment = _two_part_candidate_blob()
     mutate(experiment)
 
     with pytest.raises(ValueError, match=message):
-        _receiving_candidate_state(experiment)
+        _two_part_candidate_state(experiment)
 
 
 @pytest.mark.parametrize(
@@ -229,18 +229,18 @@ def test_receiving_candidate_rejects_partial_artifact_state(mutate, message):
     ],
 )
 def test_receiving_candidate_fails_loud_for_invalid_eligible_route(mutate, message):
-    calibration, routing = _receiving_candidate_state(_receiving_candidate_blob())
+    calibration, routing = _two_part_candidate_state(_two_part_candidate_blob())
 
     with pytest.raises(ValueError, match=message):
-        _apply_receiving_candidate_distribution(
-            mutate(_receiving_frame()),
+        _apply_two_part_candidate_distribution(
+            mutate(_two_part_frame()),
             np.array([38.0, 27.0]),
             calibration,
             routing,
         )
 
 
-def _rushing_candidate_blob() -> dict:
+def _affine_candidate_blob() -> dict:
     identity = {
         "kind": "group_empirical_cdf",
         "lam": 0.0,
@@ -248,7 +248,7 @@ def _rushing_candidate_blob() -> dict:
         "y": [0.0, 1.0],
     }
     calibration = {
-        "kind": RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+        "kind": AFFINE_STRATEGY,
         "schema_version": 1,
         "line_probability_only": True,
         "affine": {
@@ -267,7 +267,7 @@ def _rushing_candidate_blob() -> dict:
         },
     }
     return {
-        "slug": RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+        "slug": AFFINE_STRATEGY,
         "status": "active",
         "line_probability_only": True,
         "calibration": calibration,
@@ -275,8 +275,8 @@ def _rushing_candidate_blob() -> dict:
 
 
 def test_rushing_candidate_live_distribution_matches_shared_application():
-    experiment = _rushing_candidate_blob()
-    calibration = _rushing_candidate_calibration(experiment)
+    experiment = _affine_candidate_blob()
+    calibration = _affine_candidate_calibration(experiment)
     frame = pd.DataFrame(
         {
             "Player position": [1, 3],
@@ -288,13 +288,13 @@ def test_rushing_candidate_live_distribution_matches_shared_application():
         }
     )
     conditional_mean = np.array([25.0, 58.0])
-    predictive = RushingPredictive(
+    predictive = AffinePredictive(
         conditional_mean * (1.0 - frame["Model Gate"].to_numpy()),
         frame["Model Sigma"].to_numpy(),
         frame["Model Skew"].to_numpy(),
         frame["Model Gate"].to_numpy(),
     )
-    expected = apply_rushing_affine_groupcdf(
+    expected = apply_affine_groupcdf(
         calibration,
         predictive,
         frame["Line"].to_numpy(),
@@ -302,7 +302,7 @@ def test_rushing_candidate_live_distribution_matches_shared_application():
         frame["Player position"].to_numpy(),
     )
 
-    served_mean, served_over = _apply_rushing_candidate_distribution(
+    served_mean, served_over = _apply_affine_candidate_distribution(
         frame,
         conditional_mean,
         calibration,
@@ -343,7 +343,7 @@ def test_rushing_candidate_live_prediction_routes_qb_rb_experts(monkeypatch):
     filedict = {
         "model": _Model(10.0),
         "expert_models": {1: _Model(101.0), 3: _Model(303.0)},
-        "nfl_yards_experiment": _rushing_candidate_blob(),
+        "nfl_yards_experiment": _affine_candidate_blob(),
         "sn_param": "direct",
     }
 
@@ -355,7 +355,7 @@ def test_rushing_candidate_live_prediction_routes_qb_rb_experts(monkeypatch):
         "SkewNormal",
         True,
         "ratio_meanyr",
-        RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+        AFFINE_STRATEGY,
     )
 
     assert params.loc["qb", "loc"] == 101.0

@@ -18,8 +18,8 @@ from sportstradamus.training.group_conditional_cdf._contracts import (
     PIT_LAMBDA_TIE_TOLERANCE,
     PIT_LAMBDAS,
     PLAYER_CV_FOLDS,
+    AffinePredictive,
     GroupCdfBlob,
-    RushingPredictive,
 )
 from sportstradamus.training.group_conditional_cdf._maps import fit_pit_map, ks_uniform
 
@@ -30,20 +30,20 @@ def fit_affine(mean: np.ndarray, result: np.ndarray) -> tuple[float, float]:
 
 
 def apply_affine(
-    pred: RushingPredictive,
+    pred: AffinePredictive,
     intercept: float,
     slope: float,
     floor: float = MARGINAL_MEAN_FLOOR,
-) -> RushingPredictive:
+) -> AffinePredictive:
     mean = np.clip(intercept + slope * pred.marginal_mean, floor, None)
-    return RushingPredictive(mean, pred.sigma, pred.alpha, pred.gate)
+    return AffinePredictive(mean, pred.sigma, pred.alpha, pred.gate)
 
 
-def subset_predictive(pred: RushingPredictive, rows: np.ndarray) -> RushingPredictive:
-    return RushingPredictive(*(getattr(pred, field)[rows] for field in pred.__dataclass_fields__))
+def subset_predictive(pred: AffinePredictive, rows: np.ndarray) -> AffinePredictive:
+    return AffinePredictive(*(getattr(pred, field)[rows] for field in pred.__dataclass_fields__))
 
 
-def raw_cdf_endpoints(pred: RushingPredictive, point: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def raw_cdf_endpoints(pred: AffinePredictive, point: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     conditional = pred.marginal_mean / (1.0 - pred.gate)
     loc = skewnormal_loc_from_mean(conditional, pred.sigma, pred.alpha)
     base = skewnorm.cdf(point, pred.alpha, loc=loc, scale=pred.sigma)

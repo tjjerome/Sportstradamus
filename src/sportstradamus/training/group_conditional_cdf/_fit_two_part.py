@@ -29,24 +29,24 @@ from sportstradamus.training.group_conditional_cdf._contracts import (
     RANDOMIZED_PIT_DRAWS,
     RANDOMIZED_PIT_SEED,
     ROLE_VALUES,
-    ReceivingCalibrationBlob,
-    ReceivingCalibrationFit,
+    TwoPartCalibrationBlob,
+    TwoPartCalibrationFit,
 )
-from sportstradamus.training.group_conditional_cdf._line_head import fit_temperature_receiving
+from sportstradamus.training.group_conditional_cdf._line_head import fit_temperature_two_part
 from sportstradamus.training.group_conditional_cdf._pool import fixed_pool_blob, pooled_probability
 from sportstradamus.training.group_conditional_cdf._selection import select_lambdas_crossfit
 from sportstradamus.training.group_conditional_cdf._validation import (
-    receiving_fit_inputs,
     subset_rows,
-    validated_receiving_blob,
+    two_part_fit_inputs,
+    validated_two_part_blob,
 )
 
 
-def fit_receiving(config: StrategyConfig, *args) -> ReceivingCalibrationFit:
+def fit_receiving(config: StrategyConfig, *args) -> TwoPartCalibrationFit:
     """Fit the receiving two-part corner by nested five-fold Player CV."""
     position_codes = discover_codes(args[11])
     groups = positive_groups(position_codes)
-    rows = receiving_fit_inputs(*args, position_codes)
+    rows = two_part_fit_inputs(*args, position_codes)
     n_rows = len(rows.result)
     uniforms = np.random.default_rng(RANDOMIZED_PIT_SEED).random((RANDOMIZED_PIT_DRAWS, n_rows))
     oof_pit = np.empty((RANDOMIZED_PIT_DRAWS, n_rows), dtype=float)
@@ -67,7 +67,7 @@ def fit_receiving(config: StrategyConfig, *args) -> ReceivingCalibrationFit:
         train_rows = subset_rows(rows, train)
         hold_rows = subset_rows(rows, hold)
         selection = select_lambdas_crossfit(train_rows, uniforms[:, train], position_codes, groups)
-        fold_temperature = fit_temperature_receiving(raw_over[train], rows.over_result[train])
+        fold_temperature = fit_temperature_two_part(raw_over[train], rows.over_result[train])
         models = fit_models(train_rows, uniforms[:, train], *selection.lambdas, groups)
         mapped_lower = apply_models(
             models,
@@ -133,9 +133,9 @@ def fit_receiving(config: StrategyConfig, *args) -> ReceivingCalibrationFit:
         fold_selection_keys.append(selection.key)
 
     final_selection = select_lambdas_crossfit(rows, uniforms, position_codes, groups)
-    final_temperature = fit_temperature_receiving(raw_over, rows.over_result)
+    final_temperature = fit_temperature_two_part(raw_over, rows.over_result)
     final_models = fit_models(rows, uniforms, *final_selection.lambdas, groups)
-    blob: ReceivingCalibrationBlob = {
+    blob: TwoPartCalibrationBlob = {
         "kind": config.candidate_name,
         "schema_version": config.schema_version,
         "line_probability_only": True,
@@ -144,7 +144,7 @@ def fit_receiving(config: StrategyConfig, *args) -> ReceivingCalibrationFit:
         "cdf": final_models,
         "probability_pool": fixed_pool_blob(),
     }
-    validated_receiving_blob(blob)
+    validated_two_part_blob(blob)
     if (
         not all(
             np.isfinite(values).all()
@@ -162,7 +162,7 @@ def fit_receiving(config: StrategyConfig, *args) -> ReceivingCalibrationFit:
         raise ValueError("nested receiving calibration produced nonfinite OOF output")
     if np.any(oof_line_low > oof_line_high + CDF_BRANCH_TOLERANCE):
         raise ValueError("mapped line lower endpoint exceeds upper endpoint")
-    return ReceivingCalibrationFit(
+    return TwoPartCalibrationFit(
         blob=blob,
         oof_pit_draws=oof_pit,
         oof_positive_pit=oof_positive,

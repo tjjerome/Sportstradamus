@@ -131,7 +131,7 @@ Options:
                                   Warms data/training_data/ without training;
                                   pair with --bypass-withholding to reach
                                   withheld cells.
-  --structural-strategy [auto|none|receiving-role-position-two-part-groupcdf-fixedlinear-v3|rushing-qb-rb-affine-groupcdf-bookpool-v1]
+  --structural-strategy [auto|none|affine-groupcdf-bookpool-v1|role-position-two-part-groupcdf-fixedlinear-v3]
                                   Structured post-processing strategy. 'auto'
                                   honors each cell's persisted
                                   structural_strategy; 'none' disables

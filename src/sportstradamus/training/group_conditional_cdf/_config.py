@@ -16,11 +16,11 @@ from typing import Literal
 import numpy as np
 
 from sportstradamus.training.group_conditional_cdf._contracts import (
-    RECEIVING_CANDIDATE_NAME,
-    RECEIVING_SCHEMA_VERSION,
+    AFFINE_SCHEMA_VERSION,
+    AFFINE_STRATEGY_NAME,
     ROLE_VALUES,
-    RUSHING_CANDIDATE_NAME,
-    RUSHING_SCHEMA_VERSION,
+    TWO_PART_SCHEMA_VERSION,
+    TWO_PART_STRATEGY_NAME,
 )
 
 GroupingKind = Literal["categorical_code", "role_by_position"]
@@ -63,9 +63,9 @@ class StrategyConfig:
     map_impl: MapImpl
 
 
-RECEIVING_CONFIG = StrategyConfig(
-    candidate_name=RECEIVING_CANDIDATE_NAME,
-    schema_version=RECEIVING_SCHEMA_VERSION,
+TWO_PART_CONFIG = StrategyConfig(
+    candidate_name=TWO_PART_STRATEGY_NAME,
+    schema_version=TWO_PART_SCHEMA_VERSION,
     affine_marginal=False,
     boundary=True,
     grouping="role_by_position",
@@ -75,9 +75,9 @@ RECEIVING_CONFIG = StrategyConfig(
     map_impl="isotonic_pit",
 )
 
-RUSHING_CONFIG = StrategyConfig(
-    candidate_name=RUSHING_CANDIDATE_NAME,
-    schema_version=RUSHING_SCHEMA_VERSION,
+AFFINE_CONFIG = StrategyConfig(
+    candidate_name=AFFINE_STRATEGY_NAME,
+    schema_version=AFFINE_SCHEMA_VERSION,
     affine_marginal=True,
     boundary=False,
     grouping="categorical_code",
@@ -87,7 +87,7 @@ RUSHING_CONFIG = StrategyConfig(
     map_impl="group_empirical_cdf",
 )
 
-RECEIVING_ROLES = ROLE_VALUES
+TWO_PART_ROLES = ROLE_VALUES
 
 
 def discover_codes(position: np.ndarray) -> tuple[int, ...]:

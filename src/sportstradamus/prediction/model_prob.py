@@ -45,17 +45,17 @@ from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.spiderLogger import logger
 from sportstradamus.training.baselines import get_target_normalization
 from sportstradamus.training.group_conditional_cdf import (
-    RECEIVING_SCHEMA_VERSION as RECEIVING_CALIBRATION_SCHEMA_VERSION,
+    ROLE_VALUES as TWO_PART_ROLE_VALUES,
 )
 from sportstradamus.training.group_conditional_cdf import (
-    ROLE_VALUES as RECEIVING_ROLE_VALUES,
+    TWO_PART_SCHEMA_VERSION as TWO_PART_CALIBRATION_SCHEMA_VERSION,
 )
 from sportstradamus.training.group_conditional_cdf import (
-    ReceivingLineOutput,
-    RushingPredictive,
-    apply_receiving_two_part_line,
-    apply_rushing_affine_groupcdf,
-    serialize_receiving_calibration,
+    AffinePredictive,
+    TwoPartLineOutput,
+    apply_affine_groupcdf,
+    apply_two_part_line,
+    serialize_two_part_calibration,
 )
 from sportstradamus.training.model_strategy_artifacts import (
     MODEL_STRATEGY_MODEL_KEY,
@@ -74,13 +74,13 @@ from sportstradamus.training.model_strategy_registry import (
 from sportstradamus.training.model_strategy_report_identity import resolve_report_identity
 from sportstradamus.training.posthoc import MEAN_STAGE, PROB_STAGE, apply_posthoc
 from sportstradamus.training.structural_strategies import (
-    RECEIVING_POSITIONS,
-    RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
-    RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
-    RUSHING_POSITIONS,
+    AFFINE_POSITIONS,
+    AFFINE_STRATEGY,
+    TWO_PART_POSITIONS,
+    TWO_PART_STRATEGY,
 )
 from sportstradamus.training.structural_strategies import (
-    ROLE_COLUMNS as RECEIVING_ROLE_COLUMNS,
+    ROLE_COLUMNS as TWO_PART_ROLE_COLUMNS,
 )
 
 # LazyArchive defers DuckDB lock acquisition until the first attribute
@@ -144,7 +144,7 @@ _BOOK_FALLBACK_VERSION = "book_fallback"
 
 # The receiving-v3 validation operator settles every quoted line from these
 # adjacent integer CDF endpoints, independent of the pickle's generic step.
-_RECEIVING_SETTLEMENT_STEP = 1.0
+_TWO_PART_SETTLEMENT_STEP = 1.0
 
 
 def resolve_model_version(filepath: str, filedict: dict) -> str:
@@ -638,12 +638,12 @@ def _build_prob_params(
         return params
 
     prob_params = _predict(model, playerStats)
-    if structural_strategy == RUSHING_AFFINE_GROUPCDF_BOOK_POOL:
+    if structural_strategy == AFFINE_STRATEGY:
         experts = filedict.get("expert_models")
-        if not isinstance(experts, dict) or any(code not in experts for code in RUSHING_POSITIONS):
+        if not isinstance(experts, dict) or any(code not in experts for code in AFFINE_POSITIONS):
             raise ValueError("rushing candidate pickle is missing its QB/RB expert models")
         position = pd.to_numeric(playerStats["Player position"], errors="coerce")
-        for code in RUSHING_POSITIONS:
+        for code in AFFINE_POSITIONS:
             rows = playerStats.loc[position.eq(code)]
             if rows.empty:
                 continue
@@ -789,21 +789,21 @@ def _zi_kwargs(offer_df: pd.DataFrame, dist: str, hist_gate: float) -> dict:
     return {}
 
 
-def _receiving_candidate_state(
+def _two_part_candidate_state(
     experiment_blob: dict,
 ) -> tuple[dict, dict]:
     """Return the active receiving-v3 calibration and feature-routing state."""
     if not isinstance(experiment_blob, dict):
         raise ValueError("receiving-v3 candidate is missing its algorithm state")
     if (
-        experiment_blob.get("schema_version") != RECEIVING_CALIBRATION_SCHEMA_VERSION
+        experiment_blob.get("schema_version") != TWO_PART_CALIBRATION_SCHEMA_VERSION
         or experiment_blob.get("status") != "active"
         or experiment_blob.get("line_probability_only") is not True
     ):
         raise ValueError("receiving-v3 candidate is not active on schema 3")
 
     routing = experiment_blob.get("routing")
-    expected_positions = {str(code): label for code, label in RECEIVING_POSITIONS.items()}
+    expected_positions = {str(code): label for code, label in TWO_PART_POSITIONS.items()}
     expected_routing_keys = {
         "kind",
         "thresholds",
@@ -817,7 +817,7 @@ def _receiving_candidate_state(
         not isinstance(routing, dict)
         or set(routing) != expected_routing_keys
         or routing.get("kind") != "pregame_role_by_position"
-        or routing.get("role_columns") != list(RECEIVING_ROLE_COLUMNS)
+        or routing.get("role_columns") != list(TWO_PART_ROLE_COLUMNS)
         or routing.get("positions") != expected_positions
     ):
         raise ValueError("receiving-v3 candidate has invalid feature routing state")
@@ -839,7 +839,7 @@ def _receiving_candidate_state(
     rate_maps = (raw_gate_rates, served_gate_rates)
     valid_rates = all(
         isinstance(rates, dict)
-        and set(rates) == set(RECEIVING_ROLE_VALUES)
+        and set(rates) == set(TWO_PART_ROLE_VALUES)
         and all(
             isinstance(value, (int, float, np.integer, np.floating))
             and not isinstance(value, (bool, np.bool_))
@@ -859,7 +859,7 @@ def _receiving_candidate_state(
         raise ValueError("receiving-v3 routing requires finite low/high gate state")
     if any(
         float(served_gate_rates[role]) != float(gate_model_weight) * float(raw_gate_rates[role])
-        for role in RECEIVING_ROLE_VALUES
+        for role in TWO_PART_ROLE_VALUES
     ):
         raise ValueError("receiving-v3 served gates do not match their persisted model weight")
 
@@ -903,19 +903,19 @@ def _receiving_candidate_state(
     calibration = experiment_blob.get("calibration")
     if not isinstance(calibration, dict):
         raise ValueError("receiving-v3 candidate is missing calibration state")
-    serialize_receiving_calibration(calibration)
+    serialize_two_part_calibration(calibration)
     return calibration, routing
 
 
-def _receiving_candidate_routes(
+def _two_part_candidate_routes(
     offer_df: pd.DataFrame,
     routing: dict,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Apply the persisted train-only role thresholds to live pregame features."""
-    missing = [column for column in RECEIVING_ROLE_COLUMNS if column not in offer_df]
+    missing = [column for column in TWO_PART_ROLE_COLUMNS if column not in offer_df]
     if missing:
         raise ValueError(f"missing receiving-v3 role column(s): {', '.join(missing)}")
-    features = offer_df.loc[:, RECEIVING_ROLE_COLUMNS].apply(pd.to_numeric, errors="coerce")
+    features = offer_df.loc[:, TWO_PART_ROLE_COLUMNS].apply(pd.to_numeric, errors="coerce")
     if not np.isfinite(features.to_numpy(dtype=float)).all():
         raise ValueError("receiving-v3 role inputs must be finite")
 
@@ -927,22 +927,22 @@ def _receiving_candidate_routes(
     positions = raw_position.astype(int)
     if (
         not np.array_equal(raw_position, positions)
-        or not np.isin(positions, tuple(RECEIVING_POSITIONS)).all()
+        or not np.isin(positions, tuple(TWO_PART_POSITIONS)).all()
     ):
         raise ValueError("receiving-v3 candidate requires WR/RB/TE position codes 2/3/4")
 
     role_score = (
-        features[RECEIVING_ROLE_COLUMNS[0]]
-        * features[RECEIVING_ROLE_COLUMNS[1]]
-        * features[RECEIVING_ROLE_COLUMNS[2]].clip(lower=0.0)
-        * features[RECEIVING_ROLE_COLUMNS[3]].clip(lower=0.0)
+        features[TWO_PART_ROLE_COLUMNS[0]]
+        * features[TWO_PART_ROLE_COLUMNS[1]]
+        * features[TWO_PART_ROLE_COLUMNS[2]].clip(lower=0.0)
+        * features[TWO_PART_ROLE_COLUMNS[3]].clip(lower=0.0)
     ).to_numpy(dtype=float)
     thresholds = np.asarray([routing["thresholds"][str(code)] for code in positions], dtype=float)
     roles = np.where(role_score < thresholds, "low", "high")
     return roles, positions
 
 
-def _receiving_candidate_cdf(
+def _two_part_candidate_cdf(
     offer_df: pd.DataFrame,
     base_mean: np.ndarray,
     points: np.ndarray,
@@ -976,28 +976,28 @@ def _receiving_candidate_cdf(
     return cdf
 
 
-def _apply_receiving_candidate_distribution(
+def _apply_two_part_candidate_distribution(
     offer_df: pd.DataFrame,
     base_mean: np.ndarray,
     calibration: dict,
     routing: dict,
-) -> ReceivingLineOutput:
+) -> TwoPartLineOutput:
     """Apply receiving-v3 endpoint maps and its fixed authentic-book pool."""
-    roles, positions = _receiving_candidate_routes(offer_df, routing)
+    roles, positions = _two_part_candidate_routes(offer_df, routing)
     served_gate = np.asarray([routing["served_gate_rates"][role] for role in roles], dtype=float)
     offer_df["Model Gate"] = served_gate
     offer_df["Projection"] = (1.0 - served_gate) * np.asarray(base_mean, dtype=float)
     line = offer_df["Line"].to_numpy(dtype=float)
     if not np.isfinite(line).all():
         raise ValueError("receiving-v3 candidate requires finite quoted lines")
-    low_point = np.ceil(line - _RECEIVING_SETTLEMENT_STEP)
-    high_point = np.floor(line + _RECEIVING_SETTLEMENT_STEP)
-    f0 = _receiving_candidate_cdf(offer_df, base_mean, np.zeros(len(offer_df)))
-    line_low = _receiving_candidate_cdf(offer_df, base_mean, low_point)
-    line_high = _receiving_candidate_cdf(offer_df, base_mean, high_point)
+    low_point = np.ceil(line - _TWO_PART_SETTLEMENT_STEP)
+    high_point = np.floor(line + _TWO_PART_SETTLEMENT_STEP)
+    f0 = _two_part_candidate_cdf(offer_df, base_mean, np.zeros(len(offer_df)))
+    line_low = _two_part_candidate_cdf(offer_df, base_mean, low_point)
+    line_high = _two_part_candidate_cdf(offer_df, base_mean, high_point)
     book_over = offer_df["Market EV"].to_numpy(dtype=float)
     authentic = np.isfinite(book_over)
-    return apply_receiving_two_part_line(
+    return apply_two_part_line(
         calibration,
         line_low,
         line_high,
@@ -1009,7 +1009,7 @@ def _apply_receiving_candidate_distribution(
     )
 
 
-def _rushing_candidate_calibration(experiment_blob: dict) -> dict:
+def _affine_candidate_calibration(experiment_blob: dict) -> dict:
     """Return the active rushing calibration payload, rejecting partial pickles."""
     if not isinstance(experiment_blob, dict):
         raise ValueError("rushing candidate is missing its algorithm state")
@@ -1024,27 +1024,27 @@ def _rushing_candidate_calibration(experiment_blob: dict) -> dict:
     return calibration
 
 
-def _apply_rushing_candidate_distribution(
+def _apply_affine_candidate_distribution(
     offer_df: pd.DataFrame,
     base_mean: np.ndarray,
     calibration: dict,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Apply the affine/CDF head and return conditional mean plus final line P(over)."""
     position = pd.to_numeric(offer_df["Player position"], errors="coerce").to_numpy()
-    if not np.isin(position, tuple(RUSHING_POSITIONS)).all():
+    if not np.isin(position, tuple(AFFINE_POSITIONS)).all():
         raise ValueError("rushing candidate received a non-QB/RB offer")
     gate = (
         offer_df["Model Gate"].to_numpy(dtype=float)
         if "Model Gate" in offer_df
         else np.zeros(len(offer_df), dtype=float)
     )
-    predictive = RushingPredictive(
+    predictive = AffinePredictive(
         marginal_mean=np.asarray(base_mean, dtype=float) * (1.0 - gate),
         sigma=offer_df["Model Sigma"].to_numpy(dtype=float),
         alpha=offer_df["Model Skew"].to_numpy(dtype=float),
         gate=gate,
     )
-    output = apply_rushing_affine_groupcdf(
+    output = apply_affine_groupcdf(
         calibration,
         predictive,
         offer_df["Line"].to_numpy(dtype=float),
@@ -1361,13 +1361,13 @@ def model_prob(
     pit_recal_blob = filedict.get("pit_recal_blob", None)
     nfl_yards_experiment = filedict.get("nfl_yards_experiment")
     receiving_candidate_state = (
-        _receiving_candidate_state(nfl_yards_experiment)
-        if structural_strategy == RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR
+        _two_part_candidate_state(nfl_yards_experiment)
+        if structural_strategy == TWO_PART_STRATEGY
         else None
     )
     rushing_candidate_calibration = (
-        _rushing_candidate_calibration(nfl_yards_experiment)
-        if structural_strategy == RUSHING_AFFINE_GROUPCDF_BOOK_POOL
+        _affine_candidate_calibration(nfl_yards_experiment)
+        if structural_strategy == AFFINE_STRATEGY
         else None
     )
     if receiving_candidate_state is not None and (
@@ -1410,7 +1410,7 @@ def model_prob(
     offer_df = _drop_no_history_offers(offer_df)
     if rushing_candidate_calibration is not None:
         position = pd.to_numeric(offer_df.get("Player position"), errors="coerce")
-        supported = position.isin(RUSHING_POSITIONS)
+        supported = position.isin(AFFINE_POSITIONS)
         if (~supported).any():
             logger.warning(
                 f"dropped {int((~supported).sum())} non-QB/RB rushing offer(s) outside "
@@ -1439,7 +1439,7 @@ def model_prob(
 
     receiving_candidate_output = None
     if receiving_candidate_state is not None:
-        receiving_candidate_output = _apply_receiving_candidate_distribution(
+        receiving_candidate_output = _apply_two_part_candidate_distribution(
             offer_df,
             base_mean,
             *receiving_candidate_state,
@@ -1447,7 +1447,7 @@ def model_prob(
 
     rushing_candidate_over = None
     if rushing_candidate_calibration is not None:
-        base_mean, rushing_candidate_over = _apply_rushing_candidate_distribution(
+        base_mean, rushing_candidate_over = _apply_affine_candidate_distribution(
             offer_df,
             base_mean,
             rushing_candidate_calibration,

@@ -7,25 +7,25 @@ import pandas as pd
 from scipy.stats import skewnorm
 
 from sportstradamus.helpers import skewnormal_loc_from_mean
-from sportstradamus.training.group_conditional_cdf import fit_receiving_two_part_groupcdf
+from sportstradamus.training.group_conditional_cdf import fit_two_part_groupcdf
 from sportstradamus.training.group_conditional_cdf._apply import (
-    apply_receiving_two_part_line,
-    serialize_receiving_calibration,
+    apply_two_part_line,
+    serialize_two_part_calibration,
 )
 from sportstradamus.training.group_conditional_cdf._contracts import (
-    RECEIVING_POSITION_CODES,
-    ReceivingCalibrationFit,
+    ROLE_VALUES as TWO_PART_ROLE_VALUES,
 )
 from sportstradamus.training.group_conditional_cdf._contracts import (
-    ROLE_VALUES as RECEIVING_ROLE_VALUES,
-)
-from sportstradamus.training.group_conditional_cdf._pipeline_steps_receiving_support import (
-    _receiving_nested_support_audit,
+    TWO_PART_POSITION_CODES,
+    TwoPartCalibrationFit,
 )
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_shared import (
     _ks_uniform,
     _oof_brier_arrays,
     _validation_split_fingerprint,
+)
+from sportstradamus.training.group_conditional_cdf._pipeline_steps_two_part_support import (
+    _two_part_nested_support_audit,
 )
 from sportstradamus.training.scorecard import (
     _bootstrap_ratio_ci_clustered,
@@ -34,7 +34,7 @@ from sportstradamus.training.scorecard import (
     _segment_masks,
 )
 from sportstradamus.training.structural_strategies import (
-    RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
+    TWO_PART_STRATEGY,
 )
 
 
@@ -49,7 +49,7 @@ def _explicit_boolean_mask(values, expected: bool) -> np.ndarray:
     )
 
 
-def _receiving_gate_vector(value, length: int) -> np.ndarray:
+def _two_part_gate_vector(value, length: int) -> np.ndarray:
     if value is None:
         return np.zeros(length, dtype=float)
     gate = np.asarray(value, dtype=float)
@@ -69,7 +69,7 @@ def _skewnormal_cdf_endpoints(mean, sigma, alpha, gate, point) -> tuple[np.ndarr
     shapes = np.asarray(alpha, dtype=float)
     points = np.asarray(point, dtype=float)
     n_rows = len(means)
-    gates = _receiving_gate_vector(gate, n_rows)
+    gates = _two_part_gate_vector(gate, n_rows)
     if any(array.shape != (n_rows,) for array in (scales, shapes, points)):
         raise ValueError("receiving predictive inputs must be row-aligned vectors")
     if not all(np.isfinite(array).all() for array in (means, scales, shapes, points)):
@@ -88,8 +88,8 @@ def _skewnormal_cdf_endpoints(mean, sigma, alpha, gate, point) -> tuple[np.ndarr
     return np.clip(upper - atom, 0.0, 1.0), np.clip(upper, 0.0, 1.0)
 
 
-def _receiving_pit_diagnostics(
-    fit: ReceivingCalibrationFit,
+def _two_part_pit_diagnostics(
+    fit: TwoPartCalibrationFit,
     result: np.ndarray,
     roles: np.ndarray,
     positions: np.ndarray,
@@ -102,25 +102,25 @@ def _receiving_pit_diagnostics(
     return {
         "global": mean_ks(fit.oof_pit_draws),
         "role_full": {
-            role: mean_ks(fit.oof_pit_draws[:, roles == role]) for role in RECEIVING_ROLE_VALUES
+            role: mean_ks(fit.oof_pit_draws[:, roles == role]) for role in TWO_PART_ROLE_VALUES
         },
         "role_positive": {
             role: _ks_uniform(fit.oof_positive_pit[(roles == role) & positive])
-            for role in RECEIVING_ROLE_VALUES
+            for role in TWO_PART_ROLE_VALUES
         },
         "position_full": {
             str(position): mean_ks(fit.oof_pit_draws[:, positions == position])
-            for position in RECEIVING_POSITION_CODES
+            for position in TWO_PART_POSITION_CODES
         },
         "position_positive": {
             str(position): _ks_uniform(fit.oof_positive_pit[(positions == position) & positive])
-            for position in RECEIVING_POSITION_CODES
+            for position in TWO_PART_POSITION_CODES
         },
     }
 
 
-def _receiving_candidate_oof_audit(
-    fit: ReceivingCalibrationFit,
+def _two_part_candidate_oof_audit(
+    fit: TwoPartCalibrationFit,
     fused: dict,
     splits: dict,
     roles: np.ndarray,
@@ -138,7 +138,7 @@ def _receiving_candidate_oof_audit(
     star_mask, bench_mask = _segment_masks(gate_frame)
     gate2_z = _gate23_segment_match(marginal_mean, result, star_mask)[-1]
     gate3_z = _gate23_segment_match(marginal_mean, result, bench_mask)[-1]
-    pits = _receiving_pit_diagnostics(fit, result, roles, positions)
+    pits = _two_part_pit_diagnostics(fit, result, roles, positions)
     ece = _gate5_ece_debiased(fit.oof_pooled_over, outcome)
     rate_error = abs(float(fit.oof_pooled_over.mean() - outcome.mean()))
 
@@ -215,7 +215,7 @@ def _receiving_candidate_oof_audit(
     return audit
 
 
-def _step_apply_receiving_two_part_groupcdf_candidate(
+def _step_apply_two_part_groupcdf_candidate(
     calibrated: dict,
     fused: dict,
     splits: dict,
@@ -262,18 +262,18 @@ def _step_apply_receiving_two_part_groupcdf_candidate(
     positions_test = positions_test.astype(int)
 
     raw_gate_rates = context.get("gate_rates")
-    if not isinstance(raw_gate_rates, dict) or set(raw_gate_rates) != set(RECEIVING_ROLE_VALUES):
+    if not isinstance(raw_gate_rates, dict) or set(raw_gate_rates) != set(TWO_PART_ROLE_VALUES):
         raise ValueError("receiving candidate requires train-only low/high gate rates")
     model_weight = float(fused["model_weight"])
     if not np.isfinite(model_weight) or not 0.0 <= model_weight <= 1.0:
         raise ValueError("receiving candidate model weight must lie in [0, 1]")
     served_gate_rates = {
-        role: model_weight * float(raw_gate_rates[role]) for role in RECEIVING_ROLE_VALUES
+        role: model_weight * float(raw_gate_rates[role]) for role in TWO_PART_ROLE_VALUES
     }
-    gate_val = _receiving_gate_vector(
+    gate_val = _two_part_gate_vector(
         np.asarray([served_gate_rates[role] for role in roles_val]), len(index_val)
     )
-    gate_test = _receiving_gate_vector(
+    gate_test = _two_part_gate_vector(
         np.asarray([served_gate_rates[role] for role in roles_test]), len(index_test)
     )
     mean_val = np.asarray(fused["weighted_mean_val"], dtype=float)
@@ -321,7 +321,7 @@ def _step_apply_receiving_two_part_groupcdf_candidate(
         _required_series("odds_synthetic_test", index_test, allow_missing=True), False
     )
     outcome = (result >= line_val).astype(float)
-    support_audit = _receiving_nested_support_audit(
+    support_audit = _two_part_nested_support_audit(
         result,
         outcome,
         authentic_val,
@@ -329,7 +329,7 @@ def _step_apply_receiving_two_part_groupcdf_candidate(
         roles_val,
         positions_val,
     )
-    fit = fit_receiving_two_part_groupcdf(
+    fit = fit_two_part_groupcdf(
         result_upper,
         result_lower,
         zero_val,
@@ -343,10 +343,10 @@ def _step_apply_receiving_two_part_groupcdf_candidate(
         roles_val,
         positions_val,
     )
-    validation_audit = _receiving_candidate_oof_audit(
+    validation_audit = _two_part_candidate_oof_audit(
         fit, fused, splits, roles_val, positions_val, gate_val
     )
-    test_output = apply_receiving_two_part_line(
+    test_output = apply_two_part_line(
         fit.blob,
         line_low_test,
         line_high_test,
@@ -357,7 +357,7 @@ def _step_apply_receiving_two_part_groupcdf_candidate(
         authentic_test,
     )
 
-    calibration_payload = serialize_receiving_calibration(fit.blob)
+    calibration_payload = serialize_two_part_calibration(fit.blob)
     fused["gate_blend_val"] = gate_val
     fused["gate_blend_test"] = gate_test
     calibrated.update(
@@ -379,7 +379,7 @@ def _step_apply_receiving_two_part_groupcdf_candidate(
             "nfl_yards_routes": context["routes"],
             "nfl_yards_experiment_blob": {
                 "schema_version": 3,
-                "slug": RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
+                "slug": TWO_PART_STRATEGY,
                 "status": "active",
                 "kill_reason": None,
                 "line_probability_only": True,

@@ -20,7 +20,7 @@ from sportstradamus.training.model_strategy_artifacts import MODEL_STRATEGY_MODE
 from sportstradamus.training.model_strategy_registry import corner_fingerprint, get_strategy
 from sportstradamus.training.pipeline import _build_filedict, _model_version
 from sportstradamus.training.structural_strategies import (
-    RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
+    TWO_PART_STRATEGY,
 )
 
 # ``sportstradamus.prediction`` re-exports ``model_prob`` the function, shadowing
@@ -186,7 +186,7 @@ def test_model_strategy_corner_fingerprint_changes_with_each_selected_control():
 def test_build_filedict_keeps_nfl_payload_as_structural_adapter_state():
     payload = {
         "schema_version": 3,
-        "slug": RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
+        "slug": TWO_PART_STRATEGY,
         "status": "active",
         "validation_audit": {"split_fingerprint_sha256": "split-123"},
     }
@@ -195,7 +195,7 @@ def test_build_filedict_keeps_nfl_payload_as_structural_adapter_state():
         {
             "league": "NFL",
             "market": "receiving yards",
-            "structural_strategy": RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
+            "structural_strategy": TWO_PART_STRATEGY,
             "algorithm_payload": payload,
             "selected_controls": {
                 "dist": "SkewNormal",
@@ -213,8 +213,8 @@ def test_build_filedict_keeps_nfl_payload_as_structural_adapter_state():
 
     assert fd["nfl_yards_experiment"] is payload
     identity = fd[MODEL_STRATEGY_MODEL_KEY]
-    assert identity["strategy_slug"] == RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR
-    assert identity["structural_strategy"] == RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR
+    assert identity["strategy_slug"] == TWO_PART_STRATEGY
+    assert identity["structural_strategy"] == TWO_PART_STRATEGY
     assert identity["split_fingerprint"] == "split-123"
 
 

@@ -16,11 +16,11 @@ from sportstradamus.training.role_specs import (
     role_spec_for,
 )
 from sportstradamus.training.structural_strategies import (
-    RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
-    RECEIVING_SUPPORT,
-    RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
-    RUSHING_POSITIONS,
-    RUSHING_SUPPORT,
+    AFFINE_POSITIONS,
+    AFFINE_STRATEGY,
+    AFFINE_SUPPORT,
+    TWO_PART_STRATEGY,
+    TWO_PART_SUPPORT,
 )
 
 
@@ -87,18 +87,18 @@ def _fallback_routes(frames: Mapping[str, pd.DataFrame]) -> dict[str, pd.Series]
     }
 
 
-def build_receiving_role_context(
+def build_two_part_context(
     splits: Mapping[str, object],
     *,
     league: str,
     market: str,
-    support_floor: Mapping[str, int] = RECEIVING_SUPPORT,
-    slug: str = RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
+    support_floor: Mapping[str, int] = TWO_PART_SUPPORT,
+    slug: str = TWO_PART_STRATEGY,
 ) -> dict:
     """Derive train-only role thresholds, routes, and support for the two-part method."""
     # style: allow-complexity — one try/except sequences threshold→route→support→gate
     # derivation so any single failure collapses to one killed_fallback payload.
-    if slug != RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR:
+    if slug != TWO_PART_STRATEGY:
         raise ValueError(f"unsupported receiving experiment {slug!r}")
     spec = role_spec_for(league, market)
     if spec is None:
@@ -191,14 +191,14 @@ def build_receiving_role_context(
     }
 
 
-def build_rushing_expert_context(
+def build_affine_expert_context(
     splits: Mapping[str, object],
     *,
-    support_floor: Mapping[str, int] = RUSHING_SUPPORT,
-    slug: str = RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+    support_floor: Mapping[str, int] = AFFINE_SUPPORT,
+    slug: str = AFFINE_STRATEGY,
 ) -> dict:
     """Route QB/RB rows and enforce support floors for the final rushing candidate."""
-    if slug != RUSHING_AFFINE_GROUPCDF_BOOK_POOL:
+    if slug != AFFINE_STRATEGY:
         raise ValueError(f"unsupported rushing experiment {slug!r}")
     frames = {split: splits[f"X_{split}"] for split in ("train", "validation", "test")}
     support: dict[str, dict[str, int]] = {}
@@ -210,7 +210,7 @@ def build_rushing_expert_context(
                 raise ValueError("missing Player position")
             position = pd.to_numeric(frame["Player position"], errors="coerce")
             positions[split] = position
-            routes[split] = position.map(RUSHING_POSITIONS).fillna("pooled_fallback")
+            routes[split] = position.map(AFFINE_POSITIONS).fillna("pooled_fallback")
 
         players = {
             "train": splits.get("players_train"),
@@ -218,10 +218,10 @@ def build_rushing_expert_context(
         }
         support = {
             str(code): _support_for_group(routes, players, label)
-            for code, label in RUSHING_POSITIONS.items()
+            for code, label in AFFINE_POSITIONS.items()
         }
         failures = [
-            f"{RUSHING_POSITIONS[int(code)]}.{key}={counts[key]}<{minimum}"
+            f"{AFFINE_POSITIONS[int(code)]}.{key}={counts[key]}<{minimum}"
             for code, counts in support.items()
             for key, minimum in support_floor.items()
             if counts[key] < minimum

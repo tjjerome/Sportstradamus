@@ -9,15 +9,15 @@ from __future__ import annotations
 import numpy as np
 from sklearn.model_selection import GroupKFold
 
-from sportstradamus.training.group_conditional_cdf._contracts import RECEIVING_POSITION_CODES
 from sportstradamus.training.group_conditional_cdf._contracts import (
-    ROLE_VALUES as RECEIVING_ROLE_VALUES,
+    ROLE_VALUES as TWO_PART_ROLE_VALUES,
 )
+from sportstradamus.training.group_conditional_cdf._contracts import TWO_PART_POSITION_CODES
 
 # Frozen receiving-v3 support protocol. These floors were checked across the
 # full/outer/inner Player-grouped fit partitions before the candidate was ever
 # allowed to inspect the independent test outcomes.
-_RECEIVING_SUPPORT_FLOORS: dict[str, int] = {
+_TWO_PART_SUPPORT_FLOORS: dict[str, int] = {
     "fit_rows": 1000,
     "fit_players": 150,
     "positive_rows": 100,
@@ -39,7 +39,7 @@ _RECEIVING_SUPPORT_FLOORS: dict[str, int] = {
 }
 
 
-def _receiving_group_partitions(players: np.ndarray, all_rows: np.ndarray):
+def _two_part_group_partitions(players: np.ndarray, all_rows: np.ndarray):
     """Build the nested Player-grouped CV partitions the receiving audit walks.
 
     Returns ``(outer, top_partitions, fit_partitions, hold_partitions,
@@ -77,7 +77,7 @@ def _receiving_group_partitions(players: np.ndarray, all_rows: np.ndarray):
     return outer, top_partitions, fit_partitions, hold_partitions, required_fit
 
 
-def _receiving_positive_support(
+def _two_part_positive_support(
     result: np.ndarray,
     players: np.ndarray,
     roles: np.ndarray,
@@ -88,8 +88,8 @@ def _receiving_positive_support(
     """Minimum positive-support fit/hold cell for every role×position group."""
     positive_support: dict[str, dict[str, int | str]] = {}
     positive_hold_support: dict[str, dict[str, int | str]] = {}
-    for role in RECEIVING_ROLE_VALUES:
-        for position in RECEIVING_POSITION_CODES:
+    for role in TWO_PART_ROLE_VALUES:
+        for position in TWO_PART_POSITION_CODES:
             group = f"{role}_pos{position}"
             records = []
             for name, index in fit_partitions:
@@ -128,7 +128,7 @@ def _receiving_positive_support(
     return positive_support, positive_hold_support
 
 
-def _receiving_nonpositive_support(
+def _two_part_nonpositive_support(
     result: np.ndarray,
     players: np.ndarray,
     roles: np.ndarray,
@@ -137,7 +137,7 @@ def _receiving_nonpositive_support(
 ) -> tuple[dict, dict]:
     """Non-positive per-role support plus the RB boundary-cell minimums."""
     nonpositive_support: dict[str, dict[str, int | str]] = {}
-    for role in RECEIVING_ROLE_VALUES:
+    for role in TWO_PART_ROLE_VALUES:
         records = []
         for name, index in fit_partitions:
             mask = (roles[index] == role) & (result[index] <= 0.0)
@@ -187,7 +187,7 @@ def _receiving_nonpositive_support(
     return nonpositive_support, rb_minimum
 
 
-def _receiving_temperature_support(
+def _two_part_temperature_support(
     outcome: np.ndarray,
     players: np.ndarray,
     authentic: np.ndarray,
@@ -223,7 +223,7 @@ def _receiving_temperature_support(
     return temperature_support, authentic_holds
 
 
-def _receiving_rb_boundary_ok(rb_minimum: dict, floor: dict) -> bool:
+def _two_part_rb_boundary_ok(rb_minimum: dict, floor: dict) -> bool:
     """Whether the RB boundary cell clears every RB support floor."""
     return (
         rb_minimum["rows"] >= floor["rb_rows"]
@@ -235,7 +235,7 @@ def _receiving_rb_boundary_ok(rb_minimum: dict, floor: dict) -> bool:
     )
 
 
-def _receiving_support_guards(
+def _two_part_support_guards(
     players: np.ndarray,
     roles: np.ndarray,
     positions: np.ndarray,
@@ -249,10 +249,10 @@ def _receiving_support_guards(
     authentic_holds: list,
 ) -> dict:
     """Evaluate every receiving support floor against the computed partitions."""
-    floor = _RECEIVING_SUPPORT_FLOORS
+    floor = _TWO_PART_SUPPORT_FLOORS
     return {
-        "roles_exact": set(np.unique(roles)) == set(RECEIVING_ROLE_VALUES),
-        "positions_exact": set(np.unique(positions)) == set(RECEIVING_POSITION_CODES),
+        "roles_exact": set(np.unique(roles)) == set(TWO_PART_ROLE_VALUES),
+        "positions_exact": set(np.unique(positions)) == set(TWO_PART_POSITION_CODES),
         "required_fit_size": all(
             values["rows"] >= floor["fit_rows"] and values["players"] >= floor["fit_players"]
             for values in required_fit
@@ -270,7 +270,7 @@ def _receiving_support_guards(
             and values["minimum_players"] >= floor["nonpositive_players"]
             for values in nonpositive_support.values()
         ),
-        "rb_boundary_support": _receiving_rb_boundary_ok(rb_minimum, floor),
+        "rb_boundary_support": _two_part_rb_boundary_ok(rb_minimum, floor),
         "temperature_support": all(
             values["players"] >= floor["temperature_players"]
             and min(values["class_0_rows"], values["class_1_rows"])
@@ -291,7 +291,7 @@ def _receiving_support_guards(
     }
 
 
-def _receiving_nested_support_audit(
+def _two_part_nested_support_audit(
     result: np.ndarray,
     outcome: np.ndarray,
     authentic: np.ndarray,
@@ -304,18 +304,18 @@ def _receiving_nested_support_audit(
     all_rows = np.arange(n_rows)
 
     outer, top_partitions, fit_partitions, hold_partitions, required_fit = (
-        _receiving_group_partitions(players, all_rows)
+        _two_part_group_partitions(players, all_rows)
     )
-    positive_support, positive_hold_support = _receiving_positive_support(
+    positive_support, positive_hold_support = _two_part_positive_support(
         result, players, roles, positions, fit_partitions, hold_partitions
     )
-    nonpositive_support, rb_minimum = _receiving_nonpositive_support(
+    nonpositive_support, rb_minimum = _two_part_nonpositive_support(
         result, players, roles, positions, fit_partitions
     )
-    temperature_support, authentic_holds = _receiving_temperature_support(
+    temperature_support, authentic_holds = _two_part_temperature_support(
         outcome, players, authentic, top_partitions, outer
     )
-    guards = _receiving_support_guards(
+    guards = _two_part_support_guards(
         players,
         roles,
         positions,

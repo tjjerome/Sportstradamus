@@ -7,11 +7,11 @@ import json
 import numpy as np
 import pandas as pd
 
-from sportstradamus.training.group_conditional_cdf import fit_rushing_affine_groupcdf
-from sportstradamus.training.group_conditional_cdf._apply import apply_rushing_affine_groupcdf
+from sportstradamus.training.group_conditional_cdf import fit_affine_groupcdf
+from sportstradamus.training.group_conditional_cdf._apply import apply_affine_groupcdf
 from sportstradamus.training.group_conditional_cdf._contracts import (
-    RushingCalibrationFit,
-    RushingPredictive,
+    AffineCalibrationFit,
+    AffinePredictive,
 )
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_shared import (
     _ks_uniform,
@@ -26,13 +26,13 @@ from sportstradamus.training.scorecard import (
     _segment_masks,
 )
 from sportstradamus.training.structural_strategies import (
-    RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
-    RUSHING_POSITIONS,
+    AFFINE_POSITIONS,
+    AFFINE_STRATEGY,
 )
 
 
-def _rushing_candidate_oof_audit(
-    fit: RushingCalibrationFit,
+def _affine_candidate_oof_audit(
+    fit: AffineCalibrationFit,
     splits: dict,
     positions: np.ndarray,
 ) -> dict:
@@ -42,10 +42,10 @@ def _rushing_candidate_oof_audit(
 
     pit_global = float(np.mean([_ks_uniform(draw) for draw in fit.oof_pit_draws]))
     pit_by_position = {
-        RUSHING_POSITIONS[code]: float(
+        AFFINE_POSITIONS[code]: float(
             np.mean([_ks_uniform(draw[positions == code]) for draw in fit.oof_pit_draws])
         )
-        for code in RUSHING_POSITIONS
+        for code in AFFINE_POSITIONS
     }
     gate_frame = splits["X_validation"].copy()
     gate_frame["Result"] = result
@@ -116,7 +116,7 @@ def _rushing_candidate_oof_audit(
     return audit
 
 
-def _step_apply_rushing_affine_groupcdf_candidate(
+def _step_apply_affine_groupcdf_candidate(
     calibrated: dict,
     fused: dict,
     splits: dict,
@@ -143,19 +143,19 @@ def _step_apply_rushing_affine_groupcdf_candidate(
 
     gate_val = _gate_vector(fused["gate_blend_val"], len(index_val))
     gate_test = _gate_vector(fused["gate_blend_test"], len(index_test))
-    predictive_val = RushingPredictive(
+    predictive_val = AffinePredictive(
         marginal_mean=np.asarray(fused["weighted_mean_val"], dtype=float) * (1.0 - gate_val),
         sigma=np.asarray(fused["sn_sigma_blend_val"], dtype=float),
         alpha=np.asarray(fused["sn_alpha_blend_val"], dtype=float),
         gate=gate_val,
     )
-    predictive_test = RushingPredictive(
+    predictive_test = AffinePredictive(
         marginal_mean=np.asarray(fused["weighted_mean"], dtype=float) * (1.0 - gate_test),
         sigma=np.asarray(fused["sn_sigma_blend_test"], dtype=float),
         alpha=np.asarray(fused["sn_alpha_blend_test"], dtype=float),
         gate=gate_test,
     )
-    fit = fit_rushing_affine_groupcdf(
+    fit = fit_affine_groupcdf(
         predictive_val,
         splits["y_validation"]["Result"].reindex(index_val).to_numpy(dtype=float),
         splits["B_validation"]["Line"].reindex(index_val).to_numpy(dtype=float),
@@ -163,15 +163,15 @@ def _step_apply_rushing_affine_groupcdf_candidate(
         positions_val,
         players_val,
     )
-    audit = _rushing_candidate_oof_audit(fit, splits, positions_val.astype(int))
-    validation_output = apply_rushing_affine_groupcdf(
+    audit = _affine_candidate_oof_audit(fit, splits, positions_val.astype(int))
+    validation_output = apply_affine_groupcdf(
         fit.blob,
         predictive_val,
         splits["B_validation"]["Line"].reindex(index_val).to_numpy(dtype=float),
         splits["B_validation"]["Odds"].reindex(index_val).to_numpy(dtype=float),
         positions_val,
     )
-    test_output = apply_rushing_affine_groupcdf(
+    test_output = apply_affine_groupcdf(
         fit.blob,
         predictive_test,
         splits["B_test"]["Line"].reindex(index_test).to_numpy(dtype=float),
@@ -203,18 +203,18 @@ def _step_apply_rushing_affine_groupcdf_candidate(
                         sort_keys=True,
                         separators=(",", ":"),
                     )
-                    for code in RUSHING_POSITIONS
+                    for code in AFFINE_POSITIONS
                 }
             ),
             "nfl_yards_experiment_blob": {
                 "schema_version": 1,
-                "slug": RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+                "slug": AFFINE_STRATEGY,
                 "status": "active",
                 "kill_reason": None,
                 "line_probability_only": True,
                 "routing": {
                     "kind": "player_position",
-                    "experts": {str(code): label for code, label in RUSHING_POSITIONS.items()},
+                    "experts": {str(code): label for code, label in AFFINE_POSITIONS.items()},
                 },
                 "support": context["support"],
                 "calibration": fit.blob,

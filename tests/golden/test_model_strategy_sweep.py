@@ -43,10 +43,10 @@ from sportstradamus.training.model_strategy_registry import (
 from sportstradamus.training.model_strategy_report_identity import resolve_report_identity
 from sportstradamus.training.role_specs import role_spec_for
 from sportstradamus.training.structural_strategies import (
-    RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR as RECEIVING,
+    AFFINE_STRATEGY as RUSHING,
 )
 from sportstradamus.training.structural_strategies import (
-    RUSHING_AFFINE_GROUPCDF_BOOK_POOL as RUSHING,
+    TWO_PART_STRATEGY as RECEIVING,
 )
 
 _MATRIX_SHA = "matrix-123"

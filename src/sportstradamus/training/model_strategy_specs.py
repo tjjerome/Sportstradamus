@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from sportstradamus.training.structural_strategies import (
-    RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
-    RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+    AFFINE_STRATEGY,
+    TWO_PART_STRATEGY,
 )
 
 _CONTROL_FLAGS = {
@@ -222,7 +222,7 @@ BUILTIN_SPEC_DATA = (
     *_BASE_SPECS,
     *_COMPATIBILITY_SPECS,
     _yards(
-        RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
+        TWO_PART_STRATEGY,
         3,
         (
             "NFLYardsExperiment",
@@ -237,7 +237,7 @@ BUILTIN_SPEC_DATA = (
         applicability={"distribution_classes": ("continuous",), "role_registry_gated": True},
     ),
     _yards(
-        RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+        AFFINE_STRATEGY,
         1,
         (
             "NFLYardsExperiment",

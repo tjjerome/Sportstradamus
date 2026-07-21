@@ -25,8 +25,8 @@ def _identity_map(lam=0.0):
 
 def _manual_blob():
     return {
-        "kind": rushing.RUSHING_CANDIDATE_NAME,
-        "schema_version": rushing.RUSHING_SCHEMA_VERSION,
+        "kind": rushing.AFFINE_STRATEGY_NAME,
+        "schema_version": rushing.AFFINE_SCHEMA_VERSION,
         "line_probability_only": True,
         "affine": {
             "kind": "affine_marginal_mean",
@@ -72,7 +72,7 @@ def _synthetic_validation():
     line = np.floor(true_marginal / 5.0) * 5.0 + 0.5
     true_under = gate + (1.0 - gate) * skewnorm.cdf(line, alpha, loc=loc, scale=sigma)
     book_over = np.clip(1.0 - true_under + rng.normal(0.0, 0.13, n_rows), 0.02, 0.98)
-    predictive = rushing.RushingPredictive(model_marginal, sigma, alpha, gate)
+    predictive = rushing.AffinePredictive(model_marginal, sigma, alpha, gate)
     return predictive, result, line, book_over, position, player
 
 
@@ -111,7 +111,7 @@ def test_zero_atom_maps_lower_and_upper_cdf_endpoints_separately():
         "slope": 1.0,
         "floor": rushing.MARGINAL_MEAN_FLOOR,
     }
-    predictive = rushing.RushingPredictive(
+    predictive = rushing.AffinePredictive(
         marginal_mean=np.array([9.0]),
         sigma=np.array([5.0]),
         alpha=np.array([0.0]),
@@ -123,8 +123,8 @@ def test_zero_atom_maps_lower_and_upper_cdf_endpoints_separately():
     expected_lower = np.interp(raw_lower, [0.0, 0.5, 1.0], [0.0, 0.25, 1.0])
     expected_upper = np.interp(raw_upper, [0.0, 0.5, 1.0], [0.0, 0.25, 1.0])
 
-    lower, upper = rushing.rushing_cdf_endpoints(blob, predictive, np.array([0.0]), np.array([1]))
-    pit = rushing.rushing_randomized_pit(blob, predictive, np.array([0.0]), np.array([1]))
+    lower, upper = rushing.affine_cdf_endpoints(blob, predictive, np.array([0.0]), np.array([1]))
+    pit = rushing.affine_randomized_pit(blob, predictive, np.array([0.0]), np.array([1]))
 
     assert lower[0] == pytest.approx(expected_lower)
     assert upper[0] == pytest.approx(expected_upper)
@@ -134,7 +134,7 @@ def test_zero_atom_maps_lower_and_upper_cdf_endpoints_separately():
 
 def test_apply_preserves_distribution_shape_and_marks_pool_as_line_only():
     blob = _manual_blob()
-    predictive = rushing.RushingPredictive(
+    predictive = rushing.AffinePredictive(
         marginal_mean=np.array([10.0, 30.0]),
         sigma=np.array([6.0, 12.0]),
         alpha=np.array([0.5, -0.25]),
@@ -143,7 +143,7 @@ def test_apply_preserves_distribution_shape_and_marks_pool_as_line_only():
     line = np.array([12.5, 31.5])
     book = np.array([0.46, 0.51])
 
-    output = rushing.apply_rushing_affine_groupcdf(blob, predictive, line, book, np.array([1, 3]))
+    output = rushing.apply_affine_groupcdf(blob, predictive, line, book, np.array([1, 3]))
 
     expected_mean = 2.0 + 1.1 * predictive.marginal_mean
     np.testing.assert_allclose(output.marginal_mean, expected_mean)
@@ -157,9 +157,9 @@ def test_apply_preserves_distribution_shape_and_marks_pool_as_line_only():
 
 def test_portable_blob_round_trip_reproduces_application():
     blob = _manual_blob()
-    payload = rushing.serialize_rushing_calibration(blob)
-    restored = rushing.deserialize_rushing_calibration(payload)
-    predictive = rushing.RushingPredictive(
+    payload = rushing.serialize_affine_calibration(blob)
+    restored = rushing.deserialize_affine_calibration(payload)
+    predictive = rushing.AffinePredictive(
         np.array([15.0, 45.0]),
         np.array([8.0, 18.0]),
         np.array([0.2, 0.8]),
@@ -167,10 +167,10 @@ def test_portable_blob_round_trip_reproduces_application():
     )
     args = (predictive, np.array([14.5, 47.5]), np.array([0.52, 0.43]), np.array([1, 3]))
 
-    original = rushing.apply_rushing_affine_groupcdf(blob, *args)
-    reloaded = rushing.apply_rushing_affine_groupcdf(restored, *args)
+    original = rushing.apply_affine_groupcdf(blob, *args)
+    reloaded = rushing.apply_affine_groupcdf(restored, *args)
 
-    assert json.loads(payload)["kind"] == rushing.RUSHING_CANDIDATE_NAME
+    assert json.loads(payload)["kind"] == rushing.AFFINE_STRATEGY_NAME
     for field in original.__dataclass_fields__:
         np.testing.assert_array_equal(getattr(original, field), getattr(reloaded, field))
 
@@ -194,7 +194,7 @@ def test_blob_validation_rejects_malformed_numeric_state(mutation, message):
     mutation(blob)
 
     with pytest.raises(ValueError, match=message):
-        rushing.serialize_rushing_calibration(blob)
+        rushing.serialize_affine_calibration(blob)
 
 
 @pytest.mark.parametrize("missing", [None, np.nan])
@@ -204,7 +204,7 @@ def test_fit_rejects_missing_player_before_string_cast(missing):
     player[0] = missing
 
     with pytest.raises(ValueError, match="player identifiers"):
-        rushing.fit_rushing_affine_groupcdf(
+        rushing.fit_affine_groupcdf(
             predictive,
             result,
             line,
@@ -225,8 +225,8 @@ def test_lambda_ties_prefer_lower_shrink(monkeypatch):
 def test_nested_player_cv_fit_is_finite_stable_and_reusable():
     predictive, result, line, book, position, player = _synthetic_validation()
 
-    fit = rushing.fit_rushing_affine_groupcdf(predictive, result, line, book, position, player)
-    applied = rushing.apply_rushing_affine_groupcdf(fit.blob, predictive, line, book, position)
+    fit = rushing.fit_affine_groupcdf(predictive, result, line, book, position, player)
+    applied = rushing.apply_affine_groupcdf(fit.blob, predictive, line, book, position)
 
     assert len(fit.fold_affines) == rushing.PLAYER_CV_FOLDS
     assert len(fit.fold_lambdas) == rushing.PLAYER_CV_FOLDS

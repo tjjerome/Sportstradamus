@@ -5,7 +5,7 @@ One staged, config-driven engine backs both NFL yards calibrators. A
 per-role logit boundary with RB residual (receiving), the always-on per-group
 endpoint-preserving isotonic map, and the always-on line-only temperature plus
 book/model pool. Group codes are discovered from data and persisted as the map
-keys. The old ``nfl_receiving_two_part_groupcdf`` and ``nfl_rushing_affine_groupcdf``
+keys. The old ``two_part_groupcdf`` and ``affine_groupcdf``
 public names are re-exported here as thin config-constructing wrappers so callers
 can re-point at this package without behavior change; the two blob slugs and
 schema versions stay byte-identical.
@@ -16,53 +16,53 @@ from __future__ import annotations
 import numpy as np
 
 from sportstradamus.training.group_conditional_cdf._apply import (
-    apply_receiving_two_part_cdf,
-    apply_receiving_two_part_line,
-    apply_rushing_affine_groupcdf,
-    deserialize_receiving_calibration,
-    deserialize_rushing_calibration,
-    receiving_two_part_cdf_endpoints,
-    receiving_two_part_randomized_pit,
-    rushing_cdf_endpoints,
-    rushing_randomized_pit,
-    serialize_receiving_calibration,
-    serialize_rushing_calibration,
+    affine_cdf_endpoints,
+    affine_randomized_pit,
+    apply_affine_groupcdf,
+    apply_two_part_cdf,
+    apply_two_part_line,
+    deserialize_affine_calibration,
+    deserialize_two_part_calibration,
+    serialize_affine_calibration,
+    serialize_two_part_calibration,
+    two_part_cdf_endpoints,
+    two_part_randomized_pit,
 )
 from sportstradamus.training.group_conditional_cdf._config import (
-    RECEIVING_CONFIG,
-    RUSHING_CONFIG,
+    AFFINE_CONFIG,
+    TWO_PART_CONFIG,
     StrategyConfig,
 )
 from sportstradamus.training.group_conditional_cdf._contracts import (
+    AFFINE_POSITION_CODES,
+    AFFINE_SCHEMA_VERSION,
+    AFFINE_STRATEGY_NAME,
     MARGINAL_MEAN_FLOOR,
     PLAYER_CV_FOLDS,
     RANDOMIZED_PIT_DRAWS,
-    RECEIVING_CANDIDATE_NAME,
-    RECEIVING_POSITION_CODES,
-    RECEIVING_SCHEMA_VERSION,
     ROLE_VALUES,
-    RUSHING_CANDIDATE_NAME,
-    RUSHING_POSITION_CODES,
-    RUSHING_SCHEMA_VERSION,
+    TWO_PART_POSITION_CODES,
+    TWO_PART_SCHEMA_VERSION,
+    TWO_PART_STRATEGY_NAME,
+    AffineCalibrationBlob,
+    AffineCalibrationFit,
+    AffineCalibrationOutput,
     AffineMeanBlob,
+    AffinePredictive,
     EndpointMapBlob,
     GroupCdfBlob,
-    ReceivingCalibrationBlob,
-    ReceivingCalibrationFit,
-    ReceivingLineOutput,
-    RushingCalibrationBlob,
-    RushingCalibrationFit,
-    RushingCalibrationOutput,
-    RushingPredictive,
+    TwoPartCalibrationBlob,
+    TwoPartCalibrationFit,
+    TwoPartLineOutput,
 )
 from sportstradamus.training.group_conditional_cdf._fit import fit_group_conditional_cdf
 
-CANDIDATE_NAME = RECEIVING_CANDIDATE_NAME
-SCHEMA_VERSION = RECEIVING_SCHEMA_VERSION
-POSITION_CODES = RECEIVING_POSITION_CODES
+CANDIDATE_NAME = TWO_PART_STRATEGY_NAME
+SCHEMA_VERSION = TWO_PART_SCHEMA_VERSION
+POSITION_CODES = TWO_PART_POSITION_CODES
 
 
-def fit_receiving_two_part_groupcdf(
+def fit_two_part_groupcdf(
     result_cdf_upper: np.ndarray,
     result_cdf_lower: np.ndarray,
     zero_cdf: np.ndarray,
@@ -75,7 +75,7 @@ def fit_receiving_two_part_groupcdf(
     player: np.ndarray,
     role: np.ndarray,
     position: np.ndarray,
-) -> ReceivingCalibrationFit:
+) -> TwoPartCalibrationFit:
     """Fit v3 by nested five-fold Player CV on the validation split.
 
     Line settlement is endpoint-first: callers provide the raw CDF at
@@ -85,7 +85,7 @@ def fit_receiving_two_part_groupcdf(
     the fixed 80/20 pool; every other row remains model-only.
     """
     return fit_group_conditional_cdf(
-        RECEIVING_CONFIG,
+        TWO_PART_CONFIG,
         result_cdf_upper,
         result_cdf_lower,
         zero_cdf,
@@ -101,14 +101,14 @@ def fit_receiving_two_part_groupcdf(
     )
 
 
-def fit_rushing_affine_groupcdf(
-    predictive: RushingPredictive,
+def fit_affine_groupcdf(
+    predictive: AffinePredictive,
     result: np.ndarray,
     line: np.ndarray,
     book_over: np.ndarray,
     position: np.ndarray,
     player: np.ndarray,
-) -> RushingCalibrationFit:
+) -> AffineCalibrationFit:
     """Fit the rushing candidate by nested five-fold Player CV, then all validation rows.
 
     Outer folds generate honest mean, line-probability, and randomized-PIT arrays
@@ -117,49 +117,49 @@ def fit_rushing_affine_groupcdf(
     temperature, and pool weight never inspect the outer held-out players.
     """
     return fit_group_conditional_cdf(
-        RUSHING_CONFIG, predictive, result, line, book_over, position, player
+        AFFINE_CONFIG, predictive, result, line, book_over, position, player
     )
 
 
 __all__ = (
+    "AFFINE_CONFIG",
+    "AFFINE_POSITION_CODES",
+    "AFFINE_SCHEMA_VERSION",
+    "AFFINE_STRATEGY_NAME",
     "CANDIDATE_NAME",
     "MARGINAL_MEAN_FLOOR",
     "PLAYER_CV_FOLDS",
     "POSITION_CODES",
     "RANDOMIZED_PIT_DRAWS",
-    "RECEIVING_CANDIDATE_NAME",
-    "RECEIVING_CONFIG",
-    "RECEIVING_POSITION_CODES",
-    "RECEIVING_SCHEMA_VERSION",
     "ROLE_VALUES",
-    "RUSHING_CANDIDATE_NAME",
-    "RUSHING_CONFIG",
-    "RUSHING_POSITION_CODES",
-    "RUSHING_SCHEMA_VERSION",
     "SCHEMA_VERSION",
+    "TWO_PART_CONFIG",
+    "TWO_PART_POSITION_CODES",
+    "TWO_PART_SCHEMA_VERSION",
+    "TWO_PART_STRATEGY_NAME",
+    "AffineCalibrationBlob",
+    "AffineCalibrationFit",
+    "AffineCalibrationOutput",
     "AffineMeanBlob",
+    "AffinePredictive",
     "EndpointMapBlob",
     "GroupCdfBlob",
-    "ReceivingCalibrationBlob",
-    "ReceivingCalibrationFit",
-    "ReceivingLineOutput",
-    "RushingCalibrationBlob",
-    "RushingCalibrationFit",
-    "RushingCalibrationOutput",
-    "RushingPredictive",
     "StrategyConfig",
-    "apply_receiving_two_part_cdf",
-    "apply_receiving_two_part_line",
-    "apply_rushing_affine_groupcdf",
-    "deserialize_receiving_calibration",
-    "deserialize_rushing_calibration",
+    "TwoPartCalibrationBlob",
+    "TwoPartCalibrationFit",
+    "TwoPartLineOutput",
+    "affine_cdf_endpoints",
+    "affine_randomized_pit",
+    "apply_affine_groupcdf",
+    "apply_two_part_cdf",
+    "apply_two_part_line",
+    "deserialize_affine_calibration",
+    "deserialize_two_part_calibration",
+    "fit_affine_groupcdf",
     "fit_group_conditional_cdf",
-    "fit_receiving_two_part_groupcdf",
-    "fit_rushing_affine_groupcdf",
-    "receiving_two_part_cdf_endpoints",
-    "receiving_two_part_randomized_pit",
-    "rushing_cdf_endpoints",
-    "rushing_randomized_pit",
-    "serialize_receiving_calibration",
-    "serialize_rushing_calibration",
+    "fit_two_part_groupcdf",
+    "serialize_affine_calibration",
+    "serialize_two_part_calibration",
+    "two_part_cdf_endpoints",
+    "two_part_randomized_pit",
 )

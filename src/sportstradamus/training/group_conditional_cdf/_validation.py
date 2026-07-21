@@ -16,7 +16,10 @@ import numpy as np
 
 from sportstradamus.training.group_conditional_cdf._contracts import (
     AFFINE_INTERCEPT_BOUNDS,
+    AFFINE_POSITION_CODES,
+    AFFINE_SCHEMA_VERSION,
     AFFINE_SLOPE_BOUNDS,
+    AFFINE_STRATEGY_NAME,
     BOUNDARY_LOGIT_CLIP,
     CDF_BRANCH_TOLERANCE,
     INTERCEPT_BRACKET,
@@ -24,19 +27,16 @@ from sportstradamus.training.group_conditional_cdf._contracts import (
     PIT_LAMBDAS,
     PLAYER_CV_FOLDS,
     POSITIVE_GROUPS,
-    RECEIVING_CANDIDATE_NAME,
-    RECEIVING_POSITION_CODES,
-    RECEIVING_SCHEMA_VERSION,
     ROLE_VALUES,
-    RUSHING_CANDIDATE_NAME,
-    RUSHING_POSITION_CODES,
-    RUSHING_SCHEMA_VERSION,
     TEMPERATURE_BOUNDS,
+    TWO_PART_POSITION_CODES,
+    TWO_PART_SCHEMA_VERSION,
+    TWO_PART_STRATEGY_NAME,
+    AffineCalibrationBlob,
+    AffinePredictive,
     CalibrationRows,
     GroupCdfBlob,
-    ReceivingCalibrationBlob,
-    RushingCalibrationBlob,
-    RushingPredictive,
+    TwoPartCalibrationBlob,
 )
 from sportstradamus.training.group_conditional_cdf.cdf_map_validation import cdf_map_blob_is_valid
 
@@ -84,12 +84,12 @@ def group_vector(values, name: str, length: int) -> np.ndarray:
     raw = np.asarray(values)
     if raw.ndim != 1 or len(raw) != length:
         raise ValueError(f"{name} must be a row-aligned one-dimensional array")
-    if any(missing_identifier_receiving(value) for value in raw):
+    if any(missing_identifier_two_part(value) for value in raw):
         raise ValueError(f"{name} identifiers must be nonempty")
     return raw.astype(str)
 
 
-def missing_identifier_receiving(value) -> bool:
+def missing_identifier_two_part(value) -> bool:
     if value is None:
         return True
     try:
@@ -107,12 +107,12 @@ def roles(values, length: int) -> np.ndarray:
     return role_array
 
 
-def receiving_positions(values, length: int) -> np.ndarray:
+def two_part_positions(values, length: int) -> np.ndarray:
     raw = finite_vector(values, "position", length)
     position_array = raw.astype(int)
     if (
         not np.array_equal(raw, position_array)
-        or not np.isin(position_array, RECEIVING_POSITION_CODES).all()
+        or not np.isin(position_array, TWO_PART_POSITION_CODES).all()
     ):
         raise ValueError("position must contain only WR=2, RB=3, and TE=4 codes")
     return position_array
@@ -132,10 +132,10 @@ def cdf_apply_inputs(cdf, f0, role, position):
     values = probability_vector(cdf, "cdf")
     n_rows = len(values)
     boundary = probability_vector(f0, "f0", n_rows)
-    return values, boundary, roles(role, n_rows), receiving_positions(position, n_rows)
+    return values, boundary, roles(role, n_rows), two_part_positions(position, n_rows)
 
 
-def receiving_fit_inputs(
+def two_part_fit_inputs(
     result_upper,
     result_lower,
     zero_cdf,
@@ -179,7 +179,7 @@ def receiving_fit_inputs(
 
     players = group_vector(player, "player", n_rows)
     roles_array = roles(role, n_rows)
-    positions_array = receiving_positions(position, n_rows)
+    positions_array = two_part_positions(position, n_rows)
     if len(np.unique(players)) < PLAYER_CV_FOLDS:
         raise ValueError("nested calibration requires at least five validation players")
     for role_name in ROLE_VALUES:
@@ -218,25 +218,25 @@ def validate_endpoint_map(blob: Mapping[str, object]) -> None:
         raise ValueError("invalid receiving conditional CDF map")
 
 
-def validated_receiving_blob(blob: Mapping[str, object]) -> ReceivingCalibrationBlob:
+def validated_two_part_blob(blob: Mapping[str, object]) -> TwoPartCalibrationBlob:
     # style: allow-complexity — moved verbatim from the receiving corner; the
     # flat guard chain is the byte-for-byte schema contract and must not split.
     from sportstradamus.training.group_conditional_cdf._pool import fixed_pool_blob
 
     if (
-        blob.get("kind") != RECEIVING_CANDIDATE_NAME
-        or blob.get("schema_version") != RECEIVING_SCHEMA_VERSION
+        blob.get("kind") != TWO_PART_STRATEGY_NAME
+        or blob.get("schema_version") != TWO_PART_SCHEMA_VERSION
     ):
         raise ValueError("unknown receiving calibration blob kind or schema")
     if blob.get("line_probability_only") is not True:
         raise ValueError("receiving calibration must declare its line-only probability layer")
-    fitted = cast(ReceivingCalibrationBlob, blob)
+    fitted = cast(TwoPartCalibrationBlob, blob)
     if fitted.get("temperature_fit_scope") != "pre_map_raw_endpoint_settlement":
         raise ValueError("receiving calibration has an unknown temperature fit scope")
     temperature(fitted.get("temperature"))
     models = fitted.get("cdf")
     if not isinstance(models, dict) or models.get("kind") != (
-        "receiving_role_position_two_part_cdf"
+        "role_position_two_part_cdf"
     ):
         raise ValueError("receiving calibration requires the v3 CDF model")
     role_models = models.get("role_boundary")
@@ -255,7 +255,7 @@ def validated_receiving_blob(blob: Mapping[str, object]) -> ReceivingCalibration
     nonpositive_lambdas: set[float] = set()
     for role_name in ROLE_VALUES:
         model = role_models[role_name]
-        if not isinstance(model, dict) or model.get("kind") != ("receiving_two_part_role_boundary"):
+        if not isinstance(model, dict) or model.get("kind") != ("two_part_role_boundary"):
             raise ValueError(f"invalid boundary model for role {role_name}")
         intercept = model.get("intercept")
         if (

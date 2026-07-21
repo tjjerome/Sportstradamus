@@ -18,15 +18,15 @@ from sportstradamus.training.model_strategy_registry import (
     strategy_controls,
 )
 from sportstradamus.training.structural_strategies import (
-    RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR,
     ROLE_COLUMNS,
+    TWO_PART_STRATEGY,
 )
 
 _MATRIX_HASH = "d" * 64
 
 
 def _receiving_model(*, status: str = "active", include_split: bool = True) -> dict:
-    slug = RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR
+    slug = TWO_PART_STRATEGY
     spec = get_strategy(slug)
     controls = strategy_controls(spec)[0]
     adapter = {
@@ -59,7 +59,7 @@ def _receiving_model(*, status: str = "active", include_split: bool = True) -> d
 def test_generic_active_identity_selects_structural_dispatch():
     identity = _resolve_serving_strategy(_receiving_model(), "NFL", "receiving yards")
 
-    assert identity.structural_strategy == (RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR)
+    assert identity.structural_strategy == (TWO_PART_STRATEGY)
 
 
 @pytest.mark.parametrize("distribution", ["SkewNormal", "DPO"])

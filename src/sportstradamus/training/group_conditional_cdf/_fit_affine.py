@@ -30,13 +30,13 @@ from sportstradamus.training.group_conditional_cdf._contracts import (
     RANDOMIZED_PIT_DRAWS,
     RANDOMIZED_PIT_SEED,
     TEMPERATURE_BOUNDS,
-    RushingCalibrationBlob,
-    RushingCalibrationFit,
+    AffineCalibrationBlob,
+    AffineCalibrationFit,
 )
-from sportstradamus.training.group_conditional_cdf._line_head import fit_temperature_rushing
-from sportstradamus.training.group_conditional_cdf._validation_rushing import (
-    rushing_fit_inputs,
-    validated_rushing_blob,
+from sportstradamus.training.group_conditional_cdf._line_head import fit_temperature_affine
+from sportstradamus.training.group_conditional_cdf._validation_affine import (
+    affine_fit_inputs,
+    validated_affine_blob,
 )
 from sportstradamus.training.group_conditional_cdf.probability_pool import (
     apply_probability_pool,
@@ -48,7 +48,7 @@ from sportstradamus.training.group_conditional_cdf.probability_pool import (
 def fit_rushing(config: StrategyConfig, predictive, result, line, book_over, position, player):
     """Fit the rushing affine corner by nested five-fold Player CV."""
     codes = discover_codes(position)
-    pred, y, lines, books, positions, players = rushing_fit_inputs(
+    pred, y, lines, books, positions, players = affine_fit_inputs(
         predictive, result, line, book_over, position, player
     )
     n_rows = len(y)
@@ -77,7 +77,7 @@ def fit_rushing(config: StrategyConfig, predictive, result, line, book_over, pos
         lower, upper = mapped_cdf_endpoints(hold_pred, y[hold], positions[hold], maps, codes)
         oof_pit[:, hold] = lower[None, :] + uniforms[:, hold] * (upper - lower)[None, :]
         train_raw_over = mapped_over(train_pred, lines[train], positions[train], maps, codes)
-        temperature = fit_temperature_rushing(train_raw_over, over_result[train])
+        temperature = fit_temperature_affine(train_raw_over, over_result[train])
         train_candidate = apply_temperature(train_raw_over, temperature)
         hold_candidate = apply_temperature(
             mapped_over(hold_pred, lines[hold], positions[hold], maps, codes), temperature
@@ -95,10 +95,10 @@ def fit_rushing(config: StrategyConfig, predictive, result, line, book_over, pos
     corrected = apply_affine(pred, *final_affine)
     final_maps = fit_group_maps(corrected, y, positions, players, uniforms, codes)
     final_raw_over = mapped_over(corrected, lines, positions, final_maps, codes)
-    final_temperature = fit_temperature_rushing(final_raw_over, over_result)
+    final_temperature = fit_temperature_affine(final_raw_over, over_result)
     final_candidate = apply_temperature(final_raw_over, final_temperature)
     final_pool = fit_probability_pool(final_candidate, books, over_result)
-    blob: RushingCalibrationBlob = {
+    blob: AffineCalibrationBlob = {
         "kind": config.candidate_name,
         "schema_version": config.schema_version,
         "line_probability_only": True,
@@ -112,10 +112,10 @@ def fit_rushing(config: StrategyConfig, predictive, result, line, book_over, pos
         "temperature": final_temperature,
         "probability_pool": final_pool,
     }
-    _validate_rushing_fit(
+    _validate_affine_fit(
         blob, affine_folds, temperatures, rhos, (oof_mean, oof_candidate, oof_pooled, oof_pit)
     )
-    return RushingCalibrationFit(
+    return AffineCalibrationFit(
         blob=blob,
         oof_marginal_mean=oof_mean,
         oof_candidate_over=oof_candidate,
@@ -128,8 +128,8 @@ def fit_rushing(config: StrategyConfig, predictive, result, line, book_over, pos
     )
 
 
-def _validate_rushing_fit(blob, affine_folds, temperatures, rhos, outputs):
-    fitted = validated_rushing_blob(blob)
+def _validate_affine_fit(blob, affine_folds, temperatures, rhos, outputs):
+    fitted = validated_affine_blob(blob)
     affines = [*affine_folds, (fitted["affine"]["intercept"], fitted["affine"]["slope"])]
     a_low, a_high = AFFINE_INTERCEPT_BOUNDS
     b_low, b_high = AFFINE_SLOPE_BOUNDS

@@ -21,7 +21,7 @@ from sportstradamus.training.group_conditional_cdf._contracts import (
     RB_CODE,
     ROLE_VALUES,
     CalibrationRows,
-    ReceivingCdfBlob,
+    TwoPartCdfBlob,
 )
 from sportstradamus.training.group_conditional_cdf._maps import apply_endpoint_map, fit_endpoint_map
 
@@ -39,7 +39,7 @@ def fit_models(
     positive_lam: float,
     nonpositive_lam: float,
     positive_groups,
-) -> ReceivingCdfBlob:
+) -> TwoPartCdfBlob:
     role_models = {}
     for role_name in ROLE_VALUES:
         mask = rows.role == role_name
@@ -60,7 +60,7 @@ def fit_models(
             1.0,
         ).reshape(-1)
         role_models[role_name] = {
-            "kind": "receiving_two_part_role_boundary",
+            "kind": "two_part_role_boundary",
             "intercept": intercept,
             "nonpositive": fit_endpoint_map(nonpositive_samples, nonpositive_lam),
         }
@@ -99,7 +99,7 @@ def fit_models(
         )
         positive_maps[group] = fit_endpoint_map(samples, positive_lam)
     return {
-        "kind": "receiving_role_position_two_part_cdf",
+        "kind": "role_position_two_part_cdf",
         "role_boundary": role_models,
         "positive": positive_maps,
         "rb_boundary_residual": rb_residual,

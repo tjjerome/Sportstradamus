@@ -42,15 +42,15 @@ def _manual_blob():
         "temperature_fit_scope": "pre_map_raw_endpoint_settlement",
         "temperature": 2.0,
         "cdf": {
-            "kind": "receiving_role_position_two_part_cdf",
+            "kind": "role_position_two_part_cdf",
             "role_boundary": {
                 "low": {
-                    "kind": "receiving_two_part_role_boundary",
+                    "kind": "two_part_role_boundary",
                     "intercept": -0.4,
                     "nonpositive": _identity_map(),
                 },
                 "high": {
-                    "kind": "receiving_two_part_role_boundary",
+                    "kind": "two_part_role_boundary",
                     "intercept": 0.2,
                     "nonpositive": _identity_map(),
                 },
@@ -112,7 +112,7 @@ def test_piecewise_transform_uses_role_position_boundary_and_positive_map():
     roles = np.array(["low", "low", "high"])
     positions = np.array([3, 2, 4])
 
-    transformed = receiving.apply_receiving_two_part_cdf(blob, cdf, f0, roles, positions)
+    transformed = receiving.apply_two_part_cdf(blob, cdf, f0, roles, positions)
 
     q_low_rb = expit(logit(0.2) - 0.4 + 0.3)
     q_low_wr = expit(logit(0.2) - 0.4)
@@ -139,8 +139,8 @@ def test_zero_atom_endpoints_are_transformed_before_randomization():
         np.array(["low"]),
         np.array([3]),
     )
-    lower, upper = receiving.receiving_two_part_cdf_endpoints(*args)
-    draws = receiving.receiving_two_part_randomized_pit(*args)
+    lower, upper = receiving.two_part_cdf_endpoints(*args)
+    draws = receiving.two_part_randomized_pit(*args)
 
     q = expit(logit(0.2) - 0.4 + 0.3)
     assert lower[0] == pytest.approx(q * 0.4)
@@ -159,11 +159,11 @@ def test_line_apply_maps_endpoints_first_and_pools_only_authentic_quotes():
     book = np.array([0.48, np.nan, 0.54])
     authentic = np.array([True, False, True])
 
-    output = receiving.apply_receiving_two_part_line(
+    output = receiving.apply_two_part_line(
         blob, low, high, f0, role, position, book, authentic
     )
-    mapped_low = receiving.apply_receiving_two_part_cdf(blob, low, f0, role, position)
-    mapped_high = receiving.apply_receiving_two_part_cdf(blob, high, f0, role, position)
+    mapped_low = receiving.apply_two_part_cdf(blob, low, f0, role, position)
+    mapped_high = receiving.apply_two_part_cdf(blob, high, f0, role, position)
 
     np.testing.assert_array_equal(output.mapped_low, mapped_low)
     np.testing.assert_array_equal(output.mapped_high, mapped_high)
@@ -186,15 +186,15 @@ def test_line_apply_rejects_missing_authentic_book_but_allows_fallback():
         np.array([np.nan]),
     )
     with pytest.raises(ValueError, match="authentic book_over"):
-        receiving.apply_receiving_two_part_line(*args, np.array([True]))
-    output = receiving.apply_receiving_two_part_line(*args, np.array([False]))
+        receiving.apply_two_part_line(*args, np.array([True]))
+    output = receiving.apply_two_part_line(*args, np.array([False]))
     np.testing.assert_array_equal(output.pooled_over, output.candidate_over)
 
 
 def test_portable_blob_round_trip_reproduces_cdf_and_line_application():
     blob = _manual_blob()
-    payload = receiving.serialize_receiving_calibration(blob)
-    restored = receiving.deserialize_receiving_calibration(payload)
+    payload = receiving.serialize_two_part_calibration(blob)
+    restored = receiving.deserialize_two_part_calibration(payload)
     cdf = np.array([0.1, 0.7])
     f0 = np.array([0.2, 0.4])
     role = np.array(["low", "high"])
@@ -203,13 +203,13 @@ def test_portable_blob_round_trip_reproduces_cdf_and_line_application():
     authentic = np.array([True, False])
 
     np.testing.assert_array_equal(
-        receiving.apply_receiving_two_part_cdf(blob, cdf, f0, role, position),
-        receiving.apply_receiving_two_part_cdf(restored, cdf, f0, role, position),
+        receiving.apply_two_part_cdf(blob, cdf, f0, role, position),
+        receiving.apply_two_part_cdf(restored, cdf, f0, role, position),
     )
-    original = receiving.apply_receiving_two_part_line(
+    original = receiving.apply_two_part_line(
         blob, cdf, cdf, f0, role, position, book, authentic
     )
-    reloaded = receiving.apply_receiving_two_part_line(
+    reloaded = receiving.apply_two_part_line(
         restored, cdf, cdf, f0, role, position, book, authentic
     )
     for field in original.__dataclass_fields__:
@@ -219,8 +219,8 @@ def test_portable_blob_round_trip_reproduces_cdf_and_line_application():
 
 def test_nested_player_cv_fit_returns_finite_reusable_outputs():
     inputs = _synthetic_validation()
-    fit = receiving.fit_receiving_two_part_groupcdf(*inputs)
-    line = receiving.apply_receiving_two_part_line(
+    fit = receiving.fit_two_part_groupcdf(*inputs)
+    line = receiving.apply_two_part_line(
         fit.blob,
         inputs[3],
         inputs[4],
@@ -262,12 +262,12 @@ def test_blob_validation_rejects_malformed_map_and_policy_drift():
     blob["cdf"]["positive"]["high_pos4"]["x"] = [0.0, 1.0, 1.0]
     blob["cdf"]["positive"]["high_pos4"]["y"] = [0.0, 0.9, 1.0]
     with pytest.raises(ValueError, match="invalid receiving conditional CDF map"):
-        receiving.serialize_receiving_calibration(blob)
+        receiving.serialize_two_part_calibration(blob)
 
     blob = _manual_blob()
     blob["probability_pool"]["model_weight"] = 0.3
     with pytest.raises(ValueError, match="fixed policy prior"):
-        receiving.serialize_receiving_calibration(blob)
+        receiving.serialize_two_part_calibration(blob)
 
 
 def test_fit_rejects_missing_player_before_string_cast():
@@ -276,4 +276,4 @@ def test_fit_rejects_missing_player_before_string_cast():
     players[0] = None
     inputs[9] = players
     with pytest.raises(ValueError, match="identifiers must be nonempty"):
-        receiving.fit_receiving_two_part_groupcdf(*inputs)
+        receiving.fit_two_part_groupcdf(*inputs)

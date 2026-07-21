@@ -2,7 +2,7 @@
 
 Single source of truth read by three consumers: the strategy applicability gate
 (`model_strategy_registry.Applicability.matches`), the training role-context
-builder (`structural_context.build_receiving_role_context`), and the pipeline
+builder (`structural_context.build_two_part_context`), and the pipeline
 prune-preservation step. A continuous cell is eligible for the two-part
 role×position method iff it has a registered ``RoleSpec`` whose columns its
 matrix carries.

@@ -6,17 +6,17 @@ from collections.abc import Mapping
 
 AUTO = "auto"
 NONE = "none"
-RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR = (
-    "receiving-role-position-two-part-groupcdf-fixedlinear-v3"
+TWO_PART_STRATEGY = (
+    "role-position-two-part-groupcdf-fixedlinear-v3"
 )
-RUSHING_AFFINE_GROUPCDF_BOOK_POOL = "rushing-qb-rb-affine-groupcdf-bookpool-v1"
+AFFINE_STRATEGY = "affine-groupcdf-bookpool-v1"
 
 NFL_YARDS_EXPERIMENTS: dict[str, tuple[str, str]] = {
-    RECEIVING_ROLE_POSITION_TWO_PART_GROUPCDF_FIXEDLINEAR: ("NFL", "receiving yards"),
-    RUSHING_AFFINE_GROUPCDF_BOOK_POOL: ("NFL", "rushing yards"),
+    TWO_PART_STRATEGY: ("NFL", "receiving yards"),
+    AFFINE_STRATEGY: ("NFL", "rushing yards"),
 }
 EXPERIMENT_CHOICES: tuple[str, ...] = (AUTO, NONE, *NFL_YARDS_EXPERIMENTS)
-RUSHING_EXPERT_EXPERIMENTS: frozenset[str] = frozenset({RUSHING_AFFINE_GROUPCDF_BOOK_POOL})
+AFFINE_EXPERT_EXPERIMENTS: frozenset[str] = frozenset({AFFINE_STRATEGY})
 
 ROLE_COLUMNS: tuple[str, ...] = (
     "Team plays_per_game",
@@ -24,16 +24,16 @@ ROLE_COLUMNS: tuple[str, ...] = (
     "Player target share",
     "Player yards per target",
 )
-RECEIVING_POSITIONS: dict[int, str] = {2: "WR", 3: "RB", 4: "TE"}
-RUSHING_POSITIONS: dict[int, str] = {1: "QB", 3: "RB"}
-RECEIVING_SUPPORT: dict[str, int] = {
+TWO_PART_POSITIONS: dict[int, str] = {2: "WR", 3: "RB", 4: "TE"}
+AFFINE_POSITIONS: dict[int, str] = {1: "QB", 3: "RB"}
+TWO_PART_SUPPORT: dict[str, int] = {
     "train_rows": 4000,
     "validation_rows": 400,
     "test_rows": 400,
     "train_players": 100,
     "validation_players": 100,
 }
-RUSHING_SUPPORT: dict[str, int] = {
+AFFINE_SUPPORT: dict[str, int] = {
     "train_rows": 1500,
     "validation_rows": 300,
     "test_rows": 300,
@@ -77,7 +77,7 @@ def resolve_experiment_selection(flag_value: str, cell: Mapping[str, object]) ->
     return experiment
 
 
-def validate_receiving_recipe(
+def validate_two_part_recipe(
     experiment: str,
     *,
     league: str,

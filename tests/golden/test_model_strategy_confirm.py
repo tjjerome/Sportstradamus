@@ -24,7 +24,7 @@ from sportstradamus.training.model_strategy_registry import (
     registered_strategies,
 )
 from sportstradamus.training.role_specs import role_spec_for
-from sportstradamus.training.structural_strategies import RUSHING_AFFINE_GROUPCDF_BOOK_POOL
+from sportstradamus.training.structural_strategies import AFFINE_STRATEGY
 
 _MATRIX_SHA = "matrix-123"
 _MATRIX_COLUMNS = frozenset(
@@ -289,7 +289,7 @@ def test_candidate_cross_family_zinb_wins():
 
 
 def test_candidate_structural_method_persists_full_recipe_and_identity():
-    slug = RUSHING_AFFINE_GROUPCDF_BOOK_POOL
+    slug = AFFINE_STRATEGY
     cand = mc._candidate(pd.DataFrame([_structural_row(slug, "rushing yards")]))
     assert cand["strategy_slug"] == slug
     assert cand["structural_strategy"] == slug
@@ -327,7 +327,7 @@ def test_candidate_base_winner_clears_structural_method_without_stringifying_nan
 
 
 def test_candidate_rejects_missing_required_structural_axis():
-    slug = RUSHING_AFFINE_GROUPCDF_BOOK_POOL
+    slug = AFFINE_STRATEGY
     row = _structural_row(slug, "rushing yards")
     row["hpo_selection"] = float("nan")
     with pytest.raises(ValueError, match="hpo_selection contradicts controls_json"):
@@ -404,7 +404,7 @@ def test_run_meditate_true_on_clean_exit_false_on_error(monkeypatch, tmp_path):
         pd.DataFrame(
             [
                 _structural_row(
-                    RUSHING_AFFINE_GROUPCDF_BOOK_POOL,
+                    AFFINE_STRATEGY,
                     "rushing yards",
                 )
             ]
@@ -423,7 +423,7 @@ def test_run_meditate_true_on_clean_exit_false_on_error(monkeypatch, tmp_path):
 
 
 def test_ship_verdict_is_bound_to_reported_structural_method(monkeypatch):
-    slug = RUSHING_AFFINE_GROUPCDF_BOOK_POOL
+    slug = AFFINE_STRATEGY
     expected = build_artifact_identity(
         slug,
         "NFL",
