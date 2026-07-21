@@ -63,6 +63,7 @@ from sportstradamus.helpers.provenance import git_sha
 from sportstradamus.training.baselines import get_target_normalization
 from sportstradamus.training.group_conditional_cdf import (
     deserialize_two_part_calibration,
+    ks_supremum,
     two_part_cdf_endpoints,
 )
 from sportstradamus.training.markets import ALL_MARKETS
@@ -1091,14 +1092,10 @@ def _pred_midpit(df: pd.DataFrame, dist: str, y: np.ndarray, *, strategy: str) -
 
 
 def _ks_uniform(values: np.ndarray) -> float:
-    u = np.sort(np.clip(values, 0.0, 1.0))
-    n = len(u)
-    if n == 0:
+    ordered = np.sort(np.clip(values, 0.0, 1.0))
+    if len(ordered) == 0:
         return float("nan")
-    idx = np.arange(1, n + 1)
-    d_plus = float(np.max(idx / n - u))
-    d_minus = float(np.max(u - (idx - 1) / n))
-    return max(d_plus, d_minus)
+    return ks_supremum(ordered)
 
 
 def _tail_ks_uniform(values: np.ndarray, floor: float = _TAIL_PIT_FLOOR) -> float:
@@ -1129,9 +1126,7 @@ def _two_part_contract(
     # style: allow-complexity — flat row-contract validator; each branch is one
     # distinct contract rule, so splitting would only scatter the checks.
     identity, _ = validate_strategy_frame(df)
-    if identity is None or (
-        identity.structural_strategy != TWO_PART_STRATEGY
-    ):
+    if identity is None or (identity.structural_strategy != TWO_PART_STRATEGY):
         return None
 
     missing = _TWO_PART_CONTRACT_COLUMNS - set(df.columns)

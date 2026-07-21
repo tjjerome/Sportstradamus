@@ -56,6 +56,7 @@ from sportstradamus.training.group_conditional_cdf._contracts import (
     TwoPartLineOutput,
 )
 from sportstradamus.training.group_conditional_cdf._fit import fit_group_conditional_cdf
+from sportstradamus.training.group_conditional_cdf._maps import ks_supremum
 
 CANDIDATE_NAME = TWO_PART_STRATEGY_NAME
 SCHEMA_VERSION = TWO_PART_SCHEMA_VERSION
@@ -158,6 +159,7 @@ __all__ = (
     "fit_affine_groupcdf",
     "fit_group_conditional_cdf",
     "fit_two_part_groupcdf",
+    "ks_supremum",
     "serialize_affine_calibration",
     "serialize_two_part_calibration",
     "two_part_cdf_endpoints",
