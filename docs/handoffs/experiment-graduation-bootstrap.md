@@ -19,13 +19,37 @@ Two calibration methods have passed as single-cell experiments:
 Per the intended experiment lifecycle (`.claude/agents/experiment-graduation-specialist.md`),
 a method that passes on its pilot should **graduate into the sweep option pool** so
 the per-cell sweep can try it on every market and let the gates decide where it
-helps. Today both are frozen to their one pilot cell via the vestigial
-`structural_calibration` / `--experiment` lever
-([structural_strategies.py:14-17](../../src/sportstradamus/training/structural_strategies.py#L14)),
-and `structural_calibration` is absent from all 93 stat_meta cells — so neither
-method can be selected in production and neither is in the sweep pool. Every market
-that could benefit from a group-conditional-CDF calibration is currently denied the
-chance. Graduating both is pure breadth.
+helps. The owner's chosen shape is the **full merge**: fold both methods into the
+single per-cell calibration selector (`posthoc`, renamed `calibration` — §4.2) and
+**retire the parallel `--structural-strategy` / `model_strategy_registry` axis** they
+ride today, so one field names at most one calibration method per cell.
+
+**Current state (verified this lane — read the code, not the brief's earlier drafts):**
+- two-part is **already** market-agnostic *and already sweep-selectable* — a live
+  `model_strategy_registry` structural spec (`_yards(TWO_PART_STRATEGY, …)`,
+  [model_strategy_specs.py:226](../../src/sportstradamus/training/model_strategy_specs.py#L226))
+  enrolled via the `--structural-strategy` / `_YARDS_SELECTOR` axis
+  ([model_strategy_specs.py:25](../../src/sportstradamus/training/model_strategy_specs.py#L25)),
+  applicable to every continuous cell (`role_registry_gated`). It self-killed only on
+  multi-position cells; that granularity gap is **now fixed** (Lane A role-only fallback,
+  committed `ea564a7`). It needs pool-dispatch + the axis retirement — no market-agnostic code work.
+- affine is the genuinely un-graduated one — same `--structural-strategy` axis, but its fit
+  logic hardcodes `AFFINE_POSITIONS = {1:QB, 3:RB}`, so every off-NFL cell routes to
+  `pooled_fallback` / support-kill. It needs the full market-agnostic conversion (§5 Stage C).
+- The `--experiment` / `resolve_experiment_selection` lever
+  ([structural_strategies.py:44,71](../../src/sportstradamus/training/structural_strategies.py#L44))
+  the brief's earlier drafts named as "the cage" is **vestigial** — zero callers. The
+  `--structural-strategy` axis above is the real selector; the dead functions die in cleanup.
+
+**Do not confuse the two `structural_calibration` names.** The persisted filedict/pickle key
+`structural_calibration` (written [pipeline.py:1940](../../src/sportstradamus/training/pipeline.py#L1940),
+read at serve [model_prob.py:1372](../../src/sportstradamus/prediction/model_prob.py#L1372); also
+the specs' `legacy_model_key`) is **live and load-bearing** — it holds the fitted structural blob
+and must survive the merge unchanged (it is also a B5 rename-collision to leave alone, §4.2). The
+identically-named stat_meta *cell-selector field* `cell.get("structural_calibration")` inside
+`resolve_experiment_selection` is part of the vestigial lever and dies with it.
+
+Graduating both is pure breadth.
 
 **Codify the METHOD, not the artifact** (the governing principle — see the agent
 def). Do not reuse rushing yards' fitted coefficients anywhere; codify the
@@ -86,10 +110,50 @@ target/CDF earlier in the fit), the field value must **dispatch**: a structural 
 routes to the structural stage (`build_*_context` + `fit_*_groupcdf` / apply); a light
 slug routes to `posthoc.fit_posthoc`. This broadens `posthoc` semantically from
 "post-distribution corrector" to "the per-cell calibration-method selector" — update
-the module docstring + `POSTHOC_SLUGS` validation accordingly, and retire the
-`structural_calibration` / `--experiment` selection path
-([structural_strategies.py:44-76](../../src/sportstradamus/training/structural_strategies.py#L44))
-and the single-cell `STRUCTURAL_STRATEGIES` gate now that the pool is the selector.
+the module docstring + `POSTHOC_SLUGS` validation accordingly.
+
+Mutual exclusivity is **already enforced today** and must be preserved, not invented: the
+structural specs pin `"posthoc": "none"` in `_YARDS_CONTROLS`
+([model_strategy_specs.py:167-176](../../src/sportstradamus/training/model_strategy_specs.py#L167))
+plus `fixed_persist`, so a structural cell already can't also carry a corrector. After the
+merge the single `calibration` field carries that invariant structurally (one value = one
+method), and the `posthoc="none"` fixed-control is subsumed.
+
+### 4.1 Retire the `--structural-strategy` / registry axis (the real cage)
+
+The live selector is **not** `--experiment`; it is the `--structural-strategy` axis backed by
+`model_strategy_registry`. The full merge retires it:
+- **`cli.py`** — `_resolve_structural_strategy`
+  ([cli.py:123](../../src/sportstradamus/training/cli.py#L123)), `_validate_structural_controls`
+  ([cli.py:147](../../src/sportstradamus/training/cli.py#L147)), the `--structural-strategy` flag
+  ([cli.py:491](../../src/sportstradamus/training/cli.py#L491)) and its resolve/validate call sites
+  ([cli.py:596](../../src/sportstradamus/training/cli.py#L596),
+  [749](../../src/sportstradamus/training/cli.py#L749)), plus any `--deterministic`-only structural guard.
+- **`model_strategy_specs.py`** — the `_YARDS_SELECTOR` axis
+  ([:25](../../src/sportstradamus/training/model_strategy_specs.py#L25)); the two `_yards(...)` specs
+  ([:226](../../src/sportstradamus/training/model_strategy_specs.py#L226),
+  [:241](../../src/sportstradamus/training/model_strategy_specs.py#L241)) stay as the pool method
+  definitions (their `fixed_controls`/`persist`/`applicability`/`legacy_model_key` still hold — the
+  fitted-state key), but their `selector` axis wiring is dropped.
+- **`model_strategy_registry.py`** — the structural-enrollment + `role_registry_gated`
+  (`BASE_STRUCTURAL_STRATEGY`) handling now that the pool, not the registry axis, selects.
+- **`structural_strategies.py`** — delete the dead `validate_experiment_selection` /
+  `resolve_experiment_selection` lever; keep the live exports (`ROLE_COLUMNS`, `AFFINE_POSITIONS`
+  until §5 Stage C removes it, `AFFINE_STRATEGY`/`TWO_PART_STRATEGY`, the blob-key constants).
+
+### 4.2 Rename `posthoc` → `calibration` (B5, after the merge lands green)
+
+Because the field's meaning broadened, rename it — `posthoc.py`→`calibration.py`, `POSTHOC_SLUGS`,
+`--posthoc`, `fit_posthoc`/`apply_posthoc`, the `posthoc_slug`/`posthoc_blob` identifiers, the
+`runtime_controls`/`_CONTROL_FLAGS` keys, and the stat_meta `posthoc` field key. This is a
+**guarded exact-token allowlist**, not a blind word-replace (rename-collision discipline). **Do NOT
+touch** the pre-existing look-alikes: `structural_calibration` (the live pickle key above),
+`stat_calibration.json`, `get_market_calibration`, `apply_cdf_recal`, `dispersion_cal`. Regenerate
+the CLI help snapshot. Persisted-key decision for the two serialization keys `posthoc`/`posthoc_blob`:
+either retrain-gate the rename (no served structural cell exists; served corrector cells rewrite
+keys on the next `meditate`, so retrain served cells before any `devel` deploy) or keep those two
+serialization keys as `posthoc*` (zero-risk). Recommend the latter unless the owner wants the clean
+break.
 
 ## 5. Stage plan
 
@@ -107,6 +171,9 @@ and the single-cell `STRUCTURAL_STRATEGIES` gate now that the pool is the select
   ([cli.py:112](../../src/sportstradamus/training/cli.py#L112)/[715](../../src/sportstradamus/training/cli.py#L715)).
   The `--posthoc` `Choice` ([cli.py:339](../../src/sportstradamus/training/cli.py#L339))
   auto-picks up the new slugs; confirm the sweep enumerates them.
+- **Retire the `--structural-strategy` / registry axis (§4.1)** in the same stage — the pool is
+  now the only structural selector, so the parallel axis and its CLI resolve/validate come out.
+  The sweep must enumerate the two structural methods **from the pool**, not the retired axis.
 - Scaffold the data-driven non-regression table (agent step 7): `(league, market,
   method, expected)` rows, driven through the generic pool path.
 
@@ -137,6 +204,11 @@ and the single-cell `STRUCTURAL_STRATEGIES` gate now that the pool is the select
   `test_model_strategy_sweep.py`, `test_model_strategy_confirm.py`.
 
 ## 6. Affine market-lock worklist (the cage to remove)
+
+This is the **affine-specific** cage (Stage C); the shared `--structural-strategy` axis
+retirement is §4.1. Treat the line numbers below as pointers, not gospel — they predate this
+lane's recon; confirm each against current code before editing (`validate_experiment_selection`
+in particular is the vestigial lever that §4.1 already deletes).
 
 | Site | What it hardcodes |
 |---|---|
@@ -182,9 +254,21 @@ is already generic — the lock lives only in the expert-context + gate + serve 
   than a small minority of cells, the guard is wrong.
 - **One agent, whole bootstrap.** Dispatch `experiment-graduation-specialist` on this
   brief. Do not ship a cell, do not graduate a third method.
+- **Retire the axis; rename the field — both in scope.** The full merge retires the
+  `--structural-strategy` / registry axis (§4.1) and renames `posthoc`→`calibration` (§4.2, B5);
+  neither is optional. The rename runs **last**, after the merge is green, as a guarded exact-token
+  allowlist, and must not touch the five look-alikes named in §4.2.
 
 ## 8. Ledger
 
+- 2026-07-21 · premise corrected + scope expanded (Lane B B0) · earlier drafts named the
+  vestigial `--experiment` / `structural_calibration`-cell-selector lever as the cage; the live
+  selector is the `--structural-strategy` / `model_strategy_registry` axis (§1, §4.1). Full-merge
+  target: fold both methods into the `posthoc`→`calibration` pool **and** retire the registry axis;
+  the `structural_calibration` **pickle key** (load-bearing serve state) + four look-alikes are
+  rename-collisions to leave alone (§4.2). Mutual exclusivity already holds via
+  `_YARDS_CONTROLS.posthoc="none"`. Lane A (two-part grouping) DONE — two-part's multi-position
+  self-kill fixed, so it needs only pool-dispatch, no market-agnostic work.
 - Bootstrap authored for the first `experiment-graduation-specialist` run: graduate
   two-part + affine into the `posthoc` pool as the unified calibration selector;
   affine gets the cee7304 market-agnostic treatment; pilots re-pinned via a
