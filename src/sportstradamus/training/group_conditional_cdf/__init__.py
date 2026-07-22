@@ -78,6 +78,7 @@ def fit_two_part_groupcdf(
     position: np.ndarray,
     *,
     residual_positions: tuple[int, ...] = (),
+    grouping: str = "role_by_position",
 ) -> TwoPartCalibrationFit:
     """Fit v3 by nested five-fold Player CV on the validation split.
 
@@ -105,6 +106,7 @@ def fit_two_part_groupcdf(
         role,
         position,
         residual_positions=residual_positions,
+        grouping=grouping,
     )
 
 

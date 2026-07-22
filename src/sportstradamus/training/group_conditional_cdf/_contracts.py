@@ -11,7 +11,7 @@ pickle layout is byte-identical to the packages this replaces.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 import numpy as np
 
@@ -80,7 +80,7 @@ class RoleBoundaryBlob(TypedDict):
 
 
 class TwoPartCdfBlob(TypedDict):
-    """The role-boundary and role-by-position positive CDF layer.
+    """The role-boundary and per-group positive CDF layer.
 
     ``rb_boundary_residual`` is one shared logit offset (heritage name: it was
     first fit for the NFL RB position) applied to the roster codes persisted in
@@ -93,6 +93,9 @@ class TwoPartCdfBlob(TypedDict):
     positive: dict[str, EndpointMapBlob]
     rb_boundary_residual: float
     boundary_residual_positions: list[int]
+    # Absent ⇒ ``role_by_position`` (``positive`` keyed ``role_posN``); ``role_only``
+    # ⇒ ``positive`` keyed by role alone, the fallback for position-thin cells.
+    grouping: NotRequired[Literal["role_only"]]
 
 
 class FixedProbabilityPoolBlob(TypedDict):

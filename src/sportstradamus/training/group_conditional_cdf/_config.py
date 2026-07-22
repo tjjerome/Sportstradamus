@@ -95,6 +95,15 @@ def discover_codes(position: np.ndarray) -> tuple[int, ...]:
     return tuple(int(code) for code in np.unique(np.asarray(position, dtype=float).astype(int)))
 
 
-def positive_groups(position_codes: tuple[int, ...]) -> tuple[str, ...]:
-    """Cross the fixed role axis with the discovered codes into ``role_posN`` keys."""
+def positive_groups(
+    position_codes: tuple[int, ...], grouping: str = "role_by_position"
+) -> tuple[str, ...]:
+    """Positive-map group keys at the chosen granularity.
+
+    ``role_by_position`` crosses the fixed role axis with the discovered codes into
+    ``role_posN`` keys; ``role_only`` collapses the position axis to one dense map
+    per role (the fallback for cells too thin to estimate a map per position).
+    """
+    if grouping == "role_only":
+        return ROLE_VALUES
     return tuple(f"{role_name}_pos{code}" for role_name in ROLE_VALUES for code in position_codes)

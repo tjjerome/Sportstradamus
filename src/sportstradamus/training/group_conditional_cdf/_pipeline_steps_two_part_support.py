@@ -77,6 +77,27 @@ def _two_part_group_partitions(players: np.ndarray, all_rows: np.ndarray):
     return outer, top_partitions, fit_partitions, hold_partitions, required_fit
 
 
+def _positive_group_masks(
+    roles: np.ndarray, positions: np.ndarray, grouping: str
+) -> list[tuple[str, np.ndarray]]:
+    """Group key + membership mask per positive group at the chosen granularity.
+
+    ``role_by_position`` crosses each role with the discovered position codes;
+    ``role_only`` collapses the position axis so each role is one dense group.
+    """
+    groups: list[tuple[str, np.ndarray]] = []
+    for role in TWO_PART_ROLE_VALUES:
+        role_mask = roles == role
+        if grouping == "role_only":
+            groups.append((role, role_mask))
+        else:
+            groups.extend(
+                (f"{role}_pos{position}", role_mask & (positions == position))
+                for position in discover_codes(positions)
+            )
+    return groups
+
+
 def _two_part_positive_support(
     result: np.ndarray,
     players: np.ndarray,
@@ -84,48 +105,50 @@ def _two_part_positive_support(
     positions: np.ndarray,
     fit_partitions: list,
     hold_partitions: list,
+    grouping: str = "role_by_position",
 ) -> tuple[dict, dict]:
-    """Minimum positive-support fit/hold cell for every role×position group."""
+    """Minimum positive-support fit/hold cell for every positive group."""
     positive_support: dict[str, dict[str, int | str]] = {}
     positive_hold_support: dict[str, dict[str, int | str]] = {}
-    for role in TWO_PART_ROLE_VALUES:
-        for position in discover_codes(positions):
-            group = f"{role}_pos{position}"
-            records = []
-            for name, index in fit_partitions:
-                mask = (
-                    (roles[index] == role) & (positions[index] == position) & (result[index] > 0.0)
-                )
-                records.append(
-                    {
-                        "partition": name,
-                        "rows": int(mask.sum()),
-                        "players": len(np.unique(players[index][mask])),
-                    }
-                )
-            row_min = min(records, key=lambda item: (item["rows"], item["players"]))
-            player_min = min(records, key=lambda item: (item["players"], item["rows"]))
-            positive_support[group] = {
-                "minimum_rows": row_min["rows"],
-                "minimum_rows_partition": row_min["partition"],
-                "minimum_players": player_min["players"],
-                "minimum_players_partition": player_min["partition"],
-            }
-            hold_records = [
+    for group, group_mask in _positive_group_masks(roles, positions, grouping):
+        records = []
+        for name, index in fit_partitions:
+            mask = group_mask[index] & (result[index] > 0.0)
+            records.append(
                 {
                     "partition": name,
-                    "rows": int(
-                        (
-                            (roles[index] == role)
-                            & (positions[index] == position)
-                            & (result[index] > 0.0)
-                        ).sum()
-                    ),
+                    "rows": int(mask.sum()),
+                    "players": len(np.unique(players[index][mask])),
                 }
-                for name, index in hold_partitions
-            ]
-            positive_hold_support[group] = min(hold_records, key=lambda item: item["rows"])
+            )
+        row_min = min(records, key=lambda item: (item["rows"], item["players"]))
+        player_min = min(records, key=lambda item: (item["players"], item["rows"]))
+        positive_support[group] = {
+            "minimum_rows": row_min["rows"],
+            "minimum_rows_partition": row_min["partition"],
+            "minimum_players": player_min["players"],
+            "minimum_players_partition": player_min["partition"],
+        }
+        hold_records = [
+            {"partition": name, "rows": int((group_mask[index] & (result[index] > 0.0)).sum())}
+            for name, index in hold_partitions
+        ]
+        positive_hold_support[group] = min(hold_records, key=lambda item: item["rows"])
     return positive_support, positive_hold_support
+
+
+def _positive_map_support_ok(positive_support: dict, floor: dict) -> bool:
+    """Whether every positive group clears the per-fold row/player floor."""
+    return all(
+        values["minimum_rows"] >= floor["positive_rows"]
+        and values["minimum_players"] >= floor["positive_players"]
+        for values in positive_support.values()
+    )
+
+
+def _positive_holds_nonempty(positive_hold_support: dict) -> bool:
+    """Whether every positive group holds at least one row in each hold fold."""
+    return all(values["rows"] > 0 for values in positive_hold_support.values())
 
 
 def _two_part_nonpositive_support(
@@ -257,14 +280,8 @@ def _two_part_support_guards(
             values["rows"] >= floor["fit_rows"] and values["players"] >= floor["fit_players"]
             for values in required_fit
         ),
-        "positive_map_support": all(
-            values["minimum_rows"] >= floor["positive_rows"]
-            and values["minimum_players"] >= floor["positive_players"]
-            for values in positive_support.values()
-        ),
-        "positive_holds_nonempty": all(
-            values["rows"] > 0 for values in positive_hold_support.values()
-        ),
+        "positive_map_support": _positive_map_support_ok(positive_support, floor),
+        "positive_holds_nonempty": _positive_holds_nonempty(positive_hold_support),
         "nonpositive_map_support": all(
             values["minimum_rows"] >= floor["nonpositive_rows"]
             and values["minimum_players"] >= floor["nonpositive_players"]
@@ -311,6 +328,15 @@ def _two_part_nested_support_audit(
     positive_support, positive_hold_support = _two_part_positive_support(
         result, players, roles, positions, fit_partitions, hold_partitions
     )
+    grouping = "role_by_position"
+    if not (
+        _positive_map_support_ok(positive_support, _TWO_PART_SUPPORT_FLOORS)
+        and _positive_holds_nonempty(positive_hold_support)
+    ):
+        grouping = "role_only"
+        positive_support, positive_hold_support = _two_part_positive_support(
+            result, players, roles, positions, fit_partitions, hold_partitions, grouping
+        )
     nonpositive_support, rb_minimum = _two_part_nonpositive_support(
         result, players, roles, positions, fit_partitions, residual_positions
     )
@@ -350,6 +376,10 @@ def _two_part_nested_support_audit(
             "fallback_rows": int((~authentic).sum()),
         },
     }
+    if grouping != "role_by_position":
+        # Absent tag ⇒ role_by_position, so a position-granular cell's persisted
+        # audit stays byte-identical; only a role-only fallback records the switch.
+        audit["grouping"] = grouping
     failed = [name for name, passed in guards.items() if not passed]
     if failed:
         raise ValueError("two-part candidate failed support guard(s): " + ", ".join(failed))

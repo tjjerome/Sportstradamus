@@ -1,7 +1,8 @@
 # Two-Part Grouping / Gating Generalization
 
-> Status: STAGE 0 DONE — brief recommends the A+B hybrid (adaptive kept-set + role-only
-> fallback), rejects C. See §6 stage-0 verdict; Stage 1 awaiting owner GO.
+> Status: STAGE 1 DONE — A+B hybrid (role-only fallback) implemented + verified. Granularity
+> kill fixed: NBA AST reaches the gate verdict; NFL pilots byte-identical. NHL saves/skater-FP
+> reclassified to role-routing volume kills (grouping-agnostic, owner GO). See §10 ledger.
 
 ## 1. Mission & money logic
 
@@ -188,11 +189,19 @@ serving beyond the recover-from-blob mirror, any distribution-family file
 
 ### Stage 1 — Implement the chosen direction
 - **Entry:** stage-0 brief cited. **Scope:** §5 primary files (one module per subagent).
-- **Acceptance (cell list resolved — brief addenda A2–A4 + the fit-size-floor brief, all
-  measured on cached matrices):** these reach the OOF gate audit (a gate verdict — pass or
-  fail — not a support kill).
-  - **v1 role-only reachable now:** **NBA AST**, **NHL saves** (4-position in the data — not
-    single-position), **NHL skater fantasy points (UD)** (3 dense skater positions).
+- **Acceptance (RESOLVED — measured on the `--deterministic` command; output wins over the
+  brief's earlier matrix-position inference, §3):**
+  - **v1 role-only reachable:** **NBA AST** — the granularity kill
+    (`positive_map_support`/`positive_holds_nonempty`) is resolved by the role-only fallback
+    (role-only support ~5× the floor, 480–683 rows), and the run reaches the OOF gate verdict
+    (`gate4_positions`/`gate6_recent`/`gate6_citl`), not a support kill. It sits on the
+    authentic-hold floor knife-edge (`authentic_hold_players` 49–51 in the worst fold across
+    split noise) → flips clean once the authentic base grows, no code change.
+  - **Reclassified to role-routing volume kills (owner GO — not reachable, upstream of the
+    grouping audit and grouping-agnostic; `_step_apply_two_part_groupcdf_candidate` active-routing
+    guard):** **NHL saves** (`low.train_rows 3276<4000`), **NHL skater fantasy points (UD)**
+    (`high.validation_players 98<100`). Same volume-floor class as the accepted kills below; the
+    earlier "reachable" call was matrix-position-count inference, not a run.
   - **Accepted legit kills (not required):** **WNBA DREB** (thin-league fit floor); **MLB
     pitcher-strikeouts** (MLB unwired for two-part — structural); **NFL passing-yards** (~86-QB
     player universe); **WNBA AST** (authentic/settlement volume — worst-fold authentic-hold
@@ -245,6 +254,15 @@ serving beyond the recover-from-blob mirror, any distribution-family file
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
+- 2026-07-21 · STAGE 1 DONE · A+B hybrid role-only fallback implemented (one `cdf["grouping"]`
+  tag threaded fit→blob→serve, floors unchanged; absent tag ⇒ `role_by_position` keeps pilots
+  byte-identical). Granularity kill FIXED — NBA AST `positive_map_support` FAIL→PASS (role-only
+  support ~5× floor), reaches OOF gate verdict; authentic-hold borderline (49–51 players worst
+  fold). NFL pilots byte-identical (4 pins green), receiving EXIT 0 full-pipeline. NHL saves
+  (`low.train_rows 3276<4000`) + skater-FP (`high.validation_players 98<100`) die UPSTREAM on the
+  role-routing volume floor — grouping-agnostic → reclassified to accepted volume kills (owner GO).
+  refactoring-specialist ran (2 wrap fixes). Gates ✓/✓(1 pre-existing OOS ship-gate)/✓. next:
+  Lane B — graduate two-part+affine into the calibration pool.
 - 2026-07-21 · fit-floor lane KILLED · the queued fit-size-floor brief
   (`/tmp/researcher_two_part_fit_floor.md`) ran the full audit conjunction on the real split:
   `fit_players` is NON-binding — WNBA AST + NFL carries fail the **`authentic_*`/settlement**

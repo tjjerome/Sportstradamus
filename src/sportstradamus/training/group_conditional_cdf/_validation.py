@@ -237,15 +237,24 @@ def validated_two_part_blob(blob: Mapping[str, object]) -> TwoPartCalibrationBlo
     if not isinstance(role_models, dict) or set(role_models) != set(ROLE_VALUES):
         raise ValueError("two-part calibration requires low and high role boundaries")
     if not isinstance(positive_maps, dict) or not positive_maps:
-        raise ValueError("two-part calibration requires its role-by-position positive CDF maps")
-    try:
-        position_codes = sorted({int(str(key).rsplit("_pos", 1)[1]) for key in positive_maps})
-    except (IndexError, ValueError) as exc:
-        raise ValueError("two-part positive CDF maps carry malformed group keys") from exc
-    if set(positive_maps) != {
-        f"{role_name}_pos{code}" for role_name in ROLE_VALUES for code in position_codes
-    }:
-        raise ValueError("two-part calibration requires a positive CDF map per role and position")
+        raise ValueError("two-part calibration requires its positive CDF maps")
+    grouping = models.get("grouping", "role_by_position")
+    if grouping not in ("role_by_position", "role_only"):
+        raise ValueError("two-part calibration has an unknown grouping")
+    if grouping == "role_only":
+        if set(positive_maps) != set(ROLE_VALUES):
+            raise ValueError("role-only two-part calibration requires a positive CDF map per role")
+    else:
+        try:
+            position_codes = sorted({int(str(key).rsplit("_pos", 1)[1]) for key in positive_maps})
+        except (IndexError, ValueError) as exc:
+            raise ValueError("two-part positive CDF maps carry malformed group keys") from exc
+        if set(positive_maps) != {
+            f"{role_name}_pos{code}" for role_name in ROLE_VALUES for code in position_codes
+        }:
+            raise ValueError(
+                "two-part calibration requires a positive CDF map per role and position"
+            )
     residual = models.get("rb_boundary_residual")
     if (
         not isinstance(residual, (int, float))

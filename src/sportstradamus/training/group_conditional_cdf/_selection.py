@@ -42,6 +42,7 @@ def select_lambdas_crossfit(
     position_codes,
     positive_groups,
     residual_positions,
+    grouping: str = "role_by_position",
 ) -> CrossfitSelection:
     n_rows = len(rows.result)
     if uniforms.shape != (RANDOMIZED_PIT_DRAWS, n_rows):
@@ -63,6 +64,7 @@ def select_lambdas_crossfit(
                 nonpositive_lam,
                 positive_groups,
                 residual_positions,
+                grouping,
             )
             oof_lower[hold] = apply_models(
                 models,
@@ -72,6 +74,7 @@ def select_lambdas_crossfit(
                 hold_rows.position,
                 positive_groups,
                 residual_positions,
+                grouping,
             )
             oof_upper[hold] = apply_models(
                 models,
@@ -81,6 +84,7 @@ def select_lambdas_crossfit(
                 hold_rows.position,
                 positive_groups,
                 residual_positions,
+                grouping,
             )
             oof_boundary[hold] = mapped_boundary(
                 models,

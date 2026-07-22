@@ -351,6 +351,7 @@ def _step_apply_two_part_groupcdf_candidate(
         roles_val,
         positions_val,
         residual_positions=residual_positions,
+        grouping=support_audit.get("grouping", "role_by_position"),
     )
     validation_audit = _two_part_candidate_oof_audit(
         fit, fused, splits, roles_val, positions_val, gate_val

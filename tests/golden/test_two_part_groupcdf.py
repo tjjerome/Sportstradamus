@@ -9,6 +9,9 @@ import pytest
 from scipy.special import expit, logit
 
 from sportstradamus.training import group_conditional_cdf as receiving
+from sportstradamus.training.group_conditional_cdf._pipeline_steps_two_part_support import (
+    _two_part_nested_support_audit,
+)
 from sportstradamus.training.group_conditional_cdf._pool import (
     fixed_pool_blob,
 )
@@ -278,3 +281,118 @@ def test_fit_rejects_missing_player_before_string_cast():
     inputs[9] = players
     with pytest.raises(ValueError, match="identifiers must be nonempty"):
         receiving.fit_two_part_groupcdf(*inputs)
+
+
+def _manual_role_only_blob():
+    curved = {"kind": "isotonic_pit", "lam": 1.0, "x": [0.0, 0.5, 1.0], "y": [0.0, 0.25, 1.0]}
+    return {
+        "kind": receiving.CANDIDATE_NAME,
+        "schema_version": receiving.SCHEMA_VERSION,
+        "line_probability_only": True,
+        "temperature_fit_scope": "pre_map_raw_endpoint_settlement",
+        "temperature": 2.0,
+        "cdf": {
+            "kind": "role_position_two_part_cdf",
+            "role_boundary": {
+                "low": {"kind": "two_part_role_boundary", "intercept": -0.4, "nonpositive": _identity_map()},
+                "high": {"kind": "two_part_role_boundary", "intercept": 0.2, "nonpositive": _identity_map()},
+            },
+            "positive": {"low": curved, "high": _identity_map(1.0)},
+            "rb_boundary_residual": 0.0,
+            "boundary_residual_positions": [],
+            "grouping": "role_only",
+        },
+        "probability_pool": fixed_pool_blob(),
+    }
+
+
+def test_role_only_blob_serves_via_role_keyed_positive_maps():
+    blob = _manual_role_only_blob()
+    # Two "low" rows at different positions must hit the same role-keyed positive map
+    # (role_only ignores position); the "high" row hits the high map.
+    f0 = np.array([0.2, 0.2, 0.4])
+    cdf = np.array([0.6, 0.6, 0.7])
+    roles = np.array(["low", "low", "high"])
+    positions = np.array([2, 4, 3])
+
+    transformed = receiving.apply_two_part_cdf(blob, cdf, f0, roles, positions)
+
+    q_low = expit(logit(0.2) - 0.4)
+    low_positive = q_low + (1.0 - q_low) * np.interp(0.5, [0.0, 0.5, 1.0], [0.0, 0.25, 1.0])
+    q_high = expit(logit(0.4) + 0.2)
+    high_positive = q_high + (1.0 - q_high) * 0.5
+    np.testing.assert_allclose(transformed, [low_positive, low_positive, high_positive])
+
+
+def test_role_only_fit_produces_role_keyed_blob_without_position_dimension():
+    inputs = _synthetic_validation()
+    fit = receiving.fit_two_part_groupcdf(*inputs, grouping="role_only")
+    assert fit.blob["cdf"]["grouping"] == "role_only"
+    assert set(fit.blob["cdf"]["positive"]) == set(receiving.ROLE_VALUES)
+
+
+def test_default_fit_stays_position_grouped_without_grouping_tag():
+    inputs = _synthetic_validation()
+    fit = receiving.fit_two_part_groupcdf(*inputs, residual_positions=(3,))
+    assert "grouping" not in fit.blob["cdf"]
+    assert set(fit.blob["cdf"]["positive"]) == {
+        f"{role}_pos{position}"
+        for role in receiving.ROLE_VALUES
+        for position in receiving.POSITION_CODES
+    }
+
+
+def _support_audit_frame(
+    n_players: int = 320, n_positions: int = 10, positive_player_frac: float = 1.0
+):
+    """Synthetic validation frame for the nested Player-grouped support audit.
+
+    Every player is fixed to one of ``n_positions`` positions, so a large
+    ``n_positions`` thins each ``role_posN`` positive group below the per-fold
+    positive floor while the two role-only groups (``low``/``high``) stay dense.
+    ``positive_player_frac`` silences the tail of players (all-nonpositive) to
+    starve even the role-only groups.
+    """
+    rows_per_player = 12
+    players = np.repeat(np.arange(n_players), rows_per_player)
+    within = np.tile(np.arange(rows_per_player), n_players)
+    roles = np.where(within < 6, "low", "high")
+    positions = (players % n_positions) + 1
+    nonpositive = np.isin(within, [0, 1, 6, 7])
+    silent = players >= round(n_players * positive_player_frac)
+    result = np.where(nonpositive | silent, 0.0, 1.0)
+    outcome = (within % 2).astype(float)
+    authentic = np.ones(len(players), dtype=bool)
+    return result, outcome, authentic, players, roles, positions
+
+
+def test_support_audit_falls_back_to_role_only_when_position_granular_fails():
+    result, outcome, authentic, players, roles, positions = _support_audit_frame()
+    audit = _two_part_nested_support_audit(
+        result, outcome, authentic, players, roles, positions, ()
+    )
+    assert audit["grouping"] == "role_only"
+    assert set(audit["positive_map_minimum_support"]) == set(receiving.ROLE_VALUES)
+
+
+def test_support_audit_keeps_position_grouping_when_it_clears():
+    # Two positions ⇒ each role×position group stays dense, so no fallback fires
+    # and the audit records no grouping tag (absent ⇒ role_by_position).
+    result, outcome, authentic, players, roles, positions = _support_audit_frame(n_positions=2)
+    audit = _two_part_nested_support_audit(
+        result, outcome, authentic, players, roles, positions, ()
+    )
+    assert audit.get("grouping", "role_by_position") == "role_by_position"
+    assert set(audit["positive_map_minimum_support"]) == {
+        f"{role}_pos{code}" for role in receiving.ROLE_VALUES for code in (1, 2)
+    }
+
+
+def test_support_audit_still_kills_when_role_only_also_starves():
+    result, outcome, authentic, players, roles, positions = _support_audit_frame(
+        positive_player_frac=0.1
+    )
+    with pytest.raises(ValueError, match="positive"):
+        _two_part_nested_support_audit(
+            result, outcome, authentic, players, roles, positions, ()
+        )

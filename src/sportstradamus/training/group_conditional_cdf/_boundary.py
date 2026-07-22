@@ -26,7 +26,11 @@ from sportstradamus.training.group_conditional_cdf._contracts import (
 from sportstradamus.training.group_conditional_cdf._maps import apply_endpoint_map, fit_endpoint_map
 
 
-def positive_group(role: np.ndarray, position: np.ndarray) -> np.ndarray:
+def positive_group(
+    role: np.ndarray, position: np.ndarray, grouping: str = "role_by_position"
+) -> np.ndarray:
+    if grouping == "role_only":
+        return np.asarray([str(role_name) for role_name in role], dtype=str)
     return np.asarray(
         [f"{role_name}_pos{code}" for role_name, code in zip(role, position, strict=True)],
         dtype=str,
@@ -40,6 +44,7 @@ def fit_models(
     nonpositive_lam: float,
     positive_groups,
     residual_positions,
+    grouping: str = "role_by_position",
 ) -> TwoPartCdfBlob:
     role_models = {}
     for role_name in ROLE_VALUES:
@@ -68,7 +73,7 @@ def fit_models(
 
     residual = fit_boundary_residual(rows, role_models, residual_positions)
 
-    groups = positive_group(rows.role, rows.position)
+    groups = positive_group(rows.role, rows.position, grouping)
     positive_maps = {}
     for group in positive_groups:
         mask = (rows.result > 0.0) & (groups == group)
@@ -79,13 +84,18 @@ def fit_models(
             1.0,
         )
         positive_maps[group] = fit_endpoint_map(samples, positive_lam)
-    return {
+    blob: TwoPartCdfBlob = {
         "kind": "role_position_two_part_cdf",
         "role_boundary": role_models,
         "positive": positive_maps,
         "rb_boundary_residual": residual,
         "boundary_residual_positions": [int(code) for code in residual_positions],
     }
+    if grouping != "role_by_position":
+        # Absent tag ⇒ role_by_position, so position-grouped blobs (the NFL pilots)
+        # stay byte-identical; only the role-only fallback records the switch.
+        blob["grouping"] = grouping
+    return blob
 
 
 def fit_boundary_residual(rows: CalibrationRows, role_models, residual_positions) -> float:
@@ -130,9 +140,18 @@ def fit_boundary_intercept(f0: np.ndarray, nonpositive: np.ndarray) -> float:
         raise ValueError("two-part boundary intercept is outside its fit bracket") from exc
 
 
-def apply_models(models, cdf, f0, roles, positions, positive_groups, residual_positions):
+def apply_models(
+    models,
+    cdf,
+    f0,
+    roles,
+    positions,
+    positive_groups,
+    residual_positions,
+    grouping="role_by_position",
+):
     output = np.empty_like(cdf, dtype=float)
-    groups = positive_group(roles, positions)
+    groups = positive_group(roles, positions, grouping)
     for role_name in ROLE_VALUES:
         mask = roles == role_name
         raw_boundary = np.clip(f0[mask], CDF_CLIP, 1.0 - CDF_CLIP)
