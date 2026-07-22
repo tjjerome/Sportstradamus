@@ -1,4 +1,4 @@
-"""Train-market fit/gate/apply step for the affine QB/RB affine group-CDF candidate."""
+"""Train-market fit/gate/apply step for the affine per-position group-CDF candidate."""
 
 from __future__ import annotations
 
@@ -25,16 +25,14 @@ from sportstradamus.training.scorecard import (
     _gate23_segment_match,
     _segment_masks,
 )
-from sportstradamus.training.structural_strategies import (
-    AFFINE_POSITIONS,
-    AFFINE_STRATEGY,
-)
+from sportstradamus.training.structural_strategies import AFFINE_STRATEGY
 
 
 def _affine_candidate_oof_audit(
     fit: AffineCalibrationFit,
     splits: dict,
     positions: np.ndarray,
+    experts: dict[int, str],
 ) -> dict:
     """Validate the affine candidate without consulting the held-out test outcomes."""
     # style: allow-complexity -- aggregates independent out-of-fold guards on the affine candidate
@@ -42,10 +40,8 @@ def _affine_candidate_oof_audit(
 
     pit_global = float(np.mean([_ks_uniform(draw) for draw in fit.oof_pit_draws]))
     pit_by_position = {
-        AFFINE_POSITIONS[code]: float(
-            np.mean([_ks_uniform(draw[positions == code]) for draw in fit.oof_pit_draws])
-        )
-        for code in AFFINE_POSITIONS
+        label: float(np.mean([_ks_uniform(draw[positions == code]) for draw in fit.oof_pit_draws]))
+        for code, label in experts.items()
     }
     gate_frame = splits["X_validation"].copy()
     gate_frame["Result"] = result
@@ -122,9 +118,9 @@ def _step_apply_affine_groupcdf_candidate(
     splits: dict,
     context: dict,
 ) -> tuple[dict, dict]:
-    """Fit and apply the frozen QB/RB distribution and quoted-line probability heads."""
+    """Fit and apply the frozen per-position distribution and quoted-line probability heads."""
     if context.get("status") != "active":
-        raise ValueError("affine/group-CDF candidate requires active QB/RB routing")
+        raise ValueError("affine/group-CDF candidate requires active per-position routing")
     index_val = splits["X_validation"].index
     index_test = splits["X_test"].index
     positions_val = context["positions"]["validation"].reindex(index_val).to_numpy(dtype=float)
@@ -163,7 +159,8 @@ def _step_apply_affine_groupcdf_candidate(
         positions_val,
         players_val,
     )
-    audit = _affine_candidate_oof_audit(fit, splits, positions_val.astype(int))
+    experts: dict[int, str] = context["experts"]
+    audit = _affine_candidate_oof_audit(fit, splits, positions_val.astype(int), experts)
     validation_output = apply_affine_groupcdf(
         fit.blob,
         predictive_val,
@@ -203,7 +200,7 @@ def _step_apply_affine_groupcdf_candidate(
                         sort_keys=True,
                         separators=(",", ":"),
                     )
-                    for code in AFFINE_POSITIONS
+                    for code in experts
                 }
             ),
             "structural_calibration_blob": {
@@ -214,7 +211,7 @@ def _step_apply_affine_groupcdf_candidate(
                 "line_probability_only": True,
                 "routing": {
                     "kind": "player_position",
-                    "experts": {str(code): label for code, label in AFFINE_POSITIONS.items()},
+                    "experts": {str(code): label for code, label in experts.items()},
                 },
                 "support": context["support"],
                 "calibration": fit.blob,

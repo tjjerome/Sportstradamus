@@ -115,7 +115,6 @@ from sportstradamus.training.structural_context import (
 )
 from sportstradamus.training.structural_strategies import (
     AFFINE_EXPERT_EXPERIMENTS,
-    AFFINE_POSITIONS,
     AFFINE_STRATEGY,
     TWO_PART_STRATEGY,
 )
@@ -1241,7 +1240,7 @@ def _step_fit_affine_experts(
     deterministic: bool,
     sn_param: str,
 ) -> tuple[dict[int, object], dict]:
-    """Fit QB then RB with the pooled columns, labels, and selected parameters."""
+    """Fit one expert per discovered position with the pooled columns, labels, and params."""
     if context["status"] != "active":
         return {}, context
 
@@ -1249,13 +1248,13 @@ def _step_fit_affine_experts(
     positions = pd.to_numeric(X_train["Player position"], errors="coerce")
     y_train_labels = np.asarray(splits["y_train_labels"])
     expert_models: dict[int, object] = {}
-    for code in AFFINE_POSITIONS:
+    for code in context["experts"]:
         mask = positions.eq(code).to_numpy()
         if not mask.any():
             return {}, _kill_experiment_context(
                 context,
                 splits,
-                f"missing eligible train rows for rushing position code {code}",
+                f"missing eligible train rows for position code {code}",
             )
         expert_models[code] = _step_fit_model(
             dist,
@@ -1274,7 +1273,7 @@ def _step_fit_affine_experts(
             return {}, _kill_experiment_context(
                 context,
                 splits,
-                f"missing fitted rushing expert for position code {code}",
+                f"missing fitted expert for position code {code}",
             )
     return expert_models, context
 
@@ -1307,20 +1306,21 @@ def _stitch_one_split(
     X_part: pd.DataFrame,
     routes: pd.Series,
     experts: dict[int, object],
+    labels: dict[int, str],
     dist: str,
     *,
     normalize: bool,
     offset_mode: bool,
     sn_param: str,
 ) -> pd.DataFrame:
-    """Overlay each rushing position's expert params onto one pooled split."""
+    """Overlay each discovered position's expert params onto one pooled split."""
     stitched = pooled.copy()
     position = pd.to_numeric(X_part["Player position"], errors="coerce")
-    eligible_fallback = position.isin(AFFINE_POSITIONS) & routes.eq("pooled_fallback")
+    eligible_fallback = position.isin(labels) & routes.eq("pooled_fallback")
     if eligible_fallback.any():
-        raise ValueError(f"eligible rushing fallback rows on {split}")
+        raise ValueError(f"eligible expert fallback rows on {split}")
 
-    for code in AFFINE_POSITIONS:
+    for code in experts:
         eligible_index = X_part.index[position.eq(code)]
         expert_params = _predict_split_params(
             experts[code],
@@ -1337,7 +1337,7 @@ def _stitch_one_split(
             and np.isfinite(expert_params.to_numpy(dtype=float)).all()
         )
         if not valid:
-            raise ValueError(f"invalid {AFFINE_POSITIONS[code]} expert parameters on {split}")
+            raise ValueError(f"invalid {labels[code]} expert parameters on {split}")
         stitched.loc[eligible_index, :] = expert_params.to_numpy()
     return stitched
 
@@ -1353,10 +1353,10 @@ def _stitch_affine_expert_params(
     offset_mode: bool,
     sn_param: str,
 ) -> tuple[dict[str, pd.DataFrame], dict | None]:
-    """Overlay per-position rushing-expert params onto the pooled predictions.
+    """Overlay each discovered position's expert params onto the pooled predictions.
 
     Returns ``(stitched_params, context)``. When the candidate is not an active
-    rushing experiment, the pooled params pass through unchanged. A missing
+    affine experiment, the pooled params pass through unchanged. A missing
     expert or an invalid stitch kills the experiment and routes every split to
     its pooled fallback.
     """
@@ -1366,11 +1366,12 @@ def _stitch_affine_expert_params(
         or context["status"] != "active"
     ):
         return pooled_params, context
-    if any(code not in experts for code in AFFINE_POSITIONS):
+    labels: dict[int, str] = context["experts"]
+    if any(code not in experts for code in labels):
         return pooled_params, _kill_experiment_context(
             context,
             splits,
-            "missing fitted QB/RB rushing expert",
+            "missing fitted expert for a discovered position",
         )
 
     try:
@@ -1381,6 +1382,7 @@ def _stitch_affine_expert_params(
                 splits[f"X_{split}"],
                 context["routes"][split].reindex(splits[f"X_{split}"].index),
                 experts,
+                labels,
                 dist,
                 normalize=normalize,
                 offset_mode=offset_mode,
@@ -3713,6 +3715,7 @@ def train_market(
     elif structural_strategy in AFFINE_EXPERT_EXPERIMENTS:
         experiment_context = build_affine_expert_context(
             splits,
+            league=league,
             slug=structural_strategy,
         )
     else:

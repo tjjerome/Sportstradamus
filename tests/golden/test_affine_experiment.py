@@ -13,10 +13,7 @@ from sportstradamus.training import cli as training_cli
 from sportstradamus.training import pipeline as pipe
 from sportstradamus.training.cli import meditate
 from sportstradamus.training.structural_context import build_affine_expert_context
-from sportstradamus.training.structural_strategies import (
-    AFFINE_POSITIONS,
-    AFFINE_STRATEGY,
-)
+from sportstradamus.training.structural_strategies import AFFINE_STRATEGY
 
 
 def _frame(index, positions) -> pd.DataFrame:
@@ -32,14 +29,21 @@ def _frame(index, positions) -> pd.DataFrame:
     )
 
 
+# QB(1) + RB(3) carry train rows so they are discovered as experts; TE(4) appears only in the
+# holdouts (a roster code the pilot market never fields in train), so it is pruned from the
+# expert set and its holdout rows route to the pooled fallback — the market-agnostic behavior
+# that emerges from the matrix instead of a hardcoded QB/RB pair.
+_UNFIELDED_HOLDOUT_CODE = 4
+
+
 def _context_splits() -> dict:
     train_index = pd.Index([9, 2, 8, 3, 7])
     validation_index = pd.Index([19, 12, 18, 13, 17])
     test_index = pd.Index([29, 22, 28, 23, 27])
     return {
-        "X_train": _frame(train_index, [1, 3, 8, 1, 3]),
-        "X_validation": _frame(validation_index, [3, 1, 8, 3, 1]),
-        "X_test": _frame(test_index, [8, 3, 1, 1, 3]),
+        "X_train": _frame(train_index, [1, 3, 3, 1, 3]),
+        "X_validation": _frame(validation_index, [3, 1, _UNFIELDED_HOLDOUT_CODE, 3, 1]),
+        "X_test": _frame(test_index, [_UNFIELDED_HOLDOUT_CODE, 3, 1, 1, 3]),
         "players_train": pd.Series([f"t-{i}" for i in range(5)], index=train_index),
         "players_validation": pd.Series([f"v-{i}" for i in range(5)], index=validation_index),
     }
@@ -97,7 +101,9 @@ def test_cli_rejects_structural_pool_method_on_nontraining_paths(monkeypatch, pa
     monkeypatch.setattr(
         training_cli,
         "load_stat_meta",
-        lambda _path: {"NFL": {"rushing yards": {"dist": "SkewNormal", "posthoc": AFFINE_STRATEGY}}},
+        lambda _path: {
+            "NFL": {"rushing yards": {"dist": "SkewNormal", "posthoc": AFFINE_STRATEGY}}
+        },
     )
     result = CliRunner().invoke(
         meditate,
@@ -141,15 +147,21 @@ def test_structural_pool_method_skips_calibrated_g4_retry(monkeypatch):
     model_stats_row.assert_not_called()
 
 
-def test_rushing_context_routes_qb_rb_and_allows_unknown_pooled_fallback():
-    context = build_affine_expert_context(_context_splits(), support_floor=_tiny_support_floor())
+def test_affine_context_discovers_experts_and_routes_unfielded_positions_pooled():
+    context = build_affine_expert_context(
+        _context_splits(), league="NFL", support_floor=_tiny_support_floor()
+    )
     assert context["status"] == "active"
-    assert context["routes"]["train"].tolist() == [
-        "QB",
+    # Experts emerge from the train matrix (QB + RB), not a hardcoded pair; TE never trains.
+    assert context["experts"] == {1: "QB", 3: "RB"}
+    assert context["routes"]["train"].tolist() == ["QB", "RB", "RB", "QB", "RB"]
+    # TE(4) appears only in the holdouts, so its rows route to the pooled fallback.
+    assert context["routes"]["validation"].tolist() == [
         "RB",
+        "QB",
         "pooled_fallback",
-        "QB",
         "RB",
+        "QB",
     ]
     assert context["support"]["1"] == {
         "train_rows": 2,
@@ -158,12 +170,19 @@ def test_rushing_context_routes_qb_rb_and_allows_unknown_pooled_fallback():
         "train_players": 2,
         "validation_players": 2,
     }
-    assert context["support"]["3"] == context["support"]["1"]
+    assert context["support"]["3"] == {
+        "train_rows": 3,
+        "validation_rows": 2,
+        "test_rows": 2,
+        "train_players": 3,
+        "validation_players": 2,
+    }
 
 
-def test_rushing_support_failure_kills_and_routes_everything_pooled():
+def test_affine_support_failure_kills_and_routes_everything_pooled():
     context = build_affine_expert_context(
         _context_splits(),
+        league="NFL",
         support_floor=_tiny_support_floor() | {"train_rows": 3},
     )
     assert context["status"] == "killed_fallback"
@@ -171,10 +190,10 @@ def test_rushing_support_failure_kills_and_routes_everything_pooled():
     assert all(routes.eq("pooled_fallback").all() for routes in context["routes"].values())
 
 
-def test_experts_fit_qb_then_rb_with_pooled_columns_labels_and_params(monkeypatch):
+def test_experts_fit_per_discovered_position_with_pooled_columns_labels_and_params(monkeypatch):
     splits = _context_splits()
     splits["y_train_labels"] = np.array([90.0, 20.0, 80.0, 30.0, 70.0])
-    context = build_affine_expert_context(splits, support_floor=_tiny_support_floor())
+    context = build_affine_expert_context(splits, league="NFL", support_floor=_tiny_support_floor())
     opt_params = {"opt_rounds": 30}
     calls = []
 
@@ -205,14 +224,16 @@ def test_experts_fit_qb_then_rb_with_pooled_columns_labels_and_params(monkeypatc
     assert all(list(call[2].columns) == list(splits["X_train"].columns) for call in calls)
     assert all(call[4] is opt_params for call in calls)
     np.testing.assert_array_equal(calls[0][3], [90.0, 30.0])
-    np.testing.assert_array_equal(calls[1][3], [20.0, 70.0])
+    np.testing.assert_array_equal(calls[1][3], [20.0, 80.0, 70.0])
 
 
 def _prediction_splits() -> dict:
+    # Train fields only QB(1)+RB(3), so those two codes are discovered as experts; the unfielded
+    # roster code TE(4) shows up only in the holdouts and must stay pooled at dispatch.
     frames = {
-        "train": _frame(pd.Index([5, 1, 4]), [3, 8, 1]),
-        "validation": _frame(pd.Index([15, 11, 14]), [1, 3, 8]),
-        "test": _frame(pd.Index([25, 21, 24]), [8, 1, 3]),
+        "train": _frame(pd.Index([5, 1, 4]), [3, 1, 1]),
+        "validation": _frame(pd.Index([15, 11, 14]), [1, 3, _UNFIELDED_HOLDOUT_CODE]),
+        "test": _frame(pd.Index([25, 21, 24]), [_UNFIELDED_HOLDOUT_CODE, 1, 3]),
     }
     splits = {}
     for split, frame in frames.items():
@@ -240,6 +261,7 @@ def _prediction_context(splits: dict) -> dict:
     }
     return build_affine_expert_context(
         context_splits,
+        league="NFL",
         support_floor=dict.fromkeys(_tiny_support_floor(), 0),
     )
 
@@ -313,7 +335,7 @@ def test_nonfinite_expert_prediction_kills_and_atomically_restores_all_pooled(mo
         assert result["structural_context"]["routes"][split].eq("pooled_fallback").all()
 
 
-def test_rushing_candidate_has_separate_namespace_and_default_is_unchanged():
+def test_affine_candidate_has_separate_namespace_and_default_is_unchanged():
     assert pipe._deterministic_dump_subdir("SkewNormal", "joint", "ratio_meanyr") == (
         "ratio_meanyr"
     )
@@ -326,4 +348,3 @@ def test_rushing_candidate_has_separate_namespace_and_default_is_unchanged():
         )
         == f"ratio_meanyr__{AFFINE_STRATEGY}"
     )
-    assert list(AFFINE_POSITIONS) == [1, 3]

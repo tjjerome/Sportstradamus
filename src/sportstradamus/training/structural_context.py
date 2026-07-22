@@ -14,7 +14,6 @@ from sportstradamus.training.role_specs import (
     role_spec_for,
 )
 from sportstradamus.training.structural_strategies import (
-    AFFINE_POSITIONS,
     AFFINE_STRATEGY,
     AFFINE_SUPPORT,
     TWO_PART_STRATEGY,
@@ -168,45 +167,64 @@ def build_two_part_context(
 def build_affine_expert_context(
     splits: Mapping[str, object],
     *,
+    league: str,
     support_floor: Mapping[str, int] = AFFINE_SUPPORT,
     slug: str = AFFINE_STRATEGY,
 ) -> dict:
-    """Route QB/RB rows and enforce support floors for the final affine candidate."""
+    """Discover the market's fielded positions and enforce support floors per expert.
+
+    Mirrors :func:`build_two_part_context`: the expert set is the league roster codes
+    (:func:`league_position_codes`) the market's train rows actually field, labelled via
+    :func:`position_label`; codes the market never fields are pruned, and every other row
+    routes to the pooled fallback. The fit runs fresh on each cell's own matrix, so the
+    kept codes are emergent — the NFL rushing pilot reproduces its QB/RB experts because
+    those are the only roster codes its matrix carries.
+    """
     if slug != AFFINE_STRATEGY:
         raise ValueError(f"unsupported affine strategy {slug!r}")
     frames = {split: splits[f"X_{split}"] for split in ("train", "validation", "test")}
+    codes = league_position_codes(league)
+    experts: dict[int, str] = {}
     support: dict[str, dict[str, int]] = {}
     positions: dict[str, pd.Series] = {}
     try:
-        routes: dict[str, pd.Series] = {}
         for split, frame in frames.items():
-            if "Player position" not in frame.columns:
-                raise ValueError("missing Player position")
-            position = pd.to_numeric(frame["Player position"], errors="coerce")
-            positions[split] = position
-            routes[split] = position.map(AFFINE_POSITIONS).fillna("pooled_fallback")
+            positions[split] = _validated_positions(frame, codes)
+        expert_labels = {
+            code: position_label(league, code)
+            for code in codes
+            if positions["train"].eq(code).any()  # skip roster codes this market never fields
+        }
+        if not expert_labels:
+            raise ValueError("no train rows for any league position code")
 
+        routes = {
+            split: positions[split].map(expert_labels).fillna("pooled_fallback").astype("object")
+            for split in ("train", "validation", "test")
+        }
         players = {
             "train": splits.get("players_train"),
             "validation": splits.get("players_validation"),
         }
         support = {
             str(code): _support_for_group(routes, players, label)
-            for code, label in AFFINE_POSITIONS.items()
+            for code, label in expert_labels.items()
         }
         failures = [
-            f"{AFFINE_POSITIONS[int(code)]}.{key}={counts[key]}<{minimum}"
+            f"{expert_labels[int(code)]}.{key}={counts[key]}<{minimum}"
             for code, counts in support.items()
             for key, minimum in support_floor.items()
             if counts[key] < minimum
         ]
         if failures:
             raise ValueError(f"affine expert support guard failed: {', '.join(failures)}")
+        experts = expert_labels
     except ValueError as exc:
         return {
             "slug": slug,
             "status": "killed_fallback",
             "kill_reason": str(exc),
+            "experts": experts,
             "support": support,
             "routes": _fallback_routes(frames),
             "positions": positions,
@@ -216,6 +234,7 @@ def build_affine_expert_context(
         "slug": slug,
         "status": "active",
         "kill_reason": None,
+        "experts": experts,
         "support": support,
         "routes": routes,
         "positions": positions,

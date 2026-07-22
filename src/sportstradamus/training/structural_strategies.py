@@ -3,8 +3,10 @@
 Both methods are graduated into the single-valued ``posthoc`` calibration pool
 (:data:`sportstradamus.training.posthoc.STRUCTURAL_STAGE`); selection and dispatch live
 there and in ``training.pipeline`` / ``prediction.model_prob``. This module holds only the
-method-slug constants, the per-cell support floors, and the affine position/role column
-literals the two builders read.
+method-slug constants, the per-cell support floors, and the shared role-column literals a
+builder reads. Both methods discover their per-cell position codes from the training matrix
+(:func:`sportstradamus.training.role_specs.league_position_codes`), so no position literals
+live here.
 """
 
 from __future__ import annotations
@@ -20,7 +22,6 @@ ROLE_COLUMNS: tuple[str, ...] = (
     "Player target share",
     "Player yards per target",
 )
-AFFINE_POSITIONS: dict[int, str] = {1: "QB", 3: "RB"}
 TWO_PART_SUPPORT: dict[str, int] = {
     "train_rows": 4000,
     "validation_rows": 400,

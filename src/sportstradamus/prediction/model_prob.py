@@ -75,7 +75,6 @@ from sportstradamus.training.model_strategy_report_identity import resolve_repor
 from sportstradamus.training.posthoc import MEAN_STAGE, PROB_STAGE, apply_posthoc
 from sportstradamus.training.role_specs import RoleSpec, role_spec_for
 from sportstradamus.training.structural_strategies import (
-    AFFINE_POSITIONS,
     AFFINE_STRATEGY,
     TWO_PART_STRATEGY,
 )
@@ -636,19 +635,32 @@ def _build_prob_params(
 
     prob_params = _predict(model, playerStats)
     if structural_strategy == AFFINE_STRATEGY:
-        experts = filedict.get("expert_models")
-        if not isinstance(experts, dict) or any(code not in experts for code in AFFINE_POSITIONS):
-            raise ValueError("affine candidate pickle is missing its QB/RB expert models")
-        position = pd.to_numeric(playerStats["Player position"], errors="coerce")
-        for code in AFFINE_POSITIONS:
-            rows = playerStats.loc[position.eq(code)]
-            if rows.empty:
-                continue
-            expert_params = _predict(experts[code], rows)
-            if list(expert_params.columns) != list(prob_params.columns):
-                raise ValueError("affine expert parameter schema drifted from pooled model")
-            prob_params.loc[rows.index, :] = expert_params.to_numpy()
+        _overlay_affine_experts(prob_params, playerStats, filedict.get("expert_models"), _predict)
     return prob_params
+
+
+def _overlay_affine_experts(
+    prob_params: pd.DataFrame,
+    playerStats: pd.DataFrame,
+    experts: object,
+    predict,
+) -> None:
+    """Overlay each persisted position's expert params onto the pooled serve params.
+
+    The expert code set is recovered from the pickle's own ``expert_models`` keys — the
+    market's discovered positions — never a fixed QB/RB pair.
+    """
+    if not isinstance(experts, dict) or not experts:
+        raise ValueError("affine candidate pickle is missing its per-position expert models")
+    position = pd.to_numeric(playerStats["Player position"], errors="coerce")
+    for code in experts:
+        rows = playerStats.loc[position.eq(code)]
+        if rows.empty:
+            continue
+        expert_params = predict(experts[code], rows)
+        if list(expert_params.columns) != list(prob_params.columns):
+            raise ValueError("affine expert parameter schema drifted from pooled model")
+        prob_params.loc[rows.index, :] = expert_params.to_numpy()
 
 
 def _resolve_serving_strategy(filedict: dict, league: str, market: str) -> ArtifactIdentity:
@@ -940,8 +952,13 @@ def _two_part_candidate_routes(
         raise ValueError("two-part candidate requires integer position codes")
     positions = raw_position.astype(int)
     persisted_codes = {int(code) for code in routing["positions"]}
-    if not np.array_equal(raw_position, positions) or not set(positions.tolist()) <= persisted_codes:
-        raise ValueError("two-part candidate positions must be among its persisted routing position codes")
+    if (
+        not np.array_equal(raw_position, positions)
+        or not set(positions.tolist()) <= persisted_codes
+    ):
+        raise ValueError(
+            "two-part candidate positions must be among its persisted routing position codes"
+        )
 
     role_score = spec.role_score(offer_df).to_numpy(dtype=float)
     thresholds = np.asarray([routing["thresholds"][str(code)] for code in positions], dtype=float)
@@ -1032,6 +1049,11 @@ def _affine_candidate_calibration(experiment_blob: dict) -> dict:
     return calibration
 
 
+def _affine_supported_codes(calibration: dict) -> tuple[int, ...]:
+    """Position codes the fitted affine candidate calibrated — recovered from its own blob."""
+    return tuple(int(code) for code in calibration["position_cdf"])
+
+
 def _apply_affine_candidate_distribution(
     offer_df: pd.DataFrame,
     base_mean: np.ndarray,
@@ -1039,8 +1061,9 @@ def _apply_affine_candidate_distribution(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Apply the affine/CDF head and return conditional mean plus final line P(over)."""
     position = pd.to_numeric(offer_df["Player position"], errors="coerce").to_numpy()
-    if not np.isin(position, tuple(AFFINE_POSITIONS)).all():
-        raise ValueError("affine candidate received a non-QB/RB offer")
+    supported = _affine_supported_codes(calibration)
+    if not np.isin(position, tuple(supported)).all():
+        raise ValueError("affine candidate received an offer outside its calibrated positions")
     gate = (
         offer_df["Model Gate"].to_numpy(dtype=float)
         if "Model Gate" in offer_df
@@ -1383,8 +1406,12 @@ def model_prob(
     two_part_role_spec = (
         role_spec_for(league, market) if two_part_candidate_state is not None else None
     )
-    if two_part_candidate_state is not None and (dist != "SkewNormal" or two_part_role_spec is None):
-        raise ValueError("two-part candidate requires a SkewNormal cell with a registered role spec")
+    if two_part_candidate_state is not None and (
+        dist != "SkewNormal" or two_part_role_spec is None
+    ):
+        raise ValueError(
+            "two-part candidate requires a SkewNormal cell with a registered role spec"
+        )
     if two_part_candidate_state is not None and (dispersion_cal != 1.0 or skew_cal != 0.0):
         raise ValueError("two-part candidate requires its persisted raw fused shape")
     hist_gate = (
@@ -1421,10 +1448,10 @@ def model_prob(
     offer_df = _drop_no_history_offers(offer_df)
     if affine_candidate_calibration is not None:
         position = pd.to_numeric(offer_df.get("Player position"), errors="coerce")
-        supported = position.isin(AFFINE_POSITIONS)
+        supported = position.isin(_affine_supported_codes(affine_candidate_calibration))
         if (~supported).any():
             logger.warning(
-                f"dropped {int((~supported).sum())} non-QB/RB affine offer(s) outside "
+                f"dropped {int((~supported).sum())} affine offer(s) outside "
                 "the calibrated candidate support"
             )
             offer_df = offer_df.loc[supported]
