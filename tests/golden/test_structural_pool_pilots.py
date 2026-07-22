@@ -44,9 +44,16 @@ class PilotPin(TypedDict, total=False):
     expected: dict
 
 
-# One row per graduated method's passing pilot. Empty until Stage B (two-part →
-# NFL/receiving yards) and Stage C (affine → NFL/rushing yards) add their rows.
-PILOT_PINS: tuple[PilotPin, ...] = ()
+# One row per graduated method's passing pilot. Stage C (affine → NFL/rushing yards)
+# adds its row once the market-agnostic conversion lands.
+PILOT_PINS: tuple[PilotPin, ...] = (
+    {
+        "league": "NFL",
+        "market": "receiving yards",
+        "method": "role-position-two-part-groupcdf-fixedlinear-v3",
+        "distribution": "SkewNormal",
+    },
+)
 
 
 def _pilot_cell(pin: PilotPin) -> CellContext:
