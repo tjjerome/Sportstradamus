@@ -50,7 +50,8 @@ def _receiving_model(*, status: str = "active", include_split: bool = True) -> d
         "target_normalization": "ratio_meanyr",
         "normalized": True,
         "sn_param": "direct",
-        "posthoc": "none",
+        # The method rides the ``posthoc`` calibration pool: its slug IS the persisted value.
+        "posthoc": slug,
         "structural_calibration": adapter,
         MODEL_STRATEGY_MODEL_KEY: identity.as_model_blob(),
     }

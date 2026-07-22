@@ -31,16 +31,18 @@ Options:
                                   Ship 75 search axis and how to confirm a
                                   candidate normalization before persisting it
                                   to stat_meta.json.  [default: auto]
-  --posthoc [auto|cdf_recal_isotonic|isotonic_mean|none|prob_recal_isotonic|prob_recal_platt|roe_mean]
-                                  Post-hoc corrector applied after the
-                                  distribution is formed. 'auto' (default)
+  --posthoc [auto|affine-groupcdf-bookpool-v1|cdf_recal_isotonic|isotonic_mean|none|prob_recal_isotonic|prob_recal_platt|roe_mean|role-position-two-part-groupcdf-fixedlinear-v3]
+                                  Per-cell calibration-method selector (single-
+                                  valued, mutually exclusive). 'auto' (default)
                                   honors each cell's stat_meta posthoc; an
                                   explicit slug overrides every selected cell,
-                                  in a real run or under --deterministic. The
-                                  model-strategy sweep passes '--posthoc none'
-                                  for structural candidates, which replace the
-                                  post-hoc stage with their own group-
-                                  conditional CDF calibration.  [default: auto]
+                                  in a real run or under --deterministic. A
+                                  light corrector slug adjusts the decoded mean
+                                  or over-probability after the distribution is
+                                  formed; a structural slug (role-position two-
+                                  part / affine group-conditional CDF) selects
+                                  that method's own calibration stage instead.
+                                  [default: auto]
   --zinb-mode [auto|joint|hurdle]
                                   Model architecture for ZINB markets. 'auto'
                                   (default) honors each cell's stat_meta
@@ -141,14 +143,4 @@ Options:
                                   Warms data/training_data/ without training;
                                   pair with --bypass-withholding to reach
                                   withheld cells.
-  --structural-strategy [auto|none|affine-groupcdf-bookpool-v1|role-position-two-part-groupcdf-fixedlinear-v3]
-                                  Structured post-processing strategy. 'auto'
-                                  honors each cell's persisted
-                                  structural_strategy; 'none' disables
-                                  structural processing. A named strategy is
-                                  accepted only for its registered cell and
-                                  frozen controls, and only with
-                                  --deterministic. Full-HPO confirmation
-                                  persists the strategy, then uses 'auto'.
-                                  [default: auto]
   --help                          Show this message and exit.

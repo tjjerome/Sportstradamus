@@ -1,21 +1,17 @@
-"""Pure routing and support guards for the surviving structural candidates."""
+"""Shared constants for the group-conditional-CDF structural calibration methods.
+
+Both methods are graduated into the single-valued ``posthoc`` calibration pool
+(:data:`sportstradamus.training.posthoc.STRUCTURAL_STAGE`); selection and dispatch live
+there and in ``training.pipeline`` / ``prediction.model_prob``. This module holds only the
+method-slug constants, the per-cell support floors, and the affine position/role column
+literals the two builders read.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-
-AUTO = "auto"
-NONE = "none"
-TWO_PART_STRATEGY = (
-    "role-position-two-part-groupcdf-fixedlinear-v3"
-)
+TWO_PART_STRATEGY = "role-position-two-part-groupcdf-fixedlinear-v3"
 AFFINE_STRATEGY = "affine-groupcdf-bookpool-v1"
 
-STRUCTURAL_STRATEGIES: dict[str, tuple[str, str]] = {
-    TWO_PART_STRATEGY: ("NFL", "receiving yards"),
-    AFFINE_STRATEGY: ("NFL", "rushing yards"),
-}
-EXPERIMENT_CHOICES: tuple[str, ...] = (AUTO, NONE, *STRUCTURAL_STRATEGIES)
 AFFINE_EXPERT_EXPERIMENTS: frozenset[str] = frozenset({AFFINE_STRATEGY})
 
 ROLE_COLUMNS: tuple[str, ...] = (
@@ -39,78 +35,3 @@ AFFINE_SUPPORT: dict[str, int] = {
     "train_players": 60,
     "validation_players": 50,
 }
-
-
-def validate_experiment_selection(
-    experiment: str,
-    *,
-    league: str,
-    market_selection: str | None,
-) -> None:
-    """Reject an unresolved or explicit selector outside its one registered cell."""
-    if experiment == NONE:
-        return
-    if experiment == AUTO:
-        raise ValueError("structural strategy must be resolved per cell before training")
-    if experiment not in STRUCTURAL_STRATEGIES:
-        raise ValueError(f"unknown structural strategy {experiment!r}")
-
-    registered_league, registered_market = STRUCTURAL_STRATEGIES[experiment]
-    selected_markets = (
-        []
-        if market_selection is None
-        else [part.strip() for part in market_selection.split(",") if part.strip()]
-    )
-    if league != registered_league or selected_markets != [registered_market]:
-        raise ValueError(
-            f"{experiment} is registered only for --league {registered_league} "
-            f"--market {registered_market!r}"
-        )
-
-
-def resolve_experiment_selection(flag_value: str, cell: Mapping[str, object]) -> str:
-    """Honor a persisted structural method only when the CLI selector is ``auto``."""
-    experiment = cell.get("structural_calibration", NONE) if flag_value == AUTO else flag_value
-    if not isinstance(experiment, str):
-        raise ValueError("structural_calibration must be a string")
-    return experiment
-
-
-def validate_two_part_recipe(
-    experiment: str,
-    *,
-    league: str,
-    market: str,
-    distribution: str,
-    target_normalization: str,
-    posthoc: str,
-    dist_training_loss: str,
-    blending: str,
-    hpo_selection: str,
-    sn_param: str,
-    stabilization: str,
-) -> None:
-    """Enforce the fixed paired-control recipe registered for a yards candidate."""
-    if experiment == NONE:
-        return
-    expected_cell = STRUCTURAL_STRATEGIES.get(experiment)
-    if expected_cell != (league, market):
-        raise ValueError(f"{experiment} is not registered for {league}/{market}")
-
-    recipe = {
-        "distribution": (distribution, "SkewNormal"),
-        "target_normalization": (target_normalization, "ratio_meanyr"),
-        "posthoc": (posthoc, "none"),
-        "dist_training_loss": (dist_training_loss, "crps"),
-        "blending": (blending, "nll"),
-        "hpo_selection": (hpo_selection, "loss"),
-        "sn_param": (sn_param, "direct"),
-        "stabilization": (stabilization, "None"),
-    }
-    mismatches = [
-        f"{key}={actual!r} (requires {expected!r})"
-        for key, (actual, expected) in recipe.items()
-        if actual != expected
-    ]
-    if mismatches:
-        raise ValueError(f"{experiment} fixed-control recipe mismatch: {', '.join(mismatches)}")

@@ -3596,7 +3596,6 @@ def train_market(
     count_dispersion_objective: str = "crps",
     sn_param: str = "direct",
     matrix_only: bool = False,
-    structural_strategy: str = BASE_STRUCTURAL_STRATEGY,
 ) -> None:
     """Train or retrain one LightGBMLSS model for a single league/market pair.
 
@@ -3626,10 +3625,13 @@ def train_market(
             the SkewNormal forward target transform and the matching decode.
             Default ``"ratio_meanyr"`` reproduces legacy production behavior
             byte-for-byte.
-        posthoc_slug: Post-hoc corrector from
+        posthoc_slug: Calibration-method slug from
             :data:`sportstradamus.training.posthoc.POSTHOC_SLUGS`. A
             probability-stage slug recalibrates the over-probability after
-            temperature scaling; ``"none"`` (default) is a no-op.
+            temperature scaling; a structural slug (from
+            :data:`sportstradamus.training.posthoc.STRUCTURAL_STAGE`) names the
+            group-conditional-CDF method this cell trains and the structural
+            stage replaces the corrector; ``"none"`` (default) is a no-op.
         zinb_mode: Either ``"joint"`` (legacy LightGBMLSS ZINB; the default) or
             ``"hurdle"`` (use ``HurdleZINB`` from ``sportstradamus.hurdle`` — a
             two-stage model with a derived-π gate; see
@@ -3647,9 +3649,6 @@ def train_market(
             zero serving delta). Arrives resolved: the CLI maps ``"auto"`` to the
             cell's stat_meta before calling. Consulted only on the SkewNormal
             branch and in start-value seeding; persisted in the pickle.
-        structural_strategy: Resolved registered structural selector, or ``"none"``.
-            Structural methods must be applicable to this exact league/market and
-            match their fixed training controls.
     """
     # style: allow-length  pre-existing research orchestrator (§2.8/§18.9): flag,
     # don't split. Already over the limit before the FBT keyword-only conversion.
@@ -3657,10 +3656,12 @@ def train_market(
     # collapse is one more sequential stage, not nested logic.
     if zinb_mode not in {"joint", "hurdle"}:
         raise ValueError(f"zinb_mode must be 'joint' or 'hurdle', got {zinb_mode!r}")
-    if structural_strategy != BASE_STRUCTURAL_STRATEGY:
-        selected_spec = get_strategy(structural_strategy)
-        if not selected_spec.is_structural:
-            raise ValueError(f"{structural_strategy!r} is not a structural strategy selector")
+    # A structural calibration method rides the single-valued ``posthoc`` pool: when that
+    # slug names a structural method it selects the group-conditional-CDF stage, and the
+    # corrector stages read the same slug as a no-op (mutual exclusivity by construction).
+    structural_strategy = (
+        posthoc_slug if posthoc_slug in posthoc.STRUCTURAL_STAGE else BASE_STRUCTURAL_STRATEGY
+    )
 
     dist_override = dist
     init = _step_init_market(league, market, stat_data, archive, deterministic=deterministic)
@@ -3867,9 +3868,7 @@ def train_market(
         normalize=dist_info["normalize"],
         offset_mode=dist_info["offset_mode"],
         sn_param=sn_param,
-        expert_models=(
-            expert_models if structural_strategy in AFFINE_EXPERT_EXPERIMENTS else None
-        ),
+        expert_models=(expert_models if structural_strategy in AFFINE_EXPERT_EXPERIMENTS else None),
         structural_context=(
             experiment_context if structural_strategy in AFFINE_EXPERT_EXPERIMENTS else None
         ),
@@ -3998,9 +3997,7 @@ def train_market(
         selected_controls=selected_controls,
         structural_strategy=structural_strategy,
         algorithm_payload=calibrated.get("structural_calibration_blob"),
-        expert_models=(
-            expert_models if structural_strategy in AFFINE_EXPERT_EXPERIMENTS else None
-        ),
+        expert_models=(expert_models if structural_strategy in AFFINE_EXPERT_EXPERIMENTS else None),
     )
 
     _step_persist_artifacts(

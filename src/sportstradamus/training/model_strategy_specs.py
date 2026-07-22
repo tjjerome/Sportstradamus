@@ -22,14 +22,6 @@ _CONTROL_FLAGS = {
 _SHIP = ("deterministic_train", "full_hpo", "score", "serve", "confirm")
 _RESEARCH = ("deterministic_train", "full_hpo", "score")
 _SERVE_ONLY = ("serve",)
-_YARDS_SELECTOR = {
-    "key": "structural-strategy",
-    "version": 1,
-    "cli_flag": "--structural-strategy",
-    "meta_field": "structural_strategy",
-    "default_value": "none",
-    "auto_value": "auto",
-}
 
 
 def _base(
@@ -56,7 +48,7 @@ def _base(
         "fixed_persist": {},
         "required_columns": (),
         "shared_csv_columns": (),
-        "selector": None,
+        "structural": False,
         "artifact_namespace_suffix": False,
         "legacy_model_key": None,
         "legacy_csv_identity_column": None,
@@ -164,16 +156,24 @@ def _compatibility(slug: str) -> dict:
 
 _COMPATIBILITY_SPECS = tuple(_compatibility(slug) for slug in ("Gamma", "ZAGamma"))
 
-_YARDS_CONTROLS = {
-    "dist": "SkewNormal",
-    "normalization": "ratio_meanyr",
-    "dist_training_loss": "crps",
-    "sn_param": "direct",
-    "blending_loss_fn": "nll",
-    "hpo_selection": "loss",
-    "stabilization": "None",
-    "posthoc": "none",
-}
+
+# A structural method rides the single-valued ``posthoc`` calibration pool: its slug is
+# the field's value, so the fixed controls pin ``posthoc`` to the method's own slug
+# (never ``"none"``, which would be a different pool member). The field structurally
+# excludes any light corrector. Every other paired control matches the shipped recipe.
+def _yards_controls(slug: str) -> dict[str, str]:
+    return {
+        "dist": "SkewNormal",
+        "normalization": "ratio_meanyr",
+        "dist_training_loss": "crps",
+        "sn_param": "direct",
+        "blending_loss_fn": "nll",
+        "hpo_selection": "loss",
+        "stabilization": "None",
+        "posthoc": slug,
+    }
+
+
 _YARDS_PERSIST = {
     "dist": "dist",
     "normalization": "target_normalization",
@@ -181,6 +181,7 @@ _YARDS_PERSIST = {
     "sn_param": "sn_param",
     "blending_loss_fn": "blending",
     "hpo_selection": "hpo_selection",
+    "posthoc": "posthoc",
 }
 
 
@@ -201,15 +202,15 @@ def _yards(
         "enrollments": enrollments,
         "capabilities": _SHIP,
         "axes": {},
-        "fixed_controls": _YARDS_CONTROLS,
+        "fixed_controls": _yards_controls(slug),
         "cli_flags": _CONTROL_FLAGS,
         "persist": _YARDS_PERSIST,
-        "fixed_persist": {"posthoc": "none"},
+        "fixed_persist": {},
         "required_columns": artifact_columns,
         "shared_csv_columns": tuple(
             column for column in artifact_columns if column in ("P_PrePool", "PITRecalKnots")
         ),
-        "selector": _YARDS_SELECTOR,
+        "structural": True,
         "artifact_namespace_suffix": True,
         "legacy_model_key": "structural_calibration",
         "legacy_csv_identity_column": "StructuralAdapterStrategy",

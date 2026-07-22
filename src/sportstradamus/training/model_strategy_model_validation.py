@@ -33,6 +33,7 @@ def validate_model_recipe(
             ("dist", "distribution"),
             ("sn_param", "sn_param"),
             ("zinb_mode", "zinb_mode"),
+            ("posthoc", "posthoc"),
         )
         if control in controls
     }

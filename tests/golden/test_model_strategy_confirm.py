@@ -198,7 +198,6 @@ def test_candidate_picks_top_slack_corner():
         "dist_training_loss": "nll",
         "sn_param": "direct",
         "blending": "crps",
-        "structural_strategy": "none",
     }
     assert cand["slack"] == 0.30
 
@@ -239,7 +238,6 @@ def test_candidate_zinb_is_fully_persistable():
         "zinb_mode": "hurdle",
         "count_dispersion_objective": "pit_ks",
         "blending": "crps",
-        "structural_strategy": "none",
     }
 
 
@@ -260,7 +258,6 @@ def test_candidate_cross_family_negbin_wins():
         "dist": "NegBin",
         "count_dispersion_objective": "crps",
         "blending": "nll",
-        "structural_strategy": "none",
     }
     assert "zinb_mode" not in cand["edits"]  # the flip never reads the NaN zinb_mode column
     assert cand["slack"] == 0.22
@@ -283,7 +280,6 @@ def test_candidate_cross_family_zinb_wins():
         "zinb_mode": "hurdle",
         "count_dispersion_objective": "pit_ks",
         "blending": "crps",
-        "structural_strategy": "none",
     }
     assert cand["slack"] == 0.30
 
@@ -293,6 +289,8 @@ def test_candidate_structural_method_persists_full_recipe_and_identity():
     cand = mc._candidate(pd.DataFrame([_structural_row(slug, "rushing yards")]))
     assert cand["strategy_slug"] == slug
     assert cand["structural_strategy"] == slug
+    # The method rides the single-valued ``posthoc`` calibration pool: its slug IS the
+    # persisted field value, and no separate structural_strategy edit is written.
     assert cand["edits"] == {
         "dist": "SkewNormal",
         "target_normalization": "ratio_meanyr",
@@ -300,8 +298,7 @@ def test_candidate_structural_method_persists_full_recipe_and_identity():
         "sn_param": "direct",
         "blending": "nll",
         "hpo_selection": "loss",
-        "posthoc": "none",
-        "structural_strategy": slug,
+        "posthoc": slug,
     }
 
 
@@ -322,7 +319,8 @@ def test_candidate_base_winner_clears_structural_method_without_stringifying_nan
     )
     cand = mc._candidate(pd.DataFrame([row]))
     assert cand["structural_strategy"] == "none"
-    assert cand["edits"]["structural_strategy"] == "none"
+    # A base winner writes no structural edit — its ``posthoc`` stays whatever the cell had.
+    assert "structural_strategy" not in cand["edits"]
     assert "nan" not in cand["edits"].values()
 
 
@@ -395,10 +393,10 @@ def test_run_meditate_true_on_clean_exit_false_on_error(monkeypatch, tmp_path):
         )
     )
     assert mc._run_meditate("NBA", "PTS", ordinary) is True
-    # NBA/PTS is a registered role-registry cell, so the role×position two-part strategy is
-    # applicable there; the confirm full-HPO command stamps the structural selector as "auto"
-    # (meditate resolves it from stat_meta, which is "none" for this base corner).
-    assert commands[0][commands[0].index("--structural-strategy") + 1] == "auto"
+    # The retired --structural-strategy axis emits no selector flag; the calibration method
+    # rides the persisted ``posthoc`` field, so a base corner forces no --posthoc either.
+    assert "--structural-strategy" not in commands[0]
+    assert "--posthoc" not in commands[0]
 
     structural = mc._candidate(
         pd.DataFrame(
@@ -412,11 +410,11 @@ def test_run_meditate_true_on_clean_exit_false_on_error(monkeypatch, tmp_path):
     )
     assert mc._run_meditate("NFL", "rushing yards", structural) is True
     command = commands[-1]
-    assert command[command.index("--structural-strategy") + 1] == "auto"
+    assert "--structural-strategy" not in command
     assert command[command.index("--stabilization") + 1] == "None"
-    # posthoc is fixed (not persisted), so full-HPO confirm still forces the structural lane's
-    # --posthoc none rather than deferring to the base cell's stat_meta posthoc.
-    assert command[command.index("--posthoc") + 1] == "none"
+    # ``posthoc`` is now persisted (it carries the method slug), so full-HPO confirm skips
+    # --posthoc and lets the just-persisted stat_meta posthoc select the structural lane.
+    assert "--posthoc" not in command
 
     def boom(*a, **k):
         raise mc.subprocess.CalledProcessError(1, "meditate")

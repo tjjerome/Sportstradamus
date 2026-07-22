@@ -200,7 +200,7 @@ def _artifact(spec, league, market, controls, *, status="active"):
         ),
         **{
             control: controls[control]
-            for control in ("sn_param", "zinb_mode")
+            for control in ("sn_param", "zinb_mode", "posthoc")
             if control in controls
         },
         **spec.fixed_persist,
@@ -271,6 +271,9 @@ def test_family_registry_grids_and_persist_maps():
         (rushing, RUSHING),
     ):
         assert method.slug == slug and method.axes == {}
+        # The method rides the single-valued ``posthoc`` calibration pool: its slug IS the
+        # ``posthoc`` fixed control (never "none", a different pool member), and ``posthoc``
+        # persists so a confirm writes it to the cell's stat_meta.
         assert method.fixed_controls == {
             "dist": "SkewNormal",
             "normalization": "ratio_meanyr",
@@ -279,7 +282,7 @@ def test_family_registry_grids_and_persist_maps():
             "blending_loss_fn": "nll",
             "hpo_selection": "loss",
             "stabilization": "None",
-            "posthoc": "none",
+            "posthoc": slug,
         }
         assert method.persist == {
             "dist": "dist",
@@ -288,8 +291,10 @@ def test_family_registry_grids_and_persist_maps():
             "sn_param": "sn_param",
             "blending_loss_fn": "blending",
             "hpo_selection": "hpo_selection",
+            "posthoc": "posthoc",
         }
-        assert method.fixed_persist == {"posthoc": "none"}
+        assert method.fixed_persist == {}
+        assert method.is_structural
         assert len(method.canonical_signature) == 64
     # Every swept axis persists — a shipping corner is always reproducible from stat_meta alone
     # (S4: dist_training_loss gained a stat_meta field, deleting the ranks-only corner concept).
@@ -947,14 +952,16 @@ def test_run_deterministic_meditate_builds_corner_flags(monkeypatch, tmp_path):
     assert last[last.index("--sn-param") + 1] == "centered"
     assert last[last.index("--blending-loss-fn") + 1] == "crps"
     assert "--structural-strategy" not in last
-    # The posthoc override is a structural-recipe control only — base families never emit it,
-    # so a swept SkewNormal corner honours each cell's stat_meta posthoc.
+    # ``posthoc`` is a structural-recipe control only — base families never emit it, so a
+    # swept SkewNormal corner honours each cell's stat_meta posthoc.
     assert "--posthoc" not in last
     assert sweep._log_path("WNBA", "AST", sn, sn_spec).exists()
 
     sweep._run_deterministic_meditate("NFL", "receiving yards", sn, sn_spec)
     receiving_base = calls[-1]
-    assert receiving_base[receiving_base.index("--structural-strategy") + 1] == "none"
+    # The retired --structural-strategy axis emits no selector flag for a base corner.
+    assert "--structural-strategy" not in receiving_base
+    assert "--posthoc" not in receiving_base
 
     zinb = {
         "zinb_mode": "hurdle",
@@ -996,8 +1003,10 @@ def test_run_deterministic_meditate_builds_corner_flags(monkeypatch, tmp_path):
     assert structural[structural.index("--blending-loss-fn") + 1] == "nll"
     assert structural[structural.index("--hpo-selection") + 1] == "loss"
     assert structural[structural.index("--stabilization") + 1] == "None"
-    assert structural[structural.index("--posthoc") + 1] == "none"
-    assert structural[structural.index("--structural-strategy") + 1] == RUSHING
+    # The method rides the ``posthoc`` calibration pool: its slug is the --posthoc value,
+    # and the retired --structural-strategy axis emits nothing.
+    assert structural[structural.index("--posthoc") + 1] == RUSHING
+    assert "--structural-strategy" not in structural
 
 
 # --- archive-lock retry ----------------------------------------------------------------------
@@ -1394,10 +1403,10 @@ def test_stat_meta_edit_is_family_aware():
     }
     assert sweep._stat_meta_edit(sn) == (
         "dist=SkewNormal, target_normalization=centered_additive_mean10, dist_training_loss=nll, "
-        "sn_param=centered, blending=crps, structural_strategy=none"
+        "sn_param=centered, blending=crps"
     )
     receiving_base = {**sn, "league": "NFL", "market": "receiving yards"}
-    assert sweep._stat_meta_edit(receiving_base).endswith("structural_strategy=none")
+    assert sweep._stat_meta_edit(receiving_base).endswith("blending=crps")
     # Count families persist dist first (pins the winning family, e.g. a ZINB→NegBin flip).
     zinb_controls = {
         "dist": "ZINB",
@@ -1415,8 +1424,7 @@ def test_stat_meta_edit_is_family_aware():
     }
     assert (
         sweep._stat_meta_edit(zinb)
-        == "dist=ZINB, zinb_mode=hurdle, count_dispersion_objective=pit_ks, blending=nll, "
-        "structural_strategy=none"
+        == "dist=ZINB, zinb_mode=hurdle, count_dispersion_objective=pit_ks, blending=nll"
     )
     negbin_controls = {
         "dist": "NegBin",
@@ -1433,8 +1441,7 @@ def test_stat_meta_edit_is_family_aware():
     }
     assert (
         sweep._stat_meta_edit(negbin)
-        == "dist=NegBin, count_dispersion_objective=crps, blending=crps, "
-        "structural_strategy=none"
+        == "dist=NegBin, count_dispersion_objective=crps, blending=crps"
     )
     spec = get_strategy(RUSHING)
     structural = {
@@ -1445,10 +1452,11 @@ def test_stat_meta_edit_is_family_aware():
         "structural_strategy": spec.slug,
         "controls_json": controls_json(spec.fixed_controls),
     }
+    # The method rides the ``posthoc`` calibration pool: its slug is the persisted posthoc
+    # value, and no separate structural_strategy field is written.
     assert sweep._stat_meta_edit(structural) == (
         "dist=SkewNormal, target_normalization=ratio_meanyr, dist_training_loss=crps, "
-        "sn_param=direct, blending=nll, hpo_selection=loss, posthoc=none, "
-        f"structural_strategy={RUSHING}"
+        f"sn_param=direct, blending=nll, hpo_selection=loss, posthoc={RUSHING}"
     )
 
 

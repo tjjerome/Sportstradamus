@@ -11,25 +11,11 @@ from click.testing import CliRunner
 
 from sportstradamus.training import cli as training_cli
 from sportstradamus.training import pipeline as pipe
-from sportstradamus.training.cli import (
-    _resolve_structural_strategy,
-    _validate_structural_controls,
-    meditate,
-)
-from sportstradamus.training.model_strategy_registry import (
-    AUTO_STRUCTURAL_STRATEGY,
-    BASE_STRUCTURAL_STRATEGY,
-    get_strategy,
-)
+from sportstradamus.training.cli import meditate
 from sportstradamus.training.structural_context import build_affine_expert_context
 from sportstradamus.training.structural_strategies import (
     AFFINE_POSITIONS,
     AFFINE_STRATEGY,
-    AUTO,
-    NONE,
-    resolve_experiment_selection,
-    validate_experiment_selection,
-    validate_two_part_recipe,
 )
 
 
@@ -69,119 +55,16 @@ def _tiny_support_floor() -> dict[str, int]:
     }
 
 
-def _valid_recipe(**overrides) -> dict:
-    recipe = {
-        "experiment": AFFINE_STRATEGY,
-        "league": "NFL",
-        "market": "rushing yards",
-        "distribution": "SkewNormal",
-        "target_normalization": "ratio_meanyr",
-        "posthoc": "none",
-        "dist_training_loss": "crps",
-        "blending": "nll",
-        "hpo_selection": "loss",
-        "sn_param": "direct",
-        "stabilization": "None",
-    }
-    return recipe | overrides
-
-
-def test_rushing_selector_and_fixed_recipe_are_exactly_scoped():
-    validate_experiment_selection(
-        AFFINE_STRATEGY,
-        league="NFL",
-        market_selection="rushing yards",
-    )
-    validate_two_part_recipe(**_valid_recipe())
-    with pytest.raises(ValueError, match="registered only"):
-        validate_experiment_selection(
-            AFFINE_STRATEGY,
-            league="NFL",
-            market_selection="receiving yards",
-        )
-    with pytest.raises(ValueError, match="sn_param"):
-        validate_two_part_recipe(**_valid_recipe(sn_param="centered"))
-
-
-def test_cli_rejects_rushing_selector_without_deterministic_before_data_load():
-    result = CliRunner().invoke(
-        meditate,
-        [
-            "--league",
-            "NFL",
-            "--market",
-            "rushing yards",
-            "--structural-strategy",
-            AFFINE_STRATEGY,
-        ],
-    )
-    assert result.exit_code == 2
-    assert "requires --deterministic" in result.output
-
-
-@pytest.mark.parametrize("path_flag", ["--matrix-only", "--rebuild-correlations"])
-def test_cli_rejects_structural_selector_on_nontraining_paths(path_flag):
-    result = CliRunner().invoke(
-        meditate,
-        [
-            "--deterministic",
-            "--league",
-            "NFL",
-            "--market",
-            "rushing yards",
-            path_flag,
-            "--structural-strategy",
-            AFFINE_STRATEGY,
-        ],
-    )
-    assert result.exit_code == 2
-    assert "requires model training" in result.output
-
-
-def test_structural_selector_auto_uses_cell_meta_and_none_disables_it():
-    cell = {"structural_strategy": AFFINE_STRATEGY}
-    assert (
-        _resolve_structural_strategy(
-            AUTO_STRUCTURAL_STRATEGY,
-            cell,
-            league="NFL",
-            market="rushing yards",
-        )
-        == AFFINE_STRATEGY
-    )
-    assert (
-        _resolve_structural_strategy(
-            BASE_STRUCTURAL_STRATEGY,
-            cell,
-            league="NFL",
-            market="rushing yards",
-        )
-        == BASE_STRUCTURAL_STRATEGY
-    )
-    with pytest.raises(ValueError, match="unknown model strategy"):
-        _resolve_structural_strategy(
-            AUTO_STRUCTURAL_STRATEGY,
-            {"structural_strategy": "not-registered"},
-            league="NFL",
-            market="rushing yards",
-        )
-    with pytest.raises(ValueError, match="not a structural strategy"):
-        _resolve_structural_strategy(
-            AUTO_STRUCTURAL_STRATEGY,
-            {"structural_strategy": "SkewNormal"},
-            league="NFL",
-            market="rushing yards",
-        )
-
-
-def test_cli_passes_auto_resolved_structural_strategy_to_train_market(monkeypatch):
+def test_cli_selects_structural_method_from_posthoc_pool(monkeypatch):
+    """A cell whose stat_meta ``posthoc`` names the affine method routes that slug to
+    train_market's ``posthoc_slug`` — the pool is the selector, no --structural-strategy axis.
+    """
     fake_stats = MagicMock()
     fake_stats.trim_gamelog.return_value = None
     cell_meta = {
         "dist": "SkewNormal",
-        "structural_strategy": AFFINE_STRATEGY,
         "target_normalization": "ratio_meanyr",
-        "posthoc": "none",
+        "posthoc": AFFINE_STRATEGY,
         "dist_training_loss": "crps",
         "sn_param": "direct",
         "blending": "nll",
@@ -202,12 +85,41 @@ def test_cli_passes_auto_resolved_structural_strategy_to_train_market(monkeypatc
     )
 
     assert result.exit_code == 0, result.output
-    assert train_market.call_args.kwargs["structural_strategy"] == (
-        AFFINE_STRATEGY
+    assert train_market.call_args.kwargs["posthoc_slug"] == AFFINE_STRATEGY
+    assert "structural_strategy" not in train_market.call_args.kwargs
+
+
+@pytest.mark.parametrize("path_flag", ["--matrix-only", "--rebuild-correlations"])
+def test_cli_rejects_structural_pool_method_on_nontraining_paths(monkeypatch, path_flag):
+    """A structural calibration method reshapes the target during training, so it cannot run on
+    the matrix-only / correlation-rebuild paths that stop before the fit.
+    """
+    monkeypatch.setattr(
+        training_cli,
+        "load_stat_meta",
+        lambda _path: {"NFL": {"rushing yards": {"dist": "SkewNormal", "posthoc": AFFINE_STRATEGY}}},
     )
+    result = CliRunner().invoke(
+        meditate,
+        [
+            "--deterministic",
+            "--league",
+            "NFL",
+            "--market",
+            "rushing yards",
+            path_flag,
+            "--posthoc",
+            AFFINE_STRATEGY,
+        ],
+    )
+    assert result.exit_code == 2
+    assert "requires model training" in result.output
 
 
-def test_structural_strategy_skips_calibrated_g4_retry(monkeypatch):
+def test_structural_pool_method_skips_calibrated_g4_retry(monkeypatch):
+    """A structural cell (its ``posthoc_slug`` names a structural method) never takes the
+    g4-only calibrated retry — that path has no structural closure.
+    """
     model_stats_row = MagicMock()
     monkeypatch.setattr(training_cli, "_model_stats_row", model_stats_row)
 
@@ -220,51 +132,13 @@ def test_structural_strategy_skips_calibrated_g4_retry(monkeypatch):
         {
             "deterministic": False,
             "matrix_only": False,
-            "structural_strategy": AFFINE_STRATEGY,
+            "posthoc_slug": AFFINE_STRATEGY,
         },
         {},
         MagicMock(),
     )
 
     model_stats_row.assert_not_called()
-
-
-def test_structural_selector_validates_registry_distribution_and_fixed_controls():
-    spec = get_strategy(AFFINE_STRATEGY)
-    settings = {**spec.fixed_controls, **spec.fixed_persist}
-    _validate_structural_controls(
-        spec.slug,
-        league="NFL",
-        market="rushing yards",
-        distribution="SkewNormal",
-        settings=settings,
-        deterministic=True,
-    )
-    with pytest.raises(ValueError, match="distribution 'ZINB' is not applicable"):
-        _validate_structural_controls(
-            spec.slug,
-            league="NFL",
-            market="rushing yards",
-            distribution="ZINB",
-            settings=settings | {"dist": "ZINB"},
-            deterministic=True,
-        )
-    with pytest.raises(ValueError, match="sn_param='centered'"):
-        _validate_structural_controls(
-            spec.slug,
-            league="NFL",
-            market="rushing yards",
-            distribution="SkewNormal",
-            settings=settings | {"sn_param": "centered"},
-            deterministic=True,
-        )
-
-
-def test_experiment_auto_honors_persisted_method_and_explicit_none_disables_it():
-    cell = {"structural_calibration": AFFINE_STRATEGY}
-    assert resolve_experiment_selection(AUTO, cell) == AFFINE_STRATEGY
-    assert resolve_experiment_selection(NONE, cell) == NONE
-    assert resolve_experiment_selection(AUTO, {}) == NONE
 
 
 def test_rushing_context_routes_qb_rb_and_allows_unknown_pooled_fallback():

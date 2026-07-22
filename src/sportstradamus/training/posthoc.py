@@ -1,15 +1,27 @@
-"""Post-hoc per-cell corrections fit on the validation split and reapplied at inference.
+"""Per-cell calibration-method selector, fit on the validation split and reapplied at inference.
 
-Orthogonal to the target-normalization strategy in :mod:`baselines`: a strategy
-reshapes the GBDT *target* (and its loc/scale decode); a post-hoc corrector adjusts
-either the decoded *mean* (``roe_mean`` / ``isotonic_mean``) or the final
-over-*probability* (``prob_recal_isotonic`` / ``prob_recal_platt``) after the
-distribution is already formed. Selected per cell via the ``posthoc`` field in
-``stat_meta.json``; ``"none"`` is a no-op.
+The single-valued ``posthoc`` field in ``stat_meta.json`` names **at most one**
+calibration method for a cell — a light post-distribution corrector *or* a structural
+group-conditional-CDF method, never both — so the field structurally enforces mutual
+exclusivity. ``"none"`` is a no-op.
 
-The fitted state is a plain-typed ``dict`` (lists/floats) so model pickles stay
-portable, and :func:`apply_posthoc` reproduces the fit's transform exactly — the
-training-side test CSV and the live ``model_prob`` path must agree event-for-event.
+*Light correctors* (this module's :func:`fit_posthoc` / :func:`apply_posthoc`) are
+orthogonal to the target-normalization strategy in :mod:`baselines`: a strategy reshapes
+the GBDT *target* (and its loc/scale decode); a corrector adjusts either the decoded
+*mean* (``roe_mean`` / ``isotonic_mean``) or the final over-*probability*
+(``prob_recal_isotonic`` / ``prob_recal_platt``) after the distribution is already
+formed.
+
+*Structural methods* (:data:`STRUCTURAL_STAGE`) reshape the target/CDF earlier in the
+fit rather than after it, so they are dispatched by ``training.pipeline`` to their own
+group-conditional-CDF stage (context build + fit/apply) — never through
+:func:`fit_posthoc`, which treats a structural slug as identity. Their fitted state
+persists under the ``structural_calibration`` pickle key; serving dispatches on the
+resolved strategy identity, not on this field.
+
+The light correctors' fitted state is a plain-typed ``dict`` (lists/floats) so model
+pickles stay portable, and :func:`apply_posthoc` reproduces the fit's transform exactly —
+the training-side test CSV and the live ``model_prob`` path must agree event-for-event.
 """
 
 import numpy as np
@@ -19,6 +31,7 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
 
 from sportstradamus.helpers.distributions import apply_cdf_recal
+from sportstradamus.training.structural_strategies import AFFINE_STRATEGY, TWO_PART_STRATEGY
 
 # Correctors that transform a calibrated over-probability in [0, 1].
 PROB_STAGE: frozenset[str] = frozenset({"prob_recal_isotonic", "prob_recal_platt"})
@@ -32,7 +45,12 @@ MEAN_STAGE: frozenset[str] = frozenset({"roe_mean", "isotonic_mean"})
 # structurally exclusive with every other corrector — at most one corrector per cell,
 # never two stacked.
 CDF_STAGE: frozenset[str] = frozenset({"cdf_recal_isotonic"})
-POSTHOC_SLUGS: frozenset[str] = PROB_STAGE | MEAN_STAGE | CDF_STAGE | {"none"}
+# Structural group-conditional-CDF methods graduated into this selector. Unlike the
+# corrector stages above, these do not run through fit_posthoc/apply_posthoc — the
+# pipeline routes a structural slug to its structural stage. Listed here so the field
+# validates and the sweep/CLI Choice enumerate them as mutually-exclusive pool members.
+STRUCTURAL_STAGE: frozenset[str] = frozenset({TWO_PART_STRATEGY, AFFINE_STRATEGY})
+POSTHOC_SLUGS: frozenset[str] = PROB_STAGE | MEAN_STAGE | CDF_STAGE | STRUCTURAL_STAGE | {"none"}
 
 # Below this many finite rows a corrector overfits more than it calibrates; fall
 # back to identity (the offline ship gate then judges the uncorrected cell).
@@ -67,7 +85,8 @@ def fit_posthoc(slug: str, x: np.ndarray, y: np.ndarray) -> dict | None:
     """
     if slug not in POSTHOC_SLUGS:
         raise ValueError(f"Unknown posthoc slug {slug!r}; valid: {sorted(POSTHOC_SLUGS)}")
-    if slug == "none":
+    if slug == "none" or slug in STRUCTURAL_STAGE:
+        # A structural method reshapes the CDF at its own pipeline stage, not here.
         return None
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)

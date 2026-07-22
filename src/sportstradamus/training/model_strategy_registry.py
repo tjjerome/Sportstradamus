@@ -12,7 +12,6 @@ from sportstradamus.training.model_strategy_specs import BUILTIN_SPEC_DATA
 from sportstradamus.training.role_specs import role_spec_for
 
 BASE_STRUCTURAL_STRATEGY = "none"
-AUTO_STRUCTURAL_STRATEGY = "auto"
 BASE_ARTIFACT_SCHEMA_VERSION = 1
 
 CAP_DETERMINISTIC_TRAIN = "deterministic_train"
@@ -79,16 +78,18 @@ class StrategySpec:
     legacy_status_field: str
     split_fingerprint_path: tuple[str, ...]
     matrix_hash_path: tuple[str, ...]
-    selector_key: str | None = None
-    selector_version: int | None = None
-    selector_cli_flag: str | None = None
-    selector_meta_field: str | None = None
-    selector_default_value: str | None = None
-    selector_auto_value: str | None = None
+    structural: bool = False
 
     @property
     def is_structural(self) -> bool:
-        return self.selector_key is not None
+        """Whether this method reshapes the target/CDF earlier than the corrector stage.
+
+        Load-bearing beyond selection: it gates the persisted ``structural_calibration``
+        adapter blob, the split-fingerprint contract, the artifact namespace suffix, and
+        the serve-side group-conditional-CDF dispatch. Structural methods are selected
+        through the ``posthoc`` calibration pool, not a separate axis.
+        """
+        return self.structural
 
     @property
     def canonical_signature(self) -> str:
@@ -121,9 +122,6 @@ def _build_spec(data: Mapping[str, object]) -> StrategySpec:
     values = dict(data)
     values["applicability"] = Applicability(**values["applicability"])
     values["capabilities"] = frozenset(values["capabilities"])
-    selector = values.pop("selector")
-    if selector:
-        values.update({f"selector_{key}": value for key, value in selector.items()})
     return StrategySpec(**values)
 
 
