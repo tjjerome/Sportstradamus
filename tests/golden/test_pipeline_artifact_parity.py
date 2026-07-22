@@ -8,12 +8,12 @@ from sportstradamus.helpers import get_odds
 from sportstradamus.helpers.distributions import _dp_mu_from_mean
 from sportstradamus.training import baselines
 from sportstradamus.training import pipeline as pipe
-from sportstradamus.training.model_strategy_artifacts import (
+from sportstradamus.training.model_strategy import (
     MODEL_STRATEGY_MODEL_KEY,
     build_artifact_identity,
     validate_strategy_artifacts,
 )
-from sportstradamus.training.model_strategy_registry import get_strategy
+from sportstradamus.training.model_strategy import get_strategy
 from sportstradamus.training.scorecard import _brier_inputs, _pred_cdf_pmf
 
 SERVED_MEAN = np.array([2.4, 7.8])

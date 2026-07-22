@@ -1,8 +1,8 @@
 """Per-cell deterministic strategy sweep ranked by six-gate ship slack.
 
-Every applicable, explicitly enrolled :class:`model_strategy_registry.StrategySpec` contributes
-its categorical grid. Each corner trains in a research-only namespace and is scored through the
-production scorecard with its validation-fit calibration intact. Canonical spec/control
+Every applicable, explicitly enrolled :class:`sportstradamus.training.model_strategy.registry.StrategySpec`
+contributes its categorical grid. Each corner trains in a research-only namespace and is scored
+through the production scorecard with its validation-fit calibration intact. Canonical spec/control
 fingerprints make the board resumable without accepting stale or legacy strategy coverage.
 
 Deterministic trials rank only. ``--confirm`` persists the winner and requires a clean full-HPO
@@ -27,29 +27,26 @@ import tabulate
 from sportstradamus import data as _data_pkg
 from sportstradamus.helpers.io import market_file_slug
 from sportstradamus.training.markets import ALL_MARKETS
-from sportstradamus.training.model_strategy_artifacts import (
+from sportstradamus.training.model_strategy.identity import (
     InactiveStrategyArtifactError,
     build_artifact_identity,
     validate_strategy_artifacts,
 )
-from sportstradamus.training.model_strategy_execution import (
-    artifact_namespace,
-    meditate_command,
-    strategy_cli_args,
-    strategy_persistence_edits,
-)
-from sportstradamus.training.model_strategy_registry import (
-    BASE_STRUCTURAL_STRATEGY,
+from sportstradamus.training.model_strategy.registry import (
     SWEEP_CAPABILITIES,
     CellContext,
     StrategySpec,
+    artifact_namespace,
     controls_json,
     corner_fingerprint,
     distribution_class,
     get_strategy,
+    meditate_command,
     parse_controls,
     strategies_for_cell,
+    strategy_cli_args,
     strategy_controls,
+    strategy_persistence_edits,
 )
 from sportstradamus.training.scorecard import (
     apply_thresholds,
@@ -65,7 +62,7 @@ from sportstradamus.training.ship_config import (
 )
 
 _SHIP_PRED_COL = "Blended_EV"
-_REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
 _TEST_SETS_ROOT = pathlib.Path(str(pkg_resources.files(_data_pkg) / "test_sets"))
 _DETERMINISTIC_MODEL_ROOT = _REPO_ROOT / "research" / "models" / "deterministic"
 _DETERMINISTIC_LOG_ROOT = _REPO_ROOT / "research" / "logs" / "deterministic"
@@ -148,6 +145,21 @@ _BOARD_COLUMNS: list[str] = [
     "swept_at",
     "code_rev",
 ]
+
+# Board identity columns compared cell-for-cell on resume: a cell is "done" iff every one is a
+# constant nonmissing match against the freshly-derived contract.
+_IDENTITY_COLUMNS: tuple[str, ...] = (
+    "corner_fingerprint",
+    "family",
+    "strategy_slug",
+    "structural_strategy",
+    "strategy_signature",
+    "strategy_implementation_version",
+    "artifact_schema_version",
+    "strategy_status",
+    "controls_json",
+    "matrix_hash",
+)
 
 # Default output path for the living board — both CLI modes write here unless --out overrides.
 STRATEGY_RESEARCH_BOARD: pathlib.Path = pathlib.Path(
@@ -232,17 +244,20 @@ def _code_rev() -> str:
         return "unknown"
 
 
+def _decode_strategy(corner: dict[str, str]) -> str:
+    """The registered continuous transform, or canonical no-transform for a count corner.
+
+    One source of truth for both the scorecard ``decode_strategy`` and the leading token of the
+    deterministic dump subdir.
+    """
+    return corner.get("normalization", TARGET_NORM_NONE)
+
+
 def _dump_subdir(corner: dict[str, str], spec: StrategySpec) -> str:
     """Resolve the canonical deterministic namespace for one strategy corner."""
-    norm = corner.get("normalization", TARGET_NORM_NONE)
     trained_dist = corner.get("dist", spec.family)
     suffix = "_hurdle" if trained_dist == "ZINB" and corner.get("zinb_mode") == "hurdle" else ""
-    return artifact_namespace(f"{norm}{suffix}", spec)
-
-
-def _decode_strategy(corner: dict[str, str]) -> str:
-    """Use a registered continuous transform, or canonical no-transform for a count corner."""
-    return corner.get("normalization", TARGET_NORM_NONE)
+    return artifact_namespace(f"{_decode_strategy(corner)}{suffix}", spec)
 
 
 def _dump_paths(
@@ -546,6 +561,23 @@ def _has_training_data(league: str, market: str) -> bool:
     return _training_matrix_path(league, market).is_file()
 
 
+def _iter_eligible_cells(meta: dict, league: str | None, include_shipped: bool):
+    """Yield ``(league, market, cell)`` for every registered-market cell in scope.
+
+    Honors the ``--league`` filter, the trainable ``ALL_MARKETS`` registry (stat_meta carries
+    non-market entries meditate rejects), and the withheld-only default (``include_shipped`` also
+    yields already-shipped cells).
+    """
+    for lg, markets in meta.items():
+        if league is not None and lg != league:
+            continue
+        for mkt, cell in markets.items():
+            if mkt not in ALL_MARKETS.get(lg, []):
+                continue
+            if include_shipped or cell.get("shipped") == WITHHELD:
+                yield lg, mkt, cell
+
+
 def _candidate_cells(
     league: str | None = None,
     include_shipped: bool = False,
@@ -562,21 +594,14 @@ def _candidate_cells(
     meta = load_stat_meta(pathlib.Path(str(STAT_META_PATH)))
     cells: list[tuple[str, str]] = []
     unsupported: list[tuple[str, str, object]] = []
-    for lg, markets in meta.items():
-        if league is not None and lg != league:
+    for lg, mkt, cell in _iter_eligible_cells(meta, league, include_shipped):
+        try:
+            cell_dist_class = distribution_class(cell.get("dist"))
+        except (TypeError, ValueError):
+            unsupported.append((lg, mkt, cell.get("dist")))
             continue
-        for mkt, cell in markets.items():
-            if mkt not in ALL_MARKETS.get(lg, []):
-                continue
-            if not include_shipped and cell.get("shipped") != WITHHELD:
-                continue
-            try:
-                cell_dist_class = distribution_class(cell.get("dist"))
-            except (TypeError, ValueError):
-                unsupported.append((lg, mkt, cell.get("dist")))
-                continue
-            if dist_class in (_DIST_CLASS_ALL, cell_dist_class):
-                cells.append((lg, mkt))
+        if dist_class in (_DIST_CLASS_ALL, cell_dist_class):
+            cells.append((lg, mkt))
     if unsupported:
         rendered = ", ".join(f"{lg} {mkt} ({dist!r})" for lg, mkt, dist in unsupported)
         raise click.UsageError(f"board contains unsupported distribution cells: {rendered}")
@@ -670,49 +695,43 @@ def _expected_corner_records(league: str, market: str) -> dict[str, dict[str, ob
     return expected
 
 
+def _split_contract_ok(spec: StrategySpec, split: object) -> bool:
+    """Whether a board row's split-fingerprint presence matches the spec's contract."""
+    if spec.split_fingerprint_path:
+        return isinstance(split, str)
+    return split is None
+
+
+def _row_matches_contract(source: pd.Series, expected: dict[str, dict[str, object]]) -> bool:
+    """Whether one board row reproduces its cell's freshly-derived canonical corner contract."""
+    row = source.loc[list(_IDENTITY_COLUMNS)].to_dict()
+    try:
+        controls = parse_controls(row["controls_json"])
+    except (TypeError, ValueError):
+        return False
+    key = controls_json({"strategy_slug": row["strategy_slug"], "controls": controls})
+    contract = expected.get(key)
+    if contract is None:
+        return False
+    if any(
+        pd.isna(source.get(field)) or str(source.get(field)) != str(value)
+        for field, value in contract.items()
+    ):
+        return False
+    spec = get_strategy(str(row["strategy_slug"]))
+    split = source.get("split_fingerprint")
+    split = None if pd.isna(split) else split
+    if not _split_contract_ok(spec, split):
+        return False
+    return row["corner_fingerprint"] == corner_fingerprint(spec, controls, str(row["matrix_hash"]))
+
+
 def _cell_rows_match_expected(rows: pd.DataFrame, expected: dict[str, dict[str, object]]) -> bool:
-    identity_columns = (
-        "corner_fingerprint",
-        "family",
-        "strategy_slug",
-        "structural_strategy",
-        "strategy_signature",
-        "strategy_implementation_version",
-        "artifact_schema_version",
-        "strategy_status",
-        "controls_json",
-        "matrix_hash",
-    )
-    if rows.empty or any(rows[column].isna().any() for column in identity_columns):
+    if rows.empty or any(rows[column].isna().any() for column in _IDENTITY_COLUMNS):
         return False
     if len(rows) != len(expected) or rows["corner_fingerprint"].duplicated().any():
         return False
-    for _, source in rows.iterrows():
-        row = source.loc[list(identity_columns)].to_dict()
-        try:
-            controls = parse_controls(row["controls_json"])
-        except (TypeError, ValueError):
-            return False
-        key = controls_json({"strategy_slug": row["strategy_slug"], "controls": controls})
-        contract = expected.get(key)
-        if contract is None:
-            return False
-        for field, value in contract.items():
-            actual = source.get(field)
-            if pd.isna(actual) or str(actual) != str(value):
-                return False
-        spec = get_strategy(str(row["strategy_slug"]))
-        split = source.get("split_fingerprint")
-        if pd.isna(split):
-            split = None
-        if spec.split_fingerprint_path and not isinstance(split, str):
-            return False
-        if not spec.split_fingerprint_path and split is not None:
-            return False
-        fingerprint = corner_fingerprint(spec, controls, str(row["matrix_hash"]))
-        if row["corner_fingerprint"] != fingerprint:
-            return False
-    return True
+    return all(_row_matches_contract(source, expected) for _, source in rows.iterrows())
 
 
 def run_board(
@@ -890,21 +909,22 @@ def _run_board_mode(
 
 @click.command(name="model-strategy-sweep")
 @click.option(
-    "--league", default=None, help="League code, e.g. WNBA. Single-cell mode, or narrows --board."
+    "--league",
+    default=None,
+    help="League code, e.g. WNBA. A single cell also needs --market; alone it narrows the board.",
 )
-@click.option("--market", default=None, help="Market stem, e.g. AST (single-cell mode).")
 @click.option(
-    "--board/--no-board",
-    default=False,
-    help="Sweep every withheld cell with cached training data (all strategies) instead of one cell; "
-    "--league narrows it.",
+    "--market",
+    default=None,
+    help="Market stem, e.g. AST. With --league, sweeps just that cell; omit it to sweep the board.",
 )
 @click.option(
     "--include-shipped",
     is_flag=True,
     default=False,
-    help="Also sweep already-shipped (devel/main) cells to hunt a better strategy — evaluated by the "
-    "supersession test, not the fresh-ship --confirm (which only auto-ships withheld cells). Off by default.",
+    help="Board mode: also sweep already-shipped (devel/main) cells to hunt a better strategy — "
+    "evaluated by the supersession test, not the fresh-ship --confirm (which only auto-ships "
+    "withheld cells). Off by default.",
 )
 @click.option(
     "--dist-class",
@@ -946,12 +966,11 @@ def _run_board_mode(
     type=click.Path(dir_okay=False),
     default=None,
     help="Board CSV path. Defaults to the package data dir "
-    "(data/research/strategy_research_board.csv): --board upserts per cell, a single cell upserts.",
+    "(data/research/strategy_research_board.csv): a board upserts per cell, a single cell upserts.",
 )
 def main(
     league: str | None,
     market: str | None,
-    board: bool,
     include_shipped: bool,
     dist_class: str,
     confirm: bool,
@@ -961,16 +980,20 @@ def main(
     out: str | None,
 ) -> None:
     """Operation Ship 75 strategy sweep — a per-cell GridSampler over the strategy catalog, one
-    honest val-fit→test gate row per corner. ``--confirm`` then ships the winners end-to-end.
+    honest val-fit→test gate row per corner. Naming ``--league`` and ``--market`` sweeps one cell;
+    omitting ``--market`` sweeps the board (``--league`` narrows it). ``--confirm`` then ships the
+    winners end-to-end.
     """
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     out = out or str(STRATEGY_RESEARCH_BOARD)
     pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
-    if board:
+    if market is None:
         result = _run_board_mode(league, include_shipped, dist_class, out, resume, dry_run)
     else:
-        if not (league and market):
-            raise click.UsageError("pass --league and --market, or --board")
+        if not league:
+            raise click.UsageError(
+                "pass --league with --market for a single cell, or omit --market to sweep the board"
+            )
         if dry_run:
             families = _cell_families(league, market)
             click.secho(
@@ -985,7 +1008,7 @@ def main(
     click.echo(f"\nboard: {out}")
 
     if confirm and not dry_run:
-        from sportstradamus.training.model_strategy_confirm import run_confirm
+        from sportstradamus.training.model_strategy.confirm import run_confirm
 
         run_confirm(result, yes=yes)
 

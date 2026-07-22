@@ -1,4 +1,4 @@
-"""Unit tests for the Operation Ship 75 confirm-and-ship loop (``training.model_strategy_confirm``).
+"""Unit tests for the Operation Ship 75 confirm-and-ship loop (``training.model_strategy.confirm``).
 
 The loop persists a swept winner to stat_meta.json, retrains it at full HPO, and keeps it (devel)
 or reverts. No model trains and no real stat_meta is touched: the ``meditate`` subprocess and the
@@ -12,11 +12,11 @@ import json
 import pandas as pd
 import pytest
 
-from sportstradamus.training import model_strategy_confirm as mc
-from sportstradamus.training.model_strategy_artifacts import (
+from sportstradamus.training.model_strategy import confirm as mc
+from sportstradamus.training.model_strategy import (
     build_artifact_identity,
 )
-from sportstradamus.training.model_strategy_registry import (
+from sportstradamus.training.model_strategy import (
     CellContext,
     controls_json,
     distribution_class,

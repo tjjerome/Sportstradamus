@@ -39,9 +39,11 @@ from sportstradamus.training.config import (
     save_cv_std_config,
     save_zi_config,
 )
-from sportstradamus.training.model_strategy_artifacts import ArtifactIdentity
-from sportstradamus.training.model_strategy_frame import validate_strategy_frame
-from sportstradamus.training.model_strategy_report_identity import resolve_report_identity
+from sportstradamus.training.model_strategy import (
+    ArtifactIdentity,
+    resolve_report_identity,
+    validate_strategy_frame,
+)
 from sportstradamus.training.scorecard import (
     compute_gates,
     load_test_set,

@@ -7,12 +7,12 @@ from copy import deepcopy
 import pytest
 
 from sportstradamus.prediction.model_prob import _resolve_serving_strategy
-from sportstradamus.training.model_strategy_artifacts import (
+from sportstradamus.training.model_strategy import (
     MODEL_STRATEGY_MODEL_KEY,
     InactiveStrategyArtifactError,
     build_artifact_identity,
 )
-from sportstradamus.training.model_strategy_registry import (
+from sportstradamus.training.model_strategy import (
     BASE_STRUCTURAL_STRATEGY,
     get_strategy,
     strategy_controls,

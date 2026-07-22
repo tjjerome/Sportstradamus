@@ -67,7 +67,7 @@ sweep-runaway-odds = "sportstradamus.scripts.sweep_runaway_odds:main"
 fp-fetch = "sportstradamus.collectors.fantasypoints.cli:fp_fetch"
 ctg-fetch = "sportstradamus.collectors.cleaningtheglass.cli:ctg_fetch"
 savant-fetch = "sportstradamus.collectors.baseballsavant.cli:savant_fetch"
-model-strategy-sweep = "sportstradamus.training.model_strategy_sweep:main"
+model-strategy-sweep = "sportstradamus.training.model_strategy.sweep:main"
 count-family-screen = "sportstradamus.scripts.count_family_screen:main"
 
 [tool.poetry.group.dev.dependencies]

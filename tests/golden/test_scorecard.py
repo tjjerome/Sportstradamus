@@ -9,11 +9,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from sportstradamus.training.model_strategy_artifacts import (
+from sportstradamus.training.model_strategy import (
     artifact_identity_columns,
     build_artifact_identity,
 )
-from sportstradamus.training.model_strategy_registry import get_strategy, strategy_controls
+from sportstradamus.training.model_strategy import get_strategy, strategy_controls
 from sportstradamus.training.scorecard import (
     _GATE1_CI_HI_MAX,
     _GATE1_NONINF_MARGIN,

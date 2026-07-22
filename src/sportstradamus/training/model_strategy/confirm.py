@@ -1,6 +1,6 @@
 """Operation Ship 75 confirm-and-ship loop: persist a swept winner, retrain at full HPO, keep or revert.
 
-The strategy sweep (:mod:`sportstradamus.training.model_strategy_sweep`) *ranks* corners on fixed-HP
+The strategy sweep (:mod:`sportstradamus.training.model_strategy.sweep`) *ranks* corners on fixed-HP
 deterministic trials — it never ships. This module turns a ranked board into shipped cells:
 
 1. For each cell, pick the top-slack shipping corner **across the cell's swept families** — a
@@ -37,17 +37,12 @@ from sportstradamus.helpers.io import (
     model_pickle_path,
     prune_model_pickle,
 )
-from sportstradamus.training.model_strategy_artifacts import (
+from sportstradamus.training.model_strategy.identity import (
     ArtifactIdentity,
     build_artifact_identity,
     validate_strategy_artifacts,
 )
-from sportstradamus.training.model_strategy_execution import (
-    meditate_command,
-    strategy_full_hpo_cli_args,
-    strategy_persistence_edits,
-)
-from sportstradamus.training.model_strategy_registry import (
+from sportstradamus.training.model_strategy.registry import (
     BASE_STRUCTURAL_STRATEGY,
     CAP_CONFIRM,
     CAP_FULL_HPO,
@@ -55,11 +50,14 @@ from sportstradamus.training.model_strategy_registry import (
     CAP_SERVE,
     controls_json,
     get_strategy,
+    meditate_command,
     parse_controls,
     strategies_for_cell,
     strategy_controls,
+    strategy_full_hpo_cli_args,
+    strategy_persistence_edits,
 )
-from sportstradamus.training.model_strategy_sweep import (
+from sportstradamus.training.model_strategy.sweep import (
     _GATES,
     _SHIP_PRED_COL,
     _TEST_SETS_ROOT,
@@ -69,7 +67,7 @@ from sportstradamus.training.model_strategy_sweep import (
 from sportstradamus.training.scorecard import _supersede_headline, load_test_set, supersede_verdict
 from sportstradamus.training.ship_config import STAT_META_PATH, WITHHELD, load_stat_meta
 
-_REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
 _STAT_META = pathlib.Path(str(STAT_META_PATH))
 _CONFIRM_LOG_ROOT = _REPO_ROOT / "research" / "logs" / "confirm"
 _SHIPPED_DEVEL = "devel"
@@ -84,6 +82,22 @@ _CONFIRM_TIMEOUT_S = 4 * 3600
 # Confirm outcomes that leave a shippable cell on devel (vs REVERTED / HELD, which change nothing).
 _WIN_OUTCOMES: tuple[str, ...] = ("SHIPPED", "SUPERSEDED")
 _CONFIRM_CAPABILITIES = frozenset({CAP_CONFIRM, CAP_FULL_HPO, CAP_SCORE, CAP_SERVE})
+# The exact model_stats identity columns the official ship verdict is bound to.
+_SHIP_IDENTITY_COLUMNS = [
+    "league",
+    "market",
+    "strategy_slug",
+    "structural_strategy",
+    "strategy_signature",
+    "strategy_implementation_version",
+    "artifact_schema_version",
+    "strategy_status",
+    "strategy_controls_json",
+    "strategy_corner_fingerprint",
+    "strategy_matrix_hash",
+    "strategy_split_fingerprint",
+    "ship",
+]
 
 
 def _candidate(sub: pd.DataFrame) -> dict | None:
@@ -94,54 +108,58 @@ def _candidate(sub: pd.DataFrame) -> dict | None:
     lg, mkt = sub["league"].iloc[0], sub["market"].iloc[0]
     context = _cell_context(lg, mkt)
     for _, row in shipping.iterrows():
-        family = _required_text(row, "family", lg, mkt)
-        strategy_slug = _required_text(row, "strategy_slug", lg, mkt)
-        structural = _required_text(row, "structural_strategy", lg, mkt)
-        spec = get_strategy(strategy_slug)
-        expected_structural = spec.slug if spec.is_structural else BASE_STRUCTURAL_STRATEGY
-        if spec.family != family or structural != expected_structural:
-            raise ValueError(f"{lg} {mkt}: strategy/family identity mismatch")
-        applicable = strategies_for_cell(context)
-        if spec not in applicable:
-            raise ValueError(f"{lg} {mkt}: strategy {spec.slug!r} is not enrolled/applicable")
-
-        controls = parse_controls(row.get("controls_json"))
-        if controls_json(controls) != row["controls_json"] or controls not in strategy_controls(
-            spec
-        ):
-            raise ValueError(f"{lg} {mkt}: stale or noncanonical strategy controls")
-        _validate_control_columns(row, controls, lg, mkt)
-        identity = build_artifact_identity(
-            spec.slug,
-            lg,
-            mkt,
-            controls,
-            matrix_hash=context.matrix_sha256,
-        )
-        split = _validate_board_identity(row, spec, controls, identity, lg, mkt)
-        if not spec.capabilities >= _CONFIRM_CAPABILITIES:
-            continue
-        slack = float(row["slack"])
-        if not math.isfinite(slack):
-            raise ValueError(f"{lg} {mkt}: candidate slack must be finite")
-        return {
-            "league": lg,
-            "market": mkt,
-            "family": spec.family,
-            "strategy_slug": spec.slug,
-            "structural_strategy": identity.structural_strategy,
-            "strategy_signature": identity.signature,
-            "strategy_implementation_version": identity.implementation_version,
-            "artifact_schema_version": identity.artifact_schema_version,
-            "strategy_status": identity.status,
-            "matrix_hash": identity.matrix_hash,
-            "split_fingerprint": split,
-            "controls": controls,
-            "corner_fingerprint": identity.corner_fingerprint,
-            "edits": strategy_persistence_edits(context, spec, controls),
-            "slack": slack,
-        }
+        cand = _board_candidate_row(row, context, lg, mkt)
+        if cand is not None:
+            return cand
     return None
+
+
+def _board_candidate_row(row: pd.Series, context, league: str, market: str) -> dict | None:
+    """Validate one shipping board row's full identity contract; ``None`` if not confirm-capable.
+
+    Raises on any stale/mismatched identity; returns the confirm-candidate dict for a clean,
+    confirm-capable corner, or ``None`` when the corner's family lacks the confirm capabilities so
+    the caller can fall through to the next-best shipping row.
+    """
+    family = _required_text(row, "family", league, market)
+    strategy_slug = _required_text(row, "strategy_slug", league, market)
+    structural = _required_text(row, "structural_strategy", league, market)
+    spec = get_strategy(strategy_slug)
+    expected_structural = spec.slug if spec.is_structural else BASE_STRUCTURAL_STRATEGY
+    if spec.family != family or structural != expected_structural:
+        raise ValueError(f"{league} {market}: strategy/family identity mismatch")
+    if spec not in strategies_for_cell(context):
+        raise ValueError(f"{league} {market}: strategy {spec.slug!r} is not enrolled/applicable")
+    controls = parse_controls(row.get("controls_json"))
+    if controls_json(controls) != row["controls_json"] or controls not in strategy_controls(spec):
+        raise ValueError(f"{league} {market}: stale or noncanonical strategy controls")
+    _validate_control_columns(row, controls, league, market)
+    identity = build_artifact_identity(
+        spec.slug, league, market, controls, matrix_hash=context.matrix_sha256
+    )
+    split = _validate_board_identity(row, spec, identity, league, market)
+    if not spec.capabilities >= _CONFIRM_CAPABILITIES:
+        return None
+    slack = float(row["slack"])
+    if not math.isfinite(slack):
+        raise ValueError(f"{league} {market}: candidate slack must be finite")
+    return {
+        "league": league,
+        "market": market,
+        "family": spec.family,
+        "strategy_slug": spec.slug,
+        "structural_strategy": identity.structural_strategy,
+        "strategy_signature": identity.signature,
+        "strategy_implementation_version": identity.implementation_version,
+        "artifact_schema_version": identity.artifact_schema_version,
+        "strategy_status": identity.status,
+        "matrix_hash": identity.matrix_hash,
+        "split_fingerprint": split,
+        "controls": controls,
+        "corner_fingerprint": identity.corner_fingerprint,
+        "edits": strategy_persistence_edits(context, spec, controls),
+        "slack": slack,
+    }
 
 
 def _required_text(row: pd.Series, field: str, league: str, market: str) -> str:
@@ -162,47 +180,46 @@ def _validate_control_columns(
             raise ValueError(f"{league} {market}: control column {name} contradicts controls_json")
 
 
-def _validate_board_identity(
-    row: pd.Series,
-    spec,
-    controls: dict[str, str],
-    identity: ArtifactIdentity,
-    league: str,
-    market: str,
-) -> str | None:
-    strategy_slug = _required_text(row, "strategy_slug", league, market)
-    signature = _required_text(row, "strategy_signature", league, market)
-    status = _required_text(row, "strategy_status", league, market)
-    fingerprint = _required_text(row, "corner_fingerprint", league, market)
-    matrix_hash = _required_text(row, "matrix_hash", league, market)
-    implementation = row.get("strategy_implementation_version")
-    schema = row.get("artifact_schema_version")
+def _int_matches(actual: object, expected: int) -> bool:
+    """Whether a board cell's integer field equals ``expected`` (NaN / non-numeric → False)."""
     try:
-        implementation_matches = (
-            not pd.isna(implementation) and float(implementation) == identity.implementation_version
-        )
-        schema_matches = not pd.isna(schema) and float(schema) == identity.artifact_schema_version
+        return not pd.isna(actual) and float(actual) == expected
     except (TypeError, ValueError):
-        implementation_matches = False
-        schema_matches = False
-    core_matches = (
-        strategy_slug == identity.strategy_slug
-        and signature == identity.signature
-        and implementation_matches
-        and schema_matches
-        and status == "active"
-        and matrix_hash == identity.matrix_hash
-    )
-    if not core_matches:
-        raise ValueError(f"{league} {market}: stale or mismatched strategy identity")
-    split = row.get("split_fingerprint")
-    split = None if pd.isna(split) else split
+        return False
+
+
+def _validate_split_contract(spec, split: object, league: str, market: str) -> None:
     if spec.split_fingerprint_path and (not isinstance(split, str) or not split):
         raise ValueError(f"{league} {market}: missing strategy split fingerprint")
     if not spec.split_fingerprint_path and split is not None:
         raise ValueError(f"{league} {market}: unexpected strategy split fingerprint")
+
+
+def _validate_board_identity(
+    row: pd.Series,
+    spec,
+    identity: ArtifactIdentity,
+    league: str,
+    market: str,
+) -> str | None:
+    core_matches = (
+        _required_text(row, "strategy_slug", league, market) == identity.strategy_slug
+        and _required_text(row, "strategy_signature", league, market) == identity.signature
+        and _required_text(row, "strategy_status", league, market) == "active"
+        and _required_text(row, "matrix_hash", league, market) == identity.matrix_hash
+        and _int_matches(
+            row.get("strategy_implementation_version"), identity.implementation_version
+        )
+        and _int_matches(row.get("artifact_schema_version"), identity.artifact_schema_version)
+    )
+    if not core_matches:
+        raise ValueError(f"{league} {market}: stale or mismatched strategy identity")
+    fingerprint = _required_text(row, "corner_fingerprint", league, market)
     if fingerprint != identity.corner_fingerprint:
         raise ValueError(f"{league} {market}: stale strategy corner fingerprint")
+    split = row.get("split_fingerprint")
+    split = None if pd.isna(split) else split
+    _validate_split_contract(spec, split, league, market)
     return split
 
 
@@ -304,60 +321,49 @@ def _restore_cell(
     _atomic_write_meta(meta)
 
 
+def _cell_row(league: str, market: str, columns: list[str]) -> pd.Series | None:
+    """One cell's row of the requested model_stats.parquet columns, or ``None`` when absent."""
+    stats = pd.read_parquet(MODEL_STATS_PATH, columns=columns)
+    hit = stats[(stats["league"] == league) & (stats["market"] == market)]
+    return None if hit.empty else hit.iloc[0]
+
+
+def _split_matches(actual: object, expected: str | None) -> bool:
+    """Whether a model_stats split fingerprint matches the expected value (both-absent counts)."""
+    if expected is None:
+        return bool(pd.isna(actual))
+    return actual == expected
+
+
 def _ship_from_model_stats(league: str, market: str, expected: ArtifactIdentity) -> bool:
     """The official ship verdict bound to the exact reported strategy contract."""
     try:
-        stats = pd.read_parquet(
-            MODEL_STATS_PATH,
-            columns=[
-                "league",
-                "market",
-                "strategy_slug",
-                "structural_strategy",
-                "strategy_signature",
-                "strategy_implementation_version",
-                "artifact_schema_version",
-                "strategy_status",
-                "strategy_controls_json",
-                "strategy_corner_fingerprint",
-                "strategy_matrix_hash",
-                "strategy_split_fingerprint",
-                "ship",
-            ],
-        )
-        hit = stats[(stats["league"] == league) & (stats["market"] == market)]
+        row = _cell_row(league, market, _SHIP_IDENTITY_COLUMNS)
     except (OSError, ValueError, KeyError, TypeError):
         return False
-    if hit.empty:
+    if row is None or not bool(row["ship"]) or row["strategy_status"] != "active":
         return False
-    row = hit.iloc[0]
-    return bool(row["ship"]) and (
-        row["strategy_slug"] == expected.strategy_slug
-        and row["structural_strategy"] == expected.structural_strategy
-        and row["strategy_signature"] == expected.signature
-        and row["strategy_implementation_version"] == expected.implementation_version
-        and row["artifact_schema_version"] == expected.artifact_schema_version
-        and row["strategy_status"] == "active"
-        and row["strategy_controls_json"] == expected.controls_json
-        and row["strategy_corner_fingerprint"] == expected.corner_fingerprint
-        and row["strategy_matrix_hash"] == expected.matrix_hash
-        and (
-            pd.isna(row["strategy_split_fingerprint"])
-            if expected.split_fingerprint is None
-            else row["strategy_split_fingerprint"] == expected.split_fingerprint
-        )
-    )
+    checks = {
+        "strategy_slug": expected.strategy_slug,
+        "structural_strategy": expected.structural_strategy,
+        "strategy_signature": expected.signature,
+        "strategy_implementation_version": expected.implementation_version,
+        "artifact_schema_version": expected.artifact_schema_version,
+        "strategy_controls_json": expected.controls_json,
+        "strategy_corner_fingerprint": expected.corner_fingerprint,
+        "strategy_matrix_hash": expected.matrix_hash,
+    }
+    if any(row[column] != value for column, value in checks.items()):
+        return False
+    return _split_matches(row["strategy_split_fingerprint"], expected.split_fingerprint)
 
 
 def _failed_gates_after(league: str, market: str) -> list[str]:
     """The gates a just-confirmed cell fails, read from model_stats — diagnostics for the report."""
-    cols = ["league", "market", *(f"{g}_pass" for g in _GATES)]
-    stats = pd.read_parquet(MODEL_STATS_PATH, columns=cols)
-    hit = stats[(stats["league"] == league) & (stats["market"] == market)]
-    if hit.empty:
+    row = _cell_row(league, market, ["league", "market", *(f"{g}_pass" for g in _GATES)])
+    if row is None:
         return ["(no model_stats row)"]
-    r = hit.iloc[0]
-    return [g for g in _GATES if not bool(r[f"{g}_pass"])]
+    return [g for g in _GATES if not bool(row[f"{g}_pass"])]
 
 
 def _run_meditate(league: str, market: str, candidate: dict) -> bool:

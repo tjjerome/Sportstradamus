@@ -21,15 +21,15 @@ a method that passes on its pilot should **graduate into the sweep option pool**
 the per-cell sweep can try it on every market and let the gates decide where it
 helps. The owner's chosen shape is the **full merge**: fold both methods into the
 single per-cell calibration selector (`posthoc`, renamed `calibration` — §4.2) and
-**retire the parallel `--structural-strategy` / `model_strategy_registry` axis** they
+**retire the parallel `--structural-strategy` / `model_strategy.registry` axis** they
 ride today, so one field names at most one calibration method per cell.
 
 **Current state (verified this lane — read the code, not the brief's earlier drafts):**
 - two-part is **already** market-agnostic *and already sweep-selectable* — a live
-  `model_strategy_registry` structural spec (`_yards(TWO_PART_STRATEGY, …)`,
-  [model_strategy_specs.py:226](../../src/sportstradamus/training/model_strategy_specs.py#L226))
+  `model_strategy.registry` structural spec (`_yards(TWO_PART_STRATEGY, …)`,
+  [model_strategy/specs.py:226](../../src/sportstradamus/training/model_strategy/specs.py#L226))
   enrolled via the `--structural-strategy` / `_YARDS_SELECTOR` axis
-  ([model_strategy_specs.py:25](../../src/sportstradamus/training/model_strategy_specs.py#L25)),
+  ([model_strategy/specs.py:25](../../src/sportstradamus/training/model_strategy/specs.py#L25)),
   applicable to every continuous cell (`role_registry_gated`). It self-killed only on
   multi-position cells; that granularity gap is **now fixed** (Lane A role-only fallback,
   committed `ea564a7`). It needs pool-dispatch + the axis retirement — no market-agnostic code work.
@@ -114,7 +114,7 @@ the module docstring + `POSTHOC_SLUGS` validation accordingly.
 
 Mutual exclusivity is **already enforced today** and must be preserved, not invented: the
 structural specs pin `"posthoc": "none"` in `_YARDS_CONTROLS`
-([model_strategy_specs.py:167-176](../../src/sportstradamus/training/model_strategy_specs.py#L167))
+([model_strategy/specs.py:167-176](../../src/sportstradamus/training/model_strategy/specs.py#L167))
 plus `fixed_persist`, so a structural cell already can't also carry a corrector. After the
 merge the single `calibration` field carries that invariant structurally (one value = one
 method), and the `posthoc="none"` fixed-control is subsumed.
@@ -122,20 +122,20 @@ method), and the `posthoc="none"` fixed-control is subsumed.
 ### 4.1 Retire the `--structural-strategy` / registry axis (the real cage)
 
 The live selector is **not** `--experiment`; it is the `--structural-strategy` axis backed by
-`model_strategy_registry`. The full merge retires it:
+`model_strategy.registry`. The full merge retires it:
 - **`cli.py`** — `_resolve_structural_strategy`
   ([cli.py:123](../../src/sportstradamus/training/cli.py#L123)), `_validate_structural_controls`
   ([cli.py:147](../../src/sportstradamus/training/cli.py#L147)), the `--structural-strategy` flag
   ([cli.py:491](../../src/sportstradamus/training/cli.py#L491)) and its resolve/validate call sites
   ([cli.py:596](../../src/sportstradamus/training/cli.py#L596),
   [749](../../src/sportstradamus/training/cli.py#L749)), plus any `--deterministic`-only structural guard.
-- **`model_strategy_specs.py`** — the `_YARDS_SELECTOR` axis
-  ([:25](../../src/sportstradamus/training/model_strategy_specs.py#L25)); the two `_yards(...)` specs
-  ([:226](../../src/sportstradamus/training/model_strategy_specs.py#L226),
-  [:241](../../src/sportstradamus/training/model_strategy_specs.py#L241)) stay as the pool method
+- **`model_strategy/specs.py`** — the `_YARDS_SELECTOR` axis
+  ([:25](../../src/sportstradamus/training/model_strategy/specs.py#L25)); the two `_yards(...)` specs
+  ([:226](../../src/sportstradamus/training/model_strategy/specs.py#L226),
+  [:241](../../src/sportstradamus/training/model_strategy/specs.py#L241)) stay as the pool method
   definitions (their `fixed_controls`/`persist`/`applicability`/`legacy_model_key` still hold — the
   fitted-state key), but their `selector` axis wiring is dropped.
-- **`model_strategy_registry.py`** — the structural-enrollment + `role_registry_gated`
+- **`model_strategy/registry.py`** — the structural-enrollment + `role_registry_gated`
   (`BASE_STRUCTURAL_STRATEGY`) handling now that the pool, not the registry axis, selects.
 - **`structural_strategies.py`** — delete the dead `validate_experiment_selection` /
   `resolve_experiment_selection` lever; keep the live exports (`ROLE_COLUMNS`, `AFFINE_POSITIONS`
@@ -164,7 +164,7 @@ runs; `posthoc` stays the field/module/flag name.
   [model_prob.py:811+](../../src/sportstradamus/prediction/model_prob.py#L811) two-part,
   [261](../../src/sportstradamus/prediction/model_prob.py#L261)/[289](../../src/sportstradamus/prediction/model_prob.py#L289) posthoc).
 - Verify the three control sites stay coherent: `_CONTROL_FLAGS`
-  ([model_strategy_specs.py:10](../../src/sportstradamus/training/model_strategy_specs.py#L10)),
+  ([model_strategy/specs.py:10](../../src/sportstradamus/training/model_strategy/specs.py#L10)),
   `runtime_controls` ([pipeline.py:3739](../../src/sportstradamus/training/pipeline.py#L3739)),
   the CLI resolve `_resolve_cell_knob`
   ([cli.py:112](../../src/sportstradamus/training/cli.py#L112)/[715](../../src/sportstradamus/training/cli.py#L715)).
@@ -221,7 +221,7 @@ in particular is the vestigial lever that §4.1 already deletes).
 **Already done — do not redo, and do not trust the commit subjects.** A prior
 partial generalization landed the naming and the sweep-*enrollment* side: `32a78f6`
 ("make the affine strategy a market-agnostic sweep candidate") only dropped affine's
-sweep enrollment lock (one line in `model_strategy_specs.py`), and a rename series
+sweep enrollment lock (one line in `model_strategy/specs.py`), and a rename series
 (`cb05fdc`, `7b93f16`, `67498d8`, `3f0de44`) made affine's modules/symbols/persisted
 columns market-agnostic. What still remains — despite `32a78f6`'s subject claiming
 otherwise — is the fit **logic** (`AFFINE_POSITIONS`), the `validate_experiment_selection`
@@ -269,7 +269,7 @@ is already generic — the lock lives only in the expert-context + gate + serve 
   overloaded concept; owner kept `posthoc`. Gates green throughout (1 pre-existing OOS ship-gate).
 - 2026-07-21 · premise corrected + scope expanded (Lane B B0) · earlier drafts named the
   vestigial `--experiment` / `structural_calibration`-cell-selector lever as the cage; the live
-  selector is the `--structural-strategy` / `model_strategy_registry` axis (§1, §4.1). Full-merge
+  selector is the `--structural-strategy` / `model_strategy.registry` axis (§1, §4.1). Full-merge
   target: fold both methods into the `posthoc`→`calibration` pool **and** retire the registry axis;
   the `structural_calibration` **pickle key** (load-bearing serve state) + four look-alikes are
   rename-collisions to leave alone (§4.2). Mutual exclusivity already holds via

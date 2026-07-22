@@ -1,4 +1,4 @@
-"""Unit tests for the Operation Ship 75 strategy sweep (``training.model_strategy_sweep``).
+"""Unit tests for the Operation Ship 75 strategy sweep (``training.model_strategy.sweep``).
 
 Two layers are covered. The per-corner *primitive* ``_score_corner`` is the honest scorer: it loads
 one trained deterministic dump and runs the production :func:`scorecard.gate_row` on its served
@@ -16,9 +16,9 @@ import click
 import pandas as pd
 import pytest
 
-from sportstradamus.training import model_strategy_sweep as sweep
+from sportstradamus.training.model_strategy import sweep
 from sportstradamus.training.baselines import get_target_normalization
-from sportstradamus.training.model_strategy_artifacts import (
+from sportstradamus.training.model_strategy import (
     MODEL_STRATEGY_MODEL_KEY,
     SPLIT_FINGERPRINT_CSV_COLUMN,
     InactiveStrategyArtifactError,
@@ -26,8 +26,8 @@ from sportstradamus.training.model_strategy_artifacts import (
     build_artifact_identity,
     validate_strategy_artifacts,
 )
-from sportstradamus.training.model_strategy_frame import validate_strategy_frame
-from sportstradamus.training.model_strategy_registry import (
+from sportstradamus.training.model_strategy import validate_strategy_frame
+from sportstradamus.training.model_strategy import (
     BASE_STRUCTURAL_STRATEGY,
     CAP_SERVE,
     SWEEP_CAPABILITIES,
@@ -40,7 +40,7 @@ from sportstradamus.training.model_strategy_registry import (
     strategies_for_cell,
     strategy_controls,
 )
-from sportstradamus.training.model_strategy_report_identity import resolve_report_identity
+from sportstradamus.training.model_strategy import resolve_report_identity
 from sportstradamus.training.role_specs import role_spec_for
 from sportstradamus.training.structural_strategies import (
     AFFINE_STRATEGY as RUSHING,
@@ -1355,8 +1355,8 @@ def test_resume_accepts_complete_count_board_with_canonical_none_namespaces(monk
 
 
 def test_cli_board_dry_run_trains_nothing(monkeypatch, tmp_path):
-    """``--board --dry-run`` prints the scope and exits without sweeping a single cell; --dist-class
-    threads through to the cell selection.
+    """Board-mode ``--dry-run`` (no --market) prints the scope and exits without sweeping a single
+    cell; --dist-class threads through to the cell selection.
     """
     from click.testing import CliRunner
 
@@ -1375,7 +1375,7 @@ def test_cli_board_dry_run_trains_nothing(monkeypatch, tmp_path):
     monkeypatch.setattr(sweep, "run_board", boom)
     out = str(tmp_path / "board.csv")
     result = CliRunner().invoke(
-        sweep.main, ["--board", "--dry-run", "--dist-class", "count", "--out", out]
+        sweep.main, ["--dry-run", "--dist-class", "count", "--out", out]
     )
     assert result.exit_code == 0, result.output
     assert "[dry-run]" in result.output
@@ -1478,7 +1478,7 @@ def test_cli_confirm_invokes_run_confirm(monkeypatch, tmp_path):
     """``--confirm`` hands the ranked board to the confirm loop (which is mocked here)."""
     from click.testing import CliRunner
 
-    from sportstradamus.training import model_strategy_confirm
+    from sportstradamus.training.model_strategy import confirm as model_strategy_confirm
 
     monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
     monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
@@ -1499,7 +1499,7 @@ def test_cli_confirm_invokes_run_confirm(monkeypatch, tmp_path):
 def test_cli_scoped_resume_confirm_excludes_unrelated_complete_prior_cell(monkeypatch, tmp_path):
     from click.testing import CliRunner
 
-    from sportstradamus.training import model_strategy_confirm
+    from sportstradamus.training.model_strategy import confirm as model_strategy_confirm
 
     out = str(tmp_path / "board.csv")
     pd.DataFrame(
@@ -1529,7 +1529,7 @@ def test_cli_scoped_resume_confirm_excludes_unrelated_complete_prior_cell(monkey
 
     result = CliRunner().invoke(
         sweep.main,
-        ["--board", "--league", "NFL", "--resume", "--confirm", "--yes", "--out", out],
+        ["--league", "NFL", "--resume", "--confirm", "--yes", "--out", out],
     )
 
     assert result.exit_code == 0, result.output

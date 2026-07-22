@@ -12,7 +12,8 @@ import json
 import pandas as pd
 import pytest
 
-from sportstradamus.training import cli, model_strategy_confirm
+from sportstradamus.training import cli
+from sportstradamus.training.model_strategy import confirm as model_strategy_confirm
 from sportstradamus.training.cli import (
     _g4_only_retry_wanted,
     _gate_passed,

@@ -293,7 +293,7 @@ width fix is fit to a calibration target and guard-railed on g1/g5 (§6.1 go/no-
 
 | Lever | Verdict | Evidence |
 |---|---|---|
-| Strategy sweep + confirm engine (`model_strategy_sweep.py` + `model_strategy_confirm.py`) | **Alive, registry-driven, identity-bound** — `model-strategy-sweep --board --confirm` ranks exact signed base/structural corners by min-gate slack; confirm reproduces the winner at full HPO, exact-checks model/CSV/model_stats, and keeps an all-six-gate ship or restores the prior cell. Deterministic ranks, real-HPO ships (§6); generic selector and serving validation landed. Final gate audit is recorded in §6 | §6 + R4 brief |
+| Strategy sweep + confirm engine (`model_strategy/sweep.py` + `model_strategy/confirm.py`) | **Alive, registry-driven, identity-bound** — `model-strategy-sweep --confirm` ranks exact signed base/structural corners by min-gate slack; confirm reproduces the winner at full HPO, exact-checks model/CSV/model_stats, and keeps an all-six-gate ship or restores the prior cell. Deterministic ranks, real-HPO ships (§6); generic selector and serving validation landed. Final gate audit is recorded in §6 | §6 + R4 brief |
 | Forceable distribution family (`dist` via `stat_meta.json`) | **Alive** — `_resolve_dist` reads the cell's `dist` as authoritative input (SkewNormal / ZINB / NegBin); makes family a one-line sweep axis, no code edit per cell. The data-driven mean≥2 / zero-rate rule is now only the fallback | `[[dist_selection_forceable_via_stat_meta]]` |
 | Centered-target normalization (`centered_additive_mean10`) | **Alive & shipping** — out-calibrates `ratio_meanyr` on Gate 4 for several cells the scalar width fix can't reach (run the §3 shipped-counts block; several cells carry it in `stat_meta.json` today). The old P1 "dead" call judged it as a *mean-compression* fix under the pre-PIT-KS gate — superseded | refs §3 + sweep board |
 | Calibrated HP-selection search-gate (Lever-1, `--hpo-selection calibrated`) | **Alive & validated** — Optuna selects on CRPS + a PIT-KS penalty; ship-deciding knobs persist per-cell so cron re-fits reproduce them | `[[calibration_hp_selection_lever]]` |
@@ -340,7 +340,7 @@ and ask (material).
 ## 5. Module footprint & canonical paths
 
 Breadth / family / calibration work: `sportstradamus.training` (pipeline, scorecard, report,
-calibration, `model_strategy_sweep.py` + `model_strategy_confirm.py`), `sportstradamus.stats`
+calibration, `model_strategy/sweep.py` + `model_strategy/confirm.py`), `sportstradamus.stats`
 (feature columns), `data/config/{stat_meta.json, ship_config.json}`, `tests/golden/`.
 Prediction-side edits only via §7.3.
 
@@ -366,13 +366,13 @@ A served predictive is built in four independently-swappable stages,
 | **Calibration** (auto-fit, not searched) | location (`roe_mean`/`isotonic_mean`); scale+shape (`dispersion_cal` + joint `skew_cal`; count PIT-KS retarget); full-CDF (isotonic-PIT / IDR) | location + scale+shape shipped; count PIT-KS retarget via `--count-dispersion-objective pit_ks` (§6.1 Rung B′); whole-CDF isotonic-PIT recal shipped on **continuous** cells (§6.1 Rung C — PA ships, `[[rung_c_whole_cdf_recal]]`) | Rung-C-on-**count** dead (`[[rung_c_whole_cdf_recal]]`); IDR variant unbuilt |
 
 **The sweep + confirm engine.** One entry point on devel:
-`model-strategy-sweep` (`training/model_strategy_sweep.py`, with
-`training/model_strategy_confirm.py` for the ship half). It replaces the retired
+`model-strategy-sweep` (`training/model_strategy/sweep.py`, with
+`training/model_strategy/confirm.py` for the ship half). It replaces the retired
 `model_strategy_driver.py` / `model-research`-branch split — everything is on devel now.
 
-- `--board` enumerates every registered `StrategySpec` whose exact-cell enrollment, cached-matrix
-  schema, distribution-class applicability, and `deterministic_train`/`score` capabilities admit
-  the cell. Base distribution families and structural heads use the same registry contract; there
+- Board mode (omit `--market`) enumerates every registered `StrategySpec` whose exact-cell
+  enrollment, cached-matrix schema, distribution-class applicability, and
+  `deterministic_train`/`score` capabilities admit the cell. Base distribution families and structural heads use the same registry contract; there
   is no NFL-yard special branch. Results upsert into
   `data/research/strategy_research_board.csv` after each cell, and `--include-shipped` still routes
   live cells to supersession rather than fresh ship.
@@ -472,7 +472,7 @@ mandatory and a deterministic score is never shipped.
 
 **League activation guard.** `--confirm` **never** auto-flips a withheld MLB or NHL cell — those
 ship only after their owner gate (D1/D2, §6.7); a board-passing withheld cell in a gated league
-is announced and skipped (`model_strategy_confirm._drop_activation_gated`). Already-live cells in
+is announced and skipped (`model_strategy.confirm._drop_activation_gated`). Already-live cells in
 those leagues still supersession-test (a strategy swap never changes the release surface).
 
 **Shipped cell with a better corner → supersede, not auto-ship.** `--include-shipped` routes a
@@ -485,8 +485,8 @@ leaves the board **only** on matrix-wide exhaustion (§8) or the operator's docu
 call.
 
 **Stage-0 hardened the engine (owner requirement — the sweep was a bottleneck run by hand).**
-Landed: the declarative `StrategySpec` registry in `model_strategy_specs.py` /
-`model_strategy_registry.py` (base families and cell-scoped structural heads, capabilities,
+Landed: the declarative `StrategySpec` registry in `model_strategy/specs.py` /
+`model_strategy/registry.py` (base families and cell-scoped structural heads, capabilities,
 controls, persistence, selector, required columns, and artifact paths); exact cached-matrix schema
 and streamed-SHA scoping; signature/matrix/split-aware resumable board runs; `--dry-run` scope
 preview; and **model-version stamping**
@@ -558,7 +558,7 @@ it is an input, not the goal (§1).
 ### §6.0 WS-0 — Standing breadth harvest & bookkeeping (automated, high-payoff, low-effort)
 
 The breadth engine, run on a cadence rather than a campaign. **Cadence:** a registry-driven
-`model-strategy-sweep --board --confirm` monthly and after any lever or data change, plus the
+`model-strategy-sweep --confirm` monthly and after any lever or data change, plus the
 free-passer sweep below; NFL candidates first (the binding league, §6.9). **Scope guard:** a
 running sweep OWNS `stat_meta.json` — never `meditate` or hand-edit it while one runs (the §3
 concurrency probe). **Counts:** always re-derive from the §3 board-rollup and shipped-counts
@@ -1260,7 +1260,7 @@ critical path is the book-honesty repair** (§3.2 recipe: audit → Odds API sig
 historical_odds.py` → `inject_backfilled_odds.py` → matrix rebuild → re-sweep → **D1 packet**). NHL
 has a few passing corners pre-staged but is **dark until October**, so its **D2 packet lands ~Sep**.
 **No MLB or NHL cell flips before its gate** — the sweep engine's league-activation guard
-(`model_strategy_confirm._drop_activation_gated`) announces and skips any withheld MLB/NHL board
+(`model_strategy.confirm._drop_activation_gated`) announces and skips any withheld MLB/NHL board
 passer, and the D1/D2 packets (owned by the activation doc) are where the owner removes the league
 from the guard in the same PR that ships its first cells. Kill: unfixable data → a NO-GO packet is
 a valid deliverable.

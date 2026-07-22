@@ -67,11 +67,11 @@ from sportstradamus.training.group_conditional_cdf import (
     two_part_cdf_endpoints,
 )
 from sportstradamus.training.markets import ALL_MARKETS
-from sportstradamus.training.model_strategy_artifacts import STRATEGY_IDENTITY_CSV_COLUMNS
-from sportstradamus.training.model_strategy_frame import validate_strategy_frame
-from sportstradamus.training.model_strategy_registry import (
+from sportstradamus.training.model_strategy import (
     BASE_STRUCTURAL_STRATEGY,
+    STRATEGY_IDENTITY_CSV_COLUMNS,
     parse_controls,
+    validate_strategy_frame,
 )
 from sportstradamus.training.ship_config import STAT_META_PATH, TARGET_NORM_NONE, load_stat_meta
 from sportstradamus.training.structural_strategies import (

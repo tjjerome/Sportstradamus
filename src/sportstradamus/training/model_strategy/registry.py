@@ -1,4 +1,10 @@
-"""Public declarative registry for model-strategy research and confirmation."""
+"""Public declarative registry for model-strategy research and confirmation.
+
+Owns the strategy catalog (built from :mod:`sportstradamus.training.model_strategy.specs`),
+the applicability/capability queries the sweep and confirm loops filter on, the canonical
+spec/control fingerprints that make a board resumable, and the CLI-arg / persistence /
+namespace builders that turn a selected corner into a ``meditate`` invocation.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +14,7 @@ import json
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 
-from sportstradamus.training.model_strategy_specs import BUILTIN_SPEC_DATA
+from sportstradamus.training.model_strategy.specs import BUILTIN_SPEC_DATA
 from sportstradamus.training.role_specs import role_spec_for
 
 BASE_STRUCTURAL_STRATEGY = "none"
@@ -218,3 +224,65 @@ def distribution_class(distribution: str) -> str:
     if distribution in {"ZINB", "NegBin", "DPO"}:
         return "count"
     raise ValueError(f"distribution {distribution!r} has no registered strategy class")
+
+
+def meditate_command(league: str, market: str, *args: str) -> list[str]:
+    """Build the canonical cell-bound ``meditate`` subprocess command."""
+    return [
+        "poetry",
+        "run",
+        "meditate",
+        "--league",
+        league,
+        "--market",
+        market,
+        *args,
+    ]
+
+
+def strategy_cli_args(
+    cell: CellContext, spec: StrategySpec, controls: Mapping[str, str]
+) -> list[str]:
+    """Forward each control as its ``--flag value``; a structural method's slug rides ``--posthoc``.
+
+    A structural spec pins its own slug in the ``posthoc`` control, so this loop emits
+    ``--posthoc <slug>`` — the calibration pool is the selector, no separate axis.
+    """
+    del cell
+    args: list[str] = []
+    for name, value in controls.items():
+        if name not in spec.cli_flags:
+            raise ValueError(f"{spec.slug}: no CLI flag declared for control {name!r}")
+        args.extend((spec.cli_flags[name], value))
+    return args
+
+
+def strategy_full_hpo_cli_args(
+    cell: CellContext, spec: StrategySpec, controls: Mapping[str, str]
+) -> list[str]:
+    if not spec.enrolled_for(cell) or CAP_FULL_HPO not in spec.capabilities:
+        raise ValueError(f"{spec.slug}: strategy cannot run full-HPO for this cell")
+    args: list[str] = []
+    for name, value in controls.items():
+        if name in spec.persist:
+            continue
+        if name not in spec.cli_flags:
+            raise ValueError(f"{spec.slug}: no CLI flag declared for control {name!r}")
+        args.extend((spec.cli_flags[name], value))
+    return args
+
+
+def strategy_persistence_edits(
+    cell: CellContext, spec: StrategySpec, controls: Mapping[str, str]
+) -> dict[str, str]:
+    del cell
+    missing = set(spec.persist) - set(controls)
+    if missing:
+        raise ValueError(f"{spec.slug}: missing persisted controls {sorted(missing)}")
+    edits = {field: controls[name] for name, field in spec.persist.items()}
+    edits.update(spec.fixed_persist)
+    return edits
+
+
+def artifact_namespace(base_namespace: str, spec: StrategySpec) -> str:
+    return f"{base_namespace}__{spec.slug}" if spec.artifact_namespace_suffix else base_namespace

@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus.training.group_conditional_cdf._maps import ks_supremum
-from sportstradamus.training.model_strategy_registry import BASE_STRUCTURAL_STRATEGY
+from sportstradamus.training.model_strategy import BASE_STRUCTURAL_STRATEGY
 from sportstradamus.training.scorecard import (
     _bootstrap_mean_ci,
     _bootstrap_mean_ci_clustered,

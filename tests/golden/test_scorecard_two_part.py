@@ -14,7 +14,7 @@ from sportstradamus.training import group_conditional_cdf as receiving
 from sportstradamus.training.group_conditional_cdf._pool import (
     fixed_pool_blob,
 )
-from sportstradamus.training.model_strategy_artifacts import (
+from sportstradamus.training.model_strategy import (
     STRATEGY_MARKET_CSV_COLUMN,
     STRATEGY_SIGNATURE_CSV_COLUMN,
     STRATEGY_STATUS_CSV_COLUMN,
@@ -22,7 +22,7 @@ from sportstradamus.training.model_strategy_artifacts import (
     artifact_identity_columns,
     build_artifact_identity,
 )
-from sportstradamus.training.model_strategy_registry import get_strategy, strategy_controls
+from sportstradamus.training.model_strategy import get_strategy, strategy_controls
 from sportstradamus.training.scorecard import (
     _pred_cdf_pmf,
     _randomized_pit_draws,

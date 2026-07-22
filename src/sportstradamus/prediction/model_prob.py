@@ -57,21 +57,19 @@ from sportstradamus.training.group_conditional_cdf import (
     apply_two_part_line,
     serialize_two_part_calibration,
 )
-from sportstradamus.training.model_strategy_artifacts import (
-    MODEL_STRATEGY_MODEL_KEY,
-    ArtifactIdentity,
-    InactiveStrategyArtifactError,
-)
-from sportstradamus.training.model_strategy_registry import (
+from sportstradamus.training.model_strategy import (
     BASE_STRUCTURAL_STRATEGY,
     CAP_SERVE,
+    MODEL_STRATEGY_MODEL_KEY,
+    ArtifactIdentity,
     CellContext,
+    InactiveStrategyArtifactError,
     distribution_class,
     get_strategy,
     parse_controls,
+    resolve_report_identity,
     validate_strategy_selection,
 )
-from sportstradamus.training.model_strategy_report_identity import resolve_report_identity
 from sportstradamus.training.posthoc import MEAN_STAGE, PROB_STAGE, apply_posthoc
 from sportstradamus.training.role_specs import RoleSpec, role_spec_for
 from sportstradamus.training.structural_strategies import (

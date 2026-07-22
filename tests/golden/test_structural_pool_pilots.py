@@ -21,7 +21,7 @@ from typing import TypedDict
 
 import pytest
 
-from sportstradamus.training.model_strategy_registry import (
+from sportstradamus.training.model_strategy import (
     SWEEP_CAPABILITIES,
     CellContext,
     distribution_class,

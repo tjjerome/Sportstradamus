@@ -74,7 +74,7 @@ whenever the queue changes; git holds the history.
    ship_config validation rejects an SN slug on a non-SN cell and validates the whole file, so
    one bad entry kills every meditate. Add golden. Flip scripts set the slug too.
 3. **Count re-run**: re-flip receptions/targets/carries (dist=ZINB **and**
-   target_normalization=none) → `model-strategy-sweep --board --dist-class count --league NFL
+   target_normalization=none) → `model-strategy-sweep --dist-class count --league NFL
    --confirm --yes` → revert unshipped flips. Board evidence stands; only the confirms were
    lost to the crash.
 4. **Yards trio** (research verdict; brief archived at
