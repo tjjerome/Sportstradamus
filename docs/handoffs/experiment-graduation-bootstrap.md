@@ -141,19 +141,18 @@ The live selector is **not** `--experiment`; it is the `--structural-strategy` a
   `resolve_experiment_selection` lever; keep the live exports (`ROLE_COLUMNS`, `AFFINE_POSITIONS`
   until §5 Stage C removes it, `AFFINE_STRATEGY`/`TWO_PART_STRATEGY`, the blob-key constants).
 
-### 4.2 Rename `posthoc` → `calibration` (B5, after the merge lands green)
+### 4.2 Rename `posthoc` → `calibration` — INVESTIGATED, ABORTED (owner call)
 
-Because the field's meaning broadened, rename it — `posthoc.py`→`calibration.py`, `POSTHOC_SLUGS`,
-`--posthoc`, `fit_posthoc`/`apply_posthoc`, the `posthoc_slug`/`posthoc_blob` identifiers, the
-`runtime_controls`/`_CONTROL_FLAGS` keys, and the stat_meta `posthoc` field key. This is a
-**guarded exact-token allowlist**, not a blind word-replace (rename-collision discipline). **Do NOT
-touch** the pre-existing look-alikes: `structural_calibration` (the live pickle key above),
-`stat_calibration.json`, `get_market_calibration`, `apply_cdf_recal`, `dispersion_cal`. Regenerate
-the CLI help snapshot. Persisted-key decision for the two serialization keys `posthoc`/`posthoc_blob`:
-either retrain-gate the rename (no served structural cell exists; served corrector cells rewrite
-keys on the next `meditate`, so retrain served cells before any `devel` deploy) or keep those two
-serialization keys as `posthoc*` (zero-risk). Recommend the latter unless the owner wants the clean
-break.
+The field's meaning broadened (it now selects any calibration method, not only post-hoc
+correctors), which motivated a rename. Recon killed it: **`training/calibration.py` already exists**
+— a 610-line *model*-calibration module (book-weight fitting, model-blend weight, distribution
+selection; exports `fit_book_weights`/`BLENDING_SLUGS`/`fit_book_shape`, imported by 5+ files) — and
+"calibration" is already overloaded across `structural_calibration`, `stat_calibration.json`,
+`get_market_calibration`, `apply_cdf_recal`, `dispersion_cal`. `posthoc`→`calibration` would collide
+on the module filename and *worsen* the ambiguity, not fix it. The owner chose to **keep `posthoc`**
+(B1 already broadened its docstring to "per-cell calibration-method selector", so it is documented
+and unambiguous) rather than rename to a distinct token or rename the existing module. No rename
+runs; `posthoc` stays the field/module/flag name.
 
 ## 5. Stage plan
 
@@ -254,13 +253,20 @@ is already generic — the lock lives only in the expert-context + gate + serve 
   than a small minority of cells, the guard is wrong.
 - **One agent, whole bootstrap.** Dispatch `experiment-graduation-specialist` on this
   brief. Do not ship a cell, do not graduate a third method.
-- **Retire the axis; rename the field — both in scope.** The full merge retires the
-  `--structural-strategy` / registry axis (§4.1) and renames `posthoc`→`calibration` (§4.2, B5);
-  neither is optional. The rename runs **last**, after the merge is green, as a guarded exact-token
-  allowlist, and must not touch the five look-alikes named in §4.2.
+- **Retire the axis (done); the field rename was aborted.** The full merge retired the
+  `--structural-strategy` / registry axis (§4.1). The `posthoc`→`calibration` rename (§4.2) was
+  investigated and **abandoned** — the target name is taken by an unrelated 610-line module and the
+  concept is already overloaded; the owner kept `posthoc`.
 
 ## 8. Ledger
 
+- 2026-07-21 · bootstrap COMPLETE · Stage A (foundation + `--structural-strategy` axis retirement,
+  `308a564`), Stage B (two-part pilot pinned through the pool, `c40d9bc`), Stage C (affine made
+  market-agnostic — `AFFINE_POSITIONS` deleted, per-cell code discovery mirroring two-part; both
+  pilots pinned, `862e106`) all landed. Both methods are now single-valued `posthoc`-pool members
+  the sweep tries on any market; production-neutral (0 stat_meta cells carry a structural value).
+  B5 rename `posthoc`→`calibration` ABORTED (§4.2) — collides with the existing `calibration.py` +
+  overloaded concept; owner kept `posthoc`. Gates green throughout (1 pre-existing OOS ship-gate).
 - 2026-07-21 · premise corrected + scope expanded (Lane B B0) · earlier drafts named the
   vestigial `--experiment` / `structural_calibration`-cell-selector lever as the cage; the live
   selector is the `--structural-strategy` / `model_strategy_registry` axis (§1, §4.1). Full-merge
