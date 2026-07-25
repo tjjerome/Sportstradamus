@@ -12,8 +12,9 @@ import pytest
 from sportstradamus.training.model_strategy import (
     artifact_identity_columns,
     build_artifact_identity,
+    get_strategy,
+    strategy_controls,
 )
-from sportstradamus.training.model_strategy import get_strategy, strategy_controls
 from sportstradamus.training.scorecard import (
     _GATE1_CI_HI_MAX,
     _GATE1_NONINF_MARGIN,
@@ -1199,6 +1200,37 @@ def test_gate_row_no_odds_but_line_present_blanks_g1_only():
     assert row["g1_brier_diff_mean"] is None  # no Odds → Gate 1 auto-pass at verdict time
     assert row["g1_brier_skill_score"] is None
     assert row["g5_ece"] is not None  # Gate 5 computes on P + Line alone
+
+
+def test_gate1_uses_only_explicit_authentic_book_evidence():
+    df = _priced_frame()
+    authentic = np.arange(len(df)) % 2 == 0
+    df["QuoteAuthenticity"] = np.where(authentic, "authentic", "synthetic")
+    df.loc[~authentic, "P"] = 1.0 - (
+        df.loc[~authentic, "Result"] >= df.loc[~authentic, "Line"]
+    ).astype(float)
+
+    full = gate_row(df, "EV", league="NBA", market="PTS", strategy="t")
+    authentic_only = gate_row(
+        df.loc[authentic].drop(columns="QuoteAuthenticity"),
+        "EV",
+        league="NBA",
+        market="PTS",
+        strategy="t",
+    )
+
+    assert full["g1_brier_diff_mean"] == pytest.approx(
+        authentic_only["g1_brier_diff_mean"]
+    )
+    assert full["g1_brier_diff_ci_lo"] == pytest.approx(
+        authentic_only["g1_brier_diff_ci_lo"]
+    )
+    assert full["g1_brier_diff_ci_hi"] == pytest.approx(
+        authentic_only["g1_brier_diff_ci_hi"]
+    )
+    assert full["g1_brier_skill_score"] == pytest.approx(
+        authentic_only["g1_brier_skill_score"]
+    )
 
 
 def test_write_gate_scorecard_sorts_and_overwrites(tmp_path):

@@ -143,4 +143,19 @@ Options:
                                   Warms data/training_data/ without training;
                                   pair with --bypass-withholding to reach
                                   withheld cells.
+  --full-rebuild / --no-full-rebuild
+                                  Rebuild from locally cached raw inputs without
+                                  reading/appending the canonical matrix.
+                                  Requires --matrix-only and --matrix-output.
+  --matrix-output DIRECTORY       Quarantine directory for full-rebuild parquet
+                                  and manifest outputs.
+  --dependency-root DIRECTORY     Root containing the versioned volume-v1 model-
+                                  dependency namespace.
+  --frozen-matrix-dir DIRECTORY   Directory of lineage-validated matrices to
+                                  train without rebuilding or rewriting them.
+  --artifact-output DIRECTORY     Isolated directory for model and test-set
+                                  artifacts from frozen-matrix training.
+  --dependency-namespace TEXT     Dependency identity namespace stamped onto
+                                  isolated model artifacts (for example
+                                  volume-v1).
   --help                          Show this message and exit.

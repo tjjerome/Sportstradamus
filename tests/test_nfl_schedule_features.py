@@ -59,3 +59,29 @@ def test_schedule_context_historical_and_upcoming_agree(monkeypatch):
     upcoming = _context(s)  # -> upcoming branch (reads upcoming_games)
 
     assert historical["Weekday"].tolist() == upcoming["Weekday"].tolist()
+
+
+def test_fp_team_features_cache_by_season_week(monkeypatch):
+    stats = StatsNFL()
+    calls = 0
+    expected = (pd.DataFrame({"x": [1.0]}), pd.DataFrame({"y": [2.0]}))
+    monkeypatch.setattr(stats, "_lookup_season_week", lambda _date: (2024, 8))
+    monkeypatch.setattr(stats, "_lookback_windows", lambda *_args: [(2024, 1, 7)])
+    monkeypatch.setattr(nfl_module.nfl_fp_team_weekly, "available_snapshots", lambda _season: [1])
+
+    def load_features(**_kwargs):
+        nonlocal calls
+        calls += 1
+        return expected
+
+    monkeypatch.setattr(
+        nfl_module.nfl_fp_team_weekly_aggregate,
+        "load_team_and_defense_features",
+        load_features,
+    )
+
+    first = stats._join_fp_team_features(date(2024, 10, 10))
+    second = stats._join_fp_team_features(date(2024, 10, 13))
+
+    assert calls == 1
+    assert first is second

@@ -60,6 +60,7 @@ from sportstradamus.stats.nfl_fp_loader import (
     _join_nfl_players,
     _load_pbp_named_by_player,
     derive_comp_metrics,
+    join_local_nfl_players,
 )
 
 # ANY/A formula constants per the standard pro-football-reference definition.
@@ -839,7 +840,9 @@ _PLAYER_METADATA_COLS = (
 )
 
 
-def load_through_one_year(season: int, target_week: int) -> pd.DataFrame:
+def load_through_one_year(
+    season: int, target_week: int, *, snapshot_only: bool = False
+) -> pd.DataFrame:
     """Aggregate per-game FP snapshots into a leakage-clean comp profile.
 
     Reads weeks ``1..target_week`` of ``season`` from
@@ -870,21 +873,27 @@ def load_through_one_year(season: int, target_week: int) -> pd.DataFrame:
         DataFrame keyed by accent-stripped player name. Empty if no
         snapshots are available for the window.
     """
-    return load_window_one_year(season, 1, target_week)
+    return load_window_one_year(season, 1, target_week, snapshot_only=snapshot_only)
 
 
-def load_window_one_year(season: int, start_week: int, end_week: int) -> pd.DataFrame:
+def load_window_one_year(
+    season: int, start_week: int, end_week: int, *, snapshot_only: bool = False
+) -> pd.DataFrame:
     """Aggregate per-game FP snapshots for a single closed week range.
 
     Convenience wrapper for :func:`load_multi_window_one_year` with a
     one-window list. Used when the caller wants a single-season window
     (e.g. legacy fallback paths that aggregate season-by-season).
     """
-    return load_multi_window_one_year([(season, start_week, end_week)])
+    return load_multi_window_one_year(
+        [(season, start_week, end_week)], snapshot_only=snapshot_only
+    )
 
 
 def load_multi_window_one_year(
     windows: Sequence[tuple[int, int, int]],
+    *,
+    snapshot_only: bool = False,
 ) -> pd.DataFrame:
     """Aggregate per-game FP snapshots across one or more (season, start, end) windows.
 
@@ -920,7 +929,7 @@ def load_multi_window_one_year(
         return pd.DataFrame()
 
     by_player_id = _combine_bucket_aggregates(by_player_id, windows)
-    return _finalize_player_frame(by_player_id, windows)
+    return _finalize_player_frame(by_player_id, windows, snapshot_only=snapshot_only)
 
 
 def _broadcast_team_coverage(
@@ -1171,7 +1180,9 @@ def _combine_bucket_aggregates(by_player_id: pd.DataFrame, windows) -> pd.DataFr
     return by_player_id
 
 
-def _finalize_player_frame(by_player_id: pd.DataFrame, windows) -> pd.DataFrame:
+def _finalize_player_frame(
+    by_player_id: pd.DataFrame, windows, *, snapshot_only: bool = False
+) -> pd.DataFrame:
     """Join metadata + game counts, project to the name index, derive metrics, filter
     to comp positions, broadcast team coverage, and combine the PBP frame.
     """
@@ -1195,6 +1206,10 @@ def _finalize_player_frame(by_player_id: pd.DataFrame, windows) -> pd.DataFrame:
     by_player_id = by_player_id.rename(columns={"POS": "position", "G": "player_game_count"})
     by_player_id = _broadcast_team_coverage(by_player_id, windows)
     by_player_id = derive_comp_metrics(by_player_id)
+
+    if snapshot_only:
+        by_player_id["public_enrichment_available"] = 0.0
+        return join_local_nfl_players(by_player_id)
 
     target_season = max(w[0] for w in windows)
     pbp = _load_pbp_named_by_player(target_season)

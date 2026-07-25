@@ -16,6 +16,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from sportstradamus.stats import nfl_fp_snapshots
 from sportstradamus.stats import nfl_fp_team_weekly as team
 from sportstradamus.stats import nfl_fp_weekly as player
 
@@ -63,6 +64,32 @@ def test_load_snapshot_team_shape() -> None:
     df = team.load_snapshot(_SEASON, 1, "coverage_matrix")
     assert isinstance(df, pd.DataFrame)
     assert df.shape == (32, 41)
+
+
+@_needs_fp_snapshots
+def test_frozen_snapshot_cache_reads_parquet_once(monkeypatch) -> None:
+    reads = 0
+    read_parquet = nfl_fp_snapshots.pd.read_parquet
+
+    def counted_read(path):
+        nonlocal reads
+        reads += 1
+        return read_parquet(path)
+
+    player.disable_snapshot_cache()
+    monkeypatch.setattr(nfl_fp_snapshots.pd, "read_parquet", counted_read)
+    player.enable_snapshot_cache()
+    try:
+        first = player.load_snapshot(_SEASON, 1, "efficiency")
+        second = player.load_snapshot(_SEASON, 1, "efficiency")
+        hashes = player.consumed_snapshot_hashes()
+    finally:
+        player.disable_snapshot_cache()
+
+    assert reads == 1
+    assert len(hashes) == 1
+    assert len(next(iter(hashes.values()))) == 64
+    pd.testing.assert_frame_equal(first, second)
 
 
 def test_load_snapshot_unknown_kind_label() -> None:

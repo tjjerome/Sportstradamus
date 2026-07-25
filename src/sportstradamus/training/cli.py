@@ -2,6 +2,7 @@
 
 import importlib.resources as pkg_resources
 import json
+import os
 import warnings
 from pathlib import Path
 
@@ -17,7 +18,7 @@ from sportstradamus.helpers import (
     get_logger,
     odds_budget,
 )
-from sportstradamus.helpers.io import MODEL_STATS_PATH, prune_model_pickle
+from sportstradamus.helpers.io import MODEL_STATS_PATH, market_file_slug, prune_model_pickle
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 from sportstradamus.training import baselines, calibration
 from sportstradamus.training.calibration import fit_book_weights
@@ -176,6 +177,7 @@ def _retry_calibrated_if_g4_only(
     if (
         train_kwargs["deterministic"]
         or train_kwargs["matrix_only"]
+        or train_kwargs.get("artifact_output") is not None
         or train_kwargs["posthoc_slug"] in STRUCTURAL_STAGE
     ):
         return
@@ -411,6 +413,38 @@ def _retry_calibrated_if_g4_only(
         "pair with --bypass-withholding to reach withheld cells."
     ),
 )
+@click.option(
+    "--full-rebuild/--no-full-rebuild",
+    default=False,
+    help=(
+        "Rebuild from locally cached raw inputs without reading/appending the canonical matrix. "
+        "Requires --matrix-only and --matrix-output."
+    ),
+)
+@click.option(
+    "--matrix-output",
+    type=click.Path(path_type=Path, file_okay=False),
+    help="Quarantine directory for full-rebuild parquet and manifest outputs.",
+)
+@click.option(
+    "--dependency-root",
+    type=click.Path(path_type=Path, file_okay=False),
+    help="Root containing the versioned volume-v1 model-dependency namespace.",
+)
+@click.option(
+    "--frozen-matrix-dir",
+    type=click.Path(path_type=Path, file_okay=False, exists=True),
+    help="Directory of lineage-validated matrices to train without rebuilding or rewriting them.",
+)
+@click.option(
+    "--artifact-output",
+    type=click.Path(path_type=Path, file_okay=False),
+    help="Isolated directory for model and test-set artifacts from frozen-matrix training.",
+)
+@click.option(
+    "--dependency-namespace",
+    help="Dependency identity namespace stamped onto isolated model artifacts (for example volume-v1).",
+)
 def meditate(
     force,
     league,
@@ -431,6 +465,12 @@ def meditate(
     count_dispersion_objective,
     sn_param,
     matrix_only,
+    full_rebuild,
+    matrix_output,
+    dependency_root,
+    frozen_matrix_dir,
+    artifact_output,
+    dependency_namespace,
 ):
     """Train or retrain LightGBMLSS models for each configured market."""
     # style: allow-complexity — meditate entrypoint: a flat training pipeline
@@ -445,6 +485,31 @@ def meditate(
     # rebuild. See docs/gbdt_mean_regression_plan.md "Bug to fix" note.
     if deterministic and not force:
         force = True
+    if full_rebuild and deterministic:
+        raise click.UsageError("--full-rebuild and --deterministic are different modes")
+    if full_rebuild and (not matrix_only or matrix_output is None):
+        raise click.UsageError("--full-rebuild requires --matrix-only and --matrix-output")
+    if full_rebuild:
+        os.environ["SPORTSTRADAMUS_ARCHIVE_READ_ONLY"] = "1"
+    if frozen_matrix_dir is not None and (full_rebuild or deterministic or matrix_only):
+        raise click.UsageError(
+            "--frozen-matrix-dir is an isolated full-HPO mode; it is incompatible with "
+            "--full-rebuild, --deterministic, and --matrix-only"
+        )
+    if frozen_matrix_dir is not None and (
+        artifact_output is None or dependency_namespace is None
+    ):
+        raise click.UsageError(
+            "--frozen-matrix-dir requires --artifact-output and --dependency-namespace"
+        )
+    if frozen_matrix_dir is not None and not bypass_withholding:
+        raise click.UsageError("--frozen-matrix-dir requires --bypass-withholding")
+    if frozen_matrix_dir is None and (
+        artifact_output is not None or dependency_namespace is not None
+    ):
+        raise click.UsageError(
+            "--artifact-output and --dependency-namespace require --frozen-matrix-dir"
+        )
     log = get_logger("meditate")
     log.setLevel(log_level)
     log.info(
@@ -513,12 +578,18 @@ def meditate(
     ):
         if league not in ("All", lg_name):
             continue
-        struct = cls()
+        if cls is StatsMLB and (deterministic or full_rebuild or frozen_matrix_dir is not None):
+            # Frozen/cold builds consume cached historical inputs only. Probable
+            # pitchers describe the live upcoming slate and must not introduce
+            # a network dependency before the cached MLB gamelog is loaded.
+            struct = cls(load_live_pitchers=False)
+        else:
+            struct = cls()
         if league == "All" and not odds_budget.league_is_live(lg_name, struct.season_start):
             continue
         click.echo(f"[{lg_name}] loading cached gamelogs...")
         struct.load()
-        if not deterministic:
+        if not deterministic and not full_rebuild and frozen_matrix_dir is None:
             click.echo(f"[{lg_name}] updating from league API...")
             struct.update()
         stat_structs[lg_name] = struct
@@ -548,7 +619,7 @@ def meditate(
         # are never consumed by the train — skip the whole per-league setup
         # (including correlate's per-run rebuild). Only trim_gamelog, which
         # yields league_start_date, is still needed.
-        if not deterministic:
+        if not deterministic and not full_rebuild and frozen_matrix_dir is None:
             # Fit book weights for moneylines and totals before per-market loop
             book_weights.setdefault(lg, {}).setdefault("Moneyline", {})
             book_weights[lg]["Moneyline"] = fit_book_weights(
@@ -651,13 +722,23 @@ def meditate(
                 "count_dispersion_objective": cell_count_dispersion,
                 "sn_param": cell_sn_param,
                 "matrix_only": matrix_only,
+                "full_rebuild": full_rebuild,
+                "matrix_output": matrix_output,
+                "dependency_root": dependency_root,
+                "matrix_input": (
+                    frozen_matrix_dir / f"{market_file_slug(lg, market)}.parquet"
+                    if frozen_matrix_dir is not None
+                    else None
+                ),
+                "artifact_output": artifact_output,
+                "dependency_namespace": dependency_namespace,
             }
             train_market(lg, market, stat_data, archive, league_start_date, **train_kwargs)
             _retry_calibrated_if_g4_only(
                 lg, market, stat_data, archive, league_start_date, train_kwargs, stat_meta_full, log
             )
 
-    if not deterministic and not matrix_only:
+    if not deterministic and not matrix_only and artifact_output is None:
         demoted = _enforce_ship_gate(active_markets, ship_config, set(stat_structs), log)
         if demoted:
             click.echo(f"ship-gate: pruned {demoted} served cell(s) with ship=False")

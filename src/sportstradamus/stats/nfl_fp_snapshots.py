@@ -12,8 +12,10 @@ API, so call sites stay ``nfl_fp_weekly.load_window(...)`` unchanged.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
+from collections import OrderedDict
 from collections.abc import Iterable
 from importlib import resources as pkg_resources
 from importlib.resources.abc import Traversable
@@ -40,6 +42,30 @@ class SnapshotStore:
         self.base_dir = base_dir
         self.file_kinds = file_kinds
         self.label = label
+        self._cache_enabled = False
+        self._snapshot_cache: OrderedDict[tuple[int, int, str], pd.DataFrame | None] = OrderedDict()
+        self._snapshot_cache_size = 512
+        self._consumed_hashes: dict[str, str] = {}
+
+    def enable_cache(self) -> None:
+        """Enable bounded, process-local parquet caching for frozen rebuild inputs."""
+        self._cache_enabled = True
+
+    def disable_cache(self) -> None:
+        """Disable and clear the frozen-input cache."""
+        self._cache_enabled = False
+        self._snapshot_cache.clear()
+        self._consumed_hashes.clear()
+
+    def consumed_hashes(self) -> dict[str, str]:
+        """Return hashes of snapshot files read while frozen-input caching was active."""
+        return dict(sorted(self._consumed_hashes.items()))
+
+    def _cache_put(self, key: tuple[int, int, str], frame: pd.DataFrame | None) -> None:
+        self._snapshot_cache[key] = frame
+        self._snapshot_cache.move_to_end(key)
+        while len(self._snapshot_cache) > self._snapshot_cache_size:
+            self._snapshot_cache.popitem(last=False)
 
     def snapshot_dir(self, season: int, snapshot_week: int) -> Traversable | None:
         """Return the ``week_{NN}/`` directory for ``(season, snapshot_week)``.
@@ -86,16 +112,39 @@ class SnapshotStore:
                 f"unknown {self.label} file_kind: {file_kind!r}; valid kinds: {sorted(self.file_kinds)}"
             )
 
+        cache_key = (season, snapshot_week, file_kind)
+        if self._cache_enabled and cache_key in self._snapshot_cache:
+            cached = self._snapshot_cache[cache_key]
+            self._snapshot_cache.move_to_end(cache_key)
+            return None if cached is None else cached.copy(deep=False)
+
         directory = self.snapshot_dir(season, snapshot_week)
         if directory is None:
+            if self._cache_enabled:
+                self._cache_put(cache_key, None)
             return None
 
         path = directory / self.file_kinds[file_kind]
         if not os.path.exists(path):
+            if self._cache_enabled:
+                self._cache_put(cache_key, None)
             return None
 
         try:
-            return pd.read_parquet(path)
+            frame = pd.read_parquet(path)
+            if self._cache_enabled:
+                local_path = Path(str(path))
+                relative_name = (
+                    f"{self.base_dir}/{season}/{_WEEK_DIR_FMT.format(week=snapshot_week)}/"
+                    f"{self.file_kinds[file_kind]}"
+                )
+                if relative_name not in self._consumed_hashes:
+                    self._consumed_hashes[relative_name] = hashlib.sha256(
+                        local_path.read_bytes()
+                    ).hexdigest()
+                self._cache_put(cache_key, frame)
+                return frame.copy(deep=False)
+            return frame
         except Exception as exc:
             logger.warning(
                 "failed to read %s for season=%s week=%s: %s",

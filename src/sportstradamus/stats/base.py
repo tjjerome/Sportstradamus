@@ -7,6 +7,7 @@ import pickle
 import warnings
 from datetime import date, datetime, timedelta
 from io import StringIO
+from pathlib import Path
 from time import sleep
 
 import line_profiler
@@ -26,6 +27,7 @@ from sportstradamus.helpers import (
     LazyArchive,
     Scrape,
     abbreviations,
+    book_weights,
     combo_props,
     feature_filter,
     get_ev,
@@ -39,8 +41,10 @@ from sportstradamus.helpers import (
 )
 from sportstradamus.helpers.archive import TRAINING_LOOKBACK
 from sportstradamus.helpers.io import read_gamelog
+from sportstradamus.helpers.training_quotes import PROVENANCE_COLUMNS, resolve_training_quote
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.collector_snapshots import DatedSnapshotStore, load_asof_features
+from sportstradamus.stats.model_dependencies import load_model_dependency
 
 # Safety ceiling for comp z-scores. Anything beyond ±5σ is already noise;
 # ±10 is generous and acts as a guard against near-zero (but non-NaN) stds
@@ -459,6 +463,9 @@ class Stats:
         # invalidates in lockstep with ``self.comps``. Lets ``base_profile``
         # and ``get_stats`` skip the Python tuple-loop rebuild per gameday.
         self._comp_pairs_cache: dict = {}
+        self.model_dependency_root: Path | None = None
+        self.snapshot_only_rebuild = False
+        self.model_dependency_inventory: dict[str, str] = {}
 
     def parse_game(self, game):
         """Parse a single game API response and update ``self.gamelog``.
@@ -839,7 +846,7 @@ class Stats:
                 + self.stat_types["receiving"]
             )
             team_stat_types = list(
-                set(self.stat_types["offense"]) | set(self.stat_types["defense"])
+                dict.fromkeys(self.stat_types["offense"] + self.stat_types["defense"])
             )
         elif self.league == "MLB":
             stat_types = self.stat_types["pitching"] + self.stat_types["batting"]
@@ -1002,7 +1009,7 @@ class Stats:
             positionStd = positionGroups[market].mean().std()
             if positionAvg == 0 or positionStd == 0:
                 continue
-            idx = list(
+            idx = sorted(
                 set(positionGroups.groups.keys()).intersection(set(self.playerProfile.index))
             )
             self.playerProfile.loc[idx, "position z"] = (
@@ -1322,7 +1329,7 @@ class Stats:
 
         player_df.index = player_df[self.log_strings["player"]]
         player_df.drop(columns=self.log_strings["player"], inplace=True)
-        player_df = player_df.loc[list(set(player_df.index) & players)]
+        player_df = player_df.loc[sorted(set(player_df.index) & players)]
         player_df = player_df.loc[~player_df.index.duplicated()]
 
         self.profile_market(self.usage_stat, date=date)
@@ -1391,7 +1398,7 @@ class Stats:
             teams = {x["Player"]: x["Team"] for x in offers}
             opponents = {x["Player"]: x["Opponent"] for x in offers}
 
-        players = list(set(players))
+        players = sorted(set(players))
         for player in players.copy():
             if " + " in player.replace(" vs. ", " + "):
                 if player not in teams:
@@ -1967,19 +1974,36 @@ class Stats:
             return False
 
         filename = "_".join([self.league, market]).replace(" ", "-")
-        filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
         if self._volume_model_cache is None:
             self._volume_model_cache = {}
         if filename not in self._volume_model_cache:
-            if os.path.isfile(filepath):
-                with open(filepath, "rb") as infile:
-                    self._volume_model_cache[filename] = pickle.load(infile)
+            dependency_root = getattr(self, "model_dependency_root", None)
+            if dependency_root is not None:
+                dependency = load_model_dependency(dependency_root, self.league, market)
+                self._volume_model_cache[filename] = dependency.payload
+                self.model_dependency_inventory[market] = dependency.sha256
             else:
-                logger.warning(f"{filename} missing")
-                return False
+                filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
+                if os.path.isfile(filepath):
+                    with open(filepath, "rb") as infile:
+                        self._volume_model_cache[filename] = pickle.load(infile)
+                else:
+                    logger.warning(f"{filename} missing")
+                    return False
 
         filedict = self._volume_model_cache[filename]
-        playerStats = playerStats[filedict["expected_columns"]]
+        expected_columns = filedict["expected_columns"]
+        if getattr(self, "snapshot_only_rebuild", False):
+            # A cold downstream rebuild can legitimately predate the first
+            # external feature snapshot. The upstream volume matrix represents
+            # every absent feature as zero when its per-slate records are
+            # consolidated, so reproduce that training-time representation at
+            # dependency inference instead of failing on the absent columns.
+            playerStats = playerStats.reindex(columns=expected_columns, fill_value=0)
+        else:
+            # Keep serving strict: an unexpected live schema gap must not be
+            # silently converted into a historical-snapshot fallback.
+            playerStats = playerStats[expected_columns]
         model = filedict["model"]
         dist = filedict["distribution"]
 
@@ -2008,6 +2032,26 @@ class Stats:
             columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True
         )
         return True
+
+    def _training_dependency_markets(self, target_market: str) -> tuple[str, ...]:
+        """Return volume artifacts required to build ``target_market``."""
+        if target_market in self.volume_stats:
+            return ()
+        return tuple(self.volume_stats)
+
+    def preflight_training_dependencies(self, target_market: str) -> None:
+        """Validate every volume artifact before a full rebuild enters its date loop."""
+        if self.model_dependency_root is None:
+            return
+        failures = []
+        for market in self._training_dependency_markets(target_market):
+            try:
+                dependency = load_model_dependency(self.model_dependency_root, self.league, market)
+                self.model_dependency_inventory[market] = dependency.sha256
+            except (FileNotFoundError, ValueError) as exc:
+                failures.append(str(exc))
+        if failures:
+            raise RuntimeError("matrix dependency preflight failed:\n- " + "\n- ".join(failures))
 
     def get_volume_stats(self, offers, date=datetime.today().date()):
         return
@@ -2072,42 +2116,39 @@ class Stats:
             self.get_volume_stats(offers, gameDate)
 
     def _resolve_player_market_odds(self, stats, market, date, target_at):
-        evs = []
-        lines = []
-        odds = []
-        archived = []
+        records = []
+        cv = stat_cv[self.league].get(market, 1)
+        dist = stat_dist.get(self.league, {}).get(market, "Gamma")
+        weights = book_weights.get(self.league, {}).get(market, {})
+        quote_inputs = archive.get_training_quote_inputs(
+            self.league,
+            market,
+            date,
+            list(stats.index),
+            at=target_at,
+        )
         for player in stats.index:
-            a = True
-            ev = archive.get_ev(self.league, market, date, player, at=target_at)
-            line = archive.get_line(self.league, market, date, player, at=target_at)
-            if np.isnan(ev):
-                ev = self.check_combo_markets(market, player, date)
-            if line <= 0:
-                a = False
-                line = np.max([stats.loc[player, "Avg10"], 0.5])
-            if ev <= 0:
-                ev = get_ev(
-                    line,
-                    0.5,
-                    stat_cv[self.league].get(market, 1),
-                    dist=stat_dist.get(self.league, {}).get(market, "Gamma"),
-                )
-
-            lines.append(line)
-            _cv = stat_cv[self.league].get(market, 1)
-            _dist = stat_dist.get(self.league, {}).get(market, "Gamma")
-            # Shape-free: reads the stored under_prob directly rather than inverting ev through
-            # get_odds, so the training feature is distribution-family-agnostic and Jensen-free.
-            # Falls back to get_odds when under_prob was not stored (pre-migration rows).
-            under = archive.get_composite_under_prob(
-                self.league, market, date, player, at=target_at
+            rows, legacy_line = quote_inputs[player]
+            quote_kwargs = {
+                "legacy_line": legacy_line,
+                "fallback_line": max(float(stats.loc[player, "Avg10"]), 0.5),
+                "dist": dist,
+                "cv": cv,
+                "weights": weights,
+            }
+            quote = resolve_training_quote(
+                rows,
+                fallback_ev=None,
+                **quote_kwargs,
             )
-            if np.isnan(under):
-                under = get_odds(line, ev, _dist, cv=_cv)
-            odds.append(1 - under)
-            evs.append(ev)
-            archived.append(a)
-        return lines, odds, evs, archived
+            if quote.source in ("neutral_fallback", "model_fallback"):
+                quote = resolve_training_quote(
+                    rows,
+                    fallback_ev=self.check_combo_markets(market, player, date),
+                    **quote_kwargs,
+                )
+            records.append(quote.as_record())
+        return pd.DataFrame(records, index=stats.index)
 
     def get_training_matrix(self, market, cutoff_date=None):
         """Retrieves the training data matrix and target labels for a specified market.
@@ -2119,6 +2160,7 @@ class Stats:
             X (pd.DataFrame): The training data matrix.
             y (pd.DataFrame): The target labels.
         """
+        self.preflight_training_dependencies(market)
         matrix = []
         mlb_bookless = []
 
@@ -2167,6 +2209,14 @@ class Stats:
             self._dispatch_volume_stats(offers, gameDate, market)
 
             stats = self.get_stats(market, offers, gameDate)
+            # A historical gameday can have result rows but no reconstructable
+            # as-of feature rows (for example, every listed player fell off the
+            # snapshot depth chart).  Such a day contributes no observations.
+            # Skip it before joining quote columns: an empty quote frame has no
+            # ``Archived`` column and must not turn an expected data gap into a
+            # full-rebuild failure.
+            if stats.empty:
+                continue
             usage = players[usage_stat]
             usage.index = players[self.log_strings["player"]]
             usage = usage.loc[stats.index]
@@ -2182,19 +2232,11 @@ class Stats:
             game_time = datetime.combine(gameDate, datetime.min.time()) + timedelta(hours=20)
             target_at = game_time - TRAINING_LOOKBACK
 
-            lines, odds, evs, archived = self._resolve_player_market_odds(
-                stats, market, date, target_at
-            )
-
-            stats["Line"] = lines
-            stats["Odds"] = odds
-            stats["EV"] = evs
+            stats = stats.join(self._resolve_player_market_odds(stats, market, date, target_at))
             stats = stats.join(offers_df["Result"])
             stats["Player"] = stats.index
             stats["Date"] = date
             stats["GameTime"] = game_time
-            stats["Archived"] = archived
-
             if stats["Home"].dtype == bool:
                 if self.league == "MLB":
                     # Book-first: keep only real-odds rows so book-quoted MLB cells stay
@@ -2214,9 +2256,12 @@ class Stats:
             # returning an empty frame. Empty for every other league (mlb_bookless stays []).
             matrix = mlb_bookless
 
-        return (
-            pd.DataFrame(matrix).fillna(0).infer_objects(copy=False).replace([np.inf, -np.inf], 0)
-        )
+        frame = pd.DataFrame(matrix)
+        if frame.empty:
+            return frame
+        fill_columns = [column for column in frame if column not in PROVENANCE_COLUMNS]
+        frame.loc[:, fill_columns] = frame.loc[:, fill_columns].fillna(0)
+        return frame.infer_objects(copy=False).replace([np.inf, -np.inf], 0)
 
     def trim_gamelog(self):
         """Trims the gamelog to the league's training-window rows plus one year."""

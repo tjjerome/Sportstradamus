@@ -18,6 +18,7 @@ from sportstradamus.prediction.model_prob import (
     _two_part_candidate_state,
 )
 from sportstradamus.training.group_conditional_cdf import (
+    AFFINE_SCHEMA_VERSION,
     AffinePredictive,
     apply_affine_groupcdf,
     apply_two_part_line,
@@ -408,6 +409,61 @@ def test_rushing_candidate_live_distribution_matches_shared_application():
     np.testing.assert_allclose(served_mean, expected.conditional_mean)
     np.testing.assert_allclose(served_over, expected.pooled_over)
     np.testing.assert_allclose(frame["Projection"], expected.marginal_mean)
+
+
+def test_schema2_affine_serving_uses_explicit_authenticity_and_unseen_fallback():
+    calibration = _affine_candidate_blob()["calibration"]
+    calibration["schema_version"] = AFFINE_SCHEMA_VERSION
+    calibration["position_codes"] = [1, 3]
+    calibration["fallback"] = {
+        "kind": "model_only",
+        "unseen_position": "raw_cdf_unpooled",
+        "nonauthentic_quote": "candidate_unpooled",
+    }
+    calibration["affine_bounds"] = {
+        "kind": "train_scale_affine_bounds",
+        "train_abs_p95": 20.0,
+        "intercept": [-40.0, 40.0],
+        "slope": [0.5, 1.5],
+    }
+    calibration["fit_audit"] = {
+        "expected_position_codes": [1, 3],
+        "outer_folds": [{} for _ in range(5)],
+    }
+    frame = pd.DataFrame(
+        {
+            "Player position": [1, 99],
+            "Line": [20.5, 22.5],
+            "Market EV": [0.48, 0.50],
+            "QuoteAuthenticity": ["authentic", "synthetic"],
+            "Model Sigma": [12.0, 12.0],
+            "Model Skew": [0.5, 0.5],
+            "Model Gate": [0.08, 0.08],
+        }
+    )
+
+    _mean, served_over = _apply_affine_candidate_distribution(
+        frame,
+        np.array([25.0, 25.0]),
+        calibration,
+    )
+    predictive = AffinePredictive(
+        np.array([25.0, 25.0]) * 0.92,
+        np.array([12.0, 12.0]),
+        np.array([0.5, 0.5]),
+        np.array([0.08, 0.08]),
+    )
+    expected = apply_affine_groupcdf(
+        calibration,
+        predictive,
+        np.array([20.5, 22.5]),
+        np.array([0.48, 0.50]),
+        np.array([1, 99]),
+        np.array([True, False]),
+    )
+
+    np.testing.assert_array_equal(served_over, expected.pooled_over)
+    assert served_over[1] == expected.candidate_over[1]
 
 
 def test_rushing_candidate_live_prediction_routes_qb_rb_experts(monkeypatch):

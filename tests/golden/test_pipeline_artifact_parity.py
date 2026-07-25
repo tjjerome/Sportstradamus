@@ -11,9 +11,9 @@ from sportstradamus.training import pipeline as pipe
 from sportstradamus.training.model_strategy import (
     MODEL_STRATEGY_MODEL_KEY,
     build_artifact_identity,
+    get_strategy,
     validate_strategy_artifacts,
 )
-from sportstradamus.training.model_strategy import get_strategy
 from sportstradamus.training.scorecard import _brier_inputs, _pred_cdf_pmf
 
 SERVED_MEAN = np.array([2.4, 7.8])
@@ -115,6 +115,10 @@ def test_persist_converts_internal_book_over_to_scorecard_under(monkeypatch, tmp
         ),
         "players_test": None,
         "dates_test": np.array(["2026-01-04", "2026-01-11"]),
+        "quote_authenticity_test": pd.Series(
+            ["authentic", "synthetic"],
+            index=index,
+        ),
     }
     model_over = np.array([0.4, 0.7])
     matrix_hash = "b" * 64
@@ -163,10 +167,11 @@ def test_persist_converts_internal_book_over_to_scorecard_under(monkeypatch, tmp
 
     persisted = pd.read_csv(tmp_path / "test_sets" / "NFL_artifact_parity.csv")
     np.testing.assert_allclose(persisted["Odds"], 1.0 - book_over)
+    assert persisted["QuoteAuthenticity"].tolist() == ["authentic", "synthetic"]
     brier_inputs = _brier_inputs(persisted)
     assert brier_inputs is not None
     _, recovered_book_over, _, _ = brier_inputs
-    np.testing.assert_allclose(recovered_book_over, book_over)
+    np.testing.assert_allclose(recovered_book_over, book_over[:1])
     saved_model = pd.read_pickle(tmp_path / "models" / "NFL_artifact_parity.mdl")
     identity = validate_strategy_artifacts(
         get_strategy("NegBin"),
@@ -191,9 +196,9 @@ def test_split_metadata_stays_aligned_when_prediction_sorts_test_rows(monkeypatc
         def get_stat_columns(_market):
             return ["Home", "Feature"]
 
-    # Descending labels make the random test split's positional metadata order
-    # differ from the sorted order enforced by ``_step_predict_splits``.
-    index = pd.Index(range(200, 180, -1))
+    # Descending labels make the held-out metadata order differ from the sorted
+    # order enforced by ``_step_predict_splits``.
+    index = pd.Index(range(300, 200, -1))
     matrix = pd.DataFrame(
         {
             "Date": pd.date_range("2026-01-01", periods=len(index)),
@@ -229,6 +234,42 @@ def test_split_metadata_stays_aligned_when_prediction_sorts_test_rows(monkeypatc
     expected = matrix.loc[persisted.index, ["Player", "Date"]]
     pd.testing.assert_series_equal(persisted["Player"], expected["Player"])
     pd.testing.assert_series_equal(persisted["Date"], expected["Date"])
+
+
+def test_validation_assignment_is_stable_when_held_out_rows_are_added():
+    class _StatData:
+        @staticmethod
+        def get_stat_columns(_market):
+            return ["Home", "Feature"]
+
+    def matrix(rows):
+        return pd.DataFrame(
+            {
+                "Date": pd.date_range("2025-01-01", periods=rows),
+                "Player": [f"player-{i}" for i in range(rows)],
+                "Result": np.arange(rows, dtype=float),
+                "Home": [i % 2 for i in range(rows)],
+                "Feature": np.arange(rows, dtype=float),
+                "Line": np.arange(rows, dtype=float) + 0.5,
+                "Odds": np.full(rows, 0.55),
+                "EV": np.arange(rows, dtype=float) + 1.0,
+            }
+        )
+
+    original = pipe._step_build_splits(matrix(100), _StatData(), "receiving yards")
+    extended = pipe._step_build_splits(matrix(101), _StatData(), "receiving yards")
+
+    original_roles = {
+        **dict.fromkeys(original["X_test"].index, "test"),
+        **dict.fromkeys(original["X_validation"].index, "validation"),
+    }
+    extended_roles = {
+        **dict.fromkeys(extended["X_test"].index, "test"),
+        **dict.fromkeys(extended["X_validation"].index, "validation"),
+    }
+    shared = original_roles.keys() & extended_roles.keys()
+    assert shared
+    assert all(original_roles[index] == extended_roles[index] for index in shared)
 
 
 @pytest.mark.parametrize("dist", ["NegBin", "ZINB", "DPO"])

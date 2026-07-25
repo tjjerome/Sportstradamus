@@ -21,7 +21,8 @@ from sportstradamus.training.group_conditional_cdf.probability_pool import Proba
 TWO_PART_STRATEGY_NAME = "role-position-two-part-groupcdf-fixedlinear-v3"
 TWO_PART_SCHEMA_VERSION = 3
 AFFINE_STRATEGY_NAME = "affine-groupcdf-bookpool-v1"
-AFFINE_SCHEMA_VERSION = 1
+LEGACY_AFFINE_SCHEMA_VERSION = 1
+AFFINE_SCHEMA_VERSION = 2
 
 ROLE_VALUES: tuple[str, str] = ("low", "high")
 TWO_PART_POSITION_CODES: tuple[int, int, int] = (2, 3, 4)
@@ -141,6 +142,12 @@ class AffineCalibrationBlob(TypedDict):
     position_cdf: dict[str, GroupCdfBlob]
     temperature: float
     probability_pool: ProbabilityPoolBlob
+    # Schema 2 persists the complete generalized routing and fit contract.
+    # Their absence identifies a legacy schema-1 QB/RB blob.
+    position_codes: NotRequired[list[int]]
+    fallback: NotRequired[dict[str, object]]
+    affine_bounds: NotRequired[dict[str, object]]
+    fit_audit: NotRequired[dict[str, object]]
 
 
 @dataclass(frozen=True)

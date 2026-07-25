@@ -49,6 +49,16 @@ def _explicit_boolean_mask(values, expected: bool) -> np.ndarray:
     )
 
 
+def _explicit_quote_authenticity_mask(values, index: pd.Index) -> np.ndarray:
+    """Pool only rows whose aligned provenance explicitly says ``authentic``."""
+    series = pd.Series(values).reindex(index)
+    if series.isna().any():
+        raise ValueError("quote authenticity does not align to its split")
+    if not series.isin(("authentic", "derived", "synthetic")).all():
+        raise ValueError("quote authenticity contains an unsupported value")
+    return series.eq("authentic").to_numpy(dtype=bool)
+
+
 def _two_part_gate_vector(value, length: int) -> np.ndarray:
     if value is None:
         return np.zeros(length, dtype=float)
@@ -212,7 +222,15 @@ def _two_part_candidate_oof_audit(
     }
     failed = [name for name, passed in guards.items() if not passed]
     if failed:
-        raise ValueError("two-part candidate failed validation guard(s): " + ", ".join(failed))
+        diagnostics = {
+            "position_positive_pit_ks": pits["position_positive"],
+            "citl_ratio_ci": audit["gate6"]["citl_ratio_ci"],
+        }
+        raise ValueError(
+            "two-part candidate failed validation guard(s): "
+            + ", ".join(failed)
+            + f"; diagnostics={diagnostics!r}"
+        )
     return audit
 
 
@@ -316,16 +334,24 @@ def _step_apply_two_part_groupcdf_candidate(
         mean_test, sigma_test, alpha_test, gate_test, np.floor(line_test + 1.0)
     )
 
-    authentic_val = _explicit_boolean_mask(
-        _required_series("archived_validation", index_val, allow_missing=True), True
-    ) & _explicit_boolean_mask(
-        _required_series("odds_synthetic_validation", index_val, allow_missing=True), False
-    )
-    authentic_test = _explicit_boolean_mask(
-        _required_series("archived_test", index_test, allow_missing=True), True
-    ) & _explicit_boolean_mask(
-        _required_series("odds_synthetic_test", index_test, allow_missing=True), False
-    )
+    if splits.get("quote_authenticity_validation") is not None:
+        authenticity_val = _required_series("quote_authenticity_validation", index_val)
+        authenticity_test = _required_series("quote_authenticity_test", index_test)
+        authentic_val = _explicit_quote_authenticity_mask(authenticity_val, index_val)
+        authentic_test = _explicit_quote_authenticity_mask(authenticity_test, index_test)
+    else:
+        # Legacy matrices retain their old compatibility projection. New
+        # provenance-bearing matrices never infer authenticity from it.
+        authentic_val = _explicit_boolean_mask(
+            _required_series("archived_validation", index_val, allow_missing=True), True
+        ) & _explicit_boolean_mask(
+            _required_series("odds_synthetic_validation", index_val, allow_missing=True), False
+        )
+        authentic_test = _explicit_boolean_mask(
+            _required_series("archived_test", index_test, allow_missing=True), True
+        ) & _explicit_boolean_mask(
+            _required_series("odds_synthetic_test", index_test, allow_missing=True), False
+        )
     outcome = (result >= line_val).astype(float)
     residual_positions = tuple(context["boundary_residual_positions"])
     support_audit = _two_part_nested_support_audit(

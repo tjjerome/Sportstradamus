@@ -23,7 +23,7 @@ from sportstradamus.training.group_conditional_cdf._contracts import (
     TWO_PART_STRATEGY_NAME,
 )
 
-GroupingKind = Literal["categorical_code", "role_by_position"]
+GroupingKind = Literal["categorical_code", "role_by_position", "role_only"]
 LambdaMode = Literal["shared", "per_group"]
 PoolWeight = Literal["fixed_0.8", "fit"]
 MapImpl = Literal["isotonic_pit", "group_empirical_cdf"]
@@ -92,7 +92,13 @@ TWO_PART_ROLES = ROLE_VALUES
 
 def discover_codes(position: np.ndarray) -> tuple[int, ...]:
     """Recover the sorted integer group codes present in the training column."""
-    return tuple(int(code) for code in np.unique(np.asarray(position, dtype=float).astype(int)))
+    raw = np.asarray(position, dtype=float)
+    if raw.ndim != 1 or raw.size == 0 or not np.isfinite(raw).all():
+        raise ValueError("position must be a nonempty finite one-dimensional array")
+    integer = raw.astype(int)
+    if not np.array_equal(raw, integer):
+        raise ValueError("position must contain integer league roster codes")
+    return tuple(int(code) for code in np.unique(integer))
 
 
 def positive_groups(

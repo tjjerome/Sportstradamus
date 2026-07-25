@@ -38,6 +38,7 @@ import pandas as pd
 from sportstradamus.helpers.config import book_gate, book_weights, stat_cv, stat_dist
 from sportstradamus.helpers.distributions import get_ev, get_odds, no_vig_odds
 from sportstradamus.helpers.text import remove_accents
+from sportstradamus.helpers.training_quotes import ArchivedBookQuote
 
 
 @dataclasses.dataclass
@@ -223,6 +224,9 @@ class Archive:
 
     @staticmethod
     def _connect_once(db_path: Path) -> duckdb.DuckDBPyConnection:
+        read_only = os.environ.get("SPORTSTRADAMUS_ARCHIVE_READ_ONLY") == "1"
+        if read_only:
+            return duckdb.connect(str(db_path), read_only=True)
         # DuckDB <=1.1.x can leave a .wal that replays a bare CREATE TABLE
         # against an already-checkpointed catalog after a hard kill — the
         # connection then refuses to open at all. Quarantine the stale WAL
@@ -298,9 +302,10 @@ class Archive:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._db_path = db_path
         self._connection = self._connect_with_wal_recovery(db_path)
-        self._connection.execute(_SCHEMA_DDL)
-        self._auto_migrate_observed_at()
-        self._auto_migrate_shapefree_columns()
+        if os.environ.get("SPORTSTRADAMUS_ARCHIVE_READ_ONLY") != "1":
+            self._connection.execute(_SCHEMA_DDL)
+            self._auto_migrate_observed_at()
+            self._auto_migrate_shapefree_columns()
 
         self.default_totals = {
             "MLB": 4.671,
@@ -418,8 +423,112 @@ class Archive:
         if at is not None:
             sql += " AND observed_at <= ?"
             params.append(at)
-        sql += ") WHERE rn = 1"
+        # The weighted reducers consume this sequence directly. SQL row order is
+        # otherwise undefined, and changing the book iteration order can move a
+        # floating-point weighted mean by a few ULPs across independent rebuilds.
+        sql += ") WHERE rn = 1 ORDER BY book"
         return [(book, val) for book, val in self._connection.execute(sql, params).fetchall()]
+
+    def get_training_book_quotes(
+        self,
+        league: str,
+        market: str,
+        date: str | datetime.date,
+        entity: str,
+        *,
+        at: datetime.datetime | None = None,
+    ) -> list[ArchivedBookQuote]:
+        """Return one coherent latest row per book for pure training resolution.
+
+        Line, direct under-probability, EV, and observation time come from the
+        same physical archive row. Stable tie-breaking and final book ordering
+        keep weighted reductions byte-reproducible across rebuild processes.
+        """
+        d = _safe_date(date)
+        if d is None:
+            return []
+        params: list = [league, market, d, entity]
+        sql = (
+            "SELECT book, ev, under_prob, line, observed_at FROM ("
+            "  SELECT book, ev, under_prob, line, observed_at, "
+            "         ROW_NUMBER() OVER ("
+            "             PARTITION BY book "
+            "             ORDER BY observed_at DESC, line DESC NULLS LAST, "
+            "                      under_prob DESC NULLS LAST, ev DESC NULLS LAST"
+            "         ) AS rn "
+            "  FROM odds "
+            "  WHERE league=? AND market=? AND game_date=? AND entity=?"
+        )
+        if at is not None:
+            sql += " AND observed_at <= ?"
+            params.append(at)
+        sql += ") WHERE rn = 1 ORDER BY book"
+        return [
+            ArchivedBookQuote(book, ev, under_prob, line, observed_at)
+            for book, ev, under_prob, line, observed_at in self._connection.execute(
+                sql, params
+            ).fetchall()
+        ]
+
+    def get_training_quote_inputs(
+        self,
+        league: str,
+        market: str,
+        date: str | datetime.date,
+        entities: list[str],
+        *,
+        at: datetime.datetime | None = None,
+    ) -> dict[str, tuple[list[ArchivedBookQuote], float]]:
+        """Batch coherent book rows and legacy lines for an entire training slate."""
+        d = _safe_date(date)
+        ordered_entities = sorted(set(entities))
+        if d is None or not ordered_entities:
+            return {}
+        placeholders = ",".join("?" for _ in ordered_entities)
+        odds_params: list = [league, market, d, *ordered_entities]
+        odds_sql = (
+            "SELECT entity, book, ev, under_prob, line, observed_at FROM ("
+            "  SELECT entity, book, ev, under_prob, line, observed_at, "
+            "         ROW_NUMBER() OVER ("
+            "             PARTITION BY entity, book "
+            "             ORDER BY observed_at DESC, line DESC NULLS LAST, "
+            "                      under_prob DESC NULLS LAST, ev DESC NULLS LAST"
+            "         ) AS rn "
+            "  FROM odds "
+            f"  WHERE league=? AND market=? AND game_date=? AND entity IN ({placeholders})"
+        )
+        if at is not None:
+            odds_sql += " AND observed_at <= ?"
+            odds_params.append(at)
+        odds_sql += ") WHERE rn = 1 ORDER BY entity, book"
+
+        grouped: dict[str, list[ArchivedBookQuote]] = {entity: [] for entity in ordered_entities}
+        for entity, book, ev, under_prob, line, observed_at in self._connection.execute(
+            odds_sql, odds_params
+        ).fetchall():
+            grouped[entity].append(ArchivedBookQuote(book, ev, under_prob, line, observed_at))
+
+        line_params: list = [league, market, d, *ordered_entities]
+        line_sql = (
+            "SELECT DISTINCT entity, line FROM lines "
+            f"WHERE league=? AND market=? AND game_date=? AND entity IN ({placeholders})"
+        )
+        if at is not None:
+            line_sql += " AND observed_at <= ?"
+            line_params.append(at)
+        lines: dict[str, list[float]] = {entity: [] for entity in ordered_entities}
+        for entity, line in self._connection.execute(line_sql, line_params).fetchall():
+            if line is not None:
+                lines[entity].append(float(line))
+
+        inputs = {}
+        for entity in ordered_entities:
+            values = lines[entity]
+            legacy_line = float(np.floor(2 * np.median(values)) / 2) if values else 0.0
+            if np.isnan(legacy_line):
+                legacy_line = 0.0
+            inputs[entity] = (grouped[entity], legacy_line)
+        return inputs
 
     def get_ev(self, league, market, date, player, *, at: datetime.datetime | None = None):
         """Weighted-average player-prop EV across books for one slate entry.

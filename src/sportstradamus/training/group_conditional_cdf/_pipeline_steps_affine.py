@@ -10,6 +10,7 @@ import pandas as pd
 from sportstradamus.training.group_conditional_cdf import fit_affine_groupcdf
 from sportstradamus.training.group_conditional_cdf._apply import apply_affine_groupcdf
 from sportstradamus.training.group_conditional_cdf._contracts import (
+    AFFINE_SCHEMA_VERSION,
     AffineCalibrationFit,
     AffinePredictive,
 )
@@ -19,6 +20,8 @@ from sportstradamus.training.group_conditional_cdf._pipeline_steps_shared import
     _validation_split_fingerprint,
 )
 from sportstradamus.training.scorecard import (
+    _bootstrap_mean_ci,
+    _bootstrap_mean_ci_clustered,
     _bootstrap_ratio_ci_clustered,
     _gate4_pit_ks_threshold,
     _gate5_ece_debiased,
@@ -28,15 +31,49 @@ from sportstradamus.training.scorecard import (
 from sportstradamus.training.structural_strategies import AFFINE_STRATEGY
 
 
+def _affine_authenticity_mask(splits: dict, split: str, index: pd.Index) -> np.ndarray:
+    """Recover an explicit row-aligned authenticity mask for schema-2 pooling."""
+    quote_key = f"quote_authenticity_{split}"
+    if splits.get(quote_key) is not None:
+        values = pd.Series(splits[quote_key]).reindex(index)
+        if values.isna().any() or not values.isin(("authentic", "derived", "synthetic")).all():
+            raise ValueError("affine quote authenticity is missing, unaligned, or unsupported")
+        return values.eq("authentic").to_numpy(dtype=bool)
+    archived = pd.Series(splits.get(f"archived_{split}"), index=index).reindex(index)
+    synthetic = pd.Series(splits.get(f"odds_synthetic_{split}"), index=index).reindex(index)
+    if archived.isna().any() or synthetic.isna().any():
+        raise ValueError("affine calibration requires explicit quote provenance")
+    archived_bool = archived.map(lambda value: isinstance(value, (bool, np.bool_)) and bool(value))
+    synthetic_false = synthetic.map(
+        lambda value: isinstance(value, (bool, np.bool_)) and not bool(value)
+    )
+    return (archived_bool & synthetic_false).to_numpy(dtype=bool)
+
+
 def _affine_candidate_oof_audit(
     fit: AffineCalibrationFit,
     splits: dict,
     positions: np.ndarray,
     experts: dict[int, str],
+    authentic: np.ndarray,
 ) -> dict:
     """Validate the affine candidate without consulting the held-out test outcomes."""
     # style: allow-complexity -- aggregates independent out-of-fold guards on the affine candidate
-    result, players, outcome, _book, brier_delta, row_ci, player_ci = _oof_brier_arrays(fit, splits)
+    result, players, outcome, _book, brier_delta, _row_ci, _player_ci = _oof_brier_arrays(
+        fit, splits
+    )
+    book_evidence = authentic & np.isin(positions, tuple(experts))
+    if not np.any(book_evidence):
+        raise ValueError("affine validation has no authentic eligible book evidence")
+    row_ci = _bootstrap_mean_ci(
+        brier_delta[book_evidence],
+        np.random.default_rng(1729),
+    )
+    player_ci = _bootstrap_mean_ci_clustered(
+        brier_delta[book_evidence],
+        players[book_evidence],
+        np.random.default_rng(1729),
+    )
 
     pit_global = float(np.mean([_ks_uniform(draw) for draw in fit.oof_pit_draws]))
     pit_by_position = {
@@ -75,7 +112,8 @@ def _affine_candidate_oof_audit(
         "validation_rows": len(result),
         "validation_players": int(pd.Series(players).nunique()),
         "split_fingerprint_sha256": _validation_split_fingerprint(splits),
-        "brier_delta": float(brier_delta.mean()),
+        "brier_rows": int(book_evidence.sum()),
+        "brier_delta": float(brier_delta[book_evidence].mean()),
         "brier_delta_row_ci": tuple(float(value) for value in row_ci),
         "brier_delta_player_ci": tuple(float(value) for value in player_ci),
         "pit_ks": pit_global,
@@ -126,6 +164,8 @@ def _step_apply_affine_groupcdf_candidate(
     positions_val = context["positions"]["validation"].reindex(index_val).to_numpy(dtype=float)
     positions_test = context["positions"]["test"].reindex(index_test).to_numpy(dtype=float)
     players_val = splits["players_validation"].reindex(index_val).astype(str).to_numpy()
+    authentic_val = _affine_authenticity_mask(splits, "validation", index_val)
+    authentic_test = _affine_authenticity_mask(splits, "test", index_test)
 
     def _gate_vector(value, length: int) -> np.ndarray:
         if value is None:
@@ -156,17 +196,26 @@ def _step_apply_affine_groupcdf_candidate(
         splits["y_validation"]["Result"].reindex(index_val).to_numpy(dtype=float),
         splits["B_validation"]["Line"].reindex(index_val).to_numpy(dtype=float),
         splits["B_validation"]["Odds"].reindex(index_val).to_numpy(dtype=float),
+        authentic_val,
         positions_val,
         players_val,
+        expected_codes=tuple(context["experts"]),
     )
     experts: dict[int, str] = context["experts"]
-    audit = _affine_candidate_oof_audit(fit, splits, positions_val.astype(int), experts)
+    audit = _affine_candidate_oof_audit(
+        fit,
+        splits,
+        positions_val.astype(int),
+        experts,
+        authentic_val,
+    )
     validation_output = apply_affine_groupcdf(
         fit.blob,
         predictive_val,
         splits["B_validation"]["Line"].reindex(index_val).to_numpy(dtype=float),
         splits["B_validation"]["Odds"].reindex(index_val).to_numpy(dtype=float),
         positions_val,
+        authentic_val,
     )
     test_output = apply_affine_groupcdf(
         fit.blob,
@@ -174,6 +223,7 @@ def _step_apply_affine_groupcdf_candidate(
         splits["B_test"]["Line"].reindex(index_test).to_numpy(dtype=float),
         splits["B_test"]["Odds"].reindex(index_test).to_numpy(dtype=float),
         positions_test,
+        authentic_test,
     )
 
     fused["weighted_mean"] = test_output.conditional_mean
@@ -204,7 +254,7 @@ def _step_apply_affine_groupcdf_candidate(
                 }
             ),
             "structural_calibration_blob": {
-                "schema_version": 1,
+                "schema_version": AFFINE_SCHEMA_VERSION,
                 "slug": AFFINE_STRATEGY,
                 "status": "active",
                 "kill_reason": None,

@@ -515,16 +515,29 @@ def _calibration_inputs(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray] | Non
 
 
 def _priced_rows(df: pd.DataFrame) -> pd.DataFrame | None:
-    """Rows usable for the priced Brier gates: finite P, Odds, Line, and outcome.
+    """Rows usable for the priced Brier gates: authentic, finite book evidence.
 
     The single source of truth for which test rows enter Gate 1, so ancillary
     columns (e.g. Player for the clustered bootstrap) align to the same rows.
+    Provenance-bearing artifacts fail closed to explicit authentic quotes;
+    legacy artifacts without provenance retain their historical finite-price
+    behavior.
     """
     if "Odds" not in df.columns:
         return None
     if not {"P", "Odds", "Line"}.issubset(df.columns):
         return None
-    sub = df[["P", "Odds", "Line", ACTUAL_COL]].replace([np.inf, -np.inf], np.nan).dropna()
+    columns = ["P", "Odds", "Line", ACTUAL_COL]
+    if "QuoteAuthenticity" in df.columns:
+        columns.append("QuoteAuthenticity")
+    sub = df[columns].replace([np.inf, -np.inf], np.nan).dropna()
+    if "QuoteAuthenticity" in sub.columns:
+        allowed = ("authentic", "derived", "synthetic")
+        if not sub["QuoteAuthenticity"].isin(allowed).all():
+            raise ValueError("scorecard received invalid quote authenticity")
+        sub = sub.loc[sub["QuoteAuthenticity"].eq("authentic")].drop(
+            columns="QuoteAuthenticity"
+        )
     return sub if len(sub) else None
 
 

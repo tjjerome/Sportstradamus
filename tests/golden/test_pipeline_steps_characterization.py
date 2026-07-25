@@ -142,6 +142,44 @@ def test_fuse_skewnormal_with_gate(fit_calls):
     )
 
 
+def test_fuse_skewnormal_uses_only_authentic_book_evidence(monkeypatch):
+    decoded = _decoded()
+    splits = _splits()
+    authentic = np.array([True, False, True, False, True, False, True, False])
+    splits["quote_authenticity_test"] = pd.Series(
+        np.where(authentic, "authentic", "synthetic"),
+        index=splits["B_test"].index,
+    )
+    splits["quote_authenticity_validation"] = pd.Series(
+        np.where(authentic, "authentic", "derived"),
+        index=splits["B_validation"].index,
+    )
+    fit_lengths = []
+
+    def _fit(*args, **_kwargs):
+        fit_lengths.append(len(args[1]))
+        return 0.5
+
+    monkeypatch.setattr(pipe.calibration, "fit_blend_weight", _fit)
+    out = pipe._step_fuse_predictions(decoded, splits, "SkewNormal", 0.9, 0.0)
+
+    assert fit_lengths == [int(authentic.sum())]
+    np.testing.assert_allclose(out["weighted_mean"][~authentic], decoded["ev"][~authentic])
+    np.testing.assert_allclose(
+        out["weighted_mean_val"][~authentic],
+        decoded["ev_validation"][~authentic],
+    )
+    np.testing.assert_allclose(
+        out["sn_sigma_blend_test"][~authentic],
+        decoded["sn_sigma_test"][~authentic],
+    )
+    np.testing.assert_allclose(
+        out["sn_alpha_blend_test"][~authentic],
+        decoded["sn_alpha_test"][~authentic],
+    )
+    assert not np.allclose(out["weighted_mean"][authentic], decoded["ev"][authentic])
+
+
 def test_fuse_negbin(fit_calls):
     out = pipe._step_fuse_predictions(_decoded(), _splits(), "NegBin", 0.9, 0.0)
     assert fit_calls[0]["base_dist"] == "NegBin"

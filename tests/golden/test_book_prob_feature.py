@@ -11,6 +11,7 @@ import pytest
 
 from sportstradamus.helpers import config
 from sportstradamus.helpers.distributions import get_odds
+from sportstradamus.helpers.training_quotes import ArchivedBookQuote
 from sportstradamus.stats import base as base_mod
 
 
@@ -18,14 +19,15 @@ class _FakeArchive:
     def __init__(self, ev, line, under):
         self._ev, self._line, self._under = ev, line, under
 
-    def get_ev(self, *a, **k):
-        return self._ev
+    def get_training_book_quotes(self, *a, **k):
+        return [ArchivedBookQuote("book", self._ev, self._under, self._line, None)]
 
     def get_line(self, *a, **k):
         return self._line
 
-    def get_composite_under_prob(self, *a, **k):
-        return self._under
+    def get_training_quote_inputs(self, _league, _market, _date, entities, **kwargs):
+        rows = [ArchivedBookQuote("book", self._ev, self._under, self._line, None)]
+        return dict.fromkeys(entities, (rows, self._line))
 
 
 class _Stub:
@@ -45,13 +47,16 @@ def _run(monkeypatch, ev, line, under):
 
 def test_feature_uses_stored_under_prob(monkeypatch):
     """A real consensus under_prob feeds 1 - p_under directly, not the get_odds reconstruction."""
-    _, odds, _, _ = _run(monkeypatch, ev=2.4, line=1.5, under=0.55)
-    assert odds[0] == pytest.approx(1 - 0.55)
+    quote = _run(monkeypatch, ev=2.4, line=1.5, under=0.55).iloc[0]
+    assert quote["Odds"] == pytest.approx(1 - 0.55)
+    assert quote["QuoteAuthenticity"] == "authentic"
 
 
 def test_feature_falls_back_to_get_odds_when_absent(monkeypatch):
     """No shape-free quote (NaN) -> the legacy symmetric get_odds(line, ev) feature."""
-    _, odds, _, _ = _run(monkeypatch, ev=2.4, line=1.5, under=np.nan)
+    quote = _run(monkeypatch, ev=2.4, line=1.5, under=np.nan).iloc[0]
     cv = config.stat_cv["WNBA"].get("AST", 1)
     dist = config.stat_dist.get("WNBA", {}).get("AST", "Gamma")
-    assert odds[0] == pytest.approx(1 - get_odds(1.5, 2.4, dist, cv=cv))
+    assert quote["Odds"] == pytest.approx(1 - get_odds(1.5, 2.4, dist, cv=cv))
+    assert quote["QuoteAuthenticity"] == "derived"
+    assert quote["Odds_synthetic"]

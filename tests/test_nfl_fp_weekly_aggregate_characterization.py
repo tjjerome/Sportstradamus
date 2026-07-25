@@ -186,3 +186,35 @@ def test_load_multi_window_one_year_wiring(monkeypatch):
 
 def test_load_multi_window_empty_windows():
     assert m.load_multi_window_one_year([(2024, 18, 1)]).empty  # start > end -> filtered
+
+
+def test_snapshot_only_finalize_skips_public_enrichment(monkeypatch):
+    monkeypatch.setattr(
+        m,
+        "_load_pbp_named_by_player",
+        lambda _season: pytest.fail("snapshot-only rebuild consulted public PBP/NGS"),
+    )
+    monkeypatch.setattr(
+        m,
+        "_join_nfl_players",
+        lambda _frame: pytest.fail("snapshot-only rebuild consulted public player IDs"),
+    )
+    monkeypatch.setattr(m, "join_local_nfl_players", lambda frame: frame)
+    monkeypatch.setattr(
+        m,
+        "_player_metadata",
+        lambda _windows: pd.DataFrame({"POS": ["QB"]}, index=["p1"]),
+    )
+    monkeypatch.setattr(m, "_player_game_counts", lambda _windows: pd.Series(dtype=float))
+    monkeypatch.setattr(m, "_project_to_name_index", lambda frame: frame)
+    monkeypatch.setattr(m, "_derive_aggregate_metrics", lambda frame: frame)
+    monkeypatch.setattr(m, "_broadcast_team_coverage", lambda frame, _windows: frame)
+    monkeypatch.setattr(m, "derive_comp_metrics", lambda frame: frame)
+
+    out = m._finalize_player_frame(
+        pd.DataFrame({"feature": [1.0]}, index=["p1"]),
+        [(2024, 1, 1)],
+        snapshot_only=True,
+    )
+
+    assert out.loc["p1", "public_enrichment_available"] == 0.0

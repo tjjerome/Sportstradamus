@@ -109,3 +109,6 @@ load_window_or_empty = _store.load_window_or_empty
 load_through = _store.load_through
 load_all_snapshots = _store.load_all_snapshots
 snapshot_inventory = _store.snapshot_inventory
+enable_snapshot_cache = _store.enable_cache
+disable_snapshot_cache = _store.disable_cache
+consumed_snapshot_hashes = _store.consumed_hashes

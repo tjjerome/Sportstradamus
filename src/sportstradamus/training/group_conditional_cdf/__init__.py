@@ -11,6 +11,9 @@ can re-point at this package without behavior change; the two blob slugs and
 schema versions stay byte-identical.
 """
 
+# Public typed adapters intentionally mirror the internal fit contracts.
+# pylint: disable=duplicate-code
+
 from __future__ import annotations
 
 import numpy as np
@@ -37,6 +40,7 @@ from sportstradamus.training.group_conditional_cdf._contracts import (
     AFFINE_POSITION_CODES,
     AFFINE_SCHEMA_VERSION,
     AFFINE_STRATEGY_NAME,
+    LEGACY_AFFINE_SCHEMA_VERSION,
     MARGINAL_MEAN_FLOOR,
     PLAYER_CV_FOLDS,
     RANDOMIZED_PIT_DRAWS,
@@ -115,8 +119,11 @@ def fit_affine_groupcdf(
     result: np.ndarray,
     line: np.ndarray,
     book_over: np.ndarray,
+    authentic: np.ndarray,
     position: np.ndarray,
     player: np.ndarray,
+    *,
+    expected_codes: tuple[int, ...],
 ) -> AffineCalibrationFit:
     """Fit the affine candidate by nested five-fold Player CV, then all validation rows.
 
@@ -125,9 +132,17 @@ def fit_affine_groupcdf(
     Player-grouped CV selects QB and RB map shrinkage. The affine fit, map,
     temperature, and pool weight never inspect the outer held-out players.
     """
-    return fit_group_conditional_cdf(
-        AFFINE_CONFIG, predictive, result, line, book_over, position, player
+    fit_args = (
+        predictive,
+        result,
+        line,
+        book_over,
+        authentic,
+        position,
+        player,
+        expected_codes,
     )
+    return fit_group_conditional_cdf(AFFINE_CONFIG, *fit_args)
 
 
 __all__ = (
@@ -136,6 +151,7 @@ __all__ = (
     "AFFINE_SCHEMA_VERSION",
     "AFFINE_STRATEGY_NAME",
     "CANDIDATE_NAME",
+    "LEGACY_AFFINE_SCHEMA_VERSION",
     "MARGINAL_MEAN_FLOOR",
     "PLAYER_CV_FOLDS",
     "POSITION_CODES",

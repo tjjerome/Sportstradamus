@@ -56,19 +56,39 @@ def raw_cdf_endpoints(pred: AffinePredictive, point: np.ndarray) -> tuple[np.nda
     return upper - atom, upper
 
 
-def mapped_cdf_endpoints(pred, point, positions, maps, codes):
+def mapped_cdf_endpoints(
+    pred,
+    point,
+    positions,
+    maps,
+    codes,
+    *,
+    model_only_fallback: bool = False,
+):
     lower, upper = raw_cdf_endpoints(pred, point)
-    mapped_lower, mapped_upper = np.empty_like(lower), np.empty_like(upper)
+    mapped_lower, mapped_upper = lower.copy(), upper.copy()
+    assigned = np.zeros(len(lower), dtype=bool)
     for code in codes:
         mask = positions == code
         blob = maps[str(code)]
         mapped_lower[mask] = np.interp(lower[mask], blob["x"], blob["y"])
         mapped_upper[mask] = np.interp(upper[mask], blob["x"], blob["y"])
+        assigned |= mask
+    if not model_only_fallback and not assigned.all():
+        unseen = sorted({int(code) for code in np.unique(positions[~assigned])})
+        raise ValueError(f"affine calibration received unsupported position codes {unseen}")
     return np.clip(mapped_lower, 0.0, 1.0), np.clip(mapped_upper, 0.0, 1.0)
 
 
-def mapped_over(pred, line, positions, maps, codes):
-    _, mapped_under = mapped_cdf_endpoints(pred, line, positions, maps, codes)
+def mapped_over(pred, line, positions, maps, codes, *, model_only_fallback: bool = False):
+    _, mapped_under = mapped_cdf_endpoints(
+        pred,
+        line,
+        positions,
+        maps,
+        codes,
+        model_only_fallback=model_only_fallback,
+    )
     return 1.0 - mapped_under
 
 

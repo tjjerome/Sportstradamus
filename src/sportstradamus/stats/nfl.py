@@ -1458,18 +1458,21 @@ class StatsNFL(Stats):
     def _schedule_index(self) -> pd.DataFrame:
         """Cached ``(gameday, season, week)`` index spanning the comp lookback."""
         if getattr(self, "_sched_index", None) is None:
-            years = list(
-                range(
-                    self.season_start.year - COMP_PRIOR_SEASON_DEPTH,
-                    self.season_start.year + 2,
+            if self.snapshot_only_rebuild:
+                sched = self.gamelog[["gameday", "season", "week"]].copy()
+            else:
+                years = list(
+                    range(
+                        self.season_start.year - COMP_PRIOR_SEASON_DEPTH,
+                        self.season_start.year + 2,
+                    )
                 )
-            )
-            try:
-                sched = nfl.import_schedules(years)
-            except Exception as exc:
-                logger.warning("import_schedules(%s) failed: %s", years, exc)
-                self._sched_index = pd.DataFrame(columns=["gameday", "season", "week"])
-                return self._sched_index
+                try:
+                    sched = nfl.import_schedules(years)
+                except Exception as exc:
+                    logger.warning("import_schedules(%s) failed: %s", years, exc)
+                    self._sched_index = pd.DataFrame(columns=["gameday", "season", "week"])
+                    return self._sched_index
             sched = sched.dropna(subset=["gameday", "season", "week"]).copy()
             sched["gameday"] = pd.to_datetime(sched["gameday"]).dt.date
             self._sched_index = (
@@ -1506,12 +1509,20 @@ class StatsNFL(Stats):
         carry the run alone, so production stays live on mixed-fill data.
         """
         season, target_week = self._lookup_season_week(date)
+        if getattr(self, "_fp_team_feature_cache", None) is None:
+            self._fp_team_feature_cache: dict[
+                tuple[int, int], tuple[pd.DataFrame | None, pd.DataFrame | None]
+            ] = {}
+        cache_key = (season, target_week)
+        if cache_key in self._fp_team_feature_cache:
+            return self._fp_team_feature_cache[cache_key]
         pattern_a_windows = self._lookback_windows(season, target_week)
         has_data = any(
             nfl_fp_team_weekly.available_snapshots(window_season)
             for window_season, _, _ in pattern_a_windows
         ) or bool(nfl_fp_team_weekly.available_snapshots(season))
         if not has_data:
+            self._fp_team_feature_cache[cache_key] = (None, None)
             return None, None
         team_features, defense_features = (
             nfl_fp_team_weekly_aggregate.load_team_and_defense_features(
@@ -1519,7 +1530,8 @@ class StatsNFL(Stats):
                 pattern_b_snapshot=(season, target_week),
             )
         )
-        return team_features, defense_features
+        self._fp_team_feature_cache[cache_key] = (team_features, defense_features)
+        return self._fp_team_feature_cache[cache_key]
 
     def _join_fp_player_features(self, date: datetime | date) -> pd.DataFrame | None:
         """NFL hook: project FP per-player season-to-date aggregates to ``{col}_asof``.
@@ -1557,11 +1569,17 @@ class StatsNFL(Stats):
         """
         lookback_week = max(week - 1, 0)
         if lookback_week >= 1:
-            frame = nfl_fp_weekly_aggregate.load_through_one_year(season, target_week=lookback_week)
+            frame = nfl_fp_weekly_aggregate.load_through_one_year(
+                season,
+                target_week=lookback_week,
+                snapshot_only=self.snapshot_only_rebuild,
+            )
         else:
             # Early-season: fall back to prior season's late weeks.
             frame = nfl_fp_weekly_aggregate.load_through_one_year(
-                season - 1, target_week=NFL_REGULAR_SEASON_WEEKS
+                season - 1,
+                target_week=NFL_REGULAR_SEASON_WEEKS,
+                snapshot_only=self.snapshot_only_rebuild,
             )
         if frame is None or frame.empty or "Name" not in frame.columns:
             return None
@@ -1626,7 +1644,10 @@ class StatsNFL(Stats):
         if target_week is None:
             return self._compute_comp_profile_legacy(windows)
 
-        playerProfile = nfl_fp_weekly_aggregate.load_multi_window_one_year(windows)
+        playerProfile = nfl_fp_weekly_aggregate.load_multi_window_one_year(
+            windows,
+            snapshot_only=self.snapshot_only_rebuild,
+        )
         if playerProfile.empty:
             return playerProfile
         playerProfile = playerProfile.copy()
@@ -1636,8 +1657,8 @@ class StatsNFL(Stats):
             playerProfile = playerProfile.assign(player=playerProfile["Name"])
         return playerProfile
 
-    @staticmethod
     def _compute_comp_profile_legacy(
+        self,
         windows: list[tuple[int, int, int]],
     ) -> pd.DataFrame:
         """Per-season aggregation + rolling-transform path used by the None-date fallback.
@@ -1650,7 +1671,12 @@ class StatsNFL(Stats):
         """
         per_year_frames: list[pd.DataFrame] = []
         for season, start_week, end_week in windows:
-            per_year = nfl_fp_weekly_aggregate.load_window_one_year(season, start_week, end_week)
+            per_year = nfl_fp_weekly_aggregate.load_window_one_year(
+                season,
+                start_week,
+                end_week,
+                snapshot_only=self.snapshot_only_rebuild,
+            )
             if per_year.empty:
                 continue
             per_year = per_year.copy()

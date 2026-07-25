@@ -439,6 +439,26 @@ def _join_nfl_players(profile: pd.DataFrame) -> pd.DataFrame:
     return profile.join(nfl_players, how="left")
 
 
+def join_local_nfl_players(profile: pd.DataFrame) -> pd.DataFrame:
+    """Join the packaged player snapshot without consulting ``nfl_data_py``.
+
+    Full historical rebuilds use this path so player metadata is sourced from
+    the same frozen repository snapshot as the weekly FantasyPoints inputs.
+    Missing historical players remain missing rather than triggering a live
+    identifier lookup.
+    """
+    path = pkg_resources.files(data) / "leagues/nfl/players.parquet"
+    if not os.path.exists(path):
+        return profile
+    nfl_players = pd.read_parquet(path)
+    nfl_players = nfl_players.loc[nfl_players["position"].isin(_COMP_POSITIONS)].copy()
+    nfl_players.index = nfl_players.index.to_series().astype(str).apply(remove_accents)
+    nfl_players["bmi"] = nfl_players["weight"] / nfl_players["height"] / nfl_players["height"]
+    nfl_players = nfl_players[["age", "height", "bmi"]].dropna()
+    nfl_players = nfl_players[~nfl_players.index.duplicated(keep="last")]
+    return profile.join(nfl_players, how="left")
+
+
 def _fp_dir(year: int) -> object | None:
     """Return the canonical FP data directory for ``year`` if it exists."""
     directory = pkg_resources.files(data) / f"player_data/NFL/{year}"

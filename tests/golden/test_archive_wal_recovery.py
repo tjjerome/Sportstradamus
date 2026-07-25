@@ -130,6 +130,26 @@ def test_unrelated_catalog_exception_propagates(tmp_path, monkeypatch):
         monkeypatch.delenv("SPORTSTRADAMUS_ARCHIVE_DB", raising=False)
 
 
+def test_read_only_archive_connections_can_coexist(tmp_path, monkeypatch):
+    archive_db = tmp_path / "archive.duckdb"
+    writer = duckdb.connect(str(archive_db))
+    writer.execute("CREATE TABLE odds (value INTEGER)")
+    writer.execute("INSERT INTO odds VALUES (1)")
+    writer.close()
+    monkeypatch.setenv("SPORTSTRADAMUS_ARCHIVE_READ_ONLY", "1")
+
+    from sportstradamus.helpers.archive import Archive
+
+    first = Archive._connect_once(archive_db)
+    second = Archive._connect_once(archive_db)
+    try:
+        assert first.execute("SELECT value FROM odds").fetchone() == (1,)
+        assert second.execute("SELECT value FROM odds").fetchone() == (1,)
+    finally:
+        first.close()
+        second.close()
+
+
 def test_archive_retries_when_another_process_holds_lock(tmp_path, monkeypatch):
     """A peer holding the DuckDB lock must trigger bounded retry, not immediate failure."""
 

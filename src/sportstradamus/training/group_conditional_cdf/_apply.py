@@ -26,6 +26,7 @@ from sportstradamus.training.group_conditional_cdf._affine import (
 from sportstradamus.training.group_conditional_cdf._boundary import apply_models
 from sportstradamus.training.group_conditional_cdf._contracts import (
     CDF_BRANCH_TOLERANCE,
+    LEGACY_AFFINE_SCHEMA_VERSION,
     RANDOMIZED_PIT_DRAWS,
     RANDOMIZED_PIT_SEED,
     AffineCalibrationBlob,
@@ -174,6 +175,7 @@ def apply_affine_groupcdf(
     line: np.ndarray,
     book_over: np.ndarray,
     position: np.ndarray,
+    authentic: np.ndarray | None = None,
 ) -> AffineCalibrationOutput:
     """Apply the frozen validation fit to validation, held-out test, or live arrays.
 
@@ -183,14 +185,39 @@ def apply_affine_groupcdf(
     """
     fitted = validated_affine_blob(blob)
     codes = _blob_position_codes(fitted)
-    pred, lines, books, positions = affine_apply_inputs(predictive, line, book_over, position)
+    legacy = fitted["schema_version"] == LEGACY_AFFINE_SCHEMA_VERSION
+    pred, lines, books, positions, authentic_rows = affine_apply_inputs(
+        predictive,
+        line,
+        book_over,
+        position,
+        authentic,
+        legacy=legacy,
+    )
     affine = fitted["affine"]
     corrected = apply_affine(pred, affine["intercept"], affine["slope"], affine["floor"])
     candidate = apply_temperature(
-        mapped_over(corrected, lines, positions, fitted["position_cdf"], codes),
+        mapped_over(
+            corrected,
+            lines,
+            positions,
+            fitted["position_cdf"],
+            codes,
+            model_only_fallback=not legacy,
+        ),
         fitted["temperature"],
     )
-    pooled = apply_probability_pool(fitted["probability_pool"], candidate, books)
+    if legacy:
+        pooled = apply_probability_pool(fitted["probability_pool"], candidate, books)
+    else:
+        pooled = candidate.copy()
+        pool_rows = authentic_rows & np.isin(positions, codes)
+        if np.any(pool_rows):
+            pooled[pool_rows] = apply_probability_pool(
+                fitted["probability_pool"],
+                candidate[pool_rows],
+                books[pool_rows],
+            )
     conditional = corrected.marginal_mean / (1.0 - corrected.gate)
     loc = skewnormal_loc_from_mean(conditional, corrected.sigma, corrected.alpha)
     return AffineCalibrationOutput(
@@ -218,10 +245,23 @@ def affine_cdf_endpoints(
     """
     fitted = validated_affine_blob(blob)
     codes = _blob_position_codes(fitted)
-    pred, points, positions = distribution_inputs(predictive, point, position)
+    legacy = fitted["schema_version"] == LEGACY_AFFINE_SCHEMA_VERSION
+    pred, points, positions = distribution_inputs(
+        predictive,
+        point,
+        position,
+        legacy=legacy,
+    )
     affine = fitted["affine"]
     corrected = apply_affine(pred, affine["intercept"], affine["slope"], affine["floor"])
-    return mapped_cdf_endpoints(corrected, points, positions, fitted["position_cdf"], codes)
+    return mapped_cdf_endpoints(
+        corrected,
+        points,
+        positions,
+        fitted["position_cdf"],
+        codes,
+        model_only_fallback=not legacy,
+    )
 
 
 def affine_randomized_pit(

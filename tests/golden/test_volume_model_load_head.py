@@ -48,8 +48,10 @@ def _stub_start_values(monkeypatch):
 class _StubModel:
     def __init__(self, params):
         self._params = params
+        self.seen = None
 
     def predict(self, player_stats, pred_type=None):
+        self.seen = player_stats.copy()
         return self._params.loc[player_stats.index].copy()
 
 
@@ -300,3 +302,51 @@ def test_missing_pickle_returns_false_and_leaves_profile_untouched():
 
     assert result is False
     pd.testing.assert_frame_equal(stub.playerProfile, player_profile)
+
+
+def test_snapshot_only_dependency_inference_zero_aligns_absent_historical_features():
+    idx = ["A", "B"]
+    player_stats = pd.DataFrame({"Home": [1, 0], "f1": [0.1, 0.2]}, index=idx)
+    player_profile = pd.DataFrame({"keep": [1, 2]}, index=idx)
+    model = _StubModel(_params(idx, ["loc", "scale", "alpha"]))
+    stub = _Stub(
+        "NFL",
+        player_stats,
+        player_profile,
+        {
+            "NFL_attempts": {
+                "expected_columns": ["Home", "f1", "Player age_asof", "Team proe"],
+                "model": model,
+                "distribution": "SkewNormal",
+            }
+        },
+    )
+    stub.snapshot_only_rebuild = True
+
+    result = Stats.load_volume_model_params(stub, _OFFERS, "attempts", _DATE, {})
+
+    assert result is True
+    assert model.seen.columns.tolist() == ["Home", "f1", "Player age_asof", "Team proe"]
+    assert model.seen[["Player age_asof", "Team proe"]].eq(0).all().all()
+
+
+def test_live_dependency_inference_keeps_missing_feature_failure_strict():
+    idx = ["A", "B"]
+    player_stats = pd.DataFrame({"Home": [1, 0]}, index=idx)
+    player_profile = pd.DataFrame({"keep": [1, 2]}, index=idx)
+    model = _StubModel(_params(idx, ["loc", "scale", "alpha"]))
+    stub = _Stub(
+        "NFL",
+        player_stats,
+        player_profile,
+        {
+            "NFL_attempts": {
+                "expected_columns": ["Home", "Player age_asof"],
+                "model": model,
+                "distribution": "SkewNormal",
+            }
+        },
+    )
+
+    with pytest.raises(KeyError, match="Player age_asof"):
+        Stats.load_volume_model_params(stub, _OFFERS, "attempts", _DATE, {})

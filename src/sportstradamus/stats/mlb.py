@@ -166,11 +166,11 @@ class StatsMLB(Stats):
         None
     """
 
-    def __init__(self):
+    def __init__(self, *, load_live_pitchers: bool = True):
         """Initialize the StatsMLB instance."""
         super().__init__()
         self.season_start = datetime(2026, 3, 25).date()
-        self.pitchers = get_mlb_pitchers()
+        self.pitchers = get_mlb_pitchers() if load_live_pitchers else {}
         self.gameIds = []
         self.gamelog = pd.DataFrame()
         self.teamlog = pd.DataFrame()
@@ -999,6 +999,12 @@ class StatsMLB(Stats):
                 "scale": f"proj {market} std",
             },
         )
+
+    def _training_dependency_markets(self, target_market: str) -> tuple[str, ...]:
+        """Hitter cells use structural plate appearances, not the pitch-count model."""
+        if target_market in self.volume_stats or not is_mlb_pitcher_market(target_market):
+            return ()
+        return tuple(self.volume_stats)
 
     def _project_plate_appearances(self, offers, date=datetime.today().date()):
         """Structural batting-order plate-appearance projection (no trained model).

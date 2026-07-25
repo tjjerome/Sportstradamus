@@ -143,7 +143,7 @@ def _clip_lines(M: pd.DataFrame, archived_mask, n_archived: int) -> pd.DataFrame
     return M
 
 
-def _balance_lines(M, pos_mask, archived_mask, overall_target, min_rows):
+def _balance_lines(M, pos_mask, archived_mask, overall_target, min_rows, rng):
     budget = max(len(M) - min_rows, 0)
     if budget == 0:
         return M
@@ -174,15 +174,15 @@ def _balance_lines(M, pos_mask, archived_mask, overall_target, min_rows):
         chopping_block = more.index
 
     n = min(n, len(chopping_block))
-    cut = np.random.choice(chopping_block, n, replace=False, p=p)
+    cut = rng.choice(chopping_block, n, replace=False, p=p)
     M.drop(cut, inplace=True)
     return M
 
 
-def _balance_over_under(M: pd.DataFrame, min_rows: int) -> pd.DataFrame:
-    pushes = M.loc[M["Result"] == M["Line"]]
+def _balance_over_under(M: pd.DataFrame, min_rows: int, rng) -> pd.DataFrame:
+    pushes = M.loc[M["Result"] == M["Line"]].copy()
     push_rate = pushes["Archived"].sum() / M["Archived"].sum()
-    M = M.loc[M["Result"] != M["Line"]]
+    M = M.loc[M["Result"] != M["Line"]].copy()
 
     archived_no_push = M["Archived"] == 1
     if archived_no_push.sum() >= _MIN_ARCHIVED_FOR_OVER_TARGET:
@@ -205,20 +205,20 @@ def _balance_over_under(M: pd.DataFrame, min_rows: int) -> pd.DataFrame:
             p = p / np.sum(p)
 
         n = min(n, len(chopping_block))
-        cut = np.random.choice(chopping_block, n, replace=False, p=p)
+        cut = rng.choice(chopping_block, n, replace=False, p=p)
         M.drop(cut, inplace=True)
 
     n = int(push_rate * len(M)) - pushes["Archived"].sum()
     chopping_block = pushes.loc[pushes["Archived"] == 0].index
     n = np.clip(n, None, len(chopping_block))
     if n > 0:
-        cut = np.random.choice(chopping_block, n, replace=False)
+        cut = rng.choice(chopping_block, n, replace=False)
         pushes.drop(cut, inplace=True)
 
     return pd.concat([M, pushes]).sort_values("Date")
 
 
-def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
+def trim_matrix(M: pd.DataFrame, min_rows: int = 7500, seed: int | None = None) -> pd.DataFrame:
     """Remove data quality issues and prepare matrix for modeling.
 
     Trims outlier results, clips lines to a realistic range, balances
@@ -227,6 +227,13 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
     archive markets are not destroyed.
     """
     warnings.simplefilter("ignore", UserWarning)
+    if seed is None:
+        rng = np.random
+    else:
+        stable_keys = [column for column in ("Date", "Player") if column in M]
+        if stable_keys:
+            M = M.sort_values(stable_keys, kind="stable").reset_index(drop=True)
+        rng = np.random.default_rng(seed)
 
     M = _rebase_days_into_season(M)
 
@@ -251,14 +258,14 @@ def trim_matrix(M: pd.DataFrame, min_rows: int = 7500) -> pd.DataFrame:
     if "Player position" in M.columns:
         for i in M["Player position"].unique():
             M = _balance_lines(
-                M, M["Player position"] == i, archived_mask, overall_target, min_rows
+                M, M["Player position"] == i, archived_mask, overall_target, min_rows, rng
             )
     else:
         M = _balance_lines(
-            M, pd.Series(True, index=M.index), archived_mask, overall_target, min_rows
+            M, pd.Series(True, index=M.index), archived_mask, overall_target, min_rows, rng
         )
 
     if n_archived < _MIN_ARCHIVED_FOR_BALANCE:
         return M.sort_values("Date")
 
-    return _balance_over_under(M, min_rows)
+    return _balance_over_under(M, min_rows, rng)

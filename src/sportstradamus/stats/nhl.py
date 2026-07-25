@@ -38,6 +38,7 @@ from sportstradamus.stats.base import (
     scale_team_volume_to_budget,
     scraper,
 )
+from sportstradamus.stats.nhl_position_policy import allowed_nhl_positions
 
 # Days of gamelog history to retain (~4 NHL seasons); older rows pruned on each update.
 _GAMELOG_RETENTION_DAYS = 1431
@@ -126,6 +127,12 @@ class StatsNHL(Stats):
         self.usage_stat = "TimeShare"
         self.tiebreaker_stat = "Fenwick short"
         self._volume_model_cache = None
+
+    def _market_position_filter(self, gamelog: pd.DataFrame, market: str) -> pd.DataFrame:
+        """Keep only players who can accrue the requested NHL market."""
+        allowed = allowed_nhl_positions(market)
+        position = gamelog[self.log_strings["position"]].astype("string")
+        return gamelog.loc[position.isin(allowed)].copy()
 
     def build_comp_profile(self, playerDict=None):
         """Build NHL player comp profile from loaded player data.

@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -26,7 +27,7 @@ def _identity_map(lam=0.0):
 def _manual_blob():
     return {
         "kind": rushing.AFFINE_STRATEGY_NAME,
-        "schema_version": rushing.AFFINE_SCHEMA_VERSION,
+        "schema_version": rushing.LEGACY_AFFINE_SCHEMA_VERSION,
         "line_probability_only": True,
         "affine": {
             "kind": "affine_marginal_mean",
@@ -42,6 +43,44 @@ def _manual_blob():
                 "y": [0.0, 0.25, 1.0],
             },
             "3": _identity_map(),
+        },
+        "temperature": 2.0,
+        "probability_pool": {
+            "kind": "structural_probability_pool",
+            "schema_version": 1,
+            "rho": 0.4,
+            "raw_rho": 0.4,
+        },
+    }
+
+
+def _generalized_blob(codes=(1, 2, 3, 4, 5)):
+    return {
+        "kind": rushing.AFFINE_STRATEGY_NAME,
+        "schema_version": rushing.AFFINE_SCHEMA_VERSION,
+        "line_probability_only": True,
+        "affine": {
+            "kind": "affine_marginal_mean",
+            "intercept": 2.0,
+            "slope": 1.1,
+            "floor": rushing.MARGINAL_MEAN_FLOOR,
+        },
+        "position_cdf": {str(code): _identity_map() for code in codes},
+        "position_codes": list(codes),
+        "fallback": {
+            "kind": "model_only",
+            "unseen_position": "raw_cdf_unpooled",
+            "nonauthentic_quote": "candidate_unpooled",
+        },
+        "affine_bounds": {
+            "kind": "train_scale_affine_bounds",
+            "train_abs_p95": 20.0,
+            "intercept": [-40.0, 40.0],
+            "slope": [0.5, 1.5],
+        },
+        "fit_audit": {
+            "expected_position_codes": list(codes),
+            "outer_folds": [{} for _ in range(rushing.PLAYER_CV_FOLDS)],
         },
         "temperature": 2.0,
         "probability_pool": {
@@ -209,8 +248,10 @@ def test_fit_rejects_missing_player_before_string_cast(missing):
             result,
             line,
             book,
+            np.ones(len(result), dtype=bool),
             position,
             player,
+            expected_codes=(1, 3),
         )
 
 
@@ -225,8 +266,27 @@ def test_lambda_ties_prefer_lower_shrink(monkeypatch):
 def test_nested_player_cv_fit_is_finite_stable_and_reusable():
     predictive, result, line, book, position, player = _synthetic_validation()
 
-    fit = rushing.fit_affine_groupcdf(predictive, result, line, book, position, player)
-    applied = rushing.apply_affine_groupcdf(fit.blob, predictive, line, book, position)
+    authentic = np.arange(len(result)) % 5 != 0
+    book = book.copy()
+    book[~authentic] = np.nan
+    fit = rushing.fit_affine_groupcdf(
+        predictive,
+        result,
+        line,
+        book,
+        authentic,
+        position,
+        player,
+        expected_codes=(1, 3),
+    )
+    applied = rushing.apply_affine_groupcdf(
+        fit.blob,
+        predictive,
+        line,
+        book,
+        position,
+        authentic,
+    )
 
     assert len(fit.fold_affines) == rushing.PLAYER_CV_FOLDS
     assert len(fit.fold_lambdas) == rushing.PLAYER_CV_FOLDS
@@ -247,8 +307,108 @@ def test_nested_player_cv_fit_is_finite_stable_and_reusable():
         )
     )
     assert set(fit.blob["position_cdf"]) == {"1", "3"}
+    assert fit.blob["position_codes"] == [1, 3]
+    assert fit.blob["fit_audit"]["expected_position_codes"] == [1, 3]
+    assert fit.blob["fit_audit"]["authentic_rows"] == int(authentic.sum())
+    np.testing.assert_array_equal(
+        applied.pooled_over[~authentic],
+        applied.candidate_over[~authentic],
+    )
     assert all(
         group_map["x"][0] == group_map["y"][0] == 0.0
         and group_map["x"][-1] == group_map["y"][-1] == 1.0
         for group_map in fit.blob["position_cdf"].values()
     )
+
+
+@pytest.mark.parametrize("codes", [(1, 2, 3, 4, 5), (1, 2, 3, 4), (1, 2, 3)])
+def test_schema2_generalizes_code_shapes_and_uses_model_only_fallback(codes):
+    blob = _generalized_blob(codes)
+    positions = np.array([codes[0], 99])
+    predictive = rushing.AffinePredictive(
+        np.array([12.0, 14.0]),
+        np.array([4.0, 5.0]),
+        np.array([0.2, 0.3]),
+        np.array([0.05, 0.05]),
+    )
+    output = rushing.apply_affine_groupcdf(
+        blob,
+        predictive,
+        np.array([11.5, 13.5]),
+        np.array([0.55, np.nan]),
+        positions,
+        np.array([True, False]),
+    )
+
+    assert np.isfinite(output.candidate_over).all()
+    assert output.pooled_over[0] != output.candidate_over[0]
+    assert output.pooled_over[1] == output.candidate_over[1]
+
+
+def test_schema2_nonauthentic_supported_quote_is_never_pooled():
+    blob = _generalized_blob((1, 3))
+    predictive = rushing.AffinePredictive(
+        np.array([12.0, 14.0]),
+        np.array([4.0, 5.0]),
+        np.array([0.2, 0.3]),
+        np.array([0.05, 0.05]),
+    )
+    output = rushing.apply_affine_groupcdf(
+        blob,
+        predictive,
+        np.array([11.5, 13.5]),
+        np.array([0.55, 0.45]),
+        np.array([1, 3]),
+        np.array([True, False]),
+    )
+
+    assert output.pooled_over[0] != output.candidate_over[0]
+    assert output.pooled_over[1] == output.candidate_over[1]
+
+
+def test_schema2_rejects_fractional_position_before_code_discovery():
+    blob = _generalized_blob((1, 3))
+    predictive = rushing.AffinePredictive(
+        np.array([12.0]),
+        np.array([4.0]),
+        np.array([0.2]),
+        np.array([0.05]),
+    )
+
+    with pytest.raises(ValueError, match="integer league roster codes"):
+        rushing.apply_affine_groupcdf(
+            blob,
+            predictive,
+            np.array([11.5]),
+            np.array([0.55]),
+            np.array([1.5]),
+            np.array([True]),
+        )
+
+
+def test_schema2_roundtrip_persists_code_set_and_fallback_contract():
+    blob = _generalized_blob((1, 2, 3, 4))
+    restored = rushing.deserialize_affine_calibration(
+        rushing.serialize_affine_calibration(blob)
+    )
+
+    assert restored["position_codes"] == [1, 2, 3, 4]
+    assert restored["fallback"]["unseen_position"] == "raw_cdf_unpooled"
+
+
+def test_schema2_uses_train_scaled_intercept_bounds_without_changing_legacy_bounds():
+    generalized = _generalized_blob((1, 3))
+    generalized["affine"]["intercept"] = 30.0
+    rushing.serialize_affine_calibration(generalized)
+
+    legacy = _manual_blob()
+    legacy["affine"]["intercept"] = 30.0
+    with pytest.raises(ValueError, match="affine intercept"):
+        rushing.serialize_affine_calibration(legacy)
+
+
+def test_unsupported_strategy_config_fails_before_fit_dispatch():
+    unsupported = replace(rushing.AFFINE_CONFIG, boundary=True)
+
+    with pytest.raises(ValueError, match="unsupported group-conditional CDF strategy config"):
+        rushing.fit_group_conditional_cdf(unsupported)

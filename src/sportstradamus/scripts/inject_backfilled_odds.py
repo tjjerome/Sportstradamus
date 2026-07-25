@@ -36,21 +36,21 @@ import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.helpers import Archive, get_odds, stat_cv, stat_dist
+from sportstradamus.helpers import Archive, book_weights, stat_cv, stat_dist
 from sportstradamus.helpers.archive import TRAINING_LOOKBACK
 from sportstradamus.helpers.io import market_file_slug
-from sportstradamus.scripts.delete_corrupt_seed import BLOWN_ABS_CEILING, BLOWN_LINE_FACTOR
+from sportstradamus.helpers.training_quotes import (
+    AUTHENTIC,
+    TrainingQuote,
+    archive_ev_is_usable,
+    resolve_training_quote,
+)
 
 # 8 PM UTC commence-time stand-in from stats/base.py get_training_matrix. The
 # archive read happens at this minus the training lookback; backfilled rows
 # (observed_at 01:00) and the midnight seed both precede it, so get_ev returns
 # the latest observation = the backfill.
 _COMMENCE_STANDIN = datetime.timedelta(hours=20)
-
-# Sentinel Odds value written for synthesized rows so pipeline._step_synthesize_odds
-# catches them via its `Odds == 0` mask arm — works even when Odds_synthetic is absent.
-_SYNTH_ODDS_SENTINEL: float = 0.0
-
 
 def _target_at(game_date: datetime.date) -> datetime.datetime:
     return (
@@ -62,7 +62,7 @@ def _target_at(game_date: datetime.date) -> datetime.datetime:
 
 def _is_blown(ev: float, line: float) -> bool:
     """A cached EV the swept archive can no longer price — pre-``get_ev``-fix residue."""
-    return ev > BLOWN_ABS_CEILING or (line > 0 and ev > BLOWN_LINE_FACTOR * line)
+    return not archive_ev_is_usable(ev, line)
 
 
 def _resolve_row(
@@ -73,40 +73,28 @@ def _resolve_row(
     cv: float,
     row: pd.Series,
     has_synth: bool,
-) -> tuple[float, float, float, bool, bool]:
-    """Re-derived ``(line, ev, odds, synthetic, archived)`` book columns for one
-    cached row.
-
-    A row the archive prices with a sane EV is recomputed from it (the backfill
-    supersedes the seed); a row with no archived price keeps its clean cached
-    book columns. A resolved EV that is blown (an archive value the magnitude
-    sweep missed — inverted-moderate, or a point-in-time line below the latest
-    one) or already NaN (a prior synthesis, or un-re-quotable pre-fix residue)
-    is synthesized: ``Odds`` set to ``_SYNTH_ODDS_SENTINEL``, ``EV`` left NaN
-    for ``pipeline._step_synthesize_odds`` to fill canonically. No matrix row
-    may carry a blown or NaN ``EV``; a NaN ``EV`` crashes the LightGBMLSS fit.
-
-    ``archived`` mirrors ``stats/base.py`` ``_resolve_player_market_odds``: a row
-    is authentic iff the archive holds a positive line for it (``line > 0``),
-    read *before* the no-price fallback overwrites ``line`` with the cached seed.
-    The authentic mask further excludes synthesized rows, so an archived-but-blown
-    row (``archived=True``, ``synthetic=True``) is correctly not counted.
-    """
+) -> TrainingQuote:
+    """Resolve cached repair fields through the same pure policy as a rebuild."""
+    del has_synth  # retained for compatibility with older direct callers
     game_date = pd.to_datetime(row["Date"]).date()
     at = _target_at(game_date)
     date = game_date.strftime("%Y-%m-%d")
-    ev = archive.get_ev(league, market, date, row["Player"], at=at)
-    line = archive.get_line(league, market, date, row["Player"], at=at)
-    archived = line > 0
-    priced = not np.isnan(ev) and line > 0
-    if not priced:
-        line, ev = row["Line"], row["EV"]
-    if np.isnan(ev) or _is_blown(ev, line):
-        return line, np.nan, _SYNTH_ODDS_SENTINEL, True, archived
-    if priced:
-        return line, ev, 1 - get_odds(line, ev, dist, cv=cv), False, archived
-    cached_synth = row["Odds_synthetic"] if has_synth else False
-    return line, ev, row["Odds"], cached_synth, archived
+    legacy_line = archive.get_line(league, market, date, row["Player"], at=at)
+    fallback_line = max(float(row.get("Avg10", row["Line"])), 0.5)
+    fallback_ev = None
+    if row.get("QuoteSource") == "combo_ev_inversion" and not _is_blown(
+        float(row["EV"]), fallback_line
+    ):
+        fallback_ev = float(row["EV"])
+    return resolve_training_quote(
+        archive.get_training_book_quotes(league, market, date, row["Player"], at=at),
+        legacy_line=legacy_line,
+        fallback_line=fallback_line,
+        fallback_ev=fallback_ev,
+        dist=dist,
+        cv=cv,
+        weights=book_weights.get(league, {}).get(market, {}),
+    )
 
 
 def _refresh_one(
@@ -128,31 +116,24 @@ def _refresh_one(
     cv = stat_cv[league].get(market, 1)
     dist = stat_dist.get(league, {}).get(market, "Gamma")
     has_synth = "Odds_synthetic" in M.columns
-    lines, evs, odds, synth, arch = [], [], [], [], []
+    quotes = []
     for _, row in tqdm(M.iterrows(), total=len(M), desc=f"{league} {market}", leave=False):
-        line, ev, od, sy, ar = _resolve_row(archive, league, market, dist, cv, row, has_synth)
-        lines.append(line)
-        evs.append(ev)
-        odds.append(od)
-        synth.append(sy)
-        arch.append(ar)
+        quotes.append(_resolve_row(archive, league, market, dist, cv, row, has_synth))
 
-    new_odds = np.asarray(odds, dtype=float)
+    quote_frame = pd.DataFrame([quote.as_record() for quote in quotes], index=M.index)
+    new_odds = quote_frame["Odds"].to_numpy(dtype=float)
     old_odds = M["Odds"].to_numpy(dtype=float)
     n_changed = int((~np.isclose(new_odds, old_odds)).sum())
     frac_before = float(np.isclose(old_odds, 0.5).mean())
     frac_after = float(np.isclose(new_odds, 0.5).mean())
 
     old_synth = M["Odds_synthetic"].to_numpy(dtype=bool) if has_synth else np.zeros(len(M), bool)
-    new_arch = np.asarray(arch, dtype=bool)
+    new_arch = quote_frame["QuoteAuthenticity"].eq(AUTHENTIC).to_numpy()
     auth_before = int((M["Archived"].to_numpy(dtype=bool) & ~old_synth).sum())
-    auth_after = int((new_arch & ~np.asarray(synth, dtype=bool)).sum())
+    auth_after = int(new_arch.sum())
 
-    M["Line"] = lines
-    M["EV"] = evs
-    M["Odds"] = new_odds
-    M["Odds_synthetic"] = synth
-    M["Archived"] = new_arch
+    for column in quote_frame:
+        M[column] = quote_frame[column]
     return n_changed, frac_before, frac_after, auth_before, auth_after
 
 

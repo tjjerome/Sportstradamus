@@ -59,6 +59,69 @@ def test_schema_has_shapefree_columns(archive):
     assert {"under_prob", "line"} <= cols
 
 
+def test_latest_book_rows_have_stable_book_order(archive):
+    """Weighted reductions must not inherit DuckDB's unspecified row order."""
+    for book, ev in (("zeta", 2.2), ("alpha", 1.8), ("middle", 2.0)):
+        archive._connection.execute(
+            "INSERT INTO odds (league, market, game_date, entity, book, ev, observed_at) "
+            "VALUES ('WNBA', 'AST', DATE '2026-05-08', 'P', ?, ?, ?)",
+            [book, ev, _TS],
+        )
+
+    rows = archive._book_rows("WNBA", "AST", "2026-05-08", "P")
+
+    assert rows == [("alpha", 1.8), ("middle", 2.0), ("zeta", 2.2)]
+
+
+def test_training_book_quotes_keep_latest_row_fields_coherent(archive):
+    later = _TS + datetime.timedelta(hours=1)
+    archive._connection.execute(
+        "INSERT INTO odds (league, market, game_date, entity, book, ev, observed_at, "
+        "under_prob, line) VALUES "
+        "('WNBA', 'AST', DATE '2026-05-08', 'P', 'zeta', 2.0, ?, 0.40, 1.5), "
+        "('WNBA', 'AST', DATE '2026-05-08', 'P', 'zeta', 3.0, ?, 0.60, 2.5), "
+        "('WNBA', 'AST', DATE '2026-05-08', 'P', 'alpha', 2.4, ?, 0.55, 1.5)",
+        [_TS, later, later],
+    )
+
+    rows = archive.get_training_book_quotes("WNBA", "AST", "2026-05-08", "P")
+
+    assert [row.book for row in rows] == ["alpha", "zeta"]
+    assert (rows[1].ev, rows[1].under_probability, rows[1].line, rows[1].observed_at) == (
+        3.0,
+        0.60,
+        2.5,
+        later,
+    )
+
+
+def test_training_quote_batch_matches_scalar_rows_and_lines(archive):
+    later = _TS + datetime.timedelta(hours=1)
+    archive._connection.execute(
+        "INSERT INTO odds (league, market, game_date, entity, book, ev, observed_at, "
+        "under_prob, line) VALUES "
+        "('WNBA', 'AST', DATE '2026-05-08', 'P', 'zeta', 2.0, ?, 0.40, 1.5), "
+        "('WNBA', 'AST', DATE '2026-05-08', 'P', 'zeta', 3.0, ?, 0.60, 2.5), "
+        "('WNBA', 'AST', DATE '2026-05-08', 'Q', 'alpha', 2.4, ?, 0.55, 1.5)",
+        [_TS, later, later],
+    )
+    archive._connection.execute(
+        "INSERT INTO lines (league, market, game_date, entity, line, observed_at) VALUES "
+        "('WNBA', 'AST', DATE '2026-05-08', 'P', 2.5, ?), "
+        "('WNBA', 'AST', DATE '2026-05-08', 'Q', 1.5, ?)",
+        [later, later],
+    )
+
+    batch = archive.get_training_quote_inputs(
+        "WNBA", "AST", "2026-05-08", ["Q", "P", "Missing"]
+    )
+
+    for entity in ("P", "Q", "Missing"):
+        rows, line = batch[entity]
+        assert rows == archive.get_training_book_quotes("WNBA", "AST", "2026-05-08", entity)
+        assert line == archive.get_line("WNBA", "AST", "2026-05-08", entity)
+
+
 def test_auto_migrate_adds_columns_preserving_ev(tmp_path, monkeypatch):
     """Opening a pre-WS1 (7-column) DB heals it: columns added, ev untouched, under NULL."""
     db = tmp_path / "old.duckdb"

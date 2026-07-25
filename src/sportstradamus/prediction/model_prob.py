@@ -45,17 +45,18 @@ from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.spiderLogger import logger
 from sportstradamus.training.baselines import get_target_normalization
 from sportstradamus.training.group_conditional_cdf import (
-    ROLE_VALUES as TWO_PART_ROLE_VALUES,
-)
-from sportstradamus.training.group_conditional_cdf import (
-    TWO_PART_SCHEMA_VERSION as TWO_PART_CALIBRATION_SCHEMA_VERSION,
-)
-from sportstradamus.training.group_conditional_cdf import (
+    LEGACY_AFFINE_SCHEMA_VERSION,
     AffinePredictive,
     TwoPartLineOutput,
     apply_affine_groupcdf,
     apply_two_part_line,
     serialize_two_part_calibration,
+)
+from sportstradamus.training.group_conditional_cdf import (
+    ROLE_VALUES as TWO_PART_ROLE_VALUES,
+)
+from sportstradamus.training.group_conditional_cdf import (
+    TWO_PART_SCHEMA_VERSION as TWO_PART_CALIBRATION_SCHEMA_VERSION,
 )
 from sportstradamus.training.model_strategy import (
     BASE_STRUCTURAL_STRATEGY,
@@ -1060,7 +1061,8 @@ def _apply_affine_candidate_distribution(
     """Apply the affine/CDF head and return conditional mean plus final line P(over)."""
     position = pd.to_numeric(offer_df["Player position"], errors="coerce").to_numpy()
     supported = _affine_supported_codes(calibration)
-    if not np.isin(position, tuple(supported)).all():
+    legacy = calibration.get("schema_version") == LEGACY_AFFINE_SCHEMA_VERSION
+    if legacy and not np.isin(position, tuple(supported)).all():
         raise ValueError("affine candidate received an offer outside its calibrated positions")
     gate = (
         offer_df["Model Gate"].to_numpy(dtype=float)
@@ -1073,12 +1075,28 @@ def _apply_affine_candidate_distribution(
         alpha=offer_df["Model Skew"].to_numpy(dtype=float),
         gate=gate,
     )
+    authentic = None
+    if not legacy:
+        if "QuoteAuthenticity" in offer_df:
+            provenance = offer_df["QuoteAuthenticity"]
+            if provenance.isna().any() or not provenance.isin(
+                ("authentic", "derived", "synthetic")
+            ).all():
+                raise ValueError("affine candidate received invalid quote authenticity")
+            authentic = provenance.eq("authentic").to_numpy(dtype=bool)
+        else:
+            # Live offer frames carry current bookmaker probabilities rather than
+            # training provenance. Convert that explicit current-quote contract
+            # to the boolean required by the schema-2 application API.
+            current_book = offer_df["Market EV"].to_numpy(dtype=float)
+            authentic = np.isfinite(current_book) & (current_book > 0.0) & (current_book < 1.0)
     output = apply_affine_groupcdf(
         calibration,
         predictive,
         offer_df["Line"].to_numpy(dtype=float),
         offer_df["Market EV"].to_numpy(dtype=float),
         position,
+        authentic,
     )
     offer_df["Projection"] = output.marginal_mean
     offer_df["Model Sigma"] = output.sigma

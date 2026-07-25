@@ -30,7 +30,6 @@ from sklearn.metrics import (
     precision_score,
     roc_auc_score,
 )
-from sklearn.model_selection import train_test_split
 
 from sportstradamus import data
 from sportstradamus.double_poisson import DoublePoisson
@@ -82,6 +81,11 @@ from sportstradamus.training.group_conditional_cdf._pipeline_steps_two_part impo
     _step_apply_two_part_groupcdf_candidate,
 )
 from sportstradamus.training.hyperparams import _BoundedResponseFn, run_hyper_opt
+from sportstradamus.training.lineage import (
+    MATRIX_TRIM_SEED,
+    validate_matrix_manifest,
+    write_matrix_manifest,
+)
 from sportstradamus.training.model_strategy import (
     BASE_STRUCTURAL_STRATEGY,
     CAP_DETERMINISTIC_TRAIN,
@@ -201,10 +205,9 @@ def _resolve_loss_fn(family_default: str, override: str) -> str:
 # Fixed RNG seed for --deterministic runs (debug/eval only).
 DETERMINISTIC_SEED = 1234
 
-# RNG seed for the val/test random split inside ``_step_build_splits``.
-# Arbitrary but fixed so the split boundary is stable across reruns on the
-# same dataset.
-_VAL_SPLIT_RANDOM_STATE: int = 25
+# Half of the uint64 identity-hash space goes to structural calibration. Unlike
+# a positional RNG split, shared Player/Date rows keep their role as matrices grow.
+_VALIDATION_HASH_THRESHOLD: int = 1 << 63
 
 # Deterministic-mode model pickles live OUTSIDE the installed package tree so
 # the research harness can iterate on them without polluting the production
@@ -560,7 +563,16 @@ def _compute_metrics(probs: np.ndarray, y: np.ndarray) -> dict[str, float]:
     }
 
 
-def _step_init_market(league: str, market: str, stat_data, archive, *, deterministic: bool) -> dict:
+def _step_init_market(
+    league: str,
+    market: str,
+    stat_data,
+    archive,
+    *,
+    deterministic: bool,
+    full_rebuild: bool = False,
+    isolated: bool = False,
+) -> dict:
     """Validate, load distribution config + book weights + existing pickle.
 
     Args:
@@ -589,7 +601,7 @@ def _step_init_market(league: str, market: str, stat_data, archive, *, determini
     else:
         book_weights = {}
 
-    if not deterministic:
+    if not deterministic and not full_rebuild and not isolated:
         book_weights.setdefault(league, {}).setdefault(market, {})
         book_weights[league][market] = fit_book_weights(
             league, market, stat_data, archive, book_weights
@@ -601,7 +613,12 @@ def _step_init_market(league: str, market: str, stat_data, archive, *, determini
     filename = market_file_slug(league, market)
     filepath = model_pickle_path(league, market)
     need_model = True
-    if os.path.isfile(filepath):
+    if full_rebuild or isolated:
+        filedict = {}
+        dist = stat_dist[league].get(market)
+        cv = stat_cv[league].get(market, 1)
+        step = None
+    elif os.path.isfile(filepath):
         with open(filepath, "rb") as infile:
             filedict = pickle.load(infile)
             dist = filedict["distribution"]
@@ -637,6 +654,10 @@ def _step_load_matrix(
     deterministic: bool,
     force: bool,
     need_model: bool,
+    full_rebuild: bool = False,
+    matrix_output: Path | None = None,
+    dependency_root: Path | None = None,
+    matrix_input: Path | None = None,
 ) -> tuple[pd.DataFrame, object] | None:
     """Load cached training parquet, fetch new rows, concat. Returns None on early-exit.
 
@@ -654,8 +675,37 @@ def _step_load_matrix(
         ``(M, training_data_path)`` tuple where ``M`` is the combined matrix,
         or ``None`` when there is nothing to train on.
     """
-    filepath = pkg_resources.files(data) / (f"training_data/{filename}.parquet")
-    if os.path.isfile(filepath):
+    canonical_path = Path(str(pkg_resources.files(data) / f"training_data/{filename}.parquet"))
+    if matrix_input is not None:
+        filepath = matrix_input
+        if not filepath.is_file():
+            raise FileNotFoundError(f"frozen matrix input does not exist: {filepath}")
+        M = pd.read_parquet(filepath)
+        validate_matrix_manifest(filepath, M)
+        cutoff_date = league_start_date
+        stat_data.snapshot_only_rebuild = True
+    elif full_rebuild:
+        if league == "NFL":
+            from sportstradamus.stats import nfl_fp_team_weekly, nfl_fp_weekly
+
+            nfl_fp_weekly.enable_snapshot_cache()
+            nfl_fp_team_weekly.enable_snapshot_cache()
+        if matrix_output is None:
+            raise ValueError("full rebuild requires a quarantine matrix output directory")
+        canonical_root = canonical_path.parent.resolve()
+        output_root = matrix_output.resolve()
+        if output_root == canonical_root or canonical_root in output_root.parents:
+            raise ValueError("full rebuild output must be outside canonical training_data")
+        filepath = matrix_output / f"{filename}.parquet"
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        M = pd.DataFrame()
+        cutoff_date = league_start_date
+        stat_data.model_dependency_root = dependency_root or Path(
+            str(pkg_resources.files(data) / "model_dependencies")
+        )
+        stat_data.snapshot_only_rebuild = True
+    elif os.path.isfile(canonical_path):
+        filepath = canonical_path
         M = pd.read_parquet(filepath)
         cutoff_date = pd.to_datetime(M["Date"]).max().date()
         M = M.loc[
@@ -663,10 +713,15 @@ def _step_load_matrix(
             & (pd.to_datetime(M.Date).dt.date > league_start_date)
         ]
     else:
+        filepath = canonical_path
         cutoff_date = league_start_date
         M = pd.DataFrame()
 
-    new_M = pd.DataFrame() if deterministic else stat_data.get_training_matrix(market, cutoff_date)
+    new_M = (
+        pd.DataFrame()
+        if deterministic or matrix_input is not None
+        else stat_data.get_training_matrix(market, cutoff_date)
+    )
 
     if new_M.empty and not force and not need_model:
         return None
@@ -708,8 +763,6 @@ def _step_synthesize_odds(
     # continuous prior, which is all a fabricated line needs.
     synth_dist = "SkewNormal" if dist == "Mixture" else dist
     synthetic_mask = M.Odds.isna() | (M.Odds == 0)
-    if "Odds_synthetic" in M.columns:
-        synthetic_mask |= M["Odds_synthetic"].fillna(False)
     for i, row in M.loc[synthetic_mask].iterrows():
         if np.isnan(row["EV"]) or row["EV"] <= 0:
             M.loc[i, "Odds"] = 0.5
@@ -717,22 +770,43 @@ def _step_synthesize_odds(
                 M.loc[i, "Line"], 0.5, cv=cv, dist=synth_dist, gate=_prep_gate or None
             )
             M.loc[i, "Odds_synthetic"] = True
+            if "QuoteSource" in M.columns:
+                M.loc[i, "QuoteSource"] = "neutral_fallback"
+                M.loc[i, "QuoteAuthenticity"] = "synthetic"
+                M.loc[i, "QuoteSyntheticReason"] = "no_usable_book_probability"
+                M.loc[i, "Archived"] = False
         else:
             M.loc[i, "Odds"] = 1 - get_odds(
                 row["Line"], row["EV"], synth_dist, cv=cv, step=step, gate=_prep_gate or None
             )
-            M.loc[i, "Odds_synthetic"] = False
+            M.loc[i, "Odds_synthetic"] = True
+            if "QuoteSource" in M.columns:
+                M.loc[i, "QuoteSource"] = "pipeline_ev_inversion"
+                M.loc[i, "QuoteAuthenticity"] = "derived"
+                M.loc[i, "QuoteSyntheticReason"] = "ev_inversion"
+                M.loc[i, "Archived"] = False
     return M, step
 
 
 def _step_persist_matrix_and_comps(
-    M: pd.DataFrame, filepath, stat_data, *, deterministic: bool
+    M: pd.DataFrame,
+    filepath,
+    stat_data,
+    *,
+    deterministic: bool,
+    full_rebuild: bool = False,
+    immutable_input: bool = False,
 ) -> pd.DataFrame:
     """Trim the matrix, write parquet, save comps. Deterministic mode skips I/O."""
-    M = trim_matrix(M, 15000)
+    if immutable_input:
+        return M
+    M = trim_matrix(M, 15000, seed=MATRIX_TRIM_SEED)
+    if full_rebuild:
+        M = M.reindex(sorted(M.columns), axis=1)
     if not deterministic:
         M.to_parquet(filepath, compression="zstd", index=True)
-        stat_data.save_comps()
+        if not full_rebuild:
+            stat_data.save_comps()
     return M
 
 
@@ -861,9 +935,15 @@ def _step_build_splits(
         X_train = X_train[kept_cols]
         X_test = X_test[kept_cols]
 
-    X_test, X_validation, y_test, y_validation = train_test_split(
-        X_test, y_test, test_size=0.5, random_state=_VAL_SPLIT_RANDOM_STATE
+    held_out_identity = M.loc[test_idx, ["Player", "Date"]]
+    identity_hash = pd.util.hash_pandas_object(held_out_identity, index=False).to_numpy(
+        dtype=np.uint64
     )
+    validation_mask = identity_hash < _VALIDATION_HASH_THRESHOLD
+    X_validation = X_test.loc[validation_mask]
+    y_validation = y_test.loc[validation_mask]
+    X_test = X_test.loc[~validation_mask]
+    y_test = y_test.loc[~validation_mask]
 
     B_train = M.loc[X_train.index, ["Line", "Odds", "EV"]]
     B_test = M.loc[X_test.index, ["Line", "Odds", "EV"]]
@@ -885,6 +965,16 @@ def _step_build_splits(
     )
     odds_synthetic_test = (
         M.loc[X_test.index, "Odds_synthetic"] if "Odds_synthetic" in M.columns else None
+    )
+    quote_authenticity_validation = (
+        M.loc[X_validation.index, "QuoteAuthenticity"]
+        if "QuoteAuthenticity" in M.columns
+        else None
+    )
+    quote_authenticity_test = (
+        M.loc[X_test.index, "QuoteAuthenticity"]
+        if "QuoteAuthenticity" in M.columns
+        else None
     )
     return {
         "X": X,
@@ -908,6 +998,8 @@ def _step_build_splits(
         "archived_test": archived_test,
         "odds_synthetic_validation": odds_synthetic_validation,
         "odds_synthetic_test": odds_synthetic_test,
+        "quote_authenticity_validation": quote_authenticity_validation,
+        "quote_authenticity_test": quote_authenticity_test,
     }
 
 
@@ -1481,6 +1573,31 @@ def _step_compute_skill_metrics(
         Dict with: ``model_metrics``, ``book_metrics`` (or None),
         ``brier_skill_score``, ``kelly_shrinkage``.
     """
+    if len(val_book_proba) == 0:
+        metric_names = (
+            "brier_score",
+            "log_loss",
+            "roc_auc",
+            "expected_calibration_error",
+            "accuracy",
+            "precision_over",
+            "precision_under",
+            "predicted_over_rate",
+            "empirical_over_rate",
+            "prediction_std",
+            "nll",
+        )
+        logger.warning(
+            "no authentic book evidence for %s/%s; skill metrics set to nan",
+            league,
+            market,
+        )
+        return {
+            "model_metrics": dict.fromkeys(metric_names, float("nan")),
+            "book_metrics": None,
+            "brier_skill_score": float("nan"),
+            "kelly_shrinkage": float("nan"),
+        }
     book_proba_available = np.isfinite(val_book_proba).all()
     model_metrics = _compute_metrics(val_calibrated, y_class_val)
     if book_proba_available:
@@ -2096,6 +2213,7 @@ def _step_persist_artifacts(
     receiving_position: pd.Series | None = None,
     structural_strategy: str = BASE_STRUCTURAL_STRATEGY,
     structural_routes: dict[str, pd.Series] | None = None,
+    artifact_output: Path | None = None,
 ) -> None:
     """Write the scorecard-shaped test-set CSV and the model pickle.
 
@@ -2161,6 +2279,12 @@ def _step_persist_artifacts(
     # Pre-blend (model-only) over-probability — lets the offline scorecard report a
     # standalone Gate-1 CI alongside the fused one, attributing the pass to model vs book.
     X_test["P_standalone"] = y_proba_raw[:, 1]
+    quote_authenticity = splits.get("quote_authenticity_test")
+    if quote_authenticity is not None:
+        aligned_authenticity = pd.Series(quote_authenticity).reindex(X_test.index)
+        if aligned_authenticity.isna().any():
+            raise ValueError("test quote authenticity does not align to persisted rows")
+        X_test["QuoteAuthenticity"] = aligned_authenticity.to_numpy()
     _persist_player_metadata(X_test, splits)
     for column, value in artifact_identity_columns(filedict[MODEL_STRATEGY_MODEL_KEY]).items():
         X_test[column] = value
@@ -2182,7 +2306,10 @@ def _step_persist_artifacts(
     # Test-set CSVs remain inside the package data tree; only the model
     # pickle moves to the repo-root research dir so the package install
     # never carries the research artifacts.
-    if deterministic:
+    if artifact_output is not None:
+        csv_filepath = artifact_output / "test_sets" / f"{filename}.csv"
+        mdl_filepath = artifact_output / f"{filename}.mdl"
+    elif deterministic:
         strategy_subdir = _deterministic_dump_subdir(
             dist,
             zinb_mode,
@@ -2194,11 +2321,12 @@ def _step_persist_artifacts(
     else:
         csv_subdir = ""
         mdl_dir = Path(str(pkg_resources.files(data) / "models"))
-    csv_filepath = pkg_resources.files(data) / f"test_sets/{csv_subdir}{filename}.csv"
+    if artifact_output is None:
+        csv_filepath = pkg_resources.files(data) / f"test_sets/{csv_subdir}{filename}.csv"
+        mdl_filepath = mdl_dir / f"{filename}.mdl"
     Path(str(csv_filepath.parent)).mkdir(parents=True, exist_ok=True)
     X_test.to_csv(csv_filepath)
 
-    mdl_filepath = mdl_dir / f"{filename}.mdl"
     mdl_filepath.parent.mkdir(parents=True, exist_ok=True)
     with open(mdl_filepath, "wb") as outfile:
         pickle.dump(filedict, outfile, -1)
@@ -2833,6 +2961,39 @@ def _step_decode_predictions(
     return out
 
 
+def _split_quote_authenticity_mask(splits: dict, split: str) -> np.ndarray:
+    """Return a row-aligned mask for quotes that may contribute book evidence.
+
+    Current matrices carry the explicit three-state provenance contract. Legacy
+    matrices fall back to their archived/synthetic compatibility columns, and
+    truly provenance-free inputs retain their historical all-priced behavior.
+    """
+    index = splits[f"B_{split}"].index
+    authenticity = splits.get(f"quote_authenticity_{split}")
+    if authenticity is not None:
+        values = pd.Series(authenticity).reindex(index)
+        if values.isna().any() or not values.isin(("authentic", "derived", "synthetic")).all():
+            raise ValueError(f"{split} quote authenticity is missing, unaligned, or unsupported")
+        return values.eq("authentic").to_numpy(dtype=bool)
+
+    archived = splits.get(f"archived_{split}")
+    synthetic = splits.get(f"odds_synthetic_{split}")
+    if archived is None and synthetic is None:
+        return np.ones(len(index), dtype=bool)
+
+    archived_values = (
+        pd.Series(archived).reindex(index).fillna(False).astype(bool)
+        if archived is not None
+        else pd.Series(True, index=index)
+    )
+    synthetic_values = (
+        pd.Series(synthetic).reindex(index).fillna(True).astype(bool)
+        if synthetic is not None
+        else pd.Series(False, index=index)
+    )
+    return (archived_values & ~synthetic_values).to_numpy(dtype=bool)
+
+
 def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
     """SkewNormal branch: fit model_weight, blend sigma / skew on test + validation."""
     ev = decoded["ev"]
@@ -2840,6 +3001,8 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
     book_ev_test = splits["B_test"]["EV"].to_numpy()
     book_ev_val = splits["B_validation"]["EV"].to_numpy()
     y_val_result = splits["y_validation"]["Result"].to_numpy()
+    authentic_test = _split_quote_authenticity_mask(splits, "test")
+    authentic_val = _split_quote_authenticity_mask(splits, "validation")
 
     # SkewNormal book EVs are archived without a zero gate. The external hurdle
     # belongs to the positive-only model head, so the two blend endpoints are
@@ -2849,17 +3012,27 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
         if hist_gate > GATE_PUBLISH_THRESHOLD and decoded["gate_validation"] is not None
         else {}
     )
-    model_weight = calibration.fit_blend_weight(
-        blending,
-        ev_validation,
-        book_ev_val,
-        y_val_result,
-        "SkewNormal",
-        cv=cv,
-        model_sigma=decoded["sn_sigma_val"],
-        model_skew_alpha=decoded["sn_alpha_val"],
-        **_fit_gate_kwargs,
-    )
+    if authentic_val.any():
+        model_weight = calibration.fit_blend_weight(
+            blending,
+            ev_validation[authentic_val],
+            book_ev_val[authentic_val],
+            y_val_result[authentic_val],
+            "SkewNormal",
+            cv=cv,
+            model_sigma=decoded["sn_sigma_val"][authentic_val],
+            model_skew_alpha=decoded["sn_alpha_val"][authentic_val],
+            **{
+                key: (
+                    value[authentic_val]
+                    if isinstance(value, np.ndarray)
+                    else value
+                )
+                for key, value in _fit_gate_kwargs.items()
+            },
+        )
+    else:
+        model_weight = 1.0
     _test_gate_kwargs = (
         {"gate_model": decoded["gate_test"], "gate_book": 0.0}
         if hist_gate > GATE_PUBLISH_THRESHOLD and decoded["gate_test"] is not None
@@ -2870,8 +3043,10 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
         if hist_gate > GATE_PUBLISH_THRESHOLD and decoded["gate_validation"] is not None
         else {}
     )
+    test_weight = np.where(authentic_test, model_weight, 1.0)
+    val_weight = np.where(authentic_val, model_weight, 1.0)
     weighted_mean, sn_sigma_blend_test, sn_alpha_blend_test, gate_blend_test = fused_loc(
-        model_weight,
+        test_weight,
         ev,
         book_ev_test,
         cv,
@@ -2881,7 +3056,7 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
         **_test_gate_kwargs,
     )
     weighted_mean_val, sn_sigma_blend_val, sn_alpha_blend_val, gate_blend_val = fused_loc(
-        model_weight,
+        val_weight,
         ev_validation,
         book_ev_val,
         cv,
@@ -2922,19 +3097,24 @@ def _fuse_mixture(out, decoded, splits, cv, blending):
     y_val_result = splits["y_validation"]["Result"].to_numpy()
     _, mix_sd_val = _mixture_moments(**decoded["mix_val"])
     _, mix_sd_test = _mixture_moments(**decoded["mix_test"])
+    authentic_test = _split_quote_authenticity_mask(splits, "test")
+    authentic_val = _split_quote_authenticity_mask(splits, "validation")
 
-    model_weight = calibration.fit_blend_weight(
-        blending,
-        ev_validation,
-        book_ev_val,
-        y_val_result,
-        "SkewNormal",
-        cv=cv,
-        model_sigma=mix_sd_val,
-        model_skew_alpha=np.zeros_like(mix_sd_val),
-    )
+    if authentic_val.any():
+        model_weight = calibration.fit_blend_weight(
+            blending,
+            ev_validation[authentic_val],
+            book_ev_val[authentic_val],
+            y_val_result[authentic_val],
+            "SkewNormal",
+            cv=cv,
+            model_sigma=mix_sd_val[authentic_val],
+            model_skew_alpha=np.zeros(int(authentic_val.sum()), dtype=float),
+        )
+    else:
+        model_weight = 1.0
     weighted_mean, _, _, _ = fused_loc(
-        model_weight,
+        np.where(authentic_test, model_weight, 1.0),
         ev,
         book_ev_test,
         cv,
@@ -2943,7 +3123,7 @@ def _fuse_mixture(out, decoded, splits, cv, blending):
         skew_alpha=np.zeros_like(mix_sd_test),
     )
     weighted_mean_val, _, _, _ = fused_loc(
-        model_weight,
+        np.where(authentic_val, model_weight, 1.0),
         ev_validation,
         book_ev_val,
         cv,
@@ -2967,21 +3147,40 @@ def _fit_nonsn_weight(out, decoded, splits, base_dist, dist, cv, hist_gate, blen
     """Fit model_weight for the NegBin / Gamma families (shared preamble)."""
     book_ev_val = splits["B_validation"]["EV"].to_numpy()
     y_val_result = splits["y_validation"]["Result"].to_numpy()
+    authentic_val = _split_quote_authenticity_mask(splits, "validation")
 
     _zi_kwargs = {}
     if dist in ("ZINB", "ZAGamma") and hist_gate > 0:
         _zi_kwargs = {"gate_model": decoded["gate_validation"], "gate_book": hist_gate}
-    model_weight = calibration.fit_blend_weight(
-        blending,
-        decoded["ev_validation"],
-        book_ev_val,
-        y_val_result,
-        base_dist,
-        model_alpha=decoded["alpha_validation"],
-        model_r=decoded["r_validation"],
-        cv=cv,
-        **_zi_kwargs,
-    )
+    if authentic_val.any():
+        model_weight = calibration.fit_blend_weight(
+            blending,
+            decoded["ev_validation"][authentic_val],
+            book_ev_val[authentic_val],
+            y_val_result[authentic_val],
+            base_dist,
+            model_alpha=(
+                decoded["alpha_validation"][authentic_val]
+                if decoded["alpha_validation"] is not None
+                else None
+            ),
+            model_r=(
+                decoded["r_validation"][authentic_val]
+                if decoded["r_validation"] is not None
+                else None
+            ),
+            cv=cv,
+            **{
+                key: (
+                    value[authentic_val]
+                    if isinstance(value, np.ndarray)
+                    else value
+                )
+                for key, value in _zi_kwargs.items()
+            },
+        )
+    else:
+        model_weight = 1.0
     out["model_weight"] = model_weight
     return model_weight
 
@@ -2992,6 +3191,12 @@ def _fuse_negbin(out, decoded, splits, model_weight, cv, hist_gate, dist):
     ev_validation = decoded["ev_validation"]
     book_ev_test = splits["B_test"]["EV"].to_numpy()
     book_ev_val = splits["B_validation"]["EV"].to_numpy()
+    test_weight = np.where(
+        _split_quote_authenticity_mask(splits, "test"), model_weight, 1.0
+    )
+    val_weight = np.where(
+        _split_quote_authenticity_mask(splits, "validation"), model_weight, 1.0
+    )
 
     _zi_test = (
         {"gate_model": decoded["gate_test"], "gate_book": hist_gate} if dist == "ZINB" else {}
@@ -3000,7 +3205,7 @@ def _fuse_negbin(out, decoded, splits, model_weight, cv, hist_gate, dist):
         {"gate_model": decoded["gate_validation"], "gate_book": hist_gate} if dist == "ZINB" else {}
     )
     r_blend_test, p_test, gate_blend_test = fused_loc(
-        model_weight,
+        test_weight,
         ev,
         book_ev_test,
         cv,
@@ -3009,7 +3214,7 @@ def _fuse_negbin(out, decoded, splits, model_weight, cv, hist_gate, dist):
         **_zi_test,
     )
     r_blend_val, p_val, gate_blend_val = fused_loc(
-        model_weight,
+        val_weight,
         ev_validation,
         book_ev_val,
         cv,
@@ -3040,15 +3245,30 @@ def _fuse_dpo(out, decoded, splits, cv, blending):
     book_ev_test = splits["B_test"]["EV"].to_numpy()
     book_ev_val = splits["B_validation"]["EV"].to_numpy()
     y_val_result = splits["y_validation"]["Result"].to_numpy()
+    authentic_test = _split_quote_authenticity_mask(splits, "test")
+    authentic_val = _split_quote_authenticity_mask(splits, "validation")
 
-    model_weight = calibration.fit_dpo_weight(
-        decoded["ev_validation"], book_ev_val, y_val_result, decoded["phi_validation"], cv, blending
-    )
+    if authentic_val.any():
+        model_weight = calibration.fit_dpo_weight(
+            decoded["ev_validation"][authentic_val],
+            book_ev_val[authentic_val],
+            y_val_result[authentic_val],
+            decoded["phi_validation"][authentic_val],
+            cv,
+            blending,
+        )
+    else:
+        model_weight = 1.0
     weighted_mean, phi_blend_test, _ = fused_loc(
-        model_weight, decoded["ev"], book_ev_test, cv, "DPO", phi=decoded["phi"]
+        np.where(authentic_test, model_weight, 1.0),
+        decoded["ev"],
+        book_ev_test,
+        cv,
+        "DPO",
+        phi=decoded["phi"],
     )
     weighted_mean_val, phi_blend_val, _ = fused_loc(
-        model_weight,
+        np.where(authentic_val, model_weight, 1.0),
         decoded["ev_validation"],
         book_ev_val,
         cv,
@@ -3073,6 +3293,12 @@ def _fuse_gamma(out, decoded, splits, model_weight, cv, hist_gate, dist):
     ev_validation = decoded["ev_validation"]
     book_ev_test = splits["B_test"]["EV"].to_numpy()
     book_ev_val = splits["B_validation"]["EV"].to_numpy()
+    test_weight = np.where(
+        _split_quote_authenticity_mask(splits, "test"), model_weight, 1.0
+    )
+    val_weight = np.where(
+        _split_quote_authenticity_mask(splits, "validation"), model_weight, 1.0
+    )
 
     _zi_test = (
         {"gate_model": decoded["gate_test"], "gate_book": hist_gate} if dist == "ZAGamma" else {}
@@ -3083,7 +3309,7 @@ def _fuse_gamma(out, decoded, splits, model_weight, cv, hist_gate, dist):
         else {}
     )
     alpha_blend, beta_blend, gate_blend_test = fused_loc(
-        model_weight,
+        test_weight,
         ev,
         book_ev_test,
         cv,
@@ -3092,7 +3318,7 @@ def _fuse_gamma(out, decoded, splits, model_weight, cv, hist_gate, dist):
         **_zi_test,
     )
     alpha_blend_val, beta_blend_val, gate_blend_val = fused_loc(
-        model_weight,
+        val_weight,
         ev_validation,
         book_ev_val,
         cv,
@@ -3292,6 +3518,7 @@ def _step_select_distribution(
     zinb_mode: str,
     *,
     deterministic: bool,
+    isolated: bool = False,
     dist_training_loss: str = LOSS_AUTO,
     stabilization: str = "None",
     dist_override: str = LOSS_AUTO,
@@ -3310,7 +3537,8 @@ def _step_select_distribution(
 
     Mutates ``splits["X_train"]`` and ``splits["y_train_labels"]`` for the
     SkewNormal nonzero path. Also writes ``stat_zi[league][market]`` and
-    ``stat_cv[league][market]``; persists to JSON unless ``deterministic``.
+    ``stat_cv[league][market]``; persists to JSON unless ``deterministic`` or
+    ``isolated``.
 
     Args:
         splits: Output of ``_step_build_splits``.
@@ -3320,6 +3548,8 @@ def _step_select_distribution(
         target_normalization: Continuous-family slug for
             ``baselines.get_target_normalization``, or ``"none"`` for count families.
         deterministic: If True, skip persisting cv/zi to stat_calibration.json.
+        isolated: If True, keep the fitted cv/zi in process memory without
+            mutating canonical calibration config.
         sn_param: ``"direct"`` or ``"centered"`` — SkewNormal head
             parametrization (see :func:`_skewnormal_dist_obj`); ignored by the
             count families.
@@ -3349,7 +3579,7 @@ def _step_select_distribution(
     # this run's branch selection sees the gate), but skip persisting to
     # stat_calibration.json — deterministic runs use crippled hyperparameters
     # and must never mutate production config.
-    if not deterministic:
+    if not deterministic and not isolated:
         save_zi_config(stat_zi)
 
     player_stats = player_stats.apply(lambda x: x[x != 0]).groupby(level=0)
@@ -3454,7 +3684,8 @@ def _step_select_distribution(
             marginal_shape = float("nan")
 
     stat_cv[league][market] = cv
-    save_cv_std_config({league: {market: cv}}, {})
+    if not deterministic and not isolated:
+        save_cv_std_config({league: {market: cv}}, {})
 
     # Reflect SkewNormal nonzero filtering back into splits.
     splits["X_train"] = X_train
@@ -3475,6 +3706,23 @@ def _step_select_distribution(
         "global_mean": global_mean,
         "sn_param": sn_param,
     }
+
+
+def _step_persist_book_shape(
+    M: pd.DataFrame,
+    league: str,
+    market: str,
+    dist: str,
+    *,
+    deterministic: bool,
+    isolated: bool,
+) -> None:
+    """Fit canonical book-shape config only for a live, mutable training run."""
+    if deterministic or isolated or dist != "SkewNormal":
+        return
+    save_book_shape_config(
+        {league: {market: calibration.fit_book_shape(league, market, M["Result"], M["Line"])}}
+    )
 
 
 def _structural_gate_inputs(
@@ -3596,6 +3844,12 @@ def train_market(
     count_dispersion_objective: str = "crps",
     sn_param: str = "direct",
     matrix_only: bool = False,
+    full_rebuild: bool = False,
+    matrix_output: Path | None = None,
+    dependency_root: Path | None = None,
+    matrix_input: Path | None = None,
+    artifact_output: Path | None = None,
+    dependency_namespace: str | None = None,
 ) -> None:
     """Train or retrain one LightGBMLSS model for a single league/market pair.
 
@@ -3664,7 +3918,16 @@ def train_market(
     )
 
     dist_override = dist
-    init = _step_init_market(league, market, stat_data, archive, deterministic=deterministic)
+    isolated_run = matrix_input is not None or artifact_output is not None
+    init = _step_init_market(
+        league,
+        market,
+        stat_data,
+        archive,
+        deterministic=deterministic,
+        full_rebuild=full_rebuild,
+        isolated=isolated_run,
+    )
     filedict = init["filedict"]
     # init["dist"] is the existing pickle's family, used only for the pre-selection odds synth
     # below; the authoritative training dist (and the --dist override) is applied at
@@ -3682,6 +3945,10 @@ def train_market(
         deterministic=deterministic,
         force=force,
         need_model=init["need_model"],
+        full_rebuild=full_rebuild,
+        matrix_output=matrix_output,
+        dependency_root=dependency_root,
+        matrix_input=matrix_input,
     )
     if loaded is None:
         return
@@ -3689,8 +3956,24 @@ def train_market(
 
     M, step = _step_synthesize_odds(M, league, market, dist, cv)
     M = _step_persist_matrix_and_comps(
-        M, training_data_path, stat_data, deterministic=deterministic
+        M,
+        training_data_path,
+        stat_data,
+        deterministic=deterministic,
+        full_rebuild=full_rebuild,
+        immutable_input=matrix_input is not None,
     )
+    if full_rebuild:
+        repo_root = Path(__file__).resolve().parents[3]
+        write_matrix_manifest(
+            Path(training_data_path),
+            M,
+            stat_data,
+            league=league,
+            market=market,
+            cutoff_date=league_start_date,
+            repo_root=repo_root,
+        )
     if matrix_only:
         return
     with open(training_data_path, "rb") as matrix_stream:
@@ -3726,6 +4009,7 @@ def train_market(
         target_normalization,
         zinb_mode,
         deterministic=deterministic,
+        isolated=isolated_run,
         dist_training_loss=dist_training_loss,
         stabilization=stabilization,
         dist_override=dist_override,
@@ -3795,10 +4079,14 @@ def train_market(
     # fallback leg; book_skewnormal_shape reads them there only — the served blend stays
     # symmetric per the settling verdict. fit_book_shape's per-line-bin row floor self-filters
     # the synthetic fallback lines, so binning all rows still conditions on real book lines.
-    if not deterministic and dist == "SkewNormal":
-        save_book_shape_config(
-            {league: {market: calibration.fit_book_shape(league, market, M["Result"], M["Line"])}}
-        )
+    _step_persist_book_shape(
+        M,
+        league,
+        market,
+        dist,
+        deterministic=deterministic,
+        isolated=isolated_run,
+    )
 
     model = _step_build_lss_model(
         dist,
@@ -3939,7 +4227,14 @@ def train_market(
     test_calibrated_over = gate_inputs["test_calibrated_over"]
 
     val_book_proba = splits["B_validation"]["Odds"].to_numpy(dtype=float)
-    skill = _step_compute_skill_metrics(val_calibrated, y_class_val, val_book_proba, league, market)
+    authentic_val = _split_quote_authenticity_mask(splits, "validation")
+    skill = _step_compute_skill_metrics(
+        val_calibrated[authentic_val],
+        y_class_val[authentic_val],
+        val_book_proba[authentic_val],
+        league,
+        market,
+    )
     y_proba_filt = np.array([1 - test_calibrated_over, test_calibrated_over]).transpose()
 
     y_class = np.ravel(
@@ -4000,6 +4295,15 @@ def train_market(
         algorithm_payload=calibrated.get("structural_calibration_blob"),
         expert_models=(expert_models if structural_strategy in AFFINE_EXPERT_EXPERIMENTS else None),
     )
+    if dependency_namespace is not None:
+        filedict["dependency_identity"] = {
+            "namespace": dependency_namespace,
+            "schema_version": 1,
+            "league": league,
+            "market": market,
+            "training_cutoff": pd.to_datetime(M["Date"]).max().date().isoformat(),
+            "matrix_sha256": matrix_hash,
+        }
 
     _step_persist_artifacts(
         filedict=filedict,
@@ -4040,6 +4344,7 @@ def train_market(
         receiving_position=calibrated.get("receiving_candidate_test_position"),
         structural_strategy=structural_strategy,
         structural_routes=calibrated.get("structural_routes"),
+        artifact_output=artifact_output,
     )
 
     # Drift-monitoring SHAP: write per-cell |SHAP| + corr columns to the
@@ -4049,12 +4354,12 @@ def train_market(
     # Skip in deterministic mode (artifacts must not leak from eval runs) and
     # skip hurdle (HurdleZINB has two separate boosters; SHAP would need a
     # custom path — defer to a follow-up if hurdle drift becomes interesting).
-    if not deterministic and not use_hurdle:
+    if not deterministic and artifact_output is None and not use_hurdle:
         test_df = splits["X_test"].copy()
         test_df["Result"] = splits["y_test"]["Result"].to_numpy()
         compute_market_importance(league, market, model, test_df)
 
-    if not deterministic:
+    if not deterministic and artifact_output is None:
         report()
 
     del filedict
