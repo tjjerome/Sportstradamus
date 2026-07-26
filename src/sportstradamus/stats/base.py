@@ -44,7 +44,7 @@ from sportstradamus.helpers.io import read_gamelog
 from sportstradamus.helpers.training_quotes import PROVENANCE_COLUMNS, resolve_training_quote
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.collector_snapshots import DatedSnapshotStore, load_asof_features
-from sportstradamus.stats.model_dependencies import load_model_dependency
+from sportstradamus.stats.model_dependencies import DEPENDENCY_NAMESPACE, load_model_dependency
 
 # Safety ceiling for comp z-scores. Anything beyond ±5σ is already noise;
 # ±10 is generous and acts as a guard against near-zero (but non-NaN) stds
@@ -464,6 +464,7 @@ class Stats:
         # and ``get_stats`` skip the Python tuple-loop rebuild per gameday.
         self._comp_pairs_cache: dict = {}
         self.model_dependency_root: Path | None = None
+        self.model_dependency_namespace = DEPENDENCY_NAMESPACE
         self.snapshot_only_rebuild = False
         self.model_dependency_inventory: dict[str, str] = {}
         # NHL cold rebuilds repeatedly revisit the same immutable gamelog for every
@@ -2039,7 +2040,16 @@ class Stats:
         if filename not in self._volume_model_cache:
             dependency_root = getattr(self, "model_dependency_root", None)
             if dependency_root is not None:
-                dependency = load_model_dependency(dependency_root, self.league, market)
+                dependency = load_model_dependency(
+                    dependency_root,
+                    self.league,
+                    market,
+                    namespace=getattr(
+                        self,
+                        "model_dependency_namespace",
+                        DEPENDENCY_NAMESPACE,
+                    ),
+                )
                 self._volume_model_cache[filename] = dependency.payload
                 self.model_dependency_inventory[market] = dependency.sha256
             else:
@@ -2106,7 +2116,16 @@ class Stats:
         failures = []
         for market in self._training_dependency_markets(target_market):
             try:
-                dependency = load_model_dependency(self.model_dependency_root, self.league, market)
+                dependency = load_model_dependency(
+                    self.model_dependency_root,
+                    self.league,
+                    market,
+                    namespace=getattr(
+                        self,
+                        "model_dependency_namespace",
+                        DEPENDENCY_NAMESPACE,
+                    ),
+                )
                 self.model_dependency_inventory[market] = dependency.sha256
             except (FileNotFoundError, ValueError) as exc:
                 failures.append(str(exc))

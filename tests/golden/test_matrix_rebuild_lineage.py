@@ -64,6 +64,7 @@ def test_full_rebuild_ignores_cached_matrix_and_targets_quarantine(tmp_path):
         full_rebuild=True,
         matrix_output=output,
         dependency_root=dependency_root,
+        dependency_namespace="stage5-recovery-20260725-v1",
     )
 
     expected = _matrix()
@@ -72,6 +73,7 @@ def test_full_rebuild_ignores_cached_matrix_and_targets_quarantine(tmp_path):
     assert path == output / "NFL_passing-yards.parquet"
     assert stats.cutoffs == [pd.Timestamp("2024-01-01").date()]
     assert stats.model_dependency_root == dependency_root
+    assert stats.model_dependency_namespace == "stage5-recovery-20260725-v1"
 
 
 def test_full_rebuild_rejects_canonical_matrix_root():
@@ -184,6 +186,43 @@ def test_dependency_resolution_never_falls_back_to_serving_or_old_models(tmp_pat
 
     assert dependency.payload == payload
     assert dependency.path.parent == namespace
+
+
+def test_dependency_resolution_supports_fresh_named_namespace(tmp_path):
+    namespace_name = "stage5-recovery-20260725-v1"
+    namespace = tmp_path / namespace_name
+    namespace.mkdir()
+    payload = {
+        "dependency_identity": {
+            "namespace": namespace_name,
+            "schema_version": 1,
+            "league": "NFL",
+            "market": "attempts",
+            "training_cutoff": "2026-01-01",
+            "matrix_sha256": "fresh-matrix-sha",
+        },
+        "distribution": "SkewNormal",
+        "expected_columns": ["MeanYr"],
+        "model_version": "test-v2",
+        "trained_at": "2026-07-25T00:00:00+00:00",
+    }
+    (namespace / "NFL_attempts.mdl").write_bytes(pickle.dumps(payload))
+
+    dependency = load_model_dependency(
+        tmp_path,
+        "NFL",
+        "attempts",
+        namespace=namespace_name,
+    )
+
+    assert dependency.payload == payload
+    assert dependency.path.parent == namespace
+
+
+@pytest.mark.parametrize("namespace", ["", ".", "..", "parent/child", "../escape"])
+def test_dependency_resolution_rejects_unsafe_namespace(tmp_path, namespace):
+    with pytest.raises(ValueError, match="invalid dependency namespace"):
+        load_model_dependency(tmp_path, "NFL", "attempts", namespace=namespace)
 
 
 def test_mlb_hitter_rebuild_does_not_require_pitch_count_model(tmp_path):

@@ -229,7 +229,7 @@ def resolve_training_quote(
                 book_count=len(ev_rows),
             )
 
-    if _positive(fallback_ev):
+    if archive_ev_is_usable(fallback_ev, line):
         ev = float(fallback_ev)
         under = float(get_odds(line, ev, dist, cv=cv))
         if _probability(under):

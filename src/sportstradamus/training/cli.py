@@ -429,7 +429,7 @@ def _retry_calibrated_if_g4_only(
 @click.option(
     "--dependency-root",
     type=click.Path(path_type=Path, file_okay=False),
-    help="Root containing the versioned volume-v1 model-dependency namespace.",
+    help="Root containing a versioned model-dependency namespace.",
 )
 @click.option(
     "--frozen-matrix-dir",
@@ -443,7 +443,10 @@ def _retry_calibrated_if_g4_only(
 )
 @click.option(
     "--dependency-namespace",
-    help="Dependency identity namespace stamped onto isolated model artifacts (for example volume-v1).",
+    help=(
+        "Dependency identity namespace stamped onto isolated model artifacts, or selected "
+        "from --dependency-root during a full rebuild."
+    ),
 )
 def meditate(
     force,
@@ -504,11 +507,17 @@ def meditate(
         )
     if frozen_matrix_dir is not None and not bypass_withholding:
         raise click.UsageError("--frozen-matrix-dir requires --bypass-withholding")
-    if frozen_matrix_dir is None and (
-        artifact_output is not None or dependency_namespace is not None
-    ):
+    if frozen_matrix_dir is None and artifact_output is not None:
         raise click.UsageError(
-            "--artifact-output and --dependency-namespace require --frozen-matrix-dir"
+            "--artifact-output requires --frozen-matrix-dir"
+        )
+    if dependency_namespace is not None and frozen_matrix_dir is None and not full_rebuild:
+        raise click.UsageError(
+            "--dependency-namespace requires --frozen-matrix-dir or --full-rebuild"
+        )
+    if full_rebuild and dependency_namespace is not None and dependency_root is None:
+        raise click.UsageError(
+            "--dependency-namespace on a full rebuild requires --dependency-root"
         )
     log = get_logger("meditate")
     log.setLevel(log_level)

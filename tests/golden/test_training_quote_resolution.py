@@ -19,10 +19,16 @@ from sportstradamus.helpers.training_quotes import (
 )
 from sportstradamus.scripts.inject_backfilled_odds import _resolve_row
 from sportstradamus.stats import base as base_mod
+from sportstradamus.training.data import _clip_lines
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_two_part import (
     _explicit_quote_authenticity_mask,
 )
-from sportstradamus.training.pipeline import _step_synthesize_odds
+from sportstradamus.training.matrix_audit import audit_matrix
+from sportstradamus.training.pipeline import (
+    _PRETRIM_LINE_COLUMN,
+    _reconcile_clipped_neutral_quotes,
+    _step_synthesize_odds,
+)
 
 _AT_1 = datetime.datetime(2026, 5, 8, 10)
 _AT_2 = datetime.datetime(2026, 5, 8, 11)
@@ -103,6 +109,23 @@ def test_runaway_legacy_ev_falls_through_to_honest_synthetic_quote():
     assert quote.source == "neutral_fallback"
     assert quote.over_probability == 0.5
     assert quote.book_count == 0
+
+
+def test_runaway_combo_fallback_ev_falls_through_to_honest_synthetic_quote():
+    quote = resolve_training_quote(
+        [],
+        legacy_line=0.5,
+        fallback_line=0.5,
+        fallback_ev=3.0,
+        dist="SkewNormal",
+        cv=0.5,
+    )
+
+    assert quote.authenticity == SYNTHETIC
+    assert quote.source == "neutral_fallback"
+    assert quote.over_probability == 0.5
+    assert quote.book_count == 0
+    assert not archive_ev_is_runaway(quote.ev, quote.line)
 
 
 def test_runaway_threshold_allows_one_ulp_above_exact_five_x_boundary():
@@ -237,6 +260,75 @@ def test_pipeline_preserves_already_resolved_synthetic_quote_provenance():
     resolved, _ = _step_synthesize_odds(matrix, "WNBA", "AST", "SkewNormal", 0.5)
 
     pd.testing.assert_frame_equal(resolved, expected)
+
+
+def test_clipped_neutral_quote_regenerates_ev_from_the_clipped_line():
+    matrix = pd.DataFrame(
+        {
+            "Line": [8.5, 7.5],
+            _PRETRIM_LINE_COLUMN: [47.0, 7.5],
+            "Odds": [0.5, 0.5],
+            "EV": [47.0, 7.5],
+            "QuoteSource": ["neutral_fallback", "neutral_fallback"],
+            "QuoteAuthenticity": [SYNTHETIC, SYNTHETIC],
+        }
+    )
+
+    resolved = _reconcile_clipped_neutral_quotes(
+        matrix,
+        league="NFL",
+        market="targets",
+        dist="SkewNormal",
+        cv=config.stat_cv["NFL"]["targets"],
+    )
+
+    assert _PRETRIM_LINE_COLUMN not in resolved
+    assert resolved.loc[0, "Odds"] == 0.5
+    assert resolved.loc[0, "EV"] == pytest.approx(8.5)
+    assert resolved.loc[1, "EV"] == 7.5
+
+
+def test_line_clip_preserves_evidence_quotes_and_keeps_auditor_coherent(tmp_path):
+    rows = 100
+    matrix = pd.DataFrame(
+        {
+            "Player": [f"P{i}" for i in range(rows)] + ["Direct", "Derived", "Synthetic"],
+            "Date": pd.date_range("2026-01-01", periods=rows + 3),
+            "Result": [2.0] * (rows + 3),
+            "Line": [0.5 * (i % 10 + 1) for i in range(rows)] + [8.5, 6.5, 12.0],
+            "Odds": [0.5] * rows + [0.46718, 0.900301, 0.5],
+            "EV": [0.5 * (i % 10 + 1) for i in range(rows)]
+            + [31.043097, 32.5, 12.0],
+            "Archived": [False] * rows + [True, False, False],
+            "Odds_synthetic": [True] * rows + [False, True, True],
+            "QuoteSource": ["model_fallback"] * rows
+            + ["book_direct", "book_ev_inversion", "model_fallback"],
+            "QuoteAuthenticity": [SYNTHETIC] * rows + [AUTHENTIC, DERIVED, SYNTHETIC],
+            "QuoteSyntheticReason": ["no_usable_book_probability"] * rows
+            + [None, "ev_inversion", "no_usable_book_probability"],
+            "QuoteObservedAt": [pd.NaT] * rows + [_AT_1, _AT_1, pd.NaT],
+            "QuoteBookCount": [0] * rows + [1, 1, 0],
+        }
+    )
+    matrix[_PRETRIM_LINE_COLUMN] = matrix["Line"]
+    archived = matrix["Archived"]
+
+    clipped = _clip_lines(matrix, archived, int(archived.sum()))
+    assert clipped.loc[rows, "Line"] == 8.5
+    assert clipped.loc[rows + 1, "Line"] == 6.5
+    assert clipped.loc[rows + 2, "Line"] == 5.0
+
+    reconciled = _reconcile_clipped_neutral_quotes(
+        clipped,
+        league="NBA",
+        market="FTM",
+        dist="SkewNormal",
+        cv=config.stat_cv["NBA"]["FTM"],
+    )
+    path = tmp_path / "NBA_FTM.parquet"
+    reconciled.to_parquet(path)
+
+    assert audit_matrix(path)["violations"] == []
 
 
 def test_structural_pool_mask_uses_only_explicit_authenticity():

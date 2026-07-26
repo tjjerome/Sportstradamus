@@ -2,8 +2,6 @@
 
 import importlib.resources as pkg_resources
 import json
-import os.path
-import pickle
 import warnings
 from datetime import date, datetime, timedelta
 from io import StringIO
@@ -26,7 +24,6 @@ from sportstradamus.helpers import (
     get_mlb_pitchers,
     get_odds,
     remove_accents,
-    set_model_start_values,
     stat_cv,
     stat_dist,
 )
@@ -38,7 +35,6 @@ from sportstradamus.stats.base import (
     archive,
     clean_data,
     fetch_upcoming_games,
-    flatten_offers,
     scale_team_volume_to_budget,
 )
 from sportstradamus.stats.nba_client import NBAStatsError
@@ -1125,9 +1121,7 @@ class StatsNBA(Stats):
         df[team] = df[team].replace(fixups)
         df[opp] = df[opp].replace(fixups)
 
-    def get_volume_stats(
-        self, offers, date=datetime.today().date()
-    ):  # style: allow-complexity — pre-existing CC 12; NBA/WNBA branch + model/missing guards are irreducible
+    def get_volume_stats(self, offers, date=datetime.today().date()):
         """Predict minutes and normalize projections against the team-game minute budget.
 
         Scores each player in ``offers`` with the trained MIN model, then rescales
@@ -1136,67 +1130,8 @@ class StatsNBA(Stats):
         in place.
         """
         market = "MIN"
-        flat_offers = flatten_offers(offers, market)
-
-        self.profile_market(market, date)
-        self.get_depth(flat_offers, date)
-        playerStats = self.get_stats(market, flat_offers, date)
-
-        if playerStats.empty:
-            logger.warning(f"Gamelog missing - {date}")
+        if not self.load_volume_model_params(offers, market, date):
             return []
-
-        filename = "_".join([self.league, market]).replace(" ", "-")
-        filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
-        # Cache model loading — avoid re-reading pickle on every call
-        if not hasattr(self, "_volume_model_cache") or self._volume_model_cache is None:
-            if os.path.isfile(filepath):
-                with open(filepath, "rb") as infile:
-                    self._volume_model_cache = pickle.load(infile)
-            else:
-                logger.warning(f"{filename} missing")
-                return []
-
-        cols = self._volume_model_cache["expected_columns"]
-        if any(col not in playerStats.columns for col in cols):
-            logger.warning(f"Gamelog missing - {date}")
-            return []
-        playerStats = playerStats[cols]
-
-        model = self._volume_model_cache["model"]
-        dist = self._volume_model_cache["distribution"]
-
-        categories = ["Home", "Player position"]
-        if "Player position" not in playerStats.columns:
-            categories.remove("Player position")
-        for c in categories:
-            playerStats[c] = playerStats[c].astype("category")
-
-        set_model_start_values(model, dist, playerStats)
-
-        prob_params = pd.DataFrame()
-        preds = model.predict(playerStats, pred_type="parameters")
-        preds.index = playerStats.index
-        prob_params = pd.concat([prob_params, preds])
-
-        prob_params.sort_index(inplace=True)
-        playerStats.sort_index(inplace=True)
-
-        # Drop gate column for ZI distributions — not needed for budget normalization
-        prob_params.drop(columns=["gate"], inplace=True, errors="ignore")
-
-        rename_map = {
-            "loc": f"proj {market} loc",
-            "scale": f"proj {market} scale",
-            "alpha": f"proj {market} alpha",
-        }
-
-        self.playerProfile = self.playerProfile.join(
-            prob_params.rename(columns=rename_map), lsuffix="_obs"
-        )
-        self.playerProfile.drop(
-            columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True
-        )
 
         # Budget parameters derived from historical gamelogs (methodology in
         # scale_team_volume_to_budget docstring):

@@ -56,6 +56,7 @@ from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.hurdle import HurdleZINB
 from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
 from sportstradamus.skew_normal_centered import CenteredSkewNormal
+from sportstradamus.stats.model_dependencies import DEPENDENCY_NAMESPACE
 from sportstradamus.training import baselines, calibration, posthoc
 from sportstradamus.training.calibration import fit_book_weights
 from sportstradamus.training.config import (
@@ -657,6 +658,7 @@ def _step_load_matrix(
     full_rebuild: bool = False,
     matrix_output: Path | None = None,
     dependency_root: Path | None = None,
+    dependency_namespace: str = DEPENDENCY_NAMESPACE,
     matrix_input: Path | None = None,
 ) -> tuple[pd.DataFrame, object] | None:
     """Load cached training parquet, fetch new rows, concat. Returns None on early-exit.
@@ -703,6 +705,7 @@ def _step_load_matrix(
         stat_data.model_dependency_root = dependency_root or Path(
             str(pkg_resources.files(data) / "model_dependencies")
         )
+        stat_data.model_dependency_namespace = dependency_namespace
         stat_data.snapshot_only_rebuild = True
     elif os.path.isfile(canonical_path):
         filepath = canonical_path
@@ -788,6 +791,52 @@ def _step_synthesize_odds(
     return M, step
 
 
+_PRETRIM_LINE_COLUMN = "__PreTrimLine"
+
+
+def _reconcile_clipped_neutral_quotes(
+    M: pd.DataFrame,
+    *,
+    league: str,
+    market: str,
+    dist: str | None,
+    cv: float,
+) -> pd.DataFrame:
+    """Keep neutral synthetic quote tuples coherent after line clipping.
+
+    ``trim_matrix`` may clip a fallback line to the observed market range. A
+    neutral quote has no bookmaker probability or EV to preserve, so its EV
+    must be regenerated from the clipped line instead of retaining the
+    pre-clip value under misleading neutral provenance.
+    """
+    if _PRETRIM_LINE_COLUMN not in M:
+        return M
+    changed_line = ~np.isclose(
+        pd.to_numeric(M["Line"], errors="coerce"),
+        pd.to_numeric(M[_PRETRIM_LINE_COLUMN], errors="coerce"),
+        equal_nan=True,
+    )
+    if {"QuoteSource", "QuoteAuthenticity"} <= set(M.columns):
+        neutral = (
+            changed_line
+            & M["QuoteAuthenticity"].eq("synthetic")
+            & M["QuoteSource"].isin(("neutral_fallback", "model_fallback"))
+        )
+        if neutral.any():
+            prep_gate = (
+                stat_zi.get(league, {}).get(market, 0)
+                if dist in ("ZINB", "ZAGamma")
+                else 0
+            )
+            synth_dist = "SkewNormal" if dist == "Mixture" else dist
+            M.loc[neutral, "Odds"] = 0.5
+            M.loc[neutral, "EV"] = [
+                get_ev(line, 0.5, cv=cv, dist=synth_dist, gate=prep_gate or None)
+                for line in M.loc[neutral, "Line"]
+            ]
+    return M.drop(columns=_PRETRIM_LINE_COLUMN)
+
+
 def _step_persist_matrix_and_comps(
     M: pd.DataFrame,
     filepath,
@@ -796,11 +845,28 @@ def _step_persist_matrix_and_comps(
     deterministic: bool,
     full_rebuild: bool = False,
     immutable_input: bool = False,
+    league: str | None = None,
+    market: str | None = None,
+    dist: str | None = None,
+    cv: float = 1.0,
 ) -> pd.DataFrame:
     """Trim the matrix, write parquet, save comps. Deterministic mode skips I/O."""
     if immutable_input:
         return M
+    if _PRETRIM_LINE_COLUMN in M:
+        raise ValueError(f"reserved matrix column is present: {_PRETRIM_LINE_COLUMN}")
+    M[_PRETRIM_LINE_COLUMN] = M["Line"]
     M = trim_matrix(M, 15000, seed=MATRIX_TRIM_SEED)
+    if league is not None and market is not None:
+        M = _reconcile_clipped_neutral_quotes(
+            M,
+            league=league,
+            market=market,
+            dist=dist,
+            cv=cv,
+        )
+    else:
+        M = M.drop(columns=_PRETRIM_LINE_COLUMN)
     if full_rebuild:
         M = M.reindex(sorted(M.columns), axis=1)
     if not deterministic:
@@ -821,13 +887,11 @@ def _prune_uninformative_features(X_train: pd.DataFrame, categorical_cols: list[
     """Return the subset of ``X_train.columns`` LightGBM can split on.
 
     A column is dropped when ``X_train`` shows it is entirely NaN or has
-    fewer than two distinct non-NaN values (zero variance). Such columns
-    can never improve the loss — LightGBM has nothing to split on — so
-    dropping them is mathematically lossless. The win is wall-time:
-    per-trial Optuna cost scales linearly with feature count, and the
-    2026-05-27 no-filter rewire ballooned the candidate set to ~440
-    features per NFL cell, of which a non-trivial slice is sparse on a
-    given cell.
+    fewer than two distinct non-NaN values (zero variance). Exact ``overall``
+    snapshot aliases are also dropped when the unsuffixed canonical column
+    exists with identical train values. Such columns cannot add a split that
+    the retained data do not already provide. Removing only the explicit alias
+    preserves every other feature and its feature-subsampling weight.
 
     Categorical columns and ``_SEEDING_REQUIRED_COLUMNS`` are always kept.
     LightGBM treats categoricals as a special split type, and the seeding
@@ -843,6 +907,13 @@ def _prune_uninformative_features(X_train: pd.DataFrame, categorical_cols: list[
         if s.isna().all():
             continue
         if s.nunique(dropna=True) < 2:
+            continue
+        canonical = col.replace("_overall_", "_")
+        if (
+            canonical != col
+            and canonical in X_train
+            and s.equals(X_train[canonical])
+        ):
             continue
         keep.append(col)
     return keep
@@ -3948,6 +4019,7 @@ def train_market(
         full_rebuild=full_rebuild,
         matrix_output=matrix_output,
         dependency_root=dependency_root,
+        dependency_namespace=dependency_namespace or DEPENDENCY_NAMESPACE,
         matrix_input=matrix_input,
     )
     if loaded is None:
@@ -3962,6 +4034,10 @@ def train_market(
         deterministic=deterministic,
         full_rebuild=full_rebuild,
         immutable_input=matrix_input is not None,
+        league=league,
+        market=market,
+        dist=dist,
+        cv=cv,
     )
     if full_rebuild:
         repo_root = Path(__file__).resolve().parents[3]

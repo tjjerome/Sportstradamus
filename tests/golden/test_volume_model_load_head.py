@@ -23,6 +23,7 @@ model's own math is covered by its training tests, not here.
 
 import importlib.resources as pkg_resources
 import os
+from datetime import date
 
 import pandas as pd
 import pytest
@@ -30,6 +31,7 @@ import pytest
 from sportstradamus import data
 from sportstradamus.stats import base
 from sportstradamus.stats.base import Stats
+from sportstradamus.stats.nba import StatsNBA
 
 _DATE = "2024-01-01"
 # Offers shaped like the real call: a per-team mapping plus a per-market bucket,
@@ -302,6 +304,22 @@ def test_missing_pickle_returns_false_and_leaves_profile_untouched():
 
     assert result is False
     pd.testing.assert_frame_equal(stub.playerProfile, player_profile)
+
+
+def test_nba_minutes_uses_shared_dependency_loader(monkeypatch):
+    stats = StatsNBA.__new__(StatsNBA)
+    calls = []
+    offers = {"BOS": {"player a": {"Line": 30.5}}}
+    target_date = date(2024, 1, 1)
+
+    def load_volume_model_params(received_offers, market, received_date):
+        calls.append((received_offers, market, received_date))
+        return False
+
+    monkeypatch.setattr(stats, "load_volume_model_params", load_volume_model_params)
+
+    assert stats.get_volume_stats(offers, target_date) == []
+    assert calls == [(offers, "MIN", target_date)]
 
 
 def test_snapshot_only_dependency_inference_zero_aligns_absent_historical_features():

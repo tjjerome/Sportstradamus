@@ -1,8 +1,80 @@
 # Matrix integrity and structural-calibration repairs
 
-> Status: COMPLETE (Stages 0–5 executed; Stage 5 retains honest KILL evidence)
+> Status: COMPLETE (diagnosis, generalized retraining, scorecards, and durable evidence retention)
 
-> Current checkpoint: two real repeated-build checks rejected their inputs before retraining. The first
+> Final checkpoint: the accepted dependency and yards matrices remain canonical reusable inputs under
+> `src/sportstradamus/data/training_data/`. The complete 248 MiB diagnosis/retraining bundle—models,
+> test rows, scorecards, manifests, identity bridge, native probes, package/environment evidence, and
+> logs—now lives under
+> `src/sportstradamus/data/research/stage5-recovery-20260725-v1/`, not disposable quarantine.
+> Passing yards remains an honest Gate-1 KILL at `+0.0003`, row CI
+> `[-0.0067,+0.0074]`, clustered CI-high `+0.0085`; Gates 2–6 pass. Generalized rushing HPO
+> completes natively (37 trials, best `0.7474453`) after the exact rebuilt snapshot aliases are
+> pruned, and its diagnostic held-out scorecard passes all six gates (Gate 1 `-0.0242`, CI
+> `[-0.0326,-0.0157]`). Official rushing status remains a pre-holdout calibration KILL because
+> fold probability-pool weights `0.8191`, `0.7699`, `0.7897`, `0.8039`, `0.8005` breach the
+> unchanged `[0.2,0.8]` stability guard. The held-out artifact is explicitly diagnostic, not promoted
+> production evidence.
+
+> Current checkpoint: the owner authorized a separate fresh recovery after the retained-evidence
+> diagnosis closed. The new persistent root is
+> `src/sportstradamus/data/research/stage5-recovery-20260725-v1`, and the logical dependency namespace is
+> `stage5-fresh-20260725-v1`; neither reuses the deleted `volume-v1` identity. A 255-file protected
+> baseline was captured before recovery. A focused project-owned repair now threads a safe named namespace
+> through the existing dependency loader and full-rebuild path. The first targets rebuild reproduced
+> the prior current-workflow matrix exactly, then failed the generic auditor on one runaway-EV row.
+> A one-slate replay localized the defect: `trim_matrix` clipped a neutral synthetic line from 47 to
+> 8.5 without regenerating the paired neutral EV. A narrow post-clip reconciliation is implemented and
+> its focused namespace/quote tests are 28/28. Corrected targets A/B are accepted byte-for-byte at
+> SHA `958b5df0...` (14,144 rows, 483 columns), both pass the auditor, and `as_of` is their sole
+> manifest difference. Carries A/B are likewise accepted byte-for-byte at SHA `4aacd109...`
+> (6,444 rows, 483 columns), and attempts A/B at SHA `40e5acb5...` (2,401 rows, 483 columns);
+> every accepted repeat is auditor-clean with only `as_of` differing. The rejected targets matrix
+> remains quarantined and will not be trained. Attempts frozen HPO is complete and strictly bound to
+> the fresh namespace; carries and targets frozen HPO are also complete and strictly bound. Fresh
+> passing-yards A/B rebuilds are accepted byte-for-byte at SHA `79703d1f...` (2,420 rows,
+> 493 columns); both are manifest-valid and auditor-clean, their frames/dtypes/column order match
+> exactly, and `as_of` is the sole manifest difference. Fresh rushing-yards A/B is likewise accepted
+> byte-for-byte at SHA `683325f3...` (6,573 rows, 495 columns), with exact frames/dtypes/column order,
+> clean audits, valid manifests, and only `as_of` differing.
+> At the owner's direction, the
+> accepted dependency A/B matrices, all three fitted models, isolated test sets, manifests, recipe
+> bindings, hashes, and logs are now explicitly retained under the persistent recovery root; their
+> inventory is `DEPENDENCY_ARTIFACTS.md`. Downstream recovery will reuse them and will not retrain
+> attempts/carries/targets unless an integrity check fails. Accepted passing/rushing matrices follow
+> the same freeze-and-reuse rule in `STAGE5_MATRICES.md`; the independent A/B pair is the one-time
+> acceptance requirement, not permission for recurring rebuilds. The owner subsequently authorized
+> accepted passing/rushing replacements to be copied to
+> `src/sportstradamus/data/training_data/`. That promotion is complete after rushing's exact A/B
+> acceptance; all displaced local matrices were preserved in quarantine first. The owner extended
+> this authorization to every other accepted quarantined training matrix: attempts, carries, and
+> targets qualify via their corrected exact A/B evidence. The rejected pre-repair targets candidate
+> and diagnostic selected-feature probe frames do not qualify.
+>
+> Diagnosis checkpoint: the retained Wednesday passing predictions themselves change from PASS to KILL
+> under today's evidence rules: legacy positional/all-eligible scoring is `-0.0010` with clustered
+> CI-high `+0.0033`; stable identity membership alone is `+0.0017` with CI-high `+0.0067`; applying
+> authentic-only eligibility is `+0.0028` with CI-high `+0.0077`. The apparent reversal is therefore
+> primarily an evaluation-protocol correction, not sudden model deterioration. A fresh frozen-recipe
+> run closes the preregistered identity-aligned bridge exactly. Fresh passing Gate 1 is `+0.0003`,
+> row CI `[-0.0067,+0.0074]`, and clustered CI-high `+0.0085`; Gates 2–6 pass, but Gate 1 remains an
+> honest KILL. The `+0.0013147` historical-to-current point change decomposes into identity
+> `-0.0011532`, outcome/line `0`, bookmaker/eligibility `+0.0029494`, standalone model
+> `+0.0006755`, and fusion/calibration `-0.0011570`, closing to `2.17e-19`; the bookmaker term is
+> `+0.0026451` eligibility and only `+0.0003043` actual quote repricing. The current artifact
+> retains all 241 historical features and adds 149 current as-of/matchup/dependency features.
+> The rushing abort was ultimately localized to two exact duplicate `_overall_` snapshot aliases on
+> the rebuilt 4,079×447 train frame. Both Wednesday and current project code pass native LightGBMLSS
+> CV on the preserved pre-rebuild matrix and crash on the rebuilt values; dropping both aliases makes
+> unchanged native CV and full generalized HPO complete. The minimum repair removes only an exact
+> `_overall_` alias when its unsuffixed canonical column exists with identical train values, yielding
+> 4,079×445. No custom CV worker, package edit, thread/cache change, or broad feature deduplication remains.
+> Final read-only protected-content comparison finds 227/255 original hashes unchanged; all 28
+> deltas are training-matrix promotions already owned by the concurrent accepted-rebuild lanes.
+> No protected model, test set, calibration, archive, or configuration file differs.
+
+> Prior checkpoint (through `d92d3db`): two real repeated-build checks rejected their inputs before
+> retraining. The first
 > exposed unordered team-feature columns and tied player-depth ranks; the second exposed a few-ULP
 > `EV`/`Odds` drift from unordered latest-per-book archive rows. After stable book ordering was added, fresh
 > concurrent read-only rebuilds C/D matched exactly in frame contents, dtypes, column order, parquet bytes,
@@ -334,6 +406,9 @@ gates pass for a first-ship claim. Failure is valid evidence, not permission to 
 - Prefer vectorized cohort queries; no network dependency in reconstruction.
 - Preserve other-agent edits; inspect `git diff` before each patch.
 - Raw observed quotes remain separate from derived features. Applicability never enrolls a strategy.
+- Unresolved KILL evidence stays in a persistent quarantine—not `/tmp`—with identity columns,
+  predictions, quote provenance, artifact/matrix hashes, and calibration metadata until its
+  decomposition closes. A ledger aggregate is not permission to delete the row-level evidence.
 - Stop before promotion/overwrite, choosing integer settlement, treating `old_models` as authoritative
   without lineage, changing old blob meaning, editing board-search scope, weakening a guard, or adding a
   paid/network rebuild dependency.
@@ -349,6 +424,312 @@ gates pass for a first-ship claim. Failure is valid evidence, not permission to 
 
 ## 9. Ledger (append-only, newest first)
 
+- 2026-07-26 · Working tree prepared for passing-yards follow-up · the final Stage 5, initial
+  Stage 5 diagnosis, and corrupt-matrix promotion evidence trees now all live under
+  `src/sportstradamus/data/research/`; the disposable `research/quarantine/` directory is gone.
+  A stray canonical-adjacent `NHL_points.manifest.json` was removed only after confirming it was
+  byte-identical to the retained accepted manifest. The source tree contains no experimental CV
+  worker, packaged-library edit, broad duplicate-feature filter, or temporary diagnostic hook.
+  The focused next-agent brief is `docs/handoffs/nfl-passing-yards-gate1-recovery.md`
+- 2026-07-26 · Generalized yards recovery completed and all evidence moved into the data tree ·
+  exact `meditate` rushing HPO completed 37 native LightGBMLSS trials with best objective
+  `0.7474453449` and 364 rounds. The unchanged affine rho guard then KILLed the candidate before
+  artifact emission: final rho `0.7982534`, folds `[0.8191066, 0.7698826, 0.7896767,
+  0.8039475, 0.8005169]`. An external diagnostic-only replay of that exact winner permitted
+  held-out scoring without changing production validation. The resulting 1,006-row scorecard passes
+  all six gates: Gate 1 `-0.0242` with CI `[-0.0326,-0.0157]`, Gate 2 `0.19`, Gate 3
+  `0.12`, Gate 4 PIT-KS `0.0425`, Gate 5 debiased ECE `0.0034`, and Gate 6 star CI-high
+  `0.9651` versus reference `0.94`. During final scoring, the CLI loader was found to discard
+  persisted `QuoteAuthenticity`; retaining that column makes CLI Gate 1 honor the existing
+  authentic-only rule and exactly restores passing's preregistered `+0.0003` endpoint. No threshold
+  changed and no new regression tests were added per owner direction. The entire recovery bundle
+  was moved to `src/sportstradamus/data/research/stage5-recovery-20260725-v1/`; accepted matrices
+  remain under `data/training_data/` and must be reused unless integrity fails. `git diff --check`
+  passes; the protected-content comparison has 227/255 unchanged and 28 deltas, all confined to
+  separately authorized training-matrix promotion lanes
+- 2026-07-26 · Rushing native failure root-caused and minimal pipeline repair validated ·
+  isolated commit `7f52133` and current `d92d3db` both complete unchanged native LightGBMLSS
+  four-fold CV on the preserved pre-rebuild matrix, while both crash on the newly accepted frame.
+  Current code with the pre-rebuild matrix also completes at the full 447-column schema, proving
+  the regression is matrix-content-specific rather than CV orchestration, package, thread, cache,
+  or feature-count drift. The accepted frame contains exact duplicate NFL snapshot aliases:
+  `rec_sep_align_SEP_SCORE_asof == rec_sep_align_overall_SEP_SCORE_asof` and the equivalent
+  win-rate pair. Removing both `_overall_` aliases makes a 999-round native trial complete with
+  ordinary early stopping; removing either one alone still crashes. The internal train-only feature
+  pruner now removes only an exact `_overall_` alias when its canonical unsuffixed column exists;
+  the real `meditate` frame is 4,079×445 and retains LightGBMLSS-owned four-fold CV unchanged. All prior sequential-CV,
+  cache/thread, and incomplete-network schema experiments remain removed · next: run the frozen
+  Wednesday affine-groupcdf-bookpool-v1 rushing strategy from the accepted matrix into persistent
+  quarantine and score its untouched heldout
+- 2026-07-26 · Frozen-input schema leak isolated; narrow-frame repair rejected ·
+  plain `meditate` reproduced the allocator abort on its real 4,079×447 HPO frame, including with
+  one boosting round and the retained production-schema intersection; the identical four folds
+  complete when trained separately. Disabling `snapshot_only_rebuild` yielded 250 columns and native
+  trials, but only because the sandbox then failed its live schedule lookup; the retained production
+  schema has 443 columns, and the 437 shared current columns still crash. That feature-dropping
+  experiment and the project-owned CV workers are fully removed. The durable repair will persist and
+  validate model-feature columns with each matrix, then clear reconstruction state before HPO;
+  accepted matrices remain reusable · next: bind schema to matrix identity, audit quarantined model
+  schemas, and isolate the native concurrent-memory boundary without changing LightGBMLSS CV
+- 2026-07-26 · Parallel promotion remains fail-closed under the shared fallback-EV repair ·
+  `resolve_training_quote` now applies the existing archive-EV usability guard to positive fallback
+  EVs as well, preventing runaway `combo_ev_inversion` values from entering rebuilt matrices; the
+  focused resolver suite passes 14/14. `NBA_PTS` (14,966 rows, SHA `e1ac808b...`), `NBA_AST`
+  (14,902 rows, SHA `d4ae80a2...`), and `WNBA_FG3M` (14,673 rows, SHA `f89abb1f...`) were
+  manifest-valid, auditor-clean, and promoted with displaced canonical bytes preserved. The pre-fix
+  `NBA_PR` candidate (14,929 rows, SHA `6234f173...`) was rejected for one runaway derived-EV row
+  and canonical `NBA_PR` remains untouched; it is queued for one fresh post-fix matrix-only rebuild.
+  Pre-fix WNBA DREB/OREB candidates were likewise retained but not promoted and are being rebuilt
+  once with the corrected resolver. No HPO, model fitting, or canonical model change is part of
+  these lanes
+- 2026-07-26 · Confirmed-corruption rebuilds expanded to four parallel matrix-only lanes ·
+  no further HPO or model fitting is authorized. The main lane runs the 11 NBA cells and two
+  remaining NFL cells; dedicated lanes run all 11 NHL cells and all three WNBA cells, while an
+  audit worker promotes completed NBA outputs. Legacy WNBA/NHL volume payloads are copied only
+  into quarantine and wrapped with explicit source SHA, matrix SHA, cutoff, and namespace so the
+  strict loader can consume the exact existing models without changing canonical models. All 28
+  displaced parquets were hash-preserved before work began. `NBA_PTS` is the first parallel
+  completion, promoted auditor-clean at 14,966 rows / SHA `e1ac808b...`
+- 2026-07-26 · Corrected causal diagnosis separates passing explanation from rushing localization ·
+  rescoring the unchanged retained Wednesday predictions proves the passing reversal occurs before
+  retraining: legacy positional/all-eligible Gate 1 `-0.0010` (clustered CI-high `+0.0033`) becomes
+  `+0.0017` (`+0.0067`) under stable identity membership and `+0.0028` (`+0.0077`) after
+  authentic-only eligibility. The stable split removes a favorable legacy cohort, and synthetic
+  neutral probabilities no longer receive bookmaker credit. In the exact fresh bridge, quote
+  eligibility contributes `+0.0026451` while actual bookmaker repricing contributes only
+  `+0.0003043`; standalone-model drift is secondary and current fusion/calibration offsets more than
+  it adds. Passing's Wednesday PASS was therefore protocol-dependent and is invalid under the
+  corrected workflow. Rushing has only been localized, not root-caused: fresh probes eliminate a
+  universal CV/cache/thread/package/wrapper failure, but deletion of the exact failed matrix, trial-0
+  parameters, logs, and process state prevents discrimination among frame-specific, sampled-parameter,
+  and prior-heap-state causes. No speculative repair is supported
+- 2026-07-26 · Canonical-copy NBA minutes dependency trained and validated · the unchanged
+  15,000-row `NBA_MIN` parquet from `training_data` was used without rebuilding or promotion.
+  The isolated 282-feature SkewNormal/ratio artifact SHA is
+  `224f0f79cd778fe2c243364d10a86db329762a302dd22127ad0a1a05f69604f5`; its strict
+  `corrupt-promotion-20260725-v1` identity binds matrix SHA
+  `02671494e96d53f936c1e0a733b1385c876c92c5fffda23a84c0148900b0a859`,
+  cutoff 2026-06-13, model version `20260726.ratio_meanyr.3576341e`, and the isolated test
+  CSV is present. The 11-cell corrupted NBA rebuild batch is next
+- 2026-07-26 · Stage 5 diagnosis/recovery validation complete with no speculative repair · focused
+  source/evidence suite is 179/179, integration is 30/30, source/test Ruff and `git diff --check`
+  pass, and the full golden suite is 3,840 passed plus one expected XPASS with only the known
+  unchanged local-runtime failure in `test_ship_gate_invariant` (`model_stats.parquet` lists 11
+  already-shipped failing cells). The refreshed intentional CLI-help snapshot passes independently.
+  Protected comparison finds no missing files: 249/255 match content and metadata exactly; the only
+  six deltas are the five owner-authorized NFL matrix promotions plus the separately ledgered accepted
+  `MLB_total-bases` promotion, with destination hashes exactly matching their accepted identities.
+  No packaged library, canonical model/test/calibration/archive file, or board plan changed; no model
+  was promoted and nothing was pushed. Passing remains a gate KILL and rushing an execution KILL ·
+  next: owner decision only; reuse all retained matrices/dependency artifacts unless integrity fails
+- 2026-07-26 · Fresh passing evidence closes the historical/current Gate-1 bridge and remains KILL ·
+  the unchanged frozen study completed 68 trials in 1h00m42s with 1.39 GiB peak RSS; best trial 44
+  objective `0.889819`. Model/test hashes are `5fa2c6aa...` / `19742459...`, strictly bound to
+  accepted matrix `79703d1f...` and namespace `stage5-fresh-20260725-v1`. Fresh Gate 1 is `+0.0003`,
+  row CI `[-0.0067,+0.0074]`, clustered CI-high `+0.0085`; Gates 2–6 pass, but Gate 1 exceeds the
+  owner's `+0.005` threshold. Historical/current sets have 190 shared, 179 historical-only, and 188
+  current-only identities. The exact bridge attributes the `+0.0013147` change to identity
+  `-0.0011532`, outcome/line `0`, bookmaker/eligibility `+0.0029494`, standalone model
+  `+0.0006755`, and fusion/calibration `-0.0011570`, remainder `2.17e-19`. All 241 historical
+  features remain and 149 current features are added. This is legitimate cohort/quote/schema drift,
+  not a workflow defect; no repair or recipe change is supported. Full evidence is retained in
+  `PASSING_GATE1_DIAGNOSIS.md` · next: final focused/integration/golden validation and protected-file
+  delta review
+- 2026-07-25 · Fresh rushing native boundary does not reproduce the deleted-run abort · bound to
+  accepted matrix `683325f3...`, the current workflow forms the expected 4,601-row temporal train
+  split and then intentionally removes 522 zero outcomes for the frozen SkewNormal fit, yielding
+  4,079×250. Dataset creation, initialization scores, native construction, and complete explicit
+  four-fold construction all pass. Implicit and explicit CV pass at 1, 32, and the production
+  999-round cap; the cap runs early-stop at 550 / 492 rounds with 874 / 861 MiB peak RSS. The exact
+  project `run_hyper_opt` path also completes trial 0 with unchanged `nfold=4`, eight threads, and
+  9,216 MiB histogram pool (objective `0.795849`, 145 selected rounds, 928 MiB peak RSS). No
+  implicit/explicit, concurrency, cache, or Optuna-wrapper discriminator exists, so no speculative
+  HPO repair or full rushing retrain is authorized. Evidence and hashes are retained in
+  `RUSHING_NATIVE_DIAGNOSIS.md` · next: run fresh passing evidence and close its identity-aligned
+  historical/current Gate-1 bridge
+- 2026-07-25 · Five accepted quarantined matrices promoted with recoverable backups · accepted
+  attempts `40e5acb5...`, carries `4aacd109...`, targets `958b5df0...`, passing yards
+  `79703d1f...`, and rushing yards `683325f3...` now reside in
+  `src/sportstradamus/data/training_data/`. Destination hashes exactly match accepted sources and
+  a combined post-copy audit reports zero violations for all five. The displaced parquets and their
+  original hashes remain under `displaced-training-data/`; exact source/destination/backup bindings
+  are recorded in `PROMOTED_MATRICES.md`. Rejected and diagnostic probe files were not promoted
+- 2026-07-25 · Fresh rushing-yards matrix accepted after exact A/B repeat · independent serial
+  rebuilds completed in 32m58s / 34m48s with 2.18 / 2.16 GiB peak RSS and emitted byte-identical
+  6,573-row, 495-column parquets at SHA
+  `683325f31ceb75d065ef3374011491d96029b06fa7dfba5a62a5e1e805ca298e`. Frames, dtypes, column
+  order, and stable manifest fields match exactly; `as_of` is the only manifest difference. Both
+  manifests bind to the retained dependency hashes and both audits have zero violations, including
+  zero persisted nonfinite rows after the matching transient projection warning. Positions remain
+  QB 2,608 / RB 3,965 · next: back up and promote the five owner-authorized accepted matrices
+- 2026-07-25 · First confirmed-corrupt canonical matrix repaired and promoted · the single
+  `MLB_total-bases` cold rebuild completed at 64,493 rows / 144 columns and exactly reproduced
+  the previously accepted SHA `e87573fde9f29f2dd6116769c06e6d35facbeff5f6b103af8c03bde67357a479`.
+  Its manifest validates, all 64,493 quotes are authentic, and the candidate plus promoted
+  destination have zero identity, numeric, quote, provenance, position, or runaway-EV
+  violations. The displaced 64,490-row canonical parquet remains under the persistent recovery
+  root with its original hash
+- 2026-07-25 · Basketball cold rebuilds now consume the declared dependency artifact ·
+  `StatsNBA.get_volume_stats` delegates its duplicated MIN-model head to the shared loader, so
+  NBA/WNBA full rebuilds use the versioned dependency root already recorded in their manifests;
+  normal serving still resolves the same canonical model when no dependency root is set. The
+  focused loader/lineage suite is 23/23 with scoped Ruff and diff checks clean. Existing clean
+  `NBA_MIN`, `WNBA_MIN`, and `NHL_timeOnIce` parquets were copied byte-for-byte as isolated
+  dependency-training inputs; none was rebuilt or promoted
+- 2026-07-25 · Confirmed-corruption promotion lane opened alongside the five-file NFL lane ·
+  the live auditor identifies 29 corrupted training matrices; the concurrent lane owns
+  `NFL_rushing-yards`, while this lane owns the other 28 (NFL 2, MLB 1, NBA 11, WNBA 3,
+  NHL 11). Provenance-only cells are excluded by owner direction. Clean volume matrices may
+  be rebuilt only as isolated dependencies and will not be promoted. The owner waived new
+  A/B repeats because the repair workflow was already independently validated; each corrupted
+  cell now gets one cold rebuild, audit, displaced-file preservation, and promotion.
+  `MLB_total-bases` is first
+- 2026-07-25 · Owner extended conditional promotion to all other accepted quarantined matrices ·
+  accepted corrected attempts `40e5acb5...`, carries `4aacd109...`, and targets `958b5df0...` will
+  join passing/rushing in `src/sportstradamus/data/training_data/` after rushing acceptance. Current
+  destination SHAs are attempts `ec173773...`, carries `27740e69...`, targets `b909de35...`;
+  displaced files will be preserved in quarantine. Rejected pre-repair targets and diagnostic
+  selected-feature probe frames are explicitly excluded
+- 2026-07-25 · Owner authorized conditional promotion of accepted passing/rushing replacements ·
+  the exact target is `src/sportstradamus/data/training_data/`; current local parquets are passing
+  SHA `ccb8a18e...` and rushing SHA `e52b9888...`. No file has been overwritten yet. After rushing
+  passes exact A/B acceptance, preserve both displaced matrices in quarantine, copy the accepted
+  parquets, verify destination hashes, and record the intentional protected-file delta
+- 2026-07-25 · Owner directed accepted Stage 5 matrices be retained and reused · passing-yards A/B
+  is frozen in persistent local quarantine at SHA `79703d1f...`; rushing-yards will be frozen after
+  its one-time independent A/B acceptance. `STAGE5_MATRICES.md` records the paths, hashes, identity,
+  and reuse rule. Neither market will be rebuilt again unless hash or manifest integrity fails
+- 2026-07-25 · Fresh passing-yards matrix accepted after exact A/B repeat · independent serial
+  rebuilds completed in 31m38s / 31m48s with 2.01 / 2.02 GiB peak RSS and emitted byte-identical
+  2,420-row, 493-column parquets at SHA
+  `79703d1f365acdb091c303260c8673d09ed1d3201346ffc8b327b54e28795a4c`. Frames, dtypes, column
+  order, and stable manifest fields match exactly; `as_of` is the only manifest difference. Both
+  manifests bind to the three retained dependency model hashes and both matrices pass the auditor
+  with zero identity, numeric, quote, provenance, position, or runaway-EV violations. Each contains
+  1,531 authentic and 889 synthetic rows. No HPO has started · next: independently rebuild and
+  audit rushing-yards A/B from the same retained namespace
+- 2026-07-25 · Fresh dependency evidence marked for permanent local quarantine retention · accepted
+  A/B matrices, all three fitted dependency models, test sets, manifests, frozen-recipe bindings,
+  hashes, and logs remain under `src/sportstradamus/data/research/stage5-recovery-20260725-v1`; the explicit
+  inventory and reuse rule are in `DEPENDENCY_ARTIFACTS.md`. This is durable local evidence, not
+  canonical promotion or archive mutation. Passing- and rushing-yards recovery will reuse
+  `stage5-fresh-20260725-v1` and will not repeat dependency matrix/model work unless hash validation
+  fails · next: finish passing-yards matrix A, audit it, and build independent B
+- 2026-07-26 · Fresh three-model dependency namespace complete and strictly validated · targets
+  completed 67 trials in 1h01m22s with 2.14 GiB peak RSS; best trial 41 objective `0.383023`.
+  Its expected bookless warning was emitted because all 14,144 target rows are explicitly synthetic.
+  Targets model SHA is
+  `5ca30bd897f8c1248ef277119412d6b821a8f0e3b72984f8db173de1d5e224a6`, test CSV SHA is
+  `c2a75add52a8279768fde08fe9858bc860946178e5069e9fd37581b140307629`, and its 427-feature
+  SkewNormal/ratio/direct artifact binds exactly to corrected matrix `958b5df0...`. The strict loader
+  now validates attempts, carries, and targets together under `stage5-fresh-20260725-v1`, each with
+  its own new timestamp/version/cutoff and exact accepted-matrix SHA. No canonical or packaged file
+  changed · next: independently rebuild and audit passing- and rushing-yards A/B from this namespace
+- 2026-07-26 · Fresh carries dependency HPO complete and strictly validated · the unchanged frozen
+  study completed 56 trials in 1h01m50s with 2.37 GiB peak RSS; best trial 49 objective `0.391397`.
+  The isolated model SHA is
+  `06a490eec3a481f956f6887a0e0c3c52919b9e2873f9aa743bf3a607a8f4c6c3`, test CSV SHA is
+  `e277336f0dfa32f6b8e0fcec0bad98bc6d4d8ae1723b62d7eb69264620079655`, and the strict loader
+  validates its 447-feature SkewNormal/ratio/direct schema, timestamp/cutoff, fresh namespace, and
+  exact binding to carries matrix `4aacd109...`. No canonical or packaged file changed · next: run
+  targets HPO alone with the same frozen recipe
+- 2026-07-26 · Fresh attempts dependency HPO complete and strictly validated · the unchanged frozen
+  SkewNormal/ratio/CRPS/blend-NLL/loss/direct/no-stabilization/no-posthoc study completed 75 trials
+  in 1h00m44s with 1.37 GiB peak RSS; best trial 53 objective `0.324914`. The isolated model SHA is
+  `796aa8fb19c328b8e2ca1e741f8ba9a3cef2f179c4bc311c9888ca9da85f4ac0`, test CSV SHA is
+  `9e24309135721e44d8e4dc4381eabb6135a4a350bbc5a3cd8d04d42244fd1949`, and the strict dependency
+  loader validates its 390-feature SkewNormal/ratio/direct schema, timestamp/cutoff, fresh
+  `stage5-fresh-20260725-v1` identity, and exact matrix binding to `40e5acb5...`. No canonical or
+  packaged file changed · next: run carries HPO alone with the same frozen recipe
+- 2026-07-25 · Fresh dependency matrix namespace complete after exact corrected A/B repeats ·
+  attempts A/B completed in 14m41s / 14m49s with 2.03 / 2.02 GiB peak RSS and emitted
+  byte-identical 2,401-row, 483-column parquets at SHA
+  `40e5acb5db5a9b57f8d050830706ca5e5574e9b0300c81e869a4037459a0815a`. Both are
+  manifest-valid and auditor-clean with 1,506 authentic plus 895 synthetic rows; frames, dtypes,
+  column order, and stable manifest fields match exactly and `as_of` is the sole difference.
+  Together with accepted targets `958b5df0...` and carries `4aacd109...`, the fresh dependency
+  matrix root is complete. No HPO has started and the rejected pre-repair targets file remains
+  quarantined · next: run the three frozen dependency studies serially into
+  `stage5-fresh-20260725-v1`
+- 2026-07-25 · Corrected fresh carries matrix accepted after exact A/B repeat · independent serial
+  rebuilds completed in 15m15s / 15m14s with 2.13 / 2.15 GiB peak RSS and emitted byte-identical
+  6,444-row, 483-column parquets at SHA
+  `4aacd109f44b77e9642ee447065414389259ae445f20b78cd8786acd874939de`. Frames, dtypes, column
+  order, and stable manifest fields match exactly; `as_of` is the only manifest difference. Both
+  matrices pass the auditor with zero identity, numeric, quote, provenance, position, or runaway-EV
+  violations and contain 3,343 authentic plus 3,101 synthetic rows. No HPO has started · next:
+  independently rebuild and accept attempts A/B, then freeze the three accepted dependency inputs
+- 2026-07-25 · Corrected fresh targets matrix accepted after exact A/B repeat · independent serial
+  rebuilds completed in 16m30s / 16m24s with 2.43 GiB peak RSS and emitted byte-identical
+  14,144-row, 483-column parquets at SHA
+  `958b5df003c1c54dadd6cbf6e45abd381925dff40c524c478b03f2e244a9dc1e`. Frames, dtypes, column
+  order, and stable manifest fields match exactly; `as_of` is the only manifest difference. Both
+  auditor reports have zero identity, nonfinite, quote, provenance, position, or runaway-EV
+  violations. Relative to rejected `f9dfcdf8...`, all identities and non-EV values are unchanged;
+  the repair regenerates EV on exactly 931 neutral rows whose lines were clipped, including the sole
+  prior runaway. Full logs persist under the recovery root; no HPO has started · next: independently
+  rebuild and accept carries A/B, then attempts A/B
+- 2026-07-25 · Fresh targets attempt A rejected; line-clip provenance defect localized and repaired ·
+  the independently rebuilt 14,144-row targets matrix reproduced SHA `f9dfcdf8...`, but the auditor
+  correctly found Dalton Schultz 2023-10-08 as a runaway tuple: neutral resolver output
+  `(Line=47, Odds=0.5, EV=47)` was later clipped to `Line=8.5` while retaining `EV=47` and neutral
+  provenance. An isolated one-slate replay proves the corruption occurs after quote resolution.
+  Project-owned persistence now records the pre-trim line and regenerates EV only for neutral/model
+  synthetic quotes whose line was clipped; authentic and derived evidence, recipes, gates, packages,
+  and canonical files are untouched. Focused quote plus lineage tests are 28/28, scoped Ruff and
+  `git diff --check` pass. The failed A matrix is retained as rejected evidence · next: independently
+  rebuild and audit corrected targets A/B before carries or HPO
+- 2026-07-25 · Owner authorized fresh dependency/matrix recovery under a new identity · persistent
+  root `src/sportstradamus/data/research/stage5-recovery-20260725-v1` is initialized with the still-exact 255-file
+  fingerprints (`645a3bdb...` content, `8a8cdbcb...` metadata). The hard-coded `volume-v1` loader
+  would have mislabeled fresh evidence, so the smallest workflow repair parameterizes a safe
+  single-directory namespace and threads the existing CLI namespace option into full rebuilds.
+  `stage5-fresh-20260725-v1` is now the recovery identity; legacy callers retain the `volume-v1`
+  default. Focused lineage/namespace tests are 15/15, scoped Ruff and `git diff --check` pass. No
+  packaged code, recipe, gate, canonical artifact, archive, calibration, or board plan changed ·
+  next: independently rebuild and compare attempts/carries/targets matrices before any dependency HPO
+- 2026-07-25 · Diagnosis finalized without speculative repair or retrain · focused quote-provenance
+  and artifact-persistence characterization is 18/18; source Ruff and `git diff --check` pass;
+  integration is 30/30. Full golden is 3,831 passed / 1 expected xfail / 1 known unchanged failure in
+  `test_ship_gate_invariant` from the local runtime `model_stats.parquet`, identical to the baseline
+  validation state. All 255 protected canonical files match the pre-probe SHA-256 and
+  size/mtime/mode fingerprints exactly; the final fingerprint-file SHAs remain `645a3bdb...` and
+  `8a8cdbcb...`. Manual review found only the handoff change in the tracked tree; diagnostic scripts,
+  row ledgers, sampled parameters, subprocess stdout/stderr, timing/RSS logs, and summaries remain
+  isolated under `src/sportstradamus/data/research/stage5-diagnosis-d92d3db`. No full HPO, package/source edit,
+  recipe change, canonical/archive/board write, artifact promotion, or push occurred. Passing retains
+  an honest gate KILL pending newly earned row evidence; rushing retains an honest execution KILL
+  because the unavailable failing frame cannot be replaced by a passing control · next: owner may
+  supply/re-earn the exact dependency/matrix namespace in a separately authorized recovery; until
+  then, do not implement a CV repair or rerun held-out tuning
+- 2026-07-25 · Passing attribution closed to retained-artifact limits; rushing repair not supported ·
+  the hash-bound historical passing CSV (`d9bc85ad...`) exactly reproduces Gate 1 `-0.0010`, row CI
+  `[-0.0051,+0.0032]`, and player-clustered CI-high `+0.0033`. All 369 aligned outcomes and lines are
+  unchanged in the current canonical control. Applying only the stable identity membership moves the
+  same historical predictions to `+0.0017`; applying current authentic eligibility as well moves the
+  184-row historical intersection to `+0.00282`, close in scale to the deleted retry's durable
+  `+0.0030` on 363 different authentic identities. The `+0.00018` numerical difference is explicitly
+  non-additive and not claimed as a closed bridge. The retained artifact has 241 features versus the
+  deleted current artifact's recorded 390; exact standalone/fusion attribution awaits newly earned
+  evidence and remains preregistered. The identity ledger is SHA `4523e76c...` and retained
+  attribution is `52e98d0c...`. For rushing, an available
+  category-preserved current-canonical control exercised the unchanged sampled parameters, 8 threads,
+  9,216 MB histogram pool, and complete four-fold coverage. Dataset/init/native construction,
+  implicit and explicit CV at 1/32/999 rounds, and all four folds individually at the production cap
+  pass; implicit CV completed 537 reported rounds at 770,068 KiB peak RSS and explicit CV 539 at
+  755,252 KiB. Probe summary SHA is `d370a600...`. Because no controlled variable discriminates the
+  deleted-frame SIGSEGV, the mechanically selected response is execution KILL: no explicit-fold,
+  sequential-CV, cache/thread, Optuna-catching, package, or source change, and no retrain. Unresolved
+  KILL artifacts are now explicitly required to persist with row evidence and metadata · next: finish
+  validation and exact protected-file comparison
+- 2026-07-25 · Post-Stage-5 diagnosis opened from the protected baseline · branch
+  `feature/model-improvement` is clean at `d92d3db`; all 255 protected canonical files match the prior
+  content and size/mtime/mode fingerprints exactly. Persistent ignored quarantine
+  `src/sportstradamus/data/research/stage5-diagnosis-d92d3db` now owns every new probe and artifact. Deleted
+  Stage 5 matrices, dependencies, models, CSVs, and logs remain unavailable and will not be relabeled;
+  no full HPO, canonical write, archive write, package edit, or board-plan change has started · next:
+  reproduce the retained passing scorecard and localize both failures with read-only identity/native
+  probes
 - 2026-07-25 · Session plan closed, protected state verified, and recovery residue removed ·
   all 255 protected canonical files match their pre-training SHA-256 and size/mtime/mode
   fingerprints exactly. Full source Ruff and `git diff --check` pass; integration is 30/30; the two

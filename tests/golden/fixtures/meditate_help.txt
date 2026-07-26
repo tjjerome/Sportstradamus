@@ -149,13 +149,13 @@ Options:
                                   Requires --matrix-only and --matrix-output.
   --matrix-output DIRECTORY       Quarantine directory for full-rebuild parquet
                                   and manifest outputs.
-  --dependency-root DIRECTORY     Root containing the versioned volume-v1 model-
-                                  dependency namespace.
+  --dependency-root DIRECTORY     Root containing a versioned model-dependency
+                                  namespace.
   --frozen-matrix-dir DIRECTORY   Directory of lineage-validated matrices to
                                   train without rebuilding or rewriting them.
   --artifact-output DIRECTORY     Isolated directory for model and test-set
                                   artifacts from frozen-matrix training.
   --dependency-namespace TEXT     Dependency identity namespace stamped onto
-                                  isolated model artifacts (for example
-                                  volume-v1).
+                                  isolated model artifacts, or selected from
+                                  --dependency-root during a full rebuild.
   --help                          Show this message and exit.

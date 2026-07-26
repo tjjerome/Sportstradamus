@@ -377,6 +377,7 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
         "Line",
         "Player",
         "Date",
+        "QuoteAuthenticity",
         "EV",
         "Blended_EV",
     } & set(df.columns)

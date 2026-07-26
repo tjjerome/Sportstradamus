@@ -6,6 +6,8 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
+from sportstradamus.helpers.training_quotes import SYNTHETIC
+
 # Quantile cutoff for counting non-archived rows: players below the 25th
 # percentile of usage on each game day are excluded (marginal players rarely
 # accrue a sportsbook line, so their rows add noise without adding signal).
@@ -139,7 +141,12 @@ def _clip_lines(M: pd.DataFrame, archived_mask, n_archived: int) -> pd.DataFrame
     else:
         line_floor = M["Line"].quantile(_LINE_CLIP_LOW)
         line_ceil = M["Line"].quantile(_LINE_CLIP_HIGH)
-    M["Line"] = M["Line"].clip(line_floor, line_ceil)
+    clip_mask = (
+        M["QuoteAuthenticity"].eq(SYNTHETIC)
+        if "QuoteAuthenticity" in M
+        else pd.Series(True, index=M.index)
+    )
+    M.loc[clip_mask, "Line"] = M.loc[clip_mask, "Line"].clip(line_floor, line_ceil)
     return M
 
 

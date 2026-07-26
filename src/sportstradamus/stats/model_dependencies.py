@@ -22,14 +22,34 @@ class ModelDependency:
     sha256: str
 
 
-def dependency_path(root: Path, league: str, market: str) -> Path:
+def _validate_namespace(namespace: str) -> str:
+    """Return a safe single-directory dependency namespace."""
+    if not namespace or Path(namespace).name != namespace or namespace in {".", ".."}:
+        raise ValueError(f"invalid dependency namespace: {namespace!r}")
+    return namespace
+
+
+def dependency_path(
+    root: Path,
+    league: str,
+    market: str,
+    *,
+    namespace: str = DEPENDENCY_NAMESPACE,
+) -> Path:
     """Resolve a dependency path without consulting the prunable serving model root."""
-    return root / DEPENDENCY_NAMESPACE / f"{market_file_slug(league, market)}.mdl"
+    return root / _validate_namespace(namespace) / f"{market_file_slug(league, market)}.mdl"
 
 
-def load_model_dependency(root: Path, league: str, market: str) -> ModelDependency:
+def load_model_dependency(
+    root: Path,
+    league: str,
+    market: str,
+    *,
+    namespace: str = DEPENDENCY_NAMESPACE,
+) -> ModelDependency:
     """Load and validate one artifact from the versioned dependency namespace."""
-    path = dependency_path(root, league, market)
+    namespace = _validate_namespace(namespace)
+    path = dependency_path(root, league, market, namespace=namespace)
     if not path.is_file():
         raise FileNotFoundError(
             f"missing matrix dependency {league} {market}: {path}; "
@@ -39,7 +59,7 @@ def load_model_dependency(root: Path, league: str, market: str) -> ModelDependen
     payload = pickle.loads(raw)
     identity = payload.get("dependency_identity")
     expected_identity = {
-        "namespace": DEPENDENCY_NAMESPACE,
+        "namespace": namespace,
         "schema_version": DEPENDENCY_SCHEMA_VERSION,
         "league": league,
         "market": market,
