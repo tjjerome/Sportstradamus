@@ -530,6 +530,66 @@ class Archive:
             inputs[entity] = (grouped[entity], legacy_line)
         return inputs
 
+    def get_ev_line_inputs(
+        self,
+        league: str,
+        market: str,
+        date: str | datetime.date,
+        entities: list[str],
+        *,
+        at: datetime.datetime | None = None,
+    ) -> dict[str, tuple[float, float]]:
+        """Batch the legacy weighted EV and consensus line for one slate."""
+        d = _safe_date(date)
+        ordered_entities = sorted(set(entities))
+        if d is None or not ordered_entities:
+            return {}
+        placeholders = ",".join("?" for _ in ordered_entities)
+
+        odds_params: list = [league, market, d, *ordered_entities]
+        odds_sql = (
+            "SELECT entity, book, ev FROM ("
+            "  SELECT entity, book, ev, observed_at, "
+            "         ROW_NUMBER() OVER ("
+            "             PARTITION BY entity, book ORDER BY observed_at DESC"
+            "         ) AS rn "
+            "  FROM odds "
+            f"  WHERE league=? AND market=? AND game_date=? AND entity IN ({placeholders})"
+        )
+        if at is not None:
+            odds_sql += " AND observed_at <= ?"
+            odds_params.append(at)
+        odds_sql += ") WHERE rn = 1 ORDER BY entity, book"
+        ev_rows: dict[str, list[tuple[str, float]]] = {
+            entity: [] for entity in ordered_entities
+        }
+        for entity, book, ev in self._connection.execute(odds_sql, odds_params).fetchall():
+            ev_rows[entity].append((book, ev))
+
+        line_params: list = [league, market, d, *ordered_entities]
+        line_sql = (
+            "SELECT DISTINCT entity, line FROM lines "
+            f"WHERE league=? AND market=? AND game_date=? AND entity IN ({placeholders})"
+        )
+        if at is not None:
+            line_sql += " AND observed_at <= ?"
+            line_params.append(at)
+        line_values: dict[str, list[float]] = {entity: [] for entity in ordered_entities}
+        for entity, line in self._connection.execute(line_sql, line_params).fetchall():
+            if line is not None:
+                line_values[entity].append(float(line))
+
+        inputs = {}
+        for entity in ordered_entities:
+            rows = ev_rows[entity]
+            ev = self._weighted_book_ev(league, market, rows) if rows else float("nan")
+            values = line_values[entity]
+            line = float(np.floor(2 * np.median(values)) / 2) if values else 0.0
+            if np.isnan(line):
+                line = 0.0
+            inputs[entity] = (ev, line)
+        return inputs
+
     def get_ev(self, league, market, date, player, *, at: datetime.datetime | None = None):
         """Weighted-average player-prop EV across books for one slate entry.
 

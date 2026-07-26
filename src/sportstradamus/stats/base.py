@@ -466,6 +466,62 @@ class Stats:
         self.model_dependency_root: Path | None = None
         self.snapshot_only_rebuild = False
         self.model_dependency_inventory: dict[str, str] = {}
+        # NHL cold rebuilds repeatedly revisit the same immutable gamelog for every
+        # slate. Cache normalized dates and the active gameday only in that mode;
+        # live serving remains uncached so in-place collector updates are visible.
+        self._snapshot_date_cache: dict[str, tuple[tuple[int, int, str], pd.Series]] = {}
+        self._snapshot_gameday_cache: tuple[
+            tuple[int, int, str, date], pd.DataFrame
+        ] | None = None
+        self._snapshot_player_name_cache: tuple[tuple[int, int, str], pd.Series] | None = None
+
+    def _normalized_log_dates(self, frame: pd.DataFrame, *, cache_name: str) -> pd.Series:
+        """Return normalized log dates, caching immutable NHL rebuild inputs."""
+        date_column = self.log_strings["date"]
+        if self.league != "NHL" or not self.snapshot_only_rebuild:
+            return pd.to_datetime(frame[date_column]).dt.normalize()
+
+        key = (id(frame), len(frame), date_column)
+        cached = self._snapshot_date_cache.get(cache_name)
+        if cached is None or cached[0] != key:
+            cached = (key, pd.to_datetime(frame[date_column]).dt.normalize())
+            self._snapshot_date_cache[cache_name] = cached
+            if cache_name == "gamelog":
+                self._snapshot_gameday_cache = None
+        return cached[1]
+
+    def _gamelog_dates(self) -> pd.Series:
+        """Return normalized gamelog dates."""
+        return self._normalized_log_dates(self.gamelog, cache_name="gamelog")
+
+    def _teamlog_dates(self) -> pd.Series:
+        """Return normalized team-log dates."""
+        return self._normalized_log_dates(self.teamlog, cache_name="teamlog")
+
+    def _gamelog_on(self, target_date: date) -> pd.DataFrame:
+        """Return one historical gameday, reusing it within an NHL cold rebuild."""
+        if self.league != "NHL" or not self.snapshot_only_rebuild:
+            return self.gamelog.loc[self._gamelog_dates() == pd.Timestamp(target_date)]
+
+        date_column = self.log_strings["date"]
+        key = (id(self.gamelog), len(self.gamelog), date_column, target_date)
+        if self._snapshot_gameday_cache is None or self._snapshot_gameday_cache[0] != key:
+            frame = self.gamelog.loc[self._gamelog_dates() == pd.Timestamp(target_date)]
+            self._snapshot_gameday_cache = (key, frame)
+        # Callers may replace the index; keep the cached frame structurally immutable.
+        return self._snapshot_gameday_cache[1].copy(deep=False)
+
+    def _normalized_gamelog_players(self) -> pd.Series:
+        """Return accent-normalized NHL player names for an immutable cold rebuild."""
+        player_column = self.log_strings["player"]
+        if self.league != "NHL" or not self.snapshot_only_rebuild:
+            return self.gamelog[player_column].apply(remove_accents)
+
+        key = (id(self.gamelog), len(self.gamelog), player_column)
+        if self._snapshot_player_name_cache is None or self._snapshot_player_name_cache[0] != key:
+            players = self.gamelog[player_column].apply(remove_accents)
+            self._snapshot_player_name_cache = (key, players)
+        return self._snapshot_player_name_cache[1]
 
     def parse_game(self, game):
         """Parse a single game API response and update ``self.gamelog``.
@@ -983,12 +1039,17 @@ class Stats:
 
         one_year_ago = date - timedelta(days=300)
 
-        gameDates = pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date
-        self.short_gamelog = self.gamelog[(one_year_ago <= gameDates) & (gameDates < date)].copy()
+        gameDates = self._gamelog_dates()
+        target_date = pd.Timestamp(date)
+        one_year_ago = pd.Timestamp(one_year_ago)
+        short_mask = (one_year_ago <= gameDates) & (gameDates < target_date)
+        self.short_gamelog = self.gamelog[short_mask].copy()
         _pc = self.log_strings["player"]
-        self.short_gamelog[_pc] = self.short_gamelog[_pc].apply(remove_accents)
-        gameDates = pd.to_datetime(self.teamlog[self.log_strings["date"]]).dt.date
-        self.short_teamlog = self.teamlog[(one_year_ago <= gameDates) & (gameDates < date)].copy()
+        self.short_gamelog[_pc] = self._normalized_gamelog_players().loc[short_mask].to_numpy()
+        gameDates = self._teamlog_dates()
+        self.short_teamlog = self.teamlog[
+            (one_year_ago <= gameDates) & (gameDates < target_date)
+        ].copy()
 
         stat_types, team_stat_types = self._profile_stat_types()
         playerstats = self._build_player_profile_stats(stat_types, date)
@@ -1311,9 +1372,8 @@ class Stats:
         player_df = self._roster_player_df(season)
 
         if date < datetime.today().date():
-            old_player_df = self.gamelog.loc[
-                (pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date == date)
-                & self.gamelog[self.log_strings["player"]].isin(list(players)),
+            old_player_df = self._gamelog_on(date).loc[
+                lambda frame: frame[self.log_strings["player"]].isin(list(players)),
                 [
                     self.log_strings["player"],
                     self.log_strings["team"],
@@ -1478,9 +1538,7 @@ class Stats:
         """
         pitchers = None
         if date < datetime.today().date():
-            todays_games = self.gamelog.loc[
-                pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date == date
-            ]
+            todays_games = self._gamelog_on(date)
             todays_games.index = todays_games[self.log_strings["player"]]
             todays_games = todays_games.loc[~todays_games.index.duplicated()]
             stats["Home"] = todays_games[self.log_strings["home"]]
@@ -1576,10 +1634,10 @@ class Stats:
         """
         start, stop, codes = _PLAYOFF_GAMEID_CODE[self.league]
         game_col = self.log_strings["game"]
-        gl_dates = pd.to_datetime(self.gamelog[self.log_strings["date"]])
+        gl_dates = self._gamelog_dates()
         if date < datetime.today().date():
             todays = (
-                self.gamelog.loc[gl_dates.dt.date == date]
+                self.gamelog.loc[gl_dates == pd.Timestamp(date)]
                 .drop_duplicates(self.log_strings["player"])
                 .set_index(self.log_strings["player"])
             )
@@ -1672,8 +1730,10 @@ class Stats:
         """
         player_col = self.log_strings["player"]
         opp_col = self.log_strings["opponent"]
-        gld = pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date
-        career = self.gamelog.loc[gld < date, [player_col, opp_col, market]].copy()
+        gld = self._gamelog_dates()
+        career = self.gamelog.loc[
+            gld < pd.Timestamp(date), [player_col, opp_col, market]
+        ].copy()
         career[player_col] = career[player_col].apply(remove_accents)
         career = career.loc[career[player_col].isin(stats.index)]
 

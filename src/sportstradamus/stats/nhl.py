@@ -127,6 +127,10 @@ class StatsNHL(Stats):
         self.usage_stat = "TimeShare"
         self.tiebreaker_stat = "Fenwick short"
         self._volume_model_cache = None
+        self._combo_player_games_cache_key = None
+        self._combo_player_games_cache = {}
+        self._combo_archive_cache_key = None
+        self._combo_archive_cache = {}
 
     def _market_position_filter(self, gamelog: pd.DataFrame, market: str) -> pd.DataFrame:
         """Keep only players who can accrue the requested NHL market."""
@@ -838,18 +842,33 @@ class StatsNHL(Stats):
         self.playerProfile.fillna(0, inplace=True)
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):
-        player_games = self.short_gamelog.loc[
-            self.short_gamelog[self.log_strings["player"]] == player
-        ]
+        if self.snapshot_only_rebuild:
+            player_column = self.log_strings["player"]
+            cache_key = (
+                self.profile_latest_date,
+                id(self.short_gamelog),
+                len(self.short_gamelog),
+                player_column,
+            )
+            if cache_key != self._combo_player_games_cache_key:
+                self._combo_player_games_cache = dict(
+                    tuple(self.short_gamelog.groupby(player_column, sort=False))
+                )
+                self._combo_player_games_cache_key = cache_key
+            player_games = self._combo_player_games_cache.get(
+                player, self.short_gamelog.iloc[:0]
+            )
+        else:
+            player_games = self.short_gamelog.loc[
+                self.short_gamelog[self.log_strings["player"]] == player
+            ]
         cv = stat_cv.get(self.league, {}).get(market, 1)
         dist = stat_dist.get(self.league, {}).get(market, "Gamma")
         if isinstance(date, str):
             date = datetime.strptime(date, "%Y-%m-%d").date()
 
         if date < datetime.today().date():
-            todays_games = self.gamelog.loc[
-                pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date == date
-            ]
+            todays_games = self._gamelog_on(date)
             player_game = todays_games.loc[todays_games[self.log_strings["player"]] == player]
             if player_game.empty:
                 return 0
@@ -862,6 +881,8 @@ class StatsNHL(Stats):
             opponent = self.upcoming_games[team]["Opponent"]
 
         date = date.strftime("%Y-%m-%d")
+        if self.snapshot_only_rebuild:
+            self._prepare_combo_archive_cache(market, date, todays_games)
         ev = 0
         if market in combo_props:
             ev = self._combo_market_ev(market, date, player, dist, cv)
@@ -872,6 +893,51 @@ class StatsNHL(Stats):
                 market, date, player, team, opponent, dist, cv, player_games
             )
         return 0 if np.isnan(ev) else ev
+
+    def _prepare_combo_archive_cache(self, market, date, todays_games):
+        """Batch legacy submarket EV/line reads for one NHL fallback slate."""
+        if not self.snapshot_only_rebuild:
+            return
+        cache_key = (market, date)
+        if cache_key == self._combo_archive_cache_key:
+            return
+
+        if market in combo_props:
+            submarkets = list(combo_props[market])
+        elif "fantasy" in market:
+            if "prizepicks" in market:
+                submarkets = ["goals", "assists", "shots", "blocked"]
+            elif ("underdog" in market) and ("skater" in market):
+                submarkets = [
+                    "goals",
+                    "assists",
+                    "shots",
+                    "blocked",
+                    "hits",
+                    "powerPlayPoints",
+                ]
+            else:
+                submarkets = ["saves", "goalsAgainst"]
+        else:
+            submarkets = []
+
+        players = todays_games[self.log_strings["player"]].dropna().unique().tolist()
+        self._combo_archive_cache = {
+            submarket: archive.get_ev_line_inputs("NHL", submarket, date, players)
+            for submarket in submarkets
+        }
+        self._combo_archive_cache_key = cache_key
+
+    def _submarket_ev(self, submarket, date, player, dist, cv):
+        cached = self._combo_archive_cache.get(submarket)
+        if cached is None or player not in cached:
+            return super()._submarket_ev(submarket, date, player, dist, cv)
+
+        sub_cv = stat_cv.get(self.league, {}).get(submarket, 1)
+        sub_dist = stat_dist.get(self.league, {}).get(submarket, "Gamma")
+        value, subline = cached[player]
+        value = self._convert_to_market_dist(value, subline, sub_cv, sub_dist, dist, cv)
+        return value, subline, sub_cv, sub_dist
 
     def _check_nhl_fantasy(self, market, date, player, team, opponent, dist, cv, player_games):
         if "prizepicks" in market:
