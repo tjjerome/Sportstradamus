@@ -243,16 +243,22 @@ The path from "I want to improve a cell" to "it's live" is five steps.
 
 ### 1. Sweep the cell's strategy options
 
-`model-strategy-sweep` trains a quick throwaway model for every combination of the knobs that move
-the cell's distribution family (SkewNormal sweeps target shape × training loss × blend loss; ZINB
-sweeps count mode × dispersion objective × blend loss) and ranks them by how comfortably each would
-clear the ship gates — the margin it calls **slack**.
+`model-strategy-sweep` trains a quick throwaway model per candidate recipe — the knobs that move the
+cell's distribution family (target shape × training loss × blend loss × post-hoc calibrator for
+SkewNormal; count mode × dispersion objective × blend loss × calibrator for the count families) —
+and ranks them by how comfortably each would clear the ship gates, the margin it calls **slack**.
+
+The recipe space is far larger than a budget can enumerate, so each cell gets one Optuna study that
+proposes recipes rather than walking a grid, capped at `--max-trials` (48 by default). The cell's
+current recipe and any corner already proven under full HPO are always evaluated, so a search can
+only improve on what you have.
 
 ```bash
 poetry run model-strategy-sweep --league NBA --market FGM   # one cell
 poetry run model-strategy-sweep                             # every withheld cell with cached data
 poetry run model-strategy-sweep --league WNBA               # just one league's withheld cells
 poetry run model-strategy-sweep --include-shipped           # also re-check already-shipped cells
+poetry run model-strategy-sweep --resume                    # continue a crashed multi-hour run
 ```
 
 Naming a single `--league` **and** `--market` sweeps just that cell. Omit `--market` and it sweeps
@@ -263,15 +269,23 @@ yellow warning** rather than swept — the throwaway trainings reuse the cached 
 rebuild one, so train the cell for real once first if you want it in the board. Add
 `--include-shipped` to also rank already-shipped (devel/main) cells when hunting a better strategy for
 a live cell; that path is judged by the supersession test, and `--confirm` never auto-re-ships a live
-cell. As it runs it prints one line per combination, then a short table per cell
+cell. As it runs it prints one line per recipe, then a short table per cell
 with the winning strategy marked `SHIP` (green) or `KILL` (red). The full ranked results are saved to
 `data/research/strategy_research_board.csv`. **Nothing ships from this step** — the throwaway models
 only *rank* the options so you know which one to train for real.
 
-Prefer to skip the manual walkthrough below? Add `--confirm`: for each **withheld** cell it persists
-the best reproducible winner to `stat_meta.json`, retrains it for real, and keeps or reverts it on
-the official gates — steps 2–4 automated, with a prompt before it touches anything (`--yes` to skip
-it). For an already-shipped cell (only present under `--include-shipped`), `--confirm` runs the
+Each trial is scored **holdout-blind**: the rows the ship gate will use are dropped from the run
+entirely, and the calibration head is fit out-of-fold across the rest. Ranking therefore cannot
+adapt against the evidence the ship decision rests on. `--resume` reopens the cell's saved study and
+reuses every prior row still valid for the current recipe registry and training matrix, so a crashed
+run continues instead of retraining what it already scored.
+
+Prefer to skip the manual walkthrough below? Add `--confirm`: for each **withheld** cell it nominates
+its top-ranked recipes plus its current one, retrains each for real until one passes the official
+gates, and keeps that one — steps 2–4 automated, with a prompt before it touches anything (`--yes` to
+skip it). A cell whose board has no outright winner still gets confirmed: fixed-hyperparameter
+ranking cannot recognize a recipe that only passes under a real hyperparameter search, so the gates
+decide after the retrain rather than before it. For an already-shipped cell (only present under `--include-shipped`), `--confirm` runs the
 supersession test: it snapshots the incumbent, retrains the candidate in place, and scores S1/S2/S3
 (candidate clears the six gates standalone, is paired-Brier sharper, and paired-Sharpe sharper). It
 prints the comparison and swaps the live cell only when all three pass **and** you confirm the

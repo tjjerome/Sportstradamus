@@ -210,6 +210,53 @@ def _retry_calibrated_if_g4_only(
         click.echo(f"[{lg}] {market}: calibrated retry still ship=False (failed gates: {failed})")
 
 
+def _validate_mode_flags(
+    *,
+    deterministic: bool,
+    holdout_blind: bool,
+    full_rebuild: bool,
+    matrix_only: bool,
+    matrix_output: Path | None,
+    frozen_matrix_dir: Path | None,
+    artifact_output: Path | None,
+    dependency_namespace: str | None,
+    dependency_root: Path | None,
+    bypass_withholding: bool,
+) -> None:
+    """Reject flag combinations that name two different run modes at once."""
+    # style: allow-complexity — a flat list of independent boundary checks, no nesting;
+    # splitting it would only scatter the mode contract across several helpers.
+    if full_rebuild and deterministic:
+        raise click.UsageError("--full-rebuild and --deterministic are different modes")
+    # A full-HPO confirm has to score the real holdout; a holdout-blind production run
+    # would ship a model whose gates never saw half their evaluation data.
+    if holdout_blind and not deterministic:
+        raise click.UsageError("--holdout-blind is a search mode; pass --deterministic")
+    if full_rebuild and (not matrix_only or matrix_output is None):
+        raise click.UsageError("--full-rebuild requires --matrix-only and --matrix-output")
+    if frozen_matrix_dir is not None and (full_rebuild or deterministic or matrix_only):
+        raise click.UsageError(
+            "--frozen-matrix-dir is an isolated full-HPO mode; it is incompatible with "
+            "--full-rebuild, --deterministic, and --matrix-only"
+        )
+    if frozen_matrix_dir is not None and (artifact_output is None or dependency_namespace is None):
+        raise click.UsageError(
+            "--frozen-matrix-dir requires --artifact-output and --dependency-namespace"
+        )
+    if frozen_matrix_dir is not None and not bypass_withholding:
+        raise click.UsageError("--frozen-matrix-dir requires --bypass-withholding")
+    if frozen_matrix_dir is None and artifact_output is not None:
+        raise click.UsageError("--artifact-output requires --frozen-matrix-dir")
+    if dependency_namespace is not None and frozen_matrix_dir is None and not full_rebuild:
+        raise click.UsageError(
+            "--dependency-namespace requires --frozen-matrix-dir or --full-rebuild"
+        )
+    if full_rebuild and dependency_namespace is not None and dependency_root is None:
+        raise click.UsageError(
+            "--dependency-namespace on a full rebuild requires --dependency-root"
+        )
+
+
 @click.command()
 @click.option(
     "--force/--no-force",
@@ -245,6 +292,15 @@ def _retry_calibrated_if_g4_only(
         "freeze input to the cached parquet so runs are bit-identical for the "
         "compression eval harness. NEVER publish a model trained with this "
         "flag — it is deliberately low quality."
+    ),
+)
+@click.option(
+    "--holdout-blind/--no-holdout-blind",
+    default=False,
+    help=(
+        "SEARCH ONLY: drop the held-out rows from the run entirely and score on "
+        "player-disjoint cross-fit folds of validation, so a recipe search never sees "
+        "the frame its ship gate is scored on. Requires --deterministic."
     ),
 )
 @click.option(
@@ -454,6 +510,7 @@ def meditate(
     rebuild_correlations,
     log_level,
     deterministic,
+    holdout_blind,
     target_normalization,
     posthoc,
     zinb_mode,
@@ -482,43 +539,25 @@ def meditate(
     # stages plus per-league/-cell guards, not nested logic.
     # style: allow-length — grandfathered CLI orchestrator; the --posthoc knob adds one
     # param line. Extracting _step_ helpers is a separate refactor, out of this change's scope.
-    # --deterministic implies --force: the input-freeze (new_M = empty)
-    # otherwise short-circuits train_market when a prior model pickle exists,
-    # which is precisely when the eval harness needs a fresh deterministic
-    # rebuild. See docs/gbdt_mean_regression_plan.md "Bug to fix" note.
-    if deterministic and not force:
-        force = True
-    if full_rebuild and deterministic:
-        raise click.UsageError("--full-rebuild and --deterministic are different modes")
-    if full_rebuild and (not matrix_only or matrix_output is None):
-        raise click.UsageError("--full-rebuild requires --matrix-only and --matrix-output")
+    _validate_mode_flags(
+        deterministic=deterministic,
+        holdout_blind=holdout_blind,
+        full_rebuild=full_rebuild,
+        matrix_only=matrix_only,
+        matrix_output=matrix_output,
+        frozen_matrix_dir=frozen_matrix_dir,
+        artifact_output=artifact_output,
+        dependency_namespace=dependency_namespace,
+        dependency_root=dependency_root,
+        bypass_withholding=bypass_withholding,
+    )
+    # --deterministic implies --force: the input-freeze (new_M = empty) otherwise
+    # short-circuits train_market when a prior model pickle exists, which is precisely
+    # when the eval harness needs a fresh deterministic rebuild. See
+    # docs/gbdt_mean_regression_plan.md "Bug to fix" note.
+    force = force or deterministic
     if full_rebuild:
         os.environ["SPORTSTRADAMUS_ARCHIVE_READ_ONLY"] = "1"
-    if frozen_matrix_dir is not None and (full_rebuild or deterministic or matrix_only):
-        raise click.UsageError(
-            "--frozen-matrix-dir is an isolated full-HPO mode; it is incompatible with "
-            "--full-rebuild, --deterministic, and --matrix-only"
-        )
-    if frozen_matrix_dir is not None and (
-        artifact_output is None or dependency_namespace is None
-    ):
-        raise click.UsageError(
-            "--frozen-matrix-dir requires --artifact-output and --dependency-namespace"
-        )
-    if frozen_matrix_dir is not None and not bypass_withholding:
-        raise click.UsageError("--frozen-matrix-dir requires --bypass-withholding")
-    if frozen_matrix_dir is None and artifact_output is not None:
-        raise click.UsageError(
-            "--artifact-output requires --frozen-matrix-dir"
-        )
-    if dependency_namespace is not None and frozen_matrix_dir is None and not full_rebuild:
-        raise click.UsageError(
-            "--dependency-namespace requires --frozen-matrix-dir or --full-rebuild"
-        )
-    if full_rebuild and dependency_namespace is not None and dependency_root is None:
-        raise click.UsageError(
-            "--dependency-namespace on a full rebuild requires --dependency-root"
-        )
     log = get_logger("meditate")
     log.setLevel(log_level)
     log.info(
@@ -741,6 +780,7 @@ def meditate(
                 ),
                 "artifact_output": artifact_output,
                 "dependency_namespace": dependency_namespace,
+                "holdout_blind": holdout_blind,
             }
             train_market(lg, market, stat_data, archive, league_start_date, **train_kwargs)
             _retry_calibrated_if_g4_only(

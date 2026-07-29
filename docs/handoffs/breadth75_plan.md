@@ -39,9 +39,11 @@ whenever the queue changes; git holds the history.
 ## In flight right now
 
 - **Mixture pilot RUN — verdict: PROMISING on receiving yards, g1-walled on rushing.**
-  Board-only (no confirm; the confirm walker hard-skips Mixture rows until the serving
-  path lands — serve-iff-ship). Deterministic 6-corner Mixture boards vs the cells' SN
-  boards:
+  Board-only, and now out of the sweep pool entirely: `SWEEP_CAPABILITIES` requires
+  `CAP_CONFIRM`, so a family with no serving path spends no trial budget. It was the
+  rank-1 corner on 3 of the first 4 holdout-blind cells and skipped at nomination every
+  time; see model_improvement_track.md §8.2 hole #0a for the put-it-back trigger.
+  Deterministic 6-corner Mixture boards vs the cells' SN boards:
   - receiving yards: best Mixture corner (centered_additive_mean10 / crps blend) is the
     cell's **rank-1 corner overall**, g4 pit_ks 0.0552 vs bar 0.050 (SN best 0.0629 —
     60% of the g4 excess removed), g1 CI-hi +0.0064 (SN best +0.0050), g2/g3/g5/g6 all
@@ -157,7 +159,8 @@ degrades low-mean counts).
 - `pgrep -af "[m]editate|model.strategy.(sweep|confirm)"` must be empty before any
   sweep/confirm/meditate launch.
 - No training-code edits while any sweep/confirm chain runs.
-- NO `--resume` on board sweeps (resume keys on cell-presence and skips everything).
+- `--resume` is safe on board sweeps: it reopens each cell's Optuna journal and reuses prior rows
+  per row, not per cell, rejecting any whose spec/controls/matrix identity has moved.
 - Deterministic board slack oversells g4 — read direction, not magnitude; confirms decide.
 - Research-first: §8.2-flagged levers and distribution-family changes need a research brief
   (`/tmp/researcher_*.md`) before build.

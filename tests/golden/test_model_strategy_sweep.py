@@ -3,10 +3,15 @@
 Two layers are covered. The per-corner *primitive* ``_score_corner`` is the honest scorer: it loads
 one trained deterministic dump and runs the production :func:`scorecard.gate_row` on its served
 (validation-fit-calibrated) predictive — no test re-fit; the heavy dump load + scorecard gate are
-monkeypatched so the test pins only the plumbing. The *orchestration* (family-grid enumeration,
+monkeypatched so the test pins only the plumbing. The *orchestration* (conditional-TPE search,
 board assembly, verdict formatting) is exercised with the heavy per-corner ``meditate`` train+score
-monkeypatched out, so no model trains: the Optuna GridSampler study visits every corner of the
-cell's family grid once, scores each by the honest gate, and ranks the board by ship slack.
+monkeypatched out, so no model trains: one budgeted study per cell samples the enrolled families'
+corners, scores each by the honest gate, and ranks the board by ship slack.
+
+The search is budgeted, so no test may assume a cell's whole grid is enumerated. What is pinned is
+the contract around it: which families enroll, how many corners are reachable, that the seed and
+incumbent corners are evaluated first, that an admissible prior row is reused instead of retrained,
+and that a legacy row scored on the ship holdout is inert.
 """
 
 import json
@@ -16,8 +21,9 @@ import click
 import pandas as pd
 import pytest
 
-from sportstradamus.training.model_strategy import sweep
+from sportstradamus.training.model_strategy import sweep, tpe_search
 from sportstradamus.training.baselines import get_target_normalization
+from sportstradamus.training.markets import ALL_MARKETS
 from sportstradamus.training.model_strategy import (
     MODEL_STRATEGY_MODEL_KEY,
     SPLIT_FINGERPRINT_CSV_COLUMN,
@@ -39,8 +45,11 @@ from sportstradamus.training.model_strategy import (
     registered_strategies,
     strategies_for_cell,
     strategy_controls,
+    validate_strategy_selection,
 )
 from sportstradamus.training.model_strategy import resolve_report_identity
+from sportstradamus.training.model_strategy.specs import SEED_CORNERS
+from sportstradamus.training.posthoc import CDF_STAGE, POSTHOC_SLUGS, STRUCTURAL_STAGE
 from sportstradamus.training.role_specs import role_spec_for
 from sportstradamus.training.structural_strategies import (
     AFFINE_STRATEGY as RUSHING,
@@ -50,20 +59,20 @@ from sportstradamus.training.structural_strategies import (
 )
 
 _MATRIX_SHA = "matrix-123"
-_MATRIX_COLUMNS = frozenset(
-    column
-    for spec in registered_strategies()
-    for column in spec.applicability.required_data_columns
-)
 # The role×position two-part strategy is gated by the per-(league, market) role registry;
-# the NFL rushing-affine strategy is cell-pinned. A cell offers a structural corner only when
-# its real matrix carries that strategy's grouping columns, so most cells sweep base families
-# alone. These fixtures give each registered cell the role columns its real matrix carries.
+# the NFL rushing-affine strategy is cell-pinned. A structural spec only *enrolls* for a cell whose
+# real matrix carries its grouping columns — the sweep then excludes it anyway, but the registry
+# tests still need the enrolled shape. These fixtures give each registered cell those columns.
 _STRUCTURAL_CELL_COLUMNS = {
     ("NFL", "receiving yards"): frozenset(role_spec_for("NFL", "receiving yards").all_columns),
     ("NFL", "rushing yards"): frozenset(role_spec_for("NFL", "rushing yards").all_columns),
     ("NBA", "PTS"): frozenset(role_spec_for("NBA", "PTS").all_columns),
 }
+
+
+# A low-mean integer target — the shape that admits every registered base family, so a test that
+# doesn't care about admission gets all of them.
+_ADMITS_EVERY_FAMILY = (True, 5.0)
 
 
 @pytest.fixture(autouse=True)
@@ -74,8 +83,24 @@ def _fixed_matrix_contract(monkeypatch):
         lambda league, market: (
             _STRUCTURAL_CELL_COLUMNS.get((league, market), frozenset()),
             _MATRIX_SHA,
+            *_ADMITS_EVERY_FAMILY,
         ),
     )
+
+
+@pytest.fixture(autouse=True)
+def _sandboxed_study_journal(monkeypatch, tmp_path):
+    """Point every cell study's Optuna journal at a per-test directory.
+
+    Without this a test that reaches :func:`tpe_search.cell_study` writes into ``research/optuna/``
+    and the next run resumes that journal — cross-test state, and a suggestion sequence that depends
+    on which tests ran before.
+
+    Patch the module the function lives in, not the one that imports it: ``cell_study`` resolves
+    ``_STUDY_ROOT`` as a bare global in ``tpe_search``, so patching it on ``sweep`` would detach
+    silently and let real journals through.
+    """
+    monkeypatch.setattr(tpe_search, "_STUDY_ROOT", tmp_path / "optuna")
 
 
 def _canned_row(*, ship, g4_pit_ks):
@@ -129,26 +154,33 @@ def _fake_row(family, corner, slack):
 
 def _fake_run_and_score(league, market, family, corner):
     """One honest row per corner; slack favors a known best corner per family (no model trains)."""
+    # Every family sweeps posthoc, so it must move slack or the grid's best corner is a tie.
+    posthoc = 0.03 if corner["posthoc"] == "roe_mean" else 0.0
     if family == "SkewNormal":
         slack = (
             {
                 "ratio_meanyr": 0.0,
                 "centered_additive_mean10": 0.20,
                 "centered_additive_eb_meanyr_k10": -0.10,
+                "ratio_projvol": -0.05,
             }[corner["normalization"]]
             + (0.05 if corner["dist_training_loss"] == "nll" else 0.0)
             + (0.01 if corner["sn_param"] == "centered" else 0.0)
             + (0.02 if corner["blending_loss_fn"] == "crps" else 0.0)
+            + posthoc
         )
     elif family == "ZINB":
         slack = (
             {"joint": 0.0, "hurdle": 0.15}[corner["zinb_mode"]]
             + (0.05 if corner["count_dispersion_objective"] == "pit_ks" else 0.0)
             + (0.02 if corner["blending_loss_fn"] == "crps" else 0.0)
+            + posthoc
         )
     else:  # NegBin — kept below ZINB's best so cross-family ranking has an unambiguous winner
-        slack = (0.05 if corner["count_dispersion_objective"] == "pit_ks" else 0.0) + (
-            0.02 if corner["blending_loss_fn"] == "crps" else 0.0
+        slack = (
+            (0.05 if corner["count_dispersion_objective"] == "pit_ks" else 0.0)
+            + (0.02 if corner["blending_loss_fn"] == "crps" else 0.0)
+            + posthoc
         )
     spec = get_strategy(family)
     legacy = (
@@ -159,21 +191,30 @@ def _fake_run_and_score(league, market, family, corner):
     identity = build_artifact_identity(
         spec.slug, league, market, corner, legacy, matrix_hash=_MATRIX_SHA
     )
-    return [
-        {
-            **_fake_row(spec.family, corner, slack),
-            "strategy_slug": identity.strategy_slug,
-            "structural_strategy": identity.structural_strategy,
-            "strategy_signature": identity.signature,
-            "strategy_implementation_version": identity.implementation_version,
-            "artifact_schema_version": identity.artifact_schema_version,
-            "strategy_status": identity.status,
-            "controls_json": controls_json(corner),
-            "corner_fingerprint": identity.corner_fingerprint,
-            "matrix_hash": _MATRIX_SHA,
-            "split_fingerprint": identity.split_fingerprint,
-        }
-    ]
+    return {
+        **_fake_row(spec.family, corner, slack),
+        "strategy_slug": identity.strategy_slug,
+        "structural_strategy": identity.structural_strategy,
+        "strategy_signature": identity.signature,
+        "strategy_implementation_version": identity.implementation_version,
+        "artifact_schema_version": identity.artifact_schema_version,
+        "strategy_status": identity.status,
+        "controls_json": controls_json(corner),
+        "corner_fingerprint": identity.corner_fingerprint,
+        "matrix_hash": _MATRIX_SHA,
+        "split_fingerprint": identity.split_fingerprint,
+        "eval_split": sweep.EVAL_SPLIT_CROSSFIT,
+    }
+
+
+def _spy_run_and_score(trained):
+    """``_run_and_score`` stand-in that records ``(family, corner)`` per trial before scoring it."""
+
+    def run_and_score(league, market, family, corner):
+        trained.append((family, dict(corner)))
+        return _fake_run_and_score(league, market, family, corner)
+
+    return run_and_score
 
 
 def _artifact(spec, league, market, controls, *, status="active"):
@@ -230,26 +271,32 @@ def test_family_registry_grids_and_persist_maps():
     dpo = get_strategy("DPO")
     receiving = get_strategy(RECEIVING)
     rushing = get_strategy(RUSHING)
-    # SN: 3 norms × 2 dist-loss × 2 sn-param × 2 blend.
-    assert math.prod(len(v) for v in sn.axes.values()) == 24
-    # Mixture: 1 dist × 3 norms — no loss axis (component loss pinned nll), no blend axis
-    # (off-ship-path fallback trains with the default blend).
-    assert math.prod(len(v) for v in mix.axes.values()) == 3
-    assert math.prod(len(v) for v in zinb.axes.values()) == 8  # 1 dist × 2 mode × 2 disp × 2 blend
-    assert math.prod(len(v) for v in negbin.axes.values()) == 4  # 1 dist × 2 disp × 2 blend
-    assert math.prod(len(v) for v in dpo.axes.values()) == 4  # 1 dist × 2 disp × 2 blend
+    # SN: 4 norms × 2 dist-loss × 2 sn-param × 2 blend × 6 posthoc.
+    assert math.prod(len(v) for v in sn.axes.values()) == 192
+    # Mixture: 1 dist × 4 norms × 2 blend × 5 posthoc — no loss axis (lightgbmlss rejects crps
+    # components, so the pinned nll is the only trainable value).
+    assert math.prod(len(v) for v in mix.axes.values()) == 40
+    assert mix.fixed_controls["dist_training_loss"] == "nll"
+    # 1 dist × 2 mode × 2 disp × 2 blend × 5 posthoc.
+    assert math.prod(len(v) for v in zinb.axes.values()) == 40
+    assert math.prod(len(v) for v in negbin.axes.values()) == 20  # 1 dist × 2 disp × 2 blend × 5
+    assert math.prod(len(v) for v in dpo.axes.values()) == 20
     assert sn.persist == {
         "dist": "dist",
         "normalization": "target_normalization",
         "dist_training_loss": "dist_training_loss",
         "sn_param": "sn_param",
         "blending_loss_fn": "blending",
+        "posthoc": "posthoc",
     }
     assert mix.axes["dist"] == ("Mixture",)
     assert mix.axes["normalization"] == sn.axes["normalization"]
     assert mix.persist == {
         "dist": "dist",
         "normalization": "target_normalization",
+        "dist_training_loss": "dist_training_loss",
+        "blending_loss_fn": "blending",
+        "posthoc": "posthoc",
     }
     # Count families persist their single-choice dist so a winner's dist writes to stat_meta.
     assert zinb.persist == {
@@ -257,15 +304,28 @@ def test_family_registry_grids_and_persist_maps():
         "zinb_mode": "zinb_mode",
         "count_dispersion_objective": "count_dispersion_objective",
         "blending_loss_fn": "blending",
+        "posthoc": "posthoc",
     }
     assert negbin.persist == {
         "dist": "dist",
         "count_dispersion_objective": "count_dispersion_objective",
         "blending_loss_fn": "blending",
+        "posthoc": "posthoc",
     }
     assert dpo.persist == negbin.persist  # same gate-free count-family persist surface
     assert zinb.axes["dist"] == ("ZINB",) and negbin.axes["dist"] == ("NegBin",)
     assert dpo.axes["dist"] == ("DPO",)
+    # A count corner can now win on a cell whose stat_meta carries a continuous normalization, so
+    # the family pins target_normalization=none or ship_config._validate_cell rejects the ship.
+    for count_spec in (zinb, negbin, dpo):
+        assert count_spec.fixed_persist == {"target_normalization": "none"}
+    # Neither knob belongs to a base corner, because neither is decided by the corner: the cli
+    # flips hpo_selection to 'calibrated' after a Gate-4-only failure, and the pipeline silently
+    # upgrades stabilization to L2 for centered SkewNormal and Mixture. Signing either would
+    # claim a value the run did not train with. A structural spec pins the whole recipe instead.
+    for spec in (sn, mix, zinb, negbin, dpo):
+        for knob in ("hpo_selection", "stabilization"):
+            assert knob not in spec.fixed_controls and knob not in spec.axes
     for method, slug in (
         (receiving, RECEIVING),
         (rushing, RUSHING),
@@ -302,6 +362,51 @@ def test_family_registry_grids_and_persist_maps():
         assert set(spec.persist) == set(spec.axes) | set(spec.fixed_controls)
 
 
+def test_posthoc_pool_is_per_family_and_never_offers_a_structural_slug():
+    """Every base family sweeps the light-corrector pool; only SkewNormal also gets the whole-CDF
+    slug, because the pipeline gates that stage on ``dist == "SkewNormal"`` — on any other family
+    the corner falls through to the scalar path and duplicates ``none`` under a new fingerprint.
+    A structural method is its own spec, so its slug is never an axis value.
+    """
+    sn_pool = set(get_strategy("SkewNormal").axes["posthoc"])
+    assert sn_pool <= POSTHOC_SLUGS
+    for slug in ("Mixture", "ZINB", "NegBin", "DPO"):
+        assert sn_pool - set(get_strategy(slug).axes["posthoc"]) == CDF_STAGE
+    for spec in registered_strategies():
+        assert not STRUCTURAL_STAGE & set(spec.axes.get("posthoc", ()))
+
+
+def test_cell_knobs_the_corner_does_not_decide_stay_out_of_every_base_corner():
+    """A cell carrying ``hpo_selection: calibrated`` must still resolve to a registered corner.
+
+    ``pipeline.train_market`` projects the cell's runtime knobs onto ``(fixed_controls, axes)`` and
+    hands the result to :func:`validate_strategy_selection`, so pinning a knob the corner does not
+    decide turns every cell holding a different value into a hard training failure. Two knobs are
+    decided elsewhere: ``cli._retry_calibrated_if_g4_only`` persists ``hpo_selection=calibrated``
+    after a Gate-4-only miss (shipped cells carry it today), and the pipeline silently upgrades
+    ``stabilization`` to L2 for centered SkewNormal and Mixture.
+    """
+    cell_knobs = {"hpo_selection": "calibrated", "stabilization": "L2"}
+    cell = CellContext("WNBA", "AST", "SkewNormal", "continuous", frozenset(), _MATRIX_SHA)
+    for slug in ("SkewNormal", "ZINB", "NegBin", "DPO"):
+        spec = get_strategy(slug)
+        runtime = {**strategy_controls(spec)[0], **cell_knobs}
+        corner = {name: runtime[name] for name in (*spec.fixed_controls, *spec.axes)}
+        assert not cell_knobs.keys() & corner.keys()
+        validate_strategy_selection(cell, spec, corner, required_capabilities=SWEEP_CAPABILITIES)
+
+
+def test_seed_corners_are_registered_corners_of_their_named_spec():
+    """A seeded recipe is one with an independent full-HPO six-gate pass, kept so the board can
+    start from it. Drift between the seed and its family's declared grid fails loud at import;
+    this pins the same contract so an edit to either side is caught here too.
+    """
+    assert SEED_CORNERS
+    for league, market, slug, controls in SEED_CORNERS:
+        assert market in ALL_MARKETS[league]
+        assert controls in strategy_controls(get_strategy(slug))
+
+
 def test_required_matrix_columns_fail_closed_and_strategy_identity_is_spec_specific():
     receiving = get_strategy(RECEIVING)
     no_schema = CellContext("NFL", "receiving yards", "SkewNormal", "continuous")
@@ -322,8 +427,15 @@ def test_required_matrix_columns_fail_closed_and_strategy_identity_is_spec_speci
         "dist_training_loss": "crps",
         "sn_param": "direct",
         "blending_loss_fn": "nll",
+        "posthoc": "none",
     }
-    mixture_controls = {"dist": "Mixture", "normalization": "ratio_meanyr"}
+    mixture_controls = {
+        "dist": "Mixture",
+        "normalization": "ratio_meanyr",
+        "dist_training_loss": "nll",
+        "blending_loss_fn": "nll",
+        "posthoc": "none",
+    }
     sn = build_artifact_identity("SkewNormal", "WNBA", "AST", sn_controls, matrix_hash=_MATRIX_SHA)
     mixture = build_artifact_identity(
         "Mixture", "WNBA", "AST", mixture_controls, matrix_hash=_MATRIX_SHA
@@ -457,6 +569,7 @@ def test_csv_identity_rejects_partial_adapter_and_nonintegral_contracts():
         "dist_training_loss": "crps",
         "sn_param": "direct",
         "blending_loss_fn": "nll",
+        "posthoc": "none",
     }
     frame, _ = _artifact(spec, "WNBA", "AST", controls)
     frame["StrategyImplementationVersion"] = 1.5
@@ -464,15 +577,19 @@ def test_csv_identity_rejects_partial_adapter_and_nonintegral_contracts():
         validate_strategy_frame(frame, league="WNBA", market="AST")
 
 
-
 def test_dist_axis_flag_and_class_maps():
     """The dist axis forwards --dist; the class maps route count/continuous cells to their families."""
     assert get_strategy("DPO").cli_flags["dist"] == "--dist"
     assert distribution_class("SkewNormal") == "continuous"
     assert distribution_class("DPO") == "count"
-    # dist leads the swept-axis columns and rides in the board schema.
+    # dist leads the swept-axis columns and rides in the board schema, and every family's
+    # calibration-pool axis has a convenience column beside the authoritative controls_json.
     assert sweep._AXIS_COLUMNS[0] == "dist"
-    assert "dist" in sweep._BOARD_COLUMNS
+    assert set(sweep._AXIS_COLUMNS) >= {"dist", "posthoc"}
+    assert set(sweep._AXIS_COLUMNS) <= set(sweep._BOARD_COLUMNS)
+    # The frame a corner was scored on rides beside the split it was fingerprinted against.
+    assert sweep._BOARD_COLUMNS[sweep._BOARD_COLUMNS.index("split_fingerprint") + 1] == "eval_split"
+    assert sweep.EVAL_SPLIT_CROSSFIT == "crossfit_validation"
 
 
 def test_sn_param_axis_swept_persisted_and_dump_inert():
@@ -525,43 +642,77 @@ def test_dump_subdir_matches_meditate_keying():
     assert sweep._decode_strategy({"normalization": "ratio_meanyr"}) == "ratio_meanyr"
 
 
-def test_cell_families_routes_by_distribution_class(monkeypatch):
-    """A count cell sweeps every count family (even one pinned NegBin); a plain continuous cell
-    sweeps SkewNormal + Mixture, while an NFL yardage cell also sweeps the structural strategies
-    its matrix columns qualify for; loud on an unknown dist.
+def test_cell_families_admits_on_target_shape_not_the_stat_meta_class(monkeypatch):
+    """Family admission reads the cell's own target, not the class its stat_meta ``dist`` names.
+
+    A low-mean integer target offers all five base families whatever the configured dist; a
+    non-integer target or a mean above the count ceiling leaves only the continuous pair, because
+    the count branch's dispersion cap could then only fail Gate 4. An unregistered family is loud.
     """
     fake = {
         "MLB": {
             "pitcher strikeouts": {"dist": "ZINB"},
-            "pitches thrown": {"dist": "NegBin"},  # already flipped to NegBin — still sweeps all
             "hits allowed": {"dist": "Gamma"},  # unswept family
         },
         "WNBA": {"AST": {"dist": "SkewNormal"}},
         "NFL": {
-            "receiving yards": {"dist": "SkewNormal"},
-            "rushing yards": {"dist": "SkewNormal"},
             "passing yards": {"dist": "SkewNormal"},
+            "receiving yards": {"dist": "SkewNormal"},
         },
     }
+    contracts = {
+        ("MLB", "pitcher strikeouts"): (frozenset(), _MATRIX_SHA, True, 5.4),
+        ("WNBA", "AST"): (frozenset(), _MATRIX_SHA, True, 3.9),
+        ("NFL", "passing yards"): (frozenset(), _MATRIX_SHA, True, 230.0),
+        ("NFL", "receiving yards"): (
+            _STRUCTURAL_CELL_COLUMNS[("NFL", "receiving yards")],
+            _MATRIX_SHA,
+            False,
+            41.2,
+        ),
+    }
     monkeypatch.setattr(sweep, "load_stat_meta", lambda path: fake)
-    assert sweep._cell_families("MLB", "pitcher strikeouts") == ("ZINB", "NegBin", "DPO")
-    assert sweep._cell_families("MLB", "pitches thrown") == ("ZINB", "NegBin", "DPO")
-    assert sweep._cell_families("WNBA", "AST") == ("SkewNormal", "Mixture")
-    assert sweep._cell_families("NFL", "receiving yards") == (
-        "SkewNormal",
-        "Mixture",
-        RECEIVING,
-        RUSHING,
-    )
-    assert sweep._cell_families("NFL", "rushing yards") == (
-        "SkewNormal",
-        "Mixture",
-        RECEIVING,
-        RUSHING,
-    )
-    assert sweep._cell_families("NFL", "passing yards") == ("SkewNormal", "Mixture")
+    monkeypatch.setattr(sweep, "_training_matrix_contract", lambda lg, mkt: contracts[(lg, mkt)])
+
+    every_base = ("SkewNormal", "ZINB", "NegBin", "DPO")
+    assert sweep._cell_families("MLB", "pitcher strikeouts") == every_base
+    # A SkewNormal-configured cell with an integer low-mean target still gets the count families.
+    assert sweep._cell_families("WNBA", "AST") == every_base
+    assert sweep._cell_families("NFL", "passing yards") == ("SkewNormal",)
+    # A non-integer target keeps the count families out even at a mean well under the ceiling.
+    assert sweep._cell_families("NFL", "receiving yards") == ("SkewNormal",)
     with pytest.raises(click.UsageError):
         sweep._cell_families("MLB", "hits allowed")
+    # --dist-class filters families, not cells: every eligible cell keeps only that class's pool.
+    assert sweep._cell_families("WNBA", "AST", "count") == ("ZINB", "NegBin", "DPO")
+    assert sweep._cell_families("MLB", "pitcher strikeouts", "continuous") == ("SkewNormal",)
+    assert sweep._cell_families("NFL", "passing yards", "count") == ()
+
+
+def test_cell_families_excludes_structural_specs_because_holdout_blind_refuses_them(monkeypatch):
+    """A structural method is enrolled for these cells yet never enters the sweep's family pool.
+
+    ``train_market`` raises under ``--holdout-blind`` for a structural strategy: its role support is
+    derived from validation row counts, so the folds would disagree about whether the method fell
+    back and the scored corner would not be the corner that trained. Both NFL yards cells enroll
+    both structural specs today, which makes them the cells where the exclusion has to bite.
+    """
+    fake = {
+        "NFL": {
+            "receiving yards": {"dist": "SkewNormal"},
+            "rushing yards": {"dist": "SkewNormal"},
+        }
+    }
+    monkeypatch.setattr(sweep, "load_stat_meta", lambda path: fake)
+    for market in ("receiving yards", "rushing yards"):
+        enrolled = {
+            spec.slug
+            for spec in strategies_for_cell(
+                sweep._cell_context("NFL", market), required_capabilities=SWEEP_CAPABILITIES
+            )
+        }
+        assert {RECEIVING, RUSHING} <= enrolled
+        assert not {RECEIVING, RUSHING} & set(sweep._cell_families("NFL", market))
 
 
 def test_structural_strategies_are_market_agnostic_sweep_candidates():
@@ -597,42 +748,80 @@ def test_structural_strategies_are_market_agnostic_sweep_candidates():
     )
 
 
-def test_cached_matrix_contract_reads_schema_and_changes_sha_when_parquet_changes(
+def test_cached_matrix_contract_reads_schema_target_moments_and_resha_when_parquet_changes(
     monkeypatch, tmp_path
 ):
+    """The frozen input yields the schema, the exact-bytes SHA, and the two target facts that gate
+    count-family admission — a fractional Result is not an integer lattice; whole floats are.
+    """
     monkeypatch.undo()  # exercise the real helper, not this module's fixed-contract fixture
     monkeypatch.setattr(sweep, "_TRAINING_DATA_ROOT", tmp_path)
     sweep._read_training_matrix_contract.cache_clear()
     path = sweep._training_matrix_path("NFL", "receiving yards")
-    pd.DataFrame({"Player position": ["WR"], "Result": [10.0], "route_feature": [1.0]}).to_parquet(
+    pd.DataFrame({"Player position": ["WR"], "Result": [10.5], "route_feature": [1.0]}).to_parquet(
         path
     )
-    columns_before, sha_before = sweep._training_matrix_contract("NFL", "receiving yards")
+    columns_before, sha_before, integer_before, mean_before = sweep._training_matrix_contract(
+        "NFL", "receiving yards"
+    )
 
     pd.DataFrame(
         {
             "Player position": ["WR", "RB"],
-            "Result": [10.0, 11.0],
+            "Result": [10.0, 12.0],
             "route_feature": [1.0, 2.0],
         }
     ).to_parquet(path)
-    columns_after, sha_after = sweep._training_matrix_contract("NFL", "receiving yards")
+    columns_after, sha_after, integer_after, mean_after = sweep._training_matrix_contract(
+        "NFL", "receiving yards"
+    )
 
     assert columns_before == columns_after == {"Player position", "Result", "route_feature"}
     assert len(sha_before) == len(sha_after) == 64
     assert sha_before != sha_after
+    assert (integer_before, mean_before) == (False, 10.5)
+    assert (integer_after, mean_after) == (True, 11.0)
 
 
-def test_corner_count_sums_families_per_cell(monkeypatch):
-    """A count cell's corner count is ZINB + NegBin + DPO (8+4+4); a SN cell's is its single grid (24)."""
-    families = {
-        ("MLB", "pitcher strikeouts"): ("ZINB", "NegBin", "DPO"),
-        ("WNBA", "AST"): ("SkewNormal",),
-    }
-    monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: families[(lg, mkt)])
-    assert sweep._cell_corner_count("MLB", "pitcher strikeouts") == 16  # 8 + 4 + 4
-    assert sweep._cell_corner_count("WNBA", "AST") == 24
-    assert sweep._corner_count([("MLB", "pitcher strikeouts"), ("WNBA", "AST")]) == 40
+def test_cell_trial_count_is_the_reachable_grid_capped_by_the_budget():
+    """A cell contributes its reachable corners, or the per-cell budget when the grid is bigger."""
+    assert (
+        tpe_search.reachable_corners(sweep._cell_context("MLB", "pitcher strikeouts"), ("NegBin",))
+        == 20
+    )
+    assert sweep._cell_trial_count("MLB", "pitcher strikeouts", ("NegBin",), 48) == 20
+    # ZINB + NegBin + DPO = 80 reachable, so the 48-trial budget binds.
+    families = ("ZINB", "NegBin", "DPO")
+    assert sweep._cell_trial_count("MLB", "pitcher strikeouts", families, 48) == 48
+    assert sweep._cell_trial_count("MLB", "pitcher strikeouts", families, 200) == 80
+
+
+def test_ratio_projvol_is_pruned_per_cell_by_its_denominator_mapping(monkeypatch):
+    """``ratio_projvol`` needs a projected-volume denominator, so it is a per-cell axis value.
+
+    Pruning it in :func:`tpe_search.cell_axis_choices` — rather than through the spec's applicability —
+    keeps SkewNormal searchable on a cell that simply has no volume feature to divide by. NHL saves
+    has no mapping at all; NFL passing yards maps to ``attempts`` and keeps the value.
+    """
+    monkeypatch.undo()  # real matrices: the denominator resolves against the cached schema
+    sn = get_strategy("SkewNormal")
+    pruned = tpe_search.cell_axis_choices(sweep._cell_context("NHL", "saves"), sn)
+    kept = tpe_search.cell_axis_choices(sweep._cell_context("NFL", "passing yards"), sn)
+    assert "ratio_projvol" not in pruned["normalization"]
+    assert "ratio_projvol" in kept["normalization"]
+
+
+def test_reachable_corners_on_the_live_nfl_matrices(monkeypatch):
+    """The budget is spent against the corners a cell can actually reach, not the declared grid."""
+    monkeypatch.undo()  # real matrices: target lattice + mean decide count-family admission
+    # 192 SkewNormal + 40 ZINB + 20 NegBin + 20 DPO — a low-mean integer target. Mixture
+    # declares 40 more but has no serve path, so SWEEP_CAPABILITIES keeps it out of the pool.
+    tds = sweep._cell_context("NFL", "passing tds")
+    assert tpe_search.reachable_corners(tds, sweep._cell_families("NFL", "passing tds")) == 272
+    # 192 + 40: the mean-226.7 target is over the count-admission ceiling, and the structural specs
+    # this cell enrolls are excluded from the sweep.
+    yards = sweep._cell_context("NFL", "passing yards")
+    assert tpe_search.reachable_corners(yards, sweep._cell_families("NFL", "passing yards")) == 192
 
 
 def test_decode_strategy_is_registered_norm_for_sn_and_none_for_count():
@@ -652,6 +841,7 @@ def test_score_corner_runs_production_gate_for_sn(monkeypatch):
         "dist_training_loss": "crps",
         "sn_param": "direct",
         "blending_loss_fn": "nll",
+        "posthoc": "none",
     }
     frame, model = _artifact(spec, "WNBA", "AST", corner)
 
@@ -689,6 +879,7 @@ def test_score_corner_decodes_zinb_with_none_and_no_skew(monkeypatch):
         "zinb_mode": "hurdle",
         "count_dispersion_objective": "crps",
         "blending_loss_fn": "nll",
+        "posthoc": "none",
     }
     frame, model = _artifact(spec, "MLB", "pitcher strikeouts", corner)
 
@@ -750,15 +941,16 @@ def test_run_and_score_tags_family_and_uses_honest_gate(monkeypatch):
         "dist_training_loss": "nll",
         "sn_param": "direct",
         "blending_loss_fn": "crps",
+        "posthoc": "none",
     }
-    rows = sweep._run_and_score("WNBA", "AST", "SkewNormal", corner)
+    row = sweep._run_and_score("WNBA", "AST", "SkewNormal", corner)
     assert captured["corner"] == corner
-    assert rows[0]["family"] == "SkewNormal"
-    assert rows[0]["slack"] == 0.1
+    assert row["family"] == "SkewNormal"
+    assert row["slack"] == 0.1
 
 
 def test_run_and_score_records_failed_corner_non_shipping(monkeypatch):
-    """A corner whose meditate errors is caught and returned as one non-shipping row — never scored."""
+    """A corner whose meditate errors is caught and returned as a non-shipping row — never scored."""
 
     def boom(*a, **k):
         raise subprocess.CalledProcessError(1, "meditate")
@@ -773,13 +965,15 @@ def test_run_and_score_records_failed_corner_non_shipping(monkeypatch):
         "dist_training_loss": "crps",
         "sn_param": "direct",
         "blending_loss_fn": "nll",
+        "posthoc": "none",
     }
-    rows = sweep._run_and_score("NHL", "blocked", "SkewNormal", corner)
-    assert len(rows) == 1
-    assert rows[0]["ships"] is False
-    assert rows[0]["slack"] == sweep._FAILED_CORNER_SLACK
-    assert rows[0]["family"] == "SkewNormal"
-    assert rows[0]["normalization"] == "ratio_meanyr"  # corner axes preserved for the board
+    row = sweep._run_and_score("NHL", "blocked", "SkewNormal", corner)
+    assert row["ships"] is False
+    assert row["slack"] == sweep._FAILED_CORNER_SLACK
+    assert row["family"] == "SkewNormal"
+    assert row["normalization"] == "ratio_meanyr"  # corner axes preserved for the board
+    # A failed corner is still a cross-fit verdict, so it caches and never retrains on resume.
+    assert row["eval_split"] == sweep.EVAL_SPLIT_CROSSFIT
 
 
 def test_run_and_score_records_inactive_explicit_strategy_but_not_other_identity_errors(
@@ -792,7 +986,7 @@ def test_run_and_score_records_inactive_explicit_strategy_but_not_other_identity
         "_score_corner",
         lambda *args: (_ for _ in ()).throw(InactiveStrategyArtifactError("fallback")),
     )
-    row = sweep._run_and_score("NFL", "rushing yards", spec.slug, dict(spec.fixed_controls))[0]
+    row = sweep._run_and_score("NFL", "rushing yards", spec.slug, dict(spec.fixed_controls))
     assert row["ships"] is False and row["slack"] == sweep._FAILED_CORNER_SLACK
 
     monkeypatch.setattr(
@@ -804,95 +998,82 @@ def test_run_and_score_records_inactive_explicit_strategy_but_not_other_identity
         sweep._run_and_score("NFL", "rushing yards", spec.slug, dict(spec.fixed_controls))
 
 
-# --- per-cell study over the family grid -----------------------------------------------------
+# --- per-cell budgeted study ------------------------------------------------------------------
 
 
-def test_search_cell_enumerates_sn_grid_and_ranks(monkeypatch):
+def test_search_cell_samples_the_sn_grid_under_budget_and_ranks(monkeypatch):
+    """The study ranks a budgeted sample of the family's reachable corners, best slack first.
+
+    ``_known_good_corners`` is stubbed empty so the suggestion sequence depends only on the seeded
+    sampler and the fake objective, not on whatever recipe stat_meta carries for the cell today;
+    the enqueue path has its own test. With 21 evaluations of a 192-corner grid the sampler is
+    expected to find the dominant normalization (worth +0.20 against 0.00 for the runner-up).
+    """
     monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
+    monkeypatch.setattr(sweep, "_known_good_corners", lambda context: [])
     monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
     board = sweep.search_cell("WNBA", "AST")
 
-    assert len(board) == 24  # 3 norms × 2 dist-loss × 2 sn-param × 2 blend
-    # Best corner: centered-mean10 + nll + centered + crps blend (0.20 + 0.05 + 0.01 + 0.02).
+    assert 0 < len(board) <= tpe_search.MAX_TRIALS_PER_CELL
     assert board.iloc[0]["normalization"] == "centered_additive_mean10"
-    assert board.iloc[0]["dist_training_loss"] == "nll"
-    assert board.iloc[0]["sn_param"] == "centered"
-    assert board.iloc[0]["blending_loss_fn"] == "crps"
     assert board["slack"].is_monotonic_decreasing
     assert (board["family"] == "SkewNormal").all()
     assert (board["league"] == "WNBA").all() and (board["market"] == "AST").all()
     # The base family is part of the reproducible corner and persists explicitly.
     assert (board["dist"] == "SkewNormal").all()
-    # g6 is surfaced on the board.
+    # controls_json is authoritative; the convenience columns echo it, never diverge from it.
+    assert all(
+        json.loads(row["controls_json"])["posthoc"] == row["posthoc"] for _, row in board.iterrows()
+    )
+    # Every row is a cross-fit verdict, and g6 is surfaced.
+    assert (board["eval_split"] == sweep.EVAL_SPLIT_CROSSFIT).all()
     assert "g6_pass" in board.columns
 
 
-def test_search_cell_runs_registered_structural_method_with_full_fixed_recipe(monkeypatch):
-    slug = RECEIVING
-    spec = get_strategy(slug)
-    monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: (slug,))
-    seen = []
+def test_search_cell_evaluates_the_seed_corner_first(monkeypatch):
+    """NFL passing tds carries a DPO seed corner, so the budget never risks missing it.
 
-    def score(league, market, family, corner):
-        seen.append((league, market, family, corner))
-        legacy = {"validation_audit": {"split_fingerprint_sha256": "split-123"}}
-        identity = build_artifact_identity(
-            spec.slug, league, market, corner, legacy, matrix_hash=_MATRIX_SHA
-        )
-        return [
-            {
-                **_fake_row(spec.family, corner, 0.2),
-                "strategy_slug": spec.slug,
-                "structural_strategy": identity.structural_strategy,
-                "strategy_signature": identity.signature,
-                "strategy_implementation_version": identity.implementation_version,
-                "artifact_schema_version": identity.artifact_schema_version,
-                "strategy_status": identity.status,
-                "controls_json": controls_json(corner),
-                "corner_fingerprint": identity.corner_fingerprint,
-                "matrix_hash": _MATRIX_SHA,
-                "split_fingerprint": identity.split_fingerprint,
-            }
-        ]
+    A 48-trial sample of a 312-corner grid cannot be relied on to rediscover a recipe with an
+    independent full-HPO pass, so the seed and the stat_meta incumbent are enqueued ahead of the
+    sampler. Assert the seed's position and its uniqueness, not the whole enqueued list: the cell's
+    incumbent is whatever it last shipped, so pinning the list would fail on every future ship.
+    """
+    seed = next(
+        controls
+        for league, market, _, controls in SEED_CORNERS
+        if (league, market) == ("NFL", "passing tds")
+    )
+    context = sweep._cell_context("NFL", "passing tds")
+    known_good = [(spec.slug, corner) for spec, corner in sweep._known_good_corners(context)]
+    assert known_good.count(("DPO", seed)) == 1
 
-    monkeypatch.setattr(sweep, "_run_and_score", score)
-    board = sweep.search_cell("NFL", "receiving yards")
-
-    assert len(board) == 1
-    assert seen == [
-        (
-            "NFL",
-            "receiving yards",
-            slug,
-            dict(spec.fixed_controls),
-        )
-    ]
-    assert board.iloc[0]["structural_strategy"] == slug
-    assert board.iloc[0]["strategy_signature"] == spec.canonical_signature
-    assert board.iloc[0]["hpo_selection"] == "loss"
+    trained = []
+    monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("ZINB", "NegBin", "DPO"))
+    monkeypatch.setattr(sweep, "_run_and_score", _spy_run_and_score(trained))
+    sweep.search_cell("NFL", "passing tds", max_trials=6)
+    assert trained[0] == ("DPO", seed)
 
 
 def test_search_cell_count_cell_sweeps_both_families_and_unions(monkeypatch):
     """A count cell studies ZINB *and* plain NegBin; the boards union, slack-ranked across families.
 
-    The closure must bind ``family`` per study — a bare loop-variable capture would score every study
-    as the last family, collapsing both boards onto one dist. This asserts each family's full corner
-    set lands with its own ``dist`` (8 ZINB + 4 NegBin) and the union is one slack-sorted board.
+    One conditional study spans both families, so the closure must read the suggested spec per trial
+    — scoring every trial as one family would collapse both onto a single dist. The per-family
+    coverage floor (:data:`tpe_search.MIN_FAMILY_TRIALS`) is what keeps a budgeted study from ending
+    before the second family is sampled at all.
     """
     monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("ZINB", "NegBin"))
     monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
     board = sweep.search_cell("MLB", "pitcher strikeouts")
 
-    assert len(board) == 12  # 8 ZINB (2×2×2) + 4 NegBin (2×2)
-    assert board["family"].value_counts().to_dict() == {"ZINB": 8, "NegBin": 4}
-    # Per-family closure binding: each family's rows carry its own single-choice dist (no bleed).
+    assert 0 < len(board) <= tpe_search.MAX_TRIALS_PER_CELL
+    assert set(board["family"]) == {"ZINB", "NegBin"}
+    # Per-trial spec binding: each family's rows carry its own single-choice dist (no bleed).
     assert (board.loc[board["family"] == "ZINB", "dist"] == "ZINB").all()
     assert (board.loc[board["family"] == "NegBin", "dist"] == "NegBin").all()
     # Union is slack-sorted; ZINB's hurdle+pit_ks+crps (0.15+0.05+0.02) tops NegBin's best (0.05+0.02).
     assert board["slack"].is_monotonic_decreasing
     assert board.iloc[0]["family"] == "ZINB" and board.iloc[0]["zinb_mode"] == "hurdle"
-    assert board.iloc[0]["count_dispersion_objective"] == "pit_ks"
-    assert board.iloc[0]["blending_loss_fn"] == "crps"
     # NegBin corners never carry a zinb_mode key → its column stays blank for them (schema superset).
     assert board.loc[board["family"] == "NegBin", "zinb_mode"].isna().all()
     # SN-only axes are blank on a count board (the schema is a shared superset).
@@ -901,7 +1082,7 @@ def test_search_cell_count_cell_sweeps_both_families_and_unions(monkeypatch):
 
 
 def test_search_cell_survives_a_failing_corner(monkeypatch):
-    """One corner erroring does not abort the study: every corner lands, the bad one non-shipping.
+    """One corner erroring does not abort the study: the bad trial lands non-shipping and it goes on.
 
     Mirrors the NHL `blocked` case — the SkewNormal grid's `dist_training_loss=crps` corners crash
     when the cell trains as ZINB, but the `nll` corners score fine and the board still ranks them.
@@ -920,15 +1101,22 @@ def test_search_cell_survives_a_failing_corner(monkeypatch):
     )
     board = sweep.search_cell("NHL", "blocked")
 
-    assert len(board) == 24  # all corners recorded; no crash aborted the grid
     failed = board[board["slack"] == sweep._FAILED_CORNER_SLACK]
-    assert len(failed) == 12 and not failed["ships"].astype(bool).any()  # the 12 crps corners
-    assert int(board["ships"].astype(bool).sum()) == 12  # the 12 nll corners scored + shipped
+    scored = board[board["dist_training_loss"] == "nll"]
+    assert not failed.empty and not scored.empty
+    assert (failed["dist_training_loss"] == "crps").all()
+    assert not failed["ships"].astype(bool).any()
+    assert (scored["slack"] == 0.1).all()
+    # A failed corner is tagged with the search frame like any other, so it caches under its
+    # fingerprint and a resume never retrains a reliable crash.
+    assert (failed["eval_split"] == sweep.EVAL_SPLIT_CROSSFIT).all()
 
 
 def test_run_deterministic_meditate_builds_corner_flags(monkeypatch, tmp_path):
     """Each corner axis is forwarded as its flag; a ZINB corner omits --target-normalization and the
-    output is captured to a per-corner log under the research log root.
+    output is captured to a per-corner log under the research log root. Every trial runs
+    ``--holdout-blind``, so the search is scored on the cross-fit frame and never adapts against the
+    rows the ship gate uses.
     """
     monkeypatch.setattr(sweep, "_DETERMINISTIC_LOG_ROOT", tmp_path)
     calls = []
@@ -943,30 +1131,31 @@ def test_run_deterministic_meditate_builds_corner_flags(monkeypatch, tmp_path):
         "dist_training_loss": "nll",
         "sn_param": "centered",
         "blending_loss_fn": "crps",
+        "posthoc": "isotonic_mean",
     }
     sn_spec = get_strategy("SkewNormal")
     sweep._run_deterministic_meditate("WNBA", "AST", sn, sn_spec)
     last = calls[-1]
+    assert {"--deterministic", "--bypass-withholding", "--holdout-blind"} <= set(last)
     assert last[last.index("--target-normalization") + 1] == "ratio_meanyr"
     assert last[last.index("--dist-training-loss") + 1] == "nll"
     assert last[last.index("--sn-param") + 1] == "centered"
     assert last[last.index("--blending-loss-fn") + 1] == "crps"
+    # Base families now sweep the calibration pool, so the corner's posthoc overrides the cell's
+    # stat_meta value rather than deferring to it.
+    assert last[last.index("--posthoc") + 1] == "isotonic_mean"
     assert "--structural-strategy" not in last
-    # ``posthoc`` is a structural-recipe control only — base families never emit it, so a
-    # swept SkewNormal corner honours each cell's stat_meta posthoc.
-    assert "--posthoc" not in last
     assert sweep._log_path("WNBA", "AST", sn, sn_spec).exists()
 
     sweep._run_deterministic_meditate("NFL", "receiving yards", sn, sn_spec)
-    receiving_base = calls[-1]
     # The retired --structural-strategy axis emits no selector flag for a base corner.
-    assert "--structural-strategy" not in receiving_base
-    assert "--posthoc" not in receiving_base
+    assert "--structural-strategy" not in calls[-1]
 
     zinb = {
         "zinb_mode": "hurdle",
         "count_dispersion_objective": "pit_ks",
         "blending_loss_fn": "nll",
+        "posthoc": "none",
     }
     sweep._run_deterministic_meditate("MLB", "pitcher strikeouts", zinb, get_strategy("ZINB"))
     z = calls[-1]
@@ -1116,71 +1305,103 @@ def test_select_board_cells_withheld_default_shipped_flag_and_data_filter(monkey
         sweep._select_board_cells()
     del fake["MLB"]["hits allowed"]
 
-    sweepable, missing = sweep._select_board_cells()
+    sweepable, missing, no_families = sweep._select_board_cells()
     assert set(sweepable) == {("WNBA", "AST"), ("MLB", "pitcher strikeouts")}
     assert missing == [("WNBA", "STL")]  # withheld + registry, but no cached matrix
+    assert no_families == []
     # --include-shipped pulls in the devel cell (it has data); STL still missing.
-    incl, _ = sweep._select_board_cells(include_shipped=True)
+    incl, _, _ = sweep._select_board_cells(include_shipped=True)
     assert ("WNBA", "PTS") in incl
     # League filter narrows to that league's sweepable cells.
-    sweepable_wnba, _ = sweep._select_board_cells("WNBA")
-    assert sweepable_wnba == [("WNBA", "AST")]
+    sweepable_wnba, _, _ = sweep._select_board_cells("WNBA")
+    assert list(sweepable_wnba) == [("WNBA", "AST")]
 
 
-def test_select_board_cells_dist_class_filter(monkeypatch):
-    """--dist-class narrows the cohort: `count` → ZINB/NegBin cells, `continuous` → SkewNormal, `all`
-    → both.
+def test_select_board_cells_dist_class_filters_families_and_sets_aside_empty_cells(monkeypatch):
+    """``--dist-class`` narrows each cell's family pool, not the cohort of cells.
+
+    A count corner can win on a cell whose stat_meta names a continuous family, so eligibility can't
+    follow the configured dist. Every cell keeps the classes' families it can support; a cell the
+    filter (or the count-admission gates) leaves with nothing is set aside in ``no_families`` and
+    warned like a missing matrix rather than silently dropped.
     """
     fake = {
-        "WNBA": {"AST": {"dist": "SkewNormal", "shipped": "withheld"}},  # continuous
-        "MLB": {
-            "pitcher strikeouts": {"dist": "ZINB", "shipped": "withheld"},  # count (ZINB)
-            "pitches thrown": {"dist": "NegBin", "shipped": "withheld"},  # count (NegBin)
-        },
+        "WNBA": {"AST": {"dist": "SkewNormal", "shipped": "withheld"}},
+        "MLB": {"pitcher strikeouts": {"dist": "ZINB", "shipped": "withheld"}},
+        # Mean over the count-admission ceiling → no count family survives --dist-class count.
+        "NFL": {"passing yards": {"dist": "SkewNormal", "shipped": "withheld"}},
     }
-    fake_markets = {"WNBA": ["AST"], "MLB": ["pitcher strikeouts", "pitches thrown"]}
+    contracts = {
+        ("WNBA", "AST"): (frozenset(), _MATRIX_SHA, True, 3.9),
+        ("MLB", "pitcher strikeouts"): (frozenset(), _MATRIX_SHA, True, 5.4),
+        ("NFL", "passing yards"): (frozenset(), _MATRIX_SHA, True, 230.0),
+    }
+    fake_markets = {"WNBA": ["AST"], "MLB": ["pitcher strikeouts"], "NFL": ["passing yards"]}
     monkeypatch.setattr(sweep, "load_stat_meta", lambda path: fake)
+    monkeypatch.setattr(sweep, "_training_matrix_contract", lambda lg, mkt: contracts[(lg, mkt)])
     monkeypatch.setattr(sweep, "ALL_MARKETS", fake_markets)
     monkeypatch.setattr(sweep, "_has_training_data", lambda lg, mkt: True)
 
-    count, _ = sweep._select_board_cells(dist_class="count")
-    assert set(count) == {("MLB", "pitcher strikeouts"), ("MLB", "pitches thrown")}
-    continuous, _ = sweep._select_board_cells(dist_class="continuous")
-    assert continuous == [("WNBA", "AST")]
-    every, _ = sweep._select_board_cells(dist_class="all")
-    assert set(every) == {("WNBA", "AST"), ("MLB", "pitcher strikeouts"), ("MLB", "pitches thrown")}
+    count, _, no_families = sweep._select_board_cells(dist_class="count")
+    assert count == {
+        ("WNBA", "AST"): ("ZINB", "NegBin", "DPO"),
+        ("MLB", "pitcher strikeouts"): ("ZINB", "NegBin", "DPO"),
+    }
+    assert no_families == [("NFL", "passing yards")]
+
+    continuous, _, none_left = sweep._select_board_cells(dist_class="continuous")
+    assert set(continuous) == set(contracts)
+    assert all(families == ("SkewNormal",) for families in continuous.values())
+    assert none_left == []
+
+    every, _, _ = sweep._select_board_cells(dist_class="all")
+    assert every[("MLB", "pitcher strikeouts")] == ("SkewNormal", "ZINB", "NegBin", "DPO")
 
 
-def test_run_board_mode_warns_missing_data_and_passes_filters(monkeypatch, capsys):
-    """The board runner warns per cell skipped for a missing matrix and forwards its scope filters."""
+def test_run_board_mode_warns_skipped_cells_and_passes_filters(monkeypatch, capsys):
+    """The board runner warns per skipped cell — missing matrix or empty family pool — and forwards
+    its scope filters and per-cell budget.
+    """
     captured = {}
 
     def fake_select(league, include_shipped, dist_class):
         captured["incl"] = include_shipped
         captured["dist_class"] = dist_class
-        return [("WNBA", "AST")], [("WNBA", "STL")]
+        return {("WNBA", "AST"): ("ZINB",)}, [("WNBA", "STL")], [("NFL", "passing yards")]
 
     monkeypatch.setattr(sweep, "_select_board_cells", fake_select)
-    monkeypatch.setattr(sweep, "_corner_count", lambda cells: 12)
-    monkeypatch.setattr(
-        sweep,
-        "run_board",
-        lambda cells, out, resume: pd.DataFrame(
-            {"league": ["WNBA"], "market": ["AST"], "ships": [False]}
-        ),
-    )
+    monkeypatch.setattr(sweep, "_cell_trial_count", lambda lg, mkt, families, max_trials: 12)
+
+    def fake_run_board(cells, **kwargs):
+        captured.update(cells=cells, **kwargs)
+        return pd.DataFrame({"league": ["WNBA"], "market": ["AST"], "ships": [False]})
+
+    monkeypatch.setattr(sweep, "run_board", fake_run_board)
     monkeypatch.setattr(sweep, "_print_board_rollup", lambda b: None)
 
-    sweep._run_board_mode("WNBA", True, "count", "/tmp/board.csv", False, False)
+    sweep._run_board_mode("WNBA", True, "count", "/tmp/board.csv", False, False, 32)
     assert captured["incl"] is True and captured["dist_class"] == "count"
+    assert captured["max_trials"] == 32
+    assert captured["families_by_cell"] == {("WNBA", "AST"): ("ZINB",)}
     out = capsys.readouterr().out
     assert "skip WNBA STL: no cached training matrix" in out
-    assert "1 skipped (no cached matrix)" in out
+    assert "skip NFL passing yards: no applicable family under --dist-class count" in out
+    assert "1 cells to sweep · 2 skipped · <=12 deterministic trainings" in out
 
 
-def _cell_frame(league, market):
+def _cell_frame(league, market, **kwargs):
     """A one-row board frame for a cell — the shape ``search_cell`` returns for the run_board tests."""
+    del kwargs  # budget/families/cache are asserted by the tests that care
     return pd.DataFrame({"league": [league], "market": [market], "slack": [0.1], "ships": [True]})
+
+
+def _board_row(league, market, slug, controls):
+    """One board row for a scored corner, as ``search_cell`` would persist it."""
+    return {
+        "league": league,
+        "market": market,
+        **_fake_run_and_score(league, market, slug, controls),
+    }
 
 
 def test_run_board_upserts_per_cell_preserving_other_leagues(monkeypatch, tmp_path):
@@ -1201,34 +1422,32 @@ def test_run_board_upserts_per_cell_preserving_other_leagues(monkeypatch, tmp_pa
     }
 
 
-def test_run_board_resume_skips_cells_already_on_board(monkeypatch, tmp_path):
-    """``resume`` skips a cell already on the CSV (keeping its rows) and only sweeps the new one."""
+def test_run_board_resume_reuses_prior_rows_and_still_returns_the_cell(monkeypatch, tmp_path):
+    """``--resume`` no longer skips whole cells — a budgeted search never completes one — so a
+    resumed cell is swept again with its admissible prior rows handed in as the corner cache.
+    """
     out = str(tmp_path / "board.csv")
-    pd.DataFrame({"league": ["WNBA"], "market": ["AST"], "slack": [0.9], "ships": [True]}).to_csv(
-        out, index=False
-    )
-    swept = []
+    cell = ("MLB", "pitcher strikeouts")
+    prior = _board_row(*cell, "NegBin", strategy_controls(get_strategy("NegBin"))[0])
+    pd.DataFrame([prior]).to_csv(out, index=False)
+    handed = {}
 
-    def spy(league, market):
-        swept.append((league, market))
+    def spy(league, market, **kwargs):
+        handed[(league, market)] = kwargs["cached"]
         return _cell_frame(league, market)
 
     monkeypatch.setattr(sweep, "search_cell", spy)
     monkeypatch.setattr(sweep, "_print_cell_summary", lambda b: None)
-    monkeypatch.setattr(sweep, "_board_done_cells", lambda path: {("WNBA", "AST")})
 
-    board = sweep.run_board([("WNBA", "AST"), ("NBA", "FGA")], out=out, resume=True)
-    assert swept == [("NBA", "FGA")]  # the on-board cell was skipped
-    assert set(zip(board["league"], board["market"], strict=True)) == {
-        ("WNBA", "AST"),
-        ("NBA", "FGA"),
-    }
+    board = sweep.run_board([cell, ("NBA", "FGA")], out=out, resume=True)
+
+    assert list(handed[cell]) == [prior["corner_fingerprint"]]
+    assert handed[("NBA", "FGA")] == {}  # no prior rows for that cell
+    assert set(zip(board["league"], board["market"], strict=True)) == {cell, ("NBA", "FGA")}
 
 
-def test_run_board_resume_returns_only_requested_scope_but_preserves_unrelated_csv(
-    monkeypatch, tmp_path
-):
-    """A scoped resume cannot leak an unrelated complete prior winner into ``--confirm`` input."""
+def test_run_board_returns_only_requested_scope_but_preserves_unrelated_csv(monkeypatch, tmp_path):
+    """A scoped run cannot leak an unrelated prior winner into ``--confirm`` input."""
     out = str(tmp_path / "board.csv")
     pd.DataFrame(
         {
@@ -1240,11 +1459,6 @@ def test_run_board_resume_returns_only_requested_scope_but_preserves_unrelated_c
     ).to_csv(out, index=False)
     monkeypatch.setattr(sweep, "search_cell", _cell_frame)
     monkeypatch.setattr(sweep, "_print_cell_summary", lambda board: None)
-    monkeypatch.setattr(
-        sweep,
-        "_board_done_cells",
-        lambda path: {("WNBA", "AST"), ("NFL", "sacks")},
-    )
 
     result = sweep.run_board([("WNBA", "AST"), ("NBA", "FGA")], out=out, resume=True)
 
@@ -1260,98 +1474,160 @@ def test_run_board_resume_returns_only_requested_scope_but_preserves_unrelated_c
     }
 
 
-def test_resume_resweeps_legacy_nfl_yards_rows_missing_structural_family(monkeypatch, tmp_path):
-    out = tmp_path / "board.csv"
-    pd.DataFrame(
-        {
-            "league": ["NFL"],
-            "market": ["receiving yards"],
-            "family": ["SkewNormal"],
-            "normalization": ["ratio_meanyr"],
-            "dist_training_loss": ["crps"],
-            "sn_param": ["direct"],
-            "blending_loss_fn": ["nll"],
-        }
-    ).to_csv(out, index=False)
-    monkeypatch.setattr(
-        sweep,
-        "_cell_families",
-        lambda lg, mkt: (RECEIVING,),
-    )
-
-    assert sweep._board_done_cells(str(out)) == set()
-    normalized = sweep._read_board(out)
-    assert list(normalized.columns) == sweep._BOARD_COLUMNS
-    assert normalized["structural_strategy"].isna().all()
-
-    _, contract = next(iter(sweep._expected_corner_records("NFL", "receiving yards").items()))
-    spec = get_strategy(contract["strategy_slug"])
-    controls = json.loads(contract["controls_json"])
-    split = "split-123"
-    fingerprint = corner_fingerprint(spec, controls, _MATRIX_SHA)
-    signed = pd.DataFrame(
-        [
-            {
-                "league": "NFL",
-                "market": "receiving yards",
-                "corner_fingerprint": fingerprint,
-                "split_fingerprint": split,
-                **contract,
-            }
-        ]
-    )
-    signed.to_csv(out, index=False)
-    assert sweep._board_done_cells(str(out)) == {("NFL", "receiving yards")}
-
-    contradictory = signed.copy()
-    contradictory.loc[0, "hpo_selection"] = "rank"
-    contradictory.to_csv(out, index=False)
-    assert sweep._board_done_cells(str(out)) == set()
-
-    stale_split = signed.copy()
-    stale_split.loc[0, "split_fingerprint"] = "WRONG"
-    stale_split.to_csv(out, index=False)
-    # Resume can derive spec+controls+matrix before training, not the adapter's split. Confirm
-    # separately requires this board value to equal the full-HPO model+CSV split identity.
-    assert sweep._board_done_cells(str(out)) == {("NFL", "receiving yards")}
-
-    stale_matrix = signed.copy()
-    stale_matrix.loc[0, "matrix_hash"] = "old-matrix"
-    stale_matrix.to_csv(out, index=False)
-    assert sweep._board_done_cells(str(out)) == set()
-
-
-def test_resume_accepts_complete_count_board_with_canonical_none_namespaces(monkeypatch, tmp_path):
+def test_row_matches_contract_admits_a_current_corner_and_rejects_drift():
+    """Resume admission is per row, not per cell: the row must name a registered corner of a
+    registered spec, carry that spec's current identity, and be fingerprinted against the matrix in
+    hand. A budgeted search never enumerates a cell, so 'has every corner' is not a usable test.
+    """
     cell = ("MLB", "pitcher strikeouts")
-    context = CellContext(*cell, "ZINB", "count", _MATRIX_COLUMNS, _MATRIX_SHA)
-    monkeypatch.setattr(sweep, "_cell_context", lambda league, market: context)
-    monkeypatch.setattr(sweep, "_cell_families", lambda league, market: ("ZINB", "NegBin", "DPO"))
-    expected = sweep._expected_corner_records(*cell)
-    rows = []
-    for contract in expected.values():
-        spec = get_strategy(contract["strategy_slug"])
-        controls = json.loads(contract["controls_json"])
-        rows.append(
-            {
-                "league": cell[0],
-                "market": cell[1],
-                **contract,
-                "corner_fingerprint": corner_fingerprint(spec, controls, _MATRIX_SHA),
-                "split_fingerprint": None,
-            }
-        )
-    out = tmp_path / "count-board.csv"
-    pd.DataFrame(rows).to_csv(out, index=False)
+    spec = get_strategy("NegBin")
+    controls = strategy_controls(spec)[0]
+    context = sweep._cell_context(*cell)
+    row = _board_row(*cell, spec.slug, controls)
+    assert sweep._row_matches_contract(pd.Series(row), context)
 
-    assert sweep._board_done_cells(str(out)) == {cell}
-    assert {
-        spec.slug: {sweep._dump_subdir(controls, spec) for controls in strategy_controls(spec)}
-        for spec in map(get_strategy, ("ZINB", "NegBin", "DPO"))
-    } == {
-        "ZINB": {"none", "none_hurdle"},
-        "NegBin": {"none"},
-        "DPO": {"none"},
+    stale_matrix = pd.Series({**row, "matrix_hash": "old-matrix"})
+    assert not sweep._row_matches_contract(stale_matrix, context)
+
+    off_grid = pd.Series({**row, "controls_json": controls_json({**controls, "posthoc": "bogus"})})
+    assert not sweep._row_matches_contract(off_grid, context)
+
+    stale_signature = pd.Series({**row, "strategy_signature": "old-signature"})
+    assert not sweep._row_matches_contract(stale_signature, context)
+
+    unregistered = pd.Series({**row, "strategy_slug": "NoSuchFamily"})
+    assert not sweep._row_matches_contract(unregistered, context)
+
+    incomplete = pd.Series({**row, "corner_fingerprint": pd.NA})
+    assert not sweep._row_matches_contract(incomplete, context)
+
+
+def test_legacy_holdout_scored_rows_never_enter_the_corner_cache(tmp_path):
+    """``eval_split`` is the marker separating the cross-fit board from the rows scored on the ship
+    holdout. A legacy row carries no value for it — whether the column is blank or absent from an
+    older CSV entirely — and reusing one would mix two different frames on one board.
+    """
+    cell = ("MLB", "pitcher strikeouts")
+    context = sweep._cell_context(*cell)
+    row = _board_row(*cell, "NegBin", strategy_controls(get_strategy("NegBin"))[0])
+    out = tmp_path / "board.csv"
+
+    pd.DataFrame([row]).to_csv(out, index=False)
+    assert list(sweep._cached_corners(str(out), *cell, context)) == [row["corner_fingerprint"]]
+    # _cached_corners is cell-scoped: another cell's rows are not reusable here.
+    assert sweep._cached_corners(str(out), "NBA", "FGA", context) == {}
+
+    pd.DataFrame([{**row, "eval_split": ""}]).to_csv(out, index=False)
+    assert sweep._cached_corners(str(out), *cell, context) == {}
+
+    legacy = pd.DataFrame([row]).drop(columns=["eval_split"])
+    legacy.to_csv(out, index=False)
+    assert "eval_split" not in legacy.columns
+    assert list(sweep._read_board(out).columns) == sweep._BOARD_COLUMNS  # back-filled, still <NA>
+    assert sweep._cached_corners(str(out), *cell, context) == {}
+
+
+def test_search_cell_reuses_cached_corners_instead_of_retraining(monkeypatch, tmp_path):
+    """A corner this matrix already has a verdict for is never handed back to ``_run_and_score``.
+
+    The sampler re-suggests corners freely — that is what makes a resumed multi-hour run cheap —
+    so the cache is checked per trial, not just at start-up.
+    """
+    cell = ("MLB", "pitcher strikeouts")
+    out = str(tmp_path / "board.csv")
+    trained = []
+    monkeypatch.setattr(sweep, "_run_and_score", _spy_run_and_score(trained))
+
+    first = sweep.search_cell(*cell, families=("NegBin",), max_trials=8)
+    sweep._upsert_cell(first, out)
+    cached = sweep._cached_corners(out, *cell, sweep._cell_context(*cell))
+    assert set(cached) == set(first["corner_fingerprint"])
+
+    trained.clear()
+    sweep.search_cell(*cell, families=("NegBin",), max_trials=8, cached=cached)
+    retrained = {
+        corner_fingerprint(get_strategy(family), corner, _MATRIX_SHA) for family, corner in trained
     }
+    assert not retrained & set(cached)
+
+
+def test_a_changed_family_pool_gets_its_own_journal_instead_of_crashing(monkeypatch, tmp_path):
+    """Optuna fixes a categorical's choices at first suggestion, so the pool must key the study.
+
+    Resuming a journal written under a different ``family`` arm set raises "CategoricalDistribution
+    does not support dynamic value space" and kills the whole run — which is exactly what dropping
+    Mixture did to every journal already on disk, and what a --dist-class run would do to a
+    full-pool journal.
+    """
+    monkeypatch.setattr(tpe_search, "_STUDY_ROOT", tmp_path)
+    full = tpe_search.cell_study("NBA", "DREB", ("SkewNormal", "ZINB", "NegBin", "DPO"))
+    narrowed = tpe_search.cell_study("NBA", "DREB", ("ZINB", "NegBin", "DPO"))
+
+    assert full.study_name != narrowed.study_name
+    assert len(list(tmp_path.glob("NBA_DREB.*.log"))) == 2
+    # The same pool reopens the same study, so a resume still resumes.
+    again = tpe_search.cell_study("NBA", "DREB", ("SkewNormal", "ZINB", "NegBin", "DPO"))
+    assert again.study_name == full.study_name
+
+
+def test_a_cell_killed_mid_search_keeps_the_corners_it_already_trained(monkeypatch, tmp_path):
+    """Every scored corner reaches the board CSV immediately, not once the cell finishes.
+
+    The Optuna journal replays which corners were proposed but not what they scored, so a cell that
+    dies on its 30th corner would otherwise resume with nothing and retrain all 29.
+    """
+    cell = ("MLB", "pitcher strikeouts")
+    out = tmp_path / "board.csv"
+    trained = []
+    spy = _spy_run_and_score(trained)
+
+    def die_on_the_third(league, market, family, corner):
+        if len(trained) == 2:
+            raise KeyboardInterrupt
+        return spy(league, market, family, corner)
+
+    monkeypatch.setattr(sweep, "_run_and_score", die_on_the_third)
+    with pytest.raises(KeyboardInterrupt):
+        sweep.search_cell(*cell, families=("NegBin",), max_trials=8, out=str(out))
+
+    banked = sweep._read_board(out)
+    assert len(banked) == 2
+    assert set(banked["market"]) == {cell[1]}
+    # ... and a resume treats them as already-scored rather than retraining them.
+    assert set(sweep._cached_corners(str(out), *cell, sweep._cell_context(*cell))) == set(
+        banked["corner_fingerprint"]
+    )
+
+
+def test_budget_counts_retrains_not_trials(monkeypatch, tmp_path):
+    """A re-proposed corner costs no training, so it must not spend budget either.
+
+    TPE re-proposes a seen corner often enough to matter — on an observed NBA DREB run roughly a
+    quarter of trials came back cached — and charging those to ``--max-trials`` silently shrinks the
+    search well below the budget the CLI advertises.
+    """
+    cell = ("MLB", "pitcher strikeouts")
+    out = str(tmp_path / "board.csv")
+    trained = []
+    monkeypatch.setattr(sweep, "_run_and_score", _spy_run_and_score(trained))
+
+    seeded = sweep.search_cell(*cell, families=("NegBin",), max_trials=4)
+    sweep._upsert_cell(seeded, out)
+    cached = sweep._cached_corners(out, *cell, sweep._cell_context(*cell))
+    assert cached
+
+    trained.clear()
+    board = sweep.search_cell(*cell, families=("NegBin",), max_trials=4, cached=cached)
+    retrained = {
+        corner_fingerprint(get_strategy(family), corner, _MATRIX_SHA) for family, corner in trained
+    }
+
+    # NegBin's grid is far larger than the budget, so a run that charged cache hits to --max-trials
+    # would stop having trained fewer than 4 corners. It must spend the budget on new ones.
+    assert len(retrained) == 4
+    assert not retrained & set(cached)
+    # The board reports every corner the run touched, cached and fresh alike.
+    assert set(board["corner_fingerprint"]) >= retrained
 
 
 def test_cli_board_dry_run_trains_nothing(monkeypatch, tmp_path):
@@ -1364,19 +1640,17 @@ def test_cli_board_dry_run_trains_nothing(monkeypatch, tmp_path):
 
     def fake_select(lg, incl, dist_class):
         seen["dist_class"] = dist_class
-        return [("WNBA", "AST")], []
+        return {("WNBA", "AST"): ("ZINB",)}, [], []
 
     monkeypatch.setattr(sweep, "_select_board_cells", fake_select)
-    monkeypatch.setattr(sweep, "_corner_count", lambda cells: 12)
+    monkeypatch.setattr(sweep, "_cell_trial_count", lambda lg, mkt, families, max_trials: 12)
 
     def boom(*a, **k):
         raise AssertionError("run_board must not be called on a dry run")
 
     monkeypatch.setattr(sweep, "run_board", boom)
     out = str(tmp_path / "board.csv")
-    result = CliRunner().invoke(
-        sweep.main, ["--dry-run", "--dist-class", "count", "--out", out]
-    )
+    result = CliRunner().invoke(sweep.main, ["--dry-run", "--dist-class", "count", "--out", out])
     assert result.exit_code == 0, result.output
     assert "[dry-run]" in result.output
     assert seen["dist_class"] == "count"
@@ -1392,6 +1666,7 @@ def test_stat_meta_edit_is_family_aware():
         "dist_training_loss": "nll",
         "sn_param": "centered",
         "blending_loss_fn": "crps",
+        "posthoc": "prob_recal_platt",
     }
     sn = {
         "league": "WNBA",
@@ -1403,16 +1678,19 @@ def test_stat_meta_edit_is_family_aware():
     }
     assert sweep._stat_meta_edit(sn) == (
         "dist=SkewNormal, target_normalization=centered_additive_mean10, dist_training_loss=nll, "
-        "sn_param=centered, blending=crps"
+        "sn_param=centered, blending=crps, posthoc=prob_recal_platt"
     )
     receiving_base = {**sn, "league": "NFL", "market": "receiving yards"}
-    assert sweep._stat_meta_edit(receiving_base).endswith("blending=crps")
-    # Count families persist dist first (pins the winning family, e.g. a ZINB→NegBin flip).
+    assert sweep._stat_meta_edit(receiving_base).endswith("posthoc=prob_recal_platt")
+    # Count families persist dist first (pins the winning family, e.g. a ZINB→NegBin flip) and
+    # pin target_normalization=none, which a win on a continuous-configured cell would otherwise
+    # leave carrying a slug ship_config._validate_cell rejects.
     zinb_controls = {
         "dist": "ZINB",
         "zinb_mode": "hurdle",
         "count_dispersion_objective": "pit_ks",
         "blending_loss_fn": "nll",
+        "posthoc": "none",
     }
     zinb = {
         "league": "MLB",
@@ -1422,14 +1700,15 @@ def test_stat_meta_edit_is_family_aware():
         "structural_strategy": BASE_STRUCTURAL_STRATEGY,
         "controls_json": controls_json(zinb_controls),
     }
-    assert (
-        sweep._stat_meta_edit(zinb)
-        == "dist=ZINB, zinb_mode=hurdle, count_dispersion_objective=pit_ks, blending=nll"
+    assert sweep._stat_meta_edit(zinb) == (
+        "dist=ZINB, zinb_mode=hurdle, count_dispersion_objective=pit_ks, blending=nll, "
+        "posthoc=none, target_normalization=none"
     )
     negbin_controls = {
         "dist": "NegBin",
         "count_dispersion_objective": "crps",
         "blending_loss_fn": "crps",
+        "posthoc": "roe_mean",
     }
     negbin = {
         "league": "MLB",
@@ -1439,9 +1718,9 @@ def test_stat_meta_edit_is_family_aware():
         "structural_strategy": BASE_STRUCTURAL_STRATEGY,
         "controls_json": controls_json(negbin_controls),
     }
-    assert (
-        sweep._stat_meta_edit(negbin)
-        == "dist=NegBin, count_dispersion_objective=crps, blending=crps"
+    assert sweep._stat_meta_edit(negbin) == (
+        "dist=NegBin, count_dispersion_objective=crps, blending=crps, posthoc=roe_mean, "
+        "target_normalization=none"
     )
     spec = get_strategy(RUSHING)
     structural = {
@@ -1453,25 +1732,35 @@ def test_stat_meta_edit_is_family_aware():
         "controls_json": controls_json(spec.fixed_controls),
     }
     # The method rides the ``posthoc`` calibration pool: its slug is the persisted posthoc
-    # value, and no separate structural_strategy field is written.
+    # value, and no separate structural_strategy field is written. Unlike a base family it also
+    # persists hpo_selection, because a structural spec pins the whole recipe.
     assert sweep._stat_meta_edit(structural) == (
         "dist=SkewNormal, target_normalization=ratio_meanyr, dist_training_loss=crps, "
-        f"sn_param=direct, blending=nll, hpo_selection=loss, posthoc={RUSHING}"
+        f"sn_param=direct, blending=nll, posthoc={RUSHING}, hpo_selection=loss"
     )
 
 
 # --- CLI -------------------------------------------------------------------------------------
 
 
-def test_cli_runs_a_single_cell(monkeypatch, tmp_path):
+def test_cli_runs_a_single_cell_under_the_max_trials_budget(monkeypatch, tmp_path):
+    """``--league``/``--market`` sweeps one cell; ``--max-trials`` overrides the per-cell budget."""
     from click.testing import CliRunner
 
-    monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
+    monkeypatch.setattr(
+        sweep, "_cell_families", lambda lg, mkt, dist_class=sweep._DIST_CLASS_ALL: ("SkewNormal",)
+    )
     monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
     out = str(tmp_path / "board.csv")
-    result = CliRunner().invoke(sweep.main, ["--league", "WNBA", "--market", "AST", "--out", out])
+    result = CliRunner().invoke(
+        sweep.main,
+        ["--league", "WNBA", "--market", "AST", "--out", out, "--max-trials", "6"],
+    )
     assert result.exit_code == 0, result.output
-    assert "centered_additive_mean10" in result.output
+    assert "WNBA AST" in result.output
+    board = pd.read_csv(out)
+    assert 0 < len(board) <= 6
+    assert (board["league"] == "WNBA").all()
 
 
 def test_cli_confirm_invokes_run_confirm(monkeypatch, tmp_path):
@@ -1480,23 +1769,45 @@ def test_cli_confirm_invokes_run_confirm(monkeypatch, tmp_path):
 
     from sportstradamus.training.model_strategy import confirm as model_strategy_confirm
 
-    monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
+    monkeypatch.setattr(
+        sweep, "_cell_families", lambda lg, mkt, dist_class=sweep._DIST_CLASS_ALL: ("SkewNormal",)
+    )
     monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
     seen = {}
     monkeypatch.setattr(
         model_strategy_confirm,
         "run_confirm",
-        lambda board, *, yes: seen.update(n=len(board), yes=yes),
+        lambda board, *, yes, max_nominees: seen.update(
+            n=len(board), yes=yes, max_nominees=max_nominees
+        ),
     )
     out = str(tmp_path / "board.csv")
     result = CliRunner().invoke(
-        sweep.main, ["--league", "WNBA", "--market", "AST", "--out", out, "--confirm", "--yes"]
+        sweep.main,
+        [
+            "--league",
+            "WNBA",
+            "--market",
+            "AST",
+            "--out",
+            out,
+            "--max-trials",
+            "5",
+            "--confirm",
+            "--yes",
+            "--confirm-nominees",
+            "2",
+        ],
     )
     assert result.exit_code == 0, result.output
-    assert seen == {"n": 24, "yes": True}
+    assert seen["yes"] is True and 0 < seen["n"] <= 5
+    assert seen["max_nominees"] == 2
 
 
-def test_cli_scoped_resume_confirm_excludes_unrelated_complete_prior_cell(monkeypatch, tmp_path):
+def test_cli_scoped_board_confirms_only_the_requested_cells(monkeypatch, tmp_path):
+    """A ``--league``-scoped board hands ``--confirm`` its own cells only, while the CSV keeps the
+    rows of every cell outside the scope.
+    """
     from click.testing import CliRunner
 
     from sportstradamus.training.model_strategy import confirm as model_strategy_confirm
@@ -1511,10 +1822,12 @@ def test_cli_scoped_resume_confirm_excludes_unrelated_complete_prior_cell(monkey
         }
     ).to_csv(out, index=False)
     requested = [("NFL", "receiving yards"), ("NFL", "rushing yards")]
-    complete = {("NFL", "receiving yards"), ("WNBA", "AST")}
-    monkeypatch.setattr(sweep, "_select_board_cells", lambda *args: (requested, []))
-    monkeypatch.setattr(sweep, "_board_done_cells", lambda path: complete)
-    monkeypatch.setattr(sweep, "_corner_count", len)
+    monkeypatch.setattr(
+        sweep,
+        "_select_board_cells",
+        lambda *args: (dict.fromkeys(requested, ("SkewNormal",)), [], []),
+    )
+    monkeypatch.setattr(sweep, "_cell_trial_count", lambda lg, mkt, families, max_trials: 8)
     monkeypatch.setattr(sweep, "search_cell", _cell_frame)
     monkeypatch.setattr(sweep, "_print_cell_summary", lambda board: None)
     monkeypatch.setattr(sweep, "_print_board_rollup", lambda board: None)
@@ -1522,8 +1835,10 @@ def test_cli_scoped_resume_confirm_excludes_unrelated_complete_prior_cell(monkey
     monkeypatch.setattr(
         model_strategy_confirm,
         "run_confirm",
-        lambda board, *, yes: confirmed.update(
-            cells=set(zip(board["league"], board["market"], strict=True)), yes=yes
+        lambda board, *, yes, max_nominees: confirmed.update(
+            cells=set(zip(board["league"], board["market"], strict=True)),
+            yes=yes,
+            max_nominees=max_nominees,
         ),
     )
 
@@ -1533,7 +1848,7 @@ def test_cli_scoped_resume_confirm_excludes_unrelated_complete_prior_cell(monkey
     )
 
     assert result.exit_code == 0, result.output
-    assert confirmed == {"cells": set(requested), "yes": True}
+    assert confirmed == {"cells": set(requested), "yes": True, "max_nominees": None}
     persisted = pd.read_csv(out)
     assert set(zip(persisted["league"], persisted["market"], strict=True)) == {
         *requested,
@@ -1547,13 +1862,18 @@ def test_cli_single_cell_upserts_into_existing_board(monkeypatch, tmp_path):
     """
     from click.testing import CliRunner
 
-    monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
+    monkeypatch.setattr(
+        sweep, "_cell_families", lambda lg, mkt, dist_class=sweep._DIST_CLASS_ALL: ("SkewNormal",)
+    )
     monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
     out = str(tmp_path / "board.csv")
     runner = CliRunner()
 
     def run(league, market):
-        return runner.invoke(sweep.main, ["--league", league, "--market", market, "--out", out])
+        return runner.invoke(
+            sweep.main,
+            ["--league", league, "--market", market, "--out", out, "--max-trials", "6"],
+        )
 
     assert run("WNBA", "AST").exit_code == 0
     assert run("NBA", "FGA").exit_code == 0
@@ -1562,6 +1882,12 @@ def test_cli_single_cell_upserts_into_existing_board(monkeypatch, tmp_path):
         ("WNBA", "AST"),
         ("NBA", "FGA"),
     }
-    n_two_cells = len(board)
+    n_other_cell = int((board["league"] == "NBA").sum())
+
     assert run("WNBA", "AST").exit_code == 0  # re-run replaces the cell's rows, not appends
-    assert len(pd.read_csv(out)) == n_two_cells
+    reswept = pd.read_csv(out)
+    assert set(zip(reswept["league"], reswept["market"], strict=True)) == {
+        ("WNBA", "AST"),
+        ("NBA", "FGA"),
+    }
+    assert int((reswept["league"] == "NBA").sum()) == n_other_cell

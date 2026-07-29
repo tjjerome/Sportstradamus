@@ -87,6 +87,7 @@ from sportstradamus.training.lineage import (
     validate_matrix_manifest,
     write_matrix_manifest,
 )
+from sportstradamus.training.matrix_audit import incomplete_provenance_rows
 from sportstradamus.training.model_strategy import (
     BASE_STRUCTURAL_STRATEGY,
     CAP_DETERMINISTIC_TRAIN,
@@ -209,6 +210,25 @@ DETERMINISTIC_SEED = 1234
 # Half of the uint64 identity-hash space goes to structural calibration. Unlike
 # a positional RNG split, shared Player/Date rows keep their role as matrices grow.
 _VALIDATION_HASH_THRESHOLD: int = 1 << 63
+
+# Cross-fit folds for the holdout-blind search objective. Folds are player-disjoint:
+# the ship gates bootstrap player-clustered, so a row-random fold would leak exactly
+# the within-player correlation the gate corrects for. 5 matches posthoc's
+# _PIT_RECAL_CV_FOLDS, so the PIT map's own inner cross-fit sees a familiar fold size.
+_CALIBRATION_FOLDS: int = 5
+
+# Split frames that rotate between the fit and apply roles when cross-fitting; each
+# names a `{stem}_validation` / `{stem}_test` pair in the splits dict.
+_ROTATED_SPLIT_STEMS: tuple[str, ...] = (
+    "X",
+    "y",
+    "B",
+    "players",
+    "dates",
+    "archived",
+    "odds_synthetic",
+    "quote_authenticity",
+)
 
 # Deterministic-mode model pickles live OUTSIDE the installed package tree so
 # the research harness can iterate on them without polluting the production
@@ -677,6 +697,8 @@ def _step_load_matrix(
         ``(M, training_data_path)`` tuple where ``M`` is the combined matrix,
         or ``None`` when there is nothing to train on.
     """
+    # style: allow-complexity — four mutually exclusive matrix sources (frozen input, full
+    # rebuild, incremental cache, cold start) then one shared assemble-and-validate tail.
     canonical_path = Path(str(pkg_resources.files(data) / f"training_data/{filename}.parquet"))
     if matrix_input is not None:
         filepath = matrix_input
@@ -736,6 +758,18 @@ def _step_load_matrix(
     M.Date = pd.to_datetime(M.Date, format="mixed")
     if "Player" in M.columns:
         M = M.drop_duplicates(subset=["Player", "Date"], keep="last")
+    unpriced = incomplete_provenance_rows(M)
+    if unpriced:
+        # Raise before the caller persists: cached rows predating the provenance block concat
+        # against fresh rows carrying it, and pd.concat back-fills all of history with NaN. Any
+        # reader would have to guess, and _split_quote_authenticity_mask's legacy fallback guesses
+        # "authentic", letting synthetic quotes buy book evidence.
+        raise ValueError(
+            f"{league} {market}: {unpriced} of {len(M)} rows carry a half-populated odds-provenance "
+            "block, so the matrix mixes two incompatible eras. Repair it with "
+            f'`inject_backfilled_odds --league {league} --markets "{market}"`, which re-derives '
+            "the block from the archive, then retrain."
+        )
     return M, filepath
 
 
@@ -823,11 +857,7 @@ def _reconcile_clipped_neutral_quotes(
             & M["QuoteSource"].isin(("neutral_fallback", "model_fallback"))
         )
         if neutral.any():
-            prep_gate = (
-                stat_zi.get(league, {}).get(market, 0)
-                if dist in ("ZINB", "ZAGamma")
-                else 0
-            )
+            prep_gate = stat_zi.get(league, {}).get(market, 0) if dist in ("ZINB", "ZAGamma") else 0
             synth_dist = "SkewNormal" if dist == "Mixture" else dist
             M.loc[neutral, "Odds"] = 0.5
             M.loc[neutral, "EV"] = [
@@ -909,11 +939,7 @@ def _prune_uninformative_features(X_train: pd.DataFrame, categorical_cols: list[
         if s.nunique(dropna=True) < 2:
             continue
         canonical = col.replace("_overall_", "_")
-        if (
-            canonical != col
-            and canonical in X_train
-            and s.equals(X_train[canonical])
-        ):
+        if canonical != col and canonical in X_train and s.equals(X_train[canonical]):
             continue
         keep.append(col)
     return keep
@@ -925,6 +951,8 @@ def _step_build_splits(
     market: str,
     target_normalization: str = "ratio_meanyr",
     structural_strategy: str = BASE_STRUCTURAL_STRATEGY,
+    *,
+    holdout_blind: bool = False,
 ) -> dict:
     """Build feature matrix, temporal 70/30 split, then 50/50 test/validation.
 
@@ -934,6 +962,8 @@ def _step_build_splits(
         market: Market name.
         target_normalization: Normalization slug. ``ratio_projvol`` needs its
             projected-volume denominator carried into ``X`` (see below).
+        holdout_blind: Drop the held-out rows and evaluate on the validation
+            frame instead — the search mode; see ``training/cli.py``.
 
     Returns:
         Dict with: ``X``, ``y``, ``X_train``, ``X_test``, ``X_validation``,
@@ -1011,10 +1041,15 @@ def _step_build_splits(
         dtype=np.uint64
     )
     validation_mask = identity_hash < _VALIDATION_HASH_THRESHOLD
+    # A recipe search must never see the frame its own gate is scored on. Under
+    # holdout_blind the evaluation frame IS the validation frame, so the true
+    # held-out rows enter neither and are absent from the run rather than merely
+    # unread; _step_crossfit_calibrate_and_serve then scores them out-of-fold.
+    eval_mask = validation_mask if holdout_blind else ~validation_mask
     X_validation = X_test.loc[validation_mask]
     y_validation = y_test.loc[validation_mask]
-    X_test = X_test.loc[~validation_mask]
-    y_test = y_test.loc[~validation_mask]
+    X_test = X_test.loc[eval_mask]
+    y_test = y_test.loc[eval_mask]
 
     B_train = M.loc[X_train.index, ["Line", "Odds", "EV"]]
     B_test = M.loc[X_test.index, ["Line", "Odds", "EV"]]
@@ -1038,14 +1073,10 @@ def _step_build_splits(
         M.loc[X_test.index, "Odds_synthetic"] if "Odds_synthetic" in M.columns else None
     )
     quote_authenticity_validation = (
-        M.loc[X_validation.index, "QuoteAuthenticity"]
-        if "QuoteAuthenticity" in M.columns
-        else None
+        M.loc[X_validation.index, "QuoteAuthenticity"] if "QuoteAuthenticity" in M.columns else None
     )
     quote_authenticity_test = (
-        M.loc[X_test.index, "QuoteAuthenticity"]
-        if "QuoteAuthenticity" in M.columns
-        else None
+        M.loc[X_test.index, "QuoteAuthenticity"] if "QuoteAuthenticity" in M.columns else None
     )
     return {
         "X": X,
@@ -1309,6 +1340,13 @@ def _step_select_hyperparams(
                 "monotone_constraints": monotone,
                 "opt_rounds": 200,
             }
+        else:
+            # Unlike the Optuna paths below, this one hands the pickle's params straight to
+            # LightGBM, which aborts the fit unless the constraint vector has exactly one entry
+            # per training column. The pickle's vector is sized to the feature set it was trained
+            # on, so a warm start after any feature-set change dies; recompute instead of
+            # carrying it forward, since it is a pure function of the current column list.
+            opt_params = {**opt_params, "monotone_constraints": monotone}
     elif opt_params is None or opt_params.get("opt_rounds") is None:
         opt_params = run_hyper_opt(
             model,
@@ -3094,11 +3132,7 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
             model_sigma=decoded["sn_sigma_val"][authentic_val],
             model_skew_alpha=decoded["sn_alpha_val"][authentic_val],
             **{
-                key: (
-                    value[authentic_val]
-                    if isinstance(value, np.ndarray)
-                    else value
-                )
+                key: (value[authentic_val] if isinstance(value, np.ndarray) else value)
                 for key, value in _fit_gate_kwargs.items()
             },
         )
@@ -3242,11 +3276,7 @@ def _fit_nonsn_weight(out, decoded, splits, base_dist, dist, cv, hist_gate, blen
             ),
             cv=cv,
             **{
-                key: (
-                    value[authentic_val]
-                    if isinstance(value, np.ndarray)
-                    else value
-                )
+                key: (value[authentic_val] if isinstance(value, np.ndarray) else value)
                 for key, value in _zi_kwargs.items()
             },
         )
@@ -3262,12 +3292,8 @@ def _fuse_negbin(out, decoded, splits, model_weight, cv, hist_gate, dist):
     ev_validation = decoded["ev_validation"]
     book_ev_test = splits["B_test"]["EV"].to_numpy()
     book_ev_val = splits["B_validation"]["EV"].to_numpy()
-    test_weight = np.where(
-        _split_quote_authenticity_mask(splits, "test"), model_weight, 1.0
-    )
-    val_weight = np.where(
-        _split_quote_authenticity_mask(splits, "validation"), model_weight, 1.0
-    )
+    test_weight = np.where(_split_quote_authenticity_mask(splits, "test"), model_weight, 1.0)
+    val_weight = np.where(_split_quote_authenticity_mask(splits, "validation"), model_weight, 1.0)
 
     _zi_test = (
         {"gate_model": decoded["gate_test"], "gate_book": hist_gate} if dist == "ZINB" else {}
@@ -3364,12 +3390,8 @@ def _fuse_gamma(out, decoded, splits, model_weight, cv, hist_gate, dist):
     ev_validation = decoded["ev_validation"]
     book_ev_test = splits["B_test"]["EV"].to_numpy()
     book_ev_val = splits["B_validation"]["EV"].to_numpy()
-    test_weight = np.where(
-        _split_quote_authenticity_mask(splits, "test"), model_weight, 1.0
-    )
-    val_weight = np.where(
-        _split_quote_authenticity_mask(splits, "validation"), model_weight, 1.0
-    )
+    test_weight = np.where(_split_quote_authenticity_mask(splits, "test"), model_weight, 1.0)
+    val_weight = np.where(_split_quote_authenticity_mask(splits, "validation"), model_weight, 1.0)
 
     _zi_test = (
         {"gate_model": decoded["gate_test"], "gate_book": hist_gate} if dist == "ZAGamma" else {}
@@ -3895,6 +3917,233 @@ def _structural_gate_inputs(
     }
 
 
+def _step_calibrate_and_serve(
+    splits: dict,
+    preds: dict,
+    dist_info: dict,
+    *,
+    dist: str,
+    cv: float,
+    hist_gate: float,
+    shape_ceiling,
+    step,
+    blending: str,
+    count_dispersion_objective: str,
+    posthoc_slug: str,
+    structural_strategy: str,
+    experiment_context,
+) -> dict:
+    """Decode, correct, fuse and calibrate one model's predictions into served values.
+
+    Every calibrator in this chain — the mean-stage corrector, the blend weight, the
+    dispersion/skew scalars, the PIT recalibration map, the temperature, and the
+    prob-stage corrector — is fit on ``splits["*_validation"]`` and applied to
+    ``splits["*_test"]``. Nothing here refits the GBDT: the model's predictions arrive
+    ready in ``preds``. That is what lets :func:`_step_crossfit_calibrate_and_serve`
+    rotate the two frames over folds of a single split and pay only this chain.
+    """
+    prob_params = preds["prob_params"]
+    decoded = _step_decode_predictions(
+        prob_params,
+        preds["prob_params_validation"],
+        splits["X_test"],
+        splits["X_validation"],
+        dist,
+        dist_info["target_normalization"],
+        dist_info["global_mean"],
+        dist_info["denom_col"],
+        hist_gate,
+    )
+    # Mean-stage post-hoc (orthogonal to target_normalization and to the
+    # prob-stage corrector below): fit on the validation decoded mean, then
+    # correct both test and validation means BEFORE fusion so the correction
+    # flows through the blend into P (Gate 1/5) and into the persisted EV
+    # (Gate 2/3). roe_mean undoes leaf-averaging compression; it deliberately
+    # does not touch dispersion (Gate 4).
+    mean_posthoc_blob = None
+    if posthoc_slug in posthoc.MEAN_STAGE:
+        val_result = splits["y_validation"]["Result"].to_numpy(dtype=float)
+        mean_posthoc_blob = posthoc.fit_posthoc(posthoc_slug, decoded["ev_validation"], val_result)
+        decoded["ev"] = posthoc.apply_posthoc(posthoc_slug, mean_posthoc_blob, decoded["ev"])
+        decoded["ev_validation"] = posthoc.apply_posthoc(
+            posthoc_slug, mean_posthoc_blob, decoded["ev_validation"]
+        )
+
+    fused = _step_fuse_predictions(decoded, splits, dist, cv, hist_gate, blending=blending)
+    calibrated = _step_calibrate_dispersion(
+        decoded,
+        fused,
+        splits,
+        dist,
+        cv,
+        hist_gate,
+        shape_ceiling,
+        fused["model_weight"],
+        count_dispersion_objective=count_dispersion_objective,
+        posthoc_slug=posthoc_slug,
+    )
+    gate_inputs = _structural_gate_inputs(
+        structural_strategy,
+        calibrated=calibrated,
+        fused=fused,
+        splits=splits,
+        decoded=decoded,
+        dist=dist,
+        step=step,
+        experiment_context=experiment_context,
+        posthoc_slug=posthoc_slug,
+        mean_posthoc_blob=mean_posthoc_blob,
+    )
+    test_calibrated_over = gate_inputs["test_calibrated_over"]
+    return {
+        "prob_params": prob_params,
+        "decoded": decoded,
+        "fused": fused,
+        "calibrated": gate_inputs["calibrated"],
+        "y_proba_no_filt": gate_inputs["y_proba_no_filt"],
+        "T_opt": gate_inputs["T_opt"],
+        "val_calibrated": gate_inputs["val_calibrated"],
+        "model_calib": gate_inputs["model_calib"],
+        "y_class_val": gate_inputs["y_class_val"],
+        "posthoc_blob": gate_inputs["posthoc_blob"],
+        "y_proba_filt": np.array([1 - test_calibrated_over, test_calibrated_over]).transpose(),
+        "y_proba_raw": _build_y_proba_raw(splits["B_test"], decoded, dist, step),
+    }
+
+
+def _calibration_folds(splits: dict) -> pd.Series:
+    """Player-disjoint cross-fit fold id for every validation row.
+
+    Hashing the player (not the row) keeps a player's games together, and reuses
+    ``_step_build_splits``' own ``hash_pandas_object`` idiom so a player keeps its
+    fold as the matrix grows. Team-level markets carry no ``Player`` and fall back
+    to the date, which is the finest identity those cells have.
+    """
+    key = splits["players_validation"]
+    if key is None:
+        key = splits["dates_validation"]
+    digest = pd.util.hash_pandas_object(key, index=False).to_numpy(dtype=np.uint64)
+    return pd.Series(digest % _CALIBRATION_FOLDS, index=key.index)
+
+
+def _fold_splits_view(splits: dict, fit_index, apply_index) -> dict:
+    """Re-point a holdout-blind splits dict at one fold: validation fits, test applies.
+
+    Only the validation-sourced frames move. ``X_train``/``y_train_labels`` pass
+    through untouched, which is the whole point — the GBDT is never refit per fold.
+    """
+    view = dict(splits)
+    for stem in _ROTATED_SPLIT_STEMS:
+        source = splits[f"{stem}_validation"]
+        view[f"{stem}_validation"] = None if source is None else source.loc[fit_index]
+        view[f"{stem}_test"] = None if source is None else source.loc[apply_index]
+    return view
+
+
+def _concat_folds(parts: list, order: pd.Index, target: pd.Index):
+    """Stitch per-fold apply-row payloads back into the caller's original row order.
+
+    A decoded mixture rides as a ``{w1, loc1, scale1, loc2, scale2}`` dict of per-row arrays
+    rather than one array, so dicts merge per key.
+    """
+    if parts[0] is None:
+        return None
+    if isinstance(parts[0], (pd.DataFrame, pd.Series)):
+        return pd.concat(parts).reindex(target)
+    if isinstance(parts[0], dict):
+        return {
+            key: _concat_folds([part[key] for part in parts], order, target) for key in parts[0]
+        }
+    stacked = np.concatenate([np.asarray(part) for part in parts])
+    return stacked[order.get_indexer(target)]
+
+
+def _step_crossfit_calibrate_and_serve(
+    splits: dict, preds: dict, dist_info: dict, **kwargs
+) -> dict:
+    """Out-of-fold calibration over the whole validation frame.
+
+    Each fold fits the calibration chain on the other folds and applies it to its own
+    rows, so no served value was calibrated on the row it scores. The GBDT is untouched:
+    every fold reuses the same validation predictions. A final unrotated pass supplies
+    the pickle's own constants, which are reported context rather than scored values.
+
+    Returns the same keys as :func:`_step_calibrate_and_serve`, in the caller's row order.
+    """
+    folds = _calibration_folds(splits)
+    target = splits["X_test"].index
+    validation_params = preds["prob_params_validation"]
+    per_fold: list[dict] = []
+    applied: list[pd.Index] = []
+    for fold in sorted(folds.unique()):
+        apply_index = folds.index[folds.eq(fold)]
+        fit_index = folds.index[folds.ne(fold)]
+        fold_preds = {
+            "prob_params": validation_params.loc[apply_index],
+            "prob_params_validation": validation_params.loc[fit_index],
+        }
+        per_fold.append(
+            _step_calibrate_and_serve(
+                _fold_splits_view(splits, fit_index, apply_index), fold_preds, dist_info, **kwargs
+            )
+        )
+        applied.append(apply_index)
+
+    order = applied[0].append(applied[1:]) if len(applied) > 1 else applied[0]
+    whole = _step_calibrate_and_serve(
+        _fold_splits_view(splits, folds.index, folds.index),
+        {"prob_params": validation_params, "prob_params_validation": validation_params},
+        dist_info,
+        **kwargs,
+    )
+    served = dict(whole)
+    for key in ("prob_params", "y_proba_filt", "y_proba_raw", "y_proba_no_filt"):
+        served[key] = _concat_folds([fold[key] for fold in per_fold], order, target)
+    served["decoded"] = {
+        **whole["decoded"],
+        "ev": _concat_folds([fold["decoded"]["ev"] for fold in per_fold], order, target),
+    }
+    served["fused"] = {
+        **whole["fused"],
+        "weighted_mean": _concat_folds(
+            [fold["fused"]["weighted_mean"] for fold in per_fold], order, target
+        ),
+        "gate_blend_test": _concat_folds(
+            [fold["fused"]["gate_blend_test"] for fold in per_fold], order, target
+        ),
+    }
+    served["calibrated"] = {
+        **whole["calibrated"],
+        **{
+            key: _concat_folds([fold["calibrated"][key] for fold in per_fold], order, target)
+            for key in (
+                "sn_sigma_blend_test",
+                "sn_alpha_blend_test",
+                "mix_blend_test",
+                "r_test",
+                "phi_test",
+            )
+        },
+    }
+    # The served rows ARE the validation rows here, so the out-of-fold probabilities
+    # are also the honest validation-side numbers the skill metrics should report.
+    served["val_calibrated"] = served["y_proba_filt"][:, 1]
+    # Gate 4 re-derives the PIT warp from the persisted column, so it has to be each
+    # row's own fold map — the whole-fit blob still rides the pickle as its constant,
+    # but scoring a row against a map fitted on it is the leak this mode removes.
+    blobs = [fold["calibrated"].get("pit_recal_blob") for fold in per_fold]
+    if any(blob is not None for blob in blobs):
+        if any(blob is None for blob in blobs):
+            raise ValueError("cross-fit PIT recalibration collapsed on at least one fold")
+        served["pit_recal_by_row"] = pd.concat(
+            [
+                pd.Series(json.dumps(blob), index=index)
+                for blob, index in zip(blobs, applied, strict=True)
+            ]
+        ).reindex(target)
+    return served
+
+
 def train_market(
     league: str,
     market: str,
@@ -3921,6 +4170,7 @@ def train_market(
     matrix_input: Path | None = None,
     artifact_output: Path | None = None,
     dependency_namespace: str | None = None,
+    holdout_blind: bool = False,
 ) -> None:
     """Train or retrain one LightGBMLSS model for a single league/market pair.
 
@@ -4055,12 +4305,21 @@ def train_market(
     with open(training_data_path, "rb") as matrix_stream:
         matrix_hash = hashlib.file_digest(matrix_stream, "sha256").hexdigest()
 
+    if holdout_blind and structural_strategy != BASE_STRUCTURAL_STRATEGY:
+        # A structural method derives its role support from validation row counts, so
+        # rotating folds under it would flip the method into its killed_fallback on
+        # some folds and not others — an incomparable score. Structural candidates keep
+        # their own preregistered evidence path until that support is made fold-stable.
+        raise ValueError(
+            f"--holdout-blind does not support structural strategy {structural_strategy!r}"
+        )
     splits = _step_build_splits(
         M,
         stat_data,
         market,
         target_normalization,
         structural_strategy,
+        holdout_blind=holdout_blind,
     )
     if structural_strategy == TWO_PART_STRATEGY:
         experiment_context = build_two_part_context(
@@ -4240,67 +4499,34 @@ def train_market(
     )
     if structural_strategy in AFFINE_EXPERT_EXPERIMENTS:
         experiment_context = preds["structural_context"]
-    prob_params = preds["prob_params"]
-
-    decoded = _step_decode_predictions(
-        prob_params,
-        preds["prob_params_validation"],
-        splits["X_test"],
-        splits["X_validation"],
-        dist,
-        dist_info["target_normalization"],
-        dist_info["global_mean"],
-        dist_info["denom_col"],
-        hist_gate,
-    )
-    # Mean-stage post-hoc (orthogonal to target_normalization and to the
-    # prob-stage corrector below): fit on the validation decoded mean, then
-    # correct both test and validation means BEFORE fusion so the correction
-    # flows through the blend into P (Gate 1/5) and into the persisted EV
-    # (Gate 2/3). roe_mean undoes leaf-averaging compression; it deliberately
-    # does not touch dispersion (Gate 4).
-    mean_posthoc_blob = None
-    if posthoc_slug in posthoc.MEAN_STAGE:
-        val_result = splits["y_validation"]["Result"].to_numpy(dtype=float)
-        mean_posthoc_blob = posthoc.fit_posthoc(posthoc_slug, decoded["ev_validation"], val_result)
-        decoded["ev"] = posthoc.apply_posthoc(posthoc_slug, mean_posthoc_blob, decoded["ev"])
-        decoded["ev_validation"] = posthoc.apply_posthoc(
-            posthoc_slug, mean_posthoc_blob, decoded["ev_validation"]
-        )
-
-    fused = _step_fuse_predictions(decoded, splits, dist, cv, hist_gate, blending=blending)
-    calibrated = _step_calibrate_dispersion(
-        decoded,
-        fused,
+    calibrate = _step_crossfit_calibrate_and_serve if holdout_blind else _step_calibrate_and_serve
+    served = calibrate(
         splits,
-        dist,
-        cv,
-        hist_gate,
-        shape_ceiling,
-        fused["model_weight"],
+        preds,
+        dist_info,
+        dist=dist,
+        cv=cv,
+        hist_gate=hist_gate,
+        shape_ceiling=shape_ceiling,
+        step=step,
+        blending=blending,
         count_dispersion_objective=count_dispersion_objective,
         posthoc_slug=posthoc_slug,
-    )
-    gate_inputs = _structural_gate_inputs(
-        structural_strategy,
-        calibrated=calibrated,
-        fused=fused,
-        splits=splits,
-        decoded=decoded,
-        dist=dist,
-        step=step,
+        structural_strategy=structural_strategy,
         experiment_context=experiment_context,
-        posthoc_slug=posthoc_slug,
-        mean_posthoc_blob=mean_posthoc_blob,
     )
-    calibrated = gate_inputs["calibrated"]
-    y_proba_no_filt = gate_inputs["y_proba_no_filt"]
-    T_opt = gate_inputs["T_opt"]
-    val_calibrated = gate_inputs["val_calibrated"]
-    model_calib = gate_inputs["model_calib"]
-    y_class_val = gate_inputs["y_class_val"]
-    posthoc_blob = gate_inputs["posthoc_blob"]
-    test_calibrated_over = gate_inputs["test_calibrated_over"]
+    prob_params = served["prob_params"]
+    decoded = served["decoded"]
+    fused = served["fused"]
+    calibrated = served["calibrated"]
+    y_proba_no_filt = served["y_proba_no_filt"]
+    T_opt = served["T_opt"]
+    val_calibrated = served["val_calibrated"]
+    model_calib = served["model_calib"]
+    y_class_val = served["y_class_val"]
+    posthoc_blob = served["posthoc_blob"]
+    y_proba_filt = served["y_proba_filt"]
+    y_proba_raw = served["y_proba_raw"]
 
     val_book_proba = splits["B_validation"]["Odds"].to_numpy(dtype=float)
     authentic_val = _split_quote_authenticity_mask(splits, "validation")
@@ -4311,12 +4537,9 @@ def train_market(
         league,
         market,
     )
-    y_proba_filt = np.array([1 - test_calibrated_over, test_calibrated_over]).transpose()
-
     y_class = np.ravel(
         (splits["y_test"]["Result"] >= splits["B_test"]["Line"]).astype(int).to_numpy()
     )
-    y_proba_raw = _build_y_proba_raw(splits["B_test"], decoded, dist, step)
 
     mode_stats = _step_compute_mode_stats(y_proba_raw, y_proba_no_filt, y_proba_filt, y_class)
     served_weighted_mean = fused["weighted_mean"]
@@ -4404,7 +4627,7 @@ def train_market(
         global_mean=dist_info["global_mean"],
         denom_col=dist_info["denom_col"],
         pit_recal_blob=calibrated.get("pit_recal_blob"),
-        pit_recal_by_row=calibrated.get("structural_pit_maps"),
+        pit_recal_by_row=served.get("pit_recal_by_row", calibrated.get("structural_pit_maps")),
         prepool_over=(
             calibrated["receiving_candidate_test"].candidate_over
             if structural_strategy == TWO_PART_STRATEGY

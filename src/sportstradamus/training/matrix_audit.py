@@ -9,22 +9,30 @@ import click
 import numpy as np
 import pandas as pd
 
-from sportstradamus.helpers.training_quotes import archive_ev_is_runaway
+from sportstradamus.helpers.training_quotes import PROVENANCE_COLUMNS, archive_ev_is_runaway
 from sportstradamus.stats.nhl_position_policy import allowed_nhl_position_codes
 
 _BOOK_COLUMNS = ("Line", "Odds", "EV", "Archived")
 _IDENTITY_COLUMNS = ("Player", "Date")
-_PROVENANCE_COLUMNS = (
-    "QuoteSource",
-    "QuoteAuthenticity",
-    "QuoteSyntheticReason",
-    "QuoteObservedAt",
-    "QuoteBookCount",
-)
+# The three a quote cannot be interpreted without; the other two are descriptive.
+_REQUIRED_PROVENANCE_COLUMNS = ("QuoteSource", "QuoteAuthenticity", "QuoteBookCount")
+
+
+def incomplete_provenance_rows(frame: pd.DataFrame) -> int:
+    """Count rows whose explicit provenance block is present but not fully populated.
+
+    Zero for a legacy matrix that carries no block at all — that one has a defined fallback.
+    A nonzero count means the two eras were concatenated, which no reader can interpret.
+    """
+    if not all(column in frame for column in _REQUIRED_PROVENANCE_COLUMNS):
+        return 0
+    return int(frame.loc[:, list(_REQUIRED_PROVENANCE_COLUMNS)].isna().any(axis=1).sum())
 
 
 def audit_matrix(path: Path) -> dict[str, object]:
     """Report identity, numeric, lattice, position, and quote provenance integrity."""
+    # style: allow-complexity — a flat sequence of independent integrity checks, each
+    # appending its own violation; splitting it would only scatter one report's assembly.
     frame = pd.read_parquet(path)
     report: dict[str, object] = {"path": str(path), "rows": len(frame), "violations": []}
     violations = report["violations"]
@@ -36,9 +44,7 @@ def audit_matrix(path: Path) -> dict[str, object]:
     if report["duplicate_identity_rows"]:
         violations.append("duplicate Player/Date identity")
 
-    numeric = frame.loc[:, ["Result", "Line", "Odds", "EV"]].apply(
-        pd.to_numeric, errors="coerce"
-    )
+    numeric = frame.loc[:, ["Result", "Line", "Odds", "EV"]].apply(pd.to_numeric, errors="coerce")
     report["nonfinite_rows"] = int((~np.isfinite(numeric)).any(axis=1).sum())
     report["odds_out_of_range_rows"] = int(((numeric["Odds"] < 0) | (numeric["Odds"] > 1)).sum())
     archived = frame["Archived"].fillna(False).astype(bool)
@@ -104,12 +110,10 @@ def audit_matrix(path: Path) -> dict[str, object]:
         if "Odds_synthetic" in frame
         else pd.Series(False, index=frame.index)
     )
-    missing_provenance = [column for column in _PROVENANCE_COLUMNS if column not in frame]
+    missing_provenance = [column for column in PROVENANCE_COLUMNS if column not in frame]
     report["missing_provenance_columns"] = missing_provenance
     report["quote_sources"] = (
-        frame["QuoteSource"].value_counts(dropna=False).to_dict()
-        if "QuoteSource" in frame
-        else {}
+        frame["QuoteSource"].value_counts(dropna=False).to_dict() if "QuoteSource" in frame else {}
     )
     if missing_provenance:
         authentic = archived & ~synthetic
@@ -130,8 +134,7 @@ def audit_matrix(path: Path) -> dict[str, object]:
             "bookless": int((frame["QuoteBookCount"] == 0).sum()),
             "archive_coverage": float(authentic.mean()) if len(frame) else 0.0,
         }
-        required = frame[["QuoteSource", "QuoteAuthenticity", "QuoteBookCount"]]
-        if required.isna().any(axis=1).any():
+        if incomplete_provenance_rows(frame):
             violations.append("null required quote provenance")
         if not authenticity.isin(("authentic", "derived", "synthetic")).all():
             violations.append("invalid quote authenticity")
@@ -142,7 +145,11 @@ def audit_matrix(path: Path) -> dict[str, object]:
         if observed[authentic].isna().any():
             violations.append("authentic quote missing observation time")
         book_count = pd.to_numeric(frame["QuoteBookCount"], errors="coerce")
-        if book_count.isna().any() or (book_count < 0).any() or (authentic & (book_count < 1)).any():
+        if (
+            book_count.isna().any()
+            or (book_count < 0).any()
+            or (authentic & (book_count < 1)).any()
+        ):
             violations.append("invalid quote book count")
         if not archived.equals(authentic.astype(bool)):
             violations.append("Archived disagrees with explicit authenticity")

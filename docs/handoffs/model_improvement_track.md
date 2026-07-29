@@ -293,7 +293,7 @@ width fix is fit to a calibration target and guard-railed on g1/g5 (§6.1 go/no-
 
 | Lever | Verdict | Evidence |
 |---|---|---|
-| Strategy sweep + confirm engine (`model_strategy/sweep.py` + `model_strategy/confirm.py`) | **Alive, registry-driven, identity-bound** — `model-strategy-sweep --confirm` ranks exact signed base/structural corners by min-gate slack; confirm reproduces the winner at full HPO, exact-checks model/CSV/model_stats, and keeps an all-six-gate ship or restores the prior cell. Deterministic ranks, real-HPO ships (§6); generic selector and serving validation landed. Final gate audit is recorded in §6 | §6 + R4 brief |
+| Strategy sweep + confirm engine (`model_strategy/sweep.py` + `model_strategy/confirm.py`) | **Alive, registry-driven, identity-bound** — `model-strategy-sweep --confirm` ranks exact signed base corners by min-gate slack under a budgeted conditional-TPE study, scored holdout-blind; confirm walks each cell's nominees (top-K + seeds + incumbent) at full HPO, exact-checks model/CSV/model_stats, and keeps the first all-six-gate ship or restores the prior cell. Deterministic ranks, real-HPO ships (§6); generic selector and serving validation landed. Final gate audit is recorded in §6 | §6 + R4 brief |
 | Forceable distribution family (`dist` via `stat_meta.json`) | **Alive** — `_resolve_dist` reads the cell's `dist` as authoritative input (SkewNormal / ZINB / NegBin); makes family a one-line sweep axis, no code edit per cell. The data-driven mean≥2 / zero-rate rule is now only the fallback | `[[dist_selection_forceable_via_stat_meta]]` |
 | Centered-target normalization (`centered_additive_mean10`) | **Alive & shipping** — out-calibrates `ratio_meanyr` on Gate 4 for several cells the scalar width fix can't reach (run the §3 shipped-counts block; several cells carry it in `stat_meta.json` today). The old P1 "dead" call judged it as a *mean-compression* fix under the pre-PIT-KS gate — superseded | refs §3 + sweep board |
 | Calibrated HP-selection search-gate (Lever-1, `--hpo-selection calibrated`) | **Alive & validated** — Optuna selects on CRPS + a PIT-KS penalty; ship-deciding knobs persist per-cell so cron re-fits reproduce them | `[[calibration_hp_selection_lever]]` |
@@ -382,21 +382,34 @@ A served predictive is built in four independently-swappable stages,
   where declared. The corner fingerprint SHA binds
   `{strategy signature, family, exact controls, matrix SHA}`. The split fingerprint is a separate
   exact identity from the structural artifact's validation audit; it is deliberately **not** folded
-  into the pre-training corner fingerprint. `--resume` reuses only the complete expected corner set
-  and rejects stale specs, controls, matrix/schema identity, or a missing/unexpected structural
-  split contract. It does not independently derive a future structural split; full-HPO confirm
+  into the pre-training corner fingerprint. `--resume` admits prior rows **per row** — a budgeted
+  search never enumerates a whole cell — rejecting any with stale specs, controls, matrix/schema
+  identity, a missing/unexpected structural split contract, or an `eval_split` that is not the
+  cross-fit marker. It does not independently derive a future structural split; full-HPO confirm
   separately exact-compares that split across board, pickle, CSV, and `model_stats`.
-- Per cell the sweep is an exhaustive deterministic Optuna `GridSampler` over each applicable
-  spec's registered controls. Each corner trains one
-  `meditate --deterministic … --bypass-withholding` into a sandbox
+- Per cell the sweep is **one budgeted conditional-TPE study** over every applicable spec's
+  registered controls: `family` is a categorical, each family's axes are suggested under it as
+  namespaced `family__axis` parameters, and `TPESampler(multivariate=True, group=True)` is the only
+  Optuna 3.5 configuration that models that conditionality rather than falling back to independent
+  sampling. `MAX_TRIALS_PER_CELL = 48` against a ~312-corner declared grid, so the enqueued
+  incumbent and seed corners matter as much as the sampler. A per-cell journal file makes the study
+  itself resumable. Each corner trains one
+  `meditate --deterministic --bypass-withholding --holdout-blind` into a sandbox
   (`research/models/deterministic/` + `data/test_sets/deterministic/`) so a trial never clobbers a
   production market. `--deterministic` pins RNGs + fast fixed HPs.
-- Each corner is scored by the **honest val-fit→test gate row** — the deterministic dump carries
-  the pipeline's own validation-fit joint calibration, so the ranker calls `scorecard.gate_row`
-  on it, the same code production ships on (no test re-fit; that oversold the screen and was
-  removed in `10306ee`). The objective is negative **min-gate slack**: one scalar, positive iff
+- Each corner is scored **holdout-blind**: `--holdout-blind` drops the ship gate's rows from the run
+  entirely and cross-fits the calibration head out-of-fold, player-disjoint, over the validation
+  frame, so selection never adapts against the rows the ship decision uses. The ranker calls
+  `scorecard.gate_row` on the dump, the same code production ships on (no test re-fit; that oversold
+  the screen and was removed in `10306ee`). Rows carry `eval_split = crossfit_validation`; the older
+  holdout-scored rows carry `<NA>` and are inert to both the resume cache and confirm's nomination
+  lane. The objective is negative **min-gate slack**: one scalar, positive iff
   the corner ships, larger with more headroom across all six gates — "ships, with margin," not
   Gate 4 alone.
+- Structural methods are **not searchable** by this sweep: they derive role support from validation
+  row counts, so `train_market` refuses them under `--holdout-blind` rather than score folds that
+  disagree about whether the method fell back. They stay selectable in production through the
+  `posthoc` pool and keep their own preregistered evidence path.
 - `--confirm` requires the selected spec to expose `confirm`, `full_hpo`, `score`, and `serve`; a
   research-only family such as Mixture cannot slip through. It rejects noncanonical controls or
   stale corner/matrix/split identity, persists the exact controls and structural selector, and
@@ -946,14 +959,15 @@ this section makes no claim about the campaign's still-pending authoritative rep
 final gates. The **full-cohort screen**
 (`count-family-screen --all-count`, 41 cells) routes **15 DP-mandatory (zero-deflated) / 8
 hurdle-NB / 18 plain-NB** — the DP cohort is far larger than the 3 pilots. *Resume gotcha
-retired:* `--resume` now requires the exact current registered-corner set, spec signatures,
-matrix SHA, and the declared structural split presence/absence contract, so a family/axis or input
-change resweeps the cell; confirm, not resume, exact-compares the resulting split value.
-*Remaining cohort-filter gotcha:* `--dist-class` classifies by the cell's
-**current meta dist**, so integer-count cells wearing `SkewNormal` meta (NFL
-receptions/targets/carries, NBA FGA, NHL sogBS) are invisible to a count-class board; the
-workaround is the family-as-input design itself — flip the withheld cell's `dist` to a count
-family pre-sweep, the winner persists honestly, a failed confirm auto-reverts. Refs:
+retired:* `--resume` admits prior rows per row against the current spec signature, controls, matrix
+SHA, structural split contract, and cross-fit `eval_split` marker, so a family/axis or input change
+invalidates exactly the affected rows rather than the cell; confirm, not resume, exact-compares the
+resulting split value. *Cohort-filter gotcha retired:* `--dist-class` now filters **families**, not
+cells, and family admission is read from the cell's own target (integer lattice, mean ≤ 50) rather
+than its meta `dist` — so integer-count cells wearing `SkewNormal` meta (NFL
+receptions/targets/carries, NBA FGA, NHL sogBS) are searched by the count families directly, with no
+pre-sweep `dist` flip. A count winner persists `target_normalization=none` via `fixed_persist`.
+Refs:
 `[[ws3_phase0_count_screen_verdict]]`, `[[deterministic_ab_g4_oversell]]`,
 `[[data_dir_under_package]]`, `[[breadth75_campaign]]`.
 
@@ -1720,6 +1734,18 @@ the gate for WS-3's two families, the copula, and the sweep/versioning build. To
 brief on a hook-gated edit, write a one-line justification to `.claude/.state/research_waiver`.
 
 **Open holes:**
+
+- **#0a — Mixture is out of the sweep pool until it can serve** (owner call).
+  `SWEEP_CAPABILITIES` requires `CAP_CONFIRM`, which drops Mixture from every cell's family pool.
+  It was earning that budget on the board and nowhere else: on the first holdout-blind run it was
+  the rank-1 corner on 3 of the 4 cells searched — NFL passing tds +0.202, NBA FGA +0.150, NFL
+  passing yards +0.100 — against best-confirmable corners of +0.033, +0.076, and −0.040. Passing
+  yards is the sharp case: both of its two gate-passing corners were Mixture, so the cell has no
+  shippable recipe on any family the sweep can now propose. **Put Mixture back in the pool the day
+  it can serve** — that needs Mixture decode in `prediction/model_prob.py` and carries the
+  ZINB/NegBin identity merge as a migration (research-gated per the family rule above). Until then
+  the boards under-report what the data supports, and that gap is the argument for building the
+  serve path, not for re-ranking a family that cannot ship.
 
 - **#0b — Gate-4 baseline hysteresis** (highest priority; owner call). §6.0.2 carries the
   decision packet and the recommendation (ship the scale fit first; hysteresis only if churn

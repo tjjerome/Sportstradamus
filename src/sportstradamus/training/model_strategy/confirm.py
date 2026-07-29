@@ -3,17 +3,18 @@
 The strategy sweep (:mod:`sportstradamus.training.model_strategy.sweep`) *ranks* corners on fixed-HP
 deterministic trials — it never ships. This module turns a ranked board into shipped cells:
 
-1. For each cell, pick the top-slack shipping corner **across the cell's swept families** — a
-   count cell's slice carries both ZINB and NegBin corners, ranked together by ship slack. Every
-   swept axis has a ``stat_meta.json`` field, and the winner's own family's ``persist`` map builds
-   the edits (so a NegBin corner outranking ZINB persists ``dist=NegBin`` and flips the cell's
-   family).
-2. Prompt, then per candidate: write its persist fields + ``shipped="devel"`` to ``stat_meta.json``
-   (so the confirm ``meditate`` reads the exact config being shipped), run a **full-HPO** ``meditate``,
-   and read the official ``ship`` verdict from ``model_stats.parquet``.
-3. A pass keeps the cell on devel; a failure **auto-reverts** — restore the original stat_meta entry
-   *and* :func:`prune_model_pickle`. The pickle prune is mandatory: inference loads pickles by path
-   and never consults ``shipped``, so reverting stat_meta alone would leave a failed cell serving.
+1. For each cell, nominate the top :data:`CONFIRM_TOP_K` corners **across the cell's swept
+   families** by ship slack — a count cell's slice carries ZINB, NegBin and DPO corners ranked
+   together — then its seed corners and its incumbent. Every swept axis has a ``stat_meta.json``
+   field, and each nominee's own family's ``persist`` map builds the edits (so a NegBin corner
+   outranking ZINB persists ``dist=NegBin`` and flips the cell's family).
+2. Prompt, then per nominee in order: write its persist fields + ``shipped="devel"`` to
+   ``stat_meta.json`` (so the confirm ``meditate`` reads the exact config being shipped), run a
+   **full-HPO** ``meditate``, and read the official ``ship`` verdict from ``model_stats.parquet``.
+3. A pass keeps the cell on devel and ends its walk; a failure **auto-reverts** — restore the
+   original stat_meta entry *and* :func:`prune_model_pickle` — and the next nominee is tried. The
+   pickle prune is mandatory: inference loads pickles by path and never consults ``shipped``, so
+   reverting stat_meta alone would leave a failed cell serving.
 
 Everything is local and uncommitted — the human reviews the ``shipped: devel`` diff and commits it.
 A whole-file ``stat_meta.json`` backup is taken before any write as the crash/abort safety net.
@@ -40,6 +41,7 @@ from sportstradamus.helpers.io import (
 from sportstradamus.training.model_strategy.identity import (
     ArtifactIdentity,
     build_artifact_identity,
+    corner_fingerprint,
     validate_strategy_artifacts,
 )
 from sportstradamus.training.model_strategy.registry import (
@@ -61,7 +63,9 @@ from sportstradamus.training.model_strategy.sweep import (
     _GATES,
     _SHIP_PRED_COL,
     _TEST_SETS_ROOT,
+    EVAL_SPLIT_CROSSFIT,
     _cell_context,
+    _known_good_corners,
     _run_meditate_with_lock_retry,
 )
 from sportstradamus.training.scorecard import _supersede_headline, load_test_set, supersede_verdict
@@ -70,6 +74,7 @@ from sportstradamus.training.ship_config import STAT_META_PATH, WITHHELD, load_s
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
 _STAT_META = pathlib.Path(str(STAT_META_PATH))
 _CONFIRM_LOG_ROOT = _REPO_ROOT / "research" / "logs" / "confirm"
+_NOMINEE_LEDGER_PATH = _REPO_ROOT / "research" / "confirm_nominee_gates.csv"
 _SHIPPED_DEVEL = "devel"
 # Leagues whose withheld cells confirm may never auto-flip: a board-passing cell is announced and
 # skipped until the owner's activation gates (D1/D2) go GO, then the league is removed here in the
@@ -82,6 +87,11 @@ _CONFIRM_TIMEOUT_S = 4 * 3600
 # Confirm outcomes that leave a shippable cell on devel (vs REVERTED / HELD, which change nothing).
 _WIN_OUTCOMES: tuple[str, ...] = ("SHIPPED", "SUPERSEDED")
 _CONFIRM_CAPABILITIES = frozenset({CAP_CONFIRM, CAP_FULL_HPO, CAP_SCORE, CAP_SERVE})
+# Board rows a cell nominates for full-HPO confirmation. Deterministic fixed-HP scoring does not
+# ship the recipes that only pass under real HPO, so nominating the top few — rather than requiring
+# a deterministic `ships` — is what makes confirmation reachable at all for the popular NFL passing
+# markets, whose boards carry zero shipping rows.
+CONFIRM_TOP_K: int = 3
 # The exact model_stats identity columns the official ship verdict is bound to.
 _SHIP_IDENTITY_COLUMNS = [
     "league",
@@ -100,26 +110,79 @@ _SHIP_IDENTITY_COLUMNS = [
 ]
 
 
-def _candidate(sub: pd.DataFrame) -> dict | None:
-    """Return the top signed, reproducible, confirm-capable shipping corner for one cell."""
-    shipping = sub[sub["ships"].eq(True)].sort_values("slack", ascending=False)
-    if shipping.empty:
-        return None
+def _nominees(sub: pd.DataFrame) -> list[dict]:
+    """Ordered confirm nominees for one cell: top board corners, then seeds, then the incumbent.
+
+    ``ships`` is deliberately not read. Fixed-HP deterministic scoring will not ship a recipe that
+    only passes under full HPO, so requiring it left the popular NFL passing cells with no candidate
+    at all; the six gates still decide, just after the retrain rather than before it.
+
+    Ordering is the argument each source can make. Board rows first — the search's own ranked
+    recommendation on honest out-of-fold data. Seeds next: independent full-HPO held-out evidence the
+    deterministic ranking demonstrably cannot see. The incumbent last, so a cell is never downgraded
+    by an unlucky list. Rows scored against the ship holdout (legacy ``eval_split``) never nominate.
+    """
     lg, mkt = sub["league"].iloc[0], sub["market"].iloc[0]
     context = _cell_context(lg, mkt)
-    for _, row in shipping.iterrows():
+    admissible = sub[sub["eval_split"].astype("string").eq(EVAL_SPLIT_CROSSFIT)]
+    nominated: list[dict] = []
+    for _, row in admissible.sort_values("slack", ascending=False).iterrows():
+        if len(nominated) >= CONFIRM_TOP_K:
+            break
         cand = _board_candidate_row(row, context, lg, mkt)
         if cand is not None:
-            return cand
-    return None
+            nominated.append({**cand, "source": f"board slack {cand['slack']:+.3f}"})
+    for spec, controls in _known_good_corners(context):
+        cand = _corner_candidate(context, spec, lg, mkt, controls, slack=math.nan, split=None)
+        if cand is not None:
+            nominated.append({**cand, "source": "seed/incumbent"})
+    seen: set[str] = set()
+    return [
+        cand
+        for cand in nominated
+        if not (cand["corner_fingerprint"] in seen or seen.add(cand["corner_fingerprint"]))
+    ]
+
+
+def _corner_candidate(
+    context, spec, league: str, market: str, controls: dict[str, str], *, slack: float, split
+) -> dict | None:
+    """The confirm-candidate dict for one registered corner, or ``None`` if it cannot confirm.
+
+    A family without the confirm capabilities (Mixture ranks but never serves) drops out here, as
+    does a corner whose spec is not applicable to the cell — a seed or incumbent can outlive the
+    admission gates that once let it in.
+    """
+    if spec not in strategies_for_cell(context) or not spec.capabilities >= _CONFIRM_CAPABILITIES:
+        return None
+    identity = build_artifact_identity(
+        spec.slug, league, market, controls, matrix_hash=context.matrix_sha256
+    )
+    return {
+        "league": league,
+        "market": market,
+        "family": spec.family,
+        "strategy_slug": spec.slug,
+        "structural_strategy": identity.structural_strategy,
+        "strategy_signature": identity.signature,
+        "strategy_implementation_version": identity.implementation_version,
+        "artifact_schema_version": identity.artifact_schema_version,
+        "strategy_status": identity.status,
+        "matrix_hash": identity.matrix_hash,
+        "split_fingerprint": split,
+        "controls": controls,
+        "corner_fingerprint": identity.corner_fingerprint,
+        "edits": strategy_persistence_edits(context, spec, controls),
+        "slack": slack,
+    }
 
 
 def _board_candidate_row(row: pd.Series, context, league: str, market: str) -> dict | None:
-    """Validate one shipping board row's full identity contract; ``None`` if not confirm-capable.
+    """Validate one board row's full identity contract; ``None`` if not confirm-capable.
 
     Raises on any stale/mismatched identity; returns the confirm-candidate dict for a clean,
     confirm-capable corner, or ``None`` when the corner's family lacks the confirm capabilities so
-    the caller can fall through to the next-best shipping row.
+    the caller can fall through to the next-best row.
     """
     family = _required_text(row, "family", league, market)
     strategy_slug = _required_text(row, "strategy_slug", league, market)
@@ -138,28 +201,10 @@ def _board_candidate_row(row: pd.Series, context, league: str, market: str) -> d
         spec.slug, league, market, controls, matrix_hash=context.matrix_sha256
     )
     split = _validate_board_identity(row, spec, identity, league, market)
-    if not spec.capabilities >= _CONFIRM_CAPABILITIES:
-        return None
     slack = float(row["slack"])
     if not math.isfinite(slack):
         raise ValueError(f"{league} {market}: candidate slack must be finite")
-    return {
-        "league": league,
-        "market": market,
-        "family": spec.family,
-        "strategy_slug": spec.slug,
-        "structural_strategy": identity.structural_strategy,
-        "strategy_signature": identity.signature,
-        "strategy_implementation_version": identity.implementation_version,
-        "artifact_schema_version": identity.artifact_schema_version,
-        "strategy_status": identity.status,
-        "matrix_hash": identity.matrix_hash,
-        "split_fingerprint": split,
-        "controls": controls,
-        "corner_fingerprint": identity.corner_fingerprint,
-        "edits": strategy_persistence_edits(context, spec, controls),
-        "slack": slack,
-    }
+    return _corner_candidate(context, spec, league, market, controls, slack=slack, split=split)
 
 
 def _required_text(row: pd.Series, field: str, league: str, market: str) -> str:
@@ -223,14 +268,18 @@ def _validate_board_identity(
     return split
 
 
-def _candidates(board: pd.DataFrame) -> list[dict]:
-    """One confirm candidate per cell that shipped at least one corner."""
-    out = []
-    for _cell, sub in board.groupby(["league", "market"], sort=False):
-        cand = _candidate(sub)
-        if cand is not None:
-            out.append(cand)
-    return out
+def _candidates(board: pd.DataFrame, max_nominees: int | None = None) -> list[list[dict]]:
+    """Each cell's ordered nominee list; cells with nothing confirmable drop out.
+
+    ``max_nominees`` truncates each list after dedup, trading the tail of a cell's walk for wall
+    clock. The ordering :func:`_nominees` establishes is what makes that trade sound — the corners
+    most likely to ship come first.
+    """
+    return [
+        nominated[:max_nominees]
+        for _cell, sub in board.groupby(["league", "market"], sort=False)
+        if (nominated := _nominees(sub))
+    ]
 
 
 def _atomic_write_meta(meta: dict) -> None:
@@ -321,8 +370,11 @@ def _restore_cell(
     _atomic_write_meta(meta)
 
 
-def _cell_row(league: str, market: str, columns: list[str]) -> pd.Series | None:
-    """One cell's row of the requested model_stats.parquet columns, or ``None`` when absent."""
+def _cell_row(league: str, market: str, columns: list[str] | None) -> pd.Series | None:
+    """One cell's row of the requested model_stats.parquet columns, or ``None`` when absent.
+
+    ``None`` columns reads the whole row.
+    """
     stats = pd.read_parquet(MODEL_STATS_PATH, columns=columns)
     hit = stats[(stats["league"] == league) & (stats["market"] == market)]
     return None if hit.empty else hit.iloc[0]
@@ -350,12 +402,42 @@ def _ship_from_model_stats(league: str, market: str, expected: ArtifactIdentity)
         "strategy_implementation_version": expected.implementation_version,
         "artifact_schema_version": expected.artifact_schema_version,
         "strategy_controls_json": expected.controls_json,
+        # Not strategy_matrix_hash: expected is rebound to the hash this row reported, so comparing
+        # them here would assert nothing. The fingerprint below re-derives from that hash instead.
         "strategy_corner_fingerprint": expected.corner_fingerprint,
-        "strategy_matrix_hash": expected.matrix_hash,
     }
     if any(row[column] != value for column, value in checks.items()):
         return False
     return _split_matches(row["strategy_split_fingerprint"], expected.split_fingerprint)
+
+
+def _record_nominee_gates(league: str, market: str, candidate: dict) -> None:
+    """Record the just-retrained nominee's whole model_stats row in the research ledger.
+
+    This is the only moment that row exists. A losing nominee gets its pickle pruned, and
+    ``report()`` rebuilds model_stats from the pickles on disk, so by the time the walk reports
+    its verdict the gate values behind it are gone — leaving no way to compare a cell's board
+    numbers against its own confirm. Ledger only; nothing production reads it.
+    """
+    row = _cell_row(league, market, None)
+    if row is None:
+        return
+    ledger = pd.DataFrame(
+        [
+            {
+                "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "strategy_slug": candidate["strategy_slug"],
+                "source": candidate["source"],
+                **row.to_dict(),
+            }
+        ]
+    )
+    if _NOMINEE_LEDGER_PATH.exists():
+        # Rewrite rather than append: model_stats widens as gates are added, and appending a
+        # wider row under a header written by a narrower one yields a CSV no reader can parse.
+        ledger = pd.concat([pd.read_csv(_NOMINEE_LEDGER_PATH), ledger], ignore_index=True)
+    _NOMINEE_LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ledger.to_csv(_NOMINEE_LEDGER_PATH, index=False)
 
 
 def _failed_gates_after(league: str, market: str) -> list[str]:
@@ -390,7 +472,17 @@ def _run_meditate(league: str, market: str, candidate: dict) -> bool:
     return True
 
 
-def _candidate_identity(candidate: dict) -> ArtifactIdentity:
+def _candidate_identity(candidate: dict, matrix_hash: str | None = None) -> ArtifactIdentity:
+    """The nominated recipe as an identity, rebound to ``matrix_hash`` when a retrain moved the matrix.
+
+    ``_run_meditate`` passes ``--force``, which updates the league gamelogs and appends gamedays, so a
+    confirm retrain routinely lands on a different training matrix than the search scored — every cell
+    of the first overnight run did. What confirmation tests is the *recipe*; the board's pre-retrain
+    matrix hash is stale by construction, and the corner fingerprint binds it, so comparing either
+    against the retrain rejects recipes the six gates just passed. The same-retrain invariant that
+    actually matters — pickle and model_stats agreeing — is enforced in :func:`_produced_artifacts_match`.
+    """
+    matrix = candidate["matrix_hash"] if matrix_hash is None else matrix_hash
     return ArtifactIdentity(
         strategy_slug=candidate["strategy_slug"],
         structural_strategy=candidate["structural_strategy"],
@@ -401,14 +493,37 @@ def _candidate_identity(candidate: dict) -> ArtifactIdentity:
         market=candidate["market"],
         status=candidate["strategy_status"],
         controls_json=controls_json(candidate["controls"]),
-        corner_fingerprint=candidate["corner_fingerprint"],
-        matrix_hash=candidate["matrix_hash"],
+        corner_fingerprint=(
+            candidate["corner_fingerprint"]
+            if matrix_hash is None
+            else corner_fingerprint(
+                get_strategy(candidate["strategy_slug"]), candidate["controls"], matrix
+            )
+        ),
+        matrix_hash=matrix,
         split_fingerprint=candidate["split_fingerprint"],
     )
 
 
-def _produced_artifacts_match(league: str, market: str, candidate: dict) -> bool:
-    """Fail closed unless the retrain produced the exact signed board strategy and cell."""
+def _retrained_matrix_hash(league: str, market: str) -> str | None:
+    """The matrix hash the just-finished retrain reported, or ``None`` when it wrote no row."""
+    try:
+        row = _cell_row(league, market, ["league", "market", "strategy_matrix_hash"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if row is None or not isinstance(row["strategy_matrix_hash"], str):
+        return None
+    return row["strategy_matrix_hash"]
+
+
+def _produced_artifacts_match(
+    league: str, market: str, candidate: dict, expected: ArtifactIdentity
+) -> bool:
+    """Fail closed unless the retrain produced the exact signed board strategy and cell.
+
+    ``expected`` carries the matrix hash model_stats reported, so a pickle written against a different
+    matrix — a stale artifact the retrain never replaced — fails here.
+    """
     spec = get_strategy(candidate["strategy_slug"])
     csv_path = _TEST_SETS_ROOT / f"{market_file_slug(league, market)}.csv"
     try:
@@ -421,21 +536,37 @@ def _produced_artifacts_match(league: str, market: str, candidate: dict) -> bool
             model,
             league=league,
             market=market,
-            matrix_hash=candidate["matrix_hash"],
+            matrix_hash=expected.matrix_hash,
         )
     except (OSError, ValueError, KeyError, TypeError):
         return False
-    return actual == _candidate_identity(candidate)
+    return actual == expected
 
 
-def _confirm_meditate(league: str, market: str, candidate: dict) -> bool:
-    """Withheld-path confirm: retrain, then True iff the official scorecard ships the cell."""
-    expected = _candidate_identity(candidate)
-    return (
-        _run_meditate(league, market, candidate)
-        and _produced_artifacts_match(league, market, candidate)
-        and _ship_from_model_stats(league, market, expected)
-    )
+def _confirm_meditate(league: str, market: str, candidate: dict) -> list[str]:
+    """Withheld-path confirm: retrain, then the reasons the cell did not ship (empty means it did).
+
+    Reasons rather than a bool because the legs fail for very different operator-facing causes, and a
+    bare False reads on the report as a gate failure with no gate named.
+    """
+    if not _run_meditate(league, market, candidate):
+        return ["retrain error"]
+    _record_nominee_gates(league, market, candidate)
+    matrix_hash = _retrained_matrix_hash(league, market)
+    if matrix_hash is None:
+        return ["no model_stats row"]
+    # Gates first: serve-iff-ship leaves no pickle behind for a cell that failed one, so checking
+    # artifact identity ahead of them reports a missing serving artifact as the cause of a plain
+    # Gate-4 miss. The two identity legs still gate the ship — they just answer a later question.
+    failed = _failed_gates_after(league, market)
+    if failed:
+        return failed
+    expected = _candidate_identity(candidate, matrix_hash)
+    if not _produced_artifacts_match(league, market, candidate, expected):
+        return ["artifact identity"]
+    if not _ship_from_model_stats(league, market, expected):
+        return ["model_stats identity/ship"]
+    return []
 
 
 def _confirm_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
@@ -452,16 +583,13 @@ def _confirm_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
         meta[lg][mkt].update(cand["edits"])
         meta[lg][mkt]["shipped"] = _SHIPPED_DEVEL
         _atomic_write_meta(meta)
-        if _confirm_meditate(lg, mkt, cand):
+        failed = _confirm_meditate(lg, mkt, cand)
+        if not failed:
             _sync_cell_from_disk(meta, lg, mkt)
             keep = True
             click.secho(f"  SHIPPED (devel) {lg} {mkt}", fg="green")
             return (lg, mkt, "SHIPPED", [])
-        failed = _failed_gates_after(lg, mkt)
-        click.secho(
-            f"  REVERTED {lg} {mkt} — failed {' '.join(failed) or '(retrain error)'}",
-            fg="red",
-        )
+        click.secho(f"  REVERTED {lg} {mkt} — failed {' '.join(failed)}", fg="red")
         return (lg, mkt, "REVERTED", failed)
     finally:
         if not keep:
@@ -493,9 +621,14 @@ def _supersede_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
         _atomic_write_meta(meta)
         if not _run_meditate(lg, mkt, cand):
             return (lg, mkt, "HELD", ["retrain error"])
-        if not _produced_artifacts_match(lg, mkt, cand):
+        _record_nominee_gates(lg, mkt, cand)
+        matrix_hash = _retrained_matrix_hash(lg, mkt)
+        if matrix_hash is None:
+            return (lg, mkt, "HELD", ["no model_stats row"])
+        expected = _candidate_identity(cand, matrix_hash)
+        if not _produced_artifacts_match(lg, mkt, cand, expected):
             return (lg, mkt, "HELD", ["artifact identity"])
-        if not _ship_from_model_stats(lg, mkt, _candidate_identity(cand)):
+        if not _ship_from_model_stats(lg, mkt, expected):
             return (lg, mkt, "HELD", ["model_stats identity/ship"])
         baseline = load_test_set(backup / f"{slug}.csv", _SHIP_PRED_COL)
         candidate = load_test_set(_TEST_SETS_ROOT / f"{slug}.csv", _SHIP_PRED_COL)
@@ -514,62 +647,91 @@ def _supersede_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
             _restore_cell(lg, mkt, backup, meta, original)
 
 
-def _split_shippable(ready: list[dict], meta: dict) -> tuple[list[dict], list[dict]]:
-    """Partition candidates by current release surface: withheld (fresh) vs already-shipped (live).
+def _split_shippable(
+    ready: list[list[dict]], meta: dict
+) -> tuple[list[list[dict]], list[list[dict]]]:
+    """Partition *cells* by current release surface: withheld (fresh) vs already-shipped (live).
 
     Withheld cells auto-ship on a clean 6/6 (a fresh cell has no live pickle, so a failed confirm's
     revert+prune restores its dark state). Live cells route to the supersession test, which restores
     the incumbent byte-identical on a loss rather than pruning it.
     """
     fresh, shipped = [], []
-    for c in ready:
-        target = fresh if meta[c["league"]][c["market"]].get("shipped") == WITHHELD else shipped
-        target.append(c)
+    for nominated in ready:
+        lg, mkt = nominated[0]["league"], nominated[0]["market"]
+        target = fresh if meta[lg][mkt].get("shipped") == WITHHELD else shipped
+        target.append(nominated)
     return fresh, shipped
 
 
-def _drop_activation_gated(fresh: list[dict]) -> list[dict]:
-    """Announce and drop withheld candidates in activation-gated leagues — they never auto-ship."""
+def _drop_activation_gated(fresh: list[list[dict]]) -> list[list[dict]]:
+    """Announce and drop withheld cells in activation-gated leagues — they never auto-ship."""
     kept = []
-    for c in fresh:
-        if c["league"] in _ACTIVATION_GATED_LEAGUES:
+    for nominated in fresh:
+        lg, mkt = nominated[0]["league"], nominated[0]["market"]
+        if lg in _ACTIVATION_GATED_LEAGUES:
             click.secho(
-                f"  ACTIVATION-GATED {c['league']} {c['market']} — withheld {c['league']} cells ship "
+                f"  ACTIVATION-GATED {lg} {mkt} — withheld {lg} cells ship "
                 "only after the D1/D2 owner gate; skipping.",
                 fg="yellow",
             )
         else:
-            kept.append(c)
+            kept.append(nominated)
     return kept
 
 
-def _announce_plan(fresh: list[dict], shipped: list[dict]) -> None:
-    """List the run's plan: which withheld cells get persisted+confirmed, which live cells get tested."""
+def _announce_plan(fresh: list[list[dict]], shipped: list[list[dict]]) -> None:
+    """List the run's plan: each cell's nominees in the order they will be tried, with their source."""
     for label, group, verb in (
-        ("withheld candidate", fresh, "persist + confirm"),
+        ("withheld cell", fresh, "persist + confirm"),
         ("live cell", shipped, "supersession-test (S1/S2/S3)"),
     ):
         if group:
             click.secho(f"\n{len(group)} {label}(s) to {verb}:", bold=True)
-            for c in group:
-                click.echo(
-                    f"  {c['league']} {c['market']}: "
-                    + ", ".join(f"{k}={v}" for k, v in c["edits"].items())
-                )
+            for nominated in group:
+                head = nominated[0]
+                click.echo(f"  {head['league']} {head['market']} — {len(nominated)} nominee(s):")
+                for n, cand in enumerate(nominated, start=1):
+                    edits = ", ".join(f"{k}={v}" for k, v in cand["edits"].items())
+                    click.echo(f"    {n}. [{cand['source']}] {edits}")
 
 
-def run_confirm(board: pd.DataFrame, *, yes: bool = False) -> None:
+def _walk_nominees(
+    meta: dict, nominated: list[dict], attempt
+) -> tuple[str, str, str, list[str], str]:
+    """Retrain each nominee in order until one wins; report the deciding attempt and how deep it went.
+
+    No new revert machinery is needed: ``_confirm_one``'s ``finally`` already restores stat_meta and
+    prunes the pickle on every non-win, and ``_supersede_one``'s restores byte-identically. The loop
+    just stops at the first win.
+    """
+    outcome = ("", "", "REVERTED", ["no nominee"], "-")
+    for n, cand in enumerate(nominated, start=1):
+        click.secho(
+            f"\n  nominee {n}/{len(nominated)} [{cand['source']}] {cand['league']} {cand['market']}",
+            bold=True,
+        )
+        lg, mkt, verdict, failed = attempt(meta, cand)
+        outcome = (lg, mkt, verdict, failed, f"{n}/{len(nominated)} {cand['source']}")
+        if verdict in _WIN_OUTCOMES:
+            break
+    return outcome
+
+
+def run_confirm(board: pd.DataFrame, *, yes: bool = False, max_nominees: int | None = None) -> None:
     """Confirm the sweep's winners: auto-ship withheld cells on a clean 6/6, supersession-test live cells.
 
-    ``board`` is the in-memory sweep result (a row per corner, ``ships`` bool). Withheld candidates are
-    persisted + retrained and kept on a clean 6/6 (else reverted+pruned). Already-shipped cells (present
-    when the sweep ran ``--include-shipped``) run the S1/S2/S3 test and swap the live cell only on a
-    passing verdict AND an operator yes; any loss restores the incumbent. ``yes`` skips only the upfront
-    gate — live-cell promotions always prompt individually.
+    ``board`` is the in-memory sweep result (a row per corner). Each cell nominates its top corners
+    plus any seed and its incumbent; the nominees are retrained in order until one ships. Withheld
+    cells are persisted + retrained and kept on a clean 6/6 (else reverted+pruned). Already-shipped
+    cells (present when the sweep ran ``--include-shipped``) run the S1/S2/S3 test and swap the live
+    cell only on a passing verdict AND an operator yes; any loss restores the incumbent. ``yes``
+    skips only the upfront gate — live-cell promotions always prompt individually. ``max_nominees``
+    caps each cell's walk at its first N nominees.
     """
-    ready = _candidates(board)
+    ready = _candidates(board, max_nominees)
     if not ready:
-        click.echo("no shipping candidates to confirm.")
+        click.echo("no confirmable nominees on the board.")
         return
 
     meta = load_stat_meta(_STAT_META)
@@ -579,9 +741,11 @@ def run_confirm(board: pd.DataFrame, *, yes: bool = False) -> None:
         click.echo("no confirmable candidates after the activation gate.")
         return
     _announce_plan(fresh, shipped)
+    retrains = sum(len(n) for n in fresh) + sum(len(n) for n in shipped)
     prompt = (
-        f"\nPersist {len(fresh)} withheld config(s) and supersession-test {len(shipped)} live cell(s) "
-        "with a full-HPO retrain (~1h each)? Withheld failures auto-revert; live promotions prompt"
+        f"\nConfirm {len(fresh)} withheld and supersession-test {len(shipped)} live cell(s) — up to "
+        f"{retrains} full-HPO retrains (~1h each), stopping at each cell's first shipping nominee? "
+        "Withheld failures auto-revert; live promotions prompt"
     )
     if not yes and not click.confirm(prompt):
         click.echo("aborted; stat_meta.json unchanged.")
@@ -589,20 +753,24 @@ def run_confirm(board: pd.DataFrame, *, yes: bool = False) -> None:
 
     backup = _backup_stat_meta()
     click.echo(f"stat_meta.json backed up to {backup}")
-    results = [_confirm_one(meta, c) for c in fresh] + [_supersede_one(meta, c) for c in shipped]
+    results = [_walk_nominees(meta, n, _confirm_one) for n in fresh]
+    results += [_walk_nominees(meta, n, _supersede_one) for n in shipped]
     _print_confirm_report(results, backup)
 
 
 def _print_confirm_report(
-    results: list[tuple[str, str, str, list[str]]], backup: pathlib.Path
+    results: list[tuple[str, str, str, list[str], str]], backup: pathlib.Path
 ) -> None:
-    """Final table (cell → outcome → failing gates) + the tally, backup path, and commit reminder."""
+    """Final table (cell → nominee → outcome → failing gates) + tally, backup path, commit reminder."""
     rows = [
-        [f"{lg} {mkt}", outcome, " ".join(failed) or "-"] for lg, mkt, outcome, failed in results
+        [f"{lg} {mkt}", nominee, outcome, " ".join(failed) or "-"]
+        for lg, mkt, outcome, failed, nominee in results
     ]
     click.secho("\nconfirm results", bold=True)
     click.echo(
-        tabulate.tabulate(rows, headers=["cell", "outcome", "failed gates"], tablefmt="github")
+        tabulate.tabulate(
+            rows, headers=["cell", "nominee", "outcome", "failed gates"], tablefmt="github"
+        )
     )
     n_win = sum(1 for r in results if r[2] in _WIN_OUTCOMES)
     click.secho(

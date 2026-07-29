@@ -23,29 +23,47 @@ _SHIP = ("deterministic_train", "full_hpo", "score", "serve", "confirm")
 _RESEARCH = ("deterministic_train", "full_hpo", "score")
 _SERVE_ONLY = ("serve",)
 
+# Above this target mean the count branch's dispersion cap (pipeline._COUNT_BRANCH_R_CAP = 50)
+# pins r below the empirical spread, so a count corner can only fail Gate 4 — pure budget
+# waste. Kills count families on NFL passing yards (mean 227) and admits NBA PTS (13.1).
+COUNT_ADMISSION_MEAN_CEILING: float = 50.0
+
+# Every base family is offered on both classes: which family fits is decided from the cell's own
+# target facts (integer lattice, mean), not from the class its stat_meta ``dist`` happens to name.
+_BOTH_CLASSES: tuple[str, ...] = ("continuous", "count")
+# "count" stays in the tuple even though the class no longer gates admission —
+# identity.validate_model_recipe branches on it to require target_normalization="none" for a
+# corner that carries no normalization control.
+_COUNT_APPLICABILITY = {
+    "distribution_classes": _BOTH_CLASSES,
+    "requires_integer_target": True,
+    "max_global_mean": COUNT_ADMISSION_MEAN_CEILING,
+}
+
 
 def _base(
     slug: str,
-    distribution_class: str,
     axes: dict[str, tuple[str, ...]],
     persist: dict[str, str],
     *,
     capabilities: tuple[str, ...] = _SHIP,
     fixed_controls: dict[str, str] | None = None,
+    fixed_persist: dict[str, str] | None = None,
+    applicability: dict | None = None,
 ) -> dict:
     return {
         "slug": slug,
         "implementation_version": 1,
         "artifact_schema_version": 1,
         "family": slug,
-        "applicability": {"distribution_classes": (distribution_class,)},
+        "applicability": applicability or {"distribution_classes": _BOTH_CLASSES},
         "enrollments": (),
         "capabilities": capabilities,
         "axes": axes,
         "fixed_controls": fixed_controls or {},
         "cli_flags": _CONTROL_FLAGS,
         "persist": persist,
-        "fixed_persist": {},
+        "fixed_persist": fixed_persist or {},
         "required_columns": (),
         "shared_csv_columns": (),
         "structural": False,
@@ -59,99 +77,145 @@ def _base(
     }
 
 
+# ``none`` is deliberately absent: ship_config._validate_cell refuses to ship a continuous cell
+# carrying target_normalization="none", so such a corner could never confirm.
 _NORMS = (
     "ratio_meanyr",
     "centered_additive_mean10",
     "centered_additive_eb_meanyr_k10",
+    "ratio_projvol",
 )
 _BLENDING = ("crps", "nll")
+_COUNT_DISPERSION = ("crps", "pit_ks")
+# The ``posthoc`` calibration pool as a search axis. POSTHOC_SLUGS also carries two structural
+# slugs, but those are registered specs of their own and never axis values here — selecting one
+# means selecting that spec, which pins ``posthoc`` to its own slug.
+_POSTHOC = (
+    "none",
+    "prob_recal_isotonic",
+    "prob_recal_platt",
+    "roe_mean",
+    "isotonic_mean",
+)
+# pipeline gates the whole-CDF stage on ``posthoc_slug in CDF_STAGE and dist == "SkewNormal"``; on
+# any other family it falls through to the scalar path, so the corner would train identically to
+# ``none`` while carrying a different fingerprint.
+_POSTHOC_SKEWNORMAL = (*_POSTHOC, "cdf_recal_isotonic")
+# A base spec deliberately leaves ``hpo_selection`` and ``stabilization`` out of its corner. Neither
+# value is decided by the corner: ``cli._retry_calibrated_if_g4_only`` flips a cell to ``calibrated``
+# and persists it after a Gate-4-only failure (8 cells carry it today, 6 of them shipped), and the
+# pipeline silently upgrades ``stabilization`` to L2 for centered SkewNormal and Mixture. Pinning
+# either would sign a value the run did not train with and would make every such cell fail
+# ``validate_strategy_selection``. A structural spec is different — it pins the entire recipe.
+
+# With the class unlocked a count corner can win on a cell whose stat_meta carries a continuous
+# normalization; persisting ``none`` alongside keeps ship_config._validate_cell satisfied.
+_COUNT_FIXED_PERSIST = {"target_normalization": "none"}
+
+_SKEWNORMAL_PERSIST = {
+    "dist": "dist",
+    "normalization": "target_normalization",
+    "dist_training_loss": "dist_training_loss",
+    "sn_param": "sn_param",
+    "blending_loss_fn": "blending",
+    "posthoc": "posthoc",
+}
+_YARDS_PERSIST = {**_SKEWNORMAL_PERSIST, "hpo_selection": "hpo_selection"}
+_COUNT_PERSIST = {
+    "dist": "dist",
+    "count_dispersion_objective": "count_dispersion_objective",
+    "blending_loss_fn": "blending",
+    "posthoc": "posthoc",
+}
+
 _BASE_SPECS = (
     _base(
         "SkewNormal",
-        "continuous",
         {
             "normalization": _NORMS,
             "dist_training_loss": ("crps", "nll"),
             "sn_param": ("direct", "centered"),
             "blending_loss_fn": _BLENDING,
+            "posthoc": _POSTHOC_SKEWNORMAL,
+        },
+        _SKEWNORMAL_PERSIST,
+        fixed_controls={"dist": "SkewNormal"},
+    ),
+    _base(
+        "Mixture",
+        {
+            "dist": ("Mixture",),
+            "normalization": _NORMS,
+            "blending_loss_fn": _BLENDING,
+            "posthoc": _POSTHOC,
         },
         {
             "dist": "dist",
             "normalization": "target_normalization",
             "dist_training_loss": "dist_training_loss",
-            "sn_param": "sn_param",
             "blending_loss_fn": "blending",
+            "posthoc": "posthoc",
         },
-        fixed_controls={"dist": "SkewNormal"},
-    ),
-    _base(
-        "Mixture",
-        "continuous",
-        {"dist": ("Mixture",), "normalization": _NORMS},
-        {"dist": "dist", "normalization": "target_normalization"},
         capabilities=_RESEARCH,
+        # lightgbmlss rejects crps mixture components and fails loud in the constructor, so a
+        # swept dist_training_loss axis would guarantee crashed trials.
+        fixed_controls={"dist_training_loss": "nll"},
     ),
     _base(
         "ZINB",
-        "count",
         {
             "dist": ("ZINB",),
             "zinb_mode": ("joint", "hurdle"),
-            "count_dispersion_objective": ("crps", "pit_ks"),
+            "count_dispersion_objective": _COUNT_DISPERSION,
             "blending_loss_fn": _BLENDING,
+            "posthoc": _POSTHOC,
         },
         {
             "dist": "dist",
             "zinb_mode": "zinb_mode",
             "count_dispersion_objective": "count_dispersion_objective",
             "blending_loss_fn": "blending",
+            "posthoc": "posthoc",
         },
+        fixed_persist=_COUNT_FIXED_PERSIST,
+        applicability=_COUNT_APPLICABILITY,
     ),
     _base(
         "NegBin",
-        "count",
         {
             "dist": ("NegBin",),
-            "count_dispersion_objective": ("crps", "pit_ks"),
+            "count_dispersion_objective": _COUNT_DISPERSION,
             "blending_loss_fn": _BLENDING,
+            "posthoc": _POSTHOC,
         },
-        {
-            "dist": "dist",
-            "count_dispersion_objective": "count_dispersion_objective",
-            "blending_loss_fn": "blending",
-        },
+        _COUNT_PERSIST,
+        fixed_persist=_COUNT_FIXED_PERSIST,
+        applicability=_COUNT_APPLICABILITY,
     ),
     _base(
         "DPO",
-        "count",
         {
             "dist": ("DPO",),
-            "count_dispersion_objective": ("crps", "pit_ks"),
+            "count_dispersion_objective": _COUNT_DISPERSION,
             "blending_loss_fn": _BLENDING,
+            "posthoc": _POSTHOC,
         },
-        {
-            "dist": "dist",
-            "count_dispersion_objective": "count_dispersion_objective",
-            "blending_loss_fn": "blending",
-        },
+        _COUNT_PERSIST,
+        fixed_persist=_COUNT_FIXED_PERSIST,
+        applicability=_COUNT_APPLICABILITY,
     ),
 )
 
 
 def _compatibility(slug: str) -> dict:
-    data = _base(
+    return _base(
         slug,
-        "continuous",
         {},
         {},
         capabilities=_SERVE_ONLY,
         fixed_controls={"dist": slug},
+        applicability={"distribution_classes": ("continuous",), "distributions": (slug,)},
     )
-    data["applicability"] = {
-        "distribution_classes": ("continuous",),
-        "distributions": (slug,),
-    }
-    return data
 
 
 _COMPATIBILITY_SPECS = tuple(_compatibility(slug) for slug in ("Gamma", "ZAGamma"))
@@ -172,17 +236,6 @@ def _yards_controls(slug: str) -> dict[str, str]:
         "stabilization": "None",
         "posthoc": slug,
     }
-
-
-_YARDS_PERSIST = {
-    "dist": "dist",
-    "normalization": "target_normalization",
-    "dist_training_loss": "dist_training_loss",
-    "sn_param": "sn_param",
-    "blending_loss_fn": "blending",
-    "hpo_selection": "hpo_selection",
-    "posthoc": "posthoc",
-}
 
 
 def _yards(
@@ -252,6 +305,24 @@ BUILTIN_SPEC_DATA = (
         applicability={
             "distribution_classes": ("continuous",),
             "required_data_columns": ("Player position",),
+        },
+    ),
+)
+
+# Corners with an independent full-HPO six-gate pass, kept so the sweep can seed a cell with a
+# known-good recipe instead of rediscovering it. Registry validates each against its spec's grid
+# at import. NFL passing TDs: docs/handoffs/model_improvement_track.md, the 2026-07-20 NFL
+# popular-market re-baseline.
+SEED_CORNERS: tuple[tuple[str, str, str, dict[str, str]], ...] = (
+    (
+        "NFL",
+        "passing tds",
+        "DPO",
+        {
+            "dist": "DPO",
+            "count_dispersion_objective": "pit_ks",
+            "blending_loss_fn": "nll",
+            "posthoc": "roe_mean",
         },
     ),
 )

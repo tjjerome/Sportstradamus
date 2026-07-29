@@ -103,6 +103,7 @@ def _minimal_filedict_kwargs() -> dict:
             "dist_training_loss": "crps",
             "sn_param": "direct",
             "blending_loss_fn": "crps",
+            "posthoc": "none",
         },
     }
 
@@ -157,7 +158,7 @@ def test_build_filedict_carries_cell_bound_model_strategy_identity():
     assert identity["matrix_hash"] == "a" * 64
     assert identity["controls_json"] == (
         '{"blending_loss_fn":"crps","dist":"SkewNormal","dist_training_loss":"crps",'
-        '"normalization":"ratio_meanyr","sn_param":"direct"}'
+        '"normalization":"ratio_meanyr","posthoc":"none","sn_param":"direct"}'
     )
 
 
@@ -175,6 +176,7 @@ def test_model_strategy_corner_fingerprint_changes_with_each_selected_control():
         "dist_training_loss": "nll",
         "sn_param": "centered",
         "blending_loss_fn": "nll",
+        "posthoc": "roe_mean",
     }
 
     for control, alternative in alternatives.items():

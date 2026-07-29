@@ -126,11 +126,13 @@ def test_persist_converts_internal_book_over_to_scorecard_under(monkeypatch, tmp
         "dist": "NegBin",
         "count_dispersion_objective": "crps",
         "blending_loss_fn": "crps",
+        "posthoc": "none",
     }
     filedict = {
         "distribution": "NegBin",
         "target_normalization": "none",
         "normalized": False,
+        "posthoc": "none",
         MODEL_STRATEGY_MODEL_KEY: build_artifact_identity(
             "NegBin",
             "NFL",

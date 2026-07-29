@@ -14,7 +14,7 @@ import json
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 
-from sportstradamus.training.model_strategy.specs import BUILTIN_SPEC_DATA
+from sportstradamus.training.model_strategy.specs import BUILTIN_SPEC_DATA, SEED_CORNERS
 from sportstradamus.training.role_specs import role_spec_for
 
 BASE_STRUCTURAL_STRATEGY = "none"
@@ -25,7 +25,10 @@ CAP_FULL_HPO = "full_hpo"
 CAP_SCORE = "score"
 CAP_SERVE = "serve"
 CAP_CONFIRM = "confirm"
-SWEEP_CAPABILITIES = frozenset({CAP_DETERMINISTIC_TRAIN, CAP_SCORE})
+# A family must also be confirmable to be worth a trial: the sweep's product is a recipe the
+# nomination lane can retrain at full HPO and ship. Mixture ranks best on most boards and can do
+# neither, so ranking it only spends budget on a corner that is skipped at nomination.
+SWEEP_CAPABILITIES = frozenset({CAP_DETERMINISTIC_TRAIN, CAP_SCORE, CAP_CONFIRM})
 
 
 @dataclass(frozen=True)
@@ -36,6 +39,8 @@ class CellContext:
     distribution_class: str
     data_columns: frozenset[str] | None = None
     matrix_sha256: str | None = None
+    target_is_integer: bool | None = None
+    global_mean: float | None = None
 
 
 @dataclass(frozen=True)
@@ -44,11 +49,31 @@ class Applicability:
     distributions: tuple[str, ...] = ()
     required_data_columns: tuple[str, ...] = ()
     role_registry_gated: bool = False
+    requires_integer_target: bool = False
+    max_global_mean: float | None = None
+
+    def _target_admits(self, cell: CellContext) -> bool:
+        """Whether the cell's target shape admits this family.
+
+        Both gates fail OPEN on an absent fact, unlike ``required_data_columns``: they exist to
+        prune the sweep's search space, whereas ``validate_strategy_selection`` runs them again on
+        a corner an operator already forced and signed — from a context carrying no matrix facts —
+        and must not start rejecting it.
+        """
+        if self.requires_integer_target and cell.target_is_integer is False:
+            return False
+        return (
+            self.max_global_mean is None
+            or cell.global_mean is None
+            or cell.global_mean <= self.max_global_mean
+        )
 
     def matches(self, cell: CellContext) -> bool:
         if self.distribution_classes and cell.distribution_class not in self.distribution_classes:
             return False
         if self.distributions and cell.distribution not in self.distributions:
+            return False
+        if not self._target_admits(cell):
             return False
         required = set(self.required_data_columns)
         if self.role_registry_gated:
@@ -56,8 +81,6 @@ class Applicability:
             if spec is None:
                 return False
             required |= set(spec.all_columns)
-        if required and cell.data_columns is None:
-            return False
         return required <= (cell.data_columns or frozenset())
 
 
@@ -184,6 +207,11 @@ def strategy_controls(spec: StrategySpec) -> tuple[dict[str, str], ...]:
         {**spec.fixed_controls, **dict(zip(names, values, strict=True))}
         for values in itertools.product(*(spec.axes[name] for name in names))
     )
+
+
+for _league, _market, _slug, _controls in SEED_CORNERS:
+    if _controls not in strategy_controls(get_strategy(_slug)):
+        raise ValueError(f"{_slug}: seed corner for {_league} {_market} is not a registered corner")
 
 
 def controls_json(controls: Mapping[str, object]) -> str:

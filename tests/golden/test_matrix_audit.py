@@ -5,7 +5,12 @@ from pathlib import Path
 import pandas as pd
 from click.testing import CliRunner
 
-from sportstradamus.training.matrix_audit import audit_matrix, main
+from sportstradamus.helpers.training_quotes import PROVENANCE_COLUMNS
+from sportstradamus.training.matrix_audit import (
+    audit_matrix,
+    incomplete_provenance_rows,
+    main,
+)
 
 
 def _write_matrix(path: Path, **overrides) -> None:
@@ -75,6 +80,28 @@ def test_auditor_flags_duplicate_invalid_and_missing_provenance(tmp_path):
         "invalid archived quote",
         "missing quote provenance",
     }
+
+
+def test_incomplete_provenance_counts_only_the_half_populated_block(tmp_path):
+    path = tmp_path / "NBA_PTS.parquet"
+    _write_matrix(path)
+    populated = pd.read_parquet(path)
+
+    assert incomplete_provenance_rows(populated) == 0
+    assert incomplete_provenance_rows(populated.drop(columns=list(PROVENANCE_COLUMNS))) == 0
+
+    half = populated.copy()
+    half.loc[0, "QuoteAuthenticity"] = None
+    assert incomplete_provenance_rows(half) == 1
+
+
+def test_auditor_flags_a_half_populated_provenance_block(tmp_path):
+    path = tmp_path / "MLB_runs-allowed.parquet"
+    _write_matrix(path, QuoteBookCount=[None, 0])
+
+    report = audit_matrix(path)
+
+    assert "null required quote provenance" in report["violations"]
 
 
 def test_auditor_cli_exits_nonzero_on_violation(tmp_path):

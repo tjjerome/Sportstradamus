@@ -166,6 +166,7 @@ def test_generic_count_strategy_requires_raw_target_semantics():
         "expected_columns": [],
         "target_normalization": "none",
         "normalized": False,
+        "posthoc": controls["posthoc"],
         MODEL_STRATEGY_MODEL_KEY: build_artifact_identity(
             spec.slug,
             "NFL",
@@ -194,6 +195,7 @@ def test_generic_zinb_mode_must_match_signed_controls():
         "target_normalization": "none",
         "normalized": False,
         "zinb_mode": "joint",
+        "posthoc": controls["posthoc"],
         MODEL_STRATEGY_MODEL_KEY: build_artifact_identity(
             spec.slug,
             "NFL",
@@ -215,6 +217,7 @@ def test_generic_research_only_strategy_cannot_serve():
         "expected_columns": [],
         "target_normalization": controls["normalization"],
         "normalized": True,
+        "posthoc": controls["posthoc"],
         MODEL_STRATEGY_MODEL_KEY: build_artifact_identity(
             spec.slug,
             "WNBA",
