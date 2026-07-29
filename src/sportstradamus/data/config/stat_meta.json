@@ -20,11 +20,12 @@
             "posthoc": "none"
         },
         "DREB": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "centered_additive_mean10",
-            "posthoc": "none",
-            "blending": "crps"
+            "dist": "DPO",
+            "shipped": "devel",
+            "target_normalization": "none",
+            "posthoc": "prob_recal_isotonic",
+            "blending": "crps",
+            "count_dispersion_objective": "crps"
         },
         "FG3A": {
             "dist": "SkewNormal",
