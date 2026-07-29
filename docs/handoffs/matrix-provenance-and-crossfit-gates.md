@@ -1,8 +1,9 @@
 # Fix brief: matrix provenance crash + cross-fit gate optimism
 
-Three defects surfaced by phase 2 of the 30-cell holdout-blind sweep; none is caused by the sweep.
+Four defects surfaced by phase 2 of the 30-cell holdout-blind sweep; none is caused by the sweep.
 A and C are root-caused and fixed. B is a single-cell lead whose first experiment came back
-negative — the HP-selection rule is not the lever — so its cause is still open.
+negative — the HP-selection rule is not the lever — so its cause is still open. D is a silent
+process death that owns its own brief.
 
 **Operating constraint.** The driver (`research/overnight/run_all_cells.sh`) spawns fresh
 `meditate` subprocesses per nominee, which pick up an edit mid-run. Per
@@ -240,6 +241,20 @@ Point the run at a copied archive via `SPORTSTRADAMUS_ARCHIVE_DB`
 lock, and never run alongside the driver regardless — two `meditate` processes that both reach
 `report()` race on the single `model_stats.parquet`.
 
+**Some confirm failures are diverged fits, not degraded calibration.** Across the nominee ledger
+(23 nominees, 12 cells) a saturated dispersion calibrator separates outcomes perfectly: every row
+whose `dispersion_cal` sits on its 0.1 floor fails — 6 of 6 — and no ship has one. Those rows carry
+absurd `shape_ratio` values (NFL qb yards 1.7e9 and 2.7e9, qb tds 4.6e3–1.5e6, NBA TOV 48), so the
+SkewNormal fit blew up and the calibrator clamped trying to rein it in. That is a different failure
+from a corner that merely calibrates badly, and it costs a full-HPO retrain to discover.
+
+Read the *floor*, not the shape ratio: `shape_ratio > 10` does not discriminate on its own, because
+NFL attempts ships at 76.6 with a healthy `dispersion_cal` of 1.01. The conjunction is what matters.
+
+This is worth chasing rather than filing under §B. NFL qb yards carries `g1_has_edge` True on both
+nominees — it has real edge over the book and is being lost to a fitting failure, not to an absent
+signal. Contrast qb tds and TOV, which diverge *and* have no edge, so they were unshippable anyway.
+
 **HPO axis: refuted on this corner.** NHL goalie fantasy points underdog, both arms trained from
 the frozen `e7342f29…` matrix the original confirm used, `n_validation` 818 on both:
 
@@ -292,3 +307,12 @@ lines above. Covered by `tests/golden/test_hurdle_warm_start_monotone.py`. NFL r
 one shipped hurdle cell whose stored width (419) is below the current NFL feature count, so it was
 next in line for the same abort. NFL interceptions then re-confirmed all three nominees to real
 verdicts (it still fails g4+g6 — recovering the nominee was never going to rescue the cell).
+
+---
+
+## D. A forced-DPO confirm dies without a traceback
+
+The same `REVERTED … failed retrain error` symptom as §C, different cause and **unresolved**: NFL
+carries lost both nominees ~6 minutes into each fit with no exception in a log that does capture
+stderr. Cause not identified; five queued cells carry DPO in their top-2 corners and are expected
+to hit it. Diagnosis, exclusions, and the reproduction recipe: [dpo-confirm-crash.md](dpo-confirm-crash.md).
