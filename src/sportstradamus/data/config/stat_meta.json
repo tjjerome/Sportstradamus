@@ -180,12 +180,12 @@
             "blending": "nll"
         },
         "passing tds": {
-            "dist": "DPO",
-            "shipped": "withheld",
+            "dist": "NegBin",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "roe_mean",
+            "posthoc": "isotonic_mean",
             "count_dispersion_objective": "pit_ks",
-            "blending": "nll"
+            "blending": "crps"
         },
         "passing yards": {
             "dist": "SkewNormal",
@@ -252,9 +252,12 @@
         },
         "targets": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "centered_additive_mean10",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "prob_recal_platt",
+            "dist_training_loss": "nll",
+            "sn_param": "direct",
+            "blending": "nll"
         },
         "tds": {
             "dist": "ZINB",
@@ -298,9 +301,12 @@
         },
         "goalie fantasy points underdog": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "cdf_recal_isotonic",
+            "dist_training_loss": "crps",
+            "sn_param": "centered",
+            "blending": "crps"
         },
         "goals": {
             "dist": "ZINB",
@@ -552,9 +558,12 @@
         },
         "hitter fantasy points underdog": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "cdf_recal_isotonic",
+            "dist_training_loss": "nll",
+            "sn_param": "direct",
+            "blending": "nll"
         },
         "home runs": {
             "dist": "ZINB",
@@ -608,9 +617,13 @@
         },
         "runs allowed": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "prob_recal_isotonic",
+            "dist_training_loss": "nll",
+            "sn_param": "centered",
+            "blending": "nll",
+            "hpo_selection": "calibrated"
         },
         "singles": {
             "dist": "DPO",
