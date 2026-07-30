@@ -149,10 +149,12 @@
             "blending": "nll"
         },
         "carries": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "centered_additive_mean10",
-            "posthoc": "none"
+            "dist": "DPO",
+            "shipped": "devel",
+            "target_normalization": "none",
+            "posthoc": "prob_recal_isotonic",
+            "count_dispersion_objective": "crps",
+            "blending": "crps"
         },
         "completions": {
             "dist": "SkewNormal",
