@@ -265,9 +265,34 @@ optimistic about the *gate*, it is optimistic about the *fit converging at all*.
 available without touching the ranking — a count-stat cell whose nominee is SkewNormal should have
 its count-family corner tried first, or at least kept in the walk when the SkewNormal one diverges.
 
-NFL qb yards is the cell to chase. It carries `g1_has_edge` True on both nominees — real edge over
-the book, lost to a fitting failure rather than an absent signal — and it is continuous, so the
-count-family route above does not apply to it.
+NFL qb yards is still the cell to chase, but **not** for the reason first recorded here. Its
+`g1_has_edge` True is vacuous: every g1 statistic on both nominees is NaN, and both
+`_g1_within_tie_margin` and `_below_zero_ci_bound` return True on a blank CI bound by design — "no
+book to beat". So the flag means *unmeasured*, never *measured and winning*. Do not read
+`g1_has_edge` without checking `g1_brier_diff_ci_hi` is non-null first; 11 of the ledger's 31 rows
+have a vacuous g1, six of them ships.
+
+What is left after that correction is thinner but still worth the retrain: qb yards has 339 authentic
+quotes in its matrix, so its book comparison is recoverable once those rows reach the scored split,
+and it is continuous, so the count-family route above does not apply to it.
+
+**Read this walk's ship count as breadth, not staking volume.** Five of its ships are structurally
+book-less — zero authentic quotes across the entire matrix, not merely across the scored split:
+
+| cell | authentic / rows |
+|---|---|
+| NFL targets | 0 / 13499 |
+| NBA DREB | 0 / 13915 |
+| WNBA BLST | 0 / 14287 |
+| WNBA STL | 0 / 15000 |
+| WNBA DREB | 0 / 14737 |
+
+Rebounds, steals, blocks and targets are DFS-only markets, so this is the market structure rather
+than a collection gap, and the pipeline handles it deliberately: `report()` sets
+`betting_active = ship AND kelly_shrinkage > 0` with NaN filled to 0, and `get_market_calibration`
+returns NaN so Kelly falls through to its next source. Those cells are deployable and sized to zero
+until they prove live edge. Nothing to fix — but do not quote them alongside book-backed ships as if
+the two mean the same thing.
 
 **HPO axis: refuted on this corner.** NHL goalie fantasy points underdog, both arms trained from
 the frozen `e7342f29…` matrix the original confirm used, `n_validation` 818 on both:
