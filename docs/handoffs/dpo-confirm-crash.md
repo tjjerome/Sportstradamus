@@ -33,20 +33,21 @@ trials, so neither nominee got near the end of its search.
 2. dist=DPO, count_dispersion_objective=crps,   blending=crps, posthoc=prob_recal_platt
 ```
 
-**Forced DPO is not sufficient to trigger it.** Two other cells ran the same forced
-`SkewNormal`→`DPO` override through the same production confirm path without dying: MLB pitcher
-fantasy points underdog produced real gate rows for both its DPO nominees, and NBA DREB passed
-37 minutes on nominee 1. Matrix width is the one axis that separates them —
+**Forced DPO is not sufficient to trigger it.** Three other cells ran the same forced
+`SkewNormal`→`DPO` override through the same production confirm path and all reached real gate
+verdicts — two of them shipped:
 
-| cell | matrix | forced DPO | outcome |
-|---|---|---|---|
-| NFL carries | 6266 × **483** | yes | died ~6 min, both nominees |
-| NBA DREB | 13915 × 317 | yes | survived past the window |
-| MLB pitcher fp | 2436 × 141 | yes | confirmed, real gate rows |
+| cell | matrix | outcome |
+|---|---|---|
+| NFL carries | 6266 × **483** | died ~6 min, both nominees, no gate row |
+| WNBA BLST | 14287 × 317 | 63 min, SHIPPED |
+| NBA DREB | 13915 × 317 | 76 min, SHIPPED |
+| MLB pitcher fp | 2436 × 141 | confirmed, real gate rows |
 
-— but three points is a correlation, not a cause, and DREB's 317 columns sit roughly midway, which is
-weak support for a width threshold. Row count argues against size altogether: DREB has more than
-twice NFL carries' rows and is fine.
+NFL carries is the only cell with the wide 483-column NFL feature set, so width remains the one
+untested axis that separates it — but it is also the only NFL cell in the group, so league and width
+are confounded and neither is evidence yet. Row count argues against size outright: the two
+survivors have more than twice its rows.
 
 ## Ruled out, with the evidence
 
@@ -80,10 +81,14 @@ recipe below with `PYTHONFAULTHANDLER=1` and read the fault address.
 
 **Lost:** NFL carries (both nominees, no gate row).
 
-**At risk — DPO among the top-2 board corners, and still queued:** WNBA BLST, WNBA STL, WNBA DREB,
-NFL completions. NBA DREB was on this list and has since cleared the window, so the exposure is
-4 cells rather than 5. Expect any `failed retrain error` among them to be this bug, not the cell;
-check the log's last line for the forced-dist warning before concluding anything about the corner.
+**Exposed — DPO among the top-2 board corners:** WNBA STL, WNBA DREB, NFL completions still queued.
+NBA DREB and WNBA BLST were on this list and both cleared, so it is not reproducing readily.
+If one of the three does die, check the log's last line for the forced-dist warning before
+concluding anything about the corner.
+
+**NFL completions is the free experiment.** It is the one queued DPO cell on the wide NFL feature
+set, so the walk will separate "NFL carries specifically" from "NFL-width cells generally" at no
+cost. Read its outcome before designing anything.
 
 ## Reproducing it
 
