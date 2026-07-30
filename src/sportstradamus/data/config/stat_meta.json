@@ -41,9 +41,13 @@
         },
         "FGA": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_eb_meanyr_k10",
+            "posthoc": "isotonic_mean",
+            "dist_training_loss": "crps",
+            "sn_param": "direct",
+            "blending": "crps",
+            "hpo_selection": "calibrated"
         },
         "FGM": {
             "dist": "SkewNormal",
