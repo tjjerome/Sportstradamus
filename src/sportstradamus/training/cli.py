@@ -1,5 +1,6 @@
 """CLI entry point: meditate command orchestrates per-league, per-market training."""
 
+import faulthandler
 import importlib.resources as pkg_resources
 import json
 import os
@@ -45,6 +46,11 @@ from sportstradamus.training.ship_config import (
 
 warnings.simplefilter("ignore", UserWarning)
 np.seterr(divide="ignore", invalid="ignore")
+
+# A native extension can abort the interpreter outright — LightGBM's cv corrupted the heap and
+# took both NFL carries confirm nominees with it — leaving no traceback in a log that captures
+# stderr, which reads as a swallowed exception. The fault stack is the only evidence there is.
+faulthandler.enable()
 
 # Reproducibility seed for non-deterministic training runs. Not used under
 # --deterministic (which pins RNGs via seed_everything with a fixed value).

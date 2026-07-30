@@ -65,6 +65,7 @@ from sportstradamus.training.model_strategy.sweep import (
     _TEST_SETS_ROOT,
     EVAL_SPLIT_CROSSFIT,
     _cell_context,
+    _failure_reason,
     _known_good_corners,
     _run_meditate_with_lock_retry,
 )
@@ -448,12 +449,15 @@ def _failed_gates_after(league: str, market: str) -> list[str]:
     return [g for g in _GATES if not bool(row[f"{g}_pass"])]
 
 
-def _run_meditate(league: str, market: str, candidate: dict) -> bool:
-    """Full-HPO retrain of a cell from its just-persisted stat_meta strategy; True iff meditate exits clean.
+def _run_meditate(league: str, market: str, candidate: dict) -> str:
+    """Full-HPO retrain of a cell from its just-persisted stat_meta strategy; "" iff meditate exits clean.
 
     ``--force`` is required or a cell with no new gamedays skips silently and never rewrites its
-    outputs. A non-zero exit or a timeout returns False (don't trust a possibly-stale model_stats
-    row); a transient archive-lock clash is retried first (:func:`_run_meditate_with_lock_retry`).
+    outputs. A failure returns its :func:`_failure_reason` rather than a bare flag — a native abort
+    inside the fit and an ordinary non-zero exit call for completely different triage, and reporting
+    both as one "retrain error" is what sent the last investigation looking for a Python exception
+    that never existed. The caller must not trust a possibly-stale model_stats row either way; a
+    transient archive-lock clash is retried first (:func:`_run_meditate_with_lock_retry`).
     """
     spec = get_strategy(candidate["strategy_slug"])
     context = _cell_context(league, market)
@@ -467,9 +471,9 @@ def _run_meditate(league: str, market: str, candidate: dict) -> bool:
     click.echo(f"  retraining {league} {market} (full HPO, ~1h) …")
     try:
         _run_meditate_with_lock_retry(cmd, log_path, timeout=_CONFIRM_TIMEOUT_S)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return False
-    return True
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        return _failure_reason(exc)
+    return ""
 
 
 def _candidate_identity(candidate: dict, matrix_hash: str | None = None) -> ArtifactIdentity:
@@ -549,8 +553,9 @@ def _confirm_meditate(league: str, market: str, candidate: dict) -> list[str]:
     Reasons rather than a bool because the legs fail for very different operator-facing causes, and a
     bare False reads on the report as a gate failure with no gate named.
     """
-    if not _run_meditate(league, market, candidate):
-        return ["retrain error"]
+    error = _run_meditate(league, market, candidate)
+    if error:
+        return [f"retrain {error}"]
     _record_nominee_gates(league, market, candidate)
     matrix_hash = _retrained_matrix_hash(league, market)
     if matrix_hash is None:
@@ -619,8 +624,9 @@ def _supersede_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
     try:
         meta[lg][mkt].update(cand["edits"])  # shipped left as-is; the cell stays live
         _atomic_write_meta(meta)
-        if not _run_meditate(lg, mkt, cand):
-            return (lg, mkt, "HELD", ["retrain error"])
+        error = _run_meditate(lg, mkt, cand)
+        if error:
+            return (lg, mkt, "HELD", [f"retrain {error}"])
         _record_nominee_gates(lg, mkt, cand)
         matrix_hash = _retrained_matrix_hash(lg, mkt)
         if matrix_hash is None:

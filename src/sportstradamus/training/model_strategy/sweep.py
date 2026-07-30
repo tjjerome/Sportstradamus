@@ -24,6 +24,8 @@ import hashlib
 import importlib.resources as pkg_resources
 import math
 import pathlib
+import re
+import signal
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -103,6 +105,14 @@ _LOCK_ERROR_SIGNATURE = "Could not set lock on file"
 # Back-off waits (seconds) between archive-lock retries; exhausting them re-raises so a genuinely
 # stuck lock fails loud instead of looping forever.
 _LOCK_RETRY_WAITS_S: tuple[int, ...] = (15, 30, 60, 120, 240)
+# glibc's heap-corruption aborts, as emitted by malloc_printerr. A native fit can kill the
+# interpreter with one of these and no traceback, and the message lands glued to the end of a
+# multi-kilobyte tqdm line — so pull it out by pattern rather than leaving it in the log tail.
+_NATIVE_ABORT_PATTERN = re.compile(
+    r"(?:malloc|free|realloc|malloc_consolidate|munmap_chunk)\(\): [^\r\n]+"
+    r"|double free or corruption[^\r\n]*"
+    r"|corrupted [^\r\n]+"
+)
 # The six offline ship gates (value + pass); a corner ships iff all pass. Mirrors
 # scorecard._SHIP_GATES — apply_thresholds sets `ship` and min_gate_slack folds in all six.
 _GATES: tuple[str, ...] = ("g1", "g2", "g3", "g4", "g5", "g6")
@@ -362,15 +372,31 @@ def _is_archive_lock_error(log_path: pathlib.Path) -> bool:
     return _LOCK_ERROR_SIGNATURE in _log_tail(log_path)
 
 
+def _failure_reason(exc: subprocess.CalledProcessError | subprocess.TimeoutExpired) -> str:
+    """Why a meditate subprocess failed, in the terms triage needs.
+
+    A negative return code is a signal death, not an exit status: the interpreter never raised, so
+    there is no traceback to read and the exception-hunting moves are all wasted. Naming the signal
+    is what separates a native abort from an ordinary non-zero exit, which a caller reporting a bare
+    "error" renders identically.
+    """
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return "timeout"
+    if exc.returncode >= 0:
+        return f"exit {exc.returncode}"
+    return f"native abort ({signal.Signals(-exc.returncode).name})"
+
+
 def _run_meditate_with_lock_retry(cmd: list[str], log_path: pathlib.Path, *, timeout: int) -> None:
     """Run a ``meditate`` subprocess, capturing output to ``log_path``, retrying an archive-lock clash.
 
     A non-zero exit whose log shows the DuckDB write-lock collision (:data:`_LOCK_ERROR_SIGNATURE`)
     is transient — a cron archive job holds the lock — so wait per :data:`_LOCK_RETRY_WAITS_S` and
     retry (each attempt truncates the log, so a final tail reflects the last try). Every other failure
-    — a real non-zero exit, a timeout, or exhausted lock retries — surfaces the log tail and re-raises,
-    so the deterministic sweep stays fail-loud (the crash kills the Optuna study) and the confirm loop
-    can turn the raise into a HELD/REVERTED verdict.
+    — a real non-zero exit, a native abort, a timeout, or exhausted lock retries — surfaces its
+    :func:`_failure_reason` and the log tail and re-raises, so the deterministic sweep stays fail-loud
+    (the crash kills the Optuna study) and the confirm loop can turn the raise into a HELD/REVERTED
+    verdict that names the cause.
     """
     log_path.parent.mkdir(parents=True, exist_ok=True)
     n_attempts = len(_LOCK_RETRY_WAITS_S) + 1  # each wait buys one retry, plus the first attempt
@@ -386,15 +412,20 @@ def _run_meditate_with_lock_retry(cmd: list[str], log_path: pathlib.Path, *, tim
                     stderr=subprocess.STDOUT,
                 )
                 return
-            except subprocess.CalledProcessError:
+            except subprocess.CalledProcessError as exc:
                 retries_left = attempt < len(_LOCK_RETRY_WAITS_S)
                 if retries_left and _is_archive_lock_error(log_path):
                     wait = _LOCK_RETRY_WAITS_S[attempt]
                     click.echo(f"  archive write-locked; retrying in {wait}s …", err=True)
                     time.sleep(wait)
                     continue
+                tail = _log_tail(log_path)
+                abort = _NATIVE_ABORT_PATTERN.search(tail)
+                signature = f": {abort.group()}" if abort else ""
                 click.echo(
-                    f"  meditate failed — tail of {log_path}:\n{_log_tail(log_path)}", err=True
+                    f"  meditate failed — {_failure_reason(exc)}{signature}"
+                    f" — tail of {log_path}:\n{tail}",
+                    err=True,
                 )
                 raise
             except subprocess.TimeoutExpired:

@@ -97,6 +97,32 @@ def _clamp_seed_params(hp_dict: dict, initial_params: dict) -> dict:
     return seed
 
 
+def _materialise_fold_datasets(train_set, valid_set, params):
+    """Rebuild cv's two folds as plain Datasets sharing the full frame's bin mappers.
+
+    ``lgb.cv`` slices its folds with ``Dataset.subset``, and building a Booster over a subset
+    corrupts the heap on wide frames: LightGBM 4.6 and 4.7 both abort inside ``LGBM_BoosterCreate``
+    with a glibc heap message and no traceback, which cost the confirm walk both NFL carries
+    nominees (docs/handoffs/dpo-confirm-crash.md). ``fpreproc`` is cv's own hook for replacing the
+    fold data before that call, so its loop, early stopping and aggregation stay untouched, and
+    referencing the full Dataset keeps the binning identical to the subset this replaces.
+    """
+    import lightgbm as lgb  # deferred for the same reason as run_hyper_opt's imports below
+
+    full = train_set.reference
+    data, label = full.get_data(), full.get_label()
+    init_score = full.get_field("init_score").reshape(full.num_data(), -1, order="F")
+    folds = []
+    for fold in (train_set, valid_set):
+        rows = np.asarray(fold.used_indices, dtype=np.int64)
+        built = lgb.Dataset(
+            data.take(rows, axis=0), label=label[rows], reference=full, free_raw_data=False
+        )
+        built.set_init_score(init_score[rows].ravel(order="F"))
+        folds.append(built)
+    return folds[0], folds[1], params
+
+
 def run_hyper_opt(
     model,
     hp_dict,
@@ -133,6 +159,11 @@ def run_hyper_opt(
     import optuna
     from optuna.samplers import TPESampler
 
+    # LightGBM drops the raw frame at construct time unless told otherwise, and
+    # _materialise_fold_datasets reads it back off the Dataset to rebuild each fold. Set here
+    # rather than at the caller so every entry point gets the working configuration.
+    train_set.free_raw_data = False
+
     def objective(trial):
         hyper_params = _suggest_params(trial, hp_dict)
 
@@ -145,6 +176,7 @@ def run_hyper_opt(
             train_set,
             num_boost_round=num_boost_round,
             nfold=nfold,
+            fpreproc=_materialise_fold_datasets,
             callbacks=[early_stopping_callback],
             seed=None,
         )

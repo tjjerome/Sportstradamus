@@ -9,6 +9,7 @@ walk stops at the first win, and that a failure reverts the stat_meta entry *and
 """
 
 import json
+import signal
 
 import pandas as pd
 import pytest
@@ -506,8 +507,12 @@ def test_split_shippable_partitions_cells_not_nominees():
 # --- meditate subprocess primitive ------------------------------------------------------------
 
 
-def test_run_meditate_true_on_clean_exit_false_on_error(monkeypatch, tmp_path):
-    """`_run_meditate` reports subprocess success/failure only — it does not read the ship verdict."""
+def test_run_meditate_reports_why_the_subprocess_failed(monkeypatch, tmp_path):
+    """`_run_meditate` reports subprocess success/failure only — it does not read the ship verdict.
+
+    A signal death and an ordinary non-zero exit must not report the same reason: the confirm
+    walk's verdict line is the only place a native abort is ever named.
+    """
     monkeypatch.setattr(mc, "_CONFIRM_LOG_ROOT", tmp_path)
     commands = []
     monkeypatch.setattr(
@@ -525,14 +530,14 @@ def test_run_meditate_true_on_clean_exit_false_on_error(monkeypatch, tmp_path):
             0.2,
         )
     )[0]
-    assert mc._run_meditate("NBA", "PTS", ordinary) is True
+    assert mc._run_meditate("NBA", "PTS", ordinary) == ""
     # The retired --structural-strategy axis emits no selector flag; every base-family control is
     # persisted, so the full-HPO confirm forces none of them and reads the freshly-written cell.
     assert "--structural-strategy" not in commands[0]
     assert "--posthoc" not in commands[0]
 
     structural = _nominate(_structural_row(AFFINE_STRATEGY, "rushing yards"))[0]
-    assert mc._run_meditate("NFL", "rushing yards", structural) is True
+    assert mc._run_meditate("NFL", "rushing yards", structural) == ""
     command = commands[-1]
     assert "--structural-strategy" not in command
     assert command[command.index("--stabilization") + 1] == "None"
@@ -544,7 +549,13 @@ def test_run_meditate_true_on_clean_exit_false_on_error(monkeypatch, tmp_path):
         raise mc.subprocess.CalledProcessError(1, "meditate")
 
     monkeypatch.setattr(mc, "_run_meditate_with_lock_retry", boom)
-    assert mc._run_meditate("NBA", "PTS", ordinary) is False
+    assert mc._run_meditate("NBA", "PTS", ordinary) == "exit 1"
+
+    def abort(*a, **k):
+        raise mc.subprocess.CalledProcessError(-signal.SIGABRT, "meditate")
+
+    monkeypatch.setattr(mc, "_run_meditate_with_lock_retry", abort)
+    assert mc._run_meditate("NBA", "PTS", ordinary) == "native abort (SIGABRT)"
 
 
 def test_ship_verdict_is_bound_to_reported_structural_method(monkeypatch):
@@ -596,7 +607,7 @@ def test_a_gate_miss_is_reported_as_the_gate_not_a_missing_artifact(monkeypatch)
     the real NBA FGA confirm did exactly that.
     """
     candidate = _nominate(_sn_row("ratio_meanyr", "crps", "nll", True, 0.2))[0]
-    monkeypatch.setattr(mc, "_run_meditate", lambda *args: True)
+    monkeypatch.setattr(mc, "_run_meditate", lambda *args: "")
     monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
     monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: ["g4"])
     monkeypatch.setattr(
@@ -645,7 +656,7 @@ def test_confirm_accepts_a_retrain_whose_force_update_moved_the_matrix(monkeypat
         }
     )
     monkeypatch.setattr(mc.pd, "read_parquet", lambda *args, **kwargs: stats)
-    monkeypatch.setattr(mc, "_run_meditate", lambda *args: True)
+    monkeypatch.setattr(mc, "_run_meditate", lambda *args: "")
     monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: [])
 
     seen = {}
@@ -663,7 +674,7 @@ def test_confirm_accepts_a_retrain_whose_force_update_moved_the_matrix(monkeypat
 
 def test_withheld_confirm_fails_closed_before_model_stats_when_artifacts_do_not_match(monkeypatch):
     candidate = _nominate(_sn_row("ratio_meanyr", "crps", "nll", True, 0.2))[0]
-    monkeypatch.setattr(mc, "_run_meditate", lambda *args: True)
+    monkeypatch.setattr(mc, "_run_meditate", lambda *args: "")
     monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
     monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: [])
     monkeypatch.setattr(mc, "_produced_artifacts_match", lambda *args: False)
@@ -1144,7 +1155,9 @@ def _verdict(*, ship, s1=True, s2=True, s3=True):
 def _patch_supersede_io(monkeypatch, *, verdict, meditate_ok=True, model_stats_ok=True):
     """Patch the heavy IO of _supersede_one; return (restored, pruned) spy lists."""
     monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: mc.pathlib.Path("/tmp/bk"))
-    monkeypatch.setattr(mc, "_run_meditate", lambda lg, mkt, candidate: meditate_ok)
+    monkeypatch.setattr(
+        mc, "_run_meditate", lambda lg, mkt, candidate: "" if meditate_ok else "exit 1"
+    )
     monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
     monkeypatch.setattr(mc, "_produced_artifacts_match", lambda *args: True)
     monkeypatch.setattr(
@@ -1202,7 +1215,7 @@ def test_supersede_meditate_error_restores_incumbent(monkeypatch):
     )
     result = mc._supersede_one(meta, _supersede_cand())
     assert result[:3] == ("NBA", "PTS", "HELD")
-    assert result[3] == ["retrain error"]
+    assert result[3] == ["retrain exit 1"]
     assert restored[0][:2] == ("NBA", "PTS")
     assert pruned == []
 

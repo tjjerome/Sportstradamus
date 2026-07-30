@@ -1,124 +1,141 @@
-# Fix brief: a forced-DPO confirm dies silently ~6 minutes in
+# The confirm walk's full-HPO cross-validation aborts inside LightGBM
 
 NFL carries lost **both** confirm nominees to `REVERTED … failed retrain error` — a non-zero
-`meditate` exit, not a gate verdict. No `model_stats` row is written, so the cell produces no
-evidence at all and the nominee ledger stays empty for it. Diagnosis below is deliberately split
-into what is established and what is ruled out; the cause is **not** identified.
+`meditate` exit, not a gate verdict, with no `model_stats` row and an empty nominee ledger. The
+cause is an upstream LightGBM memory-safety defect, reproduced and worked around; this brief is the
+record of what it is, what it is not, and what to check if the symptom returns.
 
-## Established
+## What kills it
 
-**It is a silent death, not an exception.** The last line in
-`research/logs/confirm/NFL_carries.log` is the dist-selection warning:
+A glibc heap-corruption `abort()` — SIGABRT, exit `134` (`-6` as a return code). The signature was
+in two files from the start:
 
-```
-WARNING …pipeline: NFL carries: training forced dist=DPO
-  (data-driven pick is SkewNormal: global_mean=7.47, zero_rate=0.06)
-```
+* `research/logs/confirm/NFL_carries.log`, last line, glued to the tail of a multi-kilobyte tqdm
+  progress line: `0%| | 0/300 [00:00<?, ?it/s]malloc_consolidate(): invalid chunk size`
+* `research/overnight/NFL_carries.confirm.log`, both nominees: `malloc(): invalid size (unsorted)`
+  and `malloc_consolidate(): invalid chunk size`
 
-`_run_meditate_with_lock_retry` runs the subprocess with
-`stderr=subprocess.STDOUT` ([sweep.py:386](../../src/sportstradamus/training/model_strategy/sweep.py#L386)),
-so a Python traceback *would* be in that log. Its absence means the process died without raising —
-a signal or a native abort.
+Two different glibc detection sites across two nominees is the tell: real heap corruption moves its
+trip point with allocation history. A third and fourth message (`unsorted double linked list
+corrupted`, `free(): invalid next size`) appeared under reproduction, and LightGBM 4.7.0 produced a
+plain SIGSEGV.
 
-**It dies early, inside the first minutes of the fit.** The cell ran 16:59:42→17:25:04. Its Optuna
-board-sweep journal (`research/optuna/NFL_carries.8758d634.log`) stops at 17:12, and the confirm log's
-final write is 17:24:39 — so the deterministic board sweep took ~13 min and **both** nominees fit into
-the remaining ~12.6 min, about **6 min each**. A cold full-HPO search is capped at 60 min / 300
-trials, so neither nominee got near the end of its search.
-
-**Both nominees were forced DPO** on a cell whose data-driven pick is SkewNormal:
+The abort lands in the **first Optuna trial** — the progress bar reads `0%| | 0/300 [00:00` — inside
+`LGBM_BoosterCreate`:
 
 ```
-1. dist=DPO, count_dispersion_objective=pit_ks, blending=crps, posthoc=prob_recal_isotonic
-2. dist=DPO, count_dispersion_objective=crps,   blending=crps, posthoc=prob_recal_platt
+File ".../lightgbm/basic.py", line 3661 in __init__        # LGBM_BoosterCreate
+File ".../lightgbm/engine.py", line 572 in _make_n_folds   # Booster(tparam, train_set)
+File ".../lightgbm/engine.py", line 777 in cv
+File ".../lightgbmlss/model.py", line 237 in cv
+File "src/sportstradamus/training/hyperparams.py", line 143 in objective
 ```
 
-**Forced DPO is not sufficient to trigger it.** Three other cells ran the same forced
-`SkewNormal`→`DPO` override through the same production confirm path and all reached real gate
-verdicts — two of them shipped:
+The ~6 minutes each nominee burned is `Stats.update()` — a 1693-item tqdm that takes `04:59` — plus
+the gamelog load. The fit itself got well under a minute.
 
-| cell | matrix | outcome |
-|---|---|---|
-| NFL carries | 6266 × **483** | died ~6 min, both nominees, no gate row |
-| WNBA BLST | 14287 × 317 | 63 min, SHIPPED |
-| NBA DREB | 13915 × 317 | 76 min, SHIPPED |
-| MLB pitcher fp | 2436 × 141 | confirmed, real gate rows |
+## Root cause
 
-NFL carries is the only cell with the wide 483-column NFL feature set, so width remains the one
-untested axis that separates it — but it is also the only NFL cell in the group, so league and width
-are confounded and neither is evidence yet. Row count argues against size outright: the two
-survivors have more than twice its rows.
+`lgb.cv` slices its folds with `Dataset.subset`, and **building a Booster over a subset Dataset
+corrupts the heap** on this frame. Reproducible with `lightgbm`, `numpy` and `pandas` alone — no
+torch, no LightGBMLSS, a trivial numpy objective — so it is LightGBM's own defect, present in both
+4.6.0 and 4.7.0.
+
+| variant | aborts |
+|---|---|
+| `lgb.cv`, `nfold=4` — the production configuration | 5/5 |
+| `lgb.cv`, `nfold=3` / `nfold=5` | 0/10 each |
+| `Dataset.subset` construction alone, no Booster | 0/5 |
+| a single `lgb.train` | 0/3 |
+| per-fold `lgb.train` on materialised slices | 0/15 |
+| synthetic same-shape frame (4386 × 435), `nfold=4` | 0/3 |
+| LightGBM 4.7.0, isolated venv, same frame | 5/5 |
+
+It is data-dependent (a synthetic frame of identical shape survives) and probabilistic: `nfold=4`
+trips it near-deterministically on this cell, while `num_threads=1` still aborted 1/3. Treat any
+surviving configuration as luck, not safety.
 
 ## Ruled out, with the evidence
 
 | Hypothesis | Why it is out |
 |---|---|
-| Out of memory | Matrix is 6266 × 483 (26 MB); 31 GB available; no OOM lines |
+| The DPO family | The same abort class hit NFL rushing-yards under SkewNormal/crps in July — `data/research/stage5-recovery-20260725-v1/RUSHING_NATIVE_DIAGNOSIS.md`. The pure-LightGBM reproduction has no distribution at all |
+| Two OpenMP runtimes in the process | Real (torch's vendored `libgomp.so.1` satisfies LightGBM's, sklearn ships a third under a mangled SONAME) but not causal: a process with neither torch nor sklearn aborts identically, and import order changes nothing |
+| The pre-fit matrix/comps persist | The pure reproduction reads a parquet and aborts; nothing writes |
+| `hist_pool_size`, `max_bin`, `monotone_constraints`, `num_class`, categorical dtypes, `init_score`, `free_raw_data` | Each toggled independently; all still abort |
+| Out of memory | 39 GB box, matrix 6266 × 483, no OOM lines, and the message is corruption rather than exhaustion |
 | Confirm timeout | `_CONFIRM_TIMEOUT_S` is 4 h; actual ~6 min |
-| Warm-start Optuna enqueue (the `lambda=0` crash) | No pickle for the cell, so cold start and no `enqueue_trial` |
-| DPO itself | `meditate --deterministic --dist DPO` on the same cell and matrix exits **0** |
-| DPO under full HPO, in isolation | A `--frozen-matrix-dir` + `--artifact-output` run reached 98/300 trials over 29 min without dying — it survived five times the failure window |
-| SHAP / `compute_market_importance` | Runs only *after* the fit; at ~6 min nothing reached it. (Plausible on path-difference grounds, refuted on timing — do not re-chase without new evidence.) |
+| SHAP / `compute_market_importance` | Runs after the fit; the abort precedes the first boosting round |
 
-## Where that leaves it
+## Why the board sweep never saw it
 
-Two independent contrasts bracket it, and they point different ways:
+`--deterministic` takes the `DETERMINISTIC_FIXED_PARAMS` branch in
+`training/pipeline.py:_step_select_hyperparams` and never calls `run_hyper_opt`, so it never calls
+`model.cv`. Only the confirm's full-HPO path is exposed. That asymmetry is why the same cell passed
+77 board trials and then died on both confirm nominees, and why "three other cells ran the same
+forced override" was weaker evidence than it looked.
 
-*Same cell, different path.* The isolated probe survived on NFL carries where production died. It
-differs only in passing `matrix_input` and `artifact_output`, which set `isolated_run = True`
-([pipeline.py:4242](../../src/sportstradamus/training/pipeline.py#L4242)) and suppress the
-matrix/comps persist, `report()`, and SHAP. Two of those three are post-fit, so on this reading the
-suspect is the matrix and comps persist path — the one thing `isolated_run` skips *before* the fit.
+## The fix
 
-*Same path, different cell.* DREB and MLB pitcher fp both survive the production path under forced
-DPO, so the production path is not broken in general and something about NFL carries participates.
+`lgb.cv` takes an `fpreproc` hook that is handed each fold's two Datasets before the Booster is
+built, and LightGBMLSS's `cv` forwards it. `hyperparams._materialise_fold_datasets` uses that hook
+to rebuild both folds as plain Datasets referencing the full frame, so `Dataset.subset` never
+reaches a Booster while cv's own loop, early stopping and aggregation stay untouched. Referencing
+the full Dataset preserves its bin mappers: on a cell where the upstream path survives, the two
+produce **bit-identical** cv losses. `run_hyper_opt` sets `free_raw_data=False` on the training
+Dataset because the hook reads the frame back off it.
 
-Neither contrast is decisive alone. Deciding between them is cheap and should come first: re-run the
-isolated probe once more to confirm it reliably survives (it was run once), then run the production
-recipe below with `PYTHONFAULTHANDLER=1` and read the fault address.
+Two changes make the next one legible rather than mysterious:
 
-## Affected cells
+* `training/cli.py` enables `faulthandler`, so a native abort dumps a Python-level stack into the
+  same log instead of ending mid-line.
+* `model_strategy/sweep.py:_failure_reason` classifies a signal death separately from a non-zero
+  exit, and the failed-run echo pulls the glibc message out of the progress line by pattern. The
+  confirm report now reads `retrain native abort (SIGABRT)` rather than `retrain error`.
 
-**Lost:** NFL carries (both nominees, no gate row).
+## What it cost, and what was recovered
 
-**Exposed — DPO among the top-2 board corners:** WNBA DREB, the last one queued. NBA DREB, WNBA
-BLST and WNBA STL were all on this list and all three shipped, so the bug is not reproducing
-readily. If WNBA DREB does die, check the log's last line for the forced-dist warning before
-concluding anything about the corner.
+Exposure is **not** "the DPO cells" — the pure-LightGBM reproduction has no distribution at all, and
+deriving the list from `dist` is what produced the earlier, wrong exposure list. The signal is a
+confirm nominee that died `retrain error`. Six cells did:
 
-**The walk will not resolve the league/width confound.** Derive exposure from the board's top-2
-corners per cell, not from the cell's current `dist` — doing the latter is what led to NFL
-completions being listed here, and its top two corners are in fact SkewNormal (it shipped on
-`ratio_projvol`). No remaining queued cell is both NFL and DPO, so nothing free will separate
-"NFL carries specifically" from "wide-feature-set cells generally"; a deliberate probe has to.
+| cell | nominees lost | cause | where it landed |
+|---|---|---|---|
+| NFL carries | 2/2 | this bug — the glibc signature is in its logs | see below |
+| NBA DREB | 3/3 | not recoverable from the 07-27 logs | re-walked 07-29, all six gates pass, `devel` |
+| NFL passing tds | 4/4 | not recoverable from the 07-27 logs | re-walked 07-29, all six gates pass, `devel` |
+| NBA FGA | 2/3 | not recoverable from the 07-27 logs | re-walked 07-30, all six gates pass, `devel` |
+| NFL interceptions | 1 | `LightGBMError: monotone_constraints.size()` mismatch, with a traceback | re-walked 07-29, genuinely fails g4/g6 |
+| MLB runs allowed | 3 | `ValueError: … quote authenticity is missing`, with a traceback | re-walked 07-29, shipped `devel` |
 
-## Reproducing it
+Only NFL carries carries the glibc signature. The two tracebacked failures are unrelated bugs. The
+three middle rows lost every nominee to a silent `retrain error` whose cause the 07-27 driver did
+not record, so they cannot be attributed either way — but all three later completed real gate
+verdicts, so nothing is owed on them.
 
-Run the **production** path — the isolated one does not reproduce. It calls `report()`, so stop the
-sweep driver first or it will race the run's `model_stats.parquet`.
+## If the symptom returns
 
-**Configure through stat_meta, not flags.** Every control the DPO corner varies is in that spec's
-`persist` map (`dist`, `count_dispersion_objective`, `blending`, `posthoc`), so
-`strategy_full_hpo_cli_args` emits nothing and the confirm's real command is the bare one below —
-which is what `pgrep` shows for the live cells. Passing the same values as CLI flags exercises a
-different resolution path and is not the same test.
+Read `research/overnight/<cell>.confirm.log` first — the driver echoes the failing run's reason and
+tail there. A `native abort (SIGABRT)` line means a signal, so exception-hunting is wasted; the
+faulthandler stack names the frame.
+
+To reproduce a walk run by hand, configure the cell through `stat_meta.json` rather than flags —
+every control the DPO corner varies is in its spec's `persist` map, so `strategy_full_hpo_cli_args`
+emits nothing and the confirm's real command is the bare one below. **Set `shipped` to `devel`**, as
+`_confirm_one` does before it retrains; a `withheld` cell prunes its pickle and skips training.
 
 ```jsonc
 // src/sportstradamus/data/config/stat_meta.json → NFL.carries
-{"dist": "DPO", "shipped": "withheld", "target_normalization": "none",
+{"dist": "DPO", "shipped": "devel", "target_normalization": "none",
  "posthoc": "prob_recal_isotonic", "blending": "crps", "count_dispersion_objective": "pit_ks"}
 ```
 
 ```bash
-PYTHONFAULTHANDLER=1 poetry run meditate --league NFL --market carries --force
+poetry run meditate --league NFL --market carries --force
 echo "exit code: $?"
 ```
 
-Restore the cell's original entry afterwards — it is
+Stop the sweep driver first — the production path calls `report()` and will race
+`model_stats.parquet`. Restore the cell afterwards; its own entry is
 `{"dist": "SkewNormal", "shipped": "withheld", "target_normalization": "centered_additive_mean10",
 "posthoc": "none"}`.
-
-`PYTHONFAULTHANDLER=1` is the point of the recipe: it costs nothing and dumps a Python-level
-traceback on `SIGSEGV` / `SIGABRT`, which is the one piece of evidence this investigation never had.
-The exit code alone already narrows the families — `-11` segfault, `-9` external kill, `-6` native
-abort.

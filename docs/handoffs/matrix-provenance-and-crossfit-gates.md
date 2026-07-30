@@ -349,9 +349,11 @@ verdicts (it still fails g4+g6 — recovering the nominee was never going to res
 
 ---
 
-## D. A forced-DPO confirm dies without a traceback
+## D. A confirm's full-HPO cross-validation aborts inside LightGBM
 
-The same `REVERTED … failed retrain error` symptom as §C, different cause and **unresolved**: NFL
-carries lost both nominees ~6 minutes into each fit with no exception in a log that does capture
-stderr. Cause not identified; five queued cells carry DPO in their top-2 corners and are expected
-to hit it. Diagnosis, exclusions, and the reproduction recipe: [dpo-confirm-crash.md](dpo-confirm-crash.md).
+The same `REVERTED … failed retrain error` symptom as §C, different cause and **fixed**: NFL carries
+lost both nominees to a glibc heap-corruption abort in `lgb.cv`, which builds each fold's Booster
+over a `Dataset.subset`. Upstream defect, present in LightGBM 4.6 and 4.7, nothing to do with the
+DPO family. The walk now rebuilds the folds through cv's own `fpreproc` hook and reports a signal
+death as `native abort (SIGABRT)`. Evidence, exclusions, and the reproduction recipe:
+[dpo-confirm-crash.md](dpo-confirm-crash.md).
