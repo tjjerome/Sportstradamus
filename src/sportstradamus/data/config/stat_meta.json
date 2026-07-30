@@ -503,10 +503,12 @@
             "posthoc": "none"
         },
         "STL": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "isotonic_mean",
+            "count_dispersion_objective": "crps",
+            "blending": "nll"
         },
         "TOV": {
             "dist": "DPO",
