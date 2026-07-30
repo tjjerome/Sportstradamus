@@ -414,11 +414,12 @@
             "posthoc": "none"
         },
         "BLST": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "prob_recal_isotonic",
-            "count_dispersion_objective": "pit_ks"
+            "posthoc": "isotonic_mean",
+            "count_dispersion_objective": "crps",
+            "blending": "nll"
         },
         "DREB": {
             "dist": "SkewNormal",
