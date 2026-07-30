@@ -81,14 +81,16 @@ recipe below with `PYTHONFAULTHANDLER=1` and read the fault address.
 
 **Lost:** NFL carries (both nominees, no gate row).
 
-**Exposed — DPO among the top-2 board corners:** WNBA STL, WNBA DREB, NFL completions still queued.
-NBA DREB and WNBA BLST were on this list and both cleared, so it is not reproducing readily.
-If one of the three does die, check the log's last line for the forced-dist warning before
+**Exposed — DPO among the top-2 board corners:** WNBA DREB, the last one queued. NBA DREB, WNBA
+BLST and WNBA STL were all on this list and all three shipped, so the bug is not reproducing
+readily. If WNBA DREB does die, check the log's last line for the forced-dist warning before
 concluding anything about the corner.
 
-**NFL completions is the free experiment.** It is the one queued DPO cell on the wide NFL feature
-set, so the walk will separate "NFL carries specifically" from "NFL-width cells generally" at no
-cost. Read its outcome before designing anything.
+**The walk will not resolve the league/width confound.** Derive exposure from the board's top-2
+corners per cell, not from the cell's current `dist` — doing the latter is what led to NFL
+completions being listed here, and its top two corners are in fact SkewNormal (it shipped on
+`ratio_projvol`). No remaining queued cell is both NFL and DPO, so nothing free will separate
+"NFL carries specifically" from "wide-feature-set cells generally"; a deliberate probe has to.
 
 ## Reproducing it
 
