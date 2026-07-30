@@ -429,12 +429,13 @@
             "blending": "nll"
         },
         "DREB": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "centered_additive_mean10",
-            "posthoc": "cdf_recal_isotonic",
+            "dist": "DPO",
+            "shipped": "devel",
+            "target_normalization": "none",
+            "posthoc": "isotonic_mean",
             "blending": "crps",
-            "hpo_selection": "calibrated"
+            "hpo_selection": "calibrated",
+            "count_dispersion_objective": "pit_ks"
         },
         "FG3M": {
             "dist": "ZINB",
@@ -606,9 +607,12 @@
         },
         "pitches thrown": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "cdf_recal_isotonic",
+            "dist_training_loss": "crps",
+            "sn_param": "direct",
+            "blending": "crps"
         },
         "pitching outs": {
             "dist": "SkewNormal",
