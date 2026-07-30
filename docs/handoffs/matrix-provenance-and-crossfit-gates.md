@@ -242,7 +242,7 @@ lock, and never run alongside the driver regardless — two `meditate` processes
 `report()` race on the single `model_stats.parquet`.
 
 **Some confirm failures are diverged fits, not degraded calibration.** Across the nominee ledger
-(23 nominees, 12 cells) a saturated dispersion calibrator separates outcomes perfectly: every row
+(26 nominees, 15 cells) a saturated dispersion calibrator separates outcomes perfectly: every row
 whose `dispersion_cal` sits on its 0.1 floor fails — 6 of 6 — and no ship has one. Those rows carry
 absurd `shape_ratio` values (NFL qb yards 1.7e9 and 2.7e9, qb tds 4.6e3–1.5e6, NBA TOV 48), so the
 SkewNormal fit blew up and the calibrator clamped trying to rein it in. That is a different failure
@@ -251,9 +251,23 @@ from a corner that merely calibrates badly, and it costs a full-HPO retrain to d
 Read the *floor*, not the shape ratio: `shape_ratio > 10` does not discriminate on its own, because
 NFL attempts ships at 76.6 with a healthy `dispersion_cal` of 1.01. The conjunction is what matters.
 
-This is worth chasing rather than filing under §B. NFL qb yards carries `g1_has_edge` True on both
-nominees — it has real edge over the book and is being lost to a fitting failure, not to an absent
-signal. Contrast qb tds and TOV, which diverge *and* have no edge, so they were unshippable anyway.
+**The divergence is SkewNormal-only, and it is costing the board's budget on count cells.** All six
+floored rows are SkewNormal, on three cells (NFL qb tds, NFL qb yards, NBA TOV). The count families
+never come close: across ten rows, DPO / NegBin / ZINB top out at `shape_ratio` 1.31 and every DPO
+row sits at `dispersion_cal` 0.83–0.93. Ships by family are DPO 3/5, NegBin 1/1, SkewNormal 5/16,
+ZINB 0/4.
+
+Two of the three diverging cells are *count* stats (qb tds, TOV) whose top-slack board corner is
+nonetheless SkewNormal — so ranking nominees by board slack spends the cell's full-HPO budget on the
+family that will blow up while a fit-stable count corner sits further down the list. That is the same
+board-optimism failure as `crossfit_board_ships_optimistic`, one layer down: the board is not just
+optimistic about the *gate*, it is optimistic about the *fit converging at all*. A cheap guard is
+available without touching the ranking — a count-stat cell whose nominee is SkewNormal should have
+its count-family corner tried first, or at least kept in the walk when the SkewNormal one diverges.
+
+NFL qb yards is the cell to chase. It carries `g1_has_edge` True on both nominees — real edge over
+the book, lost to a fitting failure rather than an absent signal — and it is continuous, so the
+count-family route above does not apply to it.
 
 **HPO axis: refuted on this corner.** NHL goalie fantasy points underdog, both arms trained from
 the frozen `e7342f29…` matrix the original confirm used, `n_validation` 818 on both:
