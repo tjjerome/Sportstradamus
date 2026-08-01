@@ -411,7 +411,7 @@
     "WNBA": {
         "AST": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "cdf_recal_isotonic",
             "hpo_selection": "calibrated"
@@ -441,7 +441,7 @@
         },
         "FG3M": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
@@ -482,33 +482,33 @@
         },
         "PR": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "cdf_recal_isotonic",
             "hpo_selection": "calibrated"
         },
         "PRA": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "none"
         },
         "PTS": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "prob_recal_isotonic"
         },
         "RA": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "none",
             "hpo_selection": "calibrated"
         },
         "REB": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "none"
         },
@@ -522,7 +522,7 @@
         },
         "TOV": {
             "dist": "DPO",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none",
             "count_dispersion_objective": "pit_ks",
@@ -563,7 +563,7 @@
         },
         "hits allowed": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none",
             "blending": "crps"
@@ -602,7 +602,7 @@
         },
         "pitcher strikeouts": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "none",
             "blending": "crps"
@@ -640,7 +640,7 @@
         },
         "runs allowed": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "prob_recal_isotonic",
             "dist_training_loss": "nll",
@@ -658,7 +658,7 @@
         },
         "stolen bases": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none",
             "zinb_mode": "hurdle",
@@ -683,7 +683,7 @@
         },
         "walks allowed": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "none",
             "blending": "nll"
