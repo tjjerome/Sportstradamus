@@ -10,13 +10,11 @@ from sportstradamus.helpers.io import market_file_slug
 from sportstradamus.training.model_strategy import (
     artifact_identity_columns,
     build_artifact_identity,
-)
-from sportstradamus.training.model_strategy import (
     get_strategy,
     registered_strategies,
+    resolve_report_identity,
     strategy_controls,
 )
-from sportstradamus.training.model_strategy import resolve_report_identity
 from sportstradamus.training.report import _layer_gates_from_test_set
 
 report_module = sys.modules["sportstradamus.training.report"]

@@ -21,8 +21,9 @@ from sportstradamus.training.model_strategy import (
     STRUCTURAL_STRATEGY_CSV_COLUMN,
     artifact_identity_columns,
     build_artifact_identity,
+    get_strategy,
+    strategy_controls,
 )
-from sportstradamus.training.model_strategy import get_strategy, strategy_controls
 from sportstradamus.training.scorecard import (
     _pred_cdf_pmf,
     _randomized_pit_draws,

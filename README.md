@@ -259,6 +259,8 @@ poetry run model-strategy-sweep                             # every withheld cel
 poetry run model-strategy-sweep --league WNBA               # just one league's withheld cells
 poetry run model-strategy-sweep --include-shipped           # also re-check already-shipped cells
 poetry run model-strategy-sweep --resume                    # continue a crashed multi-hour run
+poetry run model-strategy-sweep --dry-run --resume          # what it would do, without training
+poetry run model-strategy-sweep --league WNBA -v            # one line per recipe (-q for less)
 ```
 
 Naming a single `--league` **and** `--market` sweeps just that cell. Omit `--market` and it sweeps
@@ -269,10 +271,20 @@ yellow warning** rather than swept — the throwaway trainings reuse the cached 
 rebuild one, so train the cell for real once first if you want it in the board. Add
 `--include-shipped` to also rank already-shipped (devel/main) cells when hunting a better strategy for
 a live cell; that path is judged by the supersession test, and `--confirm` never auto-re-ships a live
-cell. As it runs it prints one line per recipe, then a short table per cell
-with the winning strategy marked `SHIP` (green) or `KILL` (red). The full ranked results are saved to
-`data/research/strategy_research_board.csv`. **Nothing ships from this step** — the throwaway models
-only *rank* the options so you know which one to train for real.
+cell.
+
+As it runs each cell shows a progress bar carrying the corners done, the best slack so far, and a
+ceiling on the time left; a recipe prints a line only when it is a new best, ships, or fails. `-v`
+restores one line per recipe (cache hits included) and `-q` drops to the bar and the per-cell
+verdict. Redirected output — the overnight driver — gets those same lines plus a periodic heartbeat
+naming the recipe currently training, and no bar. Every cell ends with a short ranked table marked
+`SHIP` (green) or `KILL` (red), and the full ranked results, every recipe and every column, are saved
+to `data/research/strategy_research_board.csv`. **Nothing ships from this step** — the throwaway
+models only *rank* the options so you know which one to train for real.
+
+`--dry-run` resolves the scope without training anything: per cell, its families, its training
+ceiling, what `--resume` would reuse, and — once a board has run once and recorded per-recipe
+timings — how long it should take.
 
 Each trial is scored **holdout-blind**: the rows the ship gate will use are dropped from the run
 entirely, and the calibration head is fit out-of-fold across the rest. Ranking therefore cannot
@@ -285,7 +297,9 @@ its top-ranked recipes plus its current one, retrains each for real until one pa
 gates, and keeps that one — steps 2–4 automated, with a prompt before it touches anything (`--yes` to
 skip it). A cell whose board has no outright winner still gets confirmed: fixed-hyperparameter
 ranking cannot recognize a recipe that only passes under a real hyperparameter search, so the gates
-decide after the retrain rather than before it. For an already-shipped cell (only present under `--include-shipped`), `--confirm` runs the
+decide after the retrain rather than before it. Each retrain is roughly an hour, so it announces how
+long this cell's own past confirms took and, on a terminal, ticks elapsed against that while it runs.
+For an already-shipped cell (only present under `--include-shipped`), `--confirm` runs the
 supersession test: it snapshots the incumbent, retrains the candidate in place, and scores S1/S2/S3
 (candidate clears the six gates standalone, is paired-Brier sharper, and paired-Sharpe sharper). It
 prints the comparison and swaps the live cell only when all three pass **and** you confirm the

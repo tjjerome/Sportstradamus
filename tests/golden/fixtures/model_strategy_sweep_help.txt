@@ -1,0 +1,61 @@
+Usage: model-strategy-sweep [OPTIONS]
+
+  Operation Ship 75 strategy sweep — one conditional-TPE study per cell over the
+  strategy catalog, each corner scored on a holdout-blind cross-fit gate row.
+  Naming ``--league`` and ``--market`` sweeps one cell; omitting ``--market``
+  sweeps the board (``--league`` narrows it). ``--confirm`` then full-HPO-
+  retrains each cell's nominees until one ships.
+
+Options:
+  --league TEXT                   League code, e.g. WNBA. A single cell also
+                                  needs --market; alone it narrows the board.
+  --market TEXT                   Market stem, e.g. AST. With --league, sweeps
+                                  just that cell; omit it to sweep the board.
+  --include-shipped               Board mode: also sweep already-shipped
+                                  (devel/main) cells to hunt a better strategy —
+                                  evaluated by the supersession test, not the
+                                  fresh-ship --confirm (which only auto-ships
+                                  withheld cells). Off by default. Redundant
+                                  with --market: a named cell is swept whatever
+                                  its shipped state.
+  --dist-class [continuous|count|all]
+                                  Narrow each cell's family pool to one
+                                  distribution class — 'count' searches only
+                                  ZINB/NegBin/DPO, 'continuous' only
+                                  SkewNormal/Mixture. Filters families, not
+                                  cells.  [default: all]
+  --max-trials INTEGER RANGE      Per-cell budget of *trained* corners; a re-
+                                  proposed or cached corner is free. Early
+                                  stopping usually ends a cell well under it, so
+                                  every '<=N' count is a ceiling, not an
+                                  estimate.  [default: 48; x>=1]
+  --confirm                       After ranking, persist each cell's best
+                                  persistable corner to stat_meta.json and
+                                  confirm it with a full-HPO retrain; failures
+                                  auto-revert (stat_meta + pickle).
+  --yes                           Skip the --confirm prompt (unattended).
+                                  Requires --confirm.
+  --confirm-nominees INTEGER RANGE
+                                  Cap each cell's confirm walk at its first N
+                                  nominees, highest board slack first. Unset
+                                  walks every nominee. Requires --confirm.
+                                  [x>=1]
+  --resume                        Reopen each cell's Optuna journal and reuse
+                                  every admissible prior board row — resume a
+                                  crashed multi-hour run instead of retraining
+                                  corners this matrix already has a verdict for.
+  --dry-run                       Print the resolved scope — per cell: families,
+                                  training ceiling, what --resume would reuse,
+                                  and the time ceiling — then exit without
+                                  training a single corner.
+  -q, --quiet                     Progress bar and the per-cell verdict only. A
+                                  redirected run still gets a periodic
+                                  heartbeat, so a multi-hour cell is never a
+                                  blank log.
+  -v, --verbose                   One line per corner, cache hits included,
+                                  rather than only the notable ones.
+  --out FILE                      Board CSV path. Defaults to the package data
+                                  dir
+                                  (data/research/strategy_research_board.csv): a
+                                  board upserts per cell, a single cell upserts.
+  --help                          Show this message and exit.

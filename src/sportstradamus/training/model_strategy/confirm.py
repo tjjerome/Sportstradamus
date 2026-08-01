@@ -50,6 +50,11 @@ from sportstradamus.training.model_strategy.identity import (
     corner_fingerprint,
     validate_strategy_artifacts,
 )
+from sportstradamus.training.model_strategy.progress import (
+    elapsed_ticker,
+    human_seconds,
+    wrapped,
+)
 from sportstradamus.training.model_strategy.registry import (
     BASE_STRUCTURAL_STRATEGY,
     CAP_CONFIRM,
@@ -493,6 +498,7 @@ def _record_nominee_gates(league: str, market: str, candidate: dict) -> bool:
         [
             {
                 "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "elapsed_s": candidate.get("elapsed_s"),
                 "strategy_slug": candidate["strategy_slug"],
                 "source": candidate["source"],
                 "diverged": diverged,
@@ -579,12 +585,57 @@ def _run_meditate(league: str, market: str, candidate: dict) -> str:
         *strategy_full_hpo_cli_args(context, spec, candidate["controls"]),
     )
     log_path = _CONFIRM_LOG_ROOT / f"{market_file_slug(league, market)}.log"
-    click.echo(f"  retraining {league} {market} (full HPO, ~1h) …")
+    expected = _confirm_median_seconds(league, market)
+    click.echo(f"  retraining {league} {market} — full HPO, {_expectation(expected)} …")
+    started = time.monotonic()
     try:
-        _run_meditate_with_lock_retry(cmd, log_path, timeout=_CONFIRM_TIMEOUT_S)
+        with elapsed_ticker(f"  {league} {market} full-HPO retrain", expected):
+            _run_meditate_with_lock_retry(cmd, log_path, timeout=_CONFIRM_TIMEOUT_S)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         return _failure_reason(exc)
+    finally:
+        # Carried on the candidate rather than a module global: the same dict already threads the
+        # walk, and _record_nominee_gates is the next thing to read it.
+        candidate["elapsed_s"] = round(time.monotonic() - started, 1)
+    click.echo(f"  retrained {league} {market} in {human_seconds(candidate['elapsed_s'])}")
     return ""
+
+
+def _expectation(expected: float | None) -> str:
+    """How long this cell's retrain should take, and the wall-clock time that lands at.
+
+    A redirected run gets no ticker, so the finish time is what makes a stalled retrain obvious in a
+    log — an elapsed count would need the reader to know when the line was written.
+    """
+    if expected is None:
+        return "no timing history for this cell"
+    finish = time.strftime("%H:%M", time.localtime(time.time() + expected))
+    return f"~{human_seconds(expected)}, expect ~{finish}"
+
+
+def _confirm_median_seconds(league: str | None = None, market: str | None = None) -> float | None:
+    """Median full-HPO retrain seconds for one cell from the nominee ledger, else across all cells.
+
+    Naming no cell asks for the all-cells median, which is what sizes the up-front confirm prompt.
+
+    Median rather than mean: ``cli._retry_calibrated_if_g4_only`` can silently run a second 300-trial
+    HPO inside one subprocess, so the durations are bimodal and a mean sits between the two modes
+    describing neither. A retrain that errored never reaches the ledger, so the estimate is blind to
+    the slowest failures — hence it is always shown as approximate.
+    """
+    if not NOMINEE_LEDGER_PATH.exists():
+        return None
+    ledger = pd.read_csv(NOMINEE_LEDGER_PATH)
+    if "elapsed_s" not in ledger.columns:
+        return None
+    ledger = ledger.assign(elapsed_s=pd.to_numeric(ledger["elapsed_s"], errors="coerce")).dropna(
+        subset=["elapsed_s"]
+    )
+    if ledger.empty:
+        return None
+    cell = ledger[(ledger["league"] == league) & (ledger["market"] == market)]
+    scope = ledger if league is None or cell.empty else cell
+    return float(scope["elapsed_s"].median())
 
 
 def _candidate_identity(candidate: dict, matrix_hash: str | None = None) -> ArtifactIdentity:
@@ -814,7 +865,7 @@ def _announce_plan(fresh: list[list[dict]], shipped: list[list[dict]]) -> None:
                 click.echo(f"  {head['league']} {head['market']} — {len(nominated)} nominee(s):")
                 for n, cand in enumerate(nominated, start=1):
                     edits = ", ".join(f"{k}={v}" for k, v in cand["edits"].items())
-                    click.echo(f"    {n}. [{cand['source']}] {edits}")
+                    click.echo(wrapped(f"{n}. [{cand['source']}] {edits}", "    ", "       "))
 
 
 def _walk_nominees(
@@ -865,9 +916,11 @@ def run_confirm(board: pd.DataFrame, *, yes: bool = False, max_nominees: int | N
         return
     _announce_plan(fresh, shipped)
     retrains = sum(len(n) for n in fresh) + sum(len(n) for n in shipped)
+    each = _confirm_median_seconds()
+    budget = f" (~{human_seconds(each)} each, <={human_seconds(retrains * each)})" if each else ""
     prompt = (
         f"\nConfirm {len(fresh)} withheld and supersession-test {len(shipped)} live cell(s) — up to "
-        f"{retrains} full-HPO retrains (~1h each), stopping at each cell's first shipping nominee? "
+        f"{retrains} full-HPO retrains{budget}, stopping at each cell's first shipping nominee? "
         "Withheld failures auto-revert; live promotions prompt"
     )
     if not yes and not click.confirm(prompt):

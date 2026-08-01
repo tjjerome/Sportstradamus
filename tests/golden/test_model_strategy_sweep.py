@@ -14,41 +14,44 @@ incumbent corners are evaluated first, that an admissible prior row is reused in
 and that a legacy row scored on the ship holdout is inert.
 """
 
+import io
 import json
 import pathlib
 import subprocess
+import sys
 
 import click
 import pandas as pd
 import pytest
+from click.testing import CliRunner
 
-from sportstradamus.training.model_strategy import sweep, tpe_search
 from sportstradamus.training.baselines import get_target_normalization
 from sportstradamus.training.markets import ALL_MARKETS
 from sportstradamus.training.model_strategy import (
+    BASE_STRUCTURAL_STRATEGY,
+    CAP_SERVE,
     MODEL_STRATEGY_MODEL_KEY,
     SPLIT_FINGERPRINT_CSV_COLUMN,
+    SWEEP_CAPABILITIES,
+    CellContext,
     InactiveStrategyArtifactError,
     artifact_identity_columns,
     build_artifact_identity,
-    validate_strategy_artifacts,
-)
-from sportstradamus.training.model_strategy import validate_strategy_frame
-from sportstradamus.training.model_strategy import (
-    BASE_STRUCTURAL_STRATEGY,
-    CAP_SERVE,
-    SWEEP_CAPABILITIES,
-    CellContext,
     controls_json,
     corner_fingerprint,
     distribution_class,
     get_strategy,
+    progress,
     registered_strategies,
+    resolve_report_identity,
     strategies_for_cell,
     strategy_controls,
+    sweep,
+    tpe_search,
+    validate_strategy_artifacts,
+    validate_strategy_frame,
     validate_strategy_selection,
 )
-from sportstradamus.training.model_strategy import resolve_report_identity
 from sportstradamus.training.model_strategy.specs import SEED_CORNERS
 from sportstradamus.training.posthoc import CDF_STAGE, POSTHOC_SLUGS, STRUCTURAL_STAGE
 from sportstradamus.training.role_specs import role_spec_for
@@ -1401,9 +1404,25 @@ def test_run_board_mode_warns_skipped_cells_and_passes_filters(monkeypatch, caps
 
 
 def _cell_frame(league, market, **kwargs):
-    """A one-row board frame for a cell — the shape ``search_cell`` returns for the run_board tests."""
+    """A one-row board frame for a cell — the shape ``search_cell`` returns for the run_board tests.
+
+    Reindexed to the full board schema exactly as ``_rank_cell_board`` does, so a stub can't drift
+    into promising columns (``elapsed_s``) the real return value always carries.
+    """
     del kwargs  # budget/families/cache are asserted by the tests that care
-    return pd.DataFrame({"league": [league], "market": [market], "slack": [0.1], "ships": [True]})
+    return pd.DataFrame(
+        {"league": [league], "market": [market], "slack": [0.1], "ships": [True]}
+    ).reindex(columns=sweep._BOARD_COLUMNS)
+
+
+_SN_CORNER = {
+    "dist": "SkewNormal",
+    "normalization": "ratio_meanyr",
+    "dist_training_loss": "crps",
+    "sn_param": "direct",
+    "blending_loss_fn": "nll",
+    "posthoc": "none",
+}
 
 
 def _board_row(league, market, slug, controls):
@@ -1423,7 +1442,7 @@ def test_run_board_upserts_per_cell_preserving_other_leagues(monkeypatch, tmp_pa
         out, index=False
     )
     monkeypatch.setattr(sweep, "search_cell", _cell_frame)
-    monkeypatch.setattr(sweep, "_print_cell_summary", lambda b: None)
+    monkeypatch.setattr(sweep, "_print_cell_summary", lambda b, **kw: None)
 
     sweep.run_board([("WNBA", "AST")], out=out)
     board = pd.read_csv(out)
@@ -1448,7 +1467,7 @@ def test_run_board_resume_reuses_prior_rows_and_still_returns_the_cell(monkeypat
         return _cell_frame(league, market)
 
     monkeypatch.setattr(sweep, "search_cell", spy)
-    monkeypatch.setattr(sweep, "_print_cell_summary", lambda b: None)
+    monkeypatch.setattr(sweep, "_print_cell_summary", lambda b, **kw: None)
 
     board = sweep.run_board([cell, ("NBA", "FGA")], out=out, resume=True)
 
@@ -1469,7 +1488,7 @@ def test_run_board_returns_only_requested_scope_but_preserves_unrelated_csv(monk
         }
     ).to_csv(out, index=False)
     monkeypatch.setattr(sweep, "search_cell", _cell_frame)
-    monkeypatch.setattr(sweep, "_print_cell_summary", lambda board: None)
+    monkeypatch.setattr(sweep, "_print_cell_summary", lambda board, **kw: None)
 
     result = sweep.run_board([("WNBA", "AST"), ("NBA", "FGA")], out=out, resume=True)
 
@@ -1840,7 +1859,7 @@ def test_cli_scoped_board_confirms_only_the_requested_cells(monkeypatch, tmp_pat
     )
     monkeypatch.setattr(sweep, "_cell_trial_count", lambda lg, mkt, families, max_trials: 8)
     monkeypatch.setattr(sweep, "search_cell", _cell_frame)
-    monkeypatch.setattr(sweep, "_print_cell_summary", lambda board: None)
+    monkeypatch.setattr(sweep, "_print_cell_summary", lambda board, **kw: None)
     monkeypatch.setattr(sweep, "_print_board_rollup", lambda board: None)
     confirmed = {}
     monkeypatch.setattr(
@@ -2106,7 +2125,8 @@ def test_read_board_backfills_the_ranking_columns_on_legacy_csvs(tmp_path):
     assert order("ships") < order("discounted_slack") < order("confirm_risk")
 
 
-def test_cell_summary_shows_discounted_slack_and_risk(capsys):
+def test_cell_summary_shows_discounted_slack_and_risk(capsys, monkeypatch):
+    monkeypatch.setenv("COLUMNS", "120")
     board = pd.DataFrame(
         [
             {
@@ -2114,7 +2134,16 @@ def test_cell_summary_shows_discounted_slack_and_risk(capsys):
                 "market": "AST",
                 "strategy_slug": "SkewNormal",
                 "structural_strategy": BASE_STRUCTURAL_STRATEGY,
-                "controls_json": "{}",
+                "controls_json": controls_json(
+                    {
+                        "dist": "SkewNormal",
+                        "normalization": "centered_additive_eb_meanyr_k10",
+                        "dist_training_loss": "crps",
+                        "sn_param": "direct",
+                        "blending_loss_fn": "crps",
+                        "posthoc": "isotonic_mean",
+                    }
+                ),
                 "slack": 0.1,
                 "discounted_slack": 0.04,
                 "confirm_risk": "high",
@@ -2128,6 +2157,9 @@ def test_cell_summary_shows_discounted_slack_and_risk(capsys):
     assert "disc slack" in out and "risk" in out
     corner_line = next(line for line in out.splitlines() if "SkewNormal" in line)
     assert "0.04" in corner_line and "high" in corner_line
+    # The raw controls JSON is what used to run this table past 250 columns.
+    assert "controls_json" not in out and '{"' not in out
+    assert max(len(line) for line in out.splitlines()) <= 120
 
 
 def test_rollup_prints_calibrated_expectations_and_skips_thin_ledger(capsys):
@@ -2165,3 +2197,181 @@ def test_rollup_prints_calibrated_expectations_and_skips_thin_ledger(capsys):
     pd.DataFrame(rows[:7]).to_csv(sweep.NOMINEE_LEDGER_PATH, index=False)
     sweep._print_board_rollup(board)
     assert "P(ship)" not in capsys.readouterr().out
+
+
+def test_compress_corner_keeps_every_real_axis_value_distinct():
+    """No two registered axis values may elide to the same token.
+
+    A left-truncating shortener collides ``centered_additive_mean10`` with
+    ``centered_additive_eb_meanyr_k10`` — the two values the normalization axis turns on most —
+    which would silently relabel one recipe as the other on every progress line.
+    """
+    values = {
+        value
+        for spec in registered_strategies()
+        for controls in strategy_controls(spec)
+        for value in controls.values()
+    }
+    assert len(values) > 10, "the catalog should expose many axis values to collide"
+    shortened = {value: progress._shorten(value) for value in values}
+    assert len(set(shortened.values())) == len(values), "two axis values elided to one token"
+    assert all(len(token) <= progress._MAX_TOKEN_CHARS for token in shortened.values())
+
+
+def test_compress_corner_orders_family_first_and_clamps_to_budget():
+    corner = {
+        "posthoc": "prob_recal_isotonic",
+        "blending_loss_fn": "crps",
+        "dist": "SkewNormal",
+        "normalization": "centered_additive_eb_meanyr_k10",
+    }
+    label = progress.compress_corner(sweep._axis_order(corner), 200)
+    assert label.startswith("SkewNormal centered")  # family first, then registry axis order
+    assert "posthoc=" not in label  # axis names are dropped; values are positional
+    assert len(progress.compress_corner(sweep._axis_order(corner), 20)) == 20
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["--yes"], "require --confirm"),
+        (["--confirm-nominees", "2"], "require --confirm"),
+        (["-q", "-v"], "mutually exclusive"),
+        (["--market", "AST"], "pass --league with --market"),
+    ],
+)
+def test_cli_rejects_flags_that_would_silently_do_nothing(argv, message):
+    """Each of these was accepted and ignored, which on an unattended run reads as having applied."""
+    result = CliRunner().invoke(sweep.main, argv)
+    assert result.exit_code == 2 and message in result.output
+
+
+def test_include_shipped_with_market_is_a_note_not_an_error(monkeypatch, tmp_path):
+    """A named cell is swept whatever its shipped state, so the flag is redundant — never fatal.
+
+    Erroring here would break `--league X --market Y --include-shipped`, which worked (the withheld
+    filter lives in board-cell selection, which the single-cell path never reaches).
+    """
+    out = str(tmp_path / "board.csv")
+    result = CliRunner().invoke(
+        sweep.main,
+        ["--league", "WNBA", "--market", "AST", "--include-shipped", "--dry-run", "--out", out],
+    )
+    assert result.exit_code == 0, result.output
+    assert "redundant" in result.output and "[dry-run]" in result.output
+
+
+def test_dry_run_reports_what_resume_would_reuse(monkeypatch, tmp_path):
+    """``--dry-run --resume`` prints the per-cell reuse count its help promises."""
+    out = str(tmp_path / "board.csv")
+    controls = dict(_SN_CORNER)
+    pd.DataFrame([_board_row("WNBA", "AST", "SkewNormal", controls)]).to_csv(out, index=False)
+    monkeypatch.setattr(sweep, "_select_board_cells", lambda *a: ({("WNBA", "AST"): ("SkewNormal",)}, [], []))
+
+    result = CliRunner().invoke(sweep.main, ["--dry-run", "--resume", "--out", out])
+
+    assert result.exit_code == 0, result.output
+    assert "[dry-run]" in result.output
+    assert "1 prior rows reusable" in result.output
+
+
+def test_progress_writes_no_carriage_returns_when_redirected(monkeypatch):
+    """The overnight driver redirects to a log; a bar rendered there would corrupt every line."""
+    monkeypatch.setenv("COLUMNS", "120")
+    stream = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", stream)
+    bar = progress.SearchProgress("WNBA", "AST", 4, seed_seconds=30.0)
+    bar.starting(_SN_CORNER)
+    bar.scored(_SN_CORNER, verdict="SHIP", slack=0.2, elapsed_s=31.0, trained=True)
+    bar.close()
+
+    written = stream.getvalue()
+    assert bar.bar.disable, "tqdm must self-disable off a TTY"
+    assert "\r" not in written
+    assert "SHIP" in written and max(len(line) for line in written.splitlines()) <= 120
+
+
+def test_board_eta_prices_untimed_cells_at_the_fallback_not_zero():
+    """A cell with no history of its own costs the all-cells mean, never nothing.
+
+    Summing untimed cells as free understated a 29-cell board by 29x while still labelling the
+    result a ceiling — the one thing a time estimate must not do.
+    """
+    cells = [("NBA", "FGA"), ("WNBA", "AST"), ("NFL", "carries")]
+    budgets = dict.fromkeys(cells, 48)
+    timed_one = {("NBA", "FGA"): 300.0}
+
+    eta = sweep._board_eta(cells, budgets, timed_one, fallback=300.0)
+
+    assert eta == 3 * 48 * 300.0, "untimed cells must be priced, not skipped"
+    # With no prior board, the cells this run already finished stand in as the fallback — else a
+    # first run reports nothing the whole way through despite having timed most of its own cells.
+    assert sweep._board_eta(cells, budgets, timed_one, fallback=None) == 3 * 48 * 300.0
+    # Nothing measured anywhere is the one honest "no estimate" case.
+    assert sweep._board_eta(cells, budgets, {}, fallback=None) is None
+    assert sweep._board_eta([], budgets, timed_one, fallback=300.0) is None
+
+
+def test_board_countdown_reports_running_total_and_remaining(capsys, monkeypatch):
+    """A multi-day sit needs elapsed-so-far and time-left on one line, not just at the end."""
+    monkeypatch.setenv("COLUMNS", "120")
+    sweep._echo_board_countdown("NBA FGA", 720.0, 7800.0, remaining=8, eta=9600.0)
+    line = capsys.readouterr().out
+    assert "NBA FGA done in 12m" in line
+    assert "run 2h10m" in line and "8 cells left" in line and "<=2h40m" in line
+
+    sweep._echo_board_countdown("NBA FGA", 720.0, 7800.0, remaining=0, eta=None)
+    assert "cells left" not in capsys.readouterr().out
+
+
+def test_upsert_does_not_warn_on_a_board_predating_a_column(tmp_path, recwarn):
+    """A legacy board's back-filled columns are all-NA objects; concatenating them warned per corner.
+
+    ``_read_board`` fills any column a board predates with a ``pd.NA`` scalar, so the upsert ran
+    straight into pandas 2.x's empty/all-NA concat deprecation — once for every scored corner, which
+    is thousands of times across a board run.
+    """
+    out = tmp_path / "board.csv"
+    legacy = pd.DataFrame([_board_row("WNBA", "AST", "SkewNormal", dict(_SN_CORNER))])
+    legacy.drop(columns=["elapsed_s", "failure"], errors="ignore").to_csv(out, index=False)
+    fresh = pd.DataFrame(
+        [{**_board_row("NBA", "AST", "SkewNormal", dict(_SN_CORNER)), "elapsed_s": 18.0}]
+    ).reindex(columns=sweep._BOARD_COLUMNS)
+
+    sweep._upsert_cell(fresh, str(out))
+
+    assert not [w for w in recwarn if issubclass(w.category, FutureWarning)]
+    written = sweep._read_board(out)
+    assert list(written.columns) == sweep._BOARD_COLUMNS  # dropped columns come back on reindex
+    cells = zip(written["league"], written["market"], strict=True)
+    assert set(cells) == {("WNBA", "AST"), ("NBA", "AST")}
+
+
+def test_progress_prints_one_ship_line_per_cell_not_one_per_shipping_corner(monkeypatch):
+    """A later ship that beat nothing is noise — the bar carries `best`, the summary lists them all."""
+    monkeypatch.setenv("COLUMNS", "100")
+    stream = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", stream)
+    bar = progress.SearchProgress("NBA", "AST", 48)
+    for _ in range(4):
+        bar.scored(_SN_CORNER, verdict="SHIP", slack=0.101, elapsed_s=18.0, trained=True)
+    bar.scored(_SN_CORNER, verdict="SHIP", slack=0.140, elapsed_s=20.0, trained=True)
+    bar.scored(_SN_CORNER, verdict="KILL: g4", slack=-0.3, elapsed_s=12.0, trained=True)
+    bar.close()
+
+    printed = [line for line in stream.getvalue().splitlines() if "SHIP" in line or "KILL" in line]
+    assert len(printed) == 2, printed  # the first ship and the better one; four repeats collapse
+    assert "+0.101" in printed[0] and "+0.140" in printed[1]
+
+
+def test_progress_omits_the_eta_until_it_has_one(monkeypatch):
+    """With no seed and too few samples the bar showed a bare `<=?`; it now shows nothing."""
+    monkeypatch.setenv("COLUMNS", "100")
+    bar = progress.SearchProgress("NBA", "AST", 48)
+    bar.scored(_SN_CORNER, verdict="KILL: g4", slack=-0.3, elapsed_s=12.0, trained=True)
+    assert "<=" not in bar.bar.postfix and "?" not in bar.bar.postfix
+
+    for _ in range(progress._ETA_MIN_CORNERS):
+        bar.scored(_SN_CORNER, verdict="KILL: g4", slack=-0.3, elapsed_s=12.0, trained=True)
+    assert "<=" in bar.bar.postfix
+    bar.close()

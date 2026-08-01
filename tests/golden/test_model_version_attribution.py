@@ -16,8 +16,11 @@ import pickle
 
 import pandas as pd
 
-from sportstradamus.training.model_strategy import MODEL_STRATEGY_MODEL_KEY
-from sportstradamus.training.model_strategy import corner_fingerprint, get_strategy
+from sportstradamus.training.model_strategy import (
+    MODEL_STRATEGY_MODEL_KEY,
+    corner_fingerprint,
+    get_strategy,
+)
 from sportstradamus.training.pipeline import _build_filedict, _model_version
 from sportstradamus.training.structural_strategies import (
     TWO_PART_STRATEGY,

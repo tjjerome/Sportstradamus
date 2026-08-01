@@ -21,6 +21,7 @@ confirm ledger's measured per-gate confirm-minus-board medians (:func:`_ledger_g
 """
 
 import collections
+import contextlib
 import functools
 import hashlib
 import importlib.resources as pkg_resources
@@ -31,6 +32,7 @@ import signal
 import subprocess
 import time
 from datetime import UTC, datetime
+from statistics import fmean
 
 import click
 import numpy as np
@@ -47,6 +49,17 @@ from sportstradamus.training.model_strategy.identity import (
     InactiveStrategyArtifactError,
     build_artifact_identity,
     validate_strategy_artifacts,
+)
+from sportstradamus.training.model_strategy.progress import (
+    NORMAL,
+    QUIET,
+    VERBOSE,
+    SearchProgress,
+    compress_corner,
+    echo_above_bar,
+    human_seconds,
+    line_width,
+    wrapped,
 )
 from sportstradamus.training.model_strategy.registry import (
     BASE_STRUCTURAL_STRATEGY,
@@ -186,6 +199,8 @@ _BOARD_COLUMNS: list[str] = [
     "dispersion_cal",
     "skew_cal",
     "n",
+    "elapsed_s",
+    "failure",
     "matrix_hash",
     "split_fingerprint",
     "eval_split",
@@ -242,6 +257,14 @@ _BOARD_SLACK_PATTERN = re.compile(r"board slack ([+-]\d+\.\d+)")
 # ~10/17 while the top band shipped 1/9 — so banded rates, not the raw rank, carry the expectation.
 _SLACK_BAND_EDGES: tuple[float, float] = (0.05, 0.15)
 _SLACK_BAND_LABELS: tuple[str, ...] = ("<0.05", "0.05-0.15", ">=0.15")
+
+# Cell-summary layout. The four fixed columns plus the github borders cost this much, and what is
+# left goes to the corner label; below the floor the label stops being identifiable at all.
+_SUMMARY_FIXED_CHARS: int = 55
+_MIN_CORNER_CHARS: int = 24
+# A cell scores ~30 corners and the tail is uniformly deep-negative, so the screen shows the leading
+# ones and the board CSV keeps the rest. `-v` prints them all.
+_SUMMARY_ROWS: int = 12
 
 
 def _cell_context(league: str, market: str) -> CellContext:
@@ -376,11 +399,6 @@ def _dump_paths(
     return csv, mdl
 
 
-def _corner_label(corner: dict[str, str]) -> str:
-    """Human-scannable ``axis=value · axis=value`` for the trial's progress + log lines."""
-    return " · ".join(f"{axis}={value}" for axis, value in corner.items())
-
-
 def _log_path(league: str, market: str, corner: dict[str, str], spec: StrategySpec) -> pathlib.Path:
     """Per-corner meditate log under ``research/logs/deterministic/<subdir>/``.
 
@@ -450,21 +468,20 @@ def _run_meditate_with_lock_retry(cmd: list[str], log_path: pathlib.Path, *, tim
                 retries_left = attempt < len(_LOCK_RETRY_WAITS_S)
                 if retries_left and _is_archive_lock_error(log_path):
                     wait = _LOCK_RETRY_WAITS_S[attempt]
-                    click.echo(f"  archive write-locked; retrying in {wait}s …", err=True)
+                    echo_above_bar(f"  archive write-locked; retrying in {wait}s …", err=True)
                     time.sleep(wait)
                     continue
-                tail = _log_tail(log_path)
-                abort = _NATIVE_ABORT_PATTERN.search(tail)
+                abort = _NATIVE_ABORT_PATTERN.search(_log_tail(log_path))
                 signature = f": {abort.group()}" if abort else ""
-                click.echo(
-                    f"  meditate failed — {_failure_reason(exc)}{signature}"
-                    f" — tail of {log_path}:\n{tail}",
+                echo_above_bar(
+                    f"  meditate failed — {_failure_reason(exc)}{signature} — see {log_path}",
+                    fg="red",
                     err=True,
                 )
                 raise
             except subprocess.TimeoutExpired:
-                click.echo(
-                    f"  meditate timed out — tail of {log_path}:\n{_log_tail(log_path)}", err=True
+                echo_above_bar(
+                    f"  meditate timed out after {timeout}s — see {log_path}", fg="red", err=True
                 )
                 raise
 
@@ -585,13 +602,13 @@ def _run_and_score(
     :func:`scorecard.gate_row` — no test re-fit. The dump is keyed by subdir, so scoring right after
     this trial's train — before the next sequential trial overwrites it — keeps the loss/mode axes
     honest without a per-corner dump path (which is also why the sweep always retrains rather than
-    reusing a dump). A corner whose meditate errors or times out is caught, echoed, and returned as a
-    non-shipping row (:data:`_FAILED_CORNER_SLACK`) so one bad corner never aborts the board — and,
-    cached under its fingerprint, so a resumed run never retrains a reliable crash.
+    reusing a dump). A corner whose meditate errors or times out is caught and returned as a
+    non-shipping row (:data:`_FAILED_CORNER_SLACK`) naming the exception in ``failure``, so one bad
+    corner never aborts the board — and, cached under its fingerprint, so a resumed run never
+    retrains a reliable crash. Display is the caller's: :class:`SearchProgress` renders the row.
     """
     spec = get_strategy(strategy_slug)
     context = _cell_context(league, market)
-    label = _corner_label(corner)
     identity = build_artifact_identity(
         spec.slug,
         league,
@@ -599,7 +616,8 @@ def _run_and_score(
         corner,
         matrix_hash=context.matrix_sha256,
     )
-    click.echo(f"  training  {label} …")
+    # Spans the archive-lock back-off too (up to _LOCK_RETRY_WAITS_S of sleep), which is what an ETA
+    # built from these samples needs to include — that wait is real time the operator waits.
     start = time.monotonic()
     try:
         _run_deterministic_meditate(league, market, corner, spec)
@@ -609,19 +627,16 @@ def _run_and_score(
         subprocess.CalledProcessError,
         subprocess.TimeoutExpired,
     ) as exc:
-        click.secho(
-            f"  FAILED    {label} — {type(exc).__name__}; recorded non-shipping, continuing",
-            fg="yellow",
-            err=True,
-        )
         row = {
             **corner,
             "slack": _FAILED_CORNER_SLACK,
             "ships": False,
             "eval_split": EVAL_SPLIT_CROSSFIT,
+            "failure": type(exc).__name__,
         }
     row.update(
         {
+            "elapsed_s": round(time.monotonic() - start, 1),
             "family": spec.family,
             "strategy_slug": identity.strategy_slug,
             "structural_strategy": identity.structural_strategy,
@@ -638,11 +653,6 @@ def _run_and_score(
             ),
         }
     )
-    if float(row["slack"]) == _FAILED_CORNER_SLACK:
-        return row
-    verdict = click.style(_verdict(row), fg="green" if row["ships"] else "red")
-    elapsed = f"{time.monotonic() - start:.0f}s"
-    click.echo(f"  {verdict}  {label}  slack {float(row['slack']):+.3f}  ({elapsed})")
     return row
 
 
@@ -708,6 +718,8 @@ def search_cell(
     families: tuple[str, ...] | None = None,
     cached: dict[str, dict[str, object]] | None = None,
     out: str | None = None,
+    verbosity: int = NORMAL,
+    seed_seconds: float | None = None,
 ) -> pd.DataFrame:
     """Search one cell's recipe space under a trial budget and rank the board by slack.
 
@@ -719,6 +731,9 @@ def search_cell(
     once at the end. The Optuna journal replays which corners were *proposed* but not what they
     scored, so the board is the only durable record of a trial: without the per-corner write, an
     interrupt anywhere in a multi-hour cell throws away every corner it had already trained.
+
+    ``seed_seconds`` is this cell's mean corner duration from a prior run; it carries the bar's ETA
+    until enough of this run's own corners have landed to estimate from.
     """
     context = _cell_context(league, market)
     families = families if families is not None else _cell_families(league, market)
@@ -732,18 +747,33 @@ def search_cell(
 
     scored: dict[str, dict[str, object]] = {}
     trained: set[str] = set()
+    progress = SearchProgress(
+        league,
+        market,
+        min(reachable_corners(context, families), max_trials),
+        verbosity=verbosity,
+        seed_seconds=seed_seconds,
+        reused=len(evaluated),
+    )
 
     def objective(trial: optuna.Trial) -> float:
         spec, corner = suggest_corner(trial, context, families)
         fingerprint = corner_fingerprint(spec, corner, str(context.matrix_sha256))
         row = evaluated.get(fingerprint)
         if row is None:
+            progress.starting(corner)
             row = _run_and_score(league, market, spec.slug, corner)
             evaluated[fingerprint] = row
             trained.add(fingerprint)
-        else:
-            click.echo(f"  cached    {_corner_label(corner)}  slack {float(row['slack']):+.3f}")
         trial.set_user_attr(TRAINED_TRIAL_ATTR, fingerprint in trained)
+        progress.scored(
+            corner,
+            verdict=_verdict(row),
+            slack=float(row["slack"]),
+            elapsed_s=row.get("elapsed_s"),
+            trained=fingerprint in trained,
+            failure=_board_text(row, "failure"),
+        )
         scored[fingerprint] = row
         if out is not None:
             _upsert_cell(_rank_cell_board(league, market, scored, discounts), out)
@@ -757,11 +787,12 @@ def search_cell(
     # The budget counts retrains, not trials: a re-proposed or cached corner costs no training, so
     # it must not cost budget either. n_trials is the reachable grid, the point past which every
     # further suggestion is necessarily a repeat.
-    study.optimize(
-        objective,
-        n_trials=reachable_corners(context, families),
-        callbacks=[early_stop_callback(context, families), stop_when_budget_spent],
-    )
+    with contextlib.closing(progress):
+        study.optimize(
+            objective,
+            n_trials=reachable_corners(context, families),
+            callbacks=[early_stop_callback(context, families), stop_when_budget_spent],
+        )
     return _rank_cell_board(league, market, scored, discounts)
 
 
@@ -812,6 +843,30 @@ def _board_float(row: dict[str, object], column: str) -> float | None:
     if value is None or pd.isna(value):
         return None
     return float(value)
+
+
+def _board_text(row: dict[str, object], column: str) -> str | None:
+    """A board row's text field, ``None`` when blank — a cached CSV row carries ``pd.NA``."""
+    value = row.get(column)
+    return None if value is None or pd.isna(value) else str(value)
+
+
+def _cell_mean_seconds(out: str | None) -> tuple[dict[tuple[str, str], float], float | None]:
+    """Mean corner seconds per cell from the board's ``elapsed_s`` history, plus the all-cells mean.
+
+    Mean rather than median: a search ETA is a *sum* over the corners still to run, and E[sum] is
+    k·mean. A median would systematically under-call a distribution whose p95 (221 s) is twelve times
+    its median (19 s). Empty when no board has timings yet, and then no ETA is shown at all.
+    """
+    if out is None or not pathlib.Path(out).exists():
+        return {}, None
+    board = _read_board(pathlib.Path(out))
+    elapsed = pd.to_numeric(board["elapsed_s"], errors="coerce")
+    timed = board.assign(elapsed_s=elapsed).dropna(subset=["elapsed_s"])
+    if timed.empty:
+        return {}, None
+    per_cell = timed.groupby(["league", "market"])["elapsed_s"].mean()
+    return {cell: float(mean) for cell, mean in per_cell.items()}, float(timed["elapsed_s"].mean())
 
 
 def _discounted_slack(row: dict[str, object], discounts: dict[str, float]) -> float:
@@ -1044,15 +1099,27 @@ def run_board(
     *,
     max_trials: int = MAX_TRIALS_PER_CELL,
     families_by_cell: dict[tuple[str, str], tuple[str, ...]] | None = None,
+    verbosity: int = NORMAL,
 ) -> pd.DataFrame:
     """Search every cell in ``cells``, printing each verdict as it lands and upserting the board CSV
     per scored corner so an interrupt keeps partial progress and a ``--league``-scoped run leaves
     other leagues' rows intact. With ``resume``, each cell reopens its Optuna journal and reuses every
     admissible prior row, so a crashed multi-hour run continues instead of retraining scored corners.
     Returns the requested cells' board; CSV upserts preserve all unrelated rows.
+
+    Each finished cell folds its own measured mean back into the timing history, so the remaining-work
+    estimate sharpens as the board proceeds rather than staying pinned to the previous run's numbers.
     """
     boards: list[pd.DataFrame] = []
-    for league, market in cells:
+    means, fallback = _cell_mean_seconds(out)
+    budgets = {
+        cell: _cell_trial_count(*cell, (families_by_cell or {}).get(cell, ()), max_trials)
+        for cell in cells
+        if families_by_cell
+    }
+    board_started = time.monotonic()
+    for done, (league, market) in enumerate(cells, start=1):
+        started = time.monotonic()
         cell_board = search_cell(
             league,
             market,
@@ -1064,25 +1131,81 @@ def run_board(
                 else None
             ),
             out=out,
+            verbosity=verbosity,
+            seed_seconds=means.get((league, market), fallback),
         )
         boards.append(cell_board)
-        _print_cell_summary(cell_board)
+        _print_cell_summary(cell_board, verbosity=verbosity)
         if out is not None:
             _upsert_cell(cell_board, out)
+        trained = pd.to_numeric(cell_board["elapsed_s"], errors="coerce").dropna()
+        if not trained.empty:
+            means[(league, market)] = float(trained.mean())
+        _echo_board_countdown(
+            f"{league} {market}",
+            time.monotonic() - started,
+            time.monotonic() - board_started,
+            len(cells) - done,
+            _board_eta(cells[done:], budgets, means, fallback),
+        )
     return pd.concat(boards, ignore_index=True)
+
+
+def _board_eta(
+    cells: list[tuple[str, str]],
+    budgets: dict[tuple[str, str], int],
+    means: dict[tuple[str, str], float],
+    fallback: float | None,
+) -> float | None:
+    """Ceiling on the seconds ``cells`` still need, or ``None`` when nothing has been timed yet.
+
+    A cell with no history of its own is priced at the all-cells mean rather than at zero: on a fresh
+    board only a handful of cells are timed, and summing the rest as free understated a 29-cell run
+    by 29x while still presenting the number as a ceiling. With no prior board at all, the cells this
+    run has already finished become that mean — otherwise a first run would report nothing the whole
+    way through, having measured most of its own cells.
+    """
+    typical = fallback if fallback is not None else (fmean(means.values()) if means else None)
+    per_cell = [(budgets.get(cell), means.get(cell, typical)) for cell in cells]
+    if not per_cell or not all(budget and mean for budget, mean in per_cell):
+        return None
+    return sum(budget * mean for budget, mean in per_cell)
+
+
+def _echo_board_countdown(
+    cell: str, cell_elapsed: float, run_elapsed: float, remaining: int, eta: float | None
+) -> None:
+    """``NBA FGA done in 12m · run 2h10m · 8 cells left · <=2h40m`` after each cell of a board run.
+
+    The running total lives here rather than on the bar because this is the line a multi-day sit is
+    actually read by; the bar is scoped to the cell in front of it.
+    """
+    line = f"  {cell} done in {human_seconds(cell_elapsed)} · run {human_seconds(run_elapsed)}"
+    if remaining:
+        line += f" · {remaining} cell{'' if remaining == 1 else 's'} left"
+        if eta is not None:
+            line += f" · <={human_seconds(eta)}"
+    echo_above_bar(line)
 
 
 def _upsert_cell(cell_board: pd.DataFrame, out: str) -> pd.DataFrame:
     """Merge one cell's rows into the board CSV at ``out`` — replacing any prior rows for that
     cell — so a single-cell run refreshes the living board instead of clobbering it. Returns the
     rows written for this cell (what the CLI summarizes).
+
+    ``keep``'s all-NA columns are dropped before the concat and restored by the reindex after it.
+    :func:`_read_board` backfills any column a board predates as a ``pd.NA`` scalar, which lands as
+    an all-NA *object* column; concatenating one of those against this cell's real dtypes is what
+    pandas 2.x warns about, once per scored corner. Round-trips the same values either way — the
+    reindex puts every dropped column back, still empty.
     """
     path = pathlib.Path(out)
     if path.exists():
         prior = _read_board(path)
         league, market = cell_board["league"].iloc[0], cell_board["market"].iloc[0]
         keep = prior[~((prior["league"] == league) & (prior["market"] == market))]
-        pd.concat([keep, cell_board], ignore_index=True).to_csv(path, index=False)
+        merged = pd.concat([keep.dropna(axis="columns", how="all"), cell_board], ignore_index=True)
+        merged.reindex(columns=_BOARD_COLUMNS).to_csv(path, index=False)
     else:
         cell_board.to_csv(path, index=False)
     return cell_board
@@ -1104,11 +1227,24 @@ def _stat_meta_edit(row: object) -> str:
     return ", ".join(f"{field}={value}" for field, value in edits.items())
 
 
-def _print_cell_summary(board: pd.DataFrame) -> None:
+def _axis_order(controls: dict[str, str]) -> dict[str, str]:
+    """``controls`` in canonical axis order — family first, then its own axes.
+
+    ``controls_json`` sorts its keys so the canonical form is stable to hash, which leaves a corner
+    parsed back out of it alphabetical: `blending_loss_fn` ahead of `dist`. A positional label has to
+    read the same everywhere, and a live corner comes off ``suggest_corner`` in this order already.
+    """
+    known = {axis: controls[axis] for axis in _AXIS_COLUMNS if axis in controls}
+    return known | {axis: value for axis, value in controls.items() if axis not in known}
+
+
+def _print_cell_summary(board: pd.DataFrame, *, verbosity: int = NORMAL) -> None:
     """One cell's verdict + the exact stat_meta.json edit to ship it, over a narrow per-corner table.
 
-    The board CSV keeps all columns; the screen shows the verdict, what to change in stat_meta.json
-    (for a shipping cell), and each corner's family axes / slack / blocking gate.
+    The board CSV keeps every column and every corner; the screen shows the verdict, what to change in
+    stat_meta.json (for a shipping cell), and the leading corners by discounted slack. The old raw
+    ``controls_json`` column is gone — it restated axis columns the board already carries and by
+    itself ran the table past 250 characters.
     """
     best = board.iloc[0]
     ships = bool(best["ships"])
@@ -1118,36 +1254,34 @@ def _print_cell_summary(board: pd.DataFrame) -> None:
         + click.style(f" (best slack {float(best['slack']):+.3f})", bold=True)
     )
     if ships:
-        click.echo(f"  → stat_meta.json: {_stat_meta_edit(best)}")
+        click.echo(wrapped(f"→ stat_meta.json: {_stat_meta_edit(best)}", "  ", "    "))
+    if verbosity <= QUIET:
+        return
+    shown = board if verbosity >= VERBOSE else board.head(_SUMMARY_ROWS)
+    budget = max(_MIN_CORNER_CHARS, line_width() - _SUMMARY_FIXED_CHARS)
     table = [
         [
-            r["strategy_slug"],
-            r["structural_strategy"],
-            r["controls_json"],
+            compress_corner(_axis_order(parse_controls(r["controls_json"])), budget),
             f"{float(r['slack']):+.3f}",
             f"{float(r['discounted_slack']):+.3f}",
             r["confirm_risk"] or "-",
-            "yes" if r["ships"] else "no",
             " ".join(_failed_gates(r)) or "-",
         ]
-        for _, r in board.iterrows()
+        for _, r in shown.iterrows()
     ]
     click.echo(
         tabulate.tabulate(
             table,
-            headers=[
-                "strategy",
-                "structural strategy",
-                "controls",
-                "slack",
-                "disc slack",
-                "risk",
-                "ships",
-                "failed gates",
-            ],
+            headers=["corner", "slack", "disc slack", "risk", "failed gates"],
             tablefmt="github",
+            # Without this tabulate re-parses the slack strings as numbers and drops the leading
+            # `+`, so a positive and a negative slack stop being distinguishable at a glance.
+            disable_numparse=True,
+            colalign=("left", "right", "right", "left", "left"),
         )
     )
+    if len(shown) < len(board):
+        click.echo(f"  +{len(board) - len(shown)} more corners on the board")
 
 
 def _swept_class(*names: object) -> str | None:
@@ -1229,46 +1363,23 @@ def _print_board_rollup(board: pd.DataFrame) -> None:
     if not shipping:
         return
     click.echo("\nTo ship a cell, set these fields in its data/config/stat_meta.json entry:")
-    rows = []
+    # A stanza, not a table: the edit line is the thing you copy, so it must never be truncated to
+    # fit a column, and at ~145 characters it is what pushed the old rollup table past 250 wide.
     for lg, mkt, sub in shipping:
         best = sub.sort_values("discounted_slack", ascending=False).iloc[0]
-        rows.append(
-            [
-                f"{lg} {mkt}",
-                best["family"],
-                _stat_meta_edit(best),
-                f"{float(best['slack']):+.3f}",
-                f"{float(best['discounted_slack']):+.3f}",
-                best["confirm_risk"] or "-",
-            ]
+        risk = f"  risk {best['confirm_risk']}" if best["confirm_risk"] else ""
+        click.echo(
+            click.style(f"\n  {lg} {mkt}", bold=True)
+            + f"  {best['family']}  slack {float(best['slack']):+.3f}"
+            + f"  disc {float(best['discounted_slack']):+.3f}{risk}"
         )
-    click.echo(
-        tabulate.tabulate(
-            rows,
-            headers=["cell", "family", "set in stat_meta.json", "slack", "disc slack", "risk"],
-            tablefmt="github",
-        )
-    )
+        click.echo(wrapped(_stat_meta_edit(best), "    ", "    "))
 
 
-def _run_board_mode(
-    league: str | None,
-    include_shipped: bool,
-    dist_class: str,
-    out: str,
-    resume: bool,
-    dry_run: bool,
-    max_trials: int,
-) -> pd.DataFrame:
-    """Derive the board, warn per skipped cell, print the scope, sweep.
-
-    ``dist_class`` narrows each cell's family pool; ``resume`` reuses admissible prior rows and
-    reopens each cell's Optuna journal; ``dry_run`` prints the resolved scope then returns without
-    training a single corner.
-    """
-    families_by_cell, missing, no_families = _select_board_cells(
-        league, include_shipped, dist_class
-    )
+def _warn_unsweepable(
+    missing: list[tuple[str, str]], no_families: list[tuple[str, str]], dist_class: str
+) -> int:
+    """Warn once per cell the board cannot sweep, and return how many were skipped."""
     for lg, mkt in missing:
         click.secho(
             f"  skip {lg} {mkt}: no cached training matrix — train it first "
@@ -1279,28 +1390,177 @@ def _run_board_mode(
         click.secho(
             f"  skip {lg} {mkt}: no applicable family under --dist-class {dist_class}", fg="yellow"
         )
+    return len(missing) + len(no_families)
+
+
+def _run_board_mode(
+    league: str | None,
+    include_shipped: bool,
+    dist_class: str,
+    out: str,
+    resume: bool,
+    dry_run: bool,
+    max_trials: int,
+    verbosity: int = NORMAL,
+    confirm: bool = False,
+) -> pd.DataFrame:
+    """Derive the board, warn per skipped cell, print the scope, sweep.
+
+    ``dist_class`` narrows each cell's family pool; ``resume`` reuses admissible prior rows and
+    reopens each cell's Optuna journal; ``dry_run`` prints the resolved scope — per cell, including
+    what ``--resume`` would reuse — then returns without training a single corner.
+    """
+    families_by_cell, missing, no_families = _select_board_cells(
+        league, include_shipped, dist_class
+    )
+    skipped = _warn_unsweepable(missing, no_families, dist_class)
     if not families_by_cell:
         raise click.UsageError(
             f"no trainable cells with cached data to sweep{f' in {league}' if league else ''}."
         )
     cells = list(families_by_cell)
-    trials = sum(
-        _cell_trial_count(lg, mkt, families_by_cell[(lg, mkt)], max_trials) for lg, mkt in cells
-    )
+    budgets = {cell: _cell_trial_count(*cell, families_by_cell[cell], max_trials) for cell in cells}
+    trials = sum(budgets.values())
+    means, fallback = _cell_mean_seconds(out)
     scope = f" ({league})" if league else ""
-    skipped = len(missing) + len(no_families)
     note = f" · {skipped} skipped" if skipped else ""
+    eta = _board_eta(cells, budgets, means, fallback)
     click.echo(
         f"board{scope}: {len(cells)} cells to sweep{note} · <={trials} deterministic trainings"
+        + (f" · <={human_seconds(eta)}" if eta is not None else "")
     )
     if dry_run:
         click.secho("  [dry-run] no corners trained", fg="cyan")
+        _print_dry_run_scope(
+            cells, families_by_cell, budgets, means, fallback, out, resume, confirm
+        )
         return pd.DataFrame(columns=_BOARD_COLUMNS)
     result = run_board(
-        cells, out=out, resume=resume, max_trials=max_trials, families_by_cell=families_by_cell
+        cells,
+        out=out,
+        resume=resume,
+        max_trials=max_trials,
+        families_by_cell=families_by_cell,
+        verbosity=verbosity,
     )
     _print_board_rollup(result)
     return result
+
+
+def _print_dry_run_scope(
+    cells: list[tuple[str, str]],
+    families_by_cell: dict[tuple[str, str], tuple[str, ...]],
+    budgets: dict[tuple[str, str], int],
+    means: dict[tuple[str, str], float],
+    fallback: float | None,
+    out: str,
+    resume: bool,
+    confirm: bool,
+) -> None:
+    """Per cell: families, training ceiling, what ``--resume`` would reuse, and the time ceiling."""
+    for cell in cells:
+        n_families = len(families_by_cell[cell])
+        line = (
+            f"  {cell[0]} {cell[1]}  {n_families} famil{'y' if n_families == 1 else 'ies'}"
+            f" · <={budgets[cell]} trainings"
+        )
+        if resume:
+            reusable = len(_cached_corners(out, *cell, _cell_context(*cell)))
+            line += f" · {reusable} prior rows reusable"
+        seconds = means.get(cell, fallback)
+        if seconds:
+            line += f" · <={human_seconds(budgets[cell] * seconds)}"
+        click.echo(line)
+    if confirm:
+        click.secho("  [dry-run] --confirm not exercised", fg="cyan")
+
+
+def _run_single_cell(
+    league: str,
+    market: str,
+    include_shipped: bool,
+    dist_class: str,
+    out: str,
+    resume: bool,
+    dry_run: bool,
+    max_trials: int,
+    verbosity: int,
+    confirm: bool,
+) -> pd.DataFrame:
+    """Sweep one named cell, upsert it, print its summary; an empty board under ``dry_run``.
+
+    A named cell is swept whatever its ``shipped`` state — the withheld filter lives in board-cell
+    selection, which this path never reaches — so ``include_shipped`` has nothing left to widen here.
+    """
+    if include_shipped:
+        click.secho(
+            wrapped(
+                f"note: --include-shipped is redundant here — {league} {market} sweeps whatever its "
+                "shipped state; the flag only widens which cells a board run picks up.",
+                "  ",
+                "  ",
+            ),
+            fg="cyan",
+        )
+    families = _cell_families(league, market, dist_class)
+    if not families:
+        raise click.UsageError(
+            f"{league} {market}: no applicable family under --dist-class {dist_class}"
+        )
+    means, fallback = _cell_mean_seconds(out)
+    budgets = {(league, market): _cell_trial_count(league, market, families, max_trials)}
+    if dry_run:
+        click.secho(f"[dry-run] {league} {market}: no corners trained", fg="cyan")
+        _print_dry_run_scope(
+            [(league, market)],
+            {(league, market): families},
+            budgets,
+            means,
+            fallback,
+            out,
+            resume,
+            confirm,
+        )
+        return pd.DataFrame(columns=_BOARD_COLUMNS)
+    result = search_cell(
+        league,
+        market,
+        max_trials=max_trials,
+        families=families,
+        cached=(
+            _cached_corners(out, league, market, _cell_context(league, market)) if resume else None
+        ),
+        out=out,
+        verbosity=verbosity,
+        seed_seconds=means.get((league, market), fallback),
+    )
+    _upsert_cell(result, out)
+    _print_cell_summary(result, verbosity=verbosity)
+    return result
+
+
+def _reject_inert_flags(
+    league: str | None,
+    market: str | None,
+    confirm: bool,
+    yes: bool,
+    confirm_nominees: int | None,
+    quiet: bool,
+    verbose: bool,
+) -> None:
+    """Fail on flag combinations that would silently do nothing.
+
+    Each of these was accepted and ignored before, which on an unattended multi-day run reads as the
+    flag having taken effect.
+    """
+    if market is not None and not league:
+        raise click.UsageError(
+            "pass --league with --market for a single cell, or omit --market to sweep the board"
+        )
+    if not confirm and (yes or confirm_nominees is not None):
+        raise click.UsageError("--yes and --confirm-nominees require --confirm")
+    if quiet and verbose:
+        raise click.UsageError("--quiet and --verbose are mutually exclusive")
 
 
 @click.command(name="model-strategy-sweep")
@@ -1320,7 +1580,8 @@ def _run_board_mode(
     default=False,
     help="Board mode: also sweep already-shipped (devel/main) cells to hunt a better strategy — "
     "evaluated by the supersession test, not the fresh-ship --confirm (which only auto-ships "
-    "withheld cells). Off by default.",
+    "withheld cells). Off by default. Redundant with --market: a named cell is swept whatever its "
+    "shipped state.",
 )
 @click.option(
     "--dist-class",
@@ -1335,7 +1596,8 @@ def _run_board_mode(
     type=click.IntRange(min=1),
     default=MAX_TRIALS_PER_CELL,
     show_default=True,
-    help="Per-cell trial budget. A cell whose reachable grid is smaller runs the whole grid.",
+    help="Per-cell budget of *trained* corners; a re-proposed or cached corner is free. Early "
+    "stopping usually ends a cell well under it, so every '<=N' count is a ceiling, not an estimate.",
 )
 @click.option(
     "--confirm",
@@ -1348,14 +1610,14 @@ def _run_board_mode(
     "--yes",
     is_flag=True,
     default=False,
-    help="Skip the --confirm prompt (unattended). No effect without --confirm.",
+    help="Skip the --confirm prompt (unattended). Requires --confirm.",
 )
 @click.option(
     "--confirm-nominees",
     type=click.IntRange(min=1),
     default=None,
     help="Cap each cell's confirm walk at its first N nominees, highest board slack first. "
-    "Unset walks every nominee. No effect without --confirm.",
+    "Unset walks every nominee. Requires --confirm.",
 )
 @click.option(
     "--resume",
@@ -1368,8 +1630,23 @@ def _run_board_mode(
     "--dry-run",
     is_flag=True,
     default=False,
-    help="Print the resolved scope (cells, ~trainings, what --resume would skip) and exit without "
-    "training a single corner.",
+    help="Print the resolved scope — per cell: families, training ceiling, what --resume would "
+    "reuse, and the time ceiling — then exit without training a single corner.",
+)
+@click.option(
+    "-q",
+    "--quiet",
+    is_flag=True,
+    default=False,
+    help="Progress bar and the per-cell verdict only. A redirected run still gets a periodic "
+    "heartbeat, so a multi-hour cell is never a blank log.",
+)
+@click.option(
+    "-v",
+    "--verbose",
+    is_flag=True,
+    default=False,
+    help="One line per corner, cache hits included, rather than only the notable ones.",
 )
 @click.option(
     "--out",
@@ -1389,6 +1666,8 @@ def main(
     confirm_nominees: int | None,
     resume: bool,
     dry_run: bool,
+    quiet: bool,
+    verbose: bool,
     out: str | None,
 ) -> None:
     """Operation Ship 75 strategy sweep — one conditional-TPE study per cell over the strategy
@@ -1396,47 +1675,42 @@ def main(
     ``--market`` sweeps one cell; omitting ``--market`` sweeps the board (``--league`` narrows it).
     ``--confirm`` then full-HPO-retrains each cell's nominees until one ships.
     """
+    _reject_inert_flags(league, market, confirm, yes, confirm_nominees, quiet, verbose)
     optuna.logging.set_verbosity(optuna.logging.WARNING)
+    verbosity = QUIET if quiet else VERBOSE if verbose else NORMAL
     out = out or str(STRATEGY_RESEARCH_BOARD)
     pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
     if market is None:
         result = _run_board_mode(
-            league, include_shipped, dist_class, out, resume, dry_run, max_trials
+            league,
+            include_shipped,
+            dist_class,
+            out,
+            resume,
+            dry_run,
+            max_trials,
+            verbosity,
+            confirm,
         )
     else:
-        if not league:
-            raise click.UsageError(
-                "pass --league with --market for a single cell, or omit --market to sweep the board"
-            )
-        families = _cell_families(league, market, dist_class)
-        if not families:
-            raise click.UsageError(
-                f"{league} {market}: no applicable family under --dist-class {dist_class}"
-            )
-        if dry_run:
-            click.secho(
-                f"[dry-run] {league} {market}: families {', '.join(families)} "
-                f"· <={_cell_trial_count(league, market, families, max_trials)} trials",
-                fg="cyan",
-            )
-            return
-        result = search_cell(
+        result = _run_single_cell(
             league,
             market,
-            max_trials=max_trials,
-            families=families,
-            cached=(
-                _cached_corners(out, league, market, _cell_context(league, market))
-                if resume
-                else None
-            ),
-            out=out,
+            include_shipped,
+            dist_class,
+            out,
+            resume,
+            dry_run,
+            max_trials,
+            verbosity,
+            confirm,
         )
-        _upsert_cell(result, out)
-        _print_cell_summary(result)
-    click.echo(f"\nboard: {out}")
+    if dry_run:
+        return
+    click.echo(f"\nswept in {human_seconds(time.monotonic() - started)} · board: {out}")
 
-    if confirm and not dry_run:
+    if confirm:
         from sportstradamus.training.model_strategy.confirm import run_confirm
 
         run_confirm(result, yes=yes, max_nominees=confirm_nominees)

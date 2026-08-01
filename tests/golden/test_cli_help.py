@@ -26,6 +26,7 @@ from sportstradamus.nightly import run as reflect_cli
 from sportstradamus.prediction.cli import main as prophecize_cli
 from sportstradamus.strategies.kelly import kelly as kelly_cli
 from sportstradamus.training.cli import meditate as meditate_cli
+from sportstradamus.training.model_strategy.sweep import main as model_strategy_sweep_cli
 from tests.golden.conftest import read_snapshot, write_snapshot
 
 CLI_CASES = [
@@ -38,6 +39,7 @@ CLI_CASES = [
     ("fp-fetch", fp_fetch_cli, "fp_fetch_help.txt"),
     ("ctg-fetch", ctg_fetch_cli, "ctg_fetch_help.txt"),
     ("savant-fetch", savant_fetch_cli, "savant_fetch_help.txt"),
+    ("model-strategy-sweep", model_strategy_sweep_cli, "model_strategy_sweep_help.txt"),
 ]
 
 

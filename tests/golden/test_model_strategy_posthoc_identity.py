@@ -9,8 +9,8 @@ import pytest
 
 from sportstradamus.training.model_strategy import (
     CellContext,
-    corner_fingerprint,
     controls_json,
+    corner_fingerprint,
     get_strategy,
     registered_strategies,
     strategy_cli_args,
