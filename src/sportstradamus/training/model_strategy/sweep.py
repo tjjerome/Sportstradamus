@@ -15,7 +15,9 @@ budgeted search never enumerates a whole cell — and the Optuna journal makes t
 resumable.
 
 Deterministic trials rank only. ``--confirm`` walks each cell's nominees and requires a clean
-full-HPO 6/6 before a withheld model can ship.
+full-HPO 6/6 before a withheld model can ship. Because those confirms land systematically below
+their board scores, the board sorts on ``discounted_slack`` — raw slack re-priced under the
+confirm ledger's measured per-gate confirm-minus-board medians (:func:`_ledger_gate_discounts`).
 """
 
 import collections
@@ -165,6 +167,8 @@ _BOARD_COLUMNS: list[str] = [
     *_AXIS_COLUMNS,
     "slack",
     "ships",
+    "discounted_slack",
+    "confirm_risk",
     "g1_pass",
     "g1_brier_diff_ci_hi",
     "g1_brier_skill",
@@ -208,6 +212,36 @@ _IDENTITY_COLUMNS: tuple[str, ...] = (
 STRATEGY_RESEARCH_BOARD: pathlib.Path = pathlib.Path(
     str(pkg_resources.files(_data_pkg) / "research" / "strategy_research_board.csv")
 )
+
+# Where confirm's _record_nominee_gates appends each full-HPO nominee's model_stats row; the board
+# reads it back to price how confirm verdicts land relative to board scores.
+NOMINEE_LEDGER_PATH: pathlib.Path = _REPO_ROOT / "research" / "confirm_nominee_gates.csv"
+
+# The gate scalars with a board-side counterpart to discount. g6's legs are CI bounds against
+# per-row references, so it has no discountable scalar and is left alone.
+_DISCOUNTED_GATES: tuple[str, ...] = (
+    "g4_pit_ks",
+    "g2_star_z",
+    "g3_bench_z",
+    "g5_ece_debiased",
+    "g1_brier_diff_ci_hi",
+)
+
+# The dispersion calibrator floors at 0.1, so a ledger row on the floor (float wobble included) is
+# a diverged SkewNormal fit, not a calibration measurement — it never informs the discounts.
+_DIVERGED_DISPERSION_CAL: float = 0.1005
+
+# Below this many usable ledger observations the per-gate medians and the rollup's ship-rate cells
+# are noise, so the discounts and the calibrated-expectations table stay inert.
+_MIN_LEDGER_ROWS: int = 8
+
+# A board nominee's ledger `source` label carries the slack it was nominated at.
+_BOARD_SLACK_PATTERN = re.compile(r"board slack ([+-]\d+\.\d+)")
+
+# Rollup P(ship) bands on board slack: confirm odds measured non-monotone — the mid band shipped
+# ~10/17 while the top band shipped 1/9 — so banded rates, not the raw rank, carry the expectation.
+_SLACK_BAND_EDGES: tuple[float, float] = (0.05, 0.15)
+_SLACK_BAND_LABELS: tuple[str, ...] = ("<0.05", "0.05-0.15", ">=0.15")
 
 
 def _cell_context(league: str, market: str) -> CellContext:
@@ -689,6 +723,7 @@ def search_cell(
     context = _cell_context(league, market)
     families = families if families is not None else _cell_families(league, market)
     evaluated = dict(cached or {})
+    discounts = _ledger_gate_discounts(out)
     study = cell_study(league, market, families)
     for spec, corner in _known_good_corners(context):
         params = enqueue_params(context, spec, corner)
@@ -711,7 +746,7 @@ def search_cell(
         trial.set_user_attr(TRAINED_TRIAL_ATTR, fingerprint in trained)
         scored[fingerprint] = row
         if out is not None:
-            _upsert_cell(_rank_cell_board(league, market, scored), out)
+            _upsert_cell(_rank_cell_board(league, market, scored, discounts), out)
         return -float(row["slack"])
 
     def stop_when_budget_spent(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
@@ -727,15 +762,116 @@ def search_cell(
         n_trials=reachable_corners(context, families),
         callbacks=[early_stop_callback(context, families), stop_when_budget_spent],
     )
-    return _rank_cell_board(league, market, scored)
+    return _rank_cell_board(league, market, scored, discounts)
+
+
+def _ledger_gate_discounts(out: str | None) -> dict[str, float]:
+    """Per-gate median confirm-minus-board gate shifts measured from the nominee ledger.
+
+    Full-HPO confirms land systematically worse than the holdout-blind board on the same corner
+    (g4_pit_ks +0.0115, g2_star_z +0.034 on the 37-row ledger), so raw board slack oversells its
+    nominees. Non-diverged ledger rows are paired with their board-side gate values — the ledger's
+    own ``board_*`` echo columns when a confirm-side change has added them, else an identity join
+    against the board CSV at ``out`` — and each gate's median shift is returned. ``{}`` (inert)
+    when the ledger is absent, unpairable, or thinner than :data:`_MIN_LEDGER_ROWS` pairs.
+    """
+    if not NOMINEE_LEDGER_PATH.exists():
+        return {}
+    ledger = pd.read_csv(NOMINEE_LEDGER_PATH)
+    diverged = pd.to_numeric(ledger["dispersion_cal"], errors="coerce") <= _DIVERGED_DISPERSION_CAL
+    ledger = ledger[~diverged]
+    echo_columns = [f"board_{gate}" for gate in _DISCOUNTED_GATES]
+    if set(echo_columns) <= set(ledger.columns):
+        paired, board_columns = ledger, echo_columns
+    else:
+        if out is None or not pathlib.Path(out).exists():
+            return {}
+        paired = ledger.merge(
+            _read_board(pathlib.Path(out)),
+            left_on=["league", "market", "strategy_slug", "strategy_controls_json"],
+            right_on=["league", "market", "strategy_slug", "controls_json"],
+            suffixes=("", "_board"),
+        )
+        board_columns = [f"{gate}_board" for gate in _DISCOUNTED_GATES]
+    confirm_values = paired[list(_DISCOUNTED_GATES)].apply(pd.to_numeric, errors="coerce")
+    board_values = (
+        paired[board_columns]
+        .set_axis(list(_DISCOUNTED_GATES), axis="columns")
+        .apply(pd.to_numeric, errors="coerce")
+    )
+    shifts = confirm_values - board_values
+    shifts = shifts[shifts.notna().any(axis="columns")]
+    if len(shifts) < _MIN_LEDGER_ROWS:
+        return {}
+    return {gate: float(median) for gate, median in shifts.median().items() if pd.notna(median)}
+
+
+def _board_float(row: dict[str, object], column: str) -> float | None:
+    """A board row's numeric field as float, ``None`` when blank — cached CSV rows carry strings."""
+    value = row.get(column)
+    if value is None or pd.isna(value):
+        return None
+    return float(value)
+
+
+def _discounted_slack(row: dict[str, object], discounts: dict[str, float]) -> float:
+    """``slack`` recomputed with each gate scalar shifted by its measured confirm inflation.
+
+    Equal to ``slack`` when the discounts are inert, and a failed corner stays ``-inf``. Capped at
+    the raw ``slack``: the board row carries no g6 legs, so an uncapped recompute would float a
+    g6-bound row above its honest rank.
+    """
+    slack = float(row["slack"])
+    if not discounts or slack == _FAILED_CORNER_SLACK:
+        return slack
+    adjusted: dict[str, object] = {"g4_pit_ks_max": _board_float(row, "g4_pit_ks_max")}
+    for gate in _DISCOUNTED_GATES:
+        value = _board_float(row, gate)
+        adjusted[gate] = None if value is None else value + discounts.get(gate, 0.0)
+    return min(min_gate_slack(adjusted), slack)
+
+
+def _confirm_risk(row: dict[str, object], context: CellContext, discounts: dict[str, float]) -> str:
+    """``"high"`` when the corner matches a shape the ledger shows failing confirm, else ``""``.
+
+    Two measured shapes: a continuous-class family on an integer-lattice target (the diverged
+    ``dispersion_cal``-floor confirms), and g4 headroom inside the measured PIT-KS inflation.
+    """
+    if distribution_class(str(row["family"])) == "continuous" and context.target_is_integer:
+        return "high"
+    g4, g4_max = _board_float(row, "g4_pit_ks"), _board_float(row, "g4_pit_ks_max")
+    if g4 is not None and g4_max is not None and g4 + discounts.get("g4_pit_ks", 0.0) >= g4_max:
+        return "high"
+    return ""
 
 
 def _rank_cell_board(
-    league: str, market: str, scored: dict[str, dict[str, object]]
+    league: str,
+    market: str,
+    scored: dict[str, dict[str, object]],
+    discounts: dict[str, float] | None = None,
 ) -> pd.DataFrame:
-    """One cell's scored corners as board rows, best slack first."""
-    board = pd.DataFrame([{"league": league, "market": market, **row} for row in scored.values()])
-    ranked = board.sort_values("slack", ascending=False, ignore_index=True)
+    """One cell's scored corners as board rows, best empirically discounted slack first.
+
+    ``discounted_slack`` re-prices each row's raw slack under the ledger's confirm-vs-board gate
+    shifts and is the sort key; ``confirm_risk`` flags the corner shapes that measured worst on
+    confirm. Both fall back to the raw ranking / stay blank on a thin ledger.
+    """
+    discounts = discounts or {}
+    context = _cell_context(league, market)
+    board = pd.DataFrame(
+        [
+            {
+                "league": league,
+                "market": market,
+                **row,
+                "discounted_slack": _discounted_slack(row, discounts),
+                "confirm_risk": _confirm_risk(row, context, discounts),
+            }
+            for row in scored.values()
+        ]
+    )
+    ranked = board.sort_values("discounted_slack", ascending=False, ignore_index=True)
     ranked["swept_at"] = datetime.now(UTC).isoformat(timespec="seconds")
     ranked["code_rev"] = _code_rev()
     return ranked.reindex(columns=_BOARD_COLUMNS)
@@ -989,6 +1125,8 @@ def _print_cell_summary(board: pd.DataFrame) -> None:
             r["structural_strategy"],
             r["controls_json"],
             f"{float(r['slack']):+.3f}",
+            f"{float(r['discounted_slack']):+.3f}",
+            r["confirm_risk"] or "-",
             "yes" if r["ships"] else "no",
             " ".join(_failed_gates(r)) or "-",
         ]
@@ -1002,12 +1140,82 @@ def _print_cell_summary(board: pd.DataFrame) -> None:
                 "structural strategy",
                 "controls",
                 "slack",
+                "disc slack",
+                "risk",
                 "ships",
                 "failed gates",
             ],
             tablefmt="github",
         )
     )
+
+
+def _swept_class(*names: object) -> str | None:
+    """The distribution class of the first name that is a swept family, else ``None``."""
+    for name in names:
+        try:
+            return distribution_class(str(name))
+        except ValueError:
+            continue
+    return None
+
+
+def _ledger_board_slack(ledger: pd.DataFrame) -> pd.Series:
+    """Each ledger row's board-side slack: the ``board_slack`` echo when a confirm-side change has
+    added it, else parsed off the ``source`` label (seed/incumbent rows have none).
+    """
+    if "board_slack" in ledger.columns:
+        return pd.to_numeric(ledger["board_slack"], errors="coerce")
+    labels = ledger["source"].astype(str)
+    return labels.str.extract(_BOARD_SLACK_PATTERN, expand=False).astype(float)
+
+
+def _print_ledger_expectations() -> None:
+    """Calibrated confirm odds: P(ship) per board-slack band × family class, from the ledger.
+
+    Raw board rank is anti-predictive at the top (slack >= +0.19 shipped 1/9), so the rollup shows
+    what nominees of each shape actually did on full-HPO confirm. Silent when the ledger is absent
+    or has fewer than :data:`_MIN_LEDGER_ROWS` usable rows.
+    """
+    if not NOMINEE_LEDGER_PATH.exists():
+        return
+    ledger = pd.read_csv(NOMINEE_LEDGER_PATH)
+    families = (
+        ledger["distribution"] if "distribution" in ledger.columns else ledger["strategy_slug"]
+    )
+    nominees = pd.DataFrame(
+        {
+            "band": pd.cut(
+                _ledger_board_slack(ledger),
+                bins=[-np.inf, *_SLACK_BAND_EDGES, np.inf],
+                labels=_SLACK_BAND_LABELS,
+                right=False,
+            ),
+            "family_class": [
+                _swept_class(family, slug)
+                for family, slug in zip(families, ledger["strategy_slug"], strict=True)
+            ],
+            "shipped": ledger["ship"].map({True: 1.0, False: 0.0, "True": 1.0, "False": 0.0}),
+        }
+    ).dropna()
+    if len(nominees) < _MIN_LEDGER_ROWS:
+        return
+    nominees["band"] = nominees["band"].astype(str)
+    rates = nominees.groupby(["band", "family_class"])["shipped"].agg(["mean", "count"])
+    table = []
+    for band in _SLACK_BAND_LABELS:
+        cells = [band]
+        for family_class in _DIST_CLASSES:
+            if (band, family_class) in rates.index:
+                rate, n = rates.loc[(band, family_class)]
+                cells.append(f"{rate:.0%} ({int(n)})")
+            else:
+                cells.append("-")
+        table.append(cells)
+    click.echo(
+        f"\nconfirm P(ship) by board slack × family class ({len(nominees)} ledger nominees):"
+    )
+    click.echo(tabulate.tabulate(table, headers=["board slack", *_DIST_CLASSES], tablefmt="github"))
 
 
 def _print_board_rollup(board: pd.DataFrame) -> None:
@@ -1017,24 +1225,27 @@ def _print_board_rollup(board: pd.DataFrame) -> None:
     cells = list(board.groupby(["league", "market"], sort=False))
     shipping = [(lg, mkt, sub) for (lg, mkt), sub in cells if bool(sub["ships"].any())]
     click.echo(f"\n{len(cells)} cells swept · {len(shipping)} with a shipping corner")
+    _print_ledger_expectations()
     if not shipping:
         return
     click.echo("\nTo ship a cell, set these fields in its data/config/stat_meta.json entry:")
     rows = []
     for lg, mkt, sub in shipping:
-        best = sub.sort_values("slack", ascending=False).iloc[0]
+        best = sub.sort_values("discounted_slack", ascending=False).iloc[0]
         rows.append(
             [
                 f"{lg} {mkt}",
                 best["family"],
                 _stat_meta_edit(best),
                 f"{float(best['slack']):+.3f}",
+                f"{float(best['discounted_slack']):+.3f}",
+                best["confirm_risk"] or "-",
             ]
         )
     click.echo(
         tabulate.tabulate(
             rows,
-            headers=["cell", "family", "set in stat_meta.json", "slack"],
+            headers=["cell", "family", "set in stat_meta.json", "slack", "disc slack", "risk"],
             tablefmt="github",
         )
     )

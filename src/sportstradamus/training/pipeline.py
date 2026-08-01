@@ -171,6 +171,22 @@ _MIXTURE_SCALE_STD_CEILING: float = 20.0
 # so a searched corner is only ever tightened, never loosened.
 _MIXTURE_MIN_CHILD_WEIGHT: float = 0.1
 _MIXTURE_LAMBDA_L2_FLOOR: float = 1.0
+# Constrained-SkewNormal guardrails (research/briefs/researcher_hpo_objective_alignment.md
+# R1) — same Hathaway-style clamp as the Mixture above, but keyed to a ROBUST label scale
+# (IQR/1.349): np.std runs up to 47x looser on ratio_meanyr cells whose near-zero MeanYr
+# denominators fatten the normalized tail (brief finding 5). Ceiling 10: the corrected
+# shape ledger separates converged fits (max 2.46x the outcome SD) from diverged ones
+# (min 25x) with an empty band — 4x above the highest honest fit, 2.5x below the mildest
+# divergence. Floor 0.02: the Kiefer-Wolfowitz sigma->0 spike is live on shipped NBA FGA
+# (SN_Scale min 2.7e-6 vs median 4.53); same constant as the Mixture floor.
+_SKEWNORMAL_SCALE_ROBUST_FLOOR: float = 0.02
+_SKEWNORMAL_SCALE_ROBUST_CEILING: float = 10.0
+# |alpha| clamp for the direct parametrization — parity with the centered branch's
+# existing +-0.99 gamma1 tanh bound (implied |alpha| ~ 28.4); gamma1(30) = 0.9907 of the
+# attainable 0.99527, so the cap costs <0.5% of the skewness range.
+_SKEWNORMAL_ALPHA_BOUND: float = 30.0
+# Normal-consistency divisor turning an IQR into a sigma estimate (IQR = 1.349 sigma).
+_IQR_TO_SIGMA: float = 1.349
 # Minimum coefficient of variation for the SkewNormal branch.  Prevents
 # degenerate near-zero CV when all players have nearly identical outcomes.
 _SKEWNORMAL_CV_FLOOR: float = 0.05
@@ -1156,8 +1172,25 @@ def _pick_calibrated_candidate(candidates: list[dict], threshold: float) -> dict
     The fallback is logged: a vacuous constraint (no qualifying trial — common at low n)
     silently degrades to loss-only selection exactly where calibration matters most
     (research brief reality-check b).
+
+    Also logs the constraint's headroom (min PIT-KS, feasible count, and the CRPS price
+    of feasibility) — the Experiment-B probe of whether the constraint is non-vacuous
+    (researcher_hpo_objective_alignment brief, R2 step 1).
     """
     qualified = [c for c in candidates if c["pit_ks"] < threshold]
+    crps_price = (
+        min(c["cv_loss"] for c in qualified) - min(c["cv_loss"] for c in candidates)
+        if qualified
+        else None
+    )
+    logger.info(
+        "calibrated HP headroom: min_pit_ks=%.4f feasible=%d/%d threshold=%.4f crps_price=%s",
+        min(c["pit_ks"] for c in candidates),
+        len(qualified),
+        len(candidates),
+        threshold,
+        "n/a" if crps_price is None else format(crps_price, ".5f"),
+    )
     if qualified:
         return min(qualified, key=lambda c: c["cv_loss"])
     logger.warning(
@@ -1792,28 +1825,39 @@ def _zero_inflated_outcome_mean(
 
 
 def _diag_shape(
-    dist, cv, prob_params, test_mean_yr, test_std_yr, test_denom_mean, y_test, player_stats
+    dist,
+    cv,
+    prob_params,
+    test_mean_yr,
+    test_std_yr,
+    strategy,
+    X_test,
+    denom_col,
+    y_test,
+    player_stats,
 ):
-    """(shape_label, start_shape, model_shape, empirical_shape) for the cell's family."""
-    if dist == "SkewNormal":
+    """(shape_label, start_shape, model_shape, empirical_shape) for the cell's family.
+
+    Continuous families report sigma over sigma: ``model_shape`` is the mean predictive
+    sigma decoded through the strategy's own ``decode_scale`` (identity for additive
+    normalizations, per-row denominator multiply for ratio_*) and ``empirical_shape`` is
+    the marginal outcome SD, so ``shape_ratio`` separates converged fits (~0.6-2.5) from
+    diverged ones (>=25) — researcher_hpo_objective_alignment brief, finding 3.
+    """
+    if dist in ("SkewNormal", "Mixture"):
         diag_start_shape = float(cv)
-        scale_norm_mean = float(prob_params["scale"].mean())
-        diag_model_shape = scale_norm_mean * test_denom_mean
-        result_arr = y_test["Result"].to_numpy()
-        diag_empirical_shape = float(result_arr.std() / max(result_arr.mean(), 1e-6))
-        diag_shape_label = "scale"
-    elif dist == "Mixture":
-        diag_start_shape = float(cv)
-        _, sd_norm = _mixture_moments(
-            prob_params["mix_prob_1"].to_numpy(dtype=float),
-            prob_params["loc_1"].to_numpy(dtype=float),
-            prob_params["scale_1"].to_numpy(dtype=float),
-            prob_params["loc_2"].to_numpy(dtype=float),
-            prob_params["scale_2"].to_numpy(dtype=float),
-        )
-        diag_model_shape = float(sd_norm.mean()) * test_denom_mean
-        result_arr = y_test["Result"].to_numpy()
-        diag_empirical_shape = float(result_arr.std() / max(result_arr.mean(), 1e-6))
+        if dist == "SkewNormal":
+            sigma_norm = prob_params["scale"].to_numpy(dtype=float)
+        else:
+            _, sigma_norm = _mixture_moments(
+                prob_params["mix_prob_1"].to_numpy(dtype=float),
+                prob_params["loc_1"].to_numpy(dtype=float),
+                prob_params["scale_1"].to_numpy(dtype=float),
+                prob_params["loc_2"].to_numpy(dtype=float),
+                prob_params["scale_2"].to_numpy(dtype=float),
+            )
+        diag_model_shape = float(strategy.decode_scale(sigma_norm, X_test, denom_col).mean())
+        diag_empirical_shape = float(y_test["Result"].to_numpy().std())
         diag_shape_label = "scale"
     elif dist in ("Gamma", "ZAGamma"):
         diag_start_shape = float(np.clip((test_mean_yr / max(test_std_yr, 1e-6)) ** 2, 0.1, 100))
@@ -1917,6 +1961,7 @@ def _step_compute_diagnostics(
     dist: str,
     cv: float,
     denom_col: str,
+    strategy,
     player_stats,
     step,
 ) -> dict:
@@ -1935,12 +1980,18 @@ def _step_compute_diagnostics(
 
     test_mean_yr = X_test["MeanYr"].mean()
     test_std_yr = X_test["STDYr"].mean()
-    test_denom_mean = (
-        X_test[denom_col].mean() if dist in ("SkewNormal", "Mixture") else test_mean_yr
-    )
 
     diag_shape_label, diag_start_shape, diag_model_shape, diag_empirical_shape = _diag_shape(
-        dist, cv, prob_params, test_mean_yr, test_std_yr, test_denom_mean, y_test, player_stats
+        dist,
+        cv,
+        prob_params,
+        test_mean_yr,
+        test_std_yr,
+        strategy,
+        X_test,
+        denom_col,
+        y_test,
+        player_stats,
     )
 
     diag_start_mean = float(test_mean_yr)
@@ -3548,22 +3599,47 @@ def _resolve_dist(
     return configured
 
 
-def _skewnormal_dist_obj(sn_param: str, stabilization: str, dist_training_loss: str):
+def _skewnormal_dist_obj(
+    sn_param: str, stabilization: str, dist_training_loss: str, y_train_labels
+):
     """The continuous-branch distribution object for the requested parametrization.
 
     ``"centered"`` boosts (mean, sd, gamma1) heads via :class:`CenteredSkewNormal`,
     whose ``predict_dist`` re-emits direct (loc, scale, alpha) columns — the family
     string and every ``dist == "SkewNormal"`` consumer downstream stay unchanged.
+
+    Both parametrizations clamp the sigma-like head to the robust normalized-label
+    scale, and the direct alpha head to ``+-_SKEWNORMAL_ALPHA_BOUND`` — the boosted
+    skew-normal likelihood otherwise diverges inside one-sided leaves (monotone in
+    alpha, unbounded ridge in the exp sigma response). The wrapped ``param_dict``
+    rides the pickle, so the final refit, the warm cron, and inference share the
+    bound.
     """
     loss_fn = _resolve_loss_fn("crps", dist_training_loss)
+    q75, q25 = np.percentile(y_train_labels, [75, 25])
+    label_scale = (q75 - q25) / _IQR_TO_SIGMA
+    scale_ceiling = _SKEWNORMAL_SCALE_ROBUST_CEILING * label_scale
+    scale_floor = _SKEWNORMAL_SCALE_ROBUST_FLOOR * label_scale
     if sn_param == "centered":
         # Unstabilized centered heads NaN out within ~4 rounds (mapped-alpha hessians
         # explode near the gamma1 bound), so the module-default "None" upgrades to the
         # family's own L2 default; an explicit MAD/L2 from the caller is honored.
         if stabilization == "None":
             stabilization = "L2"
-        return CenteredSkewNormal(stabilization=stabilization, loss_fn=loss_fn)
-    return SkewNormalDist(stabilization=stabilization, loss_fn=loss_fn)
+        sn = CenteredSkewNormal(stabilization=stabilization, loss_fn=loss_fn)
+        # gamma1 is already tanh-bounded to +-0.99; the mean head stays unconstrained.
+        sn.param_dict["sd"] = _BoundedResponseFn(
+            sn.param_dict["sd"], scale_ceiling, floor=scale_floor
+        )
+        return sn
+    sn = SkewNormalDist(stabilization=stabilization, loss_fn=loss_fn)
+    sn.param_dict["scale"] = _BoundedResponseFn(
+        sn.param_dict["scale"], scale_ceiling, floor=scale_floor
+    )
+    sn.param_dict["alpha"] = _BoundedResponseFn(
+        sn.param_dict["alpha"], _SKEWNORMAL_ALPHA_BOUND, floor=-_SKEWNORMAL_ALPHA_BOUND
+    )
+    return sn
 
 
 def _continuous_dist_obj(
@@ -3571,11 +3647,12 @@ def _continuous_dist_obj(
 ):
     """Distribution object for the continuous branch.
 
-    ``y_train_labels`` must already be in the strategy's normalized space — the
-    mixture's scale clamp is derived from its std (unused for SkewNormal).
+    ``y_train_labels`` must already be in the strategy's normalized space — both
+    families derive their scale-head clamp from it (robust IQR/1.349 scale for
+    SkewNormal, std for the Mixture, whose cells are all additive).
     """
     if dist == "SkewNormal":
-        return _skewnormal_dist_obj(sn_param, stabilization, dist_training_loss)
+        return _skewnormal_dist_obj(sn_param, stabilization, dist_training_loss, y_train_labels)
     # Unstabilized mixture heads run away — same failure mode and fix as the centered
     # SkewNormal: upgrade the module-default "None" to L2, honor an explicit choice.
     if stabilization == "None":
@@ -4554,6 +4631,7 @@ def train_market(
         dist,
         cv,
         dist_info["denom_col"],
+        dist_info["target_normalization"],
         dist_info["player_stats"],
         step,
     )

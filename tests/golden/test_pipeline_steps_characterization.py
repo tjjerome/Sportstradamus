@@ -21,6 +21,7 @@ import pandas as pd
 import pytest
 
 import sportstradamus.training.pipeline as pipe
+from sportstradamus.training.baselines import get_target_normalization
 
 _N = 8
 
@@ -91,6 +92,11 @@ def _prob_params() -> pd.DataFrame:
             "scale": np.full(_N, 0.3),
             "concentration": np.full(_N, 2.0),
             "total_count": np.full(_N, 4.0),
+            "mix_prob_1": np.full(_N, 0.6),
+            "loc_1": np.full(_N, 1.0),
+            "scale_1": np.full(_N, 0.5),
+            "loc_2": np.full(_N, 3.0),
+            "scale_2": np.full(_N, 1.0),
         }
     )
 
@@ -255,7 +261,7 @@ def test_fuse_zagamma(fit_calls):
     )
 
 
-def _diag(dist, gate_blend_test):
+def _diag(dist, gate_blend_test, strategy=None):
     weighted_mean = np.linspace(9.0, 13.0, _N)
     y_proba = np.column_stack([np.linspace(0.6, 0.3, _N), np.linspace(0.4, 0.7, _N)])
     y_class = np.array([0, 1, 0, 1, 1, 0, 1, 1])
@@ -270,6 +276,7 @@ def _diag(dist, gate_blend_test):
         dist,
         0.9,
         "denom",
+        strategy,
         player_stats,
         1,
     )
@@ -287,14 +294,35 @@ def _assert_diag_common(out):
     assert math.isnan(out["cf_over_pct"])
 
 
-def test_diag_skewnormal():
-    out = _diag("SkewNormal", None)
+def test_diag_skewnormal_ratio_decodes_scale():
+    """ratio_* decode_scale multiplies by the per-row denominator, so model_shape is the
+    served (absolute) sigma; empirical_shape is the outcome SD, not a CV — shape_ratio is
+    sigma over sigma (brief finding 3)."""
+    out = _diag("SkewNormal", None, get_target_normalization("ratio_meanyr"))
     _assert_diag_common(out)
     assert out["shape_label"] == "scale"
     assert out["start_shape"] == pytest.approx(0.9)
-    assert out["model_shape"] == pytest.approx(3.15)
-    assert out["empirical_shape"] == pytest.approx(0.22770562459407903)
+    assert out["model_shape"] == pytest.approx(3.15)  # 0.3 * mean(denom 9..12)
+    assert out["empirical_shape"] == pytest.approx(2.618614682831909)  # std(Result)
     assert out["model_ev"] == pytest.approx(11.0)
+
+
+def test_diag_skewnormal_additive_keeps_raw_scale():
+    """Additive normalizations decode scale as the identity — no denominator multiply."""
+    out = _diag("SkewNormal", None, get_target_normalization("centered_additive_mean10"))
+    assert out["shape_label"] == "scale"
+    assert out["model_shape"] == pytest.approx(0.3)
+    assert out["empirical_shape"] == pytest.approx(2.618614682831909)
+
+
+def test_diag_mixture_additive_keeps_raw_scale():
+    """The Mixture branch shares the strategy-decoded sigma semantics."""
+    out = _diag("Mixture", None, get_target_normalization("centered_additive_mean10"))
+    assert out["shape_label"] == "scale"
+    assert out["start_shape"] == pytest.approx(0.9)
+    # sd of the 0.6/0.4 mixture of N(1, 0.5) and N(3, 1), identity decode.
+    assert out["model_shape"] == pytest.approx(1.2288205727444503)
+    assert out["empirical_shape"] == pytest.approx(2.618614682831909)
 
 
 def test_diag_gamma():
@@ -365,6 +393,7 @@ def test_diag_over_pct_and_cf_nonnan_branch():
         "Gamma",
         0.9,
         "denom",
+        None,
         player_stats,
         1,
     )

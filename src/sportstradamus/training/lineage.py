@@ -15,7 +15,8 @@ MATRIX_SCHEMA_VERSION = 1
 MATRIX_TRIM_SEED = 42
 
 
-def _file_sha(path: Path) -> str | None:
+def file_sha(path: Path) -> str | None:
+    """SHA256 hex digest of a file's contents, or ``None`` if it does not exist."""
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
 
 
@@ -49,7 +50,7 @@ def validate_matrix_manifest(matrix_path: Path, matrix: pd.DataFrame) -> dict:
         "schema_version": MATRIX_SCHEMA_VERSION,
         "row_count": len(matrix),
         "feature_schema": list(matrix.columns),
-        "matrix_sha256": _file_sha(matrix_path),
+        "matrix_sha256": file_sha(matrix_path),
     }
     mismatches = [name for name, expected in checks.items() if manifest.get(name) != expected]
     if mismatches:
@@ -102,13 +103,13 @@ def write_matrix_manifest(
         },
         "dependency_hashes": dict(sorted(stat_data.model_dependency_inventory.items())),
         "config_hashes": {
-            name: _file_sha(config_root / name)
+            name: file_sha(config_root / name)
             for name in ("stat_meta.json", "feature_filter.json", "book_weights.json")
         },
         "seed": MATRIX_TRIM_SEED,
         "row_count": len(matrix),
         "feature_schema": list(matrix.columns),
-        "matrix_sha256": _file_sha(matrix_path),
+        "matrix_sha256": file_sha(matrix_path),
     }
     manifest_path = matrix_path.with_suffix(".manifest.json")
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")

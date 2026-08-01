@@ -14,6 +14,7 @@ import signal
 import pandas as pd
 import pytest
 
+from sportstradamus.training.lineage import validate_matrix_manifest
 from sportstradamus.training.model_strategy import (
     CellContext,
     build_artifact_identity,
@@ -33,6 +34,8 @@ _MATRIX_COLUMNS = frozenset(
     for spec in registered_strategies()
     for column in spec.applicability.required_data_columns
 )
+# The real pin, captured before the autouse stub below replaces the module attribute.
+_REAL_PIN_CELL_MATRIX = mc._pin_cell_matrix
 
 
 @pytest.fixture(autouse=True)
@@ -58,7 +61,17 @@ def _fixed_cell_context(monkeypatch):
 @pytest.fixture(autouse=True)
 def _sandbox_nominee_ledger(monkeypatch, tmp_path):
     """Keep the confirm walk's research ledger out of the repo's ``research/`` directory."""
-    monkeypatch.setattr(mc, "_NOMINEE_LEDGER_PATH", tmp_path / "confirm_nominee_gates.csv")
+    monkeypatch.setattr(mc, "NOMINEE_LEDGER_PATH", tmp_path / "confirm_nominee_gates.csv")
+
+
+@pytest.fixture(autouse=True)
+def _stub_matrix_pin(monkeypatch):
+    """Keep the per-walk matrix pin off the real training_data and research dirs.
+
+    The pin tests below call the captured real function (``_REAL_PIN_CELL_MATRIX``) against tmp
+    paths instead.
+    """
+    monkeypatch.setattr(mc, "_pin_cell_matrix", lambda league, market: None)
 
 
 @pytest.fixture(autouse=True)
@@ -193,12 +206,12 @@ def _zinb_row(mode, disp, blend, ships, slack):
     }
 
 
-def _negbin_row(disp, blend, ships, slack):
+def _negbin_row(disp, blend, ships, slack, league="MLB", market="pitcher strikeouts"):
     """A plain-NegBin count corner: no ``zinb_mode`` (its persist map omits it), other columns blank."""
     return {
         **_signed_row(
-            "MLB",
-            "pitcher strikeouts",
+            league,
+            market,
             "NegBin",
             {
                 "dist": "NegBin",
@@ -405,6 +418,92 @@ def test_nominees_cross_family_zinb_leads():
     assert nominated[0]["slack"] == 0.30
 
 
+def _integer_target_context(monkeypatch):
+    """A WNBA-style continuous cell whose target sits on the integer lattice (e.g. WNBA AST)."""
+
+    def context(league, market):
+        columns = set(_MATRIX_COLUMNS)
+        spec = role_spec_for(league, market)
+        if spec is not None:
+            columns |= set(spec.all_columns)
+        return CellContext(
+            league,
+            market,
+            "SkewNormal",
+            distribution_class("SkewNormal"),
+            frozenset(columns),
+            _MATRIX_SHA,
+            target_is_integer=True,
+        )
+
+    monkeypatch.setattr(mc, "_cell_context", context)
+
+
+def _all_sn_top(*, count_slack=None):
+    """Four SkewNormal corners outranking an optional count corner — the burned-walk board shape."""
+    rows = [
+        _sn_row("centered_additive_mean10", "crps", "crps", False, 0.40),
+        _sn_row("centered_additive_eb_meanyr_k10", "crps", "crps", False, 0.30),
+        _sn_row("ratio_meanyr", "crps", "crps", False, 0.20),
+        _sn_row("ratio_projvol", "crps", "crps", False, 0.10),
+    ]
+    if count_slack is not None:
+        rows.append(_negbin_row("crps", "nll", False, count_slack, league="WNBA", market="AST"))
+    return rows
+
+
+def test_nominees_interleave_best_count_corner_on_integer_target(monkeypatch):
+    """An integer-target cell whose top corners are all SkewNormal (the divergence-prone family)
+    slots the best count-class corner second — inserted, never dropping a continuous nominee.
+    """
+    _integer_target_context(monkeypatch)
+    nominated = _nominate(
+        *_all_sn_top(count_slack=0.05),
+        _negbin_row("pit_ks", "nll", False, 0.02, league="WNBA", market="AST"),
+    )
+    assert [n["family"] for n in nominated] == ["SkewNormal", "NegBin", "SkewNormal", "SkewNormal"]
+    assert nominated[1]["slack"] == 0.05  # the best-slack count corner, not the 0.02 one
+    assert [n["slack"] for n in nominated] == [0.40, 0.05, 0.30, 0.20]
+
+
+def test_nominees_interleave_noop_when_count_already_in_top_slots(monkeypatch):
+    _integer_target_context(monkeypatch)
+    nominated = _nominate(
+        _sn_row("centered_additive_mean10", "crps", "crps", False, 0.40),
+        _negbin_row("crps", "nll", False, 0.30, league="WNBA", market="AST"),
+        _sn_row("ratio_meanyr", "crps", "crps", False, 0.20),
+    )
+    assert [n["family"] for n in nominated] == ["SkewNormal", "NegBin", "SkewNormal"]
+
+
+def test_nominees_interleave_noop_without_a_count_board_row(monkeypatch):
+    _integer_target_context(monkeypatch)
+    nominated = _nominate(*_all_sn_top())
+    assert [n["family"] for n in nominated] == ["SkewNormal"] * mc.CONFIRM_TOP_K
+
+
+def test_nominees_interleave_noop_on_non_integer_target():
+    """The default fixture context carries no integer-lattice fact, so the top-K stands as ranked."""
+    nominated = _nominate(*_all_sn_top(count_slack=0.05))
+    assert [n["family"] for n in nominated] == ["SkewNormal"] * mc.CONFIRM_TOP_K
+
+
+def test_nominees_sort_by_discounted_slack_when_present_else_slack():
+    """The board lane ranks by the sweep's confirm-priced ``discounted_slack`` when the column
+    exists, so the two changes can land in either order; the source label keeps the raw slack.
+    """
+    raw_leader = _sn_row("ratio_meanyr", "crps", "nll", False, 0.40)
+    discount_leader = _sn_row("centered_additive_mean10", "crps", "crps", False, 0.30)
+    assert [n["slack"] for n in _nominate(raw_leader, discount_leader)] == [0.40, 0.30]
+
+    raw_leader["discounted_slack"] = -0.10
+    discount_leader["discounted_slack"] = 0.25
+    nominated = _nominate(raw_leader, discount_leader)
+    assert [n["slack"] for n in nominated] == [0.30, 0.40]
+    assert nominated[0]["edits"]["target_normalization"] == "centered_additive_mean10"
+    assert nominated[0]["source"] == "board slack +0.300"
+
+
 def test_nominees_structural_method_persists_full_recipe_and_identity():
     slug = AFFINE_STRATEGY
     cand = _nominate(_structural_row(slug, "rushing yards"))[0]
@@ -558,6 +657,63 @@ def test_run_meditate_reports_why_the_subprocess_failed(monkeypatch, tmp_path):
     assert mc._run_meditate("NBA", "PTS", ordinary) == "native abort (SIGABRT)"
 
 
+def test_pin_cell_matrix_freezes_the_frame_every_nominee_trains_on(monkeypatch, tmp_path):
+    """The walk copies the cached matrix + a manifest the production validator accepts, and
+    ``_run_meditate`` points every nominee of the cell at that same frozen dir.
+    """
+    monkeypatch.setattr(mc, "_CONFIRM_LOG_ROOT", tmp_path / "confirm")
+    source = tmp_path / "WNBA_AST.parquet"
+    pd.DataFrame({"Result": [3.0, 5.0], "MeanYr": [4.1, 4.4]}).to_parquet(source)
+    monkeypatch.setattr(mc, "_training_matrix_path", lambda league, market: source)
+
+    frozen_dir = _REAL_PIN_CELL_MATRIX("WNBA", "AST")
+
+    frozen = frozen_dir / "WNBA_AST.parquet"
+    assert frozen.read_bytes() == source.read_bytes()
+    validate_matrix_manifest(frozen, pd.read_parquet(frozen))
+    manifest = json.loads(frozen.with_suffix(".manifest.json").read_text())
+    assert set(manifest) == {
+        "builder_version",
+        "schema_version",
+        "row_count",
+        "feature_schema",
+        "matrix_sha256",
+    }
+
+    commands = []
+    monkeypatch.setattr(
+        mc, "_run_meditate_with_lock_retry", lambda cmd, path, timeout: commands.append(cmd)
+    )
+    for row in (
+        _sn_row("ratio_meanyr", "crps", "nll", True, 0.2),
+        _sn_row("centered_additive_mean10", "crps", "crps", True, 0.1),
+    ):
+        assert mc._run_meditate("WNBA", "AST", _nominate(row)[0]) == ""
+    dirs = [cmd[cmd.index("--frozen-matrix-dir") + 1] for cmd in commands]
+    assert dirs == [str(frozen_dir), str(frozen_dir)]
+    assert all("--force" in cmd for cmd in commands)  # frozen input still needs the skip override
+
+
+def test_pin_cell_matrix_fails_loud_without_a_cached_matrix(monkeypatch, tmp_path):
+    """A swept cell always has a cached parquet; a missing one is a broken invariant, not a skip."""
+    monkeypatch.setattr(mc, "_CONFIRM_LOG_ROOT", tmp_path)
+    monkeypatch.setattr(
+        mc, "_training_matrix_path", lambda league, market: tmp_path / "absent.parquet"
+    )
+    with pytest.raises(FileNotFoundError):
+        _REAL_PIN_CELL_MATRIX("WNBA", "AST")
+
+
+def test_walk_nominees_pins_the_matrix_once_per_cell(monkeypatch):
+    pinned = []
+    monkeypatch.setattr(
+        mc, "_pin_cell_matrix", lambda league, market: pinned.append((league, market))
+    )
+    nominated = _walk_stubs("board slack +0.300", "board slack +0.200")
+    mc._walk_nominees({}, nominated, lambda meta, cand: ("WNBA", "AST", "REVERTED", ["g4"]))
+    assert pinned == [("WNBA", "AST")]
+
+
 def test_ship_verdict_is_bound_to_reported_structural_method(monkeypatch):
     slug = AFFINE_STRATEGY
     expected = build_artifact_identity(
@@ -608,6 +764,7 @@ def test_a_gate_miss_is_reported_as_the_gate_not_a_missing_artifact(monkeypatch)
     """
     candidate = _nominate(_sn_row("ratio_meanyr", "crps", "nll", True, 0.2))[0]
     monkeypatch.setattr(mc, "_run_meditate", lambda *args: "")
+    monkeypatch.setattr(mc, "_record_nominee_gates", lambda *args: False)
     monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
     monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: ["g4"])
     monkeypatch.setattr(
@@ -617,6 +774,44 @@ def test_a_gate_miss_is_reported_as_the_gate_not_a_missing_artifact(monkeypatch)
     )
 
     assert mc._confirm_meditate("WNBA", "AST", candidate) == ["g4"]
+
+
+def test_confirm_meditate_prepends_diverged_to_the_failed_gates(monkeypatch):
+    """A diverged fit (dispersion calibrator on its floor) is named ahead of the gates it fails, so
+    the report sends triage to the fit rather than the anonymous gate list — but a diverged flag
+    alone never blocks a ship (the gates already decide).
+    """
+    candidate = _nominate(_sn_row("ratio_meanyr", "crps", "nll", True, 0.2))[0]
+    monkeypatch.setattr(mc, "_run_meditate", lambda *args: "")
+    monkeypatch.setattr(mc, "_record_nominee_gates", lambda *args: True)
+    monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
+    monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: ["g1", "g4"])
+
+    assert mc._confirm_meditate("WNBA", "AST", candidate) == ["diverged", "g1", "g4"]
+
+    monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: [])
+    monkeypatch.setattr(mc, "_produced_artifacts_match", lambda *args: True)
+    monkeypatch.setattr(mc, "_ship_from_model_stats", lambda *args: True)
+    assert mc._confirm_meditate("WNBA", "AST", candidate) == []
+
+
+def test_record_nominee_gates_marks_dispersion_floor_as_diverged(monkeypatch, tmp_path):
+    """dispersion_cal at/below the floor margin classifies the fit diverged — returned to the
+    caller and recorded as the ledger's ``diverged`` column.
+    """
+    ledger = tmp_path / "ledger.csv"
+    monkeypatch.setattr(mc, "NOMINEE_LEDGER_PATH", ledger)
+    rows = iter(
+        pd.Series({"league": "WNBA", "market": "AST", "dispersion_cal": cal})
+        for cal in (0.1, 0.1005, 0.2)
+    )
+    monkeypatch.setattr(mc, "_cell_row", lambda league, market, columns: next(rows))
+    candidate = {"strategy_slug": "SkewNormal", "source": "board slack +0.300"}
+
+    assert mc._record_nominee_gates("WNBA", "AST", candidate) is True
+    assert mc._record_nominee_gates("WNBA", "AST", candidate) is True
+    assert mc._record_nominee_gates("WNBA", "AST", candidate) is False
+    assert pd.read_csv(ledger)["diverged"].tolist() == [True, True, False]
 
 
 def test_confirm_accepts_a_retrain_whose_force_update_moved_the_matrix(monkeypatch):
@@ -675,6 +870,7 @@ def test_confirm_accepts_a_retrain_whose_force_update_moved_the_matrix(monkeypat
 def test_withheld_confirm_fails_closed_before_model_stats_when_artifacts_do_not_match(monkeypatch):
     candidate = _nominate(_sn_row("ratio_meanyr", "crps", "nll", True, 0.2))[0]
     monkeypatch.setattr(mc, "_run_meditate", lambda *args: "")
+    monkeypatch.setattr(mc, "_record_nominee_gates", lambda *args: False)
     monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
     monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: [])
     monkeypatch.setattr(mc, "_produced_artifacts_match", lambda *args: False)
@@ -1158,6 +1354,7 @@ def _patch_supersede_io(monkeypatch, *, verdict, meditate_ok=True, model_stats_o
     monkeypatch.setattr(
         mc, "_run_meditate", lambda lg, mkt, candidate: "" if meditate_ok else "exit 1"
     )
+    monkeypatch.setattr(mc, "_record_nominee_gates", lambda lg, mkt, candidate: False)
     monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
     monkeypatch.setattr(mc, "_produced_artifacts_match", lambda *args: True)
     monkeypatch.setattr(
@@ -1186,6 +1383,15 @@ def test_supersede_hold_restores_incumbent_and_never_prunes(monkeypatch, capsys)
     assert restored[0][:2] == ("NBA", "PTS")
     assert pruned == []  # live cell keeps serving
     assert "S3" in capsys.readouterr().out  # the comparison was printed
+
+
+def test_supersede_prepends_diverged_on_a_held_verdict(monkeypatch):
+    meta = _shipped_meta()
+    _patch_supersede_io(monkeypatch, verdict=_verdict(ship=False, s3=False))
+    monkeypatch.setattr(mc, "_record_nominee_gates", lambda lg, mkt, candidate: True)
+    result = mc._supersede_one(meta, _supersede_cand())
+    assert result[:3] == ("NBA", "PTS", "HELD")
+    assert result[3] == ["diverged", "S3"]
 
 
 def test_supersede_pass_and_yes_keeps_candidate(monkeypatch):
@@ -1287,7 +1493,7 @@ def test_supersede_restores_on_verdict_exception(monkeypatch):
 def test_nominee_ledger_stays_parseable_when_model_stats_widens(monkeypatch, tmp_path):
     """A later, wider model_stats row must not strand the ledger behind a narrower header."""
     ledger = tmp_path / "confirm_nominee_gates.csv"
-    monkeypatch.setattr(mc, "_NOMINEE_LEDGER_PATH", ledger)
+    monkeypatch.setattr(mc, "NOMINEE_LEDGER_PATH", ledger)
     rows = iter(
         [
             pd.Series({"league": "NBA", "market": "PTS", "g4_iqr_ratio": 0.91}),
@@ -1307,6 +1513,50 @@ def test_nominee_ledger_stays_parseable_when_model_stats_widens(monkeypatch, tmp
     assert list(recorded["g4_iqr_ratio"]) == [0.91, 0.88]
     assert recorded["g7_new_gate"].isna().tolist() == [True, False]
     assert set(recorded["strategy_slug"]) == {"sn-centered"}
+
+
+def test_ledger_echoes_board_gates_for_board_nominees_only(monkeypatch, tmp_path):
+    """Board nominees carry their board row's gate values into the ledger (``board_*`` columns), so
+    board↔confirm comparisons read one row; seed/incumbent nominees leave them NaN.
+    """
+    ledger = tmp_path / "ledger.csv"
+    monkeypatch.setattr(mc, "NOMINEE_LEDGER_PATH", ledger)
+    row = _sn_row("centered_additive_mean10", "crps", "crps", False, 0.25)
+    row.update(
+        {
+            "g1_brier_diff_ci_hi": 0.01,
+            "g2_star_z": 1.5,
+            "g3_bench_z": 0.8,
+            "g4_pit_ks": 0.06,
+            "g4_pit_ks_max": 0.05,
+            "g5_ece_debiased": 0.04,
+            "n": 373,
+            "swept_at": "2026-07-29T00:00:00+00:00",
+        }
+    )
+    _seed_corners(monkeypatch, _sn_controls("ratio_projvol", "nll", "nll"))
+    board_cand, seed_cand = _nominate(row)
+    stats_row = pd.Series({"league": "WNBA", "market": "AST", "dispersion_cal": 1.0})
+    monkeypatch.setattr(mc, "_cell_row", lambda league, market, columns: stats_row)
+
+    mc._record_nominee_gates("WNBA", "AST", board_cand)
+    mc._record_nominee_gates("WNBA", "AST", seed_cand)
+
+    recorded = pd.read_csv(ledger)
+    board_row = recorded.iloc[0]
+    assert board_row["board_slack"] == 0.25
+    assert board_row["board_g1_brier_diff_ci_hi"] == 0.01
+    assert board_row["board_g2_star_z"] == 1.5
+    assert board_row["board_g3_bench_z"] == 0.8
+    assert board_row["board_g4_pit_ks"] == 0.06
+    assert board_row["board_g4_pit_ks_max"] == 0.05
+    assert board_row["board_g5_ece_debiased"] == 0.04
+    assert board_row["board_n"] == 373
+    assert board_row["board_eval_split"] == EVAL_SPLIT_CROSSFIT
+    assert board_row["board_swept_at"] == "2026-07-29T00:00:00+00:00"
+    seed_row = recorded.iloc[1]
+    assert seed_row[[f"board_{f}" for f in ("slack", "g2_star_z", "eval_split")]].isna().all()
+    assert recorded["diverged"].tolist() == [False, False]
 
 
 def test_confirm_nominee_cap_truncates_each_cell_after_dedup(monkeypatch):

@@ -80,6 +80,49 @@ def test_pick_calibrated_candidate_prefers_lowest_loss_within_threshold():
     assert picked["name"] == "calibrated_best"
 
 
+def test_pick_calibrated_candidate_logs_headroom(caplog):
+    """R2 step 1 (Experiment-B probe): one INFO line reports the feasible set the
+    epsilon-constraint saw — min PIT-KS, feasible count, threshold, and the CRPS price
+    of feasibility (best feasible minus global best); price is n/a when no trial is
+    feasible. Diagnostic only — the pick itself is unchanged."""
+    import logging
+
+    from sportstradamus.training.pipeline import _pick_calibrated_candidate
+
+    # _pick_calibrated_candidate's logger sets propagate=False (helpers.get_logger),
+    # so attach caplog's handler directly to it by its real name.
+    target = logging.getLogger("sportstradamus.cli.sportstradamus.training.pipeline")
+    target.addHandler(caplog.handler)
+    try:
+        _pick_calibrated_candidate(
+            [
+                {"cv_loss": 1.0, "pit_ks": 0.20},
+                {"cv_loss": 1.2, "pit_ks": 0.03},
+                {"cv_loss": 1.5, "pit_ks": 0.04},
+            ],
+            threshold=0.05,
+        )
+        _pick_calibrated_candidate(
+            [
+                {"cv_loss": 1.0, "pit_ks": 0.20},
+                {"cv_loss": 1.4, "pit_ks": 0.11},
+            ],
+            threshold=0.05,
+        )
+    finally:
+        target.removeHandler(caplog.handler)
+
+    headroom = [r.getMessage() for r in caplog.records if "headroom" in r.getMessage()]
+    assert len(headroom) == 2
+    assert "min_pit_ks=0.0300" in headroom[0]
+    assert "feasible=2/3" in headroom[0]
+    assert "threshold=0.0500" in headroom[0]
+    assert "crps_price=0.20000" in headroom[0]  # cv_loss(best feasible 1.2) - cv_loss(best 1.0)
+    assert "min_pit_ks=0.1100" in headroom[1]
+    assert "feasible=0/2" in headroom[1]
+    assert "crps_price=n/a" in headroom[1]
+
+
 def test_pick_calibrated_candidate_falls_back_to_best_pit_ks():
     """When no trial clears the threshold, fall back to the best-calibrated (not the sharpest)."""
     from sportstradamus.training.pipeline import _pick_calibrated_candidate

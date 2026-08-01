@@ -15,6 +15,7 @@ and that a legacy row scored on the ship holdout is inert.
 """
 
 import json
+import pathlib
 import subprocess
 
 import click
@@ -101,6 +102,16 @@ def _sandboxed_study_journal(monkeypatch, tmp_path):
     silently and let real journals through.
     """
     monkeypatch.setattr(tpe_search, "_STUDY_ROOT", tmp_path / "optuna")
+
+
+@pytest.fixture(autouse=True)
+def _sandboxed_nominee_ledger(monkeypatch, tmp_path):
+    """Point the confirm ledger at a per-test path so no test reads the real research/ CSV.
+
+    ``search_cell`` now prices its board against the ledger, so without this every orchestration
+    test would read whatever ``research/confirm_nominee_gates.csv`` the box happens to carry.
+    """
+    monkeypatch.setattr(sweep, "NOMINEE_LEDGER_PATH", tmp_path / "confirm_nominee_gates.csv")
 
 
 def _canned_row(*, ship, g4_pit_ks):
@@ -1891,3 +1902,266 @@ def test_cli_single_cell_upserts_into_existing_board(monkeypatch, tmp_path):
         ("NBA", "FGA"),
     }
     assert int((reswept["league"] == "NBA").sum()) == n_other_cell
+
+
+# --- ledger discounts, confirm risk, calibrated expectations ---------------------------------
+
+
+def _ledger_row(**overrides):
+    """One confirm-ledger row (the model_stats echo confirm.py records per nominee)."""
+    row = {
+        "recorded_at": "2026-07-28T00:00:00",
+        "strategy_slug": "SkewNormal",
+        "source": "board slack +0.100",
+        "league": "WNBA",
+        "market": "AST",
+        "distribution": "SkewNormal",
+        "strategy_controls_json": '{"corner":0}',
+        "dispersion_cal": 1.0,
+        "ship": False,
+        "g4_pit_ks": 0.06,
+        "g2_star_z": 1.5,
+        "g3_bench_z": 0.8,
+        "g5_ece_debiased": 0.04,
+        "g1_brier_diff_ci_hi": 0.01,
+    }
+    row.update(overrides)
+    return row
+
+
+def _board_csv_row(controls_json):
+    """The board-side row a ledger nominee joins against, with known gate values."""
+    return {
+        "league": "WNBA",
+        "market": "AST",
+        "strategy_slug": "SkewNormal",
+        "controls_json": controls_json,
+        "g4_pit_ks": 0.05,
+        "g2_star_z": 1.0,
+        "g3_bench_z": 1.0,
+        "g5_ece_debiased": 0.03,
+        "g1_brier_diff_ci_hi": 0.0,
+    }
+
+
+def test_ledger_gate_discounts_joins_board_drops_diverged_and_goes_inert_when_thin(tmp_path):
+    out = tmp_path / "board.csv"
+    ledger_rows, board_rows = [], []
+    for i in range(9):
+        controls = f'{{"corner":{i}}}'
+        ledger_rows.append(_ledger_row(strategy_controls_json=controls))
+        board_rows.append(_board_csv_row(controls))
+    # A diverged confirm (dispersion_cal on its 0.1 floor) and a seed row absent from the board.
+    ledger_rows.append(
+        _ledger_row(strategy_controls_json='{"corner":90}', dispersion_cal=0.1000001, g4_pit_ks=9.0)
+    )
+    board_rows.append(_board_csv_row('{"corner":90}'))
+    ledger_rows.append(_ledger_row(strategy_controls_json='{"corner":91}', source="seed/incumbent"))
+
+    assert sweep._ledger_gate_discounts(str(out)) == {}  # no ledger file yet
+
+    pd.DataFrame(ledger_rows).to_csv(sweep.NOMINEE_LEDGER_PATH, index=False)
+    assert sweep._ledger_gate_discounts(None) == {}  # no board CSV to pair against
+    pd.DataFrame(board_rows).to_csv(out, index=False)
+
+    discounts = sweep._ledger_gate_discounts(str(out))
+    assert set(discounts) == set(sweep._DISCOUNTED_GATES)
+    assert discounts["g4_pit_ks"] == pytest.approx(0.01)
+    assert discounts["g2_star_z"] == pytest.approx(0.5)
+    assert discounts["g3_bench_z"] == pytest.approx(-0.2)  # a gate confirm lands better on
+    assert discounts["g5_ece_debiased"] == pytest.approx(0.01)
+    assert discounts["g1_brier_diff_ci_hi"] == pytest.approx(0.01)
+
+    # 7 clean pairs + the diverged one: dropping the diverged row is what makes the ledger thin.
+    thin = [*ledger_rows[:7], ledger_rows[9]]
+    pd.DataFrame(thin).to_csv(sweep.NOMINEE_LEDGER_PATH, index=False)
+    assert sweep._ledger_gate_discounts(str(out)) == {}
+
+
+def test_ledger_gate_discounts_prefers_board_echo_columns():
+    """Once confirm echoes ``board_*`` gate values into the ledger, no board CSV join is needed."""
+    echo = {f"board_{gate}": 0.0 for gate in sweep._DISCOUNTED_GATES}
+    rows = [_ledger_row(strategy_controls_json=f'{{"corner":{i}}}', **echo) for i in range(8)]
+    pd.DataFrame(rows).to_csv(sweep.NOMINEE_LEDGER_PATH, index=False)
+
+    discounts = sweep._ledger_gate_discounts(None)
+
+    assert discounts["g4_pit_ks"] == pytest.approx(0.06)
+    assert discounts["g2_star_z"] == pytest.approx(1.5)
+    assert set(discounts) == set(sweep._DISCOUNTED_GATES)
+
+
+def _gate_scalars(g4, g4_max):
+    """Gate values whose g4 term binds min_gate_slack exactly (the others sit at full headroom)."""
+    return {
+        "g1_brier_diff_ci_hi": None,
+        "g2_star_z": 0.0,
+        "g3_bench_z": 0.0,
+        "g4_pit_ks": g4,
+        "g4_pit_ks_max": g4_max,
+        "g5_ece_debiased": 0.0,
+    }
+
+
+def _scored_row(marker, family, slack, gates):
+    return {
+        "family": family,
+        "strategy_slug": family,
+        "structural_strategy": BASE_STRUCTURAL_STRATEGY,
+        "controls_json": marker,
+        "slack": slack,
+        "ships": slack > 0,
+        **gates,
+    }
+
+
+def test_rank_cell_board_discounted_slack_reranks_and_matches_slack_when_inert():
+    """The same +0.02 g4 shift costs a thin-scale corner its rank while a wide-scale corner
+    absorbs it; inert discounts leave the board byte-identical to the slack ranking; a failed
+    corner stays ``-inf``; and discounting never lifts a row above its raw slack (the g6 bind
+    the board columns don't carry survives via the cap).
+    """
+    scored = {
+        "thin": _scored_row("thin-headroom", "SkewNormal", 0.10, _gate_scalars(0.045, 0.05)),
+        "wide": _scored_row("wide-scale", "NegBin", 0.09, _gate_scalars(0.455, 0.5)),
+        "g6": _scored_row("g6-bound", "NegBin", 0.02, _gate_scalars(0.01, 0.05)),
+        "dead": {
+            "family": "SkewNormal",
+            "strategy_slug": "SkewNormal",
+            "controls_json": "dead",
+            "slack": sweep._FAILED_CORNER_SLACK,
+            "ships": False,
+        },
+    }
+
+    inert = sweep._rank_cell_board("WNBA", "AST", scored)
+    assert inert["discounted_slack"].tolist() == inert["slack"].tolist()
+    assert inert["controls_json"].tolist() == ["thin-headroom", "wide-scale", "g6-bound", "dead"]
+
+    ranked = sweep._rank_cell_board("WNBA", "AST", scored, {"g4_pit_ks": 0.02})
+    assert ranked["controls_json"].tolist() == ["wide-scale", "g6-bound", "thin-headroom", "dead"]
+    by_marker = ranked.set_index("controls_json")
+    assert by_marker.loc["thin-headroom", "discounted_slack"] == pytest.approx(-0.3)
+    assert by_marker.loc["wide-scale", "discounted_slack"] == pytest.approx(0.05)
+    # g6-bound: the g1-g5 recompute (0.4) exceeds the stored slack, so the cap holds it at 0.02.
+    assert by_marker.loc["g6-bound", "discounted_slack"] == pytest.approx(0.02)
+    assert by_marker.loc["dead", "discounted_slack"] == sweep._FAILED_CORNER_SLACK
+    # Raw slack and raw gate values stay untouched — only the ranking column shifts.
+    assert by_marker.loc["thin-headroom", "slack"] == pytest.approx(0.10)
+    assert by_marker.loc["thin-headroom", "g4_pit_ks"] == pytest.approx(0.045)
+
+
+def test_confirm_risk_flags_continuous_on_integer_target_and_g4_inside_inflation(monkeypatch):
+    context = sweep._cell_context("WNBA", "AST")  # integer target via the fixed matrix contract
+    sn = {"family": "SkewNormal", **_gate_scalars(0.01, 0.05)}
+    assert sweep._confirm_risk(sn, context, {}) == "high"
+
+    count_safe = {"family": "NegBin", **_gate_scalars(0.03, 0.05)}
+    assert sweep._confirm_risk(count_safe, context, {"g4_pit_ks": 0.01}) == ""
+    count_tight = {"family": "NegBin", **_gate_scalars(0.045, 0.05)}
+    assert sweep._confirm_risk(count_tight, context, {"g4_pit_ks": 0.0115}) == "high"
+
+    # On a non-integer target the continuous family alone is not a risk shape.
+    monkeypatch.setattr(
+        sweep, "_training_matrix_contract", lambda lg, mkt: (frozenset(), _MATRIX_SHA, False, 41.2)
+    )
+    assert sweep._confirm_risk(sn, sweep._cell_context("WNBA", "AST"), {}) == ""
+
+
+def test_search_cell_threads_ledger_discounts_into_the_board(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_discounts(out):
+        seen["out"] = out
+        return {"g4_pit_ks": 0.02}
+
+    monkeypatch.setattr(sweep, "_ledger_gate_discounts", fake_discounts)
+    monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
+    monkeypatch.setattr(sweep, "_known_good_corners", lambda context: [])
+    monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
+    out = str(tmp_path / "board.csv")
+
+    board = sweep.search_cell("WNBA", "AST", max_trials=4, out=out)
+
+    assert seen["out"] == out
+    # Every fake row carries g4 0.04/0.05, so the +0.02 shift prices each at (0.05-0.06)/0.05.
+    assert board["discounted_slack"].tolist() == pytest.approx([-0.2] * len(board))
+    assert (board["g4_pit_ks"] == 0.04).all()
+    assert board["slack"].max() > 0  # raw slack survives beside the discounted ranking
+    persisted = sweep._read_board(pathlib.Path(out))
+    assert persisted["discounted_slack"].astype(float).tolist() == pytest.approx(
+        [-0.2] * len(board)
+    )
+
+
+def test_read_board_backfills_the_ranking_columns_on_legacy_csvs(tmp_path):
+    out = tmp_path / "board.csv"
+    pd.DataFrame([{"league": "WNBA", "market": "AST", "slack": 0.1, "ships": True}]).to_csv(
+        out, index=False
+    )
+    board = sweep._read_board(out)
+    assert list(board.columns) == sweep._BOARD_COLUMNS
+    assert board["discounted_slack"].isna().all() and board["confirm_risk"].isna().all()
+    order = sweep._BOARD_COLUMNS.index
+    assert order("ships") < order("discounted_slack") < order("confirm_risk")
+
+
+def test_cell_summary_shows_discounted_slack_and_risk(capsys):
+    board = pd.DataFrame(
+        [
+            {
+                "league": "WNBA",
+                "market": "AST",
+                "strategy_slug": "SkewNormal",
+                "structural_strategy": BASE_STRUCTURAL_STRATEGY,
+                "controls_json": "{}",
+                "slack": 0.1,
+                "discounted_slack": 0.04,
+                "confirm_risk": "high",
+                "ships": False,
+                "g4_pass": False,
+            }
+        ]
+    )
+    sweep._print_cell_summary(board)
+    out = capsys.readouterr().out
+    assert "disc slack" in out and "risk" in out
+    corner_line = next(line for line in out.splitlines() if "SkewNormal" in line)
+    assert "0.04" in corner_line and "high" in corner_line
+
+
+def test_rollup_prints_calibrated_expectations_and_skips_thin_ledger(capsys):
+    board = pd.DataFrame({"league": ["WNBA"], "market": ["AST"], "ships": [False]})
+
+    sweep._print_board_rollup(board)  # no ledger at all
+    assert "P(ship)" not in capsys.readouterr().out
+
+    count_row = {"distribution": "NegBin", "strategy_slug": "NegBin"}
+    rows = (
+        [_ledger_row(source="board slack +0.030", ship=True)] * 2
+        + [_ledger_row(source="board slack +0.030", ship=False)] * 2
+        + [_ledger_row(source="board slack +0.100", ship=True, **count_row)] * 3
+        + [_ledger_row(source="board slack +0.100", ship=False, **count_row)]
+        + [_ledger_row(source="board slack +0.200", ship=False)]
+        + [_ledger_row(source="seed/incumbent", ship=True)]  # no board slack → not usable
+    )
+    pd.DataFrame(rows).to_csv(sweep.NOMINEE_LEDGER_PATH, index=False)
+    sweep._print_board_rollup(board)
+    out = capsys.readouterr().out
+    assert "P(ship)" in out and "(9 ledger nominees)" in out
+    assert "50% (4)" in out  # continuous, <0.05
+    assert "75% (4)" in out  # count, 0.05-0.15
+    top_band = next(line for line in out.splitlines() if ">=0.15" in line)
+    assert "0% (1)" in top_band and " - " in top_band  # no count observations in the band
+
+    # A board_slack echo column takes precedence over parsing the source label.
+    echoed = pd.DataFrame(rows).assign(
+        source="rewritten label", board_slack=[0.03] * 4 + [0.10] * 4 + [0.20, None]
+    )
+    echoed.to_csv(sweep.NOMINEE_LEDGER_PATH, index=False)
+    sweep._print_board_rollup(board)
+    assert "(9 ledger nominees)" in capsys.readouterr().out
+
+    pd.DataFrame(rows[:7]).to_csv(sweep.NOMINEE_LEDGER_PATH, index=False)
+    sweep._print_board_rollup(board)
+    assert "P(ship)" not in capsys.readouterr().out

@@ -10,7 +10,8 @@ deterministic trials — it never ships. This module turns a ranked board into s
    outranking ZINB persists ``dist=NegBin`` and flips the cell's family).
 2. Prompt, then per nominee in order: write its persist fields + ``shipped="devel"`` to
    ``stat_meta.json`` (so the confirm ``meditate`` reads the exact config being shipped), run a
-   **full-HPO** ``meditate``, and read the official ``ship`` verdict from ``model_stats.parquet``.
+   **full-HPO** ``meditate`` on the walk's pinned training matrix, and read the official ``ship``
+   verdict from ``model_stats.parquet``.
 3. A pass keeps the cell on devel and ends its walk; a failure **auto-reverts** — restore the
    original stat_meta entry *and* :func:`prune_model_pickle` — and the next nominee is tried. The
    pickle prune is mandatory: inference loads pickles by path and never consults ``shipped``, so
@@ -38,6 +39,11 @@ from sportstradamus.helpers.io import (
     model_pickle_path,
     prune_model_pickle,
 )
+from sportstradamus.training.lineage import (
+    MATRIX_BUILDER_VERSION,
+    MATRIX_SCHEMA_VERSION,
+    file_sha,
+)
 from sportstradamus.training.model_strategy.identity import (
     ArtifactIdentity,
     build_artifact_identity,
@@ -51,6 +57,7 @@ from sportstradamus.training.model_strategy.registry import (
     CAP_SCORE,
     CAP_SERVE,
     controls_json,
+    distribution_class,
     get_strategy,
     meditate_command,
     parse_controls,
@@ -60,14 +67,17 @@ from sportstradamus.training.model_strategy.registry import (
     strategy_persistence_edits,
 )
 from sportstradamus.training.model_strategy.sweep import (
+    _DIVERGED_DISPERSION_CAL,
     _GATES,
     _SHIP_PRED_COL,
     _TEST_SETS_ROOT,
     EVAL_SPLIT_CROSSFIT,
+    NOMINEE_LEDGER_PATH,
     _cell_context,
     _failure_reason,
     _known_good_corners,
     _run_meditate_with_lock_retry,
+    _training_matrix_path,
 )
 from sportstradamus.training.scorecard import _supersede_headline, load_test_set, supersede_verdict
 from sportstradamus.training.ship_config import STAT_META_PATH, WITHHELD, load_stat_meta
@@ -75,8 +85,22 @@ from sportstradamus.training.ship_config import STAT_META_PATH, WITHHELD, load_s
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
 _STAT_META = pathlib.Path(str(STAT_META_PATH))
 _CONFIRM_LOG_ROOT = _REPO_ROOT / "research" / "logs" / "confirm"
-_NOMINEE_LEDGER_PATH = _REPO_ROOT / "research" / "confirm_nominee_gates.csv"
 _SHIPPED_DEVEL = "devel"
+# Board-row gate values echoed onto each board nominee (as ``board_*`` ledger columns), so a
+# board↔confirm comparison reads one ledger row instead of joining two CSVs. Seed/incumbent
+# nominees have no board row and leave them NaN.
+_BOARD_ECHO_FIELDS: tuple[str, ...] = (
+    "slack",
+    "g1_brier_diff_ci_hi",
+    "g2_star_z",
+    "g3_bench_z",
+    "g4_pit_ks",
+    "g4_pit_ks_max",
+    "g5_ece_debiased",
+    "n",
+    "eval_split",
+    "swept_at",
+)
 # Leagues whose withheld cells confirm may never auto-flip: a board-passing cell is announced and
 # skipped until the owner's activation gates (D1/D2) go GO, then the league is removed here in the
 # same PR that ships its first cells. Empty since the MLB+NHL GO (2026-07-09,
@@ -119,20 +143,28 @@ def _nominees(sub: pd.DataFrame) -> list[dict]:
     at all; the six gates still decide, just after the retrain rather than before it.
 
     Ordering is the argument each source can make. Board rows first — the search's own ranked
-    recommendation on honest out-of-fold data. Seeds next: independent full-HPO held-out evidence the
+    recommendation on honest out-of-fold data, by ``discounted_slack`` when the sweep prices it
+    (falling back to raw ``slack`` on older boards) — with the best count-class corner interleaved
+    second on an integer-target cell whose top corners are all continuous-family
+    (:func:`_count_class_backup`). Seeds next: independent full-HPO held-out evidence the
     deterministic ranking demonstrably cannot see. The incumbent last, so a cell is never downgraded
     by an unlucky list. Rows scored against the ship holdout (legacy ``eval_split``) never nominate.
     """
     lg, mkt = sub["league"].iloc[0], sub["market"].iloc[0]
     context = _cell_context(lg, mkt)
     admissible = sub[sub["eval_split"].astype("string").eq(EVAL_SPLIT_CROSSFIT)]
+    rank_column = "discounted_slack" if "discounted_slack" in admissible.columns else "slack"
+    ranked = admissible.sort_values(rank_column, ascending=False)
     nominated: list[dict] = []
-    for _, row in admissible.sort_values("slack", ascending=False).iterrows():
+    for _, row in ranked.iterrows():
         if len(nominated) >= CONFIRM_TOP_K:
             break
         cand = _board_candidate_row(row, context, lg, mkt)
         if cand is not None:
             nominated.append({**cand, "source": f"board slack {cand['slack']:+.3f}"})
+    backup = _count_class_backup(ranked, nominated, context, lg, mkt)
+    if backup is not None:
+        nominated.insert(1, backup)
     for spec, controls in _known_good_corners(context):
         cand = _corner_candidate(context, spec, lg, mkt, controls, slack=math.nan, split=None)
         if cand is not None:
@@ -143,6 +175,31 @@ def _nominees(sub: pd.DataFrame) -> list[dict]:
         for cand in nominated
         if not (cand["corner_fingerprint"] in seen or seen.add(cand["corner_fingerprint"]))
     ]
+
+
+def _count_class_backup(
+    ranked: pd.DataFrame, nominated: list[dict], context, league: str, market: str
+) -> dict | None:
+    """The best count-class board corner to slot second on an integer-target cell, or ``None``.
+
+    An integer-target cell's top corners are often all SkewNormal — the family whose full-HPO fit
+    can diverge — while stable count-family corners rank just below; whole walks burned on that
+    pattern. Interleaving the best count corner at slot 2 costs nothing when the leader confirms
+    and saves the walk when it diverges. No-op when the cell's target is not on the integer
+    lattice, nothing was nominated, a count corner already sits in the top slots, or the board has
+    no admissible count-class row. Insert-only: no continuous nominee is dropped.
+    """
+    if not context.target_is_integer or not nominated:
+        return None
+    if any(distribution_class(cand["family"]) == "count" for cand in nominated):
+        return None
+    for _, row in ranked.iterrows():
+        if distribution_class(str(row["family"])) != "count":
+            continue
+        cand = _board_candidate_row(row, context, league, market)
+        if cand is not None:
+            return {**cand, "source": f"board slack {cand['slack']:+.3f}"}
+    return None
 
 
 def _corner_candidate(
@@ -205,7 +262,10 @@ def _board_candidate_row(row: pd.Series, context, league: str, market: str) -> d
     slack = float(row["slack"])
     if not math.isfinite(slack):
         raise ValueError(f"{league} {market}: candidate slack must be finite")
-    return _corner_candidate(context, spec, league, market, controls, slack=slack, split=split)
+    cand = _corner_candidate(context, spec, league, market, controls, slack=slack, split=split)
+    if cand is not None:
+        cand["board_gates"] = {f"board_{field}": row.get(field) for field in _BOARD_ECHO_FIELDS}
+    return cand
 
 
 def _required_text(row: pd.Series, field: str, league: str, market: str) -> str:
@@ -323,9 +383,8 @@ def _cell_artifacts(league: str, market: str) -> list[pathlib.Path]:
 
     Deliberately excluded: the per-cell training-matrix cache (``training_data/{slug}.parquet``) and
     the per-league caches (gamelog, ``comps.json``, correlation matrices). Those are training inputs,
-    never read at serve time, and strategy-independent — a candidate run reproduces them identically,
-    so a HOLD that leaves them in candidate state changes nothing served and the next ``meditate``
-    rebuilds them.
+    never read at serve time — and a confirm retrain trains from the walk's frozen snapshot
+    (``--frozen-matrix-dir``) without touching any of them.
     """
     slug = market_file_slug(league, market)
     training_dir = MODEL_STATS_PATH.parent
@@ -412,33 +471,43 @@ def _ship_from_model_stats(league: str, market: str, expected: ArtifactIdentity)
     return _split_matches(row["strategy_split_fingerprint"], expected.split_fingerprint)
 
 
-def _record_nominee_gates(league: str, market: str, candidate: dict) -> None:
+def _record_nominee_gates(league: str, market: str, candidate: dict) -> bool:
     """Record the just-retrained nominee's whole model_stats row in the research ledger.
 
     This is the only moment that row exists. A losing nominee gets its pickle pruned, and
     ``report()`` rebuilds model_stats from the pickles on disk, so by the time the walk reports
     its verdict the gate values behind it are gone — leaving no way to compare a cell's board
-    numbers against its own confirm. Ledger only; nothing production reads it.
+    numbers against its own confirm. A board nominee's row also carries its board-side gate values
+    (``board_*``, from ``_board_candidate_row``); seed/incumbent rows leave them NaN. Ledger only;
+    nothing production reads it.
+
+    Returns whether the fit diverged — ``dispersion_cal`` on its floor
+    (:data:`_DIVERGED_DISPERSION_CAL`) — which is also recorded as the ``diverged`` column.
     """
     row = _cell_row(league, market, None)
     if row is None:
-        return
+        return False
+    dispersion = row.get("dispersion_cal")
+    diverged = bool(pd.notna(dispersion) and float(dispersion) <= _DIVERGED_DISPERSION_CAL)
     ledger = pd.DataFrame(
         [
             {
                 "recorded_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                 "strategy_slug": candidate["strategy_slug"],
                 "source": candidate["source"],
+                "diverged": diverged,
+                **candidate.get("board_gates", {}),
                 **row.to_dict(),
             }
         ]
     )
-    if _NOMINEE_LEDGER_PATH.exists():
+    if NOMINEE_LEDGER_PATH.exists():
         # Rewrite rather than append: model_stats widens as gates are added, and appending a
         # wider row under a header written by a narrower one yields a CSV no reader can parse.
-        ledger = pd.concat([pd.read_csv(_NOMINEE_LEDGER_PATH), ledger], ignore_index=True)
-    _NOMINEE_LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
-    ledger.to_csv(_NOMINEE_LEDGER_PATH, index=False)
+        ledger = pd.concat([pd.read_csv(NOMINEE_LEDGER_PATH), ledger], ignore_index=True)
+    NOMINEE_LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    ledger.to_csv(NOMINEE_LEDGER_PATH, index=False)
+    return diverged
 
 
 def _failed_gates_after(league: str, market: str) -> list[str]:
@@ -449,15 +518,55 @@ def _failed_gates_after(league: str, market: str) -> list[str]:
     return [g for g in _GATES if not bool(row[f"{g}_pass"])]
 
 
+def _frozen_matrix_dir(league: str, market: str) -> pathlib.Path:
+    """The per-cell dir a walk pins its training matrix into (shared by pin and retrain)."""
+    return _CONFIRM_LOG_ROOT / "frozen_matrix" / market_file_slug(league, market)
+
+
+def _pin_cell_matrix(league: str, market: str) -> pathlib.Path:
+    """Copy the cell's cached training matrix + lineage manifest into the walk's frozen dir.
+
+    Every nominee of the walk then retrains via ``--frozen-matrix-dir`` on this one frame — an
+    unpinned ``--force`` rewrote the matrix between nominees, so they scored different frames
+    (n_validation drifted 373/363/358 within one walk). Two side effects of meditate's frozen-input
+    mode are deliberate: the run cold-starts its HPO (warm pickle params are ignored, so every
+    nominee gets the same full search budget) and it skips the per-market book-weight refits (the
+    same isolation as the board's deterministic runs, keeping board and confirm aligned). A swept
+    cell always has a cached parquet — the sweep requires one — so a missing source fails loud
+    here. The snapshot stays on disk after the walk (research/ is gitignored), matching the
+    ``incumbent_backup`` pattern.
+    """
+    source = _training_matrix_path(league, market)
+    frozen_dir = _frozen_matrix_dir(league, market)
+    shutil.rmtree(frozen_dir, ignore_errors=True)
+    frozen_dir.mkdir(parents=True)
+    frozen = frozen_dir / source.name
+    shutil.copy2(source, frozen)
+    matrix = pd.read_parquet(frozen)
+    # Exactly the five fields lineage.validate_matrix_manifest checks on the frozen path.
+    manifest = {
+        "builder_version": MATRIX_BUILDER_VERSION,
+        "schema_version": MATRIX_SCHEMA_VERSION,
+        "row_count": len(matrix),
+        "feature_schema": list(matrix.columns),
+        "matrix_sha256": file_sha(frozen),
+    }
+    frozen.with_suffix(".manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    return frozen_dir
+
+
 def _run_meditate(league: str, market: str, candidate: dict) -> str:
     """Full-HPO retrain of a cell from its just-persisted stat_meta strategy; "" iff meditate exits clean.
 
-    ``--force`` is required or a cell with no new gamedays skips silently and never rewrites its
-    outputs. A failure returns its :func:`_failure_reason` rather than a bare flag — a native abort
-    inside the fit and an ordinary non-zero exit call for completely different triage, and reporting
-    both as one "retrain error" is what sent the last investigation looking for a Python exception
-    that never existed. The caller must not trust a possibly-stale model_stats row either way; a
-    transient archive-lock clash is retried first (:func:`_run_meditate_with_lock_retry`).
+    Trains on the walk's pinned matrix (``--frozen-matrix-dir``, see :func:`_pin_cell_matrix`) so
+    every nominee of a cell scores the same frame. ``--force`` is still required: a frozen-input
+    run appends no new rows, and without it a cell whose pickle already exists skips silently and
+    never rewrites its outputs. A failure returns its :func:`_failure_reason` rather than a bare
+    flag — a native abort inside the fit and an ordinary non-zero exit call for completely
+    different triage, and reporting both as one "retrain error" is what sent the last investigation
+    looking for a Python exception that never existed. The caller must not trust a possibly-stale
+    model_stats row either way; a transient archive-lock clash is retried first
+    (:func:`_run_meditate_with_lock_retry`).
     """
     spec = get_strategy(candidate["strategy_slug"])
     context = _cell_context(league, market)
@@ -465,6 +574,8 @@ def _run_meditate(league: str, market: str, candidate: dict) -> str:
         league,
         market,
         "--force",
+        "--frozen-matrix-dir",
+        str(_frozen_matrix_dir(league, market)),
         *strategy_full_hpo_cli_args(context, spec, candidate["controls"]),
     )
     log_path = _CONFIRM_LOG_ROOT / f"{market_file_slug(league, market)}.log"
@@ -556,21 +667,24 @@ def _confirm_meditate(league: str, market: str, candidate: dict) -> list[str]:
     error = _run_meditate(league, market, candidate)
     if error:
         return [f"retrain {error}"]
-    _record_nominee_gates(league, market, candidate)
+    # A diverged fit is named ahead of whatever it fails: the gates already reject it, but
+    # "diverged g1 g4" sends triage to the fit rather than the anonymous gate list.
+    diverged = _record_nominee_gates(league, market, candidate)
+    prefix = ["diverged"] if diverged else []
     matrix_hash = _retrained_matrix_hash(league, market)
     if matrix_hash is None:
-        return ["no model_stats row"]
+        return [*prefix, "no model_stats row"]
     # Gates first: serve-iff-ship leaves no pickle behind for a cell that failed one, so checking
     # artifact identity ahead of them reports a missing serving artifact as the cause of a plain
     # Gate-4 miss. The two identity legs still gate the ship — they just answer a later question.
     failed = _failed_gates_after(league, market)
     if failed:
-        return failed
+        return prefix + failed
     expected = _candidate_identity(candidate, matrix_hash)
     if not _produced_artifacts_match(league, market, candidate, expected):
-        return ["artifact identity"]
+        return [*prefix, "artifact identity"]
     if not _ship_from_model_stats(league, market, expected):
-        return ["model_stats identity/ship"]
+        return [*prefix, "model_stats identity/ship"]
     return []
 
 
@@ -627,21 +741,22 @@ def _supersede_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
         error = _run_meditate(lg, mkt, cand)
         if error:
             return (lg, mkt, "HELD", [f"retrain {error}"])
-        _record_nominee_gates(lg, mkt, cand)
+        diverged = _record_nominee_gates(lg, mkt, cand)
+        prefix = ["diverged"] if diverged else []
         matrix_hash = _retrained_matrix_hash(lg, mkt)
         if matrix_hash is None:
-            return (lg, mkt, "HELD", ["no model_stats row"])
+            return (lg, mkt, "HELD", [*prefix, "no model_stats row"])
         expected = _candidate_identity(cand, matrix_hash)
         if not _produced_artifacts_match(lg, mkt, cand, expected):
-            return (lg, mkt, "HELD", ["artifact identity"])
+            return (lg, mkt, "HELD", [*prefix, "artifact identity"])
         if not _ship_from_model_stats(lg, mkt, expected):
-            return (lg, mkt, "HELD", ["model_stats identity/ship"])
+            return (lg, mkt, "HELD", [*prefix, "model_stats identity/ship"])
         baseline = load_test_set(backup / f"{slug}.csv", _SHIP_PRED_COL)
         candidate = load_test_set(_TEST_SETS_ROOT / f"{slug}.csv", _SHIP_PRED_COL)
         verdict = supersede_verdict(baseline, candidate, _SHIP_PRED_COL, league=lg, market=mkt)
         click.echo("  " + _supersede_headline(verdict))
         if not verdict["ship"]:
-            return (lg, mkt, "HELD", _failed_legs(verdict))
+            return (lg, mkt, "HELD", prefix + _failed_legs(verdict))
         edits = ", ".join(f"{k}={v}" for k, v in cand["edits"].items())
         if not click.confirm(f"  Promote {lg} {mkt} to {edits}?"):
             return (lg, mkt, "HELD", ["declined"])
@@ -707,11 +822,13 @@ def _walk_nominees(
 ) -> tuple[str, str, str, list[str], str]:
     """Retrain each nominee in order until one wins; report the deciding attempt and how deep it went.
 
-    No new revert machinery is needed: ``_confirm_one``'s ``finally`` already restores stat_meta and
-    prunes the pickle on every non-win, and ``_supersede_one``'s restores byte-identically. The loop
-    just stops at the first win.
+    The cell's training matrix is pinned once here (:func:`_pin_cell_matrix`), so every nominee
+    retrains and scores on the same frame. No new revert machinery is needed: ``_confirm_one``'s
+    ``finally`` already restores stat_meta and prunes the pickle on every non-win, and
+    ``_supersede_one``'s restores byte-identically. The loop just stops at the first win.
     """
     outcome = ("", "", "REVERTED", ["no nominee"], "-")
+    _pin_cell_matrix(nominated[0]["league"], nominated[0]["market"])
     for n, cand in enumerate(nominated, start=1):
         click.secho(
             f"\n  nominee {n}/{len(nominated)} [{cand['source']}] {cand['league']} {cand['market']}",

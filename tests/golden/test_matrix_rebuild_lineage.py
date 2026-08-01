@@ -1,4 +1,4 @@
-"""Deterministic full-rebuild, dependency, and manifest contracts."""
+"""Deterministic full-rebuild, frozen-matrix, dependency, and manifest contracts."""
 
 from __future__ import annotations
 
@@ -7,12 +7,15 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
+from click import UsageError
 
 from sportstradamus.stats.mlb import StatsMLB
 from sportstradamus.stats.model_dependencies import (
     DEPENDENCY_NAMESPACE,
     load_model_dependency,
 )
+from sportstradamus.training import pipeline
+from sportstradamus.training.cli import _validate_mode_flags
 from sportstradamus.training.data import trim_matrix
 from sportstradamus.training.lineage import validate_matrix_manifest, write_matrix_manifest
 from sportstradamus.training.pipeline import _step_load_matrix, _step_persist_matrix_and_comps
@@ -29,6 +32,62 @@ class _Stats:
     def get_training_matrix(self, _market, cutoff):
         self.cutoffs.append(cutoff)
         return self.matrix.copy()
+
+    def save_comps(self):
+        raise AssertionError("player comps must not be saved on a frozen/rebuild path")
+
+
+def _mode_flags(**overrides) -> dict:
+    flags = {
+        "deterministic": False,
+        "holdout_blind": False,
+        "full_rebuild": False,
+        "matrix_only": False,
+        "matrix_output": None,
+        "frozen_matrix_dir": None,
+        "artifact_output": None,
+        "dependency_namespace": None,
+        "dependency_root": None,
+        "bypass_withholding": False,
+    }
+    flags.update(overrides)
+    return flags
+
+
+def test_frozen_matrix_dir_standalone_is_a_legal_production_mode():
+    _validate_mode_flags(**_mode_flags(frozen_matrix_dir=Path("/frozen")))
+
+
+def test_frozen_matrix_research_isolation_contract_unchanged():
+    research = _mode_flags(
+        frozen_matrix_dir=Path("/frozen"),
+        artifact_output=Path("/artifacts"),
+        dependency_namespace="stage5-fresh-v1",
+        bypass_withholding=True,
+    )
+    _validate_mode_flags(**research)
+
+    with pytest.raises(UsageError, match="--frozen-matrix-dir"):
+        _validate_mode_flags(**_mode_flags(artifact_output=Path("/artifacts")))
+    with pytest.raises(UsageError, match="--dependency-namespace"):
+        _validate_mode_flags(**{**research, "dependency_namespace": None})
+    with pytest.raises(UsageError, match="--bypass-withholding"):
+        _validate_mode_flags(**{**research, "bypass_withholding": False})
+    with pytest.raises(UsageError, match="--dependency-namespace"):
+        _validate_mode_flags(**_mode_flags(dependency_namespace="stage5-fresh-v1"))
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"deterministic": True},
+        {"matrix_only": True},
+        {"full_rebuild": True, "matrix_only": True, "matrix_output": Path("/quarantine")},
+    ],
+)
+def test_frozen_matrix_dir_refuses_rebuild_and_debug_modes(overrides):
+    with pytest.raises(UsageError, match="--frozen-matrix-dir"):
+        _validate_mode_flags(**_mode_flags(frozen_matrix_dir=Path("/frozen"), **overrides))
 
 
 def _matrix() -> pd.DataFrame:
@@ -129,6 +188,41 @@ def test_frozen_matrix_input_is_read_only_and_skips_rebuild(tmp_path):
     assert loaded_path == path
     assert stats.cutoffs == []
     assert stats.snapshot_only_rebuild is True
+    assert path.read_bytes() == before
+
+
+def test_train_market_frozen_input_skips_matrix_persist_and_comps(tmp_path, monkeypatch):
+    path = tmp_path / "NFL_attempts.parquet"
+    matrix = _matrix()
+    matrix.to_parquet(path)
+    stats = _Stats(_matrix())
+    write_matrix_manifest(
+        path,
+        matrix,
+        stats,
+        league="NFL",
+        market="attempts",
+        cutoff_date="2024-01-01",
+        repo_root=Path.cwd(),
+    )
+    before = path.read_bytes()
+    monkeypatch.setattr(pipeline, "stat_cv", {"NFL": {}})
+    monkeypatch.setattr(pipeline, "stat_zi", {})
+
+    # matrix_only stops train_market right after the persist step — the frozen
+    # pin under test — without running the HPO tail; _Stats.save_comps raises
+    # if the persist step ever reaches the comps write.
+    pipeline.train_market(
+        "NFL",
+        "attempts",
+        stats,
+        None,
+        pd.Timestamp("2024-01-01").date(),
+        force=False,
+        matrix_only=True,
+        matrix_input=path,
+    )
+
     assert path.read_bytes() == before
 
 

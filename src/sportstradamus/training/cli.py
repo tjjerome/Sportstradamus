@@ -32,6 +32,7 @@ from sportstradamus.training.pipeline import (
     train_market,
 )
 from sportstradamus.training.posthoc import POSTHOC_SLUGS, STRUCTURAL_STAGE
+from sportstradamus.training.scorecard import _GATE1_NONINF_MARGIN
 from sportstradamus.training.ship_config import (
     CONTINUOUS_DISTS,
     STAT_META_PATH,
@@ -116,6 +117,12 @@ def _resolve_cell_knob(stat_meta_full, lg, market, key, default, flag_value):
 # pd.NA means the scorecard never ran, which counts as not passing here).
 _GATE_COLS = ("g1_pass", "g2_pass", "g3_pass", "g4_pass", "g5_pass", "g6_pass")
 
+# brief R3: separates the 9 addressable near-miss ledger rows from the 4 structural
+# failures at excess >= 0.049.
+_G4_RETRY_MAX_EXCESS: float = 0.010
+# brief R3: noise band on the g1 non-inferiority CI bound.
+_G1_RETRY_NOISE_BAND: float = 0.002
+
 
 def _gate_passed(value) -> bool:
     """NA-safe read of a nullable-boolean gate cell (``bool(pd.NA)`` raises)."""
@@ -128,7 +135,16 @@ def _model_stats_row(lg: str, market: str) -> pd.Series | None:
         return None
     stats = pd.read_parquet(
         MODEL_STATS_PATH,
-        columns=["league", "market", "distribution", "ship", *_GATE_COLS],
+        columns=[
+            "league",
+            "market",
+            "distribution",
+            "ship",
+            "g4_pit_ks",
+            "g4_pit_ks_max",
+            "g1_brier_diff_ci_hi",
+            *_GATE_COLS,
+        ],
     )
     rows = stats[(stats["league"] == lg) & (stats["market"] == market)]
     return None if rows.empty else rows.iloc[0]
@@ -140,9 +156,12 @@ def _g4_only_retry_wanted(
     """Whether a cell earns the one-shot calibrated-HPO retry.
 
     Fires only for cells trained under ``loss`` selection whose fresh
-    model_stats row failed ship on Gate 4 alone — the dispersion-calibration
-    failure that calibrated trial selection targets. Hurdle-ZINB and Mixture
-    are excluded: those paths have no calibrated trial-selection closure.
+    model_stats row failed ship on a near-miss Gate 4, alone or with a
+    within-band Gate 1 — the dispersion-calibration failures calibrated trial
+    selection targets. Any other failing gate blocks the retry, g6 explicitly
+    included (deferred pending the Experiment C measurement, brief R3).
+    Hurdle-ZINB and Mixture are excluded: those paths have no calibrated
+    trial-selection closure.
     """
     if row is None or cell_hpo_selection != "loss":
         return False
@@ -152,7 +171,17 @@ def _g4_only_retry_wanted(
         return False
     if _gate_passed(row["ship"]) or _gate_passed(row["g4_pass"]):
         return False
-    return all(_gate_passed(row[c]) for c in _GATE_COLS if c != "g4_pass")
+    if not row["g4_pit_ks"] - row["g4_pit_ks_max"] <= _G4_RETRY_MAX_EXCESS:
+        return False
+    return _cofailures_within_band(row)
+
+
+def _cofailures_within_band(row: pd.Series) -> bool:
+    """Non-g4 gate failures are admissible only as exactly {g1} inside its noise band."""
+    others_failing = [c for c in _GATE_COLS if c != "g4_pass" and not _gate_passed(row[c])]
+    if others_failing == ["g1_pass"]:
+        return bool(row["g1_brier_diff_ci_hi"] - _GATE1_NONINF_MARGIN <= _G1_RETRY_NOISE_BAND)
+    return not others_failing
 
 
 def _persist_calibrated_hpo(stat_meta_full: dict, lg: str, market: str) -> None:
@@ -171,7 +200,8 @@ def _persist_calibrated_hpo(stat_meta_full: dict, lg: str, market: str) -> None:
 def _retry_calibrated_if_g4_only(
     lg, market, stat_data, archive, league_start_date, train_kwargs, stat_meta_full, log
 ) -> None:
-    """One-shot calibrated-HPO retry for a cell that failed ship on Gate 4 alone.
+    """One-shot calibrated-HPO retry for a cell that failed ship on a near-miss
+    Gate 4, alone or with a within-band Gate 1.
 
     Reruns ``train_market`` with the same kwargs but ``hpo_selection="calibrated"``
     and ``force=True`` (the first run consumed the new gamedays; without force the
@@ -242,20 +272,18 @@ def _validate_mode_flags(
         raise click.UsageError("--full-rebuild requires --matrix-only and --matrix-output")
     if frozen_matrix_dir is not None and (full_rebuild or deterministic or matrix_only):
         raise click.UsageError(
-            "--frozen-matrix-dir is an isolated full-HPO mode; it is incompatible with "
-            "--full-rebuild, --deterministic, and --matrix-only"
+            "--frozen-matrix-dir pins each cell's training matrix for a full-HPO run; it is "
+            "incompatible with --full-rebuild, --deterministic, and --matrix-only"
         )
-    if frozen_matrix_dir is not None and (artifact_output is None or dependency_namespace is None):
-        raise click.UsageError(
-            "--frozen-matrix-dir requires --artifact-output and --dependency-namespace"
-        )
-    if frozen_matrix_dir is not None and not bypass_withholding:
-        raise click.UsageError("--frozen-matrix-dir requires --bypass-withholding")
-    if frozen_matrix_dir is None and artifact_output is not None:
+    if artifact_output is not None and frozen_matrix_dir is None:
         raise click.UsageError("--artifact-output requires --frozen-matrix-dir")
-    if dependency_namespace is not None and frozen_matrix_dir is None and not full_rebuild:
+    if artifact_output is not None and (dependency_namespace is None or not bypass_withholding):
         raise click.UsageError(
-            "--dependency-namespace requires --frozen-matrix-dir or --full-rebuild"
+            "--artifact-output requires --dependency-namespace and --bypass-withholding"
+        )
+    if dependency_namespace is not None and artifact_output is None and not full_rebuild:
+        raise click.UsageError(
+            "--dependency-namespace requires --artifact-output or --full-rebuild"
         )
     if full_rebuild and dependency_namespace is not None and dependency_root is None:
         raise click.UsageError(

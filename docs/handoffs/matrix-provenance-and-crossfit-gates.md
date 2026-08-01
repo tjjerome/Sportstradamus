@@ -1,9 +1,9 @@
 # Fix brief: matrix provenance crash + cross-fit gate optimism
 
 Four defects surfaced by phase 2 of the 30-cell holdout-blind sweep; none is caused by the sweep.
-A and C are root-caused and fixed. B is a single-cell lead whose first experiment came back
-negative — the HP-selection rule is not the lever — so its cause is still open. D is a silent
-process death that owns its own brief.
+All four are now root-caused and fixed: A and C earlier, D in its own brief, and B below —
+attributed across four mechanisms by the 37-nominee ledger plus two single-axis experiments, with
+the walk/board fixes landed.
 
 **Operating constraint.** The driver (`research/overnight/run_all_cells.sh`) spawns fresh
 `meditate` subprocesses per nominee, which pick up an edit mid-run. Per
@@ -174,13 +174,75 @@ a freshly built one, and nothing checks that the two agree.
 
 ---
 
-## B. Calibration gates degrade when a corner moves to full HPO
+## B. Calibration gates degrade when a corner moves to full HPO — root-caused
 
-Full HPO regressing a gate should not happen — more search on the same recipe ought to dominate
-a fixed-HP fit — and it is regressing them systematically, not occasionally. **Status: one
-measured cell plus a concrete mechanism.** Same corner, board (fixed HP, holdout-blind cross-fit
-validation) versus its own confirm (full HPO, true holdout) — NHL goalie fantasy points
-underdog, the run's only ship so far:
+Full HPO regressing a gate reads backwards — more search on the same recipe ought to dominate a
+fixed-HP fit. **Status: root-caused; walk and board fixes landed.** Evidence: the nominee ledger
+(`research/confirm_nominee_gates.csv`, 37 full-HPO confirms, every one board-6/6; 14 shipped =
+38%) joins 37/37 to the crossfit board on `(league, market, strategy_slug, controls_json)`, plus
+the two single-axis experiments below. Confirm failure gates: g4 ×19, g1 ×8, g6 ×8, g2/g3 ×3,
+g5 ×2. Four mechanisms stack:
+
+- **M1 — SkewNormal fit divergence under full HPO.** Six ledger rows sit on the
+  `dispersion_cal` 0.1 floor with `shape_ratio` up to 2.7e9 (NFL qb tds ×3, qb yards ×2,
+  NBA TOV); 6/6 fail, no ship has one. The 30-round deterministic fit cannot diverge, so the
+  board is structurally blind to convergence risk. Family ship rates: DPO+NegBin 6/8,
+  SkewNormal 8/23, ZINB 0/6.
+- **M2 — objective/gate misalignment.** The search minimizes in-train CV CRPS/NLL with no
+  calibration term while g2/g4/g5 score calibration on a disjoint frame; the calibration
+  search-gate is opt-in (`hpo_selection: "calibrated"`, 11 cells). Excluding diverged rows,
+  confirm−board g4 averages +0.012; failures' confirm/board g4 ratio median 1.84 vs ships'
+  0.92. The g4-only calibrated retry rescued 4 of its 5 firings this run.
+- **M3 — protocol optimism, the dominant near-miss driver (measured in 0a below).** The board
+  scores the cross-fit validation frame with per-fold out-of-fold calibrators; confirm scores
+  the true holdout with val-fit calibrators. Pre-fix the walk added its own noise: matrix drift
+  between nominees from `--force` rewrites, the warm/cold budget lottery, g6 anchor seeding,
+  skipped book-weight refits.
+- **M4 — winner's curse.** Nominees are the top-3-of-≤48 corners by raw point-estimate slack;
+  slack ≥ +0.19 shipped 1/9 while +0.05–0.14 shipped 10/17. Knife-edges flip on scoring noise
+  (NFL completions failed at g4 0.0695 against a 0.0695 bar).
+
+**Protocol axis measured (experiment 0a).** Same corner, same fixed HP, same matrix — only the
+eval protocol flips (`--holdout-blind` on/off):
+
+| cell | crossfit g4 | true-holdout g4 | holdout verdict |
+|---|---|---|---|
+| NHL goalsAgainst (SN) | 0.0450 (ship, slack +0.10) | 0.0704, and g1 flips to fail | no-ship, slack −0.41 |
+| NFL receiving yards (hurdle) | 0.0302 | 0.0402 | still ships |
+| NBA FGA (SN) | 0.0302 | 0.0470 | still ships |
+
+The frame+calibrator protocol alone moves g4 by +0.010–0.025 — the size of a typical pass
+margin — and on the near-miss cell reproduces the real confirm verdict at fixed HP. The
+crossfit arms bit-reproduced their board rows except goalsAgainst, whose earlier confirm had
+`--force`-rewritten the matrix — live proof of the drift defect fixed below.
+
+**HPO axis measured (experiment 0b): null on the near-miss.** NHL goalsAgainst, frozen matrix,
+true holdout on both arms: full 300-trial cold HPO lands g4 0.0695 / g1 ci_hi 0.0043 vs the
+fixed-HP 0.0704 / 0.0056. Optuna neither causes nor cures the near-miss failure; on
+non-diverged cells the board→confirm gap is protocol, not search. (Caveat: the two arms'
+scored splits share 768 rows but differ by 17/1 from a filter quirk; direction unaffected.)
+
+**Answers to the operator's questions.** (1) Do not freeze the deterministic HPs — they are an
+underfit; full HPO wins the discrimination gates and, once the frame is held fixed, ties the
+calibration gates. (2) The board was unrepresentative in the enumerated M3 ways; the fixable
+ones are fixed, and the inherent frame gap is now priced into ranking as an empirical discount
+instead of trusted. (3) Divergence (M1) is the one genuinely HPO-specific failure class and
+routes to the research brief (σ-head guard inside the search).
+
+**Landed fixes.** Confirm walk (`model_strategy/confirm.py`): the cell's matrix is pinned once
+per walk (`_pin_cell_matrix` → `--frozen-matrix-dir` with manifest), which also buys cold-start
+parity and book-weight parity per nominee; `dispersion_cal` on the 0.1 floor reports as
+`diverged`, distinct from gate names; integer-target cells whose top-3 is all continuous get
+the best count-family corner interleaved at slot 2; every ledger row echoes its board-side
+gates as `board_*` columns. Board (`model_strategy/sweep.py`): nominees rank on
+`discounted_slack` — ledger-derived per-gate confirm−board medians, echo columns preferred with
+a join fallback, inert until ≥8 usable rows (note: once the first echo-format row lands, the
+join path stops and discounts stay inert until 8 echo rows accumulate); a `confirm_risk`
+column flags continuous-family-on-integer-target corners and g4 margins inside the measured
+inflation; the rollup prints P(ship | slack band × family) from the ledger.
+
+M2 detail — the measured same-corner example (board fixed-HP cross-fit vs its own full-HPO
+confirm), NHL goalie fantasy points underdog:
 
 | gate | board | confirm | |
 |---|---|---|---|
@@ -195,7 +257,7 @@ full HPO, which is what should happen; the two calibration gates are the ones th
 Across the wider run the dominant confirm failures are g4 and g6, on cells whose boards passed
 all six.
 
-**Leading hypothesis: the HPO objective does not include calibration.** Every base corner selects
+**M2 mechanism: the HPO objective does not include calibration.** Every base corner selects
 on CV loss, so the calibration penalty at
 [pipeline.py:4417-4422](../../src/sportstradamus/training/pipeline.py#L4417) —
 `_calibration_penalty` plus the `_gate4_pit_ks_threshold` bar, both gated on
@@ -215,18 +277,12 @@ run-wide pattern of g4-dominated failures. `cli._retry_calibrated_if_g4_only` al
 to `calibrated` and re-runs — but only when g4 is the *sole* failure, so the g2+g4 and g6 cells
 never receive it.
 
-**Why only one cell.** A reverted confirm leaves no trace to compare. `_confirm_one`'s `finally`
-calls `prune_model_pickle`, and `report()` rebuilds `model_stats.parquet` from the pickles present
-on disk, so a cell that never shipped ends with no pickle and therefore no row; `_restore_cell`
-then puts the incumbent file back wholesale. The per-nominee gate values are not recoverable from
-the confirm logs either — those carry failing gate *names* only.
-
-Do **not** "fix" this by making `_restore_cell` restore a single row. The wholesale restore is
-deliberate: `model_stats.parquet` is read by `report.get_market_calibration` for Kelly sizing and
-by `graduation.read_gate1` for Gate-2 promotion, so leaving a reverted candidate's row behind
-would size real stakes and drive promotion off a model that is not served. The fix is additive —
-have the confirm walk append each nominee's gate values to a research-side ledger before the
-revert, where `_failed_gates_after` already reads that row.
+**Why evidence was thin at first.** A reverted confirm leaves no production trace:
+`_confirm_one`'s `finally` prunes the pickle, `report()` rebuilds `model_stats.parquet` from
+pickles on disk, and `_restore_cell` puts the incumbent back wholesale — deliberately, since
+that parquet sizes Kelly stakes and drives Gate-2 promotion. The additive fix landed: the walk
+appends every nominee's full gate row to `research/confirm_nominee_gates.csv` before the
+revert, which is the ledger all the §B numbers come from.
 
 **Ruled out.** g5's debias (`_gate5_ece_debiased` / `_ece_debias_offset` take only `p_model` and
 `y` from the scored frame, nothing cross-fit-specific). Matrix degradation on the appended rows
@@ -249,14 +305,12 @@ a `(Player, Date)` identity hash, so the same player sits on both sides and the 
 calibrator enjoys mild within-player leakage. Cross-fit folds are player-disjoint and should
 therefore be **harsher**, not kinder. It is nonetheless the optimistic one.
 
-**Two experiments, one axis each.** The board→confirm step moves the HP budget *and* the
-evaluation frame together, so neither alone is identified by the numbers above.
+The board→confirm step moves the HP budget *and* the evaluation frame together; the 0a/0b
+tables at the top of this section separate the two axes, and both single-axis experiments are
+done (protocol large, HPO null on the near-miss, HP-selection null on the shipping corner
+below).
 
-1. *HPO axis — done, negative.* See below.
-2. *Protocol axis.* Hold the corner and hyperparameters fixed and run
-   `meditate --deterministic --bypass-withholding` twice, with and without `--holdout-blind`.
-
-**The confirm walk does not hold its own frame fixed either, and new data is not the reason.**
+**The confirm walk did not hold its own frame fixed either, and new data is not the reason.**
 Because every nominee retrains under `--force`, the matrix moves *between* nominees of the same
 cell: MLB pitcher fantasy points underdog scored its three at `n_validation` 373, 363, 358, and NHL
 goalsAgainst at 815, 801, 785. The obvious explanation — an in-season append — is wrong: NHL's last
@@ -264,9 +318,9 @@ gameday is 2026-06-14 and nothing was appended, yet the parquet's mtime lands mi
 `_step_persist_matrix_and_comps`, which recomputes comps and rewrites the file on every `--force`
 run regardless of whether a single row is new, and comp features are not stable across recomputes
 (`_nonmlb_comp_features` fires twice per gameday and the matrix keeps the *last* value, not the
-mean). So a cell's nominees are ranked against each other on drifting frames even in the offseason.
-Same defect as the discarded experiment below; it deserves its own fix — freeze the cell's matrix
-once at the top of the walk and run every nominee against it.
+mean). So a cell's nominees were ranked against each other on drifting frames even in the
+offseason. Fixed: `_pin_cell_matrix` freezes the cell's parquet once at the top of the walk and
+every nominee trains against the pin via `--frozen-matrix-dir`.
 
 **Run any such experiment from a frozen matrix.** `--force` — which is exactly what confirm
 passes — rewrites the cell's parquet, so a candidate arm compared against a historical confirm row
@@ -286,7 +340,7 @@ lock, and never run alongside the driver regardless — two `meditate` processes
 `report()` race on the single `model_stats.parquet`.
 
 **Some confirm failures are diverged fits, not degraded calibration.** Across the nominee ledger
-(26 nominees, 15 cells) a saturated dispersion calibrator separates outcomes perfectly: every row
+(37 nominees) a saturated dispersion calibrator separates outcomes perfectly: every row
 whose `dispersion_cal` sits on its 0.1 floor fails — 6 of 6 — and no ship has one. Those rows carry
 absurd `shape_ratio` values (NFL qb yards 1.7e9 and 2.7e9, qb tds 4.6e3–1.5e6, NBA TOV 48), so the
 SkewNormal fit blew up and the calibrator clamped trying to rein it in. That is a different failure
@@ -297,17 +351,17 @@ NFL attempts ships at 76.6 with a healthy `dispersion_cal` of 1.01. The conjunct
 
 **The divergence is SkewNormal-only, and it is costing the board's budget on count cells.** All six
 floored rows are SkewNormal, on three cells (NFL qb tds, NFL qb yards, NBA TOV). The count families
-never come close: across ten rows, DPO / NegBin / ZINB top out at `shape_ratio` 1.31 and every DPO
-row sits at `dispersion_cal` 0.83–0.93. Ships by family are DPO 3/5, NegBin 1/1, SkewNormal 5/16,
-ZINB 0/4.
+never come close: DPO / NegBin / ZINB top out at `shape_ratio` 1.31 and every DPO
+row sits at `dispersion_cal` 0.83–0.93. Ships by family are DPO+NegBin 6/8, SkewNormal 8/23,
+ZINB 0/6.
 
 Two of the three diverging cells are *count* stats (qb tds, TOV) whose top-slack board corner is
 nonetheless SkewNormal — so ranking nominees by board slack spends the cell's full-HPO budget on the
 family that will blow up while a fit-stable count corner sits further down the list. That is the same
 board-optimism failure as `crossfit_board_ships_optimistic`, one layer down: the board is not just
-optimistic about the *gate*, it is optimistic about the *fit converging at all*. A cheap guard is
-available without touching the ranking — a count-stat cell whose nominee is SkewNormal should have
-its count-family corner tried first, or at least kept in the walk when the SkewNormal one diverges.
+optimistic about the *gate*, it is optimistic about the *fit converging at all*. The guard landed:
+`_count_class_backup` interleaves the cell's best count-family corner at slot 2 whenever an
+integer-target cell's top nominees are all continuous, and diverged nominees are named as such.
 
 NFL qb yards is still the cell to chase, but **not** for the reason first recorded here. Its
 `g1_has_edge` True is vacuous: every g1 statistic on both nominees is NaN, and both
@@ -355,11 +409,32 @@ Calibrated trial selection moves g4 *away* from 1.0 and leaves g5 marginally wor
 every point estimate favours `loss`, so the HP-selection rule is not the lever here and the
 `auto`→`loss` default needs no change.
 
-Read that as corner-specific, not settled. This cell *ships* under both arms — it is not one of the
-degrading corners §B is about, and it was chosen only because it was the one cell whose confirm row
-survived. The nominee ledger now preserves gate values for every nominee, so re-run the axis on a
-corner that actually fails g4 — NFL qb tds carries `pit_ks 0.368` against a threshold two orders of
-magnitude tighter, which is far outside anything trial selection could close.
+That refutation was corner-specific (a cell that ships under both arms), but experiment 0b then
+closed the general question on a corner that actually fails: on NHL goalsAgainst the full-HPO and
+fixed-HP arms land the same g4 on the same holdout, so neither HP budget nor trial selection is
+the near-miss lever. The remaining HPO-specific class — SkewNormal divergence — is now guarded:
+per the research brief (`research/briefs/researcher_hpo_objective_alignment.md`, R1),
+`_skewnormal_dist_obj` clamps the σ-like head to `[0.02, 10] × IQR(y)/1.349` and the direct
+alpha head to ±30, riding the pickle into refit, warm cron, and inference. The brief's
+Experiment A (5 cells × 2 arms, frozen matrices, full HPO): unclamped NFL qb tds / qb yards
+diverge (corrected σ-ratio 216 / 2082, g4 0.37 / 0.41); clamped they score honestly (σ-ratio
+1.00 / 1.72) — qb yards **ships** (g4 0.0637, book-less caveat) and qb tds lands 0.0009 past its
+bar. Controls (NBA FGA, NFL attempts) show no systematic degradation (σ-ratio ~1.0 both arms;
+gate deltas inside the ±0.01 run-to-run HPO spread — the brief's <0.002 inertness bar is
+unmeasurable without seed-matched trials; FGA's ship flip at 0.0537 vs bar 0.05 sits inside its
+own historical 0.0416–0.0537 spread). The corrected `shape_ratio` (σ/σ after the `_diag_shape`
+unit fix) separates diverged from converged with an empty band and is the board-side pre-screen.
+
+The brief's other two levers resolved against build-out: Experiment B (headroom probe, 3 cells,
+`hpo_selection=calibrated`, frozen matrices) **killed the default flip** — the calibration
+constraint is non-binding on healthy cells (goalie fantasy 146/147 trials feasible, so calibrated
+≡ loss, which explains the earlier null refutation), near-vacuous on the FGA near-miss (1/54
+feasible at 0.0499 vs bar 0.05), and non-transferring on goalsAgainst (5/210 feasible, 0.038
+CRPS price, holdout g4 0.0736 vs the loss arm's 0.0695 on identical rows). `hpo_selection:
+"calibrated"` stays opt-in per-cell. The g4-only retry was widened by margin instead (g4 excess
+≤ 0.010, sole or with g1 within 0.005+0.002; g6 excluded pending an Experiment-C measurement) —
+on the current ledger that adds zero firings (the brief's "5→6" used off-snapshot numbers) and
+exists as forward armor with a bounded cost.
 
 ---
 
