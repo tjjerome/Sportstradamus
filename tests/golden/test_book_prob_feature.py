@@ -36,13 +36,13 @@ class _Stub:
     def check_combo_markets(self, *a, **k):
         return np.nan
 
-    _resolve_player_market_odds = base_mod.Stats._resolve_player_market_odds
+    resolve_player_market_odds = base_mod.Stats.resolve_player_market_odds
 
 
 def _run(monkeypatch, ev, line, under):
     monkeypatch.setattr(base_mod, "archive", _FakeArchive(ev, line, under))
     stats = pd.DataFrame({"Avg10": [2.0]}, index=["P"])
-    return _Stub()._resolve_player_market_odds(stats, "AST", "2026-05-08", None)
+    return _Stub().resolve_player_market_odds(stats, "AST", "2026-05-08", None)
 
 
 def test_feature_uses_stored_under_prob(monkeypatch):

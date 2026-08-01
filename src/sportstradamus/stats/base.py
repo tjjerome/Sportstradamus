@@ -471,9 +471,7 @@ class Stats:
         # slate. Cache normalized dates and the active gameday only in that mode;
         # live serving remains uncached so in-place collector updates are visible.
         self._snapshot_date_cache: dict[str, tuple[tuple[int, int, str], pd.Series]] = {}
-        self._snapshot_gameday_cache: tuple[
-            tuple[int, int, str, date], pd.DataFrame
-        ] | None = None
+        self._snapshot_gameday_cache: tuple[tuple[int, int, str, date], pd.DataFrame] | None = None
         self._snapshot_player_name_cache: tuple[tuple[int, int, str], pd.Series] | None = None
 
     def _normalized_log_dates(self, frame: pd.DataFrame, *, cache_name: str) -> pd.Series:
@@ -1003,6 +1001,25 @@ class Stats:
         self.teamProfile = teamstats
 
     @line_profiler.profile
+    def window_short_logs(self, date):
+        """Slice the player and team logs to the 300-day as-of window before ``date``.
+
+        The cheap prefix of ``base_profile``: quote resolution and the combo-market
+        fallbacks need only this window, not the profile frames built from it.
+        """
+        one_year_ago = pd.Timestamp(date - timedelta(days=300))
+        target_date = pd.Timestamp(date)
+
+        gameDates = self._gamelog_dates()
+        short_mask = (one_year_ago <= gameDates) & (gameDates < target_date)
+        self.short_gamelog = self.gamelog[short_mask].copy()
+        _pc = self.log_strings["player"]
+        self.short_gamelog[_pc] = self._normalized_gamelog_players().loc[short_mask].to_numpy()
+        gameDates = self._teamlog_dates()
+        self.short_teamlog = self.teamlog[
+            (one_year_ago <= gameDates) & (gameDates < target_date)
+        ].copy()
+
     def base_profile(self, date=datetime.today().date()):
         if isinstance(date, str):
             date = datetime.strptime(date, "%Y-%m-%d").date()
@@ -1038,19 +1055,7 @@ class Stats:
             ]
         )
 
-        one_year_ago = date - timedelta(days=300)
-
-        gameDates = self._gamelog_dates()
-        target_date = pd.Timestamp(date)
-        one_year_ago = pd.Timestamp(one_year_ago)
-        short_mask = (one_year_ago <= gameDates) & (gameDates < target_date)
-        self.short_gamelog = self.gamelog[short_mask].copy()
-        _pc = self.log_strings["player"]
-        self.short_gamelog[_pc] = self._normalized_gamelog_players().loc[short_mask].to_numpy()
-        gameDates = self._teamlog_dates()
-        self.short_teamlog = self.teamlog[
-            (one_year_ago <= gameDates) & (gameDates < target_date)
-        ].copy()
+        self.window_short_logs(date)
 
         stat_types, team_stat_types = self._profile_stat_types()
         playerstats = self._build_player_profile_stats(stat_types, date)
@@ -1732,9 +1737,7 @@ class Stats:
         player_col = self.log_strings["player"]
         opp_col = self.log_strings["opponent"]
         gld = self._gamelog_dates()
-        career = self.gamelog.loc[
-            gld < pd.Timestamp(date), [player_col, opp_col, market]
-        ].copy()
+        career = self.gamelog.loc[gld < pd.Timestamp(date), [player_col, opp_col, market]].copy()
         career[player_col] = career[player_col].apply(remove_accents)
         career = career.loc[career[player_col].isin(stats.index)]
 
@@ -2194,7 +2197,14 @@ class Stats:
         else:
             self.get_volume_stats(offers, gameDate)
 
-    def _resolve_player_market_odds(self, stats, market, date, target_at):
+    def resolve_player_market_odds(
+        self, stats: pd.DataFrame, market: str, date: str, target_at: datetime
+    ) -> pd.DataFrame:
+        """Resolve one gameday's book quotes and provenance for the players in ``stats``.
+
+        Reads only ``stats.index`` and ``stats["Avg10"]``, so a cached matrix can be
+        re-resolved through this same path without rebuilding its feature columns.
+        """
         records = []
         cv = stat_cv[self.league].get(market, 1)
         dist = stat_dist.get(self.league, {}).get(market, "Gamma")
@@ -2239,6 +2249,8 @@ class Stats:
             X (pd.DataFrame): The training data matrix.
             y (pd.DataFrame): The target labels.
         """
+        # style: allow-complexity — one gameday loop assembling every matrix source in order:
+        # offers, volume dispatch, features, usage, quotes, then the MLB book-first split.
         self.preflight_training_dependencies(market)
         matrix = []
         mlb_bookless = []
@@ -2311,7 +2323,7 @@ class Stats:
             game_time = datetime.combine(gameDate, datetime.min.time()) + timedelta(hours=20)
             target_at = game_time - TRAINING_LOOKBACK
 
-            stats = stats.join(self._resolve_player_market_odds(stats, market, date, target_at))
+            stats = stats.join(self.resolve_player_market_odds(stats, market, date, target_at))
             stats = stats.join(offers_df["Result"])
             stats["Player"] = stats.index
             stats["Date"] = date

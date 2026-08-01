@@ -38,7 +38,7 @@ import pandas as pd
 from sportstradamus.helpers.config import book_gate, book_weights, stat_cv, stat_dist
 from sportstradamus.helpers.distributions import get_ev, get_odds, no_vig_odds
 from sportstradamus.helpers.text import remove_accents
-from sportstradamus.helpers.training_quotes import ArchivedBookQuote
+from sportstradamus.helpers.training_quotes import ArchivedBookQuote, pickem_quote
 
 
 @dataclasses.dataclass
@@ -508,27 +508,41 @@ class Archive:
         ).fetchall():
             grouped[entity].append(ArchivedBookQuote(book, ev, under_prob, line, observed_at))
 
-        line_params: list = [league, market, d, *ordered_entities]
-        line_sql = (
-            "SELECT DISTINCT entity, line FROM lines "
-            f"WHERE league=? AND market=? AND game_date=? AND entity IN ({placeholders})"
-        )
-        if at is not None:
-            line_sql += " AND observed_at <= ?"
-            line_params.append(at)
-        lines: dict[str, list[float]] = {entity: [] for entity in ordered_entities}
-        for entity, line in self._connection.execute(line_sql, line_params).fetchall():
-            if line is not None:
-                lines[entity].append(float(line))
-
+        observed_lines = self._observed_lines(league, market, d, ordered_entities, at)
         inputs = {}
         for entity in ordered_entities:
-            values = lines[entity]
+            values, seen_at = observed_lines.get(entity, ([], None))
             legacy_line = float(np.floor(2 * np.median(values)) / 2) if values else 0.0
             if np.isnan(legacy_line):
                 legacy_line = 0.0
-            inputs[entity] = (grouped[entity], legacy_line)
+            rows = grouped[entity] or pickem_quote(market, legacy_line, seen_at)
+            inputs[entity] = (rows, legacy_line)
         return inputs
+
+    def _observed_lines(
+        self,
+        league: str,
+        market: str,
+        d: datetime.date,
+        entities: list[str],
+        at: datetime.datetime | None,
+    ) -> dict[str, tuple[list[float], datetime.datetime | None]]:
+        """Distinct archived lines per entity, with the freshest observation time."""
+        placeholders = ",".join("?" for _ in entities)
+        params: list = [league, market, d, *entities]
+        sql = (
+            "SELECT entity, list(DISTINCT line), max(observed_at) FROM lines "
+            f"WHERE league=? AND market=? AND game_date=? AND entity IN ({placeholders}) "
+            "AND line IS NOT NULL"
+        )
+        if at is not None:
+            sql += " AND observed_at <= ?"
+            params.append(at)
+        sql += " GROUP BY entity"
+        return {
+            entity: ([float(line) for line in values], observed_at)
+            for entity, values, observed_at in self._connection.execute(sql, params).fetchall()
+        }
 
     def get_ev_line_inputs(
         self,
@@ -560,9 +574,7 @@ class Archive:
             odds_sql += " AND observed_at <= ?"
             odds_params.append(at)
         odds_sql += ") WHERE rn = 1 ORDER BY entity, book"
-        ev_rows: dict[str, list[tuple[str, float]]] = {
-            entity: [] for entity in ordered_entities
-        }
+        ev_rows: dict[str, list[tuple[str, float]]] = {entity: [] for entity in ordered_entities}
         for entity, book, ev in self._connection.execute(odds_sql, odds_params).fetchall():
             ev_rows[entity].append((book, ev))
 

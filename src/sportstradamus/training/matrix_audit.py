@@ -16,6 +16,9 @@ _BOOK_COLUMNS = ("Line", "Odds", "EV", "Archived")
 _IDENTITY_COLUMNS = ("Player", "Date")
 # The three a quote cannot be interpreted without; the other two are descriptive.
 _REQUIRED_PROVENANCE_COLUMNS = ("QuoteSource", "QuoteAuthenticity", "QuoteBookCount")
+# Shared by audit_matrix (writer) and main's legacy census (reader) so a reword
+# of one can't silently desync it from the count it's supposed to drive.
+_MISSING_PROVENANCE_VIOLATION = "missing quote provenance"
 
 
 def incomplete_provenance_rows(frame: pd.DataFrame) -> int:
@@ -123,7 +126,7 @@ def audit_matrix(path: Path) -> dict[str, object]:
             "bookless": int((~archived & ~synthetic).sum()),
             "archive_coverage": float(archived.mean()) if len(frame) else 0.0,
         }
-        violations.append("missing quote provenance")
+        violations.append(_MISSING_PROVENANCE_VIOLATION)
     else:
         authenticity = frame["QuoteAuthenticity"]
         authentic = authenticity.eq("authentic")
@@ -187,6 +190,18 @@ def main(paths: tuple[Path, ...], root: Path | None) -> None:
         raise click.UsageError("provide at least one matrix path or --root")
     reports, failures = audit_paths(selected)
     click.echo(json.dumps(reports, indent=2, default=str))
+    # A legacy matrix is not yet broken, but it self-poisons on its league's next
+    # in-season append, so the census is what says how much repair work is queued.
+    legacy = [
+        report["path"]
+        for report in reports
+        if _MISSING_PROVENANCE_VIOLATION in report["violations"]
+    ]
+    click.echo(
+        f"{len(reports)} audited, {len(legacy)} legacy (no provenance block), {failures} failing"
+    )
+    for path in legacy:
+        click.echo(f"  legacy: {path}")
     if failures:
         raise click.ClickException(f"{failures} matrix file(s) failed integrity audit")
 

@@ -767,8 +767,9 @@ def _step_load_matrix(
         raise ValueError(
             f"{league} {market}: {unpriced} of {len(M)} rows carry a half-populated odds-provenance "
             "block, so the matrix mixes two incompatible eras. Repair it with "
-            f'`inject_backfilled_odds --league {league} --markets "{market}"`, which re-derives '
-            "the block from the archive, then retrain."
+            "`python -m sportstradamus.scripts.inject_backfilled_odds "
+            f'--league {league} --markets "{market}"`, which re-resolves the block from the '
+            "archive through the training join's own resolver, then retrain."
         )
     return M, filepath
 

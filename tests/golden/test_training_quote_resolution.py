@@ -17,7 +17,7 @@ from sportstradamus.helpers.training_quotes import (
     archive_ev_is_runaway,
     resolve_training_quote,
 )
-from sportstradamus.scripts.inject_backfilled_odds import _resolve_row
+from sportstradamus.scripts.inject_backfilled_odds import resolve_cached_quotes
 from sportstradamus.stats import base as base_mod
 from sportstradamus.training.data import _clip_lines
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_two_part import (
@@ -171,10 +171,13 @@ class _FakeArchive:
 
 class _Stub:
     league = "WNBA"
-    _resolve_player_market_odds = base_mod.Stats._resolve_player_market_odds
+    resolve_player_market_odds = base_mod.Stats.resolve_player_market_odds
 
     def check_combo_markets(self, *args, **kwargs):
         return np.nan
+
+    def window_short_logs(self, date):
+        """The repair windows the logs per gameday; the stub has none to window."""
 
 
 @pytest.mark.parametrize(
@@ -191,29 +194,21 @@ def test_repair_and_scratch_append_emit_identical_book_fields(
     archive = _FakeArchive(rows, legacy_line)
     monkeypatch.setattr(base_mod, "archive", archive)
     stats = pd.DataFrame({"Avg10": [2.0]}, index=["P"])
-    append_fields = _Stub()._resolve_player_market_odds(
+    append_fields = _Stub().resolve_player_market_odds(
         stats, "AST", "2026-05-08", _AT_2
     ).iloc[0]
-    cached = pd.Series(
+    cached = pd.DataFrame(
         {
-            "Player": "P",
-            "Date": "2026-05-08",
-            "Avg10": 2.0,
-            "Line": 2.0,
-            "EV": 2.0,
+            "Player": ["P"],
+            "Date": ["2026-05-08"],
+            "Avg10": [2.0],
+            "Line": [2.0],
+            "EV": [2.0],
         }
     )
-    repair = _resolve_row(
-        archive,
-        "WNBA",
-        "AST",
-        config.stat_dist["WNBA"]["AST"],
-        config.stat_cv["WNBA"].get("AST", 1),
-        cached,
-        False,
-    )
+    repair = resolve_cached_quotes(_Stub(), "AST", cached).iloc[0]
 
-    assert append_fields.to_dict() == repair.as_record()
+    assert append_fields.to_dict() == repair.to_dict()
 
 
 def test_pipeline_ev_inversion_remains_explicitly_synthetic():

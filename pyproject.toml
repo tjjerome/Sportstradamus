@@ -20,6 +20,11 @@ requests = ">=2.30.0"
 # poetry.lock is gitignored, so nothing else holds the patched versions
 # (Dependabot GHSA-qccp-gfcp-xxvc, GHSA-mf9v-mfxr-j63j, GHSA-65pc-fj4g-8rjx).
 urllib3 = ">=2.7.0"
+# ScrapeOps rotates in browser headers advertising `Accept-Encoding: ... br`, so
+# hosts answer with Brotli. Without a decoder urllib3 passes the compressed bytes
+# through and the caller parses binary (baseballsavant returned `text/csv` bodies
+# that tokenized as garbage, defeating get_csv's HTML soft-block guard).
+brotli = ">=1.1.0"
 idna = ">=3.15"
 scipy = ">=1.10.1"
 tqdm = ">=4.65.0"

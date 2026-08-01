@@ -65,24 +65,37 @@ went partial. `league_activity.json` has MLB and WNBA `live`, which puts six que
 same legacy-cache-plus-live-league position: MLB hitter fantasy points underdog, MLB pitches
 thrown, MLB pitching outs, WNBA BLST, WNBA STL, WNBA PA.
 
-**The block cannot be inverted, and the cheap re-derivation is not equivalent to a rebuild.**
-`QuoteSource`, `QuoteBookCount` and `Odds_synthetic` are NaN on *exactly* the same rows
-(6849/6849 and 557/557) — the whole provenance block goes missing together and only `Archived`
-survives. Nor would the mapping be invertible if it were present: on pitcher fantasy points,
-`Odds_synthetic == True` covers both `derived` (1185 rows) and `synthetic` (693).
+**The block cannot be inverted, so it has to be re-resolved.** `QuoteSource`, `QuoteBookCount` and
+`Odds_synthetic` are NaN on *exactly* the same rows (6849/6849 and 557/557) — the whole provenance
+block goes missing together and only `Archived` survives. Nor would the mapping be invertible if it
+were present: on pitcher fantasy points, `Odds_synthetic == True` covers both `derived` (1185 rows)
+and `synthetic` (693).
+
 [`scripts/inject_backfilled_odds.py`](../../src/sportstradamus/scripts/inject_backfilled_odds.py)
-looks like the cheap way out — it re-derives the block and `Line`/`Odds`/`EV` per cached row from
-the archive — but its `_resolve_row` passes `fallback_ev` only when the row already reads
-`QuoteSource == "combo_ev_inversion"`, so it can never reach `check_combo_markets`, whereas the
-training join's `_resolve_player_market_odds`
-([base.py:2197-2228](../../src/sportstradamus/stats/base.py#L2197)) resolves twice and consults
-combos whenever the first pass falls back. Measured on MLB runs allowed, the tool rewrote 90.8% of
-`Odds`; a real rebuild of the same cell over the same 341 gamedays left all 133 shared feature
-columns identical and reproduced `Odds`/`EV` exactly. The divergence is the tool's approximation,
-not archive drift — **do not use it to repair a training matrix.**
+does that re-resolution, and is **rebuild-equivalent**. It was not always: its `_resolve_row` was a
+columns-only function taking no `Stats` instance, so it *structurally could not* reach
+`check_combo_markets` and faked the combo branch by preserving `EV` where the row already read
+`QuoteSource == "combo_ev_inversion"` — which a legacy matrix never does. Measured on MLB runs
+allowed it rewrote 90.8% of `Odds` where a rebuild changed none. It now calls the training join's
+own resolver, `Stats.resolve_player_market_odds`
+([base.py:2204-2242](../../src/sportstradamus/stats/base.py#L2204)). That reads only `stats.index`
+and `stats["Avg10"]` — both cached — and its combo fallback needs only the 300-day log window
+(`Stats.window_short_logs`, the cheap prefix of `base_profile`, not its expensive body), so one
+call per gameday reproduces what a rebuild resolves at one batched archive query per gameday.
+
+**The control.** `MLB walks-allowed`, cold-rebuilt and migrated against the same archive, agrees on
+**100%** of all three provenance columns (4615/4615) and on `Line` (4615/4615); `Odds`/`EV` differ
+on 21 rows (0.46%, max delta 0.021), from `fit_book_weights` running during the rebuild. Cost:
+**42 m 13 s rebuild vs ~1 min migration**, 345 gamedays at 7.34 s/gameday. The generalizable
+lesson is that the tool diverged because it re-implemented the resolver instead of calling it.
+
+One caveat carries over: the combo path is not point-in-time (`_submarket_ev` calls
+`archive.get_ev` with no `at=`), so re-running the migration after new archive rows land can yield
+different combo quotes. It reproduces *a rebuild now*, which is the right contract.
 
 **Fix.** Detect the partly-populated provenance block where the matrix is loaded and raise there,
-naming the league, market, NaN count and the remedy; repair by cold rebuild. Raise at the end of
+naming the league, market, NaN count and a remedy that is runnable exactly as printed — the repair
+is a module, not a console script. Raise at the end of
 `_step_load_matrix`, before it returns: that sits upstream of `_step_synthesize_odds` and
 `_step_persist_matrix_and_comps`, so a cell that would have been poisoned never writes the bad
 matrix at all and stays re-runnable on its clean legacy cache. **Do not** drop the incomplete
@@ -95,14 +108,18 @@ point of that check.
 [matrix_audit.py](../../src/sportstradamus/training/matrix_audit.py) is the shared predicate;
 `_step_load_matrix` calls it before returning. All 8 at-risk cells (the 2 poisoned plus the 6
 queued in-season) are cold-rebuilt through `get_training_matrix` with the cache moved aside —
-`meditate --matrix-only --bypass-withholding`, 4 h 38 m for all 8, longest cell 1 h 55 m. The
-census reads 0 partial / 41 full / 57 legacy, and
-`python -m sportstradamus.training.matrix_audit --root …/training_data` reports zero `null
-required quote provenance` violations. Two rebuilds are their own controls: MLB hitter fantasy
-points underdog reproduced its healthy cache exactly (7533 rows, 100% authentic, same date span),
-and MLB pitcher fantasy points underdog reproduced the 557 legacy rows the poisoned file had
-buried. The remaining 57 legacy caches are deliberately untouched — the guard makes them fail fast
-instead of self-poisoning, and they only reach it when an in-season append fires.
+`meditate --matrix-only --bypass-withholding`, 4 h 38 m for all 8, longest cell 1 h 55 m. Two
+rebuilds are their own controls: MLB hitter fantasy points underdog reproduced its healthy cache
+exactly (7533 rows, 100% authentic, same date span), and MLB pitcher fantasy points underdog
+reproduced the 557 legacy rows the poisoned file had buried.
+
+The 52 legacy caches that remained after those rebuilds are now migrated, in one
+`--all-cached --legacy-only` pass of 2 h 55 m. `matrix_audit --root …/training_data` goes from
+**57 failing to 5**, and every survivor is a `*_corr` feature matrix — no book columns at all, so
+it violates the same check it violated before. All 93 book matrices carry a complete block, none
+is partial, and row counts are **identical** to the pre-migration backup on all 98 files: the
+migration adds columns, never rows. No tripwire is left armed for NBA/NFL/NHL to hit when their
+seasons open.
 
 MLB runs allowed closes the loop: the cell that crashed **all three** nominees on this and produced
 zero verdicts now **ships to devel** on nominee 2 (g4 pit_ks 0.0332, iqr_ratio 1.10, all six gates).
@@ -122,7 +139,34 @@ own 2435 — split `book_direct` 557 / `combo_ev_inversion` 1185 / `model_fallba
 null-provenance rows where the poisoned run had 557. Both sides now carry the block, so the concat
 that used to corrupt the cache simply works, and all three nominees reached real gate verdicts.
 That `combo_ev_inversion` band is also the direct evidence for the resolver gap above: it is exactly
-the population `inject_backfilled_odds` cannot reproduce.
+the population the old `_resolve_row` could not reproduce, and the reason the repair had to call the
+real resolver rather than approximate it.
+
+**A DFS pick'em line is a real quote, and the repair now reads it as one.** Re-resolving the legacy
+caches surfaced NFL `fantasy points underdog` and `fantasy points prizepicks` losing *all* their
+book evidence — `authentic 3378 → 0` and `4045 → 0`. The cause is an era boundary, not a policy
+error: `Underdog`/`Sleeper` odds rows begin only 2026-03-16, so every 2022–2024 pick'em entry
+archived a `lines` row and no `odds` row at all, and `resolve_training_quote` correctly saw no
+price. But an unboosted pick'em entry prices at exactly 50/50 — the operator's rake sits in the
+payout multiplier, not the line — so that bare line *is* the platform's own two-sided quote.
+`training_quotes.pickem_quote` stands it back up, and `get_training_quote_inputs` consults it only
+via `grouped[entity] or pickem_quote(...)`, so any real quote (boosted or not) outranks it; both
+cells now resolve `book_direct` at their full historical counts, with `qb tds` and `receiving
+yards` unmoved as controls.
+
+Two boundaries are load-bearing. Scope is the `fantasy points <platform>` family alone, because
+that is the only place the archive can prove a bare line is a DFS line — `lines` has no book
+column and both `add_dfs` and `merge_player_books` write to it, so an unpriced sportsbook line
+(receiving yards' 1561 rows) is genuinely unattributable and stays synthetic. And the stand-in must
+never join a live cohort: WNBA `fantasy points prizepicks` holds 10,467 real priced Underdog rows,
+and averaging a fabricated 0.5 into a real boosted price would corrupt it. Note the assumption this
+rests on — "no priced row" means "old era", not "no boost". Historical boosts are unrecoverable
+(`lines` has no boost column; `_dedup_offers_by_boost` selects nearest-neutral then discards the
+factor), so 0.5 is the best available reading, not an inference from absence. Live capture needs
+nothing: `Archive.add_dfs` already runs a boost through `no_vig_odds` into a real skewed
+`under_prob`. **Watch the ship gates on these two cells** — `p_book ≡ 0.5` makes `brier_book`
+exactly 0.25, so Gate 1 clears easily, the degenerate-book shape from the NFL passing cells. The
+difference is that there 0.5 was a measurement artifact hiding a real price; here it is the price.
 
 **Adjacent smell, not yet a bug report.** `M.drop_duplicates(subset=["Player", "Date"],
 keep="last")` means any `(Player, Date)` the fetch re-emits silently replaces its cached row with

@@ -1,34 +1,45 @@
-"""Refresh the book columns (``Line``/``Odds``/``EV``) of cached training
-matrices from the archive, without rebuilding the expensive feature columns.
+"""Re-resolve the odds-provenance block of cached training matrices from the
+archive, without rebuilding the expensive feature columns.
 
-After a historical backfill (``scripts/backfill_historical_odds.py``) lands real
-two-sided prices into ``archive.duckdb``, the cached per-cell matrices in
-``data/training_data/{cell}.parquet`` still carry the OLD degenerate book
-columns: ``training.pipeline._build_training_matrix`` only fetches game-dates
-*after* the cached cutoff each ``meditate`` run, so historical rows' ``Odds`` /
-``EV`` are frozen at first build and a backfill never reaches them.
+Two situations leave a cached matrix stale. A historical backfill
+(``scripts/backfill_historical_odds.py``) lands real two-sided prices into
+``archive.duckdb`` that the cached rows never see, because ``_step_load_matrix``
+only fetches game-dates *after* the cached cutoff each ``meditate`` run. And a
+matrix built before the provenance block shipped carries none of
+``QuoteSource``/``QuoteAuthenticity``/``QuoteBookCount``, so the first in-season
+append concatenates two incompatible eras and ``incomplete_provenance_rows``
+refuses the cell.
 
-This driver re-derives ``Line``/``Odds``/``EV`` for every cached row from the
-current archive using the SAME point-in-time read the training join uses
-(``target_at`` = game-date 20:00 UTC commence stand-in minus the training
-lookback; see ``stats/base.py`` ``get_training_matrix``). Because the backfill
-stamped its rows at ``01:00`` and the legacy seed sits at midnight, that read
-returns the backfilled price — so the injected values equal what a full rebuild
-would produce, while the (slow) feature columns are left untouched. A normal
-``meditate --force`` run then reuses the refreshed cache and retrains the cell
-against the real book.
+Both are repaired by re-running the training join's own resolver over the cached
+rows. ``Stats.resolve_player_market_odds`` reads only ``stats.index`` and
+``stats["Avg10"]`` from its frame — both cached — and its combo fallback needs
+only the 300-day log window, not the profile frames built from it. So one
+``window_short_logs`` call per gameday reproduces what a rebuild resolves, at one
+batched archive query per gameday instead of a full feature rebuild.
+
+The whole quote is written, prices included. Repairing the block alone would
+strand a row whose class changed — one relabelled ``combo_ev_inversion`` while
+its ``Odds`` stayed the neutral 0.5 reads as book evidence bought by a coin
+flip, which is what the load-time provenance guard exists to prevent. Writing
+the resolved ``Line`` is likewise what a rebuild produces: once the block is
+present ``_clip_lines`` clips synthetic rows only, so authentic and derived
+lines stay unclipped, and the next ``meditate`` re-trims from the repaired block.
 
     poetry run python -m sportstradamus.scripts.inject_backfilled_odds \
         --league NFL --markets "passing yards,attempts,completions" --dry-run
 
-Or refresh every cached matrix at once after a broad backfill (the ``*_corr``
-feature matrices carry no book columns and are skipped):
+Or sweep every cached matrix at once (the ``*_corr`` feature matrices carry no
+book columns and are skipped). ``--legacy-only`` narrows the sweep to the
+matrices that predate the block, so repairing them cannot disturb the training
+data of a cell that is already serving:
 
-    poetry run python -m sportstradamus.scripts.inject_backfilled_odds --all-cached
+    poetry run python -m sportstradamus.scripts.inject_backfilled_odds \
+        --all-cached --legacy-only
 """
 
 import datetime
 import importlib.resources as pkg_resources
+from collections import Counter
 
 import click
 import numpy as np
@@ -36,21 +47,27 @@ import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import data
-from sportstradamus.helpers import Archive, book_weights, stat_cv, stat_dist
 from sportstradamus.helpers.archive import TRAINING_LOOKBACK
 from sportstradamus.helpers.io import market_file_slug
-from sportstradamus.helpers.training_quotes import (
-    AUTHENTIC,
-    TrainingQuote,
-    archive_ev_is_usable,
-    resolve_training_quote,
-)
+from sportstradamus.helpers.training_quotes import PROVENANCE_COLUMNS
+from sportstradamus.stats import Stats, StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 
 # 8 PM UTC commence-time stand-in from stats/base.py get_training_matrix. The
 # archive read happens at this minus the training lookback; backfilled rows
-# (observed_at 01:00) and the midnight seed both precede it, so get_ev returns
+# (observed_at 01:00) and the midnight seed both precede it, so the read returns
 # the latest observation = the backfill.
 _COMMENCE_STANDIN = datetime.timedelta(hours=20)
+
+_LEAGUE_CLASSES = {
+    "NBA": StatsNBA,
+    "NFL": StatsNFL,
+    "WNBA": StatsWNBA,
+    "MLB": StatsMLB,
+    "NHL": StatsNHL,
+}
+
+_REPAIRED_COLUMNS = ("Line", "Odds", "EV", "Archived", "Odds_synthetic", *PROVENANCE_COLUMNS)
+
 
 def _target_at(game_date: datetime.date) -> datetime.datetime:
     return (
@@ -60,81 +77,57 @@ def _target_at(game_date: datetime.date) -> datetime.datetime:
     )
 
 
-def _is_blown(ev: float, line: float) -> bool:
-    """A cached EV the swept archive can no longer price — pre-``get_ev``-fix residue."""
-    return not archive_ev_is_usable(ev, line)
+def _load_league(league: str):
+    """Load one league's gamelog exactly as the training run does, minus the network."""
+    cls = _LEAGUE_CLASSES[league]
+    # Probable pitchers describe the live upcoming slate; a repair reads cached history only.
+    stat_data = cls(load_live_pitchers=False) if cls is StatsMLB else cls()
+    stat_data.load()
+    stat_data.trim_gamelog()
+    return stat_data
 
 
-def _resolve_row(
-    archive: Archive,
-    league: str,
-    market: str,
-    dist: str,
-    cv: float,
-    row: pd.Series,
-    has_synth: bool,
-) -> TrainingQuote:
-    """Resolve cached repair fields through the same pure policy as a rebuild."""
-    del has_synth  # retained for compatibility with older direct callers
-    game_date = pd.to_datetime(row["Date"]).date()
-    at = _target_at(game_date)
-    date = game_date.strftime("%Y-%m-%d")
-    legacy_line = archive.get_line(league, market, date, row["Player"], at=at)
-    fallback_line = max(float(row.get("Avg10", row["Line"])), 0.5)
-    fallback_ev = None
-    if row.get("QuoteSource") == "combo_ev_inversion" and not _is_blown(
-        float(row["EV"]), fallback_line
-    ):
-        fallback_ev = float(row["EV"])
-    return resolve_training_quote(
-        archive.get_training_book_quotes(league, market, date, row["Player"], at=at),
-        legacy_line=legacy_line,
-        fallback_line=fallback_line,
-        fallback_ev=fallback_ev,
-        dist=dist,
-        cv=cv,
-        weights=book_weights.get(league, {}).get(market, {}),
-    )
+def resolve_cached_quotes(stat_data: Stats, market: str, M: pd.DataFrame) -> pd.DataFrame:
+    """Re-resolve every cached row's quote through the training join's own resolver.
 
-
-def _refresh_one(
-    archive: Archive, league: str, market: str, M: pd.DataFrame
-) -> tuple[int, float, float, int, int]:
-    """Re-derive ``Line``/``Odds``/``EV``/``Archived`` from the archive for every
-    cached row.
-
-    Mirrors the ``Odds = 1 - get_odds(line, ev)`` derivation in ``stats/base.py``
-    ``get_training_matrix`` so the injected columns equal a full rebuild's (see
-    ``_resolve_row`` for the per-row policy). ``Archived`` is reconciled too so a
-    newly backfilled real line lifts the authentic count the two-part support
-    audit reads — refreshing prices without it leaves a real line flagged
-    synthetic. Returns
-    ``(n_changed, frac_half_before, frac_half_after, authentic_before, authentic_after)``
-    where the coin-flip fraction (``Odds == 0.5``) is the degeneracy fingerprint
-    the backfill clears and ``authentic = Archived & ~Odds_synthetic``.
+    Returns the canonical quote record for each row, aligned to ``M.index``.
     """
-    cv = stat_cv[league].get(market, 1)
-    dist = stat_dist.get(league, {}).get(market, "Gamma")
-    has_synth = "Odds_synthetic" in M.columns
-    quotes = []
-    for _, row in tqdm(M.iterrows(), total=len(M), desc=f"{league} {market}", leave=False):
-        quotes.append(_resolve_row(archive, league, market, dist, cv, row, has_synth))
+    game_dates = pd.to_datetime(M["Date"]).dt.date
+    resolved = []
+    for game_date, rows in tqdm(
+        M.groupby(game_dates), unit="gameday", desc=f"{stat_data.league} {market}", leave=False
+    ):
+        stat_data.window_short_logs(game_date)
+        players = rows["Player"]
+        stats = pd.DataFrame({"Avg10": rows["Avg10"].to_numpy()}, index=players)
+        stats = stats.loc[~stats.index.duplicated()]
+        quotes = stat_data.resolve_player_market_odds(
+            stats, market, game_date.strftime("%Y-%m-%d"), _target_at(game_date)
+        )
+        quotes = quotes.reindex(players)
+        quotes.index = rows.index
+        resolved.append(quotes)
+    return pd.concat(resolved).reindex(M.index)
 
-    quote_frame = pd.DataFrame([quote.as_record() for quote in quotes], index=M.index)
-    new_odds = quote_frame["Odds"].to_numpy(dtype=float)
-    old_odds = M["Odds"].to_numpy(dtype=float)
-    n_changed = int((~np.isclose(new_odds, old_odds)).sum())
-    frac_before = float(np.isclose(old_odds, 0.5).mean())
-    frac_after = float(np.isclose(new_odds, 0.5).mean())
 
-    old_synth = M["Odds_synthetic"].to_numpy(dtype=bool) if has_synth else np.zeros(len(M), bool)
-    new_arch = quote_frame["QuoteAuthenticity"].eq(AUTHENTIC).to_numpy()
-    auth_before = int((M["Archived"].to_numpy(dtype=bool) & ~old_synth).sum())
-    auth_after = int(new_arch.sum())
+def _repair_one(stat_data: Stats, market: str, M: pd.DataFrame) -> str:
+    """Write the re-resolved quotes into ``M`` and describe what moved."""
+    quotes = resolve_cached_quotes(stat_data, market, M)
+    legacy = "QuoteSource" not in M.columns
+    authentic_before = int(M["Archived"].to_numpy(dtype=bool).sum())
+    price_moved = int(
+        (~np.isclose(quotes["Odds"].to_numpy(float), M["Odds"].to_numpy(float))).sum()
+    )
+    for column in _REPAIRED_COLUMNS:
+        M[column] = quotes[column]
 
-    for column in quote_frame:
-        M[column] = quote_frame[column]
-    return n_changed, frac_before, frac_after, auth_before, auth_after
+    sources = Counter(quotes["QuoteSource"])
+    breakdown = ", ".join(f"{source} {count}" for source, count in sources.most_common())
+    return (
+        f"{len(M)} rows ({'legacy' if legacy else 'refresh'}); {breakdown}; "
+        f"authentic {authentic_before} -> {int(M['Archived'].sum())}; "
+        f"Odds moved on {price_moved}"
+    )
 
 
 def _all_cached_cells() -> list[tuple[str, str]]:
@@ -154,21 +147,26 @@ def _all_cached_cells() -> list[tuple[str, str]]:
 
 
 @click.command()
-@click.option("--league", default="NFL", help="League whose cached matrices to refresh.")
+@click.option("--league", default="NFL", help="League whose cached matrices to repair.")
 @click.option("--markets", default=None, help="Comma-separated market names (stat_map values).")
 @click.option(
     "--all-cached",
     is_flag=True,
-    help="Refresh every cached matrix across all leagues (ignores --league/--markets).",
+    help="Repair every cached matrix across all leagues (ignores --league/--markets).",
 )
-@click.option("--dry-run", is_flag=True, help="Report the refresh delta; do not write the parquet.")
-def main(league, markets, all_cached, dry_run):
-    """Inject backfilled archive odds into cached training matrices (no feature
-    rebuild). Follow with ``meditate --force`` to retrain against the real book."""
+@click.option(
+    "--legacy-only",
+    is_flag=True,
+    help="Repair only matrices with no provenance block yet, leaving populated ones untouched.",
+)
+@click.option("--dry-run", is_flag=True, help="Report the repair delta; do not write the parquet.")
+def main(league, markets, all_cached, legacy_only, dry_run):
+    """Re-resolve cached training matrices' odds provenance from the archive (no
+    feature rebuild). Follow with ``meditate`` to retrain against the repaired block."""
     if not all_cached and not markets:
-        raise click.UsageError("provide --markets, or --all-cached to refresh every cached matrix")
-    archive = Archive()
+        raise click.UsageError("provide --markets, or --all-cached to repair every cached matrix")
     cells = _all_cached_cells() if all_cached else [(league, m.strip()) for m in markets.split(",")]
+    loaded = {}
     for lg, market in cells:
         path = pkg_resources.files(data) / f"training_data/{market_file_slug(lg, market)}.parquet"
         if not path.is_file():
@@ -178,14 +176,13 @@ def main(league, markets, all_cached, dry_run):
         if "Odds" not in M.columns:
             click.echo(f"  {lg} {market}: not a book matrix (no Odds column), skip")
             continue
-        n_changed, frac_before, frac_after, auth_before, auth_after = _refresh_one(
-            archive, lg, market, M
-        )
-        click.echo(
-            f"  {lg} {market}: {n_changed}/{len(M)} rows changed; "
-            f"Odds==0.5 {frac_before:.1%} -> {frac_after:.1%}; "
-            f"authentic {auth_before} -> {auth_after}"
-        )
+        if legacy_only and "QuoteSource" in M.columns:
+            click.echo(f"  {lg} {market}: provenance block already populated, skip")
+            continue
+        if lg not in loaded:
+            click.echo(f"[{lg}] loading cached gamelogs...")
+            loaded[lg] = _load_league(lg)
+        click.echo(f"  {lg} {market}: {_repair_one(loaded[lg], market, M)}")
         if not dry_run:
             M.to_parquet(path, compression="zstd", index=True)
     if dry_run:

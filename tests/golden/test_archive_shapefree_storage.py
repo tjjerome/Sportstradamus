@@ -26,6 +26,7 @@ from sportstradamus.helpers import config
 from sportstradamus.helpers.archive import Archive
 from sportstradamus.helpers.config import book_gate, stat_cv, stat_dist
 from sportstradamus.helpers.distributions import SN_MAX_MEAN_FACTOR, get_ev, get_odds
+from sportstradamus.helpers.training_quotes import resolve_training_quote
 from sportstradamus.scripts.migrate_archive_shapefree import _migrate_cell
 
 _TS = datetime.datetime(2026, 5, 8, 12, 0, 0)
@@ -120,6 +121,48 @@ def test_training_quote_batch_matches_scalar_rows_and_lines(archive):
         rows, line = batch[entity]
         assert rows == archive.get_training_book_quotes("WNBA", "AST", "2026-05-08", entity)
         assert line == archive.get_line("WNBA", "AST", "2026-05-08", entity)
+
+
+def test_unpriced_pickem_line_resolves_as_the_platforms_own_symmetric_quote(archive):
+    """DFS priced rows begin only in 2026, so pre-2026 pick'em entries archived a bare
+    line. That line is the platform's own 50/50 quote, not an absent book — but only
+    where nothing priced the entry, and only where the market names the platform."""
+    archive._connection.execute(
+        "INSERT INTO lines (league, market, game_date, entity, line, observed_at) VALUES "
+        "('NFL', 'fantasy points underdog', DATE '2026-05-08', 'P', 11.5, ?), "
+        "('NFL', 'fantasy points underdog', DATE '2026-05-08', 'Priced', 9.5, ?), "
+        "('NFL', 'receiving yards', DATE '2026-05-08', 'P', 46.5, ?)",
+        [_TS, _TS, _TS],
+    )
+    archive._connection.execute(
+        "INSERT INTO odds (league, market, game_date, entity, book, ev, observed_at, "
+        "under_prob, line) VALUES "
+        "('NFL', 'fantasy points underdog', DATE '2026-05-08', 'Priced', 'Underdog', "
+        "10.2, ?, 0.42, 9.5)",
+        [_TS],
+    )
+
+    def resolve(market, entity):
+        rows, legacy = archive.get_training_quote_inputs(
+            "NFL", market, "2026-05-08", [entity]
+        )[entity]
+        return rows, resolve_training_quote(
+            rows, legacy_line=legacy, fallback_line=5.0, fallback_ev=None, dist="Gamma", cv=1.0
+        )
+
+    rows, quote = resolve("fantasy points underdog", "P")
+    assert [row.book for row in rows] == ["Underdog"]
+    assert (quote.line, quote.over_probability, quote.source) == (11.5, 0.5, "book_direct")
+    assert (quote.authenticity, quote.observed_at) == ("authentic", _TS)
+
+    # A real quote outranks the stand-in — a boost prices away from 50/50 and must survive.
+    _, priced = resolve("fantasy points underdog", "Priced")
+    assert (priced.over_probability, priced.ev) == (pytest.approx(0.58), 10.2)
+
+    # A sportsbook market's bare line is unattributable: `lines` has no book column.
+    rows, unattributed = resolve("receiving yards", "P")
+    assert rows == []
+    assert (unattributed.source, unattributed.authenticity) == ("neutral_fallback", "synthetic")
 
 
 def test_auto_migrate_adds_columns_preserving_ev(tmp_path, monkeypatch):

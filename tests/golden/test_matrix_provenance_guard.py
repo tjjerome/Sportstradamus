@@ -65,7 +65,8 @@ def test_half_populated_provenance_block_is_refused(tmp_path):
     message = str(excinfo.value)
     assert "MLB runs allowed" in message
     assert "1 of 2 rows" in message
-    assert "inject_backfilled_odds" in message
+    # The remedy must be runnable as printed: the repair is a module, not a console script.
+    assert "python -m sportstradamus.scripts.inject_backfilled_odds" in message
 
 
 def test_fully_populated_and_legacy_matrices_both_load(tmp_path):

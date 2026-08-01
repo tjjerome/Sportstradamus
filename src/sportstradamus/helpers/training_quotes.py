@@ -30,6 +30,20 @@ PROVENANCE_COLUMNS = (
     "QuoteBookCount",
 )
 
+# A fantasy-points market is one DFS platform's scoring formula, so the market
+# name names the platform that posts it; no sportsbook offers these.
+_PICKEM_PLATFORMS = {
+    "underdog": "Underdog",
+    "prizepicks": "PrizePicks",
+    "parlayplay": "ParlayPlay",
+    "parlay": "ParlayPlay",
+    "sleeper": "Sleeper",
+    "thrive": "Thrive",
+}
+# Pick'em pays the same either way at the posted line — the operator's rake sits
+# in the payout multiplier, not the line — so an unboosted entry prices at 50/50.
+_PICKEM_UNDER_PROBABILITY = 0.5
+
 
 @dataclasses.dataclass(frozen=True)
 class ArchivedBookQuote:
@@ -144,14 +158,30 @@ def _latest_observation(rows: Sequence[ArchivedBookQuote]) -> datetime.datetime 
     return max(observed) if observed else None
 
 
+def pickem_quote(
+    market: str, line: float, observed_at: datetime.datetime | None
+) -> list[ArchivedBookQuote]:
+    """The platform's own symmetric quote for a pick'em line no book ever priced.
+
+    DFS priced rows only begin in 2026; before that a pick'em entry archived its
+    line and nothing else. That bare line is still the platform's quote, so stand
+    the symmetric price back up rather than read it as an absent book. Boosted
+    entries do not price at 50/50 — ``Archive.add_dfs`` runs a live boost through
+    ``no_vig_odds`` into a real skewed quote — so callers must reach here only
+    when nothing priced the entry, letting any real quote outrank this.
+    """
+    if "fantasy points " not in market:
+        return []
+    platform = _PICKEM_PLATFORMS.get(market.rsplit(" ", 1)[-1])
+    if platform is None or not _positive(line) or observed_at is None:
+        return []
+    return [ArchivedBookQuote(platform, None, _PICKEM_UNDER_PROBABILITY, line, observed_at)]
+
+
 def _direct_line_cohort(
     rows: Sequence[ArchivedBookQuote],
 ) -> tuple[float, list[ArchivedBookQuote]] | None:
-    direct = [
-        row
-        for row in rows
-        if _positive(row.line) and _probability(row.under_probability)
-    ]
+    direct = [row for row in rows if _positive(row.line) and _probability(row.under_probability)]
     if not direct:
         return None
     lines = [float(row.line) for row in direct]
