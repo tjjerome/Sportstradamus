@@ -26,11 +26,14 @@ import functools
 import hashlib
 import importlib.resources as pkg_resources
 import math
+import os
 import pathlib
 import re
 import signal
 import subprocess
+import threading
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
 from statistics import fmean
 
@@ -54,6 +57,7 @@ from sportstradamus.training.model_strategy.progress import (
     NORMAL,
     QUIET,
     VERBOSE,
+    BoardProgress,
     SearchProgress,
     compress_corner,
     echo_above_bar,
@@ -82,8 +86,8 @@ from sportstradamus.training.model_strategy.specs import SEED_CORNERS
 from sportstradamus.training.model_strategy.tpe_search import (
     MAX_TRIALS_PER_CELL,
     TRAINED_TRIAL_ATTR,
+    CellSearchState,
     cell_study,
-    early_stop_callback,
     enqueue_params,
     reachable_corners,
     suggest_corner,
@@ -108,9 +112,30 @@ _TEST_SETS_ROOT = pathlib.Path(str(pkg_resources.files(_data_pkg) / "test_sets")
 _DETERMINISTIC_MODEL_ROOT = _REPO_ROOT / "research" / "models" / "deterministic"
 _DETERMINISTIC_LOG_ROOT = _REPO_ROOT / "research" / "logs" / "deterministic"
 _TRAINING_DATA_ROOT = pathlib.Path(str(pkg_resources.files(_data_pkg) / "training_data"))
-# 30-minute ceiling; a deterministic meditate run is fast-HP, but cells with large datasets can
-# take ~10 min, so 1800 s keeps CI from hanging without cutting off valid runs.
+# Ceiling for a cell nothing has been measured for yet. A deterministic meditate is fast-HP, but a
+# large-dataset cell can take ~10 min, so 1800 s keeps CI from hanging without cutting off valid runs.
 _MEDITATE_TRIAL_TIMEOUT_S = 1800
+# Once a cell has timings, its own worst corner sets the ceiling instead: a trial timeout is a hang
+# detector, not a work limit, and 1800 s of silence on a cell whose corners run 15 s is 30 minutes
+# before anyone finds out. Leave-one-out replay over 684 measured corners (ceiling built from the
+# cell's *other* corners) cuts one of them at a typical ceiling of 600 s — and that one is retried,
+# because a timeout row is not admitted to the resume cache.
+_TIMEOUT_HEADROOM = 2.0
+_TIMEOUT_FLOOR_S = 600
+# How far n_trials runs past the reachable grid. A corner from a family the cell has abandoned is
+# pruned before it trains, and TPE keeps proposing it because pruned trials are not in its model, so
+# without slack a cell that rules out a family early could exhaust its suggestions before its budget.
+_PRUNED_SUGGESTION_SLACK = 3
+# The `failure` value _run_and_score records for a timed-out corner; _cached_corners refuses to reuse
+# one, so `--resume` retrains it.
+_TIMEOUT_FAILURE = subprocess.TimeoutExpired.__name__
+# Serializes _upsert_cell's read-modify-write of the board CSV across concurrently swept cells.
+_BOARD_WRITE_LOCK = threading.Lock()
+# Concurrent cells, when --jobs is not given. Half the cores leaves room for the operator's shell and
+# whatever else the box is doing; the cap is where the returns flatten, because a board finishes no
+# faster than its slowest single cell. Deterministic training is core-bound, not memory-bound — the
+# largest cached matrix is 117k x 165 and a worker's floor is its interpreter, ~580 MB.
+_MAX_AUTO_JOBS = 8
 # A DuckDB read-write connection takes a process-exclusive lock on archive.duckdb; a meditate that
 # opens the archive while a cron job holds it fails immediately with this line (DuckDB throws rather
 # than blocking). A --deterministic trial trains from the cached matrix and never opens the archive,
@@ -487,7 +512,7 @@ def _run_meditate_with_lock_retry(cmd: list[str], log_path: pathlib.Path, *, tim
 
 
 def _run_deterministic_meditate(
-    league: str, market: str, corner: dict[str, str], spec: StrategySpec
+    league: str, market: str, corner: dict[str, str], spec: StrategySpec, timeout_s: int
 ) -> None:
     """Train one deterministic ``(cell, corner)`` trial via meditate.
 
@@ -511,9 +536,7 @@ def _run_deterministic_meditate(
         "--holdout-blind",
     )
     cmd += strategy_cli_args(_cell_context(league, market), spec, corner)
-    _run_meditate_with_lock_retry(
-        cmd, _log_path(league, market, corner, spec), timeout=_MEDITATE_TRIAL_TIMEOUT_S
-    )
+    _run_meditate_with_lock_retry(cmd, _log_path(league, market, corner, spec), timeout=timeout_s)
 
 
 def _score_corner(
@@ -593,7 +616,11 @@ def _verdict(row: object) -> str:
 
 
 def _run_and_score(
-    league: str, market: str, strategy_slug: str, corner: dict[str, str]
+    league: str,
+    market: str,
+    strategy_slug: str,
+    corner: dict[str, str],
+    timeout_s: int = _MEDITATE_TRIAL_TIMEOUT_S,
 ) -> dict[str, object]:
     """Train the ``corner`` retrain trial and score it; tag the row with its family.
 
@@ -606,6 +633,11 @@ def _run_and_score(
     non-shipping row (:data:`_FAILED_CORNER_SLACK`) naming the exception in ``failure``, so one bad
     corner never aborts the board — and, cached under its fingerprint, so a resumed run never
     retrains a reliable crash. Display is the caller's: :class:`SearchProgress` renders the row.
+
+    An interrupt is the one failure that is not the corner's fault. SIGINT reaches the whole process
+    group, so a Ctrl-C lands on the child as a signal death while the pool's worker threads keep
+    running; recording that as a failed corner would write a row per in-flight cell and cache it, and
+    ``--resume`` would then never retrain any of them.
     """
     spec = get_strategy(strategy_slug)
     context = _cell_context(league, market)
@@ -620,13 +652,15 @@ def _run_and_score(
     # built from these samples needs to include — that wait is real time the operator waits.
     start = time.monotonic()
     try:
-        _run_deterministic_meditate(league, market, corner, spec)
+        _run_deterministic_meditate(league, market, corner, spec, timeout_s)
         row = _score_corner(league, market, corner, spec)
     except (
         InactiveStrategyArtifactError,
         subprocess.CalledProcessError,
         subprocess.TimeoutExpired,
     ) as exc:
+        if isinstance(exc, subprocess.CalledProcessError) and exc.returncode == -signal.SIGINT:
+            raise
         row = {
             **corner,
             "slack": _FAILED_CORNER_SLACK,
@@ -720,6 +754,7 @@ def search_cell(
     out: str | None = None,
     verbosity: int = NORMAL,
     seed_seconds: float | None = None,
+    position: int = 0,
 ) -> pd.DataFrame:
     """Search one cell's recipe space under a trial budget and rank the board by slack.
 
@@ -733,12 +768,14 @@ def search_cell(
     interrupt anywhere in a multi-hour cell throws away every corner it had already trained.
 
     ``seed_seconds`` is this cell's mean corner duration from a prior run; it carries the bar's ETA
-    until enough of this run's own corners have landed to estimate from.
+    until enough of this run's own corners have landed to estimate from. ``position`` is the terminal
+    row this cell's bar draws on, handed out by :class:`BoardProgress` when cells run concurrently.
     """
     context = _cell_context(league, market)
     families = families if families is not None else _cell_families(league, market)
     evaluated = dict(cached or {})
     discounts = _ledger_gate_discounts(out)
+    timeout_s = _cell_timeout_seconds(out, league, market)
     study = cell_study(league, market, families)
     for spec, corner in _known_good_corners(context):
         params = enqueue_params(context, spec, corner)
@@ -747,6 +784,7 @@ def search_cell(
 
     scored: dict[str, dict[str, object]] = {}
     trained: set[str] = set()
+    state = CellSearchState(context, families, _prior_standings(evaluated))
     progress = SearchProgress(
         league,
         market,
@@ -754,24 +792,33 @@ def search_cell(
         verbosity=verbosity,
         seed_seconds=seed_seconds,
         reused=len(evaluated),
+        position=position,
     )
 
     def objective(trial: optuna.Trial) -> float:
         spec, corner = suggest_corner(trial, context, families)
         fingerprint = corner_fingerprint(spec, corner, str(context.matrix_sha256))
         row = evaluated.get(fingerprint)
-        if row is None:
+        # Asked once, before the cache is written: `fingerprint in trained` would answer True again
+        # on a re-proposal of a corner this run already trained, and TPE re-proposes about a quarter
+        # of the time — enough to walk the bar past its total and double-weight the ETA.
+        retrained = row is None
+        if retrained:
+            if state.abandoned(spec.slug):
+                trial.set_user_attr(TRAINED_TRIAL_ATTR, False)
+                raise optuna.TrialPruned
             progress.starting(corner)
-            row = _run_and_score(league, market, spec.slug, corner)
+            row = _run_and_score(league, market, spec.slug, corner, timeout_s)
             evaluated[fingerprint] = row
             trained.add(fingerprint)
-        trial.set_user_attr(TRAINED_TRIAL_ATTR, fingerprint in trained)
+            state.observe(spec.slug, float(row["slack"]))
+        trial.set_user_attr(TRAINED_TRIAL_ATTR, retrained)
         progress.scored(
             corner,
             verdict=_verdict(row),
             slack=float(row["slack"]),
             elapsed_s=row.get("elapsed_s"),
-            trained=fingerprint in trained,
+            trained=retrained,
             failure=_board_text(row, "failure"),
         )
         scored[fingerprint] = row
@@ -784,16 +831,22 @@ def search_cell(
         if len(trained) >= max_trials:
             study.stop()
 
-    # The budget counts retrains, not trials: a re-proposed or cached corner costs no training, so
-    # it must not cost budget either. n_trials is the reachable grid, the point past which every
-    # further suggestion is necessarily a repeat.
+    # The budget counts retrains, not trials: a re-proposed, cached, or abandoned-family corner costs
+    # no training, so it must not cost budget either. n_trials is a ceiling on *suggestions*, so it
+    # carries slack over the reachable grid — a family the cell has ruled out keeps being proposed
+    # (TPE does not model pruned trials), and each of those costs a trial and no time.
     with contextlib.closing(progress):
         study.optimize(
             objective,
-            n_trials=reachable_corners(context, families),
-            callbacks=[early_stop_callback(context, families), stop_when_budget_spent],
+            n_trials=_PRUNED_SUGGESTION_SLACK * reachable_corners(context, families),
+            callbacks=[state.stop_if_done, stop_when_budget_spent],
         )
     return _rank_cell_board(league, market, scored, discounts)
+
+
+def _prior_standings(evaluated: dict[str, dict[str, object]]) -> list[tuple[str, float]]:
+    """``(family, slack)`` per reused row, so a resumed cell keeps the family verdicts it already had."""
+    return [(str(row["family"]), float(row["slack"])) for row in evaluated.values()]
 
 
 def _ledger_gate_discounts(out: str | None) -> dict[str, float]:
@@ -867,6 +920,25 @@ def _cell_mean_seconds(out: str | None) -> tuple[dict[tuple[str, str], float], f
         return {}, None
     per_cell = timed.groupby(["league", "market"])["elapsed_s"].mean()
     return {cell: float(mean) for cell, mean in per_cell.items()}, float(timed["elapsed_s"].mean())
+
+
+def _cell_timeout_seconds(out: str | None, league: str, market: str) -> int:
+    """This cell's trial ceiling: headroom over its own slowest measured corner, else the flat one.
+
+    Maximum rather than a quantile because the spread *inside* one cell is wide — NBA BLK's corners
+    run 12 s to 906 s on the same target — so anything but the worst legitimate corner cuts real work.
+    Clamped below so a cell whose corners all run in seconds still tolerates one slow outlier, and
+    above by :data:`_MEDITATE_TRIAL_TIMEOUT_S` so the ceiling is never looser than the flat one was.
+    """
+    path = pathlib.Path(out) if out else None
+    if path is None or not path.exists():
+        return _MEDITATE_TRIAL_TIMEOUT_S
+    board = _read_board(path)
+    cell = board[(board["league"] == league) & (board["market"] == market)]
+    slowest = pd.to_numeric(cell["elapsed_s"], errors="coerce").max()
+    if not np.isfinite(slowest):
+        return _MEDITATE_TRIAL_TIMEOUT_S
+    return int(min(_MEDITATE_TRIAL_TIMEOUT_S, max(_TIMEOUT_FLOOR_S, _TIMEOUT_HEADROOM * slowest)))
 
 
 def _discounted_slack(row: dict[str, object], discounts: dict[str, float]) -> float:
@@ -1080,7 +1152,13 @@ def _current_row_identity(
 def _cached_corners(
     out: str | None, league: str, market: str, context: CellContext
 ) -> dict[str, dict[str, object]]:
-    """Admissible prior rows for one cell, keyed by corner fingerprint, for reuse without retraining."""
+    """Admissible prior rows for one cell, keyed by corner fingerprint, for reuse without retraining.
+
+    A row that timed out is not admissible. Every other failure is a property of the corner and
+    reusing it is the point — a resumed run should not retrain a reliable crash — but a timeout is a
+    property of the *machine*: the ceiling is derived from the cell's own timings, and cells now run
+    concurrently, so the corner that ran long once may well not next time.
+    """
     if out is None or not pathlib.Path(out).exists():
         return {}
     prior = _read_board(pathlib.Path(out))
@@ -1089,6 +1167,7 @@ def _cached_corners(
         str(source["corner_fingerprint"]): source.drop(labels=["league", "market"]).to_dict()
         for _, source in cell_rows.iterrows()
         if _row_matches_contract(source, context)
+        and _board_text(source, "failure") != _TIMEOUT_FAILURE
     }
 
 
@@ -1100,55 +1179,127 @@ def run_board(
     max_trials: int = MAX_TRIALS_PER_CELL,
     families_by_cell: dict[tuple[str, str], tuple[str, ...]] | None = None,
     verbosity: int = NORMAL,
+    jobs: int = 1,
 ) -> pd.DataFrame:
     """Search every cell in ``cells``, printing each verdict as it lands and upserting the board CSV
     per scored corner so an interrupt keeps partial progress and a ``--league``-scoped run leaves
     other leagues' rows intact. With ``resume``, each cell reopens its Optuna journal and reuses every
     admissible prior row, so a crashed multi-hour run continues instead of retraining scored corners.
-    Returns the requested cells' board; CSV upserts preserve all unrelated rows.
+    Returns the requested cells' board in ``cells`` order; CSV upserts preserve all unrelated rows.
 
     Each finished cell folds its own measured mean back into the timing history, so the remaining-work
     estimate sharpens as the board proceeds rather than staying pinned to the previous run's numbers.
+
+    ``jobs`` cells run at once. A ``--deterministic`` corner is a single-threaded subprocess that
+    never opens the archive, and cells share nothing but the board CSV — which :func:`_upsert_cell`
+    serializes — so the pool is bounded by cores, not by any lock of ours. Threads rather than
+    processes because the training already happens in a child process: the GIL is released for the
+    whole of it, and staying in one process is what lets the board write take an ordinary lock and
+    every cell's bar share one terminal.
     """
-    boards: list[pd.DataFrame] = []
+    swept = [
+        cell_board
+        for cell_board in _sweep_cells(
+            cells,
+            out=out,
+            resume=resume,
+            max_trials=max_trials,
+            families_by_cell=families_by_cell or {},
+            verbosity=verbosity,
+            jobs=jobs,
+        )
+        if cell_board is not None
+    ]
+    if jobs > 1:
+        # Deferred to here: cells finishing at unpredictable times would interleave their tables into
+        # the bar block. Board order, not completion order, so the tail of the run reads as a report.
+        for cell_board in swept:
+            _print_cell_summary(cell_board, verbosity=verbosity)
+    return pd.concat(swept, ignore_index=True) if swept else pd.DataFrame(columns=_BOARD_COLUMNS)
+
+
+def _sweep_cells(
+    cells: list[tuple[str, str]],
+    *,
+    out: str | None,
+    resume: bool,
+    max_trials: int,
+    families_by_cell: dict[tuple[str, str], tuple[str, ...]],
+    verbosity: int,
+    jobs: int,
+) -> list[pd.DataFrame | None]:
+    """Run ``cells`` through the pool, ``None`` where a cell crashed, in ``cells`` order.
+
+    Results are written into a pre-sized list rather than appended, because ``jobs > 1`` finishes them
+    in whatever order they happen to take and the board must not be re-ordered by how long its cells
+    ran. Each finished cell folds its own measured mean into ``means`` before the next countdown line
+    reads it, so the remaining-work estimate sharpens as the board proceeds.
+    """
     means, fallback = _cell_mean_seconds(out)
     budgets = {
-        cell: _cell_trial_count(*cell, (families_by_cell or {}).get(cell, ()), max_trials)
+        cell: _cell_trial_count(*cell, families_by_cell.get(cell, ()), max_trials)
         for cell in cells
         if families_by_cell
     }
-    board_started = time.monotonic()
-    for done, (league, market) in enumerate(cells, start=1):
-        started = time.monotonic()
-        cell_board = search_cell(
-            league,
-            market,
-            max_trials=max_trials,
-            families=(families_by_cell or {}).get((league, market)),
-            cached=(
-                _cached_corners(out, league, market, _cell_context(league, market))
-                if resume
-                else None
-            ),
-            out=out,
-            verbosity=verbosity,
-            seed_seconds=means.get((league, market), fallback),
-        )
-        boards.append(cell_board)
-        _print_cell_summary(cell_board, verbosity=verbosity)
-        if out is not None:
-            _upsert_cell(cell_board, out)
-        trained = pd.to_numeric(cell_board["elapsed_s"], errors="coerce").dropna()
-        if not trained.empty:
-            means[(league, market)] = float(trained.mean())
-        _echo_board_countdown(
-            f"{league} {market}",
-            time.monotonic() - started,
-            time.monotonic() - board_started,
-            len(cells) - done,
-            _board_eta(cells[done:], budgets, means, fallback),
-        )
-    return pd.concat(boards, ignore_index=True)
+    boards: list[pd.DataFrame | None] = [None] * len(cells)
+    board = BoardProgress(len(cells), jobs)
+    started_at = time.monotonic()
+
+    def sweep_cell(index: int, league: str, market: str) -> None:
+        with board.slot() as position:
+            started = time.monotonic()
+            cell_board = search_cell(
+                league,
+                market,
+                max_trials=max_trials,
+                families=families_by_cell.get((league, market)),
+                cached=(
+                    _cached_corners(out, league, market, _cell_context(league, market))
+                    if resume
+                    else None
+                ),
+                out=out,
+                verbosity=verbosity,
+                seed_seconds=means.get((league, market), fallback),
+                position=position,
+            )
+            boards[index] = cell_board
+            if out is not None:
+                _upsert_cell(cell_board, out)
+            if jobs < 2:
+                _print_cell_summary(cell_board, verbosity=verbosity)
+            timed = pd.to_numeric(cell_board["elapsed_s"], errors="coerce").dropna()
+            if not timed.empty:
+                means[(league, market)] = float(timed.mean())
+            left = [c for c, done in zip(cells, boards, strict=True) if done is None]
+            _echo_board_countdown(
+                f"{league} {market}",
+                _cell_verdict(cell_board),
+                time.monotonic() - started,
+                time.monotonic() - started_at,
+                left,
+                _board_eta(left, budgets, means, fallback, jobs),
+            )
+
+    with contextlib.closing(board), ThreadPoolExecutor(max_workers=jobs) as pool:
+        _drain([pool.submit(sweep_cell, i, *cell) for i, cell in enumerate(cells)])
+    return boards
+
+
+def _drain(futures: list[Future]) -> None:
+    """Wait out every cell, surfacing a crashed one instead of losing the rest of the board.
+
+    A cell can die outside :func:`_run_and_score`'s per-corner catch — a scoring bug, an Optuna
+    internal — and before the pool that was one exception ending the whole run. Ctrl-C is the
+    exception to the exception: it re-raises, because the operator asked for the run to stop.
+    """
+    for future in futures:
+        try:
+            future.result()
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:  # one cell's crash must not cost the other cells
+            echo_above_bar(f"  cell failed — {type(exc).__name__}: {exc}", fg="red", err=True)
 
 
 def _board_eta(
@@ -1156,33 +1307,60 @@ def _board_eta(
     budgets: dict[tuple[str, str], int],
     means: dict[tuple[str, str], float],
     fallback: float | None,
+    jobs: int = 1,
 ) -> float | None:
-    """Ceiling on the seconds ``cells`` still need, or ``None`` when nothing has been timed yet.
+    """Wall-clock ceiling on what ``cells`` still need, or ``None`` when nothing has been timed yet.
 
     A cell with no history of its own is priced at the all-cells mean rather than at zero: on a fresh
     board only a handful of cells are timed, and summing the rest as free understated a 29-cell run
     by 29x while still presenting the number as a ceiling. With no prior board at all, the cells this
     run has already finished become that mean — otherwise a first run would report nothing the whole
     way through, having measured most of its own cells.
+
+    ``jobs`` workers divide the total, but never below the longest single cell: a cell is swept by one
+    worker start to finish, so the board cannot finish before its slowest one does however many
+    workers are idle by then.
     """
     typical = fallback if fallback is not None else (fmean(means.values()) if means else None)
     per_cell = [(budgets.get(cell), means.get(cell, typical)) for cell in cells]
     if not per_cell or not all(budget and mean for budget, mean in per_cell):
         return None
-    return sum(budget * mean for budget, mean in per_cell)
+    seconds = [budget * mean for budget, mean in per_cell]
+    return max(sum(seconds) / jobs, *seconds)
+
+
+def _cell_verdict(cell_board: pd.DataFrame) -> str:
+    """``SHIP +0.076`` / ``no ship (best -0.096)`` / ``no corners`` — a finished cell in one phrase.
+
+    Under ``--jobs`` this is the only place a cell's outcome appears while the run is going, the
+    per-cell tables having moved to the end.
+    """
+    slack = pd.to_numeric(cell_board["slack"], errors="coerce")
+    scored = slack[np.isfinite(slack)]
+    if scored.empty:
+        return "no corners"
+    best = float(scored.max())
+    ships = bool(cell_board["ships"].eq(True).any())
+    return f"SHIP {best:+.3f}" if ships else f"no ship (best {best:+.3f})"
 
 
 def _echo_board_countdown(
-    cell: str, cell_elapsed: float, run_elapsed: float, remaining: int, eta: float | None
+    cell: str,
+    verdict: str,
+    cell_elapsed: float,
+    run_elapsed: float,
+    remaining: list[tuple[str, str]],
+    eta: float | None,
 ) -> None:
-    """``NBA FGA done in 12m · run 2h10m · 8 cells left · <=2h40m`` after each cell of a board run.
+    """``NBA FGA SHIP +0.076 in 12m · run 2h10m · 8 cells left · <=2h40m`` as each cell lands.
 
     The running total lives here rather than on the bar because this is the line a multi-day sit is
-    actually read by; the bar is scoped to the cell in front of it.
+    actually read by; a bar is scoped to the one cell in front of it. Under ``--jobs`` this is also
+    where a cell's verdict shows up at all, the per-cell tables having moved to the end of the run.
     """
-    line = f"  {cell} done in {human_seconds(cell_elapsed)} · run {human_seconds(run_elapsed)}"
+    line = f"  {cell} {verdict} in {human_seconds(cell_elapsed)} · run {human_seconds(run_elapsed)}"
     if remaining:
-        line += f" · {remaining} cell{'' if remaining == 1 else 's'} left"
+        line += f" · {len(remaining)} cell{'' if len(remaining) == 1 else 's'} left"
         if eta is not None:
             line += f" · <={human_seconds(eta)}"
     echo_above_bar(line)
@@ -1193,6 +1371,10 @@ def _upsert_cell(cell_board: pd.DataFrame, out: str) -> pd.DataFrame:
     cell — so a single-cell run refreshes the living board instead of clobbering it. Returns the
     rows written for this cell (what the CLI summarizes).
 
+    Read-modify-write over the whole file, so it takes :data:`_BOARD_WRITE_LOCK`: cells run
+    concurrently and each of them rewrites the board after every scored corner. The lock lives here
+    rather than at the call sites because there are two of them, per-corner and per-cell.
+
     ``keep``'s all-NA columns are dropped before the concat and restored by the reindex after it.
     :func:`_read_board` backfills any column a board predates as a ``pd.NA`` scalar, which lands as
     an all-NA *object* column; concatenating one of those against this cell's real dtypes is what
@@ -1200,14 +1382,17 @@ def _upsert_cell(cell_board: pd.DataFrame, out: str) -> pd.DataFrame:
     reindex puts every dropped column back, still empty.
     """
     path = pathlib.Path(out)
-    if path.exists():
-        prior = _read_board(path)
-        league, market = cell_board["league"].iloc[0], cell_board["market"].iloc[0]
-        keep = prior[~((prior["league"] == league) & (prior["market"] == market))]
-        merged = pd.concat([keep.dropna(axis="columns", how="all"), cell_board], ignore_index=True)
-        merged.reindex(columns=_BOARD_COLUMNS).to_csv(path, index=False)
-    else:
-        cell_board.to_csv(path, index=False)
+    with _BOARD_WRITE_LOCK:
+        if path.exists():
+            prior = _read_board(path)
+            league, market = cell_board["league"].iloc[0], cell_board["market"].iloc[0]
+            keep = prior[~((prior["league"] == league) & (prior["market"] == market))]
+            merged = pd.concat(
+                [keep.dropna(axis="columns", how="all"), cell_board], ignore_index=True
+            )
+            merged.reindex(columns=_BOARD_COLUMNS).to_csv(path, index=False)
+        else:
+            cell_board.to_csv(path, index=False)
     return cell_board
 
 
@@ -1403,12 +1588,14 @@ def _run_board_mode(
     max_trials: int,
     verbosity: int = NORMAL,
     confirm: bool = False,
+    jobs: int = 1,
 ) -> pd.DataFrame:
     """Derive the board, warn per skipped cell, print the scope, sweep.
 
     ``dist_class`` narrows each cell's family pool; ``resume`` reuses admissible prior rows and
     reopens each cell's Optuna journal; ``dry_run`` prints the resolved scope — per cell, including
-    what ``--resume`` would reuse — then returns without training a single corner.
+    what ``--resume`` would reuse — then returns without training a single corner. ``jobs`` cells
+    are swept at once.
     """
     families_by_cell, missing, no_families = _select_board_cells(
         league, include_shipped, dist_class
@@ -1424,9 +1611,11 @@ def _run_board_mode(
     means, fallback = _cell_mean_seconds(out)
     scope = f" ({league})" if league else ""
     note = f" · {skipped} skipped" if skipped else ""
-    eta = _board_eta(cells, budgets, means, fallback)
+    jobs = min(jobs, len(cells))
+    eta = _board_eta(cells, budgets, means, fallback, jobs)
     click.echo(
-        f"board{scope}: {len(cells)} cells to sweep{note} · <={trials} deterministic trainings"
+        f"board{scope}: {len(cells)} cells to sweep{note} · {jobs} at a time"
+        f" · <={trials} deterministic trainings"
         + (f" · <={human_seconds(eta)}" if eta is not None else "")
     )
     if dry_run:
@@ -1442,6 +1631,7 @@ def _run_board_mode(
         max_trials=max_trials,
         families_by_cell=families_by_cell,
         verbosity=verbosity,
+        jobs=jobs,
     )
     _print_board_rollup(result)
     return result
@@ -1486,22 +1676,10 @@ def _run_single_cell(
     max_trials: int,
     verbosity: int,
     confirm: bool,
+    jobs: int | None = None,
 ) -> pd.DataFrame:
-    """Sweep one named cell, upsert it, print its summary; an empty board under ``dry_run``.
-
-    A named cell is swept whatever its ``shipped`` state — the withheld filter lives in board-cell
-    selection, which this path never reaches — so ``include_shipped`` has nothing left to widen here.
-    """
-    if include_shipped:
-        click.secho(
-            wrapped(
-                f"note: --include-shipped is redundant here — {league} {market} sweeps whatever its "
-                "shipped state; the flag only widens which cells a board run picks up.",
-                "  ",
-                "  ",
-            ),
-            fg="cyan",
-        )
+    """Sweep one named cell, upsert it, print its summary; an empty board under ``dry_run``."""
+    _note_board_only_flags(league, market, include_shipped, jobs)
     families = _cell_families(league, market, dist_class)
     if not families:
         raise click.UsageError(
@@ -1551,7 +1729,8 @@ def _reject_inert_flags(
     """Fail on flag combinations that would silently do nothing.
 
     Each of these was accepted and ignored before, which on an unattended multi-day run reads as the
-    flag having taken effect.
+    flag having taken effect. Flags that are merely *redundant* on a named cell get a note from
+    :func:`_note_board_only_flags` instead — they are not mistakes, just inert at that scope.
     """
     if market is not None and not league:
         raise click.UsageError(
@@ -1561,6 +1740,35 @@ def _reject_inert_flags(
         raise click.UsageError("--yes and --confirm-nominees require --confirm")
     if quiet and verbose:
         raise click.UsageError("--quiet and --verbose are mutually exclusive")
+
+
+def _default_jobs() -> int:
+    """Concurrent cells when ``--jobs`` is unset."""
+    return min(_MAX_AUTO_JOBS, max(1, (os.cpu_count() or 2) // 2))
+
+
+def _note_board_only_flags(
+    league: str, market: str, include_shipped: bool, jobs: int | None
+) -> None:
+    """Say so when a flag that only shapes a *board* run was passed alongside a named cell.
+
+    Neither is a mistake worth failing on — one is the board default and the other widens cell
+    selection this path never reaches — but silently ignoring a flag on a multi-hour run reads as
+    the flag having taken effect.
+    """
+    notes = []
+    if include_shipped:
+        notes.append(
+            f"--include-shipped is redundant here — {league} {market} sweeps whatever its shipped "
+            "state; the flag only widens which cells a board run picks up"
+        )
+    if jobs is not None and jobs > 1:
+        notes.append(
+            f"--jobs {jobs} does nothing here — a named cell is one cell, and the corners within "
+            "one are swept in sequence"
+        )
+    for note in notes:
+        click.secho(wrapped(f"note: {note}.", "  ", "  "), fg="cyan")
 
 
 @click.command(name="model-strategy-sweep")
@@ -1598,6 +1806,15 @@ def _reject_inert_flags(
     show_default=True,
     help="Per-cell budget of *trained* corners; a re-proposed or cached corner is free. Early "
     "stopping usually ends a cell well under it, so every '<=N' count is a ceiling, not an estimate.",
+)
+@click.option(
+    "-j",
+    "--jobs",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Cells to sweep at once (default: half the cores, capped at 8). A deterministic corner is a "
+    "single-threaded subprocess that never opens the archive, so cells parallelize cleanly; corners "
+    "within a cell do not. No effect with --market, which is one cell.",
 )
 @click.option(
     "--confirm",
@@ -1661,6 +1878,7 @@ def main(
     include_shipped: bool,
     dist_class: str,
     max_trials: int,
+    jobs: int | None,
     confirm: bool,
     yes: bool,
     confirm_nominees: int | None,
@@ -1692,6 +1910,7 @@ def main(
             max_trials,
             verbosity,
             confirm,
+            jobs if jobs is not None else _default_jobs(),
         )
     else:
         result = _run_single_cell(
@@ -1705,6 +1924,7 @@ def main(
             max_trials,
             verbosity,
             confirm,
+            jobs,
         )
     if dry_run:
         return

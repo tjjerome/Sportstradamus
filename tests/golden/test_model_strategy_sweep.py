@@ -17,8 +17,12 @@ and that a legacy row scored on the ship holdout is inert.
 import io
 import json
 import pathlib
+import re
+import signal
 import subprocess
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import click
 import pandas as pd
@@ -63,6 +67,8 @@ from sportstradamus.training.structural_strategies import (
 )
 
 _MATRIX_SHA = "matrix-123"
+# Stands in for the per-cell trial ceiling wherever a test is not about the ceiling itself.
+_TIMEOUT = sweep._MEDITATE_TRIAL_TIMEOUT_S
 # The role×position two-part strategy is gated by the per-(league, market) role registry;
 # the NFL rushing-affine strategy is cell-pinned. A structural spec only *enrolls* for a cell whose
 # real matrix carries its grouping columns — the sweep then excludes it anyway, but the registry
@@ -166,7 +172,7 @@ def _fake_row(family, corner, slack):
     }
 
 
-def _fake_run_and_score(league, market, family, corner):
+def _fake_run_and_score(league, market, family, corner, timeout_s=None):
     """One honest row per corner; slack favors a known best corner per family (no model trains)."""
     # Every family sweeps posthoc, so it must move slack or the grid's best corner is a tie.
     posthoc = 0.03 if corner["posthoc"] == "roe_mean" else 0.0
@@ -224,9 +230,9 @@ def _fake_run_and_score(league, market, family, corner):
 def _spy_run_and_score(trained):
     """``_run_and_score`` stand-in that records ``(family, corner)`` per trial before scoring it."""
 
-    def run_and_score(league, market, family, corner):
+    def run_and_score(league, market, family, corner, timeout_s=None):
         trained.append((family, dict(corner)))
-        return _fake_run_and_score(league, market, family, corner)
+        return _fake_run_and_score(league, market, family, corner, timeout_s)
 
     return run_and_score
 
@@ -1103,7 +1109,7 @@ def test_search_cell_survives_a_failing_corner(monkeypatch):
     """
     monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
 
-    def maybe_fail(league, market, corner, spec):
+    def maybe_fail(league, market, corner, spec, timeout_s):
         if corner["dist_training_loss"] == "crps":
             raise subprocess.CalledProcessError(1, "meditate")
 
@@ -1148,7 +1154,7 @@ def test_run_deterministic_meditate_builds_corner_flags(monkeypatch, tmp_path):
         "posthoc": "isotonic_mean",
     }
     sn_spec = get_strategy("SkewNormal")
-    sweep._run_deterministic_meditate("WNBA", "AST", sn, sn_spec)
+    sweep._run_deterministic_meditate("WNBA", "AST", sn, sn_spec, _TIMEOUT)
     last = calls[-1]
     assert {"--deterministic", "--bypass-withholding", "--holdout-blind"} <= set(last)
     assert last[last.index("--target-normalization") + 1] == "ratio_meanyr"
@@ -1161,7 +1167,7 @@ def test_run_deterministic_meditate_builds_corner_flags(monkeypatch, tmp_path):
     assert "--structural-strategy" not in last
     assert sweep._log_path("WNBA", "AST", sn, sn_spec).exists()
 
-    sweep._run_deterministic_meditate("NFL", "receiving yards", sn, sn_spec)
+    sweep._run_deterministic_meditate("NFL", "receiving yards", sn, sn_spec, _TIMEOUT)
     # The retired --structural-strategy axis emits no selector flag for a base corner.
     assert "--structural-strategy" not in calls[-1]
 
@@ -1171,7 +1177,9 @@ def test_run_deterministic_meditate_builds_corner_flags(monkeypatch, tmp_path):
         "blending_loss_fn": "nll",
         "posthoc": "none",
     }
-    sweep._run_deterministic_meditate("MLB", "pitcher strikeouts", zinb, get_strategy("ZINB"))
+    sweep._run_deterministic_meditate(
+        "MLB", "pitcher strikeouts", zinb, get_strategy("ZINB"), _TIMEOUT
+    )
     z = calls[-1]
     assert "--target-normalization" not in z
     assert "--sn-param" not in z
@@ -1190,7 +1198,7 @@ def test_run_deterministic_meditate_builds_corner_flags(monkeypatch, tmp_path):
             "blending_loss_fn": "nll",
         }
         spec = get_strategy(family)
-        sweep._run_deterministic_meditate("MLB", "pitcher strikeouts", count, spec)
+        sweep._run_deterministic_meditate("MLB", "pitcher strikeouts", count, spec, _TIMEOUT)
         command = calls[-1]
         assert command[command.index("--dist") + 1] == family
         assert "--target-normalization" not in command
@@ -1198,7 +1206,7 @@ def test_run_deterministic_meditate_builds_corner_flags(monkeypatch, tmp_path):
 
     method_spec = get_strategy(RUSHING)
     method = dict(method_spec.fixed_controls)
-    sweep._run_deterministic_meditate("NFL", "rushing yards", method, method_spec)
+    sweep._run_deterministic_meditate("NFL", "rushing yards", method, method_spec, _TIMEOUT)
     structural = calls[-1]
     assert structural[structural.index("--dist") + 1] == "SkewNormal"
     assert structural[structural.index("--target-normalization") + 1] == "ratio_meanyr"
@@ -1393,14 +1401,16 @@ def test_run_board_mode_warns_skipped_cells_and_passes_filters(monkeypatch, caps
     monkeypatch.setattr(sweep, "run_board", fake_run_board)
     monkeypatch.setattr(sweep, "_print_board_rollup", lambda b: None)
 
-    sweep._run_board_mode("WNBA", True, "count", "/tmp/board.csv", False, False, 32)
+    sweep._run_board_mode("WNBA", True, "count", "/tmp/board.csv", False, False, 32, jobs=8)
     assert captured["incl"] is True and captured["dist_class"] == "count"
     assert captured["max_trials"] == 32
     assert captured["families_by_cell"] == {("WNBA", "AST"): ("ZINB",)}
+    # One cell cannot use eight workers, and saying "8 at a time" over a one-cell board would be a lie.
+    assert captured["jobs"] == 1
     out = capsys.readouterr().out
     assert "skip WNBA STL: no cached training matrix" in out
     assert "skip NFL passing yards: no applicable family under --dist-class count" in out
-    assert "1 cells to sweep · 2 skipped · <=12 deterministic trainings" in out
+    assert "1 cells to sweep · 2 skipped · 1 at a time · <=12 deterministic trainings" in out
 
 
 def _cell_frame(league, market, **kwargs):
@@ -1611,10 +1621,10 @@ def test_a_cell_killed_mid_search_keeps_the_corners_it_already_trained(monkeypat
     trained = []
     spy = _spy_run_and_score(trained)
 
-    def die_on_the_third(league, market, family, corner):
+    def die_on_the_third(league, market, family, corner, timeout_s=None):
         if len(trained) == 2:
             raise KeyboardInterrupt
-        return spy(league, market, family, corner)
+        return spy(league, market, family, corner, timeout_s)
 
     monkeypatch.setattr(sweep, "_run_and_score", die_on_the_third)
     with pytest.raises(KeyboardInterrupt):
@@ -1658,6 +1668,31 @@ def test_budget_counts_retrains_not_trials(monkeypatch, tmp_path):
     assert not retrained & set(cached)
     # The board reports every corner the run touched, cached and fresh alike.
     assert set(board["corner_fingerprint"]) >= retrained
+
+
+def test_a_corner_re_proposed_within_a_run_is_reported_cached_not_retrained(monkeypatch):
+    """``trained`` is per trial, not "has this corner ever trained" — the second answer is wrong.
+
+    The flag drives the bar, the ships tally and the ETA's duration samples. Testing membership in
+    the trained set marks a re-proposal as a retrain, which walked the bar past its own total and
+    weighted one corner's duration by how often TPE happened to suggest it again.
+    """
+    flags: list[bool] = []
+    scored = progress.SearchProgress.scored
+    monkeypatch.setattr(
+        progress.SearchProgress,
+        "scored",
+        lambda self, corner, **kw: (flags.append(kw["trained"]), scored(self, corner, **kw))[1],
+    )
+    trained: list[tuple[str, dict]] = []
+    monkeypatch.setattr(sweep, "_run_and_score", _spy_run_and_score(trained))
+
+    # A budget above NegBin's 20-corner grid cannot be spent, so the study runs on until patience
+    # stops it and the re-proposals this is about are guaranteed rather than hoped for.
+    board = sweep.search_cell("MLB", "pitcher strikeouts", families=("NegBin",), max_trials=40)
+
+    assert len(flags) > len(trained), "no corner was re-proposed; the assertion below proves nothing"
+    assert sum(flags) == len(trained) == len(board)
 
 
 def test_cli_board_dry_run_trains_nothing(monkeypatch, tmp_path):
@@ -2266,7 +2301,9 @@ def test_dry_run_reports_what_resume_would_reuse(monkeypatch, tmp_path):
     out = str(tmp_path / "board.csv")
     controls = dict(_SN_CORNER)
     pd.DataFrame([_board_row("WNBA", "AST", "SkewNormal", controls)]).to_csv(out, index=False)
-    monkeypatch.setattr(sweep, "_select_board_cells", lambda *a: ({("WNBA", "AST"): ("SkewNormal",)}, [], []))
+    monkeypatch.setattr(
+        sweep, "_select_board_cells", lambda *a: ({("WNBA", "AST"): ("SkewNormal",)}, [], [])
+    )
 
     result = CliRunner().invoke(sweep.main, ["--dry-run", "--resume", "--out", out])
 
@@ -2315,12 +2352,13 @@ def test_board_eta_prices_untimed_cells_at_the_fallback_not_zero():
 def test_board_countdown_reports_running_total_and_remaining(capsys, monkeypatch):
     """A multi-day sit needs elapsed-so-far and time-left on one line, not just at the end."""
     monkeypatch.setenv("COLUMNS", "120")
-    sweep._echo_board_countdown("NBA FGA", 720.0, 7800.0, remaining=8, eta=9600.0)
+    left = [("NBA", f"M{i}") for i in range(8)]
+    sweep._echo_board_countdown("NBA FGA", "SHIP +0.076", 720.0, 7800.0, left, 9600.0)
     line = capsys.readouterr().out
-    assert "NBA FGA done in 12m" in line
+    assert "NBA FGA SHIP +0.076 in 12m" in line
     assert "run 2h10m" in line and "8 cells left" in line and "<=2h40m" in line
 
-    sweep._echo_board_countdown("NBA FGA", 720.0, 7800.0, remaining=0, eta=None)
+    sweep._echo_board_countdown("NBA FGA", "no ship (best -0.096)", 720.0, 7800.0, [], None)
     assert "cells left" not in capsys.readouterr().out
 
 
@@ -2375,3 +2413,293 @@ def test_progress_omits_the_eta_until_it_has_one(monkeypatch):
         bar.scored(_SN_CORNER, verdict="KILL: g4", slack=-0.3, elapsed_s=12.0, trained=True)
     assert "<=" in bar.bar.postfix
     bar.close()
+
+
+def test_run_board_returns_cells_in_board_order_not_completion_order(monkeypatch, tmp_path):
+    """A slow cell must not sink to the bottom of the board just for having taken longer.
+
+    With ``jobs > 1`` the cells finish in whatever order they happen to take, so results are written
+    into a pre-sized list by position rather than appended as they land.
+    """
+    cells = [("WNBA", "AST"), ("WNBA", "PTS"), ("WNBA", "REB"), ("WNBA", "STL")]
+    delays = dict(zip(cells, [0.20, 0.01, 0.15, 0.02], strict=True))
+
+    def slow_cell(league, market, **kwargs):
+        time.sleep(delays[(league, market)])
+        return _cell_frame(league, market)
+
+    monkeypatch.setattr(sweep, "search_cell", slow_cell)
+    monkeypatch.setattr(sweep, "_print_cell_summary", lambda b, **kw: None)
+
+    board = sweep.run_board(cells, out=str(tmp_path / "board.csv"), jobs=4)
+    assert list(zip(board["league"], board["market"], strict=True)) == cells
+
+
+def test_concurrent_upserts_keep_every_cell(monkeypatch, tmp_path):
+    """The board CSV is a read-modify-write of the whole file, and every cell rewrites it.
+
+    Unserialized, two cells that read the same prior board both write it back and the later write
+    drops the earlier cell's rows — silently, since each cell's own rows are always present.
+    """
+    out = str(tmp_path / "board.csv")
+    cells = [("WNBA", f"M{i}") for i in range(12)]
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        for future in [
+            pool.submit(sweep._upsert_cell, _cell_frame(lg, mkt), out) for lg, mkt in cells
+        ]:
+            future.result()
+
+    board = pd.read_csv(out)
+    assert set(zip(board["league"], board["market"], strict=True)) == set(cells)
+
+
+def test_one_cell_crashing_does_not_cost_the_other_cells(monkeypatch, tmp_path, capsys):
+    """Before the pool a cell dying outside the per-corner catch ended the whole board run."""
+    cells = [("WNBA", "AST"), ("WNBA", "PTS"), ("WNBA", "REB")]
+
+    def sometimes_explode(league, market, **kwargs):
+        if market == "PTS":
+            raise RuntimeError("scoring blew up")
+        return _cell_frame(league, market)
+
+    monkeypatch.setattr(sweep, "search_cell", sometimes_explode)
+    monkeypatch.setattr(sweep, "_print_cell_summary", lambda b, **kw: None)
+
+    board = sweep.run_board(cells, out=str(tmp_path / "board.csv"), jobs=3)
+    assert list(board["market"]) == ["AST", "REB"]
+    assert "cell failed — RuntimeError: scoring blew up" in capsys.readouterr().err
+
+
+def test_a_ctrl_c_is_not_recorded_as_a_failed_corner(monkeypatch):
+    """SIGINT reaches the child meditate but not the worker thread waiting on it.
+
+    Recording the resulting non-zero exit as a failed corner would write one per in-flight cell and
+    cache it under its fingerprint, so ``--resume`` would never retrain any of them.
+    """
+    monkeypatch.setattr(
+        sweep,
+        "_run_deterministic_meditate",
+        lambda *a, **k: (_ for _ in ()).throw(
+            subprocess.CalledProcessError(-signal.SIGINT, "meditate")
+        ),
+    )
+    with pytest.raises(subprocess.CalledProcessError):
+        sweep._run_and_score("WNBA", "AST", "SkewNormal", dict(_SN_CORNER), _TIMEOUT)
+
+    # An ordinary non-zero exit is still the corner's own problem and still gets banked.
+    monkeypatch.setattr(
+        sweep,
+        "_run_deterministic_meditate",
+        lambda *a, **k: (_ for _ in ()).throw(subprocess.CalledProcessError(1, "meditate")),
+    )
+    row = sweep._run_and_score("WNBA", "AST", "SkewNormal", dict(_SN_CORNER), _TIMEOUT)
+    assert row["failure"] == "CalledProcessError" and row["slack"] == sweep._FAILED_CORNER_SLACK
+
+
+def test_cell_timeout_tracks_the_cell_and_never_exceeds_the_flat_ceiling(tmp_path):
+    """Headroom over the cell's own slowest corner, clamped both ways.
+
+    Anchored on the maximum rather than a quantile because the spread inside one cell is wide — real
+    NBA BLK corners run 12 s to 906 s — so anything gentler cuts legitimate work.
+    """
+    out = str(tmp_path / "board.csv")
+    assert sweep._cell_timeout_seconds(out, "NBA", "BLK") == sweep._MEDITATE_TRIAL_TIMEOUT_S
+
+    def board_with(seconds):
+        rows = [
+            {**_board_row("NBA", "BLK", "SkewNormal", dict(_SN_CORNER)), "elapsed_s": value}
+            for value in seconds
+        ]
+        pd.DataFrame(rows).reindex(columns=sweep._BOARD_COLUMNS).to_csv(out, index=False)
+
+    board_with([9.0, 12.0, 15.0])  # a fast cell still tolerates one slow outlier
+    assert sweep._cell_timeout_seconds(out, "NBA", "BLK") == sweep._TIMEOUT_FLOOR_S
+    board_with([12.0, 400.0])
+    assert sweep._cell_timeout_seconds(out, "NBA", "BLK") == 800
+    board_with([12.0, 1600.0])  # never looser than the flat ceiling it replaced
+    assert sweep._cell_timeout_seconds(out, "NBA", "BLK") == sweep._MEDITATE_TRIAL_TIMEOUT_S
+    # A cell with rows but no timings at all falls back rather than reading NaN as zero.
+    assert sweep._cell_timeout_seconds(out, "NBA", "DREB") == sweep._MEDITATE_TRIAL_TIMEOUT_S
+
+
+def test_a_timed_out_corner_is_retried_on_resume_but_a_crash_is_not(tmp_path):
+    """A crash is the corner's property and worth caching; a timeout is the machine's and is not.
+
+    The ceiling is derived from the cell's own timings and cells now share the box, so the corner
+    that ran long once may well not next time.
+    """
+    out = str(tmp_path / "board.csv")
+    cell = ("MLB", "pitcher strikeouts")
+    context = sweep._cell_context(*cell)
+    controls = strategy_controls(get_strategy("NegBin"))
+    rows = []
+    for failure, corner in zip(["TimeoutExpired", "CalledProcessError"], controls, strict=False):
+        row = _board_row(*cell, "NegBin", corner)
+        rows.append({**row, "failure": failure, "matrix_hash": context.matrix_sha256})
+    frame = pd.DataFrame(rows).reindex(columns=sweep._BOARD_COLUMNS)
+    frame["eval_split"] = sweep.EVAL_SPLIT_CROSSFIT
+    frame.to_csv(out, index=False)
+
+    cached = sweep._cached_corners(out, *cell, context)
+    kept = frame[frame["corner_fingerprint"].isin(cached)]
+    assert list(kept["failure"]) == ["CalledProcessError"]
+
+
+def test_a_hopeless_family_stops_being_trained(monkeypatch):
+    """A family whose corners all trail the cell's best is budget spent on a known loser.
+
+    Real boards spend 14% of their search there: 66% of non-winning families finish more than
+    :data:`tpe_search.ABANDON_SLACK_GAP` behind, and every corner of them still trains.
+    """
+    cell = ("MLB", "pitcher strikeouts")
+    trained = []
+
+    def scored(league, market, family, corner, timeout_s=None):
+        trained.append(family)
+        slack = 0.4 if family == "NegBin" else -0.9
+        return {**_fake_run_and_score(league, market, family, corner), "slack": slack}
+
+    monkeypatch.setattr(sweep, "_run_and_score", scored)
+    sweep.search_cell(*cell, families=("NegBin", "ZINB"), max_trials=30)
+
+    losers = trained.count("ZINB")
+    assert losers <= tpe_search.ABANDON_MIN_TRIALS, f"{losers} corners of a ruled-out family"
+    assert trained.count("NegBin") > losers, "the leading family must keep being searched"
+
+
+def test_a_family_that_recovers_inside_the_window_keeps_going(monkeypatch):
+    """Abandonment judges a family on its best corner, not its last — one bad corner is not a verdict."""
+    cell = ("MLB", "pitcher strikeouts")
+    trained = []
+
+    def scored(league, market, family, corner, timeout_s=None):
+        trained.append(family)
+        # ZINB opens badly, then lands a corner right behind the leader before the window closes.
+        slack = 0.4 if family == "NegBin" else (0.35 if trained.count("ZINB") == 2 else -0.9)
+        return {**_fake_run_and_score(league, market, family, corner), "slack": slack}
+
+    monkeypatch.setattr(sweep, "_run_and_score", scored)
+    sweep.search_cell(*cell, families=("NegBin", "ZINB"), max_trials=30)
+    assert trained.count("ZINB") > tpe_search.ABANDON_MIN_TRIALS
+
+
+def test_abandonment_survives_a_resume(monkeypatch):
+    """A resumed cell must not re-litigate families its reused rows already ruled out."""
+    cell = ("MLB", "pitcher strikeouts")
+    context = sweep._cell_context(*cell)
+    cached = {}
+    for spec_slug, slack in (("NegBin", 0.4), ("ZINB", -0.9)):
+        spec = get_strategy(spec_slug)
+        for corner in strategy_controls(spec)[: tpe_search.ABANDON_MIN_TRIALS]:
+            row = {**_fake_run_and_score(*cell, spec_slug, corner), "slack": slack}
+            cached[corner_fingerprint(spec, corner, str(context.matrix_sha256))] = row
+
+    trained = []
+
+    def scored(league, market, family, corner, timeout_s=None):
+        trained.append(family)
+        return {**_fake_run_and_score(league, market, family, corner), "slack": -0.9}
+
+    monkeypatch.setattr(sweep, "_run_and_score", scored)
+    sweep.search_cell(*cell, families=("NegBin", "ZINB"), max_trials=30, cached=cached)
+    assert "ZINB" not in trained, "a family the reused rows ruled out was searched again"
+
+
+def test_board_progress_hands_out_one_bar_row_per_running_cell():
+    """Concurrent cells drawing on one row would overwrite each other; a released row is reusable."""
+    board = progress.BoardProgress(total_cells=5, jobs=3)
+    with board.slot() as first, board.slot() as second, board.slot() as third:
+        assert len({first, second, third}) == 3, "two cells were handed the same terminal row"
+        assert 0 not in {first, second, third}, "row 0 belongs to the board summary"
+    with board.slot() as reused:
+        assert reused in {first, second, third}
+    assert board.done == 4
+    board.close()
+
+
+def test_the_board_line_never_accounts_for_more_cells_than_the_board_has():
+    """``done`` and the postfix are one line, so a repaint must read them from one snapshot.
+
+    Taken a moment apart under a pool they render ``3/5 cells, 3 running · 0 queued`` — six cells on
+    a board of five — because another worker's completion landed between the two reads.
+    """
+    board = progress.BoardProgress(total_cells=6, jobs=3)
+    samples: list[tuple[int, str]] = []
+    postfix = board.bar.set_postfix_str
+
+    def record(text, **kwargs):
+        samples.append((board.bar.n, text))  # the count as the repaint would have rendered it
+        return postfix(text, **kwargs)
+
+    board.bar.set_postfix_str = record
+
+    def sweep_one() -> None:
+        with board.slot():
+            time.sleep(0.01)
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        _ = [future.result() for future in [pool.submit(sweep_one) for _ in range(6)]]
+    board.close()
+
+    assert len(samples) == 12  # one repaint entering each slot, one leaving it
+    for done, text in samples:
+        running, queued = (int(n) for n in re.findall(r"(\d+) (?:running|queued)", text))
+        assert done + running + queued == board.total, f"{done} done · {text}"
+    assert samples[-1][0] == 6
+
+
+def test_a_serial_run_keeps_the_single_bar_at_row_zero():
+    """One cell at a time gets no summary row and draws exactly where it always has."""
+    board = progress.BoardProgress(total_cells=5, jobs=1)
+    assert board.bar.disable
+    with board.slot() as only:
+        assert only == 0
+    board.close()
+
+
+def test_progress_writes_no_carriage_returns_with_concurrent_bars(monkeypatch):
+    """The multi-bar block is the case that would put `\\r` back into the overnight driver's log."""
+    monkeypatch.setenv("COLUMNS", "120")
+    stream = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", stream)
+    board = progress.BoardProgress(total_cells=3, jobs=3)
+    with board.slot() as a, board.slot() as b:
+        for position, market in ((a, "AST"), (b, "PTS")):
+            bar = progress.SearchProgress("WNBA", market, 4, position=position)
+            bar.scored(_SN_CORNER, verdict="SHIP", slack=0.2, elapsed_s=31.0, trained=True)
+            bar.close()
+    board.close()
+
+    written = stream.getvalue()
+    assert "\r" not in written
+    assert written.count("SHIP") == 2
+
+
+def test_board_eta_divides_by_workers_but_never_beats_the_slowest_cell():
+    """A cell is swept by one worker start to finish, so it floors the board's wall clock."""
+    cells = [("NBA", "FGA"), ("WNBA", "AST"), ("NFL", "carries"), ("NHL", "saves")]
+    budgets = dict.fromkeys(cells, 10)
+    means = {("NBA", "FGA"): 100.0, ("WNBA", "AST"): 1.0, ("NFL", "carries"): 1.0}
+
+    serial = sweep._board_eta(cells, budgets, means, 1.0, 1)
+    assert serial == pytest.approx(10 * (100.0 + 1.0 + 1.0 + 1.0))
+    # No number of workers finishes sooner than the 1000 s cell one of them is stuck with.
+    assert sweep._board_eta(cells, budgets, means, 1.0, 4) == pytest.approx(1000.0)
+
+    # Balanced cells have no such floor, so there the workers simply divide the work.
+    even = dict.fromkeys(cells, 20.0)
+    assert sweep._board_eta(cells, budgets, even, 1.0, 4) == pytest.approx(200.0)
+
+
+def test_cell_verdict_names_the_outcome_for_a_parallel_run():
+    """Under --jobs the per-cell tables move to the end, so this line is the only live verdict."""
+    shipped = _cell_frame("NBA", "FGA")
+    assert sweep._cell_verdict(shipped) == "SHIP +0.100"
+
+    killed = shipped.copy()
+    killed["ships"], killed["slack"] = [False], [-0.096]
+    assert sweep._cell_verdict(killed) == "no ship (best -0.096)"
+
+    empty = shipped.copy()
+    empty["slack"] = [float("-inf")]
+    assert sweep._cell_verdict(empty) == "no corners"

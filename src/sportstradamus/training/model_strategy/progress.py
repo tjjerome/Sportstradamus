@@ -1,14 +1,16 @@
-"""Terminal rendering for the strategy sweep: one bar per cell, notable corners only, width-clamped.
+"""Terminal rendering for the strategy sweep: a bar per running cell, notable corners only, clamped.
 
 A sweep is a multi-day sit, so its screen is a status display, not a transcript: the board CSV is the
 durable per-corner record and this module shows only what changes a decision — a new best, a ship, a
-failure. :class:`SearchProgress` owns one cell's bar; ``tqdm(disable=None)`` collapses it to nothing
-when stdout is redirected, which is what keeps carriage returns out of the overnight driver's logs.
-A redirected run instead gets a periodic heartbeat naming the corner currently training, so a stalled
-subprocess is still visible.
+failure. :class:`SearchProgress` owns one cell's bar and :class:`BoardProgress` the summary line above
+however many are running; ``tqdm(disable=None)`` collapses all of them to nothing when stdout is
+redirected, which is what keeps carriage returns out of the overnight driver's logs. A redirected run
+instead gets a periodic heartbeat naming the corner currently training, so a stalled subprocess is
+still visible.
 """
 
 import contextlib
+import queue
 import shutil
 import textwrap
 import threading
@@ -96,6 +98,66 @@ def echo_above_bar(text: str, *, fg: str | None = None, err: bool = False) -> No
         click.secho(clamped, fg=fg, err=err)
 
 
+class BoardProgress:
+    """The board's summary row, and the bar rows the cells running under it occupy.
+
+    Rows ``1..jobs`` are handed out by :meth:`slot` so concurrent cells never fight for one line, and
+    releasing a slot is what counts a cell finished — a cell that raised still leaves the board's
+    count honest. A serial run gets no summary row and its cell sits at row 0, exactly where a
+    one-cell-at-a-time sweep has always drawn it.
+    """
+
+    def __init__(self, total_cells: int, jobs: int) -> None:
+        self.total = total_cells
+        self.done = 0
+        self.running = 0
+        self.started = time.monotonic()
+        self._lock = threading.Lock()
+        self._free: queue.Queue[int] = queue.Queue()
+        for position in range(jobs):
+            self._free.put(position if jobs < 2 else position + 1)
+        self.bar = tqdm(
+            total=total_cells,
+            disable=True if jobs < 2 else None,
+            position=0,
+            leave=False,
+            bar_format="  {desc} {n_fmt}/{total_fmt} cells{postfix}",
+        )
+        self.bar.set_description_str("board")
+
+    def close(self) -> None:
+        self.bar.close()
+
+    @contextlib.contextmanager
+    def slot(self) -> Iterator[int]:
+        position = self._free.get()
+        self._repaint(running=1)
+        try:
+            yield position
+        finally:
+            self._repaint(running=-1, done=1)
+            self._free.put(position)
+
+    def _repaint(self, *, running: int = 0, done: int = 0) -> None:
+        """Move the counters and redraw, holding the lock across both.
+
+        The count and the postfix are two halves of one line, so a repaint that reads them a moment
+        apart renders three cells done and three running out of a board of five. Painting under the
+        lock is also why ``self.bar.n`` is assigned rather than ``update()``-ed: one snapshot, one
+        line. Threads only ever take this lock before tqdm's, never the reverse, so the write here
+        cannot deadlock against a cell bar's own refresh.
+        """
+        with self._lock:
+            self.running += running
+            self.done += done
+            self.bar.n = self.done
+            self.bar.set_postfix_str(
+                f"{self.running} running · {self.total - self.done - self.running} queued"
+                f" · run {human_seconds(time.monotonic() - self.started)}",
+                refresh=True,
+            )
+
+
 class SearchProgress:
     """One cell's live bar over its trained-corner budget, plus the lines worth interrupting it for.
 
@@ -112,6 +174,7 @@ class SearchProgress:
         verbosity: int = NORMAL,
         seed_seconds: float | None = None,
         reused: int = 0,
+        position: int = 0,
     ) -> None:
         self.verbosity = verbosity
         self.seed_seconds = seed_seconds
@@ -122,6 +185,7 @@ class SearchProgress:
         self.bar = tqdm(
             total=budget,
             disable=None,
+            position=position,
             leave=False,
             bar_format="  {desc} {percentage:3.0f}%|{bar:30}| {n_fmt}/{total_fmt}{postfix}",
         )

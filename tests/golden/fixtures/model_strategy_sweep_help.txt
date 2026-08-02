@@ -29,6 +29,12 @@ Options:
                                   stopping usually ends a cell well under it, so
                                   every '<=N' count is a ceiling, not an
                                   estimate.  [default: 48; x>=1]
+  -j, --jobs INTEGER RANGE        Cells to sweep at once (default: half the
+                                  cores, capped at 8). A deterministic corner is
+                                  a single-threaded subprocess that never opens
+                                  the archive, so cells parallelize cleanly;
+                                  corners within a cell do not. No effect with
+                                  --market, which is one cell.  [x>=1]
   --confirm                       After ranking, persist each cell's best
                                   persistable corner to stat_meta.json and
                                   confirm it with a full-HPO retrain; failures

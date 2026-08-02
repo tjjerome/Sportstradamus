@@ -261,6 +261,7 @@ poetry run model-strategy-sweep --include-shipped           # also re-check alre
 poetry run model-strategy-sweep --resume                    # continue a crashed multi-hour run
 poetry run model-strategy-sweep --dry-run --resume          # what it would do, without training
 poetry run model-strategy-sweep --league WNBA -v            # one line per recipe (-q for less)
+poetry run model-strategy-sweep --jobs 4                    # 4 cells at once (default: cores/2, max 8)
 ```
 
 Naming a single `--league` **and** `--market` sweeps just that cell. Omit `--market` and it sweeps
@@ -273,14 +274,28 @@ rebuild one, so train the cell for real once first if you want it in the board. 
 a live cell; that path is judged by the supersession test, and `--confirm` never auto-re-ships a live
 cell.
 
-As it runs each cell shows a progress bar carrying the corners done, the best slack so far, and a
-ceiling on the time left; a recipe prints a line only when it is a new best, ships, or fails. `-v`
-restores one line per recipe (cache hits included) and `-q` drops to the bar and the per-cell
-verdict. Redirected output — the overnight driver — gets those same lines plus a periodic heartbeat
-naming the recipe currently training, and no bar. Every cell ends with a short ranked table marked
-`SHIP` (green) or `KILL` (red), and the full ranked results, every recipe and every column, are saved
-to `data/research/strategy_research_board.csv`. **Nothing ships from this step** — the throwaway
-models only *rank* the options so you know which one to train for real.
+A board run sweeps several cells at once — `--jobs`, defaulting to half the cores capped at 8. Each
+throwaway training is a single-threaded subprocess that never opens the DuckDB archive, so cells
+parallelize cleanly; the recipes *within* a cell stay sequential, because the search proposes each
+one from what the last one scored. Expect roughly a 5x wall-clock saving, floored by the slowest
+single cell. `--jobs 1` restores one-at-a-time.
+
+Each running cell gets a progress bar carrying its recipes done, the best slack so far, and a ceiling
+on the time left, under a summary line counting cells running and queued. A recipe prints a line only
+when it is a new best, ships, or fails, and each finished cell prints its verdict and the board's
+remaining time. `-v` restores one line per recipe (cache hits included) and `-q` drops to the bars
+and the per-cell verdicts. Redirected output — the overnight driver — gets those same lines plus a
+periodic heartbeat naming the recipe currently training, and no bars. The short ranked table per
+cell, marked `SHIP` (green) or `KILL` (red), prints as the cell finishes when sweeping one at a time
+and at the end of the run in board order otherwise; the full ranked results, every recipe and every
+column, are saved to `data/research/strategy_research_board.csv`. **Nothing ships from this step** —
+the throwaway models only *rank* the options so you know which one to train for real.
+
+A recipe that runs far past what the rest of its cell needed is killed and recorded as a failure, so
+one wedged training cannot hold up a whole cell; the ceiling is derived from that cell's own recorded
+timings, and a killed recipe is retried on `--resume` rather than cached. Once a family has had a few
+recipes and none of them is anywhere near the cell's best, the search stops proposing it and spends
+the rest of the budget on the families still in contention.
 
 `--dry-run` resolves the scope without training anything: per cell, its families, its training
 ceiling, what `--resume` would reuse, and — once a board has run once and recorded per-recipe

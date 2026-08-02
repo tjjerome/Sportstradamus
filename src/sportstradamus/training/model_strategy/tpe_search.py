@@ -14,7 +14,7 @@ import hashlib
 import math
 import pathlib
 import warnings
-from collections.abc import Callable
+from collections.abc import Iterable
 
 import optuna
 
@@ -36,9 +36,14 @@ MAX_TRIALS_PER_CELL: int = 48
 # Trials a family must receive — capped by its own corner count — before the patience stop may fire,
 # so an early plateau on one family cannot end the study before the others are sampled at all.
 MIN_FAMILY_TRIALS: int = 4
-# Trials without a new best slack before the study stops early. Each trial is one atomic meditate,
-# so there is no cheap intermediate to prune; this is early stopping, not trial pruning.
+# Trials without a new best slack before the study stops early.
 _EARLY_STOP_PATIENCE: int = 12
+# Trained corners a family gets before its standing is judged, and how far behind the cell's best it
+# has to be to be judged hopeless. Replayed over 35 cells' journals, priced by each (cell, family)'s
+# measured corner cost, 4/0.30 skips 14% of search compute; four cells end up with a corner up to
+# 0.065 slack worse than they found sequentially, and none of them loses a shipping one.
+ABANDON_MIN_TRIALS: int = 4
+ABANDON_SLACK_GAP: float = 0.30
 # A fixed sampler seed makes a resumed study reproduce the suggestion sequence its journal recorded.
 _TPE_SEED: int = 20260727
 
@@ -110,36 +115,67 @@ def reachable_corners(context: CellContext, families: tuple[str, ...]) -> int:
 TRAINED_TRIAL_ATTR = "trained"
 
 
-def early_stop_callback(
-    context: CellContext, families: tuple[str, ...]
-) -> Callable[[optuna.Study, optuna.trial.FrozenTrial], None]:
-    """An ``optimize`` callback that stops the study once it has both covered and plateaued.
+class CellSearchState:
+    """How a cell's search is going, per family and overall. Queried two ways.
 
-    The coverage floor is per family and capped by that family's own grid, so a family with fewer
-    corners than :data:`MIN_FAMILY_TRIALS` cannot hold the study open forever. Cache-served trials
-    are skipped outright: counting them would let duplicate churn age out the patience window and
-    end the search while real corners were still improving it.
+    The objective asks :meth:`abandoned` before training, so a family the cell has already ruled out
+    costs a pruned trial instead of a retrain; ``study.optimize`` calls :meth:`stop_if_done` after
+    every trial, which ends the study once every family is covered and the best slack has stopped
+    moving. Only trained corners reach :meth:`observe` — counting cache-served ones would let
+    duplicate churn age out the patience window while real corners were still improving it.
+
+    ``prior`` seeds both judgements from a resumed run's reused rows, so ``--resume`` does not start
+    a cell over having forgotten which families it already ruled out.
     """
-    floors = {
-        slug: min(MIN_FAMILY_TRIALS, _grid_size(cell_axis_choices(context, get_strategy(slug))))
-        for slug in families
-    }
-    seen: collections.Counter = collections.Counter()
-    state = {"best": math.inf, "stale": 0}
 
-    def stop_when_stale(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
-        if not trial.user_attrs.get(TRAINED_TRIAL_ATTR, True):
-            return
-        seen[trial.params.get("family")] += 1
-        if trial.value is not None and trial.value < state["best"]:
-            state.update(best=trial.value, stale=0)
+    def __init__(
+        self,
+        context: CellContext,
+        families: tuple[str, ...],
+        prior: Iterable[tuple[str, float]] = (),
+    ) -> None:
+        # Capped by the family's own grid, so one with fewer corners than MIN_FAMILY_TRIALS cannot
+        # hold the study open forever.
+        self._floors = {
+            slug: min(MIN_FAMILY_TRIALS, _grid_size(cell_axis_choices(context, get_strategy(slug))))
+            for slug in families
+        }
+        self._seen: collections.Counter = collections.Counter()
+        self._best: dict[str, float] = collections.defaultdict(lambda: -math.inf)
+        self._cell_best = -math.inf
+        self._stale = 0
+        # Standings seed from the prior rows but staleness does not: they arrive keyed by
+        # fingerprint, in no particular order, so a patience count taken over them would be noise.
+        for family, slack in prior:
+            self._seen[family] += 1
+            self._best[family] = max(self._best[family], slack)
+            self._cell_best = max(self._cell_best, slack)
+
+    def observe(self, family: str, slack: float) -> None:
+        self._seen[family] += 1
+        self._best[family] = max(self._best[family], slack)
+        if slack > self._cell_best:
+            self._cell_best, self._stale = slack, 0
         else:
-            state["stale"] += 1
-        covered = all(seen[family] >= floor for family, floor in floors.items())
-        if covered and state["stale"] >= _EARLY_STOP_PATIENCE:
-            study.stop()
+            self._stale += 1
 
-    return stop_when_stale
+    def abandoned(self, family: str) -> bool:
+        """Whether this family has been judged and found hopeless for this cell.
+
+        Monotone: the cell's best only rises and a family's own best only rises with it, so a family
+        this returns True for never comes back. A cell whose corners have all failed compares
+        ``-inf`` against ``-inf`` and abandons nothing.
+        """
+        return (
+            self._seen[family] >= ABANDON_MIN_TRIALS
+            and self._cell_best - self._best[family] > ABANDON_SLACK_GAP
+        )
+
+    def stop_if_done(self, study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
+        del trial
+        covered = all(self._seen[family] >= floor for family, floor in self._floors.items())
+        if covered and self._stale >= _EARLY_STOP_PATIENCE:
+            study.stop()
 
 
 def cell_study(league: str, market: str, families: tuple[str, ...]) -> optuna.Study:
