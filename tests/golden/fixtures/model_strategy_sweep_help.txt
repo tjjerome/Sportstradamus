@@ -46,6 +46,22 @@ Options:
                                   nominees, highest board slack first. Unset
                                   walks every nominee. Requires --confirm.
                                   [x>=1]
+  --confirm-hours FLOAT RANGE     Wall-clock budget for the confirm walks; cells
+                                  not yet started when it runs out are skipped.
+                                  Cells walk best board rank first, so the cut
+                                  lands on the weakest tail. Requires --confirm.
+                                  [x>0]
+  --confirm-fresh-only            Confirm withheld cells only; skip live-cell
+                                  supersession tests, whose promotions prompt
+                                  per cell and so need an attended run. Requires
+                                  --confirm.
+  --confirm-auto-promote          Answer the per-cell live-promotion prompt yes,
+                                  so an unattended run can swap live cells. The
+                                  S1/S2/S3 verdict and the six gates still
+                                  decide each swap; only the human veto is gone,
+                                  and every swap stays local until the
+                                  stat_meta.json diff is reviewed. Requires
+                                  --confirm.
   --resume                        Reopen each cell's Optuna journal and reuse
                                   every admissible prior board row — resume a
                                   crashed multi-hour run instead of retraining

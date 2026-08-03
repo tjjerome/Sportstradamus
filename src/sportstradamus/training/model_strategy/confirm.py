@@ -21,6 +21,7 @@ Everything is local and uncommitted — the human reviews the ``shipped: devel``
 A whole-file ``stat_meta.json`` backup is taken before any write as the crash/abort safety net.
 """
 
+import functools
 import json
 import math
 import pathlib
@@ -143,31 +144,34 @@ _SHIP_IDENTITY_COLUMNS = [
 def _nominees(sub: pd.DataFrame) -> list[dict]:
     """Ordered confirm nominees for one cell: top board corners, then seeds, then the incumbent.
 
-    ``ships`` is deliberately not read. Fixed-HP deterministic scoring will not ship a recipe that
-    only passes under full HPO, so requiring it left the popular NFL passing cells with no candidate
-    at all; the six gates still decide, just after the retrain rather than before it.
+    Only board-confident corners nominate: a corner needs a positive rank value —
+    ``discounted_slack`` when the sweep prices it, raw ``slack`` on older boards — and a cell whose
+    best admissible corner is non-positive returns no nominees at all. This trades the rare
+    full-HPO rescue of a board-negative recipe (NBA FTM shipped one at board −1.86) for not
+    spending walks on cells the board predicts to fail; the operator chose the wall clock.
+    Legacy boards with no cross-fit rows keep their seed lane — there the board has no opinion.
 
-    Ordering is the argument each source can make. Board rows first — the search's own ranked
-    recommendation on honest out-of-fold data, by ``discounted_slack`` when the sweep prices it
-    (falling back to raw ``slack`` on older boards) — with the best count-class corner interleaved
-    second on an integer-target cell whose top corners are all continuous-family
-    (:func:`_count_class_backup`). Seeds next: independent full-HPO held-out evidence the
-    deterministic ranking demonstrably cannot see. The incumbent last, so a cell is never downgraded
-    by an unlucky list. Rows scored against the ship holdout (legacy ``eval_split``) never nominate.
+    Ordering is the argument each source can make. Board rows first, ranked by the same value, with
+    the best count-class corner interleaved second on an integer-target cell whose top corners are
+    all continuous-family (:func:`_count_class_backup`). Seeds next: independent full-HPO held-out
+    evidence the deterministic ranking demonstrably cannot see. The incumbent last, so a cell is
+    never downgraded by an unlucky list. Rows scored against the ship holdout (legacy
+    ``eval_split``) never nominate. Every nominee carries the cell's best board rank as
+    ``board_rank`` so :func:`_candidates` can walk the strongest cells first.
     """
     lg, mkt = sub["league"].iloc[0], sub["market"].iloc[0]
     context = _cell_context(lg, mkt)
     admissible = sub[sub["eval_split"].astype("string").eq(EVAL_SPLIT_CROSSFIT)]
     rank_column = "discounted_slack" if "discounted_slack" in admissible.columns else "slack"
     ranked = admissible.sort_values(rank_column, ascending=False)
-    nominated: list[dict] = []
-    for _, row in ranked.iterrows():
-        if len(nominated) >= CONFIRM_TOP_K:
-            break
-        cand = _board_candidate_row(row, context, lg, mkt)
-        if cand is not None:
-            nominated.append({**cand, "source": f"board slack {cand['slack']:+.3f}"})
-    backup = _count_class_backup(ranked, nominated, context, lg, mkt)
+    if len(admissible):
+        board_rank = float(ranked[rank_column].max())
+        if not board_rank > 0:
+            return []
+    else:
+        board_rank = float("-inf")
+    nominated = _board_lane(ranked, rank_column, context, lg, mkt)
+    backup = _count_class_backup(ranked, rank_column, nominated, context, lg, mkt)
     if backup is not None:
         nominated.insert(1, backup)
     for spec, controls in _known_good_corners(context):
@@ -176,14 +180,28 @@ def _nominees(sub: pd.DataFrame) -> list[dict]:
             nominated.append({**cand, "source": "seed/incumbent"})
     seen: set[str] = set()
     return [
-        cand
+        {**cand, "board_rank": board_rank}
         for cand in nominated
         if not (cand["corner_fingerprint"] in seen or seen.add(cand["corner_fingerprint"]))
     ]
 
 
+def _board_lane(
+    ranked: pd.DataFrame, rank_column: str, context, league: str, market: str
+) -> list[dict]:
+    """The cell's top positive-rank board corners, validated and capped at ``CONFIRM_TOP_K``."""
+    lane: list[dict] = []
+    for _, row in ranked.iterrows():
+        if len(lane) >= CONFIRM_TOP_K or not row[rank_column] > 0:
+            break
+        cand = _board_candidate_row(row, context, league, market)
+        if cand is not None:
+            lane.append({**cand, "source": f"board slack {cand['slack']:+.3f}"})
+    return lane
+
+
 def _count_class_backup(
-    ranked: pd.DataFrame, nominated: list[dict], context, league: str, market: str
+    ranked: pd.DataFrame, rank_column: str, nominated: list[dict], context, league: str, market: str
 ) -> dict | None:
     """The best count-class board corner to slot second on an integer-target cell, or ``None``.
 
@@ -191,14 +209,16 @@ def _count_class_backup(
     can diverge — while stable count-family corners rank just below; whole walks burned on that
     pattern. Interleaving the best count corner at slot 2 costs nothing when the leader confirms
     and saves the walk when it diverges. No-op when the cell's target is not on the integer
-    lattice, nothing was nominated, a count corner already sits in the top slots, or the board has
-    no admissible count-class row. Insert-only: no continuous nominee is dropped.
+    lattice, nothing was nominated, a count corner already sits in the top slots, or no
+    positive-rank count-class row remains. Insert-only: no continuous nominee is dropped.
     """
     if not context.target_is_integer or not nominated:
         return None
     if any(distribution_class(cand["family"]) == "count" for cand in nominated):
         return None
     for _, row in ranked.iterrows():
+        if not row[rank_column] > 0:
+            break
         if distribution_class(str(row["family"])) != "count":
             continue
         cand = _board_candidate_row(row, context, league, market)
@@ -335,17 +355,21 @@ def _validate_board_identity(
 
 
 def _candidates(board: pd.DataFrame, max_nominees: int | None = None) -> list[list[dict]]:
-    """Each cell's ordered nominee list; cells with nothing confirmable drop out.
+    """Each cell's ordered nominee list, strongest cells first; nothing confirmable drops out.
 
     ``max_nominees`` truncates each list after dedup, trading the tail of a cell's walk for wall
     clock. The ordering :func:`_nominees` establishes is what makes that trade sound — the corners
-    most likely to ship come first.
+    most likely to ship come first. Cells sort by their best board rank descending (legacy
+    seed-only cells last) so a deadline cut lands on the weakest tail, not on cells the board
+    likes that happened to group late.
     """
-    return [
+    cells = [
         nominated[:max_nominees]
         for _cell, sub in board.groupby(["league", "market"], sort=False)
         if (nominated := _nominees(sub))
     ]
+    cells.sort(key=lambda nominated: nominated[0]["board_rank"], reverse=True)
+    return cells
 
 
 def _atomic_write_meta(meta: dict) -> None:
@@ -772,14 +796,19 @@ def _failed_legs(verdict: dict) -> list[str]:
     return [leg for leg in ("S1", "S2", "S3") if not verdict[f"{leg.lower()}_pass"]]
 
 
-def _supersede_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
+def _supersede_one(
+    meta: dict, cand: dict, *, auto_promote: bool = False
+) -> tuple[str, str, str, list[str]]:
     """Supersession-test one live cell: snapshot, retrain the candidate in place, require its exact
     artifact identity and official six-gate ``model_stats`` ship, then run S1/S2/S3 and promote it
     (on a passing verdict + operator yes) or restore the incumbent byte-identical.
 
     A live-cell swap needs the test to pass AND an explicit promote confirmation; every other exit —
     HOLD, decline, retrain error, or an exception — hits the ``finally`` restore, which copies the
-    snapshot back and never prunes, so the incumbent keeps serving.
+    snapshot back and never prunes, so the incumbent keeps serving. ``auto_promote`` answers that
+    confirmation yes so an unattended run can swap live cells: the S1/S2/S3 verdict and the six
+    gates still decide, only the human veto is gone. Every swap is still local and uncommitted, so
+    the review of the ``stat_meta.json`` diff is where a promotion is actually accepted.
     """
     lg, mkt = cand["league"], cand["market"]
     slug = market_file_slug(lg, mkt)
@@ -809,7 +838,9 @@ def _supersede_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
         if not verdict["ship"]:
             return (lg, mkt, "HELD", prefix + _failed_legs(verdict))
         edits = ", ".join(f"{k}={v}" for k, v in cand["edits"].items())
-        if not click.confirm(f"  Promote {lg} {mkt} to {edits}?"):
+        if auto_promote:
+            click.secho(f"  auto-promoting {lg} {mkt} to {edits}", fg="yellow")
+        elif not click.confirm(f"  Promote {lg} {mkt} to {edits}?"):
             return (lg, mkt, "HELD", ["declined"])
         keep = True
         _sync_cell_from_disk(meta, lg, mkt)
@@ -820,19 +851,28 @@ def _supersede_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
 
 
 def _split_shippable(
-    ready: list[list[dict]], meta: dict
+    ready: list[list[dict]], meta: dict, *, fresh_only: bool = False
 ) -> tuple[list[list[dict]], list[list[dict]]]:
     """Partition *cells* by current release surface: withheld (fresh) vs already-shipped (live).
 
     Withheld cells auto-ship on a clean 6/6 (a fresh cell has no live pickle, so a failed confirm's
     revert+prune restores its dark state). Live cells route to the supersession test, which restores
-    the incumbent byte-identical on a loss rather than pruning it.
+    the incumbent byte-identical on a loss rather than pruning it. ``fresh_only`` drops the live
+    lane entirely: supersession promotions always prompt per cell, so an unattended run would burn
+    each live cell's retrains into guaranteed HELDs.
     """
     fresh, shipped = [], []
     for nominated in ready:
         lg, mkt = nominated[0]["league"], nominated[0]["market"]
         target = fresh if meta[lg][mkt].get("shipped") == WITHHELD else shipped
         target.append(nominated)
+    if fresh_only and shipped:
+        click.secho(
+            f"  fresh-only: skipping {len(shipped)} live cell(s) — supersession promotions "
+            "prompt per cell, so they need an attended run.",
+            fg="yellow",
+        )
+        shipped = []
     return fresh, shipped
 
 
@@ -868,6 +908,23 @@ def _announce_plan(fresh: list[list[dict]], shipped: list[list[dict]]) -> None:
                     click.echo(wrapped(f"{n}. [{cand['source']}] {edits}", "    ", "       "))
 
 
+def _ledger_decided(cand: dict) -> bool:
+    """Whether this corner already has a full-HPO verdict on the same training matrix.
+
+    A resumed batch re-nominates every still-withheld cell an interrupted run already walked;
+    retraining a corner the ledger has scored on an identical frame re-buys a known verdict at
+    full-HPO price (~40 min). Ledger rows from an older matrix never match, so a cache regen
+    voids the skip and the corner retrains.
+    """
+    if not NOMINEE_LEDGER_PATH.exists():
+        return False
+    ledger = pd.read_csv(NOMINEE_LEDGER_PATH)
+    hit = (ledger["strategy_corner_fingerprint"] == cand["corner_fingerprint"]) & (
+        ledger["strategy_matrix_hash"] == cand["matrix_hash"]
+    )
+    return bool(hit.any())
+
+
 def _walk_nominees(
     meta: dict, nominated: list[dict], attempt
 ) -> tuple[str, str, str, list[str], str]:
@@ -876,7 +933,9 @@ def _walk_nominees(
     The cell's training matrix is pinned once here (:func:`_pin_cell_matrix`), so every nominee
     retrains and scores on the same frame. No new revert machinery is needed: ``_confirm_one``'s
     ``finally`` already restores stat_meta and prunes the pickle on every non-win, and
-    ``_supersede_one``'s restores byte-identically. The loop just stops at the first win.
+    ``_supersede_one``'s restores byte-identically. The loop just stops at the first win. A nominee
+    the ledger has already decided on this matrix (:func:`_ledger_decided`) is skipped, not
+    re-retrained.
     """
     outcome = ("", "", "REVERTED", ["no nominee"], "-")
     _pin_cell_matrix(nominated[0]["league"], nominated[0]["market"])
@@ -885,14 +944,63 @@ def _walk_nominees(
             f"\n  nominee {n}/{len(nominated)} [{cand['source']}] {cand['league']} {cand['market']}",
             bold=True,
         )
+        attempt_label = f"{n}/{len(nominated)} {cand['source']}"
+        if _ledger_decided(cand):
+            click.secho(
+                "    ledger already holds this corner's verdict on this matrix — skipping",
+                fg="yellow",
+            )
+            outcome = (
+                cand["league"],
+                cand["market"],
+                "SKIPPED",
+                ["prior verdict on this matrix"],
+                attempt_label,
+            )
+            continue
         lg, mkt, verdict, failed = attempt(meta, cand)
-        outcome = (lg, mkt, verdict, failed, f"{n}/{len(nominated)} {cand['source']}")
+        outcome = (lg, mkt, verdict, failed, attempt_label)
         if verdict in _WIN_OUTCOMES:
             break
     return outcome
 
 
-def run_confirm(board: pd.DataFrame, *, yes: bool = False, max_nominees: int | None = None) -> None:
+def _walk_lanes(
+    meta: dict,
+    fresh: list[list[dict]],
+    shipped: list[list[dict]],
+    deadline_hours: float | None,
+    auto_promote: bool = False,
+) -> list[tuple[str, str, str, list[str], str]]:
+    """Walk both lanes cell by cell; past the deadline, remaining cells record SKIPPED instead.
+
+    The deadline clock starts here — after the operator prompt — and is checked between cells, never
+    mid-walk: a cell that starts before the deadline finishes its walk, so the budget can overrun by
+    at most one cell. :func:`_candidates` ordered the cells best-first, which is what makes the cut
+    land on the weakest tail.
+    """
+    supersede = functools.partial(_supersede_one, auto_promote=auto_promote)
+    deadline = None if deadline_hours is None else time.monotonic() + deadline_hours * 3600
+    results = []
+    for lane, attempt in ((fresh, _confirm_one), (shipped, supersede)):
+        for nominated in lane:
+            if deadline is not None and time.monotonic() > deadline:
+                lead = nominated[0]
+                results.append((lead["league"], lead["market"], "SKIPPED", ["deadline"], "-"))
+                continue
+            results.append(_walk_nominees(meta, nominated, attempt))
+    return results
+
+
+def run_confirm(
+    board: pd.DataFrame,
+    *,
+    yes: bool = False,
+    max_nominees: int | None = None,
+    deadline_hours: float | None = None,
+    fresh_only: bool = False,
+    auto_promote: bool = False,
+) -> None:
     """Confirm the sweep's winners: auto-ship withheld cells on a clean 6/6, supersession-test live cells.
 
     ``board`` is the in-memory sweep result (a row per corner). Each cell nominates its top corners
@@ -900,8 +1008,10 @@ def run_confirm(board: pd.DataFrame, *, yes: bool = False, max_nominees: int | N
     cells are persisted + retrained and kept on a clean 6/6 (else reverted+pruned). Already-shipped
     cells (present when the sweep ran ``--include-shipped``) run the S1/S2/S3 test and swap the live
     cell only on a passing verdict AND an operator yes; any loss restores the incumbent. ``yes``
-    skips only the upfront gate — live-cell promotions always prompt individually. ``max_nominees``
-    caps each cell's walk at its first N nominees.
+    skips only the upfront gate — live-cell promotions prompt individually unless ``auto_promote``
+    answers them. ``max_nominees`` caps each cell's walk at its first N nominees;
+    ``deadline_hours`` skips cells not yet started when the budget runs out; ``fresh_only`` drops
+    the live lane for unattended runs.
     """
     ready = _candidates(board, max_nominees)
     if not ready:
@@ -909,7 +1019,7 @@ def run_confirm(board: pd.DataFrame, *, yes: bool = False, max_nominees: int | N
         return
 
     meta = load_stat_meta(_STAT_META)
-    fresh, shipped = _split_shippable(ready, meta)
+    fresh, shipped = _split_shippable(ready, meta, fresh_only=fresh_only)
     fresh = _drop_activation_gated(fresh)
     if not fresh and not shipped:
         click.echo("no confirmable candidates after the activation gate.")
@@ -929,9 +1039,7 @@ def run_confirm(board: pd.DataFrame, *, yes: bool = False, max_nominees: int | N
 
     backup = _backup_stat_meta()
     click.echo(f"stat_meta.json backed up to {backup}")
-    results = [_walk_nominees(meta, n, _confirm_one) for n in fresh]
-    results += [_walk_nominees(meta, n, _supersede_one) for n in shipped]
-    _print_confirm_report(results, backup)
+    _print_confirm_report(_walk_lanes(meta, fresh, shipped, deadline_hours, auto_promote), backup)
 
 
 def _print_confirm_report(
@@ -949,8 +1057,11 @@ def _print_confirm_report(
         )
     )
     n_win = sum(1 for r in results if r[2] in _WIN_OUTCOMES)
+    n_skip = sum(1 for r in results if r[2] == "SKIPPED")
+    skipped = f", {n_skip} skipped" if n_skip else ""
     click.secho(
-        f"\n{n_win} shipped/superseded (devel), {len(results) - n_win} reverted/held. Backup: {backup}",
+        f"\n{n_win} shipped/superseded (devel), {len(results) - n_win - n_skip} reverted/held"
+        f"{skipped}. Backup: {backup}",
         fg="green" if n_win else "yellow",
     )
     if n_win:

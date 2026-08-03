@@ -1691,7 +1691,9 @@ def test_a_corner_re_proposed_within_a_run_is_reported_cached_not_retrained(monk
     # stops it and the re-proposals this is about are guaranteed rather than hoped for.
     board = sweep.search_cell("MLB", "pitcher strikeouts", families=("NegBin",), max_trials=40)
 
-    assert len(flags) > len(trained), "no corner was re-proposed; the assertion below proves nothing"
+    assert len(flags) > len(trained), (
+        "no corner was re-proposed; the assertion below proves nothing"
+    )
     assert sum(flags) == len(trained) == len(board)
 
 
@@ -1842,8 +1844,12 @@ def test_cli_confirm_invokes_run_confirm(monkeypatch, tmp_path):
     monkeypatch.setattr(
         model_strategy_confirm,
         "run_confirm",
-        lambda board, *, yes, max_nominees: seen.update(
-            n=len(board), yes=yes, max_nominees=max_nominees
+        lambda board, *, yes, max_nominees, deadline_hours, fresh_only, auto_promote: seen.update(
+            n=len(board),
+            yes=yes,
+            max_nominees=max_nominees,
+            deadline_hours=deadline_hours,
+            fresh_only=fresh_only,
         ),
     )
     out = str(tmp_path / "board.csv")
@@ -1862,11 +1868,15 @@ def test_cli_confirm_invokes_run_confirm(monkeypatch, tmp_path):
             "--yes",
             "--confirm-nominees",
             "2",
+            "--confirm-hours",
+            "12",
+            "--confirm-fresh-only",
         ],
     )
     assert result.exit_code == 0, result.output
     assert seen["yes"] is True and 0 < seen["n"] <= 5
     assert seen["max_nominees"] == 2
+    assert seen["deadline_hours"] == 12.0 and seen["fresh_only"] is True
 
 
 def test_cli_scoped_board_confirms_only_the_requested_cells(monkeypatch, tmp_path):
@@ -1900,10 +1910,12 @@ def test_cli_scoped_board_confirms_only_the_requested_cells(monkeypatch, tmp_pat
     monkeypatch.setattr(
         model_strategy_confirm,
         "run_confirm",
-        lambda board, *, yes, max_nominees: confirmed.update(
-            cells=set(zip(board["league"], board["market"], strict=True)),
-            yes=yes,
-            max_nominees=max_nominees,
+        lambda board, *, yes, max_nominees, deadline_hours, fresh_only, auto_promote: (
+            confirmed.update(
+                cells=set(zip(board["league"], board["market"], strict=True)),
+                yes=yes,
+                max_nominees=max_nominees,
+            )
         ),
     )
 
@@ -2271,6 +2283,13 @@ def test_compress_corner_orders_family_first_and_clamps_to_budget():
     [
         (["--yes"], "require --confirm"),
         (["--confirm-nominees", "2"], "require --confirm"),
+        (["--confirm-hours", "4"], "require --confirm"),
+        (["--confirm-fresh-only"], "require --confirm"),
+        (["--confirm-auto-promote"], "require --confirm"),
+        (
+            ["--confirm", "--confirm-fresh-only", "--confirm-auto-promote"],
+            "only affects the live lane",
+        ),
         (["-q", "-v"], "mutually exclusive"),
         (["--market", "AST"], "pass --league with --market"),
     ],
@@ -2514,12 +2533,39 @@ def test_cell_timeout_tracks_the_cell_and_never_exceeds_the_flat_ceiling(tmp_pat
 
     board_with([9.0, 12.0, 15.0])  # a fast cell still tolerates one slow outlier
     assert sweep._cell_timeout_seconds(out, "NBA", "BLK") == sweep._TIMEOUT_FLOOR_S
-    board_with([12.0, 400.0])
-    assert sweep._cell_timeout_seconds(out, "NBA", "BLK") == 800
-    board_with([12.0, 1600.0])  # never looser than the flat ceiling it replaced
+    board_with([12.0, 100.0])
+    assert sweep._cell_timeout_seconds(out, "NBA", "BLK") == 200
+    board_with([12.0, 400.0])  # never looser than the flat ceiling
     assert sweep._cell_timeout_seconds(out, "NBA", "BLK") == sweep._MEDITATE_TRIAL_TIMEOUT_S
     # A cell with rows but no timings at all falls back rather than reading NaN as zero.
     assert sweep._cell_timeout_seconds(out, "NBA", "DREB") == sweep._MEDITATE_TRIAL_TIMEOUT_S
+
+
+def test_a_timed_out_corner_does_not_raise_the_next_run_s_ceiling(tmp_path):
+    """Only a corner that finished measures anything; a timed-out one measures the cap that killed it.
+
+    Counting it compounds — an NBA DREB cap of 366 s produced a 733 s timeout, which would have set
+    1466 s, then the ceiling — on precisely the cell the adaptive cap exists to bound. With no
+    finished corner left to anchor on the cell falls back rather than inventing a number.
+    """
+    out = str(tmp_path / "board.csv")
+
+    def board_with(*rows):
+        frame = [
+            {
+                **_board_row("NBA", "DREB", "SkewNormal", dict(_SN_CORNER)),
+                "elapsed_s": seconds,
+                "failure": failure,
+            }
+            for seconds, failure in rows
+        ]
+        pd.DataFrame(frame).reindex(columns=sweep._BOARD_COLUMNS).to_csv(out, index=False)
+
+    board_with((733.1, "TimeoutExpired"))
+    assert sweep._cell_timeout_seconds(out, "NBA", "DREB") == sweep._MEDITATE_TRIAL_TIMEOUT_S
+    # A real crash still timed something, and a finished corner beside the timeout still anchors it.
+    board_with((733.1, "TimeoutExpired"), (110.0, None), (60.0, "CalledProcessError"))
+    assert sweep._cell_timeout_seconds(out, "NBA", "DREB") == 220
 
 
 def test_a_timed_out_corner_is_retried_on_resume_but_a_crash_is_not(tmp_path):

@@ -250,8 +250,8 @@ def _seed_corners(monkeypatch, *controls):
 
 
 def test_nominees_rank_by_slack_and_persist_the_whole_recipe():
-    """The top-slack corner leads the list, and every SkewNormal axis — including
-    dist_training_loss (S4) — lands in the persisted edits.
+    """The top-slack corner leads the list, every SkewNormal axis — including dist_training_loss
+    (S4) — lands in the persisted edits, and the lane never dips below zero to fill the top-K.
     """
     nominated = _nominate(
         _sn_row("centered_additive_mean10", "nll", "crps", True, 0.30),
@@ -266,23 +266,25 @@ def test_nominees_rank_by_slack_and_persist_the_whole_recipe():
         "blending": "crps",
         "posthoc": "none",
     }
-    assert [n["slack"] for n in nominated] == [0.30, 0.25, -0.10]
+    assert [n["slack"] for n in nominated] == [0.30, 0.25]
     assert nominated[0]["source"] == "board slack +0.300"
+    assert all(n["board_rank"] == 0.30 for n in nominated)
 
 
-def test_nominees_ignore_the_ships_flag():
-    """``ships`` stays on the board as a human-facing signal only — confirm never reads it.
+def test_nominees_skip_a_cell_with_no_positive_board_rank(monkeypatch):
+    """A cell whose best admissible corner is non-positive nominates nothing — not even its seed.
 
-    Fixed-HP deterministic scoring will not ship a recipe that only passes under full HPO, so
-    requiring it left the popular NFL passing cells (zero shipping rows) unconfirmable. The top-slack
-    admissible corner is nominated regardless; the six gates still decide, after the retrain.
+    ``ships`` is still never read (a positive-rank corner nominates whatever its ships flag says),
+    but the board-confidence bar replaces the old walk-everything contract: full HPO occasionally
+    rescued a board-negative recipe (NBA FTM shipped at board −1.86), and the operator traded that
+    tail for not burning retrains on cells the board predicts to fail.
     """
+    _seed_corners(monkeypatch, _sn_controls("ratio_projvol", "nll", "nll"))
     nominated = _nominate(
         _sn_row("ratio_meanyr", "crps", "nll", False, -0.20),
-        _sn_row("centered_additive_mean10", "crps", "crps", False, -0.05),
+        _sn_row("centered_additive_mean10", "crps", "crps", True, -0.05),
     )
-    assert [n["slack"] for n in nominated] == [-0.05, -0.20]
-    assert nominated[0]["edits"]["target_normalization"] == "centered_additive_mean10"
+    assert nominated == []
 
 
 def test_nominees_cap_the_board_lane_at_top_k():
@@ -488,6 +490,13 @@ def test_nominees_interleave_noop_on_non_integer_target():
     assert [n["family"] for n in nominated] == ["SkewNormal"] * mc.CONFIRM_TOP_K
 
 
+def test_nominees_interleave_never_borrows_a_non_positive_count_corner(monkeypatch):
+    """The count-class backup honors the same board-confidence bar as the lane it patches."""
+    _integer_target_context(monkeypatch)
+    nominated = _nominate(*_all_sn_top(count_slack=-0.05))
+    assert [n["family"] for n in nominated] == ["SkewNormal"] * mc.CONFIRM_TOP_K
+
+
 def test_nominees_sort_by_discounted_slack_when_present_else_slack():
     """The board lane ranks by the sweep's confirm-priced ``discounted_slack`` when the column
     exists, so the two changes can land in either order; the source label keeps the raw slack.
@@ -499,9 +508,11 @@ def test_nominees_sort_by_discounted_slack_when_present_else_slack():
     raw_leader["discounted_slack"] = -0.10
     discount_leader["discounted_slack"] = 0.25
     nominated = _nominate(raw_leader, discount_leader)
-    assert [n["slack"] for n in nominated] == [0.30, 0.40]
+    # The discounted rank also carries the confidence bar: the raw leader's −0.10 drops it.
+    assert [n["slack"] for n in nominated] == [0.30]
     assert nominated[0]["edits"]["target_normalization"] == "centered_additive_mean10"
     assert nominated[0]["source"] == "board slack +0.300"
+    assert nominated[0]["board_rank"] == 0.25
 
 
 def test_nominees_structural_method_persists_full_recipe_and_identity():
@@ -591,6 +602,22 @@ def test_candidates_are_one_nominee_list_per_cell():
         ("MLB", "pitcher strikeouts"),
     ]
     assert [len(n) for n in grouped] == [1, 1]
+
+
+def test_candidates_walk_the_strongest_cells_first():
+    """Cells order by best board rank descending, so a deadline cut lands on the weakest tail."""
+    board = pd.DataFrame(
+        [
+            _sn_row("centered_additive_mean10", "crps", "crps", False, 0.10),
+            _zinb_row("hurdle", "pit_ks", "crps", False, 0.50),
+        ]
+    )
+    grouped = mc._candidates(board)
+    assert [(n[0]["league"], n[0]["market"]) for n in grouped] == [
+        ("MLB", "pitcher strikeouts"),
+        ("WNBA", "AST"),
+    ]
+    assert [n[0]["board_rank"] for n in grouped] == [0.50, 0.10]
 
 
 def test_split_shippable_partitions_cells_not_nominees():
@@ -1037,7 +1064,9 @@ def test_walk_nominees_reverts_a_loser_before_the_next_nominee_persists(monkeypa
     monkeypatch.setattr(
         mc,
         "_confirm_meditate",
-        lambda lg, mkt, cand: confirmed.append(cand["source"]) or ([] if len(confirmed) > 1 else ["g4"]),
+        lambda lg, mkt, cand: (
+            confirmed.append(cand["source"]) or ([] if len(confirmed) > 1 else ["g4"])
+        ),
     )
     nominated = [
         {
@@ -1090,12 +1119,12 @@ def test_run_confirm_yes_persists_and_confirms(monkeypatch, capsys, tmp_path):
     assert meta["WNBA"]["AST"]["shipped"] == "devel"
     assert meta["WNBA"]["AST"]["target_normalization"] == "centered_additive_mean10"
     assert meta["WNBA"]["AST"]["sn_param"] == "direct"  # the swept default persists explicitly too
-    assert confirmed == ["board slack +0.250"]  # the runner-up is never retrained
+    assert confirmed == ["board slack +0.250"]  # the negative-rank corner never nominates
     out = capsys.readouterr().out
-    assert "WNBA AST — 2 nominee(s)" in out
+    assert "WNBA AST — 1 nominee(s)" in out
     assert "1. [board slack +0.250]" in out
     assert "SHIPPED" in out
-    assert "1/2 board slack +0.250" in out  # the report's nominee column
+    assert "1/1 board slack +0.250" in out  # the report's nominee column
 
 
 def test_run_confirm_prompt_quotes_the_worst_case_retrain_count(monkeypatch, capsys):
@@ -1123,7 +1152,7 @@ def test_run_confirm_prompt_quotes_the_worst_case_retrain_count(monkeypatch, cap
     monkeypatch.setattr(mc.click, "confirm", lambda text: prompts.append(text) or False)
 
     mc.run_confirm(board)
-    assert "up to 3 full-HPO retrains" in prompts[0]
+    assert "up to 2 full-HPO retrains" in prompts[0]  # the negative-rank corner never nominates
     assert "aborted" in capsys.readouterr().out
 
 
@@ -1165,7 +1194,8 @@ def test_run_confirm_mixed_board_routes_withheld_and_shipped(monkeypatch, capsys
     monkeypatch.setattr(
         mc,
         "_supersede_one",
-        lambda m, c: calls["supersede"].append(c["market"]) or ("NBA", "PTS", "SUPERSEDED", []),
+        lambda m, c, *, auto_promote: calls["supersede"].append(c["market"])
+        or ("NBA", "PTS", "SUPERSEDED", []),
     )
 
     mc.run_confirm(board, yes=True)
@@ -1173,6 +1203,113 @@ def test_run_confirm_mixed_board_routes_withheld_and_shipped(monkeypatch, capsys
     assert calls["supersede"] == ["PTS"]
     out = capsys.readouterr().out
     assert "SHIPPED" in out and "SUPERSEDED" in out
+
+
+def test_run_confirm_fresh_only_skips_the_live_lane(monkeypatch, capsys):
+    """``fresh_only`` drops the supersession lane before any retrain: live-cell promotions prompt
+    per cell, so an unattended run would burn their retrains into guaranteed HELDs."""
+    board = pd.DataFrame(
+        [
+            _sn_row("centered_additive_mean10", "crps", "crps", True, 0.25),  # WNBA AST (withheld)
+            _signed_row(
+                "NBA",
+                "PTS",
+                "SkewNormal",
+                _sn_controls("centered_additive_mean10", "crps", "crps"),
+                True,
+                0.30,
+            ),
+        ]
+    )
+    meta = {
+        "WNBA": {"AST": _sn_original()},
+        "NBA": {"PTS": {"dist": "SkewNormal", "shipped": "devel"}},
+    }
+    monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
+    monkeypatch.setattr(mc, "_backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
+    confirmed = []
+    monkeypatch.setattr(
+        mc,
+        "_confirm_one",
+        lambda m, c: confirmed.append(c["market"]) or ("WNBA", "AST", "SHIPPED", []),
+    )
+    monkeypatch.setattr(
+        mc, "_supersede_one", lambda m, c: pytest.fail("fresh_only must never walk the live lane")
+    )
+
+    mc.run_confirm(board, yes=True, fresh_only=True)
+    assert confirmed == ["AST"]
+    assert "fresh-only: skipping 1 live cell(s)" in capsys.readouterr().out
+
+
+def test_run_confirm_deadline_skips_cells_not_yet_started(monkeypatch, capsys):
+    """The budget is checked between cells: a cell that starts in time finishes its walk, cells past
+    the deadline record SKIPPED instead of retraining, and the best board rank walks first."""
+    board = pd.DataFrame(
+        [
+            _sn_row("centered_additive_mean10", "crps", "crps", False, 0.25),
+            _zinb_row("hurdle", "pit_ks", "crps", False, 0.50),
+        ]
+    )
+    meta = {
+        "WNBA": {"AST": _sn_original()},
+        "MLB": {"pitcher strikeouts": {"dist": "ZINB", "shipped": "withheld"}},
+    }
+    monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
+    monkeypatch.setattr(mc, "_backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
+    confirmed = []
+    monkeypatch.setattr(
+        mc,
+        "_confirm_one",
+        lambda m, c: (
+            confirmed.append((c["league"], c["market"]))
+            or (c["league"], c["market"], "SHIPPED", [])
+        ),
+    )
+    ticks = [0.0, 1800.0, 7200.0]  # deadline calc, cell-1 check (inside), cell-2 check (past)
+    monkeypatch.setattr(mc.time, "monotonic", lambda: ticks.pop(0) if ticks else 7200.0)
+
+    mc.run_confirm(board, yes=True, deadline_hours=1.0)
+    assert confirmed == [("MLB", "pitcher strikeouts")]  # the stronger cell got the budget
+    out = capsys.readouterr().out
+    assert "WNBA AST" in out and "SKIPPED" in out and "deadline" in out
+    assert "1 skipped" in out
+
+
+def test_walk_nominees_skips_a_corner_the_ledger_already_decided(monkeypatch, capsys):
+    """A resumed batch re-nominates cells an interrupted run already walked; a corner with a
+    full-HPO verdict on the identical matrix is skipped, and the walk moves to the next nominee.
+    A ledger row from an older matrix does not match, so a cache regen voids the skip."""
+    decided, fresh = (
+        _sn_row("centered_additive_mean10", "crps", "crps", False, 0.30),
+        _sn_row("ratio_meanyr", "crps", "nll", False, 0.25),
+    )
+    stale = _sn_row("ratio_projvol", "crps", "crps", False, 0.20)
+    pd.DataFrame(
+        [
+            {
+                "strategy_corner_fingerprint": decided["corner_fingerprint"],
+                "strategy_matrix_hash": _MATRIX_SHA,
+            },
+            {
+                "strategy_corner_fingerprint": stale["corner_fingerprint"],
+                "strategy_matrix_hash": "old-matrix",
+            },
+        ]
+    ).to_csv(mc.NOMINEE_LEDGER_PATH, index=False)
+    attempted = []
+    meta = {"WNBA": {"AST": _sn_original()}}
+
+    def attempt(m, cand):
+        attempted.append(cand["slack"])
+        return ("WNBA", "AST", "REVERTED", ["g4"])
+
+    result = mc._walk_nominees(
+        meta, mc._candidates(pd.DataFrame([decided, fresh, stale]))[0], attempt
+    )
+    assert attempted == [0.25, 0.20]  # the decided leader is skipped, the stale-matrix row retrains
+    assert result[2] == "REVERTED"  # the cell's verdict comes from the corners that actually ran
+    assert "already holds this corner's verdict" in capsys.readouterr().out
 
 
 def test_run_confirm_reports_nothing_confirmable_when_every_corner_is_unservable(
@@ -1404,6 +1541,45 @@ def test_supersede_pass_and_yes_keeps_candidate(monkeypatch):
     assert pruned == []
 
 
+def test_supersede_auto_promote_swaps_without_prompting(monkeypatch, capsys):
+    """``auto_promote`` answers the promote prompt so an unattended run can swap live cells; the
+    S1/S2/S3 verdict still decides, and the swap is announced."""
+    meta = _shipped_meta()
+    restored, pruned = _patch_supersede_io(monkeypatch, verdict=_verdict(ship=True))
+    monkeypatch.setattr(
+        mc.click, "confirm", lambda *a, **k: pytest.fail("auto_promote must not prompt")
+    )
+    result = mc._supersede_one(meta, _supersede_cand(), auto_promote=True)
+    assert result[:3] == ("NBA", "PTS", "SUPERSEDED")
+    assert restored == [] and pruned == []
+    assert "auto-promoting NBA PTS" in capsys.readouterr().out
+
+
+def test_supersede_auto_promote_still_holds_a_losing_verdict(monkeypatch):
+    """The flag removes the human veto, not the test: a failing S1/S2/S3 still restores the
+    incumbent, so an unattended run can never swap in a worse model."""
+    meta = _shipped_meta()
+    restored, pruned = _patch_supersede_io(monkeypatch, verdict=_verdict(ship=False, s3=False))
+    result = mc._supersede_one(meta, _supersede_cand(), auto_promote=True)
+    assert result[:3] == ("NBA", "PTS", "HELD")
+    assert restored[0][:2] == ("NBA", "PTS") and pruned == []
+
+
+def test_walk_lanes_threads_auto_promote_into_the_live_lane(monkeypatch):
+    """``run_confirm``'s flag has to reach ``_supersede_one``; the fresh lane never sees it."""
+    seen = {}
+    monkeypatch.setattr(
+        mc,
+        "_supersede_one",
+        lambda m, c, *, auto_promote: (
+            seen.update(auto_promote=auto_promote) or ("NBA", "PTS", "HELD", [])
+        ),
+    )
+    live = [[{"league": "NBA", "market": "PTS", "source": "board slack +0.300"}]]
+    mc._walk_lanes({}, [], live, None, True)
+    assert seen == {"auto_promote": True}
+
+
 def test_supersede_pass_but_no_restores_incumbent(monkeypatch):
     meta = _shipped_meta()
     restored, _ = _patch_supersede_io(monkeypatch, verdict=_verdict(ship=True))
@@ -1497,9 +1673,7 @@ def test_nominee_ledger_stays_parseable_when_model_stats_widens(monkeypatch, tmp
     rows = iter(
         [
             pd.Series({"league": "NBA", "market": "PTS", "g4_iqr_ratio": 0.91}),
-            pd.Series(
-                {"league": "NBA", "market": "PTS", "g4_iqr_ratio": 0.88, "g7_new_gate": 1.0}
-            ),
+            pd.Series({"league": "NBA", "market": "PTS", "g4_iqr_ratio": 0.88, "g7_new_gate": 1.0}),
         ]
     )
     monkeypatch.setattr(mc, "_cell_row", lambda league, market, columns: next(rows))

@@ -436,6 +436,39 @@ CRPS price, holdout g4 0.0736 vs the loss arm's 0.0695 on identical rows). `hpo_
 on the current ledger that adds zero firings (the brief's "5→6" used off-snapshot numbers) and
 exists as forward armor with a bounded cost.
 
+**Is full HPO overfitting instead of the deterministic arm underfitting?** No — measured, not
+argued. Three paired arms (deterministic 30-round/31-leaf vs full HPO) on **sha-verified identical
+matrices**, same true holdout, same code: full HPO never loses a calibration gate, winning g4 once
+and tying twice. It wins the disagreement outright — NFL qb yards' deterministic arm fails at
+g4 0.0847 against its 0.0789 bar while full HPO returns 0.0620 and ships. Deterministic's only
+wins are g2/g3 by 0.02–0.07 on cells that ship either way. Two supporting checks: within a cell,
+the recipes that shipped carried *more* capacity than the ones that failed (the aggregate
+capacity–failure correlation is a Simpson's reversal), and the confirm−board g4 gap sits inside
+the band the frame change alone explains. The pre-registered trigger for a selection-guard lever
+(HPO losing a calibration gate beyond noise on ≥3 pairs) is not met at zero. The other five
+det-pair cells are live, so their HPO arms need a supersession pass to take this to n=8.
+
+**Nominee policy: only board-confident corners walk.** `_nominees` now requires a positive rank
+value (`discounted_slack`, else `slack`) per corner and skips a cell whose best admissible corner
+is non-positive; `_candidates` orders cells by that rank so a `--confirm-hours` deadline cuts the
+weakest tail. This trades the rare full-HPO rescue of a board-negative recipe (NBA FTM shipped one
+at board −1.86) for wall clock. The first batch under it walked 12 withheld cells and **shipped 7**:
+
+| board slack band | cells | shipped |
+|---|---|---|
+| ≥ +0.07 | 7 | 7 |
+| ≤ +0.05 | 5 | 0 |
+
+Board rank now predicts the confirm verdict cleanly, which is the parity claim above holding at
+batch scale. Per-gate confirm−board deltas over the batch's 18 board-sourced nominee rows: g1
+median **+0.0008** (IQR ±0.002), g5 +0.008, g2/g3 near zero with spread — and g4 **+0.0158**
+(IQR +0.008…+0.037), the same frame offset §B measures at +0.010–0.025. That residual is the
+live limit: `discounted_slack` prices it into *ranking* but cannot move a *gate threshold*, so a
+cell whose board g4 sits within ~0.016 of its bar is still a coin flip at confirm — which is where
+every remaining miss landed (NFL interceptions, receiving yards ×3, qb yards' first nominee). The
+untried lever is a per-gate board-side handicap at nomination (require board g4 + 0.016 to clear
+the bar), which would have skipped those walks.
+
 ---
 
 ## C. A warm-start hurdle retrain dies on a stale monotone vector

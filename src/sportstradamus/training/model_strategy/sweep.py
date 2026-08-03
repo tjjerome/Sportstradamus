@@ -112,16 +112,20 @@ _TEST_SETS_ROOT = pathlib.Path(str(pkg_resources.files(_data_pkg) / "test_sets")
 _DETERMINISTIC_MODEL_ROOT = _REPO_ROOT / "research" / "models" / "deterministic"
 _DETERMINISTIC_LOG_ROOT = _REPO_ROOT / "research" / "logs" / "deterministic"
 _TRAINING_DATA_ROOT = pathlib.Path(str(pkg_resources.files(_data_pkg) / "training_data"))
-# Ceiling for a cell nothing has been measured for yet. A deterministic meditate is fast-HP, but a
-# large-dataset cell can take ~10 min, so 1800 s keeps CI from hanging without cutting off valid runs.
-_MEDITATE_TRIAL_TIMEOUT_S = 1800
-# Once a cell has timings, its own worst corner sets the ceiling instead: a trial timeout is a hang
-# detector, not a work limit, and 1800 s of silence on a cell whose corners run 15 s is 30 minutes
-# before anyone finds out. Leave-one-out replay over 684 measured corners (ceiling built from the
-# cell's *other* corners) cuts one of them at a typical ceiling of 600 s — and that one is retried,
-# because a timeout row is not admitted to the resume cache.
+# Hard ceiling on one deterministic trial, and the cap for a cell nothing has been measured for yet.
+# A corner's median is 33 s and its p95 is 385 s, so 300 s cuts 6.5% of the 2208 measured corners —
+# but slow corners are also *bad* ones (median slack -1.162 against -0.194, ships 20.8% against
+# 35.8%), so only 4 of 81 cells have their best corner above it and only MLB hits ships uncapped and
+# not at 300 s, its winner sitting at 342 s. A cut corner is retried rather than cached, so the cost
+# of the ones this does catch is one retry, not a lost recipe.
+_MEDITATE_TRIAL_TIMEOUT_S = 300
+# Once a cell has timings, its own worst *finished* corner sets the cap instead: a timeout is a hang
+# detector, not a work limit, and five minutes of silence on a cell whose corners run 15 s is a long
+# time to find out. The floor is what keeps that from becoming a work limit in turn — the 7 cells
+# whose slowest corner is under a minute run ~44 s at worst, so 120 s tolerates an outlier without
+# cutting one. At this ceiling 60 of 81 cells sit at it and 21 are genuinely adaptive.
 _TIMEOUT_HEADROOM = 2.0
-_TIMEOUT_FLOOR_S = 600
+_TIMEOUT_FLOOR_S = 120
 # How far n_trials runs past the reachable grid. A corner from a family the cell has abandoned is
 # pruned before it trains, and TPE keeps proposing it because pruned trials are not in its model, so
 # without slack a cell that rules out a family early could exhaust its suggestions before its budget.
@@ -927,14 +931,23 @@ def _cell_timeout_seconds(out: str | None, league: str, market: str) -> int:
 
     Maximum rather than a quantile because the spread *inside* one cell is wide — NBA BLK's corners
     run 12 s to 906 s on the same target — so anything but the worst legitimate corner cuts real work.
-    Clamped below so a cell whose corners all run in seconds still tolerates one slow outlier, and
-    above by :data:`_MEDITATE_TRIAL_TIMEOUT_S` so the ceiling is never looser than the flat one was.
+    Clamped both ways by :data:`_TIMEOUT_FLOOR_S` and :data:`_MEDITATE_TRIAL_TIMEOUT_S`.
+
+    Only corners that *finished* are evidence. A timed-out one measures the cap that killed it, so
+    counting it would make each run's cap twice the last one's until it pinned at the ceiling — on
+    exactly the cell the cap exists for.
     """
     path = pathlib.Path(out) if out else None
     if path is None or not path.exists():
         return _MEDITATE_TRIAL_TIMEOUT_S
     board = _read_board(path)
-    cell = board[(board["league"] == league) & (board["market"] == market)]
+    # A blank `failure` reads back as pd.NA; `!= _TIMEOUT_FAILURE` against pd.NA is pd.NA, not
+    # True, so every finished corner would silently drop out of the mask without the cast + fillna.
+    cell = board[
+        (board["league"] == league)
+        & (board["market"] == market)
+        & (board["failure"].astype("string").fillna("") != _TIMEOUT_FAILURE)
+    ]
     slowest = pd.to_numeric(cell["elapsed_s"], errors="coerce").max()
     if not np.isfinite(slowest):
         return _MEDITATE_TRIAL_TIMEOUT_S
@@ -1723,6 +1736,9 @@ def _reject_inert_flags(
     confirm: bool,
     yes: bool,
     confirm_nominees: int | None,
+    confirm_hours: float | None,
+    confirm_fresh_only: bool,
+    confirm_auto_promote: bool,
     quiet: bool,
     verbose: bool,
 ) -> None:
@@ -1736,8 +1752,23 @@ def _reject_inert_flags(
         raise click.UsageError(
             "pass --league with --market for a single cell, or omit --market to sweep the board"
         )
-    if not confirm and (yes or confirm_nominees is not None):
-        raise click.UsageError("--yes and --confirm-nominees require --confirm")
+    passed = [
+        name
+        for name, is_set in (
+            ("--yes", yes),
+            ("--confirm-nominees", confirm_nominees is not None),
+            ("--confirm-hours", confirm_hours is not None),
+            ("--confirm-fresh-only", confirm_fresh_only),
+            ("--confirm-auto-promote", confirm_auto_promote),
+        )
+        if is_set
+    ]
+    if passed and not confirm:
+        raise click.UsageError(f"{', '.join(passed)} require --confirm")
+    if confirm_fresh_only and confirm_auto_promote:
+        raise click.UsageError(
+            "--confirm-auto-promote only affects the live lane that --confirm-fresh-only drops"
+        )
     if quiet and verbose:
         raise click.UsageError("--quiet and --verbose are mutually exclusive")
 
@@ -1837,6 +1868,29 @@ def _note_board_only_flags(
     "Unset walks every nominee. Requires --confirm.",
 )
 @click.option(
+    "--confirm-hours",
+    type=click.FloatRange(min=0, min_open=True),
+    default=None,
+    help="Wall-clock budget for the confirm walks; cells not yet started when it runs out are "
+    "skipped. Cells walk best board rank first, so the cut lands on the weakest tail. "
+    "Requires --confirm.",
+)
+@click.option(
+    "--confirm-fresh-only",
+    is_flag=True,
+    default=False,
+    help="Confirm withheld cells only; skip live-cell supersession tests, whose promotions prompt "
+    "per cell and so need an attended run. Requires --confirm.",
+)
+@click.option(
+    "--confirm-auto-promote",
+    is_flag=True,
+    default=False,
+    help="Answer the per-cell live-promotion prompt yes, so an unattended run can swap live cells. "
+    "The S1/S2/S3 verdict and the six gates still decide each swap; only the human veto is gone, "
+    "and every swap stays local until the stat_meta.json diff is reviewed. Requires --confirm.",
+)
+@click.option(
     "--resume",
     is_flag=True,
     default=False,
@@ -1882,6 +1936,9 @@ def main(
     confirm: bool,
     yes: bool,
     confirm_nominees: int | None,
+    confirm_hours: float | None,
+    confirm_fresh_only: bool,
+    confirm_auto_promote: bool,
     resume: bool,
     dry_run: bool,
     quiet: bool,
@@ -1893,7 +1950,18 @@ def main(
     ``--market`` sweeps one cell; omitting ``--market`` sweeps the board (``--league`` narrows it).
     ``--confirm`` then full-HPO-retrains each cell's nominees until one ships.
     """
-    _reject_inert_flags(league, market, confirm, yes, confirm_nominees, quiet, verbose)
+    _reject_inert_flags(
+        league,
+        market,
+        confirm,
+        yes,
+        confirm_nominees,
+        confirm_hours,
+        confirm_fresh_only,
+        confirm_auto_promote,
+        quiet,
+        verbose,
+    )
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     verbosity = QUIET if quiet else VERBOSE if verbose else NORMAL
     out = out or str(STRATEGY_RESEARCH_BOARD)
@@ -1933,7 +2001,14 @@ def main(
     if confirm:
         from sportstradamus.training.model_strategy.confirm import run_confirm
 
-        run_confirm(result, yes=yes, max_nominees=confirm_nominees)
+        run_confirm(
+            result,
+            yes=yes,
+            max_nominees=confirm_nominees,
+            deadline_hours=confirm_hours,
+            fresh_only=confirm_fresh_only,
+            auto_promote=confirm_auto_promote,
+        )
 
 
 if __name__ == "__main__":
