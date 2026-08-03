@@ -81,10 +81,11 @@ from sportstradamus.training.model_strategy.sweep import (
     NOMINEE_LEDGER_PATH,
     _cell_context,
     _failure_reason,
-    _known_good_corners,
     _run_meditate_with_lock_retry,
+    _seed_corners,
     _training_matrix_path,
 )
+from sportstradamus.training.posthoc import PROB_STAGE
 from sportstradamus.training.scorecard import _supersede_headline, load_test_set, supersede_verdict
 from sportstradamus.training.ship_config import STAT_META_PATH, WITHHELD, load_stat_meta
 
@@ -123,6 +124,19 @@ _CONFIRM_CAPABILITIES = frozenset({CAP_CONFIRM, CAP_FULL_HPO, CAP_SCORE, CAP_SER
 # a deterministic `ships` — is what makes confirmation reachable at all for the popular NFL passing
 # markets, whose boards carry zero shipping rows.
 CONFIRM_TOP_K: int = 3
+# Controls that change the shape of the predictive distribution, and therefore the PIT Gate 4
+# scores. Two corners agreeing on all of them (and on their family) fail Gate 4 identically.
+_GATE4_MECHANISM_CONTROLS: tuple[str, ...] = (
+    "normalization",
+    "dist_training_loss",
+    "sn_param",
+    "zinb_mode",
+    "count_dispersion_objective",
+    "blending_loss_fn",
+)
+# Correctors that move a single over-probability rather than the predictive PIT, so Gate 4
+# cannot tell them from ``none``.
+_PIT_NEUTRAL_POSTHOC: frozenset[str] = frozenset({"none", *PROB_STAGE})
 # The exact model_stats identity columns the official ship verdict is bound to.
 _SHIP_IDENTITY_COLUMNS = [
     "league",
@@ -174,7 +188,7 @@ def _nominees(sub: pd.DataFrame) -> list[dict]:
     backup = _count_class_backup(ranked, rank_column, nominated, context, lg, mkt)
     if backup is not None:
         nominated.insert(1, backup)
-    for spec, controls in _known_good_corners(context):
+    for spec, controls in _seed_corners(context):
         cand = _corner_candidate(context, spec, lg, mkt, controls, slack=math.nan, split=None)
         if cand is not None:
             nominated.append({**cand, "source": "seed/incumbent"})
@@ -186,18 +200,64 @@ def _nominees(sub: pd.DataFrame) -> list[dict]:
     ]
 
 
+def _gate4_mechanism(candidate: dict) -> tuple[str, ...]:
+    """What a corner does to the predictive PIT — the thing Gate 4 actually scores.
+
+    Two corners sharing this key fail Gate 4 the same way, so walking both spends a full-HPO
+    hour to learn one thing. ``posthoc`` only joins the key when it reshapes the distribution:
+    ``none`` and the probability-only recalibrators leave the predictive PIT untouched, so they
+    are one mechanism, not three.
+    """
+    controls = candidate["controls"]
+    shaping = controls.get("posthoc", "none")
+    return (
+        candidate["strategy_slug"],
+        *(controls.get(name, "") for name in _GATE4_MECHANISM_CONTROLS),
+        "" if shaping in _PIT_NEUTRAL_POSTHOC else shaping,
+    )
+
+
 def _board_lane(
     ranked: pd.DataFrame, rank_column: str, context, league: str, market: str
 ) -> list[dict]:
-    """The cell's top positive-rank board corners, validated and capped at ``CONFIRM_TOP_K``."""
-    lane: list[dict] = []
+    """The cell's positive-rank board corners, ordered for mechanism diversity, capped at K.
+
+    The leader always goes first — the board's own opinion is the best single guess. After that
+    a corner earns its slot by being *different*: first the highest-ranked unseen family, then
+    the highest-ranked unseen Gate-4 mechanism, and only then the next corner by rank. Without
+    it a cell whose top three rows are near-identical ZINB corners spends its whole walk
+    relearning one verdict while a positive DPO or structural row never runs.
+    """
+    pool: list[dict] = []
     for _, row in ranked.iterrows():
-        if len(lane) >= CONFIRM_TOP_K or not row[rank_column] > 0:
+        if not row[rank_column] > 0:
             break
         cand = _board_candidate_row(row, context, league, market)
         if cand is not None:
-            lane.append({**cand, "source": f"board slack {cand['slack']:+.3f}"})
+            pool.append({**cand, "source": f"board slack {cand['slack']:+.3f}"})
+
+    lane: list[dict] = []
+    families: set[str] = set()
+    mechanisms: set[tuple[str, ...]] = set()
+    remaining = list(range(len(pool)))
+    while remaining and len(lane) < CONFIRM_TOP_K:
+        pick = _next_slot(pool, remaining, families, mechanisms) if lane else remaining[0]
+        remaining.remove(pick)
+        lane.append(pool[pick])
+        families.add(pool[pick]["strategy_slug"])
+        mechanisms.add(_gate4_mechanism(pool[pick]))
     return lane
+
+
+def _next_slot(
+    pool: list[dict], remaining: list[int], families: set[str], mechanisms: set[tuple[str, ...]]
+) -> int:
+    """The highest-ranked remaining corner that argues something new, else the next by rank."""
+    unseen_family = (index for index in remaining if pool[index]["strategy_slug"] not in families)
+    unseen_mechanism = (
+        index for index in remaining if _gate4_mechanism(pool[index]) not in mechanisms
+    )
+    return next(unseen_family, next(unseen_mechanism, remaining[0]))
 
 
 def _count_class_backup(
@@ -234,9 +294,13 @@ def _corner_candidate(
 
     A family without the confirm capabilities (Mixture ranks but never serves) drops out here, as
     does a corner whose spec is not applicable to the cell — a seed or incumbent can outlive the
-    admission gates that once let it in.
+    admission gates that once let it in. So does a structural corner with no board row behind it:
+    a structural artifact's split fingerprint only exists after the retrain, so a synthesized
+    nominee would carry ``None`` and fail its own identity check.
     """
     if spec not in strategies_for_cell(context) or not spec.capabilities >= _CONFIRM_CAPABILITIES:
+        return None
+    if spec.is_structural and split is None:
         return None
     identity = build_artifact_identity(
         spec.slug, league, market, controls, matrix_hash=context.matrix_sha256

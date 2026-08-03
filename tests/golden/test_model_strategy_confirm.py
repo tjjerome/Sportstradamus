@@ -26,7 +26,7 @@ from sportstradamus.training.model_strategy import (
 from sportstradamus.training.model_strategy import confirm as mc
 from sportstradamus.training.model_strategy.sweep import EVAL_SPLIT_CROSSFIT
 from sportstradamus.training.role_specs import role_spec_for
-from sportstradamus.training.structural_strategies import AFFINE_STRATEGY
+from sportstradamus.training.structural_strategies import AFFINE_STRATEGY, TWO_PART_STRATEGY
 
 _MATRIX_SHA = "matrix-123"
 _MATRIX_COLUMNS = frozenset(
@@ -75,13 +75,13 @@ def _stub_matrix_pin(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_known_good_corners(monkeypatch):
+def _no_seed_corners(monkeypatch):
     """Empty the seed/incumbent lane by default, so a test's board is its whole nominee list.
 
-    The real ``_known_good_corners`` reads the repo's committed stat_meta.json; the seed-lane tests
+    The real ``_seed_corners`` reads the repo's committed stat_meta.json; the seed-lane tests
     below patch explicit corners back in.
     """
-    monkeypatch.setattr(mc, "_known_good_corners", lambda context: [])
+    monkeypatch.setattr(mc, "_seed_corners", lambda context: [])
 
 
 def _fake_meta_disk(monkeypatch, tmp_path):
@@ -183,7 +183,7 @@ def _mixture_row(league, market, slack):
     )
 
 
-def _zinb_row(mode, disp, blend, ships, slack):
+def _zinb_row(mode, disp, blend, ships, slack, posthoc="none"):
     """A ZINB count corner, reindexed to the full board schema (SN-only columns blank)."""
     return {
         **_signed_row(
@@ -195,7 +195,7 @@ def _zinb_row(mode, disp, blend, ships, slack):
                 "zinb_mode": mode,
                 "count_dispersion_objective": disp,
                 "blending_loss_fn": blend,
-                "posthoc": "none",
+                "posthoc": posthoc,
             },
             ships,
             slack,
@@ -241,7 +241,7 @@ def _nominate(*rows):
 def _seed_corners(monkeypatch, *controls):
     monkeypatch.setattr(
         mc,
-        "_known_good_corners",
+        "_seed_corners",
         lambda context: [(get_strategy(c["dist"]), c) for c in controls],
     )
 
@@ -454,18 +454,21 @@ def _all_sn_top(*, count_slack=None):
     return rows
 
 
-def test_nominees_interleave_best_count_corner_on_integer_target(monkeypatch):
-    """An integer-target cell whose top corners are all SkewNormal (the divergence-prone family)
-    slots the best count-class corner second — inserted, never dropping a continuous nominee.
+def test_nominees_promote_the_best_count_corner_over_a_near_identical_continuous_one(monkeypatch):
+    """A board whose leaders are four SkewNormal corners still walks the count family second.
+
+    Slot 1 is the board's own leader. Slot 2 goes to the best corner from a family nothing has
+    walked yet — here the 0.05 NegBin, not the 0.02 one and not the next SkewNormal — because a
+    second SkewNormal corner would re-learn the divergence the first one already showed. Slot 3
+    then takes the highest-ranked corner whose Gate-4 mechanism is still unseen.
     """
     _integer_target_context(monkeypatch)
     nominated = _nominate(
         *_all_sn_top(count_slack=0.05),
         _negbin_row("pit_ks", "nll", False, 0.02, league="WNBA", market="AST"),
     )
-    assert [n["family"] for n in nominated] == ["SkewNormal", "NegBin", "SkewNormal", "SkewNormal"]
-    assert nominated[1]["slack"] == 0.05  # the best-slack count corner, not the 0.02 one
-    assert [n["slack"] for n in nominated] == [0.40, 0.05, 0.30, 0.20]
+    assert [n["family"] for n in nominated] == ["SkewNormal", "NegBin", "SkewNormal"]
+    assert [n["slack"] for n in nominated] == [0.40, 0.05, 0.30]
 
 
 def test_nominees_interleave_noop_when_count_already_in_top_slots(monkeypatch):
@@ -485,9 +488,15 @@ def test_nominees_interleave_noop_without_a_count_board_row(monkeypatch):
 
 
 def test_nominees_interleave_noop_on_non_integer_target():
-    """The default fixture context carries no integer-lattice fact, so the top-K stands as ranked."""
+    """The count-class backup is integer-target gated; mechanism diversity is not.
+
+    The default fixture context carries no integer-lattice fact, so the backup adds nothing and
+    the lane stays at ``CONFIRM_TOP_K``. Diversity still orders those slots, so the count corner
+    reaches slot 2 on its own — the backup's job here is only the extra insert it declines to make.
+    """
     nominated = _nominate(*_all_sn_top(count_slack=0.05))
-    assert [n["family"] for n in nominated] == ["SkewNormal"] * mc.CONFIRM_TOP_K
+    assert len(nominated) == mc.CONFIRM_TOP_K
+    assert [n["family"] for n in nominated] == ["SkewNormal", "NegBin", "SkewNormal"]
 
 
 def test_nominees_interleave_never_borrows_a_non_positive_count_corner(monkeypatch):
@@ -1749,3 +1758,114 @@ def test_confirm_nominee_cap_truncates_each_cell_after_dedup(monkeypatch):
     assert [len(cell) for cell in uncapped] == [3]
     assert [len(cell) for cell in capped] == [2]
     assert [n["source"] for n in capped[0]] == [n["source"] for n in uncapped[0][:2]]
+
+
+# --- mechanism-diverse nomination ---------------------------------------------------------
+
+
+def test_nominees_spend_the_lane_on_distinct_gate4_mechanisms_not_neighbouring_corners():
+    """Three near-identical ZINB corners cannot crowd out a positive DPO row below them.
+
+    The leader keeps slot 1. Slot 2 goes to the best unseen family (DPO) and slot 3 to the best
+    corner whose Gate-4 mechanism is still unseen — here the ``pit_ks`` dispersion, not the
+    second ``crps`` ZINB that would fail Gate 4 exactly as the leader did.
+    """
+    nominated = _nominate(
+        _zinb_row("joint", "crps", "nll", False, 0.40),
+        # Same predictive shape as the leader; only its over-probability corrector differs.
+        _zinb_row("joint", "crps", "nll", False, 0.35, posthoc="prob_recal_platt"),
+        _zinb_row("joint", "pit_ks", "nll", False, 0.15),
+        _negbin_row("crps", "nll", False, 0.25),
+    )
+
+    assert [(n["strategy_slug"], n["slack"]) for n in nominated] == [
+        ("ZINB", 0.40),
+        ("NegBin", 0.25),
+        ("ZINB", 0.15),
+    ]
+
+
+def test_nominees_treat_probability_only_recalibrators_as_the_leaders_gate4_mechanism():
+    """``prob_recal_*`` does not touch the predictive PIT, so it is not a Gate-4 alternative.
+
+    With only probability-stage variants of the leader available, the lane falls back to plain
+    rank order — and a mean-stage corrector, which does reshape what Gate 4 sees, outranks them.
+    """
+    leader = _sn_controls("ratio_meanyr", "crps", "nll")
+    assert mc._gate4_mechanism({"strategy_slug": "SkewNormal", "controls": leader}) == (
+        mc._gate4_mechanism(
+            {
+                "strategy_slug": "SkewNormal",
+                "controls": {**leader, "posthoc": "prob_recal_platt"},
+            }
+        )
+    )
+    assert mc._gate4_mechanism({"strategy_slug": "SkewNormal", "controls": leader}) != (
+        mc._gate4_mechanism(
+            {"strategy_slug": "SkewNormal", "controls": {**leader, "posthoc": "roe_mean"}}
+        )
+    )
+
+    nominated = _nominate(
+        _sn_row("ratio_meanyr", "crps", "nll", False, 0.40),
+        _sn_row("ratio_meanyr", "crps", "nll", False, 0.30, posthoc="prob_recal_platt"),
+        _sn_row("ratio_meanyr", "crps", "nll", False, 0.20, posthoc="roe_mean"),
+    )
+
+    assert [n["slack"] for n in nominated] == [0.40, 0.20, 0.30]
+
+
+def test_nominees_keep_plain_rank_order_when_no_corner_argues_anything_new():
+    nominated = _nominate(
+        _sn_row("ratio_meanyr", "crps", "nll", False, 0.40),
+        _sn_row("ratio_meanyr", "crps", "nll", False, 0.30, posthoc="prob_recal_isotonic"),
+        _sn_row("ratio_meanyr", "crps", "nll", False, 0.20, posthoc="prob_recal_platt"),
+        _sn_row("ratio_meanyr", "crps", "nll", False, 0.10, posthoc="none"),
+    )
+
+    assert [n["slack"] for n in nominated] == [0.40, 0.30, 0.20]
+
+
+def test_nonpositive_cells_still_receive_no_confirm_walk_under_diversity():
+    assert _nominate(_sn_row("ratio_meanyr", "crps", "nll", False, -0.01)) == []
+
+
+# --- structural nomination ----------------------------------------------------------------
+
+
+def test_structural_corners_confirm_only_through_a_board_row_carrying_a_split_fingerprint():
+    """A board row brings the split fingerprint a synthesized seed cannot have.
+
+    A structural artifact's fingerprint only exists after the retrain, so nominating the recipe
+    straight from the seed register would sign a candidate whose identity check must fail.
+    """
+    context = mc._cell_context("NFL", "receiving yards")
+    spec = get_strategy(TWO_PART_STRATEGY)
+    controls = dict(spec.fixed_controls)
+
+    synthesized = mc._corner_candidate(
+        context, spec, "NFL", "receiving yards", controls, slack=float("nan"), split=None
+    )
+    from_board = mc._corner_candidate(
+        context, spec, "NFL", "receiving yards", controls, slack=0.4, split="split-123"
+    )
+
+    assert synthesized is None
+    assert from_board is not None and from_board["split_fingerprint"] == "split-123"
+
+    nominated = _nominate(_structural_row(TWO_PART_STRATEGY, "receiving yards", slack=0.4))
+    assert [n["strategy_slug"] for n in nominated] == [TWO_PART_STRATEGY]
+
+
+def test_board_row_whose_identity_predates_the_current_spec_fails_closed():
+    """A stale implementation version is a hard error, never a silently walked nominee."""
+    row = _structural_row(TWO_PART_STRATEGY, "receiving yards")
+    row["strategy_implementation_version"] -= 1
+
+    with pytest.raises(ValueError, match="stale or mismatched strategy identity"):
+        _nominate(row)
+
+    rebuilt = _structural_row(TWO_PART_STRATEGY, "receiving yards")
+    rebuilt["matrix_hash"] = "matrix-rebuilt"
+    with pytest.raises(ValueError, match="stale or mismatched strategy identity"):
+        _nominate(rebuilt)

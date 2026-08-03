@@ -20,6 +20,7 @@ from sportstradamus.training.group_conditional_cdf._contracts import (
     TwoPartCalibrationFit,
 )
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_shared import (
+    _adapter_schema_version,
     _ks_uniform,
     _oof_brier_arrays,
     _validation_split_fingerprint,
@@ -57,6 +58,78 @@ def _explicit_quote_authenticity_mask(values, index: pd.Index) -> np.ndarray:
     if not series.isin(("authentic", "derived", "synthetic")).all():
         raise ValueError("quote authenticity contains an unsupported value")
     return series.eq("authentic").to_numpy(dtype=bool)
+
+
+def _required_series(
+    splits: dict, key: str, index: pd.Index, *, allow_missing: bool = False
+) -> pd.Series:
+    series = splits.get(key)
+    if series is None:
+        if allow_missing:
+            # A cell whose book coverage never triggered synthetic augmentation carries no
+            # ``Odds_synthetic``/``Archived`` column, so its split is absent; absent provenance
+            # reads as all-False (no synthetic row, nothing archived).
+            return pd.Series(False, index=index, dtype=bool)
+        raise ValueError(f"two-part candidate requires {key} provenance")
+    aligned = series.reindex(index)
+    if not allow_missing and aligned.isna().any():
+        raise ValueError(f"two-part candidate {key} does not align to its split")
+    return aligned
+
+
+def _two_part_authentic_mask(splits: dict, split: str, index: pd.Index) -> np.ndarray:
+    """Rows whose quote provenance explicitly says ``authentic``, however the matrix records it."""
+    if splits.get(f"quote_authenticity_{split}") is not None:
+        return _explicit_quote_authenticity_mask(
+            _required_series(splits, f"quote_authenticity_{split}", index), index
+        )
+    # Legacy matrices retain their old compatibility projection. New provenance-bearing
+    # matrices never infer authenticity from it.
+    return _explicit_boolean_mask(
+        _required_series(splits, f"archived_{split}", index, allow_missing=True), True
+    ) & _explicit_boolean_mask(
+        _required_series(splits, f"odds_synthetic_{split}", index, allow_missing=True), False
+    )
+
+
+def _two_part_support_rows(splits: dict, context: dict, index: pd.Index) -> tuple:
+    """The nested support audit's row inputs for one validation partition."""
+    result = splits["y_validation"]["Result"].reindex(index).to_numpy(dtype=float)
+    line = splits["B_validation"]["Line"].reindex(index).to_numpy(dtype=float)
+    positions = pd.to_numeric(
+        splits["X_validation"]["Player position"].reindex(index), errors="coerce"
+    ).to_numpy(dtype=float)
+    if not np.isfinite(positions).all():
+        raise ValueError("two-part candidate positions must be finite")
+    return (
+        result,
+        (result >= line).astype(float),
+        _two_part_authentic_mask(splits, "validation", index),
+        _required_series(splits, "players_validation", index).astype(str).to_numpy(),
+        context["routes"]["validation"].reindex(index).astype(str).to_numpy(),
+        positions.astype(int),
+        tuple(context["boundary_residual_positions"]),
+    )
+
+
+def pin_two_part_grouping(splits: dict, context: dict, partitions: list[pd.Index]) -> str:
+    """The one positive-map granularity every calibration-fit partition supports.
+
+    A cross-fit run refits the two-part calibrator on each fold's complement, and the support
+    audit's own ``role_by_position``/``role_only`` demotion is partition-dependent — letting it
+    run per fold would score folds that disagree about what the map is. Probing every partition
+    up front pins one grouping for all of them, or fails the corner when neither is universally
+    supported.
+    """
+    rows = [_two_part_support_rows(splits, context, index) for index in partitions]
+    for grouping in ("role_by_position", "role_only"):
+        try:
+            for partition in rows:
+                _two_part_nested_support_audit(*partition, pinned_grouping=grouping)
+        except ValueError:
+            continue
+        return grouping
+    raise ValueError("no two-part grouping is supported on every calibration-fit partition")
 
 
 def _two_part_gate_vector(value, length: int) -> np.ndarray:
@@ -250,22 +323,8 @@ def _step_apply_two_part_groupcdf_candidate(
     index_val = splits["X_validation"].index
     index_test = splits["X_test"].index
 
-    def _required_series(key: str, index: pd.Index, *, allow_missing: bool = False) -> pd.Series:
-        series = splits.get(key)
-        if series is None:
-            if allow_missing:
-                # A cell whose book coverage never triggered synthetic augmentation carries no
-                # ``Odds_synthetic``/``Archived`` column, so its split is absent; absent provenance
-                # reads as all-False (no synthetic row, nothing archived).
-                return pd.Series(False, index=index, dtype=bool)
-            raise ValueError(f"two-part candidate requires {key} provenance")
-        aligned = series.reindex(index)
-        if not allow_missing and aligned.isna().any():
-            raise ValueError(f"two-part candidate {key} does not align to its split")
-        return aligned
-
-    raw_players = _required_series("players_validation", index_val)
-    dates = pd.to_datetime(_required_series("dates_validation", index_val), errors="coerce")
+    raw_players = _required_series(splits, "players_validation", index_val)
+    dates = pd.to_datetime(_required_series(splits, "dates_validation", index_val), errors="coerce")
     player_missing = raw_players.astype(str).str.strip().isin(("", "nan", "None", "<NA>"))
     identity = pd.DataFrame({"Player": raw_players, "Date": dates}, index=index_val)
     if player_missing.any() or dates.isna().any() or identity.duplicated().any():
@@ -334,24 +393,8 @@ def _step_apply_two_part_groupcdf_candidate(
         mean_test, sigma_test, alpha_test, gate_test, np.floor(line_test + 1.0)
     )
 
-    if splits.get("quote_authenticity_validation") is not None:
-        authenticity_val = _required_series("quote_authenticity_validation", index_val)
-        authenticity_test = _required_series("quote_authenticity_test", index_test)
-        authentic_val = _explicit_quote_authenticity_mask(authenticity_val, index_val)
-        authentic_test = _explicit_quote_authenticity_mask(authenticity_test, index_test)
-    else:
-        # Legacy matrices retain their old compatibility projection. New
-        # provenance-bearing matrices never infer authenticity from it.
-        authentic_val = _explicit_boolean_mask(
-            _required_series("archived_validation", index_val, allow_missing=True), True
-        ) & _explicit_boolean_mask(
-            _required_series("odds_synthetic_validation", index_val, allow_missing=True), False
-        )
-        authentic_test = _explicit_boolean_mask(
-            _required_series("archived_test", index_test, allow_missing=True), True
-        ) & _explicit_boolean_mask(
-            _required_series("odds_synthetic_test", index_test, allow_missing=True), False
-        )
+    authentic_val = _two_part_authentic_mask(splits, "validation", index_val)
+    authentic_test = _two_part_authentic_mask(splits, "test", index_test)
     outcome = (result >= line_val).astype(float)
     residual_positions = tuple(context["boundary_residual_positions"])
     support_audit = _two_part_nested_support_audit(
@@ -362,6 +405,7 @@ def _step_apply_two_part_groupcdf_candidate(
         roles_val,
         positions_val,
         residual_positions,
+        pinned_grouping=context.get("pinned_grouping"),
     )
     fit = fit_two_part_groupcdf(
         result_upper,
@@ -414,7 +458,7 @@ def _step_apply_two_part_groupcdf_candidate(
             "receiving_candidate_calibration_payload": calibration_payload,
             "structural_routes": context["routes"],
             "structural_calibration_blob": {
-                "schema_version": 3,
+                "schema_version": _adapter_schema_version(TWO_PART_STRATEGY),
                 "slug": TWO_PART_STRATEGY,
                 "status": "active",
                 "kill_reason": None,

@@ -76,10 +76,13 @@ from sportstradamus.training.group_conditional_cdf._pipeline_steps_affine import
     _step_apply_affine_groupcdf_candidate,
 )
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_shared import (
+    STRUCTURAL_ROW_FIELDS,
+    _aligned_rows,
     _persist_structural_columns,
 )
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_two_part import (
     _step_apply_two_part_groupcdf_candidate,
+    pin_two_part_grouping,
 )
 from sportstradamus.training.hyperparams import _BoundedResponseFn, run_hyper_opt
 from sportstradamus.training.lineage import (
@@ -2365,15 +2368,8 @@ def _step_persist_artifacts(
     phi_test: np.ndarray | None,
     global_mean: float,
     denom_col: str,
-    pit_recal_blob: dict | None = None,
-    pit_recal_by_row: pd.Series | None = None,
-    prepool_over: np.ndarray | None = None,
-    receiving_calibration_payload: str | None = None,
-    receiving_f0: np.ndarray | None = None,
-    receiving_role: pd.Series | None = None,
-    receiving_position: pd.Series | None = None,
+    structural_rows: dict[str, pd.Series | None],
     structural_strategy: str = BASE_STRUCTURAL_STRATEGY,
-    structural_routes: dict[str, pd.Series] | None = None,
     artifact_output: Path | None = None,
 ) -> None:
     """Write the scorecard-shaped test-set CSV and the model pickle.
@@ -2420,21 +2416,19 @@ def _step_persist_artifacts(
         hist_gate=hist_gate,
     )
 
-    if pit_recal_by_row is not None:
-        aligned_maps = pit_recal_by_row.reindex(X_test.index)
-        if aligned_maps.isna().any():
-            raise ValueError("rowwise PIT recalibration maps do not align to test rows")
-        X_test["PITRecalKnots"] = aligned_maps.to_numpy()
-    elif pit_recal_blob is not None:
-        # §6.1 Rung C map, persisted as one constant JSON column so the CSV-only scorecard
-        # can apply g to the PIT before the Gate-4 KS (mirrors DenomCol/GlobalMean). Absent
-        # column => no warp => byte-identical to a pre-Rung-C cell.
-        X_test["PITRecalKnots"] = json.dumps(pit_recal_blob)
+    if structural_rows["pit_recal_by_row"] is not None:
+        # §6.1 Rung C map. One constant JSON payload from a whole-fit run, one payload per
+        # cross-fit fold otherwise, so the CSV-only scorecard can apply g to the PIT before
+        # the Gate-4 KS (mirrors DenomCol/GlobalMean). Absent column => no warp =>
+        # byte-identical to a pre-Rung-C cell.
+        X_test["PITRecalKnots"] = _aligned_rows(
+            structural_rows, "pit_recal_by_row", X_test.index
+        ).to_numpy()
 
     X_test["P"] = y_proba_filt[:, 1]
-    if prepool_over is not None:
-        prepool = np.asarray(prepool_over, dtype=float)
-        if prepool.shape != (len(X_test),) or not np.isfinite(prepool).all():
+    if structural_rows["prepool_over"] is not None:
+        prepool = _aligned_rows(structural_rows, "prepool_over", X_test.index).to_numpy(dtype=float)
+        if not np.isfinite(prepool).all():
             raise ValueError("pre-pool probability must be finite and row-aligned")
         X_test["P_PrePool"] = prepool
     # Pre-blend (model-only) over-probability — lets the offline scorecard report a
@@ -2450,13 +2444,7 @@ def _step_persist_artifacts(
     for column, value in artifact_identity_columns(filedict[MODEL_STRATEGY_MODEL_KEY]).items():
         X_test[column] = value
     _persist_structural_columns(
-        X_test,
-        structural_strategy=structural_strategy,
-        structural_routes=structural_routes,
-        receiving_calibration_payload=receiving_calibration_payload,
-        receiving_f0=receiving_f0,
-        receiving_role=receiving_role,
-        receiving_position=receiving_position,
+        X_test, structural_strategy=structural_strategy, rows=structural_rows
     )
 
     # Under --deterministic, redirect to a `deterministic/` subdir so the
@@ -3995,6 +3983,59 @@ def _structural_gate_inputs(
     }
 
 
+def _structural_rows(
+    structural_strategy: str, calibrated: dict, index: pd.Index
+) -> dict[str, pd.Series | None]:
+    """Every fit-dependent served value the CSV carries per row, as row-indexed Series.
+
+    One shape for all three paths — base, two-part, affine — so the cross-fit stitcher does
+    not have to know which method produced them; a field the active method never fits is
+    ``None``. The values are what the persisted CSV must show *per row*, which under
+    cross-fitting differs from the whole-fit constants the pickle keeps.
+    """
+    routes = calibrated.get("structural_routes")
+    rows: dict[str, pd.Series | None] = dict.fromkeys(STRUCTURAL_ROW_FIELDS)
+    rows["test_route"] = None if routes is None else routes["test"].reindex(index)
+    if structural_strategy == TWO_PART_STRATEGY:
+        test_output = calibrated["receiving_candidate_test"]
+        rows["prepool_over"] = pd.Series(test_output.candidate_over, index=index)
+        rows["two_part_calibration_by_row"] = pd.Series(
+            calibrated["receiving_candidate_calibration_payload"], index=index
+        )
+        rows["two_part_f0"] = pd.Series(calibrated["receiving_candidate_test_f0"], index=index)
+        rows["two_part_role"] = calibrated["receiving_candidate_test_role"]
+        rows["two_part_position"] = calibrated["receiving_candidate_test_position"]
+        return rows
+    if structural_strategy == AFFINE_STRATEGY:
+        rows["prepool_over"] = pd.Series(
+            calibrated["rushing_candidate_test"].candidate_over, index=index
+        )
+        rows["pit_recal_by_row"] = calibrated["structural_pit_maps"]
+        return rows
+    blob = calibrated.get("pit_recal_blob")
+    if blob is not None:
+        rows["pit_recal_by_row"] = pd.Series(json.dumps(blob), index=index)
+    return rows
+
+
+def _crossfit_structural_rows(
+    per_fold: list[dict], order: pd.Index, target: pd.Index
+) -> dict[str, pd.Series | None]:
+    """Stitch each fold's structural rows back into the caller's row order.
+
+    A field either has a fold-specific value everywhere or nowhere: a calibrator that
+    collapsed on one fold and not another would leave the frame half-warped, which reads as
+    a scored artifact rather than the failure it is.
+    """
+    rows: dict[str, pd.Series | None] = {}
+    for field in STRUCTURAL_ROW_FIELDS:
+        parts = [fold["structural_rows"][field] for fold in per_fold]
+        if any(part is None for part in parts) and any(part is not None for part in parts):
+            raise ValueError(f"cross-fit structural {field} collapsed on at least one fold")
+        rows[field] = _concat_folds(parts, order, target)
+    return rows
+
+
 def _step_calibrate_and_serve(
     splits: dict,
     preds: dict,
@@ -4077,6 +4118,9 @@ def _step_calibrate_and_serve(
         "prob_params": prob_params,
         "decoded": decoded,
         "fused": fused,
+        "structural_rows": _structural_rows(
+            structural_strategy, gate_inputs["calibrated"], splits["X_test"].index
+        ),
         "calibrated": gate_inputs["calibrated"],
         "y_proba_no_filt": gate_inputs["y_proba_no_filt"],
         "T_opt": gate_inputs["T_opt"],
@@ -4102,6 +4146,12 @@ def _calibration_folds(splits: dict) -> pd.Series:
         key = splits["dates_validation"]
     digest = pd.util.hash_pandas_object(key, index=False).to_numpy(dtype=np.uint64)
     return pd.Series(digest % _CALIBRATION_FOLDS, index=key.index)
+
+
+def _calibration_fit_partitions(splits: dict) -> list[pd.Index]:
+    """Every row set a cross-fit run fits a calibrator on: the whole frame, then each fold's rest."""
+    folds = _calibration_folds(splits)
+    return [folds.index, *(folds.index[folds.ne(fold)] for fold in sorted(folds.unique()))]
 
 
 def _fold_splits_view(splits: dict, fit_index, apply_index) -> dict:
@@ -4206,19 +4256,11 @@ def _step_crossfit_calibrate_and_serve(
     # The served rows ARE the validation rows here, so the out-of-fold probabilities
     # are also the honest validation-side numbers the skill metrics should report.
     served["val_calibrated"] = served["y_proba_filt"][:, 1]
-    # Gate 4 re-derives the PIT warp from the persisted column, so it has to be each
-    # row's own fold map — the whole-fit blob still rides the pickle as its constant,
-    # but scoring a row against a map fitted on it is the leak this mode removes.
-    blobs = [fold["calibrated"].get("pit_recal_blob") for fold in per_fold]
-    if any(blob is not None for blob in blobs):
-        if any(blob is None for blob in blobs):
-            raise ValueError("cross-fit PIT recalibration collapsed on at least one fold")
-        served["pit_recal_by_row"] = pd.concat(
-            [
-                pd.Series(json.dumps(blob), index=index)
-                for blob, index in zip(blobs, applied, strict=True)
-            ]
-        ).reindex(target)
+    # Every fit-dependent structural value the CSV shows becomes each row's own fold value —
+    # the PIT warp Gate 4 re-derives, the two-part calibration map, the pre-pool probability.
+    # The whole-fit blobs still ride the pickle as its constants, but scoring a row against
+    # state fitted on it is the leak this mode removes.
+    served["structural_rows"] = _crossfit_structural_rows(per_fold, order, target)
     return served
 
 
@@ -4383,14 +4425,6 @@ def train_market(
     with open(training_data_path, "rb") as matrix_stream:
         matrix_hash = hashlib.file_digest(matrix_stream, "sha256").hexdigest()
 
-    if holdout_blind and structural_strategy != BASE_STRUCTURAL_STRATEGY:
-        # A structural method derives its role support from validation row counts, so
-        # rotating folds under it would flip the method into its killed_fallback on
-        # some folds and not others — an incomparable score. Structural candidates keep
-        # their own preregistered evidence path until that support is made fold-stable.
-        raise ValueError(
-            f"--holdout-blind does not support structural strategy {structural_strategy!r}"
-        )
     splits = _step_build_splits(
         M,
         stat_data,
@@ -4400,12 +4434,20 @@ def train_market(
         holdout_blind=holdout_blind,
     )
     if structural_strategy == TWO_PART_STRATEGY:
+        # Routes, thresholds and gate rates come off the original train/full-validation
+        # split, so every calibration fold shares them. The positive-map granularity is the
+        # one piece the support audit would otherwise re-decide per fold, so a cross-fit run
+        # pins it across all of them up front.
         experiment_context = build_two_part_context(
             splits,
             league=league,
             market=market,
             slug=structural_strategy,
         )
+        if holdout_blind and experiment_context["status"] == "active":
+            experiment_context["pinned_grouping"] = pin_two_part_grouping(
+                splits, experiment_context, _calibration_fit_partitions(splits)
+            )
     elif structural_strategy in AFFINE_EXPERT_EXPERIMENTS:
         experiment_context = build_affine_expert_context(
             splits,
@@ -4705,23 +4747,8 @@ def train_market(
         phi_test=calibrated["phi_test"],
         global_mean=dist_info["global_mean"],
         denom_col=dist_info["denom_col"],
-        pit_recal_blob=calibrated.get("pit_recal_blob"),
-        pit_recal_by_row=served.get("pit_recal_by_row", calibrated.get("structural_pit_maps")),
-        prepool_over=(
-            calibrated["receiving_candidate_test"].candidate_over
-            if structural_strategy == TWO_PART_STRATEGY
-            else (
-                calibrated["rushing_candidate_test"].candidate_over
-                if structural_strategy == AFFINE_STRATEGY
-                else None
-            )
-        ),
-        receiving_calibration_payload=calibrated.get("receiving_candidate_calibration_payload"),
-        receiving_f0=calibrated.get("receiving_candidate_test_f0"),
-        receiving_role=calibrated.get("receiving_candidate_test_role"),
-        receiving_position=calibrated.get("receiving_candidate_test_position"),
+        structural_rows=served["structural_rows"],
         structural_strategy=structural_strategy,
-        structural_routes=calibrated.get("structural_routes"),
         artifact_output=artifact_output,
     )
 

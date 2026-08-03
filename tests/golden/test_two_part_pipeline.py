@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 from scipy.stats import skewnorm
 
 from sportstradamus.helpers import skewnormal_loc_from_mean
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_two_part import (
     _skewnormal_cdf_endpoints,
+    pin_two_part_grouping,
 )
 from sportstradamus.training.structural_context import build_two_part_context
 from sportstradamus.training.structural_strategies import ROLE_COLUMNS
@@ -79,3 +81,57 @@ def test_receiving_endpoint_helper_preserves_role_specific_zero_atom():
     assert upper[0] - lower[0] == gate[0]
     assert upper[1] == (gate[1] + (1.0 - gate[1]) * base[1])
     assert lower[1] == upper[1]
+
+
+def _supported_splits(rows: int, thin_position_positives: int | None = None):
+    """A validation frame dense enough to clear every two-part support floor.
+
+    ``thin_position_positives`` starves roster code 4 of positive rows, which is what makes
+    ``role_by_position`` unsupportable while ``role_only`` still holds.
+    """
+    rng = np.random.default_rng(11)
+    index = pd.Index(range(rows))
+    positions = np.resize(np.array([2, 3, 4]), rows)
+    roles = np.where(np.arange(rows) % 2 == 0, "low", "high")
+    result = rng.gamma(2.0, 6.0, rows)
+    result[rng.random(rows) < 0.25] = 0.0
+    if thin_position_positives is not None:
+        starved = np.flatnonzero(positions == 4)
+        result[starved[thin_position_positives:]] = 0.0
+    # The line sits at the median of the positive outcomes, which keeps both over/under classes
+    # populated for the temperature floors however many rows the starving above zeroed.
+    line = float(np.median(result[result > 0.0]))
+    splits = {
+        "X_validation": pd.DataFrame({"Player position": positions}, index=index),
+        "y_validation": pd.DataFrame({"Result": result}, index=index),
+        "B_validation": pd.DataFrame({"Line": np.full(rows, line)}, index=index),
+        "players_validation": pd.Series([f"player-{i % 400}" for i in range(rows)], index=index),
+        "quote_authenticity_validation": pd.Series("authentic", index=index),
+    }
+    context = {
+        "routes": {"validation": pd.Series(roles, index=index, dtype="object")},
+        "boundary_residual_positions": [],
+    }
+    return splits, context, index
+
+
+def test_pin_two_part_grouping_keeps_position_granularity_when_every_partition_supports_it():
+    splits, context, index = _supported_splits(3000)
+    partitions = [index, index[: int(len(index) * 0.8)], index[int(len(index) * 0.2) :]]
+
+    assert pin_two_part_grouping(splits, context, partitions) == "role_by_position"
+
+
+def test_pin_two_part_grouping_demotes_once_any_single_partition_cannot_hold_positions():
+    """One thin partition decides for all of them — folds may not each pick their own grouping."""
+    splits, context, index = _supported_splits(3000, thin_position_positives=40)
+    partitions = [index, index[: int(len(index) * 0.8)]]
+
+    assert pin_two_part_grouping(splits, context, partitions) == "role_only"
+
+
+def test_pin_two_part_grouping_fails_the_corner_when_neither_grouping_is_supported():
+    splits, context, index = _supported_splits(300)
+
+    with pytest.raises(ValueError, match="no two-part grouping is supported"):
+        pin_two_part_grouping(splits, context, [index])

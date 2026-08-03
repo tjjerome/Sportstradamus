@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from sportstradamus.training.calibration import DEFAULT_BLENDING as _DEFAULT_BLENDING
 from sportstradamus.training.structural_strategies import (
     AFFINE_STRATEGY,
     TWO_PART_STRATEGY,
@@ -248,7 +249,9 @@ def _yards(
 ) -> dict:
     return {
         "slug": slug,
-        "implementation_version": 1,
+        # v2: both methods hold their routing/expert set fixed across the holdout-blind
+        # calibration folds, so a v1 board row's score is not comparable to a v2 one.
+        "implementation_version": 2,
         "artifact_schema_version": schema,
         "family": "SkewNormal",
         "applicability": applicability,
@@ -274,12 +277,20 @@ def _yards(
     }
 
 
+# Artifact-schema versions of the two structural adapters, echoed into each fitted pickle's
+# ``structural_calibration`` wrapper (group_conditional_cdf._pipeline_steps_*) so the two can
+# never drift apart. Two-part is at 4 because its deterministic CSV now carries a row-specific
+# ``StructuralCalibration`` payload; affine is at 2, the generalized-routing schema it has
+# written since the QB/RB pilot was lifted.
+TWO_PART_ARTIFACT_SCHEMA_VERSION = 4
+AFFINE_ARTIFACT_SCHEMA_VERSION = 2
+
 BUILTIN_SPEC_DATA = (
     *_BASE_SPECS,
     *_COMPATIBILITY_SPECS,
     _yards(
         TWO_PART_STRATEGY,
-        3,
+        TWO_PART_ARTIFACT_SCHEMA_VERSION,
         (
             "StructuralAdapterStrategy",
             "StructuralRoute",
@@ -294,7 +305,7 @@ BUILTIN_SPEC_DATA = (
     ),
     _yards(
         AFFINE_STRATEGY,
-        1,
+        AFFINE_ARTIFACT_SCHEMA_VERSION,
         (
             "StructuralAdapterStrategy",
             "StructuralRoute",
@@ -309,11 +320,34 @@ BUILTIN_SPEC_DATA = (
     ),
 )
 
+# Corners the sweep must evaluate on the cell's *current* matrix before it spends a sampler
+# trial. Unlike CONFIRM_EVIDENCE_CORNERS these carry no independent full-HPO verdict, so
+# confirmation never synthesizes one: a mandatory corner reaches a walk only through the board
+# row its own evaluation writes. The three NFL cells below are the reachability-repair
+# acceptance set — each names the recipe whose evidence predates the current grid.
+MANDATORY_SWEEP_CORNERS: tuple[tuple[str, str, str, dict[str, str]], ...] = (
+    ("NFL", "receiving yards", TWO_PART_STRATEGY, _yards_controls(TWO_PART_STRATEGY)),
+    ("NFL", "rushing yards", AFFINE_STRATEGY, _yards_controls(AFFINE_STRATEGY)),
+    (
+        "NFL",
+        "passing yards",
+        "SkewNormal",
+        {
+            "dist": "SkewNormal",
+            "normalization": "ratio_meanyr",
+            "dist_training_loss": "crps",
+            "sn_param": "direct",
+            "blending_loss_fn": "nll",
+            "posthoc": "none",
+        },
+    ),
+)
+
 # Corners with an independent full-HPO six-gate pass, kept so the sweep can seed a cell with a
-# known-good recipe instead of rediscovering it. Registry validates each against its spec's grid
-# at import. NFL passing TDs: docs/handoffs/model_improvement_track.md, the 2026-07-20 NFL
-# popular-market re-baseline.
-SEED_CORNERS: tuple[tuple[str, str, str, dict[str, str]], ...] = (
+# known-good recipe instead of rediscovering it and so confirmation can nominate it directly.
+# Registry validates each against its spec's grid at import. NFL passing TDs:
+# docs/handoffs/model_improvement_track.md, the 2026-07-20 NFL popular-market re-baseline.
+CONFIRM_EVIDENCE_CORNERS: tuple[tuple[str, str, str, dict[str, str]], ...] = (
     (
         "NFL",
         "passing tds",
@@ -326,3 +360,39 @@ SEED_CORNERS: tuple[tuple[str, str, str, dict[str, str]], ...] = (
         },
     ),
 )
+
+# Effective historical behavior of each strategy's unpersisted controls — what a cell trained
+# with before the control became a swept axis, not the CLI's ``auto`` sentinel. Reconstructing an
+# incumbent from these (registry.incumbent_controls) is what keeps a cell whose stat_meta predates
+# the grid nominatable instead of silently absent. Structural strategies are fully described by
+# their fixed controls and need no entry.
+INCUMBENT_CONTROL_DEFAULTS: dict[str, dict[str, str]] = {
+    "SkewNormal": {
+        "normalization": "ratio_meanyr",
+        "dist_training_loss": "crps",
+        "sn_param": "direct",
+        "blending_loss_fn": _DEFAULT_BLENDING,
+        "posthoc": "none",
+    },
+    "Mixture": {
+        "normalization": "ratio_meanyr",
+        "blending_loss_fn": _DEFAULT_BLENDING,
+        "posthoc": "none",
+    },
+    "ZINB": {
+        "zinb_mode": "joint",
+        "count_dispersion_objective": "crps",
+        "blending_loss_fn": _DEFAULT_BLENDING,
+        "posthoc": "none",
+    },
+    "NegBin": {
+        "count_dispersion_objective": "crps",
+        "blending_loss_fn": _DEFAULT_BLENDING,
+        "posthoc": "none",
+    },
+    "DPO": {
+        "count_dispersion_objective": "crps",
+        "blending_loss_fn": _DEFAULT_BLENDING,
+        "posthoc": "none",
+    },
+}

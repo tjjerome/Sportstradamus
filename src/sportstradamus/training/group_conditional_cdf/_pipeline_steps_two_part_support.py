@@ -317,19 +317,26 @@ def _two_part_nested_support_audit(
     roles: np.ndarray,
     positions: np.ndarray,
     residual_positions,
+    pinned_grouping: str | None = None,
 ) -> dict:
-    """Audit every full/outer/inner Player-grouped partition used by two-part v3."""
+    """Audit every full/outer/inner Player-grouped partition used by two-part v3.
+
+    ``pinned_grouping`` forces one granularity instead of demoting to ``role_only`` when
+    ``role_by_position`` is unsupported: a cross-fit run pins one grouping across every
+    calibration-fit partition up front, so a fold may not quietly change it (and fails its
+    support guards instead).
+    """
     n_rows = len(result)
     all_rows = np.arange(n_rows)
 
     outer, top_partitions, fit_partitions, hold_partitions, required_fit = (
         _two_part_group_partitions(players, all_rows)
     )
+    grouping = pinned_grouping or "role_by_position"
     positive_support, positive_hold_support = _two_part_positive_support(
-        result, players, roles, positions, fit_partitions, hold_partitions
+        result, players, roles, positions, fit_partitions, hold_partitions, grouping
     )
-    grouping = "role_by_position"
-    if not (
+    if pinned_grouping is None and not (
         _positive_map_support_ok(positive_support, _TWO_PART_SUPPORT_FLOORS)
         and _positive_holds_nonempty(positive_hold_support)
     ):

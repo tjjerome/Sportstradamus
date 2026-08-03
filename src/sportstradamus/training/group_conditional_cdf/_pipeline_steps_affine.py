@@ -10,11 +10,11 @@ import pandas as pd
 from sportstradamus.training.group_conditional_cdf import fit_affine_groupcdf
 from sportstradamus.training.group_conditional_cdf._apply import apply_affine_groupcdf
 from sportstradamus.training.group_conditional_cdf._contracts import (
-    AFFINE_SCHEMA_VERSION,
     AffineCalibrationFit,
     AffinePredictive,
 )
 from sportstradamus.training.group_conditional_cdf._pipeline_steps_shared import (
+    _adapter_schema_version,
     _ks_uniform,
     _oof_brier_arrays,
     _validation_split_fingerprint,
@@ -254,7 +254,7 @@ def _step_apply_affine_groupcdf_candidate(
                 }
             ),
             "structural_calibration_blob": {
-                "schema_version": AFFINE_SCHEMA_VERSION,
+                "schema_version": _adapter_schema_version(AFFINE_STRATEGY),
                 "slug": AFFINE_STRATEGY,
                 "status": "active",
                 "kill_reason": None,

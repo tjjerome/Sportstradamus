@@ -30,6 +30,7 @@ import pytest
 from click.testing import CliRunner
 
 from sportstradamus.training.baselines import get_target_normalization
+from sportstradamus.training.calibration import DEFAULT_BLENDING
 from sportstradamus.training.markets import ALL_MARKETS
 from sportstradamus.training.model_strategy import (
     BASE_STRUCTURAL_STRATEGY,
@@ -56,7 +57,11 @@ from sportstradamus.training.model_strategy import (
     validate_strategy_frame,
     validate_strategy_selection,
 )
-from sportstradamus.training.model_strategy.specs import SEED_CORNERS
+from sportstradamus.training.model_strategy.specs import (
+    CONFIRM_EVIDENCE_CORNERS,
+    INCUMBENT_CONTROL_DEFAULTS,
+    MANDATORY_SWEEP_CORNERS,
+)
 from sportstradamus.training.posthoc import CDF_STAGE, POSTHOC_SLUGS, STRUCTURAL_STAGE
 from sportstradamus.training.role_specs import role_spec_for
 from sportstradamus.training.structural_strategies import (
@@ -67,12 +72,22 @@ from sportstradamus.training.structural_strategies import (
 )
 
 _MATRIX_SHA = "matrix-123"
+
+
+def _dpo_controls(dispersion: str, blending: str, posthoc: str) -> dict[str, str]:
+    return {
+        "dist": "DPO",
+        "count_dispersion_objective": dispersion,
+        "blending_loss_fn": blending,
+        "posthoc": posthoc,
+    }
+
 # Stands in for the per-cell trial ceiling wherever a test is not about the ceiling itself.
 _TIMEOUT = sweep._MEDITATE_TRIAL_TIMEOUT_S
-# The role×position two-part strategy is gated by the per-(league, market) role registry;
-# the NFL rushing-affine strategy is cell-pinned. A structural spec only *enrolls* for a cell whose
-# real matrix carries its grouping columns — the sweep then excludes it anyway, but the registry
-# tests still need the enrolled shape. These fixtures give each registered cell those columns.
+# The role×position two-part strategy is gated by the per-(league, market) role registry; the
+# affine strategy needs only a ``Player position`` column. A structural spec enrolls — and now
+# also ranks — only for a cell whose real matrix carries its grouping columns. These fixtures
+# give each registered cell those columns.
 _STRUCTURAL_CELL_COLUMNS = {
     ("NFL", "receiving yards"): frozenset(role_spec_for("NFL", "receiving yards").all_columns),
     ("NFL", "rushing yards"): frozenset(role_spec_for("NFL", "rushing yards").all_columns),
@@ -417,12 +432,13 @@ def test_cell_knobs_the_corner_does_not_decide_stay_out_of_every_base_corner():
 
 
 def test_seed_corners_are_registered_corners_of_their_named_spec():
-    """A seeded recipe is one with an independent full-HPO six-gate pass, kept so the board can
-    start from it. Drift between the seed and its family's declared grid fails loud at import;
-    this pins the same contract so an edit to either side is caught here too.
+    """Both seed registers name real cells and real corners of their declared family.
+
+    Drift between a seed and its family's declared grid fails loud at import; this pins the same
+    contract for both registers so an edit to either side is caught here too.
     """
-    assert SEED_CORNERS
-    for league, market, slug, controls in SEED_CORNERS:
+    assert MANDATORY_SWEEP_CORNERS and CONFIRM_EVIDENCE_CORNERS
+    for league, market, slug, controls in (*MANDATORY_SWEEP_CORNERS, *CONFIRM_EVIDENCE_CORNERS):
         assert market in ALL_MARKETS[league]
         assert controls in strategy_controls(get_strategy(slug))
 
@@ -698,9 +714,11 @@ def test_cell_families_admits_on_target_shape_not_the_stat_meta_class(monkeypatc
     assert sweep._cell_families("MLB", "pitcher strikeouts") == every_base
     # A SkewNormal-configured cell with an integer low-mean target still gets the count families.
     assert sweep._cell_families("WNBA", "AST") == every_base
+    # This cell's fake contract carries no columns, so neither structural spec is applicable.
     assert sweep._cell_families("NFL", "passing yards") == ("SkewNormal",)
-    # A non-integer target keeps the count families out even at a mean well under the ceiling.
-    assert sweep._cell_families("NFL", "receiving yards") == ("SkewNormal",)
+    # A non-integer target keeps the count families out even at a mean well under the ceiling;
+    # this cell does carry the structural columns, so both structural methods rank on it.
+    assert sweep._cell_families("NFL", "receiving yards") == ("SkewNormal", RECEIVING, RUSHING)
     with pytest.raises(click.UsageError):
         sweep._cell_families("MLB", "hits allowed")
     # --dist-class filters families, not cells: every eligible cell keeps only that class's pool.
@@ -709,13 +727,12 @@ def test_cell_families_admits_on_target_shape_not_the_stat_meta_class(monkeypatc
     assert sweep._cell_families("NFL", "passing yards", "count") == ()
 
 
-def test_cell_families_excludes_structural_specs_because_holdout_blind_refuses_them(monkeypatch):
-    """A structural method is enrolled for these cells yet never enters the sweep's family pool.
+def test_cell_families_carries_every_enrolled_structural_spec(monkeypatch):
+    """A structural method enrolled for a cell also ranks on it — the pool is applicability alone.
 
-    ``train_market`` raises under ``--holdout-blind`` for a structural strategy: its role support is
-    derived from validation row counts, so the folds would disagree about whether the method fell
-    back and the scored corner would not be the corner that trained. Both NFL yards cells enroll
-    both structural specs today, which makes them the cells where the exclusion has to bite.
+    Both methods now hold their routing fixed across the holdout-blind calibration folds, so the
+    scored corner is the corner that trained and there is nothing left to exclude. Both NFL yards
+    cells enroll both structural specs today, which makes them where the inclusion has to bite.
     """
     fake = {
         "NFL": {
@@ -732,7 +749,7 @@ def test_cell_families_excludes_structural_specs_because_holdout_blind_refuses_t
             )
         }
         assert {RECEIVING, RUSHING} <= enrolled
-        assert not {RECEIVING, RUSHING} & set(sweep._cell_families("NFL", market))
+        assert {RECEIVING, RUSHING} <= set(sweep._cell_families("NFL", market))
 
 
 def test_structural_strategies_are_market_agnostic_sweep_candidates():
@@ -838,10 +855,10 @@ def test_reachable_corners_on_the_live_nfl_matrices(monkeypatch):
     # declares 40 more but has no serve path, so SWEEP_CAPABILITIES keeps it out of the pool.
     tds = sweep._cell_context("NFL", "passing tds")
     assert tpe_search.reachable_corners(tds, sweep._cell_families("NFL", "passing tds")) == 272
-    # 192 + 40: the mean-226.7 target is over the count-admission ceiling, and the structural specs
-    # this cell enrolls are excluded from the sweep.
+    # 192 SkewNormal plus one fixed corner per enrolled structural spec: the mean-226.7 target is
+    # over the count-admission ceiling, so no count family reaches this cell.
     yards = sweep._cell_context("NFL", "passing yards")
-    assert tpe_search.reachable_corners(yards, sweep._cell_families("NFL", "passing yards")) == 192
+    assert tpe_search.reachable_corners(yards, sweep._cell_families("NFL", "passing yards")) == 194
 
 
 def test_decode_strategy_is_registered_norm_for_sn_and_none_for_count():
@@ -1024,13 +1041,13 @@ def test_run_and_score_records_inactive_explicit_strategy_but_not_other_identity
 def test_search_cell_samples_the_sn_grid_under_budget_and_ranks(monkeypatch):
     """The study ranks a budgeted sample of the family's reachable corners, best slack first.
 
-    ``_known_good_corners`` is stubbed empty so the suggestion sequence depends only on the seeded
+    ``_enqueued_corners`` is stubbed empty so the suggestion sequence depends only on the seeded
     sampler and the fake objective, not on whatever recipe stat_meta carries for the cell today;
     the enqueue path has its own test. With 21 evaluations of a 192-corner grid the sampler is
     expected to find the dominant normalization (worth +0.20 against 0.00 for the runner-up).
     """
     monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
-    monkeypatch.setattr(sweep, "_known_good_corners", lambda context: [])
+    monkeypatch.setattr(sweep, "_enqueued_corners", lambda context: [])
     monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
     board = sweep.search_cell("WNBA", "AST")
 
@@ -1060,12 +1077,12 @@ def test_search_cell_evaluates_the_seed_corner_first(monkeypatch):
     """
     seed = next(
         controls
-        for league, market, _, controls in SEED_CORNERS
+        for league, market, _, controls in CONFIRM_EVIDENCE_CORNERS
         if (league, market) == ("NFL", "passing tds")
     )
     context = sweep._cell_context("NFL", "passing tds")
-    known_good = [(spec.slug, corner) for spec, corner in sweep._known_good_corners(context)]
-    assert known_good.count(("DPO", seed)) == 1
+    enqueued = [(spec.slug, corner) for spec, corner in sweep._enqueued_corners(context)]
+    assert enqueued.count(("DPO", seed)) == 1
 
     trained = []
     monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("ZINB", "NegBin", "DPO"))
@@ -2143,7 +2160,7 @@ def test_search_cell_threads_ledger_discounts_into_the_board(monkeypatch, tmp_pa
 
     monkeypatch.setattr(sweep, "_ledger_gate_discounts", fake_discounts)
     monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
-    monkeypatch.setattr(sweep, "_known_good_corners", lambda context: [])
+    monkeypatch.setattr(sweep, "_enqueued_corners", lambda context: [])
     monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
     out = str(tmp_path / "board.csv")
 
@@ -2749,3 +2766,130 @@ def test_cell_verdict_names_the_outcome_for_a_parallel_run():
     empty = shipped.copy()
     empty["slack"] = [float("-inf")]
     assert sweep._cell_verdict(empty) == "no corners"
+
+
+# --- mandatory seeds and incumbent reconstruction ----------------------------------------------
+
+
+def test_mandatory_corners_lead_the_enqueue_order_ahead_of_evidence_and_the_incumbent(monkeypatch):
+    """A mandatory corner is evaluated first, then the proven evidence corner, then the incumbent.
+
+    The three acceptance cells declare recipes whose evidence predates the current matrix, so the
+    sweep has to re-measure them on it before a budgeted sampler is trusted to have considered
+    them. Assert each source's position, not the exact list — the incumbent is whatever the cell
+    last shipped.
+    """
+    monkeypatch.setattr(
+        sweep,
+        "load_stat_meta",
+        lambda path: {"NFL": {"passing yards": {"dist": "DPO", "posthoc": "roe_mean"}}},
+    )
+    mandatory = next(
+        (slug, controls)
+        for league, market, slug, controls in MANDATORY_SWEEP_CORNERS
+        if (league, market) == ("NFL", "passing yards")
+    )
+    monkeypatch.setattr(
+        sweep,
+        "CONFIRM_EVIDENCE_CORNERS",
+        (("NFL", "passing yards", "DPO", _dpo_controls("crps", "nll", "none")),),
+    )
+
+    enqueued = [
+        (spec.slug, corner)
+        for spec, corner in sweep._enqueued_corners(sweep._cell_context("NFL", "passing yards"))
+    ]
+
+    assert enqueued[0] == mandatory
+    assert enqueued[1] == ("DPO", _dpo_controls("crps", "nll", "none"))
+    # The stat_meta cell above reconstructs to the DPO/roe_mean incumbent, and it comes last.
+    assert enqueued[-1] == ("DPO", _dpo_controls("crps", "nll", "roe_mean"))
+    assert len(enqueued) == len(set(map(str, enqueued)))
+
+
+def test_mandatory_corner_identity_is_matrix_bound_so_a_rebuild_forces_reevaluation(monkeypatch):
+    """A seed declares a recipe, never an evaluation: the matrix hash is what a board row keys on."""
+    context = sweep._cell_context("NFL", "receiving yards")
+    rebuilt = CellContext(
+        context.league,
+        context.market,
+        context.distribution,
+        context.distribution_class,
+        context.data_columns,
+        "matrix-rebuilt",
+        context.target_is_integer,
+        context.global_mean,
+    )
+    spec, corner = sweep._enqueued_corners(context)[0]
+
+    assert spec.slug == RECEIVING
+    assert corner_fingerprint(spec, corner, str(context.matrix_sha256)) != corner_fingerprint(
+        spec, corner, str(rebuilt.matrix_sha256)
+    )
+    # Same recipe, same matrix ⇒ the same row an exact resume reuses.
+    assert corner_fingerprint(spec, corner, str(context.matrix_sha256)) == corner_fingerprint(
+        *sweep._enqueued_corners(rebuilt)[0], str(context.matrix_sha256)
+    )
+
+
+@pytest.mark.parametrize(
+    ("cell", "expected"),
+    [
+        # Legacy passing-yards metadata: only the family and its transform were ever persisted.
+        (
+            {"dist": "SkewNormal", "target_normalization": "ratio_meanyr"},
+            {
+                "dist": "SkewNormal",
+                "normalization": "ratio_meanyr",
+                "dist_training_loss": "crps",
+                "sn_param": "direct",
+                "blending_loss_fn": "nll",
+                "posthoc": "none",
+            },
+        ),
+        # An explicitly persisted value always beats the historical default.
+        (
+            {"dist": "SkewNormal", "target_normalization": "ratio_meanyr", "sn_param": "centered"},
+            {
+                "dist": "SkewNormal",
+                "normalization": "ratio_meanyr",
+                "dist_training_loss": "crps",
+                "sn_param": "centered",
+                "blending_loss_fn": "nll",
+                "posthoc": "none",
+            },
+        ),
+        # The count families' defaults reproduce what the CLI resolves for an unset knob.
+        (
+            {"dist": "ZINB"},
+            {
+                "dist": "ZINB",
+                "zinb_mode": "joint",
+                "count_dispersion_objective": "crps",
+                "blending_loss_fn": "nll",
+                "posthoc": "none",
+            },
+        ),
+        # An explicit value the grid no longer carries yields no incumbent, never a rewrite.
+        ({"dist": "SkewNormal", "target_normalization": "retired_slug"}, None),
+    ],
+)
+def test_incumbent_reconstruction_fills_unpersisted_controls_from_historical_defaults(
+    monkeypatch, cell, expected
+):
+    monkeypatch.setattr(sweep, "load_stat_meta", lambda path: {"WNBA": {"AST": cell}})
+
+    incumbent = sweep._incumbent_corner(sweep._cell_context("WNBA", "AST"))
+
+    assert (None if incumbent is None else incumbent[1]) == expected
+
+
+def test_incumbent_control_defaults_reproduce_the_meditate_cli_fallbacks():
+    """The defaults are the CLI's own ``auto`` fallbacks, so a reconstruction is not a guess."""
+    assert INCUMBENT_CONTROL_DEFAULTS["SkewNormal"]["blending_loss_fn"] == DEFAULT_BLENDING
+    assert INCUMBENT_CONTROL_DEFAULTS["ZINB"]["zinb_mode"] == "joint"
+    assert INCUMBENT_CONTROL_DEFAULTS["SkewNormal"]["sn_param"] == "direct"
+    assert INCUMBENT_CONTROL_DEFAULTS["DPO"]["count_dispersion_objective"] == "crps"
+    for slug, defaults in INCUMBENT_CONTROL_DEFAULTS.items():
+        assert defaults["posthoc"] == "none"
+        assert get_strategy(slug).is_structural is False

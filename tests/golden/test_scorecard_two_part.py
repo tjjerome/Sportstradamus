@@ -204,7 +204,7 @@ def test_load_test_set_rejects_inactive_or_mismatched_structural_identity(tmp_pa
 
 
 
-def test_load_test_set_rejects_nonconstant_or_wrong_schema_receiving_blob(tmp_path):
+def test_load_test_set_rejects_missing_or_wrong_schema_receiving_blob(tmp_path):
     frame = _candidate_frame()
     frame.loc[0, "StructuralAdapterStrategy"] = "none"
     path = tmp_path / "nonconstant-experiment.csv"
@@ -213,10 +213,10 @@ def test_load_test_set_rejects_nonconstant_or_wrong_schema_receiving_blob(tmp_pa
         load_test_set(path, "Blended_EV")
 
     frame = _candidate_frame()
-    frame.loc[0, "StructuralCalibration"] += " "
-    path = tmp_path / "nonconstant.csv"
+    frame.loc[0, "StructuralCalibration"] = None
+    path = tmp_path / "missing-payload.csv"
     frame.to_csv(path, index=False)
-    with pytest.raises(ValueError, match="one constant nonmissing JSON"):
+    with pytest.raises(ValueError, match="nonmissing JSON value on every row"):
         load_test_set(path, "Blended_EV")
 
     frame = _candidate_frame()
@@ -339,3 +339,49 @@ def test_diff_cli_rejects_mixed_legacy_and_generic_identity(tmp_path):
 
     assert result.exit_code != 0
     assert "cannot mix legacy and generic strategy identities" in result.output
+
+
+def test_row_specific_calibration_payloads_score_each_row_against_its_own_fold_map():
+    """A cross-fit artifact carries one payload per fold; each row is scored under its own.
+
+    Splitting the frame's rows across two maps must reproduce, row for row, what scoring each
+    half under its own constant-payload frame produces — that is what makes a cross-fit board
+    row and a full-HPO one the same statistic.
+    """
+    frame = _candidate_frame()
+    actual = frame["Result"].to_numpy(dtype=float)
+    flat = _calibration_blob()
+    flat["cdf"]["positive"] = {group: _identity_map(0.0) for group in flat["cdf"]["positive"]}
+    payloads = np.where(
+        np.arange(len(frame)) < 3,
+        frame["StructuralCalibration"].iloc[0],
+        receiving.serialize_two_part_calibration(flat),
+    )
+    mixed = frame.assign(StructuralCalibration=payloads)
+
+    scored = np.asarray(_randomized_pit_draws(mixed, "SkewNormal", actual, strategy="none"))
+    curved = np.asarray(_randomized_pit_draws(frame, "SkewNormal", actual, strategy="none"))
+    flat_only = np.asarray(
+        _randomized_pit_draws(
+            frame.assign(StructuralCalibration=payloads[-1]), "SkewNormal", actual, strategy="none"
+        )
+    )
+
+    np.testing.assert_array_equal(scored[:, :3], curved[:, :3])
+    np.testing.assert_array_equal(scored[:, 3:], flat_only[:, 3:])
+    assert not np.array_equal(curved[:, 3:], flat_only[:, 3:])
+
+
+def test_row_specific_payloads_load_and_validate_every_distinct_blob(tmp_path):
+    """Load-time validation is per payload, so a bad fold map fails closed like a bad constant."""
+    frame = _candidate_frame()
+    broken = json.loads(frame["StructuralCalibration"].iloc[0])
+    broken["schema_version"] = 99
+    frame["StructuralCalibration"] = np.where(
+        np.arange(len(frame)) < 3, frame["StructuralCalibration"], json.dumps(broken)
+    )
+    path = tmp_path / "one-bad-fold.csv"
+    frame.to_csv(path, index=False)
+
+    with pytest.raises(ValueError, match="unknown two-part calibration blob kind or schema"):
+        load_test_set(path, "Blended_EV")

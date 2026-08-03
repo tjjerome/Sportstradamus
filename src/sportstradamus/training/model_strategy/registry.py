@@ -14,7 +14,12 @@ import json
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 
-from sportstradamus.training.model_strategy.specs import BUILTIN_SPEC_DATA, SEED_CORNERS
+from sportstradamus.training.model_strategy.specs import (
+    BUILTIN_SPEC_DATA,
+    CONFIRM_EVIDENCE_CORNERS,
+    INCUMBENT_CONTROL_DEFAULTS,
+    MANDATORY_SWEEP_CORNERS,
+)
 from sportstradamus.training.role_specs import role_spec_for
 
 BASE_STRUCTURAL_STRATEGY = "none"
@@ -209,9 +214,43 @@ def strategy_controls(spec: StrategySpec) -> tuple[dict[str, str], ...]:
     )
 
 
-for _league, _market, _slug, _controls in SEED_CORNERS:
+for _league, _market, _slug, _controls in (*MANDATORY_SWEEP_CORNERS, *CONFIRM_EVIDENCE_CORNERS):
     if _controls not in strategy_controls(get_strategy(_slug)):
         raise ValueError(f"{_slug}: seed corner for {_league} {_market} is not a registered corner")
+
+for _slug, _defaults in INCUMBENT_CONTROL_DEFAULTS.items():
+    _spec = get_strategy(_slug)
+    _reachable = {name: set(values) for name, values in _spec.axes.items()}
+    if any(
+        value not in _reachable.get(name, {_spec.fixed_controls.get(name)})
+        for name, value in _defaults.items()
+    ):
+        raise ValueError(f"{_slug}: incumbent control default is not a reachable control value")
+
+
+def incumbent_controls(
+    spec: StrategySpec, persisted: Mapping[str, object]
+) -> dict[str, str] | None:
+    """A cell's persisted recipe completed into a registered corner, or ``None`` if it isn't one.
+
+    Resolution order is fixed controls, then explicit persisted values, then the strategy's
+    historical effective defaults (:data:`specs.INCUMBENT_CONTROL_DEFAULTS`) for whatever the cell
+    never wrote down. An explicit value is never coerced: a cell carrying one the current grid
+    dropped yields no incumbent rather than a silently rewritten recipe.
+    """
+    controls = dict(spec.fixed_controls)
+    controls.update(
+        {
+            control: str(persisted[field])
+            for control, field in spec.persist.items()
+            if persisted.get(field) is not None
+        }
+    )
+    defaults = INCUMBENT_CONTROL_DEFAULTS.get(spec.slug, {})
+    for name in (*spec.fixed_controls, *spec.axes):
+        if name not in controls and name in defaults:
+            controls[name] = defaults[name]
+    return controls if controls in strategy_controls(spec) else None
 
 
 def controls_json(controls: Mapping[str, object]) -> str:

@@ -165,6 +165,7 @@ def test_persist_converts_internal_book_over_to_scorecard_under(monkeypatch, tmp
         phi_test=None,
         global_mean=5.0,
         denom_col="MeanYr",
+        structural_rows=dict.fromkeys(pipe.STRUCTURAL_ROW_FIELDS),
     )
 
     persisted = pd.read_csv(tmp_path / "test_sets" / "NFL_artifact_parity.csv")

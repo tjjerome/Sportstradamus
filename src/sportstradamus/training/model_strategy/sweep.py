@@ -75,6 +75,7 @@ from sportstradamus.training.model_strategy.registry import (
     corner_fingerprint,
     distribution_class,
     get_strategy,
+    incumbent_controls,
     meditate_command,
     parse_controls,
     strategies_for_cell,
@@ -82,7 +83,10 @@ from sportstradamus.training.model_strategy.registry import (
     strategy_controls,
     strategy_persistence_edits,
 )
-from sportstradamus.training.model_strategy.specs import SEED_CORNERS
+from sportstradamus.training.model_strategy.specs import (
+    CONFIRM_EVIDENCE_CORNERS,
+    MANDATORY_SWEEP_CORNERS,
+)
 from sportstradamus.training.model_strategy.tpe_search import (
     MAX_TRIALS_PER_CELL,
     TRAINED_TRIAL_ATTR,
@@ -370,19 +374,18 @@ def _cell_families(league: str, market: str, dist_class: str = _DIST_CLASS_ALL) 
     with the class unlocked, a count family can win on a cell whose stat_meta names a continuous one,
     so which cells are eligible no longer follows from the recipe the cell happens to carry today.
 
-    Structural methods are excluded outright: they derive their role support from validation row
-    counts, so ``train_market`` refuses them under ``--holdout-blind`` rather than score folds that
-    silently disagree about whether the method fell back. They stay selectable in production through
-    the ``posthoc`` pool and keep their own preregistered evidence path; this sweep cannot rank them
-    until that support is made fold-stable.
+    Structural methods rank here like any other family. They hold their routing and expert set fixed
+    across the calibration folds (``pipeline.train_market``), so a fold can no longer disagree about
+    whether the method fell back; an unsupported cell fails the corner rather than scoring a pooled
+    fallback under a structural identity. Applicability still gates them — the role registry for
+    two-part, a ``Player position`` column for affine.
     """
     return tuple(
         spec.slug
         for spec in strategies_for_cell(
             _cell_context(league, market), required_capabilities=SWEEP_CAPABILITIES
         )
-        if not spec.is_structural
-        and dist_class in (_DIST_CLASS_ALL, distribution_class(spec.family))
+        if dist_class in (_DIST_CLASS_ALL, distribution_class(spec.family))
     )
 
 
@@ -694,41 +697,69 @@ def _run_and_score(
     return row
 
 
-def _known_good_corners(context: CellContext) -> list[tuple[StrategySpec, dict[str, str]]]:
-    """The cell's stat_meta incumbent plus every seed corner registered for it.
-
-    Both are enqueued ahead of the sampler so a budgeted search always evaluates the do-nothing
-    baseline and any recipe already proven under full HPO, rather than hoping TPE rediscovers them.
-    Confirm reuses this as its seed/incumbent nomination source.
-
-    A structural incumbent is excluded: this sweep cannot rank it (see :func:`_cell_families`), and
-    confirm cannot nominate it either — a structural artifact's split fingerprint only exists after
-    the retrain, so a synthesized nominee would carry ``None`` and fail its own identity check.
-    """
-    candidates = [
+def _declared_corners(
+    declarations: tuple[tuple[str, str, str, dict[str, str]], ...], context: CellContext
+) -> list[tuple[StrategySpec, dict[str, str]]]:
+    """The seed declarations registered for this exact cell, resolved to their specs."""
+    return [
         (get_strategy(slug), dict(controls))
-        for league, market, slug, controls in SEED_CORNERS
+        for league, market, slug, controls in declarations
         if (league, market) == (context.league, context.market)
     ]
+
+
+def _deduplicated(
+    context: CellContext, candidates: list[tuple[StrategySpec, dict[str, str]]]
+) -> list[tuple[StrategySpec, dict[str, str]]]:
+    """Order-preserving dedup on the matrix-bound corner fingerprint.
+
+    A cell that already ships its seed recipe declares the same corner twice; the fingerprint
+    carries the matrix hash, so the same recipe against a rebuilt matrix is a new corner.
+    """
+    seen: set[str] = set()
+    unique = []
+    for spec, corner in candidates:
+        fingerprint = corner_fingerprint(spec, corner, str(context.matrix_sha256))
+        if fingerprint not in seen:
+            seen.add(fingerprint)
+            unique.append((spec, corner))
+    return unique
+
+
+def _seed_corners(context: CellContext) -> list[tuple[StrategySpec, dict[str, str]]]:
+    """The cell's independently proven recipes, then its reconstructed stat_meta incumbent.
+
+    These are the corners confirmation may nominate without a board row behind them: each
+    carries full-HPO evidence of its own, or is what the cell serves today. Confirm's seed lane
+    reads this directly.
+    """
+    candidates = _declared_corners(CONFIRM_EVIDENCE_CORNERS, context)
     incumbent = _incumbent_corner(context)
     if incumbent is not None:
         candidates.append(incumbent)
-    # A cell that already ships its seed recipe yields the same corner twice.
-    seen: set[str] = set()
-    known = []
-    for spec, corner in candidates:
-        fingerprint = corner_fingerprint(spec, corner, str(context.matrix_sha256))
-        if fingerprint not in seen and not spec.is_structural:
-            seen.add(fingerprint)
-            known.append((spec, corner))
-    return known
+    return _deduplicated(context, candidates)
+
+
+def _enqueued_corners(context: CellContext) -> list[tuple[StrategySpec, dict[str, str]]]:
+    """Every corner the sweep evaluates ahead of the sampler, in enqueue order.
+
+    Mandatory cell corners lead — a recipe whose evidence predates the current matrix has to be
+    re-measured on it before a budgeted search can be said to have considered it — then the
+    confirm-evidence corners, then the incumbent. Enqueuing all three beats hoping TPE
+    rediscovers them at ~15% grid coverage.
+    """
+    return _deduplicated(
+        context, _declared_corners(MANDATORY_SWEEP_CORNERS, context) + _seed_corners(context)
+    )
 
 
 def _incumbent_corner(context: CellContext) -> tuple[StrategySpec, dict[str, str]] | None:
     """The cell's current stat_meta recipe read back as a registered corner, if it still is one.
 
-    Returns ``None`` when the live recipe predates the current grid — a cell whose persisted fields
-    no longer name a registered corner has nothing to enqueue, and the sampler covers it.
+    Controls the cell never persisted are filled from the strategy's historical effective
+    defaults, so a recipe that predates a control becoming a swept axis still reconstructs.
+    Returns ``None`` only when an explicitly persisted value has left the grid — the sampler
+    covers that cell instead.
     """
     meta = load_stat_meta(pathlib.Path(str(STAT_META_PATH)))
     cell = meta.get(context.league, {}).get(context.market, {})
@@ -737,15 +768,8 @@ def _incumbent_corner(context: CellContext) -> tuple[StrategySpec, dict[str, str
         spec = get_strategy(str(slug))
     except ValueError:
         return None
-    corner = {
-        **spec.fixed_controls,
-        **{
-            control: str(cell[field])
-            for control, field in spec.persist.items()
-            if cell.get(field) is not None
-        },
-    }
-    return (spec, corner) if corner in strategy_controls(spec) else None
+    controls = incumbent_controls(spec, cell)
+    return None if controls is None else (spec, controls)
 
 
 def search_cell(
@@ -781,7 +805,7 @@ def search_cell(
     discounts = _ledger_gate_discounts(out)
     timeout_s = _cell_timeout_seconds(out, league, market)
     study = cell_study(league, market, families)
-    for spec, corner in _known_good_corners(context):
+    for spec, corner in _enqueued_corners(context):
         params = enqueue_params(context, spec, corner)
         if params is not None and spec.slug in families:
             study.enqueue_trial(params, skip_if_exists=True)

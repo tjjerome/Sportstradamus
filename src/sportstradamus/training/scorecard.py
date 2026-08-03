@@ -536,9 +536,7 @@ def _priced_rows(df: pd.DataFrame) -> pd.DataFrame | None:
         allowed = ("authentic", "derived", "synthetic")
         if not sub["QuoteAuthenticity"].isin(allowed).all():
             raise ValueError("scorecard received invalid quote authenticity")
-        sub = sub.loc[sub["QuoteAuthenticity"].eq("authentic")].drop(
-            columns="QuoteAuthenticity"
-        )
+        sub = sub.loc[sub["QuoteAuthenticity"].eq("authentic")].drop(columns="QuoteAuthenticity")
     return sub if len(sub) else None
 
 
@@ -1135,8 +1133,13 @@ def _tail_ks_uniform(values: np.ndarray, floor: float = _TAIL_PIT_FLOOR) -> floa
 
 def _two_part_contract(
     df: pd.DataFrame,
-) -> tuple[Mapping[str, object], np.ndarray, np.ndarray, np.ndarray] | None:
-    """Validate and decode the two-part row contract when it is present."""
+) -> tuple[dict[str, Mapping[str, object]], pd.Series, np.ndarray, np.ndarray, np.ndarray] | None:
+    """Validate and decode the two-part row contract when it is present.
+
+    The calibration payload is validated per row rather than as one cell-level constant:
+    ordinary full-HPO training writes one fit to every row, while a cross-fit run writes each
+    row the fit that never saw it. Both are the same contract at the row level.
+    """
     # style: allow-complexity — flat row-contract validator; each branch is one
     # distinct contract rule, so splitting would only scatter the checks.
     identity, _ = validate_strategy_frame(df)
@@ -1147,9 +1150,10 @@ def _two_part_contract(
     if missing:
         raise ValueError(f"two-part scorecard contract missing columns: {sorted(missing)}")
     calibration = df[_STRUCTURAL_CALIBRATION_COL]
-    if calibration.isna().any() or calibration.astype(str).nunique() != 1:
-        raise ValueError("StructuralCalibration must be one constant nonmissing JSON value")
-    blob = deserialize_two_part_calibration(str(calibration.iloc[0]))
+    if calibration.isna().any():
+        raise ValueError("StructuralCalibration must carry a nonmissing JSON value on every row")
+    payloads = calibration.astype(str)
+    blobs = {payload: deserialize_two_part_calibration(payload) for payload in payloads.unique()}
 
     roles = df[_STRUCTURAL_ROLE_COL].to_numpy()
     if (
@@ -1181,7 +1185,7 @@ def _two_part_contract(
         gate = pd.to_numeric(df["Gate"], errors="coerce").to_numpy(dtype=float)
         if not np.isfinite(gate).all() or np.any((gate < 0.0) | (gate >= 1.0)):
             raise ValueError("two-part Gate must be finite and lie in [0, 1)")
-    return blob, f0, roles.astype(str), positions
+    return blobs, payloads, f0, roles.astype(str), positions
 
 
 def _two_part_cdf_endpoints(
@@ -1200,7 +1204,7 @@ def _two_part_cdf_endpoints(
     if "PITRecalKnots" in df.columns:
         raise ValueError("two-part must use StructuralCalibration, not PITRecalKnots")
 
-    blob, persisted_f0, roles, positions = contract
+    blobs, payloads, persisted_f0, roles, positions = contract
     raw_f0, _ = _pred_cdf_pmf(
         df,
         dist,
@@ -1212,14 +1216,21 @@ def _two_part_cdf_endpoints(
 
     raw_upper, raw_mass = _pred_cdf_pmf(df, dist, y, strategy=strategy)
     raw_lower = raw_upper - raw_mass
-    return two_part_cdf_endpoints(
-        blob,
-        raw_lower,
-        raw_upper,
-        persisted_f0,
-        roles,
-        positions,
-    )
+    lower = np.empty(len(df), dtype=float)
+    upper = np.empty(len(df), dtype=float)
+    # Each distinct payload applies only to the rows it was fitted without: one pass on a
+    # full-HPO artifact, one per fold on a cross-fit one.
+    for payload, blob in blobs.items():
+        rows = payloads.eq(payload).to_numpy()
+        lower[rows], upper[rows] = two_part_cdf_endpoints(
+            blob,
+            raw_lower[rows],
+            raw_upper[rows],
+            persisted_f0[rows],
+            roles[rows],
+            positions[rows],
+        )
+    return lower, upper
 
 
 def _apply_pit_recal_by_row(df: pd.DataFrame, values: np.ndarray) -> np.ndarray:
