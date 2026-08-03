@@ -57,10 +57,13 @@
             "blending": "crps"
         },
         "FTM": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "NegBin",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "prob_recal_platt",
+            "count_dispersion_objective": "crps",
+            "blending": "nll",
+            "hpo_selection": "calibrated"
         },
         "MIN": {
             "dist": "SkewNormal",
@@ -114,7 +117,8 @@
             "dist": "SkewNormal",
             "shipped": "devel",
             "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "posthoc": "none",
+            "hpo_selection": "calibrated"
         },
         "STL": {
             "dist": "DPO",
@@ -208,16 +212,22 @@
             "blending": "nll"
         },
         "qb tds": {
-            "dist": "ZINB",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
+            "dist": "SkewNormal",
+            "shipped": "devel",
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "cdf_recal_isotonic",
+            "dist_training_loss": "nll",
+            "sn_param": "direct",
+            "blending": "nll"
         },
         "qb yards": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_eb_meanyr_k10",
+            "posthoc": "isotonic_mean",
+            "dist_training_loss": "crps",
+            "sn_param": "centered",
+            "blending": "nll"
         },
         "receiving tds": {
             "dist": "ZINB",
@@ -440,10 +450,12 @@
             "count_dispersion_objective": "pit_ks"
         },
         "FG3M": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "isotonic_mean",
+            "count_dispersion_objective": "pit_ks",
+            "blending": "nll"
         },
         "FGA": {
             "dist": "SkewNormal",
@@ -522,12 +534,12 @@
         },
         "TOV": {
             "dist": "DPO",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none",
+            "posthoc": "prob_recal_platt",
             "count_dispersion_objective": "pit_ks",
             "zinb_mode": "hurdle",
-            "blending": "nll"
+            "blending": "crps"
         },
         "fantasy points prizepicks": {
             "dist": "SkewNormal",
@@ -563,10 +575,13 @@
         },
         "hits allowed": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "ratio_meanyr",
-            "posthoc": "none",
-            "blending": "crps"
+            "posthoc": "prob_recal_platt",
+            "blending": "nll",
+            "dist_training_loss": "nll",
+            "sn_param": "centered",
+            "hpo_selection": "calibrated"
         },
         "hits+runs+rbi": {
             "dist": "DPO",
@@ -596,9 +611,12 @@
         },
         "pitcher fantasy points underdog": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "none",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "prob_recal_platt",
+            "dist_training_loss": "nll",
+            "sn_param": "direct",
+            "blending": "crps"
         },
         "pitcher strikeouts": {
             "dist": "SkewNormal",
@@ -657,12 +675,12 @@
             "blending": "crps"
         },
         "stolen bases": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "NegBin",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none",
+            "posthoc": "prob_recal_platt",
             "zinb_mode": "hurdle",
-            "count_dispersion_objective": "crps",
+            "count_dispersion_objective": "pit_ks",
             "blending": "nll"
         },
         "total bases": {

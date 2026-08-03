@@ -68,7 +68,7 @@ def test_skewnormal_even_money_book_is_neutral(league, market, line):
     assert p_under == pytest.approx(0.5, abs=0.02)
 
 
-@pytest.mark.parametrize("league,market,line", [("NBA", "FTM", 0.5), ("WNBA", "FG3M", 0.5)])
+@pytest.mark.parametrize("league,market,line", [("WNBA", "FTM", 0.5), ("NBA", "OREB", 0.5)])
 def test_zinb_even_money_book_not_overconfident(league, market, line):
     """A high-zero-rate ZINB count at a 0.5 line must not manufacture a wildly
     overconfident Under from the round trip.
@@ -76,6 +76,12 @@ def test_zinb_even_money_book_not_overconfident(league, market, line):
     The structural zero rate floors P(under) near the gate so it cannot reach
     exactly 0.5, but it must be far below the ~0.82 the broken round trip
     produced (`get_ev` returned the bare line, `get_odds` re-added the full gate).
+
+    The cells are named rather than discovered, so a sweep that flips one to
+    another count family (NBA FTM → NegBin, WNBA FG3M → DPO both did) fails the
+    `dist` assertion below. Repoint at a ZINB cell whose zero rate is near 0.45:
+    a correct round trip returns ~`max(0.5, zero_rate)`, so above ~0.6 the floor
+    alone clears 0.65 and the bar stops testing the double-gate it was written for.
     """
     dist, cv, gate, step = _book_cell_params(league, market)
     assert dist == "ZINB"

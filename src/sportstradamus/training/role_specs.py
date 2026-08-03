@@ -168,6 +168,7 @@ _NFL_CELLS: dict[str, RoleSpec] = {
     "passing first downs": RoleSpec(_NFL_PASS_VOLUME, _NFL_QB_USAGE, _NFL_PASS_EFFICIENCY),
     "attempts": RoleSpec(_NFL_PASS_VOLUME, _NFL_QB_USAGE),
     "completions": RoleSpec(_NFL_PASS_VOLUME, _NFL_QB_USAGE),
+    "qb tds": RoleSpec(_NFL_PASS_VOLUME, _NFL_QB_USAGE),
     "sacks taken": RoleSpec(_NFL_PASS_VOLUME, _NFL_QB_USAGE),
     "rushing yards": RoleSpec(
         _NFL_RUN_VOLUME,
