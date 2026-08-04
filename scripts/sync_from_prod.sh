@@ -84,7 +84,7 @@ run rsync -a --partial --timeout="$RSYNC_TIMEOUT" -e "$RSYNC_SSH" \
 # 4. Pull data/runtime/ (update, never delete dev-only files). Runtime files are
 #    written atomically on prod, so a live read returns complete files.
 run mkdir -p "$LOCAL_DIR/$RUNTIME_REL"
-run rsync -a --timeout="$RSYNC_TIMEOUT" -e "$RSYNC_SSH" \
+run rsync -au --timeout="$RSYNC_TIMEOUT" -e "$RSYNC_SSH" \
     "$PROD_SSH:$PROD_DIR/$RUNTIME_REL/" "$LOCAL_DIR/$RUNTIME_REL/"
 
 # 5. Fold prod's rows into dev's archive losslessly. Run from the repo root so

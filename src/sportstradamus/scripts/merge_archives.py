@@ -17,7 +17,8 @@ target with a not-yet-migrated source — see ``_odds_select``.
 
 The source is attached read-only and never modified. The target is rebuilt in
 place (a timestamped ``.bak-<epoch>`` is written first) unless ``--output``
-directs the union to a fresh file instead.
+directs the union to a fresh file instead. The CLI holds ``scripts/run_job.sh``'s
+shared archive flock, so an in-place rebuild serializes against a live cron write.
 
 Usage
 -----
@@ -36,6 +37,8 @@ from pathlib import Path
 import click
 import duckdb
 
+from sportstradamus.helpers.locks import ARCHIVE_LOCK_FILE, file_lock
+
 # The observation identity. WS1 added shape-free quote columns (under_prob, line) to odds;
 # those are derived from ev and are NOT part of the identity, so the union dedups on this key
 # and reconciles the quote columns separately (see _odds_select).
@@ -48,7 +51,8 @@ _ODDS_SORT = "league, market, game_date, entity, book, observed_at"
 # Same env-var override and default the Archive singleton honours.
 _DEFAULT_TARGET = os.environ.get("SPORTSTRADAMUS_ARCHIVE_DB", "archive/archive.duckdb")
 
-_ARCHIVE_LOCK_FILE = "/tmp/sportstradamus-archive.lock"
+# Match run_job.sh's `flock -w 900`: wait up to 15 min for a running cron, then fail.
+_FLOCK_TIMEOUT_S = 900
 
 
 def _connect(path: Path, *, read_only: bool) -> duckdb.DuckDBPyConnection:
@@ -59,9 +63,8 @@ def _connect(path: Path, *, read_only: bool) -> duckdb.DuckDBPyConnection:
         if "Could not set lock" not in str(exc):
             raise
         raise RuntimeError(
-            f"archive {path} is locked by another process (a running cron?). "
-            "Run during a quiet window or while holding scripts/run_job.sh's "
-            f"archive flock ({_ARCHIVE_LOCK_FILE})."
+            f"archive {path} is locked despite the flock — is the dashboard or a "
+            "stray reader holding it?"
         ) from exc
 
 
@@ -221,7 +224,16 @@ def merge_archives(
 )
 def main(source: Path, target: Path, output: Path | None, dry_run: bool, no_backup: bool) -> None:
     """Merge the SOURCE odds archive into TARGET as a lossless set-union of rows."""
-    report = merge_archives(source, target, output, dry_run=dry_run, backup=not no_backup)
+    # An in-place merge drops and recreates both tables, so it must not race a cron
+    # write. The flock is what _connect's error message has always told operators to
+    # hold; holding it here means sync_from_prod.sh no longer relies on them doing so.
+    with file_lock(
+        ARCHIVE_LOCK_FILE,
+        timeout_s=_FLOCK_TIMEOUT_S,
+        label="merge-archives",
+        contention_hint="A long cron? Retry in a quiet window.",
+    ):
+        report = merge_archives(source, target, output, dry_run=dry_run, backup=not no_backup)
     if dry_run:
         click.echo("DRY RUN — no changes written.")
     for table, r in report.items():

@@ -224,3 +224,6 @@ src/sportstradamus/data/leagues/wnba/corr_metadata.json
 src/sportstradamus/data/leagues/mlb/corr_metadata.json
 src/sportstradamus/data/leagues/nhl/corr_metadata.json
 src/sportstradamus/data/runtime/*
+
+# Timestamped stat_meta backups a confirm/supersede walk writes before each persist
+src/sportstradamus/data/config/stat_meta.*.bak.json
