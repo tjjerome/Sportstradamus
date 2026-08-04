@@ -113,9 +113,7 @@ def test_training_quote_batch_matches_scalar_rows_and_lines(archive):
         [later, later],
     )
 
-    batch = archive.get_training_quote_inputs(
-        "WNBA", "AST", "2026-05-08", ["Q", "P", "Missing"]
-    )
+    batch = archive.get_training_quote_inputs("WNBA", "AST", "2026-05-08", ["Q", "P", "Missing"])
 
     for entity in ("P", "Q", "Missing"):
         rows, line = batch[entity]
@@ -143,9 +141,9 @@ def test_unpriced_pickem_line_resolves_as_the_platforms_own_symmetric_quote(arch
     )
 
     def resolve(market, entity):
-        rows, legacy = archive.get_training_quote_inputs(
-            "NFL", market, "2026-05-08", [entity]
-        )[entity]
+        rows, legacy = archive.get_training_quote_inputs("NFL", market, "2026-05-08", [entity])[
+            entity
+        ]
         return rows, resolve_training_quote(
             rows, legacy_line=legacy, fallback_line=5.0, fallback_ev=None, dist="Gamma", cv=1.0
         )
@@ -156,8 +154,13 @@ def test_unpriced_pickem_line_resolves_as_the_platforms_own_symmetric_quote(arch
     assert (quote.authenticity, quote.observed_at) == ("authentic", _TS)
 
     # A real quote outranks the stand-in — a boost prices away from 50/50 and must survive.
+    # Its mean is re-derived at the resolving cell's cv/dist, so it need not match the 10.2
+    # the boost encoded under whatever config was live then.
     _, priced = resolve("fantasy points underdog", "Priced")
-    assert (priced.over_probability, priced.ev) == (pytest.approx(0.58), 10.2)
+    assert (priced.over_probability, priced.ev) == (
+        pytest.approx(0.58),
+        pytest.approx(17.4268, abs=1e-4),
+    )
 
     # A sportsbook market's bare line is unattributable: `lines` has no book column.
     rows, unattributed = resolve("receiving yards", "P")
@@ -202,8 +205,14 @@ def test_add_dfs_write_round_trips(archive, league, market):
     """``add_dfs`` stores ``(under_prob, line)`` that re-encode to the stored ``ev``."""
     dist, cv, gate = _shape(league, market)
     offer = {
-        "League": league, "Market": market, "Player": "Test Player",
-        "Date": "2026-05-08", "Line": 3.5, "Boost": 1.0, "Boost_Over": 1.0, "Boost_Under": 1.0,
+        "League": league,
+        "Market": market,
+        "Player": "Test Player",
+        "Date": "2026-05-08",
+        "Line": 3.5,
+        "Boost": 1.0,
+        "Boost_Over": 1.0,
+        "Boost_Under": 1.0,
     }
     archive.add_dfs([offer], "Underdog", {})
     archive.write()
@@ -217,7 +226,11 @@ def test_add_dfs_write_round_trips(archive, league, market):
 def test_merge_player_books_quotes_optional(archive):
     """Per-book ``book_quotes`` populate ``(under_prob, line)``; omitting them leaves NULL."""
     archive.merge_player_books(
-        "WNBA", "AST", "2026-05-08", "Quoted", {"fanduel": 2.6},
+        "WNBA",
+        "AST",
+        "2026-05-08",
+        "Quoted",
+        {"fanduel": 2.6},
         book_quotes={"fanduel": (3.5, 0.55)},
     )
     archive.merge_player_books("WNBA", "AST", "2026-05-08", "Bare", {"fanduel": 2.6})
@@ -299,7 +312,9 @@ def test_migration_recovers_floored_cv_cell(archive, monkeypatch):
     # Live config after the floor: cv clamped to 0.02, std still sane. Pick std so
     # std/median(ev) == cv_true exactly, mirroring the real cells (cv == std/mean).
     monkeypatch.setitem(mig.stat_cv[league], market, 0.02)
-    monkeypatch.setitem(mig.stat_std.setdefault(league, {}), market, cv_true * float(np.median(evs)))
+    monkeypatch.setitem(
+        mig.stat_std.setdefault(league, {}), market, cv_true * float(np.median(evs))
+    )
 
     for i, ev in enumerate(evs):
         archive._connection.execute(
@@ -348,10 +363,30 @@ def test_confer_prop_write_keeps_shapefree_quote(archive):
                     {
                         "key": "player_points",
                         "outcomes": [
-                            {"description": "LeBron James", "name": "Over", "point": 25.5, "price": 1.91},
-                            {"description": "LeBron James", "name": "Under", "point": 25.5, "price": 1.95},
-                            {"description": "Anthony Davis", "name": "Over", "point": 18.5, "price": 1.83},
-                            {"description": "Anthony Davis", "name": "Under", "point": 18.5, "price": 2.05},
+                            {
+                                "description": "LeBron James",
+                                "name": "Over",
+                                "point": 25.5,
+                                "price": 1.91,
+                            },
+                            {
+                                "description": "LeBron James",
+                                "name": "Under",
+                                "point": 25.5,
+                                "price": 1.95,
+                            },
+                            {
+                                "description": "Anthony Davis",
+                                "name": "Over",
+                                "point": 18.5,
+                                "price": 1.83,
+                            },
+                            {
+                                "description": "Anthony Davis",
+                                "name": "Under",
+                                "point": 18.5,
+                                "price": 2.05,
+                            },
                         ],
                     }
                 ],
@@ -362,8 +397,18 @@ def test_confer_prop_write_keeps_shapefree_quote(archive):
                     {
                         "key": "player_points",
                         "outcomes": [
-                            {"description": "LeBron James", "name": "Over", "point": 26.5, "price": 2.0},
-                            {"description": "LeBron James", "name": "Under", "point": 26.5, "price": 1.87},
+                            {
+                                "description": "LeBron James",
+                                "name": "Over",
+                                "point": 26.5,
+                                "price": 2.0,
+                            },
+                            {
+                                "description": "LeBron James",
+                                "name": "Under",
+                                "point": 26.5,
+                                "price": 1.87,
+                            },
                         ],
                     }
                 ],

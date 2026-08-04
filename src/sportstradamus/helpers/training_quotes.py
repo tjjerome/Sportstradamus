@@ -193,6 +193,85 @@ def _direct_line_cohort(
     return selected, [row for row in direct if float(row.line) == selected]
 
 
+def _authentic_quote(
+    cohort: Sequence[ArchivedBookQuote],
+    line: float,
+    *,
+    dist: str,
+    cv: float,
+    weights: Mapping[str, float],
+) -> TrainingQuote:
+    """Build the quote for a same-line cohort that priced the market directly.
+
+    Re-inverts the mean from each book's ``(line, under_prob)`` instead of averaging the
+    archive's stored ``ev``, which goes stale the next time ``cv`` is recomputed (every
+    ``meditate`` run) or the distribution family flips — 71% of a live sample of ungated
+    quotes had drifted, by 26% of the mean. Inverting per book and then averaging (not
+    averaging the probability first) matches how the value was originally encoded, so an
+    undrifted cohort reproduces its stored ``ev`` exactly.
+
+    The inversion stays ungated even for ``ZINB``/``ZAGamma`` cells, matching the fallback
+    this replaces: ``book_gate``'s population zero rate (0.78 for NFL tds, 0.89 for MLB
+    home runs) exceeds the under-probabilities books actually quote — they only price
+    players likely to score — so gating here would clamp every quote to ``get_ev``'s
+    ceiling. Neither inversion reproduces such a book, so the book leg of ``fused_loc`` is
+    unsound for gated cells either way, a distribution-family question rather than a clamp
+    choice.
+    """
+    under = _weighted_value(cohort, "under_probability", weights)
+    if under is None:  # Defensive; the cohort predicate guarantees this.
+        raise ValueError("direct quote cohort has no probability")
+    return TrainingQuote(
+        line=line,
+        over_probability=float(np.clip(1.0 - under, 0.0, 1.0)),
+        ev=float(
+            np.average(
+                [float(get_ev(line, row.under_probability, cv=cv, dist=dist)) for row in cohort],
+                weights=[_weight(row.book, weights) for row in cohort],
+            )
+        ),
+        source="book_direct",
+        authenticity=AUTHENTIC,
+        synthetic_reason=None,
+        observed_at=_latest_observation(cohort),
+        book_count=len(cohort),
+    )
+
+
+def _ev_inversion_quote(
+    line: float,
+    ev: float | None,
+    *,
+    dist: str,
+    cv: float,
+    source: str,
+    observed_at: datetime.datetime | None,
+    book_count: int,
+) -> TrainingQuote | None:
+    """Stand a probability back up from an ev-only quote, or ``None`` if it will not invert.
+
+    The fallback for rows predating the shape-free ``(line, under_prob)`` columns, where the
+    stored ``ev`` is the only surviving evidence and so cannot be re-derived the way
+    :func:`_authentic_quote` does. ``None`` when there is no ev or the inversion lands
+    outside ``(0, 1)``, letting the caller try the next rung of the ladder.
+    """
+    if ev is None or ev <= 0:
+        return None
+    under = float(get_odds(line, ev, dist, cv=cv))
+    if not _probability(under):
+        return None
+    return TrainingQuote(
+        line=line,
+        over_probability=float(1.0 - under),
+        ev=ev,
+        source=source,
+        authenticity=DERIVED,
+        synthetic_reason="ev_inversion",
+        observed_at=observed_at,
+        book_count=book_count,
+    )
+
+
 def resolve_training_quote(
     rows: Sequence[ArchivedBookQuote],
     *,
@@ -213,27 +292,7 @@ def resolve_training_quote(
     ordered_rows = sorted(rows, key=lambda row: row.book)
     direct = _direct_line_cohort(ordered_rows)
     if direct is not None:
-        line, cohort = direct
-        under = _weighted_value(cohort, "under_probability", weights)
-        if under is None:  # Defensive; the cohort predicate guarantees this.
-            raise ValueError("direct quote cohort has no probability")
-        ev = _weighted_value(
-            [row for row in cohort if archive_ev_is_usable(row.ev, line)],
-            "ev",
-            weights,
-        )
-        if ev is None or ev <= 0:
-            ev = float(get_ev(line, under, cv=cv, dist=dist))
-        return TrainingQuote(
-            line=line,
-            over_probability=float(np.clip(1.0 - under, 0.0, 1.0)),
-            ev=ev,
-            source="book_direct",
-            authenticity=AUTHENTIC,
-            synthetic_reason=None,
-            observed_at=_latest_observation(cohort),
-            book_count=len(cohort),
-        )
+        return _authentic_quote(direct[1], direct[0], dist=dist, cv=cv, weights=weights)
 
     line_is_observed = _positive(legacy_line)
     line = (
@@ -244,35 +303,31 @@ def resolve_training_quote(
         else 0.5
     )
     ev_rows = [row for row in ordered_rows if archive_ev_is_usable(row.ev, line)]
-    ev = _weighted_value(ev_rows, "ev", weights)
-    if ev is not None and ev > 0:
-        under = float(get_odds(line, ev, dist, cv=cv))
-        if _probability(under):
-            return TrainingQuote(
-                line=line,
-                over_probability=float(1.0 - under),
-                ev=ev,
-                source="book_ev_inversion",
-                authenticity=DERIVED,
-                synthetic_reason="ev_inversion",
-                observed_at=_latest_observation(ev_rows),
-                book_count=len(ev_rows),
-            )
+    cohort_ev = _weighted_value(ev_rows, "ev", weights)
+    derived = _ev_inversion_quote(
+        line,
+        cohort_ev,
+        dist=dist,
+        cv=cv,
+        source="book_ev_inversion",
+        observed_at=_latest_observation(ev_rows),
+        book_count=len(ev_rows),
+    )
+    if derived is not None:
+        return derived
 
-    if archive_ev_is_usable(fallback_ev, line):
-        ev = float(fallback_ev)
-        under = float(get_odds(line, ev, dist, cv=cv))
-        if _probability(under):
-            return TrainingQuote(
-                line=line,
-                over_probability=float(1.0 - under),
-                ev=ev,
-                source="combo_ev_inversion",
-                authenticity=DERIVED,
-                synthetic_reason="ev_inversion",
-                observed_at=None,
-                book_count=0,
-            )
+    combo_ev = float(fallback_ev) if archive_ev_is_usable(fallback_ev, line) else None
+    derived = _ev_inversion_quote(
+        line,
+        combo_ev,
+        dist=dist,
+        cv=cv,
+        source="combo_ev_inversion",
+        observed_at=None,
+        book_count=0,
+    )
+    if derived is not None:
+        return derived
 
     ev = float(get_ev(line, 0.5, cv=cv, dist=dist))
     return TrainingQuote(

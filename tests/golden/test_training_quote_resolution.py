@@ -54,7 +54,9 @@ def test_direct_probability_uses_one_deterministic_same_line_cohort():
 
     assert quote.line == 2.5
     assert quote.over_probability == pytest.approx(0.45)
-    assert quote.ev == pytest.approx(3.0)
+    # Each cohort quote re-inverted at the cell's current cv/dist, then averaged — not the
+    # stored 3.1/2.9, which were encoded under whatever config was live when they scraped.
+    assert quote.ev == pytest.approx(2.3460, abs=1e-4)
     assert quote.authenticity == AUTHENTIC
     assert quote.source == "book_direct"
     assert quote.synthetic_reason is None
@@ -80,9 +82,16 @@ def test_legacy_ev_inversion_is_explicitly_derived_and_synthetic():
     assert not quote.archived and quote.odds_synthetic
 
 
-def test_runaway_archive_ev_cannot_enter_direct_quote():
+@pytest.mark.parametrize("stored_ev", [2.4, None, 50_000.0])
+def test_direct_quote_ev_is_derived_from_the_quote_not_the_stored_ev(stored_ev):
+    """A shape-free cohort resolves identically whatever ``ev`` sits beside it.
+
+    The stored ``ev`` is a scrape-time encoding, so a stale one (a later ``meditate``
+    moved ``cv``), an absent one (the writer refused a clamped inversion), and a runaway
+    one must all yield the same mean: the one today's config implies.
+    """
     quote = resolve_training_quote(
-        [_row("b", 50_000.0, 0.55, 2.5)],
+        [_row("b", stored_ev, 0.55, 2.5)],
         legacy_line=2.5,
         fallback_line=2.0,
         fallback_ev=None,
@@ -92,7 +101,7 @@ def test_runaway_archive_ev_cannot_enter_direct_quote():
 
     assert quote.authenticity == AUTHENTIC
     assert quote.source == "book_direct"
-    assert quote.ev < 50_000.0
+    assert quote.ev == pytest.approx(2.3390, abs=1e-4)
 
 
 def test_runaway_legacy_ev_falls_through_to_honest_synthetic_quote():

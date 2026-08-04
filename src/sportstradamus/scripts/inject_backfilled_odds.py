@@ -118,6 +118,12 @@ def _repair_one(stat_data: Stats, market: str, M: pd.DataFrame) -> str:
     price_moved = int(
         (~np.isclose(quotes["Odds"].to_numpy(float), M["Odds"].to_numpy(float))).sum()
     )
+    # Reported separately because the two move independently: an authentic row's Odds is
+    # already shape-free and rarely shifts, while its EV is re-inverted at the cell's current
+    # cv/dist, so a refresh that reports "Odds moved on 0" can still rewrite every EV.
+    ev_moved = int(
+        (~np.isclose(quotes["EV"].to_numpy(float), M["EV"].to_numpy(float), equal_nan=True)).sum()
+    )
     for column in _REPAIRED_COLUMNS:
         M[column] = quotes[column]
 
@@ -126,7 +132,7 @@ def _repair_one(stat_data: Stats, market: str, M: pd.DataFrame) -> str:
     return (
         f"{len(M)} rows ({'legacy' if legacy else 'refresh'}); {breakdown}; "
         f"authentic {authentic_before} -> {int(M['Archived'].sum())}; "
-        f"Odds moved on {price_moved}"
+        f"Odds moved on {price_moved}; EV moved on {ev_moved}"
     )
 
 
