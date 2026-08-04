@@ -83,10 +83,29 @@ _CLAMPED_PREDICATE = f"""
     AND NOT ({BLOWN_PREDICATE})
 """
 
+# The same ceiling on a row that predates the shape-free columns. Without its own line the
+# clamp is only recognisable against the lines table — the fallback BLOWN_PREDICATE already
+# uses — and BLOWN_PREDICATE's own test is strictly greater, so a value sitting exactly on the
+# ceiling slips between the two. These reach the resolver's ev-only rung, where the fabricated
+# mean sets the probability as well: on WNBA FG3M it was inverting to a confident 0.77 under.
+# Nothing here is recoverable, so they delete, and the resolver falls back to an honest
+# neutral quote. The line itself lives in the lines table and is untouched.
+_EV_ONLY_CLAMPED_PREDICATE = f"""
+    line IS NULL AND ev IS NOT NULL
+    AND abs(ev - {BLOWN_LINE_FACTOR} * (
+        SELECT MAX(l.line) FROM lines l
+        WHERE l.league = odds.league AND l.market = odds.market
+          AND l.game_date = odds.game_date AND l.entity = odds.entity
+          AND l.line > 0)) <= {_CLAMP_RTOL} * ev
+    AND NOT ({BLOWN_PREDICATE})
+"""
+
+_ANY_CLAMPED = f"(({_CLAMPED_PREDICATE}) OR ({_EV_ONLY_CLAMPED_PREDICATE}))"
+
 # What the training join actually reads on the authentic path, so a row that has it survives
 # a poisoned ev intact.
 _SHAPE_FREE = "under_prob IS NOT NULL AND line IS NOT NULL"
-_UNUSABLE_EV = f"(({BLOWN_PREDICATE}) OR ({_CLAMPED_PREDICATE}))"
+_UNUSABLE_EV = f"(({BLOWN_PREDICATE}) OR {_ANY_CLAMPED})"
 _NULL_EV_PREDICATE = f"{_UNUSABLE_EV} AND {_SHAPE_FREE}"
 _DELETE_PREDICATE = f"{_UNUSABLE_EV} AND NOT ({_SHAPE_FREE})"
 
@@ -136,16 +155,16 @@ def sweep_runaway_odds(archive: str | Path, *, apply: bool = False, backup: bool
     con = _connect(archive, read_only=not apply)
     try:
         total_rows = con.execute("SELECT COUNT(*) FROM odds").fetchone()[0]
-        blown, clamped = _count(con, BLOWN_PREDICATE), _count(con, _CLAMPED_PREDICATE)
+        blown, clamped = _count(con, BLOWN_PREDICATE), _count(con, _ANY_CLAMPED)
         nulled, deleted = _count(con, _NULL_EV_PREDICATE), _count(con, _DELETE_PREDICATE)
         worst = _worst_cells(con, BLOWN_PREDICATE)
-        worst_clamped = _worst_cells(con, _CLAMPED_PREDICATE)
+        worst_clamped = _worst_cells(con, _ANY_CLAMPED)
         remaining, remaining_clamped = blown, clamped
-        if apply and (blown or clamped):
+        if apply and (nulled or deleted):
             con.execute(f"DELETE FROM odds WHERE {_DELETE_PREDICATE}")
             con.execute(f"UPDATE odds SET ev = NULL WHERE {_NULL_EV_PREDICATE}")
             remaining = _count(con, BLOWN_PREDICATE)
-            remaining_clamped = _count(con, _CLAMPED_PREDICATE)
+            remaining_clamped = _count(con, _ANY_CLAMPED)
             con.execute("CHECKPOINT")
     finally:
         con.close()
@@ -177,7 +196,7 @@ def _print_report(report: dict, archive: Path, apply: bool) -> None:
     )
     _print_cells(report["worst"])
     click.echo(
-        f"gate-refuted rows (ev = {BLOWN_LINE_FACTOR:.0f}×line, non-DFS book): "
+        f"gate-refuted rows (ev = {BLOWN_LINE_FACTOR:.0f}×line): "
         f"{report['clamped']:,} of {report['total_rows']:,}"
     )
     _print_cells(report["worst_clamped"])

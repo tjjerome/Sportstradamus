@@ -153,6 +153,38 @@ def test_sweep_spares_negative_line_team_market(tmp_path):
     )  # no positive line for the slot -> line arm off, ev well under the absolute ceiling
 
 
+def test_sweep_deletes_a_pre_ws1_row_sitting_exactly_on_the_ceiling(tmp_path):
+    """A ceiling on a row with no shape-free line hides between both other arms.
+
+    ``BLOWN_PREDICATE`` tests strictly-greater and the gate-refuted arm needs the row's
+    own ``line``, so exactly ``5×`` the lines-table line slipped through — and it is the
+    worst place for it, because the resolver's ev-only rung turns that fabricated mean
+    into a confident probability (0.77 under on WNBA FG3M). Nothing is recoverable.
+    """
+    db = tmp_path / "archive.duckdb"
+    con = _empty_archive(db)
+    con.execute(
+        "INSERT INTO lines VALUES "
+        "('WNBA','FG3M','2025-12-23','Ceiling Guy',1.5,'2025-12-23 01:00:00'),"
+        "('WNBA','FG3M','2025-12-23','Under Guy',1.5,'2025-12-23 01:00:00')"
+    )
+    con.execute(
+        "INSERT INTO odds VALUES "
+        "('WNBA','FG3M','2025-12-23','Ceiling Guy','dk',7.5,'2025-12-23 01:00:00',NULL,NULL),"
+        "('WNBA','FG3M','2025-12-23','Under Guy','dk',7.4,'2025-12-23 01:00:00',NULL,NULL)"
+    )
+    con.execute("CHECKPOINT")
+    con.close()
+
+    report = sweep_runaway_odds(db, apply=True)
+
+    assert (report["blown"], report["clamped"], report["deleted"]) == (0, 1, 1)
+    con = duckdb.connect(str(db), read_only=True)
+    assert con.execute("SELECT entity FROM odds").fetchall() == [("Under Guy",)]
+    assert con.execute("SELECT COUNT(*) FROM lines").fetchone()[0] == 2
+    con.close()
+
+
 def test_sweep_flags_sub_2000_runaway(tmp_path):
     """Pre-fix residue between 5×line and the absolute 2000 ceiling is real garbage
     the fixed clamp could never write; the line arm (not absolute-only) must catch it."""
