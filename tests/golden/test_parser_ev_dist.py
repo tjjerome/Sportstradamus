@@ -5,13 +5,14 @@ distribution and zero-inflation gate, not the ``get_ev`` SkewNormal default.
 ``book_gate`` supplies its zero-inflation gate; the parser threads both into
 ``get_ev`` so the archived book mean is the exact inverse of the gated
 ``get_odds`` call the book-fallback decode (``_book_cell_params``) reads it back
-with. A quote whose de-vigged under sits at or below the gate refutes the
-population zero rate for the quoted player — no mean reproduces it, so the
-parser stores a NULL ev with the shape-free quote (the 2026-06 NFL tds
-poisoning fix) instead of the clamp ceiling. A quote above the gate must still
-invert under the market's own family, landing on a different mean than the
-SkewNormal default would — the routing this guards. Regression guard for the
-moneylines.py parser dist+gate wiring.
+with. Whenever ``get_ev`` returns its ``SN_MAX_MEAN_FACTOR × line`` ceiling, no mean
+reproduced the price, so the parser stores a NULL ev beside the shape-free quote
+(the 2026-06 NFL tds poisoning fix) rather than persisting the bound. A gate
+refuted by a sharp under-prob is one way to land there; an ungated family too
+tight for a long price is another. A quote the family *can* reproduce still
+inverts under it, landing on a different mean than the SkewNormal default would —
+the routing this guards. Regression guard for the moneylines.py parser dist+gate
+wiring.
 """
 
 import datetime
@@ -137,9 +138,15 @@ def test_count_prop_above_gate_inverts_under_market_dist():
     under = no_vig_odds(2.8, 1.45)[1]
     gate = book_gate("NBA", "BLK", dist)
     assert gate is None or under > gate, "fixture must sit above the live gate"
+    # Expectation is derived from live calibration rather than pinned, because stat_cv/
+    # stat_zi are recomputed by every meditate: what must hold is that the parser routes
+    # through the market's own family and drops the ceiling, whichever side of the cap
+    # this cell's current calibration puts the quote on.
     expected_ev = get_ev(0.5, under, cv, dist=dist, gate=gate)
-    assert ev == pytest.approx(expected_ev), (
-        f"parser must invert under {dist}+book_gate, got ev={ev:.4f} vs {expected_ev:.4f} "
-        "(the SkewNormal default diverges here)"
-    )
-    assert 0 < ev <= SN_MAX_MEAN_FACTOR * 0.5, f"quote must stay bounded: {ev}"
+    if expected_ev >= SN_MAX_MEAN_FACTOR * 0.5:
+        assert ev is None, f"a clamped inversion is a bound, not a mean: {ev}"
+    else:
+        assert ev == pytest.approx(expected_ev), (
+            f"parser must invert under {dist}+book_gate, got ev={ev:.4f} vs {expected_ev:.4f} "
+            "(the SkewNormal default diverges here)"
+        )

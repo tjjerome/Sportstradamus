@@ -1,32 +1,39 @@
 #!/usr/bin/env python3
-"""Sweep magnitude-blown ``ev`` rows from the archive in one global pass.
+"""Repair both classes of poisoned book ``ev`` in the archive, in one global pass.
 
-The ``get_ev`` clamp fix bounds every new book-EV write at
-``SN_MAX_MEAN_FACTOR × line``, but the archive still carries the historical
-runaway rows the old unbounded inversion wrote — the ZINB ``under ≤ gate``
-runaway on the DFS write path and the SkewNormal ``mean → ∞`` asymptote — with
-means up to the millions across every poisoned cell.
-:mod:`sportstradamus.scripts.delete_corrupt_seed` strips those per named cell;
-this driver sweeps EVERY cell at once for the one-shot post-deploy cleanup of a
-live archive (dev or prod), reusing that module's blown-row predicate.
+Two encoder bugs left ``ev`` values that no distribution produced, and both need
+sweeping across every cell after their fix deploys:
 
-It is **dry-run by default** — it prints the blown-row count and the worst cells
-and writes nothing. ``--apply`` deletes them (a timestamped ``.bak-<epoch>`` is
+* **Magnitude-blown** — the old unbounded inversion (the ZINB ``under ≤ gate``
+  runaway on the DFS write path, the SkewNormal ``mean → ∞`` asymptote) wrote
+  means up to the millions. The ``get_ev`` clamp fix bounds new writes at
+  ``SN_MAX_MEAN_FACTOR × line``; the residue is **deleted**.
+* **Gate-refuted** — a sharp quote whose de-vigged under-prob sits at or below
+  the calibrated zero-inflation gate has no mean solution at all, so the encoder
+  stored ``get_ev``'s clamp ceiling as if it were one. The shape-free
+  ``(under_prob, line)`` quote beside it is still sound, so only the **ev is
+  nulled**; the consensus reader None-skips a book that has none.
+
+:mod:`sportstradamus.scripts.delete_corrupt_seed` strips blown rows per named
+cell; this driver sweeps EVERY cell at once for the one-shot post-deploy cleanup
+of a live archive (dev or prod), reusing that module's blown-row predicate.
+
+It is **dry-run by default** — it prints both counts and the worst cells and
+writes nothing. ``--apply`` repairs them (a timestamped ``.bak-<epoch>`` is
 written first unless ``--no-backup``). The CLI holds ``scripts/run_job.sh``'s
 shared archive flock so the sweep serializes against a live cron write.
 
-Only sweep AFTER the ``get_ev`` fix is deployed: a ``confer`` running the old
-encode repopulates runaway rows faster than you can delete them.
+Only sweep AFTER both encoder fixes are deployed to the box you are sweeping: a
+``confer`` running the old encode repopulates poisoned rows faster than you can
+repair them. Prod tracks ``devel``, so check what ``devel`` actually carries.
 
     poetry run sweep-runaway-odds                                            # dry run
-    poetry run sweep-runaway-odds --apply                                    # back up + delete
+    poetry run sweep-runaway-odds --apply                                    # back up + repair
     poetry run python -m sportstradamus.scripts.sweep_runaway_odds --apply   # on prod
 """
 
 from __future__ import annotations
 
-import contextlib
-import fcntl
 import os
 import shutil
 import time
@@ -35,6 +42,7 @@ from pathlib import Path
 import click
 import duckdb
 
+from sportstradamus.helpers.locks import ARCHIVE_LOCK_FILE, file_lock
 from sportstradamus.scripts.delete_corrupt_seed import (
     BLOWN_ABS_CEILING,
     BLOWN_LINE_FACTOR,
@@ -44,38 +52,31 @@ from sportstradamus.scripts.delete_corrupt_seed import (
 # Same env override + default the Archive singleton and merge-archives honour.
 _DEFAULT_ARCHIVE = os.environ.get("SPORTSTRADAMUS_ARCHIVE_DB", "archive/archive.duckdb")
 
-# The lock scripts/run_job.sh wraps every cron in; holding it serializes this
-# sweep against a live confer/prophecize/close-lines archive write.
-_ARCHIVE_LOCK_FILE = "/tmp/sportstradamus-archive.lock"
 # Match run_job.sh's `flock -w 900`: wait up to 15 min for a running cron, then fail.
 _FLOCK_TIMEOUT_S = 900
-_FLOCK_POLL_S = 2
 
 # Enough rows to identify the worst offenders without a wall of output.
 _WORST_CELLS_SHOWN = 15
 
+# The platforms Archive.add_dfs writes (prediction/scoring.py). Their ev is a pinned
+# placeholder clamp rather than a book inversion, so the gate-refuted fix deliberately
+# left that path alone and this repair must skip them too.
+_DFS_PLATFORMS = ("Underdog", "Sleeper")
 
-@contextlib.contextmanager
-def _archive_flock(timeout_s: float = _FLOCK_TIMEOUT_S):
-    """Hold ``run_job.sh``'s archive flock, waiting up to ``timeout_s`` for a cron."""
-    fd = os.open(_ARCHIVE_LOCK_FILE, os.O_CREAT | os.O_RDWR, 0o644)
-    deadline = time.monotonic() + timeout_s
-    try:
-        while True:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if time.monotonic() >= deadline:
-                    raise RuntimeError(
-                        f"archive flock {_ARCHIVE_LOCK_FILE} still held after "
-                        f"{timeout_s:.0f}s (a long cron?); retry in a quiet window."
-                    ) from None
-                time.sleep(_FLOCK_POLL_S)
-        yield
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
+# Same tolerance training_quotes.archive_ev_is_runaway uses to spare the ceiling from the
+# runaway test, so the two agree on exactly which rows sit *at* the clamp.
+_CLAMP_RTOL = 1e-12
+
+# A clamped quote: ev sitting exactly on get_ev's ceiling for the row's own line, from a
+# real sportsbook. Keys on the odds row's own shape-free line — the line get_ev was actually
+# called with — not the lines-table MAX that BLOWN_PREDICATE has to fall back on. Excluding
+# blown rows keeps the two classes disjoint, so the dry run's counts sum to the real total.
+_CLAMPED_PREDICATE = f"""
+    book NOT IN {_DFS_PLATFORMS}
+    AND ev IS NOT NULL AND line IS NOT NULL AND line > 0
+    AND abs(ev - {BLOWN_LINE_FACTOR} * line) <= {_CLAMP_RTOL} * {BLOWN_LINE_FACTOR} * line
+    AND NOT ({BLOWN_PREDICATE})
+"""
 
 
 def _connect(path: Path, *, read_only: bool) -> duckdb.DuckDBPyConnection:
@@ -91,17 +92,25 @@ def _connect(path: Path, *, read_only: bool) -> duckdb.DuckDBPyConnection:
         ) from exc
 
 
-def _count_blown(con: duckdb.DuckDBPyConnection) -> int:
-    return con.execute(f"SELECT COUNT(*) FROM odds WHERE {BLOWN_PREDICATE}").fetchone()[0]
+def _count(con: duckdb.DuckDBPyConnection, predicate: str) -> int:
+    return con.execute(f"SELECT COUNT(*) FROM odds WHERE {predicate}").fetchone()[0]
+
+
+def _worst_cells(con: duckdb.DuckDBPyConnection, predicate: str) -> list[tuple[str, str, int]]:
+    return con.execute(
+        f"SELECT league, market, COUNT(*) AS n FROM odds WHERE {predicate} "
+        f"GROUP BY league, market ORDER BY n DESC LIMIT {_WORST_CELLS_SHOWN}"
+    ).fetchall()
 
 
 def sweep_runaway_odds(archive: str | Path, *, apply: bool = False, backup: bool = True) -> dict:
-    """Count (and, with ``apply``, delete) every magnitude-blown ``ev`` row.
+    """Count (and, with ``apply``, repair) both classes of poisoned ``ev`` row.
 
-    Caller owns concurrency (the CLI holds the archive flock). With ``apply`` a
-    timestamped ``.bak-<epoch>`` is written first (unless ``backup=False``), the
-    blown rows are deleted in one pass and the DB is checkpointed. Returns
-    ``{total_rows, blown, remaining, worst, backup}``.
+    Magnitude-blown rows are deleted outright; gate-refuted rows keep their shape-free
+    ``(under_prob, line)`` quote and lose only the ``ev``. Caller owns concurrency (the
+    CLI holds the archive flock). With ``apply`` a timestamped ``.bak-<epoch>`` is written
+    first (unless ``backup=False``) and the DB is checkpointed. Returns
+    ``{total_rows, blown, clamped, remaining, remaining_clamped, worst, worst_clamped, backup}``.
     """
     archive = Path(archive)
     if not archive.is_file():
@@ -115,15 +124,15 @@ def sweep_runaway_odds(archive: str | Path, *, apply: bool = False, backup: bool
     con = _connect(archive, read_only=not apply)
     try:
         total_rows = con.execute("SELECT COUNT(*) FROM odds").fetchone()[0]
-        blown = _count_blown(con)
-        worst = con.execute(
-            f"SELECT league, market, COUNT(*) AS n FROM odds WHERE {BLOWN_PREDICATE} "
-            f"GROUP BY league, market ORDER BY n DESC LIMIT {_WORST_CELLS_SHOWN}"
-        ).fetchall()
-        remaining = blown
-        if apply and blown:
+        blown, clamped = _count(con, BLOWN_PREDICATE), _count(con, _CLAMPED_PREDICATE)
+        worst = _worst_cells(con, BLOWN_PREDICATE)
+        worst_clamped = _worst_cells(con, _CLAMPED_PREDICATE)
+        remaining, remaining_clamped = blown, clamped
+        if apply and (blown or clamped):
             con.execute(f"DELETE FROM odds WHERE {BLOWN_PREDICATE}")
-            remaining = _count_blown(con)
+            con.execute(f"UPDATE odds SET ev = NULL WHERE {_CLAMPED_PREDICATE}")
+            remaining = _count(con, BLOWN_PREDICATE)
+            remaining_clamped = _count(con, _CLAMPED_PREDICATE)
             con.execute("CHECKPOINT")
     finally:
         con.close()
@@ -131,10 +140,18 @@ def sweep_runaway_odds(archive: str | Path, *, apply: bool = False, backup: bool
     return {
         "total_rows": total_rows,
         "blown": blown,
+        "clamped": clamped,
         "remaining": remaining,
+        "remaining_clamped": remaining_clamped,
         "worst": worst,
+        "worst_clamped": worst_clamped,
         "backup": backup_path,
     }
+
+
+def _print_cells(worst: list[tuple[str, str, int]]) -> None:
+    for league, market, n in worst:
+        click.echo(f"  {league:6} {market:24} {n:>10,}")
 
 
 def _print_report(report: dict, archive: Path, apply: bool) -> None:
@@ -143,14 +160,22 @@ def _print_report(report: dict, archive: Path, apply: bool) -> None:
         f"runaway rows (ev > {BLOWN_ABS_CEILING:.0f} OR ev > {BLOWN_LINE_FACTOR:.0f}×max positive line): "
         f"{report['blown']:,} of {report['total_rows']:,}"
     )
-    for league, market, n in report["worst"]:
-        click.echo(f"  {league:6} {market:24} {n:>10,}")
+    _print_cells(report["worst"])
+    click.echo(
+        f"gate-refuted rows (ev = {BLOWN_LINE_FACTOR:.0f}×line, non-DFS book): "
+        f"{report['clamped']:,} of {report['total_rows']:,}"
+    )
+    _print_cells(report["worst_clamped"])
     if not apply:
-        click.echo("DRY RUN — nothing written; pass --apply to back up + delete.")
+        click.echo("DRY RUN — nothing written; pass --apply to back up + repair.")
         return
     if report["backup"] is not None:
         click.echo(f"backed up -> {report['backup']}")
-    click.echo(f"deleted {report['blown']:,} rows ({report['remaining']:,} remaining).")
+    click.echo(f"deleted {report['blown']:,} runaway rows ({report['remaining']:,} remaining).")
+    click.echo(
+        f"nulled ev on {report['clamped']:,} gate-refuted rows "
+        f"({report['remaining_clamped']:,} remaining); their quotes were kept."
+    )
 
 
 @click.command()
@@ -160,17 +185,25 @@ def _print_report(report: dict, archive: Path, apply: bool) -> None:
     type=click.Path(path_type=Path),
     help="Archive to sweep in place (default: $SPORTSTRADAMUS_ARCHIVE_DB or archive/archive.duckdb).",
 )
-@click.option("--apply", is_flag=True, help="Delete the blown rows (default: dry run, count only).")
 @click.option(
-    "--no-backup", is_flag=True, help="Skip the timestamped backup before an --apply delete."
+    "--apply", is_flag=True, help="Repair the poisoned rows (default: dry run, counts only)."
+)
+@click.option(
+    "--no-backup", is_flag=True, help="Skip the timestamped backup before an --apply repair."
 )
 def main(archive: Path, apply: bool, no_backup: bool) -> None:
-    """Sweep every magnitude-blown ev row from the archive (dry run unless --apply).
+    """Repair every poisoned ev row in the archive (dry run unless --apply).
 
-    Deploy the get_ev fix BEFORE sweeping prod — an old-encode confer repopulates
-    runaway rows otherwise.
+    Deletes magnitude-blown rows; nulls the ev on gate-refuted ones, keeping their
+    quote. Deploy the encoder fixes to the box you are sweeping BEFORE sweeping it —
+    an old-encode confer repopulates the rows otherwise.
     """
-    with _archive_flock():
+    with file_lock(
+        ARCHIVE_LOCK_FILE,
+        timeout_s=_FLOCK_TIMEOUT_S,
+        label="sweep-runaway-odds",
+        contention_hint="A long cron? Retry in a quiet window.",
+    ):
         report = sweep_runaway_odds(archive, apply=apply, backup=not no_backup)
     _print_report(report, archive, apply)
 

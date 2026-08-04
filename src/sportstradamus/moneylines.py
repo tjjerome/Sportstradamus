@@ -56,6 +56,7 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
+from sportstradamus.helpers.distributions import SN_MAX_MEAN_FACTOR
 from sportstradamus.helpers.io import (
     read_league_activity,
     read_upcoming_events,
@@ -751,19 +752,16 @@ def _event_player_props(book, market, league, props, odds):
         price = no_vig_odds(*[x["price"] for x in lines])
         dist = stat_dist.get(league, {}).get(market_name, "SkewNormal")
         gate = book_gate(league, market_name, dist)
-        # A sharp quote whose under-prob sits at or below the calibrated gate
-        # refutes the population zero rate for this (selected) player — no mean
-        # reproduces it, and storing get_ev's clamp ceiling as a real mean is how
-        # every 2026-06+ NFL tds row went bad (population zi 0.78 vs quoted-star
-        # unders ~0.42). Store a NULL ev with the shape-free quote instead; the
-        # consensus reader None-skips the book. The DFS path (add_dfs) keeps its
-        # pinned clamp semantics — placeholders are guarded downstream.
-        if gate is not None and price[1] <= gate:
-            entry["EV"][book["key"]] = None
-        else:
-            entry["EV"][book["key"]] = get_ev(
-                line, price[1], stat_cv[league].get(market_name, 1), dist=dist, gate=gate
-            )
+        ev = get_ev(line, price[1], stat_cv[league].get(market_name, 1), dist=dist, gate=gate)
+        # get_ev returns its ceiling when no mean in [0, SN_MAX_MEAN_FACTOR × line]
+        # reproduces the price, so the value is a bound, not a mean — persisting it is how
+        # every 2026-06+ NFL tds row went bad. A gate refuted by a sharp quote is one cause
+        # (population zi 0.78 vs quoted-star unders ~0.42); an ungated family too tight for
+        # an extreme price is another, and both poison training identically. Store a NULL ev
+        # with the shape-free quote instead; the consensus reader None-skips the book. The
+        # DFS path (add_dfs) keeps its pinned clamp semantics — guarded downstream.
+        clamped = ev >= max(SN_MAX_MEAN_FACTOR * line, 1.0)
+        entry["EV"][book["key"]] = None if clamped else ev
         entry["Quotes"][book["key"]] = (line, price[1])
 
 

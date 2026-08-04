@@ -176,26 +176,43 @@ def test_player_prop_gate_refuted_quote_stores_null_ev(monkeypatch):
     assert 0 < under < 0.777
 
 
-def test_player_prop_above_gate_still_stores_real_ev(monkeypatch):
+def _tds_prop_ev(monkeypatch, dist, gate, over, under):
+    """Archive one NFL tds quote through the parser and return the ev it stored."""
     from sportstradamus import moneylines
 
-    monkeypatch.setitem(moneylines.stat_dist.setdefault("NFL", {}), "tds", "ZINB")
+    monkeypatch.setitem(moneylines.stat_dist.setdefault("NFL", {}), "tds", dist)
     monkeypatch.setitem(moneylines.stat_cv.setdefault("NFL", {}), "tds", 0.35)
-    monkeypatch.setattr(moneylines, "book_gate", lambda lg, mkt, dist: 0.30)
+    monkeypatch.setattr(moneylines, "book_gate", lambda lg, mkt, d: gate)
 
     market = {
         "key": "player_tds",
         "outcomes": [
-            {"description": "Star Scorer", "name": "Over", "price": 1.52, "point": 0.5},
-            {"description": "Star Scorer", "name": "Under", "price": 2.45, "point": 0.5},
+            {"description": "Star Scorer", "name": "Over", "price": over, "point": 0.5},
+            {"description": "Star Scorer", "name": "Under", "price": under, "point": 0.5},
         ],
     }
     odds = {}
     moneylines._event_player_props(
         {"key": "fanduel"}, market, "NFL", {"NFL": {"player_tds": "tds"}}, odds
     )
-    ev = odds["tds"]["Star Scorer"]["EV"]["fanduel"]
-    assert ev is not None and np.isfinite(ev) and 0 < ev <= 5 * 0.5
+    return odds["tds"]["Star Scorer"]["EV"]["fanduel"]
+
+
+def test_player_prop_that_inverts_stores_the_solved_mean(monkeypatch):
+    # De-vigged under ~0.49 — well above the 0.30 gate and inside the band ZINB can
+    # reproduce at a mean below the cap, so brentq lands on a real solution.
+    ev = _tds_prop_ev(monkeypatch, "ZINB", 0.30, over=1.90, under=2.00)
+    assert ev is not None and np.isfinite(ev)
+    assert 0 < ev < SN_MAX_MEAN_FACTOR * 0.5, "a solved mean must sit strictly under the cap"
+
+
+def test_player_prop_clamped_by_an_ungated_family_stores_null_ev(monkeypatch):
+    # A heavy over favourite (-1000) leaves a de-vigged under of ~0.12, below what an
+    # ungated NegBin reaches at any mean up to the cap, so get_ev returns its ceiling.
+    # The ceiling is a bound, not a mean, and must not be persisted just because
+    # zero-inflation was not what made the inversion unsolvable.
+    ev = _tds_prop_ev(monkeypatch, "NegBin", None, over=1.10, under=8.00)
+    assert ev is None
 
 
 class _StageCapture:
