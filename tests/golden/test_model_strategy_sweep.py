@@ -16,6 +16,7 @@ and that a legacy row scored on the ship holdout is inert.
 
 import io
 import json
+import math
 import pathlib
 import re
 import signal
@@ -50,7 +51,9 @@ from sportstradamus.training.model_strategy import (
     registered_strategies,
     resolve_report_identity,
     strategies_for_cell,
+    strategy_cli_args,
     strategy_controls,
+    strategy_persistence_edits,
     sweep,
     tpe_search,
     validate_strategy_artifacts,
@@ -77,6 +80,7 @@ _MATRIX_SHA = "matrix-123"
 def _dpo_controls(dispersion: str, blending: str, posthoc: str) -> dict[str, str]:
     return {
         "dist": "DPO",
+        "dist_training_loss": "nll",
         "count_dispersion_objective": dispersion,
         "blending_loss_fn": blending,
         "posthoc": posthoc,
@@ -336,6 +340,7 @@ def test_family_registry_grids_and_persist_maps():
     # Count families persist their single-choice dist so a winner's dist writes to stat_meta.
     assert zinb.persist == {
         "dist": "dist",
+        "dist_training_loss": "dist_training_loss",
         "zinb_mode": "zinb_mode",
         "count_dispersion_objective": "count_dispersion_objective",
         "blending_loss_fn": "blending",
@@ -343,6 +348,7 @@ def test_family_registry_grids_and_persist_maps():
     }
     assert negbin.persist == {
         "dist": "dist",
+        "dist_training_loss": "dist_training_loss",
         "count_dispersion_objective": "count_dispersion_objective",
         "blending_loss_fn": "blending",
         "posthoc": "posthoc",
@@ -441,6 +447,44 @@ def test_seed_corners_are_registered_corners_of_their_named_spec():
     for league, market, slug, controls in (*MANDATORY_SWEEP_CORNERS, *CONFIRM_EVIDENCE_CORNERS):
         assert market in ALL_MARKETS[league]
         assert controls in strategy_controls(get_strategy(slug))
+
+
+def test_every_count_spec_pins_the_only_loss_its_constructor_accepts():
+    """No count corner may carry a loss other than ``nll``, on any axis or by inheritance.
+
+    The count constructors accept ``nll`` alone. A count spec declares no ``dist_training_loss``
+    axis, so before the pin ``meditate`` fell back to the *cell's* value — and on the six cells
+    configured continuous with ``crps`` that reached the constructor and killed every count corner
+    they had. Phrased against the registry rather than one spec so a new count family inherits it.
+    """
+    count_slugs = [
+        slug
+        for slug in ("SkewNormal", "Mixture", "ZINB", "NegBin", "DPO")
+        if distribution_class(slug) == "count"
+    ]
+    assert count_slugs, "no count families registered"
+    for slug in count_slugs:
+        spec = get_strategy(slug)
+        assert "dist_training_loss" not in spec.axes, f"{slug} must not sweep the loss"
+        losses = {controls["dist_training_loss"] for controls in strategy_controls(spec)}
+        assert losses == {"nll"}, f"{slug} corners carry {losses}"
+
+
+def test_a_count_corner_carries_nll_down_both_meditate_paths(monkeypatch):
+    """The sweep passes the loss as a flag; confirm persists it. Neither may inherit the cell's."""
+    monkeypatch.setattr(
+        sweep, "_training_matrix_contract", lambda lg, mkt: (frozenset(), _MATRIX_SHA, True, 4.0)
+    )
+    context = sweep._cell_context("WNBA", "OREB")
+    spec = get_strategy("DPO")
+    corner = strategy_controls(spec)[0]
+
+    flags = strategy_cli_args(context, spec, corner)
+    edits = strategy_persistence_edits(context, spec, corner)
+
+    assert "--dist-training-loss" in flags
+    assert flags[flags.index("--dist-training-loss") + 1] == "nll"
+    assert edits["dist_training_loss"] == "nll"
 
 
 def test_required_matrix_columns_fail_closed_and_strategy_identity_is_spec_specific():
@@ -659,14 +703,14 @@ def test_dump_subdir_matches_meditate_keying():
     # the pipeline.py --dist fix writes (keyed on the trained dist, not raw zinb_mode).
     assert (
         sweep._dump_subdir(
-            {"dist": "NegBin", "count_dispersion_objective": "crps"},
+            {"dist": "NegBin", "dist_training_loss": "nll", "count_dispersion_objective": "crps"},
             get_strategy("NegBin"),
         )
         == "none"
     )
     assert (
         sweep._dump_subdir(
-            {"dist": "DPO", "count_dispersion_objective": "pit_ks"}, get_strategy("DPO")
+            {"dist": "DPO", "dist_training_loss": "nll", "count_dispersion_objective": "pit_ks"}, get_strategy("DPO")
         )
         == "none"
     )
@@ -913,6 +957,7 @@ def test_score_corner_decodes_zinb_with_none_and_no_skew(monkeypatch):
     spec = get_strategy("ZINB")
     corner = {
         "dist": "ZINB",
+        "dist_training_loss": "nll",
         "zinb_mode": "hurdle",
         "count_dispersion_objective": "crps",
         "blending_loss_fn": "nll",
@@ -1322,14 +1367,16 @@ def test_select_board_cells_withheld_default_shipped_flag_and_data_filter(monkey
             "PTS": {"dist": "SkewNormal", "shipped": "devel"},  # only with --include-shipped
             "STL": {
                 "dist": "ZINB",
+                "dist_training_loss": "nll",
                 "shipped": "withheld",
             },  # withheld but no cached matrix → missing
         },
         "MLB": {
-            "pitcher strikeouts": {"dist": "ZINB", "shipped": "withheld"},  # default board
+            "pitcher strikeouts": {"dist": "ZINB", "dist_training_loss": "nll", "shipped": "withheld"},  # default board
             "hits allowed": {"dist": "Gamma", "shipped": "withheld"},  # excluded: unswept family
             "1st inning hits allowed": {
                 "dist": "ZINB",
+                "dist_training_loss": "nll",
                 "shipped": "withheld",
             },  # excluded: not a market
         },
@@ -1366,7 +1413,7 @@ def test_select_board_cells_dist_class_filters_families_and_sets_aside_empty_cel
     """
     fake = {
         "WNBA": {"AST": {"dist": "SkewNormal", "shipped": "withheld"}},
-        "MLB": {"pitcher strikeouts": {"dist": "ZINB", "shipped": "withheld"}},
+        "MLB": {"pitcher strikeouts": {"dist": "ZINB", "dist_training_loss": "nll", "shipped": "withheld"}},
         # Mean over the count-admission ceiling → no count family survives --dist-class count.
         "NFL": {"passing yards": {"dist": "SkewNormal", "shipped": "withheld"}},
     }
@@ -1771,6 +1818,7 @@ def test_stat_meta_edit_is_family_aware():
     # leave carrying a slug ship_config._validate_cell rejects.
     zinb_controls = {
         "dist": "ZINB",
+        "dist_training_loss": "nll",
         "zinb_mode": "hurdle",
         "count_dispersion_objective": "pit_ks",
         "blending_loss_fn": "nll",
@@ -1785,11 +1833,12 @@ def test_stat_meta_edit_is_family_aware():
         "controls_json": controls_json(zinb_controls),
     }
     assert sweep._stat_meta_edit(zinb) == (
-        "dist=ZINB, zinb_mode=hurdle, count_dispersion_objective=pit_ks, blending=nll, "
-        "posthoc=none, target_normalization=none"
+        "dist=ZINB, dist_training_loss=nll, count_dispersion_objective=pit_ks, blending=nll, "
+        "posthoc=none, zinb_mode=hurdle, target_normalization=none"
     )
     negbin_controls = {
         "dist": "NegBin",
+        "dist_training_loss": "nll",
         "count_dispersion_objective": "crps",
         "blending_loss_fn": "crps",
         "posthoc": "roe_mean",
@@ -1803,8 +1852,8 @@ def test_stat_meta_edit_is_family_aware():
         "controls_json": controls_json(negbin_controls),
     }
     assert sweep._stat_meta_edit(negbin) == (
-        "dist=NegBin, count_dispersion_objective=crps, blending=crps, posthoc=roe_mean, "
-        "target_normalization=none"
+        "dist=NegBin, dist_training_loss=nll, count_dispersion_objective=crps, blending=crps, "
+        "posthoc=roe_mean, target_normalization=none"
     )
     spec = get_strategy(RUSHING)
     structural = {
@@ -2149,6 +2198,94 @@ def test_confirm_risk_flags_continuous_on_integer_target_and_g4_inside_inflation
         sweep, "_training_matrix_contract", lambda lg, mkt: (frozenset(), _MATRIX_SHA, False, 41.2)
     )
     assert sweep._confirm_risk(sn, sweep._cell_context("WNBA", "AST"), {}) == ""
+
+
+def _priced_against(monkeypatch, incumbent_slack, *challenger_slacks):
+    """Price a synthetic cell's corners against an incumbent scored at ``incumbent_slack``."""
+    spec = get_strategy("SkewNormal")
+    corners = strategy_controls(spec)[: 1 + len(challenger_slacks)]
+    monkeypatch.setattr(sweep, "_incumbent_corner", lambda context: (spec, corners[0]))
+    context = sweep._cell_context("WNBA", "AST")
+    return sweep._with_incumbent_margin(
+        [
+            {
+                "corner_fingerprint": corner_fingerprint(
+                    spec, controls, str(context.matrix_sha256)
+                ),
+                "slack": slack,
+                "discounted_slack": slack,
+            }
+            for controls, slack in zip(
+                corners, (incumbent_slack, *challenger_slacks), strict=True
+            )
+        ],
+        context,
+    )
+
+
+def test_board_prices_every_corner_against_the_cells_serving_recipe(monkeypatch):
+    """``margin_vs_incumbent`` is a corner's slack less the serving recipe's, on one frame.
+
+    Slack alone ranks a corner against the gates and the book and never against the model it would
+    replace, so a supersession ranked on slack is ranked on the wrong quantity.
+    """
+    priced = _priced_against(monkeypatch, 0.10, 0.25, -0.05)
+
+    assert [row["is_incumbent"] for row in priced] == [True, False, False]
+    assert [row["margin_vs_incumbent"] for row in priced] == pytest.approx([0.0, 0.15, -0.15])
+
+
+@pytest.mark.parametrize(
+    "baseline_slack, why",
+    [
+        (sweep._FAILED_CORNER_SLACK, "the fit crashed, so it measured nothing"),
+        (-12.0, "it scored, but disagrees with the cell shipping today"),
+    ],
+)
+def test_a_baseline_that_fails_its_own_gates_leaves_every_margin_unknown(
+    monkeypatch, baseline_slack, why
+):
+    """An incumbent that does not clear the gates is unknown, not a huge win.
+
+    It is serving because it passed all six at full HPO, so a negative re-measure indicts the
+    measurement, not the model. Subtracting it anyway inverts the ranking: the first supersession
+    pass put NHL points top of the live lane at margin +12.4 off a −12.0 baseline, and it held.
+    """
+    priced = _priced_against(monkeypatch, baseline_slack, 0.25)
+
+    assert [row["is_incumbent"] for row in priced] == [True, False], why
+    assert all(math.isnan(row["margin_vs_incumbent"]) for row in priced), why
+
+
+def test_search_cell_scores_the_incumbent_even_when_the_study_never_proposes_it(monkeypatch):
+    """The baseline is guaranteed, not hoped for.
+
+    ``enqueue_trial`` skips params its study already holds, so a resumed cell whose cached baseline
+    row had gone inadmissible silently lost it — 25 of 73 live cells on the board carry no incumbent
+    row for that reason. The backstop costs one retrain beyond ``max_trials``.
+    """
+    monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
+    monkeypatch.setattr(sweep, "_enqueued_corners", lambda context: [])
+    monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
+
+    board = sweep.search_cell("WNBA", "AST", max_trials=2)
+
+    assert board["is_incumbent"].sum() == 1
+    assert board["margin_vs_incumbent"].notna().all()
+
+
+def test_a_family_restricted_sweep_prices_no_cross_family_incumbent(monkeypatch):
+    """A sweep not allowed to train the incumbent's family cannot compare anything to it."""
+    zinb = get_strategy("ZINB")
+    monkeypatch.setattr(sweep, "_incumbent_corner", lambda ctx: (zinb, strategy_controls(zinb)[0]))
+    monkeypatch.setattr(sweep, "_cell_families", lambda lg, mkt: ("SkewNormal",))
+    monkeypatch.setattr(sweep, "_enqueued_corners", lambda context: [])
+    monkeypatch.setattr(sweep, "_run_and_score", _fake_run_and_score)
+
+    board = sweep.search_cell("WNBA", "AST", max_trials=2)
+
+    assert not board["is_incumbent"].any()
+    assert board["margin_vs_incumbent"].isna().all()
 
 
 def test_search_cell_threads_ledger_discounts_into_the_board(monkeypatch, tmp_path):
@@ -2782,7 +2919,7 @@ def test_mandatory_corners_lead_the_enqueue_order_ahead_of_evidence_and_the_incu
     monkeypatch.setattr(
         sweep,
         "load_stat_meta",
-        lambda path: {"NFL": {"passing yards": {"dist": "DPO", "posthoc": "roe_mean"}}},
+        lambda path: {"NFL": {"passing yards": {"dist": "DPO", "dist_training_loss": "nll", "posthoc": "roe_mean"}}},
     )
     mandatory = next(
         (slug, controls)
@@ -2864,6 +3001,7 @@ def test_mandatory_corner_identity_is_matrix_bound_so_a_rebuild_forces_reevaluat
             {"dist": "ZINB"},
             {
                 "dist": "ZINB",
+                "dist_training_loss": "nll",
                 "zinb_mode": "joint",
                 "count_dispersion_objective": "crps",
                 "blending_loss_fn": "nll",

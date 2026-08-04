@@ -192,6 +192,7 @@ def _zinb_row(mode, disp, blend, ships, slack, posthoc="none"):
             "ZINB",
             {
                 "dist": "ZINB",
+                "dist_training_loss": "nll",
                 "zinb_mode": mode,
                 "count_dispersion_objective": disp,
                 "blending_loss_fn": blend,
@@ -201,7 +202,6 @@ def _zinb_row(mode, disp, blend, ships, slack, posthoc="none"):
             slack,
         ),
         "normalization": float("nan"),
-        "dist_training_loss": float("nan"),
         "sn_param": float("nan"),
     }
 
@@ -215,6 +215,7 @@ def _negbin_row(disp, blend, ships, slack, league="MLB", market="pitcher strikeo
             "NegBin",
             {
                 "dist": "NegBin",
+                "dist_training_loss": "nll",
                 "count_dispersion_objective": disp,
                 "blending_loss_fn": blend,
                 "posthoc": "none",
@@ -224,7 +225,6 @@ def _negbin_row(disp, blend, ships, slack, league="MLB", market="pitcher strikeo
         ),
         "zinb_mode": float("nan"),
         "normalization": float("nan"),
-        "dist_training_loss": float("nan"),
         "sn_param": float("nan"),
     }
 
@@ -233,9 +233,17 @@ def _structural_row(slug, market, ships=True, slack=0.4):
     return _signed_row("NFL", market, slug, dict(get_strategy(slug).fixed_controls), ships, slack)
 
 
-def _nominate(*rows):
+def _nominate(*rows, live=False):
     """Every nominee for the single-cell board made of ``rows``, in the order confirm will try them."""
-    return mc._nominees(pd.DataFrame(list(rows)))
+    return mc._nominees(pd.DataFrame(list(rows)), live=live)
+
+
+def _withheld_meta(board):
+    """Every cell on ``board`` marked withheld — the fresh lane, which ranks on slack."""
+    return {
+        league: {market: {"shipped": mc.WITHHELD} for market in sub["market"]}
+        for league, sub in board.groupby("league")
+    }
 
 
 def _seed_corners(monkeypatch, *controls):
@@ -369,6 +377,7 @@ def test_nominees_zinb_is_fully_persistable():
     nominated = _nominate(_zinb_row("hurdle", "pit_ks", "crps", True, 0.2))
     assert nominated[0]["edits"] == {
         "dist": "ZINB",
+        "dist_training_loss": "nll",
         "zinb_mode": "hurdle",
         "count_dispersion_objective": "pit_ks",
         "blending": "crps",
@@ -391,6 +400,7 @@ def test_nominees_cross_family_negbin_leads():
     assert nominated[0]["family"] == "NegBin"
     assert nominated[0]["edits"] == {
         "dist": "NegBin",
+        "dist_training_loss": "nll",
         "count_dispersion_objective": "crps",
         "blending": "nll",
         "posthoc": "none",
@@ -411,6 +421,7 @@ def test_nominees_cross_family_zinb_leads():
     assert nominated[0]["family"] == "ZINB"
     assert nominated[0]["edits"] == {
         "dist": "ZINB",
+        "dist_training_loss": "nll",
         "zinb_mode": "hurdle",
         "count_dispersion_objective": "pit_ks",
         "blending": "crps",
@@ -594,6 +605,55 @@ def test_nominees_reject_noncanonical_controls_json():
         _nominate(row)
 
 
+def test_a_live_cell_ranks_its_nominees_on_the_margin_over_the_incumbent():
+    """The two lanes rank on different quantities because they answer different questions.
+
+    A withheld cell has to clear the gates outright, so it ranks on slack. A live cell has to beat
+    the recipe already serving, so it ranks on ``margin_vs_incumbent`` — and the orders differ, as
+    the highest-slack corner here is the one that loses to the incumbent.
+    """
+    loses = {**_sn_row("centered_additive_mean10", "crps", "crps", True, 0.30)}
+    loses["margin_vs_incumbent"] = -0.05
+    beats = {**_sn_row("centered_additive_mean10", "nll", "crps", True, 0.10)}
+    beats["margin_vs_incumbent"] = 0.08
+
+    live = _nominate(loses, beats, live=True)
+    fresh = _nominate(loses, beats, live=False)
+
+    assert [n["slack"] for n in live[:1]] == [0.10]  # ranked by margin, so the +0.08 corner leads
+    assert [n["slack"] for n in fresh[:1]] == [0.30]  # ranked by slack, so the 0.30 corner leads
+    assert loses["corner_fingerprint"] not in {n["corner_fingerprint"] for n in live}
+
+
+def test_a_board_swept_before_margins_existed_keeps_the_old_live_ranking():
+    """Margins are a property of the sweep that wrote the board, so their absence is not a NaN.
+
+    Read back off disk a pre-margin board carries the column as ``pd.NA``; treating that as an
+    unknown margin would silently stop every live cell from nominating on a board that never had a
+    baseline to measure against.
+    """
+    legacy = pd.DataFrame(
+        [_sn_row("centered_additive_mean10", "crps", "crps", True, 0.30)]
+    ).assign(margin_vs_incumbent=pd.NA)
+    meta = {"WNBA": {"AST": {"shipped": "devel"}}}
+
+    grouped = mc._candidates(legacy, meta)
+
+    assert [n[0]["slack"] for n in grouped] == [0.30]
+
+
+def test_a_live_cell_with_no_measured_baseline_nominates_nobody():
+    """An unmeasured incumbent makes every margin unknown, and unknown is not evidence of better.
+
+    The fresh lane is unaffected: its bar never referenced the incumbent.
+    """
+    row = {**_sn_row("centered_additive_mean10", "crps", "crps", True, 0.30)}
+    row["margin_vs_incumbent"] = float("nan")
+
+    assert _nominate(row, live=True) == []
+    assert _nominate(row, live=False)
+
+
 def test_candidates_are_one_nominee_list_per_cell():
     """``_candidates`` groups the board by cell; a cell whose every corner is unconfirmable drops out
     rather than contributing an empty walk.
@@ -605,7 +665,7 @@ def test_candidates_are_one_nominee_list_per_cell():
             _mixture_row("NBA", "PTS", 0.90),
         ]
     )
-    grouped = mc._candidates(board)
+    grouped = mc._candidates(board, _withheld_meta(board))
     assert [(n[0]["league"], n[0]["market"]) for n in grouped] == [
         ("WNBA", "AST"),
         ("MLB", "pitcher strikeouts"),
@@ -621,7 +681,7 @@ def test_candidates_walk_the_strongest_cells_first():
             _zinb_row("hurdle", "pit_ks", "crps", False, 0.50),
         ]
     )
-    grouped = mc._candidates(board)
+    grouped = mc._candidates(board, _withheld_meta(board))
     assert [(n[0]["league"], n[0]["market"]) for n in grouped] == [
         ("MLB", "pitcher strikeouts"),
         ("WNBA", "AST"),
@@ -1262,7 +1322,7 @@ def test_run_confirm_deadline_skips_cells_not_yet_started(monkeypatch, capsys):
     )
     meta = {
         "WNBA": {"AST": _sn_original()},
-        "MLB": {"pitcher strikeouts": {"dist": "ZINB", "shipped": "withheld"}},
+        "MLB": {"pitcher strikeouts": {"dist": "ZINB", "dist_training_loss": "nll", "shipped": "withheld"}},
     }
     monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
     monkeypatch.setattr(mc, "_backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
@@ -1314,7 +1374,7 @@ def test_walk_nominees_skips_a_corner_the_ledger_already_decided(monkeypatch, ca
         return ("WNBA", "AST", "REVERTED", ["g4"])
 
     result = mc._walk_nominees(
-        meta, mc._candidates(pd.DataFrame([decided, fresh, stale]))[0], attempt
+        meta, mc._candidates(pd.DataFrame([decided, fresh, stale]), meta)[0], attempt
     )
     assert attempted == [0.25, 0.20]  # the decided leader is skipped, the stale-matrix row retrains
     assert result[2] == "REVERTED"  # the cell's verdict comes from the corners that actually ran
@@ -1324,8 +1384,12 @@ def test_walk_nominees_skips_a_corner_the_ledger_already_decided(monkeypatch, ca
 def test_run_confirm_reports_nothing_confirmable_when_every_corner_is_unservable(
     monkeypatch, capsys
 ):
+    """Nothing confirmable ⇒ stat_meta is read to assign lanes but never backed up or written."""
     monkeypatch.setattr(
-        mc, "load_stat_meta", lambda path: pytest.fail("an empty board must not read stat_meta")
+        mc, "_backup_stat_meta", lambda: pytest.fail("an empty board must not touch stat_meta")
+    )
+    monkeypatch.setattr(
+        mc, "_atomic_write_meta", lambda meta: pytest.fail("an empty board must not write stat_meta")
     )
     mc.run_confirm(pd.DataFrame([_mixture_row("WNBA", "AST", 0.9)]), yes=True)
     assert "no confirmable nominees on the board." in capsys.readouterr().out
@@ -1347,6 +1411,7 @@ def test_run_confirm_skips_activation_gated_league(monkeypatch, capsys):
         "ZINB",
         {
             "dist": "ZINB",
+            "dist_training_loss": "nll",
             "zinb_mode": "hurdle",
             "count_dispersion_objective": "pit_ks",
             "blending_loss_fn": "crps",
@@ -1358,7 +1423,7 @@ def test_run_confirm_skips_activation_gated_league(monkeypatch, capsys):
     board = pd.DataFrame([_sn_row("centered_additive_mean10", "crps", "crps", True, 0.25), mlb_row])
     meta = {
         "WNBA": {"AST": _sn_original()},
-        "MLB": {"total bases": {"dist": "ZINB", "shipped": "withheld"}},
+        "MLB": {"total bases": {"dist": "ZINB", "dist_training_loss": "nll", "shipped": "withheld"}},
     }
     monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
     monkeypatch.setattr(mc, "_backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
@@ -1752,8 +1817,8 @@ def test_confirm_nominee_cap_truncates_each_cell_after_dedup(monkeypatch):
         ]
     )
 
-    uncapped = mc._candidates(board)
-    capped = mc._candidates(board, 2)
+    uncapped = mc._candidates(board, _withheld_meta(board))
+    capped = mc._candidates(board, _withheld_meta(board), 2)
 
     assert [len(cell) for cell in uncapped] == [3]
     assert [len(cell) for cell in capped] == [2]

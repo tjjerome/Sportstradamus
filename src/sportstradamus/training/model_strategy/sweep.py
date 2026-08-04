@@ -46,6 +46,11 @@ import tabulate
 
 from sportstradamus import data as _data_pkg
 from sportstradamus.helpers.io import market_file_slug
+from sportstradamus.helpers.locks import (
+    ORCHESTRATED_ENV_VAR,
+    TRAINING_ARTIFACTS_LOCK_FILE,
+    file_lock,
+)
 from sportstradamus.training.baselines import resolve_denom_col
 from sportstradamus.training.markets import ALL_MARKETS
 from sportstradamus.training.model_strategy.identity import (
@@ -214,6 +219,8 @@ _BOARD_COLUMNS: list[str] = [
     "slack",
     "ships",
     "discounted_slack",
+    "is_incumbent",
+    "margin_vs_incumbent",
     "confirm_risk",
     "g1_pass",
     "g1_brier_diff_ci_hi",
@@ -481,8 +488,14 @@ def _run_meditate_with_lock_retry(cmd: list[str], log_path: pathlib.Path, *, tim
     :func:`_failure_reason` and the log tail and re-raises, so the deterministic sweep stays fail-loud
     (the crash kills the Optuna study) and the confirm loop can turn the raise into a HELD/REVERTED
     verdict that names the cause.
+
+    Every orchestrated ``meditate`` reaches the subprocess through here, so this is also where the
+    child is marked orchestrated: a walk already holds the training-artifact lock on its own behalf,
+    and a sweep's parallel corners write only the research sandbox. Without the mark they would
+    contend with the lock their own orchestrator holds.
     """
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, ORCHESTRATED_ENV_VAR: "1"}
     n_attempts = len(_LOCK_RETRY_WAITS_S) + 1  # each wait buys one retry, plus the first attempt
     for attempt in range(n_attempts):
         with log_path.open("w") as log:
@@ -494,6 +507,7 @@ def _run_meditate_with_lock_retry(cmd: list[str], log_path: pathlib.Path, *, tim
                     timeout=timeout,
                     stdout=log,
                     stderr=subprocess.STDOUT,
+                    env=env,
                 )
                 return
             except subprocess.CalledProcessError as exc:
@@ -772,6 +786,67 @@ def _incumbent_corner(context: CellContext) -> tuple[StrategySpec, dict[str, str
     return None if controls is None else (spec, controls)
 
 
+def _record_scored(
+    league: str,
+    market: str,
+    scored: dict[str, dict[str, object]],
+    discounts: dict[str, float],
+    out: str | None,
+) -> None:
+    """Flush the cell's corners scored so far to the board, when the run persists one.
+
+    Called after every scored corner. The Optuna journal replays which corners were *proposed* but
+    not what they scored, so the board is the only durable record of a trial: without the per-corner
+    write, an interrupt anywhere in a multi-hour cell throws away every corner it had trained.
+    """
+    if out is not None:
+        _upsert_cell(_rank_cell_board(league, market, scored, discounts), out)
+
+
+def _scored_incumbent(
+    context: CellContext,
+    families: tuple[str, ...],
+    scored: dict[str, dict[str, object]],
+    timeout_s: int,
+    progress: SearchProgress,
+) -> dict[str, dict[str, object]]:
+    """Score the cell's serving recipe on this matrix unless the search already did.
+
+    The incumbent leads :func:`_enqueued_corners`, so the search covers it on a cell whose study is
+    fresh. It is not covered when the study already holds those params: ``enqueue_trial`` skips the
+    enqueue, and if the cached board row behind it had gone inadmissible nothing re-measures it. That
+    is not hypothetical — 25 of 73 live cells on the current board carry no incumbent row, which is
+    why their corners could only ever be ranked against the gates, never against what the cell
+    serves. This is the backstop that closes the gap, and it costs a retrain beyond ``max_trials``:
+    the baseline is what the search is measured against, not one of its trials.
+
+    A families-restricted sweep prices no cross-family incumbent — the corners it trains are not
+    comparable to a recipe it is not allowed to train — so those cells keep a ``NaN`` margin.
+
+    The result deliberately does not reach :class:`CellSearchState`: a crashed baseline is one
+    observation of ``-inf`` on the incumbent's own family, which would abandon exactly the family
+    the cell has the most evidence for.
+    """
+    incumbent = _incumbent_corner(context)
+    if incumbent is None or incumbent[0].slug not in families:
+        return {}
+    spec, corner = incumbent
+    fingerprint = corner_fingerprint(spec, corner, str(context.matrix_sha256))
+    if fingerprint in scored:
+        return {}
+    progress.starting(corner)
+    row = _run_and_score(context.league, context.market, spec.slug, corner, timeout_s)
+    progress.scored(
+        corner,
+        verdict=_verdict(row),
+        slack=float(row["slack"]),
+        elapsed_s=row.get("elapsed_s"),
+        trained=True,
+        failure=_board_text(row, "failure"),
+    )
+    return {fingerprint: row}
+
+
 def search_cell(
     league: str,
     market: str,
@@ -798,6 +873,10 @@ def search_cell(
     ``seed_seconds`` is this cell's mean corner duration from a prior run; it carries the bar's ETA
     until enough of this run's own corners have landed to estimate from. ``position`` is the terminal
     row this cell's bar draws on, handed out by :class:`BoardProgress` when cells run concurrently.
+
+    After the budget is spent, the cell's ``stat_meta`` incumbent trains once more if the study
+    never scored it — a retrain beyond ``max_trials`` that prices every other row's
+    ``margin_vs_incumbent`` (:func:`_scored_incumbent`).
     """
     context = _cell_context(league, market)
     families = families if families is not None else _cell_families(league, market)
@@ -850,8 +929,7 @@ def search_cell(
             failure=_board_text(row, "failure"),
         )
         scored[fingerprint] = row
-        if out is not None:
-            _upsert_cell(_rank_cell_board(league, market, scored, discounts), out)
+        _record_scored(league, market, scored, discounts, out)
         return -float(row["slack"])
 
     def stop_when_budget_spent(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
@@ -869,6 +947,8 @@ def search_cell(
             n_trials=_PRUNED_SUGGESTION_SLACK * reachable_corners(context, families),
             callbacks=[state.stop_if_done, stop_when_budget_spent],
         )
+        scored.update(_scored_incumbent(context, families, scored, timeout_s, progress))
+        _record_scored(league, market, scored, discounts, out)
     return _rank_cell_board(league, market, scored, discounts)
 
 
@@ -1009,6 +1089,49 @@ def _confirm_risk(row: dict[str, object], context: CellContext, discounts: dict[
     return ""
 
 
+def _with_incumbent_margin(rows: list[dict[str, object]], context: CellContext) -> list[dict]:
+    """Tag the cell's serving recipe and price every corner as its margin over that recipe.
+
+    Slack measures a corner against the gates and the book, which is the bar a withheld cell has to
+    clear outright. It says nothing about the bar a live cell faces — beating what already serves —
+    so a supersession ranked on slack is ranked on the wrong quantity. The margin is that comparison
+    on one frame under one protocol, and it is ``NaN`` (unknown, not zero) when the cell has no
+    baseline row.
+
+    A baseline that does not clear the gates is also unknown, not a huge win. The incumbent is by
+    construction a recipe that passed all six at full HPO — that is why it serves — so a negative
+    re-measure means the baseline disagrees with the fact that the cell ships today, and the
+    measurement is not comparable to the candidates'. Subtracting it anyway inverts the ranking:
+    the first supersession pass put NHL points top of the live lane at margin +12.4, sourced
+    entirely from an incumbent scoring -12.0, and it held on both S2 and S3 like every other cell
+    whose baseline was broken.
+    """
+    incumbent = _incumbent_corner(context)
+    baseline = (
+        None
+        if incumbent is None
+        else corner_fingerprint(incumbent[0], incumbent[1], str(context.matrix_sha256))
+    )
+    reference = next(
+        (
+            float(row["discounted_slack"])
+            for row in rows
+            if row.get("corner_fingerprint") == baseline and float(row["slack"]) >= 0
+        ),
+        None,
+    )
+    return [
+        {
+            **row,
+            "is_incumbent": row.get("corner_fingerprint") == baseline,
+            "margin_vs_incumbent": (
+                math.nan if reference is None else float(row["discounted_slack"]) - reference
+            ),
+        }
+        for row in rows
+    ]
+
+
 def _rank_cell_board(
     league: str,
     market: str,
@@ -1020,20 +1143,25 @@ def _rank_cell_board(
     ``discounted_slack`` re-prices each row's raw slack under the ledger's confirm-vs-board gate
     shifts and is the sort key; ``confirm_risk`` flags the corner shapes that measured worst on
     confirm. Both fall back to the raw ranking / stay blank on a thin ledger.
+    ``margin_vs_incumbent`` prices each corner against the cell's serving recipe — the value
+    confirm's live lane ranks on.
     """
     discounts = discounts or {}
     context = _cell_context(league, market)
     board = pd.DataFrame(
-        [
-            {
-                "league": league,
-                "market": market,
-                **row,
-                "discounted_slack": _discounted_slack(row, discounts),
-                "confirm_risk": _confirm_risk(row, context, discounts),
-            }
-            for row in scored.values()
-        ]
+        _with_incumbent_margin(
+            [
+                {
+                    "league": league,
+                    "market": market,
+                    **row,
+                    "discounted_slack": _discounted_slack(row, discounts),
+                    "confirm_risk": _confirm_risk(row, context, discounts),
+                }
+                for row in scored.values()
+            ],
+            context,
+        )
     )
     ranked = board.sort_values("discounted_slack", ascending=False, ignore_index=True)
     ranked["swept_at"] = datetime.now(UTC).isoformat(timespec="seconds")
@@ -2025,14 +2153,23 @@ def main(
     if confirm:
         from sportstradamus.training.model_strategy.confirm import run_confirm
 
-        run_confirm(
-            result,
-            yes=yes,
-            max_nominees=confirm_nominees,
-            deadline_hours=confirm_hours,
-            fresh_only=confirm_fresh_only,
-            auto_promote=confirm_auto_promote,
-        )
+        # The walk snapshots and restores each cell's production artifacts around its retrain,
+        # which only holds while nothing else writes them. Claimed here at the process boundary
+        # rather than inside run_confirm so the walk logic stays a plain testable function.
+        with file_lock(
+            TRAINING_ARTIFACTS_LOCK_FILE,
+            timeout_s=0,
+            label="confirm walk",
+            contention_hint="Wait for it to finish, or kill it, before starting another.",
+        ):
+            run_confirm(
+                result,
+                yes=yes,
+                max_nominees=confirm_nominees,
+                deadline_hours=confirm_hours,
+                fresh_only=confirm_fresh_only,
+                auto_promote=confirm_auto_promote,
+            )
 
 
 if __name__ == "__main__":

@@ -469,6 +469,33 @@ every remaining miss landed (NFL interceptions, receiving yards ×3, qb yards' f
 untried lever is a per-gate board-side handicap at nomination (require board g4 + 0.016 to clear
 the bar), which would have skipped those walks.
 
+**Slack is the wrong currency for the live lane.** The first full supersession pass spent **15
+full-HPO retrains for 0 promotions** — every cell held on S2 (paired Brier CI straddling or below
+zero), most on S3 too (paired-Sharpe z as low as −2.78 against a 1.645 bar); 46 more cells hit the
+deadline unwalked. The cause is structural, not a threshold being too strict: slack measures a
+corner against the gates and the book and never against the model the cell already serves, so it
+predicts fresh-lane shipping well (table above) and carries almost no signal about *replacing*
+something.
+
+The board now scores each cell's `stat_meta` incumbent as a baseline corner and publishes
+`margin_vs_incumbent` (`is_incumbent` flags the baseline row); `_nominees` ranks a live cell on that
+margin and a withheld cell on slack, unchanged. The baseline was already enqueued but not
+guaranteed — `enqueue_trial` skips params its study already holds, so **25 of 73 live cells carried
+no incumbent row at all** — so `_scored_incumbent` retrains it after the search when nothing scored
+it, one corner beyond `max_trials`.
+
+A margin is `NaN` — unknown, never 0 — when the baseline is missing, when its family sits outside a
+`--dist-class`-restricted sweep, or when **the baseline does not itself clear the gates**. That last
+condition matters more than it sounds: the incumbent passed all six at full HPO (that is why it
+serves), so a negative re-measure indicts the measurement, not the model, and subtracting it inverts
+the ranking. The pass put NHL points top of the live lane at margin +12.4 sourced entirely from a
+−12.0 baseline, and NBA OREB second at +4.8 off −4.5; both held. Where the baseline is valid (46
+cells), **20 have the incumbent as their own best corner** — margin 0, nothing to attempt.
+
+Replayed against the pass's own outcomes the rule skips **14 of the 15 retrains** up front; the one
+survivor (MLB home runs, baseline +0.161, margin +0.158) held too. Boards swept before the column
+existed keep the old slack ranking whole-board, so this needs a re-sweep to take effect.
+
 ---
 
 ## C. A warm-start hurdle retrain dies on a stale monotone vector

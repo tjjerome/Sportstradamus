@@ -155,14 +155,32 @@ _SHIP_IDENTITY_COLUMNS = [
 ]
 
 
-def _nominees(sub: pd.DataFrame) -> list[dict]:
+def _rank_column(admissible: pd.DataFrame, *, live: bool) -> str:
+    """The board value that decides this cell's nominations.
+
+    A withheld cell is ranked on absolute gate headroom, because passing the gates outright is
+    exactly the bar it has to clear. A live cell's bar is a different question — is this corner
+    better than the recipe already serving? — so it ranks on ``margin_vs_incumbent``. Ranking a
+    supersession on slack measures the candidate against the book and the gates while never
+    comparing it to the incumbent it would replace. ``live`` is only ever set on a board that
+    carries margins at all (see :func:`_candidates`), so the column is present whenever it is read.
+    """
+    if live:
+        return "margin_vs_incumbent"
+    return "discounted_slack" if "discounted_slack" in admissible.columns else "slack"
+
+
+def _nominees(sub: pd.DataFrame, *, live: bool = False) -> list[dict]:
     """Ordered confirm nominees for one cell: top board corners, then seeds, then the incumbent.
 
-    Only board-confident corners nominate: a corner needs a positive rank value —
-    ``discounted_slack`` when the sweep prices it, raw ``slack`` on older boards — and a cell whose
-    best admissible corner is non-positive returns no nominees at all. This trades the rare
-    full-HPO rescue of a board-negative recipe (NBA FTM shipped one at board −1.86) for not
-    spending walks on cells the board predicts to fail; the operator chose the wall clock.
+    Only board-confident corners nominate: a corner needs a positive rank value — see
+    :func:`_rank_column` for which value that is — and a cell whose best admissible corner is
+    non-positive returns no nominees at all. On a live cell that also means a cell whose baseline
+    never scored (``margin_vs_incumbent`` all ``NaN``) nominates nobody: an unmeasured incumbent
+    makes every margin unknown, and an unknown margin is not evidence a corner is better. This
+    trades the rare full-HPO rescue of a board-negative recipe (NBA FTM shipped one at board
+    −1.86) for not spending walks on cells the board predicts to fail; the operator chose the
+    wall clock.
     Legacy boards with no cross-fit rows keep their seed lane — there the board has no opinion.
 
     Ordering is the argument each source can make. Board rows first, ranked by the same value, with
@@ -176,8 +194,12 @@ def _nominees(sub: pd.DataFrame) -> list[dict]:
     lg, mkt = sub["league"].iloc[0], sub["market"].iloc[0]
     context = _cell_context(lg, mkt)
     admissible = sub[sub["eval_split"].astype("string").eq(EVAL_SPLIT_CROSSFIT)]
-    rank_column = "discounted_slack" if "discounted_slack" in admissible.columns else "slack"
-    ranked = admissible.sort_values(rank_column, ascending=False)
+    rank_column = _rank_column(admissible, live=live)
+    # A board read back off disk carries pd.NA in any column its sweep predates, and `pd.NA > 0` is
+    # neither True nor False — every rank comparison below would raise on it.
+    ranked = admissible.assign(
+        **{rank_column: pd.to_numeric(admissible[rank_column], errors="coerce")}
+    ).sort_values(rank_column, ascending=False)
     if len(admissible):
         board_rank = float(ranked[rank_column].max())
         if not board_rank > 0:
@@ -418,19 +440,35 @@ def _validate_board_identity(
     return split
 
 
-def _candidates(board: pd.DataFrame, max_nominees: int | None = None) -> list[list[dict]]:
+def _candidates(
+    board: pd.DataFrame, meta: dict, max_nominees: int | None = None
+) -> list[list[dict]]:
     """Each cell's ordered nominee list, strongest cells first; nothing confirmable drops out.
 
     ``max_nominees`` truncates each list after dedup, trading the tail of a cell's walk for wall
     clock. The ordering :func:`_nominees` establishes is what makes that trade sound — the corners
-    most likely to ship come first. Cells sort by their best board rank descending (legacy
-    seed-only cells last) so a deadline cut lands on the weakest tail, not on cells the board
-    likes that happened to group late.
+    most likely to ship come first. ``meta`` decides each cell's lane, which decides what its
+    nominees are ranked on.
+
+    Cells sort by their best board rank descending (legacy seed-only cells last) so a deadline cut
+    lands on the weakest tail, not on cells the board likes that happened to group late. The two
+    lanes rank on different quantities, but a stable sort over the mixed list still leaves each
+    lane correctly ordered within itself, which is all :func:`_walk_lanes` walks.
+
+    Whether a board carries incumbent margins is a property of the sweep that wrote it, so it is
+    decided once here rather than per cell: on a board swept before margins existed every cell keeps
+    the old slack ranking, and on one swept with them a live cell whose own baseline never scored
+    gets ``NaN`` — unknown — instead of silently falling back to the wrong quantity.
     """
+    priced = "margin_vs_incumbent" in board and board["margin_vs_incumbent"].notna().any()
     cells = [
         nominated[:max_nominees]
-        for _cell, sub in board.groupby(["league", "market"], sort=False)
-        if (nominated := _nominees(sub))
+        for (league, market), sub in board.groupby(["league", "market"], sort=False)
+        if (
+            nominated := _nominees(
+                sub, live=priced and meta[league][market].get("shipped") != WITHHELD
+            )
+        )
     ]
     cells.sort(key=lambda nominated: nominated[0]["board_rank"], reverse=True)
     return cells
@@ -1077,12 +1115,12 @@ def run_confirm(
     ``deadline_hours`` skips cells not yet started when the budget runs out; ``fresh_only`` drops
     the live lane for unattended runs.
     """
-    ready = _candidates(board, max_nominees)
+    meta = load_stat_meta(_STAT_META)
+    ready = _candidates(board, meta, max_nominees)
     if not ready:
         click.echo("no confirmable nominees on the board.")
         return
 
-    meta = load_stat_meta(_STAT_META)
     fresh, shipped = _split_shippable(ready, meta, fresh_only=fresh_only)
     fresh = _drop_activation_gated(fresh)
     if not fresh and not shipped:
