@@ -4,8 +4,6 @@ Combines market-level diagnostics with professional forecasting metrics
 following Gneiting & Raftery (2007) and Murphy (1973).
 """
 
-from datetime import datetime, timedelta
-
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -17,14 +15,13 @@ from sportstradamus.analysis import (
     murphy_decomposition,
 )
 from sportstradamus.dashboard.components.grid import render_themed_grid
+from sportstradamus.dashboard.components.hero import desk_only_notice, page_hero
 from sportstradamus.dashboard.components.lab_filters import apply_lab_filters, render_lab_filters
 from sportstradamus.dashboard.data import (
-    TIMEFRAME_OPTIONS,
     filtered_history_or_stop,
     get_prediction_history,
     load_resolved_history_or_stop,
     load_stat_meta,
-    render_banner,
     sidebar_filters,
     sport_filtered,
 )
@@ -48,8 +45,9 @@ _LOW_SHARPNESS_STD = 0.04
 # market table (spec: find-the-weak-spots framing, the opposite intent from Receipts).
 _START_HERE_COUNT = 3
 
-st.title("Market Diagnostics & Forecast Quality")
-render_banner("stats", "per-market accuracy, calibration, CRPS")
+page_hero("MODEL LAB · DIAGNOSTICS", "Market Diagnostics & Forecast Quality")
+desk_only_notice()
+
 
 stat_meta = load_stat_meta()
 lab_sel = render_lab_filters(stat_meta, collapsed=False)
@@ -63,15 +61,8 @@ if history.empty:
     st.info("No data matches the current sport filter.")
     st.stop()
 
-st.sidebar.header("Filters")
-time_window = st.sidebar.selectbox(
-    "Time window", list(TIMEFRAME_OPTIONS.keys()), index=0, key="mkt_time"
-)
-cutoff = None
-if TIMEFRAME_OPTIONS[time_window] is not None:
-    cutoff = datetime.today().date() - timedelta(days=TIMEFRAME_OPTIONS[time_window])
-
-filters = sidebar_filters(history, key_prefix="mkt_")
+filters = sidebar_filters(history, key_prefix="mkt_", time_window_key="mkt_time")
+cutoff = filters["cutoff"]
 
 df = filtered_history_or_stop(history, filters)
 df = apply_lab_filters(df, stat_meta, lab_sel)
@@ -89,6 +80,15 @@ if cutoff is not None:
 if df.empty:
     st.info("No data for selected time window.")
     st.stop()
+
+# Coverage is a diagnostics fact (share of predictions carrying a stored distribution),
+# not a filter — it lives in the page body, not the shared sidebar filter panel.
+if "Dist" in df.columns:
+    st.metric(
+        "Distribution Data Coverage",
+        f"{df['Dist'].notna().mean():.0%}",
+        help="Share of predictions in the current filter carrying a stored distribution family.",
+    )
 
 # CRPS arrives as a precomputed per-prediction column; here we only aggregate
 # the stored values instead of re-integrating per row on every rerun.

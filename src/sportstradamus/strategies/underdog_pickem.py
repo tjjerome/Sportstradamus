@@ -1,4 +1,4 @@
-"""Underdog Pick'em orchestrator (Phase 3 §3.3 + §3.5 Rivals).
+"""Pick'em orchestrator for Underdog and Sleeper (Phase 3 §3.3 + §3.5 Rivals).
 
 Pure orchestrator over ``prediction.scoring.process_offers`` and
 ``prediction.correlation.find_correlation`` (one search per contest
@@ -42,6 +42,13 @@ _RECOMMENDATIONS_DIR = Path("data") / "recommendations"
 # dashboard re-sizes every entry against the user's actual bankroll.
 REFERENCE_BANKROLL = Decimal("1000")
 
+# Sleeper has no Rivals/H2H game mode; callers building a Sleeper PickemConfig
+# override contest_variants with this instead of the Underdog-shaped default.
+PLATFORM_CONTEST_VARIANTS: dict[str, tuple[str, ...]] = {
+    "Underdog": ("power", "flex", "rivals"),
+    "Sleeper": ("power", "flex"),
+}
+
 
 @dataclass(frozen=True)
 class PickemConfig:
@@ -72,18 +79,20 @@ class RecommendedEntry:
     payout_multiplier: float
     ev: float
     recommended_stake: Decimal
+    canonical_legs: tuple[dict, ...] = ()
     shrinkage_source: str = "training"
     shrinkage: float = 1.0
     extras: dict[str, Any] = field(default_factory=dict)
+    platform: str = "Underdog"
 
 
-def _filter_legs(offers: pd.DataFrame, config: PickemConfig) -> pd.DataFrame:
+def filter_legs(offers: pd.DataFrame, config: PickemConfig) -> pd.DataFrame:
     """Apply leg-level filters: model & sharp coverage + edge + disagreement."""
     if offers.empty:
         return offers
     required = {"Win Prob", "Market Prob"}
     if not required.issubset(offers.columns):
-        msg = f"_filter_legs needs columns {required}; got {set(offers.columns)}"
+        msg = f"filter_legs needs columns {required}; got {set(offers.columns)}"
         raise ValueError(msg)
 
     df = offers.dropna(subset=["Win Prob", "Market Prob"]).copy()
@@ -135,6 +144,7 @@ def _row_to_entry(
     bankroll: Decimal,
     config: PickemConfig,
     shrinkage_info: tuple[float, str],
+    platform: str = "Underdog",
 ) -> RecommendedEntry:
     payout = float(row["Boost"])
     model_ev = float(row["Model EV"])
@@ -142,6 +152,7 @@ def _row_to_entry(
     ev = model_ev - 1.0
     bet_size = int(row["Bet Size"])
     legs = tuple(str(row.get(f"Leg {i}", "")) for i in range(1, bet_size + 1))
+    canonical_legs = tuple(row["legs"])
     shrinkage, source = shrinkage_info
 
     stake = fractional_kelly_stake(
@@ -163,13 +174,26 @@ def _row_to_entry(
         payout_multiplier=payout,
         ev=ev,
         recommended_stake=stake,
+        canonical_legs=canonical_legs,
         shrinkage=shrinkage,
         shrinkage_source=source,
         extras={"league": str(row.get("League", "")), "game": str(row.get("Game", ""))},
+        platform=platform,
     )
 
 
-def _resolve_market_shrinkage(league: str, market: str) -> tuple[float, str]:
+def resolve_market_shrinkage(league: str, market: str) -> tuple[float, str]:
+    """Resolve Kelly shrinkage for one ``(league, market)`` cell.
+
+    Blends live CLV-segment calibration with offline training calibration per
+    ``kelly.resolve_shrinkage``'s explicit>blended>training>clv_segment>fallback
+    chain; the returned source label tells a caller which rung of that chain
+    fired for this cell.
+
+    Returns:
+        ``(shrinkage, source)`` where ``source`` is one of ``"blended"``,
+        ``"training"``, ``"clv_segment"``, or ``"fallback"``.
+    """
     # Lazy imports keep torch (via training.report) out of the dashboard import
     # path — do NOT hoist clv or get_market_calibration to module level.
     from sportstradamus import clv as _clv
@@ -195,17 +219,18 @@ def construct_entries(
     *,
     parlay_dfs: dict[str, pd.DataFrame] | None = None,
     offers_df: pd.DataFrame | None = None,
+    platform: str = "Underdog",
 ) -> list[RecommendedEntry]:
-    """Build ranked, sized Underdog Pick'em entries for ``date``.
+    """Build ranked, sized Pick'em entries for ``date`` on ``platform``.
 
     ``parlay_dfs`` / ``offers_df`` injection short-circuits the live scraper
     so tests and offline reruns do not hit the network.
     """
     config = config or PickemConfig()
     if parlay_dfs is None:
-        parlay_dfs, offers_df = _live_load(config)
+        parlay_dfs, offers_df = live_load(config, platform)
     offers_df = pd.DataFrame() if offers_df is None else offers_df
-    filtered_offers = _filter_legs(offers_df, config) if not offers_df.empty else offers_df
+    filtered_offers = filter_legs(offers_df, config) if not offers_df.empty else offers_df
 
     entries: list[RecommendedEntry] = []
     for variant in config.contest_variants:
@@ -215,7 +240,9 @@ def construct_entries(
         parlays = _filter_parlays(parlays, variant, config.entry_sizes, config)
         if variant == "rivals":
             parlays = _validate_rivals_coverage(parlays, filtered_offers)
-        entries.extend(_variant_entries(parlays, variant, filtered_offers, bankroll, config))
+        entries.extend(
+            _variant_entries(parlays, variant, filtered_offers, bankroll, config, platform)
+        )
 
     return rank_and_dedupe(entries, config)
 
@@ -226,22 +253,25 @@ def _variant_entries(
     filtered_offers: pd.DataFrame,
     bankroll: Decimal,
     config: PickemConfig,
+    platform: str = "Underdog",
 ) -> list[RecommendedEntry]:
-    market_by_player = _canonical_markets_by_player(filtered_offers)
+    market_by_player = _canonical_markets_by_player(filtered_offers, platform)
     entries: list[RecommendedEntry] = []
     for _, row in parlays.iterrows():
         league = str(row.get("League", ""))
         shrinkage_info = _parlay_shrinkage(row, league, market_by_player)
-        entries.append(_row_to_entry(row, variant, bankroll, config, shrinkage_info))
+        entries.append(_row_to_entry(row, variant, bankroll, config, shrinkage_info, platform))
     return entries
 
 
-def _canonical_markets_by_player(filtered_offers: pd.DataFrame) -> dict[str, set[str]]:
+def _canonical_markets_by_player(
+    filtered_offers: pd.DataFrame, platform: str = "Underdog"
+) -> dict[str, set[str]]:
     """Map each offer's player to the canonical market(s) they were offered on.
 
-    Offer ``Market`` is the raw Underdog name (a ``stat_map["Underdog"]`` key);
+    Offer ``Market`` is the raw platform name (a ``stat_map[platform]`` key);
     mapping it gives the canonical cell key (``REB``, ``BLST``, …) that
-    ``_resolve_market_shrinkage`` resolves against. The leg display strings
+    ``resolve_market_shrinkage`` resolves against. The leg display strings
     can't drive this — they carry a third, lossy namespace (``blocks_and_steals``).
     """
     if filtered_offers.empty or not {"Player", "Market"}.issubset(filtered_offers.columns):
@@ -249,7 +279,7 @@ def _canonical_markets_by_player(filtered_offers: pd.DataFrame) -> dict[str, set
     out: dict[str, set[str]] = {}
     for player, market in zip(
         filtered_offers["Player"],
-        filtered_offers["Market"].map(stat_map["Underdog"]),
+        filtered_offers["Market"].map(stat_map.get(platform, {})),
         strict=True,
     ):
         if isinstance(market, str):
@@ -267,13 +297,13 @@ def _parlay_shrinkage(
     """
     markets: set[str] = set()
     for i in range(1, int(row["Bet Size"]) + 1):
-        markets |= market_by_player.get(_leg_player(str(row.get(f"Leg {i}", ""))), set())
+        markets |= market_by_player.get(leg_player(str(row.get(f"Leg {i}", ""))), set())
     if not markets:
         return 1.0, "fallback"
-    return min((_resolve_market_shrinkage(league, m) for m in markets), key=lambda r: r[0])
+    return min((resolve_market_shrinkage(league, m) for m in markets), key=lambda r: r[0])
 
 
-def _leg_player(leg: str) -> str:
+def leg_player(leg: str) -> str:
     """Player name from a leg string ``"{Player} Over|Under {Line} {Market} - …"``."""
     for token in (" Over ", " Under "):
         if token in leg:
@@ -282,7 +312,10 @@ def _leg_player(leg: str) -> str:
 
 
 def _parlays_per_variant(
-    scored_offers_df: pd.DataFrame, stats: dict[str, Any], config: PickemConfig
+    scored_offers_df: pd.DataFrame,
+    stats: dict[str, Any],
+    config: PickemConfig,
+    platform: str = "Underdog",
 ) -> dict[str, pd.DataFrame]:
     """Run ``find_correlation`` once per contest variant on already-scored offers.
 
@@ -293,7 +326,7 @@ def _parlays_per_variant(
 
     scored = scored_offers_df.to_dict("records") if not scored_offers_df.empty else []
     return {
-        v: find_correlation(scored, stats, "Underdog", contest_variant=v)[1]
+        v: find_correlation(scored, stats, platform, contest_variant=v)[1]
         for v in config.contest_variants
     }
 
@@ -304,6 +337,8 @@ def build_entries_from_scored(
     scored_offers_df: pd.DataFrame,
     stats: dict[str, Any],
     config: PickemConfig | None = None,
+    *,
+    platform: str = "Underdog",
 ) -> list[RecommendedEntry]:
     """Build ranked entries from offers already scored by ``process_offers``.
 
@@ -313,17 +348,26 @@ def build_entries_from_scored(
     the dashboard without a second scrape or archive lock.
     """
     config = config or PickemConfig()
-    parlay_dfs = _parlays_per_variant(scored_offers_df, stats, config)
+    parlay_dfs = _parlays_per_variant(scored_offers_df, stats, config, platform)
     return construct_entries(
-        date, bankroll, config, parlay_dfs=parlay_dfs, offers_df=scored_offers_df
+        date,
+        bankroll,
+        config,
+        parlay_dfs=parlay_dfs,
+        offers_df=scored_offers_df,
+        platform=platform,
     )
 
 
-def _live_load(config: PickemConfig) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:
+def live_load(
+    config: PickemConfig, platform: str = "Underdog"
+) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:
     """Re-run the prophecize loader and search per variant. Heavy."""
-    from sportstradamus.books import get_ud
+    from sportstradamus.books import get_sleeper, get_ud
     from sportstradamus.prediction.scoring import process_offers
     from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
+
+    loaders = {"Underdog": get_ud, "Sleeper": get_sleeper}
 
     stats: dict[str, Any] = {}
     for cls, key in (
@@ -339,14 +383,21 @@ def _live_load(config: PickemConfig) -> tuple[dict[str, pd.DataFrame], pd.DataFr
             s.update()
             stats[key] = s
     offers_df, _ = process_offers(
-        get_ud(), "Underdog", stats, contest_variant=config.contest_variants[0]
+        loaders[platform](), platform, stats, contest_variant=config.contest_variants[0]
     )
-    return _parlays_per_variant(offers_df, stats, config), offers_df
+    return _parlays_per_variant(offers_df, stats, config, platform), offers_df
 
 
 @click.command()
 @click.option("--date", default="today", help="Slate date (YYYY-MM-DD or 'today').")
 @click.option("--bankroll", type=str, required=True, help="Bankroll in dollars.")
+@click.option(
+    "--platform",
+    type=click.Choice(["Underdog", "Sleeper"], case_sensitive=False),
+    default="Underdog",
+    show_default=True,
+    help="DFS platform to build Pick'em entries for.",
+)
 @click.option(
     "--out",
     "out_path",
@@ -354,12 +405,16 @@ def _live_load(config: PickemConfig) -> tuple[dict[str, pd.DataFrame], pd.DataFr
     default=None,
     help="Override output YAML path.",
 )
-def pickem_build(date: str, bankroll: str, out_path: str | None) -> None:
-    """Build today's Underdog Pick'em entries and emit recommendations YAML."""
+def pickem_build(date: str, bankroll: str, platform: str, out_path: str | None) -> None:
+    """Build today's Pick'em entries for ``platform`` and emit recommendations YAML."""
     slate_date = datetime.date.today() if date == "today" else datetime.date.fromisoformat(date)
-    config = PickemConfig()
-    entries = construct_entries(slate_date, Decimal(bankroll), config)
-    target = Path(out_path) if out_path else _RECOMMENDATIONS_DIR / f"{slate_date.isoformat()}.yaml"
+    config = PickemConfig(contest_variants=PLATFORM_CONTEST_VARIANTS[platform])
+    entries = construct_entries(slate_date, Decimal(bankroll), config, platform=platform)
+    target = (
+        Path(out_path)
+        if out_path
+        else _RECOMMENDATIONS_DIR / f"{slate_date.isoformat()}_{platform.lower()}.yaml"
+    )
     path = emit_yaml(entries, slate_date, Decimal(bankroll), config, target)
     click.echo(f"wrote {len(entries)} entries -> {path}")
 

@@ -24,6 +24,7 @@ from sportstradamus.analysis import (
     worst_month,
 )
 from sportstradamus.dashboard.components.grid import render_themed_grid
+from sportstradamus.dashboard.components.hero import desk_only_notice, page_hero
 from sportstradamus.dashboard.components.profit_sim import (
     render_profit_sim,
     render_profit_sim_summary,
@@ -34,11 +35,9 @@ from sportstradamus.dashboard.data import (
     format_ts,
     load_calibration_summary,
     load_history,
-    load_parlays,
     load_profit_sim_summary,
     load_resolve_meta,
     load_user_slips,
-    render_banner,
     sidebar_filters,
     sport_filtered,
 )
@@ -91,11 +90,11 @@ def _hero_stat(label: str, value: str, *, size: str, color: str = "") -> str:
     )
 
 
-st.title("Receipts")
-render_banner("stats", "the track record, with the losers shown")
+page_hero("THE RECEIPTS", "Receipts")
+desk_only_notice()
+
 
 history = load_history()
-parlays = load_parlays()
 
 if history.empty:
     st.warning("No prediction history found. Run `prophecize` first.")
@@ -116,7 +115,7 @@ if history.empty:
     st.info("No resolved predictions match the current sport filter.")
     st.stop()
 
-filters = sidebar_filters(history, parlays, key_prefix="receipts_")
+filters = sidebar_filters(history, key_prefix="receipts_")
 df = filtered_history_or_stop(history, filters)
 
 df = dedup_bets(df)

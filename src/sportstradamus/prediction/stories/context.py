@@ -33,6 +33,7 @@ _CTX_COLS = [
     "game_total",
     "spread",
     "fav_team",
+    "home_team",
     "ml_fav_prob",
     "ml_margin",
     "total_ratio",
@@ -96,6 +97,7 @@ class GameCtx:
     game_total: float | None = None
     total_ratio: float | None = None
     fav_team: str | None = None
+    home_team: str | None = None
     ml_margin: float | None = None
     spread: float | None = None
     pos_edges: Mapping[str, Mapping[str, dict]] = field(default_factory=dict)
@@ -106,9 +108,6 @@ def ctx_from_row(row: Mapping) -> GameCtx:
     """Rebuild a :class:`GameCtx` (sans ``rho``) from one context-parquet row."""
     pe = row.get("pos_edges")
     pos_edges = json.loads(pe) if isinstance(pe, str) and pe.strip() else {}
-    fav = row.get("fav_team")
-    if isinstance(fav, float) and math.isnan(fav):
-        fav = None
     return GameCtx(
         league=str(row.get("League", "")),
         game=str(row.get("Game", "")),
@@ -116,7 +115,8 @@ def ctx_from_row(row: Mapping) -> GameCtx:
         shape=str(row.get("shape") or "even"),
         game_total=_none_if_nan(row.get("game_total")),
         total_ratio=_none_if_nan(row.get("total_ratio")),
-        fav_team=fav,
+        fav_team=_none_if_nan(row.get("fav_team")),
+        home_team=_none_if_nan(row.get("home_team")),
         ml_margin=_none_if_nan(row.get("ml_margin")),
         spread=_none_if_nan(row.get("spread")),
         pos_edges=pos_edges,
@@ -227,6 +227,12 @@ def _game_row(key: tuple, grp: pd.DataFrame) -> dict:
         ml_fav_prob = ml_margin = float("nan")
         fav_team = None
 
+    home_team = None
+    if "Home" in grp.columns:
+        home = grp.loc[grp["Home"].fillna(False).astype(bool), "Team"].dropna().unique()
+        if len(home) == 1:
+            home_team = str(home[0])
+
     return {
         "League": league,
         "Game": game,
@@ -234,6 +240,7 @@ def _game_row(key: tuple, grp: pd.DataFrame) -> dict:
         "game_total": game_total,
         "spread": spread,
         "fav_team": fav_team,
+        "home_team": home_team,
         "ml_fav_prob": ml_fav_prob,
         "ml_margin": ml_margin,
         "pos_edges": _pos_edges(grp),

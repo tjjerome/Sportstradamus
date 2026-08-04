@@ -1,32 +1,50 @@
 """Tonight — game-card slate showing today's offers grouped by game."""
 
+from urllib.parse import quote
+
 import pandas as pd
 import streamlit as st
 
 from sportstradamus.dashboard.components.glyphs import game_shape_glyph
+from sportstradamus.dashboard.components.hero import page_hero
 from sportstradamus.dashboard.data import (
     format_ts,
     load_current_game_context,
+    load_current_game_stories,
     load_current_meta,
     load_current_offers,
     load_current_parlays,
     sport_filtered,
 )
-from sportstradamus.dashboard.narrative import context_strip, home_away, top_thesis
+from sportstradamus.dashboard.narrative import context_strip, game_headline, home_away
 
 # Legend glyph size: smaller than the default (40px) card glyph so five fit across
 # one row of st.columns(5).
 _LEGEND_GLYPH_SIZE = 28
 
-# (shape, display name, mockup .sub caption) for the legend row, in the same order
-# as docs/mockups/p8-glyphs.html.
+# (shape, display name, meaning) for the legend row. The glyph-type name (comet,
+# supernova, …) is dropped — the glyph itself carries that; only the game-script
+# meaning stays as the caption.
 _SHAPE_LEGEND = [
-    ("shootout", "Shootout", "comet · fast total"),
-    ("blowout", "Blowout", "supernova · lopsided"),
-    ("coinflip", "Coinflip", "scales · close ML"),
-    ("even", "Even", "lone star · neutral"),
-    ("grind", "Grind", "hourglass · low total"),
+    ("shootout", "Shootout", "fast total"),
+    ("blowout", "Blowout", "lopsided"),
+    ("coinflip", "Coinflip", "close ML"),
+    ("even", "Even", "neutral"),
+    ("grind", "Grind", "low total"),
 ]
+
+# A game tipping off within this many minutes is "urgent" — it rises to the top of the
+# slate and its kicker turns red. Needs the Commence tip-off timestamp on the offers;
+# absent it (older snapshots, Sleeper), every game reads as non-urgent.
+_URGENT_MINUTES = 60
+
+
+def _format_countdown(minutes: float) -> str:
+    """Minutes-to-tip as "locks in 2h 05m" / "locks in 43m"; "in progress" once started."""
+    if minutes <= 0:
+        return "in progress"
+    hours, mins = divmod(int(minutes), 60)
+    return f"locks in {hours}h {mins:02d}m" if hours else f"locks in {mins}m"
 
 
 def _render_shape_legend() -> None:
@@ -38,14 +56,13 @@ def _render_shape_legend() -> None:
             st.caption(f"**{name}**  \n{sub}")
 
 
-st.title("Tonight")
-
 meta = load_current_meta()
 generated = format_ts(meta.get("generated_at", "no run on record"))
-st.caption(f"Last updated: {generated}")
+page_hero("TONIGHT'S SLATE", "Tonight", generated)
 
 offers = sport_filtered(load_current_offers())
 parlays = load_current_parlays()
+stories = load_current_game_stories()
 game_context = load_current_game_context()
 
 if offers.empty:
@@ -63,21 +80,20 @@ if "Game" not in offers.columns:
     st.info("Offer data missing game grouping columns.")
     st.stop()
 
+now = pd.Timestamp.now(tz="UTC")
+cards = []
 for game_key, group in offers.groupby(game_key_cols, sort=False):
     if isinstance(game_key, str):
         game_key = (game_key,)
     key_dict = dict(zip(game_key_cols, game_key, strict=False))
-
-    league = key_dict.get("League", "")
+    game = str(group["Game"].iloc[0])
     date_raw = key_dict.get("Date", "")
     home, away = home_away(group)
-    lock_time = format_ts(str(date_raw)) if date_raw else ""
 
-    offer_count = len(group)
-    # Legs past the Kelly filter (Kelly > 0) — the model-liked picks the constellation
-    # draws as stars; deduped to distinct Player/Market/Bet across books and alt-lines.
+    # Favored legs: the model-liked picks (Kelly > 0) the constellation draws as stars,
+    # deduped to distinct Player/Market/Bet across books and alt-lines.
     kelly = pd.to_numeric(group["Kelly"], errors="coerce") if "Kelly" in group else None
-    liked_count = (
+    favored = (
         group.loc[kelly > 0].drop_duplicates(["Player", "Market", "Bet"]).shape[0]
         if kelly is not None
         else 0
@@ -85,34 +101,72 @@ for game_key, group in offers.groupby(game_key_cols, sort=False):
     # Top edge = the best model edge vs the DFS payout in the game (Model EV − 1).
     edges = pd.to_numeric(group["Model EV"], errors="coerce") - 1 if "Model EV" in group else None
     top_edge = edges.max() if edges is not None and edges.notna().any() else None
-    headline = top_thesis(parlays, game=group["Game"].iloc[0], date=date_raw)
-    strip = context_strip(game_context, game=key_dict["Game"], date=date_raw)
-    shape = strip["shape"] if strip else ""
+    strip = context_strip(game_context, game=game, date=date_raw)
+    # Commence is the full tip-off timestamp threaded from the scrapers; absent it (older
+    # snapshots, Sleeper offers) minutes-to-tip is inf, so the game reads as non-urgent.
+    commence = (
+        pd.to_datetime(group["Commence"].iloc[0], utc=True, errors="coerce")
+        if "Commence" in group.columns
+        else pd.NaT
+    )
+    minutes = (commence - now).total_seconds() / 60 if pd.notna(commence) else float("inf")
+    cards.append(
+        {
+            "league": key_dict.get("League", ""),
+            "home": home,
+            "away": away,
+            "date": date_raw,
+            "favored": favored,
+            "offer_count": len(group),
+            "top_edge": top_edge,
+            "headline": game_headline(stories, parlays, game=game, date=date_raw),
+            "shape": strip["shape"] if strip else "",
+            "minutes": minutes,
+            "urgent": 0 < minutes < _URGENT_MINUTES,
+        }
+    )
 
-    with st.container(border=True):
-        left, right = st.columns([4, 1])
-        with left:
-            st.markdown(f"**{home} vs {away}**  ·  {league}")
-            if headline:
-                st.markdown(headline)
-            if lock_time:
-                st.caption(lock_time)
-            st.caption(
-                f"{offer_count} offer{'s' if offer_count != 1 else ''} · {liked_count} model-liked"
-            )
-            if top_edge is not None and pd.notna(top_edge):
-                st.caption(f"Top edge: {top_edge:+.1%}")
-        with right:
-            st.markdown(game_shape_glyph(shape), unsafe_allow_html=True)
-            game_label = f"{home} vs {away}"
-            # Date keeps doubleheaders distinct; format must match the Games
-            # page's game-picker labels.
-            game_param = f"{game_label} · {date_raw}" if date_raw else game_label
-            if st.button("View game", key=f"tonight_{league}_{date_raw}_{game_label}"):
-                # switch_page drops query params set the same run; hand off via
-                # session state and let the Games picker read it first (?game=
-                # is the deep link).
-                st.session_state["nav_game"] = game_param
-                st.switch_page("surfaces/games.py")
+# Games tipping off within the hour rise to the top; then most favored legs first,
+# soonest tip-off as the tiebreak.
+cards.sort(key=lambda c: (0 if c["urgent"] else 1, -c["favored"], c["minutes"]))
 
-st.caption("Prophecies arrive with the next data wave.")
+for c in cards:
+    league, home, away = c["league"], c["home"], c["away"]
+    top_edge, favored, offer_count = c["top_edge"], c["favored"], c["offer_count"]
+    shape, minutes = c["shape"], c["minutes"]
+
+    # A positive top edge lights the card; without one it drops to the muted "no edge"
+    # state. The prophecy is the oracle voice — the story headline, or a dim placeholder.
+    has_edge = top_edge is not None and pd.notna(top_edge) and top_edge > 0
+    card_class = "tonight-card" if has_edge else "tonight-card muted"
+    edge_badge = (
+        f'<span class="tc-badge tc-g">+{top_edge:.0%} top edge</span>'
+        if has_edge
+        else '<span class="tc-badge tc-gray">no edge</span>'
+    )
+    prophecy = (
+        f'<div class="tc-prophecy">“{c["headline"]}”</div>'
+        if c["headline"]
+        else '<div class="tc-prophecy tc-dim">No prophecy tonight — thin edges</div>'
+    )
+    countdown = _format_countdown(minutes) if minutes != float("inf") else ""
+    kicker = f"{league} &nbsp;·&nbsp; {countdown}" if countdown else league
+    kicker_cls = "tc-kicker tc-urgent" if c["urgent"] else "tc-kicker"
+    plural = "s" if offer_count != 1 else ""
+    # The whole card is the View-game link; Date keeps doubleheaders distinct and the
+    # label must match the Games page's game-picker (its ?game= deep link).
+    game_param = f"{home} vs {away} · {c['date']}" if c["date"] else f"{home} vs {away}"
+    st.markdown(
+        f'<div class="{card_class}">'
+        f'<a class="tc-cardlink" href="games?game={quote(game_param)}" target="_self" '
+        f'aria-label="View {home} vs {away}"></a>'
+        f'<div class="tc-main"><div class="{kicker_cls}">{kicker}</div>'
+        f'<div class="tc-matchup">{home} <span class="tc-vs">vs</span> {away}</div>'
+        f"{prophecy}"
+        f'<div class="tc-foot">{edge_badge}<span class="tc-meta">'
+        f"<b>{offer_count}</b> offer{plural} &middot; <b>{favored}</b> favored</span>"
+        f'<span class="tc-viewcue">View game →</span></div></div>'
+        f'<div class="tc-side">{game_shape_glyph(shape, size=58)}'
+        f'<span class="tc-shapename">{shape.title()}</span></div></div>',
+        unsafe_allow_html=True,
+    )

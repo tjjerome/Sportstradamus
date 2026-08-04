@@ -17,10 +17,14 @@ import pandas as pd
 from sportstradamus.prediction.stories import engine
 from sportstradamus.prediction.stories.context import GameCtx, Leg
 from sportstradamus.prediction.stories.engine import (
+    _city_from_name,
     _direction,
+    _home_city,
+    _localize_g,
     _stack_focus,
     _subject_legs,
     route,
+    thesis_variants,
 )
 from sportstradamus.prediction.stories.legs import enrich_legs
 
@@ -93,6 +97,55 @@ def _stack_ctxs(legs: list[Leg], rho: float = 0.3) -> dict[str, GameCtx]:
     pairs = {frozenset({a, b}): rho for a, b in combinations(ids, 2)}
     game = legs[0].game
     return {game: GameCtx(league="NBA", game=game, shape="even", rho=pairs)}
+
+
+def test_city_from_name_strips_one_or_two_word_nicknames():
+    assert _city_from_name("Chicago Bulls") == "Chicago"
+    assert _city_from_name("Oklahoma City Thunder") == "Oklahoma City"
+    assert _city_from_name("Golden State Warriors") == "Golden State"
+    assert _city_from_name("LA Clippers") == "LA"
+    # Two-word nicknames strip both words — not "Portland Trail" / "Boston Red".
+    assert _city_from_name("Portland Trail Blazers") == "Portland"
+    assert _city_from_name("Boston Red Sox") == "Boston"
+    assert _city_from_name("Toronto Maple Leafs") == "Toronto"
+
+
+def test_localize_g_reads_prepositions_and_place_nouns_as_location():
+    # A locative preposition before {g}, or a venue/crowd noun after it, means the home city.
+    assert _localize_g("the points pile up in {g}") == "the points pile up in {home}"
+    assert _localize_g("defense travels to {g}") == "defense travels to {home}"
+    assert _localize_g("the {g} faithful roar") == "the {home} faithful roar"
+    # Anything else stays the matchup.
+    assert _localize_g("the {g} shootout lifts lines") == "the {g} shootout lifts lines"
+    assert _localize_g("{g} goes the distance") == "{g} goes the distance"
+
+
+def test_localize_g_resolves_each_occurrence_independently():
+    out = _localize_g("{g} tips off in {g}").format(g="CHI/SEA", home="Chicago")
+    assert out == "CHI/SEA tips off in Chicago"
+
+
+def test_home_city_falls_back_to_matchup_without_home_team():
+    assert _home_city(GameCtx(league="NBA", game="CHI/SEA"), "CHI/SEA") == "CHI/SEA"
+    assert _home_city(None, "CHI/SEA") == "CHI/SEA"
+
+
+def test_home_city_resolves_home_abbrev_to_city_via_team_assets():
+    ctx = GameCtx(league="NBA", game="CHI/SEA", home_team="CHI")
+    assert _home_city(ctx, "CHI/SEA") == "Chicago"
+
+
+def test_thesis_variants_leaves_no_unsubstituted_token_with_home_city():
+    legs = _legs(
+        ("Tatum", "Over", 28.5, "PTS", "BOS/PHI", "BOS", "F1", "scoring"),
+        ("Tatum", "Over", 8.5, "REB", "BOS/PHI", "BOS", "F1", "boards"),
+        ("Embiid", "Under", 30.5, "PTS", "BOS/PHI", "PHI", "C1", "scoring"),
+    )
+    ctx = GameCtx(league="NBA", game="BOS/PHI", shape="blowout", home_team="BOS")
+    rendered, idx, _ = thesis_variants(legs, {"BOS/PHI": ctx})
+    assert rendered and 0 <= idx < len(rendered)
+    # Every slot resolved: the localize + format pass leaves no raw {g}/{home}/{p} braces.
+    assert all("{" not in variant for variant in rendered)
 
 
 def test_route_player_archetype_on_clear_star():

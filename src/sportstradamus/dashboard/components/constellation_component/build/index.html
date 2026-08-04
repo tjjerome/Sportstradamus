@@ -108,6 +108,29 @@
       .cst-btn:hover {
         filter: brightness(1.08);
       }
+      /* Phase M docked tap card: on touch the hover card becomes a full-width sheet
+         pinned to the iframe's bottom edge (thumb zone). Same tokens, new geometry. */
+      .cst-card.cst-docked {
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        bottom: 8px;
+        top: auto;
+        width: auto;
+        z-index: 30;
+      }
+      .cst-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .cst-actions .cst-btn {
+        flex: 1;
+      }
+      .cst-btn.cst-toggle {
+        background: transparent;
+        color: var(--gold);
+        border: 1px solid var(--gold);
+      }
     </style>
   </head>
   <body>

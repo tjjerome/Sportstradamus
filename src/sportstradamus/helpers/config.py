@@ -220,3 +220,15 @@ for _variant, _table in _raw_underdog.items():
     if _variant.startswith("_"):
         continue
     underdog_payouts[_variant] = {int(k): v for k, v in _table.items()}
+
+# Sleeper contest-variant payouts -- same shape convention as underdog_payouts
+# above (string size keys rewritten to int). See sleeper_payouts.json's own
+# "_comment" for what each key ("power", "flex", "flex_k") means.
+with (_config_dir / "sleeper_payouts.json").open() as infile:
+    _raw_sleeper = json.load(infile)
+
+sleeper_payouts: dict[str, dict[int, float | list[float]]] = {}
+for _variant, _table in _raw_sleeper.items():
+    if _variant.startswith("_"):
+        continue
+    sleeper_payouts[_variant] = {int(k): v for k, v in _table.items()}

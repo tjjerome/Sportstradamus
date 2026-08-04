@@ -149,12 +149,17 @@ def _atomic_write_csv(df: pd.DataFrame, path) -> None:
     tmp.replace(path)
 
 
-def read_parquet_safe(path) -> pd.DataFrame:
-    """Return parquet contents or an empty DataFrame if the file is absent."""
+def read_parquet_safe(path, columns: list[str] | None = None) -> pd.DataFrame:
+    """Return parquet contents or an empty DataFrame if the file is absent.
+
+    ``columns`` projects the read at the pyarrow layer (only those column chunks are
+    decoded) — for callers that need a handful of scalar columns out of a wide,
+    struct-heavy file.
+    """
     p = Path(str(path))
     if not p.is_file():
         return pd.DataFrame()
-    return pd.read_parquet(p, engine="pyarrow")
+    return pd.read_parquet(p, engine="pyarrow", columns=columns)
 
 
 # ---------------------------------------------------------------------------
@@ -200,9 +205,14 @@ def write_parlay_hist(df: pd.DataFrame) -> None:
     _atomic_write_parquet(out, PARLAY_HIST_PATH)
 
 
-def read_parlay_hist() -> pd.DataFrame:
-    """Read the parlay history."""
-    df = read_parquet_safe(PARLAY_HIST_PATH)
+def read_parlay_hist(columns: list[str] | None = None) -> pd.DataFrame:
+    """Read the parlay history.
+
+    ``columns`` projects the read (pyarrow-level) for callers that only need scalar
+    columns; the list<->tuple normalization then only touches whichever list columns
+    were actually requested.
+    """
+    df = read_parquet_safe(PARLAY_HIST_PATH, columns=columns)
     if df.empty:
         return df
     for col in _PARLAY_LIST_COLS:

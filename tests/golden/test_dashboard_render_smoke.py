@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -115,12 +116,26 @@ _OFFER_ROWS = [
 ]
 
 
+def _hero_title(at: AppTest) -> str:
+    """The page_hero ``<h1 class="hero-title">`` text from the rendered app.
+
+    Surfaces open with ``components.hero.page_hero`` (an ``st.html`` block) instead of
+    ``st.title``; ``class="hero-title"`` uniquely tags the hero markup (the injected
+    APP_CSS carries a ``.hero-title`` selector but never that attribute form).
+    """
+    heroes = [h.body for h in at.get("html") if 'class="hero-title"' in h.body]
+    assert heroes, "no page-hero rendered"
+    match = re.search(r'class="hero-title">([^<]*)</h1>', heroes[0])
+    assert match, "hero-title h1 not found"
+    return match.group(1)
+
+
 def test_app_boots_and_tonight_renders():
     """Bare ``.run()`` with no navigation lands on Tonight (``app.py``'s default page)."""
     at = AppTest.from_string(_WRAPPER, default_timeout=30)
     at.run()
     assert not at.exception
-    assert at.title[0].value == "Tonight"
+    assert _hero_title(at) == "Tonight"
 
 
 def test_app_sport_switch_rerenders_without_exception():
@@ -153,7 +168,7 @@ def test_board_renders_condensed_grid(monkeypatch, tmp_path):
     at.switch_page("surfaces/board.py")
     at.run()
     assert not at.exception
-    assert at.title[0].value == "Today's Predictions"
+    assert _hero_title(at) == "Today's Predictions"
 
 
 # Mirrors prediction/parlay.py's row-construction contract: legs is a
@@ -170,6 +185,7 @@ _PARLAY_ROWS = [
         "Boost": 3.0,
         "P": 0.42,
         "Indep P": 0.35,
+        "Model EV": 0.44,  # p_corr = 0.44/3 > p_indep = 0.35/3 ⇒ scatter "above line"
         "legs": [
             {"player": "J. Brunson", "market": "PTS", "league": "NBA"},
             {"player": "K. Towns", "market": "REB", "league": "NBA"},
@@ -187,6 +203,7 @@ _PARLAY_ROWS = [
         "Boost": 3.0,
         "P": 0.55,
         "Indep P": 0.40,
+        "Model EV": 0.38,  # p_corr = 0.38/3 < p_indep = 0.40/3 ⇒ scatter "below line"
         "legs": [
             {"player": "A. Wilson", "market": "AST", "league": "NBA"},
             {"player": "A. Wilson", "market": "TOV", "league": "NBA"},
@@ -216,7 +233,7 @@ def test_lab_correlations_renders_heatmap_and_panels(monkeypatch, tmp_path):
     at._page_hash = calc_hash("lab-correlations")  # see module docstring
     at.run()
     assert not at.exception
-    assert at.title[0].value == "Correlations & Parlays"
+    assert _hero_title(at) == "Correlations & Parlays"
 
 
 def _diag_row(league: str, market: str, i: int) -> dict:
@@ -286,7 +303,7 @@ def test_lab_diagnostics_renders_market_table_and_start_here_strip(monkeypatch, 
     at._page_hash = calc_hash("lab-diagnostics")  # see module docstring
     at.run()
     assert not at.exception
-    assert at.title[0].value == "Market Diagnostics & Forecast Quality"
+    assert _hero_title(at) == "Market Diagnostics & Forecast Quality"
     assert any("Start here" in c.value for c in at.caption)
     tile_labels = {m.label for m in at.metric}
     assert {"NBA - PTS", "NBA - AST"} <= tile_labels
@@ -379,7 +396,7 @@ def test_lab_training_renders_gate_matrix_and_glance_strip(monkeypatch, tmp_path
     at._page_hash = calc_hash("lab-training")  # see module docstring
     at.run()
     assert not at.exception
-    assert at.title[0].value == "Model Training Diagnostics"
+    assert _hero_title(at) == "Model Training Diagnostics"
     tile_labels = {m.label: m.value for m in at.metric}
     assert tile_labels.get("Cells trained") == "2"
     assert tile_labels.get("Shipping (all gates)") == "1"
@@ -414,7 +431,7 @@ def test_lab_modifiers_renders_empty_state(monkeypatch, tmp_path):
     at._page_hash = calc_hash("lab-modifiers")  # see module docstring
     at.run()
     assert not at.exception
-    assert at.title[0].value == "Modifier Reconciler"
+    assert _hero_title(at) == "Modifier Reconciler"
 
 
 def test_games_rail_shows_reconciler_chip(monkeypatch, tmp_path):
@@ -482,10 +499,30 @@ def test_lab_modifiers_two_click_save_writes_overlay(monkeypatch, tmp_path):
 
 
 @pytest.mark.xfail(
+    reason=(
+        "Order-dependent pre-existing flake, not a product bug: when an earlier test in "
+        "the same xdist worker has already called dashboard.data.load_current_offers() "
+        "against the real data/runtime/current_offers.parquet, this test's own tmp_path "
+        "fixture (3 synthetic rows) gets shadowed by that stale (3763-row) cached result, "
+        "so the leg->offer lookup can't attach the 'G.' position prefix to any pair key "
+        "and every pair reads as unknown instead of on-record. Confirmed unrelated to any "
+        "single change: reproduces identically on a clean baseline worktree with 5 no-op "
+        "`assert True` tests added anywhere in tests/golden/ — any change to total test "
+        "count reshuffles xdist's worker distribution enough to trigger or dodge it. "
+        "Root cause is deeper than a missing cache key: st.cache_data.clear() (both the "
+        "blanket call this test already makes, and a targeted "
+        "_load_current_offers_cached.clear()), keying the cache on an explicit (path, "
+        "mtime) tuple instead of mtime alone, and even monkeypatching "
+        "dashboard.data.load_current_offers directly to a lambda all failed identically — "
+        "the function object AppTest resolves inside the rerun is provably the original, "
+        "unpatched one, meaning AppTest's script-rerun mechanism isn't re-resolving "
+        "`from ... import` bindings the way its own execution model implies. Fixing this "
+        "for real means reading streamlit.testing.v1's rerun internals, not dashboard "
+        "code. strict=False so this stops being reported as a failure if a future "
+        "xdist shuffle happens to dodge it again — do not remove this marker without "
+        "either fixing the underlying AppTest behavior or re-confirming the flake."
+    ),
     strict=False,
-    reason="cross-file xdist flake: AppTest rerun internals serve a stale cached loader "
-    "when other dashboard-smoke files run first; passes isolated and file-scoped "
-    "(see AppTest cache-staleness memory) — not an app defect",
 )
 def test_lab_modifiers_pairwise_isolation_updates_stale_pair(monkeypatch, tmp_path):
     """All-known-pair residual opens pairwise isolation; a pair quote updates its modifier.
@@ -554,3 +591,47 @@ def test_lab_modifiers_pairwise_isolation_updates_stale_pair(monkeypatch, tmp_pa
     solved = json.loads(overlay_path.read_text())["modifiers"]["Underdog"]["NBA"]["team"]
     assert solved["G.PTS & G.AST"] == [0.85, 1.0]
     assert solved["G.PTS & G.REB"] == [0.95, 1.0]
+
+
+def test_app_boots_mobile_with_dock():
+    """Forced-mobile boot: app renders, and a seeded slip mounts the dock bar."""
+    st.cache_data.clear()
+    at = AppTest.from_string(_WRAPPER, default_timeout=30)
+    at.session_state["_force_mobile"] = True
+    at.session_state["slip_legs"] = [
+        {
+            "player": "Jalen Brunson",
+            "team": "NYK",
+            "market": "PTS",
+            "stat": "PTS",
+            "bet": "Over",
+            "line": 25.5,
+            "league": "NBA",
+            "game": "NYK/BOS",
+            "date": "2026-07-16",
+            "platform": "Underdog",
+            "win_prob": 0.6,
+            "boost": 1.0,
+            "push_prob": 0.0,
+            "kelly": 0.05,
+        },
+        {
+            "player": "Jayson Tatum",
+            "team": "BOS",
+            "market": "PTS",
+            "stat": "PTS",
+            "bet": "Over",
+            "line": 27.5,
+            "league": "NBA",
+            "game": "NYK/BOS",
+            "date": "2026-07-16",
+            "platform": "Underdog",
+            "win_prob": 0.58,
+            "boost": 1.0,
+            "push_prob": 0.0,
+            "kelly": 0.04,
+        },
+    ]
+    at.run()
+    assert not at.exception
+    assert any(b.key == "slip_dock_toggle" for b in at.button)

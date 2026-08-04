@@ -41,18 +41,20 @@ def init_slip_state() -> None:
     ss.setdefault(_EDIT_ID, None)
 
 
-def bankroll_input() -> None:
+def bankroll_input(key: str = "_bankroll_widget") -> None:
     """Render the one global bankroll control; mirror it onto the plain slip key.
 
     Follows the app's widget-key→plain-key convention so the builders read a
     stable non-widget key (``slip_bankroll``) that every Kelly stake scales to.
+    ``key`` exists because the mobile slip dock renders a second instance in the
+    same run as the sidebar shelf's — two widgets can't share one key.
     """
     value = st.number_input(
         "Bankroll ($)",
         min_value=0.0,
         value=float(st.session_state[_BANKROLL]),
         step=50.0,
-        key="_bankroll_widget",
+        key=key,
     )
     st.session_state[_BANKROLL] = value
 
@@ -68,7 +70,11 @@ def _legs_from_records(
     """
     out: list[dict] = []
     for record in records:
-        idx = find_offer_idx(record, offers, platform)
+        # Story legs carry the display market name in ``market`` but the canonical code in
+        # ``stat``; find_offer_idx matches offers["Market"] (the code), so look up by the
+        # code. A dashboard-built leg already has market == stat, so this is a no-op there.
+        lookup = {**record, "market": record.get("stat") or record["market"]}
+        idx = find_offer_idx(lookup, offers, platform)
         if idx is not None:
             out.append(build_leg(offers.loc[idx]))
     return out

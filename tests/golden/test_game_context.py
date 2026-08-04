@@ -179,6 +179,61 @@ def test_build_game_context_slate_median_baseline():
     assert ctx.loc["GGG/HHH", "shape"] == "shootout"  # 260/230 = 1.13
 
 
+def test_build_game_context_derives_home_team_from_home_flag():
+    """``home_team`` is the team whose offers carry ``Home`` — the only home/away signal in the
+    frame, since the ``Game`` key is alphabetically sorted and its order can't encode it."""
+    offers = pd.DataFrame(
+        [
+            {
+                "League": "NBA",
+                "Game": "BOS/PHI",
+                "Date": "2026-06-13",
+                "Team": "PHI",
+                "Opponent": "BOS",
+                "Home": True,
+                "O/U": 118.0,
+                "Moneyline": 0.55,
+                "Player": "A",
+                "Market": "PTS",
+            },
+            {
+                "League": "NBA",
+                "Game": "BOS/PHI",
+                "Date": "2026-06-13",
+                "Team": "BOS",
+                "Opponent": "PHI",
+                "Home": False,
+                "O/U": 120.0,
+                "Moneyline": 0.45,
+                "Player": "B",
+                "Market": "PTS",
+            },
+        ]
+    )
+    row = build_game_context(offers, {"NBA": 111.667}).iloc[0]
+    assert row["home_team"] == "PHI"  # from the Home flag, not the sorted "BOS/PHI" key order
+
+
+def test_build_game_context_home_team_none_without_home_column():
+    offers = pd.DataFrame(
+        [
+            {
+                "League": "NBA",
+                "Game": "BOS/PHI",
+                "Date": "2026-06-13",
+                "Team": "BOS",
+                "Opponent": "PHI",
+                "O/U": 120.0,
+                "Moneyline": 0.55,
+                "Player": "A",
+                "Market": "PTS",
+            }
+        ]
+    )
+    row = build_game_context(offers, {"NBA": 111.667}).iloc[0]
+    assert row["home_team"] is None
+
+
 def test_ctx_from_row_parses_pos_edges():
     row = {
         "League": "NBA",
@@ -188,6 +243,7 @@ def test_ctx_from_row_parses_pos_edges():
         "game_total": 238.0,
         "total_ratio": 1.07,
         "fav_team": "BOS",
+        "home_team": "BOS",
         "ml_margin": 0.24,
         "spread": 2.0,
         "pos_edges": '{"BOS": {"F": {"dvpoa": 0.15, "n": 2}}}',
@@ -195,7 +251,7 @@ def test_ctx_from_row_parses_pos_edges():
     ctx = ctx_from_row(row)
     assert isinstance(ctx, GameCtx)
     assert ctx.league == "NBA" and ctx.game == "BOS/PHI" and ctx.shape == "blowout"
-    assert ctx.fav_team == "BOS" and ctx.spread == 2.0
+    assert ctx.fav_team == "BOS" and ctx.home_team == "BOS" and ctx.spread == 2.0
     assert ctx.pos_edges["BOS"]["F"]["dvpoa"] == 0.15
     assert ctx.rho == {}
 
@@ -257,6 +313,7 @@ def test_build_game_context_empty_safe():
         "game_total",
         "spread",
         "fav_team",
+        "home_team",
         "ml_fav_prob",
         "ml_margin",
         "total_ratio",

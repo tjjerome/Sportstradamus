@@ -25,8 +25,10 @@ from sportstradamus.dashboard.columns import (
     add_match_column,
 )
 from sportstradamus.dashboard.components.grid import (
+    _HEAT_MILD_EDGE,
+    _HEAT_STRONG_EDGE,
     _HEAT_TEXT,
-    _HOVER_CSS,
+    _OBSIDIAN_CSS,
     build_themed_grid_options,
 )
 from sportstradamus.dashboard.lenses import LENSES, apply_lens
@@ -101,6 +103,48 @@ def test_percent_cols_get_a_value_formatter_value_stays_numeric() -> None:
         fmt = defs[col].get("valueFormatter")
         assert fmt is not None and "%" in fmt.js_code  # display-only suffix
     assert "valueFormatter" not in defs["Kelly"]  # only percent_cols get it
+
+
+def test_signed_percent_cols_get_a_sign_prefixed_formatter() -> None:
+    options = build_themed_grid_options(
+        _GRID_DF,
+        numeric_cols=_NUMERIC,
+        signed_percent_cols=[MODEL_EDGE],
+        percent_cols=[CONSENSUS_EDGE],
+    )
+    defs = _column_defs(options)
+    signed = defs[MODEL_EDGE]["valueFormatter"].js_code
+    plain = defs[CONSENSUS_EDGE]["valueFormatter"].js_code
+    # The signed formatter (edge columns) prefixes a "+" on positives; the plain one doesn't.
+    assert ">0?'+'" in signed
+    assert ">0?'+'" not in plain
+    assert "%" in signed and "%" in plain
+
+
+def test_decimal_cols_get_a_three_decimal_formatter_value_stays_numeric() -> None:
+    """Gate matrix's Brier Skill Score renders at 3 dp (P8 Task R5.e) via a ``toFixed(3)``
+    valueFormatter; the underlying value stays numeric so the grid still click-sorts on it.
+    Only ``decimal_cols`` get it — an integer count column (n_fails) stays formatter-free.
+    """
+    df = pd.DataFrame({"brier_skill_score": [0.123456, -0.05], "n_fails": [1, 2]})
+    options = build_themed_grid_options(
+        df, numeric_cols=["brier_skill_score", "n_fails"], decimal_cols=["brier_skill_score"]
+    )
+    defs = _column_defs(options)
+    assert "toFixed(3)" in defs["brier_skill_score"]["valueFormatter"].js_code
+    assert "valueFormatter" not in defs["n_fails"]
+
+
+def test_heatmap_thresholds_are_absolute_not_fraction_of_max() -> None:
+    options = build_themed_grid_options(
+        _GRID_DF, numeric_cols=_NUMERIC, heatmap_col=MODEL_EDGE, heatmap_center=0.0
+    )
+    js = _column_defs(options)[MODEL_EDGE]["cellStyle"].js_code
+    # Bucket boundaries are the fixed ±MILD/±STRONG edges baked absolutely, independent of
+    # the column's own max — so an edge-sorted first screen no longer paints solid (the old
+    # fraction-of-column-max bug, where the max set the scale and everything looked extreme).
+    assert repr(-_HEAT_STRONG_EDGE) in js and repr(_HEAT_STRONG_EDGE) in js
+    assert repr(-_HEAT_MILD_EDGE) in js
 
 
 def test_header_tooltips_attached() -> None:
@@ -195,8 +239,11 @@ def test_arrow_col_adds_cellrenderer_and_hidden_cols_hide() -> None:
         df, numeric_cols=["Line"], arrow_col="Line", hidden_cols=["Bet", "Market"]
     )
     defs = _column_defs(options)
-    assert hasattr(defs["Line"]["cellRenderer"], "js_code")
-    assert "Bet" in defs["Line"]["cellRenderer"].js_code
+    renderer = defs["Line"]["cellRenderer"].js_code
+    assert "Bet" in renderer
+    # Must be a class renderer exposing getGui — a plain-function renderer returning an SVG
+    # string renders it as escaped markup in AG Grid 34 (the exact P8 Board arrow bug).
+    assert "getGui" in renderer, "arrow renderer is not class-based (would escape the SVG)"
     assert defs["Bet"]["hide"] is True
     assert defs["Market"]["hide"] is True
 
@@ -209,9 +256,29 @@ def test_arrow_col_noop_without_bet_column() -> None:
     assert "Bet" not in defs
 
 
-def test_hover_css_is_gold_rail_client_side() -> None:
-    assert _HOVER_CSS[".ag-row-hover"]["box-shadow"] == "inset 3px 0 0 #C9A227 !important"
-    assert _HOVER_CSS[".ag-row-hover"]["background-color"] == "rgba(201,162,39,.06) !important"
+def test_obsidian_skin_frames_the_grid_keeps_gold_as_chrome() -> None:
+    """Owner-selected "Obsidian Tablet" table treatment (2026-07-15): the themed grids wear a
+    dark-glass slab with a gold hairline frame, engraved small-caps headers, and gold-etched
+    rows, injected into AG Grid's own DOM via custom_css (it renders in an iframe, so a
+    page-level wrapper div can't reach it). Pin the shape only — the owner browser check is the
+    real gate, since custom_css can pass this assertion yet still not render inside the iframe.
+    """
+    wrap = _OBSIDIAN_CSS[".ag-root-wrapper"]
+    assert "linear-gradient" in wrap["background"], "no obsidian slab gradient"
+    assert wrap["border"] == "1px solid rgba(201,162,39,0.45)", "no gold frame"
+    assert "Cinzel" in _OBSIDIAN_CSS[".ag-header-cell-text"]["font-family"], "header not engraved"
+    # Every color is a design token: the slab is surface→background, header ink is the neutral
+    # gray token, gold appears only as chrome (frame/rules/hover) — no invented off-token colors.
+    assert "#1A1D24" in wrap["background"] and "#0E1117" in wrap["background"]
+    assert _OBSIDIAN_CSS[".ag-header-cell-text"]["color"] == theme.GRAY
+    # AG Grid v34 paints row-hover through an absolutely-positioned ::before overlay covering a
+    # .ag-row-hover{background-color} rule, so hover drives AG Grid's own --ag-row-hover-color
+    # variable; the gold rail is a first-cell inset. Gold stays chrome, never a data-cell fill.
+    assert wrap["--ag-row-hover-color"] == "rgba(201,162,39,0.09)"
+    assert (
+        _OBSIDIAN_CSS[".ag-row-hover .ag-cell:first-child"]["box-shadow"]
+        == "inset 3px 0 0 #C9A227"
+    )
 
 
 def test_flag_col_adds_get_row_style_jscode() -> None:
@@ -297,6 +364,9 @@ def test_glyph_cols_color_pass_fail_glyphs_green_red() -> None:
         assert theme.GREEN in style
         assert theme.RED in style
         assert theme.GOLD not in style
+        # R5.d: the glyph is colored TEXT, not a filled cell — a background swatch would
+        # hide the ●/○ mark. The token must ride on 'color', never 'backgroundColor'.
+        assert "backgroundColor" not in style
 
 
 def test_glyph_cols_noop_without_kwarg() -> None:

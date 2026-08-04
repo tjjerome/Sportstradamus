@@ -6,6 +6,8 @@ import streamlit as st
 from sportstradamus.dashboard import columns
 from sportstradamus.dashboard.components.deep_dive import init_detail_state, show_detail
 from sportstradamus.dashboard.components.grid import render_themed_grid
+from sportstradamus.dashboard.components.hero import page_hero
+from sportstradamus.dashboard.components.offer_cards import render_offer_cards
 from sportstradamus.dashboard.components.slip_builder import render_simple_builder
 from sportstradamus.dashboard.components.slip_state import add_to_simple_slip
 from sportstradamus.dashboard.data import (
@@ -13,17 +15,17 @@ from sportstradamus.dashboard.data import (
     load_current_game_corr,
     load_current_meta,
     load_current_offers,
-    render_banner,
     sport_filtered,
 )
 from sportstradamus.dashboard.lenses import LENSES, apply_lens
-
-st.title("Today's Predictions")
+from sportstradamus.dashboard.viewport import is_mobile
+from sportstradamus.helpers import market_display_name
 
 meta = load_current_meta()
 generated = format_ts(meta.get("generated_at", "no run on record"))
-render_banner("predictions", f"generated {generated}")
+page_hero("THE BOARD", "Today's Predictions", generated)
 
+mobile = is_mobile()
 offers = sport_filtered(load_current_offers())
 
 if offers.empty:
@@ -62,18 +64,29 @@ with lens_col:
 with side_col:
     side = st.segmented_control("Side", ["All", "Over", "Under"], default="All", key="board_side")
 
-col1, col2, col3 = st.columns(3)
-with col1:
-    leagues = sorted(offers["League"].dropna().unique())
-    selected_leagues = st.multiselect("League", leagues, default=leagues)
-with col2:
-    platforms = sorted(offers["Platform"].dropna().unique()) if "Platform" in offers else []
-    selected_platforms = st.multiselect("Platform", platforms, default=platforms)
-with col3:
-    markets = sorted(offers["Market"].dropna().unique())
-    selected_markets = st.multiselect("Market", markets, default=markets)
+# Phone: the widget-heavy filters collapse into one expander; lens/side stay above.
+filter_host = st.expander("Filters") if mobile else st.container()
+with filter_host:
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        leagues = sorted(offers["League"].dropna().unique())
+        selected_leagues = st.multiselect("League", leagues, default=leagues)
+    with col2:
+        platforms = sorted(offers["Platform"].dropna().unique()) if "Platform" in offers else []
+        selected_platforms = st.multiselect("Platform", platforms, default=platforms)
+    with col3:
+        markets = sorted(offers["Market"].dropna().unique())
+        # Chips show the prose market name; the stored value stays the slug the filter keys off.
+        market_labels = {
+            m: market_display_name(lg, m)
+            for lg, m in zip(offers["League"], offers["Market"], strict=True)
+            if pd.notna(m)
+        }
+        selected_markets = st.multiselect(
+            "Market", markets, default=markets, format_func=lambda s: market_labels.get(s, s)
+        )
 
-player_query = st.text_input("Player search", placeholder="e.g. Jokic")
+    player_query = st.text_input("Player search", placeholder="e.g. Jokic")
 
 filtered = apply_lens(offers, lens)
 if selected_leagues:
@@ -92,21 +105,22 @@ filtered = columns.add_edges(filtered)
 
 range_cols = [c for c in RANGE_COLS if c in filtered.columns]
 if range_cols:
-    st.caption("Numeric range filters")
-    rcols = st.columns(len(range_cols))
-    for slot, col in zip(rcols, range_cols, strict=False):
-        series = pd.to_numeric(filtered[col], errors="coerce").dropna()
-        if series.empty:
-            continue
-        lo = float(series.min())
-        hi = float(series.max())
-        if lo == hi:
-            continue
-        sel = slot.slider(
-            columns.LABELS.get(col, col), lo, hi, (lo, hi), step=(hi - lo) / 100 or 0.01
-        )
-        vals = pd.to_numeric(filtered[col], errors="coerce")
-        filtered = filtered.loc[vals.between(sel[0], sel[1]) | vals.isna()]
+    with filter_host:
+        st.caption("Numeric range filters")
+        rcols = st.columns(len(range_cols))
+        for slot, col in zip(rcols, range_cols, strict=False):
+            series = pd.to_numeric(filtered[col], errors="coerce").dropna()
+            if series.empty:
+                continue
+            lo = float(series.min())
+            hi = float(series.max())
+            if lo == hi:
+                continue
+            sel = slot.slider(
+                columns.LABELS.get(col, col), lo, hi, (lo, hi), step=(hi - lo) / 100 or 0.01
+            )
+            vals = pd.to_numeric(filtered[col], errors="coerce")
+            filtered = filtered.loc[vals.between(sel[0], sel[1]) | vals.isna()]
 
 if "Model EV" in filtered.columns:
     filtered = filtered.sort_values("Model EV", ascending=False)
@@ -130,39 +144,47 @@ if "Market" in grid_df.columns:
     grid_df = grid_df.rename(columns={"Market": "Market Slug"})
 
 if "Win Prob" in grid_df.columns:
-    grid_df["Win Prob"] = (grid_df["Win Prob"] * 100).apply(
-        lambda x: f"{x:.2f}%" if pd.notna(x) else ""
-    )
+    # Kept numeric (0–100) so the column click-sorts; the "%" is a display-only
+    # valueFormatter (percent_cols below), same as the edge columns.
+    grid_df["Win Prob"] = (pd.to_numeric(grid_df["Win Prob"], errors="coerce") * 100).round(1)
 # Model/Consensus Edge are edge-vs-DFS percentages (EV - 1, x100); kept numeric so the
 # heatmap can bucket Model Edge and the grid sorts them — the "%" is a display suffix
 # (percent_cols below), not baked into the value.
 for col in (columns.MODEL_EDGE, columns.CONSENSUS_EDGE):
     if col in grid_df.columns:
         grid_df[col] = (pd.to_numeric(grid_df[col], errors="coerce") * 100).round(1)
-for col in ("Boost", "Kelly"):
-    if col in grid_df.columns:
-        grid_df[col] = pd.to_numeric(grid_df[col], errors="coerce").round(2)
+if "Boost" in grid_df.columns:
+    grid_df["Boost"] = pd.to_numeric(grid_df["Boost"], errors="coerce").round(2)
 grid_df = grid_df.rename(columns=columns.LABELS)
 
 # columns.LABELS renames Consensus Edge -> Cons Edge before the grid ever sees the
 # frame, so every lookup below keys off the post-rename name, same as "Win %" already
 # does for Win Prob.
 numeric_cols = [
-    c
-    for c in ("Line", "Boost", "Win %", columns.MODEL_EDGE, "Cons Edge", "Kelly")
-    if c in grid_df.columns
+    c for c in ("Line", "Boost", "Win %", columns.MODEL_EDGE, "Cons Edge") if c in grid_df.columns
 ]
-selected_rows = render_themed_grid(
-    grid_df,
-    numeric_cols=numeric_cols,
-    heatmap_col=columns.MODEL_EDGE,
-    heatmap_center=0.0,
-    header_help=columns.HELP,
-    percent_cols=[columns.MODEL_EDGE, "Cons Edge"],
-    arrow_col="Line",
-    hidden_cols=["Bet", "Market Slug"],
-)
-st.caption("Trend sparklines arrive with the L1 line-movement export.")
+if mobile:
+    # Cards read the pre-rename filtered frame (raw 0–1 Win Prob; Model Edge ×100
+    # below, matching the grid path's percent convention).
+    selected_rows = []
+    cards_df = filtered.copy()
+    cards_df[columns.MODEL_EDGE] = (
+        pd.to_numeric(cards_df[columns.MODEL_EDGE], errors="coerce") * 100
+    ).round(1)
+    render_offer_cards(cards_df)
+else:
+    selected_rows = render_themed_grid(
+        grid_df,
+        numeric_cols=numeric_cols,
+        heatmap_col=columns.MODEL_EDGE,
+        heatmap_center=0.0,
+        header_help=columns.HELP,
+        percent_cols=["Win %"],
+        signed_percent_cols=[columns.MODEL_EDGE, "Cons Edge"],
+        arrow_col="Line",
+        hidden_cols=["Bet", "Market Slug"],
+    )
+    st.caption("Trend sparklines arrive with the L1 line-movement export.")
 
 if st.session_state.corr_nav:
     # Rerun from "View →" button — keep the stack as-is, just clear the flag.
@@ -179,9 +201,10 @@ elif selected_rows:
         matches = filtered.loc[mask]
         if not matches.empty:
             st.session_state.detail_stack = [matches.index[0]]
-else:
+elif not mobile:
     # Grid reports no selection (tab switch, filter cleared the table, etc.)
-    # — close popup and reset tracking.
+    # — close popup and reset tracking. Mobile has no grid selection; its cards
+    # set detail_stack directly, so the reset would race the card click.
     st.session_state.detail_stack = []
     st.session_state.last_grid_key = None
 
@@ -191,28 +214,30 @@ if st.session_state.detail_stack:
 else:
     st.caption("Click a row to see charts and correlated bets.")
 
-st.subheader("Build a cross-game slip")
-if selected_rows:
-    sel = selected_rows[0]
-    mask = (
-        (filtered["Player"] == sel.get("Player"))
-        & (filtered["Market"] == sel.get("Market Slug"))
-        & (filtered["Bet"] == sel.get("Bet"))
-        & (filtered["Platform"] == sel.get("Platform"))
-    )
-    match = filtered.loc[mask]
-    if not match.empty and match.iloc[0]["Platform"] in ("Underdog", "Sleeper"):
-        full = match.iloc[0]
-        if st.button(
-            f"Add {full['Player']} {full['Bet']} {full['Line']:.10g} to slip",
-            key="board_add_slip",
-        ):
-            add_to_simple_slip(full.to_dict())
-            st.rerun()
+if not mobile:
+    # Mobile adds legs straight from each card; this selected-row path is grid-only.
+    st.subheader("Build a cross-game slip")
+    if selected_rows:
+        sel = selected_rows[0]
+        mask = (
+            (filtered["Player"] == sel.get("Player"))
+            & (filtered["Market"] == sel.get("Market Slug"))
+            & (filtered["Bet"] == sel.get("Bet"))
+            & (filtered["Platform"] == sel.get("Platform"))
+        )
+        match = filtered.loc[mask]
+        if not match.empty and match.iloc[0]["Platform"] in ("Underdog", "Sleeper"):
+            full = match.iloc[0]
+            if st.button(
+                f"Add {full['Player']} {full['Bet']} {full['Line']:.10g} to slip",
+                key="board_add_slip",
+            ):
+                add_to_simple_slip(full.to_dict())
+                st.rerun()
+        else:
+            st.caption("Select an Underdog or Sleeper row to add it to a slip.")
     else:
-        st.caption("Select an Underdog or Sleeper row to add it to a slip.")
-else:
-    st.caption("Select a row above, then add it to your slip.")
+        st.caption("Select a row above, then add it to your slip.")
 render_simple_builder(filtered, load_current_game_corr())
 
 with st.expander("Snapshot info"):

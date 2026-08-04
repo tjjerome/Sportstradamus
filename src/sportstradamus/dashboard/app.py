@@ -18,15 +18,22 @@ import streamlit as st
 from sportstradamus.dashboard import theme
 from sportstradamus.dashboard.components.deep_dive import drop_detail_on_page_change
 from sportstradamus.dashboard.components.locked_shelf import render_locked_shelf
+from sportstradamus.dashboard.components.slip_dock import render_slip_dock
 from sportstradamus.dashboard.components.slip_state import init_slip_state
+from sportstradamus.dashboard.viewport import is_mobile
 
 st.set_page_config(page_title="Sportstradamus Dashboard", layout="wide")
 
-st.html(theme.APP_CSS + theme.STARFIELD_HTML)
+# APP_CSS is a <style> block: it must go through st.markdown with unsafe HTML,
+# NOT st.html — st.html's DOMPurify (USE_PROFILES {html:true}) strips <style>/<svg>
+# outright, so the whole celestial CSS layer silently no-ops (renders flat).
+st.markdown(theme.APP_CSS + theme.STARFIELD_HTML, unsafe_allow_html=True)
 theme.register_plotly_template()
 
 # Slip state is shared across surfaces; seed it before any surface renders.
 init_slip_state()
+
+_mobile = is_mobile()
 
 # Global sport switch: stored under plain key so surfaces read it without the
 # widget-key indirection. Copy widget value into the plain key each run.
@@ -98,7 +105,8 @@ pg = st.navigation(
                 url_path="lab-modifiers",
             ),
         ],
-    }
+    },
+    position="top" if _mobile else "sidebar",
 )
 
 with st.sidebar:
@@ -109,3 +117,6 @@ with st.sidebar:
 drop_detail_on_page_change(st.session_state, pg.url_path)
 
 pg.run()
+
+if _mobile:
+    render_slip_dock()

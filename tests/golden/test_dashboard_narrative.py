@@ -12,6 +12,7 @@ from sportstradamus.dashboard import theme
 from sportstradamus.dashboard.narrative import (
     bet_arrow,
     context_strip,
+    game_headline,
     home_away,
     match_label,
     top_thesis,
@@ -66,6 +67,39 @@ def test_top_thesis_empty_when_no_match():
     )
     assert top_thesis(parlays, game="ZZZ/YYY", date="2026-06-13") == ""
     assert top_thesis(pd.DataFrame(), game="NYK/SAS", date="2026-06-13") == ""
+
+
+def test_game_headline_story_wins_over_parlay():
+    stories = pd.DataFrame(
+        [
+            {"Game": "NYK/SAS", "headline": "low", "model_ev": 1.2},
+            {"Game": "NYK/SAS", "headline": "The Knicks pull away", "model_ev": 1.9},
+        ]
+    )
+    parlays = pd.DataFrame(
+        [{"Game": "NYK/SAS", "Date": "2026-06-13", "Model EV": 5.0, "Thesis": "parlay says"}]
+    )
+    assert game_headline(stories, parlays, game="NYK/SAS", date="2026-06-13") == "The Knicks pull away"
+
+
+def test_game_headline_falls_back_to_parlay_when_no_story_row():
+    stories = pd.DataFrame([{"Game": "BOS/PHI", "headline": "other game", "model_ev": 2.0}])
+    parlays = pd.DataFrame(
+        [{"Game": "NYK/SAS", "Date": "2026-06-13", "Model EV": 1.2, "Thesis": "parlay thesis"}]
+    )
+    assert game_headline(stories, parlays, game="NYK/SAS", date="2026-06-13") == "parlay thesis"
+
+
+def test_game_headline_blank_story_headline_falls_back():
+    stories = pd.DataFrame([{"Game": "NYK/SAS", "headline": "", "model_ev": 3.0}])
+    parlays = pd.DataFrame(
+        [{"Game": "NYK/SAS", "Date": "2026-06-13", "Model EV": 1.2, "Thesis": "parlay backup"}]
+    )
+    assert game_headline(stories, parlays, game="NYK/SAS", date="2026-06-13") == "parlay backup"
+
+
+def test_game_headline_empty_when_both_sources_empty():
+    assert game_headline(pd.DataFrame(), pd.DataFrame(), game="NYK/SAS", date="2026-06-13") == ""
 
 
 def test_context_strip_returns_fields():
