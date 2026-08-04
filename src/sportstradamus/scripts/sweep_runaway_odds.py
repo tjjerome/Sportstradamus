@@ -7,12 +7,20 @@ sweeping across every cell after their fix deploys:
 * **Magnitude-blown** — the old unbounded inversion (the ZINB ``under ≤ gate``
   runaway on the DFS write path, the SkewNormal ``mean → ∞`` asymptote) wrote
   means up to the millions. The ``get_ev`` clamp fix bounds new writes at
-  ``SN_MAX_MEAN_FACTOR × line``; the residue is **deleted**.
+  ``SN_MAX_MEAN_FACTOR × line``.
 * **Gate-refuted** — a sharp quote whose de-vigged under-prob sits at or below
   the calibrated zero-inflation gate has no mean solution at all, so the encoder
-  stored ``get_ev``'s clamp ceiling as if it were one. The shape-free
-  ``(under_prob, line)`` quote beside it is still sound, so only the **ev is
-  nulled**; the consensus reader None-skips a book that has none.
+  stored ``get_ev``'s clamp ceiling as if it were one.
+
+Both are repaired the same way, because in both the *quote* is sound and only the
+mean derived from it is not: where the row still carries its shape-free
+``(under_prob, line)`` the **ev is nulled** and the row is kept. The consensus
+reader None-skips a book with no ev, and the training join re-derives the mean
+from the quote anyway. Only a row left with nothing usable — no quote and no
+trustworthy ev — is **deleted**. That distinction is worth the branch: on the dev
+archive 34,266 of 34,280 blown rows are real 2025–26 quotes from real books
+(fanduel, betrivers, draftkings) on live cells, and deleting them would discard
+book evidence that only paid historical API calls could buy back.
 
 :mod:`sportstradamus.scripts.delete_corrupt_seed` strips blown rows per named
 cell; this driver sweeps EVERY cell at once for the one-shot post-deploy cleanup
@@ -78,6 +86,13 @@ _CLAMPED_PREDICATE = f"""
     AND NOT ({BLOWN_PREDICATE})
 """
 
+# What the training join actually reads on the authentic path, so a row that has it survives
+# a poisoned ev intact.
+_SHAPE_FREE = "under_prob IS NOT NULL AND line IS NOT NULL"
+_UNUSABLE_EV = f"(({BLOWN_PREDICATE}) OR ({_CLAMPED_PREDICATE}))"
+_NULL_EV_PREDICATE = f"{_UNUSABLE_EV} AND {_SHAPE_FREE}"
+_DELETE_PREDICATE = f"{_UNUSABLE_EV} AND NOT ({_SHAPE_FREE})"
+
 
 def _connect(path: Path, *, read_only: bool) -> duckdb.DuckDBPyConnection:
     """Open the archive, translating a DuckDB lock collision into operator guidance."""
@@ -106,11 +121,11 @@ def _worst_cells(con: duckdb.DuckDBPyConnection, predicate: str) -> list[tuple[s
 def sweep_runaway_odds(archive: str | Path, *, apply: bool = False, backup: bool = True) -> dict:
     """Count (and, with ``apply``, repair) both classes of poisoned ``ev`` row.
 
-    Magnitude-blown rows are deleted outright; gate-refuted rows keep their shape-free
-    ``(under_prob, line)`` quote and lose only the ``ev``. Caller owns concurrency (the
-    CLI holds the archive flock). With ``apply`` a timestamped ``.bak-<epoch>`` is written
-    first (unless ``backup=False``) and the DB is checkpointed. Returns
-    ``{total_rows, blown, clamped, remaining, remaining_clamped, worst, worst_clamped, backup}``.
+    A row keeping its shape-free ``(under_prob, line)`` quote loses only the ``ev``;
+    one left with nothing usable is deleted. Caller owns concurrency (the CLI holds the
+    archive flock). With ``apply`` a timestamped ``.bak-<epoch>`` is written first
+    (unless ``backup=False``) and the DB is checkpointed. Returns ``{total_rows, blown,
+    clamped, nulled, deleted, remaining, remaining_clamped, worst, worst_clamped, backup}``.
     """
     archive = Path(archive)
     if not archive.is_file():
@@ -125,12 +140,13 @@ def sweep_runaway_odds(archive: str | Path, *, apply: bool = False, backup: bool
     try:
         total_rows = con.execute("SELECT COUNT(*) FROM odds").fetchone()[0]
         blown, clamped = _count(con, BLOWN_PREDICATE), _count(con, _CLAMPED_PREDICATE)
+        nulled, deleted = _count(con, _NULL_EV_PREDICATE), _count(con, _DELETE_PREDICATE)
         worst = _worst_cells(con, BLOWN_PREDICATE)
         worst_clamped = _worst_cells(con, _CLAMPED_PREDICATE)
         remaining, remaining_clamped = blown, clamped
         if apply and (blown or clamped):
-            con.execute(f"DELETE FROM odds WHERE {BLOWN_PREDICATE}")
-            con.execute(f"UPDATE odds SET ev = NULL WHERE {_CLAMPED_PREDICATE}")
+            con.execute(f"DELETE FROM odds WHERE {_DELETE_PREDICATE}")
+            con.execute(f"UPDATE odds SET ev = NULL WHERE {_NULL_EV_PREDICATE}")
             remaining = _count(con, BLOWN_PREDICATE)
             remaining_clamped = _count(con, _CLAMPED_PREDICATE)
             con.execute("CHECKPOINT")
@@ -141,6 +157,8 @@ def sweep_runaway_odds(archive: str | Path, *, apply: bool = False, backup: bool
         "total_rows": total_rows,
         "blown": blown,
         "clamped": clamped,
+        "nulled": nulled,
+        "deleted": deleted,
         "remaining": remaining,
         "remaining_clamped": remaining_clamped,
         "worst": worst,
@@ -166,15 +184,18 @@ def _print_report(report: dict, archive: Path, apply: bool) -> None:
         f"{report['clamped']:,} of {report['total_rows']:,}"
     )
     _print_cells(report["worst_clamped"])
+    click.echo(
+        f"repair plan: null the ev on {report['nulled']:,} rows (quotes kept), "
+        f"delete {report['deleted']:,} with no quote left."
+    )
     if not apply:
         click.echo("DRY RUN — nothing written; pass --apply to back up + repair.")
         return
     if report["backup"] is not None:
         click.echo(f"backed up -> {report['backup']}")
-    click.echo(f"deleted {report['blown']:,} runaway rows ({report['remaining']:,} remaining).")
     click.echo(
-        f"nulled ev on {report['clamped']:,} gate-refuted rows "
-        f"({report['remaining_clamped']:,} remaining); their quotes were kept."
+        f"done; {report['remaining']:,} runaway and {report['remaining_clamped']:,} "
+        "gate-refuted rows remain."
     )
 
 
