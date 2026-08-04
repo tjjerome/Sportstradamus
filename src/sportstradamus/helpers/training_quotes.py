@@ -203,12 +203,18 @@ def _authentic_quote(
 ) -> TrainingQuote:
     """Build the quote for a same-line cohort that priced the market directly.
 
-    Re-inverts the mean from each book's ``(line, under_prob)`` instead of averaging the
-    archive's stored ``ev``, which goes stale the next time ``cv`` is recomputed (every
-    ``meditate`` run) or the distribution family flips — 71% of a live sample of ungated
-    quotes had drifted, by 26% of the mean. Inverting per book and then averaging (not
-    averaging the probability first) matches how the value was originally encoded, so an
-    undrifted cohort reproduces its stored ``ev`` exactly.
+    The mean is inverted from the cohort's consensus under-probability under the cell's
+    CURRENT config, not read from the archive's stored ``ev``. A stored ``ev`` was encoded
+    at scrape time and goes stale the next time ``cv`` is recomputed (every ``meditate``
+    run) or the distribution family flips — 71% of a live sample of ungated quotes had
+    drifted, by 26% of the mean.
+
+    Inverting the consensus rather than averaging per-book inversions is what keeps the
+    three book columns describing *one* distribution: ``get_odds(line, ev, cv)`` returns
+    exactly ``1 - over_probability``, so the probability Gate 1 scores and the mean the
+    ``fused_loc`` book leg pools are the same quote. ``get_ev`` is convex, so the two
+    orders differ by far more than rounding — on MLB total bases at a 0.5 line, 0.64
+    against 1.23 — and averaging means yields a number no single distribution produces.
 
     The inversion stays ungated even for ``ZINB``/``ZAGamma`` cells, matching the fallback
     this replaces: ``book_gate``'s population zero rate (0.78 for NFL tds, 0.89 for MLB
@@ -224,12 +230,7 @@ def _authentic_quote(
     return TrainingQuote(
         line=line,
         over_probability=float(np.clip(1.0 - under, 0.0, 1.0)),
-        ev=float(
-            np.average(
-                [float(get_ev(line, row.under_probability, cv=cv, dist=dist)) for row in cohort],
-                weights=[_weight(row.book, weights) for row in cohort],
-            )
-        ),
+        ev=float(get_ev(line, under, cv=cv, dist=dist)),
         source="book_direct",
         authenticity=AUTHENTIC,
         synthetic_reason=None,

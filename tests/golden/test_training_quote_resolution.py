@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from sportstradamus.helpers import config
+from sportstradamus.helpers.distributions import get_odds
 from sportstradamus.helpers.training_quotes import (
     AUTHENTIC,
     DERIVED,
@@ -54,9 +55,9 @@ def test_direct_probability_uses_one_deterministic_same_line_cohort():
 
     assert quote.line == 2.5
     assert quote.over_probability == pytest.approx(0.45)
-    # Each cohort quote re-inverted at the cell's current cv/dist, then averaged — not the
+    # The consensus under-prob (0.55) inverted at the cell's current cv/dist — not the
     # stored 3.1/2.9, which were encoded under whatever config was live when they scraped.
-    assert quote.ev == pytest.approx(2.3460, abs=1e-4)
+    assert quote.ev == pytest.approx(2.3390, abs=1e-4)
     assert quote.authenticity == AUTHENTIC
     assert quote.source == "book_direct"
     assert quote.synthetic_reason is None
@@ -80,6 +81,37 @@ def test_legacy_ev_inversion_is_explicitly_derived_and_synthetic():
     assert quote.synthetic_reason == "ev_inversion"
     assert quote.book_count == 1
     assert not quote.archived and quote.odds_synthetic
+
+
+@pytest.mark.parametrize(
+    ("dist", "cv", "unders"),
+    [
+        ("SkewNormal", 0.5, (0.60, 0.50)),
+        ("NegBin", 0.6957, (0.59, 0.41, 0.52)),
+        ("Gamma", 1.0, (0.42,)),
+        ("DPO", 0.8, (0.70, 0.33)),
+    ],
+)
+def test_direct_quote_line_odds_and_ev_describe_one_distribution(dist, cv, unders):
+    """The three book columns must be mutually consistent, not merely individually sane.
+
+    ``Odds`` is scored by Gate 1 and ``EV`` is pooled by ``fused_loc``, so if inverting the
+    EV does not return the probability, the model is graded against one book and blended
+    against another. Averaging per-book inversions breaks this — ``get_ev`` is convex, so
+    the mean of the inversions is not the inversion of the mean.
+    """
+    quote = resolve_training_quote(
+        [_row(f"b{i}", None, under, 2.5) for i, under in enumerate(unders)],
+        legacy_line=2.5,
+        fallback_line=2.0,
+        fallback_ev=None,
+        dist=dist,
+        cv=cv,
+    )
+
+    assert float(get_odds(2.5, quote.ev, dist, cv=cv)) == pytest.approx(
+        1.0 - quote.over_probability, abs=1e-6
+    )
 
 
 @pytest.mark.parametrize("stored_ev", [2.4, None, 50_000.0])
@@ -197,15 +229,11 @@ class _Stub:
         ([], 0.0),
     ],
 )
-def test_repair_and_scratch_append_emit_identical_book_fields(
-    monkeypatch, rows, legacy_line
-):
+def test_repair_and_scratch_append_emit_identical_book_fields(monkeypatch, rows, legacy_line):
     archive = _FakeArchive(rows, legacy_line)
     monkeypatch.setattr(base_mod, "archive", archive)
     stats = pd.DataFrame({"Avg10": [2.0]}, index=["P"])
-    append_fields = _Stub().resolve_player_market_odds(
-        stats, "AST", "2026-05-08", _AT_2
-    ).iloc[0]
+    append_fields = _Stub().resolve_player_market_odds(stats, "AST", "2026-05-08", _AT_2).iloc[0]
     cached = pd.DataFrame(
         {
             "Player": ["P"],
@@ -301,8 +329,7 @@ def test_line_clip_preserves_evidence_quotes_and_keeps_auditor_coherent(tmp_path
             "Result": [2.0] * (rows + 3),
             "Line": [0.5 * (i % 10 + 1) for i in range(rows)] + [8.5, 6.5, 12.0],
             "Odds": [0.5] * rows + [0.46718, 0.900301, 0.5],
-            "EV": [0.5 * (i % 10 + 1) for i in range(rows)]
-            + [31.043097, 32.5, 12.0],
+            "EV": [0.5 * (i % 10 + 1) for i in range(rows)] + [31.043097, 32.5, 12.0],
             "Archived": [False] * rows + [True, False, False],
             "Odds_synthetic": [True] * rows + [False, True, True],
             "QuoteSource": ["model_fallback"] * rows
