@@ -124,10 +124,15 @@ _SKEWNORMAL_PERSIST = {
 _YARDS_PERSIST = {**_SKEWNORMAL_PERSIST, "hpo_selection": "hpo_selection"}
 _COUNT_PERSIST = {
     "dist": "dist",
+    "dist_training_loss": "dist_training_loss",
     "count_dispersion_objective": "count_dispersion_objective",
     "blending_loss_fn": "blending",
     "posthoc": "posthoc",
 }
+# The count constructors accept `nll` alone, and a count spec declares no dist_training_loss axis,
+# so without this pin meditate inherits the *cell's* value — on a cell configured continuous with
+# `crps` that reached the constructor and killed every count corner it had.
+_COUNT_FIXED_CONTROLS = {"dist_training_loss": "nll"}
 
 _BASE_SPECS = (
     _base(
@@ -171,13 +176,8 @@ _BASE_SPECS = (
             "blending_loss_fn": _BLENDING,
             "posthoc": _POSTHOC,
         },
-        {
-            "dist": "dist",
-            "zinb_mode": "zinb_mode",
-            "count_dispersion_objective": "count_dispersion_objective",
-            "blending_loss_fn": "blending",
-            "posthoc": "posthoc",
-        },
+        {**_COUNT_PERSIST, "zinb_mode": "zinb_mode"},
+        fixed_controls=_COUNT_FIXED_CONTROLS,
         fixed_persist=_COUNT_FIXED_PERSIST,
         applicability=_COUNT_APPLICABILITY,
     ),
@@ -190,6 +190,7 @@ _BASE_SPECS = (
             "posthoc": _POSTHOC,
         },
         _COUNT_PERSIST,
+        fixed_controls=_COUNT_FIXED_CONTROLS,
         fixed_persist=_COUNT_FIXED_PERSIST,
         applicability=_COUNT_APPLICABILITY,
     ),
@@ -202,6 +203,7 @@ _BASE_SPECS = (
             "posthoc": _POSTHOC,
         },
         _COUNT_PERSIST,
+        fixed_controls=_COUNT_FIXED_CONTROLS,
         fixed_persist=_COUNT_FIXED_PERSIST,
         applicability=_COUNT_APPLICABILITY,
     ),
@@ -354,6 +356,7 @@ CONFIRM_EVIDENCE_CORNERS: tuple[tuple[str, str, str, dict[str, str]], ...] = (
         "DPO",
         {
             "dist": "DPO",
+            "dist_training_loss": "nll",
             "count_dispersion_objective": "pit_ks",
             "blending_loss_fn": "nll",
             "posthoc": "roe_mean",

@@ -124,6 +124,7 @@ def test_persist_converts_internal_book_over_to_scorecard_under(monkeypatch, tmp
     matrix_hash = "b" * 64
     selected_controls = {
         "dist": "NegBin",
+        "dist_training_loss": "nll",
         "count_dispersion_objective": "crps",
         "blending_loss_fn": "crps",
         "posthoc": "none",
