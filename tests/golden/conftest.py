@@ -7,11 +7,25 @@ See docs/STYLE_GUIDE.md §19 and the Phase 1 section of the refactor plan at
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
+from sportstradamus.helpers.locks import _LOCK_DIR_ENV
+
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def isolated_lock_dir(tmp_path_factory) -> None:
+    """Point the training-artifact flock at a scratch dir for the whole session.
+
+    tmp_path_factory roots itself per xdist worker, so the CLI tests that exercise a
+    confirm walk or a meditate run neither contend with each other nor block a real
+    walk that happens to be running on this box.
+    """
+    os.environ[_LOCK_DIR_ENV] = str(tmp_path_factory.mktemp("locks"))
 
 
 @pytest.fixture

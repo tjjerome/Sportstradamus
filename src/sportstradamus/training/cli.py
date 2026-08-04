@@ -20,6 +20,11 @@ from sportstradamus.helpers import (
     odds_budget,
 )
 from sportstradamus.helpers.io import MODEL_STATS_PATH, market_file_slug, prune_model_pickle
+from sportstradamus.helpers.locks import (
+    ORCHESTRATED_ENV_VAR,
+    TRAINING_ARTIFACTS_LOCK_FILE,
+    hold_for_process,
+)
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 from sportstradamus.training import baselines, calibration
 from sportstradamus.training.calibration import fit_book_weights
@@ -289,6 +294,37 @@ def _validate_mode_flags(
         raise click.UsageError(
             "--dependency-namespace on a full rebuild requires --dependency-root"
         )
+
+
+def _lock_production_artifacts(
+    league: str,
+    market: str | None,
+    *,
+    deterministic: bool,
+    matrix_only: bool,
+    artifact_output: Path | None,
+) -> None:
+    """Claim the production artifact set for this run, or refuse to start.
+
+    A confirm/supersede walk snapshots and restores that set cell by cell, on the
+    assumption that only its own retrain writes it in between; a second writer breaks
+    that and tears a model pickle away from its test-set CSV. The three sandbox modes
+    write elsewhere, and an orchestrated run is the lock holder's own work.
+    """
+    if deterministic or matrix_only or artifact_output or os.environ.get(ORCHESTRATED_ENV_VAR):
+        return
+    try:
+        hold_for_process(
+            TRAINING_ARTIFACTS_LOCK_FILE,
+            timeout_s=0,
+            label=f"meditate league={league} market={market or 'all'}",
+            contention_hint=(
+                "Wait for it to finish, or use a sandbox mode "
+                "(--deterministic / --artifact-output)."
+            ),
+        )
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 @click.command()
@@ -584,6 +620,13 @@ def meditate(
         dependency_namespace=dependency_namespace,
         dependency_root=dependency_root,
         bypass_withholding=bypass_withholding,
+    )
+    _lock_production_artifacts(
+        league,
+        market,
+        deterministic=deterministic,
+        matrix_only=matrix_only,
+        artifact_output=artifact_output,
     )
     # --deterministic implies --force: the input-freeze (new_M = empty) otherwise
     # short-circuits train_market when a prior model pickle exists, which is precisely

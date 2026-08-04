@@ -292,25 +292,48 @@ def _layer_gates_from_test_set(
 ) -> None:
     """Overwrite the placeholder ship-gate columns on ``row`` if the test-set CSV is present.
 
-    Generic model and test-set identities must match exactly. Identity-absent
-    legacy artifacts are accepted only as a pair.
+    Gates layer only when the CSV's strategy identity matches the model's: generic
+    identities must match exactly, and identity-absent legacy artifacts are accepted only
+    as a pair. A pair that disagrees — a killed ``meditate``, or a confirm walk interrupted
+    between its pickle copy and its CSV copy — warns naming the cell and leaves the
+    placeholders in place, rather than aborting the run that is training every other cell.
+    Retraining that cell realigns the two artifacts.
 
-    Skips silently when the CSV is missing (the cell trained but its test_set
-    wasn't dumped), empty (degenerate frame would crash ``pd.qcut``), or
-    malformed (missing required columns). The row is mutated in place.
+    Skips silently when the CSV is missing (the cell trained but its test_set wasn't
+    dumped) or empty (degenerate frame would crash ``pd.qcut``), and warns when it is
+    unreadable or fails identity validation. The row is mutated in place.
     """
     test_set_path = Path(str(_TEST_SETS_DIR / f"{market_file_slug(league, market)}.csv"))
     if not test_set_path.is_file():
         return
-    test_identity, _spec = validate_strategy_frame(
-        pd.read_csv(test_set_path), league=league, market=market
-    )
-    model_is_legacy = expected_identity.controls_json is None
-    test_set_is_legacy = test_identity is None
-    if model_is_legacy != test_set_is_legacy:
-        raise ValueError(f"{league} {market}: mixed legacy/generic strategy artifacts")
-    if not model_is_legacy and test_identity != expected_identity:
-        raise ValueError(f"{league} {market}: model/test-set strategy identity mismatch")
+    mismatch = ""
+    try:
+        test_identity, _spec = validate_strategy_frame(
+            pd.read_csv(test_set_path), league=league, market=market
+        )
+    except ValueError as e:
+        # Every rejection here subclasses ValueError: pandas' ParserError/EmptyDataError on a
+        # half-written CSV (whose text ends in the newline stripped below, so the warning stays
+        # one greppable line), and the stale-identity family. That includes
+        # InactiveStrategyArtifactError — a cell whose structural experiment self-killed to its
+        # pooled fallback is a legitimate training outcome, and the serving path
+        # (prediction.model_prob) still refuses to serve it.
+        mismatch = str(e).strip()
+    else:
+        model_is_legacy = expected_identity.controls_json is None
+        test_set_is_legacy = test_identity is None
+        if model_is_legacy != test_set_is_legacy:
+            mismatch = "mixed legacy/generic strategy artifacts"
+        elif not model_is_legacy and test_identity != expected_identity:
+            mismatch = "model/test-set strategy identity mismatch"
+    if mismatch:
+        logger.warning(
+            "scorecard skip %s/%s: %s; retrain this cell to realign pickle and test set",
+            league,
+            market,
+            mismatch,
+        )
+        return
     try:
         df = load_test_set(test_set_path, _SHIP_PRED_COL)
     except (ValueError, KeyError) as e:
