@@ -123,11 +123,14 @@ class _CaptureArchive:
         pass
 
 
-def test_add_dfs_missing_under_side_is_bounded_not_blown():
-    # A Rivals/H2H-style DFS pick carries a single Boost and no Boost_Under; the
-    # one-sided no_vig fabrication used to drive the count-cell ev into the
-    # thousands. It must stay bounded by the cap (BLK's high gate floors the even
-    # price at the gate, not a runaway).
+def test_add_dfs_missing_under_side_is_never_blown_or_clamped():
+    """A one-sided DFS pick stores a real mean or none — never a bound dressed as one.
+
+    A Rivals/H2H-style pick carries a single Boost and no Boost_Under; the one-sided
+    no_vig fabrication used to drive the count-cell ev into the thousands. BLK's high
+    zero rate then floors the symmetric price below the gate, so the inversion has no
+    solution at all and lands on ``get_ev``'s ceiling — which must be stored as NULL.
+    """
     offer = {
         "Player": "Nikola Jokic",
         "League": "NBA",
@@ -138,17 +141,17 @@ def test_add_dfs_missing_under_side_is_bounded_not_blown():
     }
     cap = _CaptureArchive()
     Archive.add_dfs(cap, [offer], "Underdog", {})
-    assert cap.evs and cap.evs[0] <= SN_MAX_MEAN_FACTOR * 1.5, (
-        f"missing under side blew the ev: {cap.evs}"
+    assert len(cap.evs) == 1
+    assert cap.evs[0] is None or 0 < cap.evs[0] < SN_MAX_MEAN_FACTOR * 1.5, (
+        f"stored a clamped or blown ev as a mean: {cap.evs}"
     )
 
 
 # --- Gate-refuted quote persistence (the 2026-06+ NFL tds poisoning) ---------
 #
 # A sharp quote whose under-prob sits at or below the calibrated gate has no
-# implied mean (population zi vs quoted-star selection). The moneylines path
-# must store a NULL ev with the shape-free quote — never the clamp ceiling as a
-# real mean. The DFS path (add_dfs) keeps its pinned clamp semantics above.
+# implied mean (population zi vs quoted-star selection). Both writers must store a
+# NULL ev with the shape-free quote — never the clamp ceiling as a real mean.
 
 
 def test_player_prop_gate_refuted_quote_stores_null_ev(monkeypatch):

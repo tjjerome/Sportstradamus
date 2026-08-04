@@ -167,11 +167,11 @@ def test_add_dfs_dedup_market_resolution_and_ev():
     # Jokic BLK (ZINB) and McDavid points (SkewNormal) both encode through a
     # calibrated cell (stat_calibration.json -- gitignored, meditate-recomputed),
     # so their exact ev moves with the live calibration: pin only the invariant the
-    # book-fallback clamp guarantees -- positive and bounded by SN_MAX_MEAN_FACTOR *
-    # line, never a runaway. Some Guy's WNBA pts cell is config-missing (default
+    # writer guarantees -- a mean strictly inside get_ev's ceiling, or NULL when the
+    # price has no mean at all. Some Guy's WNBA pts cell is config-missing (default
     # dist/cv), so its ev is deterministic and stays an exact pin.
-    assert 0 < evs["Nikola Jokic"] <= SN_MAX_MEAN_FACTOR * 1.5
-    assert 0 < evs["Connor Mcdavid"] <= SN_MAX_MEAN_FACTOR * 1.5
+    for player in ("Nikola Jokic", "Connor Mcdavid"):
+        assert evs[player] is None or 0 < evs[player] < SN_MAX_MEAN_FACTOR * 1.5, player
     assert evs["Some Guy"] == pytest.approx(15.136385967, rel=1e-6)
 
     assert cap.lines == [

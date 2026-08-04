@@ -66,22 +66,19 @@ _FLOCK_TIMEOUT_S = 900
 # Enough rows to identify the worst offenders without a wall of output.
 _WORST_CELLS_SHOWN = 15
 
-# The platforms Archive.add_dfs writes (prediction/scoring.py). Their ev is a pinned
-# placeholder clamp rather than a book inversion, so the gate-refuted fix deliberately
-# left that path alone and this repair must skip them too.
-_DFS_PLATFORMS = ("Underdog", "Sleeper")
-
 # Same tolerance training_quotes.archive_ev_is_runaway uses to spare the ceiling from the
 # runaway test, so the two agree on exactly which rows sit *at* the clamp.
 _CLAMP_RTOL = 1e-12
 
-# A clamped quote: ev sitting exactly on get_ev's ceiling for the row's own line, from a
-# real sportsbook. Keys on the odds row's own shape-free line — the line get_ev was actually
-# called with — not the lines-table MAX that BLOWN_PREDICATE has to fall back on. Excluding
-# blown rows keeps the two classes disjoint, so the dry run's counts sum to the real total.
+# A clamped quote: ev sitting exactly on get_ev's ceiling for the row's own line. Keys on the
+# odds row's own shape-free line — the line get_ev was actually called with — not the
+# lines-table MAX that BLOWN_PREDICATE has to fall back on. Excluding blown rows keeps the two
+# classes disjoint, so the dry run's counts sum to the real total. Underdog and Sleeper are in
+# scope: Archive.add_dfs used to treat its ceiling as a deliberate placeholder, but it clamps
+# on every unboosted pick against a high-zero-rate cell and rode into both the served blend
+# and the fitted book weights, so it now stores NULL like the sportsbook writer.
 _CLAMPED_PREDICATE = f"""
-    book NOT IN {_DFS_PLATFORMS}
-    AND ev IS NOT NULL AND line IS NOT NULL AND line > 0
+    ev IS NOT NULL AND line IS NOT NULL AND line > 0
     AND abs(ev - {BLOWN_LINE_FACTOR} * line) <= {_CLAMP_RTOL} * {BLOWN_LINE_FACTOR} * line
     AND NOT ({BLOWN_PREDICATE})
 """

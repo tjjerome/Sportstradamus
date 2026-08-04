@@ -36,7 +36,12 @@ import numpy as np
 import pandas as pd
 
 from sportstradamus.helpers.config import book_gate, book_weights, stat_cv, stat_dist
-from sportstradamus.helpers.distributions import get_ev, get_odds, no_vig_odds
+from sportstradamus.helpers.distributions import (
+    SN_MAX_MEAN_FACTOR,
+    get_ev,
+    get_odds,
+    no_vig_odds,
+)
 from sportstradamus.helpers.text import remove_accents
 from sportstradamus.helpers.training_quotes import ArchivedBookQuote, pickem_quote
 
@@ -1150,8 +1155,25 @@ class Archive:
             odds = no_vig_odds(over, _dfs_under_boost(over, o.get("Boost_Under")))
             ev = get_ev(line, odds[1], cv, dist=dist, gate=gate)
 
+            # Same rule the sportsbook writer follows: get_ev returns its ceiling when no
+            # mean reproduces the price, and a bound is not a mean. It binds constantly here
+            # — an unboosted pick prices at 0.5, which sits below book_gate's population zero
+            # rate on every high-zi count cell, so one prophecize wrote 6,055 of these. They
+            # reach further than the sportsbook kind did: _sanitize_book_ev's runaway test is
+            # 10x line and deliberately spares 5x, and fit_book_weights drops only pinnacle,
+            # so the placeholder rode into both the served blend and the fitted weights.
+            # Storing NULL drops the platform from _weighted_book_ev instead; the quote and
+            # the line beside it are untouched and still carry the entry.
+            clamped = ev >= max(SN_MAX_MEAN_FACTOR * line, 1.0)
             self._stage_book_ev(
-                league, market, d, player, platform, ev, under_prob=odds[1], line=line
+                league,
+                market,
+                d,
+                player,
+                platform,
+                None if clamped else ev,
+                under_prob=odds[1],
+                line=line,
             )
             self._stage_line(league, market, d, player, line)
 
