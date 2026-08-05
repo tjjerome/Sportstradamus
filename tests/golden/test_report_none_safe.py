@@ -19,6 +19,7 @@ upstream (suspenders).
 import math
 from unittest import mock
 
+import pandas as pd
 import pytest
 
 from sportstradamus.training.report import _wide_row
@@ -174,13 +175,29 @@ def test_wide_row_surfaces_generic_strategy_identity():
     }
 
 
-def test_wide_row_propagates_invalid_structural_identity():
+def test_wide_row_skips_an_invalid_structural_identity_without_aborting(caplog):
+    """A pickle whose identity no longer validates costs its own row's gates, not the run.
+
+    ``report`` rescans every cell on disk after each one trains, so a pickle written
+    before its strategy's canonical signature changed used to abort the very
+    ``meditate --force`` that was retraining it — 23 cells were in that state after a
+    signature bump. Nulling the identity columns is also the safer of the two outcomes:
+    the gates stay ``<NA>`` so the cell cannot ship on stale artifacts, whereas the raise
+    left the previous ``model_stats.parquet`` standing with whatever ``ship`` it last had.
+    """
     model = _model_with_diag({"model_shape": 1.0, "empirical_shape": 1.0})
     with (
         mock.patch(
             "sportstradamus.training.report.resolve_report_identity",
             side_effect=ValueError("stale structural strategy identity"),
         ),
-        pytest.raises(ValueError, match="stale structural strategy identity"),
+        caplog.at_level("WARNING"),
     ):
-        _wide_row(model, "NFL", "rushing yards", "devel", {}, {})
+        row, identity = _wide_row(model, "NFL", "rushing yards", "devel", {}, {})
+
+    assert identity is None
+    assert row["strategy_slug"] is None and row["strategy_signature"] is None
+    assert row["ship"] is pd.NA
+    assert all(row[f"g{n}_pass"] is pd.NA for n in range(1, 7))
+    assert "NFL/rushing yards" in caplog.text
+    assert "stale structural strategy identity" in caplog.text

@@ -81,6 +81,21 @@ _TEST_SETS_DIR = pkg_resources.files(data) / "test_sets"
 # against divide-by-zero when empirical_shape is near zero on sparse markets.
 _SHAPE_DENOM_FLOOR: float = 0.01
 
+# model_stats column -> ArtifactIdentity attribute. The two names diverge because the
+# parquet prefixes what the identity spells bare (`signature` -> `strategy_signature`).
+_IDENTITY_COLUMNS = {
+    "strategy_slug": "strategy_slug",
+    "structural_strategy": "structural_strategy",
+    "strategy_signature": "signature",
+    "strategy_implementation_version": "implementation_version",
+    "artifact_schema_version": "artifact_schema_version",
+    "strategy_status": "status",
+    "strategy_controls_json": "controls_json",
+    "strategy_corner_fingerprint": "corner_fingerprint",
+    "strategy_matrix_hash": "matrix_hash",
+    "strategy_split_fingerprint": "split_fingerprint",
+}
+
 
 def report() -> None:
     """Build per-cell training stats from saved model pickles and persist parquet + CSV."""
@@ -127,6 +142,32 @@ def report() -> None:
     write_model_stats(league_models, stat_cv, stat_std, stat_shipped)
 
 
+def _identity_block(model: dict, league: str, market: str) -> tuple[dict, ArtifactIdentity | None]:
+    """The row's strategy-identity columns, and the identity that binds its test set.
+
+    A pickle whose identity no longer validates yields all-``None`` columns and a ``None``
+    identity rather than raising. ``report`` rescans every cell on disk after each one
+    trains, so a pickle written before its strategy's canonical signature changed would
+    otherwise abort the very run that is retraining it — the same rule
+    :func:`_layer_gates_from_test_set` applies on the test-set side. That cell's own
+    retrain restamps the identity and the columns fill back in.
+    """
+    try:
+        identity = resolve_report_identity(model, league=league, market=market)
+    except ValueError as e:
+        logger.warning(
+            "scorecard skip %s/%s: %s; retrain this cell to restamp its identity",
+            league,
+            market,
+            e,
+        )
+        identity = None
+    return {
+        col: getattr(identity, attr) if identity else None
+        for col, attr in _IDENTITY_COLUMNS.items()
+    }, identity
+
+
 def _wide_row(
     model: dict,
     league: str,
@@ -134,14 +175,18 @@ def _wide_row(
     shipped: str,
     stat_cv: dict,
     stat_std: dict,
-) -> tuple[dict, ArtifactIdentity]:
-    """Flatten one model and retain its validated identity for test-set binding."""
+) -> tuple[dict, ArtifactIdentity | None]:
+    """Flatten one model and retain its validated identity for test-set binding.
+
+    The identity is ``None`` when the pickle's own identity no longer validates, which
+    leaves the row's ship gates on their placeholders.
+    """
     metrics_block = model.get("metrics") or {}
     model_m = metrics_block.get("model") or {}
     book_m = metrics_block.get("book_baseline") or {}
     diag = model.get("diagnostics") or {}
     params = model.get("params") or {}
-    strategy_identity = resolve_report_identity(model, league=league, market=market)
+    identity_cols, strategy_identity = _identity_block(model, league, market)
     has_book = bool(book_m)
 
     def _safe_float(value) -> float:
@@ -172,16 +217,7 @@ def _wide_row(
         "league": league,
         "market": market,
         "distribution": model.get("distribution"),
-        "strategy_slug": strategy_identity.strategy_slug,
-        "structural_strategy": strategy_identity.structural_strategy,
-        "strategy_signature": strategy_identity.signature,
-        "strategy_implementation_version": strategy_identity.implementation_version,
-        "artifact_schema_version": strategy_identity.artifact_schema_version,
-        "strategy_status": strategy_identity.status,
-        "strategy_controls_json": strategy_identity.controls_json,
-        "strategy_corner_fingerprint": strategy_identity.corner_fingerprint,
-        "strategy_matrix_hash": strategy_identity.matrix_hash,
-        "strategy_split_fingerprint": strategy_identity.split_fingerprint,
+        **identity_cols,
         "shipped": shipped,
         # Sample
         "n_validation": float("nan"),  # populated by training.scorecard.compute_gates
@@ -284,7 +320,7 @@ def _load_prior_g6_fired() -> dict[tuple[str, str], bool]:
 
 def _layer_gates_from_test_set(
     row: dict,
-    expected_identity: ArtifactIdentity,
+    expected_identity: ArtifactIdentity | None,
     league: str,
     market: str,
     *,
@@ -299,12 +335,14 @@ def _layer_gates_from_test_set(
     placeholders in place, rather than aborting the run that is training every other cell.
     Retraining that cell realigns the two artifacts.
 
-    Skips silently when the CSV is missing (the cell trained but its test_set wasn't
-    dumped) or empty (degenerate frame would crash ``pd.qcut``), and warns when it is
-    unreadable or fails identity validation. The row is mutated in place.
+    Skips silently when ``expected_identity`` is ``None`` (the pickle's own identity
+    already failed to resolve and warned in :func:`_identity_block`), when the CSV is
+    missing (the cell trained but its test_set wasn't dumped), or when it is empty
+    (degenerate frame would crash ``pd.qcut``). Warns when the CSV is unreadable or
+    fails identity validation. The row is mutated in place.
     """
     test_set_path = Path(str(_TEST_SETS_DIR / f"{market_file_slug(league, market)}.csv"))
-    if not test_set_path.is_file():
+    if expected_identity is None or not test_set_path.is_file():
         return
     mismatch = ""
     try:
