@@ -45,7 +45,11 @@ def gate_matrix_frame(stats: pd.DataFrame) -> pd.DataFrame:
     in turn rank above cells that are fully passing.
     """
     out = stats.copy()
-    fails = ~out[list(GATE_COLS)].astype(bool)
+    # Gates are tri-state: pd.NA until the scorecard has run over that cell's test set,
+    # or when its artifacts are too stale to bind one. `astype(bool)` raises on those,
+    # and an ungraded gate is not a pass — count it as a fail so the cell sorts toward
+    # the actionable end rather than crashing the page.
+    fails = ~out[list(GATE_COLS)].fillna(False).astype(bool)
     out["n_fails"] = fails.sum(axis=1)
     out["rail"] = out["n_fails"].map(_rail)
     out["_tier"] = out["n_fails"].map(_tier)
@@ -68,7 +72,9 @@ def render_gate_matrix(matrix: pd.DataFrame, *, height: int = 560) -> None:
     id_cols = [c for c in ("league", "market", "brier_skill_score") if c in matrix.columns]
     display = matrix[[*id_cols, *GATE_COLS, "n_fails", "rail"]].copy()
     for col in GATE_COLS:
-        display[col] = display[col].map(lambda passed: "●" if passed else "○")
+        # pd.NA is ambiguous in a boolean test, and an ungraded gate is not a pass —
+        # same reading `gate_matrix_frame` counts it under.
+        display[col] = display[col].fillna(False).map(lambda passed: "●" if passed else "○")
     render_themed_grid(
         display,
         numeric_cols=["brier_skill_score", "n_fails"],

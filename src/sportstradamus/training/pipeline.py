@@ -4480,7 +4480,13 @@ def train_market(
     runtime_controls = {
         "dist": dist,
         "normalization": target_normalization,
-        "dist_training_loss": _resolve_loss_fn("crps", dist_training_loss),
+        # Report the loss the dist object was actually built with. The count constructors
+        # resolve `auto` against their own "nll" default, which a bare "crps" here
+        # contradicted -- every count cell then failed the corner check on a control the
+        # spec fixes. Families that leave it unpinned (SkewNormal) keep the "crps" default.
+        "dist_training_loss": _resolve_loss_fn(
+            selected_spec.fixed_controls.get("dist_training_loss", "crps"), dist_training_loss
+        ),
         "sn_param": sn_param,
         "blending_loss_fn": blending,
         "zinb_mode": zinb_mode,
