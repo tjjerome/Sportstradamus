@@ -52,6 +52,30 @@ def test_job_sig_modes_are_distinct_and_base_format_stable():
     assert bho._job_sig("NFL", PROPS, None, "close") == "NFL|passing yards|close"
 
 
+def test_backfill_game_lines_only_skips_the_paid_prop_calls(monkeypatch, tmp_path):
+    """Repairing a window where game lines went unfetched must not re-buy props:
+    the per-event prop calls are the whole cost, the h2h/totals/spreads call is one."""
+
+    class FakeArchive:
+        def write(self):
+            pass
+
+    prop_calls, moneyline_calls = [], []
+    monkeypatch.setattr(bho, "Archive", FakeArchive)
+    monkeypatch.setattr(bho, "PROGRESS_PATH", tmp_path / "progress.json")
+    monkeypatch.setattr(bho, "get_props", lambda archive, apikey, *a, **k: prop_calls.append(k))
+    monkeypatch.setattr(
+        bho, "get_moneylines", lambda archive, apikey, **k: moneyline_calls.append(k)
+    )
+    bho._backfill(FAKE_KEYS, PROPS, "NFL", "americanfootball_nfl", DATES, 6, game_lines_only=True)
+    assert prop_calls == []
+    assert len(moneyline_calls) == 1
+    # Its own resume key, so a game-lines run can't mark dates done for the full job.
+    assert list(json.loads((tmp_path / "progress.json").read_text())) == [
+        "NFL|passing yards|gamelines"
+    ]
+
+
 def test_alt_market_names_resolve_to_stat_map():
     with open(pkg_resources.files(data) / "config" / "stat_map.json") as f:
         stat_map = json.load(f)["Odds API"]

@@ -193,18 +193,20 @@ def _report_dry_run(capture):
         click.echo(f"  ladder rungs {market}: {n}")
 
 
-def _job_sig(league, props, alt_mode=None, layer="feature"):
+def _job_sig(league, props, alt_mode=None, layer="feature", game_lines_only=False):
     """Stable key for the resume log: league + market set, tagged by mode.
 
-    Alt-mode and close-layer runs fetch different data for the same market
-    names, so they must not share resume state with the plain feature job
-    (whose historical sig format stays untouched).
+    Alt-mode, close-layer and game-lines-only runs fetch different data for the
+    same market names, so they must not share resume state with the plain
+    feature job (whose historical sig format stays untouched).
     """
     sig = f"{league}|{','.join(sorted(props[league].values()))}"
     if alt_mode:
         sig += f"|{alt_mode}"
     if layer != "feature":
         sig += f"|{layer}"
+    if game_lines_only:
+        sig += "|gamelines"
     return sig
 
 
@@ -248,11 +250,19 @@ def _probe(apikey, props, league, sport_key, dates, snapshot_hour, layer="featur
 
 
 def _backfill(
-    apikey, props, league, sport_key, dates, snapshot_hour, alt_mode=None, layer="feature"
+    apikey,
+    props,
+    league,
+    sport_key,
+    dates,
+    snapshot_hour,
+    alt_mode=None,
+    layer="feature",
+    game_lines_only=False,
 ):
     """Fetch each date, flushing + checkpointing per date so a credit-out exit
     is safe and the same command resumes from where it stopped."""
-    job_sig = _job_sig(league, props, alt_mode, layer)
+    job_sig = _job_sig(league, props, alt_mode, layer, game_lines_only)
     done = _load_done(job_sig)
     remaining = [d for d in dates if d.isoformat() not in done]
     click.echo(f"{league}: {len(done)} done, {len(remaining)} to fetch this run")
@@ -268,15 +278,16 @@ def _backfill(
                 get_moneylines(
                     archive, apikey, date=_as_of(d, snapshot_hour), sport=league, key=sport_key
                 )
-            get_props(
-                archive,
-                apikey[HISTORICAL_KEY_NAME],
-                props,
-                date=_as_of(d, snapshot_hour),
-                sport=league,
-                key=sport_key,
-                observed_at_hour=observed_at_hour,
-            )
+            if not game_lines_only:
+                get_props(
+                    archive,
+                    apikey[HISTORICAL_KEY_NAME],
+                    props,
+                    date=_as_of(d, snapshot_hour),
+                    sport=league,
+                    key=sport_key,
+                    observed_at_hour=observed_at_hour,
+                )
         except OddsAPIAuthError as e:
             click.echo(f"STOP (401): {e}")
             click.echo(
@@ -324,8 +335,24 @@ def _backfill(
     help="feature: pre-read snapshot (observed_at 01:00, includes game lines). "
     "close: evaluation-only closing snapshot (observed_at 23:00, props only).",
 )
+@click.option(
+    "--game-lines-only",
+    is_flag=True,
+    help="Fetch only h2h/totals/spreads, skipping the per-event prop calls. "
+    "For repairing a window where game lines went unfetched but props did not.",
+)
 def main(
-    league, markets, start, end, snapshot_hour, max_dates, check_all, dry_run, alt_mode, layer
+    league,
+    markets,
+    start,
+    end,
+    snapshot_hour,
+    max_dates,
+    check_all,
+    dry_run,
+    alt_mode,
+    layer,
+    game_lines_only,
 ):
     """Re-fetch real historical book EVs for degenerate-seed markets.
 
@@ -342,6 +369,12 @@ def main(
         raise click.ClickException(
             f"close-layer snapshots belong late in the day (hour > {FEATURE_SNAPSHOT_MAX_HOUR})"
         )
+    if game_lines_only and layer != "feature":
+        raise click.ClickException("--game-lines-only needs --layer feature; close is props-only")
+    if game_lines_only and dry_run:
+        # --dry-run reports per-book prop ev spread, which this mode never fetches;
+        # letting it through would pay the full prop bill the flag exists to avoid.
+        raise click.ClickException("--dry-run probes prop ev spread; nothing to probe here")
     apikey, props = _load_keys_and_props(league, markets, alt_mode)
     sport_key = ODDS_API_SPORT_KEYS[league]
     if check_all:
@@ -368,10 +401,12 @@ def main(
         return
 
     if max_dates:
-        job_sig = _job_sig(league, props, alt_mode, layer)
+        job_sig = _job_sig(league, props, alt_mode, layer, game_lines_only)
         done = _load_done(job_sig)
         dates = [d for d in dates if d.isoformat() not in done][:max_dates]
-    _backfill(apikey, props, league, sport_key, dates, snapshot_hour, alt_mode, layer)
+    _backfill(
+        apikey, props, league, sport_key, dates, snapshot_hour, alt_mode, layer, game_lines_only
+    )
 
 
 if __name__ == "__main__":
