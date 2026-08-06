@@ -9,13 +9,13 @@
         },
         "BLK": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
         "BLST": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
@@ -35,13 +35,13 @@
         },
         "FG3M": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
         "FGA": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_eb_meanyr_k10",
             "posthoc": "isotonic_mean",
             "dist_training_loss": "crps",
@@ -79,7 +79,7 @@
         },
         "PA": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
@@ -91,31 +91,31 @@
         },
         "PR": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
         "PRA": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
         "PTS": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
         "RA": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none"
         },
         "REB": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none",
             "hpo_selection": "calibrated"
@@ -154,7 +154,7 @@
         },
         "carries": {
             "dist": "DPO",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "prob_recal_isotonic",
             "count_dispersion_objective": "crps",
@@ -167,7 +167,8 @@
             "posthoc": "prob_recal_platt",
             "dist_training_loss": "crps",
             "sn_param": "centered",
-            "blending": "nll"
+            "blending": "nll",
+            "hpo_selection": "calibrated"
         },
         "fantasy points prizepicks": {
             "dist": "SkewNormal",
@@ -178,7 +179,7 @@
         },
         "fantasy points underdog": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_eb_meanyr_k10",
             "posthoc": "none",
             "blending": "nll"
@@ -227,7 +228,8 @@
             "posthoc": "isotonic_mean",
             "dist_training_loss": "crps",
             "sn_param": "centered",
-            "blending": "nll"
+            "blending": "nll",
+            "hpo_selection": "calibrated"
         },
         "receiving tds": {
             "dist": "ZINB",
@@ -284,7 +286,7 @@
         },
         "tds": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none"
         },
@@ -324,7 +326,7 @@
         },
         "goalie fantasy points underdog": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "cdf_recal_isotonic",
             "dist_training_loss": "crps",
@@ -365,7 +367,7 @@
         },
         "powerPlayPoints": {
             "dist": "ZINB",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "none",
             "posthoc": "none",
             "zinb_mode": "hurdle",
@@ -459,7 +461,7 @@
         },
         "FGA": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "centered_additive_mean10",
             "posthoc": "isotonic_mean",
             "hpo_selection": "calibrated"
@@ -575,7 +577,7 @@
         },
         "hits allowed": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "prob_recal_platt",
             "blending": "nll",
