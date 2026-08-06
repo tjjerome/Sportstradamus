@@ -153,3 +153,28 @@ def test_get_props_leagues_filter(monkeypatch) -> None:
         moneylines.ODDS_API_EVENTS_URL.format(sport="basketball_nba"),
         moneylines.ODDS_API_EVENT_ODDS_URL.format(sport="basketball_nba", eventId="ev1"),
     ]
+
+
+def test_region_split_is_credit_neutral() -> None:
+    """A us2-only market moves regions without adding to the bill.
+
+    The Odds API charges markets x regions, so the guard against cron spend rising is
+    that every market appears in exactly one region's request. NBA TOV went dark for
+    months because its last book (fliff) sits in us2 and we only ever asked us.
+    """
+    props = {"NBA": {"player_points": "PTS", "player_turnovers": "TOV"}}
+
+    calls = moneylines._region_markets("NBA", props)
+
+    assert dict(calls) == {"us": ["player_points"], "us2": ["player_turnovers"]}
+    billed = sum(len(markets) * len(regions.split(",")) for regions, markets in calls)
+    assert billed == len(props["NBA"])
+
+
+def test_mlb_inning_markets_ride_the_us_request() -> None:
+    props = {"MLB": {"batter_hits": "hits"}}
+
+    us, us2 = moneylines._region_markets("MLB", props)
+
+    assert us == ("us", ["batter_hits", "totals_1st_1_innings", "spreads_1st_1_innings"])
+    assert us2 == ("us2", [])

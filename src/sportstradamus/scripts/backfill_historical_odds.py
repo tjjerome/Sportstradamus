@@ -59,6 +59,10 @@ ALT_MARKET_KEYS = {
         "batter_hits_alternate": "hits",
         "batter_total_bases_alternate": "total bases",
         "pitcher_strikeouts_alternate": "pitcher strikeouts",
+        # No book has quoted a batter-strikeouts main line since betmgm, the last
+        # holdout, dropped it on 2026-06-26 -- the alt ladder is the only surviving
+        # record of the market. It feeds book-CDF fitting, not the training quote.
+        "batter_strikeouts_alternate": "batter strikeouts",
     },
     "NHL": {
         "player_points_alternate": "points",

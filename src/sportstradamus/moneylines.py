@@ -94,6 +94,18 @@ ODDS_API_HISTORICAL_ODDS_URL = f"{_ODDS_API_BASE}/sports/{{sport}}/odds-history/
 _LIVE_DAY_WINDOW = 6
 _HIST_DAY_WINDOW = 1
 
+# Markets whose main line has left the `us` region entirely: the only books still
+# quoting them (fliff, ballybet, betparx, hardrockbet, espnbet) sit in `us2`, so a
+# us-only request archives nothing and the cell silently loses its book. Billing is
+# per market per region, so routing these to a second us2 request instead of folding
+# them into the us one costs exactly what a us-only request cost. NBA TOV went dark on
+# 2025-10-29 and was found this way; re-probe when a market goes quiet. Markets that
+# merely have *more* books in us2 stay here deliberately -- buying that depth would add
+# a region to every market, and the us pool is deep enough.
+US2_ONLY_MARKETS = {
+    "NBA": ("player_turnovers",),
+}
+
 # Game lines (totals, spreads) are symmetric: the no-vig median price IS the
 # implied value, so their EV must invert under a symmetric distribution. Pin the
 # family explicitly rather than lean on get_ev's default — a 2026-03 default flip
@@ -543,16 +555,59 @@ def _props_request(apikey, date, historical):
     )
 
 
+def _region_markets(league, props):
+    """Split one league's market list into the ``(region, markets)`` calls to make.
+
+    Every market lands in exactly one region, so the ``markets x regions`` bill matches
+    a single us-only request while :data:`US2_ONLY_MARKETS` still get archived.
+    """
+    markets = list(props[league])
+    if league == "MLB":
+        markets += ["totals_1st_1_innings", "spreads_1st_1_innings"]
+    us2 = US2_ONLY_MARKETS.get(league, ())
+    return (
+        ("us", [m for m in markets if m not in us2]),
+        ("us2", [m for m in markets if m in us2]),
+    )
+
+
+def _fetch_event_odds(req, sport, event_id, region_markets):
+    """One event's odds, one request per region, merged into a single payload.
+
+    Returns ``False`` when the endpoint 404s (the caller aborts the whole run), ``None``
+    when no region returned anything usable, else the payload with every region's
+    bookmakers concatenated. The regions carry disjoint market lists, so no book can
+    contribute the same market twice.
+    """
+    merged, bookmakers = None, []
+    for region, markets in region_markets:
+        if not markets:
+            continue
+        res = _get_with_retry(
+            req.odds_url_template.format(sport=sport, eventId=event_id),
+            params={**req.params, "markets": ",".join(markets), "regions": region},
+        )
+        if res.status_code == HTTPStatus.NOT_FOUND:
+            return False
+        if res.status_code != HTTPStatus.OK:
+            continue
+        payload = res.json()["data"] if req.historical else res.json()
+        merged = merged or payload
+        bookmakers.extend(payload.get("bookmakers", []))
+    if merged is None:
+        return None
+    merged["bookmakers"] = bookmakers
+    return merged
+
+
 def _store_sport_props(archive, ledger, sport, league, props, date, req, observed_at_hour=None):
     """Fetch and archive one sport's events.
 
     Returns ``False`` when a per-event odds endpoint 404s (the caller aborts the
     whole run, matching the original early ``return``); ``True`` otherwise.
     """
-    markets = ",".join(props[league].keys())
-    if league == "MLB":
-        markets += ",totals_1st_1_innings,spreads_1st_1_innings"
-    fetch_params = {**req.params, "markets": markets}
+    region_markets = _region_markets(league, props)
+    fetch_params = {**req.params, "markets": ",".join(props[league])}
     events = _get_with_retry(req.event_url_template.format(sport=sport), params=fetch_params)
     if events.status_code != HTTPStatus.OK:
         return True
@@ -563,19 +618,16 @@ def _store_sport_props(archive, ledger, sport, league, props, date, req, observe
         )
         if gameDate > date + timedelta(days=req.day_delta):
             continue
-        event_params = {**fetch_params, "regions": "us"}
-        res = _get_with_retry(
-            req.odds_url_template.format(sport=sport, eventId=event["id"]), params=event_params
-        )
-        if res.status_code == HTTPStatus.NOT_FOUND:
+        payload = _fetch_event_odds(req, sport, event["id"], region_markets)
+        if payload is False:
             return False
-        if res.status_code != HTTPStatus.OK:
+        if payload is None:
             continue
 
         observed_at = _historical_observed_at(req.historical, gameDate, observed_at_hour)
         _archive_event_props(
             archive,
-            res.json()["data"] if req.historical else res.json(),
+            payload,
             league,
             props,
             gameDate.strftime("%Y-%m-%d"),
