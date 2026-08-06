@@ -49,10 +49,13 @@ mechanical half.
   itself is unlabelled, so the drawing has to carry the name on its own.
   ``topology.primary`` is the class the vertex graph *is*; at most two
   secondaries, never repeating the primary.
-* **S8** ``leagues`` is a *preference*, not a gate. Tag a template with the
-  leagues whose equipment it actually is (a mitt, a backboard) and every other
-  league will still be dealt it occasionally; ``"all"`` is the neutral default
-  and is what most templates should carry.
+* **S8** ``leagues`` is a hard gate: a template tagged with a league's own
+  equipment (a mitt, a backboard) is dealt to that league and no other — an NFL
+  night must never wear the bat. ``"all"`` is the general library every league
+  draws from, and it carries most of the bank. NBA and WNBA share a tag list
+  because they share their equipment. The floor is **3 league-specific per
+  (league, class)** and **5 general per class**, so no league can be pushed onto
+  a shape that says nothing about the sport being played.
 * **S9** Generic archetypes only, never trademarked geometry.
 """
 
@@ -179,18 +182,31 @@ def tuning() -> dict:
     return shape_catalog()["tuning"]
 
 
-def _score(tpl: dict, league: str, topology: str, dealt: Counter, cfg: dict) -> float:
-    """Class fit, plus a league's pull toward its own equipment, minus variety pressure.
+def eligible_templates(league: str) -> list[str]:
+    """Template slugs a league may be dealt — the general library plus its own gear.
 
+    A hard gate (S8), not a ranking: another league's equipment is never on the
+    table, whatever the deck looks like that night.
+    """
+    return [
+        slug
+        for slug, tpl in shape_catalog()["templates"].items()
+        if tpl["leagues"] == "all" or league in tpl["leagues"]
+    ]
+
+
+def _score(tpl: dict, topology: str, dealt: Counter, cfg: dict) -> float:
+    """Class fit, plus the pull toward this league's own gear, minus variety pressure.
+
+    Only ever called on templates already eligible for the league, so anything
+    carrying a league tag at all is carrying *this* one — the affinity term is a
+    tie-break between own gear and the general library, not a filter.
+    ``variety_lambda`` is the owner's "everything is coming up mesh" knob: 0 is
+    pure topology fidelity, ~0.5 nudges a homogeneous slate toward spread, ≥ 2
+    forces it. ``league_affinity`` above the ``fit`` span (2) makes own gear
+    outrank topology; at 0 a league stops reaching for its own equipment.
     A ``generic`` game has no class to match, so every template fits it equally
-    and the other two terms decide. ``variety_lambda`` is the owner's "everything
-    is coming up mesh" knob: 0 is pure topology fidelity, ~0.5 nudges a
-    homogeneous slate toward spread, ≥ 2 forces it. ``league_affinity`` is the
-    weight on a template naming this league (+1) against one naming somebody
-    else's (-1) — a preference, never a filter, so a baseball night is likely but
-    not guaranteed to wear the mitt and an NFL night can still be dealt the bat.
-    Set it above the ``fit`` span (2) and it outranks topology; at 0 leagues stop
-    mattering entirely.
+    and the other two terms decide.
     """
     topo = tpl["topology"]
     if topology == "generic":
@@ -201,9 +217,8 @@ def _score(tpl: dict, league: str, topology: str, dealt: Counter, cfg: dict) -> 
         fit = 1
     else:
         fit = 0
-    leagues = tpl["leagues"]
-    affinity = 0 if leagues == "all" else (1 if league in leagues else -1)
-    return fit + cfg["league_affinity"] * affinity - cfg["variety_lambda"] * dealt[topo["primary"]]
+    own = 0 if tpl["leagues"] == "all" else 1
+    return fit + cfg["league_affinity"] * own - cfg["variety_lambda"] * dealt[topo["primary"]]
 
 
 def assign_templates(
@@ -217,9 +232,10 @@ def assign_templates(
     (fewer supernodes than ``cfg['min_shape_nodes']``, or below the ``min_nodes`` of
     every template still on the table) — those keep the spring layout.
 
-    The whole night is dealt at once from one deck of the whole catalog, so no two
-    games showing at the same time can wear the same shape whatever leagues they
-    belong to. League only weights the choice (see ``_score``).
+    The whole night is dealt at once from one shared deck, so no two games showing
+    at the same time can wear the same shape whatever leagues they belong to. Each
+    game draws only from what its own league is eligible for (see
+    ``eligible_templates``) — another league's equipment is never on its table.
 
     Deterministic: an md5 of date and catalog version seeds the shuffle, and games
     are dealt in sorted-key order, so every viewer sees the same slate dealt the
@@ -236,15 +252,18 @@ def assign_templates(
     dealt: Counter = Counter()
     assignment: dict[str, str | None] = {}
     for game_key, league, topology, n_supernodes in sorted(games):
+        allowed = set(eligible_templates(league))
         free = [
             slug
             for slug in deck
-            if slug not in assignment.values() and templates[slug]["min_nodes"] <= n_supernodes
+            if slug in allowed
+            and slug not in assignment.values()
+            and templates[slug]["min_nodes"] <= n_supernodes
         ]
         if n_supernodes < cfg["min_shape_nodes"] or not free:
             assignment[game_key] = None
             continue
-        best = max(free, key=lambda slug: _score(templates[slug], league, topology, dealt, cfg))
+        best = max(free, key=lambda slug: _score(templates[slug], topology, dealt, cfg))
         assignment[game_key] = best
         dealt[templates[best]["topology"]["primary"]] += 1
     return assignment

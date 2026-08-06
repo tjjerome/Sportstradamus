@@ -254,7 +254,7 @@ so they drop onto the existing anchor axis; `side` splits vertices for team seed
 (The six above are **fully authored exemplars** — one per topology class plus extras — and ship
 as-is; they are the format ground truth for the rest.)
 
-**Authoring rules** (documented as `S1–S8` in `constellation_shapes.py`'s module docstring, the
+**Authoring rules** (documented as `S1–S9` in `constellation_shapes.py`'s module docstring, the
 way `bank.py` documents R1–R6; the golden enforces what's mechanical):
 
 - **S1** Coordinates normalized to [-1, 1]², shape centered, use the box — no postage stamps.

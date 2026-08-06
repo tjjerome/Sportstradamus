@@ -8,10 +8,11 @@ module docstring is their reference), and loader-contract checks through the
 public accessors, including the hot-reload behavior the tuning loop depends on.
 
 The bank floor pins at the bottom are what keep the assigner from running out of
-deck. They are deck-wide rather than per-league because dealing is: one night's
-games take distinct shapes from one shared catalog whatever leagues they belong
-to, and ``leagues`` only weights the choice. A deck that falls under them starts
-handing games ``None`` and the map silently reverts to the spring layout.
+deck *and* from putting a league on a shape that says nothing about its sport:
+5 general plus 3 per league in every topology class, so every class can answer
+any league with either its own equipment or an unaffiliated object. NBA and WNBA
+share a tag list — same equipment, same shapes. A deck that falls under the
+floors starts handing games ``None`` and the map reverts to the spring layout.
 """
 
 from __future__ import annotations
@@ -149,14 +150,23 @@ def test_shape_catalog_and_tuning_read_the_shipped_file(raw):
     assert cs.tuning() == raw["tuning"]
 
 
-def test_every_league_has_equipment_of_its_own_to_be_pulled_toward(raw):
-    """``league_affinity`` only means something if the league is tagged somewhere."""
-    tagged = Counter()
-    for tpl in raw["templates"].values():
-        for league in () if tpl["leagues"] == "all" else tpl["leagues"]:
-            tagged[league] += 1
+def test_eligible_templates_are_the_general_library_plus_the_leagues_own(raw):
+    """S8 is a gate: another league's equipment is never on a game's table."""
+    order = list(raw["templates"])
     for league in _LEAGUES:
-        assert tagged[league] >= 3, f"{league} has only {tagged[league]} of its own"
+        want = [
+            slug
+            for slug in order
+            if raw["templates"][slug]["leagues"] == "all"
+            or league in raw["templates"][slug]["leagues"]
+        ]
+        assert cs.eligible_templates(league) == want
+
+
+def test_a_league_off_the_map_still_gets_the_general_library(raw):
+    assert cs.eligible_templates("CFL") == [
+        slug for slug, tpl in raw["templates"].items() if tpl["leagues"] == "all"
+    ]
 
 
 def test_catalog_hot_reloads_on_an_owner_edit(tmp_path, monkeypatch):
@@ -330,33 +340,32 @@ def _mixed_league_deck(tmp_path, monkeypatch):
 
 
 def test_a_league_is_pulled_toward_its_own_equipment_first(tmp_path, monkeypatch):
-    """Own gear outranks a universal, which outranks somebody else's — the whole
-    of what ``league_affinity`` buys when every template fits the class equally."""
+    """Own gear outranks the general library when both fit the class equally —
+    the whole of what ``league_affinity`` buys once eligibility has had its say."""
     _mixed_league_deck(tmp_path, monkeypatch)
-    dealt = cs.assign_templates("2026-08-06", _slate(3, league="MLB"), _SANE_TUNING)
-    assert [dealt[game] for game, *_ in _slate(3, league="MLB")] == ["mitt", "net", "backboard"]
+    dealt = cs.assign_templates("2026-08-06", _slate(2, league="MLB"), _SANE_TUNING)
+    assert [dealt[game] for game, *_ in _slate(2, league="MLB")] == ["mitt", "net"]
 
 
-def test_another_leagues_equipment_is_discouraged_never_barred(tmp_path, monkeypatch):
-    """A soft weight, not a filter: an NBA night short on shapes still gets the mitt."""
+def test_another_leagues_equipment_is_never_dealt_even_with_nothing_left(tmp_path, monkeypatch):
+    """S8 is a gate, not a preference: an NBA night that runs out of shapes goes
+    shapeless rather than wearing the mitt."""
     _mixed_league_deck(tmp_path, monkeypatch)
     dealt = cs.assign_templates("2026-08-06", _slate(3), _SANE_TUNING)
-    assert set(dealt.values()) == {"mitt", "net", "backboard"}
-    assert dealt["G00-NBA"] == "backboard"
+    assert [dealt[game] for game, *_ in _slate(3)] == ["backboard", "net", None]
 
 
-def test_league_affinity_at_zero_stops_leagues_mattering(tmp_path, monkeypatch):
-    """The knob's off position, so a night can be dealt on topology alone."""
+def test_league_affinity_at_zero_stops_a_league_reaching_for_its_own(tmp_path, monkeypatch):
+    """The knob's off position: eligibility still holds, but own gear stops
+    outranking the general library, so the tie falls to shuffle position."""
     _mixed_league_deck(tmp_path, monkeypatch)
-    assert cs.assign_templates("2026-08-06", _slate(1, league="MLB"), _SANE_TUNING) == {
-        "G00-MLB": "mitt"
-    }
-    blind = {**_SANE_TUNING, "league_affinity": 0.0}
-    dealt = [
-        cs.assign_templates("2026-08-06", [("G00", league, "mesh", 6)], blind)["G00"]
-        for league in ("MLB", "NBA", "NHL")
-    ]
-    assert len(set(dealt)) == 1
+    dates = [f"2026-08-{day:02d}" for day in range(1, 11)]
+
+    def dealt(cfg):
+        return [cs.assign_templates(date, _slate(1, league="MLB"), cfg)["G00-MLB"] for date in dates]
+
+    assert dealt(_SANE_TUNING) == ["mitt"] * len(dates)
+    assert "net" in dealt({**_SANE_TUNING, "league_affinity": 0.0})
 
 
 def test_a_game_with_too_few_supernodes_keeps_the_spring_layout(tmp_path, monkeypatch):
@@ -377,12 +386,54 @@ def test_a_game_below_every_templates_min_nodes_keeps_the_spring_layout(tmp_path
     assert dealt["G00-NBA"] is None
 
 
+def _inventory(raw) -> dict[tuple[str, str], int]:
+    """``(class, "general"|league) -> count`` over primary classes only.
+
+    Primaries, not secondaries: the floor is about a league having a *best*
+    answer in every class, and a secondary is by definition a compromise.
+    """
+    counts: Counter = Counter()
+    for tpl in raw["templates"].values():
+        cls = tpl["topology"]["primary"]
+        if tpl["leagues"] == "all":
+            counts[(cls, "general")] += 1
+        else:
+            for league in tpl["leagues"]:
+                counts[(cls, league)] += 1
+    return counts
+
+
+def test_every_class_carries_five_general_shapes(raw):
+    """The unaffiliated library every league draws from, deep enough that a class
+    never depends on league gear to answer a night."""
+    counts = _inventory(raw)
+    for cls in _CLASSES:
+        assert counts[(cls, "general")] >= 5, f"{cls} has only {counts[(cls, 'general')]} general"
+
+
+def test_every_league_carries_three_of_its_own_in_every_class(raw):
+    """Another league's equipment is barred, so a league with a thin class gets
+    pushed onto general shapes for games its own gear should be naming."""
+    counts = _inventory(raw)
+    for league in _LEAGUES:
+        for cls in _CLASSES:
+            assert counts[(cls, league)] >= 3, f"{league}/{cls} has only {counts[(cls, league)]}"
+
+
+def test_nba_and_wnba_share_every_shape_they_are_tagged_with(raw):
+    """Same equipment, same shapes — a tag list naming one and not the other is a typo."""
+    for slug, tpl in raw["templates"].items():
+        if tpl["leagues"] != "all":
+            assert ("NBA" in tpl["leagues"]) == ("WNBA" in tpl["leagues"]), slug
+
+
 def test_the_deck_is_deep_enough_for_a_stacked_multi_league_night(raw):
-    """One deck now covers every league showing at once, so the floor is the worst
-    combined night rather than the worst single league: MLB's 17-game doubleheader
-    slate beside an NFL Sunday, of which only the games with enough supernodes to
-    carry a shape are actually dealt."""
-    assert len(raw["templates"]) >= 45
+    """One deck covers every league showing at once, so the floor is the worst
+    combined night — MLB's 17-game doubleheader slate beside an NFL Sunday — of
+    which only the games with enough supernodes to carry a shape are dealt."""
+    assert len(raw["templates"]) >= 100
+    for league in _LEAGUES:
+        assert len(cs.eligible_templates(league)) >= 60, league
 
 
 def test_every_class_has_real_depth_behind_it(raw):
@@ -398,4 +449,4 @@ def test_every_class_has_real_depth_behind_it(raw):
             answers[cls] += 1
     assert primaries == set(_CLASSES), f"no template is primarily {set(_CLASSES) - primaries}"
     for cls in _CLASSES:
-        assert answers[cls] >= 10, f"{cls} has only {answers[cls]}"
+        assert answers[cls] >= 25, f"{cls} has only {answers[cls]}"

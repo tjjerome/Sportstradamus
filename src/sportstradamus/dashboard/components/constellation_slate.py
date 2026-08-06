@@ -9,11 +9,10 @@ and the graph maths in ``constellation_layout``.
 
 Dealing is per **date**, not per league. A shape is a game's identity for the
 night, so no two games showing at once may wear the same one — which means the
-deal has to see every league's slate at once, and a league's own equipment
-(a mitt, a backboard) is a *soft* preference inside the shared deck rather than a
-hard filter. A template that names another league's gear is discouraged, not
-barred: an NFL night can still be dealt The Bat, just rarely, the way a real sky
-lends the same figures to every season.
+deal has to see every league's slate at once. Each game still draws only from
+what its own league is eligible for: the general library of unaffiliated objects
+that most of the bank is, plus that league's own equipment. Another league's gear
+is never on the table, so an NFL night cannot be dealt The Bat.
 
 Deliberately uncached at every level: the catalog's ``tuning`` block is the
 owner's live surface, and an edit has to reclassify and re-deal on the very next

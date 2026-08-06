@@ -139,8 +139,9 @@ ring read as a team color). Pairwise correlation |ρ| is the edge weight (gold, 
 dashed when ρ < 0 — "fights the thesis"); an edge stays hidden until one of its stars is in the
 slip and faintly previews on hover, so the clutter scales with the slip, not the game.
 Layout is **template-guided and team-anchored**: a game is classified by the shape of its own
-correlation graph and dealt one of the bank's sports-object templates, distinct across the league's
-slate for the night, and its stars take that template's vertices — most prominent vertex to
+correlation graph and dealt one of the bank's sports-object templates, distinct across the whole
+night whatever league it belongs to and drawn only from the general library plus that league's own
+equipment — never another league's — and its stars take that template's vertices — most prominent vertex to
 most-connected leg, each team held to its own side, a player's tightly-tied legs collapsing to one
 vertex and exploding back as a knot. A game too thin to fill a template keeps the older
 **force-directed** layout: each team's most-connected leg pinned to its side, the correlation edges

@@ -350,14 +350,15 @@ stage ends with the §9 checklist green and the dashboard runnable.
     Lab/Receipts desk-first captions. Desktop paths byte-identical; every task carries a
     recorded live-browser verdict (playwright chromium, mobile UA). Phase D seam: D owns
     positions, M owns sizes/events; D's knot explode radius must respect the mobile floor.
-  - **Phase D — loose constellation shapes** (spec §6.1, **Opus implementer**): 49-template
+  - **Phase D — loose constellation shapes** (spec §6.1, **Opus implementer**): 100-template
     hand-authored shape bank (`constellation_shapes.json`, topology-tagged hub/chain/twin/mesh,
     generic archetypes never trademarked marks, authoring rules S1–S9 + floor goldens —
     story-engine fidelity); player-supernode clustering (a player's |ρ|≥0.35 legs plan as one
     node, explode back as a knot around their vertex); graph topology classifier; slate
     assigner dealing **distinct** topology-matched templates across the whole night, every
-    league at once, with `leagues` a soft score weight rather than a filter (deck 49 vs worst
-    combined slate — no repeats by construction); star→vertex assignment
+    league at once, each game drawing from the general library plus its own league's gear and
+    never another league's (deck 100, ≥ 64 per league, vs worst combined slate — no repeats by
+    construction); star→vertex assignment
     keeps the DESIGN §4a grammar FIXED (star=leg after explosion, team sides w/ golden-angle
     overflow, ρ-adjacency greedy, spring fallback for thin games); decoration layer (outline +
     fillers + silhouette α=0.13, never gold, never interactive, and uncaptioned), DESIGN §4a
@@ -439,23 +440,31 @@ devel-bound PR; research-analyst only if a stage turns into a modeling question 
   shape's name ("just let the shape speak for itself"); `_add_nameplate` + its color constant + the
   two goldens gone, DESIGN §4a's decoration sentence now says *uncaptioned* and why. **Ball hubs
   added** — `the-basketball` (hub, NBA/WNBA: cross seams off a centre star, two 5-segment bows) and
-  `the-baseball` (twin, MLB: two mirrored seam arcs — the honest class, and it fills MLB's missing
-  twin); the football was already in the bank as `the-pigskin`. Bank now **49 templates**. **League
-  affinity is a soft weight** — `eligible_templates`'s hard per-league filter is gone; the new
-  `league_affinity` knob scores own-gear +1 / another league's -1 against a `fit` span of 2, so a
-  baseball night is *likely* but not guaranteed to wear the mitt and an NFL night can still draw the
-  bat. **Dealing is now per-date across every league at once** (`slate_shapes` lost its `league`
+  `the-baseball` (twin, MLB: two mirrored seam arcs — the honest class); the football was already in
+  the bank as `the-pigskin`. **Leagues stay
+  walled, the general library carries the load** — an NFL night must never wear the bat, so
+  `eligible_templates` remains a hard gate (general library + own gear); `league_affinity` demoted
+  to a tie-break *inside* that gate, so a league reaches for its own equipment first and falls back
+  to unaffiliated objects, never to somebody else's. NBA and WNBA share one tag list.
+  **Dealing is now per-date across every league at once** (`slate_shapes` lost its `league`
   parameter, seed is `date|version`, `games.py` deals from the *unfiltered* offers frame), which is
   what makes "never the same shape in two active games" true across leagues rather than within one.
-  Floor pins moved per-league → deck-wide to match. **Carve:** the shape half left `constellation.py`
+  **Bank doubled 49 → 100** to make the wall affordable: 13 general + 3 per league in *every*
+  topology class (owner floor: 5 general + 3 per league per category, i.e. 17; delivered 25), so
+  no league is ever pushed onto a shape that says nothing about its sport. New floors pin all
+  three numbers. Per-league deck is 64. Authored with parametric helpers (`band` thickens a
+  polyline into a silhouette, `circle` emits a cubic circle) against the offline contact sheet
+  rather than 51 browser passes. **Carve:** the shape half left `constellation.py`
   for a new `constellation_slate.py` (918 → 666 lines) — game-graph extraction, template placement,
   dealing, decoration; owner exempted the new module from the length guidance. The circular-import
   seam was `_universe`, which returned figure-presentation dicts; it now returns the defining row and
   each side derives what it needs. Live pass on the Aug-6 slate: 8 games / 3 shaped / all distinct
-  across MLB + WNBA, WNBA dealt The Basketball and MLB The Mitt + The Plate — affinity visible
-  without a filter. Two authoring iterations the browser forced: the basketball's bows read as an
-  octagon at 3 points per bow (needs 5), and the baseball's seams read as a closed ring until the
-  arcs were shortened to ~110°. · gates ruff ✓ / golden 4302 ✓ / refactoring-specialist ✓ ·
+  across MLB + WNBA, WNBA dealt The Basketball and MLB The Diamond + The Cap — own gear reached for
+  first, another league's never on the table. Three authoring iterations the offline sheet forced:
+  the basketball's bows read as an octagon at 3 points per bow (needs 5), the baseball's seams read
+  as a closed ring until the arcs were shortened to ~110°, and a closed step-polygon silhouette
+  (staircase) reads as a solid mass where a band reads as steps. · gates ruff ✓ / golden 4357 ✓ /
+  refactoring-specialist ✓ ·
   integration still blocked by the training-artifacts lock (a `model-strategy-sweep --confirm`,
   unrelated to this lane) · not pushed.
 - 2026-08-06 · **Phase D complete — D2…D7 landed** · `9a9701d` supernodes + topology classifier
