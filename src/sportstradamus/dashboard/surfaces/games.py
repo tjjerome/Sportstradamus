@@ -251,7 +251,7 @@ def _render_tuning_cockpit(shapes: dict[str, GameShape], focus_game: str) -> Non
     """Every reading behind tonight's dealing, so thresholds get set against numbers.
 
     The classifier's six metrics are what ``constellation_shapes.json``'s ``tuning``
-    block is compared to, and the catalog reloads on file mtime — so the loop is
+    block is compared to, and the catalog reloads on file mtime — so the loop is:
     read a column here, edit the JSON, rerun the browser. No dashboard restart, and
     no caching on this path: a stale table would be worse than none.
     """

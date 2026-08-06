@@ -138,8 +138,13 @@ up. A leg in the slip burns at **full color and opacity**; a candidate is the sa
 ring read as a team color). Pairwise correlation |ρ| is the edge weight (gold, opacity/width ∝ |ρ|,
 dashed when ρ < 0 — "fights the thesis"); an edge stays hidden until one of its stars is in the
 slip and faintly previews on hover, so the clutter scales with the slip, not the game.
-Layout is **team-anchored force-directed**: each team's most-connected leg is pinned to its side,
-the correlation edges place the rest, so a cross-matchup leg floats toward the centre and an
+Layout is **template-guided and team-anchored**: a game is classified by the shape of its own
+correlation graph and dealt one of the bank's sports-object templates, distinct across the league's
+slate for the night, and its stars take that template's vertices — most prominent vertex to
+most-connected leg, each team held to its own side, a player's tightly-tied legs collapsing to one
+vertex and exploding back as a knot. A game too thin to fill a template keeps the older
+**force-directed** layout: each team's most-connected leg pinned to its side, the correlation edges
+placing the rest. Either way a cross-matchup leg floats toward the centre and an
 unrepresented side leaves its half empty (the both-teams parlay rule, made visual). Legs from
 *other* games never become stars here — the map stays one game; a single-sided game reaches its
 second team through a separate satellite section beside the map, never by crowding the constellation.
@@ -148,7 +153,12 @@ read plus a **Full detail** link into the offer dialog, slip preserved) — with
 zoom/pan off (it's a map, not a chart). Switching lenses (the deeper/wider toggles) animates the map
 in with a brief fade + scale settle; a bare restyle (lighting a star on a click) does not — the
 animation fires only when the lens actually changes the plotted trace set, and
-`prefers-reduced-motion` disables it. This is the one piece of decoration that *is* data: use it on the slip
+`prefers-reduced-motion` disables it. Beneath the stars sits the one **decoration layer** that is
+*not* data: the dealt template's filled silhouette, its engraved outline, and faint filler stars on
+the vertices no leg claimed, with a Cinzel nameplate along the bottom saying which constellation
+this is. It is engraving, never gold — gold stays the correlation-edge color alone, so no engraved
+stroke can be misread as a ρ tie — it carries no `customdata` and is inert to click and hover, and
+a game with no template draws none of it. Everything else here *is* data: use the map on the slip
 editor, Game pages, and parlay detail, keep it on `backgroundColor`, never let it crowd a table. It
 is the brand's signature; treat its grammar — star = leg, **fill = team**, **size = edge**,
 **brightness = in the slip**, edge = correlation — as FIXED. Team fills come from

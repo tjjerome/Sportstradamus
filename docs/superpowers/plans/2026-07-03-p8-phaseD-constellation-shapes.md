@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
-> checkbox (`- [ ]`) syntax for tracking. This phase is sized for an **Opus-class implementer**:
+> checkbox (`- [x]`) syntax for tracking. This phase is sized for an **Opus-class implementer**:
 > the shape bank is craft work and the star→vertex assignment is judgment-heavy; the contracts
 > below are binding, the interior math is yours to make beautiful.
 
@@ -339,7 +339,7 @@ def eligible_templates(league: str) -> list[str]:
     """Slugs allowed for a league ('all' or listed), catalog order."""
 ```
 
-- [ ] Golden first: schema validation per template (as docstring above, plus both sides
+- [x] Golden first: schema validation per template (as docstring above, plus both sides
   represented); tuning-block validation (exactly the eight keys, each within its sane range —
   shares/densities/rho in (0,1), `chain_mean_degree` in (1,4), `min_shape_nodes` ≥ 2,
   `variety_lambda` ≥ 0); **hot-reload pin** (write a temp catalog, load, bump a tuning value +
@@ -347,7 +347,7 @@ def eligible_templates(league: str) -> list[str]:
   for all five leagues, ≥ 6 per (league, class) counting primary+secondary, all four
   non-generic classes covered per league; a slate-maxima table constant in the test ties the 20
   floor to the sizing table above.
-- [ ] Author the bank in class batches (exemplars → hub → chain → twin → mesh → league packs);
+- [x] Author the bank in class batches (exemplars → hub → chain → twin → mesh → league packs);
   loader; gates; commit per batch, final
   `feat(p8-d): constellation shape bank — 49 templates, topology-tagged`
 
@@ -400,7 +400,7 @@ mean degree), mesh last (densest signature, hardest to fake). No thresholds in t
 everything reads from the caller-supplied tuning block, so the owner retunes against the D6
 readings without touching Python.
 
-- [ ] Goldens first, synthetic fixtures per class (run at the shipped tuning values): a star
+- [x] Goldens first, synthetic fixtures per class (run at the shipped tuning values): a star
   graph (1 center, 6 spokes) → hub; a 6-path → chain; two 4-cliques + one weak bridge across
   teams → twin; a 6-clique → mesh; 2 nodes → generic. Threshold sensitivity: the 6-clique
   reclassifies away from mesh when `mesh_density` is passed above its reading (proves the knob
@@ -408,7 +408,7 @@ readings without touching Python.
   star-graph fixture. Clustering: same player PTS/PRA/AST at ρ .7/.6/.65 → one supernode; same
   player at ρ .1 → stays split; cross-player ρ .9 → never merges; collapsed edge = max member
   pair; determinism (byte-equal outputs).
-- [ ] Implement; gates; commit
+- [x] Implement; gates; commit
   `feat(p8-d): player supernodes + graph topology classifier`
 
 ---
@@ -455,13 +455,13 @@ games frame it already renders (each game's supernode graph + class via D2 — s
 microseconds) and passes each game its slug. Every game on the slate resolves the same
 assignment no matter which one the user is looking at.
 
-- [ ] Goldens first: 16-game synthetic slate → 16 distinct slugs; determinism across calls;
+- [x] Goldens first: 16-game synthetic slate → 16 distinct slugs; determinism across calls;
   changing the date changes the dealing; a hub-classified game receives a hub-primary template
   when one is free; **variety knob** — on an 8-game all-mesh synthetic slate, the count of
   distinct primary classes dealt is strictly higher at `variety_lambda=2` than at `0` (the
   all-mesh escape hatch, proven); pool-exhaustion impossible pin (slate maxima table vs
   floors); thin game → None.
-- [ ] Implement; gates; commit `feat(p8-d): slate template assigner — distinct, topology-matched`
+- [x] Implement; gates; commit `feat(p8-d): slate template assigner — distinct, topology-matched`
 
 ---
 
@@ -521,12 +521,12 @@ Binding behaviors (the interior algorithm is yours; these are pinned by tests):
    lower-prominence-number (more important) vertices — the shape's key stars are the game's key
    players.
 
-- [ ] Goldens first: side-purity pin; determinism pin (byte-equal positions across calls);
+- [x] Goldens first: side-purity pin; determinism pin (byte-equal positions across calls);
   overflow-jitter stays side-of-axis; single-team → other side all fillers; a hand-built
   4-supernode/2-per-team case lands the two strongest-ρ nodes on adjacent vertices; a 3-member
   cluster explodes to a ring of radius `_EXPLODE_R0 + _EXPLODE_DR` centered on its vertex;
   explosion clamps at the axis.
-- [ ] Implement; gates; commit
+- [x] Implement; gates; commit
   `feat(p8-d): star→vertex assignment + supernode explosion — loose, team-true, ρ-adjacent`
 
 ---
@@ -570,15 +570,15 @@ _FILLER_COLOR = "rgba(138,145,160,0.30)"   # theme GRAY at low alpha; smaller th
 7. Lens interplay (Phase C): Look-deeper background stars and Look-wider satellites render
    *outside* the template (perimeter) — decoration never repositions them; verify visually.
 
-- [ ] Figure pins first: silhouette shape present at `_SILHOUETTE_ALPHA`; decoration traces
+- [x] Figure pins first: silhouette shape present at `_SILHOUETTE_ALPHA`; decoration traces
   carry `hoverinfo="skip"` + no gold anywhere in the decoration layer; gold edge trace count
   unchanged vs a no-template render; spring fallback byte-stable when the assigner returns
   None; static-under-selection pin still green.
-- [ ] Implement; **live tuning session** (`poetry run dashboard`, real slate): iterate bank
+- [x] Implement; **live tuning session** (`poetry run dashboard`, real slate): iterate bank
   coordinates + alphas until each shape reads at a glance without shouting, and a full slate
   shows all-distinct shapes; record a one-paragraph verdict + screenshot note in the commit
   body.
-- [ ] Gates; commit `feat(p8-d): decoration layer + slate wiring (silhouette, glow, fillers)`
+- [x] Gates; commit `feat(p8-d): decoration layer + slate wiring (silhouette, glow, fillers)`
 
 ---
 
@@ -588,10 +588,10 @@ _FILLER_COLOR = "rgba(138,145,160,0.30)"   # theme GRAY at low alpha; smaller th
 - Modify: `src/sportstradamus/dashboard/surfaces/games.py`
 - Test: AppTest smoke extension
 
-- [ ] A quiet Cinzel caption under the map names the constellation (the template's `label` —
+- [x] A quiet Cinzel caption under the map names the constellation (the template's `label` —
   "The Zamboni") — the Skyrim moment, one line, `.celestial-kicker` class, no other chrome.
   Spring-fallback games show no nameplate.
-- [ ] **"Constellation tuning" expander** (collapsed by default, sober styling, bottom of the
+- [x] **"Constellation tuning" expander** (collapsed by default, sober styling, bottom of the
   page): one row per slate game — game · class · n_supernodes · the D2 readings
   (cross_share / top_share / mean_degree / diameter_frac / density) · dealt template ·
   spring-fallback flag — plus a caption naming the tuning surface
@@ -599,7 +599,7 @@ _FILLER_COLOR = "rgba(138,145,160,0.30)"   # theme GRAY at low alpha; smaller th
   (`R`), no restart. This is the owner's cockpit: when a slate reads all-mesh, the density
   column says whether to raise `mesh_density` (reclassify) or raise `variety_lambda` (keep the
   verdicts, spread the shapes).
-- [ ] Gates; commit `feat(p8-d): constellation nameplate + tuning cockpit`
+- [x] Gates; commit `feat(p8-d): constellation nameplate + tuning cockpit`
 
 ---
 
@@ -615,7 +615,7 @@ and add one sentence defining the decoration layer (silhouette ≈13%, outline/f
 never gold, never interactive, never a data mark). Every other §4a clause stays byte-identical.
 Run `tests/golden/test_design_tokens.py` before committing (presence-needle pins).
 
-- [ ] Commit `docs(p8-d): DESIGN §4a — template-guided constellation layout`
+- [x] Commit `docs(p8-d): DESIGN §4a — template-guided constellation layout`
 
 ---
 

@@ -1,14 +1,16 @@
-"""Pins for the dashboard constellation — the DESIGN §4a static team-anchored star map.
+"""Pins for the dashboard constellation — the DESIGN §4a static, shape-dealt star map.
 
 ``constellation_figure`` is pure (networkx force layout + plotly draw, no Streamlit).
 The node set is the game's **model-liked** legs (Kelly ``K`` > 0), fixed per game —
 selecting a leg never moves a star, it only lights it up. A slip leg renders active
 (full team color, opacity 1, labelled); a candidate renders desaturated + dim,
-labelled like the rest. Star size ∝ Kelly edge. Each team's hub anchors to its side. Every tie is a
+labelled like the rest. Star size ∝ Kelly edge. Each team's hub anchors to its side — on the
+template the game was dealt when it has one, on the spring solve when it doesn't. Every tie is a
 gold edge (width/opacity ∝ |ρ|, dashed when ρ < 0) drawn as a faint base web that
 brightens when both its stars are in the slip. These assert that grammar, the static layout,
-the size/selection encodings, the hover, the per-edge endpoint ``meta``, and the
-click-key + card-field ``customdata`` the in-app editor and its JS card rely on.
+the size/selection encodings, the hover, the per-edge endpoint ``meta``, the
+click-key + card-field ``customdata`` the in-app editor and its JS card rely on, and
+the Phase D decoration layer's subordination to all of it.
 """
 
 from __future__ import annotations

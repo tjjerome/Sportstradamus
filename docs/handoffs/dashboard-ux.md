@@ -1,6 +1,6 @@
 # Dashboard UX — "the Oracle"
 
-> Status: ACTIVE — **Phase D (loose constellation shapes) is the current step**: plan [plans/2026-07-03-p8-phaseD-constellation-shapes.md](../superpowers/plans/2026-07-03-p8-phaseD-constellation-shapes.md), executing on `feature/dashboard-ux`. P8 (0/A/B/C + R remediation) shipped and owner-live-checked 2026-07-16; Phase M is built and gates-green with the owner's real-phone pass still outstanding; E art catalog stays parked.
+> Status: ACTIVE — **Phase D (loose constellation shapes) is built and gates-green on `feature/dashboard-ux`, owner live-check outstanding**: plan [plans/2026-07-03-p8-phaseD-constellation-shapes.md](../superpowers/plans/2026-07-03-p8-phaseD-constellation-shapes.md). P8 (0/A/B/C + R remediation) shipped and owner-live-checked 2026-07-16; Phase M is built and gates-green with the owner's real-phone pass still outstanding; E art catalog stays parked.
 
 ## 1. Mission & money logic
 
@@ -433,6 +433,34 @@ devel-bound PR; research-analyst only if a stage turns into a modeling question 
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
+- 2026-08-06 · **Phase D complete — D2…D7 landed** · `9a9701d` supernodes + topology classifier
+  (`constellation_layout.py`; twin→hub→chain→mesh cascade, every threshold from the catalog
+  `tuning` block) · `981ab4a` slate assigner (md5(league|date|version)-seeded shuffle, distinct per
+  game per night, `variety_lambda` anti-monoculture knob) · `690b4f6` `assign_stars` +
+  `explode_clusters` (prominence↔importance, team sides held, golden-angle overflow on the star's
+  own side, single-team games return fillers rather than raise) · `9a2a630` decoration layer +
+  `games.py` slate wiring (silhouette via `layout.shapes` α 0.13, outline + glow, filler stars, all
+  named `decoration` with no `customdata` so the pointer ignores them; `shape=None` reproduces the
+  old figure byte-for-byte) · `ee97e52` dartboard → medal on the owner's call · `f305eb2` bank
+  filled to **47 templates** + floor pins (≥ 37 eligible and ≥ 15 per class per league, over the
+  ≥ 20 / ≥ 6 floors) · `bcb1658` Cinzel nameplate + tuning cockpit expander · this commit, DESIGN
+  §4a amendment + stale-prose refresh. **Two defects only the browser found**, both now pinned:
+  Plotly's shape-path parser silently drops any command outside `M L H V Q C T S Z`, so the
+  dartboard's `A` arcs vanished and it rendered as a flat hexagon — the loader raises on them now;
+  and the frame's aspect stretch *inverts* between desktop (~2.4× wide) and phone (~0.87×), so one
+  correction turned the diamond into a kite and each viewport carries its own. **Deviations from
+  plan:** engine split across `constellation_shapes.py` (catalog) + `constellation_layout.py`
+  (positions) to stay under the ~300-line rule; no `main.js` change — `LENS_TRACE_NAMES` is a no-op
+  on every reachable path and `pointFrom` already gates on `customdata`; 47 templates not 49
+  (the floors, not a count, are what the goldens hold); a cleat was cut because a shape that is all
+  edge and no mass is invisible at 13% alpha. **Open for the owner:** a universal template can
+  outrank a league-flavoured one on fit, so a baseball night dealt BOS/CWS The Shuttlecock — adding
+  a league-affinity term to the assigner score is a deliberate call, not a bug fix.
+  `constellation.py` is now 900 lines, past the ~300 guidance; the specialist recommends carving
+  the shape half into its own module as separate follow-up work. Gates: ruff ✓ / golden 4300 ✓ /
+  refactoring-specialist ✓ (no edits) · integration **blocked, not failed** — a 4-hour
+  `model-strategy-sweep --confirm` holds the training-artifacts lock, so `meditate`'s smoke test
+  refuses; 29/30 pass and no training file is in the diff. Re-run before any push. Not pushed.
 - 2026-08-06 · **Phase D started — D1a shape bank landed** · `constellation_shapes.json` (schema v2,
   `tuning` block, six authored exemplars) + `components/constellation_shapes.py` loader
   (`shape_catalog`/`tuning`/`eligible_templates`, validate-on-load, `(path, mtime_ns)` lru_cache so an

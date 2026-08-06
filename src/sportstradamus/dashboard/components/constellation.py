@@ -3,7 +3,8 @@
 The dashboard's signature element (DESIGN.md §4a) and the slip editor's primary
 control. Every model-liked leg in the game (Kelly edge ``K`` > 0) is a star, sized
 by that edge so the strongest legs read biggest; the layout is **fixed per game**
-(team-anchored force-directed) and never moves when you pick legs. A star you've
+(the sports-object template the game was dealt, or a team-anchored force-directed
+solve when it is too thin for one) and never moves when you pick legs. A star you've
 added to the slip burns at full team color; a candidate you haven't is the same
 color desaturated and dimmed — selection is alpha + saturation, not a ring (a gold
 ring read as a team color). Stories / Builder / Moon just pre-activate a subset.
@@ -37,8 +38,9 @@ The figure is pure (no Streamlit, no Archive): each node carries its
 ``Player|Market|Bet`` key plus its hover-card fields as ``customdata`` (the key at
 index 0 — a plotly click turns into an add/remove), and each edge carries its two
 endpoint keys in ``meta`` so the component's JS can dim-in a star's incident ties on
-hover. It locks its own axes (no zoom/pan) — the builder hides the modebar. Layout is
-force-directed (networkx, always present via torch); plotly draws.
+hover. It locks its own axes (no zoom/pan) — the builder hides the modebar. Positions come
+from ``constellation_layout`` when the game carries a template and from networkx's
+force solve when it doesn't; plotly draws.
 Team fills read ``theme.team_colors(league, team)`` — real per-team primaries from
 ``team_assets.json``, never gold (gold is the correlation-edge color).
 """
@@ -495,7 +497,7 @@ def _add_team_tags(fig: go.Figure, league: str, teams: list[str]) -> None:
 def _add_nameplate(fig: go.Figure, label: str) -> None:
     """Name the constellation along the bottom of the map, the way a star chart does.
 
-    Same Cinzel voice as the team tags but quieter and lettespaced, so it reads as
+    Same Cinzel voice as the team tags but quieter and letterspaced, so it reads as
     a caption on the sky rather than a third team. A game the assigner skipped has
     no shape and gets no nameplate — the spring map is not a constellation and
     must not claim to be one.
