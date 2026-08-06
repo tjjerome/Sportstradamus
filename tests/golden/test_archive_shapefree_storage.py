@@ -489,3 +489,24 @@ def test_composite_under_prob_weights_books(archive):
 def test_composite_under_prob_nan_when_absent(archive):
     """No book quote -> NaN, so the caller falls back to the symmetric get_odds feature."""
     assert np.isnan(archive.get_composite_under_prob("WNBA", "AST", "2026-05-08", "ghost"))
+
+
+def test_team_market_readers_split_defaulting_from_null_on_a_miss(archive):
+    """An unquoted game reads NaN through ``get_team_market``, defaulted through the pair.
+
+    Both semantics are load-bearing and must not converge. ``get_moneyline`` /
+    ``get_total`` default because the gamelog builds the same feature columns with the
+    same miss values — the model would otherwise see different inputs in training and
+    serving. ``get_team_market`` stays NaN so snapshot writers can tell an unquoted
+    game from a real pick'em; collapsing that distinction once hid a whole league
+    going unfetched behind a plausible-looking 0.5.
+    """
+    assert np.isnan(archive.get_team_market("MLB", "Moneyline", "2026-05-08", "ATH"))
+    assert np.isnan(archive.get_team_market("MLB", "Totals", "2026-05-08", "ATH"))
+
+    assert archive.get_moneyline("MLB", "2026-05-08", "ATH") == 0.5
+    assert archive.get_total("MLB", "2026-05-08", "ATH") == archive.default_totals["MLB"]
+
+    _insert_book_row(archive, "MLB", "Moneyline", "ATH", "pinnacle", 0.62, 0.5, 0.0)
+    assert archive.get_moneyline("MLB", "2026-05-08", "ATH") == pytest.approx(0.62)
+    assert archive.get_team_market("MLB", "Moneyline", "2026-05-08", "ATH") == pytest.approx(0.62)

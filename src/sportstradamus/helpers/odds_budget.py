@@ -208,14 +208,23 @@ def _read_ledger(ledger: Path) -> list[tuple[datetime, str, dict]]:
 
 
 def _league_run_means(recent: list[dict]) -> dict[str, float]:
-    """Mean summed cost per league across broad runs (null-league rows excluded)."""
+    """Mean cost of the broad runs that actually *bought* a league's odds.
+
+    Runs costing this league nothing are excluded, and a league with no paid run
+    in the window reports none at all so the caller keeps its seed cost. Averaging
+    the free ``events`` tiering probes in instead makes the estimate measure how
+    often a league was skipped rather than what it costs, which decays a starved
+    league toward zero and then admits it on a price that was never real — MLB
+    once read 37.5 against a true 218.5, and an out-of-season league read 0.0.
+    """
     run_totals: dict[tuple[str, str], float] = defaultdict(float)
     for r in recent:
         if r["kind"] == "broad" and r["league"]:
             run_totals[(r["run"], r["league"])] += r["cost"]
     per_league: dict[str, list[float]] = defaultdict(list)
     for (_, league), total in run_totals.items():
-        per_league[league].append(total)
+        if total > 0:
+            per_league[league].append(total)
     return {league: sum(runs) / len(runs) for league, runs in per_league.items()}
 
 

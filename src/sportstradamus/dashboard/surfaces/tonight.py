@@ -29,7 +29,9 @@ _SHAPE_LEGEND = [
     ("shootout", "Shootout", "fast total"),
     ("blowout", "Blowout", "lopsided"),
     ("coinflip", "Coinflip", "close ML"),
-    ("even", "Even", "neutral"),
+    # Not a game script: "even" is what classify_shape returns when no moneyline was
+    # quoted, so the caption names the gap rather than implying a read on the game.
+    ("even", "No line yet", "unquoted"),
     ("grind", "Grind", "low total"),
 ]
 

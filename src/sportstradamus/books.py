@@ -34,8 +34,9 @@ SLEEPER_GAMES_URL = "https://api.sleeper.app/scores/lines_game_picker"
 SLEEPER_PLAYERS_URL = "https://api.sleeper.app/players/{league}?exclude_injury=false"
 
 # Team abbreviation corrections applied across both scrapers. PDX→POR makes Portland's
-# WNBA team match the NBA code (Sleeper uses the airport code PDX; PDX is unused
-# elsewhere, so the flat map is safe).
+# WNBA team match the NBA code (Sleeper uses the airport code PDX). Kept for Sleeper's
+# wire format only — abbreviations.json now emits POR, so nothing writes PDX into the
+# archive; it used to, and every archived Portland total read back as the league default.
 ABBR_MAP = {"WSH": "WAS", "GS": "GSW", "PHO": "PHX", "NOP": "NO", "AZ": "ARI", "PDX": "POR"}
 
 _scraper: Scrape | None = None

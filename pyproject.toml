@@ -91,6 +91,11 @@ ruff = "0.15.8"         # exact-pin; keep == .pre-commit-config.yaml ruff rev (l
 mypy = "^1.10.0"
 pre-commit = "^3.7.0"
 pylint = "^3.2"          # duplicate-code detector only; see [tool.pylint.*]
+# exact-pin: playwright ships a browser revision per release, and 1.60.0 is what
+# ~/.cache/ms-playwright already holds (chromium-1228). A caret would float the venv
+# onto a release wanting a different revision -> a 280 MB re-download. Same reason as
+# ruff above: the lock is gitignored, so nothing else holds the version.
+playwright = "1.60.0"
 
 
 [[tool.poetry.source]]

@@ -304,6 +304,39 @@ def test_leg_dataclass_is_frozen():
     assert leg.game is None  # unenriched default
 
 
+def test_build_game_context_unquoted_game_reads_even_not_coinflip():
+    """A game no book quoted must stay visibly unknown, never a confident coinflip.
+
+    ``cli.py`` re-reads ``O/U`` / ``Moneyline`` through ``archive.get_team_market``
+    (NaN on a miss) rather than the defaulting ``get_total`` / ``get_moneyline`` the
+    feature path needs, precisely so this row reaches the ``"even"`` cell. A whole
+    league once went unfetched for a week behind a defaulted 0.5, which classified
+    every one of its games ``"coinflip"`` with an arbitrary favorite.
+    """
+    offers = pd.DataFrame(
+        [
+            {
+                "League": "MLB",
+                "Game": "ATH/CIN",
+                "Date": "2026-08-06",
+                "Team": team,
+                "Player": f"P{team}",
+                "Market": "hits",
+                "Position": "",
+                "O/U": float("nan"),
+                "Moneyline": float("nan"),
+                "DVPOA": 0.0,
+            }
+            for team in ("ATH", "CIN")
+        ]
+    )
+    row = build_game_context(offers, {"MLB": 4.671}).iloc[0]
+    assert row["shape"] == "even"
+    assert row["fav_team"] is None
+    assert pd.isna(row["ml_fav_prob"]) and pd.isna(row["ml_margin"])
+    assert pd.isna(row["game_total"]) and pd.isna(row["total_ratio"])
+
+
 def test_build_game_context_empty_safe():
     out = build_game_context(pd.DataFrame(), {"NBA": 111.667})
     assert list(out.columns) == [

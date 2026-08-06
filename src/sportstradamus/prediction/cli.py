@@ -287,13 +287,25 @@ def main(progress, legacy_correlation, contest_variant, log_level):
         parlay_df.reset_index(drop=True, inplace=True)
         parlay_df[["Legs Resolved", "Misses", "Profit"]] = np.nan
 
-    if not snapshot_offers.empty and "O/U" in snapshot_offers.columns:
-        snapshot_offers["O/U"] = snapshot_offers.apply(
-            lambda r: archive.get_total(r["League"], r["Date"], r["Team"]) or r["O/U"],
-            axis=1,
-        )
-
     if not snapshot_offers.empty:
+        # Re-read letting a miss stay NaN, unlike the feature path's 0.5 / league-total
+        # default (needed there for train/serve parity). The game-context classifier
+        # must tell "unquoted game" from a real pick'em -- a defaulted 0.5 here hid a
+        # whole league going unfetched.
+        team_keys = ["League", "Date", "Team"]
+        for column, market in (("O/U", "Totals"), ("Moneyline", "Moneyline")):
+            if column not in snapshot_offers.columns:
+                continue
+            quotes = {
+                (league, date, team): archive.get_team_market(league, market, date, team)
+                for league, date, team in snapshot_offers[team_keys]
+                .drop_duplicates()
+                .itertuples(index=False, name=None)
+            }
+            snapshot_offers[column] = [
+                quotes[key] for key in snapshot_offers[team_keys].itertuples(index=False, name=None)
+            ]
+
         key_cols = ["League", "Market", "Date", "Player"]
         line_map = {
             key: archive.get_line(*key)

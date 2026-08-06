@@ -633,7 +633,11 @@ class Archive:
         return self._weighted_book_ev(league, market, rows)
 
     def get_team_market(self, league, market, date, team, *, at: datetime.datetime | None = None):
-        """Weighted-average team-market EV (non-player, non-moneyline).
+        """Weighted-average team-market EV, ``np.nan`` when no book quoted the game.
+
+        The null-returning read behind :meth:`get_moneyline` and :meth:`get_total`,
+        and what snapshot writers call directly when an unquoted game must stay
+        distinguishable from a real neutral quote.
 
         Matches ``team`` case-insensitively: gamelogs carry uppercase
         abbreviations (``"BUF"``) while the legacy klepto-migrated rows
@@ -645,27 +649,24 @@ class Archive:
         return self._weighted_book_ev(league, market, rows)
 
     def get_moneyline(self, league, date, team, *, at: datetime.datetime | None = None):
-        """Weighted-average moneyline EV across books for ``team`` on ``date``.
+        """Weighted-average moneyline EV across books, ``0.5`` when nobody quoted.
 
-        Falls back to ``0.5`` when no book has quoted the game.
-        Case-insensitive team match — see :meth:`get_team_market`.
+        The neutral default exists for the model-feature path: the gamelog builds
+        ``moneyline`` with the same ``0.5`` miss value (:meth:`get_team_market_map`
+        callers), so training and serving have to agree on it. Anything that needs
+        to *see* the miss calls :meth:`get_team_market` instead.
         """
-        rows = self._book_rows(league, "Moneyline", date, team, at=at, case_insensitive_entity=True)
-        if not rows:
-            return 0.5
-        return self._weighted_book_ev(league, "Moneyline", rows)
+        ev = self.get_team_market(league, "Moneyline", date, team, at=at)
+        return 0.5 if np.isnan(ev) else ev
 
     def get_total(self, league, date, team, *, at: datetime.datetime | None = None):
-        """Weighted-average game-total EV for ``team`` on ``date``.
+        """Weighted-average game-total EV, the per-league default when nobody quoted.
 
-        Falls back to the per-league default total when no book has quoted
-        the game so callers always receive a numeric value.
-        Case-insensitive team match — see :meth:`get_team_market`.
+        Same train/serve-parity contract as :meth:`get_moneyline`; use
+        :meth:`get_team_market` when an unquoted game must stay visible as one.
         """
-        rows = self._book_rows(league, "Totals", date, team, at=at, case_insensitive_entity=True)
-        if not rows:
-            return self.default_totals.get(league, 1)
-        return self._weighted_book_ev(league, "Totals", rows)
+        ev = self.get_team_market(league, "Totals", date, team, at=at)
+        return self.default_totals.get(league, 1) if np.isnan(ev) else ev
 
     def get_team_market_map(
         self,

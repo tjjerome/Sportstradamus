@@ -477,6 +477,30 @@ def test_estimate_costs_seeds_bootstrap_unseen_leagues(monkeypatch, tmp_path) ->
     assert league_costs == {"NBA": 80.0, "MLB": 300}
 
 
+def test_estimate_costs_ignores_free_probe_runs_when_pricing_a_league(
+    monkeypatch, tmp_path
+) -> None:
+    """Cost-0 runs must not price a league — a skipped league is not a cheap one.
+
+    Every broad run logs a free ``events`` tiering probe per league, so a league the
+    governor keeps excluding accumulates zero-cost runs. Averaging those in measures
+    how often it was skipped, not what it costs: MLB decayed to 37.5 against a true
+    218.5, and out-of-season leagues priced at 0.0 — which would have waved NFL
+    through as free the moment its season opened. A league with only free probes
+    reports no mean at all and falls back to its seed.
+    """
+    ledger = _governed(monkeypatch, tmp_path)
+    ledger.write_text(
+        _ledger_line(1, "broad", 200, run="r1", league="MLB")
+        + _ledger_line(1, "broad", 0, run="r2", league="MLB")  # probe-only run
+        + _ledger_line(1, "broad", 0, run="r3", league="MLB")
+        + _ledger_line(1, "broad", 0, run="r1", league="NFL")  # never bought at all
+    )
+    cfg = {**_ESTIMATE_CFG, "league_seed_costs": {"NFL": 165}}
+    _, league_costs = odds_budget.estimate_costs(_NOW, cfg)
+    assert league_costs == {"MLB": 200.0, "NFL": 165}
+
+
 def test_estimate_costs_skips_torn_final_line(monkeypatch, tmp_path) -> None:
     ledger = _governed(monkeypatch, tmp_path)
     ledger.write_text(_ledger_line(1, "close_lines", 140) + '{"ts": "2026-07-10T')
