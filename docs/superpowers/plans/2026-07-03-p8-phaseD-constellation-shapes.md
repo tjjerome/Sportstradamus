@@ -588,9 +588,10 @@ _FILLER_COLOR = "rgba(138,145,160,0.30)"   # theme GRAY at low alpha; smaller th
 - Modify: `src/sportstradamus/dashboard/surfaces/games.py`
 - Test: AppTest smoke extension
 
-- [x] A quiet Cinzel caption under the map names the constellation (the template's `label` —
-  "The Zamboni") — the Skyrim moment, one line, `.celestial-kicker` class, no other chrome.
-  Spring-fallback games show no nameplate.
+- [x] ~~A quiet Cinzel caption under the map names the constellation.~~ **Built, then cut on the
+  owner's call after the live pass** — "just let the shape speak for itself." A shape that has to
+  be told to you isn't reading, so the map is uncaptioned and the template's `label` survives only
+  in the tuning cockpit. DESIGN §4a records the rule.
 - [x] **"Constellation tuning" expander** (collapsed by default, sober styling, bottom of the
   page): one row per slate game — game · class · n_supernodes · the D2 readings
   (cross_share / top_share / mean_degree / diameter_frac / density) · dealt template ·
@@ -599,7 +600,8 @@ _FILLER_COLOR = "rgba(138,145,160,0.30)"   # theme GRAY at low alpha; smaller th
   (`R`), no restart. This is the owner's cockpit: when a slate reads all-mesh, the density
   column says whether to raise `mesh_density` (reclassify) or raise `variety_lambda` (keep the
   verdicts, spread the shapes).
-- [x] Gates; commit `feat(p8-d): constellation nameplate + tuning cockpit`
+- [x] Gates; commit `feat(p8-d): constellation nameplate + tuning cockpit` (nameplate
+  later removed — see above)
 
 ---
 

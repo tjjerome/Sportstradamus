@@ -155,10 +155,10 @@ in with a brief fade + scale settle; a bare restyle (lighting a star on a click)
 animation fires only when the lens actually changes the plotted trace set, and
 `prefers-reduced-motion` disables it. Beneath the stars sits the one **decoration layer** that is
 *not* data: the dealt template's filled silhouette, its engraved outline, and faint filler stars on
-the vertices no leg claimed, with a Cinzel nameplate along the bottom saying which constellation
-this is. It is engraving, never gold — gold stays the correlation-edge color alone, so no engraved
-stroke can be misread as a ρ tie — it carries no `customdata` and is inert to click and hover, and
-a game with no template draws none of it. Everything else here *is* data: use the map on the slip
+the vertices no leg claimed. It goes **uncaptioned** — a shape that has to be told to you isn't
+reading, so the drawing carries its own name or it doesn't earn one. It is engraving, never gold —
+gold stays the correlation-edge color alone, so no engraved stroke can be misread as a ρ tie — it
+carries no `customdata` and is inert to click and hover, and a game with no template draws none of it. Everything else here *is* data: use the map on the slip
 editor, Game pages, and parlay detail, keep it on `backgroundColor`, never let it crowd a table. It
 is the brand's signature; treat its grammar — star = leg, **fill = team**, **size = edge**,
 **brightness = in the slip**, edge = correlation — as FIXED. Team fills come from

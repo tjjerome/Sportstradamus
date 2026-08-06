@@ -9,7 +9,7 @@ from scratch, or pre-seeded from a story.
 import pandas as pd
 import streamlit as st
 
-from sportstradamus.dashboard.components.constellation import GameShape, slate_shapes
+from sportstradamus.dashboard.components.constellation_slate import GameShape, slate_shapes
 from sportstradamus.dashboard.components.glyphs import game_shape_glyph
 from sportstradamus.dashboard.components.hero import page_hero
 from sportstradamus.dashboard.components.slip_builder import render_constellation_builder
@@ -283,7 +283,8 @@ def _render_tuning_cockpit(shapes: dict[str, GameShape], focus_game: str) -> Non
 meta = load_current_meta()
 page_hero("THE CONSTELLATION", "Games", format_ts(meta.get("generated_at", "no run on record")))
 
-offers = sport_filtered(load_current_offers()).reset_index(drop=True)
+slate = load_current_offers()
+offers = sport_filtered(slate).reset_index(drop=True)
 corr = load_current_game_corr()
 game_context = load_current_game_context()
 ctxs = load_game_ctxs()
@@ -312,14 +313,10 @@ else:
         ]
         league = str(group["League"].iloc[0]) if not group.empty else ""
         home, away = home_away(group) if not group.empty else ("", "")
-        # Dealt across the league's whole night, every platform, so a game's shape
-        # can't change under the user when they switch Underdog <-> Sleeper.
-        shapes = slate_shapes(
-            offers.loc[(offers["League"] == league) & (offers["Date"].astype(str) == focus_date)],
-            corr,
-            league,
-            focus_date,
-        )
+        # Dealt from the whole night — every league, every platform — so a game's shape
+        # can't change under the user when they switch Underdog <-> Sleeper or narrow
+        # the sport filter, and two games showing at once can't wear the same shape.
+        shapes = slate_shapes(slate.loc[slate["Date"].astype(str) == focus_date], corr, focus_date)
         _render_hero(game_context, parlays, stories, league, focus_game, focus_date, home, away)
         _render_story_preloader(stories, st.session_state[_PLATFORM], focus_game, offers)
 

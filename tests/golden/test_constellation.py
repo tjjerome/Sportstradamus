@@ -19,23 +19,25 @@ import pandas as pd
 import pytest
 
 from sportstradamus.dashboard.components.constellation import (
-    _DECORATION,
     _DEEP_ALPHA,
     _EDGE_BASE_ALPHA,
-    _FILLER_SIZE,
     _INACTIVE_ALPHA,
     _LABEL_FONT_SIZE_MOBILE,
-    _SHAPE_SCALE,
-    _SHAPE_SCALE_MOBILE,
-    _SILHOUETTE_ALPHA,
     _SIZE_MAX,
     _SIZE_MIN,
     _SIZE_MIN_MOBILE,
     _WIDER_SCALE,
-    _scale_path,
     constellation_figure,
 )
 from sportstradamus.dashboard.components.constellation_shapes import shape_catalog
+from sportstradamus.dashboard.components.constellation_slate import (
+    DECORATION,
+    FILLER_SIZE,
+    SHAPE_SCALE,
+    SHAPE_SCALE_MOBILE,
+    SILHOUETTE_ALPHA,
+    scale_path,
+)
 from sportstradamus.dashboard.theme import GOLD, GRAY, team_colors
 
 _TEAMS = ("NYK", "SAS")  # sorted -> NYK anchors left (-x), SAS right (+x); real NBA codes
@@ -85,15 +87,15 @@ def _trace(fig, name: str):
 def _node_traces(fig) -> list:
     # The Phase D decoration layer draws markers and lines too, but carries no
     # customdata, so every helper below that zips against it has to skip it.
-    return [t for t in fig.data if t.mode and "markers" in t.mode and t.name != _DECORATION]
+    return [t for t in fig.data if t.mode and "markers" in t.mode and t.name != DECORATION]
 
 
 def _edge_traces(fig) -> list:
-    return [t for t in fig.data if t.mode == "lines" and t.name != _DECORATION]
+    return [t for t in fig.data if t.mode == "lines" and t.name != DECORATION]
 
 
 def _decoration_traces(fig) -> list:
-    return [t for t in fig.data if t.name == _DECORATION]
+    return [t for t in fig.data if t.name == DECORATION]
 
 
 def _shown_keys(fig) -> set:
@@ -518,7 +520,7 @@ def test_the_silhouette_is_drawn_faintly_beneath_everything():
     assert shapes[0].type == "path"
     assert shapes[0].layer == "below"
     assert shapes[0].line.width == 0
-    assert f",{_SILHOUETTE_ALPHA})" in shapes[0].fillcolor
+    assert f",{SILHOUETTE_ALPHA})" in shapes[0].fillcolor
 
 
 def test_the_decoration_layer_is_inert_to_the_pointer():
@@ -552,7 +554,7 @@ def test_the_template_does_not_change_how_many_gold_edges_are_drawn():
 
 def test_stars_land_on_template_vertices():
     frame = {
-        (round(v["x"] * _SHAPE_SCALE[0], 5), round(v["y"] * _SHAPE_SCALE[1], 5))
+        (round(v["x"] * SHAPE_SCALE[0], 5), round(v["y"] * SHAPE_SCALE[1], 5))
         for v in _HOURGLASS["vertices"]
     }
     assert set(_node_pos(_shaped()).values()) <= frame
@@ -561,7 +563,7 @@ def test_stars_land_on_template_vertices():
 def test_unfilled_vertices_get_filler_stars_too_small_to_read_as_legs():
     fillers = [t for t in _decoration_traces(_shaped()) if t.mode == "markers"]
     assert len(fillers) == 1
-    assert fillers[0].marker.size == _FILLER_SIZE < _SIZE_MIN
+    assert fillers[0].marker.size == FILLER_SIZE < _SIZE_MIN
     assert len(fillers[0].x) == len(_HOURGLASS["vertices"]) - len(_node_pos(_shaped()))
 
 
@@ -577,17 +579,17 @@ def test_the_engraving_shrinks_with_its_stars_under_the_look_wider_lens():
 def test_a_silhouette_rescales_x_and_y_independently():
     """The frame is far wider than it is tall, so one uniform scale would leave every
     round shape a flat lens — x and y take different corrections."""
-    assert _scale_path("M -1 0.5 L 1 -0.5 Z", 0.8, 1.32) == "M -0.8 0.66 L 0.8 -0.66 Z"
+    assert scale_path("M -1 0.5 L 1 -0.5 Z", 0.8, 1.32) == "M -0.8 0.66 L 0.8 -0.66 Z"
     # A cubic's control points are coordinates too, and alternate the same way.
-    assert _scale_path("M 0 0 C 1 1 -1 -1 0.5 0.5", 2.0, 4.0) == "M 0 0 C 2 4 -2 -4 1 2"
+    assert scale_path("M 0 0 C 1 1 -1 -1 0.5 0.5", 2.0, 4.0) == "M 0 0 C 2 4 -2 -4 1 2"
 
 
 def test_the_phone_frame_stretches_the_other_way():
     """Desktop is wide and short, the phone near-square — the correction has to invert
     or a diamond that reads round on a laptop renders as a tall kite in a hand."""
-    assert _SHAPE_SCALE[0] < _SHAPE_SCALE[1] and _SHAPE_SCALE_MOBILE[0] > _SHAPE_SCALE_MOBILE[1]
+    assert SHAPE_SCALE[0] < SHAPE_SCALE[1] and SHAPE_SCALE_MOBILE[0] > SHAPE_SCALE_MOBILE[1]
     frame = {
-        (round(v["x"] * _SHAPE_SCALE_MOBILE[0], 5), round(v["y"] * _SHAPE_SCALE_MOBILE[1], 5))
+        (round(v["x"] * SHAPE_SCALE_MOBILE[0], 5), round(v["y"] * SHAPE_SCALE_MOBILE[1], 5))
         for v in _HOURGLASS["vertices"]
     }
     assert set(_node_pos(_shaped(mobile=True)).values()) <= frame
@@ -603,24 +605,18 @@ def test_the_shape_frame_correction_keeps_stars_and_engraving_together():
     assert min(outline_xs) <= min(star_xs) and max(star_xs) <= max(outline_xs)
 
 
-def _nameplates(fig) -> list:
-    return [a for a in fig.layout.annotations if " ".join(_HOURGLASS["label"].upper()) == a.text]
+def test_a_shaped_map_is_never_captioned_with_the_shapes_name():
+    """The drawing has to carry the name on its own.
 
-
-def test_the_shape_is_named_along_the_bottom_in_cinzel():
-    """A star chart names its constellations; the nameplate is that caption, in the
-    same Cinzel voice as the team tags but quieter so it can't read as a third team."""
-    plate = _nameplates(_shaped())
-    assert len(plate) == 1
-    assert plate[0].font.family == "Cinzel, serif"
-    assert (plate[0].xref, plate[0].yref) == ("paper", "paper")
-    assert (plate[0].x, plate[0].yanchor) == (0.5, "bottom")
-
-
-def test_a_spring_fallback_game_is_not_named():
-    """No template means no constellation, and an unnamed map must not claim one."""
-    legs = _slip("A|PTS|Over")
-    pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Over", 0.3))
-    fig = constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Over", 0.5)), pool)
-    assert not [a for a in fig.layout.annotations if a.yanchor == "bottom"]
-    assert len(fig.layout.annotations) == 2  # the two team tags, unchanged
+    A caption naming the constellation is the tell that the engraving isn't
+    reading, so the map annotates only its two team tags whether or not the game
+    was dealt a shape.
+    """
+    plain = constellation_figure(
+        _slip("A|PTS|Over"),
+        _corr(("A|PTS|Over", "B|REB|Over", 0.5)),
+        _pool(("A|PTS|Over", 0.4), ("B|REB|Over", 0.3)),
+    )
+    for fig in (_shaped(), plain):
+        assert len(fig.layout.annotations) == 2  # the two team tags, and nothing else
+        assert not [a for a in fig.layout.annotations if _HOURGLASS["label"].upper() in a.text]

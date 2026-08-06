@@ -3,13 +3,14 @@
 The catalog is the owner's live tuning surface for P8 Phase D: hand-edited
 coordinates and classifier thresholds, reloaded on the next browser rerun with
 no dashboard restart. So these pins split in two — raw-JSON structural checks
-that every authored template obeys the S1–S8 authoring rules (the loader's
+that every authored template obeys the S1–S9 authoring rules (the loader's
 module docstring is their reference), and loader-contract checks through the
 public accessors, including the hot-reload behavior the tuning loop depends on.
 
-The bank floor pins at the bottom (≥ 20 eligible per league, ≥ 6 per (league,
-class), all four non-generic classes covered) are what keep the assigner from
-running out of deck on a real slate: a league that falls under them starts
+The bank floor pins at the bottom are what keep the assigner from running out of
+deck. They are deck-wide rather than per-league because dealing is: one night's
+games take distinct shapes from one shared catalog whatever leagues they belong
+to, and ``leagues`` only weights the choice. A deck that falls under them starts
 handing games ``None`` and the map silently reverts to the spring layout.
 """
 
@@ -43,6 +44,7 @@ _SANE_TUNING = {
     "mesh_density": 0.45,
     "min_shape_nodes": 3,
     "variety_lambda": 0.5,
+    "league_affinity": 1.0,
 }
 
 _SANE_TEMPLATES = {
@@ -89,8 +91,8 @@ def test_catalog_version_and_top_level_keys(raw):
 
 
 def test_tuning_block_is_exactly_the_shipped_knobs_in_range(raw):
-    """The eight knobs the classifier and assigner read, each inside the band a
-    hand edit has to stay in for the cascade to keep meaning anything."""
+    """Every knob the classifier and assigner read, each inside the band a hand
+    edit has to stay in for the cascade to keep meaning anything."""
     assert set(raw["tuning"]) == set(cs.TUNING_BOUNDS)
     for key, value in raw["tuning"].items():
         low, high = cs.TUNING_BOUNDS[key]
@@ -101,7 +103,7 @@ def test_tuning_block_is_exactly_the_shipped_knobs_in_range(raw):
 def test_template_obeys_authoring_rules(raw, slug):
     tpl = raw["templates"][slug]
     assert slug == slug.lower() and " " not in slug
-    assert tpl["label"].strip(), "S7: nameplate text is non-empty"
+    assert tpl["label"].strip(), "S7: the cockpit's name for the shape is non-empty"
 
     leagues = tpl["leagues"]
     assert leagues == "all" or (leagues and set(leagues) <= set(_LEAGUES))
@@ -147,22 +149,14 @@ def test_shape_catalog_and_tuning_read_the_shipped_file(raw):
     assert cs.tuning() == raw["tuning"]
 
 
-def test_eligible_templates_are_league_scoped_in_catalog_order(raw):
-    order = list(raw["templates"])
+def test_every_league_has_equipment_of_its_own_to_be_pulled_toward(raw):
+    """``league_affinity`` only means something if the league is tagged somewhere."""
+    tagged = Counter()
+    for tpl in raw["templates"].values():
+        for league in () if tpl["leagues"] == "all" else tpl["leagues"]:
+            tagged[league] += 1
     for league in _LEAGUES:
-        want = [
-            slug
-            for slug in order
-            if raw["templates"][slug]["leagues"] == "all"
-            or league in raw["templates"][slug]["leagues"]
-        ]
-        assert cs.eligible_templates(league) == want
-
-
-def test_eligible_templates_for_an_unlisted_league_is_the_universal_set(raw):
-    assert cs.eligible_templates("CFL") == [
-        slug for slug, tpl in raw["templates"].items() if tpl["leagues"] == "all"
-    ]
+        assert tagged[league] >= 3, f"{league} has only {tagged[league]} of its own"
 
 
 def test_catalog_hot_reloads_on_an_owner_edit(tmp_path, monkeypatch):
@@ -260,14 +254,15 @@ def _stub_deck(tmp_path, monkeypatch, per_class=8, min_nodes=2):
     monkeypatch.setattr(cs, "CATALOG_PATH", path)
 
 
-def _slate(count, topology="mesh", n_supernodes=6):
-    return [(f"G{i:02d}", topology, n_supernodes) for i in range(count)]
+def _slate(count, topology="mesh", n_supernodes=6, league="NBA"):
+    return [(f"G{i:02d}-{league}", league, topology, n_supernodes) for i in range(count)]
 
 
 def test_a_full_slate_is_dealt_distinct_shapes(tmp_path, monkeypatch):
-    """No two games on a league's night may wear the same constellation."""
+    """No two games showing at once may wear the same constellation, whatever
+    leagues they belong to — the deal is one deck over the whole night."""
     _stub_deck(tmp_path, monkeypatch)
-    dealt = cs.assign_templates("NBA", "2026-08-06", _slate(16), _SANE_TUNING)
+    dealt = cs.assign_templates("2026-08-06", _slate(8) + _slate(8, league="MLB"), _SANE_TUNING)
     assert len(dealt) == 16
     slugs = list(dealt.values())
     assert None not in slugs
@@ -277,16 +272,16 @@ def test_a_full_slate_is_dealt_distinct_shapes(tmp_path, monkeypatch):
 def test_dealing_is_deterministic_and_reshuffles_on_a_new_date(tmp_path, monkeypatch):
     _stub_deck(tmp_path, monkeypatch)
     games = _slate(10)
-    first = cs.assign_templates("NBA", "2026-08-06", games, _SANE_TUNING)
-    assert first == cs.assign_templates("NBA", "2026-08-06", list(reversed(games)), _SANE_TUNING)
-    assert first != cs.assign_templates("NBA", "2026-08-07", games, _SANE_TUNING)
+    first = cs.assign_templates("2026-08-06", games, _SANE_TUNING)
+    assert first == cs.assign_templates("2026-08-06", list(reversed(games)), _SANE_TUNING)
+    assert first != cs.assign_templates("2026-08-07", games, _SANE_TUNING)
 
 
 def test_a_game_is_dealt_a_template_matching_its_topology(tmp_path, monkeypatch):
     _stub_deck(tmp_path, monkeypatch)
     for topology in _ROTATION:
-        dealt = cs.assign_templates("NBA", "2026-08-06", _slate(1, topology), _SANE_TUNING)
-        slug = dealt["G00"]
+        dealt = cs.assign_templates("2026-08-06", _slate(1, topology), _SANE_TUNING)
+        slug = next(iter(dealt.values()))
         assert cs.shape_catalog()["templates"][slug]["topology"]["primary"] == topology
 
 
@@ -298,7 +293,7 @@ def test_variety_lambda_spreads_a_slate_that_is_all_one_class(tmp_path, monkeypa
 
     def classes_dealt(variety_lambda):
         dealt = cs.assign_templates(
-            "NBA", "2026-08-06", games, {**_SANE_TUNING, "variety_lambda": variety_lambda}
+            "2026-08-06", games, {**_SANE_TUNING, "variety_lambda": variety_lambda}
         )
         return {templates[slug]["topology"]["primary"] for slug in dealt.values()}
 
@@ -306,10 +301,71 @@ def test_variety_lambda_spreads_a_slate_that_is_all_one_class(tmp_path, monkeypa
     assert len(classes_dealt(2)) > 1
 
 
+def _mixed_league_deck(tmp_path, monkeypatch):
+    """Three interchangeable mesh templates — one MLB's, one universal, one NBA's."""
+    vertices = [
+        {
+            "id": i,
+            "x": round(-0.9 + 0.6 * i, 3),
+            "y": 0.9 if i % 2 else -0.5,
+            "side": side,
+            "prominence": i + 1,
+        }
+        for i, side in enumerate("LLRR")
+    ]
+    templates = {
+        slug: {
+            "label": f"The {slug.title()}",
+            "leagues": leagues,
+            "topology": {"primary": "mesh", "secondary": []},
+            "min_nodes": 2,
+            "vertices": vertices,
+            "outline": [[i, i + 1] for i in range(3)],
+            "silhouette": "M -0.9 -0.5 L 0.9 -0.5 L 0 0.9 Z",
+        }
+        for slug, leagues in (("mitt", ["MLB"]), ("net", "all"), ("backboard", ["NBA"]))
+    }
+    _write_catalog(tmp_path / "constellation_shapes.json", _SANE_TUNING, templates)
+    monkeypatch.setattr(cs, "CATALOG_PATH", tmp_path / "constellation_shapes.json")
+
+
+def test_a_league_is_pulled_toward_its_own_equipment_first(tmp_path, monkeypatch):
+    """Own gear outranks a universal, which outranks somebody else's — the whole
+    of what ``league_affinity`` buys when every template fits the class equally."""
+    _mixed_league_deck(tmp_path, monkeypatch)
+    dealt = cs.assign_templates("2026-08-06", _slate(3, league="MLB"), _SANE_TUNING)
+    assert [dealt[game] for game, *_ in _slate(3, league="MLB")] == ["mitt", "net", "backboard"]
+
+
+def test_another_leagues_equipment_is_discouraged_never_barred(tmp_path, monkeypatch):
+    """A soft weight, not a filter: an NBA night short on shapes still gets the mitt."""
+    _mixed_league_deck(tmp_path, monkeypatch)
+    dealt = cs.assign_templates("2026-08-06", _slate(3), _SANE_TUNING)
+    assert set(dealt.values()) == {"mitt", "net", "backboard"}
+    assert dealt["G00-NBA"] == "backboard"
+
+
+def test_league_affinity_at_zero_stops_leagues_mattering(tmp_path, monkeypatch):
+    """The knob's off position, so a night can be dealt on topology alone."""
+    _mixed_league_deck(tmp_path, monkeypatch)
+    assert cs.assign_templates("2026-08-06", _slate(1, league="MLB"), _SANE_TUNING) == {
+        "G00-MLB": "mitt"
+    }
+    blind = {**_SANE_TUNING, "league_affinity": 0.0}
+    dealt = [
+        cs.assign_templates("2026-08-06", [("G00", league, "mesh", 6)], blind)["G00"]
+        for league in ("MLB", "NBA", "NHL")
+    ]
+    assert len(set(dealt)) == 1
+
+
 def test_a_game_with_too_few_supernodes_keeps_the_spring_layout(tmp_path, monkeypatch):
     _stub_deck(tmp_path, monkeypatch)
-    games = [("thin", "mesh", _SANE_TUNING["min_shape_nodes"] - 1), ("full", "mesh", 6)]
-    dealt = cs.assign_templates("NBA", "2026-08-06", games, _SANE_TUNING)
+    games = [
+        ("thin", "NBA", "mesh", _SANE_TUNING["min_shape_nodes"] - 1),
+        ("full", "NBA", "mesh", 6),
+    ]
+    dealt = cs.assign_templates("2026-08-06", games, _SANE_TUNING)
     assert dealt["thin"] is None
     assert dealt["full"] is not None
 
@@ -317,40 +373,29 @@ def test_a_game_with_too_few_supernodes_keeps_the_spring_layout(tmp_path, monkey
 def test_a_game_below_every_templates_min_nodes_keeps_the_spring_layout(tmp_path, monkeypatch):
     """Templates are never stretched to fit — a shape that can't be filled isn't dealt."""
     _stub_deck(tmp_path, monkeypatch, min_nodes=9)
-    dealt = cs.assign_templates("NBA", "2026-08-06", _slate(1, n_supernodes=5), _SANE_TUNING)
-    assert dealt["G00"] is None
+    dealt = cs.assign_templates("2026-08-06", _slate(1, n_supernodes=5), _SANE_TUNING)
+    assert dealt["G00-NBA"] is None
 
 
-def test_every_league_has_a_deck_deep_enough_for_a_real_slate():
-    """The worst observed slate is 17 games (MLB doubleheaders) and the assigner never
-    repeats a template on a night, so a league under 20 starts dealing None."""
-    for league in _LEAGUES:
-        assert len(cs.eligible_templates(league)) >= 20, league
+def test_the_deck_is_deep_enough_for_a_stacked_multi_league_night(raw):
+    """One deck now covers every league showing at once, so the floor is the worst
+    combined night rather than the worst single league: MLB's 17-game doubleheader
+    slate beside an NFL Sunday, of which only the games with enough supernodes to
+    carry a shape are actually dealt."""
+    assert len(raw["templates"]) >= 45
 
 
-def test_every_league_can_answer_every_topology_class():
+def test_every_class_has_real_depth_behind_it(raw):
     """Counting secondaries, because a secondary match still beats an unrelated
     template — but a class with nothing behind it means those games get shapes that
     say nothing about how they actually correlate."""
-    templates = cs.shape_catalog()["templates"]
-    for league in _LEAGUES:
-        answers = Counter()
-        for slug in cs.eligible_templates(league):
-            topo = templates[slug]["topology"]
-            for cls in (topo["primary"], *topo["secondary"]):
-                answers[cls] += 1
-        assert set(answers) >= set(_CLASSES), (
-            f"{league} has no template for {set(_CLASSES) - set(answers)}"
-        )
-        for cls in _CLASSES:
-            assert answers[cls] >= 6, f"{league}/{cls} has only {answers[cls]}"
-
-
-def test_every_class_is_some_templates_primary_in_every_league():
-    """A class carried only as a secondary is never the best answer to anything."""
-    templates = cs.shape_catalog()["templates"]
-    for league in _LEAGUES:
-        primaries = {
-            templates[slug]["topology"]["primary"] for slug in cs.eligible_templates(league)
-        }
-        assert primaries == set(_CLASSES), f"{league}: {primaries}"
+    answers: Counter = Counter()
+    primaries = set()
+    for tpl in raw["templates"].values():
+        topo = tpl["topology"]
+        primaries.add(topo["primary"])
+        for cls in (topo["primary"], *topo["secondary"]):
+            answers[cls] += 1
+    assert primaries == set(_CLASSES), f"no template is primarily {set(_CLASSES) - primaries}"
+    for cls in _CLASSES:
+        assert answers[cls] >= 10, f"{cls} has only {answers[cls]}"

@@ -352,14 +352,15 @@ stage ends with the §9 checklist green and the dashboard runnable.
     positions, M owns sizes/events; D's knot explode radius must respect the mobile floor.
   - **Phase D — loose constellation shapes** (spec §6.1, **Opus implementer**): 49-template
     hand-authored shape bank (`constellation_shapes.json`, topology-tagged hub/chain/twin/mesh,
-    generic archetypes never trademarked marks, authoring rules S1–S8 + floor goldens —
+    generic archetypes never trademarked marks, authoring rules S1–S9 + floor goldens —
     story-engine fidelity); player-supernode clustering (a player's |ρ|≥0.35 legs plan as one
     node, explode back as a knot around their vertex); graph topology classifier; slate
-    assigner dealing **distinct** topology-matched templates across a league's whole game day
-    (pool 37/league vs worst slate 17 — no repeats by construction); star→vertex assignment
+    assigner dealing **distinct** topology-matched templates across the whole night, every
+    league at once, with `leagues` a soft score weight rather than a filter (deck 49 vs worst
+    combined slate — no repeats by construction); star→vertex assignment
     keeps the DESIGN §4a grammar FIXED (star=leg after explosion, team sides w/ golden-angle
     overflow, ρ-adjacency greedy, spring fallback for thin games); decoration layer (outline +
-    fillers + silhouette α=0.13, never gold, never interactive), Cinzel nameplate, DESIGN §4a
+    fillers + silhouette α=0.13, never gold, never interactive, and uncaptioned), DESIGN §4a
     layout-clause amendment same-commit. All classifier/assigner thresholds owner-tunable live:
     catalog `tuning` block, mtime hot-reload (edit JSON → rerun, no restart), Games-page
     diagnostics expander shows per-game readings, `variety_lambda` knob spreads shape classes
@@ -433,6 +434,30 @@ devel-bound PR; research-analyst only if a stage turns into a modeling question 
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
+- 2026-08-06 · **Phase D owner pass — balls, no nameplate, soft leagues, module carve** · Four owner
+  asks after the phase closed. **Nameplate deleted** — the map is no longer captioned with the
+  shape's name ("just let the shape speak for itself"); `_add_nameplate` + its color constant + the
+  two goldens gone, DESIGN §4a's decoration sentence now says *uncaptioned* and why. **Ball hubs
+  added** — `the-basketball` (hub, NBA/WNBA: cross seams off a centre star, two 5-segment bows) and
+  `the-baseball` (twin, MLB: two mirrored seam arcs — the honest class, and it fills MLB's missing
+  twin); the football was already in the bank as `the-pigskin`. Bank now **49 templates**. **League
+  affinity is a soft weight** — `eligible_templates`'s hard per-league filter is gone; the new
+  `league_affinity` knob scores own-gear +1 / another league's -1 against a `fit` span of 2, so a
+  baseball night is *likely* but not guaranteed to wear the mitt and an NFL night can still draw the
+  bat. **Dealing is now per-date across every league at once** (`slate_shapes` lost its `league`
+  parameter, seed is `date|version`, `games.py` deals from the *unfiltered* offers frame), which is
+  what makes "never the same shape in two active games" true across leagues rather than within one.
+  Floor pins moved per-league → deck-wide to match. **Carve:** the shape half left `constellation.py`
+  for a new `constellation_slate.py` (918 → 666 lines) — game-graph extraction, template placement,
+  dealing, decoration; owner exempted the new module from the length guidance. The circular-import
+  seam was `_universe`, which returned figure-presentation dicts; it now returns the defining row and
+  each side derives what it needs. Live pass on the Aug-6 slate: 8 games / 3 shaped / all distinct
+  across MLB + WNBA, WNBA dealt The Basketball and MLB The Mitt + The Plate — affinity visible
+  without a filter. Two authoring iterations the browser forced: the basketball's bows read as an
+  octagon at 3 points per bow (needs 5), and the baseball's seams read as a closed ring until the
+  arcs were shortened to ~110°. · gates ruff ✓ / golden 4302 ✓ / refactoring-specialist ✓ ·
+  integration still blocked by the training-artifacts lock (a `model-strategy-sweep --confirm`,
+  unrelated to this lane) · not pushed.
 - 2026-08-06 · **Phase D complete — D2…D7 landed** · `9a9701d` supernodes + topology classifier
   (`constellation_layout.py`; twin→hub→chain→mesh cascade, every threshold from the catalog
   `tuning` block) · `981ab4a` slate assigner (md5(league|date|version)-seeded shuffle, distinct per
