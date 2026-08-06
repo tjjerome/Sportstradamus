@@ -13,13 +13,18 @@ with no code involved — the whole premise of the D6 cockpit.
 from __future__ import annotations
 
 import itertools
+import math
 
 import pytest
 
 from sportstradamus.dashboard.components import constellation_shapes as cs
 from sportstradamus.dashboard.components.constellation_layout import (
+    _EXPLODE_DR,
+    _EXPLODE_R0,
+    assign_stars,
     cluster_players,
     collapse_edges,
+    explode_clusters,
     topology_class,
 )
 
@@ -57,7 +62,7 @@ def _two_lobes():
     edges = [(a, b, 0.6) for a, b in itertools.combinations(left, 2)]
     edges += [(a, b, 0.6) for a, b in itertools.combinations(right, 2)]
     edges.append((left[0], right[0], 0.1))
-    teams = {node: "AAA" for node in left} | {node: "BBB" for node in right}
+    teams = dict.fromkeys(left, "AAA") | dict.fromkeys(right, "BBB")
     return left + right, edges, teams
 
 
@@ -73,7 +78,7 @@ def _sparse_web():
     that a plausible in-bounds retune (0.60) can push it back off."""
     nodes = _legs("P", 6)
     ring = [(nodes[i], nodes[(i + 1) % 6], _W) for i in range(6)]
-    edges = ring + [(nodes[0], nodes[3], _W), (nodes[1], nodes[4], _W)]
+    edges = [*ring, (nodes[0], nodes[3], _W), (nodes[1], nodes[4], _W)]
     teams = {node: ("AAA" if i % 2 == 0 else "BBB") for i, node in enumerate(nodes)}
     return nodes, edges, teams
 
@@ -190,6 +195,132 @@ def test_collapsed_edge_takes_the_strongest_member_pair():
     clusters = cluster_players(legs, edges, TUNING["cluster_rho"])
     collapsed = collapse_edges(edges, clusters)
     assert collapsed == [("A|PRA|Over+A|PTS|Over", "B|REB|Over", 0.55)]
+
+
+def _template(vertices):
+    """A bare template — assign_stars reads geometry only, never the decoration."""
+    return {"vertices": vertices, "min_nodes": 2}
+
+
+def _vertex(vid, x, y, side, prominence):
+    return {"id": vid, "x": x, "y": y, "side": side, "prominence": prominence}
+
+
+_MIRRORED = _template(
+    [
+        _vertex(0, -0.9, 0.9, "L", 1),
+        _vertex(1, -0.9, 0.0, "L", 3),
+        _vertex(2, -0.9, -0.9, "L", 5),
+        _vertex(3, 0.9, 0.9, "R", 2),
+        _vertex(4, 0.9, 0.0, "R", 4),
+        _vertex(5, 0.9, -0.9, "R", 6),
+    ]
+)
+
+# One left vertex against three right ones at deliberately unequal distances, so
+# a correlation pull and a prominence ranking disagree about where to put B.
+_LOPSIDED = _template(
+    [
+        _vertex(0, -0.9, 0.0, "L", 1),
+        _vertex(1, 0.1, 0.0, "R", 3),
+        _vertex(2, 0.9, 0.9, "R", 1),
+        _vertex(3, 0.9, -0.9, "R", 2),
+    ]
+)
+
+
+def _two_by_two():
+    nodes = ["A1|PTS|Over", "A2|PTS|Over", "B1|PTS|Over", "B2|PTS|Over"]
+    teams = {nodes[0]: "AAA", nodes[1]: "AAA", nodes[2]: "BBB", nodes[3]: "BBB"}
+    edges = [(nodes[0], nodes[2], 0.8), (nodes[1], nodes[3], 0.2)]
+    return nodes, teams, edges
+
+
+def test_a_star_never_lands_on_the_other_teams_half():
+    """The one thing the layout is not allowed to lie about."""
+    nodes, teams, edges = _two_by_two()
+    positions, _ = assign_stars(nodes, teams, ["AAA", "BBB"], edges, _MIRRORED)
+    for node, (x, _) in positions.items():
+        assert (x < 0) == (teams[node] == "AAA"), node
+
+
+def test_placement_is_deterministic_whatever_order_the_inputs_arrive_in():
+    nodes, teams, edges = _two_by_two()
+    first = assign_stars(nodes, teams, ["AAA", "BBB"], edges, _MIRRORED)
+    assert first == assign_stars(nodes, teams, ["AAA", "BBB"], edges, _MIRRORED)
+    assert first == assign_stars(
+        list(reversed(nodes)), teams, ["AAA", "BBB"], list(reversed(edges)), _MIRRORED
+    )
+
+
+def test_a_correlated_star_sits_near_its_partner_even_over_a_showier_vertex():
+    """Adjacency beats prominence: the gold edge should stay short."""
+    nodes = ["A|PTS|Over", "B|PTS|Over"]
+    teams = {nodes[0]: "AAA", nodes[1]: "BBB"}
+    positions, _ = assign_stars(nodes, teams, ["AAA", "BBB"], [(*nodes, 0.8)], _LOPSIDED)
+    assert positions["B|PTS|Over"] == (0.1, 0.0)  # nearest, and the least prominent
+
+
+def test_prominence_decides_when_nothing_is_correlated():
+    nodes = ["A|PTS|Over", "B|PTS|Over"]
+    teams = {nodes[0]: "AAA", nodes[1]: "BBB"}
+    positions, _ = assign_stars(nodes, teams, ["AAA", "BBB"], [], _LOPSIDED)
+    assert positions["B|PTS|Over"] == (0.9, 0.9)  # the most prominent right vertex
+
+
+def test_a_single_team_game_leaves_the_far_half_to_fillers():
+    """ARI/ARI is real in this data. The empty half is the truth about the game."""
+    nodes = ["A1|PTS|Over", "A2|PTS|Over"]
+    teams = dict.fromkeys(nodes, "ARI")
+    positions, fillers = assign_stars(nodes, teams, ["ARI"], [], _MIRRORED)
+    assert all(x < 0 for x, _ in positions.values())
+    assert {3, 4, 5} <= set(fillers)
+
+
+def test_overflow_orbits_its_own_side_instead_of_stretching_the_template():
+    nodes = [f"A{i}|PTS|Over" for i in range(5)]
+    teams = dict.fromkeys(nodes, "AAA")
+    positions, _ = assign_stars(nodes, teams, ["AAA", "BBB"], [], _MIRRORED)
+    assert len(positions) == 5
+    assert all(x <= 0.0 for x, _ in positions.values()), "overflow never crosses the axis"
+
+
+def test_unfilled_vertices_come_back_as_fillers_so_the_shape_still_reads():
+    nodes = ["A|PTS|Over", "B|PTS|Over"]
+    teams = {nodes[0]: "AAA", nodes[1]: "BBB"}
+    positions, fillers = assign_stars(nodes, teams, ["AAA", "BBB"], [], _MIRRORED)
+    assert len(fillers) == 4
+    assert set(fillers).isdisjoint(
+        vertex["id"]
+        for vertex in _MIRRORED["vertices"]
+        if (vertex["x"], vertex["y"]) in positions.values()
+    )
+
+
+def test_a_lone_leg_sits_exactly_on_its_vertex():
+    exploded = explode_clusters({"A|PTS|Over": (0.4, -0.2)}, {"A|PTS|Over": ["A|PTS|Over"]})
+    assert exploded == {"A|PTS|Over": (0.4, -0.2)}
+
+
+def test_a_knot_rings_its_vertex_tightly_enough_to_read_as_one_point():
+    members = ["A|AST|Over", "A|PRA|Over", "A|PTS|Over"]
+    exploded = explode_clusters({"+".join(members): (0.5, 0.5)}, {"+".join(members): members})
+    radius = _EXPLODE_R0 + _EXPLODE_DR  # 3 members: one step past the 2-member ring
+    assert len(exploded) == 3
+    for point in exploded.values():
+        assert math.dist(point, (0.5, 0.5)) == pytest.approx(radius)
+    # Ring starts at -90 degrees, members in sorted order.
+    assert exploded[members[0]] == pytest.approx((0.5, 0.5 - radius))
+
+
+def test_a_knot_beside_the_axis_clamps_rather_than_spilling_onto_the_wrong_team():
+    members = ["A|AST|Over", "A|PRA|Over", "A|PTS|Over"]
+    key = "+".join(members)
+    exploded = explode_clusters({key: (-0.02, 0.0)}, {key: members})
+    assert all(x <= 0.0 for x, _ in exploded.values())
+    assert min(x for x, _ in exploded.values()) < -0.02, (
+        "the knot still opens up, it just can't cross"
+    )
 
 
 def test_clustering_and_classification_are_deterministic():
