@@ -9,6 +9,7 @@ from scratch, or pre-seeded from a story.
 import pandas as pd
 import streamlit as st
 
+from sportstradamus.dashboard.components.constellation import GameShape, slate_shapes
 from sportstradamus.dashboard.components.glyphs import game_shape_glyph
 from sportstradamus.dashboard.components.hero import page_hero
 from sportstradamus.dashboard.components.slip_builder import render_constellation_builder
@@ -260,6 +261,7 @@ parlays = load_current_parlays()
 # width) stays visible whether or not a slip is seeded; a live slip pins it to that slip's
 # game (see _game_select).
 legs = st.session_state[_LEGS]
+shapes: dict[str, GameShape] = {}
 if offers.empty:
     st.info("No current predictions. Run `poetry run prophecize` to generate offers.")
     focus_game = ""
@@ -277,13 +279,27 @@ else:
         ]
         league = str(group["League"].iloc[0]) if not group.empty else ""
         home, away = home_away(group) if not group.empty else ("", "")
+        # Dealt across the league's whole night, every platform, so a game's shape
+        # can't change under the user when they switch Underdog <-> Sleeper.
+        shapes = slate_shapes(
+            offers.loc[(offers["League"] == league) & (offers["Date"].astype(str) == focus_date)],
+            corr,
+            league,
+            focus_date,
+        )
         _render_hero(game_context, parlays, stories, league, focus_game, focus_date, home, away)
         _render_story_preloader(stories, st.session_state[_PLATFORM], focus_game, offers)
 
 st.divider()
 if focus_game:
     _render_lens_toggles()
-render_constellation_builder(offers, corr, ctxs, focus_game=focus_game)
+render_constellation_builder(
+    offers,
+    corr,
+    ctxs,
+    focus_game=focus_game,
+    shape=shapes[focus_game].template if focus_game in shapes else None,
+)
 
 # Reconciler handoff: the Modifiers page defaults to the session rail, so the
 # current slip arrives loaded. Two legs is the reconciler's minimum.

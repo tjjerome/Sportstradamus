@@ -103,6 +103,7 @@ def render_constellation_builder(
     *,
     focus_game: str,
     key_prefix: str = "cb",
+    shape: dict | None = None,
 ) -> None:
     """Same-game correlation-aware editor with a live deterministic thesis headline.
 
@@ -112,7 +113,9 @@ def render_constellation_builder(
     full offer detail without disturbing the slip. Other-game slip legs show as
     satellites. Two lens toggles (``games.py``'s ``lens_deep`` / ``lens_wider``
     session-state bools) turn on the map's "look deeper" / "look wider" overlays.
-    The caller draws the game's context banner above this.
+    The caller draws the game's context banner above this, and deals ``shape`` —
+    this game's constellation template for the night — from the whole league
+    slate, so it can't depend on which platform is showing.
     """
     if not focus_game:
         st.info("Pick a game above to see its constellation.")
@@ -135,6 +138,7 @@ def render_constellation_builder(
         key_prefix=key_prefix,
         deep_pool=deep_pool,
         wider_groups=wider_groups,
+        shape=shape,
     )
     if legs:
         with st.container(height=_LEG_PANEL_HEIGHT, border=False, key="constellation_legpanel"):
@@ -244,6 +248,7 @@ def _render_constellation(
     key_prefix: str,
     deep_pool: pd.DataFrame | None,
     wider_groups: list[tuple[str, list[dict]]] | None,
+    shape: dict | None,
 ) -> None:
     """Draw the interactive star map and act on the component's click/detail callback.
 
@@ -257,7 +262,13 @@ def _render_constellation(
     mobile = is_mobile()
     action = render_constellation(
         constellation_figure(
-            legs, corr, pool, deep_pool=deep_pool, wider_groups=wider_groups, mobile=mobile
+            legs,
+            corr,
+            pool,
+            deep_pool=deep_pool,
+            wider_groups=wider_groups,
+            mobile=mobile,
+            shape=shape,
         ),
         key=f"{key_prefix}_constellation",
         mobile=mobile,

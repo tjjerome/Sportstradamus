@@ -31,7 +31,11 @@ mechanical half.
   outline-free.
 * **S5** ``silhouette`` is one closed SVG path — the filled gesture, ≤ ~8
   commands. It carries what the line-work can't (the bolt's body, the leaf's
-  lobes).
+  lobes). Only ``M L Q C T S Z``, space-separated, every coordinate set
+  re-issuing its command letter: Plotly's shape parser silently drops anything
+  else (an ``A`` arc costs you the curve with no error), and ``H``/``V`` would
+  break the x/y alternation the renderer rescales on. Draw curves as cubics —
+  a circular quadrant of radius ``r`` wants control points at ``0.5523 r``.
 * **S6** ``min_nodes`` = fewest real supernodes that still read as the object
   (2–5).
 * **S7** ``label`` is the nameplate text ("The Bolt"). ``topology.primary`` is
@@ -60,6 +64,13 @@ CATALOG_PATH = Path(str(pkg_resources.files(data) / "config" / "constellation_sh
 TOPOLOGY_CLASSES = frozenset({"hub", "chain", "twin", "mesh"})
 
 _SIDES = frozenset({"L", "R", "C"})
+
+# Plotly's shape paths accept only a subset of SVG, and an unsupported command is
+# dropped in silence — an "A" arc costs you the curve with no error anywhere. H and V
+# are supported there but banned here anyway: they take a single coordinate, which
+# would break the strict x/y alternation the renderer's rescale walks on. Write the
+# curve as a cubic and the straight line as an L.
+_SVG_COMMANDS = frozenset("MLQCTSZ")
 
 # Owner-editable knob -> the band a hand edit has to stay inside. Bounded knobs
 # are strict at both ends: a 0 or 1 share makes the classifier answer the same
@@ -120,6 +131,13 @@ def _validate_template(slug: str, tpl: dict) -> None:
     for pair in tpl["outline"]:
         if not set(pair) <= set(ids):
             raise ValueError(f"{slug}: outline pair {pair} references a missing vertex id")
+
+    used = {token for token in tpl["silhouette"].split() if token.isalpha()}
+    if not used <= _SVG_COMMANDS:
+        raise ValueError(
+            f"{slug}: silhouette uses {sorted(used - _SVG_COMMANDS)}, "
+            f"which Plotly drops without a word; allowed: {sorted(_SVG_COMMANDS)}"
+        )
 
 
 @functools.lru_cache(maxsize=8)

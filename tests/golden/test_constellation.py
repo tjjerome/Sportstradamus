@@ -17,15 +17,23 @@ import pandas as pd
 import pytest
 
 from sportstradamus.dashboard.components.constellation import (
+    _DECORATION,
     _DEEP_ALPHA,
     _EDGE_BASE_ALPHA,
+    _FILLER_SIZE,
     _INACTIVE_ALPHA,
     _LABEL_FONT_SIZE_MOBILE,
+    _SHAPE_SCALE,
+    _SHAPE_SCALE_MOBILE,
+    _SILHOUETTE_ALPHA,
     _SIZE_MAX,
+    _SIZE_MIN,
     _SIZE_MIN_MOBILE,
     _WIDER_SCALE,
+    _scale_path,
     constellation_figure,
 )
+from sportstradamus.dashboard.components.constellation_shapes import shape_catalog
 from sportstradamus.dashboard.theme import GOLD, GRAY, team_colors
 
 _TEAMS = ("NYK", "SAS")  # sorted -> NYK anchors left (-x), SAS right (+x); real NBA codes
@@ -73,11 +81,17 @@ def _trace(fig, name: str):
 
 
 def _node_traces(fig) -> list:
-    return [t for t in fig.data if t.mode and "markers" in t.mode]
+    # The Phase D decoration layer draws markers and lines too, but carries no
+    # customdata, so every helper below that zips against it has to skip it.
+    return [t for t in fig.data if t.mode and "markers" in t.mode and t.name != _DECORATION]
 
 
 def _edge_traces(fig) -> list:
-    return [t for t in fig.data if t.mode == "lines"]
+    return [t for t in fig.data if t.mode == "lines" and t.name != _DECORATION]
+
+
+def _decoration_traces(fig) -> list:
+    return [t for t in fig.data if t.name == _DECORATION]
 
 
 def _shown_keys(fig) -> set:
@@ -469,3 +483,119 @@ def test_mobile_figure_raises_size_floor_and_flags_slip_membership():
     assert all(cd[8] == 1 for cd in active.customdata)
     candidate = _trace(fig, "candidate")
     assert all(cd[8] == 0 for cd in candidate.customdata)
+
+
+# --- Phase D: the constellation-shape layer -------------------------------------
+
+_HOURGLASS = shape_catalog()["templates"]["the-hourglass"]
+
+
+def _shaped(*, wider=None, mobile=False):
+    """A four-leg two-team game rendered onto a real template."""
+    legs = _slip("A|PTS|Over")
+    pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Over", 0.3), ("C|AST|Over", 0.2), ("D|PTS|Over", 0.1))
+    corr = _corr(("A|PTS|Over", "B|REB|Over", 0.5))
+    return constellation_figure(
+        legs, corr, pool, shape=_HOURGLASS, wider_groups=wider, mobile=mobile
+    )
+
+
+def test_without_a_template_the_figure_is_exactly_the_spring_map():
+    """The shapeless path is today's figure — a game the assigner skips loses nothing."""
+    legs = _slip("A|PTS|Over")
+    pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Over", 0.3))
+    corr = _corr(("A|PTS|Over", "B|REB|Over", 0.5))
+    fig = constellation_figure(legs, corr, pool)
+    assert _decoration_traces(fig) == []
+    assert fig.layout.shapes == ()
+
+
+def test_the_silhouette_is_drawn_faintly_beneath_everything():
+    shapes = _shaped().layout.shapes
+    assert len(shapes) == 1
+    assert shapes[0].type == "path"
+    assert shapes[0].layer == "below"
+    assert shapes[0].line.width == 0
+    assert f",{_SILHOUETTE_ALPHA})" in shapes[0].fillcolor
+
+
+def test_the_decoration_layer_is_inert_to_the_pointer():
+    """No customdata is what main.js gates click and hover on, so this layer needs
+    no guard of its own — but it must stay customdata-free for that to hold."""
+    for trace in _decoration_traces(_shaped()):
+        assert trace.hoverinfo == "skip"
+        assert trace.customdata is None
+        assert trace.showlegend is False
+
+
+def test_no_engraved_stroke_is_ever_gold():
+    """Gold means correlation and nothing else (DESIGN §4a)."""
+    figure = _shaped()
+    assert figure.layout.shapes[0].fillcolor.lower().find(GOLD.lower()) == -1
+    for trace in _decoration_traces(figure):
+        rendered = f"{trace.line}{trace.marker}".lower()
+        assert GOLD.lower() not in rendered
+        assert "gold" not in rendered
+
+
+def test_the_template_does_not_change_how_many_gold_edges_are_drawn():
+    legs = _slip("A|PTS|Over")
+    pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Over", 0.3))
+    corr = _corr(("A|PTS|Over", "B|REB|Over", 0.5))
+    plain = constellation_figure(legs, corr, pool)
+    shaped = constellation_figure(legs, corr, pool, shape=_HOURGLASS)
+    assert len(_edge_traces(shaped)) == len(_edge_traces(plain))
+    assert _shown_keys(shaped) == _shown_keys(plain)
+
+
+def test_stars_land_on_template_vertices():
+    frame = {
+        (round(v["x"] * _SHAPE_SCALE[0], 5), round(v["y"] * _SHAPE_SCALE[1], 5))
+        for v in _HOURGLASS["vertices"]
+    }
+    assert set(_node_pos(_shaped()).values()) <= frame
+
+
+def test_unfilled_vertices_get_filler_stars_too_small_to_read_as_legs():
+    fillers = [t for t in _decoration_traces(_shaped()) if t.mode == "markers"]
+    assert len(fillers) == 1
+    assert fillers[0].marker.size == _FILLER_SIZE < _SIZE_MIN
+    assert len(fillers[0].x) == len(_HOURGLASS["vertices"]) - len(_node_pos(_shaped()))
+
+
+def test_the_engraving_shrinks_with_its_stars_under_the_look_wider_lens():
+    """Decoration that ignored focus_scale would detach from the map it belongs to."""
+    outline = next(t for t in _decoration_traces(_shaped(wider=[])) if t.mode == "lines")
+    plain = next(t for t in _decoration_traces(_shaped()) if t.mode == "lines")
+    span = max(x for x in outline.x if x is not None)
+    plain_span = max(x for x in plain.x if x is not None)
+    assert span == pytest.approx(plain_span * _WIDER_SCALE)
+
+
+def test_a_silhouette_rescales_x_and_y_independently():
+    """The frame is far wider than it is tall, so one uniform scale would leave every
+    round shape a flat lens — x and y take different corrections."""
+    assert _scale_path("M -1 0.5 L 1 -0.5 Z", 0.8, 1.32) == "M -0.8 0.66 L 0.8 -0.66 Z"
+    # A cubic's control points are coordinates too, and alternate the same way.
+    assert _scale_path("M 0 0 C 1 1 -1 -1 0.5 0.5", 2.0, 4.0) == "M 0 0 C 2 4 -2 -4 1 2"
+
+
+def test_the_phone_frame_stretches_the_other_way():
+    """Desktop is wide and short, the phone near-square — the correction has to invert
+    or a diamond that reads round on a laptop renders as a tall kite in a hand."""
+    assert _SHAPE_SCALE[0] < _SHAPE_SCALE[1] and _SHAPE_SCALE_MOBILE[0] > _SHAPE_SCALE_MOBILE[1]
+    frame = {
+        (round(v["x"] * _SHAPE_SCALE_MOBILE[0], 5), round(v["y"] * _SHAPE_SCALE_MOBILE[1], 5))
+        for v in _HOURGLASS["vertices"]
+    }
+    assert set(_node_pos(_shaped(mobile=True)).values()) <= frame
+
+
+def test_the_shape_frame_correction_keeps_stars_and_engraving_together():
+    """Whatever the correction is, both layers must take it — the whole point is that
+    the stars sit on the silhouette."""
+    figure = _shaped()
+    outline = next(t for t in _decoration_traces(figure) if t.mode == "lines")
+    star_xs = [x for x, _ in _node_pos(figure).values()]
+    outline_xs = [round(float(x), 5) for x in outline.x if x is not None]
+    assert min(outline_xs) <= min(star_xs) and max(star_xs) <= max(outline_xs)

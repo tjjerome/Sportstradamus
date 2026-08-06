@@ -47,11 +47,24 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
+from typing import NamedTuple
 
 import networkx as nx
 import pandas as pd
 import plotly.graph_objects as go
 
+from sportstradamus.dashboard.components.constellation_layout import (
+    assign_stars,
+    cluster_players,
+    collapse_edges,
+    explode_clusters,
+    topology_class,
+)
+from sportstradamus.dashboard.components.constellation_shapes import (
+    assign_templates,
+    shape_catalog,
+    tuning,
+)
 from sportstradamus.dashboard.legs import corr_key
 from sportstradamus.dashboard.theme import GOLD, GRAY, team_colors, team_name
 from sportstradamus.leg_schema import is_model_liked, leg_field
@@ -119,6 +132,29 @@ _ACTIVE_LABEL_COLOR = "#C7CEDA"  # in-slip captions read brighter than gray cand
 _TAG_LEFT_COLOR = "#e2909b"  # team[0] tag — warm, left side
 _TAG_RIGHT_COLOR = "#8ea6c9"  # team[1] tag — cool, right side
 
+# The Phase D decoration layer: an engraving under the stars, never gold. Gold is
+# the correlation-edge color and nothing else, so no engraved stroke can be
+# misread as a ρ tie.
+_SILHOUETTE_ALPHA = 0.13  # faint intent signal, below the ambient-decoration ceiling
+_SILHOUETTE_FILL = f"rgba(95,107,128,{_SILHOUETTE_ALPHA})"  # _DEEP_COLOR #5f6b80
+_OUTLINE_COLOR = "rgba(230,233,239,0.22)"  # theme TEXT #E6E9EF
+_OUTLINE_GLOW_COLOR = "rgba(230,233,239,0.08)"  # the same stroke, wider and fainter
+_FILLER_COLOR = "rgba(138,145,160,0.30)"  # theme GRAY #8A91A0
+_OUTLINE_WIDTH, _OUTLINE_GLOW_WIDTH = 1, 4
+_FILLER_SIZE = 6  # under _SIZE_MIN, so a filler can never be mistaken for a leg
+_DECORATION = "decoration"
+
+# Templates are authored in a true square; this frame is not one, and which way it
+# leans flips with the viewport. Desktop puts 3.2 x-units across ~980px against 2.8 of
+# y over _FIG_HEIGHT — a circle renders ~2.4x wide. The phone is near-square at the
+# same height and inverts it to ~0.87x, so one constant pair would fix the dartboard
+# and turn the diamond into a kite. Each viewport therefore carries its own (x, y),
+# sized to fill the frame and land a circle ~1.2x wide: correcting the last of it
+# would squeeze the desktop map into a portrait strip and throw away the left-right
+# spread the two teams are read by, and ~1.2x is inside "loose".
+_SHAPE_SCALE = (0.69, 1.38)
+_SHAPE_SCALE_MOBILE = (1.30, 0.98)
+
 
 def _last_name(player: str) -> str:
     parts = player.split()
@@ -184,6 +220,7 @@ def constellation_figure(
     deep_pool: pd.DataFrame | None = None,
     wider_groups: list[tuple[str, list[dict]]] | None = None,
     mobile: bool = False,
+    shape: dict | None = None,
 ) -> go.Figure:
     """Static star map of the game's model-liked legs, the slip's legs lit up.
 
@@ -197,6 +234,11 @@ def constellation_figure(
     — they are optional overlays, not a change to the base map. See the module
     docstring for what each draws. ``mobile`` lifts star sizes and label fonts to
     touch floors (positions untouched — DESIGN §4a grammar holds on both paths).
+
+    ``shape`` is the constellation template this game was dealt for the night
+    (``constellation_shapes.assign_templates``). ``None`` — a game too thin to
+    carry one, or a slate with nothing left to deal — reproduces the spring
+    layout byte-for-byte, so the shapeless path is exactly today's figure.
     """
     fig = _blank_figure()
     info = _universe(pool, slip_legs)
@@ -213,14 +255,21 @@ def constellation_figure(
     team_color = {team: team_colors(league, team)[0] for team in teams}
     node_team = {k: info[k]["team"] for k in keys}
     edges = _edges(keys, rho)
-    pos = _layout(keys, node_team, teams, [(a, b, abs(r)) for a, b, r in edges])
-    floor = _SIZE_MIN_MOBILE if mobile else _SIZE_MIN
-    label_size = _LABEL_FONT_SIZE_MOBILE if mobile else _LABEL_FONT_SIZE
+    floor, label_size, shape_scale = (
+        (_SIZE_MIN_MOBILE, _LABEL_FONT_SIZE_MOBILE, _SHAPE_SCALE_MOBILE)
+        if mobile
+        else (_SIZE_MIN, _LABEL_FONT_SIZE, _SHAPE_SCALE)
+    )
+    pos, fillers = _positions(
+        keys, node_team, teams, [(a, b, abs(r)) for a, b, r in edges], shape, shape_scale
+    )
     sizes = _star_sizes(keys, info, floor=floor)
 
     focus_scale = _WIDER_SCALE if wider_groups is not None else 1.0
     pos = {k: (x * focus_scale, y * focus_scale) for k, (x, y) in pos.items()}
 
+    if shape is not None:
+        _add_decoration(fig, shape, fillers, shape_scale, focus_scale)
     if deep_pool is not None:
         _add_deep_trace(fig, deep_pool, slip_legs, radius=_DEEP_RADIUS * focus_scale, floor=floor)
     for a, b, r in edges:
@@ -501,6 +550,101 @@ def _edges(keys: list[str], rho: dict[frozenset, float]) -> list[tuple[str, str,
     return sorted(out)
 
 
+def _positions(
+    nodes: list[str],
+    node_team: dict[str, str | None],
+    teams: list[str],
+    edges: list[tuple[str, str, float]],
+    template: dict | None,
+    scale: tuple[float, float],
+) -> tuple[dict[str, tuple[float, float]], list[int]]:
+    """Star positions, plus the template vertices no star filled.
+
+    Without a template this is the spring layout and an empty filler list — the
+    original behavior, untouched. With one, a player's tightly-tied legs first
+    collapse into a supernode so a three-leg knot claims a single vertex rather
+    than eating three, then the supernodes take vertices and explode back into
+    their legs. Template coordinates never go through ``_rescale``: the stars
+    have to land on the silhouette, which is authored in the same [-1, 1] box,
+    and the same template has to stay visibly the same shape from one game to the
+    next. The only thing applied to them is ``scale``, the viewport's aspect
+    correction, which the decoration layer takes too.
+    """
+    if template is None:
+        return _layout(nodes, node_team, teams, edges), []
+    clusters, super_team, collapsed = _supernodes(nodes, node_team, edges)
+    placed, fillers = assign_stars(sorted(clusters), super_team, teams, collapsed, template)
+    sx, sy = scale
+    exploded = explode_clusters(placed, clusters)
+    return {key: (x * sx, y * sy) for key, (x, y) in exploded.items()}, fillers
+
+
+def _supernodes(
+    nodes: list[str],
+    node_team: dict[str, str | None],
+    edges: list[tuple[str, str, float]],
+) -> tuple[dict[str, list[str]], dict[str, str | None], list[tuple[str, str, float]]]:
+    """Collapse a game's legs into supernodes: ``(clusters, team per cluster, edges)``.
+
+    Both the slate classifier and the per-game layout start here, so they always
+    agree about how many nodes a game really has.
+    """
+    clusters = cluster_players(nodes, edges, tuning()["cluster_rho"])
+    return (
+        clusters,
+        {key: node_team[members[0]] for key, members in clusters.items()},
+        collapse_edges(edges, clusters),
+    )
+
+
+class GameShape(NamedTuple):
+    """What one game was dealt for the night, and the reading behind it."""
+
+    template: dict | None
+    label: str | None
+    topology: str
+    n_supernodes: int
+    readings: dict
+
+
+def slate_shapes(
+    offers: pd.DataFrame, corr: pd.DataFrame | None, league: str, date: str
+) -> dict[str, GameShape]:
+    """Deal every game on a league's night its own constellation.
+
+    Dealt over the whole league slate rather than the visible platform's slice, so
+    a game keeps its shape when the user switches Underdog ↔ Sleeper. Never cached:
+    the tuning block is the owner's live surface, and an edit has to reclassify and
+    re-deal on the very next rerun.
+    """
+    cfg = tuning()
+    catalog = shape_catalog()["templates"]
+    graphs = {}
+    for game, group in offers.groupby("Game"):
+        info = _universe(group, [])
+        keys = sorted(info)
+        edges = [(a, b, abs(r)) for a, b, r in _edges(keys, _rho_map(corr, str(game)))]
+        clusters, super_team, collapsed = _supernodes(
+            keys, {key: info[key]["team"] for key in keys}, edges
+        )
+        topo, readings = topology_class(sorted(clusters), super_team, collapsed, cfg)
+        graphs[str(game)] = (topo, readings, len(clusters))
+
+    dealt = assign_templates(
+        league, date, [(game, topo, n) for game, (topo, _, n) in graphs.items()], cfg
+    )
+    return {
+        game: GameShape(
+            template=catalog[dealt[game]] if dealt[game] else None,
+            label=catalog[dealt[game]]["label"] if dealt[game] else None,
+            topology=topo,
+            n_supernodes=n,
+            readings=readings,
+        )
+        for game, (topo, readings, n) in graphs.items()
+    }
+
+
 def _layout(
     nodes: list[str],
     node_team: dict[str, str | None],
@@ -583,6 +727,85 @@ def _rescale(pos: dict[str, tuple[float, float]]) -> dict[str, tuple[float, floa
         return dict.fromkeys(pos, (0.0, 0.0))
     factor = _LAYOUT_TARGET / span
     return {k: (x * factor, y * factor) for k, (x, y) in centered.items()}
+
+
+def _scale_path(path: str, sx: float, sy: float) -> str:
+    """Rescale a silhouette path's coordinates onto the frame.
+
+    Every command the catalog allows (S5) takes strictly alternating x, y pairs,
+    which is why ``H``/``V`` are banned there — they would break the alternation
+    this walk depends on.
+    """
+    scaled, axis = [], 0
+    for token in path.split():
+        if token.isalpha():
+            scaled.append(token)
+            axis = 0
+            continue
+        scaled.append(f"{float(token) * (sx if axis % 2 == 0 else sy):g}")
+        axis += 1
+    return " ".join(scaled)
+
+
+def _add_decoration(
+    fig: go.Figure,
+    template: dict,
+    fillers: list[int],
+    scale: tuple[float, float],
+    focus_scale: float,
+) -> None:
+    """Draw the game's constellation beneath its stars: silhouette, engraved
+    outline, and faint stars on the vertices no leg filled.
+
+    Three deliberate constraints. The palette is the cool engraving family and
+    never gold, so nothing here can be misread as a correlation edge. Every trace
+    is named ``decoration`` with ``hoverinfo="skip"`` and carries no
+    ``customdata``, which is what the component's JS gates click and hover on — so
+    the layer is inert to the pointer without needing a guard. And it takes both
+    the viewport aspect correction and ``focus_scale``, exactly as the stars do,
+    or the shape would detach from the map it belongs to under the "look wider"
+    lens.
+    """
+    sx, sy = scale[0] * focus_scale, scale[1] * focus_scale
+    fig.add_shape(
+        type="path",
+        path=_scale_path(template["silhouette"], sx, sy),
+        fillcolor=_SILHOUETTE_FILL,
+        line={"width": 0},
+        layer="below",
+    )
+    xy = {v["id"]: (v["x"] * sx, v["y"] * sy) for v in template["vertices"]}
+    xs, ys = [], []
+    for a, b in template["outline"]:
+        xs += [xy[a][0], xy[b][0], None]
+        ys += [xy[a][1], xy[b][1], None]
+    for color, width in (
+        (_OUTLINE_GLOW_COLOR, _OUTLINE_GLOW_WIDTH),
+        (_OUTLINE_COLOR, _OUTLINE_WIDTH),
+    ):
+        fig.add_trace(
+            go.Scatter(
+                x=xs,
+                y=ys,
+                mode="lines",
+                line={"color": color, "width": width},
+                name=_DECORATION,
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
+    if fillers:
+        fig.add_trace(
+            go.Scatter(
+                x=[xy[vid][0] for vid in fillers],
+                y=[xy[vid][1] for vid in fillers],
+                mode="markers",
+                marker={"size": _FILLER_SIZE, "color": _FILLER_COLOR},
+                name=_DECORATION,
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
 
 
 def _add_edge(fig: go.Figure, a: str, b: str, p0, p1, rho: float, *, active: set[str]) -> None:
