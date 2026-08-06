@@ -197,7 +197,7 @@ def _vertex_pools(vertices: dict[int, dict], teams: list[str]) -> dict[str | Non
     """Vertex ids each side may draw from, most prominent first.
 
     Centre vertices sit in every pool rather than being reserved: a template's
-    spine is often its most important star (a dartboard's bullseye is prominence
+    spine is often its most important star (a medal's disc centre is prominence
     1), so withholding it from both teams would leave the shape headless. Sides
     draw from a shared used-set, so a contested centre goes to whoever picks
     first — and the caller lets the scarcer team pick first.

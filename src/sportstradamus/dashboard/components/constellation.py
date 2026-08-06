@@ -147,7 +147,7 @@ _DECORATION = "decoration"
 # Templates are authored in a true square; this frame is not one, and which way it
 # leans flips with the viewport. Desktop puts 3.2 x-units across ~980px against 2.8 of
 # y over _FIG_HEIGHT — a circle renders ~2.4x wide. The phone is near-square at the
-# same height and inverts it to ~0.87x, so one constant pair would fix the dartboard
+# same height and inverts it to ~0.87x, so one constant pair would round the medal
 # and turn the diamond into a kite. Each viewport therefore carries its own (x, y),
 # sized to fill the frame and land a circle ~1.2x wide: correcting the last of it
 # would squeeze the desktop map into a portrait strip and throw away the left-right
