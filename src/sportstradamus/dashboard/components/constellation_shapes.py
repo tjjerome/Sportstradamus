@@ -17,8 +17,11 @@ Authoring rules. JSON carries no comments, so this docstring is the schema
 reference; ``tests/golden/test_constellation_shapes.py`` enforces the
 mechanical half.
 
-* **S1** Coordinates normalized to [-1, 1]², shape centered, use the box — no
-  postage stamps.
+* **S1** Coordinates normalized to [-1, 1]², shape centered, and *use the box*:
+  the renderer squeezes x hard to undo the frame's own stretch, so anything
+  authored inside ±0.5 collapses into a column. Reach ±0.8 or wider. Keep
+  star-bearing vertices at |y| ≤ 0.90 — a prominence-1 star at the mobile floor
+  is ~0.3 tall and a vertex any higher clips the ceiling.
 * **S2** 5–13 vertices. ``prominence`` is the importance order (1 = the star the
   shape can't live without), and mirror pairs tie, so it ranks rather than
   permutes. Player-outline shapes simplify to ≤ 13 vertices; the silhouette
@@ -36,6 +39,10 @@ mechanical half.
   else (an ``A`` arc costs you the curve with no error), and ``H``/``V`` would
   break the x/y alternation the renderer rescales on. Draw curves as cubics —
   a circular quadrant of radius ``r`` wants control points at ``0.5523 r``.
+  Draw the object thicker than life: at 13% alpha a hairline shaft or a shoe
+  profile disappears, so long objects (bat, arrow, oar) carry a shaft two or
+  three times its real width, and objects that are all edge and no mass don't
+  belong in the bank at all.
 * **S6** ``min_nodes`` = fewest real supernodes that still read as the object
   (2–5).
 * **S7** ``label`` is the nameplate text ("The Bolt"). ``topology.primary`` is

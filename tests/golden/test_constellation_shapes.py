@@ -7,16 +7,17 @@ that every authored template obeys the S1–S8 authoring rules (the loader's
 module docstring is their reference), and loader-contract checks through the
 public accessors, including the hot-reload behavior the tuning loop depends on.
 
-Bank floor pins (≥ 20 eligible per league, ≥ 6 per (league, class), all four
-non-generic classes covered) land with the final D1b batch — asserting them
-against the six exemplars would hold the suite red for the whole middle of the
-phase.
+The bank floor pins at the bottom (≥ 20 eligible per league, ≥ 6 per (league,
+class), all four non-generic classes covered) are what keep the assigner from
+running out of deck on a real slate: a league that falls under them starts
+handing games ``None`` and the map silently reverts to the spring layout.
 """
 
 from __future__ import annotations
 
 import json
 import os
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -318,3 +319,38 @@ def test_a_game_below_every_templates_min_nodes_keeps_the_spring_layout(tmp_path
     _stub_deck(tmp_path, monkeypatch, min_nodes=9)
     dealt = cs.assign_templates("NBA", "2026-08-06", _slate(1, n_supernodes=5), _SANE_TUNING)
     assert dealt["G00"] is None
+
+
+def test_every_league_has_a_deck_deep_enough_for_a_real_slate():
+    """The worst observed slate is 17 games (MLB doubleheaders) and the assigner never
+    repeats a template on a night, so a league under 20 starts dealing None."""
+    for league in _LEAGUES:
+        assert len(cs.eligible_templates(league)) >= 20, league
+
+
+def test_every_league_can_answer_every_topology_class():
+    """Counting secondaries, because a secondary match still beats an unrelated
+    template — but a class with nothing behind it means those games get shapes that
+    say nothing about how they actually correlate."""
+    templates = cs.shape_catalog()["templates"]
+    for league in _LEAGUES:
+        answers = Counter()
+        for slug in cs.eligible_templates(league):
+            topo = templates[slug]["topology"]
+            for cls in (topo["primary"], *topo["secondary"]):
+                answers[cls] += 1
+        assert set(answers) >= set(_CLASSES), (
+            f"{league} has no template for {set(_CLASSES) - set(answers)}"
+        )
+        for cls in _CLASSES:
+            assert answers[cls] >= 6, f"{league}/{cls} has only {answers[cls]}"
+
+
+def test_every_class_is_some_templates_primary_in_every_league():
+    """A class carried only as a secondary is never the best answer to anything."""
+    templates = cs.shape_catalog()["templates"]
+    for league in _LEAGUES:
+        primaries = {
+            templates[slug]["topology"]["primary"] for slug in cs.eligible_templates(league)
+        }
+        assert primaries == set(_CLASSES), f"{league}: {primaries}"
