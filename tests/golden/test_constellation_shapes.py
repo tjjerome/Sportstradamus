@@ -218,3 +218,103 @@ def test_a_malformed_catalog_fails_loud_naming_the_field(tmp_path, monkeypatch, 
     monkeypatch.setattr(cs, "CATALOG_PATH", path)
     with pytest.raises(ValueError, match=needle):
         cs.shape_catalog()
+
+
+_ROTATION = ("hub", "chain", "twin", "mesh")
+
+
+def _stub_deck(tmp_path, monkeypatch, per_class=8, min_nodes=2):
+    """Point the loader at a synthetic bank wide enough to deal a whole slate.
+
+    Dealing pins run against this rather than the shipped catalog so they stay
+    honest about the algorithm and don't move every time D1b adds templates.
+    Each class carries the previous class as its secondary, so a homogeneous
+    slate always has a partial-fit alternative for the variety knob to reach for.
+    """
+    count = max(3, min_nodes)  # a template can't ask for more nodes than it has vertices
+    vertices = [
+        {
+            "id": i,
+            "x": round(-0.9 + 1.8 * i / (count - 1), 3),
+            "y": 0.9 if i % 2 else -0.5,
+            "side": "L" if i < count / 2 else "R",
+            "prominence": i + 1,
+        }
+        for i in range(count)
+    ]
+    templates = {}
+    for index, primary in enumerate(_ROTATION):
+        for n in range(per_class):
+            templates[f"{primary}-{n}"] = {
+                "label": f"The {primary.title()} {n}",
+                "leagues": "all",
+                "topology": {"primary": primary, "secondary": [_ROTATION[index - 1]]},
+                "min_nodes": min_nodes,
+                "vertices": vertices,
+                "outline": [[i, i + 1] for i in range(count - 1)],
+                "silhouette": "M -0.9 -0.5 L 0.9 -0.5 L 0 0.9 Z",
+            }
+    path = tmp_path / "constellation_shapes.json"
+    _write_catalog(path, _SANE_TUNING, templates)
+    monkeypatch.setattr(cs, "CATALOG_PATH", path)
+
+
+def _slate(count, topology="mesh", n_supernodes=6):
+    return [(f"G{i:02d}", topology, n_supernodes) for i in range(count)]
+
+
+def test_a_full_slate_is_dealt_distinct_shapes(tmp_path, monkeypatch):
+    """No two games on a league's night may wear the same constellation."""
+    _stub_deck(tmp_path, monkeypatch)
+    dealt = cs.assign_templates("NBA", "2026-08-06", _slate(16), _SANE_TUNING)
+    assert len(dealt) == 16
+    slugs = list(dealt.values())
+    assert None not in slugs
+    assert len(set(slugs)) == 16
+
+
+def test_dealing_is_deterministic_and_reshuffles_on_a_new_date(tmp_path, monkeypatch):
+    _stub_deck(tmp_path, monkeypatch)
+    games = _slate(10)
+    first = cs.assign_templates("NBA", "2026-08-06", games, _SANE_TUNING)
+    assert first == cs.assign_templates("NBA", "2026-08-06", list(reversed(games)), _SANE_TUNING)
+    assert first != cs.assign_templates("NBA", "2026-08-07", games, _SANE_TUNING)
+
+
+def test_a_game_is_dealt_a_template_matching_its_topology(tmp_path, monkeypatch):
+    _stub_deck(tmp_path, monkeypatch)
+    for topology in _ROTATION:
+        dealt = cs.assign_templates("NBA", "2026-08-06", _slate(1, topology), _SANE_TUNING)
+        slug = dealt["G00"]
+        assert cs.shape_catalog()["templates"][slug]["topology"]["primary"] == topology
+
+
+def test_variety_lambda_spreads_a_slate_that_is_all_one_class(tmp_path, monkeypatch):
+    """The owner's "everything is coming up mesh" escape hatch, proven live."""
+    _stub_deck(tmp_path, monkeypatch)
+    games = _slate(8)
+    templates = cs.shape_catalog()["templates"]
+
+    def classes_dealt(variety_lambda):
+        dealt = cs.assign_templates(
+            "NBA", "2026-08-06", games, {**_SANE_TUNING, "variety_lambda": variety_lambda}
+        )
+        return {templates[slug]["topology"]["primary"] for slug in dealt.values()}
+
+    assert classes_dealt(0) == {"mesh"}
+    assert len(classes_dealt(2)) > 1
+
+
+def test_a_game_with_too_few_supernodes_keeps_the_spring_layout(tmp_path, monkeypatch):
+    _stub_deck(tmp_path, monkeypatch)
+    games = [("thin", "mesh", _SANE_TUNING["min_shape_nodes"] - 1), ("full", "mesh", 6)]
+    dealt = cs.assign_templates("NBA", "2026-08-06", games, _SANE_TUNING)
+    assert dealt["thin"] is None
+    assert dealt["full"] is not None
+
+
+def test_a_game_below_every_templates_min_nodes_keeps_the_spring_layout(tmp_path, monkeypatch):
+    """Templates are never stretched to fit — a shape that can't be filled isn't dealt."""
+    _stub_deck(tmp_path, monkeypatch, min_nodes=9)
+    dealt = cs.assign_templates("NBA", "2026-08-06", _slate(1, n_supernodes=5), _SANE_TUNING)
+    assert dealt["G00"] is None

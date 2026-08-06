@@ -43,9 +43,12 @@ mechanical half.
 from __future__ import annotations
 
 import functools
+import hashlib
 import importlib.resources as pkg_resources
 import json
 import math
+import random
+from collections import Counter
 from pathlib import Path
 
 from sportstradamus import data
@@ -152,3 +155,64 @@ def eligible_templates(league: str) -> list[str]:
         for slug, tpl in shape_catalog()["templates"].items()
         if tpl["leagues"] == "all" or league in tpl["leagues"]
     ]
+
+
+def _score(tpl: dict, topology: str, dealt: Counter, cfg: dict) -> float:
+    """Class fit minus variety pressure.
+
+    A ``generic`` game has no class to match, so every template fits it equally
+    and the variety term alone decides. ``variety_lambda`` is the owner's
+    "everything is coming up mesh" knob: 0 is pure topology fidelity, ~0.5 nudges
+    a homogeneous slate toward spread, ≥ 2 forces it.
+    """
+    topo = tpl["topology"]
+    if topology == "generic":
+        fit = 1
+    elif topology == topo["primary"]:
+        fit = 2
+    elif topology in topo["secondary"]:
+        fit = 1
+    else:
+        fit = 0
+    return fit - cfg["variety_lambda"] * dealt[topo["primary"]]
+
+
+def assign_templates(
+    league: str,
+    date: str,
+    games: list[tuple[str, str, int]],
+    cfg: dict,
+) -> dict[str, str | None]:
+    """Deal each ``(game_key, topology_class, n_supernodes)`` a distinct template.
+
+    Returns ``game_key -> slug``, or ``None`` for a game too thin to carry a shape
+    (fewer supernodes than ``cfg['min_shape_nodes']``, or below the ``min_nodes`` of
+    every template still on the table) — those keep the spring layout.
+
+    Deterministic: an md5 of league, date and catalog version seeds the shuffle,
+    and games are dealt in sorted-key order, so every viewer sees the same slate
+    dealt the same way and a new date reshuffles the deck. Ties fall to shuffle
+    position. ``md5`` rather than ``hash()`` on purpose — ``PYTHONHASHSEED`` would
+    make the dealing differ between runs of the same day.
+    """
+    catalog = shape_catalog()
+    templates = catalog["templates"]
+    deck = eligible_templates(league)
+    seed = f"{league}|{date}|{catalog['version']}".encode()
+    random.Random(int(hashlib.md5(seed).hexdigest(), 16)).shuffle(deck)
+
+    dealt: Counter = Counter()
+    assignment: dict[str, str | None] = {}
+    for game_key, topology, n_supernodes in sorted(games):
+        free = [
+            slug
+            for slug in deck
+            if slug not in assignment.values() and templates[slug]["min_nodes"] <= n_supernodes
+        ]
+        if n_supernodes < cfg["min_shape_nodes"] or not free:
+            assignment[game_key] = None
+            continue
+        best = max(free, key=lambda slug: _score(templates[slug], topology, dealt, cfg))
+        assignment[game_key] = best
+        dealt[templates[best]["topology"]["primary"]] += 1
+    return assignment
