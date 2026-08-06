@@ -599,3 +599,26 @@ def test_the_shape_frame_correction_keeps_stars_and_engraving_together():
     star_xs = [x for x, _ in _node_pos(figure).values()]
     outline_xs = [round(float(x), 5) for x in outline.x if x is not None]
     assert min(outline_xs) <= min(star_xs) and max(star_xs) <= max(outline_xs)
+
+
+def _nameplates(fig) -> list:
+    return [a for a in fig.layout.annotations if " ".join(_HOURGLASS["label"].upper()) == a.text]
+
+
+def test_the_shape_is_named_along_the_bottom_in_cinzel():
+    """A star chart names its constellations; the nameplate is that caption, in the
+    same Cinzel voice as the team tags but quieter so it can't read as a third team."""
+    plate = _nameplates(_shaped())
+    assert len(plate) == 1
+    assert plate[0].font.family == "Cinzel, serif"
+    assert (plate[0].xref, plate[0].yref) == ("paper", "paper")
+    assert (plate[0].x, plate[0].yanchor) == (0.5, "bottom")
+
+
+def test_a_spring_fallback_game_is_not_named():
+    """No template means no constellation, and an unnamed map must not claim one."""
+    legs = _slip("A|PTS|Over")
+    pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Over", 0.3))
+    fig = constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Over", 0.5)), pool)
+    assert not [a for a in fig.layout.annotations if a.yanchor == "bottom"]
+    assert len(fig.layout.annotations) == 2  # the two team tags, unchanged

@@ -143,6 +143,7 @@ _FILLER_COLOR = "rgba(138,145,160,0.30)"  # theme GRAY #8A91A0
 _OUTLINE_WIDTH, _OUTLINE_GLOW_WIDTH = 1, 4
 _FILLER_SIZE = 6  # under _SIZE_MIN, so a filler can never be mistaken for a leg
 _DECORATION = "decoration"
+_NAMEPLATE_COLOR = "rgba(138,145,160,0.55)"  # theme GRAY #8A91A0, quieter than a team tag
 
 # Templates are authored in a true square; this frame is not one, and which way it
 # leans flips with the viewport. Desktop puts 3.2 x-units across ~980px against 2.8 of
@@ -270,6 +271,7 @@ def constellation_figure(
 
     if shape is not None:
         _add_decoration(fig, shape, fillers, shape_scale, focus_scale)
+        _add_nameplate(fig, shape["label"])
     if deep_pool is not None:
         _add_deep_trace(fig, deep_pool, slip_legs, radius=_DEEP_RADIUS * focus_scale, floor=floor)
     for a, b, r in edges:
@@ -488,6 +490,27 @@ def _add_team_tags(fig: go.Figure, league: str, teams: list[str]) -> None:
             showarrow=False,
             font={"family": "Cinzel, serif", "size": 11, "color": color},
         )
+
+
+def _add_nameplate(fig: go.Figure, label: str) -> None:
+    """Name the constellation along the bottom of the map, the way a star chart does.
+
+    Same Cinzel voice as the team tags but quieter and lettespaced, so it reads as
+    a caption on the sky rather than a third team. A game the assigner skipped has
+    no shape and gets no nameplate — the spring map is not a constellation and
+    must not claim to be one.
+    """
+    fig.add_annotation(
+        text=" ".join(label.upper()),
+        xref="paper",
+        yref="paper",
+        x=0.5,
+        y=0.0,
+        xanchor="center",
+        yanchor="bottom",
+        showarrow=False,
+        font={"family": "Cinzel, serif", "size": 10, "color": _NAMEPLATE_COLOR},
+    )
 
 
 def _pool_field(

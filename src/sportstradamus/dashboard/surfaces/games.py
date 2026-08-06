@@ -247,6 +247,39 @@ def _render_lens_toggles() -> None:
         st.session_state[state_key] = state_key in (selected or [])
 
 
+def _render_tuning_cockpit(shapes: dict[str, GameShape], focus_game: str) -> None:
+    """Every reading behind tonight's dealing, so thresholds get set against numbers.
+
+    The classifier's six metrics are what ``constellation_shapes.json``'s ``tuning``
+    block is compared to, and the catalog reloads on file mtime — so the loop is
+    read a column here, edit the JSON, rerun the browser. No dashboard restart, and
+    no caching on this path: a stale table would be worse than none.
+    """
+    with st.expander("Constellation tuning", expanded=False):
+        table = pd.DataFrame(
+            [
+                {
+                    "Game": ("▸ " if game == focus_game else "") + game,
+                    "Class": shape.topology,
+                    "Shape": shape.label or "— spring layout —",
+                    "Stars": shape.n_supernodes,
+                    "cross_share": shape.readings["cross_share"],
+                    "top_share": shape.readings["top_share"],
+                    "mean_degree": shape.readings["mean_degree"],
+                    "diameter_frac": shape.readings["diameter_frac"],
+                    "density": shape.readings["density"],
+                }
+                for game, shape in sorted(shapes.items())
+            ]
+        )
+        st.dataframe(table, hide_index=True, width="stretch")
+        st.caption(
+            "Thresholds live in `data/config/constellation_shapes.json` → `tuning`. "
+            "Edit and rerun — the catalog reloads on file change, no restart. "
+            "`variety_lambda` is the knob for a night that comes up all one class."
+        )
+
+
 meta = load_current_meta()
 page_hero("THE CONSTELLATION", "Games", format_ts(meta.get("generated_at", "no run on record")))
 
@@ -300,6 +333,8 @@ render_constellation_builder(
     focus_game=focus_game,
     shape=shapes[focus_game].template if focus_game in shapes else None,
 )
+if shapes:
+    _render_tuning_cockpit(shapes, focus_game)
 
 # Reconciler handoff: the Modifiers page defaults to the session rail, so the
 # current slip arrives loaded. Two legs is the reconciler's minimum.
