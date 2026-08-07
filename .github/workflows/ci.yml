@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, devel]
   pull_request:
 
 jobs:
@@ -11,16 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Poetry
+        run: pipx install poetry
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Install system build deps
-        # python-snappy compiles a C extension against libsnappy headers.
-        run: sudo apt-get update && sudo apt-get install -y libsnappy-dev
-
-      - name: Install Poetry
-        run: pipx install poetry
+          cache: poetry
 
       - name: Install dependencies
         run: poetry install --no-interaction --with dev
@@ -41,8 +38,10 @@ jobs:
       - name: Format check (ruff format)
         run: poetry run ruff format --check src/ tests/
 
-      - name: Golden tests
-        run: poetry run pytest tests/golden/ -v
+      - name: Tests (behavioral + golden)
+        # Default addopts exclude the integration and diagnostics markers and
+        # parallelize via pytest-xdist.
+        run: poetry run pytest
 
       - name: Integration smoke test
         # Fake mode (default): odds API, nba_api, scrapers, and Sheets are
