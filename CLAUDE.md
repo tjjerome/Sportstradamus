@@ -276,7 +276,7 @@ Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
   - Healthchecks.io `/start` / `/fail` / success pings,
   - structured `START` / `OK` / `FAIL` / `WAIT` / `PULL` log lines per job.
 * **Production crontab** (run as `sportstradamus@<host>`): the canonical
-  schedule lives in [README.md §Recommended Cron](README.md#recommended-cron).
+  schedule lives in [docs/OPERATIONS.md](docs/OPERATIONS.md).
   Key coupling: the number of confer slots must match `broad_slots_per_day`
   in `data/config/odds_api_budget.json`.
 
