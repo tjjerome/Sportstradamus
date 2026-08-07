@@ -19,6 +19,7 @@ from sportstradamus.helpers import (
     remove_accents,
     requests,
 )
+from sportstradamus.helpers.scraping import REQUEST_TIMEOUT_S
 from sportstradamus.spiderLogger import logger
 
 # Underdog Fantasy API endpoints
@@ -365,24 +366,24 @@ def get_sleeper():
             Returns ``{}`` on API failure.
     """
     offers = {}
-    res = requests.get(SLEEPER_AVAILABLE_URL)
+    res = requests.get(SLEEPER_AVAILABLE_URL, timeout=REQUEST_TIMEOUT_S)
     if res.status_code != HTTPStatus.OK:
         return offers
 
     res = res.json()
     leagues = {x["sport"] for x in res}
 
-    alt = requests.get(SLEEPER_ALT_URL)
+    alt = requests.get(SLEEPER_ALT_URL, timeout=REQUEST_TIMEOUT_S)
     if alt.status_code == HTTPStatus.OK:
         res.extend(alt.json())
 
-    game_res = requests.get(SLEEPER_GAMES_URL)
+    game_res = requests.get(SLEEPER_GAMES_URL, timeout=REQUEST_TIMEOUT_S)
     if game_res.status_code != HTTPStatus.OK:
         return offers
     games = _sleeper_games_map(game_res.json())
 
     for league in tqdm(leagues, desc="Getting Sleeper lines...", leave=False):
-        players = requests.get(SLEEPER_PLAYERS_URL.format(league=league))
+        players = requests.get(SLEEPER_PLAYERS_URL.format(league=league), timeout=REQUEST_TIMEOUT_S)
         if players.status_code != HTTPStatus.OK:
             continue
         players = players.json()

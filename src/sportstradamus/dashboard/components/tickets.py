@@ -9,6 +9,7 @@ business logic.
 
 from __future__ import annotations
 
+import html
 import json
 
 import pandas as pd
@@ -123,7 +124,8 @@ def render_tickets(tickets: list[dict]) -> None:
             with col, st.container(border=True):
                 st.markdown(
                     f'<div style="height:{_RAIL_HEIGHT_PX}px;margin:-1px -1px 10px -1px;'
-                    f'border-radius:3px 3px 0 0;background:{ticket["color"]}"></div>',
+                    f"border-radius:3px 3px 0 0;"
+                    f'background:{html.escape(str(ticket["color"]), quote=True)}"></div>',
                     unsafe_allow_html=True,
                 )
                 badge = _BADGE_COLOR_KEYWORD.get(ticket["color"], "gray")

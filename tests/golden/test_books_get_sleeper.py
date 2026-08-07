@@ -93,7 +93,7 @@ class _FakeResponse:
 
 class _FakeRequests:
     @staticmethod
-    def get(url):
+    def get(url, timeout=None):
         return _FakeResponse(_ROUTES[url])
 
 

@@ -66,6 +66,9 @@ class ClosingLine:
 # Markets whose value schema is per-book EV only (no Lines table rows).
 _TEAM_ONLY_MARKETS = frozenset({"Moneyline", "Totals", "1st 1 innings"})
 
+# Columns _book_rows may interpolate into SQL; anything else is an injection vector.
+_BOOK_VALUE_COLS = frozenset({"ev", "under_prob"})
+
 _DEFAULT_DB_PATH = Path("archive/archive.duckdb")
 
 # Hours before commence_time treated as "the books' line" during training.
@@ -418,6 +421,10 @@ class Archive:
             return []
         params: list = [league, market, d, entity]
         entity_clause = "UPPER(entity)=UPPER(?)" if case_insensitive_entity else "entity=?"
+        if value_col not in _BOOK_VALUE_COLS:
+            raise ValueError(
+                f"value_col must be one of {sorted(_BOOK_VALUE_COLS)}, got {value_col!r}"
+            )
         sql = (
             f"SELECT book, {value_col} FROM ("
             f"  SELECT book, {value_col}, observed_at, "

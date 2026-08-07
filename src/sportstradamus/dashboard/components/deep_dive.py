@@ -7,6 +7,8 @@ stats, Correlated). The Comps / Other-stats tabs read the ``current_offer_detail
 sidecar prerendered at ``prophecize`` time so the server never recomputes them live.
 """
 
+import html
+
 import pandas as pd
 import streamlit as st
 
@@ -63,20 +65,26 @@ def _edge_badge(model_ev: float) -> str:
     return f":{color}[**{edge:+.0%} edge**]"
 
 
+def _esc_field(row: pd.Series, key: str) -> str:
+    """HTML-escaped ``row[key]``, or escaped ``"?"`` when absent."""
+    return html.escape(str(row.get(key, "?")))
+
+
 def _render_header(row: pd.Series) -> None:
     """Themed-workbench header: Cinzel kicker, Plex name + market, side line, gold rule."""
-    market = row.get("Market Display", row.get("Market", "?"))
-    bet = row.get("Bet", "?")
+    market = html.escape(str(row.get("Market Display", row.get("Market", "?"))))
+    bet = _esc_field(row, "Bet")
     arrow = bet_arrow(bet) if bet in ("Over", "Under") else ""
     head, badge = st.columns([4, 1])
     head.markdown(
-        f'<div class="celestial-kicker">◈ {row.get("League", "?")} · '
-        f"{row.get('Platform', '?')}</div>"
+        f'<div class="celestial-kicker">◈ {_esc_field(row, "League")} · '
+        f"{_esc_field(row, 'Platform')}</div>"
         f'<div style="font-size:19px;font-weight:700;margin:2px 0 1px">'
-        f"{row.get('Player', '?')} — {market}</div>"
+        f"{_esc_field(row, 'Player')} — {market}</div>"
         f'<div style="color:{GRAY};font-size:13px">{arrow} '
-        f"{bet} {row.get('Line', '?')} · {row.get('Team', '?')} vs "
-        f"{row.get('Opponent', '?')}</div>",
+        f"{bet} {_esc_field(row, 'Line')} · "
+        f"{_esc_field(row, 'Team')} vs "
+        f"{_esc_field(row, 'Opponent')}</div>",
         unsafe_allow_html=True,
     )
     model_ev = row.get("Model EV")

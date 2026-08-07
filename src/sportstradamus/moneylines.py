@@ -63,6 +63,7 @@ from sportstradamus.helpers.io import (
     write_league_activity,
     write_upcoming_events,
 )
+from sportstradamus.helpers.scraping import REQUEST_TIMEOUT_S
 from sportstradamus.spiderLogger import logger
 
 # Closing-line capture window. Run `confer --close-lines` every 10 minutes
@@ -144,10 +145,10 @@ def _get_with_retry(url, params=None):
     other non-200 statuses propagate back so callers can decide whether to
     ``continue`` or bail.
     """
-    res = requests.get(url, params=params)
+    res = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_S)
     if res.status_code == HTTPStatus.TOO_MANY_REQUESTS:
         sleep(1)
-        res = requests.get(url, params=params)
+        res = requests.get(url, params=params, timeout=REQUEST_TIMEOUT_S)
     # Before the 401 raise so exhausted-key responses still hit the ledger.
     odds_budget.record_response(url, params, res)
     if res.status_code == HTTPStatus.UNAUTHORIZED:

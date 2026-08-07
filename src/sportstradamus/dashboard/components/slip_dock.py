@@ -12,6 +12,7 @@ helpers — no duplicated math.
 
 from __future__ import annotations
 
+import html
 from collections.abc import Sequence
 from decimal import Decimal
 
@@ -109,7 +110,8 @@ def _render_sheet(legs: Sequence[dict], score: SlipScore | None) -> None:
     for i, leg in enumerate(legs):
         text_col, rm_col = st.columns([8, 1])
         text_col.markdown(
-            f'<div class="slip-dock-line">{leg_label(leg)} · {leg["league"]}</div>',
+            f'<div class="slip-dock-line">{html.escape(leg_label(leg))} · '
+            f"{html.escape(str(leg['league']))}</div>",
             unsafe_allow_html=True,
         )
         if rm_col.button(":material/close:", key=f"slip_dock_rm_{i}", help="Remove leg"):

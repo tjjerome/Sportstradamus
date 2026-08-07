@@ -21,6 +21,7 @@ from typing import Literal
 
 import requests
 
+from sportstradamus.helpers.scraping import REQUEST_TIMEOUT_S
 from sportstradamus.spiderLogger import logger
 
 # Conservative default: a realistic Firefox UA so requests look like a
@@ -239,6 +240,7 @@ class CookieClient:
                 headers=merged,
                 params=params,
                 json=json_body,
+                timeout=REQUEST_TIMEOUT_S,
             )
             last_response = response
             if response.status_code in _AUTH_STATUSES:

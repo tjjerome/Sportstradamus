@@ -11,6 +11,7 @@ prerendered at ``prophecize`` time; the Correlated tab prices each candidate liv
 the copula scorer (``slip_engine.ev_lift``).
 """
 
+import html
 import json
 
 import pandas as pd
@@ -120,7 +121,7 @@ def _table_cell(text: str, *, mono: bool = False, extra: str = "") -> str:
         style += f";{_TABLE_MONO}"
     if extra:
         style += f";{extra}"
-    return f'<td style="{style}">{text}</td>'
+    return f'<td style="{style}">{html.escape(text)}</td>'
 
 
 def _comps_table_html(comps: list[dict], avg_label: str, span: float) -> str:
@@ -128,7 +129,7 @@ def _comps_table_html(comps: list[dict], avg_label: str, span: float) -> str:
     (``avg_label``'s % deviation) heatmapped via ``_heat_css``. ``comps`` iterates in
     the order given — the caller preserves the KNN closest-first order, not this table.
     """
-    labels = ["Comp", "Games", avg_label, "vs their avg"]
+    labels = ["Comp", "Games", html.escape(avg_label), "vs their avg"]
     header = "".join(
         f'<th style="padding:7px 10px;text-align:{"left" if lbl == "Comp" else "right"};'
         f'color:{GRAY};font-size:11px;border-bottom:1px solid {_TABLE_BORDER}">{lbl}</th>'

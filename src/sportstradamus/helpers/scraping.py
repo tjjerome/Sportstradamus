@@ -21,6 +21,8 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 from sportstradamus import creds
 from sportstradamus.spiderLogger import logger
 
+REQUEST_TIMEOUT_S = 60  # bound network hangs; generous because proxy-routed fetches legitimately take tens of seconds
+
 
 class Scrape:
     """HTTP GET client that rotates browser headers on retry.
@@ -46,7 +48,8 @@ class Scrape:
         """Fetch the header pool from ScrapeOps on first access."""
         if self._headers is None:
             self._headers = requests.get(
-                f"http://headers.scrapeops.io/v1/browser-headers?api_key={self._scrapeops_key}"
+                f"https://headers.scrapeops.io/v1/browser-headers?api_key={self._scrapeops_key}",
+                timeout=REQUEST_TIMEOUT_S,
             ).json()["result"]
             self._header = random.choice(self._headers)
             self._weights = np.ones([len(self._headers)])
@@ -112,7 +115,9 @@ class Scrape:
                     headers.update(self.header)
                     sleep(random.uniform(1, 3))
                 try:
-                    response = requests.get(url, headers=headers, params=params)
+                    response = requests.get(
+                        url, headers=headers, params=params, timeout=REQUEST_TIMEOUT_S
+                    )
                     if response.status_code == HTTPStatus.OK:
                         return response.json()
                     logger.debug(f"Attempt {i}, Error {response.status_code}")
@@ -137,7 +142,7 @@ class Scrape:
                     self._new_headers()
                     sleep(random.uniform(1, 3))
                 try:
-                    response = requests.get(url, headers=self.header)
+                    response = requests.get(url, headers=self.header, timeout=REQUEST_TIMEOUT_S)
                     content_type = response.headers.get("content-type", "")
                     if response.status_code == HTTPStatus.OK and "html" not in content_type.lower():
                         return pd.read_csv(StringIO(response.text))

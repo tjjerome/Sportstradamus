@@ -6,6 +6,8 @@ and the interactive constellation. A slip is then built by clicking candidate st
 from scratch, or pre-seeded from a story.
 """
 
+import html
+
 import pandas as pd
 import streamlit as st
 
@@ -90,7 +92,7 @@ def _hero_stat(label: str, value: str, *, title: str = "", mono: bool = True) ->
         f"<span{attr}><div style=\"font-family:'Cinzel',serif;font-size:9px;"
         f'letter-spacing:.14em;text-transform:uppercase;color:{GRAY}">{label}</div>'
         f'<div style="font-family:{value_font};font-size:16px;'
-        f'font-weight:600;margin-top:1px">{value}</div></span>'
+        f'font-weight:600;margin-top:1px">{html.escape(value)}</div></span>'
     )
 
 
@@ -119,7 +121,8 @@ def _render_hero(
     headline = game_headline(stories, parlays, game=game, date=date)
     glyph = game_shape_glyph(str(strip["shape"]), size=_HERO_GLYPH_SIZE)
     subline = (
-        f'<div class="celestial-headline" style="font-size:17px;margin-top:2px">{headline}</div>'
+        '<div class="celestial-headline" style="font-size:17px;margin-top:2px">'
+        f"{html.escape(headline)}</div>"
         if headline
         else ""
     )
@@ -136,9 +139,9 @@ def _render_hero(
         f'<div style="position:absolute;top:8px;right:14px;width:{_HERO_GLYPH_SIZE}px;'
         f'height:{_HERO_GLYPH_SIZE}px;opacity:.9">{glyph}</div>'
         f'<div style="font-size:20px;font-weight:700;letter-spacing:.01em">'
-        f"{team_name(league, away)} "
+        f"{html.escape(team_name(league, away))} "
         f'<span style="color:{GRAY};font-size:15px;font-weight:400">@</span> '
-        f"{team_name(league, home)}</div>"
+        f"{html.escape(team_name(league, home))}</div>"
         f"{subline}"
         f'<div style="display:flex;gap:22px;margin-top:12px">{stats}</div></div>',
         unsafe_allow_html=True,

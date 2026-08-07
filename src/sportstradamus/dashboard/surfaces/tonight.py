@@ -1,5 +1,6 @@
 """Tonight — game-card slate showing today's offers grouped by game."""
 
+import html
 from urllib.parse import quote
 
 import pandas as pd
@@ -147,28 +148,30 @@ for c in cards:
         else '<span class="tc-badge tc-gray">no edge</span>'
     )
     prophecy = (
-        f'<div class="tc-prophecy">“{c["headline"]}”</div>'
+        f'<div class="tc-prophecy">“{html.escape(c["headline"])}”</div>'
         if c["headline"]
         else '<div class="tc-prophecy tc-dim">No prophecy tonight — thin edges</div>'
     )
     countdown = _format_countdown(minutes) if minutes != float("inf") else ""
-    kicker = f"{league} &nbsp;·&nbsp; {countdown}" if countdown else league
+    league_esc = html.escape(league)
+    kicker = f"{league_esc} &nbsp;·&nbsp; {countdown}" if countdown else league_esc
     kicker_cls = "tc-kicker tc-urgent" if c["urgent"] else "tc-kicker"
     plural = "s" if offer_count != 1 else ""
     # The whole card is the View-game link; Date keeps doubleheaders distinct and the
     # label must match the Games page's game-picker (its ?game= deep link).
     game_param = f"{home} vs {away} · {c['date']}" if c["date"] else f"{home} vs {away}"
+    home_esc, away_esc = html.escape(home, quote=True), html.escape(away, quote=True)
     st.markdown(
         f'<div class="{card_class}">'
         f'<a class="tc-cardlink" href="games?game={quote(game_param)}" target="_self" '
-        f'aria-label="View {home} vs {away}"></a>'
+        f'aria-label="View {home_esc} vs {away_esc}"></a>'
         f'<div class="tc-main"><div class="{kicker_cls}">{kicker}</div>'
-        f'<div class="tc-matchup">{home} <span class="tc-vs">vs</span> {away}</div>'
+        f'<div class="tc-matchup">{home_esc} <span class="tc-vs">vs</span> {away_esc}</div>'
         f"{prophecy}"
         f'<div class="tc-foot">{edge_badge}<span class="tc-meta">'
         f"<b>{offer_count}</b> offer{plural} &middot; <b>{favored}</b> favored</span>"
         f'<span class="tc-viewcue">View game →</span></div></div>'
         f'<div class="tc-side">{game_shape_glyph(shape, size=58)}'
-        f'<span class="tc-shapename">{shape.title()}</span></div></div>',
+        f'<span class="tc-shapename">{html.escape(shape.title())}</span></div></div>',
         unsafe_allow_html=True,
     )

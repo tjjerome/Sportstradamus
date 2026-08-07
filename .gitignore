@@ -185,6 +185,8 @@ logs/*
 *.prof
 *.pdf
 *.xlsx
+# Credentials never enter the repo, at any depth (belt beside src/sportstradamus/creds/.gitignore)
+creds/
 src/sportstradamus/data/training/training_report.txt
 src/sportstradamus/data/~$feature_importances.xlsx
 src/sportstradamus/data/feature_importances.xlsx
@@ -200,7 +202,6 @@ src/sportstradamus/data/runtime/
 src/sportstradamus/data/fantasypoints/
 src/profile_output.lprof
 profile_output.lprof
-poetry.lock
 *.dat:Zone.Identifier
 *.dat:shield
 archive/*
