@@ -132,7 +132,7 @@ def payout_curve_for(
     Sleeper, ParlayPlay, Chalkboard) keep the legacy single-payout table.
     """
     # Deferred import: legacy shims live in ``correlation.py`` per
-    # CONTRIBUTING.md §Package Map; importing at module scope would create a
+    # docs/ARCHITECTURE.md §Package Map; importing at module scope would create a
     # cycle with ``correlation``'s top-level ``beam_search_parlays`` import.
     from sportstradamus.prediction.correlation import (
         _legacy_underdog_overwrite_payouts,

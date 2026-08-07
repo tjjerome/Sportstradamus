@@ -20,7 +20,7 @@ decision engines (kelly, pickem-build, parlay pricing) are league-agnostic and
 already built; what MLB/NHL need is model-quality work + data-freshness repair
 (the wiring delta is now landed) — not new architecture. No
 doc gives these leagues a breadth target —
-[`model_improvement_track.md`](model_improvement_track.md) §1 covers
+[`model_improvement_track.md`](../handoffs/model_improvement_track.md) §1 covers
 NBA/WNBA/NFL only; this lane exists to close that gap. Seasonal urgency: **MLB
 is in season now** — the apps price it heavily while NBA/NFL are dark, and the
 D1 option decays as the season burns. NHL starts in October; D2 wants its
@@ -30,9 +30,9 @@ packet by ~Sep.
 
 1. [`../sportstradamus_roadmap_v3.md`](../sportstradamus_roadmap_v3.md) §5
    (seasonality) + §7 (the D1/D2 rows) — why now, and who decides. Predecessor
-   design sketches: [`../archive/sportstradamus_roadmap_v2.md`](../archive/sportstradamus_roadmap_v2.md)
+   design sketches: [`../archive/sportstradamus_roadmap_v2.md`](sportstradamus_roadmap_v2.md)
    (non-normative, status claims stale).
-2. [`model_improvement_track.md`](model_improvement_track.md) §1 (the
+2. [`model_improvement_track.md`](../handoffs/model_improvement_track.md) §1 (the
    lens), §3.3 (the failure-mode-census pattern stage 0 copies), §6 operating
    loop + §6 lever stages (the post-GO method, reused wholesale — never
    restated here).
@@ -44,7 +44,7 @@ packet by ~Sep.
 5. [`CLAUDE.md`](../../CLAUDE.md) §Hard rules (DuckDB lock) + §Agentic workflow
    conventions (research-first) — assumed law; the two rules this lane leans
    on hardest.
-6. [`model_improvement_track.md`](model_improvement_track.md) §7.5 —
+6. [`model_improvement_track.md`](../handoffs/model_improvement_track.md) §7.5 —
    the model-track footprint and session mechanics stage 1+ mirrors.
 7. `src/sportstradamus/stats/mlb.py`, `src/sportstradamus/stats/nhl.py` — the
    two Stats classes under audit (`season_start`, `load`/`update`).
@@ -173,7 +173,7 @@ run, but nothing merges in stage 0.
 **Post-GO (stage 1+):** mirrors the model-track footprint —
 `sportstradamus.training` (pipeline, scorecard, report),
 `data/config/stat_meta.json`, ship-config plumbing — see
-[`model_improvement_track.md`](model_improvement_track.md) §7.5 and
+[`model_improvement_track.md`](../handoffs/model_improvement_track.md) §7.5 and
 §6; not restated here. Plus the activation-specific deltas this audit
 names:
 
@@ -188,7 +188,7 @@ names:
 
 Editing outside the footprint is a stop condition (§8). Serving-path changes
 carry the inference-path compatibility checklist
-([`model_improvement_track.md`](model_improvement_track.md) §7.3) —
+([`model_improvement_track.md`](../handoffs/model_improvement_track.md) §7.3) —
 reference it, don't restate it.
 
 ## 6. Stage plan
@@ -238,7 +238,7 @@ acceptance and kill criteria.
   module per subagent), then the model_improvement_track.md §6 operating loop
   verbatim — free passers first (§6.0 pattern), then the §6 stage ladder
   cheapest-first. Loop and stages live in
-  [`model_improvement_track.md`](model_improvement_track.md) §6;
+  [`model_improvement_track.md`](../handoffs/model_improvement_track.md) §6;
   this brief does not restate them.
 - **Acceptance per cell:** official full-HPO scorecard 5/5
   ([`../ship_gate.md`](../ship_gate.md)) → `shipped: "devel"` via standard

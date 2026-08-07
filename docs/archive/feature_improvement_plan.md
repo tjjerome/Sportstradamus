@@ -9,7 +9,7 @@
 > detail across all five leagues; [`operation_ship_75.md`](operation_ship_75.md) §5.8
 > cross-references this doc. Gate thresholds live in [`ship_gate.md`](ship_gate.md);
 > MLB/NHL activation gates (data freshness, D1/D2 GO) live in
-> [`handoffs/mlb-nhl-activation.md`](handoffs/mlb-nhl-activation.md).
+> [`mlb-nhl-activation.md`](mlb-nhl-activation.md).
 
 ## 0. Changelog
 
@@ -34,7 +34,7 @@ calibration axes ([`operation_ship_75.md`](operation_ship_75.md) §5.2–§5.6);
 B-frame design — book `Line`/`Odds`/`EV` are deliberately **not** features
 ([`pipeline.py`](../src/sportstradamus/training/pipeline.py) keeps them in separate
 B-frames for the blend and calibration; the blend owns book information); MLB/NHL
-activation gates ([`handoffs/mlb-nhl-activation.md`](handoffs/mlb-nhl-activation.md)).
+activation gates ([`mlb-nhl-activation.md`](mlb-nhl-activation.md)).
 
 Operator constraints: **new external data must be free sources only**; **all five
 leagues get equal effort budget** — refinement for NBA/WNBA/NFL (machinery exists),
@@ -347,7 +347,7 @@ items.
 | **NBA** | PF (g1 — needs signal); calibration-blocked cells get signal alongside ship75 axes | QW-1/2/5, M-1, M-2, M-3, M-4, M-5, M-6, L-3, L-5 | feedback-rich; first to validate every shared-base build |
 | **WNBA** | STL (g1) | every shared-base item lands for WNBA in the same PR (shared `base.py` machinery); EB-shrunk variants preferred (small n); M-4 explicitly dual-league | piggybacks NBA regens |
 | **NFL** | attempts, carries, completions, receiving-yards, rushing-yards (g1+g4); qb-yards, passing-first-downs (multi-gate) | QW-1/2/4, **M-1 primary**, M-2, M-5, M-6, **M-8 ablation**, L-3, L-4 | richest source set already (FP suite); the feature-count question is tested *here* |
-| **MLB** | 24 withheld; hitter volume markets first (batting order), Ks later (umpire) | QW-3, M-2/M-3 shared, **L-1 centerpiece**, L-2, L-4, L-5 | matrix/feature builds proceed against refreshed gamelogs now; training ships post-D1 ([activation lane](handoffs/mlb-nhl-activation.md)) |
+| **MLB** | 24 withheld; hitter volume markets first (batting order), Ks later (umpire) | QW-3, M-2/M-3 shared, **L-1 centerpiece**, L-2, L-4, L-5 | matrix/feature builds proceed against refreshed gamelogs now; training ships post-D1 ([activation lane](mlb-nhl-activation.md)) |
 | **NHL** | 16 withheld, greenfield; goalie SV + skater shots/points first | **M-9 foundation**, QW-1/5, M-2/M-3 shared | post-D2 (same lane); lean-first — first board IS the baseline |
 
 **Anti-drift guard.** Foundation leagues (MLB/NHL) have slow feedback — no trained
@@ -511,7 +511,7 @@ brief / building / A-B / shipped / closed.
 1. [`operation_ship_75.md`](operation_ship_75.md) — lever stack, §5.8 features
    summary, validation loop this plan reuses
 2. [`ship_gate.md`](ship_gate.md) — g1–g5 thresholds (authoritative)
-3. [`handoffs/mlb-nhl-activation.md`](handoffs/mlb-nhl-activation.md) — MLB/NHL
+3. [`mlb-nhl-activation.md`](mlb-nhl-activation.md) — MLB/NHL
    data freshness + D1/D2 GO gates
 4. [`CONTRIBUTING.md`](../CONTRIBUTING.md) §Package Map
 5. [`STYLE_GUIDE.md`](STYLE_GUIDE.md) §16 — doc conventions this file follows

@@ -19,7 +19,7 @@ render-only (slugs stay the logic key).
 **Branch:** `feature/dashboard-ux`. Prereq: Phase 0 merged (leg_label upgrade in A4 touches
 `leg_schema.py`).
 
-**Spec:** `docs/superpowers/specs/2026-07-03-p8-oracle-assets-celestial-polish-design.md` §3.
+**Spec:** `docs/archive/superpowers/specs/2026-07-03-p8-oracle-assets-celestial-polish-design.md` §3.
 Mockups are pixel truth (`docs/mockups/p8-*.html`). Gates + refactoring-specialist after every
 task (see Phase 0 plan's Context section; same rules).
 

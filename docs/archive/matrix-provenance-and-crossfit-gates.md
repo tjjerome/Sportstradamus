@@ -7,7 +7,7 @@ the walk/board fixes landed.
 
 **Operating constraint.** The driver (`research/overnight/run_all_cells.sh`) spawns fresh
 `meditate` subprocesses per nominee, which pick up an edit mid-run. Per
-[breadth75_plan.md](breadth75_plan.md), no training-code edit lands while a sweep/confirm chain
+[breadth75_plan.md](../handoffs/breadth75_plan.md), no training-code edit lands while a sweep/confirm chain
 runs — coordinate landing through the session that owns the driver. Two corollaries learned
 stopping it for this fix: `SIGTERM` to the driver `bash` is deferred until its foreground child
 returns, so use `SIGKILL` on the driver alone to stop the queue while the in-flight cell finishes

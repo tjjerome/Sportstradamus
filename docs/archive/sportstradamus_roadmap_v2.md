@@ -221,7 +221,7 @@ golden, CLI snapshots; `poetry run meditate --rebuild-correlations --league NBA`
 
 ### 1.2 Audit `find_correlation` + `beam_search_parlays` — ✅ AUDIT / ⚠️ FIXES PARTIAL
 
-**Audit** at `docs/PARLAY_AUDIT.md`; calibration plot/CSV at `docs/PARLAY_CALIBRATION_*`.
+**Audit** at `docs/PARLAY_AUDIT.md`; calibration plot/CSV at `docs/archive/evidence/PARLAY_CALIBRATION_*`.
 **Note:** `beam_search_parlays` was since split out into `prediction/parlay.py`
 (`find_correlation` stays in `prediction/correlation.py`). **Shipped:** Gaussian copula, `contest_variant` parameter
 (power/flex/insurance/rivals), `data/underdog_payouts.json`, push-aware EV via

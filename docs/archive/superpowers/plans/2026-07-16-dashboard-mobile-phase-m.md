@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make the dashboard's core money loop (Tonight → Games/constellation → slip build → stakes) work well on a phone, with the Board readable, per the approved spec `docs/superpowers/specs/2026-07-16-dashboard-mobile-design.md`.
+**Goal:** Make the dashboard's core money loop (Tonight → Games/constellation → slip build → stakes) work well on a phone, with the Board readable, per the approved spec `docs/archive/superpowers/specs/2026-07-16-dashboard-mobile-design.md`.
 
 **Architecture:** A User-Agent branch (`viewport.is_mobile()`, session-cached, test/query-param overridable) gates render-level differences — top nav, a fixed bottom slip dock, a Board card list, and a touch-mode constellation — while one `@media (max-width: 767px)` block in `theme.APP_CSS` handles style-only reshaping. Desktop paths stay byte-identical.
 

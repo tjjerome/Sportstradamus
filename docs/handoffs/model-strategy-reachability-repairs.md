@@ -20,7 +20,7 @@ Read these after `CLAUDE.md` and `CONTRIBUTING.md`:
 
 1. [`model_improvement_track.md`](model_improvement_track.md) — strategy, gate,
    and experiment contracts.
-2. [`matrix-provenance-and-crossfit-gates.md`](matrix-provenance-and-crossfit-gates.md)
+2. [`matrix-provenance-and-crossfit-gates.md`](../archive/matrix-provenance-and-crossfit-gates.md)
    — frozen-matrix and cross-fit constraints.
 3. `src/sportstradamus/training/model_strategy/` — registry, sweep, confirmation,
    and artifact identity.

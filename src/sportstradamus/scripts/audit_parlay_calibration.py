@@ -13,9 +13,9 @@ A "hit" is a parlay where every counted leg covered (``Misses == 0`` and
 
 Outputs (timestamped with today's date):
 
-* ``docs/PARLAY_CALIBRATION_<YYYY-MM-DD>.png`` — predicted vs empirical
+* ``docs/archive/evidence/PARLAY_CALIBRATION_<YYYY-MM-DD>.png`` — predicted vs empirical
   hit rate by decile, with a 45-degree reference line.
-* ``docs/PARLAY_CALIBRATION_<YYYY-MM-DD>.csv`` — decile table with the
+* ``docs/archive/evidence/PARLAY_CALIBRATION_<YYYY-MM-DD>.csv`` — decile table with the
   predicted-probability bin edges, mean predicted probability, empirical
   hit rate, sample count, and Wilson 95% confidence bounds.
 
@@ -60,7 +60,7 @@ N_DECILES: int = 10
 # the empirical hit rate is too noisy to interpret.
 MIN_DECILE_SAMPLES: int = 20
 
-DOCS_DIR: Path = Path(__file__).resolve().parents[3] / "docs"
+DOCS_DIR: Path = Path(__file__).resolve().parents[3] / "docs" / "archive" / "evidence"
 
 
 def _recovered_payout(row: pd.Series) -> float:

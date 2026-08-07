@@ -303,7 +303,7 @@ no conversation context, so the handoff prompt is the entire briefing.
 3. The workstream brief at `docs/handoffs/{slug}.md` — the lane this session
    prompt serves: its stage plan, locked decisions, and ledger are the scope
    the prompt must inherit. The brief template is
-   `docs/handoffs/_template.md`.
+   `.claude/handoff-template.md`.
 4. The lane's home-of-record docs per the brief's §2 — for the model track
    that is `docs/model_improvement_track.md` (§2 ground truth, §11
    verification / inference-path checklist, §9 failure protocol, the target
@@ -374,4 +374,4 @@ no conversation context, so the handoff prompt is the entire briefing.
   workstream brief: on a stage boundary, update `docs/handoffs/{slug}.md`
   (stage plan, status line, ledger) instead of committing prompt copies —
   `docs/handoffs/` holds briefs only. New briefs and major re-briefs are
-  drafted from `docs/handoffs/_template.md`.
+  drafted from `.claude/handoff-template.md`.

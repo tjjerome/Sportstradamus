@@ -12,7 +12,7 @@
 
 ## Spec
 
-`docs/superpowers/specs/2026-06-14-constellation-satellite-legs-design.md` (gitignored per repo convention; on disk).
+`docs/archive/superpowers/specs/2026-06-14-constellation-satellite-legs-design.md` (gitignored per repo convention; on disk).
 
 ## Repo-state preconditions & commit policy
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 
 def test_beam_search_parlays_canonical_import() -> None:
-    """Canonical path advertised in CONTRIBUTING.md §Package Map."""
+    """Canonical path advertised in docs/ARCHITECTURE.md §Package Map."""
     from sportstradamus.prediction.parlay import beam_search_parlays
 
     assert callable(beam_search_parlays)

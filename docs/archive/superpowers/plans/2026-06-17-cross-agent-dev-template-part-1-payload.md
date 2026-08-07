@@ -9,7 +9,7 @@
 **Tech Stack:** Python 3.11 (hooks + their pytest tests), pre-commit, lizard (multi-language complexity), ruff, clang-tidy, the Agent Skills `SKILL.md` standard, Claude Code `settings.json`/hooks, GitHub Copilot `.github/` customization + `.vscode/settings.json`.
 
 **Source references (read once):**
-- Design spec: `/home/trevor/Sportstradamus/docs/superpowers/specs/2026-06-17-cross-agent-dev-template-design.md`
+- Design spec: `/home/trevor/Sportstradamus/docs/archive/superpowers/specs/2026-06-17-cross-agent-dev-template-design.md`
 - Hooks to port verbatim live in `/home/trevor/Sportstradamus/.claude/hooks/`
 - caveman output-style to copy: `/home/trevor/Sportstradamus/.claude/output-styles/caveman.md`
 

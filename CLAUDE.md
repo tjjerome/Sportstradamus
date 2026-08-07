@@ -75,10 +75,11 @@ reads fine.
 
 ## Mandatory reading — do this first
 
-Before touching any code, read these two documents once:
+Before touching any code, read these documents once:
 
-1. **[CONTRIBUTING.md](CONTRIBUTING.md)** — package map, data flow, where to find things,
-   how to make changes, how to add a league or market. Required reading. Not optional.
+1. **[CONTRIBUTING.md](CONTRIBUTING.md)** — contribution workflow: how to make changes,
+   how to add a league or market — plus **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
+   for the package map, data flow, and where to find things. Required reading. Not optional.
 2. **[docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md)** — formatting, naming, docstrings, type
    hints, dead-code rules. Cite sections by number in commits and comments.
 
@@ -159,7 +160,7 @@ The codebase was refactored from several 1,000–7,000 line monoliths into packa
 Do not undo that work:
 
 * **No new monoliths.** If a file you are editing exceeds ~300 lines, stop and check
-  whether you are adding to the right module. Consult CONTRIBUTING.md §Package Map.
+  whether you are adding to the right module. Consult docs/ARCHITECTURE.md §Package Map.
 * **No back-compat shims.** The old `train.py`, `sportstradamus.py`, and `stats.py`
   shims have been deleted. Import from the canonical package paths:
   - Stats classes → `sportstradamus.stats`
@@ -174,8 +175,8 @@ Do not undo that work:
 * **No magic numbers.** Named constants at module level with a one-line reason comment.
   See STYLE_GUIDE.md §9.
 * **Dashboard never touches the DuckDB archive.** The Streamlit dashboard reads
-  pre-computed parquet snapshots only (`data/history.parquet`,
-  `data/parlay_hist.parquet`, `data/model_stats.parquet`,
+  pre-computed parquet snapshots only (`data/runtime/history.parquet`,
+  `data/runtime/parlay_hist.parquet`, `data/training/model_stats.parquet`,
   `data/runtime/current_pickem.parquet`). DuckDB holds an
   exclusive file lock for the entire lifetime of any read-write connection;
   the dashboard is the only long-lived process in the system, so any archive
@@ -321,7 +322,7 @@ The old single-file modules no longer exist. Use these paths:
 | `confer`, `get_props`, `get_moneylines` | `sportstradamus.moneylines` |
 | `get_ud`, `get_sleeper` | `sportstradamus.books` |
 
-Full per-submodule breakdown is in CONTRIBUTING.md §Package Map.
+Full per-submodule breakdown is in docs/ARCHITECTURE.md §Package Map.
 
 ## Architecture
 

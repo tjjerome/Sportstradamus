@@ -77,7 +77,7 @@ From the real published output `src/sportstradamus/data/current_offers.parquet`:
 3. **Root Cause B (ZINB derived-π gate).** Independent of FGA, evidence is
    solid and reproducible. Detailed task-by-task spec already written (Phase B,
    superseded to the derived-π design) at
-   `docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md` — see the
+   `docs/archive/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md` — see the
    "Phase B SUPERSEDED" note: `gate = clip((q − NB(0))/(1 − NB(0)), 0, 1)`
    with a calibrated zero classifier `q`. Reuses all downstream ZINB code.
 
@@ -85,7 +85,7 @@ From the real published output `src/sportstradamus/data/current_offers.parquet`:
 
 - Prior detailed implementation spec (Phase A now abandoned; **Phase B
   derived-π section still valid**):
-  `docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md`
+  `docs/archive/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md`
 - Canonical investigation plan/history:
   `/home/trevor/.claude/plans/my-models-seem-to-jazzy-minsky.md`
 - Throwaway diagnostic scripts were under `/tmp` (`protoA2_meanrev.py`,

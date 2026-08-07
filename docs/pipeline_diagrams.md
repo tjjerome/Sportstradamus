@@ -1,7 +1,7 @@
 # Pipeline Diagrams
 
 High-level flowcharts for the training and inference pipelines. The authoritative
-narrative is [CONTRIBUTING.md](../CONTRIBUTING.md) §Data Flow and §Modifying the
+narrative is [docs/ARCHITECTURE.md](ARCHITECTURE.md) §Data Flow and §Modifying the
 Training Pipeline; the offline ship-gate detail is in
 [docs/handoffs/model_improvement_track.md](handoffs/model_improvement_track.md) and
 [docs/ship_gate.md](ship_gate.md).

@@ -779,7 +779,7 @@ git commit -m "test(mlb-volume): verify hitter matrix populates proj columns"
 After the plan is implemented, the main session owns the wrap-up per the repo conventions:
 1. Run the `refactoring-specialist` subagent on every touched `.py` (`stats/mlb.py`, `training/markets.py`, `training/baselines.py`, `scripts/measure_mlb_volume_constants.py`, `tests/golden/test_mlb_volume_normalization.py`) **before** any push/PR/review.
 2. Re-run the three gates once after the specialist returns (ruff, golden, integration).
-3. Append a ledger line to `docs/handoffs/mlb-nhl-activation.md` §10; resume the paused Phase 5 matrix assembly for the remaining hitter cells now that the projector populates their volume features.
+3. Append a ledger line to `docs/archive/mlb-nhl-activation.md` §10; resume the paused Phase 5 matrix assembly for the remaining hitter cells now that the projector populates their volume features.
 4. No `shipped:` flip; SkewNormal families unchanged. **Never push `devel` directly.**
 
 ---

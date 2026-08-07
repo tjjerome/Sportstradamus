@@ -17,7 +17,7 @@
 - **`ALL_MARKETS` = 96 cells** (NFL 20, NBA 21, WNBA 18, MLB 22, NHL 15) — [src/sportstradamus/training/markets.py:5-112](../../../src/sportstradamus/training/markets.py#L5-L112).
 - **Today's 36 Gate-1 cells** live in `ship_config.json` on the unmerged ship branch `ship/baselines-36-cells` (NBA 13, WNBA 10, NFL 13). On `devel`, `ship_config.json` is currently `{}`.
 - **`check_graduation` prints only** — no state file. Its classifier and parquet readers are what Task 2 extracts. See [src/sportstradamus/scripts/check_graduation.py](../../../src/sportstradamus/scripts/check_graduation.py).
-- **Design spec:** [docs/superpowers/specs/2026-05-22-gate-driven-serving-control-design.md](../specs/2026-05-22-gate-driven-serving-control-design.md) (approved).
+- **Design spec:** [docs/archive/superpowers/specs/2026-05-22-gate-driven-serving-control-design.md](../specs/2026-05-22-gate-driven-serving-control-design.md) (approved).
 - **Quality gates (CLAUDE.md):** `poetry run ruff check src/sportstradamus/`, `poetry run pytest tests/golden/`, `poetry run pytest -m integration` must all pass. The `refactoring-specialist` subagent must run on every touched `.py` before any push/PR/review.
 
 ## File Structure

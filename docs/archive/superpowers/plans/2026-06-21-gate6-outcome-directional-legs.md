@@ -6,7 +6,7 @@
 
 **Architecture:** All gate logic stays in `src/sportstradamus/training/scorecard.py` as pure functions of one test-set CSV; the only new input is an optional `prior_g6_fired` boolean (for anchor hysteresis) that `training/report.py` derives from the previous `model_stats.parquet` row and threads in. The authoritative ship decision is `apply_thresholds`; `min_gate_slack` is the ranking signal for the board sweep.
 
-**Tech Stack:** Python 3.11, numpy, pandas, pytest (golden suite via xdist), poetry. Design spec: `docs/superpowers/specs/2026-06-21-gate6-outcome-directional-legs-design.md`. Research: `/tmp/researcher_gate6_scope_and_drift.md`.
+**Tech Stack:** Python 3.11, numpy, pandas, pytest (golden suite via xdist), poetry. Design spec: `docs/archive/superpowers/specs/2026-06-21-gate6-outcome-directional-legs-design.md`. Research: `/tmp/researcher_gate6_scope_and_drift.md`.
 
 ---
 

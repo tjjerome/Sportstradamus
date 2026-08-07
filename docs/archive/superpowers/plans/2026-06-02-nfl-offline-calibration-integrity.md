@@ -6,7 +6,7 @@
 
 **Architecture:** Five sequenced changes to the training/prediction pipeline. (1) Wire the already-built `MEAN_STAGE` post-hoc corrector (`roe_mean`) into `train_market` at the decode→fuse seam and into `model_prob` inference. (2) Add a behavior-preserving `blending` strategy seam (registry + per-cell config field, default `nll`). (3) Build convolution-derived honest books for the no-market QB combined cells. (4) Persist `Player`/`Date` and add a player-clustered g1 recheck. (5) Roll out per-cell with BSS + supersede guardrails. Immediate breadth comes from change (1); changes (2)–(4) are integrity/extensibility groundwork for Phase 2.
 
-**Tech Stack:** Python 3.11, LightGBMLSS, scipy/numpy/pandas, DuckDB archive, pytest. Spec: [`docs/superpowers/specs/2026-06-02-nfl-offline-calibration-integrity-design.md`](../specs/2026-06-02-nfl-offline-calibration-integrity-design.md).
+**Tech Stack:** Python 3.11, LightGBMLSS, scipy/numpy/pandas, DuckDB archive, pytest. Spec: [`docs/archive/superpowers/specs/2026-06-02-nfl-offline-calibration-integrity-design.md`](../specs/2026-06-02-nfl-offline-calibration-integrity-design.md).
 
 **Worktree:** Execute in a dedicated worktree off `model-research` (the production-tracking branch is `devel`; `model-research` is where this work lives). No production retrain happens until Task 8.
 

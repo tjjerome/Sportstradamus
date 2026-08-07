@@ -38,7 +38,7 @@ goal. Work is ordered by payoff-to-effort per the §6 workstream table; individu
 expected to fail, and every workstream carries pre-written escalation branches.
 
 Breadth targets (D3/D5 inputs; MLB/NHL targets are set by the D1/D2 activation packets —
-[`mlb-nhl-activation.md`](mlb-nhl-activation.md)):
+[`mlb-nhl-activation.md`](../archive/mlb-nhl-activation.md)):
 
 | League | Ship-75 target | Ship-90 target |
 |---|---|---|
@@ -52,7 +52,7 @@ tracks `devel`, so a Gate-1-clearing cell in its 14-day Gate-2 soak is already l
 counts. Mantra: *don't let perfect be the enemy of good.* The gate certifies **deployable**; the
 Kelly sizer and the live soak certify **profitable**. MLB and NHL have cells in `stat_meta.json`
 but no breadth target until their activation gates decide (D1/D2 —
-[`mlb-nhl-activation.md`](mlb-nhl-activation.md)).
+[`mlb-nhl-activation.md`](../archive/mlb-nhl-activation.md)).
 
 **Failure is not an option at the operation level.** Individual *levers* are allowed to fail —
 when one doesn't move a cell, scrap that path and take the next. The plan is built so every
@@ -326,7 +326,7 @@ width fix is fit to a calibration target and guard-railed on g1/g5 (§6.1 go/no-
   calibrated distributions; calibration is the product; breadth is a D3/D5 input, not the goal.
   Live alignment (§6.10, WS-1) is Priority 1.
 - 2026-07-07 — MLB and NHL activation is folded into this track (WS-2, §6.7/§6.9); no MLB/NHL
-  cell ships before its owner gate (D1/D2 — [`mlb-nhl-activation.md`](mlb-nhl-activation.md)).
+  cell ships before its owner gate (D1/D2 — [`mlb-nhl-activation.md`](../archive/mlb-nhl-activation.md)).
 - 2026-07-07 — a Fable **Stage 0** cleans the sweep/confirm engine and builds structure (corner
   registry + family axis, resume/queue, version stamping, new-family scaffold, this doc rework)
   before any Sonnet grunt work; the execution queue after it is Sonnet-sized.
@@ -1265,7 +1265,7 @@ M-3 stadium table); **D-5** referee/umpire (lowest priority).
 ### §6.7 WS-2 — MLB (now) + NHL (by Sep) activation
 
 Entry: matrix/feature builds proceed **now**; training ships only post-D1 (MLB) / post-D2 (NHL)
-— gates owned by [`mlb-nhl-activation.md`](mlb-nhl-activation.md) (data freshness, book
+— gates owned by [`mlb-nhl-activation.md`](../archive/mlb-nhl-activation.md) (data freshness, book
 honesty, GO/NO-GO; not restated here).
 
 **Reality (re-derive counts from §3).** MLB is in season with **0 cells served**; its board cells
@@ -1428,7 +1428,7 @@ snapshot.
 #### MLB / NHL — foundation, then activation
 
 Feature foundations are §6.7 and proceed now; training/shipping is gated on D1/D2
-([`mlb-nhl-activation.md`](mlb-nhl-activation.md)). First targets when active: MLB hitter
+([`mlb-nhl-activation.md`](../archive/mlb-nhl-activation.md)). First targets when active: MLB hitter
 volume markets (batting order), Ks later (umpire); NHL goalie SV + skater shots/points.
 Book-less MLB cells (pitches-thrown, both fantasy) grade against the synthetic coin-flip book —
 **owner ruling: they must beat it** (g1–g3 vs 0.5 baseline, no autopass); the
@@ -1894,10 +1894,10 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 - 2026-07-18 · W1 finished + W2/W5 executed; three leagues over target. MLB count board 8/8 confirms shipped (6 DPO, 2 NegBin) → MLB 14/19 with batter strikeouts' W5 re-earn. W2 reroutes: NHL sogBS shipped (DPO, BSS +0.220), NBA FGA all-16 kill (g4+g6 — family not binding, stays SN). W5 direct re-earns: NHL assists (DPO +0.085) + MLB batter strikeouts shipped; NBA FTM's DPO corner honestly dead — first live calibrated-retry exercise (fired, still g4); NBA STL shipped on retest (DPO +0.083) → NBA 16/21 CROSSES 75%. Found + fixed: report()'s pickle-dist writeback reverted STL's pending flip off a stale pickle — writeback removed, stat_meta dist input-only (save_distribution_config archived; forced-dist warning = flip-reached-training audit). W3 pilots both KILL (PA g6-only −0.004 knife-edge; NFL receiving-yards g1+g4 sharp-book) ⇒ K4; Mixture.py confirmed in pinned lightgbmlss (SplineFlow too) — escalation ask becomes Mixture-not-SHASH, deferred until continuous-board verdicts. NHL+MLB continuous boards in flight. Scoreboard: WNBA 14/18 ✓ · NBA 16/21 ✓ · MLB 14/19 · NHL 10/15 · NFL 7/20.
 - 2026-07-17 · W1 count boards NBA + NHL closed. NBA: 0 board ships (FTM hurdle +0.02 corner reverted at full-HPO on g4 alone; STL −0.040 / TOV −0.300 kills) but BLST + OREB shipped via direct full-HPO re-earn → NBA 15/21. NHL: 3/3 confirms shipped — blocked (DPO, BSS +0.024), powerPlayPoints (hurdle-ZINB, BSS +0.449), shots (DPO, BSS +0.012) → NHL 8/15; assists −0.058 near-miss (best corner DPO). DPO ships now 4 (TOV, points, blocked, shots). S1 evidence: joint-ZINB 0/132 board corners, best −0.166. Hurdle path has no Optuna search (`_step_select_hyperparams` fixed/warm params) — calibrated HP selection can never apply to hurdle corners. Owner-ordered fallback BUILT same day: `_calibration_penalty` extended to the LSS count/Gamma families (refit → decode → per-trial dispersion-c → served PIT-KS; guard now `not use_hurdle`) and meditate auto-retries a cell once with `hpo_selection=calibrated` when ship fails on g4 alone under loss selection, pinning the knob to stat_meta on a shipped retry; confirm re-syncs subprocess-written pins from disk so later whole-file writes can't erase them. Three gates green + goldens (predicate matrix, persist, sync, count-closure live-path).
 - 2026-07-17 · WS-3 pilots + breadth-75 reframe (owner: 75% every league is the mission, not WS-3 step-following). DPO first ship — WNBA TOV full-HPO 5/5 → devel (4/4 DPO corners board-pass, all NB corners die g4, BSS +0.042); NBA PF all-kill (<50% gap-close, family not binding → §6.1/§6.2); NHL points in flight; kill rule dead. Gap: NBA +3 / NFL +8 / NHL +8 / MLB +10 (WNBA 14/18 done). Five waves: count boards (non-NFL first) → integer-meta reroute → centered-SN pilots + continuous board → NFL book repair (paid backfill agent in flight, apply-at-gap) → ECE recal. Found: NBA BLST/OREB ship=True-but-withheld (free re-earns); `--dist-class` meta-dist blindspot (§6.6 gotcha); book-less MLB trio auto-passes g1–g3 (owner rule). Model-class escalation past families → §6.6 (ordinal stack / mixture / comp-PMF, §8.2-gated). NFL book audit closed same day: July repair already real for the big-7, paid backfill dead (API hole pre-2023-05-03; 882 credits spent, probe-verified ~0 recovery) — blockers rerouted code-side; tds ev-clamp bug root-caused (population zi 0.777 vs quoted-star prices, selection effect) + FIXED (gate-refuted quotes → NULL ev + shape-free quote; 20,840 poisoned evs NULLed; tds matrix purged) + repair applied (88k seed rows deleted, matrices swapped); autopass RETRACTED same day — bookless cells must beat the coin flip. Pilots 2/3 SHIP: NHL points confirm 5/5 → devel (BSS +0.012, n_val 11.8k). Simplification track S1–S5 adopted (§6.6). NHL points interim: DPO 6/6 deterministic +0.226, pit_ks 0.0153 (NB floor 0.083) — low-mean ceiling thesis validated; full-HPO confirm in flight.
-- 2026-07-11 · WS-2 activation COMPLETE: 9 cells live on devel — 5 MLB (2026-07-10) + 4 NHL (goals, hits, shotsAgainst, timeOnIce; commit 3635a20), all deterministic-board → full-HPO confirm on 2-season matrices; final spend 2.39M of 5M credits. NHL powerPlayPoints failed confirm, saves ranks-only (non-persistable dist-loss corner). Post-GO grind on no-ship cells moves to the §6 operating loop (detail: mlb-nhl-activation.md §10).
+- 2026-07-11 · WS-2 activation COMPLETE: 9 cells live on devel — 5 MLB (2026-07-10) + 4 NHL (goals, hits, shotsAgainst, timeOnIce; commit 3635a20), all deterministic-board → full-HPO confirm on 2-season matrices; final spend 2.39M of 5M credits. NHL powerPlayPoints failed confirm, saves ranks-only (non-persistable dist-loss corner). Post-GO grind on no-ship cells moves to the §6 operating loop (detail: ../archive/mlb-nhl-activation.md §10).
 - 2026-07-10 · dfs-products lane created (decision-engine expansion: game-line combos verify-first, Ladders, alt-line hardening) · §6.11 Rivals pricer build repointed there (tail read stays); ladders + gamelines stage-0 briefs in docs/archive/; serve-time budget locked ≤15 min heavy day · next: unchanged
 - 2026-07-10 · WS-2/WS-4 backfill program done (1.76M credits of 5M): MLB+NHL feature gap closed (7-11 sharp books, NHL 2023-24 refilled), `ladder` seeded 15.5M rungs all five leagues (alt keys backfill-only), MLB/NHL close-layer dual snapshots (23Z eval-only) → CLV/movement computable; §6.11 tail read + §6.5 ladder-lift re-test unblocked. MLB matrices rebuilt 19/19 at 2 seasons; NHL rebuild + both sweeps in flight.
-- 2026-07-09 · WS-2 Track A (key-independent) done: MLB/NHL klepto seed purged (3.1M junk odds rows), backfill `_probe` key bugfix, per-league `trim_gamelog` windows (MLB 95k / NHL 110k rows = 2-season matrices), Savant affinity bot-block fix, activation guard emptied per GO. Gates clean. Backfill + rebuild + sweep/confirm blocked on the activated Odds API key (detail: mlb-nhl-activation.md §10).
+- 2026-07-09 · WS-2 Track A (key-independent) done: MLB/NHL klepto seed purged (3.1M junk odds rows), backfill `_probe` key bugfix, per-league `trim_gamelog` windows (MLB 95k / NHL 110k rows = 2-season matrices), Savant affinity bot-block fix, activation guard emptied per GO. Gates clean. Backfill + rebuild + sweep/confirm blocked on the activated Odds API key (detail: ../archive/mlb-nhl-activation.md §10).
 - 2026-07-09 · Stage-0 engine work LANDED (§6 status revised in place): version stamping train→serve→history→dashboard + `backfill_history_eras.py`; board `--resume`/per-cell upsert/`swept_at`/`code_rev`/`--dry-run`; FamilySpec registry live. Residue → WS-3: confirm queue-manifest, auto archive-snapshot, family-as-swept-axis. Owner declared D1/D2 GO with 5M-credit backfill — WS-2 activation execution starts (plan: `~/.claude/plans/review-the-model-improvement-track-md-ha-lexical-storm.md`).
 - 2026-07-07 · plan reworked profit-first (owner reframe). WS-1 live-alignment = P1; MLB+NHL activation folded in (WS-2); family research DONE (WS-3: Double Poisson count + centered-SN continuous); copula stage-0 DONE (WS-4); sweep-engine Stage-0 spec written. §6 restructured to workstreams; sweep-era verdicts → refs §15. Confirm league-guard added — withheld MLB/NHL never auto-flip pre-D1/D2 (`_drop_activation_gated` + goldens).
 - 2026-06-28 · WS2 book-shape gate cleared but served-gate lift decoupled at w≈0.90 (research bet); book DREB stays in-family SkewNormal (measured skew ≪ bound), ladder table empty → ladder lift deferred. detail refs §15.

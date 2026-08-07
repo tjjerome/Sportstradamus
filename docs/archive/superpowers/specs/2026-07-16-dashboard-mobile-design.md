@@ -166,7 +166,7 @@ work. The seam:
 
 ## 7. Rollout
 
-Phase M on the dashboard-ux lane: implementation plan under `docs/superpowers/plans/`,
+Phase M on the dashboard-ux lane: implementation plan under `docs/archive/superpowers/plans/`,
 a §6 stage-plan entry and ledger line in `docs/handoffs/dashboard-ux.md`, and a short
 DESIGN.md §Mobile note (breakpoint, dock pattern, touch-constellation grammar
 addendum). Estimated 3–4 sessions: dock + viewport; constellation touch; Board cards +

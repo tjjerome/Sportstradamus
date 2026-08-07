@@ -162,7 +162,7 @@ degrades low-mean counts).
 - `--resume` is safe on board sweeps: it reopens each cell's Optuna journal and reuses prior rows
   per row, not per cell, rejecting any whose spec/controls/matrix identity has moved.
 - Deterministic board slack oversells g4 — read direction, not magnitude; confirms decide.
-  Root-caused 2026-07-30 (protocol-dominated; see matrix-provenance-and-crossfit-gates.md §B):
+  Root-caused 2026-07-30 (protocol-dominated; see ../archive/matrix-provenance-and-crossfit-gates.md §B):
   rank and read nominees by `discounted_slack`, treat `confirm_risk=high` corners (continuous
   family on integer target, g4 inside measured inflation) as coin flips regardless of slack,
   and calibrate expectations from the rollup's P(ship | slack band × family) table — raw slack

@@ -29,7 +29,7 @@ a dedicated `variety_lambda` knob that spreads template classes when a whole sla
 the same way.
 
 **Prereqs:** Phase C merged (team-colored stars, lenses — Phase D layers under them). Spec §6.1
-of `docs/superpowers/specs/2026-07-03-p8-oracle-assets-celestial-polish-design.md`; the "loose
+of `docs/archive/superpowers/specs/2026-07-03-p8-oracle-assets-celestial-polish-design.md`; the "loose
 shapes" demo at the bottom of `docs/mockups/p8-constellation-lab.html` is the visual reference
 ("the faint silhouette carries the 'hoop.' Same rules underneath: size ∝ edge, each team seeds
 its side").

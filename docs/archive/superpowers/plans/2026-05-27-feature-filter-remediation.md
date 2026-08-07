@@ -768,7 +768,7 @@ Create `scripts/audit_joint_shap.py`:
 
 ```python
 """Compare per-parameter SHAP rankings vs joint-sum SHAP rankings for the
-ZINB/ZAGamma NFL cells. Verdict goes into docs/superpowers/research/.
+ZINB/ZAGamma NFL cells. Verdict goes into docs/archive/superpowers/research/.
 
 Read-only — does not modify any production artifacts.
 
@@ -861,12 +861,12 @@ Expected: For each ZINB/ZAGamma NFL cell, a table of top-10 features by `(joint_
 - **If divergences are small (<10 ranks on average)** — joint sum is fine; no fix needed. Document the finding and close the open question.
 - **If divergences are large** — open a follow-up PR to compute per-parameter SHAP and store separately, with the filter using either per-parameter top-K or a weighted sum that respects the gate-head's distinct purpose.
 
-Write the verdict to `docs/superpowers/research/2026-05-27-joint-shap-audit.md` (one paragraph describing the finding + decision). Stage that file. **Do not implement a code fix in this PR** — that's a separate decision.
+Write the verdict to `docs/archive/superpowers/research/2026-05-27-joint-shap-audit.md` (one paragraph describing the finding + decision). Stage that file. **Do not implement a code fix in this PR** — that's a separate decision.
 
 - [ ] **Step 4: Commit the audit script + verdict**
 
 ```bash
-git add scripts/audit_joint_shap.py docs/superpowers/research/2026-05-27-joint-shap-audit.md
+git add scripts/audit_joint_shap.py docs/archive/superpowers/research/2026-05-27-joint-shap-audit.md
 git commit -m "$(cat <<'EOF'
 chore(fs): joint-SHAP-per-distribution-parameter audit for ZINB cells
 
@@ -876,7 +876,7 @@ is a per-cell table of features where gate-rank diverges most from
 joint-rank — flagging cases where the joint sum may be diluting
 gate-head signal for ZINB / ZAGamma distributions.
 
-Verdict at docs/superpowers/research/2026-05-27-joint-shap-audit.md.
+Verdict at docs/archive/superpowers/research/2026-05-27-joint-shap-audit.md.
 
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 EOF
@@ -887,7 +887,7 @@ EOF
 
 ## Phase 4 — Evaluation Track (DEFERRED, gated on profiling)
 
-These are bigger algorithmic moves recommended by the researcher. They are NOT part of this PR. Document them in `docs/superpowers/research/2026-05-27-feature-filter-options.md` so the decision is captured, and let the human decide which (if any) to pick up after Phases 1-3 land.
+These are bigger algorithmic moves recommended by the researcher. They are NOT part of this PR. Document them in `docs/archive/superpowers/research/2026-05-27-feature-filter-options.md` so the decision is captured, and let the human decide which (if any) to pick up after Phases 1-3 land.
 
 ### Option A — Adopt powershap (arXiv:2206.08394)
 
