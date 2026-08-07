@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -12,7 +12,10 @@ from click.testing import CliRunner
 from sportstradamus.nightly import LIVE_METRICS_COLUMNS
 from sportstradamus.scripts.backfill_live_metrics import main
 
-NOW = datetime(2026, 5, 20, 0, 0, 0)
+# The CLI walks backward from the real current day (day-rounded, naive UTC —
+# mirrors backfill_live_metrics.main); fixture dates must be relative to the
+# same clock or every endpoint's catalog window is empty and nothing is written.
+NOW = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
 
 
 def _offer(line, bet, model_p, books_p):

@@ -147,8 +147,14 @@ def test_cli_devel_validates_and_summarizes(tmp_path):
             }
         },
     )
+    # The devel branch enforces serve-iff-ship against model_stats; without an
+    # explicit fixture the CLI reads the real production parquet.
+    ms = tmp_path / "ms.parquet"
+    pd.DataFrame([{"league": "NBA", "market": "PTS", "ship": True}]).to_parquet(
+        ms, engine="pyarrow", index=False
+    )
     before = meta_path.read_text()
-    result = _invoke(["--branch", "devel", "--meta", str(meta_path)])
+    result = _invoke(["--branch", "devel", "--meta", str(meta_path), "--model-stats", str(ms)])
     assert result.exit_code == 0, result.output
     assert "active=1" in result.output
     assert "withheld=1" in result.output
@@ -306,12 +312,19 @@ def test_cli_prune_deletes_only_withheld_pickles(tmp_path, monkeypatch):
             }
         },
     )
+    # Serve-iff-ship fixture: keep the served cell passing so the CLI exits 0.
+    ms = tmp_path / "ms.parquet"
+    pd.DataFrame([{"league": "NBA", "market": "PTS", "ship": True}]).to_parquet(
+        ms, engine="pyarrow", index=False
+    )
     result = _invoke(
         [
             "--branch",
             "devel",
             "--meta",
             str(meta_path),
+            "--model-stats",
+            str(ms),
             "--prune",
         ]
     )

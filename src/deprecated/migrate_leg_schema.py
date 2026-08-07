@@ -1,3 +1,25 @@
+# ARCHIVED 2026-08-06 from src/sportstradamus/scripts/migrate_leg_schema.py
+# Reason: one-shot Sheets-era leg-schema migration, already executed in
+#   production (Jul 2026); every live writer emits the structured schema
+#   directly, so the script has no remaining caller.
+# Last live SHA: 2f32edd
+# Original imports (now unresolved here):
+#   import click
+#   import numpy as np
+#   import pandas as pd
+#   import pyarrow.parquet as pq
+#   from tqdm import tqdm
+#   from sportstradamus import clv
+#   from sportstradamus.analysis import _leg_market_map
+#   from sportstradamus.helpers import Archive, stat_dist, stat_map
+#   from sportstradamus.helpers.io import PARLAY_HIST_PATH, _atomic_tmp, _atomic_write_parquet
+#   from sportstradamus.prediction.cli import (
+#       _ALT_LINE_TOL_CONTINUOUS,
+#       _ALT_LINE_TOL_COUNT,
+#       _COUNT_DISTS,
+#   )
+#   from sportstradamus.prediction.parlay import resolve_leg_stat
+
 """One-shot migration: Sheets-era leg strings/tuples -> structured schema.
 
 Converts parlay_hist (Leg 1..6 -> legs structs), user_slips (desc JSON ->

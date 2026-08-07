@@ -74,6 +74,8 @@ from sportstradamus.training.structural_strategies import (
     TWO_PART_STRATEGY as RECEIVING,
 )
 
+pytestmark = pytest.mark.diagnostics
+
 _MATRIX_SHA = "matrix-123"
 
 

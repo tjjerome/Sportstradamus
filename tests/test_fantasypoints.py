@@ -28,6 +28,7 @@ from sportstradamus.collectors.fantasypoints.transform import (
     write_parquet,
 )
 from sportstradamus.collectors.transport import (
+    REQUEST_TIMEOUT_S,
     CollectorAuthError,
     CollectorDecodeError,
     CookieClient,
@@ -134,7 +135,7 @@ def test_client_env_var_overrides_keys(monkeypatch):
     monkeypatch.setenv("FANTASYPOINTS_COOKIE", "from_env=1")
     captured = {}
 
-    def capture(method, url, headers=None, params=None, json=None):
+    def capture(method, url, headers=None, params=None, json=None, timeout=None):
         captured["headers"] = headers
         return FakeResponse(200, body={})
 
@@ -147,9 +148,10 @@ def test_client_env_var_overrides_keys(monkeypatch):
 def test_client_post_sends_json_body(monkeypatch):
     captured = {}
 
-    def capture(method, url, headers=None, params=None, json=None):
+    def capture(method, url, headers=None, params=None, json=None, timeout=None):
         captured["method"] = method
         captured["json"] = json
+        captured["timeout"] = timeout
         return FakeResponse(200, body={"ok": True})
 
     _patch_request(monkeypatch, capture)
@@ -158,12 +160,13 @@ def test_client_post_sends_json_body(monkeypatch):
     assert out == {"ok": True}
     assert captured["method"] == "POST"
     assert captured["json"] == body
+    assert captured["timeout"] == REQUEST_TIMEOUT_S
 
 
 def test_client_strips_accept_encoding_from_request_headers(monkeypatch):
     captured = {}
 
-    def capture(method, url, headers=None, params=None, json=None):
+    def capture(method, url, headers=None, params=None, json=None, timeout=None):
         captured["headers"] = headers
         return FakeResponse(200, body={"ok": True})
 
@@ -180,7 +183,7 @@ def test_client_strips_accept_encoding_from_request_headers(monkeypatch):
 
 
 def test_client_raises_decode_error_with_diagnostic_on_non_json_body(monkeypatch):
-    def respond_with_garbage(method, url, headers=None, params=None, json=None):
+    def respond_with_garbage(method, url, headers=None, params=None, json=None, timeout=None):
         return FakeResponse(
             200,
             content=b"\x83\xaa\xbf",
@@ -449,7 +452,7 @@ def test_cli_run_writes_parquet_via_post(monkeypatch, tmp_path):
     monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
     captured = {}
 
-    def capture(method, url, headers=None, params=None, json=None):
+    def capture(method, url, headers=None, params=None, json=None, timeout=None):
         captured["method"] = method
         captured["json"] = json
         return FakeResponse(
@@ -1108,7 +1111,7 @@ def test_cli_discover_dry_run_lists_new_endpoints(monkeypatch, tmp_path):
 
     catalog_path = tmp_path / "catalog.json"
 
-    def fake_request(method, url, headers=None, params=None, json=None):
+    def fake_request(method, url, headers=None, params=None, json=None, timeout=None):
         assert method == "POST"
         return FakeResponse(200, body=_registry_sample())
 
@@ -1143,7 +1146,7 @@ def test_cli_discover_writes_catalog_and_skips_existing(monkeypatch, tmp_path):
         catalog_path,
     )
 
-    def fake_request(method, url, headers=None, params=None, json=None):
+    def fake_request(method, url, headers=None, params=None, json=None, timeout=None):
         return FakeResponse(200, body=_registry_sample())
 
     monkeypatch.setattr(client_mod.requests, "request", fake_request)
@@ -1392,7 +1395,7 @@ def test_cli_run_writes_report_with_per_spec_outcomes(monkeypatch, tmp_path):
     monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
     monkeypatch.setattr(client_mod, "_RETRY_BACKOFF_S", (0.0, 0.0, 0.0))
 
-    def fake_request(method, url, headers=None, params=None, json=None):
+    def fake_request(method, url, headers=None, params=None, json=None, timeout=None):
         if "passing-basic" in url:
             return FakeResponse(
                 200,
@@ -1472,7 +1475,7 @@ def test_cli_run_records_routing_failure_in_report_without_aborting_batch(monkey
     monkeypatch.setenv("FANTASYPOINTS_AUTHORIZATION", "Bearer test")
     monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
 
-    def fake_request(method, url, headers=None, params=None, json=None):
+    def fake_request(method, url, headers=None, params=None, json=None, timeout=None):
         return FakeResponse(
             200,
             body={"content": {"table": {"rows": {"count": 1, "values": [{"x": 1}]}}}},
@@ -1539,7 +1542,7 @@ def test_cli_run_interactive_refresh_resumes_after_401(monkeypatch, tmp_path):
         "content": {"table": {"rows": {"count": 1, "values": [{"teamAbbreviation": "CIN"}]}}}
     }
 
-    def fake_request(method, url, headers=None, params=None, json=None):
+    def fake_request(method, url, headers=None, params=None, json=None, timeout=None):
         call_count["n"] += 1
         # First call fails 401, second succeeds (after the refresh).
         if call_count["n"] == 1:
@@ -1666,7 +1669,7 @@ def test_cli_backfill_writes_parquets_for_each_week(monkeypatch, tmp_path):
 
     seen_bodies = []
 
-    def fake_request(method, url, headers=None, params=None, json=None):
+    def fake_request(method, url, headers=None, params=None, json=None, timeout=None):
         seen_bodies.append(json)
         return FakeResponse(
             200,
@@ -1979,7 +1982,7 @@ def test_cli_run_mode_s2d_sends_expanded_weeks(monkeypatch, tmp_path):
     monkeypatch.setattr(client_mod, "_INTER_REQUEST_SLEEP_S", 0.0)
     captured = {}
 
-    def capture(method, url, headers=None, params=None, json=None):
+    def capture(method, url, headers=None, params=None, json=None, timeout=None):
         captured["json"] = json
         return FakeResponse(200, body={"content": {"table": {"rows": {"values": [{"a": 1}]}}}})
 
@@ -2023,7 +2026,7 @@ def test_cli_discover_replace_flag_discards_existing_catalog(monkeypatch, tmp_pa
         catalog_path,
     )
 
-    def fake_request(method, url, headers=None, params=None, json=None):
+    def fake_request(method, url, headers=None, params=None, json=None, timeout=None):
         return FakeResponse(200, body=_registry_sample())
 
     monkeypatch.setattr(client_mod.requests, "request", fake_request)

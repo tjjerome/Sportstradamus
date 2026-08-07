@@ -4,12 +4,23 @@ A monotone map ``g`` fit on the validation PIT ``Z = F(Y|X)`` so ``g(Z)`` is Uni
 applied to any CDF value ``u = F(point)`` it returns the recalibrated ``g(u)``. Distinct
 from the single-line ``prob_recal_isotonic`` corrector: this reshapes the whole predictive
 CDF (the alt-line ladder), not just the over-probability at one line.
+
+Also pins the two seams that apply ``g`` outside the scorecard: the ``model_prob``
+inference warp (``over = 1 − g(F(line))``, a legacy no-blob pickle an exact no-op) and
+the training pipeline's persisted test-set over-prob, which must be the same warped
+quantity so Gates 1/5 judge the cell as served.
 """
 
 import numpy as np
+import pandas as pd
 from scipy import stats
 
+from sportstradamus.prediction.model_prob import _apply_cdf_recal_over
 from sportstradamus.training import posthoc
+from sportstradamus.training.pipeline import (
+    _step_calibrate_dispersion,
+    _step_compute_test_probabilities,
+)
 
 
 def _ks_uniform(u: np.ndarray) -> float:
@@ -139,3 +150,90 @@ def test_crossfit_keeps_randomized_draws_grouped_by_source_row(monkeypatch):
             assert np.any(np.isclose(train, first, atol=1e-12, rtol=0.0)) == np.any(
                 np.isclose(train, second, atol=1e-12, rtol=0.0)
             )
+
+
+def test_apply_cdf_recal_over_matches_one_minus_g_of_cdf():
+    # Inference serves ``over = 1 − g(F(line))``. The raw model over-prob is
+    # ``1 − F(line)``, so the model_prob seam applies ``1 − g(1 − over_raw)`` — the
+    # same map ``g`` the offline Gate 4 scored on the PIT.
+    rng = np.random.default_rng(7)
+    blob = posthoc.fit_isotonic_pit(rng.beta(0.5, 0.5, size=2000))
+    cdf = rng.uniform(0.0, 1.0, size=50)  # F(line) for a batch of offers
+    warped = _apply_cdf_recal_over(1.0 - cdf, blob)
+    np.testing.assert_allclose(warped, 1.0 - posthoc.apply_cdf_recal(blob, cdf))
+
+
+def test_apply_cdf_recal_over_none_is_identity():
+    # A legacy pickle (no ``pit_recal_blob``) must serve byte-identically.
+    over = np.array([0.1, 0.4, 0.9])
+    np.testing.assert_array_equal(_apply_cdf_recal_over(over, None), over)
+
+
+def test_calibrate_dispersion_rung_c_hands_served_val_params_downstream():
+    # Rung C bypasses the scalar (c, skew) fit, but _step_calibrate_temperature and
+    # _step_compute_test_probabilities still read the served (raw) val/test params off the
+    # returned dict; leaving any None crashes get_odds (ev=None). Pins that contract.
+    rng = np.random.default_rng(9)
+    n = 500
+    mean, sigma, alpha = np.full(n, 6.0), np.full(n, 3.0), np.full(n, 2.0)
+    fused = {
+        "r_test": None,
+        "r_blend_val": None,
+        "alpha_blend": None,
+        "alpha_blend_val": None,
+        "beta_blend_val": None,
+        "phi_test": None,
+        "phi_blend_val": None,
+        "weighted_mean": mean,
+        "weighted_mean_val": mean,
+        "sn_sigma_blend_test": sigma,
+        "sn_sigma_blend_val": sigma,
+        "sn_alpha_blend_test": alpha,
+        "sn_alpha_blend_val": alpha,
+        "mix_blend_test": None,
+        "mix_blend_val": None,
+    }
+    splits = {"y_validation": pd.DataFrame({"Result": rng.gamma(2.0, 3.0, n)})}
+    out = _step_calibrate_dispersion(
+        {}, fused, splits, "SkewNormal", 1.0, 0.0, 100.0, 0.5, posthoc_slug="cdf_recal_isotonic"
+    )
+    for key in (
+        "val_weighted_mean_val",
+        "sn_sigma_blend_val",
+        "sn_alpha_blend_val",
+        "sn_sigma_blend_test",
+        "sn_alpha_blend_test",
+    ):
+        assert out[key] is not None, f"Rung C left {key} None — downstream get_odds will crash"
+    assert out["c_opt"] == 1.0 and out["skew_cal"] == 0.0  # scalar bypassed
+    assert out["pit_recal_blob"] is not None  # a map was fit
+
+
+def _skewnormal_inputs():
+    n = 300
+    rng = np.random.default_rng(8)
+    fused = {"weighted_mean": np.full(n, 18.0), "gate_blend_test": None}
+    splits = {"B_test": pd.DataFrame({"Line": rng.uniform(8.0, 30.0, n)})}
+    base = {"sn_sigma_blend_test": np.full(n, 5.0), "sn_alpha_blend_test": np.full(n, 2.0)}
+    blob = posthoc.fit_isotonic_pit(rng.beta(0.5, 0.5, size=3000))
+    return fused, splits, base, blob
+
+
+def test_step_compute_test_probabilities_warps_over_through_g():
+    # Gate 1 (Brier-skill) and Gate 5 (ECE) read the persisted ``P`` column, and a Rung-C
+    # cell is *served* with the whole-CDF map applied, so the test-set over-prob the
+    # pipeline records must be ``1 − g(F(line))``. A no-blob run must stay an exact no-op.
+    fused, splits, base, blob = _skewnormal_inputs()
+    raw = _step_compute_test_probabilities(
+        fused, {**base, "pit_recal_blob": None}, splits, {}, "SkewNormal", 1
+    )
+    rerun = _step_compute_test_probabilities(
+        fused, {**base, "pit_recal_blob": None}, splits, {}, "SkewNormal", 1
+    )
+    np.testing.assert_array_equal(raw, rerun)
+    warped = _step_compute_test_probabilities(
+        fused, {**base, "pit_recal_blob": blob}, splits, {}, "SkewNormal", 1
+    )
+    raw_under = raw[:, 0]  # F(line)
+    np.testing.assert_allclose(warped[:, 1], 1.0 - posthoc.apply_cdf_recal(blob, raw_under))
+    assert not np.allclose(warped[:, 1], raw[:, 1])  # the map is non-trivial on this PIT

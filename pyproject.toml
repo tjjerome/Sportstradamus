@@ -256,7 +256,7 @@ ignore-signatures = true
 testpaths = ["tests"]
 markers = [
     "integration: end-to-end pipeline test (confer -> meditate -> prophecize) on cached fixtures. Skipped by default; opt in with `pytest -m integration`.",
-    "diagnostics: tests for dev-only research scripts (zinb-routing, icc) that never ship to production. Slow (statsmodels bootstrap). Skipped by default; opt in with `pytest -m diagnostics`.",
+    "diagnostics: dev-only tooling tests (research scripts + model-strategy sweep/confirm orchestration) that never ship to production. Slow. Skipped by default; opt in with `pytest -m diagnostics`.",
 ]
 # Default runs skip the integration + diagnostics suites and parallelize via
 # pytest-xdist (`-n auto`). CI's `pytest tests/golden/` is unaffected by the marker

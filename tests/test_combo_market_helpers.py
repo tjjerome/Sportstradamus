@@ -114,6 +114,9 @@ def test_nhl_combo_opponent_uses_upcoming_games_key(monkeypatch):
 
     s = nhl.StatsNHL.__new__(nhl.StatsNHL)
     s.league = "NHL"
+    # __new__ skips Stats.__init__; mirror its default so the normal (non-cold-
+    # rebuild) branch of check_combo_markets runs.
+    s.snapshot_only_rebuild = False
     s.log_strings = {
         "player": "playerName",
         "team": "team",

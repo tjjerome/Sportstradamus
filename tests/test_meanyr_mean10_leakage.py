@@ -1,7 +1,8 @@
-"""Regression test for the MeanYr/Mean10 leakage rule in ``Stats.base_profile``.
+"""Regression test for the MeanYr/Mean10 leakage rule in ``Stats.window_short_logs``.
 
 ``stats/base.py`` builds ``short_gamelog`` with a strict less-than date filter
-(``gameDates < date``), so the target game date is excluded from every
+(``gameDates < target_date`` in ``Stats.window_short_logs``, the helper
+``base_profile`` delegates to), so the target game date is excluded from every
 downstream aggregate (``MeanYr``, ``Mean10``, ``GamesPlayed``, ...). Flipping
 the operator to ``<=`` would contaminate the per-player baseline features
 with the very target the model is trying to predict — fatal for the centered
@@ -10,13 +11,13 @@ SkewNormal target in P1 of the GBDT-mean-regression project (and severe for
 
 Two layers of guarding:
 
-1. **Static check**: the source of ``Stats.base_profile`` must contain the
+1. **Static check**: the source of ``Stats.window_short_logs`` must contain the
    literal strict-less-than expression. Catches a textual regression in
    review without needing a runtime fixture.
 2. **Functional check**: applies the same filter to a synthetic gamelog and
    asserts the sentinel row at the target date is excluded from MeanYr /
-   Mean10 / GamesPlayed aggregates computed the same way ``base.py:681-693``
-   does.
+   Mean10 / GamesPlayed aggregates computed the same way the rolling-feature
+   block in ``stats/base.py`` does.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ _LOOKBACK_DAYS = 365
 
 
 def _filter_matches_production(gamelog: pd.DataFrame, target_date: date) -> pd.DataFrame:
-    """Replicate ``Stats.base_profile`` lines 223-226 on the synthetic frame.
+    """Replicate the ``Stats.window_short_logs`` mask on the synthetic frame.
 
     Pure function so the test asserts the exact production semantics; any
     drift between this and the source is caught by the static check below.
@@ -44,14 +45,14 @@ def _filter_matches_production(gamelog: pd.DataFrame, target_date: date) -> pd.D
     return gamelog[(one_year_ago <= gameDates) & (gameDates < target_date)].copy()
 
 
-def test_base_profile_source_uses_strict_less_than():
-    """Guards against a textual ``<`` → ``<=`` regression in base.py:226."""
-    src = inspect.getsource(Stats.base_profile)
+def test_window_short_logs_source_uses_strict_less_than():
+    """Guards against a textual ``<`` → ``<=`` regression in the short-log mask."""
+    src = inspect.getsource(Stats.window_short_logs)
     # The leakage-critical filter expression. Whitespace-tolerant.
-    assert "(gameDates < date)" in src.replace("\n", " "), (
-        "Stats.base_profile must use strict less-than (`gameDates < date`) so "
-        "the target game date is excluded from short_gamelog. A change to `<=` "
-        "would leak the target row into MeanYr/Mean10."
+    assert "(gameDates < target_date)" in src.replace("\n", " "), (
+        "Stats.window_short_logs must use strict less-than (`gameDates < "
+        "target_date`) so the target game date is excluded from short_gamelog. "
+        "A change to `<=` would leak the target row into MeanYr/Mean10."
     )
 
 
@@ -92,9 +93,10 @@ def test_meanyr_mean10_exclude_target_date_sentinel():
 def test_expanding_features_source_uses_strict_less_than():
     """Guards the M-1 career expanding mean against a ``<`` → ``<=`` regression."""
     src = inspect.getsource(Stats._expanding_features)
-    assert "gld < date" in src.replace("\n", " "), (
-        "Stats._expanding_features must use strict less-than (`gld < date`) so the "
-        "target game is excluded from MeanYr_expanding_shifted / _vsopp / _eb."
+    assert "gld < pd.Timestamp(date)" in src.replace("\n", " "), (
+        "Stats._expanding_features must use strict less-than (`gld < "
+        "pd.Timestamp(date)`) so the target game is excluded from "
+        "MeanYr_expanding_shifted / _vsopp / _eb."
     )
 
 

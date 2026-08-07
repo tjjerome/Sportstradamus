@@ -28,6 +28,8 @@ from sportstradamus.training.model_strategy.sweep import EVAL_SPLIT_CROSSFIT
 from sportstradamus.training.role_specs import role_spec_for
 from sportstradamus.training.structural_strategies import AFFINE_STRATEGY, TWO_PART_STRATEGY
 
+pytestmark = pytest.mark.diagnostics
+
 _MATRIX_SHA = "matrix-123"
 _MATRIX_COLUMNS = frozenset(
     column

@@ -41,6 +41,9 @@ def _game_context_historical() -> pd.DataFrame:
                 ls["team"]: team,
                 ls["opponent"]: OPPONENT[team],
                 ls["home"]: True,
+                # Regular-season game ID (code "2" at index 2): the _playoff_flag /
+                # _series_context tail of _game_context reads it; Playoff stays 0.
+                ls["game"]: "0022400001",
                 "moneyline": -110.0,
                 "totals": TEAM_TOTAL[team],
             }

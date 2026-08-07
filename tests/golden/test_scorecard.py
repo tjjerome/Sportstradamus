@@ -7,13 +7,21 @@ so no trained model, network, or plotting backend is required.
 
 import hashlib
 import importlib.resources as pkg_resources
+import json
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from sportstradamus import data
+from sportstradamus.helpers.distributions import _dp_cdf_pmf, _dp_ppf
+from sportstradamus.training import group_conditional_cdf as receiving
+from sportstradamus.training import posthoc
+from sportstradamus.training.group_conditional_cdf._pool import fixed_pool_blob
 from sportstradamus.training.model_strategy import (
+    STRATEGY_SIGNATURE_CSV_COLUMN,
+    STRATEGY_STATUS_CSV_COLUMN,
+    STRUCTURAL_STRATEGY_CSV_COLUMN,
     artifact_identity_columns,
     build_artifact_identity,
     get_strategy,
@@ -31,7 +39,11 @@ from sportstradamus.training.scorecard import (
     _GATE6_MARGIN,
     _GATE6_STAR_REF_BASKETBALL,
     _SUPERSEDE_S3_Z_MIN,
+    ACTUAL_COL,
+    DECILE_COL,
+    DEFAULT_PRED_COL,
     TARGET_NORM_NONE,
+    _apply_pit_recal_by_row,
     _decode_sn_loc_scale,
     _dispersion_diagnostics,
     _ece_debias_offset,
@@ -2864,3 +2876,650 @@ def test_load_test_set_rejects_missing_or_variable_persisted_denom(tmp_path):
     variable.to_csv(variable_path, index=False)
     with pytest.raises(ValueError, match="exactly one DenomCol"):
         load_test_set(variable_path, "Blended_EV")
+
+
+# ---------------------------------------------------------------------------
+# §6.1 Rung C — Gate 4 applies the whole-CDF map ``g`` to the PIT before the KS.
+# The map is persisted as a constant ``PITRecalKnots`` JSON column on the scored
+# test CSV (mirroring ``DenomCol``/``GlobalMean``); a cell without the column
+# behaves byte-identically to a pre-Rung-C cell.
+# ---------------------------------------------------------------------------
+
+_RECAL_LOC, _RECAL_SCALE, _RECAL_ALPHA = 20.0, 5.0, 3.0
+
+
+def _under_dispersed_skewnorm(n: int = 3000):
+    # Served predictive is SkewNormal(loc, scale, alpha); outcomes are drawn 1.7x wider, so
+    # the served PIT piles into the tails (the under-dispersion signature Gate 4 fails on).
+    from scipy.stats import skewnorm
+
+    rng = np.random.default_rng(0)
+    y = skewnorm.rvs(_RECAL_ALPHA, loc=_RECAL_LOC, scale=_RECAL_SCALE * 1.7, size=n, random_state=rng)
+    df = pd.DataFrame(
+        {"SN_Loc": _RECAL_LOC, "SN_Scale": _RECAL_SCALE, "SN_Alpha": _RECAL_ALPHA}, index=range(n)
+    )
+    return df, y
+
+
+def test_gate_g4_reflects_warped_pit():
+    df, y = _under_dispersed_skewnorm()
+    raw_ks = _randomized_pit_ks(df, "SkewNormal", y, strategy=TARGET_NORM_NONE)
+    # g fit on this cell's own served PIT uniformizes it, so the warped Gate-4 KS must drop.
+    served_pit = _randomized_pit_draws(df, "SkewNormal", y, strategy=TARGET_NORM_NONE)[0]
+    blob = posthoc.fit_isotonic_pit(served_pit)
+    warped = df.assign(PITRecalKnots=json.dumps(blob))
+    warped_ks = _randomized_pit_ks(warped, "SkewNormal", y, strategy=TARGET_NORM_NONE)
+    assert warped_ks < raw_ks
+    assert warped_ks < 0.05
+
+
+def test_gate_g4_identity_without_knots_column():
+    # No PITRecalKnots column => no warp => the exact pre-Rung-C statistic. A lambda=0
+    # (identity) blob must reproduce that same number, pinning the no-op both ways.
+    df, y = _under_dispersed_skewnorm()
+    bare = _randomized_pit_ks(df, "SkewNormal", y, strategy=TARGET_NORM_NONE)
+    served_pit = _randomized_pit_draws(df, "SkewNormal", y, strategy=TARGET_NORM_NONE)[0]
+    identity = df.assign(PITRecalKnots=json.dumps(posthoc.fit_isotonic_pit(served_pit, lam=0.0)))
+    identity_ks = _randomized_pit_ks(identity, "SkewNormal", y, strategy=TARGET_NORM_NONE)
+    assert identity_ks == bare
+
+
+def test_load_test_set_preserves_pit_recal_knots(tmp_path):
+    # report() scores a dumped CSV through load_test_set, which keeps only an allowlist of
+    # columns. The constant PITRecalKnots map must survive that load, or the official Gate 4
+    # silently scores the un-recalibrated cell. Both the deterministic A/B (pd.read_csv) and the
+    # assign()-based tests above bypass load_test_set, so only this end-to-end load path catches it.
+    rng = np.random.default_rng(1)
+    n = 200
+    blob = posthoc.fit_isotonic_pit(rng.beta(0.5, 0.5, size=3000))
+    df = pd.DataFrame(
+        {
+            DECILE_COL: rng.uniform(10.0, 30.0, n),
+            ACTUAL_COL: rng.uniform(0.0, 40.0, n),
+            DEFAULT_PRED_COL: rng.uniform(10.0, 30.0, n),
+            "SN_Loc": _RECAL_LOC,
+            "SN_Scale": _RECAL_SCALE,
+            "SN_Alpha": _RECAL_ALPHA,
+            "PITRecalKnots": json.dumps(blob),
+        }
+    )
+    path = tmp_path / "WNBA_PA.csv"
+    df.to_csv(path, index=False)
+    loaded = load_test_set(path, DEFAULT_PRED_COL)
+    probe = np.linspace(0.05, 0.95, n)
+    np.testing.assert_array_equal(
+        _apply_pit_recal_by_row(loaded, probe),
+        posthoc.apply_cdf_recal(blob, probe),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Double Poisson ("DPO") — DP_MU / DP_PHI param columns (the count analogue of
+# NegBin's R / NB_P), gate-free family. Pins the column inference + load path,
+# Gate-4 randomized-PIT calibration, the Gate-6 count-cohort over-leg, and an
+# end-to-end gate_row. The kernel itself is pinned in tests/test_double_poisson.py.
+# ---------------------------------------------------------------------------
+
+# Low-mean / near-unit-precision band — the lattice regime DPO cells live in
+# (NBA PF, NHL points per the WS-3 Phase-0 screen).
+_DPO_MU_RANGE = (0.5, 4.0)
+_DPO_PHI_RANGE = (0.6, 1.8)
+
+
+def _dpo_frame(n: int = 600, seed: int = 0) -> pd.DataFrame:
+    """Calibrated DPO frame: ``Result`` drawn from each row's own ``(mu, phi)``
+    by inverse-CDF sampling, with a calibrated over-probability ``P`` and a
+    coin-flip book so the priced gates all compute.
+    """
+    rng = np.random.default_rng(seed)
+    mu = rng.uniform(*_DPO_MU_RANGE, n)
+    phi = rng.uniform(*_DPO_PHI_RANGE, n)
+    y = _dp_ppf(rng.uniform(size=n), mu, phi)
+    line = np.round(mu) + 0.5
+    cdf_at_line, _ = _dp_cdf_pmf(np.floor(line), mu, phi)
+    return pd.DataFrame(
+        {
+            "MeanYr": mu,
+            "Result": y,
+            "EV": mu,
+            "DP_MU": mu,
+            "DP_PHI": phi,
+            "Line": line,
+            "P": 1.0 - cdf_at_line,
+            "Odds": np.full(n, 0.5),
+        }
+    )
+
+
+def test_infer_dist_and_load_test_set_keep_dp_columns(tmp_path):
+    df = _dpo_frame(50)
+    assert _infer_dist_from_columns(df) == "DPO"
+    csv = tmp_path / "NBA_PF.csv"
+    df.to_csv(csv, index=False)
+    loaded = load_test_set(csv, "EV")
+    assert {"DP_MU", "DP_PHI"} <= set(loaded.columns)
+    assert _infer_dist_from_columns(loaded) == "DPO"
+
+
+def test_randomized_pit_ks_calibrated_dpo_clears_gate4():
+    """Well-calibrated DPO sample passes the Gate-4 KS; a 2x-too-narrow predictive fails it."""
+    df = _dpo_frame(6000, seed=7)
+    y = df["Result"].to_numpy()
+    assert _randomized_pit_ks(df, "DPO", y, strategy="baseline") < 0.05
+    narrow = df.assign(DP_PHI=df["DP_PHI"] * 4.0)  # variance mu/phi shrinks 4x
+    assert _randomized_pit_ks(narrow, "DPO", y, strategy="baseline") > 0.10
+
+
+def test_gate_row_end_to_end_dpo():
+    """gate_row auto-detects DP columns: analytical G4 + coverage populate and the
+    calibrated frame clears the shape/bias gates through apply_thresholds."""
+    row = apply_thresholds(
+        gate_row(_dpo_frame(600, seed=1), "EV", league="NBA", market="PF", strategy="baseline")
+    )
+    assert row["g4_pit_ks"] is not None
+    assert row["g4_iqr_pred"] > 0.0
+    assert row["central50_coverage"] is not None
+    assert row["central80_coverage"] is not None
+    assert row["g2_pass"] and row["g3_pass"] and row["g4_pass"]
+    assert isinstance(row["ship"], bool)
+
+
+def _dpo_bench_over_frame(n: int = 200, seed: int = 7) -> pd.DataFrame:
+    """Mirror of ``_count_legs_frame`` on DP params: the stable BENCH (low MeanYr)
+    is over-predicted 1.3x vs a realized mean of 2.0 (above the
+    ``_GATE6_OVER_MIN_MEAN`` guard), so the over-leg must fire iff DPO is in the
+    Gate-6 count cohort.
+    """
+    rng = np.random.default_rng(seed)
+    meanyr = np.concatenate([rng.uniform(0.5, 3.0, n // 2), rng.uniform(8.0, 20.0, n // 2)])
+    mean10 = meanyr * (1.0 + rng.uniform(-0.05, 0.05, n))
+    bench = meanyr <= np.quantile(meanyr, 0.25)
+    return pd.DataFrame(
+        {
+            "MeanYr": meanyr,
+            "Mean10": mean10,
+            "Result": np.where(bench, 2.0, mean10) + rng.normal(0.0, 0.2, n),
+            "Blended_EV": np.where(bench, 1.3 * 2.0, mean10),
+            "Player": [f"P{i % 40}" for i in range(n)],
+            "DP_MU": meanyr,
+            "DP_PHI": np.ones(n),
+        }
+    )
+
+
+def test_gate6_over_leg_covers_dpo_cells():
+    from sportstradamus.training.scorecard import _gate6_legs
+
+    g6 = _gate6_legs(_dpo_bench_over_frame(), "Blended_EV", league="WNBA", prior_g6_fired=None)
+    assert g6["g6_over_ci_lo"] is not None
+    assert g6["g6_over_ci_lo"] > 1.0 + _GATE6_MARGIN
+
+
+# ---------------------------------------------------------------------------
+# 2-component Gaussian mixture — MIX_Loc1/MIX_Loc2/MIX_Scale1/MIX_Scale2/MIX_W1
+# in the cell's NORMALIZED space plus the same constant DenomCol/GlobalMean
+# columns SkewNormal uses, so both locs and both scales must decode through the
+# target-normalization registry before evaluating.
+# ---------------------------------------------------------------------------
+
+# All frames encode against ratio_meanyr: decoded loc/scale = raw * MeanYr
+# (MeanYr kept well above the 0.5 decode floor so the multiply is exact).
+_MIX_STRATEGY = "ratio_meanyr"
+_MIX_COLS = {"MIX_Loc1", "MIX_Loc2", "MIX_Scale1", "MIX_Scale2", "MIX_W1"}
+
+
+def _mix_frame(n: int = 200, seed: int = 4) -> pd.DataFrame:
+    """Calibrated Mixture frame: ``Result`` drawn from each row's own decoded
+    mixture (component picked ~Bernoulli(w1)), a ``Line`` near the mixture
+    median, and a coin-flip book so the priced gates all compute.
+    """
+    rng = np.random.default_rng(seed)
+    meanyr = rng.uniform(2.0, 10.0, n)
+    w1 = rng.uniform(0.3, 0.9, n)
+    raw_loc1 = rng.uniform(0.7, 0.9, n)
+    raw_loc2 = rng.uniform(1.1, 1.4, n)
+    raw_scale1 = rng.uniform(0.12, 0.22, n)
+    raw_scale2 = rng.uniform(0.22, 0.35, n)
+    loc1, loc2 = raw_loc1 * meanyr, raw_loc2 * meanyr
+    scale1, scale2 = raw_scale1 * meanyr, raw_scale2 * meanyr
+    from_first = rng.random(n) < w1
+    result = np.where(from_first, rng.normal(loc1, scale1), rng.normal(loc2, scale2))
+    df = pd.DataFrame(
+        {
+            "MeanYr": meanyr,
+            "Result": result,
+            "EV": w1 * loc1 + (1.0 - w1) * loc2,
+            "MIX_Loc1": raw_loc1,
+            "MIX_Loc2": raw_loc2,
+            "MIX_Scale1": raw_scale1,
+            "MIX_Scale2": raw_scale2,
+            "MIX_W1": w1,
+            "DenomCol": "MeanYr",
+        }
+    )
+    median = _pred_ppf(df, "Mixture", 0.5, strategy=_MIX_STRATEGY)
+    df["Line"] = np.round(median) + 0.5
+    cdf_at_line, _ = _pred_cdf_pmf(df, "Mixture", df["Line"].to_numpy(), strategy=_MIX_STRATEGY)
+    df["P"] = 1.0 - cdf_at_line
+    df["Odds"] = 0.5
+    return df
+
+
+def test_infer_dist_and_load_test_set_keep_mix_columns(tmp_path):
+    df = _mix_frame(50)
+    assert _infer_dist_from_columns(df) == "Mixture"
+    csv = tmp_path / "NBA_PTS.csv"
+    df.to_csv(csv, index=False)
+    loaded = load_test_set(csv, "EV")
+    assert set(loaded.columns) >= _MIX_COLS
+    assert _infer_dist_from_columns(loaded) == "Mixture"
+
+
+def test_mixture_pit_uniform_pins_decode_and_cdf_composition():
+    """Result is drawn from each row's own decoded mixture, so its PIT must be
+    ~Uniform(0, 1); a decode that dropped the MeanYr denominator or scored only
+    one component would blow the KS well past this bound (KS at n=200: E ≈ 0.06,
+    α=0.05 critical ≈ 0.096). Zero point mass routes the randomized PIT down the
+    single-deterministic-draw (continuous) branch.
+    """
+    df = _mix_frame()
+    pit, pmf = _pred_cdf_pmf(df, "Mixture", df["Result"].to_numpy(), strategy=_MIX_STRATEGY)
+    np.testing.assert_array_equal(pmf, np.zeros(len(df)))
+    assert _ks_uniform(pit) < 0.08
+
+
+def test_mixture_degenerate_w1_reproduces_plain_normal_cdf():
+    """w1=1 collapses the mixture to component 1: the CDF must equal the plain
+    normal at the decoded loc/scale, with the dead component's params inert."""
+    from scipy.stats import norm
+
+    n = 64
+    meanyr = np.linspace(2.0, 8.0, n)
+    df = pd.DataFrame(
+        {
+            "MeanYr": meanyr,
+            "MIX_Loc1": np.full(n, 1.1),
+            "MIX_Loc2": np.full(n, 3.0),
+            "MIX_Scale1": np.full(n, 0.2),
+            "MIX_Scale2": np.full(n, 0.9),
+            "MIX_W1": np.ones(n),
+            "DenomCol": "MeanYr",
+        }
+    )
+    y = 1.1 * meanyr + np.linspace(-1.0, 1.0, n)
+    cdf, _ = _pred_cdf_pmf(df, "Mixture", y, strategy=_MIX_STRATEGY)
+    np.testing.assert_allclose(cdf, norm.cdf(y, loc=1.1 * meanyr, scale=0.2 * meanyr), atol=1e-12)
+
+
+def test_gate_row_end_to_end_mixture():
+    """gate_row auto-detects MIX columns: analytical G4 + coverage populate and
+    the calibrated frame clears the shape/bias gates through apply_thresholds."""
+    row = apply_thresholds(
+        gate_row(_mix_frame(600, seed=2), "EV", league="NBA", market="PTS", strategy=_MIX_STRATEGY)
+    )
+    assert row["g4_pit_ks"] is not None
+    assert row["g4_iqr_pred"] > 0.0
+    assert row["central50_coverage"] is not None
+    assert row["central80_coverage"] is not None
+    assert row["g2_pass"] and row["g3_pass"] and row["g4_pass"]
+    assert isinstance(row["ship"], bool)
+
+
+# ---------------------------------------------------------------------------
+# Official-scorecard parity guards for the NFL receiving-yards v3 two-part head.
+# ---------------------------------------------------------------------------
+
+_MATRIX_HASH = "a" * 64
+_SPLIT_FINGERPRINT = "b" * 64
+
+
+def _strategy_identity_columns() -> dict[str, object]:
+    spec = get_strategy(receiving.CANDIDATE_NAME)
+    legacy_payload = {
+        "schema_version": receiving.SCHEMA_VERSION,
+        "status": "active",
+        "validation_audit": {"split_fingerprint_sha256": _SPLIT_FINGERPRINT},
+    }
+    identity = build_artifact_identity(
+        spec.slug,
+        "NFL",
+        "receiving yards",
+        strategy_controls(spec)[0],
+        legacy_payload,
+        matrix_hash=_MATRIX_HASH,
+    )
+    return artifact_identity_columns(identity.as_model_blob())
+
+
+def _identity_map(lam: float) -> dict[str, object]:
+    return {
+        "kind": "isotonic_pit",
+        "lam": lam,
+        "x": [0.0, 1.0],
+        "y": [0.0, 1.0],
+    }
+
+
+def _calibration_blob() -> dict[str, object]:
+    curved = {
+        "kind": "isotonic_pit",
+        "lam": 1.0,
+        "x": [0.0, 0.4, 1.0],
+        "y": [0.0, 0.2, 1.0],
+    }
+    return {
+        "kind": receiving.CANDIDATE_NAME,
+        "schema_version": receiving.SCHEMA_VERSION,
+        "line_probability_only": True,
+        "temperature_fit_scope": "pre_map_raw_endpoint_settlement",
+        "temperature": 1.4,
+        "cdf": {
+            "kind": "role_position_two_part_cdf",
+            "role_boundary": {
+                role: {
+                    "kind": "two_part_role_boundary",
+                    "intercept": -0.3 if role == "low" else 0.2,
+                    "nonpositive": _identity_map(0.75),
+                }
+                for role in receiving.ROLE_VALUES
+            },
+            "positive": {
+                f"{role}_pos{position}": curved.copy()
+                for role in receiving.ROLE_VALUES
+                for position in receiving.POSITION_CODES
+            },
+            "rb_boundary_residual": 0.25,
+            "boundary_residual_positions": [3],
+        },
+        "probability_pool": fixed_pool_blob(),
+    }
+
+
+def _candidate_frame() -> pd.DataFrame:
+    from scipy.stats import skewnorm
+
+    result = np.array([0.0, 4.0, 8.0, 12.0, 20.0, 30.0])
+    loc = np.array([6.0, 8.0, 10.0, 12.0, 18.0, 24.0])
+    scale = np.array([5.0, 5.5, 6.0, 6.5, 8.0, 9.0])
+    alpha = np.array([1.0, 1.3, 1.6, 1.9, 1.2, 0.8])
+    gate = np.array([0.25, 0.20, 0.15, 0.10, 0.08, 0.05])
+    base_f0 = skewnorm.cdf(0.0, alpha, loc=loc, scale=scale)
+    f0 = gate + (1.0 - gate) * base_f0
+    frame = pd.DataFrame(
+        {
+            "MeanYr": np.array([8.0, 10.0, 12.0, 15.0, 22.0, 28.0]),
+            "Result": result,
+            "Blended_EV": np.array([7.0, 9.0, 11.0, 14.0, 20.0, 26.0]),
+            "Line": np.array([5.5, 7.5, 9.5, 11.5, 19.5, 27.5]),
+            "P": np.array([0.53, 0.57, 0.51, 0.49, 0.55, 0.52]),
+            "P_PrePool": np.array([0.58, 0.61, 0.54, 0.46, 0.60, 0.56]),
+            "SN_Loc": loc,
+            "SN_Scale": scale,
+            "SN_Alpha": alpha,
+            "Gate": gate,
+            "StructuralAdapterStrategy": receiving.CANDIDATE_NAME,
+            "StructuralRoute": np.array(["low", "low", "high", "high", "low", "high"]),
+            "StructuralFallback": False,
+            "StructuralCalibration": receiving.serialize_two_part_calibration(_calibration_blob()),
+            "StructuralRole": np.array(["low", "low", "high", "high", "low", "high"]),
+            "StructuralPosition": np.array([2, 3, 4, 2, 3, 4]),
+            "StructuralF0": f0,
+        }
+    )
+    for column, value in _strategy_identity_columns().items():
+        frame[column] = value
+    return frame
+
+
+def test_receiving_v3_gate4_transforms_outcome_endpoints_before_randomization():
+    frame = _candidate_frame()
+    actual = frame["Result"].to_numpy(dtype=float)
+    raw_upper, raw_mass = _pred_cdf_pmf(frame, "SkewNormal", actual, strategy="none")
+    expected = receiving.two_part_randomized_pit(
+        _calibration_blob(),
+        raw_upper - raw_mass,
+        raw_upper,
+        frame["StructuralF0"].to_numpy(dtype=float),
+        frame["StructuralRole"].to_numpy(),
+        frame["StructuralPosition"].to_numpy(),
+    )
+
+    scored = np.asarray(_randomized_pit_draws(frame, "SkewNormal", actual, strategy="none"))
+    np.testing.assert_array_equal(scored, expected)
+
+    different_lines = frame.assign(Line=np.linspace(100.5, 600.5, len(frame)))
+    rescored = np.asarray(
+        _randomized_pit_draws(different_lines, "SkewNormal", actual, strategy="none")
+    )
+    np.testing.assert_array_equal(rescored, expected)
+
+
+def test_load_test_set_retains_and_validates_receiving_v3_contract(tmp_path):
+    path = tmp_path / "NFL_receiving-yards.csv"
+    _candidate_frame().to_csv(path, index=False)
+
+    loaded = load_test_set(path, "Blended_EV")
+
+    assert {
+        "StructuralAdapterStrategy",
+        "StructuralCalibration",
+        "StructuralRole",
+        "StructuralPosition",
+        "StructuralF0",
+        "P_PrePool",
+    }.issubset(loaded.columns)
+    assert set(_strategy_identity_columns()).issubset(loaded.columns)
+    assert loaded["StructuralCalibration"].nunique() == 1
+
+
+def test_load_test_set_rejects_partial_or_identity_absent_receiving_contract(tmp_path):
+    partial = _candidate_frame().drop(columns=STRATEGY_SIGNATURE_CSV_COLUMN)
+    partial_path = tmp_path / "partial-identity.csv"
+    partial.to_csv(partial_path, index=False)
+    with pytest.raises(ValueError, match="StrategySignature"):
+        load_test_set(partial_path, "Blended_EV")
+
+    adapter_only = _candidate_frame().drop(columns=list(_strategy_identity_columns()))
+    adapter_path = tmp_path / "adapter-only.csv"
+    adapter_only.to_csv(adapter_path, index=False)
+    with pytest.raises(ValueError, match="adapter strategy columns require generic"):
+        load_test_set(adapter_path, "Blended_EV")
+
+
+def test_load_test_set_rejects_inactive_or_mismatched_structural_identity(tmp_path):
+    inactive = _candidate_frame()
+    inactive[STRATEGY_STATUS_CSV_COLUMN] = "killed_fallback"
+    inactive_path = tmp_path / "inactive.csv"
+    inactive.to_csv(inactive_path, index=False)
+    with pytest.raises(ValueError, match="inactive strategy artifact"):
+        load_test_set(inactive_path, "Blended_EV")
+
+    mismatched = _candidate_frame()
+    mismatched[STRUCTURAL_STRATEGY_CSV_COLUMN] = "none"
+    mismatched_path = tmp_path / "mismatched.csv"
+    mismatched.to_csv(mismatched_path, index=False)
+    with pytest.raises(ValueError, match="stale, mismatched, or wrong-cell"):
+        load_test_set(mismatched_path, "Blended_EV")
+
+
+def test_load_test_set_rejects_missing_or_wrong_schema_receiving_blob(tmp_path):
+    frame = _candidate_frame()
+    frame.loc[0, "StructuralAdapterStrategy"] = "none"
+    path = tmp_path / "nonconstant-experiment.csv"
+    frame.to_csv(path, index=False)
+    with pytest.raises(ValueError, match="one constant nonmissing StructuralAdapterStrategy"):
+        load_test_set(path, "Blended_EV")
+
+    frame = _candidate_frame()
+    frame.loc[0, "StructuralCalibration"] = None
+    path = tmp_path / "missing-payload.csv"
+    frame.to_csv(path, index=False)
+    with pytest.raises(ValueError, match="nonmissing JSON value on every row"):
+        load_test_set(path, "Blended_EV")
+
+    frame = _candidate_frame()
+    blob = json.loads(frame["StructuralCalibration"].iloc[0])
+    blob["schema_version"] = 99
+    frame["StructuralCalibration"] = json.dumps(blob)
+    path = tmp_path / "wrong-schema.csv"
+    frame.to_csv(path, index=False)
+    with pytest.raises(ValueError, match="unknown two-part calibration blob kind or schema"):
+        load_test_set(path, "Blended_EV")
+
+
+@pytest.mark.parametrize(
+    ("column", "bad_value", "message"),
+    [
+        ("StructuralRole", "slot", "only nonmissing low/high"),
+        ("StructuralPosition", 2.5, "integer league roster codes"),
+        ("StructuralF0", 1.2, "finite probabilities"),
+        ("SN_Scale", 0.0, "strictly positive"),
+        ("P_PrePool", np.nan, "P_PrePool must be finite"),
+    ],
+)
+def test_load_test_set_rejects_invalid_receiving_v3_row_fields(
+    tmp_path, column, bad_value, message
+):
+    frame = _candidate_frame()
+    frame.loc[0, column] = bad_value
+    path = tmp_path / f"invalid-{column}.csv"
+    frame.to_csv(path, index=False)
+
+    with pytest.raises(ValueError, match=message):
+        load_test_set(path, "Blended_EV")
+
+
+def test_load_test_set_rejects_partial_receiving_v3_contract(tmp_path):
+    frame = _candidate_frame().drop(columns="StructuralF0")
+    path = tmp_path / "partial.csv"
+    frame.to_csv(path, index=False)
+
+    with pytest.raises(ValueError, match=r"artifact missing required columns.*StructuralF0"):
+        load_test_set(path, "Blended_EV")
+
+
+def test_receiving_v3_gate4_rejects_f0_shape_drift():
+    frame = _candidate_frame()
+    frame["StructuralF0"] += 1e-4
+
+    with pytest.raises(ValueError, match="does not match the persisted served SkewNormal shape"):
+        _randomized_pit_draws(
+            frame,
+            "SkewNormal",
+            frame["Result"].to_numpy(dtype=float),
+            strategy="none",
+        )
+
+
+def test_receiving_v3_scorecard_contract_is_cell_scoped():
+    with pytest.raises(ValueError, match="does not match the generic model-strategy identity"):
+        gate_row(
+            _candidate_frame(),
+            "Blended_EV",
+            league="NBA",
+            market="PTS",
+            strategy="none",
+        )
+
+
+def test_diff_cli_routes_explicit_cell_identity_to_receiving_v3_gate(tmp_path):
+    path = tmp_path / "receiving-v3.csv"
+    _candidate_frame().to_csv(path, index=False)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "--baseline",
+            str(path),
+            "--candidate",
+            str(path),
+            "--league",
+            "NFL",
+            "--market",
+            "receiving-yards",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "supersede:" in result.output
+
+    inferred = CliRunner().invoke(
+        main,
+        ["--baseline", str(path), "--candidate", str(path)],
+    )
+    assert inferred.exit_code == 0, inferred.output
+
+
+def test_diff_cli_rejects_mixed_legacy_and_generic_identity(tmp_path):
+    candidate = _candidate_frame()
+    candidate_path = tmp_path / "candidate.csv"
+    candidate.to_csv(candidate_path, index=False)
+
+    legacy = candidate.drop(
+        columns=[
+            *list(_strategy_identity_columns()),
+            "StructuralAdapterStrategy",
+            "StructuralRoute",
+            "StructuralFallback",
+            "StructuralCalibration",
+            "StructuralF0",
+            "StructuralRole",
+            "StructuralPosition",
+        ]
+    )
+    legacy_path = tmp_path / "legacy.csv"
+    legacy.to_csv(legacy_path, index=False)
+
+    result = CliRunner().invoke(
+        main,
+        ["--baseline", str(legacy_path), "--candidate", str(candidate_path)],
+    )
+
+    assert result.exit_code != 0
+    assert "cannot mix legacy and generic strategy identities" in result.output
+
+
+def test_row_specific_calibration_payloads_score_each_row_against_its_own_fold_map():
+    """A cross-fit artifact carries one payload per fold; each row is scored under its own.
+
+    Splitting the frame's rows across two maps must reproduce, row for row, what scoring each
+    half under its own constant-payload frame produces — that is what makes a cross-fit board
+    row and a full-HPO one the same statistic.
+    """
+    frame = _candidate_frame()
+    actual = frame["Result"].to_numpy(dtype=float)
+    flat = _calibration_blob()
+    flat["cdf"]["positive"] = {group: _identity_map(0.0) for group in flat["cdf"]["positive"]}
+    payloads = np.where(
+        np.arange(len(frame)) < 3,
+        frame["StructuralCalibration"].iloc[0],
+        receiving.serialize_two_part_calibration(flat),
+    )
+    mixed = frame.assign(StructuralCalibration=payloads)
+
+    scored = np.asarray(_randomized_pit_draws(mixed, "SkewNormal", actual, strategy="none"))
+    curved = np.asarray(_randomized_pit_draws(frame, "SkewNormal", actual, strategy="none"))
+    flat_only = np.asarray(
+        _randomized_pit_draws(
+            frame.assign(StructuralCalibration=payloads[-1]), "SkewNormal", actual, strategy="none"
+        )
+    )
+
+    np.testing.assert_array_equal(scored[:, :3], curved[:, :3])
+    np.testing.assert_array_equal(scored[:, 3:], flat_only[:, 3:])
+    assert not np.array_equal(curved[:, 3:], flat_only[:, 3:])
+
+
+def test_row_specific_payloads_load_and_validate_every_distinct_blob(tmp_path):
+    """Load-time validation is per payload, so a bad fold map fails closed like a bad constant."""
+    frame = _candidate_frame()
+    broken = json.loads(frame["StructuralCalibration"].iloc[0])
+    broken["schema_version"] = 99
+    frame["StructuralCalibration"] = np.where(
+        np.arange(len(frame)) < 3, frame["StructuralCalibration"], json.dumps(broken)
+    )
+    path = tmp_path / "one-bad-fold.csv"
+    frame.to_csv(path, index=False)
+
+    with pytest.raises(ValueError, match="unknown two-part calibration blob kind or schema"):
+        load_test_set(path, "Blended_EV")

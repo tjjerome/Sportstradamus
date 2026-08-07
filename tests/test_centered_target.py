@@ -158,9 +158,18 @@ def test_offset_meta_centered_eb_has_required_keys():
     assert meta["games_col"] == "GamesPlayed"
 
 
-def test_offset_meta_ratio_is_none():
-    """Ratio strategy needs no baseline mirror — denom column + MeanYr suffice."""
-    assert get_target_normalization("ratio_meanyr").offset_meta(global_mean=8.69) is None
+def test_offset_meta_ratio_persists_denom_col():
+    """Ratio pickles persist the denominator so serve decodes with the trained denom.
+
+    Guards the g4 decode-denom fix: a ZI SkewNormal cell trained on
+    ``MeanYr_nonzero`` must not decode against a hardcoded ``MeanYr``.
+    """
+    strat = get_target_normalization("ratio_meanyr")
+    assert strat.offset_meta(global_mean=8.69) == {"method": "ratio", "denom_col": "MeanYr"}
+    assert strat.offset_meta(global_mean=8.69, denom_col="MeanYr_nonzero") == {
+        "method": "ratio",
+        "denom_col": "MeanYr_nonzero",
+    }
 
 
 def test_start_mode_flag_per_strategy():
