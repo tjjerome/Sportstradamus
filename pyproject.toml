@@ -3,6 +3,7 @@ name = "Sportstradamus"
 version = "4.2.0"
 description = "Scrape Sportsbooks Odds and Player Stats and surface +EV bets in a Streamlit dashboard"
 authors = ["Trevor Jerome <trevor81994@gmail.com>"]
+license = "MIT"
 readme = "README.md"
 homepage = "https://github.com/tjjerome/sportstradamus"
 repository = "https://github.com/tjjerome/sportstradamus"
