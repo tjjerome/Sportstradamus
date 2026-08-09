@@ -201,3 +201,35 @@ def test_committed_records_carry_correct_platform_after_shared_draw(monkeypatch,
     assert len(records) == _ledger_selection.MAX_ENTRIES_PER_DAY
     for rec in records:
         assert rec["platform"] == id_to_platform[rec["id"]]
+
+
+# --- live_load stamps Platform on the scraped offers ---------------------------
+
+
+def test_live_load_stamps_platform_on_offers(monkeypatch) -> None:
+    """``live_load`` is the ledger's only offers source, and ``build_leg`` /
+    Sleeper flex pricing read ``Platform`` — a column ``process_offers`` never
+    stamps (prophecize adds it to its own copies in prediction/cli.py). The
+    fake ``live_load``s elsewhere in the suite include the column in their
+    fixtures, which is exactly how the missing stamp shipped unnoticed."""
+    from sportstradamus.strategies import underdog_pickem
+
+    class _StubStats:
+        season_start = None
+
+        def load(self) -> None:
+            pass
+
+    for name in ("StatsNBA", "StatsNFL", "StatsWNBA", "StatsMLB", "StatsNHL"):
+        monkeypatch.setattr(f"sportstradamus.stats.{name}", _StubStats)
+    monkeypatch.setattr(underdog_pickem.odds_budget, "league_is_live", lambda *a: False)
+    monkeypatch.setattr("sportstradamus.books.get_ud", list)
+    monkeypatch.setattr(
+        "sportstradamus.prediction.scoring.process_offers",
+        lambda *a, **k: (pd.DataFrame([{"Player": "A", "Market": "PTS"}]), None),
+    )
+    monkeypatch.setattr(underdog_pickem, "_parlays_per_variant", lambda *a: {})
+
+    _, offers_df = underdog_pickem.live_load(ledger._SHARED_CONFIG, "Underdog")
+
+    assert (offers_df["Platform"] == "Underdog").all()

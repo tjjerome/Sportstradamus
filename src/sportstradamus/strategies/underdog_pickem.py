@@ -385,6 +385,9 @@ def live_load(
     offers_df, _ = process_offers(
         loaders[platform](), platform, stats, contest_variant=config.contest_variants[0]
     )
+    # process_offers doesn't stamp Platform — prophecize adds it to its own copies
+    # (prediction/cli.py), and build_leg/parlay pricing require the column here too.
+    offers_df["Platform"] = platform
     return _parlays_per_variant(offers_df, stats, config, platform), offers_df
 
 
