@@ -384,18 +384,15 @@ def test_lab_training_renders_gate_matrix_and_glance_strip(monkeypatch, tmp_path
 
     io_module = importlib.import_module("sportstradamus.helpers.io")
     data_module = importlib.import_module("sportstradamus.dashboard.data")
-    lab_training_module = importlib.import_module("sportstradamus.dashboard.surfaces.lab_training")
     monkeypatch.setattr(io_module, "MODEL_STATS_PATH", fixture)
     monkeypatch.setattr(data_module, "MODEL_STATS_PATH", fixture)
-    monkeypatch.setattr(lab_training_module, "MODEL_STATS_PATH", fixture)
-    monkeypatch.setattr(lab_training_module, "LIVE_METRICS_PATH", missing_live_metrics)
-    # Sixth gap, seen only on the CI runner (no live model_stats.parquet): under
-    # full-suite ordering there, the page's re-executed ``from helpers.io import
-    # MODEL_STATS_PATH`` still resolved the live path and read_gate1 raised its
-    # missing-parquet UsageError. Redirecting ``read_gate1`` through the
-    # ``training.graduation`` module object (a package no test's sys.modules sweep
-    # touches, so its identity is stable) pins the fixture regardless of which
-    # path binding the page ends up reading.
+    # Sixth gap: ``import_module`` on the page EXECUTES its module-level
+    # ``lifecycle_table(MODEL_STATS_PATH, ...)`` call — with the live parquet
+    # absent (CI runner) that import itself raises read_gate1's UsageError
+    # before any patch lands on the page module. Redirect ``read_gate1``
+    # through the ``training.graduation`` module object first, so both the
+    # import below and every AppTest re-execution of the page read the fixture
+    # no matter which path binding they resolve.
     graduation_module = importlib.import_module("sportstradamus.training.graduation")
     real_read_gate1 = graduation_module.read_gate1
     monkeypatch.setattr(
@@ -403,6 +400,9 @@ def test_lab_training_renders_gate_matrix_and_glance_strip(monkeypatch, tmp_path
         "read_gate1",
         lambda path, league=None: real_read_gate1(fixture, league),
     )
+    lab_training_module = importlib.import_module("sportstradamus.dashboard.surfaces.lab_training")
+    monkeypatch.setattr(lab_training_module, "MODEL_STATS_PATH", fixture)
+    monkeypatch.setattr(lab_training_module, "LIVE_METRICS_PATH", missing_live_metrics)
 
     at = AppTest.from_file(str(_APP), default_timeout=30)
     at.run()
