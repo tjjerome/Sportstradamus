@@ -9,15 +9,22 @@
         },
         "BLK": {
             "dist": "ZINB",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "prob_recal_platt",
+            "dist_training_loss": "nll",
+            "count_dispersion_objective": "crps",
+            "blending": "nll",
+            "zinb_mode": "hurdle"
         },
         "BLST": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "roe_mean",
+            "dist_training_loss": "nll",
+            "count_dispersion_objective": "pit_ks",
+            "blending": "nll"
         },
         "DREB": {
             "dist": "DPO",
@@ -34,10 +41,13 @@
             "posthoc": "none"
         },
         "FG3M": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "isotonic_mean",
+            "dist_training_loss": "nll",
+            "count_dispersion_objective": "crps",
+            "blending": "crps"
         },
         "FGA": {
             "dist": "SkewNormal",
@@ -78,10 +88,13 @@
             "posthoc": "none"
         },
         "PA": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "dist": "NegBin",
+            "shipped": "devel",
+            "target_normalization": "none",
+            "posthoc": "prob_recal_isotonic",
+            "dist_training_loss": "nll",
+            "count_dispersion_objective": "pit_ks",
+            "blending": "crps"
         },
         "PF": {
             "dist": "ZINB",
@@ -91,15 +104,21 @@
         },
         "PR": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_mean10",
+            "posthoc": "prob_recal_platt",
+            "dist_training_loss": "nll",
+            "sn_param": "direct",
+            "blending": "crps"
         },
         "PRA": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_eb_meanyr_k10",
+            "posthoc": "prob_recal_platt",
+            "dist_training_loss": "crps",
+            "sn_param": "direct",
+            "blending": "crps"
         },
         "PTS": {
             "dist": "SkewNormal",
@@ -108,17 +127,23 @@
             "posthoc": "none"
         },
         "RA": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "dist": "DPO",
+            "shipped": "devel",
+            "target_normalization": "none",
+            "posthoc": "prob_recal_isotonic",
+            "dist_training_loss": "nll",
+            "count_dispersion_objective": "pit_ks",
+            "blending": "nll"
         },
         "REB": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
+            "dist": "NegBin",
+            "shipped": "devel",
+            "target_normalization": "none",
             "posthoc": "none",
-            "hpo_selection": "calibrated"
+            "hpo_selection": "calibrated",
+            "dist_training_loss": "nll",
+            "count_dispersion_objective": "crps",
+            "blending": "crps"
         },
         "STL": {
             "dist": "DPO",
@@ -154,11 +179,12 @@
         },
         "carries": {
             "dist": "DPO",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "prob_recal_isotonic",
-            "count_dispersion_objective": "crps",
-            "blending": "crps"
+            "posthoc": "prob_recal_platt",
+            "count_dispersion_objective": "pit_ks",
+            "blending": "nll",
+            "dist_training_loss": "nll"
         },
         "completions": {
             "dist": "SkewNormal",
@@ -179,10 +205,12 @@
         },
         "fantasy points underdog": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "centered_additive_eb_meanyr_k10",
-            "posthoc": "none",
-            "blending": "nll"
+            "shipped": "devel",
+            "target_normalization": "ratio_meanyr",
+            "posthoc": "prob_recal_isotonic",
+            "blending": "nll",
+            "dist_training_loss": "crps",
+            "sn_param": "centered"
         },
         "interceptions": {
             "dist": "ZINB",
@@ -326,7 +354,7 @@
         },
         "goalie fantasy points underdog": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "ratio_meanyr",
             "posthoc": "cdf_recal_isotonic",
             "dist_training_loss": "crps",
@@ -366,13 +394,14 @@
             "blending": "crps"
         },
         "powerPlayPoints": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "NegBin",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none",
+            "posthoc": "prob_recal_isotonic",
             "zinb_mode": "hurdle",
             "count_dispersion_objective": "pit_ks",
-            "blending": "nll"
+            "blending": "crps",
+            "dist_training_loss": "nll"
         },
         "saves": {
             "dist": "SkewNormal",
@@ -422,11 +451,14 @@
     },
     "WNBA": {
         "AST": {
-            "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "centered_additive_mean10",
-            "posthoc": "cdf_recal_isotonic",
-            "hpo_selection": "calibrated"
+            "dist": "DPO",
+            "shipped": "devel",
+            "target_normalization": "none",
+            "posthoc": "prob_recal_platt",
+            "hpo_selection": "calibrated",
+            "dist_training_loss": "nll",
+            "count_dispersion_objective": "pit_ks",
+            "blending": "crps"
         },
         "BLK": {
             "dist": "ZINB",
@@ -515,16 +547,22 @@
         },
         "RA": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "centered_additive_mean10",
-            "posthoc": "none",
-            "hpo_selection": "calibrated"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_eb_meanyr_k10",
+            "posthoc": "prob_recal_isotonic",
+            "hpo_selection": "calibrated",
+            "dist_training_loss": "nll",
+            "sn_param": "direct",
+            "blending": "crps"
         },
         "REB": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "centered_additive_mean10",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_eb_meanyr_k10",
+            "posthoc": "cdf_recal_isotonic",
+            "dist_training_loss": "nll",
+            "sn_param": "direct",
+            "blending": "crps"
         },
         "STL": {
             "dist": "DPO",
