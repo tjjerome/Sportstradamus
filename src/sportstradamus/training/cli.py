@@ -19,6 +19,7 @@ from sportstradamus.helpers import (
     get_logger,
     odds_budget,
 )
+from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
 from sportstradamus.helpers.io import MODEL_STATS_PATH, market_file_slug, prune_model_pickle
 from sportstradamus.helpers.locks import (
     ORCHESTRATED_ENV_VAR,
@@ -348,15 +349,11 @@ def _lock_production_artifacts(
     default=False,
     help="Rebuild only the per-league correlation matrices and exit; skip the per-market training loop",
 )
-@click.option(
-    "--log-level",
-    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
-    default="INFO",
-    help="Verbosity for the structured JSONL log.",
-)
+@LOG_LEVEL_OPTION
 @click.option(
     "--deterministic/--no-deterministic",
     default=False,
+    hidden=True,
     help=(
         "DEBUG/EVAL ONLY: pin all RNGs, use fixed fast hyperparameters, and "
         "freeze input to the cached parquet so runs are bit-identical for the "
@@ -367,6 +364,7 @@ def _lock_production_artifacts(
 @click.option(
     "--holdout-blind/--no-holdout-blind",
     default=False,
+    hidden=True,
     help=(
         "SEARCH ONLY: drop the held-out rows from the run entirely and score on "
         "player-disjoint cross-fit folds of validation, so a recipe search never sees "
@@ -378,6 +376,7 @@ def _lock_production_artifacts(
     type=click.Choice([LOSS_AUTO, *sorted(baselines.TARGET_NORMALIZATION_SLUGS)]),
     default=LOSS_AUTO,
     show_default=True,
+    hidden=True,
     help=(
         "Target-normalization transform for SkewNormal markets. 'auto' (default) "
         "honors each cell's stat_meta target_normalization; an explicit slug "
@@ -391,6 +390,7 @@ def _lock_production_artifacts(
     type=click.Choice([LOSS_AUTO, *sorted(POSTHOC_SLUGS)]),
     default=LOSS_AUTO,
     show_default=True,
+    hidden=True,
     help=(
         "Per-cell calibration-method selector (single-valued, mutually exclusive). 'auto' "
         "(default) honors each cell's stat_meta posthoc; an explicit slug overrides every "
@@ -405,6 +405,7 @@ def _lock_production_artifacts(
     type=click.Choice([LOSS_AUTO, "joint", "hurdle"]),
     default=LOSS_AUTO,
     show_default=True,
+    hidden=True,
     help=(
         "Model architecture for ZINB markets. 'auto' (default) honors each "
         "cell's stat_meta zinb_mode (else 'joint'); an explicit slug overrides "
@@ -419,6 +420,7 @@ def _lock_production_artifacts(
     type=click.Choice(list(DIST_TRAINING_LOSS_CHOICES)),
     default=LOSS_AUTO,
     show_default=True,
+    hidden=True,
     help=(
         "Training loss for the LightGBMLSS distribution. 'auto' (default) honors each "
         "cell's persisted stat_meta dist_training_loss, falling back to the per-family "
@@ -431,6 +433,7 @@ def _lock_production_artifacts(
     type=click.Choice([LOSS_AUTO, *sorted(_FORCEABLE_DISTS)]),
     default=LOSS_AUTO,
     show_default=True,
+    hidden=True,
     help=(
         "Training distribution family. 'auto' (default) honors each cell's stat_meta dist "
         "(else the data-driven mean>=2 / zero-rate pick); an explicit family (DPO / NegBin / "
@@ -442,6 +445,7 @@ def _lock_production_artifacts(
     type=click.Choice([LOSS_AUTO, *sorted(calibration.BLENDING_SLUGS)]),
     default=LOSS_AUTO,
     show_default=True,
+    hidden=True,
     help=(
         "Loss minimized when fitting the model↔book blend weight. 'auto' (default) honors each "
         "cell's stat_meta blending; an explicit slug overrides every cell. An Operation Ship 75 "
@@ -472,6 +476,7 @@ def _lock_production_artifacts(
 @click.option(
     "--bypass-withholding/--no-bypass-withholding",
     default=False,
+    hidden=True,
     help=(
         "One-shot escape from the ship gate: train EVERY market in the "
         "registry regardless of shipped status. Withheld SkewNormal cells "
@@ -486,6 +491,7 @@ def _lock_production_artifacts(
     type=click.Choice(["None", "MAD", "L2"]),
     default="None",
     show_default=True,
+    hidden=True,
     help=(
         "Per-distribution-parameter gradient stabilization for LightGBMLSS. 'None' (default) "
         "is current production. 'MAD'/'L2' damp the scale-head's large/outlier gradients (the "
@@ -497,6 +503,7 @@ def _lock_production_artifacts(
     type=click.Choice([LOSS_AUTO, "loss", "calibrated"]),
     default=LOSS_AUTO,
     show_default=True,
+    hidden=True,
     help=(
         "Optuna trial-selection rule for SkewNormal and LSS count/Gamma cells (hurdle-ZINB has no "
         "Optuna search). 'auto' (default) honors each cell's stat_meta hpo_selection (else 'loss'); "
@@ -511,6 +518,7 @@ def _lock_production_artifacts(
     type=click.Choice([LOSS_AUTO, "crps", "pit_ks"]),
     default=LOSS_AUTO,
     show_default=True,
+    hidden=True,
     help=(
         "Objective the count branch (NegBin/ZINB/Gamma) minimizes when fitting the dispersion "
         "scale. 'auto' (default) honors each cell's stat_meta count_dispersion_objective (else "
@@ -524,6 +532,7 @@ def _lock_production_artifacts(
     type=click.Choice([LOSS_AUTO, "direct", "centered"]),
     default=LOSS_AUTO,
     show_default=True,
+    hidden=True,
     help=(
         "SkewNormal parametrization. 'auto' (default) honors each cell's stat_meta sn_param "
         "(else 'direct', current production); 'centered' boosts (mean, sd, gamma1) heads and "
@@ -542,6 +551,7 @@ def _lock_production_artifacts(
 @click.option(
     "--full-rebuild/--no-full-rebuild",
     default=False,
+    hidden=True,
     help=(
         "Rebuild from locally cached raw inputs without reading/appending the canonical matrix. "
         "Requires --matrix-only and --matrix-output."
@@ -550,25 +560,30 @@ def _lock_production_artifacts(
 @click.option(
     "--matrix-output",
     type=click.Path(path_type=Path, file_okay=False),
+    hidden=True,
     help="Quarantine directory for full-rebuild parquet and manifest outputs.",
 )
 @click.option(
     "--dependency-root",
     type=click.Path(path_type=Path, file_okay=False),
+    hidden=True,
     help="Root containing a versioned model-dependency namespace.",
 )
 @click.option(
     "--frozen-matrix-dir",
     type=click.Path(path_type=Path, file_okay=False, exists=True),
+    hidden=True,
     help="Directory of lineage-validated matrices to train without rebuilding or rewriting them.",
 )
 @click.option(
     "--artifact-output",
     type=click.Path(path_type=Path, file_okay=False),
+    hidden=True,
     help="Isolated directory for model and test-set artifacts from frozen-matrix training.",
 )
 @click.option(
     "--dependency-namespace",
+    hidden=True,
     help=(
         "Dependency identity namespace stamped onto isolated model artifacts, or selected "
         "from --dependency-root during a full rebuild."

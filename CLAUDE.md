@@ -237,13 +237,13 @@ poetry install
 poetry run pre-commit install   # required once after clone
 
 # CLI entry points
-poetry run prophecize        # prediction pipeline → dashboard snapshots
-poetry run confer            # fetch current odds/props
-poetry run meditate          # train/retrain ML models
-poetry run reflect           # historical parlay performance
-poetry run dashboard         # Streamlit dashboard
-poetry run pickem-build      # Underdog Power/Flex/Rivals recommendations YAML
-poetry run kelly             # re-size a recommendations YAML offline
+poetry run sportstradamus prophecize        # prediction pipeline → dashboard snapshots
+poetry run sportstradamus confer            # fetch current odds/props
+poetry run sportstradamus meditate          # train/retrain ML models
+poetry run sportstradamus reflect           # historical parlay performance
+poetry run sportstradamus dashboard         # Streamlit dashboard
+poetry run sportstradamus bet pickem      # Underdog Power/Flex/Rivals recommendations YAML
+poetry run sportstradamus bet kelly             # re-size a recommendations YAML offline
 
 # Quality gates — all three must pass before committing
 poetry run ruff check src/sportstradamus/
@@ -443,7 +443,7 @@ consult.
 touching production:
 
 ```bash
-poetry run python -m sportstradamus.training.scorecard \
+poetry run sportstradamus ship scorecard \
     --baseline data/test_sets/NBA_PTS.csv \
     --candidate /tmp/NBA_PTS_centered.csv
 ```

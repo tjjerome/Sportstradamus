@@ -1,0 +1,14 @@
+Usage: sportstradamus fetch savant verify [OPTIONS]
+
+  Confirm each tool's parquet landed with rows for the season and date.
+
+  Exits non-zero if any expected snapshot is missing or empty so cron can detect
+  a botched capture without parsing stdout.
+
+Options:
+  --season INTEGER   Season. Defaults to current.
+  --date [%Y-%m-%d]  Capture-date stamp (YYYY-MM-DD) for the snapshot dir.
+                     Defaults to today.
+  --only TEXT        Only check these endpoint names (repeatable).
+  --catalog FILE     Override catalog path (default: bundled config).
+  --help             Show this message and exit.

@@ -4,17 +4,17 @@
 # Usage:
 #   run_job.sh <job> [extra args passed through to the underlying command]
 #
-# Jobs:
-#   prophecize         poetry run prophecize
-#   confer             poetry run confer
-#   close-lines        poetry run confer --close-lines
-#   meditate           poetry run meditate
-#   reflect            poetry run reflect
+# Jobs (all dispatch through `python -m sportstradamus`, see the case map):
+#   prophecize         prediction pipeline -> dashboard snapshots
+#   confer             fetch current odds/props
+#   close-lines        confer --close-lines
+#   meditate           train/retrain models
+#   reflect            nightly resolution
 #   gate-status        scripts/gate_status_update.sh (monthly: refresh main ship_config, open PR)
-#   fp-fetch           poetry run fp-fetch run (weekly: snapshot Fantasy Points Data Suite)
-#   ctg-fetch          poetry run ctg-fetch run (snapshot Cleaning the Glass NBA tables)
-#   savant-fetch       poetry run savant-fetch run (snapshot Baseball Savant MLB leaderboards)
-#   ledger-commit      poetry run ledger-commit --run-slot {morning,afternoon}
+#   fp-fetch           fetch fp run (weekly: snapshot Fantasy Points Data Suite)
+#   ctg-fetch          fetch ctg run (snapshot Cleaning the Glass NBA tables)
+#   savant-fetch       fetch savant run (snapshot Baseball Savant MLB leaderboards)
+#   ledger-commit      bet ledger-commit --run-slot {morning,afternoon}
 #
 # Environment (optional):
 #   HEALTHCHECK_URL_<JOB>   per-job healthchecks.io URL (e.g. HEALTHCHECK_URL_PROPHECIZE)
@@ -50,17 +50,20 @@ fi
 JOB="$1"
 shift
 
+# Module form (python -m) never consults console-script stubs, so a job that
+# fires mid-`poetry install` can't hit a half-written entry point.
+UMBRELLA=(poetry run python -m sportstradamus)
 case "$JOB" in
-    prophecize)   CMD=(poetry run prophecize) ;;
-    confer)       CMD=(poetry run confer) ;;
-    close-lines)  CMD=(poetry run confer --close-lines) ;;
-    meditate)     CMD=(poetry run meditate) ;;
-    reflect)      CMD=(poetry run reflect) ;;
+    prophecize)   CMD=("${UMBRELLA[@]}" prophecize) ;;
+    confer)       CMD=("${UMBRELLA[@]}" confer) ;;
+    close-lines)  CMD=("${UMBRELLA[@]}" confer --close-lines) ;;
+    meditate)     CMD=("${UMBRELLA[@]}" meditate) ;;
+    reflect)      CMD=("${UMBRELLA[@]}" reflect) ;;
     gate-status)  CMD=(bash "$SCRIPT_DIR/gate_status_update.sh") ;;
-    fp-fetch)     CMD=(poetry run fp-fetch run) ;;
-    ctg-fetch)    CMD=(poetry run ctg-fetch run) ;;
-    savant-fetch) CMD=(poetry run savant-fetch run) ;;
-    ledger-commit) CMD=(poetry run ledger-commit) ;;
+    fp-fetch)     CMD=("${UMBRELLA[@]}" fetch fp run) ;;
+    ctg-fetch)    CMD=("${UMBRELLA[@]}" fetch ctg run) ;;
+    savant-fetch) CMD=("${UMBRELLA[@]}" fetch savant run) ;;
+    ledger-commit) CMD=("${UMBRELLA[@]}" bet ledger-commit) ;;
     *)
         echo "unknown job: $JOB" >&2
         exit 64
@@ -107,6 +110,15 @@ pull_devel() {
         if ! git pull --ff-only origin devel >>"$LOG_FILE" 2>&1; then
             log "PULL_WARN job=$JOB reason=pull_failed action=run_existing_checkout"
             exit 0
+        fi
+        # A pull that moves the dependency set must sync the venv before the
+        # job runs, or the checkout imports against stale packages.
+        if git diff --name-only 'HEAD@{1}..HEAD' 2>/dev/null | grep -qE '^(pyproject\.toml|poetry\.lock)$'; then
+            if poetry install --no-interaction >>"$LOG_FILE" 2>&1; then
+                log "PULL_INSTALL job=$JOB ok"
+            else
+                log "PULL_WARN job=$JOB reason=poetry_install_failed"
+            fi
         fi
         # Re-apply overlay corrections onto the fresh configs; entries devel
         # now carries are pruned from the overlay.

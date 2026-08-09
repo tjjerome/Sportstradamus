@@ -298,6 +298,9 @@ def meditate_command(league: str, market: str, *args: str) -> list[str]:
     return [
         "poetry",
         "run",
+        "python",
+        "-m",
+        "sportstradamus",
         "meditate",
         "--league",
         league,

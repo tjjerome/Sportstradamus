@@ -116,8 +116,6 @@ def _sleeper_curve(
 def payout_curve_for(
     platform: str,
     contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"],
-    *,
-    legacy: bool,
 ) -> tuple[list[float], dict[int, list[float]]]:
     """Build the (per-size search list, per-(size,misses) payout table) for a platform.
 
@@ -131,21 +129,6 @@ def payout_curve_for(
     accepted for the ``pickem-build`` path. Other platforms (PrizePicks,
     Sleeper, ParlayPlay, Chalkboard) keep the legacy single-payout table.
     """
-    # Deferred import: legacy shims live in ``correlation.py`` per
-    # docs/ARCHITECTURE.md §Package Map; importing at module scope would create a
-    # cycle with ``correlation``'s top-level ``beam_search_parlays`` import.
-    from sportstradamus.prediction.correlation import (
-        _legacy_underdog_overwrite_payouts,
-        _legacy_underdog_search_payouts,
-    )
-
-    if legacy and platform == "Underdog":
-        search = _legacy_underdog_search_payouts()
-        # Display table mirrors the legacy line-498 overwrite (mixed regime).
-        legacy_overwrite = _legacy_underdog_overwrite_payouts()
-        full_curve = {sz: [legacy_overwrite[sz], 0.0] for sz in legacy_overwrite}
-        return search, full_curve
-
     if platform == "Sleeper":
         full_curve = _sleeper_curve(contest_variant)
         max_size = max(full_curve.keys())

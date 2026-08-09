@@ -8,11 +8,11 @@ out on the box running the jobs.
 
 ```
 morning:
-  poetry run confer          # pull today's lines
-  poetry run prophecize      # score + write dashboard snapshots
+  poetry run sportstradamus confer          # pull today's lines
+  poetry run sportstradamus prophecize      # score + write dashboard snapshots
 
 weekly (or when model accuracy drops):
-  poetry run meditate        # retrain stale models
+  poetry run sportstradamus meditate        # retrain stale models
 ```
 
 League activity — which leagues `confer` polls and `prophecize`/`meditate` update —
@@ -69,6 +69,20 @@ crontab — they run on the dev box beside the manual weekly `meditate`, then
 Both are `run_job.sh` cases, so scheduling either (with a
 `HEALTHCHECK_URL_CTG_FETCH` / `HEALTHCHECK_URL_SAVANT_FETCH` set) is possible.
 See [data_collectors.md](data_collectors.md).
+
+## Dashboard as a service
+
+Run the dashboard under systemd with the module-form entry point — it survives
+`poetry install` re-registrations, which console-script stubs do not:
+
+```ini
+[Service]
+User=<runtime-user>
+WorkingDirectory=<repo-dir>
+ExecStart=poetry run python -m sportstradamus dashboard
+Restart=always
+RestartSec=5
+```
 
 ## Related runbooks
 

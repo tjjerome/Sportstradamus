@@ -12,6 +12,7 @@ from pathlib import Path
 import click
 
 from sportstradamus.collectors.catalog import EndpointSpec, load_catalog
+from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
 
 # Number of leading characters to echo when previewing a token value —
 # enough to confirm it changed without leaking the full secret.
@@ -29,11 +30,6 @@ CATALOG_OPTION = click.option(
     type=click.Path(path_type=Path, dir_okay=False),
     default=None,
     help="Override catalog path (default: bundled config).",
-)
-LOG_LEVEL_OPTION = click.option(
-    "--log-level",
-    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
-    default="INFO",
 )
 
 

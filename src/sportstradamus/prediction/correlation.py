@@ -86,20 +86,6 @@ _LEAGUE_POSITIONS = {
 }
 
 
-def _legacy_underdog_overwrite_payouts() -> dict[int, float]:
-    """Reproduce the audit §2.4 legacy line-498 overwrite table.
-
-    Mixes insurance multipliers for sizes 2-3 with power multipliers for sizes
-    4-6. Preserved verbatim so ``legacy=True`` runs match historical output.
-    """
-    return {2: 3.5, 3: 6.5, 4: 6.0, 5: 10.0, 6: 25.0}
-
-
-def _legacy_underdog_search_payouts() -> list[float]:
-    """Reproduce the audit §2.4 legacy in-search payout list (insurance line)."""
-    return [3.5, 6.5, 10.9, 20.2, 39.9]
-
-
 def _team_slice(corr_df: pd.DataFrame, team: str) -> pd.Series:
     """Return the R series for one team from a stratified correlation DataFrame.
 
@@ -598,7 +584,6 @@ def _process_league_games(
     full_payouts,
     parlay_df,
     contest_variant,
-    legacy,
     corr_sink,
     story_sink,
     market_map,
@@ -683,7 +668,6 @@ def _process_league_games(
             opp,
             stat_map,
             contest_variant=contest_variant,
-            legacy=legacy,
             full_refund_below_size=full_refund_below_size,
         )
         if best_bets:
@@ -698,7 +682,6 @@ def find_correlation(
     platform,
     *,
     contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"] = "pooled",
-    legacy: bool = False,
     corr_sink: list | None = None,
     story_sink: list | None = None,
 ):
@@ -716,9 +699,6 @@ def find_correlation(
             ``power`` (sizes 2-3) and ``flex`` (sizes 4+) into one pool;
             the single-variant names are accepted for the ``pickem-build``
             path. Ignored for non-Underdog platforms.
-        legacy: When True, reproduce the pre-2026.05 pipeline verbatim — no
-            PSD repair, no push-aware EV, mixed insurance/power Boost overwrite.
-            Removed next release.
         corr_sink: When provided, each game appends its upper-triangle
             correlation slice (``League, Game, leg_a, leg_b, rho``) to this list
             for the dashboard rail/constellation. The pickem variant-sweep caller
@@ -786,7 +766,7 @@ def find_correlation(
     # ``search_payouts`` is the single-multiplier-per-size list used inside the
     # beam-search ranking; ``full_payouts`` is the per-(size, miss-count) lookup
     # driving push-aware EV and the display Boost column.
-    search_payouts, full_payouts = payout_curve_for(platform, contest_variant, legacy=legacy)
+    search_payouts, full_payouts = payout_curve_for(platform, contest_variant)
 
     for league in ["NFL", "NBA", "WNBA", "MLB", "NHL"]:
         league_df = df.loc[df["League"] == league]
@@ -824,21 +804,10 @@ def find_correlation(
             full_payouts,
             parlay_df,
             contest_variant,
-            legacy,
             corr_sink,
             story_sink,
             stat_map[platform],
             stat_map,
-        )
-
-    if legacy and platform == "Underdog":
-        # Legacy line-498 overwrite (audit §2.4): mixed insurance/power
-        # multipliers indexed by bet size, preserved so historical exports stay
-        # reproducible under ``legacy=True``.
-        legacy_overwrite = _legacy_underdog_overwrite_payouts()
-        parlay_df["Boost"] = (
-            parlay_df["Bet Size"].apply(lambda x: legacy_overwrite.get(int(x), 0.0))
-            * parlay_df["Boost"]
         )
 
     return df.dropna(subset="Model EV").sort_values("Model EV", ascending=False), parlay_df

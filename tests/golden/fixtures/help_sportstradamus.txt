@@ -1,0 +1,17 @@
+Usage: sportstradamus [OPTIONS] COMMAND [ARGS]...
+
+  Sports prop modeling: odds collection, training, prediction, betting.
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+  admin       Recurring archive and data maintenance.
+  bet         Bet sizing, pick'em building, and ledger tools.
+  confer      Fetch current odds and player props into the archive.
+  dashboard   Launch the Sportstradamus Streamlit dashboard.
+  fetch       Third-party stat-site snapshot collectors.
+  meditate    Train or retrain LightGBMLSS models for each configured market.
+  prophecize  Run the full prediction pipeline and write parquet snapshots...
+  reflect     Nightly resolution: update stats, fill Actual/Legs...
+  ship        Offline ship gates, graduation, and model-strategy sweeps.

@@ -56,6 +56,7 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
+from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
 from sportstradamus.helpers.distributions import SN_MAX_MEAN_FACTOR
 from sportstradamus.helpers.io import (
     read_league_activity,
@@ -298,12 +299,7 @@ def _resolve_broad_run_leagues(keys, cli_log):
         "<fixture_dir>/odds_<sport_key>_<event_id>.json."
     ),
 )
-@click.option(
-    "--log-level",
-    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
-    default="INFO",
-    help="Verbosity for the structured JSONL log.",
-)
+@LOG_LEVEL_OPTION
 def confer(close_lines: bool, fixture_dir: Path | None, log_level: str):
     """Fetch current odds and player props into the archive."""
     cli_log = get_logger("confer")

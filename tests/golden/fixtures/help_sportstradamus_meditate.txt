@@ -1,0 +1,35 @@
+Usage: sportstradamus meditate [OPTIONS]
+
+  Train or retrain LightGBMLSS models for each configured market.
+
+Options:
+  --force / --no-force            Skip markets with fresh data (default). Pass
+                                  --force to rebuild the prior correlation CSV
+                                  cache and build markets whose models are
+                                  already up to date.
+  --league [All|NFL|NBA|MLB|NHL|WNBA]
+                                  Select league to train on
+  --rebuild-correlations / --no-rebuild-correlations
+                                  Rebuild only the per-league correlation
+                                  matrices and exit; skip the per-market
+                                  training loop
+  --log-level [DEBUG|INFO|WARNING|ERROR]
+                                  Verbosity for the structured JSONL log.
+  --market TEXT                   Comma-separated market stem(s) to train (e.g.
+                                  'FTM,STL'). When omitted, all markets for the
+                                  active league are trained. A stem absent from
+                                  every active league is an error.
+  --branch [devel|main]           Which release branch's ship policy to honor.
+                                  'devel' (default, matches the production
+                                  server) trains every cell with shipped in
+                                  {devel, main}. 'main' only trains cells with
+                                  shipped=main. See data/config/stat_meta.json.
+                                  [default: devel]
+  --matrix-only / --no-matrix-only
+                                  Assemble and persist each cell's training
+                                  matrix (and comps), then stop before
+                                  distribution selection and model training.
+                                  Warms data/training_data/ without training;
+                                  pair with --bypass-withholding to reach
+                                  withheld cells.
+  --help                          Show this message and exit.

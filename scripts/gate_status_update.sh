@@ -6,7 +6,7 @@
 #
 # Environment (optional):
 #   GATE_STATUS_DRY_RUN       non-empty -> generate (or stub) and stop before git.
-#   GENERATE_SHIP_CONFIG_CMD  generator command (default: "poetry run generate-ship-config").
+#   GENERATE_SHIP_CONFIG_CMD  generator command (default: "poetry run python -m sportstradamus ship config").
 #   GATE_STATUS_WORKTREE      worktree dir for the main checkout (default: $PROJECT_DIR/.gate-status-main).
 #   SPORTSTRADAMUS_DIR        project root (default: parent of this script).
 set -euo pipefail
@@ -14,7 +14,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 PROJECT_DIR="${SPORTSTRADAMUS_DIR:-$(dirname -- "$SCRIPT_DIR")}"
 STAT_META_REL="src/sportstradamus/data/config/stat_meta.json"
-GEN_CMD="${GENERATE_SHIP_CONFIG_CMD:-poetry run generate-ship-config}"
+GEN_CMD="${GENERATE_SHIP_CONFIG_CMD:-poetry run python -m sportstradamus ship config}"
 
 cd "$PROJECT_DIR"
 

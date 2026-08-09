@@ -228,7 +228,7 @@ pickem-build  (strategies/underdog_pickem.py)
         │
         ▼
   data/recommendations/{date}.yaml
-        ├─ poetry run kelly            (offline re-sizing)
+        ├─ poetry run sportstradamus bet kelly            (offline re-sizing)
         └─ dashboard                   (live review)
 ```
 
@@ -349,7 +349,7 @@ A "market" is a betting category for a single stat in a single league (e.g.
    market key and produces a valid `(X, y)` pair, and `get_stats` produces the
    same feature columns for live offers.
 
-5. Run `poetry run meditate --league {LEAGUE} --market {market}` and review the
+5. Run `poetry run sportstradamus meditate --league {LEAGUE} --market {market}` and review the
    new row in `data/training/model_stats.csv` (mirror of the parquet).
 
 ---

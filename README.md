@@ -98,13 +98,13 @@ After installing and adding credentials, run the commands in this order:
 
 ```bash
 # 1. Fetch current odds into the local archive (~2–5 minutes)
-poetry run confer
+poetry run sportstradamus confer
 
 # 2. Train models for one league to verify the pipeline (~10–30 minutes)
-poetry run meditate --league NBA
+poetry run sportstradamus meditate --league NBA
 
 # 3. Score current offers and write dashboard snapshots
-poetry run prophecize
+poetry run sportstradamus prophecize
 ```
 
 On the first `meditate` run, player game-log CSVs are downloaded from the league
@@ -117,20 +117,20 @@ minutes per league the first time; subsequent runs only fetch new games.
 
 All commands are defined as Poetry scripts in `pyproject.toml`.
 
-### `poetry run confer`
+### `poetry run sportstradamus confer`
 
 Fetches current player prop odds from the Odds API and supplemental lines from
 Underdog and Sleeper. Writes results to the local archive.
 
 ```bash
-poetry run confer
+poetry run sportstradamus confer
 ```
 
 No flags. Typically run once per day before `prophecize`.
 
 ---
 
-### `poetry run meditate`
+### `poetry run sportstradamus meditate`
 
 Trains or retrains LightGBMLSS distributional models, one per market per league.
 Reads game logs via the `Stats` classes, fits Optuna hyperparameter search,
@@ -138,11 +138,11 @@ calibrates against bookmaker lines, and writes model pickles to
 `src/sportstradamus/data/models/`.
 
 ```bash
-poetry run meditate                          # train only stale/missing models
-poetry run meditate --league NBA             # one league only
-poetry run meditate --market points,assists  # only the named market stem(s)
-poetry run meditate --force                  # don't skip markets with fresh data
-poetry run meditate --rebuild-correlations   # rebuild the {LEAGUE}_corr.csv matrices
+poetry run sportstradamus meditate                          # train only stale/missing models
+poetry run sportstradamus meditate --league NBA             # one league only
+poetry run sportstradamus meditate --market points,assists  # only the named market stem(s)
+poetry run sportstradamus meditate --force                  # don't skip markets with fresh data
+poetry run sportstradamus meditate --rebuild-correlations   # rebuild the {LEAGUE}_corr.csv matrices
 # --help lists the rest: --target-normalization, --zinb-mode, --branch, --deterministic, --bypass-withholding
 ```
 
@@ -154,7 +154,7 @@ that writes it and [docs/ship_gate.md](docs/ship_gate.md) for the gate columns.
 
 ---
 
-### `poetry run prophecize`
+### `poetry run sportstradamus prophecize`
 
 Scores all current offers against trained models, computes expected value,
 filters by confidence threshold, and writes parquet snapshots
@@ -162,7 +162,7 @@ filters by confidence threshold, and writes parquet snapshots
 Streamlit dashboard reads.
 
 ```bash
-poetry run prophecize
+poetry run sportstradamus prophecize
 ```
 
 Requires `confer` to have been run at least once today and models to exist for
@@ -170,28 +170,28 @@ the active leagues.
 
 ---
 
-### `poetry run reflect`
+### `poetry run sportstradamus reflect`
 
 Analyzes historical parlay performance from the archive.
 
 ```bash
-poetry run reflect
+poetry run sportstradamus reflect
 ```
 
 ---
 
-### `poetry run dashboard`
+### `poetry run sportstradamus dashboard`
 
 Launches a Streamlit dashboard for interactive review of picks and parlay
 performance. Replaces `reflect` for visual exploration.
 
 ```bash
-poetry run dashboard
+poetry run sportstradamus dashboard
 ```
 
 ---
 
-### `poetry run pickem-build`
+### `poetry run sportstradamus bet pickem`
 
 Underdog-native orchestrator covering Power, Flex, and Rivals contest
 variants. Loads today's offers, filters by edge / disagreement / EV
@@ -200,7 +200,7 @@ cross, sizes each candidate via `strategies/kelly.py`, and writes
 `data/recommendations/{date}.yaml`.
 
 ```bash
-poetry run pickem-build --date today --bankroll 500
+poetry run sportstradamus bet pickem --date today --bankroll 500
 ```
 
 Bankroll is a CLI flag only — there is no `data/bankroll.json`. Rivals
@@ -208,7 +208,7 @@ is restricted to 2- and 3-leg sizes regardless of `--entry-sizes`.
 
 ---
 
-### `poetry run kelly`
+### `poetry run sportstradamus bet kelly`
 
 Re-sizes a recommendations YAML offline. Reads the file produced by
 `pickem-build`, applies fractional Kelly with the resolution chain
@@ -216,7 +216,7 @@ Re-sizes a recommendations YAML offline. Reads the file produced by
 and prints a tabulated stake table.
 
 ```bash
-poetry run kelly --bankroll 500 --from data/recommendations/2026-05-08.yaml
+poetry run sportstradamus bet kelly --bankroll 500 --from data/recommendations/2026-05-08.yaml
 ```
 
 cvxpy (SCS solver), pyyaml, and tabulate are required base dependencies

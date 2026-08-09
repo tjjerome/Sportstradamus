@@ -88,7 +88,7 @@ def score_slip(
     if n < 2 or base <= 0.0:
         return SlipScore(indep_p, indep_p, 0.0, 0.0, n, play_type, Decimal("0"), payout_approximate)
 
-    sig = psd_or_none(_block_diagonal_sig(legs, corr), legacy=False)
+    sig = psd_or_none(_block_diagonal_sig(legs, corr))
     joint_p = float(multivariate_normal.cdf(norm.ppf(p), np.zeros(n), sig))
     boost = float(np.prod([float(leg["boost"]) for leg in legs]))
     payout = float(np.clip(boost * base, PAYOUT_CLIP_LO, PAYOUT_CLIP_HI))
@@ -104,7 +104,6 @@ def score_slip(
             payout,
             full_payouts,
             base,
-            False,
             full_refund_below_size=full_refund_below_size,
         )
     )
@@ -172,11 +171,11 @@ def _platform_pricing(platform: str, n: int) -> tuple[str, dict, float, bool]:
     rather than an error — pre-existing, symmetric across both platforms.
     """
     if platform == "Sleeper":
-        search, full_curve = payout_curve_for("Sleeper", "pooled", legacy=False)
+        search, full_curve = payout_curve_for("Sleeper", "pooled")
         base = search[n - 2] if 0 <= n - 2 < len(search) else 0.0
         play_type = "Max" if n <= SLEEPER_MAX_SIZE else "Flex"
         return play_type, full_curve, float(base), False
-    search, full_curve = payout_curve_for("Underdog", "pooled", legacy=False)
+    search, full_curve = payout_curve_for("Underdog", "pooled")
     base = search[n - 2] if 0 <= n - 2 < len(search) else 0.0
     play_type = "Power" if n <= POWER_MAX_SIZE else "Flex"
     return play_type, full_curve, float(base), False

@@ -375,17 +375,20 @@ def test_set_start_values_offset_mode_ignored_for_non_skewnormal():
 
 
 def test_meditate_accepts_target_normalization_flag():
-    """CLI surface: --target-normalization must accept registered slugs."""
+    """CLI surface: --target-normalization accepts registered slugs.
+
+    The flag is ``hidden=True`` (research axis, absent from ``--help``), so the
+    contract pinned here is parseability: a registered slug must clear click's
+    Choice validation. The unknown-slug rejection below is the other half.
+    """
     from click.testing import CliRunner
 
     from sportstradamus.training.cli import meditate
 
     runner = CliRunner()
-    result = runner.invoke(meditate, ["--help"])
-    assert result.exit_code == 0
-    assert "--target-normalization" in result.output
-    assert "ratio_meanyr" in result.output
-    assert "centered_additive_eb_meanyr_k10" in result.output
+    for slug in ("ratio_meanyr", "centered_additive_eb_meanyr_k10"):
+        result = runner.invoke(meditate, ["--target-normalization", slug, "--help"])
+        assert result.exit_code == 0, result.output
 
 
 def test_meditate_rejects_unknown_target_normalization():

@@ -1,4 +1,4 @@
-Usage: run [OPTIONS]
+Usage: sportstradamus reflect [OPTIONS]
 
   Nightly resolution: update stats, fill Actual/Legs Resolved/Misses, save.
 

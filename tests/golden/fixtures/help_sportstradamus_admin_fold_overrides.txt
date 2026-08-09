@@ -1,0 +1,9 @@
+Usage: sportstradamus admin fold-overrides [OPTIONS]
+
+  Apply data/runtime/modifier_overrides.json onto the committed modifier
+  configs.
+
+Options:
+  --prune  Drop overlay entries the committed configs already carry (post-pull /
+           dev sync).
+  --help   Show this message and exit.

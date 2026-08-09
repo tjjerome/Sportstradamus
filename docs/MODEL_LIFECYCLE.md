@@ -30,14 +30,14 @@ current recipe and any corner already proven under full HPO are always evaluated
 only improve on what you have.
 
 ```bash
-poetry run model-strategy-sweep --league NBA --market FGM   # one cell
-poetry run model-strategy-sweep                             # every withheld cell with cached data
-poetry run model-strategy-sweep --league WNBA               # just one league's withheld cells
-poetry run model-strategy-sweep --include-shipped           # also re-check already-shipped cells
-poetry run model-strategy-sweep --resume                    # continue a crashed multi-hour run
-poetry run model-strategy-sweep --dry-run --resume          # what it would do, without training
-poetry run model-strategy-sweep --league WNBA -v            # one line per recipe (-q for less)
-poetry run model-strategy-sweep --jobs 4                    # 4 cells at once (default: cores/2, max 8)
+poetry run sportstradamus ship sweep --league NBA --market FGM   # one cell
+poetry run sportstradamus ship sweep                             # every withheld cell with cached data
+poetry run sportstradamus ship sweep --league WNBA               # just one league's withheld cells
+poetry run sportstradamus ship sweep --include-shipped           # also re-check already-shipped cells
+poetry run sportstradamus ship sweep --resume                    # continue a crashed multi-hour run
+poetry run sportstradamus ship sweep --dry-run --resume          # what it would do, without training
+poetry run sportstradamus ship sweep --league WNBA -v            # one line per recipe (-q for less)
+poetry run sportstradamus ship sweep --jobs 4                    # 4 cells at once (default: cores/2, max 8)
 ```
 
 Naming a single `--league` **and** `--market` sweeps just that cell. Omit `--market` and it sweeps
@@ -123,7 +123,7 @@ So a board winner of `centered_additive_mean10 · crps/crps` for NBA FGM makes t
 Set those fields *before* you train — `meditate` reads them:
 
 ```bash
-poetry run meditate --league NBA --market FGM --bypass-withholding
+poetry run sportstradamus meditate --league NBA --market FGM --bypass-withholding
 ```
 
 A real training run (unlike the sweep) is the one whose result actually counts. One caveat: if the
@@ -137,7 +137,7 @@ confirming under `crps`.
 the verdict for one cell on its own:
 
 ```bash
-poetry run python -m sportstradamus.training.scorecard --league NBA --market FGM
+poetry run sportstradamus ship scorecard --league NBA --market FGM
 ```
 
 It prints a **SHIP SUMMARY** naming any gate the cell fails. A cell that passes every gate is ready
@@ -158,7 +158,7 @@ Change the cell's `shipped` field from `"withheld"` to `"devel"` in `stat_meta.j
 sanity-check the config:
 
 ```bash
-poetry run generate-ship-config --branch devel   # validates and summarizes; changes nothing
+poetry run sportstradamus ship config --branch devel   # validates and summarizes; changes nothing
 ```
 
 On `devel` the server serves the model and records how it does on real settled bets.
@@ -169,8 +169,8 @@ Once a cell has proven itself on live bets, `check-graduation` shows where every
 `generate-ship-config` promotes the ones that passed:
 
 ```bash
-poetry run check-graduation                      # status of every cell
-poetry run generate-ship-config --branch main    # promote graduated cells to fully live
+poetry run sportstradamus ship graduation                      # status of every cell
+poetry run sportstradamus ship config --branch main    # promote graduated cells to fully live
 ```
 
 ## Research flags

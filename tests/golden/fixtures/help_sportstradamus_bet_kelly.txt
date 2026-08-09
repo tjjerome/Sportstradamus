@@ -1,4 +1,4 @@
-Usage: kelly [OPTIONS]
+Usage: sportstradamus bet kelly [OPTIONS]
 
   Re-size stakes from a recommendations YAML and print a table.
 

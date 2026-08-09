@@ -75,11 +75,11 @@ def test_two_leg_same_game_matches_direct_parlay_call():
 
     p = np.array([0.6, 0.55])
     push = np.zeros(2)
-    sig = psd_or_none(np.array([[1.0, 0.4], [0.4, 1.0]]), legacy=False)
-    search, full = payout_curve_for("Underdog", "pooled", legacy=False)
+    sig = psd_or_none(np.array([[1.0, 0.4], [0.4, 1.0]]))
+    search, full = payout_curve_for("Underdog", "pooled")
     base = float(search[0])
     payout = float(np.clip(1.0 * base, 1.0, 100.0))
-    expected = float(parlay_payout_prob(p, push, sig, 2, 1.0, payout, full, base, False))
+    expected = float(parlay_payout_prob(p, push, sig, 2, 1.0, payout, full, base))
 
     assert score.model_ev == pytest.approx(expected, rel=1e-9)
     assert score.joint_p > score.indep_p  # positive within-game rho lifts the joint
@@ -118,7 +118,7 @@ def test_sleeper_max_size3_applies_real_bonus():
         _leg("C", "AST", "Over", 5.5, 0.5, 1.0, "X/Y"),
     ]
     score = score_slip(legs, _corr([]), platform="Sleeper", bankroll=Decimal("1000"))
-    search, _ = payout_curve_for("Sleeper", "pooled", legacy=False)
+    search, _ = payout_curve_for("Sleeper", "pooled")
     assert score.payout == pytest.approx(float(search[1]))  # size-3 index, boost=1.0
     assert score.play_type == "Max"
     assert not score.payout_approximate
@@ -137,7 +137,7 @@ def test_sleeper_flex_size5_wiring():
         _leg("E", "BLK", "Over", 0.5, 0.5, 1.0, "X/Y"),
     ]
     score = score_slip(legs, _corr([]), platform="Sleeper", bankroll=Decimal("1000"))
-    search, _ = payout_curve_for("Sleeper", "pooled", legacy=False)
+    search, _ = payout_curve_for("Sleeper", "pooled")
     # base (search[3], size-5 index) is 0.751 < PAYOUT_CLIP_LO, so boost(1.0) * base
     # clips up to the floor -- score_slip's existing clip, not this test's math.
     assert score.payout == pytest.approx(max(float(search[3]), PAYOUT_CLIP_LO))

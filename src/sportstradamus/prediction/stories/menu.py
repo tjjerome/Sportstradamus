@@ -241,7 +241,7 @@ def _score_subset(bet_id: Sequence[int], sctx: GameScoringContext, new_map: dict
     g = sctx.g
     arr = np.asarray(bet_id)
     boost, payout = _boost_payout(bet_id, sctx)
-    sig = psd_or_none(g.C[np.ix_(bet_id, bet_id)], legacy=False)
+    sig = psd_or_none(g.C[np.ix_(bet_id, bet_id)])
     model_ev = float(
         parlay_payout_prob(
             g.p_model[arr],
@@ -252,7 +252,6 @@ def _score_subset(bet_id: Sequence[int], sctx: GameScoringContext, new_map: dict
             payout,
             sctx.full_payouts,
             sctx.payout_base_by_size[size],
-            False,
         )
     )
     win_prob = model_ev / payout if payout > 0 else 0.0

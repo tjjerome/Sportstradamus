@@ -33,6 +33,7 @@ from sportstradamus.analysis import (
     resolve_history,
 )
 from sportstradamus.helpers import Archive, get_logger
+from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
 from sportstradamus.helpers.io import (
     CALIBRATION_SUMMARY_PATH,
     LIVE_METRICS_PATH,
@@ -338,12 +339,7 @@ def _precompute_calibration(history):
 @click.option(
     "--history-only", is_flag=True, default=False, help="Skip parlay resolution (much faster)."
 )
-@click.option(
-    "--log-level",
-    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
-    default="INFO",
-    help="Verbosity for the structured JSONL log.",
-)
+@LOG_LEVEL_OPTION
 def run(league, skip_update, history_only, log_level):
     """Nightly resolution: update stats, fill Actual/Legs Resolved/Misses, save."""
     logger.setLevel(log_level)

@@ -1,16 +1,10 @@
-Usage: main [OPTIONS]
+Usage: sportstradamus prophecize [OPTIONS]
 
   Run the full prediction pipeline and write parquet snapshots for the
   dashboard.
 
 Options:
   --progress / --no-progress      Display progress bars
-  --legacy-correlation / --no-legacy-correlation
-                                  Reproduce the pre-2026.05 parlay pipeline
-                                  verbatim — no PSD repair, no push-aware EV,
-                                  mixed insurance/power Boost overwrite. Removed
-                                  next release; provided as a one-cycle escape
-                                  hatch.
   --contest-variant [pooled|power|flex|insurance|rivals]
                                   Underdog payout pool for parlay scoring.
                                   Default 'pooled' combines power (2-3 legs) and

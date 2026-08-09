@@ -1,0 +1,14 @@
+Usage: sportstradamus admin sweep-runaway-odds [OPTIONS]
+
+  Repair every poisoned ev row in the archive (dry run unless --apply).
+
+  Deletes magnitude-blown rows; nulls the ev on gate-refuted ones, keeping their
+  quote. Deploy the encoder fixes to the box you are sweeping BEFORE sweeping it
+  — an old-encode confer repopulates the rows otherwise.
+
+Options:
+  --archive PATH  Archive to sweep in place (default: $SPORTSTRADAMUS_ARCHIVE_DB
+                  or archive/archive.duckdb).
+  --apply         Repair the poisoned rows (default: dry run, counts only).
+  --no-backup     Skip the timestamped backup before an --apply repair.
+  --help          Show this message and exit.

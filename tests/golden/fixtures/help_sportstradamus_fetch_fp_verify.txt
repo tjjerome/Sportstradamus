@@ -1,0 +1,19 @@
+Usage: sportstradamus fetch fp verify [OPTIONS]
+
+  Spot-check downloaded parquets against the requested season / week / mode.
+
+  Loads the parquet that ``run`` should have written and confirms its rows carry
+  the expected season/week values. Exits non-zero if any spec yielded an error-
+  severity issue so cron / scripts can detect a botched download without parsing
+  stdout.
+
+Options:
+  --season INTEGER                Season. Defaults to inferred current.
+  --week INTEGER                  Week. Defaults to inferred.
+  --mode [weekly|season_to_date|postseason]
+                                  Aggregation mode for this fetch.  [default:
+                                  weekly]
+  --only TEXT                     Only check these endpoint names (repeatable).
+  --catalog FILE                  Override catalog path (default: bundled
+                                  config).
+  --help                          Show this message and exit.

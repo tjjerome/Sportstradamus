@@ -402,7 +402,7 @@ def test_realized_multiplier_underdog_two_leg_push_with_surviving_miss_still_bus
 
 def test_realized_multiplier_sleeper_three_leg_push_uses_generic_rule_not_full_refund() -> None:
     assert SLEEPER_FULL_REFUND_MAX_SIZE == 2
-    _, curve = payout_curve_for("Sleeper", "power", legacy=False)
+    _, curve = payout_curve_for("Sleeper", "power")
     expected = curve[2][0]
     assert _ledger_settlement.realized_multiplier(
         "power", 3, 2, 0, platform="Sleeper"

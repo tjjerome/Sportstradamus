@@ -1,0 +1,11 @@
+Usage: sportstradamus ship graduation [OPTIONS]
+
+  Print the lifecycle status table joining Gate 1 (offline) and Gate 2 (live).
+
+Options:
+  --league TEXT             Filter to one league (e.g. NBA).
+  --model-stats-path PATH   Override Gate 1 parquet path (defaults to
+                            data/model_stats.parquet).
+  --live-metrics-path PATH  Override Gate 2 parquet path (defaults to
+                            data/live_metrics_per_market.parquet).
+  --help                    Show this message and exit.

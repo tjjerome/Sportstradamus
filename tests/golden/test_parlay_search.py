@@ -168,22 +168,12 @@ def test_flex_vs_power_diverges_under_misses() -> None:
 
 
 def test_payout_curve_loader_returns_power_by_default() -> None:
-    """``payout_curve_for("Underdog", "power", legacy=False)`` reads the
+    """``payout_curve_for("Underdog", "power")`` reads the
     JSON config and returns the 0-misses entries as the search list."""
-    search, full = payout_curve_for("Underdog", "power", legacy=False)
+    search, full = payout_curve_for("Underdog", "power")
     assert search[0] == pytest.approx(3.0)  # 2-leg power
     assert full[2][0] == pytest.approx(3.0)
     assert full[2][1] == 0.0  # power: no payout at 1 miss
-
-
-def test_payout_curve_legacy_underdog_matches_audit() -> None:
-    """Legacy mode returns the audit-documented insurance line for ranking
-    and the mixed insurance/power overwrite for display."""
-    search, full = payout_curve_for("Underdog", "power", legacy=True)
-    assert search == [3.5, 6.5, 10.9, 20.2, 39.9]
-    # Mixed regime: 4-leg display = 6.0 (power), 5-leg = 10.0 (power).
-    assert full[4][0] == pytest.approx(6.0)
-    assert full[5][0] == pytest.approx(10.0)
 
 
 def test_psd_repair_keeps_correlation_units_diagonal() -> None:
@@ -327,7 +317,7 @@ def test_beam_search_characterization() -> None:
 def test_sleeper_payout_curve_max_applies_power_bonus() -> None:
     """Sleeper Max payout curve pulls the confirmed size-only power bonus:
     size 2 has no bonus (1.0x), size 3 carries the confirmed ~1.0797x."""
-    search, full = payout_curve_for("Sleeper", "pooled", legacy=False)
+    search, full = payout_curve_for("Sleeper", "pooled")
     assert search[0] == pytest.approx(1.0)
     assert search[1] == pytest.approx(1.0797)
     assert full[2][0] == pytest.approx(1.0)
@@ -344,12 +334,12 @@ def test_sleeper_payout_curve_variant_zeroes_out_of_scope_sizes() -> None:
     value) so ``max_bet_size`` actually shrinks; "flex" keeps the full range
     but zero-pads the power sizes below it, since ``search`` always indexes
     from size 2."""
-    search_power, full_power = payout_curve_for("Sleeper", "power", legacy=False)
+    search_power, full_power = payout_curve_for("Sleeper", "power")
     assert set(full_power.keys()) == set(range(2, SLEEPER_MAX_SIZE + 1))
     assert len(search_power) == SLEEPER_MAX_SIZE - 1
     assert full_power[SLEEPER_MAX_SIZE][0] == pytest.approx(1.0797)
 
-    search_flex, full_flex = payout_curve_for("Sleeper", "flex", legacy=False)
+    search_flex, full_flex = payout_curve_for("Sleeper", "flex")
     assert set(full_flex.keys()) == set(range(2, SLEEPER_FLEX_CAP + 1))
     assert len(search_flex) == SLEEPER_FLEX_CAP - 1
     for sz in range(2, SLEEPER_FLEX_MIN_SIZE):
@@ -357,7 +347,7 @@ def test_sleeper_payout_curve_variant_zeroes_out_of_scope_sizes() -> None:
     assert full_flex[SLEEPER_FLEX_MIN_SIZE][0] != 0.0
     assert search_flex[0] == 0.0  # size 2 slot zeroed, not power's bonus
 
-    search_pooled, full_pooled = payout_curve_for("Sleeper", "pooled", legacy=False)
+    search_pooled, full_pooled = payout_curve_for("Sleeper", "pooled")
     assert set(full_pooled.keys()) == set(range(2, SLEEPER_FLEX_CAP + 1))
     assert len(search_pooled) == SLEEPER_FLEX_CAP - 1
     assert full_pooled[SLEEPER_MAX_SIZE][0] == pytest.approx(1.0797)  # real, not zeroed
@@ -636,7 +626,7 @@ def _sleeper_flex_beam_inputs(*, m_pair: float = 1.0, p_push_leg0: float = 0.0) 
     P = p_model.reshape(n, 1) * p_model
     var = p_model * (1 - p_model)
     V = np.sqrt(var.reshape(n, 1) * var)
-    search, full_payouts = payout_curve_for("Sleeper", "pooled", legacy=False)
+    search, full_payouts = payout_curve_for("Sleeper", "pooled")
     search = search[:3]
     full_payouts = {sz: v for sz, v in full_payouts.items() if sz <= 4}
     EV = np.exp(C * V) * P * (boosts.reshape(n, 1) * M * boosts) * search[0]

@@ -1,4 +1,4 @@
-Usage: confer [OPTIONS]
+Usage: sportstradamus confer [OPTIONS]
 
   Fetch current odds and player props into the archive.
 

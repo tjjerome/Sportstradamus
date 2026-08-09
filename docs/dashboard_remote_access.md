@@ -43,7 +43,7 @@ User=<user>
 WantedBy=multi-user.target
 ```
 
-`poetry run dashboard` is the canonical entry point (`sportstradamus.dashboard:run`);
+`poetry run sportstradamus dashboard` is the canonical entry point (`sportstradamus.dashboard:run`);
 it launches `streamlit run` on the package's `dashboard/app.py` with the file
 watcher off, so an unattended server never shows the "Source file changed,
 rerun?" popup. Don't point `ExecStart` at a `.py` directly — the launcher
@@ -100,7 +100,7 @@ persists.
 | Device offline in `tailscale status` | `sudo systemctl restart tailscaled` |
 | HTTPS URL returns 502 | Check Streamlit is listening: `ss -tlnp \| grep 8501` |
 | Reachable on LAN but not via tailnet | Loopback bind is correct *only* with `tailscale serve` proxying it |
-| Dashboard not restarting after crash | `journalctl -u <unit> -n 100`; confirm the poetry path in `ExecStart` and that `poetry run dashboard` starts by hand |
+| Dashboard not restarting after crash | `journalctl -u <unit> -n 100`; confirm the poetry path in `ExecStart` and that `poetry run sportstradamus dashboard` starts by hand |
 
 ## Day-to-day
 

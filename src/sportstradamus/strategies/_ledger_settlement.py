@@ -213,7 +213,7 @@ def realized_multiplier(
         return 1.0
     if effective_size < 2:
         return 0.0 if misses > 0 else 1.0
-    _, curve = payout_curve_for(platform, contest_variant, legacy=False)
+    _, curve = payout_curve_for(platform, contest_variant)
     row = curve.get(effective_size)
     if row is None or misses >= len(row):
         return 0.0

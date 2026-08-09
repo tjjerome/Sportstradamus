@@ -1,4 +1,4 @@
-Usage: model-strategy-sweep [OPTIONS]
+Usage: sportstradamus ship sweep [OPTIONS]
 
   Operation Ship 75 strategy sweep — one conditional-TPE study per cell over the
   strategy catalog, each corner scored on a holdout-blind cross-fit gate row.

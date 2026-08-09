@@ -74,7 +74,7 @@ def _ctx(
         }
         for i in range(n)
     }
-    search, full = payout_curve_for(platform, "pooled", legacy=False)
+    search, full = payout_curve_for(platform, "pooled")
     if max_size is not None:
         full = {s: full[s] for s in full if s <= max_size}
     pay_base = {s: search[s - 2] for s in range(2, len(search) + 2) if s <= max(full)}
@@ -242,7 +242,7 @@ def test_model_ev_is_the_real_copula_scorer():
     arr = np.asarray(bet_id)
     boost = float(g.M[0, 1] * g.boosts[0] * g.boosts[1])
     payout = float(np.clip(boost * sctx.payout_base_by_size[2], 1.0, 100.0))
-    sig = psd_or_none(g.C[np.ix_(bet_id, bet_id)], legacy=False)
+    sig = psd_or_none(g.C[np.ix_(bet_id, bet_id)])
     direct = float(
         parlay_payout_prob(
             g.p_model[arr],
@@ -253,7 +253,6 @@ def test_model_ev_is_the_real_copula_scorer():
             payout,
             sctx.full_payouts,
             sctx.payout_base_by_size[2],
-            False,
         )
     )
     assert scored["model_ev"] == direct

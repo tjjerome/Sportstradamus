@@ -1,0 +1,7 @@
+Usage: sportstradamus fetch ctg refresh-auth [OPTIONS] CURL_INPUT
+
+  Update auth fields in creds/keys.json from a fresh curl command.
+
+Options:
+  --keys-path PATH  Override keys.json path (default: bundled creds/keys.json).
+  --help            Show this message and exit.

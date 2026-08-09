@@ -1,4 +1,4 @@
-Usage: run [OPTIONS]
+Usage: sportstradamus dashboard [OPTIONS]
 
   Launch the Sportstradamus Streamlit dashboard.
 

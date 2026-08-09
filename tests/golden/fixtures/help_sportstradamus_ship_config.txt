@@ -1,0 +1,21 @@
+Usage: sportstradamus ship config [OPTIONS]
+
+  Promote / demote stat_meta entries based on gate state.
+
+Options:
+  --branch [devel|main]  Gate to apply. 'main' promotes graduated cells
+                         (shipped:devel→main) and demotes failed cells
+                         (shipped:main→devel) in stat_meta.json. 'devel'
+                         validates the current stat_meta + prints a summary; the
+                         human curates devel promotions by hand.  [required]
+  --prune / --no-prune   Delete every withheld cell's model pickle (immediate
+                         dark-out on this machine). Honors the resolved branch
+                         policy.
+  --meta PATH            stat_meta.json path (defaults to
+                         data/config/stat_meta.json).
+  --model-stats PATH     Gate 1 parquet path (defaults to
+                         data/model_stats.parquet). Read for both branches.
+  --live-metrics PATH    Gate 2 parquet path (defaults to
+                         data/live_metrics_per_market.parquet). main only.
+  --dry-run              Print the changes; do not mutate or prune.
+  --help                 Show this message and exit.

@@ -41,7 +41,6 @@ def process_offers(
     stats,
     *,
     contest_variant="pooled",
-    legacy=False,
     corr_sink=None,
     story_sink=None,
 ):
@@ -57,7 +56,6 @@ def process_offers(
         book: DFS platform name (e.g. ``"Underdog"``).
         stats: ``{league: Stats}`` dict for currently active leagues.
         contest_variant: Underdog contest variant; passed to find_correlation.
-        legacy: Legacy-pipeline escape hatch; passed to find_correlation.
         corr_sink: Optional list the per-game correlation slices accumulate into;
             forwarded to find_correlation. See its docstring.
         story_sink: Optional list the per-game scoring bundles accumulate into;
@@ -79,7 +77,6 @@ def process_offers(
         stats,
         book,
         contest_variant=contest_variant,
-        legacy=legacy,
         corr_sink=corr_sink,
         story_sink=story_sink,
     )

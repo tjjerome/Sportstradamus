@@ -315,7 +315,7 @@ def test_build_cross_game_candidates_sleeper_uses_sleeper_curve_for_payout_multi
     candidates = xg.build_cross_game_candidates(offers, config, DATE, "morning", platform="Sleeper")
     two_leg = next(c for c in candidates if c.entry_size == 2)
 
-    _, sleeper_curve = payout_curve_for("Sleeper", "pooled", legacy=False)
+    _, sleeper_curve = payout_curve_for("Sleeper", "pooled")
     assert two_leg.payout_multiplier == pytest.approx(sleeper_curve[2][0])
-    _, underdog_curve = payout_curve_for("Underdog", "pooled", legacy=False)
+    _, underdog_curve = payout_curve_for("Underdog", "pooled")
     assert two_leg.payout_multiplier != pytest.approx(underdog_curve[2][0])

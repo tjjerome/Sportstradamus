@@ -160,7 +160,7 @@ def _is_sleeper_flex_candidate(info, bet_size):
     return info["Platform"] == "Sleeper" and bet_size >= SLEEPER_FLEX_MIN_SIZE
 
 
-def _sleeper_flex_payout(g, bet_id, bet_size, payout_base, p, SIG, legacy):
+def _sleeper_flex_payout(g, bet_id, bet_size, payout_base, p, SIG):
     """Price a Sleeper Flex candidate: devig each leg, then K(n,k)/P_devigged.
 
     boost/M's running-product mechanism does not apply here -- devig already
@@ -178,7 +178,7 @@ def _sleeper_flex_payout(g, bet_id, bet_size, payout_base, p, SIG, legacy):
     flex_curve = sleeper_flex_payout_curve(devigged_p, sleeper_payouts["flex_k"])
     payout = flex_curve[bet_size][0]
     p = parlay_payout_prob(
-        p, np.zeros(bet_size), SIG, bet_size, 1.0, payout, flex_curve, payout_base, legacy
+        p, np.zeros(bet_size), SIG, bet_size, 1.0, payout, flex_curve, payout_base
     )
     return payout, p
 
@@ -193,7 +193,6 @@ def _leg_boost_payout(
     SIG,
     full_payouts,
     payout_base,
-    legacy,
     full_refund_below_size,
 ):
     """Price a Max/Underdog candidate via the per-leg boost array push-repricing path."""
@@ -213,7 +212,6 @@ def _leg_boost_payout(
         payout,
         full_payouts,
         payout_base,
-        legacy,
         full_refund_below_size=full_refund_below_size,
     )
 
@@ -246,7 +244,6 @@ def _evaluate_parlay(
     team,
     opp,
     leg_teams,
-    legacy,
     new_map,
     full_refund_below_size=None,
 ):
@@ -266,13 +263,11 @@ def _evaluate_parlay(
     if prev_p < _MODEL_EV_PRECHECK_FLOOR:
         return None
 
-    SIG = psd_or_none(C[np.ix_(bet_id, bet_id)], legacy)
-    if SIG is None:
-        return None
+    SIG = psd_or_none(C[np.ix_(bet_id, bet_id)])
 
     payout = np.clip(payout_base * boost, PAYOUT_CLIP_LO, PAYOUT_CLIP_HI)
     if _is_sleeper_flex_candidate(info, bet_size):
-        payout, p = _sleeper_flex_payout(g, bet_id, bet_size, payout_base, p, SIG, legacy)
+        payout, p = _sleeper_flex_payout(g, bet_id, bet_size, payout_base, p, SIG)
     else:
         p = _leg_boost_payout(
             g,
@@ -284,7 +279,6 @@ def _evaluate_parlay(
             SIG,
             full_payouts,
             payout_base,
-            legacy,
             full_refund_below_size,
         )
     pb = p / prev_p * prev_pb
@@ -294,10 +288,6 @@ def _evaluate_parlay(
         return None
 
     bet = itemgetter(*bet_id)(bet_df)
-    # Display Boost: under legacy, the bare modifier product (the post-search
-    # line-498 overwrite multiplies by per-size payout); otherwise the
-    # payout-inclusive value so the column matches the EV that drove ranking.
-    display_boost = boost if legacy else payout
     legs = [
         build_leg(
             {
@@ -311,7 +301,9 @@ def _evaluate_parlay(
     return info | {
         "Model EV": p,
         "Market EV": pb,
-        "Boost": display_boost,
+        # Display Boost: the payout-inclusive value, so the column matches the
+        # EV that drove ranking.
+        "Boost": payout,
         "Rec Bet": units,
         "legs": legs,
         "Bet ID": bet_id,
@@ -341,7 +333,6 @@ def beam_search_parlays(
     stat_map,
     *,
     contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"] = "pooled",
-    legacy: bool = False,
     full_refund_below_size: int | None = None,
 ):
     """Enumerate top parlay combinations via beam search.
@@ -369,8 +360,6 @@ def beam_search_parlays(
             :func:`sportstradamus.analysis._leg_market_map`.
         contest_variant: Underdog contest variant. Affects payout curve
             interpretation in :func:`payouts.expected_payout_with_pushes`.
-        legacy: When True, reproduce pre-2026.05 scoring (no PSD repair, no
-            push-aware EV, bare modifier-product Boost in the output).
         full_refund_below_size: Threaded to :func:`payouts.expected_payout_with_pushes`
             — entries at or below this size refund in full on any push
             (Sleeper's 2-pick divergence). ``None`` keeps the generic
@@ -409,7 +398,6 @@ def beam_search_parlays(
                 team,
                 opp,
                 leg_teams,
-                legacy,
                 new_map,
                 full_refund_below_size,
             )

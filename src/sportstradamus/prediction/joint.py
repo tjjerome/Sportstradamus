@@ -1,8 +1,7 @@
 """Joint-probability math for correlated slips — the Gaussian-copula / Σ seam.
 
 Σ is assembled in ``correlation.py`` as ``GameArrays``; joint slip pricing is
-consumed only through :func:`parlay_payout_prob`. Alternative dependence models
-swap in behind a flag mirroring the existing ``legacy`` flag.
+consumed only through :func:`parlay_payout_prob`.
 """
 
 from __future__ import annotations
@@ -43,16 +42,13 @@ def _nearest_psd(sigma: np.ndarray, tol: float = _PSD_EIG_TOLERANCE) -> np.ndarr
     return repaired * diag_scale[:, None] * diag_scale[None, :]
 
 
-def psd_or_none(SIG, legacy):
-    """Gate a leg-correlation matrix on the PSD floor, repairing or rejecting it.
+def psd_or_none(SIG):
+    """Gate a leg-correlation matrix on the PSD floor, repairing it when needed.
 
-    Under ``legacy=True`` a sub-floor matrix is dropped (``None``, matching the
-    pre-2026.05 behavior of skipping the parlay outright); otherwise it is
-    projected to the nearest PSD via :func:`_nearest_psd` instead of dropped.
+    A sub-floor matrix is projected to the nearest PSD via :func:`_nearest_psd`
+    instead of dropped.
     """
     min_eig = np.min(np.linalg.eigvalsh(SIG))
-    if legacy:
-        return None if min_eig < _PSD_EIG_TOLERANCE else SIG
     if min_eig < _PSD_EIG_TOLERANCE:
         return _nearest_psd(SIG)
     return SIG
@@ -67,7 +63,6 @@ def parlay_payout_prob(
     payout,
     full_payouts,
     payout_base,
-    legacy,
     *,
     full_refund_below_size=None,
 ):
@@ -76,8 +71,7 @@ def parlay_payout_prob(
     The fast analytical ``mvn.cdf`` path only ever gives P(all hit), so any
     curve with a payout at more than one miss-count (Underdog flex/insurance)
     or any leg with a non-floor push probability must route to the Monte-Carlo
-    :func:`expected_payout_with_pushes` path instead — under ``legacy=True``
-    the analytical path always runs, matching pre-2026.05 scoring.
+    :func:`expected_payout_with_pushes` path instead.
 
     ``boost`` may be a per-leg ``np.ndarray`` (push-repricing, see
     :func:`expected_payout_with_pushes`) as well as a scalar; ``full_refund_below_size``
@@ -89,7 +83,7 @@ def parlay_payout_prob(
     # mvn.cdf only gives P(all hit), discarding the partial-hit tiers.
     curve = full_payouts.get(bet_size, [payout_base, 0.0])
     multi_tier = sum(1 for v in curve if v > 0) > 1
-    if (has_pushes or multi_tier) and not legacy:
+    if has_pushes or multi_tier:
         return expected_payout_with_pushes(
             p,
             push_legs,

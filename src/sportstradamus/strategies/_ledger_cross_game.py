@@ -44,8 +44,8 @@ _CROSS_GAME_BEAM_WIDTH: int = 200  # v1 default, narrower than the same-game sea
 _MAX_ENTRY_SIZE: int = 6
 
 _POOLED_CURVES: dict[str, dict[int, list[float]]] = {
-    "Underdog": payout_curve_for("Underdog", "pooled", legacy=False)[1],
-    "Sleeper": payout_curve_for("Sleeper", "pooled", legacy=False)[1],
+    "Underdog": payout_curve_for("Underdog", "pooled")[1],
+    "Sleeper": payout_curve_for("Sleeper", "pooled")[1],
 }
 
 

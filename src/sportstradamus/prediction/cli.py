@@ -33,6 +33,7 @@ from sportstradamus.helpers import (
     stat_dist,
     stat_map,
 )
+from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
 from sportstradamus.helpers.io import (
     read_history,
     read_parlay_hist,
@@ -153,15 +154,6 @@ def _stamp_alt_line(offers: pd.DataFrame) -> pd.DataFrame:
 @click.command()
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
 @click.option(
-    "--legacy-correlation/--no-legacy-correlation",
-    default=False,
-    help=(
-        "Reproduce the pre-2026.05 parlay pipeline verbatim — no PSD repair, "
-        "no push-aware EV, mixed insurance/power Boost overwrite. Removed "
-        "next release; provided as a one-cycle escape hatch."
-    ),
-)
-@click.option(
     "--contest-variant",
     type=click.Choice(["pooled", "power", "flex", "insurance", "rivals"]),
     default="pooled",
@@ -171,14 +163,9 @@ def _stamp_alt_line(offers: pd.DataFrame) -> pd.DataFrame:
         "single-variant names are kept for the pickem-build path."
     ),
 )
-@click.option(
-    "--log-level",
-    type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"]),
-    default="INFO",
-    help="Verbosity for the structured JSONL log.",
-)
+@LOG_LEVEL_OPTION
 @line_profiler.profile
-def main(progress, legacy_correlation, contest_variant, log_level):
+def main(progress, contest_variant, log_level):
     """Run the full prediction pipeline and write parquet snapshots for the dashboard."""
     # style: allow-complexity — prophecize entrypoint: a flat top-level pipeline
     # (per-league load/update, per-platform fetch+score, snapshot + history
@@ -188,7 +175,7 @@ def main(progress, legacy_correlation, contest_variant, log_level):
     cli_log.setLevel(log_level)
     cli_log.info(
         "prophecize invoked",
-        extra={"contest_variant": contest_variant, "legacy_correlation": legacy_correlation},
+        extra={"contest_variant": contest_variant},
     )
     tqdm.__init__ = partialmethod(tqdm.__init__, disable=(not progress))
 
@@ -223,7 +210,6 @@ def main(progress, legacy_correlation, contest_variant, log_level):
             "Underdog",
             stats,
             contest_variant=contest_variant,
-            legacy=legacy_correlation,
             corr_sink=corr_sink,
             story_sink=story_sink,
         )
@@ -255,7 +241,6 @@ def main(progress, legacy_correlation, contest_variant, log_level):
             "Sleeper",
             stats,
             contest_variant=contest_variant,
-            legacy=legacy_correlation,
             corr_sink=corr_sink,
             story_sink=story_sink,
         )

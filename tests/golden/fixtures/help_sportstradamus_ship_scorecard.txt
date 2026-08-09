@@ -1,0 +1,34 @@
+Usage: sportstradamus ship scorecard [OPTIONS]
+
+  Score compression on dumped test sets, diff two strategies, or score live
+  data.
+
+Options:
+  --league TEXT                 Filter test sets by league (e.g. NBA).
+  --market TEXT                 Single market stem (requires --league).
+  --pred-col [EV|Blended_EV]    Predicted-mean column to evaluate. Blended_EV =
+                                fused ship gate (default); EV = raw model.
+  --strategy TEXT               Strategy label for the run log.
+  --deciles INTEGER             Number of buckets.  [default: 10]
+  --scatter / --no-scatter      Write a scatter PNG to /tmp.
+  --test-sets-dir PATH          Override the test_sets directory (defaults to
+                                the package data dir).
+  --baseline PATH               Diff mode: baseline test-set CSV.
+  --candidate PATH              Diff mode: candidate test-set CSV (compared
+                                against --baseline).
+  --no-log                      Skip appending to the run log.
+  --scorecard / --no-scorecard  On a full audit, write the per-cell five-gate
+                                scorecard CSV (model + oracle).
+  --scorecard-out PATH          Gate scorecard CSV path. Defaults to
+                                /tmp/scorecard.csv on a full audit (no
+                                --league/--market filter); a filtered run only
+                                writes when this flag is given explicitly. The
+                                production model_stats.parquet is owned by
+                                training.report.report() and is never touched by
+                                this CLI.
+  --live-window INTEGER         Score the last N days of settled offers from
+                                history.parquet instead of test_sets CSVs.
+                                Reuses the offline decile-bias path; strategy
+                                label becomes `live_{N}d` unless --strategy is
+                                given.
+  --help                        Show this message and exit.

@@ -1,0 +1,22 @@
+Usage: sportstradamus fetch savant run [OPTIONS]
+
+  Snapshot each catalog endpoint's current season-to-date table to disk.
+
+  Writes one parquet per tool under
+  ``{player,team}_data/{LEAGUE}/{source}/{season}/{date}/``. Re-runs on the same
+  date overwrite; a later date writes a fresh dated snapshot.
+
+Options:
+  --season INTEGER                Season (year). Defaults to current.
+  --date [%Y-%m-%d]               Capture-date stamp (YYYY-MM-DD) for the
+                                  snapshot dir. Defaults to today.
+  --only TEXT                     Only fetch these endpoint names (repeatable).
+  --dry-run                       Print resolved URLs and parquet paths only.
+  --refetch                       Re-download even if a non-empty parquet
+                                  already exists for this (season, date) cell.
+                                  Default is to skip existing non-empty files.
+  --catalog FILE                  Override catalog path (default: bundled
+                                  config).
+  --log-level [DEBUG|INFO|WARNING|ERROR]
+                                  Verbosity for the structured JSONL log.
+  --help                          Show this message and exit.

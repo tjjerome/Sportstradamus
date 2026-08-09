@@ -19,7 +19,7 @@ ground truth:
 - **The track that ships against these gates:**
   [`handoffs/model_improvement_track.md`](handoffs/model_improvement_track.md) (standings are
   never prose — its §3 ground-truth commands).
-- **Per-cell gate pass/fail:** a fresh `python -m sportstradamus.training.scorecard`
+- **Per-cell gate pass/fail:** a fresh `sportstradamus ship scorecard`
   sweep (`model_stats.parquet` can lag a gate redefinition).
 
 **Source of truth (code):** the gate constants, `gate_row()`, `apply_thresholds()` and
@@ -212,7 +212,7 @@ gate's natural threshold.
 
 A challenger replaces an established baseline only if **all three** hold. Computed by
 `supersede_verdict()` on two row-aligned test-set CSVs via
-`python -m sportstradamus.training.scorecard --baseline ... --candidate ...`.
+`sportstradamus ship scorecard --baseline ... --candidate ...`.
 
 | # | Gate | Rule |
 |---|------|------|

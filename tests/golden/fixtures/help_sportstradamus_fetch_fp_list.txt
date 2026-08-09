@@ -1,0 +1,7 @@
+Usage: sportstradamus fetch fp list [OPTIONS]
+
+  Print the registered endpoint catalog.
+
+Options:
+  --catalog FILE  Override catalog path (default: bundled config).
+  --help          Show this message and exit.
