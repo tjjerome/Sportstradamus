@@ -10,9 +10,19 @@ import math
 
 import pytest
 
-from sportstradamus.helpers import stat_cv
+from sportstradamus.helpers import stat_cv, stat_dist
 from sportstradamus.helpers.distributions import get_ev, get_odds
 from sportstradamus.prediction.model_prob import _book_cell_params
+
+# First three SkewNormal cells in the live config: discovered rather than named so a
+# strategy sweep that reships a cell under a new family retargets these pins instead
+# of rotting them (the deliberately-named ZINB cells below document the opposite call).
+_SN_CELLS = [
+    (lg, mkt)
+    for lg in sorted(stat_dist)
+    for mkt in sorted(stat_dist[lg])
+    if stat_dist[lg][mkt] == "SkewNormal"
+][:3]
 
 
 def _decode(line, ev, dist, cv, gate):
@@ -44,7 +54,7 @@ def test_get_ev_inverts_get_odds(line, cv, dist, gate, under):
     assert _decode(line, ev, dist, cv, gate) == pytest.approx(under, abs=5e-3)
 
 
-@pytest.mark.parametrize("league,market", [("WNBA", "REB"), ("WNBA", "PTS"), ("WNBA", "AST")])
+@pytest.mark.parametrize("league,market", _SN_CELLS)
 def test_book_fallback_skewnormal_has_no_gate(league, market):
     """SkewNormal book-fallback must not re-add a zero-inflation gate the encode never removed."""
     dist, _cv, gate, _step = _book_cell_params(league, market)
@@ -53,7 +63,8 @@ def test_book_fallback_skewnormal_has_no_gate(league, market):
 
 
 @pytest.mark.parametrize(
-    "league,market,line", [("WNBA", "REB", 6.5), ("WNBA", "PTS", 16.5), ("WNBA", "AST", 3.5)]
+    "league,market,line",
+    [(lg, mkt, line) for (lg, mkt), line in zip(_SN_CELLS, (6.5, 16.5, 3.5), strict=False)],
 )
 def test_skewnormal_even_money_book_is_neutral(league, market, line):
     """An even-money SkewNormal book price decodes to ~0.5.

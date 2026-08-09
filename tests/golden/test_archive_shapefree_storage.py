@@ -30,9 +30,32 @@ from sportstradamus.helpers.training_quotes import resolve_training_quote
 from sportstradamus.scripts.migrate_archive_shapefree import _migrate_cell
 
 _TS = datetime.datetime(2026, 5, 8, 12, 0, 0)
-# One cell per production family; both are real configured cells (the Cardoso market is
-# WNBA/AST). Skipped gracefully if a future config drops one.
-_CELLS = [("WNBA", "AST"), ("NBA", "FG3M")]
+
+
+# The fixture under-probs reach down to 0.45; a count cell whose structural-zero
+# floor sits at or above that (home-runs-class zero rates) is un-invertible by
+# construction, so the discovered cell must carry a smaller gate.
+_MAX_COUNT_GATE = 0.4
+
+
+def _first_cell(family, max_gate=None):
+    for lg in sorted(stat_dist):
+        for mkt in sorted(stat_dist[lg]):
+            if stat_dist[lg][mkt] != family:
+                continue
+            if max_gate is not None and (book_gate(lg, mkt, family) or 0) >= max_gate:
+                continue
+            return lg, mkt
+    return None
+
+
+# One live cell per decode family class the shape-free scheme round-trips
+# (continuous SkewNormal + gated count), discovered from the live config so a
+# strategy sweep that reships a pinned cell under a new family can't rot these
+# tests. Skipped gracefully if a future config drops a family entirely.
+_SN_CELL = _first_cell("SkewNormal")
+_COUNT_CELL = _first_cell("ZINB", max_gate=_MAX_COUNT_GATE)
+_CELLS = [c for c in (_SN_CELL, _COUNT_CELL) if c]
 
 
 @pytest.fixture
@@ -287,6 +310,7 @@ def test_migration_backfills_and_preserves_ev(archive, league, market):
     assert n2 == 0 and err2 == 0.0
 
 
+@pytest.mark.skipif(_SN_CELL is None, reason="no SkewNormal cell in live config")
 def test_migration_recovers_floored_cv_cell(archive, monkeypatch):
     """A SkewNormal cell whose live cv was floored (the MLB doubles/hits, NHL goals/assists class
     at ``cv==0.02``) recovers the true quote. Crucially this pins the floored-cv *distrust*: even
@@ -297,9 +321,8 @@ def test_migration_recovers_floored_cv_cell(archive, monkeypatch):
     """
     from sportstradamus.scripts import migrate_archive_shapefree as mig
 
-    league, market = "WNBA", "AST"
-    dist = stat_dist[league][market]
-    assert dist == "SkewNormal"
+    league, market = _SN_CELL
+    dist = "SkewNormal"
     gate = book_gate(league, market, dist)
     line = 1.5
     cv_true = 0.6  # the real, wide cv the ev was encoded at, before the floor
@@ -448,10 +471,10 @@ def _insert_book_row(archive, league, market, entity, book, ev, under_prob, line
     )
 
 
+@pytest.mark.skipif(_SN_CELL is None, reason="no SkewNormal cell in live config")
 def test_get_ev_ignores_book_shape(archive, monkeypatch):
     """get_ev returns the stored ev whether or not a book_shape is fitted (no read re-encode)."""
-    league, market = "WNBA", "AST"
-    assert stat_dist[league][market] == "SkewNormal"
+    league, market = _SN_CELL
     _insert_book_row(archive, league, market, "P", "pinnacle", 2.4, 0.55, 1.5)
     assert archive.get_ev(league, market, "2026-05-08", "P") == 2.4
 
