@@ -2,11 +2,24 @@
 
 from __future__ import annotations
 
+import subprocess
+
 import numpy as np
 import pandas as pd
+import pytest
 from click.testing import CliRunner
 
 from sportstradamus.scripts.backfill_history_eras import backfill_history_eras
+
+_SHALLOW_CLONE = (
+    subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    == "true"
+)
 
 
 def _row(player, date, cv, *, league="NBA", market="PTS", platform="Underdog"):
@@ -84,6 +97,10 @@ def test_same_boundary_day_stays_two_eras(monkeypatch, tmp_path):
     assert eras["era_id"].nunique() == 2
 
 
+@pytest.mark.skipif(
+    _SHALLOW_CLONE,
+    reason="flip-date annotation reads full stat_meta.json git history; CI clones are shallow",
+)
 def test_flip_date_annotates_recent_eras(monkeypatch, tmp_path):
     # A late-2026 era should pick up a real stat_meta.json flip date; the very
     # first (Feb) era predates the config history and stays unannotated.

@@ -1247,6 +1247,10 @@ def test_gate1_uses_only_explicit_authentic_book_evidence():
     assert full["g1_brier_skill_score"] == pytest.approx(authentic_only["g1_brier_skill_score"])
 
 
+@pytest.mark.skipif(
+    not (pkg_resources.files(data) / "test_sets/NFL_passing-yards.csv").is_file(),
+    reason="retained historical test-set CSV is a local training artifact (gitignored)",
+)
 def test_retained_historical_passing_yards_gate1_reproduces():
     path = pkg_resources.files(data) / "test_sets/NFL_passing-yards.csv"
     with path.open("rb") as stream:

@@ -389,6 +389,20 @@ def test_lab_training_renders_gate_matrix_and_glance_strip(monkeypatch, tmp_path
     monkeypatch.setattr(data_module, "MODEL_STATS_PATH", fixture)
     monkeypatch.setattr(lab_training_module, "MODEL_STATS_PATH", fixture)
     monkeypatch.setattr(lab_training_module, "LIVE_METRICS_PATH", missing_live_metrics)
+    # Sixth gap, seen only on the CI runner (no live model_stats.parquet): under
+    # full-suite ordering there, the page's re-executed ``from helpers.io import
+    # MODEL_STATS_PATH`` still resolved the live path and read_gate1 raised its
+    # missing-parquet UsageError. Redirecting ``read_gate1`` through the
+    # ``training.graduation`` module object (a package no test's sys.modules sweep
+    # touches, so its identity is stable) pins the fixture regardless of which
+    # path binding the page ends up reading.
+    graduation_module = importlib.import_module("sportstradamus.training.graduation")
+    real_read_gate1 = graduation_module.read_gate1
+    monkeypatch.setattr(
+        graduation_module,
+        "read_gate1",
+        lambda path, league=None: real_read_gate1(fixture, league),
+    )
 
     at = AppTest.from_file(str(_APP), default_timeout=30)
     at.run()
@@ -593,8 +607,17 @@ def test_lab_modifiers_pairwise_isolation_updates_stale_pair(monkeypatch, tmp_pa
     assert solved["G.PTS & G.REB"] == [0.95, 1.0]
 
 
-def test_app_boots_mobile_with_dock():
-    """Forced-mobile boot: app renders, and a seeded slip mounts the dock bar."""
+def test_app_boots_mobile_with_dock(monkeypatch, tmp_path):
+    """Forced-mobile boot: app renders, and a seeded slip mounts the dock bar.
+
+    Seeds ``current_offers`` because the default Tonight surface ``st.stop()``s
+    on an empty board, which halts the script before ``app.py`` reaches the
+    dock render — with no runtime parquets (CI) the toggle would never mount.
+    """
+    fixture = tmp_path / "current_offers.parquet"
+    pd.DataFrame(_OFFER_ROWS).to_parquet(fixture)
+    data_module = importlib.import_module("sportstradamus.dashboard.data")
+    monkeypatch.setattr(data_module, "CURRENT_OFFERS_PATH", fixture)
     st.cache_data.clear()
     at = AppTest.from_string(_WRAPPER, default_timeout=30)
     at.session_state["_force_mobile"] = True
