@@ -15,11 +15,8 @@ Different period type (date vs. week ordinal) and different query shape (single
 as-of lookup vs. ``1..N`` windowing) from the week-keyed store, so this is a
 separate loader, not a bimodal generalization of it.
 
-Layout on disk::
-
-    data/{base_dir}/{season}/{YYYY-MM-DD}/{tool}.parquet
-
-where ``base_dir`` is e.g. ``player_data/NBA/cleaningtheglass`` or
+Layout on disk: ``data/{base_dir}/{season}/{YYYY-MM-DD}/{tool}.parquet``, where
+``base_dir`` is e.g. ``player_data/NBA/cleaningtheglass`` or
 ``team_data/MLB/baseballsavant``.
 """
 
@@ -115,9 +112,7 @@ class DatedSnapshotStore:
             )
             return None
 
-    def load_asof(
-        self, season: int, game_date: date | datetime, tool: str
-    ) -> pd.DataFrame | None:
+    def load_asof(self, season: int, game_date: date | datetime, tool: str) -> pd.DataFrame | None:
         """Load ``tool`` from the latest snapshot strictly before ``game_date``.
 
         ``None`` when no snapshot predates the game — the caller degrades to

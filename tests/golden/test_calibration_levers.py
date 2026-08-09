@@ -202,9 +202,18 @@ def test_resolve_cell_knob_persists_per_cell_selection_and_honors_flag_override(
     assert _resolve_cell_knob(sm, "WNBA", "PA", "hpo_selection", "loss", LOSS_AUTO) == "loss"
     assert _resolve_cell_knob(sm, "WNBA", "PR", "hpo_selection", "loss", "loss") == "loss"
     # count_dispersion_objective persists identically, so OREB's pit_ks ship reproduces on the cron
-    assert _resolve_cell_knob(sm, "WNBA", "OREB", "count_dispersion_objective", "crps", LOSS_AUTO) == "pit_ks"
-    assert _resolve_cell_knob(sm, "WNBA", "BLST", "count_dispersion_objective", "crps", LOSS_AUTO) == "crps"
-    assert _resolve_cell_knob(sm, "WNBA", "OREB", "count_dispersion_objective", "crps", "crps") == "crps"
+    assert (
+        _resolve_cell_knob(sm, "WNBA", "OREB", "count_dispersion_objective", "crps", LOSS_AUTO)
+        == "pit_ks"
+    )
+    assert (
+        _resolve_cell_knob(sm, "WNBA", "BLST", "count_dispersion_objective", "crps", LOSS_AUTO)
+        == "crps"
+    )
+    assert (
+        _resolve_cell_knob(sm, "WNBA", "OREB", "count_dispersion_objective", "crps", "crps")
+        == "crps"
+    )
     # zinb_mode persists so a hurdle ship reproduces on the cron instead of darking back to joint
     assert _resolve_cell_knob(sm, "WNBA", "FTM", "zinb_mode", "joint", LOSS_AUTO) == "hurdle"
     assert _resolve_cell_knob(sm, "WNBA", "PA", "zinb_mode", "joint", LOSS_AUTO) == "joint"

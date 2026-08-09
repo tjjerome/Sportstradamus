@@ -34,7 +34,11 @@ def _nfl_with_schedule() -> StatsNFL:
         [{"player display name": p, "gameday": GAMEDAY.isoformat()} for p in TEAMS]
     )
     s.upcoming_games = {
-        t: {"Opponent": "BBB" if t == "AAA" else "AAA", "Home": True, "gameday": GAMEDAY.isoformat()}
+        t: {
+            "Opponent": "BBB" if t == "AAA" else "AAA",
+            "Home": True,
+            "gameday": GAMEDAY.isoformat(),
+        }
         for t in set(TEAMS.values())
     }
     return s

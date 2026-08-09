@@ -388,9 +388,7 @@ def test_schema2_rejects_fractional_position_before_code_discovery():
 
 def test_schema2_roundtrip_persists_code_set_and_fallback_contract():
     blob = _generalized_blob((1, 2, 3, 4))
-    restored = rushing.deserialize_affine_calibration(
-        rushing.serialize_affine_calibration(blob)
-    )
+    restored = rushing.deserialize_affine_calibration(rushing.serialize_affine_calibration(blob))
 
     assert restored["position_codes"] == [1, 2, 3, 4]
     assert restored["fallback"]["unseen_position"] == "raw_cdf_unpooled"

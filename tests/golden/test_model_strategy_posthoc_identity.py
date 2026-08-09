@@ -62,7 +62,9 @@ def test_corners_differing_only_in_posthoc_share_a_signature_but_not_a_fingerpri
     spec = get_strategy("SkewNormal")
     corners = strategy_controls(spec)
     base = corners[0]
-    other = next(c for c in corners if c["posthoc"] != base["posthoc"] and _same_but_posthoc(c, base))
+    other = next(
+        c for c in corners if c["posthoc"] != base["posthoc"] and _same_but_posthoc(c, base)
+    )
 
     assert corner_fingerprint(spec, base, _MATRIX_HASH) != corner_fingerprint(
         spec, other, _MATRIX_HASH

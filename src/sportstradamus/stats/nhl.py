@@ -855,9 +855,7 @@ class StatsNHL(Stats):
                     tuple(self.short_gamelog.groupby(player_column, sort=False))
                 )
                 self._combo_player_games_cache_key = cache_key
-            player_games = self._combo_player_games_cache.get(
-                player, self.short_gamelog.iloc[:0]
-            )
+            player_games = self._combo_player_games_cache.get(player, self.short_gamelog.iloc[:0])
         else:
             player_games = self.short_gamelog.loc[
                 self.short_gamelog[self.log_strings["player"]] == player

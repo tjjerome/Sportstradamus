@@ -230,7 +230,9 @@ def _validated_position_codes_field(fitted: Mapping[str, object]) -> tuple[int, 
 
 def affine_bounds_for_training(mean: np.ndarray, result: np.ndarray) -> dict[str, object]:
     """Return schema-2 bounds whose dimensional intercept follows the train target scale."""
-    values = np.concatenate((np.abs(np.asarray(mean, dtype=float)), np.abs(np.asarray(result, dtype=float))))
+    values = np.concatenate(
+        (np.abs(np.asarray(mean, dtype=float)), np.abs(np.asarray(result, dtype=float)))
+    )
     if values.size == 0 or not np.isfinite(values).all():
         raise ValueError("affine bound scale requires finite training values")
     scale = max(1.0, float(np.quantile(values, 0.95)))

@@ -288,10 +288,6 @@ def _fold_support_audit(train, hold, positions, authentic, eligible, codes):
         "hold_authentic_rows": int(authentic[hold].sum()),
         "train_eligible_authentic_rows": int((eligible[train] & authentic[train]).sum()),
         "hold_eligible_authentic_rows": int((eligible[hold] & authentic[hold]).sum()),
-        "train_position_rows": {
-            str(code): int((positions[train] == code).sum()) for code in codes
-        },
-        "hold_position_rows": {
-            str(code): int((positions[hold] == code).sum()) for code in codes
-        },
+        "train_position_rows": {str(code): int((positions[train] == code).sum()) for code in codes},
+        "hold_position_rows": {str(code): int((positions[hold] == code).sum()) for code in codes},
     }

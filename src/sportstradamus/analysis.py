@@ -953,7 +953,9 @@ def reconstruct_prob(row, line=None):
     r = param if dist in ("NegBin", "ZINB") else None
     alpha = param if dist in ("Gamma", "ZAGamma") else None
     phi = param if dist == "DPO" and not pd.isna(param) else None
-    return get_odds(line, ev, dist, cv, alpha=alpha, r=r, gate=gate, phi=phi, step=row.get("Step", 1))
+    return get_odds(
+        line, ev, dist, cv, alpha=alpha, r=r, gate=gate, phi=phi, step=row.get("Step", 1)
+    )
 
 
 def reconstruct_quantile(row, q):

@@ -276,8 +276,7 @@ def test_obsidian_skin_frames_the_grid_keeps_gold_as_chrome() -> None:
     # variable; the gold rail is a first-cell inset. Gold stays chrome, never a data-cell fill.
     assert wrap["--ag-row-hover-color"] == "rgba(201,162,39,0.09)"
     assert (
-        _OBSIDIAN_CSS[".ag-row-hover .ag-cell:first-child"]["box-shadow"]
-        == "inset 3px 0 0 #C9A227"
+        _OBSIDIAN_CSS[".ag-row-hover .ag-cell:first-child"]["box-shadow"] == "inset 3px 0 0 #C9A227"
     )
 
 

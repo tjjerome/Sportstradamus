@@ -634,9 +634,9 @@ def test_a_board_swept_before_margins_existed_keeps_the_old_live_ranking():
     unknown margin would silently stop every live cell from nominating on a board that never had a
     baseline to measure against.
     """
-    legacy = pd.DataFrame(
-        [_sn_row("centered_additive_mean10", "crps", "crps", True, 0.30)]
-    ).assign(margin_vs_incumbent=pd.NA)
+    legacy = pd.DataFrame([_sn_row("centered_additive_mean10", "crps", "crps", True, 0.30)]).assign(
+        margin_vs_incumbent=pd.NA
+    )
     meta = {"WNBA": {"AST": {"shipped": "devel"}}}
 
     grouped = mc._candidates(legacy, meta)
@@ -1265,8 +1265,9 @@ def test_run_confirm_mixed_board_routes_withheld_and_shipped(monkeypatch, capsys
     monkeypatch.setattr(
         mc,
         "_supersede_one",
-        lambda m, c, *, auto_promote: calls["supersede"].append(c["market"])
-        or ("NBA", "PTS", "SUPERSEDED", []),
+        lambda m, c, *, auto_promote: (
+            calls["supersede"].append(c["market"]) or ("NBA", "PTS", "SUPERSEDED", [])
+        ),
     )
 
     mc.run_confirm(board, yes=True)
@@ -1324,7 +1325,13 @@ def test_run_confirm_deadline_skips_cells_not_yet_started(monkeypatch, capsys):
     )
     meta = {
         "WNBA": {"AST": _sn_original()},
-        "MLB": {"pitcher strikeouts": {"dist": "ZINB", "dist_training_loss": "nll", "shipped": "withheld"}},
+        "MLB": {
+            "pitcher strikeouts": {
+                "dist": "ZINB",
+                "dist_training_loss": "nll",
+                "shipped": "withheld",
+            }
+        },
     }
     monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
     monkeypatch.setattr(mc, "_backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))
@@ -1391,7 +1398,9 @@ def test_run_confirm_reports_nothing_confirmable_when_every_corner_is_unservable
         mc, "_backup_stat_meta", lambda: pytest.fail("an empty board must not touch stat_meta")
     )
     monkeypatch.setattr(
-        mc, "_atomic_write_meta", lambda meta: pytest.fail("an empty board must not write stat_meta")
+        mc,
+        "_atomic_write_meta",
+        lambda meta: pytest.fail("an empty board must not write stat_meta"),
     )
     mc.run_confirm(pd.DataFrame([_mixture_row("WNBA", "AST", 0.9)]), yes=True)
     assert "no confirmable nominees on the board." in capsys.readouterr().out
@@ -1425,7 +1434,9 @@ def test_run_confirm_skips_activation_gated_league(monkeypatch, capsys):
     board = pd.DataFrame([_sn_row("centered_additive_mean10", "crps", "crps", True, 0.25), mlb_row])
     meta = {
         "WNBA": {"AST": _sn_original()},
-        "MLB": {"total bases": {"dist": "ZINB", "dist_training_loss": "nll", "shipped": "withheld"}},
+        "MLB": {
+            "total bases": {"dist": "ZINB", "dist_training_loss": "nll", "shipped": "withheld"}
+        },
     }
     monkeypatch.setattr(mc, "load_stat_meta", lambda path: meta)
     monkeypatch.setattr(mc, "_backup_stat_meta", lambda: mc.pathlib.Path("/tmp/stat_meta.bak.json"))

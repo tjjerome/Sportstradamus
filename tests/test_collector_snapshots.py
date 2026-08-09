@@ -170,11 +170,15 @@ def test_collector_asof_features_memoizes_per_key(store, tmp_path):
     """A second call for the same (grain, season, date) serves the cache, not a fresh read."""
     _write_tool(tmp_path, "2026-01-01", "player_usage", pd.DataFrame({"name": ["X"], "a": [5]}))
     holder = SimpleNamespace(_collector_asof_cache=None)
-    first = Stats._collector_asof_features(holder, _BASE_DIR, "name", set(), _SEASON, date(2026, 1, 8))
+    first = Stats._collector_asof_features(
+        holder, _BASE_DIR, "name", set(), _SEASON, date(2026, 1, 8)
+    )
     assert first.loc["X", "a_asof"] == 5
     # A newer (still-prior) snapshot would win on a fresh read; the cache must ignore it.
     _write_tool(tmp_path, "2026-01-05", "player_usage", pd.DataFrame({"name": ["X"], "a": [99]}))
-    again = Stats._collector_asof_features(holder, _BASE_DIR, "name", set(), _SEASON, date(2026, 1, 8))
+    again = Stats._collector_asof_features(
+        holder, _BASE_DIR, "name", set(), _SEASON, date(2026, 1, 8)
+    )
     assert again.loc["X", "a_asof"] == 5
 
 

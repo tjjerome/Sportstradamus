@@ -99,9 +99,7 @@ def test_flip_date_annotates_recent_eras(monkeypatch, tmp_path):
 
 
 def test_empty_history_exits_zero(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "sportstradamus.scripts.backfill_history_eras.read_history", pd.DataFrame
-    )
+    monkeypatch.setattr("sportstradamus.scripts.backfill_history_eras.read_history", pd.DataFrame)
     out = tmp_path / "out.parquet"
     result = CliRunner().invoke(backfill_history_eras, ["--output", str(out)])
     assert result.exit_code == 0

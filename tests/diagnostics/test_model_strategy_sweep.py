@@ -88,6 +88,7 @@ def _dpo_controls(dispersion: str, blending: str, posthoc: str) -> dict[str, str
         "posthoc": posthoc,
     }
 
+
 # Stands in for the per-cell trial ceiling wherever a test is not about the ceiling itself.
 _TIMEOUT = sweep._MEDITATE_TRIAL_TIMEOUT_S
 # The role×position two-part strategy is gated by the per-(league, market) role registry; the
@@ -712,7 +713,8 @@ def test_dump_subdir_matches_meditate_keying():
     )
     assert (
         sweep._dump_subdir(
-            {"dist": "DPO", "dist_training_loss": "nll", "count_dispersion_objective": "pit_ks"}, get_strategy("DPO")
+            {"dist": "DPO", "dist_training_loss": "nll", "count_dispersion_objective": "pit_ks"},
+            get_strategy("DPO"),
         )
         == "none"
     )
@@ -1374,7 +1376,11 @@ def test_select_board_cells_withheld_default_shipped_flag_and_data_filter(monkey
             },  # withheld but no cached matrix → missing
         },
         "MLB": {
-            "pitcher strikeouts": {"dist": "ZINB", "dist_training_loss": "nll", "shipped": "withheld"},  # default board
+            "pitcher strikeouts": {
+                "dist": "ZINB",
+                "dist_training_loss": "nll",
+                "shipped": "withheld",
+            },  # default board
             "hits allowed": {"dist": "Gamma", "shipped": "withheld"},  # excluded: unswept family
             "1st inning hits allowed": {
                 "dist": "ZINB",
@@ -1415,7 +1421,13 @@ def test_select_board_cells_dist_class_filters_families_and_sets_aside_empty_cel
     """
     fake = {
         "WNBA": {"AST": {"dist": "SkewNormal", "shipped": "withheld"}},
-        "MLB": {"pitcher strikeouts": {"dist": "ZINB", "dist_training_loss": "nll", "shipped": "withheld"}},
+        "MLB": {
+            "pitcher strikeouts": {
+                "dist": "ZINB",
+                "dist_training_loss": "nll",
+                "shipped": "withheld",
+            }
+        },
         # Mean over the count-admission ceiling → no count family survives --dist-class count.
         "NFL": {"passing yards": {"dist": "SkewNormal", "shipped": "withheld"}},
     }
@@ -2217,9 +2229,7 @@ def _priced_against(monkeypatch, incumbent_slack, *challenger_slacks):
                 "slack": slack,
                 "discounted_slack": slack,
             }
-            for controls, slack in zip(
-                corners, (incumbent_slack, *challenger_slacks), strict=True
-            )
+            for controls, slack in zip(corners, (incumbent_slack, *challenger_slacks), strict=True)
         ],
         context,
     )
@@ -2921,7 +2931,11 @@ def test_mandatory_corners_lead_the_enqueue_order_ahead_of_evidence_and_the_incu
     monkeypatch.setattr(
         sweep,
         "load_stat_meta",
-        lambda path: {"NFL": {"passing yards": {"dist": "DPO", "dist_training_loss": "nll", "posthoc": "roe_mean"}}},
+        lambda path: {
+            "NFL": {
+                "passing yards": {"dist": "DPO", "dist_training_loss": "nll", "posthoc": "roe_mean"}
+            }
+        },
     )
     mandatory = next(
         (slug, controls)

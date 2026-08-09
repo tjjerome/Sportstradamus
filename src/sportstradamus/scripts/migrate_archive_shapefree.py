@@ -199,8 +199,12 @@ def _migrate_cell(
 
 
 @click.command(help=__doc__)
-@click.option("--db-path", default=str(_DEFAULT_DB_PATH), show_default=True,
-              help="Target DuckDB archive file.")
+@click.option(
+    "--db-path",
+    default=str(_DEFAULT_DB_PATH),
+    show_default=True,
+    help="Target DuckDB archive file.",
+)
 @click.option("--no-backup", is_flag=True, help="Skip the .bak copy before mutating the DB.")
 def main(db_path: str, no_backup: bool) -> None:
     db = Path(db_path)
@@ -251,12 +255,16 @@ def main(db_path: str, no_backup: bool) -> None:
 
     con.execute("CHECKPOINT")
     con.close()
-    print(f"Backfilled {total} odds rows across {len(cells) - len(skipped)} cells "
-          f"({dropped} un-invertible rows left NULL -> ev fallback). "
-          f"Max round-trip abs err {worst:.2e}.")
+    print(
+        f"Backfilled {total} odds rows across {len(cells) - len(skipped)} cells "
+        f"({dropped} un-invertible rows left NULL -> ev fallback). "
+        f"Max round-trip abs err {worst:.2e}."
+    )
     if skipped:
-        print(f"Skipped {len(skipped)} ill-conditioned cells (kept on ev fallback): "
-              + ", ".join(skipped))
+        print(
+            f"Skipped {len(skipped)} ill-conditioned cells (kept on ev fallback): "
+            + ", ".join(skipped)
+        )
 
 
 if __name__ == "__main__":

@@ -362,7 +362,9 @@ def test_league_affinity_at_zero_stops_a_league_reaching_for_its_own(tmp_path, m
     dates = [f"2026-08-{day:02d}" for day in range(1, 11)]
 
     def dealt(cfg):
-        return [cs.assign_templates(date, _slate(1, league="MLB"), cfg)["G00-MLB"] for date in dates]
+        return [
+            cs.assign_templates(date, _slate(1, league="MLB"), cfg)["G00-MLB"] for date in dates
+        ]
 
     assert dealt(_SANE_TUNING) == ["mitt"] * len(dates)
     assert "net" in dealt({**_SANE_TUNING, "league_affinity": 0.0})

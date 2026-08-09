@@ -163,9 +163,7 @@ def test_line_apply_maps_endpoints_first_and_pools_only_authentic_quotes():
     book = np.array([0.48, np.nan, 0.54])
     authentic = np.array([True, False, True])
 
-    output = receiving.apply_two_part_line(
-        blob, low, high, f0, role, position, book, authentic
-    )
+    output = receiving.apply_two_part_line(blob, low, high, f0, role, position, book, authentic)
     mapped_low = receiving.apply_two_part_cdf(blob, low, f0, role, position)
     mapped_high = receiving.apply_two_part_cdf(blob, high, f0, role, position)
 
@@ -210,9 +208,7 @@ def test_portable_blob_round_trip_reproduces_cdf_and_line_application():
         receiving.apply_two_part_cdf(blob, cdf, f0, role, position),
         receiving.apply_two_part_cdf(restored, cdf, f0, role, position),
     )
-    original = receiving.apply_two_part_line(
-        blob, cdf, cdf, f0, role, position, book, authentic
-    )
+    original = receiving.apply_two_part_line(blob, cdf, cdf, f0, role, position, book, authentic)
     reloaded = receiving.apply_two_part_line(
         restored, cdf, cdf, f0, role, position, book, authentic
     )
@@ -294,8 +290,16 @@ def _manual_role_only_blob():
         "cdf": {
             "kind": "role_position_two_part_cdf",
             "role_boundary": {
-                "low": {"kind": "two_part_role_boundary", "intercept": -0.4, "nonpositive": _identity_map()},
-                "high": {"kind": "two_part_role_boundary", "intercept": 0.2, "nonpositive": _identity_map()},
+                "low": {
+                    "kind": "two_part_role_boundary",
+                    "intercept": -0.4,
+                    "nonpositive": _identity_map(),
+                },
+                "high": {
+                    "kind": "two_part_role_boundary",
+                    "intercept": 0.2,
+                    "nonpositive": _identity_map(),
+                },
             },
             "positive": {"low": curved, "high": _identity_map(1.0)},
             "rb_boundary_residual": 0.0,
@@ -393,6 +397,4 @@ def test_support_audit_still_kills_when_role_only_also_starves():
         positive_player_frac=0.1
     )
     with pytest.raises(ValueError, match="positive"):
-        _two_part_nested_support_audit(
-            result, outcome, authentic, players, roles, positions, ()
-        )
+        _two_part_nested_support_audit(result, outcome, authentic, players, roles, positions, ())

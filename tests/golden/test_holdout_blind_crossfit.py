@@ -59,7 +59,9 @@ def test_calibration_folds_are_player_disjoint_and_deterministic():
     assert folds.between(0, pipe._CALIBRATION_FOLDS - 1).all()
     assert len(folds.unique()) > 1
     players = splits["players_validation"]
-    per_player = pd.DataFrame({"player": players, "fold": folds}).groupby("player")["fold"].nunique()
+    per_player = (
+        pd.DataFrame({"player": players, "fold": folds}).groupby("player")["fold"].nunique()
+    )
     assert (per_player == 1).all(), "a player's rows must never straddle two folds"
     pd.testing.assert_series_equal(folds, pipe._calibration_folds(splits))
 

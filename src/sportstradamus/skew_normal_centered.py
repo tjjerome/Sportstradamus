@@ -97,9 +97,7 @@ class CenteredSkewNormalTorch(SkewNormalTorch):
     """
 
     def __init__(self, mean, sd, gamma1, validate_args=None):
-        mean, sd, gamma1 = (
-            torch.as_tensor(v, dtype=torch.float32) for v in (mean, sd, gamma1)
-        )
+        mean, sd, gamma1 = (torch.as_tensor(v, dtype=torch.float32) for v in (mean, sd, gamma1))
         loc, scale, alpha = _centered_to_direct(mean, sd, gamma1, torch)
         super().__init__(loc, scale, alpha, validate_args=validate_args)
 
@@ -169,7 +167,5 @@ class CenteredSkewNormal(SkewNormal):
                 pred["gamma1"].to_numpy(),
                 np,
             )
-            pred = pd.DataFrame(
-                {"loc": loc, "scale": scale, "alpha": alpha}, index=pred.index
-            )
+            pred = pd.DataFrame({"loc": loc, "scale": scale, "alpha": alpha}, index=pred.index)
         return pred

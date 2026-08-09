@@ -37,8 +37,11 @@ def _bare_mlb():
     stats = mlb.StatsMLB.__new__(mlb.StatsMLB)
     stats.league = "MLB"
     stats.log_strings = {
-        "team": "team", "opponent": "opponent", "player": "playerName",
-        "date": "gameDate", "home": "home",
+        "team": "team",
+        "opponent": "opponent",
+        "player": "playerName",
+        "date": "gameDate",
+        "home": "home",
     }
     return stats
 
@@ -83,9 +86,7 @@ def test_projector_applies_team_offense_multiplier(monkeypatch):
     # "team" is the fillna(0) sentinel; the NYY multiplier must be keyed from the
     # offer's Team, so reading profile["team"] (== 0) would drop it and fail here.
     stats.playerProfile = pd.DataFrame({"team": [0], "depth": [1.0]}, index=["A"])
-    stats.gamelog = pd.DataFrame(
-        {"playerName": ["A"], "gameDate": ["2024-05-01"], "home": [True]}
-    )
+    stats.gamelog = pd.DataFrame({"playerName": ["A"], "gameDate": ["2024-05-01"], "home": [True]})
     monkeypatch.setattr(stats, "get_depth", lambda offers, d: None)
     monkeypatch.setattr(stats, "_mlb_offense_adjustment", lambda *a, **k: {"NYY": 1.05})
     stats._project_plate_appearances(
@@ -153,8 +154,13 @@ def test_offense_adjustment_degrades_without_obp_history(monkeypatch):
     stats.teamProfile = pd.DataFrame({"OBP": []}, index=pd.Index([], name="team"))
     stats.gamelog = pd.DataFrame(
         {
-            "playerName": [], "team": [], "gameDate": [], "starting pitcher": [],
-            "hits allowed": [], "walks allowed": [], "batters faced": [],
+            "playerName": [],
+            "team": [],
+            "gameDate": [],
+            "starting pitcher": [],
+            "hits allowed": [],
+            "walks allowed": [],
+            "batters faced": [],
             "opponent pitcher": [],
         }
     )
@@ -169,11 +175,13 @@ def test_get_volume_stats_routes_hitter_to_structural(monkeypatch):
     stats = _bare_mlb()
     calls = {}
     monkeypatch.setattr(
-        stats, "_project_plate_appearances",
+        stats,
+        "_project_plate_appearances",
         lambda offers, d: calls.__setitem__("hitter", (offers, d)),
     )
     monkeypatch.setattr(
-        stats, "load_volume_model_params",
+        stats,
+        "load_volume_model_params",
         lambda *a, **k: calls.__setitem__("pitcher", (a, k)),
     )
     offers = [{"Player": "A", "Team": "NYY", "Opponent": "BOS"}]
@@ -201,7 +209,8 @@ def test_dispatch_routes_markets_correctly(monkeypatch):
     seen = {}
     monkeypatch.setattr(stats, "get_depth", lambda offers, d: seen.__setitem__("depth", True))
     monkeypatch.setattr(
-        stats, "get_volume_stats",
+        stats,
+        "get_volume_stats",
         lambda offers, d, pitcher: seen.__setitem__("volume", pitcher),
     )
     offers = [{"Player": "A", "Team": "NYY", "Opponent": "BOS"}]

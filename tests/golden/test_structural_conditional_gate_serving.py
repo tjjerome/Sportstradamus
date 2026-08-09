@@ -166,7 +166,9 @@ def test_receiving_candidate_live_endpoint_operator_matches_shared_application()
         np.array([True, True]),
     )
 
-    served = _apply_two_part_candidate_distribution(frame, mean, calibration, routing, _TWO_PART_SPEC)
+    served = _apply_two_part_candidate_distribution(
+        frame, mean, calibration, routing, _TWO_PART_SPEC
+    )
 
     for field in expected.__dataclass_fields__:
         np.testing.assert_array_equal(getattr(served, field), getattr(expected, field))

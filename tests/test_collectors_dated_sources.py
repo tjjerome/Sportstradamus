@@ -53,15 +53,21 @@ def test_parse_empty_shapes():
 
 
 def test_dated_path_routes_player_and_team():
-    player = dated_path_for(_spec("player_usage"), season=2025, date="2026-01-15", league="NBA", source_dir="ctg")
-    team = dated_path_for(_spec("team_four_factors"), season=2025, date="2026-01-15", league="NBA", source_dir="ctg")
+    player = dated_path_for(
+        _spec("player_usage"), season=2025, date="2026-01-15", league="NBA", source_dir="ctg"
+    )
+    team = dated_path_for(
+        _spec("team_four_factors"), season=2025, date="2026-01-15", league="NBA", source_dir="ctg"
+    )
     assert player.parts[-4:] == ("ctg", "2025", "2026-01-15", "usage.parquet")
     assert "player_data" in str(player) and "team_data" in str(team)
 
 
 def test_dated_path_rejects_unprefixed_name():
     with pytest.raises(ValueError, match="player_<tool> or team_<tool>"):
-        dated_path_for(_spec("usage"), season=2025, date="2026-01-15", league="NBA", source_dir="ctg")
+        dated_path_for(
+            _spec("usage"), season=2025, date="2026-01-15", league="NBA", source_dir="ctg"
+        )
 
 
 def test_dated_run_writes_parquet(tmp_path, monkeypatch):

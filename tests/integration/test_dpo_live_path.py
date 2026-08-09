@@ -137,9 +137,7 @@ def test_dpo_live_path_decodes_finite_and_recovers_exact_mean():
     import torch
 
     idx = np.linspace(0, len(pp) - 1, _CROSS_KERNEL_N_ROWS).astype(int)
-    torch_mean = DoublePoissonTorch(
-        torch.tensor(mu[idx]), torch.tensor(phi[idx])
-    ).mean.numpy()
+    torch_mean = DoublePoissonTorch(torch.tensor(mu[idx]), torch.tensor(phi[idx])).mean.numpy()
     np.testing.assert_allclose(ev[idx], torch_mean, rtol=_MEAN_CROSS_KERNEL_RTOL)
 
     # Serve parity: the model_prob chain (blend -> odds -> push) must stay
@@ -149,9 +147,7 @@ def test_dpo_live_path_decodes_finite_and_recovers_exact_mean():
     assert np.isfinite(under).all()
     assert ((under > 0.0) & (under < 1.0)).all()
 
-    mean_blend, phi_blend, gate_blend = fused_loc(
-        0.6, ev, ev * 0.95, 0.5, "DPO", phi=phi
-    )
+    mean_blend, phi_blend, gate_blend = fused_loc(0.6, ev, ev * 0.95, 0.5, "DPO", phi=phi)
     assert np.isfinite(mean_blend).all() and (mean_blend > 0).all()
     assert np.isfinite(phi_blend).all() and (phi_blend > 0).all()
     assert gate_blend is None

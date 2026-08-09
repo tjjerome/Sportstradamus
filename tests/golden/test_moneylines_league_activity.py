@@ -88,9 +88,7 @@ def test_classify_tiers_and_persist_snapshot(monkeypatch, tmp_path) -> None:
 
 
 def test_classify_live_is_sticky_through_midweek_gap(monkeypatch, tmp_path) -> None:
-    events = {
-        _events_url("americanfootball_nfl"): _FakeResponse([{"commence_time": _commence(4)}])
-    }
+    events = {_events_url("americanfootball_nfl"): _FakeResponse([{"commence_time": _commence(4)}])}
     previous = {
         "updated": _NOW.isoformat(),
         "leagues": {"NFL": {"tier": "live", "next_game": _commence(-3)}},

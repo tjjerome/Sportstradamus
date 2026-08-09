@@ -43,6 +43,7 @@ def _load_full_matrix() -> pd.DataFrame:
         pytest.skip("cached NBA_FGA.parquet not present in this environment")
     return pd.read_parquet(parquet).sort_values(["Date"]).head(GATE_N_ROWS).reset_index(drop=True)
 
+
 # Same fixed subsample size as the determinism gate so the two share state.
 GATE_N_ROWS = 4000
 

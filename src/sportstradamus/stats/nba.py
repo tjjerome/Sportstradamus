@@ -511,7 +511,11 @@ class StatsNBA(Stats):
     def _join_fp_player_features(self, date):
         """NBA hook: Cleaning the Glass per-player season-to-date features as of ``date``."""
         return self._collector_asof_features(
-            _CTG_PLAYER_DIR, _CTG_PLAYER_KEY_COL, _CTG_PLAYER_META_COLS, self._ctg_season(date), date
+            _CTG_PLAYER_DIR,
+            _CTG_PLAYER_KEY_COL,
+            _CTG_PLAYER_META_COLS,
+            self._ctg_season(date),
+            date,
         )
 
     def _join_fp_team_features(self, date):

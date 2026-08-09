@@ -8,10 +8,13 @@ so no trained model, network, or plotting backend is required.
 import hashlib
 import importlib.resources as pkg_resources
 import json
+import math
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
 import pytest
+from click.testing import CliRunner
 
 from sportstradamus import data
 from sportstradamus.helpers.distributions import _dp_cdf_pmf, _dp_ppf
@@ -53,9 +56,11 @@ from sportstradamus.training.scorecard import (
     _gate5_ece_debiased,
     _gate5_ece_equal_mass,
     _gate23_segment_match,
+    _history_to_eval_frame,
     _infer_dist_from_columns,
     _iqr_pred_analytical,
     _ks_uniform,
+    _make_meanyr_lookup_from_gamelog,
     _memmel_sharpe_z,
     _pred_cdf_pmf,
     _pred_midpit,
@@ -76,6 +81,7 @@ from sportstradamus.training.scorecard import (
     fit_skewnorm_dispersion_skew,
     gate_row,
     load_test_set,
+    main,
     min_gate_slack,
     scorecard,
     supersede_verdict,
@@ -1235,18 +1241,10 @@ def test_gate1_uses_only_explicit_authentic_book_evidence():
         strategy="t",
     )
 
-    assert full["g1_brier_diff_mean"] == pytest.approx(
-        authentic_only["g1_brier_diff_mean"]
-    )
-    assert full["g1_brier_diff_ci_lo"] == pytest.approx(
-        authentic_only["g1_brier_diff_ci_lo"]
-    )
-    assert full["g1_brier_diff_ci_hi"] == pytest.approx(
-        authentic_only["g1_brier_diff_ci_hi"]
-    )
-    assert full["g1_brier_skill_score"] == pytest.approx(
-        authentic_only["g1_brier_skill_score"]
-    )
+    assert full["g1_brier_diff_mean"] == pytest.approx(authentic_only["g1_brier_diff_mean"])
+    assert full["g1_brier_diff_ci_lo"] == pytest.approx(authentic_only["g1_brier_diff_ci_lo"])
+    assert full["g1_brier_diff_ci_hi"] == pytest.approx(authentic_only["g1_brier_diff_ci_hi"])
+    assert full["g1_brier_skill_score"] == pytest.approx(authentic_only["g1_brier_skill_score"])
 
 
 def test_retained_historical_passing_yards_gate1_reproduces():
@@ -1943,17 +1941,6 @@ def test_signed_count_identity_uses_no_target_normalization():
 # ---------------------------------------------------------------------------
 # --live-window mode (Stage 0 deliverable 0.3)
 # ---------------------------------------------------------------------------
-
-import math
-from datetime import datetime, timedelta
-
-from click.testing import CliRunner
-
-from sportstradamus.training.scorecard import (
-    _history_to_eval_frame,
-    _make_meanyr_lookup_from_gamelog,
-    main,
-)
 
 
 def _build_live_offer(line, bet, model_p, books_p):
@@ -2894,7 +2881,9 @@ def _under_dispersed_skewnorm(n: int = 3000):
     from scipy.stats import skewnorm
 
     rng = np.random.default_rng(0)
-    y = skewnorm.rvs(_RECAL_ALPHA, loc=_RECAL_LOC, scale=_RECAL_SCALE * 1.7, size=n, random_state=rng)
+    y = skewnorm.rvs(
+        _RECAL_ALPHA, loc=_RECAL_LOC, scale=_RECAL_SCALE * 1.7, size=n, random_state=rng
+    )
     df = pd.DataFrame(
         {"SN_Loc": _RECAL_LOC, "SN_Scale": _RECAL_SCALE, "SN_Alpha": _RECAL_ALPHA}, index=range(n)
     )

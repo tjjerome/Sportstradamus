@@ -1087,9 +1087,10 @@ def _apply_affine_candidate_distribution(
     if not legacy:
         if "QuoteAuthenticity" in offer_df:
             provenance = offer_df["QuoteAuthenticity"]
-            if provenance.isna().any() or not provenance.isin(
-                ("authentic", "derived", "synthetic")
-            ).all():
+            if (
+                provenance.isna().any()
+                or not provenance.isin(("authentic", "derived", "synthetic")).all()
+            ):
                 raise ValueError("affine candidate received invalid quote authenticity")
             authentic = provenance.eq("authentic").to_numpy(dtype=bool)
         else:

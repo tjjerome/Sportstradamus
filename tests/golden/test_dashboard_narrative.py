@@ -79,7 +79,9 @@ def test_game_headline_story_wins_over_parlay():
     parlays = pd.DataFrame(
         [{"Game": "NYK/SAS", "Date": "2026-06-13", "Model EV": 5.0, "Thesis": "parlay says"}]
     )
-    assert game_headline(stories, parlays, game="NYK/SAS", date="2026-06-13") == "The Knicks pull away"
+    assert (
+        game_headline(stories, parlays, game="NYK/SAS", date="2026-06-13") == "The Knicks pull away"
+    )
 
 
 def test_game_headline_falls_back_to_parlay_when_no_story_row():

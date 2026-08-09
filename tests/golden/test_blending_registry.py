@@ -108,9 +108,7 @@ def test_validate_cell_mixture_is_continuous():
     }
     ship_config._validate_cell("NFL", "yards", mix_cell)
     with pytest.raises(ValueError, match="cannot ship"):
-        ship_config._validate_cell(
-            "NFL", "yards", {**mix_cell, "target_normalization": "none"}
-        )
+        ship_config._validate_cell("NFL", "yards", {**mix_cell, "target_normalization": "none"})
     with pytest.raises(ValueError, match="cannot carry"):
         ship_config._validate_cell(
             "NFL", "yards", {**mix_cell, "dist": "NegBin", "shipped": "withheld"}

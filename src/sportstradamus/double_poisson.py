@@ -145,14 +145,14 @@ class DoublePoissonTorch(D.Distribution):
             cdf = torch.cumsum(torch.exp(log_pmf), dim=0).reshape(-1, batch_numel)
             sample_shape = torch.Size(sample_shape)
             u = torch.rand(
-                sample_shape.numel(), batch_numel,
-                dtype=self.mu.dtype, device=self.mu.device,
+                sample_shape.numel(),
+                batch_numel,
+                dtype=self.mu.dtype,
+                device=self.mu.device,
             )
             # searchsorted wants the sorted axis last: (B, K) vs (B, n). Scale u
             # by the total truncated mass so u can never exceed cdf[-1].
-            idx = torch.searchsorted(
-                cdf.T.contiguous(), (u * cdf[-1]).T.contiguous()
-            ).T
+            idx = torch.searchsorted(cdf.T.contiguous(), (u * cdf[-1]).T.contiguous()).T
             out = idx.to(self.mu.dtype).clamp(max=grid[-1])
             return out.reshape(sample_shape + self.batch_shape)
 

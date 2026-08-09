@@ -71,9 +71,7 @@ def test_decode_loc_is_exact_inverse_of_encode_loc():
     X = _frame()
     loc = np.array([12.0, 9.0, 5.0, 3.0, 2.0])
 
-    round_trip = strat.decode_loc(
-        strat.encode_loc(loc, X, 10.0, _PROJ_MIN), X, 10.0, _PROJ_MIN
-    )
+    round_trip = strat.decode_loc(strat.encode_loc(loc, X, 10.0, _PROJ_MIN), X, 10.0, _PROJ_MIN)
     np.testing.assert_allclose(round_trip, loc)
 
 
@@ -129,9 +127,7 @@ def test_resolve_denom_col_raises_on_volume_or_unmapped_market():
         resolve_denom_col("ratio_projvol", "NFL", "carries", ["MeanYr"], zero_inflated=False)
     # An NFL market with no volume mapping at all.
     with pytest.raises(ValueError, match="ratio_projvol"):
-        resolve_denom_col(
-            "ratio_projvol", "NFL", "interceptions", ["MeanYr"], zero_inflated=False
-        )
+        resolve_denom_col("ratio_projvol", "NFL", "interceptions", ["MeanYr"], zero_inflated=False)
 
 
 def test_every_mapped_denominator_is_a_forward_projection():

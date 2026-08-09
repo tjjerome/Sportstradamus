@@ -74,9 +74,7 @@ def _fit_predict(X_train, X_test, y_train) -> pd.DataFrame:
         seed=DETERMINISTIC_SEED,
         sn_param="centered",
     )
-    return predict_lss_params(
-        model, "SkewNormal", X_test, normalized=False, sn_param="centered"
-    )
+    return predict_lss_params(model, "SkewNormal", X_test, normalized=False, sn_param="centered")
 
 
 @pytest.mark.integration
@@ -109,9 +107,7 @@ def test_centered_sn_live_path_reemits_direct_frame():
     # path clips anyway; corner quality is the pilots' question, not this
     # contract's.
     line = np.round(mean_back) + 0.5
-    under = get_odds(
-        line, mean_back, "SkewNormal", cv=0.3, sigma=scale, skew_alpha=alpha, step=0.5
-    )
+    under = get_odds(line, mean_back, "SkewNormal", cv=0.3, sigma=scale, skew_alpha=alpha, step=0.5)
     assert np.isfinite(under).all()
     assert ((under >= 0.0) & (under <= 1.0)).all()
     assert 0.05 < float(np.median(under)) < 0.95

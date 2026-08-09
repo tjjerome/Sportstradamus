@@ -59,9 +59,7 @@ def test_log_prob_matches_direct_at_mapped_params():
     centered = CenteredSkewNormalTorch(mean, sd, g1)
     direct = SkewNormalTorch(loc, scale, alpha)
     x = torch.tensor([[1.0, 4.0], [2.5, 6.0], [0.0, 9.0]])
-    np.testing.assert_allclose(
-        centered.log_prob(x).numpy(), direct.log_prob(x).numpy(), atol=1e-5
-    )
+    np.testing.assert_allclose(centered.log_prob(x).numpy(), direct.log_prob(x).numpy(), atol=1e-5)
 
 
 def test_numpy_and_torch_mappings_agree():
@@ -69,9 +67,7 @@ def test_numpy_and_torch_mappings_agree():
     sd = np.linspace(0.5, 3.0, 7)
     g1 = np.linspace(-0.99, 0.99, 7)
     np_out = _centered_to_direct(mean, sd, g1, np)
-    torch_out = _centered_to_direct(
-        *(torch.tensor(v) for v in (mean, sd, g1)), torch
-    )
+    torch_out = _centered_to_direct(*(torch.tensor(v) for v in (mean, sd, g1)), torch)
     for a, b in zip(np_out, torch_out, strict=True):
         np.testing.assert_allclose(a, b.numpy(), rtol=1e-6)
 
@@ -125,9 +121,7 @@ def test_wrapper_contract_and_predict_reemits_direct_params():
     # (mean, log sd, atanh(gamma1/bound)) — the auto start-value fallback seeds
     # all heads at 0.5, which stalls the mean head under stabilization.
     g1_seed = float(np.clip(skew(y), -0.5, 0.5))
-    model.start_values = np.array(
-        [y.mean(), math.log(y.std()), math.atanh(g1_seed / _GAMMA1_MAX)]
-    )
+    model.start_values = np.array([y.mean(), math.log(y.std()), math.atanh(g1_seed / _GAMMA1_MAX)])
     torch.manual_seed(0)
     model.train(
         {"num_leaves": 7, "learning_rate": 0.1, "verbose": -1, "seed": 1},

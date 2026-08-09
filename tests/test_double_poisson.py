@@ -38,7 +38,9 @@ def test_truncation_round_trip():
     dist = DoublePoissonTorch(mu, phi)
     baseline = dist.log_prob(torch.tensor([[0.0], [3.0], [12.0]]))
     wide = dist._log_kernel(torch.tensor([[0.0], [3.0], [12.0]])) - torch.logsumexp(
-        dist._log_kernel(torch.arange(2 * len(dist._support_grid()), dtype=torch.float32).unsqueeze(-1)),
+        dist._log_kernel(
+            torch.arange(2 * len(dist._support_grid()), dtype=torch.float32).unsqueeze(-1)
+        ),
         dim=0,
     )
     assert torch.allclose(baseline, wide, atol=1e-5)

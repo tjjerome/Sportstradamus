@@ -69,8 +69,9 @@ def test_corrupt_book_ev_does_not_inflate_blend():
     # Model EV must stay in the threes-prop support, not the 7x inflation
     # (Champagnie 2.7 -> 7.45) the unguarded pool produced live.
     offer_df = _zinb_offer_df([7802.0, 7802.0, 4268.0])
-    _blend_with_book(offer_df, "ZINB", model_weight=0.85, cv=0.566, hist_gate=0.337,
-                     league="NBA", market="FG3M")
+    _blend_with_book(
+        offer_df, "ZINB", model_weight=0.85, cv=0.566, hist_gate=0.337, league="NBA", market="FG3M"
+    )
     blended = offer_df["Projection"].to_numpy()
     line = offer_df["Line"].to_numpy()
     assert np.isfinite(blended).all()
@@ -97,8 +98,9 @@ def test_sane_book_ev_blend_unchanged_by_guard():
     # A legitimate book EV near the line must blend normally (the guard is inert).
     sane = _zinb_offer_df([2.6, 1.5, 0.6])
     guarded = sane.copy()
-    _blend_with_book(guarded, "ZINB", model_weight=0.85, cv=0.566, hist_gate=0.337,
-                     league="NBA", market="FG3M")
+    _blend_with_book(
+        guarded, "ZINB", model_weight=0.85, cv=0.566, hist_gate=0.337, league="NBA", market="FG3M"
+    )
     blended = guarded["Projection"].to_numpy()
     # Blended mean sits in the plausible band between the model and the book.
     assert (blended > 0).all()

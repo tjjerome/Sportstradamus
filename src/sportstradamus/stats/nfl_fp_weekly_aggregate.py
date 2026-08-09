@@ -885,9 +885,7 @@ def load_window_one_year(
     one-window list. Used when the caller wants a single-season window
     (e.g. legacy fallback paths that aggregate season-by-season).
     """
-    return load_multi_window_one_year(
-        [(season, start_week, end_week)], snapshot_only=snapshot_only
-    )
+    return load_multi_window_one_year([(season, start_week, end_week)], snapshot_only=snapshot_only)
 
 
 def load_multi_window_one_year(

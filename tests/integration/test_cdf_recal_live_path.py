@@ -122,7 +122,9 @@ def _score(monkeypatch, tmp_path, prob_params, player_stats, offers, pit_recal_b
     monkeypatch.setattr(mp, "stat_dist", {_LEAGUE: {_MARKET: "SkewNormal"}})
     monkeypatch.setattr(mp, "stat_zi", {})
     monkeypatch.setattr(mp, "_build_prob_params", lambda *a, **k: prob_params.copy())
-    return pd.DataFrame(mp.model_prob(offers, _LEAGUE, _MARKET, _PLATFORM, _StubStats(), player_stats))
+    return pd.DataFrame(
+        mp.model_prob(offers, _LEAGUE, _MARKET, _PLATFORM, _StubStats(), player_stats)
+    )
 
 
 @pytest.mark.integration
