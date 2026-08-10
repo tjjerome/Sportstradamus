@@ -5,6 +5,14 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-08-09
+
+First tagged release. Five-league prediction pipeline (NBA, WNBA, MLB, NHL, NFL),
+LightGBMLSS distributional models with a six-gate offline ship harness, DuckDB odds
+archive, Underdog/Sleeper pick'em strategy tooling, and the Streamlit dashboard.
+Git history was rewritten prior to this release to remove credential files committed
+in 2023; the affected keys were rotated.
+
 ### Security
 - Request timeouts on every production HTTP call; ScrapeOps header fetch over TLS.
 - Dashboard HTML output escapes API-origin strings (stored-XSS hardening).
@@ -25,8 +33,3 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 ### Added
 - MIT license, security policy, code of conduct, issue/PR templates, Dependabot config.
 
-## [4.2.0] - 2026-08-06
-
-Baseline for the public changelog: five-league prediction pipeline (NBA, WNBA, MLB, NHL, NFL),
-LightGBMLSS distributional models with a six-gate offline ship harness, DuckDB odds archive,
-Underdog/Sleeper pick'em strategy tooling, and the Streamlit dashboard.
