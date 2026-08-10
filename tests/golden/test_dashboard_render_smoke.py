@@ -225,6 +225,7 @@ def test_lab_correlations_renders_heatmap_and_panels(monkeypatch, tmp_path):
     fixture = tmp_path / "parlay_hist.parquet"
     pd.DataFrame(_PARLAY_ROWS).to_parquet(fixture)
     monkeypatch.setattr("sportstradamus.helpers.io.PARLAY_HIST_PATH", fixture)
+    monkeypatch.setattr("sportstradamus.helpers.io.PARLAY_HIST_DIR", tmp_path / "parlay_hist")
     monkeypatch.setattr("sportstradamus.dashboard.data.PARLAY_HIST_PATH", fixture)
 
     at = AppTest.from_file(str(_APP), default_timeout=30)

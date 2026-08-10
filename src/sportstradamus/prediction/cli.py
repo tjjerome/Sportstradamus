@@ -7,7 +7,7 @@ Orchestrates the full prediction pipeline:
 3. Score via :func:`process_offers` (feature extraction + distributional model)
 4. Snapshot scored offers + parlays as parquet for the Streamlit dashboard
 5. Persist a rolling year of predictions to ``data/history.parquet`` and
-   the new parlays to ``data/parlay_hist.parquet``
+   the new parlays to the ``data/parlay_hist/`` day partitions
 """
 
 from __future__ import annotations
@@ -36,9 +36,8 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
 from sportstradamus.helpers.io import (
     read_history,
-    read_parlay_hist,
+    upsert_parlay_hist,
     write_history,
-    write_parlay_hist,
 )
 from sportstradamus.history_schema import HISTORY_COLS, PREDICTION_KEY
 from sportstradamus.prediction.persist import (
@@ -325,14 +324,11 @@ def main(progress, contest_variant, log_level):
     _write_pickem_snapshot({"Underdog": scored_ud, "Sleeper": scored_sl}, stats)
 
     if not parlay_df.empty:
-        old_parlays = read_parlay_hist()
-        if not old_parlays.empty:
-            combined = pd.concat([parlay_df, old_parlays], ignore_index=True).drop_duplicates(
-                subset=["Model EV", "Market EV"], ignore_index=True
-            )
-        else:
-            combined = parlay_df
-        write_parlay_hist(combined)
+        upsert_parlay_hist(
+            parlay_df,
+            dedup_subset=["Model EV", "Market EV"],
+            retention_days=_HISTORY_RETENTION_DAYS,
+        )
 
     archive.write()
     logger.info("Checking historical predictions")

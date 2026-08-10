@@ -1187,6 +1187,7 @@ class Stats:
         self.profiled_market = market
         return date
 
+    @line_profiler.profile
     def profile_market(self, market, date=datetime.today().date()):
         date = self._begin_profile_market(market, date)
         if date is None:
@@ -1418,6 +1419,7 @@ class Stats:
 
         self.playerProfile.fillna(0, inplace=True)
 
+    @line_profiler.profile
     def get_stats(self, market, offers, date=datetime.today().date()):
         self.profile_market(market, date)
         self._ensure_comps(date=date)

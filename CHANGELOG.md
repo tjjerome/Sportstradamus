@@ -5,6 +5,13 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 
 ## [Unreleased]
 
+### Changed
+- Parlay history is now one parquet per game date (`data/runtime/parlay_hist/`);
+  prophecize and reflect rewrite only the days they touch instead of the whole
+  multi-million-row file (43% of a warm prophecize run, line-profiled). The old
+  single-file store self-migrates on the first run; parlays now share the
+  history parquet's 365-day retention.
+
 ## [4.2.0] - 2026-08-09
 
 First tagged release. Five-league prediction pipeline (NBA, WNBA, MLB, NHL, NFL),

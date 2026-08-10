@@ -26,7 +26,13 @@ from sportstradamus import data
 _RUNTIME_DIR = pkg_resources.files(data) / "runtime"
 _TRAINING_DIR = pkg_resources.files(data) / "training"
 HISTORY_PATH = _RUNTIME_DIR / "history.parquet"
+# Legacy single-file parlay history. Reads fall back to it until the first
+# upsert_parlay_hist migrates its rows into PARLAY_HIST_DIR and deletes it.
 PARLAY_HIST_PATH = _RUNTIME_DIR / "parlay_hist.parquet"
+# One parquet per game date ("YYYY-MM-DD.parquet"). Partitioned so the
+# hot-path writers (prophecize upsert, reflect resolution) rewrite only the
+# days they touch instead of the whole multi-million-row history each slot.
+PARLAY_HIST_DIR = _RUNTIME_DIR / "parlay_hist"
 CURRENT_OFFERS_PATH = _RUNTIME_DIR / "current_offers.parquet"
 CURRENT_PARLAYS_PATH = _RUNTIME_DIR / "current_parlays.parquet"
 CURRENT_GAME_CORR_PATH = _RUNTIME_DIR / "current_game_corr.parquet"
@@ -194,27 +200,94 @@ def _list_to_tuple(v):
     return v
 
 
-def write_parlay_hist(df: pd.DataFrame) -> None:
-    """Atomically write the parlay history parquet."""
-    out = df.copy()
+def _parlay_day_path(day) -> Path:
+    return Path(str(PARLAY_HIST_DIR)) / f"{day}.parquet"
+
+
+def _parlay_day_files() -> list[Path]:
+    return sorted(Path(str(PARLAY_HIST_DIR)).glob("*.parquet"))
+
+
+def _write_parlay_day(day_df: pd.DataFrame, day) -> None:
+    out = day_df.copy()
     # _date is a transient column added by analysis.compute_parlay_metrics; never persist it.
     out = out.drop(columns=[c for c in ("_date",) if c in out.columns])
     for col in _PARLAY_LIST_COLS:
         if col in out.columns:
             out[col] = out[col].apply(_seq_to_list)
-    _atomic_write_parquet(out, PARLAY_HIST_PATH)
+    _atomic_write_parquet(out, _parlay_day_path(day))
+
+
+def write_parlay_hist(df: pd.DataFrame, days: list[str] | None = None) -> None:
+    """Write the parlay history as one parquet per game date.
+
+    ``days=None`` is a full rewrite: every date in ``df`` is written, day files
+    for dates absent from ``df`` are deleted, and the legacy single-file parquet
+    is removed (this is also the migration path). Passing ``days`` writes only
+    those dates' partitions — for callers like reflect that mutate a few recent
+    days of an otherwise-unchanged frame.
+    """
+    if days is None:
+        days = [] if df.empty else df["Date"].unique()
+        keep = {f"{day}.parquet" for day in days}
+        for stale in _parlay_day_files():
+            if stale.name not in keep:
+                stale.unlink()
+        Path(str(PARLAY_HIST_PATH)).unlink(missing_ok=True)
+    for day in days:
+        _write_parlay_day(df.loc[df["Date"] == day], day)
+
+
+def upsert_parlay_hist(
+    new_df: pd.DataFrame, dedup_subset: list[str], retention_days: int | None = None
+) -> None:
+    """Merge freshly built parlays into their day partitions.
+
+    Reads only the day files ``new_df`` touches, keeps the new row on a
+    ``dedup_subset`` collision, and rewrites just those partitions. If the
+    legacy single-file history still exists it is migrated (partitioned and
+    deleted) first, so the first post-deploy run self-migrates. With
+    ``retention_days``, partitions older than that many days are deleted —
+    mirroring the history parquet's retention trim.
+    """
+    if Path(str(PARLAY_HIST_PATH)).is_file():
+        write_parlay_hist(read_parlay_hist())
+    for day in new_df["Date"].unique():
+        day_new = new_df.loc[new_df["Date"] == day]
+        day_old = read_parquet_safe(_parlay_day_path(day))
+        if not day_old.empty:
+            day_new = pd.concat([day_new, day_old], ignore_index=True)
+        _write_parlay_day(day_new.drop_duplicates(subset=dedup_subset, ignore_index=True), day)
+    if retention_days is not None:
+        cutoff = pd.Timestamp.today().date() - pd.Timedelta(days=retention_days)
+        for day_file in _parlay_day_files():
+            if pd.Timestamp(day_file.stem).date() < cutoff:
+                day_file.unlink()
+
+
+def parlay_hist_mtime() -> float:
+    """Latest mtime across the day partitions and the legacy file (0.0 if none).
+
+    Cache-invalidation key for the dashboard: every partition write replaces its
+    file atomically with a fresh mtime, so the max moves on any upsert.
+    """
+    paths = [*_parlay_day_files(), Path(str(PARLAY_HIST_PATH))]
+    return max((p.stat().st_mtime for p in paths if p.is_file()), default=0.0)
 
 
 def read_parlay_hist(columns: list[str] | None = None) -> pd.DataFrame:
-    """Read the parlay history.
+    """Read the parlay history (all day partitions, plus the legacy file if present).
 
     ``columns`` projects the read (pyarrow-level) for callers that only need scalar
     columns; the list<->tuple normalization then only touches whichever list columns
     were actually requested.
     """
-    df = read_parquet_safe(PARLAY_HIST_PATH, columns=columns)
-    if df.empty:
-        return df
+    frames = [read_parquet_safe(p, columns=columns) for p in _parlay_day_files()]
+    frames.append(read_parquet_safe(PARLAY_HIST_PATH, columns=columns))
+    frames = [f for f in frames if not f.empty]
+    if not frames:
+        return pd.DataFrame()
+    df = pd.concat(frames, ignore_index=True)
     for col in _PARLAY_LIST_COLS:
         if col in df.columns:
             df[col] = df[col].apply(_list_to_tuple)

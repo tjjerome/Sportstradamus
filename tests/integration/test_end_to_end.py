@@ -196,16 +196,15 @@ def test_pipeline_smoke(
     monkeypatch.setattr(prediction_cli, "write_current_game_stories", game_stories_calls.append)
 
     # Skip writing prediction history to data/history.dat.
-    def _noop_write(_df):
+    def _noop_write(_df, **_kwargs):
         return None
 
     def _empty_df():
         return pd.DataFrame()
 
     monkeypatch.setattr(prediction_cli, "write_history", _noop_write)
-    monkeypatch.setattr(prediction_cli, "write_parlay_hist", _noop_write)
+    monkeypatch.setattr(prediction_cli, "upsert_parlay_hist", _noop_write)
     monkeypatch.setattr(prediction_cli, "read_history", _empty_df)
-    monkeypatch.setattr(prediction_cli, "read_parlay_hist", _empty_df)
 
     if not _REAL_APIS:
         _stub_stats_loaders(monkeypatch)

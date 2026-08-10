@@ -830,6 +830,7 @@ class StatsMLB(Stats):
             game_type = self.upcoming_games.get(team, {}).get("game type")
         return _MLB_SERIES_GAMES_TO_WIN.get(game_type, _MLB_DEFAULT_SERIES_WINS)
 
+    @line_profiler.profile
     def profile_market(self, market, date=datetime.today().date()):
         date = self._begin_profile_market(market, date)
         if date is None:

@@ -30,6 +30,7 @@ from sportstradamus.helpers.io import (
     PARLAY_HIST_PATH,
     PROFIT_SIM_SUMMARY_PATH,
     USER_SLIPS_PATH,
+    parlay_hist_mtime,
     read_history,
     read_parlay_hist,
     read_parquet_safe,
@@ -181,10 +182,10 @@ def load_parlays(columns: Sequence[str] | None = None) -> pd.DataFrame:
     """Parlay history from parquet, keyed on path+mtime so cron rewrites invalidate the cache.
 
     ``columns`` projects the read to a scalar subset (Lab Correlations does this — the
-    full 1.7M-row file carries multi-GB ``list<float>`` struct columns it never plots).
+    full 1.7M-row history carries multi-GB ``list<float>`` struct columns it never plots).
     """
     key = tuple(columns) if columns else None
-    return _load_parlays_cached(PARLAY_HIST_PATH, _mtime(PARLAY_HIST_PATH), key)
+    return _load_parlays_cached(PARLAY_HIST_PATH, parlay_hist_mtime(), key)
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading current offers...")

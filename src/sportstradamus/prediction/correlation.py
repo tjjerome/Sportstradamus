@@ -571,6 +571,7 @@ def _append_story_context(
     )
 
 
+@line_profiler.profile
 def _process_league_games(
     df,
     league_df,

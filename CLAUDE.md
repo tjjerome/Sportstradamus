@@ -176,7 +176,7 @@ Do not undo that work:
   See STYLE_GUIDE.md §9.
 * **Dashboard never touches the DuckDB archive.** The Streamlit dashboard reads
   pre-computed parquet snapshots only (`data/runtime/history.parquet`,
-  `data/runtime/parlay_hist.parquet`, `data/training/model_stats.parquet`,
+  `data/runtime/parlay_hist/` day partitions, `data/training/model_stats.parquet`,
   `data/runtime/current_pickem.parquet`). DuckDB holds an
   exclusive file lock for the entire lifetime of any read-write connection;
   the dashboard is the only long-lived process in the system, so any archive

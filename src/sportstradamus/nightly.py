@@ -15,6 +15,7 @@ Schedule with cron after games finish, e.g.:
 import importlib.resources as pkg_resources
 import json
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 
 import click
 import numpy as np
@@ -37,6 +38,7 @@ from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
 from sportstradamus.helpers.io import (
     CALIBRATION_SUMMARY_PATH,
     LIVE_METRICS_PATH,
+    PARLAY_HIST_PATH,
     PROFIT_SIM_SUMMARY_PATH,
     _atomic_write_parquet,
     read_history,
@@ -461,7 +463,12 @@ def _resolve_parlays(stats, history_only):
                 lambda bet: check_bet(bet, stats, stat_map), axis=1
             ).tolist()
             parlays.loc[parlays["Legs Resolved"].isna(), ["Legs Resolved", "Misses"]] = results
-            write_parlay_hist(parlays)
+            if Path(str(PARLAY_HIST_PATH)).is_file():
+                # Legacy single-file history still present: full write migrates it
+                # into day partitions before any partial day-write can fork state.
+                write_parlay_hist(parlays)
+            else:
+                write_parlay_hist(parlays, days=list(unresolved["Date"].unique()))
             n_resolved_parl = sum(
                 1 for legs, _ in results if not (isinstance(legs, float) and np.isnan(legs))
             )

@@ -121,7 +121,7 @@ Sportstradamus/
 
 | Module | What's in it |
 |---|---|
-| `cli.py` | `main` click command — loads/updates `Stats` for active leagues, scrapes DFS offers (Underdog, Sleeper), scores via `process_offers`, snapshots scored offers + parlays as parquet for the dashboard, persists `history.parquet` / `parlay_hist.parquet` |
+| `cli.py` | `main` click command — loads/updates `Stats` for active leagues, scrapes DFS offers (Underdog, Sleeper), scores via `process_offers`, snapshots scored offers + parlays as parquet for the dashboard, persists `history.parquet` / the `parlay_hist/` day partitions |
 | `model_prob.py` | `model_prob` — loads a trained model, computes blended probability distributions for a league/market/platform batch, decodes per the cell's target normalization |
 | `scoring.py` | `process_offers`, `match_offers` — offer-level EV scoring and deduplication |
 | `correlation.py` | `find_correlation` — loads the per-league correlation parquets, assembles Σ, scores parlay legs (calls `parlay.beam_search_parlays`) |
@@ -220,7 +220,7 @@ prophecize  (prediction/cli.py)
         │
         ▼
   prediction/persist.py  →  parquet snapshots the dashboard reads
-  history.parquet / parlay_hist.parquet
+  history.parquet / parlay_hist/ day partitions
 
 pickem-build  (strategies/underdog_pickem.py)
   prediction/parlay.beam_search_parlays(contest_variant=...)
