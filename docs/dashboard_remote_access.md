@@ -1,25 +1,28 @@
 # Always-on Dashboard with Tailscale
 
-How to keep the Sportstradamus Streamlit dashboard running on the UP Board
-(Ubuntu 24.04) and reach it from anywhere via Tailscale.
+How to keep the Streamlit dashboard running on a home server and reach it from
+your own devices, without exposing it to the internet.
+
+> **Warning — the dashboard has no authentication.** Anyone who can reach the
+> port can read and click everything. Keep it tailnet-only: bind Streamlit to
+> localhost and front it with `tailscale serve`, which only devices signed into
+> your tailnet can reach. Never expose it to the public internet — no port
+> forwarding, no public reverse proxy, and never `tailscale funnel`.
 
 ## Architecture
 
 ```
-phone / laptop  --(WireGuard over internet)-->  upboard.<tailnet>.ts.net  -->  127.0.0.1:8501  (Streamlit)
-                       Tailscale mesh                    Tailscale Serve              systemd unit
+phone / laptop --(WireGuard)--> <host>.<tailnet>.ts.net --> 127.0.0.1:8501 (Streamlit)
+                Tailscale mesh       Tailscale Serve             systemd unit
 ```
 
-Two layers:
-
 1. **systemd** keeps the Streamlit process alive across reboots and crashes.
-2. **Tailscale** gives the UP Board a stable hostname reachable from any
-   device signed into your tailnet — no port forwarding, no DNS, no certs
-   to manage.
+2. **Tailscale Serve** gives the box a stable HTTPS hostname reachable only
+   from your tailnet — no port forwarding, no DNS, no certs to manage.
 
-## 1. Keep the dashboard alive — systemd unit
+## 1. systemd unit
 
-Drop this in `/etc/systemd/system/sportstradamus-dashboard.service`:
+Drop this in `/etc/systemd/system/<unit>.service`:
 
 ```ini
 [Unit]
@@ -27,156 +30,82 @@ Description=Sportstradamus dashboard
 After=network.target
 
 [Service]
-WorkingDirectory=/home/trevor/Sportstradamus
-ExecStart=/home/trevor/.local/bin/poetry run streamlit run src/sportstradamus/dashboard_app.py --server.port 8501 --server.address 127.0.0.1 --server.headless true
+WorkingDirectory=<repo-checkout>
+Environment=STREAMLIT_SERVER_PORT=8501
+Environment=STREAMLIT_SERVER_ADDRESS=127.0.0.1
+Environment=STREAMLIT_SERVER_HEADLESS=true
+ExecStart=<path-to-poetry> run dashboard
 Restart=always
 RestartSec=5
-User=trevor
+User=<user>
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-Bind to `127.0.0.1` so Streamlit is only reachable through the local
-loopback. Tailscale Serve (step 7) proxies the tailnet hostname into it.
+`poetry run sportstradamus dashboard` is the canonical entry point (`sportstradamus.dashboard:run`);
+it launches `streamlit run` on the package's `dashboard/app.py` with the file
+watcher off, so an unattended server never shows the "Source file changed,
+rerun?" popup. Don't point `ExecStart` at a `.py` directly — the launcher
+centralizes those production flags.
 
-Enable and start:
+The bind comes from the `Environment=` lines (the `dashboard` command takes no
+flags). `STREAMLIT_SERVER_ADDRESS=127.0.0.1` keeps Streamlit on loopback so it
+is only reachable through Tailscale Serve.
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now sportstradamus-dashboard
-sudo systemctl status sportstradamus-dashboard
+sudo systemctl enable --now <unit>
 ```
 
-## 2. Tailscale account
+## 2. Join the tailnet
 
-Sign up at https://tailscale.com (Google / GitHub / email login). The
-free **Personal** tier covers up to 100 devices.
-
-## 3. Install Tailscale on the UP Board
+Install Tailscale (https://tailscale.com/download) on the server and on each
+device you browse from, sign both into the same tailnet, then on the server:
 
 ```bash
-curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up --ssh --hostname=<host>
 ```
 
-Installs the apt repo, the `tailscaled` daemon, and the `tailscale` CLI.
-The daemon auto-starts and is enabled in systemd by the installer.
+`--ssh` allows SSH from tailnet devices using Tailscale identity, so port 22
+never needs exposing. Enable MagicDNS in the admin console so `<host>`
+resolves by name.
 
-## 4. Bring the UP Board onto your tailnet
-
-```bash
-sudo tailscale up --ssh --hostname=upboard
-```
-
-- Prints a URL — open it on a logged-in device, click **Connect** to
-  authorize the machine.
-- `--ssh` lets you SSH in from any tailnet device using Tailscale identity
-  (kills the need to expose port 22 anywhere).
-- `--hostname` sets the MagicDNS name.
-
-Verify:
+## 3. HTTPS via Tailscale Serve
 
 ```bash
-tailscale status
-tailscale ip -4    # prints the 100.x.y.z tailnet IP
-```
-
-## 5. Enable MagicDNS (one-time)
-
-Open https://login.tailscale.com/admin/dns → toggle **MagicDNS: on**.
-The UP Board is now reachable as `upboard` from any tailnet device.
-
-## 6. Install Tailscale on your phone / laptop
-
-| Platform | Install |
-|---|---|
-| iOS / Android | App stores |
-| macOS | App store or `brew install tailscale` |
-| Windows | https://tailscale.com/download |
-| Linux | Same `curl … \| sh` as step 3, then `sudo tailscale up` |
-
-Sign in with the same account. Each device gets its own tailnet IP.
-
-## 7. HTTPS via Tailscale Serve
-
-Streamlit on `:8501` is plain HTTP. To upgrade to a real HTTPS URL with
-an automatic Let's Encrypt cert from Tailscale:
-
-```bash
-sudo tailscale cert upboard.<your-tailnet>.ts.net
+sudo tailscale cert <host>.<tailnet>.ts.net
 sudo tailscale serve --bg --https=443 http://127.0.0.1:8501
 ```
 
-Get your exact tailnet name from `tailscale status` or the admin console.
+Now `https://<host>.<tailnet>.ts.net` proxies to Streamlit with an automatic
+Let's Encrypt cert. `--bg` persists across `tailscaled` restarts; check with
+`tailscale serve status`.
 
-Check it:
-
-```bash
-tailscale serve status
-```
-
-Now `https://upboard.<tailnet>.ts.net` proxies to Streamlit. The
-`--bg` flag persists across `tailscaled` restarts.
-
-## 8. Lock the OS firewall
-
-Belt and suspenders — ensure 8501 is only reachable through the tailnet:
-
-```bash
-sudo ufw allow in on tailscale0
-sudo ufw allow OpenSSH        # skip if you rely on `tailscale ssh`
-sudo ufw default deny incoming
-sudo ufw enable
-```
-
-## 9. (Optional) Public URL — Tailscale Funnel
-
-Only enable if you want **non-tailnet** visitors. **No auth wall** — anyone
-with the URL can hit Streamlit, which has no login.
-
-In admin console → DNS → enable Funnel for the device. Then:
-
-```bash
-sudo tailscale funnel --bg 443
-```
-
-For a public link with an auth wall instead, prefer Cloudflare Tunnel +
-Cloudflare Access and keep Tailscale private.
+If the box runs an OS firewall, allow inbound only on the `tailscale0`
+interface (plus SSH if you don't rely on `tailscale ssh`) and default-deny
+the rest.
 
 ## Smoke test
 
-From your phone with wifi off (LTE only):
-
-```
-https://upboard.<tailnet>.ts.net
-```
-
-If the dashboard loads, you're done. Reboot the UP Board and repeat —
-both `tailscaled` and `sportstradamus-dashboard` should auto-start, and
-`tailscale serve` state persists.
+From your phone with wifi off (LTE only), open
+`https://<host>.<tailnet>.ts.net`. Then reboot the server and repeat — both
+`tailscaled` and `<unit>` should auto-start, and `tailscale serve` state
+persists.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| `tailscale status` shows the device offline | `sudo systemctl restart tailscaled` |
-| HTTPS URL returns 502 | Check the dashboard is listening: `ss -tlnp \| grep 8501` |
-| Dashboard reachable on LAN but not via tailnet | Streamlit bound to `127.0.0.1` is correct *only* if `tailscale serve` proxies it; otherwise bind to `0.0.0.0` |
-| Cert error in browser | Re-run `sudo tailscale cert <hostname>`; check it matches the URL exactly |
-| Dashboard not restarting after crash | `journalctl -u sportstradamus-dashboard -n 100` — check the `ExecStart` path matches your `poetry` install |
+| Device offline in `tailscale status` | `sudo systemctl restart tailscaled` |
+| HTTPS URL returns 502 | Check Streamlit is listening: `ss -tlnp \| grep 8501` |
+| Reachable on LAN but not via tailnet | Loopback bind is correct *only* with `tailscale serve` proxying it |
+| Dashboard not restarting after crash | `journalctl -u <unit> -n 100`; confirm the poetry path in `ExecStart` and that `poetry run sportstradamus dashboard` starts by hand |
 
-## Day-to-day commands
+## Day-to-day
 
 ```bash
-# Restart dashboard after a code change
-sudo systemctl restart sportstradamus-dashboard
-
-# Tail dashboard logs
-journalctl -u sportstradamus-dashboard -f
-
-# See who's on the tailnet
-tailscale status
-
-# Stop serving (e.g. for maintenance)
-sudo tailscale serve reset
+sudo systemctl restart <unit>    # after a code change
+journalctl -u <unit> -f          # tail logs
+sudo tailscale serve reset       # stop serving for maintenance
 ```

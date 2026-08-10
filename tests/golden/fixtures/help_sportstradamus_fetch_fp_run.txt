@@ -1,0 +1,29 @@
+Usage: sportstradamus fetch fp run [OPTIONS]
+
+  Walk the catalog, fetch every endpoint, write one parquet per tool.
+
+  Defaults to the most recently completed period. On a 401 mid-batch in an
+  interactive terminal, prompts for a fresh curl and resumes.
+
+Options:
+  --season INTEGER                Season (year). Defaults to current.
+  --week INTEGER                  Week. Defaults to inferred.
+  --only TEXT                     Only fetch these endpoint names (repeatable).
+  --mode [weekly|season_to_date|postseason]
+                                  Aggregation mode for this fetch.  [default:
+                                  weekly]
+  --dry-run                       Print resolved URLs and parquet paths only.
+  --no-cache                      Flip ``useCache`` to ``False`` on every v2
+                                  body — bypasses the server-side result cache.
+                                  Use when a previous broken-body run may have
+                                  cached an empty result under the same query
+                                  hash.
+  --refetch                       Re-download even if a non-empty parquet
+                                  already exists for this cell. Default is to
+                                  skip existing non-empty files; zero-row
+                                  parquets are always re-fetched.
+  --catalog FILE                  Override catalog path (default: bundled
+                                  config).
+  --log-level [DEBUG|INFO|WARNING|ERROR]
+                                  Verbosity for the structured JSONL log.
+  --help                          Show this message and exit.

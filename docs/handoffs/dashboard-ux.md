@@ -1,0 +1,555 @@
+# Dashboard UX — "the Oracle"
+
+> Status: ACTIVE — **Phase D (loose constellation shapes) is built and gates-green on `feature/dashboard-ux`, owner live-check outstanding**: plan [plans/2026-07-03-p8-phaseD-constellation-shapes.md](../archive/superpowers/plans/2026-07-03-p8-phaseD-constellation-shapes.md). P8 (0/A/B/C + R remediation) shipped and owner-live-checked 2026-07-16; Phase M is built and gates-green with the owner's real-phone pass still outstanding; E art catalog stays parked.
+
+## 1. Mission & money logic
+
+Turn the dashboard from read-only spreadsheet tabs into the product's primary interface: users
+build correlation-aware parlays from model prophecies, see why every pick is made, and can verify
+profitability unaided. Money logic: the models only earn if their edge gets *used* — a builder
+that makes recommendations editable, explainable, and provable is the conversion layer between
+calibration work (model-track) and actual entries on Underdog/Sleeper.
+
+## 2. Read first (in order)
+
+1. [docs/dashboard_ux_redesign.md](../dashboard_ux_redesign.md) — the approved design spec (what
+   to build); naming map + platform taxonomy live there.
+2. [DESIGN.md](../../DESIGN.md) — visual tokens incl. celestial layer; FIXED vs FLEXIBLE.
+3. CLAUDE.md §Hard rules — dashboard never touches DuckDB; §MANDATORY refactoring-specialist.
+4. `src/sportstradamus/prediction/persist.py` — `_OFFER_KEEP_COLS` gates every new snapshot
+   column.
+5. `src/sportstradamus/dashboard_data.py` + `dashboard_detail.py` — the legacy surface being
+   replaced (loaders, dialog, phrase bank).
+6. `tests/golden/test_design_tokens.py` + `test_dashboard_no_archive_lock.py` — the two hard
+   gates this lane must keep green and extend.
+7. `src/sportstradamus/prediction/joint.py` (copula pricing) +
+   `prediction/payouts.py` (`payout_curve_for`) — the seams the slip engine
+   reuses (post parlay.py split; beam search stays in `parlay.py`).
+8. [docs/mockups/](../mockups/) — approved wireframes; the eight `p8-*.html` files are the locked
+   P8 pixel truth (`p8-celestial-refresh.html` is exploratory, not locked).
+9. P8 work: the spec
+   [specs/2026-07-03-p8-oracle-assets-celestial-polish-design.md](../archive/superpowers/specs/2026-07-03-p8-oracle-assets-celestial-polish-design.md)
+   + the six phase plans `docs/archive/superpowers/plans/2026-07-03-p8-*.md` (0/A/B/C/D/E — read the one you
+   are executing, start to finish, before touching code).
+
+## 3. Verify before you trust
+
+If command output contradicts brief prose, the output wins — fix the brief in place (minor) or
+stop and ask the owner (material).
+
+    git fetch origin && git log --oneline origin/devel -3
+    git log --oneline -5                          # lane branch state
+    ls src/sportstradamus/dashboard/ 2>/dev/null  # package exists ⇒ P1 landed
+    ls src/sportstradamus/pages/ 2>/dev/null      # legacy pages gone ⇒ P1 landed
+    python3 -c "import pandas as pd; print(pd.read_parquet('src/sportstradamus/data/runtime/current_offers.parquet').columns.tolist())"
+                                                  # K/Why/Game present ⇒ P2 landed
+    ls src/sportstradamus/data/runtime/current_game_corr.parquet 2>/dev/null
+    ls src/sportstradamus/data/runtime/user_slips.parquet 2>/dev/null  # ⇒ P3 produced saves
+    poetry run python -c "import streamlit; print(streamlit.__version__)"  # needs ≥1.45 for st.navigation icons
+    # CLV corruption check (Phase 0.9 fixes; >0 impossible-probability rows ⇒ still broken):
+    python3 -c "import pandas as pd; h=pd.read_parquet('src/sportstradamus/data/runtime/history.parquet'); print(sum(1 for os in h.get('Offers',[]) if isinstance(os,list) for o in os if (o.get('close_books_p') or 0)>1.5) if 'Offers' in h.columns else (h['Close Market Prob']>1.5).sum())"
+
+### Volatile product assumptions
+
+- **Underdog payout multipliers** (Power/Flex tiers incl. flex partial payouts) — re-verify
+  against the live app before trusting `prediction/parlay.py` tables; play-type rule (2–3 legs
+  Power, 4+ Flex) is owner-stated product behavior, re-verify on UD product changes.
+- **Sleeper payout table** — `parlay.py` carries placeholder `[1.0, 1.0]`; slip engine must show
+  "payout table unverified" until a real table is committed. Re-verify: open Sleeper, record
+  multipliers per leg count, commit alongside the UD tables.
+- **Headshot/logo CDN URL patterns** — unofficial; re-verify with a curl per league before P8
+  relies on them; initials fallback must always work.
+- **Underdog game lines** (Total/Spread/Moneyline) — product surface may change; re-verify
+  what's offered before building the correlation-engine stage.
+
+## 4. Locked decisions
+
+All owner-locked 2026-06-11 (the mockup-review session); changes are owner-only:
+
+- IA: six surfaces (Tonight/Game/Board/Slips/Receipts/Model Lab), games-first spine, board
+  inside. No relitigating page structure.
+- Celestial-B skin: gold `#C9A227` + Cinzel/Cormorant display-only faces; DESIGN.md amended
+  deliberately by the owner; bans (purple gradients, default red, emoji icons) stand.
+- Prose is precomputed templates/phrase banks at prophecize time. Free-LLM rewriter is an
+  optional later seam, never a dependency. No paid APIs anywhere in the dashboard path.
+- Platform taxonomy: platforms = Underdog, Sleeper. Power/Flex = auto play types (2–3 / 4+
+  legs), informational chip only. Rivals = leg type (sits inside a Power/Flex slip beside player
+  props and game lines, not a separate contest). Internal `contest_variant` field names unchanged.
+- Slips is a **story menu**, not the old `Family` cluster: up to 5 data-driven stories per game,
+  each offering a **Bankroll Builder** (max Kelly log-growth, sun motif) and a **Shoot the Moon**
+  (max EV, moon motif) starting parlay, edited from there in the constellation. Menu stakes are a
+  standalone preview; the slip rail is the real bankroll allocator. Mechanics live in P3.
+- Underdog game lines get **no modeling engine** (sharp lines); correlation-engine citizens
+  only, book-implied probabilities.
+- Ambient/visual art is stock or commissioned only — **never AI-generated**;
+  license/attribution tracked in the ambient manifest.
+- Precompute-first: dashboard reads snapshots; only live calc is slip joint-prob (copula over
+  per-game corr slices).
+
+## 5. Module footprint & canonical paths
+
+May touch:
+
+- `src/sportstradamus/dashboard/` (new package: `app.py`, `data.py`, `theme.py`, `assets.py`,
+  `prose.py`, `slip/`, `components/`, `surfaces/`) — all files <300 lines (CLAUDE.md).
+- Legacy surface being replaced (delete at end of P1, no shims): `dashboard.py`,
+  `dashboard_app.py`, `dashboard_data.py`, `dashboard_detail.py`, `pages/`.
+- `src/sportstradamus/prediction/`: `stories.py` (new), `persist.py`, `correlation.py`, `cli.py`,
+  `parlay.py` output-row shaping only (P8 Phase 0 — copula internals stay out of bounds).
+- `src/sportstradamus/nightly.py` (grading + nightly precomputes).
+- `src/sportstradamus/helpers/io.py` (path constants + the history codec P8 Phase 0 deletes).
+- P8 Phase 0 additions: `src/sportstradamus/leg_schema.py` (new), `analysis.py`, `clv.py`,
+  `history_schema.py`, `scripts/migrate_leg_schema.py` (new).
+- Recorded exception (owner-approved via the Phase B plan): one additive hook in
+  `training/correlate.py:_write_corr_outputs` emitting `corr_market_summary.parquet`.
+- `src/sportstradamus/scripts/`: `export_line_movement.py`, `build_team_assets.py` (new).
+- `src/sportstradamus/data/config/team_assets.json`,
+  `src/sportstradamus/data/config/constellation_shapes.json`,
+  `src/sportstradamus/data/assets/ambient/`, `src/sportstradamus/dashboard/static/` (favicon,
+  logo files when commissioned art lands).
+- `tests/golden/` + `tests/integration/` files for the above; `.claude/hooks/design-lint.py`;
+  `DESIGN.md`; `.streamlit/config.toml`; this brief; the spec; roadmap §4/§9.
+
+Out of footprint (stop condition): `training/`, `stats/`, `strategies/` internals (import them,
+don't edit), `stat_meta.json`, archive schema, crontab/creds (owner-only; propose in ledger).
+
+## 6. Stage plan
+
+Stages P0–P8 are the redesign; L-stages are the registered later work behind the scars. Each
+stage ends with the §9 checklist green and the dashboard runnable.
+
+- **P0 — tokens + docs + lane** ✔ (this commit). Goal: celestial amendment + spec + lane + scars
+  registered. Acceptance: design-token golden test green with celestial asserts; spec + brief +
+  roadmap rows exist.
+- **P1 — package migration + nav skeleton.** Goal: `dashboard/` package, six `st.Page` surfaces,
+  behavior-preserving ports (Board←page 1, Slips←2a+2b, Receipts←3+6, Lab←4/5/7), Tonight/Game
+  thin, global sport switch, single `set_page_config`, legacy files deleted. Entry: P0. Scope:
+  dashboard package + test repoints (`test_dashboard_no_archive_lock.py` → pkgutil
+  auto-discovery; two source-slice render pins → new paths). Acceptance: all gates green;
+  manual: six nav entries render real snapshots, sport switch filters, deep-dive opens from
+  Board. Est: 1–2 sessions. If it fails: revert to last green, halve the port batch.
+- **P2 — pipeline precompute + thesis engine v2.** ✔ Two increments landed. First the v1
+  generator (`Why`/`K`/`Game` offer keep-cols, `Thesis` on parlays, `current_game_corr.parquet`
+  per-game leg-pair ρ via opt-in `find_correlation(corr_sink=…)`, `stories_version` in meta,
+  render-time phrase bank retired, `parse_leg` moved to the prediction layer); then the v2 thesis
+  engine (the four-archetype router + `current_game_context.parquet` + JSON voice banks detailed
+  below). The naming bar (owner, post-P1) is met: headlines unique within a slate, built from
+  concrete game context, bank large enough that repeat users don't see the same headline two days
+  running; deterministic templates only (locked §4), diversity from bank size + context keying +
+  the md5 date seed, never randomness. See §10 for both landings. Design rationale + verified code
+  citations live in `docs/archive/superpowers/specs/2026-06-11-thesis-engine-v2-design.md` (background).
+
+  *(p3b, 2026-07-02: direction keys are now **narrative** — bet side ⊕ stat valence via
+  `_NEGATIVE_MARKETS` — with stack Contrast/Mixed routing, conviction anchors, and one shared
+  headline + dek per story; see the §10 p3b line.)*
+
+  *Why it was reopened:* v1 told exactly one story — a featured player (`_family_thesis` always
+  elected a star, breaking ties alphabetically by name) — and its game-shape classifier was dead in
+  production. The snapshot `O/U` column is the **team-implied half-total** (~108 NBA / ~82 WNBA;
+  `cli.py` overwrites `O/U` with `archive.get_total`, which stores `(total ± spread)/2` per
+  team — `moneylines.py:295-302`), but v1's `_TOTAL_BANDS` expected raw game totals (NBA
+  235/215). So `total.median() ≈ 108 ≤ 215` always ⇒ every non-lopsided game classified "grind"
+  and the shootout/coinflip/even cells were dead inventory. v2 replaces that with the
+  league-relative `total_ratio` band classifier.
+
+  1. **Game-context precompute + classifier fix.** New `current_game_context.parquet`, one row per
+     `(League, Game, Date)`, path constant in `helpers/io.py` (`CURRENT_GAME_CONTEXT_PATH`), written
+     by `persist.py` beside the corr slice from a pure `build_game_context(offers, default_totals)`
+     over the finished `snapshot_offers` (no archive reads — cli passes `archive.default_totals` in).
+     Columns: `League`/`Game`/`Date`; `game_total` (sum of the two teams' median `O/U`); `spread`
+     (abs diff of the two team-implied totals — exact, needs no `get_spread`); `fav_team` (max
+     `Moneyline`); `ml_fav_prob`, `ml_margin` (`max|p − 0.5|`); `total_ratio` (`game_total /
+     baseline`); `baseline_total`; `shape`; `pos_edges` (JSON `{team: {pos_group: {dvpoa, n}}}`);
+     `n_offers`. Replace `_TOTAL_BANDS`/`_DEFAULT_TOTAL_BAND` with one league-agnostic ratio-band
+     classifier over `total_ratio`: `_SHOOTOUT_RATIO = 1.05`, `_GRIND_RATIO = 0.95`, keep
+     `_ML_LOPSIDED_MARGIN = 0.18` (already probability-space). Baseline = slate-median game total
+     when the slate has ≥ 4 games, else `2 × default_totals[league]`. Keep the position labels:
+     `_resolve_player_positions` (`correlation.py`) already resolves `G1`/`QB1`/`B3` on the league
+     slice but never writes them back — write them onto the offers frame as a new `Position` string
+     column and append it to `_OFFER_KEEP_COLS` (append-only); combo/`vs.` legs resolve empty and
+     are excluded from `pos_edges`.
+  2. **Pure archetype engine.** `thesis(legs, ctxs) -> headline`: pure, deterministic, no I/O, no
+     archive, no `Family` input. `Leg`/`GameCtx` are frozen dataclasses built by `enrich_legs(parsed,
+     offers)` + the context codec. Variant seed keeps the md5 date scheme keyed on the leg-set:
+     `md5(game | sorted-leg-keys | date | shape | archetype)` — identical between prophecize and the
+     P3 rail because `date` is the snapshot date, not wall-clock. Four archetypes with named-constant
+     firing gates, precedence **player → stack → unit → game-script**:
+     - **player** — one player holds ≥ 0.5 of the legs **and** ≥ 2 legs (strict gate — kills the
+       alphabetical-star pick on no-standout slips).
+     - **stack** — ≥ 3 legs in the primary game, ≥ 2 distinct players, mean bet-signed ρ ≥ 0.10 over
+       the slip's leg pairs (read from the corr slice).
+     - **unit** — ≥ 2 legs share `(team, position-group, direction)` and that group's aggregated
+       DVPOA edge ≥ 0.05 (pos_group = `Position` label minus its rank digit, `G1`→`G`).
+     - **game-script** — shape ∈ {shootout, grind, blowout, coinflip}; the no-standout / mixed-slip
+       answer ("shootout lifts every stat line"), always available.
+
+     Fallback when nothing fires and shape is "even" → game-script "even" cells, never a forced star.
+     Multi-game slip → pick the primary game (most legs, ties by sorted game key) and tell its story.
+     `attach_parlay_theses` slims to a pipeline adapter: parse each parlay row's legs → enrich →
+     build `GameCtx`s once per game → call `thesis()` per **distinct leg-set** → run the existing
+     slate-uniqueness pass over distinct leg-sets within `(League, Date)`. `Family` leaves the thesis
+     path entirely but stays on `current_parlays.parquet` for Slips grouping/ordering only.
+  3. **Per-sport voice banks (all five leagues now — do not defer for seasonality).** Bank STRINGS
+     live in an external committed data file `data/config/voice_bank.json` (same convention as
+     `stat_map.json`) — a phrase bank is data, not code, so it is **not** bounded by the 300-line
+     code limit and should be authored generously (many variants per reachable cell so repeat users
+     rotate; that is what a data file is for). Nested
+     `{voice: {archetype: {shape: {direction: {category: [variants]}}}}}`; voices `basketball` (NBA
+     **and** WNBA share it), `football`, `hockey`, `baseball`, and `shared` (the league-neutral
+     fallback net). `stories/bank.py` is a small pure loader: a cached JSON read plus
+     `bank_cell(voice, archetype, shape, direction, category)` walking the fallback chain `(voice,
+     arch, shape, dir, cat) → (shared, …) → (shared, …, "even", dir, cat) → (shared, …, "even", dir,
+     "production")` (guaranteed hit). v1's 107 player variants are preserved verbatim as
+     basketball's player cells. Template slots: player `{p}`/`{g}`; unit `{team}`/`{grp}`/`{opp}`;
+     game-script `{g}`; stack `{n}`/`{g}`/`{p}` — voices use only their archetype's slots. Author
+     football/hockey/baseball from game knowledge with sport-correct vocabulary and pin via a
+     synthetic-fixture coverage golden (no live legs needed; classifier/normalization/categories are
+     league-blind, so adding a league is one JSON voice block). Decisions: **no pace source**
+     (`total_ratio` is the tempo proxy); **WNBA shares the basketball voice**.
+
+  File layout (300-line cap on CODE only — bank strings are external JSON): `stories/legs.py`
+  (parse + `enrich_legs` + `_stat_category`), `why.py` (unchanged), `context.py` (`GameCtx`/`Leg`,
+  `build_game_context`, parquet↔ctx codec, classifier + ratio constants), `engine.py` (`thesis`,
+  archetype router, variant seed, slate-uniqueness machinery), `thesis.py` (slims to the
+  `attach_parlay_theses` adapter), `bank.py` (JSON loader + fallback) + `data/config/voice_bank.json`.
+  The stories package stays import-safe (no `Archive()` at module load — pinned by
+  `test_dashboard_no_archive_lock.py`) so the P3 rail can import and recompute the engine live. Bump
+  `stories_version`.
+
+  Acceptance: context-builder golden (synthetic two-team offers → exact row; game_total / spread /
+  ratio hand-computed); a synthetic slate hits all five shapes (the all-grind repro fails);
+  archetype routing unit tests per gate (the no-standout fixture routes to game-script, not an
+  alphabetical star; stack / unit / player gates); `thesis()` determinism (same inputs + date →
+  byte-equal); per-league bank-coverage golden (every league × archetype × shape × direction
+  resolves with no KeyError; football/hockey/baseball render sport-correct vocabulary from synthetic
+  fixtures); headline-uniqueness-within-slate still holds; persist characterization updated;
+  integration -n0 shows the new file + `Position` flowing; archive-lock + design goldens green;
+  refactoring-specialist on every touched `.py`. Est: 3–4 sessions.
+- **P3 — slip engine + story menu.** Goal: the story-menu workflow that replaces `Family`, the rail
+  on all surfaces, both joint probs, payout/EV/kelly, play-type chip rule (single constant), save +
+  reflect grading, Sleeper unverified state.
+
+  **Story menu (pipeline precompute — replaces `Family` as the Slips grouping key).** `prophecize`
+  writes `current_game_stories.parquet` keyed `(platform, League, Game, story_id, objective)` →
+  `{legs, headline, joint_p, model_ev, kelly_stake}`. Per `(platform, game)`, enumerate up to **5**
+  stories straight from the game's real signal — strong individual legs (edge ≥ the menu floor;
+  start at the 0.05 the unit gate and per-offer "why" already use) and the correlation clusters
+  among them. **No "always" archetype** — a thin game yields few or zero stories; game-script
+  surfaces only when the shape is itself the signal (the engine keeps its game-script *fallback* for
+  labeling a user-built slip, but the generator has none). Eligible leg types are player props,
+  **Rivals** matchup legs, and — behind **L3** — game lines, which double as correlation anchors that
+  pull player legs into a story (a DFS line diverging from our weighted consensus is the edge). For
+  each story emit two parlays over its eligible legs, **free to share legs**:
+  - **Bankroll Builder** (sun motif) = max expected **log-growth** G — the full-Kelly geometric
+    growth rate, i.e. the bet that compounds bankroll fastest, *not* the one with the biggest stake.
+  - **Shoot the Moon** (moon motif) = max **Model EV** — the widest high-edge set inside the
+    play-type cap; usually the 5–6-leg extension of the 2–3-leg Builder.
+
+  Score every candidate leg-subset through the existing copula joint-prob → Kelly/EV path (reuse
+  `find_correlation`'s scorer, don't rebuild); brute-force over subsets is fine at ~8–12 offers a
+  game. Platforms compute independently and **the same story repeating across platforms is expected
+  and good** — same story across books = a stronger data-backed call.
+
+  **Slips flow.** Platform select (Underdog/Sleeper) → up to 5 **story cards** (engine headline +
+  one-line why) → two **variant chips** (Bankroll Builder / Shoot the Moon) → the chosen parlay
+  loads into the constellation editor (P4). Menu stakes are a **standalone preview** (the parlay's
+  own full-Kelly fraction of bankroll — "if this were your only bet"); the live rail re-runs the
+  joint slate allocation over whatever is actually in the slip — the real allocator, the same
+  bankroll slider the pickem page carries.
+
+  **Live thesis regen:** the rail recomputes `thesis(legs, ctxs)` (the P2 engine) on every slip edit
+  (add/remove/swap) via a thin `dashboard/slip/story.py`, so a user-edited slip never shows a stale
+  headline naming a removed player. Legs come from slip state enriched against the loaded offers
+  frame; `GameCtx`s from a new `load_current_game_context` + the existing `load_current_game_corr`.
+  An unedited loaded slip shows the precomputed `Thesis` verbatim (it may carry a slate-uniqueness
+  bump the pure function can't reproduce); the first edit switches to the live recompute (the
+  single-slip recompute skips the slate-uniqueness pass — faithfulness beats slate uniqueness for
+  one slip). A slip whose game lacks a context row degrades to shape "even" routing, never a crash.
+
+  Acceptance: story-enumerator unit tests (cap 5; a no-signal game yields zero; edge floor honored;
+  correlation-cluster stories form); two-objective construction (Builder's G ≥ any sibling's growth,
+  Moon's EV ≥ Builder's EV, shared legs allowed); per-platform menus independent; standalone-preview
+  vs slip-allocated sizing diverge as designed; rail unit tests (2-leg hand-computed joint; 3→4 leg
+  play-type boundary; Decimal quantization); removing the named player changes the headline and the
+  old name never renders; missing-context slip degrades to "even"; manual: slip survives full nav
+  cycle; backdated slip grades on reflect; archive-lock golden green. Est: 4–5 sessions (the menu
+  generator is the pipeline half). Kill branch: if copula import drags weight, inline the 30-line
+  MVN-cdf math instead.
+- **P4 — Tonight + Game.** Goal: narrative surfaces (cards, prophecies, why-strings, context
+  strip, constellation v1, `?game=` links, scars mounted). MUST FIX (P1 known bug): Tonight's
+  View-game button lands on the Game page's default game — `st.switch_page` drops query params
+  set in the same run (tonight.py sets `st.query_params["game"]` then switches). Hand off via a
+  plain `st.session_state` key; game.py reads session-state first, `?game=` second (deep links).
+  **Context strip + headlines read `current_game_context.parquet`** (the P2 artifact): the Game
+  context strip shows total / derived spread / favorite (replacing the per-row `O/U`/`Moneyline`
+  peek at `surfaces/game.py:51-56`); Tonight cards show the top per-leg-set thesis headline per
+  game. **Constellation v1 doubles as the slip editor the P3 story menu loads into** — nodes are the
+  game's candidate legs (player props, Rivals, L3 game lines), edges the `current_game_corr` ρ;
+  add/remove/swap drives the live rail + thesis regen (graph viz here, the seeded parlay + rail
+  mechanics are P3). Acceptance: render pins; archive-lock gate green; View-game lands on the clicked game
+  (doubleheaders included); context strip shows the derived spread for a fixture game. Est: 1–2
+  sessions.
+- **P5 — Board + Slips upgrade.** Goal: themed AG Grid (right-aligned numerals, edge heatmap,
+  sparkline, prophecy lenses), load-into-rail. Entry: pin `streamlit-aggrid` version. Acceptance:
+  grid-options golden (token colors, no centered numerics). Est: 1–2 sessions. Kill branch: any
+  grid the theme fights falls back to `st.dataframe` + `column_config`.
+- **P6 — deep-dive v2 + swap.** Goal: SHAP-ranked chips flip charts, case panel, market-trust →
+  Lab deep link, swap dialog (story fit, EV deltas, anti-corr flags). Acceptance: chip-ranking +
+  swap-ordering unit tests. Est: 1–2 sessions.
+- **P7 — Receipts.** Goal: skeptic page (hero units, EV>5% record, CLV beat, worst month,
+  grids, Profit Sim fold-in, your-slips). Acceptance: aggregation unit tests on fixture history;
+  hero parity vs old Overview totals. Est: 1–2 sessions.
+- **P8 — assets + celestial polish.** Design locked in the spec
+  ([specs/2026-07-03-p8…](../archive/superpowers/specs/2026-07-03-p8-oracle-assets-celestial-polish-design.md));
+  the mockup-refresh milestone is done (eight locked `p8-*.html` mockups — pixel truth). Executes
+  as six plans in `docs/archive/superpowers/plans/` (0→A→B→C serial; D and E follow C and may run in
+  parallel with each other — `games.py`/`constellation*` belong to D, E catalogs those slots but
+  never edits them; each plan self-contained for a clean-context implementer; gates +
+  refactoring-specialist per task):
+  - **Phase 0 — data-model retirement** (owner-directed, maximal scope): structured legs replace
+    the Desc round-trip / `Leg 1..6` / user-slip desc JSON; `Corr Same`/`Corr Opp` structs replace
+    the correlation display strings; history.parquet goes flat one-row-per-offer (tuple codec
+    deleted) + `Alt Line` flag; CLV closing slot becomes a real probability (task 0.9 — fixes the
+    KNOWN-BAD above); dead `Fun`/`Family` columns + klepto retired; one-shot idempotent migration
+    (`scripts/migrate_leg_schema.py`) converts all historical parquets, then `parse_leg` /
+    `LEG_PATTERN` die from runtime. Commit the mockups + spec before dispatching subagents
+    (worktrees can't see untracked files).
+  - **Phase A — shared infra**: app.py injection block (`.celestial-*` fonts + global starfield,
+    DOM spike first w/ pre-committed fallback), Plotly token template + off-token hex purge +
+    ban golden, DESIGN.md gold-highlight amendment, `market_display.json` + helper,
+    `team_assets.json` + safe-fallback loader, shared Lab filter panel, ▲/▼ + Match helpers,
+    first AppTest smoke.
+  - **Phase B — sober surfaces**: Board 14→10, corr-market-summary artifact + Lab Correlations
+    heatmap, Lab Diagnostics weak-spots reframe, Lab Training g6 + gate matrix, calibration
+    precompute + Receipts reliability panel (standard vs alt/ladder), Receipts tickets + honest
+    sim label.
+  - **Phase C — celestial**: `ev_lift`/`astrolabe_payload` on the existing copula path, Details
+    five-tab rebuild, glyph set + Tonight unification, Games nebula hero + team-colored
+    constellation, the astrolabe JS component, the two lenses, Receipts nebula hero.
+  - **Phase R — remediation & polish** (**Opus implementer**;
+    [plans/2026-07-05-p8-phaseR-remediation.md](../archive/superpowers/plans/2026-07-05-p8-phaseR-remediation.md)):
+    R0 finish the half-run leg-schema migration + real reflect + resolve-meta test-leak fix;
+    R1 whitespace starfield under kept-wide layout + twinkle >0.20 exception (DESIGN §3
+    amendment, ≤0.70 peak) + `page_hero` kicker/headline on all seven surfaces + Sheets-banner
+    retirement + gold active states; R2 board runtime (class-based AG Grid arrow renderer,
+    outlier-only edge tint, `--ag-row-hover-color` gold hover, numeric Win %, market-filter
+    display names); R3 tonight nebula cards + story-engine `game_headline` rewire; R4 games
+    hero voice (prophecy subline, full team names, compact pickers, lens chip row) +
+    constellation presence (`_rescale` re-centering, candidate hue retention, faint base
+    edges, sky dressing); R5 lab fixes (corr perf column-projection + downsample, single
+    filter homes, glyph-colored gate matrix, 3-dp formats); R6 walkthrough + ledger + ticked
+    checkboxes. **Every task ends with a recorded live-browser verdict** — the process hole
+    that let 0/A/B/C ship flat.
+  - **Phase M — mobile money loop** (spec
+    [specs/2026-07-16-dashboard-mobile-design.md](../archive/superpowers/specs/2026-07-16-dashboard-mobile-design.md),
+    plan [plans/2026-07-16-dashboard-mobile-phase-m.md](../archive/superpowers/plans/2026-07-16-dashboard-mobile-phase-m.md)):
+    UA-branch (`viewport.is_mobile`) + one media block; top nav on phone (Streamlit natively
+    collapses it to the sidebar drawer under ~768px — in-content links + the dock carry the
+    money loop) + slip dock (fixed bottom bar/sheet); Board card list; constellation touch
+    mode (docked tap card, second-tap toggle, in-slip customdata flag, touch size floors);
+    Lab/Receipts desk-first captions. Desktop paths byte-identical; every task carries a
+    recorded live-browser verdict (playwright chromium, mobile UA). Phase D seam: D owns
+    positions, M owns sizes/events; D's knot explode radius must respect the mobile floor.
+  - **Phase D — loose constellation shapes** (spec §6.1, **Opus implementer**): 100-template
+    hand-authored shape bank (`constellation_shapes.json`, topology-tagged hub/chain/twin/mesh,
+    generic archetypes never trademarked marks, authoring rules S1–S9 + floor goldens —
+    story-engine fidelity); player-supernode clustering (a player's |ρ|≥0.35 legs plan as one
+    node, explode back as a knot around their vertex); graph topology classifier; slate
+    assigner dealing **distinct** topology-matched templates across the whole night, every
+    league at once, each game drawing from the general library plus its own league's gear and
+    never another league's (deck 100, ≥ 64 per league, vs worst combined slate — no repeats by
+    construction); star→vertex assignment
+    keeps the DESIGN §4a grammar FIXED (star=leg after explosion, team sides w/ golden-angle
+    overflow, ρ-adjacency greedy, spring fallback for thin games); decoration layer (outline +
+    fillers + silhouette α=0.13, never gold, never interactive, and uncaptioned), DESIGN §4a
+    layout-clause amendment same-commit. All classifier/assigner thresholds owner-tunable live:
+    catalog `tuning` block, mtime hot-reload (edit JSON → rerun, no restart), Games-page
+    diagnostics expander shows per-game readings, `variety_lambda` knob spreads shape classes
+    on a homogeneous (all-mesh) slate.
+  - **Phase E — art-asset catalog + scarring** (spec §6.2, Sonnet): `docs/art_assets.md` slot
+    catalog (every vector/blank placeholder → source + license + priority), ambient-manifest
+    infra with license-gated loader (gradient scars until files land), interim generated
+    favicon wired via `page_icon`, commissioned-logo pipeline (guru/genie brief in
+    `docs/art_briefs/logo_guru.md` + zero-code-change `st.logo` slot), free/licensed sourcing
+    pass (NASA/Unsplash class; owner approves binaries before commit).
+  Deferred (spec §6, registered in roadmap §8): forward sim-bettor ledger (own lane),
+  empirical-vs-model ρ overlay.
+- **L1 — line-movement export.** `export-line-movement` cron (Archive→parquet) + run_job.sh case
+  + crontab + healthcheck + CLI snapshot; dialog tab flips on. Owner wires cron.
+- **L2 — comps persistence.** Persist comp outputs at prophecize time; comps panel + chip flip
+  on.
+- **L3 — game lines into the correlation engine.** Book-implied probs only; Game-board rows +
+  constellation team nodes + slip legs flip on, **and game lines become eligible P3 story-menu legs**
+  — a game line whose book-implied prob diverges from our weighted consensus is a candidate strong
+  leg and a correlation anchor that pulls player legs into a story. Data producer:
+  [`dfs-products.md`](dfs-products.md) stages 4–5 (game lines are event contracts / Combo
+  Entries — mechanics in that brief §3; presentation spec §5b); this lane builds UI only,
+  behind its current phase.
+- **L4 — correlation-block risk.** UD/Sleeper pairing-rule model; rail chip flips on. Pairing-rule
+  ground-truth capture = dfs-products stage 0.
+- **L5 — ambient art acquisition.** Stock/commissioned per spec §6 brief; manifest fill-in.
+- **L6 — optional free-LLM prose rewriter.** Only if a free API exists; templates remain the
+  fallback contract.
+- **L7 — Ladders views** (spec §5b: rung display, P(lowest=r) strip, per-rung Receipts grading).
+  Flip on the ladder snapshot artifact; data producer: dfs-products stage 3.
+- **L8 — alt-line markers + Receipts standard-vs-alt split** (spec §5b). Flip on the `Alt Line`
+  snapshot column; data producer: dfs-products stage 2c (persist.py coordination).
+- **L9 — combo-EV chips on the rail** (spec §5b). Flip on game-line offer rows; data producer:
+  dfs-products stage 4 (correlation-aware EV at stage 5).
+
+## 7. Working rules
+
+- Dashboard reads parquet snapshots only, never DuckDB — CLAUDE.md §Hard rules; the archive-lock
+  golden test is the gate.
+- Never load `corr_same_team.parquet`/`corr_opposing.parquet` from the dashboard (NBA = 2.85M
+  rows); per-game slices only.
+- Snapshot schema changes are append-only: add columns/files, never rename/remove (server tracks
+  `devel`; old process + new snapshot must coexist).
+- Slip state lives under plain non-widget `st.session_state` keys; rail renders from `app.py` so
+  its widgets exist on every page.
+- Money is `Decimal` (CLAUDE.md); play-type rule is one named constant in `slip/math.py`.
+- All display copy follows the spec §2 taxonomy (platforms = UD/Sleeper; Power/Flex = chip;
+  Rivals = leg type).
+- Conflict order: command output > CLAUDE.md/CONTRIBUTING.md > DESIGN.md/spec > this brief >
+  roadmap v3.
+
+## 8. Escalation & stop conditions
+
+STOP and ask the owner when: gates red at session start through no fault of yours; any change to
+payout tables or gate constants; anything touching crontab, creds, paid APIs, or scraping ToS;
+editing outside §5 footprint; two consecutive sessions with no acceptance criterion moving.
+PARK AND PIVOT when blocked externally: ledger line + status `BLOCKED (on: …)` + point owner at
+roadmap v3 §4.
+DISPATCH: refactoring-specialist per the five CLAUDE.md triggers; devel-ship-curator for every
+devel-bound PR; research-analyst only if a stage turns into a modeling question (none planned).
+
+## 9. Session definition of done
+
+- refactoring-specialist ran on every `.py` touched this session (CLAUDE.md five-trigger rule).
+- `poetry run ruff check src/sportstradamus/` clean.
+- `poetry run pytest tests/golden/` clean.
+- `poetry run pytest -m integration -n0` clean, then `touch .claude/.state/integration_green`.
+- One ledger line appended to §10; status line updated if a stage boundary was crossed.
+- Never push `devel` directly — devel-ship-curator carves ship PRs.
+- Durable non-obvious lesson? Offer a memory capture (CLAUDE.md §Agentic workflow conventions).
+
+## 10. Ledger (append-only, newest first, cap ~15)
+
+- 2026-08-06 · **Phase D owner pass — balls, no nameplate, soft leagues, module carve** · Four owner
+  asks after the phase closed. **Nameplate deleted** — the map is no longer captioned with the
+  shape's name ("just let the shape speak for itself"); `_add_nameplate` + its color constant + the
+  two goldens gone, DESIGN §4a's decoration sentence now says *uncaptioned* and why. **Ball hubs
+  added** — `the-basketball` (hub, NBA/WNBA: cross seams off a centre star, two 5-segment bows) and
+  `the-baseball` (twin, MLB: two mirrored seam arcs — the honest class); the football was already in
+  the bank as `the-pigskin`. **Leagues stay
+  walled, the general library carries the load** — an NFL night must never wear the bat, so
+  `eligible_templates` remains a hard gate (general library + own gear); `league_affinity` demoted
+  to a tie-break *inside* that gate, so a league reaches for its own equipment first and falls back
+  to unaffiliated objects, never to somebody else's. NBA and WNBA share one tag list.
+  **Dealing is now per-date across every league at once** (`slate_shapes` lost its `league`
+  parameter, seed is `date|version`, `games.py` deals from the *unfiltered* offers frame), which is
+  what makes "never the same shape in two active games" true across leagues rather than within one.
+  **Bank doubled 49 → 100** to make the wall affordable: 13 general + 3 per league in *every*
+  topology class (owner floor: 5 general + 3 per league per category, i.e. 17; delivered 25), so
+  no league is ever pushed onto a shape that says nothing about its sport. New floors pin all
+  three numbers. Per-league deck is 64. Authored with parametric helpers (`band` thickens a
+  polyline into a silhouette, `circle` emits a cubic circle) against the offline contact sheet
+  rather than 51 browser passes. **Carve:** the shape half left `constellation.py`
+  for a new `constellation_slate.py` (918 → 666 lines) — game-graph extraction, template placement,
+  dealing, decoration; owner exempted the new module from the length guidance. The circular-import
+  seam was `_universe`, which returned figure-presentation dicts; it now returns the defining row and
+  each side derives what it needs. Live pass on the Aug-6 slate: 8 games / 3 shaped / all distinct
+  across MLB + WNBA, WNBA dealt The Basketball and MLB The Diamond + The Cap — own gear reached for
+  first, another league's never on the table. Three authoring iterations the offline sheet forced:
+  the basketball's bows read as an octagon at 3 points per bow (needs 5), the baseball's seams read
+  as a closed ring until the arcs were shortened to ~110°, and a closed step-polygon silhouette
+  (staircase) reads as a solid mass where a band reads as steps. · gates ruff ✓ / golden 4357 ✓ /
+  refactoring-specialist ✓ ·
+  integration still blocked by the training-artifacts lock (a `model-strategy-sweep --confirm`,
+  unrelated to this lane) · not pushed.
+- 2026-08-06 · **Phase D complete — D2…D7 landed** · `9a9701d` supernodes + topology classifier
+  (`constellation_layout.py`; twin→hub→chain→mesh cascade, every threshold from the catalog
+  `tuning` block) · `981ab4a` slate assigner (md5(league|date|version)-seeded shuffle, distinct per
+  game per night, `variety_lambda` anti-monoculture knob) · `690b4f6` `assign_stars` +
+  `explode_clusters` (prominence↔importance, team sides held, golden-angle overflow on the star's
+  own side, single-team games return fillers rather than raise) · `9a2a630` decoration layer +
+  `games.py` slate wiring (silhouette via `layout.shapes` α 0.13, outline + glow, filler stars, all
+  named `decoration` with no `customdata` so the pointer ignores them; `shape=None` reproduces the
+  old figure byte-for-byte) · `ee97e52` dartboard → medal on the owner's call · `f305eb2` bank
+  filled to **47 templates** + floor pins (≥ 37 eligible and ≥ 15 per class per league, over the
+  ≥ 20 / ≥ 6 floors) · `bcb1658` Cinzel nameplate + tuning cockpit expander · this commit, DESIGN
+  §4a amendment + stale-prose refresh. **Two defects only the browser found**, both now pinned:
+  Plotly's shape-path parser silently drops any command outside `M L H V Q C T S Z`, so the
+  dartboard's `A` arcs vanished and it rendered as a flat hexagon — the loader raises on them now;
+  and the frame's aspect stretch *inverts* between desktop (~2.4× wide) and phone (~0.87×), so one
+  correction turned the diamond into a kite and each viewport carries its own. **Deviations from
+  plan:** engine split across `constellation_shapes.py` (catalog) + `constellation_layout.py`
+  (positions) to stay under the ~300-line rule; no `main.js` change — `LENS_TRACE_NAMES` is a no-op
+  on every reachable path and `pointFrom` already gates on `customdata`; 47 templates not 49
+  (the floors, not a count, are what the goldens hold); a cleat was cut because a shape that is all
+  edge and no mass is invisible at 13% alpha. **Open for the owner:** a universal template can
+  outrank a league-flavoured one on fit, so a baseball night dealt BOS/CWS The Shuttlecock — adding
+  a league-affinity term to the assigner score is a deliberate call, not a bug fix.
+  `constellation.py` is now 900 lines, past the ~300 guidance; the specialist recommends carving
+  the shape half into its own module as separate follow-up work. Gates: ruff ✓ / golden 4300 ✓ /
+  refactoring-specialist ✓ (no edits) · integration **blocked, not failed** — a 4-hour
+  `model-strategy-sweep --confirm` holds the training-artifacts lock, so `meditate`'s smoke test
+  refuses; 29/30 pass and no training file is in the diff. Re-run before any push. Not pushed.
+- 2026-08-06 · **Phase D started — D1a shape bank landed** · `constellation_shapes.json` (schema v2,
+  `tuning` block, six authored exemplars) + `components/constellation_shapes.py` loader
+  (`shape_catalog`/`tuning`/`eligible_templates`, validate-on-load, `(path, mtime_ns)` lru_cache so an
+  owner JSON edit lands on the next rerun — not `st.cache_data`, not a TTL) + 20 goldens. Bank floor
+  pins deliberately deferred to the last D1b batch; until then most games fall back to the spring
+  layout, which is the designed interim state. Gates: ruff ✓ / golden 4211 ✓ / integration 30 ✓ /
+  refactoring-specialist ✓ (clean, no edits).
+- 2026-08-06 · **Step 0 prerequisites — owner-approved footprint exception** · `fb622f0`. MLB game
+  context was every-row-identical because `Archive.get_moneyline`/`get_total` default a *miss* to
+  `0.5` / the league total, so `build_game_context` read "nobody quoted this game" as a confident
+  `coinflip` with an `idxmax()`-arbitrary favorite. Root cause underneath: MLB bought zero Odds API
+  game lines from 2026-07-31 on — the budget governor's per-run allowance never fit it, and
+  `_league_run_means` was averaging in the cost-0 `events` probes, pricing dormant NFL/NHL at 0.0.
+  Fixed: `cli.py` re-reads both team markets through the NaN-returning `get_team_market` (the
+  defaulting readers stay for the feature path — the gamelog builds `moneyline` with the same 0.5, so
+  train/serve must agree); estimator ignores zero-cost runs; WNBA Portland `PDX`→`POR`; Tonight's
+  `"even"` chip relabelled "No line yet". `"even"` is an unknown-sentinel, not a game script, and is
+  structurally load-bearing (20 `voice_bank.json` cells, `bank.py:59`'s terminal fallback) — kept.
+  Also: playwright 1.60.0 exact-pinned into the dev group, 101 orphaned `.pyc` deleted. Touches
+  `helpers/`, `moneylines`-adjacent config and `prediction/` — outside §5, owner-authorized.
+  Follow-on: MLB game lines backfilled for 2026-08-01..05 (68 games, 150 credits on `odds_api_max`,
+  which holds ~4.48M) behind a new `--game-lines-only` mode on `backfill_historical_odds`. **Today's
+  slate is still unquoted** — that needs a live confer run with MLB inside the allowance, not a
+  backfill.
+- 2026-07-16 · **Phase M built, gates green — owner phone pass pending** · mobile money-loop landed (`4ab13ff`..`0923f67`, 11 commits): viewport UA-branch (+`?m=` override), media layer, slip dock (fixed bar+sheet, live-debugged at 390px), top-nav wiring (Streamlit collapses to drawer on phone-portrait — recorded deviation, in-content links + dock carry the loop), Board cards + collapsed filters, constellation touch (22px floors, docked tap card w/ Add/Remove via in-slip customdata flag, second-tap toggle, sky-tap dismiss), desk captions consolidated to `hero.desk_only_notice`. Every task live-verified (playwright chromium, mobile UA + desktop parity). Gates: ruff ✓ / golden 3627 ✓ / integration 26 ✓ / refactoring-specialist ✓ (flagged pre-existing >300-line constellation/slip_builder/theme for a future split). Open: owner real-phone pass over tailscale (plan Task 10.3); not pushed.
+- 2026-07-16 · **Phase R shipped + lane closed** · R1–R5 (`2fb7bb9`..`312e5f4`) + post-R5 polish this session, every task owner-live-checked **pass**; plan checkboxes ticked. R0 was verify-only (migration + `reflect` already ran on prod Jul 10 — history/current_offers/resolve_meta carry real data, no R0 code). **R1–R5:** whitespace starfield under `layout="wide"` (dust ~80 ≤0.20, twinkles ≤0.70 peak, selective occlusion) + page heroes on all 7 surfaces + Sheets banners retired; Board class-renderer arrows + outlier-only absolute tint + `--ag-row-hover-color` gold rail + sortable numeric Win %; Tonight nebula prophecy cards + `game_headline` story engine + tip-off urgency; Games hero full team names + prophecy subline + re-centered team-colored constellation w/ faint base web + sky dressing; Lab Correlations column-projected + 20k downsample (7.2 GB → seconds), single filter home, colored ●/○ gate glyphs, 3-dp metrics. **Polish (this session):** obsidian on-token table skin (gold frame + corner brackets); lens animations (deep = fade only the fresh trace, wider = whole-map settle, both slower, reduced-motion-safe); games speed cache (`load_game_ctxs` — 56k-row corr no longer re-run per star click); correlation value-add scatter now plots `p_corr = Model EV/Boost` vs `p_indep = Indep P/Boost` (was self-vs-self on the diagonal); story `{g}` slot → home city / game context (bank/context/engine); fixed-height **2-column gold-tablet legs panel** (`constellation_legpanel`, no page reflow); **manuscript fonts** — Spectral serif base + IBM Plex Mono for every numeral (metric values/deltas pinned, grid numeric inline-mono, hero Total/Spread mono / Shape word serif), Cinzel labels + Cormorant headlines as chrome; DESIGN §2/§6/§7 + token golden in lockstep. Session commits: `d3c9565` anim · `d6792f6` stories{g} · `07cb399` scatter · `906a177` polish bundle. **Caveat:** story `{g}` is code-complete + gate-green but populates `home_team` only after the next server `prophecize` rewrites `current_game_stories` — no live verdict yet. **Ledger over cap** (28→29 entries; cap ~15) — a trim pass is owner's call, deferred to avoid deleting other lanes' cross-refs. · gates ruff ✓ / golden 3614 pass ✓ / integration 26 ✓ / refactoring-specialist ✓ · **D/E now unblocked** (Phase D constellation shapes, Phase E art catalog — both parked behind R) · not pushed — devel review owns the merge.
+- 2026-07-05 · P8 0/A/B/C owner review → **Phase R planned** (docs-only; four read-only audit subagents) · Owner reviewed the live app post-merge (`84c3342`): "doesn't look like the mockups, no flair, disjoint." Audit verdict — three stacked layers. **(1) Box data broken:** leg-schema migration ran Jul 4 08:02, migrated parlay_hist, **died inside `_migrate_history`** (archive backfill loops) → history.parquet still nested → `annotate_offer_outcomes` finds no `Line` → all 15,017 rows NaN → Receipts/Diagnostics/Calibration empty + Platforms multiselect empty; `resolve_meta.json` "Jul 4 22:48" = **leaked test fixture** (`test_nightly_run_characterization.py` writes the real file via the CLI, xdist restore race); prophecy lines blank everywhere = surfaces still read `current_parlays` (0 rows) — never rewired to `current_game_stories` (which HAS headlines). **(2) Planning gaps (this lane's own plans):** page-hero kicker/headline treatment never tasked on any surface (`.celestial-*` classes used by exactly 2 elements; all 7 pages `st.title`); Tonight nebula cards never tasked (spec §4.2 called the delta "small" — wrong); market-FILTER display names unspecced; starfield tuned for centered gutters vs `layout="wide"` reality; Sheets blue banner survived. **(3) Runtime bugs goldens can't see** (0/83 plan checkboxes ticked, no ledger entries, A1 spike commit admits "shipped without a browser check"): Board Line column renders escaped SVG (st-aggrid 1.2.1 + AG Grid 34: plain-function JsCode classified as React component → string return escaped; fix = class renderer w/ `getGui`); edge tint = %-of-max buckets on an edge-sorted page → paint wall; gold hover killed by AG Grid v34 `::before` overlay (fix = `--ag-row-hover-color`); gate matrix emits backgroundColor where mockup locks colored ●/○ text; Lab Correlations eager-loads 1.68M-row parlay_hist (7.2 GB RAM, 22 s + per-rerun struct-column CSV) → page never reaches its heatmap (summary parquets fine: NBA/NFL/WNBA on disk); constellation = latent `_rescale` no-re-center bug (one-sided slate → corner squish) + candidate desat 0.55/α0.45 crushing dark team hues + edges opacity-0 until in-slip + missing skywrap dressing (lens FIGURE modes + glyphs verified DONE; hero wash values mockup-exact). **Owner decisions:** keep `layout="wide"` but starfield renders through all whitespace (only data-dense blocks occlude); animated twinkle accents may exceed 0.20 (cap 0.70 peak) — DESIGN §3 amendment in R1. **Phase R plan authored** ([plans/2026-07-05-p8-phaseR-remediation.md](../archive/superpowers/plans/2026-07-05-p8-phaseR-remediation.md), Opus implementer, R0–R6, every task ends with a recorded live-browser verdict); D/E parked behind R. Also: `feature/dashboard-ux` is 4 commits behind devel (merge happened after the screenshots) — R starts with `git merge devel`. No `.py` touched this session · gates N/A · not pushed.
+- 2026-07-11 · heads-up · dfs-products reworked `surfaces/lab_modifiers.py` (dashboard
+  slips only, ambiguity leg hints) and added a `st.page_link` chip ("Payout incorrect?
+  Report it") at the bottom of `surfaces/games.py`, shown when the rail holds ≥2 legs —
+  one-widget touch, plain st, no builder changes; fold into the Phase-R inventory ·
+  next: unchanged
+- 2026-07-10 · heads-up · owner-directed dfs-products addition landed a fourth Model Lab page (`surfaces/lab_modifiers.py`, "Modifiers" nav entry in `app.py`) — modifier reconciler over session/locked slips, plain st widgets, smoke case added to `test_dashboard_render_smoke.py`; fold into the Phase-R surface inventory when that work resumes · next: unchanged
+- 2026-07-10 · scars L7–L9 registered + L3/L4 repointed (docs-only, dfs-products session) · spec gains §5b (Ladders views, game-line/combo chips, alt-line markers); data producers = new dfs-products lane; UI builds stay behind this lane's current phase. NOTE for owner: this brief's status line still reads "Phase 0 in flight" — session memory says P8 0/A/B/C merged locally with Phase-R remediation current; reconcile from git + Phase-R plan before the next lane session (out of this session's scope) · next: unchanged
+- 2026-07-03 · P8 follow-up plans D+E ✔ (docs-only, same session; Phase 0 already in flight on a Sonnet agent) · Owner named the two follow-ups the spec deferred: **Phase D** ([plans/…phaseD-constellation-shapes.md](../archive/superpowers/plans/2026-07-03-p8-phaseD-constellation-shapes.md), Opus implementer; rewritten same-day after owner feedback — 3 seeds → full engine) — loose sports-shape constellations: **49-template** hand-authored bank (topology-tagged, 6 exemplars fully authored in-plan: hoop/goalposts/hourglass/dartboard/bolt/diamond; authoring rules S1–S8 incl. no-trademark; floor goldens ≥20/league ≥6/league-class), **player supernodes** (same-player |ρ|≥0.35 legs plan as one node → explode as knot, owner's idea), **topology classifier** (hub/chain/twin/mesh/generic off the collapsed web, twin→hub→chain→mesh cascade), **slate assigner** (md5(league|date)-shuffled dealing, distinct per game day by construction — pool 37 vs worst slate 17 MLB doubleheaders), `assign_stars`+`explode_clusters` preserving the FIXED §4a grammar (star=leg post-explosion, team sides w/ golden-angle overflow, ρ-adjacency greedy, prominence↔importance, spring fallback), decoration layer (outline+fillers+silhouette α=0.13, never gold/interactive, main.js "decoration" trace guard), Cinzel nameplate + **tuning cockpit** (all thresholds in catalog `tuning` block, mtime hot-reload no-restart, per-game readings expander, `variety_lambda` anti-all-mesh knob — owner ask), DESIGN §4a amendment same-commit; **Phase E** ([plans/…phaseE-art-asset-catalog.md](../archive/superpowers/plans/2026-07-03-p8-phaseE-art-asset-catalog.md), Sonnet) — `docs/art_assets.md` slot catalog, ambient_manifest.json + license-gated `dashboard/assets.py` loader (unlicensed art never renders; gradient scars byte-identical when slots empty), interim generated favicon (◈ comet, `page_icon` — app.py has none today), commissioned guru/genie logo brief (`docs/art_briefs/logo_guru.md`) + existence-guarded `st.logo` slot (art lands → zero code change), free/licensed sourcing (NASA/Unsplash class, owner approves binaries). Sequencing: D+E after C, parallel to each other; `games.py`/`constellation*` are D's. §5 footprint +`constellation_shapes.json` + `dashboard/static/` dir. Roadmap §8: the two spec-§6 entries converted from deferred → planned (ρ-overlay stays deferred). No `.py` touched · gates N/A · not pushed.
+- 2026-07-03 · P8 planning ✔ (docs-only session) · Spec reviewed + four phase plans authored (`docs/archive/superpowers/plans/2026-07-03-p8-{phase0-leg-schema-retirement,phaseA-shared-infra,phaseB-sober-surfaces,phaseC-celestial}.md`) for Sonnet implementers. Owner locked: Sheets-era data retirement = **Phase 0 of this lane**, maximal scope ("anything that reduces data mutations"), one-time migration (parsers die from runtime), alt/ladder flag = |Line−Consensus Line|>tol at snapshot. **Audit findings:** (1) **CLV corrupt at source** — `clv.py` writes `archive.get_ev` (book MEAN) into the closing-probability slot; verified 35,263/35,923 close-valued history offers >1.5 + 3,259 literal-'nan' platforms → Receipts CLV tiles noise; fix = Phase 0.9 (`get_odds(line, close_ev, dist, cv)` conversion, line-exact) + migration backfill/quarantine; §3 gained a re-verify one-liner. (2) `training_report.txt` already gone, Sheets code archived — nothing to retire. (3) `.celestial-*` classes/ambient layer NEVER built (spec §2 assumed them) — Phase A1 creates the whole injection block. (4) Dead cols `Fun` (parlay.py:533) / `Family` (correlation.py:507), zero consumers. (5) `{LEAGUE}_corr.csv` refs stale — real artifacts `data/leagues/{lg}/corr_{same_team,opposing}.parquet` (NBA/NFL only) → Phase B2 compact `corr_market_summary.parquet`. (6) AppTest harness aspirational (zero imports in tests/) — Phase A7 builds first smoke. Reuse verified: `SlipScore` already carries indep_p+joint_p (astrolabe=read, EV lift=two score_slip calls); `ml_fav_prob` already devigged (no new helper). §5 footprint expanded for Phase 0 + the one recorded `training/correlate.py` hook exception. No `.py` touched (specialist N/A); gates N/A · not pushed. (owner audit: "NYK/SAS comes up short 3 different ways, starting with De'Aaron Fox" — Fox's leg was an *Over* — plus the BB/STM chip swapping the story) · **All root causes fixed.** Majority-vote `_direction` → **narrative unanimity** (`Over`/`Under` cells now mean *narratively* unanimous thrive/fade, anything split routes `Mixed`); alphabetical `_anchor` → **conviction** (leg count, then max `win_prob`, name only as final tiebreak); `{g}`-as-actor templates rewritten (28 offenders; R1–R6 authoring rules documented in `bank.py`, mechanically enforced by coverage bans). **Valence** (owner: Over ≠ "doing well" for TOV/sacks-taken): `legs._NEGATIVE_MARKETS` flips bet → narrative side; new `mistakes` category resolves **before** the needle loop, killing 7 live miscategorizations (interceptions/sacks-taken→stops, batter-strikeouts→k's, goalsAgainst/runs-hits-allowed→scoring…); literal over/under words banned outside mistakes cells (flipped-side rule inside). **Taxonomy** `engine._DIRECTIONS_BY_ARCHETYPE` (single source, coverage test enumerates it): stack gains `ContrastOver`/`ContrastUnder` (lone thriver/fader vs the field, that player anchors) + `Mixed` for player/stack/game-script. **One story, one headline** (BB/STM = modes): `menu._story_prose` renders once on the builder∩moon core, same `headline`+`dek` on both objective rows; empty-core guard blanks a foreign-named subject; within-game headline dedup via shared `thesis.next_unique_variant`; games.py selectbox label now stable, mode chip changes only the legs/EV caption. **Prose fully externalized** (owner directive — no fighting length caps): `voice_bank.json` 272 cells / 1,632 variants (≥6-variant floor per cell, five voices, sport-correct parity — NFL/MLB/NHL same fidelity as NBA/WNBA) + new `why_bank.json` (why-clause + dek banks, 108 strings, md5-rotated by row+date; pronoun map data-side); an AST-walk golden bans prose literals in `stories/*.py`. **Dek** (story subhead): `why.story_dek` = cluster-ρ + anchor-form + matchup clauses (clause-guarded, ρ-floor 0.05, deterministic); `_STORY_COLS` +`"dek"`; games.py captions it. `STORIES_VERSION` p3a→p3b — every headline reshuffles once on next `prophecize` (md5 indices moved with cell growth), byte-stable after; `user_slips.parquet` headlines stay frozen by design. The repro fixture now renders **ContrastOver naming Fox as the thriver** — the reported line is unrepresentable. · gates ruff ✓ / golden ✓ (story suites 2,418 pass; 5 pre-existing out-of-footprint reds — scorecard ×3, ship-gate invariant, real-NBA correlation — re-confirmed on clean devel via stash) / integration ✓ / refactoring-specialist ✓ (×2: `offer_index` made public + de-narration; post-quality-fix re-run) · quality review C1 (dek anchor facts died at `offer_index`'s column whitelist — "Avg 5"/"DVPOA" now kept) + M1/M2/M3/M4/M5/I1 all applied · not pushed.
+- 2026-06-16 · #6c strategy-sim rework LANDED (`f32a3c6`) + `dashboard_remote_access.md` de-drifted · **#6c closes the 2026-06-15 "routed out / BLOCKED" loop**: model-track landed the engine payout/Kelly fix (`4eb2878`, Gate-1 hold→hold preserved + staking params) and demoted NBA BLST + WNBA PA (`4dc0b30`), so this lane built the rework **on the fixed engine, zero duplication**. New pure `analysis.filter_bet_universe` (`Model EV` > 1 **and** `Market EV` > 1 + min_consensus_edge — the owner's Model-Edge>0 & Consensus-Edge filter) + `precompute_profit_sim_summary` (`TIMEFRAMES` × 4 strategies: Flat·Conservative/Moderate + Kelly·Conservative/Moderate, 5%/10% daily caps, flat-off-initial default, fractional Kelly 0.25/0.50, compound toggle flips `flat_off_initial`). **MC runs nightly, not at load** (owner spec): `nightly._precompute_profit_sim` → `PROFIT_SIM_SUMMARY_PATH` parquet, dashboard `load_profit_sim_summary` reads it instantly (`render_profit_sim_summary` shows the grid; the live re-sim stays behind the Receipts expander). **prob_col coupling trap** (memory `profit_sim_payout_kelly_bug` neighbor): profit_sim's `prob_col` is BOTH the eligibility filter and the Kelly prob → to filter on Model Edge you PRE-filter the universe and pass `min_model_p=0`. · **Doc de-drift**: systemd `ExecStart` pointed at the **deleted** `src/sportstradamus/dashboard_app.py` → now `poetry run sportstradamus dashboard` (canonical `sportstradamus.dashboard:run` → `streamlit run dashboard/app.py`, watcher off); bind via `STREAMLIT_SERVER_*` env (the command takes no flags), `…ADDRESS=127.0.0.1` for Tailscale Serve; troubleshooting bind/restart rows updated. **DRIFT-WATCH:** re-check `docs/dashboard_remote_access.md` whenever the dashboard **entry point / launch command** changes — it hard-codes `ExecStart` + the `dashboard/app.py` launch path. · no `.py` touched this turn (specialist N/A); #6c gates were green at `f32a3c6` · lane → devel (FF) this turn.
+- 2026-06-15 · Notes pass + Strategy-sim routed out · Owner notes after P7: fixed the deep-dive distribution chart (book-fallback rows had NaN `Projection STD` → `resolve_std` falls back to `ev*cv` then `ev*0.3`), the cross-page detail-dialog popup (`drop_detail_on_page_change` clears `detail_stack` on `st.navigation` page change), removed the under-hit-rate/Model-Lab market-trust row; **Other stats reworked** — `prediction/stories/details.py` `volume_trend` column now emits a `{stat,value,series,percentile}` entry (NFL volume stat is per **base position** QB→attempts/RB→carries/WR·TE→targets, depth-rank suffix stripped) and the deep-dive renders volume + other-stats uniformly via `st.metric` (stat name + recent mean + **percentile chip below the number**, implied-team-total style) with `help=` glosses from a new prepopulated `data/config/stat_tooltips.json` (`load_stat_tooltips`); Comps table + Correlated tab flagged for the P8 restyle. **Receipts:** hero reframed **rates-first** (ROI / win% / record lead; raw units + count to fine print; `analysis.dedup_bets` collapses the same prop posted under both books); the Strategy simulator was gated off-by-default to kill the load-time hit. **Strategy-sim rework ROUTED OUT of this lane:** owner asked for Model-Edge>0 & Consensus-Edge filter, flat-off-initial + compound-toggle staking, 1w/1m/3m/6m/1y horizons, 5%/10% daily caps, fractional Kelly, nightly-precompute — but the engine `strategies/profit_sim.py` is gate-load-bearing (S3 + Gate-2) with a real payout/Kelly accounting bug, and owner vetoed duplicating it. So the engine fix+extend goes to **model-track** (revalidate gates, owner sign-off; see its ledger + memory `profit-sim-payout-kelly-bug`); this lane's sim rework is **BLOCKED on that**, simulator stays toggled-off until it lands. · gates/refactor/commit for this notes pass pending.
+- 2026-06-15 · P7 — Receipts "prove it" surface ✔ (owner: strike P6b YAGNI, proceed to P7) · **P6b (same-game candidate "swap" panel) STRUCK** — owner called it YAGNI; removed from the plan. **P7** turns the old "Overview" clone into the redesign's skeptic surface (§3: *a skeptic must verify profitability unaided*). Four new **pure** aggregations in the shared `analysis.py` home (next to `_roi_table`/`compute_individual_metrics`, fed the exploded Push-dropped per-offer frame `get_filtered_history` already returns): `tailed_record` (hero — units + W–L record + ROI), `ev_threshold_record`, `worst_month`, `record_grid(by)`, sharing `_with_profit_units`; the inline `_JUICE_PAYOUT` was promoted to a public `analysis.JUICE_PAYOUT` (receipts.py imports it — one home for the flat -110 accounting). **Decision baked in — "EV>5%" = flat -110 edge ≥ 5%** (`Win Prob·_FLAT_DECIMAL_ODDS−1 ≥ 0.05` ⟺ `Win Prob ≥ 0.55`), the **same accounting basis as the hero P&L** so the skeptic check is coherent with the profit number beside it — deliberately NOT the platform-overloaded history-path `Model EV` column (which collapses to the probability for flat singles but is a payout multiple for Underdog → incoherent as one threshold) nor the existing `_roi_table` 0.55–0.70 prob cuts. **`surfaces/receipts.py` reworked** (page-script): re-titled **Receipts**; **hero** "if you'd tailed every rec" (units/record/ROI + the existing cumulative-profit area chart); **skeptic-checks** `st.columns(4)` — EV>5% record · CLV beat rate (`clv.summarize` `frac_beat_close`, structural/full-history) · calibration (`brier_score_loss` + `compute_book_brier_skill_score` "vs book" one-liner) · **worst month always shown, red when negative** (`delta_color="normal"`, the honesty contract — losers never hidden); **by league/market/platform** `st.segmented_control` → `record_grid` → `components/grid.render_themed_grid` (Win%/ROI scaled ×100 for the percent formatter, heatmap on Units); kept Your-slips / rolling-accuracy / volume / full CLV blocks; the five generic KPIs absorbed into hero+checks. **Profit Sim folded in**: standalone `surfaces/receipts_sim.py` **deleted** and rebuilt as `components/profit_sim.py:render_profit_sim(history)` (controls moved off `st.sidebar`→inline with `profit_`-prefixed keys since the host owns the sidebar; orchestrator over `_prepare_sim_frame`/`_apply_sim_controls`/`_run_strategies`/`_render_bankroll_chart`/`_render_summary_table`/`_render_pnl_drawdown` step helpers — the page-body-in-a-function tripped the CC/length gate), mounted in a `st.expander("Strategy simulator")`; its `st.Page` removed → **nav 5→4 top-level** (Tonight/Board/Games/Receipts + Model Lab), matching the spec's surface count. `strategies/profit_sim.py` untouched. **Tests**: new `test_receipts_agg.py` (hero parity vs the legacy inline `Profit Unit` sum, EV>5% boundary incl. the 0.55 row, worst-month min-units tie→earliest, record_grid Units-desc sort, empties); `test_profit_sim_page_render.py` repointed to the component + dedents the sliced `summary_rows`→`summary_df` block (kept verbatim inside `_render_summary_table` so the pin still execs it); `test_profit_sim.py` untouched. · gates ruff ✓ / golden ✓ (1832 pass; **same 2 out-of-footprint reds** — the real-NBA `test_correlation_helpers.py` corr-parquet-vocabulary failures — re-confirmed pre-existing by stashing this session's work and reproducing both on the clean tree) / integration ✓ (14) · refactoring-specialist ✓ (removed 8 duplicative `st.subheader`-echoing section-divider banners across `analysis.py`+`receipts.py`, ran `ruff format`; kept `receipts.py` one page-script; no out-of-scope edits) · full Streamlit render manual-verify pending (no runtime in CI) · not pushed.
+- 2026-06-15 · P6a.2 — deep-dive v2 dialog ✔ · `deep_dive.py` rebuilt into the evidence chain: header **edge badge** (`Model EV−1`, green/red by intent), **the case** (per-offer `Why` prose), **context strip** (implied team total with ±vs `baseline_total/2` arrow + moneyline + game **shape** + DVPOA), **market-trust** panel (30d live `precision_*` for the bet side, honest ≥30-settled caption, **View in Model Lab →** `nav_cell` deep-link), and five tabs — History (unchanged), **Model** (three labels: app betting line dashed-white UNCHANGED; consensus `Consensus Line` solid GRAY rule, no over/under reshade; model **projection** GOLD dot+label via `_projection_overlay`, which returns *two* charts so the caller's `+` keeps a FLAT layer list — do not pre-layer), **Comps** + **Other stats** (decode the P6a.1 sidecar via `_detail_row`/`_decode`; new `sparkline` builder), **Correlated** (+slip via `add_to_simple_slip`, alongside View-nav). New mtime-cached `data.load_current_offer_details` / `load_live_metrics`. `SHAPE_HELP` relocated games.py→`narrative` (shared, both import); `narrative.context_strip` gained `baseline_total`; pure `narrative.lab_filters_for_nav_cell`; `lab_training` now has keyed league + **market** multiselects that consume `nav_cell` (deep-link lands on the cell). Tests: `test_deep_dive_charts.py` (3-label layer spec, app line unchanged, consensus not reshading, NaN-skip) + `test_deep_dive.py` (`_live_read` bet-side/30d-window/sparse, `_decode`, `_detail_row` 5-key join, `_edge_badge`, `lab_filters_for_nav_cell`); narrative pins updated for `baseline_total`. refactoring-specialist verdict: **keep `deep_dive.py` one file** (401 lines, cohesive, <500 hard cap; tab renderers aren't independently meaningful) — deleted one narrating comment; flagged pre-existing `data.py` (540L) for a future loaders split. **Side fix (pipeline-integrity, owner-requested):** the long-red `test_get_training_matrix` digest was gitignored `stat_calibration.json` drift (recomputed 2026-06-12 > the 2026-06-06 pin) feeding `stat_cv`→`get_odds`; all tracked code byte-identical → pipeline intact. Test now pins `base.stat_cv` (like `archive`/`datetime`); **known reds 3→2** (only the two real-NBA correlation reds in `test_correlation_helpers.py` remain). Gates: ruff ✓ / golden 1823 pass ✓ / integration 14 ✓. Full Streamlit render manual-verify pending (no runtime in CI). Not pushed.
+- 2026-06-15 · P6a.1 — deep-dive detail-prerender pipeline ✔ (owner-approved plan; P6a = deep-dive v2, sliced P6a.1 pipeline now / P6a.2 dashboard next / P6b same-game candidate panel after) · New pure, league-blind, archive-free module `prediction/stories/details.py` writes `current_offer_details.parquet` (`CURRENT_OFFER_DETAILS_PATH`), one row per `(League, Date, Player, Market, Opponent)` with three JSON payloads the dashboard will render without recompute: **`comps_vs_opp`** (the player's KNN comps who faced this opponent in the **last 300 days** → each comp's avg-vs-opp + % diff vs its own 300d overall avg), **`volume_trend`** (per-league volume-stat sparkline series), **`other_stats`** (top-4 SHAP-ranked gamelog stats not shown elsewhere + value + last-N series + **percentile among same-position slate players**). Pure helpers `comps_vs_opponent` / `volume_trend` / `rank_other_stats` / `position_percentile` / `build_offer_details`, fed plain frames by a cli adapter `_offer_details_frame`. **Real-data finding (WNBA 436-offer snapshot):** SHAP feature names are *engineered* (`Mean10`, `Player TS_PCT short`, `Player MIN growth`) so the naïve "(SHAP features) ∩ (gamelog columns)" was empty everywhere — fixed with `_feature_to_stat` (strip `Player ` prefix + ` short`/` growth`/` long` suffix → backing gamelog stat), which recovers meaningful efficiency stats (PTS→TS_PCT/EFG_PCT/PCT_FGA; FG3M→FG3_PCT…). Verified: comps 196/220, volume 220/220, other_stats 202/220. **Consensus market line** (owner: the Model-tab needs the weighted-avg book line, distinct from the DFS app `Line`) added as an append-only `Consensus Line` column on `current_offers` via per-unique-key `archive.get_line` in cli; `persist._OFFER_KEEP_COLS` extended (intersect-projection, so the normalize characterization pins are unaffected). **Lifecycle bug caught by integration:** `short_gamelog` is only set inside `get_stats`, so a loaded-but-not-scored / book-fallback league lacks it (`AttributeError`); adapter now windows `self.gamelog` (always loaded, and what the dashboard's own history lookups match against) to `_DETAIL_GAMELOG_DAYS`=400 and only builds details for leagues actually in the slate. Per-league volume-stat map (NBA/WNBA `MIN`, NFL `snap pct`, MLB `plateAppearances`, NHL `TimeShare`); MLB comps **deferred** (pitcher/hitter `self.comps` structure ≠ the KNN `_comp_pairs` table, so `_COMP_PAIR_LEAGUES`={NBA,WNBA,NFL,NHL} → empty comps panel for MLB, honest scar). · gates ruff ✓ / golden ✓ (1809 pass; new `test_details.py` 13 pins — comps/volume/rank/percentile/orchestrator + the `_feature_to_stat` decode + empty-safe; **same 3 out-of-footprint reds** — `test_correlate.py:210` corr-parquet pollution now persistent on disk + real-NBA `get_training_matrix` digest, re-confirmed pre-existing by stashing this session's work) / integration ✓ (14) · refactoring-specialist ✓ (doc-only de-narration of `details.py`/`cli.py`; `persist.py`/`io.py` already clean; no out-of-scope edits) · non-empty detail path is unit-tested + real-WNBA-verified (integration stubs `process_offers`/`write_current_offers`, so its detail write is column-stable but empty) · not pushed.
+- 2026-06-15 · Constellation click-to-add fix + four UX/data fixes ✔ (owner review, three asks + a clarification) · **The click-to-add was the regression** ("can't click stars to build from scratch"): `slip_builder._toggle_leg` appended the clicked candidate to the throwaway `focus_legs` *filtered copy*, never `st.session_state[_LEGS]`, so adds silently vanished (and removes mis-indexed the session list once a slip had satellites). It now reads/mutates the canonical slip directly. Latent since the JS component landed — it surfaced only when the Games rework enabled build-from-scratch (the old builder required a seeded slip, so you mostly toggled/removed existing legs). · **Games picker stays**: the platform + game + banner + story-preloader picker used to vanish the moment a slip seeded (the `if legs:` branch skipped it); now always rendered via `_game_picker`, pinned to the slip's game while one is live (`_select_slip_label`). · **Edge declutter**: `constellation._add_edge` shows a tie only when BOTH endpoints are in the slip (`a in active and b in active`, was `or`) — a seeded multi-leg slip is no longer a hairball of ties to candidates; hover still faint-previews a star's other ties. Supersedes the P4.5 "each leg you pick lights up its own ties" note. · **Board edge %**: `grid.build_themed_grid_options` gained `percent_cols` + a shared `_PERCENT_FORMATTER` JsCode so `Model Edge`/`Consensus Edge` show a "%" suffix while staying numeric (heatmap + sort intact); the Board's numeric range-filter sliders also now filter on **Model/Consensus Edge** not raw `Model EV`/`Market EV` (`columns.add_edges` moved before the slider block; commit `cb8cf92`). · **New same-game "Add a leg the model doesn't like" picker** (`satellite_picker.render_disliked_legs`, Kelly ≤ 0 chips capped `_DISLIKED_CAP` = 9, reusing `_render_pick_popover`) — the manual override for a same-game non-star leg; the module is now "supplemental leg pickers". · **Team-code POR canonical** (separate commit): Underdog's WNBA Portland `POR` vs Sleeper's `PDX` made MIN/POR + MIN/PDX two slate cards; `PDX→POR` added to `books.ABBR_MAP` + `wnba._WNBA_TEAM_ABBR_MAP` (PDX unused elsewhere, NBA POR untouched). **Takes effect next confer/meditate/prophecize** — the generated corr artifacts + the snapshot re-form under POR; the committed snapshot still shows MIN/PDX until then. · commits `00cadcb` (dashboard) + `430a6b2` (data) · gates ruff ✓ / golden ✓ (1796 pass; new constellation both-active + single-leg edge pins + grid percent_cols pin; same 3 out-of-footprint reds — `test_correlate.py:210` corr-parquet + real-NBA `get_training_matrix`) / integration ✓ (14) · refactoring-specialist ✓ (1 comment de-narration in board.py; flagged the Win% lexicographic sort as pre-existing/out-of-scope) · render paths (picker visibility, disliked chips, click) are manual-verify on a fresh `poetry run sportstradamus dashboard` · not pushed.
+- 2026-06-15 · Tonight card captions (edge + model-liked count); constellation stays Kelly ✔ (owner-directed, three turns) · **Turn 1** ("fix it to show the edge; change the constellation to all legs with an edge"): Tonight's "Top edge" caption read `group["Projection"].max()` (the renamed stat-MEAN) and printed it as "Top edge: +25.50", meaningless — now shows the best **`Model EV` − 1** (betting edge vs the DFS payout) in the game, as a percent. I also built the constellation half (`constellation`/`satellite_picker`/`games` filtered + sized on `Model EV` − 1 + a `dashboard/legs.MODEL_EV_FLOOR = 1.0` constant). **Turn 2**: the owner saw it's a **no-op set-wise** — `Kelly > 0 ⟺ Model EV > 1` (Boost > 1) selects the identical legs, the switch only distorts star *size* by boost — and said **keep Kelly** for filter + size, so that half was **fully reverted to HEAD** (`git checkout HEAD --` the 8 files; commit `26b5f1a` = the Tonight caption only). This supersedes the §6/§10 P4-era "Tonight top-edge MISLABELS `Model EV` (= stat mean)" note — post-`038bb30` the mislabelled column was `Projection`. **Turn 3** (this commit): each Tonight card also shows the **count of legs past the Kelly filter** (`Kelly > 0`, deduped to distinct Player/Market/Bet across books + alt-lines — the constellation's star count), rendered `"{N} offers · {M} model-liked"`, so a game with no stars reads `0 model-liked`. · gates ruff ✓ / golden ✓ (1794 pass; same 3 out-of-footprint reds — `test_correlate.py:210` corr-parquet pollution + the real-NBA `get_training_matrix` digest) / integration ✓ (14) · refactoring-specialist ✓ on `tonight.py` (0 edits — page-script shape correct, the 4 inline comments carry real constraints) · not pushed.
+- 2026-06-15 · Games surface — game-first constellation builder + slate dedup ✔ (owner review, round 2) · Renamed Slips → **Games** (`surfaces/slips.py` → `games.py`, nav title/url_path + tonight + locked_shelf redirects). Reworked into a game-centric flow: a shared **Platform + Game** picker drives the Total/Spread/Shape banner and the constellation, which now **renders for the selected game whether or not a slip is seeded** — `render_constellation_builder` lost its `if not legs: return` guard and gained a `focus_game` param, so candidate (Kelly > 0) stars are clickable to **build from scratch**; a story is an optional preloader (`_render_story_preloader`), no longer the only way in. (This was the "can't click stars" report: most games carry no Kelly > 0 legs, and the old builder drew nothing until a story seeded ≥ 1 leg, so on those games there was nothing to click.) The banner moved from the builder to the page so it shows **before** seeding. `constellation._game_of` now reads the matchup from the candidate **pool** (not the slip), so the team-anchored layout is static per game and renders pre-seed. **Slate dedup**: a matchup's two per-team offer rows (TOR vs ATL + ATL vs TOR) collapse to one card/option via a new pure `narrative.home_away(group)` — **home first** off the `Home` flag, else the canonical (alphabetical) `Game` key; `persist._OFFER_KEEP_COLS` now carries `Home` so the snapshot has it (home/away ordering activates on the next `prophecize`; until then it falls back to alphabetical, still deduped). Tonight groups on the canonical `Game` key, not Team/Opponent. · gates ruff ✓ / golden ✓ (1794 pass; new constellation pool-anchor pin + 2 `home_away` pins; same 3 out-of-footprint reds — `test_correlate.py:210` corr-parquet + real-NBA `get_training_matrix`) / integration ✓ (14) · refactoring-specialist ✓ (inlined `_slip_game` + a nested `format_func`, de-narrated 2 comments) · live-dashboard walkthrough not run (no Streamlit runtime here) · not pushed.
+- 2026-06-14 · Edge re-based on the DFS payout + Games folded into Slips + Pick'em retired ✔ (owner-directed, two commits) · **The board's edge was measured against the wrong baseline.** The owner plays the DFS app (Underdog payout table / Sleeper boost), not the consensus book, so `Edge = Model EV − Market EV` was meaningless. **Commit `1a4a5c7`**: the snapshot already ships the right primitives — `Model EV` = Win Prob × Boost (the model's EV against the DFS payout), `Market EV` = Market Prob × Boost (the book's EV at that same payout = the mispricing signal), and `Kelly = (Model EV − 1)/(Boost − 1)` was already correct (sizes off `Model EV` + `Boost`, never `Market EV`). So `columns.add_edges` now derives **`Model Edge` = `Model EV` − 1** (your edge vs DFS, what Kelly sizes) and **`Consensus Edge` = `Market EV` − 1** (the book's edge at that payout; > 0 ⇒ the book agrees the line's soft, < 0 ⇒ contrarian); `lenses.py` re-framed around the DFS break-even 1.0. **Heatmap + tooltips weren't rendering**: `grid.py` passed a plain `{"function": …}` dict cellStyle (st_aggrid silently drops it) and omitted `allow_unsafe_jscode` — fixed with a real `JsCode` cellStyle + `allow_unsafe_jscode=True` + `enableBrowserTooltips=True`. Dropped the dead `persist.write_current_offers(stats_dict=)` back-compat param. **This commit — Games → Slips + Pick'em retired**: the Pick'em tab and its **entire prophecize runtime snapshot path** are gone (`cli._write_pickem_snapshot`, `persist.write_current_pickem`, `io.CURRENT_PICKEM_PATH`, `data.load_current_pickem`, the snapshot-only `underdog_pickem.build_entries_from_scored` + `_pickem_emit.entries_to_frame` + orphaned `REFERENCE_BANKROLL`) — the standalone `pickem-build`/`kelly` operator CLIs stay. `surfaces/game.py` **deleted**, folded into Slips: new `_render_game_seed` (+ `_apply_game_preselect`) honors the Tonight `nav_game`/`?game=` handoff and seeds the constellation from any game's legs, and `render_constellation_builder` gained a keyword-only `game_context` so `_render_game_banner` draws the focus game's **Total / Spread / Shape** strip (`_SHAPE_HELP` glosses shootout/grind/blowout/coinflip). Tonight "View game" → `slips.py`; nav drops to five top-level surfaces. The §6 P4 block's `surfaces/game.py:51-56` pointer is now historical — the strip lives in the builder. · gates ruff ✓ / golden ✓ (1791 pass; same 3 out-of-footprint reds — `test_correlate.py:210` corr-parquet pollution + the real-NBA `get_training_matrix` digest) / integration ✓ (14) · refactoring-specialist ✓ (inlined the `_score` forwarder, de-narrated 6 comment/docstring lines) · manual live-dashboard walkthrough not run (no Streamlit runtime here) · not pushed.
+- 2026-06-14 · P5 Board + Slips themed grid, on a pipeline-wide scoring-column rename ✔ (owner-directed; owner-authorized override of §5 footprint + §7 append-only) · **`Model EV` was overloaded across frames** — the projected *stat mean* in offer/history, but parlay *betting-EV* in `parlay.py`/`parlay_hist.parquet` — so before shipping P5 the owner chose to fix the crossed wires at the source. **Part A — deep rename** (commit `038bb30`), applied **per-frame, never a blind sweep**: offer/history `Model EV`→`Projection`, `Books EV`→`Market Projection`, `Model STD`→`Projection STD`, the offer EV multipliers `Model`→`Model EV` & `Books`→`Market EV`, `Model P`→`Win Prob`, `Books P`→`Market Prob`, `Close Books P`→`Close Market Prob`, `Push P`→`Push Prob`, `K`→`Kelly`; in the **parlay frame `Model EV` STAYS** (already betting-EV) and only `Books EV`→`Market EV`. End state: `Model EV` = betting-EV everywhere, `Projection` = the stat value everywhere. ~30 source + test files across `prediction/`, `training/scorecard.py`, `strategies/`, `analysis.py`, `nightly.py`, `history_schema.py`, dashboard. **Deliberately NOT renamed** (so a later pass knows it was intentional): `Model Param/R/Alpha/Sigma/Skew` (distribution-shape plumbing), `Model Over`/`Model Under` (the `Bet` side is `str[6:]`-sliced off these, then dropped pre-snapshot), `Model CLV`/`Market CLV` + `Books STD` (already clear), parlay `P`/`PB`/`Indep P`/`Indep PB` (joint-prob shorthands), plotly `name="Model"` legend labels, and the internal `get_filtered_history(min_model_p=)` param. **One-time data migration** `scripts/migrate_scoring_cols.py` (idempotent — gates on unambiguous-old keys so a re-run can't re-rename; offer/leg payloads are positional tuples so only top-level columns move) rewrites the runtime parquets (history/parlay/`current_*`/clv/live_metrics). **Part B — P5 themed grid** (this commit) on the renamed base: new pure `components/grid.py` `build_themed_grid_options` (right-aligned IBM Plex Mono numerals, never centered; optional diverging heatmap baked from `theme.DIVERGING_COLORS`, pinned byte-equal to `config.toml` `chartDivergingColors`, painted only on the saturated tails so light text keeps contrast); `dashboard/columns.py` slimmed to one display label (`Win Prob`→`Win %`) + the derived **Edge = `Model EV` − `Market EV`** + header tooltips; `dashboard/lenses.py` (Sharp edges / Longshots / Contrarian / **Consensus** preset views — the divergence lenses key off **Edge**, not probability); `components/slip_state.py` extracted from `slip_builder.py` (458→302; new module 189). `surfaces/board.py` reworked to the themed grid + a prophecy-lens `st.segmented_control` + Edge heatmap; `surfaces/slips.py` Pick'em moved `st.dataframe`→`render_themed_grid`. Sparkline column is a **scar** (`sparkline_col` hook + caption) pending the L1 line-movement export. · gates ruff ✓ / golden ✓ (1793 pass; new `test_grid_options` + the `test_design_tokens` DIVERGING_COLORS↔config mirror pin; **same 3 out-of-footprint reds** — `test_correlate.py:210` corr-parquet pollution + the real-NBA `get_training_matrix` digest — **re-verified pre-existing by stashing Part B at `038bb30`**) / integration ✓ (14) · refactoring-specialist ✓ (4 stale-docstring de-narrations: `analysis._migrate_flat_history`, `stories/why`, `profit_sim`, `board.py` comments; + I de-staled the display strings it flagged — `receipts_sim` sliders, `lab_diagnostics` sharpness labels, `data.get_filtered_history` docstring; it also flagged `persist.write_current_offers(stats_dict=)` as a pre-existing unused back-compat param — left out of scope) · manual live-dashboard walkthrough not run (no Streamlit runtime here) · not pushed.
+- 2026-06-14 · Satellite card + whole-game preset gate ✔ (owner review, round 5 follow-ups) · **Satellite picks now show the same condensed offer card as the constellation.** New public `deep_dive.render_offer_card(row)` — the Streamlit twin of the JS hover card (person-icon headshot scar, player, bet/line/market, Win/Boost/Kelly, last-5 scar). Each satellite pick became an `st.popover(star_label)` whose body is that card plus **Add to slip** / **Full detail →** (`_render_pick_popover` returns `{"add": row}` or `{"detail": offers_index}`). **Detail dialog unified**: the per-focus-pool draw lifted out of `_render_constellation` into shared `slip_builder._draw_detail_dialog(offers)` — both the constellation stars and the satellite picks push an offers-frame index (`find_offer_idx` resolves the satellite row), and corr-nav is scoped to that row's own game pool (correlated legs are same-game, so it holds across reruns); `_apply_satellite_action` gained the `detail` branch. Streamlit has no hover, so the card lives in a click-popover with an explicit Add (owner-picked over a quick-add chip + detail icon). **Whole-game preset gate** (owner: "single-team preset valid iff only one team has model edge"): `validate_parlay_legs` gained keyword `require_both_teams=True` (gates only the both-sides check, never distinct-players); `menu._stories_for_game` sets it `False` **only when the game's entire edge set is one team**, so a one-sided game now emits a single-team preset (the satellite completes it) while a two-team game still requires both-teams presets — a one-team cluster inside a two-team game still emits nothing. This *narrows* the P4.5 "one-team cluster emits no story" to two-team games only. **Streamlit deprecation swept**: `use_container_width=True`→`width="stretch"` across 9 dashboard files (30 call sites). · gates ruff ✓ / golden ✓ (1786 pass; `test_validate_parlay_legs` +2 require-both cases, `test_story_menu` single-team-game-emits + two-team-single-cluster-empty; same 3 out-of-footprint `test_correlate.py:210` corr reds) / integration ✓ (14) · refactoring-specialist ✓ (0 substantive — render_offer_card/_draw_detail_dialog reuse confirmed genuine; flagged slip_builder.py now 458 lines → P5 should split the slip-state API into `slip_state.py`) · satellite card + detail dialog are manual-verify · not pushed.
+- 2026-06-14 · Satellite legs ✔ (owner review, round 5 addenda) · A game's model-liked legs (Kelly `K` > 0) often sit on **only one of its two teams**, so it can't form a valid parlay alone (`validate_parlay_legs` needs both sides). New **satellite** section pulls edge legs from *other* games into the slip. The constellation stays **same-game** (DESIGN §4a FIXED): the builder gains a **focus game** (`_game_pool`→`_focus_pool`, = the oldest leg's game; no longer empties on a multi-game slip), the map + thesis headline are drawn over `focus_legs` only (satellites never become stray stars), and everything else in the slip is a satellite. New pure `components/satellite_picker.py`: `satellite_groups(offers, *, focus_game, platform, exclude_keys)` returns other-game `K` > 0 legs on the slip platform, grouped by game, each capped to `_PER_GAME_CAP` (= 6) and games ranked by best edge, already-slipped keys dropped; `render_satellites(...)` is a thin render returning an **add/remove action union** the builder applies via `_apply_satellite_action` (the builder owns slip state). The expander **auto-opens while the slip is invalid** (single-team / one leg) and collapses once valid; chips are **grouped by game** so you grab one validating leg or a whole second cluster (combine two single-team parlays). `_render_leg_list(focus_game=…)` now shows only the focus game's legs; satellites are listed + removed in the picker. **Reused unchanged**: `validate_parlay_legs` (whole slip), `score_slip` (cross-game pairs have no corr entry → block-diagonal independent), lock-in/grading. **Candidate-star labels** (owner ask #1, reverses the round-4 "label-on-hover only"): `constellation._add_node_trace` now gives **both** active + candidate stars their `Lastname MKT o/uLine` caption (`mode="markers+text"`); the active/candidate signal stays fill-color + opacity. `_star_label`→public `star_label`, reused by the picker chips (no R0801, no forwarder). · gates ruff ✓ / golden ✓ (1782 pass; new `test_satellite_picker` (4) + `test_constellation` candidate-label pin flipped; the same 3 out-of-footprint `test_correlate.py:210` corr-parquet reds + 1 known pickem mvn.cdf xdist flake that passes `-n0`) / integration ✓ (14) · refactoring-specialist ✓ (extracted `_SATELLITE_COLS`) · the picker render path is manual-verify (no Streamlit-runtime goldens — lane precedent) · not pushed.
+- 2026-06-14 · P4.5 ✔ (owner review, round 5) · Constellation edge interactivity + a richer hover card + valid presets, all on one **hand-authored custom JS component** (no build toolchain — there is no npm in this repo or on the box, so `components/constellation_component/build/{index.html,main.js}` are committed static files that speak the Streamlit postMessage protocol directly and render the figure JSON via plotly.js from CDN; this *replaced* the planned esbuild step, removing the toolchain the plan flagged as its main risk). **Edges hidden-until-active**: `constellation._edges` now emits **every** tie (the strongest-tie backbone is gone — `_backbone_edges`/`_strongest_tie` deleted) with a baseline opacity of 0 unless an endpoint is in the slip, so an empty slip is a clean field and clutter scales with the slip; each edge carries its endpoint keys in `meta` so the JS **faint-previews** a star's incident ties on hover (client-side `Plotly.restyle`, no rerun). **Rich hover card** (owner scope "shell + entry only"): the JS draws an absolutely-positioned card on `plotly_hover` (hover-intent so its button is clickable) with the core read; its **Full detail →** button reuses the existing `deep_dive.show_detail` `@st.dialog` over the game pool — the slip lives in `session_state`, so opening detail never clears it (board.py:184-186 pattern). **Scarred** for a later data lane: player headshot (initials disc) + last-5 mini chart (no headshot/last-5 columns in the snapshots yet). Node `customdata` now carries `[key, player, market, bet, line, win, boost, kelly]`; `st.plotly_chart(on_select=…)` swapped for the component (`_apply_constellation_action` nonce-dedups click/detail; `_CLICK_NONCE` gone). **Valid presets** (round-5 addendum — **supersedes the round-4 "single-team stories are fine, NOT gated" call below**): `prediction/stories/menu._best_subsets` now enumerates only **valid** parlays (distinct players + both teams), so a seeded Builder/Moon is lockable as-is and a one-team cluster emits no story — the generator now *produces* the validating cross-team leg instead of leaving it to the user. The rule moved to a shared pure `prediction/stories/legs.validate_parlay_legs`; the editor gate `slip_engine.slip_validity` was **deleted** and repointed there (prediction can't import dashboard; deleting beats a forwarder). · gates ruff ✓ / golden ✓ (1779 pass; `test_constellation` edge pins reworked — all-ties + endpoint `meta` + hidden-until-active opacity + customdata card fields; `test_slip_validity`→`test_validate_parlay_legs` repointed; `test_story_menu` +preset-validity pin, fixture teams interleaved + oracle filtered; same 3 out-of-footprint `test_correlate.py:210` corr-parquet reds) / integration ✓ (14) · refactoring-specialist ✓ (4 docstring trims) · the JS card hover + detail dialog are manual-verify (no Streamlit-runtime/JS goldens — lane precedent) · not pushed.
+- 2026-06-14 · P4 static map ✔ (owner review of the live editor, round 4) · The constellation is now a **static per-game star map**, not a slip-relative one that reshuffled on every pick. **Node set = the game's model-liked legs** (`pool` rows with Kelly `K` > 0) — fixed per game; selecting/deselecting only restyles a star, never moves/adds/removes one (`test_layout_is_static_under_selection` pins it). Stories/Builder/Moon just pre-activate a subset. **Correct edge metric:** `Model EV` is the projected *stat mean* (`model_prob.decoded.ev`; `deep_dive` uses it as the distribution mean), NOT betting edge — the real per-leg edge is **`K = (Model−1)/(Boost−1)`** (Kelly; `correlation.py` already ranks strong legs by it; ~16% of offers are K>0, ~5/game). So "model-liked (edge>0)" = K>0, and **star size ∝ K** (relative to the game's strongest leg). Added `K` to `_SNAPSHOT_COLS` so an active leg carries its own edge. **Ring dropped** (owner: a gold ring read as a team color) — selection is now **alpha + saturation**: an active leg burns full team color/opacity + carries its text label + draws on top; a candidate is the same color **desaturated toward gray** (`_desaturate` blends to `GRAY`) + dimmed (`_INACTIVE_ALPHA`) + label-on-hover (declutters a dense game). **Richer hover**: `Player — Market o/u Line` + `Win {p} · {boost}x · Kelly {K}`. Drawn edges are now a **sparse backbone** (`_backbone_edges` = each star's single strongest tie, deduped); the *layout* still springs on the full web (`_layout_edges`). Team-anchored force layout unchanged. **Owner decision — single-team stories are fine, NOT gated** (closes the round-3 follow-up): a strong same-team correlation story carries the parlay and you click a weak other-team star to make it valid. Caveat the owner accepted with the K>0 node set: a validity leg with K ≤ 0 isn't a node, so it's unreachable from the map (rare — median 5 K>0 legs/game usually covers both sides). · gates ruff ✓ / golden ✓ (1774 pass; `test_constellation` rewritten — K-universe, size∝edge, static-layout-under-selection, active/candidate styling, hover; same 3 out-of-footprint `test_correlate.py:210` corr-parquet reds) / integration ✓ (14) · refactoring-specialist ✓ (inlined `_node_color`, extracted `_LABEL_FONT_SIZE`, dropped 1 narrating comment) · not pushed.
+- 2026-06-13 · P4 interactivity ✔ (owner review of the live constellation, round 3) · The constellation is now **the editor**, not a read-only visual. **Team-anchored force layout** (replaces the brief generic spring + a rejected hard two-column experiment — columns hide the cross-team ties that are the whole point): `constellation._anchors` pins each team's most-connected leg (max weighted degree) to its side via `spring_layout(fixed=…)`, a |ρ|-weighted warm start seeds the left-right basin, and the edges place the rest — so a leg correlated *across* the matchup floats to the centre and an unrepresented side leaves its half empty (the both-teams rule made visual). The layout springs on the **full** correlation web (`_layout_edges`) while drawing stays the decluttered subset. **Team-color star FILL + gold/gray RING** (was gold/gray fill): `marker.color` is a per-point team-color list (`_TEAM_PALETTE` placeholder until P8 `team_assets.json`), `marker.line.color` carries the slip(gold)/context(gray) signal. **Click-to-toggle**: the `_render_add_leg` selectbox dropdown is **deleted** — `st.plotly_chart(on_select="rerun", selection_mode="points")` + `_handle_constellation_click` reads the node's `Player|Market|Bet` off plotly `customdata` to add/remove its leg; a `_CLICK_NONCE` baked into the widget key gives each toggle a fresh widget so the stale selection can't re-fire. Renders even at <2 legs so context stars are clickable. **No modebar / no zoom-pan** (`config={"displayModeBar": False, "scrollZoom": False}` + `dragmode=False` + `fixedrange`): "it's a map, not a chart." Leg list under it is now readonly (`_render_leg_list(removable=False)`; simple builder keeps its remove buttons). **DESIGN §4a amended** (owner-authorized): grammar is now star = leg, **fill = team**, **ring = slip/context**, edge = correlation. **networkx restored** — imported directly (guaranteed present transitively via torch); pyproject/lock left at HEAD (the lane branch's lock-vs-pyproject inconsistency is pre-existing + out of scope; devel-ship-curator declares the explicit dep when it carves). **Owner Q answered**: live-dashboard changes weren't showing because Streamlit caches *imported* modules — a server restart is needed, not `prophecize` (page scripts hot-reload, imported components don't). **Still open (P3a generator):** 6 of 24 story seeds remain single-team — gating `prediction/stories/menu.py` on both-teams is the follow-up. · gates ruff ✓ / golden ✓ (`test_constellation` rewritten — team colors via `marker.line.color`, anchor opposite-sides, customdata, determinism; the 3 suite reds are the same out-of-footprint `test_correlate.py:210` corr-parquet pollution, now persistent on disk — my files import nothing on that path) / integration ✓ (14) · refactoring-specialist ✓ (0 edits — both files arrived clean) · not pushed.
+- 2026-06-13 · P4 polish ✔ (owner review of the live constellation) · **Edge declutter**: the v1 map drew every leg-pair ≥ floor (the 12 context nodes alone = ~66 context↔context lines = a hairball). Now `constellation._edges` draws all slip↔slip ties **plus each context star's single strongest slip tie**, and **drops context↔context entirely**; context cap 12→8. **Invalid-parlay guards** (UD/Sleeper reject same-game entries that repeat a player or sit on one team): new pure `slip_engine.slip_validity(legs)→(ok, reason)` (distinct players + both teams), `render_constellation_builder` warns + disables "Lock it in!" when invalid, `_render_add_leg` now dedups candidates by **Player** (not Player/Market/Bet — kills the same-player alt-market clutter, which also thins the map) and sorts the missing team's legs first; `_SNAPSHOT_COLS` gained `Team`. **Star labels**: `Lastname MKT o/u Line` (e.g. `Brunson PTS o25.5`, Jr./Sr. suffix-stripped) replacing `Player Bet`. **Flag (not fixed, generator-side):** 6 of 24 current story seeds are single-team — `prediction/stories/menu.py` can still emit single-team stories, so the builder now flags them "add the other team"; gating the generator's cluster/subset search on both-teams is a P3a follow-up. · gates ruff ✓ / golden ✓ (P4 goldens 41/41 in isolation; the 3 suite reds are all out-of-footprint — see base entry) / integration ✓ (14) · refactoring-specialist ✓ (clean, walrus + `slip_validity` placement endorsed) · 3 new/updated goldens (`test_constellation` edges/labels/dedup, `test_slip_validity`) · not pushed.
+- 2026-06-13 · P4 ✔ · Tonight + Game narrative surfaces + constellation v1. **View-game fix** (P1 known bug): `st.switch_page` drops same-run query params, so Tonight's `?game=` handoff always landed on Game's default game — now hands off via a one-shot `st.session_state["nav_game"]` key that `game.py` reads before `?game=` (the deep-link path), seeding the keyed selectbox so a later change sticks; doubleheaders stay distinct on the `· {Date}` label. **Context strip**: `game.py` replaced the per-row `Moneyline`/`O/U` peek with `current_game_context` (total · `{fav} -{spread}` · shape), keyed on the canonical `Game` slash key + Date, degrading to N/A when a game has no context row. **Tonight headlines**: each card shows the top per-leg-set `Thesis` (the max-`Model EV` parlay for its `(Game, Date)`) as plain markdown — celestial display fonts stay P8. **Constellation v1** (slip editor only — owner-scoped this session; the DESIGN §4a Game-page view is deferred): new pure `dashboard/components/constellation.py:constellation_figure` renders the FIXED star-map grammar — slip legs gold stars, correlated context legs gray (capped 12, |ρ| ≥ 0.05), edges gold with width/opacity ∝ |ρ| and **dashed when ρ < 0** ("fights the thesis"); **networkx** `spring_layout` (|ρ|-weighted, fixed seed → deterministic, testable) lays the nodes out and **plotly** draws them (token palette ours, not DOT). networkx added to pyproject (pure-python, no deploy binary; graphviz rejected for its `dot` system-binary + DOT-styling cost). Rendered in `render_constellation_builder` where the theming scar sat; the pairing-block-risk caption stays scarred (L4). Support: new pure `dashboard/narrative.py` (`top_thesis`/`context_strip`); `corr_key` promoted from `slip_engine._leg_key` to `dashboard/legs.py` (one shared key format); `theme.GRAY` token added. v1 is a read-only visual — node click-to-edit is later (P6 swap). · gates ruff ✓ / golden ✓ (**3 pre-existing out-of-footprint reds left untouched**: `stats` `get_training_matrix` data-drift digest; and `test_find_correlation_offer_correlations_real_nba` + `test_kernel_reads_real_nba_cmap`, both a **test-isolation bug** — `tests/golden/test_correlate.py:210` writes synthetic `AAA/BBB` corr matrices to the **real packaged** `data/leagues/nba/corr_same_team.parquet`, so under xdist's random order it clobbers those real-NBA readers; order-dependent, same class as [[integration-test-mutates-stat-meta]]. P4 code writes zero to that path and `correlation.py` imports no dashboard module — none are P4's) / integration ✓ (14 pass) · refactoring-specialist ✓ (one `ruff format` line reflow, 0 substantive) · 2 new goldens (constellation grammar/determinism, narrative lookups); AppTest smokes deferred (lane precedent, no in-tree pattern) · manual dashboard walkthrough not run unprompted · not pushed (lane branch) · next: P5 Board + Slips themed AG Grid + load-into-rail.
+- 2026-06-12 · P3b polish ✔ · locked-shelf detail for the bet-placement workflow (owner: scroll the rail to remember what to bet while placing in the UD/Sleeper app). Each shelf entry now shows payout · EV · stake · status inline; a **View** `st.dialog` lists every leg (mirrors `deep_dive.py`); **Delete** (`helpers/io.delete_user_slip` + test) drops a slip by `slip_id`; **Edit** unchanged. gates ruff ✓ / golden ✓ / integration ✓.
+- 2026-06-12 · P3b fix ✔ · slip mispriced at **+2530% EV** (owner). `dashboard/legs.py:find_offer_idx` masked on Player/Bet/Market/Line only — the `platform` arg just translated the market label, never filtered rows. `current_offers` holds BOTH books' rows for the same leg at different boost scales (UD raw promo ~1.0 after the `cli.py:163` ÷1.78; Sleeper raw API mult ~1.7–3.6), so `matches[0]` returned the lower-index Sleeper row (boost 1.78) for an Underdog-seeded slip → `score_slip` ran ∏1.78 × Power `base[3]`=6 ≈ 36x. Fix = `mask &= offers["Platform"] == platform` when a platform is given; the parlay reprices to +350% (UD) / +339% (Sleeper, ∏boosts) — the residual ~+340% is model calibration, separate. Regression test pins the same-leg-on-both-books case. See [[dashboard-offer-resolution-platform]]. gates ruff ✓ / golden ✓ / integration ✓.
+- 2026-06-12 · P2 hotfix ✔ · `prophecize` crash in `write_current_game_context`. `context.py:_game_row` did `grp.loc[mls.idxmax(), "Team"]`; `offers.groupby` keeps the offers frame's index, and a real slate had a label repeated across two teams (`23 SAS` / `23 NYK`) → `.loc` returned a 2-row Series → `fav_team` non-scalar → pyarrow `ArrowInvalid`. Fix = `grp.reset_index(drop=True)` at the top of `_game_row`; regression test pins a duplicate-index two-team game (scalar `fav_team` + parquet round-trip). Pre-existing since the P2 v2 thesis-engine landing (`9b6ff2a`), surfaced now. gates ruff ✓ / golden ✓ (the 2 known reds only) / integration ✓.
+- 2026-06-12 · P3b ✔ · slip builders + locked shelf + grading landed (dashboard half of P3). **Two builder types, one sidebar shelf** (the copula is only valid within a game): a **constellation** builder (same-game, correlation + live thesis; hosted on Slips) and a **simple** builder (any-game, grade-only; hosted on Board) — both lock to `data/runtime/user_slips.parquet` (`USER_SLIPS_PATH`) and the global sidebar shelf, both edit-reopen by `builder_type`. New pure `dashboard/slip_engine.py` is the one sanctioned live calc: `score_slip(legs, corr, *, platform, bankroll, shrinkage)` builds a **block-diagonal** SIG (within-game ρ from the `current_game_corr` slice keyed `Player|Market|Bet`, cross-game pairs ρ=0 → joint collapses to the independent product), repairs via `_psd_or_none`, prices through `_parlay_payout_prob` (gate-free copula core, **never `_evaluate_parlay`** — its both-teams gate drops single-team stacks); `slip_headline` reuses the P2 `thesis_variants` and **sorts legs canonically** so the headline is a pure function of the leg-set (path- + order-independent). **Platform pricing:** Underdog = pooled Power(≤3)/Flex(4+) curve × ∏boosts; **Sleeper = ∏ per-leg boosts** (base 1.0; correlation-discount factor deferred to the Sleeper-parity track → `payout_approximate=True` scar caption, EV shown not suppressed). Money is `Decimal` (`fractional_kelly_stake`). Three constellation seeds (story cascade `platform→game→story→Bankroll-Builder/Shoot-the-Moon`; Game-tab same-game multiselect; sidebar edit) + one simple seed (Board cross-game multiselect). **Grading:** `nightly._resolve_user_slips` mirrors `_resolve_parlays` but over per-leg `analysis._resolve_leg` (a slip may span games) — Power all-or-nothing, Flex/Sleeper partial-cash floor (≥2 hits, ≤2 misses), unplayed games keep the slip `pending`; counts surface in `resolve_meta`. Receipts gained a "Your slips" record panel. Legs are snapshotted from `current_offers` at seed/add (Desc carries the `- {pct}%, {boost}x` tail so `parse_leg` *and* the grading `LEG_PATTERN` both parse it). · gates ruff ✓ / golden ✓ (1751 pass; **1 pre-existing unrelated red** — stats `get_training_matrix` data-drift digest; pickem mvn.cdf xdist flake intermittent, passes -n0) / integration ✓ (14 pass) · refactoring-specialist ✓ (inlined `_bankroll` wrapper, dropped 2 section banners + 1 what-docstring) · deleted stale `test_predictions_parlays_render_characterization.py` (pinned the rewritten-away `slips.py::_render_parlay`) · 4 new golden files (slip_engine / headline-determinism / user_slips_io / nightly_user_slips); AppTest smokes deferred (no AppTest pattern in-tree, per golden-cull) · manual dashboard walkthrough not run unprompted · next: P4 constellation *visual* (starfield/edge nodes) + swap-dialog polish + context strip + celestial theming + Sleeper correlation-discount factor
+- 2026-06-12 · P3a ✔ · story-menu generator landed (pipeline half of P3; dashboard half = P3b next). New `current_game_stories.parquet` (`CURRENT_GAME_STORIES_PATH`), one menu per `(platform, Game)`: ≤5 correlation-cluster stories × 2 objectives (`builder`/`moon`), keyed `(platform, League, Game, story_id, objective)` → `legs`(JSON)/`headline`/`joint_p`/`model_ev`/`kelly_stake`(full-Kelly fraction)/`bet_size`/`Date`. Pure `prediction/stories/menu.py:build_game_stories`: greedy ρ-graph clustering over strong legs (per-$1 edge ≥ 0.05), then a two-phase subset search — cheap independent-joint proxy ranks all subsets, exact copula (`parlay._parlay_payout_prob`) scores only a shortlist (top-K/objective ∪ all Power subsets) — Builder = argmax single-bet full-Kelly log-growth `_log_growth`, Moon = argmax model EV within the Power/Flex cap. **Scores raw via the gate-free copula core, NOT `_evaluate_parlay`** (its `_parlay_admissible` requires both teams → would silently drop single-team stacks). Per-game scoring bundle exposed via a new opt-in `story_sink` on `find_correlation`/`process_offers` (`GameScoringContext` dataclass in parlay.py; append-only, mirrors `corr_sink`; `_append_story_context` helper keeps `_process_league_games` ≤ CC10). cli builds the menu from the already-built `game_context` + `corr_sink`. `STORIES_VERSION` → `p3a`. **Perf:** menu pass ~5.5s realistic busy slate / ~13s worst case (10×40 fully-correlated strong legs, 1.3s/game) — negligible vs the 15-min budget; the shortlist bounds the 50k-sample flex MC (`_PUSH_MC_SAMPLES` untouched). Note: ≥3-leg `model_ev` carries ~1e-4 noise (scipy `mvn.cdf` is randomized QMC for dim ≥ 3 — same as the existing parlay snapshot). · gates ruff ✓ / golden ✓ (1740 pass; **1 pre-existing unrelated red** — stats `get_training_matrix` data-drift digest; pickem mvn.cdf xdist flake intermittent) / integration ✓ (14 pass, story writer fires column-stable) · refactoring-specialist ✓ (formatting + 1 type annotation only) · live-budget smoke deferred (not run unprompted — scrapes + writes archive + collides with :50 cron) · next: P3b slip rail + Slips story-card UI + live thesis regen + save/reflect grading

@@ -4,25 +4,25 @@ Produces *stratified* Spearman correlation matrices on residualized per-game
 stats with sample-size-aware shrinkage, plus a metadata sidecar for
 reproducibility.
 
-Outputs (per league):
+Outputs (per league, all under ``data/leagues/{league}/``):
 
-* ``data/{LEAGUE}_corr_same_team.csv`` — within-team pair correlations
-  indexed by ``(team, market_a, market_b)``.
-* ``data/{LEAGUE}_corr_opposing.csv`` — cross-team pair correlations
-  indexed by ``(team, team_market, opp_market)``. Both sides keyed by their
-  raw (un-prefixed) market names; the file structure encodes the
-  team-vs-opponent relationship.
-* ``data/correlations/{LEAGUE}_corr_metadata.json`` — date range covered,
-  per-team observation counts, generation timestamp, git SHA.
+* ``corr_same_team.parquet`` — within-team pair correlations indexed by
+  ``(team, market_a, market_b)``.
+* ``corr_opposing.parquet`` — cross-team pair correlations indexed by
+  ``(team, team_market, opp_market)``. Both sides keyed by their raw
+  (un-prefixed) market names; the file structure encodes the team-vs-opponent
+  relationship.
+* ``corr_metadata.json`` — date range covered, per-team observation counts,
+  generation timestamp, git SHA.
 
-The intermediate per-game record at ``data/training_data/{LEAGUE}_corr.csv``
+The intermediate per-game record at ``data/training_data/{LEAGUE}_corr.parquet``
 is still written (warm-start cache) but no longer used by the prediction
 pipeline.
 """
 
+import hashlib
 import importlib.resources as pkg_resources
 import json
-import subprocess
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
@@ -30,6 +30,10 @@ import pandas as pd
 from tqdm import tqdm
 
 from sportstradamus import data
+from sportstradamus.helpers import get_logger
+from sportstradamus.helpers.provenance import git_sha
+
+logger = get_logger(__name__)
 
 # Lookback window for game inclusion. ~1 calendar year covers a full regular
 # season + post-season for the major leagues.
@@ -53,6 +57,17 @@ MIN_OVERLAP_FOR_FULL_WEIGHT: int = 30
 # dropped from the output — keeps the on-disk matrix sparse.
 CORR_MAGNITUDE_FLOOR: float = 0.05
 
+# Structural invariants (not cache-key tunables): a scored game has exactly two
+# teams, and a correlation needs at least two markets over at least two rows.
+_TEAMS_PER_GAME: int = 2
+_MIN_CORR_DIMENSIONS: int = 2
+
+# _TRACKED_STATS groups markets by correlation role (NBA/WNBA by position,
+# other leagues flat) for matrix stratification -- a different concept from
+# training.markets.ALL_MARKETS (the flat per-league model-training list). The
+# two deliberately share only incidental scoring-stat windows; DRY-merging them
+# would couple unrelated configs, so the duplicate-code check is silenced here.
+# pylint: disable=duplicate-code
 _TRACKED_STATS: dict[str, dict] = {
     "NFL": {
         "QB": [
@@ -389,16 +404,78 @@ _TRACKED_STATS: dict[str, dict] = {
         ],
     },
 }
+# pylint: enable=duplicate-code
 
 
-def _git_sha() -> str:
-    """Return the short git SHA of the current HEAD, or ``"unknown"`` if not in a repo."""
+def _build_cache_key(league: str, stat_data) -> dict:
+    """Summarize the inputs to ``correlate`` for cache-validity comparison.
+
+    The key captures everything that, if unchanged since the last successful
+    run, makes the previously written outputs still correct: the latest game
+    date and row count in the gamelog (data freshness), a hash of the tracked
+    stat lists for the league (schema changes), and the module-level
+    constants that control residualization and shrinkage.
+    """
+    date_col = stat_data.log_strings["date"]
+    gamelog = stat_data.gamelog
+    if date_col in gamelog.columns and len(gamelog) > 0:
+        dates = pd.to_datetime(gamelog[date_col], errors="coerce")
+        max_date = dates.max()
+        gamelog_max_date = max_date.date().isoformat() if pd.notna(max_date) else None
+    else:
+        gamelog_max_date = None
+    tracked = _TRACKED_STATS.get(league, {})
+    tracked_blob = json.dumps(tracked, sort_keys=True).encode("utf-8")
+    return {
+        "gamelog_max_date": gamelog_max_date,
+        "gamelog_row_count": len(gamelog),
+        "tracked_stats_hash": hashlib.sha1(tracked_blob).hexdigest(),
+        "constants": {
+            "lookback_days": LOOKBACK_DAYS,
+            "rolling_window_games": ROLLING_WINDOW_GAMES,
+            "min_overlap_for_full_weight": MIN_OVERLAP_FOR_FULL_WEIGHT,
+            "corr_magnitude_floor": CORR_MAGNITUDE_FLOOR,
+        },
+    }
+
+
+def _corr_outputs_present(league: str) -> bool:
+    """Return True when the three correlate outputs and a healthy warm-start cache exist.
+
+    "Healthy" means the intermediate cache (``training_data/{league}_corr.parquet``)
+    holds at least as many rows as the metadata's own
+    ``total_team_game_observations``. The cache isn't consumed by the outputs
+    directly, but a degenerate one (emptied by some earlier failure) can never
+    repair itself once the cache key otherwise matches -- ``correlate`` would keep
+    taking the skip path forever without ever calling ``_build_team_game_records``
+    again. Comparing against the metadata's own recorded count (rather than a bare
+    non-empty check) correctly treats "genuinely zero games ever recorded" as
+    healthy while still catching a populated cache that collapsed to fewer rows
+    than it should have.
+    """
+    league_dir = pkg_resources.files(data) / "leagues" / league.lower()
+    metadata_path = league_dir / "corr_metadata.json"
+    for name in ("corr_same_team.parquet", "corr_opposing.parquet", "corr_metadata.json"):
+        if not (league_dir / name).is_file():
+            return False
+    raw_filepath = pkg_resources.files(data) / "training_data" / f"{league}_corr.parquet"
+    if not raw_filepath.is_file():
+        return False
     try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL, text=True
-        ).strip()
-    except (subprocess.SubprocessError, FileNotFoundError):
-        return "unknown"
+        expected_rows = json.loads(metadata_path.read_text())["total_team_game_observations"]
+    except (OSError, json.JSONDecodeError, KeyError):
+        return False
+    return len(pd.read_parquet(raw_filepath)) >= expected_rows
+
+
+def _cache_key_matches(league: str, cache_key: dict) -> bool:
+    """Return True when the prior metadata's cache_key equals the current one."""
+    metadata_path = pkg_resources.files(data) / "leagues" / league.lower() / "corr_metadata.json"
+    try:
+        prior = json.loads(metadata_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return prior.get("cache_key") == cache_key
 
 
 def _residualize_gamelog(
@@ -430,6 +507,11 @@ def _residualize_gamelog(
         return gamelog.copy()
 
     out = gamelog.copy()
+    # Promote stat columns to float — residuals carry NaN (rolling-mean warmup)
+    # and NaN can't be assigned into an int column without a FutureWarning.
+    for stat in present:
+        if not pd.api.types.is_float_dtype(out[stat]):
+            out[stat] = out[stat].astype(float)
     order = out[[player_col, date_col]].astype({player_col: "string", date_col: "string"})
     sort_idx = order.sort_values([player_col, date_col], kind="stable").index
 
@@ -443,7 +525,6 @@ def _residualize_gamelog(
                 .mean()
             )
         )
-        # Align back to the original index order.
         out.loc[sort_idx, stat] = (sorted_view[stat] - prior_mean).to_numpy()
     return out
 
@@ -483,7 +564,7 @@ def _build_team_game_records(
     for gameId in tqdm(games):
         game_df = residualized.loc[residualized[log_str["game"]] == gameId]
         gameDate = datetime.fromisoformat(game_df.iloc[0][log_str["date"]])
-        if gameDate < latest_date or len(game_df[log_str["team"]].unique()) != 2:
+        if gameDate < latest_date or len(game_df[log_str["team"]].unique()) != _TEAMS_PER_GAME:
             continue
         [home_team, away_team] = tuple(
             game_df.sort_values(log_str["home"], ascending=False)[log_str["team"]].unique()
@@ -540,13 +621,13 @@ def _build_team_game_records(
 
         records.append(
             {"TEAM": home_team}
-            | {"DATE": gameDate.date()}
+            | {"DATE": gameDate}
             | homeStats
             | {"_OPP_" + k: v for k, v in awayStats.items()}
         )
         records.append(
             {"TEAM": away_team}
-            | {"DATE": gameDate.date()}
+            | {"DATE": gameDate}
             | awayStats
             | {"_OPP_" + k: v for k, v in homeStats.items()}
         )
@@ -677,10 +758,17 @@ def _stratify_team_pairs(team_corr: pd.Series) -> tuple[pd.Series, pd.Series]:
     return same, cross
 
 
-def correlate(league: str, stat_data, force: bool = False) -> None:
+def correlate(league: str, stat_data, *, force: bool = False) -> None:
     """Build stratified per-league correlation matrices and metadata sidecar.
 
-    Process per league:
+    When the prior run's outputs are present and the inputs are unchanged
+    (gamelog freshness, tracked stat schema, and module constants all
+    match the prior ``cache_key`` in ``corr_metadata.json``), the function
+    logs a "cache valid" line and returns without recomputing. Pass
+    ``force=True`` (CLI: ``--rebuild-correlations`` or ``--force``) to
+    bypass the skip.
+
+    Process per league when the cache is invalid:
 
     1. Load (or warm-start) the per-game record cache; trim to the
        ``LOOKBACK_DAYS`` window.
@@ -698,17 +786,34 @@ def correlate(league: str, stat_data, force: bool = False) -> None:
         league: One of NFL/NBA/MLB/NHL/WNBA.
         stat_data: A loaded ``Stats`` instance with ``gamelog``,
             ``log_strings``, ``profile_market``, and ``playerProfile``.
-        force: When True, rebuilds the per-game record cache from scratch
-            instead of reusing the prior run's CSV.
+        force: When True, bypasses the cache-skip check and rebuilds the
+            per-game record cache from scratch instead of reusing the prior
+            run's parquet.
     """
-    print(f"Correlating {league}...")
+    logger.info("Correlating %s...", league)
     log = stat_data
+
+    cache_key = _build_cache_key(league, log)
+    if not force and _corr_outputs_present(league) and _cache_key_matches(league, cache_key):
+        logger.info("Correlating %s... cache valid, skipped", league)
+        return
 
     training_data_dir = pkg_resources.files(data) / "training_data"
     training_data_dir.mkdir(parents=True, exist_ok=True)
-    raw_filepath = training_data_dir / f"{league}_corr.csv"
+    raw_filepath = training_data_dir / f"{league}_corr.parquet"
+
+    matrix, latest_date = _load_or_warmstart_matrix(raw_filepath, force)
+    matrix = _append_new_records(league, log, matrix, latest_date, raw_filepath)
+    matrix_for_corr = matrix.drop(columns="DATE", errors="ignore")
+
+    same_team_blocks, opposing_blocks, per_team_obs = _correlate_teams(matrix_for_corr)
+    _write_corr_outputs(league, same_team_blocks, opposing_blocks)
+    _write_corr_metadata(league, matrix, per_team_obs, cache_key)
+
+
+def _load_or_warmstart_matrix(raw_filepath, force):
     if raw_filepath.is_file() and not force:
-        matrix = pd.read_csv(raw_filepath, index_col=0)
+        matrix = pd.read_parquet(raw_filepath)
         if "DATE" in matrix.columns:
             matrix["DATE"] = pd.to_datetime(matrix["DATE"], format="mixed")
             latest_date = matrix["DATE"].max()
@@ -719,13 +824,29 @@ def correlate(league: str, stat_data, force: bool = False) -> None:
     else:
         matrix = pd.DataFrame()
         latest_date = datetime.today() - timedelta(days=LOOKBACK_DAYS)
+    return matrix, latest_date
 
+
+def _append_new_records(league, log, matrix, latest_date, raw_filepath):
+    prior_rows = len(matrix)
     new_records = _build_team_game_records(league, log, latest_date)
     matrix = pd.concat([matrix, pd.json_normalize(new_records)], ignore_index=True)
-    matrix.to_csv(raw_filepath)
+    if "DATE" in matrix.columns:
+        # Keep DATE as pandas datetime64 for stable parquet writes across
+        # pyarrow versions/environments.
+        matrix["DATE"] = pd.to_datetime(matrix["DATE"], errors="coerce")
+    if prior_rows > 0 and len(matrix) == 0:
+        logger.warning(
+            "%s: rebuild produced 0 rows (had %d) - writing anyway, investigate "
+            "_build_team_game_records",
+            league,
+            prior_rows,
+        )
+    matrix.to_parquet(raw_filepath, compression="zstd")
+    return matrix
 
-    matrix_for_corr = matrix.drop(columns="DATE", errors="ignore")
 
+def _correlate_teams(matrix_for_corr):
     same_team_blocks: dict = {}
     opposing_blocks: dict = {}
     per_team_obs: dict[str, int] = {}
@@ -736,15 +857,12 @@ def correlate(league: str, stat_data, force: bool = False) -> None:
         # Drop columns that are entirely NaN (residuals never defined for any
         # game) — they cannot contribute to a correlation estimate.
         team_matrix = team_matrix.loc[:, team_matrix.notna().any(axis=0)]
-        if team_matrix.shape[1] < 2 or len(team_matrix) < 2:
+        if team_matrix.shape[1] < _MIN_CORR_DIMENSIONS or len(team_matrix) < _MIN_CORR_DIMENSIONS:
             continue
         team_matrix = team_matrix.reindex(sorted(team_matrix.columns), axis=1)
 
         per_team_obs[str(team)] = len(team_matrix)
 
-        # Vectorized Spearman + pairwise overlap in one pass — the prior
-        # ``team_matrix.corr(method='spearman')`` was the dominant per-team
-        # cost and is numerically equivalent to this matmul formulation.
         c_spearman, overlap = _pairwise_spearman_with_overlap(team_matrix)
         c_remap = 2 * np.sin(np.pi / 6 * c_spearman)
         c_shrunk = _shrink_correlations(c_remap, overlap)
@@ -758,21 +876,58 @@ def correlate(league: str, stat_data, force: bool = False) -> None:
             same_team_blocks[team] = same
         if not opposing.empty:
             opposing_blocks[team] = opposing
+    return same_team_blocks, opposing_blocks, per_team_obs
 
-    same_path = pkg_resources.files(data) / f"{league}_corr_same_team.csv"
-    opposing_path = pkg_resources.files(data) / f"{league}_corr_opposing.csv"
+
+def _market_summary(blocks: pd.Series, scope: str) -> pd.DataFrame:
+    """Aggregate (team, market_a, market_b) → R across teams to market-pair means.
+
+    Position prefixes strip (B1.AST → AST) so the pair grid is market-level;
+    n_teams lets the dashboard filter thin pairs honestly.
+    """
+    columns = ["market_a", "market_b", "rho_mean", "n_teams", "scope"]
+    if blocks.empty:
+        return pd.DataFrame(columns=columns)
+
+    df = blocks.rename("R").reset_index()
+    df.columns = ["team", "market_a", "market_b", "R"]
+    for market_col in ("market_a", "market_b"):
+        df[market_col] = df[market_col].str.split(".").str[-1]
+    grouped = df.groupby(["market_a", "market_b"])["R"]
+    out = grouped.mean().rename("rho_mean").reset_index()
+    out["n_teams"] = grouped.size().to_numpy()
+    out["scope"] = scope
+    return out[columns]
+
+
+def _write_corr_outputs(league, same_team_blocks, opposing_blocks):
+    league_dir = pkg_resources.files(data) / "leagues" / league.lower()
+    league_dir.mkdir(parents=True, exist_ok=True)
+    same_path = league_dir / "corr_same_team.parquet"
+    opposing_path = league_dir / "corr_opposing.parquet"
+    same_series = pd.concat(same_team_blocks) if same_team_blocks else pd.Series(dtype="float64")
+    opposing_series = pd.concat(opposing_blocks) if opposing_blocks else pd.Series(dtype="float64")
     if same_team_blocks:
-        pd.concat(same_team_blocks).to_csv(same_path)
+        same_series.to_frame("R").to_parquet(same_path, compression="zstd")
     else:
-        pd.DataFrame(columns=["R"]).to_csv(same_path)
+        pd.DataFrame(columns=["R"]).to_parquet(same_path, compression="zstd")
     if opposing_blocks:
-        pd.concat(opposing_blocks).to_csv(opposing_path)
+        opposing_series.to_frame("R").to_parquet(opposing_path, compression="zstd")
     else:
-        pd.DataFrame(columns=["R"]).to_csv(opposing_path)
+        pd.DataFrame(columns=["R"]).to_parquet(opposing_path, compression="zstd")
 
-    metadata_dir = pkg_resources.files(data) / "correlations"
-    metadata_dir.mkdir(parents=True, exist_ok=True)
-    metadata_path = metadata_dir / f"{league}_corr_metadata.json"
+    parts = [
+        _market_summary(same_series, "same_team"),
+        _market_summary(opposing_series, "opposing"),
+    ]
+    non_empty = [p for p in parts if not p.empty]
+    summary = pd.concat(non_empty, ignore_index=True) if non_empty else parts[0]
+    summary.to_parquet(league_dir / "corr_market_summary.parquet", compression="zstd")
+
+
+def _write_corr_metadata(league, matrix, per_team_obs, cache_key):
+    league_dir = pkg_resources.files(data) / "leagues" / league.lower()
+    metadata_path = league_dir / "corr_metadata.json"
     dates = (
         pd.to_datetime(matrix.DATE)
         if "DATE" in matrix.columns
@@ -781,7 +936,7 @@ def correlate(league: str, stat_data, force: bool = False) -> None:
     metadata = {
         "league": league,
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        "git_sha": _git_sha(),
+        "git_sha": git_sha(),
         "lookback_days": LOOKBACK_DAYS,
         "rolling_window_games": ROLLING_WINDOW_GAMES,
         "min_overlap_for_full_weight": MIN_OVERLAP_FOR_FULL_WEIGHT,
@@ -792,6 +947,7 @@ def correlate(league: str, stat_data, force: bool = False) -> None:
         },
         "total_team_game_observations": len(matrix),
         "per_team_observations": per_team_obs,
+        "cache_key": cache_key,
     }
     with open(metadata_path, "w") as fh:
         json.dump(metadata, fh, indent=2)

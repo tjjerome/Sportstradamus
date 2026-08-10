@@ -9,14 +9,19 @@ weights machinery picks the next-freshest header on retry.
 import importlib.resources as pkg_resources
 import json
 import random
+from http import HTTPStatus
+from io import StringIO
 from time import sleep
 
 import numpy as np
+import pandas as pd
 import requests
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 from sportstradamus import creds
 from sportstradamus.spiderLogger import logger
+
+REQUEST_TIMEOUT_S = 60  # bound network hangs; generous because proxy-routed fetches legitimately take tens of seconds
 
 
 class Scrape:
@@ -31,7 +36,7 @@ class Scrape:
 
     def __init__(self):
         """Load API keys. Headers are fetched on first use."""
-        with open(pkg_resources.files(creds) / "keys.json") as f:
+        with (pkg_resources.files(creds) / "keys.json").open() as f:
             _keys = json.load(f)
         self.apikey = _keys["scrapingfish"]
         self._scrapeops_key = _keys["scrapeops"]
@@ -43,18 +48,21 @@ class Scrape:
         """Fetch the header pool from ScrapeOps on first access."""
         if self._headers is None:
             self._headers = requests.get(
-                f"http://headers.scrapeops.io/v1/browser-headers?api_key={self._scrapeops_key}"
+                f"https://headers.scrapeops.io/v1/browser-headers?api_key={self._scrapeops_key}",
+                timeout=REQUEST_TIMEOUT_S,
             ).json()["result"]
             self._header = random.choice(self._headers)
             self._weights = np.ones([len(self._headers)])
 
     @property
     def headers(self):
+        """The ScrapeOps header pool, fetched on first access."""
         self._ensure_headers()
         return self._headers
 
     @property
     def header(self):
+        """The currently active browser header."""
         self._ensure_headers()
         return self._header
 
@@ -64,6 +72,7 @@ class Scrape:
 
     @property
     def weights(self):
+        """Per-header rotation weights; a burned header decays toward zero."""
         self._ensure_headers()
         return self._weights
 
@@ -74,8 +83,8 @@ class Scrape:
     def _new_headers(self):
         """Rotate to a new header, weighted against the recently-burned one."""
         self._ensure_headers()
-        for i in range(len(self._headers)):
-            if self._headers[i] == self._header:
+        for i, candidate in enumerate(self._headers):
+            if candidate == self._header:
                 self._weights[i] = 0
             else:
                 self._weights[i] += 1
@@ -106,13 +115,40 @@ class Scrape:
                     headers.update(self.header)
                     sleep(random.uniform(1, 3))
                 try:
-                    response = requests.get(url, headers=headers, params=params)
-                    if response.status_code == 200:
+                    response = requests.get(
+                        url, headers=headers, params=params, timeout=REQUEST_TIMEOUT_S
+                    )
+                    if response.status_code == HTTPStatus.OK:
                         return response.json()
-                    else:
-                        logger.debug("Attempt " + str(i) + ", Error " + str(response.status_code))
+                    logger.debug(f"Attempt {i}, Error {response.status_code}")
                 except Exception:
-                    logger.exception("Attempt " + str(i) + ",")
+                    logger.exception(f"Attempt {i},")
 
             logger.warning("Max Attempts Reached")
             return {}
+
+    def get_csv(self, url, max_attempts=3):
+        """GET a CSV endpoint with header rotation, returning a DataFrame.
+
+        Hosts like moneypuck answer the default requests UA with an HTML
+        "data license" bot-block page (HTTP 200) but return the real CSV to a
+        rotated browser header, so an HTML content-type is treated as a soft
+        block and retried. Returns an empty frame once retries are exhausted;
+        callers treat the empty frame as "no data".
+        """
+        with logging_redirect_tqdm():
+            for i in range(1, max_attempts + 1):
+                if i > 1:
+                    self._new_headers()
+                    sleep(random.uniform(1, 3))
+                try:
+                    response = requests.get(url, headers=self.header, timeout=REQUEST_TIMEOUT_S)
+                    content_type = response.headers.get("content-type", "")
+                    if response.status_code == HTTPStatus.OK and "html" not in content_type.lower():
+                        return pd.read_csv(StringIO(response.text))
+                    logger.debug(f"Attempt {i}, CSV block status={response.status_code}")
+                except Exception:
+                    logger.exception(f"Attempt {i},")
+
+            logger.warning(f"Max Attempts Reached (csv): {url}")
+            return pd.DataFrame()

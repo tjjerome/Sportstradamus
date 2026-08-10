@@ -257,7 +257,7 @@ Not pursued further — user prefers root cause fix over post-hoc correction.
 ## 7. Root Cause: Gradient Boosting Shrinkage
 
 LightGBMLSS initializes each training observation with per-observation start values from
-`MeanYr` and `STDYr` (see `helpers.py:set_model_start_values`). The boosted trees learn
+`MeanYr` and `STDYr` (see `helpers/distributions.py:set_model_start_values`). The boosted trees learn
 **residuals in pre-response-function space** added to those start values.
 
 Regularization compresses residuals toward zero:
@@ -287,7 +287,7 @@ This removes scale dependence entirely. The target range becomes ~0.3–3.0 for 
 instead of 0–30+. The compression would still occur, but a 50% compression of a 0.3–3.0
 target is far less damaging than a 50% compression of a 5–22 target.
 
-Implementation: in `train.py`, before building `dtrain`:
+Implementation: in `training/pipeline.py`, before building `dtrain`:
 ```python
 y_train_labels_raw = y_train_labels.copy()
 mean_yr_train = X_train['MeanYr'].values

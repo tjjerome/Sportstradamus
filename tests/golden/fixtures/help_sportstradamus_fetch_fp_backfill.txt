@@ -1,0 +1,39 @@
+Usage: sportstradamus fetch fp backfill [OPTIONS]
+
+  Iterate (season, week) pairs and write per-tool parquets for each.
+
+  Designed for an overnight one-time grab. Pacing is conservative by default
+  (short pause between endpoints, longer on a week transition); override via the
+  ``--request-pause-*`` / ``--week-pause-*`` flags.
+
+Options:
+  --start-season INTEGER          First season to fetch (inclusive).  [required]
+  --end-season INTEGER            Last season to fetch (inclusive).  [required]
+  --start-week INTEGER            First week of each season.  [default: 1]
+  --end-week INTEGER              Last week of each season.  [default: 18]
+  --only TEXT                     Only fetch these endpoint names (repeatable).
+  --dry-run                       Print the total call count and exit without
+                                  fetching.
+  --request-pause-min FLOAT       Min seconds (random uniform) between endpoints
+                                  in the same week.  [default: 2.0]
+  --request-pause-max FLOAT       Max seconds (random uniform) between endpoints
+                                  in the same week.  [default: 8.0]
+  --week-pause-min FLOAT          Min seconds (random uniform) when
+                                  transitioning to a new week.  [default: 8.0]
+  --week-pause-max FLOAT          Max seconds (random uniform) when
+                                  transitioning to a new week.  [default: 28.0]
+  --mode [weekly|season_to_date|postseason]
+                                  Aggregation mode for this fetch.  [default:
+                                  weekly]
+  --no-cache                      Same as ``run --no-cache`` — bypass the
+                                  server-side cache.
+  --refetch                       Re-download even if a non-empty parquet
+                                  already exists for a given cell. Default is to
+                                  skip — useful for resuming a backfill that
+                                  stopped midway. Zero-row parquets are always
+                                  re-fetched.
+  --catalog FILE                  Override catalog path (default: bundled
+                                  config).
+  --log-level [DEBUG|INFO|WARNING|ERROR]
+                                  Verbosity for the structured JSONL log.
+  --help                          Show this message and exit.

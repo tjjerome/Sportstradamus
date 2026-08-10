@@ -1,0 +1,1966 @@
+{
+  "version": 2,
+  "tuning": {
+    "cluster_rho": 0.35,
+    "hub_top_share": 0.3,
+    "twin_cross_share": 0.25,
+    "chain_mean_degree": 2.3,
+    "chain_diameter_frac": 0.5,
+    "mesh_density": 0.45,
+    "min_shape_nodes": 3,
+    "variety_lambda": 0.5,
+    "league_affinity": 1
+  },
+  "templates": {
+    "the-hoop": {
+      "label": "The Hoop",
+      "leagues": ["NBA", "WNBA"],
+      "topology": {"primary": "mesh", "secondary": ["hub"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": -0.95, "y": 0.55, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.6, "y": 0.8, "side": "L", "prominence": 3},
+        {"id": 2, "x": -0.25, "y": 0.9, "side": "L", "prominence": 2},
+        {"id": 3, "x": 0.25, "y": 0.9, "side": "R", "prominence": 2},
+        {"id": 4, "x": 0.6, "y": 0.8, "side": "R", "prominence": 3},
+        {"id": 5, "x": 0.95, "y": 0.55, "side": "R", "prominence": 1},
+        {"id": 6, "x": -0.45, "y": 0.1, "side": "L", "prominence": 4},
+        {"id": 7, "x": 0.45, "y": 0.1, "side": "R", "prominence": 4},
+        {"id": 8, "x": -0.3, "y": -0.55, "side": "L", "prominence": 5},
+        {"id": 9, "x": 0.3, "y": -0.55, "side": "R", "prominence": 5},
+        {"id": 10, "x": 0, "y": -0.85, "side": "C", "prominence": 6}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [6, 8], [8, 10], [10, 9], [9, 7], [6, 7]],
+      "silhouette": "M -0.95 0.55 C -0.95 0.7819 -0.5247 0.97 0 0.97 C 0.5247 0.97 0.95 0.7819 0.95 0.55 L 0.45 0.10 L 0.30 -0.85 L -0.30 -0.85 L -0.45 0.10 Z"
+    },
+    "the-goalposts": {
+      "label": "The Goalposts",
+      "leagues": ["NFL"],
+      "topology": {"primary": "twin", "secondary": []},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": 0, "y": -0.9, "side": "C", "prominence": 4},
+        {"id": 1, "x": 0, "y": -0.35, "side": "C", "prominence": 5},
+        {"id": 2, "x": -0.75, "y": -0.2, "side": "L", "prominence": 2},
+        {"id": 3, "x": 0.75, "y": -0.2, "side": "R", "prominence": 2},
+        {"id": 4, "x": -0.75, "y": 0.85, "side": "L", "prominence": 1},
+        {"id": 5, "x": 0.75, "y": 0.85, "side": "R", "prominence": 1},
+        {"id": 6, "x": -0.75, "y": 0.35, "side": "L", "prominence": 3},
+        {"id": 7, "x": 0.75, "y": 0.35, "side": "R", "prominence": 3}
+      ],
+      "outline": [[0, 1], [1, 2], [1, 3], [2, 6], [6, 4], [3, 7], [7, 5]],
+      "silhouette": "M -0.06 -0.9 L 0.06 -0.9 L 0.06 -0.4 L 0.78 -0.26 L 0.78 0.85 L 0.66 0.85 L 0.66 -0.14 L 0.06 -0.28 L -0.06 -0.28 L -0.66 -0.14 L -0.66 0.85 L -0.78 0.85 L -0.78 -0.26 L -0.06 -0.4 Z"
+    },
+    "the-hourglass": {
+      "label": "The Hourglass",
+      "leagues": "all",
+      "topology": {"primary": "twin", "secondary": ["chain"]},
+      "min_nodes": 2,
+      "vertices": [
+        {"id": 0, "x": -0.7, "y": 0.85, "side": "L", "prominence": 1},
+        {"id": 1, "x": 0.7, "y": 0.85, "side": "R", "prominence": 1},
+        {"id": 2, "x": 0, "y": 0.05, "side": "C", "prominence": 3},
+        {"id": 3, "x": -0.7, "y": -0.85, "side": "L", "prominence": 2},
+        {"id": 4, "x": 0.7, "y": -0.85, "side": "R", "prominence": 2}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 4], [4, 3], [3, 2], [2, 0]],
+      "silhouette": "M -0.7 0.85 L 0.7 0.85 L 0.05 0.05 L 0.7 -0.85 L -0.7 -0.85 L -0.05 0.05 Z"
+    },
+    "the-medal": {
+      "label": "The Medal",
+      "leagues": "all",
+      "topology": {"primary": "hub", "secondary": ["mesh"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": -0.28, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.5, "y": 0.88, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.5, "y": 0.88, "side": "R", "prominence": 2},
+        {"id": 3, "x": 0, "y": 0.32, "side": "C", "prominence": 3},
+        {"id": 4, "x": -0.52, "y": 0.02, "side": "L", "prominence": 4},
+        {"id": 5, "x": 0.52, "y": 0.02, "side": "R", "prominence": 4},
+        {"id": 6, "x": -0.52, "y": -0.58, "side": "L", "prominence": 5},
+        {"id": 7, "x": 0.52, "y": -0.58, "side": "R", "prominence": 5},
+        {"id": 8, "x": 0, "y": -0.88, "side": "C", "prominence": 6},
+        {"id": 9, "x": -0.17, "y": 0.26, "side": "L", "prominence": 7},
+        {"id": 10, "x": 0.17, "y": 0.26, "side": "R", "prominence": 7}
+      ],
+      "outline": [[0, 3], [0, 4], [0, 5], [0, 6], [0, 7], [0, 8], [1, 9], [9, 3], [2, 10], [10, 3]],
+      "silhouette": "M -0.6 -0.28 C -0.6 -0.6114 -0.3314 -0.88 0 -0.88 C 0.3314 -0.88 0.6 -0.6114 0.6 -0.28 C 0.6 0.0514 0.3314 0.32 0 0.32 C -0.3314 0.32 -0.6 0.0514 -0.6 -0.28 Z M -0.5 0.88 L -0.17 0.26 L 0.17 0.26 L 0.5 0.88 Z"
+    },
+    "the-bolt": {
+      "label": "The Bolt",
+      "leagues": "all",
+      "topology": {"primary": "chain", "secondary": []},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.8, "y": 0.9, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.3, "y": 0.45, "side": "L", "prominence": 3},
+        {"id": 2, "x": -0.45, "y": 0.2, "side": "L", "prominence": 5},
+        {"id": 3, "x": 0.15, "y": -0.15, "side": "R", "prominence": 4},
+        {"id": 4, "x": 0, "y": -0.4, "side": "C", "prominence": 6},
+        {"id": 5, "x": 0.75, "y": -0.9, "side": "R", "prominence": 2}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]],
+      "silhouette": "M -0.86 0.9 L -0.04 0.34 L -0.3 0.02 L 0.86 -0.9 L 0.16 -0.24 L 0.42 0.1 Z"
+    },
+    "the-crown": {
+      "label": "The Crown",
+      "leagues": "all",
+      "topology": {"primary": "hub", "secondary": ["twin"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": -0.2, "side": "C", "prominence": 1},
+        {"id": 1, "x": 0, "y": 0.85, "side": "C", "prominence": 2},
+        {"id": 2, "x": -0.75, "y": 0.62, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0.75, "y": 0.62, "side": "R", "prominence": 3},
+        {"id": 4, "x": -0.38, "y": 0.18, "side": "L", "prominence": 4},
+        {"id": 5, "x": 0.38, "y": 0.18, "side": "R", "prominence": 4},
+        {"id": 6, "x": -0.75, "y": -0.2, "side": "L", "prominence": 5},
+        {"id": 7, "x": 0.75, "y": -0.2, "side": "R", "prominence": 5},
+        {"id": 8, "x": -0.38, "y": -0.2, "side": "L", "prominence": 6},
+        {"id": 9, "x": 0.38, "y": -0.2, "side": "R", "prominence": 6},
+        {"id": 10, "x": 0, "y": -0.62, "side": "C", "prominence": 7}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 8], [0, 9], [0, 10], [6, 8], [7, 9]],
+      "silhouette": "M -0.75 -0.62 L 0.75 -0.62 L 0.75 0.62 L 0.38 0.18 L 0 0.85 L -0.38 0.18 L -0.75 0.62 Z"
+    },
+    "the-torch": {
+      "label": "The Torch",
+      "leagues": "all",
+      "topology": {"primary": "hub", "secondary": ["chain"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0.05, "side": "C", "prominence": 1},
+        {"id": 1, "x": 0, "y": 0.9, "side": "C", "prominence": 2},
+        {"id": 2, "x": -0.44, "y": 0.56, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0.44, "y": 0.56, "side": "R", "prominence": 3},
+        {"id": 4, "x": -0.52, "y": 0.02, "side": "L", "prominence": 4},
+        {"id": 5, "x": 0.52, "y": 0.02, "side": "R", "prominence": 4},
+        {"id": 6, "x": -0.34, "y": -0.42, "side": "L", "prominence": 5},
+        {"id": 7, "x": 0.34, "y": -0.42, "side": "R", "prominence": 5},
+        {"id": 8, "x": 0, "y": -0.66, "side": "C", "prominence": 6},
+        {"id": 9, "x": 0, "y": -0.9, "side": "C", "prominence": 7}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7], [6, 8], [7, 8], [8, 9]],
+      "silhouette": "M 0 0.9 C 0.04 0.42 0.52 0.32 0.52 0 C 0.52 -0.3 0.3 -0.5 0 -0.5 C -0.3 -0.5 -0.52 -0.3 -0.52 0 C -0.52 0.32 -0.04 0.42 0 0.9 Z M -0.16 -0.46 L 0.16 -0.46 L 0.11 -0.9 L -0.11 -0.9 Z"
+    },
+    "the-umbrella": {
+      "label": "The Umbrella",
+      "leagues": "all",
+      "topology": {"primary": "hub", "secondary": ["twin"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0.8, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.9, "y": 0.12, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.9, "y": 0.12, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.48, "y": -0.04, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.48, "y": -0.04, "side": "R", "prominence": 3},
+        {"id": 5, "x": 0, "y": 0.06, "side": "C", "prominence": 4},
+        {"id": 6, "x": 0, "y": -0.32, "side": "C", "prominence": 5},
+        {"id": 7, "x": 0, "y": -0.66, "side": "C", "prominence": 6},
+        {"id": 8, "x": 0.34, "y": -0.86, "side": "R", "prominence": 7}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [1, 3], [3, 5], [5, 4], [4, 2], [5, 6], [6, 7], [7, 8]],
+      "silhouette": "M -0.9 0.12 C -0.9 0.52 -0.5 0.82 0 0.82 C 0.5 0.82 0.9 0.52 0.9 0.12 L 0.48 -0.04 L 0 0.06 L -0.48 -0.04 Z M -0.06 0.06 L 0.06 0.06 L 0.06 -0.74 L 0.34 -0.74 L 0.34 -0.86 L -0.06 -0.86 Z"
+    },
+    "the-firework": {
+      "label": "The Firework",
+      "leagues": "all",
+      "topology": {"primary": "hub", "secondary": ["mesh"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0.18, "side": "C", "prominence": 1},
+        {"id": 1, "x": 0, "y": 0.88, "side": "C", "prominence": 2},
+        {"id": 2, "x": -0.7, "y": 0.18, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0.7, "y": 0.18, "side": "R", "prominence": 3},
+        {"id": 4, "x": -0.5, "y": 0.68, "side": "L", "prominence": 4},
+        {"id": 5, "x": 0.5, "y": 0.68, "side": "R", "prominence": 4},
+        {"id": 6, "x": -0.5, "y": -0.32, "side": "L", "prominence": 5},
+        {"id": 7, "x": 0.5, "y": -0.32, "side": "R", "prominence": 5},
+        {"id": 8, "x": 0, "y": -0.52, "side": "C", "prominence": 6},
+        {"id": 9, "x": -0.22, "y": -0.88, "side": "L", "prominence": 7}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7], [0, 8], [8, 9]],
+      "silhouette": "M 0 0.88 C 0.08 0.36 0.24 0.24 0.70 0.18 C 0.24 0.12 0.08 0 0 -0.52 C -0.08 0 -0.24 0.12 -0.70 0.18 C -0.24 0.24 -0.08 0.36 0 0.88 Z"
+    },
+    "the-spotlight": {
+      "label": "The Spotlight",
+      "leagues": "all",
+      "topology": {"primary": "hub", "secondary": ["twin"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.1, "y": 0.62, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.86, "y": -0.8, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.42, "y": -0.86, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0.06, "y": -0.88, "side": "C", "prominence": 4},
+        {"id": 4, "x": 0.52, "y": -0.82, "side": "R", "prominence": 3},
+        {"id": 5, "x": 0.88, "y": -0.66, "side": "R", "prominence": 2},
+        {"id": 6, "x": -0.56, "y": 0.9, "side": "L", "prominence": 5},
+        {"id": 7, "x": 0.36, "y": 0.9, "side": "R", "prominence": 5},
+        {"id": 8, "x": -0.56, "y": 0.66, "side": "L", "prominence": 6},
+        {"id": 9, "x": 0.36, "y": 0.66, "side": "R", "prominence": 6}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [6, 7], [7, 9], [9, 8], [8, 6]],
+      "silhouette": "M -0.52 0.66 L -0.86 -0.88 L 0.88 -0.88 L 0.32 0.66 Z M -0.6 0.64 L 0.4 0.64 L 0.4 0.92 L -0.6 0.92 Z"
+    },
+    "the-shuttlecock": {
+      "label": "The Shuttlecock",
+      "leagues": "all",
+      "topology": {"primary": "hub", "secondary": ["chain"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": -0.52, "side": "C", "prominence": 1},
+        {"id": 1, "x": 0, "y": 0.86, "side": "C", "prominence": 2},
+        {"id": 2, "x": -0.78, "y": 0.72, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0.78, "y": 0.72, "side": "R", "prominence": 3},
+        {"id": 4, "x": -0.4, "y": 0.82, "side": "L", "prominence": 4},
+        {"id": 5, "x": 0.4, "y": 0.82, "side": "R", "prominence": 4},
+        {"id": 6, "x": -0.34, "y": 0.06, "side": "L", "prominence": 5},
+        {"id": 7, "x": 0.34, "y": 0.06, "side": "R", "prominence": 5},
+        {"id": 8, "x": -0.3, "y": -0.66, "side": "L", "prominence": 6},
+        {"id": 9, "x": 0.3, "y": -0.66, "side": "R", "prominence": 6}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7], [2, 4], [4, 1], [1, 5], [5, 3]],
+      "silhouette": "M -0.30 -0.66 C -0.30 -0.86 0.30 -0.86 0.30 -0.66 L 0.78 0.72 C 0.40 0.90 -0.40 0.90 -0.78 0.72 Z"
+    },
+    "the-arrow": {
+      "label": "The Arrow",
+      "leagues": "all",
+      "topology": {"primary": "chain", "secondary": ["twin"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.88, "y": -0.72, "side": "L", "prominence": 2},
+        {"id": 1, "x": -0.56, "y": -0.46, "side": "L", "prominence": 4},
+        {"id": 2, "x": -0.2, "y": -0.16, "side": "L", "prominence": 5},
+        {"id": 3, "x": 0.18, "y": 0.14, "side": "R", "prominence": 5},
+        {"id": 4, "x": 0.54, "y": 0.44, "side": "R", "prominence": 3},
+        {"id": 5, "x": 0.88, "y": 0.72, "side": "R", "prominence": 1},
+        {"id": 6, "x": -0.86, "y": -0.34, "side": "L", "prominence": 6},
+        {"id": 7, "x": -0.5, "y": -0.82, "side": "L", "prominence": 6},
+        {"id": 8, "x": 0.36, "y": 0.86, "side": "R", "prominence": 7},
+        {"id": 9, "x": 0.86, "y": 0.24, "side": "R", "prominence": 7}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [0, 6], [0, 7], [5, 8], [5, 9]],
+      "silhouette": "M -0.9 -0.5 L -0.66 -0.84 L 0.62 0.3 L 0.4 0.62 Z M 0.94 0.82 L 0.1 0.86 L 0.9 -0.04 Z"
+    },
+    "the-oar": {
+      "label": "The Oar",
+      "leagues": "all",
+      "topology": {"primary": "chain", "secondary": ["twin"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.72, "y": 0.78, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.86, "y": 0.4, "side": "L", "prominence": 3},
+        {"id": 2, "x": -0.46, "y": 0.44, "side": "L", "prominence": 3},
+        {"id": 3, "x": -0.3, "y": 0.14, "side": "L", "prominence": 2},
+        {"id": 4, "x": 0.06, "y": -0.16, "side": "C", "prominence": 4},
+        {"id": 5, "x": 0.42, "y": -0.46, "side": "R", "prominence": 5},
+        {"id": 6, "x": 0.78, "y": -0.76, "side": "R", "prominence": 2},
+        {"id": 7, "x": 0.88, "y": -0.5, "side": "R", "prominence": 6}
+      ],
+      "outline": [[0, 1], [0, 2], [1, 3], [2, 3], [3, 4], [4, 5], [5, 6], [6, 7]],
+      "silhouette": "M -0.74 0.86 C -1 0.6 -0.98 0.2 -0.68 0.04 C -0.36 0.24 -0.34 0.66 -0.74 0.86 Z M -0.66 0 L -0.44 0.2 L 0.9 -0.66 L 0.7 -0.88 Z"
+    },
+    "the-comet": {
+      "label": "The Comet",
+      "leagues": "all",
+      "topology": {"primary": "chain", "secondary": ["hub"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": 0.72, "y": 0.68, "side": "R", "prominence": 1},
+        {"id": 1, "x": 0.4, "y": 0.42, "side": "R", "prominence": 2},
+        {"id": 2, "x": 0.06, "y": 0.14, "side": "C", "prominence": 3},
+        {"id": 3, "x": -0.28, "y": -0.14, "side": "L", "prominence": 4},
+        {"id": 4, "x": -0.6, "y": -0.42, "side": "L", "prominence": 5},
+        {"id": 5, "x": -0.88, "y": -0.7, "side": "L", "prominence": 6},
+        {"id": 6, "x": -0.72, "y": -0.14, "side": "L", "prominence": 7},
+        {"id": 7, "x": -0.44, "y": -0.72, "side": "L", "prominence": 7},
+        {"id": 8, "x": 0.88, "y": 0.34, "side": "R", "prominence": 8},
+        {"id": 9, "x": 0.42, "y": 0.86, "side": "R", "prominence": 8}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [2, 6], [2, 7], [0, 8], [0, 9]],
+      "silhouette": "M 0.9 0.66 C 0.9 0.92 0.5 0.92 0.5 0.66 C 0.5 0.4 0.9 0.4 0.9 0.66 Z M 0.9 0.9 L -0.88 -0.72 L 0.34 0.36 Z"
+    },
+    "the-pennant": {
+      "label": "The Pennant",
+      "leagues": "all",
+      "topology": {"primary": "chain", "secondary": ["twin"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.72, "y": 0.82, "side": "L", "prominence": 2},
+        {"id": 1, "x": -0.72, "y": 0.3, "side": "L", "prominence": 3},
+        {"id": 2, "x": -0.72, "y": -0.24, "side": "L", "prominence": 4},
+        {"id": 3, "x": -0.72, "y": -0.86, "side": "L", "prominence": 5},
+        {"id": 4, "x": 0.86, "y": 0.34, "side": "R", "prominence": 1},
+        {"id": 5, "x": 0.2, "y": 0.62, "side": "R", "prominence": 3},
+        {"id": 6, "x": 0.2, "y": 0.06, "side": "R", "prominence": 4},
+        {"id": 7, "x": -0.24, "y": 0.74, "side": "C", "prominence": 6},
+        {"id": 8, "x": -0.24, "y": 0.14, "side": "C", "prominence": 6}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [0, 7], [7, 5], [5, 4], [4, 6], [6, 8], [8, 1]],
+      "silhouette": "M -0.78 0.88 L -0.66 0.88 L -0.66 -0.86 L -0.78 -0.86 Z M -0.66 0.82 L 0.88 0.34 L -0.66 0.08 Z"
+    },
+    "the-ladder": {
+      "label": "The Ladder",
+      "leagues": "all",
+      "topology": {"primary": "chain", "secondary": ["mesh"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": -0.86, "y": -0.72, "side": "L", "prominence": 3},
+        {"id": 1, "x": -0.56, "y": -0.86, "side": "L", "prominence": 3},
+        {"id": 2, "x": -0.48, "y": -0.3, "side": "L", "prominence": 2},
+        {"id": 3, "x": -0.18, "y": -0.44, "side": "L", "prominence": 2},
+        {"id": 4, "x": -0.06, "y": 0.14, "side": "C", "prominence": 1},
+        {"id": 5, "x": 0.24, "y": 0, "side": "C", "prominence": 1},
+        {"id": 6, "x": 0.3, "y": 0.56, "side": "R", "prominence": 4},
+        {"id": 7, "x": 0.6, "y": 0.42, "side": "R", "prominence": 4},
+        {"id": 8, "x": 0.62, "y": 0.88, "side": "R", "prominence": 5},
+        {"id": 9, "x": 0.88, "y": 0.66, "side": "R", "prominence": 5}
+      ],
+      "outline": [[0, 2], [2, 4], [4, 6], [6, 8], [1, 3], [3, 5], [5, 7], [7, 9], [0, 1], [2, 3], [4, 5], [6, 7], [8, 9]],
+      "silhouette": "M -0.9 -0.66 L -0.52 -0.92 L 0.92 0.6 L 0.56 0.9 Z"
+    },
+    "the-ski": {
+      "label": "The Ski",
+      "leagues": "all",
+      "topology": {"primary": "chain", "secondary": ["twin"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.84, "y": -0.3, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.58, "y": -0.44, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.22, "y": -0.24, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0.14, "y": -0.02, "side": "C", "prominence": 4},
+        {"id": 4, "x": 0.5, "y": 0.22, "side": "R", "prominence": 3},
+        {"id": 5, "x": 0.86, "y": 0.48, "side": "R", "prominence": 2},
+        {"id": 6, "x": -0.04, "y": 0.24, "side": "C", "prominence": 5},
+        {"id": 7, "x": 0.24, "y": 0.42, "side": "R", "prominence": 6},
+        {"id": 8, "x": -0.62, "y": 0.72, "side": "L", "prominence": 5},
+        {"id": 9, "x": -0.3, "y": -0.62, "side": "L", "prominence": 6}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [3, 6], [6, 7], [8, 9]],
+      "silhouette": "M -0.86 -0.24 C -1 -0.5 -0.88 -0.72 -0.62 -0.72 L 0.9 0.34 L 0.76 0.6 L -0.62 -0.4 C -0.72 -0.4 -0.76 -0.32 -0.72 -0.22 Z M -0.72 0.78 L -0.52 0.72 L -0.2 -0.56 L -0.4 -0.62 Z"
+    },
+    "the-scales": {
+      "label": "The Scales",
+      "leagues": "all",
+      "topology": {"primary": "twin", "secondary": ["hub"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0.62, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.82, "y": 0.34, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.82, "y": 0.34, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.82, "y": -0.3, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.82, "y": -0.3, "side": "R", "prominence": 3},
+        {"id": 5, "x": -0.5, "y": -0.42, "side": "L", "prominence": 5},
+        {"id": 6, "x": 0.5, "y": -0.42, "side": "R", "prominence": 5},
+        {"id": 7, "x": -1, "y": -0.42, "side": "L", "prominence": 5},
+        {"id": 8, "x": 1, "y": -0.42, "side": "R", "prominence": 5},
+        {"id": 9, "x": 0, "y": -0.04, "side": "C", "prominence": 4},
+        {"id": 10, "x": 0, "y": -0.72, "side": "C", "prominence": 6}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 9], [9, 10], [1, 3], [2, 4], [3, 5], [3, 7], [4, 6], [4, 8], [5, 7], [6, 8]],
+      "silhouette": "M -0.86 0.28 L 0.86 0.28 L 0.86 0.42 L -0.86 0.42 Z M -0.08 0.4 L 0.08 0.4 L 0.08 -0.66 L -0.08 -0.66 Z M -0.4 -0.9 L 0.4 -0.9 L 0.24 -0.7 L -0.24 -0.7 Z"
+    },
+    "the-wings": {
+      "label": "The Wings",
+      "leagues": "all",
+      "topology": {"primary": "twin", "secondary": ["chain"]},
+      "min_nodes": 2,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0.1, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.4, "y": 0.42, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.4, "y": 0.42, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.74, "y": 0.4, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.74, "y": 0.4, "side": "R", "prominence": 3},
+        {"id": 5, "x": -0.98, "y": 0.12, "side": "L", "prominence": 4},
+        {"id": 6, "x": 0.98, "y": 0.12, "side": "R", "prominence": 4},
+        {"id": 7, "x": -0.66, "y": -0.2, "side": "L", "prominence": 5},
+        {"id": 8, "x": 0.66, "y": -0.2, "side": "R", "prominence": 5},
+        {"id": 9, "x": -0.3, "y": -0.38, "side": "L", "prominence": 6},
+        {"id": 10, "x": 0.3, "y": -0.38, "side": "R", "prominence": 6},
+        {"id": 11, "x": 0, "y": -0.72, "side": "C", "prominence": 7}
+      ],
+      "outline": [[0, 1], [0, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 7], [6, 8], [7, 9], [8, 10], [9, 0], [10, 0], [0, 11]],
+      "silhouette": "M 0 0.24 C -0.3 0.54 -0.76 0.56 -0.98 0.12 C -0.86 -0.14 -0.5 -0.36 0 -0.34 Z M 0 0.24 C 0.3 0.54 0.76 0.56 0.98 0.12 C 0.86 -0.14 0.5 -0.36 0 -0.34 Z M -0.14 0.1 L 0.14 0.1 L 0.08 -0.78 L -0.08 -0.78 Z"
+    },
+    "the-laurels": {
+      "label": "The Laurels",
+      "leagues": "all",
+      "topology": {"primary": "twin", "secondary": ["chain"]},
+      "min_nodes": 2,
+      "vertices": [
+        {"id": 0, "x": 0, "y": -0.78, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.52, "y": -0.62, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.52, "y": -0.62, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.86, "y": -0.14, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.86, "y": -0.14, "side": "R", "prominence": 3},
+        {"id": 5, "x": -0.82, "y": 0.44, "side": "L", "prominence": 4},
+        {"id": 6, "x": 0.82, "y": 0.44, "side": "R", "prominence": 4},
+        {"id": 7, "x": -0.46, "y": 0.82, "side": "L", "prominence": 5},
+        {"id": 8, "x": 0.46, "y": 0.82, "side": "R", "prominence": 5},
+        {"id": 9, "x": 0, "y": 0.6, "side": "C", "prominence": 6}
+      ],
+      "outline": [[0, 1], [0, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 7], [6, 8]],
+      "silhouette": "M 0 -0.82 C -0.62 -0.7 -1 -0.26 -0.94 0.34 C -0.88 0.76 -0.66 0.9 -0.42 0.86 C -0.66 0.5 -0.74 0.02 -0.6 -0.4 C -0.44 -0.62 -0.2 -0.72 0 -0.7 Z M 0 -0.82 C 0.62 -0.7 1 -0.26 0.94 0.34 C 0.88 0.76 0.66 0.9 0.42 0.86 C 0.66 0.5 0.74 0.02 0.6 -0.4 C 0.44 -0.62 0.2 -0.72 0 -0.7 Z"
+    },
+    "the-hurdle": {
+      "label": "The Hurdle",
+      "leagues": "all",
+      "topology": {"primary": "twin", "secondary": ["mesh"]},
+      "min_nodes": 2,
+      "vertices": [
+        {"id": 0, "x": -0.72, "y": 0.66, "side": "L", "prominence": 1},
+        {"id": 1, "x": 0.72, "y": 0.66, "side": "R", "prominence": 1},
+        {"id": 2, "x": -0.72, "y": 0.06, "side": "L", "prominence": 2},
+        {"id": 3, "x": 0.72, "y": 0.06, "side": "R", "prominence": 2},
+        {"id": 4, "x": -0.72, "y": -0.5, "side": "L", "prominence": 3},
+        {"id": 5, "x": 0.72, "y": -0.5, "side": "R", "prominence": 3},
+        {"id": 6, "x": -0.96, "y": -0.82, "side": "L", "prominence": 4},
+        {"id": 7, "x": 0.96, "y": -0.82, "side": "R", "prominence": 4},
+        {"id": 8, "x": -0.48, "y": -0.82, "side": "L", "prominence": 5},
+        {"id": 9, "x": 0.48, "y": -0.82, "side": "R", "prominence": 5},
+        {"id": 10, "x": 0, "y": 0.66, "side": "C", "prominence": 6},
+        {"id": 11, "x": 0, "y": 0.06, "side": "C", "prominence": 7}
+      ],
+      "outline": [[0, 10], [10, 1], [2, 11], [11, 3], [0, 2], [2, 4], [1, 3], [3, 5], [4, 6], [4, 8], [5, 7], [5, 9]],
+      "silhouette": "M -0.78 0.74 L 0.78 0.74 L 0.78 0.56 L -0.78 0.56 Z M -0.78 0.14 L 0.78 0.14 L 0.78 -0.02 L -0.78 -0.02 Z M -0.8 0.66 L -0.64 0.66 L -0.42 -0.86 L -0.58 -0.86 Z M 0.8 0.66 L 0.64 0.66 L 0.42 -0.86 L 0.58 -0.86 Z"
+    },
+    "the-gloves": {
+      "label": "The Gloves",
+      "leagues": "all",
+      "topology": {"primary": "twin", "secondary": ["hub"]},
+      "min_nodes": 2,
+      "vertices": [
+        {"id": 0, "x": -0.56, "y": 0.3, "side": "L", "prominence": 1},
+        {"id": 1, "x": 0.56, "y": 0.3, "side": "R", "prominence": 1},
+        {"id": 2, "x": -0.94, "y": 0.06, "side": "L", "prominence": 2},
+        {"id": 3, "x": 0.94, "y": 0.06, "side": "R", "prominence": 2},
+        {"id": 4, "x": -0.58, "y": -0.36, "side": "L", "prominence": 3},
+        {"id": 5, "x": 0.58, "y": -0.36, "side": "R", "prominence": 3},
+        {"id": 6, "x": -0.18, "y": 0, "side": "C", "prominence": 4},
+        {"id": 7, "x": 0.18, "y": 0, "side": "C", "prominence": 4},
+        {"id": 8, "x": -0.32, "y": -0.78, "side": "L", "prominence": 5},
+        {"id": 9, "x": 0.32, "y": -0.78, "side": "R", "prominence": 5}
+      ],
+      "outline": [[0, 2], [2, 4], [4, 6], [6, 0], [1, 3], [3, 5], [5, 7], [7, 1], [4, 8], [5, 9]],
+      "silhouette": "M -0.2 0.34 C -0.5 0.74 -1 0.6 -0.98 0.12 C -0.96 -0.26 -0.7 -0.5 -0.4 -0.44 L -0.2 -0.72 L -0.16 0.1 Z M 0.2 0.34 C 0.5 0.74 1 0.6 0.98 0.12 C 0.96 -0.26 0.7 -0.5 0.4 -0.44 L 0.2 -0.72 L 0.16 0.1 Z"
+    },
+    "the-binoculars": {
+      "label": "The Binoculars",
+      "leagues": "all",
+      "topology": {"primary": "twin", "secondary": ["mesh"]},
+      "min_nodes": 2,
+      "vertices": [
+        {"id": 0, "x": -0.62, "y": 0.72, "side": "L", "prominence": 1},
+        {"id": 1, "x": 0.62, "y": 0.72, "side": "R", "prominence": 1},
+        {"id": 2, "x": -0.96, "y": 0.36, "side": "L", "prominence": 2},
+        {"id": 3, "x": 0.96, "y": 0.36, "side": "R", "prominence": 2},
+        {"id": 4, "x": -0.62, "y": -0.78, "side": "L", "prominence": 3},
+        {"id": 5, "x": 0.62, "y": -0.78, "side": "R", "prominence": 3},
+        {"id": 6, "x": -0.28, "y": 0.36, "side": "L", "prominence": 4},
+        {"id": 7, "x": 0.28, "y": 0.36, "side": "R", "prominence": 4},
+        {"id": 8, "x": -0.28, "y": -0.42, "side": "L", "prominence": 5},
+        {"id": 9, "x": 0.28, "y": -0.42, "side": "R", "prominence": 5},
+        {"id": 10, "x": 0, "y": 0.1, "side": "C", "prominence": 6}
+      ],
+      "outline": [[0, 2], [2, 4], [4, 8], [8, 6], [6, 0], [1, 3], [3, 5], [5, 9], [9, 7], [7, 1], [6, 10], [10, 7]],
+      "silhouette": "M -0.96 0.36 L -0.28 0.36 L -0.28 -0.5 C -0.28 -0.84 -0.96 -0.84 -0.96 -0.5 Z M -1 0.76 L -0.24 0.76 L -0.24 0.4 L -1 0.4 Z M 0.96 0.36 L 0.28 0.36 L 0.28 -0.5 C 0.28 -0.84 0.96 -0.84 0.96 -0.5 Z M 1 0.76 L 0.24 0.76 L 0.24 0.4 L 1 0.4 Z M -0.3 0.24 L 0.3 0.24 L 0.3 0.04 L -0.3 0.04 Z"
+    },
+    "the-dumbbell": {
+      "label": "The Dumbbell",
+      "leagues": "all",
+      "topology": {"primary": "twin", "secondary": ["chain"]},
+      "min_nodes": 2,
+      "vertices": [
+        {"id": 0, "x": -0.72, "y": 0.5, "side": "L", "prominence": 1},
+        {"id": 1, "x": 0.72, "y": 0.5, "side": "R", "prominence": 1},
+        {"id": 2, "x": -0.72, "y": -0.5, "side": "L", "prominence": 2},
+        {"id": 3, "x": 0.72, "y": -0.5, "side": "R", "prominence": 2},
+        {"id": 4, "x": -0.96, "y": 0.28, "side": "L", "prominence": 3},
+        {"id": 5, "x": 0.96, "y": 0.28, "side": "R", "prominence": 3},
+        {"id": 6, "x": -0.96, "y": -0.28, "side": "L", "prominence": 4},
+        {"id": 7, "x": 0.96, "y": -0.28, "side": "R", "prominence": 4},
+        {"id": 8, "x": -0.26, "y": 0, "side": "C", "prominence": 5},
+        {"id": 9, "x": 0.26, "y": 0, "side": "C", "prominence": 5},
+        {"id": 10, "x": 0, "y": 0, "side": "C", "prominence": 6}
+      ],
+      "outline": [[0, 2], [0, 4], [4, 6], [6, 2], [1, 3], [1, 5], [5, 7], [7, 3], [8, 10], [10, 9], [0, 8], [2, 8], [1, 9], [3, 9]],
+      "silhouette": "M -0.78 0.62 L -0.5 0.62 L -0.5 -0.62 L -0.78 -0.62 Z M -1 0.36 L -0.82 0.36 L -0.82 -0.36 L -1 -0.36 Z M 0.78 0.62 L 0.5 0.62 L 0.5 -0.62 L 0.78 -0.62 Z M 1 0.36 L 0.82 0.36 L 0.82 -0.36 L 1 -0.36 Z M -0.5 0.12 L 0.5 0.12 L 0.5 -0.12 L -0.5 -0.12 Z"
+    },
+    "the-goggles": {
+      "label": "The Goggles",
+      "leagues": "all",
+      "topology": {"primary": "twin", "secondary": ["mesh"]},
+      "min_nodes": 2,
+      "vertices": [
+        {"id": 0, "x": -0.5, "y": 0.34, "side": "L", "prominence": 1},
+        {"id": 1, "x": 0.5, "y": 0.34, "side": "R", "prominence": 1},
+        {"id": 2, "x": -0.86, "y": 0.1, "side": "L", "prominence": 2},
+        {"id": 3, "x": 0.86, "y": 0.1, "side": "R", "prominence": 2},
+        {"id": 4, "x": -0.5, "y": -0.16, "side": "L", "prominence": 3},
+        {"id": 5, "x": 0.5, "y": -0.16, "side": "R", "prominence": 3},
+        {"id": 6, "x": -0.16, "y": 0.1, "side": "C", "prominence": 4},
+        {"id": 7, "x": 0.16, "y": 0.1, "side": "C", "prominence": 4},
+        {"id": 8, "x": -1, "y": 0.62, "side": "L", "prominence": 5},
+        {"id": 9, "x": 1, "y": 0.62, "side": "R", "prominence": 5},
+        {"id": 10, "x": -0.86, "y": -0.62, "side": "L", "prominence": 6},
+        {"id": 11, "x": 0.86, "y": -0.62, "side": "R", "prominence": 6}
+      ],
+      "outline": [[0, 2], [2, 4], [4, 6], [6, 0], [1, 3], [3, 5], [5, 7], [7, 1], [6, 7], [0, 8], [1, 9], [4, 10], [5, 11]],
+      "silhouette": "M -0.16 0.1 C -0.16 0.5 -0.86 0.5 -0.86 0.1 C -0.86 -0.3 -0.16 -0.3 -0.16 0.1 Z M 0.16 0.1 C 0.16 0.5 0.86 0.5 0.86 0.1 C 0.86 -0.3 0.16 -0.3 0.16 0.1 Z M -0.18 0.18 L 0.18 0.18 L 0.18 0.02 L -0.18 0.02 Z M -1 0.66 L -0.72 0.36 L -0.78 -0.6 L -1 -0.6 Z M 1 0.66 L 0.72 0.36 L 0.78 -0.6 L 1 -0.6 Z"
+    },
+    "the-net": {
+      "label": "The Net",
+      "leagues": "all",
+      "topology": {"primary": "mesh", "secondary": ["twin"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": -0.8, "y": 0.5, "side": "L", "prominence": 2},
+        {"id": 1, "x": 0, "y": 0.5, "side": "C", "prominence": 1},
+        {"id": 2, "x": 0.8, "y": 0.5, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.8, "y": 0.15, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0, "y": 0.15, "side": "C", "prominence": 4},
+        {"id": 5, "x": 0.8, "y": 0.15, "side": "R", "prominence": 3},
+        {"id": 6, "x": -0.8, "y": -0.2, "side": "L", "prominence": 5},
+        {"id": 7, "x": 0, "y": -0.2, "side": "C", "prominence": 6},
+        {"id": 8, "x": 0.8, "y": -0.2, "side": "R", "prominence": 5},
+        {"id": 9, "x": -0.9, "y": -0.85, "side": "L", "prominence": 7},
+        {"id": 10, "x": 0.9, "y": -0.85, "side": "R", "prominence": 7}
+      ],
+      "outline": [[0, 1], [1, 2], [3, 4], [4, 5], [6, 7], [7, 8], [0, 3], [3, 6], [1, 4], [4, 7], [2, 5], [5, 8], [6, 9], [8, 10]],
+      "silhouette": "M -0.8 0.56 L 0.8 0.56 L 0.8 -0.26 L -0.8 -0.26 Z M -0.94 0.6 L -0.82 0.6 L -0.82 -0.88 L -0.94 -0.88 Z M 0.94 0.6 L 0.82 0.6 L 0.82 -0.88 L 0.94 -0.88 Z"
+    },
+    "the-shield": {
+      "label": "The Shield",
+      "leagues": "all",
+      "topology": {"primary": "mesh", "secondary": ["hub"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": -0.86, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.86, "y": 0.72, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.86, "y": 0.72, "side": "R", "prominence": 2},
+        {"id": 3, "x": 0, "y": 0.72, "side": "C", "prominence": 3},
+        {"id": 4, "x": -0.8, "y": 0.1, "side": "L", "prominence": 4},
+        {"id": 5, "x": 0.8, "y": 0.1, "side": "R", "prominence": 4},
+        {"id": 6, "x": 0, "y": 0.1, "side": "C", "prominence": 5},
+        {"id": 7, "x": -0.44, "y": -0.46, "side": "L", "prominence": 6},
+        {"id": 8, "x": 0.44, "y": -0.46, "side": "R", "prominence": 6},
+        {"id": 9, "x": -0.44, "y": 0.72, "side": "L", "prominence": 7},
+        {"id": 10, "x": 0.44, "y": 0.72, "side": "R", "prominence": 7}
+      ],
+      "outline": [[1, 9], [9, 3], [3, 10], [10, 2], [1, 4], [2, 5], [4, 6], [6, 5], [4, 7], [7, 0], [5, 8], [8, 0], [3, 6], [6, 0]],
+      "silhouette": "M -0.86 0.78 L 0.86 0.78 L 0.86 0.1 C 0.86 -0.4 0.5 -0.74 0 -0.9 C -0.5 -0.74 -0.86 -0.4 -0.86 0.1 Z"
+    },
+    "the-trophy": {
+      "label": "The Trophy",
+      "leagues": "all",
+      "topology": {"primary": "mesh", "secondary": ["hub"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0.1, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.44, "y": 0.72, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.44, "y": 0.72, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.44, "y": -0.14, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.44, "y": -0.14, "side": "R", "prominence": 3},
+        {"id": 5, "x": -0.86, "y": 0.42, "side": "L", "prominence": 4},
+        {"id": 6, "x": 0.86, "y": 0.42, "side": "R", "prominence": 4},
+        {"id": 7, "x": 0, "y": -0.46, "side": "C", "prominence": 5},
+        {"id": 8, "x": -0.62, "y": -0.86, "side": "L", "prominence": 6},
+        {"id": 9, "x": 0.62, "y": -0.86, "side": "R", "prominence": 6},
+        {"id": 10, "x": 0, "y": 0.72, "side": "C", "prominence": 7}
+      ],
+      "outline": [[1, 10], [10, 2], [1, 3], [2, 4], [3, 0], [0, 4], [1, 5], [5, 3], [2, 6], [6, 4], [3, 7], [4, 7], [7, 8], [7, 9], [8, 9]],
+      "silhouette": "M -0.44 0.78 L 0.44 0.78 L 0.44 0.1 C 0.44 -0.2 0.24 -0.34 0 -0.34 C -0.24 -0.34 -0.44 -0.2 -0.44 0.1 Z M -0.1 -0.3 L 0.1 -0.3 L 0.1 -0.66 L -0.1 -0.66 Z M -0.62 -0.9 L 0.62 -0.9 L 0.5 -0.62 L -0.5 -0.62 Z"
+    },
+    "the-scoreboard": {
+      "label": "The Scoreboard",
+      "leagues": "all",
+      "topology": {"primary": "mesh", "secondary": ["twin"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": -0.86, "y": 0.62, "side": "L", "prominence": 2},
+        {"id": 1, "x": -0.28, "y": 0.62, "side": "L", "prominence": 1},
+        {"id": 2, "x": 0.28, "y": 0.62, "side": "R", "prominence": 1},
+        {"id": 3, "x": 0.86, "y": 0.62, "side": "R", "prominence": 2},
+        {"id": 4, "x": -0.86, "y": 0.02, "side": "L", "prominence": 3},
+        {"id": 5, "x": -0.28, "y": 0.02, "side": "L", "prominence": 4},
+        {"id": 6, "x": 0.28, "y": 0.02, "side": "R", "prominence": 4},
+        {"id": 7, "x": 0.86, "y": 0.02, "side": "R", "prominence": 3},
+        {"id": 8, "x": -0.86, "y": -0.56, "side": "L", "prominence": 5},
+        {"id": 9, "x": 0, "y": -0.56, "side": "C", "prominence": 6},
+        {"id": 10, "x": 0.86, "y": -0.56, "side": "R", "prominence": 5},
+        {"id": 11, "x": 0, "y": -0.86, "side": "C", "prominence": 7}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [4, 5], [5, 6], [6, 7], [8, 9], [9, 10], [0, 4], [4, 8], [1, 5], [2, 6], [3, 7], [7, 10], [9, 11]],
+      "silhouette": "M -0.92 0.72 L 0.92 0.72 L 0.92 -0.66 L -0.92 -0.66 Z M -0.14 -0.62 L 0.14 -0.62 L 0.14 -0.9 L -0.14 -0.9 Z"
+    },
+    "the-cage": {
+      "label": "The Cage",
+      "leagues": "all",
+      "topology": {"primary": "mesh", "secondary": ["hub"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0.3, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.7, "y": 0.62, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.7, "y": 0.62, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.86, "y": 0, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.86, "y": 0, "side": "R", "prominence": 3},
+        {"id": 5, "x": -0.56, "y": -0.56, "side": "L", "prominence": 4},
+        {"id": 6, "x": 0.56, "y": -0.56, "side": "R", "prominence": 4},
+        {"id": 7, "x": 0, "y": -0.82, "side": "C", "prominence": 5},
+        {"id": 8, "x": -0.3, "y": 0.72, "side": "L", "prominence": 6},
+        {"id": 9, "x": 0.3, "y": 0.72, "side": "R", "prominence": 6},
+        {"id": 10, "x": 0, "y": -0.24, "side": "C", "prominence": 7}
+      ],
+      "outline": [[8, 9], [1, 8], [9, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 7], [6, 7], [0, 10], [10, 7], [3, 10], [4, 10], [0, 8], [0, 9]],
+      "silhouette": "M -0.7 0.72 C -0.96 0.4 -0.94 -0.3 -0.6 -0.66 C -0.3 -0.94 0.3 -0.94 0.6 -0.66 C 0.94 -0.3 0.96 0.4 0.7 0.72 Z"
+    },
+    "the-ring": {
+      "label": "The Ring",
+      "leagues": "all",
+      "topology": {"primary": "mesh", "secondary": ["twin"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": -0.9, "y": -0.5, "side": "L", "prominence": 2},
+        {"id": 1, "x": 0.9, "y": -0.5, "side": "R", "prominence": 2},
+        {"id": 2, "x": -0.6, "y": 0.34, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0.6, "y": 0.34, "side": "R", "prominence": 3},
+        {"id": 4, "x": -0.9, "y": 0.2, "side": "L", "prominence": 1},
+        {"id": 5, "x": 0.9, "y": 0.2, "side": "R", "prominence": 1},
+        {"id": 6, "x": -0.6, "y": 0.72, "side": "L", "prominence": 4},
+        {"id": 7, "x": 0.6, "y": 0.72, "side": "R", "prominence": 4},
+        {"id": 8, "x": 0, "y": 0.34, "side": "C", "prominence": 5},
+        {"id": 9, "x": 0, "y": -0.5, "side": "C", "prominence": 6},
+        {"id": 10, "x": 0, "y": -0.84, "side": "C", "prominence": 7}
+      ],
+      "outline": [[0, 9], [9, 1], [2, 8], [8, 3], [0, 2], [1, 3], [0, 4], [2, 6], [1, 5], [3, 7], [4, 6], [5, 7], [9, 10]],
+      "silhouette": "M -0.9 -0.5 L 0.9 -0.5 L 0.6 0.34 L -0.6 0.34 Z M -0.96 0.24 L -0.84 0.24 L -0.84 -0.56 L -0.96 -0.56 Z M 0.96 0.24 L 0.84 0.24 L 0.84 -0.56 L 0.96 -0.56 Z"
+    },
+    "the-track": {
+      "label": "The Track",
+      "leagues": "all",
+      "topology": {"primary": "mesh", "secondary": ["chain"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": -0.86, "y": 0, "side": "L", "prominence": 2},
+        {"id": 1, "x": 0.86, "y": 0, "side": "R", "prominence": 2},
+        {"id": 2, "x": 0, "y": 0.7, "side": "C", "prominence": 1},
+        {"id": 3, "x": 0, "y": -0.7, "side": "C", "prominence": 3},
+        {"id": 4, "x": -0.5, "y": 0.7, "side": "L", "prominence": 4},
+        {"id": 5, "x": 0.5, "y": 0.7, "side": "R", "prominence": 4},
+        {"id": 6, "x": -0.5, "y": -0.7, "side": "L", "prominence": 5},
+        {"id": 7, "x": 0.5, "y": -0.7, "side": "R", "prominence": 5},
+        {"id": 8, "x": -0.46, "y": 0, "side": "L", "prominence": 6},
+        {"id": 9, "x": 0.46, "y": 0, "side": "R", "prominence": 6},
+        {"id": 10, "x": 0, "y": 0.32, "side": "C", "prominence": 7},
+        {"id": 11, "x": 0, "y": -0.32, "side": "C", "prominence": 7}
+      ],
+      "outline": [[0, 4], [4, 2], [2, 5], [5, 1], [1, 7], [7, 3], [3, 6], [6, 0], [8, 10], [10, 9], [9, 11], [11, 8], [0, 8], [1, 9], [2, 10], [3, 11]],
+      "silhouette": "M -0.86 0 C -0.86 0.39 -0.48 0.7 0 0.7 C 0.48 0.7 0.86 0.39 0.86 0 C 0.86 -0.39 0.48 -0.7 0 -0.7 C -0.48 -0.7 -0.86 -0.39 -0.86 0 Z"
+    },
+    "the-bleachers": {
+      "label": "The Bleachers",
+      "leagues": "all",
+      "topology": {"primary": "mesh", "secondary": ["twin"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": -0.94, "y": 0.72, "side": "L", "prominence": 2},
+        {"id": 1, "x": 0.94, "y": 0.72, "side": "R", "prominence": 2},
+        {"id": 2, "x": -0.66, "y": 0.2, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0.66, "y": 0.2, "side": "R", "prominence": 3},
+        {"id": 4, "x": -0.4, "y": -0.3, "side": "L", "prominence": 4},
+        {"id": 5, "x": 0.4, "y": -0.3, "side": "R", "prominence": 4},
+        {"id": 6, "x": -0.16, "y": -0.8, "side": "L", "prominence": 5},
+        {"id": 7, "x": 0.16, "y": -0.8, "side": "R", "prominence": 5},
+        {"id": 8, "x": 0, "y": 0.72, "side": "C", "prominence": 1},
+        {"id": 9, "x": 0, "y": 0.2, "side": "C", "prominence": 6},
+        {"id": 10, "x": 0, "y": -0.3, "side": "C", "prominence": 7}
+      ],
+      "outline": [[0, 8], [8, 1], [2, 9], [9, 3], [4, 10], [10, 5], [6, 7], [0, 2], [2, 4], [4, 6], [1, 3], [3, 5], [5, 7]],
+      "silhouette": "M -0.94 0.78 L 0.94 0.78 L 0.16 -0.86 L -0.16 -0.86 Z"
+    },
+    "the-clipboard": {
+      "label": "The Clipboard",
+      "leagues": "all",
+      "topology": {"primary": "mesh", "secondary": ["chain"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0.86, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.66, "y": 0.62, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.66, "y": 0.62, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.66, "y": 0.16, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.66, "y": 0.16, "side": "R", "prominence": 3},
+        {"id": 5, "x": -0.66, "y": -0.3, "side": "L", "prominence": 4},
+        {"id": 6, "x": 0.66, "y": -0.3, "side": "R", "prominence": 4},
+        {"id": 7, "x": -0.66, "y": -0.76, "side": "L", "prominence": 5},
+        {"id": 8, "x": 0.66, "y": -0.76, "side": "R", "prominence": 5},
+        {"id": 9, "x": 0, "y": 0.16, "side": "C", "prominence": 6},
+        {"id": 10, "x": 0, "y": -0.3, "side": "C", "prominence": 7}
+      ],
+      "outline": [[1, 2], [3, 9], [9, 4], [5, 10], [10, 6], [7, 8], [1, 3], [3, 5], [5, 7], [2, 4], [4, 6], [6, 8], [0, 1], [0, 2]],
+      "silhouette": "M -0.74 0.72 L 0.74 0.72 L 0.74 -0.88 L -0.74 -0.88 Z M -0.24 0.92 L 0.24 0.92 L 0.24 0.64 L -0.24 0.64 Z"
+    },
+    "the-bracket": {
+      "label": "The Bracket",
+      "leagues": "all",
+      "topology": {"primary": "hub", "secondary": ["chain"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.44, "y": 0.42, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.44, "y": 0.42, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.86, "y": 0.72, "side": "L", "prominence": 3},
+        {"id": 4, "x": -0.86, "y": 0.14, "side": "L", "prominence": 4},
+        {"id": 5, "x": 0.86, "y": 0.72, "side": "R", "prominence": 3},
+        {"id": 6, "x": 0.86, "y": 0.14, "side": "R", "prominence": 4},
+        {"id": 7, "x": -0.44, "y": -0.42, "side": "L", "prominence": 5},
+        {"id": 8, "x": 0.44, "y": -0.42, "side": "R", "prominence": 5},
+        {"id": 9, "x": -0.86, "y": -0.14, "side": "L", "prominence": 6},
+        {"id": 10, "x": -0.86, "y": -0.72, "side": "L", "prominence": 7},
+        {"id": 11, "x": 0.86, "y": -0.14, "side": "R", "prominence": 6},
+        {"id": 12, "x": 0.86, "y": -0.72, "side": "R", "prominence": 7}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 7], [0, 8], [1, 3], [1, 4], [2, 5], [2, 6], [7, 9], [7, 10], [8, 11], [8, 12]],
+      "silhouette": "M -0.92 0.78 L -0.5 0.78 L -0.5 -0.78 L -0.92 -0.78 L -0.92 -0.66 L -0.62 -0.66 L -0.62 0.66 L -0.92 0.66 Z M 0.92 0.78 L 0.5 0.78 L 0.5 -0.78 L 0.92 -0.78 L 0.92 -0.66 L 0.62 -0.66 L 0.62 0.66 L 0.92 0.66 Z"
+    },
+    "the-diamond": {
+      "label": "The Diamond",
+      "leagues": ["MLB"],
+      "topology": {"primary": "mesh", "secondary": ["hub"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": -0.85, "side": "C", "prominence": 1},
+        {"id": 1, "x": 0.62, "y": -0.15, "side": "R", "prominence": 2},
+        {"id": 2, "x": 0, "y": 0.5, "side": "C", "prominence": 3},
+        {"id": 3, "x": -0.62, "y": -0.15, "side": "L", "prominence": 2},
+        {"id": 4, "x": 0, "y": -0.2, "side": "C", "prominence": 5},
+        {"id": 5, "x": -0.9, "y": 0.45, "side": "L", "prominence": 4},
+        {"id": 6, "x": 0.9, "y": 0.45, "side": "R", "prominence": 4},
+        {"id": 7, "x": 0, "y": 0.88, "side": "C", "prominence": 6},
+        {"id": 8, "x": -0.85, "y": -0.55, "side": "L", "prominence": 7},
+        {"id": 9, "x": 0.85, "y": -0.55, "side": "R", "prominence": 7}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 0], [0, 5], [0, 6], [5, 7], [7, 6]],
+      "silhouette": "M 0 -0.85 L 0.62 -0.15 L 0 0.5 L -0.62 -0.15 Z M -0.9 0.45 C -0.9 0.6875 -0.497 0.88 0 0.88 C 0.497 0.88 0.9 0.6875 0.9 0.45 L 0 -0.85 Z"
+    },
+    "the-jersey": {
+      "label": "The Jersey",
+      "leagues": "all",
+      "topology": {"primary": "mesh", "secondary": ["twin"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0.5, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.5, "y": 0.7, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.5, "y": 0.7, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.9, "y": 0.3, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.9, "y": 0.3, "side": "R", "prominence": 3},
+        {"id": 5, "x": -0.58, "y": -0.06, "side": "L", "prominence": 4},
+        {"id": 6, "x": 0.58, "y": -0.06, "side": "R", "prominence": 4},
+        {"id": 7, "x": -0.5, "y": -0.86, "side": "L", "prominence": 5},
+        {"id": 8, "x": 0.5, "y": -0.86, "side": "R", "prominence": 5},
+        {"id": 9, "x": 0, "y": 0, "side": "C", "prominence": 6},
+        {"id": 10, "x": 0, "y": -0.5, "side": "C", "prominence": 7}
+      ],
+      "outline": [[1, 0], [0, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 7], [6, 8], [7, 10], [10, 8], [0, 9], [9, 10]],
+      "silhouette": "M -0.5 0.74 L -0.16 0.56 L 0.16 0.56 L 0.5 0.74 L 0.9 0.34 L 0.62 -0.06 L 0.54 -0.9 L -0.54 -0.9 L -0.62 -0.06 L -0.9 0.34 Z"
+    },
+    "the-backboard": {
+      "label": "The Backboard",
+      "leagues": ["NBA", "WNBA"],
+      "topology": {"primary": "mesh", "secondary": ["hub"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": -0.86, "y": 0.78, "side": "L", "prominence": 3},
+        {"id": 1, "x": 0.86, "y": 0.78, "side": "R", "prominence": 3},
+        {"id": 2, "x": -0.86, "y": 0.04, "side": "L", "prominence": 4},
+        {"id": 3, "x": 0.86, "y": 0.04, "side": "R", "prominence": 4},
+        {"id": 4, "x": -0.3, "y": 0.5, "side": "L", "prominence": 1},
+        {"id": 5, "x": 0.3, "y": 0.5, "side": "R", "prominence": 1},
+        {"id": 6, "x": -0.3, "y": 0.06, "side": "L", "prominence": 2},
+        {"id": 7, "x": 0.3, "y": 0.06, "side": "R", "prominence": 2},
+        {"id": 8, "x": -0.24, "y": -0.3, "side": "L", "prominence": 5},
+        {"id": 9, "x": 0.24, "y": -0.3, "side": "R", "prominence": 5},
+        {"id": 10, "x": 0, "y": -0.78, "side": "C", "prominence": 6}
+      ],
+      "outline": [[0, 1], [1, 3], [3, 2], [2, 0], [4, 5], [5, 7], [7, 6], [6, 4], [8, 9], [6, 8], [7, 9], [8, 10], [9, 10]],
+      "silhouette": "M -0.9 0.84 L 0.9 0.84 L 0.9 -0.02 L -0.9 -0.02 Z M -0.3 -0.24 L 0.3 -0.24 L 0.16 -0.82 L -0.16 -0.82 Z"
+    },
+    "the-basketball": {
+      "label": "The Basketball",
+      "leagues": ["NBA", "WNBA"],
+      "topology": {"primary": "hub", "secondary": ["mesh"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0, "side": "C", "prominence": 1},
+        {"id": 1, "x": 0, "y": 0.86, "side": "C", "prominence": 2},
+        {"id": 2, "x": 0, "y": -0.86, "side": "C", "prominence": 2},
+        {"id": 3, "x": -0.86, "y": 0, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.86, "y": 0, "side": "R", "prominence": 3},
+        {"id": 5, "x": -0.36, "y": 0.7, "side": "L", "prominence": 4},
+        {"id": 6, "x": -0.62, "y": 0.38, "side": "L", "prominence": 5},
+        {"id": 7, "x": -0.62, "y": -0.38, "side": "L", "prominence": 5},
+        {"id": 8, "x": -0.36, "y": -0.7, "side": "L", "prominence": 4},
+        {"id": 9, "x": 0.36, "y": 0.7, "side": "R", "prominence": 4},
+        {"id": 10, "x": 0.62, "y": 0.38, "side": "R", "prominence": 5},
+        {"id": 11, "x": 0.62, "y": -0.38, "side": "R", "prominence": 5},
+        {"id": 12, "x": 0.36, "y": -0.7, "side": "R", "prominence": 4}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [1, 5], [5, 6], [6, 7], [7, 8], [8, 2], [1, 9], [9, 10], [10, 11], [11, 12], [12, 2]],
+      "silhouette": "M 0 0.9 C 0.4971 0.9 0.9 0.4971 0.9 0 C 0.9 -0.4971 0.4971 -0.9 0 -0.9 C -0.4971 -0.9 -0.9 -0.4971 -0.9 0 C -0.9 0.4971 -0.4971 0.9 0 0.9 Z"
+    },
+    "the-key": {
+      "label": "The Key",
+      "leagues": ["NBA", "WNBA"],
+      "topology": {"primary": "hub", "secondary": ["mesh"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0.2, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.56, "y": 0.2, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.56, "y": 0.2, "side": "R", "prominence": 2},
+        {"id": 3, "x": 0, "y": 0.66, "side": "C", "prominence": 3},
+        {"id": 4, "x": 0, "y": -0.26, "side": "C", "prominence": 4},
+        {"id": 5, "x": -0.4, "y": 0.52, "side": "L", "prominence": 5},
+        {"id": 6, "x": 0.4, "y": 0.52, "side": "R", "prominence": 5},
+        {"id": 7, "x": -0.56, "y": -0.86, "side": "L", "prominence": 6},
+        {"id": 8, "x": 0.56, "y": -0.86, "side": "R", "prominence": 6},
+        {"id": 9, "x": -0.4, "y": -0.12, "side": "L", "prominence": 7},
+        {"id": 10, "x": 0.4, "y": -0.12, "side": "R", "prominence": 7}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [1, 7], [2, 8], [7, 8], [1, 4], [2, 4]],
+      "silhouette": "M -0.56 -0.86 L 0.56 -0.86 L 0.56 -0.2 L -0.56 -0.2 Z M -0.56 0.2 C -0.56 0.45 -0.31 0.66 0 0.66 C 0.31 0.66 0.56 0.45 0.56 0.2 C 0.56 -0.05 0.31 -0.26 0 -0.26 C -0.31 -0.26 -0.56 -0.05 -0.56 0.2 Z"
+    },
+    "the-helmet": {
+      "label": "The Helmet",
+      "leagues": ["NFL"],
+      "topology": {"primary": "hub", "secondary": ["mesh"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": -0.1, "y": 0.16, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.1, "y": 0.82, "side": "C", "prominence": 2},
+        {"id": 2, "x": -0.82, "y": 0.24, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0.5, "y": 0.5, "side": "R", "prominence": 3},
+        {"id": 4, "x": 0.62, "y": -0.06, "side": "R", "prominence": 4},
+        {"id": 5, "x": 0.86, "y": -0.36, "side": "R", "prominence": 5},
+        {"id": 6, "x": 0.2, "y": -0.6, "side": "C", "prominence": 6},
+        {"id": 7, "x": -0.5, "y": -0.44, "side": "L", "prominence": 4},
+        {"id": 8, "x": -0.78, "y": -0.14, "side": "L", "prominence": 6},
+        {"id": 9, "x": -0.44, "y": 0.7, "side": "L", "prominence": 7},
+        {"id": 10, "x": 0.16, "y": 0.78, "side": "R", "prominence": 7}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 7], [0, 8], [1, 9], [9, 2], [1, 10], [10, 3], [4, 5], [5, 6], [6, 7], [2, 8]],
+      "silhouette": "M -0.1 0.86 C 0.4 0.86 0.66 0.5 0.66 0.06 C 0.66 -0.4 0.3 -0.66 -0.2 -0.62 C -0.66 -0.58 -0.88 -0.2 -0.86 0.16 C -0.84 0.56 -0.5 0.86 -0.1 0.86 Z M 0.5 -0.06 L 0.9 -0.3 L 0.72 -0.66 L 0.1 -0.7 Z"
+    },
+    "the-pigskin": {
+      "label": "The Pigskin",
+      "leagues": ["NFL"],
+      "topology": {"primary": "mesh", "secondary": ["twin"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.9, "y": 0, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.9, "y": 0, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.44, "y": 0.44, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.44, "y": 0.44, "side": "R", "prominence": 3},
+        {"id": 5, "x": -0.44, "y": -0.44, "side": "L", "prominence": 4},
+        {"id": 6, "x": 0.44, "y": -0.44, "side": "R", "prominence": 4},
+        {"id": 7, "x": 0, "y": 0.5, "side": "C", "prominence": 5},
+        {"id": 8, "x": 0, "y": -0.5, "side": "C", "prominence": 5},
+        {"id": 9, "x": -0.2, "y": 0.16, "side": "L", "prominence": 6},
+        {"id": 10, "x": 0.2, "y": 0.16, "side": "R", "prominence": 6}
+      ],
+      "outline": [[1, 3], [3, 7], [7, 4], [4, 2], [2, 6], [6, 8], [8, 5], [5, 1], [0, 9], [0, 10], [0, 7], [0, 8], [9, 10]],
+      "silhouette": "M -0.9 0 C -0.66 0.44 -0.4 0.56 0 0.56 C 0.4 0.56 0.66 0.44 0.9 0 C 0.66 -0.44 0.4 -0.56 0 -0.56 C -0.4 -0.56 -0.66 -0.44 -0.9 0 Z M -0.06 0.3 L 0.06 0.3 L 0.06 -0.3 L -0.06 -0.3 Z"
+    },
+    "the-baseball": {
+      "label": "The Baseball",
+      "leagues": ["MLB"],
+      "topology": {"primary": "twin", "secondary": ["chain"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": -0.44, "y": 0.6, "side": "L", "prominence": 2},
+        {"id": 1, "x": -0.66, "y": 0.32, "side": "L", "prominence": 3},
+        {"id": 2, "x": -0.76, "y": 0, "side": "L", "prominence": 1},
+        {"id": 3, "x": -0.66, "y": -0.32, "side": "L", "prominence": 3},
+        {"id": 4, "x": -0.44, "y": -0.6, "side": "L", "prominence": 2},
+        {"id": 5, "x": 0.44, "y": 0.6, "side": "R", "prominence": 2},
+        {"id": 6, "x": 0.66, "y": 0.32, "side": "R", "prominence": 3},
+        {"id": 7, "x": 0.76, "y": 0, "side": "R", "prominence": 1},
+        {"id": 8, "x": 0.66, "y": -0.32, "side": "R", "prominence": 3},
+        {"id": 9, "x": 0.44, "y": -0.6, "side": "R", "prominence": 2}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [5, 6], [6, 7], [7, 8], [8, 9]],
+      "silhouette": "M 0 0.96 C 0.5302 0.96 0.96 0.5302 0.96 0 C 0.96 -0.5302 0.5302 -0.96 0 -0.96 C -0.5302 -0.96 -0.96 -0.5302 -0.96 0 C -0.96 0.5302 -0.5302 0.96 0 0.96 Z"
+    },
+    "the-mitt": {
+      "label": "The Mitt",
+      "leagues": ["MLB"],
+      "topology": {"primary": "hub", "secondary": ["mesh"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": -0.1, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.3, "y": 0.72, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.06, "y": 0.82, "side": "C", "prominence": 2},
+        {"id": 3, "x": 0.42, "y": 0.74, "side": "R", "prominence": 2},
+        {"id": 4, "x": 0.74, "y": 0.46, "side": "R", "prominence": 3},
+        {"id": 5, "x": -0.66, "y": 0.34, "side": "L", "prominence": 3},
+        {"id": 6, "x": -0.82, "y": -0.2, "side": "L", "prominence": 4},
+        {"id": 7, "x": 0.86, "y": -0.06, "side": "R", "prominence": 4},
+        {"id": 8, "x": -0.5, "y": -0.7, "side": "L", "prominence": 5},
+        {"id": 9, "x": 0.44, "y": -0.72, "side": "R", "prominence": 5},
+        {"id": 10, "x": 0, "y": -0.86, "side": "C", "prominence": 6}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7], [0, 8], [0, 9], [9, 10], [8, 10]],
+      "silhouette": "M -0.66 0.4 C -0.6 0.78 -0.2 0.9 0.06 0.86 C 0.5 0.9 0.86 0.6 0.88 0.1 C 0.9 -0.4 0.5 -0.86 0 -0.88 C -0.5 -0.9 -0.88 -0.6 -0.86 -0.2 C -0.84 0.1 -0.76 0.3 -0.66 0.4 Z"
+    },
+    "the-bat": {
+      "label": "The Bat",
+      "leagues": ["MLB"],
+      "topology": {"primary": "chain", "secondary": ["twin"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.86, "y": -0.72, "side": "L", "prominence": 2},
+        {"id": 1, "x": -0.6, "y": -0.46, "side": "L", "prominence": 4},
+        {"id": 2, "x": -0.3, "y": -0.16, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0.02, "y": 0.16, "side": "C", "prominence": 3},
+        {"id": 4, "x": 0.36, "y": 0.48, "side": "R", "prominence": 2},
+        {"id": 5, "x": 0.7, "y": 0.8, "side": "R", "prominence": 1},
+        {"id": 6, "x": -0.82, "y": -0.44, "side": "L", "prominence": 5},
+        {"id": 7, "x": 0.88, "y": 0.5, "side": "R", "prominence": 5},
+        {"id": 8, "x": 0.42, "y": 0.86, "side": "R", "prominence": 6},
+        {"id": 9, "x": -0.56, "y": -0.86, "side": "L", "prominence": 6}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [0, 6], [0, 9], [5, 7], [5, 8]],
+      "silhouette": "M -0.9 -0.7 L -0.8 -0.82 L 0.88 0.56 C 0.98 0.72 0.78 0.94 0.62 0.82 Z"
+    },
+    "the-plate": {
+      "label": "The Plate",
+      "leagues": ["MLB"],
+      "topology": {"primary": "mesh", "secondary": ["hub"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0.06, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.46, "y": 0.54, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.46, "y": 0.54, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.46, "y": -0.2, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.46, "y": -0.2, "side": "R", "prominence": 3},
+        {"id": 5, "x": 0, "y": -0.72, "side": "C", "prominence": 4},
+        {"id": 6, "x": -0.96, "y": 0.62, "side": "L", "prominence": 5},
+        {"id": 7, "x": 0.96, "y": 0.62, "side": "R", "prominence": 5},
+        {"id": 8, "x": -0.96, "y": -0.5, "side": "L", "prominence": 6},
+        {"id": 9, "x": 0.96, "y": -0.5, "side": "R", "prominence": 6},
+        {"id": 10, "x": -0.79, "y": 0.06, "side": "L", "prominence": 7},
+        {"id": 11, "x": 0.79, "y": 0.06, "side": "R", "prominence": 7}
+      ],
+      "outline": [[1, 2], [2, 4], [4, 5], [5, 3], [3, 1], [0, 1], [0, 2], [0, 5], [6, 10], [10, 8], [8, 6], [7, 11], [11, 9], [9, 7]],
+      "silhouette": "M -0.46 0.58 L 0.46 0.58 L 0.46 -0.2 L 0 -0.76 L -0.46 -0.2 Z M -0.96 0.7 L -0.62 0.7 L -0.62 -0.56 L -0.96 -0.56 Z M 0.96 0.7 L 0.62 0.7 L 0.62 -0.56 L 0.96 -0.56 Z"
+    },
+    "the-stick": {
+      "label": "The Stick",
+      "leagues": ["NHL"],
+      "topology": {"primary": "chain", "secondary": ["twin"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.5, "y": -0.7, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.88, "y": -0.78, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.34, "y": -0.42, "side": "L", "prominence": 3},
+        {"id": 3, "x": -0.1, "y": -0.02, "side": "C", "prominence": 4},
+        {"id": 4, "x": 0.16, "y": 0.38, "side": "R", "prominence": 3},
+        {"id": 5, "x": 0.44, "y": 0.78, "side": "R", "prominence": 2},
+        {"id": 6, "x": 0.72, "y": 0.86, "side": "R", "prominence": 5},
+        {"id": 7, "x": -0.7, "y": -0.86, "side": "L", "prominence": 6},
+        {"id": 8, "x": -0.16, "y": -0.62, "side": "L", "prominence": 6}
+      ],
+      "outline": [[1, 0], [0, 2], [2, 3], [3, 4], [4, 5], [5, 6], [1, 7], [7, 8], [8, 0]],
+      "silhouette": "M -0.92 -0.62 L -0.94 -0.86 L -0.28 -0.62 L 0.76 0.88 L 0.54 0.9 L -0.34 -0.44 Z"
+    },
+    "the-crease": {
+      "label": "The Crease",
+      "leagues": ["NHL"],
+      "topology": {"primary": "mesh", "secondary": ["hub"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0.5, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.6, "y": 0.5, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.6, "y": 0.5, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.6, "y": 0.06, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.6, "y": 0.06, "side": "R", "prominence": 3},
+        {"id": 5, "x": -0.86, "y": -0.2, "side": "L", "prominence": 4},
+        {"id": 6, "x": 0.86, "y": -0.2, "side": "R", "prominence": 4},
+        {"id": 7, "x": 0, "y": -0.72, "side": "C", "prominence": 5},
+        {"id": 8, "x": -0.44, "y": -0.6, "side": "L", "prominence": 6},
+        {"id": 9, "x": 0.44, "y": -0.6, "side": "R", "prominence": 6},
+        {"id": 10, "x": 0, "y": 0.06, "side": "C", "prominence": 7}
+      ],
+      "outline": [[1, 0], [0, 2], [1, 3], [2, 4], [3, 10], [10, 4], [3, 5], [5, 8], [8, 7], [7, 9], [9, 6], [6, 4]],
+      "silhouette": "M -0.6 0.56 L 0.6 0.56 L 0.6 0.02 L -0.6 0.02 Z M -0.86 0.02 C -0.86 -0.42 -0.48 -0.76 0 -0.76 C 0.48 -0.76 0.86 -0.42 0.86 0.02 Z"
+    },
+    "the-skate": {
+      "label": "The Skate",
+      "leagues": ["NHL"],
+      "topology": {"primary": "chain", "secondary": ["hub"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": -0.1, "y": -0.1, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.66, "y": 0.5, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.3, "y": 0.34, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.66, "y": -0.2, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.62, "y": -0.2, "side": "R", "prominence": 3},
+        {"id": 5, "x": -0.84, "y": -0.56, "side": "L", "prominence": 4},
+        {"id": 6, "x": 0.84, "y": -0.56, "side": "R", "prominence": 4},
+        {"id": 7, "x": -0.4, "y": -0.8, "side": "L", "prominence": 5},
+        {"id": 8, "x": 0.4, "y": -0.8, "side": "R", "prominence": 5},
+        {"id": 9, "x": -0.2, "y": 0.6, "side": "C", "prominence": 6},
+        {"id": 10, "x": 0, "y": -0.56, "side": "C", "prominence": 7}
+      ],
+      "outline": [[1, 9], [9, 2], [1, 3], [2, 4], [3, 0], [0, 4], [3, 5], [4, 6], [5, 7], [7, 8], [8, 6], [0, 10], [10, 7], [10, 8]],
+      "silhouette": "M -0.66 0.56 L -0.2 0.62 L 0.34 0.34 L 0.66 -0.16 L 0.66 -0.4 L -0.66 -0.4 Z M -0.88 -0.5 L 0.88 -0.5 L 0.88 -0.66 C 0.5 -0.84 -0.5 -0.84 -0.88 -0.66 Z"
+    },
+    "the-compass": {
+      "label": "The Compass",
+      "leagues": "all",
+      "topology": {"primary": "hub", "secondary": []},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0, "side": "C", "prominence": 1},
+        {"id": 1, "x": 0, "y": 0.88, "side": "C", "prominence": 2},
+        {"id": 2, "x": 0, "y": -0.88, "side": "C", "prominence": 2},
+        {"id": 3, "x": -0.9, "y": 0, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.9, "y": 0, "side": "R", "prominence": 3},
+        {"id": 5, "x": -0.48, "y": 0.48, "side": "L", "prominence": 4},
+        {"id": 6, "x": 0.48, "y": 0.48, "side": "R", "prominence": 4},
+        {"id": 7, "x": -0.48, "y": -0.48, "side": "L", "prominence": 5},
+        {"id": 8, "x": 0.48, "y": -0.48, "side": "R", "prominence": 5}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7], [0, 8]],
+      "silhouette": "M 0 0.96 L 0.2 0.2 L 0.96 0 L 0.2 -0.2 L 0 -0.96 L -0.2 -0.2 L -0.96 0 L -0.2 0.2 Z"
+    },
+    "the-fan": {
+      "label": "The Fan",
+      "leagues": "all",
+      "topology": {"primary": "hub", "secondary": ["chain"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": -0.86, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.9, "y": 0.14, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.62, "y": 0.56, "side": "L", "prominence": 3},
+        {"id": 3, "x": -0.22, "y": 0.8, "side": "L", "prominence": 4},
+        {"id": 4, "x": 0, "y": 0.88, "side": "C", "prominence": 5},
+        {"id": 5, "x": 0.22, "y": 0.8, "side": "R", "prominence": 4},
+        {"id": 6, "x": 0.62, "y": 0.56, "side": "R", "prominence": 3},
+        {"id": 7, "x": 0.9, "y": 0.14, "side": "R", "prominence": 2}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, 7]],
+      "silhouette": "M 0 -0.9 L -0.94 0.1 C -0.5 0.98 0.5 0.98 0.94 0.1 Z"
+    },
+    "the-parachute": {
+      "label": "The Parachute",
+      "leagues": "all",
+      "topology": {"primary": "hub", "secondary": ["twin"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": -0.88, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.94, "y": 0.14, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.5, "y": 0.64, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0, "y": 0.82, "side": "C", "prominence": 4},
+        {"id": 4, "x": 0.5, "y": 0.64, "side": "R", "prominence": 3},
+        {"id": 5, "x": 0.94, "y": 0.14, "side": "R", "prominence": 2},
+        {"id": 6, "x": -0.62, "y": -0.44, "side": "L", "prominence": 5},
+        {"id": 7, "x": 0.62, "y": -0.44, "side": "R", "prominence": 5}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7], [1, 2], [2, 3], [3, 4], [4, 5]],
+      "silhouette": "M -0.96 0.1 C -0.96 0.98 0.96 0.98 0.96 0.1 Z"
+    },
+    "the-windmill": {
+      "label": "The Windmill",
+      "leagues": "all",
+      "topology": {"primary": "hub", "secondary": []},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.88, "y": 0.36, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.36, "y": 0.88, "side": "R", "prominence": 2},
+        {"id": 3, "x": 0.88, "y": -0.36, "side": "R", "prominence": 3},
+        {"id": 4, "x": -0.36, "y": -0.88, "side": "L", "prominence": 3},
+        {"id": 5, "x": -0.44, "y": 0.62, "side": "L", "prominence": 4},
+        {"id": 6, "x": 0.62, "y": 0.44, "side": "R", "prominence": 4},
+        {"id": 7, "x": 0.44, "y": -0.62, "side": "R", "prominence": 5},
+        {"id": 8, "x": -0.62, "y": -0.44, "side": "L", "prominence": 5}
+      ],
+      "outline": [[0, 1], [1, 5], [5, 0], [0, 2], [2, 6], [6, 0], [0, 3], [3, 7], [7, 0], [0, 4], [4, 8], [8, 0]],
+      "silhouette": "M 0 0 L -0.9 0.38 L -0.46 0.64 L 0 0 L 0.38 0.9 L 0.64 0.46 L 0 0 L 0.9 -0.38 L 0.46 -0.64 L 0 0 L -0.38 -0.9 L -0.64 -0.46 Z"
+    },
+    "the-stopwatch": {
+      "label": "The Stopwatch",
+      "leagues": "all",
+      "topology": {"primary": "hub", "secondary": ["mesh"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": -0.08, "side": "C", "prominence": 1},
+        {"id": 1, "x": 0, "y": 0.92, "side": "C", "prominence": 2},
+        {"id": 2, "x": -0.44, "y": 0.4, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0.58, "y": -0.18, "side": "R", "prominence": 3},
+        {"id": 4, "x": -0.74, "y": -0.08, "side": "L", "prominence": 4},
+        {"id": 5, "x": 0.74, "y": -0.08, "side": "R", "prominence": 4},
+        {"id": 6, "x": 0, "y": -0.82, "side": "C", "prominence": 5},
+        {"id": 7, "x": -0.54, "y": -0.6, "side": "L", "prominence": 6},
+        {"id": 8, "x": 0.54, "y": -0.6, "side": "R", "prominence": 6}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6]],
+      "silhouette": "M 0 0.72 C 0.44184 0.72 0.8 0.36184 0.8 -0.08 C 0.8 -0.52184 0.44184 -0.88 0 -0.88 C -0.44184 -0.88 -0.8 -0.52184 -0.8 -0.08 C -0.8 0.36184 -0.44184 0.72 0 0.72 Z"
+    },
+    "the-javelin": {
+      "label": "The Javelin",
+      "leagues": "all",
+      "topology": {"primary": "chain", "secondary": []},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": 0.92, "y": 0.8, "side": "R", "prominence": 1},
+        {"id": 1, "x": 0.55, "y": 0.46, "side": "R", "prominence": 2},
+        {"id": 2, "x": 0.18, "y": 0.12, "side": "R", "prominence": 3},
+        {"id": 3, "x": -0.19, "y": -0.22, "side": "L", "prominence": 3},
+        {"id": 4, "x": -0.56, "y": -0.56, "side": "L", "prominence": 2},
+        {"id": 5, "x": -0.92, "y": -0.9, "side": "L", "prominence": 1}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]],
+      "silhouette": "M 0.98 0.88 L 0.6 0.76 L -0.86 -0.78 L -0.98 -0.9 L -0.76 -0.94 L 0.72 0.6 Z"
+    },
+    "the-boomerang": {
+      "label": "The Boomerang",
+      "leagues": "all",
+      "topology": {"primary": "chain", "secondary": ["twin"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.92, "y": 0.66, "side": "L", "prominence": 2},
+        {"id": 1, "x": -0.58, "y": 0.2, "side": "L", "prominence": 3},
+        {"id": 2, "x": -0.24, "y": -0.26, "side": "L", "prominence": 4},
+        {"id": 3, "x": 0, "y": -0.62, "side": "C", "prominence": 1},
+        {"id": 4, "x": 0.24, "y": -0.26, "side": "R", "prominence": 4},
+        {"id": 5, "x": 0.58, "y": 0.2, "side": "R", "prominence": 3},
+        {"id": 6, "x": 0.92, "y": 0.66, "side": "R", "prominence": 2}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6]],
+      "silhouette": "M -0.98 0.6 L 0 -0.82 L 0.98 0.6 L 0.68 0.74 L 0 -0.4 L -0.68 0.74 Z"
+    },
+    "the-crescent": {
+      "label": "The Crescent",
+      "leagues": "all",
+      "topology": {"primary": "chain", "secondary": ["twin"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": 0.34, "y": 0.86, "side": "R", "prominence": 1},
+        {"id": 1, "x": -0.22, "y": 0.8, "side": "C", "prominence": 2},
+        {"id": 2, "x": -0.66, "y": 0.44, "side": "L", "prominence": 3},
+        {"id": 3, "x": -0.82, "y": -0.06, "side": "L", "prominence": 4},
+        {"id": 4, "x": -0.6, "y": -0.56, "side": "L", "prominence": 3},
+        {"id": 5, "x": -0.16, "y": -0.84, "side": "C", "prominence": 2},
+        {"id": 6, "x": 0.34, "y": -0.86, "side": "R", "prominence": 1}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6]],
+      "silhouette": "M 0.36 0.9 C -0.52 0.9 -0.98 0.42 -0.98 -0.04 C -0.98 -0.5 -0.52 -0.9 0.36 -0.9 C -0.2 -0.62 -0.44 -0.3 -0.44 -0.02 C -0.44 0.3 -0.2 0.62 0.36 0.9 Z"
+    },
+    "the-plume": {
+      "label": "The Plume",
+      "leagues": "all",
+      "topology": {"primary": "chain", "secondary": []},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": 0.62, "y": 0.9, "side": "R", "prominence": 1},
+        {"id": 1, "x": 0.36, "y": 0.52, "side": "R", "prominence": 2},
+        {"id": 2, "x": 0.1, "y": 0.14, "side": "C", "prominence": 3},
+        {"id": 3, "x": -0.16, "y": -0.24, "side": "L", "prominence": 3},
+        {"id": 4, "x": -0.42, "y": -0.62, "side": "L", "prominence": 2},
+        {"id": 5, "x": -0.68, "y": -0.94, "side": "L", "prominence": 1},
+        {"id": 6, "x": -0.34, "y": 0.56, "side": "L", "prominence": 4},
+        {"id": 7, "x": 0.66, "y": -0.12, "side": "R", "prominence": 4}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [1, 6], [2, 7]],
+      "silhouette": "M -0.7 -0.96 C 0.16 -0.26 0.5 0.3 0.64 0.94 C 0.1 0.5 -0.36 0.3 -0.7 -0.96 Z"
+    },
+    "the-staircase": {
+      "label": "The Staircase",
+      "leagues": "all",
+      "topology": {"primary": "chain", "secondary": ["mesh"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.92, "y": -0.9, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.92, "y": -0.3, "side": "L", "prominence": 3},
+        {"id": 2, "x": -0.3, "y": -0.3, "side": "L", "prominence": 2},
+        {"id": 3, "x": -0.3, "y": 0.26, "side": "C", "prominence": 3},
+        {"id": 4, "x": 0.3, "y": 0.26, "side": "R", "prominence": 2},
+        {"id": 5, "x": 0.3, "y": 0.88, "side": "R", "prominence": 3},
+        {"id": 6, "x": 0.92, "y": 0.88, "side": "R", "prominence": 1}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6]],
+      "silhouette": "M -1.07 -0.9 L -1.024 -0.192 L -0.401 -0.189 L -0.402 0.37 L 0.192 0.364 L 0.194 0.986 L 0.92 1.03 L 0.92 0.73 L 0.406 0.774 L 0.408 0.156 L -0.198 0.15 L -0.199 -0.411 L -0.816 -0.408 L -0.77 -0.9 Z"
+    },
+    "the-wave": {
+      "label": "The Wave",
+      "leagues": "all",
+      "topology": {"primary": "chain", "secondary": []},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.9, "y": -0.33, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.6, "y": -0.76, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.3, "y": -0.61, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0, "y": 0, "side": "C", "prominence": 4},
+        {"id": 4, "x": 0.3, "y": 0.61, "side": "R", "prominence": 3},
+        {"id": 5, "x": 0.6, "y": 0.76, "side": "R", "prominence": 2},
+        {"id": 6, "x": 0.9, "y": 0.33, "side": "R", "prominence": 1}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6]],
+      "silhouette": "M -0.777 -0.244 L -0.537 -0.624 L -0.418 -0.517 L -0.135 0.066 L 0.182 0.703 L 0.663 0.896 L 1.023 0.416 L 0.777 0.244 L 0.537 0.624 L 0.418 0.517 L 0.135 -0.066 L -0.182 -0.703 L -0.663 -0.896 L -1.023 -0.416 Z"
+    },
+    "the-bowtie": {
+      "label": "The Bowtie",
+      "leagues": "all",
+      "topology": {"primary": "twin", "secondary": ["hub"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.92, "y": 0.7, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.92, "y": -0.7, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.16, "y": 0.2, "side": "L", "prominence": 3},
+        {"id": 3, "x": -0.16, "y": -0.2, "side": "L", "prominence": 4},
+        {"id": 4, "x": 0.16, "y": 0.2, "side": "R", "prominence": 3},
+        {"id": 5, "x": 0.16, "y": -0.2, "side": "R", "prominence": 4},
+        {"id": 6, "x": 0.92, "y": 0.7, "side": "R", "prominence": 1},
+        {"id": 7, "x": 0.92, "y": -0.7, "side": "R", "prominence": 2}
+      ],
+      "outline": [[0, 1], [0, 2], [1, 3], [2, 3], [4, 5], [4, 6], [5, 7], [6, 7]],
+      "silhouette": "M -0.96 0.76 L -0.14 0.16 L -0.14 -0.16 L -0.96 -0.76 Z M 0.96 0.76 L 0.14 0.16 L 0.14 -0.16 L 0.96 -0.76 Z"
+    },
+    "the-headphones": {
+      "label": "The Headphones",
+      "leagues": "all",
+      "topology": {"primary": "twin", "secondary": ["chain"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.86, "y": 0.2, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.86, "y": -0.42, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.5, "y": -0.42, "side": "L", "prominence": 3},
+        {"id": 3, "x": -0.5, "y": 0.2, "side": "L", "prominence": 4},
+        {"id": 4, "x": 0.86, "y": 0.2, "side": "R", "prominence": 1},
+        {"id": 5, "x": 0.86, "y": -0.42, "side": "R", "prominence": 2},
+        {"id": 6, "x": 0.5, "y": -0.42, "side": "R", "prominence": 3},
+        {"id": 7, "x": 0.5, "y": 0.2, "side": "R", "prominence": 4},
+        {"id": 8, "x": 0, "y": 0.86, "side": "C", "prominence": 5}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [3, 8], [8, 7]],
+      "silhouette": "M -0.92 0.26 L -0.92 -0.5 L -0.44 -0.5 L -0.44 0.26 Z M 0.92 0.26 L 0.92 -0.5 L 0.44 -0.5 L 0.44 0.26 Z M -0.7 0.24 C -0.7 0.96 0.7 0.96 0.7 0.24 L 0.56 0.24 C 0.56 0.8 -0.56 0.8 -0.56 0.24 Z"
+    },
+    "the-tickets": {
+      "label": "The Tickets",
+      "leagues": "all",
+      "topology": {"primary": "twin", "secondary": ["mesh"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.92, "y": 0.58, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.14, "y": 0.78, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.08, "y": 0.02, "side": "L", "prominence": 3},
+        {"id": 3, "x": -0.86, "y": -0.18, "side": "L", "prominence": 4},
+        {"id": 4, "x": 0.08, "y": 0.18, "side": "R", "prominence": 3},
+        {"id": 5, "x": 0.86, "y": 0.38, "side": "R", "prominence": 2},
+        {"id": 6, "x": 0.92, "y": -0.42, "side": "R", "prominence": 1},
+        {"id": 7, "x": 0.14, "y": -0.62, "side": "R", "prominence": 4}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4]],
+      "silhouette": "M -0.96 0.62 L -0.1 0.84 L -0.04 0 L -0.9 -0.22 Z M 0.04 0.2 L 0.9 0.42 L 0.96 -0.46 L 0.1 -0.68 Z"
+    },
+    "the-cymbals": {
+      "label": "The Cymbals",
+      "leagues": "all",
+      "topology": {"primary": "twin", "secondary": ["hub"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.9, "y": 0.72, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.36, "y": 0.24, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.9, "y": -0.24, "side": "L", "prominence": 3},
+        {"id": 3, "x": -0.62, "y": 0.24, "side": "L", "prominence": 4},
+        {"id": 4, "x": 0.9, "y": 0.72, "side": "R", "prominence": 1},
+        {"id": 5, "x": 0.36, "y": 0.24, "side": "R", "prominence": 2},
+        {"id": 6, "x": 0.9, "y": -0.24, "side": "R", "prominence": 3},
+        {"id": 7, "x": 0.62, "y": 0.24, "side": "R", "prominence": 4},
+        {"id": 8, "x": -0.5, "y": -0.84, "side": "L", "prominence": 5},
+        {"id": 9, "x": 0.5, "y": -0.84, "side": "R", "prominence": 5}
+      ],
+      "outline": [[0, 3], [3, 2], [3, 1], [1, 0], [1, 2], [4, 7], [7, 6], [7, 5], [5, 4], [5, 6], [2, 8], [6, 9]],
+      "silhouette": "M -0.94 0.78 L -0.3 0.24 L -0.94 -0.3 Z M 0.94 0.78 L 0.3 0.24 L 0.94 -0.3 Z"
+    },
+    "the-lantern": {
+      "label": "The Lantern",
+      "leagues": "all",
+      "topology": {"primary": "mesh", "secondary": ["hub"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0.92, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.56, "y": 0.56, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.56, "y": 0.56, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.72, "y": 0, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.72, "y": 0, "side": "R", "prominence": 3},
+        {"id": 5, "x": -0.56, "y": -0.56, "side": "L", "prominence": 4},
+        {"id": 6, "x": 0.56, "y": -0.56, "side": "R", "prominence": 4},
+        {"id": 7, "x": 0, "y": -0.9, "side": "C", "prominence": 5},
+        {"id": 8, "x": 0, "y": 0.2, "side": "C", "prominence": 6},
+        {"id": 9, "x": -0.24, "y": -0.24, "side": "L", "prominence": 6},
+        {"id": 10, "x": 0.24, "y": -0.24, "side": "R", "prominence": 6}
+      ],
+      "outline": [[0, 1], [0, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 7], [6, 7], [1, 2], [5, 6], [8, 9], [8, 10], [9, 10]],
+      "silhouette": "M 0 0.96 L -0.6 0.58 L -0.76 0 L -0.6 -0.58 L 0 -0.94 L 0.6 -0.58 L 0.76 0 L 0.6 0.58 Z"
+    },
+    "the-banner": {
+      "label": "The Banner",
+      "leagues": "all",
+      "topology": {"primary": "mesh", "secondary": ["twin"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": -0.92, "y": 0.82, "side": "L", "prominence": 1},
+        {"id": 1, "x": 0, "y": 0.9, "side": "C", "prominence": 2},
+        {"id": 2, "x": 0.92, "y": 0.82, "side": "R", "prominence": 1},
+        {"id": 3, "x": -0.86, "y": 0.06, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0, "y": 0.14, "side": "C", "prominence": 4},
+        {"id": 5, "x": 0.86, "y": 0.06, "side": "R", "prominence": 3},
+        {"id": 6, "x": -0.78, "y": -0.68, "side": "L", "prominence": 5},
+        {"id": 7, "x": 0, "y": -0.34, "side": "C", "prominence": 6},
+        {"id": 8, "x": 0.78, "y": -0.68, "side": "R", "prominence": 5}
+      ],
+      "outline": [[0, 1], [1, 2], [0, 3], [1, 4], [2, 5], [3, 4], [4, 5], [3, 6], [5, 8], [6, 7], [7, 8]],
+      "silhouette": "M -0.96 0.86 C -0.3 0.98 0.3 0.98 0.96 0.86 L 0.82 -0.72 L 0 -0.38 L -0.82 -0.72 Z"
+    },
+    "the-locker": {
+      "label": "The Locker",
+      "leagues": "all",
+      "topology": {"primary": "mesh", "secondary": ["chain"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": -0.76, "y": 0.9, "side": "L", "prominence": 1},
+        {"id": 1, "x": 0.76, "y": 0.9, "side": "R", "prominence": 1},
+        {"id": 2, "x": -0.76, "y": 0.3, "side": "L", "prominence": 2},
+        {"id": 3, "x": 0.76, "y": 0.3, "side": "R", "prominence": 2},
+        {"id": 4, "x": -0.76, "y": -0.3, "side": "L", "prominence": 3},
+        {"id": 5, "x": 0.76, "y": -0.3, "side": "R", "prominence": 3},
+        {"id": 6, "x": -0.76, "y": -0.9, "side": "L", "prominence": 4},
+        {"id": 7, "x": 0.76, "y": -0.9, "side": "R", "prominence": 4},
+        {"id": 8, "x": 0, "y": 0.3, "side": "C", "prominence": 5},
+        {"id": 9, "x": 0, "y": -0.3, "side": "C", "prominence": 5}
+      ],
+      "outline": [[0, 1], [0, 2], [1, 3], [2, 3], [2, 4], [3, 5], [4, 5], [4, 6], [5, 7], [6, 7], [2, 8], [8, 3], [4, 9], [9, 5]],
+      "silhouette": "M -0.82 0.96 L 0.82 0.96 L 0.82 -0.96 L -0.82 -0.96 Z"
+    },
+    "the-shot-clock": {
+      "label": "The Shot Clock",
+      "leagues": ["NBA", "WNBA"],
+      "topology": {"primary": "hub", "secondary": ["mesh"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": -0.04, "side": "C", "prominence": 1},
+        {"id": 1, "x": 0, "y": 0.72, "side": "C", "prominence": 2},
+        {"id": 2, "x": -0.62, "y": 0.36, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0.62, "y": 0.36, "side": "R", "prominence": 3},
+        {"id": 4, "x": -0.62, "y": -0.44, "side": "L", "prominence": 4},
+        {"id": 5, "x": 0.62, "y": -0.44, "side": "R", "prominence": 4},
+        {"id": 6, "x": 0, "y": -0.8, "side": "C", "prominence": 5},
+        {"id": 7, "x": -0.36, "y": 0.92, "side": "L", "prominence": 6},
+        {"id": 8, "x": 0.36, "y": 0.92, "side": "R", "prominence": 6}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [7, 8]],
+      "silhouette": "M -0.78 0.66 L 0.78 0.66 L 0.78 -0.86 L -0.78 -0.86 Z"
+    },
+    "the-arc": {
+      "label": "The Arc",
+      "leagues": ["NBA", "WNBA"],
+      "topology": {"primary": "chain", "secondary": ["twin"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.9, "y": -0.72, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.9, "y": -0.12, "side": "L", "prominence": 3},
+        {"id": 2, "x": -0.62, "y": 0.42, "side": "L", "prominence": 4},
+        {"id": 3, "x": -0.1, "y": 0.72, "side": "L", "prominence": 2},
+        {"id": 4, "x": 0.42, "y": 0.62, "side": "R", "prominence": 2},
+        {"id": 5, "x": 0.78, "y": 0.16, "side": "R", "prominence": 4},
+        {"id": 6, "x": 0.9, "y": -0.4, "side": "R", "prominence": 3},
+        {"id": 7, "x": 0.9, "y": -0.86, "side": "R", "prominence": 1}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, 7]],
+      "silhouette": "M -1.01 -0.72 L -1.007 -0.094 L -0.7 0.496 L -0.121 0.828 L 0.479 0.713 L 0.88 0.207 L 1.009 -0.387 L 1.01 -0.86 L 0.79 -0.86 L 0.791 -0.413 L 0.68 0.113 L 0.361 0.527 L -0.079 0.612 L -0.54 0.344 L -0.793 -0.146 L -0.79 -0.72 Z"
+    },
+    "the-crossover": {
+      "label": "The Crossover",
+      "leagues": ["NBA", "WNBA"],
+      "topology": {"primary": "chain", "secondary": []},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.9, "y": 0.78, "side": "L", "prominence": 2},
+        {"id": 1, "x": -0.44, "y": -0.6, "side": "L", "prominence": 3},
+        {"id": 2, "x": 0.02, "y": 0.68, "side": "C", "prominence": 1},
+        {"id": 3, "x": 0.46, "y": -0.72, "side": "R", "prominence": 3},
+        {"id": 4, "x": 0.9, "y": 0.5, "side": "R", "prominence": 2}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4]],
+      "silhouette": "M -0.786 0.818 L -0.427 -0.481 L 0.036 0.799 L 0.484 -0.602 L 0.787 0.541 L 1.013 0.459 L 0.436 -0.838 L 0.004 0.561 L -0.453 -0.719 L -1.014 0.742 Z"
+    },
+    "the-alley-oop": {
+      "label": "The Alley-Oop",
+      "leagues": ["NBA", "WNBA"],
+      "topology": {"primary": "chain", "secondary": ["hub"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.92, "y": -0.7, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.66, "y": 0.14, "side": "L", "prominence": 3},
+        {"id": 2, "x": -0.22, "y": 0.66, "side": "L", "prominence": 4},
+        {"id": 3, "x": 0.24, "y": 0.82, "side": "R", "prominence": 4},
+        {"id": 4, "x": 0.66, "y": 0.5, "side": "R", "prominence": 3},
+        {"id": 5, "x": 0.9, "y": -0.42, "side": "R", "prominence": 2}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]],
+      "silhouette": "M -1.025 -0.667 L -0.758 0.19 L -0.286 0.748 L 0.26 0.928 L 0.757 0.552 L 1.006 -0.392 L 0.794 -0.448 L 0.563 0.448 L 0.22 0.712 L -0.154 0.572 L -0.562 0.09 L -0.815 -0.733 Z"
+    },
+    "the-sneakers": {
+      "label": "The Sneakers",
+      "leagues": ["NBA", "WNBA"],
+      "topology": {"primary": "twin", "secondary": ["chain"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.88, "y": 0.5, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.32, "y": 0.5, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.24, "y": 0.02, "side": "L", "prominence": 3},
+        {"id": 3, "x": -0.88, "y": 0.02, "side": "L", "prominence": 4},
+        {"id": 4, "x": 0.24, "y": -0.02, "side": "R", "prominence": 3},
+        {"id": 5, "x": 0.88, "y": -0.02, "side": "R", "prominence": 4},
+        {"id": 6, "x": 0.88, "y": -0.54, "side": "R", "prominence": 1},
+        {"id": 7, "x": 0.32, "y": -0.54, "side": "R", "prominence": 2},
+        {"id": 8, "x": -0.56, "y": 0.86, "side": "L", "prominence": 5},
+        {"id": 9, "x": 0.56, "y": -0.9, "side": "R", "prominence": 5}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 8], [8, 1], [6, 9], [9, 7]],
+      "silhouette": "M -0.92 0.54 L -0.28 0.54 L -0.2 -0.02 L -0.92 -0.02 Z M 0.92 -0.58 L 0.28 -0.58 L 0.2 -0.02 L 0.92 -0.02 Z"
+    },
+    "the-wristbands": {
+      "label": "The Wristbands",
+      "leagues": ["NBA", "WNBA"],
+      "topology": {"primary": "twin", "secondary": ["mesh"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.9, "y": 0.66, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.34, "y": 0.66, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.34, "y": 0.06, "side": "L", "prominence": 3},
+        {"id": 3, "x": -0.9, "y": 0.06, "side": "L", "prominence": 4},
+        {"id": 4, "x": 0.34, "y": -0.06, "side": "R", "prominence": 3},
+        {"id": 5, "x": 0.9, "y": -0.06, "side": "R", "prominence": 4},
+        {"id": 6, "x": 0.9, "y": -0.7, "side": "R", "prominence": 1},
+        {"id": 7, "x": 0.34, "y": -0.7, "side": "R", "prominence": 2},
+        {"id": 8, "x": -0.62, "y": 0.36, "side": "C", "prominence": 5},
+        {"id": 9, "x": 0.62, "y": -0.38, "side": "C", "prominence": 5}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 8], [8, 2], [5, 9], [9, 7]],
+      "silhouette": "M -0.94 0.7 L -0.3 0.7 L -0.3 0.02 L -0.94 0.02 Z M 0.94 -0.02 L 0.3 -0.02 L 0.3 -0.74 L 0.94 -0.74 Z"
+    },
+    "the-elbows": {
+      "label": "The Elbows",
+      "leagues": ["NBA", "WNBA"],
+      "topology": {"primary": "twin", "secondary": []},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.9, "y": 0.84, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.3, "y": 0.84, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.3, "y": 0.1, "side": "L", "prominence": 3},
+        {"id": 3, "x": -0.9, "y": 0.1, "side": "L", "prominence": 4},
+        {"id": 4, "x": -0.6, "y": -0.5, "side": "C", "prominence": 5},
+        {"id": 5, "x": 0.9, "y": 0.84, "side": "R", "prominence": 1},
+        {"id": 6, "x": 0.3, "y": 0.84, "side": "R", "prominence": 2},
+        {"id": 7, "x": 0.3, "y": 0.1, "side": "R", "prominence": 3},
+        {"id": 8, "x": 0.9, "y": 0.1, "side": "R", "prominence": 4},
+        {"id": 9, "x": 0.6, "y": -0.5, "side": "C", "prominence": 5}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 0], [2, 4], [3, 4], [5, 6], [6, 7], [7, 8], [8, 5], [7, 9], [8, 9]],
+      "silhouette": "M -0.94 0.88 L -0.26 0.88 L -0.26 0.06 L -0.94 0.06 Z M 0.94 0.88 L 0.26 0.88 L 0.26 0.06 L 0.94 0.06 Z"
+    },
+    "the-court": {
+      "label": "The Court",
+      "leagues": ["NBA", "WNBA"],
+      "topology": {"primary": "mesh", "secondary": ["twin"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": -0.92, "y": 0.84, "side": "L", "prominence": 1},
+        {"id": 1, "x": 0.92, "y": 0.84, "side": "R", "prominence": 1},
+        {"id": 2, "x": -0.92, "y": -0.84, "side": "L", "prominence": 2},
+        {"id": 3, "x": 0.92, "y": -0.84, "side": "R", "prominence": 2},
+        {"id": 4, "x": 0, "y": 0.84, "side": "C", "prominence": 3},
+        {"id": 5, "x": 0, "y": -0.84, "side": "C", "prominence": 3},
+        {"id": 6, "x": -0.34, "y": 0.36, "side": "L", "prominence": 4},
+        {"id": 7, "x": 0.34, "y": 0.36, "side": "R", "prominence": 4},
+        {"id": 8, "x": -0.34, "y": -0.36, "side": "L", "prominence": 5},
+        {"id": 9, "x": 0.34, "y": -0.36, "side": "R", "prominence": 5}
+      ],
+      "outline": [[0, 4], [4, 1], [1, 3], [3, 5], [5, 2], [2, 0], [4, 5], [6, 7], [7, 9], [9, 8], [8, 6]],
+      "silhouette": "M -0.96 0.9 L 0.96 0.9 L 0.96 -0.9 L -0.96 -0.9 Z"
+    },
+    "the-huddle": {
+      "label": "The Huddle",
+      "leagues": ["NFL"],
+      "topology": {"primary": "hub", "secondary": ["mesh"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0, "side": "C", "prominence": 1},
+        {"id": 1, "x": 0, "y": 0.86, "side": "C", "prominence": 2},
+        {"id": 2, "x": -0.66, "y": 0.56, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0.66, "y": 0.56, "side": "R", "prominence": 3},
+        {"id": 4, "x": -0.86, "y": -0.14, "side": "L", "prominence": 4},
+        {"id": 5, "x": 0.86, "y": -0.14, "side": "R", "prominence": 4},
+        {"id": 6, "x": -0.46, "y": -0.76, "side": "L", "prominence": 5},
+        {"id": 7, "x": 0.46, "y": -0.76, "side": "R", "prominence": 5},
+        {"id": 8, "x": 0, "y": -0.92, "side": "C", "prominence": 6}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7], [0, 8]],
+      "silhouette": "M 0 0.9 C 0.49707 0.9 0.9 0.49707 0.9 0 C 0.9 -0.49707 0.49707 -0.9 0 -0.9 C -0.49707 -0.9 -0.9 -0.49707 -0.9 0 C -0.9 0.49707 -0.49707 0.9 0 0.9 Z"
+    },
+    "the-kicking-tee": {
+      "label": "The Kicking Tee",
+      "leagues": ["NFL"],
+      "topology": {"primary": "hub", "secondary": ["twin"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0.12, "side": "C", "prominence": 1},
+        {"id": 1, "x": 0, "y": 0.9, "side": "C", "prominence": 2},
+        {"id": 2, "x": -0.9, "y": -0.12, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0.9, "y": -0.12, "side": "R", "prominence": 3},
+        {"id": 4, "x": -0.5, "y": -0.8, "side": "L", "prominence": 4},
+        {"id": 5, "x": 0.5, "y": -0.8, "side": "R", "prominence": 4},
+        {"id": 6, "x": -0.46, "y": 0.5, "side": "L", "prominence": 5},
+        {"id": 7, "x": 0.46, "y": 0.5, "side": "R", "prominence": 5}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7]],
+      "silhouette": "M -0.94 -0.18 C -0.5 0.36 0.5 0.36 0.94 -0.18 L 0.56 -0.86 L -0.56 -0.86 Z"
+    },
+    "the-chain-gang": {
+      "label": "The Chain Gang",
+      "leagues": ["NFL"],
+      "topology": {"primary": "chain", "secondary": ["twin"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.9, "y": -0.68, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.54, "y": -0.24, "side": "L", "prominence": 3},
+        {"id": 2, "x": -0.18, "y": 0.2, "side": "L", "prominence": 4},
+        {"id": 3, "x": 0.18, "y": 0.2, "side": "R", "prominence": 4},
+        {"id": 4, "x": 0.54, "y": -0.24, "side": "R", "prominence": 3},
+        {"id": 5, "x": 0.9, "y": -0.68, "side": "R", "prominence": 1},
+        {"id": 6, "x": 0, "y": 0.88, "side": "C", "prominence": 2}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [2, 6], [6, 3]],
+      "silhouette": "M -0.985 -0.61 L -0.625 -0.17 L -0.237 0.294 L 0.237 0.294 L 0.625 -0.17 L 0.985 -0.61 L 0.815 -0.75 L 0.455 -0.31 L 0.123 0.106 L -0.123 0.106 L -0.455 -0.31 L -0.815 -0.75 Z"
+    },
+    "the-route": {
+      "label": "The Route",
+      "leagues": ["NFL"],
+      "topology": {"primary": "chain", "secondary": []},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.9, "y": -0.86, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.9, "y": -0.1, "side": "L", "prominence": 3},
+        {"id": 2, "x": -0.9, "y": 0.5, "side": "L", "prominence": 2},
+        {"id": 3, "x": -0.3, "y": 0.5, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.3, "y": 0.7, "side": "R", "prominence": 4},
+        {"id": 5, "x": 0.9, "y": 0.86, "side": "R", "prominence": 2}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]],
+      "silhouette": "M -1.01 -0.86 L -1.01 -0.1 L -0.978 0.578 L -0.318 0.609 L 0.268 0.805 L 0.872 0.966 L 0.928 0.754 L 0.332 0.595 L -0.282 0.391 L -0.822 0.422 L -0.79 -0.1 L -0.79 -0.86 Z"
+    },
+    "the-hashmarks": {
+      "label": "The Hashmarks",
+      "leagues": ["NFL"],
+      "topology": {"primary": "chain", "secondary": ["mesh"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.9, "y": 0.9, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.54, "y": 0.5, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.18, "y": 0.1, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0.18, "y": -0.3, "side": "R", "prominence": 3},
+        {"id": 4, "x": 0.54, "y": -0.7, "side": "R", "prominence": 2},
+        {"id": 5, "x": 0.9, "y": -0.9, "side": "R", "prominence": 1}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]],
+      "silhouette": "M -0.803 0.987 L -0.443 0.587 L -0.083 0.187 L 0.277 -0.213 L 0.623 -0.6 L 0.963 -0.786 L 0.837 -1.014 L 0.457 -0.8 L 0.083 -0.387 L -0.277 0.013 L -0.637 0.413 L -0.997 0.813 Z"
+    },
+    "the-shoulder-pads": {
+      "label": "The Shoulder Pads",
+      "leagues": ["NFL"],
+      "topology": {"primary": "twin", "secondary": ["hub"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.9, "y": 0.4, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.9, "y": -0.3, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.34, "y": -0.5, "side": "L", "prominence": 3},
+        {"id": 3, "x": -0.2, "y": 0.34, "side": "L", "prominence": 4},
+        {"id": 4, "x": 0.2, "y": 0.34, "side": "R", "prominence": 4},
+        {"id": 5, "x": 0.34, "y": -0.5, "side": "R", "prominence": 3},
+        {"id": 6, "x": 0.9, "y": -0.3, "side": "R", "prominence": 2},
+        {"id": 7, "x": 0.9, "y": 0.4, "side": "R", "prominence": 1},
+        {"id": 8, "x": 0, "y": 0.86, "side": "C", "prominence": 5},
+        {"id": 9, "x": 0, "y": -0.84, "side": "C", "prominence": 6}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [3, 8], [8, 4], [2, 9], [9, 5]],
+      "silhouette": "M -0.94 0.46 C -0.6 0.66 -0.28 0.5 -0.16 0.34 L -0.36 -0.56 L -0.94 -0.36 Z M 0.94 0.46 C 0.6 0.66 0.28 0.5 0.16 0.34 L 0.36 -0.56 L 0.94 -0.36 Z"
+    },
+    "the-goal-line": {
+      "label": "The Goal Line",
+      "leagues": ["NFL"],
+      "topology": {"primary": "twin", "secondary": ["chain"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.84, "y": 0.86, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.84, "y": 0.16, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.66, "y": -0.34, "side": "L", "prominence": 3},
+        {"id": 3, "x": -0.5, "y": -0.84, "side": "L", "prominence": 4},
+        {"id": 4, "x": 0.84, "y": 0.86, "side": "R", "prominence": 1},
+        {"id": 5, "x": 0.84, "y": 0.16, "side": "R", "prominence": 2},
+        {"id": 6, "x": 0.66, "y": -0.34, "side": "R", "prominence": 3},
+        {"id": 7, "x": 0.5, "y": -0.84, "side": "R", "prominence": 4},
+        {"id": 8, "x": 0, "y": -0.6, "side": "C", "prominence": 5}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [4, 5], [5, 6], [6, 7], [3, 8], [8, 7]],
+      "silhouette": "M -0.9 0.9 L -0.72 0.9 L -0.44 -0.88 L -0.62 -0.88 Z M 0.9 0.9 L 0.72 0.9 L 0.44 -0.88 L 0.62 -0.88 Z"
+    },
+    "the-gridiron": {
+      "label": "The Gridiron",
+      "leagues": ["NFL"],
+      "topology": {"primary": "mesh", "secondary": ["chain"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": -0.92, "y": 0.82, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.3, "y": 0.82, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.3, "y": 0.82, "side": "R", "prominence": 2},
+        {"id": 3, "x": 0.92, "y": 0.82, "side": "R", "prominence": 1},
+        {"id": 4, "x": -0.92, "y": -0.82, "side": "L", "prominence": 3},
+        {"id": 5, "x": -0.3, "y": -0.82, "side": "L", "prominence": 4},
+        {"id": 6, "x": 0.3, "y": -0.82, "side": "R", "prominence": 4},
+        {"id": 7, "x": 0.92, "y": -0.82, "side": "R", "prominence": 3},
+        {"id": 8, "x": 0, "y": 0.82, "side": "C", "prominence": 5},
+        {"id": 9, "x": 0, "y": -0.82, "side": "C", "prominence": 5}
+      ],
+      "outline": [[0, 1], [1, 8], [8, 2], [2, 3], [4, 5], [5, 9], [9, 6], [6, 7], [0, 4], [1, 5], [8, 9], [2, 6], [3, 7]],
+      "silhouette": "M -0.96 0.88 L 0.96 0.88 L 0.96 -0.88 L -0.96 -0.88 Z"
+    },
+    "the-facemask": {
+      "label": "The Facemask",
+      "leagues": ["NFL"],
+      "topology": {"primary": "mesh", "secondary": ["twin"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": -0.9, "y": 0.72, "side": "L", "prominence": 1},
+        {"id": 1, "x": 0.9, "y": 0.72, "side": "R", "prominence": 1},
+        {"id": 2, "x": -0.9, "y": 0.1, "side": "L", "prominence": 2},
+        {"id": 3, "x": 0.9, "y": 0.1, "side": "R", "prominence": 2},
+        {"id": 4, "x": -0.72, "y": -0.5, "side": "L", "prominence": 3},
+        {"id": 5, "x": 0.72, "y": -0.5, "side": "R", "prominence": 3},
+        {"id": 6, "x": -0.34, "y": -0.88, "side": "L", "prominence": 4},
+        {"id": 7, "x": 0.34, "y": -0.88, "side": "R", "prominence": 4},
+        {"id": 8, "x": 0, "y": 0.4, "side": "C", "prominence": 5},
+        {"id": 9, "x": 0, "y": -0.24, "side": "C", "prominence": 5}
+      ],
+      "outline": [[0, 1], [0, 2], [1, 3], [2, 3], [2, 4], [3, 5], [4, 5], [4, 6], [5, 7], [6, 7], [8, 0], [8, 1], [9, 4], [9, 5]],
+      "silhouette": "M -0.94 0.78 L 0.94 0.78 L 0.94 0.06 C 0.86 -0.6 0.5 -0.94 0 -0.94 C -0.5 -0.94 -0.86 -0.6 -0.94 0.06 Z"
+    },
+    "the-mound": {
+      "label": "The Mound",
+      "leagues": ["MLB"],
+      "topology": {"primary": "hub", "secondary": ["mesh"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0.06, "side": "C", "prominence": 1},
+        {"id": 1, "x": 0, "y": 0.88, "side": "C", "prominence": 2},
+        {"id": 2, "x": -0.9, "y": 0.28, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0.9, "y": 0.28, "side": "R", "prominence": 3},
+        {"id": 4, "x": -0.62, "y": -0.62, "side": "L", "prominence": 4},
+        {"id": 5, "x": 0.62, "y": -0.62, "side": "R", "prominence": 4},
+        {"id": 6, "x": 0, "y": -0.86, "side": "C", "prominence": 5},
+        {"id": 7, "x": -0.28, "y": 0.06, "side": "L", "prominence": 6},
+        {"id": 8, "x": 0.28, "y": 0.06, "side": "R", "prominence": 6}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [7, 8]],
+      "silhouette": "M -0.94 -0.5 C -0.7 0.4 0.7 0.4 0.94 -0.5 Z"
+    },
+    "the-cap": {
+      "label": "The Cap",
+      "leagues": ["MLB"],
+      "topology": {"primary": "hub", "secondary": ["twin"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0.78, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.44, "y": 0.34, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.44, "y": 0.34, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.84, "y": -0.08, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.84, "y": -0.08, "side": "R", "prominence": 3},
+        {"id": 5, "x": 0, "y": 0.02, "side": "C", "prominence": 4},
+        {"id": 6, "x": 0.92, "y": -0.56, "side": "R", "prominence": 5},
+        {"id": 7, "x": 0.5, "y": -0.62, "side": "R", "prominence": 6},
+        {"id": 8, "x": -0.6, "y": -0.66, "side": "L", "prominence": 7}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [4, 6], [6, 7], [3, 8]],
+      "silhouette": "M -0.88 -0.1 C -0.86 0.84 0.86 0.84 0.88 -0.1 Z M 0.5 -0.16 C 0.86 -0.16 0.96 -0.44 0.94 -0.62 L 0.46 -0.66 Z"
+    },
+    "the-basepath": {
+      "label": "The Basepath",
+      "leagues": ["MLB"],
+      "topology": {"primary": "chain", "secondary": ["mesh"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": 0, "y": -0.9, "side": "C", "prominence": 1},
+        {"id": 1, "x": 0.62, "y": -0.28, "side": "R", "prominence": 2},
+        {"id": 2, "x": 0.9, "y": 0.34, "side": "R", "prominence": 3},
+        {"id": 3, "x": 0.28, "y": 0.9, "side": "R", "prominence": 2},
+        {"id": 4, "x": -0.34, "y": 0.34, "side": "L", "prominence": 4},
+        {"id": 5, "x": -0.9, "y": -0.24, "side": "L", "prominence": 3}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]],
+      "silhouette": "M -0.078 -0.822 L 0.531 -0.215 L 0.794 0.31 L 0.28 0.79 L -0.264 0.261 L -0.821 -0.316 L -0.979 -0.164 L -0.416 0.419 L 0.28 1.01 L 1.006 0.37 L 0.709 -0.345 L 0.078 -0.978 Z"
+    },
+    "the-warning-track": {
+      "label": "The Warning Track",
+      "leagues": ["MLB"],
+      "topology": {"primary": "chain", "secondary": ["twin"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.9, "y": -0.66, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.82, "y": 0.06, "side": "L", "prominence": 3},
+        {"id": 2, "x": -0.44, "y": 0.62, "side": "L", "prominence": 4},
+        {"id": 3, "x": 0.14, "y": 0.86, "side": "R", "prominence": 2},
+        {"id": 4, "x": 0.68, "y": 0.56, "side": "R", "prominence": 4},
+        {"id": 5, "x": 0.9, "y": -0.1, "side": "R", "prominence": 3},
+        {"id": 6, "x": 0.86, "y": -0.7, "side": "R", "prominence": 1}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6]],
+      "silhouette": "M -1.029 -0.646 L -0.942 0.104 L -0.523 0.72 L 0.147 0.99 L 0.782 0.641 L 1.029 -0.082 L 0.99 -0.709 L 0.73 -0.691 L 0.771 -0.118 L 0.578 0.479 L 0.133 0.73 L -0.357 0.52 L -0.698 0.016 L -0.771 -0.674 Z"
+    },
+    "the-shin-guards": {
+      "label": "The Shin Guards",
+      "leagues": ["MLB"],
+      "topology": {"primary": "twin", "secondary": ["chain"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.82, "y": 0.86, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.34, "y": 0.86, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.26, "y": -0.36, "side": "L", "prominence": 3},
+        {"id": 3, "x": -0.74, "y": -0.36, "side": "L", "prominence": 4},
+        {"id": 4, "x": -0.5, "y": -0.86, "side": "C", "prominence": 5},
+        {"id": 5, "x": 0.82, "y": 0.86, "side": "R", "prominence": 1},
+        {"id": 6, "x": 0.34, "y": 0.86, "side": "R", "prominence": 2},
+        {"id": 7, "x": 0.26, "y": -0.36, "side": "R", "prominence": 3},
+        {"id": 8, "x": 0.74, "y": -0.36, "side": "R", "prominence": 4},
+        {"id": 9, "x": 0.5, "y": -0.86, "side": "C", "prominence": 5}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 0], [2, 4], [3, 4], [5, 6], [6, 7], [7, 8], [8, 5], [7, 9], [8, 9]],
+      "silhouette": "M -0.86 0.9 L -0.3 0.9 L -0.22 -0.4 L -0.44 -0.9 L -0.58 -0.9 L -0.78 -0.4 Z M 0.86 0.9 L 0.3 0.9 L 0.22 -0.4 L 0.44 -0.9 L 0.58 -0.9 L 0.78 -0.4 Z"
+    },
+    "the-batters-boxes": {
+      "label": "The Batter's Boxes",
+      "leagues": ["MLB"],
+      "topology": {"primary": "twin", "secondary": ["mesh"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.9, "y": 0.66, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.28, "y": 0.66, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.28, "y": -0.4, "side": "L", "prominence": 3},
+        {"id": 3, "x": -0.9, "y": -0.4, "side": "L", "prominence": 4},
+        {"id": 4, "x": 0.9, "y": 0.66, "side": "R", "prominence": 1},
+        {"id": 5, "x": 0.28, "y": 0.66, "side": "R", "prominence": 2},
+        {"id": 6, "x": 0.28, "y": -0.4, "side": "R", "prominence": 3},
+        {"id": 7, "x": 0.9, "y": -0.4, "side": "R", "prominence": 4},
+        {"id": 8, "x": 0, "y": -0.62, "side": "C", "prominence": 5},
+        {"id": 9, "x": 0, "y": -0.9, "side": "C", "prominence": 6}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [2, 8], [8, 6], [8, 9]],
+      "silhouette": "M -0.94 0.7 L -0.24 0.7 L -0.24 -0.44 L -0.94 -0.44 Z M 0.94 0.7 L 0.24 0.7 L 0.24 -0.44 L 0.94 -0.44 Z"
+    },
+    "the-catchers-mask": {
+      "label": "The Catcher's Mask",
+      "leagues": ["MLB"],
+      "topology": {"primary": "mesh", "secondary": ["hub"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0.9, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.66, "y": 0.62, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.66, "y": 0.62, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.86, "y": 0.02, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.86, "y": 0.02, "side": "R", "prominence": 3},
+        {"id": 5, "x": -0.6, "y": -0.6, "side": "L", "prominence": 4},
+        {"id": 6, "x": 0.6, "y": -0.6, "side": "R", "prominence": 4},
+        {"id": 7, "x": 0, "y": -0.9, "side": "C", "prominence": 5},
+        {"id": 8, "x": -0.3, "y": 0.02, "side": "L", "prominence": 6},
+        {"id": 9, "x": 0.3, "y": 0.02, "side": "R", "prominence": 6}
+      ],
+      "outline": [[0, 1], [1, 3], [3, 5], [5, 7], [7, 6], [6, 4], [4, 2], [2, 0], [1, 2], [3, 4], [5, 6], [8, 9], [0, 8], [7, 9]],
+      "silhouette": "M 0 0.94 C 0.519162 0.94 0.94 0.519162 0.94 0 C 0.94 -0.519162 0.519162 -0.94 0 -0.94 C -0.519162 -0.94 -0.94 -0.519162 -0.94 0 C -0.94 0.519162 -0.519162 0.94 0 0.94 Z"
+    },
+    "the-faceoff": {
+      "label": "The Faceoff",
+      "leagues": ["NHL"],
+      "topology": {"primary": "hub", "secondary": ["mesh"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.9, "y": 0.44, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.9, "y": 0.44, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.9, "y": -0.44, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.9, "y": -0.44, "side": "R", "prominence": 3},
+        {"id": 5, "x": 0, "y": 0.9, "side": "C", "prominence": 4},
+        {"id": 6, "x": 0, "y": -0.9, "side": "C", "prominence": 4},
+        {"id": 7, "x": -0.48, "y": 0, "side": "L", "prominence": 5},
+        {"id": 8, "x": 0.48, "y": 0, "side": "R", "prominence": 5}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [7, 8]],
+      "silhouette": "M 0 0.86 C 0.474978 0.86 0.86 0.474978 0.86 0 C 0.86 -0.474978 0.474978 -0.86 0 -0.86 C -0.474978 -0.86 -0.86 -0.474978 -0.86 0 C -0.86 0.474978 -0.474978 0.86 0 0.86 Z"
+    },
+    "the-trapper": {
+      "label": "The Trapper",
+      "leagues": ["NHL"],
+      "topology": {"primary": "hub", "secondary": ["twin"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": -0.08, "y": -0.1, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.72, "y": 0.5, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.16, "y": 0.86, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0.44, "y": 0.72, "side": "R", "prominence": 4},
+        {"id": 4, "x": 0.8, "y": 0.24, "side": "R", "prominence": 5},
+        {"id": 5, "x": 0.7, "y": -0.44, "side": "R", "prominence": 6},
+        {"id": 6, "x": 0.06, "y": -0.88, "side": "C", "prominence": 2},
+        {"id": 7, "x": -0.84, "y": -0.36, "side": "L", "prominence": 3},
+        {"id": 8, "x": -0.9, "y": 0.06, "side": "L", "prominence": 7}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7], [0, 8], [1, 2], [2, 3], [3, 4], [4, 5]],
+      "silhouette": "M -0.92 0.1 C -0.92 0.8 0.1 1 0.5 0.76 C 0.94 0.5 0.86 -0.4 0.1 -0.92 C -0.5 -0.9 -0.9 -0.42 -0.92 0.1 Z"
+    },
+    "the-goal-light": {
+      "label": "The Goal Light",
+      "leagues": ["NHL"],
+      "topology": {"primary": "hub", "secondary": []},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": -0.06, "side": "C", "prominence": 1},
+        {"id": 1, "x": 0, "y": 0.9, "side": "C", "prominence": 2},
+        {"id": 2, "x": -0.66, "y": 0.66, "side": "L", "prominence": 3},
+        {"id": 3, "x": 0.66, "y": 0.66, "side": "R", "prominence": 3},
+        {"id": 4, "x": -0.92, "y": -0.02, "side": "L", "prominence": 4},
+        {"id": 5, "x": 0.92, "y": -0.02, "side": "R", "prominence": 4},
+        {"id": 6, "x": -0.56, "y": -0.7, "side": "L", "prominence": 5},
+        {"id": 7, "x": 0.56, "y": -0.7, "side": "R", "prominence": 5},
+        {"id": 8, "x": 0, "y": -0.9, "side": "C", "prominence": 6}
+      ],
+      "outline": [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7], [0, 8]],
+      "silhouette": "M -0.56 -0.44 C -0.56 0.5 0.56 0.5 0.56 -0.44 Z"
+    },
+    "the-slapshot": {
+      "label": "The Slapshot",
+      "leagues": ["NHL"],
+      "topology": {"primary": "chain", "secondary": ["hub"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.9, "y": 0.86, "side": "L", "prominence": 2},
+        {"id": 1, "x": -0.5, "y": 0.3, "side": "L", "prominence": 3},
+        {"id": 2, "x": -0.1, "y": -0.12, "side": "L", "prominence": 4},
+        {"id": 3, "x": 0.34, "y": -0.5, "side": "R", "prominence": 3},
+        {"id": 4, "x": 0.9, "y": -0.68, "side": "R", "prominence": 1},
+        {"id": 5, "x": 0.62, "y": 0.44, "side": "R", "prominence": 5}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5]],
+      "silhouette": "M -0.802 0.93 L -0.407 0.376 L -0.017 -0.033 L 0.399 -0.395 L 0.937 -0.566 L 0.863 -0.794 L 0.281 -0.605 L -0.183 -0.207 L -0.593 0.224 L -0.998 0.79 Z"
+    },
+    "the-goalie-pads": {
+      "label": "The Goalie Pads",
+      "leagues": ["NHL"],
+      "topology": {"primary": "twin", "secondary": ["mesh"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.88, "y": 0.88, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.26, "y": 0.88, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.26, "y": -0.5, "side": "L", "prominence": 3},
+        {"id": 3, "x": -0.88, "y": -0.5, "side": "L", "prominence": 4},
+        {"id": 4, "x": -0.57, "y": 0.18, "side": "C", "prominence": 5},
+        {"id": 5, "x": 0.88, "y": 0.88, "side": "R", "prominence": 1},
+        {"id": 6, "x": 0.26, "y": 0.88, "side": "R", "prominence": 2},
+        {"id": 7, "x": 0.26, "y": -0.5, "side": "R", "prominence": 3},
+        {"id": 8, "x": 0.88, "y": -0.5, "side": "R", "prominence": 4},
+        {"id": 9, "x": 0.57, "y": 0.18, "side": "C", "prominence": 5}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 0], [0, 4], [4, 1], [2, 4], [4, 3], [5, 6], [6, 7], [7, 8], [8, 5], [5, 9], [9, 6], [7, 9], [9, 8]],
+      "silhouette": "M -0.92 0.92 L -0.22 0.92 L -0.22 -0.54 L -0.92 -0.54 Z M 0.92 0.92 L 0.22 0.92 L 0.22 -0.54 L 0.92 -0.54 Z"
+    },
+    "the-crossed-sticks": {
+      "label": "The Crossed Sticks",
+      "leagues": ["NHL"],
+      "topology": {"primary": "twin", "secondary": ["chain"]},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.9, "y": 0.82, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.46, "y": 0.3, "side": "L", "prominence": 3},
+        {"id": 2, "x": 0.44, "y": -0.76, "side": "R", "prominence": 5},
+        {"id": 3, "x": 0.9, "y": -0.9, "side": "R", "prominence": 2},
+        {"id": 4, "x": 0.9, "y": 0.82, "side": "R", "prominence": 1},
+        {"id": 5, "x": 0.46, "y": 0.3, "side": "R", "prominence": 3},
+        {"id": 6, "x": -0.44, "y": -0.76, "side": "L", "prominence": 5},
+        {"id": 7, "x": -0.9, "y": -0.9, "side": "L", "prominence": 2},
+        {"id": 8, "x": 0, "y": -0.24, "side": "C", "prominence": 4}
+      ],
+      "outline": [[0, 1], [1, 8], [8, 2], [2, 3], [4, 5], [5, 8], [8, 6], [6, 7]],
+      "silhouette": "M -0.94 0.86 L -0.8 0.7 L 0.94 -0.78 L 0.94 -0.94 L 0.72 -0.94 Z M 0.94 0.86 L 0.8 0.7 L -0.94 -0.78 L -0.94 -0.94 L -0.72 -0.94 Z"
+    },
+    "the-blue-lines": {
+      "label": "The Blue Lines",
+      "leagues": ["NHL"],
+      "topology": {"primary": "twin", "secondary": []},
+      "min_nodes": 3,
+      "vertices": [
+        {"id": 0, "x": -0.66, "y": 0.9, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.66, "y": 0.3, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.66, "y": -0.3, "side": "L", "prominence": 2},
+        {"id": 3, "x": -0.66, "y": -0.9, "side": "L", "prominence": 1},
+        {"id": 4, "x": 0.66, "y": 0.9, "side": "R", "prominence": 1},
+        {"id": 5, "x": 0.66, "y": 0.3, "side": "R", "prominence": 2},
+        {"id": 6, "x": 0.66, "y": -0.3, "side": "R", "prominence": 2},
+        {"id": 7, "x": 0.66, "y": -0.9, "side": "R", "prominence": 1},
+        {"id": 8, "x": 0, "y": 0.34, "side": "C", "prominence": 3},
+        {"id": 9, "x": 0, "y": -0.34, "side": "C", "prominence": 3}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [4, 5], [5, 6], [6, 7], [1, 8], [8, 5], [2, 9], [9, 6]],
+      "silhouette": "M -0.76 0.94 L -0.56 0.94 L -0.56 -0.94 L -0.76 -0.94 Z M 0.76 0.94 L 0.56 0.94 L 0.56 -0.94 L 0.76 -0.94 Z"
+    },
+    "the-zamboni": {
+      "label": "The Zamboni",
+      "leagues": ["NHL"],
+      "topology": {"primary": "mesh", "secondary": ["chain"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": -0.9, "y": -0.16, "side": "L", "prominence": 1},
+        {"id": 1, "x": -0.36, "y": -0.16, "side": "L", "prominence": 2},
+        {"id": 2, "x": -0.36, "y": 0.5, "side": "L", "prominence": 3},
+        {"id": 3, "x": -0.9, "y": 0.5, "side": "L", "prominence": 4},
+        {"id": 4, "x": 0.34, "y": 0.86, "side": "R", "prominence": 5},
+        {"id": 5, "x": 0.9, "y": 0.86, "side": "R", "prominence": 1},
+        {"id": 6, "x": 0.9, "y": -0.16, "side": "R", "prominence": 2},
+        {"id": 7, "x": 0.34, "y": -0.16, "side": "R", "prominence": 3},
+        {"id": 8, "x": -0.56, "y": -0.72, "side": "L", "prominence": 6},
+        {"id": 9, "x": 0.56, "y": -0.72, "side": "R", "prominence": 6}
+      ],
+      "outline": [[0, 1], [1, 2], [2, 3], [3, 0], [1, 7], [7, 4], [4, 5], [5, 6], [6, 7], [0, 8], [8, 9], [9, 6]],
+      "silhouette": "M -0.94 -0.2 L -0.94 0.54 L -0.32 0.54 L 0.3 0.9 L 0.94 0.9 L 0.94 -0.2 Z"
+    },
+    "the-goalie-mask": {
+      "label": "The Goalie Mask",
+      "leagues": ["NHL"],
+      "topology": {"primary": "mesh", "secondary": ["hub"]},
+      "min_nodes": 4,
+      "vertices": [
+        {"id": 0, "x": 0, "y": 0.92, "side": "C", "prominence": 1},
+        {"id": 1, "x": -0.62, "y": 0.66, "side": "L", "prominence": 2},
+        {"id": 2, "x": 0.62, "y": 0.66, "side": "R", "prominence": 2},
+        {"id": 3, "x": -0.86, "y": 0.06, "side": "L", "prominence": 3},
+        {"id": 4, "x": 0.86, "y": 0.06, "side": "R", "prominence": 3},
+        {"id": 5, "x": -0.54, "y": -0.62, "side": "L", "prominence": 4},
+        {"id": 6, "x": 0.54, "y": -0.62, "side": "R", "prominence": 4},
+        {"id": 7, "x": 0, "y": -0.92, "side": "C", "prominence": 5},
+        {"id": 8, "x": -0.28, "y": 0.32, "side": "L", "prominence": 6},
+        {"id": 9, "x": 0.28, "y": 0.32, "side": "R", "prominence": 6},
+        {"id": 10, "x": 0, "y": -0.24, "side": "C", "prominence": 7}
+      ],
+      "outline": [[0, 1], [1, 3], [3, 5], [5, 7], [7, 6], [6, 4], [4, 2], [2, 0], [8, 9], [8, 10], [9, 10], [0, 8], [0, 9], [7, 10]],
+      "silhouette": "M -0.9 0.24 C -0.9 0.8 -0.5 0.96 0 0.96 C 0.5 0.96 0.9 0.8 0.9 0.24 C 0.9 -0.5 0.5 -0.96 0 -0.96 C -0.5 -0.96 -0.9 -0.5 -0.9 0.24 Z"
+    }
+  }
+}

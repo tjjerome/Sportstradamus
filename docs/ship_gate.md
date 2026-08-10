@@ -16,16 +16,17 @@ ground truth:
 - **Shipped count (the numerator):** the `shipped` field in
   [`stat_meta.json`](../src/sportstradamus/data/config/stat_meta.json) —
   `"devel"` / `"main"` ship; `"withheld"` does not.
-- **Standings + the push to 75%:** [`operation_ship_75.md`](operation_ship_75.md)
-  §"Current standings".
-- **Per-cell gate pass/fail:** a fresh `python -m sportstradamus.training.scorecard`
+- **The track that ships against these gates:**
+  [`handoffs/model_improvement_track.md`](handoffs/model_improvement_track.md) (standings are
+  never prose — its §3 ground-truth commands).
+- **Per-cell gate pass/fail:** a fresh `sportstradamus ship scorecard`
   sweep (`model_stats.parquet` can lag a gate redefinition).
 
 **Source of truth (code):** the gate constants, `gate_row()`, `apply_thresholds()` and
-the five `_gate*` helpers in
+the `_gate*` helpers in
 [src/sportstradamus/training/scorecard.py](../src/sportstradamus/training/scorecard.py).
 
-_Last updated: 2026-06-03._
+_Last updated: 2026-06-19._
 
 ---
 
@@ -36,20 +37,23 @@ with an **offline** check at research→devel and a **live** check at devel→ma
 
 |  | research → devel (offline) | devel → main (live) |
 |---|---|---|
-| **Set first baseline** | The **5 gates** below | **Profitability:** positive Kelly-sized ROI on settled data |
-| **Supersede incumbent** | **S1** pass all 5 + **S2** paired Brier CI + **S3** paired Sharpe (backdated Kelly sim) | **≥ +0.5% ROI vs the incumbent on live data for ≥ 2 weeks** |
+| **Set first baseline** | The **6 gates** below | **Profitability:** positive Kelly-sized ROI on settled data |
+| **Supersede incumbent** | **S1** pass all 6 + **S2** paired Brier CI + **S3** paired Sharpe (backdated Kelly sim) | **≥ +0.5% ROI vs the incumbent on live data for ≥ 2 weeks** |
 
 A served model that drifts back outside any of its track's bounds is **withheld and
 re-enters the set-baseline track** for a fresh baseline (drift monitor).
 
 ---
 
-## research → devel, set baseline: the 5 gates (strict)
+## research → devel, set baseline: the 6 gates (strict)
 
 Computed by `gate_row()` + `apply_thresholds()` on the test-set CSVs dumped by
-`meditate`. A cell **ships** iff all five pass. Star = top-mean **decile**; bench =
+`meditate`. A cell **ships** iff all six pass. Star = top-mean **decile**; bench =
 bottom-mean **quartile** (pooled coarser on purpose — low-volume players generalize
-more than stars).
+more than stars). Gate 6 **applies to every cell** and is the **OR of three one-sided
+anti-shrinkage legs** (recent-form, CITL-under, count over — below): the cell fails Gate 6
+if any leg fires. Only the recent-form leg is anchor-scoped (`corr(Mean10, Result)` with a
+hysteresis deadband); the CITL-under leg runs on every cell.
 
 | # | Gate | Formula | Threshold | Constant |
 |---|------|---------|-----------|----------|
@@ -58,12 +62,53 @@ more than stars).
 | 3 | **Bench σ-match** | Same on the bottom-mean quartile | `z < 0.5` | `_GATE3_BENCH_Z_MAX = 0.5` |
 | 4 | **PIT-KS calibration** | `pit_ks = KS(randomized-PIT, Uniform)` of the predictive CDF (seeded draws, averaged) | `pit_ks < max(δ, 1.358/√n)`, `δ = 0.05` — whole-CDF mispricing under the larger of the vig-scale effect floor and the cell's KS α=0.05 noise floor | `_GATE4_PIT_KS_DELTA = 0.05` |
 | 5 | **Equal-mass ECE** | 10 equal-mass `p_model` bins; `ece = Σ (n_b/N)·|mean(p_model) − mean(y)|` | `ece < 0.075` | `_GATE5_ECE_MAX = 0.075` |
+| 6 | **Anti-shrinkage (3 OR-ed legs)** | Fails if ANY leg fires; each is a player-clustered bootstrap one-sided CI on *stable* (`\|Mean10/MeanYr−1\| ≤ 0.12`) segments. **(a) recent-form** `Σ Blended_EV / Σ Mean10` on the top-MeanYr quartile (UB `star_hi`), anchored on `corr(Mean10, Result)` with a `0.58/0.52` hysteresis deadband. **(b) CITL-under** `Σ Blended_EV / Σ Result` on the same stars (UB `citl_hi`), every cell. **(c) over** `Σ Blended_EV / Σ Result` on the bottom-MeanYr quartile (LB `over_lo`), count/ZINB only, guarded by `mean(Result) ≥ 1` | recent-form `star_hi ≥ star_ref − 0.03` (`star_ref`: basketball `0.95`, NFL `0.94`); CITL `citl_hi ≥ 1 − 0.03`; over `over_lo ≤ 1 + 0.03` | `_GATE6_STAR_REF_BASKETBALL = 0.95`, `_GATE6_MARGIN = 0.03`, `_GATE6_FIRE_ON = 0.58`, `_GATE6_KEEP_ON = 0.52`, `_GATE6_OVER_MIN_MEAN = 1.0` |
 
 **Denominators are σ, not σ/√N.** Gates 2/3 use the segment's **standard deviation**
 (not the standard error of the mean). With ~2000 rows per cell, σ/√N collapses to
 near-zero on low-variance bench segments and the gate fires on a negligible bias;
 σ keeps the yardstick at "what a typical event in the segment looks like" regardless
 of N.
+
+**Gate 6 catches a stable-star regression toward the global mean the other five can miss.**
+The first case was the `ratio_meanyr` cohort: those cells divide the target by a 365-day
+MeanYr that conflates "high historical average" with "will regress", so the holdout itself
+teaches a high-volume regression real games don't show. The model fits that holdout
+faithfully — top-decile `mean(pred)/mean(Result) ≈ 1.0` — so every outcome-scored gate
+passes (a relative-bias rework of Gates 2/3 is equally blind: the holdout's own stable stars
+are suppressed). But the blind spot is general: Gate 2's bias `z` divides by the outcome σ,
+so on a high-variance stat a real proportional star shrinkage launders into a tiny `z` and
+passes (the shipped NBA fantasy-points case — stable stars served at `0.88×` recent form,
+Gate-2 `z = 0.22`). Three one-sided legs, OR-ed, cover the failure from different angles:
+
+1. **Recent-form** (the original leg): scores the *stable* top-MeanYr prediction against the
+   players' **recent form** (`Mean10`) — the one yardstick the `ratio_meanyr` holdout
+   corruption does not suppress (the held-out `Result` is itself suppressed, so a leg scored
+   against the outcome is structurally blind to that class). Fails when a stable star is
+   projected materially below the causal real-game floor (~0.99× recent form, measured from
+   6 seasons of gamelog; the floor is set to `0.95` to tolerate ~5% shrinkage, ~0.94 for NFL
+   position-mixed yardage). Anchored on `corr(Mean10, Result)`, because where recent form
+   doesn't predict the outcome (minutes, bursty counts) predicting below it is correct
+   regression, not shrinkage. The anchor uses a **`0.58/0.52` hysteresis deadband** — a fresh
+   cell is judged at `0.58`, a cell whose leg fired last run keeps being judged down to
+   `0.52` — so a cell whose `corr` straddles the boundary can't flip ship state on a retrain
+   wobble.
+2. **CITL-under** (calibration-in-the-large, every cell): scores the same stable stars'
+   `Σ Blended_EV / Σ Result` against the realized outcome, failing when the served prediction
+   sits materially below it (`citl_hi < 1 − 0.03`). This is the σ-denominator-free counterpart
+   to Gate 2 — it catches the proportional under-prediction the outcome confirms (NBA
+   fantasy-points) regardless of variance, and it runs without the anchor because the outcome
+   is always a valid yardstick.
+3. **Over** (count/ZINB bench): scores `Σ Blended_EV / Σ Result` on the stable *bottom*-MeanYr
+   quartile, failing when low-volume players are over-predicted (`over_lo > 1 + 0.03`). Guarded
+   by `mean(Result) ≥ 1` so it can't fire on degenerate rare counts where the ratio is
+   discreteness, not a defect.
+
+The recent-form and CITL legs are star-side (mean-regression deflates the stars, where recent
+form is also the cleanest yardstick); the over leg is the only bench-side check and is scoped to
+count families. Live symptom that motivated the original leg: served WNBA FGA projecting a stable
+13.4-shooter at 10.1 (Win-Prob pinned at the 0.90 clamp). [research:
+`/tmp/researcher_overshrinkage_gate.md`, `/tmp/researcher_gate6_scope_and_drift.md`]
 
 **Gate 1 is non-inferiority, not superiority.** Intent #3 is "the deployed ensemble
 is *at least as good as* the book," so a statistical **tie passes** — we do not demand
@@ -143,14 +188,20 @@ as the reported `g4_iqr_ratio`.
   retired IQR gate (randomized-PIT is well-defined on count cells), so that Step 0.4
   blank-pass workaround is closed.
 - **Gates 2/3 blank**: fail (couldn't compute).
+- **Gate 6 blank** (every leg untestable: recent form below the anchor / too few stable
+  stars / over-leg guard or non-count family): **auto-pass** — "not applicable", the only
+  blank-is-pass besides Gate 1. Each of the three legs auto-passes independently when it
+  can't test; Gate 6 fails only when a leg fires on a positive signal.
 
-**Oracle columns.** Every gate emits a sibling "oracle" value computed under the
+**Oracle columns.** Gates 1–5 each emit a sibling "oracle" value computed under the
 deterministic-1/0 oracle (`pred = Result`; over-prob `= 1 if Result>=Line else 0`):
 - Gate 1 oracle `mean = −book Brier` (and CI sits below 0), exposing the book's own
   Brier so the achievable headroom is visible.
 - Gate 2/3 oracle `z = 0`.
 - Gate 4 oracle `ratio = 1.0`.
 - Gate 5 oracle `ece = 0`.
+- Gate 6 has **no oracle** — its reference is the external causal floor, not the row's
+  own (artifact-suppressed) outcome.
 
 The σ / IQR_true denominators equal the model row, so the oracle row sizes each
 gate's natural threshold.
@@ -161,11 +212,11 @@ gate's natural threshold.
 
 A challenger replaces an established baseline only if **all three** hold. Computed by
 `supersede_verdict()` on two row-aligned test-set CSVs via
-`python -m sportstradamus.training.scorecard --baseline ... --candidate ...`.
+`sportstradamus ship scorecard --baseline ... --candidate ...`.
 
 | # | Gate | Rule |
 |---|------|------|
-| S1 | **Pass all 5** | The challenger clears every set-baseline gate above. |
+| S1 | **Pass all 6** | The challenger clears every set-baseline gate above. |
 | S2 | **Paired Brier CI** | `d_i = brier_current_i − brier_new_i` per shared event; 95% CI of `mean(d)` must have `ci_lo > 0` (CI excludes 0 in the new model's favor). |
 | S3 | **Paired Sharpe (backdated)** | Run the dashboard's Kelly-sized profit-sim (`strategies/profit_sim.py`) on the shared events for each model; `sharpe_new > sharpe_current`. |
 

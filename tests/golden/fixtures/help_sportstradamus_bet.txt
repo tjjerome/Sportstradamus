@@ -1,0 +1,11 @@
+Usage: sportstradamus bet [OPTIONS] COMMAND [ARGS]...
+
+  Bet sizing, pick'em building, and ledger tools.
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+  kelly          Re-size stakes from a recommendations YAML and print a table.
+  ledger-commit  Twice-daily policy_v1 commit: build candidates, draw,...
+  pickem         Build today's Pick'em entries for ``platform`` and emit...

@@ -75,10 +75,11 @@ reads fine.
 
 ## Mandatory reading — do this first
 
-Before touching any code, read these two documents once:
+Before touching any code, read these documents once:
 
-1. **[CONTRIBUTING.md](CONTRIBUTING.md)** — package map, data flow, where to find things,
-   how to make changes, how to add a league or market. Required reading. Not optional.
+1. **[CONTRIBUTING.md](CONTRIBUTING.md)** — contribution workflow: how to make changes,
+   how to add a league or market — plus **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
+   for the package map, data flow, and where to find things. Required reading. Not optional.
 2. **[docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md)** — formatting, naming, docstrings, type
    hints, dead-code rules. Cite sections by number in commits and comments.
 
@@ -97,6 +98,9 @@ to redo the work.
   when an edit adds one.
 * Use `click` over `argparse` for CLI args
 * Long-running scripts: add a status bar with `tqdm`
+* Money values are always `Decimal`, never `float`
+* Program roadmap: [docs/sportstradamus_roadmap_v3.md](docs/sportstradamus_roadmap_v3.md)
+  (swimlane index). Working a lane? Read its brief in `docs/handoffs/` first.
 * **Multi-module work uses subagent-driven development by default.** When a
   task touches two or more modules, dispatch one subagent per module rather
   than serializing through the main session. The main session orchestrates,
@@ -116,8 +120,10 @@ to redo the work.
   that keeps the app from looking AI-generated (no default-red, no purple gradients, no
   Inter/Roboto, Material icons not emoji). Treat the FIXED tokens as inviolable and do not
   supplement them with your own defaults. The `design-lint` hook nudges live and
-  `tests/golden/test_design_tokens.py` is the hard gate; Stage 2/3 work is parked in
-  [docs/dashboard_design_stage2_3.md](docs/dashboard_design_stage2_3.md).
+  `tests/golden/test_design_tokens.py` is the hard gate. The UX redesign spec (six surfaces,
+  slip rail, taxonomy, scars) is
+  [docs/dashboard_ux_redesign.md](docs/dashboard_ux_redesign.md); its lane brief is
+  [docs/handoffs/dashboard-ux.md](docs/handoffs/dashboard-ux.md).
 
 ## Agentic workflow conventions
 
@@ -134,7 +140,8 @@ These conventions pair with the hooks in `.claude/hooks/`.
   `poetry run pytest -m integration -n0 && touch "$CLAUDE_PROJECT_DIR/.claude/.state/integration_green"`
   so a clean run clears the push prompt. Editing any `.py` afterward re-arms it.
 
-* **Research-first.** Before building any Operation Ship 75 §8-flagged lever, or
+* **Research-first.** Before building any `docs/handoffs/model_improvement_track.md`
+  §8.2-flagged lever, or
   changing a distribution family / dispersion mechanism, dispatch the
   `research-analyst` subagent first and cite its `/tmp/researcher_*.md` brief.
   The research-gate hook enforces the discrete cases (a `shipped:` flip in
@@ -153,7 +160,7 @@ The codebase was refactored from several 1,000–7,000 line monoliths into packa
 Do not undo that work:
 
 * **No new monoliths.** If a file you are editing exceeds ~300 lines, stop and check
-  whether you are adding to the right module. Consult CONTRIBUTING.md §Package Map.
+  whether you are adding to the right module. Consult docs/ARCHITECTURE.md §Package Map.
 * **No back-compat shims.** The old `train.py`, `sportstradamus.py`, and `stats.py`
   shims have been deleted. Import from the canonical package paths:
   - Stats classes → `sportstradamus.stats`
@@ -168,8 +175,8 @@ Do not undo that work:
 * **No magic numbers.** Named constants at module level with a one-line reason comment.
   See STYLE_GUIDE.md §9.
 * **Dashboard never touches the DuckDB archive.** The Streamlit dashboard reads
-  pre-computed parquet snapshots only (`data/history.parquet`,
-  `data/parlay_hist.parquet`, `data/model_stats.parquet`,
+  pre-computed parquet snapshots only (`data/runtime/history.parquet`,
+  `data/runtime/parlay_hist.parquet`, `data/training/model_stats.parquet`,
   `data/runtime/current_pickem.parquet`). DuckDB holds an
   exclusive file lock for the entire lifetime of any read-write connection;
   the dashboard is the only long-lived process in the system, so any archive
@@ -230,13 +237,13 @@ poetry install
 poetry run pre-commit install   # required once after clone
 
 # CLI entry points
-poetry run prophecize        # prediction pipeline → dashboard snapshots
-poetry run confer            # fetch current odds/props
-poetry run meditate          # train/retrain ML models
-poetry run reflect           # historical parlay performance
-poetry run dashboard         # Streamlit dashboard
-poetry run pickem-build      # Underdog Power/Flex/Rivals recommendations YAML
-poetry run kelly             # re-size a recommendations YAML offline
+poetry run sportstradamus prophecize        # prediction pipeline → dashboard snapshots
+poetry run sportstradamus confer            # fetch current odds/props
+poetry run sportstradamus meditate          # train/retrain ML models
+poetry run sportstradamus reflect           # historical parlay performance
+poetry run sportstradamus dashboard         # Streamlit dashboard
+poetry run sportstradamus bet pickem      # Underdog Power/Flex/Rivals recommendations YAML
+poetry run sportstradamus bet kelly             # re-size a recommendations YAML offline
 
 # Quality gates — all three must pass before committing
 poetry run ruff check src/sportstradamus/
@@ -259,21 +266,19 @@ Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
   matches `main`; check `devel` HEAD when reasoning about server behavior.
 * **All cron jobs go through `scripts/run_job.sh`.** The wrapper adds:
   - per-job `flock -n` (a second invocation of the same job is skipped),
+  - a self-deploy `git pull --ff-only origin devel` before each job (own
+    `flock -n`; a failed pull runs the existing checkout; the two modifier
+    configs are reset then re-folded from `modifier_overrides.json` with
+    `--prune` so dashboard-captured corrections never block the pull;
+    `GIT_PULL=0` skips),
   - a shared archive `flock -w 900` (serializes against DuckDB's
     single-writer lock so jobs don't collide on `archive.duckdb`),
   - Healthchecks.io `/start` / `/fail` / success pings,
-  - structured `START` / `OK` / `FAIL` / `WAIT` log lines per job.
-* **Production crontab** (run as `sportstradamus@<host>`):
-
-  ```cron
-  50 8-20 * * *          /home/sportstradamus/Sportstradamus/scripts/run_job.sh prophecize
-  30 8,12 * * *          /home/sportstradamus/Sportstradamus/scripts/run_job.sh confer
-  0 1 * * 5              /home/sportstradamus/Sportstradamus/scripts/run_job.sh meditate
-  0 23 * * *             /home/sportstradamus/Sportstradamus/scripts/run_job.sh reflect
-  */10 11-23,0-1 * * *   /home/sportstradamus/Sportstradamus/scripts/run_job.sh close-lines
-  0 2 1 * *              /home/sportstradamus/Sportstradamus/scripts/run_job.sh gate-status
-  0 10 * * 3             /home/sportstradamus/Sportstradamus/scripts/run_job.sh fp-fetch
-  ```
+  - structured `START` / `OK` / `FAIL` / `WAIT` / `PULL` log lines per job.
+* **Production crontab** (run as `sportstradamus@<host>`): the canonical
+  schedule lives in [docs/OPERATIONS.md](docs/OPERATIONS.md).
+  Key coupling: the number of confer slots must match `broad_slots_per_day`
+  in `data/config/odds_api_budget.json`.
 
   The `fp-fetch` job runs weekly during NFL season: it walks the
   Fantasy Points Data Suite endpoint catalog
@@ -283,6 +288,14 @@ Python 3.11 required. PyTorch CPU-only (2.9.1) via custom Poetry source.
   fresh session cookie in `creds/keys.json` (see
   `docs/fantasypoints.md`) and `HEALTHCHECK_URL_FP_FETCH` set so
   cookie-expiry surfaces as an immediate alert.
+
+  The `ctg-fetch` (NBA, Cleaning the Glass) and `savant-fetch` (MLB,
+  Baseball Savant) collectors are **dev-side**, not prod-cron: run them on
+  the dev box beside the manual weekly `meditate`, then `sync_to_prod.sh`
+  pushes their date-stamped snapshots up. They share the `fp-fetch`
+  framework (`sportstradamus.collectors`); `StatsNBA`/`StatsMLB` fold the
+  snapshots in via the `_join_fp_*_features` hooks once each source's join
+  schema is pinned. Canonical guide: `docs/data_collectors.md`.
 
   The `gate-status` job runs monthly: it promotes/demotes cells in `main`'s
   `stat_meta.json` based on live Gate-2 graduation and opens a PR (a human
@@ -309,7 +322,7 @@ The old single-file modules no longer exist. Use these paths:
 | `confer`, `get_props`, `get_moneylines` | `sportstradamus.moneylines` |
 | `get_ud`, `get_sleeper` | `sportstradamus.books` |
 
-Full per-submodule breakdown is in CONTRIBUTING.md §Package Map.
+Full per-submodule breakdown is in docs/ARCHITECTURE.md §Package Map.
 
 ## Architecture
 
@@ -409,7 +422,7 @@ consult.
 | EV / line | `model_ev`, `mean_line`, `result_mean`, `mean_ev_diff` (↑), `median_ev_diff` (↑), `frac_ev_gt_line` | `meditate` |
 | Kelly | `kelly_shrinkage` (↑), `model_weight` | `meditate` |
 | Shape | `model_shape`, `empirical_shape`, `shape_ratio`, `marginal_shape`, `dispersion_cal` | `meditate` |
-| Ship gates | `g1_brier_diff_mean` (↓), `g1_brier_diff_ci_lo/hi`, `g1_brier_diff_mean_oracle` (+ oracle CI), `g2_star_z` (↓), `g3_bench_z` (↓), `g4_iqr_ratio`, `g5_ece_debiased` (↓), `g1_pass`…`g5_pass`, `ship` | `training.scorecard.compute_gates` |
+| Ship gates | `g1_brier_diff_mean` (↓), `g1_brier_diff_ci_lo/hi`, `g1_brier_diff_mean_oracle` (+ oracle CI), `g2_star_z` (↓), `g3_bench_z` (↓), `g4_iqr_ratio`, `g5_ece_debiased` (↓), `g6_star_ci_hi`/`g6_star_ref`/`g6_recent_corr` (`ratio_meanyr` SkewNormal cohort), `g1_pass`…`g6_pass`, `ship` | `training.scorecard.compute_gates` |
 | HP | `hp_rounds`, `hp_leaves`, `hp_lr`, `hp_min_child`, `hp_l1`, `hp_l2` | `meditate` |
 | Calibration | `cv`, `std` | `meditate` (from `stat_calibration.json`) |
 
@@ -423,14 +436,14 @@ consult.
 - `shape_ratio` ≈ 1.0 ⇒ well-calibrated dispersion;
   `dispersion_cal = 1.0` ⇒ no fix needed; `< 1.0` ⇒ model over-dispersed.
 - `model_weight` near 0 ⇒ bookmaker dominates; near 1 ⇒ model dominates.
-- `ship == True` ⇔ all five offline gates pass on the most recent
+- `ship == True` ⇔ all six offline gates pass on the most recent
   test-set CSV; see `docs/ship_gate.md` for the threshold rationale.
 
 **Standalone A/B-test harness** for testing model updates without
 touching production:
 
 ```bash
-poetry run python -m sportstradamus.training.scorecard \
+poetry run sportstradamus ship scorecard \
     --baseline data/test_sets/NBA_PTS.csv \
     --candidate /tmp/NBA_PTS_centered.csv
 ```
@@ -447,11 +460,12 @@ production data.
 | `config/stat_meta.json` | **Committed.** Per-cell `{dist, shipped, strategy}` (distribution family, release surface — `"withheld"` / `"devel"` / `"main"`, training strategy slug) |
 | `config/stat_calibration.json` | **Gitignored.** Per-cell `{cv, std, zi}` — runtime-recomputed by `meditate` each run |
 | `config/stat_map.json` | Stat name mappings across APIs/sportsbooks |
+| `config/odds_api_budget.json` | **Committed.** Odds API credit governor knobs: cycle quota/reset day, `enforce` kill switch, slots/day (must match the confer crontab), floor safety factor, per-league seed costs + priority. Consumed by `helpers/odds_budget.py`; ledger at `data/runtime/odds_api_usage.jsonl` |
 | `config/feature_filter.json` | League-shared (`Common`) + per-market locked-in (`Always`) feature lists. The historical `Filtered` SHAP-ranked buckets were removed in the 2026-05-27 no-filter rewire; production trains on the full candidate set |
 | `config/playerCompStats.json` | Learned player comp weights per league/position |
 | `config/book_weights.json` | **Gitignored.** Sportsbook reliability weights for consensus lines |
 | `config/prop_books.json` | List of sportsbooks consulted for player-prop consensus |
-| `{LEAGUE}_corr.csv` | Pre-computed player stat correlation matrices |
+| `leagues/{league}/corr_same_team.parquet` + `corr_opposing.parquet` | Pre-computed player stat correlation matrices (written by `training/correlate.py`; never loaded by the dashboard — NBA is 2.85M rows, per-game slices only) |
 
 ### Data Storage
 

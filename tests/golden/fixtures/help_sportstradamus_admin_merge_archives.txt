@@ -1,0 +1,14 @@
+Usage: sportstradamus admin merge-archives [OPTIONS]
+
+  Merge the SOURCE odds archive into TARGET as a lossless set-union of rows.
+
+Options:
+  --source PATH  Archive to merge FROM (opened read-only, never modified).
+                 [required]
+  --target PATH  Archive to merge INTO, rebuilt in place as the union (default:
+                 $SPORTSTRADAMUS_ARCHIVE_DB or archive/archive.duckdb).
+  --output PATH  Write the union to a NEW file instead of mutating --target.
+  --dry-run      Report counts only; write nothing.
+  --no-backup    Skip the timestamped backup of --target before an in-place
+                 merge.
+  --help         Show this message and exit.

@@ -1,0 +1,8 @@
+Usage: sportstradamus admin backfill-history-eras [OPTIONS]
+
+  Segment pre-stamp history into model eras and write the join parquet.
+
+Options:
+  --output PATH  Override the output parquet path (defaults to
+                 data/runtime/history_eras.parquet).
+  --help         Show this message and exit.

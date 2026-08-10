@@ -43,6 +43,8 @@ from sportstradamus.skew_normal import SkewNormal
 warnings.filterwarnings("ignore")
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "training_data"
+# Repo root — research artifacts live outside the data package (top-level `research/`).
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # ── Market configurations ───────────────────────────────────────────────
 # continuous=True  → base dist is continuous (Gamma), ALL zeros are structural
@@ -50,30 +52,30 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "training_data"
 
 MARKETS = {
     # NBA
-    "NBA_PTS": {"file": "NBA_PTS.csv", "dist": "ZAGamma", "zi": 0.065, "continuous": True},
-    "NBA_PRA": {"file": "NBA_PRA.csv", "dist": "Gamma", "zi": 0.026, "continuous": True},
-    "NBA_BLK": {"file": "NBA_BLK.csv", "dist": "NegBin", "zi": 0.007, "continuous": False},
-    "NBA_AST": {"file": "NBA_AST.csv", "dist": "NegBin", "zi": 0.013, "continuous": False},
+    "NBA_PTS": {"file": "NBA_PTS.parquet", "dist": "ZAGamma", "zi": 0.065, "continuous": True},
+    "NBA_PRA": {"file": "NBA_PRA.parquet", "dist": "Gamma", "zi": 0.026, "continuous": True},
+    "NBA_BLK": {"file": "NBA_BLK.parquet", "dist": "NegBin", "zi": 0.007, "continuous": False},
+    "NBA_AST": {"file": "NBA_AST.parquet", "dist": "NegBin", "zi": 0.013, "continuous": False},
     # NFL
     "NFL_pass_yds": {
-        "file": "NFL_passing-yards.csv",
+        "file": "NFL_passing-yards.parquet",
         "dist": "ZAGamma",
         "zi": 0.066,
         "continuous": True,
     },
     "NFL_fantasy-points-underdog": {
-        "file": "NFL_fantasy-points-underdog.csv",
+        "file": "NFL_fantasy-points-underdog.parquet",
         "dist": "Gamma",
         "zi": 0.0289,
         "continuous": True,
     },
     "NFL_receptions": {
-        "file": "NFL_receptions.csv",
+        "file": "NFL_receptions.parquet",
         "dist": "NegBin",
         "zi": 0.0098,
         "continuous": False,
     },
-    "NFL_tds": {"file": "NFL_tds.csv", "dist": "NegBin", "zi": 0.006, "continuous": False},
+    "NFL_tds": {"file": "NFL_tds.parquet", "dist": "NegBin", "zi": 0.006, "continuous": False},
 }
 
 EPSILON = 0.01  # Clip value for zeros in continuous distributions
@@ -113,8 +115,8 @@ def preprocess_zi(y, zi_gate, is_continuous_base, rng=None):
 
 
 def load_market(market_file, zi_gate, is_continuous_base):
-    """Load training CSV, apply ZI preprocessing, split data."""
-    df = pd.read_csv(DATA_DIR / market_file, index_col=0)
+    """Load training parquet, apply ZI preprocessing, split data."""
+    df = pd.read_parquet(DATA_DIR / market_file)
 
     meta_cols = ["Line", "Odds", "EV", "Result", "Player", "Date", "Archived"]
     feature_cols = [c for c in df.columns if c not in meta_cols]
@@ -229,7 +231,7 @@ def compute_metrics(ev, y_true, lines, sigma_or_shape, dist_type, gate=None):
         results["over_pct"] = float("nan")
 
     results["n_confident"] = int(conf_mask.sum())
-    results["n_total"] = int(len(y_true))
+    results["n_total"] = len(y_true)
 
     return results
 
@@ -456,7 +458,7 @@ def main():
         print(f"  {market_name}  (current dist: {cfg['dist']})")
         print(f"{'=' * 60}")
 
-        X_train, X_val, X_test, y_train, y_val, y_test, meta_val, meta_test = load_market(
+        X_train, X_val, X_test, y_train, y_val, y_test, _meta_val, meta_test = load_market(
             cfg["file"], cfg["zi"], cfg["continuous"]
         )
 
@@ -655,7 +657,8 @@ def main():
             )
 
     # Save results to JSON for later analysis
-    out_path = DATA_DIR.parent / "experiment_results.json"
+    out_path = _REPO_ROOT / "research" / "distributions" / "experiment_results.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     serializable = []
     for r in all_results:
         sr = {}

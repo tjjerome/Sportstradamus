@@ -1,0 +1,10 @@
+Usage: sportstradamus admin count-family-screen [OPTIONS]
+
+  Screen count cells: zero-modification routing + Double Poisson escalation bar.
+
+Options:
+  --league TEXT  League filter; repeatable or comma-separated.
+  --market TEXT  Market filter; repeatable or comma-separated.
+  --all-count    Screen every count-dist cell in stat_meta.json with a cached
+                 matrix.
+  --help         Show this message and exit.

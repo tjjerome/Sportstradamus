@@ -1,0 +1,15 @@
+Usage: sportstradamus prophecize [OPTIONS]
+
+  Run the full prediction pipeline and write parquet snapshots for the
+  dashboard.
+
+Options:
+  --progress / --no-progress      Display progress bars
+  --contest-variant [pooled|power|flex|insurance|rivals]
+                                  Underdog payout pool for parlay scoring.
+                                  Default 'pooled' combines power (2-3 legs) and
+                                  flex (4+ legs) into one pool; single-variant
+                                  names are kept for the pickem-build path.
+  --log-level [DEBUG|INFO|WARNING|ERROR]
+                                  Verbosity for the structured JSONL log.
+  --help                          Show this message and exit.

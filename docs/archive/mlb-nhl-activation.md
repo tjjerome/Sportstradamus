@@ -1,0 +1,328 @@
+# MLB / NHL activation
+
+> Status: DONE (absorbed: model-track WS-2 — post-GO grind on the no-ship cells runs
+> there; this brief holds the per-league detail). D1/D2 = GO; **9 cells live on devel:
+> 5 MLB** (stolen bases, home runs, pitcher strikeouts, walks allowed, hits allowed)
+> **+ 4 NHL** (goals, hits, shotsAgainst, timeOnIce) — all full-HPO confirm on
+> 2-season matrices; the 3 pre-D2 slip cells re-earned honestly.
+
+## 1. Mission & money logic
+
+Produce the decision packets behind owner gates D1 (MLB, ~Jul 2026) and D2 (NHL, ~Sep 2026), then
+post-GO grind the cells through the standard ship lifecycle. Re-derive counts from §3 — as of the
+last check MLB is **19 cells (5 devel + 14 withheld)**; NHL is **15 cells (4 devel + 11 withheld)**. The
+matrices are assembled and the serve paths wired (§10 ledger); what remains is the audit packets
+and the post-gate model-quality work.
+
+Money logic: two entire slates of app-priced markets at marginal cost. The
+modeling machinery, the six offline gates, the Gate-2 lifecycle, and the
+decision engines (kelly, pickem-build, parlay pricing) are league-agnostic and
+already built; what MLB/NHL need is model-quality work + data-freshness repair
+(the wiring delta is now landed) — not new architecture. No
+doc gives these leagues a breadth target —
+[`model_improvement_track.md`](../handoffs/model_improvement_track.md) §1 covers
+NBA/WNBA/NFL only; this lane exists to close that gap. Seasonal urgency: **MLB
+is in season now** — the apps price it heavily while NBA/NFL are dark, and the
+D1 option decays as the season burns. NHL starts in October; D2 wants its
+packet by ~Sep.
+
+## 2. Read first (in order)
+
+1. [`../sportstradamus_roadmap_v3.md`](../sportstradamus_roadmap_v3.md) §5
+   (seasonality) + §7 (the D1/D2 rows) — why now, and who decides. Predecessor
+   design sketches: [`../archive/sportstradamus_roadmap_v2.md`](sportstradamus_roadmap_v2.md)
+   (non-normative, status claims stale).
+2. [`model_improvement_track.md`](../handoffs/model_improvement_track.md) §1 (the
+   lens), §3.3 (the failure-mode-census pattern stage 0 copies), §6 operating
+   loop + §6 lever stages (the post-GO method, reused wholesale — never
+   restated here).
+3. [`../ship_gate.md`](../ship_gate.md) — g1–g6 thresholds the packets score
+   against.
+4. [`CONTRIBUTING.md`](../../CONTRIBUTING.md) §Package Map, §Adding a New
+   League, §Adding a New Market, §Shipping to Production — the mechanics this
+   lane audits and, post-GO, exercises.
+5. [`CLAUDE.md`](../../CLAUDE.md) §Hard rules (DuckDB lock) + §Agentic workflow
+   conventions (research-first) — assumed law; the two rules this lane leans
+   on hardest.
+6. [`model_improvement_track.md`](../handoffs/model_improvement_track.md) §7.5 —
+   the model-track footprint and session mechanics stage 1+ mirrors.
+7. `src/sportstradamus/stats/mlb.py`, `src/sportstradamus/stats/nhl.py` — the
+   two Stats classes under audit (`season_start`, `load`/`update`).
+8. `src/sportstradamus/training/markets.py` +
+   `src/sportstradamus/data/config/stat_meta.json` — registry vs meta, the
+   alignment stage 0 checks.
+
+## 3. Verify before you trust
+
+Rule, verbatim: if command output contradicts brief prose, the output wins —
+fix the brief in place (minor) or stop and ask the owner (material).
+
+```bash
+git fetch origin && git log --oneline origin/devel -3
+
+# Cell counts + release surface. Last check: MLB 19 (all withheld) / NHL 15 (12 withheld + 3 devel)
+python3 -c "import json,collections; m=json.load(open('src/sportstradamus/data/config/stat_meta.json')); [print(l, len(v), dict(collections.Counter(c['shipped'] for c in v.values()))) for l,v in m.items()]"
+
+# Registry alignment — stat_meta cells absent from ALL_MARKETS can never train.
+# Last check: 0 orphans (the earlier MLB '1st inning *' / NHL 'fantasy points prizepicks' gaps closed)
+python3 - <<'EOF'
+import ast, json
+meta = json.load(open("src/sportstradamus/data/config/stat_meta.json"))
+tree = ast.parse(open("src/sportstradamus/training/markets.py").read())
+reg = next(ast.literal_eval(n.value) for n in ast.walk(tree)
+           if isinstance(n, ast.AnnAssign) and n.target.id == "ALL_MARKETS")
+for lg in ("MLB", "NHL"):
+    print(lg, "meta-only:", sorted(set(meta[lg]) - set(reg[lg])))
+EOF
+
+# Gamelog freshness — CSVs are gitignored, so a fresh checkout is EMPTY. Sync from
+# prod first (scripts/sync_from_prod.sh), then judge: most recent season present?
+ls src/sportstradamus/data/player_data/MLB/ src/sportstradamus/data/player_data/NHL/
+
+# Hardcoded season anchors. 2026-06-10: MLB 2024-03-28, NHL 2024-10-04 — two
+# seasons stale (contrast NBA 2025-10-21, WNBA 2026-05-15, NFL 2026-09-10)
+grep -n "season_start = datetime" src/sportstradamus/stats/*.py
+
+# Which leagues the train/serve CLIs actually instantiate (findings below)
+grep -n "from sportstradamus.stats import" src/sportstradamus/training/cli.py \
+    src/sportstradamus/prediction/cli.py src/sportstradamus/nightly.py
+
+# Archive odds coverage by league/market — READ-ONLY, short-lived connection.
+# Run against a synced dev copy, never beside prod cron (§7 lock rule).
+python3 - <<'EOF'
+import duckdb
+con = duckdb.connect("archive/archive.duckdb", read_only=True)
+for t in ("odds", "lines"):
+    print(con.execute(f"SELECT league, market, count(*) n, min(game_date) lo, "
+        f"max(game_date) hi FROM {t} WHERE league IN ('MLB','NHL') "
+        "GROUP BY 1,2 ORDER BY 1, n DESC").fetchdf().to_string())
+con.close()
+EOF
+
+# App coverage — which MLB/NHL markets Underdog/Sleeper price right now
+# (prod snapshot via sync_from_prod.sh; live scrapes are ToS surface → owner, §8)
+python3 -c "import pandas as pd; df = pd.read_parquet('src/sportstradamus/data/runtime/current_offers.parquet'); print(df[df.League.isin(['MLB','NHL'])].groupby(['League','Platform','Market']).size())"
+```
+
+Findings verified 2026-06-10 (each re-derivable above — re-verify, don't trust):
+
+- **`meditate --league MLB|NHL` currently trains nothing.**
+  `training/cli.py` instantiates only `StatsNBA/StatsNFL/StatsWNBA`; the
+  league loop hits `stat_structs.get(lg) is None` and silently `continue`s.
+  (CONTRIBUTING §Adding a New League's "instantiates each league's Stats class
+  dynamically" is stale — trust the grep.) Same gap on the serve path:
+  `prediction/cli.py` imports the same three. `nightly.py` carries the full
+  five-league map.
+- **`confer` never fetches MLB/NHL from the Odds API** —
+  `moneylines.py:LEAGUES_OF_INTEREST = ("NBA", "NFL", "WNBA")` (comment: prop
+  coverage "thin"; books scrapers were the intended source).
+  `scripts/backfill_historical_odds.py` does carry `baseball_mlb` /
+  `icehockey_nhl` sport keys. The archive's MLB/NHL book side is therefore
+  legacy-era until proven otherwise — the model_improvement_track.md §3.2
+  "is the book honest?" check is mandatory before any g1 verdict is believed.
+- **Most cells default `dist: SkewNormal`** with `target_normalization` /
+  `posthoc` `"none"` — including count-shaped stats (home runs, stolen bases,
+  goals, assists, blocked). Re-derive from `stat_meta.json`; any family re-route
+  is research-gated (§4) and, for NHL, the R1 Double-Poisson verdict applies on
+  activation (model_improvement_track.md §6.6).
+- `StatsMLB` / `StatsNHL` exist and export from `sportstradamus.stats`;
+  gamelogs live under `src/sportstradamus/data/player_data/{LEAGUE}/{YEAR}/`
+  (gitignored — freshness is only checkable where the data lives).
+- `meditate` skips + pickle-prunes withheld cells; audit training needs
+  `--bypass-withholding` or a `--deterministic` sandbox run (writes to
+  `research/models/deterministic/`, never production). The strategy sweep +
+  confirm engine (`model-strategy-sweep`) is on **devel** now, and its
+  `--confirm` **never auto-flips a withheld MLB/NHL cell** — the league
+  activation guard announces and skips it (model_improvement_track.md §6.7);
+  only D1/D2 removes the league from the guard.
+
+### Volatile product assumptions
+
+- **App market coverage per league** — which MLB/NHL markets Underdog/Sleeper
+  actually price, and the Fantasy-Points position split `books.py:get_ud`
+  assumes. Re-verify via the `current_offers` probe at the start of every
+  audit session; on drift, redo the census before anything downstream.
+- **Odds API market availability for MLB/NHL props** — the "thin coverage"
+  note in `moneylines.py` predates 2026. Re-verify against the Odds API market
+  catalog before designing the packet's book side; live calls burn paid
+  credits → owner sign-off first (§8).
+
+## 4. Locked decisions
+
+All dated 2026-06-10:
+
+- **D1 / D2 are owner-only gates** (roadmap v3 §7). This lane prepares
+  decision packets; it never makes the call and never flips a gate.
+- **Stage 0 is audit-only** — no `shipped:` flips, no devel-bound production
+  edits. (The research-gate hook fires on any `shipped:` flip in
+  `stat_meta.json` regardless; the rule and the hook agree.)
+- **Distribution-family re-routing for these cells is research-gated** — any
+  SkewNormal → ZINB/NegBin/ZAGamma re-route or dispersion-mechanism change
+  requires dispatching the Opus-backed `research-analyst` FIRST and citing its
+  `/tmp/researcher_*.md` brief. Hard requirement, not advisory (CLAUDE.md
+  §Agentic workflow research-first; `.claude/research_gated.txt`).
+- **NO-GO is a valid, successful deliverable** (§6 kill criteria).
+
+## 5. Module footprint & canonical paths
+
+**Stage 0 (now):** read-only on `src/sportstradamus/`; probes in `/tmp`; a
+probe worth keeping may land in `src/sportstradamus/scripts/` (one module).
+Scratch-branch wiring patches are allowed as evidence-production for the smoke
+run, but nothing merges in stage 0.
+
+**Post-GO (stage 1+):** mirrors the model-track footprint —
+`sportstradamus.training` (pipeline, scorecard, report),
+`data/config/stat_meta.json`, ship-config plumbing — see
+[`model_improvement_track.md`](../handoffs/model_improvement_track.md) §7.5 and
+§6; not restated here. Plus the activation-specific deltas this audit
+names:
+
+| Module | Why |
+|---|---|
+| `src/sportstradamus/training/cli.py` | instantiate `StatsMLB`/`StatsNHL` (today: NBA/NFL/WNBA only) |
+| `src/sportstradamus/prediction/cli.py` | same gap on the serve path |
+| `src/sportstradamus/stats/mlb.py`, `stats/nhl.py` | `season_start` anchors, loader repair |
+| `src/sportstradamus/training/markets.py` | registry ↔ `stat_meta.json` alignment |
+| `src/sportstradamus/data/config/stat_meta.json` | per-cell family/strategy; `shipped` flips post-gate |
+| `src/sportstradamus/moneylines.py` | `LEAGUES_OF_INTEREST` — owner-gated (paid API spend) |
+
+Editing outside the footprint is a stop condition (§8). Serving-path changes
+carry the inference-path compatibility checklist
+([`model_improvement_track.md`](../handoffs/model_improvement_track.md) §7.3) —
+reference it, don't restate it.
+
+## 6. Stage plan
+
+### Stage 0a — MLB audit packet
+
+- **Goal:** a D1 decision packet the owner can GO/NO-GO on.
+- **Entry:** none — start any time; the ~Jul 2026 D1 window decays weekly.
+- **Scope:** §5 stage-0 footprint.
+- **The packet** (one committed doc; path recorded in the §10 ledger):
+  1. Gamelog freshness verdict + repair-cost estimate — seasons missing; does
+     `StatsMLB.load()/update()` still run against today's statsapi;
+     `season_start` fix.
+  2. Archive odds coverage by market (counts, date range, distinct books) +
+     the honesty check: real two-sided prices or a legacy seed
+     (model_improvement_track.md §3.2 pattern)? g1 grades against this.
+  3. App coverage census: markets Underdog/Sleeper actually price, mapped onto
+     the MLB cells (re-derive the count from §3); unpriced cells flagged for the
+     owner's denominator call.
+  4. Wiring-delta list (§3 findings) with cost estimate.
+  5. `meditate --league MLB --bypass-withholding --market <subset>` smoke on a
+     scratch branch (or `--deterministic` sandbox) + full scorecard sweep →
+     free-passer count (cells already clearing g1–g6) + a failure-mode census
+     table à la model_improvement_track.md §3.3.
+  6. Recommended GO/NO-GO with reasons + a proposed breadth target for the
+     owner to lock at D1.
+- **Acceptance:** packet committed + §10 ledger line + owner pointed at it.
+  The D1 decision is NOT this lane's to make.
+- **Est. sessions:** 1–2.
+- **Kill criteria:** data source unfixably stale / league API gone → the
+  packet says exactly that, with the repair cost, and recommends NO-GO. A
+  NO-GO packet is a successful deliverable, not a failure.
+
+### Stage 0b — NHL audit packet
+
+Same packet shape over the NHL cells (re-derive the count from §3; 3 are already
+`devel` pre-D2 and need owner reconciliation — §8), against D2 (~Sep 2026, before puck
+drop). Entry: none — run after 0a unless the owner reorders. Off-season
+caveat: no live slates until October, so the app census reads last season's
+snapshots/archive and the packet dates it as such. Est. 1–2 sessions; same
+acceptance and kill criteria.
+
+### Stage 1+ — post-GO per-cell grind (per league)
+
+- **Entry:** D1 (MLB) or D2 (NHL) = GO, owner-committed; breadth target locked.
+- **Procedure:** land the packet's wiring deltas + data repair first (one
+  module per subagent), then the model_improvement_track.md §6 operating loop
+  verbatim — free passers first (§6.0 pattern), then the §6 stage ladder
+  cheapest-first. Loop and stages live in
+  [`model_improvement_track.md`](../handoffs/model_improvement_track.md) §6;
+  this brief does not restate them.
+- **Acceptance per cell:** official full-HPO scorecard 5/5
+  ([`../ship_gate.md`](../ship_gate.md)) → `shipped: "devel"` via standard
+  mechanics (CONTRIBUTING §Shipping; devel-ship-curator carves every PR).
+- **Est. sessions:** set by the packet's free-passer count + failure census.
+- **Kill criteria:** model_improvement_track.md §8 failure protocol per
+  lever/cell. League-level kill is an owner call → status `DONE (no-go)` or
+  `BLOCKED (on: next season)`.
+
+## 7. Working rules
+
+- Conflict order: command output > CLAUDE.md/CONTRIBUTING.md > home-of-record
+  doc (model_improvement_track, ship_gate) > this brief > roadmap v3.
+- **Archive lock discipline.** Probes open `duckdb.connect(...,
+  read_only=True)` and close immediately. `Archive()` is a read-write
+  singleton whose DuckDB file lock lives for the connection lifetime — never
+  hold one casually; CLAUDE.md §Hard rules (dashboard/DuckDB) is the canonical
+  statement of the lock physics. `Archive().to_pandas(league, market)` is fine
+  inside a short script that exits.
+- Production data flows one way here: `scripts/sync_from_prod.sh` (pull).
+  `sync_to_prod.sh`, crontab edits, anything on the prod box: owner-only.
+- Compute: full-league `meditate` is hours; default to `--market` scoping and
+  `--deterministic` sandbox runs for exploration (model_improvement_track.md
+  §6); real-HPO only to confirm a ship candidate.
+- Packets and this brief revise in place (STYLE_GUIDE §16); the §10 ledger is
+  the only append-only zone.
+
+## 8. Escalation & stop conditions
+
+**STOP and ask the owner when:**
+
+- entry criteria unmet (any stage-1 work before an owner-committed GO);
+- gates red at session start through no fault of yours;
+- integration smoke regression;
+- any change to gate constants or test tolerances;
+- anything touching credentials, paid APIs (incl. Odds API probes for MLB/NHL
+  coverage), cron, or ToS surface (live Underdog/Sleeper scrapes);
+- a full-league `meditate` looks necessary — it is real cost; prefer
+  `--market` scoping and the deterministic sandbox (model_improvement_track.md
+  §6), and ask before any full run;
+- cron / production-box changes of any kind — owner-only;
+- two consecutive sessions with no acceptance criterion moving (grind detector).
+
+No reconciliation pending — the pre-D2 NHL devel-flip slip is resolved (reverted to withheld,
+pickles pruned, re-earn via confirm; see the status line + §10 ledger).
+
+**PARK AND PIVOT when blocked externally:** append a ledger line with the
+blocking reason, set the status line to `BLOCKED (on: …)`, and point the owner
+at the roadmap v3 §4 swimlane index for the next lane.
+
+**DISPATCH a subagent when:**
+
+- `research-analyst` (Opus-backed) — hard-required before any
+  distribution-family re-route or dispersion-mechanism change on these cells
+  (§4), and for any packet family recommendation beyond "keep as-is";
+- `devel-ship-curator` — every devel-bound PR (post-GO);
+- `prompt-engineer` — new briefs / major re-briefs;
+- `refactoring-specialist` — per the five CLAUDE.md triggers.
+
+## 9. Session definition of done
+
+- refactoring-specialist ran on every `.py` touched this session
+  (CLAUDE.md five-trigger rule).
+- `poetry run ruff check src/sportstradamus/` clean.
+- `poetry run pytest tests/golden/` clean.
+- `poetry run pytest -m integration -n0` clean, then
+  `touch .claude/.state/integration_green`.
+- One ledger line appended to §10; status line updated if a stage boundary
+  was crossed.
+- Never push `devel` directly — devel-ship-curator carves ship PRs.
+- Durable non-obvious lesson? Offer a memory capture (CLAUDE.md §Agentic
+  workflow conventions).
+
+## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
+
+- `2026-07-11 · status trued · roadmap audit: ACTIVE→DONE (absorbed into model-track WS-2; its §6 loop owns the post-GO grind); roadmap §4/§7 updated to match (D1/D2 RESOLVED — GO 2026-07-09) · next: —`
+- `2026-07-11 · SHIPPED · first NHL cells to devel (commit 3635a20): goals + hits (ZINB hurdle/crps, blending nll) + shotsAgainst + timeOnIce (SN centered_additive_mean10, blending crps) — board 6/15 shippers on 2.3-season matrices (coin-flip rows gone) → full-HPO confirm; powerPlayPoints failed confirm (auto-reverted), saves ranks-only (best corner needs non-persistable dist-loss). All 3 pre-D2 slip cells re-earned. Confirm's live-cell supersession leg re-tested 2 MLB cells (hits allowed HOLD, home runs SUPERSEDE verdict but promote prompt aborted — background run has no stdin; incumbents restored byte-identical, verified vs pickle mtimes + model_stats). Operation complete: 9 cells live (5 MLB + 4 NHL), 2.39M of 5M credits · next: post-GO grind on no-ship cells (§6 loop); owner requests the devel-ship-curator PR carve`
+- `2026-07-10 · SHIPPED · first MLB cells to devel: stolen bases + home runs (ZINB hurdle) + pitcher strikeouts + walks allowed (SN centered_additive_mean10) + hits allowed (SN ratio_meanyr) — deterministic board 5/19 shippers → full-HPO confirm 6/6 each; doubles near-miss (-0.016). Backfill program complete at 2.39M credits: feature gap closed (MLB 336 + NHL 622 dates), NHL 2023-24 refilled, big-3 honesty purge (NBA 974k / NFL 88k / WNBA 3k junk rows; NBA 2023 re-priced 73%→6.6%), close layers all 5 leagues, ladder seeded 15.5M→NBA 8.2M w/ combo alternates. 2-season matrices: MLB 19/19 (hitter cells 55-66k rows). batter-Ks: API has no MLB 2025 history at any hour — cell honestly thin · next: NHL rebuild → sweep → confirm`
+- `2026-07-09 · hardened · Track A (key-independent) done: klepto seed purge (MLB 1,014,522 + NHL 2,103,111 odds rows deleted, dry-run==real, 2022 gone, residual degeneracy ≈0 through 2025; 2026 residual = live app-book agreement, benign); backfill _probe apikey bugfix (passed whole creds dict → guaranteed 401; now apikey[HISTORICAL_KEY_NAME], one constant to repoint for the new key); per-league trim_gamelog windows (MLB 95k / NHL 110k / NFL 50k rows, default 21.5k) = the 2-season matrix-depth lever — reverting it later silently re-trims deep matrices on the next meditate; Savant affinity CSVs via scraper.get_csv (bot-block keeps cache); _ACTIVATION_GATED_LEAGUES=() per GO, guard machinery + goldens kept. Gates: ruff + golden 3421 + integration 24 clean. Live 1-date probe (old key, NFL passing yards 2023-10-29): key ALIVE, 29/29 players real de-vig across 10 sharp books — probe path validated end-to-end; _CaptureArchive stub caught up to Archive API (book_quotes, add_ladder). Ladder finding: historical fetch already ingests rungs via add_ladder (271 landed), but stat_map carries zero *_alternate market keys → alt-line program needs request-side keys only, ingestion exists · next: Track B backfill (blocked on activated Odds API key)`
+- `2026-07-09 · GO · owner declared D1+D2 GO (ship + 5M-credit Odds API backfill, deepest-data path); 3 pre-D2 NHL devel flips reverted to withheld + pickles pruned (re-earn via confirm). Archive audit: gap 2025-03-28→2026-03-15 both leagues, 2026 = app books only, 2022 + NHL-2023 = klepto seed junk, MLB-2023–2025/NHL-2024–2025 pre-gap real sharp books. Plan: seed cleanup → full-slate backfill (all leagues alt-line enrichment) → 2-season matrices (trim_gamelog ROWS lever) → sweep/confirm · next: backfill (blocked on new Odds API key)`
+- `2026-07-07 · rescoped · activation folded into model_improvement_track.md WS-2 (§6.7). Status QUEUED→ACTIVE (matrices+serve-wiring done; audit packets + post-D1/D2 grind remain). Counts re-derived: MLB 19 all-withheld, NHL 15 (12 withheld + 3 devel). Sweep-engine league guard (_drop_activation_gated + goldens) now blocks any withheld MLB/NHL auto-flip; the 3 pre-guard NHL devel flips flagged for owner reconciliation (§8). Stale "five gates"/"24-16 counts"/model-research-branch text fixed. NHL inherits the R1 Double-Poisson count verdict on activation · next: MLB D1 audit packet (§3.2 book-honesty repair is the critical path)`
+- `2026-07-07 · wired · MLB+NHL serve paths (commit 15dc64e): prediction/cli.py prophecize now registers all 5 leagues via one load/update loop (was 3 unrolled NBA/NFL/WNBA blocks); underdog_pickem.py _live_load uses a 5-league tuple. NBA/NFL/WNBA bit-identical, MLB/NHL additive. Ready-not-live: prophecize load+updates MLB/NHL + pulls their book offers every run, but the ship-gate serves nothing until cells ship (all withheld). Dev scripts optimize_comp_weights/evaluate_comp_features still 3-league (offline tooling, left). Gates: ruff clean, integration 24/24 (test_end_to_end drives the loop), golden clean bar the concurrent sweep's stat_meta count · next: training the withheld cells (owner-gated D1/D2)`
+- `2026-07-07 · completed · last 4 MLB cells assembled -> MLB 21/21 (commit 6d1d9e9, matrix-only, no training): brentq guard in _mlb_hits_proportional_ev (missing archived hits EV -> NaN under-prob -> get_ev/brentq raised) + book-less fallback in get_training_matrix (an MLB market with zero archived odds keeps participation rows via market-aware usage: batters-faced for pitcher markets, plateAppearances for hitters; book-quoted cells stay Archived-only) behind is_mlb_pitcher_market helper. Rows: pitches-thrown 1890, pitcher-fantasy-score 1983, hitter-fantasy-score 17260 (all book-less -> median-fallback lines), hitter-fantasy-points-underdog 3524 (real Underdog odds). 3/4 are degenerate-book until real odds land · next: serve-path wiring (underdog_pickem) + training-time decision on the 3 book-less cells`
+- `2026-07-07 · committed · activation Phase-5 code wrap-up (commit b6c2d6d): 5-league load/update loop wires StatsMLB/StatsNHL into meditate; --matrix-only flag (assemble+persist, stop before training); Archive->LazyArchive; MLB season_start 2026 + stat_map usage->plateAppearances + _load_affinity_csv discretized {comps,distances}; NHL season_start 2025-10-07 + moneypuck via Scrape.get_csv (HTML bot-block fix). Landed alongside a concurrent model-strategy sweep — its stat_meta.json + model_strategy_* stayed dirty and were never staged · next: 4-cell completion`
+- `2026-07-06 · assembled · Phase-5 matrix batch (matrix-only, no training, per-league isolated archive copies): 31 new withheld matrices — NHL 15/15; MLB 17/21 (11/11 assembled hitter cells carry structural Player proj plateAppearances; 4 gaps: pitches-thrown + pitcher-fantasy-score have no archived odds [MLB keeps Archived rows only, base.py:2107], hitter fantasy score + hitter fantasy points underdog crash brentq NaN in _mlb_hits_proportional_ev mlb.py:1183) · next: fix hitter-fantasy EV derivation + activation Phase-5 code wrap-up`
+- `2026-07-06 · built · MLB volume-norm (own spec+plan): plateAppearances retired as trained cell -> structural slot-PA projector + bounded OBP/market offense adj; team sourced from offers (fixed all-0 profile["team"] sentinel: crashed get_total + killed adj); rebuilt total-bases matrix carries Player proj plateAppearances mean/std (no .mdl); withheld unchanged, no training · next: activation Phase 5 wrap-up (wiring/backfill still stashed)`
+- `2026-06-10 · created · brief drafted from roadmap-v3 migration · next: stage 0a MLB packet (D1 window ~Jul)`

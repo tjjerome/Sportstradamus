@@ -1,0 +1,11 @@
+Usage: sportstradamus fetch savant [OPTIONS] COMMAND [ARGS]...
+
+  Snapshot Baseball Savant (Statcast) MLB leaderboards to disk.
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+  list    Print the registered endpoint catalog.
+  run     Snapshot each catalog endpoint's current season-to-date table to...
+  verify  Confirm each tool's parquet landed with rows for the season and...

@@ -1,13 +1,15 @@
-# Operation Ship 75 — References
+# Model Improvement Track — References
 
-> **Preserves the load-bearing facts from the deprecated
+> **The evidence appendix for [`model_improvement_track.md`](handoffs/model_improvement_track.md):**
+> research verdicts (P0–A1.6), branch/commit refs, the critical-files map, and citations
+> [1]–[75]. Preserves the load-bearing facts from the deprecated
 > [`gbdt_mean_regression_plan.md`](archive/gbdt_mean_regression_plan.md) /
-> [`gbdt_mean_regression_context.md`](archive/gbdt_mean_regression_context.md)**
-> so future sessions don't lose context after the new plan
-> ([`operation_ship_75.md`](operation_ship_75.md)) supersedes them. Full
+> [`gbdt_mean_regression_context.md`](archive/gbdt_mean_regression_context.md); full
 > prose for any item below lives in the archived docs at the line
 > citations. Research briefs cited as `/tmp/researcher_*.md` are
-> distilled here; their full bodies are not preserved (scratch).
+> distilled here; their full bodies are not preserved (scratch). The
+> *operational* checklists that used to live here (§12 inference-path,
+> §13 cross-league caveats) moved to the consolidated doc — pointers remain.
 
 ## Table of contents
 
@@ -25,6 +27,7 @@
 12. [Per-change-type inference-path checklist](#12-per-change-type-inference-path-checklist)
 13. [Cross-league caveats](#13-cross-league-caveats)
 14. [References [1]–[48]](#14-references)
+15. [Ship-75 sweep-era verdicts](#15-ship-75-sweep-era-verdicts)
 
 ---
 
@@ -341,11 +344,12 @@ primary build (deferred behind 75% breadth).
   [`scripts/prune_nfl_matrix_positions.py`](../src/sportstradamus/scripts/prune_nfl_matrix_positions.py):
   passing-yards 15000 → 2646 rows, mean 38.1 → 215.9.
 - New Stage A4 entry **T11**: per-position model-split bias experiment
-  (deferred to Ship 90 — see [`operation_ship_90.md`](operation_ship_90.md)).
+  (originally deferred to Ship 90; now a live lever —
+  [`model_improvement_track.md`](handoffs/model_improvement_track.md) §6.6).
 
 ## 10. Branch / PR / commit refs
 
-- **Active branch (Operation Ship 75):** `model-research`.
+- **Active branch (model improvement track):** `model-research`.
 - **Prior PR:** #46 → `devel`; HEAD before Ship 75 rework `fbec3cc`.
 - **Earlier breadth-led docs rework HEAD:** `6e913b1`.
 - **Latest shipped via old plan:** 13 NBA + 10 WNBA + 13 NFL baselines
@@ -355,8 +359,8 @@ primary build (deferred behind 75% breadth).
   spec (absolute bias + BSS ≥ 0). Under the new five-gate scorecard
   ([`training/scorecard.py`](../src/sportstradamus/training/scorecard.py),
   adds G4 IQR ratio and G5 ECE), some of these no longer ship. See
-  Step 0 audit in
-  [`operation_ship_75.md`](operation_ship_75.md).
+  the gate-audit table in
+  [`model_improvement_track.md`](handoffs/model_improvement_track.md) §3.1.
 
 ## 11. Critical files map
 
@@ -379,87 +383,16 @@ last-verified against `fbec3cc` (HEAD before Ship 75 rework):
 
 ## 12. Per-change-type inference-path checklist
 
-Every change must land its inference-side mirror in the same PR before
-promotion. Gate 1 lets a change into the test window; this checklist is
-what makes that window safe. Copy from the deprecated plan §Inference
-path:
-
-| Change type | Inference-side work | Precedent |
-|---|---|---|
-| **Training-only** (loss change, monotone constraint, ZTNB likelihood, per-parameter Optuna, sample reweighting) | None. Output schema unchanged. | Stage B1 ZTNB attempt: only loss changed. |
-| **New target / baseline strategy** | Inverse decode in `model_prob.py` `_decode_skewnormal` via `baselines.STRATEGY_REGISTRY[strategy].decode_loc/decode_scale`; matching `*_Ratio` feature in `get_stats`; `target_strategy` + `offset_meta` keys round-trip. | P1 `centered_additive_*`. |
-| **New distribution head** (T3 spliced/Pareto, MZINB, CMPμ, PGBM, MEGB, gbex) | (a) new decode block in [`model_prob.py:259-272`](../src/sportstradamus/prediction/model_prob.py); (b) `get_ev` / `get_odds` / `fused_loc` / `set_model_start_values` accept the new `dist`; (c) `dist` in `_build_filedict` + legacy fallback; (d) new live-path test mirroring [`test_zinb_hurdle_live_path.py`](../tests/integration/test_zinb_hurdle_live_path.py). | P2.B HurdleZINB. |
-| **Post-hoc calibration object** (isotonic on loc, CQR/LCMQR, **`bias_correction` from Ship 75 Step 1**) | Pickle as a new key (`isotonic` / `cqr` / `temperature` / `bias_correction` precedent); load in `model_prob`, apply after decode (before/after `fused_loc` per what's calibrated); byte-identical round-trip test. | `temperature` field in `_build_filedict`. |
-| **New player-level feature** (Ship 75 Step 2 expanding-mean, Step 3 opponent-defense) | Column in BOTH `get_training_matrix` and `get_stats`, computed identically, leakage-safe; same dtype/index; add to `feature_filter.json` whitelist. | `MeanYr` / `Mean10` / `*_Ratio` (`base.py:676-702`), `test_meanyr_mean10_leakage.py`. |
-| **Multi-head factorization** (T5, deferred) | `prophecize` loads N pickles/market; `model_prob` Monte Carlos; `fused_loc` multi-output blend; new `factor_pickles: dict[str, Path]` on parent pickle; new live-path test. **Largest inference-side change in plan.** | None in-repo. |
-| **Different model class** (CatBoost ordered TS, MEGB, GPBoost) | New `is_catboost`/`is_gpboost` flag; `model_prob` + `prediction/__init__.py` load path branch; determinism gate extended; adapt if no LSS `predict(pred_type="parameters")` API. | P2.B `is_hurdle`. |
-
-**Hard ship gate:** any change requiring inference-side work must have
-a passing live-path integration test under `tests/integration/`
-**before promotion to production**.
-
-**Pickle-schema discipline:** every new field needs (1) reader site in
-`model_prob.py`, (2) legacy default fallback
-(`filedict.get("new_key", default)`), (3) round-trip test asserting
-byte-identical predictions. Current fields written by
-`_build_filedict`: `model`, `step`, `stats`, `metrics`, `diagnostics`,
-`params`, `distribution`, `cv`, `std`, `temperature`, `dispersion_cal`,
-`weight`, `r_book`, `hist_gate`, `shape_ceiling`, `normalized`,
-`offset_meta`, `target_strategy`, `zinb_mode`, `is_hurdle`,
-`expected_columns`. Ship 75 adds: `bias_correction`.
+Moved — the checklist is operational, not historical. Canonical home:
+[`model_improvement_track.md`](handoffs/model_improvement_track.md) §7.3 (table, the
+hard ship gate, and the pickle-schema discipline).
 
 ## 13. Cross-league caveats
 
-Copy from the deprecated plan §Cross-league caveats. Read before
-running any cross-league A/B:
-
-1. **NFL sample sizes are an order of magnitude smaller than NBA**
-   (~17 vs ~82 games/player/season). EB(MeanYr, K=10) is aggressive
-   shrinkage at that size — re-derive `K = σ²_within / σ²_between`
-   per league. NFL K may be much lower (or EB transform may fail on
-   form-volatile NFL markets).
-2. **NFL stats are position-locked.** `Player position` is already a
-   categorical (`pipeline.py:_step_build_splits`). Cross-player models
-   per market may not transfer cleanly (QB vs WR don't share "passing
-   yards"); per-position scoping shipped in Stage A1.6 for NFL.
-3. **WNBA shares NBA's structure but has half the games / season.**
-   EB K=10 probably fine but verify. The per-100-poss factorization
-   (T5-basketball) is KILLED so the transfer point is moot. WNBA has
-   no `FGM` or `FG3A` markets (confirmed against the `stat_dist`
-   config view of `stat_meta.json`);
-   `FTM_per_FGA` + `FG3M_per_FGA` are the available efficiency
-   factors for ICC diagnostics.
-4. **The scorecard A/B harness is league-agnostic but file
-   paths are league-specific.** Cached parquets at
-   `data/training_data/{LEAGUE}_{market}.parquet`; deterministic test
-   sets at `data/test_sets/deterministic/{strategy}/{LEAGUE}_{market}.csv`.
-5. **Determinism gate currently covers NBA only.** Two
-   `test_deterministic_mode_*` tests use NBA_FGA + NBA_FG3M
-   ([`tests/integration/test_determinism_gate.py:37,102`](../tests/integration/test_determinism_gate.py)).
-   Before a cross-league change, add parallel assertions on WNBA_FGA
-   + WNBA_FG3M + a representative NFL market — else the cross-league
-   verdict is noise.
-6. **For low-mean NFL markets** (interceptions ~0.5, sacks ~1.5),
-   the ZINB diagnostic formulae may need to compute on `log(1+Y)`
-   [22]; the asymptotic Vuong degrades badly at very low means.
-   Wilson-Einbeck's non-asymptotic test should be the only one trusted
-   for NFL interceptions / sacks.
-7. **Two-track parallelism holds across leagues.** Track A and B
-   touch different distribution branches and markets; workable in
-   parallel per league. Shared resource is the read-only
-   `scorecard` harness.
-8. **Low-mean conditional-dispersion diagnostics need a non-Pearson
-   estimator — trust the Dunn–Smyth RQR over Pearson at mean ≲ 0.11.**
-   In B1.5 the df-corrected Pearson and RQR variance diverged at very
-   low NFL means (rushing-tds: Pearson 0.57 vs RQR 0.96; interceptions:
-   Pearson 1.38 vs RQR 1.04). A future low-mean NFL pass should
-   bootstrap the RQR variance and/or use deviance-based dispersion.
-9. **Post-hoc bias correctors at NFL count means must be affine ROE,
-   not isotonic / per-decile.** At interceptions ~0.5 and TD zero-rates
-   0.78–0.92, isotonic tails and per-bin (multicalibration) correctors
-   overfit; percent-calibration error is worst in low-base-rate groups
-   [48]. Reserve isotonic / per-decile for the higher-mean NBA / WNBA
-   count cells.
+Moved — canonical home: [`model_improvement_track.md`](handoffs/model_improvement_track.md)
+§7.4. The B1.5 numeric evidence behind its caveat 8 (Pearson-vs-RQR divergence at
+very low NFL means: rushing-tds Pearson 0.57 vs RQR 0.96; interceptions 1.38 vs
+1.04) stays preserved here.
 
 ## 14. References
 
@@ -503,7 +436,7 @@ Renumbered from the deprecated context doc.
 [47] Efron, B., Morris, C. (1973). Stein's estimation rule and its competitors — James-Stein / empirical-Bayes shrinkage.
 [48] Roelofs, R., et al. (2022). Mitigating bias in calibration error estimation — low-base-rate sensitivity.
 
-*Added by the full-distribution audit (marginal-breadth levers folded into [`operation_ship_75.md`](operation_ship_75.md) §5):*
+*Added by the full-distribution audit (marginal-breadth levers folded into [`model_improvement_track.md`](handoffs/model_improvement_track.md) §6):*
 
 [49] Czado, C., Gneiting, T., Held, L. (2009). Predictive model assessment for count data. *Biometrics* 65(4), 1254–1261.
 [50] Hallin, M., Ley, C. (2014). Skew-symmetric distributions and Fisher information — the double sin of the skew-normal. *Bernoulli* 20(3), 1432–1462. *(arXiv:1209.4177)*
@@ -528,6 +461,48 @@ Renumbered from the deprecated context doc.
 [69] Arnold, S., Walz, E.-M., Ziegel, J., Gneiting, T. (2024). Decompositions of the mean CRPS. *Electronic Journal of Statistics* 18, 4992–5044.
 [70] Chernozhukov, V., Wüthrich, K., Zhu, Y. (2021). Distributional conformal prediction. *PNAS* 118(48). *(arXiv:1909.07889)*
 [71] López de Prado, M. (2018). *Advances in Financial Machine Learning.* Wiley (ch. 7 purging/embargo, ch. 12 CPCV).
+[72] Dmochowski, J. P. (2023). A statistical theory of optimal decision-making in sports betting. *PLOS ONE* 18(6): e0287601. DOI 10.1371/journal.pone.0287601. *(book single point: median sufficient for side, extra quantiles necessary for shape — §6.5 book-distribution audit)*
+[73] Shin, H. S. (1993). Measuring the incidence of insider trading in a market for state-contingent claims. *Economic Journal* 103(420), 1141–1153. DOI 10.2307/2234240. *(endogenous favourite-longshot de-vig — a location refinement for the Pooling-half de-vig sub-item)*
+[74] Gneiting, T., Raftery, A. E., Westveld, A. H., Goldman, T. (2005). Calibrated probabilistic forecasting using ensemble model output statistics and minimum CRPS estimation. *Monthly Weather Review* 133(5), 1098–1118. DOI 10.1175/MWR2904.1. *(EMOS/NGR location-scale combination — structure A's ancestor — is fit by minimum CRPS, never PIT-KS; grounds the §6.5 Pooling-half probe's verdict that A-fit-to-PIT-KS is ill-posed)*
+[75] Gneiting, T., Balabdaoui, F., Raftery, A. E. (2007). Probabilistic forecasts, calibration and sharpness. *JRSS-B* 69(2), 243–268. DOI 10.1111/j.1467-9868.2007.00587.x. *(maximize sharpness subject to calibration — the lens exposing structure A's location distortion: a g4 number bought by sacrificing CRPS/sharpness)*
+[78] Meer, T., Weeks, M. (2024). Bounded distributions place limits on skewness and larger moments. *PLoS ONE* 19(2): e0297862. DOI 10.1371/journal.pone.0297862. *(non-negative-support skew bound γ ≥ δ−1/δ — the WS2 book-shape γ(μ) clamp + SkewNormal-vs-§6.6 routing pre-check)*
+[79] Rigby, R. A., Stasinopoulos, D. M. (2005). Generalized additive models for location, scale and shape (GAMLSS). *JRSS-C* 54(3), 507–554. DOI 10.1111/j.1467-9876.2005.00510.x. *(smooth sign-free σ²(μ)/γ(μ) fit + P-spline regularization — WS2(c) shape curve)*
+[80] Breeden, D. T., Litzenberger, R. H. (1978). Prices of state-contingent claims implicit in option prices. *Journal of Business* 51(4), 621–651. DOI 10.1086/296025. *(implied density from multiple quoted strikes/lines — WS2(a) ladder consensus, isotonic-then-invert)*
+[81] Bell, A., Jones, K. (2015). Explaining fixed effects: random effects modeling of panel data. *Political Science Research and Methods* 3(1), 133–153. DOI 10.1017/psrm.2014.7. *(within/between Mundlak demean — WS2 Q3 line-binning inflation screen)*
+[82] Azzalini, A. (1985). A class of distributions which includes the normal ones. *Scandinavian J. Statistics* 12(2), 171–178. JSTOR 4615982. *(SkewNormal definition + standardized-skewness bound ±0.9953 — the WS2 Q2 feasibility test that keeps DREB in-family)*
+[83] Taylor, L. R. (1961). Aggregation, variance and the mean. *Nature* 189, 732–735. DOI 10.1038/189732a0. *(mean-variance power law var=a·μ^b; b<1 = ordering/sub-Poisson — WS2 Q1 σ²(μ) form, DREB b≈0.34)*
+[84] Cobain, M. R. D. et al. (2019). Taylor's power law captures the effects of environmental variability on community structure. *J. Animal Ecology* 88(2), 290–301. DOI 10.1111/1365-2656.12923. *(temporal Taylor's-law exponent interpretation: clustering vs ordering regime)*
+[85] Busetti, F. (2017). Quantile aggregation of density forecasts. *Oxford Bulletin of Economics and Statistics* 79(4), 495–512. DOI 10.1111/obes.12163. *(quantile/Vincentization vs linear pool — WS2(a) consensus aggregation alternative)*
+
+---
+
+## 15. Ship-75 sweep-era verdicts
+
+Durable verdicts from the Ship-75 strategy sweep, consolidated here as the citable home for the
+trimmed `model_improvement_track.md` §10 ledger. Full narrative is in git
+(`git log docs/handoffs/model_improvement_track.md`); the memory links carry the operational
+lesson. The live plan-body homes are §3.4 (lever table), §6.5 (blend closed-status), §8.2
+(resolved holes).
+
+**Rework briefs.** The profit-first rework is supported by four briefs — count family (Double
+Poisson), continuous family (centered-SN), copula stage-0 (Gaussian + t-branch), and sweep UX +
+version attribution — at
+`/tmp/researcher_{count_family,continuous_family,copula_stage0,sweep_ux_versioning}.md`, mirrored
+under `~/.claude/plans/review-the-current-state-partitioned-taco-agent-*.md`.
+
+| Verdict | Status | Anchor |
+|---|---|---|
+| Gate 6 anti-shrinkage redesigned → OR of 3 one-sided legs, widened to all cells | Built, live | `[[gate6_anti_shrinkage_holdout_blind]]`; track §7.1 |
+| `ratio_projvol` normalization | Refuted 0/40 (manufactured zero-inflated low-volume tail) | `[[ratio_projvol_refuted]]`; track §6.2 |
+| Lever 1 calibrated HP search-gate | Validated (ships WNBA PR); per-cell `hpo_selection` persists | `[[calibration_hp_selection_lever]]`; track §6.1 |
+| WNBA built-lever lane | Closed at 13/18 (FTM hurdle+pit_ks; PR/RA/AST/OREB/FGA); rest §6.6-bound | `[[operation_ship_75_state]]`; track §6.9 |
+| §6.5 book-distribution audit | NO-GO standalone rebuild (decoupled from served gate at w≈0.90) | `[[book_distribution_audit_nogo]]` |
+| §6.5 Pooling-half BLP + decoupled | NO-GO both structures + weight-challenge probe-v2 (0/9 OOS) | `[[pooling_half_blp_nogo]]` |
+| WS2 shaped-book leg | Split — book-only fallback GO, served-blend NO-GO | `[[ws2_settling_split_verdict]]`, `[[book_skew_shape_borrow_refuted]]` |
+| Rung-C whole-CDF isotonic-PIT | Ships continuous (PA); dead on count | `[[rung_c_whole_cdf_recal]]` |
+| NFL volume five | Feature-mature (485 cols); negative BSS = target-shape → §6.2/§6.6 | `[[nfl_volume_cells_feature_mature]]` |
+| Deterministic A/B g4 gains | Oversell (feature-poor baseline underfits variance); read direction not magnitude | `[[deterministic_ab_g4_oversell]]` |
+| Warm-start `enqueue_trial` on `λ=0` pickle | Crashes `--force`/warm; workaround = move pickle aside → cold start | `[[warm_start_enqueue_lambda_zero_crash]]` |
 
 ---
 

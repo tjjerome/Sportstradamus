@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, devel]
   pull_request:
 
 jobs:
@@ -11,15 +11,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
       - name: Install Poetry
         run: pipx install poetry
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: poetry
+
       - name: Install dependencies
         run: poetry install --no-interaction --with dev
+
+      - name: Stage CI test fixtures (data + creds stubs)
+        # Live config files are gitignored because they hold secrets or large
+        # learned outputs. The committed stubs in tests/ci_fixtures/ have the
+        # keys callers expect at import time, with placeholder values. The data
+        # reorg (24e58b7) moved config JSON to src/sportstradamus/data/config/;
+        # stage the fixtures there so helpers/config.py finds them at import.
+        run: |
+          cp tests/ci_fixtures/data/*.json src/sportstradamus/data/config/
+          cp tests/ci_fixtures/creds/keys.json src/sportstradamus/creds/keys.json
 
       - name: Lint (ruff check)
         run: poetry run ruff check src/ tests/
@@ -27,26 +38,17 @@ jobs:
       - name: Format check (ruff format)
         run: poetry run ruff format --check src/ tests/
 
-      - name: Stage CI test stubs (gitignored secrets + learned configs)
-        # helpers/config.py loads keys.json plus several learned JSONs eagerly
-        # at import, so the package (and therefore every golden test, including
-        # test_imports) cannot import without them. These files are gitignored
-        # (secrets / runtime-learned outputs); write placeholders with the keys
-        # callers read at import. Empty dicts suffice for the learned configs —
-        # only odds_api is dereferenced at import time.
-        run: |
-          mkdir -p src/sportstradamus/creds
-          printf '%s' '{"odds_api": "", "odds_api_plus": "", "scrapingfish": "", "scrapeops": "", "fantasypoints_authorization": "", "fantasypoints_cookie": "", "fantasypoints_user_agent": ""}' > src/sportstradamus/creds/keys.json
-          printf '%s' '{"NFL": {}, "NBA": {}, "WNBA": {}, "NHL": {}, "MLB": {}}' > src/sportstradamus/data/stat_cv.json
-          printf '%s' '{}' > src/sportstradamus/data/stat_std.json
-          printf '%s' '{}' > src/sportstradamus/data/book_weights.json
-          printf '%s' '{}' > src/sportstradamus/data/goalies.json
-          # Several modules build a klepto Archive() at module level, which
-          # scandir()s ``archive/`` on construction; an empty dir is enough.
-          mkdir -p archive
+      - name: Tests (behavioral + golden)
+        # Default addopts exclude the integration and diagnostics markers and
+        # parallelize via pytest-xdist.
+        run: poetry run pytest
 
-      - name: Golden tests
-        run: poetry run pytest tests/golden/ -v
+      - name: Integration smoke test
+        # Fake mode (default): odds API, nba_api, scrapers, and Sheets are
+        # all stubbed/canned. Live network calls only fire when
+        # SPORTSTRADAMUS_INTEGRATION_REAL_APIS=1, which CI never sets.
+        # -n0: the integration suite is not xdist-safe (shared stat_meta.json fixture).
+        run: poetry run pytest tests/integration/ -m integration -n0 -v
 
       - name: Type check (mypy, advisory)
         # Does not gate merges; surfaces warnings only.

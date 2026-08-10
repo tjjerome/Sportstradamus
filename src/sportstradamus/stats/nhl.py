@@ -5,21 +5,18 @@ import json
 import os.path
 import pickle
 import warnings
-from datetime import datetime, timedelta
-from io import StringIO
+from datetime import date, datetime, timedelta
 from time import sleep
 
 import line_profiler
 import numpy as np
 import pandas as pd
-import requests
 from scipy.stats import iqr, norm, poisson
 from sklearn.neighbors import BallTree
 from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import (
-    Archive,
     Scrape,
     abbreviations,
     combo_props,
@@ -32,8 +29,21 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
+from sportstradamus.helpers.io import write_gamelog
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats.base import Stats, archive, clean_data, scraper
+from sportstradamus.stats.base import (
+    Stats,
+    archive,
+    clean_data,
+    scale_team_volume_to_budget,
+    scraper,
+)
+from sportstradamus.stats.nhl_position_policy import allowed_nhl_positions
+
+# Days of gamelog history to retain (~4 NHL seasons); older rows pruned on each update.
+_GAMELOG_RETENTION_DAYS = 1431
+# Days since season start before triggering a full gamelog re-enrichment pass.
+_STALE_SEASON_DAYS = 300
 
 
 class StatsNHL(Stats):
@@ -51,7 +61,7 @@ class StatsNHL(Stats):
 
     def __init__(self):
         super().__init__()
-        self.season_start = datetime(2024, 10, 4).date()
+        self.season_start = datetime(2025, 10, 7).date()
         self.skater_stats = [
             "GOE",
             "Fenwick",
@@ -117,23 +127,16 @@ class StatsNHL(Stats):
         self.usage_stat = "TimeShare"
         self.tiebreaker_stat = "Fenwick short"
         self._volume_model_cache = None
+        self._combo_player_games_cache_key = None
+        self._combo_player_games_cache = {}
+        self._combo_archive_cache_key = None
+        self._combo_archive_cache = {}
 
-    def load(self):
-        """Loads NHL skater and goalie data from files.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-        filepath = pkg_resources.files(data) / "nhl_data.dat"
-        if os.path.isfile(filepath):
-            with open(filepath, "rb") as infile:
-                nhl_data = pickle.load(infile)
-                self.players = nhl_data.get("players", {})
-                self.gamelog = nhl_data.get("gamelog", {})
-                self.teamlog = nhl_data.get("teamlog", {})
+    def _market_position_filter(self, gamelog: pd.DataFrame, market: str) -> pd.DataFrame:
+        """Keep only players who can accrue the requested NHL market."""
+        allowed = allowed_nhl_positions(market)
+        position = gamelog[self.log_strings["position"]].astype("string")
+        return gamelog.loc[position.isin(allowed)].copy()
 
     def build_comp_profile(self, playerDict=None):
         """Build NHL player comp profile from loaded player data.
@@ -163,7 +166,7 @@ class StatsNHL(Stats):
     def update_player_comps(self, year=None):
         if year is None:
             year = self.season_start.year
-        with open(pkg_resources.files(data) / "playerCompStats.json") as infile:
+        with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as infile:
             stats = json.load(infile)
 
         players = self.players.get(self.season_start.year - 1, {})
@@ -190,16 +193,56 @@ class StatsNHL(Stats):
             min_k = 4 if position == "G" else 5
             comps[position] = self._build_comps(knn, positionProfile, min_comps=min_k, max_comps=20)
 
-        filepath = pkg_resources.files(data) / "nhl_comps.json"
+        filepath = pkg_resources.files(data) / "leagues" / "nhl" / "comps.json"
         with open(filepath, "w") as outfile:
             json.dump(comps, outfile, indent=4)
 
-    def _compute_comps(self):
-        """Build comps from loaded data at runtime (no JSON I/O)."""
-        with open(pkg_resources.files(data) / "playerCompStats.json") as f:
+    def _current_season_key(self, target_game_date: date) -> int:
+        """Return the ``self.players`` key for the season containing ``target_game_date``.
+
+        NHL seasons run Oct–Jun and ``self.players`` is keyed by the season
+        *start* year (int). Oct–Dec dates belong to that year's season;
+        Jan–Sep dates belong to the prior year's season.
+        """
+        if target_game_date.month >= 10:
+            return target_game_date.year
+        return target_game_date.year - 1
+
+    def _player_seasons_through(self, target_game_date: date) -> dict:
+        """Merge ``self.players`` seasons ``<=`` ``target_game_date``'s season.
+
+        Returns a flat ``{player_id: stats_dict}`` mapping ready for
+        :meth:`build_comp_profile`. Iterates oldest → newest so the current
+        season's roster wins on dict-update conflicts (matches the
+        :meth:`update_player_comps` ``prior.update(current)`` order).
+        """
+        cutoff = self._current_season_key(target_game_date)
+        merged: dict = {}
+        for season_key in sorted(self.players.keys()):
+            if season_key > cutoff:
+                continue
+            merged.update(self.players[season_key])
+        return merged
+
+    def _compute_comps(self, target_game_date: date | None = None) -> None:
+        """Build comps from loaded data at runtime (no JSON I/O).
+
+        When ``target_game_date`` is provided, the player pool is bounded to
+        ``self.players`` seasons that started on or before the target date's
+        season-start year, so a 2022 training row's comps no longer pool
+        with 2024+ rookies. ``self.playerProfile`` is already date-bounded
+        by :meth:`base_profile` upstream (it filters ``short_gamelog`` to
+        the 300-day window ending at ``date``), so the gate here is on the
+        per-season roster set that feeds :meth:`build_comp_profile`.
+        Today() default preserves inference / cron behavior.
+        """
+        with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as f:
             stats = json.load(f)
 
-        playerProfile, all_players, id_to_name = self.build_comp_profile()
+        if target_game_date is None:
+            target_game_date = datetime.today().date()
+        playerDict = self._player_seasons_through(target_game_date)
+        playerProfile, all_players, id_to_name = self.build_comp_profile(playerDict=playerDict)
         if playerProfile.empty:
             return
 
@@ -232,12 +275,11 @@ class StatsNHL(Stats):
         teamlog = []
         game = scraper.get(f"https://api-web.nhle.com/v1/gamecenter/{gameId}/boxscore")
         season = game["season"]
-        res = requests.get(
+        game_df = scraper.get_csv(
             f"https://moneypuck.com/moneypuck/playerData/games/{season}/{gameId}.csv"
         )
-        if res.status_code != 200:
+        if game_df.empty:
             return gamelog, teamlog
-        game_df = pd.read_csv(StringIO(res.text))
         pp_df = game_df.loc[game_df.situation == "5on4"]
         game_df = game_df.loc[game_df.situation == "all"]
         if game and not game_df.empty:
@@ -259,231 +301,252 @@ class StatsNHL(Stats):
                 win = (game["homeTeam"]["score"] > game["awayTeam"]["score"]) == home
 
                 if player["position"] == "Team Level":
-                    n = {
-                        "gameId": gameId,
-                        "gameDate": gameDate,
-                        "team": team,
-                        "opponent": opponent,
-                        "home": home,
-                    }
-                    stats = {
-                        "Corsi": float(player["OffIce_F_shotAttempts"]),
-                        "Fenwick": float(player["OffIce_F_unblockedShotAttempts"]),
-                        "Hits": float(player["OffIce_F_hits"]),
-                        "Takeaways": float(player["OffIce_F_takeaways"]),
-                        "PIM": float(player["OffIce_F_penalityMinutes"]),
-                        "Corsi_Pct": float(player["OffIce_shotAttempts_For_Percentage"]),
-                        "Fenwick_Pct": float(player["OffIce_unblockedShotAttempts_For_Percentage"]),
-                        "Hits_Pct": float(player["OffIce_hits_For_Percentage"]),
-                        "Takeaways_Pct": float(player["OffIce_takeaways_For_Percentage"]),
-                        "PIM_Pct": float(player["OffIce_penalityMinutes_For_Percentage"]),
-                        "Block_Pct": float(player["OffIce_A_blockedShotAttempts"])
-                        / float(player["OffIce_A_shotAttempts"]),
-                        "xGoals": float(player["OffIce_F_flurryScoreVenueAdjustedxGoals"]),
-                        "xGoalsAgainst": float(player["OffIce_A_flurryScoreVenueAdjustedxGoals"]),
-                        "goalsAgainst": float(player["OffIce_A_goals"]),
-                        "goals": float(player["OffIce_F_goals"]),
-                    }
-                    shotsAgainst = float(player["OffIce_A_shotsOnGoal"])
-                    stats.update(
-                        {
-                            "WL": "W" if stats["goals"] > stats["goalsAgainst"] else "L",
-                            "GOE": (float(player["OffIce_F_goals"]) - stats["xGoals"])
-                            / float(player["OffIce_F_shotAttempts"]),
-                            "SV": (float(player["OffIce_A_savedShotsOnGoal"]) / shotsAgainst)
-                            if shotsAgainst
-                            else 0,
-                            "SOE": (
-                                (
-                                    float(player["OffIce_A_flurryScoreVenueAdjustedxGoals"])
-                                    - float(player["OffIce_A_goals"])
-                                )
-                                / shotsAgainst
-                            )
-                            if shotsAgainst
-                            else 0,
-                            "Freeze": (
-                                (
-                                    float(player["OffIce_A_freeze"])
-                                    - float(player["OffIce_A_xFreeze"])
-                                )
-                                / shotsAgainst
-                            )
-                            if shotsAgainst
-                            else 0,
-                            "Rebound": (
-                                (
-                                    float(player["OffIce_A_rebounds"])
-                                    - float(player["OffIce_A_xRebounds"])
-                                )
-                                / shotsAgainst
-                            )
-                            if shotsAgainst
-                            else 0,
-                            "RG": (
-                                (
-                                    float(player["OffIce_A_reboundGoals"])
-                                    - float(player["OffIce_A_reboundxGoals"])
-                                )
-                                / float(player["OffIce_A_rebounds"])
-                            )
-                            if float(player["OffIce_A_rebounds"])
-                            else 0,
-                        }
+                    teamlog.append(
+                        self._team_level_row(player, gameId, gameDate, team, opponent, home)
                     )
-                    teamlog.append(n | stats)
                 else:
-                    n = {
-                        "gameId": gameId,
-                        "gameDate": gameDate,
-                        "team": team,
-                        "opponent": opponent,
-                        "opponent goalie": remove_accents(
-                            game_df.loc[
-                                (game_df.position == "G") & (game_df.team != team), "playerName"
-                            ].iat[0]
-                        ),
-                        "home": home,
-                        "playerId": player["playerId"],
-                        "playerName": remove_accents(player["playerName"]),
-                        "position": player["position"],
-                    }
-                    stats = {
-                        "points": float(player["I_F_points"]),
-                        "shots": float(player["I_F_shotsOnGoal"]),
-                        "blocked": float(player["I_A_blockedShotAttempts"]),
-                        "sogBS": float(player["I_F_shotsOnGoal"])
-                        + float(player["I_A_blockedShotAttempts"]),
-                        "goals": float(player["I_F_goals"]),
-                        "assists": float(player["I_F_primaryAssists"])
-                        + float(player["I_F_secondaryAssists"]),
-                        "hits": float(player["I_F_hits"]),
-                        "faceOffWins": float(player["I_F_faceOffsWon"]),
-                        "timeOnIce": float(player["I_F_iceTime"]) / 60,
-                        "saves": float(player["OnIce_A_savedShotsOnGoal"]),
-                        "shotsAgainst": float(player["OnIce_A_shotsOnGoal"]),
-                        "goalsAgainst": float(player["OnIce_A_goals"]),
-                    }
-                    if player["playerName"] in pp_df["playerName"].to_list():
-                        stats["powerPlayPoints"] = float(
-                            pp_df.loc[pp_df["playerName"] == player["playerName"]][
-                                "I_F_points"
-                            ].iat[0]
+                    gamelog.append(
+                        self._skater_row(
+                            player,
+                            gameId,
+                            gameDate,
+                            team,
+                            opponent,
+                            home,
+                            win,
+                            game_df,
+                            pp_df,
+                            team_map,
                         )
-                    else:
-                        stats["powerPlayPoints"] = 0
-                    stats.update(
-                        {
-                            "fantasy points prizepicks": stats.get("goals", 0) * 8
-                            + stats.get("assists", 0) * 5
-                            + stats.get("sogBS", 0) * 1.5,
-                            "goalie fantasy points underdog": int(win) * 6
-                            + stats.get("saves", 0) * 0.6
-                            - stats.get("goalsAgainst", 0) * 3,
-                            "skater fantasy points underdog": stats.get("goals", 0) * 6
-                            + stats.get("assists", 0) * 4
-                            + stats.get("sogBS", 0)
-                            + stats.get("hits", 0) * 0.5
-                            + stats.get("powerPlayPoints", 0) * 0.5,
-                            "goalie fantasy points parlay": stats.get("saves", 0) * 0.25
-                            - stats.get("goalsAgainst", 0),
-                            "skater fantasy points parlay": stats.get("goals", 0) * 3
-                            + stats.get("assists", 0) * 2
-                            + stats.get("shots", 0) * 0.5
-                            + stats.get("hits", 0)
-                            + stats.get("blocked", 0),
-                        }
                     )
-                    team = {v: k for k, v in team_map.items()}.get(team, team)
-                    shots = float(player["I_F_shotAttempts"])
-                    shotsAgainst = float(player["OnIce_A_shotsOnGoal"])
-                    stats.update(
-                        {
-                            "GOE": (
-                                (
-                                    stats["goals"]
-                                    - float(player["I_F_flurryScoreVenueAdjustedxGoals"])
-                                )
-                                / shots
-                            )
-                            if shots
-                            else 0,
-                            "Fenwick": float(player["OnIce_unblockedShotAttempts_For_Percentage"]),
-                            "TimeShare": stats["timeOnIce"]
-                            / (
-                                float(
-                                    game_df.loc[
-                                        game_df["playerName"] == team, "OffIce_F_iceTime"
-                                    ].iat[0]
-                                )
-                                / 60
-                            ),
-                            "ShotShare": stats["shots"]
-                            / float(
-                                game_df.loc[
-                                    game_df["playerName"] == team, "OffIce_F_shotsOnGoal"
-                                ].iat[0]
-                            ),
-                            "Shot60": stats["shots"] * 60 / stats["timeOnIce"],
-                            "Blk60": stats["blocked"] * 60 / stats["timeOnIce"],
-                            "Hit60": stats["hits"] * 60 / stats["timeOnIce"],
-                            "Ast60": stats["assists"] * 60 / stats["timeOnIce"],
-                            "SV": (float(player["OnIce_A_savedShotsOnGoal"]) / shotsAgainst)
-                            if shotsAgainst
-                            else 0,
-                            "SOE": (
-                                (
-                                    float(player["OnIce_A_flurryScoreVenueAdjustedxGoals"])
-                                    - stats["goalsAgainst"]
-                                )
-                                / shotsAgainst
-                            )
-                            if shotsAgainst
-                            else 0,
-                            "Freeze": (
-                                (float(player["OnIce_A_freeze"]) - float(player["OnIce_A_xFreeze"]))
-                                / shotsAgainst
-                            )
-                            if shotsAgainst
-                            else 0,
-                            "Rebound": (
-                                (
-                                    float(player["OnIce_A_rebounds"])
-                                    - float(player["OnIce_A_xRebounds"])
-                                )
-                                / shotsAgainst
-                            )
-                            if shotsAgainst
-                            else 0,
-                            "RG": (
-                                (
-                                    float(player["OnIce_A_reboundGoals"])
-                                    - float(player["OnIce_A_reboundxGoals"])
-                                )
-                                / float(player["OnIce_A_rebounds"])
-                            )
-                            if float(player["OnIce_A_rebounds"])
-                            else 0,
-                        }
-                    )
-                    gamelog.append(n | stats)
 
         return gamelog, teamlog
 
-    def update(self):
-        """Updates the NHL skater and goalie data.
+    def _team_level_row(self, player, gameId, gameDate, team, opponent, home):
+        """Build one Team Level (on-ice aggregate) teamlog row from a moneypuck row."""
+        n = {
+            "gameId": gameId,
+            "gameDate": gameDate,
+            "team": team,
+            "opponent": opponent,
+            "home": home,
+        }
+        stats = {
+            "Corsi": float(player["OffIce_F_shotAttempts"]),
+            "Fenwick": float(player["OffIce_F_unblockedShotAttempts"]),
+            "Hits": float(player["OffIce_F_hits"]),
+            "Takeaways": float(player["OffIce_F_takeaways"]),
+            "PIM": float(player["OffIce_F_penalityMinutes"]),
+            "Corsi_Pct": float(player["OffIce_shotAttempts_For_Percentage"]),
+            "Fenwick_Pct": float(player["OffIce_unblockedShotAttempts_For_Percentage"]),
+            "Hits_Pct": float(player["OffIce_hits_For_Percentage"]),
+            "Takeaways_Pct": float(player["OffIce_takeaways_For_Percentage"]),
+            "PIM_Pct": float(player["OffIce_penalityMinutes_For_Percentage"]),
+            "Block_Pct": float(player["OffIce_A_blockedShotAttempts"])
+            / float(player["OffIce_A_shotAttempts"]),
+            "xGoals": float(player["OffIce_F_flurryScoreVenueAdjustedxGoals"]),
+            "xGoalsAgainst": float(player["OffIce_A_flurryScoreVenueAdjustedxGoals"]),
+            "goalsAgainst": float(player["OffIce_A_goals"]),
+            "goals": float(player["OffIce_F_goals"]),
+        }
+        shotsAgainst = float(player["OffIce_A_shotsOnGoal"])
+        stats.update(
+            {
+                "WL": "W" if stats["goals"] > stats["goalsAgainst"] else "L",
+                "GOE": (float(player["OffIce_F_goals"]) - stats["xGoals"])
+                / float(player["OffIce_F_shotAttempts"]),
+                "SV": (float(player["OffIce_A_savedShotsOnGoal"]) / shotsAgainst)
+                if shotsAgainst
+                else 0,
+                "SOE": (
+                    (
+                        float(player["OffIce_A_flurryScoreVenueAdjustedxGoals"])
+                        - float(player["OffIce_A_goals"])
+                    )
+                    / shotsAgainst
+                )
+                if shotsAgainst
+                else 0,
+                "Freeze": (
+                    (float(player["OffIce_A_freeze"]) - float(player["OffIce_A_xFreeze"]))
+                    / shotsAgainst
+                )
+                if shotsAgainst
+                else 0,
+                "Rebound": (
+                    (float(player["OffIce_A_rebounds"]) - float(player["OffIce_A_xRebounds"]))
+                    / shotsAgainst
+                )
+                if shotsAgainst
+                else 0,
+                "RG": (
+                    (
+                        float(player["OffIce_A_reboundGoals"])
+                        - float(player["OffIce_A_reboundxGoals"])
+                    )
+                    / float(player["OffIce_A_rebounds"])
+                )
+                if float(player["OffIce_A_rebounds"])
+                else 0,
+            }
+        )
+        return n | stats
 
-        Args:
-            None
+    def _skater_row(
+        self, player, gameId, gameDate, team, opponent, home, win, game_df, pp_df, team_map
+    ):
+        """Build one skater/goalie gamelog row (box score + on-ice rates + fantasy points)."""
+        n = {
+            "gameId": gameId,
+            "gameDate": gameDate,
+            "team": team,
+            "opponent": opponent,
+            "opponent goalie": remove_accents(
+                game_df.loc[(game_df.position == "G") & (game_df.team != team), "playerName"].iat[0]
+            ),
+            "home": home,
+            "playerId": player["playerId"],
+            "playerName": remove_accents(player["playerName"]),
+            "position": player["position"],
+        }
+        stats = {
+            "points": float(player["I_F_points"]),
+            "shots": float(player["I_F_shotsOnGoal"]),
+            "blocked": float(player["I_A_blockedShotAttempts"]),
+            "sogBS": float(player["I_F_shotsOnGoal"]) + float(player["I_A_blockedShotAttempts"]),
+            "goals": float(player["I_F_goals"]),
+            "assists": float(player["I_F_primaryAssists"]) + float(player["I_F_secondaryAssists"]),
+            "hits": float(player["I_F_hits"]),
+            "faceOffWins": float(player["I_F_faceOffsWon"]),
+            "timeOnIce": float(player["I_F_iceTime"]) / 60,
+            "saves": float(player["OnIce_A_savedShotsOnGoal"]),
+            "shotsAgainst": float(player["OnIce_A_shotsOnGoal"]),
+            "goalsAgainst": float(player["OnIce_A_goals"]),
+        }
+        if player["playerName"] in pp_df["playerName"].to_list():
+            stats["powerPlayPoints"] = float(
+                pp_df.loc[pp_df["playerName"] == player["playerName"]]["I_F_points"].iat[0]
+            )
+        else:
+            stats["powerPlayPoints"] = 0
+        stats.update(
+            {
+                "fantasy points prizepicks": stats.get("goals", 0) * 8
+                + stats.get("assists", 0) * 5
+                + stats.get("sogBS", 0) * 1.5,
+                "goalie fantasy points underdog": int(win) * 6
+                + stats.get("saves", 0) * 0.6
+                - stats.get("goalsAgainst", 0) * 3,
+                "skater fantasy points underdog": stats.get("goals", 0) * 6
+                + stats.get("assists", 0) * 4
+                + stats.get("sogBS", 0)
+                + stats.get("hits", 0) * 0.5
+                + stats.get("powerPlayPoints", 0) * 0.5,
+                "goalie fantasy points parlay": stats.get("saves", 0) * 0.25
+                - stats.get("goalsAgainst", 0),
+                "skater fantasy points parlay": stats.get("goals", 0) * 3
+                + stats.get("assists", 0) * 2
+                + stats.get("shots", 0) * 0.5
+                + stats.get("hits", 0)
+                + stats.get("blocked", 0),
+            }
+        )
+        team = {v: k for k, v in team_map.items()}.get(team, team)
+        shots = float(player["I_F_shotAttempts"])
+        shotsAgainst = float(player["OnIce_A_shotsOnGoal"])
+        stats.update(
+            {
+                "GOE": (
+                    (stats["goals"] - float(player["I_F_flurryScoreVenueAdjustedxGoals"])) / shots
+                )
+                if shots
+                else 0,
+                "Fenwick": float(player["OnIce_unblockedShotAttempts_For_Percentage"]),
+                "TimeShare": stats["timeOnIce"]
+                / (
+                    float(game_df.loc[game_df["playerName"] == team, "OffIce_F_iceTime"].iat[0])
+                    / 60
+                ),
+                "ShotShare": stats["shots"]
+                / float(game_df.loc[game_df["playerName"] == team, "OffIce_F_shotsOnGoal"].iat[0]),
+                "Shot60": stats["shots"] * 60 / stats["timeOnIce"],
+                "Blk60": stats["blocked"] * 60 / stats["timeOnIce"],
+                "Hit60": stats["hits"] * 60 / stats["timeOnIce"],
+                "Ast60": stats["assists"] * 60 / stats["timeOnIce"],
+                "SV": (float(player["OnIce_A_savedShotsOnGoal"]) / shotsAgainst)
+                if shotsAgainst
+                else 0,
+                "SOE": (
+                    (
+                        float(player["OnIce_A_flurryScoreVenueAdjustedxGoals"])
+                        - stats["goalsAgainst"]
+                    )
+                    / shotsAgainst
+                )
+                if shotsAgainst
+                else 0,
+                "Freeze": (
+                    (float(player["OnIce_A_freeze"]) - float(player["OnIce_A_xFreeze"]))
+                    / shotsAgainst
+                )
+                if shotsAgainst
+                else 0,
+                "Rebound": (
+                    (float(player["OnIce_A_rebounds"]) - float(player["OnIce_A_xRebounds"]))
+                    / shotsAgainst
+                )
+                if shotsAgainst
+                else 0,
+                "RG": (
+                    (float(player["OnIce_A_reboundGoals"]) - float(player["OnIce_A_reboundxGoals"]))
+                    / float(player["OnIce_A_rebounds"])
+                )
+                if float(player["OnIce_A_rebounds"])
+                else 0,
+            }
+        )
+        return n | stats
 
-        Returns:
-            None
-        """
-        # Get game ids
+    def _update(self):
+        """Updates the NHL skater and goalie data."""
         latest_date = self.season_start
         if not self.gamelog.empty:
             latest_date = pd.to_datetime(self.gamelog["gameDate"]).max().date() + timedelta(days=1)
         today = datetime.today().date()
+
+        ids = self._collect_game_ids(latest_date, today)
+        nhl_gamelog, nhl_teamlog = self._parse_new_games(ids, today)
+        self._merge_new_gamelogs(nhl_gamelog, nhl_teamlog)
+        self._fetch_upcoming_games_nhl(today)
+
+        player_df = self._fetch_player_bios_nhl()
+        skater_df = self._fetch_skater_summary(player_df)
+        goalie_df = self._fetch_goalie_summary(player_df)
+        self.players[self.season_start.year] = skater_df.to_dict("index") | goalie_df.to_dict(
+            "index"
+        )
+
+        four_years_ago = today - timedelta(days=_GAMELOG_RETENTION_DAYS)
+        self.gamelog = self.gamelog[
+            pd.to_datetime(self.gamelog["gameDate"]).dt.date >= four_years_ago
+        ]
+        self.gamelog.drop_duplicates(subset=["gameId", "playerName"], keep="last", inplace=True)
+        self.teamlog = self.teamlog[
+            pd.to_datetime(self.teamlog["gameDate"]).dt.date >= four_years_ago
+        ]
+        self.teamlog.drop_duplicates(subset=["gameId", "team"], keep="last", inplace=True)
+
+        if (
+            self.season_start < datetime.today().date() - timedelta(days=_STALE_SEASON_DAYS)
+            or clean_data
+        ):
+            self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
+            self._enrich_team_markets(self.gamelog, date_col="gameDate", team_col="team")
+
+        write_gamelog("nhl", self.gamelog, self.teamlog, self.players)
+
+    def _collect_game_ids(self, latest_date, today):
+        """Walk the NHL schedule day-by-day collecting (gameId, date) since latest_date."""
         ids = []
         while latest_date <= today:
             start_date = latest_date.strftime("%Y-%m-%d")
@@ -499,18 +562,23 @@ class StatsNHL(Stats):
 
             else:
                 break
+        return ids
 
-        # Parse the game stats
+    def _parse_new_games(self, ids, today):
+        """Parse each completed game id into (gamelog, teamlog) row lists."""
         nhl_gamelog = []
         nhl_teamlog = []
-        for gameId, date in tqdm(ids, desc="Getting NHL Stats"):
-            if datetime.strptime(date, "%Y-%m-%d").date() < today:
-                gamelog, teamlog = self.parse_game(gameId, date)
+        for gameId, game_date_str in tqdm(ids, desc="Getting NHL Stats"):
+            if datetime.strptime(game_date_str, "%Y-%m-%d").date() < today:
+                gamelog, teamlog = self.parse_game(gameId, game_date_str)
                 if type(gamelog) is list:
                     nhl_gamelog.extend(gamelog)
                 if type(teamlog) is list:
                     nhl_teamlog.extend(teamlog)
+        return nhl_gamelog, nhl_teamlog
 
+    def _merge_new_gamelogs(self, nhl_gamelog, nhl_teamlog):
+        """Dedup new player/team rows, enrich markets, and prepend to the stored logs."""
         nhl_df = pd.DataFrame(nhl_gamelog).fillna(0).infer_objects(copy=False)
         if not nhl_df.empty:
             nhl_df.drop_duplicates(subset=["gameId", "playerName"], keep="last", inplace=True)
@@ -521,12 +589,7 @@ class StatsNHL(Stats):
                 nhl_df = nhl_df[
                     ~nhl_df.apply(lambda x: (x["gameId"], x["playerName"]) in existing, axis=1)
                 ]
-            nhl_df.loc[:, "moneyline"] = nhl_df.apply(
-                lambda x: archive.get_moneyline(self.league, x["gameDate"], x["team"]), axis=1
-            )
-            nhl_df.loc[:, "totals"] = nhl_df.apply(
-                lambda x: archive.get_total(self.league, x["gameDate"], x["team"]), axis=1
-            )
+            self._enrich_team_markets(nhl_df, date_col="gameDate", team_col="team")
         nhl_teamlog_df = pd.DataFrame(nhl_teamlog).fillna(0).infer_objects(copy=False)
         if not nhl_teamlog_df.empty:
             nhl_teamlog_df.drop_duplicates(subset=["gameId", "team"], keep="last", inplace=True)
@@ -537,6 +600,8 @@ class StatsNHL(Stats):
             pd.concat([nhl_teamlog_df, self.teamlog]).sort_values("gameDate").reset_index(drop=True)
         )
 
+    def _fetch_upcoming_games_nhl(self, today):
+        """Populate self.upcoming_games with opponent + predicted goalie from dobbersports."""
         res = scraper.get(
             "https://core.api.dobbersports.com/v1/weekly-schedule/weekly-games?week=0"
         )
@@ -571,10 +636,13 @@ class StatsNHL(Stats):
                 goalie = remove_accents(goalie[0]["goalie"]["fullName"]) if goalie else ""
                 self.upcoming_games[abbr] = {"Opponent": opp, "Home": home, "Goalie": goalie}
 
-        res = requests.get(
+    def _fetch_player_bios_nhl(self):
+        """All-players bio lookup (height/weight/bmi/age/position) from moneypuck."""
+        player_df = scraper.get_csv(
             "https://moneypuck.com/moneypuck/playerData/playerBios/allPlayersLookup.csv"
         )
-        player_df = pd.read_csv(StringIO(res.text))
+        if player_df.empty:
+            return player_df
         player_df.rename(columns={"name": "playerName"}, inplace=True)
         player_df.height = (
             player_df.height.str[:-1]
@@ -588,283 +656,162 @@ class StatsNHL(Stats):
         player_df.playerName = player_df.playerName.apply(remove_accents)
         player_df["position"] = player_df["position"].replace("R", "W")
         player_df["position"] = player_df["position"].replace("L", "W")
+        return player_df
 
-        res = requests.get(
+    def _fetch_skater_summary(self, player_df):
+        """Per-60 / per-attempt skater rates from the moneypuck season summary."""
+        skater_df = scraper.get_csv(
             f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{self.season_start.year}/regular/skaters.csv"
         )
-        if res.status_code == 200:
-            skater_df = pd.read_csv(StringIO(res.text))
-            skater_df.rename(columns={"name": "playerName"}, inplace=True)
-            skater_df = skater_df.loc[skater_df["situation"] == "all"]
-            skater_df["Fenwick"] = (
-                skater_df["onIce_fenwickPercentage"] - skater_df["offIce_fenwickPercentage"]
-            )
-            skater_df["timePerGame"] = skater_df["icetime"] / skater_df["games_played"] / 60
-            skater_df["timePerShift"] = skater_df["icetime"] / skater_df["I_F_shifts"]
-            skater_df["xGoals"] = (
-                skater_df["I_F_flurryScoreVenueAdjustedxGoals"] / skater_df["I_F_shotAttempts"]
-            )
-            skater_df["shotsOnGoal"] = skater_df["I_F_shotsOnGoal"] / skater_df["I_F_shotAttempts"]
-            skater_df["goals"] = (
-                skater_df["I_F_goals"] - skater_df["I_F_flurryScoreVenueAdjustedxGoals"]
-            ) / skater_df["I_F_shotAttempts"]
-            skater_df["rebounds"] = skater_df["I_F_rebounds"] / skater_df["I_F_shotAttempts"]
-            skater_df["freeze"] = skater_df["I_F_freeze"] / skater_df["I_F_shotAttempts"]
-            skater_df["oZoneStarts"] = skater_df["I_F_oZoneShiftStarts"] / (
-                skater_df["I_F_oZoneShiftStarts"] + skater_df["I_F_dZoneShiftStarts"]
-            )
-            skater_df["flyStarts"] = skater_df["I_F_flyShiftStarts"] / skater_df["I_F_shifts"]
-            skater_df["shotAttempts"] = (
-                skater_df["I_F_shotAttempts"] / skater_df["icetime"] * 60 * 60
-            )
-            skater_df["hits"] = skater_df["I_F_hits"] / skater_df["icetime"] * 60 * 60
-            skater_df["takeaways"] = skater_df["I_F_takeaways"] / skater_df["icetime"] * 60 * 60
-            skater_df["giveaways"] = skater_df["I_F_giveaways"] / skater_df["icetime"] * 60 * 60
-            skater_df["assists"] = (
-                (skater_df["I_F_primaryAssists"] + skater_df["I_F_secondaryAssists"])
-                / skater_df["icetime"]
-                * 60
-                * 60
-            )
-            skater_df["penaltyMinutes"] = (
-                skater_df["penalityMinutes"] / skater_df["icetime"] * 60 * 60
-            )
-            skater_df["penaltyMinutesDrawn"] = (
-                skater_df["penalityMinutesDrawn"] / skater_df["icetime"] * 60 * 60
-            )
-            skater_df["blockedShots"] = (
-                skater_df["shotsBlockedByPlayer"] / skater_df["icetime"] * 60 * 60
-            )
-            skater_df = skater_df[
-                [
-                    "playerId",
-                    "playerName",
-                    "team",
-                    "position",
-                    "Fenwick",
-                    "timePerGame",
-                    "timePerShift",
-                    "shotAttempts",
-                    "xGoals",
-                    "shotsOnGoal",
-                    "goals",
-                    "rebounds",
-                    "freeze",
-                    "oZoneStarts",
-                    "flyStarts",
-                    "hits",
-                    "takeaways",
-                    "giveaways",
-                    "assists",
-                    "penaltyMinutes",
-                    "penaltyMinutesDrawn",
-                    "blockedShots",
-                ]
+        if skater_df.empty:
+            return pd.DataFrame()
+        skater_df.rename(columns={"name": "playerName"}, inplace=True)
+        skater_df = skater_df.loc[skater_df["situation"] == "all"]
+        skater_df["Fenwick"] = (
+            skater_df["onIce_fenwickPercentage"] - skater_df["offIce_fenwickPercentage"]
+        )
+        skater_df["timePerGame"] = skater_df["icetime"] / skater_df["games_played"] / 60
+        skater_df["timePerShift"] = skater_df["icetime"] / skater_df["I_F_shifts"]
+        skater_df["xGoals"] = (
+            skater_df["I_F_flurryScoreVenueAdjustedxGoals"] / skater_df["I_F_shotAttempts"]
+        )
+        skater_df["shotsOnGoal"] = skater_df["I_F_shotsOnGoal"] / skater_df["I_F_shotAttempts"]
+        skater_df["goals"] = (
+            skater_df["I_F_goals"] - skater_df["I_F_flurryScoreVenueAdjustedxGoals"]
+        ) / skater_df["I_F_shotAttempts"]
+        skater_df["rebounds"] = skater_df["I_F_rebounds"] / skater_df["I_F_shotAttempts"]
+        skater_df["freeze"] = skater_df["I_F_freeze"] / skater_df["I_F_shotAttempts"]
+        skater_df["oZoneStarts"] = skater_df["I_F_oZoneShiftStarts"] / (
+            skater_df["I_F_oZoneShiftStarts"] + skater_df["I_F_dZoneShiftStarts"]
+        )
+        skater_df["flyStarts"] = skater_df["I_F_flyShiftStarts"] / skater_df["I_F_shifts"]
+        skater_df["shotAttempts"] = skater_df["I_F_shotAttempts"] / skater_df["icetime"] * 60 * 60
+        skater_df["hits"] = skater_df["I_F_hits"] / skater_df["icetime"] * 60 * 60
+        skater_df["takeaways"] = skater_df["I_F_takeaways"] / skater_df["icetime"] * 60 * 60
+        skater_df["giveaways"] = skater_df["I_F_giveaways"] / skater_df["icetime"] * 60 * 60
+        skater_df["assists"] = (
+            (skater_df["I_F_primaryAssists"] + skater_df["I_F_secondaryAssists"])
+            / skater_df["icetime"]
+            * 60
+            * 60
+        )
+        skater_df["penaltyMinutes"] = skater_df["penalityMinutes"] / skater_df["icetime"] * 60 * 60
+        skater_df["penaltyMinutesDrawn"] = (
+            skater_df["penalityMinutesDrawn"] / skater_df["icetime"] * 60 * 60
+        )
+        skater_df["blockedShots"] = (
+            skater_df["shotsBlockedByPlayer"] / skater_df["icetime"] * 60 * 60
+        )
+        skater_df = skater_df[
+            [
+                "playerId",
+                "playerName",
+                "team",
+                "position",
+                "Fenwick",
+                "timePerGame",
+                "timePerShift",
+                "shotAttempts",
+                "xGoals",
+                "shotsOnGoal",
+                "goals",
+                "rebounds",
+                "freeze",
+                "oZoneStarts",
+                "flyStarts",
+                "hits",
+                "takeaways",
+                "giveaways",
+                "assists",
+                "penaltyMinutes",
+                "penaltyMinutesDrawn",
+                "blockedShots",
             ]
+        ]
 
-            skater_df = player_df.merge(
-                skater_df, how="right", on="playerId", suffixes=[None, "_y"]
-            )
-            skater_df.dropna(inplace=True)
-            skater_df.index = skater_df.playerId
-            skater_df.drop(
-                columns=[
-                    "playerId",
-                    "birthDate",
-                    "nationality",
-                    "primaryNumber",
-                    "primaryPosition",
-                    "playerName_y",
-                    "team_y",
-                    "position_y",
-                ],
-                inplace=True,
-            )
+        return self._merge_player_bio(player_df, skater_df)
 
-        else:
-            skater_df = pd.DataFrame()
-
-        # res = requests.get(f"https://moneypuck.com/moneypuck/playerData/shots/shots_{self.season_start.year}.csv")
-        # shot_df = pd.read_csv(StringIO(res.text))
-
-        res = requests.get(
+    def _fetch_goalie_summary(self, player_df):
+        """Per-save / per-shot goalie rates from the moneypuck season summary."""
+        goalie_df = scraper.get_csv(
             f"https://moneypuck.com/moneypuck/playerData/seasonSummary/{self.season_start.year}/regular/goalies.csv"
         )
-        if res.status_code == 200:
-            goalie_df = pd.read_csv(StringIO(res.text))
-            goalie_df.rename(columns={"name": "playerName"}, inplace=True)
-            goalie_df = goalie_df.loc[goalie_df["situation"] == "all"]
-            goalie_df["timePerGame"] = goalie_df["icetime"] / goalie_df["games_played"] / 60
-            goalie_df["saves"] = goalie_df["ongoal"] - goalie_df["goals"]
-            goalie_df["savePct"] = goalie_df["saves"] / goalie_df["ongoal"]
-            goalie_df["freezeAgainst"] = (goalie_df["freeze"] - goalie_df["xFreeze"]) / goalie_df[
-                "saves"
+        if goalie_df.empty:
+            return pd.DataFrame()
+        goalie_df.rename(columns={"name": "playerName"}, inplace=True)
+        goalie_df = goalie_df.loc[goalie_df["situation"] == "all"]
+        goalie_df["timePerGame"] = goalie_df["icetime"] / goalie_df["games_played"] / 60
+        goalie_df["saves"] = goalie_df["ongoal"] - goalie_df["goals"]
+        goalie_df["savePct"] = goalie_df["saves"] / goalie_df["ongoal"]
+        goalie_df["freezeAgainst"] = (goalie_df["freeze"] - goalie_df["xFreeze"]) / goalie_df[
+            "saves"
+        ]
+        goalie_df["reboundsAgainst"] = (goalie_df["rebounds"] - goalie_df["xRebounds"]) / goalie_df[
+            "saves"
+        ]
+        goalie_df["goalsAgainst"] = (
+            goalie_df["goals"] - goalie_df["flurryAdjustedxGoals"]
+        ) / goalie_df["ongoal"]
+        goalie_df = goalie_df[
+            [
+                "playerId",
+                "playerName",
+                "team",
+                "position",
+                "timePerGame",
+                "savePct",
+                "freezeAgainst",
+                "reboundsAgainst",
+                "goalsAgainst",
             ]
-            goalie_df["reboundsAgainst"] = (
-                goalie_df["rebounds"] - goalie_df["xRebounds"]
-            ) / goalie_df["saves"]
-            goalie_df["goalsAgainst"] = (
-                goalie_df["goals"] - goalie_df["flurryAdjustedxGoals"]
-            ) / goalie_df["ongoal"]
-            goalie_df = goalie_df[
-                [
-                    "playerId",
-                    "playerName",
-                    "team",
-                    "position",
-                    "timePerGame",
-                    "savePct",
-                    "freezeAgainst",
-                    "reboundsAgainst",
-                    "goalsAgainst",
-                ]
-            ]
+        ]
 
-            goalie_df = player_df.merge(
-                goalie_df, how="right", on="playerId", suffixes=[None, "_y"]
-            )
-            goalie_df.dropna(inplace=True)
-            goalie_df.index = goalie_df.playerId
-            goalie_df.drop(
-                columns=[
-                    "playerId",
-                    "birthDate",
-                    "nationality",
-                    "primaryNumber",
-                    "primaryPosition",
-                    "playerName_y",
-                    "team_y",
-                    "position_y",
-                ],
-                inplace=True,
-            )
+        return self._merge_player_bio(player_df, goalie_df)
 
-        else:
-            goalie_df = pd.DataFrame()
-
-        self.players[self.season_start.year] = skater_df.to_dict("index") | goalie_df.to_dict(
-            "index"
+    def _merge_player_bio(self, player_df, summary_df):
+        """Right-join a moneypuck season summary onto player bios; drop merge cruft."""
+        merged = player_df.merge(summary_df, how="right", on="playerId", suffixes=[None, "_y"])
+        merged.dropna(inplace=True)
+        merged.index = merged.playerId
+        merged.drop(
+            columns=[
+                "playerId",
+                "birthDate",
+                "nationality",
+                "primaryNumber",
+                "primaryPosition",
+                "playerName_y",
+                "team_y",
+                "position_y",
+            ],
+            inplace=True,
         )
-
-        # Remove old games to prevent file bloat
-        four_years_ago = today - timedelta(days=1431)
-        self.gamelog = self.gamelog[
-            pd.to_datetime(self.gamelog["gameDate"]).dt.date >= four_years_ago
-        ]
-        self.gamelog.drop_duplicates(subset=["gameId", "playerName"], keep="last", inplace=True)
-        self.teamlog = self.teamlog[
-            pd.to_datetime(self.teamlog["gameDate"]).dt.date >= four_years_ago
-        ]
-        self.teamlog.drop_duplicates(subset=["gameId", "team"], keep="last", inplace=True)
-
-        if self.season_start < datetime.today().date() - timedelta(days=300) or clean_data:
-            self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
-            self.gamelog.loc[:, "moneyline"] = self.gamelog.apply(
-                lambda x: archive.get_moneyline(self.league, x["gameDate"], x["team"]), axis=1
-            )
-            self.gamelog.loc[:, "totals"] = self.gamelog.apply(
-                lambda x: archive.get_total(self.league, x["gameDate"], x["team"]), axis=1
-            )
-
-        # Write to file
-        with open((pkg_resources.files(data) / "nhl_data.dat"), "wb") as outfile:
-            pickle.dump(
-                {"players": self.players, "gamelog": self.gamelog, "teamlog": self.teamlog},
-                outfile,
-                -1,
-            )
+        return merged
 
     def dump_goalie_list(self):
-        filepath = pkg_resources.files(data) / "goalies.json"
+        filepath = pkg_resources.files(data) / "config" / "goalies.json"
         with open(filepath, "w") as outfile:
             json.dump(
                 list(self.gamelog.loc[self.gamelog.position == "G", "playerName"].unique()), outfile
             )
 
     def get_volume_stats(self, offers, date=datetime.today().date(), pitcher=False):
-        flat_offers = {}
-        if isinstance(offers, dict):
-            for players in offers.values():
-                flat_offers.update(players)
-        else:
-            flat_offers = offers
-
         market = "shotsAgainst" if pitcher else "timeOnIce"
-
-        if isinstance(offers, dict):
-            flat_offers.update(offers.get(market, {}))
-        self.profile_market(market, date)
-        self.get_depth(flat_offers, date)
-        playerStats = self.get_stats(market, flat_offers, date)
-
-        filename = "_".join([self.league, market]).replace(" ", "-")
-        filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
-        if self._volume_model_cache is None:
-            self._volume_model_cache = {}
-        if filename not in self._volume_model_cache:
-            if os.path.isfile(filepath):
-                with open(filepath, "rb") as infile:
-                    self._volume_model_cache[filename] = pickle.load(infile)
-            else:
-                logger.warning(f"{filename} missing")
-                return
-
-        if filename in self._volume_model_cache:
-            filedict = self._volume_model_cache[filename]
-            # Slice to the trained schema embedded in the pickle.
-            playerStats = playerStats[filedict["expected_columns"]]
-            model = filedict["model"]
-            dist = filedict["distribution"]
-
-            categories = ["Home", "Player position"]
-            if "Player position" not in playerStats.columns:
-                categories.remove("Player position")
-            for c in categories:
-                playerStats[c] = playerStats[c].astype("category")
-
-            set_model_start_values(model, dist, playerStats)
-
-            prob_params = pd.DataFrame()
-            preds = model.predict(playerStats, pred_type="parameters")
-            preds.index = playerStats.index
-            prob_params = pd.concat([prob_params, preds])
-
-            prob_params.sort_index(inplace=True)
-            playerStats.sort_index(inplace=True)
-
-        else:
-            logger.warning(f"{filename} missing")
+        if not self.load_volume_model_params(
+            offers,
+            market,
+            date,
+        ):
             return
 
-        # Drop gate column for ZI distributions — not needed for budget normalization
-        prob_params.drop(columns=["gate"], inplace=True, errors="ignore")
-
-        # SkewNormal: rename loc/scale/alpha to proj {market} loc/scale/alpha
-        rename_map = {
-            "loc": f"proj {market} loc",
-            "scale": f"proj {market} scale",
-            "alpha": f"proj {market} alpha",
-        }
-
-        self.playerProfile = self.playerProfile.join(
-            prob_params.rename(columns=rename_map), lsuffix="_obs"
-        )
-        self.playerProfile.drop(
-            columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True
-        )
-
         if not pitcher:
-            # ------------------------------------------------------------------
-            # Budget parameters — derived by analyzing historical NHL gamelogs.
-            #
-            # Methodology:
+            # Budget parameters derived from historical NHL gamelogs:
             #   typical_rotation : median skaters (non-G) logging >3 min per team-game
             #   ot_rate          : fraction of team-games where total skater TOI > 300
             #   ot_extra         : mean extra team TOI above 300 when OT occurs (9.6 min)
             #   avg_unmodeled_min: mean TOI for ranked 8-18 skaters (rank > 7 tier)
-            #   per_player_floor : 5th-percentile TOI for top-7 tier skaters
-            #   per_player_cap   : 99th-percentile TOI for top-7 tier skaters
-            # ------------------------------------------------------------------
+            #   per_player_floor : 5th-pct TOI for top-7 tier skaters
+            #   per_player_cap   : 99th-pct TOI for top-7 tier skaters
             reg_minutes = 300  # 5 skaters × 60 min regulation
             ot_rate = 0.189  # measured: 18.9% of team-games go to OT
             ot_extra = 9.6  # measured: mean extra team TOI when OT occurs
@@ -876,54 +823,15 @@ class StatsNHL(Stats):
             # Expected total team TOI including OT
             budget_mean = reg_minutes + ot_rate * ot_extra
 
-            teams = self.playerProfile.loc[self.playerProfile["team"] != 0].groupby("team")
-            for _team, team_df in teams:
-                # SkewNormal: E[X] = loc + scale * delta * sqrt(2/pi)
-                loc = team_df[f"proj {market} loc"].copy()
-                scale = team_df[f"proj {market} scale"].copy()
-                sn_alpha = (
-                    team_df[f"proj {market} alpha"].copy()
-                    if f"proj {market} alpha" in team_df.columns
-                    else pd.Series(0, index=loc.index)
-                )
-                N = len(team_df)
-
-                delta = sn_alpha / np.sqrt(1 + sn_alpha**2)
-                true_means = loc + scale * delta * np.sqrt(2 / np.pi)
-                true_vars = scale**2
-
-                total = true_means.sum()
-                if total <= 0:
-                    continue
-
-                # Reserve TOI for the many unmodeled skaters (rank 8-18)
-                unmodeled_count = max(0, typical_rotation - N)
-                unmodeled_reserve = unmodeled_count * avg_unmodeled_min
-
-                upper_target = budget_mean - unmodeled_reserve
-                lower_target = N * per_player_floor
-                target = max(upper_target, lower_target)
-
-                # Precision-weighted deficit distribution
-                deficit = target - total
-                total_var = true_vars.sum()
-                if total_var > 0:
-                    adjustments = true_vars / total_var * deficit
-                else:
-                    adjustments = true_means / total * deficit
-
-                new_means = (true_means + adjustments).clip(lower=0, upper=per_player_cap)
-
-                # Scale both loc and scale to preserve coefficient of variation
-                ratio = new_means / true_means.replace(0, np.nan)
-                ratio = ratio.fillna(1.0).clip(lower=0.1, upper=10.0)
-                new_scale = scale * ratio
-                new_loc = new_means - new_scale * delta * np.sqrt(2 / np.pi)
-
-                self.playerProfile.loc[loc.index, f"proj {market} loc"] = new_loc
-                self.playerProfile.loc[scale.index, f"proj {market} scale"] = new_scale
-                self.playerProfile.loc[loc.index, f"proj {market} mean"] = new_means
-                self.playerProfile.loc[scale.index, f"proj {market} std"] = new_scale
+            scale_team_volume_to_budget(
+                self.playerProfile,
+                market,
+                budget_mean=budget_mean,
+                typical_rotation=typical_rotation,
+                avg_unmodeled_min=avg_unmodeled_min,
+                per_player_floor=per_player_floor,
+                per_player_cap=per_player_cap,
+            )
 
         # Drop SkewNormal parameters (keep only mean/std for downstream use)
         self.playerProfile.drop(
@@ -934,18 +842,31 @@ class StatsNHL(Stats):
         self.playerProfile.fillna(0, inplace=True)
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):
-        player_games = self.short_gamelog.loc[
-            self.short_gamelog[self.log_strings["player"]] == player
-        ]
+        if self.snapshot_only_rebuild:
+            player_column = self.log_strings["player"]
+            cache_key = (
+                self.profile_latest_date,
+                id(self.short_gamelog),
+                len(self.short_gamelog),
+                player_column,
+            )
+            if cache_key != self._combo_player_games_cache_key:
+                self._combo_player_games_cache = dict(
+                    tuple(self.short_gamelog.groupby(player_column, sort=False))
+                )
+                self._combo_player_games_cache_key = cache_key
+            player_games = self._combo_player_games_cache.get(player, self.short_gamelog.iloc[:0])
+        else:
+            player_games = self.short_gamelog.loc[
+                self.short_gamelog[self.log_strings["player"]] == player
+            ]
         cv = stat_cv.get(self.league, {}).get(market, 1)
         dist = stat_dist.get(self.league, {}).get(market, "Gamma")
         if isinstance(date, str):
             date = datetime.strptime(date, "%Y-%m-%d").date()
 
         if date < datetime.today().date():
-            todays_games = self.gamelog.loc[
-                pd.to_datetime(self.gamelog[self.log_strings["date"]]).dt.date == date
-            ]
+            todays_games = self._gamelog_on(date)
             player_game = todays_games.loc[todays_games[self.log_strings["player"]] == player]
             if player_game.empty:
                 return 0
@@ -955,74 +876,99 @@ class StatsNHL(Stats):
 
         else:
             team = player_games[self.log_strings["team"]].iloc[-1]
-            opponent = self.upcoming_games[team][self.log_strings["opponent"]]
+            opponent = self.upcoming_games[team]["Opponent"]
 
         date = date.strftime("%Y-%m-%d")
+        if self.snapshot_only_rebuild:
+            self._prepare_combo_archive_cache(market, date, todays_games)
         ev = 0
         if market in combo_props:
-            for submarket in combo_props.get(market, []):
-                sub_cv = stat_cv["NHL"].get(submarket, 1)
-                sub_dist = stat_dist.get("NHL", {}).get(submarket, "Gamma")
-                v = archive.get_ev("NHL", submarket, date, player)
-                subline = archive.get_line("NHL", submarket, date, player)
-                if sub_dist != dist and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
-                if np.isnan(v) or v == 0:
-                    ev = 0
-                    break
-
-                else:
-                    ev += v
-
+            ev = self._combo_market_ev(market, date, player, dist, cv)
         elif market == "goalsAgainst":
             ev = archive.get_total("NHL", date, opponent)
-
         elif "fantasy" in market:
-            ev = 0
-            book_odds = False
+            ev = self._check_nhl_fantasy(
+                market, date, player, team, opponent, dist, cv, player_games
+            )
+        return 0 if np.isnan(ev) else ev
+
+    def _prepare_combo_archive_cache(self, market, date, todays_games):
+        """Batch legacy submarket EV/line reads for one NHL fallback slate."""
+        if not self.snapshot_only_rebuild:
+            return
+        cache_key = (market, date)
+        if cache_key == self._combo_archive_cache_key:
+            return
+
+        if market in combo_props:
+            submarkets = list(combo_props[market])
+        elif "fantasy" in market:
             if "prizepicks" in market:
-                fantasy_props = [("goals", 8), ("assists", 5), ("shots", 1.5), ("blocked", 1.5)]
+                submarkets = ["goals", "assists", "shots", "blocked"]
             elif ("underdog" in market) and ("skater" in market):
-                fantasy_props = [
-                    ("goals", 6),
-                    ("assists", 4),
-                    ("shots", 1),
-                    ("blocked", 1),
-                    ("hits", 0.5),
-                    ("powerPlayPoints", 0.5),
+                submarkets = [
+                    "goals",
+                    "assists",
+                    "shots",
+                    "blocked",
+                    "hits",
+                    "powerPlayPoints",
                 ]
             else:
-                fantasy_props = [("saves", 0.6), ("goalsAgainst", -3), ("Moneyline", 6)]
-            for submarket, weight in fantasy_props:
-                sub_cv = stat_cv["NHL"].get(submarket, 1)
-                sub_dist = stat_dist.get("NHL", {}).get(submarket, "Gamma")
-                v = archive.get_ev("NHL", submarket, date, player)
-                subline = archive.get_line("NHL", submarket, date, player)
-                if sub_dist != dist and not np.isnan(v):
-                    v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
-                if np.isnan(v) or v == 0:
-                    if submarket == "Moneyline":
-                        p = archive.get_moneyline("NHL", date, team)
-                        ev += p * weight
-                    elif submarket == "goalsAgainst":
-                        v = archive.get_total("NHL", date, opponent)
-                        subline = np.floor(v) + 0.5
-                        v = get_ev(
-                            subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist
-                        )
-                        ev += v * weight
-                    else:
-                        if subline == 0 and not player_games.empty:
-                            subline = np.floor(player_games.iloc[-10:][submarket].median()) + 0.5
+                submarkets = ["saves", "goalsAgainst"]
+        else:
+            submarkets = []
 
-                        if subline != 0:
-                            under = (player_games[submarket] < subline).mean()
-                            ev += get_ev(subline, under, sub_cv, dist=sub_dist) * weight
-                else:
-                    book_odds = True
-                    ev += v * weight
+        players = todays_games[self.log_strings["player"]].dropna().unique().tolist()
+        self._combo_archive_cache = {
+            submarket: archive.get_ev_line_inputs("NHL", submarket, date, players)
+            for submarket in submarkets
+        }
+        self._combo_archive_cache_key = cache_key
 
-            if not book_odds:
-                ev = 0
+    def _submarket_ev(self, submarket, date, player, dist, cv):
+        cached = self._combo_archive_cache.get(submarket)
+        if cached is None or player not in cached:
+            return super()._submarket_ev(submarket, date, player, dist, cv)
 
-        return 0 if np.isnan(ev) else ev
+        sub_cv = stat_cv.get(self.league, {}).get(submarket, 1)
+        sub_dist = stat_dist.get(self.league, {}).get(submarket, "Gamma")
+        value, subline = cached[player]
+        value = self._convert_to_market_dist(value, subline, sub_cv, sub_dist, dist, cv)
+        return value, subline, sub_cv, sub_dist
+
+    def _check_nhl_fantasy(self, market, date, player, team, opponent, dist, cv, player_games):
+        if "prizepicks" in market:
+            fantasy_props = [("goals", 8), ("assists", 5), ("shots", 1.5), ("blocked", 1.5)]
+        elif ("underdog" in market) and ("skater" in market):
+            fantasy_props = [
+                ("goals", 6),
+                ("assists", 4),
+                ("shots", 1),
+                ("blocked", 1),
+                ("hits", 0.5),
+                ("powerPlayPoints", 0.5),
+            ]
+        else:
+            fantasy_props = [("saves", 0.6), ("goalsAgainst", -3), ("Moneyline", 6)]
+
+        ev = 0
+        book_odds = False
+        for submarket, weight in fantasy_props:
+            v, subline, sub_cv, sub_dist = self._submarket_ev(submarket, date, player, dist, cv)
+            if not (np.isnan(v) or v == 0):
+                book_odds = True
+                ev += v * weight
+            elif submarket == "Moneyline":
+                ev += archive.get_moneyline("NHL", date, team) * weight
+            elif submarket == "goalsAgainst":
+                v = archive.get_total("NHL", date, opponent)
+                subline = np.floor(v) + 0.5
+                v = get_ev(subline, get_odds(subline, v, sub_dist, cv=sub_cv), cv=cv, dist=dist)
+                ev += v * weight
+            else:
+                contribution, _ = self._fantasy_default_contribution(
+                    submarket, weight, v, subline, sub_cv, sub_dist, player_games
+                )
+                ev += contribution
+        return ev if book_odds else 0

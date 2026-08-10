@@ -1,32 +1,31 @@
 """Empirical calibration audit for beam-search parlay candidates.
 
-Reads ``data/parlay_hist.dat`` (written by ``prophecize`` and resolved by
+Reads ``data/parlay_hist.parquet`` (written by ``prophecize`` and resolved by
 ``reflect``), filters to the last ``--days`` (default 90) of resolved
 parlays, recovers each parlay's predicted joint probability from
 ``Model EV`` and the platform payout table, buckets by predicted
 probability deciles, and computes the empirical hit rate per decile from
-the resolved ``Legs`` / ``Misses`` columns.
+the resolved ``Legs Resolved`` / ``Misses`` columns.
 
 A "hit" is a parlay where every counted leg covered (``Misses == 0`` and
-``Legs == Bet Size``) — pushed legs are excluded by ``check_bet`` in
+``Legs Resolved == Bet Size``) — pushed legs are excluded by ``check_bet`` in
 :mod:`sportstradamus.analysis` before the row is counted.
 
 Outputs (timestamped with today's date):
 
-* ``docs/PARLAY_CALIBRATION_<YYYY-MM-DD>.png`` — predicted vs empirical
+* ``docs/archive/evidence/PARLAY_CALIBRATION_<YYYY-MM-DD>.png`` — predicted vs empirical
   hit rate by decile, with a 45-degree reference line.
-* ``docs/PARLAY_CALIBRATION_<YYYY-MM-DD>.csv`` — decile table with the
+* ``docs/archive/evidence/PARLAY_CALIBRATION_<YYYY-MM-DD>.csv`` — decile table with the
   predicted-probability bin edges, mean predicted probability, empirical
   hit rate, sample count, and Wilson 95% confidence bounds.
 
-If ``parlay_hist.dat`` is missing or contains zero resolved rows in the
+If ``parlay_hist.parquet`` is missing or contains zero resolved rows in the
 window, the script writes an empty CSV plus a placeholder PNG explaining
 the data gap, so the audit document can still reference the artifacts.
 """
 
 from __future__ import annotations
 
-import importlib.resources as pkg_resources
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -35,7 +34,7 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 
-from sportstradamus import data
+from sportstradamus.helpers.io import read_parlay_hist
 
 # Underdog/PrizePicks per-size payout multipliers used inside
 # ``beam_search_parlays`` to convert a joint probability into ``Model EV``.
@@ -61,7 +60,7 @@ N_DECILES: int = 10
 # the empirical hit rate is too noisy to interpret.
 MIN_DECILE_SAMPLES: int = 20
 
-DOCS_DIR: Path = Path(__file__).resolve().parents[3] / "docs"
+DOCS_DIR: Path = Path(__file__).resolve().parents[3] / "docs" / "archive" / "evidence"
 
 
 def _recovered_payout(row: pd.Series) -> float:
@@ -118,36 +117,40 @@ def _wilson_bounds(hits: int, n: int, z: float = 1.96) -> tuple[float, float]:
 
 
 def _load_resolved_parlays(window_start: date) -> pd.DataFrame:
-    """Load ``parlay_hist.dat`` and filter to resolved rows in the window.
+    """Load ``parlay_hist.parquet`` and filter to resolved rows in the window.
 
-    A resolved row has non-null ``Legs`` and ``Misses`` (filled by
+    A resolved row has non-null ``Legs Resolved`` and ``Misses`` (filled by
     ``reflect``). Rows whose ``Date`` is before ``window_start`` or whose
     platform/bet-size is unknown are dropped.
     """
-    path = pkg_resources.files(data) / "parlay_hist.dat"
-    if not Path(str(path)).is_file():
-        return pd.DataFrame()
-
-    df = pd.read_pickle(path)
+    df = read_parlay_hist()
     if df.empty:
         return df
 
-    required = {"Date", "Platform", "Bet Size", "Boost", "Model EV", "Legs", "Misses"}
+    required = {
+        "Date",
+        "Platform",
+        "Bet Size",
+        "Boost",
+        "Model EV",
+        "Legs Resolved",
+        "Misses",
+    }
     missing = required - set(df.columns)
     if missing:
-        raise RuntimeError(f"parlay_hist.dat missing columns: {sorted(missing)}")
+        raise RuntimeError(f"parlay_hist.parquet missing columns: {sorted(missing)}")
 
     df = df.copy()
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
     df = df.loc[df["Date"].notna() & (df["Date"] >= window_start)]
-    df = df.loc[df["Legs"].notna() & df["Misses"].notna()]
+    df = df.loc[df["Legs Resolved"].notna() & df["Misses"].notna()]
     df["Joint P"] = df.apply(_recover_joint_prob, axis=1)
     df = df.loc[df["Joint P"].between(0.0, 1.0, inclusive="both")]
     if "Indep P" in df.columns:
         df["Indep Joint P"] = df.apply(_recover_indep_joint_prob, axis=1)
     else:
         df["Indep Joint P"] = float("nan")
-    df["Hit"] = ((df["Misses"] == 0) & (df["Legs"] == df["Bet Size"])).astype(int)
+    df["Hit"] = ((df["Misses"] == 0) & (df["Legs Resolved"] == df["Bet Size"])).astype(int)
     return df
 
 

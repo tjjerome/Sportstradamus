@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P8 · Games — Look deeper / Look wider lenses</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Cinzel:wght@600&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#0E1117;--surface:#1A1D24;--text:#E6E9EF;--border:#2A2E37;--gray:#8A91A0;--gold:#C9A227;
+    --lva:#C8102E;--ind:#26436E;--link:#5B8DEF}
+  *{box-sizing:border-box}
+  body{margin:0 auto;max-width:1000px;background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;font-size:14px;line-height:1.5;padding:26px 24px 72px}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  .kicker{font-family:'Cinzel',serif;font-weight:600;font-size:10.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--gold)}
+  h1{font-size:22px;margin:1px 0 2px}
+  h2{font-size:13.5px;margin:24px 0 5px;font-weight:600;font-family:'Cinzel',serif;letter-spacing:.05em}
+  .dim{color:var(--gray);font-size:12px}
+  svg.ic{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-0.12em}
+
+  .lenses{display:flex;gap:10px;margin:14px 0 6px;align-items:center}
+  .lenslab{font-family:'Cinzel',serif;font-size:9.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--gray)}
+  .lens{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;color:var(--gray);border:1px solid var(--border);border-radius:4px;padding:6px 12px;cursor:pointer;background:var(--surface)}
+  .lens.on{color:var(--gold);border-color:var(--gold);background:rgba(201,162,39,.12)}
+
+  .skywrap{position:relative;border:1px solid var(--border);border-radius:6px;overflow:hidden;background:radial-gradient(ellipse at 50% 42%, rgba(46,107,230,.06), transparent 62%), #12151c}
+  .slab{font-family:'IBM Plex Mono',monospace;font-size:10px}
+  .teamtag{position:absolute;top:10px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:.14em;font-weight:600}
+  .teamtag.l{left:14px;color:#e2909b} .teamtag.r{right:14px;color:#8ea6c9}
+  .badge{position:absolute;top:9px;left:50%;transform:translateX(-50%);font-family:'Cinzel',serif;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--gold);border:1px solid rgba(201,162,39,.4);border-radius:3px;padding:2px 9px;background:rgba(201,162,39,.08)}
+  .note{color:var(--gray);font-size:12px;margin-top:14px;line-height:1.6;border-top:1px solid var(--border);padding-top:12px}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute"><defs>
+  <symbol id="star5" viewBox="0 0 24 24"><path d="M12 1.6l3.09 6.9 7.51.7-5.66 5.02 1.68 7.38L12 17.9l-6.62 3.7 1.68-7.38L1.4 9.2l7.51-.7z"/></symbol>
+  <filter id="glow" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="3.2"/></filter>
+</defs></svg>
+
+<div class="kicker">◈ The constellation</div>
+<h1>Look deeper · Look wider</h1>
+<div class="dim">The two satellite pickers become lenses on the sky itself — no expanders below the map. Deeper reveals this game's hidden legs; wider zooms out to the whole board.</div>
+
+<div class="lenses">
+  <span class="lenslab">Lenses</span>
+  <span class="lens on"><svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4M11 8v6M8 11h6"/></svg> Look deeper</span>
+  <span class="lens"><svg class="ic" viewBox="0 0 24 24"><path d="M3 9V3h6M21 9V3h-6M3 15v6h6M21 15v6h-6"/></svg> Look wider</span>
+</div>
+
+<!-- ===================== LOOK DEEPER ===================== -->
+<h2>Look deeper — same game, hidden legs</h2>
+<div class="skywrap">
+  <span class="teamtag l">LAS VEGAS</span><span class="teamtag r">INDIANA</span>
+  <span class="badge">Look deeper</span>
+  <svg viewBox="0 0 520 360" width="100%" style="display:block">
+    <!-- faint field -->
+    <g fill="#9fb0c8"><circle cx="60" cy="70" r="1" opacity=".4"/><circle cx="470" cy="60" r="1" opacity=".4"/></g>
+
+    <!-- BACKGROUND: model-passed legs — dim, cool, UNCONNECTED, scattered off the shape -->
+    <g fill="#5f6b80">
+      <use href="#star5" x="70"  y="120" width="13" height="13" opacity=".33"/>
+      <use href="#star5" x="120" y="250" width="12" height="12" opacity=".3"/>
+      <use href="#star5" x="410" y="110" width="13" height="13" opacity=".33"/>
+      <use href="#star5" x="440" y="230" width="11" height="11" opacity=".28"/>
+      <use href="#star5" x="360" y="300" width="12" height="12" opacity=".3"/>
+      <use href="#star5" x="95"  y="300" width="11" height="11" opacity=".26"/>
+      <circle cx="180" cy="70" r="1.6" opacity=".3"/><circle cx="330" cy="60" r="1.5" opacity=".3"/>
+    </g>
+    <g fill="#7f8a9c" class="slab" opacity=".55">
+      <text x="83" y="150" text-anchor="middle">Young Steals o1.5</text>
+      <text x="132" y="280" text-anchor="middle">Gray Points o9.5</text>
+      <text x="423" y="140" text-anchor="middle">Boston Blocks o1.5</text>
+      <text x="373" y="330" text-anchor="middle">Loyd 3-Pt Made o2.5</text>
+    </g>
+
+    <!-- FOREGROUND: the model-liked constellation stays lit + intact -->
+    <g stroke="var(--gold)">
+      <g filter="url(#glow)" opacity=".5" fill="none" stroke-width="4.5"><path d="M196 96 H324 V172 H196 Z"/><path d="M214 188 Q260 210 306 188"/></g>
+      <g fill="none" stroke-width="1.7" opacity=".9"><path d="M196 96 H324 V172 H196 Z"/><path d="M214 188 Q260 210 306 188"/></g>
+    </g>
+    <use href="#star5" x="186" y="86"  width="22" height="22" fill="var(--lva)"/>
+    <use href="#star5" x="196" y="172" width="40" height="40" fill="var(--lva)"/>
+    <use href="#star5" x="312" y="86"  width="24" height="24" fill="var(--ind)"/>
+    <use href="#star5" x="290" y="174" width="28" height="28" fill="var(--ind)"/>
+    <text x="216" y="228" fill="#e9ecf2" class="slab" text-anchor="middle" font-weight="600">Wilson Points o23.5</text>
+  </svg>
+</div>
+<div class="dim" style="margin-top:5px">The lit constellation is unchanged. Behind it, every other leg in this game — the ones the model passes on — appears as a faint, unconnected star. Tap one to ride it along in the slip.</div>
+
+<!-- ===================== LOOK WIDER ===================== -->
+<h2>Look wider — the whole board</h2>
+<div class="skywrap">
+  <span class="badge">Look wider</span>
+  <svg viewBox="0 0 520 360" width="100%" style="display:block">
+    <!-- centre: the current game, shrunk -->
+    <g stroke="var(--gold)">
+      <g filter="url(#glow)" opacity=".5" fill="none" stroke-width="3"><path d="M236 150 H300 V196 H236 Z"/><path d="M247 205 Q268 218 289 205"/></g>
+      <g fill="none" stroke-width="1.3" opacity=".9"><path d="M236 150 H300 V196 H236 Z"/><path d="M247 205 Q268 218 289 205"/></g>
+    </g>
+    <use href="#star5" x="230" y="144" width="15" height="15" fill="var(--lva)"/>
+    <use href="#star5" x="236" y="188" width="22" height="22" fill="var(--lva)"/>
+    <use href="#star5" x="292" y="146" width="15" height="15" fill="var(--ind)"/>
+    <text x="268" y="238" fill="var(--gray)" class="slab" text-anchor="middle">Las Vegas vs Indiana</text>
+
+    <!-- periphery: other games' best legs as small clusters + faint labels -->
+    <g>
+      <text x="86" y="52" fill="var(--gray)" class="slab" text-anchor="middle">NYK @ SAS</text>
+      <use href="#star5" x="60"  y="58" width="20" height="20" fill="#2E6BE6"/><use href="#star5" x="96" y="66" width="15" height="15" fill="#8a6d1f"/>
+      <text x="86" y="112" fill="#cfd5df" class="slab" text-anchor="middle" opacity=".8">Brunson Points o25.5</text>
+    </g>
+    <g>
+      <text x="430" y="52" fill="var(--gray)" class="slab" text-anchor="middle">MIA v ORL</text>
+      <use href="#star5" x="404" y="58" width="19" height="19" fill="#98002e"/><use href="#star5" x="440" y="66" width="14" height="14" fill="#0b1a3a"/>
+      <text x="430" y="112" fill="#cfd5df" class="slab" text-anchor="middle" opacity=".8">Herro 3-Pt Made o2.5</text>
+    </g>
+    <g>
+      <text x="80" y="286" fill="var(--gray)" class="slab" text-anchor="middle">DAL vs PHX</text>
+      <use href="#star5" x="58"  y="292" width="18" height="18" fill="#1b3c6e"/><use href="#star5" x="92" y="300" width="13" height="13" fill="#c8202e"/>
+      <text x="80" y="342" fill="#cfd5df" class="slab" text-anchor="middle" opacity=".8">Doncic Assists o8.5</text>
+    </g>
+    <g>
+      <text x="436" y="286" fill="var(--gray)" class="slab" text-anchor="middle">DEN @ LAL</text>
+      <use href="#star5" x="414" y="292" width="20" height="20" fill="#0e2240"/><use href="#star5" x="448" y="300" width="14" height="14" fill="#7a1a2a"/>
+      <text x="436" y="342" fill="#cfd5df" class="slab" text-anchor="middle" opacity=".8">Jokic Rebounds o12.5</text>
+    </g>
+    <!-- scattered faint board stars -->
+    <g fill="#9fb0c8"><circle cx="200" cy="70" r="1.4" opacity=".4"/><circle cx="330" cy="300" r="1.4" opacity=".4"/><circle cx="180" cy="300" r="1.2" opacity=".35"/><circle cx="340" cy="72" r="1.2" opacity=".35"/></g>
+  </svg>
+</div>
+<div class="dim" style="margin-top:5px">The current constellation shrinks to the centre; the model's favorite legs from every other game orbit the edges, grouped by matchup. Tap one to pull it in as a satellite (it rounds out a one-sided game into a valid parlay).</div>
+
+<div class="note">
+  <b>Replaces</b> the "Add a leg from another game" / "Add a leg the model doesn't like" expanders — both become lenses on the star map. Independent toggles (either, both, neither). <b>Look deeper</b> = reveal this game's model-passed legs as faint unconnected stars, shape intact. <b>Look wider</b> = zoom out; other games' best legs populate the edges. Tapping a revealed star still opens the same themed hover/detail card. Active lens = gold (owner highlight rule).
+</div>
+</body>
+</html>

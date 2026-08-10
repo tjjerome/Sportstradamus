@@ -7,17 +7,16 @@ and that none of the orchestration code has been broken by a refactor.
 Two modes, controlled by the ``SPORTSTRADAMUS_INTEGRATION_REAL_APIS``
 environment variable:
 
-* **Fake (default).** The Odds API, ``nba_api``, Google Sheets, Underdog,
-  and Sleeper are all replaced with stubs / canned fixtures. Runs in
-  well under 90 seconds.
+* **Fake (default).** The Odds API, ``nba_api``, Underdog, and Sleeper are
+  all replaced with stubs / canned fixtures. Runs in well under 90 seconds.
 * **Real.** Set ``SPORTSTRADAMUS_INTEGRATION_REAL_APIS=1`` to opt in to
   live network calls (``confer`` still goes through ``--fixture-dir``,
   but ``meditate`` and ``prophecize`` get real ``StatsWNBA`` data).
   Allowed to take longer.
 
 The test never writes data: every disk-write touchpoint
-(``Archive.write``, model pickle writes, history files, Google Sheets) is
-intercepted. We exercise import paths and callback wiring only.
+(``Archive.write``, model pickle writes, history files) is intercepted.
+We exercise import paths and callback wiring only.
 
 Marked ``integration`` so the default ``pytest`` collection skips it; opt
 in with ``pytest -m integration``.
@@ -27,8 +26,8 @@ from __future__ import annotations
 
 import datetime
 import os
+import shutil
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
@@ -53,14 +52,17 @@ def test_pipeline_smoke(
     ``--fixture-dir`` flag is the only fixture-mode hook in production.
     """
     # ----- shared scaffolding -----
-    (tmp_path / "archive" / "WNBA").mkdir(parents=True)
+    (tmp_path / "archive").mkdir(parents=True)
+    # Seed a pre-sample_ts archive so Archive.__init__ exercises the
+    # ALTER TABLE migration path on top of an existing on-disk DB. A
+    # greenfield CREATE TABLE IF NOT EXISTS hides schema-migration bugs.
+    shutil.copy(
+        fixtures_dir / "legacy_archive.duckdb",
+        tmp_path / "archive" / "archive.duckdb",
+    )
     monkeypatch.chdir(tmp_path)
 
     from sportstradamus.helpers.archive import Archive
-
-    # No-op archive write so we never touch disk. The in-memory dict that
-    # downstream readers rely on is unaffected.
-    monkeypatch.setattr(Archive, "write", lambda self: None)
 
     runner = CliRunner()
 
@@ -75,18 +77,40 @@ def test_pipeline_smoke(
     assert result.exit_code == 0, f"confer failed: {result.output}"
 
     archive_obj = Archive()
-    archive_obj._ensure_loaded("WNBA")
-    pts_by_date = dict(archive_obj.archive["WNBA"].get("PTS", {}))
-    offers_with_ev = sum(
-        1
-        for date_payload in pts_by_date.values()
-        for player_data in date_payload.values()
-        if player_data.get("EV")
-    )
+    pts_df = archive_obj.to_pandas("WNBA", "PTS")
+    book_cols = [c for c in pts_df.columns if c != "Line"]
+    offers_with_ev = int(pts_df[book_cols].notna().any(axis=1).sum()) if not pts_df.empty else 0
     assert offers_with_ev >= 10, (
         f"confer wrote EV for only {offers_with_ev} player-prop offers; "
-        f"expected >= 10. archive contents: {pts_by_date!r}"
+        f"expected >= 10. archive contents: {pts_df!r}"
     )
+
+    # Re-run confer to confirm the archive append-only property: a second
+    # poll should add new ``observed_at`` rows rather than overwrite the
+    # first poll's rows.
+    first_poll_rows = int(
+        archive_obj._connection.execute("SELECT COUNT(*) FROM odds").fetchone()[0]
+    )
+    result = runner.invoke(
+        confer,
+        ["--fixture-dir", str(fixtures_dir / "odds_api")],
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0, f"second confer failed: {result.output}"
+    second_poll_rows = int(
+        archive_obj._connection.execute("SELECT COUNT(*) FROM odds").fetchone()[0]
+    )
+    assert second_poll_rows > first_poll_rows, (
+        f"second confer poll did not append new rows: {first_poll_rows} -> {second_poll_rows}"
+    )
+
+    sample_player = next(iter(pts_df.index))[1] if not pts_df.empty else None
+    if sample_player is not None:
+        history = archive_obj.get_ev_history("WNBA", "PTS", "2026-05-08", sample_player)
+        if not history.empty:
+            assert history["observed_at"].is_monotonic_increasing, (
+                "get_ev_history must return rows ordered by observed_at"
+            )
 
     # ----- Phase 2: meditate (CLI invoked; ML stubbed; no writes) -----
     from sportstradamus.training import cli as training_cli
@@ -95,6 +119,12 @@ def test_pipeline_smoke(
     # Restrict to one market; skip the extended per-market loop.
     monkeypatch.setattr(markets_module, "ALL_MARKETS", {"WNBA": ["PTS"]})
     monkeypatch.setattr(training_cli, "ALL_MARKETS", {"WNBA": ["PTS"]})
+
+    # Gate-driven meditate skips cells withheld in stat_meta; an empty
+    # ship-config makes every cell active (mirrors --deterministic) so this
+    # smoke check is robust to which cells happen to be withheld on the
+    # committed branch.
+    monkeypatch.setattr(training_cli, "load_ship_config", lambda *a, **kw: {})
 
     if not _REAL_APIS:
         _stub_stats_loaders(monkeypatch)
@@ -119,19 +149,15 @@ def test_pipeline_smoke(
 
     result = runner.invoke(meditate, ["--league", "WNBA"], catch_exceptions=False)
     assert result.exit_code == 0, f"meditate failed: {result.output}"
-    assert (
-        ("WNBA", "PTS") in train_market_calls
-    ), f"train_market was not invoked for WNBA:PTS. calls={train_market_calls}"
+    assert ("WNBA", "PTS") in train_market_calls, (
+        f"train_market was not invoked for WNBA:PTS. calls={train_market_calls}"
+    )
 
-    # ----- Phase 3: prophecize (CLI invoked; sheets + scrapers mocked) -----
+    # ----- Phase 3: prophecize (CLI invoked; parquet snapshot + scrapers mocked) -----
     from sportstradamus.prediction import cli as prediction_cli
 
-    sheets_client = MagicMock(name="gspread_client")
-    sheets_client.open.return_value.worksheet.return_value = MagicMock(name="worksheet")
-    monkeypatch.setattr(prediction_cli, "_authorize_sheets", lambda: sheets_client)
-
-    monkeypatch.setattr(prediction_cli, "get_ud", lambda: {})
-    monkeypatch.setattr(prediction_cli, "get_sleeper", lambda: {})
+    monkeypatch.setattr(prediction_cli, "get_ud", dict)
+    monkeypatch.setattr(prediction_cli, "get_sleeper", dict)
 
     captured: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {}
 
@@ -143,10 +169,31 @@ def test_pipeline_smoke(
 
     monkeypatch.setattr(prediction_cli, "process_offers", stub_process_offers)
 
-    def stub_save_data(df, parlay_df, book, gc):
-        gc.open("Sportstradamus")  # exercise the mocked sheets handle
+    snapshot_calls: list[dict] = []
 
-    monkeypatch.setattr(prediction_cli, "save_data", stub_save_data)
+    def stub_write_current_offers(
+        offers, parlays, leagues, platforms, contest_variant="power", stats_dict=None
+    ):
+        snapshot_calls.append(
+            {
+                "offers": offers,
+                "parlays": parlays,
+                "leagues": list(leagues),
+                "platforms": list(platforms),
+                "contest_variant": contest_variant,
+            }
+        )
+
+    monkeypatch.setattr(prediction_cli, "write_current_offers", stub_write_current_offers)
+
+    game_corr_calls: list = []
+    monkeypatch.setattr(prediction_cli, "write_current_game_corr", game_corr_calls.append)
+
+    game_context_calls: list = []
+    monkeypatch.setattr(prediction_cli, "write_current_game_context", game_context_calls.append)
+
+    game_stories_calls: list = []
+    monkeypatch.setattr(prediction_cli, "write_current_game_stories", game_stories_calls.append)
 
     # Skip writing prediction history to data/history.dat.
     def _noop_write(_df):
@@ -168,18 +215,46 @@ def test_pipeline_smoke(
     result = runner.invoke(prophecize_main, [], catch_exceptions=False)
     assert result.exit_code == 0, f"prophecize failed: {result.output}"
 
-    # The mocked sheets client was reached but no live HTTP fired.
-    assert sheets_client.open.called, "save_data path never opened the sheets client"
+    # The parquet snapshot writer was reached but no real disk write fired.
+    assert snapshot_calls, "write_current_offers was never invoked"
 
     # The orchestration produced offers with EV and at least one parlay candidate.
     assert captured, "process_offers was never invoked"
     underdog_offers, _ = captured.get("Underdog", (pd.DataFrame(), pd.DataFrame()))
     assert len(underdog_offers) >= 10, f"expected >= 10 offers with EV, got {len(underdog_offers)}"
-    assert (
-        underdog_offers["Model EV"].notna().sum() >= 10
-    ), "fewer than 10 offers had a populated Model EV column"
+    assert underdog_offers["Projection"].notna().sum() >= 10, (
+        "fewer than 10 offers had a populated Projection column"
+    )
     parlay_total = sum(len(p) for _, p in captured.values())
     assert parlay_total >= 1, "no parlay candidates were returned"
+
+    # The P2 narrative layer attached its columns and the corr-slice writer fired.
+    snapshot_offers = snapshot_calls[0]["offers"]
+    snapshot_parlays = snapshot_calls[0]["parlays"]
+    assert "Why" in snapshot_offers.columns, "attach_offer_why did not add the Why column"
+    assert "Position" in snapshot_offers.columns, "Position depth label did not flow to offers"
+    assert "Thesis" in snapshot_parlays.columns, (
+        "attach_parlay_theses did not add the Thesis column"
+    )
+    assert game_corr_calls, "write_current_game_corr was never invoked"
+
+    # Game context is built once and the same frame fed to the writer: one row per
+    # (League, Game, Date) with a classified shape.
+    assert game_context_calls, "write_current_game_context was never invoked"
+    context = game_context_calls[0]
+    assert not context.empty, "build_game_context produced no rows from the offers frame"
+    assert set(context["Game"]) == {"LVA/NYL", "PHX/SEA"}, (
+        f"unexpected games: {set(context['Game'])}"
+    )
+    assert context["shape"].notna().all(), "every game context row carries a classified shape"
+
+    # Story-menu writer fired with a column-stable frame. It is empty here: the
+    # stubbed process_offers populates no story_sink, so the generator yields no
+    # stories (story generation itself is covered by tests/golden/test_story_menu).
+    from sportstradamus.prediction.stories.menu import _STORY_COLS
+
+    assert game_stories_calls, "write_current_game_stories was never invoked"
+    assert list(game_stories_calls[0].columns) == _STORY_COLS
 
 
 # --- helpers --------------------------------------------------------------
@@ -191,17 +266,29 @@ def _stub_stats_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
     ``meditate`` and ``prophecize`` instantiate every supported league's
     ``Stats`` class at startup and call ``load`` / ``update`` on the
     relevant ones; in fake mode we don't want any of those calls hitting
-    ``nba_api``, ``nfl_data_py``, or local CSV caches.
+    ``nba_api``, ``nfl_data_py``, ``statsapi``, or local CSV caches. The per-league
+    update gate is pinned open so the run never consults the host's real
+    ``league_activity.json`` snapshot (or the season calendar).
     """
+    import sportstradamus.stats.mlb as mlb_module
     import sportstradamus.stats.nba as nba_module
     import sportstradamus.stats.nfl as nfl_module
+    import sportstradamus.stats.nhl as nhl_module
     import sportstradamus.stats.wnba as wnba_module
+    from sportstradamus.helpers import odds_budget
 
-    for mod in (nba_module, nfl_module, wnba_module):
+    monkeypatch.setattr(odds_budget, "league_is_live", lambda league, season_start: True)
+    monkeypatch.setattr(odds_budget, "update_window_open", lambda league, season_start: True)
+    monkeypatch.setattr(odds_budget, "season_opener", lambda league: None)
+    monkeypatch.setattr(mlb_module, "get_mlb_pitchers", dict)
+
+    for mod in (nba_module, nfl_module, wnba_module, mlb_module, nhl_module):
         cls_name = {
             nba_module: "StatsNBA",
             nfl_module: "StatsNFL",
             wnba_module: "StatsWNBA",
+            mlb_module: "StatsMLB",
+            nhl_module: "StatsNHL",
         }[mod]
         cls = getattr(mod, cls_name)
         monkeypatch.setattr(cls, "load", lambda self: None)
@@ -228,14 +315,32 @@ _PLAYER_LINES = [
 ]
 
 
+# Team → implied win probability and half-total, so ``build_game_context`` has a
+# real ``Moneyline``/``O/U`` to classify shape from (LVA and SEA the favorites).
+_TEAM_CONTEXT = {
+    "LVA": (0.62, 86.0),
+    "NYL": (0.38, 80.0),
+    "SEA": (0.55, 83.0),
+    "PHX": (0.45, 81.0),
+}
+
+
 def _synthetic_offers() -> pd.DataFrame:
-    """Mirror the column contract that ``prediction/cli.py`` consumes."""
+    """Mirror the column contract that ``prediction/cli.py`` consumes.
+
+    Carries the post-``find_correlation`` columns the P2 narrative layer reads —
+    ``Game`` (canonical sorted key), ``O/U`` half-total, ``Moneyline`` win
+    probability, ``Position`` depth label, ``DVPOA`` — so ``build_game_context``
+    produces real context rows rather than the empty-frame fallback.
+    """
     rows = []
-    for player, team, opp, line, model_ev in _PLAYER_LINES:
+    for i, (player, team, opp, line, model_ev) in enumerate(_PLAYER_LINES):
+        win_prob, half_total = _TEAM_CONTEXT[team]
         rows.append(
             {
                 "League": "WNBA",
                 "Date": "2026-05-08",
+                "Game": "/".join(sorted([team, opp])),
                 "Team": team,
                 "Opponent": opp,
                 "Player": player,
@@ -243,13 +348,16 @@ def _synthetic_offers() -> pd.DataFrame:
                 "Line": line,
                 "Boost": 1.0,
                 "Bet": "Over",
-                "Model EV": model_ev,
+                "Projection": model_ev,
                 "Model Param": line,
-                "Books EV": line,
-                "Model P": 0.55,
-                "Books P": 0.50,
-                "Model": 1.05,
-                "Books": 1.0,
+                "Market Projection": line,
+                "Win Prob": 0.55,
+                "Market Prob": 0.50,
+                "Model EV": 1.05,
+                "Market EV": 1.0,
+                "O/U": half_total,
+                "Moneyline": win_prob,
+                "DVPOA": 0.06,
                 "Dist": "Gamma",
                 "CV": 1.0,
                 "Gate": 0,
@@ -257,7 +365,8 @@ def _synthetic_offers() -> pd.DataFrame:
                 "Disp Cal": 1.0,
                 "Step": 0.5,
                 "Player position": "G",
-                "K": 1.0,
+                "Position": f"G{i % 3 + 1}",
+                "Kelly": 1.0,
             }
         )
     return pd.DataFrame(rows)
@@ -273,7 +382,7 @@ def _synthetic_parlays(book: str) -> pd.DataFrame:
                 "Game": "LVA@NYL",
                 "Family": "WNBA-PTS",
                 "Model EV": 1.45,
-                "Books EV": 1.10,
+                "Market EV": 1.10,
                 "Rec Bet": 5.0,
                 "Fun": 0.8,
                 "P": 0.42,

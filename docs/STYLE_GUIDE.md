@@ -5,14 +5,14 @@ Read it once and apply its rules without rederiving them. Cite sections by
 number (`§N`) in commits, comments, and review notes. Keep it short; update it
 when conventions change.
 
-**The thesis.** This is a solo-maintained numeric Python project, and most new
-code now arrives through an AI agent. The dominant failure mode is not wrong
-code — the tests catch that — it is *too much* code: wrappers that forward a
-call, fallbacks for cases that can't happen, comments that narrate the obvious,
-abstractions built for a future that never comes. Every line is a line one
-person has to read and maintain later. So the default posture of this guide is
-**less code, written for a human to understand months from now.** When a rule
-here and a textbook habit disagree, the rule here wins.
+**The thesis.** This is a solo-maintained numeric Python project, and these
+conventions bind every contributor, human or automated. The dominant failure
+mode is not wrong code — the tests catch that — it is *too much* code:
+wrappers that forward a call, fallbacks for cases that can't happen, comments
+that narrate the obvious, abstractions built for a future that never comes.
+Every line is a line one person has to read and maintain later. So the default
+posture of this guide is **less code, written for a human to understand months
+from now.** When a rule here and a textbook habit disagree, the rule here wins.
 
 ---
 
@@ -443,7 +443,8 @@ Update docs in the same commit that changes the contract or workflow they
 describe. At minimum, consider:
 
 - `README.md` — contributor pointers and quickstart commands.
-- `CONTRIBUTING.md` — package map, where to add a league or market.
+- `CONTRIBUTING.md` — contributor workflow and quality gates.
+- `docs/ARCHITECTURE.md` — package map, where to add a league or market.
 - `CLAUDE.md` — diagnostic schemas, deployment notes, the per-cell training
   stats columns. The training-stats schema in particular must stay in sync
   with `training/report.py`.
@@ -542,12 +543,12 @@ grepping the codebase for meaning.
 
 ---
 
-## 18. For Claude and Other LLM Contributors
+## 18. Automated contributors
 
 These rules exist because automated edits arrive fast and in bulk, and a silent
-behavior change from an agent is harder to catch than the same change from a
-human. The job is not to produce more code; it is to produce the least code
-that correctly does what was asked, in the style of the code already here.
+behavior change from automated tooling is harder to catch than the same change
+from a human. The job is not to produce more code; it is to produce the least
+code that correctly does what was asked, in the style of the code already here.
 
 **Posture and scope:**
 
@@ -564,9 +565,9 @@ that correctly does what was asked, in the style of the code already here.
    longer exists. What stays stable is behavior the outside world depends on —
    training-report numbers, archive rows, Sheet column order, CLI flags — never
    the internal layout.
-3. **Prefer small, reviewable patches, one module at a time.** Single-module
-   work stays in the main session; multi-module work defaults to one subagent
-   per module (CLAUDE.md is authoritative on the workflow).
+3. **Prefer small, reviewable patches, one module at a time.** Split
+   multi-module work into independent per-module changes rather than one
+   sprawling diff (CLAUDE.md is authoritative on the workflow).
 4. **Do not add features, refactors, or "improvements" beyond what was asked.**
    A bug fix does not need the surrounding code cleaned up. Speculative cleanup
    is how scope grows quietly. If you spot unrelated work worth doing, say so;
@@ -588,21 +589,23 @@ that correctly does what was asked, in the style of the code already here.
 
 **Workflow:**
 
-10. **Read this guide once per session.** After that, cite sections by number
+10. **Read this guide once, up front.** After that, cite sections by number
     instead of re-reading.
-11. **Prefer `Edit` over `Write`.** `Edit` sends a diff; `Write` resends the
-    whole file. Use `Write` only for genuinely new files or full rewrites.
+11. **Prefer targeted edits over whole-file rewrites.** A minimal diff is
+    cheaper to review and safer to apply; rewrite a file wholesale only when
+    it is genuinely new or a full rewrite was the task.
 12. **Let the tools fix mechanical style.** `ruff format` and
-    `ruff check --fix` run automatically on every edit (§19); don't spend
-    tokens hand-formatting what they already handle.
+    `ruff check --fix` run in the enforcement layers (§19); don't spend
+    effort hand-formatting what they already handle.
 13. **Add docstrings and only meaningful comments — do not pad (§7, §9).**
 14. **Run or explicitly request validation before claiming completion.** The
     three gates in §14 must pass; if you can't run them, say so and ask.
 15. **Consult the glossary (§17) before grepping** — the term is probably there.
-16. **Dispatch parallel subagents for independent work** — per-league stats
-    subclasses, per-book scrapers. One file per subagent.
-17. **Subagent prompts name this guide by path** (`docs/STYLE_GUIDE.md`); they
-    read it themselves rather than receiving its body.
+16. **Parallelize only independent work** — per-league stats subclasses,
+    per-book scrapers — and keep each parallel workstream scoped to one file.
+17. **Delegate by reference, not paraphrase.** Hand-offs name this guide by
+    path (`docs/STYLE_GUIDE.md`) so the delegate reads the source itself
+    rather than a summary of it.
 18. **Do not speculatively abstract.** Two similar lines stay two lines. Three
     similar lines earn a helper, named for what it does, not for the
     duplication it removed (§2.6).
@@ -633,30 +636,16 @@ review finds any of these, it fails before substance review:
 
 ## 19. Enforcement
 
-Style is enforced in three layers so review attention can go to substance, not
-nits:
+Style is enforced in layers so review attention can go to substance, not nits.
 
-**1. While Claude edits — PostToolUse hooks.** Every `Edit` / `Write` /
-`MultiEdit` to a `.py` file runs two hooks (`.claude/settings.json`):
-
-- `ruff check --fix` then `ruff format` on that file — mechanical lint and
-  formatting fixed before the agent moves on.
-- `complexity-gate.py` (`.claude/hooks/`) — an AST gate that **blocks** the
-  edit if a function you changed exceeds the §10 limits (cyclomatic complexity
-  > 10, source length > 200, nesting > 4) and is new or got worse than its
-  last-committed version. Pre-existing debt in a file never blocks an unrelated
-  edit; the gate is a ratchet that only tightens. Override a genuinely
-  irreducible case with `# style: allow-complexity` / `-length` / `-nesting`
-  inside the function plus a one-line reason — the same documented-suppression
-  posture this section applies to `# noqa`.
-
-**2. Before any push, PR, or review — `refactoring-specialist` subagent.**
-Mandatory on every Python file touched in the session (CLAUDE.md). It enforces
-this guide's structural rules — orchestrator flatness (§2.8, §10), wrapper
-elimination (§12), duplicate consolidation (§2.6), magic numbers (§9), comment
-de-narration (§9), and the hard rules — citing `§N` for each change.
-
-**3. In CI and local `pre-commit`:**
+The first layer is repo automation configured under `.claude/` and inventoried
+in [`.claude/README.md`](../.claude/README.md): `ruff` lint and format on
+every edit, a complexity ratchet on the §10 limits (with documented override
+tags), documentation-drift nudges, and a structural style pass by the
+`refactoring-specialist` review agent before any push, PR, or review
+(mandated for agentic sessions by CLAUDE.md). That tooling runs automatically
+in agentic sessions; no contributor is required to use it, because the same
+rules bind everyone through the second layer — CI and local `pre-commit`:
 
 | Tool | Scope | Blocking? |
 |---|---|---|

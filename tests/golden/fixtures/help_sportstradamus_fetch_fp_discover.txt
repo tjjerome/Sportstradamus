@@ -1,0 +1,19 @@
+Usage: sportstradamus fetch fp discover [OPTIONS]
+
+  Auto-populate the catalog from Fantasy Points' tool registry.
+
+  Hits ``POST /v2/ds/all/tools``, walks the published-tool list, and adds one
+  catalog entry per (tool, context) pair. By default existing entries are
+  preserved — re-run safely when FP adds new tools. Pass ``--replace`` to
+  discard the existing catalog first (use this when the body schema or URL
+  pattern changes).
+
+Options:
+  --league TEXT      League segment in tool URLs.  [default: nfl]
+  --include-private  Include tools flagged isPrivate=true (debug/VIP tables).
+  --replace          Discard the existing catalog and rewrite from scratch. Use
+                     when the body schema changes (catalogs from before the v2
+                     ``/values`` rewrite need this).
+  --dry-run          Print discovered specs without writing to the catalog.
+  --catalog FILE
+  --help             Show this message and exit.

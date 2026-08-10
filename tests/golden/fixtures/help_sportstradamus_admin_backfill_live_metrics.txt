@@ -1,0 +1,11 @@
+Usage: sportstradamus admin backfill-live-metrics [OPTIONS]
+
+  Backfill rolling live metrics over the last ``--days`` days.
+
+Options:
+  --days INTEGER  Backfill window length in days.  [default: 90]
+  --step INTEGER  Days between successive computed_at endpoints walking
+                  backward.  [default: 1]
+  --output PATH   Override the output parquet path (defaults to
+                  data/live_metrics_per_market.parquet).
+  --help          Show this message and exit.

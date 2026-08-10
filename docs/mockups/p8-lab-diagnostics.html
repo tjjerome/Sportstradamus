@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P8 · Model Lab — Diagnostics (rev 2)</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Cinzel:wght@600&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#0E1117;--surface:#1A1D24;--text:#E6E9EF;--border:#2A2E37;--primary:#2E6BE6;--link:#5B8DEF;
+    --green:#1F9D55;--red:#E5484D;--orange:#F5A524;--gray:#8A91A0;--gold:#C9A227;
+    --neg2:#9A2B2B;--neg1:#C0453E;--pos1:#7FAAE8;--pos2:#2351B4}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:'IBM Plex Sans',sans-serif;font-size:14px;line-height:1.5}
+  .starfield{position:fixed;inset:0;z-index:0;pointer-events:none}
+  .page{position:relative;z-index:1;max-width:1000px;margin:0 auto;padding:26px 24px 80px}
+  .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+  .kicker{font-family:'Cinzel',serif;font-weight:600;font-size:10.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--gold)}
+  h1{font-size:22px;margin:1px 0 1px}
+  .updated{color:var(--gray);font-size:12px}
+  .seclab{font-family:'Cinzel',serif;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--gray);margin:22px 0 8px;display:flex;align-items:center;gap:9px}
+  .seclab::after{content:"";flex:1;height:1px;background:var(--border)}
+  .dim{color:var(--gray);font-size:12px}
+  .tk{opacity:.4}
+  @media (prefers-reduced-motion:no-preference){@keyframes tw{0%,100%{opacity:.18}50%{opacity:.85}}
+    .tk{animation:tw 4.4s ease-in-out infinite}.tk:nth-child(2n){animation-duration:6s}.tk:nth-child(3n){animation-duration:3.6s}}
+
+  /* diagnostic filter panel */
+  .filters{border:1px solid var(--border);border-radius:6px;background:var(--surface);padding:11px 14px;margin-top:14px}
+  .fhead{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .fhead .ft{font-family:'Cinzel',serif;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}
+  .fhead .reset{margin-left:auto;font-size:11px;color:var(--link);cursor:pointer}
+  .frow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:5px 0}
+  .fgl{font-family:'Cinzel',serif;font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--gray);width:58px;flex:0 0 auto;text-align:right;padding-right:2px}
+  .fpill{background:#20242d;border:1px solid var(--border);border-radius:4px;padding:3px 9px;font-size:11.5px;color:var(--gray);cursor:pointer;font-family:'IBM Plex Mono',monospace}
+  .fpill.on{color:var(--gold);border-color:var(--gold);background:rgba(201,162,39,.12)}
+  .fsel{background:#20242d;border:1px solid var(--border);border-radius:4px;padding:3px 9px;font-size:11.5px;color:var(--text);display:inline-flex;gap:6px;align-items:center}
+  .fsel .cw{color:var(--gray)}
+
+  .weak{border:1px solid rgba(245,165,36,.4);background:rgba(245,165,36,.06);border-radius:5px;padding:8px 12px;margin:12px 0;font-size:12.5px;color:#e9c06a;display:flex;gap:8px;align-items:center}
+  .weak b{color:var(--orange)}
+
+  .ptitle{font-size:12.5px;font-weight:600;margin-bottom:6px}
+  .panel{border:1px solid var(--border);border-radius:5px;background:var(--surface);padding:12px 14px}
+  .panelrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .axt{font-family:'IBM Plex Mono',monospace;font-size:9px;fill:#8A91A0}
+  .gridwrap{border:1px solid var(--border);border-radius:5px;overflow:hidden;background:var(--surface)}
+  table{border-collapse:collapse;width:100%;font-size:12.5px}
+  thead th{background:#20242d;color:var(--gray);font-weight:500;font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)}
+  thead th.r{text-align:right}
+  tbody td{padding:7px 12px;border-bottom:1px solid var(--border)}
+  tbody tr.flag{box-shadow:inset 3px 0 0 var(--orange)}
+  td.num{font-family:'IBM Plex Mono',monospace;text-align:right}
+  td.heat{font-family:'IBM Plex Mono',monospace;text-align:right;border-radius:2px}
+  .tag{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--gray);border:1px solid var(--border);border-radius:3px;padding:0 5px}
+  .pos{color:var(--green)} .neg{color:var(--red)}
+  .leg{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--gray);margin-right:12px}
+  .leg i{width:12px;height:3px;display:inline-block;border-radius:2px}
+  .note{color:var(--gray);font-size:12px;margin-top:18px;line-height:1.6;border-top:1px solid var(--border);padding-top:12px}
+</style>
+</head>
+<body>
+
+<div class="starfield">
+  <svg width="100%" height="100%" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice">
+    <defs><symbol id="spk" viewBox="0 0 10 10"><path d="M5 0.3 L6.05 3.95 L9.7 5 L6.05 6.05 L5 9.7 L3.95 6.05 L0.3 5 L3.95 3.95 Z"/></symbol></defs>
+    <g fill="#aeb9cc">
+      <use class="tk" href="#spk" x="60" y="120" width="9" height="9"/><use class="tk" href="#spk" x="40" y="700" width="8" height="8"/>
+      <use class="tk" href="#spk" x="1360" y="180" width="9" height="9"/><use class="tk" href="#spk" x="1390" y="760" width="8" height="8"/>
+      <circle class="tk" cx="90" cy="260" r="1.3"/><circle class="tk" cx="150" cy="600" r="1.1"/><circle class="tk" cx="30" cy="380" r="1.4"/>
+      <circle class="tk" cx="1340" cy="300" r="1.3"/><circle class="tk" cx="1280" cy="680" r="1.1"/><circle class="tk" cx="1400" cy="440" r="1.4"/>
+      <circle class="tk" cx="720" cy="16" r="1.1"/><circle class="tk" cx="70" cy="520" r="1.1"/><circle class="tk" cx="1370" cy="620" r="1.1"/>
+    </g>
+  </svg>
+</div>
+
+<div class="page">
+<div class="kicker">◈ Model Lab · Diagnostics</div>
+<h1>Market Diagnostics &amp; Forecast Quality</h1>
+<div class="updated">where the models need work — the diagnostic bench, not a scoreboard (that's Receipts)</div>
+
+<!-- GRANULAR DIAGNOSTIC FILTERS — everything in stat_meta.json -->
+<div class="filters">
+  <div class="fhead"><span class="ft">◈ Diagnostic filters</span><span class="dim" style="font-size:11px">47 of 99 cells</span><span class="reset">reset</span></div>
+  <div class="frow"><span class="fgl">Scope</span>
+    <span class="fsel"><span class="cw">League</span> NBA · WNBA <b>+3</b> ▾</span>
+    <span class="fsel"><span class="cw">Market</span> all ▾</span>
+    <span class="fsel"><span class="cw">Window</span> 90 days ▾</span>
+    <span class="fsel"><span class="cw">Min n</span> 25 ▾</span>
+    <span class="fpill">count</span><span class="fpill">continuous</span>
+  </div>
+  <div class="frow"><span class="fgl">Family</span>
+    <span class="fpill on">SkewNormal</span><span class="fpill on">ZINB</span>
+    <span class="fgl" style="width:auto;margin-left:8px">Norm</span>
+    <span class="fpill">none</span><span class="fpill on">centered_additive_mean10</span><span class="fpill">eb_meanyr_k10</span><span class="fpill">ratio_meanyr</span>
+  </div>
+  <div class="frow"><span class="fgl">Post-hoc</span>
+    <span class="fpill">none</span><span class="fpill on">cdf_recal_isotonic</span><span class="fpill">prob_recal_isotonic</span><span class="fpill">roe_mean</span><span class="fpill">isotonic_mean</span>
+  </div>
+  <div class="frow"><span class="fgl">Config</span>
+    <span class="fpill">blending: crps</span><span class="fpill">hpo: calibrated</span><span class="fpill">zinb: hurdle</span><span class="fpill">disp-obj: pit_ks</span>
+    <span class="fgl" style="width:auto;margin-left:8px">Surface</span>
+    <span class="fpill on">withheld</span><span class="fpill on">devel</span><span class="fpill">main</span>
+  </div>
+  <div class="frow"><span class="fgl">Sort</span>
+    <span class="fsel"><span class="cw">by</span> worst BSS ▾</span>
+    <span class="fpill on">⚠ flag weak cells</span>
+  </div>
+</div>
+
+<div class="weak">⚠ <span>in this filter: <b>3</b> under-dispersed (coverage &lt; nominal) · <b>2</b> negative BSS · <b>1</b> over-biased &gt;7% — start here.</span></div>
+
+<div class="seclab">Market-level diagnostics</div>
+<div class="ptitle">Accuracy by league-market <span class="dim">— worst BSS first</span></div>
+<div class="gridwrap">
+  <table>
+    <thead><tr><th>League</th><th>Market</th><th>Family</th><th>Norm</th><th class="r">Acc</th><th class="r">Balance</th><th class="r">Brier</th><th class="r">BSS</th><th class="r">CRPS</th><th class="r">n</th></tr></thead>
+    <tbody>
+      <tr class="flag"><td>MLB</td><td>Total Bases</td><td><span class="tag">SkewNormal</span></td><td><span class="tag">ratio_meanyr</span></td><td class="num">49.8%</td><td class="num neg">+8.9%</td><td class="num">0.253</td><td class="heat" style="background:var(--neg1)">−.019</td><td class="num">1.44</td><td class="num">377</td></tr>
+      <tr class="flag"><td>NHL</td><td>Shots On Goal</td><td><span class="tag">ZINB</span></td><td><span class="tag">none</span></td><td class="num">51.1%</td><td class="num">−6.2%</td><td class="num">0.251</td><td class="heat" style="background:var(--neg1)">−.011</td><td class="num">2.02</td><td class="num">288</td></tr>
+      <tr><td>NFL</td><td>Rush Yds</td><td><span class="tag">SkewNormal</span></td><td><span class="tag">centered_additive_mean10</span></td><td class="num">52.6%</td><td class="num">+4.8%</td><td class="num">0.251</td><td class="num">+.004</td><td class="num">18.4</td><td class="num">410</td></tr>
+      <tr><td>NBA</td><td>3-Pt Made</td><td><span class="tag">ZINB</span></td><td><span class="tag">none</span></td><td class="num">54.0%</td><td class="num">+3.4%</td><td class="num">0.248</td><td class="heat" style="background:var(--pos1)">+.014</td><td class="num">1.12</td><td class="num">880</td></tr>
+      <tr><td>WNBA</td><td>Rebounds</td><td><span class="tag">SkewNormal</span></td><td><span class="tag">centered_additive_mean10</span></td><td class="num">55.8%</td><td class="num">−2.1%</td><td class="num">0.245</td><td class="heat" style="background:var(--pos1)">+.022</td><td class="num">2.31</td><td class="num">642</td></tr>
+      <tr><td>NBA</td><td>Points</td><td><span class="tag">SkewNormal</span></td><td><span class="tag">centered_additive_mean10</span></td><td class="num">57.1%</td><td class="num">+1.2%</td><td class="num">0.238</td><td class="heat" style="background:var(--pos2)">+.041</td><td class="num">4.82</td><td class="num">1,204</td></tr>
+    </tbody>
+  </table>
+</div>
+<div class="dim" style="margin-top:5px">Family + Norm columns come straight from stat_meta.json so you can see which config underperforms. Flagged rows fail a gate. <span style="color:var(--link);cursor:pointer">Export (CSV)</span></div>
+
+<div class="seclab">Forecast quality — proper scoring rules</div>
+<div class="panelrow">
+  <div class="panel">
+    <div class="ptitle">Reliability diagram</div>
+    <svg viewBox="0 0 340 190" width="100%">
+      <line x1="40" y1="164" x2="204" y2="16" stroke="#8A91A0" stroke-dasharray="3 4" stroke-width="1" opacity=".7"/>
+      <line x1="40" y1="16" x2="40" y2="164" stroke="#2A2E37"/><line x1="40" y1="164" x2="330" y2="164" stroke="#2A2E37"/>
+      <g fill="var(--pos1)" opacity=".22"><rect x="52" y="120" width="10" height="44"/><rect x="86" y="96" width="10" height="68"/><rect x="120" y="84" width="10" height="80"/><rect x="154" y="104" width="10" height="60"/><rect x="188" y="128" width="10" height="36"/></g>
+      <polyline points="57,150 91,120 125,96 159,72 193,44" fill="none" stroke="var(--gold)" stroke-width="1.8"/>
+      <g fill="var(--gold)"><circle cx="57" cy="150" r="4"/><circle cx="91" cy="120" r="5"/><circle cx="125" cy="96" r="5.5"/><circle cx="159" cy="72" r="4.5"/><circle cx="193" cy="44" r="3.5"/></g>
+      <g class="axt" text-anchor="end"><text x="36" y="167">50</text><text x="36" y="20">100</text></g>
+      <g class="axt" text-anchor="middle"><text x="40" y="178">50</text><text x="204" y="178">100</text><text x="122" y="188">predicted %</text></g>
+    </svg>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Brier skill score by market</div>
+    <svg viewBox="0 0 340 190" width="100%">
+      <line x1="150" y1="12" x2="150" y2="150" stroke="#8A91A0" stroke-dasharray="3 4" stroke-width="1" opacity=".6"/>
+      <text class="axt" x="150" y="164" text-anchor="middle">0 — no skill</text>
+      <g>
+        <rect x="108" y="18" width="42" height="15" fill="var(--neg1)"/><text class="axt" x="146" y="30" text-anchor="end">MLB·TB</text>
+        <rect x="126" y="40" width="24" height="15" fill="var(--neg1)"/><text class="axt" x="146" y="52" text-anchor="end">NHL·SOG</text>
+        <rect x="150" y="62" width="9" height="15" fill="#5f6b80"/><text class="axt" x="146" y="74" text-anchor="end">NFL·Rush</text>
+        <rect x="150" y="84" width="30" height="15" fill="var(--pos1)"/><text class="axt" x="146" y="96" text-anchor="end">NBA·3PM</text>
+        <rect x="150" y="106" width="86" height="15" fill="var(--pos2)"/><text class="axt" x="146" y="118" text-anchor="end">NBA·PTS</text>
+      </g>
+      <g class="axt" text-anchor="middle"><text x="90" y="140">−.05</text><text x="210" y="140">+.05</text></g>
+    </svg>
+  </div>
+</div>
+
+<div class="panelrow" style="margin-top:12px">
+  <div class="panel">
+    <div class="ptitle">Brier decomposition (Murphy 1973)</div>
+    <svg viewBox="0 0 340 176" width="100%">
+      <line x1="150" y1="10" x2="150" y2="150" stroke="#2A2E37"/>
+      <g>
+        <rect x="96" y="16" width="54" height="15" fill="var(--pos2)"/><rect x="150" y="16" width="20" height="15" fill="var(--red)"/><text class="axt" x="92" y="28" text-anchor="end">NBA·PTS</text>
+        <rect x="112" y="40" width="38" height="15" fill="var(--pos2)"/><rect x="150" y="40" width="28" height="15" fill="var(--red)"/><text class="axt" x="92" y="52" text-anchor="end">WNBA·REB</text>
+        <rect x="120" y="64" width="30" height="15" fill="var(--pos1)"/><rect x="150" y="64" width="34" height="15" fill="var(--red)"/><text class="axt" x="92" y="76" text-anchor="end">MLB·TB</text>
+      </g>
+      <g class="axt" text-anchor="middle"><text x="120" y="164">← resolution</text><text x="200" y="164">reliability →</text></g>
+    </svg>
+    <div class="dim" style="margin-top:2px">Blue resolution (higher=better), red reliability (lower=better).</div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">CRPS over time <span class="dim">— NBA Points (filter to one market)</span></div>
+    <svg viewBox="0 0 340 176" width="100%">
+      <g stroke="#2A2E37"><line x1="40" y1="24" x2="330" y2="24" opacity=".4"/><line x1="40" y1="60" x2="330" y2="60" opacity=".4"/><line x1="40" y1="96" x2="330" y2="96" opacity=".4"/><line x1="40" y1="140" x2="330" y2="140"/></g>
+      <g class="axt" text-anchor="end"><text x="36" y="27">6.0</text><text x="36" y="63">5.0</text><text x="36" y="99">4.0</text><text x="36" y="143">3.0</text></g>
+      <path d="M40 70 C90 76 140 64 200 68 S300 58 326 54" fill="none" stroke="var(--primary)" stroke-width="1.6"/>
+      <path d="M40 96 C90 92 140 98 200 90 S300 86 326 84" fill="none" stroke="var(--pos1)" stroke-width="1.6"/>
+      <g class="axt" text-anchor="middle"><text x="70" y="156">Apr</text><text x="185" y="156">May</text><text x="305" y="156">Jun</text></g>
+    </svg>
+    <div style="margin-top:2px"><span class="leg"><i style="background:var(--primary)"></i>NBA</span><span class="leg"><i style="background:var(--pos1)"></i>WNBA</span><span class="dim">mean CRPS · lower = sharper + calibrated</span></div>
+  </div>
+</div>
+
+<div class="ptitle" style="margin-top:14px">Prediction interval coverage</div>
+<div class="gridwrap">
+  <table>
+    <thead><tr><th>Nominal level</th><th class="r">Actual coverage</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>50%</td><td class="num">51.2%</td><td class="pos">Good</td></tr>
+      <tr><td>80%</td><td class="num">78.1%</td><td class="pos">Good</td></tr>
+      <tr class="flag"><td>90%</td><td class="num">85.4%</td><td class="neg">Overconfident</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="note">
+  <b>Lab intent = find weak spots</b> (distinct from Receipts, which shows off): worst-first sort, weak cells flagged, a "start here" summary. <b>Granular filters expose all of stat_meta.json</b> — distribution family, target-normalization, post-hoc, blending, hpo-selection, zinb-mode, dispersion-objective, shipped surface, market type + the usual league/market/window/min-n — so you can isolate <i>which config</i> underperforms (Family + Norm are table columns too). Filter panel is shared chrome across all three Lab surfaces. Charts stay sober + rethemed to DESIGN tokens (RdYlGn gone); CRPS axis shows real mean-CRPS numbers (scale-sensitive → filter to one market).
+</div>
+</div>
+
+<script>
+const v0=fetch('/version.txt').then(r=>r.text()).catch(()=>'');
+setInterval(async()=>{try{const a=await v0;const b=await fetch('/version.txt?'+Date.now()).then(r=>r.text());if(a&&a!==b)location.reload()}catch(e){}},2000);
+</script>
+</body>
+</html>

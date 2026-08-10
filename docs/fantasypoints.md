@@ -4,6 +4,11 @@
 writes each tool's response to disk every week. The catalog and the
 session token are the only two things you maintain.
 
+This page covers FP-specific setup. The shared collector framework — the
+`run`/`verify`/`list`/`refresh-auth` CLI surface, curl→keys.json auth rotation,
+the skip-if-on-disk contract, and how to add a new source — lives in
+[data_collectors.md](data_collectors.md); FP is its week-keyed member.
+
 ## Before you start: legal
 
 Fantasy Points' Terms of Service may restrict automated access to the
@@ -50,8 +55,8 @@ Two paths — pick one (or combine):
 **Bulk: `fp-fetch discover`** — auto-populates from FP's tool registry.
 
 ```bash
-poetry run fp-fetch discover --dry-run    # preview new entries
-poetry run fp-fetch discover              # write them
+poetry run sportstradamus fetch fp discover --dry-run    # preview new entries
+poetry run sportstradamus fetch fp discover              # write them
 ```
 
 `discover` hits `POST /v2/ds/all/tools`, walks every published tool,
@@ -104,7 +109,7 @@ also re-shaped per mode (see `--mode` below).
 5. Register:
 
    ```bash
-   poetry run fp-fetch import-curl /tmp/line_matchups.curl \
+   poetry run sportstradamus fetch fp import-curl /tmp/line_matchups.curl \
        --name line_matchups \
        --output-subdir team/line_matchups
    ```
@@ -144,7 +149,7 @@ overlay it onto the existing catalog entry with `--replace`:
 
 ```bash
 pbpaste > /tmp/passing_advanced.curl
-poetry run fp-fetch import-curl /tmp/passing_advanced.curl \
+poetry run sportstradamus fetch fp import-curl /tmp/passing_advanced.curl \
     --name player_passing_advanced \
     --replace
 ```
@@ -159,9 +164,9 @@ runtime substitutor overrides it per call based on `--mode`.
 ### 3. Verify locally
 
 ```bash
-poetry run fp-fetch list
-poetry run fp-fetch run --week 5 --season 2025 --dry-run
-poetry run fp-fetch run --week 5 --season 2025 --only team_line_matchups
+poetry run sportstradamus fetch fp list
+poetry run sportstradamus fetch fp run --week 5 --season 2025 --dry-run
+poetry run sportstradamus fetch fp run --week 5 --season 2025 --only team_line_matchups
 ```
 
 `run` fetches each endpoint, parses `content.rows.values` (v2
@@ -195,13 +200,13 @@ for postseason mode; the `+18` shift happens during path resolution.
 
 ```bash
 # default — one regular-season week only (REG: [N])
-poetry run fp-fetch run --week 5 --season 2025
+poetry run sportstradamus fetch fp run --week 5 --season 2025
 
 # season-to-date through week N (REG: [1..N])
-poetry run fp-fetch run --week 5 --season 2025 --mode season_to_date
+poetry run sportstradamus fetch fp run --week 5 --season 2025 --mode season_to_date
 
 # postseason week N (POST: [N])
-poetry run fp-fetch run --week 1 --season 2025 --mode postseason
+poetry run sportstradamus fetch fp run --week 1 --season 2025 --mode postseason
 ```
 
 The mode rewrites `context.weeks` in the request body so FP returns
@@ -227,9 +232,9 @@ After a run, sanity-check what landed on disk against what you
 asked for:
 
 ```bash
-poetry run fp-fetch verify --week 5 --season 2025
-poetry run fp-fetch verify --week 5 --season 2025 --mode season_to_date
-poetry run fp-fetch verify --week 5 --season 2025 --only player_passing_basic
+poetry run sportstradamus fetch fp verify --week 5 --season 2025
+poetry run sportstradamus fetch fp verify --week 5 --season 2025 --mode season_to_date
+poetry run sportstradamus fetch fp verify --week 5 --season 2025 --only player_passing_basic
 ```
 
 For every catalog entry the verifier:
@@ -265,7 +270,7 @@ the prompt and fail fast so Healthchecks.io pings `/fail`.
 ## Historical backfill
 
 ```bash
-poetry run fp-fetch backfill \
+poetry run sportstradamus fetch fp backfill \
     --start-season 2021 --end-season 2024 \
     --start-week 1 --end-week 18
 ```
@@ -298,48 +303,12 @@ the environment so token-expiry failures alert via Healthchecks.io.
 
 ## When the token expires
 
-The healthcheck alert (`/fail` ping with the last 50 log lines) will
-quote a message like:
-
-```
-FP returned 401 for POST https://...  — Authorization token is
-expired or missing. Refresh fantasypoints_authorization in
-creds/keys.json; see docs/fantasypoints.md.
-```
-
-Refresh in one step:
-
-1. In DevTools, copy any logged-in XHR as cURL (the same recipe as
-   §1, step 4, but to a temp file):
-
-   ```bash
-   pbpaste > /tmp/fresh.curl   # macOS
-   wl-paste > /tmp/fresh.curl  # Wayland Linux
-   ```
-
-2. Update `creds/keys.json`:
-
-   ```bash
-   poetry run fp-fetch refresh-auth /tmp/fresh.curl
-   ```
-
-   Or pipe directly without the temp file:
-
-   ```bash
-   pbpaste | poetry run fp-fetch refresh-auth -
-   ```
-
-   The command extracts the `Authorization`, `Cookie`, and
-   `User-Agent` headers and writes them to `creds/keys.json`,
-   preserving every other field. It prints a redacted preview of
-   each value (first 24 chars) so you can confirm without leaking
-   the full token to a shared terminal.
-
-3. Confirm:
-
-   ```bash
-   poetry run fp-fetch run --only line_matchups
-   ```
+The healthcheck alert (`/fail` ping with the last 50 log lines) quotes a `401`
+message pointing here. Refresh in one paste with
+`poetry run sportstradamus fetch fp refresh-auth /tmp/fresh.curl` (or `pbpaste | … refresh-auth -`),
+then confirm with `fp-fetch run --only line_matchups`. The extract-headers,
+preserve-other-keys, redacted-preview mechanics are the shared refresh-auth flow
+documented in [data_collectors.md](data_collectors.md#auth).
 
 ## Output layout
 

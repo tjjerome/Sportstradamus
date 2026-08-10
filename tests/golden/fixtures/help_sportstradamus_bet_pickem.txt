@@ -1,0 +1,11 @@
+Usage: sportstradamus bet pickem [OPTIONS]
+
+  Build today's Pick'em entries for ``platform`` and emit recommendations YAML.
+
+Options:
+  --date TEXT                    Slate date (YYYY-MM-DD or 'today').
+  --bankroll TEXT                Bankroll in dollars.  [required]
+  --platform [underdog|sleeper]  DFS platform to build Pick'em entries for.
+                                 [default: Underdog]
+  --out FILE                     Override output YAML path.
+  --help                         Show this message and exit.

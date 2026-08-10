@@ -1,6 +1,5 @@
 import importlib.resources as pkg_resources
 import json
-import os.path
 
 import numpy as np
 import pandas as pd
@@ -9,6 +8,7 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 
 from sportstradamus import data
+from sportstradamus.helpers.io import read_parlay_hist, write_parlay_hist
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL
 
 
@@ -54,13 +54,10 @@ def reflect():
     dateStr = {"MLB": "gameDate", "NBA": "GAME_DATE", "NFL": "gameday", "NHL": "gameDate"}
     teamStr = {"MLB": "team", "NBA": "TEAM_ABBREVIATION", "NFL": "team", "NHL": "team"}
 
-    with open(pkg_resources.files(data) / "stat_map.json") as infile:
+    with open(pkg_resources.files(data) / "config" / "stat_map.json") as infile:
         stat_map = json.load(infile)
 
-    filepath = pkg_resources.files(data) / "parlay_hist.dat"
-    if os.path.isfile(filepath):
-        parlays_clean = pd.read_pickle(filepath)
-
+    parlays_clean = read_parlay_hist()
     parlays = parlays_clean.copy()
 
     def check_bet(bet):
@@ -84,69 +81,70 @@ def reflect():
         ]
         if game.empty:
             return np.nan, np.nan
-        else:
-            legs = 0
-            misses = 0
-            for leg in bet:
-                if isinstance(leg, str) and "%" in leg:
-                    legs += 1
-                    if " Under " in leg:
-                        split_leg = leg.split(" Under ")
-                        over = False
+        legs = 0
+        misses = 0
+        for leg in bet:
+            if isinstance(leg, str) and "%" in leg:
+                legs += 1
+                if " Under " in leg:
+                    split_leg = leg.split(" Under ")
+                    over = False
+                else:
+                    split_leg = leg.split(" Over ")
+                    over = True
+                player = split_leg[0]
+                rest = split_leg[1].split(" - ")[0]
+                line = rest.split(" ")[0]
+                market = rest[(len(line) + 1) :].replace("H2H ", "")
+                line = float(line)
+                market = new_map.get(market, market)
+
+                if " + " in player:
+                    players = player.split(" + ")
+                    result1 = game.loc[game[nameStr[bet.League]] == players[0], market]
+                    result2 = game.loc[game[nameStr[bet.League]] == players[1], market]
+                    if result1.empty or result2.empty:
+                        result = result1
                     else:
-                        split_leg = leg.split(" Over ")
-                        over = True
-                    player = split_leg[0]
-                    rest = split_leg[1].split(" - ")[0]
-                    line = rest.split(" ")[0]
-                    market = rest[(len(line) + 1) :].replace("H2H ", "")
-                    line = float(line)
-                    market = new_map.get(market, market)
-
-                    if " + " in player:
-                        players = player.split(" + ")
-                        result1 = game.loc[game[nameStr[bet.League]] == players[0], market]
-                        result2 = game.loc[game[nameStr[bet.League]] == players[1], market]
-                        if result1.empty or result2.empty:
-                            result = result1
-                        else:
-                            result = pd.Series(result1.iat[0] + result2.iat[0])
-                    elif " vs. " in player:
-                        players = player.split(" vs. ")
-                        result1 = game.loc[game[nameStr[bet.League]] == players[0], market]
-                        result2 = game.loc[game[nameStr[bet.League]] == players[1], market]
-                        if result1.empty or result2.empty:
-                            result = result1
-                        else:
-                            result = pd.Series(result1.iat[0] + result2.iat[0])
+                        result = pd.Series(result1.iat[0] + result2.iat[0])
+                elif " vs. " in player:
+                    players = player.split(" vs. ")
+                    result1 = game.loc[game[nameStr[bet.League]] == players[0], market]
+                    result2 = game.loc[game[nameStr[bet.League]] == players[1], market]
+                    if result1.empty or result2.empty:
+                        result = result1
                     else:
-                        result = game.loc[game[nameStr[bet.League]] == player, market]
+                        result = pd.Series(result1.iat[0] + result2.iat[0])
+                else:
+                    result = game.loc[game[nameStr[bet.League]] == player, market]
 
-                    if result.empty or result.iat[0] == line:
-                        legs -= 1
-                    elif result.iat[0] < line and over or result.iat[0] > line and not over:
-                        misses += 1
+                if result.empty or result.iat[0] == line:
+                    legs -= 1
+                elif (result.iat[0] < line and over) or (result.iat[0] > line and not over):
+                    misses += 1
 
-            return legs, misses
+        return legs, misses
 
-    parlays.loc[parlays.Legs.isna(), ["Legs", "Misses"]] = (
-        parlays.loc[parlays.Legs.isna()].progress_apply(check_bet, axis=1).to_list()
+    parlays.loc[parlays["Legs Resolved"].isna(), ["Legs Resolved", "Misses"]] = (
+        parlays.loc[parlays["Legs Resolved"].isna()].progress_apply(check_bet, axis=1).to_list()
     )
-    parlays.dropna(subset=["Legs"], inplace=True)
-    parlays[["Legs", "Misses"]] = parlays[["Legs", "Misses"]].astype(int)
+    parlays.dropna(subset=["Legs Resolved"], inplace=True)
+    parlays[["Legs Resolved", "Misses"]] = parlays[["Legs Resolved", "Misses"]].astype(int)
     parlays["Profit"] = parlays.apply(
-        lambda x: np.clip(
-            payout_table[x.Platform][x.Legs][x.Misses]
-            * (x.Boost if x.Boost < 2 or x.Misses == 0 else 1),
-            None,
-            100,
-        )
-        - 1,
+        lambda x: (
+            np.clip(
+                payout_table[x.Platform][x["Legs Resolved"]][x.Misses]
+                * (x.Boost if x.Boost < 2 or x.Misses == 0 else 1),
+                None,
+                100,
+            )
+            - 1
+        ),
         axis=1,
     )
 
-    pd.concat([parlays, parlays_clean]).drop_duplicates(subset=parlays.columns[:-3]).to_pickle(
-        filepath
+    write_parlay_hist(
+        pd.concat([parlays, parlays_clean]).drop_duplicates(subset=parlays.columns[:-3])
     )
 
     parlays.loc[parlays["Model EV"] >= 6, "Model EV"] = 5.99
@@ -167,7 +165,7 @@ def reflect():
                 mean_profit = np.zeros([int(1 / n), int(5 / n)])
                 for i, bt in enumerate(tqdm(np.arange(1, 2, n))):
                     for j, mt in enumerate(np.arange(1, 6, n)):
-                        test_df = df.loc[(df["Books EV"] > bt) & (df["Model EV"] > mt)]
+                        test_df = df.loc[(df["Market EV"] > bt) & (df["Model EV"] > mt)]
                         bets = (
                             test_df.sort_values("Model EV", ascending=False)
                             .groupby(["Game", "Date"])
@@ -188,7 +186,7 @@ def reflect():
                 book_threshold = book_threshold[model_threshold > 1]
                 model_threshold = model_threshold[model_threshold > 1]
                 p = np.polyfit(np.log(6 - model_threshold), book_threshold, 1)
-                mask = (p[0] * np.log(6 - df["Model EV"]) + p[1]) < df["Books EV"]
+                mask = (p[0] * np.log(6 - df["Model EV"]) + p[1]) < df["Market EV"]
 
                 fig = plt.figure()
                 ax = sns.heatmap(

@@ -9,6 +9,10 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+# Hand-authored static Streamlit component (no npm in repo/prod — index.html + main.js
+# ARE the source, not generated output); the generic build/ rule above must not drop them.
+!/src/sportstradamus/dashboard/components/constellation_component/build/
+!/src/sportstradamus/dashboard/components/astrolabe_component/build/
 develop-eggs/
 dist/
 downloads/
@@ -164,11 +168,16 @@ cython_debug/
 *.mdl
 docs/build
 *.csv*
+# Track the Tier-0 status snapshot so the per-cell "current metric vs goal vs pass"
+# is visible in the branch without re-running the audit (regenerated each full
+# compression_eval run). Research-branch only; denylisted from devel/main.
+!src/sportstradamus/data/tier0_scorecard.csv
 *.
 .lprof
 *refactor.py
 *test.py
 *.txt
+logs/*
 
 # Tests are tracked; the broad globs above don't apply inside tests/.
 !tests/**/*.py
@@ -176,20 +185,46 @@ docs/build
 *.prof
 *.pdf
 *.xlsx
-src/sportstradamus/data/training_report.txt
+# Credentials never enter the repo, at any depth (belt beside src/sportstradamus/creds/.gitignore)
+creds/
+src/sportstradamus/data/training/training_report.txt
 src/sportstradamus/data/~$feature_importances.xlsx
 src/sportstradamus/data/feature_importances.xlsx
-src/sportstradamus/data/stat_cv.json
-src/sportstradamus/data/stat_std.json
-src/sportstradamus/data/most_important_features.json
-src/sportstradamus/data/features_to_filter.json
-src/sportstradamus/data/book_weights.json
-src/sportstradamus/data/goalies.json
+src/sportstradamus/data/config/stat_cv.json
+src/sportstradamus/data/config/stat_std.json
+src/sportstradamus/data/config/book_weights.json
+src/sportstradamus/data/config/goalies.json
+src/sportstradamus/data/leagues/*/players.json
+src/sportstradamus/data/leagues/*/players.parquet
+src/sportstradamus/data/leagues/*/comps.json
+src/sportstradamus/data/leagues/*/comps_metric.npz
+src/sportstradamus/data/runtime/
+src/sportstradamus/data/fantasypoints/
 src/profile_output.lprof
 profile_output.lprof
-poetry.lock
 *.dat:Zone.Identifier
 *.dat:shield
 archive/*
 src/sportstradamus/data/training_data/.gitignore:Zone.Identifier
 *.parquet
+research/
+notebooks/
+
+# Git worktrees for isolated feature workspaces (subagent-driven development)
+.worktrees/
+
+# Claude Code hook runtime state (per-session markers, snapshots, waiver)
+/.claude/.state/
+
+# Research-gated path list is tracked config despite the broad *.txt ignore above
+!.claude/research_gated.txt
+.claude/scheduled_tasks.lock
+src/sportstradamus/data/leagues/nba/corr_metadata.json
+src/sportstradamus/data/leagues/nfl/corr_metadata.json
+src/sportstradamus/data/leagues/wnba/corr_metadata.json
+src/sportstradamus/data/leagues/mlb/corr_metadata.json
+src/sportstradamus/data/leagues/nhl/corr_metadata.json
+src/sportstradamus/data/runtime/*
+
+# Timestamped stat_meta backups a confirm/supersede walk writes before each persist
+src/sportstradamus/data/config/stat_meta.*.bak.json

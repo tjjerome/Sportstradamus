@@ -89,7 +89,7 @@ green:
   stays uniform. Picklable round-trip is unit-tested.
 
   **Spec drift note**: the original spec at
-  `docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md`
+  `docs/archive/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md`
   (Phase B Task B1) returned `gate = 1 − p_nonzero` — i.e. the
   *marginal* zero rate, not the structural-inflation π. That was a
   bug: downstream `fused_loc` in
@@ -673,7 +673,7 @@ Ranked by likely leverage:
 | Master plan (durable) | `docs/gbdt_mean_regression_plan.md` (P2.B row updated with the SHIP verdict; P2.A row marked DEAD) |
 | P1 research handoff (sibling doc) | `docs/CENTERED_TARGET_NEGATIVE_RESULT.md` |
 | Overconfidence investigation (lineage) | `docs/OVERCONFIDENCE_INVESTIGATION.md` §2 |
-| Original spec (pre-correction) | `docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md` Phase B "SUPERSEDED → derived-π" |
+| Original spec (pre-correction) | `docs/archive/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md` Phase B "SUPERSEDED → derived-π" |
 | HurdleZINB class | `src/sportstradamus/hurdle.py` |
 | Pipeline integration | `src/sportstradamus/training/pipeline.py` (helpers `fit_hurdle_model`, `predict_hurdle_params`, `fit_predict_hurdle_params`; `use_hurdle` dispatch in `train_market`) |
 | CLI flag | `src/sportstradamus/training/cli.py` `--zinb-mode` |

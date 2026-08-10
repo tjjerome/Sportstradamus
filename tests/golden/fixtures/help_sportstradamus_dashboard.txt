@@ -1,0 +1,12 @@
+Usage: sportstradamus dashboard [OPTIONS]
+
+  Launch the Sportstradamus Streamlit dashboard.
+
+  Production runs unattended under systemd, so the source-file watcher is
+  disabled. The watcher's only effect is the "Source file changed, rerun?"
+  popup, which misleads users — clicking "Rerun" only re-executes the script, it
+  does not invalidate the data cache, so the displayed data looks unchanged.
+  Data freshness is handled by mtime-keyed caches in ``dashboard/data.py``.
+
+Options:
+  --help  Show this message and exit.

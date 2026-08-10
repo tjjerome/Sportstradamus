@@ -1,0 +1,20 @@
+{
+  "cycle_credits": 20000,
+  "cycle_reset_day": 1,
+  "enforce": true,
+  "broad_slots_per_day": 5,
+  "floor_safety_factor": 1.25,
+  "floor_min_per_day": 300,
+  "default_league_run_cost": 150,
+  "estimate_window_days": 7,
+  "poll_horizon_days": 14,
+  "promote_within_days": 1,
+  "league_priority": ["NBA", "WNBA", "NFL", "MLB", "NHL"],
+  "league_seed_costs": {
+    "NBA": 100,
+    "WNBA": 55,
+    "NFL": 165,
+    "MLB": 300,
+    "NHL": 60
+  }
+}

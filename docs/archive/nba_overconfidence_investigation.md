@@ -122,7 +122,7 @@ observable total-zero probability sidesteps the EM normally needed for latent
 structural zeros.
 
 Full task-by-task TDD spec (Phase B, "SUPERSEDED → derived-π" section):
-`docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md`.
+`docs/archive/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md`.
 
 ---
 
@@ -214,9 +214,9 @@ root-cause pass.
 ## 5. Artifact pointers
 
 - This report: `docs/OVERCONFIDENCE_INVESTIGATION.md` (tracked).
-- Concise hand-back: `docs/superpowers/plans/2026-05-19-overconfidence-findings-handback.md`.
+- Concise hand-back: `docs/archive/superpowers/plans/2026-05-19-overconfidence-findings-handback.md`.
 - Detailed implementation spec (Phase A abandoned; **Phase B derived-π still
-  valid**): `docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md`.
+  valid**): `docs/archive/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md`.
 - Investigation history / decisions:
   `~/.claude/plans/my-models-seem-to-jazzy-minsky.md`.
 - Project memory: `overconfidence-investigation` (so future sessions don't
@@ -532,8 +532,8 @@ Ranked by likely leverage:
 | Branch | `claude/fix-gbdt-mean-regression-GcY1g` (32 commits ahead of `origin`, not pushed) |
 | Master plan (durable) | `docs/operation_ship_75.md` (this doc historicized under `docs/archive/gbdt_mean_regression_plan.md`) |
 | OVERCONFIDENCE_INVESTIGATION (lineage) | `docs/OVERCONFIDENCE_INVESTIGATION.md` |
-| Phase-A original spec | `docs/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md` |
-| P0.5 determinism design | `docs/superpowers/specs/2026-05-19-p0.5-determinism-gate-design.md` |
+| Phase-A original spec | `docs/archive/superpowers/plans/2026-05-18-fga-fg3m-overconfidence-fix.md` |
+| P0.5 determinism design | `docs/archive/superpowers/specs/2026-05-19-p0.5-determinism-gate-design.md` |
 | Strategy registry | `src/sportstradamus/training/baselines.py` |
 | Pipeline dispatch | `src/sportstradamus/training/pipeline.py` (target_strategy plumbing throughout `train_market`) |
 | Prediction-side mirror | `src/sportstradamus/prediction/model_prob.py` `_decode_skewnormal` helper |

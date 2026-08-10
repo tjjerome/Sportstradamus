@@ -1,16 +1,15 @@
 [tool.poetry]
 name = "Sportstradamus"
 version = "4.2.0"
-description = "Scrape Sportsbooks Odds and Player Stats and export to Google Sheets"
+description = "Scrape Sportsbooks Odds and Player Stats and surface +EV bets in a Streamlit dashboard"
 authors = ["Trevor Jerome <trevor81994@gmail.com>"]
+license = "MIT"
 readme = "README.md"
 homepage = "https://github.com/tjjerome/sportstradamus"
 repository = "https://github.com/tjjerome/sportstradamus"
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.12"
-google-auth-oauthlib = ">=1.0.0"
-gspread = ">=5.8.0"
 mlb-statsapi = ">=1.6.1"
 nba-api = ">=1.11.4"
 nfl-data-py = ">=0.3.2"
@@ -18,35 +17,51 @@ numpy = ">=1.24.3,<2.0.0"
 pandas = ">=2.0.1"
 protobuf = ">=4.23.0"
 requests = ">=2.30.0"
-# Security floors for requests' transitive deps; pinned directly because
-# poetry.lock is gitignored, so nothing else holds the patched versions
+# Security floors for requests' transitive deps
 # (Dependabot GHSA-qccp-gfcp-xxvc, GHSA-mf9v-mfxr-j63j, GHSA-65pc-fj4g-8rjx).
 urllib3 = ">=2.7.0"
+# ScrapeOps rotates in browser headers advertising `Accept-Encoding: ... br`, so
+# hosts answer with Brotli. Without a decoder urllib3 passes the compressed bytes
+# through and the caller parses binary (baseballsavant returned `text/csv` bodies
+# that tokenized as garbage, defeating get_csv's HTML soft-block guard).
+brotli = ">=1.1.0"
 idna = ">=3.15"
 scipy = ">=1.10.1"
 tqdm = ">=4.65.0"
-importlib = "^1.0.4"
 click = "^8.1.3"
 pytz = "^2023.3"
 scikit-learn = ">=1.5.0,<1.8.0"
-shap = ">=0.44.0,<0.45.0"
+shap = "==0.45.1"
 lightgbmlss = ">=0.6"
 torch = {version = "2.9.1", source = "pytorch_cpu"}
+# The download.pytorch.org CPU wheel doesn't declare sympy, but torch._dynamo
+# imports it (hit via the centered-SN head). Declared so a locked install has it.
+sympy = ">=1.13"
 line-profiler = "^4.1.3"
-klepto = {extras = ["archives"], version = "^0.2.5"}
+h5py = ">=3.9"
+duckdb = "^1.1.0"
 nflreadpy = "^0.1.2"
 polars = "^1.33.1"
 pyarrow = "^23.0.1"
 scrapeops-python-requests = "^0.4.7"
-streamlit = ">=1.30"
+streamlit = ">=1.38"
 plotly = ">=5.18"
+streamlit-aggrid = "^1.2.1.post2"
+# Constellation graph layout (dashboard); previously reached the env only as a
+# stray transitive install — declared here so a locked install actually has it.
+networkx = ">=3.1"
+# Research-only (model-research branch): powers scripts/zinb_routing_diagnostics.py,
+# which was stripped from devel along with statsmodels. Re-added here so the
+# diagnostic and its golden test still resolve on this branch; devel has neither.
+statsmodels = "^0.14.6"
+# cvxpy + SCS power joint_kelly_portfolio; PyYAML and tabulate drive the
+# `kelly` CLI's recommendations-YAML I/O.
+cvxpy = ">=1.4"
+pyyaml = ">=6.0"
+tabulate = ">=0.9"
 
 [tool.poetry.scripts]
-prophecize = "sportstradamus.prediction.cli:main"
-confer = "sportstradamus.moneylines:confer"
-meditate = "sportstradamus.training.cli:meditate"
-dashboard = "sportstradamus.dashboard:run"
-reflect = "sportstradamus.nightly:run"
+sportstradamus = "sportstradamus.cli:cli"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.23.1"
@@ -54,19 +69,19 @@ sphinx-pdj-theme = "^0.4.0"
 sphinx-pyproject = "^0.1.0"
 lightgbm = ">=4.6.0,<4.7.0"
 pytest = "^9.0.3"
+pytest-xdist = "^3.6"
 matplotlib = "^3.7.1"
 optuna = ">=3.5.0,<3.6.0"
 optuna-dashboard = "^0.10.2"
 seaborn = "^0.13.1"
-ruff = "^0.6.0"
+ruff = "0.15.8"         # exact-pin; keep == .pre-commit-config.yaml ruff rev (a caret floats the venv off the hook version → format ping-pong)
 mypy = "^1.10.0"
 pre-commit = "^3.7.0"
-
-
-[[tool.poetry.source]]
-name = "torch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-priority = "explicit"
+pylint = "^3.2"          # duplicate-code detector only; see [tool.pylint.*]
+# exact-pin: playwright ships a browser revision per release, and 1.60.0 is what
+# ~/.cache/ms-playwright already holds (chromium-1228). A caret would float the venv
+# onto a release wanting a different revision -> a 280 MB re-download.
+playwright = "1.60.0"
 
 
 [[tool.poetry.source]]
@@ -94,11 +109,32 @@ extend-exclude = ["src/deprecated"]
 # D: pydocstyle, SIM: simplify, RUF: ruff-native, N: naming,
 # PTH: pathlib, PLR/PLW: pylint refactor/warning, PERF: performance,
 # TID: tidy-imports.
+# C4/RET/PIE/ERA/FBT/T20 mechanize STYLE_GUIDE rules that were docs-only.
+# C90 (mccabe) is deliberately omitted: the .claude/hooks/complexity-gate.py
+# AST gate covers complexity diff-scoped, without flagging all legacy code.
 select = [
     "E", "W", "F", "I", "UP", "B", "D", "SIM", "RUF",
     "N", "PTH", "PLR", "PLW", "PERF", "TID",
+    "C4",   # flake8-comprehensions — §10 idioms (mostly autofixable)
+    "RET",  # flake8-return — §10 guard clauses; RET504 = "name steps, not echoes"
+    "PIE",  # flake8-pie — misc redundancy (mostly autofixable)
+    "ERA",  # eradicate — §12 no commented-out code (dormant; see ignore ratchet)
+    "FBT",  # flake8-boolean-trap — §10 no flag arguments (dormant; see ignore)
+    "T20",  # flake8-print — §9 no stray prints (dormant; see ignore)
 ]
 ignore = [
+    # PRIORITY LIFT — these contradict CLAUDE.md hard rules and head the
+    # ratchet queue: E722 (bare except -> STYLE_GUIDE §11) and PLR2004
+    # (magic values -> §9 / no-magic-numbers). Both still appear in the phase
+    # blocks below; clear those modules first, then drop them from here.
+
+    # ----- Anti-slop ratchet: declared in `select`, dormant until a one-time
+    # burn-down. Baseline with `ruff check --add-noqa src/sportstradamus/`,
+    # then drop each code as its modules are cleaned.
+    "ERA001",                       # §12 commented-out code
+    "FBT001", "FBT002", "FBT003",   # §10 boolean flag arguments
+    "T201", "T203",                 # §9 stray print / pprint
+
     # Module and package docstrings — ratcheting up as each file gains one.
     "D100", "D104",
     # Argument and statement-count limits — advisory during the refactor.
@@ -149,8 +185,9 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# Scripts are terser by nature; tests do not need docstrings.
-"src/sportstradamus/scripts/*" = ["D", "PLR"]
+# Scripts are terser by nature; tests do not need docstrings. Scripts may
+# legitimately print, so keep T20 off them even after the ratchet lifts it.
+"src/sportstradamus/scripts/*" = ["D", "PLR", "T201", "T203"]
 "tests/*" = ["D"]
 
 [tool.ruff.lint.pydocstyle]
@@ -174,11 +211,38 @@ warn_unused_ignores = true
 disallow_untyped_defs = false
 check_untyped_defs = true
 
+# -----------------------------------------------------------------------------
+# Duplication detector. Ruff has no clone detection; pylint's similarity
+# checker fills that gap (GitClear's data makes duplication the dominant
+# AI-debt signal). BLOCKING: tests/golden/test_no_duplicate_code.py runs the
+# checker over src/sportstradamus/ and fails on any R0801 group, so this command
+# reproduces the gate locally:
+#
+#     poetry run pylint --disable=all --enable=duplicate-code src/sportstradamus/
+#
+# Policy: any parallelism must be justified (STYLE_GUIDE §2.9; rule of three
+# §2.6). Hoist genuine clones into the base class or a shared helper. A block
+# that stays parallel — same shape but genuinely different knowledge per
+# league/grain — must carry an explicit `# pylint: disable=duplicate-code`
+# pragma with a one-line rationale; the gate tolerates only pragma-justified
+# duplication. Do NOT raise min-similarity-lines to silence a real clone.
+# -----------------------------------------------------------------------------
+[tool.pylint.similarities]
+min-similarity-lines = 6
+ignore-comments = true
+ignore-docstrings = true
+ignore-imports = true
+ignore-signatures = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
     "integration: end-to-end pipeline test (confer -> meditate -> prophecize) on cached fixtures. Skipped by default; opt in with `pytest -m integration`.",
+    "diagnostics: dev-only tooling tests (research scripts + model-strategy sweep/confirm orchestration) that never ship to production. Slow. Skipped by default; opt in with `pytest -m diagnostics`.",
 ]
-# Default runs skip the integration suite. CI's `pytest tests/golden/` is
-# unaffected because golden tests are unmarked.
-addopts = "-m 'not integration'"
+# Default runs skip the integration + diagnostics suites and parallelize via
+# pytest-xdist (`-n auto`). CI's `pytest tests/golden/` is unaffected by the marker
+# filter (golden tests are unmarked) and now runs across all cores.
+# The integration suite is NOT xdist-safe — its autouse preserve_data_files fixture
+# mutates a shared config/stat_meta.json — so run it serially: `pytest -m integration -n0`.
+addopts = "-m 'not integration and not diagnostics' -n auto"

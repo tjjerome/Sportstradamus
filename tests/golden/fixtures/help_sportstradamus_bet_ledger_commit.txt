@@ -1,0 +1,8 @@
+Usage: sportstradamus bet ledger-commit [OPTIONS]
+
+  Twice-daily policy_v1 commit: build candidates, draw, size, append.
+
+Options:
+  --run-slot [morning|afternoon]  [required]
+  --date TEXT
+  --help                          Show this message and exit.

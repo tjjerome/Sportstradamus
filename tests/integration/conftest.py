@@ -7,6 +7,7 @@ pipeline on cached fixtures. It is opt-in via ``pytest -m integration``;
 
 from __future__ import annotations
 
+import contextlib
 import importlib.resources as pkg_resources
 from pathlib import Path
 
@@ -28,35 +29,39 @@ def fixtures_dir() -> Path:
 def reset_archive_singleton():
     """Force the next ``Archive()`` to re-initialize against the current cwd.
 
-    ``Archive`` is a process-singleton that scans ``./archive/`` once on
+    ``Archive`` is a process-singleton that opens its DuckDB file once on
     first instantiation. Because several production modules call
     ``Archive()`` at import time, the singleton is bound before our test
-    has a chance to ``chdir`` into a tmp working directory. Resetting
-    ``_initialized`` lets the next call rerun ``__init__`` against the new
-    cwd without breaking other module-level references.
+    has a chance to ``chdir`` into a tmp working directory. Closing the
+    existing connection and resetting ``_initialized`` lets the next call
+    rerun ``__init__`` against the new cwd.
     """
     from sportstradamus.helpers.archive import Archive
 
-    inst = Archive._instance
-    if inst is not None:
+    def _reset(inst):
+        if inst is None:
+            return
+        con = getattr(inst, "_connection", None)
+        if con is not None:
+            with contextlib.suppress(Exception):
+                con.close()
         inst._initialized = False
-        inst.archive = {}
-        inst._loaded = set()
-        inst._changed_keys = {}
+
+    _reset(Archive._instance)
     yield
-    # Re-reset on the way out so the next test starts clean too.
-    inst = Archive._instance
-    if inst is not None:
-        inst._initialized = False
-        inst.archive = {}
-        inst._loaded = set()
-        inst._changed_keys = {}
+    _reset(Archive._instance)
 
 
-# Files in ``src/sportstradamus/data/`` that ``meditate`` rewrites mid-run.
+# Files under ``src/sportstradamus/data/`` that the pipeline rewrites mid-run.
 # We snapshot their bytes at test setup and restore on teardown so the
-# integration suite leaves no on-disk side effects.
-_DATA_FILES_TO_PROTECT = ("book_weights.json", "upcoming_events.json")
+# integration suite leaves no on-disk side effects. ``config/stat_meta.json``
+# is COMMITTED -- meditate's gate/ship logic rewrites its ``shipped`` fields
+# from fixture gate results, which must never be left staged against production.
+_DATA_FILES_TO_PROTECT = (
+    "book_weights.json",
+    "upcoming_events.json",
+    "config/stat_meta.json",
+)
 
 
 def _data_dir_real_path() -> Path:
@@ -74,16 +79,18 @@ def _data_dir_real_path() -> Path:
     raise RuntimeError(msg)
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def preserve_data_files():
     """Snapshot/restore mutable JSON config files in the ``data`` package.
 
-    ``meditate`` rewrites ``book_weights.json``; ``confer --fixture-dir``
-    rewrites ``upcoming_events.json``. The smoke test's stubs prevent
-    those writes from carrying real production data, but the underlying
-    file truncation still mutates the on-disk bytes — this fixture
-    captures them up front and writes them back on teardown so the
-    integration suite leaves no on-disk side effects.
+    ``meditate`` rewrites ``book_weights.json`` and, via the gate/ship logic,
+    the ``shipped`` fields of the committed ``config/stat_meta.json``;
+    ``confer --fixture-dir`` rewrites ``upcoming_events.json``. The smoke
+    test's stubs prevent those writes from carrying real production data, but
+    the underlying file truncation still mutates the on-disk bytes — this
+    fixture captures them up front and writes them back on teardown so the
+    integration suite leaves no on-disk side effects. Autouse so every
+    integration test is covered, not just the ones that opt in.
     """
     data_root = _data_dir_real_path()
     snapshots = {

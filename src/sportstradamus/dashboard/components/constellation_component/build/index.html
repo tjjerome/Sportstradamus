@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>constellation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js" charset="utf-8"></script>
+    <style>
+      /* Token values mirror DESIGN.md §2 — the iframe can't read .streamlit/config.toml,
+         so the surface/border/text/gold/primary hexes are restated here verbatim. */
+      :root {
+        --bg: #0e1117;
+        --surface: #1a1d24;
+        --border: #2a2e37;
+        --text: #e6e9ef;
+        --gray: #8a91a0;
+        --gold: #c9a227;
+        --primary: #2e6be6;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        font-family: "IBM Plex Sans", system-ui, sans-serif;
+        color: var(--text);
+        overflow: visible;
+      }
+      #chart {
+        width: 100%;
+      }
+      .cst-card {
+        position: absolute;
+        z-index: 20;
+        width: 232px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 10px 12px;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+        pointer-events: auto;
+        font-size: 13px;
+        line-height: 1.35;
+      }
+      .cst-hidden {
+        display: none;
+      }
+      .cst-head {
+        display: flex;
+        gap: 9px;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+      .cst-shot {
+        flex: 0 0 auto;
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        background: var(--border);
+        color: var(--gray);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 600;
+        font-size: 12px;
+      }
+      .cst-name {
+        font-weight: 600;
+      }
+      .cst-leg {
+        color: var(--gray);
+        font-size: 12px;
+      }
+      .cst-stats {
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 12px;
+        margin-bottom: 8px;
+      }
+      .cst-kelly {
+        color: var(--gold);
+      }
+      .cst-scar {
+        border: 1px dashed var(--border);
+        color: var(--gray);
+        border-radius: 4px;
+        padding: 7px;
+        text-align: center;
+        font-size: 11px;
+        margin-bottom: 8px;
+      }
+      .cst-btn {
+        width: 100%;
+        background: var(--primary);
+        color: #fff;
+        border: none;
+        border-radius: 4px;
+        padding: 6px 10px;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 12px;
+      }
+      .cst-btn:hover {
+        filter: brightness(1.08);
+      }
+      /* Phase M docked tap card: on touch the hover card becomes a full-width sheet
+         pinned to the iframe's bottom edge (thumb zone). Same tokens, new geometry. */
+      .cst-card.cst-docked {
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        bottom: 8px;
+        top: auto;
+        width: auto;
+        z-index: 30;
+      }
+      .cst-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .cst-actions .cst-btn {
+        flex: 1;
+      }
+      .cst-btn.cst-toggle {
+        background: transparent;
+        color: var(--gold);
+        border: 1px solid var(--gold);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="chart"></div>
+    <div id="card" class="cst-card cst-hidden" aria-hidden="true"></div>
+    <script src="./main.js"></script>
+  </body>
+</html>
