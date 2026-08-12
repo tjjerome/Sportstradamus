@@ -81,7 +81,7 @@ pylint = "^3.2"          # duplicate-code detector only; see [tool.pylint.*]
 # exact-pin: playwright ships a browser revision per release, and 1.60.0 is what
 # ~/.cache/ms-playwright already holds (chromium-1228). A caret would float the venv
 # onto a release wanting a different revision -> a 280 MB re-download.
-playwright = "1.60.0"
+playwright = "1.62.0"
 
 
 [[tool.poetry.source]]
