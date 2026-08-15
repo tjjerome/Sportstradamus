@@ -6,6 +6,10 @@ versions follow [SemVer](https://semver.org/). Detail lives in git history.
 ## [Unreleased]
 
 ### Changed
+- Dependency bumps: numpy 2.3.5, optuna 4.9, shap 0.49.1, mypy 2.3, playwright 1.62,
+  optuna-dashboard 0.20; CI actions checkout/setup-python to v7. The Optuna 4 move
+  swaps the sweep's journal storage to `JournalFileBackend`; existing journals resume.
+- torch stays at 2.9.1 — lightgbmlss 0.6.1 caps it below 2.10.
 - Parlay history is now one parquet per game date (`data/runtime/parlay_hist/`);
   prophecize and reflect rewrite only the days they touch instead of the whole
   multi-million-row file (43% of a warm prophecize run, line-profiled). The old
