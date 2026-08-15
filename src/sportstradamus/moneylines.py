@@ -15,7 +15,9 @@ the dedicated high-limit ``odds_api_max`` backfill key (the free tier has
 no history), while live confer/close-lines stay on ``odds_api``/``odds_api_plus``.
 
 Credit budgeting — the usage ledger and the broad-run pacing governor —
-lives in ``sportstradamus.helpers.odds_budget``.
+lives in ``sportstradamus.helpers.odds_budget``. Game lines are decoupled
+from props admission: they are bought for the whole live slate whenever
+the close-lines floor holds, even on runs where props fit nothing.
 
 The ``--close-lines`` flag swaps the broad pipeline for a cheap targeted
 pass: it reads ``data/upcoming_events.json`` (refreshed by every broad
@@ -230,11 +232,14 @@ def _classify_league_activity(key, sports):
 def _resolve_broad_run_leagues(keys, cli_log):
     """Probe the sports index and decide which leagues a broad run may fetch.
 
-    Returns ``(leagues, skip_run)``: ``leagues`` is ``None`` for an
-    unrestricted run (probe failure, or the governor not enforcing) or the
-    governor's allowed-leagues tuple; ``skip_run`` is ``True`` only when
-    enforcement is on and nothing is admitted (floor reserve exhausted, or
-    every league idle).
+    Returns ``(props_leagues, gameline_leagues, skip_run)``. The two tuples
+    are independent admissions: props are paced per slot, while game lines
+    (3 credits/league) cover the whole live slate whenever the close-lines
+    floor holds — a props ``no_fit`` run becomes a cheap gameline-only run
+    instead of a full skip. Both tuples are ``None`` for an unrestricted run
+    (probe failure, or the governor not enforcing); ``skip_run`` is ``True``
+    only when enforcement is on and both are empty (every league idle, or
+    the close-lines floor breached).
     """
     # The sports index is a free endpoint; its quota headers feed the governor.
     res = _get_with_retry(ODDS_API_SPORTS_URL, params={"apiKey": keys["odds_api_plus"]})
@@ -242,16 +247,16 @@ def _resolve_broad_run_leagues(keys, cli_log):
         cli_log.warning(
             "budget probe failed, proceeding ungoverned", extra={"status": res.status_code}
         )
-        return None, False
+        return None, None, False
 
     active = [s for s in res.json() if _active_in_scope(s)]
     remaining = int(res.headers["X-Requests-Remaining"])
     cfg = odds_budget.BUDGET_CFG
     tiers = _classify_league_activity(keys["odds_api_plus"], active)
     now = datetime.now(pytz.utc)
-    floor_per_day, league_costs = odds_budget.estimate_costs(now, cfg)
+    floor_per_day, league_costs, last_paid = odds_budget.estimate_costs(now, cfg)
     decision = odds_budget.broad_run_allowance(
-        now, remaining, tiers, floor_per_day, league_costs, cfg
+        now, remaining, tiers, floor_per_day, league_costs, last_paid, cfg
     )
     cli_log.info(
         "budget decision",
@@ -259,6 +264,7 @@ def _resolve_broad_run_leagues(keys, cli_log):
             "enforce": cfg["enforce"],
             "tiers": tiers,
             "allowed": list(decision.allowed_leagues),
+            "gameline": list(decision.gameline_leagues),
             "reason": decision.reason,
             "reserve": round(decision.reserve),
             "per_slot": round(decision.per_slot),
@@ -267,11 +273,13 @@ def _resolve_broad_run_leagues(keys, cli_log):
             "floor_per_day": round(floor_per_day),
         },
     )
-    if cfg["enforce"] and not decision.allowed_leagues:
+    if cfg["enforce"] and not decision.allowed_leagues and not decision.gameline_leagues:
         # Exit 0: a governor skip is success, not a healthchecks FAIL.
         cli_log.info("budget skip: nothing admitted", extra={"reason": decision.reason})
-        return None, True
-    return (decision.allowed_leagues if cfg["enforce"] else None), False
+        return None, None, True
+    if cfg["enforce"]:
+        return decision.allowed_leagues, decision.gameline_leagues, False
+    return None, None, False
 
 
 @click.command()
@@ -322,10 +330,10 @@ def confer(close_lines: bool, fixture_dir: Path | None, log_level: str):
         cli_log.info("run usage", extra=odds_budget.run_summary())
         return
 
-    leagues = None
+    props_leagues = gameline_leagues = None
     if fixture_dir is None:
         odds_budget.set_run_context("broad")
-        leagues, skip_run = _resolve_broad_run_leagues(keys, cli_log)
+        props_leagues, gameline_leagues, skip_run = _resolve_broad_run_leagues(keys, cli_log)
         if skip_run:
             return
 
@@ -333,20 +341,24 @@ def confer(close_lines: bool, fixture_dir: Path | None, log_level: str):
     logger.info("Archive loaded")
 
     if fixture_dir is None:
-        archive = get_moneylines(archive, keys, leagues=leagues)
+        archive = get_moneylines(archive, keys, leagues=gameline_leagues)
+        # Flush now so staged game lines survive a props-phase exception.
+        archive.write()
         logger.info("Game data complete")
 
-    archive = get_props(
-        archive,
-        keys["odds_api_plus"],
-        stat_map["Odds API"],
-        fixture_dir=fixture_dir,
-        leagues=leagues,
-    )
-    logger.info("Player data complete, writing to file...")
+    # None (ungoverned or fixture mode) must run; only the governor's explicit () skips.
+    if props_leagues != ():
+        archive = get_props(
+            archive,
+            keys["odds_api_plus"],
+            stat_map["Odds API"],
+            fixture_dir=fixture_dir,
+            leagues=props_leagues,
+        )
+        logger.info("Player data complete, writing to file...")
 
-    archive.write()
-    logger.info("Success!")
+        archive.write()
+        logger.info("Success!")
     cli_log.info("run usage", extra=odds_budget.run_summary())
 
 
@@ -495,6 +507,7 @@ def get_moneylines(
     for sport, league in sports:
         res = _get_with_retry(url_template.format(sport=sport), params=params)
         if res.status_code != HTTPStatus.OK:
+            logger.warning(f"moneylines: {league} ({sport}) returned status {res.status_code}")
             continue
         games = res.json()["data"] if historical else res.json()
         for game in tqdm(games, desc=f"Getting {league} Game Data", unit="game"):
@@ -587,6 +600,7 @@ def _fetch_event_odds(req, sport, event_id, region_markets):
         if res.status_code == HTTPStatus.NOT_FOUND:
             return False
         if res.status_code != HTTPStatus.OK:
+            logger.warning(f"props: {sport} {event_id} {region} returned status {res.status_code}")
             continue
         payload = res.json()["data"] if req.historical else res.json()
         merged = merged or payload
@@ -607,6 +621,7 @@ def _store_sport_props(archive, ledger, sport, league, props, date, req, observe
     fetch_params = {**req.params, "markets": ",".join(props[league])}
     events = _get_with_retry(req.event_url_template.format(sport=sport), params=fetch_params)
     if events.status_code != HTTPStatus.OK:
+        logger.warning(f"props: {league} events feed returned status {events.status_code}")
         return True
 
     for event in events.json()["data"] if req.historical else events.json():
@@ -843,9 +858,11 @@ def _event_spread_book(market, book, game, spread_home, spread_away):
 
 def _write_event_totals(archive, game, league, gameDate, totals, spread_home, spread_away):
     """Write the totals team buckets, blending in the parsed spreads."""
+    home_team = abbreviations[league].get(remove_accents(game["home_team"]))
+    away_team = abbreviations[league].get(remove_accents(game["away_team"]))
+    if home_team is None or away_team is None:
+        return
     for market in totals:
-        home_team = abbreviations[league][remove_accents(game["home_team"])]
-        away_team = abbreviations[league][remove_accents(game["away_team"])]
         # spread_home/away are keyed by spread-name; totals is keyed by book.
         # The .get(k, 0) always falls through to 0, so the written value is
         # simply total / 2. Intentional: preserve the archived behavior.

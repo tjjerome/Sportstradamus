@@ -17,11 +17,14 @@ Every governed response appends one JSON line to
 Floor invariant: the close-lines pass is the per-game floor and is never
 governed. Before a broad confer run, :func:`broad_run_allowance` reserves
 the projected floor spend to cycle end (recent close-lines cost/day x days
-left x ``floor_safety_factor``), splits what remains across the broad slots
-left in the cycle, and admits leagues in ``league_priority`` order while
-their estimated per-run cost (recent-ledger mean per league, else the
-config's ``league_seed_costs`` estimate, else ``default_league_run_cost``)
-still fits the slot share. Config lives in
+left x ``floor_safety_factor``), then a small game-line reserve — the live
+slate keeps buying cheap game lines down to the close floor even when props
+stop. The remainder is split per-slot across the broad slots left in the
+cycle, admitting props in ``league_priority`` order while each estimated
+per-run cost (recent-ledger mean per league, else the config's
+``league_seed_costs`` estimate, else ``default_league_run_cost``) still
+fits the slot share, plus a once-a-day starvation escape that lets one
+aging live league take a whole day's share. Config lives in
 ``data/config/odds_api_budget.json`` — loaded eagerly here, not by
 ``helpers.config``.
 
@@ -88,6 +91,15 @@ _SEASON_START_LEAD_DAYS = 7
 # Gamelog refresh runs from this many days before a league's next scheduled
 # game to this many days after its last one (owner-set: 10 either side).
 _UPDATE_WINDOW_DAYS = 10
+
+# /odds bills markets x regions: h2h,totals,spreads x us (see
+# moneylines._moneyline_request); keep in step with that market list.
+GAME_LINE_RUN_COST = 3
+
+# A live league unbought this long may take a whole day's slot share once: strict
+# per-slot priority otherwise starves any league whose run cost exceeds per_slot
+# forever (the 2026-07/08 MLB incident). The window doubles as the cadence limiter.
+STARVED_PROPS_AFTER_DAYS = 1.0
 
 # "unknown" so backfill scripts that import moneylines still record ledger
 # lines without tagging a run kind.
@@ -207,33 +219,46 @@ def _read_ledger(ledger: Path) -> list[tuple[datetime, str, dict]]:
     return entries
 
 
-def _league_run_means(recent: list[dict]) -> dict[str, float]:
-    """Mean cost of the broad runs that actually *bought* a league's odds.
+def _league_props_history(recent: list[dict]) -> tuple[dict[str, float], dict[str, datetime]]:
+    """Mean cost and newest timestamp of the broad runs that *bought* a league's props.
 
-    Runs costing this league nothing are excluded, and a league with no paid run
+    Only ``event_odds`` rows count as props spend: game-line rows land as
+    endpoint ``odds`` and ride broad runs even for leagues without props
+    admission, so folding them in would register a 3-credit game-line-only
+    run as a paid run and drag a starved league's props mean toward 3. Runs
+    costing this league nothing are excluded, and a league with no paid run
     in the window reports none at all so the caller keeps its seed cost. Averaging
     the free ``events`` tiering probes in instead makes the estimate measure how
     often a league was skipped rather than what it costs, which decays a starved
     league toward zero and then admits it on a price that was never real — MLB
     once read 37.5 against a true 218.5, and an out-of-season league read 0.0.
     """
+    props_rows = [
+        r for r in recent if r["kind"] == "broad" and r["league"] and r["endpoint"] == "event_odds"
+    ]
     run_totals: dict[tuple[str, str], float] = defaultdict(float)
-    for r in recent:
-        if r["kind"] == "broad" and r["league"]:
-            run_totals[(r["run"], r["league"])] += r["cost"]
+    for r in props_rows:
+        run_totals[(r["run"], r["league"])] += r["cost"]
+    paid_runs = {key: total for key, total in run_totals.items() if total > 0}
     per_league: dict[str, list[float]] = defaultdict(list)
-    for (_, league), total in run_totals.items():
-        if total > 0:
-            per_league[league].append(total)
-    return {league: sum(runs) / len(runs) for league, runs in per_league.items()}
+    for (_, league), total in paid_runs.items():
+        per_league[league].append(total)
+    means = {league: sum(runs) / len(runs) for league, runs in per_league.items()}
+    last_paid: dict[str, datetime] = {}
+    for r in props_rows:
+        if (r["run"], r["league"]) in paid_runs:
+            ts = datetime.fromisoformat(r["ts"])
+            last_paid[r["league"]] = max(ts, last_paid.get(r["league"], ts))
+    return means, last_paid
 
 
-def estimate_costs(now: datetime, cfg: dict) -> tuple[float, dict[str, float]]:
+def estimate_costs(now: datetime, cfg: dict) -> tuple[float, dict[str, float], dict[str, datetime]]:
     """Estimate spend rates from the usage ledger.
 
-    Returns ``(floor_per_day, league_costs)``: recent close-lines burn per day
-    (floored at ``floor_min_per_day``) and the mean broad-run cost per league,
-    both over the last ``estimate_window_days`` of ``odds_api_plus`` records.
+    Returns ``(floor_per_day, league_costs, last_paid)``: recent close-lines
+    burn per day (floored at ``floor_min_per_day``), the mean broad-run props
+    cost per league, and each league's newest paid-props timestamp, all over
+    the last ``estimate_window_days`` of ``odds_api_plus`` records.
     ``league_seed_costs`` from the config bootstrap leagues the ledger hasn't
     seen yet (fresh deploy, season start); a ledger mean always wins over its
     seed. Opportunistically prunes records older than the retention horizon.
@@ -245,7 +270,8 @@ def estimate_costs(now: datetime, cfg: dict) -> tuple[float, dict[str, float]]:
     recent = [r for ts, _, r in entries if ts >= window_start and r["key"] == "odds_api_plus"]
     close_total = sum(r["cost"] for r in recent if r["kind"] == "close_lines")
     floor_per_day = max(close_total / cfg["estimate_window_days"], cfg["floor_min_per_day"])
-    league_costs = {**cfg.get("league_seed_costs", {}), **_league_run_means(recent)}
+    means, last_paid = _league_props_history(recent)
+    league_costs = {**cfg.get("league_seed_costs", {}), **means}
 
     keep_cutoff = now - timedelta(days=_LEDGER_RETENTION_DAYS)
     if any(ts < keep_cutoff for ts, _, _ in entries):
@@ -254,7 +280,7 @@ def estimate_costs(now: datetime, cfg: dict) -> tuple[float, dict[str, float]]:
             f.writelines(line for ts, line, _ in entries if ts >= keep_cutoff)
         tmp.replace(ledger)
 
-    return floor_per_day, league_costs
+    return floor_per_day, league_costs, last_paid
 
 
 def classify_tier(days_to_next: float | None, previous_tier: str | None, cfg: dict) -> str | None:
@@ -357,7 +383,9 @@ class BudgetDecision(NamedTuple):
     """Outcome of the broad-run budget check."""
 
     allowed_leagues: tuple[str, ...]
-    reason: str  # "ok" | "partial" | "floor_reserve" | "no_fit" | "idle"
+    gameline_leagues: tuple[str, ...]
+    # Props admission outcome: "ok" | "partial" | "floor_reserve" | "no_fit" | "idle"
+    reason: str
     reserve: float
     per_slot: float
     spendable: float
@@ -369,28 +397,43 @@ def broad_run_allowance(
     league_tiers: dict[str, str],
     floor_per_day: float,
     league_costs: dict[str, float],
+    last_paid: dict[str, datetime],
     cfg: dict,
 ) -> BudgetDecision:
     """Decide which leagues a broad confer run may fetch within budget.
 
     ``remaining`` is the live ``X-Requests-Remaining`` header value. The
     close-lines floor to cycle end (x ``floor_safety_factor``) is reserved
-    first; the rest is split across the broad slots left in the cycle and
-    handed out while each league's estimated run cost still fits — live
-    leagues in ``league_priority`` order, then preseason leagues likewise
-    (about-to-start leagues ride the bottom of the list until opening night).
+    first, plus a small game-line reserve for the slate: game lines are the
+    cheapest product, so ``gameline_leagues`` keeps every live and preseason
+    league buying them down to the close floor, past the point props stop.
+    The rest is split across the broad slots left in the cycle and handed
+    out as props admission while each league's estimated run cost still
+    fits — live leagues in ``league_priority`` order, then preseason leagues
+    likewise (about-to-start leagues ride the bottom of the list until
+    opening night). At most one live league per run whose props have gone
+    unbought past ``STARVED_PROPS_AFTER_DAYS`` is then admitted against the
+    whole day's share instead of the single slot.
     """
+    # style: allow-complexity — flat admission policy (CC 16): reserve math, the
+    # per-slot greedy loop, and the starvation scan all share pacing state
+    # (allowed, per_slot, day_share); extracting a leg would fragment one decision.
     admit_order = [lg for lg in cfg["league_priority"] if league_tiers.get(lg) == "live"] + [
         lg for lg in cfg["league_priority"] if league_tiers.get(lg) == "preseason"
     ]
     if not admit_order:
-        return BudgetDecision((), "idle", 0.0, 0.0, 0.0)
+        return BudgetDecision((), (), "idle", 0.0, 0.0, 0.0)
     _, cycle_end = cycle_bounds(now, cfg["cycle_reset_day"])
     days_left = (cycle_end - now).total_seconds() / 86400
-    reserve = floor_per_day * days_left * cfg["floor_safety_factor"]
+    close_reserve = floor_per_day * days_left * cfg["floor_safety_factor"]
+    gameline_reserve = (
+        GAME_LINE_RUN_COST * len(admit_order) * cfg["broad_slots_per_day"] * days_left
+    )
+    reserve = close_reserve + gameline_reserve
+    gameline_leagues = tuple(admit_order) if remaining > close_reserve else ()
     spendable = remaining - reserve
     if spendable <= 0:
-        return BudgetDecision((), "floor_reserve", reserve, 0.0, spendable)
+        return BudgetDecision((), gameline_leagues, "floor_reserve", reserve, 0.0, spendable)
     per_slot = spendable / max(cfg["broad_slots_per_day"] * days_left, 1.0)
     allowance = per_slot
     allowed: list[str] = []
@@ -399,10 +442,22 @@ def broad_run_allowance(
         if cost <= allowance:
             allowed.append(league)
             allowance -= cost
+    # One escape per run: the next probe's live remaining header re-paces around it.
+    stale_cutoff = now - timedelta(days=STARVED_PROPS_AFTER_DAYS)
+    day_share = per_slot * cfg["broad_slots_per_day"]
+    for league in admit_order:
+        if league_tiers.get(league) != "live" or league in allowed:
+            continue
+        last = last_paid.get(league)
+        if last is not None and last >= stale_cutoff:
+            continue
+        if league_costs.get(league, cfg["default_league_run_cost"]) <= day_share:
+            allowed.append(league)
+            break
     if len(allowed) == len(admit_order):
         reason = "ok"
     elif allowed:
         reason = "partial"
     else:
         reason = "no_fit"
-    return BudgetDecision(tuple(allowed), reason, reserve, per_slot, spendable)
+    return BudgetDecision(tuple(allowed), gameline_leagues, reason, reserve, per_slot, spendable)
