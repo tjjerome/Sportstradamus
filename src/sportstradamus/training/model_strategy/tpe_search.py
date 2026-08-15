@@ -181,7 +181,7 @@ class CellSearchState:
 def cell_study(league: str, market: str, families: tuple[str, ...]) -> optuna.Study:
     """One resumable conditional-TPE study per cell and family pool, journalled under ``research/``.
 
-    ``multivariate=True, group=True`` is the only Optuna 3.5 configuration that models a conditional
+    ``multivariate=True, group=True`` is the only Optuna configuration that models a conditional
     space — with either off the sampler falls back to independent per-parameter sampling and cannot
     learn that a normalization value only means something under a continuous family. The journal
     lives under gitignored ``research/``, so resume state is machine-local by design.
@@ -193,10 +193,11 @@ def cell_study(league: str, market: str, families: tuple[str, ...]) -> optuna.St
     run would collide with a full-pool journal the same way. Keying on the pool starts a fresh study
     instead, and lets narrowed runs keep their own resumable state alongside the full one.
 
-    All three of those APIs are marked experimental, and each announces itself once per cell. The
-    warnings carry nothing actionable — the choices are deliberate, and the ``optuna >=3.5,<3.6``
-    pin is what stops "the interface can change in the future" from reaching us — so they are
-    silenced here rather than left to bury a real failure in a 30-cell run's output.
+    ``multivariate`` and ``group`` are still marked experimental, and each announces itself
+    once per cell. The warnings carry nothing actionable — the choices are deliberate, and
+    the ``optuna >=4.9,<5`` pin is what stops "the interface can change in the future" from
+    reaching us — so they are silenced here rather than left to bury a real failure in a
+    30-cell run's output.
     """
     _STUDY_ROOT.mkdir(parents=True, exist_ok=True)
     pool = hashlib.sha256("|".join(families).encode()).hexdigest()[:8]
@@ -207,6 +208,8 @@ def cell_study(league: str, market: str, families: tuple[str, ...]) -> optuna.St
             study_name=f"{league}__{market}__{pool}",
             direction="minimize",
             sampler=optuna.samplers.TPESampler(multivariate=True, group=True, seed=_TPE_SEED),
-            storage=optuna.storages.JournalStorage(optuna.storages.JournalFileStorage(str(path))),
+            storage=optuna.storages.JournalStorage(
+                optuna.storages.journal.JournalFileBackend(str(path))
+            ),
             load_if_exists=True,
         )
