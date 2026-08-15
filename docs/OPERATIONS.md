@@ -84,6 +84,27 @@ Restart=always
 RestartSec=5
 ```
 
+## Incident recovery
+
+Quick checks when collection or serving looks wrong:
+
+- **Governor decisions**: `grep -h "budget decision" logs/*/confer.jsonl | tail -20`
+  — per run: `tiers`, props `allowed`, `gameline` leagues, `reason`, `per_slot`,
+  `remaining`. A live league missing from `gameline` means the close-lines floor
+  itself is breached; missing from `allowed` for more than a day means the
+  starvation escape isn't firing — check its ledger cost vs `per_slot × slots`.
+- **Last paid props run per league** (from the ledger):
+  `jq -r 'select(.kind=="broad" and .endpoint=="event_odds" and .cost>0) | [.league,.ts] | @tsv' src/sportstradamus/data/runtime/odds_api_usage.jsonl | sort -k2 | awk '{last[$1]=$2} END {for (l in last) print l, last[l]}'`
+- **Poisoned odds rows**: `poetry run sportstradamus admin sweep-runaway-odds`
+  (dry-run; add `--apply` after review). Follow with `meditate --league <LG>` so
+  `fit_book_weights` refits off the cleaned archive.
+- **Withheld cell still serving**: `meditate` prunes withheld pickles weekly; a
+  missed run leaves stale pickles that `model_prob` now refuses with a
+  "withheld but pickle on disk" warning. To prune immediately:
+  `poetry run python -c "from sportstradamus.helpers.io import prune_model_pickle; print(prune_model_pickle('WNBA','PRA'))"`
+- **Diverged dispersion fit**: serving logs "dispersion_cal … pinned at its fit
+  bound" and serves the unscaled shape; retrain the cell to clear it.
+
 ## Related runbooks
 
 - [merge_archives.md](merge_archives.md) — reconcile the production and dev odds

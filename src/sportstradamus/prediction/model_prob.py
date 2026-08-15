@@ -38,6 +38,7 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
     stat_map,
+    stat_meta,
     stat_zi,
 )
 from sportstradamus.helpers.distributions import _DP_PHI_CEILING
@@ -73,6 +74,7 @@ from sportstradamus.training.model_strategy import (
 )
 from sportstradamus.training.posthoc import MEAN_STAGE, PROB_STAGE, apply_posthoc
 from sportstradamus.training.role_specs import RoleSpec, role_spec_for
+from sportstradamus.training.ship_config import WITHHELD
 from sportstradamus.training.structural_strategies import (
     AFFINE_STRATEGY,
     TWO_PART_STRATEGY,
@@ -126,6 +128,17 @@ _OWN_SCALE_FLOOR: float = 0.5
 # Below this own-scale a player has no informative history to anchor a model mean (a
 # debutant, or a position player on a foreign stat line); the clamp can't help, so drop it.
 _OWN_SCALE_MIN: float = 0.1
+
+# Training brackets the dispersion fit in scorecard._DISPERSION_C_BOUNDS = (0.1, 10.0); a value
+# pinned at either end is a diverged fit, not a measurement, and serving it rescales the
+# predictive shape up to 10x too narrow (SkewNormal pins at the floor, count families at the
+# cap) — the 2026-08 WNBA overconfident-unders vector. Local constants, not an import: the
+# scorecard/sweep modules (click, tabulate, Optuna) stay out of the serving import path. The
+# tolerances absorb float wobble around the bounds, mirroring sweep._DIVERGED_DISPERSION_CAL.
+# Known gap: DPO's train-time cap is dynamic (min(10, ceiling/max(phi))), so a DPO fit pinned
+# below 9.95 escapes detection; the in-family phi re-clip in _dispersion_calibrate bounds it.
+_DIVERGED_DISPERSION_FLOOR: float = 0.1005
+_DIVERGED_DISPERSION_CEIL: float = 9.95
 
 # Maximum scored offers retained per player after boost-distance deduplication.
 _MAX_OFFERS_PER_PLAYER: int = 3
@@ -1305,6 +1318,24 @@ def _blend_with_book(
     return base_mean
 
 
+def _serving_dispersion_cal(
+    dispersion_cal: float, skew_cal: float, cell: str
+) -> tuple[float, float]:
+    """Neutralize a diverged dispersion fit at serve time; healthy values pass through.
+
+    The skew shift resets with it: (c, s) come from the same joint fit, so a
+    pinned c means s is not trustworthy either. A skew-only cell (c == 1.0,
+    s != 0) is healthy and passes through.
+    """
+    if dispersion_cal <= _DIVERGED_DISPERSION_FLOOR or dispersion_cal >= _DIVERGED_DISPERSION_CEIL:
+        logger.warning(
+            f"{cell}: dispersion_cal {dispersion_cal:.4g} pinned at its fit bound — "
+            "diverged fit, serving unscaled shape"
+        )
+        return 1.0, 0.0
+    return dispersion_cal, skew_cal
+
+
 def _dispersion_calibrate(
     offer_df: pd.DataFrame, dist: str, dispersion_cal: float, skew_cal: float
 ) -> None:
@@ -1381,6 +1412,14 @@ def model_prob(
     market = normalize_market(league, market, platform)
     filename = market_file_slug(league, market)
     filepath = model_pickle_path(league, market)
+    # Withhold is normally enforced by meditate pruning the pickle; a missed meditate leaves
+    # a stale pickle serving a withheld cell (two weeks of WNBA PRA, 2026-08). Fail closed.
+    if stat_meta.get(league, {}).get(market, {}).get("shipped") == WITHHELD:
+        if os.path.isfile(filepath):
+            logger.warning(
+                f"{filename} withheld but pickle on disk — skipping; run meditate to prune"
+            )
+        return []
     if not os.path.isfile(filepath):
         logger.warning(f"{filename} missing")
         return []
@@ -1398,8 +1437,9 @@ def model_prob(
     cv = filedict["cv"]
     model_weight = filedict["weight"]
     temperature = filedict.get("temperature", None)
-    dispersion_cal = filedict.get("dispersion_cal", 1.0)
-    skew_cal = filedict.get("skew_cal", 0.0)
+    dispersion_cal, skew_cal = _serving_dispersion_cal(
+        filedict.get("dispersion_cal", 1.0), filedict.get("skew_cal", 0.0), filename
+    )
     shape_ceiling = filedict.get("shape_ceiling")
     dist = filedict["distribution"]
     strategy_identity = _resolve_serving_strategy(filedict, league, market)

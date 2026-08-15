@@ -43,9 +43,11 @@ Fields per cell drive shipping + training:
 
 Shipping a cell that has cleared Gate 1 is a one-field edit to
 ``stat_meta.json``: set ``shipped`` from ``"withheld"`` to ``"devel"`` (or
-``"main"`` after Gate 2 graduation). Inference never reads this file — it
-decodes the strategy from the self-describing pickle — so training config
-and inference cannot drift.
+``"main"`` after Gate 2 graduation). Inference never reads this config for
+*how* to serve — the strategy is decoded from the self-describing pickle, so
+training config and inference cannot drift — but ``model_prob`` refuses a
+cell whose ``shipped`` is :data:`WITHHELD`, a fail-closed backstop when a
+missed ``meditate`` prune leaves a stale pickle on disk.
 """
 
 from __future__ import annotations
