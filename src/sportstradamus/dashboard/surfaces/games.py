@@ -152,6 +152,10 @@ def _render_story_preloader(
     stories: pd.DataFrame, platform: str, game: str, offers: pd.DataFrame
 ) -> None:
     """Optional: pre-load a story's legs into the constellation for the chosen game."""
+    # The stories snapshot lags offers (absent until the first prophecize writes it);
+    # game_headline guards the hero the same way.
+    if stories.empty:
+        return
     sub = stories.loc[(stories["platform"] == platform) & (stories["Game"] == game)]
     if sub.empty:
         return

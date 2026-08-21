@@ -19,6 +19,7 @@ import contextlib
 import importlib
 import pkgutil
 import sys
+from types import ModuleType
 
 import pandas as pd
 
@@ -75,10 +76,32 @@ def _clear_dashboard_imports() -> dict[str, object]:
 
 
 def _restore_modules(removed: dict[str, object]) -> None:
-    """Undo :func:`_clear_dashboard_imports`: drop fresh re-imports, restore originals."""
-    for name in [m for m in list(sys.modules) if m.startswith(_CLEARED_PREFIXES)]:
+    """Undo :func:`_clear_dashboard_imports`: drop fresh re-imports, restore originals.
+
+    Restoring ``sys.modules`` alone is not enough: the fresh-import phase also
+    re-bound each fresh submodule as an *attribute* on its parent package (e.g.
+    ``sportstradamus.prediction`` on the top package — the top package survives
+    the clear, so its attribute now points at the fresh, about-to-be-discarded
+    module object). ``monkeypatch.setattr`` with a dotted-string target resolves
+    through those attributes, not ``sys.modules``, while a plain ``from x import
+    y`` resolves through ``sys.modules`` — leaving them divergent means a later
+    test patches a dead module while the code under test imports the real one.
+    So re-point every parent attribute at the restored original, and drop
+    attributes whose module was fresh-only (nothing to restore).
+    """
+    fresh = [m for m in list(sys.modules) if m.startswith(_CLEARED_PREFIXES)]
+    for name in fresh:
         del sys.modules[name]
     sys.modules.update(removed)
+    for name in set(fresh) | set(removed):
+        parent_name, _, child = name.rpartition(".")
+        parent = sys.modules.get(parent_name)
+        if parent is None:
+            continue
+        if name in sys.modules:
+            setattr(parent, child, sys.modules[name])
+        elif isinstance(getattr(parent, child, None), ModuleType):
+            delattr(parent, child)
 
 
 def _discover_dashboard_modules() -> list[str]:
