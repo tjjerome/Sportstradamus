@@ -50,7 +50,7 @@ git fetch origin && git log --oneline origin/devel -3
 ls data/recommendations/ 2>/dev/null | tail -3   # pickem-build output present?
 ls data/ledger/ 2>/dev/null                       # prior-stage artifacts
 grep -n "pickem" scripts/run_job.sh               # cron wiring state
-poetry run sportstradamus bet pickem --help                    # CLI alive
+sportstradamus bet pickem --help                    # CLI alive
 ```
 
 Known at creation: `pickem-build` is **not** in the production crontab

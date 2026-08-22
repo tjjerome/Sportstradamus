@@ -100,7 +100,7 @@ cookie" message).
 DevTools as cURL, then:
 
 ```bash
-poetry run sportstradamus fetch ctg refresh-auth /tmp/fresh.curl   # or: pbpaste | … refresh-auth -
+sportstradamus fetch ctg refresh-auth /tmp/fresh.curl   # or: pbpaste | … refresh-auth -
 ```
 
 `refresh-auth` extracts the `Authorization`/`Cookie`/`User-Agent` headers, writes

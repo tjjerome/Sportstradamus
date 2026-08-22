@@ -102,7 +102,7 @@ than the line alone. A tie passes — that is the entire point. It follows that:
 | Release surface per cell | `stat_meta.json` `shipped` (git carries flip history) |
 | Per-cell gate numbers | `data/training/model_stats.csv` (mirror of the parquet) |
 | Sweep board (per-cell best corner + gate slacks) | `data/research/strategy_research_board.csv` |
-| Live telemetry / recorded picks / graduation | `data/runtime/*.parquet` + `poetry run sportstradamus ship graduation` |
+| Live telemetry / recorded picks / graduation | `data/runtime/*.parquet` + `sportstradamus ship graduation` |
 | Served-offer snapshots the dashboard reads | `data/runtime/{current_pickem,current_offers,history}.parquet` |
 | Product-payout rules (Rivals, Ladders, multipliers) | the decision lanes (`strategies/`, `books.py`), **not** this track |
 | Lever stack, stages, per-league routing, session rules | **this doc** |
@@ -138,7 +138,7 @@ print(best.assign(pass_=best.ships).groupby('league').agg(passing=('ships','sum'
 ls -la data/training/model_stats.csv   # stale ⇒ re-run meditate before trusting
 
 # Lifecycle per (league, market): not-shipped / in-test / graduated / demoted
-poetry run sportstradamus ship graduation
+sportstradamus ship graduation
 
 # Recorded live picks (Bet populated) per league — the era-aware WS-1 spine (§6.10)
 python3 -c "
@@ -1080,7 +1080,7 @@ NFL numerator, or a live-test state.
   `f5d76a0fee5dc1229411d6f40382ee838baaf6bf4b9dbeb6c023ae4664c3a652`.
 
   ```bash
-  poetry run sportstradamus meditate --league NFL --market "passing yards" --force \
+  sportstradamus meditate --league NFL --market "passing yards" --force \
     --bypass-withholding --dist SkewNormal --target-normalization ratio_meanyr \
     --dist-training-loss crps --blending-loss-fn nll --hpo-selection loss \
     --sn-param direct --stabilization None
@@ -1108,7 +1108,7 @@ NFL numerator, or a live-test state.
   `e8b16b4e05efc712f58d8f48749cf5a06f329d9bd37f3ad99012ef2b063232b2`.
 
   ```bash
-  poetry run sportstradamus meditate --league NFL --market "passing tds" --force \
+  sportstradamus meditate --league NFL --market "passing tds" --force \
     --bypass-withholding --dist DPO --target-normalization ratio_meanyr \
     --dist-training-loss nll --blending-loss-fn nll --hpo-selection loss \
     --count-dispersion-objective pit_ks --sn-param direct --stabilization None
@@ -1592,7 +1592,7 @@ candidate match production config — identical flags on both runs; withheld cel
 ```bash
 # 0. baseline insurance + baseline deterministic run (BEFORE any code change)
 cp src/sportstradamus/data/training_data/NFL_carries.parquet /tmp/NFL_carries.cache.bak
-poetry run sportstradamus meditate --league NFL --market carries --deterministic \
+sportstradamus meditate --league NFL --market carries --deterministic \
     --bypass-withholding --target-normalization ratio_meanyr
 cp src/sportstradamus/data/test_sets/deterministic/ratio_meanyr/NFL_carries.csv \
     /tmp/NFL_carries.baseline.csv
@@ -1612,9 +1612,9 @@ M.to_parquet("src/sportstradamus/data/training_data/NFL_carries.parquet",
 EOF
 
 # 3. candidate deterministic run (identical flags) + scorecard comparison
-poetry run sportstradamus meditate --league NFL --market carries --deterministic \
+sportstradamus meditate --league NFL --market carries --deterministic \
     --bypass-withholding --target-normalization ratio_meanyr
-poetry run sportstradamus ship scorecard \
+sportstradamus ship scorecard \
     --baseline /tmp/NFL_carries.baseline.csv \
     --candidate src/sportstradamus/data/test_sets/deterministic/ratio_meanyr/NFL_carries.csv
 

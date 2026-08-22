@@ -42,8 +42,8 @@ This is the usual direction: fold the server's live rows into the dev machine.
    backup is written automatically before any in-place change:
 
    ```bash
-   poetry run sportstradamus admin merge-archives --source /tmp/prod_archive_snapshot.duckdb --dry-run
-   poetry run sportstradamus admin merge-archives --source /tmp/prod_archive_snapshot.duckdb
+   sportstradamus admin merge-archives --source /tmp/prod_archive_snapshot.duckdb --dry-run
+   sportstradamus admin merge-archives --source /tmp/prod_archive_snapshot.duckdb
    ```
 
    The dry-run prints how many rows each table would gain. The real run reports the same

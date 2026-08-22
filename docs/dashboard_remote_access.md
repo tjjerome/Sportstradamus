@@ -43,7 +43,7 @@ User=<user>
 WantedBy=multi-user.target
 ```
 
-`poetry run sportstradamus dashboard` is the canonical entry point (`sportstradamus.dashboard:run`);
+`sportstradamus dashboard` is the canonical entry point (`sportstradamus.dashboard:run`);
 it launches `streamlit run` on the package's `dashboard/app.py` with the file
 watcher off, so an unattended server never shows the "Source file changed,
 rerun?" popup. Don't point `ExecStart` at a `.py` directly — the launcher

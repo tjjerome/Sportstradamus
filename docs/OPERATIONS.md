@@ -8,11 +8,11 @@ out on the box running the jobs.
 
 ```
 morning:
-  poetry run sportstradamus confer          # pull today's lines
-  poetry run sportstradamus prophecize      # score + write dashboard snapshots
+  sportstradamus confer          # pull today's lines
+  sportstradamus prophecize      # score + write dashboard snapshots
 
 weekly (or when model accuracy drops):
-  poetry run sportstradamus meditate        # retrain stale models
+  sportstradamus meditate        # retrain stale models
 ```
 
 League activity — which leagues `confer` polls and `prophecize`/`meditate` update —
@@ -100,7 +100,7 @@ Quick checks when collection or serving looks wrong:
   starvation escape isn't firing — check its ledger cost vs `per_slot × slots`.
 - **Last paid props run per league** (from the ledger):
   `jq -r 'select(.kind=="broad" and .endpoint=="event_odds" and .cost>0) | [.league,.ts] | @tsv' src/sportstradamus/data/runtime/odds_api_usage.jsonl | sort -k2 | awk '{last[$1]=$2} END {for (l in last) print l, last[l]}'`
-- **Poisoned odds rows**: `poetry run sportstradamus admin sweep-runaway-odds`
+- **Poisoned odds rows**: `sportstradamus admin sweep-runaway-odds`
   (dry-run; add `--apply` after review). Follow with `meditate --league <LG>` so
   `fit_book_weights` refits off the cleaned archive.
 - **Withheld cell still serving**: `meditate` prunes withheld pickles weekly; a

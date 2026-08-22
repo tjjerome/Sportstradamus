@@ -55,8 +55,8 @@ Two paths — pick one (or combine):
 **Bulk: `fp-fetch discover`** — auto-populates from FP's tool registry.
 
 ```bash
-poetry run sportstradamus fetch fp discover --dry-run    # preview new entries
-poetry run sportstradamus fetch fp discover              # write them
+sportstradamus fetch fp discover --dry-run    # preview new entries
+sportstradamus fetch fp discover              # write them
 ```
 
 `discover` hits `POST /v2/ds/all/tools`, walks every published tool,
@@ -109,7 +109,7 @@ also re-shaped per mode (see `--mode` below).
 5. Register:
 
    ```bash
-   poetry run sportstradamus fetch fp import-curl /tmp/line_matchups.curl \
+   sportstradamus fetch fp import-curl /tmp/line_matchups.curl \
        --name line_matchups \
        --output-subdir team/line_matchups
    ```
@@ -149,7 +149,7 @@ overlay it onto the existing catalog entry with `--replace`:
 
 ```bash
 pbpaste > /tmp/passing_advanced.curl
-poetry run sportstradamus fetch fp import-curl /tmp/passing_advanced.curl \
+sportstradamus fetch fp import-curl /tmp/passing_advanced.curl \
     --name player_passing_advanced \
     --replace
 ```
@@ -164,9 +164,9 @@ runtime substitutor overrides it per call based on `--mode`.
 ### 3. Verify locally
 
 ```bash
-poetry run sportstradamus fetch fp list
-poetry run sportstradamus fetch fp run --week 5 --season 2025 --dry-run
-poetry run sportstradamus fetch fp run --week 5 --season 2025 --only team_line_matchups
+sportstradamus fetch fp list
+sportstradamus fetch fp run --week 5 --season 2025 --dry-run
+sportstradamus fetch fp run --week 5 --season 2025 --only team_line_matchups
 ```
 
 `run` fetches each endpoint, parses `content.rows.values` (v2
@@ -200,13 +200,13 @@ for postseason mode; the `+18` shift happens during path resolution.
 
 ```bash
 # default — one regular-season week only (REG: [N])
-poetry run sportstradamus fetch fp run --week 5 --season 2025
+sportstradamus fetch fp run --week 5 --season 2025
 
 # season-to-date through week N (REG: [1..N])
-poetry run sportstradamus fetch fp run --week 5 --season 2025 --mode season_to_date
+sportstradamus fetch fp run --week 5 --season 2025 --mode season_to_date
 
 # postseason week N (POST: [N])
-poetry run sportstradamus fetch fp run --week 1 --season 2025 --mode postseason
+sportstradamus fetch fp run --week 1 --season 2025 --mode postseason
 ```
 
 The mode rewrites `context.weeks` in the request body so FP returns
@@ -232,9 +232,9 @@ After a run, sanity-check what landed on disk against what you
 asked for:
 
 ```bash
-poetry run sportstradamus fetch fp verify --week 5 --season 2025
-poetry run sportstradamus fetch fp verify --week 5 --season 2025 --mode season_to_date
-poetry run sportstradamus fetch fp verify --week 5 --season 2025 --only player_passing_basic
+sportstradamus fetch fp verify --week 5 --season 2025
+sportstradamus fetch fp verify --week 5 --season 2025 --mode season_to_date
+sportstradamus fetch fp verify --week 5 --season 2025 --only player_passing_basic
 ```
 
 For every catalog entry the verifier:
@@ -270,7 +270,7 @@ the prompt and fail fast so Healthchecks.io pings `/fail`.
 ## Historical backfill
 
 ```bash
-poetry run sportstradamus fetch fp backfill \
+sportstradamus fetch fp backfill \
     --start-season 2021 --end-season 2024 \
     --start-week 1 --end-week 18
 ```
@@ -305,7 +305,7 @@ the environment so token-expiry failures alert via Healthchecks.io.
 
 The healthcheck alert (`/fail` ping with the last 50 log lines) quotes a `401`
 message pointing here. Refresh in one paste with
-`poetry run sportstradamus fetch fp refresh-auth /tmp/fresh.curl` (or `pbpaste | … refresh-auth -`),
+`sportstradamus fetch fp refresh-auth /tmp/fresh.curl` (or `pbpaste | … refresh-auth -`),
 then confirm with `fp-fetch run --only line_matchups`. The extract-headers,
 preserve-other-keys, redacted-preview mechanics are the shared refresh-auth flow
 documented in [data_collectors.md](data_collectors.md#auth).

@@ -24,10 +24,16 @@ git clone https://github.com/tjjerome/sportstradamus.git
 cd Sportstradamus
 poetry install
 poetry run pre-commit install   # required once — wires ruff + the smoke test into commits
+
+# Puts `sportstradamus` on PATH, which is how the docs spell every CLI example.
+ln -sf "$(poetry env info --path)/bin/sportstradamus" ~/.local/bin/sportstradamus
 ```
 
 `poetry install` pulls PyTorch CPU-only from a custom source; the first install
 downloads ~1–2 GB.
+
+The symlink covers the project CLI only — the quality gates below still run
+through `poetry run`, since `pytest` and `ruff` stay inside the venv.
 
 ### Credential and config stubs
 

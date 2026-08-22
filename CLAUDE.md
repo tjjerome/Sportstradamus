@@ -236,14 +236,18 @@ Read it once per session so you know its scope and limits.
 poetry install
 poetry run pre-commit install   # required once after clone
 
+# Required once — puts `sportstradamus` on PATH, which is how every CLI example
+# below is spelled. Dev tools (pytest, ruff) still go through `poetry run`.
+ln -sf "$(poetry env info --path)/bin/sportstradamus" ~/.local/bin/sportstradamus
+
 # CLI entry points
-poetry run sportstradamus prophecize        # prediction pipeline → dashboard snapshots
-poetry run sportstradamus confer            # fetch current odds/props
-poetry run sportstradamus meditate          # train/retrain ML models
-poetry run sportstradamus reflect           # historical parlay performance
-poetry run sportstradamus dashboard         # Streamlit dashboard
-poetry run sportstradamus bet pickem      # Underdog Power/Flex/Rivals recommendations YAML
-poetry run sportstradamus bet kelly             # re-size a recommendations YAML offline
+sportstradamus prophecize       # prediction pipeline → dashboard snapshots
+sportstradamus confer           # fetch current odds/props
+sportstradamus meditate         # train/retrain ML models
+sportstradamus reflect          # historical parlay performance
+sportstradamus dashboard        # Streamlit dashboard
+sportstradamus bet pickem       # Underdog Power/Flex/Rivals recommendations YAML
+sportstradamus bet kelly        # re-size a recommendations YAML offline
 
 # Quality gates — all three must pass before committing
 poetry run ruff check src/sportstradamus/
@@ -443,7 +447,7 @@ consult.
 touching production:
 
 ```bash
-poetry run sportstradamus ship scorecard \
+sportstradamus ship scorecard \
     --baseline data/test_sets/NBA_PTS.csv \
     --candidate /tmp/NBA_PTS_centered.csv
 ```

@@ -32,10 +32,10 @@ typically `"Last, First"`; account for that when pinning the join key below.
 ### Verify locally
 
 ```bash
-poetry run sportstradamus fetch savant list
-poetry run sportstradamus fetch savant run --season 2026 --dry-run
-poetry run sportstradamus fetch savant run --season 2026 --only player_expected_stats
-poetry run sportstradamus fetch savant verify --season 2026
+sportstradamus fetch savant list
+sportstradamus fetch savant run --season 2026 --dry-run
+sportstradamus fetch savant run --season 2026 --only player_expected_stats
+sportstradamus fetch savant verify --season 2026
 ```
 
 `--season` is the calendar year; `--date` defaults to today, so omit it for a

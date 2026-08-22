@@ -30,7 +30,7 @@ per session:
 5. Write the cookie into `creds/keys.json`:
 
    ```bash
-   poetry run sportstradamus fetch ctg refresh-auth /tmp/ctg.curl
+   sportstradamus fetch ctg refresh-auth /tmp/ctg.curl
    ```
 
    This populates `cleaningtheglass_cookie` (and `cleaningtheglass_user_agent`),
@@ -51,10 +51,10 @@ the JSON, each an `EndpointSpec` (`name`, `url`, optional `params`/`method`,
 ### 3. Verify locally
 
 ```bash
-poetry run sportstradamus fetch ctg list
-poetry run sportstradamus fetch ctg run --season 2025 --dry-run
-poetry run sportstradamus fetch ctg run --season 2025 --only player_usage
-poetry run sportstradamus fetch ctg verify --season 2025
+sportstradamus fetch ctg list
+sportstradamus fetch ctg run --season 2025 --dry-run
+sportstradamus fetch ctg run --season 2025 --only player_usage
+sportstradamus fetch ctg verify --season 2025
 ```
 
 `--season` is CTG's integer label (the 2025-26 season is `2025`, flipping in

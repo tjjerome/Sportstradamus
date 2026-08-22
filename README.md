@@ -44,7 +44,14 @@ git clone https://github.com/tjjerome/Sportstradamus.git
 cd Sportstradamus
 poetry install                  # first install downloads ~1-2 GB (CPU torch)
 poetry run pre-commit install   # wires ruff lint/format into the commit hook
+
+# Puts `sportstradamus` on PATH so the commands below work as written. The stub's
+# shebang is absolute, so it needs no venv activation and runs from any directory.
+ln -sf "$(poetry env info --path)/bin/sportstradamus" ~/.local/bin/sportstradamus
 ```
+
+That symlink shortens the project CLI only; dev tools (`pytest`, `ruff`,
+`pre-commit`) still go through `poetry run`.
 
 Create `src/sportstradamus/creds/keys.json` (the `creds/` directory is
 git-ignored — see [SECURITY.md](SECURITY.md) for the credential layout):
@@ -66,10 +73,10 @@ git-ignored — see [SECURITY.md](SECURITY.md) for the credential layout):
 Then run the pipeline once, in order:
 
 ```bash
-poetry run sportstradamus confer                   # fetch odds (~2-5 min)
-poetry run sportstradamus meditate --league NBA    # train one league (~10-30 min)
-poetry run sportstradamus prophecize               # score offers, write snapshots
-poetry run sportstradamus dashboard                # browse picks
+sportstradamus confer                   # fetch odds (~2-5 min)
+sportstradamus meditate --league NBA    # train one league (~10-30 min)
+sportstradamus prophecize               # score offers, write snapshots
+sportstradamus dashboard                # browse picks
 ```
 
 The first `meditate` downloads and caches player game logs per league; later
