@@ -107,6 +107,9 @@ Quick checks when collection or serving looks wrong:
   missed run leaves stale pickles that `model_prob` now refuses with a
   "withheld but pickle on disk" warning. To prune immediately:
   `poetry run python -c "from sportstradamus.helpers.io import prune_model_pickle; print(prune_model_pickle('WNBA','PRA'))"`
+- **Served cell failing fresh gates**: `meditate` only warns (SHIP-GATE
+  WARNINGS table at the end of the run) — demotion is manual: flip the cell to
+  `shipped: "withheld"`, or `sportstradamus ship config --branch devel --prune`.
 - **Diverged dispersion fit**: serving logs "dispersion_cal … pinned at its fit
   bound" and serves the unscaled shape; retrain the cell to clear it.
 

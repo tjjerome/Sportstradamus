@@ -426,7 +426,7 @@ def test_cell_knobs_the_corner_does_not_decide_stay_out_of_every_base_corner():
     ``pipeline.train_market`` projects the cell's runtime knobs onto ``(fixed_controls, axes)`` and
     hands the result to :func:`validate_strategy_selection`, so pinning a knob the corner does not
     decide turns every cell holding a different value into a hard training failure. Two knobs are
-    decided elsewhere: ``cli._retry_calibrated_if_g4_only`` persists ``hpo_selection=calibrated``
+    decided elsewhere: the confirm walk's calibrated fallback persists ``hpo_selection=calibrated``
     after a Gate-4-only miss (shipped cells carry it today), and the pipeline silently upgrades
     ``stabilization`` to L2 for centered SkewNormal and Mixture.
     """

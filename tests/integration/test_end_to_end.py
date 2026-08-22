@@ -140,6 +140,9 @@ def test_pipeline_smoke(
         train_market_calls.append((league, market))
 
     monkeypatch.setattr(training_cli, "train_market", stub_train_market)
+    # The per-league report() would rescan every real pickle in data/models/ and
+    # rewrite production model_stats.parquet — nothing this smoke test trained.
+    monkeypatch.setattr(training_cli, "report", lambda: None)
 
     # ``meditate`` rewrites ``data/book_weights.json`` mid-run; the
     # ``preserve_data_files`` fixture restores the original bytes on

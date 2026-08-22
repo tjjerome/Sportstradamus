@@ -1,24 +1,26 @@
-"""Golden pins for the g4-only calibrated-HPO retry orchestration in ``training.cli``.
+"""Golden pins for the g4-only calibrated-HPO retry owned by the confirm walk.
 
-The retry predicate decides when a cell that failed ship under loss-selection
-gets its one-shot ``hpo_selection="calibrated"`` retrain, and the persist helper
-pins the knob into stat_meta so the weekly warm cron keeps the selection that
-shipped. Both are pure enough to pin exhaustively here; the count closure itself
-is covered by ``tests/integration/test_calibrated_count_closure.py``.
+The retry predicate decides when a nominee that failed ship under loss-selection
+gets its one-shot ``hpo_selection="calibrated"`` retrain, and the pin helper
+persists the knob (stat_meta + the nominee's edits) so the weekly meditate keeps
+the selection that shipped. Both are pure enough to pin exhaustively here; the
+count closure itself is covered by
+``tests/integration/test_calibrated_count_closure.py``.
 """
 
 import json
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
-from sportstradamus.training import cli
-from sportstradamus.training.cli import (
+from sportstradamus.training.model_strategy import confirm
+from sportstradamus.training.model_strategy.confirm import (
     _g4_only_retry_wanted,
     _gate_passed,
-    _persist_calibrated_hpo,
+    _pin_calibrated,
+    _retry_calibrated_wanted,
 )
-from sportstradamus.training.model_strategy import confirm as model_strategy_confirm
 
 _ALL_PASS = {f"g{i}_pass": True for i in range(1, 7)}
 
@@ -97,15 +99,21 @@ def test_g4_only_retry_predicate(row, hpo_selection, zinb_mode, wanted):
     assert _g4_only_retry_wanted(row, hpo_selection, zinb_mode) is wanted
 
 
-def test_persist_calibrated_hpo_disk_and_memory(tmp_path, monkeypatch):
+def _candidate() -> dict:
+    return {"league": "NBA", "market": "FTM", "strategy_slug": "zinb", "edits": {"dist": "ZINB"}}
+
+
+def test_pin_calibrated_meta_edits_and_disk(tmp_path, monkeypatch):
     meta_path = tmp_path / "stat_meta.json"
     meta = {"NBA": {"FTM": {"dist": "ZINB", "shipped": "devel"}}}
     meta_path.write_text(json.dumps(meta, indent=4) + "\n")
-    monkeypatch.setattr(cli, "STAT_META_PATH", meta_path)
+    monkeypatch.setattr(confirm, "_STAT_META", meta_path)
+    cand = _candidate()
 
-    _persist_calibrated_hpo(meta, "NBA", "FTM")
+    _pin_calibrated(meta, cand)
 
     assert meta["NBA"]["FTM"]["hpo_selection"] == "calibrated"
+    assert cand["edits"]["hpo_selection"] == "calibrated"
     text = meta_path.read_text()
     assert text.endswith("\n")
     on_disk = json.loads(text)
@@ -114,13 +122,35 @@ def test_persist_calibrated_hpo_disk_and_memory(tmp_path, monkeypatch):
     assert '    "NBA"' in text
 
 
-def test_confirm_sync_cell_picks_up_subprocess_pin(tmp_path, monkeypatch):
-    meta_path = tmp_path / "stat_meta.json"
-    on_disk = {"NBA": {"FTM": {"dist": "ZINB", "shipped": "devel", "hpo_selection": "calibrated"}}}
-    meta_path.write_text(json.dumps(on_disk, indent=4) + "\n")
-    monkeypatch.setattr(model_strategy_confirm, "_STAT_META", meta_path)
+def test_retry_wanted_structural_never_reads_model_stats(monkeypatch):
+    monkeypatch.setattr(
+        confirm, "get_strategy", lambda slug: SimpleNamespace(is_structural=True)
+    )
+    monkeypatch.setattr(
+        confirm, "_cell_row", lambda *a: pytest.fail("structural must short-circuit")
+    )
+    assert _retry_calibrated_wanted(_candidate(), {}) is False
 
-    stale = {"NBA": {"FTM": {"dist": "ZINB", "shipped": "devel"}}}
-    model_strategy_confirm._sync_cell_from_disk(stale, "NBA", "FTM")
 
-    assert stale["NBA"]["FTM"]["hpo_selection"] == "calibrated"
+def test_retry_wanted_unreadable_model_stats(monkeypatch):
+    monkeypatch.setattr(
+        confirm, "get_strategy", lambda slug: SimpleNamespace(is_structural=False)
+    )
+
+    def _raise(*args):
+        raise OSError("no parquet")
+
+    monkeypatch.setattr(confirm, "_cell_row", _raise)
+    assert _retry_calibrated_wanted(_candidate(), {}) is False
+
+
+def test_retry_wanted_delegates_to_predicate(monkeypatch):
+    monkeypatch.setattr(
+        confirm, "get_strategy", lambda slug: SimpleNamespace(is_structural=False)
+    )
+    monkeypatch.setattr(confirm, "_cell_row", lambda *a: _row())
+    assert _retry_calibrated_wanted(_candidate(), {}) is True
+    # The cell's own persisted knobs decide, exactly as the subprocess resolved them.
+    assert _retry_calibrated_wanted(_candidate(), {"hpo_selection": "calibrated"}) is False
+    monkeypatch.setattr(confirm, "_cell_row", lambda *a: _row(distribution="ZINB"))
+    assert _retry_calibrated_wanted(_candidate(), {"zinb_mode": "hurdle"}) is False

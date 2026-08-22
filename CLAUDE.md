@@ -397,8 +397,8 @@ drift monitoring only — those CSVs no longer drive selection.
 ### Training stats (`data/training/model_stats.parquet` + `.csv` mirror)
 
 Single source of truth for per-cell training diagnostics. Written by
-`training/report.py:report()` after every `meditate` run as **one wide row
-per `(league, market)` cell**; consumed by:
+`training/report.py:report()` at the end of each league pass of a `meditate`
+run as **one wide row per `(league, market)` cell**; consumed by:
 
 * The Streamlit dashboard (`pages/7_Stats_Model_Training.py`) — tab views
   by metric family with `lifecycle_state` joined in from

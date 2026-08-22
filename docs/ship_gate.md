@@ -237,7 +237,11 @@ where `shipped` is one of `"withheld"` / `"devel"` / `"main"`:
 
 This is **default-deny**: only cells the human explicitly promotes
 (`shipped` ≠ `"withheld"`) serve. Promoting a Gate-1 passer is a
-one-line edit (`"withheld"` → `"devel"`). `generate-ship-config --branch
+one-line edit (`"withheld"` → `"devel"`). Demotion is equally manual: a
+served cell whose weekly retrain fails the fresh gates is **warned about**
+(meditate's SHIP-GATE WARNINGS table; `ship config --branch devel` repeats
+it) but keeps serving until the human flips it back to `"withheld"` (next
+meditate prunes the pickle) or runs `ship config --branch devel --prune`. `generate-ship-config --branch
 main` mutates `stat_meta.json` monthly (cron via `run_job.sh
 gate-status`) to promote graduated cells `"devel"` → `"main"` and demote
 the rest back to `"devel"`; the cron opens a PR a human merges.

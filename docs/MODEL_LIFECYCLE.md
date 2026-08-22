@@ -163,6 +163,12 @@ sportstradamus ship config --branch devel   # validates and summarizes; changes 
 
 On `devel` the server serves the model and records how it does on real settled bets.
 
+The weekly `meditate` retrains each served cell once with its persisted `stat_meta.json` config.
+A retrain that fails the fresh gates only **warns** (a SHIP-GATE WARNINGS table at the end of the
+run, echoed by `ship config --branch devel`) — the cell keeps serving until you demote it: flip
+`shipped` to `"withheld"` (the next meditate prunes the pickle) or run
+`sportstradamus ship config --branch devel --prune` for an immediate dark-out.
+
 ## 5. Graduate to main
 
 Once a cell has proven itself on live bets, `check-graduation` shows where every cell stands and
@@ -191,6 +197,8 @@ selected cell; the `auto` default honors what the cell has persisted:
 - `--blending-loss-fn` — loss minimized when fitting the model↔book blend weight.
 - `--stabilization` — per-parameter gradient damping (`MAD`/`L2`) on the scale head.
 - `--hpo-selection` — Optuna trial-selection rule: lowest CV loss vs PIT-KS-aware `calibrated`.
+  The confirm walk retries a nominee failing ship on Gate 4 alone once under `calibrated` and
+  persists the winning knob per-cell; the weekly `meditate` just trains with the persisted value.
 - `--count-dispersion-objective` — objective for the count-branch dispersion fit (`crps` vs `pit_ks`).
 - `--sn-param` — SkewNormal parametrization: `direct` vs `centered` boosting heads.
 

@@ -17,6 +17,11 @@ deterministic trials — it never ships. This module turns a ranked board into s
    pickle prune is mandatory: inference loads pickles by path and never consults ``shipped``, so
    reverting stat_meta alone would leave a failed cell serving.
 
+The walk also owns the g4-only calibrated fallback: a nominee failing ship on a near-miss Gate 4
+alone is retrained once under ``hpo_selection: "calibrated"``, and a shipping retry persists that
+pin with the cell's other edits. The weekly ``meditate`` never explores — it trains each cell once
+with whatever this walk persisted.
+
 Everything is local and uncommitted — the human reviews the ``shipped: devel`` diff and commits it.
 A whole-file ``stat_meta.json`` backup is taken before any write as the crash/abort safety net.
 """
@@ -86,7 +91,12 @@ from sportstradamus.training.model_strategy.sweep import (
     _training_matrix_path,
 )
 from sportstradamus.training.posthoc import PROB_STAGE
-from sportstradamus.training.scorecard import _supersede_headline, load_test_set, supersede_verdict
+from sportstradamus.training.scorecard import (
+    _GATE1_NONINF_MARGIN,
+    _supersede_headline,
+    load_test_set,
+    supersede_verdict,
+)
 from sportstradamus.training.ship_config import STAT_META_PATH, WITHHELD, load_stat_meta
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
@@ -152,6 +162,25 @@ _SHIP_IDENTITY_COLUMNS = [
     "strategy_matrix_hash",
     "strategy_split_fingerprint",
     "ship",
+]
+# The six ship-gate booleans in model_stats.parquet (nullable BooleanDtype; pd.NA means the
+# scorecard never ran, which counts as not passing here).
+_GATE_COLS: tuple[str, ...] = tuple(f"{g}_pass" for g in _GATES)
+# brief R3: separates the 9 addressable near-miss ledger rows from the 4 structural
+# failures at excess >= 0.049.
+_G4_RETRY_MAX_EXCESS: float = 0.010
+# brief R3: noise band on the g1 non-inferiority CI bound.
+_G1_RETRY_NOISE_BAND: float = 0.002
+# The model_stats columns the calibrated-retry predicate reads.
+_RETRY_COLUMNS = [
+    "league",
+    "market",
+    "distribution",
+    "ship",
+    "g4_pit_ks",
+    "g4_pit_ks_max",
+    "g1_brier_diff_ci_hi",
+    *_GATE_COLS,
 ]
 
 
@@ -483,18 +512,6 @@ def _atomic_write_meta(meta: dict) -> None:
     tmp.replace(_STAT_META)
 
 
-def _sync_cell_from_disk(meta: dict, league: str, market: str) -> None:
-    """Re-read one cell's stat_meta entry after a meditate subprocess shipped it.
-
-    The g4-only calibrated retry inside meditate persists ``hpo_selection`` to disk
-    from the subprocess; without this re-sync the walk's next whole-file
-    ``_atomic_write_meta`` (another cell's persist or revert) would silently erase
-    that pin from confirm's stale in-memory copy.
-    """
-    with _STAT_META.open() as fh:
-        meta[league][market] = json.load(fh)[league][market]
-
-
 def _backup_stat_meta() -> pathlib.Path:
     """Copy the whole stat_meta.json to a timestamped sibling — the crash/abort recovery point."""
     backup = _STAT_META.with_name(f"stat_meta.{time.strftime('%Y%m%dT%H%M%S')}.bak.json")
@@ -644,7 +661,7 @@ def _record_nominee_gates(league: str, market: str, candidate: dict) -> bool:
 
 def _failed_gates_after(league: str, market: str) -> list[str]:
     """The gates a just-confirmed cell fails, read from model_stats — diagnostics for the report."""
-    row = _cell_row(league, market, ["league", "market", *(f"{g}_pass" for g in _GATES)])
+    row = _cell_row(league, market, ["league", "market", *_GATE_COLS])
     if row is None:
         return ["(no model_stats row)"]
     return [g for g in _GATES if not bool(row[f"{g}_pass"])]
@@ -744,10 +761,10 @@ def _confirm_median_seconds(league: str | None = None, market: str | None = None
 
     Naming no cell asks for the all-cells median, which is what sizes the up-front confirm prompt.
 
-    Median rather than mean: ``cli._retry_calibrated_if_g4_only`` can silently run a second 300-trial
-    HPO inside one subprocess, so the durations are bimodal and a mean sits between the two modes
-    describing neither. A retrain that errored never reaches the ledger, so the estimate is blind to
-    the slowest failures — hence it is always shown as approximate.
+    Each ledger row now times exactly one meditate subprocess (a calibrated retry records its own
+    row), but a retrain that errored never reaches the ledger, so the estimate is blind to the
+    slowest failures — hence it is always shown as approximate. Median guards the estimate against
+    that skew.
     """
     if not NOMINEE_LEDGER_PATH.exists():
         return None
@@ -835,18 +852,110 @@ def _produced_artifacts_match(
     return actual == expected
 
 
-def _confirm_meditate(league: str, market: str, candidate: dict) -> list[str]:
+def _gate_passed(value) -> bool:
+    """NA-safe read of a nullable-boolean gate cell (``bool(pd.NA)`` raises)."""
+    return pd.notna(value) and bool(value)
+
+
+def _g4_only_retry_wanted(
+    row: pd.Series | None, cell_hpo_selection: str, cell_zinb_mode: str
+) -> bool:
+    """Whether a cell earns the one-shot calibrated-HPO retry.
+
+    Fires only for cells trained under ``loss`` selection whose fresh
+    model_stats row failed ship on a near-miss Gate 4, alone or with a
+    within-band Gate 1 — the dispersion-calibration failures calibrated trial
+    selection targets. Any other failing gate blocks the retry, g6 explicitly
+    included (deferred pending the Experiment C measurement, brief R3).
+    Hurdle-ZINB and Mixture are excluded: those paths have no calibrated
+    trial-selection closure.
+    """
+    if row is None or cell_hpo_selection != "loss":
+        return False
+    if row["distribution"] == "Mixture":
+        return False
+    if row["distribution"] == "ZINB" and cell_zinb_mode == "hurdle":
+        return False
+    if _gate_passed(row["ship"]) or _gate_passed(row["g4_pass"]):
+        return False
+    if not row["g4_pit_ks"] - row["g4_pit_ks_max"] <= _G4_RETRY_MAX_EXCESS:
+        return False
+    return _cofailures_within_band(row)
+
+
+def _cofailures_within_band(row: pd.Series) -> bool:
+    """Non-g4 gate failures are admissible only as exactly {g1} inside its noise band."""
+    others_failing = [c for c in _GATE_COLS if c != "g4_pass" and not _gate_passed(row[c])]
+    if others_failing == ["g1_pass"]:
+        return bool(row["g1_brier_diff_ci_hi"] - _GATE1_NONINF_MARGIN <= _G1_RETRY_NOISE_BAND)
+    return not others_failing
+
+
+def _retry_calibrated_wanted(candidate: dict, cell: dict) -> bool:
+    """Whether the just-retrained nominee earns the walk's calibrated-HPO fallback.
+
+    ``cell`` is the nominee's stat_meta entry *after* its edits — exactly what the meditate
+    subprocess resolved its knobs from. Structural corners never retry (their spec pins
+    ``hpo_selection``, and the structural stage has no calibrated trial-selection closure).
+    """
+    if get_strategy(candidate["strategy_slug"]).is_structural:
+        return False
+    try:
+        row = _cell_row(candidate["league"], candidate["market"], _RETRY_COLUMNS)
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return _g4_only_retry_wanted(
+        row, cell.get("hpo_selection", "loss"), cell.get("zinb_mode", "joint")
+    )
+
+
+def _pin_calibrated(meta: dict, candidate: dict) -> None:
+    """Pin ``hpo_selection: "calibrated"`` for the retry — in stat_meta (the rerun subprocess
+    reads it back per-cell, the same path the weekly cron uses) and in the nominee's edits (so
+    the persisted diff, the supersede promote prompt, and the report tell the truth).
+    """
+    lg, mkt = candidate["league"], candidate["market"]
+    click.echo(f"  {lg} {mkt}: g4-only ship fail — retrying with hpo_selection=calibrated")
+    meta[lg][mkt]["hpo_selection"] = "calibrated"
+    candidate["edits"]["hpo_selection"] = "calibrated"
+    _atomic_write_meta(meta)
+
+
+def _retrain_with_calibrated_retry(
+    league: str, market: str, candidate: dict, meta: dict
+) -> tuple[str, bool]:
+    """Retrain a nominee, with the walk's one-shot calibrated fallback on a g4-only near-miss.
+
+    Runs the nominee's meditate and records its ledger row; when the fresh model_stats row earns
+    the retry (:func:`_retry_calibrated_wanted`), pins the knob and reruns the identical command,
+    recording the retry as its own ledger row. Returns ``(error, diverged)`` for the run whose
+    model_stats row stands; a failed retry leaves the pin for the caller's revert to strip.
+    """
+    error = _run_meditate(league, market, candidate)
+    if error:
+        return error, False
+    diverged = _record_nominee_gates(league, market, candidate)
+    if not _retry_calibrated_wanted(candidate, meta[league][market]):
+        return "", diverged
+    _pin_calibrated(meta, candidate)
+    retry = {**candidate, "source": f"{candidate['source']} +calibrated-retry"}
+    error = _run_meditate(league, market, retry)
+    if error:
+        return error, diverged
+    return "", _record_nominee_gates(league, market, retry)
+
+
+def _confirm_meditate(league: str, market: str, candidate: dict, meta: dict) -> list[str]:
     """Withheld-path confirm: retrain, then the reasons the cell did not ship (empty means it did).
 
     Reasons rather than a bool because the legs fail for very different operator-facing causes, and a
     bare False reads on the report as a gate failure with no gate named.
     """
-    error = _run_meditate(league, market, candidate)
+    error, diverged = _retrain_with_calibrated_retry(league, market, candidate, meta)
     if error:
         return [f"retrain {error}"]
     # A diverged fit is named ahead of whatever it fails: the gates already reject it, but
     # "diverged g1 g4" sends triage to the fit rather than the anonymous gate list.
-    diverged = _record_nominee_gates(league, market, candidate)
     prefix = ["diverged"] if diverged else []
     matrix_hash = _retrained_matrix_hash(league, market)
     if matrix_hash is None:
@@ -879,9 +988,8 @@ def _confirm_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
         meta[lg][mkt].update(cand["edits"])
         meta[lg][mkt]["shipped"] = _SHIPPED_DEVEL
         _atomic_write_meta(meta)
-        failed = _confirm_meditate(lg, mkt, cand)
+        failed = _confirm_meditate(lg, mkt, cand, meta)
         if not failed:
-            _sync_cell_from_disk(meta, lg, mkt)
             keep = True
             click.secho(f"  SHIPPED (devel) {lg} {mkt}", fg="green")
             return (lg, mkt, "SHIPPED", [])
@@ -920,10 +1028,9 @@ def _supersede_one(
     try:
         meta[lg][mkt].update(cand["edits"])  # shipped left as-is; the cell stays live
         _atomic_write_meta(meta)
-        error = _run_meditate(lg, mkt, cand)
+        error, diverged = _retrain_with_calibrated_retry(lg, mkt, cand, meta)
         if error:
             return (lg, mkt, "HELD", [f"retrain {error}"])
-        diverged = _record_nominee_gates(lg, mkt, cand)
         prefix = ["diverged"] if diverged else []
         matrix_hash = _retrained_matrix_hash(lg, mkt)
         if matrix_hash is None:
@@ -945,7 +1052,6 @@ def _supersede_one(
         elif not click.confirm(f"  Promote {lg} {mkt} to {edits}?"):
             return (lg, mkt, "HELD", ["declined"])
         keep = True
-        _sync_cell_from_disk(meta, lg, mkt)
         return (lg, mkt, "SUPERSEDED", [])
     finally:
         if not keep:

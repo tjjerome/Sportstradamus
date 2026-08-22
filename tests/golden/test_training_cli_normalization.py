@@ -67,8 +67,8 @@ def test_cli_target_normalization_matches_effective_family_contract(
     monkeypatch.setattr(training_cli, "fit_book_weights", MagicMock(return_value={}))
     monkeypatch.setattr(training_cli, "correlate", MagicMock())
     monkeypatch.setattr(training_cli, "train_market", train_market)
-    monkeypatch.setattr(training_cli, "_retry_calibrated_if_g4_only", MagicMock())
-    monkeypatch.setattr(training_cli, "_enforce_ship_gate", MagicMock(return_value=0))
+    monkeypatch.setattr(training_cli, "report", MagicMock())
+    monkeypatch.setattr(training_cli, "_warn_ship_gate", MagicMock())
 
     args = ["--league", "NFL", "--market", "passing tds"]
     if bypass_withholding:

@@ -104,7 +104,6 @@ from sportstradamus.training.model_strategy import (
     get_strategy,
     validate_strategy_selection,
 )
-from sportstradamus.training.report import report
 from sportstradamus.training.role_specs import role_spec_for
 from sportstradamus.training.scorecard import (
     _gate4_pit_ks_threshold,
@@ -2449,9 +2448,9 @@ def _step_persist_artifacts(
 
     # Under --deterministic, redirect to a `deterministic/` subdir so the
     # scorecard harness can score artifacts without overwriting production.
-    # Training-data parquet and the whole-suite report() stay suppressed
-    # (input is unchanged under input-freeze; report() is not per-market and
-    # would clobber the production data/training/model_stats.{parquet,csv}).
+    # The training-data parquet stays suppressed (input is unchanged under
+    # input-freeze); the whole-suite report() runs at the CLI's league
+    # boundary and skips deterministic runs there for the same reason.
     # Test-set CSVs remain inside the package data tree; only the model
     # pickle moves to the repo-root research dir so the package install
     # never carries the research artifacts.
@@ -4769,9 +4768,6 @@ def train_market(
         test_df = splits["X_test"].copy()
         test_df["Result"] = splits["y_test"]["Result"].to_numpy()
         compute_market_importance(league, market, model, test_df)
-
-    if not deterministic and artifact_output is None:
-        report()
 
     del filedict
     del model

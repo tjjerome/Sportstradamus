@@ -147,7 +147,7 @@ def test_cli_devel_validates_and_summarizes(tmp_path):
             }
         },
     )
-    # The devel branch enforces serve-iff-ship against model_stats; without an
+    # The devel branch reports served-but-failing cells against model_stats; without an
     # explicit fixture the CLI reads the real production parquet.
     ms = tmp_path / "ms.parquet"
     pd.DataFrame([{"league": "NBA", "market": "PTS", "ship": True}]).to_parquet(
@@ -158,6 +158,22 @@ def test_cli_devel_validates_and_summarizes(tmp_path):
     assert result.exit_code == 0, result.output
     assert "active=1" in result.output
     assert "withheld=1" in result.output
+    assert meta_path.read_text() == before
+
+
+def test_cli_devel_warns_on_failing_served_cell_without_failing(tmp_path):
+    """A served cell with ship=False is reported, not fatal — the cull is the human's decision."""
+    meta_path = tmp_path / "stat_meta.json"
+    _write(meta_path, {"NBA": {"PTS": _meta_cell("SkewNormal", "devel", "ratio_meanyr")}})
+    ms = tmp_path / "ms.parquet"
+    pd.DataFrame([{"league": "NBA", "market": "PTS", "ship": False}]).to_parquet(
+        ms, engine="pyarrow", index=False
+    )
+    before = meta_path.read_text()
+    result = _invoke(["--branch", "devel", "--meta", str(meta_path), "--model-stats", str(ms)])
+    assert result.exit_code == 0, result.output
+    assert "WARN NBA/PTS" in result.output
+    assert "1 served cell(s) fail the ship gate" in result.output
     assert meta_path.read_text() == before
 
 

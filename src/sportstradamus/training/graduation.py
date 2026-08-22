@@ -230,11 +230,12 @@ def served_cells_failing_ship(
 ) -> list[tuple[str, str]]:
     """Return ``(league, market)`` cells marked ``shipped`` devel/main yet failing ship.
 
-    A cell may serve only when its ``model_stats`` row clears all five offline
-    gates (``ship == True``; see ``training.scorecard``). This is the invariant
-    the ``generate-ship-config --branch devel`` guard and the golden test both
-    enforce. A missing parquet or an ``NA`` ``ship`` (no scored evidence) is not
-    a failure — only an explicit ``ship == False`` demotes.
+    Feeds the two warning surfaces — meditate's post-run table and the
+    ``generate-ship-config --branch devel`` summary — that tell the human which
+    served cells fail the offline gates (``ship == False``; see
+    ``training.scorecard``); the cull itself is a manual decision. A missing
+    parquet or an ``NA`` ``ship`` (no scored evidence) is not a failure — only
+    an explicit ``ship == False`` flags.
     """
     if not model_stats_path.exists():
         return []

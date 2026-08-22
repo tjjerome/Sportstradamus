@@ -86,13 +86,21 @@ def _no_seed_corners(monkeypatch):
     monkeypatch.setattr(mc, "_seed_corners", lambda context: [])
 
 
-def _fake_meta_disk(monkeypatch, tmp_path):
-    """Route ``_atomic_write_meta`` to a tmp ``_STAT_META`` file.
+@pytest.fixture(autouse=True)
+def _no_calibrated_retry(monkeypatch):
+    """Keep the walk's calibrated fallback out of unrelated tests.
 
-    The ship path re-reads the cell from disk after the meditate subprocess
-    (``_sync_cell_from_disk`` — the subprocess may have pinned ``hpo_selection``),
-    so a bare no-op write mock would make the sync read the real repo file and
-    clobber the in-memory candidate. Returns the write-call list.
+    The real predicate reads the production ``MODEL_STATS_PATH``; the retry tests below patch
+    it back to a truthy stub.
+    """
+    monkeypatch.setattr(mc, "_retry_calibrated_wanted", lambda candidate, cell: False)
+
+
+def _fake_meta_disk(monkeypatch, tmp_path):
+    """Route ``_atomic_write_meta`` to a tmp ``_STAT_META`` file and return the write-call list.
+
+    Keeps every persist — including the calibrated-retry pin, the only mid-walk write besides a
+    nominee's own edits — off the repo's committed stat_meta.json.
     """
     meta_file = tmp_path / "stat_meta.json"
     monkeypatch.setattr(mc, "_STAT_META", meta_file)
@@ -871,7 +879,7 @@ def test_a_gate_miss_is_reported_as_the_gate_not_a_missing_artifact(monkeypatch)
         lambda *args: pytest.fail("a gate miss must not be diagnosed through the pruned pickle"),
     )
 
-    assert mc._confirm_meditate("WNBA", "AST", candidate) == ["g4"]
+    assert mc._confirm_meditate("WNBA", "AST", candidate, {"WNBA": {"AST": {}}}) == ["g4"]
 
 
 def test_confirm_meditate_prepends_diverged_to_the_failed_gates(monkeypatch):
@@ -880,17 +888,18 @@ def test_confirm_meditate_prepends_diverged_to_the_failed_gates(monkeypatch):
     alone never blocks a ship (the gates already decide).
     """
     candidate = _nominate(_sn_row("ratio_meanyr", "crps", "nll", True, 0.2))[0]
+    meta = {"WNBA": {"AST": {}}}
     monkeypatch.setattr(mc, "_run_meditate", lambda *args: "")
     monkeypatch.setattr(mc, "_record_nominee_gates", lambda *args: True)
     monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
     monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: ["g1", "g4"])
 
-    assert mc._confirm_meditate("WNBA", "AST", candidate) == ["diverged", "g1", "g4"]
+    assert mc._confirm_meditate("WNBA", "AST", candidate, meta) == ["diverged", "g1", "g4"]
 
     monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: [])
     monkeypatch.setattr(mc, "_produced_artifacts_match", lambda *args: True)
     monkeypatch.setattr(mc, "_ship_from_model_stats", lambda *args: True)
-    assert mc._confirm_meditate("WNBA", "AST", candidate) == []
+    assert mc._confirm_meditate("WNBA", "AST", candidate, meta) == []
 
 
 def test_record_nominee_gates_marks_dispersion_floor_as_diverged(monkeypatch, tmp_path):
@@ -960,7 +969,15 @@ def test_confirm_accepts_a_retrain_whose_force_update_moved_the_matrix(monkeypat
 
     monkeypatch.setattr(mc, "_produced_artifacts_match", artifacts_match)
 
-    assert mc._confirm_meditate(candidate["league"], candidate["market"], candidate) == []
+    assert (
+        mc._confirm_meditate(
+            candidate["league"],
+            candidate["market"],
+            candidate,
+            {candidate["league"]: {candidate["market"]: {}}},
+        )
+        == []
+    )
     # The pickle leg is held to the retrain's matrix too, so a stale artifact still fails there.
     assert seen["matrix_hash"] == retrained_hash
 
@@ -977,7 +994,9 @@ def test_withheld_confirm_fails_closed_before_model_stats_when_artifacts_do_not_
         "_ship_from_model_stats",
         lambda *args: pytest.fail("unverified artifacts must never reach the ship verdict"),
     )
-    assert mc._confirm_meditate("WNBA", "AST", candidate) == ["artifact identity"]
+    assert mc._confirm_meditate("WNBA", "AST", candidate, {"WNBA": {"AST": {}}}) == [
+        "artifact identity"
+    ]
 
 
 # --- persist / confirm / revert --------------------------------------------------------------
@@ -987,7 +1006,7 @@ def test_confirm_one_pass_keeps_devel(monkeypatch, tmp_path):
     meta = {"WNBA": {"AST": _sn_original()}}
     writes = _fake_meta_disk(monkeypatch, tmp_path)
     monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
-    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt, candidate: [])
+    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt, candidate, meta: [])
     pruned = []
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)))
 
@@ -1026,7 +1045,7 @@ def test_confirm_one_fail_reverts_stat_meta_and_prunes_pickle(monkeypatch):
         current_meta[lg][mkt] = prior
 
     monkeypatch.setattr(mc, "_restore_cell", restore)
-    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt, candidate: ["g4"])
+    monkeypatch.setattr(mc, "_confirm_meditate", lambda lg, mkt, candidate, meta: ["g4"])
     pruned = []
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)) or True)
     monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: ["g4"])
@@ -1063,7 +1082,7 @@ def test_confirm_one_exception_restores_once_after_single_candidate_transition(
     monkeypatch.setattr(
         mc,
         "_confirm_meditate",
-        lambda lg, mkt, candidate: (_ for _ in ()).throw(RuntimeError("boom")),
+        lambda lg, mkt, candidate, meta: (_ for _ in ()).throw(RuntimeError("boom")),
     )
     pruned = []
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)))
@@ -1080,6 +1099,69 @@ def test_confirm_one_exception_restores_once_after_single_candidate_transition(
     assert states[0]["WNBA"]["AST"]["shipped"] == "devel"
     assert states[1]["WNBA"]["AST"] == original
     assert meta["WNBA"]["AST"] == original
+    assert pruned == [("WNBA", "AST")]
+
+
+def test_confirm_one_retry_ships_and_persists_the_pin(monkeypatch, tmp_path):
+    """A g4-only near-miss nominee retries once under calibrated; a shipping retry persists the
+    pin in stat_meta AND in the edits the report/diff shows."""
+    meta = {"WNBA": {"AST": _sn_original()}}
+    writes = _fake_meta_disk(monkeypatch, tmp_path)
+    monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
+    runs = []
+    monkeypatch.setattr(mc, "_run_meditate", lambda lg, mkt, cand: runs.append(cand["source"]) or "")
+    monkeypatch.setattr(mc, "_record_nominee_gates", lambda lg, mkt, cand: False)
+    monkeypatch.setattr(mc, "_retry_calibrated_wanted", lambda cand, cell: len(runs) == 1)
+    monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
+    monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: [])
+    monkeypatch.setattr(mc, "_candidate_identity", lambda cand, matrix_hash: None)
+    monkeypatch.setattr(mc, "_produced_artifacts_match", lambda *args: True)
+    monkeypatch.setattr(mc, "_ship_from_model_stats", lambda *args: True)
+    monkeypatch.setattr(
+        mc, "prune_model_pickle", lambda lg, mkt: pytest.fail("a shipped retry must not prune")
+    )
+
+    cand = {
+        "league": "WNBA",
+        "market": "AST",
+        "source": "board slack +0.300",
+        "strategy_slug": "SkewNormal",
+        "edits": {"target_normalization": "centered_additive_mean10"},
+    }
+    assert mc._confirm_one(meta, cand) == ("WNBA", "AST", "SHIPPED", [])
+    assert runs == ["board slack +0.300", "board slack +0.300 +calibrated-retry"]
+    assert meta["WNBA"]["AST"]["hpo_selection"] == "calibrated"
+    assert cand["edits"]["hpo_selection"] == "calibrated"
+    assert len(writes) == 2  # the nominee's persist + the retry pin
+
+
+def test_confirm_one_retry_failure_reverts_the_pin(monkeypatch, tmp_path):
+    """A retry that still fails reverts like any loser — the pin leaves stat_meta with the rest
+    of the nominee's edits and the pickle is pruned."""
+    original = _sn_original()
+    meta = {"WNBA": {"AST": dict(original)}}
+    _fake_meta_disk(monkeypatch, tmp_path)
+    monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
+    monkeypatch.setattr(mc, "_cell_artifacts", lambda lg, mkt: [])
+    runs = []
+    monkeypatch.setattr(mc, "_run_meditate", lambda lg, mkt, cand: runs.append(cand["source"]) or "")
+    monkeypatch.setattr(mc, "_record_nominee_gates", lambda lg, mkt, cand: False)
+    monkeypatch.setattr(mc, "_retry_calibrated_wanted", lambda cand, cell: len(runs) == 1)
+    monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
+    monkeypatch.setattr(mc, "_failed_gates_after", lambda lg, mkt: ["g4"])
+    pruned = []
+    monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: pruned.append((lg, mkt)) or True)
+
+    cand = {
+        "league": "WNBA",
+        "market": "AST",
+        "source": "seed/incumbent",
+        "strategy_slug": "SkewNormal",
+        "edits": {"target_normalization": "centered_additive_mean10"},
+    }
+    assert mc._confirm_one(meta, cand) == ("WNBA", "AST", "REVERTED", ["g4"])
+    assert len(runs) == 2  # loss attempt + calibrated retry
+    assert meta["WNBA"]["AST"] == original  # the pin reverted with everything else
     assert pruned == [("WNBA", "AST")]
 
 
@@ -1135,7 +1217,7 @@ def test_walk_nominees_reverts_a_loser_before_the_next_nominee_persists(monkeypa
     monkeypatch.setattr(
         mc,
         "_confirm_meditate",
-        lambda lg, mkt, cand: (
+        lambda lg, mkt, cand, meta: (
             confirmed.append(cand["source"]) or ([] if len(confirmed) > 1 else ["g4"])
         ),
     )
@@ -1182,7 +1264,7 @@ def test_run_confirm_yes_persists_and_confirms(monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(
         mc,
         "_confirm_meditate",
-        lambda lg, mkt, cand: confirmed.append(cand["source"]) or [],
+        lambda lg, mkt, cand, meta: confirmed.append(cand["source"]) or [],
     )
     monkeypatch.setattr(mc, "prune_model_pickle", lambda lg, mkt: False)
 
@@ -1626,6 +1708,26 @@ def test_supersede_pass_and_yes_keeps_candidate(monkeypatch):
     assert result[:3] == ("NBA", "PTS", "SUPERSEDED")
     assert restored == []  # winning candidate kept in place
     assert pruned == []
+
+
+def test_supersede_retry_pins_calibrated_into_the_promoted_edits(monkeypatch):
+    """The live lane gets the same fallback; a shipping retry's pin reaches the promote prompt."""
+    meta = _shipped_meta()
+    restored, pruned = _patch_supersede_io(monkeypatch, verdict=_verdict(ship=True))
+    runs = []
+    monkeypatch.setattr(mc, "_run_meditate", lambda lg, mkt, cand: runs.append(cand["source"]) or "")
+    monkeypatch.setattr(mc, "_retry_calibrated_wanted", lambda cand, cell: len(runs) == 1)
+    prompts = []
+    monkeypatch.setattr(mc.click, "confirm", lambda msg, **k: prompts.append(msg) or True)
+
+    cand = _supersede_cand()
+    result = mc._supersede_one(meta, cand)
+    assert result[:3] == ("NBA", "PTS", "SUPERSEDED")
+    assert len(runs) == 2
+    assert cand["edits"]["hpo_selection"] == "calibrated"
+    assert meta["NBA"]["PTS"]["hpo_selection"] == "calibrated"
+    assert "hpo_selection=calibrated" in prompts[0]
+    assert restored == [] and pruned == []
 
 
 def test_supersede_auto_promote_swaps_without_prompting(monkeypatch, capsys):

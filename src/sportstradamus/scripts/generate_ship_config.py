@@ -177,15 +177,18 @@ def main(branch, prune, meta, model_stats, live_metrics, dry_run) -> None:
             f"# branch=devel: active={n_active} withheld={n_withheld} "
             f"(stat_meta.json validated; no mutation)"
         )
+        # Report-only, like the free-passer sweep below: the weekly meditate warns on the
+        # same cells and the human owns the cull decision (flip shipped=withheld, or --prune).
         failing = served_cells_failing_ship(meta_map, model_stats_path)
         if failing:
             for lg, mk in failing:
                 click.echo(
-                    f"  ERROR {lg}/{mk}: shipped on devel but ship=False (offline gates fail)"
+                    f"  WARN {lg}/{mk}: shipped on devel but ship=False (offline gates fail)"
                 )
-            raise click.ClickException(
-                f"{len(failing)} served cell(s) fail the ship gate; "
-                "demote each to shipped=withheld in stat_meta.json"
+            click.secho(
+                f"# {len(failing)} served cell(s) fail the ship gate — cull by flipping "
+                "shipped=withheld in stat_meta.json (add --prune for immediate dark-out)",
+                fg="yellow",
             )
 
     # Free-passer sweep (report-only): cells the offline gate now passes that are

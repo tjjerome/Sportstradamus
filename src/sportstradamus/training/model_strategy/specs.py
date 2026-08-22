@@ -103,11 +103,12 @@ _POSTHOC = (
 # ``none`` while carrying a different fingerprint.
 _POSTHOC_SKEWNORMAL = (*_POSTHOC, "cdf_recal_isotonic")
 # A base spec deliberately leaves ``hpo_selection`` and ``stabilization`` out of its corner. Neither
-# value is decided by the corner: ``cli._retry_calibrated_if_g4_only`` flips a cell to ``calibrated``
-# and persists it after a Gate-4-only failure (8 cells carry it today, 6 of them shipped), and the
-# pipeline silently upgrades ``stabilization`` to L2 for centered SkewNormal and Mixture. Pinning
-# either would sign a value the run did not train with and would make every such cell fail
-# ``validate_strategy_selection``. A structural spec is different — it pins the entire recipe.
+# value is decided by the corner: the confirm walk's calibrated fallback flips a cell to
+# ``calibrated`` and persists it after a Gate-4-only failure (8 cells carry it today, 6 of them
+# shipped), and the pipeline silently upgrades ``stabilization`` to L2 for centered SkewNormal and
+# Mixture. Pinning either would sign a value the run did not train with and would make every such
+# cell fail ``validate_strategy_selection``. A structural spec is different — it pins the entire
+# recipe.
 
 # With the class unlocked a count corner can win on a cell whose stat_meta carries a continuous
 # normalization; persisting ``none`` alongside keeps ship_config._validate_cell satisfied.

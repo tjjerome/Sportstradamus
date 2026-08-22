@@ -540,7 +540,11 @@ calls the automation cannot fully encode still need an operator:
    default. Neither clears ⇒ route to §6.1 Rung C / §6.6. (Worked example — the PA/PR/DREB
    re-confirm: PR shipped *only* under calibrated, g4 0.0516 → 0.0423, and carries the persisted
    field; PA was a calibrated no-op — fallback fired, g4 ≈ 0.058 either way — and DREB a 0.0508
-   near-miss, both held.)
+   near-miss, both held.) The loss→calibrated direction is now automated in the walk: a nominee
+   failing ship on a g4-only near-miss is retried once under `calibrated` and a shipping retry
+   persists the pin (`confirm._retrain_with_calibrated_retry`); the calibrated-*first* doctrine
+   above stays manual — automating it would double every SkewNormal nominee's cost. The weekly
+   `meditate` never retries; it trains each cell once with the persisted knob.
 
 3. **Supersede shipped cells (S1+S2+S3).** `--include-shipped` routes a shipped cell through the
    higher §7.1 bar — a shipped cell may have a better corner than the scale-only default it
