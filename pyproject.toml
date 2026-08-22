@@ -13,6 +13,11 @@ python = ">=3.11,<3.12"
 mlb-statsapi = ">=1.6.1"
 nba-api = ">=1.11.4"
 nfl-data-py = ">=0.3.2"
+# Held below 2.0 by the centered SkewNormal head, whose hessian overflows float32 on
+# some draws and stops boosting early wherever it first goes inf. numpy 2 perturbs the
+# arithmetic enough to move that point around; the suite tolerates the wobble now, so
+# this is no longer a red-CI blocker, just an unstabilized cliff nobody should step
+# closer to for a non-security bump. Fix the overflow, then lift this.
 numpy = ">=1.24.3,<2.0.0"
 pandas = ">=2.0.1"
 protobuf = ">=4.23.0"
@@ -31,8 +36,11 @@ tqdm = ">=4.65.0"
 click = "^8.1.3"
 pytz = "^2023.3"
 scikit-learn = ">=1.5.0,<1.8.0"
-shap = "==0.45.1"
+shap = "==0.49.1"
 lightgbmlss = ">=0.6"
+# Held at 2.9.1 by lightgbmlss 0.6.1 (its latest release), which declares torch<2.10.
+# That strands four low-severity advisories needing >=2.10; none reach us, as nothing
+# here calls torch.jit.script or torch.lstm_cell. Revisit when lightgbmlss ships again.
 torch = {version = "2.9.1", source = "pytorch_cpu"}
 # The download.pytorch.org CPU wheel doesn't declare sympy, but torch._dynamo
 # imports it (hit via the centered-SN head). Declared so a locked install has it.
@@ -71,17 +79,17 @@ lightgbm = ">=4.6.0,<4.7.0"
 pytest = "^9.0.3"
 pytest-xdist = "^3.6"
 matplotlib = "^3.7.1"
-optuna = ">=3.5.0,<3.6.0"
-optuna-dashboard = "^0.10.2"
+optuna = ">=4.9.0,<5.0.0"
+optuna-dashboard = "^0.20.0"   # 0.10.x predates Optuna 4 but only floors optuna>=2.4.0, so it resolves and then breaks at runtime
 seaborn = "^0.13.1"
 ruff = "0.15.8"         # exact-pin; keep == .pre-commit-config.yaml ruff rev (a caret floats the venv off the hook version → format ping-pong)
-mypy = "^1.10.0"
+mypy = "^2.3.0"
 pre-commit = "^3.7.0"
 pylint = "^3.2"          # duplicate-code detector only; see [tool.pylint.*]
-# exact-pin: playwright ships a browser revision per release, and 1.60.0 is what
-# ~/.cache/ms-playwright already holds (chromium-1228). A caret would float the venv
-# onto a release wanting a different revision -> a 280 MB re-download.
-playwright = "1.60.0"
+# exact-pin: playwright ships a browser revision per release, so a caret would float
+# the venv onto a release wanting a revision ~/.cache/ms-playwright does not hold ->
+# a silent 280 MB re-download. Bumping this line means running `playwright install`.
+playwright = "1.62.0"
 
 
 [[tool.poetry.source]]
