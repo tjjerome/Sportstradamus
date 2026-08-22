@@ -123,9 +123,7 @@ def test_pin_calibrated_meta_edits_and_disk(tmp_path, monkeypatch):
 
 
 def test_retry_wanted_structural_never_reads_model_stats(monkeypatch):
-    monkeypatch.setattr(
-        confirm, "get_strategy", lambda slug: SimpleNamespace(is_structural=True)
-    )
+    monkeypatch.setattr(confirm, "get_strategy", lambda slug: SimpleNamespace(is_structural=True))
     monkeypatch.setattr(
         confirm, "_cell_row", lambda *a: pytest.fail("structural must short-circuit")
     )
@@ -133,9 +131,7 @@ def test_retry_wanted_structural_never_reads_model_stats(monkeypatch):
 
 
 def test_retry_wanted_unreadable_model_stats(monkeypatch):
-    monkeypatch.setattr(
-        confirm, "get_strategy", lambda slug: SimpleNamespace(is_structural=False)
-    )
+    monkeypatch.setattr(confirm, "get_strategy", lambda slug: SimpleNamespace(is_structural=False))
 
     def _raise(*args):
         raise OSError("no parquet")
@@ -145,9 +141,7 @@ def test_retry_wanted_unreadable_model_stats(monkeypatch):
 
 
 def test_retry_wanted_delegates_to_predicate(monkeypatch):
-    monkeypatch.setattr(
-        confirm, "get_strategy", lambda slug: SimpleNamespace(is_structural=False)
-    )
+    monkeypatch.setattr(confirm, "get_strategy", lambda slug: SimpleNamespace(is_structural=False))
     monkeypatch.setattr(confirm, "_cell_row", lambda *a: _row())
     assert _retry_calibrated_wanted(_candidate(), {}) is True
     # The cell's own persisted knobs decide, exactly as the subprocess resolved them.

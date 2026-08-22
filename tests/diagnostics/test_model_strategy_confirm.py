@@ -1109,7 +1109,9 @@ def test_confirm_one_retry_ships_and_persists_the_pin(monkeypatch, tmp_path):
     writes = _fake_meta_disk(monkeypatch, tmp_path)
     monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
     runs = []
-    monkeypatch.setattr(mc, "_run_meditate", lambda lg, mkt, cand: runs.append(cand["source"]) or "")
+    monkeypatch.setattr(
+        mc, "_run_meditate", lambda lg, mkt, cand: runs.append(cand["source"]) or ""
+    )
     monkeypatch.setattr(mc, "_record_nominee_gates", lambda lg, mkt, cand: False)
     monkeypatch.setattr(mc, "_retry_calibrated_wanted", lambda cand, cell: len(runs) == 1)
     monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
@@ -1144,7 +1146,9 @@ def test_confirm_one_retry_failure_reverts_the_pin(monkeypatch, tmp_path):
     monkeypatch.setattr(mc, "_snapshot_cell", lambda lg, mkt: tmp_path / "snapshot")
     monkeypatch.setattr(mc, "_cell_artifacts", lambda lg, mkt: [])
     runs = []
-    monkeypatch.setattr(mc, "_run_meditate", lambda lg, mkt, cand: runs.append(cand["source"]) or "")
+    monkeypatch.setattr(
+        mc, "_run_meditate", lambda lg, mkt, cand: runs.append(cand["source"]) or ""
+    )
     monkeypatch.setattr(mc, "_record_nominee_gates", lambda lg, mkt, cand: False)
     monkeypatch.setattr(mc, "_retry_calibrated_wanted", lambda cand, cell: len(runs) == 1)
     monkeypatch.setattr(mc, "_retrained_matrix_hash", lambda lg, mkt: _MATRIX_SHA)
@@ -1715,7 +1719,9 @@ def test_supersede_retry_pins_calibrated_into_the_promoted_edits(monkeypatch):
     meta = _shipped_meta()
     restored, pruned = _patch_supersede_io(monkeypatch, verdict=_verdict(ship=True))
     runs = []
-    monkeypatch.setattr(mc, "_run_meditate", lambda lg, mkt, cand: runs.append(cand["source"]) or "")
+    monkeypatch.setattr(
+        mc, "_run_meditate", lambda lg, mkt, cand: runs.append(cand["source"]) or ""
+    )
     monkeypatch.setattr(mc, "_retry_calibrated_wanted", lambda cand, cell: len(runs) == 1)
     prompts = []
     monkeypatch.setattr(mc.click, "confirm", lambda msg, **k: prompts.append(msg) or True)
