@@ -3,10 +3,10 @@
 # from the dev box after a local `meditate` and/or a collector run (`ctg-fetch`,
 # `savant-fetch`):
 #
-#   scripts/sync_to_prod.sh             # sync models + collector snapshots to prod
+#   scripts/sync_to_prod.sh             # sync models + serving artifacts + collector snapshots
 #   scripts/sync_to_prod.sh --dry-run   # show what would change, touch nothing
 #
-# Two kinds of pass:
+# Three kinds of pass:
 #   * MODELS (mirror, --delete): the models dir is mirrored — prod-only orphans
 #     are deleted so a retired cell's pickle doesn't linger. The research subdir
 #     models/deterministic/ is excluded (and prod's copy protected from --delete).
@@ -18,9 +18,19 @@
 #     (nba_players_*.csv, affinity_*.csv, gamelogs) — a --delete there would wipe
 #     those. Hard rule: NEVER --delete on a player_data/ or team_data/ path.
 #     A collector dir absent on dev (catalog not yet populated) is skipped.
+#   * SERVING ARTIFACTS (single files, additive): gitignored training outputs the
+#     prod serving pipeline reads — book_weights.json and stat_calibration.json
+#     (consensus weights + per-cell cv/zi read at serve), model_stats.{parquet,csv}
+#     (kelly shrinkage), and each league's corr_* correlation trio (parlay
+#     scoring). With prod's `meditate` cron disabled, this script is the ONLY path
+#     these take to prod; models synced without them serve against stale
+#     calibration (the 2026-08 WNBA book_weights incident). Explicit file list,
+#     never a config/-wide pass — config/ also holds prod-local runtime state
+#     (goalies.json) that a directory sync would clobber.
 #
-# NOTE: prod's weekly `meditate` cron (Fri 01:00) rewrites the models dir. Don't
-# run this during that window or you may race its model writes.
+# NOTE: if prod's weekly `meditate` cron is enabled it rewrites the models dir and
+# the serving artifacts above. Don't run this during that window (or at all while
+# prod self-trains — the two workflows overwrite each other).
 #
 # Environment (optional overrides):
 #   PROD_SSH             ssh target for prod  (default: sportstradamus@192.168.1.84)
@@ -55,6 +65,20 @@ COLLECTOR_RELS=(
     "src/sportstradamus/data/player_data/MLB/baseballsavant"
     "src/sportstradamus/data/team_data/MLB/baseballsavant"
 )
+# Serving artifacts — gitignored files meditate/correlate write on dev and the
+# prod pipelines read at serve (see header). Files absent on dev are skipped.
+SERVING_FILE_RELS=(
+    "src/sportstradamus/data/config/book_weights.json"
+    "src/sportstradamus/data/config/stat_calibration.json"
+    "src/sportstradamus/data/training/model_stats.parquet"
+    "src/sportstradamus/data/training/model_stats.csv"
+)
+for league_dir in "$LOCAL_DIR"/src/sportstradamus/data/leagues/*/; do
+    [[ -d "$league_dir" ]] || continue
+    for name in corr_same_team.parquet corr_opposing.parquet corr_metadata.json; do
+        [[ -f "$league_dir$name" ]] && SERVING_FILE_RELS+=("${league_dir#"$LOCAL_DIR/"}$name")
+    done
+done
 SSH_OPTS=(-o "ConnectTimeout=$SSH_CONNECT_TIMEOUT" -o BatchMode=yes)
 RSYNC_SSH="ssh -o ConnectTimeout=$SSH_CONNECT_TIMEOUT -o BatchMode=yes"
 
@@ -111,6 +135,21 @@ sync_pass() {
     run rsync -av "${filter[@]}" "$src/" "$dest/"
 }
 
+# One serving-artifact file, additive overwrite. $1 = repo-relative file path.
+sync_file() {
+    local rel="$1"
+    local src="$LOCAL_DIR/$rel"
+    if [[ ! -f "$src" ]]; then
+        echo ">> skip $rel (not present on dev)"
+        return 0
+    fi
+    local dest_dir
+    dest_dir="$(dirname -- "$rel")"
+    # shellcheck disable=SC2029  # expand $dest_dir locally into the remote mkdir
+    run ssh "${SSH_OPTS[@]}" "$PROD_SSH" "mkdir -p '$PROD_DIR/$dest_dir'"
+    run rsync -av --timeout="$RSYNC_TIMEOUT" -e "$RSYNC_SSH" "$src" "$PROD_SSH:$PROD_DIR/$rel"
+}
+
 echo ">> sync_to_prod -> $PROD_SSH:$PROD_DIR"
 [[ "$DRY_RUN" -eq 1 ]] && echo ">> DRY RUN (no changes)"
 
@@ -131,6 +170,9 @@ fi
 sync_pass "$MODELS_REL" 1
 for rel in "${COLLECTOR_RELS[@]}"; do
     sync_pass "$rel" 0
+done
+for rel in "${SERVING_FILE_RELS[@]}"; do
+    sync_file "$rel"
 done
 
 [[ "$DRY_RUN" -eq 1 ]] && echo ">> dry run complete." || echo ">> push complete."
