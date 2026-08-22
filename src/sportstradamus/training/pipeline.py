@@ -3550,20 +3550,14 @@ def _data_driven_dist(global_mean: float, hist_gate: float) -> str:
     return "ZINB" if hist_gate > GATE_PUBLISH_THRESHOLD else "NegBin"
 
 
-def _resolve_dist(
-    configured: str | None,
-    data_dist: str,
-    global_mean: float,
-    hist_gate: float,
-    league: str,
-    market: str,
-) -> str:
-    """The distribution family to train: the operator-configured one (authoritative — ``--dist`` flag
-    or stat_meta), or ``data_dist`` when nothing is pinned / ``"auto"``.
+def _resolve_dist(configured: str | None, data_dist: str, league: str, market: str) -> str:
+    """The distribution family to train: the configured one (authoritative — ``--dist`` flag or
+    stat_meta, where the sweep persists its gate-validated pick), or ``data_dist`` when nothing
+    is pinned / ``"auto"``.
 
-    A configured family that disagrees with the data still trains (the operator's call) but logs a loud
-    warning — forcing ``SkewNormal`` on a low-mean count stat mis-preps the target, forcing a count
-    family on a high-mean stat is usually harmless. An unrecognized family is a config error: fail loud.
+    Disagreement with the mean/zero-rate heuristic is expected, not warned — DPO and Mixture are
+    force-only, so every such cell would warn weekly. An unrecognized family is a config error:
+    fail loud.
     """
     if configured in (None, "auto"):
         return data_dist
@@ -3571,17 +3565,6 @@ def _resolve_dist(
         raise ValueError(
             f"{league} {market}: stat_meta dist {configured!r} is not a forceable family; "
             f"use one of {sorted(_FORCEABLE_DISTS)} or 'auto'"
-        )
-    if configured != data_dist:
-        logger.warning(
-            "%s %s: training forced dist=%s (data-driven pick is %s: "
-            "global_mean=%.2f, zero_rate=%.2f)",
-            league,
-            market,
-            configured,
-            data_dist,
-            global_mean,
-            hist_gate,
         )
     return configured
 
@@ -3684,14 +3667,13 @@ def _step_select_distribution(
 ) -> dict:
     """Choose distribution family + apply target transform + compute shape priors.
 
-    Family selection: ``dist_override`` (the ``meditate --dist`` sweep axis) wins over every cell when
-    not ``"auto"``; otherwise the cell's stat_meta ``dist`` is authoritative when set
-    (:func:`_resolve_dist` forces that branch and warns if it disagrees with the data); an unset /
-    ``"auto"`` cell falls back to the data-driven rule (:func:`_data_driven_dist`):
-    ``global_mean >= _SKEWNORMAL_MEAN_THRESHOLD`` → SkewNormal, else NegBin escalated to ZINB when
-    ``hist_gate > GATE_PUBLISH_THRESHOLD``. For
-    SkewNormal, drops zero rows when ``hist_gate > NONZERO_DENOM_GATE`` and applies the strategy's
-    forward transform.
+    Family selection: ``dist_override`` (the ``meditate --dist`` sweep axis) wins over every
+    cell when not ``"auto"``; otherwise the cell's stat_meta ``dist`` is authoritative when set
+    (:func:`_resolve_dist` forces that branch); an unset / ``"auto"`` cell falls back to the
+    data-driven rule (:func:`_data_driven_dist`): ``global_mean >= _SKEWNORMAL_MEAN_THRESHOLD``
+    → SkewNormal, else NegBin escalated to ZINB when ``hist_gate > GATE_PUBLISH_THRESHOLD``. For
+    SkewNormal, drops zero rows when ``hist_gate > NONZERO_DENOM_GATE`` and applies the
+    strategy's forward transform.
 
     Mutates ``splits["X_train"]`` and ``splits["y_train_labels"]`` for the
     SkewNormal nonzero path. Also writes ``stat_zi[league][market]`` and
@@ -3754,14 +3736,7 @@ def _step_select_distribution(
         if dist_override != LOSS_AUTO
         else load_distribution_config().get(league, {}).get(market)
     )
-    dist = _resolve_dist(
-        configured,
-        _data_driven_dist(global_mean, hist_gate),
-        global_mean,
-        hist_gate,
-        league,
-        market,
-    )
+    dist = _resolve_dist(configured, _data_driven_dist(global_mean, hist_gate), league, market)
     if dist in ("SkewNormal", "Mixture"):
         strategy = baselines.get_target_normalization(target_normalization)
         cv = (

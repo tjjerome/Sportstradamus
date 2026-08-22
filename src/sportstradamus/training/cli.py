@@ -11,6 +11,7 @@ import click
 import numpy as np
 import pandas as pd
 import tabulate
+from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import (
@@ -688,7 +689,9 @@ def meditate(
 
         league_start_date = stat_data.trim_gamelog()
 
-        for market in markets:
+        market_bar = tqdm(markets, unit="market")
+        for market in market_bar:
+            market_bar.set_description(f"[{lg}] {market}")
             cell_meta = stat_meta_full.get(lg, {}).get(market, {})
             cell_dist = cell_meta.get("dist") if dist == LOSS_AUTO else dist
             cell_target_norm = resolve_cell_target_normalization(
