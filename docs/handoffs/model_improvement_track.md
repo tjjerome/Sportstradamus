@@ -715,7 +715,11 @@ Entry: cell fails g4 (either direction) or g2/g3.
   one-parameter μ-power fix does not transfer (median held-out −0.0001 KS, wins 13/30). No
   mean-bucketed isotonic, no IDR-on-μ, no Rung C beyond SkewNormal. Per-cell exceptions only:
   NFL receiving yards (−0.0099) and NBA FGA (−0.0036). Revisit only if the *served* fit moves to
-  the OOF frame (n≈5000+, the one path that changes the variance regime).
+  the OOF frame (n≈5000+, the one path that changes the variance regime). Sequential
+  `(c, s)` → Rung C is likewise null: the WNBA FGA half-split pilot scored −0.0001 held-out KS
+  vs recal-only (kill bar −0.005) even though the joint fit finds a large defect
+  (c ≈ 0.75, s ≈ 2.9) — the isotonic map alone absorbs it, so CDF_STAGE's `(c, s)` bypass
+  stands as designed.
 
 **Training-time calibration levers (Lever 1 selection + Lever 4 stabilization, built, opt-in).**
 The post-hoc rungs above polish a *fixed* trained σ-head; these two change which head you get,
