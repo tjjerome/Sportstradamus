@@ -662,11 +662,13 @@ Entry: cell fails g4 (either direction) or g2/g3.
   centered-skewness space (clamp `|s| ≤ 3`), warm-start `(c, 0)`, ship at val
   `pit_ks < 0.040` (val→test discount +0.008–0.010). Fit, dump, and gate all act on the *served*
   (model × book) predictive, re-encoded to normalized space so the scorecard decode recovers it
-  byte-for-byte. *Candidate refinement (Experiment-4 gated, `/tmp/researcher_lever1_v3.md` R5):*
-  cross-fit λ-shrink the fitted `(c, s)` toward `(1, 0)` — Lilliefors–Durbin simulation shows
-  the unshrunk val-fit is ~0.0106 KS optimistic at n≈1000 and `s` comes back non-zero 27% of
-  the time under a true `s = 0`; ship as a stability fix iff the offline replay beats the
-  unshrunk fit by ≥0.0005 median held-out KS with no cell degrading >0.002.
+  byte-for-byte. *λ-shrinkage refinement — NULL (`/tmp/researcher_lever1_v3.md` R5, Exp-4
+  replay over 79 cells):* cross-fit λ-shrinking the fitted `(c, s)` toward `(1, 0)` missed its
+  ship bar (median held-out KS −0.0001 vs the −0.0005 bar; worst degrade +0.0058 vs the 0.002
+  cap; CvM-fit arm no better). The replay also measured the unshrunk fit itself as net-neutral
+  at median (+0.0002 held-out) — it pays only where real miscalibration exists (WNBA FGA
+  0.065→0.028) and taxes slightly elsewhere, which is exactly what the
+  `_DISPERSION_SKEW_MIN_GAIN` hard gate protects: keep the gate, no λ machinery.
 - **Rung B′ — re-target the count objective (built, opt-in; default-flip candidate,
   Experiment-3 gated).** The count-branch `dispersion_cal`
   minimized CRPS, but the gate is PIT-KS — re-targeting the fit to PIT-KS is the one change
@@ -1894,8 +1896,9 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
   `TPESampler(constraints_func=…)` feasibility (optuna 4.9.0), per-trial KS from the cv fold
   boosters (`predict_cv_oof_params`, no refit, ~4.7× rows), 1-SE ε final pick; C2 joint `(c, s)`
   closure fix; fidelity ladder killed blend/post-hoc threading (gaps ≤0.004). Board g4 discount
-  now conditioned on (family, 1/√n) in `sweep._ledger_gate_discounts`. Pending: Exp 2 default
-  flip + retry deletion, Exp 3 count-objective flip, Exp 4 λ-shrinkage.
+  now conditioned on (family, 1/√n) in `sweep._ledger_gate_discounts`. Exp 4 read: R5
+  λ-shrinkage NULL (§6.1 Rung B). Pending: Exp 2 default flip + retry deletion, Exp 3
+  count-objective flip.
 - 2026-07-21 · Role×position two-part method generalized off NFL. New `training/role_specs.py`
   registers a `RoleSpec` for every continuous cell in NFL/NBA/WNBA/NHL (43 total, MLB excluded):
   league-wide positions (mirror `Stats.positions`, tier only codes a market fields) + small
