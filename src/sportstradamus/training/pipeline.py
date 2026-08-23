@@ -4598,6 +4598,14 @@ def train_market(
         # either _calibration_penalty branch); calibrated falls back to loss selection.
         penalty = _calibration_penalty(splits, dist_info)
         penalty_threshold = _gate4_pit_ks_threshold(len(splits["y_validation"]))
+    elif hpo_selection == "calibrated":
+        logger.warning(
+            "%s %s: hpo_selection 'calibrated' is inert on the %s path — no HP search "
+            "consults it; drop the stat_meta pin or route the cell off this path",
+            league,
+            market,
+            "hurdle" if use_hurdle else "Mixture",
+        )
     opt_params, _ = _step_select_hyperparams(
         splits["X_train"],
         dist,
