@@ -45,24 +45,6 @@ def _suggest_params(trial, hp_dict):
     return hyper_params
 
 
-# Lever 1 search-gate weight. The hinge is one-sided (zero once a trial clears the Gate-4 PIT-KS
-# threshold), so a large weight only discourages the under-dispersed corner without distorting the
-# feasible region — which stays ranked by pure CRPS (no pull toward the over-dispersed marginal
-# predictor). 10x dominates the inter-trial CRPS spread (~0.03) at a typical gate excess (~0.05),
-# so an uncalibrated-but-sharp trial loses to a calibrated one.
-_CALIBRATION_PENALTY_WEIGHT = 10.0
-
-
-def _penalized_objective(crps: float, pit_ks: float, threshold: float) -> float:
-    """Search-gating HPO objective (Lever 1): CRPS plus a one-sided hinge on the validation PIT-KS.
-
-    Zero hinge for calibrated trials (``pit_ks <= threshold``) so the feasible region is ranked by
-    pure CRPS; infeasible trials are pushed up by their Gate-4 excess, steering the TPE sampler
-    toward the wider-sigma calibrated region rather than only re-ranking the sharpest cluster.
-    """
-    return crps + _CALIBRATION_PENALTY_WEIGHT * max(0.0, pit_ks - threshold)
-
-
 def _collect_calibrated_candidates(trials):
     """Every completed Lever-1 trial as a param dict tagged with its raw ``cv_loss`` and ``pit_ks``,
     sorted by CRPS — the candidate set :func:`_pick_calibrated_candidate` picks the final HP from.
@@ -146,11 +128,15 @@ def run_hyper_opt(
     params are evaluated first, so the selected hyperparameters are unaffected.
 
     Default (``calibration_penalty is None``) returns the single best-CV-loss param dict and the
-    objective is plain CV-CRPS — unchanged. When ``calibration_penalty`` is given (Lever 1,
-    calibrated HP selection), the objective becomes the search-gating score
-    ``CRPS + weight*max(0, pit_ks - penalty_threshold)`` — ``calibration_penalty(params)`` returns
-    the trial's served validation PIT-KS — so the TPE sampler explores the wider-sigma region. The
-    return is then every completed trial's param dict tagged with its raw ``cv_loss``
+    objective is plain CV loss (CRPS, or nll for the count families) — unchanged. When
+    ``calibration_penalty`` is given (Lever 1, calibrated HP selection), the objective stays the
+    raw CV loss; each trial's served PIT-KS is measured out-of-fold —
+    ``calibration_penalty(params, cvbooster=…, folds=…, opt_rounds=…)`` harvests the fold boosters
+    ``model.cv`` already trained, so there is no per-trial refit — and reaches the TPE sampler as a
+    feasibility constraint (``constraints_func``, Deb's rule: feasible trials model the "below"
+    KDE first, infeasible ones rank by violation) instead of a scalarized hinge, so scarce
+    feasibility can no longer collapse the search into a pure PIT-KS minimizer. The return is then
+    every completed trial's param dict tagged with its raw ``cv_loss``
     and ``pit_ks``, sorted by ``cv_loss``, for :func:`_pick_calibrated_candidate`'s final pick.
     """
     # Deferred: lightgbm and optuna are heavy; keeping them out of the top-level
@@ -164,6 +150,14 @@ def run_hyper_opt(
     # rather than at the caller so every entry point gets the working configuration.
     train_set.free_raw_data = False
 
+    folds = None
+    if calibration_penalty is not None:
+        # Explicit contiguous folds (rows are date-ordered, so these are the same date blocks
+        # cv's default produces) — lightgbm's kstep chunking silently drops the tail rows when
+        # n % nfold != 0, and OOF pooling needs the exact held-out index sets.
+        chunks = np.array_split(np.arange(train_set.construct().num_data()), nfold)
+        folds = [(np.concatenate(chunks[:k] + chunks[k + 1 :]), chunks[k]) for k in range(nfold)]
+
     def objective(trial):
         hyper_params = _suggest_params(trial, hp_dict)
 
@@ -175,28 +169,48 @@ def run_hyper_opt(
             hyper_params,
             train_set,
             num_boost_round=num_boost_round,
+            folds=folds,
             nfold=nfold,
             fpreproc=_materialise_fold_datasets,
             callbacks=[early_stopping_callback],
             seed=None,
+            return_cvbooster=calibration_penalty is not None,
         )
 
         cv_losses = np.array(cv_result[f"valid {model.dist.loss_fn}-mean"])
         opt_rounds = int(np.argmin(cv_losses)) + 1
         trial.set_user_attr("opt_round", opt_rounds)
         crps = float(np.min(cv_losses))
-        if calibration_penalty is None:
-            return crps
-        pit_ks = float(calibration_penalty({**hyper_params, "opt_rounds": opt_rounds}))
-        trial.set_user_attr("cv_loss", crps)
-        trial.set_user_attr("pit_ks", pit_ks)
-        return _penalized_objective(crps, pit_ks, penalty_threshold)
+        if calibration_penalty is not None:
+            pit_ks = float(
+                calibration_penalty(
+                    {**hyper_params, "opt_rounds": opt_rounds},
+                    cvbooster=cv_result["cvbooster"],
+                    folds=folds,
+                    opt_rounds=opt_rounds,
+                )
+            )
+            trial.set_user_attr("cv_loss", crps)
+            trial.set_user_attr("pit_ks", pit_ks)
+        return crps
 
     if silence:
         optuna.logging.set_verbosity(optuna.logging.WARNING)
 
+    if calibration_penalty is not None:
+        # ``.get`` with inf: a trial that died before tagging pit_ks reads as infeasible,
+        # not a crash. constraints_func is optuna-@experimental but 4-years-stable; its
+        # wiring is pinned by tests/golden/test_calibration_levers.py.
+        sampler = TPESampler(
+            constraints_func=lambda t: (
+                t.user_attrs.get("pit_ks", float("inf")) - penalty_threshold,
+            )
+        )
+    else:
+        sampler = TPESampler()
+
     study = optuna.create_study(
-        sampler=TPESampler(),
+        sampler=sampler,
         direction="minimize",
         study_name="LightGBMLSS Hyper-Parameter Optimization",
     )

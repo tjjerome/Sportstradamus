@@ -9,6 +9,7 @@ import random
 import warnings
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import lightgbm as lgb
 import numpy as np
@@ -410,6 +411,56 @@ def predict_lss_params(
     preds = model.predict(X, pred_type="parameters")
     preds.index = X.index
     return preds
+
+
+def predict_cv_oof_params(
+    cvbooster,
+    folds,
+    opt_rounds: int,
+    X: pd.DataFrame,
+    start_values: np.ndarray,
+    dist_obj,
+) -> pd.DataFrame:
+    """Pooled out-of-fold raw distribution parameters from ``model.cv``'s fold boosters.
+
+    The raw-booster equivalent of :func:`predict_lss_params` for a ``CVBooster``: each fold's
+    held-out rows are predicted by that fold's booster capped at ``num_iteration=opt_rounds``,
+    the per-row predict-time margins are added, and the distribution's response functions are
+    applied in ``param_dict`` order — exactly what ``LightGBMLSS.predict`` does via
+    ``dist.predict_dist``, which exposes no iteration cap (why this cannot just call it). Same
+    column layout and float32 dtype as :func:`predict_lss_params`; the frame is indexed by the
+    pooled held-out rows in fold order.
+
+    Args:
+        cvbooster: ``CVBooster`` from ``model.cv(..., return_cvbooster=True)``;
+            ``boosters[k]`` pairs with ``folds[k]``.
+        folds: The explicit ``(train_idx, test_idx)`` positional index pairs the cv ran on.
+        opt_rounds: Boosting rounds at the trial's CV-loss argmin.
+        X: The full training frame the cv ``Dataset`` was built from.
+        start_values: Per-row raw-space start values for ``X`` — the array
+            ``set_model_start_values`` computes, shape ``(len(X), n_dist_param)``.
+        dist_obj: Distribution object whose ``param_dict`` response functions apply
+            (including any ``_BoundedResponseFn`` shape clamp already installed on it).
+    """
+    frames = []
+    for booster, (_, test_idx) in zip(cvbooster.boosters, folds, strict=True):
+        X_fold = X.iloc[test_idx]
+        predt = torch.tensor(
+            booster.predict(X_fold, raw_score=True, num_iteration=opt_rounds),
+            dtype=torch.float32,
+        ).reshape(-1, dist_obj.n_dist_param)
+        init = torch.tensor(start_values[test_idx], dtype=torch.float32)
+        params = np.concatenate(
+            [
+                response_fn(predt[:, i].reshape(-1, 1) + init[:, i].reshape(-1, 1)).numpy()
+                for i, response_fn in enumerate(dist_obj.param_dict.values())
+            ],
+            axis=1,
+        )
+        frames.append(
+            pd.DataFrame(params, columns=list(dist_obj.param_dict.keys()), index=X_fold.index)
+        )
+    return pd.concat(frames)
 
 
 def fit_predict_params(
@@ -1164,56 +1215,62 @@ def _step_build_lss_model(
     return model
 
 
-def _pick_calibrated_candidate(candidates: list[dict], threshold: float) -> dict:
-    """Calibration-constrained HP selection (Lever 1): the lowest-CRPS trial whose CV
-    PIT-KS clears ``threshold``; if none qualify, the best-calibrated trial.
+# Asymptotic SD of the Kolmogorov statistic × √n — one sampling SE of a trial's measured PIT-KS.
+_KS_SAMPLING_SD_COEF = 0.2606
+
+
+def _pick_calibrated_candidate(candidates: list[dict], threshold: float, n_rows: int) -> dict:
+    """Calibration-constrained HP selection (Lever 1): the lowest-CRPS trial whose OOF
+    PIT-KS clears the noise-aware effective threshold.
 
     Operationalizes Gneiting-Balabdaoui-Raftery 2007's "sharpness subject to calibration"
-    as a hard constraint (congruent with the ship gate) rather than a scalarized penalty.
-    The fallback is logged: a vacuous constraint (no qualifying trial — common at low n)
-    silently degrades to loss-only selection exactly where calibration matters most
-    (research brief reality-check b).
+    as an ε-constraint under the one-standard-error rule (ESL §7.10):
+    ``tau_eff = max(threshold, min_pit_ks + SE)`` with ``SE = _KS_SAMPLING_SD_COEF / √n_rows``,
+    then min ``cv_loss`` over ``pit_ks <= tau_eff`` (never empty — ``min_pit_ks`` qualifies).
+    When no trial clears the raw Gate-4 threshold the pick is the sharpest trial statistically
+    tied with the best-calibrated one, never the bare min-KS trial — the single most
+    winner's-cursed of ~300 noisy KS draws (Lever-1-v3 brief, R3).
 
-    Also logs the constraint's headroom (min PIT-KS, feasible count, and the CRPS price
-    of feasibility) — the Experiment-B probe of whether the constraint is non-vacuous
-    (researcher_hpo_objective_alignment brief, R2 step 1).
+    Also logs the constraint's headroom (min PIT-KS, feasible count at the raw threshold,
+    ``tau_eff``, and the CRPS price of the pick over the loss-only best) — the probe of
+    whether the constraint is non-vacuous.
+
+    Args:
+        candidates: Completed trials tagged with ``cv_loss`` and ``pit_ks``.
+        threshold: The cell's raw Gate-4 PIT-KS bar.
+        n_rows: Rows in the pooled OOF frame each trial's ``pit_ks`` was measured on.
     """
-    qualified = [c for c in candidates if c["pit_ks"] < threshold]
-    crps_price = (
-        min(c["cv_loss"] for c in qualified) - min(c["cv_loss"] for c in candidates)
-        if qualified
-        else None
-    )
+    min_pit_ks = min(c["pit_ks"] for c in candidates)
+    tau_eff = max(threshold, min_pit_ks + _KS_SAMPLING_SD_COEF / np.sqrt(n_rows))
+    picked = min((c for c in candidates if c["pit_ks"] <= tau_eff), key=lambda c: c["cv_loss"])
     logger.info(
-        "calibrated HP headroom: min_pit_ks=%.4f feasible=%d/%d threshold=%.4f crps_price=%s",
-        min(c["pit_ks"] for c in candidates),
-        len(qualified),
+        "calibrated HP headroom: min_pit_ks=%.4f feasible=%d/%d threshold=%.4f "
+        "tau_eff=%.4f crps_price=%.5f",
+        min_pit_ks,
+        sum(c["pit_ks"] < threshold for c in candidates),
         len(candidates),
         threshold,
-        "n/a" if crps_price is None else format(crps_price, ".5f"),
+        tau_eff,
+        picked["cv_loss"] - min(c["cv_loss"] for c in candidates),
     )
-    if qualified:
-        return min(qualified, key=lambda c: c["cv_loss"])
-    logger.warning(
-        "calibrated HP selection: no trial met CV-PIT-KS < %.4f (best %.4f); "
-        "falling back to min-PIT-KS",
-        threshold,
-        min(c["pit_ks"] for c in candidates),
-    )
-    return min(candidates, key=lambda c: c["pit_ks"])
+    return picked
 
 
 def _calibration_penalty(splits: dict, dist_info: dict):
     """Build the per-trial served-PIT-KS evaluator that search-gates the HPO (Lever 1).
 
-    Returns a closure over ``splits``/``dist_info`` mapping a candidate param dict to the
-    served randomized-PIT KS on the validation split — SkewNormal via its joint
-    (scale, skew) fit, every other family (NegBin / ZINB joint / DPO / Gamma / ZAGamma)
-    via one refit + scalar dispersion-``c`` fit. Two deliberate proxy simplifications:
-    (a) both branches are model-only — the book blend is skipped (the model dominates
-    failing cells, so the model-only KS closely proxies the served Gate-4 statistic while
-    keeping per-trial cost to one refit); (b) the count branch always fits ``c`` on the
-    PIT-KS objective — a proxy for the production dispersion fit even when the cell's
+    Returns ``evaluate(params, *, cvbooster, folds, opt_rounds)`` mapping one trial's
+    already-trained CV fold boosters to the served randomized-PIT KS on the pooled
+    out-of-fold train rows — SkewNormal via its joint (scale, skew) fit, every other
+    family (NegBin / ZINB joint / DPO / Gamma / ZAGamma) via the scalar dispersion-``c``
+    fit. No refit: each fold's held-out rows are predicted from that fold's booster at
+    ``num_iteration=opt_rounds``, pooled in fold order, decoded once, fit once — the
+    OOF frame is ~4.7× the validation split, cutting the KS sampling SD 2.16× and
+    removing the +33% per-trial refit (Lever-1-v3 brief, R2). Two deliberate proxy
+    simplifications: (a) both branches are model-only — the book blend and post-hoc
+    stages are skipped (measured within ≤0.004 KS of the served frame on every
+    measurable calibrated cell); (b) the count branch always fits ``c`` on the PIT-KS
+    objective — a proxy for the production dispersion fit even when the cell's
     ``count_dispersion_objective`` is crps — because the closure's output IS the
     served-KS ranking statistic.
     """
@@ -1221,24 +1278,35 @@ def _calibration_penalty(splits: dict, dist_info: dict):
     strategy = dist_info["target_normalization"]
     global_mean = dist_info["global_mean"]
     denom_col = dist_info["denom_col"]
-    X_val = splits["X_validation"]
-    y_val = splits["y_validation"]["Result"].to_numpy(dtype=float)
+    dist_obj = dist_info["dist_obj"]
+    X_train = splits["X_train"]
+    y_train_result = splits["y_train"]["Result"]
+    # The per-row predict-time margins predict_lss_params would seed for these rows; they
+    # depend only on the frame, so compute once. SimpleNamespace stands in for the model
+    # object set_model_start_values assigns onto.
+    carrier = SimpleNamespace()
+    set_model_start_values(
+        carrier,
+        dist,
+        X_train,
+        shape_ceiling=dist_info["shape_ceiling"],
+        normalized=dist_info["normalize"],
+        offset_mode=dist_info["offset_mode"],
+        sn_param=dist_info["sn_param"],
+    )
+    start_values = carrier.start_values
 
-    def served_pit_ks(params: dict) -> float:
-        preds = fit_predict_params(
-            dist_info["dist_obj"],
-            dist,
-            splits["X_train"],
-            splits["y_train_labels"],
-            X_val,
-            params,
-            normalized=dist_info["normalize"],
-            shape_ceiling=dist_info["shape_ceiling"],
-            offset_mode=dist_info["offset_mode"],
-            sn_param=dist_info["sn_param"],
-        )
-        sn_loc = strategy.decode_loc(preds["loc"].to_numpy(), X_val, global_mean, denom_col)
-        sn_scale = strategy.decode_scale(preds["scale"].to_numpy(), X_val, denom_col)
+    def oof_frames(cvbooster, folds, opt_rounds):
+        preds = predict_cv_oof_params(cvbooster, folds, opt_rounds, X_train, start_values, dist_obj)
+        # y_train is the raw pre-transform frame and X_train keeps its original index
+        # through the SkewNormal nonzero filter, so .loc realigns the raw outcomes.
+        y_pool = y_train_result.loc[preds.index].to_numpy(dtype=float)
+        return preds, X_train.loc[preds.index], y_pool
+
+    def served_pit_ks(params: dict, *, cvbooster, folds, opt_rounds) -> float:
+        preds, X_pool, y_pool = oof_frames(cvbooster, folds, opt_rounds)
+        sn_loc = strategy.decode_loc(preds["loc"].to_numpy(), X_pool, global_mean, denom_col)
+        sn_scale = strategy.decode_scale(preds["scale"].to_numpy(), X_pool, denom_col)
         skew = preds["alpha"].to_numpy()
         decoded = decode_predictive_mean(
             preds,
@@ -1248,22 +1316,11 @@ def _calibration_penalty(splits: dict, dist_info: dict):
             hist_gate=dist_info["hist_gate"],
         )
         mean = decoded.ev
-        c, s = fit_skewnorm_dispersion_skew(mean, sn_scale, skew, y_val, gate=decoded.gate)
-        return _served_sn_pit_ks(mean, sn_scale, skew, y_val, c, s, decoded.gate)
+        c, s = fit_skewnorm_dispersion_skew(mean, sn_scale, skew, y_pool, gate=decoded.gate)
+        return _served_sn_pit_ks(mean, sn_scale, skew, y_pool, c, s, decoded.gate)
 
-    def count_pit_ks(params: dict) -> float:
-        preds = fit_predict_params(
-            dist_info["dist_obj"],
-            dist,
-            splits["X_train"],
-            splits["y_train_labels"],
-            X_val,
-            params,
-            normalized=dist_info["normalize"],
-            shape_ceiling=dist_info["shape_ceiling"],
-            offset_mode=dist_info["offset_mode"],
-            sn_param=dist_info["sn_param"],
-        )
+    def count_pit_ks(params: dict, *, cvbooster, folds, opt_rounds) -> float:
+        preds, _, y_pool = oof_frames(cvbooster, folds, opt_rounds)
         decoded = decode_predictive_mean(preds, dist)
         shape_ceiling = dist_info["shape_ceiling"]
         if dist == "DPO":
@@ -1278,7 +1335,7 @@ def _calibration_penalty(splits: dict, dist_info: dict):
             lambda c: _dispersion_pit_ks_loss(
                 c,
                 dist=dist,
-                y_val_arr=y_val,
+                y_val_arr=y_pool,
                 val_weighted_mean=decoded.ev,
                 gate_blend_val=decoded.gate,
                 r_blend_val=decoded.r,
@@ -1291,7 +1348,7 @@ def _calibration_penalty(splits: dict, dist_info: dict):
         frame = _count_pit_frame(
             dist, c_opt, decoded.ev, decoded.gate, decoded.r, decoded.alpha, decoded.phi
         )
-        return _randomized_pit_ks(frame, dist, y_val, strategy=TARGET_NORM_NONE)
+        return _randomized_pit_ks(frame, dist, y_pool, strategy=TARGET_NORM_NONE)
 
     if dist == "SkewNormal":
         return served_pit_ks
@@ -1313,9 +1370,9 @@ def _step_select_hyperparams(
     """Pick Optuna-tuned params, warm-start, or the deterministic fixed set.
 
     When ``calibration_penalty`` is given (Lever 1, calibrated HP selection) the Optuna
-    objective is search-gated on validation PIT-KS and the paths return every completed trial (a
-    list) for the caller's :func:`_pick_calibrated_candidate` final pick; every other case returns
-    the single best param dict as before.
+    sampler is feasibility-constrained on the out-of-fold PIT-KS and the paths return every
+    completed trial (a list) for the caller's :func:`_pick_calibrated_candidate` final pick;
+    every other case returns the single best param dict as before.
 
     Args:
         X_train: Training feature matrix (used to size ``min_child_weight`` upper).
@@ -4553,7 +4610,7 @@ def train_market(
         penalty_threshold=penalty_threshold,
     )
     if isinstance(opt_params, list):
-        picked = _pick_calibrated_candidate(opt_params, penalty_threshold)
+        picked = _pick_calibrated_candidate(opt_params, penalty_threshold, len(splits["X_train"]))
         opt_params = {k: v for k, v in picked.items() if k not in ("cv_loss", "pit_ks")}
     model = _step_fit_model(
         dist,
