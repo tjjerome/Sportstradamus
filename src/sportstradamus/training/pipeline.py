@@ -110,7 +110,6 @@ from sportstradamus.training.scorecard import (
     _randomized_pit_draws,
     _randomized_pit_ks,
     _served_sn_pit_ks,
-    fit_skewnorm_dispersion_c,
     fit_skewnorm_dispersion_skew,
 )
 from sportstradamus.training.shap import compute_market_importance
@@ -1249,8 +1248,8 @@ def _calibration_penalty(splits: dict, dist_info: dict):
             hist_gate=dist_info["hist_gate"],
         )
         mean = decoded.ev
-        c = fit_skewnorm_dispersion_c(mean, sn_scale, skew, y_val, gate=decoded.gate)
-        return _served_sn_pit_ks(mean, sn_scale, skew, y_val, c, 0.0, decoded.gate)
+        c, s = fit_skewnorm_dispersion_skew(mean, sn_scale, skew, y_val, gate=decoded.gate)
+        return _served_sn_pit_ks(mean, sn_scale, skew, y_val, c, s, decoded.gate)
 
     def count_pit_ks(params: dict) -> float:
         preds = fit_predict_params(
