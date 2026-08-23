@@ -17,7 +17,8 @@ resumable.
 Deterministic trials rank only. ``--confirm`` walks each cell's nominees and requires a clean
 full-HPO 6/6 before a withheld model can ship. Because those confirms land systematically below
 their board scores, the board sorts on ``discounted_slack`` — raw slack re-priced under the
-confirm ledger's measured per-gate confirm-minus-board medians (:func:`_ledger_gate_discounts`).
+confirm ledger's measured confirm-minus-board shifts: flat per-gate medians, except g4's, which
+is conditioned on the nominee's family and validation size (:func:`_ledger_gate_discounts`).
 """
 
 import collections
@@ -33,6 +34,7 @@ import signal
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
 from statistics import fmean
@@ -289,6 +291,19 @@ _DIVERGED_DISPERSION_CAL: float = 0.1005
 # Below this many usable ledger observations the per-gate medians and the rollup's ship-rate cells
 # are noise, so the discounts and the calibrated-expectations table stay inert.
 _MIN_LEDGER_ROWS: int = 8
+
+# The g4 discount covers the fit's predicted inflation plus this residual quantile — the coverage
+# the old flat p75 bought, re-centered on the nominee's (family, n) conditional mean.
+_G4_DISCOUNT_RESIDUAL_QUANTILE: float = 0.75
+
+# lstsq drops singular directions below this fraction of the largest, so the dummy-trap
+# collinearity and a near-constant-n column surface as reduced rank — triggering the flat-median
+# fallback — instead of as amplified noise coefficients.
+_G4_FIT_RCOND: float = 1e-6
+
+# g4's discount is a per-nominee function of (family, n) — see _g4_conditional_discount — while
+# every other gate keeps its flat median scalar.
+_GateDiscounts = dict[str, float | Callable[[str, float | None], float]]
 
 # A board nominee's ledger `source` label carries the slack it was nominated at.
 _BOARD_SLACK_PATTERN = re.compile(r"board slack ([+-]\d+\.\d+)")
@@ -790,7 +805,7 @@ def _record_scored(
     league: str,
     market: str,
     scored: dict[str, dict[str, object]],
-    discounts: dict[str, float],
+    discounts: _GateDiscounts,
     out: str | None,
 ) -> None:
     """Flush the cell's corners scored so far to the board, when the run persists one.
@@ -957,15 +972,17 @@ def _prior_standings(evaluated: dict[str, dict[str, object]]) -> list[tuple[str,
     return [(str(row["family"]), float(row["slack"])) for row in evaluated.values()]
 
 
-def _ledger_gate_discounts(out: str | None) -> dict[str, float]:
-    """Per-gate median confirm-minus-board gate shifts measured from the nominee ledger.
+def _ledger_gate_discounts(out: str | None) -> _GateDiscounts:
+    """Per-gate confirm-minus-board gate shifts measured from the nominee ledger.
 
     Full-HPO confirms land systematically worse than the holdout-blind board on the same corner
     (g4_pit_ks +0.0115, g2_star_z +0.034 on the 37-row ledger), so raw board slack oversells its
     nominees. Non-diverged ledger rows are paired with their board-side gate values — the ledger's
     own ``board_*`` echo columns when a confirm-side change has added them, else an identity join
-    against the board CSV at ``out`` — and each gate's median shift is returned. ``{}`` (inert)
-    when the ledger is absent, unpairable, or thinner than :data:`_MIN_LEDGER_ROWS` pairs.
+    against the board CSV at ``out`` — and each gate's median shift is returned, except g4's,
+    which becomes a per-nominee function of the corner's family and validation size
+    (:func:`_g4_conditional_discount`). ``{}`` (inert) when the ledger is absent, unpairable, or
+    thinner than :data:`_MIN_LEDGER_ROWS` pairs.
     """
     if not NOMINEE_LEDGER_PATH.exists():
         return {}
@@ -995,7 +1012,57 @@ def _ledger_gate_discounts(out: str | None) -> dict[str, float]:
     shifts = shifts[shifts.notna().any(axis="columns")]
     if len(shifts) < _MIN_LEDGER_ROWS:
         return {}
-    return {gate: float(median) for gate, median in shifts.median().items() if pd.notna(median)}
+    discounts: _GateDiscounts = {
+        gate: float(median) for gate, median in shifts.median().items() if pd.notna(median)
+    }
+    if "g4_pit_ks" in discounts:
+        discounts["g4_pit_ks"] = _g4_conditional_discount(
+            shifts["g4_pit_ks"],
+            paired.loc[shifts.index, "distribution"],
+            pd.to_numeric(paired.loc[shifts.index, "n_validation"], errors="coerce"),
+            float(discounts["g4_pit_ks"]),
+        )
+    return discounts
+
+
+def _g4_conditional_discount(
+    inflation: pd.Series, families: pd.Series, n_validation: pd.Series, flat_median: float
+) -> float | Callable[[str, float | None], float]:
+    """g4's discount as a function of the nominee's (family, n_validation), not one flat scalar.
+
+    Measured g4 inflation is structured: it scales with 1/sqrt(n_validation) (corr 0.45) and
+    shifts by family (ZINB ≈ +0.024, NegBin ≈ −0.013; joint OLS R² = 0.51 on the 122-pair
+    ledger), so any flat quantile over-discounts n≥1600 cells ~7x while under-discounting
+    NFL-scale (n≈300) ones ~2x. OLS via numpy lstsq (deterministic) of the paired inflations on
+    [intercept, 1/sqrt(n), family dummies]; a nominee's discount is its predicted inflation plus
+    the :data:`_G4_DISCOUNT_RESIDUAL_QUANTILE` of the fit residuals, with dummy effect 0 for a
+    family absent from the fit. Falls back to ``flat_median`` when the design is degenerate —
+    fewer than :data:`_MIN_LEDGER_ROWS` usable pairs, or effective rank below families+1 (single
+    family with near-constant n) — and per nominee when the board row carries no ``n``.
+    """
+    usable = inflation.notna() & families.notna() & n_validation.notna()
+    if int(usable.sum()) < _MIN_LEDGER_ROWS:
+        return flat_median
+    y = inflation[usable].to_numpy(dtype=float)
+    inv_sqrt_n = 1.0 / np.sqrt(n_validation[usable].to_numpy(dtype=float))
+    fams = families[usable].astype(str)
+    levels = sorted(fams.unique())
+    design = np.column_stack(
+        [np.ones_like(inv_sqrt_n), inv_sqrt_n]
+        + [(fams == level).to_numpy(dtype=float) for level in levels]
+    )
+    coef, _, rank, _ = np.linalg.lstsq(design, y, rcond=_G4_FIT_RCOND)
+    if rank < len(levels) + 1:
+        return flat_median
+    residual_q = float(np.quantile(y - design @ coef, _G4_DISCOUNT_RESIDUAL_QUANTILE))
+    effects = dict(zip(levels, coef[2:].tolist(), strict=True))
+
+    def discount(family: str, n: float | None) -> float:
+        if n is None:
+            return flat_median
+        return float(coef[0] + coef[1] / math.sqrt(n) + effects.get(family, 0.0) + residual_q)
+
+    return discount
 
 
 def _board_float(row: dict[str, object], column: str) -> float | None:
@@ -1058,7 +1125,15 @@ def _cell_timeout_seconds(out: str | None, league: str, market: str) -> int:
     return int(min(_MEDITATE_TRIAL_TIMEOUT_S, max(_TIMEOUT_FLOOR_S, _TIMEOUT_HEADROOM * slowest)))
 
 
-def _discounted_slack(row: dict[str, object], discounts: dict[str, float]) -> float:
+def _gate_discount(discounts: _GateDiscounts, gate: str, row: dict[str, object]) -> float:
+    """One row's discount for ``gate`` — g4's is evaluated at the row's own (family, n)."""
+    discount = discounts.get(gate, 0.0)
+    if callable(discount):
+        return discount(str(row["family"]), _board_float(row, "n"))
+    return discount
+
+
+def _discounted_slack(row: dict[str, object], discounts: _GateDiscounts) -> float:
     """``slack`` recomputed with each gate scalar shifted by its measured confirm inflation.
 
     Equal to ``slack`` when the discounts are inert, and a failed corner stays ``-inf``. Capped at
@@ -1071,11 +1146,11 @@ def _discounted_slack(row: dict[str, object], discounts: dict[str, float]) -> fl
     adjusted: dict[str, object] = {"g4_pit_ks_max": _board_float(row, "g4_pit_ks_max")}
     for gate in _DISCOUNTED_GATES:
         value = _board_float(row, gate)
-        adjusted[gate] = None if value is None else value + discounts.get(gate, 0.0)
+        adjusted[gate] = None if value is None else value + _gate_discount(discounts, gate, row)
     return min(min_gate_slack(adjusted), slack)
 
 
-def _confirm_risk(row: dict[str, object], context: CellContext, discounts: dict[str, float]) -> str:
+def _confirm_risk(row: dict[str, object], context: CellContext, discounts: _GateDiscounts) -> str:
     """``"high"`` when the corner matches a shape the ledger shows failing confirm, else ``""``.
 
     Two measured shapes: a continuous-class family on an integer-lattice target (the diverged
@@ -1084,9 +1159,9 @@ def _confirm_risk(row: dict[str, object], context: CellContext, discounts: dict[
     if distribution_class(str(row["family"])) == "continuous" and context.target_is_integer:
         return "high"
     g4, g4_max = _board_float(row, "g4_pit_ks"), _board_float(row, "g4_pit_ks_max")
-    if g4 is not None and g4_max is not None and g4 + discounts.get("g4_pit_ks", 0.0) >= g4_max:
-        return "high"
-    return ""
+    if g4 is None or g4_max is None:
+        return ""
+    return "high" if g4 + _gate_discount(discounts, "g4_pit_ks", row) >= g4_max else ""
 
 
 def _with_incumbent_margin(rows: list[dict[str, object]], context: CellContext) -> list[dict]:
@@ -1136,7 +1211,7 @@ def _rank_cell_board(
     league: str,
     market: str,
     scored: dict[str, dict[str, object]],
-    discounts: dict[str, float] | None = None,
+    discounts: _GateDiscounts | None = None,
 ) -> pd.DataFrame:
     """One cell's scored corners as board rows, best empirically discounted slack first.
 

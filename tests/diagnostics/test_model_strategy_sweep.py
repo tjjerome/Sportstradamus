@@ -2062,6 +2062,7 @@ def _ledger_row(**overrides):
         "league": "WNBA",
         "market": "AST",
         "distribution": "SkewNormal",
+        "n_validation": 1500,
         "strategy_controls_json": '{"corner":0}',
         "dispersion_cal": 1.0,
         "ship": False,
@@ -2093,9 +2094,20 @@ def _board_csv_row(controls_json):
 def test_ledger_gate_discounts_joins_board_drops_diverged_and_goes_inert_when_thin(tmp_path):
     out = tmp_path / "board.csv"
     ledger_rows, board_rows = [], []
-    for i in range(9):
+    # Shifts vary per pair, with an outlier last, so the pins below hold for the median only —
+    # a mean (or any other quantile) would land elsewhere.
+    for i, bump in enumerate([0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 20.0]):
         controls = f'{{"corner":{i}}}'
-        ledger_rows.append(_ledger_row(strategy_controls_json=controls))
+        ledger_rows.append(
+            _ledger_row(
+                strategy_controls_json=controls,
+                g4_pit_ks=0.05 + 0.005 * bump,
+                g2_star_z=1.0 + 0.1 * bump,
+                g3_bench_z=1.0 - 0.05 * bump,
+                g5_ece_debiased=0.03 + 0.002 * bump,
+                g1_brier_diff_ci_hi=0.001 * bump,
+            )
+        )
         board_rows.append(_board_csv_row(controls))
     # A diverged confirm (dispersion_cal on its 0.1 floor) and a seed row absent from the board.
     ledger_rows.append(
@@ -2112,11 +2124,13 @@ def test_ledger_gate_discounts_joins_board_drops_diverged_and_goes_inert_when_th
 
     discounts = sweep._ledger_gate_discounts(str(out))
     assert set(discounts) == set(sweep._DISCOUNTED_GATES)
-    assert discounts["g4_pit_ks"] == pytest.approx(0.01)
-    assert discounts["g2_star_z"] == pytest.approx(0.5)
+    # One family at one n is a degenerate g4 design, so g4 falls back to the flat median scalar.
+    assert isinstance(discounts["g4_pit_ks"], float)
+    assert discounts["g4_pit_ks"] == pytest.approx(0.02)
+    assert discounts["g2_star_z"] == pytest.approx(0.4)
     assert discounts["g3_bench_z"] == pytest.approx(-0.2)  # a gate confirm lands better on
-    assert discounts["g5_ece_debiased"] == pytest.approx(0.01)
-    assert discounts["g1_brier_diff_ci_hi"] == pytest.approx(0.01)
+    assert discounts["g5_ece_debiased"] == pytest.approx(0.008)
+    assert discounts["g1_brier_diff_ci_hi"] == pytest.approx(0.004)
 
     # 7 clean pairs + the diverged one: dropping the diverged row is what makes the ledger thin.
     thin = [*ledger_rows[:7], ledger_rows[9]]
@@ -2124,17 +2138,52 @@ def test_ledger_gate_discounts_joins_board_drops_diverged_and_goes_inert_when_th
     assert sweep._ledger_gate_discounts(str(out)) == {}
 
 
-def test_ledger_gate_discounts_prefers_board_echo_columns():
-    """Once confirm echoes ``board_*`` gate values into the ledger, no board CSV join is needed."""
+def test_ledger_gate_discounts_conditions_g4_on_family_and_n_via_echo_columns():
+    """g4's discount follows the ledger's (family, 1/sqrt(n)) inflation structure while every
+    other gate keeps its flat median; the ``board_*`` echo columns pair the rows, so no board
+    CSV join is needed (``out=None``).
+    """
     echo = {f"board_{gate}": 0.0 for gate in sweep._DISCOUNTED_GATES}
-    rows = [_ledger_row(strategy_controls_json=f'{{"corner":{i}}}', **echo) for i in range(8)]
+    # g4 inflation = 0.5/sqrt(n) + family effect, plus one +/-0.005 pair per combo: OLS recovers
+    # the structure exactly and the p75 of the symmetric residuals is +0.005.
+    combos = [
+        ("ZINB", 300, 0.02),
+        ("ZINB", 900, 0.02),
+        ("NegBin", 1600, -0.01),
+        ("NegBin", 4900, -0.01),
+    ]
+    rows = [
+        _ledger_row(
+            distribution=family,
+            n_validation=n,
+            g4_pit_ks=0.5 / math.sqrt(n) + effect + sign * 0.005,
+            g2_star_z=1.0 + sign * 0.5,
+            **echo,
+        )
+        for family, n, effect in combos
+        for sign in (1.0, -1.0)
+    ]
     pd.DataFrame(rows).to_csv(sweep.NOMINEE_LEDGER_PATH, index=False)
 
     discounts = sweep._ledger_gate_discounts(None)
 
-    assert discounts["g4_pit_ks"] == pytest.approx(0.06)
-    assert discounts["g2_star_z"] == pytest.approx(1.5)
     assert set(discounts) == set(sweep._DISCOUNTED_GATES)
+    g4 = discounts["g4_pit_ks"]
+    assert callable(g4)
+    # Predicted inflation at the nominee's (family, n) plus the residual p75 — including at an n
+    # the ledger never saw. A small-n ZINB nominee is discounted far more than a large-n NegBin
+    # one, where the flat rule would have handed both the same number.
+    assert g4("ZINB", 300) == pytest.approx(0.5 / math.sqrt(300) + 0.02 + 0.005)
+    assert g4("ZINB", 1200) == pytest.approx(0.5 / math.sqrt(1200) + 0.02 + 0.005)
+    assert g4("NegBin", 4900) == pytest.approx(0.5 / math.sqrt(4900) - 0.01 + 0.005)
+    assert g4("ZINB", 300) > g4("NegBin", 4900)
+    assert math.isfinite(g4("DPO", 900))  # family absent from the fit: dummy effect 0
+    # A board row that carries no n gets the flat median rule.
+    flat_median = float(pd.Series([row["g4_pit_ks"] for row in rows]).median())
+    assert g4("ZINB", None) == pytest.approx(flat_median)
+    # Non-g4 gates stay flat median scalars even though their shifts vary across pairs.
+    assert isinstance(discounts["g2_star_z"], float)
+    assert discounts["g2_star_z"] == pytest.approx(1.0)
 
 
 def _gate_scalars(g4, g4_max):
@@ -2149,7 +2198,7 @@ def _gate_scalars(g4, g4_max):
     }
 
 
-def _scored_row(marker, family, slack, gates):
+def _scored_row(marker, family, slack, gates, n=None):
     return {
         "family": family,
         "strategy_slug": family,
@@ -2157,6 +2206,7 @@ def _scored_row(marker, family, slack, gates):
         "controls_json": marker,
         "slack": slack,
         "ships": slack > 0,
+        "n": n,
         **gates,
     }
 
@@ -2168,8 +2218,8 @@ def test_rank_cell_board_discounted_slack_reranks_and_matches_slack_when_inert()
     the board columns don't carry survives via the cap).
     """
     scored = {
-        "thin": _scored_row("thin-headroom", "SkewNormal", 0.10, _gate_scalars(0.045, 0.05)),
-        "wide": _scored_row("wide-scale", "NegBin", 0.09, _gate_scalars(0.455, 0.5)),
+        "thin": _scored_row("thin-headroom", "SkewNormal", 0.10, _gate_scalars(0.045, 0.05), n=500),
+        "wide": _scored_row("wide-scale", "NegBin", 0.09, _gate_scalars(0.455, 0.5), n=5000),
         "g6": _scored_row("g6-bound", "NegBin", 0.02, _gate_scalars(0.01, 0.05)),
         "dead": {
             "family": "SkewNormal",
@@ -2196,6 +2246,18 @@ def test_rank_cell_board_discounted_slack_reranks_and_matches_slack_when_inert()
     assert by_marker.loc["thin-headroom", "slack"] == pytest.approx(0.10)
     assert by_marker.loc["thin-headroom", "g4_pit_ks"] == pytest.approx(0.045)
 
+    # A conditional g4 discount is evaluated at each row's own (family, n): the small-n SkewNormal
+    # row eats the +0.02 the flat case charged everyone, while the large-n NegBin row pays nothing.
+    conditional = sweep._rank_cell_board(
+        "WNBA",
+        "AST",
+        scored,
+        {"g4_pit_ks": lambda family, n: 0.02 if family == "SkewNormal" and n == 500 else 0.0},
+    )
+    per_row = conditional.set_index("controls_json")
+    assert per_row.loc["thin-headroom", "discounted_slack"] == pytest.approx(-0.3)
+    assert per_row.loc["wide-scale", "discounted_slack"] == pytest.approx(0.09)
+
 
 def test_confirm_risk_flags_continuous_on_integer_target_and_g4_inside_inflation(monkeypatch):
     context = sweep._cell_context("WNBA", "AST")  # integer target via the fixed matrix contract
@@ -2206,6 +2268,10 @@ def test_confirm_risk_flags_continuous_on_integer_target_and_g4_inside_inflation
     assert sweep._confirm_risk(count_safe, context, {"g4_pit_ks": 0.01}) == ""
     count_tight = {"family": "NegBin", **_gate_scalars(0.045, 0.05)}
     assert sweep._confirm_risk(count_tight, context, {"g4_pit_ks": 0.0115}) == "high"
+    # A conditional g4 discount reads the row's family before deciding the headroom is gone.
+    conditional = {"g4_pit_ks": lambda family, n: 0.0115 if family == "NegBin" else 0.0}
+    assert sweep._confirm_risk(count_tight, context, conditional) == "high"
+    assert sweep._confirm_risk({**count_tight, "family": "ZINB"}, context, conditional) == ""
 
     # On a non-integer target the continuous family alone is not a risk shape.
     monkeypatch.setattr(
