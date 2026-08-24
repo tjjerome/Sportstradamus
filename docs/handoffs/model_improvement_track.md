@@ -548,8 +548,9 @@ calls the automation cannot fully encode still need an operator:
    sunset path is dead:** the calibrated-everywhere default flip was killed by its pre-registered
    criteria (§6.1 Lever 1 — 1/4 failing cells improved, MLB g1 breach), so the retry machinery
    and this two-attempt doctrine stay. What changed instead: v3 is now the implementation behind
-   every `calibrated` pin (v2's hinge is deleted), and its SkewNormal measure blends with the
-   book per trial, so low-`model_weight` pins are safe to retry into.
+   every `calibrated` pin (v2's hinge is deleted), and its SkewNormal measure scores the
+   book-blended predictive on both the OOF and validation frames, so low-`model_weight` pins
+   are safe to retry into.
 
 3. **Supersede shipped cells (S1+S2+S3).** `--include-shipped` routes a shipped cell through the
    higher §7.1 bar — a shipped cell may have a better corner than the scale-only default it
@@ -747,26 +748,34 @@ upstream of the polish. Both default to current production.
   and the per-trial evaluator
   [`pipeline._calibration_penalty`](../../src/sportstradamus/training/pipeline.py). The measure
   fits the gate's joint `(c, s)` (the v2 c-only closure's `s = 0` blindfold was worth 0.03–0.04
-  KS on the NFL SN cells), and the SkewNormal branch **blends with the book per trial**
-  (`pipeline._blend_oof_skewnormal`, mirroring `_fuse_skewnormal`). The blend is mandatory, not
-  optional fidelity: the static ladder (`exp1_fidelity_ladder.csv`) measured the blend gap at
-  ≤0.004 KS on *fixed* artifacts, but under search pressure a model-only measure Goodharts on
-  book-dominated cells — Exp-2's MLB hits allowed (model_weight ≈ 0.12) walked the served g4
-  from 0.021 to 0.153 over 280 trials while its own OOF measure kept improving, dragging g1/g5
-  down with it. The count branch stays model-only (its risk cohort is all SN); post-hoc threading
-  stays NOT built. Cost ≈ the plain `loss` path (the +33% refit is gone); a `calibrated` pin on a
-  hurdle or Mixture cell is inert and now warns.
+  KS on the NFL SN cells), and the SkewNormal statistic is the **max over two book-blended
+  frames** — the OOF pool and the validation split, the latter predicted refit-free by averaging
+  the fold boosters' raw margins (`pipeline.predict_cv_ensemble_params`;
+  `pipeline._blend_oof_skewnormal` mirrors `_fuse_skewnormal` on both). Both legs are mandatory,
+  not optional fidelity, and each was forced by a live failure mode Exp-2 exposed on MLB hits
+  allowed (model_weight ≈ 0.12): a **model-only** measure Goodharts on book-dominated cells (the
+  static ladder's ≤0.004 blend gap on *fixed* artifacts inverted under search pressure — 280
+  trials walked the served g4 from 0.021 to 0.153 while the measure kept improving), and a
+  **blended but OOF-only** measure passes era-fragile trials (train-era recal-fixable, but the
+  validation-era serve fit demanded c=1.80/s=−2.82 which collapsed to g4 0.104 on test — the R2
+  era caveat realized, escalated to its pre-registered two-frame form). The count branch stays
+  model-only OOF (its risk cohort is all SN); post-hoc threading stays NOT built. Cost ≈ the
+  plain `loss` path (the +33% refit is gone; the validation leg is invisible at ~8 s/trial); a
+  `calibrated` pin on a hurdle or Mixture cell is inert and now warns.
 
   **Exp-2 verdict (6 cells × 3 arms, frozen-matrix, 60-min wall each): default flip KILLED by
   its pre-registered criteria** — g4 improved on 1 of 4 failing cells (≥3 required), 1 flip to
   pass (≥2 required), and the MLB arm breached g1. v3 stays an **opt-in per-cell pin**, but it
   *replaces v2 as the implementation behind that pin* (the hinge is deleted) and it is the better
-  opt-in where the model dominates: WNBA MIN ships under v3 (g4 0.0609 loss / 0.0542 v2 fail /
-  0.0470 v3 **ship**, +6 trials over loss), and both controls (NBA PTS, NHL points) held `ship`
-  with equal-or-better trial counts. NBA PF was flat across all three arms (~0.07 — over-wide
-  NegBin, evidence for the Rung B′ / R4 count-objective flip, not for selection). Side finding:
-  v2's refit cost capped real searches at ~10–30 trials/hour, the historical reason the lever
-  under-performed.
+  opt-in where the model dominates: WNBA MIN ships under the final two-frame v3 (g4 0.0609 loss
+  / 0.0542 v2 fail / 0.0464 v3 **ship**, +5 trials over loss), and both controls (NBA PTS, NHL
+  points) held `ship` with equal-or-better trial counts. On MLB hits allowed the final measure
+  is safe at low model_weight: g4 0.0371 vs the v2 incumbent's 0.0390 (the interim measures'
+  0.104–0.153 catastrophes eliminated), with g1 +0.0024 — inside the ±0.003 replicate band the
+  `loss` arm also sat in, so the pin no longer risks poisoning on retrain. NBA PF was flat
+  across all three arms (~0.07 — over-wide NegBin, evidence for the Rung B′ / R4
+  count-objective flip, not for selection). Side finding: v2's refit cost capped real searches
+  at ~10–30 trials/hour, the historical reason the lever under-performed.
 
   **Scale-bound vs shape-bound — what the search-gate can and cannot fix.** A g4-failing SkewNormal
   cell is one of two kinds, separated by the PIT central-coverage triple already in the gate row:
@@ -1911,9 +1920,11 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
 - 2026-08-24 · Exp-2 verdict: calibrated-everywhere default flip KILLED (1/4 improved, MLB g1
-  breach); WNBA MIN ships under v3; MLB Goodhart on model_weight ≈ 0.12 → SN constraint now
-  blends with the book per trial (`_blend_oof_skewnormal`); retry machinery + two-attempt
-  doctrine stay; v2 hinge gone — v3 IS the `calibrated` pin.
+  breach); v2 hinge gone — v3 IS the `calibrated` pin; retry machinery + two-attempt doctrine
+  stay. Two live failures on MLB hits allowed forced the final SN measure to max(blended OOF,
+  blended validation-ensemble): model-only Goodharts at low model_weight (g4 0.153), OOF-only
+  passes era-fragile trials (0.104). Final: MLB 0.0371 ≈ v2's 0.039, WNBA MIN ships 0.0464,
+  controls hold.
 - 2026-08-23 · Lever 1 v3 landed (worktree `g4-calibrated-v3`, brief
   `/tmp/researcher_lever1_v3.md`): hinge deleted — raw CV loss + OOF PIT-KS as
   `TPESampler(constraints_func=…)` feasibility (optuna 4.9.0), per-trial KS from the cv fold
