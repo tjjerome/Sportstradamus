@@ -56,7 +56,7 @@ from sportstradamus.helpers.distributions import _DP_PHI_CEILING, _DP_PHI_FLOOR,
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.hurdle import HurdleZINB
 from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
-from sportstradamus.skew_normal_centered import CenteredSkewNormal
+from sportstradamus.skew_normal_centered import CenteredSkewNormal, _centered_to_direct
 from sportstradamus.stats.model_dependencies import DEPENDENCY_NAMESPACE
 from sportstradamus.training import baselines, calibration, posthoc
 from sportstradamus.training.calibration import fit_book_weights
@@ -460,7 +460,17 @@ def predict_cv_oof_params(
         frames.append(
             pd.DataFrame(params, columns=list(dist_obj.param_dict.keys()), index=X_fold.index)
         )
-    return pd.concat(frames)
+    pooled = pd.concat(frames)
+    if isinstance(dist_obj, CenteredSkewNormal):
+        # Mirror CenteredSkewNormal.predict_dist: downstream consumers only ever see the
+        # direct (loc, scale, alpha) frame.
+        loc, scale, alpha = _centered_to_direct(
+            pooled["mean"].to_numpy(), pooled["sd"].to_numpy(), pooled["gamma1"].to_numpy(), np
+        )
+        pooled = pd.DataFrame(
+            {"loc": loc, "scale": scale, "alpha": alpha}, index=pooled.index, dtype=np.float32
+        )
+    return pooled
 
 
 def fit_predict_params(

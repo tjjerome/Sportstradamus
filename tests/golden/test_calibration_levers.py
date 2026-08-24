@@ -245,6 +245,59 @@ def test_predict_cv_oof_params_matches_predict_lss_params_layout():
     assert (oof["scale"].to_numpy() > 0).all()
 
 
+def test_predict_cv_oof_params_reemits_direct_columns_for_centered_sn():
+    """Centered-parametrization pin (the exp2 NBA-PTS arm-C crash): the OOF frame from a
+    ``CenteredSkewNormal`` model must re-emit the direct ``(loc, scale, alpha)`` columns the
+    calibrated closure decodes — mirroring ``CenteredSkewNormal.predict_dist`` — not the raw
+    ``(mean, sd, gamma1)`` heads."""
+    import lightgbm as lgb
+    import pandas as pd
+    from lightgbmlss.model import LightGBMLSS
+
+    from sportstradamus.helpers import set_model_start_values
+    from sportstradamus.skew_normal_centered import CenteredSkewNormal
+    from sportstradamus.training.hyperparams import _materialise_fold_datasets
+    from sportstradamus.training.pipeline import predict_cv_oof_params
+
+    rng = np.random.default_rng(1)
+    n = 300
+    mean_yr = rng.uniform(8.0, 25.0, size=n)
+    X = pd.DataFrame(
+        {
+            "MeanYr": mean_yr,
+            "STDYr": 0.4 * mean_yr,
+            "ZeroYr": np.zeros(n),
+            "Signal": rng.normal(size=n),
+        }
+    )
+    y = np.clip(1.0 + 0.15 * X["Signal"].to_numpy() + rng.normal(scale=0.25, size=n), 0.2, None)
+
+    model = LightGBMLSS(CenteredSkewNormal(loss_fn="nll"))
+    set_model_start_values(model, "SkewNormal", X, normalized=True, sn_param="centered")
+    dtrain = lgb.Dataset(X, label=y)
+    dtrain.free_raw_data = False
+
+    params = {"num_leaves": 8, "learning_rate": 0.1, "min_child_samples": 20, "verbose": -1}
+    chunks = np.array_split(np.arange(n), 2)
+    folds = [(chunks[1], chunks[0]), (chunks[0], chunks[1])]
+    cv_result = model.cv(
+        dict(params),
+        dtrain,
+        num_boost_round=10,
+        folds=folds,
+        fpreproc=_materialise_fold_datasets,
+        return_cvbooster=True,
+    )
+    oof = predict_cv_oof_params(
+        cv_result["cvbooster"], folds, 10, X, model.start_values, model.dist
+    )
+
+    assert list(oof.columns) == ["loc", "scale", "alpha"]
+    assert sorted(oof.index) == list(X.index)
+    assert np.isfinite(oof.to_numpy()).all()
+    assert (oof["scale"].to_numpy() > 0).all()
+
+
 def test_clamp_seed_params_rescues_sub_floor_log_param():
     """Warm-start regression: a pickle storing lambda_l1=0.0 (LightGBM's default, below the
     1e-6 log-scale floor) must be clamped up to the floor, not enqueued as-is — seeding 0.0 into
