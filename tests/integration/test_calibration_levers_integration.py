@@ -137,14 +137,14 @@ def test_calibration_penalty_scores_skewnormal_then_pick_selects(monkeypatch):
         "sn_param": "direct",
     }
     n_feat = X.shape[1]
-    joint_fit_calls = []
-    real_joint_fit = pipeline_mod.fit_skewnorm_dispersion_skew
+    sn_ks_probes = []
+    real_sn_ks = pipeline_mod._served_sn_pit_ks
 
-    def _spy_joint_fit(*args, **kwargs):
-        joint_fit_calls.append(1)
-        return real_joint_fit(*args, **kwargs)
+    def _spy_sn_ks(mean, sigma, skew, y, c, s, gate=None):
+        sn_ks_probes.append((float(c), float(s)))
+        return real_sn_ks(mean, sigma, skew, y, c, s, gate)
 
-    monkeypatch.setattr(pipeline_mod, "fit_skewnorm_dispersion_skew", _spy_joint_fit)
+    monkeypatch.setattr(pipeline_mod, "_served_sn_pit_ks", _spy_sn_ks)
     served_pit_ks = _calibration_penalty(splits, dist_info)
 
     # The trial artifacts the evaluator now consumes: a real cv per candidate with explicit
@@ -184,9 +184,10 @@ def test_calibration_penalty_scores_skewnormal_then_pick_selects(monkeypatch):
         )
         assert 0.0 <= cand["pit_ks"] <= 1.0  # every candidate scored a finite served PIT-KS
 
-    # C2: the SkewNormal closure fits (c, s) jointly per trial — the frame the gate scores —
-    # not the retired c-only proxy.
-    assert len(joint_fit_calls) == len(candidates)
+    # C2: the SkewNormal closure searches the skew dimension per trial — the frame the gate
+    # scores — not the retired c-only (s = 0) proxy. The coarse sequential fit probes
+    # interior s values by construction.
+    assert any(s != 0.0 for _, s in sn_ks_probes)
 
     threshold = _gate4_pit_ks_threshold(len(splits["y_validation"]))
     winner = _pick_calibrated_candidate(candidates, threshold, len(splits["X_train"]))

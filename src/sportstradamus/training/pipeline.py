@@ -107,6 +107,8 @@ from sportstradamus.training.model_strategy import (
 )
 from sportstradamus.training.role_specs import role_spec_for
 from sportstradamus.training.scorecard import (
+    _DISPERSION_C_BOUNDS,
+    _DISPERSION_SKEW_BOUNDS,
     _gate4_pit_ks_threshold,
     _randomized_pit_draws,
     _randomized_pit_ks,
@@ -1344,13 +1346,26 @@ def _calibration_penalty(splits: dict, dist_info: dict):
             hist_gate=dist_info["hist_gate"],
         )
         mean = decoded.ev
-        # joint=False (sequential c-then-s): the full 3-start Nelder-Mead joint fit is the
-        # production serve fit; inside the per-trial constraint it is ~5x the cost for a
-        # ranking measure the sequential fit orders identically.
-        c, s = fit_skewnorm_dispersion_skew(
-            mean, sn_scale, skew, y_pool, gate=decoded.gate, joint=False
+        # Coarse sequential (c, s) at 0.01 tolerance — a ranking measure, not the serve
+        # fit. The production fit_skewnorm_dispersion_skew burns ~50 full-precision KS
+        # evals per call (~187 s/trial on a ZI SN pool); ~20 coarse evals order the
+        # trials identically.
+        ks_at = lambda c, s: _served_sn_pit_ks(  # noqa: E731
+            mean, sn_scale, skew, y_pool, c, s, decoded.gate
         )
-        return _served_sn_pit_ks(mean, sn_scale, skew, y_pool, c, s, decoded.gate)
+        c = minimize_scalar(
+            lambda c: ks_at(c, 0.0),
+            bounds=_DISPERSION_C_BOUNDS,
+            method="bounded",
+            options={"xatol": 1e-2},
+        ).x
+        s = minimize_scalar(
+            lambda s: ks_at(c, s),
+            bounds=_DISPERSION_SKEW_BOUNDS,
+            method="bounded",
+            options={"xatol": 1e-2},
+        ).x
+        return ks_at(c, s)
 
     def count_pit_ks(params: dict, *, cvbooster, folds, opt_rounds) -> float:
         preds, _, y_pool = oof_frames(cvbooster, folds, opt_rounds)
