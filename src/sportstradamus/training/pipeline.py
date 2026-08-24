@@ -1366,9 +1366,8 @@ def _calibration_penalty(
     leg vetoes trials whose in-era recal-fixability does not survive to the era the
     serve fit and gate actually use. Deliberate proxy simplifications: (a) both frames
     skip the post-hoc stages (≤0.005 KS); the count branch stays model-only OOF (no
-    demonstrated harm; its risk pins are all SN); (b) the count branch always fits ``c``
-    on the PIT-KS
-    objective — a proxy for the production dispersion fit even when the cell's
+    demonstrated harm; its risk pins are all SN); (b) the count branch always fits ``c`` on the
+    PIT-KS objective — a proxy for the production dispersion fit even when the cell's
     ``count_dispersion_objective`` is crps — because the closure's output IS the
     served-KS ranking statistic; (c) the measure is budgeted — the pool is capped at
     :data:`_OOF_KS_MAX_ROWS` rows, the SN fit runs sequential (c then s), and the count
