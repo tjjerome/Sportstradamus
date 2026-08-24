@@ -672,7 +672,8 @@ Entry: cell fails g4 (either direction) or g2/g3.
   0.065→0.028) and taxes slightly elsewhere, which is exactly what the
   `_DISPERSION_SKEW_MIN_GAIN` hard gate protects: keep the gate, no λ machinery.
 - **Rung B′ — re-target the count objective (built, opt-in; default-flip candidate,
-  Experiment-3 gated).** The count-branch `dispersion_cal`
+  Experiment-3 gated; kickoff brief: [count_dispersion_flip.md](count_dispersion_flip.md)).**
+  The count-branch `dispersion_cal`
   minimized CRPS, but the gate is PIT-KS — re-targeting the fit to PIT-KS is the one change
   that tightens the whole over-wide count branch (snapshot: all 21 ZINB/NegBin cells
   over-covered; the 2026-08 confirm-ledger read sharpens this: 26 of 30 over-wide count rows
@@ -991,7 +992,7 @@ first-order CRPS trial can produce (LightGBMLSS's CRPS path sets the Hessian to 
 before ship; an inference-path round-trip test for every new served object (§7.3). **If it fails:**
 signal-starved → features (§6.3); genuine heavy tail → family (§6.6).
 
-### §6.6 WS-3 — Family escalation: count wall + shape-bound (DPO live — 4 ships: WNBA TOV, NHL points/blocked/shots; centered-SN pilots next)
+### §6.6 WS-3 — Family escalation: count wall + shape-bound (DPO live — 4 ships: WNBA TOV, NHL points/blocked/shots; centered-SN pilots next; shape-bound kickoff brief: [shape_bound_triage.md](shape_bound_triage.md))
 
 Entry: a cell whose cheaper axes are recorded-tried (§8), or a whole cohort the sweep leaves at
 the family ceiling. **This is the main funded build.** The two research questions are answered —
