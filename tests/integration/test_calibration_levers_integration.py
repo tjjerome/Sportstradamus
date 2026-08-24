@@ -129,6 +129,9 @@ def test_calibration_penalty_scores_skewnormal_then_pick_selects(monkeypatch):
         "B_train": pd.DataFrame({"Line": mean_yr[:cut], "Odds": 0.5, "EV": book_ev}),
         "X_validation": X.iloc[cut:].reset_index(drop=True),
         "y_validation": pd.DataFrame({"Result": y_raw[cut:]}),
+        "B_validation": pd.DataFrame(
+            {"Line": mean_yr[cut:], "Odds": 0.5, "EV": mean_yr[cut:] * 1.02}
+        ).reset_index(drop=True),
     }
     dist_info = {
         "dist": "SkewNormal",
@@ -206,9 +209,10 @@ def test_calibration_penalty_scores_skewnormal_then_pick_selects(monkeypatch):
     # interior s values by construction.
     assert any(s != 0.0 for _, s in sn_ks_probes)
 
-    # R1-lite: every trial's measure blends with the book (exp2 MLB Goodhart fix) — one
-    # fit_blend_weight per evaluator call, and the fitted weight is a real mixing fraction.
-    assert len(blend_weights) == len(candidates)
+    # R1-lite two-frame constraint: every trial's measure blends with the book on BOTH the
+    # OOF and validation frames (exp2 MLB Goodhart + era-transfer fixes) — two
+    # fit_blend_weight calls per evaluator call, each a real mixing fraction.
+    assert len(blend_weights) == 2 * len(candidates)
     assert all(0.0 <= w <= 1.0 for w in blend_weights)
 
     threshold = _gate4_pit_ks_threshold(len(splits["y_validation"]))

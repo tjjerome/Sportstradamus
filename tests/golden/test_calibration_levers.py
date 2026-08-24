@@ -298,6 +298,43 @@ def test_predict_cv_oof_params_reemits_direct_columns_for_centered_sn():
     assert (oof["scale"].to_numpy() > 0).all()
 
 
+def test_predict_cv_ensemble_params_averages_raw_margins_and_reemits_direct():
+    """Validation-leg pin (the two-frame constraint): the ensemble predictor averages the
+    fold boosters' RAW margins before the response functions — not the response-space
+    params — and a ``CenteredSkewNormal`` frame re-emits the direct ``(loc, scale, alpha)``
+    columns exactly like the OOF path."""
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    from sportstradamus.skew_normal_centered import CenteredSkewNormal
+    from sportstradamus.training.pipeline import (
+        _response_param_frame,
+        predict_cv_ensemble_params,
+    )
+
+    rng = np.random.default_rng(7)
+    n = 40
+    dist_obj = CenteredSkewNormal(loss_fn="nll")
+    X = pd.DataFrame(rng.normal(size=(n, 3)), columns=["a", "b", "c"])
+    start_values = rng.normal(scale=0.1, size=(n, dist_obj.n_dist_param))
+    raw_a = rng.normal(scale=0.5, size=(n, dist_obj.n_dist_param))
+    raw_b = rng.normal(scale=0.5, size=(n, dist_obj.n_dist_param))
+    cvbooster = SimpleNamespace(
+        boosters=[
+            SimpleNamespace(predict=lambda X, raw_score, num_iteration, _r=r: _r)
+            for r in (raw_a, raw_b)
+        ]
+    )
+
+    ens = predict_cv_ensemble_params(cvbooster, 10, X, start_values, dist_obj)
+
+    expected = _response_param_frame((raw_a + raw_b) / 2.0, start_values, dist_obj, X.index)
+    assert list(ens.columns) == ["loc", "scale", "alpha"]
+    assert (ens["scale"].to_numpy() > 0).all()
+    pd.testing.assert_frame_equal(ens, expected)
+
+
 def test_clamp_seed_params_rescues_sub_floor_log_param():
     """Warm-start regression: a pickle storing lambda_l1=0.0 (LightGBM's default, below the
     1e-6 log-scale floor) must be clamped up to the floor, not enqueued as-is — seeding 0.0 into

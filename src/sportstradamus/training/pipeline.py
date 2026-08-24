@@ -444,35 +444,56 @@ def predict_cv_oof_params(
         dist_obj: Distribution object whose ``param_dict`` response functions apply
             (including any ``_BoundedResponseFn`` shape clamp already installed on it).
     """
-    frames = []
-    for booster, (_, test_idx) in zip(cvbooster.boosters, folds, strict=True):
-        X_fold = X.iloc[test_idx]
-        predt = torch.tensor(
-            booster.predict(X_fold, raw_score=True, num_iteration=opt_rounds),
-            dtype=torch.float32,
-        ).reshape(-1, dist_obj.n_dist_param)
-        init = torch.tensor(start_values[test_idx], dtype=torch.float32)
-        params = np.concatenate(
-            [
-                response_fn(predt[:, i].reshape(-1, 1) + init[:, i].reshape(-1, 1)).numpy()
-                for i, response_fn in enumerate(dist_obj.param_dict.values())
-            ],
-            axis=1,
+    frames = [
+        _response_param_frame(
+            booster.predict(X.iloc[test_idx], raw_score=True, num_iteration=opt_rounds),
+            start_values[test_idx],
+            dist_obj,
+            X.iloc[test_idx].index,
         )
-        frames.append(
-            pd.DataFrame(params, columns=list(dist_obj.param_dict.keys()), index=X_fold.index)
-        )
-    pooled = pd.concat(frames)
+        for booster, (_, test_idx) in zip(cvbooster.boosters, folds, strict=True)
+    ]
+    return pd.concat(frames)
+
+
+def _response_param_frame(raw_margins, start_values: np.ndarray, dist_obj, index) -> pd.DataFrame:
+    """Raw booster margins + start values → response-space param frame for one row block."""
+    predt = torch.tensor(raw_margins, dtype=torch.float32).reshape(-1, dist_obj.n_dist_param)
+    init = torch.tensor(start_values, dtype=torch.float32)
+    params = np.concatenate(
+        [
+            response_fn(predt[:, i].reshape(-1, 1) + init[:, i].reshape(-1, 1)).numpy()
+            for i, response_fn in enumerate(dist_obj.param_dict.values())
+        ],
+        axis=1,
+    )
+    frame = pd.DataFrame(params, columns=list(dist_obj.param_dict.keys()), index=index)
     if isinstance(dist_obj, CenteredSkewNormal):
         # Mirror CenteredSkewNormal.predict_dist: downstream consumers only ever see the
         # direct (loc, scale, alpha) frame.
         loc, scale, alpha = _centered_to_direct(
-            pooled["mean"].to_numpy(), pooled["sd"].to_numpy(), pooled["gamma1"].to_numpy(), np
+            frame["mean"].to_numpy(), frame["sd"].to_numpy(), frame["gamma1"].to_numpy(), np
         )
-        pooled = pd.DataFrame(
-            {"loc": loc, "scale": scale, "alpha": alpha}, index=pooled.index, dtype=np.float32
+        frame = pd.DataFrame(
+            {"loc": loc, "scale": scale, "alpha": alpha}, index=index, dtype=np.float32
         )
-    return pooled
+    return frame
+
+
+def predict_cv_ensemble_params(
+    cvbooster, opt_rounds: int, X: pd.DataFrame, start_values: np.ndarray, dist_obj
+) -> pd.DataFrame:
+    """Ensemble raw params for rows no fold booster trained on (e.g. the validation split).
+
+    Averages the fold boosters' raw margins at ``num_iteration=opt_rounds`` — the standard
+    cv-ensemble predictor — then applies start values and response functions exactly as
+    :func:`predict_cv_oof_params` does for held-out fold rows.
+    """
+    raw = np.mean(
+        [b.predict(X, raw_score=True, num_iteration=opt_rounds) for b in cvbooster.boosters],
+        axis=0,
+    )
+    return _response_param_frame(raw, start_values, dist_obj, X.index)
 
 
 def fit_predict_params(
@@ -1333,18 +1354,20 @@ def _calibration_penalty(
     """Build the per-trial served-PIT-KS evaluator that search-gates the HPO (Lever 1).
 
     Returns ``evaluate(params, *, cvbooster, folds, opt_rounds)`` mapping one trial's
-    already-trained CV fold boosters to the served randomized-PIT KS on the pooled
-    out-of-fold train rows — SkewNormal via its joint (scale, skew) fit, every other
-    family (NegBin / ZINB joint / DPO / Gamma / ZAGamma) via the scalar dispersion-``c``
-    fit. No refit: each fold's held-out rows are predicted from that fold's booster at
-    ``num_iteration=opt_rounds``, pooled in fold order, decoded once, fit once — the
-    OOF frame is ~4.7× the validation split, cutting the KS sampling SD 2.16× and
-    removing the +33% per-trial refit (Lever-1-v3 brief, R2). Three deliberate proxy
-    simplifications: (a) the SkewNormal branch blends with the book per trial
-    (:func:`_blend_oof_skewnormal` — mandatory after exp2's MLB Goodhart failure on a
-    model_weight ~0.12 cell) but skips the post-hoc stages (≤0.005 KS); the count branch
-    stays model-only (no demonstrated harm; its risk pins are all SN); (b) the count
-    branch always fits ``c`` on the PIT-KS
+    already-trained CV fold boosters to a served randomized-PIT KS — SkewNormal via its
+    joint (scale, skew) fit, every other family (NegBin / ZINB joint / DPO / Gamma /
+    ZAGamma) via the scalar dispersion-``c`` fit. No refit anywhere: fold held-out rows
+    come from that fold's booster at ``num_iteration=opt_rounds`` (~4.7× the validation
+    rows, cutting the KS sampling SD 2.16× and removing the +33% per-trial refit —
+    Lever-1-v3 brief, R2), and the validation rows from the fold-booster ensemble mean.
+    The SkewNormal statistic is the **max over the OOF and validation frames** (the R2
+    era caveat, escalated after exp2): both frames blend with the book per trial
+    (:func:`_blend_oof_skewnormal` — mandatory at low model_weight) and the validation
+    leg vetoes trials whose in-era recal-fixability does not survive to the era the
+    serve fit and gate actually use. Deliberate proxy simplifications: (a) both frames
+    skip the post-hoc stages (≤0.005 KS); the count branch stays model-only OOF (no
+    demonstrated harm; its risk pins are all SN); (b) the count branch always fits ``c``
+    on the PIT-KS
     objective — a proxy for the production dispersion fit even when the cell's
     ``count_dispersion_objective`` is crps — because the closure's output IS the
     served-KS ranking statistic; (c) the measure is budgeted — the pool is capped at
@@ -1388,8 +1411,7 @@ def _calibration_penalty(
         y_pool = y_train_result.loc[preds.index].to_numpy(dtype=float)
         return preds, X_train.loc[preds.index], y_pool
 
-    def served_pit_ks(params: dict, *, cvbooster, folds, opt_rounds) -> float:
-        preds, X_pool, y_pool = oof_frames(cvbooster, folds, opt_rounds)
+    def sn_frame_ks(preds, X_pool, y_pool, book_ev):
         sn_loc = strategy.decode_loc(preds["loc"].to_numpy(), X_pool, global_mean, denom_col)
         sn_scale = strategy.decode_scale(preds["scale"].to_numpy(), X_pool, denom_col)
         skew = preds["alpha"].to_numpy()
@@ -1400,7 +1422,6 @@ def _calibration_penalty(
             sn_scale=sn_scale,
             hist_gate=dist_info["hist_gate"],
         )
-        book_ev = splits["B_train"]["EV"].loc[preds.index].to_numpy(dtype=float)
         mean, sn_scale, skew, gate = _blend_oof_skewnormal(
             decoded, sn_scale, skew, book_ev, y_pool, dist_info, blending
         )
@@ -1425,6 +1446,28 @@ def _calibration_penalty(
             options={"xatol": _TRIAL_XATOL},
         ).x
         return ks_at(c, s)
+
+    def served_pit_ks(params: dict, *, cvbooster, folds, opt_rounds) -> float:
+        preds, X_pool, y_pool = oof_frames(cvbooster, folds, opt_rounds)
+        ks_oof = sn_frame_ks(
+            preds, X_pool, y_pool, splits["B_train"]["EV"].loc[preds.index].to_numpy(dtype=float)
+        )
+        # Two-frame constraint (the R2 era caveat, escalated): the OOF pool is train-era, the
+        # gate is later-era. exp2's MLB rerun showed a trial can be recal-fixable in-era yet
+        # demand an extreme, non-transferring (c, s) on the validation era (serve fit
+        # c=1.80/s=-2.82 → test g4 0.104 at model_weight 0.05). The validation leg prices each
+        # trial on the same frame the serve fit will use; the fold-booster ensemble keeps it
+        # refit-free.
+        preds_val = predict_cv_ensemble_params(
+            cvbooster, opt_rounds, splits["X_validation"], start_values_val, dist_obj
+        )
+        ks_val = sn_frame_ks(
+            preds_val,
+            splits["X_validation"],
+            splits["y_validation"]["Result"].to_numpy(dtype=float),
+            splits["B_validation"]["EV"].to_numpy(dtype=float),
+        )
+        return max(ks_oof, ks_val)
 
     def count_pit_ks(params: dict, *, cvbooster, folds, opt_rounds) -> float:
         preds, _, y_pool = oof_frames(cvbooster, folds, opt_rounds)
@@ -1462,6 +1505,17 @@ def _calibration_penalty(
         return _randomized_pit_ks(frame, dist, y_pool, strategy=TARGET_NORM_NONE)
 
     if dist == "SkewNormal":
+        carrier_val = SimpleNamespace()
+        set_model_start_values(
+            carrier_val,
+            dist,
+            splits["X_validation"],
+            shape_ceiling=dist_info["shape_ceiling"],
+            normalized=dist_info["normalize"],
+            offset_mode=dist_info["offset_mode"],
+            sn_param=dist_info["sn_param"],
+        )
+        start_values_val = carrier_val.start_values
         return served_pit_ks
     return count_pit_ks
 
