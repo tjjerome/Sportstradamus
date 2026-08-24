@@ -1276,7 +1276,53 @@ def _pick_calibrated_candidate(candidates: list[dict], threshold: float, n_rows:
     return picked
 
 
-def _calibration_penalty(splits: dict, dist_info: dict):
+def _blend_oof_skewnormal(decoded, sn_scale, skew, book_ev, y_pool, dist_info, blending):
+    """Blend the OOF model predictive with the book the way serving does.
+
+    exp2 MLB hits allowed: at model_weight ~0.12 the model-only measure anti-correlates
+    with the served gate (280 trials walked g4 from 0.02 to 0.15), so the constraint must
+    score the fused predictive. Per-trial ``fit_blend_weight`` mirrors the production fit;
+    rows without a real book EV blend at weight 1 (the authenticity fallback). Returns the
+    blended ``(mean, sigma, alpha, gate)``.
+    """
+    book_ok = np.isfinite(book_ev) & (book_ev > 0)
+    cv = dist_info["cv"]
+    gate_kwargs = (
+        {"gate_model": decoded.gate, "gate_book": 0.0}
+        if dist_info["hist_gate"] > GATE_PUBLISH_THRESHOLD and decoded.gate is not None
+        else {}
+    )
+    if book_ok.any():
+        w = calibration.fit_blend_weight(
+            blending,
+            decoded.ev[book_ok],
+            book_ev[book_ok],
+            y_pool[book_ok],
+            "SkewNormal",
+            cv=cv,
+            model_sigma=sn_scale[book_ok],
+            model_skew_alpha=skew[book_ok],
+            **{
+                key: (value[book_ok] if isinstance(value, np.ndarray) else value)
+                for key, value in gate_kwargs.items()
+            },
+        )
+    else:
+        w = 1.0
+    mean, sigma_blend, alpha_blend, gate_blend = fused_loc(
+        np.where(book_ok, w, 1.0),
+        decoded.ev,
+        np.where(book_ok, book_ev, decoded.ev),
+        cv,
+        "SkewNormal",
+        sigma=sn_scale,
+        skew_alpha=skew,
+        **gate_kwargs,
+    )
+    return mean, sigma_blend, alpha_blend, gate_blend if gate_kwargs else decoded.gate
+
+
+def _calibration_penalty(splits: dict, dist_info: dict, *, blending: str = calibration.DEFAULT_BLENDING):
     """Build the per-trial served-PIT-KS evaluator that search-gates the HPO (Lever 1).
 
     Returns ``evaluate(params, *, cvbooster, folds, opt_rounds)`` mapping one trial's
@@ -1287,9 +1333,11 @@ def _calibration_penalty(splits: dict, dist_info: dict):
     ``num_iteration=opt_rounds``, pooled in fold order, decoded once, fit once — the
     OOF frame is ~4.7× the validation split, cutting the KS sampling SD 2.16× and
     removing the +33% per-trial refit (Lever-1-v3 brief, R2). Three deliberate proxy
-    simplifications: (a) both branches are model-only — the book blend and post-hoc
-    stages are skipped (measured within ≤0.004 KS of the served frame on every
-    measurable calibrated cell); (b) the count branch always fits ``c`` on the PIT-KS
+    simplifications: (a) the SkewNormal branch blends with the book per trial
+    (:func:`_blend_oof_skewnormal` — mandatory after exp2's MLB Goodhart failure on a
+    model_weight ~0.12 cell) but skips the post-hoc stages (≤0.005 KS); the count branch
+    stays model-only (no demonstrated harm; its risk pins are all SN); (b) the count
+    branch always fits ``c`` on the PIT-KS
     objective — a proxy for the production dispersion fit even when the cell's
     ``count_dispersion_objective`` is crps — because the closure's output IS the
     served-KS ranking statistic; (c) the measure is budgeted — the pool is capped at
@@ -1345,13 +1393,16 @@ def _calibration_penalty(splits: dict, dist_info: dict):
             sn_scale=sn_scale,
             hist_gate=dist_info["hist_gate"],
         )
-        mean = decoded.ev
+        book_ev = splits["B_train"]["EV"].loc[preds.index].to_numpy(dtype=float)
+        mean, sn_scale, skew, gate = _blend_oof_skewnormal(
+            decoded, sn_scale, skew, book_ev, y_pool, dist_info, blending
+        )
         # Coarse sequential (c, s) at 0.01 tolerance — a ranking measure, not the serve
         # fit. The production fit_skewnorm_dispersion_skew burns ~50 full-precision KS
         # evals per call (~187 s/trial on a ZI SN pool); ~20 coarse evals order the
         # trials identically.
         ks_at = lambda c, s: _served_sn_pit_ks(  # noqa: E731
-            mean, sn_scale, skew, y_pool, c, s, decoded.gate
+            mean, sn_scale, skew, y_pool, c, s, gate
         )
         c = minimize_scalar(
             lambda c: ks_at(c, 0.0),
@@ -4648,7 +4699,7 @@ def train_market(
         # Hurdle skips Optuna entirely (_step_select_hyperparams), so there is nothing to
         # select. Mixture has no per-trial served-KS closure (its params frame doesn't fit
         # either _calibration_penalty branch); calibrated falls back to loss selection.
-        penalty = _calibration_penalty(splits, dist_info)
+        penalty = _calibration_penalty(splits, dist_info, blending=blending)
         penalty_threshold = _gate4_pit_ks_threshold(len(splits["y_validation"]))
     elif hpo_selection == "calibrated":
         logger.warning(

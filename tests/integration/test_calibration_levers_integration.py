@@ -117,10 +117,16 @@ def test_calibration_penalty_scores_skewnormal_then_pick_selects(monkeypatch):
     y_norm = y_raw / mean_yr  # ratio_meanyr forward
 
     cut = 1000
+    # Book EV for the train rows: a real quote near the outcome mean for most rows, with a
+    # zero-EV band exercising the no-book fallback (model-only at weight 1) inside
+    # _blend_oof_skewnormal.
+    book_ev = mean_yr[:cut] * 1.02
+    book_ev[:50] = 0.0
     splits = {
         "X_train": X.iloc[:cut],
         "y_train": pd.DataFrame({"Result": y_raw[:cut]}),
         "y_train_labels": y_norm[:cut],
+        "B_train": pd.DataFrame({"Line": mean_yr[:cut], "Odds": 0.5, "EV": book_ev}),
         "X_validation": X.iloc[cut:].reset_index(drop=True),
         "y_validation": pd.DataFrame({"Result": y_raw[cut:]}),
     }
@@ -131,6 +137,7 @@ def test_calibration_penalty_scores_skewnormal_then_pick_selects(monkeypatch):
         "global_mean": float(y_raw[:cut].mean()),
         "denom_col": "MeanYr",
         "hist_gate": 0.0,
+        "cv": 0.4,
         "normalize": True,
         "offset_mode": False,
         "shape_ceiling": None,
@@ -145,6 +152,16 @@ def test_calibration_penalty_scores_skewnormal_then_pick_selects(monkeypatch):
         return real_sn_ks(mean, sigma, skew, y, c, s, gate)
 
     monkeypatch.setattr(pipeline_mod, "_served_sn_pit_ks", _spy_sn_ks)
+
+    blend_weights = []
+    real_blend_fit = pipeline_mod.calibration.fit_blend_weight
+
+    def _spy_blend_fit(*args, **kwargs):
+        w = real_blend_fit(*args, **kwargs)
+        blend_weights.append(float(np.asarray(w).ravel()[0]))
+        return w
+
+    monkeypatch.setattr(pipeline_mod.calibration, "fit_blend_weight", _spy_blend_fit)
     served_pit_ks = _calibration_penalty(splits, dist_info)
 
     # The trial artifacts the evaluator now consumes: a real cv per candidate with explicit
@@ -188,6 +205,11 @@ def test_calibration_penalty_scores_skewnormal_then_pick_selects(monkeypatch):
     # scores — not the retired c-only (s = 0) proxy. The coarse sequential fit probes
     # interior s values by construction.
     assert any(s != 0.0 for _, s in sn_ks_probes)
+
+    # R1-lite: every trial's measure blends with the book (exp2 MLB Goodhart fix) — one
+    # fit_blend_weight per evaluator call, and the fitted weight is a real mixing fraction.
+    assert len(blend_weights) == len(candidates)
+    assert all(0.0 <= w <= 1.0 for w in blend_weights)
 
     threshold = _gate4_pit_ks_threshold(len(splits["y_validation"]))
     winner = _pick_calibrated_candidate(candidates, threshold, len(splits["X_train"]))
