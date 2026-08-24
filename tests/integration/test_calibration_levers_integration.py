@@ -20,6 +20,7 @@ import pytest
 @pytest.mark.integration
 def test_run_hyper_opt_search_gate_returns_pit_ks_tagged_candidates():
     import lightgbm as lgb
+    import pandas as pd
     from lightgbmlss.model import LightGBMLSS
 
     from sportstradamus.skew_normal import SkewNormal
@@ -28,7 +29,16 @@ def test_run_hyper_opt_search_gate_returns_pit_ks_tagged_candidates():
     rng = np.random.default_rng(0)
     n = 600
     x0 = rng.normal(size=n)
-    X = np.column_stack([x0, rng.normal(size=n), rng.normal(size=n)])
+    # A category-dtype column mirrors the production matrices (e.g. MLB "Player position"):
+    # lightgbm auto-registers it as a named categorical feature, which breaks if the Dataset
+    # is constructed before cv sees the trial params (the exp2 MLB arm-C crash).
+    X = pd.DataFrame(
+        {
+            "x0": x0,
+            "x1": rng.normal(size=n),
+            "pos": pd.Categorical(rng.choice(["C", "1B", "OF"], size=n)),
+        }
+    )
     y = 5.0 + 2.0 * x0 + rng.normal(scale=1.0, size=n)
     dtrain = lgb.Dataset(X, label=y)
 

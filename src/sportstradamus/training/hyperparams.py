@@ -154,8 +154,11 @@ def run_hyper_opt(
     if calibration_penalty is not None:
         # Explicit contiguous folds (rows are date-ordered, so these are the same date blocks
         # cv's default produces) — lightgbm's kstep chunking silently drops the tail rows when
-        # n % nfold != 0, and OOF pooling needs the exact held-out index sets.
-        chunks = np.array_split(np.arange(train_set.construct().num_data()), nfold)
+        # n % nfold != 0, and OOF pooling needs the exact held-out index sets. Row count comes
+        # from the raw frame, NOT construct(): an early parameterless construct freezes the
+        # Dataset so cv's later per-trial params (categorical_feature by name) force a re-init
+        # against the converted array, where name lookup fails.
+        chunks = np.array_split(np.arange(len(train_set.data)), nfold)
         folds = [(np.concatenate(chunks[:k] + chunks[k + 1 :]), chunks[k]) for k in range(nfold)]
 
     def objective(trial):
