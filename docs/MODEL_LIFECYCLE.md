@@ -45,7 +45,8 @@ every **withheld** cell in `stat_meta.json` — both SkewNormal and ZINB — tha
 matrix (a "board" run), printing an up-front count of how many cells (and trainings) that is;
 `--league` alone narrows the board to one league. A cell with no cached matrix is **skipped with a
 yellow warning** rather than swept — the throwaway trainings reuse the cached matrix and never
-rebuild one, so train the cell for real once first if you want it in the board. Add
+rebuild one. The weekly `meditate` keeps every active cell's matrix warm (withheld cells included —
+they skip only the fit), so this bites only a market that has never seen a weekly run. Add
 `--include-shipped` to also rank already-shipped (devel/main) cells when hunting a better strategy for
 a live cell; that path is judged by the supersession test, and `--confirm` never auto-re-ships a live
 cell.

@@ -446,7 +446,7 @@ def _lock_production_artifacts(
     help=(
         "Assemble and persist each cell's training matrix (and comps), then stop before "
         "distribution selection and model training. Warms data/training_data/ without training; "
-        "pair with --bypass-withholding to reach withheld cells."
+        "withheld cells are included (their matrices refresh on every run)."
     ),
 )
 @click.option(
@@ -577,7 +577,8 @@ def meditate(
         np.random.seed(_RNG_SEED)
 
     # Per-cell ship config (data/config/stat_meta.json) governs which markets
-    # train with which strategy and which are withheld (skipped + pruned).
+    # train with which strategy and which are withheld (matrix kept warm,
+    # training skipped, pickle pruned).
     # Validated here so a bad entry fails before the expensive gamelog loads
     # below. Deterministic A/B runs ignore it: they target an explicit
     # --market with an explicit --target-normalization and must never mutate
@@ -711,8 +712,27 @@ def meditate(
                         f"(dist={cell_dist!r}, strategy={cell_target_norm!r})"
                     )
                 else:
+                    # Withheld cells keep their training matrix warm — a later promotion
+                    # (board sweep / confirm walk) trains from this cache without a
+                    # cold multi-season rebuild. Only the fit is skipped.
+                    train_market(
+                        lg,
+                        market,
+                        stat_data,
+                        archive,
+                        league_start_date,
+                        force=force,
+                        matrix_only=True,
+                        full_rebuild=full_rebuild,
+                        matrix_output=matrix_output,
+                        dependency_root=dependency_root,
+                        dependency_namespace=dependency_namespace,
+                    )
                     prune_model_pickle(lg, market)
-                    click.echo(f"[{lg}] {market}: withheld — pruned pickle, skipped training")
+                    click.echo(
+                        f"[{lg}] {market}: withheld — matrix refreshed, pruned pickle, "
+                        "skipped training"
+                    )
                     continue
             if cell_dist is not None and cell_dist not in CONTINUOUS_DISTS:
                 cell_target_norm = TARGET_NORM_NONE

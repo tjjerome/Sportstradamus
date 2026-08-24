@@ -22,8 +22,10 @@ Fields per cell drive shipping + training:
   pipeline branch consumes the target-normalization slug.
 * ``shipped`` — release surface:
 
-  - ``"withheld"`` — never shipped; ``meditate`` skips training and prunes
-    the production pickle so inference dark-outs the market.
+  - ``"withheld"`` — never shipped; ``meditate`` still refreshes the cell's
+    training matrix (so a later sweep runs from a warm cache) but skips
+    training and prunes the production pickle so inference dark-outs the
+    market.
   - ``"devel"`` — passed Gate 1; ships on the ``devel`` branch that the
     production server tracks. Has not yet graduated through Gate 2 to
     ``main``.
@@ -237,7 +239,8 @@ def resolve_cell_target_normalization(
 
     Returns:
         A strategy slug, :data:`TARGET_NORM_NONE`, or :data:`WITHHELD` (the
-        caller prunes the pickle and skips training in the last case).
+        caller refreshes the matrix, prunes the pickle, and skips training
+        in the last case).
     """
     mapped = config.get(league, {}).get(market)
     if mapped is None:

@@ -247,7 +247,7 @@ stability as a gate before `scripts/optimize_comp_weights.py --save`.
 |---|---|
 | Change which markets a league trains | `training/markets.py` → `ALL_MARKETS` |
 | Change which distribution a stat uses | `src/sportstradamus/data/config/stat_meta.json` (`dist` field) |
-| Control which cells train and serve | `stat_meta.json` per-cell `shipped` field — `"withheld"` (skipped + pruned) / `"devel"` / `"main"` release surfaces |
+| Control which cells train and serve | `stat_meta.json` per-cell `shipped` field — `"withheld"` (matrix kept warm, training skipped, pickle pruned) / `"devel"` / `"main"` release surfaces |
 | Add/remove a sportsbook from consensus lines | `src/sportstradamus/data/config/prop_books.json` |
 | Add a player name alias | `src/sportstradamus/data/config/name_map.json` |
 | Understand a training stats metric | `training/report.py` (schema owner) + [docs/ship_gate.md](ship_gate.md) for the gate columns |

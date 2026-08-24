@@ -30,6 +30,6 @@ Options:
                                   matrix (and comps), then stop before
                                   distribution selection and model training.
                                   Warms data/training_data/ without training;
-                                  pair with --bypass-withholding to reach
-                                  withheld cells.
+                                  withheld cells are included (their matrices
+                                  refresh on every run).
   --help                          Show this message and exit.
