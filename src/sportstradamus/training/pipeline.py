@@ -1238,6 +1238,11 @@ _KS_SAMPLING_SD_COEF = 0.2606
 _OOF_KS_MAX_ROWS = 4000
 _OOF_KS_SUBSAMPLE_SEED = 4517
 
+# Per-trial minimize_scalar tolerance for the SkewNormal (c, s) and count dispersion-c fits
+# inside the OOF constraint: a coarse ranking measure, not the full-precision serve fit — see
+# the per-branch comments below for each fit's specific eval cost.
+_TRIAL_XATOL = 1e-2
+
 
 def _pick_calibrated_candidate(candidates: list[dict], threshold: float, n_rows: int) -> dict:
     """Calibration-constrained HP selection (Lever 1): the lowest-CRPS trial whose OOF
@@ -1322,7 +1327,9 @@ def _blend_oof_skewnormal(decoded, sn_scale, skew, book_ev, y_pool, dist_info, b
     return mean, sigma_blend, alpha_blend, gate_blend if gate_kwargs else decoded.gate
 
 
-def _calibration_penalty(splits: dict, dist_info: dict, *, blending: str = calibration.DEFAULT_BLENDING):
+def _calibration_penalty(
+    splits: dict, dist_info: dict, *, blending: str = calibration.DEFAULT_BLENDING
+):
     """Build the per-trial served-PIT-KS evaluator that search-gates the HPO (Lever 1).
 
     Returns ``evaluate(params, *, cvbooster, folds, opt_rounds)`` mapping one trial's
@@ -1397,24 +1404,25 @@ def _calibration_penalty(splits: dict, dist_info: dict, *, blending: str = calib
         mean, sn_scale, skew, gate = _blend_oof_skewnormal(
             decoded, sn_scale, skew, book_ev, y_pool, dist_info, blending
         )
+
         # Coarse sequential (c, s) at 0.01 tolerance — a ranking measure, not the serve
         # fit. The production fit_skewnorm_dispersion_skew burns ~50 full-precision KS
         # evals per call (~187 s/trial on a ZI SN pool); ~20 coarse evals order the
         # trials identically.
-        ks_at = lambda c, s: _served_sn_pit_ks(  # noqa: E731
-            mean, sn_scale, skew, y_pool, c, s, gate
-        )
+        def ks_at(c, s):
+            return _served_sn_pit_ks(mean, sn_scale, skew, y_pool, c, s, gate)
+
         c = minimize_scalar(
             lambda c: ks_at(c, 0.0),
             bounds=_DISPERSION_C_BOUNDS,
             method="bounded",
-            options={"xatol": 1e-2},
+            options={"xatol": _TRIAL_XATOL},
         ).x
         s = minimize_scalar(
             lambda s: ks_at(c, s),
             bounds=_DISPERSION_SKEW_BOUNDS,
             method="bounded",
-            options={"xatol": 1e-2},
+            options={"xatol": _TRIAL_XATOL},
         ).x
         return ks_at(c, s)
 
@@ -1446,7 +1454,7 @@ def _calibration_penalty(splits: dict, dist_info: dict, *, blending: str = calib
             # xatol 0.01: each loss eval prices the whole lattice CDF over the pool x 25
             # draws; default tolerance burns ~3x the evals refining c digits the
             # constraint ranking never uses. The production serve fit stays full precision.
-            options={"xatol": 1e-2},
+            options={"xatol": _TRIAL_XATOL},
         ).x
         frame = _count_pit_frame(
             dist, c_opt, decoded.ev, decoded.gate, decoded.r, decoded.alpha, decoded.phi
