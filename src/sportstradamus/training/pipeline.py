@@ -1228,6 +1228,14 @@ def _step_build_lss_model(
 # Asymptotic SD of the Kolmogorov statistic × √n — one sampling SE of a trial's measured PIT-KS.
 _KS_SAMPLING_SD_COEF = 0.2606
 
+# Per-trial constraint cost cap: the OOF pool is subsampled to this many rows before the
+# KS fit — every KS eval prices the predictive CDF over the whole pool (x 25 draws on the
+# lattice), and an uncapped 8-10k-row pool pushed one Optuna trial to ~17 min (exp2 NHL
+# points: 4 trials/hour). At 4000 rows the KS sampling SE is 0.021, still tighter than the
+# validation frame the retired v2 measure used at every cell size seen in the confirm ledger.
+_OOF_KS_MAX_ROWS = 4000
+_OOF_KS_SUBSAMPLE_SEED = 4517
+
 
 def _pick_calibrated_candidate(candidates: list[dict], threshold: float, n_rows: int) -> dict:
     """Calibration-constrained HP selection (Lever 1): the lowest-CRPS trial whose OOF
@@ -1276,13 +1284,16 @@ def _calibration_penalty(splits: dict, dist_info: dict):
     fit. No refit: each fold's held-out rows are predicted from that fold's booster at
     ``num_iteration=opt_rounds``, pooled in fold order, decoded once, fit once — the
     OOF frame is ~4.7× the validation split, cutting the KS sampling SD 2.16× and
-    removing the +33% per-trial refit (Lever-1-v3 brief, R2). Two deliberate proxy
+    removing the +33% per-trial refit (Lever-1-v3 brief, R2). Three deliberate proxy
     simplifications: (a) both branches are model-only — the book blend and post-hoc
     stages are skipped (measured within ≤0.004 KS of the served frame on every
     measurable calibrated cell); (b) the count branch always fits ``c`` on the PIT-KS
     objective — a proxy for the production dispersion fit even when the cell's
     ``count_dispersion_objective`` is crps — because the closure's output IS the
-    served-KS ranking statistic.
+    served-KS ranking statistic; (c) the measure is budgeted — the pool is capped at
+    :data:`_OOF_KS_MAX_ROWS` rows, the SN fit runs sequential (c then s), and the count
+    c-fit at 0.01 tolerance — a per-trial constraint must cost seconds, not the ~17 min
+    the production-grade fit took on an 8k-row pool.
     """
     dist = dist_info["dist"]
     strategy = dist_info["target_normalization"]
@@ -1308,6 +1319,13 @@ def _calibration_penalty(splits: dict, dist_info: dict):
 
     def oof_frames(cvbooster, folds, opt_rounds):
         preds = predict_cv_oof_params(cvbooster, folds, opt_rounds, X_train, start_values, dist_obj)
+        if len(preds) > _OOF_KS_MAX_ROWS:
+            keep = np.sort(
+                np.random.default_rng(_OOF_KS_SUBSAMPLE_SEED).choice(
+                    len(preds), _OOF_KS_MAX_ROWS, replace=False
+                )
+            )
+            preds = preds.iloc[keep]
         # y_train is the raw pre-transform frame and X_train keeps its original index
         # through the SkewNormal nonzero filter, so .loc realigns the raw outcomes.
         y_pool = y_train_result.loc[preds.index].to_numpy(dtype=float)
@@ -1326,7 +1344,12 @@ def _calibration_penalty(splits: dict, dist_info: dict):
             hist_gate=dist_info["hist_gate"],
         )
         mean = decoded.ev
-        c, s = fit_skewnorm_dispersion_skew(mean, sn_scale, skew, y_pool, gate=decoded.gate)
+        # joint=False (sequential c-then-s): the full 3-start Nelder-Mead joint fit is the
+        # production serve fit; inside the per-trial constraint it is ~5x the cost for a
+        # ranking measure the sequential fit orders identically.
+        c, s = fit_skewnorm_dispersion_skew(
+            mean, sn_scale, skew, y_pool, gate=decoded.gate, joint=False
+        )
         return _served_sn_pit_ks(mean, sn_scale, skew, y_pool, c, s, decoded.gate)
 
     def count_pit_ks(params: dict, *, cvbooster, folds, opt_rounds) -> float:
@@ -1354,6 +1377,10 @@ def _calibration_penalty(splits: dict, dist_info: dict):
             ),
             bounds=(0.1, upper),
             method="bounded",
+            # xatol 0.01: each loss eval prices the whole lattice CDF over the pool x 25
+            # draws; default tolerance burns ~3x the evals refining c digits the
+            # constraint ranking never uses. The production serve fit stays full precision.
+            options={"xatol": 1e-2},
         ).x
         frame = _count_pit_frame(
             dist, c_opt, decoded.ev, decoded.gate, decoded.r, decoded.alpha, decoded.phi
@@ -4628,7 +4655,9 @@ def train_market(
         penalty_threshold=penalty_threshold,
     )
     if isinstance(opt_params, list):
-        picked = _pick_calibrated_candidate(opt_params, penalty_threshold, len(splits["X_train"]))
+        picked = _pick_calibrated_candidate(
+            opt_params, penalty_threshold, min(len(splits["X_train"]), _OOF_KS_MAX_ROWS)
+        )
         opt_params = {k: v for k, v in picked.items() if k not in ("cv_loss", "pit_ks")}
     model = _step_fit_model(
         dist,
