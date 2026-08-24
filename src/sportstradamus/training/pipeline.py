@@ -9,6 +9,7 @@ import random
 import warnings
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import lightgbm as lgb
 import numpy as np
@@ -55,7 +56,7 @@ from sportstradamus.helpers.distributions import _DP_PHI_CEILING, _DP_PHI_FLOOR,
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.hurdle import HurdleZINB
 from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
-from sportstradamus.skew_normal_centered import CenteredSkewNormal
+from sportstradamus.skew_normal_centered import CenteredSkewNormal, _centered_to_direct
 from sportstradamus.stats.model_dependencies import DEPENDENCY_NAMESPACE
 from sportstradamus.training import baselines, calibration, posthoc
 from sportstradamus.training.calibration import fit_book_weights
@@ -106,11 +107,12 @@ from sportstradamus.training.model_strategy import (
 )
 from sportstradamus.training.role_specs import role_spec_for
 from sportstradamus.training.scorecard import (
+    _DISPERSION_C_BOUNDS,
+    _DISPERSION_SKEW_BOUNDS,
     _gate4_pit_ks_threshold,
     _randomized_pit_draws,
     _randomized_pit_ks,
     _served_sn_pit_ks,
-    fit_skewnorm_dispersion_c,
     fit_skewnorm_dispersion_skew,
 )
 from sportstradamus.training.shap import compute_market_importance
@@ -411,6 +413,87 @@ def predict_lss_params(
     preds = model.predict(X, pred_type="parameters")
     preds.index = X.index
     return preds
+
+
+def predict_cv_oof_params(
+    cvbooster,
+    folds,
+    opt_rounds: int,
+    X: pd.DataFrame,
+    start_values: np.ndarray,
+    dist_obj,
+) -> pd.DataFrame:
+    """Pooled out-of-fold raw distribution parameters from ``model.cv``'s fold boosters.
+
+    The raw-booster equivalent of :func:`predict_lss_params` for a ``CVBooster``: each fold's
+    held-out rows are predicted by that fold's booster capped at ``num_iteration=opt_rounds``,
+    the per-row predict-time margins are added, and the distribution's response functions are
+    applied in ``param_dict`` order — exactly what ``LightGBMLSS.predict`` does via
+    ``dist.predict_dist``, which exposes no iteration cap (why this cannot just call it). Same
+    column layout and float32 dtype as :func:`predict_lss_params`; the frame is indexed by the
+    pooled held-out rows in fold order.
+
+    Args:
+        cvbooster: ``CVBooster`` from ``model.cv(..., return_cvbooster=True)``;
+            ``boosters[k]`` pairs with ``folds[k]``.
+        folds: The explicit ``(train_idx, test_idx)`` positional index pairs the cv ran on.
+        opt_rounds: Boosting rounds at the trial's CV-loss argmin.
+        X: The full training frame the cv ``Dataset`` was built from.
+        start_values: Per-row raw-space start values for ``X`` — the array
+            ``set_model_start_values`` computes, shape ``(len(X), n_dist_param)``.
+        dist_obj: Distribution object whose ``param_dict`` response functions apply
+            (including any ``_BoundedResponseFn`` shape clamp already installed on it).
+    """
+    frames = [
+        _response_param_frame(
+            booster.predict(X.iloc[test_idx], raw_score=True, num_iteration=opt_rounds),
+            start_values[test_idx],
+            dist_obj,
+            X.iloc[test_idx].index,
+        )
+        for booster, (_, test_idx) in zip(cvbooster.boosters, folds, strict=True)
+    ]
+    return pd.concat(frames)
+
+
+def _response_param_frame(raw_margins, start_values: np.ndarray, dist_obj, index) -> pd.DataFrame:
+    """Raw booster margins + start values → response-space param frame for one row block."""
+    predt = torch.tensor(raw_margins, dtype=torch.float32).reshape(-1, dist_obj.n_dist_param)
+    init = torch.tensor(start_values, dtype=torch.float32)
+    params = np.concatenate(
+        [
+            response_fn(predt[:, i].reshape(-1, 1) + init[:, i].reshape(-1, 1)).numpy()
+            for i, response_fn in enumerate(dist_obj.param_dict.values())
+        ],
+        axis=1,
+    )
+    frame = pd.DataFrame(params, columns=list(dist_obj.param_dict.keys()), index=index)
+    if isinstance(dist_obj, CenteredSkewNormal):
+        # Mirror CenteredSkewNormal.predict_dist: downstream consumers only ever see the
+        # direct (loc, scale, alpha) frame.
+        loc, scale, alpha = _centered_to_direct(
+            frame["mean"].to_numpy(), frame["sd"].to_numpy(), frame["gamma1"].to_numpy(), np
+        )
+        frame = pd.DataFrame(
+            {"loc": loc, "scale": scale, "alpha": alpha}, index=index, dtype=np.float32
+        )
+    return frame
+
+
+def predict_cv_ensemble_params(
+    cvbooster, opt_rounds: int, X: pd.DataFrame, start_values: np.ndarray, dist_obj
+) -> pd.DataFrame:
+    """Ensemble raw params for rows no fold booster trained on (e.g. the validation split).
+
+    Averages the fold boosters' raw margins at ``num_iteration=opt_rounds`` — the standard
+    cv-ensemble predictor — then applies start values and response functions exactly as
+    :func:`predict_cv_oof_params` does for held-out fold rows.
+    """
+    raw = np.mean(
+        [b.predict(X, raw_score=True, num_iteration=opt_rounds) for b in cvbooster.boosters],
+        axis=0,
+    )
+    return _response_param_frame(raw, start_values, dist_obj, X.index)
 
 
 def fit_predict_params(
@@ -1165,81 +1248,171 @@ def _step_build_lss_model(
     return model
 
 
-def _pick_calibrated_candidate(candidates: list[dict], threshold: float) -> dict:
-    """Calibration-constrained HP selection (Lever 1): the lowest-CRPS trial whose CV
-    PIT-KS clears ``threshold``; if none qualify, the best-calibrated trial.
+# Asymptotic SD of the Kolmogorov statistic × √n — one sampling SE of a trial's measured PIT-KS.
+_KS_SAMPLING_SD_COEF = 0.2606
+
+# Per-trial constraint cost cap: the OOF pool is subsampled to this many rows before the
+# KS fit — every KS eval prices the predictive CDF over the whole pool (x 25 draws on the
+# lattice), and an uncapped 8-10k-row pool pushed one Optuna trial to ~17 min (exp2 NHL
+# points: 4 trials/hour). At 4000 rows the KS sampling SE is 0.021, still tighter than the
+# validation frame the retired v2 measure used at every cell size seen in the confirm ledger.
+_OOF_KS_MAX_ROWS = 4000
+_OOF_KS_SUBSAMPLE_SEED = 4517
+
+# Per-trial minimize_scalar tolerance for the SkewNormal (c, s) and count dispersion-c fits
+# inside the OOF constraint: a coarse ranking measure, not the full-precision serve fit — see
+# the per-branch comments below for each fit's specific eval cost.
+_TRIAL_XATOL = 1e-2
+
+
+def _pick_calibrated_candidate(candidates: list[dict], threshold: float, n_rows: int) -> dict:
+    """Calibration-constrained HP selection (Lever 1): the lowest-CRPS trial whose OOF
+    PIT-KS clears the noise-aware effective threshold.
 
     Operationalizes Gneiting-Balabdaoui-Raftery 2007's "sharpness subject to calibration"
-    as a hard constraint (congruent with the ship gate) rather than a scalarized penalty.
-    The fallback is logged: a vacuous constraint (no qualifying trial — common at low n)
-    silently degrades to loss-only selection exactly where calibration matters most
-    (research brief reality-check b).
+    as an ε-constraint under the one-standard-error rule (ESL §7.10):
+    ``tau_eff = max(threshold, min_pit_ks + SE)`` with ``SE = _KS_SAMPLING_SD_COEF / √n_rows``,
+    then min ``cv_loss`` over ``pit_ks <= tau_eff`` (never empty — ``min_pit_ks`` qualifies).
+    When no trial clears the raw Gate-4 threshold the pick is the sharpest trial statistically
+    tied with the best-calibrated one, never the bare min-KS trial — the single most
+    winner's-cursed of ~300 noisy KS draws (Lever-1-v3 brief, R3).
 
-    Also logs the constraint's headroom (min PIT-KS, feasible count, and the CRPS price
-    of feasibility) — the Experiment-B probe of whether the constraint is non-vacuous
-    (researcher_hpo_objective_alignment brief, R2 step 1).
+    Also logs the constraint's headroom (min PIT-KS, feasible count at the raw threshold,
+    ``tau_eff``, and the CRPS price of the pick over the loss-only best) — the probe of
+    whether the constraint is non-vacuous.
+
+    Args:
+        candidates: Completed trials tagged with ``cv_loss`` and ``pit_ks``.
+        threshold: The cell's raw Gate-4 PIT-KS bar.
+        n_rows: Rows in the pooled OOF frame each trial's ``pit_ks`` was measured on.
     """
-    qualified = [c for c in candidates if c["pit_ks"] < threshold]
-    crps_price = (
-        min(c["cv_loss"] for c in qualified) - min(c["cv_loss"] for c in candidates)
-        if qualified
-        else None
-    )
+    min_pit_ks = min(c["pit_ks"] for c in candidates)
+    tau_eff = max(threshold, min_pit_ks + _KS_SAMPLING_SD_COEF / np.sqrt(n_rows))
+    picked = min((c for c in candidates if c["pit_ks"] <= tau_eff), key=lambda c: c["cv_loss"])
     logger.info(
-        "calibrated HP headroom: min_pit_ks=%.4f feasible=%d/%d threshold=%.4f crps_price=%s",
-        min(c["pit_ks"] for c in candidates),
-        len(qualified),
+        "calibrated HP headroom: min_pit_ks=%.4f feasible=%d/%d threshold=%.4f "
+        "tau_eff=%.4f crps_price=%.5f",
+        min_pit_ks,
+        sum(c["pit_ks"] < threshold for c in candidates),
         len(candidates),
         threshold,
-        "n/a" if crps_price is None else format(crps_price, ".5f"),
+        tau_eff,
+        picked["cv_loss"] - min(c["cv_loss"] for c in candidates),
     )
-    if qualified:
-        return min(qualified, key=lambda c: c["cv_loss"])
-    logger.warning(
-        "calibrated HP selection: no trial met CV-PIT-KS < %.4f (best %.4f); "
-        "falling back to min-PIT-KS",
-        threshold,
-        min(c["pit_ks"] for c in candidates),
-    )
-    return min(candidates, key=lambda c: c["pit_ks"])
+    return picked
 
 
-def _calibration_penalty(splits: dict, dist_info: dict):
+def _blend_oof_skewnormal(decoded, sn_scale, skew, book_ev, y_pool, dist_info, blending):
+    """Blend the OOF model predictive with the book the way serving does.
+
+    exp2 MLB hits allowed: at model_weight ~0.12 the model-only measure anti-correlates
+    with the served gate (280 trials walked g4 from 0.02 to 0.15), so the constraint must
+    score the fused predictive. Per-trial ``fit_blend_weight`` mirrors the production fit;
+    rows without a real book EV blend at weight 1 (the authenticity fallback). Returns the
+    blended ``(mean, sigma, alpha, gate)``.
+    """
+    book_ok = np.isfinite(book_ev) & (book_ev > 0)
+    cv = dist_info["cv"]
+    gate_kwargs = (
+        {"gate_model": decoded.gate, "gate_book": 0.0}
+        if dist_info["hist_gate"] > GATE_PUBLISH_THRESHOLD and decoded.gate is not None
+        else {}
+    )
+    if book_ok.any():
+        w = calibration.fit_blend_weight(
+            blending,
+            decoded.ev[book_ok],
+            book_ev[book_ok],
+            y_pool[book_ok],
+            "SkewNormal",
+            cv=cv,
+            model_sigma=sn_scale[book_ok],
+            model_skew_alpha=skew[book_ok],
+            **{
+                key: (value[book_ok] if isinstance(value, np.ndarray) else value)
+                for key, value in gate_kwargs.items()
+            },
+        )
+    else:
+        w = 1.0
+    mean, sigma_blend, alpha_blend, gate_blend = fused_loc(
+        np.where(book_ok, w, 1.0),
+        decoded.ev,
+        np.where(book_ok, book_ev, decoded.ev),
+        cv,
+        "SkewNormal",
+        sigma=sn_scale,
+        skew_alpha=skew,
+        **gate_kwargs,
+    )
+    return mean, sigma_blend, alpha_blend, gate_blend if gate_kwargs else decoded.gate
+
+
+def _calibration_penalty(
+    splits: dict, dist_info: dict, *, blending: str = calibration.DEFAULT_BLENDING
+):
     """Build the per-trial served-PIT-KS evaluator that search-gates the HPO (Lever 1).
 
-    Returns a closure over ``splits``/``dist_info`` mapping a candidate param dict to the
-    served randomized-PIT KS on the validation split — SkewNormal via its joint
-    (scale, skew) fit, every other family (NegBin / ZINB joint / DPO / Gamma / ZAGamma)
-    via one refit + scalar dispersion-``c`` fit. Two deliberate proxy simplifications:
-    (a) both branches are model-only — the book blend is skipped (the model dominates
-    failing cells, so the model-only KS closely proxies the served Gate-4 statistic while
-    keeping per-trial cost to one refit); (b) the count branch always fits ``c`` on the
+    Returns ``evaluate(params, *, cvbooster, folds, opt_rounds)`` mapping one trial's
+    already-trained CV fold boosters to a served randomized-PIT KS — SkewNormal via its
+    joint (scale, skew) fit, every other family (NegBin / ZINB joint / DPO / Gamma /
+    ZAGamma) via the scalar dispersion-``c`` fit. No refit anywhere: fold held-out rows
+    come from that fold's booster at ``num_iteration=opt_rounds`` (~4.7× the validation
+    rows, cutting the KS sampling SD 2.16× and removing the +33% per-trial refit —
+    Lever-1-v3 brief, R2), and the validation rows from the fold-booster ensemble mean.
+    The SkewNormal statistic is the **max over the OOF and validation frames** (the R2
+    era caveat, escalated after exp2): both frames blend with the book per trial
+    (:func:`_blend_oof_skewnormal` — mandatory at low model_weight) and the validation
+    leg vetoes trials whose in-era recal-fixability does not survive to the era the
+    serve fit and gate actually use. Deliberate proxy simplifications: (a) both frames
+    skip the post-hoc stages (≤0.005 KS); the count branch stays model-only OOF (no
+    demonstrated harm; its risk pins are all SN); (b) the count branch always fits ``c`` on the
     PIT-KS objective — a proxy for the production dispersion fit even when the cell's
     ``count_dispersion_objective`` is crps — because the closure's output IS the
-    served-KS ranking statistic.
+    served-KS ranking statistic; (c) the measure is budgeted — the pool is capped at
+    :data:`_OOF_KS_MAX_ROWS` rows, the SN fit runs sequential (c then s), and the count
+    c-fit at 0.01 tolerance — a per-trial constraint must cost seconds, not the ~17 min
+    the production-grade fit took on an 8k-row pool.
     """
     dist = dist_info["dist"]
     strategy = dist_info["target_normalization"]
     global_mean = dist_info["global_mean"]
     denom_col = dist_info["denom_col"]
-    X_val = splits["X_validation"]
-    y_val = splits["y_validation"]["Result"].to_numpy(dtype=float)
+    dist_obj = dist_info["dist_obj"]
+    X_train = splits["X_train"]
+    y_train_result = splits["y_train"]["Result"]
+    # The per-row predict-time margins predict_lss_params would seed for these rows; they
+    # depend only on the frame, so compute once. SimpleNamespace stands in for the model
+    # object set_model_start_values assigns onto.
+    carrier = SimpleNamespace()
+    set_model_start_values(
+        carrier,
+        dist,
+        X_train,
+        shape_ceiling=dist_info["shape_ceiling"],
+        normalized=dist_info["normalize"],
+        offset_mode=dist_info["offset_mode"],
+        sn_param=dist_info["sn_param"],
+    )
+    start_values = carrier.start_values
 
-    def served_pit_ks(params: dict) -> float:
-        preds = fit_predict_params(
-            dist_info["dist_obj"],
-            dist,
-            splits["X_train"],
-            splits["y_train_labels"],
-            X_val,
-            params,
-            normalized=dist_info["normalize"],
-            shape_ceiling=dist_info["shape_ceiling"],
-            offset_mode=dist_info["offset_mode"],
-            sn_param=dist_info["sn_param"],
-        )
-        sn_loc = strategy.decode_loc(preds["loc"].to_numpy(), X_val, global_mean, denom_col)
-        sn_scale = strategy.decode_scale(preds["scale"].to_numpy(), X_val, denom_col)
+    def oof_frames(cvbooster, folds, opt_rounds):
+        preds = predict_cv_oof_params(cvbooster, folds, opt_rounds, X_train, start_values, dist_obj)
+        if len(preds) > _OOF_KS_MAX_ROWS:
+            keep = np.sort(
+                np.random.default_rng(_OOF_KS_SUBSAMPLE_SEED).choice(
+                    len(preds), _OOF_KS_MAX_ROWS, replace=False
+                )
+            )
+            preds = preds.iloc[keep]
+        # y_train is the raw pre-transform frame and X_train keeps its original index
+        # through the SkewNormal nonzero filter, so .loc realigns the raw outcomes.
+        y_pool = y_train_result.loc[preds.index].to_numpy(dtype=float)
+        return preds, X_train.loc[preds.index], y_pool
+
+    def sn_frame_ks(preds, X_pool, y_pool, book_ev):
+        sn_loc = strategy.decode_loc(preds["loc"].to_numpy(), X_pool, global_mean, denom_col)
+        sn_scale = strategy.decode_scale(preds["scale"].to_numpy(), X_pool, denom_col)
         skew = preds["alpha"].to_numpy()
         decoded = decode_predictive_mean(
             preds,
@@ -1248,23 +1421,55 @@ def _calibration_penalty(splits: dict, dist_info: dict):
             sn_scale=sn_scale,
             hist_gate=dist_info["hist_gate"],
         )
-        mean = decoded.ev
-        c = fit_skewnorm_dispersion_c(mean, sn_scale, skew, y_val, gate=decoded.gate)
-        return _served_sn_pit_ks(mean, sn_scale, skew, y_val, c, 0.0, decoded.gate)
-
-    def count_pit_ks(params: dict) -> float:
-        preds = fit_predict_params(
-            dist_info["dist_obj"],
-            dist,
-            splits["X_train"],
-            splits["y_train_labels"],
-            X_val,
-            params,
-            normalized=dist_info["normalize"],
-            shape_ceiling=dist_info["shape_ceiling"],
-            offset_mode=dist_info["offset_mode"],
-            sn_param=dist_info["sn_param"],
+        mean, sn_scale, skew, gate = _blend_oof_skewnormal(
+            decoded, sn_scale, skew, book_ev, y_pool, dist_info, blending
         )
+
+        # Coarse sequential (c, s) at 0.01 tolerance — a ranking measure, not the serve
+        # fit. The production fit_skewnorm_dispersion_skew burns ~50 full-precision KS
+        # evals per call (~187 s/trial on a ZI SN pool); ~20 coarse evals order the
+        # trials identically.
+        def ks_at(c, s):
+            return _served_sn_pit_ks(mean, sn_scale, skew, y_pool, c, s, gate)
+
+        c = minimize_scalar(
+            lambda c: ks_at(c, 0.0),
+            bounds=_DISPERSION_C_BOUNDS,
+            method="bounded",
+            options={"xatol": _TRIAL_XATOL},
+        ).x
+        s = minimize_scalar(
+            lambda s: ks_at(c, s),
+            bounds=_DISPERSION_SKEW_BOUNDS,
+            method="bounded",
+            options={"xatol": _TRIAL_XATOL},
+        ).x
+        return ks_at(c, s)
+
+    def served_pit_ks(params: dict, *, cvbooster, folds, opt_rounds) -> float:
+        preds, X_pool, y_pool = oof_frames(cvbooster, folds, opt_rounds)
+        ks_oof = sn_frame_ks(
+            preds, X_pool, y_pool, splits["B_train"]["EV"].loc[preds.index].to_numpy(dtype=float)
+        )
+        # Two-frame constraint (the R2 era caveat, escalated): the OOF pool is train-era, the
+        # gate is later-era. exp2's MLB rerun showed a trial can be recal-fixable in-era yet
+        # demand an extreme, non-transferring (c, s) on the validation era (serve fit
+        # c=1.80/s=-2.82 → test g4 0.104 at model_weight 0.05). The validation leg prices each
+        # trial on the same frame the serve fit will use; the fold-booster ensemble keeps it
+        # refit-free.
+        preds_val = predict_cv_ensemble_params(
+            cvbooster, opt_rounds, splits["X_validation"], start_values_val, dist_obj
+        )
+        ks_val = sn_frame_ks(
+            preds_val,
+            splits["X_validation"],
+            splits["y_validation"]["Result"].to_numpy(dtype=float),
+            splits["B_validation"]["EV"].to_numpy(dtype=float),
+        )
+        return max(ks_oof, ks_val)
+
+    def count_pit_ks(params: dict, *, cvbooster, folds, opt_rounds) -> float:
+        preds, _, y_pool = oof_frames(cvbooster, folds, opt_rounds)
         decoded = decode_predictive_mean(preds, dist)
         shape_ceiling = dist_info["shape_ceiling"]
         if dist == "DPO":
@@ -1279,7 +1484,7 @@ def _calibration_penalty(splits: dict, dist_info: dict):
             lambda c: _dispersion_pit_ks_loss(
                 c,
                 dist=dist,
-                y_val_arr=y_val,
+                y_val_arr=y_pool,
                 val_weighted_mean=decoded.ev,
                 gate_blend_val=decoded.gate,
                 r_blend_val=decoded.r,
@@ -1288,13 +1493,28 @@ def _calibration_penalty(splits: dict, dist_info: dict):
             ),
             bounds=(0.1, upper),
             method="bounded",
+            # xatol 0.01: each loss eval prices the whole lattice CDF over the pool x 25
+            # draws; default tolerance burns ~3x the evals refining c digits the
+            # constraint ranking never uses. The production serve fit stays full precision.
+            options={"xatol": _TRIAL_XATOL},
         ).x
         frame = _count_pit_frame(
             dist, c_opt, decoded.ev, decoded.gate, decoded.r, decoded.alpha, decoded.phi
         )
-        return _randomized_pit_ks(frame, dist, y_val, strategy=TARGET_NORM_NONE)
+        return _randomized_pit_ks(frame, dist, y_pool, strategy=TARGET_NORM_NONE)
 
     if dist == "SkewNormal":
+        carrier_val = SimpleNamespace()
+        set_model_start_values(
+            carrier_val,
+            dist,
+            splits["X_validation"],
+            shape_ceiling=dist_info["shape_ceiling"],
+            normalized=dist_info["normalize"],
+            offset_mode=dist_info["offset_mode"],
+            sn_param=dist_info["sn_param"],
+        )
+        start_values_val = carrier_val.start_values
         return served_pit_ks
     return count_pit_ks
 
@@ -1314,9 +1534,9 @@ def _step_select_hyperparams(
     """Pick Optuna-tuned params, warm-start, or the deterministic fixed set.
 
     When ``calibration_penalty`` is given (Lever 1, calibrated HP selection) the Optuna
-    objective is search-gated on validation PIT-KS and the paths return every completed trial (a
-    list) for the caller's :func:`_pick_calibrated_candidate` final pick; every other case returns
-    the single best param dict as before.
+    sampler is feasibility-constrained on the out-of-fold PIT-KS and the paths return every
+    completed trial (a list) for the caller's :func:`_pick_calibrated_candidate` final pick;
+    every other case returns the single best param dict as before.
 
     Args:
         X_train: Training feature matrix (used to size ``min_child_weight`` upper).
@@ -4540,8 +4760,16 @@ def train_market(
         # Hurdle skips Optuna entirely (_step_select_hyperparams), so there is nothing to
         # select. Mixture has no per-trial served-KS closure (its params frame doesn't fit
         # either _calibration_penalty branch); calibrated falls back to loss selection.
-        penalty = _calibration_penalty(splits, dist_info)
+        penalty = _calibration_penalty(splits, dist_info, blending=blending)
         penalty_threshold = _gate4_pit_ks_threshold(len(splits["y_validation"]))
+    elif hpo_selection == "calibrated":
+        logger.warning(
+            "%s %s: hpo_selection 'calibrated' is inert on the %s path — no HP search "
+            "consults it; drop the stat_meta pin or route the cell off this path",
+            league,
+            market,
+            "hurdle" if use_hurdle else "Mixture",
+        )
     opt_params, _ = _step_select_hyperparams(
         splits["X_train"],
         dist,
@@ -4554,7 +4782,9 @@ def train_market(
         penalty_threshold=penalty_threshold,
     )
     if isinstance(opt_params, list):
-        picked = _pick_calibrated_candidate(opt_params, penalty_threshold)
+        picked = _pick_calibrated_candidate(
+            opt_params, penalty_threshold, min(len(splits["X_train"]), _OOF_KS_MAX_ROWS)
+        )
         opt_params = {k: v for k, v in picked.items() if k not in ("cv_loss", "pit_ks")}
     model = _step_fit_model(
         dist,
