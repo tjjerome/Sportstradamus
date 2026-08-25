@@ -175,21 +175,22 @@ is a one-line `stat_meta.json` edit plus a retrain; the DPO/`roe_mean` corner is
 
 ## Residue
 
-- **NFL tds' book quote is deflated ~8× by a gated-write / ungated-read asymmetry.**
-  `odds.under_prob` is not a native de-vigged quote: it is the stored `ev` re-derived **through**
-  the zero-inflation gate. On 30 000 sampled NFL tds rows the gated re-derivation matches the stored
-  value to a median absolute difference of **0.00031** while the gate-free one misses by **0.142**;
-  passing tds gives 0.00205 against 0.107. It holds across all 12 sportsbooks and every year
-  2023–2026. `helpers/training_quotes.py:_authentic_quote` then inverts it **ungated** by explicit
-  design, so the round trip is `ev --gate--> under_prob --no gate--> ev'` with `ev' ≪ ev`. That is
-  where `ρ = 0.22` and the 0.855 haircut came from: stored book `ev` averages 0.25–0.46 against a
-  model mean of 0.17, yet the re-inverted book mean is ≈0.04. Cohort-wide — every zero-inflated cell
-  writes `under_prob` the same way. `_authentic_quote`'s own docstring already concedes "the book
-  leg of `fused_loc` is unsound for gated cells either way"; this measurement identifies why, and
-  makes it a repairable write-path defect rather than a distribution-family limitation. **Not
-  actioned** — a repair moves the book leg on every gated cell, and three shipping cells (MLB home
-  runs, MLB stolen bases, NHL hits) are recorded as borrowing their Gate-6 pass from a mis-levelled
-  book leg. Owner decision packet.
+- **The book-leg gate asymmetry was chased and is not a defect.** The archive and the training
+  path put the book quote on different footings — `moneylines.py` / `add_dfs` store a **native**
+  de-vigged `under_prob` and derive `ev` from it *with* `book_gate` (NULL when the inversion
+  clamps), while `helpers/training_quotes.py` never receives a gate and inverts the same quote
+  **ungated** for every family. Gating the training inversion is not available: books only price
+  players likely to score, so they quote under-probabilities *below* the population zero rate,
+  which a gated ZINB cannot reproduce — over 3 000 archived quotes per cell the gated inversion
+  clamps on 90% of MLB home runs, 76% of NHL goals, 48% of NBA BLK and 38% of NFL interceptions
+  rows. `_authentic_quote`'s docstring already says this and is right. Nor is the residual a
+  uniform `(1−π)` deflation: `Σ book_ev / Σ Result` on authentic training rows runs 0.284 (NFL
+  interceptions), 0.392 (NBA BLK), 0.868 (MLB runs allowed), 0.979 (NBA TOV), 1.296 (NHL goals),
+  1.663 (NHL hits), 1.936 (MLB home runs) — dividing by `(1−π)` rescues two cells and destroys two
+  others. What is left is per-cell book quality plus favourite-longshot bias, i.e. the
+  cohort-unsafe book-leg level recalibration the research brief already killed. The one genuinely
+  asymmetric rung, `_ev_inversion_quote` (inverts a stored *gated* `ev` ungated), carries 0.1% of
+  NHL goals rows, 0.3% of MLB home runs and 0% elsewhere. **No change made.**
 - **Post-fusion correction makes the served mean coarse on `isotonic_mean` cells.** NFL tds serves
   34 distinct means over 2466 offers (was 2466). It costs nothing on the gates or on `roc_auc`
   (served 0.7125 against 0.6920 in production) but the served EV is granular, which matters for

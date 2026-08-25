@@ -1952,10 +1952,12 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
   bit-identically. **MLB hits allowed drops Gate 4** (0.0323 → 0.0540) — `isotonic_mean` is a step
   function, and post-fusion its plateaus *are* the served mean (`Blended_EV` distinct 1066 → 20),
   which clumps the randomized PIT on a continuous family; count families discretize anyway and all
-  three improved. Re-cornered in-band. New residue: NFL tds' archived `under_prob` is `ev`
-  re-derived **through** the zero-inflation gate (median |diff| 0.00031 gated vs 0.142 gate-free,
-  30k rows, all 12 books) while `_authentic_quote` inverts it **ungated** — an ~8× book-leg
-  deflation on every gated cell, and the true source of `ρ = 0.22`. Owner packet, not actioned.
+  three improved. Re-cornered in-band. Also chased and **cleared**: the book-leg gate asymmetry
+  between the archive (native `under_prob`, `ev` its gated derivative) and `training_quotes` (which
+  inverts ungated) is not a defect — gating the training inversion clamps 90% of MLB home runs /
+  76% of NHL goals / 48% of NBA BLK quotes, because books price under-probabilities *below* the
+  population zero rate, and the residual is not a uniform `(1−π)` deflation (`Σ book_ev / Σ Result`
+  runs 0.28–1.94 across gated cells with no `(1−π)` pattern). No change made.
 - 2026-08-25 (2) · **The mean corrector is on the wrong side of the model↔book pool** — new lane
   [mean_corrector_stage_order.md](mean_corrector_stage_order.md), research gate discharged by
   [researcher_count_blend_location.md](../archive/researcher_count_blend_location.md). `fused_loc`
