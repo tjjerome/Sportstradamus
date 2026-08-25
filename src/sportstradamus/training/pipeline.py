@@ -2613,10 +2613,10 @@ def _step_persist_artifacts(
     # Internal B_* frames use book OVER probability for validation/blending;
     # scorecard-shaped CSV artifacts define Odds as book UNDER probability.
     X_test["Odds"] = 1.0 - B_test["Odds"].values
-    # EV is the base mean the blend used, mean-corrected when a mean-stage
-    # corrector is active, so the bias gates (Gate 2/3) read the corrected value.
-    # The served shape columns below retain their separately calibrated
-    # dispersion, which the mean-stage corrector intentionally leaves alone.
+    # EV is the model's own base mean, pre-blend and pre-correction; the mean-stage
+    # corrector acts on the pool, so Blended_EV above carries it and the outcome gates
+    # (1/2/3/6) read that. The served shape columns below retain their separately
+    # calibrated dispersion, which the mean-stage corrector intentionally leaves alone.
     X_test["EV"] = ev
     _stage_family_shape_columns(
         X_test,
@@ -2930,15 +2930,8 @@ def _calibrate_count_dispersion(
     """NegBin/ZINB/Gamma scalar dispersion fit: scale ``r``/``alpha`` by ``c``."""
     r_blend_val = fused["r_blend_val"]
     alpha_blend_val = fused["alpha_blend_val"]
-    beta_blend_val = fused["beta_blend_val"]
-    p_val = fused["p_val"]
     gate_blend_val = fused["gate_blend_val"]
-
-    val_weighted_mean = (
-        r_blend_val * (1 - p_val) / p_val
-        if dist in ("NegBin", "ZINB")
-        else alpha_blend_val / beta_blend_val
-    )
+    val_weighted_mean = fused["weighted_mean_val"]
 
     mean_shape = np.mean(r_blend_val) if dist in ("NegBin", "ZINB") else np.mean(alpha_blend_val)
     max_c = shape_ceiling / mean_shape if mean_shape > 0 else 10.0
@@ -2974,6 +2967,53 @@ def _calibrate_count_dispersion(
     out["c_opt"] = c_opt
     out["val_weighted_mean"] = val_weighted_mean
     return out
+
+
+def _step_correct_fused_mean(
+    fused: dict, splits: dict, dist: str, posthoc_slug: str
+) -> dict | None:
+    """Fit the mean-stage corrector on the FUSED validation mean and apply it to both splits.
+
+    A logarithmic opinion pool is not mean-preserving: it multiplies whatever mean
+    calibration its legs carry by ``rho^(1-w)``, so a corrector fitted before fusion is
+    discarded by the pool. Ranjan & Gneiting (2010, doi:10.1111/j.1467-9868.2009.00726.x)
+    Thm 1 is the general statement — recalibrate the combination, not the components. The
+    corrected object is the mean the gates score, so the fit target and the gate target
+    agree on a zero-inflated family. Runs before the dispersion fit, which reads the
+    corrected mean, and therefore before the temperature fit below it.
+
+    Every mean-dependent served parameter is re-derived downstream from
+    ``weighted_mean`` — ``NB_P``, ``DP_MU`` and ``SN_Loc`` in
+    :func:`_stage_family_shape_columns`, ``beta`` in :func:`_calibrate_count_dispersion`
+    — so only Mixture, whose components carry the location, needs re-encoding here.
+
+    Returns the fitted corrector for the pickle, or ``None`` when the cell has no
+    mean-stage slug.
+    """
+    if posthoc_slug not in posthoc.MEAN_STAGE:
+        return None
+    gate_val, gate_test = fused["gate_blend_val"], fused["gate_blend_test"]
+    blob = posthoc.fit_posthoc(
+        posthoc_slug,
+        posthoc.served_mean(fused["weighted_mean_val"], gate_val),
+        splits["y_validation"]["Result"].to_numpy(dtype=float),
+    )
+    corrected_test = posthoc.correct_fused_mean(
+        posthoc_slug, blob, fused["weighted_mean"], gate_test
+    )
+    corrected_val = posthoc.correct_fused_mean(
+        posthoc_slug, blob, fused["weighted_mean_val"], gate_val
+    )
+    if dist == "Mixture":
+        fused["mix_blend_test"] = _shift_mixture(
+            fused["mix_blend_test"], corrected_test - fused["weighted_mean"]
+        )
+        fused["mix_blend_val"] = _shift_mixture(
+            fused["mix_blend_val"], corrected_val - fused["weighted_mean_val"]
+        )
+    fused["weighted_mean"] = corrected_test
+    fused["weighted_mean_val"] = corrected_val
+    return blob
 
 
 def _step_calibrate_dispersion(
@@ -3581,10 +3621,9 @@ def _fuse_negbin(out, decoded, splits, model_weight, cv, hist_gate, dist):
     out.update(
         {
             "weighted_mean": r_blend_test * (1 - p_test) / p_test,
+            "weighted_mean_val": r_blend_val * (1 - p_val) / p_val,
             "r_test": r_blend_test,
             "r_blend_val": r_blend_val,
-            "p_test": p_test,
-            "p_val": p_val,
             "gate_blend_test": gate_blend_test,
             "gate_blend_val": gate_blend_val,
         }
@@ -3681,9 +3720,9 @@ def _fuse_gamma(out, decoded, splits, model_weight, cv, hist_gate, dist):
     out.update(
         {
             "weighted_mean": alpha_blend / beta_blend,
+            "weighted_mean_val": alpha_blend_val / beta_blend_val,
             "alpha_blend": alpha_blend,
             "alpha_blend_val": alpha_blend_val,
-            "beta_blend": beta_blend,
             "beta_blend_val": beta_blend_val,
             "gate_blend_test": gate_blend_test,
             "gate_blend_val": gate_blend_val,
@@ -3711,12 +3750,12 @@ def _step_fuse_predictions(
         blending: Blending loss slug forwarded to ``calibration.fit_blend_weight``.
 
     Returns:
-        Dict with: ``model_weight``, ``weighted_mean``, ``gate_blend_test``,
-        ``gate_blend_val``, ``r_test``, ``r_blend_val``, ``p_test``, ``p_val``,
+        Dict with: ``model_weight``, ``weighted_mean``, ``weighted_mean_val``,
+        ``gate_blend_test``, ``gate_blend_val``, ``r_test``, ``r_blend_val``,
         ``phi_test``, ``phi_blend_val``, ``alpha_blend``, ``alpha_blend_val``,
-        ``beta_blend``, ``beta_blend_val``, ``sn_sigma_blend_test``,
-        ``sn_sigma_blend_val``, ``sn_alpha_blend_test``, ``sn_alpha_blend_val``.
-        Unused fields are None.
+        ``beta_blend_val``, ``sn_sigma_blend_test``, ``sn_sigma_blend_val``,
+        ``sn_alpha_blend_test``, ``sn_alpha_blend_val``, ``mix_blend_test``,
+        ``mix_blend_val``. Unused fields are None.
     """
     base_dist = (
         "SkewNormal"
@@ -3732,13 +3771,10 @@ def _step_fuse_predictions(
         "gate_blend_val": None,
         "r_test": None,
         "r_blend_val": None,
-        "p_test": None,
-        "p_val": None,
         "phi_test": None,
         "phi_blend_val": None,
         "alpha_blend": None,
         "alpha_blend_val": None,
-        "beta_blend": None,
         "beta_blend_val": None,
         "sn_sigma_blend_test": None,
         "sn_sigma_blend_val": None,
@@ -4248,12 +4284,14 @@ def _step_calibrate_and_serve(
 ) -> dict:
     """Decode, correct, fuse and calibrate one model's predictions into served values.
 
-    Every calibrator in this chain — the mean-stage corrector, the blend weight, the
+    Every calibrator in this chain — the blend weight, the mean-stage corrector, the
     dispersion/skew scalars, the PIT recalibration map, the temperature, and the
     prob-stage corrector — is fit on ``splits["*_validation"]`` and applied to
-    ``splits["*_test"]``. Nothing here refits the GBDT: the model's predictions arrive
-    ready in ``preds``. That is what lets :func:`_step_crossfit_calibrate_and_serve`
-    rotate the two frames over folds of a single split and pay only this chain.
+    ``splits["*_test"]``, in that order: the mean corrector sits on the fused side of
+    the pool, so the dispersion and temperature fits both see the corrected mean.
+    Nothing here refits the GBDT: the model's predictions arrive ready in ``preds``.
+    That is what lets :func:`_step_crossfit_calibrate_and_serve` rotate the two frames
+    over folds of a single split and pay only this chain.
     """
     prob_params = preds["prob_params"]
     decoded = _step_decode_predictions(
@@ -4267,22 +4305,8 @@ def _step_calibrate_and_serve(
         dist_info["denom_col"],
         hist_gate,
     )
-    # Mean-stage post-hoc (orthogonal to target_normalization and to the
-    # prob-stage corrector below): fit on the validation decoded mean, then
-    # correct both test and validation means BEFORE fusion so the correction
-    # flows through the blend into P (Gate 1/5) and into the persisted EV
-    # (Gate 2/3). roe_mean undoes leaf-averaging compression; it deliberately
-    # does not touch dispersion (Gate 4).
-    mean_posthoc_blob = None
-    if posthoc_slug in posthoc.MEAN_STAGE:
-        val_result = splits["y_validation"]["Result"].to_numpy(dtype=float)
-        mean_posthoc_blob = posthoc.fit_posthoc(posthoc_slug, decoded["ev_validation"], val_result)
-        decoded["ev"] = posthoc.apply_posthoc(posthoc_slug, mean_posthoc_blob, decoded["ev"])
-        decoded["ev_validation"] = posthoc.apply_posthoc(
-            posthoc_slug, mean_posthoc_blob, decoded["ev_validation"]
-        )
-
     fused = _step_fuse_predictions(decoded, splits, dist, cv, hist_gate, blending=blending)
+    mean_posthoc_blob = _step_correct_fused_mean(fused, splits, dist, posthoc_slug)
     calibrated = _step_calibrate_dispersion(
         decoded,
         fused,

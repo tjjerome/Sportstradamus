@@ -118,6 +118,45 @@ def apply_posthoc(slug: str, blob: dict | None, x: np.ndarray) -> np.ndarray:
     return np.clip(out, _PROB_CLIP, 1 - _PROB_CLIP)
 
 
+def served_mean(base_mean: np.ndarray, gate: np.ndarray | float | None) -> np.ndarray:
+    """The mean the ship gates score: the base mean deflated by a zero-inflation gate.
+
+    ZINB/ZAGamma and gated SkewNormal carry the BASE-distribution mean, with the gate
+    reapplied only when pricing over/under probabilities, so ``E[Y] = (1 - gate) * base``.
+    ``gate`` is ``None`` for a gate-free family, which is what ``fused_loc`` returns.
+    """
+    base_mean = np.asarray(base_mean, dtype=float)
+    if gate is None:
+        return base_mean
+    return base_mean * (1.0 - np.asarray(gate, dtype=float))
+
+
+def correct_fused_mean(
+    slug: str, blob: dict | None, base_mean: np.ndarray, gate: np.ndarray | float | None
+) -> np.ndarray:
+    """Apply a :data:`MEAN_STAGE` corrector to the SERVED mean; return the corrected BASE mean.
+
+    Ranjan & Gneiting (2010, doi:10.1111/j.1467-9868.2009.00726.x) Thm 1: a non-trivial
+    pool of calibrated components is itself uncalibrated, so the corrector belongs on the
+    model-book combination rather than on either leg. It therefore acts on the object the
+    gates score — ``(1 - gate) * base`` on a zero-inflated family, the base mean otherwise
+    — and the gate divides back out so the family keeps its base-mean parameterization.
+    Training and inference both call this, which is what keeps the two stages identical.
+
+    Args:
+        slug: The cell's ``posthoc`` value; anything outside :data:`MEAN_STAGE` is identity.
+        blob: The fitted corrector, or ``None`` for identity.
+        base_mean: Post-fusion base-distribution mean.
+        gate: Blended zero-inflation probability, or ``None`` for a gate-free family.
+    """
+    if slug not in MEAN_STAGE:
+        return np.asarray(base_mean, dtype=float)
+    corrected = apply_posthoc(slug, blob, served_mean(base_mean, gate))
+    if gate is None:
+        return corrected
+    return corrected / (1.0 - np.asarray(gate, dtype=float))
+
+
 def fit_isotonic_pit(
     pit: np.ndarray, *, n_bins: int = _PIT_RECAL_BINS, lam: float = 1.0
 ) -> dict | None:

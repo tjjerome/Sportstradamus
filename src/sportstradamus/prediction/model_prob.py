@@ -72,7 +72,7 @@ from sportstradamus.training.model_strategy import (
     resolve_report_identity,
     validate_strategy_selection,
 )
-from sportstradamus.training.posthoc import MEAN_STAGE, PROB_STAGE, apply_posthoc
+from sportstradamus.training.posthoc import PROB_STAGE, apply_posthoc, correct_fused_mean
 from sportstradamus.training.role_specs import RoleSpec, role_spec_for
 from sportstradamus.training.ship_config import WITHHELD
 from sportstradamus.training.structural_strategies import (
@@ -295,20 +295,6 @@ def _apply_cdf_recal_over(raw_over: np.ndarray, pit_recal_blob: dict | None) -> 
     if pit_recal_blob is None:
         return raw_over
     return 1.0 - apply_cdf_recal(pit_recal_blob, 1.0 - np.asarray(raw_over, dtype=float))
-
-
-def _apply_mean_posthoc(
-    model_mu: np.ndarray, posthoc_slug: str, posthoc_blob: dict | None
-) -> np.ndarray:
-    """Apply a fitted mean-stage corrector to the decoded model mean.
-
-    No-op unless the cell's slug is a :data:`MEAN_STAGE` corrector. Mirrors the
-    training-side correction in ``pipeline.train_market`` so the live blend sees
-    the same corrected mean.
-    """
-    if posthoc_slug in MEAN_STAGE:
-        return apply_posthoc(posthoc_slug, posthoc_blob, model_mu)
-    return model_mu
 
 
 def _book_cell_params(
@@ -1244,6 +1230,8 @@ def _blend_with_book(
     hist_gate: float,
     league: str,
     market: str,
+    posthoc_slug: str = "none",
+    posthoc_blob: dict | None = None,
 ) -> np.ndarray:
     model_ev = offer_df["Projection"].to_numpy()
     books_ev = offer_df["Market Projection"].fillna(offer_df["Projection"]).to_numpy()
@@ -1310,6 +1298,11 @@ def _blend_with_book(
         )
         base_mean = alpha_blend / beta_blend
         offer_df["Model Alpha"] = alpha_blend
+    # The mean-stage corrector recalibrates the POOL, not its legs: a log opinion pool is
+    # not mean-preserving, so a pre-fusion correction is multiplied straight back down by
+    # rho^(1-w). Ranjan & Gneiting (2010) Thm 1 — recalibrate the combination. Mirrors
+    # pipeline._step_calibrate_and_serve, which corrects the same object one stage later.
+    base_mean = correct_fused_mean(posthoc_slug, posthoc_blob, base_mean, gate_blend)
     if gate_blend is not None:
         offer_df["Projection"] = (1 - gate_blend) * base_mean
         offer_df["Model Gate"] = gate_blend
@@ -1527,13 +1520,10 @@ def model_prob(
         offer_df, dist, cv, step, hist_gate or None, league, market
     )
     _clamp_shape_ceiling(offer_df, dist, shape_ceiling)
-    # Mean-stage post-hoc correction before blending, mirroring train_market so
-    # live predictions match the offline test CSV event-for-event.
-    offer_df["Projection"] = _apply_mean_posthoc(
-        offer_df["Projection"].to_numpy(), posthoc_slug, posthoc_blob
-    )
     _sanitize_model_ev(offer_df, dist)
-    base_mean = _blend_with_book(offer_df, dist, model_weight, cv, hist_gate, league, market)
+    base_mean = _blend_with_book(
+        offer_df, dist, model_weight, cv, hist_gate, league, market, posthoc_slug, posthoc_blob
+    )
 
     # ZI dists: book reports the non-zero component EV; scale to marginal EV.
     if hist_gate and dist in ("ZINB", "ZAGamma"):
