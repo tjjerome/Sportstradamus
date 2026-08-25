@@ -671,23 +671,28 @@ Entry: cell fails g4 (either direction) or g2/g3.
   at median (+0.0002 held-out) — it pays only where real miscalibration exists (WNBA FGA
   0.065→0.028) and taxes slightly elsewhere, which is exactly what the
   `_DISPERSION_SKEW_MIN_GAIN` hard gate protects: keep the gate, no λ machinery.
-- **Rung B′ — re-target the count objective (built, opt-in; default-flip candidate,
-  Experiment-3 gated; kickoff brief: [count_dispersion_flip.md](count_dispersion_flip.md)).**
-  The count-branch `dispersion_cal`
-  minimized CRPS, but the gate is PIT-KS — re-targeting the fit to PIT-KS is the one change
-  that tightens the whole over-wide count branch (snapshot: all 21 ZINB/NegBin cells
-  over-covered; the 2026-08 confirm-ledger read sharpens this: 26 of 30 over-wide count rows
-  sit on the `crps` objective, so the flip to `pit_ks`-by-default is Experiment-3 gated — ship
-  iff ≥2 of 3 pilot cells improve g4 ≥0.010 with no control losing `ship` and the g6 over-leg
-  flat). Minimizing CRPS does not guarantee a calibrated PIT. Built as
+- **Rung B′ — re-target the count objective (built; stays an opt-in per-cell pin — R4/Exp-3
+  settled the default 2026-08-24; lane record:
+  [count_dispersion_flip.md](count_dispersion_flip.md)).**
+  The count-branch `dispersion_cal` minimizes CRPS while the gate scores PIT-KS, so re-targeting
+  the fit at the gate's own statistic is the obvious move; minimizing CRPS does not guarantee a
+  calibrated PIT. Built as
   [`pipeline._dispersion_pit_ks_loss`](../../src/sportstradamus/training/pipeline.py) (mirrors
   `_dispersion_crps_loss`, swaps the objective for `scorecard._randomized_pit_ks`), selected by
-  `meditate --count-dispersion-objective pit_ks`; default `crps` keeps production. The
-  `0.01·log(c)²` brake is retained as the only sharpness guard — a pure PIT-KS objective has none
-  (CRPS implicitly penalizes over-confidence), so watch the over-leg of g6 and the g1 acceptance
-  on count cells (§8.2 open-Q). The count miscalibration is
-  *uniform* (over-wide on both central-50 and central-80, 7/7), exactly the regime a single
-  scale clears.
+  `meditate --count-dispersion-objective pit_ks`; default `crps` keeps production. **Exp-3
+  verdict — default flip NOT adopted:** directionally right, an order of magnitude too small to
+  matter. A 44-cell offline replay (6 seeded half-splits, base shape recovered by dividing out
+  each dump's shipped `dispersion_cal`, entry gated on reproducing the recorded `g4_pit_ks`) puts
+  `pit_ks − crps` at a median −0.0001 with **zero threshold flips either way**, and the sign is
+  not stable across families (ZINB −0.0002, DPO +0.0001); the 98 paired cross-fit board corners
+  agree on direction (82/98 better, p = 4.7e-12, median −0.0017) but convert 9 extra `g4_pass`
+  into a single net `ship`. Structural note worth keeping: a failing cell never ships, so a
+  confirm never persists a pin for it — the default's blast radius (9 unpinned ZINB cells) and
+  the failing cohort are the same set by construction, which is why 26 of the 30 over-wide count
+  rows read `crps`. **§8.2 open-Q #9(b) closes NO-RISK:** the PIT-KS objective's missing sharpness
+  brake left `g6_pass` identical on all 98 paired corners and moved `g1_brier_diff_ci_hi` a median
+  0.0000. The cohort's real wall is elsewhere — the cells the lever helps most (NBA TOV −0.067,
+  NHL goalsAgainst −0.022) fail Gate 1, and the Gate-4-only cells do not respond.
 - **Rung C — full CDF (isotonic-PIT / IDR, BUILT & shipped on continuous cells; dead on count) —
   the recommended fix for the mixed-direction SkewNormal cohort.** Shipped: WNBA PA rides the
   whole-CDF isotonic-PIT recal; on count cells the monotone map degrades the low-mean lattice, so
@@ -774,9 +779,10 @@ upstream of the polish. Both default to current production.
   is safe at low model_weight: g4 0.0371 vs the v2 incumbent's 0.0390 (the interim measures'
   0.104–0.153 catastrophes eliminated), with g1 +0.0024 — inside the ±0.003 replicate band the
   `loss` arm also sat in, so the pin no longer risks poisoning on retrain. NBA PF was flat
-  across all three arms (~0.07 — over-wide NegBin, evidence for the Rung B′ / R4
-  count-objective flip, not for selection). Side finding: v2's refit cost capped real searches
-  at ~10–30 trials/hour, the historical reason the lever under-performed.
+  across all three arms (~0.07 — over-wide NegBin, so not a selection defect; R4 later showed it
+  is not a dispersion-objective defect either, its paired board delta being exactly 0.0000, which
+  leaves PF's plateau unexplained by any width lever). Side finding: v2's refit cost capped
+  real searches at ~10–30 trials/hour, the historical reason the lever under-performed.
 
   **Scale-bound vs shape-bound — what the search-gate can and cannot fix.** A g4-failing SkewNormal
   cell is one of two kinds, separated by the PIT central-coverage triple already in the gate row:
@@ -1844,8 +1850,10 @@ brief on a hook-gated edit, write a one-line justification to `.claude/.state/re
   of the gate-matched PIT (`/tmp/researcher_continuous_family.md`): the shape/kurtosis cohort is
   §6.6-bound (centered-SN / SHASH), the scale-bound residual is the search-gate's. So the cheap
   cov50/cov80 query is no longer the open question — it is answered per cell in R2's routing table;
-  what remains is executing the confirms. (b) Rung B′'s PIT-KS count objective
-  has no sharpness brake — watch g6's over-leg and the g1 acceptance for over-tightening. (c) only
+  what remains is executing the confirms. (b) CLOSED (R4/Exp-3,
+  2026-08-24) — Rung B′'s PIT-KS count objective has no sharpness brake past `0.01·log(c)²`, but
+  over 98 paired cross-fit corners it left `g6_pass` identical on every one and moved
+  `g1_brier_diff_ci_hi` a median 0.0000; no over-tightening to watch. (c) only
   promote `--stabilization` to a swept axis if MAD/L2 ever wins on ≥1 cell (YAGNI). (d) the
   under-wide-AND-mislocated NFL SkewNormal cells (attempts/carries, central-50 ≈ 0.27/0.34) are out
   of reach for any selection/post-hoc width fix — that defect is signal/family, not width; confirm
@@ -1920,6 +1928,25 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-08-24 · R4 / Exp-3 verdict: count-objective default flip **NULL — stays `crps`**, brief
+  [count_dispersion_flip.md](count_dispersion_flip.md) closed. Three measurements: 44-cell offline
+  replay (6 seeded half-splits, un-scaling verified against each cell's recorded `g4_pit_ks`)
+  median `pit_ks − crps` −0.0001, **zero threshold flips**, family sign unstable (DPO +0.0001);
+  98 paired cross-fit corners median −0.0017 (82/98 better, p 4.7e-12) but `ships` 36 → 37 and
+  **`g6_pass` identical on all 98** — closes §8.2 open-Q #9(b) NO-RISK; live NFL tds NegBin pair at
+  full HPO (300 trials, same frozen matrix, controls differing only in the objective) lands
+  `pit_ks` *worse* on its own statistic, g4 0.0743 vs 0.0700, both KILL. Structural read: a failing
+  cell never ships → never gets a pin → trains on the default, so blast radius == failing cohort
+  (9 unpinned ZINB cells). The lever's best cells (NBA TOV −0.067, NHL goalsAgainst −0.022) are
+  Gate-1 walled; the g4-only cells don't respond (NBA PF board Δ exactly 0.0000). Knob stays a
+  swept axis + opt-in pin; no code changed.
+- 2026-08-24 · **A ledger `ship=True` is evidence only against its own `strategy_matrix_hash`.**
+  NFL tds' shelf nominee (NegBin, `dl=nll`/`blending=nll`/`objective=pit_ks`/`posthoc=none`) passed
+  6/6 on 2026-08-03 — g4 0.0203, g1 ci_hi −0.0271, BSS +0.195 — on matrix `285d0daa` (n 2484).
+  Re-run at full HPO with byte-identical controls on the current `7918c1b8` (n 2466): g4 0.0743,
+  `g6_citl_ci_hi` 0.783, KILL; the `crps` twin KILLs identically, so the loss is the matrix. NBA
+  FGA and WNBA REB are stale the same way; MLB hitter fantasy points underdog is merely un-re-run.
+  Check the hash before spending a confirm on a shelf nominee.
 - 2026-08-24 · Exp-2 verdict: calibrated-everywhere default flip KILLED (1/4 improved, MLB g1
   breach); v2 hinge gone — v3 IS the `calibrated` pin; retry machinery + two-attempt doctrine
   stay. Two live failures on MLB hits allowed forced the final SN measure to max(blended OOF,
