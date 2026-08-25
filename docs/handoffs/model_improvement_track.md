@@ -975,6 +975,17 @@ verdicts) and memory; the durable conclusions:
   family/shape-bound → §6.6.
 - The five `fused_loc` immaturities (parameter-blend ≠ density pool; symmetric book; linear-shrink
   skew; sharpen-only pool; no `p_book` noise) are documented in the references doc.
+- **Pool operator (count location: geometric → arithmetic, or → precision-weighted) — KILLED
+  cohort-wide.** The count branch's log opinion pool is the exact density-level LOP for a count
+  family and is *not* mean-preserving (`μ_pool = μ_model·ρ^(1−w)`), which is the whole of NFL tds'
+  Gate-6 deficit. Swapping it to arithmetic moves the served CITL *away* from 1.0 on 19 of 29 pooled
+  count cells and costs NHL hits its `ship`; precision-weighting is strictly worse than the
+  incumbent. The extra shrinkage is doing real calibration work wherever the model over-predicts.
+  The location-vs-width and Gate-6-vs-Gate-4 distinctions are genuine — §6.5 had never probed
+  location — but they do not rescue an operator change; they only mean nobody had measured it.
+  **The corrector's stage order is the lever, and it lives in §6.1, not here**
+  ([mean_corrector_stage_order.md](mean_corrector_stage_order.md),
+  [researcher_count_blend_location.md](../archive/researcher_count_blend_location.md)).
 
 **Reopen only for a genuinely over-wide cohort at `w<0.9`** (post-§6.6, or NHL/MLB on activation),
 re-probing per cohort — never generalize the NO-GO. **If reopened, the design is settled:** fit
@@ -1928,6 +1939,57 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-08-25 (3) · **NFL tds SHIPS — the mean corrector moved to the fused side of the pool**
+  ([mean_corrector_stage_order.md](mean_corrector_stage_order.md), lane closed). One rule, no
+  per-cell branching: fit and apply the `MEAN_STAGE` corrector on the *fused served* mean, after
+  fusion and before the dispersion and temperature fits. `posthoc.correct_fused_mean` is the single
+  entry point both training and `model_prob` call, and it corrects `(1−π)·base`, which closes
+  `[[posthoc_mean_miscontracted_on_gated]]` by construction. Full HPO on matrix `7918c1b8`:
+  `g6_citl_ci_hi` 0.8983 → **1.0956**, `g4_pit_ks` 0.0431 → **0.0242**, `g5_ece_debiased`
+  0.0179 → **0.0083**, `g1` and BSS flat, `roc_auc` 0.7119, fusion haircut 0.855 → 1.281.
+  Pinned `NegBin`/`isotonic_mean`/`crps`/`nll`, `shipped: devel`. Controls: NFL passing tds, NBA
+  BLST, NBA FG3M, WNBA FG3M all retain `ship`; the four `w = 1` cells reproduce every gate value
+  bit-identically. **MLB hits allowed drops Gate 4** (0.0323 → 0.0540) — `isotonic_mean` is a step
+  function, and post-fusion its plateaus *are* the served mean (`Blended_EV` distinct 1066 → 20),
+  which clumps the randomized PIT on a continuous family; count families discretize anyway and all
+  three improved. Re-cornered in-band. New residue: NFL tds' archived `under_prob` is `ev`
+  re-derived **through** the zero-inflation gate (median |diff| 0.00031 gated vs 0.142 gate-free,
+  30k rows, all 12 books) while `_authentic_quote` inverts it **ungated** — an ~8× book-leg
+  deflation on every gated cell, and the true source of `ρ = 0.22`. Owner packet, not actioned.
+- 2026-08-25 (2) · **The mean corrector is on the wrong side of the model↔book pool** — new lane
+  [mean_corrector_stage_order.md](mean_corrector_stage_order.md), research gate discharged by
+  [researcher_count_blend_location.md](../archive/researcher_count_blend_location.md). `fused_loc`
+  pools the count location *geometrically* (a log opinion pool, correct as a density operator) and a
+  LOP is not mean-preserving, so the pre-fusion `roe_mean`/`isotonic_mean` correction is multiplied
+  straight back down by `ρ^(1−w)` — 0.855 on NFL tds. Ranjan & Gneiting 2010 Thm 1: recalibrate the
+  combination, not the components. Moving the corrector post-fusion is measured to ship NFL tds
+  (`g6_citl_ci_hi` 0.8527 → 1.13, `g4` 0.0463 → 0.0171, `g5` also improves; independent
+  reconstruction puts served CITL 0.7678 → 1.0121 all-row / 1.0147 star under a player-disjoint
+  cross-fit) with a blast radius of 11 enumerable cells, 4 of them exact no-ops at `w = 1.0`. **§6.5
+  stays CLOSED** — the pool-operator change is screened and KILLED cohort-wide (19/29 CITL worse,
+  NHL hits loses `ship`). Also killed: `_MODEL_WEIGHT_MAX` as a lead (binds on 4 cells, discards the
+  flagship's best ranking signal — tds' book `roc_auc` 0.7341 beats the model's 0.7149), and any
+  second book-quality weight (`fit_model_weight` already is one; `[[proxy_goodhart_under_search]]`).
+  Book-leg level recalibration works and is NOT cohort-safe (costs MLB home runs / MLB stolen bases /
+  NHL hits) — owner packet, not an experiment. Framing corrections: the power de-vig is dead code,
+  and the "worse than a base rate" book count is 17/30 on authentic rows, not 33/48.
+- 2026-08-25 · Count Gate-4 mean lane **closed — lever real, both cells walled**
+  ([count_mean_calibration.md](count_mean_calibration.md)). Seven sandboxed full-HPO arms confirm
+  the mechanism: at fixed family and matrix a mean-stage corrector takes Gate 4 across threshold on
+  both convertible cells — NFL tds `g4_pit_ks` 0.0700 → **0.0431** (`isotonic_mean`, which also
+  beats `roe_mean` on g1/g5/BSS/`roc_auc`/g6 at once), NBA PF 0.0627 → **0.0366**. Neither ships,
+  and the walls are unrelated. **NFL tds is blend-bound on g6**: the corrector reaches model CITL
+  0.92–0.93 but fusion carries only 0.83–0.86 through, so served tops out ≈0.86 against g6's 0.97
+  — the residual is §6.5 blend structure, not the corrector. **NBA PF is posthoc-slot-bound on
+  g1**: its entire Gate-1 cushion comes from `prob_recal_isotonic` (control arm reproduces the
+  ledger, BSS +0.345 vs −0.141 without it — a 0.49 swing), and the single-valued `posthoc` field
+  cannot hold that and a mean corrector at once; `cdf_recal_isotonic` is no escape, being
+  SkewNormal-gated in `pipeline.py` and refused by the registry on count families. **NFL
+  interceptions refuted exactly as pre-registered** — the affine collapsed to slope 0.196 and
+  `roc_auc` fell to 0.4993. Two framing corrections: the fusion haircut is **recipe-dependent, not
+  a cell property** (0.874 → 0.826 → 0.855 across three tds arms), and blend dilution is not a
+  low-mean or per-league class (48 count cells, median haircut 1.0000, Spearman vs `mean(y)`
+  −0.024). No code changed; no cell persisted.
 - 2026-08-24 · Count Gate-4 re-diagnosed: **the mean is the lever, not the zeros** — new lane
   [count_mean_calibration.md](count_mean_calibration.md), research gate discharged by
   [researcher_count_gate4_zeroinflation.md](../archive/researcher_count_gate4_zeroinflation.md).

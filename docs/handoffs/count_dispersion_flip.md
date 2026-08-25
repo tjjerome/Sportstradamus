@@ -123,11 +123,13 @@ predictive **mean**, not the dispersion — see the successor lane below.
   NBA FGA (nominee `f779a7b4`, latest row `723e5597`) and WNBA REB (`3f884021` vs `0ca8378d`) are
   matrix-stale exactly like NFL tds; only MLB hitter fantasy points underdog (`5d00d1fc`) has no
   later row to contradict it, and that only means nothing has re-run the cell since 2026-07-29.
-- **Successor lane: [count_mean_calibration.md](count_mean_calibration.md).** The follow-up
-  diagnostic located the Gate-4 supremum at the bottom of the lattice on every failing count cell
-  and traced it to a predictive-mean deficit, not to dispersion or zero-inflation. That lane owns
-  the family routing (including the ZINB → DPO swap this lane deferred), the entry screen, and the
-  pre-registered E1/E2/E3 experiments. Two corrections it lands on this record: **NFL interceptions
-  passes Gate 1** on its recent rows and fails Gate 6, and **NBA PF's newest ledger rows are
-  NegBin, not ZINB**, so the dump-based reads for that cell above describe a run the ledger does
-  not contain.
+- **Successor lane: [count_mean_calibration.md](count_mean_calibration.md) — closed.** It traced
+  the Gate-4 supremum to a predictive-mean deficit rather than dispersion or zero-inflation, and
+  confirmed at full HPO that a mean-stage corrector **does** take Gate 4 across its threshold on
+  both convertible cells (NFL tds 0.0700 → 0.0431, NBA PF 0.0627 → 0.0366). Neither shipped there:
+  NFL tds read as blend-bound on Gate 6 — actually corrector *stage* order, fixed and shipped in
+  [mean_corrector_stage_order.md](mean_corrector_stage_order.md) — and NBA PF is blocked by the
+  single-valued `posthoc` slot, which still stands. That lane also
+  lands two corrections on this record — **NFL interceptions passes Gate 1** on its recent rows and
+  fails Gate 6, and **NBA PF's newest ledger rows are NegBin, not ZINB**, so the dump-based reads
+  for that cell above describe a run the ledger does not contain.
