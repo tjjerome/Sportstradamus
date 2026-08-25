@@ -1928,6 +1928,23 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-08-24 · Count Gate-4 re-diagnosed: **the mean is the lever, not the zeros** — new lane
+  [count_mean_calibration.md](count_mean_calibration.md), research gate discharged by
+  [researcher_count_gate4_zeroinflation.md](../archive/researcher_count_gate4_zeroinflation.md).
+  The KS supremum sits at the bottom of the lattice on every failing count cell (cohort Spearman
+  |zero-mass gap| vs g4 = +0.607), but dropping the ZINB gate rescales the served mean by
+  `1/(1−π)`, so the gate probe was confounded: at fixed mean the gate buys 0.005–0.009, while
+  mean-only takes all four failing ZINB cells under threshold and the gate then adds ≈0.000. The
+  NFL cells serve a mean 26% below outcome — the same defect g6's CITL leg measures. Every g4
+  failure among 49 count cells is a ZINB (5/16 vs 0/33, Fisher p 0.0023) because **`posthoc:
+  roe_mean` is mis-contracted on gated families** — fit on the gate-excluded base mean against
+  zero-inclusive Result, gate reapplied downstream (simulated: NHL goals CITL 0.997→0.260) — so
+  the board correctly rejects it and gated cells never get a mean fix (adoption 1/17 ZINB vs 6/25
+  DPO; the one is withheld, nothing live harmed). Three pathologies, route on `φ̂ =
+  (Var(y)−Var(m))/mean(y)` not raw Pearson (NBA PF 0.78 vs 1.31 — opposite verdicts). Convertible
+  cells: **NFL tds and NBA PF only**; TOV/goalsAgainst g1-walled. E1 = NFL tds `--dist NegBin
+  --posthoc roe_mean`, ~35min, no new code. Also: the cross-fit board is matrix-stale on 14/15
+  cells — re-sweep before spending a confirm on any board nominee.
 - 2026-08-24 · R4 / Exp-3 verdict: count-objective default flip **NULL — stays `crps`**, brief
   [count_dispersion_flip.md](count_dispersion_flip.md) closed. Three measurements: 44-cell offline
   replay (6 seeded half-splits, un-scaling verified against each cell's recorded `g4_pit_ks`)

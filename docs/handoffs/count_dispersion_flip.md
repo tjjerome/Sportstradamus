@@ -75,12 +75,13 @@ Splitting the over-wide cohort by which *other* gates also fail is what re-point
 | MLB runs allowed | ZINB | 2 / 4 | g1 | +0.0007 | +0.0083 |
 | NBA TOV | ZINB | 0 | g1, g6 | not replayable | −0.0673 |
 | NHL goalsAgainst | ZINB/DPO | 0 | g1 | no test CSV | −0.0224 |
-| NFL interceptions | ZINB | 0 | g1, g2, g5, g6 | −0.0013 | +0.0067 |
+| NFL interceptions | ZINB | 0 | g6 (g1 passes — see successor lane) | −0.0013 | +0.0067 |
 
-The cells the lever helps most are Gate-1 walled — their deficit is signal, not width, which
-routes to §6.3 rather than here. The cells that are Gate-4-only do not respond: NFL
+NBA TOV and NHL goalsAgainst are Gate-1 walled — their deficit is signal, not width, which routes
+to §6.3 rather than here. The cells that are Gate-4-only do not respond to *this* lever: NFL
 interceptions replays at 0.1300 / 0.1319 / 0.1306 (as-shipped / crps / pit_ks) against a 0.0698
-threshold, and NFL tds at 0.0591 / 0.0590 / 0.0588 against 0.0500.
+threshold, and NFL tds at 0.0591 / 0.0590 / 0.0588 against 0.0500. What does move them is the
+predictive **mean**, not the dispersion — see the successor lane below.
 
 ## Corrections to the kickoff framing
 
@@ -122,5 +123,11 @@ threshold, and NFL tds at 0.0591 / 0.0590 / 0.0588 against 0.0500.
   NBA FGA (nominee `f779a7b4`, latest row `723e5597`) and WNBA REB (`3f884021` vs `0ca8378d`) are
   matrix-stale exactly like NFL tds; only MLB hitter fantasy points underdog (`5d00d1fc`) has no
   later row to contradict it, and that only means nothing has re-run the cell since 2026-07-29.
-- The ZINB → DPO swap on the worst ZINB cells remains available, one cell per confirm through the
-  normal supersession lane.
+- **Successor lane: [count_mean_calibration.md](count_mean_calibration.md).** The follow-up
+  diagnostic located the Gate-4 supremum at the bottom of the lattice on every failing count cell
+  and traced it to a predictive-mean deficit, not to dispersion or zero-inflation. That lane owns
+  the family routing (including the ZINB → DPO swap this lane deferred), the entry screen, and the
+  pre-registered E1/E2/E3 experiments. Two corrections it lands on this record: **NFL interceptions
+  passes Gate 1** on its recent rows and fails Gate 6, and **NBA PF's newest ledger rows are
+  NegBin, not ZINB**, so the dump-based reads for that cell above describe a run the ledger does
+  not contain.
