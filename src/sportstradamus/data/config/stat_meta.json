@@ -316,10 +316,12 @@
             "blending": "nll"
         },
         "tds": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "NegBin",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none"
+            "posthoc": "isotonic_mean",
+            "count_dispersion_objective": "crps",
+            "blending": "nll"
         },
         "yards": {
             "dist": "SkewNormal",
