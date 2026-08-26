@@ -51,10 +51,11 @@ def _base(
     fixed_controls: dict[str, str] | None = None,
     fixed_persist: dict[str, str] | None = None,
     applicability: dict | None = None,
+    implementation_version: int = 1,
 ) -> dict:
     return {
         "slug": slug,
-        "implementation_version": 1,
+        "implementation_version": implementation_version,
         "artifact_schema_version": 1,
         "family": slug,
         "applicability": applicability or {"distribution_classes": _BOTH_CLASSES},
@@ -147,6 +148,11 @@ _BASE_SPECS = (
         },
         _SKEWNORMAL_PERSIST,
         fixed_controls={"dist": "SkewNormal"},
+        # v2 (2026-08-26): scorecard's dispersion-calibrator skew bound widened from +/-3
+        # to +/-8 — a v1 board row scored its calibrated retry under the railed fit, so
+        # its score is not comparable to a v2 one. Count families keep v1 (c-only
+        # calibrator, no skew term).
+        implementation_version=2,
     ),
     _base(
         "Mixture",
@@ -254,7 +260,10 @@ def _yards(
         "slug": slug,
         # v2: both methods hold their routing/expert set fixed across the holdout-blind
         # calibration folds, so a v1 board row's score is not comparable to a v2 one.
-        "implementation_version": 2,
+        # v3 (2026-08-26): dispersion-calibrator skew bound widened +/-3 -> +/-8 (same
+        # rotation as the SkewNormal base spec — structural methods share its calibrated
+        # retry).
+        "implementation_version": 3,
         "artifact_schema_version": schema,
         "family": "SkewNormal",
         "applicability": applicability,

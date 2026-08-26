@@ -179,15 +179,17 @@ _TWO_PART_CONTRACT_COLUMNS: frozenset[str] = frozenset(
 # Search range for the SkewNormal dispersion scalar c (fit_skewnorm_dispersion_c). Lower
 # bound permits tightening an over-wide cell; upper bound matches the count branch's hard cap.
 _DISPERSION_C_BOUNDS: tuple[float, float] = (0.1, 10.0)
-# Clamp on the Lever-4a additive skew shift s (fit_skewnorm_dispersion_skew). |s| <= 3 keeps
-# the served skewness well inside the SkewNormal's range and bounds the 2-param fit's capacity
-# at ~2k calibration rows (the skewness MLE is only n^(1/4)-consistent near alpha=0 —
-# Hallin & Ley 2014 — so an unbounded shift overfits the gate's own KS).
-_DISPERSION_SKEW_BOUNDS: tuple[float, float] = (-3.0, 3.0)
+# Clamp on the Lever-4a additive skew shift s (fit_skewnorm_dispersion_skew). Heavy-tail
+# yards cells rail the fit at |s| = 3 and still fail Gate 4; the measured PIT-KS transfer
+# is monotone in the bound and saturates near |s| = 8 (NFL receiving yards 0.0568 -> 0.0453,
+# screen matching the full-HPO ledger within +/-0.0007 — docs/archive/researcher_studentt_head.md).
+# Overfit control (the skewness MLE is only n^(1/4)-consistent near alpha=0, Hallin & Ley
+# 2014) now rests on _DISPERSION_SKEW_MIN_GAIN's val->test discount, not the clamp.
+_DISPERSION_SKEW_BOUNDS: tuple[float, float] = (-8.0, 8.0)
 # Deterministic warm starts for the joint (c, s) fit. The objective has a flat-gradient
 # Fisher singularity at s = 0, so a single Nelder-Mead seeded there stalls; spanning negative,
 # zero, and positive skew lets the arg-min escape it for either skew direction.
-_DISPERSION_SKEW_STARTS: tuple[float, ...] = (-1.5, 0.0, 1.5, 3.0)
+_DISPERSION_SKEW_STARTS: tuple[float, ...] = (-1.5, 0.0, 1.5, 3.0, 6.0)
 # Minimum PIT-KS improvement (vs scale-only) for the skew shift to be kept; below it the fit
 # returns the pure Lever-1 (c, 0), byte-identical. Set to the measured val->test discount: a
 # skew gain smaller than the discount is finite-sample noise that won't survive to the test

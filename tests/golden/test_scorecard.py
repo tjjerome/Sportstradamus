@@ -2568,7 +2568,9 @@ def test_fit_skewnorm_dispersion_skew_recovers_underskew():
     c, s = fit_skewnorm_dispersion_skew(mean, sigma, skew0, y)
 
     assert s > 1.0
-    assert -3.0 <= s <= 3.0
+    from sportstradamus.training.scorecard import _DISPERSION_SKEW_BOUNDS
+
+    assert _DISPERSION_SKEW_BOUNDS[0] <= s <= _DISPERSION_SKEW_BOUNDS[1]
     assert (
         _sn_pit_ks(mean, sigma, skew0, y, c, s)
         < _sn_pit_ks(mean, sigma, skew0, y, c_only, 0.0) - 0.02
