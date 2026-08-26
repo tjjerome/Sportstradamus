@@ -1068,8 +1068,9 @@ Refs:
 
 **Continuous — centered-parametrization SkewNormal (R2 verdict; ~2 sessions, zero serving delta).**
 The headline diagnosis: the trained α-head is **frozen at ~0 on every SkewNormal cell** — raw
-`SN_Alpha ≈ 0` after subtracting `skew_cal`, which **rails at the ±3 clamp on 9–12/12 corners** of
-the yards/fantasy family. That is the α=0 Fisher-information singularity (Arellano-Valle & Azzalini
+`SN_Alpha ≈ 0` after subtracting `skew_cal`, which **railed at the then-±3 clamp on 9–12/12
+corners** of the yards/fantasy family (clamp widened to ±8 on 2026-08-26 per the §8.2 #0a
+routing protocol — railed + g4-only cells re-confirm under the wider cap first). That is the α=0 Fisher-information singularity (Arellano-Valle & Azzalini
 2008; Hallin & Ley 2014) live in production; the centered parametrization is the designed fix. New
 distribution class with a closed-form (mean, sd, γ1)→(ξ, ω, α) map, γ1 response `0.99·tanh`
 (as-built; see Build status for the 0.9952 float32 deviation),
@@ -1082,7 +1083,7 @@ count board via the meta-dist input — see the second engine gotcha above; expe
 0.05); (2) riders on NBA FGA + NFL receiving/rushing-yards (retrains only); (3) **SHASH gated on
 pilot evidence** (3–4 sessions, hand-rolled on the `skew_normal.py` pattern, n≳1000 cells) — the
 **WNBA DREB kurtosis class** (+10.4 z) routes to SHASH, *not* a centered pilot; NFL targets (pure
-kurtosis) to StudentT/SHASH after g5/g6. **skew-t deferred indefinitely** (density embeds t-CDF;
+kurtosis) to SHASH after g5/g6 (StudentT piloted NO-GO 2026-08-26 — §8.2 #0a). **skew-t deferred indefinitely** (density embeds t-CDF;
 torch lacks `betainc`; SHASH δ<1 covers the regime). **Kill (per cell, after calibrated-HPO
 confirm):** val PIT-KS gain <15% vs incumbent, or γ1(x) degenerate, or g1 BSS drop >0.01 / g5 ≥0.075
 = no-ship; 0/2 pilots ⇒ cohort → SHASH. Stacking: centered-SN supersedes `skew_cal`'s role but the
@@ -1838,10 +1839,16 @@ brief on a hook-gated edit, write a one-line justification to `.claude/.state/re
   decode/scorecard/persist/serve, so it would serve `E[Y|Y>0]` — measured +14–21% mean inflation
   on NFL receiving/rushing yards that g2/g3/g6 cannot detect. Mixture stays `_RESEARCH`; reopen
   only on the brief's pre-registered 4-condition trigger (evaluable by the WS-0 monthly sweep).
-  Cheaper continuous escalation if a cell is genuinely g4-bound (sole failing gate, g4/bar ≤ 1.20):
-  a **StudentT LSS head** — the brief's player-disjoint residual screen has it tying/beating GMM-2
-  on 3/5 cells at 3 params; the in-repo StudentT NO-GO measured a global hand-fit shape oracle,
-  not a conditional-scale head, so it does not cover this. Own brief + pilot before any build.
+  Continuous escalation for a genuinely g4-bound cell: **StudentT LSS head piloted and refuted
+  (2026-08-26, `docs/archive/researcher_studentt_head.md`)** for the gated right-skewed cohort —
+  the t-likelihood is a redescending M-estimator whose `loc` head fits a robust centre, not
+  `E[Y]` (−25% served mean on receiving yards), and on every cell where a family lever could
+  ship it is dominated by widening `_DISPERSION_SKEW_BOUNDS` to ±8 (landed 2026-08-26;
+  SkewNormal spec v2, structural v3). The brief's 4-step routing protocol governs the cohort:
+  railed `skew_cal` + g4-only → the widened cap; not railed → §6.1/§6.2 axes; still bound +
+  near-symmetric + un-gated → StudentT permissible as research (empirically also g1-walled);
+  still bound + `zi > 0.05` right-skewed → skew-t/SHASH (SHASH is not blocked by torch's
+  missing `betainc`). Full 13-item build list preserved in the brief if ever reopened.
   Hardening backlog from the same brief: fail-fast on a `stat_meta` `dist` with no serve
   capability (`dist:"Mixture"` today crashes confer/close-lines/matrix-regen at ~8 book-leg
   sites), and `_serve_offset_mode` hardcodes SkewNormal (offset-drift class for any future

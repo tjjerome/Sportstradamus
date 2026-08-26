@@ -65,6 +65,7 @@ This is `model_strategy/` code: one module, subagent-scoped, golden-tested.
 | Escalation | Verdict |
 |---|---|
 | SHASH / StudentT families on the g4-hard pilots | NO-GO (memory `cdf_recal_nonstationary_pit`) |
+| StudentT conditional-scale head (gated right-skewed cohort) | Piloted NO-GO 2026-08-26 — redescending `loc` serves −25% mean; dominated by the ±8 skew cap (`docs/archive/researcher_studentt_head.md`) |
 | Whole-CDF isotonic-PIT recal (Rung C) | Built; neither pilot survives (PA g1-walled, DREB g5-bound) |
 | μ-conditional / higher-DOF post-hoc defaults | Killed (R7) |
 | Book-skew shape borrow (§6.5 WS2) | Refuted, reverted |

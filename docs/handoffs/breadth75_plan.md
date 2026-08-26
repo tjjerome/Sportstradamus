@@ -84,7 +84,10 @@ whenever the queue changes; git holds the history.
    priority, two different problems.
    - **receiving + rushing yards**: g4 fails on **upper-tail under-dispersion** (right-tail
      PIT mass 0.21–0.25 vs nominal 0.05; boom games land far more often than a single-mode
-     SkewNormal tail allows). NOT the zero atom — positive-only KS ≈ full KS, so
+     SkewNormal tail allows). *(Superseded 2026-08-26: under the post-fusion corrector and
+     the joint `(c, s)` calibrator the incumbent's far tail is now too heavy — cov80 0.851 —
+     so the residual is asymmetry + support, not raw tail weight;
+     `docs/archive/researcher_studentt_head.md`.)* NOT the zero atom — positive-only KS ≈ full KS, so
      ZAGamma/hurdle would fix the wrong defect. **Compound/compositional architecture
      (count × per-event severity) SMOKE-TESTED — PARTIAL/NO-MERIT, not the lever.** With
      real play-by-play severities and the pre-registered bar (right-tail PIT ≤ 0.10 AND
