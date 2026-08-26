@@ -320,6 +320,7 @@
             "shipped": "devel",
             "target_normalization": "none",
             "posthoc": "isotonic_mean",
+            "dist_training_loss": "nll",
             "count_dispersion_objective": "crps",
             "blending": "nll"
         },
