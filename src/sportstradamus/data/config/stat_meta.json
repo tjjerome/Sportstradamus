@@ -216,10 +216,13 @@
             "sn_param": "centered"
         },
         "interceptions": {
-            "dist": "ZINB",
-            "shipped": "withheld",
+            "dist": "DPO",
+            "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "roe_mean"
+            "posthoc": "isotonic_mean",
+            "dist_training_loss": "nll",
+            "count_dispersion_objective": "crps",
+            "blending": "nll"
         },
         "passing first downs": {
             "dist": "SkewNormal",
