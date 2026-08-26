@@ -276,9 +276,12 @@
         },
         "receiving yards": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "shipped": "devel",
+            "target_normalization": "ratio_projvol",
+            "posthoc": "prob_recal_isotonic",
+            "dist_training_loss": "nll",
+            "sn_param": "direct",
+            "blending": "nll"
         },
         "receptions": {
             "dist": "SkewNormal",
