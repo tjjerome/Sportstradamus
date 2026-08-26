@@ -957,8 +957,24 @@ Entry: a cell where §6.1–§6.3 left the served predictive miscalibrated. **St
 alter the dispersion mechanism → `research-analyst` brief first (§8.2).**
 
 **Status — both halves probed NO-GO for the current SkewNormal cohort; the blend is not the lever
-at `w≈0.90`.** The full narrative and citations live in the references doc (Ship-75 sweep-era
-verdicts) and memory; the durable conclusions:
+at `w≈0.90`.** That NO-GO is **g4-scoped** (over-wide cells at `w≈0.90`); the g1-bound cohort is a
+different failure and is covered by the `crps_1se` verdict below. The full narrative and citations
+live in the references doc (Ship-75 sweep-era verdicts) and memory; the durable conclusions:
+
+- **`crps_1se` blending slug — BUILT (research verdict, g1-bound cohort;
+  [researcher_blend_weight_slug.md](../archive/researcher_blend_weight_slug.md)).** For cells that
+  fail only g1 against a sharp book (NFL passing yards archetype: ci_hi 0.0060 vs 0.0050, g2–g6
+  pass), the failure is CI width, not accuracy — `ci_hi(λ) ≈ λ²E[Δ²] − 2λE[Δ(y−½)] + 1.96λ·sd/√m`,
+  zero at the book. The slug shrinks the fitted CRPS blend weight to the smallest grid value within
+  one player-clustered paired-bootstrap SE of the argmin (forecast-combination-puzzle shrinkage):
+  no-edge cells ride the book line, edge cells keep their weight (measured λ_1SE: passing yards
+  0.02, completions 0.03, WNBA PTS 0.44, NBA MIN 0.65). `brier_line` and any ci_hi-minimizing
+  objective are KILLED — assay-sensitivity leak, and Brier-at-line picks the same λ as CRPS anyway.
+  A `crps_1se` ship buys coverage, not edge: `kelly_shrinkage = clip(BSS,0,1)` sizes it near zero —
+  keep that valve. Cluster-count sensitivity makes NFL systematically more book-lean than NBA (by
+  design). Gate note from the same brief: the ship gate reads the **iid** `g1_brier_diff_ci_hi`;
+  `g1_clustered_ci_hi` is reported-only, and board-crossfit vs production-test g1 disagree by
+  ~0.003 on the same cell (open question below).
 
 - **Built + committed:** power (logarithmic) de-vig (favourite-longshot bias on asymmetric /
   anytime-TD lines, Clarke-Kovalchik-Ingram 2017) and the count-tail regularizer `_sanitize_book_ev`
@@ -1814,17 +1830,22 @@ brief on a hook-gated edit, write a one-line justification to `.claude/.state/re
 
 **Open holes:**
 
-- **#0a — Mixture is out of the sweep pool until it can serve** (owner call).
-  `SWEEP_CAPABILITIES` requires `CAP_CONFIRM`, which drops Mixture from every cell's family pool.
-  It was earning that budget on the board and nowhere else: on the first holdout-blind run it was
-  the rank-1 corner on 3 of the 4 cells searched — NFL passing tds +0.202, NBA FGA +0.150, NFL
-  passing yards +0.100 — against best-confirmable corners of +0.033, +0.076, and −0.040. Passing
-  yards is the sharp case: both of its two gate-passing corners were Mixture, so the cell has no
-  shippable recipe on any family the sweep can now propose. **Put Mixture back in the pool the day
-  it can serve** — that needs Mixture decode in `prediction/model_prob.py` and carries the
-  ZINB/NegBin identity merge as a migration (research-gated per the family rule above). Until then
-  the boards under-report what the data supports, and that gap is the argument for building the
-  serve path, not for re-ranking a family that cannot ship.
+- **#0a — Mixture serve build: KILLED as scoped (2026-08-25 brief), hole superseded.**
+  `/tmp/researcher_mixture_serve.md` (archived copy: `docs/archive/researcher_mixture_serve.md`):
+  the three motivating cells resolved without it (passing tds shipped; NBA FGA has shipping DPO
+  corners; NFL passing yards fails g1 on 100% of corners — a shape lever cannot manufacture g1
+  edge). Decisive safety find: Mixture is `zero_adjusted_continuous` but publishes no gate in
+  decode/scorecard/persist/serve, so it would serve `E[Y|Y>0]` — measured +14–21% mean inflation
+  on NFL receiving/rushing yards that g2/g3/g6 cannot detect. Mixture stays `_RESEARCH`; reopen
+  only on the brief's pre-registered 4-condition trigger (evaluable by the WS-0 monthly sweep).
+  Cheaper continuous escalation if a cell is genuinely g4-bound (sole failing gate, g4/bar ≤ 1.20):
+  a **StudentT LSS head** — the brief's player-disjoint residual screen has it tying/beating GMM-2
+  on 3/5 cells at 3 params; the in-repo StudentT NO-GO measured a global hand-fit shape oracle,
+  not a conditional-scale head, so it does not cover this. Own brief + pilot before any build.
+  Hardening backlog from the same brief: fail-fast on a `stat_meta` `dist` with no serve
+  capability (`dist:"Mixture"` today crashes confer/close-lines/matrix-regen at ~8 book-leg
+  sites), and `_serve_offset_mode` hardcodes SkewNormal (offset-drift class for any future
+  non-SN continuous family).
 
 - **#0b — Gate-4 baseline hysteresis** (highest priority; owner call). §6.0.2 carries the
   decision packet and the recommendation (ship the scale fit first; hysteresis only if churn
