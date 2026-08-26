@@ -30,41 +30,23 @@ whenever the queue changes; git holds the history.
 
 | League | Shipped | Target (75%) | Status |
 |---|---|---|---|
-| WNBA | 14/18 | 14 | **DONE** |
-| NBA | 16/21 | 16 | **DONE** |
-| MLB | 14/19 | 15 | +1 needed |
-| NHL | 10/15 | 12 | +2 needed |
-| NFL | 9/20 | 15 | +6 needed — priority |
+| WNBA | 13/18 | 14 | +1 needed (post-supersession pullback) |
+| NBA | 18/21 | 16 | **DONE** |
+| MLB | 15/19 | 15 | **DONE** |
+| NHL | 12/15 | 12 | **DONE** |
+| NFL | 19/20 | 15 | **DONE** — passing yards the sole withheld cell (g1-walled, sharp book, n=333) |
 
 ## In flight right now
 
-- **Mixture pilot RUN — verdict: PROMISING on receiving yards, g1-walled on rushing.**
-  Board-only, and now out of the sweep pool entirely: `SWEEP_CAPABILITIES` requires
-  `CAP_CONFIRM`, so a family with no serving path spends no trial budget. It was the
-  rank-1 corner on 3 of the first 4 holdout-blind cells and skipped at nomination every
-  time; see model_improvement_track.md §8.2 hole #0a for the put-it-back trigger.
-  Deterministic 6-corner Mixture boards vs the cells' SN boards:
-  - receiving yards: best Mixture corner (centered_additive_mean10 / crps blend) is the
-    cell's **rank-1 corner overall**, g4 pit_ks 0.0552 vs bar 0.050 (SN best 0.0629 —
-    60% of the g4 excess removed), g1 CI-hi +0.0064 (SN best +0.0050), g2/g3/g5/g6 all
-    pass. Deterministic undersells a new family (30 rounds, no HPO) — full-HPO confirm
-    is the decider once serving lands.
-  - rushing yards: Mixture also halves the g4 excess (0.0703 vs SN 0.0868) but g1 is a
-    real wall (CI-hi +0.0143, bss −0.0245 vs SN −0.0027) — book-bound beyond the family.
-  - Pre-registered sharp-book kill (g4 clears while g1 stays positive) NOT triggered.
-  - Build hardening that made it trainable: component-scale clamp to
-    [0.02, 20]×label-std (Hathaway-style — kills the σ→0 likelihood spike and the
-    dead-head exp-overflow), stabilization None→L2, and per-fit floors
-    min_child_weight≥0.1 / lambda_l2≥1.0 (near-dead components have ~zero hessian and
-    unregularized Newton leaf steps explode).
-  - Next: build the Mixture serve path (model_prob decode + blend + dashboard deep-dive
-    + live-path integration test), then full-HPO confirm receiving yards.
-- **NFL chain complete**: receptions + yards shipped to devel (committed) → NFL 9/20.
-  Revert gates now known: carries g1, qb yards g3 (not g4 — bss +0.118), targets g2.
-  Count-board candidates (targets NegBin +0.149, qb tds hurdle-ZINB +0.064) still queued
-  for the post-fix re-run; receptions NegBin is moot (SN ship banked).
+- Rushing + receiving yards + interceptions ship on devel (receiving via the ±8
+  dispersion skew cap — routing protocol at model_improvement_track.md §8.2 #0a;
+  rushing book-lean w=0.05). Mixture serve build killed, StudentT no-go — briefs in
+  `docs/archive/`, reopen trigger in §8.2 #0a.
+- Passing yards = last NFL cell, g1-only wall (best corner ci_hi 0.0056 vs 0.0050 at
+  the w=0.05 floor; standalone model 0.1359; n=333). Small-n recal / data-accrual
+  research brief in flight.
 
-## NFL end-game (7 → 15)
+## NFL end-game (19/20 — passing yards remains)
 
 1. **Six candidates through confirm** (in flight + re-run): the five SN confirms above, plus
    the count re-runs. If a confirm reverts, its recovery levers in order: g4-only calibrated
@@ -122,7 +104,7 @@ thinnest; carries/qb-yards/receptions healthiest. Recovery per reverter: g4-only
 retry → `cdf_recal_isotonic` (continuous cells only — NOT qb tds; the monotone CDF map
 degrades low-mean counts).
 
-## NHL queue (10 → 12), after the NFL chain
+## NHL queue (12/15 — target met)
 
 1. **saves** re-confirm — S4 unlocked its +0.011 corner (ratio_meanyr / dist_training_loss=nll
    / direct / crps): single-cell `model-strategy-sweep --league NHL --market saves --confirm
@@ -132,7 +114,7 @@ degrades low-mean counts).
    5/5 else revert. Backup: goalsAgainst count retry (−0.118).
 3. If both fail: Mixture pilot ask to owner (6th type) with full board evidence.
 
-## MLB queue (14 → 15), after the NFL chain
+## MLB queue (15/19 — target met)
 
 1. **pitches thrown** re-confirm — S4 unlocked its +0.052 corner
    (centered_additive_eb_meanyr_k10 / nll / centered / crps): single-cell sweep --confirm.
