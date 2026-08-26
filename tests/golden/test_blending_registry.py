@@ -15,6 +15,51 @@ def test_crps_registered_default_still_nll():
     assert calibration.DEFAULT_BLENDING == "nll"
 
 
+def test_registry_pinned_and_specs_axis_matches():
+    assert frozenset({"nll", "crps", "crps_1se"}) == calibration.BLENDING_SLUGS
+    from sportstradamus.training.model_strategy.specs import _BLENDING
+
+    assert set(_BLENDING) == set(calibration.BLENDING_SLUGS)
+
+
+def test_fit_blend_weight_routes_crps_1se_forwarding_clusters(monkeypatch):
+    seen = {}
+
+    def fake(*args, **kwargs):
+        seen["args"] = args
+        seen["kwargs"] = kwargs
+        return 0.42
+
+    monkeypatch.setattr(calibration, "fit_model_weight_crps_1se", fake)
+    w = calibration.fit_blend_weight(
+        "crps_1se", [1.0], [1.0], [1.0], "NegBin", model_r=[5.0], cv=0.5, clusters=["a"]
+    )
+    assert w == 0.42
+    assert seen["args"] == ([1.0], [1.0], [1.0], "NegBin")
+    assert seen["kwargs"]["clusters"] == ["a"]
+
+
+def test_other_slugs_tolerate_clusters_kwarg():
+    # Pipeline call sites now always pass clusters=; the TNC fitters must not see it.
+    n = 50
+    rng = np.random.default_rng(5)
+    model_ev = rng.uniform(1.0, 6.0, n)
+    odds_ev = model_ev + rng.normal(0, 0.4, n)
+    result = np.maximum(0, np.round(rng.normal(model_ev, 1.5)))
+    for slug in ("nll", "crps"):
+        w = calibration.fit_blend_weight(
+            slug,
+            model_ev,
+            odds_ev,
+            result,
+            "NegBin",
+            model_r=np.full(n, 5.0),
+            cv=0.5,
+            clusters=np.arange(n),
+        )
+        assert calibration._MODEL_WEIGHT_MIN - 1e-9 <= w <= calibration._MODEL_WEIGHT_MAX + 1e-9
+
+
 def test_fit_blend_weight_crps_returns_bounded_weight_each_family():
     rng = np.random.default_rng(3)
     n = 400

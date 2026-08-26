@@ -86,7 +86,7 @@ _NORMS = (
     "centered_additive_eb_meanyr_k10",
     "ratio_projvol",
 )
-_BLENDING = ("crps", "nll")
+_BLENDING = ("crps", "crps_1se", "nll")
 _COUNT_DISPERSION = ("crps", "pit_ks")
 # The ``posthoc`` calibration pool as a search axis. POSTHOC_SLUGS also carries two structural
 # slugs, but those are registered specs of their own and never axis values here — selecting one

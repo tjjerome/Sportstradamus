@@ -31,6 +31,21 @@ logger = get_logger(__name__)
 _MODEL_WEIGHT_MIN: float = 0.05
 _MODEL_WEIGHT_MAX: float = 0.9
 
+# crps_1se grid: 35 points give 0.025 steps over the weight bounds — fine enough that
+# the 1-SE pick is grid-limited, coarse enough that the n×35 loss matrix stays cheap.
+_ONE_SE_GRID_POINTS: int = 35
+_ONE_SE_GRID: np.ndarray = np.linspace(_MODEL_WEIGHT_MIN, _MODEL_WEIGHT_MAX, _ONE_SE_GRID_POINTS)
+# κ = one standard error — the single global shrinkage intensity; never tuned per cell
+# or league (a per-cell κ reopens the selection channel the brief warns about).
+_ONE_SE_KAPPA: float = 1.0
+# Player-clustered paired bootstrap of the loss difference: fixed draws + seed keep the
+# fitted weight deterministic run-to-run (seed matches the brief's probe).
+_ONE_SE_BOOTSTRAP_DRAWS: int = 2000
+_ONE_SE_BOOTSTRAP_SEED: int = 1729
+# Below this many distinct clusters the clustered SE is too noisy to trust; the fit
+# collapses to the plain grid argmin instead.
+_ONE_SE_MIN_CLUSTERS: int = 10
+
 # Resolution threshold for choosing NegBin over Gamma: the per-player ratio
 # step/nonzero_mean measures how "count-like" (integer-stepped, low-mean) the
 # distribution is.  Above 0.2 the stat fits a count model better than a
@@ -405,6 +420,85 @@ def fit_model_weight(
     return _minimize_weight(objective)
 
 
+def _crps_loss_vector(
+    model_ev,
+    odds_ev,
+    result,
+    dist,
+    model_alpha=None,
+    model_r=None,
+    cv=None,
+    model_sigma=None,
+    model_skew_alpha=None,
+    gate_model=None,
+    gate_book=None,
+):
+    """Build the per-family per-observation CRPS of the blended predictive as a function of ``w``.
+
+    Shared by :func:`fit_model_weight_crps` (which minimizes the mean) and
+    :func:`fit_model_weight_crps_1se` (which needs the whole loss vector at each grid point).
+    """
+    result = np.asarray(result, dtype=float)
+    model_ev = np.asarray(model_ev, dtype=float)
+    odds_ev = np.asarray(odds_ev, dtype=float)
+
+    if dist == "SkewNormal":
+        model_sigma_arr = np.asarray(model_sigma, dtype=float)
+        model_skew_arr = np.asarray(model_skew_alpha, dtype=float)
+
+        def loss_vector(w):
+            bl_ev, bl_sigma, bl_alpha, g_blend = fused_loc(
+                w,
+                model_ev,
+                odds_ev,
+                cv,
+                "SkewNormal",
+                sigma=model_sigma_arr,
+                skew_alpha=model_skew_arr,
+                gate_model=gate_model,
+                gate_book=gate_book,
+            )
+            bl_loc = skewnormal_loc_from_mean(bl_ev, bl_sigma, bl_alpha)
+            return skewnorm_crps(result, bl_loc, bl_sigma, bl_alpha, gate=g_blend)
+
+        return loss_vector
+
+    if dist == "NegBin":
+        model_r_arr = np.asarray(model_r, dtype=float)
+
+        def loss_vector(w):
+            r_blend, p_blend, g_blend = fused_loc(
+                w,
+                model_ev,
+                odds_ev,
+                cv,
+                "NegBin",
+                r=model_r_arr,
+                gate_model=gate_model,
+                gate_book=gate_book,
+            )
+            return negbin_crps(result, r_blend, p_blend, gate=g_blend)
+
+        return loss_vector
+
+    model_alpha_arr = np.asarray(model_alpha, dtype=float)
+
+    def loss_vector(w):
+        alpha_bl, beta_bl, g_blend = fused_loc(
+            w,
+            model_ev,
+            odds_ev,
+            cv,
+            "Gamma",
+            alpha=model_alpha_arr,
+            gate_model=gate_model,
+            gate_book=gate_book,
+        )
+        return gamma_crps(result, alpha_bl, 1 / beta_bl, gate=g_blend)
+
+    return loss_vector
+
+
 def fit_model_weight_crps(
     model_ev,
     odds_ev,
@@ -428,80 +522,120 @@ def fit_model_weight_crps(
 
     Returns a single float w in [0.05, 0.9].
     """
-    result = np.asarray(result, dtype=float)
-    model_ev = np.asarray(model_ev, dtype=float)
-    odds_ev = np.asarray(odds_ev, dtype=float)
-
-    if dist == "SkewNormal":
-        model_sigma_arr = np.asarray(model_sigma, dtype=float)
-        model_skew_arr = np.asarray(model_skew_alpha, dtype=float)
-
-        def objective(w):
-            bl_ev, bl_sigma, bl_alpha, g_blend = fused_loc(
-                w,
-                model_ev,
-                odds_ev,
-                cv,
-                "SkewNormal",
-                sigma=model_sigma_arr,
-                skew_alpha=model_skew_arr,
-                gate_model=gate_model,
-                gate_book=gate_book,
-            )
-            bl_loc = skewnormal_loc_from_mean(bl_ev, bl_sigma, bl_alpha)
-            return np.mean(skewnorm_crps(result, bl_loc, bl_sigma, bl_alpha, gate=g_blend))
-
-        return _minimize_weight(objective)
-
-    if dist == "NegBin":
-        model_r_arr = np.asarray(model_r, dtype=float)
-
-        def objective(w):
-            r_blend, p_blend, g_blend = fused_loc(
-                w,
-                model_ev,
-                odds_ev,
-                cv,
-                "NegBin",
-                r=model_r_arr,
-                gate_model=gate_model,
-                gate_book=gate_book,
-            )
-            return np.mean(negbin_crps(result, r_blend, p_blend, gate=g_blend))
-
-        return _minimize_weight(objective)
-
-    model_alpha_arr = np.asarray(model_alpha, dtype=float)
-
-    def objective(w):
-        alpha_bl, beta_bl, g_blend = fused_loc(
-            w,
-            model_ev,
-            odds_ev,
-            cv,
-            "Gamma",
-            alpha=model_alpha_arr,
-            gate_model=gate_model,
-            gate_book=gate_book,
-        )
-        return np.mean(gamma_crps(result, alpha_bl, 1 / beta_bl, gate=g_blend))
-
-    return _minimize_weight(objective)
+    loss_vector = _crps_loss_vector(
+        model_ev,
+        odds_ev,
+        result,
+        dist,
+        model_alpha=model_alpha,
+        model_r=model_r,
+        cv=cv,
+        model_sigma=model_sigma,
+        model_skew_alpha=model_skew_alpha,
+        gate_model=gate_model,
+        gate_book=gate_book,
+    )
+    return _minimize_weight(lambda w: np.mean(loss_vector(w)))
 
 
-def fit_dpo_weight(model_ev, book_ev, result, model_phi, cv, blending) -> float:
+def _one_se_weight(losses: np.ndarray, clusters) -> float:
+    """Smallest ``_ONE_SE_GRID`` weight whose mean loss sits within ``_ONE_SE_KAPPA`` SEs of the argmin.
+
+    ``losses`` is the n×G per-observation loss matrix over ``_ONE_SE_GRID``. For each grid
+    weight below the argmin, the SE is the player-clustered paired bootstrap of the per-row
+    loss difference against the argmin column — whole clusters resampled with replacement,
+    ``scorecard._bootstrap_mean_ci_clustered``'s idiom. The rule only restricts: with no
+    usable clusters (``None`` or fewer than ``_ONE_SE_MIN_CLUSTERS`` distinct), a non-finite
+    SE, or no smaller weight inside the band, it returns the plain argmin.
+    """
+    mean_loss = losses.mean(axis=0)
+    star = int(np.argmin(mean_loss))
+    if clusters is None:
+        return float(_ONE_SE_GRID[star])
+    _, codes = np.unique(np.asarray(clusters), return_inverse=True)
+    n_clusters = int(codes.max()) + 1
+    if n_clusters < _ONE_SE_MIN_CLUSTERS:
+        return float(_ONE_SE_GRID[star])
+
+    rng = np.random.default_rng(_ONE_SE_BOOTSTRAP_SEED)
+    picks = rng.integers(0, n_clusters, size=(_ONE_SE_BOOTSTRAP_DRAWS, n_clusters))
+    counts = np.bincount(codes, minlength=n_clusters)
+    rows_per_draw = counts[picks].sum(axis=1)
+    for j in range(star):
+        diff = losses[:, j] - losses[:, star]
+        cluster_sums = np.bincount(codes, weights=diff, minlength=n_clusters)
+        se = float(np.std(cluster_sums[picks].sum(axis=1) / rows_per_draw, ddof=1))
+        if not np.isfinite(se):
+            return float(_ONE_SE_GRID[star])
+        if mean_loss[j] <= mean_loss[star] + _ONE_SE_KAPPA * se:
+            return float(_ONE_SE_GRID[j])
+    return float(_ONE_SE_GRID[star])
+
+
+def fit_model_weight_crps_1se(
+    model_ev,
+    odds_ev,
+    result,
+    dist,
+    model_alpha=None,
+    model_r=None,
+    cv=None,
+    model_sigma=None,
+    model_skew_alpha=None,
+    gate_model=None,
+    gate_book=None,
+    clusters=None,
+) -> float:
+    """Fit the blend weight by a one-standard-error parsimony rule on the CRPS path.
+
+    Same per-observation loss as :func:`fit_model_weight_crps`, evaluated over ``_ONE_SE_GRID``
+    instead of TNC-minimized: take the argmin, then return the smallest grid weight whose mean
+    CRPS is within ``_ONE_SE_KAPPA`` player-clustered paired-bootstrap SEs of it — Diebold–Pauly
+    shrinkage of the estimated combination weight toward the book
+    (``/tmp/researcher_blend_weight_slug.md``). On a no-edge cell the flat loss path drives ``w``
+    to the floor; on a real-edge cell the band is tight and ``w`` stays near the argmin.
+
+    ``clusters`` is the per-row player identity (date for team markets); without it the fit
+    falls back to the plain grid argmin.
+
+    Returns a single float w in [0.05, 0.9].
+    """
+    loss_vector = _crps_loss_vector(
+        model_ev,
+        odds_ev,
+        result,
+        dist,
+        model_alpha=model_alpha,
+        model_r=model_r,
+        cv=cv,
+        model_sigma=model_sigma,
+        model_skew_alpha=model_skew_alpha,
+        gate_model=gate_model,
+        gate_book=gate_book,
+    )
+    losses = np.column_stack([loss_vector(w) for w in _ONE_SE_GRID])
+    return _one_se_weight(losses, clusters)
+
+
+def fit_dpo_weight(model_ev, book_ev, result, model_phi, cv, blending, clusters=None) -> float:
     """Blend-weight fit for the DPO family, mirroring :func:`fit_model_weight`.
 
     Not routed through :func:`fit_blend_weight` because that dispatcher's unknown-family
     fallback is the Gamma branch — silently wrong for DPO. Same ``_minimize_weight`` bounds
-    and per-observation clamp; the objective is the blended DP log-pmf (``nll``) or
-    :func:`~sportstradamus.helpers.distributions.dp_crps` (``crps``).
+    and per-observation clamp; the objective is the blended DP log-pmf (``nll``),
+    :func:`~sportstradamus.helpers.distributions.dp_crps` (``crps``), or the same 1-SE
+    grid rule as :func:`fit_model_weight_crps_1se` over the ``dp_crps`` losses
+    (``crps_1se``, which is what ``clusters`` feeds).
     """
     result = np.asarray(result, dtype=float)
 
     def _blended(w):
         mean_bl, phi_bl, _ = fused_loc(w, model_ev, book_ev, cv, "DPO", phi=model_phi)
         return _dp_mu_from_mean(mean_bl, phi_bl), phi_bl
+
+    if blending == "crps_1se":
+        losses = np.column_stack([dp_crps(result, *_blended(w)) for w in _ONE_SE_GRID])
+        return _one_se_weight(losses, clusters)
 
     if blending == "crps":
 
@@ -522,21 +656,27 @@ def fit_dpo_weight(model_ev, book_ev, result, model_phi, cv, blending) -> float:
 
 
 # Per-cell blend strategy: how the model and book distributions are combined.
-# Each entry owns its weight-fitting objective and its weight bounds, so a future
-# strategy can change the objective (e.g. Brier-at-line) and/or the bounds (e.g.
-# drop the 0.05 floor) without touching the others. Default `nll` reproduces the
-# historical behavior exactly.
+# Each entry owns its weight-fitting objective and its weight bounds, so a strategy
+# can change the objective (as `crps_1se` does) and/or the bounds (e.g. drop the
+# 0.05 floor) without touching the others — but never a gate-scored functional like
+# Brier-at-line (assay-sensitivity; /tmp/researcher_blend_weight_slug.md). Default
+# `nll` reproduces the historical behavior exactly.
 DEFAULT_BLENDING: str = "nll"
-BLENDING_SLUGS: frozenset[str] = frozenset({"nll", "crps"})
+BLENDING_SLUGS: frozenset[str] = frozenset({"nll", "crps", "crps_1se"})
 
 
 def fit_blend_weight(blending: str, *args, **kwargs) -> float:
     """Dispatch to the blend strategy's weight fitter. ``nll`` is the legacy
     clamped-log-likelihood objective in :func:`fit_model_weight`; ``crps`` is the
-    bounded strictly-proper objective in :func:`fit_model_weight_crps`.
+    bounded strictly-proper objective in :func:`fit_model_weight_crps`; ``crps_1se``
+    is the 1-SE parsimony rule in :func:`fit_model_weight_crps_1se`.
     """
     if blending not in BLENDING_SLUGS:
         raise ValueError(f"Unknown blending slug {blending!r}; valid: {sorted(BLENDING_SLUGS)}")
+    if blending == "crps_1se":
+        return fit_model_weight_crps_1se(*args, **kwargs)
+    # Only the 1-SE rule uses cluster identity; the TNC fitters keep their signatures.
+    kwargs.pop("clusters", None)
     if blending == "crps":
         return fit_model_weight_crps(*args, **kwargs)
     return fit_model_weight(*args, **kwargs)

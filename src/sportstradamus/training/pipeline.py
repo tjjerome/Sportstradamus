@@ -3402,6 +3402,16 @@ def _split_quote_authenticity_mask(splits: dict, split: str) -> np.ndarray:
     return (archived_values & ~synthetic_values).to_numpy(dtype=bool)
 
 
+def _blend_fit_clusters(splits: dict, mask: np.ndarray) -> np.ndarray:
+    """Per-row cluster ids for the blend-weight fit: player identity, with the same
+    date fallback for team markets as :func:`_calibration_folds`.
+    """
+    key = splits["players_validation"]
+    if key is None:
+        key = splits["dates_validation"]
+    return key.to_numpy()[mask]
+
+
 def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
     """SkewNormal branch: fit model_weight, blend sigma / skew on test + validation."""
     ev = decoded["ev"]
@@ -3430,6 +3440,7 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
             cv=cv,
             model_sigma=decoded["sn_sigma_val"][authentic_val],
             model_skew_alpha=decoded["sn_alpha_val"][authentic_val],
+            clusters=_blend_fit_clusters(splits, authentic_val),
             **{
                 key: (value[authentic_val] if isinstance(value, np.ndarray) else value)
                 for key, value in _fit_gate_kwargs.items()
@@ -3514,6 +3525,7 @@ def _fuse_mixture(out, decoded, splits, cv, blending):
             cv=cv,
             model_sigma=mix_sd_val[authentic_val],
             model_skew_alpha=np.zeros(int(authentic_val.sum()), dtype=float),
+            clusters=_blend_fit_clusters(splits, authentic_val),
         )
     else:
         model_weight = 1.0
@@ -3574,6 +3586,7 @@ def _fit_nonsn_weight(out, decoded, splits, base_dist, dist, cv, hist_gate, blen
                 else None
             ),
             cv=cv,
+            clusters=_blend_fit_clusters(splits, authentic_val),
             **{
                 key: (value[authentic_val] if isinstance(value, np.ndarray) else value)
                 for key, value in _zi_kwargs.items()
@@ -3651,6 +3664,7 @@ def _fuse_dpo(out, decoded, splits, cv, blending):
             decoded["phi_validation"][authentic_val],
             cv,
             blending,
+            clusters=_blend_fit_clusters(splits, authentic_val),
         )
     else:
         model_weight = 1.0
