@@ -226,7 +226,9 @@ _BOARD_COLUMNS: list[str] = [
     "confirm_risk",
     "g1_pass",
     "g1_brier_diff_ci_hi",
+    "g1_brier_diff_ci_hi_standalone",
     "g1_brier_skill",
+    "model_weight",
     "g2_pass",
     "g2_star_z",
     "g3_pass",
@@ -617,7 +619,11 @@ def _score_corner(
         # g4 PIT-KS dispersion, g5 ECE, g6 anti-shrinkage — is visible on the board.
         "g1_pass": bool(row.get("g1_pass")),
         "g1_brier_diff_ci_hi": row.get("g1_brier_diff_ci_hi"),
+        "g1_brier_diff_ci_hi_standalone": row.get("g1_brier_diff_ci_hi_standalone"),
         "g1_brier_skill": row.get("g1_brier_skill_score"),
+        # The corner's fitted blend weight, so a book-lean corner (w at the 0.05 floor) is
+        # distinguishable from a model-driven one when reading its gate values.
+        "model_weight": filedict.get("weight"),
         "g2_pass": bool(row.get("g2_pass")),
         "g2_star_z": row.get("g2_star_z"),
         "g3_pass": bool(row.get("g3_pass")),
@@ -989,6 +995,21 @@ def _ledger_gate_discounts(out: str | None) -> _GateDiscounts:
     ledger = pd.read_csv(NOMINEE_LEDGER_PATH)
     diverged = pd.to_numeric(ledger["dispersion_cal"], errors="coerce") <= _DIVERGED_DISPERSION_CAL
     ledger = ledger[~diverged]
+    # A pair measures the board→confirm gap under the scoring code that produced it. A registry
+    # change (new axis value, stage reorder) rotates strategy signatures, and pairs recorded under
+    # the old code would price corners the new code scores differently — so stale-signature rows
+    # are dropped, the same admissibility rule resume and nomination already apply. The existing
+    # _MIN_LEDGER_ROWS floor then holds discounts inert until enough current-code pairs accrue.
+    current_signatures: dict[str, str | None] = {}
+    for slug in ledger["strategy_slug"].dropna().astype(str).unique():
+        try:
+            current_signatures[slug] = get_strategy(slug).canonical_signature
+        except ValueError:
+            current_signatures[slug] = None
+    ledger = ledger[
+        ledger["strategy_signature"].astype(str)
+        == ledger["strategy_slug"].astype(str).map(current_signatures)
+    ]
     echo_columns = [f"board_{gate}" for gate in _DISCOUNTED_GATES]
     if set(echo_columns) <= set(ledger.columns):
         paired, board_columns = ledger, echo_columns
