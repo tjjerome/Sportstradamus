@@ -104,6 +104,7 @@ _POSTHOC = (
 # sweep's nested cross-fit frame — both live corners scored worse than their plain-platt
 # siblings (0.0062/0.0067 vs 0.0056/0.0064 g1 ci_hi on NFL passing yards, 2026-08-27).
 # Re-admission needs a fresh brief validating the OOF-lambda selection under sweep pressure.
+
 # pipeline gates the whole-CDF stage on ``posthoc_slug in CDF_STAGE and dist == "SkewNormal"``; on
 # any other family it falls through to the scalar path, so the corner would train identically to
 # ``none`` while carrying a different fingerprint.
