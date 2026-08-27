@@ -1967,6 +1967,16 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-08-27 (1) · **Passing-yards 2026-07-20 full-HPO pass SUPERSEDED.** Fresh full-HPO
+  meditate of the recorded §6.8 recipe under current code (post-fusion corrector, joint
+  `(c,s)`, ±8 skew cap, fresh data): g1 mean +0.0104, CI [+0.0010, +0.0213] at the w=0.05
+  floor — kill, with g2–g6 all passing. Pickle pruned, stat_meta reverted to withheld. The
+  cell's g1 wall analysis + lever ranking: `docs/archive/researcher_passing_g1.md` (Phase B =
+  `prob_recal_platt_cv` build).
+- 2026-08-26 (2) · **NFL receiving yards SHIPS 6/6** (first nominee, board slack +0.084;
+  g4 pit_ks 0.0415, g1 ci_hi 0.0004, BSS +0.023 at w=0.9) on the ±8 dispersion skew cap
+  (`5beb11f2`; routing protocol §8.2 #0a). Rushing yards + interceptions shipped the day
+  prior; NFL 19/20, passing yards the sole withheld cell.
 - 2026-08-25 (3) · **NFL tds SHIPS — the mean corrector moved to the fused side of the pool**
   ([mean_corrector_stage_order.md](mean_corrector_stage_order.md), lane closed). One rule, no
   per-cell branching: fit and apply the `MEAN_STAGE` corrector on the *fused served* mean, after

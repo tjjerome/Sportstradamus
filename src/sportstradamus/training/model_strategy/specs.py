@@ -96,6 +96,7 @@ _POSTHOC = (
     "none",
     "prob_recal_isotonic",
     "prob_recal_platt",
+    "prob_recal_platt_cv",
     "roe_mean",
     "isotonic_mean",
 )

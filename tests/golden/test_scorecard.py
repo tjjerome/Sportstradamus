@@ -1247,28 +1247,6 @@ def test_gate1_uses_only_explicit_authentic_book_evidence():
     assert full["g1_brier_skill_score"] == pytest.approx(authentic_only["g1_brier_skill_score"])
 
 
-@pytest.mark.skipif(
-    not (pkg_resources.files(data) / "test_sets/NFL_passing-yards.csv").is_file(),
-    reason="retained historical test-set CSV is a local training artifact (gitignored)",
-)
-def test_retained_historical_passing_yards_gate1_reproduces():
-    path = pkg_resources.files(data) / "test_sets/NFL_passing-yards.csv"
-    with path.open("rb") as stream:
-        assert (
-            hashlib.file_digest(stream, "sha256").hexdigest()
-            == "d9bc85adc753ea9aaa6fed183ada252b5c943a268366afc38673b56d6cea6b29"
-        )
-    frame = pd.read_csv(path, index_col=0)
-
-    gates = compute_gates(frame, league="NFL", market="passing yards")
-
-    assert gates["n_validation"] == 369
-    assert gates["g1_brier_diff_mean"] == -0.0010
-    assert gates["g1_brier_diff_ci_lo"] == -0.0051
-    assert gates["g1_brier_diff_ci_hi"] == 0.0032
-    assert gates["g1_clustered_ci_hi"] == 0.0033
-
-
 def test_write_gate_scorecard_sorts_and_overwrites(tmp_path):
     rows = [
         gate_row(_compressed_frame(seed=1), "EV", league="NFL", market="yards", strategy="t"),

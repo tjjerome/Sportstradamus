@@ -9,8 +9,8 @@ exclusivity. ``"none"`` is a no-op.
 orthogonal to the target-normalization strategy in :mod:`baselines`: a strategy reshapes
 the GBDT *target* (and its loc/scale decode); a corrector adjusts either the decoded
 *mean* (``roe_mean`` / ``isotonic_mean``) or the final over-*probability*
-(``prob_recal_isotonic`` / ``prob_recal_platt``) after the distribution is already
-formed.
+(``prob_recal_isotonic`` / ``prob_recal_platt`` / ``prob_recal_platt_cv``) after the
+distribution is already formed.
 
 *Structural methods* (:data:`STRUCTURAL_STAGE`) reshape the target/CDF earlier in the
 fit rather than after it, so they are dispatched by ``training.pipeline`` to their own
@@ -24,7 +24,10 @@ pickles stay portable, and :func:`apply_posthoc` reproduces the fit's transform 
 the training-side test CSV and the live ``model_prob`` path must agree event-for-event.
 """
 
+import math
+
 import numpy as np
+from scipy.optimize import minimize
 from scipy.special import expit, logit
 from scipy.stats import kstest
 from sklearn.isotonic import IsotonicRegression
@@ -34,7 +37,9 @@ from sportstradamus.helpers.distributions import apply_cdf_recal
 from sportstradamus.training.structural_strategies import AFFINE_STRATEGY, TWO_PART_STRATEGY
 
 # Correctors that transform a calibrated over-probability in [0, 1].
-PROB_STAGE: frozenset[str] = frozenset({"prob_recal_isotonic", "prob_recal_platt"})
+PROB_STAGE: frozenset[str] = frozenset(
+    {"prob_recal_isotonic", "prob_recal_platt", "prob_recal_platt_cv"}
+)
 # Correctors that transform a decoded mean prediction (non-negative stat units).
 MEAN_STAGE: frozenset[str] = frozenset({"roe_mean", "isotonic_mean"})
 # §6.1 Rung C — whole-CDF recalibration. Where PROB_STAGE recalibrates a single-line
@@ -60,6 +65,17 @@ _PROB_CLIP: float = 1e-4
 # shrunk-toward-zero slope.
 _PLATT_C: float = 1e6
 
+# Intercept-penalty grid for prob_recal_platt_cv: the Platt intercept estimates the
+# fit-split over-rate, which is unlearnable at small n and transfers a Brier cost
+# across the val/holdout over-rate gap, while the slope carries the transferable
+# shrinkage. 0 recovers the unpenalised map, inf is intercept-free; the interior
+# points are log-spaced. Out-of-fold log-loss picks per cell (folds/seed reuse the
+# _PIT_RECAL_CV_* constants below).
+_PLATT_CV_LAMBDA_GRID: tuple[float, ...] = (0.0, 1.0, 5.0, 20.0, 100.0, math.inf)
+# Below this many rows a fold's held-out log-loss is noise and a single-class train
+# split cannot fit a map, so the selection degrades to the unpenalised lambda=0 fit.
+_PLATT_CV_MIN_FOLD_ROWS: int = 20
+
 # A whole-CDF map needs few knots to flatten a smooth PIT and overfits with many, so
 # B equal-mass bins cap its degrees of freedom (B≈10 matches the g5 ECE binning). The
 # shrink weight lambda blends the empirical map toward the identity
@@ -73,7 +89,9 @@ _PIT_RECAL_CV_FOLDS: int = 5
 _PIT_RECAL_CV_SEED: int = 0
 
 
-def fit_posthoc(slug: str, x: np.ndarray, y: np.ndarray) -> dict | None:
+def fit_posthoc(
+    slug: str, x: np.ndarray, y: np.ndarray, clusters: np.ndarray | None = None
+) -> dict | None:
     """Fit a corrector on validation data; ``None`` means "apply nothing".
 
     Args:
@@ -82,6 +100,8 @@ def fit_posthoc(slug: str, x: np.ndarray, y: np.ndarray) -> dict | None:
             decoded mean for :data:`MEAN_STAGE`.
         y: Validation outcomes — binary over/under for :data:`PROB_STAGE`,
             raw result for :data:`MEAN_STAGE`.
+        clusters: Optional per-row group labels (player identity) aligned with ``x``.
+            Only ``prob_recal_platt_cv`` reads them, to keep its CV folds group-disjoint.
     """
     if slug not in POSTHOC_SLUGS:
         raise ValueError(f"Unknown posthoc slug {slug!r}; valid: {sorted(POSTHOC_SLUGS)}")
@@ -94,6 +114,8 @@ def fit_posthoc(slug: str, x: np.ndarray, y: np.ndarray) -> dict | None:
     x, y = x[finite], y[finite]
     if len(x) < _MIN_FIT_ROWS or np.ptp(x) == 0.0:
         return None
+    if slug == "prob_recal_platt_cv":
+        return _fit_platt_cv(x, y, None if clusters is None else np.asarray(clusters)[finite])
     if slug == "prob_recal_platt":
         return _fit_platt(x, y)
     if slug in ("prob_recal_isotonic", "isotonic_mean"):
@@ -275,9 +297,78 @@ def _fit_isotonic(x: np.ndarray, y: np.ndarray) -> dict:
 def _fit_platt(x: np.ndarray, y: np.ndarray) -> dict | None:
     if len(np.unique(y)) < 2:
         return None
-    feat = logit(np.clip(x, _PROB_CLIP, 1 - _PROB_CLIP)).reshape(-1, 1)
-    lr = LogisticRegression(C=_PLATT_C).fit(feat, y)
-    return {"kind": "platt", "a": float(lr.coef_[0, 0]), "b": float(lr.intercept_[0])}
+    a, b = _platt_coeffs(logit(np.clip(x, _PROB_CLIP, 1 - _PROB_CLIP)), y, 0.0)
+    return {"kind": "platt", "a": a, "b": b}
+
+
+def _fit_platt_cv(x: np.ndarray, y: np.ndarray, clusters: np.ndarray | None = None) -> dict | None:
+    """Platt map with the intercept penalty selected by out-of-fold log-loss.
+
+    Folds are group-disjoint over ``clusters`` when given, so a repeat player cannot
+    leak the fit split's over-rate into the held-out score. Ties go to the larger
+    penalty; the winning ``lam`` is refit on all rows and recorded in the blob, which
+    :func:`apply_posthoc` treats as a plain ``"platt"`` map.
+    """
+    if len(np.unique(y)) < 2:
+        return None
+    feat = logit(np.clip(x, _PROB_CLIP, 1 - _PROB_CLIP))
+    folds = _platt_cv_folds(len(feat), clusters)
+    if any(len(f) < _PLATT_CV_MIN_FOLD_ROWS or len(np.unique(y[f])) < 2 for f in folds):
+        return {**_fit_platt(x, y), "lam": 0.0}
+    best_lam, best_loss = _PLATT_CV_LAMBDA_GRID[0], float("inf")
+    for lam in _PLATT_CV_LAMBDA_GRID:
+        loss = _platt_cv_oof_loss(feat, y, folds, lam)
+        if loss < best_loss or (loss == best_loss and lam > best_lam):
+            best_lam, best_loss = lam, loss
+    a, b = _platt_coeffs(feat, y, best_lam)
+    return {"kind": "platt", "a": a, "b": b, "lam": float(best_lam)}
+
+
+def _platt_cv_folds(n: int, clusters: np.ndarray | None) -> list[np.ndarray]:
+    """Seeded row-index folds, group-disjoint over ``clusters`` when given."""
+    rng = np.random.default_rng(_PIT_RECAL_CV_SEED)
+    if clusters is None:
+        return np.array_split(rng.permutation(n), _PIT_RECAL_CV_FOLDS)
+    groups = np.array_split(rng.permutation(np.unique(clusters)), _PIT_RECAL_CV_FOLDS)
+    return [np.flatnonzero(np.isin(clusters, group)) for group in groups]
+
+
+def _platt_cv_oof_loss(
+    feat: np.ndarray, y: np.ndarray, folds: list[np.ndarray], lam: float
+) -> float:
+    oof = np.empty_like(feat)
+    for fold in folds:
+        train = np.setdiff1d(np.arange(len(feat)), fold, assume_unique=True)
+        a, b = _platt_coeffs(feat[train], y[train], lam)
+        oof[fold] = a * feat[fold] + b
+    return _bernoulli_nll(oof, y)
+
+
+def _platt_coeffs(feat: np.ndarray, y: np.ndarray, lam: float) -> tuple[float, float]:
+    """Platt ``(slope, intercept)`` on a logit feature under intercept penalty ``lam * b**2``.
+
+    ``lam == 0`` is the exact unpenalised ``prob_recal_platt`` fit; ``lam == inf`` drops
+    the intercept; an interior ``lam`` solves the penalised MLE from the unpenalised start.
+    """
+    if lam == 0.0:
+        lr = LogisticRegression(C=_PLATT_C).fit(feat.reshape(-1, 1), y)
+        return float(lr.coef_[0, 0]), float(lr.intercept_[0])
+    if math.isinf(lam):
+        lr = LogisticRegression(C=_PLATT_C, fit_intercept=False).fit(feat.reshape(-1, 1), y)
+        return float(lr.coef_[0, 0]), 0.0
+
+    def objective(params: np.ndarray) -> float:
+        return _bernoulli_nll(params[0] * feat + params[1], y) + lam * params[1] ** 2
+
+    res = minimize(objective, np.array(_platt_coeffs(feat, y, 0.0)), method="BFGS")
+    if not res.success:
+        res = minimize(objective, res.x, method="Nelder-Mead")
+    return float(res.x[0]), float(res.x[1])
+
+
+def _bernoulli_nll(logits: np.ndarray, y: np.ndarray) -> float:
+    p = np.clip(expit(logits), _PROB_CLIP, 1 - _PROB_CLIP)
+    return float(-np.sum(y * np.log(p) + (1 - y) * np.log(1 - p)))
 
 
 def _fit_affine(x: np.ndarray, y: np.ndarray) -> dict:

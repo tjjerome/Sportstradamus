@@ -4193,7 +4193,12 @@ def _structural_gate_inputs(
         )
         posthoc_blob = mean_posthoc_blob  # None unless the slug is a MEAN_STAGE corrector
         if posthoc_slug in posthoc.PROB_STAGE:
-            posthoc_blob = posthoc.fit_posthoc(posthoc_slug, val_calibrated, y_class_val)
+            posthoc_blob = posthoc.fit_posthoc(
+                posthoc_slug,
+                val_calibrated,
+                y_class_val,
+                clusters=_blend_fit_clusters(splits, np.ones(len(y_class_val), dtype=bool)),
+            )
             val_calibrated = posthoc.apply_posthoc(posthoc_slug, posthoc_blob, val_calibrated)
         test_calibrated_over = apply_temperature(y_proba_no_filt[:, 1], T_opt)
         if posthoc_slug in posthoc.PROB_STAGE:
