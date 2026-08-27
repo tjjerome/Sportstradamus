@@ -34,7 +34,7 @@ whenever the queue changes; git holds the history.
 | NBA | 18/21 | 16 | **DONE** |
 | MLB | 15/19 | 15 | **DONE** |
 | NHL | 12/15 | 12 | **DONE** |
-| NFL | 19/20 | 15 | **DONE** — passing yards the sole withheld cell (g1-walled, sharp book, n=333) |
+| NFL | 20/20 | 15 | **DONE** — every cell on devel |
 
 ## In flight right now
 
@@ -42,11 +42,11 @@ whenever the queue changes; git holds the history.
   dispersion skew cap — routing protocol at model_improvement_track.md §8.2 #0a;
   rushing book-lean w=0.05). Mixture serve build killed, StudentT no-go — briefs in
   `docs/archive/`, reopen trigger in §8.2 #0a.
-- Passing yards = last NFL cell, g1-only wall (best corner ci_hi 0.0056 vs 0.0050 at
-  the w=0.05 floor; standalone model 0.1359; n=333). Small-n recal / data-accrual
-  research brief in flight.
+- Passing yards shipped (devel) via the SkewNormal precision-pool scale floor
+  (`_BLEND_MODEL_SCALE_FLOOR`, commit 29139a7a) — NFL end-game §4 has the numbers.
+  Remaining NFL work is supersession hygiene, not breadth.
 
-## NFL end-game (19/20 — passing yards remains)
+## NFL end-game (20/20 — complete)
 
 1. **Six candidates through confirm** (in flight + re-run): the five SN confirms above, plus
    the count re-runs. If a confirm reverts, its recovery levers in order: g4-only calibrated
@@ -86,10 +86,13 @@ whenever the queue changes; git holds the history.
      negative (bss −0.004 / −0.007) so the g4 fix has a plausible-not-assured g1 crossing;
      pre-registered kill: g4 clears but g1 stays positive ⇒ sharp-book KILL — bank the
      evidence, do not chase.
-   - **passing yards**: NOT reachable this cycle — ~0 zeros (different cell), most
-     efficiently priced NFL prop market, g1 needs ~88× the current n with a point estimate
-     worse than the book. Routes to the pooling/TabPFN lane, not Mixture; honest KILL for
-     now.
+   - **passing yards**: SHIPPED (devel) on the seed recipe under the SkewNormal
+     precision-pool scale floor — g1 mean −0.0026, ci_hi 0.0044, BSS +0.012 at w=0.31.
+     The earlier "needs ~88× n" framing was wrong twice over: the point estimate was a
+     dead tie (not worse than the book), and the g1 mass sat in nine degenerate served
+     probabilities the un-floored precision blend produced
+     (`docs/archive/researcher_passing_g1.md`). Ships as coverage: kelly_shrinkage ≈ 0.01
+     stakes it near nothing by design.
 5. **Remaining pool**: attempts is the only favorable-point-estimate g1 cell (needs ~1.5×
    effective n — obtainable via EB-shrink partial pooling, not history; the Odds API has no
    pre-2023-05 NFL prop history). completions (8× n) and passing tds (5× n + g4) are

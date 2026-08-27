@@ -917,6 +917,20 @@ pulled, each reusing WS-5's regen + parity infrastructure. Pull one only when a 
 
 Entry: Stage-3 batch confirmed (its regen + parity infrastructure is reused).
 
+External QB-props review intake (2026-08-27, cross-checked against house evidence): four
+items admitted to this backlog — (a) stabilization-based per-feature EB weights, the
+Tango/Carleton n/(n+M) phantom-observation form with M re-derived from our own split-half
+data (house EB uses one global k on the normalization baseline only), paired with
+reliability-as-feature (feed n/(n+M) into the σ head so thin-sample players widen honestly);
+(b) completed / attempted air-yards totals for NFL QBs (aDOT already carries air yards per
+attempt; the totals are absent and free from nflfastR fields) — NFL falsification-pilot
+scoping applies; (c) rookie/zero-sample priors from draft capital as location *and* variance
+inflator, with the KNN comp pool extended to pool distribution shape, not just level;
+(d) per-parameter σ/ν regularization — filed under §8.2 #9(c). Rejected from the same
+review: component decomposition (house smoke-test refuted it for yards — dependence-driven
+booms), Johnson SU as a LightGBMLSS default (not in the pinned 0.6.1), and ZINB-by-default
+(matches the house plain-NB verdict already).
+
 1. **M-2 / B-2 — EWMA recency family (all leagues).** `Avg1/3/5` are high-variance tail
    snapshots; exponentially-weighted mean/std at 2–3 half-lives adds a continuous recency axis
    to the family that already dominates SHAP. In `_rolling_features` (leakage-safe by
@@ -968,7 +982,11 @@ live in the references doc (Ship-75 sweep-era verdicts) and memory; the durable 
   zero at the book. The slug shrinks the fitted CRPS blend weight to the smallest grid value within
   one player-clustered paired-bootstrap SE of the argmin (forecast-combination-puzzle shrinkage):
   no-edge cells ride the book line, edge cells keep their weight (measured λ_1SE: passing yards
-  0.02, completions 0.03, WNBA PTS 0.44, NBA MIN 0.65). `brier_line` and any ci_hi-minimizing
+  0.02, completions 0.03, WNBA PTS 0.44, NBA MIN 0.65). Floor-weight caveat (2026-08-27 brief):
+  the SkewNormal blend is precision-weighted, so a `w = 0.05` corner is *not* "95% book" — the
+  served probability retained ~46% of the standalone model's departure from the book before
+  `_BLEND_MODEL_SCALE_FLOOR` landed, and the floor caps (not removes) that seizure; read
+  `model_weight` as a pool weight, never a probability-space share. `brier_line` and any ci_hi-minimizing
   objective are KILLED — assay-sensitivity leak, and Brier-at-line picks the same λ as CRPS anyway.
   A `crps_1se` ship buys coverage, not edge: `kelly_shrinkage = clip(BSS,0,1)` sizes it near zero —
   keep that valve. Cluster-count sensitivity makes NFL systematically more book-lean than NBA (by
@@ -1754,6 +1772,9 @@ the code before relying on the list.
 
 1. NFL sample sizes are an order of magnitude smaller than NBA (~17 vs ~82
    games/player/season); re-derive EB shrinkage `K = σ²_within / σ²_between` per league.
+   Quantitative g1 form (§8.2 #0c): the admissible book-disagreement radius is
+   `δ√n/1.96` — 0.046 at NFL n≈325 vs 0.114 at NBA n≈2000 — so a g1 lever validated on
+   one league may be measuring nothing on the other.
 2. NFL stats are position-locked (`Player position` categorical; per-position scoping shipped) —
    cross-player models per market may not transfer.
 3. WNBA shares NBA's structure at half the games/season; verify EB K. WNBA has no `FGM` or
@@ -1854,6 +1875,20 @@ brief on a hook-gated edit, write a one-line justification to `.claude/.state/re
   sites), and `_serve_offset_mode` hardcodes SkewNormal (offset-drift class for any future
   non-SN continuous family).
 
+- **#0c — Gate 1 is a disagreement-radius test; the served-P degeneracy class.** Two
+  linked facts from the passing-yards campaign (`docs/archive/researcher_passing_g1.md`):
+  (i) since `d_i = (p_m−p_b)(p_m+p_b−2y)` and `|p_m+p_b−2y| ≈ 1` near 0.5, the gate admits
+  at most `rms|p_model − p_book| ≲ δ√n/1.96` even for a perfectly calibrated model —
+  n=325 buys 0.046, n=2000 buys 0.114; a cell can be *more right* than the book and still
+  fail unless its Brier skill covers the disagreement. (ii) The precision pool could serve
+  saturated P (0/1) when the GBDT σ collapsed below the book's — fixed structurally by
+  `_BLEND_MODEL_SCALE_FLOOR` (0.8× book scale), but `frac(P<0.01 or P>0.99)` is still not
+  a reported `model_stats` column and would surface any recurrence across the 7/23 SN cells
+  that showed it. Open follow-ups: the reporting column; and the board→confirm g1 gap's
+  named mechanism (a Platt intercept transfers the fit-split over-rate across a val/holdout
+  over-rate gap — worth a 20-minute ledger query comparing shipped `prob_recal_platt` cells'
+  confirm-vs-board g1 shift against `posthoc: none` cells). The continuous-hurdle lane is
+  closed for this cell class: P(Result=0)=0.128% — no zero atom, no g1 channel.
 - **#0b — Gate-4 baseline hysteresis** (highest priority; owner call). §6.0.2 carries the
   decision packet and the recommendation (ship the scale fit first; hysteresis only if churn
   persists). It gates trust in the ship-incrementally premise.
@@ -1893,7 +1928,11 @@ brief on a hook-gated edit, write a one-line justification to `.claude/.state/re
   2026-08-24) — Rung B′'s PIT-KS count objective has no sharpness brake past `0.01·log(c)²`, but
   over 98 paired cross-fit corners it left `g6_pass` identical on every one and moved
   `g1_brier_diff_ci_hi` a median 0.0000; no over-tightening to watch. (c) only
-  promote `--stabilization` to a swept axis if MAD/L2 ever wins on ≥1 cell (YAGNI). (d) the
+  promote `--stabilization` to a swept axis if MAD/L2 ever wins on ≥1 cell (YAGNI; the
+  StudentT pilot's MAD-beats-L2-by-15% was on a family that was never built — arguably
+  discharges the condition, owner call — and the external QB-props review's per-parameter
+  regularization idea, lower LR / higher min_data_in_leaf on the σ/shape heads than μ,
+  belongs to this same slot for g4-bound cells). (d) the
   under-wide-AND-mislocated NFL SkewNormal cells (attempts/carries, central-50 ≈ 0.27/0.34) are out
   of reach for any selection/post-hoc width fix — that defect is signal/family, not width; confirm
   via §6.3 features and/or the §6.9 `log(volume)` offset before spending a calibration lever on
@@ -1967,6 +2006,14 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-08-27 (2) · **NFL passing yards SHIPS 6/6 — NFL 20/20, yards campaign complete.**
+  The lever was structural, not statistical: `fused_loc`'s SkewNormal precision pool now
+  floors the model scale at 0.8× book scale (`29139a7a`), killing the degenerate-P seizure
+  that carried 98% of the cell's g1 mass. Seed recipe confirms with posthoc *none*: g1 mean
+  −0.0026, ci_hi 0.0044, BSS +0.012 at w=0.31. `prob_recal_platt_cv` built but pulled from
+  the axis pool (both live corners under-ran plain platt — static-screen non-transfer,
+  `proxy_goodhart_under_search` again). Controls under the floor: NBA MIN +0.100, NBA fp
+  prizepicks +0.045, NFL receptions +0.016, zero gate losses. SkewNormal spec → v3.
 - 2026-08-27 (1) · **Passing-yards 2026-07-20 full-HPO pass SUPERSEDED.** Fresh full-HPO
   meditate of the recorded §6.8 recipe under current code (post-fusion corrector, joint
   `(c,s)`, ±8 skew cap, fresh data): g1 mean +0.0104, CI [+0.0010, +0.0213] at the w=0.05
@@ -2119,23 +2166,3 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
   artifacts remain quarantined, the generic board/confirm seam was not exercised for enrollment,
   and there was no `shipped` flip, live enrollment, push, or numerator change.
 - 2026-07-19 (3) · Mixture family #6 built end-to-end + board-piloted same day (owner bumped it to the front). Ships first: NFL receptions (ratio_meanyr/nll/direct/nll) + yards (eb_meanyr_k10/crps/centered/nll) confirmed 5/5 → devel, NFL 9/20; carries g1 / qb yards g3 / targets g2 reverted. Build: pipeline branches (decode/fuse-by-location-shift/scalar-c dispersion on served PIT-KS/temperature/persist MIX_* via strategy encode), helpers kernels (_mixnorm cdf/ppf/odds + start values), scorecard gates (MIX decode + CDF/PPF), sweep FamilySpec (6 corners), validator continuous-aware (CONTINUOUS_DISTS), confirm hard-skips Mixture (serve-iff-ship). Three guardrails made it trainable (§6.6): scale clamp [0.02,20]×label-std, L2 stabilization, min_child_weight/lambda_l2 floors — root cause was σ→0 likelihood spikes + zero-hessian Newton blowup (probe-localized: fused_loc inf−inf → NaN). Pilots: receiving yards Mixture corner = rank-1, g4 0.0552 vs 0.050 (60% of SN's excess removed), g1 +0.0064 CI-hi, rest pass — serve path then full-HPO confirm; rushing g4 halved but g1-walled (bss −0.0245). Sharp-book kill NOT triggered. Scoreboard: WNBA 14/18 ✓ · NBA 16/21 ✓ · MLB 14/19 · NHL 10/15 · NFL 9/20.
-- 2026-07-19 (2) · NFL breadth research + first mandatory ship. research-analyst brief (research/briefs/researcher_nfl_breadth_20260719.md): board ceiling 13/20; receiving/rushing-yards g4 = upper-tail under-dispersion (right-tail PIT 0.21–0.25 vs 0.05, positive-only KS ≈ full KS — NOT the zero atom, ZAGamma dominated); passing yards + completions + passing tds = efficient-book kills (88×/8×/5× n at unfavorable point estimates); interceptions correction — DPO/NegBin corners PASS g1, wall is g4 over-dispersion; attempts = only favorable thin-n cell (1.5× effective n via EB-shrink). Owner: yards trio = priority, interceptions lowest; endorsed a 6th dist type conditional on smoke-testing the compound count×severity architecture first → smoke test run (real PBP severities, MC compound PIT): PARTIAL on receiving (right-tail 0.206→0.180, ~13% of needed), NO MERIT on rushing (worse) — independence assumption understates the dependence-driven joint upper tail; compound rejected for yards, **Mixture head pilot = active lever**. NFL receptions SHIPPED at confirm (SN ratio_meanyr, dist_training_loss=nll persisted — S4 live) → NFL 8/20; carries + qb yards (bss +0.118, g4-pass, other-gate fail) reverted, recovery queued. Living plan file created: docs/handoffs/breadth75_plan.md.
-- 2026-07-19 · Owner: NFL breadth = highest priority. NHL+MLB continuous boards closed: NHL saves +0.011 and MLB pitches thrown +0.052 both ships-but-RANKS-ONLY (dl=nll, third/second occurrence) → S4 BUILT same day (commit 4538861: dist_training_loss persists per cell, meditate resolves it per-cell, ranks-only machinery deleted; −87 LOC). MLB pitching outs REVERTED at full-HPO (g4; +0.057 ×2 corners remain for a manual walk), runs allowed re-swept to g1-only −0.040 (book-side, dead this wave), NHL skater fantasy best −0.230 g4-only on a persistable centered corner (posthoc-isotonic retry queued), goalie fantasy/hitter fantasy/pitcher fantasy dead. NBA STL's DPO ship stale-pinned the ZINB book round-trip golden → re-pinned to FTM. W4 NFL chain LIVE: receptions/targets/carries flipped ZINB (blindspot workaround) → count board+confirm → unshipped flips revert → continuous board+confirm → tds matrix regen. Post-chain queue: pitches thrown + saves re-confirms (S4-unlocked), pitching-outs walk, skater-fantasy retry. Scoreboard: WNBA 14/18 ✓ · NBA 16/21 ✓ · MLB 14/19 · NHL 10/15 · NFL 7/20.
-- 2026-07-18 · W1 finished + W2/W5 executed; three leagues over target. MLB count board 8/8 confirms shipped (6 DPO, 2 NegBin) → MLB 14/19 with batter strikeouts' W5 re-earn. W2 reroutes: NHL sogBS shipped (DPO, BSS +0.220), NBA FGA all-16 kill (g4+g6 — family not binding, stays SN). W5 direct re-earns: NHL assists (DPO +0.085) + MLB batter strikeouts shipped; NBA FTM's DPO corner honestly dead — first live calibrated-retry exercise (fired, still g4); NBA STL shipped on retest (DPO +0.083) → NBA 16/21 CROSSES 75%. Found + fixed: report()'s pickle-dist writeback reverted STL's pending flip off a stale pickle — writeback removed, stat_meta dist input-only (save_distribution_config archived; forced-dist warning = flip-reached-training audit). W3 pilots both KILL (PA g6-only −0.004 knife-edge; NFL receiving-yards g1+g4 sharp-book) ⇒ K4; Mixture.py confirmed in pinned lightgbmlss (SplineFlow too) — escalation ask becomes Mixture-not-SHASH, deferred until continuous-board verdicts. NHL+MLB continuous boards in flight. Scoreboard: WNBA 14/18 ✓ · NBA 16/21 ✓ · MLB 14/19 · NHL 10/15 · NFL 7/20.
-- 2026-07-17 · W1 count boards NBA + NHL closed. NBA: 0 board ships (FTM hurdle +0.02 corner reverted at full-HPO on g4 alone; STL −0.040 / TOV −0.300 kills) but BLST + OREB shipped via direct full-HPO re-earn → NBA 15/21. NHL: 3/3 confirms shipped — blocked (DPO, BSS +0.024), powerPlayPoints (hurdle-ZINB, BSS +0.449), shots (DPO, BSS +0.012) → NHL 8/15; assists −0.058 near-miss (best corner DPO). DPO ships now 4 (TOV, points, blocked, shots). S1 evidence: joint-ZINB 0/132 board corners, best −0.166. Hurdle path has no Optuna search (`_step_select_hyperparams` fixed/warm params) — calibrated HP selection can never apply to hurdle corners. Owner-ordered fallback BUILT same day: `_calibration_penalty` extended to the LSS count/Gamma families (refit → decode → per-trial dispersion-c → served PIT-KS; guard now `not use_hurdle`) and meditate auto-retries a cell once with `hpo_selection=calibrated` when ship fails on g4 alone under loss selection, pinning the knob to stat_meta on a shipped retry; confirm re-syncs subprocess-written pins from disk so later whole-file writes can't erase them. Three gates green + goldens (predicate matrix, persist, sync, count-closure live-path).
-- 2026-07-17 · WS-3 pilots + breadth-75 reframe (owner: 75% every league is the mission, not WS-3 step-following). DPO first ship — WNBA TOV full-HPO 5/5 → devel (4/4 DPO corners board-pass, all NB corners die g4, BSS +0.042); NBA PF all-kill (<50% gap-close, family not binding → §6.1/§6.2); NHL points in flight; kill rule dead. Gap: NBA +3 / NFL +8 / NHL +8 / MLB +10 (WNBA 14/18 done). Five waves: count boards (non-NFL first) → integer-meta reroute → centered-SN pilots + continuous board → NFL book repair (paid backfill agent in flight, apply-at-gap) → ECE recal. Found: NBA BLST/OREB ship=True-but-withheld (free re-earns); `--dist-class` meta-dist blindspot (§6.6 gotcha); book-less MLB trio auto-passes g1–g3 (owner rule). Model-class escalation past families → §6.6 (ordinal stack / mixture / comp-PMF, §8.2-gated). NFL book audit closed same day: July repair already real for the big-7, paid backfill dead (API hole pre-2023-05-03; 882 credits spent, probe-verified ~0 recovery) — blockers rerouted code-side; tds ev-clamp bug root-caused (population zi 0.777 vs quoted-star prices, selection effect) + FIXED (gate-refuted quotes → NULL ev + shape-free quote; 20,840 poisoned evs NULLed; tds matrix purged) + repair applied (88k seed rows deleted, matrices swapped); autopass RETRACTED same day — bookless cells must beat the coin flip. Pilots 2/3 SHIP: NHL points confirm 5/5 → devel (BSS +0.012, n_val 11.8k). Simplification track S1–S5 adopted (§6.6). NHL points interim: DPO 6/6 deterministic +0.226, pit_ks 0.0153 (NB floor 0.083) — low-mean ceiling thesis validated; full-HPO confirm in flight.
-- 2026-07-11 · WS-2 activation COMPLETE: 9 cells live on devel — 5 MLB (2026-07-10) + 4 NHL (goals, hits, shotsAgainst, timeOnIce; commit 3635a20), all deterministic-board → full-HPO confirm on 2-season matrices; final spend 2.39M of 5M credits. NHL powerPlayPoints failed confirm, saves ranks-only (non-persistable dist-loss corner). Post-GO grind on no-ship cells moves to the §6 operating loop (detail: ../archive/mlb-nhl-activation.md §10).
-- 2026-07-10 · dfs-products lane created (decision-engine expansion: game-line combos verify-first, Ladders, alt-line hardening) · §6.11 Rivals pricer build repointed there (tail read stays); ladders + gamelines stage-0 briefs in docs/archive/; serve-time budget locked ≤15 min heavy day · next: unchanged
-- 2026-07-10 · WS-2/WS-4 backfill program done (1.76M credits of 5M): MLB+NHL feature gap closed (7-11 sharp books, NHL 2023-24 refilled), `ladder` seeded 15.5M rungs all five leagues (alt keys backfill-only), MLB/NHL close-layer dual snapshots (23Z eval-only) → CLV/movement computable; §6.11 tail read + §6.5 ladder-lift re-test unblocked. MLB matrices rebuilt 19/19 at 2 seasons; NHL rebuild + both sweeps in flight.
-- 2026-07-09 · WS-2 Track A (key-independent) done: MLB/NHL klepto seed purged (3.1M junk odds rows), backfill `_probe` key bugfix, per-league `trim_gamelog` windows (MLB 95k / NHL 110k rows = 2-season matrices), Savant affinity bot-block fix, activation guard emptied per GO. Gates clean. Backfill + rebuild + sweep/confirm blocked on the activated Odds API key (detail: ../archive/mlb-nhl-activation.md §10).
-- 2026-07-09 · Stage-0 engine work LANDED (§6 status revised in place): version stamping train→serve→history→dashboard + `backfill_history_eras.py`; board `--resume`/per-cell upsert/`swept_at`/`code_rev`/`--dry-run`; FamilySpec registry live. Residue → WS-3: confirm queue-manifest, auto archive-snapshot, family-as-swept-axis. Owner declared D1/D2 GO with 5M-credit backfill — WS-2 activation execution starts (plan: `~/.claude/plans/review-the-model-improvement-track-md-ha-lexical-storm.md`).
-- 2026-07-07 · plan reworked profit-first (owner reframe). WS-1 live-alignment = P1; MLB+NHL activation folded in (WS-2); family research DONE (WS-3: Double Poisson count + centered-SN continuous); copula stage-0 DONE (WS-4); sweep-engine Stage-0 spec written. §6 restructured to workstreams; sweep-era verdicts → refs §15. Confirm league-guard added — withheld MLB/NHL never auto-flip pre-D1/D2 (`_drop_activation_gated` + goldens).
-- 2026-06-28 · WS2 book-shape gate cleared but served-gate lift decoupled at w≈0.90 (research bet); book DREB stays in-family SkewNormal (measured skew ≪ bound), ladder table empty → ladder lift deferred. detail refs §15.
-- 2026-06-27 · WNBA 7→13/18 on built non-family levers (FTM hurdle+pit_ks; PR/RA/AST/OREB/FGA). built-lever lane closed; residual §6.6-bound (count family / centered-SN) + STL §6.3.
-- 2026-06-26 · §6.5 book-distribution audit + Pooling-half BLP + decoupled + weight-challenge probe-v2 all NO-GO; blend not the lever at w≈0.90; residual → §6.6/§6.1. refs §15.
-- 2026-06-25 · NFL hole #4 NEGATIVE — volume five feature-mature (485 cols), negative BSS = target-shape not features; `centered_additive_mean10` decisive (carries g1 flips on pure target transform) → §6.2/§6.6, not §6.3.
-- 2026-06-23 · Lever 1 reworked to calibrated HP search-gate + VALIDATED (ships WNBA PR); per-cell `hpo_selection` persists so cron reproduces.
-- 2026-06-22 · Gate 6 redesigned (OR of 3 one-sided legs + anchor hysteresis) + widened to all cells; `ratio_projvol` REFUTED 0/40, g6 validated; first full strategy board generated.
-- 2026-06-19 · Gate 6 added (anti-shrinkage); §6.3 feature batch 1 + Playoff/series shipped via §7.2 A/B.
-- 2026-06-17 · §6.0 train/live parity harness built; archive NBA Totals ×1.4427 corruption root-caused+fixed+guardrailed; QW-1 game-script A/B NO-SHIP across 15 cells.
-- older lines live in git (`git log docs/handoffs/model_improvement_track.md`); durable sweep-era verdicts consolidated in [`../operation_ship_references.md`](../operation_ship_references.md) §15.
