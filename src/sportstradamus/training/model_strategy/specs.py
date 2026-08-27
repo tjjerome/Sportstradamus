@@ -157,7 +157,10 @@ _BASE_SPECS = (
         # to +/-8 — a v1 board row scored its calibrated retry under the railed fit, so
         # its score is not comparable to a v2 one. Count families keep v1 (c-only
         # calibrator, no skew term).
-        implementation_version=2,
+        # v3 (2026-08-27): fused_loc's SkewNormal precision pool floors the model scale
+        # at _BLEND_MODEL_SCALE_FLOOR x book scale; earlier rows scored the un-floored
+        # blend. Count families unaffected (log-mean pools carry no scale seizure).
+        implementation_version=3,
     ),
     _base(
         "Mixture",
@@ -268,7 +271,8 @@ def _yards(
         # v3 (2026-08-26): dispersion-calibrator skew bound widened +/-3 -> +/-8 (same
         # rotation as the SkewNormal base spec — structural methods share its calibrated
         # retry).
-        "implementation_version": 3,
+        # v4 (2026-08-27): SkewNormal precision-pool scale floor (same rotation again).
+        "implementation_version": 4,
         "artifact_schema_version": schema,
         "family": "SkewNormal",
         "applicability": applicability,

@@ -81,6 +81,12 @@ _DP_NEWTON_MAX_ITER = 8
 # estimate outside this band is small-sample noise, not a real dispersion read.
 _DP_PHI_SEED_FLOOR = 0.25
 _DP_PHI_SEED_CEILING = 4.0
+# SkewNormal precision-pool floor on the model scale, as a fraction of the book scale.
+# The pool weights legs by 1/sigma^2, so a GBDT sigma far below the book's seizes the
+# blend regardless of w and saturates served P to 0/1 — three such rows carried 98% of
+# NFL passing yards' Gate-1 point estimate (docs/archive/researcher_passing_g1.md §6;
+# 0.8 was the best measured kappa, with g4/cov50 unchanged and g5 improved).
+_BLEND_MODEL_SCALE_FLOOR = 0.8
 
 
 def odds_to_prob(odds):
@@ -941,7 +947,16 @@ def fused_loc(
         book_delta = book_skew / np.sqrt(1 + book_skew**2)
         book_loc = ev_b - book_scale * book_delta * np.sqrt(2 / np.pi)
 
-        prec_m = 1.0 / model_sigma**2
+        # The floor applies to the pool only: model_loc above decodes the model's own
+        # mean identity from its true sigma, which the floor must not shift. At w = 1
+        # (no authentic book quote) there is no book leg to seize, and the pure-model
+        # identity fused == model must hold exactly.
+        pooled_model_sigma = np.where(
+            np.asarray(w) >= 1.0,
+            model_sigma,
+            np.maximum(model_sigma, _BLEND_MODEL_SCALE_FLOOR * book_scale),
+        )
+        prec_m = 1.0 / pooled_model_sigma**2
         prec_b = 1.0 / book_scale**2
         total_prec = w * prec_m + (1 - w) * prec_b
         blended_loc = (w * model_loc * prec_m + (1 - w) * book_loc * prec_b) / total_prec

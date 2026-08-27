@@ -139,8 +139,10 @@ def test_fused_loc_skewnormal_default_unchanged():
         sigma=np.array([3.5]),
         skew_alpha=np.array([1.2]),
     )
-    assert float(ev[0]) == pytest.approx(10.82731187571877, abs=1e-9)
-    assert float(sig[0]) == pytest.approx(4.060653952180996, abs=1e-9)
+    # Pinned under the precision-pool scale floor (model sigma 3.5 sits just under
+    # 0.8 x the 4.4 book scale, so the pool sees 3.52).
+    assert float(ev[0]) == pytest.approx(10.838451175474876, abs=1e-9)
+    assert float(sig[0]) == pytest.approx(4.069976152553347, abs=1e-9)
     assert float(skew[0]) == pytest.approx(0.36, abs=1e-9)
     assert gate is None
 
