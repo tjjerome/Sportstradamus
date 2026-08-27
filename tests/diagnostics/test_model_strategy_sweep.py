@@ -313,16 +313,16 @@ def test_family_registry_grids_and_persist_maps():
     dpo = get_strategy("DPO")
     receiving = get_strategy(RECEIVING)
     rushing = get_strategy(RUSHING)
-    # SN: 4 norms × 2 dist-loss × 2 sn-param × 3 blend × 7 posthoc.
-    assert math.prod(len(v) for v in sn.axes.values()) == 336
-    # Mixture: 1 dist × 4 norms × 3 blend × 6 posthoc — no loss axis (lightgbmlss rejects crps
+    # SN: 4 norms × 2 dist-loss × 2 sn-param × 3 blend × 6 posthoc.
+    assert math.prod(len(v) for v in sn.axes.values()) == 288
+    # Mixture: 1 dist × 4 norms × 3 blend × 5 posthoc — no loss axis (lightgbmlss rejects crps
     # components, so the pinned nll is the only trainable value).
-    assert math.prod(len(v) for v in mix.axes.values()) == 72
+    assert math.prod(len(v) for v in mix.axes.values()) == 60
     assert mix.fixed_controls["dist_training_loss"] == "nll"
-    # 1 dist × 2 mode × 2 disp × 3 blend × 6 posthoc.
-    assert math.prod(len(v) for v in zinb.axes.values()) == 72
-    assert math.prod(len(v) for v in negbin.axes.values()) == 36  # 1 dist × 2 disp × 3 blend × 6
-    assert math.prod(len(v) for v in dpo.axes.values()) == 36
+    # 1 dist × 2 mode × 2 disp × 3 blend × 5 posthoc.
+    assert math.prod(len(v) for v in zinb.axes.values()) == 60
+    assert math.prod(len(v) for v in negbin.axes.values()) == 30  # 1 dist × 2 disp × 3 blend × 5
+    assert math.prod(len(v) for v in dpo.axes.values()) == 30
     assert sn.persist == {
         "dist": "dist",
         "normalization": "target_normalization",

@@ -86,5 +86,7 @@ def test_cluster_folds_are_group_disjoint():
 def test_registry_exposes_the_new_slug():
     assert "prob_recal_platt_cv" in posthoc.PROB_STAGE
     assert "prob_recal_platt_cv" in posthoc.POSTHOC_SLUGS
-    assert "prob_recal_platt_cv" in get_strategy("SkewNormal").axes["posthoc"]
-    assert "prob_recal_platt_cv" in get_strategy("NegBin").axes["posthoc"]
+    # Out of the sweep axis pool after the 2026-08-27 live kill (specs._POSTHOC comment);
+    # the slug stays registered so a stat_meta cell carrying it still fits and serves.
+    assert "prob_recal_platt_cv" not in get_strategy("SkewNormal").axes["posthoc"]
+    assert "prob_recal_platt_cv" not in get_strategy("NegBin").axes["posthoc"]
