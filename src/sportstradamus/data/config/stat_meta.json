@@ -528,9 +528,12 @@
         },
         "MIN": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
+            "shipped": "devel",
             "target_normalization": "ratio_meanyr",
-            "posthoc": "none"
+            "posthoc": "cdf_recal_isotonic",
+            "dist_training_loss": "nll",
+            "sn_param": "direct",
+            "blending": "nll"
         },
         "OREB": {
             "dist": "ZINB",
