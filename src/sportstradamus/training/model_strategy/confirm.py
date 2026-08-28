@@ -147,6 +147,8 @@ _GATE4_MECHANISM_CONTROLS: tuple[str, ...] = (
 # Correctors that move a single over-probability rather than the predictive PIT, so Gate 4
 # cannot tell them from ``none``.
 _PIT_NEUTRAL_POSTHOC: frozenset[str] = frozenset({"none", *PROB_STAGE})
+# brief L2: exact-rank ties only. Wider bands demote corners the board genuinely ranks higher.
+_SHAPING_SLOT_TIE_TOL: float = 1e-9
 # The exact model_stats identity columns the official ship verdict is bound to.
 _SHIP_IDENTITY_COLUMNS = [
     "league",
@@ -202,8 +204,9 @@ def _rank_column(admissible: pd.DataFrame, *, live: bool) -> str:
 def _nominees(sub: pd.DataFrame, *, live: bool = False) -> list[dict]:
     """Ordered confirm nominees for one cell: top board corners, then seeds, then the incumbent.
 
-    Only board-confident corners nominate: a corner needs a positive rank value — see
-    :func:`_rank_column` for which value that is — and a cell whose best admissible corner is
+    Only board-confident corners nominate: a corner needs a positive admissibility value — the
+    milder ``veto_slack`` pricing on a withheld cell that carries it, else the same value
+    :func:`_rank_column` picks for ordering — and a cell whose best admissible corner is
     non-positive returns no nominees at all. On a live cell that also means a cell whose baseline
     never scored (``margin_vs_incumbent`` all ``NaN``) nominates nobody: an unmeasured incumbent
     makes every margin unknown, and an unknown margin is not evidence a corner is better. This
@@ -226,17 +229,21 @@ def _nominees(sub: pd.DataFrame, *, live: bool = False) -> list[dict]:
     rank_column = _rank_column(admissible, live=live)
     # A board read back off disk carries pd.NA in any column its sweep predates, and `pd.NA > 0` is
     # neither True nor False — every rank comparison below would raise on it.
+    # brief L5: the stable fingerprint tie-break makes an exact-tie lane a fact about the board,
+    # not about row order.
     ranked = admissible.assign(
         **{rank_column: pd.to_numeric(admissible[rank_column], errors="coerce")}
-    ).sort_values(rank_column, ascending=False)
+    ).sort_values([rank_column, "corner_fingerprint"], ascending=[False, True], kind="stable")
     if len(admissible):
         board_rank = float(ranked[rank_column].max())
-        if not board_rank > 0:
+        lane_rows = _veto_admissible(ranked, rank_column, live=live)
+        if lane_rows is None:
             return []
+        ranked = lane_rows
     else:
         board_rank = float("-inf")
     nominated = _board_lane(ranked, rank_column, context, lg, mkt)
-    backup = _count_class_backup(ranked, rank_column, nominated, context, lg, mkt)
+    backup = _count_class_backup(ranked, nominated, context, lg, mkt)
     if backup is not None:
         nominated.insert(1, backup)
     for spec, controls in _seed_corners(context):
@@ -249,6 +256,47 @@ def _nominees(sub: pd.DataFrame, *, live: bool = False) -> list[dict]:
         for cand in nominated
         if not (cand["corner_fingerprint"] in seen or seen.add(cand["corner_fingerprint"]))
     ]
+
+
+def _veto_admissible(ranked: pd.DataFrame, rank_column: str, *, live: bool) -> pd.DataFrame | None:
+    """The rows eligible for lane slots, or ``None`` when the whole cell fails the nomination bar.
+
+    brief R3: admissibility is priced at the milder median ``veto_slack`` while the ordering (and
+    ``board_rank``, the walk order) stays on the conservative rank column, so a cell whose corners
+    fail only under the conservative price still walks — last. Boards that predate the veto
+    pricing, and the live lane's margin, keep the rank column as the bar. brief L4: a corner the
+    ledger has already decided on this matrix cannot usefully walk again — the walk would skip
+    it — so it never spends a lane slot either.
+    """
+    veto = ranked[rank_column]
+    if not live and "veto_slack" in ranked.columns:
+        veto = pd.to_numeric(ranked["veto_slack"], errors="coerce").fillna(veto)
+    if not veto.max() > 0:
+        return None
+    ranked = ranked[veto > 0]
+    decided = _decided_pairs()
+    if decided:
+        pairs = zip(
+            ranked["corner_fingerprint"].astype(str),
+            ranked["matrix_hash"].astype(str),
+            strict=True,
+        )
+        ranked = ranked[[pair not in decided for pair in pairs]]
+    return ranked
+
+
+def _decided_pairs() -> set[tuple[str, str]]:
+    """Every ``(corner_fingerprint, matrix_hash)`` the ledger holds a full-HPO verdict for."""
+    if not NOMINEE_LEDGER_PATH.exists():
+        return set()
+    ledger = pd.read_csv(NOMINEE_LEDGER_PATH)
+    return set(
+        zip(
+            ledger["strategy_corner_fingerprint"].astype(str),
+            ledger["strategy_matrix_hash"].astype(str),
+            strict=True,
+        )
+    )
 
 
 def _gate4_mechanism(candidate: dict) -> tuple[str, ...]:
@@ -271,28 +319,33 @@ def _gate4_mechanism(candidate: dict) -> tuple[str, ...]:
 def _board_lane(
     ranked: pd.DataFrame, rank_column: str, context, league: str, market: str
 ) -> list[dict]:
-    """The cell's positive-rank board corners, ordered for mechanism diversity, capped at K.
+    """The cell's veto-admissible board corners, ordered for mechanism diversity, capped at K.
 
-    The leader always goes first — the board's own opinion is the best single guess. After that
-    a corner earns its slot by being *different*: first the highest-ranked unseen family, then
-    the highest-ranked unseen Gate-4 mechanism, and only then the next corner by rank. Without
-    it a cell whose top three rows are near-identical ZINB corners spends its whole walk
-    relearning one verdict while a positive DPO or structural row never runs.
+    ``ranked`` arrives already filtered to the corners that clear the nomination bar (see
+    :func:`_nominees`), best rank first. The leader always goes first — the board's own opinion is
+    the best single guess. After that a corner earns its slot by being *different*: first the
+    highest-ranked unseen family, then the highest-ranked unseen Gate-4 mechanism — with a
+    PIT-reshaping corner taking an exactly tied slot (:func:`_next_slot`) — and only then the
+    next corner by rank. Without it a cell whose top three rows are near-identical ZINB corners
+    spends its whole walk relearning one verdict while a positive DPO or structural row never
+    runs.
     """
     pool: list[dict] = []
+    rank_values: list[float] = []
     for _, row in ranked.iterrows():
-        if not row[rank_column] > 0:
-            break
         cand = _board_candidate_row(row, context, league, market)
         if cand is not None:
             pool.append({**cand, "source": f"board slack {cand['slack']:+.3f}"})
+            rank_values.append(float(row[rank_column]))
 
     lane: list[dict] = []
     families: set[str] = set()
     mechanisms: set[tuple[str, ...]] = set()
     remaining = list(range(len(pool)))
     while remaining and len(lane) < CONFIRM_TOP_K:
-        pick = _next_slot(pool, remaining, families, mechanisms) if lane else remaining[0]
+        pick = (
+            _next_slot(pool, rank_values, remaining, families, mechanisms) if lane else remaining[0]
+        )
         remaining.remove(pick)
         lane.append(pool[pick])
         families.add(pool[pick]["strategy_slug"])
@@ -301,18 +354,43 @@ def _board_lane(
 
 
 def _next_slot(
-    pool: list[dict], remaining: list[int], families: set[str], mechanisms: set[tuple[str, ...]]
+    pool: list[dict],
+    rank_values: list[float],
+    remaining: list[int],
+    families: set[str],
+    mechanisms: set[tuple[str, ...]],
 ) -> int:
-    """The highest-ranked remaining corner that argues something new, else the next by rank."""
+    """The highest-ranked remaining corner that argues something new, else the next by rank.
+
+    brief L2: when the lane holds no PIT-reshaping corner and the pick is a non-reshaping corner
+    exactly tied (:data:`_SHAPING_SLOT_TIE_TOL`) with an unseen-mechanism corner that does
+    reshape, the reshaper takes the slot — the ranking statistic cannot separate the two (slack
+    binds on a mean/skill gate on ~97% of top rows), and confirm Gate 4 demonstrably can.
+    """
     unseen_family = (index for index in remaining if pool[index]["strategy_slug"] not in families)
-    unseen_mechanism = (
-        index for index in remaining if _gate4_mechanism(pool[index]) not in mechanisms
-    )
-    return next(unseen_family, next(unseen_mechanism, remaining[0]))
+    pick = next(unseen_family, None)
+    if pick is not None:
+        return pick
+    unseen = [index for index in remaining if _gate4_mechanism(pool[index]) not in mechanisms]
+    pick = unseen[0] if unseen else remaining[0]
+    lane_reshapes = any(mechanism[-1] for mechanism in mechanisms)
+    if not lane_reshapes and not _gate4_mechanism(pool[pick])[-1]:
+        tied_reshaper = next(
+            (
+                index
+                for index in unseen
+                if _gate4_mechanism(pool[index])[-1]
+                and abs(rank_values[index] - rank_values[pick]) <= _SHAPING_SLOT_TIE_TOL
+            ),
+            None,
+        )
+        if tied_reshaper is not None:
+            return tied_reshaper
+    return pick
 
 
 def _count_class_backup(
-    ranked: pd.DataFrame, rank_column: str, nominated: list[dict], context, league: str, market: str
+    ranked: pd.DataFrame, nominated: list[dict], context, league: str, market: str
 ) -> dict | None:
     """The best count-class board corner to slot second on an integer-target cell, or ``None``.
 
@@ -321,15 +399,14 @@ def _count_class_backup(
     pattern. Interleaving the best count corner at slot 2 costs nothing when the leader confirms
     and saves the walk when it diverges. No-op when the cell's target is not on the integer
     lattice, nothing was nominated, a count corner already sits in the top slots, or no
-    positive-rank count-class row remains. Insert-only: no continuous nominee is dropped.
+    veto-admissible count-class row remains (``ranked`` is pre-filtered to the nomination bar).
+    Insert-only: no continuous nominee is dropped.
     """
     if not context.target_is_integer or not nominated:
         return None
     if any(distribution_class(cand["family"]) == "count" for cand in nominated):
         return None
     for _, row in ranked.iterrows():
-        if not row[rank_column] > 0:
-            break
         if distribution_class(str(row["family"])) != "count":
             continue
         cand = _board_candidate_row(row, context, league, market)
@@ -1116,23 +1193,6 @@ def _announce_plan(fresh: list[list[dict]], shipped: list[list[dict]]) -> None:
                     click.echo(wrapped(f"{n}. [{cand['source']}] {edits}", "    ", "       "))
 
 
-def _ledger_decided(cand: dict) -> bool:
-    """Whether this corner already has a full-HPO verdict on the same training matrix.
-
-    A resumed batch re-nominates every still-withheld cell an interrupted run already walked;
-    retraining a corner the ledger has scored on an identical frame re-buys a known verdict at
-    full-HPO price (~40 min). Ledger rows from an older matrix never match, so a cache regen
-    voids the skip and the corner retrains.
-    """
-    if not NOMINEE_LEDGER_PATH.exists():
-        return False
-    ledger = pd.read_csv(NOMINEE_LEDGER_PATH)
-    hit = (ledger["strategy_corner_fingerprint"] == cand["corner_fingerprint"]) & (
-        ledger["strategy_matrix_hash"] == cand["matrix_hash"]
-    )
-    return bool(hit.any())
-
-
 def _walk_nominees(
     meta: dict, nominated: list[dict], attempt
 ) -> tuple[str, str, str, list[str], str]:
@@ -1141,31 +1201,37 @@ def _walk_nominees(
     The cell's training matrix is pinned once here (:func:`_pin_cell_matrix`), so every nominee
     retrains and scores on the same frame. No new revert machinery is needed: ``_confirm_one``'s
     ``finally`` already restores stat_meta and prunes the pickle on every non-win, and
-    ``_supersede_one``'s restores byte-identically. The loop just stops at the first win. A nominee
-    the ledger has already decided on this matrix (:func:`_ledger_decided`) is skipped, not
-    re-retrained.
+    ``_supersede_one``'s restores byte-identically. The loop just stops at the first win.
+
+    Nomination already drops ledger-decided corners (brief L4), but a concurrent walk can append a
+    verdict between selection and this loop, so a decided nominee is still skipped here — without
+    letting a trailing skip overwrite the verdict of a corner that actually ran.
     """
     outcome = ("", "", "REVERTED", ["no nominee"], "-")
     _pin_cell_matrix(nominated[0]["league"], nominated[0]["market"])
+    decided = _decided_pairs()
+    walked = False
     for n, cand in enumerate(nominated, start=1):
         click.secho(
             f"\n  nominee {n}/{len(nominated)} [{cand['source']}] {cand['league']} {cand['market']}",
             bold=True,
         )
         attempt_label = f"{n}/{len(nominated)} {cand['source']}"
-        if _ledger_decided(cand):
+        if decided and (str(cand["corner_fingerprint"]), str(cand["matrix_hash"])) in decided:
             click.secho(
                 "    ledger already holds this corner's verdict on this matrix — skipping",
                 fg="yellow",
             )
-            outcome = (
-                cand["league"],
-                cand["market"],
-                "SKIPPED",
-                ["prior verdict on this matrix"],
-                attempt_label,
-            )
+            if not walked:
+                outcome = (
+                    cand["league"],
+                    cand["market"],
+                    "SKIPPED",
+                    ["prior verdict on this matrix"],
+                    attempt_label,
+                )
             continue
+        walked = True
         lg, mkt, verdict, failed = attempt(meta, cand)
         outcome = (lg, mkt, verdict, failed, attempt_label)
         if verdict in _WIN_OUTCOMES:

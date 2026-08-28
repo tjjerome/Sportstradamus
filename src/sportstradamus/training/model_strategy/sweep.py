@@ -17,8 +17,9 @@ resumable.
 Deterministic trials rank only. ``--confirm`` walks each cell's nominees and requires a clean
 full-HPO 6/6 before a withheld model can ship. Because those confirms land systematically below
 their board scores, the board sorts on ``discounted_slack`` — raw slack re-priced under the
-confirm ledger's measured confirm-minus-board shifts: flat per-gate medians, except g4's, which
-is conditioned on the nominee's family and validation size (:func:`_ledger_gate_discounts`).
+confirm ledger's measured confirm-minus-board shifts at a conservative quantile — while the
+milder median pricing lands in ``veto_slack``, the admissibility bar confirm's nomination veto
+reads (:func:`_ledger_gate_discounts`).
 """
 
 import collections
@@ -34,7 +35,6 @@ import signal
 import subprocess
 import threading
 import time
-from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
 from statistics import fmean
@@ -98,12 +98,13 @@ from sportstradamus.training.model_strategy.tpe_search import (
     MAX_TRIALS_PER_CELL,
     TRAINED_TRIAL_ATTR,
     CellSearchState,
+    cell_axis_choices,
     cell_study,
     enqueue_params,
     reachable_corners,
     suggest_corner,
 )
-from sportstradamus.training.posthoc import STRUCTURAL_STAGE
+from sportstradamus.training.posthoc import PROB_STAGE, STRUCTURAL_STAGE
 from sportstradamus.training.scorecard import (
     apply_thresholds,
     gate_row,
@@ -221,6 +222,7 @@ _BOARD_COLUMNS: list[str] = [
     "slack",
     "ships",
     "discounted_slack",
+    "veto_slack",
     "is_incumbent",
     "margin_vs_incumbent",
     "confirm_risk",
@@ -290,22 +292,25 @@ _DISCOUNTED_GATES: tuple[str, ...] = (
 # a diverged SkewNormal fit, not a calibration measurement — it never informs the discounts.
 _DIVERGED_DISPERSION_CAL: float = 0.1005
 
-# Below this many usable ledger observations the per-gate medians and the rollup's ship-rate cells
-# are noise, so the discounts and the calibrated-expectations table stay inert.
+# Below this many usable ledger observations the per-gate quantiles and the rollup's ship-rate
+# cells are noise, so the discounts and the calibrated-expectations table stay inert.
 _MIN_LEDGER_ROWS: int = 8
 
-# The g4 discount covers the fit's predicted inflation plus this residual quantile — the coverage
-# the old flat p75 bought, re-centered on the nominee's (family, n) conditional mean.
-_G4_DISCOUNT_RESIDUAL_QUANTILE: float = 0.75
+# brief R2: 8 pairs from one cell measure that cell's draw variance, not the board→confirm shift;
+# the discounts also need pairs from at least this many distinct cells before they price anything.
+_MIN_LEDGER_CELLS: int = 3
 
-# lstsq drops singular directions below this fraction of the largest, so the dummy-trap
-# collinearity and a near-constant-n column surface as reduced rank — triggering the flat-median
-# fallback — instead of as amplified noise coefficients.
-_G4_FIT_RCOND: float = 1e-6
+# brief R3: the ranking discount prices corners at the q75 shift (conservative — LOCO-validated
+# against the deleted per-(family, n) OLS), while the veto bar prices at the median so a cell whose
+# corners only fail under the conservative price still walks.
+_RANK_DISCOUNT_QUANTILE: float = 0.75
+_VETO_DISCOUNT_QUANTILE: float = 0.50
 
-# g4's discount is a per-nominee function of (family, n) — see _g4_conditional_discount — while
-# every other gate keeps its flat median scalar.
-_GateDiscounts = dict[str, float | Callable[[str, float | None], float]]
+# brief L1': how many top distinct base recipes get their CDF-stage twin scored after the study.
+# Two, not one — the top exact-tie group spans more than one base on 44% of cells.
+_SHAPING_PROBE_ANCHORS: int = 2
+
+_GateDiscounts = dict[str, float]
 
 # A board nominee's ledger `source` label carries the slack it was nominated at.
 _BOARD_SLACK_PATTERN = re.compile(r"board slack ([+-]\d+\.\d+)")
@@ -780,12 +785,62 @@ def _enqueued_corners(context: CellContext) -> list[tuple[StrategySpec, dict[str
 
     Mandatory cell corners lead — a recipe whose evidence predates the current matrix has to be
     re-measured on it before a budgeted search can be said to have considered it — then the
-    confirm-evidence corners, then the incumbent. Enqueuing all three beats hoping TPE
-    rediscovers them at ~15% grid coverage.
+    confirm-evidence corners, then the incumbent, then the gate-axis frontier
+    (:func:`_frontier_corners`). Enqueuing these beats hoping TPE rediscovers them at ~15% grid
+    coverage.
     """
     return _deduplicated(
-        context, _declared_corners(MANDATORY_SWEEP_CORNERS, context) + _seed_corners(context)
+        context,
+        _declared_corners(MANDATORY_SWEEP_CORNERS, context)
+        + _seed_corners(context)
+        + _frontier_corners(context),
     )
+
+
+def _frontier_corners(context: CellContext) -> list[tuple[StrategySpec, dict[str, str]]]:
+    """One default-controls corner per (normalization, PIT-shaping posthoc) frontier point.
+
+    Gate evidence is axis-structured — normalization moves the mean gates (g2/g3/g6), the
+    PIT-shaping posthoc moves Gate 4 — while TPE optimizes one scalar and can leave a whole
+    frontier point unsampled while it exploits an adjacent basin (WNBA MIN's board-shipping
+    ratio_meanyr+cdf_recal corner was never proposed: the joint's only observation was
+    confounded with ``centered``). ``none`` represents the whole PIT-neutral class — Gate 4
+    cannot tell a prob-stage recalibrator from ``none`` — and every other control takes the
+    family default, so the frontier costs |normalizations| x |shaping posthocs| trains, not a
+    grid sweep.
+    """
+    corners = [
+        (spec, controls)
+        for spec in strategies_for_cell(context, required_capabilities=SWEEP_CAPABILITIES)
+        if not spec.structural and "posthoc" in spec.axes
+        for controls in _spec_frontier(context, spec)
+    ]
+    return _deduplicated(context, corners)
+
+
+def _spec_frontier(context: CellContext, spec: StrategySpec) -> list[dict[str, str]]:
+    """One family's frontier corners: default controls with (normalization, posthoc) pinned.
+
+    Axes come per-cell pruned (:func:`tpe_search.cell_axis_choices`), so a normalization the
+    cell cannot train — ``ratio_projvol`` without a volume denominator — never burns an
+    enqueued trial on a guaranteed crash.
+    """
+    axes = cell_axis_choices(context, spec)
+    shaping = [p for p in axes["posthoc"] if p != "none" and p not in PROB_STAGE]
+    dist = spec.fixed_controls.get("dist") or spec.axes["dist"][0]
+    frontier = []
+    for norm in axes.get("normalization", (None,)):
+        for posthoc in ("none", *shaping):
+            overrides = {"dist": dist, "normalization": norm, "posthoc": posthoc}
+            persisted = {
+                spec.persist[name]: value
+                for name, value in overrides.items()
+                if value is not None and name in spec.persist
+            }
+            controls = incumbent_controls(spec, persisted)
+            if controls is not None:
+                frontier.append(controls)
+    return frontier
 
 
 def _incumbent_corner(context: CellContext) -> tuple[StrategySpec, dict[str, str]] | None:
@@ -812,6 +867,7 @@ def _record_scored(
     market: str,
     scored: dict[str, dict[str, object]],
     discounts: _GateDiscounts,
+    veto_discounts: _GateDiscounts,
     out: str | None,
 ) -> None:
     """Flush the cell's corners scored so far to the board, when the run persists one.
@@ -821,7 +877,7 @@ def _record_scored(
     write, an interrupt anywhere in a multi-hour cell throws away every corner it had trained.
     """
     if out is not None:
-        _upsert_cell(_rank_cell_board(league, market, scored, discounts), out)
+        _upsert_cell(_rank_cell_board(league, market, scored, discounts, veto_discounts), out)
 
 
 def _scored_incumbent(
@@ -868,6 +924,83 @@ def _scored_incumbent(
     return {fingerprint: row}
 
 
+def _shaping_probes(
+    context: CellContext,
+    families: tuple[str, ...],
+    evaluated: dict[str, dict[str, object]],
+    scored: dict[str, dict[str, object]],
+    discounts: _GateDiscounts,
+    timeout_s: int,
+    progress: SearchProgress,
+) -> dict[str, dict[str, object]]:
+    """The top base recipes' CDF-stage twins, scored after the study — coverage, not search.
+
+    Slack binds on a mean/skill gate on ~97% of top board rows, so the ranking statistic is blind
+    to the one corrector that reshapes the predictive PIT: ``cdf_recal_isotonic`` ties ``none``
+    on slack while their confirm Gate-4 pass rates differ 80.6% vs 51.7% (brief L1'). The probe
+    makes that mechanism's coverage deterministic where TPE sampling cannot be relied on: the top
+    :data:`_SHAPING_PROBE_ANCHORS` distinct base recipes (controls less ``posthoc``) each get
+    their cdf twin scored, when their spec carries the corrector and the twin is not already
+    evaluated. Runs beside :func:`_scored_incumbent`, so like the incumbent it is a retrain
+    beyond ``max_trials`` — deterministic coverage never crowds out sampler budget.
+    """
+    ranked = sorted(
+        scored.values(),
+        key=lambda row: (-_discounted_slack(row, discounts), str(row["corner_fingerprint"])),
+    )
+    probes: dict[str, dict[str, object]] = {}
+    for slug, fingerprint, probe in _probe_targets(context, families, ranked):
+        if fingerprint in evaluated or fingerprint in scored or fingerprint in probes:
+            continue
+        progress.starting(probe)
+        probed = _run_and_score(context.league, context.market, slug, probe, timeout_s)
+        progress.scored(
+            probe,
+            verdict=_verdict(probed),
+            slack=float(probed["slack"]),
+            elapsed_s=probed.get("elapsed_s"),
+            trained=True,
+            failure=_board_text(probed, "failure"),
+        )
+        probes[fingerprint] = probed
+    return probes
+
+
+def _probe_targets(
+    context: CellContext, families: tuple[str, ...], ranked: list[dict[str, object]]
+) -> list[tuple[str, str, dict[str, str]]]:
+    """``(slug, fingerprint, probe corner)`` per anchor base whose CDF twin is worth scoring.
+
+    An anchor is one of the first :data:`_SHAPING_PROBE_ANCHORS` distinct base recipes (controls
+    less ``posthoc``) in rank order; it yields a probe when its spec carries the corrector and the
+    anchor row is not already the cdf twin itself.
+    """
+    targets: list[tuple[str, str, dict[str, str]]] = []
+    bases: list[tuple] = []
+    for row in ranked:
+        if float(row["slack"]) == _FAILED_CORNER_SLACK or str(row["family"]) not in families:
+            continue
+        corner = parse_controls(row["controls_json"])
+        base = tuple(sorted((name, value) for name, value in corner.items() if name != "posthoc"))
+        if base in bases:
+            continue
+        if len(bases) == _SHAPING_PROBE_ANCHORS:
+            break
+        bases.append(base)
+        spec = get_strategy(str(row["family"]))
+        if (
+            spec.structural
+            or "cdf_recal_isotonic" not in spec.axes.get("posthoc", ())
+            or corner.get("posthoc") == "cdf_recal_isotonic"
+        ):
+            continue
+        probe = {**corner, "posthoc": "cdf_recal_isotonic"}
+        targets.append(
+            (spec.slug, corner_fingerprint(spec, probe, str(context.matrix_sha256)), probe)
+        )
+    return targets
+
+
 def search_cell(
     league: str,
     market: str,
@@ -902,13 +1035,15 @@ def search_cell(
     context = _cell_context(league, market)
     families = families if families is not None else _cell_families(league, market)
     evaluated = dict(cached or {})
-    discounts = _ledger_gate_discounts(out)
+    discounts, veto_discounts = _ledger_gate_discounts(out)
     timeout_s = _cell_timeout_seconds(out, league, market)
     study = cell_study(league, market, families)
+    enqueued_fingerprints: set[str] = set()
     for spec, corner in _enqueued_corners(context):
         params = enqueue_params(context, spec, corner)
         if params is not None and spec.slug in families:
             study.enqueue_trial(params, skip_if_exists=True)
+            enqueued_fingerprints.add(corner_fingerprint(spec, corner, str(context.matrix_sha256)))
 
     scored: dict[str, dict[str, object]] = {}
     trained: set[str] = set()
@@ -939,7 +1074,11 @@ def search_cell(
             row = _run_and_score(league, market, spec.slug, corner, timeout_s)
             evaluated[fingerprint] = row
             trained.add(fingerprint)
-            state.observe(spec.slug, float(row["slack"]))
+            state.observe(
+                spec.slug,
+                float(row["slack"]),
+                sampled=fingerprint not in enqueued_fingerprints,
+            )
         trial.set_user_attr(TRAINED_TRIAL_ATTR, retrained)
         progress.scored(
             corner,
@@ -950,7 +1089,9 @@ def search_cell(
             failure=_board_text(row, "failure"),
         )
         scored[fingerprint] = row
-        _record_scored(league, market, scored, discounts, out)
+        _record_scored(league, market, scored, discounts, veto_discounts, out)
+        # The objective must stay RAW slack: pricing the ledger discounts into it would let the
+        # sampler optimize against its own correction (the Goodhart failure the brief bounded).
         return -float(row["slack"])
 
     def stop_when_budget_spent(study: optuna.Study, trial: optuna.trial.FrozenTrial) -> None:
@@ -969,8 +1110,11 @@ def search_cell(
             callbacks=[state.stop_if_done, stop_when_budget_spent],
         )
         scored.update(_scored_incumbent(context, families, scored, timeout_s, progress))
-        _record_scored(league, market, scored, discounts, out)
-    return _rank_cell_board(league, market, scored, discounts)
+        scored.update(
+            _shaping_probes(context, families, evaluated, scored, discounts, timeout_s, progress)
+        )
+        _record_scored(league, market, scored, discounts, veto_discounts, out)
+    return _rank_cell_board(league, market, scored, discounts, veto_discounts)
 
 
 def _prior_standings(evaluated: dict[str, dict[str, object]]) -> list[tuple[str, float]]:
@@ -978,20 +1122,24 @@ def _prior_standings(evaluated: dict[str, dict[str, object]]) -> list[tuple[str,
     return [(str(row["family"]), float(row["slack"])) for row in evaluated.values()]
 
 
-def _ledger_gate_discounts(out: str | None) -> _GateDiscounts:
-    """Per-gate confirm-minus-board gate shifts measured from the nominee ledger.
+def _ledger_gate_discounts(out: str | None) -> tuple[_GateDiscounts, _GateDiscounts]:
+    """Per-gate confirm-minus-board shifts from the nominee ledger, priced at two quantiles.
 
     Full-HPO confirms land systematically worse than the holdout-blind board on the same corner
     (g4_pit_ks +0.0115, g2_star_z +0.034 on the 37-row ledger), so raw board slack oversells its
     nominees. Non-diverged ledger rows are paired with their board-side gate values — the ledger's
     own ``board_*`` echo columns when a confirm-side change has added them, else an identity join
-    against the board CSV at ``out`` — and each gate's median shift is returned, except g4's,
-    which becomes a per-nominee function of the corner's family and validation size
-    (:func:`_g4_conditional_discount`). ``{}`` (inert) when the ledger is absent, unpairable, or
-    thinner than :data:`_MIN_LEDGER_ROWS` pairs.
+    against the board CSV at ``out`` — and each gate's shift distribution is summarized twice:
+    the :data:`_RANK_DISCOUNT_QUANTILE` scalars price ``discounted_slack`` (the ordering), the
+    :data:`_VETO_DISCOUNT_QUANTILE` scalars price ``veto_slack`` (the nomination bar). A flat
+    per-gate quantile beat the deleted per-(family, n) OLS 2.6x on leave-one-cell-out error —
+    the ledger is too thin to support conditional structure (brief R1). ``({}, {})`` (inert) when
+    the ledger is absent, unpairable, or thinner than :data:`_MIN_LEDGER_ROWS` pairs drawn from
+    :data:`_MIN_LEDGER_CELLS` distinct cells.
     """
+    inert: tuple[_GateDiscounts, _GateDiscounts] = ({}, {})
     if not NOMINEE_LEDGER_PATH.exists():
-        return {}
+        return inert
     ledger = pd.read_csv(NOMINEE_LEDGER_PATH)
     diverged = pd.to_numeric(ledger["dispersion_cal"], errors="coerce") <= _DIVERGED_DISPERSION_CAL
     ledger = ledger[~diverged]
@@ -1015,7 +1163,7 @@ def _ledger_gate_discounts(out: str | None) -> _GateDiscounts:
         paired, board_columns = ledger, echo_columns
     else:
         if out is None or not pathlib.Path(out).exists():
-            return {}
+            return inert
         paired = ledger.merge(
             _read_board(pathlib.Path(out)),
             left_on=["league", "market", "strategy_slug", "strategy_controls_json"],
@@ -1031,59 +1179,13 @@ def _ledger_gate_discounts(out: str | None) -> _GateDiscounts:
     )
     shifts = confirm_values - board_values
     shifts = shifts[shifts.notna().any(axis="columns")]
-    if len(shifts) < _MIN_LEDGER_ROWS:
-        return {}
-    discounts: _GateDiscounts = {
-        gate: float(median) for gate, median in shifts.median().items() if pd.notna(median)
-    }
-    if "g4_pit_ks" in discounts:
-        discounts["g4_pit_ks"] = _g4_conditional_discount(
-            shifts["g4_pit_ks"],
-            paired.loc[shifts.index, "distribution"],
-            pd.to_numeric(paired.loc[shifts.index, "n_validation"], errors="coerce"),
-            float(discounts["g4_pit_ks"]),
-        )
-    return discounts
-
-
-def _g4_conditional_discount(
-    inflation: pd.Series, families: pd.Series, n_validation: pd.Series, flat_median: float
-) -> float | Callable[[str, float | None], float]:
-    """g4's discount as a function of the nominee's (family, n_validation), not one flat scalar.
-
-    Measured g4 inflation is structured: it scales with 1/sqrt(n_validation) (corr 0.45) and
-    shifts by family (ZINB ≈ +0.024, NegBin ≈ −0.013; joint OLS R² = 0.51 on the 122-pair
-    ledger), so any flat quantile over-discounts n≥1600 cells ~7x while under-discounting
-    NFL-scale (n≈300) ones ~2x. OLS via numpy lstsq (deterministic) of the paired inflations on
-    [intercept, 1/sqrt(n), family dummies]; a nominee's discount is its predicted inflation plus
-    the :data:`_G4_DISCOUNT_RESIDUAL_QUANTILE` of the fit residuals, with dummy effect 0 for a
-    family absent from the fit. Falls back to ``flat_median`` when the design is degenerate —
-    fewer than :data:`_MIN_LEDGER_ROWS` usable pairs, or effective rank below families+1 (single
-    family with near-constant n) — and per nominee when the board row carries no ``n``.
-    """
-    usable = inflation.notna() & families.notna() & n_validation.notna()
-    if int(usable.sum()) < _MIN_LEDGER_ROWS:
-        return flat_median
-    y = inflation[usable].to_numpy(dtype=float)
-    inv_sqrt_n = 1.0 / np.sqrt(n_validation[usable].to_numpy(dtype=float))
-    fams = families[usable].astype(str)
-    levels = sorted(fams.unique())
-    design = np.column_stack(
-        [np.ones_like(inv_sqrt_n), inv_sqrt_n]
-        + [(fams == level).to_numpy(dtype=float) for level in levels]
+    cells = paired.loc[shifts.index, ["league", "market"]].drop_duplicates()
+    if len(shifts) < _MIN_LEDGER_ROWS or len(cells) < _MIN_LEDGER_CELLS:
+        return inert
+    return tuple(
+        {gate: float(value) for gate, value in shifts.quantile(q).items() if pd.notna(value)}
+        for q in (_RANK_DISCOUNT_QUANTILE, _VETO_DISCOUNT_QUANTILE)
     )
-    coef, _, rank, _ = np.linalg.lstsq(design, y, rcond=_G4_FIT_RCOND)
-    if rank < len(levels) + 1:
-        return flat_median
-    residual_q = float(np.quantile(y - design @ coef, _G4_DISCOUNT_RESIDUAL_QUANTILE))
-    effects = dict(zip(levels, coef[2:].tolist(), strict=True))
-
-    def discount(family: str, n: float | None) -> float:
-        if n is None:
-            return flat_median
-        return float(coef[0] + coef[1] / math.sqrt(n) + effects.get(family, 0.0) + residual_q)
-
-    return discount
 
 
 def _board_float(row: dict[str, object], column: str) -> float | None:
@@ -1146,14 +1248,6 @@ def _cell_timeout_seconds(out: str | None, league: str, market: str) -> int:
     return int(min(_MEDITATE_TRIAL_TIMEOUT_S, max(_TIMEOUT_FLOOR_S, _TIMEOUT_HEADROOM * slowest)))
 
 
-def _gate_discount(discounts: _GateDiscounts, gate: str, row: dict[str, object]) -> float:
-    """One row's discount for ``gate`` — g4's is evaluated at the row's own (family, n)."""
-    discount = discounts.get(gate, 0.0)
-    if callable(discount):
-        return discount(str(row["family"]), _board_float(row, "n"))
-    return discount
-
-
 def _discounted_slack(row: dict[str, object], discounts: _GateDiscounts) -> float:
     """``slack`` recomputed with each gate scalar shifted by its measured confirm inflation.
 
@@ -1167,7 +1261,7 @@ def _discounted_slack(row: dict[str, object], discounts: _GateDiscounts) -> floa
     adjusted: dict[str, object] = {"g4_pit_ks_max": _board_float(row, "g4_pit_ks_max")}
     for gate in _DISCOUNTED_GATES:
         value = _board_float(row, gate)
-        adjusted[gate] = None if value is None else value + _gate_discount(discounts, gate, row)
+        adjusted[gate] = None if value is None else value + discounts.get(gate, 0.0)
     return min(min_gate_slack(adjusted), slack)
 
 
@@ -1182,7 +1276,7 @@ def _confirm_risk(row: dict[str, object], context: CellContext, discounts: _Gate
     g4, g4_max = _board_float(row, "g4_pit_ks"), _board_float(row, "g4_pit_ks_max")
     if g4 is None or g4_max is None:
         return ""
-    return "high" if g4 + _gate_discount(discounts, "g4_pit_ks", row) >= g4_max else ""
+    return "high" if g4 + discounts.get("g4_pit_ks", 0.0) >= g4_max else ""
 
 
 def _with_incumbent_margin(rows: list[dict[str, object]], context: CellContext) -> list[dict]:
@@ -1233,12 +1327,14 @@ def _rank_cell_board(
     market: str,
     scored: dict[str, dict[str, object]],
     discounts: _GateDiscounts | None = None,
+    veto_discounts: _GateDiscounts | None = None,
 ) -> pd.DataFrame:
     """One cell's scored corners as board rows, best empirically discounted slack first.
 
     ``discounted_slack`` re-prices each row's raw slack under the ledger's confirm-vs-board gate
-    shifts and is the sort key; ``confirm_risk`` flags the corner shapes that measured worst on
-    confirm. Both fall back to the raw ranking / stay blank on a thin ledger.
+    shifts and is the sort key; ``veto_slack`` prices the same rows under the milder median shifts
+    — the bar confirm's nomination veto reads; ``confirm_risk`` flags the corner shapes that
+    measured worst on confirm. All fall back to the raw ranking / stay blank on a thin ledger.
     ``margin_vs_incumbent`` prices each corner against the cell's serving recipe — the value
     confirm's live lane ranks on.
     """
@@ -1252,6 +1348,7 @@ def _rank_cell_board(
                     "market": market,
                     **row,
                     "discounted_slack": _discounted_slack(row, discounts),
+                    "veto_slack": _discounted_slack(row, veto_discounts or {}),
                     "confirm_risk": _confirm_risk(row, context, discounts),
                 }
                 for row in scored.values()
@@ -1259,7 +1356,14 @@ def _rank_cell_board(
             context,
         )
     )
-    ranked = board.sort_values("discounted_slack", ascending=False, ignore_index=True)
+    # brief L5: a stable sort with a fingerprint tie-break makes an exact-tie ordering a fact
+    # about the board, not about dict insertion — the repro test's "coin flip" slot loss.
+    ranked = board.sort_values(
+        ["discounted_slack", "corner_fingerprint"],
+        ascending=[False, True],
+        kind="stable",
+        ignore_index=True,
+    )
     ranked["swept_at"] = datetime.now(UTC).isoformat(timespec="seconds")
     ranked["code_rev"] = _code_rev()
     return ranked.reindex(columns=_BOARD_COLUMNS)

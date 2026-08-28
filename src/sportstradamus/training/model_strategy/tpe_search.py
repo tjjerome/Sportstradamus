@@ -151,12 +151,19 @@ class CellSearchState:
             self._best[family] = max(self._best[family], slack)
             self._cell_best = max(self._cell_best, slack)
 
-    def observe(self, family: str, slack: float) -> None:
+    def observe(self, family: str, slack: float, *, sampled: bool = True) -> None:
+        """Record a retrained corner; ``sampled=False`` (an enqueued corner) never ages patience.
+
+        The enqueue prefix (seeds, incumbent, gate-axis frontier) is deterministic coverage, not
+        sampler search — a run of non-improving enqueued corners says nothing about whether TPE
+        has stopped finding improvements, and counting them could stop the study before its first
+        own proposal.
+        """
         self._seen[family] += 1
         self._best[family] = max(self._best[family], slack)
         if slack > self._cell_best:
             self._cell_best, self._stale = slack, 0
-        else:
+        elif sampled:
             self._stale += 1
 
     def abandoned(self, family: str) -> bool:

@@ -545,6 +545,150 @@ def test_nominees_sort_by_discounted_slack_when_present_else_slack():
     assert nominated[0]["board_rank"] == 0.25
 
 
+def test_nominees_veto_on_veto_slack_and_rank_on_discounted_slack():
+    """brief R3: admissibility is priced at the milder q50 ``veto_slack`` while ordering stays on
+    the q75 ``discounted_slack``, so a cell whose corners all go rank-negative under the
+    confirm-priced discount still walks when the median price says they clear the gates.
+    """
+    rescued = _sn_row("ratio_meanyr", "crps", "nll", False, 0.10)
+    rescued["discounted_slack"], rescued["veto_slack"] = -0.05, 0.04
+    runner_up = _sn_row("centered_additive_mean10", "crps", "crps", False, 0.08)
+    runner_up["discounted_slack"], runner_up["veto_slack"] = -0.12, 0.02
+
+    nominated = _nominate(rescued, runner_up)
+    board = [n for n in nominated if n["source"].startswith("board")]
+    # Both corners survive the q50 veto and keep their q75 ordering; board_rank stays the
+    # rank-column max so rescued cells sort last in the walk order.
+    assert [n["slack"] for n in board] == [0.10, 0.08]
+    assert nominated[0]["board_rank"] == pytest.approx(-0.05)
+
+    # A row negative under both prices never nominates even beside a rescued one.
+    dead = _sn_row("centered_additive_eb_meanyr_k10", "crps", "crps", False, 0.30)
+    dead["discounted_slack"], dead["veto_slack"] = -0.40, -0.20
+    with_dead = _nominate(rescued, dead)
+    assert [n["slack"] for n in with_dead if n["source"].startswith("board")] == [0.10]
+
+    # All rows dead under the q50 veto: the cell nominates nothing, not even its seed.
+    rescued_dead = dict(rescued)
+    rescued_dead["discounted_slack"], rescued_dead["veto_slack"] = -0.05, -0.01
+    assert _nominate(rescued_dead, dead) == []
+
+    # Legacy boards without the veto column keep the rank-column veto.
+    no_veto = _sn_row("ratio_meanyr", "crps", "nll", False, 0.10)
+    no_veto["discounted_slack"] = -0.05
+    assert _nominate(no_veto) == []
+
+
+def test_nominees_break_exact_rank_ties_by_fingerprint():
+    """brief L5: with equal rank values the lane order is fingerprint order, not row order —
+    the same board must nominate the same lane on every run.
+    """
+    rows = [
+        _sn_row("ratio_meanyr", "nll", "crps_1se", False, 0.06, posthoc="prob_recal_platt"),
+        _sn_row("ratio_meanyr", "nll", "nll", False, 0.06),
+    ]
+    forward = [n["corner_fingerprint"] for n in _nominate(*rows)]
+    backward = [n["corner_fingerprint"] for n in _nominate(*reversed(rows))]
+    assert forward == backward
+    board_lane = [f for f in forward if f in {r["corner_fingerprint"] for r in rows}]
+    assert board_lane == sorted(board_lane)
+
+
+def test_nominees_drop_ledger_decided_corners_at_selection():
+    """brief L4: a corner with a full-HPO verdict on this matrix never spends a lane slot —
+    the lane fills with undecided corners the walk can actually run. A verdict from an older
+    matrix does not match.
+    """
+    decided = _sn_row("centered_additive_mean10", "crps", "crps", False, 0.40)
+    stale = _sn_row("ratio_projvol", "crps", "crps", False, 0.35)
+    fresh = [
+        _sn_row("ratio_meanyr", "crps", "nll", False, 0.30),
+        _sn_row("centered_additive_eb_meanyr_k10", "crps", "crps", False, 0.20),
+        _sn_row("ratio_meanyr", "nll", "crps", False, 0.10),
+    ]
+    pd.DataFrame(
+        [
+            {
+                "strategy_corner_fingerprint": decided["corner_fingerprint"],
+                "strategy_matrix_hash": _MATRIX_SHA,
+            },
+            {
+                "strategy_corner_fingerprint": stale["corner_fingerprint"],
+                "strategy_matrix_hash": "old-matrix",
+            },
+        ]
+    ).to_csv(mc.NOMINEE_LEDGER_PATH, index=False)
+
+    nominated = _nominate(decided, stale, *fresh)
+    board = [n for n in nominated if n["source"].startswith("board")]
+    assert len(board) == mc.CONFIRM_TOP_K
+    slacks = [n["slack"] for n in board]
+    assert decided["corner_fingerprint"] not in {n["corner_fingerprint"] for n in nominated}
+    assert slacks[0] == 0.35  # the stale-matrix corner leads — its verdict no longer binds
+
+
+def test_next_slot_promotes_a_shaping_corner_at_an_exact_tie_only():
+    """brief L2: when the lane holds no PIT-reshaping corner and the diversity pick is exactly
+    tied (``_SHAPING_SLOT_TIE_TOL``) with a remaining unseen-mechanism corner that reshapes the
+    PIT, take the reshaping corner. A lower-ranked reshaper is never promoted, and a lane that
+    already holds a reshaper keeps the plain rule.
+    """
+
+    def cand(norm, dl, bl, posthoc, slack):
+        row = _sn_row(norm, dl, bl, False, slack, posthoc=posthoc)
+        return {
+            "strategy_slug": "SkewNormal",
+            "family": "SkewNormal",
+            "controls": _sn_controls(norm, dl, bl, "direct", posthoc),
+            "corner_fingerprint": row["corner_fingerprint"],
+        }
+
+    platt = cand("ratio_meanyr", "nll", "crps_1se", "prob_recal_platt", 0.06)
+    plain = cand("ratio_meanyr", "nll", "nll", "none", 0.06)
+    shaped = cand("ratio_meanyr", "nll", "crps", "cdf_recal_isotonic", 0.06)
+    pool, ranks = [platt, plain, shaped], [0.06, 0.06, 0.06]
+    lane_state = ({"SkewNormal"}, {mc._gate4_mechanism(platt)})
+
+    # Exact tie, no reshaper in the lane: the reshaper wins the slot over the plain corner.
+    pick = mc._next_slot(pool, ranks, [1, 2], *lane_state)
+    assert pick == 2
+
+    # The reshaper ranks strictly lower: the plain rule stands.
+    pick = mc._next_slot(pool, [0.06, 0.06, 0.05], [1, 2], *lane_state)
+    assert pick == 1
+
+    # The lane already carries a reshaper: no preference fires even over a tied reshaper.
+    seen = ({"SkewNormal"}, {mc._gate4_mechanism(platt), mc._gate4_mechanism(shaped)})
+    shaped_crps = cand("ratio_meanyr", "crps", "nll", "cdf_recal_isotonic", 0.06)
+    pick = mc._next_slot([platt, plain, shaped_crps], [0.06, 0.06, 0.06], [1, 2], *seen)
+    assert pick == 1
+
+
+def test_walk_nominees_reports_the_real_outcome_over_a_trailing_skip(monkeypatch, capsys):
+    """brief L4 bug fix: a decided nominee after a real REVERTED must not overwrite the report —
+    the walk's verdict is the strongest thing that actually ran; all-decided still reads SKIPPED.
+    """
+    monkeypatch.setattr(mc, "_pin_cell_matrix", lambda lg, mkt: None)
+    monkeypatch.setattr(mc, "_decided_pairs", lambda: {("decided-fp", _MATRIX_SHA)})
+    walked = {
+        "league": "WNBA", "market": "AST", "source": "board slack +0.300",
+        "corner_fingerprint": "fresh-fp", "matrix_hash": _MATRIX_SHA,
+    }
+    skipped = {
+        "league": "WNBA", "market": "AST", "source": "board slack +0.200",
+        "corner_fingerprint": "decided-fp", "matrix_hash": _MATRIX_SHA,
+    }
+
+    result = mc._walk_nominees(
+        {}, [walked, skipped], lambda meta, cand: ("WNBA", "AST", "REVERTED", ["g4"])
+    )
+    assert result[2] == "REVERTED"
+    assert "already holds this corner's verdict" in capsys.readouterr().out
+
+    result = mc._walk_nominees({}, [skipped], lambda meta, cand: pytest.fail("must not run"))
+    assert result[2] == "SKIPPED"
+
+
 def test_nominees_structural_method_persists_full_recipe_and_identity():
     slug = AFFINE_STRATEGY
     cand = _nominate(_structural_row(slug, "rushing yards"))[0]
@@ -1440,10 +1584,11 @@ def test_run_confirm_deadline_skips_cells_not_yet_started(monkeypatch, capsys):
     assert "1 skipped" in out
 
 
-def test_walk_nominees_skips_a_corner_the_ledger_already_decided(monkeypatch, capsys):
-    """A resumed batch re-nominates cells an interrupted run already walked; a corner with a
-    full-HPO verdict on the identical matrix is skipped, and the walk moves to the next nominee.
-    A ledger row from an older matrix does not match, so a cache regen voids the skip."""
+def test_walk_nominees_skips_a_corner_the_ledger_already_decided(monkeypatch):
+    """A corner with a full-HPO verdict on the identical matrix never reaches the walk — brief L4
+    drops it at lane selection, so the slot goes to a corner that can actually run. A ledger row
+    from an older matrix does not match, so a cache regen voids the skip. (The walk keeps its own
+    skip as a concurrent-run backstop — pinned separately.)"""
     decided, fresh = (
         _sn_row("centered_additive_mean10", "crps", "crps", False, 0.30),
         _sn_row("ratio_meanyr", "crps", "nll", False, 0.25),
@@ -1471,9 +1616,8 @@ def test_walk_nominees_skips_a_corner_the_ledger_already_decided(monkeypatch, ca
     result = mc._walk_nominees(
         meta, mc._candidates(pd.DataFrame([decided, fresh, stale]), meta)[0], attempt
     )
-    assert attempted == [0.25, 0.20]  # the decided leader is skipped, the stale-matrix row retrains
+    assert attempted == [0.25, 0.20]  # the decided leader never nominates, the stale row retrains
     assert result[2] == "REVERTED"  # the cell's verdict comes from the corners that actually ran
-    assert "already holds this corner's verdict" in capsys.readouterr().out
 
 
 def test_run_confirm_reports_nothing_confirmable_when_every_corner_is_unservable(
