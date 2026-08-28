@@ -30,7 +30,7 @@ whenever the queue changes; git holds the history.
 
 | League | Shipped | Target (75%) | Status |
 |---|---|---|---|
-| WNBA | 13/18 | 14 | +1 needed (post-supersession pullback) |
+| WNBA | 14/18 | 14 | **DONE** — MIN shipped 6/6 (cdf_recal mechanism, repro-verified) |
 | NBA | 18/21 | 16 | **DONE** |
 | MLB | 15/19 | 15 | **DONE** |
 | NHL | 12/15 | 12 | **DONE** |

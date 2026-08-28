@@ -1494,7 +1494,8 @@ snapshot.
   the benchmark disagreement (§3.3). Do **not** re-route a demoted WNBA cell to a family/feature
   build on the demotion alone; WS-1 reconciles book-BSS vs app-line profit first (owner packet).
 - **Count-family (§6.6 Double Poisson) / centered-SN** on the shape-bound residual (BLST/FTM/TOV
-  count; DREB/PA shape) once the family lands — the built-lever lane is closed for WNBA at 13/18.
+  count; DREB/PA shape) once the family lands — WNBA sits at 14/18 (target met; MIN shipped via
+  the cdf_recal mechanism, 2026-08-28).
 - Verdict: six of the eight realistic calibration/normalization cells.
 
 #### NFL — the binding league, with a real failure mode
@@ -2012,6 +2013,17 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-08-28 (2) · **WNBA MIN SHIPS 6/6 — WNBA 14/18, breadth-75 met in all five leagues.**
+  Recipe: `ratio_meanyr`/nll/direct/`cdf_recal_isotonic`/blending nll (confirm g4 0.045, g2 0.106).
+  General levers, brief `/tmp/researcher_frontier_dl_span.md`: ledger discounts became flat
+  q75-rank/q50-veto quantiles with a 3-cell floor (per-(family,n) g4 OLS deleted, 2.6× worse LOCO);
+  board gained `veto_slack`; frontier enqueue + patience exemption; stable fingerprint sort (L5);
+  ledger-decided corners dropped at lane selection (L4); exact-tie shaping slot preference (L2);
+  top-2-base cdf probes, budget-exempt (L1′). Root cause: slack binds on mean/skill gates on 97%
+  of top rows, so it cannot rank the Gate-4 mechanism (shaping vs PIT-neutral confirm-g4 pass
+  80.6% vs 51.7%, p=3e-5). Repro test: round 1 failed (PIT-neutral lane, coin-flip slot loss —
+  the evidence for L4/L5), round 2 rediscovered the cdf mechanism as lane leader and reconfirmed
+  first-walk under the test-start ledger snapshot (held-out rows re-appended, NFL precedent).
 - 2026-08-28 · **Yards-trio reproducibility test PASSES — all three cells re-discovered and
   re-confirmed 6/6 from reverted stat_meta + wiped Optuna journals.** Rushing ships nominee 3
   (`cdf_recal_isotonic`/centered/crps), receiving nominee 3 (`prob_recal_isotonic`/centered/crps),
@@ -2167,14 +2179,3 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
   conditional versus full three-category semantics before any NBA FGA, NFL carries, or NFL
   receptions candidate pilot. No integer-candidate pilot/heldout access, registry enrollment,
   `shipped` flip, or live mutation occurred.
-- 2026-07-20 (1) · NFL popular-market re-baseline: passing yards
-  (SkewNormal/`ratio_meanyr`/CRPS, n=369), passing TDs (DPO canonical `none`; legacy evidence
-  identity `ratio_meanyr`/NLL/`pit_ks`/**`roe_mean`**, n=373), and rushing yards
-  (`rushing-qb-rb-affine-groupcdf-bookpool-v1`, cold 95-trial HPO, n=1009), plus receiving yards
-  (`receiving-role-position-two-part-groupcdf-fixedlinear-v3`, cold 146-trial HPO, n=2238), each
-  produced an isolated full-HPO artifact and passed all six gates on independent heldout evidence.
-  Receiving also passed every frozen
-  canonical validation/support guard on 2,239 rows / 382 players; its prior direct-read result
-  remains retired for 1,118-row heldout overlap. Evidence and commands are pinned in §6.6; all
-  artifacts remain quarantined, the generic board/confirm seam was not exercised for enrollment,
-  and there was no `shipped` flip, live enrollment, push, or numerator change.
