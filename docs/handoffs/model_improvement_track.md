@@ -1884,10 +1884,16 @@ brief on a hook-gated edit, write a one-line justification to `.claude/.state/re
   saturated P (0/1) when the GBDT σ collapsed below the book's — fixed structurally by
   `_BLEND_MODEL_SCALE_FLOOR` (0.8× book scale), but `frac(P<0.01 or P>0.99)` is still not
   a reported `model_stats` column and would surface any recurrence across the 7/23 SN cells
-  that showed it. Open follow-ups: the reporting column; and the board→confirm g1 gap's
+  that showed it. Open follow-ups: the reporting column; the board→confirm g1 gap's
   named mechanism (a Platt intercept transfers the fit-split over-rate across a val/holdout
   over-rate gap — worth a 20-minute ledger query comparing shipped `prob_recal_platt` cells'
-  confirm-vs-board g1 shift against `posthoc: none` cells). The continuous-hurdle lane is
+  confirm-vs-board g1 shift against `posthoc: none` cells); and the seed-lane veto found by
+  the 2026-08-28 repro test — `_nominees` returns empty when every board corner's
+  *discounted* slack is ≤ 0, before the seed/incumbent lane attaches, so once
+  `_ledger_gate_discounts` crosses `_MIN_LEDGER_ROWS` a low-slack cell can never re-nominate
+  even a seed whose own current-signature ledger row says ship=True. Deliberate wall-clock
+  trade per the docstring, but the seed lane's rationale ("independent full-HPO evidence the
+  board cannot see") argues it should survive the early return; owner call before any edit. The continuous-hurdle lane is
   closed for this cell class: P(Result=0)=0.128% — no zero atom, no g1 channel.
 - **#0b — Gate-4 baseline hysteresis** (highest priority; owner call). §6.0.2 carries the
   decision packet and the recommendation (ship the scale fit first; hysteresis only if churn
@@ -2006,6 +2012,13 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-08-28 · **Yards-trio reproducibility test PASSES — all three cells re-discovered and
+  re-confirmed 6/6 from reverted stat_meta + wiped Optuna journals.** Rushing ships nominee 3
+  (`cdf_recal_isotonic`/centered/crps), receiving nominee 3 (`prob_recal_isotonic`/centered/crps),
+  passing nominee 1 first try (`ratio_meanyr`/crps/direct/`crps_1se`/posthoc none — the campaign
+  seed with one blending axis moved). Walk-written configs committed; served pickles are the fresh
+  full-HPO artifacts. Side-finding: the first passing walk was vetoed by mid-test ledger-discount
+  activation (see §8.2 #0c) and re-run under the test-start ledger snapshot.
 - 2026-08-27 (2) · **NFL passing yards SHIPS 6/6 — NFL 20/20, yards campaign complete.**
   The lever was structural, not statistical: `fused_loc`'s SkewNormal precision pool now
   floors the model scale at 0.8× book scale (`29139a7a`), killing the degenerate-P seizure
@@ -2165,4 +2178,3 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
   remains retired for 1,118-row heldout overlap. Evidence and commands are pinned in §6.6; all
   artifacts remain quarantined, the generic board/confirm seam was not exercised for enrollment,
   and there was no `shipped` flip, live enrollment, push, or numerator change.
-- 2026-07-19 (3) · Mixture family #6 built end-to-end + board-piloted same day (owner bumped it to the front). Ships first: NFL receptions (ratio_meanyr/nll/direct/nll) + yards (eb_meanyr_k10/crps/centered/nll) confirmed 5/5 → devel, NFL 9/20; carries g1 / qb yards g3 / targets g2 reverted. Build: pipeline branches (decode/fuse-by-location-shift/scalar-c dispersion on served PIT-KS/temperature/persist MIX_* via strategy encode), helpers kernels (_mixnorm cdf/ppf/odds + start values), scorecard gates (MIX decode + CDF/PPF), sweep FamilySpec (6 corners), validator continuous-aware (CONTINUOUS_DISTS), confirm hard-skips Mixture (serve-iff-ship). Three guardrails made it trainable (§6.6): scale clamp [0.02,20]×label-std, L2 stabilization, min_child_weight/lambda_l2 floors — root cause was σ→0 likelihood spikes + zero-hessian Newton blowup (probe-localized: fused_loc inf−inf → NaN). Pilots: receiving yards Mixture corner = rank-1, g4 0.0552 vs 0.050 (60% of SN's excess removed), g1 +0.0064 CI-hi, rest pass — serve path then full-HPO confirm; rushing g4 halved but g1-walled (bss −0.0245). Sharp-book kill NOT triggered. Scoreboard: WNBA 14/18 ✓ · NBA 16/21 ✓ · MLB 14/19 · NHL 10/15 · NFL 9/20.
