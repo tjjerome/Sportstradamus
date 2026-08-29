@@ -40,6 +40,12 @@ MAX_FRACTION_OF_BANKROLL: float = 0.005
 # treat the leg as no-information and stake zero rather than negative.
 SHRINKAGE_FLOOR: float = 0.0
 
+# Shrinkage anchors effective_p = 0.5 + (p - 0.5) * s on an entry's JOINT win
+# probability, so any positive no-evidence default drags a multi-leg entry's tiny
+# joint_p toward 0.5 against a 10-20x payout and manufactures edge; 0.0 instead
+# stakes zero via the SHRINKAGE_FLOOR check.
+NO_EVIDENCE_SHRINKAGE: float = 0.0
+
 # CLV-segment leg count below which live BSS is ignored; the segment is
 # still mostly noise at this size even if it cleared CLV_SEGMENT_MIN_N.
 LIVE_BLEND_FLOOR: int = 25
@@ -78,7 +84,7 @@ def resolve_shrinkage(
        ``live_n >= LIVE_BLEND_FLOOR`` → blended per the ``w_live`` ramp.
     3. Only ``training_bss`` (or live below the floor) → training_bss.
     4. Only ``live_bss`` (training missing) → live_bss.
-    5. Neither → ``1.0``, logged at DEBUG.
+    5. Neither → :data:`NO_EVIDENCE_SHRINKAGE` (``0.0``), logged at DEBUG.
 
     NaNs in ``training_bss`` / ``live_bss`` are treated as missing.
     Result is clipped to ``[SHRINKAGE_FLOOR, 1.0]``.
@@ -96,8 +102,8 @@ def resolve_shrinkage(
     if has_live:
         return _clip01(live_bss)
 
-    _logger.debug("kelly shrinkage fallback: no training or live BSS available; using 1.0")
-    return 1.0
+    _logger.debug("kelly shrinkage fallback: no training or live BSS available; staking zero")
+    return NO_EVIDENCE_SHRINKAGE
 
 
 def _blend_shrinkage(training_bss: float, live_bss: float, live_n: int) -> float:

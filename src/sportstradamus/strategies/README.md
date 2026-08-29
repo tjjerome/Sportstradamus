@@ -44,7 +44,7 @@ Order of precedence, used by `fractional_kelly_stake` when no explicit
 
 3. Only training BSS → use it directly.
 4. Only live BSS → use it directly.
-5. Neither → fallback `1.0`, logged at DEBUG.
+5. Neither → `NO_EVIDENCE_SHRINKAGE` (`0.0`, zero stake), logged at DEBUG.
 
 The ramp constants (`LIVE_BLEND_FLOOR=25`, `LIVE_BLEND_FULL=100`) are
 roadmap-aligned with `CLV_SEGMENT_MIN_N=20`: live signal is no longer

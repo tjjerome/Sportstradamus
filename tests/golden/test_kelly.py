@@ -13,6 +13,7 @@ from sportstradamus.strategies.kelly import (
     LIVE_BLEND_FLOOR,
     LIVE_BLEND_FULL,
     MAX_FRACTION_OF_BANKROLL,
+    NO_EVIDENCE_SHRINKAGE,
     KellyCandidate,
     fractional_kelly_stake,
     joint_kelly_portfolio,
@@ -75,7 +76,7 @@ def test_resolve_midramp_blends_evenly():
     assert out == pytest.approx(expected, abs=1e-9)
 
 
-def test_resolve_neither_logs_debug_and_returns_one(caplog, monkeypatch):
+def test_resolve_neither_logs_debug_and_returns_zero(caplog, monkeypatch):
     # The structured logger silences DEBUG and disables propagation; swap in
     # a plain stdlib logger for the duration of this test so caplog can see
     # the DEBUG record.
@@ -84,7 +85,7 @@ def test_resolve_neither_logs_debug_and_returns_one(caplog, monkeypatch):
     monkeypatch.setattr(kelly, "_logger", plain)
     with caplog.at_level(logging.DEBUG, logger="kelly-test"):
         out = resolve_shrinkage(training_bss=None, live_bss=None, live_n=0)
-    assert out == 1.0
+    assert out == NO_EVIDENCE_SHRINKAGE == 0.0
     assert any("fallback" in rec.message for rec in caplog.records)
 
 
@@ -197,9 +198,60 @@ def test_resolution_chain_via_fractional_kelly_stake():
     s = resolve_shrinkage(training_bss=0.8, live_bss=None, live_n=0)
     assert s == pytest.approx(0.8)
 
-    # Final fallback.
+    # Final fallback: no evidence means zero trust, not full trust.
     s = resolve_shrinkage(training_bss=None, live_bss=None, live_n=0)
-    assert s == 1.0
+    assert s == 0.0
+
+
+def test_no_evidence_cell_resolves_to_zero_with_fallback_source(monkeypatch):
+    """A cell with no model_stats row (NaN training BSS) and no CLV segment
+    (n=0) must land on the ``"fallback"`` rung at shrinkage 0.0 — not 1.0,
+    which handed full trust to exactly the cells with no evidence.
+    """
+    import importlib
+
+    from sportstradamus import clv
+    from sportstradamus.strategies.underdog_pickem import resolve_market_shrinkage
+
+    # ``sportstradamus.training`` re-exports the ``report`` *function*, shadowing
+    # the submodule attribute — go through sys.modules so the patch lands on the
+    # module resolve_market_shrinkage's lazy from-import reads.
+    report_mod = importlib.import_module("sportstradamus.training.report")
+
+    monkeypatch.setattr(clv, "get_segment_calibration", lambda league, market: (1.0, 0))
+    monkeypatch.setattr(
+        report_mod,
+        "get_market_calibration",
+        lambda league, market: {"brier_skill_score": float("nan")},
+    )
+
+    shrinkage, source = resolve_market_shrinkage("WNBA", "PTS")
+    assert source == "fallback"
+    assert shrinkage == 0.0
+
+
+def test_fallback_source_entry_stakes_zero():
+    # The manufactured-edge scenario NO_EVIDENCE_SHRINKAGE exists for: a 5-leg
+    # entry's tiny joint probability against a 20x payout. Fallback shrinkage
+    # must stake zero through the SHRINKAGE_FLOOR check...
+    s = resolve_shrinkage(training_bss=None, live_bss=None, live_n=0)
+    stake = fractional_kelly_stake(
+        bankroll=Decimal("1000"),
+        win_prob=0.03,
+        payout_multiplier=Decimal("20"),
+        model_shrinkage=s,
+    )
+    assert stake == Decimal("0")
+
+    # ...because even a small positive default anchors effective_p toward 0.5
+    # and manufactures a stake out of no evidence.
+    manufactured = fractional_kelly_stake(
+        bankroll=Decimal("1000"),
+        win_prob=0.03,
+        payout_multiplier=Decimal("20"),
+        model_shrinkage=0.05,
+    )
+    assert manufactured > Decimal("0")
 
 
 # --------------------------------------------------------------------------- #
@@ -238,15 +290,30 @@ def test_kelly_units_uses_shrinkage_and_max_fraction_cap():
 
 def test_kelly_units_floors_shrinkage_zero_to_reject():
     # Zero shrinkage collapses win_prob to a coin flip regardless of edge.
-    # At payout=3x a coin flip is still +EV (raw_kelly=0.25 > 0) -- shrinkage
-    # alone doesn't reject a big-enough payout. At payout=1.5x a coin flip is
-    # -EV (b=0.5; raw_kelly=(0.5*0.5-0.5)/0.5=-0.5 < 0): the candidate is
-    # correctly rejected despite win_prob=0.9's apparent edge, proving the
-    # audit's stated failure mode (no model-confidence discount reaching
-    # parlay sizing) is fixed.
+    # kelly_edge itself still scores a coin flip +EV at payout=3x (0.25 > 0)
+    # -- rejecting that is the parlay layer's job (see the floor pin below).
     raw = kelly_edge(win_prob=0.9, payout_multiplier=3.0, model_shrinkage=0.0)
     assert raw == pytest.approx(0.25)
 
     raw_losing = kelly_edge(win_prob=0.9, payout_multiplier=1.5, model_shrinkage=0.0)
     assert raw_losing == pytest.approx(-0.5)
     assert raw_losing < 0
+
+
+def test_parlay_kelly_units_rejects_no_evidence_leg():
+    # One no-evidence leg (shrinkage at the floor) must reject the whole
+    # candidate: the coin-flip anchor would otherwise score POSITIVE units
+    # at any payout > 2x and rank garbage parlays as recommendable.
+    import numpy as np
+
+    from sportstradamus.prediction.parlay import _parlay_kelly_units
+
+    class _G:
+        shrinkage = np.array([0.0, 0.5])
+
+    assert _parlay_kelly_units(_G, [0, 1], p=2.0, payout=4.0) == -1.0
+
+    class _GTrusted:
+        shrinkage = np.array([0.4, 0.5])
+
+    assert _parlay_kelly_units(_GTrusted, [0, 1], p=2.0, payout=4.0) > 0

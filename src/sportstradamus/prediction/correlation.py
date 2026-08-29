@@ -211,8 +211,10 @@ def _leg_shrinkage(game_df, platform, league, shrinkage_cache):
     league's processing loop — ``resolve_market_shrinkage`` hits training/CLV
     I/O per call, and markets repeat heavily across a slate's legs, so this
     avoids re-resolving the same cell hundreds of times per league. Legs
-    whose ``Market`` has no ``stat_map`` entry for this platform fall back to
-    ``1.0`` (full trust), matching ``resolve_shrinkage``'s own no-signal default.
+    whose ``Market`` has no ``stat_map`` entry for this platform keep ``1.0``:
+    those are game legs (moneylines, totals) with no per-market calibration
+    concept, not no-evidence player cells — ``resolve_shrinkage``'s own
+    no-evidence default is ``NO_EVIDENCE_SHRINKAGE`` (0.0).
     """
     from sportstradamus.strategies.underdog_pickem import resolve_market_shrinkage
 

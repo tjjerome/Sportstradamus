@@ -22,6 +22,7 @@ from sportstradamus.prediction.payouts import (
 from sportstradamus.strategies.kelly import (
     DEFAULT_KELLY_FRACTION,
     MAX_FRACTION_OF_BANKROLL,
+    SHRINKAGE_FLOOR,
     kelly_edge,
 )
 
@@ -225,6 +226,10 @@ def _parlay_kelly_units(g, bet_id, p, payout):
     not a final stake, so the approximation is acceptable here.
     """
     parlay_shrinkage = float(np.min(g.shrinkage[np.ix_(bet_id)]))
+    # A no-evidence leg (shrinkage at the floor) anchors win_prob to a coin flip,
+    # which kelly_edge scores POSITIVE at any payout > 2x -- reject, don't rank.
+    if parlay_shrinkage <= SHRINKAGE_FLOOR:
+        return -1.0
     win_prob = p / payout
     raw_kelly = kelly_edge(win_prob, payout, parlay_shrinkage)
     if raw_kelly <= 0:
