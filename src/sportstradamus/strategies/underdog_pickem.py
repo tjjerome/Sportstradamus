@@ -21,6 +21,7 @@ import pandas as pd
 
 from sportstradamus.helpers import odds_budget, stat_map
 from sportstradamus.helpers.logging import get_logger
+from sportstradamus.leg_schema import leg_label
 from sportstradamus.strategies._pickem_emit import emit_yaml, rank_and_dedupe
 from sportstradamus.strategies.kelly import (
     DEFAULT_KELLY_FRACTION,
@@ -118,11 +119,11 @@ def _filter_parlays(
 
 
 def _rivals_row_covered(row: pd.Series, players: list[str]) -> bool:
-    legs = [row.get(f"Leg {i}", "") for i in range(1, int(row["Bet Size"]) + 1)]
-    for desc in legs:
-        if "vs." not in str(desc):
+    for leg in row["legs"]:
+        desc = str(leg["player"])
+        if "vs." not in desc:
             continue
-        sides = [s.strip() for s in str(desc).split("vs.")[:2]]
+        sides = [s.strip() for s in desc.split("vs.")[:2]]
         covered = sum(1 for side in sides if any(side and side.split()[0] in p for p in players))
         if covered < 2:
             _logger.warning("rivals candidate dropped: one-sided (%s)", desc)
@@ -151,8 +152,8 @@ def _row_to_entry(
     joint_prob = model_ev / payout if payout > 0 else 0.0
     ev = model_ev - 1.0
     bet_size = int(row["Bet Size"])
-    legs = tuple(str(row.get(f"Leg {i}", "")) for i in range(1, bet_size + 1))
     canonical_legs = tuple(row["legs"])
+    legs = tuple(leg_label(leg) for leg in canonical_legs)
     shrinkage, source = shrinkage_info
 
     stake = fractional_kelly_stake(
@@ -240,9 +241,7 @@ def construct_entries(
         parlays = _filter_parlays(parlays, variant, config.entry_sizes, config)
         if variant == "rivals":
             parlays = _validate_rivals_coverage(parlays, filtered_offers)
-        entries.extend(
-            _variant_entries(parlays, variant, filtered_offers, bankroll, config, platform)
-        )
+        entries.extend(_variant_entries(parlays, variant, bankroll, config, platform))
 
     return rank_and_dedupe(entries, config)
 
@@ -250,61 +249,36 @@ def construct_entries(
 def _variant_entries(
     parlays: pd.DataFrame,
     variant: str,
-    filtered_offers: pd.DataFrame,
     bankroll: Decimal,
     config: PickemConfig,
     platform: str = "Underdog",
 ) -> list[RecommendedEntry]:
-    market_by_player = _canonical_markets_by_player(filtered_offers, platform)
     entries: list[RecommendedEntry] = []
     for _, row in parlays.iterrows():
         league = str(row.get("League", ""))
-        shrinkage_info = _parlay_shrinkage(row, league, market_by_player)
+        shrinkage_info = _parlay_shrinkage(row, league, platform)
         entries.append(_row_to_entry(row, variant, bankroll, config, shrinkage_info, platform))
     return entries
 
 
-def _canonical_markets_by_player(
-    filtered_offers: pd.DataFrame, platform: str = "Underdog"
-) -> dict[str, set[str]]:
-    """Map each offer's player to the canonical market(s) they were offered on.
-
-    Offer ``Market`` is the raw platform name (a ``stat_map[platform]`` key);
-    mapping it gives the canonical cell key (``REB``, ``BLST``, …) that
-    ``resolve_market_shrinkage`` resolves against. The leg display strings
-    can't drive this — they carry a third, lossy namespace (``blocks_and_steals``).
-    """
-    if filtered_offers.empty or not {"Player", "Market"}.issubset(filtered_offers.columns):
-        return {}
-    out: dict[str, set[str]] = {}
-    for player, market in zip(
-        filtered_offers["Player"],
-        filtered_offers["Market"].map(stat_map.get(platform, {})),
-        strict=True,
-    ):
-        if isinstance(market, str):
-            out.setdefault(str(player), set()).add(market)
-    return out
-
-
-def _parlay_shrinkage(
-    row: pd.Series, league: str, market_by_player: dict[str, set[str]]
-) -> tuple[float, str]:
+def _parlay_shrinkage(row: pd.Series, league: str, platform: str) -> tuple[float, str]:
     """Kelly shrinkage for one parlay: the most conservative of its leg markets.
 
     A parlay cashes only if every leg hits, so it inherits the trust of its
     least-calibrated market — resolve per distinct leg market and keep the min.
+    Leg ``market`` is the raw platform name (a ``stat_map[platform]`` key);
+    mapping it gives the canonical cell key (``REB``, ``BLST``, …) that
+    ``resolve_market_shrinkage`` resolves against. Combo / H2H names with no
+    mapping are skipped; a parlay with none left falls back to full trust.
     """
-    markets: set[str] = set()
-    for i in range(1, int(row["Bet Size"]) + 1):
-        markets |= market_by_player.get(leg_player(str(row.get(f"Leg {i}", ""))), set())
+    markets = {stat_map[platform].get(leg["market"]) for leg in row["legs"]} - {None}
     if not markets:
         return 1.0, "fallback"
     return min((resolve_market_shrinkage(league, m) for m in markets), key=lambda r: r[0])
 
 
 def leg_player(leg: str) -> str:
-    """Player name from a leg string ``"{Player} Over|Under {Line} {Market} - …"``."""
+    """Player name from a leg label ``"{player} Over|Under {line} {market}"``."""
     for token in (" Over ", " Under "):
         if token in leg:
             return leg.split(token, 1)[0].strip()
@@ -320,11 +294,17 @@ def _parlays_per_variant(
     """Run ``find_correlation`` once per contest variant on already-scored offers.
 
     The expensive scrape + model scoring happened upstream; this only enumerates
-    correlated parlays per payout variant, which touches no archive.
+    correlated parlays per payout variant, which touches no archive. Candidates
+    come from the ``filter_legs`` pool — the same edge/disagreement gates as the
+    leg universe — so garbage-probability legs never seed a parlay. An empty
+    pool short-circuits: ``find_correlation`` KeyErrors on a rowless frame.
     """
     from sportstradamus.prediction.correlation import find_correlation
 
-    scored = scored_offers_df.to_dict("records") if not scored_offers_df.empty else []
+    pool = filter_legs(scored_offers_df, config)
+    if pool.empty:
+        return {v: pd.DataFrame() for v in config.contest_variants}
+    scored = pool.to_dict("records")
     return {
         v: find_correlation(scored, stats, platform, contest_variant=v)[1]
         for v in config.contest_variants
