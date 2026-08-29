@@ -81,6 +81,7 @@ an exception. A session works one lane and reads that lane's brief.
 | `dashboard-ux` | Narrative-first dashboard: six surfaces, slip builder, receipts, celestial skin | ACTIVE | — | [handoffs/dashboard-ux.md](handoffs/dashboard-ux.md) |
 | `bestball-2027` | Draft products for the 2027 season | BLOCKED (on: D4) | D4 | [handoffs/bestball-2027.md](handoffs/bestball-2027.md) |
 | `hygiene-closeout` | Triage, calibration re-run, drift fixes, recurring checks | ACTIVE | — | [handoffs/hygiene-closeout.md](handoffs/hygiene-closeout.md) |
+| `skewnormal-hessian` | Non-finite hessians in the centered SkewNormal head; blocks the numpy 2 pin | ACTIVE | — (stage 0 decides whether the early boosting stop is damage or convergence) | [handoffs/skewnormal-hessian-float32.md](handoffs/skewnormal-hessian-float32.md) |
 
 ### 4.1 Build path (visual index)
 
