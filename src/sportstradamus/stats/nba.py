@@ -441,47 +441,6 @@ class StatsNBA(Stats):
 
         return playerProfile, playerDict
 
-    def update_player_comps(self, year=None):
-        """Recompute player comp BallTrees and write them to comps.json."""
-        if year is None:
-            year = self.season_start.year
-        with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as infile:
-            stats = json.load(infile)
-
-        prior_season, current_season = self._comp_season_pair()
-        playerList = self.players.get(prior_season, {})
-        playerList.update(self.players.get(current_season, {}))
-        playerProfile, playerDict = self.build_comp_profile(playerList)
-        all_features = set()
-        for pos_weights in stats[self.league].values():
-            all_features.update(pos_weights.keys())
-        all_features = list(all_features)
-        playerProfile = playerProfile[
-            [f for f in all_features if f in playerProfile.columns]
-        ].replace([np.nan, np.inf, -np.inf], 0)
-
-        comps = {}
-        for position in self.positions:
-            pos_weights = stats[self.league][position]
-            pos_features = list(pos_weights.keys())
-            pos_players = [
-                p
-                for p, v in playerDict.items()
-                if v["POS"] == position and p in playerProfile.index
-            ]
-            positionProfile = playerProfile.loc[pos_players, pos_features]
-            positionProfile = positionProfile.apply(
-                lambda x: (x - x.mean()) / x.std(), axis=0
-            ).fillna(0)
-            positionProfile = positionProfile.mul(np.sqrt(list(pos_weights.values())))
-            knn = BallTree(positionProfile)
-            comps[position] = self._build_comps(knn, positionProfile, min_comps=5, max_comps=20)
-
-        self.comps = comps
-        filepath = pkg_resources.files(data) / "leagues" / self.league.lower() / "comps.json"
-        with open(filepath, "w") as outfile:
-            json.dump(comps, outfile, indent=4)
-
     def _comp_season_pair(self) -> tuple[str, str]:
         """Return the ``(prior, current)`` ``self.players`` keys for comp assembly.
 
@@ -530,8 +489,7 @@ class StatsNBA(Stats):
 
         Returns a ``{team: {player_name: stats_dict}}`` mapping ready for
         :meth:`build_comp_profile`. Iterates oldest → newest so the current
-        season's roster wins on dict-update conflicts (matches the
-        :meth:`update_player_comps` ``prior.update(current)`` order).
+        season's roster wins on dict-update conflicts.
         """
         cutoff = self._current_season_key(target_game_date)
         merged: dict = {}

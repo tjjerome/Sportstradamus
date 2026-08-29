@@ -607,7 +607,7 @@ def _cell_artifacts(league: str, market: str) -> list[pathlib.Path]:
     that cell's ``meditate`` runs between them, so the revert touches only that cell's row/key).
 
     Deliberately excluded: the per-cell training-matrix cache (``training_data/{slug}.parquet``) and
-    the per-league caches (gamelog, ``comps.json``, correlation matrices). Those are training inputs,
+    the per-league caches (gamelog, correlation matrices). Those are training inputs,
     never read at serve time — and a confirm retrain trains from the walk's frozen snapshot
     (``--frozen-matrix-dir``) without touching any of them.
     """

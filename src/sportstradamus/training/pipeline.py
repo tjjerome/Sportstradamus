@@ -969,10 +969,9 @@ def _reconcile_clipped_neutral_quotes(
     return M.drop(columns=_PRETRIM_LINE_COLUMN)
 
 
-def _step_persist_matrix_and_comps(
+def _step_persist_matrix(
     M: pd.DataFrame,
     filepath,
-    stat_data,
     *,
     deterministic: bool,
     full_rebuild: bool = False,
@@ -982,7 +981,7 @@ def _step_persist_matrix_and_comps(
     dist: str | None = None,
     cv: float = 1.0,
 ) -> pd.DataFrame:
-    """Trim the matrix, write parquet, save comps. Deterministic mode skips I/O."""
+    """Trim the matrix and write it to parquet; deterministic mode skips the write."""
     if immutable_input:
         return M
     if _PRETRIM_LINE_COLUMN in M:
@@ -1003,8 +1002,6 @@ def _step_persist_matrix_and_comps(
         M = M.reindex(sorted(M.columns), axis=1)
     if not deterministic:
         M.to_parquet(filepath, compression="zstd", index=True)
-        if not full_rebuild:
-            stat_data.save_comps()
     return M
 
 
@@ -4634,10 +4631,9 @@ def train_market(
     M, training_data_path = loaded
 
     M, step = _step_synthesize_odds(M, league, market, dist, cv)
-    M = _step_persist_matrix_and_comps(
+    M = _step_persist_matrix(
         M,
         training_data_path,
-        stat_data,
         deterministic=deterministic,
         full_rebuild=full_rebuild,
         immutable_input=matrix_input is not None,

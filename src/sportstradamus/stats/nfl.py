@@ -1418,7 +1418,7 @@ class StatsNFL(Stats):
         target_season, target_week = self._lookup_season_week(target_game_date)
         return target_season, target_week
 
-    def _comp_target_key(self, date: "date | None") -> "tuple[int, int | None]":
+    def _comp_target_key(self, date: "date") -> "tuple[int, int | None]":
         """NFL override: cache the per-week comp pool on ``(season, week)``.
 
         The base implementation buckets on the most-recent Wednesday's week
@@ -1768,64 +1768,6 @@ class StatsNFL(Stats):
         if target_week > 1:
             windows.append((target_season, 1, target_week - 1))
         return windows
-
-    def update_player_comps(self, year: int | None = None) -> None:
-        """Rebuild comp clusters for each NFL position and write to ``comps.json``.
-
-        Applies the Phase-1.5 lookback rule via ``build_comp_profile``: after
-        week 4 of the current season, the comp pool is restricted to
-        current-season weeks 1..W-1; pre-week-5, the prior season's back half
-        (weeks 11..18) is blended with any current-season games. Writes the
-        result to ``data/leagues/nfl/comps.json`` for reuse by the prediction
-        pipeline.
-
-        Args:
-            year: Override the season year. Defaults to ``self.season_start.year``.
-        """
-        if year is None:
-            year = self.season_start.year
-        with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as infile:
-            stats = json.load(infile)
-
-        filterStat = {"QB": "dropbacks", "RB": "attempts", "WR": "routes", "TE": "routes"}
-
-        # Pass today's date so the Phase-1.5 lookback rule applies: after
-        # week 4 of the current season the comp pool is restricted to
-        # current-season weeks 1..W-1 (`_lookback_windows`), which is the
-        # operator-confirmed cron behaviour. Pre-week-5 (or off-season),
-        # the prior season's back half (weeks 11..18) is blended with
-        # any current-season games already played.
-        playerProfile = self.build_comp_profile(target_game_date=datetime.today().date())
-        if playerProfile.empty:
-            return
-
-        comps = {}
-        for position in ["QB", "RB", "WR", "TE"]:
-            positionProfile = playerProfile.loc[playerProfile.position == position].copy()
-            positionProfile[filterStat[position]] = (
-                positionProfile[filterStat[position]] / positionProfile["player_game_count"]
-            )
-            positionProfile = positionProfile.loc[
-                positionProfile[filterStat[position]]
-                >= positionProfile[filterStat[position]].quantile(_COMP_POOL_MIN_USAGE_PERCENTILE)
-            ]
-            positionProfile = positionProfile.reindex(
-                columns=list(stats["NFL"][position].keys())
-            ).replace([np.nan, np.inf, -np.inf], 0)
-            positionProfile = positionProfile.apply(
-                lambda x: (x - x.mean()) / x.std(), axis=0
-            ).fillna(0)
-            positionProfile = positionProfile.mul(
-                np.sqrt(np.abs(np.asarray(list(stats["NFL"][position].values()))))
-            )
-            knn = BallTree(positionProfile)
-            comps[position] = self._build_comps(
-                knn, positionProfile, min_comps=_COMP_KNN_MIN, max_comps=_COMP_KNN_MAX
-            )
-
-        filepath = pkg_resources.files(data) / "leagues" / "nfl" / "comps.json"
-        with open(filepath, "w") as outfile:
-            json.dump(comps, outfile, indent=4)
 
     def _compute_comps(self, target_game_date: date | None = None) -> None:
         """Build comps from loaded data at runtime (no JSON I/O).

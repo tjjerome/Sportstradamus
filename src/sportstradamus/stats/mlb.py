@@ -691,8 +691,8 @@ class StatsMLB(Stats):
         comps ordered closest-first (``distance = 1 - match_score``), keeping only
         same-handedness pairs at or above the match-score threshold. This is the
         same ``{"comps", "distances"}`` shape the other leagues' KNN comps carry,
-        so MLB writes a uniform ``comps.json`` even though its affinities come from
-        a static Statcast table rather than a fitted BallTree.
+        even though MLB's affinities come from a static Statcast table rather than
+        a fitted BallTree.
         """
         filepath = pkg_resources.files(data) / "player_data" / "MLB" / filename
         if not os.path.isfile(filepath):
@@ -711,7 +711,7 @@ class StatsMLB(Stats):
             for pid, grp in df.groupby("pid", sort=False)
         }
 
-    def update_player_comps(self, year=None):
+    def update_player_comps(self) -> None:
         """Refresh the Savant affinity CSVs, keeping the cached copy on a bot-block."""
         for filename in (
             "affinity_hittersByHittingProfile_matchScores.csv",

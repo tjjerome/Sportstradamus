@@ -1748,7 +1748,7 @@ sportstradamus ship scorecard \
 
 Executor notes: the deterministic CSV subdir is the normalization slug
 (`{target_normalization}{_hurdle?}`); the parquet snippet mirrors what
-`_step_persist_matrix_and_comps` writes (same `trim_matrix(…, 15000)`, same compression);
+`_step_persist_matrix` writes (same `trim_matrix(…, 15000)`, same compression);
 `update()` requires league-API access — run after the daily jobs or accept a slightly stale
 gamelog on both sides (fine: the A/B only needs both sides identical).
 

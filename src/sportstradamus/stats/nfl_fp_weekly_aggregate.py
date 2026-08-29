@@ -906,7 +906,7 @@ def load_multi_window_one_year(
     season in the window set (the one whose comp pool we're really
     computing for). Players who only appear in earlier seasons inherit
     NaN on the PBP columns, which the downstream ``fillna(0)`` chain
-    in ``update_player_comps`` absorbs.
+    in ``_compute_comps`` absorbs.
 
     Args:
         windows: List of ``(season, start_week, end_week)`` triples.

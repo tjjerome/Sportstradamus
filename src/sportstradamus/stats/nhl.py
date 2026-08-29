@@ -163,40 +163,6 @@ class StatsNHL(Stats):
 
         return playerProfile, playerDict, id_to_name
 
-    def update_player_comps(self, year=None):
-        if year is None:
-            year = self.season_start.year
-        with open(pkg_resources.files(data) / "config" / "playerCompStats.json") as infile:
-            stats = json.load(infile)
-
-        players = self.players.get(self.season_start.year - 1, {})
-        players.update(self.players.get(self.season_start.year, {}))
-        playerProfile, all_players, id_to_name = self.build_comp_profile(players)
-
-        comps = {}
-        for position in ["C", "W", "D", "G"]:
-            pos_players = [
-                p
-                for p, v in all_players.items()
-                if v.get("position") == position and p in playerProfile.index
-            ]
-            positionProfile = playerProfile.loc[
-                pos_players, list(stats["NHL"][position].keys())
-            ].replace([np.nan, np.inf, -np.inf], 0)
-            positionProfile.index = positionProfile.index.map(lambda x: id_to_name.get(x, x))
-            positionProfile = positionProfile[~positionProfile.index.duplicated(keep="first")]
-            positionProfile = positionProfile.apply(
-                lambda x: (x - x.mean()) / x.std(), axis=0
-            ).fillna(0)
-            positionProfile = positionProfile.mul(np.sqrt(list(stats["NHL"][position].values())))
-            knn = BallTree(positionProfile)
-            min_k = 4 if position == "G" else 5
-            comps[position] = self._build_comps(knn, positionProfile, min_comps=min_k, max_comps=20)
-
-        filepath = pkg_resources.files(data) / "leagues" / "nhl" / "comps.json"
-        with open(filepath, "w") as outfile:
-            json.dump(comps, outfile, indent=4)
-
     def _current_season_key(self, target_game_date: date) -> int:
         """Return the ``self.players`` key for the season containing ``target_game_date``.
 
@@ -213,8 +179,7 @@ class StatsNHL(Stats):
 
         Returns a flat ``{player_id: stats_dict}`` mapping ready for
         :meth:`build_comp_profile`. Iterates oldest → newest so the current
-        season's roster wins on dict-update conflicts (matches the
-        :meth:`update_player_comps` ``prior.update(current)`` order).
+        season's roster wins on dict-update conflicts.
         """
         cutoff = self._current_season_key(target_game_date)
         merged: dict = {}

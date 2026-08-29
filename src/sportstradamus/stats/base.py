@@ -1,7 +1,6 @@
 """Stats base class: shared data loading, feature engineering, and prediction API."""
 
 import importlib.resources as pkg_resources
-import json
 import os.path
 import pickle
 import warnings
@@ -454,8 +453,7 @@ class Stats:
         # Per-week comp cache (training matrix path). ``_ensure_comps(date)``
         # routes the active ``self.comps`` to the entry keyed by the
         # ``(season, week-of-Wednesday)`` bucket that contains ``date``, and
-        # rebuilds on cache miss. ``date=None`` (inference / cron) keeps the
-        # legacy lazy-once snapshot.
+        # rebuilds on cache miss.
         self._comps_by_week: dict = {}
         self._current_comps_key = None
         # Per-comp-pool cache of the static (player, comp, position, dist,
@@ -664,8 +662,12 @@ class Stats:
             }
         return comps
 
-    def update_player_comps(self, year=None):
-        return
+    def update_player_comps(self) -> None:
+        """League hook: refresh external data the comp build reads. Default no-op.
+
+        Only MLB overrides it — its comps come from downloaded Statcast affinity
+        tables rather than a BallTree fitted from the gamelog.
+        """
 
     def _compute_comps(self, target_game_date: "date | None" = None) -> None:
         """Build comps from loaded data. Override in subclass.
@@ -680,7 +682,7 @@ class Stats:
                 and the legacy lookahead leakage is not yet addressed.
         """
 
-    def _comp_target_key(self, date: "date | None") -> "int | None":
+    def _comp_target_key(self, date: "date") -> int:
         """Cache key for the comp pool active at ``date``.
 
         Default heuristic: the week index of the most-recent Wednesday on or
@@ -688,31 +690,21 @@ class Stats:
         within a Wed→Wed window all gamedays share the same comp pool,
         matching live retrain cadence. Subclasses with schedule semantics
         (NFL) may override to return a (season, schedule-week) tuple.
-
-        Returns ``None`` when ``date`` is ``None`` -- the inference path keys
-        on the lazy-once snapshot instead.
         """
-        if date is None:
-            return None
         wed_offset = (date.weekday() - 2) % 7  # Monday=0..Sunday=6; Wednesday=2
         most_recent_wed = date - timedelta(days=wed_offset)
         return most_recent_wed.toordinal() // 7
 
-    def _ensure_comps(self, date: "date | None" = None) -> None:
+    def _ensure_comps(self, date: "date") -> None:
         """Materialize ``self.comps`` for the comp pool active at ``date``.
 
-        Two modes:
-
-        * ``date is None`` (inference, cron, dashboards): lazy-once. Build
-          comps if ``self.comps`` is empty, otherwise reuse the cached
-          snapshot for the lifetime of the ``Stats`` instance.
-        * ``date`` provided (training matrix path): route ``self.comps`` to
-          the per-week cache entry containing ``date``. Cache key comes from
-          :meth:`_comp_target_key`. First visit to a (season, week) bucket
-          calls :meth:`_compute_comps` with the date so per-league code can
-          bound the comp pool point-in-time; subsequent visits to the same
-          bucket are O(1) swaps. This eliminates the look-ahead leakage where
-          a 2023 training row's comps "know" the 2025 player population.
+        Routes ``self.comps`` to the per-week cache entry containing ``date``,
+        keyed by :meth:`_comp_target_key`. The first visit to a (season, week)
+        bucket calls :meth:`_compute_comps` with the date so per-league code can
+        bound the comp pool point-in-time; later visits to the same bucket are
+        O(1) swaps. This eliminates the look-ahead leakage where a 2023 training
+        row's comps "know" the 2025 player population. Inference passes
+        ``today()``, so it builds one pool per process and reuses it.
         """
         # TODO(comp-leakage-mlb): StatsNFL, StatsNBA, StatsWNBA, and StatsNHL
         # all honor ``target_game_date`` and gate their comp pool on the
@@ -724,11 +716,6 @@ class Stats:
         # every gameday. A true fix needs historical baseballsavant exports
         # (the published CSV is current-state only) so this leakage stays
         # open until that data source is wired in.
-        if date is None:
-            if not self.comps:
-                self._compute_comps()
-            return
-
         target_key = self._comp_target_key(date)
         if self._current_comps_key == target_key and self.comps:
             return
@@ -833,14 +820,6 @@ class Stats:
                 out[i] = np.interp(q, cum_norm[s:e], vals[s:e])
             results[q] = pd.Series(out, index=players_idx)
         return results
-
-    def save_comps(self):
-        """Write current comps to the league's JSON file for inspection."""
-        if not self.comps:
-            return
-        filepath = pkg_resources.files(data) / "leagues" / self.league.lower() / "comps.json"
-        with open(filepath, "w") as f:
-            json.dump(self.comps, f, indent=4)
 
     def _join_fp_team_features(self, date) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
         """League hook: return ``(team_features, defense_features)`` for ``date``.
@@ -1097,7 +1076,7 @@ class Stats:
         # Pass ``date`` so the training-matrix iteration rebuilds the comp
         # pool whenever the advancing date crosses into a new Wednesday-keyed
         # week (see :meth:`_ensure_comps`). The inference / cron path passes
-        # today() and hits the lazy-once snapshot path.
+        # today(), so it builds one pool on the first market and reuses it.
         self._ensure_comps(date=date)
         _pairs = self._comp_pairs()
         if not _pairs.empty:

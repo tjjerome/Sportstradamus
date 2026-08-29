@@ -171,7 +171,6 @@ def main(
     print(f"Loading {league} cached gamelogs...")
     stat_data = _STAT_CTORS[league]()
     stat_data.load()
-    stat_data.update_player_comps()
 
     print(f"Loading training matrix for {league} {market}...")
     M = _load_matrix(league, market)

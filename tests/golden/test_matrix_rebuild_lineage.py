@@ -18,7 +18,7 @@ from sportstradamus.training import pipeline
 from sportstradamus.training.cli import _validate_mode_flags
 from sportstradamus.training.data import trim_matrix
 from sportstradamus.training.lineage import validate_matrix_manifest, write_matrix_manifest
-from sportstradamus.training.pipeline import _step_load_matrix, _step_persist_matrix_and_comps
+from sportstradamus.training.pipeline import _step_load_matrix, _step_persist_matrix
 
 
 class _Stats:
@@ -32,9 +32,6 @@ class _Stats:
     def get_training_matrix(self, _market, cutoff):
         self.cutoffs.append(cutoff)
         return self.matrix.copy()
-
-    def save_comps(self):
-        raise AssertionError("player comps must not be saved on a frozen/rebuild path")
 
 
 def _mode_flags(**overrides) -> dict:
@@ -191,7 +188,7 @@ def test_frozen_matrix_input_is_read_only_and_skips_rebuild(tmp_path):
     assert path.read_bytes() == before
 
 
-def test_train_market_frozen_input_skips_matrix_persist_and_comps(tmp_path, monkeypatch):
+def test_train_market_frozen_input_skips_matrix_persist(tmp_path, monkeypatch):
     path = tmp_path / "NFL_attempts.parquet"
     matrix = _matrix()
     matrix.to_parquet(path)
@@ -210,8 +207,7 @@ def test_train_market_frozen_input_skips_matrix_persist_and_comps(tmp_path, monk
     monkeypatch.setattr(pipeline, "stat_zi", {})
 
     # matrix_only stops train_market right after the persist step — the frozen
-    # pin under test — without running the HPO tail; _Stats.save_comps raises
-    # if the persist step ever reaches the comps write.
+    # pin under test — without running the HPO tail.
     pipeline.train_market(
         "NFL",
         "attempts",
@@ -370,15 +366,13 @@ def test_trim_and_parquet_sha_are_reproducible(tmp_path):
 
 
 def test_full_rebuild_write_canonicalizes_feature_order(tmp_path):
-    stats = _Stats(_matrix())
     outputs = [tmp_path / "one.parquet", tmp_path / "two.parquet"]
     matrices = [_matrix(), _matrix().reindex(columns=list(reversed(_matrix().columns)))]
 
     for matrix, output in zip(matrices, outputs, strict=True):
-        persisted = _step_persist_matrix_and_comps(
+        persisted = _step_persist_matrix(
             matrix,
             output,
-            stats,
             deterministic=False,
             full_rebuild=True,
         )
