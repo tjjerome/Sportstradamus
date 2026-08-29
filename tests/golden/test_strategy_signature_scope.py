@@ -53,9 +53,7 @@ def test_cli_and_persist_maps_are_not_signed(spec):
 @pytest.mark.parametrize("spec", registered_strategies(), ids=lambda spec: spec.slug)
 def test_a_version_bump_rotates_the_signature(spec):
     bumped = dataclasses.replace(spec, implementation_version=spec.implementation_version + 1)
-    reschemad = dataclasses.replace(
-        spec, artifact_schema_version=spec.artifact_schema_version + 1
-    )
+    reschemad = dataclasses.replace(spec, artifact_schema_version=spec.artifact_schema_version + 1)
 
     assert bumped.canonical_signature != spec.canonical_signature
     assert reschemad.canonical_signature != spec.canonical_signature

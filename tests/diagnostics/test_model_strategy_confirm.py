@@ -671,12 +671,18 @@ def test_walk_nominees_reports_the_real_outcome_over_a_trailing_skip(monkeypatch
     monkeypatch.setattr(mc, "_pin_cell_matrix", lambda lg, mkt: None)
     monkeypatch.setattr(mc, "_decided_pairs", lambda: {("decided-fp", _MATRIX_SHA)})
     walked = {
-        "league": "WNBA", "market": "AST", "source": "board slack +0.300",
-        "corner_fingerprint": "fresh-fp", "matrix_hash": _MATRIX_SHA,
+        "league": "WNBA",
+        "market": "AST",
+        "source": "board slack +0.300",
+        "corner_fingerprint": "fresh-fp",
+        "matrix_hash": _MATRIX_SHA,
     }
     skipped = {
-        "league": "WNBA", "market": "AST", "source": "board slack +0.200",
-        "corner_fingerprint": "decided-fp", "matrix_hash": _MATRIX_SHA,
+        "league": "WNBA",
+        "market": "AST",
+        "source": "board slack +0.200",
+        "corner_fingerprint": "decided-fp",
+        "matrix_hash": _MATRIX_SHA,
     }
 
     result = mc._walk_nominees(

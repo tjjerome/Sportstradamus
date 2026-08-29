@@ -32,7 +32,6 @@ from click.testing import CliRunner
 
 from sportstradamus.training.baselines import get_target_normalization
 from sportstradamus.training.calibration import DEFAULT_BLENDING
-from sportstradamus.training.posthoc import PROB_STAGE
 from sportstradamus.training.markets import ALL_MARKETS
 from sportstradamus.training.model_strategy import (
     BASE_STRUCTURAL_STRATEGY,
@@ -66,7 +65,7 @@ from sportstradamus.training.model_strategy.specs import (
     INCUMBENT_CONTROL_DEFAULTS,
     MANDATORY_SWEEP_CORNERS,
 )
-from sportstradamus.training.posthoc import CDF_STAGE, POSTHOC_SLUGS, STRUCTURAL_STAGE
+from sportstradamus.training.posthoc import CDF_STAGE, POSTHOC_SLUGS, PROB_STAGE, STRUCTURAL_STAGE
 from sportstradamus.training.role_specs import role_spec_for
 from sportstradamus.training.structural_strategies import (
     AFFINE_STRATEGY as RUSHING,
@@ -1163,9 +1162,7 @@ def test_frontier_corners_cover_normalization_by_shaping_posthoc_grid():
     shaping = tuple(p for p in choices["posthoc"] if p != "none" and p not in PROB_STAGE)
     sn_points = {(c["normalization"], c["posthoc"]) for s, c in corners if s.slug == "SkewNormal"}
     assert sn_points == {
-        (norm, posthoc)
-        for norm in choices["normalization"]
-        for posthoc in ("none", *shaping)
+        (norm, posthoc) for norm in choices["normalization"] for posthoc in ("none", *shaping)
     }
     defaults = INCUMBENT_CONTROL_DEFAULTS["SkewNormal"]
     for frontier_spec, controls in corners:
@@ -1226,12 +1223,18 @@ def test_shaping_probes_cover_the_top_two_bases_with_the_cdf_corrector(monkeypat
     context = sweep._cell_context("WNBA", "MIN")
     scored = dict(
         [
-            _probe_scored_row(context, _probe_corner("ratio_meanyr", "nll", "crps_1se", "prob_recal_platt"), 0.06),
+            _probe_scored_row(
+                context, _probe_corner("ratio_meanyr", "nll", "crps_1se", "prob_recal_platt"), 0.06
+            ),
             # Same base as the leader (posthoc differs) — one anchor, not two.
-            _probe_scored_row(context, _probe_corner("ratio_meanyr", "nll", "crps_1se", "none"), 0.06),
+            _probe_scored_row(
+                context, _probe_corner("ratio_meanyr", "nll", "crps_1se", "none"), 0.06
+            ),
             _probe_scored_row(context, _probe_corner("ratio_meanyr", "crps", "nll", "none"), 0.044),
             # Third distinct base — beyond the anchor budget, never probed.
-            _probe_scored_row(context, _probe_corner("centered_additive_mean10", "crps", "nll", "none"), 0.03),
+            _probe_scored_row(
+                context, _probe_corner("centered_additive_mean10", "crps", "nll", "none"), 0.03
+            ),
         ]
     )
     failed_fp, failed = _probe_scored_row(
@@ -1265,7 +1268,9 @@ def test_shaping_probes_skip_covered_known_and_foreign_anchors(monkeypatch):
     leader_fp, leader = _probe_scored_row(
         context, _probe_corner("ratio_meanyr", "nll", "crps_1se", "cdf_recal_isotonic"), 0.06
     )
-    runner_fp, runner = _probe_scored_row(context, _probe_corner("ratio_meanyr", "crps", "nll", "none"), 0.044)
+    runner_fp, runner = _probe_scored_row(
+        context, _probe_corner("ratio_meanyr", "crps", "nll", "none"), 0.044
+    )
     probe_fp, probe_row = _probe_scored_row(
         context, _probe_corner("ratio_meanyr", "crps", "nll", "cdf_recal_isotonic"), 0.044
     )
@@ -1283,11 +1288,18 @@ def test_shaping_probes_skip_covered_known_and_foreign_anchors(monkeypatch):
     )
     assert trained == [] and probes == {}
 
-    count_fp, count_row = _probe_scored_row(context, _probe_corner("ratio_meanyr", "crps", "nll", "none"), 0.1)
+    count_fp, count_row = _probe_scored_row(
+        context, _probe_corner("ratio_meanyr", "crps", "nll", "none"), 0.1
+    )
     count_row["family"] = count_row["strategy_slug"] = "ZINB"
     probes = sweep._shaping_probes(
-        context, ("ZINB",), {count_fp: count_row}, {count_fp: count_row}, {},
-        timeout_s=60, progress=_quiet_progress(),
+        context,
+        ("ZINB",),
+        {count_fp: count_row},
+        {count_fp: count_row},
+        {},
+        timeout_s=60,
+        progress=_quiet_progress(),
     )
     assert trained == [] and probes == {}
 
@@ -1319,9 +1331,18 @@ def test_rank_cell_board_breaks_ties_deterministically_by_fingerprint():
     test's slot-3 'coin flip' was an unstable sort over an insertion-ordered tie.
     """
     tied = {
-        "b-corner": {**_scored_row("b", "SkewNormal", 0.05, _gate_scalars(0.02, 0.05)), "corner_fingerprint": "bbb"},
-        "a-corner": {**_scored_row("a", "SkewNormal", 0.05, _gate_scalars(0.02, 0.05)), "corner_fingerprint": "aaa"},
-        "c-corner": {**_scored_row("c", "SkewNormal", 0.10, _gate_scalars(0.01, 0.05)), "corner_fingerprint": "ccc"},
+        "b-corner": {
+            **_scored_row("b", "SkewNormal", 0.05, _gate_scalars(0.02, 0.05)),
+            "corner_fingerprint": "bbb",
+        },
+        "a-corner": {
+            **_scored_row("a", "SkewNormal", 0.05, _gate_scalars(0.02, 0.05)),
+            "corner_fingerprint": "aaa",
+        },
+        "c-corner": {
+            **_scored_row("c", "SkewNormal", 0.10, _gate_scalars(0.01, 0.05)),
+            "corner_fingerprint": "ccc",
+        },
     }
     forward = sweep._rank_cell_board("WNBA", "AST", tied)
     reversed_in = sweep._rank_cell_board("WNBA", "AST", dict(reversed(list(tied.items()))))
@@ -2375,9 +2396,7 @@ def test_ledger_gate_discounts_are_flat_quantile_scalars_via_echo_columns():
             g2_star_z=1.0 + (0.5 if i % 2 == 0 else -0.5),
             **echo,
         )
-        for i, (n, (league, market)) in enumerate(
-            (300 + 100 * k, cells[k % 4]) for k in range(8)
-        )
+        for i, (n, (league, market)) in enumerate((300 + 100 * k, cells[k % 4]) for k in range(8))
     ]
     pd.DataFrame(rows).to_csv(sweep.NOMINEE_LEDGER_PATH, index=False)
 
