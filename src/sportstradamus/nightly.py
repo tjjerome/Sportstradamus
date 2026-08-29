@@ -97,6 +97,10 @@ _BOOKS_P_CLIP = 1e-3
 # the offline S3 sim's 5% per-bet ceiling. The live ROI is the dollar-weighted
 # realized return on the staked dollars within the rolling window.
 _KELLY_LIVE_CAP_FRAC: float = 0.05
+# Below ~150 settled offers a proportion's se (~0.04) makes the warn gap indistinguishable from noise.
+_CAL_DIVERGENCE_MIN_N = 150
+# The 2026-08 WNBA PRA consensus poisoning ran a ~0.10 predicted-vs-empirical gap; 0.08 catches a repeat.
+_CAL_DIVERGENCE_WARN_GAP = 0.08
 
 
 def _empty_live_metrics_frame() -> pd.DataFrame:
@@ -314,6 +318,31 @@ def _compute_live_metrics(history: pd.DataFrame, *, now: datetime | None = None)
     return _enforce_live_metrics_dtypes(pd.DataFrame(rows))
 
 
+def _warn_calibration_divergence(metrics: pd.DataFrame) -> None:
+    """WARN per cell whose 30-day bet mix diverges from realized outcomes.
+
+    The 2026-08 WNBA PRA consensus poisoning sat invisible for ~4 weeks: CLV
+    monitoring shares the poisoned consensus, but this frame already carries
+    the smoking gun (predicted vs empirical over rate). Surface it nightly.
+    """
+    window = metrics[
+        (metrics["window_days"] == max(LIVE_METRICS_WINDOWS))
+        & (metrics["n_settled"] >= _CAL_DIVERGENCE_MIN_N)
+    ]
+    gap = (window["predicted_over_rate"] - window["empirical_over_rate"]).abs()
+    for row in window[gap > _CAL_DIVERGENCE_WARN_GAP].itertuples():
+        logger.warning(
+            "Calibration divergence: %s %s predicted_over_rate=%.3f "
+            "empirical_over_rate=%.3f n_settled=%d window_days=%d",
+            row.league,
+            row.market,
+            row.predicted_over_rate,
+            row.empirical_over_rate,
+            row.n_settled,
+            row.window_days,
+        )
+
+
 def _precompute_profit_sim(history):
     summary = precompute_profit_sim_summary(annotate_offer_outcomes(history))
     _atomic_write_parquet(summary, PROFIT_SIM_SUMMARY_PATH)
@@ -361,6 +390,7 @@ def run(league, skip_update, history_only, log_level):
     metrics = _compute_live_metrics(history)
     _atomic_write_parquet(metrics, LIVE_METRICS_PATH)
     logger.info(f"Live metrics: wrote {len(metrics)} rows to {LIVE_METRICS_PATH.name}")
+    _warn_calibration_divergence(metrics)
 
     _precompute_profit_sim(history)
     _precompute_calibration(history)
