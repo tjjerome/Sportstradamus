@@ -380,7 +380,13 @@ A served predictive is built in four independently-swappable stages,
   canonical spec signature, implementation/artifact-schema versions, status and cell, sorted
   compact `controls_json`, cached-matrix SHA, corner fingerprint, and structural split fingerprint
   where declared. The corner fingerprint SHA binds
-  `{strategy signature, family, exact controls, matrix SHA}`. The split fingerprint is a separate
+  `{strategy signature, family, exact controls, matrix SHA}`. The spec signature covers the
+  artifact contract only — `axes`, `cli_flags`, and the `persist` map are excluded
+  (`registry._UNSIGNED_SPEC_FIELDS`), because they describe what the sweep may try next rather
+  than how a trained artifact was produced, and corner membership already rejects an artifact
+  whose controls left the pool. Widening a search axis therefore leaves every stored signature and
+  fingerprint alone; a `implementation_version` or `artifact_schema_version` bump rotates them, and
+  that rotation is the signal to retrain. The split fingerprint is a separate
   exact identity from the structural artifact's validation audit; it is deliberately **not** folded
   into the pre-training corner fingerprint. `--resume` admits prior rows **per row** — a budgeted
   search never enumerates a whole cell — rejecting any with stale specs, controls, matrix/schema
@@ -440,7 +446,10 @@ Serving validates active status, `serve` capability, exact cell, distribution cl
 controls, the pickle's actual distribution and `expected_columns`, plus corner/matrix/split
 identity; a structural adapter dispatches only from that validated selector. Identity-absent
 base-family legacy artifacts remain compatible, but a legacy structural blob without generic
-identity fails closed. The signed recipe is also checked against every independently persisted
+identity fails closed. A cell that fails any of those checks is skipped with a warning and serves
+nothing, rather than raising — `process_offers` scores every league and market inside one
+try/except per platform, so a single unservable pickle would otherwise drop the whole slate. The
+signed recipe is also checked against every independently persisted
 runtime field (distribution, normalization/normalized semantics, SN parameterization, ZINB mode,
 and fixed posthoc settings). Live supersession requires the fresh candidate-bound `model_stats`
 row before S1/S2/S3, and S2/S3 pair exact shared events by Player + UTC Date + Line + Result

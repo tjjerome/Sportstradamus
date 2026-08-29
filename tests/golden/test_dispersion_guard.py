@@ -1,20 +1,31 @@
 """A diverged calibration fit must never scale the served distribution.
 
-Two fail-closed serving guards in ``prediction/model_prob.py``. A
+Three fail-closed serving guards in ``prediction/model_prob.py``. A
 ``dispersion_cal`` pinned at its optimizer bound (the 2026-08 WNBA
 overconfident-unders vector) means the joint ``(c, s)`` fit diverged, so
-``_serving_dispersion_cal`` serves the unscaled shape instead. And a cell
+``_serving_dispersion_cal`` serves the unscaled shape instead. A cell
 whose ``stat_meta`` says ``withheld`` must serve nothing even when a missed
 ``meditate`` left a stale pickle on disk (two weeks of WNBA PRA, 2026-08).
+And a pickle whose strategy identity no longer validates costs its own cell
+only — ``process_offers`` scores every market inside one try/except per
+platform, so raising there would drop the whole slate.
 """
 
+import dataclasses
 import importlib
 import logging
+import pickle
 
 import pandas as pd
 import pytest
 
 from sportstradamus.prediction.model_prob import _serving_dispersion_cal
+from sportstradamus.training.model_strategy import (
+    MODEL_STRATEGY_MODEL_KEY,
+    build_artifact_identity,
+    get_strategy,
+    strategy_controls,
+)
 from sportstradamus.training.ship_config import WITHHELD
 
 # The package __init__ re-exports the model_prob *function*, shadowing the
@@ -87,3 +98,36 @@ def test_withheld_cell_without_pickle_is_silent(monkeypatch, tmp_path, caplog):
     with caplog.at_level(logging.WARNING, logger="log"):
         assert _serve_wnba_pra() == []
     assert "withheld but pickle on disk" not in caplog.text
+
+
+def test_stale_strategy_identity_skips_the_cell_not_the_slate(monkeypatch, tmp_path, caplog):
+    spec = get_strategy("SkewNormal")
+    identity = build_artifact_identity(
+        spec.slug,
+        "WNBA",
+        "PRA",
+        strategy_controls(spec)[0],
+        matrix_hash="matrix-sha",
+    )
+    pickle_path = tmp_path / "WNBA_PRA.mdl"
+    with open(pickle_path, "wb") as outfile:
+        pickle.dump(
+            {
+                "cv": 1.0,
+                "weight": 0.5,
+                "step": 0.5,
+                "distribution": "SkewNormal",
+                "model_version": "test",
+                MODEL_STRATEGY_MODEL_KEY: dataclasses.asdict(identity)
+                | {"signature": "rotated-away"},
+            },
+            outfile,
+            -1,
+        )
+    monkeypatch.setattr(model_prob_module, "stat_meta", {})
+    monkeypatch.setattr(model_prob_module, "model_pickle_path", lambda league, market: pickle_path)
+
+    with caplog.at_level(logging.WARNING, logger="log"):
+        assert _serve_wnba_pra() == []
+    assert "not served" in caplog.text
+    assert "WNBA_PRA" in caplog.text

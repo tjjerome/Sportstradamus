@@ -1396,8 +1396,9 @@ def model_prob(
     scaling, and returns a list of offer dicts augmented with scoring
     columns (``Model EV``, ``Market EV``, ``Projection``, ``Bet``, ``Kelly``, etc.).
 
-    Returns an empty list when no model file exists or when the joined
-    DataFrame is empty after filtering.
+    Returns an empty list when no model file exists, when the pickle's strategy
+    identity no longer validates, or when the joined DataFrame is empty after
+    filtering.
     """
     # style: allow-complexity -- top-level serving orchestrator: load pickle, build params,
     # apply posthoc/dispersion/structural calibration, blend with book, emit scoring columns.
@@ -1435,7 +1436,14 @@ def model_prob(
     )
     shape_ceiling = filedict.get("shape_ceiling")
     dist = filedict["distribution"]
-    strategy_identity = _resolve_serving_strategy(filedict, league, market)
+    try:
+        strategy_identity = _resolve_serving_strategy(filedict, league, market)
+    except ValueError as e:
+        # process_offers scores every league and market inside one try/except per platform, so
+        # letting this propagate drops the whole slate over one unservable cell. Skip the cell
+        # instead, as the withheld and missing-pickle guards above already do.
+        logger.warning(f"{filename} not served: {e}")
+        return []
     structural_strategy = strategy_identity.structural_strategy
     step = filedict["step"]
     normalized = filedict.get("normalized", False)

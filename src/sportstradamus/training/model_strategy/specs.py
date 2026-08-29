@@ -75,7 +75,6 @@ def _base(
         "legacy_schema_field": "schema_version",
         "legacy_status_field": "status",
         "split_fingerprint_path": (),
-        "matrix_hash_path": (),
     }
 
 
@@ -295,7 +294,6 @@ def _yards(
         "legacy_schema_field": "schema_version",
         "legacy_status_field": "status",
         "split_fingerprint_path": ("validation_audit", "split_fingerprint_sha256"),
-        "matrix_hash_path": (),
     }
 
 
