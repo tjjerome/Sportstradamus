@@ -30,15 +30,22 @@ and Healthchecks.io start/fail/success pings. Each job pings
 `HEALTHCHECK_URL_<JOB>` (the job name uppercased, `-` → `_`; e.g. `close-lines`
 → `HEALTHCHECK_URL_CLOSE_LINES`), falling back to the shared `HEALTHCHECK_URL`.
 
+Every ping carries a `?rid=` run ID and a body opening `job=<job> host=<host>
+status=…`; failures append the exit code and a tqdm-stripped log excerpt, and a
+lock timeout names the jobs that were running instead. Point each
+`HEALTHCHECK_URL_<JOB>` at its own check UUID if you can — with one shared UUID
+any job's success still marks the check alive, so a job that fails every run
+stays invisible.
+
 ```cron
 50 8-20 * * *          <repo-dir>/scripts/run_job.sh prophecize
 30 8,11,14,17,20 * * * <repo-dir>/scripts/run_job.sh confer
 55 8 * * *             <repo-dir>/scripts/run_job.sh ledger-commit --run-slot morning
 55 14 * * *            <repo-dir>/scripts/run_job.sh ledger-commit --run-slot afternoon
 0 1 * * 5              <repo-dir>/scripts/run_job.sh meditate
-0 23 * * *             <repo-dir>/scripts/run_job.sh reflect
+0 2 * * *              <repo-dir>/scripts/run_job.sh reflect
 */10 11-23,0-1 * * *   <repo-dir>/scripts/run_job.sh close-lines
-0 2 1 * *              <repo-dir>/scripts/run_job.sh gate-status
+0 4 1 * *              <repo-dir>/scripts/run_job.sh gate-status
 0 10 * * 3             <repo-dir>/scripts/run_job.sh fp-fetch
 ```
 
@@ -48,7 +55,7 @@ and Healthchecks.io start/fail/success pings. Each job pings
 | `confer` | 5 slots/day | broad odds/props fetch; the credit governor decides which leagues each slot fetches |
 | `ledger-commit` | 2×/day (morning + afternoon) | simulated-bettor ledger commit (policy_v1) |
 | `meditate` | Fri 1am | retrain models |
-| `reflect` | nightly 11pm | grade history, profit-sim + calibration summaries + simulated-bettor ledger |
+| `reflect` | nightly 2am | grade history, profit-sim + calibration summaries + simulated-bettor ledger |
 | `close-lines` | every 10 min, game hours | closing-line capture for games starting in 5–25 min; no-op tick when nothing is due |
 | `gate-status` | monthly | Gate-2 promote/demote PR against `main`; needs `gh` auth and `HEALTHCHECK_URL_GATE_STATUS` |
 | `fp-fetch` | Wed 10am (NFL season) | Fantasy Points endpoint snapshots; needs a fresh session cookie and `HEALTHCHECK_URL_FP_FETCH` |
@@ -60,6 +67,12 @@ Couplings to keep in sync:
   config claims underspends the monthly credit budget; more overspends it.
 - `close-lines` is the per-game data floor and is never throttled by the
   governor — don't widen its hours without re-checking the credit budget.
+- `reflect` holds the shared archive lock for its whole ~1 h run, so it sits at
+  2am, after `close-lines` stops at 01:50. Overlapping the two starves
+  `close-lines` — it waits `ARCHIVE_LOCK_TIMEOUT` and exits without capturing
+  the closing lines for games tipping in that window. Every job takes that lock,
+  including ones like `gate-status` that never read the archive, which is why it
+  sits at 4am rather than sharing `reflect`'s start minute.
 - Season starts/ends never require cron edits: idle leagues cost one free
   events call per broad run, and `prophecize`/`meditate` skip them.
 

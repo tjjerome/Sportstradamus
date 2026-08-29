@@ -24,6 +24,11 @@
 #   ARCHIVE_LOCK_TIMEOUT    seconds to wait for the shared archive lock (default: 900)
 #   GIT_PULL                set 0 to skip the pre-job devel pull (default: 1)
 #
+# Healthchecks pings:
+#   Every ping carries a `?rid=` run ID and a body whose first line is
+#   `job=<job> host=<host> status=…`, so an alert names its own job and its own
+#   elapsed time even when several HEALTHCHECK_URL_<JOB> share one check UUID.
+#
 # Concurrency model:
 #   - Per-job flock (-n): a second invocation of the *same* job is skipped.
 #   - Pull flock (-n): only one job pulls devel at a time; concurrent jobs skip
@@ -90,10 +95,37 @@ job_upper="$(echo "$JOB" | tr '[:lower:]-' '[:upper:]_')"
 hc_var="HEALTHCHECK_URL_${job_upper}"
 HC_URL="${!hc_var:-${HEALTHCHECK_URL:-}}"
 
+# Pairs this run's /start with its own terminating ping. Without it healthchecks
+# times the run from whichever job pinged /start last, so a shared check reports
+# some other job's elapsed time on our failure.
+RUN_ID="$(cat /proc/sys/kernel/random/uuid)"
+HC_TAG="job=$JOB host=${HOSTNAME%%.*}"
+
 ping_hc() {
-    local suffix="$1"  # "" for success, "/fail" for failure, "/start" for start
+    local suffix="$1" body="${2-}"  # "" for success, "/fail" for failure, "/start" for start
     [[ -z "$HC_URL" ]] && return 0
-    curl -fsS --max-time 10 --retry 3 -o /dev/null "${HC_URL}${suffix}" || true
+    printf '%s' "$body" | curl -fsS --max-time 10 --retry 3 --data-binary @- \
+        -o /dev/null "${HC_URL}${suffix}?rid=${RUN_ID}" || true
+}
+
+# The logs are mostly tqdm carriage-return frames, so a raw tail is one
+# unreadable progress bar. Split on \r and drop the frames.
+log_excerpt() {
+    tail -c 262144 "$LOG_FILE" | tr '\r' '\n' \
+        | grep -vE 'it/s\]|s/it\]|\?it/s\]' | tail -n 40
+}
+
+# Names the live jobs when we lose the archive lock — the holder is one of
+# them, and "waited 900s" alone doesn't say who starved us.
+running_jobs() {
+    local lock name found=()
+    for lock in "$LOCK_DIR"/sportstradamus-*.lock; do
+        name="${lock##*/sportstradamus-}"
+        name="${name%.lock}"
+        case "$name" in archive | git-pull | "$JOB") continue ;; esac
+        flock -n "$lock" true 2>/dev/null || found+=("$name")
+    done
+    echo "${found[*]:-none}"
 }
 
 log() {
@@ -133,7 +165,8 @@ pull_devel() {
 
 run() {
     log "START job=$JOB cmd=${CMD[*]}"
-    ping_hc "/start"
+    ping_hc "/start" "$HC_TAG status=start
+cmd=${CMD[*]}"
 
     local start_ts end_ts duration status
     start_ts=$(date +%s)
@@ -146,14 +179,13 @@ run() {
 
     if [[ $status -eq 0 ]]; then
         log "OK job=$JOB duration=${duration}s"
-        ping_hc ""
+        ping_hc "" "$HC_TAG status=ok duration=${duration}s"
     else
         log "FAIL job=$JOB duration=${duration}s exit=$status"
-        # Send last 50 lines of the log as the failure body so the alert is useful.
-        if [[ -n "$HC_URL" ]]; then
-            tail -n 50 "$LOG_FILE" | curl -fsS --max-time 10 --retry 3 \
-                --data-binary @- -o /dev/null "${HC_URL}/fail" || true
-        fi
+        ping_hc "/fail" "$HC_TAG status=fail duration=${duration}s exit=$status
+log=$LOG_FILE
+--- last 40 log lines ---
+$(log_excerpt)"
     fi
     return $status
 }
@@ -179,7 +211,9 @@ wait_start=$(date +%s)
 if ! flock -w "$ARCHIVE_LOCK_TIMEOUT" 8; then
     waited=$(( $(date +%s) - wait_start ))
     log "FAIL_LOCK job=$JOB reason=archive_lock_timeout waited=${waited}s"
-    ping_hc "/fail"
+    ping_hc "/fail" "$HC_TAG status=fail_lock waited=${waited}s
+$JOB never started: gave up waiting for the shared DuckDB archive lock.
+jobs running: $(running_jobs)"
     exit 75  # EX_TEMPFAIL
 fi
 wait_end=$(date +%s)
