@@ -842,10 +842,7 @@ class Archive:
             sql += " AND observed_at <= ?"
             params.append(at)
         arr = [row[0] for row in self._connection.execute(sql, params).fetchall()]
-        if not arr:
-            return 0
-        line = np.floor(2 * np.median(arr)) / 2
-        return 0 if np.isnan(line) else float(line)
+        return _consensus_line(arr)
 
     def to_pandas(self, league, market):
         """Flatten one league/market into a wide DataFrame.
