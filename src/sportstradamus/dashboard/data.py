@@ -370,7 +370,8 @@ def load_corr_market_summary(league: str) -> pd.DataFrame:
     """Market-pair mean-correlation summary for a league (mtime-keyed cache).
 
     Columns ``market_a, market_b, rho_mean, n_teams, scope`` (scope is
-    ``same_team`` or ``opposing``), written by ``training.correlate``'s
+    ``same_team``, ``opposing``, or ``same_player``; regenerated files add
+    ``n_teams_distinct``), written by ``training.correlate``'s
     ``_write_corr_outputs`` alongside the dashboard-forbidden per-team corr
     parquets. Returns an empty DataFrame for a league with no corr data
     generated yet — callers caption that rather than crash.

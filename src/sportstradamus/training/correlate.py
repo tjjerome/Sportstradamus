@@ -12,6 +12,10 @@ Outputs (per league, all under ``data/leagues/{league}/``):
   ``(team, team_market, opp_market)``. Both sides keyed by their raw
   (un-prefixed) market names; the file structure encodes the team-vs-opponent
   relationship.
+* ``corr_market_summary.parquet`` — market-level pooled means of the pair
+  correlations, one row per ``(market_a, market_b, scope)`` where scope is
+  ``same_team``, ``opposing``, or ``same_player`` (same-team pairs whose two
+  sides share a slot prefix — one player's own stat pair).
 * ``corr_metadata.json`` — date range covered, per-team observation counts,
   generation timestamp, git SHA.
 
@@ -883,9 +887,13 @@ def _market_summary(blocks: pd.Series, scope: str) -> pd.DataFrame:
     """Aggregate (team, market_a, market_b) → R across teams to market-pair means.
 
     Position prefixes strip (B1.AST → AST) so the pair grid is market-level;
-    n_teams lets the dashboard filter thin pairs honestly.
+    pairs pool with an unweighted mean over the pooled rows. ``n_teams`` is the
+    pooled (team × slot-prefix) row count — the legacy name the dashboard's
+    thin-pair mask reads — and ``n_teams_distinct`` counts the distinct teams
+    behind those rows, so downstream shrinkage can tell 30 teams from 30
+    batting-slot pairs on 4 teams.
     """
-    columns = ["market_a", "market_b", "rho_mean", "n_teams", "scope"]
+    columns = ["market_a", "market_b", "rho_mean", "n_teams", "scope", "n_teams_distinct"]
     if blocks.empty:
         return pd.DataFrame(columns=columns)
 
@@ -893,9 +901,15 @@ def _market_summary(blocks: pd.Series, scope: str) -> pd.DataFrame:
     df.columns = ["team", "market_a", "market_b", "R"]
     for market_col in ("market_a", "market_b"):
         df[market_col] = df[market_col].str.split(".").str[-1]
-    grouped = df.groupby(["market_a", "market_b"])["R"]
-    out = grouped.mean().rename("rho_mean").reset_index()
-    out["n_teams"] = grouped.size().to_numpy()
+    out = (
+        df.groupby(["market_a", "market_b"])
+        .agg(
+            rho_mean=("R", "mean"),
+            n_teams=("R", "size"),
+            n_teams_distinct=("team", "nunique"),
+        )
+        .reset_index()
+    )
     out["scope"] = scope
     return out[columns]
 
@@ -916,9 +930,20 @@ def _write_corr_outputs(league, same_team_blocks, opposing_blocks):
     else:
         pd.DataFrame(columns=["R"]).to_parquet(opposing_path, compression="zstd")
 
+    if same_team_blocks:
+        label_a = same_series.index.get_level_values(1)
+        label_b = same_series.index.get_level_values(2)
+        # An equal slot prefix (B1., G2., ...) on both sides means one player's
+        # own stat pair; label inequality drops the R=1.0 self-pairs.
+        same_slot = label_a.str.split(".").str[0] == label_b.str.split(".").str[0]
+        same_player_series = same_series[same_slot & (label_a != label_b)]
+    else:
+        same_player_series = same_series
+
     parts = [
         _market_summary(same_series, "same_team"),
         _market_summary(opposing_series, "opposing"),
+        _market_summary(same_player_series, "same_player"),
     ]
     non_empty = [p for p in parts if not p.empty]
     summary = pd.concat(non_empty, ignore_index=True) if non_empty else parts[0]
