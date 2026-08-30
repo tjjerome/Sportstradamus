@@ -29,6 +29,7 @@ from sportstradamus.helpers import (
     book_gate,
     book_skewnormal_shape,
     book_weights,
+    combo_props,
     decode_predictive_mean,
     fused_loc,
     get_ev,
@@ -1618,10 +1619,10 @@ def _servable_fallback_quotes(
     Mirrors the training-side consumer (``Stats.resolve_player_market_odds``): one
     modal-line cohort quote per player from :func:`resolve_training_quote`, with the
     ``check_combo_markets`` consensus folded in on a second pass only when the first
-    came back synthetic. A quote serves when a real sportsbook (non-DFS) sits in its
-    same-line cohort, or when it is the combo consensus. Pure ev-inversions and
-    synthetic quotes never serve — a DFS platform reposting (or discounting) a line
-    is not independent support.
+    came back synthetic and the market is a ``combo_props`` component sum. A quote
+    serves when a real sportsbook (non-DFS) sits in its same-line cohort, or when it
+    is the combo consensus. Pure ev-inversions and synthetic quotes never serve — a
+    DFS platform reposting (or discounting) a line is not independent support.
     """
     weights = book_weights.get(league, {}).get(market, {})
     first_lines = offer_df["Line"].groupby(level=0).first()
@@ -1644,7 +1645,11 @@ def _servable_fallback_quotes(
                 "weights": weights,
             }
             quote = resolve_training_quote(rows, fallback_ev=None, **quote_kwargs)
-            if quote.source in ("neutral_fallback", "model_fallback"):
+            # The combo second pass is only trusted for the simple combo_props sums,
+            # whose components are real-book quoted. Fantasy-score markets build a
+            # mean from 8 weighted components plus gamelog fill-ins and price the
+            # tail off a generic cv — graded 17% at a claimed 0.87, so they no-serve.
+            if quote.source in ("neutral_fallback", "model_fallback") and market in combo_props:
                 quote = resolve_training_quote(
                     rows,
                     fallback_ev=stat_data.check_combo_markets(market, player, date),

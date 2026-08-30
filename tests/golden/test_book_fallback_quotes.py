@@ -149,8 +149,9 @@ def test_one_real_book_beside_dfs_serves(archive, monkeypatch):
 
 
 def test_combo_ev_inversion_still_serves(archive, monkeypatch):
-    """A combo consensus (check_combo_markets) serves without any archived rows."""
+    """A combo_props market's combo consensus serves without any archived rows."""
     _patch_cell(monkeypatch, "NegBin", 0.5)
+    monkeypatch.setitem(mp.combo_props, _MARKET, ["A", "B"])
 
     records = mp.book_fallback_prob(
         [_offer("Combo Guy", 25.5)], _LEAGUE, _MARKET, "Underdog", _StubStats(combo_ev=22.0)
@@ -160,6 +161,22 @@ def test_combo_ev_inversion_still_serves(archive, monkeypatch):
     rec = records[0]
     assert rec["Projection"] == pytest.approx(22.0, abs=1e-4)
     assert rec["Model Version"] == mp._BOOK_FALLBACK_VERSION
+
+
+def test_fantasy_market_never_serves_combo_fallback(archive, monkeypatch):
+    """A market outside combo_props (fantasy scores) gets no combo second pass.
+
+    The 8-component weighted mean plus generic-cv tail graded 16.7% at a
+    claimed 0.87 -- those quotes must not reach the board.
+    """
+    _patch_cell(monkeypatch, "NegBin", 0.5)
+    assert _MARKET not in mp.combo_props
+
+    records = mp.book_fallback_prob(
+        [_offer("Bench Guy", 5.5)], _LEAGUE, _MARKET, "Underdog", _StubStats(combo_ev=3.0)
+    )
+
+    assert records == []
 
 
 class _TotalsOnlyArchive:

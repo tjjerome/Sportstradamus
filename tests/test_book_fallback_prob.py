@@ -195,6 +195,7 @@ def test_combo_consensus_still_serves(monkeypatch):
     """The check_combo_markets second pass (NFL qb combos et al.) keeps serving."""
     _patch_cell(monkeypatch)
     monkeypatch.setattr(mp, "archive", _StubArchive({}))
+    monkeypatch.setitem(mp.combo_props, _RAW_MARKET, ["A", "B"])
     stats = _StubStats(pd.DataFrame(), combo_ev=22.0)
 
     records = mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats)
