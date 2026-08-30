@@ -3,11 +3,12 @@
 Two invariants are pinned here so a future edit cannot silently drift the two
 pipelines apart:
 
-1. **Book-odds fallback ≡ blend with model_weight 0.** The missing-model
-   fallback scores a leg from the book params directly (via ``_book_over_prob``).
-   Blending model and book through :func:`fused_loc` with ``w=0`` must collapse
-   to those same book params for every distribution family, so the fallback is
-   exactly the weight-0 blend (the user-stated equivalence).
+1. **Book leg ≡ blend with model_weight 0.** ``_book_over_prob`` scores the book
+   endpoint of the model path (``book_fallback_prob`` now prices from
+   ``resolve_training_quote`` cohorts instead). Blending model and book through
+   :func:`fused_loc` with ``w=0`` must collapse to those same book params for
+   every distribution family, so the book leg is exactly the weight-0 blend
+   (the user-stated equivalence).
 
 2. **Decode parity.** :func:`decode_predictive_mean` is the single decode kernel
    shared by ``prediction.model_prob`` and ``training.pipeline``; it must
@@ -34,7 +35,7 @@ mp = importlib.import_module("sportstradamus.prediction.model_prob")
 
 
 def _book_over(dist, line, book_ev, cv, step, gate):
-    """Over-probability the fallback assigns — the real ``_book_over_prob``."""
+    """Over-probability of the model path's book leg — the real ``_book_over_prob``."""
     offer_df = pd.DataFrame({"Line": [line], "Market Projection": [book_ev]})
     # Synthetic, never-fitted cell: the SkewNormal book shape stays the symmetric
     # constant-CV (mean*cv) read the w=0 reference uses, so the parity holds at the

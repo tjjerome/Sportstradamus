@@ -1,8 +1,10 @@
 """The book-odds encode/decode round trip must not manufacture an edge.
 
 `get_ev` encodes a bookmaker (line, under-prob) to a mean stored in the archive;
-`get_odds` decodes a mean back to a probability in `book_fallback_prob`. The two
-must be inverses, and the zero-inflation gate must be applied symmetrically, or a
+`get_odds` decodes a mean back to a probability on the model path's book leg
+(`_book_over_prob`; `book_fallback_prob` runs its own shape-consistent
+invert+decode pair off `resolve_training_quote` cohorts). Encode and decode must
+be inverses, and the zero-inflation gate must be applied symmetrically, or a
 book-only leg shows a fake edge that buries the genuinely-modeled markets.
 """
 
