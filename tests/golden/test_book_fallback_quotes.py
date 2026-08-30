@@ -167,8 +167,8 @@ def test_combo_ev_inversion_still_serves(archive, monkeypatch):
 def test_fantasy_market_never_serves_combo_fallback(archive, monkeypatch):
     """A market outside combo_props (fantasy scores) gets no combo second pass.
 
-    The 8-component weighted mean plus generic-cv tail graded 16.7% at a
-    claimed 0.87 -- those quotes must not reach the board.
+    The 8-component weighted mean plus generic-cv tail clean-graded 0.40 at
+    claimed >= 0.85 -- those quotes must not reach the board.
     """
     _patch_cell(monkeypatch, "NegBin", 0.5)
     assert _MARKET not in mp.combo_props

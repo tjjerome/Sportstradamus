@@ -268,13 +268,24 @@ def _enforce_live_metrics_dtypes(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _settled_offers(history: pd.DataFrame):
-    """Annotate history with per-offer outcomes and parse ``_date``; None if none settled."""
+    """Annotate history with per-offer outcomes and parse ``_date``; None if none settled.
+
+    Only decided offers survive: ``Result`` in Over/Under (needs Actual and
+    Line; drops pushes, which the platforms void) plus non-null ``Bet`` and
+    ``Win Prob``. ~13k legacy pre-flat-schema rows carry Actual with NaN
+    Line/Bet/Win Prob — their outcome is underivable, deflating both over
+    rates and NaN-poisoning the Kelly profit sim.
+    """
     if history.empty:
         return None
     exploded = annotate_offer_outcomes(history)
     if exploded.empty or "Actual" not in exploded.columns:
         return None
-    settled = exploded[exploded["Actual"].notna()].copy()
+    settled = exploded[
+        exploded["Result"].isin(("Over", "Under"))
+        & exploded["Bet"].notna()
+        & exploded["Win Prob"].notna()
+    ].copy()
     if settled.empty:
         return None
     settled["_date"] = pd.to_datetime(settled["Date"], errors="coerce")

@@ -342,11 +342,26 @@ def _hist_stats_table(filtered, prob_col, today):
     return hist_stats
 
 
+def _with_profit_units(exploded):
+    """Return a copy of the settled rows carrying ``Hit`` and the flat -110 ``Profit Unit``.
+
+    Pushes and unresolved rows (``Result`` NaN) are dropped, not graded — a push
+    refunds the stake and an unresolved row is not a settled bet, so counting
+    either as a loss fakes the record. ``Hit`` is derived from ``Bet == Result``
+    when absent; an upstream NaN-safe ``Hit`` is kept as-is. A hit pays
+    ``JUICE_PAYOUT``, a miss ``-1`` — the flat-unit basis the Receipts hero and
+    skeptic checks share so every number is comparable.
+    """
+    df = exploded.loc[exploded["Result"].notna() & (exploded["Result"] != "Push")].copy()
+    if "Hit" not in df.columns:
+        df["Hit"] = (df["Bet"] == df["Result"]).astype(int)
+    df["Profit Unit"] = df["Hit"] * JUICE_PAYOUT - (1 - df["Hit"])
+    return df
+
+
 def _daily_calibration_tables(filtered, prob_col, today):
-    """Daily per-(date, league, market) P&L and the model-probability calibration."""
-    one_year = filtered.loc[filtered["_date"] >= today - timedelta(days=365)].copy()
-    one_year["Hit"] = (one_year["Bet"] == one_year["Result"]).astype(int)
-    one_year["Profit Unit"] = one_year["Hit"] * (100 / 110) - (1 - one_year["Hit"])
+    """Daily per-(date, league, market) P&L and calibration, over settled bets only."""
+    one_year = _with_profit_units(filtered.loc[filtered["_date"] >= today - timedelta(days=365)])
 
     daily = (
         one_year.groupby(["_date", "League", "Market"])
@@ -418,7 +433,8 @@ def compute_individual_metrics(history):
 
     Returns (hist_stats, daily, calibration, roi) DataFrames.
     """
-    history = history.loc[history["Result"] != "Push"].copy()
+    # isin, not != "Push": a NaN Result (legacy row) passes != and would grade as a loss.
+    history = history.loc[history["Result"].isin(("Over", "Under"))].copy()
     if history.empty:
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
@@ -436,20 +452,6 @@ def compute_individual_metrics(history):
     daily, calibration = _daily_calibration_tables(filtered, prob_col, today)
     roi = _roi_table(history, today)
     return hist_stats, daily, calibration, roi
-
-
-def _with_profit_units(exploded):
-    """Return a copy carrying ``Hit`` and the flat -110 ``Profit Unit`` per offer.
-
-    ``Hit`` is derived from ``Bet == Result`` when absent. A hit pays
-    ``JUICE_PAYOUT``, a miss ``-1`` — the flat-unit basis the Receipts hero and
-    skeptic checks share so every number is comparable.
-    """
-    df = exploded.copy()
-    if "Hit" not in df.columns:
-        df["Hit"] = (df["Bet"] == df["Result"]).astype(int)
-    df["Profit Unit"] = df["Hit"] * JUICE_PAYOUT - (1 - df["Hit"])
-    return df
 
 
 def dedup_bets(exploded):

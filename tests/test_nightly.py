@@ -14,6 +14,7 @@ from sportstradamus.nightly import (
     LIVE_METRICS_COLUMNS,
     LIVE_METRICS_WINDOWS,
     _compute_live_metrics,
+    _settled_offers,
     _side_precision,
 )
 
@@ -166,6 +167,53 @@ def test_compute_live_metrics_no_settled_returns_empty():
     metrics = _compute_live_metrics(pd.DataFrame(rows), now=NOW)
     assert metrics.empty
     assert list(metrics.columns) == list(LIVE_METRICS_COLUMNS)
+
+
+def test_settled_offers_excludes_legacy_and_push_rows():
+    """Legacy NaN-Line rows and pushes never reach the live metrics.
+
+    ~13k pre-flat-schema history rows have Actual filled but Line/Bet/Win Prob
+    NaN — their Over/Under outcome is underivable, so counting them deflates
+    both over rates and NaN-poisons the Kelly sim. Pushes (Actual == Line) are
+    voided by the platforms, so counting them as unders/losses is the same bias.
+    """
+    date = NOW.strftime("%Y-%m-%d")
+
+    def _row(player, actual, line, bet, model_p, books_p):
+        return {
+            "Player": player,
+            "League": "NBA",
+            "Date": date,
+            "Market": "PTS",
+            "Projection": 10.0,
+            **_build_offer(line, bet, model_p, books_p),
+            "Actual": actual,
+        }
+
+    history = pd.DataFrame(
+        [
+            _row("Hit_1", 12.0, 10.0, "Over", 0.60, 0.50),
+            _row("Hit_2", 12.0, 10.0, "Over", 0.60, 0.50),
+            _row("Miss", 8.0, 10.0, "Over", 0.60, 0.50),
+            _row("Push", 10.0, 10.0, "Over", 0.60, 0.50),
+            _row("Legacy", 22.0, np.nan, np.nan, np.nan, np.nan),
+        ]
+    )
+
+    settled = _settled_offers(history)
+    assert sorted(settled["Player"]) == ["Hit_1", "Hit_2", "Miss"]
+
+    metrics = _compute_live_metrics(history, now=NOW)
+    row_30d = metrics[metrics["window_days"] == 30].iloc[0]
+    assert row_30d["n_settled"] == 3
+    # 2 Overs of 3 decided; a leaked push or legacy row would give 2/4 or 2/5.
+    assert row_30d["empirical_over_rate"] == pytest.approx(2 / 3)
+    # All 3 decided bets are Over; a leaked legacy row (Bet NaN) would give 3/4.
+    assert row_30d["predicted_over_rate"] == pytest.approx(1.0)
+    # Fair-odds 2.0 payout, 2 wins on 3 flat stakes; a push-as-loss would give 0.
+    assert row_30d["profit_sim_yield"] == pytest.approx(1 / 3)
+    # A leaked NaN Win Prob row would NaN the whole cell's Kelly yield.
+    assert row_30d["profit_sim_kelly_yield"] == pytest.approx(1 / 3)
 
 
 def test_compute_live_metrics_profit_sim_yield_signs():

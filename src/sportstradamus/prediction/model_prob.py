@@ -1640,7 +1640,8 @@ def _servable_fallback_quotes(
             # The combo second pass is only trusted for the simple combo_props sums,
             # whose components are real-book quoted. Fantasy-score markets build a
             # mean from 8 weighted components plus gamelog fill-ins and price the
-            # tail off a generic cv — graded 17% at a claimed 0.87, so they no-serve.
+            # tail off a generic cv — clean-graded 0.40 at claimed >= 0.85, so they
+            # no-serve until the component-sum kernel replaces this path.
             if quote.source in ("neutral_fallback", "model_fallback") and market in combo_props:
                 quote = resolve_training_quote(
                     rows,

@@ -11,23 +11,31 @@ devel `e1246576..55587e66`) whose fallback rewrite exposed this lane.
 
 ## Why this lane exists (graded evidence)
 
-`history.parquet` grading of fantasy cells, DNP zeros excluded
-(`Actual > 0`, pushes dropped):
+`history.parquet` grading of fantasy cells — legacy pre-flat-schema rows
+excluded (see audit note below), DNP zeros excluded (`Actual > 0`), pushes
+dropped:
 
 | market | path | n | claimed | hit |
 |---|---|---|---|---|
 | hitter fantasy points underdog (MLB) | model (`ratio_meanyr`) | 2612 | 0.678 | 0.593 |
-| hitter fantasy points underdog (MLB) | book_fallback | 1154 | 0.503 | 0.586 |
-| pitcher fantasy points underdog (MLB) | model | 500 | 0.615 | 0.564 |
+| hitter fantasy points underdog (MLB) | book_fallback | 1311 | 0.513 | 0.567 |
+| pitcher fantasy points underdog (MLB) | model | 544 | 0.619 | 0.557 |
 | pitcher fantasy points underdog (MLB) | book_fallback | 199 | 0.506 | 0.477 |
-| fantasy points underdog (NBA/WNBA) | model | 1533 | 0.569 | **0.264** |
-| fantasy points underdog (NBA/WNBA) | book_fallback | 201 | 0.509 | 0.517 |
+| fantasy points underdog (WNBA) | model | 797 | 0.569 | 0.507 |
+| fantasy points underdog (WNBA) | book_fallback | 213 | 0.510 | 0.526 |
 
-Directional extremes are worse: fallback rows claiming ≥ 0.85 hit 1/6 (the
-0.90-cap `combo_ev_inversion` unders that triggered this lane). The NBA/WNBA
-model row (claimed 0.569, hit 0.264) is bad enough that the lane's first data
-task is a grading audit — a scale or settlement mismatch is plausible and must
-be ruled out before that cell's model is condemned.
+Directional extremes carry the damage: clean fallback rows claiming ≥ 0.85 hit
+0.40 (n=10; the 0.90-cap `combo_ev_inversion` unders that triggered this lane).
+
+Grading caveat, resolved by the audit: legacy pre-flat-schema history rows
+(nested `Offers`, top-level `Line`/`Bet`/`Win Prob` NaN — all NBA fantasy rows,
+616/1678 WNBA rows) score `Hit = 0` under naive `(Bet == Result)` aggregation,
+which is what produced this brief's original "hit 0.264" NBA/WNBA figure.
+Settlement scale is fine (WNBA line median 27.55 vs actual median 27.75); the
+cell is ~6 pt overconfident like the MLB cells, not condemned. The cell itself:
+`normalize_market` scores NBA/WNBA underdog fantasy via the
+`fantasy points prizepicks` cell; the history label stays
+`fantasy points underdog`.
 
 The MLB hitter cell currently has **no pickle** (culled), so before the gate it
 served 100% fallback → combo inversion. As of this lane's opening commit,
@@ -159,9 +167,13 @@ distributions** instead of (or blended with) a directly-trained combo model.
    pricing — convolution vs copula-MC, correlation estimation error, family
    choice for weighted count sums, calibration of the derived tail. Cite the
    brief in the implementing PR.
-1. Grading audit of `fantasy points underdog` (NBA/WNBA) settlement scale.
+1. ~~Grading audit~~ **done** — legacy-row artifact, see the grading caveat
+   above; settlement scale confirmed fine.
 2. Lane A kernel + backtest; flip consumers 1→2→3 only on green backtest.
-3. Lane B behind the scorecard A/B; per-cell ship decisions.
+   Execution plan (phases, thresholds, admission policy):
+   `~/.claude/plans/investigate-and-improve-the-abstract-lerdorf.md`.
+3. Lane B behind the scorecard A/B; per-cell ship decisions (deferred until
+   Lane A lands).
 
 Usual gates apply throughout (`ruff`, golden, `-m integration -n0`,
 refactoring-specialist before push). No serving behavior changes without the
