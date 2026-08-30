@@ -40,6 +40,10 @@ _PICKEM_PLATFORMS = {
     "sleeper": "Sleeper",
     "thrive": "Thrive",
 }
+# Book names under which the DFS pick'em platforms write archive odds rows.
+# Their prices repost (and sometimes move) sportsbook consensus, so consensus
+# readers cap their weight whenever a real sportsbook also quotes the entry.
+DFS_PLATFORM_BOOKS: frozenset[str] = frozenset(_PICKEM_PLATFORMS.values())
 # Pick'em pays the same either way at the posted line — the operator's rake sits
 # in the payout multiplier, not the line — so an unboosted entry prices at 50/50.
 _PICKEM_UNDER_PROBABILITY = 0.5
@@ -68,6 +72,7 @@ class TrainingQuote:
     synthetic_reason: str | None
     observed_at: datetime.datetime | None
     book_count: int
+    books: tuple[str, ...] = ()
 
     @property
     def archived(self) -> bool:
@@ -167,7 +172,7 @@ def pickem_quote(
     line and nothing else. That bare line is still the platform's quote, so stand
     the symmetric price back up rather than read it as an absent book. Boosted
     entries do not price at 50/50 — ``Archive.add_dfs`` runs a live boost through
-    ``no_vig_odds`` into a real skewed quote — so callers must reach here only
+    ``dfs_boost_probs`` into a real skewed quote — so callers must reach here only
     when nothing priced the entry, letting any real quote outrank this.
     """
     if "fantasy points " not in market:
@@ -236,6 +241,7 @@ def _authentic_quote(
         synthetic_reason=None,
         observed_at=_latest_observation(cohort),
         book_count=len(cohort),
+        books=tuple(row.book for row in cohort),
     )
 
 

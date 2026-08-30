@@ -38,12 +38,17 @@ import pandas as pd
 from sportstradamus.helpers.config import book_gate, book_weights, stat_cv, stat_dist
 from sportstradamus.helpers.distributions import (
     SN_MAX_MEAN_FACTOR,
+    UNDERDOG_BOOST_BASELINE,
+    dfs_boost_probs,
     get_ev,
     get_odds,
-    no_vig_odds,
 )
 from sportstradamus.helpers.text import remove_accents
-from sportstradamus.helpers.training_quotes import ArchivedBookQuote, pickem_quote
+from sportstradamus.helpers.training_quotes import (
+    DFS_PLATFORM_BOOKS,
+    ArchivedBookQuote,
+    pickem_quote,
+)
 
 
 @dataclasses.dataclass
@@ -68,6 +73,17 @@ _TEAM_ONLY_MARKETS = frozenset({"Moneyline", "Totals", "1st 1 innings"})
 
 # Columns _book_rows may interpolate into SQL; anything else is an injection vector.
 _BOOK_VALUE_COLS = frozenset({"ev", "under_prob"})
+
+# Guards on the weighted book consensus: a DFS platform reposting a moved or
+# discounted line (the 2026-08 Sleeper WNBA incident) must not read as market truth.
+# A median line is only meaningful with at least this many lined book rows.
+_DIVERGENCE_MIN_BOOKS = 3
+# Normal cross-book jitter is half a point; only lines at least this far off the median drop.
+_DIVERGENCE_ABS_FLOOR = 2.0
+# High lines jitter proportionally, so the tolerance also scales with the median.
+_DIVERGENCE_REL_FACTOR = 0.25
+# Ceiling on one DFS platform's normalized consensus weight while a sportsbook remains.
+_DFS_BOOK_WEIGHT_CAP = 0.25
 
 _DEFAULT_DB_PATH = Path("archive/archive.duckdb")
 
@@ -146,29 +162,75 @@ def _safe_date(d: str | datetime.date | None) -> datetime.date | None:
         return None
 
 
-def _dfs_under_boost(over, boost_under):
-    return boost_under if boost_under and boost_under > 0 else over
+def _consensus_line(values: list[float]) -> float:
+    """Median of observed lines floored to the half-point; ``0.0`` when nothing usable."""
+    if not values:
+        return 0.0
+    line = np.floor(2 * np.median(values)) / 2
+    return 0.0 if np.isnan(line) else float(line)
+
+
+def _dfs_offer_probs(offer: dict, platform: str) -> list[float]:
+    """Payout-implied ``[p_over, p_under]`` for one DFS offer.
+
+    ``Boost_Over``/``Boost_Under`` are full decimal payouts on Sleeper but
+    modifiers on the standard slot payout on Underdog, so Underdog converts
+    through ``UNDERDOG_BOOST_BASELINE`` before the devig. An offer with no
+    positive side multiplier (rivals carry a single both-ways ``Boost``)
+    prices as a symmetric standard pick; a genuinely one-sided offer keeps
+    its missing side missing — fabricating the symmetric twin let moved
+    lines archive as fair 50/50 quotes.
+    """
+    over = offer.get("Boost_Over", 0)
+    under = offer.get("Boost_Under", 0)
+    if not (over > 0 or under > 0):
+        over = under = offer.get("Boost", 1)
+    if platform == "Underdog":
+        over, under = over * UNDERDOG_BOOST_BASELINE, under * UNDERDOG_BOOST_BASELINE
+    return dfs_boost_probs(over, under)
+
+
+def _drop_divergent_lines(
+    rows: list[tuple[str, float | None, float | None]],
+) -> list[tuple[str, float | None, float | None]]:
+    """Drop rows whose line sits far off the cohort median line.
+
+    A row that far from the pack is quoting a different offer (a DFS platform's
+    moved/discounted tier). The median only means anything with at least
+    ``_DIVERGENCE_MIN_BOOKS`` lined rows — below that the filter is inert — and
+    NULL-line rows (team markets, pre-migration history) are never dropped.
+    """
+    lined = [float(row[2]) for row in rows if row[2] is not None and np.isfinite(row[2])]
+    if len(lined) < _DIVERGENCE_MIN_BOOKS:
+        return rows
+    median_line = float(np.median(lined))
+    allowed = max(_DIVERGENCE_ABS_FLOOR, _DIVERGENCE_REL_FACTOR * median_line)
+    return [
+        row
+        for row in rows
+        if row[2] is None or not np.isfinite(row[2]) or abs(float(row[2]) - median_line) <= allowed
+    ]
 
 
 def _dedup_offers_by_boost(offers) -> list[dict]:
     """Normalize ``offers`` to records, one per ``(Player, Market)``.
 
-    Accepts a single dict or a list. Duplicates are resolved in favor of the
-    offer whose ``Boost_Over`` is closest to a neutral 1.0 (filling ``Boost_Over``
-    from ``Boost`` when absent). Empty list when no offers survive.
+    Accepts a single dict or a list. Duplicate tiers resolve in favor of the
+    offer whose ``Boost_Over`` (``Boost`` when absent) sits closest to a
+    neutral 1.0; a boost tie keeps the higher line. Empty list when no offers
+    survive.
     """
     if not isinstance(offers, list):
         offers = [offers]
     df = pd.DataFrame(offers)
     if df.empty:
         return []
-    if "Boost_Over" not in df.columns:
-        df["Boost_Over"] = np.nan
+    boost = df["Boost_Over"] if "Boost_Over" in df.columns else pd.Series(np.nan, index=df.index)
     if "Boost" in df.columns:
-        df.loc[df["Boost_Over"].isna(), "Boost_Over"] = df.loc[df["Boost_Over"].isna(), "Boost"]
-    df["Boost Factor"] = np.abs(df["Boost_Over"] - 1)
-    df = df.loc[~df.sort_values("Boost Factor").duplicated(["Player", "Market"])]
-    return df.to_dict(orient="records")
+        boost = boost.fillna(df["Boost"])
+    df["Boost Factor"] = np.abs(boost - 1)
+    ranked = df.sort_values(["Boost Factor", "Line"], ascending=[True, False])
+    return df.loc[~ranked.duplicated(["Player", "Market"])].to_dict(orient="records")
 
 
 def _resolve_market(league: str, raw_market: str, key: dict) -> str:
@@ -375,18 +437,35 @@ class Archive:
                 self._connection.execute(f"ALTER TABLE odds ADD COLUMN {col} DOUBLE")
         self._connection.commit()
 
-    def _weighted_book_ev(self, league: str, market: str, rows: list[tuple[str, float]]) -> float:
-        weights = book_weights.get(league, {}).get(market, {})
-        evs = []
-        ws = []
-        for book, ev in rows:
-            if ev is None:
-                continue
-            evs.append(ev)
-            ws.append(weights.get(book, 1))
-        if not evs:
+    def _weighted_book_ev(
+        self, league: str, market: str, rows: list[tuple[str, float | None, float | None]]
+    ) -> float:
+        """Weighted consensus over latest per-book rows, guarded against DFS poisoning.
+
+        Rows quoting a line far from the cohort median are a different offer
+        (a DFS platform's moved/discounted tier) and drop out; NULL-line rows
+        (team markets, pre-migration history) never do. Each DFS platform still
+        present is then capped at ``_DFS_BOOK_WEIGHT_CAP`` of the normalized
+        weight while at least one sportsbook remains, so a lone pick'em quote
+        cannot dominate the consensus.
+        """
+        usable = _drop_divergent_lines([row for row in rows if row[1] is not None])
+        if not usable:
             return float("nan")
-        return float(np.average(evs, weights=ws))
+
+        weights = book_weights.get(league, {}).get(market, {})
+        values = np.array([row[1] for row in usable], dtype=float)
+        ws = np.array([weights.get(row[0], 1) for row in usable], dtype=float)
+        is_dfs = np.array([row[0] in DFS_PLATFORM_BOOKS for row in usable])
+        if is_dfs.any() and not is_dfs.all():
+            norm = ws / ws.sum()
+            capped = np.minimum(norm[is_dfs], _DFS_BOOK_WEIGHT_CAP)
+            # One renormalization: the freed mass goes to the sportsbooks, keeping
+            # each DFS book's effective weight at or under the cap.
+            norm[~is_dfs] *= (1.0 - capped.sum()) / norm[~is_dfs].sum()
+            norm[is_dfs] = capped
+            ws = norm
+        return float(np.average(values, weights=ws))
 
     def _book_rows(
         self,
@@ -398,11 +477,13 @@ class Archive:
         at: datetime.datetime | None = None,
         case_insensitive_entity: bool = False,
         value_col: str = "ev",
-    ) -> list[tuple[str, float]]:
-        """Return ``[(book, value), ...]`` — latest ``value_col`` observation per book at-or-before ``at``.
+    ) -> list[tuple[str, float, float | None]]:
+        """Return ``[(book, value, line), ...]`` — latest ``value_col`` observation per book at-or-before ``at``.
 
         ``value_col`` selects the per-book column to read: ``"ev"`` (the consensus mean) or the
-        shape-free ``"under_prob"`` (backs :meth:`get_composite_under_prob`).
+        shape-free ``"under_prob"`` (backs :meth:`get_composite_under_prob`). ``line`` is the
+        same physical row's quoted line (NULL for team markets and pre-migration history),
+        carried so the consensus reducer can drop divergent-line quotes.
 
         ``at=None`` means "latest available", i.e. as-of-now.
 
@@ -426,8 +507,8 @@ class Archive:
                 f"value_col must be one of {sorted(_BOOK_VALUE_COLS)}, got {value_col!r}"
             )
         sql = (
-            f"SELECT book, {value_col} FROM ("
-            f"  SELECT book, {value_col}, observed_at, "
+            f"SELECT book, {value_col}, line FROM ("
+            f"  SELECT book, {value_col}, line, observed_at, "
             "         ROW_NUMBER() OVER (PARTITION BY book ORDER BY observed_at DESC) AS rn "
             "  FROM odds "
             f"  WHERE league=? AND market=? AND game_date=? AND {entity_clause}"
@@ -439,7 +520,10 @@ class Archive:
         # otherwise undefined, and changing the book iteration order can move a
         # floating-point weighted mean by a few ULPs across independent rebuilds.
         sql += ") WHERE rn = 1 ORDER BY book"
-        return [(book, val) for book, val in self._connection.execute(sql, params).fetchall()]
+        return [
+            (book, val, line)
+            for book, val, line in self._connection.execute(sql, params).fetchall()
+        ]
 
     def get_training_book_quotes(
         self,
@@ -524,9 +608,7 @@ class Archive:
         inputs = {}
         for entity in ordered_entities:
             values, seen_at = observed_lines.get(entity, ([], None))
-            legacy_line = float(np.floor(2 * np.median(values)) / 2) if values else 0.0
-            if np.isnan(legacy_line):
-                legacy_line = 0.0
+            legacy_line = _consensus_line(values)
             rows = grouped[entity] or pickem_quote(market, legacy_line, seen_at)
             inputs[entity] = (rows, legacy_line)
         return inputs
@@ -574,8 +656,8 @@ class Archive:
 
         odds_params: list = [league, market, d, *ordered_entities]
         odds_sql = (
-            "SELECT entity, book, ev FROM ("
-            "  SELECT entity, book, ev, observed_at, "
+            "SELECT entity, book, ev, line FROM ("
+            "  SELECT entity, book, ev, line, observed_at, "
             "         ROW_NUMBER() OVER ("
             "             PARTITION BY entity, book ORDER BY observed_at DESC"
             "         ) AS rn "
@@ -586,9 +668,11 @@ class Archive:
             odds_sql += " AND observed_at <= ?"
             odds_params.append(at)
         odds_sql += ") WHERE rn = 1 ORDER BY entity, book"
-        ev_rows: dict[str, list[tuple[str, float]]] = {entity: [] for entity in ordered_entities}
-        for entity, book, ev in self._connection.execute(odds_sql, odds_params).fetchall():
-            ev_rows[entity].append((book, ev))
+        ev_rows: dict[str, list[tuple[str, float, float | None]]] = {
+            entity: [] for entity in ordered_entities
+        }
+        for entity, book, ev, line in self._connection.execute(odds_sql, odds_params).fetchall():
+            ev_rows[entity].append((book, ev, line))
 
         line_params: list = [league, market, d, *ordered_entities]
         line_sql = (
@@ -607,11 +691,7 @@ class Archive:
         for entity in ordered_entities:
             rows = ev_rows[entity]
             ev = self._weighted_book_ev(league, market, rows) if rows else float("nan")
-            values = line_values[entity]
-            line = float(np.floor(2 * np.median(values)) / 2) if values else 0.0
-            if np.isnan(line):
-                line = 0.0
-            inputs[entity] = (ev, line)
+            inputs[entity] = (ev, _consensus_line(line_values[entity]))
         return inputs
 
     def get_ev(self, league, market, date, player, *, at: datetime.datetime | None = None):
@@ -716,8 +796,8 @@ class Archive:
         """
         params: list = [league, market]
         sql = (
-            "SELECT game_date, entity, book, ev FROM ("
-            "  SELECT game_date, entity, book, ev, observed_at, "
+            "SELECT game_date, entity, book, ev, line FROM ("
+            "  SELECT game_date, entity, book, ev, line, observed_at, "
             "         ROW_NUMBER() OVER ("
             "             PARTITION BY game_date, entity, book "
             "             ORDER BY observed_at DESC"
@@ -737,10 +817,10 @@ class Archive:
             params.append(at)
         sql += ") WHERE rn = 1"
 
-        grouped: dict[tuple[str, str], list[tuple[str, float]]] = {}
-        for game_date, entity, book, ev in self._connection.execute(sql, params).fetchall():
+        grouped: dict[tuple[str, str], list[tuple[str, float, float | None]]] = {}
+        for game_date, entity, book, ev, line in self._connection.execute(sql, params).fetchall():
             key = (game_date.isoformat(), entity.upper())
-            grouped.setdefault(key, []).append((book, ev))
+            grouped.setdefault(key, []).append((book, ev, line))
         return {key: self._weighted_book_ev(league, market, rows) for key, rows in grouped.items()}
 
     def get_line(self, league, market, date, player, *, at: datetime.datetime | None = None):
@@ -1130,15 +1210,20 @@ class Archive:
             self._stage_ladder(league, market, d, entity, book, line, p_over, observed_at)
 
     def add_dfs(self, offers, platform, key):
-        """Add a batch of scraped offers to the archive for one ``platform``.
+        """Add a batch of scraped DFS offers to the archive for one ``platform``.
 
-        ``offers`` is accepted as a list or single dict; duplicates per
-        ``(Player, Market)`` are resolved in favor of the offer closest to
-        a neutral 1.0 boost. The ``key`` mapping renames sportsbook-native
+        ``offers`` is accepted as a list or single dict. Every tier's
+        ``(line, p_over)`` is appended to the ladder table; per
+        ``(Player, Market)`` the tier whose boost sits closest to a neutral
+        1.0 (higher line on a tie) additionally becomes the platform's odds
+        and lines rows, storing its payout-implied under-probability beside
+        the encoded ``ev``. The ``key`` mapping renames sportsbook-native
         market strings into the canonical per-league market names used
         elsewhere in the pipeline.
         """
-        offers = _dedup_offers_by_boost(offers)
+        if not isinstance(offers, list):
+            offers = [offers]
+        kept = {(o["Player"], o["Market"], o["Line"]) for o in _dedup_offers_by_boost(offers)}
 
         for o in offers:
             if not o["Line"]:
@@ -1149,19 +1234,20 @@ class Archive:
 
             league = o["League"]
             market = _resolve_market(league, o["Market"], key)
+            line = float(o["Line"])
+            p_over, p_under = _dfs_offer_probs(o, platform)
+            self.add_ladder(league, market, d, o["Player"], platform, [(line, p_over)])
+
+            tier = (o["Player"], o["Market"], o["Line"])
+            if tier not in kept:
+                continue
+            kept.discard(tier)
 
             cv = stat_cv.get(league, {}).get(market, 1)
             dist = stat_dist.get(league, {}).get(market, "Gamma")
             gate = book_gate(league, market, dist)
-
             player = remove_accents(o["Player"])
-            line = float(o["Line"])
-
-            over = o.get("Boost_Over", 0) if o.get("Boost_Over", 0) > 0 else o.get("Boost", 1)
-            # A missing/zero under side fabricated a ~6.5%-vig under in no_vig_odds
-            # that inverts to a blown count-cell ev; DFS picks are symmetric instead.
-            odds = no_vig_odds(over, _dfs_under_boost(over, o.get("Boost_Under")))
-            ev = get_ev(line, odds[1], cv, dist=dist, gate=gate)
+            ev = get_ev(line, p_under, cv, dist=dist, gate=gate)
 
             # Same rule the sportsbook writer follows: get_ev returns its ceiling when no
             # mean reproduces the price, and a bound is not a mean. It binds constantly here
@@ -1180,7 +1266,7 @@ class Archive:
                 player,
                 platform,
                 None if clamped else ev,
-                under_prob=odds[1],
+                under_prob=p_under,
                 line=line,
             )
             self._stage_line(league, market, d, player, line)

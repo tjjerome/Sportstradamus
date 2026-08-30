@@ -147,6 +147,41 @@ def no_vig_odds(over, under=None, method="proportional"):
     return [o / juice, u / juice]
 
 
+# Per-pick fair payout for an unboosted Underdog Power pick: power[4] ** (1/4)
+# = 10 ** 0.25 ≈ 1.778. Used by model_prob to convert the raw promo multiplier
+# from the Underdog API into a payout-inclusive value so ``Model = P * Boost``
+# yields true per-$1 expected return; consumers that want the raw modifier
+# (dashboard display, ``nightly.py`` profit-sim, parlay-search arithmetic in
+# ``correlation.py``) divide it back out.
+UNDERDOG_BOOST_BASELINE: float = 1.78
+
+# An unboosted symmetric DFS pick pays the same either way, so it prices even.
+DFS_FAIR_PICK_PROB = 0.5
+
+
+def dfs_boost_probs(odds_over, odds_under):
+    """Payout-implied ``[p_over, p_under]`` from full decimal DFS payout odds.
+
+    A two-sided offer devigs proportionally, so a symmetric pair prices at
+    exactly ``DFS_FAIR_PICK_PROB`` per side and standard picks are unchanged.
+    A one-sided offer — the missing side passed as 0 or NaN — is the
+    platform's own claim on a moved or discounted line: the offered side
+    stores its raw breakeven ``1/odds`` with no hold shave and the other side
+    its complement, never a fabricated fair 50/50. Neither side offered
+    prices even.
+    """
+    imp_over = 1.0 / odds_over if odds_over > 0 else None
+    imp_under = 1.0 / odds_under if odds_under > 0 else None
+    if imp_over is not None and imp_under is not None:
+        juice = imp_over + imp_under
+        return [imp_over / juice, imp_under / juice]
+    if imp_over is not None:
+        return [imp_over, 1.0 - imp_over]
+    if imp_under is not None:
+        return [1.0 - imp_under, imp_under]
+    return [DFS_FAIR_PICK_PROB, DFS_FAIR_PICK_PROB]
+
+
 # Cap the SkewNormal implied mean at this multiple of the line — the archive's
 # own blown-row threshold (``BLOWN_LINE_FACTOR``). Below the corresponding
 # under-prob the inversion would exceed it, so the line is used instead.

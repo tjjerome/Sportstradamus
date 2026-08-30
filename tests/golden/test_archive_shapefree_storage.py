@@ -94,7 +94,7 @@ def test_latest_book_rows_have_stable_book_order(archive):
 
     rows = archive._book_rows("WNBA", "AST", "2026-05-08", "P")
 
-    assert rows == [("alpha", 1.8), ("middle", 2.0), ("zeta", 2.2)]
+    assert rows == [("alpha", 1.8, None), ("middle", 2.0, None), ("zeta", 2.2, None)]
 
 
 def test_training_book_quotes_keep_latest_row_fields_coherent(archive):
@@ -244,6 +244,73 @@ def test_add_dfs_write_round_trips(archive, league, market):
     ).fetchone()
     assert under is not None and line == 3.5
     assert get_ev(line, under, cv, dist=dist, gate=gate) == pytest.approx(ev, abs=1e-6)
+
+
+def test_one_sided_discounted_offer_stores_payout_implied_under(archive):
+    """The 2026-08 Sleeper WNBA poisoning: a one-sided discounted offer (only an
+    over at decimal payout 1.35 on a moved 24.5 line) is the platform's own
+    claim and must store its payout-implied under-probability — never the
+    fabricated fair 50/50 that let the moved line read as market truth."""
+    offer = {
+        "League": "WNBA",
+        "Market": "PRA",
+        "Player": "Angel Reese",
+        "Date": "2026-08-28",
+        "Line": 24.5,
+        "Boost_Over": 1.35,
+        "Boost_Under": 0.0,
+    }
+    archive.add_dfs([offer], "Sleeper", {})
+    archive.write()
+
+    under, line = archive._connection.execute(
+        "SELECT under_prob, line FROM odds WHERE entity='Angel Reese'"
+    ).fetchone()
+    assert line == 24.5
+    assert under == pytest.approx(1 - 1 / 1.35)  # ~0.259, NOT 0.5
+
+    ladder = archive._connection.execute(
+        "SELECT line, p_over FROM ladder WHERE entity='Angel Reese'"
+    ).fetchall()
+    assert ladder == [(24.5, pytest.approx(1 / 1.35))]
+
+
+def test_multi_tier_ingest_keeps_one_odds_row_and_ladders_every_tier(archive):
+    """Two-plus lines for one (Player, Market): exactly one odds row — the tier
+    whose boost sits nearest a neutral 1.0, higher line winning the tie — while
+    every tier's (line, p_over) lands in the ladder table."""
+    base = {
+        "League": "WNBA",
+        "Market": "PRA",
+        "Player": "Tier Player",
+        "Date": "2026-08-28",
+    }
+    offers = [
+        {**base, "Line": 24.5, "Boost_Over": 1.35, "Boost_Under": 0.0},
+        {**base, "Line": 20.5, "Boost_Over": 1.06, "Boost_Under": 1.06},
+        {**base, "Line": 22.5, "Boost_Over": 1.06, "Boost_Under": 1.06},
+    ]
+    archive.add_dfs(offers, "Sleeper", {})
+    archive.write()
+
+    odds = archive._connection.execute(
+        "SELECT line, under_prob FROM odds WHERE entity='Tier Player'"
+    ).fetchall()
+    assert odds == [(22.5, pytest.approx(0.5))]
+
+    lines = archive._connection.execute(
+        "SELECT line FROM lines WHERE entity='Tier Player'"
+    ).fetchall()
+    assert lines == [(22.5,)]
+
+    ladder = archive._connection.execute(
+        "SELECT line, p_over FROM ladder WHERE entity='Tier Player' ORDER BY line"
+    ).fetchall()
+    assert ladder == [
+        (20.5, pytest.approx(0.5)),
+        (22.5, pytest.approx(0.5)),
+        (24.5, pytest.approx(1 / 1.35)),
+    ]
 
 
 def test_merge_player_books_quotes_optional(archive):
