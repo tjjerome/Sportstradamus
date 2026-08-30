@@ -24,6 +24,7 @@ import pandas as pd
 import pytest
 
 from sportstradamus import data
+from sportstradamus.helpers.training_quotes import ArchivedBookQuote
 from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
 from sportstradamus.stats import StatsNBA
 from sportstradamus.training import posthoc
@@ -49,11 +50,11 @@ _BOOK_EV = 6.0
 class _StubArchive:
     default_totals = {_LEAGUE: 220.0}
 
-    def get_ev(self, league, market, date, player):
-        return _BOOK_EV
-
-    def get_line(self, league, market, date, player):
-        return 5.5
+    def get_training_quote_inputs(self, league, market, date, entities):
+        row = ArchivedBookQuote(
+            book="fanduel", ev=_BOOK_EV, under_probability=0.55, line=5.5, observed_at=None
+        )
+        return {entity: ([row], 5.5) for entity in entities}
 
 
 class _StubStats:

@@ -346,8 +346,14 @@ def _book_over_prob(
     Inverts the composite book EV through the cell distribution at each row's line. Shared by
     :func:`model_prob` and :func:`book_fallback_prob`. For SkewNormal the book ``(sigma, skew)``
     comes from the per-cell fitted shape evaluated at the book mean (:func:`book_skewnormal_shape`);
-    an unfitted cell returns ``(mean*cv, 0)``, the legacy symmetric constant-CV read.
+    an unfitted cell returns ``(mean*cv, 0)``, the legacy symmetric constant-CV read. A NaN
+    ``Market Projection`` (no independent quote) stays NaN so ``_finalize_records`` prices the
+    row payout-implied.
     """
+    quoted = offer_df.loc[offer_df["Market Projection"].notna()]
+    if quoted.empty:
+        return pd.Series(np.nan, index=offer_df.index)
+    offer_df = quoted
     if dist == "SkewNormal":
         # The archive encodes SkewNormal sportsbook EVs without the model's
         # external hurdle. Keep the book endpoint gate-free on decode too.
@@ -720,48 +726,34 @@ def _resolve_serving_strategy(filedict: dict, league: str, market: str) -> Artif
 
 
 def _book_evs_for_players(
-    playerStats: pd.DataFrame,
     offer_df: pd.DataFrame,
+    league: str,
     market: str,
     dist: str,
     cv: float,
     hist_gate: float,
-    dateMap: dict,
+    date_map: dict,
     stat_data,
-    platform: str,
+    players: pd.Index,
 ) -> list:
-    # Raw offer boosts are platform-native multipliers — Underdog's are relative to its
-    # fair-pick baseline — so scale to full decimal odds before the payout devig, the
-    # same conversion _finalize_records applies to the export columns. Two-sided pairs
-    # devig proportionally, where the scale cancels.
-    boost_scale = {"Underdog": UNDERDOG_BOOST_BASELINE}.get(platform, 1.0)
-    evs = []
-    for player in playerStats.index:
-        date = dateMap.get(player, "")
-        ev = archive.get_ev(stat_data.league, market, date, player)
-        line = archive.get_line(stat_data.league, market, date, player)
-        if np.isnan(ev):
-            ev = stat_data.check_combo_markets(market, player, date)
-        if line <= 0:
-            line = np.max([playerStats.loc[player, "Avg10"], 0.5])
-        missing_ev = np.isnan(ev) or ev <= 0
-        if missing_ev and player in offer_df.index:
-            o = offer_df.loc[player]
-            if isinstance(o, pd.DataFrame):
-                o = o.iloc[0]
-            o = o.to_dict()
-            under = dfs_boost_probs(
-                boost_scale * o.get("Boost_Over", 0), boost_scale * o.get("Boost_Under", 0)
-            )[1]
-            ev = get_ev(
-                line,
-                under,
-                stat_cv[stat_data.league].get(market, 1),
-                dist=dist,
-                gate=(None if dist == "SkewNormal" else hist_gate or None),
-            )
-        evs.append(ev)
-    return evs
+    """Modal-cohort book means for the model path's book leg; NaN without support.
+
+    Resolves the same admission-gated quotes as the fallback path and inverts each
+    at its own cohort line, replacing the old cross-line average of stored per-row
+    means (a DFS platform's boundary-line self-quote inverted under a too-narrow
+    fitted shape once implied a 2.5-K mean for a 1.1-K batter). A player whose only
+    support is the platform's own quote gets NaN: the blend then runs model-only
+    and ``_finalize_records`` prices ``Market Prob`` payout-implied, applying the
+    unquoted-disagreement drop.
+    """
+    quotes = _servable_fallback_quotes(offer_df, league, market, date_map, stat_data, dist, cv)
+    gate = None if dist == "SkewNormal" else hist_gate or None
+    return [
+        _quote_pricing_params(quotes[p], league, market, dist, cv, gate=gate)[0]
+        if p in quotes
+        else np.nan
+        for p in players
+    ]
 
 
 def _decode_model_params(
@@ -1521,7 +1513,7 @@ def model_prob(
         playerStats["Defense position"] = playerStats["Defense avg"]
 
     evs = _book_evs_for_players(
-        playerStats, offer_df, market, dist, cv, hist_gate, dateMap, stat_data, platform
+        offer_df, league, market, dist, cv, hist_gate, dateMap, stat_data, playerStats.index
     )
     playerStats["Market Projection"] = evs
     playerStats["Books STD"] = cv * np.array(evs)
@@ -1664,17 +1656,19 @@ def _servable_fallback_quotes(
 
 
 def _quote_pricing_params(
-    quote: TrainingQuote, league: str, market: str, dist: str, cv: float
+    quote: TrainingQuote, league: str, market: str, dist: str, cv: float, gate: float | None = None
 ) -> tuple[float, float | None, float | None]:
     """Invert the quote at its own line under the exact shape the decode will use.
 
     Returns ``(mean, sigma, skew)``. Fixing ``(sigma, skew)`` across the invert/decode
     pair makes ``decode(invert(p)) == p`` at the quote line — the shape-consistent
     round trip that kills the symmetric-encode/skewed-decode asymmetry (an honest
-    50/50 no longer decodes to 0.57 under). The pair is ungated on both sides: books
-    only price players likely to record the stat, so the population zero rate can
-    exceed the quoted under-prob and a gated inversion would clamp at ``get_ev``'s
-    ceiling (see ``_authentic_quote``).
+    50/50 no longer decodes to 0.57 under). On the fallback path the pair is ungated
+    on both sides: books only price players likely to record the stat, so the
+    population zero rate can exceed the quoted under-prob and a gated inversion
+    would clamp at ``get_ev``'s ceiling (see ``_authentic_quote``). The model path
+    passes the cell gate on count families instead — its decode is gated and its
+    blend expects the non-zero component mean.
     """
     under = 1.0 - quote.over_probability
     if dist == "SkewNormal":
@@ -1682,7 +1676,7 @@ def _quote_pricing_params(
         sigma, skew = float(sigma), float(skew)
     else:
         sigma = skew = None
-    mean = float(get_ev(quote.line, under, cv, dist=dist, sigma=sigma, skew_alpha=skew))
+    mean = float(get_ev(quote.line, under, cv, dist=dist, sigma=sigma, skew_alpha=skew, gate=gate))
     return mean, sigma, skew
 
 

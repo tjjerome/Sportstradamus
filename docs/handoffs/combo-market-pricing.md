@@ -48,10 +48,14 @@ derived market. Three consumers:
    stop-serve commit: training matrices for fantasy cells still consume the
    mean quote until Lane A replaces it — a known, temporary train/serve
    divergence on this one branch.
-2. **Model-path Market EV** — `prediction/model_prob.py:744`
-   (`_book_evs_for_players`): when the archive has no direct quote, the combo
-   mean is the "book consensus" fed into the model↔book blend and the exported
-   `Market EV`/`Market Prob`.
+2. **Model-path Market EV** — `prediction/model_prob.py`
+   (`_book_evs_for_players`): rebuilt 2026-08-30 on the same modal-cohort
+   admission as the fallback path. A player with no real-book cohort (and no
+   `combo_props` consensus) gets a NaN book leg: the blend runs model-only and
+   `_finalize_records` prices `Market Prob` payout-implied with the 0.15
+   disagreement drop. Fantasy combo means no longer reach the model path's
+   market side — a served fantasy model's only market reference is the
+   platform's own payout until Lane A prices the sum.
 3. **Fallback serving** — `prediction/model_prob.py` `_servable_fallback_quotes`
    second pass (now `combo_props`-gated, see above).
 

@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from sportstradamus.helpers import get_odds
 from sportstradamus.helpers.archive import Archive
 from sportstradamus.helpers.distributions import (
     UNDERDOG_BOOST_BASELINE,
@@ -267,45 +268,50 @@ def test_unquoted_rows_price_payout_implied_and_phantoms_drop(monkeypatch):
     assert by_player["Quoted Twin"]["Market Prob"] == pytest.approx(0.62)
 
 
-class _NoPriceArchive:
-    def get_ev(self, league, market, date, player):
-        return float("nan")
-
-    def get_line(self, league, market, date, player):
-        return 21.5
-
-
-def _captured_under(monkeypatch, platform, boost_over, boost_under):
-    monkeypatch.setattr(mp, "archive", _NoPriceArchive())
-    captured = {}
-
-    def fake_get_ev(line, under, cv, dist=None, gate=None):
-        captured["under"] = under
-        return 20.0
-
-    monkeypatch.setattr(mp, "get_ev", fake_get_ev)
-    playerStats = pd.DataFrame({"Avg10": [20.0]}, index=["Test Player"])
-    offer_df = pd.DataFrame(
-        {"Boost_Over": [boost_over], "Boost_Under": [boost_under]}, index=["Test Player"]
+def _model_book_leg(offer_df):
+    return mp._book_evs_for_players(
+        offer_df,
+        _LEAGUE,
+        _MARKET,
+        "NegBin",
+        0.5,
+        0.0,
+        dict.fromkeys(offer_df.index, _DATE),
+        _StubStats(),
+        offer_df.index,
     )
-    evs = mp._book_evs_for_players(
-        playerStats, offer_df, "PTS", "NegBin", 0.5, 0.0, {}, _StubStats(), platform
-    )
-    assert evs == [20.0]
-    return captured["under"]
 
 
-def test_book_evs_boost_devig_two_sided_preserves_legacy_mapping(monkeypatch):
-    """dfs_boost_probs()[1] is the under side — identical to _odds_from_boost()[0]."""
-    under = _captured_under(monkeypatch, "Sleeper", 2.0, 1.6)
-    legacy_under = (1 / 1.6) / (1 / 1.6 + 1 / 2.0)
-    assert under == pytest.approx(legacy_under)
-    assert under == pytest.approx(dfs_boost_probs(2.0, 1.6)[1])
+def test_model_book_leg_dfs_only_is_nan(archive, monkeypatch):
+    """The model path's book leg refuses a DFS platform's self-quote.
+
+    The NaN mean makes the blend run model-only and sends the row to
+    ``_finalize_records``' payout-implied pricing plus the disagreement drop —
+    never a cross-line inversion of the platform's own price (the Baez 2.47-mean
+    phantom).
+    """
+    _patch_cell(monkeypatch, "NegBin", 0.5)
+    _insert_odds(archive, "Star Guard", "Underdog", 0.675, 1.5, ev=1.17)
+
+    offer_df = pd.DataFrame([_offer("Star Guard", 1.5)])
+    offer_df.index = offer_df.Player
+    evs = _model_book_leg(offer_df)
+
+    assert len(evs) == 1 and np.isnan(evs[0])
 
 
-def test_book_evs_underdog_boosts_scale_to_decimal(monkeypatch):
-    """One-sided Underdog boosts devig at the full decimal breakeven, not the raw
-    multiplier (raw 1.55 -> decimal 2.759 -> p_under = 1 - 1/2.759)."""
-    under = _captured_under(monkeypatch, "Underdog", 1.55, 0.0)
-    assert under == pytest.approx(dfs_boost_probs(1.55 * UNDERDOG_BOOST_BASELINE, 0)[1])
-    assert under == pytest.approx(1 - 1 / (1.55 * UNDERDOG_BOOST_BASELINE))
+def test_model_book_leg_prices_modal_cohort(archive, monkeypatch):
+    """A real-book cohort inverts to one mean that reproduces the cohort prob.
+
+    Replaces the cross-line average of stored per-row means: the discounted
+    Sleeper 24.5 row cannot drag the 33.5 consensus."""
+    _patch_cell(monkeypatch, "NegBin", 0.5)
+    _insert_odds(archive, "Star Guard", "Sleeper", 0.5, 24.5)
+    _insert_odds(archive, "Star Guard", "fanduel", 0.60, 33.5)
+    _insert_odds(archive, "Star Guard", "draftkings", 0.70, 33.5)
+
+    offer_df = pd.DataFrame([_offer("Star Guard", 33.5)])
+    offer_df.index = offer_df.Player
+    evs = _model_book_leg(offer_df)
+
+    assert get_odds(33.5, evs[0], "NegBin", cv=0.5) == pytest.approx(0.65, abs=1e-6)
