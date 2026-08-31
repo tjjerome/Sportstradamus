@@ -58,6 +58,10 @@ NHL_SKATER_UNDERDOG_WEIGHTS = (
     ("powerPlayPoints", 0.5),
 )
 NHL_SKATER_PRIZEPICKS_WEIGHTS = (("goals", 8), ("assists", 5), ("shots", 1.5), ("blocked", 1.5))
+# `hits` is a pick'em-only market: 3200 archived player-gamedays, none of them
+# from a sportsbook. It is the sole component of the underdog skater spec that
+# no book prices, so without a fallback that spec never quotes at all.
+NHL_ASSUMABLE_SKATER_COMPONENTS = frozenset({"hits"})
 # The research brief's 0.6*shotsAgainst - 3.6*goalsAgainst re-parameterization is
 # unusable here: shotsAgainst has zero book quotes in the archive (model-side volume
 # stat), so the goalie spec stays on the quoted pair; the same-player corr matrix
@@ -832,7 +836,10 @@ class StatsNHL(Stats):
 
     def _fantasy_combo_spec(self, market, player):
         if market == "skater fantasy points underdog":
-            return ComboSpec(marginals=NHL_SKATER_UNDERDOG_WEIGHTS)
+            return ComboSpec(
+                marginals=NHL_SKATER_UNDERDOG_WEIGHTS,
+                assumable=NHL_ASSUMABLE_SKATER_COMPONENTS,
+            )
         if market == "fantasy points prizepicks":
             return ComboSpec(marginals=NHL_SKATER_PRIZEPICKS_WEIGHTS)
         if market == "goalie fantasy points underdog":

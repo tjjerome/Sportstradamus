@@ -429,6 +429,7 @@ class ComboSpec:
     marginals: tuple[tuple[str, float], ...]  # book-quoted components: (submarket, weight)
     sampled: tuple[str, ...] = ()  # book-quoted, weight-0 (post-visible only)
     bernoulli: tuple[tuple[str, float], ...] = ()  # (name, weight); p via _combo_bernoulli_p
+    assumable: frozenset[str] = frozenset()  # marginals allowed to fall back to a trailing rate
     post_builder: Callable | None = None  # (stats_obj, player, date) -> post fn | None
     analytics: tuple[str, ...] = ()  # provenance labels (e.g. "hit_shares", "win_map", "hbp")
 
@@ -2440,6 +2441,35 @@ class Stats:
         """Hook: success probability for a named Bernoulli combo component."""
         raise NotImplementedError(f"{type(self).__name__} has no Bernoulli component {name!r}")
 
+    def _assumed_component(self, market: str, weight: float, player: str) -> ComboComponent | None:
+        """An unquoted component carried as the player's own trailing rate.
+
+        Rare stats (MLB ``stolen bases``) are priced on a minority of the board,
+        and under all-or-nothing admission one missing quote rejects the whole
+        player. The substitute is the player's trailing *frequency*, not a point
+        mass at its mean: a scaled Bernoulli whose ``p`` is the share of trailing
+        games recording the stat and whose weight is rescaled by ``rate / p``, so
+        ``E[term] == weight * rate`` exactly while the term keeps a real spread.
+
+        Measured on MLB hitter fantasy over the 1345 player-gamedays where a
+        sportsbook *did* price stolen bases, so every arm is paired against the
+        real quote: PIT KS 0.0670 real / **0.0540** Bernoulli / 0.1115
+        deterministic offset, PIT mean 0.5047 / 0.5066 / 0.4924. The
+        deterministic arm's loss is the lost variance rather than the lost quote,
+        which is why this returns a distribution. Per-row disagreement with the
+        real quote is -0.085 points on a 9.6-point mean, 0.1% of rows moving more
+        than half a point.
+
+        ``None`` when the player never recorded the stat in the trailing window --
+        a zero contribution, which the sum expresses by omitting the component.
+        """
+        games = self.short_gamelog
+        games = games[games[self.log_strings["player"]] == player][market]
+        p = float((games >= 1).mean()) if not games.empty else 0.0
+        if p <= 0:
+            return None
+        return ComboComponent(market, float(weight) * float(games.mean()) / p, p, "Bernoulli", 0.0)
+
     def _book_mean_shift(self, combo, market: str, combo_inputs: dict, player: str) -> float:
         """Half the distance from the component-sum mean to the market's own quoted mean.
 
@@ -2489,7 +2519,9 @@ class Stats:
         sampled component must resolve ``source == "book_direct"`` off at least
         one real sportsbook, and every Bernoulli p must be a finite open-interval
         probability, else the player is omitted entirely — never a mix of real
-        and fabricated components.
+        and fabricated components. A spec may name components as ``assumable``,
+        which the books price too rarely to reject a whole player over: those
+        fall back to ``_assumed_component`` and are named in ``synthetic_reason``.
         A registered ``combo_props`` market prices every player off one simple
         sum; a fantasy market takes its spec per player from
         ``_fantasy_combo_spec``, so NFL's one all-position market can carry a
@@ -2550,7 +2582,7 @@ class Stats:
                 continue
             spec = specs[player]
             slots = list(spec.marginals) + [(sub, 0.0) for sub in spec.sampled]
-            components, component_quotes = [], []
+            components, component_quotes, assumed = [], [], []
             admitted = True
             for sub, weight in slots:
                 sub_dist, sub_cv, sub_weights = sub_cfg[sub]
@@ -2572,8 +2604,14 @@ class Stats:
                 if quote.source != "book_direct" or not any(
                     book not in DFS_PLATFORM_BOOKS for book in quote.books
                 ):
-                    admitted = False
-                    break
+                    if sub not in spec.assumable:
+                        admitted = False
+                        break
+                    stand_in = self._assumed_component(sub, weight, player)
+                    if stand_in is not None:
+                        components.append(stand_in)
+                    assumed.append(sub)
+                    continue
                 mean, sigma, skew, phi = quote_pricing_params(
                     quote, self.league, sub, sub_dist, sub_cv
                 )
@@ -2610,6 +2648,8 @@ class Stats:
             reason = "component_sum"
             if spec.analytics:
                 reason += "+" + ",".join(spec.analytics)
+            if assumed:
+                reason += "+assumed:" + ",".join(assumed)
             if shift:
                 reason += "+book_mean"
             quotes[player] = TrainingQuote(

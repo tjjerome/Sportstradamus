@@ -15,6 +15,7 @@ import pytest
 from sportstradamus.stats import nhl
 from sportstradamus.stats.base import ComboSpec
 from sportstradamus.stats.nhl import (
+    NHL_ASSUMABLE_SKATER_COMPONENTS,
     NHL_GOALIE_UNDERDOG_BERNOULLI,
     NHL_GOALIE_UNDERDOG_WEIGHTS,
     NHL_SKATER_PRIZEPICKS_WEIGHTS,
@@ -29,7 +30,13 @@ def bare_stats():
 
 def test_skater_underdog_spec():
     spec = bare_stats()._fantasy_combo_spec("skater fantasy points underdog", "Any Skater")
-    assert spec == ComboSpec(marginals=NHL_SKATER_UNDERDOG_WEIGHTS)
+    assert spec == ComboSpec(
+        marginals=NHL_SKATER_UNDERDOG_WEIGHTS,
+        assumable=NHL_ASSUMABLE_SKATER_COMPONENTS,
+    )
+    # No sportsbook prices skater hits, so it is the one component allowed to fall
+    # back to the player's trailing rate; the rest must be book-quoted.
+    assert NHL_ASSUMABLE_SKATER_COMPONENTS == frozenset({"hits"})
     assert NHL_SKATER_UNDERDOG_WEIGHTS == (
         ("goals", 6),
         ("assists", 4),

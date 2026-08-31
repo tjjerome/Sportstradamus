@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from sportstradamus.helpers.distributions import get_ev
@@ -70,10 +71,14 @@ class _SpecStats(Stats):
     """Bare Stats subclass exposing a fixed fantasy spec and Bernoulli p table."""
 
     league = _LEAGUE
+    log_strings = {"player": "playerName"}
 
-    def __init__(self, spec, bernoulli_p=None):
+    def __init__(self, spec, bernoulli_p=None, trailing=()):
         self.spec = spec
         self.bernoulli_p = bernoulli_p or {}
+        self.short_gamelog = pd.DataFrame(
+            {"playerName": ["P"] * len(trailing), "subB": list(trailing)}
+        )
 
     def _fantasy_combo_spec(self, market, player):
         return self.spec if market == _FANTASY else None
@@ -144,6 +149,45 @@ def test_non_direct_component_omits_player(combo_env):
     stats = _SpecStats(ComboSpec(marginals=(("subA", 1.0), ("subB", 1.0))))
 
     assert stats.combo_quote(_FANTASY, ["P"], _DATE, _AT, lines={"P": 25.5}) == {}
+
+
+def test_assumable_component_falls_back_to_the_trailing_rate(combo_env):
+    inputs = _direct_inputs()
+    del inputs["subB"]
+    combo_env(inputs)
+    spec = ComboSpec(marginals=(("subA", 1.0), ("subB", 3.0)), assumable=frozenset({"subB"}))
+    # 2 of 5 trailing games recorded the stat, mean 0.6 -> p = 0.4, weight 3 * 0.6 / 0.4.
+    stats = _SpecStats(spec, trailing=[0, 0, 1, 0, 2])
+
+    q = stats.combo_quote(_FANTASY, ["P"], _DATE, _AT, lines={"P": 25.5})["P"]
+
+    assert q.ev == pytest.approx(_MEAN_A + 3.0 * 0.6)
+    assert "assumed:subB" in q.synthetic_reason
+    assert q.sum_sd > 0.0
+
+
+def test_assumable_component_with_no_trailing_occurrences_contributes_nothing(combo_env):
+    inputs = _direct_inputs()
+    del inputs["subB"]
+    combo_env(inputs)
+    spec = ComboSpec(marginals=(("subA", 1.0), ("subB", 3.0)), assumable=frozenset({"subB"}))
+    stats = _SpecStats(spec, trailing=[0, 0, 0])
+
+    q = stats.combo_quote(_FANTASY, ["P"], _DATE, _AT, lines={"P": 25.5})["P"]
+
+    assert q.ev == pytest.approx(_MEAN_A)
+    assert "assumed:subB" in q.synthetic_reason
+
+
+def test_assumable_component_prefers_its_real_quote(combo_env):
+    combo_env(_direct_inputs())
+    spec = ComboSpec(marginals=(("subA", 1.0), ("subB", 3.0)), assumable=frozenset({"subB"}))
+    stats = _SpecStats(spec, trailing=[0, 0, 1, 0, 2])
+
+    q = stats.combo_quote(_FANTASY, ["P"], _DATE, _AT, lines={"P": 25.5})["P"]
+
+    assert q.ev == pytest.approx(_MEAN_A + 3.0 * _MEAN_B)
+    assert "assumed" not in q.synthetic_reason
 
 
 def test_no_positive_line_omits_player(combo_env):

@@ -117,6 +117,14 @@ FANTASY_COMBO_MARKETS = frozenset(
 
 _HIT_TYPES = ("singles", "doubles", "triples", "home runs")
 
+# Sportsbooks price stolen bases on a minority of the hitter board, and under
+# all-or-nothing admission that one gap rejects the whole player: on 45 gamedays
+# only 32.4% of hitter-fantasy rows had every component quoted. It is also the
+# only component whose omission is cheap to model — league rate 0.064 per game,
+# so a player's trailing frequency carries it (see `Stats._assumed_component`,
+# which measures the substitution against the real quote where one exists).
+_ASSUMABLE_HITTER_COMPONENTS = frozenset({"stolen bases"})
+
 # Hit-type fantasy weights per variant — the same numbers as the
 # `_mlb_fantasy_props` tables (pinned by tests/test_combo_spec_mlb.py). The
 # hit types are not priced as marginals: each sampled `hits` draw is split
@@ -1437,6 +1445,7 @@ class StatsMLB(Stats):
             sampled=("hits",),
             post_builder=partial(_build_hit_split_post, market=market),
             analytics=("hit_shares", "hbp"),
+            assumable=_ASSUMABLE_HITTER_COMPONENTS,
         )
 
     def _combo_bernoulli_p(self, name, player, date):

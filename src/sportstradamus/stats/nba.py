@@ -61,6 +61,16 @@ _CTG_TEAM_META_COLS: frozenset[str] = frozenset()
 # because they are distinct book markets with their own correlation cross terms).
 NBA_FANTASY_WEIGHTS = (("PTS", 1), ("REB", 1.2), ("AST", 1.5), ("BLK", 3), ("STL", 3), ("TOV", -1))
 
+# The three components sportsbooks price thinly or not at all, measured over the
+# 2025-26 archive: NBA `TOV` reaches a real book on 15.7% of its rows (325 against
+# PTS's 20712) and WNBA quotes none of the three — `BLK` has no archived row at
+# any book, `STL` and `TOV` only pick'em platforms. Under all-or-nothing admission
+# that one gap denies the whole fantasy board, so they fall back to the player's
+# trailing rate (`Stats._assumed_component`). Shared with WNBA by inheritance: the
+# fallback only fires where no sportsbook priced the component, which on NBA's
+# densely quoted `BLK`/`STL` is the rare row rather than the rule.
+NBA_ASSUMABLE_FANTASY_COMPONENTS = frozenset({"TOV", "BLK", "STL"})
+
 
 class StatsNBA(Stats):
     """NBA player statistics: game log loading, feature engineering, and prediction."""
@@ -1151,7 +1161,10 @@ class StatsNBA(Stats):
 
     def _fantasy_combo_spec(self, market, player):
         if market in ("fantasy points prizepicks", "fantasy points underdog"):
-            return ComboSpec(marginals=NBA_FANTASY_WEIGHTS)
+            return ComboSpec(
+                marginals=NBA_FANTASY_WEIGHTS,
+                assumable=NBA_ASSUMABLE_FANTASY_COMPONENTS,
+            )
         return None
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):
