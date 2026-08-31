@@ -63,12 +63,16 @@ NBA_FANTASY_WEIGHTS = (("PTS", 1), ("REB", 1.2), ("AST", 1.5), ("BLK", 3), ("STL
 
 # The three components sportsbooks price thinly or not at all, measured over the
 # 2025-26 archive: NBA `TOV` reaches a real book on 15.7% of its rows (325 against
-# PTS's 20712) and WNBA quotes none of the three — `BLK` has no archived row at
-# any book, `STL` and `TOV` only pick'em platforms. Under all-or-nothing admission
-# that one gap denies the whole fantasy board, so they fall back to the player's
-# trailing rate (`Stats._assumed_component`). Shared with WNBA by inheritance: the
-# fallback only fires where no sportsbook priced the component, which on NBA's
-# densely quoted `BLK`/`STL` is the rare row rather than the rule.
+# PTS's 20712), `STL` on 18.2% and `BLK` on 40.9%. Under all-or-nothing admission
+# that denies the whole fantasy board, so they fall back to the player's trailing
+# rate (`Stats._assumed_component`) where no sportsbook priced them.
+#
+# `_MAX_ASSUMED_COMPONENT_SHARE` still binds at one of these six per player, so a
+# row needs `TOV` quoted before a second may fall back. WNBA inherits this set and
+# quotes none of the three — no archived `BLK` row at any book, `STL` and `TOV`
+# pick'em only — so WNBA fantasy always exceeds the cap and stays unquotable here.
+# It graded PIT KS 0.0405 against legacy's 0.1489 when the cap was off, which makes
+# it a component-model-blend candidate rather than a book quote.
 NBA_ASSUMABLE_FANTASY_COMPONENTS = frozenset({"TOV", "BLK", "STL"})
 
 

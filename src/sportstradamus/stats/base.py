@@ -434,6 +434,13 @@ class ComboSpec:
     analytics: tuple[str, ...] = ()  # provenance labels (e.g. "hit_shares", "win_map", "hbp")
 
 
+# A sum still counts as a book quote while at most a quarter of its component markets are
+# carried by `Stats._assumed_component` rather than priced. Past that the book information
+# no longer dominates and the result is a model, which belongs to the component-model blend
+# lane and its scorecard, not to this layer's quote ladder.
+_MAX_ASSUMED_COMPONENT_SHARE: float = 0.25
+
+
 def _relocated_under_prob(under_prob: Callable, shift: float, line: float) -> float:
     """The component sum's CDF moved to a new location: ``F_new(x) = F(x - shift)``."""
     return under_prob(line - shift)
@@ -2460,6 +2467,10 @@ class Stats:
         real quote is -0.085 points on a 9.6-point mean, 0.1% of rows moving more
         than half a point.
 
+        A stand-in never displaces a real quote: the books see more than the
+        gamelog does, so this runs only where no sportsbook priced the component,
+        and ``_MAX_ASSUMED_COMPONENT_SHARE`` bounds how much of a spec it may carry.
+
         ``None`` when the player never recorded the stat in the trailing window --
         a zero contribution, which the sum expresses by omitting the component.
         """
@@ -2522,6 +2533,10 @@ class Stats:
         and fabricated components. A spec may name components as ``assumable``,
         which the books price too rarely to reject a whole player over: those
         fall back to ``_assumed_component`` and are named in ``synthetic_reason``.
+        A real quote always wins over the fallback, and no more than
+        ``_MAX_ASSUMED_COMPONENT_SHARE`` of a spec's component markets may be
+        carried that way — past it the player is omitted like any other
+        inadmissible row.
         A registered ``combo_props`` market prices every player off one simple
         sum; a fantasy market takes its spec per player from
         ``_fantasy_combo_spec``, so NFL's one all-position market can carry a
@@ -2630,7 +2645,8 @@ class Stats:
                     components.append(
                         ComboComponent(name, float(weight), float(p), "Bernoulli", 0.0)
                     )
-            if not admitted:
+            n_components = len(spec.marginals) + len(spec.sampled) + len(spec.bernoulli)
+            if not admitted or len(assumed) > _MAX_ASSUMED_COMPONENT_SHARE * n_components:
                 continue
             post = spec.post_builder(self, player, date) if spec.post_builder else None
             combo = combo_sum_quote(components, rho, post=post)

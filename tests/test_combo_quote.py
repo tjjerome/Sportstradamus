@@ -34,13 +34,15 @@ _TS_A = datetime.datetime(2026, 6, 3, 12, 0, 0)
 _TS_B = datetime.datetime(2026, 6, 3, 10, 0, 0)
 _FANTASY = "myfantasy"
 
-_CV = {"subA": 0.3, "subB": 0.5}
-_DIST = {"subA": "Gamma", "subB": "NegBin"}
-_UNDER = {"subA": 0.45, "subB": 0.60}
-_SUBLINE = {"subA": 20.5, "subB": 4.5}
+_CV = {"subA": 0.3, "subB": 0.5, "subX": 0.4, "subY": 0.35}
+_DIST = {"subA": "Gamma", "subB": "NegBin", "subX": "Gamma", "subY": "Gamma"}
+_UNDER = {"subA": 0.45, "subB": 0.60, "subX": 0.50, "subY": 0.55}
+_SUBLINE = {"subA": 20.5, "subB": 4.5, "subX": 8.5, "subY": 6.5}
 
 _MEAN_A = get_ev(_SUBLINE["subA"], _UNDER["subA"], cv=_CV["subA"], dist="Gamma")
 _MEAN_B = get_ev(_SUBLINE["subB"], _UNDER["subB"], cv=_CV["subB"], dist="NegBin")
+_MEAN_X = get_ev(_SUBLINE["subX"], _UNDER["subX"], cv=_CV["subX"], dist="Gamma")
+_MEAN_Y = get_ev(_SUBLINE["subY"], _UNDER["subY"], cv=_CV["subY"], dist="Gamma")
 
 _RECORD_COLUMNS = {
     "Line",
@@ -95,6 +97,8 @@ def _direct_inputs(player="P"):
     return {
         "subA": {player: (_rows("subA", ("fanduel", "draftkings"), _TS_A), _SUBLINE["subA"])},
         "subB": {player: (_rows("subB", ("Underdog", "betmgm"), _TS_B), _SUBLINE["subB"])},
+        "subX": {player: (_rows("subX", ("fanduel", "betmgm"), _TS_A), _SUBLINE["subX"])},
+        "subY": {player: (_rows("subY", ("draftkings",), _TS_A), _SUBLINE["subY"])},
     }
 
 
@@ -151,17 +155,22 @@ def test_non_direct_component_omits_player(combo_env):
     assert stats.combo_quote(_FANTASY, ["P"], _DATE, _AT, lines={"P": 25.5}) == {}
 
 
+# One assumed component of four is exactly the quarter ceiling, so these specs quote;
+# the two-component spec below is half assumed and does not.
+_FOUR_MARGINALS = (("subA", 1.0), ("subX", 1.0), ("subY", 1.0), ("subB", 3.0))
+
+
 def test_assumable_component_falls_back_to_the_trailing_rate(combo_env):
     inputs = _direct_inputs()
     del inputs["subB"]
     combo_env(inputs)
-    spec = ComboSpec(marginals=(("subA", 1.0), ("subB", 3.0)), assumable=frozenset({"subB"}))
+    spec = ComboSpec(marginals=_FOUR_MARGINALS, assumable=frozenset({"subB"}))
     # 2 of 5 trailing games recorded the stat, mean 0.6 -> p = 0.4, weight 3 * 0.6 / 0.4.
     stats = _SpecStats(spec, trailing=[0, 0, 1, 0, 2])
 
     q = stats.combo_quote(_FANTASY, ["P"], _DATE, _AT, lines={"P": 25.5})["P"]
 
-    assert q.ev == pytest.approx(_MEAN_A + 3.0 * 0.6)
+    assert q.ev == pytest.approx(_MEAN_A + _MEAN_X + _MEAN_Y + 3.0 * 0.6)
     assert "assumed:subB" in q.synthetic_reason
     assert q.sum_sd > 0.0
 
@@ -170,13 +179,24 @@ def test_assumable_component_with_no_trailing_occurrences_contributes_nothing(co
     inputs = _direct_inputs()
     del inputs["subB"]
     combo_env(inputs)
-    spec = ComboSpec(marginals=(("subA", 1.0), ("subB", 3.0)), assumable=frozenset({"subB"}))
+    spec = ComboSpec(marginals=_FOUR_MARGINALS, assumable=frozenset({"subB"}))
     stats = _SpecStats(spec, trailing=[0, 0, 0])
 
     q = stats.combo_quote(_FANTASY, ["P"], _DATE, _AT, lines={"P": 25.5})["P"]
 
-    assert q.ev == pytest.approx(_MEAN_A)
+    assert q.ev == pytest.approx(_MEAN_A + _MEAN_X + _MEAN_Y)
     assert "assumed:subB" in q.synthetic_reason
+
+
+def test_too_many_assumed_components_stops_being_a_book_quote(combo_env):
+    inputs = _direct_inputs()
+    del inputs["subB"]
+    combo_env(inputs)
+    # One assumed of two components is half the spec, past the quarter ceiling.
+    spec = ComboSpec(marginals=(("subA", 1.0), ("subB", 3.0)), assumable=frozenset({"subB"}))
+    stats = _SpecStats(spec, trailing=[0, 0, 1, 0, 2])
+
+    assert stats.combo_quote(_FANTASY, ["P"], _DATE, _AT, lines={"P": 25.5}) == {}
 
 
 def test_assumable_component_prefers_its_real_quote(combo_env):
