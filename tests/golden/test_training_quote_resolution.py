@@ -326,6 +326,10 @@ class _FakeArchive:
 class _Stub:
     league = "WNBA"
     resolve_player_market_odds = base_mod.Stats.resolve_player_market_odds
+    # Bound rather than stubbed: pass 2 consults the combo kernel, and a hand-rolled
+    # stand-in would stop tracking it. On a non-combo market it returns no quotes.
+    combo_quote = base_mod.Stats.combo_quote
+    _fantasy_combo_spec = base_mod.Stats._fantasy_combo_spec
 
     def check_combo_markets(self, *args, **kwargs):
         return np.nan

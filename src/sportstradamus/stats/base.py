@@ -2225,8 +2225,15 @@ class Stats:
 
         Reads only ``stats.index`` and ``stats["Avg10"]``, so a cached matrix can be
         re-resolved through this same path without rebuilding its feature columns.
+
+        Players the books left unpriced get a second pass offering both combo paths.
+        ``combo_quote`` prices the weighted component sum through the NORTA kernel and
+        outranks the legacy ``check_combo_markets`` scalar, which stays as the lower
+        rung: the kernel emits a real tail from real component quotes where the scalar
+        fabricates one from the cell's generic cv. It is batched over the whole
+        unpriced set because each spec component costs one archive read per gameday,
+        not one per player.
         """
-        records = []
         cv = stat_cv[self.league].get(market, 1)
         dist = stat_dist.get(self.league, {}).get(market, "Gamma")
         weights = book_weights.get(self.league, {}).get(market, {})
@@ -2237,28 +2244,38 @@ class Stats:
             list(stats.index),
             at=target_at,
         )
+        # dist/cv/weights price the (league, market) cell and never change per
+        # player; only the line inputs do, so the two live in separate dicts.
+        market_kwargs = {"dist": dist, "cv": cv, "weights": weights}
+        quotes, line_kwargs, unpriced = {}, {}, []
         for player in stats.index:
             rows, legacy_line = quote_inputs[player]
-            quote_kwargs = {
+            line_kwargs[player] = {
                 "legacy_line": legacy_line,
                 "fallback_line": max(float(stats.loc[player, "Avg10"]), 0.5),
-                "dist": dist,
-                "cv": cv,
-                "weights": weights,
             }
             quote = resolve_training_quote(
-                rows,
-                fallback_ev=None,
-                **quote_kwargs,
+                rows, fallback_ev=None, **market_kwargs, **line_kwargs[player]
             )
+            quotes[player] = quote
             if quote.source in ("neutral_fallback", "model_fallback"):
-                quote = resolve_training_quote(
-                    rows,
-                    fallback_ev=self.check_combo_markets(market, player, date),
-                    **quote_kwargs,
-                )
-            records.append(quote.as_record())
-        return pd.DataFrame(records, index=stats.index)
+                unpriced.append(player)
+
+        combo_quotes = self.combo_quote(market, unpriced, date, target_at) if unpriced else {}
+        for player in unpriced:
+            # The legacy scalar is the lower rung, so a kernel quote makes it dead weight —
+            # and it costs a per-player archive read on the leagues that implement it.
+            combo = combo_quotes.get(player)
+            quotes[player] = resolve_training_quote(
+                quote_inputs[player][0],
+                fallback_ev=None if combo else self.check_combo_markets(market, player, date),
+                fallback_quote=combo,
+                **market_kwargs,
+                **line_kwargs[player],
+            )
+        return pd.DataFrame(
+            [quotes[player].as_record() for player in stats.index], index=stats.index
+        )
 
     def get_training_matrix(self, market, cutoff_date=None):
         """Retrieves the training data matrix and target labels for a specified market.
