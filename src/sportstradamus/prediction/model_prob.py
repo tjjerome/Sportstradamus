@@ -1668,17 +1668,23 @@ def _price_offers_at_quotes(
     """Set ``Market Projection`` and the ``Market EV`` over-probability in place.
 
     Every offered line for a player is decoded from the one quote-implied mean with
-    the same ``(sigma, skew)`` used to invert it, so an offer at the quote line
-    reproduces the cohort probability exactly and alternate lines price off the
-    same distribution rather than a cross-line average.
+    the same fitted shape (``sigma``/``skew`` or ``phi``) used to invert it, so an
+    offer at the quote line reproduces the cohort probability exactly and alternate
+    lines price off the same distribution rather than a cross-line average.
     """
     priced = {p: quote_pricing_params(q, league, market, dist, cv) for p, q in quotes.items()}
-    offer_df["Market Projection"] = offer_df.index.map({p: v[0] for p, v in priced.items()})
+    offer_df["Market Projection"] = offer_df.index.map({p: v.mean for p, v in priced.items()})
     shape_kwargs = {}
     if dist == "SkewNormal":
         shape_kwargs = {
-            "sigma": offer_df.index.map({p: v[1] for p, v in priced.items()}).to_numpy(float),
-            "skew_alpha": offer_df.index.map({p: v[2] for p, v in priced.items()}).to_numpy(float),
+            "sigma": offer_df.index.map({p: v.sigma for p, v in priced.items()}).to_numpy(float),
+            "skew_alpha": offer_df.index.map({p: v.skew for p, v in priced.items()}).to_numpy(
+                float
+            ),
+        }
+    elif dist == "DPO" and any(v.phi is not None for v in priced.values()):
+        shape_kwargs = {
+            "phi": offer_df.index.map({p: v.phi for p, v in priced.items()}).to_numpy(float)
         }
     offer_df["Market EV"] = 1 - get_odds(
         offer_df["Line"].to_numpy(dtype=float),

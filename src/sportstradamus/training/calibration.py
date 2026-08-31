@@ -75,6 +75,11 @@ _MIN_ROWS_PER_SHAPE_BIN: int = 120
 # Minimum usable line bins before a per-cell shape curve is fit. Two points pin a line
 # with zero residual freedom; three is the floor for a fit with any room to disagree.
 _MIN_BINS_FOR_SHAPE_FIT: int = 3
+# Deciles of the book's implied mean for count cells: enough bins to fit a two-parameter
+# power law well clear of _MIN_BINS_FOR_SHAPE_FIT, while keeping every bin above
+# _MIN_ROWS_PER_SHAPE_BIN on a cell at the training-matrix row floor. Splitting finer
+# (20 bins) measurably degraded the fit — noisier bins, and sparse cells lose bins entirely.
+COUNT_SHAPE_BINS: int = 10
 
 
 def _extract_result_and_test_df(market, df, stat_data):
@@ -236,11 +241,15 @@ def fit_book_weights(league: str, market: str, stat_data, archive, book_weights:
     return {}
 
 
-def fit_book_shape(league: str, market: str, results, lines) -> dict | None:
+def fit_book_shape(
+    league: str, market: str, results, conditioner, *, quantile_bins: int | None = None
+) -> dict | None:
     """Fit the book's conditional ``(variance, skewness)`` curves from a cell's history.
 
-    Bins realized ``results`` by the book ``line`` they were graded against, keeps the bins
-    clearing ``_MIN_ROWS_PER_SHAPE_BIN``, and over each bin's conditional mean ``μ`` fits:
+    Bins realized ``results`` by the ``conditioner`` they were graded against — the book
+    line for a SkewNormal cell, the book's implied mean for a count cell (see
+    ``quantile_bins``) — keeps the bins clearing ``_MIN_ROWS_PER_SHAPE_BIN``, and over each
+    bin's conditional mean ``μ`` fits:
 
     * ``var = a·μ^b`` (Taylor's power law) by sqrt(n)-weighted least squares in log space.
       ``b`` is free to cross the Poisson line ``var = μ`` — sub-Poisson count cells (WNBA
@@ -252,14 +261,31 @@ def fit_book_shape(league: str, market: str, results, lines) -> dict | None:
 
     Returns ``{a, b, skew_c, skew_d, n_bins}``, or ``None`` when fewer than
     ``_MIN_BINS_FOR_SHAPE_FIT`` bins clear the row floor (the caller keeps the cell's
-    constant-CV symmetric shape). ``train_market`` calls this for each SkewNormal cell and
-    persists the result via :func:`~sportstradamus.training.config.save_book_shape_config`.
+    constant-CV symmetric shape). ``train_market`` calls this for each SkewNormal and
+    Double Poisson cell and persists the result via
+    :func:`~sportstradamus.training.config.save_book_shape_config`.
+
+    Args:
+        quantile_bins: Bin ``conditioner`` into this many quantiles instead of grouping by
+            its distinct values. Required for count cells, which quote one line (0.5)
+            forever and so yield a single value-bin — far below ``_MIN_BINS_FOR_SHAPE_FIT``,
+            which is the mechanical reason no count cell has ever carried a fit. Deciles of
+            the book's implied mean recover ten usable bins from the same rows.
     """
     results = np.asarray(results, dtype=float)
-    lines = np.asarray(lines, dtype=float)
+    conditioner = np.asarray(conditioner, dtype=float)
+    # Below one bin's worth of rows there are no quantiles to take — a count cell the books
+    # never quoted has no archived rows at all. Grouping by distinct value instead leaves
+    # every bin under the floor, so both paths fall through to the same None return.
+    if quantile_bins is not None and len(conditioner) >= _MIN_ROWS_PER_SHAPE_BIN:
+        interior = np.linspace(0, 1, quantile_bins + 1)[1:-1]
+        bin_id = np.searchsorted(np.unique(np.quantile(conditioner, interior)), conditioner)
+    else:
+        bin_id = conditioner
+
     mu, var, bin_skew, weight = [], [], [], []
-    for line in np.unique(lines):
-        bin_results = results[lines == line]
+    for bin_key in np.unique(bin_id):
+        bin_results = results[bin_id == bin_key]
         if len(bin_results) < _MIN_ROWS_PER_SHAPE_BIN:
             continue
         mu.append(bin_results.mean())
@@ -269,7 +295,7 @@ def fit_book_shape(league: str, market: str, results, lines) -> dict | None:
 
     if len(mu) < _MIN_BINS_FOR_SHAPE_FIT:
         logger.info(
-            "Book shape fit - %s, %s: %d usable line bins (< %d) — constant-CV fallback",
+            "Book shape fit - %s, %s: %d usable bins (< %d) — constant-CV fallback",
             league,
             market,
             len(mu),

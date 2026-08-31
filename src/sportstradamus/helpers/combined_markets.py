@@ -99,6 +99,10 @@ class ComboComponent:
     but contributes nothing to the weighted sum. ``dist`` additionally admits
     ``"Bernoulli"`` (mean = success probability; used for win components),
     which has no ``get_odds`` counterpart.
+
+    ``sigma``/``skew`` (SkewNormal) and ``phi`` (Double Poisson) carry the fitted book
+    shape the component's mean was inverted under, so the sampler reproduces the same
+    marginal the inversion assumed. Leaving them ``None`` prices off ``cv`` alone.
     """
 
     market: str
@@ -109,6 +113,7 @@ class ComboComponent:
     sigma: float | None = None
     skew: float | None = None
     gate: float | None = None
+    phi: float | None = None
 
 
 @dataclass
@@ -156,7 +161,7 @@ def _family_ppf(u: np.ndarray, c: ComboComponent) -> np.ndarray:
         r = 1.0 / c.cv
         return nbinom.ppf(u, r, r / (r + c.mean))
     if c.dist == "DPO":
-        phi = np.array([1.0 / (1.0 + c.cv * c.mean)])
+        phi = np.array([c.phi if c.phi is not None else 1.0 / (1.0 + c.cv * c.mean)])
         grid, log_pmf = _dp_log_pmf_grid(_dp_mu_from_mean(np.array([c.mean]), phi), phi)
         cdf = np.clip(np.cumsum(np.exp(log_pmf[:, 0])), 0.0, 1.0)
         return grid[np.minimum(np.searchsorted(cdf, u), grid.size - 1)]
@@ -209,6 +214,8 @@ def _component_sd(c: ComboComponent) -> float:
         return abs(c.mean) * c.cv
     if c.dist == "Poisson" or (c.dist in ("NegBin", "ZINB") and c.cv == 1):
         return float(np.sqrt(max(c.mean, 0.0)))
+    if c.dist == "DPO" and c.phi is not None:
+        return float(np.sqrt(max(c.mean / c.phi, 0.0)))
     # NegBin r = 1/cv and DPO phi = 1/(1 + cv*ev) share var = mean*(1 + cv*mean).
     return float(np.sqrt(max(c.mean * (1.0 + c.cv * c.mean), 0.0)))
 

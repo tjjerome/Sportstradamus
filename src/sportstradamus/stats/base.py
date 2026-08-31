@@ -2506,10 +2506,12 @@ class Stats:
                 ):
                     admitted = False
                     break
-                mean, sigma, skew = quote_pricing_params(quote, self.league, sub, sub_dist, sub_cv)
+                mean, sigma, skew, phi = quote_pricing_params(
+                    quote, self.league, sub, sub_dist, sub_cv
+                )
                 components.append(
                     ComboComponent(
-                        sub, float(weight), mean, sub_dist, sub_cv, sigma=sigma, skew=skew
+                        sub, float(weight), mean, sub_dist, sub_cv, sigma=sigma, skew=skew, phi=phi
                     )
                 )
                 component_quotes.append(quote)

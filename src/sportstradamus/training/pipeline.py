@@ -4118,11 +4118,23 @@ def _step_persist_book_shape(
     isolated: bool,
 ) -> None:
     """Fit canonical book-shape config only for a live, mutable training run."""
-    if deterministic or isolated or dist != "SkewNormal":
+    if deterministic or isolated or dist not in ("SkewNormal", "DPO"):
         return
-    save_book_shape_config(
-        {league: {market: calibration.fit_book_shape(league, market, M["Result"], M["Line"])}}
-    )
+    if dist == "SkewNormal":
+        fit = calibration.fit_book_shape(league, market, M["Result"], M["Line"])
+    else:
+        # Quantile bins always fill, so unlike the line-binned SkewNormal path they cannot
+        # self-filter the synthetic fallback rows by the per-bin row floor — restrict to
+        # rows carrying a real archived quote before conditioning on the book's implied mean.
+        quoted = M[M["Archived"]] if "Archived" in M.columns else M
+        fit = calibration.fit_book_shape(
+            league,
+            market,
+            quoted["Result"],
+            quoted["EV"],
+            quantile_bins=calibration.COUNT_SHAPE_BINS,
+        )
+    save_book_shape_config({league: {market: fit}})
 
 
 def _structural_gate_inputs(
@@ -4773,6 +4785,8 @@ def train_market(
     # fallback leg; book_skewnormal_shape reads them there only — the served blend stays
     # symmetric per the settling verdict. fit_book_shape's per-line-bin row floor self-filters
     # the synthetic fallback lines, so binning all rows still conditions on real book lines.
+    # Double Poisson cells fit the same variance curve for book_count_dispersion, which
+    # replaces the marginal-cv variance convention when inverting a quote to a mean.
     _step_persist_book_shape(
         M,
         league,

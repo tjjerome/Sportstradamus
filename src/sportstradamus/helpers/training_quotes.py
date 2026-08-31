@@ -11,11 +11,11 @@ import datetime
 import operator
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from typing import TypeVar
+from typing import NamedTuple, TypeVar
 
 import numpy as np
 
-from sportstradamus.helpers.config import book_skewnormal_shape
+from sportstradamus.helpers.config import book_count_dispersion, book_skewnormal_shape
 from sportstradamus.helpers.distributions import get_ev, get_odds
 
 CONSENSUS_LINE_POLICY = "modal-nearest-median-v1"
@@ -397,26 +397,50 @@ def resolve_training_quote(
     )
 
 
+class QuotePricingParams(NamedTuple):
+    """The inverted quote plus whichever fitted shape the family carries.
+
+    ``sigma``/``skew`` populate for SkewNormal, ``phi`` for Double Poisson; every
+    other family leaves all three ``None`` and prices off ``cv`` alone.
+    """
+
+    mean: float
+    sigma: float | None = None
+    skew: float | None = None
+    phi: float | None = None
+
+
 def quote_pricing_params(
     quote: TrainingQuote, league: str, market: str, dist: str, cv: float, gate: float | None = None
-) -> tuple[float, float | None, float | None]:
+) -> QuotePricingParams:
     """Invert the quote at its own line under the exact shape the decode will use.
 
-    Returns ``(mean, sigma, skew)``. Fixing ``(sigma, skew)`` across the invert/decode
-    pair makes ``decode(invert(p)) == p`` at the quote line — the shape-consistent
-    round trip that kills the symmetric-encode/skewed-decode asymmetry (an honest
-    50/50 no longer decodes to 0.57 under). On the fallback path the pair is ungated
-    on both sides: books only price players likely to record the stat, so the
-    population zero rate can exceed the quoted under-prob and a gated inversion
-    would clamp at ``get_ev``'s ceiling (see ``_authentic_quote``). The model path
-    passes the cell gate on count families instead — its decode is gated and its
-    blend expects the non-zero component mean.
+    Returns ``(mean, sigma, skew, phi)``. Fixing the shape across the invert/decode pair
+    makes ``decode(invert(p)) == p`` at the quote line — the shape-consistent round trip
+    that kills the symmetric-encode/skewed-decode asymmetry (an honest 50/50 no longer
+    decodes to 0.57 under). ``(sigma, skew)`` carry it for SkewNormal cells and ``phi``
+    for Double Poisson ones; the remaining families have no fitted shape and price off
+    ``cv`` alone. On the fallback path the pair is ungated on both sides: books only price
+    players likely to record the stat, so the population zero rate can exceed the quoted
+    under-prob and a gated inversion would clamp at ``get_ev``'s ceiling (see
+    ``_authentic_quote``). The model path passes the cell gate on count families instead —
+    its decode is gated and its blend expects the non-zero component mean.
+
+    The two shapes are evaluated at different points on purpose. ``sigma`` reads at
+    ``quote.ev``, the cv-inverted mean, because a SkewNormal cell's line tracks its mean
+    closely. ``phi`` reads at ``quote.line``: a count cell quotes 0.5 against means from
+    0.09 to 2.5, and the cv-inverted mean is exactly the quantity the fitted dispersion
+    exists to correct, so seeding the correction with it would feed the bias back in.
     """
     under = 1.0 - quote.over_probability
+    sigma = skew = phi = None
     if dist == "SkewNormal":
         sigma, skew = book_skewnormal_shape(league, market, quote.ev, cv)
         sigma, skew = float(sigma), float(skew)
     else:
-        sigma = skew = None
-    mean = float(get_ev(quote.line, under, cv, dist=dist, sigma=sigma, skew_alpha=skew, gate=gate))
-    return mean, sigma, skew
+        fitted = book_count_dispersion(league, market, quote.line, cv)
+        phi = None if fitted is None else float(fitted)
+    mean = float(
+        get_ev(quote.line, under, cv, dist=dist, sigma=sigma, skew_alpha=skew, gate=gate, phi=phi)
+    )
+    return QuotePricingParams(mean, sigma, skew, phi)

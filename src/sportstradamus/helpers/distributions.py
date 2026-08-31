@@ -472,7 +472,7 @@ def skewnorm_crps(y, loc, scale, alpha, gate=None) -> np.ndarray:
     return np.sum((cdf - indicator) ** 2, axis=0) * dx
 
 
-def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None, sigma=None):
+def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None, sigma=None, phi=None):
     """Invert the book's ``(line, under-prob)`` to the implied mean.
 
     The exact numerical inverse of :func:`get_odds`: returns the mean ``ev`` for
@@ -499,6 +499,10 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None, sig
         sigma: SkewNormal scale held fixed across the inversion; ``None`` → ``ev*cv``.
             WS2 passes the per-cell fitted scale evaluated once at the quoted line, so
             the bracket stays monotone (the shape does not move with the solved mean).
+        phi: Double Poisson precision held fixed across the inversion; ``None`` →
+            ``1/(1+cv·ev)``. The count analogue of ``sigma`` and fixed for the same
+            reason — :func:`~sportstradamus.helpers.config.book_count_dispersion`
+            evaluates it once at the quoted line so the bracket stays monotone.
 
     Returns:
         The mean that reproduces the book's ``under`` under :func:`get_odds`.
@@ -508,7 +512,15 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None, sig
 
     def p_under(ev):
         return get_odds(
-            line, ev, dist, cv=cv, step=step, gate=gate, skew_alpha=skew_alpha, sigma=sigma
+            line,
+            ev,
+            dist,
+            cv=cv,
+            step=step,
+            gate=gate,
+            skew_alpha=skew_alpha,
+            sigma=sigma,
+            phi=phi,
         )
 
     lo = 1e-6

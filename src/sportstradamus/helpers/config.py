@@ -34,7 +34,11 @@ import json
 import numpy as np
 
 from sportstradamus import creds, data
-from sportstradamus.helpers.distributions import skewnormal_params_from_moments
+from sportstradamus.helpers.distributions import (
+    _DP_PHI_CEILING,
+    _DP_PHI_FLOOR,
+    skewnormal_params_from_moments,
+)
 
 # --- API keys ---------------------------------------------------------------
 
@@ -149,6 +153,43 @@ def book_skewnormal_shape(
         return mu * (cv if cv is not None else cell.get("cv", 1.0)), 0.0
     var = coeffs["a"] * mu ** coeffs["b"]
     return skewnormal_params_from_moments(var, coeffs["skew_c"] + coeffs["skew_d"] * mu)
+
+
+def book_count_dispersion(
+    league: str, market: str, mean: float | np.ndarray, cv: float
+) -> np.ndarray | None:
+    """The book's Double Poisson precision ``phi`` at conditional mean ``mean``, or ``None``.
+
+    The count analogue of :func:`book_skewnormal_shape`: evaluates the same fitted
+    ``var = a·μ^b`` at the row's own mean and converts it to the family's native
+    ``phi = μ/var``, in place of the ``phi = 1/(1 + cv·μ)`` fallback that asserts
+    ``var = μ(1 + cv·μ)`` from the cell's *marginal* cv. Measured across 30 count cells,
+    that assertion overstates the book's conditional variance by 1.41× at the median and
+    ~3.5× on the high-mean NBA cells, and every mean inverted out of it inherits the
+    error. A single market never notices — ``get_odds`` re-derives the same probability
+    under the same convention — but a component sum adds the means, so they have to be
+    right rather than merely self-consistent.
+
+    Restricted to **Double Poisson**, because constant ``phi`` gives ``var ∝ μ`` exactly,
+    which is the ``b ≈ 1`` observed on 22 of the 30 cells; NegBin at constant ``r`` cannot
+    express that shape, and applying the fit to NegBin cells moved mean recovery the wrong
+    way on 5 of 7. Such a cell wants a family change, not a coefficient.
+
+    Returns the **larger** of the fitted and conventional precisions, i.e. the smaller of
+    the two variances. Every contaminant in the fit's estimator — within-bin spread of
+    true means, the book's own mean bias — inflates measured variance, so a fit asking for
+    *more* dispersion than the convention is the reading least likely to be real; taking
+    those at face value overshot MLB ``rbi`` and ``total bases`` badly. The two curves
+    cross at most once, so the maximum is continuous in ``mean``.
+    """
+    if stat_dist.get(league, {}).get(market) != "DPO":
+        return None
+    coeffs = stat_meta.get(league, {}).get(market, {}).get("book_shape")
+    if coeffs is None:
+        return None
+    mu = np.asarray(mean, dtype=float)
+    fitted = mu / (coeffs["a"] * mu ** coeffs["b"])
+    return np.clip(np.maximum(fitted, 1.0 / (1.0 + cv * mu)), _DP_PHI_FLOOR, _DP_PHI_CEILING)
 
 
 with (_config_dir / "stat_map.json").open() as infile:
