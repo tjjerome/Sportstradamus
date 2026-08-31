@@ -334,18 +334,17 @@ def _count_cell(monkeypatch, dist, coeffs):
     monkeypatch.setitem(config.stat_meta, "TESTLG", {"TESTMK": {"cv": 0.5, "book_shape": coeffs}})
 
 
-def test_book_count_dispersion_is_dpo_only(monkeypatch):
-    """NegBin holds ``r`` constant, which cannot express the measured ``var ∝ mu``."""
-    coeffs = {"a": 0.9, "b": 1.0, "skew_c": 0.0, "skew_d": 0.0, "n_bins": 10}
-    _count_cell(monkeypatch, "NegBin", coeffs)
-
-    assert config.book_count_dispersion("TESTLG", "TESTMK", 1.5, 0.5) is None
-
-
 def test_book_count_dispersion_unfitted_cell_keeps_the_convention(monkeypatch):
     _count_cell(monkeypatch, "DPO", None)
 
-    assert config.book_count_dispersion("TESTLG", "TESTMK", 1.5, 0.5) is None
+    assert config.book_count_dispersion("TESTLG", "TESTMK", 1.5, 0.5) == (None, None)
+
+
+def test_book_count_dispersion_skips_a_family_with_no_count_dispersion(monkeypatch):
+    coeffs = {"a": 0.9, "b": 1.0, "skew_c": 0.0, "skew_d": 0.0, "n_bins": 10}
+    _count_cell(monkeypatch, "Gamma", coeffs)
+
+    assert config.book_count_dispersion("TESTLG", "TESTMK", 1.5, 0.5) == (None, None)
 
 
 def test_book_count_dispersion_returns_the_fitted_precision(monkeypatch):
@@ -353,23 +352,54 @@ def test_book_count_dispersion_returns_the_fitted_precision(monkeypatch):
     _count_cell(monkeypatch, "DPO", coeffs)
     mean, cv = 2.0, 0.5
 
-    phi = config.book_count_dispersion("TESTLG", "TESTMK", mean, cv)
+    phi, r = config.book_count_dispersion("TESTLG", "TESTMK", mean, cv)
 
     # var = 0.9*2 = 1.8 against the convention's 2*(1+0.5*2) = 4.0, so the fit wins.
+    assert r is None
     assert float(phi) == pytest.approx(mean / 1.8, rel=1e-9)
     assert float(phi) > 1.0 / (1.0 + cv * mean)
 
 
-def test_book_count_dispersion_ignores_a_fit_that_raises_the_variance(monkeypatch):
+def test_book_count_dispersion_returns_the_fitted_negbin_r(monkeypatch):
+    """NBA REB recovers a mean 19.4% high on the convention and 0.0% high on the fit."""
+    coeffs = {"a": 1.5, "b": 1.0, "skew_c": 0.0, "skew_d": 0.0, "n_bins": 10}
+    _count_cell(monkeypatch, "NegBin", coeffs)
+    mean, cv = 2.0, 0.5
+
+    phi, r = config.book_count_dispersion("TESTLG", "TESTMK", mean, cv)
+
+    # Fitted var = 3.0 sits between Poisson (2.0) and the convention's 2*(1+0.5*2) = 4.0,
+    # so r = mean^2 / (var - mean) = 4, double the convention's r = 1/cv = 2.
+    assert phi is None
+    assert float(r) == pytest.approx(mean**2 / (3.0 - mean), rel=1e-9)
+    assert float(r) > 1.0 / cv
+
+
+def test_book_count_dispersion_keeps_the_convention_below_poisson_variance(monkeypatch):
+    """``var <= mean`` has no NegBin representation — r would be infinite."""
+    coeffs = {"a": 0.4, "b": 1.0, "skew_c": 0.0, "skew_d": 0.0, "n_bins": 10}
+    _count_cell(monkeypatch, "NegBin", coeffs)
+    cv = 0.5
+
+    _, r = config.book_count_dispersion("TESTLG", "TESTMK", 2.0, cv)
+
+    assert float(r) == pytest.approx(1.0 / cv, rel=1e-9)
+
+
+@pytest.mark.parametrize("dist", ["DPO", "NegBin"])
+def test_book_count_dispersion_ignores_a_fit_that_raises_the_variance(monkeypatch, dist):
     """Every contaminant in the estimator inflates variance, so only cuts are trusted."""
     coeffs = {"a": 3.0, "b": 1.0, "skew_c": 0.0, "skew_d": 0.0, "n_bins": 10}
-    _count_cell(monkeypatch, "DPO", coeffs)
+    _count_cell(monkeypatch, dist, coeffs)
     mean, cv = 0.5, 0.5
 
-    phi = config.book_count_dispersion("TESTLG", "TESTMK", mean, cv)
+    phi, r = config.book_count_dispersion("TESTLG", "TESTMK", mean, cv)
 
     # Fitted var = 1.5 exceeds the convention's 0.5*(1+0.25) = 0.625 — keep the convention.
-    assert float(phi) == pytest.approx(1.0 / (1.0 + cv * mean), rel=1e-9)
+    if dist == "DPO":
+        assert float(phi) == pytest.approx(1.0 / (1.0 + cv * mean), rel=1e-9)
+    else:
+        assert float(r) == pytest.approx(mean**2 / (0.625 - mean), rel=1e-9)
 
 
 def test_get_ev_phi_round_trips_through_get_odds():
@@ -381,3 +411,13 @@ def test_get_ev_phi_round_trips_through_get_odds():
     assert get_odds(line, ev, "DPO", cv=cv, step=1, phi=phi) == pytest.approx(under, abs=1e-6)
     # The passthrough must actually bind — the cv convention implies a different mean.
     assert get_ev(line, under, cv, dist="DPO") != pytest.approx(ev, rel=1e-3)
+
+
+def test_get_ev_r_round_trips_through_get_odds():
+    """NegBin's analogue of the phi passthrough, so invert and decode share one shape."""
+    line, under, cv, r = 4.5, 0.52, 0.53, 14.4
+
+    ev = get_ev(line, under, cv, dist="NegBin", r=r)
+
+    assert get_odds(line, ev, "NegBin", cv=cv, step=1, r=r) == pytest.approx(under, abs=1e-6)
+    assert get_ev(line, under, cv, dist="NegBin") != pytest.approx(ev, rel=1e-3)

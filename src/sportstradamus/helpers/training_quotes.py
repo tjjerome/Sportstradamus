@@ -400,14 +400,16 @@ def resolve_training_quote(
 class QuotePricingParams(NamedTuple):
     """The inverted quote plus whichever fitted shape the family carries.
 
-    ``sigma``/``skew`` populate for SkewNormal, ``phi`` for Double Poisson; every
-    other family leaves all three ``None`` and prices off ``cv`` alone.
+    ``sigma``/``skew`` populate for SkewNormal, ``phi`` for Double Poisson and ``r``
+    for NegBin/ZINB; every other family leaves all four ``None`` and prices off
+    ``cv`` alone.
     """
 
     mean: float
     sigma: float | None = None
     skew: float | None = None
     phi: float | None = None
+    r: float | None = None
 
 
 def quote_pricing_params(
@@ -415,12 +417,12 @@ def quote_pricing_params(
 ) -> QuotePricingParams:
     """Invert the quote at its own line under the exact shape the decode will use.
 
-    Returns ``(mean, sigma, skew, phi)``. Fixing the shape across the invert/decode pair
+    Returns ``(mean, sigma, skew, phi, r)``. Fixing the shape across the invert/decode pair
     makes ``decode(invert(p)) == p`` at the quote line — the shape-consistent round trip
     that kills the symmetric-encode/skewed-decode asymmetry (an honest 50/50 no longer
-    decodes to 0.57 under). ``(sigma, skew)`` carry it for SkewNormal cells and ``phi``
-    for Double Poisson ones; the remaining families have no fitted shape and price off
-    ``cv`` alone. On the fallback path the pair is ungated on both sides: books only price
+    decodes to 0.57 under). ``(sigma, skew)`` carry it for SkewNormal cells, ``phi``
+    for Double Poisson ones and ``r`` for NegBin/ZINB; the remaining families have no
+    fitted shape and price off ``cv`` alone. On the fallback path the pair is ungated on both sides: books only price
     players likely to record the stat, so the population zero rate can exceed the quoted
     under-prob and a gated inversion would clamp at ``get_ev``'s ceiling (see
     ``_authentic_quote``). The model path passes the cell gate on count families instead —
@@ -428,19 +430,23 @@ def quote_pricing_params(
 
     The two shapes are evaluated at different points on purpose. ``sigma`` reads at
     ``quote.ev``, the cv-inverted mean, because a SkewNormal cell's line tracks its mean
-    closely. ``phi`` reads at ``quote.line``: a count cell quotes 0.5 against means from
-    0.09 to 2.5, and the cv-inverted mean is exactly the quantity the fitted dispersion
-    exists to correct, so seeding the correction with it would feed the bias back in.
+    closely. The count dispersion reads at ``quote.line``: a count cell quotes 0.5 against
+    means from 0.09 to 2.5, and the cv-inverted mean is exactly the quantity the fitted
+    dispersion exists to correct, so seeding the correction with it would feed the bias
+    back in.
     """
     under = 1.0 - quote.over_probability
-    sigma = skew = phi = None
+    sigma = skew = phi = r = None
     if dist == "SkewNormal":
         sigma, skew = book_skewnormal_shape(league, market, quote.ev, cv)
         sigma, skew = float(sigma), float(skew)
     else:
-        fitted = book_count_dispersion(league, market, quote.line, cv)
-        phi = None if fitted is None else float(fitted)
+        phi, r = book_count_dispersion(league, market, quote.line, cv)
+        phi = None if phi is None else float(phi)
+        r = None if r is None else float(r)
     mean = float(
-        get_ev(quote.line, under, cv, dist=dist, sigma=sigma, skew_alpha=skew, gate=gate, phi=phi)
+        get_ev(
+            quote.line, under, cv, dist=dist, sigma=sigma, skew_alpha=skew, gate=gate, phi=phi, r=r
+        )
     )
-    return QuotePricingParams(mean, sigma, skew, phi)
+    return QuotePricingParams(mean, sigma, skew, phi, r)

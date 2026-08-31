@@ -1686,6 +1686,10 @@ def _price_offers_at_quotes(
         shape_kwargs = {
             "phi": offer_df.index.map({p: v.phi for p, v in priced.items()}).to_numpy(float)
         }
+    elif dist in ("NegBin", "ZINB") and any(v.r is not None for v in priced.values()):
+        shape_kwargs = {
+            "r": offer_df.index.map({p: v.r for p, v in priced.items()}).to_numpy(float)
+        }
     offer_df["Market EV"] = 1 - get_odds(
         offer_df["Line"].to_numpy(dtype=float),
         offer_df["Market Projection"].to_numpy(dtype=float),

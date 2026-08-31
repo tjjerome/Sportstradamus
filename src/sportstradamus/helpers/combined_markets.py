@@ -100,9 +100,10 @@ class ComboComponent:
     ``"Bernoulli"`` (mean = success probability; used for win components),
     which has no ``get_odds`` counterpart.
 
-    ``sigma``/``skew`` (SkewNormal) and ``phi`` (Double Poisson) carry the fitted book
-    shape the component's mean was inverted under, so the sampler reproduces the same
-    marginal the inversion assumed. Leaving them ``None`` prices off ``cv`` alone.
+    ``sigma``/``skew`` (SkewNormal), ``phi`` (Double Poisson) and ``r`` (NegBin/ZINB)
+    carry the fitted book shape the component's mean was inverted under, so the sampler
+    reproduces the same marginal the inversion assumed. Leaving them ``None`` prices off
+    ``cv`` alone.
     """
 
     market: str
@@ -114,6 +115,7 @@ class ComboComponent:
     skew: float | None = None
     gate: float | None = None
     phi: float | None = None
+    r: float | None = None
 
 
 @dataclass
@@ -158,7 +160,7 @@ def _family_ppf(u: np.ndarray, c: ComboComponent) -> np.ndarray:
     if c.dist == "Poisson" or (c.dist in ("NegBin", "ZINB") and c.cv == 1):
         return poisson.ppf(u, c.mean)
     if c.dist in ("NegBin", "ZINB"):
-        r = 1.0 / c.cv
+        r = c.r if c.r is not None else 1.0 / c.cv
         return nbinom.ppf(u, r, r / (r + c.mean))
     if c.dist == "DPO":
         phi = np.array([c.phi if c.phi is not None else 1.0 / (1.0 + c.cv * c.mean)])
@@ -204,6 +206,20 @@ def _marginal_mean(c: ComboComponent) -> float:
     return (1.0 - gate) * c.mean if gate is not None else c.mean
 
 
+def _count_variance(c: ComboComponent) -> float:
+    """Var[X] for a count component under the exact dispersion its inversion used.
+
+    An unfitted cell falls back to the shared ``var = mean(1 + cv·mean)`` convention,
+    which both ``r = 1/cv`` and ``phi = 1/(1 + cv·mean)`` reproduce exactly.
+    """
+    if c.dist == "Poisson" or (c.dist in ("NegBin", "ZINB") and c.cv == 1):
+        return c.mean  # the legacy cv == 1 count encoding prices as bare Poisson
+    if c.dist == "DPO":
+        return c.mean / (c.phi if c.phi is not None else 1.0 / (1.0 + c.cv * c.mean))
+    r = c.r if c.r is not None else 1.0 / c.cv
+    return c.mean * (1.0 + c.mean / r)
+
+
 def _component_sd(c: ComboComponent) -> float:
     """Family-convention sd, used only to rank components for Sobol dimensions."""
     if c.dist == "Bernoulli":
@@ -212,12 +228,7 @@ def _component_sd(c: ComboComponent) -> float:
         return float(c.sigma) if c.sigma is not None else abs(c.mean) * c.cv
     if c.dist in ("Gamma", "ZAGamma"):
         return abs(c.mean) * c.cv
-    if c.dist == "Poisson" or (c.dist in ("NegBin", "ZINB") and c.cv == 1):
-        return float(np.sqrt(max(c.mean, 0.0)))
-    if c.dist == "DPO" and c.phi is not None:
-        return float(np.sqrt(max(c.mean / c.phi, 0.0)))
-    # NegBin r = 1/cv and DPO phi = 1/(1 + cv*ev) share var = mean*(1 + cv*mean).
-    return float(np.sqrt(max(c.mean * (1.0 + c.cv * c.mean), 0.0)))
+    return float(np.sqrt(max(_count_variance(c), 0.0)))
 
 
 _Z_CACHE: dict[int, np.ndarray] = {}

@@ -472,7 +472,9 @@ def skewnorm_crps(y, loc, scale, alpha, gate=None) -> np.ndarray:
     return np.sum((cdf - indicator) ** 2, axis=0) * dx
 
 
-def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None, sigma=None, phi=None):
+def get_ev(
+    line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None, sigma=None, phi=None, r=None
+):
     """Invert the book's ``(line, under-prob)`` to the implied mean.
 
     The exact numerical inverse of :func:`get_odds`: returns the mean ``ev`` for
@@ -503,6 +505,8 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None, sig
             ``1/(1+cv·ev)``. The count analogue of ``sigma`` and fixed for the same
             reason — :func:`~sportstradamus.helpers.config.book_count_dispersion`
             evaluates it once at the quoted line so the bracket stays monotone.
+        r: NegBin/ZINB dispersion held fixed across the inversion; ``None`` → ``1/cv``.
+            The same fitted shape as ``phi``, in the other count family's parameter.
 
     Returns:
         The mean that reproduces the book's ``under`` under :func:`get_odds`.
@@ -521,6 +525,7 @@ def get_ev(line, under, cv=1, dist="SkewNormal", gate=None, skew_alpha=None, sig
             skew_alpha=skew_alpha,
             sigma=sigma,
             phi=phi,
+            r=r,
         )
 
     lo = 1e-6

@@ -2627,12 +2627,20 @@ class Stats:
                         components.append(stand_in)
                     assumed.append(sub)
                     continue
-                mean, sigma, skew, phi = quote_pricing_params(
+                mean, sigma, skew, phi, r = quote_pricing_params(
                     quote, self.league, sub, sub_dist, sub_cv
                 )
                 components.append(
                     ComboComponent(
-                        sub, float(weight), mean, sub_dist, sub_cv, sigma=sigma, skew=skew, phi=phi
+                        sub,
+                        float(weight),
+                        mean,
+                        sub_dist,
+                        sub_cv,
+                        sigma=sigma,
+                        skew=skew,
+                        phi=phi,
+                        r=r,
                     )
                 )
                 component_quotes.append(quote)
