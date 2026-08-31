@@ -7,6 +7,7 @@ import pickle
 import warnings
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
+from functools import partial
 from io import StringIO
 from pathlib import Path
 from time import sleep
@@ -430,6 +431,11 @@ class ComboSpec:
     bernoulli: tuple[tuple[str, float], ...] = ()  # (name, weight); p via _combo_bernoulli_p
     post_builder: Callable | None = None  # (stats_obj, player, date) -> post fn | None
     analytics: tuple[str, ...] = ()  # provenance labels (e.g. "hit_shares", "win_map", "hbp")
+
+
+def _relocated_under_prob(under_prob: Callable, shift: float, line: float) -> float:
+    """The component sum's CDF moved to a new location: ``F_new(x) = F(x - shift)``."""
+    return under_prob(line - shift)
 
 
 class Stats:
@@ -2421,13 +2427,57 @@ class Stats:
             return get_ev(subline, under, sub_cv, dist=sub_dist) * weight, False
         return 0, False
 
-    def _fantasy_combo_spec(self, market: str) -> ComboSpec | None:
-        """Hook: component spec for a league's fantasy-score markets; base has none."""
+    def _fantasy_combo_spec(self, market: str, player: str) -> ComboSpec | None:
+        """Hook: component spec for a league's fantasy-score markets; base has none.
+
+        Takes the player because NFL runs one all-position fantasy market whose
+        quoted components differ by position (see ``StatsNFL``); the leagues that
+        split their fantasy markets by role ignore it.
+        """
         return None
 
     def _combo_bernoulli_p(self, name: str, player: str, date) -> float:
         """Hook: success probability for a named Bernoulli combo component."""
         raise NotImplementedError(f"{type(self).__name__} has no Bernoulli component {name!r}")
+
+    def _book_mean_shift(self, combo, market: str, combo_inputs: dict, player: str) -> float:
+        """Half the distance from the component-sum mean to the market's own quoted mean.
+
+        A fantasy spec is an *approximation* of the platform's settlement formula —
+        proxied components, terms no book quotes — so the component sum carries a
+        residual the market's own line does not, and the market's line carries one
+        the sum does not. Averaging the two halves both residuals. Measured on MLB hitter
+        fantasy (n=1345, quotes read at first pitch), against the same NORTA shape:
+        PIT KS 0.221 component-sum / 0.072 book-only / **0.067 averaged**, PIT mean
+        0.435 / 0.521 / **0.505**, mean |claimed-hit| over +/-1.5 sd offset lines
+        0.024 / 0.022 / **0.012**.
+
+        Simple ``combo_props`` sums are excluded because their spec is *exact*, so
+        the sum is already unbiased and averaging only pulls it off centre: the
+        component sum wins PIT KS on all five graded simple combos (WNBA PRA/RA/PR/PA,
+        MLB hits+runs+rbi) against this blend.
+
+        The market's own quote is admitted from any book including the DFS platforms,
+        unlike a component quote. On a fantasy market the platform's posted line is
+        the only quote in existence and it is a projection; the even-money price
+        beside it is not, and the ``book_direct`` inversion reads the line.
+        """
+        rows, legacy_line = combo_inputs.get(player, ([], None))
+        dist = stat_dist.get(self.league, {}).get(market, "Gamma")
+        cv = stat_cv.get(self.league, {}).get(market, 1)
+        quote = resolve_training_quote(
+            rows,
+            legacy_line=legacy_line,
+            fallback_line=0.0,
+            fallback_ev=None,
+            dist=dist,
+            cv=cv,
+            weights=book_weights.get(self.league, {}).get(market, {}),
+        )
+        if quote.source != "book_direct":
+            return 0.0
+        book_mean = quote_pricing_params(quote, self.league, market, dist, cv).mean
+        return 0.5 * (book_mean - combo.mean)
 
     def combo_quote(self, market, players, date, at, lines=None) -> dict[str, TrainingQuote]:
         """Price a combo market as an honest weighted component sum, per player.
@@ -2440,6 +2490,13 @@ class Stats:
         one real sportsbook, and every Bernoulli p must be a finite open-interval
         probability, else the player is omitted entirely — never a mix of real
         and fabricated components.
+        A registered ``combo_props`` market prices every player off one simple
+        sum; a fantasy market takes its spec per player from
+        ``_fantasy_combo_spec``, so NFL's one all-position market can carry a
+        different component list per position. Submarket fetches are batched over
+        the union of the specs in play. A fantasy sum is then relocated halfway to
+        the market's own quoted mean where one exists (``_book_mean_shift``); the
+        shape is the component sum's either way.
         The combo line is ``lines[player]`` when a mapping is given, else the
         combo market's own archived consensus line; no positive line, no quote.
         Component inversions pass ``gate=None``: this layer's book-quote
@@ -2449,31 +2506,40 @@ class Stats:
         """
         # style: allow-complexity — one strict-admission-and-pricing pass per player;
         # extracting the admission loop from the quote build would scatter one policy.
-        if market in combo_props:
-            spec = ComboSpec(marginals=tuple((m, 1.0) for m in combo_props[market]))
+        simple = market in combo_props
+        if simple:
+            simple_sum = ComboSpec(marginals=tuple((m, 1.0) for m in combo_props[market]))
+            specs = dict.fromkeys(players, simple_sum)
         else:
-            spec = self._fantasy_combo_spec(market)
-        if spec is None:
+            specs = {p: self._fantasy_combo_spec(market, p) for p in players}
+            specs = {p: s for p, s in specs.items() if s is not None}
+        if not specs:
             return {}
 
-        players = list(players)
-        slots = list(spec.marginals) + [(sub, 0.0) for sub in spec.sampled]
+        players = list(specs)
+        submarkets = {
+            sub
+            for spec in specs.values()
+            for sub in [name for name, _ in spec.marginals] + list(spec.sampled)
+        }
         sub_cfg = {
             sub: (
                 stat_dist.get(self.league, {}).get(sub, "Gamma"),
                 stat_cv.get(self.league, {}).get(sub, 1),
                 book_weights.get(self.league, {}).get(sub, {}),
             )
-            for sub, _ in slots
+            for sub in submarkets
         }
         inputs = {
             sub: archive.get_training_quote_inputs(self.league, sub, date, players, at=at)
             for sub in sub_cfg
         }
+        combo_inputs = (
+            {}
+            if simple and lines is not None
+            else archive.get_training_quote_inputs(self.league, market, date, players, at=at)
+        )
         if lines is None:
-            combo_inputs = archive.get_training_quote_inputs(
-                self.league, market, date, players, at=at
-            )
             lines = {player: combo_inputs.get(player, ([], None))[1] for player in players}
         rho = load_same_player_rho(self.league)
 
@@ -2482,6 +2548,8 @@ class Stats:
             line = lines.get(player)
             if line is None or not np.isfinite(line) or float(line) <= 0:
                 continue
+            spec = specs[player]
+            slots = list(spec.marginals) + [(sub, 0.0) for sub in spec.sampled]
             components, component_quotes = [], []
             admitted = True
             for sub, weight in slots:
@@ -2528,6 +2596,12 @@ class Stats:
                 continue
             post = spec.post_builder(self, player, date) if spec.post_builder else None
             combo = combo_sum_quote(components, rho, post=post)
+            shift = 0.0 if simple else self._book_mean_shift(combo, market, combo_inputs, player)
+            under_prob_at = (
+                partial(_relocated_under_prob, combo.under_prob, shift)
+                if shift
+                else combo.under_prob
+            )
             observed = [q.observed_at for q in component_quotes if q.observed_at is not None]
             weakest = min(
                 component_quotes,
@@ -2536,10 +2610,12 @@ class Stats:
             reason = "component_sum"
             if spec.analytics:
                 reason += "+" + ",".join(spec.analytics)
+            if shift:
+                reason += "+book_mean"
             quotes[player] = TrainingQuote(
                 line=float(line),
-                over_probability=1.0 - combo.under_prob(float(line)),
-                ev=combo.mean,
+                over_probability=1.0 - under_prob_at(float(line)),
+                ev=combo.mean + shift,
                 source=COMBO_SUM_SOURCE,
                 authenticity=DERIVED,
                 synthetic_reason=reason,
@@ -2547,6 +2623,6 @@ class Stats:
                 book_count=min(q.book_count for q in component_quotes),
                 books=weakest.books,
                 sum_sd=combo.sd,
-                under_prob_at=combo.under_prob,
+                under_prob_at=under_prob_at,
             )
         return quotes

@@ -5,8 +5,8 @@ against the stored gamelog settlement columns: the MLB gamelog's ``hitByPitch``
 field never populates, so its fantasy settlement columns silently omit the HBP
 term (combo-sum pricing brief §8e) and would pin a biased truth.
 
-NFL fantasy composites deliberately declare no spec: their scoring spans a
-dozen thinly-quoted markets, so they stay on the model path.
+NFL runs one all-position fantasy market, so its spec is selected per player off
+the roster position; the weights are still the platform's single scoring table.
 
 Platform rule sources: underdogfantasy.com Rules -> Scoring and the
 prizepicks.com scoring chart (2026 season), cross-checked against the repo's
@@ -14,6 +14,7 @@ settled gamelog formulas where those are trustworthy (every league but MLB's
 HBP term).
 """
 
+import pandas as pd
 import pytest
 
 from sportstradamus.helpers import combo_props
@@ -24,7 +25,11 @@ from sportstradamus.stats.mlb import (
     StatsMLB,
 )
 from sportstradamus.stats.nba import NBA_FANTASY_WEIGHTS, StatsNBA
-from sportstradamus.stats.nfl import StatsNFL
+from sportstradamus.stats.nfl import (
+    NFL_FANTASY_COMPONENTS,
+    NFL_FANTASY_WEIGHTS,
+    StatsNFL,
+)
 from sportstradamus.stats.nhl import StatsNHL
 from sportstradamus.stats.wnba import StatsWNBA
 
@@ -122,8 +127,8 @@ PRIZEPICKS_NFL = {
 UNDERDOG_NFL = PRIZEPICKS_NFL | {"receptions": 0.5, "fumbles lost": -2}
 
 
-def _spec(cls, market):
-    spec = object.__new__(cls)._fantasy_combo_spec(market)
+def _spec(cls, market, player="Any Player"):
+    spec = object.__new__(cls)._fantasy_combo_spec(market, player)
     assert spec is not None, f"{cls.__name__} declares no combo spec for {market!r}"
     return spec
 
@@ -215,10 +220,42 @@ def test_mlb_hbp_offset_weights():
     assert FANTASY_HBP_WEIGHTS["hitter fantasy score"] == PRIZEPICKS_MLB_HITTER["walks"]
 
 
-@pytest.mark.parametrize("market", ["fantasy points underdog", "fantasy points prizepicks"])
-def test_nfl_fantasy_declares_no_combo_spec(market):
-    # NFL fantasy composites are deliberately out of the component-sum lane:
-    # their scoring spans a dozen markets whose books quote thinly, so they stay
-    # on the model path with the platform's own payout as the market reference.
-    # NFL's simple combos (qb tds / qb yards / yards) ride combo_props instead.
-    assert object.__new__(StatsNFL)._fantasy_combo_spec(market) is None
+NFL_MARKET_TABLES = {
+    "fantasy points underdog": UNDERDOG_NFL,
+    "fantasy points prizepicks": PRIZEPICKS_NFL,
+}
+
+
+def _nfl_stats():
+    stats = object.__new__(StatsNFL)
+    stats.players = pd.DataFrame(
+        {"position": ["QB", "RB", "WR", "TE"]},
+        index=["A Quarterback", "A Back", "A Receiver", "An End"],
+    )
+    return stats
+
+
+@pytest.mark.parametrize("player", ["A Quarterback", "A Back", "A Receiver", "An End"])
+@pytest.mark.parametrize("market", sorted(NFL_MARKET_TABLES))
+def test_nfl_fantasy_weights(market, player):
+    spec = _nfl_stats()._fantasy_combo_spec(market, player)
+    _check_platform_weights(spec, NFL_MARKET_TABLES[market], f"NFL {market} {player}")
+    assert spec.sampled == ()
+    assert spec.bernoulli == ()
+
+
+def test_nfl_fantasy_component_lists_stay_within_the_scoring_table():
+    # Every declared component must be a real scoring term, and every position's
+    # omissions must be terms worth under a tenth of a point a game there (the
+    # coverage table in nfl.py). Pinning the lists keeps a future edit from
+    # dropping a term that actually carries points.
+    assert set(NFL_FANTASY_WEIGHTS) | {"receptions"} <= set(PRIZEPICKS_NFL)
+    assert NFL_FANTASY_COMPONENTS["WR"] == NFL_FANTASY_COMPONENTS["TE"]
+    assert "rushing yards" in NFL_FANTASY_COMPONENTS["RB"]
+    assert "rushing yards" not in NFL_FANTASY_COMPONENTS["WR"]
+    assert "receptions" not in NFL_FANTASY_COMPONENTS["QB"]
+
+
+def test_nfl_fantasy_declines_unknown_position_and_market():
+    assert _nfl_stats()._fantasy_combo_spec("fantasy points underdog", "Nobody At All") is None
+    assert _nfl_stats()._fantasy_combo_spec("fantasy points parlayplay", "A Receiver") is None

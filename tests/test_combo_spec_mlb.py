@@ -49,7 +49,7 @@ def test_spec_tables_match_fantasy_props():
     # so any instance-data access at spec-build time fails loudly.
     stats = make_stats()
     for market in sorted(FANTASY_COMBO_MARKETS):
-        spec = stats._fantasy_combo_spec(market)
+        spec = stats._fantasy_combo_spec(market, "Any Player")
         props = dict(StatsMLB._mlb_fantasy_props(market))
         if "pitcher" in market:
             assert dict(spec.marginals) == {
@@ -99,7 +99,7 @@ def test_spec_none_outside_the_four():
         "hits+runs+rbi",
         "pitcher strikeouts",
     ):
-        assert stats._fantasy_combo_spec(market) is None
+        assert stats._fantasy_combo_spec(market, "Any Player") is None
 
 
 def test_multinomial_split_sums_and_means():
@@ -123,7 +123,9 @@ def test_quality_start_post_exact():
         ("pitcher fantasy points underdog", 5.0),
         ("pitcher fantasy score", 4.0),
     ):
-        post = stats._fantasy_combo_spec(market).post_builder(stats, "Any Pitcher", QUOTE_DATE)
+        post = stats._fantasy_combo_spec(market, "Any Player").post_builder(
+            stats, "Any Pitcher", QUOTE_DATE
+        )
         assert np.array_equal(post(draws), weight * np.array([1.0, 0.0, 0.0, 1.0, 0.0]))
 
 
@@ -142,7 +144,7 @@ def hitter_window(games, home_runs_per_game):
 
 def test_hitter_post_deterministic_and_offset():
     stats = make_stats(short_gamelog=hitter_window(30, 1))
-    spec = stats._fantasy_combo_spec("hitter fantasy points underdog")
+    spec = stats._fantasy_combo_spec("hitter fantasy points underdog", "Any Hitter")
     hits = np.random.default_rng(11).integers(0, 6, size=8192).astype(float)
     draws = {"hits": hits, "walks": np.zeros(8192)}
     term_a = spec.post_builder(stats, "Slugger", QUOTE_DATE)(draws)
@@ -157,7 +159,7 @@ def test_hitter_post_league_share_fallback():
     # 3 window hits sit below _HIT_SHARES_MIN_HITS, so the league shares split
     # the draws: E[term] = H * sum(w*s) + 2*HBP offset for the score variant.
     stats = make_stats(short_gamelog=hitter_window(3, 1))
-    spec = stats._fantasy_combo_spec("hitter fantasy score")
+    spec = stats._fantasy_combo_spec("hitter fantasy score", "Any Hitter")
     hits = np.full(20000, 4.0)
     term = spec.post_builder(stats, "Slugger", QUOTE_DATE)(draws={"hits": hits})
     weights = [w for _, w in FANTASY_HIT_TYPE_WEIGHTS["hitter fantasy score"]]

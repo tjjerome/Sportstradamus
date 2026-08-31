@@ -26,7 +26,7 @@ def _settled_game(**overrides):
 
 @pytest.mark.parametrize("market", FANTASY_MARKETS)
 def test_fantasy_markets_get_pure_marginal_spec(market):
-    spec = object.__new__(StatsNBA)._fantasy_combo_spec(market)
+    spec = object.__new__(StatsNBA)._fantasy_combo_spec(market, "Any Player")
     assert isinstance(spec, ComboSpec)
     assert spec.marginals == NBA_FANTASY_WEIGHTS
     assert spec.sampled == ()
@@ -38,7 +38,7 @@ def test_fantasy_markets_get_pure_marginal_spec(market):
 @pytest.mark.parametrize("market", ["PRA", "PTS", "fantasy points parlay"])
 def test_other_markets_return_none(market):
     # Simple combos ride combo_props and legacy fantasy/proration paths stay untouched.
-    assert object.__new__(StatsNBA)._fantasy_combo_spec(market) is None
+    assert object.__new__(StatsNBA)._fantasy_combo_spec(market, "Any Player") is None
 
 
 @pytest.mark.parametrize("market", FANTASY_MARKETS)

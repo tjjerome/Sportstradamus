@@ -29,6 +29,7 @@ from sportstradamus.stats import (
 from sportstradamus.stats.base import (
     _VOLUME_SCALE_RATIO_CAP,
     _VOLUME_SCALE_RATIO_FLOOR,
+    ComboSpec,
     Stats,
     clean_data,
 )
@@ -89,6 +90,46 @@ NFL_MARKET_POSITIONS = {
     "receiving tds": {"WR", "RB", "TE"},
     "yards": {"WR", "RB", "TE"},  # rush+rec scrimmage yards
     "tds": {"WR", "RB", "TE"},  # rush+rec TDs
+}
+
+# Fantasy scoring is one all-position formula (see update()), but the components a
+# book actually quotes are not, so the component sum is specified per position.
+# Measured over the 2025 NFL season, per (player, gameday), quote coverage and mean
+# points contributed:
+#
+#   QB  passing yards 82%/7.42  passing tds 81%/4.90  interceptions 81%/-0.58
+#       rushing yards 79%/1.49  tds 82%/0.98          receptions 0%/0.01
+#   RB  rushing yards 71%/3.62  receiving yards 62%/1.20  receptions 63%/0.79  tds 98%/1.99
+#   WR  receiving yards 74%/3.22  receptions 72%/1.28  tds 98%/1.24  rushing yards 5%/0.08
+#   TE  receiving yards 64%/2.27  receptions 63%/1.11  tds 98%/1.11  rushing yards 1%/0.03
+#
+# Admission is all-or-nothing, so a term that is structurally ~0 for a position and
+# essentially unquoted there would reject the whole position: WR/TE rushing yards and
+# QB receiving yards/receptions are dropped for that reason, at a cost under 0.1 points
+# against a ~7-point sd. `fumbles lost` is quoted on one gameday all season and is
+# dropped everywhere (a QB gives up 0.34 points to it); so are the three 2-pt
+# conversion terms, which no book prices. `yards` and `qb yards` are quoted as
+# composites but stopped archiving after 2023, so the sum runs off the split markets.
+NFL_FANTASY_COMPONENTS = {
+    "QB": ("passing yards", "passing tds", "interceptions", "rushing yards", "tds"),
+    "RB": ("rushing yards", "receiving yards", "receptions", "tds"),
+    "WR": ("receiving yards", "receptions", "tds"),
+    "TE": ("receiving yards", "receptions", "tds"),
+}
+
+# Points per unit, straight off the update() scoring formulas. `receptions` is the
+# only weight the two platforms disagree on.
+NFL_FANTASY_WEIGHTS = {
+    "passing yards": 0.04,
+    "passing tds": 4.0,
+    "interceptions": -1.0,
+    "rushing yards": 0.1,
+    "receiving yards": 0.1,
+    "tds": 6.0,
+}
+NFL_FANTASY_RECEPTION_POINTS = {
+    "fantasy points prizepicks": 1.0,
+    "fantasy points underdog": 0.5,
 }
 
 # nfl-data-py delivers the advanced-stat columns (yards per carry, passer
@@ -1820,6 +1861,21 @@ class StatsNFL(Stats):
             )
 
         self.comps = comps
+
+    def _fantasy_combo_spec(self, market: str, player: str) -> ComboSpec | None:
+        """Per-position component sum for NFL's all-position fantasy markets.
+
+        The scoring formula is position-independent; the quoted components are not,
+        so the spec is selected off the player's roster position (see
+        ``NFL_FANTASY_COMPONENTS`` for the coverage measurements behind each list).
+        A player whose position is unknown gets no quote.
+        """
+        reception_points = NFL_FANTASY_RECEPTION_POINTS.get(market)
+        components = NFL_FANTASY_COMPONENTS.get(self.players["position"].get(player))
+        if reception_points is None or components is None:
+            return None
+        weights = NFL_FANTASY_WEIGHTS | {"receptions": reception_points}
+        return ComboSpec(marginals=tuple((sub, weights[sub]) for sub in components))
 
     def check_combo_markets(
         self, market: str, player: str, date: date = datetime.today().date()

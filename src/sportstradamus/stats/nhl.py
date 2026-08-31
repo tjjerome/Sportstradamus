@@ -830,7 +830,7 @@ class StatsNHL(Stats):
         )
         self.playerProfile.fillna(0, inplace=True)
 
-    def _fantasy_combo_spec(self, market):
+    def _fantasy_combo_spec(self, market, player):
         if market == "skater fantasy points underdog":
             return ComboSpec(marginals=NHL_SKATER_UNDERDOG_WEIGHTS)
         if market == "fantasy points prizepicks":

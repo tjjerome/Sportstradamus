@@ -1149,7 +1149,7 @@ class StatsNBA(Stats):
         self.playerProfile.fillna(0, inplace=True)
         return None
 
-    def _fantasy_combo_spec(self, market):
+    def _fantasy_combo_spec(self, market, player):
         if market in ("fantasy points prizepicks", "fantasy points underdog"):
             return ComboSpec(marginals=NBA_FANTASY_WEIGHTS)
         return None

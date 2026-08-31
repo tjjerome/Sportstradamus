@@ -75,7 +75,7 @@ class _SpecStats(Stats):
         self.spec = spec
         self.bernoulli_p = bernoulli_p or {}
 
-    def _fantasy_combo_spec(self, market):
+    def _fantasy_combo_spec(self, market, player):
         return self.spec if market == _FANTASY else None
 
     def _combo_bernoulli_p(self, name, player, date):
@@ -168,6 +168,63 @@ def test_combo_props_market_sums_unit_weights(combo_env, monkeypatch):
     assert q.line == 24.5
     assert q.ev == pytest.approx(_MEAN_A + _MEAN_B)
     assert q.source == COMBO_SUM_SOURCE
+
+
+# The fantasy market itself has no stat_meta cell, so its own quote inverts Gamma/cv=1.
+_OWN_UNDER, _OWN_LINE = 0.55, 30.5
+_OWN_MEAN = get_ev(_OWN_LINE, _OWN_UNDER, cv=1, dist="Gamma")
+
+
+def _with_own_quote(inputs, market, book="Underdog"):
+    return inputs | {
+        market: {"P": ([ArchivedBookQuote(book, None, _OWN_UNDER, _OWN_LINE, _TS_A)], _OWN_LINE)}
+    }
+
+
+def test_fantasy_market_quote_pulls_the_sum_halfway_to_it(combo_env):
+    spec = ComboSpec(marginals=(("subA", 1.0), ("subB", 1.0)))
+    combo_env(_direct_inputs())
+    unblended = _SpecStats(spec).combo_quote(_FANTASY, ["P"], _DATE, _AT, lines={"P": 25.5})["P"]
+    combo_env(_with_own_quote(_direct_inputs(), _FANTASY))
+
+    q = _SpecStats(spec).combo_quote(_FANTASY, ["P"], _DATE, _AT, lines={"P": 25.5})["P"]
+
+    assert unblended.ev == pytest.approx(_MEAN_A + _MEAN_B)
+    assert q.ev == pytest.approx(0.5 * (unblended.ev + _OWN_MEAN))
+    assert q.synthetic_reason == "component_sum+book_mean"
+    # Pure location shift: same shape, same sd, evaluated `shift` further along.
+    shift = q.ev - unblended.ev
+    assert q.sum_sd == pytest.approx(unblended.sum_sd)
+    for x in (18.0, 25.5, 33.0):
+        assert q.under_prob_at(x + shift) == pytest.approx(unblended.under_prob_at(x))
+    assert q.under_prob_at(25.5) == pytest.approx(1.0 - q.over_probability)
+
+
+def test_simple_combo_ignores_its_own_market_quote(combo_env, monkeypatch):
+    # A combo_props spec settles exactly as the sum of its components, so the sum is
+    # already unbiased and blending only pulls it off centre — measured on all five
+    # graded simple combos. Only fantasy specs, which approximate their formula, blend.
+    monkeypatch.setitem(base.combo_props, "TESTCOMBO", ["subA", "subB"])
+    combo_env(_with_own_quote(_direct_inputs(), "TESTCOMBO"))
+    stats = object.__new__(Stats)
+    stats.league = _LEAGUE
+
+    q = stats.combo_quote("TESTCOMBO", ["P"], _DATE, _AT)["P"]
+
+    assert q.ev == pytest.approx(_MEAN_A + _MEAN_B)
+    assert q.synthetic_reason == "component_sum"
+
+
+def test_fantasy_market_without_its_own_quote_keeps_the_component_sum(combo_env):
+    # NFL fantasy: no book has quoted the composite since 2023, so there is nothing
+    # to blend with and the component sum stands alone.
+    combo_env(_direct_inputs())
+    stats = _SpecStats(ComboSpec(marginals=(("subA", 1.0), ("subB", 1.0))))
+
+    q = stats.combo_quote(_FANTASY, ["P"], _DATE, _AT, lines={"P": 25.5})["P"]
+
+    assert q.ev == pytest.approx(_MEAN_A + _MEAN_B)
+    assert q.synthetic_reason == "component_sum"
 
 
 def test_unknown_market_returns_empty(combo_env):

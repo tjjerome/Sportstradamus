@@ -1407,7 +1407,7 @@ class StatsMLB(Stats):
 
         return ev if book_odds else 0
 
-    def _fantasy_combo_spec(self, market):
+    def _fantasy_combo_spec(self, market, player):
         """Component-sum spec for the four MLB fantasy markets (brief §8).
 
         Pure config: the marginal/Bernoulli/quality-start weights read straight

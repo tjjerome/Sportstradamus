@@ -28,7 +28,7 @@ def bare_stats():
 
 
 def test_skater_underdog_spec():
-    spec = bare_stats()._fantasy_combo_spec("skater fantasy points underdog")
+    spec = bare_stats()._fantasy_combo_spec("skater fantasy points underdog", "Any Skater")
     assert spec == ComboSpec(marginals=NHL_SKATER_UNDERDOG_WEIGHTS)
     assert NHL_SKATER_UNDERDOG_WEIGHTS == (
         ("goals", 6),
@@ -41,7 +41,7 @@ def test_skater_underdog_spec():
 
 
 def test_skater_prizepicks_spec():
-    spec = bare_stats()._fantasy_combo_spec("fantasy points prizepicks")
+    spec = bare_stats()._fantasy_combo_spec("fantasy points prizepicks", "Any Skater")
     assert spec == ComboSpec(marginals=NHL_SKATER_PRIZEPICKS_WEIGHTS)
     assert NHL_SKATER_PRIZEPICKS_WEIGHTS == (
         ("goals", 8),
@@ -52,7 +52,7 @@ def test_skater_prizepicks_spec():
 
 
 def test_goalie_underdog_spec():
-    spec = bare_stats()._fantasy_combo_spec("goalie fantasy points underdog")
+    spec = bare_stats()._fantasy_combo_spec("goalie fantasy points underdog", "Any Goalie")
     assert spec == ComboSpec(
         marginals=NHL_GOALIE_UNDERDOG_WEIGHTS,
         bernoulli=NHL_GOALIE_UNDERDOG_BERNOULLI,
@@ -77,7 +77,7 @@ def test_goalie_quoted_pair_equals_shots_against_form():
 @pytest.mark.parametrize("market", ["sogBS", "goalie fantasy points parlay", "saves"])
 def test_other_markets_return_none(market):
     # sogBS rides combo_props; parlay fantasy and plain props stay off the spec path.
-    assert bare_stats()._fantasy_combo_spec(market) is None
+    assert bare_stats()._fantasy_combo_spec(market, "Any Skater") is None
 
 
 class _StubArchive:
