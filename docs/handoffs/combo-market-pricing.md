@@ -129,7 +129,14 @@ Sketch (research brief refines this):
    book-quoted (or an explicitly whitelisted analytic like QS), or the combo
    quote is absent — consumers already handle absent honestly post-repair.
    The gamelog fill-in either dies or survives only as a clearly-labeled
-   degraded tier that never reaches serving.
+   degraded tier that never reaches serving. "Book-quoted" means a real
+   sportsbook: a pick'em platform pays evenly at its posted line, so its implied
+   probability is anchored near 0.5 however far the truth sits from there, and a
+   platform-only component carries that anchor rather than a price. MLB stolen
+   bases archive 100% of Underdog rows at exactly under 0.50 where the
+   sportsbooks quote 0.87-0.89 and the market settles under 0.90 — weighted by 4
+   in the fantasy sum, one such component moves the combo further than every
+   honest one together.
 5. Wire NFL `check_combo_markets` through the generalized kernel (closes the
    stub and the `combined_markets.py` orphan).
 
@@ -172,6 +179,16 @@ distributions** instead of (or blended with) a directly-trained combo model.
 2. Lane A kernel + backtest; flip consumers 1→2→3 only on green backtest.
    Execution plan (phases, thresholds, admission policy):
    `~/.claude/plans/investigate-and-improve-the-abstract-lerdorf.md`.
+   Blocking sub-lever found while grading the kernel: both count conventions
+   (`NegBin r = 1/cv`, `DPO phi = 1/(1+cv·ev)`) impose `var = μ(1 + cv·μ)` on the
+   book quote, over-dispersing the inversion. MLB `hits` settles at mean 0.847
+   with P(0) = 0.4295, Poisson-exact, yet reproducing that P(0) under DPO at
+   cv=0.456 demands μ=1.066 — 26% high, and the sum weights it by ~4.6. A single
+   market's probability is unharmed (`get_odds` re-derives it from the same mean
+   under the same cv, so the round trip is exact), but a component *sum* adds
+   means, and `_blend_with_book` pools that same mean into every served count
+   cell. Fix is the research brief's fitted `var = a·μ^b`, not a blanket Poisson:
+   `rbi` genuinely clumps and stays over-dispersed.
 3. Lane B behind the scorecard A/B; per-cell ship decisions (deferred until
    Lane A lands).
 

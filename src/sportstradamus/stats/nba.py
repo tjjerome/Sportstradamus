@@ -31,6 +31,7 @@ from sportstradamus.helpers.io import read_gamelog, write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import nba_client
 from sportstradamus.stats.base import (
+    ComboSpec,
     Stats,
     archive,
     clean_data,
@@ -54,6 +55,11 @@ _CTG_PLAYER_KEY_COL = ""
 _CTG_PLAYER_META_COLS: frozenset[str] = frozenset()
 _CTG_TEAM_KEY_COL = ""
 _CTG_TEAM_META_COLS: frozenset[str] = frozenset()
+
+# DFS scoring weights shared by PrizePicks and Underdog NBA fantasy (settled gamelog formula in
+# _compute_derived_player_stats; its BLST*3 term is carried as separate BLK/STL components
+# because they are distinct book markets with their own correlation cross terms).
+NBA_FANTASY_WEIGHTS = (("PTS", 1), ("REB", 1.2), ("AST", 1.5), ("BLK", 3), ("STL", 3), ("TOV", -1))
 
 
 class StatsNBA(Stats):
@@ -1141,6 +1147,11 @@ class StatsNBA(Stats):
         # pylint: enable=duplicate-code
 
         self.playerProfile.fillna(0, inplace=True)
+        return None
+
+    def _fantasy_combo_spec(self, market):
+        if market in ("fantasy points prizepicks", "fantasy points underdog"):
+            return ComboSpec(marginals=NBA_FANTASY_WEIGHTS)
         return None
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):

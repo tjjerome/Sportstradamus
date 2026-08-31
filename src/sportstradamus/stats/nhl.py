@@ -32,6 +32,7 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.io import write_gamelog
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats.base import (
+    ComboSpec,
     Stats,
     archive,
     clean_data,
@@ -44,6 +45,29 @@ from sportstradamus.stats.nhl_position_policy import allowed_nhl_positions
 _GAMELOG_RETENTION_DAYS = 1431
 # Days since season start before triggering a full gamelog re-enrichment pass.
 _STALE_SEASON_DAYS = 300
+
+# DFS scoring weights (settled gamelog formulas in _skater_row; the sogBS terms there
+# are carried as separate shots/blocked components because those are distinct book
+# markets with their own correlation cross terms).
+NHL_SKATER_UNDERDOG_WEIGHTS = (
+    ("goals", 6),
+    ("assists", 4),
+    ("shots", 1),
+    ("blocked", 1),
+    ("hits", 0.5),
+    ("powerPlayPoints", 0.5),
+)
+NHL_SKATER_PRIZEPICKS_WEIGHTS = (("goals", 8), ("assists", 5), ("shots", 1.5), ("blocked", 1.5))
+# The research brief's 0.6*shotsAgainst - 3.6*goalsAgainst re-parameterization is
+# unusable here: shotsAgainst has zero book quotes in the archive (model-side volume
+# stat), so the goalie spec stays on the quoted pair; the same-player corr matrix
+# carries the residual saves x goalsAgainst co-movement (weakly negative for
+# starters — save% luck at fixed shot volume — despite saves + GA == SA on raw counts).
+NHL_GOALIE_UNDERDOG_WEIGHTS = (("saves", 0.6), ("goalsAgainst", -3))
+NHL_GOALIE_UNDERDOG_BERNOULLI = (("win", 6),)
+# Keeps the goalie win probability off the exact 0/1 poles so it always clears
+# combo_quote's strict open-interval admission check.
+_GOALIE_WIN_P_CLIP: float = 0.01
 
 
 class StatsNHL(Stats):
@@ -805,6 +829,40 @@ class StatsNHL(Stats):
             errors="ignore",
         )
         self.playerProfile.fillna(0, inplace=True)
+
+    def _fantasy_combo_spec(self, market):
+        if market == "skater fantasy points underdog":
+            return ComboSpec(marginals=NHL_SKATER_UNDERDOG_WEIGHTS)
+        if market == "fantasy points prizepicks":
+            return ComboSpec(marginals=NHL_SKATER_PRIZEPICKS_WEIGHTS)
+        if market == "goalie fantasy points underdog":
+            return ComboSpec(
+                marginals=NHL_GOALIE_UNDERDOG_WEIGHTS,
+                bernoulli=NHL_GOALIE_UNDERDOG_BERNOULLI,
+                analytics=("win_ml",),
+            )
+        return None
+
+    def _combo_bernoulli_p(self, name, player, date):
+        if name != "win":
+            return super()._combo_bernoulli_p(name, player, date)
+        if isinstance(date, str):
+            date = datetime.strptime(date, "%Y-%m-%d").date()
+        if date < datetime.today().date():
+            todays_games = self._gamelog_on(date)
+            player_game = todays_games.loc[todays_games[self.log_strings["player"]] == player]
+            if player_game.empty:
+                return np.nan
+            team = player_game[self.log_strings["team"]].iloc[0]
+        else:
+            team = self.short_gamelog.loc[
+                self.short_gamelog[self.log_strings["player"]] == player,
+                self.log_strings["team"],
+            ].iloc[-1]
+        # A goalie starter takes essentially every team decision, so the raw team
+        # moneyline is P(win) — no SP-style calibration map (unlike MLB pitchers).
+        p = archive.get_moneyline("NHL", date.strftime("%Y-%m-%d"), team)
+        return float(np.clip(p, _GOALIE_WIN_P_CLIP, 1 - _GOALIE_WIN_P_CLIP))
 
     def check_combo_markets(self, market, player, date=datetime.today().date()):
         if self.snapshot_only_rebuild:

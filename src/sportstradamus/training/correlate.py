@@ -14,8 +14,9 @@ Outputs (per league, all under ``data/leagues/{league}/``):
   relationship.
 * ``corr_market_summary.parquet`` — market-level pooled means of the pair
   correlations, one row per ``(market_a, market_b, scope)`` where scope is
-  ``same_team``, ``opposing``, or ``same_player`` (same-team pairs whose two
-  sides share a slot prefix — one player's own stat pair).
+  ``same_team``, ``opposing``, or ``same_player`` (same-slot pairs — one
+  player's own stat pair — pooled from the unshrunk pre-floor correlations
+  with an n-weighted Fisher-z mean, shrunk once at the pooled overlap).
 * ``corr_metadata.json`` — date range covered, per-team observation counts,
   generation timestamp, git SHA.
 
@@ -58,8 +59,14 @@ MIN_ROLLING_OBSERVATIONS: int = 3
 MIN_OVERLAP_FOR_FULL_WEIGHT: int = 30
 
 # Pairs with absolute (post-shrinkage) correlation below this magnitude are
-# dropped from the output — keeps the on-disk matrix sparse.
+# dropped from the output — keeps the on-disk matrix sparse. The same_player
+# summary instead floors the unshrunk *pooled* value (see _same_player_summary).
 CORR_MAGNITUDE_FLOOR: float = 0.05
+
+# Fisher-z pooling needs |rho| strictly below 1: tiny-overlap same-slot pairs
+# can rank-agree perfectly (the Spearman remap hits exactly +/-1, where arctanh
+# diverges), and one infinite z would poison the pooled mean.
+_FISHER_Z_RHO_CAP: float = 1.0 - 1e-6
 
 # Structural invariants (not cache-key tunables): a scored game has exactly two
 # teams, and a correlation needs at least two markets over at least two rows.
@@ -151,6 +158,7 @@ _TRACKED_STATS: dict[str, dict] = {
             "hits",
             "goals",
             "assists",
+            "powerPlayPoints",
             "faceOffWins",
             "timeOnIce",
         ],
@@ -164,6 +172,7 @@ _TRACKED_STATS: dict[str, dict] = {
             "hits",
             "goals",
             "assists",
+            "powerPlayPoints",
             "faceOffWins",
             "timeOnIce",
         ],
@@ -177,6 +186,7 @@ _TRACKED_STATS: dict[str, dict] = {
             "hits",
             "goals",
             "assists",
+            "powerPlayPoints",
             "faceOffWins",
             "timeOnIce",
         ],
@@ -783,7 +793,8 @@ def correlate(league: str, stat_data, *, force: bool = False) -> None:
     4. Apply shrinkage proportional to the overlap deficit below
        ``MIN_OVERLAP_FOR_FULL_WEIGHT``.
     5. Stratify into same-team and opposing pair series; drop pairs below
-       ``CORR_MAGNITUDE_FLOOR``.
+       ``CORR_MAGNITUDE_FLOOR``. Same-slot pairs are captured pre-shrink,
+       pre-floor for the ``same_player`` summary pool.
     6. Write the two CSVs and the metadata JSON sidecar.
 
     Args:
@@ -810,8 +821,10 @@ def correlate(league: str, stat_data, *, force: bool = False) -> None:
     matrix = _append_new_records(league, log, matrix, latest_date, raw_filepath)
     matrix_for_corr = matrix.drop(columns="DATE", errors="ignore")
 
-    same_team_blocks, opposing_blocks, per_team_obs = _correlate_teams(matrix_for_corr)
-    _write_corr_outputs(league, same_team_blocks, opposing_blocks)
+    same_team_blocks, opposing_blocks, same_player_pairs, per_team_obs = _correlate_teams(
+        matrix_for_corr
+    )
+    _write_corr_outputs(league, same_team_blocks, opposing_blocks, same_player_pairs)
     _write_corr_metadata(league, matrix, per_team_obs, cache_key)
 
 
@@ -850,9 +863,42 @@ def _append_new_records(league, log, matrix, latest_date, raw_filepath):
     return matrix
 
 
+def _same_slot_pairs(team, c_remap: pd.DataFrame, overlap: pd.DataFrame) -> pd.DataFrame | None:
+    """One team's unshrunk, pre-floor same-slot (own-player) market-pair rows.
+
+    Captured before ``_shrink_correlations`` runs, so ``_same_player_summary`` can
+    pool honestly from unshrunk, unfloored correlations. The ``_OPP_`` side is
+    skipped: those are the opponent's own pairs, captured under the opponent's row
+    of the same game. The mask is symmetric, so both (a, b) and (b, a) rows emit,
+    mirroring the other scopes' pair grids. ``None`` when the team has no same-slot
+    pair with a defined correlation.
+    """
+    labels = c_remap.columns
+    own = ~labels.str.startswith("_OPP_")
+    slots = labels.str.split(".").str[0].to_numpy()
+    markets = labels.str.split(".").str[-1].to_numpy()
+    rho_arr = c_remap.to_numpy()
+    pair_mask = (slots[:, None] == slots[None, :]) & own[:, None] & own[None, :]
+    np.fill_diagonal(pair_mask, False)
+    pair_mask &= ~np.isnan(rho_arr)
+    ii, jj = np.nonzero(pair_mask)
+    if not ii.size:
+        return None
+    return pd.DataFrame(
+        {
+            "team": team,
+            "market_a": markets[ii],
+            "market_b": markets[jj],
+            "rho": rho_arr[ii, jj],
+            "n": overlap.to_numpy()[ii, jj],
+        }
+    )
+
+
 def _correlate_teams(matrix_for_corr):
     same_team_blocks: dict = {}
     opposing_blocks: dict = {}
+    same_player_frames: list[pd.DataFrame] = []
     per_team_obs: dict[str, int] = {}
 
     teams_iter = matrix_for_corr["TEAM"].unique() if "TEAM" in matrix_for_corr.columns else []
@@ -869,6 +915,11 @@ def _correlate_teams(matrix_for_corr):
 
         c_spearman, overlap = _pairwise_spearman_with_overlap(team_matrix)
         c_remap = 2 * np.sin(np.pi / 6 * c_spearman)
+
+        same_player_frame = _same_slot_pairs(team, c_remap, overlap)
+        if same_player_frame is not None:
+            same_player_frames.append(same_player_frame)
+
         c_shrunk = _shrink_correlations(c_remap, overlap)
 
         c_stack = c_shrunk.unstack().dropna()
@@ -880,7 +931,12 @@ def _correlate_teams(matrix_for_corr):
             same_team_blocks[team] = same
         if not opposing.empty:
             opposing_blocks[team] = opposing
-    return same_team_blocks, opposing_blocks, per_team_obs
+    same_player_pairs = (
+        pd.concat(same_player_frames, ignore_index=True)
+        if same_player_frames
+        else pd.DataFrame(columns=["team", "market_a", "market_b", "rho", "n"])
+    )
+    return same_team_blocks, opposing_blocks, same_player_pairs, per_team_obs
 
 
 def _market_summary(blocks: pd.Series, scope: str) -> pd.DataFrame:
@@ -914,7 +970,48 @@ def _market_summary(blocks: pd.Series, scope: str) -> pd.DataFrame:
     return out[columns]
 
 
-def _write_corr_outputs(league, same_team_blocks, opposing_blocks):
+def _same_player_summary(pairs: pd.DataFrame) -> pd.DataFrame:
+    """Pool captured same-slot pairs into ``same_player`` market-pair rows.
+
+    ``pairs`` holds one row per (team, slot) same-slot market pair with its
+    unshrunk pre-floor correlation ``rho`` and pairwise overlap ``n``, captured
+    in ``_correlate_teams`` before ``_shrink_correlations``. Pooling the stored
+    per-team R instead would double-attenuate: each stored value is already
+    ``min(1, n/30)``-shrunk, and the post-shrink floor has deleted weak-overlap
+    pairs outright.
+
+    ``rho_mean`` for this scope is the once-shrunk Fisher-z pool:
+    ``tanh(sum(n * arctanh(rho)) / sum(n))`` times a single credibility shrink
+    ``min(1, n_pool / MIN_OVERLAP_FOR_FULL_WEIGHT)`` at the pooled overlap
+    (usually 1). ``CORR_MAGNITUDE_FLOOR`` tests the *unshrunk* pooled value, so
+    a weak-overlap pair survives once its pooled evidence clears the floor.
+    ``n_teams`` is the pooled pair-row count and ``n_teams_distinct`` the
+    distinct teams behind those rows, matching ``_market_summary``'s columns.
+    """
+    columns = ["market_a", "market_b", "rho_mean", "n_teams", "scope", "n_teams_distinct"]
+    if pairs.empty:
+        return pd.DataFrame(columns=columns)
+
+    z = np.arctanh(pairs["rho"].clip(-_FISHER_Z_RHO_CAP, _FISHER_Z_RHO_CAP))
+    agg = (
+        pairs.assign(nz=pairs["n"] * z)
+        .groupby(["market_a", "market_b"])
+        .agg(
+            nz=("nz", "sum"),
+            n_pool=("n", "sum"),
+            n_teams=("n", "size"),
+            n_teams_distinct=("team", "nunique"),
+        )
+        .reset_index()
+    )
+    rho_pool = np.tanh(agg["nz"] / agg["n_pool"])
+    shrink = (agg["n_pool"] / MIN_OVERLAP_FOR_FULL_WEIGHT).clip(upper=1.0)
+    agg["rho_mean"] = rho_pool * shrink
+    agg["scope"] = "same_player"
+    return agg.loc[rho_pool.abs() > CORR_MAGNITUDE_FLOOR, columns].reset_index(drop=True)
+
+
+def _write_corr_outputs(league, same_team_blocks, opposing_blocks, same_player_pairs):
     league_dir = pkg_resources.files(data) / "leagues" / league.lower()
     league_dir.mkdir(parents=True, exist_ok=True)
     same_path = league_dir / "corr_same_team.parquet"
@@ -930,20 +1027,10 @@ def _write_corr_outputs(league, same_team_blocks, opposing_blocks):
     else:
         pd.DataFrame(columns=["R"]).to_parquet(opposing_path, compression="zstd")
 
-    if same_team_blocks:
-        label_a = same_series.index.get_level_values(1)
-        label_b = same_series.index.get_level_values(2)
-        # An equal slot prefix (B1., G2., ...) on both sides means one player's
-        # own stat pair; label inequality drops the R=1.0 self-pairs.
-        same_slot = label_a.str.split(".").str[0] == label_b.str.split(".").str[0]
-        same_player_series = same_series[same_slot & (label_a != label_b)]
-    else:
-        same_player_series = same_series
-
     parts = [
         _market_summary(same_series, "same_team"),
         _market_summary(opposing_series, "opposing"),
-        _market_summary(same_player_series, "same_player"),
+        _same_player_summary(same_player_pairs),
     ]
     non_empty = [p for p in parts if not p.empty]
     summary = pd.concat(non_empty, ignore_index=True) if non_empty else parts[0]

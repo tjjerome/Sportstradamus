@@ -83,18 +83,19 @@ def test_null_line_rows_are_immune_to_divergence(archive):
     assert archive.get_ev(_LG, _MKT, _DATE, "P") == pytest.approx(expected)
 
 
-def test_dfs_weight_capped_when_a_real_book_remains(archive, monkeypatch):
-    """A dominant DFS platform weight clips to the cap; the sportsbook absorbs the rest."""
+def test_dfs_platform_drops_out_when_a_real_book_remains(archive, monkeypatch):
+    """A sportsbook on the entry prices it alone, whatever weight the platform carries."""
     monkeypatch.setitem(config.book_weights, _LG, {_MKT: {"Sleeper": 12.0, "fanduel": 1.0}})
     _insert(archive, "fanduel", 20.0, 24.5)
     _insert(archive, "Sleeper", 40.0, 24.5)
 
-    # Sleeper's normalized 12/13 ~ 0.92 (the live WNBA PRA failure mode) clips to
-    # 0.25 and fanduel takes the freed mass, so the mix is exactly 0.75/0.25.
-    assert archive.get_ev(_LG, _MKT, _DATE, "P") == pytest.approx(0.75 * 20.0 + 0.25 * 40.0)
+    # Sleeper's normalized 12/13 ~ 0.92 is the live WNBA PRA failure mode, but even an
+    # even split misprices: a pick'em platform's implied probability sits near 0.5
+    # however far the truth is, so it contributes no signal beside a real book.
+    assert archive.get_ev(_LG, _MKT, _DATE, "P") == pytest.approx(20.0)
 
 
-def test_dfs_only_cell_skips_the_cap(archive, monkeypatch):
+def test_dfs_only_cell_keeps_the_platforms(archive, monkeypatch):
     """With no sportsbook to defer to, platform weights stand as configured."""
     monkeypatch.setitem(config.book_weights, _LG, {_MKT: {"Sleeper": 3.0, "Underdog": 1.0}})
     _insert(archive, "Sleeper", 40.0, 24.5)

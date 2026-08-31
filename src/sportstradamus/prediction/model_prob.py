@@ -32,7 +32,6 @@ from sportstradamus.helpers import (
     combo_props,
     decode_predictive_mean,
     fused_loc,
-    get_ev,
     get_odds,
     get_push_prob,
     set_model_start_values,
@@ -48,6 +47,7 @@ from sportstradamus.helpers.io import market_file_slug, model_pickle_path
 from sportstradamus.helpers.training_quotes import (
     DFS_PLATFORM_BOOKS,
     TrainingQuote,
+    quote_pricing_params,
     resolve_training_quote,
 )
 from sportstradamus.spiderLogger import logger
@@ -749,7 +749,7 @@ def _book_evs_for_players(
     quotes = _servable_fallback_quotes(offer_df, league, market, date_map, stat_data, dist, cv)
     gate = None if dist == "SkewNormal" else hist_gate or None
     return [
-        _quote_pricing_params(quotes[p], league, market, dist, cv, gate=gate)[0]
+        quote_pricing_params(quotes[p], league, market, dist, cv, gate=gate)[0]
         if p in quotes
         else np.nan
         for p in players
@@ -1656,31 +1656,6 @@ def _servable_fallback_quotes(
     return quotes
 
 
-def _quote_pricing_params(
-    quote: TrainingQuote, league: str, market: str, dist: str, cv: float, gate: float | None = None
-) -> tuple[float, float | None, float | None]:
-    """Invert the quote at its own line under the exact shape the decode will use.
-
-    Returns ``(mean, sigma, skew)``. Fixing ``(sigma, skew)`` across the invert/decode
-    pair makes ``decode(invert(p)) == p`` at the quote line — the shape-consistent
-    round trip that kills the symmetric-encode/skewed-decode asymmetry (an honest
-    50/50 no longer decodes to 0.57 under). On the fallback path the pair is ungated
-    on both sides: books only price players likely to record the stat, so the
-    population zero rate can exceed the quoted under-prob and a gated inversion
-    would clamp at ``get_ev``'s ceiling (see ``_authentic_quote``). The model path
-    passes the cell gate on count families instead — its decode is gated and its
-    blend expects the non-zero component mean.
-    """
-    under = 1.0 - quote.over_probability
-    if dist == "SkewNormal":
-        sigma, skew = book_skewnormal_shape(league, market, quote.ev, cv)
-        sigma, skew = float(sigma), float(skew)
-    else:
-        sigma = skew = None
-    mean = float(get_ev(quote.line, under, cv, dist=dist, sigma=sigma, skew_alpha=skew, gate=gate))
-    return mean, sigma, skew
-
-
 def _price_offers_at_quotes(
     offer_df: pd.DataFrame,
     quotes: dict[str, TrainingQuote],
@@ -1697,7 +1672,7 @@ def _price_offers_at_quotes(
     reproduces the cohort probability exactly and alternate lines price off the
     same distribution rather than a cross-line average.
     """
-    priced = {p: _quote_pricing_params(q, league, market, dist, cv) for p, q in quotes.items()}
+    priced = {p: quote_pricing_params(q, league, market, dist, cv) for p, q in quotes.items()}
     offer_df["Market Projection"] = offer_df.index.map({p: v[0] for p, v in priced.items()})
     shape_kwargs = {}
     if dist == "SkewNormal":

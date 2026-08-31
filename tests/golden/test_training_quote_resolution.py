@@ -12,9 +12,11 @@ from sportstradamus.helpers import config
 from sportstradamus.helpers.distributions import get_odds
 from sportstradamus.helpers.training_quotes import (
     AUTHENTIC,
+    COMBO_SUM_SOURCE,
     DERIVED,
     SYNTHETIC,
     ArchivedBookQuote,
+    TrainingQuote,
     archive_ev_is_runaway,
     resolve_training_quote,
 )
@@ -64,6 +66,42 @@ def test_direct_probability_uses_one_deterministic_same_line_cohort():
     assert quote.observed_at == _AT_2
     assert quote.book_count == 2
     assert quote.archived and not quote.odds_synthetic
+
+
+def test_direct_cohort_prices_off_its_sportsbooks_when_a_platform_shares_the_line():
+    """A pick'em platform beside a real book contributes neither price nor provenance.
+
+    Its implied probability is anchored near 0.5 however far the truth sits from
+    there — on MLB stolen bases the platforms archive 100% at under 0.50 where the
+    sportsbooks on the same cohort quote 0.86 and the market settles under 0.90.
+    """
+    quote = resolve_training_quote(
+        [_row("Underdog", None, 0.50, 0.5), _row("fanduel", None, 0.88, 0.5)],
+        legacy_line=None,
+        fallback_line=0.0,
+        fallback_ev=None,
+        dist="Poisson",
+        cv=0.5,
+    )
+
+    assert quote.source == "book_direct"
+    assert quote.over_probability == pytest.approx(0.12)
+    assert quote.books == ("fanduel",)
+    assert quote.book_count == 1
+
+
+def test_direct_cohort_keeps_a_platform_no_sportsbook_quoted():
+    quote = resolve_training_quote(
+        [_row("Underdog", None, 0.50, 0.5), _row("Sleeper", None, 0.60, 0.5)],
+        legacy_line=None,
+        fallback_line=0.0,
+        fallback_ev=None,
+        dist="Poisson",
+        cv=0.5,
+    )
+
+    assert quote.over_probability == pytest.approx(0.45)
+    assert quote.books == ("Sleeper", "Underdog")
 
 
 def test_legacy_ev_inversion_is_explicitly_derived_and_synthetic():
@@ -193,6 +231,81 @@ def test_no_book_quote_is_model_fallback_with_honest_null_observation():
     assert quote.synthetic_reason == "no_usable_book_probability"
     assert quote.observed_at is None
     assert quote.book_count == 0
+
+
+def _combo_sum_quote():
+    return TrainingQuote(
+        line=3.5,
+        over_probability=0.62,
+        ev=3.9,
+        source=COMBO_SUM_SOURCE,
+        authenticity=DERIVED,
+        synthetic_reason="combo_sum",
+        observed_at=_AT_1,
+        book_count=2,
+        books=("fanduel", "draftkings"),
+        sum_sd=1.7,
+        under_prob_at=lambda line: 0.38,
+    )
+
+
+def test_fallback_quote_outranks_legacy_combo_ev_inversion():
+    """The caller-built combo_sum quote returns verbatim, beating a usable fallback_ev."""
+    combo = _combo_sum_quote()
+    quote = resolve_training_quote(
+        [],
+        legacy_line=2.5,
+        fallback_line=2.0,
+        fallback_ev=3.0,
+        dist="SkewNormal",
+        cv=0.5,
+        fallback_quote=combo,
+    )
+
+    assert quote is combo
+
+
+def test_direct_and_ev_inversion_rungs_outrank_fallback_quote():
+    direct = resolve_training_quote(
+        [_row("b", None, 0.55, 2.5)],
+        legacy_line=2.5,
+        fallback_line=2.0,
+        fallback_ev=None,
+        dist="SkewNormal",
+        cv=0.5,
+        fallback_quote=_combo_sum_quote(),
+    )
+    derived = resolve_training_quote(
+        [_row("b", 3.0, None, None)],
+        legacy_line=2.5,
+        fallback_line=2.0,
+        fallback_ev=None,
+        dist="SkewNormal",
+        cv=0.5,
+        fallback_quote=_combo_sum_quote(),
+    )
+
+    assert direct.source == "book_direct"
+    assert direct.authenticity == AUTHENTIC
+    assert derived.source == "book_ev_inversion"
+
+
+def test_as_record_excludes_combo_sum_extras():
+    """``sum_sd``/``under_prob_at`` never serialize; records keep the exact legacy columns."""
+    record = _combo_sum_quote().as_record()
+
+    assert list(record) == [
+        "Line",
+        "Odds",
+        "EV",
+        "Archived",
+        "Odds_synthetic",
+        "QuoteSource",
+        "QuoteAuthenticity",
+        "QuoteSyntheticReason",
+        "QuoteObservedAt",
+        "QuoteBookCount",
+    ]
 
 
 class _FakeArchive:

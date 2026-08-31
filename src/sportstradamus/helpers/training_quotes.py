@@ -8,17 +8,23 @@ from __future__ import annotations
 
 import dataclasses
 import datetime
+import operator
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from typing import TypeVar
 
 import numpy as np
 
+from sportstradamus.helpers.config import book_skewnormal_shape
 from sportstradamus.helpers.distributions import get_ev, get_odds
 
 CONSENSUS_LINE_POLICY = "modal-nearest-median-v1"
 AUTHENTIC = "authentic"
 DERIVED = "derived"
 SYNTHETIC = "synthetic"
+# Component-sum kernel quotes carry this source with ``authenticity=DERIVED``:
+# the probability is derived from real component-book quotes, not fabricated.
+COMBO_SUM_SOURCE = "combo_sum"
 BLOWN_ABS_CEILING = 2000.0
 BLOWN_LINE_FACTOR = 5.0
 
@@ -73,6 +79,11 @@ class TrainingQuote:
     observed_at: datetime.datetime | None
     book_count: int
     books: tuple[str, ...] = ()
+    # Combo-sum extras (``COMBO_SUM_SOURCE`` quotes): the component-sum sd and a
+    # per-line under-probability evaluator. Both are excluded from ``as_record()``
+    # and every serialization — records stay byte-identical to legacy quotes.
+    sum_sd: float | None = None
+    under_prob_at: Callable[[float], float] | None = None
 
     @property
     def archived(self) -> bool:
@@ -139,6 +150,30 @@ def archive_ev_is_usable(value, line) -> bool:
 def _weight(book: str, weights: Mapping[str, float]) -> float:
     value = weights.get(book, 1.0)
     return float(value) if _positive(value) else 1.0
+
+
+_R = TypeVar("_R")
+_quote_book: Callable[[ArchivedBookQuote], str] = operator.attrgetter("book")
+
+
+def sportsbook_cohort(
+    rows: Sequence[_R], book_of: Callable[[_R], str] = _quote_book
+) -> Sequence[_R]:
+    """The sportsbooks in a cohort, or the whole cohort when none of them quoted it.
+
+    A pick'em platform posts a line its product pays evenly at, so its implied
+    probability is anchored near 0.5 however far the truth sits from it. On MLB
+    stolen bases the platforms quote 0.50 under where the sportsbooks on the same
+    cohort quote 0.86 and the market settles under 0.90; the same holds for home
+    runs and doubles, every market whose 0.5-line granularity forces the platform
+    off the median. Graded over the archive's mixed cohorts, dropping them beat
+    keeping them on 14 of 16 MLB markets and cost 0.0001 Brier on the worst.
+
+    With no sportsbook present the platform's line is the only evidence there is,
+    so it stays — the pick'em boards carry entries no book prices at all.
+    """
+    sharp = [row for row in rows if book_of(row) not in DFS_PLATFORM_BOOKS]
+    return sharp or rows
 
 
 def _weighted_value(
@@ -228,7 +263,11 @@ def _authentic_quote(
     ceiling. Neither inversion reproduces such a book, so the book leg of ``fused_loc`` is
     unsound for gated cells either way, a distribution-family question rather than a clamp
     choice.
+
+    The cohort narrows to its sportsbooks first (:func:`sportsbook_cohort`), so the
+    quote's ``books``/``book_count`` name exactly the rows that set its price.
     """
+    cohort = sportsbook_cohort(cohort)
     under = _weighted_value(cohort, "under_probability", weights)
     if under is None:  # Defensive; the cohort predicate guarantees this.
         raise ValueError("direct quote cohort has no probability")
@@ -288,13 +327,19 @@ def resolve_training_quote(
     dist: str,
     cv: float,
     weights: Mapping[str, float] | None = None,
+    fallback_quote: TrainingQuote | None = None,
 ) -> TrainingQuote:
     """Resolve one training quote without consulting outcomes or mutable state.
 
     Direct shape-free probabilities are authentic only when they belong to the
     selected same-line book cohort. Legacy EV inversion and neutral/model
-    fallbacks remain explicitly derived or synthetic.
+    fallbacks remain explicitly derived or synthetic. A caller-built
+    ``fallback_quote`` slots between book EV inversion and the legacy
+    ``fallback_ev`` combo inversion: it prices a real component-sum tail, so it
+    outranks a scalar EV inverted under the cell's fabricated generic-cv tail.
     """
+    # style: allow-complexity — the resolution ladder itself: one early return per
+    # rung in provenance order; extracting rungs would scatter one policy.
     weights = weights or {}
     ordered_rows = sorted(rows, key=lambda row: row.book)
     direct = _direct_line_cohort(ordered_rows)
@@ -309,7 +354,7 @@ def resolve_training_quote(
         if _positive(fallback_line)
         else 0.5
     )
-    ev_rows = [row for row in ordered_rows if archive_ev_is_usable(row.ev, line)]
+    ev_rows = sportsbook_cohort([row for row in ordered_rows if archive_ev_is_usable(row.ev, line)])
     cohort_ev = _weighted_value(ev_rows, "ev", weights)
     derived = _ev_inversion_quote(
         line,
@@ -322,6 +367,9 @@ def resolve_training_quote(
     )
     if derived is not None:
         return derived
+
+    if fallback_quote is not None:
+        return fallback_quote
 
     combo_ev = float(fallback_ev) if archive_ev_is_usable(fallback_ev, line) else None
     derived = _ev_inversion_quote(
@@ -347,3 +395,28 @@ def resolve_training_quote(
         observed_at=None,
         book_count=0,
     )
+
+
+def quote_pricing_params(
+    quote: TrainingQuote, league: str, market: str, dist: str, cv: float, gate: float | None = None
+) -> tuple[float, float | None, float | None]:
+    """Invert the quote at its own line under the exact shape the decode will use.
+
+    Returns ``(mean, sigma, skew)``. Fixing ``(sigma, skew)`` across the invert/decode
+    pair makes ``decode(invert(p)) == p`` at the quote line — the shape-consistent
+    round trip that kills the symmetric-encode/skewed-decode asymmetry (an honest
+    50/50 no longer decodes to 0.57 under). On the fallback path the pair is ungated
+    on both sides: books only price players likely to record the stat, so the
+    population zero rate can exceed the quoted under-prob and a gated inversion
+    would clamp at ``get_ev``'s ceiling (see ``_authentic_quote``). The model path
+    passes the cell gate on count families instead — its decode is gated and its
+    blend expects the non-zero component mean.
+    """
+    under = 1.0 - quote.over_probability
+    if dist == "SkewNormal":
+        sigma, skew = book_skewnormal_shape(league, market, quote.ev, cv)
+        sigma, skew = float(sigma), float(skew)
+    else:
+        sigma = skew = None
+    mean = float(get_ev(quote.line, under, cv, dist=dist, sigma=sigma, skew_alpha=skew, gate=gate))
+    return mean, sigma, skew

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime
+import operator
 import os
 import time
 import warnings
@@ -45,9 +46,9 @@ from sportstradamus.helpers.distributions import (
 )
 from sportstradamus.helpers.text import remove_accents
 from sportstradamus.helpers.training_quotes import (
-    DFS_PLATFORM_BOOKS,
     ArchivedBookQuote,
     pickem_quote,
+    sportsbook_cohort,
 )
 
 
@@ -82,9 +83,6 @@ _DIVERGENCE_MIN_BOOKS = 3
 _DIVERGENCE_ABS_FLOOR = 2.0
 # High lines jitter proportionally, so the tolerance also scales with the median.
 _DIVERGENCE_REL_FACTOR = 0.25
-# Ceiling on one DFS platform's normalized consensus weight while a sportsbook remains.
-_DFS_BOOK_WEIGHT_CAP = 0.25
-
 _DEFAULT_DB_PATH = Path("archive/archive.duckdb")
 
 # Hours before commence_time treated as "the books' line" during training.
@@ -444,27 +442,21 @@ class Archive:
 
         Rows quoting a line far from the cohort median are a different offer
         (a DFS platform's moved/discounted tier) and drop out; NULL-line rows
-        (team markets, pre-migration history) never do. Each DFS platform still
-        present is then capped at ``_DFS_BOOK_WEIGHT_CAP`` of the normalized
-        weight while at least one sportsbook remains, so a lone pick'em quote
-        cannot dominate the consensus.
+        (team markets, pre-migration history) never do. What survives narrows to
+        its sportsbooks under the same :func:`sportsbook_cohort` policy the
+        shape-free quote resolver applies, so both consensus reads price off one
+        rule rather than two.
         """
-        usable = _drop_divergent_lines([row for row in rows if row[1] is not None])
+        usable = sportsbook_cohort(
+            _drop_divergent_lines([row for row in rows if row[1] is not None]),
+            operator.itemgetter(0),
+        )
         if not usable:
             return float("nan")
 
         weights = book_weights.get(league, {}).get(market, {})
         values = np.array([row[1] for row in usable], dtype=float)
         ws = np.array([weights.get(row[0], 1) for row in usable], dtype=float)
-        is_dfs = np.array([row[0] in DFS_PLATFORM_BOOKS for row in usable])
-        if is_dfs.any() and not is_dfs.all():
-            norm = ws / ws.sum()
-            capped = np.minimum(norm[is_dfs], _DFS_BOOK_WEIGHT_CAP)
-            # One renormalization: the freed mass goes to the sportsbooks, keeping
-            # each DFS book's effective weight at or under the cap.
-            norm[~is_dfs] *= (1.0 - capped.sum()) / norm[~is_dfs].sum()
-            norm[is_dfs] = capped
-            ws = norm
         return float(np.average(values, weights=ws))
 
     def _book_rows(

@@ -5,7 +5,9 @@ import json
 import os.path
 import pickle
 import warnings
+from bisect import bisect_left
 from datetime import datetime, timedelta
+from functools import partial
 from io import StringIO
 from time import sleep
 
@@ -13,7 +15,9 @@ import line_profiler
 import numpy as np
 import pandas as pd
 import statsapi as mlb
+from scipy.special import expit, logit
 from scipy.stats import iqr, norm, poisson
+from sklearn.linear_model import LogisticRegression
 from sklearn.neighbors import BallTree
 from tqdm import tqdm
 
@@ -31,9 +35,17 @@ from sportstradamus.helpers import (
     stat_cv,
     stat_dist,
 )
+from sportstradamus.helpers.combined_markets import POST_RNG_SEED
 from sportstradamus.helpers.io import write_gamelog
 from sportstradamus.spiderLogger import logger
-from sportstradamus.stats.base import Stats, archive, clean_data, is_mlb_pitcher_market, scraper
+from sportstradamus.stats.base import (
+    ComboSpec,
+    Stats,
+    archive,
+    clean_data,
+    is_mlb_pitcher_market,
+    scraper,
+)
 
 # Minimum Savant affinity match_score to include a player as a comparable.
 # Scores below this are weak matches that add noise to comp feature sets.
@@ -89,6 +101,152 @@ _OBP_POLE_GUARD = 0.5  # cap expected OBP so the 1/(1-OBP) PA law stays finite
 _TEAM_OBP_WINDOW = (
     10  # recent starts for opposing-starter OBP-allowed (matches teamProfile last-10)
 )
+
+
+# The four fantasy markets priced as honest component sums through the NORTA
+# kernel (combo-sum pricing brief §8); everything else — parlay variants
+# included — keeps the legacy `_check_mlb_fantasy` path.
+FANTASY_COMBO_MARKETS = frozenset(
+    {
+        "hitter fantasy score",
+        "hitter fantasy points underdog",
+        "pitcher fantasy score",
+        "pitcher fantasy points underdog",
+    }
+)
+
+_HIT_TYPES = ("singles", "doubles", "triples", "home runs")
+
+# Hit-type fantasy weights per variant — the same numbers as the
+# `_mlb_fantasy_props` tables (pinned by tests/test_combo_spec_mlb.py). The
+# hit types are not priced as marginals: each sampled `hits` draw is split
+# across them by the compound-multinomial post hook below.
+FANTASY_HIT_TYPE_WEIGHTS = {
+    "hitter fantasy points underdog": (
+        ("singles", 3.0),
+        ("doubles", 6.0),
+        ("triples", 8.0),
+        ("home runs", 10.0),
+    ),
+    "hitter fantasy score": (
+        ("singles", 3.0),
+        ("doubles", 5.0),
+        ("triples", 8.0),
+        ("home runs", 10.0),
+    ),
+}
+
+# Settled hit-by-pitch weight per variant (the gamelog fantasy formulas). No
+# book quotes HBP, so it enters as a deterministic mean offset of
+# weight * LEAGUE_HBP_PER_GAME — +0.135 points on underdog, 2% of the mean and
+# <1% of the variance, admitted clean per brief §8e.
+FANTASY_HBP_WEIGHTS = {"hitter fantasy points underdog": 3.0, "hitter fantasy score": 2.0}
+# ~0.011 HBP per plate appearance x ~4.2 PA per game (brief §8e).
+LEAGUE_HBP_PER_GAME = 0.045
+
+# League hit-type shares (singles, doubles, triples, home runs) measured on
+# 140k hitter-games (brief §8d): the split fallback for thin player windows.
+LEAGUE_HIT_SHARES = (0.6517, 0.1925, 0.0165, 0.1393)
+# Below this many trailing-window hits a player's own shares are noisier than
+# the league prior (the singles-share SE alone is ~0.11 at 20 hits).
+_HIT_SHARES_MIN_HITS = 20
+
+# Quality start settles as six full innings (outs >= 18) with earned runs <= 3.
+_QS_MIN_OUTS = 18
+_QS_MAX_RUNS = 3
+
+# P(SP win) / P(team win) by team-moneyline bucket ((lo, hi] upper edges),
+# measured on 13,914 starts (brief §8b). A step table rather than one flat
+# ratio because favorites convert team wins into starter decisions at ~0.68
+# against ~0.43 for heavy dogs. Fallback map for gamelogs too thin to fit the
+# logistic in `_fit_sp_win_curve`.
+SP_WIN_RATIO_BUCKETS = (
+    (0.40, 0.430),
+    (0.45, 0.527),
+    (0.50, 0.589),
+    (0.55, 0.557),
+    (0.60, 0.592),
+    (0.65, 0.680),
+    (1.00, 0.684),
+)
+# Quoted starter rows required before the fitted logistic map is trusted over
+# the measured bucket table.
+_SP_WIN_FIT_MIN_STARTS = 500
+# Keeps logit() finite on consensus moneylines near the probability poles.
+_SP_WIN_P_CLIP = 0.01
+
+
+def _multinomial_split(rng, hits, shares):
+    """Split integer hit-count draws across the four hit types.
+
+    Binomial ladder — X1 ~ Bin(H, s1), X2 ~ Bin(H - X1, s2 / (1 - s1)), ... —
+    equal in law to a per-draw ``rng.multinomial(H_i, shares)`` (multinomial
+    chain rule) but vectorized over the draw vector, which ``rng.multinomial``
+    cannot do for a vector of trial counts.
+    """
+    counts = []
+    remaining = hits
+    tail = 1.0
+    for share in shares[:-1]:
+        # tail hits 0 when the leading shares already sum to 1 (a window that is
+        # all singles); the clip absorbs float error in the renormalization.
+        p = float(np.clip(share / tail, 0.0, 1.0)) if tail > 0 else 0.0
+        drawn = rng.binomial(remaining, p)
+        counts.append(drawn)
+        remaining = remaining - drawn
+        tail -= share
+    counts.append(remaining)
+    return counts
+
+
+def _build_hit_split_post(stats_obj, player, date, *, market):
+    """Build the hitter-fantasy post hook: compound-multinomial hit-type split.
+
+    Proration made the four hit types deterministic multiples of one latent and
+    discarded 25% of the sum's variance; splitting each sampled ``hits`` draw
+    as Mult(H, shares) recovers 98.6% of it (brief §8d). Shares come from the
+    player's trailing window, or from the league table when the window holds
+    too few hits. The unquoted HBP term rides along as a deterministic mean
+    offset (brief §8e).
+    """
+    games = stats_obj.short_gamelog
+    games = games[games[stats_obj.log_strings["player"]] == player]
+    window_hits = games["hits"].sum()
+    if window_hits >= _HIT_SHARES_MIN_HITS:
+        shares = tuple(float(games[sub].sum()) / float(window_hits) for sub in _HIT_TYPES)
+    else:
+        shares = LEAGUE_HIT_SHARES
+    weights = [weight for _, weight in FANTASY_HIT_TYPE_WEIGHTS[market]]
+    offset = FANTASY_HBP_WEIGHTS[market] * LEAGUE_HBP_PER_GAME
+
+    def post(draws):
+        rng = np.random.default_rng(POST_RNG_SEED)
+        split = _multinomial_split(rng, np.rint(draws["hits"]).astype(np.int64), shares)
+        term = np.full(draws["hits"].shape, offset)
+        for weight, type_counts in zip(weights, split, strict=True):
+            term = term + weight * type_counts
+        return term
+
+    return post
+
+
+def _build_quality_start_post(stats_obj, player, date, *, weight):
+    """Build the pitcher-fantasy post hook: quality start priced in-sample.
+
+    QS is a deterministic functional of two components already in the sum
+    (outs, runs allowed), so it is evaluated on the sampled pair instead of
+    being added as a marginal (brief §8a). Documented approximation: settlement
+    reads *earned* runs for both the QS trigger and the -3 penalty while the
+    priced component is total runs allowed, and the settled outs term is
+    3*floor(outs/3) against the priced 1-per-out — measured -0.550 and +0.531
+    points of mean respectively, a coincidental near-cancellation, not design.
+    """
+
+    def post(draws):
+        quality = (draws["pitching outs"] >= _QS_MIN_OUTS) & (draws["runs allowed"] <= _QS_MAX_RUNS)
+        return weight * quality.astype(float)
+
+    return post
 
 
 def _mlb_team_abbr(mlb_teams, team_id):
@@ -198,6 +356,10 @@ class StatsMLB(Stats):
             "score": "runs",
         }
         self._volume_model_cache = None
+        # update() replaces this with the probable-pitcher table; empty keeps
+        # quote-time team lookups safe on load()-only instances.
+        self.upcoming_games = {}
+        self._sp_win_curve = None  # lazy (a, b) SP-win logit map; () = use the bucket table
 
     def _join_fp_player_features(self, date):
         """MLB hook: Baseball Savant per-player season-to-date features as of ``date``."""
@@ -1244,6 +1406,103 @@ class StatsMLB(Stats):
                 v_outs = self._keep_positive(v, v_outs)
 
         return ev if book_odds else 0
+
+    def _fantasy_combo_spec(self, market):
+        """Component-sum spec for the four MLB fantasy markets (brief §8).
+
+        Pure config: the marginal/Bernoulli/quality-start weights read straight
+        off the `_mlb_fantasy_props` tables, and all player-dependent work (hit
+        shares, the SP-win probability) happens at quote time inside the post
+        builder and `_combo_bernoulli_p`.
+        """
+        if market not in FANTASY_COMBO_MARKETS:
+            return None
+        props = self._mlb_fantasy_props(market)
+        weights = dict(props)
+        if "pitcher" in market:
+            return ComboSpec(
+                marginals=tuple(
+                    (sub, float(w))
+                    for sub, w in props
+                    if sub not in ("pitcher win", "quality start")
+                ),
+                bernoulli=(("pitcher win", float(weights["pitcher win"])),),
+                post_builder=partial(
+                    _build_quality_start_post, weight=float(weights["quality start"])
+                ),
+                analytics=("win_map",),
+            )
+        return ComboSpec(
+            marginals=tuple((sub, float(w)) for sub, w in props if sub not in _HIT_TYPES),
+            sampled=("hits",),
+            post_builder=partial(_build_hit_split_post, market=market),
+            analytics=("hit_shares", "hbp"),
+        )
+
+    def _combo_bernoulli_p(self, name, player, date):
+        """P(pitcher win) for the fantasy spec's Bernoulli component (brief §8b).
+
+        The starter only takes the decision if he completes five innings and
+        the bullpen holds, so the raw team moneyline overstates the pitcher
+        fantasy mean by ~1 point (measured P(SP win)/P(team win) = 0.585
+        overall). Maps the archived team moneyline through the lazily fitted
+        logistic, or through the measured bucket-ratio step table when the fit
+        is infeasible. NaN when the pitcher's team cannot be resolved, which
+        makes the base layer omit the player.
+        """
+        team = self._pitcher_team(player, date)
+        if team is None:
+            return np.nan
+        p_team = archive.get_moneyline(self.league, date, team)
+        if self._sp_win_curve is None:
+            self._sp_win_curve = self._fit_sp_win_curve()
+        if self._sp_win_curve:
+            a, b = self._sp_win_curve
+            clipped = np.clip(p_team, _SP_WIN_P_CLIP, 1 - _SP_WIN_P_CLIP)
+            return float(expit(a + b * logit(clipped)))
+        edges = [edge for edge, _ in SP_WIN_RATIO_BUCKETS]
+        return p_team * SP_WIN_RATIO_BUCKETS[bisect_left(edges, p_team)][1]
+
+    def _pitcher_team(self, player, date):
+        """Team abbreviation for a pitcher on ``date``.
+
+        A settled date reads the player's gamelog row; otherwise the
+        probable-pitcher table. ``None`` when neither knows the player.
+        """
+        if not isinstance(date, str):
+            date = date.strftime("%Y-%m-%d")
+        rows = self.gamelog[self.gamelog[self.log_strings["player"]] == player]
+        day = rows[rows[self.log_strings["date"]].astype(str).str[:10] == date]
+        if not day.empty:
+            return day.iloc[-1][self.log_strings["team"]]
+        for team, game in self.upcoming_games.items():
+            if game.get("Pitcher") == player:
+                # doubleheader entries key as e.g. "NYY2"; the archive stores
+                # the bare abbreviation
+                return team.rstrip("0123456789")
+        return None
+
+    def _fit_sp_win_curve(self):
+        """Fit ``logit P(SP win) = a + b * logit P(team win)`` from the gamelog.
+
+        Uses quoted starter rows: ``moneyline`` is the archive-backfilled team
+        win probability, with exact 0.5 excluded as the unquoted-game default
+        rather than a real pick'em. Returns ``(a, b)``, or ``()`` when the
+        gamelog cannot support an honest fit — which routes
+        `_combo_bernoulli_p` to SP_WIN_RATIO_BUCKETS.
+        """
+        log = self.gamelog
+        if "moneyline" not in log.columns:
+            return ()
+        starts = log[log["starting pitcher"]]
+        p_team = pd.to_numeric(starts["moneyline"], errors="coerce")
+        won = pd.to_numeric(starts["pitcher win"], errors="coerce")
+        mask = p_team.notna() & won.notna() & (p_team != 0.5)
+        if int(mask.sum()) < _SP_WIN_FIT_MIN_STARTS:
+            return ()
+        x = logit(np.clip(p_team[mask].to_numpy(float), _SP_WIN_P_CLIP, 1 - _SP_WIN_P_CLIP))
+        fit = LogisticRegression(penalty=None).fit(x.reshape(-1, 1), won[mask].to_numpy(float) > 0)
+        return float(fit.intercept_[0]), float(fit.coef_[0][0])
 
     def get_depth(self, offers, date=datetime.today().date()):
         if isinstance(offers, dict):
