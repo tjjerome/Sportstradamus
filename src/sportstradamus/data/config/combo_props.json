@@ -11,6 +11,10 @@
         "receiving yards",
         "rushing yards"
     ],
+    "tds": [
+        "receiving tds",
+        "rushing tds"
+    ],
     "hits+runs+rbi": [
         "hits",
         "runs",

@@ -34,6 +34,9 @@ EXPECTED_COMBO_PROPS = {
     "qb tds": ["passing tds", "rushing tds"],
     "qb yards": ["passing yards", "rushing yards"],
     "yards": ["receiving yards", "rushing yards"],
+    # nfl.py's update() settles tds = rushing_tds + receiving_tds, alongside
+    # qb_tds = rushing_tds + passing_tds for the QB market.
+    "tds": ["receiving tds", "rushing tds"],
     "hits+runs+rbi": ["hits", "runs", "rbi"],
     "PRA": ["PTS", "REB", "AST"],
     "RA": ["REB", "AST"],
