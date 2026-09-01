@@ -43,6 +43,9 @@ from sportstradamus.training.scorecard import (
     _GATE6_STAR_REF_BASKETBALL,
     _SUPERSEDE_S3_Z_MIN,
     ACTUAL_COL,
+    COMPONENT_SUM_COLUMNS,
+    COMPONENT_SUM_DIST,
+    COMPONENT_SUM_QUANTILE_COLUMNS,
     DECILE_COL,
     DEFAULT_PRED_COL,
     TARGET_NORM_NONE,
@@ -3496,3 +3499,147 @@ def test_row_specific_payloads_load_and_validate_every_distinct_blob(tmp_path):
 
     with pytest.raises(ValueError, match="unknown two-part calibration blob kind or schema"):
         load_test_set(path, "Blended_EV")
+
+
+# ---------------------------------------------------------------------------
+# Component sums — SUM_CDF / SUM_PMF / SUM_Q10 / SUM_Q25 / SUM_Q75 / SUM_Q90
+# persisted by the combo assembler in place of a closed-form family. Endpoint
+# fidelity is the load-bearing pin: a frame whose endpoints were generated from
+# a known family must reproduce that family's Gate-4 numbers exactly.
+# ---------------------------------------------------------------------------
+
+_SUM_STRATEGY = "ratio_meanyr"
+# The gate_row keys a persisted endpoint can move. gate_row rounds to 4 dp, so the
+# fidelity test pins the unrounded `_dispersion_diagnostics` beside them.
+_SUM_FIDELITY_KEYS = (
+    "g4_pit_ks",
+    "g4_tail_pit_ks",
+    "g4_iqr_pred",
+    "g4_iqr_true",
+    "g4_iqr_ratio",
+    "central50_coverage",
+    "central80_coverage",
+    "g5_ece_debiased",
+)
+
+
+def _as_component_sum(source: pd.DataFrame, dist: str, params: list[str]) -> pd.DataFrame:
+    """Re-express a closed-form frame as the endpoints a component sum would persist.
+
+    Generates the six ``SUM_*`` columns from ``source``'s own family and drops the
+    family ``params``, so both frames describe one identical predictive by two
+    routes: re-derived from parameters, and read back from sampled endpoints.
+    """
+    actual = source[ACTUAL_COL].to_numpy(dtype=float)
+    cdf, pmf = _pred_cdf_pmf(source, dist, actual, strategy=_SUM_STRATEGY)
+    endpoints = {"SUM_CDF": cdf, "SUM_PMF": pmf}
+    for q, column in COMPONENT_SUM_QUANTILE_COLUMNS.items():
+        endpoints[column] = _pred_ppf(source, dist, q, strategy=_SUM_STRATEGY)
+    return source.drop(columns=params).assign(**endpoints)
+
+
+def _skewnormal_priced_frame(n: int = 900, seed: int = 5) -> pd.DataFrame:
+    """Calibrated skewed SkewNormal frame in ``ratio_meanyr`` space, priced end to end.
+
+    ``Result`` is drawn from each row's own decoded predictive and ``P`` is that
+    predictive's over-probability, so every gate computes and the decode (both loc
+    and scale multiply through ``MeanYr``) is load-bearing rather than an identity.
+    """
+    from scipy.stats import skewnorm
+
+    rng = np.random.default_rng(seed)
+    meanyr = rng.uniform(4.0, 30.0, n)
+    raw_loc = rng.uniform(0.80, 1.10, n)
+    raw_scale = rng.uniform(0.25, 0.45, n)
+    alpha = rng.uniform(-1.5, 2.5, n)
+    loc, scale = raw_loc * meanyr, raw_scale * meanyr
+    df = pd.DataFrame(
+        {
+            "MeanYr": meanyr,
+            "Result": skewnorm.rvs(alpha, loc=loc, scale=scale, random_state=rng),
+            "Blended_EV": skewnorm.mean(alpha, loc=loc, scale=scale),
+            "SN_Loc": raw_loc,
+            "SN_Scale": raw_scale,
+            "SN_Alpha": alpha,
+            "DenomCol": "MeanYr",
+        }
+    )
+    df["Line"] = np.round(df["Blended_EV"]) + 0.5
+    cdf_at_line, _ = _pred_cdf_pmf(df, "SkewNormal", df["Line"].to_numpy(), strategy=_SUM_STRATEGY)
+    df["P"] = 1.0 - cdf_at_line
+    df["Odds"] = 0.5
+    return df
+
+
+@pytest.mark.parametrize(
+    ("source", "dist", "params", "pred_col", "market"),
+    [
+        (
+            _skewnormal_priced_frame(),
+            "SkewNormal",
+            ["SN_Loc", "SN_Scale", "SN_Alpha"],
+            "Blended_EV",
+            "PRA",
+        ),
+        (_dpo_frame(900, seed=3), "DPO", ["DP_MU", "DP_PHI"], "EV", "PR"),
+    ],
+    ids=["continuous", "count"],
+)
+def test_persisted_endpoints_reproduce_the_family_they_were_generated_from(
+    source, dist, params, pred_col, market
+):
+    """Endpoint fidelity: the distribution-free branch must grade a closed-form family
+    identically to the family's own parameters. The count case additionally covers the
+    ``SUM_PMF > 0`` path, where the seeded randomized PIT spreads each integer's jump.
+    """
+    endpoints = _as_component_sum(source, dist, params)
+    assert _infer_dist_from_columns(endpoints) == COMPONENT_SUM_DIST
+
+    cell = {"league": "NBA", "market": market, "strategy": _SUM_STRATEGY}
+    closed_form = gate_row(source, pred_col, **cell)
+    persisted = gate_row(endpoints, pred_col, **cell)
+    for key in _SUM_FIDELITY_KEYS:
+        assert persisted[key] == pytest.approx(closed_form[key], abs=1e-9), key
+
+    actual = source[ACTUAL_COL].to_numpy(dtype=float)
+    np.testing.assert_array_equal(
+        _dispersion_diagnostics(endpoints, COMPONENT_SUM_DIST, actual, strategy=_SUM_STRATEGY),
+        _dispersion_diagnostics(source, dist, actual, strategy=_SUM_STRATEGY),
+    )
+
+
+def test_component_sum_ppf_raises_on_an_unpersisted_quantile():
+    """An endpoint the assembler never sampled is a missing input, not an interpolation."""
+    endpoints = _as_component_sum(_dpo_frame(20), "DPO", ["DP_MU", "DP_PHI"])
+    np.testing.assert_array_equal(
+        _pred_ppf(endpoints, COMPONENT_SUM_DIST, 0.25, strategy=_SUM_STRATEGY),
+        endpoints["SUM_Q25"].to_numpy(),
+    )
+    with pytest.raises(ValueError, match="no endpoint for quantile"):
+        _pred_ppf(endpoints, COMPONENT_SUM_DIST, 0.5, strategy=_SUM_STRATEGY)
+
+
+def test_component_sum_cdf_raises_away_from_the_row_outcome():
+    """The endpoints were sampled at ``Result``; grading another ``y`` would score a
+    different CDF under the same numbers, so the mismatch must fail loud."""
+    endpoints = _as_component_sum(_dpo_frame(20), "DPO", ["DP_MU", "DP_PHI"])
+    actual = endpoints[ACTUAL_COL].to_numpy(dtype=float)
+    cdf, pmf = _pred_cdf_pmf(endpoints, COMPONENT_SUM_DIST, actual, strategy=_SUM_STRATEGY)
+    np.testing.assert_array_equal(cdf, endpoints["SUM_CDF"].to_numpy())
+    np.testing.assert_array_equal(pmf, endpoints["SUM_PMF"].to_numpy())
+    with pytest.raises(ValueError, match="only at the row's own Result"):
+        _pred_cdf_pmf(endpoints, COMPONENT_SUM_DIST, actual + 1.0, strategy=_SUM_STRATEGY)
+
+
+def test_load_test_set_keeps_endpoints_without_decode_or_identity_columns(tmp_path):
+    """A component sum is produced by no trained cell, so it carries no ``DenomCol``,
+    no ``TargetNormalization``, and no ``Strategy*`` identity — and must still load."""
+    endpoints = _as_component_sum(
+        _skewnormal_priced_frame(40), "SkewNormal", ["SN_Loc", "SN_Scale", "SN_Alpha"]
+    ).drop(columns="DenomCol")
+    csv = tmp_path / "NBA_PRA.csv"
+    endpoints.to_csv(csv, index=False)
+
+    loaded = load_test_set(csv, "Blended_EV")
+    assert set(loaded.columns) >= COMPONENT_SUM_COLUMNS
+    assert _infer_dist_from_columns(loaded) == COMPONENT_SUM_DIST

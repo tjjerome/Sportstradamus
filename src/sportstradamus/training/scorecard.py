@@ -270,6 +270,24 @@ N_DECILES = 10
 DECILE_COL = "MeanYr"
 ACTUAL_COL = "Result"
 
+# A combo priced as a weighted sum of its component cells' predictives has no closed-form
+# family — the sum is evaluated by Monte-Carlo — so there are no per-row family params for
+# `_infer_dist_from_columns` to key on and Gate 4 would silently fall back to the point-IQR
+# estimator. Instead the assembler persists the CDF endpoints it already sampled, and the
+# gate reads them. The four quantiles are the complete set the gate asks for
+# (`_iqr_pred_analytical` at 0.25/0.75, `_dispersion_diagnostics` at 0.10/0.25/0.75/0.90);
+# `SUM_CDF` / `SUM_PMF` are evaluated at the row's own realized outcome and nowhere else.
+COMPONENT_SUM_DIST = "ComponentSum"
+COMPONENT_SUM_QUANTILE_COLUMNS: dict[float, str] = {
+    0.10: "SUM_Q10",
+    0.25: "SUM_Q25",
+    0.75: "SUM_Q75",
+    0.90: "SUM_Q90",
+}
+COMPONENT_SUM_COLUMNS: frozenset[str] = frozenset(
+    {"SUM_CDF", "SUM_PMF", *COMPONENT_SUM_QUANTILE_COLUMNS.values()}
+)
+
 # The ship gates score the fused ``Blended_EV`` — what the parlay actually drafts and what
 # ``report.compute_gates`` scores in production (``report._SHIP_PRED_COL``). Default the CLI /
 # A-B to that same column so a scorecard reflects the shipping decision rather than the raw
@@ -355,7 +373,8 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
         ``MIX_Scale1`` / ``MIX_Scale2`` / ``MIX_W1`` for the 2-component
         Gaussian mixture, ``R`` / ``NB_P`` for NegBin/ZINB,
         ``DP_MU`` / ``DP_PHI`` for DPO, ``Alpha`` for Gamma/ZAGamma,
-        ``Gate`` for the zero-inflated variants).
+        ``Gate`` for the zero-inflated variants, :data:`COMPONENT_SUM_COLUMNS`
+        for a family-free component sum).
         Rows with non-finite values in any required column are dropped.
 
     Raises:
@@ -434,6 +453,7 @@ def load_test_set(path: Path, pred_col: str) -> pd.DataFrame:
                 _STRUCTURAL_F0_COL,
                 _STRUCTURAL_ROUTE_COL,
                 _STRUCTURAL_FALLBACK_COL,
+                *COMPONENT_SUM_COLUMNS,
                 *STRATEGY_IDENTITY_CSV_COLUMNS,
             }
             & set(df.columns)
@@ -864,14 +884,20 @@ def _mix_ppf(
 def _infer_dist_from_columns(df: pd.DataFrame) -> str | None:
     """Identify the distribution family from per-row parameter columns.
 
-    Returns one of ``"Mixture"``, ``"SkewNormal"``, ``"NegBin"`, ``"ZINB"``,
-    ``"DPO"``, ``"Gamma"``, ``"ZAGamma"`` based on which params
-    ``training/pipeline.py`` ``_step_persist_artifacts`` dumped into the
+    Returns one of :data:`COMPONENT_SUM_DIST`, ``"Mixture"``, ``"SkewNormal"``,
+    ``"NegBin"`, ``"ZINB"``, ``"DPO"``, ``"Gamma"``, ``"ZAGamma"`` based on which
+    params ``training/pipeline.py`` ``_step_persist_artifacts`` dumped into the
     test-set CSV (~lines 1191-1212). ``None`` for legacy / synthetic frames
     missing every distribution param — those keep the back-compat point-IQR
     semantics.
+
+    The endpoint family is checked first because the endpoints fully describe what
+    was priced: a component-sum candidate assembled from an incumbent's CSV can
+    still carry that model's params, and they no longer describe the predictive.
     """
     cols = set(df.columns)
+    if cols >= COMPONENT_SUM_COLUMNS:
+        return COMPONENT_SUM_DIST
     if {"MIX_Loc1", "MIX_Loc2", "MIX_Scale1", "MIX_Scale2", "MIX_W1"} <= cols:
         return "Mixture"
     if {"SN_Loc", "SN_Scale", "SN_Alpha"} <= cols:
@@ -973,7 +999,19 @@ def _pred_ppf(df: pd.DataFrame, dist: str, q: float, *, strategy: str) -> np.nda
     dumped into the test-set CSV. ``q`` is a scalar in ``(0, 1)``; the ZINB /
     ZAGamma mixtures invert through the custom routines (a quantile at or below
     the zero gate lands on 0).
+
+    Raises:
+        ValueError: If ``dist`` is unknown, or if a component sum was asked for a
+            quantile it did not persist — an unpersisted endpoint is a missing
+            input, not something to interpolate.
     """
+    # style: allow-complexity — flat per-family quantile dispatch; each branch is one
+    # family's inversion, so splitting would only scatter them behind thin forwarders.
+    if dist == COMPONENT_SUM_DIST:
+        column = COMPONENT_SUM_QUANTILE_COLUMNS.get(q)
+        if column is None:
+            raise ValueError(f"{COMPONENT_SUM_DIST} persists no endpoint for quantile {q!r}")
+        return df[column].to_numpy(dtype=float)
     if dist == "SkewNormal":
         loc, scale = _decode_sn_loc_scale(df, strategy)
         alpha = df["SN_Alpha"].to_numpy(dtype=float)
@@ -1048,8 +1086,22 @@ def _pred_cdf_pmf(
     count / zero-inflated families. Shared by the mid-PIT and the randomized PIT
     so both read the same family parameterization; the zero-inflated mixtures
     fold the gate into both terms.
+
+    Raises:
+        ValueError: If ``dist`` is unknown, or if a component sum is evaluated
+            anywhere but at its own realized outcome — its endpoints were sampled
+            once, at ``Result``, so any other ``y`` would grade a wrong CDF.
     """
+    # style: allow-complexity — flat per-family dispatch; each branch is one family's
+    # CDF/PMF pair, so splitting would only scatter them behind thin forwarders.
     y = np.asarray(y, dtype=float)
+    if dist == COMPONENT_SUM_DIST:
+        if not np.allclose(y, df[ACTUAL_COL].to_numpy(dtype=float)):
+            raise ValueError(f"{COMPONENT_SUM_DIST} endpoints hold only at the row's own Result")
+        return (
+            df["SUM_CDF"].to_numpy(dtype=float),
+            df["SUM_PMF"].to_numpy(dtype=float),
+        )
     if dist == "SkewNormal":
         loc, scale = _decode_sn_loc_scale(df, strategy)
         alpha = df["SN_Alpha"].to_numpy(dtype=float)
