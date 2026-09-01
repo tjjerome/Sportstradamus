@@ -434,7 +434,14 @@ def quote_pricing_params(
     means from 0.09 to 2.5, and the cv-inverted mean is exactly the quantity the fitted
     dispersion exists to correct, so seeding the correction with it would feed the bias
     back in.
+
+    A ``COMBO_SUM_SOURCE`` quote passes its own mean straight through: the kernel built
+    it by summing component quotes, and re-inverting the sum's over-probability through
+    the composite cell's marginal family would trade it for a single-market
+    approximation of a sum. That quote's shape travels on ``sum_sd``/``under_prob_at``.
     """
+    if quote.source == COMBO_SUM_SOURCE:
+        return QuotePricingParams(float(quote.ev), None, None, None, None)
     under = 1.0 - quote.over_probability
     sigma = skew = phi = r = None
     if dist == "SkewNormal":

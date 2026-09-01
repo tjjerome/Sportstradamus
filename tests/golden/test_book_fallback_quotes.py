@@ -27,7 +27,9 @@ from sportstradamus.helpers.archive import Archive
 from sportstradamus.helpers.distributions import (
     UNDERDOG_BOOST_BASELINE,
     dfs_boost_probs,
+    get_ev,
 )
+from sportstradamus.stats import base
 
 mp = importlib.import_module("sportstradamus.prediction.model_prob")
 
@@ -47,17 +49,19 @@ def archive(tmp_path, monkeypatch):
         Archive._instance._initialized = False
     a = Archive()
     monkeypatch.setattr(mp, "archive", a)
+    # combo_quote resolves its components through stats.base's own archive binding.
+    monkeypatch.setattr(base, "archive", a)
     yield a
     with contextlib.suppress(Exception):
         a._connection.close()
     Archive._instance._initialized = False
 
 
-def _insert_odds(a, entity, book, under, line, ev=None):
+def _insert_odds(a, entity, book, under, line, ev=None, market=_MARKET):
     a._connection.execute(
         "INSERT INTO odds (league, market, game_date, entity, book, ev, under_prob, line, "
         "observed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [_LEAGUE, _MARKET, _DATE, entity, book, ev, under, line, _TS],
+        [_LEAGUE, market, _DATE, entity, book, ev, under, line, _TS],
     )
 
 
@@ -69,14 +73,13 @@ def _patch_cell(monkeypatch, dist, cv):
 class _StubStats:
     league = _LEAGUE
 
-    def __init__(self, combo_ev=float("nan")):
-        self._combo_ev = combo_ev
-
     def get_stats(self, market, offers):
         return pd.DataFrame()
 
-    def check_combo_markets(self, market, player, date):
-        return self._combo_ev
+    # Bound rather than stubbed: the serving second pass prices through the real
+    # component-sum kernel, and a hand-rolled stand-in would stop tracking its
+    # admission rules the moment they moved.
+    combo_quote = base.Stats.combo_quote
 
 
 def _offer(player, line):
@@ -149,32 +152,85 @@ def test_one_real_book_beside_dfs_serves(archive, monkeypatch):
     assert records[0]["Win Prob"] == pytest.approx(0.60, abs=1e-6)
 
 
-def test_combo_ev_inversion_still_serves(archive, monkeypatch):
-    """A combo_props market's combo consensus serves without any archived rows."""
+def _insert_components(a, entity):
+    for market, under, line in (("A", 0.55, 14.5), ("B", 0.48, 8.5)):
+        _insert_odds(a, entity, "fanduel", under, line, market=market)
+        _insert_odds(a, entity, "draftkings", under, line, market=market)
+
+
+def test_component_sum_serves_an_unquoted_combo(archive, monkeypatch):
+    """A combo_props market with no quote of its own serves off its components.
+
+    The composite is unpriced, so the sum is the only honest quote available — and
+    it prices every offered line off the kernel's CDF rather than the composite
+    cell's generic cv.
+    """
     _patch_cell(monkeypatch, "NegBin", 0.5)
     monkeypatch.setitem(mp.combo_props, _MARKET, ["A", "B"])
+    _insert_components(archive, "Combo Guy")
 
     records = mp.book_fallback_prob(
-        [_offer("Combo Guy", 25.5)], _LEAGUE, _MARKET, "Underdog", _StubStats(combo_ev=22.0)
+        [_offer("Combo Guy", 25.5)], _LEAGUE, _MARKET, "Underdog", _StubStats()
     )
 
     assert len(records) == 1
     rec = records[0]
-    assert rec["Projection"] == pytest.approx(22.0, abs=1e-4)
     assert rec["Model Version"] == mp._BOOK_FALLBACK_VERSION
+    # Means add regardless of correlation, so the served projection is exactly the two
+    # component means -- proof the kernel's mean passed through rather than being
+    # re-inverted at the composite line under the composite cell's own family.
+    expected = sum(
+        get_ev(line, under, 1.0, dist="Gamma") for under, line in ((0.55, 14.5), (0.48, 8.5))
+    )
+    assert rec["Projection"] == pytest.approx(expected, abs=1e-4)
+    assert 0.0 < rec["Market Prob"] < 1.0
+
+
+def test_component_only_dfs_support_never_serves(archive, monkeypatch):
+    """One platform-only component sinks the whole sum, not just its own term.
+
+    A pick'em platform pays evenly at its posted line, so its implied probability is
+    anchored near 0.5 however far the truth sits; weighted into a sum it moves the
+    combo further than every honest component together.
+    """
+    _patch_cell(monkeypatch, "NegBin", 0.5)
+    monkeypatch.setitem(mp.combo_props, _MARKET, ["A", "B"])
+    _insert_odds(archive, "Combo Guy", "fanduel", 0.55, 14.5, market="A")
+    _insert_odds(archive, "Combo Guy", "Underdog", 0.50, 8.5, market="B")
+
+    records = mp.book_fallback_prob(
+        [_offer("Combo Guy", 25.5)], _LEAGUE, _MARKET, "Underdog", _StubStats()
+    )
+
+    assert records == []
+
+
+def test_blocked_combo_cell_never_serves(archive, monkeypatch):
+    """A cell in ``_COMBO_SERVE_BLOCKED`` skips the second pass even fully quoted."""
+    _patch_cell(monkeypatch, "NegBin", 0.5)
+    monkeypatch.setitem(mp.combo_props, _MARKET, ["A", "B"])
+    monkeypatch.setattr(mp, "_COMBO_SERVE_BLOCKED", frozenset({(_LEAGUE, _MARKET)}))
+    _insert_components(archive, "Combo Guy")
+
+    records = mp.book_fallback_prob(
+        [_offer("Combo Guy", 25.5)], _LEAGUE, _MARKET, "Underdog", _StubStats()
+    )
+
+    assert records == []
 
 
 def test_fantasy_market_never_serves_combo_fallback(archive, monkeypatch):
     """A market outside combo_props (fantasy scores) gets no combo second pass.
 
-    The 8-component weighted mean plus generic-cv tail clean-graded 0.40 at
-    claimed >= 0.85 -- those quotes must not reach the board.
+    Fantasy specs carry up to 8 weighted components and remain no-served pending
+    their own graded verdict, so the kernel is not offered to them here.
     """
     _patch_cell(monkeypatch, "NegBin", 0.5)
     assert _MARKET not in mp.combo_props
+    _insert_components(archive, "Bench Guy")
 
     records = mp.book_fallback_prob(
-        [_offer("Bench Guy", 5.5)], _LEAGUE, _MARKET, "Underdog", _StubStats(combo_ev=3.0)
+        [_offer("Bench Guy", 5.5)], _LEAGUE, _MARKET, "Underdog", _StubStats()
     )
 
     assert records == []
@@ -295,9 +351,10 @@ def test_model_book_leg_dfs_only_is_nan(archive, monkeypatch):
 
     offer_df = pd.DataFrame([_offer("Star Guard", 1.5)])
     offer_df.index = offer_df.Player
-    evs = _model_book_leg(offer_df)
+    evs, sds = _model_book_leg(offer_df)
 
     assert len(evs) == 1 and np.isnan(evs[0])
+    assert len(sds) == 1 and np.isnan(sds[0])
 
 
 def test_model_book_leg_prices_modal_cohort(archive, monkeypatch):
@@ -312,6 +369,8 @@ def test_model_book_leg_prices_modal_cohort(archive, monkeypatch):
 
     offer_df = pd.DataFrame([_offer("Star Guard", 33.5)])
     offer_df.index = offer_df.Player
-    evs = _model_book_leg(offer_df)
+    evs, sds = _model_book_leg(offer_df)
 
     assert get_odds(33.5, evs[0], "NegBin", cv=0.5) == pytest.approx(0.65, abs=1e-6)
+    # A single-market quote asserts nothing about spread beyond its own cv.
+    assert sds[0] == pytest.approx(0.5 * evs[0])

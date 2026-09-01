@@ -36,7 +36,7 @@ def test_skater_underdog_spec():
     )
     # No sportsbook prices skater hits, so it is the one component allowed to fall
     # back to the player's trailing rate; the rest must be book-quoted.
-    assert NHL_ASSUMABLE_SKATER_COMPONENTS == frozenset({"hits"})
+    assert set(NHL_ASSUMABLE_SKATER_COMPONENTS) == {"hits"}
     assert NHL_SKATER_UNDERDOG_WEIGHTS == (
         ("goals", 6),
         ("assists", 4),

@@ -6,6 +6,8 @@ convolution checks the count path at rho = 0, per the research brief's
 "keep the convolution and the closed-form Normal as test oracles" verdict.
 """
 
+import itertools
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -104,7 +106,7 @@ def test_monotone_alt_lines():
     quote = combo_sum_quote(comps, make_rho(0.15))
     grid = np.arange(-4.0, 25.0, 0.25)
     probs = [quote.under_prob(x) for x in grid]
-    assert all(b >= a for a, b in zip(probs, probs[1:]))
+    assert all(b >= a for a, b in itertools.pairwise(probs))
 
 
 def test_achieved_correlation():
@@ -236,7 +238,7 @@ def test_weight_zero_component_contributes_only_through_post():
 
 def test_component_cap_and_unknown_family():
     many = [ComboComponent(f"m{i}", 1.0, 2.0, "Poisson", 1.0) for i in range(10)]
-    with pytest.raises(ValueError, match="1..9 components"):
+    with pytest.raises(ValueError, match=r"1\.\.9 components"):
         combo_sum_quote(many, rho_zero)
     with pytest.raises(ValueError, match="Mixture"):
         combo_sum_quote([ComboComponent("m", 1.0, 2.0, "Mixture", 1.0)], rho_zero)

@@ -22,6 +22,7 @@ import pytest
 
 from sportstradamus.helpers.distributions import get_ev
 from sportstradamus.helpers.training_quotes import ArchivedBookQuote
+from sportstradamus.stats import base
 
 # ``sportstradamus.prediction`` re-exports the ``model_prob`` function, which
 # shadows the submodule under attribute access — fetch the module explicitly so
@@ -45,7 +46,7 @@ class _StubArchive:
     def __init__(self, rows_by_player):
         self._rows = rows_by_player
 
-    def get_training_quote_inputs(self, league, market, date, entities):
+    def get_training_quote_inputs(self, league, market, date, entities, at=None):
         return {e: (self._rows.get(e, []), None) for e in entities}
 
 
@@ -63,6 +64,10 @@ class _StubStats:
 
     def check_combo_markets(self, market, player, date):
         return self._combo_ev
+
+    # Bound rather than stubbed: the serving second pass prices through the real
+    # component-sum kernel, so a stand-in would stop tracking its admission rules.
+    combo_quote = base.Stats.combo_quote
 
 
 def _offer(player="Test Player", line=_LINE):
@@ -191,17 +196,19 @@ def test_pure_ev_inversion_never_serves(monkeypatch):
     assert mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats) == []
 
 
-def test_combo_consensus_still_serves(monkeypatch):
-    """The check_combo_markets second pass (NFL qb combos et al.) keeps serving."""
+def test_legacy_combo_scalar_no_longer_serves(monkeypatch):
+    """A combo market with unquoted components serves nothing at all.
+
+    The second pass now prices the component sum rather than inverting
+    ``check_combo_markets``' scalar mean under a generic cv, so a market whose
+    components nothing priced has no honest quote left to fall back to. The stub
+    still offers the scalar; the board must refuse it.
+    """
     _patch_cell(monkeypatch)
-    monkeypatch.setattr(mp, "archive", _StubArchive({}))
+    stub = _StubArchive({})
+    monkeypatch.setattr(mp, "archive", stub)
+    monkeypatch.setattr(base, "archive", stub)
     monkeypatch.setitem(mp.combo_props, _RAW_MARKET, ["A", "B"])
     stats = _StubStats(pd.DataFrame(), combo_ev=22.0)
 
-    records = mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats)
-
-    assert len(records) == 1
-    rec = records[0]
-    # The convolved consensus mean survives the invert+decode round trip.
-    assert rec["Projection"] == pytest.approx(22.0, abs=1e-4)
-    assert rec["Model Version"] == mp._BOOK_FALLBACK_VERSION
+    assert mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats) == []
