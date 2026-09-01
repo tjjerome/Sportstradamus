@@ -9,10 +9,11 @@ Repair the generic strategy-research pipeline so registered structural methods,
 historically valid incumbents, and genuinely different confirmation mechanisms
 remain reachable from holdout-blind sweep through fresh retrain.
 
-NFL receiving yards, rushing yards, and passing yards are mandatory acceptance
-cells, but the implementation must operate through registry metadata and
-applicability rules rather than market-specific branches. Passing all six gates
-is an empirical outcome, not a code-test assertion.
+NFL receiving yards and rushing yards are mandatory acceptance cells and NFL
+passing yards is the unaided-discovery acceptance cell, but the implementation
+must operate through registry metadata and applicability rules rather than
+market-specific branches. Passing all six gates is an empirical outcome, not a
+code-test assertion.
 
 ## 2. Read first
 
@@ -128,10 +129,9 @@ Register these mandatory sweep corners:
 
 - NFL receiving yards: the two-part structural spec's exact fixed controls.
 - NFL rushing yards: the affine structural spec's exact fixed controls.
-- NFL passing yards: `SkewNormal`, `ratio_meanyr`, CRPS distribution loss,
-  direct parametrization, NLL blending, and `posthoc=none`.
 
-Keep the existing passing-TDs DPO recipe in `CONFIRM_EVIDENCE_CORNERS`.
+No base-family recipe is seeded: NFL passing yards must be found by the sampler
+unaided. Keep the existing passing-TDs DPO recipe in `CONFIRM_EVIDENCE_CORNERS`.
 
 Enqueue, before sampler suggestions: mandatory cell corner, confirm-evidence
 corner, then reconstructed incumbent. Deduplicate by the current matrix-bound
@@ -143,7 +143,7 @@ Structural mandatory corners may reach confirmation only through validated
 board rows carrying a structural split fingerprint. Preserve the positive-board
 requirement; mandatory evaluation is not a negative-board confirm exception.
 
-Acceptance: all three recipes precede sampler trials; exact resume reuses a
+Acceptance: both recipes precede sampler trials; exact resume reuses a
 fingerprint while a matrix change forces reevaluation; confirmation cannot
 synthesize a structural seed; and the passing-TDs evidence seed remains.
 

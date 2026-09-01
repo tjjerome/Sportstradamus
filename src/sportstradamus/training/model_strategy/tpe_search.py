@@ -198,7 +198,9 @@ def cell_study(league: str, market: str, families: tuple[str, ...]) -> optuna.St
     raises ``CategoricalDistribution does not support dynamic value space`` and kills the run. That is
     not hypothetical — dropping Mixture invalidated every journal on disk, and a ``--dist-class``
     run would collide with a full-pool journal the same way. Keying on the pool starts a fresh study
-    instead, and lets narrowed runs keep their own resumable state alongside the full one.
+    instead, and lets narrowed runs keep their own resumable state alongside the full one. Each
+    family's axis grid is in the key for the same reason: adding a value to an axis (a new posthoc
+    slug) changes that categorical's choices and would poison every journal written before it.
 
     ``multivariate`` and ``group`` are still marked experimental, and each announces itself
     once per cell. The warnings carry nothing actionable — the choices are deliberate, and
@@ -207,7 +209,8 @@ def cell_study(league: str, market: str, families: tuple[str, ...]) -> optuna.St
     30-cell run's output.
     """
     _STUDY_ROOT.mkdir(parents=True, exist_ok=True)
-    pool = hashlib.sha256("|".join(families).encode()).hexdigest()[:8]
+    space = "|".join(f"{slug}{sorted(get_strategy(slug).axes.items())}" for slug in families)
+    pool = hashlib.sha256(space.encode()).hexdigest()[:8]
     path = _STUDY_ROOT / f"{market_file_slug(league, market)}.{pool}.log"
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", optuna.exceptions.ExperimentalWarning)

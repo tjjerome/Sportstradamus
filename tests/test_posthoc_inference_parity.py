@@ -16,7 +16,8 @@ def _fitted_blob(slug):
     rng = np.random.default_rng(0)
     p = np.clip(rng.uniform(0.05, 0.95, 2000), 1e-4, 1 - 1e-4)
     y = (rng.uniform(size=p.size) < p).astype(float)
-    return posthoc.fit_posthoc(slug, p, y)
+    book = np.clip(p + rng.normal(0.0, 0.05, p.size), 0.05, 0.95)
+    return posthoc.fit_posthoc(slug, p, y, book=book)
 
 
 def test_inference_matches_training_for_prob_stage():

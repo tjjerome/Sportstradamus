@@ -95,6 +95,7 @@ _POSTHOC = (
     "none",
     "prob_recal_isotonic",
     "prob_recal_platt",
+    "prob_recal_book_citl",
     "roe_mean",
     "isotonic_mean",
 )
@@ -103,6 +104,9 @@ _POSTHOC = (
 # sweep's nested cross-fit frame — both live corners scored worse than their plain-platt
 # siblings (0.0062/0.0067 vs 0.0056/0.0064 g1 ci_hi on NFL passing yards, 2026-08-27).
 # Re-admission needs a fresh brief validating the OOF-lambda selection under sweep pressure.
+# What fails to transfer is the base rate: an outcome-fit intercept learns the fold's over-rate,
+# which the holdout does not share. prob_recal_book_citl anchors that level to the book's mean
+# over-probability instead of to outcomes, which is why it is in the pool.
 
 # pipeline gates the whole-CDF stage on ``posthoc_slug in CDF_STAGE and dist == "SkewNormal"``; on
 # any other family it falls through to the scalar path, so the corner would train identically to
@@ -343,24 +347,12 @@ BUILTIN_SPEC_DATA = (
 # Corners the sweep must evaluate on the cell's *current* matrix before it spends a sampler
 # trial. Unlike CONFIRM_EVIDENCE_CORNERS these carry no independent full-HPO verdict, so
 # confirmation never synthesizes one: a mandatory corner reaches a walk only through the board
-# row its own evaluation writes. The three NFL cells below are the reachability-repair
-# acceptance set — each names the recipe whose evidence predates the current grid.
+# row its own evaluation writes. The two NFL cells below are the reachability-repair
+# acceptance set — each names a structural recipe whose evidence predates the current grid.
+# No base-family recipe is seeded: those the sweep has to find unaided.
 MANDATORY_SWEEP_CORNERS: tuple[tuple[str, str, str, dict[str, str]], ...] = (
     ("NFL", "receiving yards", TWO_PART_STRATEGY, _yards_controls(TWO_PART_STRATEGY)),
     ("NFL", "rushing yards", AFFINE_STRATEGY, _yards_controls(AFFINE_STRATEGY)),
-    (
-        "NFL",
-        "passing yards",
-        "SkewNormal",
-        {
-            "dist": "SkewNormal",
-            "normalization": "ratio_meanyr",
-            "dist_training_loss": "crps",
-            "sn_param": "direct",
-            "blending_loss_fn": "nll",
-            "posthoc": "none",
-        },
-    ),
 )
 
 # Corners with an independent full-HPO six-gate pass, kept so the sweep can seed a cell with a

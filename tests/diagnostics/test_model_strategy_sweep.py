@@ -14,6 +14,7 @@ incumbent corners are evaluated first, that an admissible prior row is reused in
 and that a legacy row scored on the ship holdout is inert.
 """
 
+import dataclasses
 import io
 import json
 import math
@@ -313,16 +314,16 @@ def test_family_registry_grids_and_persist_maps():
     dpo = get_strategy("DPO")
     receiving = get_strategy(RECEIVING)
     rushing = get_strategy(RUSHING)
-    # SN: 4 norms × 2 dist-loss × 2 sn-param × 3 blend × 6 posthoc.
-    assert math.prod(len(v) for v in sn.axes.values()) == 288
-    # Mixture: 1 dist × 4 norms × 3 blend × 5 posthoc — no loss axis (lightgbmlss rejects crps
+    # SN: 4 norms × 2 dist-loss × 2 sn-param × 3 blend × 7 posthoc.
+    assert math.prod(len(v) for v in sn.axes.values()) == 336
+    # Mixture: 1 dist × 4 norms × 3 blend × 6 posthoc — no loss axis (lightgbmlss rejects crps
     # components, so the pinned nll is the only trainable value).
-    assert math.prod(len(v) for v in mix.axes.values()) == 60
+    assert math.prod(len(v) for v in mix.axes.values()) == 72
     assert mix.fixed_controls["dist_training_loss"] == "nll"
-    # 1 dist × 2 mode × 2 disp × 3 blend × 5 posthoc.
-    assert math.prod(len(v) for v in zinb.axes.values()) == 60
-    assert math.prod(len(v) for v in negbin.axes.values()) == 30  # 1 dist × 2 disp × 3 blend × 5
-    assert math.prod(len(v) for v in dpo.axes.values()) == 30
+    # 1 dist × 2 mode × 2 disp × 3 blend × 6 posthoc.
+    assert math.prod(len(v) for v in zinb.axes.values()) == 72
+    assert math.prod(len(v) for v in negbin.axes.values()) == 36  # 1 dist × 2 disp × 3 blend × 6
+    assert math.prod(len(v) for v in dpo.axes.values()) == 36
     assert sn.persist == {
         "dist": "dist",
         "normalization": "target_normalization",
@@ -872,13 +873,13 @@ def test_cell_trial_count_is_the_reachable_grid_capped_by_the_budget():
     """A cell contributes its reachable corners, or the per-cell budget when the grid is bigger."""
     assert (
         tpe_search.reachable_corners(sweep._cell_context("MLB", "pitcher strikeouts"), ("NegBin",))
-        == 30
+        == 36
     )
-    assert sweep._cell_trial_count("MLB", "pitcher strikeouts", ("NegBin",), 48) == 30
-    # ZINB + NegBin + DPO = 120 reachable, so the 48-trial budget binds.
+    assert sweep._cell_trial_count("MLB", "pitcher strikeouts", ("NegBin",), 48) == 36
+    # ZINB + NegBin + DPO = 144 reachable, so the 48-trial budget binds.
     families = ("ZINB", "NegBin", "DPO")
     assert sweep._cell_trial_count("MLB", "pitcher strikeouts", families, 48) == 48
-    assert sweep._cell_trial_count("MLB", "pitcher strikeouts", families, 200) == 120
+    assert sweep._cell_trial_count("MLB", "pitcher strikeouts", families, 200) == 144
 
 
 def test_ratio_projvol_is_pruned_per_cell_by_its_denominator_mapping(monkeypatch):
@@ -899,14 +900,14 @@ def test_ratio_projvol_is_pruned_per_cell_by_its_denominator_mapping(monkeypatch
 def test_reachable_corners_on_the_live_nfl_matrices(monkeypatch):
     """The budget is spent against the corners a cell can actually reach, not the declared grid."""
     monkeypatch.undo()  # real matrices: target lattice + mean decide count-family admission
-    # 288 SkewNormal + 60 ZINB + 30 NegBin + 30 DPO — a low-mean integer target. Mixture
+    # 336 SkewNormal + 72 ZINB + 36 NegBin + 36 DPO — a low-mean integer target. Mixture
     # declares more but has no serve path, so SWEEP_CAPABILITIES keeps it out of the pool.
     tds = sweep._cell_context("NFL", "passing tds")
-    assert tpe_search.reachable_corners(tds, sweep._cell_families("NFL", "passing tds")) == 408
-    # 288 SkewNormal plus one fixed corner per enrolled structural spec: the mean-226.7 target is
+    assert tpe_search.reachable_corners(tds, sweep._cell_families("NFL", "passing tds")) == 480
+    # 336 SkewNormal plus one fixed corner per enrolled structural spec: the mean-226.7 target is
     # over the count-admission ceiling, so no count family reaches this cell.
     yards = sweep._cell_context("NFL", "passing yards")
-    assert tpe_search.reachable_corners(yards, sweep._cell_families("NFL", "passing yards")) == 290
+    assert tpe_search.reachable_corners(yards, sweep._cell_families("NFL", "passing yards")) == 338
 
 
 def test_decode_strategy_is_registered_norm_for_sn_and_none_for_count():
@@ -1896,6 +1897,25 @@ def test_a_changed_family_pool_gets_its_own_journal_instead_of_crashing(monkeypa
     # The same pool reopens the same study, so a resume still resumes.
     again = tpe_search.cell_study("NBA", "DREB", ("SkewNormal", "ZINB", "NegBin", "DPO"))
     assert again.study_name == full.study_name
+
+
+def test_a_widened_axis_gets_its_own_journal_instead_of_crashing(monkeypatch, tmp_path):
+    """A new axis value changes a categorical's choices exactly the way a pool change does."""
+    monkeypatch.setattr(tpe_search, "_STUDY_ROOT", tmp_path)
+    before = tpe_search.cell_study("NBA", "DREB", ("SkewNormal", "ZINB"))
+    sn = get_strategy("SkewNormal")
+    widened = dataclasses.replace(
+        sn, axes={**sn.axes, "posthoc": (*sn.axes["posthoc"], "prob_recal_widened")}
+    )
+    monkeypatch.setattr(
+        tpe_search,
+        "get_strategy",
+        lambda slug: widened if slug == "SkewNormal" else get_strategy(slug),
+    )
+    after = tpe_search.cell_study("NBA", "DREB", ("SkewNormal", "ZINB"))
+
+    assert before.study_name != after.study_name
+    assert len(list(tmp_path.glob("NBA_DREB.*.log"))) == 2
 
 
 def test_a_cell_killed_mid_search_keeps_the_corners_it_already_trained(monkeypatch, tmp_path):
@@ -3235,34 +3255,38 @@ def test_cell_verdict_names_the_outcome_for_a_parallel_run():
 def test_mandatory_corners_lead_the_enqueue_order_ahead_of_evidence_and_the_incumbent(monkeypatch):
     """A mandatory corner is evaluated first, then the proven evidence corner, then the incumbent.
 
-    The three acceptance cells declare recipes whose evidence predates the current matrix, so the
-    sweep has to re-measure them on it before a budgeted sampler is trusted to have considered
-    them. Assert each source's position, not the exact list — the incumbent is whatever the cell
-    last shipped.
+    The two acceptance cells declare structural recipes whose evidence predates the current
+    matrix, so the sweep has to re-measure them on it before a budgeted sampler is trusted to have
+    considered them. Assert each source's position, not the exact list — the incumbent is whatever
+    the cell last shipped.
     """
     monkeypatch.setattr(
         sweep,
         "load_stat_meta",
         lambda path: {
             "NFL": {
-                "passing yards": {"dist": "DPO", "dist_training_loss": "nll", "posthoc": "roe_mean"}
+                "receiving yards": {
+                    "dist": "DPO",
+                    "dist_training_loss": "nll",
+                    "posthoc": "roe_mean",
+                }
             }
         },
     )
     mandatory = next(
         (slug, controls)
         for league, market, slug, controls in MANDATORY_SWEEP_CORNERS
-        if (league, market) == ("NFL", "passing yards")
+        if (league, market) == ("NFL", "receiving yards")
     )
     monkeypatch.setattr(
         sweep,
         "CONFIRM_EVIDENCE_CORNERS",
-        (("NFL", "passing yards", "DPO", _dpo_controls("crps", "nll", "none")),),
+        (("NFL", "receiving yards", "DPO", _dpo_controls("crps", "nll", "none")),),
     )
 
     enqueued = [
         (spec.slug, corner)
-        for spec, corner in sweep._enqueued_corners(sweep._cell_context("NFL", "passing yards"))
+        for spec, corner in sweep._enqueued_corners(sweep._cell_context("NFL", "receiving yards"))
     ]
 
     assert enqueued[0] == mandatory
@@ -3272,7 +3296,7 @@ def test_mandatory_corners_lead_the_enqueue_order_ahead_of_evidence_and_the_incu
     assert enqueued[2] == ("DPO", _dpo_controls("crps", "nll", "roe_mean"))
     frontier = {
         str((spec.slug, corner))
-        for spec, corner in sweep._frontier_corners(sweep._cell_context("NFL", "passing yards"))
+        for spec, corner in sweep._frontier_corners(sweep._cell_context("NFL", "receiving yards"))
     }
     assert {str(pair) for pair in enqueued[3:]} <= frontier
     assert len(enqueued) == len(set(map(str, enqueued)))

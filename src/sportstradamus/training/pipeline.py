@@ -4202,11 +4202,16 @@ def _structural_gate_inputs(
         )
         posthoc_blob = mean_posthoc_blob  # None unless the slug is a MEAN_STAGE corrector
         if posthoc_slug in posthoc.PROB_STAGE:
+            # Synthetic and EV-inverted quotes carry no market opinion; only real prices feed
+            # the book leg.
+            book = splits["B_validation"]["Odds"].to_numpy(dtype=float)
+            book = np.where(_split_quote_authenticity_mask(splits, "validation"), book, np.nan)
             posthoc_blob = posthoc.fit_posthoc(
                 posthoc_slug,
                 val_calibrated,
                 y_class_val,
                 clusters=_blend_fit_clusters(splits, np.ones(len(y_class_val), dtype=bool)),
+                book=book,
             )
             val_calibrated = posthoc.apply_posthoc(posthoc_slug, posthoc_blob, val_calibrated)
         test_calibrated_over = apply_temperature(y_proba_no_filt[:, 1], T_opt)

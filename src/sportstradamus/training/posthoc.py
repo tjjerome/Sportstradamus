@@ -9,8 +9,8 @@ exclusivity. ``"none"`` is a no-op.
 orthogonal to the target-normalization strategy in :mod:`baselines`: a strategy reshapes
 the GBDT *target* (and its loc/scale decode); a corrector adjusts either the decoded
 *mean* (``roe_mean`` / ``isotonic_mean``) or the final over-*probability*
-(``prob_recal_isotonic`` / ``prob_recal_platt`` / ``prob_recal_platt_cv``) after the
-distribution is already formed.
+(``prob_recal_isotonic`` / ``prob_recal_platt`` / ``prob_recal_platt_cv`` /
+``prob_recal_book_citl``) after the distribution is already formed.
 
 *Structural methods* (:data:`STRUCTURAL_STAGE`) reshape the target/CDF earlier in the
 fit rather than after it, so they are dispatched by ``training.pipeline`` to their own
@@ -27,7 +27,7 @@ the training-side test CSV and the live ``model_prob`` path must agree event-for
 import math
 
 import numpy as np
-from scipy.optimize import minimize
+from scipy.optimize import brentq, minimize
 from scipy.special import expit, logit
 from scipy.stats import kstest
 from sklearn.isotonic import IsotonicRegression
@@ -38,7 +38,7 @@ from sportstradamus.training.structural_strategies import AFFINE_STRATEGY, TWO_P
 
 # Correctors that transform a calibrated over-probability in [0, 1].
 PROB_STAGE: frozenset[str] = frozenset(
-    {"prob_recal_isotonic", "prob_recal_platt", "prob_recal_platt_cv"}
+    {"prob_recal_isotonic", "prob_recal_platt", "prob_recal_platt_cv", "prob_recal_book_citl"}
 )
 # Correctors that transform a decoded mean prediction (non-negative stat units).
 MEAN_STAGE: frozenset[str] = frozenset({"roe_mean", "isotonic_mean"})
@@ -64,6 +64,9 @@ _PROB_CLIP: float = 1e-4
 # Effectively unregularized Platt scaling — we want the calibration MLE, not a
 # shrunk-toward-zero slope.
 _PLATT_C: float = 1e6
+# Wide enough that _PROB_CLIP-clipped probabilities saturate at both ends, so any interior
+# book mean is bracketed and brentq's sign change is guaranteed.
+_CITL_INTERCEPT_BRACKET: tuple[float, float] = (-20.0, 20.0)
 
 # Intercept-penalty grid for prob_recal_platt_cv: the Platt intercept estimates the
 # fit-split over-rate, which is unlearnable at small n and transfers a Brier cost
@@ -90,7 +93,11 @@ _PIT_RECAL_CV_SEED: int = 0
 
 
 def fit_posthoc(
-    slug: str, x: np.ndarray, y: np.ndarray, clusters: np.ndarray | None = None
+    slug: str,
+    x: np.ndarray,
+    y: np.ndarray,
+    clusters: np.ndarray | None = None,
+    book: np.ndarray | None = None,
 ) -> dict | None:
     """Fit a corrector on validation data; ``None`` means "apply nothing".
 
@@ -102,7 +109,11 @@ def fit_posthoc(
             raw result for :data:`MEAN_STAGE`.
         clusters: Optional per-row group labels (player identity) aligned with ``x``.
             Only ``prob_recal_platt_cv`` reads them, to keep its CV folds group-disjoint.
+        book: Per-row book over-probability aligned with ``x``, NaN where the row has no
+            authentic quote. Only ``prob_recal_book_citl`` reads it.
     """
+    # style: allow-complexity — one flat branch per registered slug; a slug->fitter table
+    # would hide that two fitters read a third, differently-shaped input (clusters, book).
     if slug not in POSTHOC_SLUGS:
         raise ValueError(f"Unknown posthoc slug {slug!r}; valid: {sorted(POSTHOC_SLUGS)}")
     if slug == "none" or slug in STRUCTURAL_STAGE:
@@ -114,6 +125,8 @@ def fit_posthoc(
     x, y = x[finite], y[finite]
     if len(x) < _MIN_FIT_ROWS or np.ptp(x) == 0.0:
         return None
+    if slug == "prob_recal_book_citl":
+        return _fit_book_citl(x, np.asarray(book, dtype=float)[finite])
     if slug == "prob_recal_platt_cv":
         return _fit_platt_cv(x, y, None if clusters is None else np.asarray(clusters)[finite])
     if slug == "prob_recal_platt":
@@ -299,6 +312,22 @@ def _fit_platt(x: np.ndarray, y: np.ndarray) -> dict | None:
         return None
     a, b = _platt_coeffs(logit(np.clip(x, _PROB_CLIP, 1 - _PROB_CLIP)), y, 0.0)
     return {"kind": "platt", "a": a, "b": b}
+
+
+def _fit_book_citl(x: np.ndarray, book: np.ndarray) -> dict | None:
+    """Slope-1 Platt map whose intercept recentres the served level on the book's.
+
+    The outcome-fitted correctors learn the validation fold's over-rate, which at a few
+    hundred rows is noise that transfers a Brier cost to the holdout; anchoring on the
+    market consensus never consults outcomes, so it cannot overfit the fold.
+    """
+    quoted = np.isfinite(book)
+    if quoted.sum() < _MIN_FIT_ROWS:
+        return None
+    feat = logit(np.clip(x[quoted], _PROB_CLIP, 1 - _PROB_CLIP))
+    target = float(book[quoted].mean())
+    b = brentq(lambda shift: float(expit(feat + shift).mean()) - target, *_CITL_INTERCEPT_BRACKET)
+    return {"kind": "platt", "a": 1.0, "b": float(b)}
 
 
 def _fit_platt_cv(x: np.ndarray, y: np.ndarray, clusters: np.ndarray | None = None) -> dict | None:

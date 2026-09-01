@@ -661,6 +661,14 @@ Entry: cell fails g4 (either direction) or g2/g3.
   source (normalization §6.2, features §6.3), carry mean correction as last resort, and ship a
   mean-corrected cell only if it also holds the g1 BSS guardrail and survives the val→test
   discount.
+- **Rung A′ — level (`prob_recal_book_citl`, built).** One intercept on the served
+  over-probability, slope fixed at 1, fit so its mean equals the mean *book* over-probability on
+  authentic validation quotes; outcomes never consulted. Targets the g1 failure mode where the
+  served P leans a constant few points off the market and the outcome-fitted correctors
+  (`prob_recal_platt` / isotonic) learn the fold's over-rate instead — unlearnable at ~300 rows and
+  a Brier cost across the val→holdout over-rate gap (§8.2 #0c). `PROB_STAGE` in
+  [`posthoc.py`](../../src/sportstradamus/training/posthoc.py), in every family's sweep pool;
+  reuses the `platt` blob so serving is unchanged.
 - **Rung B — scale + shape (joint `(c, skew_cal)`, shipped).** Per-cell scale `c` fit so the
   served predictive PIT is Uniform, inside
   [`pipeline._step_calibrate_dispersion`](../../src/sportstradamus/training/pipeline.py) with
