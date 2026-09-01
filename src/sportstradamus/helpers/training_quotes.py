@@ -11,6 +11,7 @@ import datetime
 import operator
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
+from functools import partial
 from typing import NamedTuple, TypeVar
 
 import numpy as np
@@ -79,9 +80,10 @@ class TrainingQuote:
     observed_at: datetime.datetime | None
     book_count: int
     books: tuple[str, ...] = ()
-    # Combo-sum extras (``COMBO_SUM_SOURCE`` quotes): the component-sum sd and a
-    # per-line under-probability evaluator. Both are excluded from ``as_record()``
-    # and every serialization — records stay byte-identical to legacy quotes.
+    # Component-sum extras: the sum's sd and a per-line under-probability evaluator,
+    # carried by a ``COMBO_SUM_SOURCE`` quote or a ``book_direct`` quote re-tailed with
+    # the sum's shape (see ``with_component_sum_shape``). Both are excluded from
+    # ``as_record()`` and every serialization — records stay byte-identical to legacy quotes.
     sum_sd: float | None = None
     under_prob_at: Callable[[float], float] | None = None
 
@@ -109,6 +111,50 @@ class TrainingQuote:
             "QuoteObservedAt": self.observed_at,
             "QuoteBookCount": self.book_count,
         }
+
+
+def _anchored_under_prob(
+    under_prob: Callable[[float], float], line: float, at_line: float, target: float, x: float
+) -> float:
+    """The sum's CDF rescaled within each side of ``line`` so it reads ``target`` there."""
+    f = under_prob(x)
+    if x <= line:
+        return target * f / at_line
+    return target + (1.0 - target) * (f - at_line) / (1.0 - at_line)
+
+
+def with_component_sum_shape(book: TrainingQuote, combo: TrainingQuote) -> TrainingQuote:
+    """The book's own quote, re-tailed with a component sum's shape.
+
+    A direct book quote is one ``(line, probability)`` pair. Every other line the
+    platform offers is priced off the composite cell's single generic ``cv``, which
+    carries no component dispersions and no correlation between them — graded across
+    ±1.5 sd offset lines that loses to the component sum on 9 of 10 markets.
+
+    The two are combined where each is strongest: the book fixes how the mass splits
+    at its own line, and the sum supplies the shape within each side, rescaled to that
+    split. So the quoted pair survives exactly — ``decode(invert(p)) == p`` still holds
+    at the quote line, and the book's mean is never superseded — while every other
+    offered line prices off the sum.
+
+    Rescaling rather than sliding the CDF is what makes this work on a count sum.
+    ``hits+runs+rbi`` totals small integers, so its CDF is a step function with steps
+    of 0.2 and up; no location shift can land on an arbitrary probability, and one that
+    tried missed the book by 0.068 on average at its own line.
+    """
+    target = 1.0 - book.over_probability
+    at_line = combo.under_prob_at(book.line)
+    if not 0.0 < at_line < 1.0:
+        # The sum puts no mass on one side of the book's line, so there is no shape
+        # there to rescale — the two disagree too far to combine.
+        return book
+    return dataclasses.replace(
+        book,
+        sum_sd=combo.sum_sd,
+        under_prob_at=partial(
+            _anchored_under_prob, combo.under_prob_at, book.line, at_line, target
+        ),
+    )
 
 
 def _finite(value) -> bool:

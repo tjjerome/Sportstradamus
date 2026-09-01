@@ -50,6 +50,7 @@ from sportstradamus.helpers.training_quotes import (
     TrainingQuote,
     quote_pricing_params,
     resolve_training_quote,
+    with_component_sum_shape,
 )
 from sportstradamus.spiderLogger import logger
 from sportstradamus.training.baselines import get_target_normalization
@@ -754,9 +755,9 @@ def _book_evs_for_players(
     unquoted-disagreement drop.
 
     The spread is ``cv * mean`` for a single-market quote, which is all that family
-    asserts, but a component sum carries its own — the kernel added the component
-    variances and their correlation, so ``cv * mean`` would substitute the composite
-    cell's generic dispersion for a quantity actually computed.
+    asserts, but a quote carrying a component sum's shape has its own — the kernel
+    added the component variances and their correlation, so ``cv * mean`` would
+    substitute the composite cell's generic dispersion for a computed quantity.
     """
     quotes = _servable_fallback_quotes(offer_df, league, market, date_map, stat_data, dist, cv)
     gate = None if dist == "SkewNormal" else hist_gate or None
@@ -769,7 +770,7 @@ def _book_evs_for_players(
             continue
         mean = quote_pricing_params(quote, league, market, dist, cv, gate=gate).mean
         means.append(mean)
-        sds.append(quote.sum_sd if quote.source == COMBO_SUM_SOURCE else cv * mean)
+        sds.append(quote.sum_sd if quote.sum_sd is not None else cv * mean)
     return means, sds
 
 
@@ -1640,13 +1641,19 @@ def _servable_fallback_quotes(
 
     Mirrors the training-side consumer (``Stats.resolve_player_market_odds``): one
     modal-line cohort quote per player from :func:`resolve_training_quote`, then a
-    second pass over whatever came back synthetic that prices the market as an honest
-    component sum through :meth:`Stats.combo_quote`, anchored on the player's own
-    offered line. A quote serves when a real sportsbook (non-DFS) sits in its
-    same-line cohort, or when it is a component sum — whose own admission already
-    demands a sportsbook behind every component. Pure ev-inversions and synthetic
-    quotes never serve: a DFS platform reposting (or discounting) a line is not
-    independent support.
+    second pass on the ``combo_props`` sums that prices the market as a weighted
+    component sum through :meth:`Stats.combo_quote`. A quote serves when a real
+    sportsbook (non-DFS) sits in its same-line cohort, or when it is a component sum —
+    whose own admission already demands a sportsbook behind every component. Pure
+    ev-inversions and synthetic quotes never serve: a DFS platform reposting (or
+    discounting) a line is not independent support.
+
+    The second pass covers every player, not just the unquoted ones, because the two
+    quotes carry different things. Where the book priced the composite it keeps its
+    own line, probability and mean, and takes only the sum's shape
+    (:func:`with_component_sum_shape`) — a single quoted pair says nothing about any
+    other offered line, and on this board a tenth of served legs are priced off the
+    quote line. Where it did not, the sum is the whole quote.
 
     Only the simple ``combo_props`` sums take the second pass. Fantasy-score markets
     build a mean from up to 8 weighted components and stay no-served pending their own
@@ -1663,7 +1670,6 @@ def _servable_fallback_quotes(
     quotes: dict[str, TrainingQuote] = {}
     for date, players in players_by_date.items():
         quote_inputs = archive.get_training_quote_inputs(league, market, date, players)
-        unpriced = []
         for player in players:
             rows, legacy_line = quote_inputs.get(player, ([], None))
             quotes[player] = resolve_training_quote(
@@ -1677,11 +1683,29 @@ def _servable_fallback_quotes(
                 cv=cv,
                 weights=weights,
             )
-            if quotes[player].source in ("neutral_fallback", "model_fallback"):
-                unpriced.append(player)
-        if unpriced and combo_servable:
-            lines = {player: float(first_lines[player]) for player in unpriced}
-            quotes.update(stat_data.combo_quote(market, unpriced, date, None, lines=lines))
+        if not combo_servable:
+            continue
+        # Anchored on the book's own line where it quoted one, so the sum's shape is
+        # fitted around the real price rather than replacing it; on the offered line
+        # otherwise, where there is no price to preserve.
+        lines = {
+            player: quotes[player].line
+            if quotes[player].source == "book_direct"
+            else float(first_lines[player])
+            for player in players
+        }
+        for player, combo in stat_data.combo_quote(
+            market, players, date, None, lines=lines
+        ).items():
+            # Only a direct cohort quote is worth anchoring to. Every other rung's
+            # probability is an inversion of a stored ``ev``, which is that quote's
+            # gated derivative rather than a native price — untrustworthy enough that
+            # `_has_serving_support` refuses to serve it, so anchoring the sum on it
+            # would be worse than the sum alone.
+            book = quotes[player]
+            quotes[player] = (
+                with_component_sum_shape(book, combo) if book.source == "book_direct" else combo
+            )
 
     return {player: quote for player, quote in quotes.items() if _has_serving_support(quote)}
 
@@ -1702,12 +1726,13 @@ def _price_offers_at_quotes(
     offer at the quote line reproduces the cohort probability exactly and alternate
     lines price off the same distribution rather than a cross-line average.
 
-    A component sum instead prices every line off the kernel's own CDF, which is the
-    whole reason it exists: the composite cell's marginal family has one generic ``cv``
-    and no component dispersions, and grading the two across ±1.5 sd offset lines put
-    the sum ahead on 9 of 10 markets.
+    A quote carrying a component sum's shape instead prices every line off that CDF,
+    which is the whole reason the kernel exists: the composite cell's marginal family
+    has one generic ``cv`` and no component dispersions, and grading the two across
+    ±1.5 sd offset lines put the sum ahead on 9 of 10 markets. Its own quoted line is
+    unaffected either way — the shape was anchored there.
     """
-    combo_cdfs = {p: q.under_prob_at for p, q in quotes.items() if q.source == COMBO_SUM_SOURCE}
+    combo_cdfs = {p: q.under_prob_at for p, q in quotes.items() if q.under_prob_at is not None}
     priced = {p: quote_pricing_params(q, league, market, dist, cv) for p, q in quotes.items()}
     offer_df["Market Projection"] = offer_df.index.map({p: v.mean for p, v in priced.items()})
     shape_kwargs = {}

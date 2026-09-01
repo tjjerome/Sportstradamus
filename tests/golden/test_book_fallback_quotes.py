@@ -186,6 +186,41 @@ def test_component_sum_serves_an_unquoted_combo(archive, monkeypatch):
     assert 0.0 < rec["Market Prob"] < 1.0
 
 
+def test_book_quote_keeps_its_price_and_takes_the_sum_shape(archive, monkeypatch):
+    """A quoted combo keeps its own pair exactly and re-tails every other line.
+
+    The book priced one line; the composite cell's generic cv priced all the others,
+    carrying no component dispersions. Anchoring the sum's CDF on the quoted pair
+    preserves ``decode(invert(p)) == p`` there and replaces only the tail.
+    """
+    _patch_cell(monkeypatch, "NegBin", 0.5)
+    monkeypatch.setitem(mp.combo_props, _MARKET, ["A", "B"])
+    _insert_components(archive, "Combo Guy")
+    _insert_odds(archive, "Combo Guy", "fanduel", 0.60, 25.5)
+    _insert_odds(archive, "Combo Guy", "draftkings", 0.70, 25.5)
+
+    records = mp.book_fallback_prob(
+        [_offer("Combo Guy", 25.5), _offer("Combo Guy", 30.5)],
+        _LEAGUE,
+        _MARKET,
+        "Underdog",
+        _StubStats(),
+    )
+
+    by_line = {r["Line"]: r for r in records}
+    assert set(by_line) == {25.5, 30.5}
+    at_quote = by_line[25.5]
+    assert at_quote["Bet"] == "Under"
+    # To the Sobol sample's own resolution (1/8192): the anchor lands on a draw, so the
+    # quoted probability comes back within one point of the sorted sum, not to float.
+    assert at_quote["Market Prob"] == pytest.approx(0.65, abs=2e-4)
+
+    alt = by_line[30.5]
+    over = alt["Win Prob"] if alt["Bet"] == "Over" else 1.0 - alt["Win Prob"]
+    marginal = 1.0 - get_odds(30.5, alt["Projection"], "NegBin", cv=0.5)
+    assert over != pytest.approx(marginal, abs=1e-3)
+
+
 def test_component_only_dfs_support_never_serves(archive, monkeypatch):
     """One platform-only component sinks the whole sum, not just its own term.
 
