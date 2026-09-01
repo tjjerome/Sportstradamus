@@ -23,6 +23,7 @@ from tqdm import tqdm
 from sportstradamus import data
 from sportstradamus.helpers.combined_markets import (
     ComboComponent,
+    ComboSum,
     combo_sum_quote,
     load_same_player_rho,
 )
@@ -78,6 +79,53 @@ def _constant_term(offset: float, draws: dict[str, np.ndarray]) -> np.ndarray:
     return np.full(next(iter(draws.values())).shape, offset)
 
 
+def _thinned(draws: np.ndarray, count: int) -> np.ndarray:
+    """``count`` systematic quantile points out of a sorted draw vector."""
+    return draws[np.floor((np.arange(count) + 0.5) * draws.size / count).astype(int)]
+
+
+def _pooled(sums: ComboSum, incumbent: ComboSum, weight: float) -> ComboSum:
+    """Linear pool ``weight * F_sum + (1 - weight) * F_incumbent``, as one draw vector.
+
+    Mixing the samples rather than the CDFs is what keeps the pool invertible: the
+    six persisted endpoints all read off a sorted draw vector, and a mixture CDF has
+    no closed-form quantile to persist. Each side contributes its own quantiles at
+    its own weight, so the pool is exact up to the Sobol resolution and stays
+    mean-preserving — the property a log pool would lose.
+    """
+    take = round(weight * sums.draws_sorted.size)
+    draws = np.concatenate(
+        (
+            _thinned(sums.draws_sorted, take),
+            _thinned(incumbent.draws_sorted, sums.draws_sorted.size - take),
+        )
+    )
+    draws.sort()
+    mean = weight * sums.mean + (1.0 - weight) * incumbent.mean
+    return ComboSum(mean=mean, sd=float(draws.std()), draws_sorted=draws)
+
+
+def _endpoints(quote: ComboSum, result: float, line: float) -> tuple[float, ...]:
+    """The scorecard's six endpoint values for one priced row.
+
+    ``ComboSum.under_prob`` splits push mass like ``get_odds``, which is right for
+    the served ``P`` and wrong for a CDF: ``SUM_CDF`` reads the sorted draws directly
+    so it is ``F(y)``, with ``SUM_PMF`` its atom at the realized outcome. The
+    quantiles take the generalized (floor) inverse so a discrete sum stays on its own
+    settlement lattice.
+    """
+    draws = quote.draws_sorted
+    lo = np.searchsorted(draws, result, side="left")
+    hi = np.searchsorted(draws, result, side="right")
+    return (
+        quote.mean,
+        1.0 - quote.under_prob(line),
+        hi / draws.size,
+        (hi - lo) / draws.size,
+        *np.quantile(draws, _QUANTILES, method="inverted_cdf"),
+    )
+
+
 def _model_rho(
     cells: dict[str, ComponentCell], graded: pd.MultiIndex, min_pairs: int
 ) -> tuple[Callable[[str, str], float], dict[str, float]]:
@@ -109,14 +157,18 @@ def _price_rows(
     post: Callable[[dict[str, np.ndarray]], np.ndarray] | None,
     results: np.ndarray,
     lines: np.ndarray,
+    incumbent: dict[str, np.ndarray | str | float] | None = None,
+    mixture_weight: float | None = None,
 ) -> pd.DataFrame:
     """One NORTA quote per row, read out as the scorecard's endpoint columns.
 
-    ``ComboSum.under_prob`` splits push mass like ``get_odds``, which is right for
-    the served ``P`` and wrong for a CDF: the endpoints read the sorted draws
-    directly so ``SUM_CDF`` is ``F(y)`` and ``SUM_PMF`` its atom at the realized
-    outcome. The quantiles take the generalized (floor) inverse so a discrete sum
-    stays on its own settlement lattice.
+    With ``incumbent`` and ``mixture_weight`` supplied, each row is priced twice —
+    the component sum, and the combo cell's own predictive sampled as a
+    single-component quote on the same Sobol net — and the two draw vectors are
+    linear-pooled. Routing the incumbent through the same kernel rather than through
+    its family's closed form is what makes the pool exact: both sides then carry the
+    same sampling error, and a pool at ``mixture_weight = 0`` reproduces the
+    incumbent's own gate row.
     """
     priced = []
     for i, weights in enumerate(tqdm(row_specs, desc="component sum")):
@@ -128,31 +180,44 @@ def _price_rows(
                     float(aligned[sub]["mean"][i]),
                     cells[sub].dist,
                     cells[sub].cv,
-                    **{
-                        field: None
-                        if np.isnan(aligned[sub][field][i])
-                        else float(aligned[sub][field][i])
-                        for field in SHAPE_FIELDS
-                    },
+                    **_shape_kwargs(aligned[sub], i),
                 )
                 for sub, weight in weights
             ],
             rho,
             post=post,
         )
-        draws = quote.draws_sorted
-        lo = np.searchsorted(draws, results[i], side="left")
-        hi = np.searchsorted(draws, results[i], side="right")
-        priced.append(
-            (
-                quote.mean,
-                1.0 - quote.under_prob(lines[i]),
-                hi / draws.size,
-                (hi - lo) / draws.size,
-                *np.quantile(draws, _QUANTILES, method="inverted_cdf"),
+        if incumbent is not None:
+            marginal = combo_sum_quote(
+                [
+                    ComboComponent(
+                        "incumbent",
+                        1.0,
+                        float(incumbent["mean"][i]),
+                        incumbent["dist"],
+                        incumbent["cv"],
+                        **_shape_kwargs(incumbent, i),
+                    )
+                ],
+                rho,
             )
-        )
+            quote = _pooled(quote, marginal, mixture_weight)
+        priced.append(_endpoints(quote, results[i], lines[i]))
     return pd.DataFrame(priced, columns=_ENDPOINT_COLUMNS)
+
+
+def _shape_kwargs(row_params: dict[str, np.ndarray], i: int) -> dict[str, float | None]:
+    """A row's optional per-family shape fields, with NaN read back as absent."""
+    return {
+        field: None if np.isnan(row_params[field][i]) else float(row_params[field][i])
+        for field in SHAPE_FIELDS
+    }
+
+
+def _aligned(cell: ComponentCell, keys: pd.MultiIndex) -> dict[str, np.ndarray]:
+    """One cell's decoded parameters as row-aligned arrays over the graded keys."""
+    reindexed = cell.params.reindex(keys)
+    return {field: reindexed[field].to_numpy(dtype=float) for field in cell.params}
 
 
 def _unpriced_cell(diagnostics: dict, reason: str) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
@@ -167,6 +232,7 @@ def component_sum_frame(
     test_sets_dir: Path | None = None,
     rho_source: str = "book",
     min_rows: int = _MIN_GRADED_ROWS,
+    mixture_weight: float | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """Price ``(league, market)`` as a sum of its component cells' served predictives.
 
@@ -186,13 +252,16 @@ def component_sum_frame(
         rho_source: ``"book"`` for the shipped same-player residual Spearman,
             ``"model"`` for the components' own out-of-sample residual correlation.
         min_rows: Graded rows below which the cell is reported rather than priced.
+        mixture_weight: When given, linear-pool the sum with the incumbent's own
+            predictive at this weight on the sum instead of returning the sum alone.
     """
     # style: allow-complexity — one assembly pass; the join, the pricing call and the
     # frame surgery all key off the same restricted row set, and splitting them would
     # only thread that set through forwarders.
     started = perf_counter()
     root = test_sets_dir or Path(str(pkg_resources.files(data) / "test_sets"))
-    combo = pd.read_csv(root / f"{market_file_slug(league, market)}.csv")
+    combo_path = root / f"{market_file_slug(league, market)}.csv"
+    combo = pd.read_csv(combo_path)
     specs, offset, provenance = spec_weights(league, market, combo)
     diagnostics: dict = {
         "league": league,
@@ -240,17 +309,21 @@ def component_sum_frame(
         rho, diagnostics["rho"] = load_same_player_rho(league), {}
     else:
         rho, diagnostics["rho"] = _model_rho(cells, graded_keys, _RHO_MIN_PAIRS)
+    incumbent = None
+    if mixture_weight is not None:
+        own = load_component_cell(league, market, combo_path)
+        incumbent = {"dist": own.dist, "cv": own.cv, **_aligned(own, graded_keys)}
+        diagnostics["mixture_weight"] = mixture_weight
     endpoints = _price_rows(
         cells,
-        {
-            sub: {f: cell.params.reindex(graded_keys)[f].to_numpy(dtype=float) for f in cell.params}
-            for sub, cell in cells.items()
-        },
+        {sub: _aligned(cell, graded_keys) for sub, cell in cells.items()},
         [weights for weights, keep in zip(row_specs, covered, strict=True) if keep],
         rho,
         partial(_constant_term, offset) if offset else None,
         graded["Result"].to_numpy(dtype=float),
         graded["Line"].to_numpy(dtype=float),
+        incumbent,
+        mixture_weight,
     )
 
     identity = [

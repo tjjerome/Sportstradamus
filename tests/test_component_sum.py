@@ -18,7 +18,7 @@ from sportstradamus.training.component_cells import (
     load_component_cell,
     spec_weights,
 )
-from sportstradamus.training.component_sum import _model_rho, component_sum_frame
+from sportstradamus.training.component_sum import _model_rho, _thinned, component_sum_frame
 
 # Sobol at 8192 draws resolves a marginal CDF far tighter than the 0.006 tail bound
 # tests/test_combined_markets.py uses for a multi-component sum.
@@ -352,3 +352,62 @@ def test_a_thin_join_is_reported_rather_than_graded(blst_dir):
 
     assert candidate.empty
     assert diagnostics["reason"] == "only 40 of 40 rows join every component"
+
+
+# --- the incumbent mixture arm ---------------------------------------------
+
+
+def test_thinning_keeps_a_sorted_vector_sorted_and_spanning(blst_dir):
+    draws = np.sort(np.random.default_rng(0).normal(size=4096))
+
+    for count in (1, 7, 1000, 4096):
+        thinned = _thinned(draws, count)
+        assert len(thinned) == count
+        assert np.all(np.diff(thinned) >= 0)
+        assert draws[0] <= thinned[0] and thinned[-1] <= draws[-1]
+
+
+def test_mixture_at_zero_reproduces_the_incumbent_predictive(blst_dir):
+    """The pool's own fidelity pin: at weight 0 the kernel must resample the incumbent.
+
+    Routing the incumbent through ``combo_sum_quote`` as a one-component sum is what
+    lets the pool share the sum's sampling error. If that resampling drifted from the
+    family the scorecard reads, every mixture verdict would be measuring the drift.
+    """
+    candidate, baseline, _ = component_sum_frame(
+        "NBA", "BLST", test_sets_dir=blst_dir, mixture_weight=0.0
+    )
+    loaded = scorecard.load_test_set(blst_dir / f"{market_file_slug('NBA', 'BLST')}.csv", "EV")
+    strategy = scorecard._decode_strategy_for_frame(loaded, "NBA", "BLST")
+    cdf, _ = scorecard._pred_cdf_pmf(
+        loaded, "DPO", baseline["Result"].to_numpy(dtype=float), strategy=strategy
+    )
+
+    assert candidate["SUM_CDF"].to_numpy() == pytest.approx(cdf, abs=_MARGINAL_TOL)
+
+
+def test_mixture_mean_is_the_convex_combination_of_its_two_arms(blst_dir):
+    """A linear pool is mean-preserving; a log pool would not be. This pins which one."""
+    arms = {
+        weight: component_sum_frame("NBA", "BLST", test_sets_dir=blst_dir, mixture_weight=weight)[
+            0
+        ]["Blended_EV"].to_numpy()
+        for weight in (0.0, 0.25, 1.0)
+    }
+
+    assert arms[0.25] == pytest.approx(0.25 * arms[1.0] + 0.75 * arms[0.0])
+    assert not np.allclose(arms[0.0], arms[1.0])
+
+
+def test_mixture_endpoints_stay_internally_consistent(blst_dir):
+    candidate, _, diagnostics = component_sum_frame(
+        "NBA", "BLST", test_sets_dir=blst_dir, mixture_weight=0.5
+    )
+
+    assert diagnostics["mixture_weight"] == 0.5
+    assert scorecard._infer_dist_from_columns(candidate) == scorecard.COMPONENT_SUM_DIST
+    assert (candidate["SUM_Q10"] <= candidate["SUM_Q25"]).all()
+    assert (candidate["SUM_Q25"] <= candidate["SUM_Q75"]).all()
+    assert (candidate["SUM_Q75"] <= candidate["SUM_Q90"]).all()
+    assert candidate["SUM_CDF"].between(0.0, 1.0).all()
+    assert (candidate["SUM_PMF"] >= 0).all()
