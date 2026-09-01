@@ -2030,6 +2030,15 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
 
 ## 10. Ledger (append-only, newest first, cap ~15 — older lines live in git)
 
+- 2026-09-01 · **NFL passing yards SHIPS 6/6 again — general lever, unaided sweep.** The
+  post-leak retrain failed g1 by a hair (ci_hi 0.0050): served P leaned +0.0265 over the book
+  (calibration-in-the-large) and the lean alone carried the point estimate; every outcome-fitted
+  corrector learns the fold's over-rate. New `PROB_STAGE` slug `prob_recal_book_citl` (§6.1
+  Rung A′: slope 1, intercept anchored to the book's mean over-prob, outcomes unseen) in every
+  family's pool; passing-yards mandatory seed dropped; Optuna journals keyed on the axis grid.
+  Bare withheld entry + `ship sweep --confirm`: sampler drew the slug, board +0.116 vs +0.084
+  best `none`; first nominee confirms g1 +0.0004 [−0.0005, +0.0015], g5 0.003, w 0.05, BSS
+  −0.002, b −0.097. Recipe `centered_additive_eb_meanyr_k10`/nll/direct/crps_1se. NFL 20/20.
 - 2026-08-28 (2) · **WNBA MIN SHIPS 6/6 — WNBA 14/18, breadth-75 met in all five leagues.**
   Recipe: `ratio_meanyr`/nll/direct/`cdf_recal_isotonic`/blending nll (confirm g4 0.045, g2 0.106).
   General levers, brief `/tmp/researcher_frontier_dl_span.md`: ledger discounts became flat
@@ -2183,16 +2192,3 @@ route to §6.2 normalization + §6.6 family (`[[nfl_volume_cells_feature_mature]
   `_step_predict_splits`/`_step_persist_artifacts` — four transient complexity tags removed, all
   honestly under CC 10. Gates: golden 3771 pass (only the pre-existing shipped-cell ship-gate
   invariant red), integration 30, Ruff + complexity clean.
-- 2026-07-20 (2) · Generic board/confirm seam landed: declarative `StrategySpec` registry,
-  generic `--structural-strategy`, canonical controls JSON, spec/family/control/matrix-bound corner
-  fingerprint plus separate structural split fingerprint, and exact model/CSV/model_stats/
-  scorecard/serving identity. The final focused regression suites passed 431 tests; real
-  receiving/rushing deterministic paths both returned 6/6 with exact model/CSV identity and
-  unchanged protected production hashes, but no confirm ran. Authoritative Ruff passed; the full
-  golden/integration runs exposed one unchanged shipped-cell runtime invariant plus two repaired
-  fixture defects, so the integration marker remains unset (details: §6). The exact integer
-  PIT/settlement kernel is golden-tested but deliberately not production-wired. Research briefs
-  and hashes are pinned in §6.6; owner must select push-void
-  conditional versus full three-category semantics before any NBA FGA, NFL carries, or NFL
-  receptions candidate pilot. No integer-candidate pilot/heldout access, registry enrollment,
-  `shipped` flip, or live mutation occurred.

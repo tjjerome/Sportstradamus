@@ -241,12 +241,12 @@
         },
         "passing yards": {
             "dist": "SkewNormal",
-            "shipped": "withheld",
-            "target_normalization": "ratio_meanyr",
-            "posthoc": "none",
-            "blending": "crps_1se",
-            "dist_training_loss": "crps",
-            "sn_param": "direct"
+            "shipped": "devel",
+            "target_normalization": "centered_additive_eb_meanyr_k10",
+            "posthoc": "prob_recal_book_citl",
+            "dist_training_loss": "nll",
+            "sn_param": "direct",
+            "blending": "crps_1se"
         },
         "qb tds": {
             "dist": "SkewNormal",
