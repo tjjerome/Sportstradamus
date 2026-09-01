@@ -24,9 +24,6 @@ the four helpers here:
   Use for stats whose only meaningful denominator is "games played"
   (team-level FP scored / FP allowed). Distinct from Pattern A in that
   there's no underlying volume to weight against.
-- :func:`matchup_lookup` — Pattern B, single-row pass-through.
-  No aggregation; pulls the row(s) matching a (team, opponent) key
-  for matchup-forecast kinds (`line_matchups`, etc.).
 
 Both `base_profile` (training) and `get_stats` (inference) should
 route every FP-derived feature through these helpers so the two
@@ -203,34 +200,3 @@ def game_mean(
     out = df.groupby(group_col, dropna=False)[value_col].mean()
     out.name = f"{value_col}_per_game"
     return out
-
-
-def matchup_lookup(
-    df: pd.DataFrame,
-    where_col: str,
-    where_value: object,
-) -> pd.DataFrame:
-    """Pick rows matching ``df[where_col] == where_value`` -- no aggregation.
-
-    Pattern B entry point. Matchup-forecast kinds like ``line_matchups``
-    publish one row per (team, week) that's already game-specific --
-    the row IS the feature. Concatenating these across weeks would
-    destroy the matchup signal; this helper just filters.
-
-    The caller is responsible for picking the right snapshot before
-    calling (via :func:`nfl_fp_weekly.load_snapshot` or
-    :func:`nfl_fp_team_weekly.load_snapshot`, NOT ``load_through`` /
-    ``load_window``).
-
-    Args:
-        df: Single-snapshot frame (NOT a concatenated window).
-        where_col: Column to filter on (e.g. ``"teamTeamId"``).
-        where_value: Value to match.
-
-    Returns:
-        Filtered DataFrame. Empty when no row matches, when ``df`` is
-        empty, or when ``where_col`` is missing.
-    """
-    if df.empty or where_col not in df.columns:
-        return df.iloc[0:0].copy()
-    return df.loc[df[where_col] == where_value].copy()

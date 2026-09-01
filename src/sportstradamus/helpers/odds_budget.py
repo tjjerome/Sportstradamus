@@ -38,7 +38,8 @@ admitted after every live league. Leagues with nothing inside the horizon
 are idle: not polled, kept in the snapshot at
 ``helpers.io.LEAGUE_ACTIVITY_PATH`` only as an ``idle`` record remembering
 the last seen game. :func:`league_is_live` serves the snapshot to the
-prophecize/meditate/pickem-build offer loops, and
+prophecize/meditate/pickem-build offer loops (``SPORTSTRADAMUS_HOLD_LEAGUES``
+holds named leagues out of them regardless of tier), and
 :func:`update_window_open` gates ``Stats.update`` itself (10 days before
 the next game to 10 days after the last; ``SPORTSTRADAMUS_FORCE_UPDATE=1``
 bypasses). Season-start constants remain only as the stale-snapshot
@@ -87,6 +88,12 @@ _ACTIVITY_STALE_DAYS = 3
 
 # Legacy pre-season update window, kept as the activity-snapshot fallback.
 _SEASON_START_LEAD_DAYS = 7
+
+# Operator override for `league_is_live`: comma-separated league keys to keep
+# out of the offer loops regardless of what the feed says. Set on the cron line
+# (nothing to deploy, nothing to unwind) while a league's models are unfit to
+# serve -- a retrain in flight, a schema break.
+_HOLD_ENV_VAR = "SPORTSTRADAMUS_HOLD_LEAGUES"
 
 # Gamelog refresh runs from this many days before a league's next scheduled
 # game to this many days after its last one (owner-set: 10 either side).
@@ -322,8 +329,13 @@ def league_is_live(league: str, season_start) -> bool:
     A league is live when the feed-derived activity snapshot tiers it
     ``live`` or ``preseason`` (both poll — preseason starts
     ``poll_horizon_days`` before opening night). A missing or stale snapshot
-    falls back to the legacy ``season_start`` window.
+    falls back to the legacy ``season_start`` window. Leagues named in
+    ``SPORTSTRADAMUS_HOLD_LEAGUES`` are never live; the variable is read per
+    call so a cron picks up the hold without a restart.
     """
+    held = {lg.strip().upper() for lg in os.environ.get(_HOLD_ENV_VAR, "").split(",")}
+    if league.upper() in held:
+        return False
     leagues = _fresh_leagues()
     if leagues is not None:
         return leagues.get(league, {}).get("tier") in ("live", "preseason")

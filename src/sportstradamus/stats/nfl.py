@@ -1539,15 +1539,13 @@ class StatsNFL(Stats):
         ``_lookup_season_week``, applies the Phase-1.5 lookback rule via
         ``_lookback_windows`` (post-week-4 = current-season only;
         pre-week-5 = prior season weeks 11..18 BLENDED with current
-        partial), and hands the windows + the target snapshot to the
-        bridge. The bridge handles Pattern A (rate stats pooled across
-        windows) and Pattern B (``line_matchups`` single-snapshot at
-        target week).
+        partial), and hands the windows to the bridge, which pools the
+        Pattern A rate stats across them.
 
         Returns ``(None, None)`` when the team-data fetcher hasn't
-        backfilled any snapshots for the target season AND the prior
-        season -- the existing nfl_data_py-derived teamlog aggregates
-        carry the run alone, so production stays live on mixed-fill data.
+        backfilled any snapshots for the lookback windows -- the existing
+        nfl_data_py-derived teamlog aggregates carry the run alone, so
+        production stays live on mixed-fill data.
         """
         season, target_week = self._lookup_season_week(date)
         if getattr(self, "_fp_team_feature_cache", None) is None:
@@ -1558,18 +1556,14 @@ class StatsNFL(Stats):
         if cache_key in self._fp_team_feature_cache:
             return self._fp_team_feature_cache[cache_key]
         pattern_a_windows = self._lookback_windows(season, target_week)
-        has_data = any(
+        if not any(
             nfl_fp_team_weekly.available_snapshots(window_season)
             for window_season, _, _ in pattern_a_windows
-        ) or bool(nfl_fp_team_weekly.available_snapshots(season))
-        if not has_data:
+        ):
             self._fp_team_feature_cache[cache_key] = (None, None)
             return None, None
         team_features, defense_features = (
-            nfl_fp_team_weekly_aggregate.load_team_and_defense_features(
-                pattern_a_windows=pattern_a_windows,
-                pattern_b_snapshot=(season, target_week),
-            )
+            nfl_fp_team_weekly_aggregate.load_team_and_defense_features(pattern_a_windows)
         )
         self._fp_team_feature_cache[cache_key] = (team_features, defense_features)
         return self._fp_team_feature_cache[cache_key]
@@ -1775,10 +1769,6 @@ class StatsNFL(Stats):
           (no postseason props are priced), but the test pins it so a
           future tightening does not kill it before the operator decides
           to price one.
-
-        Pattern B (``line_matchups``) is NOT routed through this method;
-        the single-snapshot lookup at ``(target_season, target_week)``
-        applies whether the target is reg-season or postseason.
         """
         if target_week is None:
             # Legacy fallback -- full-season aggregates for prior 3 + current.

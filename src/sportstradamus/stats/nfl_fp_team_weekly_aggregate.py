@@ -22,13 +22,6 @@ Pattern dispatches handled by this module:
   column to extract per-situation snap counts, then compute pass% as
   ``sum(pass_snaps) / (sum(pass_snaps) + sum(rush_snaps))`` per team.
 
-Pattern B (``line_matchups``) is handled inline in
-:func:`_load_line_matchups`: single-snapshot lookup, no aggregation; the
-row IS the feature for the target game. Team-side ``teamStats*`` columns
-go to teamProfile under the team's abbreviation; opponent-side
-``opponentStats*`` columns go to defenseProfile under the opponent's
-abbreviation.
-
 Pattern C (per-opponent x position fantasy_points_allowed) is **deferred
 to Phase 2b** -- the FP fetcher currently writes a 1-row season-to-date
 stub per snapshot (flagged in
@@ -66,12 +59,6 @@ from sportstradamus.stats.nfl_fp_aggregation import (
 # Used to re-key per-teamId aggregates back to the abbreviation index that
 # teamProfile / defenseProfile uses (matches the NFL gamelog's "team" col).
 _TEAM_ABBR_COL = "teamAbbreviation"
-
-# Opponent abbreviation column line_matchups carries instead of
-# ``opponentTeamId``. Defense-side Pattern B rows index by this directly
-# since the value is already a team-abbreviation key matching the
-# defenseProfile index in stats/base.py.
-_OPPONENT_ABBR_COL = "opponentAbbreviation"
 
 # PROE source columns. PFR-style formula:
 # ``sum(actual_dropbacks - expected_dropbacks) / sum(expected_dropbacks)``.
@@ -333,48 +320,15 @@ def _rpr_bucket_recipes() -> tuple[_TeamRecipe, ...]:
 _ALL_RECIPES: tuple[_TeamRecipe, ...] = _RECIPES + _rpr_bucket_recipes()
 
 
-def load_pattern_a_team_features(
-    pattern_a_windows: Sequence[tuple[int, int, int]],
-) -> pd.DataFrame:
-    """Pattern-A-only team features for callers that need rate stats without Pattern B.
-
-    The player-comp broadcast (``nfl_fp_weekly_aggregate.load_multi_window_one_year``)
-    needs the team's season-to-date ``off_faced_man_pct`` /
-    ``off_faced_zone_pct`` to project onto every player in the comp pool,
-    but does NOT want the matchup-specific ``lm_*`` columns Pattern B
-    would attach -- comps are season-to-date snapshots, not forecasts for
-    a specific game.
-
-    Args:
-        pattern_a_windows: Per-window ``(season, start_week, end_week)``
-            tuples to pool. Same semantics as
-            :func:`load_team_and_defense_features`.
-
-    Returns:
-        DataFrame indexed by team abbreviation with Pattern-A team
-        features only. Empty when no usable snapshots were found.
-    """
-    if not pattern_a_windows:
-        return pd.DataFrame()
-    abbr_season = max(season for season, _, _ in pattern_a_windows)
-    abbr_map = _build_team_abbreviation_map(abbr_season)
-    if abbr_map.empty:
-        return pd.DataFrame()
-    return _aggregate_pattern_a(pattern_a_windows, grain="team", abbr_map=abbr_map)
-
-
 def load_team_and_defense_features(
     pattern_a_windows: Sequence[tuple[int, int, int]],
-    pattern_b_snapshot: tuple[int, int],
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Aggregate weekly FP team snapshots into team / defense feature frames.
 
     Pattern A kinds pool per-game team rows across every
-    ``(season, start_week, end_week)`` window, then aggregate per the
-    recipe. Pattern B (``line_matchups``) reads the single snapshot at
-    ``pattern_b_snapshot`` -- the row IS the feature for the target game.
+    ``(season, start_week, end_week)`` window, then aggregate per the recipe.
 
-    The two-input contract lets the NFL caller apply the Phase-1.5
+    The windows-list contract lets the NFL caller apply the Phase-1.5
     lookback rule (post-week-4 = current-season only;
     pre-week-5 = prior season weeks 11..18 BLENDED with current-season
     partial, raw rows pooled before per-team groupby). Both branches of
@@ -383,59 +337,34 @@ def load_team_and_defense_features(
 
     Output frames are indexed by ``teamAbbreviation`` (e.g. ``"PHI"``,
     ``"KC"``) to match the abbreviation-indexed teamProfile / defenseProfile
-    built by ``stats/base.py:base_profile``. The abbreviation map is
-    sourced from the most recent season in ``pattern_a_windows`` (or
-    ``pattern_b_snapshot[0]`` if Pattern A is empty); team relocations
-    (OAK->LV, STL->LA) are resolved to the team's *current* abbreviation
-    because the underlying ``teamTeamId`` is stable across seasons.
+    built by ``stats/base.py:base_profile``.
 
     Args:
         pattern_a_windows: Per-window ``(season, start_week, end_week)``
             tuples to pool for Pattern A rate-stat reads. Windows where
             ``start_week > end_week`` are skipped silently. Empty list
-            short-circuits to no Pattern A features.
-        pattern_b_snapshot: ``(season, week)`` of the target game's
-            line_matchups snapshot. Pattern B output is empty when the
-            snapshot is missing or has no rows.
+            short-circuits to no features.
 
     Returns:
         Tuple ``(team_features, defense_features)`` of DataFrames, each
         indexed by team abbreviation. Empty DataFrames if no usable
         snapshots were found.
     """
-    abbr_season = _pick_abbr_season(pattern_a_windows, pattern_b_snapshot)
-    abbr_map = _build_team_abbreviation_map(abbr_season)
+    if not pattern_a_windows:
+        return pd.DataFrame(), pd.DataFrame()
+
+    # Source the abbreviation map from the most recent window season: the
+    # underlying teamTeamId is stable across relocations (OAK->LV, STL->LA)
+    # but the abbreviation is not, and teamProfile / defenseProfile key on
+    # the team's current-day one.
+    abbr_map = _build_team_abbreviation_map(max(season for season, _, _ in pattern_a_windows))
     if abbr_map.empty:
         return pd.DataFrame(), pd.DataFrame()
 
-    team_features = _aggregate_pattern_a(pattern_a_windows, grain="team", abbr_map=abbr_map)
-    defense_features = _aggregate_pattern_a(pattern_a_windows, grain="defense", abbr_map=abbr_map)
-    team_b, defense_b = _load_line_matchups(*pattern_b_snapshot, abbr_map=abbr_map)
-    if not team_b.empty:
-        team_features = team_b if team_features.empty else team_features.join(team_b, how="outer")
-    if not defense_b.empty:
-        defense_features = (
-            defense_b if defense_features.empty else defense_features.join(defense_b, how="outer")
-        )
-    return team_features, defense_features
-
-
-def _pick_abbr_season(
-    pattern_a_windows: Sequence[tuple[int, int, int]],
-    pattern_b_snapshot: tuple[int, int],
-) -> int:
-    """Pick the season to source the teamTeamId -> abbreviation map from.
-
-    Prefer the most recent season in the Pattern A windows; fall back to
-    the Pattern B snapshot season when Pattern A is empty. Either choice
-    converges to the same mapping for NFL teams that haven't relocated;
-    for teams that have (OAK->LV in 2020), the most-recent season gives
-    the current-day abbreviation -- which matches what teamProfile /
-    defenseProfile use for live game lookups.
-    """
-    if pattern_a_windows:
-        return max(season for season, _, _ in pattern_a_windows)
-    return pattern_b_snapshot[0]
+    return (
+        _aggregate_pattern_a(pattern_a_windows, grain="team", abbr_map=abbr_map),
+        _aggregate_pattern_a(pattern_a_windows, grain="defense", abbr_map=abbr_map),
+    )
 
 
 def _recipes_by_kind(grain: str) -> dict[str, list[_TeamRecipe]]:
@@ -621,74 +550,6 @@ def _parse_bucket_json(raw: object) -> dict:
         return {}
 
 
-def _load_line_matchups(
-    season: int,
-    target_week: int,
-    abbr_map: pd.Series,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Pattern B -- single-snapshot lookup, split team-side / opp-side cols.
-
-    ``line_matchups`` carries one row per matchup that week. Each row has
-    both the team's own protection-line baseline (``teamStats*``) and the
-    opponent's pass-rush profile (``opponentStats*``). Team-side cols join
-    into teamProfile under the team's abbreviation (resolved from
-    ``teamTeamId`` via ``abbr_map``); opp-side cols join into defenseProfile
-    under the opponent's abbreviation (taken directly from the
-    ``opponentAbbreviation`` column FP writes on line_matchups rows).
-    """
-    df = nfl_fp_team_weekly.load_snapshot(season, target_week, "line_matchups")
-    if df is None or df.empty or TEAM_GROUP_COL not in df.columns:
-        return pd.DataFrame(), pd.DataFrame()
-
-    mapping = abbr_map.to_dict()
-    team_cols = [c for c in df.columns if c.startswith("teamStats")]
-    opp_cols = [c for c in df.columns if c.startswith("opponentStats")]
-
-    team_df = _line_matchups_team_side(df, team_cols, mapping)
-    opp_df = _line_matchups_opp_side(df, opp_cols)
-    return team_df, opp_df
-
-
-def _line_matchups_team_side(
-    df: pd.DataFrame,
-    value_cols: list[str],
-    mapping: dict[int, str],
-) -> pd.DataFrame:
-    """Project the team-side of line_matchups (own OL) to an abbreviation-indexed frame.
-
-    Uses ``teamTeamId`` resolved via ``mapping`` because the team-grain
-    line_matchups frame carries ``teamTeamId`` + ``teamAbbreviation`` for
-    its own side -- both work as the index, but resolving via the id keeps
-    one canonical source-of-truth path with the Pattern-A aggregation.
-    """
-    if not value_cols:
-        return pd.DataFrame()
-    side = df[[TEAM_GROUP_COL, *value_cols]].copy()
-    side.index = [mapping.get(idx) for idx in side[TEAM_GROUP_COL]]
-    side = side.loc[side.index.notna()] if isinstance(side.index, pd.Index) else side
-    side = side.drop(columns=[TEAM_GROUP_COL])
-    return side.add_prefix("lm_")
-
-
-def _line_matchups_opp_side(
-    df: pd.DataFrame,
-    value_cols: list[str],
-) -> pd.DataFrame:
-    """Project the opp-side of line_matchups (opp DL) to an abbreviation-indexed frame.
-
-    Uses ``opponentAbbreviation`` directly because line_matchups does NOT
-    carry ``opponentTeamId`` -- the abbreviation is the only opponent key
-    FP writes. Skips the abbr_map round-trip entirely.
-    """
-    if not value_cols or _OPPONENT_ABBR_COL not in df.columns:
-        return pd.DataFrame()
-    side = df[[_OPPONENT_ABBR_COL, *value_cols]].copy()
-    side.index = side[_OPPONENT_ABBR_COL].values
-    side = side.loc[side.index.notna()] if isinstance(side.index, pd.Index) else side
-    side = side.drop(columns=[_OPPONENT_ABBR_COL])
-    return side.add_prefix("lm_def_")
-
-
 # Module-level cache: teamTeamId -> teamAbbreviation, keyed by season.
 # Populated lazily on first call to _build_team_abbreviation_map; avoids
 # re-reading parquets on repeated calls in a training loop.
@@ -768,4 +629,4 @@ def _abbr_from_player_grain(season: int) -> pd.Series | None:
     return None
 
 
-__all__ = ("load_pattern_a_team_features", "load_team_and_defense_features")
+__all__ = ("load_team_and_defense_features",)

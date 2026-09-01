@@ -73,9 +73,10 @@ def test_fp_team_features_cache_by_season_week(monkeypatch):
     monkeypatch.setattr(stats, "_lookback_windows", lambda *_args: [(2024, 1, 7)])
     monkeypatch.setattr(nfl_module.nfl_fp_team_weekly, "available_snapshots", lambda _season: [1])
 
-    def load_features(**_kwargs):
+    def load_features(pattern_a_windows):
         nonlocal calls
         calls += 1
+        assert pattern_a_windows == [(2024, 1, 7)]
         return expected
 
     monkeypatch.setattr(

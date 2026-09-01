@@ -942,11 +942,6 @@ def _broadcast_team_coverage(
     the player-comp profile broadcasts them onto each player via the
     player's ``Team`` so the KNN distance metric can see them.
 
-    Uses the Pattern-A-only entry point on the team bridge to avoid
-    pulling matchup-specific ``lm_*`` columns (Pattern B) into the
-    comp profile -- those are forecasts for a specific game, not
-    season-to-date features.
-
     Args:
         profile: Per-player wide frame indexed by accent-stripped name
             with a ``Team`` column carrying the player's team abbreviation.
@@ -961,7 +956,7 @@ def _broadcast_team_coverage(
     """
     if profile.empty or "Team" not in profile.columns:
         return profile
-    team_features = nfl_fp_team_weekly_aggregate.load_pattern_a_team_features(windows)
+    team_features, _ = nfl_fp_team_weekly_aggregate.load_team_and_defense_features(windows)
     if team_features.empty:
         return profile
     keep_cols = [

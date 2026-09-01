@@ -125,6 +125,14 @@ Quick checks when collection or serving looks wrong:
   `shipped: "withheld"`, or `sportstradamus ship config --branch devel --prune`.
 - **Diverged dispersion fit**: serving logs "dispersion_cal … pinned at its fit
   bound" and serves the unscaled shape; retrain the cell to clear it.
+- **Whole league unfit to serve** (retrain in flight, schema break): prefix the
+  cron line with `SPORTSTRADAMUS_HOLD_LEAGUES=NFL` (comma-separated for several).
+  `league_is_live` then reports the league idle, so `prophecize` and
+  `pickem-build` skip it while still archiving its DFS lines; `confer` and
+  `close-lines` are unaffected. Clear it by removing the prefix — effective next
+  tick, nothing to deploy. The hold also suppresses the league's gamelog
+  `update()`, so a long hold wants one `SPORTSTRADAMUS_FORCE_UPDATE=1` run after.
+  Keep it off `meditate --league All` lines: that loop honors the same gate.
 
 ## Related runbooks
 

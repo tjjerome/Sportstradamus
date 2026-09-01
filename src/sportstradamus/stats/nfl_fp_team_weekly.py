@@ -16,7 +16,7 @@ Layout on disk::
             coverage_matrix_opp.parquet
             fantasy_points_scored.parquet
             fantasy_points_scored_opp.parquet
-            line_matchups.parquet            <-- this-week-only forward look
+            line_matchups.parquet            <-- realized game rows; abbreviation source only
             passing_advanced.parquet
             passing_advanced_opp.parquet
             ...                              <-- 20 file_kinds total
@@ -58,17 +58,17 @@ game). Recommended denominators per family:
 - proe_report: ``sum(actual_dropbacks - expected_dropbacks) /
   sum(expected_dropbacks)``; the per-game ratio is biased
 
-A few kinds are **matchup-dependent forecasts**, not historical
-aggregates -- they're FP's expert view of the upcoming game and must
-NOT be averaged. Pull the row at the target game's snapshot directly
-via :func:`load_snapshot` and join on ``(team, opponent, week)``:
-
-- line_matchups -- both ``teamStats*`` (this team's protection-line
-  baseline) and ``opponentStats*`` (the opponent's pass-rush profile
-  for this matchup) are forward-looking and game-specific
-  (final semantics pending fetcher-side schema confirmation; the
-  ``opponentStats*`` interpretation is currently best-guess and should
-  be re-checked once the team-data backfill populates)
+``line_matchups`` must NOT be used as a feature for the week it is
+filed under. Its ``teamStats*`` columns are that week's **realized**
+game totals, not a forecast: 2025 week 1 records PIT 20 / NYJ 39 /
+GB 25 rushing attempts, which is exactly
+``player_data/NFL/2025/week_01/rushing_basic.parquet`` grouped by team,
+and ``teamStatsGamesPlayed`` is always 1. Reading the target week's row
+is same-game target leakage; it cost six NFL models a retrain in
+2026-09. The kind is loaded here only as the ``teamTeamId ->
+teamAbbreviation`` source (see
+``nfl_fp_team_weekly_aggregate._abbr_from_team_grain``), which is
+week-agnostic.
 
 And a few are **game outcomes** that average game-to-game (the
 denominator is just games):
@@ -116,11 +116,6 @@ FILE_KINDS: dict[str, str] = {
     "rushing_basic": "rushing_basic.parquet",
     "rushing_basic_opp": "rushing_basic_opp.parquet",
 }
-
-# Logical kinds that are forward-looking matchup forecasts rather than
-# historical aggregates. Concatenating these across weeks is WRONG --
-# consumers must call :func:`load_snapshot` for the target week directly.
-MATCHUP_FORECAST_KINDS: frozenset[str] = frozenset({"line_matchups"})
 
 # Logical kinds whose ``*_opp`` mirror is the defense-faced equivalent.
 # Useful for callers that want to iterate "all paired offensive kinds"
