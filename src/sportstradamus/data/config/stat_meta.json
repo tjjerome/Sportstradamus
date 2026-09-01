@@ -241,7 +241,7 @@
         },
         "passing yards": {
             "dist": "SkewNormal",
-            "shipped": "devel",
+            "shipped": "withheld",
             "target_normalization": "ratio_meanyr",
             "posthoc": "none",
             "blending": "crps_1se",
