@@ -67,7 +67,7 @@ Sportstradamus/
 | `odds_budget.py` | Odds API credit-budget governor: usage ledger, cycle math, cost estimates, broad-run league admission, season/activity windows (`league_is_live`, `update_window_open`, `season_opener`). Loads `config/odds_api_budget.json` itself — the one exception to `config.py` owning config loads |
 | `distributions.py` | Model/bookmaker fusion math: `fused_loc`, `get_ev`, `get_odds`, `fit_distro`, `no_vig_odds`, `odds_to_prob`, `prob_to_odds` |
 | `integer_distribution.py` | Exact CDF endpoints and settlement for nonnegative-integer outcomes |
-| `combined_markets.py` | Honest book references for combined QB markets with no direct sportsbook line |
+| `combined_markets.py` | Scrambled-Sobol NORTA kernel (`ComboComponent`, `combo_sum_quote`) that combines weighted component marginals into one combo-market predictive under a same-player residual correlation |
 | `io.py` | Atomic parquet/JSON IO and schema converters for the data hot path (history, parlay history, model pickles) |
 | `locks.py` | Advisory file locks serializing the long-running jobs that share one checkout |
 | `logging.py` | Structured JSON logging for CLI entry points (`get_logger`) |

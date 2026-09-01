@@ -144,28 +144,137 @@ Validation: backtest the derived `under_prob` against graded combo outcomes
 (claimed-vs-hit by bucket) before any consumer flips; the nightly
 calibration-divergence WARN (n≥150, gap>0.08) watches it live afterward.
 
-## Lane B — model predictions on combo markets: blend the components
+## Lane B — model predictions on combo markets: blend the components — **CLOSED, NO-GO**
 
-Goal: a combo cell's prediction built from the **component models'
-distributions** instead of (or blended with) a directly-trained combo model.
+Built and graded. A combo cell's prediction assembled from its **component models'
+own predictives** is well-formed and cheap to produce, and it does not beat the
+directly-trained combo model anywhere. **0 of 16 gradeable cells supersede**, across
+three prediction arms and both correlation arms.
 
-* Nearly every MLB hitter component has a live pickle (`singles`, `doubles`,
-  `home-runs`, `rbi`, `runs`, `walks`, `stolen-bases`; `triples` missing —
-  gamelog rate or hits-prorated analytic is the candidate fill). NBA combo
-  components (PTS/REB/AST/BLK/STL/TOV) are modeled. Pitcher fantasy is
-  thinner (no `pitcher-strikeouts`/`quality-start` models) — start with
-  hitters.
-* Combiner is the **same kernel as Lane A** applied to model-predicted
-  per-component distributions (LightGBMLSS params → PMF/samples), with the
-  same copula. One implementation, two input sources.
-* Evaluate as a candidate against the direct combo model with the existing
-  A/B harness: `sportstradamus ship scorecard --baseline <direct-model CSV>
-  --candidate <blend CSV>` on frozen matrices; the six offline gates decide
-  per cell, human ships. Also test a convex blend of direct-model and
-  component-blend probabilities as a third arm.
-* Order: MLB hitter fantasy (dead cell, pure upside) → NBA fantasy (after the
-  grading audit) → PRA/yards-class simple combos (models exist and pass gates
-  today; component-blend must *beat* the incumbent, not just exist).
+Nothing in serving changed. `component_sum_frame` produces no `TrainingQuote` and is
+not on any serving path; the lane's deliverable is this verdict.
+
+### What was built
+
+* `training/component_cells.py` — which components, at what weight, decoded per row.
+  Weights come from the tables serving already uses (`combo_props`, each league's
+  `Stats._fantasy_combo_spec`), never a copy. Per-row predictives are read out of each
+  component cell's `data/test_sets` dump — its **test split only**, so every component
+  row is out-of-sample for its own model, with no pickle, feature matrix or archive read.
+* `training/component_sum.py` — `component_sum_frame(league, market, ...)`, which feeds
+  those components to the *same* `helpers/combined_markets.combo_sum_quote` kernel Lane A
+  uses and returns a row-aligned `(candidate, baseline)` pair for the ship scorecard.
+* `training/scorecard.py` — a `ComponentSum` family that grades a distribution-free
+  predictive from six persisted endpoints (`SUM_CDF`, `SUM_PMF`, `SUM_Q10/Q25/Q75/Q90`).
+  Without it Gate 4 — the only gate that sees dispersion, and the whole point of a
+  component sum — silently fell back to a point-IQR estimator.
+* `scripts/backtest_component_sum.py` — the sweep driver.
+
+Reproduce:
+
+    poetry run python -m sportstradamus.scripts.backtest_component_sum --rho both
+    poetry run python -m sportstradamus.scripts.backtest_component_sum \
+        --rho book --mixture-weight 0.5
+
+### The arms
+
+* **A0** — the incumbent combo model, restricted to the joined rows.
+* **A1** — the NORTA component sum (`mixture_weight` unset).
+* **A2** — a linear pool `0.5 * F_A1 + 0.5 * F_A0`, the handoff's convex-blend arm. It
+  is built by pooling the two arms' **draw vectors**, not their CDFs: all six endpoints
+  read off a sorted draw vector and a mixture CDF has no closed-form quantile to
+  persist. The incumbent side is resampled through the same kernel as a one-component
+  sum, which is what makes `mixture_weight=0` reproduce the incumbent's own gate row
+  (pinned in `tests/test_component_sum.py`) and lets both sides carry the same
+  sampling error.
+
+### Per-cell verdict
+
+`A0`/`A1`/`A2` columns are Gate 4's randomized-PIT KS (lower is better; the gate's
+threshold is `1.358/sqrt(n)`). Every cell holds.
+
+| cell | n / combo rows | A0 | A1 | A2 | verdict |
+|---|---|---|---|---|---|
+| MLB `hits+runs+rbi` | 8792 / 9858 (89%) | **0.0208** | 0.0555 | 0.0365 | HOLD |
+| MLB `hitter fantasy points underdog` | 586 / 3234 (18%) | **0.0452** | 0.2184 | — | HOLD |
+| NBA `BLST` | 1570 / 2192 (72%) | **0.0206** | 0.0321 | 0.0255 | HOLD |
+| NBA `PA` | 1779 / 2189 (81%) | **0.0400** | 0.0696 | 0.0489 | HOLD |
+| NBA `PR` | 2022 / 2195 (92%) | **0.0150** | 0.0478 | 0.0272 | HOLD |
+| NBA `PRA` | 1806 / 2212 (82%) | **0.0279** | 0.0556 | 0.0397 | HOLD |
+| NBA `RA` | 1828 / 2217 (82%) | **0.0348** | 0.0528 | 0.0394 | HOLD |
+| NBA `fantasy points prizepicks` | 501 / 1873 (27%) | **0.0359** | 0.1036 | 0.0677 | HOLD |
+| NFL `fantasy points prizepicks` | 1414 / 1938 (73%) | **0.0457** | 0.1264 | 0.0925 | HOLD |
+| NFL `fantasy points underdog` | 1368 / 1851 (74%) | **0.0520** | 0.1322 | 0.0963 | HOLD |
+| NFL `tds` | 457 / 2466 (19%) | **0.0405** | 0.0496 | 0.0436 | HOLD |
+| NFL `yards` | 441 / 2057 (21%) | **0.0595** | 0.1509 | 0.0943 | HOLD |
+| NFL `qb tds` | 277 / 341 (81%) | 0.0932 | 0.0564 | **0.0520** | HOLD (thin) |
+| NFL `qb yards` | 232 / 279 (83%) | **0.0568** | 0.1797 | 0.0945 | HOLD (thin) |
+| NHL `sogBS` | 234 / 2391 (10%) | **0.0691** | 0.0891 | 0.0713 | HOLD (thin) |
+| WNBA `BLST` | 1850 / 2256 (82%) | 0.0234 | 0.0247 | **0.0198** | HOLD |
+
+Cells under ~300 paired rows are reported, not judged: Gate 4's threshold and Gate 1's
+bootstrap CI both widen enough that a thin cell fails for the wrong reason.
+
+**Eight cells could not be graded at all**, none of them for a reason about the method:
+
+* WNBA `PA` / `PR` / `PRA` / `RA` / `fantasy points prizepicks` — the `PTS` and `REB`
+  test-set dumps carry a strategy identity that no longer resolves, so `load_test_set`
+  refuses them. A stale artifact; re-dumping those two cells unblocks five combos.
+* MLB `pitcher fantasy points underdog`, NHL `goalie fantasy points underdog` — their
+  specs need sampled/Bernoulli/post-hook terms (pitcher win, quality start, goalie win)
+  that no component cell models.
+* NHL `skater fantasy points underdog` — only 12 of 2040 rows join every component;
+  `blocked` reaches 95 of 2040. Same co-occurrence wall Lane A hit.
+
+### Why it loses: the sum is honestly dispersed, the incumbent is fitted
+
+The component sum's spread is *computed* — it adds the component variances and their
+correlation — while the incumbent's is *fitted to this cell's outcomes*. That predicts
+exactly what Gate 4's IQR ratio shows, and the split is clean:
+
+| incumbent `g4_iqr_ratio` | cells | the sum moves it toward 1.0 |
+|---|---|---|
+| more than 0.10 off 1.0 | 10 | **9** |
+| within 0.10 of 1.0 | 5 | **0** |
+
+The repairs are large where they happen — NFL `qb tds` 1.689 → 1.000, NHL `sogBS`
+0.667 → 1.000, MLB hitter fantasy 1.574 → 1.333 — and the damage where the incumbent
+was already right is what costs the whole board. This is the same two-sidedness Lane A
+measured from the book side (`combo_kernel_honest_not_predictive`): the sum is honest,
+not sharp. A well-trained combo cell has already absorbed the dependence structure into
+its fitted scale, and rebuilding that scale from parts throws information away.
+
+The Brier picture agrees and is what actually blocks supersession. A1's paired-Brier
+S2 mean is negative in every single cell; even where all six offline gates pass on the
+candidate — MLB `hits+runs+rbi` under A2 ships G1–G6 outright — S2 lands at
+−0.0006 [−0.0009, −0.0002], a small but statistically clean loss to the incumbent.
+
+### Two findings worth keeping
+
+**Correlation is not the lever.** ρ_book (the shipped same-player residual Spearman)
+and ρ_model (the components' own NORTA `ρ_Z`, estimated on shared rows *outside* the
+graded set) are interchangeable here: across 16 cells the largest PIT-KS difference is
+0.0197, the mean is 0.0057, and **zero** cells flip either their gate row or their
+verdict. On MLB `hits+runs+rbi` the pairwise estimates land within 0.06 and disagree in
+sign (`hits|rbi` 0.468 book vs 0.507 model, `runs|rbi` 0.407 vs 0.349) — the
+expectation that a better model would leave uniformly *less* residual correlation does
+not hold. Do not spend another lane on the correlation input.
+
+**The convex blend interpolates; it does not ensemble.** A2 lands strictly between A0
+and A1 on Gate 4 in 13 of 15 cells. It beats both endpoints in exactly two — WNBA
+`BLST` (0.0198 against 0.0234 / 0.0247, n=1850) and NFL `qb tds` (thin) — and neither
+converts to a supersede. A blend is therefore a way to *bound* the damage from a
+mis-specified sum, not a way to extract value the incumbent lacks.
+
+### What would change the answer
+
+Not a kernel change and not a correlation change. The one lead the evidence supports
+is narrow: on a cell whose incumbent is badly mis-dispersed and whose components are
+sound, the sum's spread is the better one. Grading that as a **dispersion prior** for
+the incumbent — borrow the sum's scale, keep the incumbent's location and ranking —
+is a different experiment from replacing the predictive, and it is the only Lane B
+descendant worth opening. Re-dumping WNBA `PTS`/`REB` would add five more cells to
+test it on.
 
 ## Sequencing and gates
 
@@ -189,8 +298,8 @@ distributions** instead of (or blended with) a directly-trained combo model.
    means, and `_blend_with_book` pools that same mean into every served count
    cell. Fix is the research brief's fitted `var = a·μ^b`, not a blanket Poisson:
    `rbi` genuinely clumps and stays over-dispersed.
-3. Lane B behind the scorecard A/B; per-cell ship decisions (deferred until
-   Lane A lands).
+3. ~~Lane B behind the scorecard A/B~~ **done, NO-GO** — graded on all 16
+   reachable cells, none supersedes; see the Lane B section above.
 
 Usual gates apply throughout (`ruff`, golden, `-m integration -n0`,
 refactoring-specialist before push). No serving behavior changes without the
