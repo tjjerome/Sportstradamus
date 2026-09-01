@@ -167,7 +167,7 @@ def test_component_sum_serves_an_unquoted_combo(archive, monkeypatch):
     cell's generic cv.
     """
     _patch_cell(monkeypatch, "NegBin", 0.5)
-    monkeypatch.setitem(mp.combo_props, _MARKET, ["A", "B"])
+    monkeypatch.setitem(book_quotes.combo_props, _MARKET, ["A", "B"])
     _insert_components(archive, "Combo Guy")
 
     records = mp.book_fallback_prob(
@@ -195,7 +195,7 @@ def test_book_quote_keeps_its_price_and_takes_the_sum_shape(archive, monkeypatch
     preserves ``decode(invert(p)) == p`` there and replaces only the tail.
     """
     _patch_cell(monkeypatch, "NegBin", 0.5)
-    monkeypatch.setitem(mp.combo_props, _MARKET, ["A", "B"])
+    monkeypatch.setitem(book_quotes.combo_props, _MARKET, ["A", "B"])
     _insert_components(archive, "Combo Guy")
     _insert_odds(archive, "Combo Guy", "fanduel", 0.60, 25.5)
     _insert_odds(archive, "Combo Guy", "draftkings", 0.70, 25.5)
@@ -230,7 +230,7 @@ def test_component_only_dfs_support_never_serves(archive, monkeypatch):
     combo further than every honest component together.
     """
     _patch_cell(monkeypatch, "NegBin", 0.5)
-    monkeypatch.setitem(mp.combo_props, _MARKET, ["A", "B"])
+    monkeypatch.setitem(book_quotes.combo_props, _MARKET, ["A", "B"])
     _insert_odds(archive, "Combo Guy", "fanduel", 0.55, 14.5, market="A")
     _insert_odds(archive, "Combo Guy", "Underdog", 0.50, 8.5, market="B")
 
@@ -244,7 +244,7 @@ def test_component_only_dfs_support_never_serves(archive, monkeypatch):
 def test_blocked_combo_cell_never_serves(archive, monkeypatch):
     """A cell in ``_COMBO_SERVE_BLOCKED`` skips the second pass even fully quoted."""
     _patch_cell(monkeypatch, "NegBin", 0.5)
-    monkeypatch.setitem(mp.combo_props, _MARKET, ["A", "B"])
+    monkeypatch.setitem(book_quotes.combo_props, _MARKET, ["A", "B"])
     monkeypatch.setattr(book_quotes, "COMBO_SERVE_BLOCKED", frozenset({(_LEAGUE, _MARKET)}))
     _insert_components(archive, "Combo Guy")
 
@@ -262,7 +262,7 @@ def test_fantasy_market_never_serves_combo_fallback(archive, monkeypatch):
     their own graded verdict, so the kernel is not offered to them here.
     """
     _patch_cell(monkeypatch, "NegBin", 0.5)
-    assert _MARKET not in mp.combo_props
+    assert _MARKET not in book_quotes.combo_props
     _insert_components(archive, "Bench Guy")
 
     records = mp.book_fallback_prob(

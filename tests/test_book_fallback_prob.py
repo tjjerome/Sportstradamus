@@ -213,7 +213,7 @@ def test_legacy_combo_scalar_no_longer_serves(monkeypatch):
     stub = _StubArchive({})
     monkeypatch.setattr(book_quotes, "archive", stub)
     monkeypatch.setattr(base, "archive", stub)
-    monkeypatch.setitem(mp.combo_props, _RAW_MARKET, ["A", "B"])
+    monkeypatch.setitem(book_quotes.combo_props, _RAW_MARKET, ["A", "B"])
     stats = _StubStats(pd.DataFrame(), combo_ev=22.0)
 
     assert mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats) == []

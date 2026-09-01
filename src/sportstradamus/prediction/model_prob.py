@@ -10,7 +10,6 @@ returns a list of scored offer dicts ready for :func:`find_correlation`.
 from __future__ import annotations
 
 import hashlib
-import json
 import os.path
 import pickle
 from pathlib import Path
@@ -22,14 +21,10 @@ from scipy.stats import skewnorm
 from sportstradamus.helpers import (
     GATE_PUBLISH_THRESHOLD,
     NONZERO_DENOM_GATE,
-    UNDERDOG_BOOST_BASELINE,
     LazyArchive,
     apply_cdf_recal,
     apply_temperature,
     book_gate,
-    book_skewnormal_shape,
-    book_weights,
-    combo_props,
     decode_predictive_mean,
     fused_loc,
     get_odds,
@@ -42,16 +37,8 @@ from sportstradamus.helpers import (
     stat_meta,
     stat_zi,
 )
-from sportstradamus.helpers.distributions import _DP_PHI_CEILING, dfs_boost_probs
+from sportstradamus.helpers.distributions import _DP_PHI_CEILING
 from sportstradamus.helpers.io import market_file_slug, model_pickle_path
-from sportstradamus.helpers.training_quotes import (
-    COMBO_SUM_SOURCE,
-    DFS_PLATFORM_BOOKS,
-    TrainingQuote,
-    quote_pricing_params,
-    resolve_training_quote,
-    with_component_sum_shape,
-)
 from sportstradamus.prediction.book_quotes import (
     book_evs_for_players,
     price_offers_at_quotes,
