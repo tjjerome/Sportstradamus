@@ -22,6 +22,7 @@ import pytest
 
 from sportstradamus.helpers.distributions import get_ev
 from sportstradamus.helpers.training_quotes import ArchivedBookQuote
+from sportstradamus.prediction import book_quotes
 from sportstradamus.stats import base
 
 # ``sportstradamus.prediction`` re-exports the ``model_prob`` function, which
@@ -117,7 +118,7 @@ def _feature_frame(players, player_position=1):
 
 def test_full_parity_model_mirrors_book(monkeypatch):
     _patch_cell(monkeypatch)
-    monkeypatch.setattr(mp, "archive", _StubArchive(_quote_rows()))
+    monkeypatch.setattr(book_quotes, "archive", _StubArchive(_quote_rows()))
     stats = _StubStats(_feature_frame(["Test Player"], player_position=1))
 
     records = mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats)
@@ -146,7 +147,7 @@ def test_full_parity_model_mirrors_book(monkeypatch):
 
 def test_neutral_fill_when_no_feature_matrix(monkeypatch):
     _patch_cell(monkeypatch)
-    monkeypatch.setattr(mp, "archive", _StubArchive(_quote_rows()))
+    monkeypatch.setattr(book_quotes, "archive", _StubArchive(_quote_rows()))
     stats = _StubStats(pd.DataFrame())  # no players matched -> no features
 
     records = mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats)
@@ -164,7 +165,7 @@ def test_neutral_fill_when_no_feature_matrix(monkeypatch):
 
 def test_returns_empty_when_market_unknown(monkeypatch):
     monkeypatch.setattr(mp, "stat_dist", {})  # no distribution to devig with
-    monkeypatch.setattr(mp, "archive", _StubArchive(_quote_rows()))
+    monkeypatch.setattr(book_quotes, "archive", _StubArchive(_quote_rows()))
     stats = _StubStats(pd.DataFrame())
 
     assert mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats) == []
@@ -172,7 +173,7 @@ def test_returns_empty_when_market_unknown(monkeypatch):
 
 def test_returns_empty_when_no_book_quote(monkeypatch):
     _patch_cell(monkeypatch)
-    monkeypatch.setattr(mp, "archive", _StubArchive({}))  # no archived rows at all
+    monkeypatch.setattr(book_quotes, "archive", _StubArchive({}))  # no archived rows at all
     stats = _StubStats(pd.DataFrame())  # check_combo_markets also returns NaN
 
     assert mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats) == []
@@ -181,7 +182,9 @@ def test_returns_empty_when_no_book_quote(monkeypatch):
 def test_dfs_only_cohort_never_serves(monkeypatch):
     """A cohort of DFS platforms alone is the platform quoting itself — no serve."""
     _patch_cell(monkeypatch)
-    monkeypatch.setattr(mp, "archive", _StubArchive(_quote_rows(book="Sleeper", under=0.5)))
+    monkeypatch.setattr(
+        book_quotes, "archive", _StubArchive(_quote_rows(book="Sleeper", under=0.5))
+    )
     stats = _StubStats(pd.DataFrame())
 
     assert mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats) == []
@@ -190,7 +193,9 @@ def test_dfs_only_cohort_never_serves(monkeypatch):
 def test_pure_ev_inversion_never_serves(monkeypatch):
     """A legacy ev-only row (no native under-prob) is derived, not independent support."""
     _patch_cell(monkeypatch)
-    monkeypatch.setattr(mp, "archive", _StubArchive(_quote_rows(under=None, line=None, ev=22.0)))
+    monkeypatch.setattr(
+        book_quotes, "archive", _StubArchive(_quote_rows(under=None, line=None, ev=22.0))
+    )
     stats = _StubStats(pd.DataFrame())
 
     assert mp.book_fallback_prob([_offer()], _LEAGUE, _RAW_MARKET, _PLATFORM, stats) == []
@@ -206,7 +211,7 @@ def test_legacy_combo_scalar_no_longer_serves(monkeypatch):
     """
     _patch_cell(monkeypatch)
     stub = _StubArchive({})
-    monkeypatch.setattr(mp, "archive", stub)
+    monkeypatch.setattr(book_quotes, "archive", stub)
     monkeypatch.setattr(base, "archive", stub)
     monkeypatch.setitem(mp.combo_props, _RAW_MARKET, ["A", "B"])
     stats = _StubStats(pd.DataFrame(), combo_ev=22.0)

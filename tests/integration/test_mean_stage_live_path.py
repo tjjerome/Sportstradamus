@@ -18,6 +18,7 @@ is absent.
 
 from __future__ import annotations
 
+import datetime
 import importlib
 import importlib.resources as pkg_resources
 import pickle
@@ -27,9 +28,15 @@ import pandas as pd
 import pytest
 
 from sportstradamus import data
+from sportstradamus.helpers.config import book_count_dispersion
+from sportstradamus.helpers.distributions import get_odds
+from sportstradamus.helpers.training_quotes import ArchivedBookQuote
+from sportstradamus.prediction import book_quotes, offer_records
 from sportstradamus.training import posthoc
 
 mp = importlib.import_module("sportstradamus.prediction.model_prob")
+
+pytestmark = pytest.mark.integration
 
 _LEAGUE, _MARKET, _PLATFORM = "NBA", "BLK", "Underdog"
 _N_OFFERS = 30
@@ -42,25 +49,34 @@ _MODEL_WEIGHT = 0.6
 _BOOK_EV = 0.55
 _MODEL_R = 3.0
 _ZI_GATE = 0.25
+_OBSERVED_AT = datetime.datetime(2026, 6, 3, 12, 0, 0)
 # Identity columns the offer frame owns; the feature frame must not duplicate them.
 _OFFER_COLUMNS = ("Player", "League", "Team", "Opponent", "Date", "Market", "Line", "Boost")
 
 
 class _StubArchive:
+    """The two archive surfaces model_prob reads, and nothing else."""
+
     default_totals = {_LEAGUE: 220.0}
 
-    def get_ev(self, league, market, date, player):
-        return _BOOK_EV
+    def __init__(self, dist, gate):
+        # One modal cohort of real sportsbooks whose consensus under-probability
+        # inverts to exactly _BOOK_EV. Built through get_odds under the same shape
+        # quote_pricing_params will invert with, rather than asserted as a mean the
+        # book leg no longer accepts directly.
+        _phi, r = book_count_dispersion(_LEAGUE, _MARKET, _LINE, 1.0)
+        under = float(get_odds(_LINE, _BOOK_EV, dist, cv=1.0, gate=gate, r=r))
+        self._rows = [
+            ArchivedBookQuote(book, None, under, _LINE, _OBSERVED_AT)
+            for book in ("fanduel", "draftkings")
+        ]
 
-    def get_line(self, league, market, date, player):
-        return _LINE
+    def get_training_quote_inputs(self, league, market, date, entities, at=None):
+        return {e: (list(self._rows), _LINE) for e in entities}
 
 
 class _StubStats:
     league = _LEAGUE
-
-    def check_combo_markets(self, market, player, date):
-        return float("nan")
 
 
 def _fixture_rows():
@@ -113,7 +129,11 @@ def _score(monkeypatch, tmp_path, dist, slug, blob, player_stats, offers, player
     with open(pickle_path, "wb") as fh:
         pickle.dump(_filedict(dist, slug, blob), fh)
     monkeypatch.setattr(mp, "model_pickle_path", lambda _lg, _mkt: str(pickle_path))
-    monkeypatch.setattr(mp, "archive", _StubArchive())
+    # Two bindings since the model_prob split: book_quotes resolves the quotes,
+    # offer_records reads default_totals when finalizing.
+    stub_archive = _StubArchive(dist, _ZI_GATE if dist == "ZINB" else None)
+    monkeypatch.setattr(book_quotes, "archive", stub_archive)
+    monkeypatch.setattr(offer_records, "archive", stub_archive)
     monkeypatch.setattr(mp, "stat_cv", {_LEAGUE: {_MARKET: 1.0}})
     monkeypatch.setattr(mp, "stat_dist", {_LEAGUE: {_MARKET: dist}})
     monkeypatch.setattr(mp, "stat_zi", {_LEAGUE: {_MARKET: _ZI_GATE}} if dist == "ZINB" else {})

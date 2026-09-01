@@ -6,10 +6,10 @@ quote the training matrix resolves (``resolve_training_quote`` over
 DFS platform's reposted or discounted line can poison — and must price every
 offered line with the exact shape used to invert the quote, so
 ``decode(invert(p)) == p`` at the quote line. Rows nothing real priced never
-serve. ``_finalize_records`` fills a missing ``Market EV`` with the payout-implied
+serve. ``offer_records.finalize_records`` fills a missing ``Market EV`` with the payout-implied
 probability of the chosen side (never a flat 0.5) and drops unquoted
 single-player rows whose model probability disagrees with that only-available
-price beyond ``_UNQUOTED_BOOK_DISAGREEMENT_MAX``.
+price beyond ``UNQUOTED_BOOK_DISAGREEMENT_MAX``.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from sportstradamus.helpers.distributions import (
     dfs_boost_probs,
     get_ev,
 )
+from sportstradamus.prediction import book_quotes, offer_records
 from sportstradamus.stats import base
 
 mp = importlib.import_module("sportstradamus.prediction.model_prob")
@@ -48,7 +49,7 @@ def archive(tmp_path, monkeypatch):
             Archive._instance._connection.close()
         Archive._instance._initialized = False
     a = Archive()
-    monkeypatch.setattr(mp, "archive", a)
+    monkeypatch.setattr(book_quotes, "archive", a)
     # combo_quote resolves its components through stats.base's own archive binding.
     monkeypatch.setattr(base, "archive", a)
     yield a
@@ -244,7 +245,7 @@ def test_blocked_combo_cell_never_serves(archive, monkeypatch):
     """A cell in ``_COMBO_SERVE_BLOCKED`` skips the second pass even fully quoted."""
     _patch_cell(monkeypatch, "NegBin", 0.5)
     monkeypatch.setitem(mp.combo_props, _MARKET, ["A", "B"])
-    monkeypatch.setattr(mp, "_COMBO_SERVE_BLOCKED", frozenset({(_LEAGUE, _MARKET)}))
+    monkeypatch.setattr(book_quotes, "COMBO_SERVE_BLOCKED", frozenset({(_LEAGUE, _MARKET)}))
     _insert_components(archive, "Combo Guy")
 
     records = mp.book_fallback_prob(
@@ -289,7 +290,7 @@ def _finalize_input(rows):
 
 
 def test_unquoted_rows_price_payout_implied_and_phantoms_drop(monkeypatch):
-    monkeypatch.setattr(mp, "archive", _TotalsOnlyArchive())
+    monkeypatch.setattr(offer_records, "archive", _TotalsOnlyArchive())
     decimal = 1.55 * UNDERDOG_BOOST_BASELINE
     rows = [
         # Unquoted boosted over at the payout-implied breakeven; model gap 0.1375
@@ -336,7 +337,7 @@ def test_unquoted_rows_price_payout_implied_and_phantoms_drop(monkeypatch):
         },
     ]
 
-    records = mp._finalize_records(
+    records = offer_records.finalize_records(
         _finalize_input(rows),
         _LEAGUE,
         "Underdog",
@@ -360,7 +361,7 @@ def test_unquoted_rows_price_payout_implied_and_phantoms_drop(monkeypatch):
 
 
 def _model_book_leg(offer_df):
-    return mp._book_evs_for_players(
+    return book_quotes.book_evs_for_players(
         offer_df,
         _LEAGUE,
         _MARKET,

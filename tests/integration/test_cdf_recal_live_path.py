@@ -25,6 +25,10 @@ import pytest
 
 from sportstradamus import data
 from sportstradamus.helpers.training_quotes import ArchivedBookQuote
+
+# ``sportstradamus.prediction`` re-exports the ``model_prob`` function, shadowing the
+# submodule under attribute access — fetch the module so monkeypatch hits its globals.
+from sportstradamus.prediction import book_quotes, offer_records
 from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
 from sportstradamus.stats import StatsNBA
 from sportstradamus.training import posthoc
@@ -35,8 +39,6 @@ from sportstradamus.training.pipeline import (
     fit_predict_params,
 )
 
-# ``sportstradamus.prediction`` re-exports the ``model_prob`` function, shadowing the
-# submodule under attribute access — fetch the module so monkeypatch hits its globals.
 mp = importlib.import_module("sportstradamus.prediction.model_prob")
 
 _LEAGUE, _MARKET, _PLATFORM = "NBA", "DREB", "Underdog"
@@ -50,7 +52,7 @@ _BOOK_EV = 6.0
 class _StubArchive:
     default_totals = {_LEAGUE: 220.0}
 
-    def get_training_quote_inputs(self, league, market, date, entities):
+    def get_training_quote_inputs(self, league, market, date, entities, at=None):
         row = ArchivedBookQuote(
             book="fanduel", ev=_BOOK_EV, under_probability=0.55, line=5.5, observed_at=None
         )
@@ -118,7 +120,11 @@ def _score(monkeypatch, tmp_path, prob_params, player_stats, offers, pit_recal_b
     with open(pickle_path, "wb") as fh:
         pickle.dump(_filedict(pit_recal_blob), fh)
     monkeypatch.setattr(mp, "model_pickle_path", lambda _lg, _mkt: str(pickle_path))
-    monkeypatch.setattr(mp, "archive", _StubArchive())
+    # Two bindings since the model_prob split: book_quotes resolves the quotes,
+    # offer_records reads default_totals when finalizing.
+    stub_archive = _StubArchive()
+    monkeypatch.setattr(book_quotes, "archive", stub_archive)
+    monkeypatch.setattr(offer_records, "archive", stub_archive)
     monkeypatch.setattr(mp, "stat_cv", {_LEAGUE: {_MARKET: 1.0}})
     monkeypatch.setattr(mp, "stat_dist", {_LEAGUE: {_MARKET: "SkewNormal"}})
     monkeypatch.setattr(mp, "stat_zi", {})

@@ -52,6 +52,12 @@ from sportstradamus.helpers.training_quotes import (
     resolve_training_quote,
     with_component_sum_shape,
 )
+from sportstradamus.prediction.book_quotes import (
+    book_evs_for_players,
+    price_offers_at_quotes,
+    servable_fallback_quotes,
+)
+from sportstradamus.prediction.offer_records import book_over_prob, finalize_records
 from sportstradamus.spiderLogger import logger
 from sportstradamus.training.baselines import get_target_normalization
 from sportstradamus.training.group_conditional_cdf import (
@@ -93,36 +99,10 @@ from sportstradamus.training.structural_strategies import (
 # access. See LazyArchive docstring in helpers/archive.py.
 archive = LazyArchive()
 
-# Maximum allowed model confidence before applying a boost.
-_MAX_CONFIDENCE = 0.90
-
 # Minimum bookmaker line for a "yards" market to be scored. Combo legs ("vs.")
 # are exempt; single-player yards lines at or below this are too low to model
 # reliably and are dropped.
 _MIN_YARDS_LINE = 8
-
-# Maximum Underdog boost multiplier kept when de-duplicating a player's offers.
-# Above this the promo is an outlier (e.g. a discounted special) that distorts
-# the per-player distance ranking, so it is filtered out.
-_MAX_UNDERDOG_BOOST = 3.65
-
-# A book-fallback quote serves only when its same-line cohort holds at least this many
-# real sportsbooks. DFS platforms repost (or discount) consensus rather than price
-# independently, so a cohort of platforms alone is the platform quoting itself — the
-# Sleeper fake-50/50 poisoning vector.
-_MIN_FALLBACK_REAL_BOOKS = 1
-
-# Component sums whose components are not fit to quote, so the sum inherits their defect.
-# NBA BLK and STL archive a probability that disagrees with their own stored ev at every
-# line (+0.17 to +0.27, with 29%/43% of ev NULL); the sum graded claimed 0.141 against a
-# realized 0.439. Repairing the components is what lifts this, not a kernel change.
-_COMBO_SERVE_BLOCKED = frozenset({("NBA", "BLST")})
-
-# Drop an unquoted single-player leg when the model disagrees with the payout-implied
-# probability by more than this. Underdog prices its own boosts near-fair, so a model
-# >15 pts from the only price available has no independent support — these were the
-# +51%-edge phantom picks the flat 0.5 prior manufactured.
-_UNQUOTED_BOOK_DISAGREEMENT_MAX = 0.15
 
 # A bookmaker projected mean beyond this multiple of its own line is implausible:
 # model and book project the same stat, and a sane book mean sits within a small
@@ -163,9 +143,6 @@ _OWN_SCALE_MIN: float = 0.1
 # below 9.95 escapes detection; the in-family phi re-clip in _dispersion_calibrate bounds it.
 _DIVERGED_DISPERSION_FLOOR: float = 0.1005
 _DIVERGED_DISPERSION_CEIL: float = 9.95
-
-# Maximum scored offers retained per player after boost-distance deduplication.
-_MAX_OFFERS_PER_PLAYER: int = 3
 
 # Serve-time model-version cache keyed by (pickle path, mtime): the legacy synthesis
 # hashes the whole pickle file, so it runs once per model per process. See resolve_model_version.
@@ -340,264 +317,6 @@ def _book_cell_params(
     return dist, cv, gate, step
 
 
-def _book_over_prob(
-    offer_df: pd.DataFrame,
-    dist: str,
-    cv: float,
-    step: float,
-    gate: float | None,
-    league: str,
-    market: str,
-) -> pd.Series:
-    """Devigged book probability of the over per row, inverted from ``Market Projection``.
-
-    Inverts the composite book EV through the cell distribution at each row's line. Shared by
-    :func:`model_prob` and :func:`book_fallback_prob`. For SkewNormal the book ``(sigma, skew)``
-    comes from the per-cell fitted shape evaluated at the book mean (:func:`book_skewnormal_shape`);
-    an unfitted cell returns ``(mean*cv, 0)``, the legacy symmetric constant-CV read. A NaN
-    ``Market Projection`` (no independent quote) stays NaN so ``_finalize_records`` prices the
-    row payout-implied.
-    """
-    quoted = offer_df.loc[offer_df["Market Projection"].notna()]
-    if quoted.empty:
-        return pd.Series(np.nan, index=offer_df.index)
-    offer_df = quoted
-    if dist == "SkewNormal":
-        # The archive encodes SkewNormal sportsbook EVs without the model's
-        # external hurdle. Keep the book endpoint gate-free on decode too.
-        gate = None
-
-        def _sn_over(x):
-            sigma, skew = book_skewnormal_shape(league, market, x["Market Projection"], cv)
-            return 1 - get_odds(
-                x["Line"],
-                x["Market Projection"],
-                dist,
-                cv=cv,
-                step=step,
-                sigma=float(sigma),
-                skew_alpha=float(skew),
-                gate=gate,
-            )
-
-        return offer_df.apply(_sn_over, axis=1)
-    return offer_df.apply(
-        lambda x: 1 - get_odds(x["Line"], x["Market Projection"], dist, cv, step=step, gate=gate),
-        axis=1,
-    )
-
-
-def _annotate_display_shape(offer_df: pd.DataFrame, dist: str) -> None:
-    """Set the display-only ``Model Param`` and ``Projection STD`` columns in place.
-
-    Reads the distribution-shape parameters the model emitted (``Model R`` /
-    ``Model Phi`` / ``Model Sigma`` / ``Model Alpha``); falls back to NaN when they are absent,
-    as on a book-fallback record. These columns feed the dashboard detail popup
-    only — no scoring path reads them.
-    """
-    # style: allow-complexity  flat per-distribution-family dispatch of closed-form
-    # display variances; splitting duplicates the family/param-present guards.
-    if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
-        offer_df["Model Param"] = offer_df["Model R"]
-    elif dist == "DPO" and "Model Phi" in offer_df.columns:
-        offer_df["Model Param"] = offer_df["Model Phi"]
-    elif dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
-        offer_df["Model Param"] = offer_df["Model Sigma"]
-    elif "Model Alpha" in offer_df.columns:
-        offer_df["Model Param"] = offer_df["Model Alpha"]
-    else:
-        offer_df["Model Param"] = np.nan
-
-    _m = offer_df["Projection"].to_numpy(dtype=float)
-    if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
-        _r = offer_df["Model R"].to_numpy(dtype=float)
-        offer_df["Projection STD"] = np.sqrt(np.clip(_m + _m**2 / np.clip(_r, 1e-6, None), 0, None))
-    elif dist == "DPO" and "Model Phi" in offer_df.columns:
-        _phi = offer_df["Model Phi"].to_numpy(dtype=float)
-        offer_df["Projection STD"] = np.sqrt(np.clip(_m / np.clip(_phi, 1e-6, None), 0, None))
-    elif dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
-        _sg = offer_df["Model Sigma"].to_numpy(dtype=float)
-        _sk = (
-            offer_df["Model Skew"].to_numpy(dtype=float)
-            if "Model Skew" in offer_df.columns
-            else np.zeros_like(_sg)
-        )
-        _delta = _sk / np.sqrt(1 + _sk**2)
-        offer_df["Projection STD"] = _sg * np.sqrt(np.clip(1 - 2 * _delta**2 / np.pi, 0, None))
-    elif "Model Alpha" in offer_df.columns:
-        _a = offer_df["Model Alpha"].to_numpy(dtype=float)
-        offer_df["Projection STD"] = _m / np.sqrt(np.clip(_a, 1e-6, None))
-    else:
-        offer_df["Projection STD"] = np.nan
-
-
-def _finalize_records(
-    offer_df: pd.DataFrame,
-    league: str,
-    platform: str,
-    dist: str,
-    cv: float,
-    step: float,
-    temperature: float | None,
-    dispersion_cal: float,
-    model_version: str,
-    pit_recal_blob: dict | None = None,
-) -> list[dict]:
-    """Resolve the bet side, apply boosts, and project the export schema.
-
-    Shared tail of :func:`model_prob` and :func:`book_fallback_prob`. Expects
-    ``offer_df`` to already carry ``Model Over`` / ``Model Under`` (win
-    probabilities for each side), the raw ``Market EV`` over-probability (NaN when no
-    book quoted the leg — filled with the payout-implied probability of the chosen
-    side, and the unquoted-disagreement gate then drops single-player rows the model
-    disagrees with beyond ``_UNQUOTED_BOOK_DISAGREEMENT_MAX``), ``Push Prob``,
-    ``Projection`` and ``Market Projection``. Feature-derived passenger columns absent on a
-    book-fallback record (built without a feature matrix) are filled neutral so
-    correlation and the dashboard read sane values — ``Player position`` in
-    particular must stay an int, never NaN, or correlation's position map breaks.
-    """
-    totals_map = archive.default_totals
-    for _col in ("Avg5", "AvgH2H", "H2HPlayed", "Total", "Defense position", "Moneyline"):
-        if _col not in offer_df.columns:
-            offer_df[_col] = np.nan
-    if "Home" not in offer_df.columns:
-        # Bool, not NaN: dashboard/narrative.py's match_label does `'v' if home else '@'`,
-        # and NaN is truthy in Python — it would render every no-Home row as the host.
-        offer_df["Home"] = False
-    if "Commence" not in offer_df.columns:
-        # Only Underdog threads a tip-off timestamp (books.py::get_ud); Sleeper and
-        # book-fallback rows default to empty so the export projection stays uniform
-        # (the dashboard coerces "" → NaT → non-urgent countdown).
-        offer_df["Commence"] = ""
-
-    offer_df["Model Over"] = offer_df["Model Over"].clip(upper=_MAX_CONFIDENCE)
-    offer_df["Model Under"] = offer_df["Model Under"].clip(upper=_MAX_CONFIDENCE)
-
-    offer_df["Win Prob"] = offer_df[["Model Over", "Model Under"]].max(axis=1)
-    offer_df["Bet"] = offer_df[["Model Over", "Model Under"]].idxmax(axis=1).str[6:]
-
-    if "Boost" in offer_df.columns:
-        offer_df.loc[offer_df["Boost"] == 1, ["Boost_Under", "Boost_Over"]] = 1
-    offer_df[["Boost_Under", "Boost_Over"]] = offer_df[["Boost_Under", "Boost_Over"]].fillna(
-        0
-    ).infer_objects(copy=False) * (UNDERDOG_BOOST_BASELINE if platform == "Underdog" else 1)
-    offer_df["Boost"] = offer_df.apply(
-        lambda x: (
-            (x["Boost_Over"] if x["Bet"] == "Over" else x["Boost_Under"])
-            if not np.isnan(x["Boost_Over"])
-            else x["Boost"]
-        ),
-        axis=1,
-    )
-
-    offer_df["Model EV"] = offer_df["Win Prob"] * offer_df["Boost"]
-    offer_df.loc[(offer_df["Bet"] == "Under"), "Market EV"] = (
-        1 - offer_df.loc[(offer_df["Bet"] == "Under"), "Market EV"]
-    )
-    unquoted = offer_df["Market EV"].isna()
-    # Post-conversion Boost_Over/Boost_Under are full decimal odds on every platform, so
-    # the payout-implied probability of the chosen side is the platform's own price for
-    # the leg — the only price available when no book quoted it.
-    implied = offer_df.apply(
-        lambda x: dfs_boost_probs(x["Boost_Over"], x["Boost_Under"])[
-            1 if x["Bet"] == "Under" else 0
-        ],
-        axis=1,
-    )
-    offer_df["Market Prob"] = offer_df["Market EV"].fillna(implied)
-    phantom = (
-        unquoted
-        & ~offer_df["Player"].str.contains(" vs. ", regex=False)
-        & ((offer_df["Win Prob"] - offer_df["Market Prob"]).abs() > _UNQUOTED_BOOK_DISAGREEMENT_MAX)
-    )
-    if phantom.any():
-        logger.warning(
-            f"{league} {offer_df['Market'].iat[0]}: dropped {int(phantom.sum())} unquoted "
-            "offer(s) disagreeing with the payout-implied price"
-        )
-        offer_df = offer_df.loc[~phantom]
-    offer_df["Market EV"] = offer_df["Market Prob"] * offer_df["Boost"]
-    offer_df["Kelly"] = (offer_df["Model EV"] - 1) / (offer_df["Boost"] - 1)
-    offer_df["Distance"] = offer_df["Boost"] / UNDERDOG_BOOST_BASELINE
-    offer_df.loc[offer_df["Distance"] < 1, "Distance"] = (
-        1 / offer_df.loc[offer_df["Distance"] < 1, "Distance"]
-    )
-    offer_df = (
-        offer_df.loc[offer_df["Boost"] <= _MAX_UNDERDOG_BOOST]
-        .sort_values("Distance", ascending=True)
-        .groupby("Player")
-        .head(_MAX_OFFERS_PER_PLAYER)
-    )
-
-    offer_df["Avg 5"] = offer_df["Avg5"] - offer_df["Line"]
-    offer_df["Avg H2H"] = offer_df["AvgH2H"] - offer_df["Line"]
-    offer_df.loc[offer_df["H2HPlayed"] == 0, "Avg H2H"] = 0
-    offer_df["O/U"] = offer_df["Total"] / totals_map.get(league, 1)
-    offer_df["DVPOA"] = offer_df["Defense position"]
-    if "Player position" not in offer_df:
-        offer_df["Player position"] = -1
-
-    offer_df["Player position"] = offer_df["Player position"].astype("category")
-    offer_df["Player position"] = (
-        offer_df["Player position"].cat.set_categories(range(-1, 5)).fillna(-1).astype(int)
-    )
-    _annotate_display_shape(offer_df, dist)
-
-    offer_df["Dist"] = dist
-    offer_df["CV"] = cv
-    offer_df["Gate"] = offer_df.get("Model Gate", np.nan)
-    offer_df["Temperature"] = temperature
-    offer_df["Disp Cal"] = dispersion_cal
-    offer_df["Step"] = step
-    offer_df["Model Version"] = model_version
-    # §6.1 Rung C: the whole-CDF recal map g (a cdf_recal_isotonic cell's served
-    # warp) so the deep-dive can draw g∘F, the distribution the model actually
-    # serves. Null for every other cell — the raw parametric curve is exact there.
-    offer_df["Model PIT Recal"] = json.dumps(pit_recal_blob) if pit_recal_blob else None
-
-    return offer_df[
-        [
-            "League",
-            "Date",
-            "Commence",
-            "Team",
-            "Opponent",
-            "Home",
-            "Player",
-            "Market",
-            "Line",
-            "Boost",
-            "Boost_Over",
-            "Boost_Under",
-            "Bet",
-            "Market EV",
-            "Model EV",
-            "Avg 5",
-            "Avg H2H",
-            "Moneyline",
-            "O/U",
-            "DVPOA",
-            "Player position",
-            "Projection",
-            "Model Param",
-            "Projection STD",
-            "Win Prob",
-            "Push Prob",
-            "Market Projection",
-            "Market Prob",
-            "Kelly",
-            "Dist",
-            "CV",
-            "Gate",
-            "Temperature",
-            "Disp Cal",
-            "Step",
-            "Model Version",
-            "Model PIT Recal",
-        ]
-    ].to_dict("records")
-
-
 def _col_or_none(df: pd.DataFrame, col: str, active: bool = True) -> np.ndarray | None:
     return df[col].to_numpy() if active and col in df.columns else None
 
@@ -731,47 +450,6 @@ def _resolve_serving_strategy(filedict: dict, league: str, market: str) -> Artif
     )
     validate_strategy_selection(cell, spec, controls, required_capabilities=(CAP_SERVE,))
     return identity
-
-
-def _book_evs_for_players(
-    offer_df: pd.DataFrame,
-    league: str,
-    market: str,
-    dist: str,
-    cv: float,
-    hist_gate: float,
-    date_map: dict,
-    stat_data,
-    players: pd.Index,
-) -> tuple[list, list]:
-    """Modal-cohort book means and spreads for the model path's book leg.
-
-    Resolves the same admission-gated quotes as the fallback path and inverts each
-    at its own cohort line, replacing the old cross-line average of stored per-row
-    means (a DFS platform's boundary-line self-quote inverted under a too-narrow
-    fitted shape once implied a 2.5-K mean for a 1.1-K batter). A player whose only
-    support is the platform's own quote gets NaN: the blend then runs model-only
-    and ``_finalize_records`` prices ``Market Prob`` payout-implied, applying the
-    unquoted-disagreement drop.
-
-    The spread is ``cv * mean`` for a single-market quote, which is all that family
-    asserts, but a quote carrying a component sum's shape has its own — the kernel
-    added the component variances and their correlation, so ``cv * mean`` would
-    substitute the composite cell's generic dispersion for a computed quantity.
-    """
-    quotes = _servable_fallback_quotes(offer_df, league, market, date_map, stat_data, dist, cv)
-    gate = None if dist == "SkewNormal" else hist_gate or None
-    means, sds = [], []
-    for player in players:
-        quote = quotes.get(player)
-        if quote is None:
-            means.append(np.nan)
-            sds.append(np.nan)
-            continue
-        mean = quote_pricing_params(quote, league, market, dist, cv, gate=gate).mean
-        means.append(mean)
-        sds.append(quote.sum_sd if quote.sum_sd is not None else cv * mean)
-    return means, sds
 
 
 def _decode_model_params(
@@ -1411,6 +1089,22 @@ def _model_over_and_push(offer_df: pd.DataFrame, dist: str, cv: float, step, bas
     return 1 - raw_under, push
 
 
+def _offer_frame_for_market(offers: list[dict], market: str) -> pd.DataFrame:
+    """Player-indexed offer frame with the short-line yards filter applied.
+
+    Below-``_MIN_YARDS_LINE`` single-player yards offers are unreliable to model;
+    "vs." combo legs are exempt. Shared by :func:`model_prob` and
+    :func:`book_fallback_prob`.
+    """
+    offer_df = pd.DataFrame(offers)
+    offer_df.index = offer_df.Player
+    if "yards" in market:
+        offer_df = offer_df.loc[
+            (offer_df.Player.str.contains("vs.")) | (offer_df.Line > _MIN_YARDS_LINE)
+        ]
+    return offer_df
+
+
 def model_prob(
     offers: list[dict],
     league: str,
@@ -1449,12 +1143,7 @@ def model_prob(
         logger.warning(f"{filename} missing")
         return []
 
-    offer_df = pd.DataFrame(offers)
-    offer_df.index = offer_df.Player
-    if "yards" in market:
-        offer_df = offer_df.loc[
-            (offer_df.Player.str.contains("vs.")) | (offer_df.Line > _MIN_YARDS_LINE)
-        ]
+    offer_df = _offer_frame_for_market(offers, market)
 
     with open(filepath, "rb") as infile:
         filedict = pickle.load(infile)
@@ -1530,7 +1219,7 @@ def model_prob(
     if "Defense position" not in playerStats:
         playerStats["Defense position"] = playerStats["Defense avg"]
 
-    evs, sds = _book_evs_for_players(
+    evs, sds = book_evs_for_players(
         offer_df, league, market, dist, cv, hist_gate, dateMap, stat_data, playerStats.index
     )
     playerStats["Market Projection"] = evs
@@ -1555,7 +1244,7 @@ def model_prob(
     if offer_df.empty:
         return []
 
-    offer_df["Market EV"] = _book_over_prob(
+    offer_df["Market EV"] = book_over_prob(
         offer_df, dist, cv, step, hist_gate or None, league, market
     )
     _clamp_shape_ceiling(offer_df, dist, shape_ceiling)
@@ -1601,7 +1290,7 @@ def model_prob(
     offer_df["Model Under"] = 1 - cal_over
     offer_df["Model Over"] = 1 - offer_df["Model Under"]
 
-    return _finalize_records(
+    return finalize_records(
         offer_df,
         league,
         platform,
@@ -1613,159 +1302,6 @@ def model_prob(
         model_version,
         pit_recal_blob,
     )
-
-
-def _has_serving_support(quote: TrainingQuote) -> bool:
-    """Whether a quote rests on evidence independent of the platform offering the leg.
-
-    A direct cohort quote needs a real sportsbook in it; a component sum already
-    demanded one behind every component to exist at all. Everything else — synthetic
-    anchors, ev-inversions, DFS-only cohorts — is the platform quoting itself back.
-    """
-    if quote.source == COMBO_SUM_SOURCE:
-        return True
-    real_books = sum(book not in DFS_PLATFORM_BOOKS for book in quote.books)
-    return quote.source == "book_direct" and real_books >= _MIN_FALLBACK_REAL_BOOKS
-
-
-def _servable_fallback_quotes(
-    offer_df: pd.DataFrame,
-    league: str,
-    market: str,
-    date_map: dict,
-    stat_data,
-    dist: str,
-    cv: float,
-) -> dict[str, TrainingQuote]:
-    """Resolve per-player book quotes; keep only the ones with independent support.
-
-    Mirrors the training-side consumer (``Stats.resolve_player_market_odds``): one
-    modal-line cohort quote per player from :func:`resolve_training_quote`, then a
-    second pass on the ``combo_props`` sums that prices the market as a weighted
-    component sum through :meth:`Stats.combo_quote`. A quote serves when a real
-    sportsbook (non-DFS) sits in its same-line cohort, or when it is a component sum —
-    whose own admission already demands a sportsbook behind every component. Pure
-    ev-inversions and synthetic quotes never serve: a DFS platform reposting (or
-    discounting) a line is not independent support.
-
-    The second pass covers every player, not just the unquoted ones, because the two
-    quotes carry different things. Where the book priced the composite it keeps its
-    own line, probability and mean, and takes only the sum's shape
-    (:func:`with_component_sum_shape`) — a single quoted pair says nothing about any
-    other offered line, and on this board a tenth of served legs are priced off the
-    quote line. Where it did not, the sum is the whole quote.
-
-    Only the simple ``combo_props`` sums take the second pass. Fantasy-score markets
-    build a mean from up to 8 weighted components and stay no-served pending their own
-    graded verdict; ``_COMBO_SERVE_BLOCKED`` carries the sums whose components are
-    themselves unfit to quote.
-    """
-    weights = book_weights.get(league, {}).get(market, {})
-    first_lines = offer_df["Line"].groupby(level=0).first()
-    players_by_date: dict[str, list[str]] = {}
-    for player in offer_df.index.unique():
-        players_by_date.setdefault(date_map.get(player, ""), []).append(player)
-    combo_servable = market in combo_props and (league, market) not in _COMBO_SERVE_BLOCKED
-
-    quotes: dict[str, TrainingQuote] = {}
-    for date, players in players_by_date.items():
-        quote_inputs = archive.get_training_quote_inputs(league, market, date, players)
-        for player in players:
-            rows, legacy_line = quote_inputs.get(player, ([], None))
-            quotes[player] = resolve_training_quote(
-                rows,
-                fallback_ev=None,
-                legacy_line=legacy_line,
-                # Serving has no Avg10 to mirror base.py's fallback anchor; the
-                # player's own offered line anchors the inversion instead.
-                fallback_line=max(float(first_lines[player]), 0.5),
-                dist=dist,
-                cv=cv,
-                weights=weights,
-            )
-        if not combo_servable:
-            continue
-        # Anchored on the book's own line where it quoted one, so the sum's shape is
-        # fitted around the real price rather than replacing it; on the offered line
-        # otherwise, where there is no price to preserve.
-        lines = {
-            player: quotes[player].line
-            if quotes[player].source == "book_direct"
-            else float(first_lines[player])
-            for player in players
-        }
-        for player, combo in stat_data.combo_quote(
-            market, players, date, None, lines=lines
-        ).items():
-            # Only a direct cohort quote is worth anchoring to. Every other rung's
-            # probability is an inversion of a stored ``ev``, which is that quote's
-            # gated derivative rather than a native price — untrustworthy enough that
-            # `_has_serving_support` refuses to serve it, so anchoring the sum on it
-            # would be worse than the sum alone.
-            book = quotes[player]
-            quotes[player] = (
-                with_component_sum_shape(book, combo) if book.source == "book_direct" else combo
-            )
-
-    return {player: quote for player, quote in quotes.items() if _has_serving_support(quote)}
-
-
-def _price_offers_at_quotes(
-    offer_df: pd.DataFrame,
-    quotes: dict[str, TrainingQuote],
-    league: str,
-    market: str,
-    dist: str,
-    cv: float,
-    step: float,
-) -> None:
-    """Set ``Market Projection`` and the ``Market EV`` over-probability in place.
-
-    Every offered line for a player is decoded from the one quote-implied mean with
-    the same fitted shape (``sigma``/``skew`` or ``phi``) used to invert it, so an
-    offer at the quote line reproduces the cohort probability exactly and alternate
-    lines price off the same distribution rather than a cross-line average.
-
-    A quote carrying a component sum's shape instead prices every line off that CDF,
-    which is the whole reason the kernel exists: the composite cell's marginal family
-    has one generic ``cv`` and no component dispersions, and grading the two across
-    ±1.5 sd offset lines put the sum ahead on 9 of 10 markets. Its own quoted line is
-    unaffected either way — the shape was anchored there.
-    """
-    combo_cdfs = {p: q.under_prob_at for p, q in quotes.items() if q.under_prob_at is not None}
-    priced = {p: quote_pricing_params(q, league, market, dist, cv) for p, q in quotes.items()}
-    offer_df["Market Projection"] = offer_df.index.map({p: v.mean for p, v in priced.items()})
-    shape_kwargs = {}
-    if dist == "SkewNormal":
-        shape_kwargs = {
-            "sigma": offer_df.index.map({p: v.sigma for p, v in priced.items()}).to_numpy(float),
-            "skew_alpha": offer_df.index.map({p: v.skew for p, v in priced.items()}).to_numpy(
-                float
-            ),
-        }
-    elif dist == "DPO" and any(v.phi is not None for v in priced.values()):
-        shape_kwargs = {
-            "phi": offer_df.index.map({p: v.phi for p, v in priced.items()}).to_numpy(float)
-        }
-    elif dist in ("NegBin", "ZINB") and any(v.r is not None for v in priced.values()):
-        shape_kwargs = {
-            "r": offer_df.index.map({p: v.r for p, v in priced.items()}).to_numpy(float)
-        }
-    lines = offer_df["Line"].to_numpy(dtype=float)
-    over = 1 - get_odds(
-        lines,
-        offer_df["Market Projection"].to_numpy(dtype=float),
-        dist,
-        cv=cv,
-        step=step,
-        **shape_kwargs,
-    )
-    if combo_cdfs:
-        over = [
-            1.0 - combo_cdfs[player](line) if player in combo_cdfs else marginal
-            for player, line, marginal in zip(offer_df.index, lines, over, strict=True)
-        ]
-    offer_df["Market EV"] = over
 
 
 def book_fallback_prob(
@@ -1796,16 +1332,11 @@ def book_fallback_prob(
     gate_arg = hist_gate or None
 
     date_map = {x["Player"]: x["Date"] for x in offers}
-    offer_df = pd.DataFrame(offers)
-    offer_df.index = offer_df.Player
-    if "yards" in market:
-        offer_df = offer_df.loc[
-            (offer_df.Player.str.contains("vs.")) | (offer_df.Line > _MIN_YARDS_LINE)
-        ]
+    offer_df = _offer_frame_for_market(offers, market)
     if offer_df.empty:
         return []
 
-    quotes = _servable_fallback_quotes(offer_df, league, market, date_map, stat_data, dist, cv)
+    quotes = servable_fallback_quotes(offer_df, league, market, date_map, stat_data, dist, cv)
     servable = offer_df.index.isin(list(quotes))
     if unservable := int(len(offer_df) - servable.sum()):
         logger.warning(
@@ -1815,7 +1346,7 @@ def book_fallback_prob(
     if offer_df.empty:
         return []
 
-    _price_offers_at_quotes(offer_df, quotes, league, market, dist, cv, step)
+    price_offers_at_quotes(offer_df, quotes, league, market, dist, cv, step)
 
     playerStats = stat_data.get_stats(market, offers)
     if not playerStats.empty:
@@ -1840,6 +1371,6 @@ def book_fallback_prob(
     offer_df["Model Under"] = 1 - _over
     offer_df["Projection"] = offer_df["Market Projection"]
 
-    return _finalize_records(
+    return finalize_records(
         offer_df, league, platform, dist, cv, step, None, 1.0, _BOOK_FALLBACK_VERSION
     )

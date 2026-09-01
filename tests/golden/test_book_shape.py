@@ -183,7 +183,7 @@ _OVER_SHAPE = {"a": 1.3, "b": 1.1, "skew_c": 0.6, "skew_d": -0.1, "n_bins": 9}
 
 
 def test_book_over_prob_unfitted_is_legacy_symmetric(monkeypatch):
-    from sportstradamus.prediction.model_prob import _book_over_prob
+    from sportstradamus.prediction.offer_records import book_over_prob
 
     league, market = "WNBA", "AST"
     cv = config.stat_cv[league][market]
@@ -193,7 +193,7 @@ def test_book_over_prob_unfitted_is_legacy_symmetric(monkeypatch):
     monkeypatch.setitem(config.stat_meta[league][market], "book_shape", None)
     df = pd.DataFrame({"Line": [2.5, 1.5], "Market Projection": [2.2, 1.1]})
 
-    got = _book_over_prob(df, "SkewNormal", cv, 0.5, None, league, market)
+    got = book_over_prob(df, "SkewNormal", cv, 0.5, None, league, market)
 
     expected = [
         1 - get_odds(ln, mp, "SkewNormal", cv=cv, step=0.5, sigma=mp * cv, skew_alpha=0, gate=None)
@@ -203,14 +203,14 @@ def test_book_over_prob_unfitted_is_legacy_symmetric(monkeypatch):
 
 
 def test_book_over_prob_fitted_uses_shape(monkeypatch):
-    from sportstradamus.prediction.model_prob import _book_over_prob
+    from sportstradamus.prediction.offer_records import book_over_prob
 
     league, market = "WNBA", "AST"
     cv = config.stat_cv[league][market]
     monkeypatch.setitem(config.stat_meta[league][market], "book_shape", _OVER_SHAPE)
     df = pd.DataFrame({"Line": [2.5], "Market Projection": [2.2]})
 
-    got = _book_over_prob(df, "SkewNormal", cv, 0.5, None, league, market)
+    got = book_over_prob(df, "SkewNormal", cv, 0.5, None, league, market)
 
     sigma, skew = config.book_skewnormal_shape(league, market, 2.2)
     expected = 1 - get_odds(
@@ -229,7 +229,7 @@ def test_book_over_prob_fitted_uses_shape(monkeypatch):
 # --- Settling verdict: the served blend collapses-to-cv (book shape does NOT enter) -------
 # The WS2 settling experiment found the shaped book loses the served blend OOS, so
 # _blend_with_book keeps the symmetric book leg — its output must be independent of a fitted
-# book_shape, even though the book-only _book_over_prob path does read the shape.
+# book_shape, even though the book-only book_over_prob path does read the shape.
 
 
 def _sn_blend_df():
