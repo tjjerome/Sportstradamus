@@ -647,10 +647,10 @@
             "dist": "SkewNormal",
             "shipped": "devel",
             "target_normalization": "ratio_meanyr",
-            "posthoc": "isotonic_mean",
+            "posthoc": "roe_mean",
             "blending": "nll",
-            "dist_training_loss": "nll",
-            "sn_param": "centered",
+            "dist_training_loss": "crps",
+            "sn_param": "direct",
             "hpo_selection": "calibrated"
         },
         "hits+runs+rbi": {
