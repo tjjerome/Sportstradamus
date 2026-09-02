@@ -96,7 +96,7 @@ no authentic rows at all in 2025.
 | MLB runs allowed | BROKEN | sweep under the knob | pending |
 | NHL hits | BROKEN | sweep under the knob | pending |
 | NBA BLK | BROKEN | book-side packet first | blocked on the ingestion packet |
-| MLB batter strikeouts | DATA | guard result stands until the feed returns | guard landed; retrain pending |
+| MLB batter strikeouts | DATA | guard result stands until the feed returns | retrained 2026-09-02: `w = 1.0` (2 authentic rows / 2 clusters), Gate 1 blank, skill / Kelly NaN; ships model-only as a book-less cell |
 
 The census (50 book-quoted cells) also flags a second wave outside the owner's cohort: NHL
 powerPlayPoints (NegBin, CITL 0.67), NFL tds (NegBin, 0.76), NFL interceptions (DPO, 0.83), MLB
