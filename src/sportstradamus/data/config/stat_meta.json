@@ -394,13 +394,14 @@
             "posthoc": "none"
         },
         "hits": {
-            "dist": "ZINB",
+            "dist": "DPO",
             "shipped": "devel",
             "target_normalization": "none",
-            "posthoc": "none",
+            "posthoc": "prob_recal_isotonic",
             "zinb_mode": "hurdle",
             "count_dispersion_objective": "crps",
-            "blending": "nll"
+            "blending": "nll",
+            "dist_training_loss": "nll"
         },
         "points": {
             "dist": "DPO",
