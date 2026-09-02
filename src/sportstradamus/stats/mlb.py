@@ -1159,17 +1159,7 @@ class StatsMLB(Stats):
         if not pitcher:
             self._project_plate_appearances(offers, date)
             return
-        market = "pitches thrown"
-        self.load_volume_model_params(
-            offers,
-            market,
-            date,
-            {
-                "loc": f"proj {market} mean",
-                "rate": f"proj {market} mean",
-                "scale": f"proj {market} std",
-            },
-        )
+        self.load_volume_model_params(offers, "pitches thrown", date)
 
     def _training_dependency_markets(self, target_market: str) -> tuple[str, ...]:
         """Hitter cells use structural plate appearances, not the pitch-count model."""

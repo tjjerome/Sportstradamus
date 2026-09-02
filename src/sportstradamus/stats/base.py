@@ -36,6 +36,7 @@ from sportstradamus.helpers import (
     get_mlb_pitchers,
     get_odds,
     odds_budget,
+    predictive_std,
     remove_accents,
     set_model_start_values,
     stat_cv,
@@ -275,6 +276,60 @@ def flatten_offers(offers: dict | list, market: str) -> dict | list:
     return flat
 
 
+def apply_volume_budget(
+    player_profile: pd.DataFrame,
+    market: str,
+    index: pd.Index,
+    *,
+    target: float,
+    per_player_cap: float,
+) -> None:
+    """Redistribute one team's volume projections onto ``target``, in place.
+
+    The precision-weighted adjustment is the minimum-information-loss solution to:
+        minimise  sum_i (d_i / sigma_i)^2
+        subject to  sum_i (mu_i + d_i) = target
+        -> d_i = sigma_i^2 / sum_j(sigma_j^2) * (target - total)
+    Players we are most uncertain about absorb the correction; confidently
+    projected players are left largely untouched. Each new mean is clipped to
+    ``per_player_cap``, and the SD is scaled by the same ratio so every player's
+    coefficient of variation survives. A team already projecting zero total volume
+    has no shares to redistribute and is left alone.
+
+    Args:
+        player_profile: Frame carrying ``"proj {market} mean"`` and
+            ``"proj {market} std"``; both are written back for ``index``.
+        market: Stat name used to construct the column key (e.g. ``"MIN"``).
+        index: The team's player rows.
+        target: Total volume the team's projections should sum to.
+        per_player_cap: Hard ceiling clipped onto each player's new mean before
+            the ratio rescale.
+    """
+    means = player_profile.loc[index, f"proj {market} mean"]
+    stds = player_profile.loc[index, f"proj {market} std"]
+
+    total = means.sum()
+    if total <= 0:
+        return
+
+    variances = stds**2
+    total_var = variances.sum()
+    if total_var > 0:
+        adjustments = variances / total_var * (target - total)
+    else:
+        adjustments = means / total * (target - total)
+
+    new_means = (means + adjustments).clip(lower=0, upper=per_player_cap)
+    ratio = (
+        (new_means / means.replace(0, np.nan))
+        .fillna(1.0)
+        .clip(lower=_VOLUME_SCALE_RATIO_FLOOR, upper=_VOLUME_SCALE_RATIO_CAP)
+    )
+
+    player_profile.loc[index, f"proj {market} mean"] = new_means
+    player_profile.loc[index, f"proj {market} std"] = stds * ratio
+
+
 def scale_team_volume_to_budget(
     player_profile: pd.DataFrame,
     market: str,
@@ -285,14 +340,11 @@ def scale_team_volume_to_budget(
     per_player_floor: float,
     per_player_cap: float,
 ) -> None:
-    """Rescale per-player SkewNormal volume projections to a team minutes budget.
+    """Rescale per-player volume projections to a team minutes budget.
 
-    For each team, distributes the (budget - modeled-total) deficit across the
-    team's modeled players precision-weighted by variance, clips each player to
-    ``per_player_cap``, and rescales loc/scale together to preserve every
-    player's coefficient of variation. Mutates ``player_profile`` in place.
     Shared by the NBA and NHL volume models, which differ only in the per-league
-    ``budget_mean`` derivation and the rotation/floor/cap parameters.
+    ``budget_mean`` derivation and the rotation/floor/cap parameters. Rows with
+    ``team == 0`` are unassigned players and are skipped.
 
     Two real-world constraints complicate a simple minutes cap:
 
@@ -305,19 +357,9 @@ def scale_team_volume_to_budget(
        means some minutes go to players we have no projection for. We reserve:
            unmodeled_reserve = max(0, typical_rotation - N) * avg_unmodeled_min
 
-    The precision-weighted adjustment is the minimum-information-loss solution to:
-        minimise  sum_i (d_i / sigma_i)^2
-        subject to  sum_i (mu_i + d_i) = target
-        -> d_i = sigma_i^2 / sum_j(sigma_j^2) * (target - total)
-    Players we are most uncertain about absorb the correction; confidently
-    projected players are left largely untouched.
-
     Args:
-        player_profile: DataFrame with columns ``"team"``, ``"proj {market} loc"``,
-            ``"proj {market} scale"``, and optionally ``"proj {market} alpha"``.
-            Rows with ``team == 0`` are skipped (unassigned players).
-            Writes back ``"proj {market} loc"``, ``"proj {market} scale"``,
-            ``"proj {market} mean"``, and ``"proj {market} std"`` in place.
+        player_profile: DataFrame with a ``"team"`` column plus the projection
+            columns :func:`apply_volume_budget` reads and writes.
         market: Stat name used to construct the column key (e.g. ``"MIN"``).
         budget_mean: Expected total team volume (minutes or TOI) per game,
             including overtime expectation.  Units match ``per_player_cap``.
@@ -332,50 +374,15 @@ def scale_team_volume_to_budget(
     """
     teams = player_profile.loc[player_profile["team"] != 0].groupby("team")
     for _team, team_df in teams:
-        loc = team_df[f"proj {market} loc"].copy()
-        scale = team_df[f"proj {market} scale"].copy()
-        sn_alpha = (
-            team_df[f"proj {market} alpha"].copy()
-            if f"proj {market} alpha" in team_df.columns
-            else pd.Series(0, index=loc.index, dtype=loc.dtype)
+        modeled = len(team_df)
+        unmodeled_reserve = max(0, typical_rotation - modeled) * avg_unmodeled_min
+        apply_volume_budget(
+            player_profile,
+            market,
+            team_df.index,
+            target=max(budget_mean - unmodeled_reserve, modeled * per_player_floor),
+            per_player_cap=per_player_cap,
         )
-        N = len(team_df)
-
-        delta = sn_alpha / np.sqrt(1 + sn_alpha**2)
-        true_means = loc + scale * delta * np.sqrt(2 / np.pi)
-        true_vars = scale**2
-
-        total = true_means.sum()
-        if total <= 0:
-            continue
-
-        unmodeled_count = max(0, typical_rotation - N)
-        unmodeled_reserve = unmodeled_count * avg_unmodeled_min
-
-        upper_target = budget_mean - unmodeled_reserve
-        lower_target = N * per_player_floor
-        target = max(upper_target, lower_target)
-
-        deficit = target - total
-        total_var = true_vars.sum()
-        if total_var > 0:
-            adjustments = true_vars / total_var * deficit
-        else:
-            adjustments = true_means / total * deficit
-
-        new_means = (true_means + adjustments).clip(lower=0, upper=per_player_cap)
-
-        ratio = new_means / true_means.replace(0, np.nan)
-        ratio = ratio.fillna(1.0).clip(
-            lower=_VOLUME_SCALE_RATIO_FLOOR, upper=_VOLUME_SCALE_RATIO_CAP
-        )
-        new_scale = scale * ratio
-        new_loc = new_means - new_scale * delta * np.sqrt(2 / np.pi)
-
-        player_profile.loc[loc.index, f"proj {market} loc"] = new_loc
-        player_profile.loc[scale.index, f"proj {market} scale"] = new_scale
-        player_profile.loc[loc.index, f"proj {market} mean"] = new_means
-        player_profile.loc[scale.index, f"proj {market} std"] = new_scale
 
 
 def fetch_upcoming_games(league_id: str, season: str | int, today: date) -> dict[str, dict]:
@@ -2014,40 +2021,34 @@ class Stats:
 
         return stats
 
-    def load_volume_model_params(
-        self, offers, market, date, rename_map=None, position_filter=None
-    ) -> bool:
-        """Join a volume model's predicted distribution parameters into playerProfile.
+    def load_volume_model_params(self, offers, market, date, position_filter=None) -> bool:
+        """Join a volume model's decoded projection into playerProfile.
 
-        Shared head of ``StatsMLB`` / ``StatsNHL`` / ``StatsNFL`` ``get_volume_stats``:
-        flattens ``offers``, profiles the market, loads the cached
-        ``models/{league}_{market}.mdl`` pickle, predicts the per-player
-        distribution parameters, and joins them into ``self.playerProfile`` under
-        ``rename_map`` (the per-league difference besides ``market``). Returns
-        ``True`` on success, ``False`` when the gamelog is empty or the pickle is
-        absent so callers with post-join work (NHL/NFL budget scaling) can abort.
+        Shared head of ``StatsNBA`` / ``StatsMLB`` / ``StatsNHL`` / ``StatsNFL``
+        ``get_volume_stats``: flattens ``offers``, profiles the market, loads the
+        cached ``models/{league}_{market}.mdl`` pickle, predicts the per-player
+        distribution parameters, and writes ``proj {market} mean`` /
+        ``proj {market} std`` into ``self.playerProfile``. Returns ``True`` on
+        success, ``False`` when the gamelog is empty or the pickle is absent so
+        callers with post-join work (NBA/NHL/NFL budget scaling) can abort.
+
+        Seeding and decode both run through the artifact's own
+        ``normalized`` / ``target_normalization`` / ``offset_meta`` metadata, so a
+        volume projection lands on the stat scale by the same route
+        ``prediction.model_prob`` takes for a market model. The family algebra
+        stays in ``decode_model_params`` — this path is family-agnostic, which the
+        DPO ``carries`` model requires.
 
         Args:
             offers: Sportsbook offers dict or list passed through from the caller.
             market: The volume stat market name (e.g. ``"carries"``).
             date: Game date used for profiling and stats lookup.
-            rename_map: Column rename applied to the raw model output before the
-                join, e.g. ``{"loc": "proj carries loc", ...}``. Defaults to the
-                SkewNormal ``loc``/``scale``/``alpha`` map (``proj {market} loc``
-                etc.) shared by NFL and NHL; MLB passes its own ``mean``/``std`` map.
             position_filter: When not ``None``, restrict predicted rows to players
                 whose ``"Player position"`` value is in this collection before the
                 join. NFL passes a per-market list of depth-chart position numbers
-                (``1`` = QB, ``2`` = WR, ``3`` = RB, ``4`` = TE). MLB and NHL
+                (``1`` = QB, ``2`` = WR, ``3`` = RB, ``4`` = TE). The other leagues
                 pass ``None`` and skip the filter.
         """
-        if rename_map is None:
-            rename_map = {
-                "loc": f"proj {market} loc",
-                "scale": f"proj {market} scale",
-                "alpha": f"proj {market} alpha",
-            }
-
         flat_offers = flatten_offers(offers, market)
 
         self.profile_market(market, date)
@@ -2058,34 +2059,10 @@ class Stats:
             logger.warning(f"Gamelog missing - {date}")
             return False
 
-        filename = "_".join([self.league, market]).replace(" ", "-")
-        if self._volume_model_cache is None:
-            self._volume_model_cache = {}
-        if filename not in self._volume_model_cache:
-            dependency_root = getattr(self, "model_dependency_root", None)
-            if dependency_root is not None:
-                dependency = load_model_dependency(
-                    dependency_root,
-                    self.league,
-                    market,
-                    namespace=getattr(
-                        self,
-                        "model_dependency_namespace",
-                        DEPENDENCY_NAMESPACE,
-                    ),
-                )
-                self._volume_model_cache[filename] = dependency.payload
-                self.model_dependency_inventory[market] = dependency.sha256
-            else:
-                filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
-                if os.path.isfile(filepath):
-                    with open(filepath, "rb") as infile:
-                        self._volume_model_cache[filename] = pickle.load(infile)
-                else:
-                    logger.warning(f"{filename} missing")
-                    return False
+        filedict = self._load_volume_model(market)
+        if filedict is None:
+            return False
 
-        filedict = self._volume_model_cache[filename]
         expected_columns = filedict["expected_columns"]
         if getattr(self, "snapshot_only_rebuild", False):
             # A cold downstream rebuild can legitimately predate the first
@@ -2098,8 +2075,8 @@ class Stats:
             # Keep serving strict: an unexpected live schema gap must not be
             # silently converted into a historical-snapshot fallback.
             playerStats = playerStats[expected_columns]
-        model = filedict["model"]
         dist = filedict["distribution"]
+        target_normalization = filedict.get("target_normalization", "ratio_meanyr")
 
         categories = ["Home", "Player position"]
         if "Player position" not in playerStats.columns:
@@ -2107,25 +2084,85 @@ class Stats:
         for c in categories:
             playerStats[c] = playerStats[c].astype("category")
 
-        set_model_start_values(model, dist, playerStats)
+        # training/__init__ imports training.cli, which imports this package, so the
+        # decode registry can only be reached once sportstradamus.stats is loaded.
+        from sportstradamus.training.baselines import decode_model_params, serve_offset_mode
 
-        prob_params = model.predict(playerStats, pred_type="parameters")
+        set_model_start_values(
+            filedict["model"],
+            dist,
+            playerStats,
+            normalized=filedict.get("normalized", False),
+            offset_mode=serve_offset_mode(dist, target_normalization),
+            sn_param=filedict.get("sn_param", "direct"),
+        )
+
+        prob_params = filedict["model"].predict(playerStats, pred_type="parameters")
         prob_params.index = playerStats.index
 
         prob_params.sort_index(inplace=True)
         playerStats.sort_index(inplace=True)
         if position_filter is not None:
-            prob_params = prob_params.loc[playerStats["Player position"].isin(position_filter)]
+            # The normalization decode reads its denominator out of playerStats, so
+            # the two frames have to be filtered together, not just prob_params.
+            playerStats = playerStats.loc[playerStats["Player position"].isin(position_filter)]
+            prob_params = prob_params.loc[playerStats.index]
 
-        # gate is a ZI-model artifact; callers consume only the distribution parameters.
-        prob_params.drop(columns=["gate"], inplace=True, errors="ignore")
+        decoded = decode_model_params(
+            prob_params,
+            dist,
+            playerStats,
+            hist_gate=filedict.get("hist_gate", 0.0),
+            offset_meta=filedict.get("offset_meta"),
+            target_normalization=target_normalization,
+        )
         self.playerProfile = self.playerProfile.join(
-            prob_params.rename(columns=rename_map), lsuffix="_obs"
+            pd.DataFrame(
+                {
+                    f"proj {market} mean": decoded.ev,
+                    f"proj {market} std": predictive_std(dist, decoded),
+                },
+                index=prob_params.index,
+            ),
+            lsuffix="_obs",
         )
         self.playerProfile.drop(
             columns=[col for col in self.playerProfile.columns if "_obs" in col], inplace=True
         )
         return True
+
+    def _load_volume_model(self, market: str) -> dict | None:
+        """Return the cached volume pickle for ``market``, or ``None`` when absent.
+
+        Resolves through ``model_dependency_root`` when a training rebuild pinned
+        one — recording the artifact's digest in ``model_dependency_inventory`` —
+        and falls back to the packaged ``data/models`` pickle at serve time.
+        """
+        filename = "_".join([self.league, market]).replace(" ", "-")
+        if self._volume_model_cache is None:
+            self._volume_model_cache = {}
+        if filename in self._volume_model_cache:
+            return self._volume_model_cache[filename]
+
+        dependency_root = getattr(self, "model_dependency_root", None)
+        if dependency_root is not None:
+            dependency = load_model_dependency(
+                dependency_root,
+                self.league,
+                market,
+                namespace=getattr(self, "model_dependency_namespace", DEPENDENCY_NAMESPACE),
+            )
+            self._volume_model_cache[filename] = dependency.payload
+            self.model_dependency_inventory[market] = dependency.sha256
+            return dependency.payload
+
+        filepath = pkg_resources.files(data) / f"models/{filename}.mdl"
+        if not os.path.isfile(filepath):
+            logger.warning(f"{filename} missing")
+            return None
+        with open(filepath, "rb") as infile:
+            self._volume_model_cache[filename] = pickle.load(infile)
+        return self._volume_model_cache[filename]
 
     def _training_dependency_markets(self, target_market: str) -> tuple[str, ...]:
         """Return volume artifacts required to build ``target_market``."""

@@ -81,6 +81,9 @@ _DP_NEWTON_MAX_ITER = 8
 # estimate outside this band is small-sample noise, not a real dispersion read.
 _DP_PHI_SEED_FLOOR = 0.25
 _DP_PHI_SEED_CEILING = 4.0
+# Divide-by-zero guard on a family's shape parameter in the predictive-SD closed
+# forms; a shape this small is a degenerate fit, not a real dispersion read.
+_SHAPE_FLOOR = 1e-6
 # SkewNormal precision-pool floor on the model scale, as a fraction of the book scale.
 # The pool weights legs by 1/sigma^2, so a GBDT sigma far below the book's seizes the
 # blend regardless of w and saturates served P to 0/1 — three such rows carried 98% of
@@ -833,6 +836,35 @@ def decode_predictive_mean(prob_params, dist, *, sn_loc=None, sn_scale=None, his
     return DecodedParams(ev=ev, sigma=sn_scale, skew=skew, gate=gate)
 
 
+def predictive_std(dist: str, decoded: DecodedParams) -> np.ndarray:
+    """Closed-form predictive SD for a decoded distribution.
+
+    The moment companion to :func:`decode_predictive_mean`: together they reduce
+    any family to the ``(mean, std)`` pair that the volume-projection path and the
+    dashboard detail popup both consume, so neither has to carry family algebra.
+    Returns NaN where the family's shape parameter is absent (a book-fallback
+    record, or a legacy pickle predating the shape persist).
+    """
+    # style: allow-complexity  flat per-family dispatch of closed forms; splitting
+    # it would duplicate the shape-present guard in every branch.
+    mean = np.asarray(decoded.ev, dtype=float)
+    if dist in ("NegBin", "ZINB") and decoded.r is not None:
+        r = np.clip(np.asarray(decoded.r, dtype=float), _SHAPE_FLOOR, None)
+        return np.sqrt(np.clip(mean + mean**2 / r, 0, None))
+    if dist == "DPO" and decoded.phi is not None:
+        phi = np.clip(np.asarray(decoded.phi, dtype=float), _SHAPE_FLOOR, None)
+        return np.sqrt(np.clip(mean / phi, 0, None))
+    if dist in ("Gamma", "ZAGamma") and decoded.alpha is not None:
+        alpha = np.clip(np.asarray(decoded.alpha, dtype=float), _SHAPE_FLOOR, None)
+        return mean / np.sqrt(alpha)
+    if dist == "SkewNormal" and decoded.sigma is not None:
+        sigma = np.asarray(decoded.sigma, dtype=float)
+        skew = np.asarray(decoded.skew if decoded.skew is not None else 0.0, dtype=float)
+        delta = skew / np.sqrt(1 + skew**2)
+        return sigma * np.sqrt(np.clip(1 - 2 * delta**2 / np.pi, 0, None))
+    return np.full_like(mean, np.nan)
+
+
 def apply_temperature(p_over, temperature):
     """Temperature-scale an over-probability in logit space.
 
@@ -1135,6 +1167,33 @@ def _mixture_start_values(mu, std, n, offset_mode, normalized):
     logit_base = np.full(n, np.log(_MIX_BASE_WEIGHT))
     logit_boom = np.full(n, np.log(1.0 - _MIX_BASE_WEIGHT))
     return np.column_stack([loc, boom_loc, log_scale, boom_log_scale, logit_base, logit_boom])
+
+
+def shape_from_moments(
+    dist: str, mean: np.ndarray | float, std: np.ndarray | float
+) -> tuple[str, np.ndarray] | None:
+    """Recover a family's shape parameter from a predictive mean/SD pair.
+
+    Inverse of :func:`predictive_std`. The volume path publishes only
+    ``proj {market} mean`` / ``proj {market} std`` -- a team-budget-rescaled
+    projection, not fitted distribution parameters -- but ``fused_loc`` blends the
+    family's own shape. Returns the ``(column, values)`` pair the offer frame should
+    carry, or ``None`` for a family whose shape a mean/SD pair cannot pin down.
+
+    SkewNormal resolves to the symmetric case: with no skew to carry through the
+    budget rescale, sigma is the SD itself.
+    """
+    mean = np.clip(np.asarray(mean, dtype=float), _SHAPE_FLOOR, None)
+    var = np.clip(np.asarray(std, dtype=float), _SHAPE_FLOOR, None) ** 2
+    if dist in ("NegBin", "ZINB"):
+        return "Model R", mean**2 / np.clip(var - mean, _SHAPE_FLOOR, None)
+    if dist == "DPO":
+        return "Model Phi", np.clip(mean / var, _DP_PHI_FLOOR, _DP_PHI_CEILING)
+    if dist in ("Gamma", "ZAGamma"):
+        return "Model Alpha", mean**2 / var
+    if dist == "SkewNormal":
+        return "Model Sigma", np.sqrt(var)
+    return None
 
 
 def set_model_start_values(

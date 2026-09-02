@@ -18,9 +18,11 @@ import pandas as pd
 
 from sportstradamus.helpers import (
     UNDERDOG_BOOST_BASELINE,
+    DecodedParams,
     LazyArchive,
     book_skewnormal_shape,
     get_odds,
+    predictive_std,
 )
 from sportstradamus.helpers.distributions import dfs_boost_probs
 from sportstradamus.spiderLogger import logger
@@ -100,6 +102,11 @@ def book_over_prob(
     )
 
 
+def col_or_none(df: pd.DataFrame, col: str, active: bool = True) -> np.ndarray | None:
+    """``df[col]`` as an array, or ``None`` when it is absent or ``active`` is false."""
+    return df[col].to_numpy() if active and col in df.columns else None
+
+
 def _annotate_display_shape(offer_df: pd.DataFrame, dist: str) -> None:
     """Set the display-only ``Model Param`` and ``Projection STD`` columns in place.
 
@@ -108,8 +115,6 @@ def _annotate_display_shape(offer_df: pd.DataFrame, dist: str) -> None:
     as on a book-fallback record. These columns feed the dashboard detail popup
     only — no scoring path reads them.
     """
-    # style: allow-complexity  flat per-distribution-family dispatch of closed-form
-    # display variances; splitting duplicates the family/param-present guards.
     if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
         offer_df["Model Param"] = offer_df["Model R"]
     elif dist == "DPO" and "Model Phi" in offer_df.columns:
@@ -121,27 +126,19 @@ def _annotate_display_shape(offer_df: pd.DataFrame, dist: str) -> None:
     else:
         offer_df["Model Param"] = np.nan
 
-    _m = offer_df["Projection"].to_numpy(dtype=float)
-    if dist in ("NegBin", "ZINB") and "Model R" in offer_df.columns:
-        _r = offer_df["Model R"].to_numpy(dtype=float)
-        offer_df["Projection STD"] = np.sqrt(np.clip(_m + _m**2 / np.clip(_r, 1e-6, None), 0, None))
-    elif dist == "DPO" and "Model Phi" in offer_df.columns:
-        _phi = offer_df["Model Phi"].to_numpy(dtype=float)
-        offer_df["Projection STD"] = np.sqrt(np.clip(_m / np.clip(_phi, 1e-6, None), 0, None))
-    elif dist == "SkewNormal" and "Model Sigma" in offer_df.columns:
-        _sg = offer_df["Model Sigma"].to_numpy(dtype=float)
-        _sk = (
-            offer_df["Model Skew"].to_numpy(dtype=float)
-            if "Model Skew" in offer_df.columns
-            else np.zeros_like(_sg)
-        )
-        _delta = _sk / np.sqrt(1 + _sk**2)
-        offer_df["Projection STD"] = _sg * np.sqrt(np.clip(1 - 2 * _delta**2 / np.pi, 0, None))
-    elif "Model Alpha" in offer_df.columns:
-        _a = offer_df["Model Alpha"].to_numpy(dtype=float)
-        offer_df["Projection STD"] = _m / np.sqrt(np.clip(_a, 1e-6, None))
-    else:
-        offer_df["Projection STD"] = np.nan
+    offer_df["Projection STD"] = predictive_std(
+        # "Model Alpha" is Gamma's concentration; the family names its own shape,
+        # so an absent column decodes to NaN rather than borrowing another's.
+        dist,
+        DecodedParams(
+            ev=offer_df["Projection"].to_numpy(dtype=float),
+            r=col_or_none(offer_df, "Model R"),
+            alpha=col_or_none(offer_df, "Model Alpha"),
+            sigma=col_or_none(offer_df, "Model Sigma"),
+            skew=col_or_none(offer_df, "Model Skew"),
+            phi=col_or_none(offer_df, "Model Phi"),
+        ),
+    )
 
 
 def finalize_records(

@@ -20,7 +20,6 @@ from scipy.stats import skewnorm
 
 from sportstradamus.helpers import (
     GATE_PUBLISH_THRESHOLD,
-    NONZERO_DENOM_GATE,
     LazyArchive,
     apply_cdf_recal,
     apply_temperature,
@@ -30,6 +29,7 @@ from sportstradamus.helpers import (
     get_odds,
     get_push_prob,
     set_model_start_values,
+    shape_from_moments,
     skewnormal_loc_from_mean,
     stat_cv,
     stat_dist,
@@ -44,9 +44,13 @@ from sportstradamus.prediction.book_quotes import (
     price_offers_at_quotes,
     servable_fallback_quotes,
 )
-from sportstradamus.prediction.offer_records import book_over_prob, finalize_records
+from sportstradamus.prediction.offer_records import (
+    book_over_prob,
+    col_or_none,
+    finalize_records,
+)
 from sportstradamus.spiderLogger import logger
-from sportstradamus.training.baselines import get_target_normalization
+from sportstradamus.training.baselines import decode_model_params, serve_offset_mode
 from sportstradamus.training.group_conditional_cdf import (
     LEGACY_AFFINE_SCHEMA_VERSION,
     AffinePredictive,
@@ -176,30 +180,6 @@ def normalize_market(league: str, market: str, platform: str) -> str:
     return market
 
 
-def _resolve_denom_col(offset_meta: dict | None, hist_gate: float, columns) -> str:
-    """SkewNormal decode denominator, preferring the value training persisted.
-
-    The denom (``MeanYr`` vs ``MeanYr_nonzero``) is a property of the trained model:
-    training picks it from the empirical zero-rate and stores it in the pickle. Reading
-    it back keeps serve in lockstep even when the runtime ``stat_zi`` (gitignored,
-    per-box) is stale or absent. Falls back to the legacy ``hist_gate`` recompute for
-    pre-persist pickles; the ``prior_*`` keys cover already-shipped centered pickles
-    without a retrain (mean10 stores the denom as ``prior_fallback_col``, EB as
-    ``prior_col``).
-    """
-    om = offset_meta or {}
-    persisted = om.get("denom_col") or om.get("prior_fallback_col")
-    if persisted is None and om.get("method") == "eb_additive":
-        persisted = om.get("prior_col")
-    if persisted is not None:
-        return persisted
-    return (
-        "MeanYr_nonzero"
-        if (hist_gate > NONZERO_DENOM_GATE and "MeanYr_nonzero" in columns)
-        else "MeanYr"
-    )
-
-
 def _decode_skewnormal(
     prob_params: pd.DataFrame,
     playerStats: pd.DataFrame,
@@ -234,20 +214,13 @@ def _decode_skewnormal(
         ``Projection``, ``Model Sigma``, ``Model Skew``, and optional
         ``Model Gate`` columns set.
     """
-    strategy = get_target_normalization(target_normalization)
-    # ratio_projvol persists its projected-volume denominator in offset_meta;
-    # _resolve_denom_col reads it (and the centered prior_* back-compat keys),
-    # falling back to the season-mean choice for legacy pickles.
-    denom_col = _resolve_denom_col(offset_meta, hist_gate, playerStats.columns)
-    # global_mean snapshot lives in offset_meta for centered strategies; the
-    # ratio strategy ignores it (uses MeanYr from features directly).
-    global_mean = float((offset_meta or {}).get("global_mean", 0.0))
-
-    ev_loc = strategy.decode_loc(prob_params["loc"].values, playerStats, global_mean, denom_col)
-    ev_scale = strategy.decode_scale(prob_params["scale"].values, playerStats, denom_col)
-
-    decoded = decode_predictive_mean(
-        prob_params, "SkewNormal", sn_loc=ev_loc, sn_scale=ev_scale, hist_gate=hist_gate
+    decoded = decode_model_params(
+        prob_params,
+        "SkewNormal",
+        playerStats,
+        hist_gate=hist_gate,
+        offset_meta=offset_meta,
+        target_normalization=target_normalization,
     )
     prob_params["Projection"] = decoded.ev
     prob_params["Model Sigma"] = decoded.sigma
@@ -304,26 +277,6 @@ def _book_cell_params(
     return dist, cv, gate, step
 
 
-def _col_or_none(df: pd.DataFrame, col: str, active: bool = True) -> np.ndarray | None:
-    return df[col].to_numpy() if active and col in df.columns else None
-
-
-def _serve_offset_mode(dist: str, target_normalization: str) -> bool:
-    """Whether serve seeds the SkewNormal with the centered-residual offset.
-
-    Mirrors training's ``offset_mode = strategy.start_mode_flag == "offset"``
-    (``pipeline.train_market``) so a model trained against any offset strategy seeds the
-    same way at predict time. Derived from the registry — not a hardcoded
-    ``offset_meta["method"]`` string — so a new offset strategy needs no serve-side edit.
-    Only the SkewNormal seed consumes ``offset_mode``; the ``dist`` guard short-circuits
-    the registry lookup off that path and for non-registry legacy slugs.
-    """
-    return (
-        dist == "SkewNormal"
-        and get_target_normalization(target_normalization).start_mode_flag == "offset"
-    )
-
-
 def _build_prob_params(
     filedict: dict,
     market: str,
@@ -335,14 +288,22 @@ def _build_prob_params(
     structural_strategy: str,
 ) -> pd.DataFrame:
     if market in stat_data.volume_stats:
-        prob_params = pd.DataFrame(index=playerStats.index)
-        prob_params = prob_params.join(stat_data.playerProfile[f"proj {market} mean"])
-        if f"proj {market} std" in stat_data.playerProfile.columns:
-            prob_params = prob_params.join(stat_data.playerProfile[f"proj {market} std"])
+        prob_params = pd.DataFrame(index=playerStats.index).join(
+            stat_data.playerProfile[[f"proj {market} mean", f"proj {market} std"]]
+        )
         prob_params.rename(
             columns={f"proj {market} mean": "Projection", f"proj {market} std": "Model Param"},
             inplace=True,
         )
+        # The volume path publishes a predictive mean/SD, but _blend_with_book reads the
+        # family's own shape column; recover it rather than let the blend see a None.
+        shape = shape_from_moments(dist, prob_params["Projection"], prob_params["Model Param"])
+        if shape is not None:
+            shape_col, shape_values = shape
+            prob_params[shape_col] = shape_values
+        if dist == "SkewNormal":
+            # No skew survives the budget rescale, so the symmetric case is exact.
+            prob_params["Model Skew"] = 0.0
         return prob_params
 
     model = filedict["model"]
@@ -363,7 +324,7 @@ def _build_prob_params(
                 dist,
                 rows,
                 normalized=normalized,
-                offset_mode=_serve_offset_mode(dist, target_normalization),
+                offset_mode=serve_offset_mode(dist, target_normalization),
                 sn_param=filedict.get("sn_param", "direct"),
             )
         params = predict_model.predict(rows, pred_type="parameters")
@@ -951,8 +912,8 @@ def _blend_with_book(
             books_ev,
             cv,
             "SkewNormal",
-            sigma=_col_or_none(offer_df, "Model Sigma"),
-            skew_alpha=_col_or_none(offer_df, "Model Skew"),
+            sigma=col_or_none(offer_df, "Model Sigma"),
+            skew_alpha=col_or_none(offer_df, "Model Skew"),
             **zi,
         )
         offer_df["Model Sigma"] = sigma_blend
@@ -964,7 +925,7 @@ def _blend_with_book(
             books_ev,
             cv,
             "NegBin",
-            r=_col_or_none(offer_df, "Model R"),
+            r=col_or_none(offer_df, "Model R"),
             **zi,
         )
         base_mean = r_blend * (1 - p_blend) / p_blend
@@ -978,7 +939,7 @@ def _blend_with_book(
             books_ev,
             cv,
             "DPO",
-            phi=_col_or_none(offer_df, "Model Phi"),
+            phi=col_or_none(offer_df, "Model Phi"),
             **zi,
         )
         offer_df["Model Phi"] = phi_blend
@@ -989,7 +950,7 @@ def _blend_with_book(
             books_ev,
             cv,
             "Gamma",
-            alpha=_col_or_none(offer_df, "Model Alpha"),
+            alpha=col_or_none(offer_df, "Model Alpha"),
             **zi,
         )
         base_mean = alpha_blend / beta_blend
@@ -1053,12 +1014,12 @@ def _dispersion_calibrate(
 
 
 def _model_over_and_push(offer_df: pd.DataFrame, dist: str, cv: float, step, base_mean):
-    r = _col_or_none(offer_df, "Model R", dist in ("NegBin", "ZINB"))
-    alpha = _col_or_none(offer_df, "Model Alpha", dist in ("Gamma", "ZAGamma"))
-    phi = _col_or_none(offer_df, "Model Phi", dist == "DPO")
-    sigma = _col_or_none(offer_df, "Model Sigma", dist == "SkewNormal")
-    skew = _col_or_none(offer_df, "Model Skew", dist == "SkewNormal")
-    gate = _col_or_none(offer_df, "Model Gate", dist in ("ZINB", "ZAGamma", "SkewNormal"))
+    r = col_or_none(offer_df, "Model R", dist in ("NegBin", "ZINB"))
+    alpha = col_or_none(offer_df, "Model Alpha", dist in ("Gamma", "ZAGamma"))
+    phi = col_or_none(offer_df, "Model Phi", dist == "DPO")
+    sigma = col_or_none(offer_df, "Model Sigma", dist == "SkewNormal")
+    skew = col_or_none(offer_df, "Model Skew", dist == "SkewNormal")
+    gate = col_or_none(offer_df, "Model Gate", dist in ("ZINB", "ZAGamma", "SkewNormal"))
     line = offer_df["Line"].to_numpy()
     if dist == "SkewNormal":
         raw_under = get_odds(

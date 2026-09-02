@@ -826,12 +826,6 @@ class StatsNHL(Stats):
                 per_player_cap=per_player_cap,
             )
 
-        # Drop SkewNormal parameters (keep only mean/std for downstream use)
-        self.playerProfile.drop(
-            columns=[f"proj {market} loc", f"proj {market} scale", f"proj {market} alpha"],
-            inplace=True,
-            errors="ignore",
-        )
         self.playerProfile.fillna(0, inplace=True)
 
     def _fantasy_combo_spec(self, market, player):

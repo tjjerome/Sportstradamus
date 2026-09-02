@@ -16,21 +16,23 @@ previously had zero ``tests/golden/`` coverage.
 
 from __future__ import annotations
 
-import sys
+import importlib
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from sportstradamus.prediction.model_prob import _resolve_denom_col, _serve_offset_mode
 from sportstradamus.training.baselines import (
     TARGET_NORMALIZATION_SLUGS,
     get_target_normalization,
+    serve_denom_col,
+    serve_offset_mode,
 )
 
 # The function ``model_prob`` (re-exported in prediction/__init__) shadows the submodule
-# in the package namespace, so fetch the real module object for monkeypatching.
-_MP = sys.modules["sportstradamus.prediction.model_prob"]
+# in the package namespace, so ``import ... as`` binds the function; go through
+# importlib to get the real module object the monkeypatching below needs.
+_MP = importlib.import_module("sportstradamus.prediction.model_prob")
 
 # Intended serve seeding per strategy, declared explicitly (NOT derived from the
 # registry) so adding a strategy forces a human to state and verify its seeding —
@@ -51,9 +53,9 @@ def test_serve_offset_mode_per_strategy(slug):
         "centered_additive_mean10 shipped a 2x serve-decode bug."
     )
     expected = _EXPECTED_SERVE_OFFSET[slug]
-    assert _serve_offset_mode("SkewNormal", slug) is expected
+    assert serve_offset_mode("SkewNormal", slug) is expected
     # offset_mode is meaningless off the SkewNormal seed — never offset other dists.
-    assert _serve_offset_mode("ZINB", slug) is False
+    assert serve_offset_mode("ZINB", slug) is False
     # Parity anchor: serve's decision must equal training's start_mode_flag rule.
     assert expected == (get_target_normalization(slug).start_mode_flag == "offset")
 
@@ -66,7 +68,7 @@ def test_serve_denom_col_reads_pickle_not_stale_stat_zi(slug):
     offset_meta = get_target_normalization(slug).offset_meta(
         global_mean=5.0, denom_col="MeanYr_nonzero"
     )
-    denom = _resolve_denom_col(offset_meta, hist_gate=0.0, columns=("MeanYr", "MeanYr_nonzero"))
+    denom = serve_denom_col(offset_meta, hist_gate=0.0, columns=("MeanYr", "MeanYr_nonzero"))
     assert denom == "MeanYr_nonzero"
 
 
@@ -74,10 +76,10 @@ def test_resolve_denom_col_legacy_pickle_falls_back_to_hist_gate():
     # Pre-persist pickle (offset_meta is None): recompute from the runtime hist_gate,
     # byte-identical to the legacy behavior.
     cols = ("MeanYr", "MeanYr_nonzero")
-    assert _resolve_denom_col(None, hist_gate=0.30, columns=cols) == "MeanYr_nonzero"
-    assert _resolve_denom_col(None, hist_gate=0.0, columns=cols) == "MeanYr"
+    assert serve_denom_col(None, hist_gate=0.30, columns=cols) == "MeanYr_nonzero"
+    assert serve_denom_col(None, hist_gate=0.0, columns=cols) == "MeanYr"
     # No MeanYr_nonzero column ⇒ MeanYr even at a high gate.
-    assert _resolve_denom_col(None, hist_gate=0.30, columns=("MeanYr",)) == "MeanYr"
+    assert serve_denom_col(None, hist_gate=0.30, columns=("MeanYr",)) == "MeanYr"
 
 
 class _FakeModel:

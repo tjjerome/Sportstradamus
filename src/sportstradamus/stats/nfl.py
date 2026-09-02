@@ -26,13 +26,7 @@ from sportstradamus.stats import (
     nfl_fp_team_weekly_aggregate,
     nfl_fp_weekly_aggregate,
 )
-from sportstradamus.stats.base import (
-    _VOLUME_SCALE_RATIO_CAP,
-    _VOLUME_SCALE_RATIO_FLOOR,
-    ComboSpec,
-    Stats,
-    clean_data,
-)
+from sportstradamus.stats.base import ComboSpec, Stats, apply_volume_budget, clean_data
 
 # Phase-1.5 lookback rule:
 #   - Post-week-4 (target_week >= 5) of the target's season: comp pool is
@@ -1882,103 +1876,43 @@ class StatsNFL(Stats):
             ):
                 return
 
-            if market == "attempts":
-                self._finalize_attempts_volume(market)
-                continue
-
-            teams = self.playerProfile.loc[self.playerProfile["team"] != 0].groupby("team")
-            for team, team_df in teams:
-                self._rescale_team_volume(market, team, team_df)
+            # attempts is the pass-volume budget carries and targets divide, not
+            # itself a share of one, so it takes no team rescale.
+            if market != "attempts":
+                teams = self.playerProfile.loc[self.playerProfile["team"] != 0].groupby("team")
+                for team, team_df in teams:
+                    self._rescale_team_volume(market, team, team_df)
             self.playerProfile.fillna(0, inplace=True)
 
         # Defragment after 3-market loop's sequential .join / .loc column inserts.
         self.playerProfile = self.playerProfile.copy()
 
-    def _finalize_attempts_volume(self, market):
-        # SkewNormal: E[X] = loc + scale * delta * sqrt(2/pi)
-        loc = self.playerProfile[f"proj {market} loc"].fillna(0)
-        scale = self.playerProfile[f"proj {market} scale"].fillna(0)
-        sn_alpha = (
-            self.playerProfile[f"proj {market} alpha"].fillna(0)
-            if f"proj {market} alpha" in self.playerProfile.columns
-            else 0
-        )
-
-        delta = sn_alpha / np.sqrt(1 + sn_alpha**2)
-        true_means = loc + scale * delta * np.sqrt(2 / np.pi)
-        true_stds = scale
-
-        self.playerProfile.loc[loc.index, f"proj {market} mean"] = true_means
-        self.playerProfile.loc[scale.index, f"proj {market} std"] = true_stds
-        self.playerProfile.drop(
-            columns=[f"proj {market} loc", f"proj {market} scale"],
-            inplace=True,
-            errors="ignore",
-        )
-        self.playerProfile.drop(columns=[f"proj {market} alpha"], inplace=True, errors="ignore")
-
-        self.playerProfile.fillna(0, inplace=True)
-
     def _rescale_team_volume(self, market, team, team_df):
-        # Precision-weighted, always-adjust normalization.
-        # Budget constraints:
-        #   carries:  total ≈ plays_per_game − proj_attempts − _UNMODELED_CARRY_RESERVE
-        #   targets:  total ≈ proj_attempts − _UNMODELED_TARGET_RESERVE
-        # proj_attempts from SkewNormal: E[X] = loc + scale*delta*sqrt(2/π),
-        # delta = alpha/sqrt(1+alpha²)
-        loc = team_df[f"proj {market} loc"].copy()
-        scale = team_df[f"proj {market} scale"].copy()
-        sn_alpha = (
-            team_df[f"proj {market} alpha"].copy()
-            if f"proj {market} alpha" in team_df.columns
-            else 0
-        )
+        """Redistribute one team's carries or targets onto its share of team plays.
 
-        delta = sn_alpha / np.sqrt(1 + sn_alpha**2)
-        true_means = loc + scale * delta * np.sqrt(2 / np.pi)
-        true_vars = scale**2
-        total = true_means.sum()
-
-        if total <= 0:
-            return
-
+        Budget constraints:
+            carries:  total ≈ plays_per_game − proj_attempts − _UNMODELED_CARRY_RESERVE
+            targets:  total ≈ proj_attempts − _UNMODELED_TARGET_RESERVE
+        """
         plays = self.teamProfile.loc[team, "plays_per_game"]
-
-        # proj_attempts for this team: from attempts market
         if "proj attempts mean" in self.playerProfile.columns:
             proj_attempts = self.playerProfile.loc[
                 self.playerProfile["team"] == team, "proj attempts mean"
             ].sum()
         else:
-            pass_rate = self.teamProfile.loc[team, "pass_rate"]
-            proj_attempts = plays * pass_rate
+            proj_attempts = plays * self.teamProfile.loc[team, "pass_rate"]
 
         if market == "carries":
             cap = _CARRY_CAP
-            rush_budget = plays - proj_attempts
-            target = max(rush_budget - _UNMODELED_CARRY_RESERVE, len(team_df))
+            budget = plays - proj_attempts - _UNMODELED_CARRY_RESERVE
         else:  # targets
             cap = _TARGET_CAP
-            target = max(proj_attempts - _UNMODELED_TARGET_RESERVE, len(team_df))
+            budget = proj_attempts - _UNMODELED_TARGET_RESERVE
 
-        deficit = target - total
-        total_var = true_vars.sum()
-        if total_var > 0:
-            adjustments = true_vars / total_var * deficit
-        else:
-            adjustments = true_means / total * deficit
-
-        new_means = (true_means + adjustments).clip(lower=0, upper=cap)
-
-        # SkewNormal: scale both loc and scale to preserve CV
-        ratio = new_means / true_means.replace(0, np.nan)
-        ratio = ratio.fillna(1.0).clip(
-            lower=_VOLUME_SCALE_RATIO_FLOOR, upper=_VOLUME_SCALE_RATIO_CAP
+        apply_volume_budget(
+            self.playerProfile,
+            market,
+            team_df.index,
+            target=max(budget, len(team_df)),
+            per_player_cap=cap,
         )
-        new_scale = scale * ratio
-        new_loc = new_means - new_scale * delta * np.sqrt(2 / np.pi)
-
-        self.playerProfile.loc[loc.index, f"proj {market} loc"] = new_loc
-        self.playerProfile.loc[scale.index, f"proj {market} scale"] = new_scale
-        self.playerProfile.loc[loc.index, f"proj {market} mean"] = new_means
-        self.playerProfile.loc[scale.index, f"proj {market} std"] = new_scale

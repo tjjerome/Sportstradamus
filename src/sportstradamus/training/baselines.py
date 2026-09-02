@@ -49,6 +49,12 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from sportstradamus.helpers.distributions import (
+    NONZERO_DENOM_GATE,
+    DecodedParams,
+    decode_predictive_mean,
+)
+
 # Empirical-Bayes shrinkage strength: pseudo-count of "global-mean games"
 # mixed into each player's trailing per-player mean. Validated on the NBA
 # FGA holdout (top-volume-quintile bias -2.0 -> -0.48 at K=10) in the
@@ -488,3 +494,100 @@ def resolve_denom_col(
     if zero_inflated and "MeanYr_nonzero" in columns:
         return "MeanYr_nonzero"
     return "MeanYr"
+
+
+def serve_denom_col(offset_meta: dict | None, hist_gate: float, columns) -> str:
+    """SkewNormal decode denominator, preferring the value training persisted.
+
+    The serve-side companion to :func:`resolve_denom_col`, which makes the same
+    choice at train time from the cell's zero-rate. The denom (``MeanYr`` vs
+    ``MeanYr_nonzero``) is a property of the trained model, so reading it back off
+    the pickle keeps serve in lockstep even when the runtime ``stat_zi``
+    (gitignored, per-box) is stale or absent. Falls back to the legacy
+    ``hist_gate`` recompute for pre-persist pickles; the ``prior_*`` keys cover
+    already-shipped centered pickles without a retrain (mean10 stores the denom as
+    ``prior_fallback_col``, EB as ``prior_col``).
+    """
+    om = offset_meta or {}
+    persisted = om.get("denom_col") or om.get("prior_fallback_col")
+    if persisted is None and om.get("method") == "eb_additive":
+        persisted = om.get("prior_col")
+    if persisted is not None:
+        return persisted
+    return (
+        "MeanYr_nonzero"
+        if (hist_gate > NONZERO_DENOM_GATE and "MeanYr_nonzero" in columns)
+        else "MeanYr"
+    )
+
+
+def serve_offset_mode(dist: str, target_normalization: str) -> bool:
+    """Whether serve seeds the SkewNormal with the centered-residual offset.
+
+    Mirrors training's ``offset_mode = strategy.start_mode_flag == "offset"``
+    (``pipeline.train_market``) so a model trained against any offset strategy seeds
+    the same way at predict time. Derived from the registry — not a hardcoded
+    ``offset_meta["method"]`` string — so a new offset strategy needs no serve-side
+    edit. Only the SkewNormal seed consumes ``offset_mode``; the ``dist`` guard
+    short-circuits the registry lookup off that path and for non-registry legacy
+    slugs.
+    """
+    return (
+        dist == "SkewNormal"
+        and get_target_normalization(target_normalization).start_mode_flag == "offset"
+    )
+
+
+def decode_model_params(
+    prob_params: pd.DataFrame,
+    dist: str,
+    X: pd.DataFrame,
+    *,
+    hist_gate: float,
+    offset_meta: dict | None,
+    target_normalization: str,
+) -> DecodedParams:
+    """Decode raw LightGBMLSS output into an absolute mean plus family shape.
+
+    Wraps :func:`~sportstradamus.helpers.distributions.decode_predictive_mean` with
+    the target-normalization inverse the count families don't need: only SkewNormal
+    trains in a transformed space, so only it routes ``loc``/``scale`` back through
+    the registry. Every serving consumer — the market path in
+    ``prediction.model_prob`` and the volume-projection path in ``stats.base`` —
+    decodes here, so a cell cannot mean one thing scored as a market and another
+    scored as a volume dependency.
+
+    Args:
+        prob_params: ``predict(pred_type="parameters")`` frame. SkewNormal needs
+            ``loc``/``scale``/``alpha``; the count families read their own columns
+            and their ``gate`` where zero-inflated.
+        dist: Distribution family slug from the model pickle.
+        X: The feature frame the params were predicted from, row-aligned with
+            ``prob_params``; supplies the decode denominator.
+        hist_gate: Empirical zero-rate persisted with the model.
+        offset_meta: Pickle-persisted baseline metadata; ``None`` for legacy or
+            ratio-strategy models.
+        target_normalization: Slug of the baseline strategy the model trained
+            against.
+
+    Returns:
+        DecodedParams with the absolute ``ev`` plus the family's shape fields.
+    """
+    if dist != "SkewNormal":
+        return decode_predictive_mean(prob_params, dist)
+
+    strategy = get_target_normalization(target_normalization)
+    # ratio_projvol persists its projected-volume denominator in offset_meta;
+    # serve_denom_col reads it (and the centered prior_* back-compat keys),
+    # falling back to the season-mean choice for legacy pickles.
+    denom_col = serve_denom_col(offset_meta, hist_gate, X.columns)
+    # global_mean snapshot lives in offset_meta for centered strategies; the
+    # ratio strategy ignores it (uses MeanYr from features directly).
+    global_mean = float((offset_meta or {}).get("global_mean", 0.0))
+    return decode_predictive_mean(
+        prob_params,
+        dist,
+        sn_loc=strategy.decode_loc(prob_params["loc"].values, X, global_mean, denom_col),
+        sn_scale=strategy.decode_scale(prob_params["scale"].values, X, denom_col),
+        hist_gate=hist_gate,
+    )

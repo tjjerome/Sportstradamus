@@ -26,10 +26,10 @@ import pandas as pd
 import pytest
 
 from sportstradamus import data
-from sportstradamus.prediction.model_prob import _decode_skewnormal, _serve_offset_mode
+from sportstradamus.prediction.model_prob import _decode_skewnormal
 from sportstradamus.skew_normal import SkewNormal as SkewNormalDist
 from sportstradamus.stats import StatsNBA
-from sportstradamus.training.baselines import get_target_normalization
+from sportstradamus.training.baselines import get_target_normalization, serve_offset_mode
 from sportstradamus.training.pipeline import (
     DETERMINISTIC_FIXED_PARAMS,
     DETERMINISTIC_SEED,
@@ -101,7 +101,7 @@ def test_centered_skewnormal_live_decode_finite_and_uninflated(slug):
 
     # Drive the LIVE decode with the registry-persisted offset_meta and the serve-derived
     # seeding flag — exactly what model_prob does at predict time.
-    assert _serve_offset_mode("SkewNormal", slug) is offset_mode
+    assert serve_offset_mode("SkewNormal", slug) is offset_mode
     offset_meta = strategy.offset_meta(global_mean, denom_col)
     decoded = _decode_skewnormal(
         prob_params, X_test, hist_gate=0.0, offset_meta=offset_meta, target_normalization=slug
