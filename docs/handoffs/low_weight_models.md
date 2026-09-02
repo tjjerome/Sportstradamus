@@ -89,7 +89,7 @@ no authentic rows at all in 2025.
 
 | Cell | Class | Lever | Status |
 |---|---|---|---|
-| MLB hits allowed | BIASED (CITL 1.23) | re-confirm the ledger's DPO arm under the knob | fork closed: training pathology |
+| MLB hits allowed | BIASED (CITL 1.23) → WEAK | sweep under the floor | **SUPERSEDED 2026-09-02** (`31b5ae5c`): SkewNormal `ratio_meanyr / crps / direct / nll / roe_mean`, `w` 0.05 → 0.78 (1095 authentic rows / 214 clusters), 6/6, BSS +0.031, shape_ratio 4.99 → 0.91, negative means 139 → 0, CITL 0.94, ρ(model) 0.08 → 0.14 (line 0.18, Mean10 0.12); S1 pass, S2/S3 waived against the book-riding incumbent |
 | NFL passing yards | WEAK | re-confirm the `ratio_meanyr / direct / nll / none` arm post-leak | 2026-09-02 sweep under the floor: 14/15 scored corners fit `w = 0.05`, the other 0.145 (325 authentic validation rows; the 1-SE rule floors it), so nothing nominated; keeps its coverage ship, lifts as seasons accumulate |
 | NFL attempts | BROKEN | `sn_param: centered` / count corners under the knob | fork closed: training pathology |
 | NHL skater fantasy (UD) | BIASED (CITL 0.68) | centered / count corners under the knob | fork closed: training pathology; quote classes checked |
