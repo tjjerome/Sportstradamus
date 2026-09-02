@@ -2191,11 +2191,13 @@ def _step_compute_diagnostics(
         ``model_shape``, ``empirical_shape``, ``start_mean``, ``model_ev``,
         ``mean_line``, ``ev_minus_line``, ``result_mean``, ``median_ev_diff``,
         ``frac_ev_gt_line``, ``over_pct_ev_gt``, ``over_pct_ev_lt``,
-        ``cf_over_pct``, ``ev_meanyr_corr``, ``result_meanyr_corr``).
+        ``cf_over_pct``, ``ev_meanyr_corr``, ``result_meanyr_corr``,
+        ``n_authentic_validation``, ``n_blend_fit_clusters``).
     """
     X_test = splits["X_test"]
     y_test = splits["y_test"]
     B_test = splits["B_test"]
+    authentic_val = _split_quote_authenticity_mask(splits, "validation")
 
     test_mean_yr = X_test["MeanYr"].mean()
     test_std_yr = X_test["STDYr"].mean()
@@ -2257,6 +2259,8 @@ def _step_compute_diagnostics(
         "cf_over_pct": diag_cf_over_pct,
         "ev_meanyr_corr": diag_ev_meanyr_corr,
         "result_meanyr_corr": diag_result_meanyr_corr,
+        "n_authentic_validation": int(authentic_val.sum()),
+        "n_blend_fit_clusters": _blend_fit_cluster_count(splits, authentic_val),
     }
 
 
@@ -2398,6 +2402,8 @@ def _build_filedict(
             "result_meanyr_corr": diag["result_meanyr_corr"],
             "shape_ceiling": shape_ceiling,
             "marginal_shape": marginal_shape,
+            "n_authentic_validation": diag["n_authentic_validation"],
+            "n_blend_fit_clusters": diag["n_blend_fit_clusters"],
         },
         "params": opt_params,
         "distribution": dist,
@@ -2615,6 +2621,19 @@ def _step_persist_artifacts(
     # (1/2/3/6) read that. The served shape columns below retain their separately
     # calibrated dispersion, which the mean-stage corrector intentionally leaves alone.
     X_test["EV"] = ev
+    # Pre-blend probe inputs: with the book base mean and the model-only shape in absolute
+    # EV space, an offline pass re-runs fused_loc at any weight instead of inverting the
+    # served pool. _stage_family_shape_columns stays the served-shape contract.
+    X_test["Book_EV"] = B_test["EV"].values
+    if dist == "SkewNormal":
+        X_test["SN_Sigma_model"] = decoded["sn_sigma_test"]
+        X_test["SN_Alpha_model"] = decoded["sn_alpha_test"]
+    elif dist in ("NegBin", "ZINB"):
+        X_test["R_model"] = decoded["r"]
+        if dist == "ZINB":
+            X_test["Gate_model"] = decoded["gate_test"]
+    elif dist == "DPO":
+        X_test["DP_PHI_model"] = decoded["phi"]
     _stage_family_shape_columns(
         X_test,
         dist=dist,
@@ -3406,7 +3425,38 @@ def _blend_fit_clusters(splits: dict, mask: np.ndarray) -> np.ndarray:
     key = splits["players_validation"]
     if key is None:
         key = splits["dates_validation"]
-    return key.to_numpy()[mask]
+    # The metadata series keep the Date-sorted split order while B_validation (and the mask
+    # built over its index) were index-sorted in _step_predict_splits: align by label.
+    return key.reindex(splits["B_validation"].index).to_numpy()[mask]
+
+
+def _blend_fit_cluster_count(splits: dict, mask: np.ndarray) -> int:
+    """Distinct clusters the blend-weight fit would see under ``mask``."""
+    return len(np.unique(_blend_fit_clusters(splits, mask))) if mask.any() else 0
+
+
+def _blend_fit_supported(splits: dict, mask: np.ndarray) -> bool:
+    """Whether the authentic validation rows carry enough evidence to fit a blend weight.
+
+    The floor is the one the 1-SE rule's clustered SE already uses; below it the fit is a
+    coin flip on a handful of games, and serving treats unquoted rows as model-only anyway,
+    so w = 1.0 is the honest value. Clusters, not rows: 30 rows from 2 pitchers is still no
+    evidence. Cross-fit folds apply the floor to their own ~80% share of the clusters, so a
+    cell just above it can fit ``w`` on the whole frame while its folds — and the dumped test
+    rows — serve model-only.
+    """
+    n_clusters = _blend_fit_cluster_count(splits, mask)
+    if n_clusters >= calibration._ONE_SE_MIN_CLUSTERS:
+        return True
+    if mask.any():
+        logger.warning(
+            "blend weight not fit: %d authentic validation rows over %d clusters "
+            "(floor %d); serving model-only",
+            int(mask.sum()),
+            n_clusters,
+            calibration._ONE_SE_MIN_CLUSTERS,
+        )
+    return False
 
 
 def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
@@ -3427,7 +3477,7 @@ def _fuse_skewnormal(out, decoded, splits, cv, hist_gate, blending):
         if hist_gate > GATE_PUBLISH_THRESHOLD and decoded["gate_validation"] is not None
         else {}
     )
-    if authentic_val.any():
+    if _blend_fit_supported(splits, authentic_val):
         model_weight = calibration.fit_blend_weight(
             blending,
             ev_validation[authentic_val],
@@ -3512,7 +3562,7 @@ def _fuse_mixture(out, decoded, splits, cv, blending):
     authentic_test = _split_quote_authenticity_mask(splits, "test")
     authentic_val = _split_quote_authenticity_mask(splits, "validation")
 
-    if authentic_val.any():
+    if _blend_fit_supported(splits, authentic_val):
         model_weight = calibration.fit_blend_weight(
             blending,
             ev_validation[authentic_val],
@@ -3565,7 +3615,7 @@ def _fit_nonsn_weight(out, decoded, splits, base_dist, dist, cv, hist_gate, blen
     _zi_kwargs = {}
     if dist in ("ZINB", "ZAGamma") and hist_gate > 0:
         _zi_kwargs = {"gate_model": decoded["gate_validation"], "gate_book": hist_gate}
-    if authentic_val.any():
+    if _blend_fit_supported(splits, authentic_val):
         model_weight = calibration.fit_blend_weight(
             blending,
             decoded["ev_validation"][authentic_val],
@@ -3653,7 +3703,7 @@ def _fuse_dpo(out, decoded, splits, cv, blending):
     authentic_test = _split_quote_authenticity_mask(splits, "test")
     authentic_val = _split_quote_authenticity_mask(splits, "validation")
 
-    if authentic_val.any():
+    if _blend_fit_supported(splits, authentic_val):
         model_weight = calibration.fit_dpo_weight(
             decoded["ev_validation"][authentic_val],
             book_ev_val[authentic_val],
@@ -4480,7 +4530,10 @@ def _step_crossfit_calibrate_and_serve(
         served[key] = _concat_folds([fold[key] for fold in per_fold], order, target)
     served["decoded"] = {
         **whole["decoded"],
-        "ev": _concat_folds([fold["decoded"]["ev"] for fold in per_fold], order, target),
+        **{
+            key: _concat_folds([fold["decoded"][key] for fold in per_fold], order, target)
+            for key in ("ev", "sn_sigma_test", "sn_alpha_test", "gate_test", "r", "phi")
+        },
     }
     served["fused"] = {
         **whole["fused"],
@@ -4918,6 +4971,11 @@ def train_market(
 
     val_book_proba = splits["B_validation"]["Odds"].to_numpy(dtype=float)
     authentic_val = _split_quote_authenticity_mask(splits, "validation")
+    if fused["model_weight"] == 1.0:
+        # The evidence floor refused the blend fit (a fit never returns 1.0; the cap is
+        # calibration._MODEL_WEIGHT_MAX), so the same rows have no book evidence to score
+        # skill or Kelly shrinkage against either.
+        authentic_val = np.zeros_like(authentic_val)
     skill = _step_compute_skill_metrics(
         val_calibrated[authentic_val],
         y_class_val[authentic_val],

@@ -254,6 +254,8 @@ def _wide_row(
         # Kelly & blending
         "kelly_shrinkage": _safe_float(metrics_block.get("kelly_shrinkage")),
         "model_weight": _diag("model_weight"),
+        "n_authentic_validation": _diag("n_authentic_validation"),
+        "n_blend_fit_clusters": _diag("n_blend_fit_clusters"),
         # Shape
         "model_shape": float(mod_shape),
         "empirical_shape": float(emp_shape),

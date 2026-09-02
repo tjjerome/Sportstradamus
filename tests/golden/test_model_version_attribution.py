@@ -66,6 +66,8 @@ def _minimal_filedict_kwargs() -> dict:
         "cf_over_pct",
         "ev_meanyr_corr",
         "result_meanyr_corr",
+        "n_authentic_validation",
+        "n_blend_fit_clusters",
     )
     diag = dict.fromkeys(diag_keys, 0.0)
     return {
@@ -148,6 +150,18 @@ def test_build_filedict_carries_wellformed_version():
     assert date_slug == fd["trained_at"][:10].replace("-", "")
     assert norm_slug == "ratio_meanyr"
     assert len(sha8) == 8
+
+
+def test_build_filedict_appends_blend_fit_evidence_counts():
+    kwargs = _minimal_filedict_kwargs()
+    kwargs["diag"] = {**kwargs["diag"], "n_authentic_validation": 214, "n_blend_fit_clusters": 37}
+
+    diagnostics = _build_filedict(**kwargs)["diagnostics"]
+
+    assert diagnostics["n_authentic_validation"] == 214
+    assert diagnostics["n_blend_fit_clusters"] == 37
+    # Key order is load-bearing for pickle byte parity: the counts append, never reorder.
+    assert list(diagnostics)[-2:] == ["n_authentic_validation", "n_blend_fit_clusters"]
 
 
 def test_build_filedict_carries_cell_bound_model_strategy_identity():

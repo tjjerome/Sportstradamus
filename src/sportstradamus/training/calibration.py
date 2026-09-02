@@ -43,7 +43,9 @@ _ONE_SE_KAPPA: float = 1.0
 _ONE_SE_BOOTSTRAP_DRAWS: int = 2000
 _ONE_SE_BOOTSTRAP_SEED: int = 1729
 # Below this many distinct clusters the clustered SE is too noisy to trust; the fit
-# collapses to the plain grid argmin instead.
+# collapses to the plain grid argmin instead. Also the evidence floor for fitting a blend
+# weight at all (pipeline._blend_fit_supported) and for scoring Gate 1 (scorecard._priced_rows):
+# moving it moves all three together.
 _ONE_SE_MIN_CLUSTERS: int = 10
 
 # Resolution threshold for choosing NegBin over Gamma: the per-player ratio

@@ -201,7 +201,9 @@ def _rank_column(admissible: pd.DataFrame, *, live: bool) -> str:
     return "discounted_slack" if "discounted_slack" in admissible.columns else "slack"
 
 
-def _nominees(sub: pd.DataFrame, *, live: bool = False) -> list[dict]:
+def _nominees(
+    sub: pd.DataFrame, *, live: bool = False, min_model_weight: float | None = None
+) -> list[dict]:
     """Ordered confirm nominees for one cell: top board corners, then seeds, then the incumbent.
 
     Only board-confident corners nominate: a corner needs a positive admissibility value — the
@@ -236,7 +238,9 @@ def _nominees(sub: pd.DataFrame, *, live: bool = False) -> list[dict]:
     ).sort_values([rank_column, "corner_fingerprint"], ascending=[False, True], kind="stable")
     if len(admissible):
         board_rank = float(ranked[rank_column].max())
-        lane_rows = _veto_admissible(ranked, rank_column, live=live)
+        lane_rows = _veto_admissible(
+            ranked, rank_column, live=live, min_model_weight=min_model_weight
+        )
         if lane_rows is None:
             return []
         ranked = lane_rows
@@ -258,7 +262,9 @@ def _nominees(sub: pd.DataFrame, *, live: bool = False) -> list[dict]:
     ]
 
 
-def _veto_admissible(ranked: pd.DataFrame, rank_column: str, *, live: bool) -> pd.DataFrame | None:
+def _veto_admissible(
+    ranked: pd.DataFrame, rank_column: str, *, live: bool, min_model_weight: float | None = None
+) -> pd.DataFrame | None:
     """The rows eligible for lane slots, or ``None`` when the whole cell fails the nomination bar.
 
     brief R3: admissibility is priced at the milder median ``veto_slack`` while the ordering (and
@@ -267,6 +273,10 @@ def _veto_admissible(ranked: pd.DataFrame, rank_column: str, *, live: bool) -> p
     pricing, and the live lane's margin, keep the rank column as the bar. brief L4: a corner the
     ledger has already decided on this matrix cannot usefully walk again — the walk would skip
     it — so it never spends a lane slot either.
+
+    ``min_model_weight`` drops book-riding corners from the lane (why: :func:`run_confirm`). It is
+    a lane filter, not a cell veto: a cell whose top corner rides the book still nominates its
+    remaining positive corners, and when none remain, its seeds and incumbent.
     """
     veto = ranked[rank_column]
     if not live and "veto_slack" in ranked.columns:
@@ -282,6 +292,11 @@ def _veto_admissible(ranked: pd.DataFrame, rank_column: str, *, live: bool) -> p
             strict=True,
         )
         ranked = ranked[[pair not in decided for pair in pairs]]
+    if min_model_weight is not None:
+        # NaN (a board swept before the weight column existed) and exactly 1.0 (a cell with no
+        # authentic validation quotes to blend against) are not evidence of a book-rider.
+        weight = pd.to_numeric(ranked["model_weight"], errors="coerce")
+        ranked = ranked[~(weight < min_model_weight)]
     return ranked
 
 
@@ -547,7 +562,11 @@ def _validate_board_identity(
 
 
 def _candidates(
-    board: pd.DataFrame, meta: dict, max_nominees: int | None = None
+    board: pd.DataFrame,
+    meta: dict,
+    max_nominees: int | None = None,
+    *,
+    min_model_weight: float | None = None,
 ) -> list[list[dict]]:
     """Each cell's ordered nominee list, strongest cells first; nothing confirmable drops out.
 
@@ -572,7 +591,9 @@ def _candidates(
         for (league, market), sub in board.groupby(["league", "market"], sort=False)
         if (
             nominated := _nominees(
-                sub, live=priced and meta[league][market].get("shipped") != WITHHELD
+                sub,
+                live=priced and meta[league][market].get("shipped") != WITHHELD,
+                min_model_weight=min_model_weight,
             )
         )
     ]
@@ -902,6 +923,11 @@ def _retrained_matrix_hash(league: str, market: str) -> str | None:
     return row["strategy_matrix_hash"]
 
 
+def _served_weight(path: pathlib.Path) -> float:
+    """The blend weight in a model pickle: how much of the served predictive is model, not book."""
+    return float(pd.read_pickle(path)["weight"])
+
+
 def _produced_artifacts_match(
     league: str, market: str, candidate: dict, expected: ArtifactIdentity
 ) -> bool:
@@ -1051,11 +1077,19 @@ def _confirm_meditate(league: str, market: str, candidate: dict, meta: dict) -> 
     return []
 
 
-def _confirm_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
+def _confirm_one(
+    meta: dict, cand: dict, *, min_model_weight: float | None = None
+) -> tuple[str, str, str, list[str]]:
     """Persist one candidate, confirm at full HPO, and keep it (devel) or revert (stat_meta + pickle).
 
     The pickle prune on failure is what actually dark-outs the cell — inference loads pickles by
     path and ignores ``shipped``, so a reverted stat_meta entry alone would still serve.
+
+    ``min_model_weight`` is the campaign's blend-weight floor, checked here rather than on the
+    board: the board's ``model_weight`` is a fixed-HP proxy that this retrain refits, so only the
+    served pickle says what the cell would actually blend. A cell under the floor reverts like any
+    other loser; the ledger row written before this check keeps its 6/6 verdict, so the corner is
+    decided on this matrix and walks again only once the matrix hash moves.
     """
     lg, mkt = cand["league"], cand["market"]
     original = deepcopy(meta[lg][mkt])
@@ -1067,9 +1101,12 @@ def _confirm_one(meta: dict, cand: dict) -> tuple[str, str, str, list[str]]:
         _atomic_write_meta(meta)
         failed = _confirm_meditate(lg, mkt, cand, meta)
         if not failed:
-            keep = True
-            click.secho(f"  SHIPPED (devel) {lg} {mkt}", fg="green")
-            return (lg, mkt, "SHIPPED", [])
+            weight = _served_weight(model_pickle_path(lg, mkt))
+            if min_model_weight is None or weight >= min_model_weight:
+                keep = True
+                click.secho(f"  SHIPPED (devel) {lg} {mkt} w={weight:.3f}", fg="green")
+                return (lg, mkt, "SHIPPED", [])
+            failed = [f"w={weight:.3f}<{min_model_weight}"]
         click.secho(f"  REVERTED {lg} {mkt} — failed {' '.join(failed)}", fg="red")
         return (lg, mkt, "REVERTED", failed)
     finally:
@@ -1084,7 +1121,7 @@ def _failed_legs(verdict: dict) -> list[str]:
 
 
 def _supersede_one(
-    meta: dict, cand: dict, *, auto_promote: bool = False
+    meta: dict, cand: dict, *, auto_promote: bool = False, min_model_weight: float | None = None
 ) -> tuple[str, str, str, list[str]]:
     """Supersession-test one live cell: snapshot, retrain the candidate in place, require its exact
     artifact identity and official six-gate ``model_stats`` ship, then run S1/S2/S3 and promote it
@@ -1096,6 +1133,14 @@ def _supersede_one(
     confirmation yes so an unattended run can swap live cells: the S1/S2/S3 verdict and the six
     gates still decide, only the human veto is gone. Every swap is still local and uncommitted, so
     the review of the ``stat_meta.json`` diff is where a promotion is actually accepted.
+
+    ``min_model_weight`` cuts both ways on this lane. A candidate under the floor is held whatever
+    the verdict says. Above it, a book-riding incumbent waives S2/S3 for that pair: both models sit
+    on the book at the line, so their paired Brier difference is ~0 by construction and neither
+    test can ever fire — S1 plus the weight separation is the whole evidence available for the swap.
+    An incumbent already above the floor keeps the full S1+S2+S3 bar. Both weights print on the
+    headline whether or not the floor is set, so the live lane reads the incumbent's pickle from
+    its snapshot on every walk.
     """
     lg, mkt = cand["league"], cand["market"]
     slug = market_file_slug(lg, mkt)
@@ -1120,8 +1165,17 @@ def _supersede_one(
         baseline = load_test_set(backup / f"{slug}.csv", _SHIP_PRED_COL)
         candidate = load_test_set(_TEST_SETS_ROOT / f"{slug}.csv", _SHIP_PRED_COL)
         verdict = supersede_verdict(baseline, candidate, _SHIP_PRED_COL, league=lg, market=mkt)
-        click.echo("  " + _supersede_headline(verdict))
-        if not verdict["ship"]:
+        w_in = _served_weight(backup / model_pickle_path(lg, mkt).name)
+        w_out = _served_weight(model_pickle_path(lg, mkt))
+        waived = (
+            min_model_weight is not None and verdict["s1_pass"] and w_out >= min_model_weight > w_in
+        )
+        click.echo(f"  {_supersede_headline(verdict)}  w {w_in:.3f}→{w_out:.3f}")
+        if waived:
+            click.echo("  [S2/S3 waived: incumbent rides the book]")
+        if min_model_weight is not None and w_out < min_model_weight:
+            return (lg, mkt, "HELD", [*prefix, f"w={w_out:.3f}<{min_model_weight}"])
+        if not (verdict["ship"] or waived):
             return (lg, mkt, "HELD", prefix + _failed_legs(verdict))
         edits = ", ".join(f"{k}={v}" for k, v in cand["edits"].items())
         if auto_promote:
@@ -1245,6 +1299,7 @@ def _walk_lanes(
     shipped: list[list[dict]],
     deadline_hours: float | None,
     auto_promote: bool = False,
+    min_model_weight: float | None = None,
 ) -> list[tuple[str, str, str, list[str], str]]:
     """Walk both lanes cell by cell; past the deadline, remaining cells record SKIPPED instead.
 
@@ -1253,10 +1308,13 @@ def _walk_lanes(
     at most one cell. :func:`_candidates` ordered the cells best-first, which is what makes the cut
     land on the weakest tail.
     """
-    supersede = functools.partial(_supersede_one, auto_promote=auto_promote)
+    confirm = functools.partial(_confirm_one, min_model_weight=min_model_weight)
+    supersede = functools.partial(
+        _supersede_one, auto_promote=auto_promote, min_model_weight=min_model_weight
+    )
     deadline = None if deadline_hours is None else time.monotonic() + deadline_hours * 3600
     results = []
-    for lane, attempt in ((fresh, _confirm_one), (shipped, supersede)):
+    for lane, attempt in ((fresh, confirm), (shipped, supersede)):
         for nominated in lane:
             if deadline is not None and time.monotonic() > deadline:
                 lead = nominated[0]
@@ -1274,6 +1332,7 @@ def run_confirm(
     deadline_hours: float | None = None,
     fresh_only: bool = False,
     auto_promote: bool = False,
+    min_model_weight: float | None = None,
 ) -> None:
     """Confirm the sweep's winners: auto-ship withheld cells on a clean 6/6, supersession-test live cells.
 
@@ -1285,10 +1344,12 @@ def run_confirm(
     skips only the upfront gate — live-cell promotions prompt individually unless ``auto_promote``
     answers them. ``max_nominees`` caps each cell's walk at its first N nominees;
     ``deadline_hours`` skips cells not yet started when the budget runs out; ``fresh_only`` drops
-    the live lane for unattended runs.
+    the live lane for unattended runs. ``min_model_weight`` sets the campaign's blend-weight floor:
+    book-riding corners drop out of every lane, a confirmed cell under the floor reverts, and a
+    book-riding incumbent waives S2/S3 against a candidate above it.
     """
     meta = load_stat_meta(_STAT_META)
-    ready = _candidates(board, meta, max_nominees)
+    ready = _candidates(board, meta, max_nominees, min_model_weight=min_model_weight)
     if not ready:
         click.echo("no confirmable nominees on the board.")
         return
@@ -1313,7 +1374,9 @@ def run_confirm(
 
     backup = _backup_stat_meta()
     click.echo(f"stat_meta.json backed up to {backup}")
-    _print_confirm_report(_walk_lanes(meta, fresh, shipped, deadline_hours, auto_promote), backup)
+    _print_confirm_report(
+        _walk_lanes(meta, fresh, shipped, deadline_hours, auto_promote, min_model_weight), backup
+    )
 
 
 def _print_confirm_report(

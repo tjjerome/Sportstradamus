@@ -62,6 +62,15 @@ Options:
                                   and every swap stays local until the
                                   stat_meta.json diff is reviewed. Requires
                                   --confirm.
+  --min-model-weight FLOAT RANGE  Ship policy: a board corner whose fitted blend
+                                  weight sits below this ranks but never
+                                  nominates (book-less cells at w=1.0 are
+                                  exempt); a confirmed retrain landing below it
+                                  is reverted; in the live lane a candidate at
+                                  or above it may supersede an incumbent below
+                                  it on S1 alone — S2/S3 cannot separate two
+                                  book-riding legs. Unset keeps today's
+                                  behavior. Requires --confirm.  [0<=x<1]
   --resume                        Reopen each cell's Optuna journal and reuse
                                   every admissible prior board row — resume a
                                   crashed multi-hour run instead of retraining

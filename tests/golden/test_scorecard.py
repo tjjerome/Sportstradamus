@@ -1229,6 +1229,7 @@ def test_gate_row_no_odds_but_line_present_blanks_g1_only():
 
 def test_gate1_uses_only_explicit_authentic_book_evidence():
     df = _priced_frame()
+    df["Player"] = [f"P{i % 50}" for i in range(len(df))]
     authentic = np.arange(len(df)) % 2 == 0
     df["QuoteAuthenticity"] = np.where(authentic, "authentic", "synthetic")
     df.loc[~authentic, "P"] = 1.0 - (
@@ -1248,6 +1249,55 @@ def test_gate1_uses_only_explicit_authentic_book_evidence():
     assert full["g1_brier_diff_ci_lo"] == pytest.approx(authentic_only["g1_brier_diff_ci_lo"])
     assert full["g1_brier_diff_ci_hi"] == pytest.approx(authentic_only["g1_brier_diff_ci_hi"])
     assert full["g1_brier_skill_score"] == pytest.approx(authentic_only["g1_brier_skill_score"])
+
+
+def _authenticity_frame(n: int, n_players: int, *, seed: int = 21) -> pd.DataFrame:
+    """A priced, fully-authentic frame spread over ``n_players`` distinct ``Player`` values."""
+    df = _priced_frame(n=n, seed=seed)
+    df["QuoteAuthenticity"] = "authentic"
+    df["Player"] = [f"P{i % n_players}" for i in range(n)]
+    return df
+
+
+def test_priced_rows_below_cluster_floor_reads_as_book_less():
+    """A one-row (or few-player) authentic book is no book: below
+    ``calibration._ONE_SE_MIN_CLUSTERS`` distinct players the priced set is too thin to
+    call Gate 1 book-beaten rather than book-less — the same floor the blend-weight fit
+    applies to its priced rows. 12 authentic rows over only 2 players must fold to the
+    blank/auto-pass convention, not a one-row "win".
+    """
+    from sportstradamus.training.scorecard import _priced_rows
+
+    df = _authenticity_frame(n=12, n_players=2)
+    assert _priced_rows(df) is None
+
+    row = apply_thresholds(gate_row(df, "EV", league="NBA", market="PTS", strategy="t"))
+    assert row["g1_brier_diff_ci_lo"] is None
+    assert row["g1_brier_diff_ci_hi"] is None
+    assert row["g1_pass"] is True  # blank Gate 1 auto-passes — no book to beat
+
+
+def test_priced_rows_at_cluster_floor_returns_rows():
+    """The same shape of frame spread over 10 distinct players (the floor) clears it —
+    rows come back rather than folding to None."""
+    from sportstradamus.training.scorecard import _priced_rows
+
+    df = _authenticity_frame(n=12, n_players=10)
+    sub = _priced_rows(df)
+    assert sub is not None
+    assert len(sub) == 12
+
+
+def test_priced_rows_legacy_without_authenticity_column_ignores_floor():
+    """Frames predating the provenance column keep the historical finite-price
+    behavior: the cluster floor only applies inside the provenance-bearing branch, so
+    3 rows survive even though that is far below it."""
+    from sportstradamus.training.scorecard import _priced_rows
+
+    df = _priced_frame(n=3, seed=3)
+    sub = _priced_rows(df)
+    assert sub is not None
+    assert len(sub) == 3
 
 
 def test_write_gate_scorecard_sorts_and_overwrites(tmp_path):

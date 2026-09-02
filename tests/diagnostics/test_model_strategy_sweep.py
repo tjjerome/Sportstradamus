@@ -282,6 +282,7 @@ def _artifact(spec, league, market, controls, *, status="active"):
             normalization
             and get_target_normalization(normalization).start_mode_flag == "normalized"
         ),
+        "diagnostics": {"n_authentic_validation": 0},
         **{
             control: controls[control]
             for control in ("sn_param", "zinb_mode", "posthoc")
@@ -952,6 +953,30 @@ def test_score_corner_runs_production_gate_for_sn(monkeypatch):
     assert row["g1_pass"] is True and row["g6_pass"] is True
     assert row["dispersion_cal"] == 1.27 and row["skew_cal"] == 2.3
     assert row["n"] == 1500
+
+
+def test_score_corner_reads_n_authentic_validation_from_diagnostics(monkeypatch):
+    """The board's evidence-behind-the-weight column comes from the diagnostics block of the pickle
+    the sweep's own deterministic retrain just wrote."""
+    spec = get_strategy("SkewNormal")
+    corner = {
+        "dist": "SkewNormal",
+        "normalization": "centered_additive_mean10",
+        "dist_training_loss": "crps",
+        "sn_param": "direct",
+        "blending_loss_fn": "nll",
+        "posthoc": "none",
+    }
+    monkeypatch.setattr(
+        sweep, "gate_row", lambda df, pred_col, **kw: _canned_row(ship=True, g4_pit_ks=0.03)
+    )
+    monkeypatch.setattr(sweep, "apply_thresholds", lambda row: row)
+
+    frame, model = _artifact(spec, "WNBA", "AST", corner)
+    model["diagnostics"] = {"n_authentic_validation": 42}
+    monkeypatch.setattr(sweep, "load_test_set", lambda path, col: frame)
+    monkeypatch.setattr(sweep.pd, "read_pickle", lambda path: model)
+    assert sweep._score_corner("WNBA", "AST", corner, spec)["n_authentic_validation"] == 42
 
 
 def test_score_corner_decodes_zinb_with_none_and_no_skew(monkeypatch):
@@ -2156,12 +2181,15 @@ def test_cli_confirm_invokes_run_confirm(monkeypatch, tmp_path):
     monkeypatch.setattr(
         model_strategy_confirm,
         "run_confirm",
-        lambda board, *, yes, max_nominees, deadline_hours, fresh_only, auto_promote: seen.update(
-            n=len(board),
-            yes=yes,
-            max_nominees=max_nominees,
-            deadline_hours=deadline_hours,
-            fresh_only=fresh_only,
+        lambda board, *, yes, max_nominees, deadline_hours, fresh_only, auto_promote, min_model_weight: (
+            seen.update(
+                n=len(board),
+                yes=yes,
+                max_nominees=max_nominees,
+                deadline_hours=deadline_hours,
+                fresh_only=fresh_only,
+                min_model_weight=min_model_weight,
+            )
         ),
     )
     out = str(tmp_path / "board.csv")
@@ -2183,12 +2211,15 @@ def test_cli_confirm_invokes_run_confirm(monkeypatch, tmp_path):
             "--confirm-hours",
             "12",
             "--confirm-fresh-only",
+            "--min-model-weight",
+            "0.3",
         ],
     )
     assert result.exit_code == 0, result.output
     assert seen["yes"] is True and 0 < seen["n"] <= 5 + 1 + sweep._SHAPING_PROBE_ANCHORS
     assert seen["max_nominees"] == 2
     assert seen["deadline_hours"] == 12.0 and seen["fresh_only"] is True
+    assert seen["min_model_weight"] == 0.3
 
 
 def test_cli_scoped_board_confirms_only_the_requested_cells(monkeypatch, tmp_path):
@@ -2222,7 +2253,7 @@ def test_cli_scoped_board_confirms_only_the_requested_cells(monkeypatch, tmp_pat
     monkeypatch.setattr(
         model_strategy_confirm,
         "run_confirm",
-        lambda board, *, yes, max_nominees, deadline_hours, fresh_only, auto_promote: (
+        lambda board, *, yes, max_nominees, deadline_hours, fresh_only, auto_promote, min_model_weight: (
             confirmed.update(
                 cells=set(zip(board["league"], board["market"], strict=True)),
                 yes=yes,
@@ -2768,6 +2799,7 @@ def test_compress_corner_orders_family_first_and_clamps_to_budget():
         (["--confirm-hours", "4"], "require --confirm"),
         (["--confirm-fresh-only"], "require --confirm"),
         (["--confirm-auto-promote"], "require --confirm"),
+        (["--min-model-weight", "0.3"], "require --confirm"),
         (
             ["--confirm", "--confirm-fresh-only", "--confirm-auto-promote"],
             "only affects the live lane",

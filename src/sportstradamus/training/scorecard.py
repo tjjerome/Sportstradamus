@@ -61,6 +61,7 @@ from sportstradamus.helpers.integer_distribution import (
 from sportstradamus.helpers.io import read_history
 from sportstradamus.helpers.provenance import git_sha
 from sportstradamus.training.baselines import get_target_normalization
+from sportstradamus.training.calibration import _ONE_SE_MIN_CLUSTERS
 from sportstradamus.training.group_conditional_cdf import (
     deserialize_two_part_calibration,
     ks_supremum,
@@ -89,11 +90,11 @@ from sportstradamus.training.structural_strategies import (
 #     low-variance bench segments), Gate 4 IQR spread, Gate 5 equal-mass ECE.
 #     The per-cell metrics (plus an "oracle" bound) land on the wide
 #     ``model_stats.parquet`` row via :func:`compute_gates`; ``apply_thresholds``
-#     wires the strict starter pass/fail. Cells with no book Odds leave Gate 1
-#     blank; the ship convention is that a blank Gate 1 auto-passes — no book
-#     to beat, model wins by default. Gate 5 (model-only calibration) does NOT
-#     use Odds, so it still computes for those cells; Gate 5 blank means
-#     "couldn't compute" (no P or no Line), not auto-pass.
+#     wires the strict starter pass/fail. Cells with no book Odds, or with authentic
+#     quotes below the cluster floor, leave Gate 1 blank; the ship convention is that
+#     a blank Gate 1 auto-passes — no book to beat, model wins by default. Gate 5
+#     (model-only calibration) does NOT use Odds, so it still computes for those
+#     cells; Gate 5 blank means "couldn't compute" (no P or no Line), not auto-pass.
 #   * research -> devel, supersede: pass all six + a paired Brier CI (current-new,
 #     95% CI excludes 0 in the new model's favor) + a paired Sharpe improvement on a
 #     backdated Kelly sim (supersede_verdict, diff mode).
@@ -544,7 +545,11 @@ def _priced_rows(df: pd.DataFrame) -> pd.DataFrame | None:
     columns (e.g. Player for the clustered bootstrap) align to the same rows.
     Provenance-bearing artifacts fail closed to explicit authentic quotes;
     legacy artifacts without provenance retain their historical finite-price
-    behavior.
+    behavior. A one-row book is no book: below
+    :data:`~sportstradamus.training.calibration._ONE_SE_MIN_CLUSTERS` distinct
+    players (dates when the dump has no ``Player``, as team markets cluster), the
+    authentic set is too thin to call Gate 1 book-beaten rather than book-less —
+    the same floor the blend-weight fit applies to its priced rows.
     """
     if "Odds" not in df.columns:
         return None
@@ -559,6 +564,9 @@ def _priced_rows(df: pd.DataFrame) -> pd.DataFrame | None:
         if not sub["QuoteAuthenticity"].isin(allowed).all():
             raise ValueError("scorecard received invalid quote authenticity")
         sub = sub.loc[sub["QuoteAuthenticity"].eq("authentic")].drop(columns="QuoteAuthenticity")
+        key = "Player" if "Player" in df.columns else "Date"
+        if df.loc[sub.index, key].nunique() < _ONE_SE_MIN_CLUSTERS:
+            return None
     return sub if len(sub) else None
 
 
@@ -571,7 +579,8 @@ def _brier_inputs(
     top of :func:`_calibration_inputs`. The row set is re-filtered to drop rows with
     non-finite ``Odds`` (so the Brier and ECE row sets can differ when some events
     have a posted line but no book quote). Returns ``None`` when ``Odds`` is missing
-    entirely or every priced row is non-finite. Shared by
+    entirely, every priced row is non-finite, or the priced rows fall below the
+    cluster floor. Shared by
     :func:`_brier_skill_score` and Gate 1 (:func:`_gate1_brier_ci`); ``index`` is the
     surviving-row index so callers can align ancillary columns (Player) to the same
     rows without re-deriving the filter.
@@ -1891,8 +1900,9 @@ def gate_row(
     bound: Gate 1 diff = -book Brier, Gates 2/3 ``z = 0``, Gate 4 ratio ``1.0``, Gate 5
     ``ece = 0``. The σ / IQR_true denominators equal the model row, so the oracle
     columns size each gate's natural threshold. Measurement-only — no pass/fail. Gate
-    1 is **blank when ``Odds`` is missing** (no book to beat); the ship convention is
-    that a blank Gate 1 **auto-passes** — model wins by default. Gate 5 needs only
+    1 is **blank when ``Odds`` is missing or the priced rows fall below the cluster
+    floor** (no book, or too thin a book, to beat); the ship convention is that a
+    blank Gate 1 **auto-passes** — model wins by default. Gate 5 needs only
     ``P`` + ``Line`` (not ``Odds``), so it still computes for book-unpriced cells; a
     blank Gate 5 means "couldn't compute" (no P or no Line), NOT auto-pass.
     """
@@ -2051,7 +2061,8 @@ def _g1_within_tie_margin(hi: float | None) -> bool:
     the statistical-tie margin :data:`_GATE1_NONINF_MARGIN` — i.e. we are 95%
     confident the fused ensemble's Brier is at most ``δ`` worse than the book's. A
     tight tie or a win passes; a wildly-worse or underpowered (wide-CI) cell fails. A
-    blank bound (no ``Odds``) auto-passes — there is no book to beat.
+    blank bound (no ``Odds``, or priced rows below the cluster floor) auto-passes —
+    there is no book to beat.
     """
     return hi is None or hi < _GATE1_NONINF_MARGIN
 
@@ -2064,8 +2075,8 @@ def _below_zero_ci_bound(hi: float | None) -> bool:
     ``hi`` is stored rounded to 4 dp and round() keeps the sign bit, so a
     genuinely-negative bound in (-5e-5, 0) — e.g. receiving-yards' -0.00004 — lands on
     -0.0, where a plain ``-0.0 < 0.0`` is False. A negative-signed zero still beat the
-    book, so treat it as below the bound. A blank bound (no ``Odds``) is True — no
-    book to beat.
+    book, so treat it as below the bound. A blank bound (no ``Odds``, or priced rows
+    below the cluster floor) is True — no book to beat.
     """
     if hi is None:
         return True
@@ -2105,8 +2116,9 @@ def apply_thresholds(row: dict[str, object]) -> dict[str, object]:
     reports the stricter provable-superiority result without gating on it. Blank-cell
     semantics — distinct because the gates fail for different structural reasons:
 
-    * Gate 1 blank (no ``Odds``): **auto-pass** — no book to beat, model wins by
-      default. The only "no book data" auto-pass.
+    * Gate 1 blank (no ``Odds``, or priced rows below the cluster floor):
+      **auto-pass** — no book to beat, model wins by default. The only "no book
+      data" auto-pass.
     * Gate 2/3/5 blank: **fail** — the cell couldn't compute the gate (e.g. missing
       ``P`` / ``Line``), and we don't credit the model for absence of evidence.
     * Gate 4 blank (no per-row distribution params ⇒ no ``g4_pit_ks``): **fail** — the

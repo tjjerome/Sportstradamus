@@ -231,6 +231,7 @@ _BOARD_COLUMNS: list[str] = [
     "g1_brier_diff_ci_hi_standalone",
     "g1_brier_skill",
     "model_weight",
+    "n_authentic_validation",
     "g2_pass",
     "g2_star_z",
     "g3_pass",
@@ -629,6 +630,7 @@ def _score_corner(
         # The corner's fitted blend weight, so a book-lean corner (w at the 0.05 floor) is
         # distinguishable from a model-driven one when reading its gate values.
         "model_weight": filedict.get("weight"),
+        "n_authentic_validation": filedict["diagnostics"]["n_authentic_validation"],
         "g2_pass": bool(row.get("g2_pass")),
         "g2_star_z": row.get("g2_star_z"),
         "g3_pass": bool(row.get("g3_pass")),
@@ -2091,6 +2093,7 @@ def _reject_inert_flags(
     confirm_hours: float | None,
     confirm_fresh_only: bool,
     confirm_auto_promote: bool,
+    min_model_weight: float | None,
     quiet: bool,
     verbose: bool,
 ) -> None:
@@ -2112,6 +2115,7 @@ def _reject_inert_flags(
             ("--confirm-hours", confirm_hours is not None),
             ("--confirm-fresh-only", confirm_fresh_only),
             ("--confirm-auto-promote", confirm_auto_promote),
+            ("--min-model-weight", min_model_weight is not None),
         )
         if is_set
     ]
@@ -2243,6 +2247,16 @@ def _note_board_only_flags(
     "and every swap stays local until the stat_meta.json diff is reviewed. Requires --confirm.",
 )
 @click.option(
+    "--min-model-weight",
+    type=click.FloatRange(min=0, max=1, max_open=True),
+    default=None,
+    help="Ship policy: a board corner whose fitted blend weight sits below this ranks but never "
+    "nominates (book-less cells at w=1.0 are exempt); a confirmed retrain landing below it is "
+    "reverted; in the live lane a candidate at or above it may supersede an incumbent below it on "
+    "S1 alone — S2/S3 cannot separate two book-riding legs. Unset keeps today's behavior. Requires "
+    "--confirm.",
+)
+@click.option(
     "--resume",
     is_flag=True,
     default=False,
@@ -2291,6 +2305,7 @@ def main(
     confirm_hours: float | None,
     confirm_fresh_only: bool,
     confirm_auto_promote: bool,
+    min_model_weight: float | None,
     resume: bool,
     dry_run: bool,
     quiet: bool,
@@ -2311,6 +2326,7 @@ def main(
         confirm_hours,
         confirm_fresh_only,
         confirm_auto_promote,
+        min_model_weight,
         quiet,
         verbose,
     )
@@ -2369,6 +2385,7 @@ def main(
                 deadline_hours=confirm_hours,
                 fresh_only=confirm_fresh_only,
                 auto_promote=confirm_auto_promote,
+                min_model_weight=min_model_weight,
             )
 
 
