@@ -1,6 +1,6 @@
 # Lane record — low-weight models: the model legs the book is hiding
 
-**Status: ACTIVE (opened 2026-09-01).** Context spine: CLAUDE.md,
+**Status: ACTIVE (opened 2026-09-01; first campaign wave closed 2026-09-02).** Context spine: CLAUDE.md,
 [docs/ARCHITECTURE.md](../ARCHITECTURE.md), [ship_gate.md](../ship_gate.md),
 [model_improvement_track.md](model_improvement_track.md) §6.5 / §8.2.
 
@@ -93,8 +93,8 @@ no authentic rows at all in 2025.
 | NFL passing yards | WEAK | re-confirm the `ratio_meanyr / direct / nll / none` arm post-leak | 2026-09-02 sweep under the floor: 14/15 scored corners fit `w = 0.05`, the other 0.145 (325 authentic validation rows; the 1-SE rule floors it), so nothing nominated; keeps its coverage ship, lifts as seasons accumulate |
 | NFL attempts | BROKEN | swept under the floor 2026-09-02 (36 corners, `--dist-class all`) | **HELD, coverage ship stands (w 0.05)**: no confirmable nominee. Every positive-slack corner rides the book (w 0.05–0.10) except `ZINB nll hurdle pit_ks crps prob_recal_platt` at w 0.42, slack +0.048, discounted −0.185 (under the nomination bar); the other 11 corners at w ≥ 0.3 (ZINB / NegBin / DPO) fail g1 at slack ≤ −0.76; both structural corners die on their own support guards (two-part `low.train_rows=817<4000`; affine slope outside the calibrated bounds). Book prices are real again (361/371 test rows authentic, 1.9% at exactly 0.5), so the volume-lane synthetic-price caveat is closed on the current dump |
 | NHL skater fantasy (UD) | BIASED (CITL 0.68) | swept under the floor 2026-09-02 (`--dist-class all`, 4 full-HPO confirms) | **HELD, incumbent stands (w 0.329, 6/6)**: all four nominees pass S1 at w 0.63 / 0.60 / 0.35 / 0.34 (6/6, served CITL 1.01–1.05, shape_ratio 0.85–0.92, BSS 0.09–0.11, 219 authentic validation rows) but fail S2 (paired Brier d within ±0.0013, n=2040) and S3 — both legs sit on the same pick'em line at p=0.5 — and the S1-only waiver does not fire because the incumbent is already above the floor. The ≥ 0.3 criterion is met by the incumbent while its model-only leg stays census-BIASED: the waiver keys on the incumbent's `w`, not on its model-leg class (owner call whether to extend it). Fork closed: training pathology. Quote classes: 1211 authentic = Underdog direct (2024 and 2026 only, none for the 2025 season; the archive holds UD rows 2026-03→06 only), 11.6k derived = `combo_ev_inversion` (excluded from the weight fit and the gates), 480 synthetic. UD's line runs high against outcomes (61% under / 36% over on the 1211 quotes) — pick'em softness, not a formula gap: the stored fantasy column reproduces goals×6 + assists×4 + (shots+blocks) + hits×0.5 + PPP×0.5 exactly, UD's line sits 0.6 *below* that formula's 365-day expectation (9.15 vs 9.72; realized 7.91), and the goalie UD cell balances 51/48 |
-| MLB runs allowed | BROKEN | sweep under the knob | pending |
-| NHL hits | BROKEN | sweep under the knob | pending |
+| MLB runs allowed | BROKEN | swept under the floor 2026-09-02 (35 corners) | **HELD, coverage ship stands (w 0.63)**: no corner clears the nomination bar — the two best DPO corners (slack +0.058) fit `w` at 0.175, and the three positive-slack corners above the floor (DPO 0.318/0.390, NegBin 0.277) all carry negative discounted slack. The incumbent ZINB hurdle recipe was re-confirmed and **failed its own ship on the current matrix**: g4 fails, BSS −0.004 (was +0.001), matrix hash moved `f8b7f540` → `b5f66a09`. Artifacts were restored, so serving is unchanged, but the cell's ship is stale — the next `meditate` will withhold it unless a corner is found |
+| NHL hits | BROKEN → BIASED | swept under the floor 2026-09-02 | **SUPERSEDED (`45ef5698`)**: DPO `crps` dispersion / `nll` / `none`, `w` 0.775 → 0.670 (1396 authentic rows / 298 clusters), 6/6, S1 + **S2 pass** (paired Brier +0.0048 [+0.0021, +0.0074], n=2461) + **S3 pass** (Sharpe 0.130 → 0.162, z +1.78) — a real supersession, no waiver. Model leg now beats naive (ρ 0.22 → 0.336 vs Mean10 0.299, line 0.389), BSS +0.058, served CITL 0.995; census stays BIASED because the model-only mean still under-shoots (CITL 0.777 [0.745, 0.811]) |
 | NBA BLK | BROKEN | book-side packet first | blocked on the ingestion packet |
 | MLB batter strikeouts | DATA | guard result stands until the feed returns | retrained 2026-09-02: `w = 1.0` (2 authentic rows / 2 clusters), Gate 1 blank, skill / Kelly NaN; ships model-only as a book-less cell |
 
@@ -103,6 +103,44 @@ powerPlayPoints (NegBin, CITL 0.67), NFL tds (NegBin, 0.76), NFL interceptions (
 stolen bases (NegBin, 0.84), and — provisionally, because their dumps predate `Gate_model` and the
 deflation used the blended gate — MLB home runs (1.73) and NHL goals (1.37). Re-run the census after
 the next `meditate` regenerates the dumps before acting on the last two.
+
+## Campaign outcome (wave 1, 2026-09-02)
+
+Eight cohort cells swept under `--min-model-weight 0.3`; two superseded, four held, one blocked on
+its book leg, one is book-less by data. Census re-run after the wave (`class` from the same script):
+
+| Cell | `w` before → after | Outcome | ρ(model) before → after | Class after |
+|---|---|---|---|---|
+| MLB hits allowed | 0.05 → 0.78 | SUPERSEDED (`31b5ae5c`) | 0.08 → 0.14 | WEAK |
+| NHL hits | 0.78 → 0.67 | SUPERSEDED (`45ef5698`) | 0.22 → 0.34 | BIASED |
+| NHL skater fantasy | 0.33 → 0.33 | HELD (S2/S3 tie) | 0.01 | BIASED |
+| MLB runs allowed | 0.63 → 0.63 | HELD (no nominee; incumbent ship stale) | −0.00 | BROKEN |
+| NFL attempts | 0.05 → 0.05 | HELD (no nominee) | −0.03 | BROKEN |
+| NFL passing yards | 0.05 → 0.05 | HELD (no corner ≥ 0.3) | 0.14 | WEAK |
+| MLB batter strikeouts | 0.05 → 1.00 | book-less under the cluster floor | — | out of census |
+| NBA BLK | 0.80 | blocked on the ingestion packet | 0.31 | BROKEN |
+
+Cells still riding the book at the 0.05 floor: **two** (NFL attempts, NFL passing yards), down from
+four. Across all 49 book-quoted cells the census now reads 14 PAR / 22 WEAK / 8 BIASED / 3 BROKEN /
+2 NOLINE.
+
+**What the wave taught.** The knob does what it was built for — it kept every book-riding corner out
+of nomination — but on five of the six sweeps it was not the binding constraint. Three things bind
+ahead of it:
+
+1. **Discounted slack is the nomination bar.** NFL attempts and MLB runs allowed both have
+   positive-slack corners above the floor (ZINB at `w` 0.42, DPO at 0.32 / 0.39) that never became
+   nominees because their discounted slack is negative. The floor filter never ran on them.
+2. **S2/S3 cannot separate two legs on the same pick'em line.** NHL skater fantasy produced four
+   6/6 nominees at `w` 0.34–0.63 and every one lost on a paired Brier difference inside ±0.0013.
+   The S1-only waiver did not fire because it keys on the incumbent's `w` (0.329, above the floor),
+   not on the incumbent's census class. Extending the waiver to a BROKEN/BIASED model leg above the
+   floor is an owner call, and it is the one change that would have shipped a healthier weight here.
+3. **A ship is matrix-scoped.** MLB runs allowed re-confirmed its own incumbent and failed g4 on the
+   current matrix, so a live cell can carry a stale `ship = True` until something forces a retrain.
+
+Where a real model beat the book — NHL hits — the ordinary machinery shipped it with no waiver at
+all (S2 +0.0048 [+0.0021, +0.0074], S3 z +1.78).
 
 ## Owner packets (not fixed in this lane)
 
@@ -145,5 +183,6 @@ shaped book inside the blend; BLP / decoupled blend; model-only quality as an HP
 
 ## Changelog
 
+- 2026-09-02 wave 1 swept: MLB hits allowed + NHL hits superseded, four held; census re-run.
 - 2026-09-02 guards, cluster-id alignment fix, `--min-model-weight`, probes landed on devel.
 - 2026-09-01 lane opened.
