@@ -90,7 +90,7 @@ no authentic rows at all in 2025.
 | Cell | Class | Lever | Status |
 |---|---|---|---|
 | MLB hits allowed | BIASED (CITL 1.23) | re-confirm the ledger's DPO arm under the knob | fork closed: training pathology |
-| NFL passing yards | WEAK | re-confirm the `ratio_meanyr / direct / nll / none` arm post-leak | pending |
+| NFL passing yards | WEAK | re-confirm the `ratio_meanyr / direct / nll / none` arm post-leak | 2026-09-02 sweep under the floor: 14/15 scored corners fit `w = 0.05`, the other 0.145 (325 authentic validation rows; the 1-SE rule floors it), so nothing nominated; keeps its coverage ship, lifts as seasons accumulate |
 | NFL attempts | BROKEN | `sn_param: centered` / count corners under the knob | fork closed: training pathology |
 | NHL skater fantasy (UD) | BIASED (CITL 0.68) | centered / count corners under the knob | fork closed: training pathology; quote classes checked |
 | MLB runs allowed | BROKEN | sweep under the knob | pending |
