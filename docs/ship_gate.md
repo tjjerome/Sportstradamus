@@ -178,7 +178,9 @@ as the reported `g4_iqr_ratio`.
 **Auto-pass / fail conventions for blank metrics:**
 
 - **Gate 1 blank** (no book `Odds` in the dump): **auto-pass** — no book to beat,
-  model wins by default.
+  model wins by default. Also blank when the authentic-quoted rows span fewer than
+  `calibration._ONE_SE_MIN_CLUSTERS` distinct players (dates for team markets) — a
+  one-row book is no book, the same floor the blend-weight fit applies to its rows.
 - **Gate 5 blank** (no `P` or no `Line`): **fail** — the cell couldn't compute
   calibration; that's a model artifact, not a free pass. Gate 5 only needs `P` +
   `Line`, NOT `Odds`, so unpriced-but-lined markets still get a real ECE.
@@ -219,6 +221,14 @@ A challenger replaces an established baseline only if **all three** hold. Comput
 | S1 | **Pass all 6** | The challenger clears every set-baseline gate above. |
 | S2 | **Paired Brier CI** | `d_i = brier_current_i − brier_new_i` per shared event; 95% CI of `mean(d)` must have `ci_lo > 0` (CI excludes 0 in the new model's favor). |
 | S3 | **Paired Sharpe (backdated)** | Run the dashboard's Kelly-sized profit-sim (`strategies/profit_sim.py`) on the shared events for each model; `sharpe_new > sharpe_current`. |
+
+Under `ship sweep --confirm --min-model-weight T` the blend weight is a ship criterion as well:
+a board corner whose fitted `model_weight` is below `T` ranks but never nominates (exactly `1.0`
+= no authentic quotes, exempt), a confirmed retrain landing below `T` is reverted, and a
+challenger at or above `T` may replace an incumbent below `T` on **S1 alone** — two legs that
+both sit on the book at the line give S2/S3 a paired difference of zero, so they cannot separate
+them. Any other supersession keeps S1 + S2 + S3. See
+[handoffs/low_weight_models.md](handoffs/low_weight_models.md).
 
 ---
 

@@ -80,6 +80,7 @@ an exception. A session works one lane and reads that lane's brief.
 | `mlb-nhl-activation` | Activated both leagues (D1/D2 = GO); post-GO grind runs in model-track WS-2; brief keeps the per-league detail | DONE (absorbed: model-track WS-2) | — | [archive/mlb-nhl-activation.md](archive/mlb-nhl-activation.md) |
 | `dashboard-ux` | Narrative-first dashboard: six surfaces, slip builder, receipts, celestial skin | ACTIVE | — | [handoffs/dashboard-ux.md](handoffs/dashboard-ux.md) |
 | `bestball-2027` | Draft products for the 2027 season | BLOCKED (on: D4) | D4 | [handoffs/bestball-2027.md](handoffs/bestball-2027.md) |
+| `low-weight-models` | Repair the model legs hidden behind a floor blend weight; ship criterion = free `w ≥ 0.3` + 6/6 gates, every lever sweep-testable | ACTIVE | — | [handoffs/low_weight_models.md](handoffs/low_weight_models.md) |
 | `hygiene-closeout` | Triage, calibration re-run, drift fixes, recurring checks | ACTIVE | — | [handoffs/hygiene-closeout.md](handoffs/hygiene-closeout.md) |
 
 ### 4.1 Build path (visual index)
