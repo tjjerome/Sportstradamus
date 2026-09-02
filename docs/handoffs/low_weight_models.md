@@ -120,6 +120,13 @@ the next `meditate` regenerates the dumps before acting on the last two.
   mapped in `stat_map.json`, so the market is requested; the book set in `prop_books.json` simply
   no longer contains one that prices it. Owner call: add a book that prices batter strikeouts, or
   accept the cell as book-less (it serves model-only under the cluster floor).
+- **Underdog NHL quote coverage starts 2026-03-16.** The archive's `odds` table holds Underdog
+  NHL rows for 17 markets from 2026-03-16 to 2026-06-14 (169k rows) and none earlier; the only
+  older `fantasy` rows are the 2022-23 four-book component backfill (117,652 rows per book,
+  identical counts). The skater fantasy matrix's 758 "authentic" 2024 rows therefore predate the
+  current archive and cannot be regenerated, and the 2024-25 season has no direct quote at all.
+  Owner call: whether the UD NHL feed can be backfilled; until then the cell's live book
+  evidence is the 453 rows of spring 2026.
 
 ## Do not retry without new evidence
 
