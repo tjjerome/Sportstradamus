@@ -19,9 +19,11 @@ from pathlib import Path
 
 import pytest
 
+from sportstradamus.prediction.stories import bank as bank_module
 from sportstradamus.prediction.stories import engine, legs
 from sportstradamus.prediction.stories.bank import _bank, bank_cell, why_bank
 from sportstradamus.prediction.stories.engine import _DIRECTIONS_BY_ARCHETYPE
+from sportstradamus.training.markets import ALL_MARKETS
 
 _LEAGUE_VOICE = engine._VOICE_BY_LEAGUE
 _SPORT_VOICES = tuple(sorted(set(_LEAGUE_VOICE.values())))
@@ -217,12 +219,24 @@ def test_fallback_chain_steps_down_to_even_then_endpoint():
         bank_cell("basketball", "unit", "shootout", "Over", "boards")
         is _bank()["shared"]["unit"]["shootout"]["Over"]["production"]
     )
-    # An even-shaped lookup for a vocabulary no unit cell speaks exhausts the
-    # chain and lands on the guaranteed endpoint.
+    # An even-shaped lookup for a vocabulary no unit cell speaks: with the shape
+    # already "even", the shared-production step and the endpoint are one key.
     assert (
         bank_cell("hockey", "unit", "even", "Under", "k's")
         is _bank()["shared"]["unit"]["even"]["Under"]["production"]
     )
+
+
+def test_endpoint_answers_a_bank_that_authors_nothing_else(monkeypatch):
+    """The terminal return is unreachable for every mapped league today, so it
+    takes a bank stripped to the endpoint cell to exercise it."""
+    endpoint = ["the only copy there is"]
+    monkeypatch.setattr(
+        bank_module,
+        "_bank",
+        lambda *_a, **_k: {"shared": {"player": {"even": {"Over": {"production": endpoint}}}}},
+    )
+    assert bank_cell("basketball", "player", "shootout", "Over", "boards") is endpoint
 
 
 @pytest.mark.parametrize("shape", [s for s in _SHAPES if s != "even"])
@@ -266,6 +280,60 @@ _CONTRARIAN_CELLS = (
 def test_contrarian_cells_exist(voice, archetype, shape, direction):
     cell = _bank()[voice][archetype][shape][direction]["production"]
     assert len(cell) >= _MIN_VARIANTS_PER_CELL
+
+
+def test_every_shaped_node_carries_production():
+    """The chain probes only ``category`` then ``production`` under a shape node,
+    so a node authored without a production cell would drop its shape for every
+    other category."""
+    for voice, archetypes in _bank().items():
+        for archetype, shapes in archetypes.items():
+            for shape, directions in shapes.items():
+                for direction, categories in directions.items():
+                    assert "production" in categories, (voice, archetype, shape, direction)
+
+
+def test_every_pipeline_league_has_a_voice():
+    """A league the pipeline trains but the engine doesn't map reads shared copy
+    silently — ``ALL_MARKETS`` is the canonical league catalogue."""
+    assert set(ALL_MARKETS) <= set(_LEAGUE_VOICE)
+
+
+# Lead case is a bank-wide convention: Over/Under cells read as headlines and open
+# on a capital or a slot, while Mixed and Contrast* cells read as fragments and
+# never capitalise. These cells predate the convention and keep their lowercase
+# leads; no new cell may join them.
+_LOWERCASE_LEAD_CELLS = frozenset(
+    {
+        ("shared", "player", "even", "Over", "mistakes"),
+        ("shared", "player", "even", "Under", "mistakes"),
+        ("basketball", "player", "even", "Over", "mistakes"),
+        ("basketball", "player", "even", "Under", "mistakes"),
+        ("football", "player", "even", "Over", "mistakes"),
+        ("football", "player", "even", "Under", "mistakes"),
+        ("football", "stack", "even", "Under", "production"),
+        ("hockey", "player", "even", "Over", "mistakes"),
+        ("hockey", "player", "even", "Under", "mistakes"),
+        ("hockey", "stack", "even", "Under", "production"),
+        ("baseball", "player", "even", "Over", "mistakes"),
+        ("baseball", "player", "even", "Under", "mistakes"),
+        ("baseball", "stack", "even", "Under", "production"),
+    }
+)
+
+
+def test_lead_case_matches_direction():
+    """Mixed within one cell would render the same game capitalised one day and
+    lowercase the next, since the md5 rotation moves through the variants."""
+    for voice, archetype, shape, direction, category, variants in _walk_variants():
+        key = (voice, archetype, shape, direction, category)
+        for variant in variants:
+            if variant[0] == "{":
+                continue
+            if direction in ("Mixed", "ContrastOver", "ContrastUnder"):
+                assert variant[0].islower(), (key, variant)
+            elif key not in _LOWERCASE_LEAD_CELLS:
+                assert variant[0].isupper(), (key, variant)
 
 
 def _cell_text(voice, archetype, shape, direction, category):

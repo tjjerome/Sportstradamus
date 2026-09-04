@@ -43,12 +43,14 @@ def bank_cell(voice: str, archetype: str, shape: str, direction: str, category: 
     Shape outranks both voice and category: a shootout keeps shootout copy even
     when the voice authors no such cell and the category has to degrade to
     ``production``, because shape-blind prose contradicts the game it describes
-    ("low ceiling — fade the scoring" on a Coors slate). Only when neither the
-    voice nor ``shared`` authors *any* cell for that shape and direction does
-    the chain fall to ``"even"``, and finally to the guaranteed ``shared
-    (archetype, "even", direction, "production")`` endpoint — never a KeyError,
-    never an empty list, for any valid archetype/direction. A voice missing
-    from the bank reads straight from ``shared``.
+    ("low ceiling — fade the scoring" on a Coors slate). Under a shape node the
+    chain probes ``category`` then ``production`` and nothing else, so the
+    authoring invariant the design rests on is that every authored shaped node
+    carries a ``production`` cell. Only when neither the voice nor ``shared``
+    authors *any* cell for that shape and direction does the chain fall to
+    ``"even"``, and finally to the guaranteed ``shared (archetype, "even",
+    direction, "production")`` endpoint. A voice missing from the bank reads
+    straight from ``shared``.
     """
     bank = _bank()
     shared = bank["shared"]
@@ -58,6 +60,8 @@ def bank_cell(voice: str, archetype: str, shape: str, direction: str, category: 
         (voiced, shape, "production"),
         (shared, shape, category),
         (shared, shape, "production"),
+        # Defence in depth: while shared authors every archetype/shape/direction
+        # at production, no mapped league reaches these last two or the endpoint.
         (voiced, "even", category),
         (shared, "even", category),
     ):
