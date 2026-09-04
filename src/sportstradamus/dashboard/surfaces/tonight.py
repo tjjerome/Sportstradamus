@@ -26,8 +26,9 @@ from sportstradamus.dashboard.narrative import (
     storyless_prophecy,
 )
 
-# Legend glyph size: smaller than the default (40px) card glyph so five fit across
-# one row of st.columns(5).
+# Card-side glyph is the largest on this page; the legend row below shrinks to fit
+# five across one line of st.columns(5).
+_CARD_GLYPH_SIZE = 58
 _LEGEND_GLYPH_SIZE = 28
 
 # A game tipping off within this many minutes is "urgent" — it rises to the top of the
@@ -167,7 +168,7 @@ for c in cards:
         f'<div class="tc-foot">{edge_badge}<span class="tc-meta">'
         f"<b>{offer_count}</b> offer{plural} &middot; <b>{favored}</b> favored</span>"
         f'<span class="tc-viewcue">View game →</span></div></div>'
-        f'<div class="tc-side">{game_shape_glyph(shape, size=58)}'
+        f'<div class="tc-side">{game_shape_glyph(shape, size=_CARD_GLYPH_SIZE)}'
         f'<span class="tc-shapename">{shape_name}</span></div></div>',
         unsafe_allow_html=True,
     )

@@ -50,6 +50,8 @@ _HERO_BG = (
     f"radial-gradient(ellipse at 82% -10%, {SEQUENTIAL_COLORS[6]}29, transparent 46%),"
     f"radial-gradient(ellipse at 12% 120%, {GOLD}12, transparent 45%),#1A1D24"
 )
+# Two legs is the reconciler's minimum — a single leg has nothing to reconcile against.
+_RECONCILER_MIN_LEGS = 2
 
 
 def _candidate_games(offers: pd.DataFrame, platform: str) -> dict[str, dict]:
@@ -349,8 +351,8 @@ if shapes:
     _render_tuning_cockpit(shapes, focus_game)
 
 # Reconciler handoff: the Modifiers page defaults to the session rail, so the
-# current slip arrives loaded. Two legs is the reconciler's minimum.
-if len(st.session_state[_LEGS]) >= 2:
+# current slip arrives loaded.
+if len(st.session_state[_LEGS]) >= _RECONCILER_MIN_LEGS:
     st.page_link(
         "surfaces/lab_modifiers.py",
         label="Payout incorrect? Report it",
