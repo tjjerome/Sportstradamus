@@ -19,11 +19,11 @@ from pathlib import Path
 
 import pytest
 
+from sportstradamus.helpers.config import stat_meta
 from sportstradamus.prediction.stories import bank as bank_module
 from sportstradamus.prediction.stories import engine, legs
 from sportstradamus.prediction.stories.bank import _bank, bank_cell, why_bank
 from sportstradamus.prediction.stories.engine import _DIRECTIONS_BY_ARCHETYPE
-from sportstradamus.training.markets import ALL_MARKETS
 
 _LEAGUE_VOICE = engine._VOICE_BY_LEAGUE
 _SPORT_VOICES = tuple(sorted(set(_LEAGUE_VOICE.values())))
@@ -295,8 +295,8 @@ def test_every_shaped_node_carries_production():
 
 def test_every_pipeline_league_has_a_voice():
     """A league the pipeline trains but the engine doesn't map reads shared copy
-    silently — ``ALL_MARKETS`` is the canonical league catalogue."""
-    assert set(ALL_MARKETS) <= set(_LEAGUE_VOICE)
+    silently — ``stat_meta`` is the canonical per-league cell catalogue."""
+    assert set(stat_meta) <= set(_LEAGUE_VOICE)
 
 
 # Lead case is a bank-wide convention: Over/Under cells read as headlines and open
