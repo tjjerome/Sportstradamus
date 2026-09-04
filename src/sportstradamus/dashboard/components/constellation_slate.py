@@ -50,7 +50,8 @@ _MIN_EDGE_RHO = 0.05
 # the correlation-edge color and nothing else, so no engraved stroke can be
 # misread as a ρ tie.
 SILHOUETTE_ALPHA = 0.13  # faint intent signal, below the ambient-decoration ceiling
-_SILHOUETTE_FILL = f"rgba(95,107,128,{SILHOUETTE_ALPHA})"  # constellation._DEEP_COLOR #5f6b80
+# constellation_lenses._DEEP_COLOR #5f6b80
+_SILHOUETTE_FILL = f"rgba(95,107,128,{SILHOUETTE_ALPHA})"
 _OUTLINE_COLOR = "rgba(230,233,239,0.22)"  # theme TEXT #E6E9EF
 _OUTLINE_GLOW_COLOR = "rgba(230,233,239,0.08)"  # the same stroke, wider and fainter
 _FILLER_COLOR = "rgba(138,145,160,0.30)"  # theme GRAY #8A91A0

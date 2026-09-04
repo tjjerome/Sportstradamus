@@ -527,6 +527,34 @@ def test_wider_groups_have_no_edges():
         assert not (set(edge.meta) & wider_keys)
 
 
+def _map_footprint(fig, sky: set, px) -> tuple[list, tuple[float, float, float, float]]:
+    """The drawn map's stars as ``(px position, px size)``, plus their px bounding box.
+
+    ``sky`` names the wider lens's own keys, which are what the map is measured
+    against — everything else on the figure, main and deep alike, is the map.
+    """
+    pos, sizes = _node_pos(fig), _sizes(fig)
+    drawn = [((pos[k][0] * px[0], pos[k][1] * px[1]), sizes[k]) for k in pos if k not in sky]
+    box = (
+        min(x - size / 2 for (x, _), size in drawn),
+        min(y - size / 2 for (_, y), size in drawn),
+        max(x + size / 2 for (x, _), size in drawn),
+        max(y + size / 2 for (_, y), size in drawn),
+    )
+    return drawn, box
+
+
+def _band_of(at: tuple[float, float], box: tuple[float, float, float, float]) -> str:
+    """Which open band a sky star sits in: the side of the map it most clearly clears."""
+    beyond = {
+        "left": box[0] - at[0],
+        "right": at[0] - box[2],
+        "below": box[1] - at[1],
+        "above": at[1] - box[3],
+    }
+    return max(beyond, key=beyond.get)
+
+
 def test_wider_stars_never_enter_the_constellations_footprint():
     """Both lenses at once: the sky stays outside the whole drawn map, deep stars
     included, and keeps a glyph's clear air from every one of them."""
@@ -536,30 +564,30 @@ def test_wider_stars_never_enter_the_constellations_footprint():
     fig = constellation_figure(legs, _corr(), pool, deep_pool=deep_pool, wider_groups=_sky(2))
     sky = {cd[0] for cd in _trace(fig, "wider").customdata}
     pos, sizes = _node_pos(fig), _sizes(fig)
-    drawn = [(pos[key], sizes[key]) for key in pos if key not in sky]
-    box = (
-        min(x * PX_PER_UNIT[0] - size / 2 for (x, _), size in drawn),
-        min(y * PX_PER_UNIT[1] - size / 2 for (_, y), size in drawn),
-        max(x * PX_PER_UNIT[0] + size / 2 for (x, _), size in drawn),
-        max(y * PX_PER_UNIT[1] + size / 2 for (_, y), size in drawn),
-    )
+    drawn, box = _map_footprint(fig, sky, PX_PER_UNIT)
     for key in sky:
-        (x, y), size = pos[key], sizes[key]
-        at = (x * PX_PER_UNIT[0], y * PX_PER_UNIT[1])
+        at = (pos[key][0] * PX_PER_UNIT[0], pos[key][1] * PX_PER_UNIT[1])
         assert not (box[0] <= at[0] <= box[2] and box[1] <= at[1] <= box[3]), key
-        for (ox, oy), other in drawn:
-            apart = math.hypot(at[0] - ox * PX_PER_UNIT[0], at[1] - oy * PX_PER_UNIT[1])
-            assert apart >= (size + other) / 2 + _STAR_GAP_PX - 1e-9, key
+        for other_at, other in drawn:
+            assert math.dist(at, other_at) >= (sizes[key] + other) / 2 + _STAR_GAP_PX - 1e-9, key
 
 
 def test_wider_stars_are_not_a_ring():
-    """The owner's one hard no. A ring holds one radius and leaves no empty sector."""
+    """The owner's one hard no.
+
+    A ring holds one radius, leaves no empty sector, and hands every game its own
+    angular slot. The sky does none of those: it deals the games into the couple of
+    open bands beside the map, several games to a band.
+    """
     groups = _sky(WIDER_GAMES)
-    for mobile in (False, True):
-        wider = _trace(
-            constellation_figure([], None, _ladder(13), wider_groups=groups, mobile=mobile),
-            "wider",
-        )
+    game_of = {
+        f"{row['Player']}|{row['Market']}|{row['Bet']}": game
+        for game, rows in groups
+        for row in rows
+    }
+    for mobile, px in ((False, PX_PER_UNIT), (True, PX_PER_UNIT_MOBILE)):
+        fig = constellation_figure([], None, _ladder(13), wider_groups=groups, mobile=mobile)
+        wider = _trace(fig, "wider")
         radii = [math.hypot(float(x), float(y)) for x, y in zip(wider.x, wider.y, strict=True)]
         assert max(radii) - min(radii) >= 0.25 * (sum(radii) / len(radii)), mobile
         angles = sorted(
@@ -568,6 +596,13 @@ def test_wider_stars_are_not_a_ring():
         gaps = [b - a for a, b in itertools.pairwise(angles)] + [angles[0] + math.tau - angles[-1]]
         # Bands leave whole sectors of the sky empty; an even ring leaves none.
         assert max(gaps) >= 3 * math.tau / len(angles), (mobile, math.degrees(max(gaps)))
+        sky = {card[0] for card in wider.customdata}
+        _, box = _map_footprint(fig, sky, px)
+        bands: dict[str, set[str]] = {}
+        for card, x, y in zip(wider.customdata, wider.x, wider.y, strict=True):
+            at = (float(x) * px[0], float(y) * px[1])
+            bands.setdefault(_band_of(at, box), set()).add(game_of[card[0]])
+        assert max(len(games) for games in bands.values()) >= 2, (mobile, bands)
 
 
 def test_mobile_figure_raises_size_floor_and_flags_slip_membership():
