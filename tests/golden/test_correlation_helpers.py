@@ -29,7 +29,6 @@ so the correlation arithmetic is pinned on real values with no SciPy randomness.
 
 from __future__ import annotations
 
-import datetime
 import importlib.resources as pkg_resources
 
 import numpy as np
@@ -462,15 +461,17 @@ class _FakeMLBStats:
     ``get_depth`` records the arguments it was handed and writes the batting
     slots onto ``playerProfile`` the way the real method does — a dict pandas
     aligns on the profile index, so a player the profile does not carry stays
-    absent from the ``depth`` column.
+    absent from the ``depth`` column. A ``None`` slot puts a player in the
+    profile with no entry in that dict, i.e. NaN depth, which is what the real
+    method's ``continue`` leaves behind for a hitter it cannot place.
     """
 
-    def __init__(self, slots: dict[str, int]) -> None:
+    def __init__(self, slots: dict[str, int | None]) -> None:
         self.playerProfile = pd.DataFrame(index=pd.Index(list(slots), name="playerName"))
-        self._slots = slots
+        self._slots = {k: v for k, v in slots.items() if v is not None}
         self.depth_calls: list[tuple[list[dict], object]] = []
 
-    def get_depth(self, offers, date):
+    def get_depth(self, offers, date=None):
         self.depth_calls.append((offers, date))
         self.playerProfile["depth"] = self._slots
 
@@ -493,9 +494,16 @@ def _mlb_legs() -> pd.DataFrame:
                 ("Nico Hoerner", "CHC"),
                 ("Shota Imanaga", "CHC"),
                 ("Kyle Tucker + Shota Imanaga", "CHC"),
+                ("Ian Happ", "CHC"),
                 ("Oneil Cruz", "PIT"),
             ]
         ]
+    )
+
+
+def _mlb_stats() -> _FakeMLBStats:
+    return _FakeMLBStats(
+        {"Kyle Tucker": 3, "Nico Hoerner": 9, "Shota Imanaga": 0, "Ian Happ": None}
     )
 
 
@@ -504,33 +512,32 @@ def test_resolve_player_positions_mlb_labels_batting_slots() -> None:
 
     Reading the offer column labeled every MLB leg ``P``, so every batter pair
     looked up a missing correlation row and scored rho 0. Slots 1-9 become
-    ``B1``..``B9``; a pitcher (slot 0) and a hitter the profile never resolved
-    both fall through to ``P``. Combo legs keep the one-label-per-component list
-    shape ``_build_cmarket`` expects.
+    ``B1``..``B9``; the three ways a leg misses — a pitcher's slot 0, a NaN depth
+    (Ian Happ, in the profile but unplaced), and a player the profile never
+    carried at all (Oneil Cruz) — all fall through to ``P``. Combo legs keep the
+    one-label-per-component list shape ``_build_cmarket`` expects.
     """
-    stat_data = _FakeMLBStats({"Kyle Tucker": 3, "Nico Hoerner": 9, "Shota Imanaga": 0})
+    stat_data = _mlb_stats()
 
     resolved = _resolve_player_positions(_mlb_legs(), "MLB", stat_data)
 
-    assert list(resolved["Player position"]) == ["B3", "B9", "P", ["B3", "P"], "P"]
-    assert len(stat_data.depth_calls) == 1  # once per game date, not once per leg
+    assert list(resolved["Player position"]) == ["B3", "B9", "P", ["B3", "P"], "P", "P"]
+    assert len(stat_data.depth_calls) == 1  # once for the league, not once per leg
     records, call_date = stat_data.depth_calls[0]
     assert records == [
         {"Player": "Kyle Tucker", "Team": "CHC"},
         {"Player": "Nico Hoerner", "Team": "CHC"},
         {"Player": "Shota Imanaga", "Team": "CHC"},
         {"Player": "Kyle Tucker + Shota Imanaga", "Team": "CHC"},
+        {"Player": "Ian Happ", "Team": "CHC"},
         {"Player": "Oneil Cruz", "Team": "PIT"},
     ]
-    # get_depth compares `date < datetime.today().date()`, which raises on a datetime.
-    assert type(call_date) is datetime.date
-    assert call_date == datetime.date(2026, 9, 4)
+    assert call_date is None  # the default, today, exactly as scoring.py calls it
 
 
 def test_build_cmarket_mlb_keys_by_batting_slot() -> None:
     """cMarket tokens must key the way the MLB corr parquets do: ``B{n}``/``P``."""
-    stat_data = _FakeMLBStats({"Kyle Tucker": 3, "Nico Hoerner": 9, "Shota Imanaga": 0})
-    resolved = _resolve_player_positions(_mlb_legs(), "MLB", stat_data)
+    resolved = _resolve_player_positions(_mlb_legs(), "MLB", _mlb_stats())
 
     cmarket = _build_cmarket(resolved, "MLB", {})["cMarket"]
 
@@ -539,6 +546,7 @@ def test_build_cmarket_mlb_keys_by_batting_slot() -> None:
         ["B9.hits"],
         ["P.hits"],
         ["B3.hits", "P.hits"],
+        ["P.hits"],
         ["P.hits"],
     ]
 

@@ -315,9 +315,9 @@ def _resolve_player_positions(league_df, league, stat_data):
 
     Non-MLB: drop combo / ``vs.`` legs, rank players within (team, position) by
     the league's usage profile, and suffix the rank (``G1``/``G2``/...). MLB:
-    re-resolve each game date's batting order through ``stat_data`` and label the
-    slot ``B1``..``B9``, or ``P`` for a pitcher or an unresolved hitter. Returns
-    the updated ``league_df`` (the non-MLB branch drops rows, so the caller must
+    re-resolve the batting order through ``stat_data`` and label the slot
+    ``B1``..``B9``, or ``P`` for a pitcher or an unresolved hitter. Returns the
+    updated ``league_df`` (the non-MLB branch drops rows, so the caller must
     rebind).
     """
     if league != "MLB":
@@ -362,19 +362,18 @@ def _resolve_player_positions(league_df, league, stat_data):
         # The offer column is 0 on every MLB leg — playerProfile["position"] is filled
         # only for non-MLB leagues — and the depth process_offers resolved has since
         # been overwritten by _game_context from posted lineups alone, so it is all
-        # zeros on any run preceding the lineup post. Re-resolve it per game date.
-        slot_labels = {}
-        for date, date_df in league_df.groupby("Date"):
-            stat_data.get_depth(
-                date_df[["Player", "Team"]].drop_duplicates().to_dict("records"),
-                pd.to_datetime(date).date(),
-            )
-            depth = stat_data.playerProfile["depth"]
-            for idx, player in date_df.Player.items():
-                slots = [depth.get(p, 0) for p in player.replace(" vs. ", " + ").split(" + ")]
-                labels = [f"B{int(s)}" if 1 <= s <= _MLB_LINEUP_SLOTS else "P" for s in slots]
-                slot_labels[idx] = labels[0] if len(labels) == 1 else labels
-        league_df["Player position"] = pd.Series(slot_labels, dtype=object)
+        # zeros on any run preceding the lineup post. Re-resolve it here.
+        stat_data.get_depth(league_df[["Player", "Team"]].drop_duplicates().to_dict("records"))
+        depth = stat_data.playerProfile["depth"].to_dict()
+        slot_labels = []
+        for player in league_df.Player:
+            # find_correlation has already collapsed a " vs. " leg's Team to one
+            # abbreviation, so its second component carries that player's modal slot
+            # rather than the slot his own team posted.
+            slots = [depth.get(p, 0) for p in player.replace(" vs. ", " + ").split(" + ")]
+            labels = [f"B{int(s)}" if 1 <= s <= _MLB_LINEUP_SLOTS else "P" for s in slots]
+            slot_labels.append(labels[0] if len(labels) == 1 else labels)
+        league_df["Player position"] = pd.Series(slot_labels, index=league_df.index, dtype=object)
     return league_df
 
 
@@ -811,9 +810,9 @@ def find_correlation(
         # they are absent from the slice, and inside it they carry one label per
         # component, which pyarrow refuses to mix with the plain strings when
         # persist writes the offers parquet.
-        df.loc[league_df.index, "Position"] = [
-            p if isinstance(p, str) else "" for p in league_df["Player position"]
-        ]
+        df.loc[league_df.index, "Position"] = league_df["Player position"].map(
+            lambda p: p if isinstance(p, str) else ""
+        )
         league_df = _build_cmarket(league_df, league, new_map)
         parlay_df = _process_league_games(
             df,
