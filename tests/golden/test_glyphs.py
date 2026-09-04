@@ -1,8 +1,8 @@
 """Pins for ``dashboard.components.glyphs`` — the unified game-shape glyph set.
 
-Five bespoke celestial SVGs (comet/supernova/scales/lone-star/hourglass), one per
-``current_game_context.shape`` value; unknown/empty shapes fall back to the lone
-star. No Streamlit, no I/O — pure string construction, so it unit-tests directly.
+Five bespoke celestial SVGs (comet/supernova/scales/cloud/hourglass), one per
+``current_game_context.shape`` value; unknown/empty shapes fall back to the cloud.
+No Streamlit, no I/O — pure string construction, so it unit-tests directly.
 """
 
 from __future__ import annotations
@@ -19,11 +19,11 @@ def test_all_five_shapes_resolve_to_svg():
         assert "<svg" in game_shape_glyph(shape)
 
 
-def test_unknown_shape_falls_back_to_lone_star():
+def test_unknown_shape_falls_back_to_cloud():
     assert game_shape_glyph("nonsense") == game_shape_glyph("even")
 
 
-def test_empty_shape_falls_back_to_lone_star():
+def test_empty_shape_falls_back_to_cloud():
     assert game_shape_glyph("") == game_shape_glyph("even")
 
 
@@ -33,6 +33,17 @@ def test_gradient_ids_unique_across_all_glyphs():
         ids = re.findall(r'id="([^"]+)"', _GLYPHS[shape])
         seen.extend(ids)
     assert len(seen) == len(set(seen)), f"duplicate ids across glyph set: {seen}"
+
+
+# The whole palette the set is allowed to draw with: the gold and neutral DESIGN §2
+# tokens, the white gradient centers, and the two dark-gold ends the cores fade to.
+_TOKEN_HEXES = {"#C9A227", "#8A91A0", "#fff", "#6f560f", "#7a5f18"}
+
+
+def test_glyphs_draw_only_in_token_colors():
+    for shape in _SHAPES:
+        used = set(re.findall(r"#[0-9A-Fa-f]{3,8}", _GLYPHS[shape]))
+        assert used <= _TOKEN_HEXES, f"{shape} glyph is off-token: {used - _TOKEN_HEXES}"
 
 
 def test_size_overrides_width_and_height_but_not_viewbox():
