@@ -9,6 +9,7 @@ posted batting order.
 """
 
 import re
+from collections import defaultdict
 
 import pandas as pd
 
@@ -20,8 +21,6 @@ _BATTING_SLOT = re.compile(r"B[1-9]")
 # {slot} vocabulary: the top of the order has a name of its own, the rest read as
 # plain ordinals.
 _SLOT_WORDS = ("leadoff", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th")
-
-_LINEUP_COLUMNS = ("Bats", "Opp Hand", "Lineup")
 
 
 def batting_slot(position: object) -> str | None:
@@ -46,11 +45,12 @@ def attach_lineup_columns(offers: pd.DataFrame, stats: dict) -> pd.DataFrame:
     mlb = stats.get("MLB")
     if offers.empty or mlb is None:
         blank = pd.Series(dtype=str) if offers.empty else ""
-        for column in _LINEUP_COLUMNS:
+        for column in ("Bats", "Opp Hand", "Lineup"):
             offers[column] = blank
         return offers
 
-    bats_by_name, throws_by_name = _hands_by_name(mlb.players)
+    bats_by_name = _hand_by_name(mlb.players, "bats")
+    throws_by_name = _hand_by_name(mlb.players, "throws")
     bats, opp_hand, lineup = [], [], []
     for league, team, player, position in offers[
         ["League", "Team", "Player", "Position"]
@@ -60,6 +60,8 @@ def attach_lineup_columns(offers: pd.DataFrame, stats: dict) -> pd.DataFrame:
             opp_hand.append("")
             lineup.append("")
             continue
+        # Doubleheaders key the second game "NYY2" while offers carry plain "NYY",
+        # so its hitters miss the card and read as usual — same as get_depth.
         game = mlb.upcoming_games.get(team, {})
         starter = game.get("Opponent Pitcher")
         bats.append(bats_by_name.get(player, ""))
@@ -69,15 +71,17 @@ def attach_lineup_columns(offers: pd.DataFrame, stats: dict) -> pd.DataFrame:
     return offers
 
 
-def _hands_by_name(players: dict) -> tuple[dict[str, str], dict[str, str]]:
-    """Batting sides and throwing hands from the player registry, keyed by name.
+def _hand_by_name(players: dict, hand: str) -> dict[str, str]:
+    """One role's ``bats`` or ``throws`` map, name-keyed, ambiguous names left out.
 
-    Split by role rather than kept as one record per name: the registry is
-    id-keyed and names collide across roles, so a pitcher named Luis Garcia
-    would otherwise shadow the batter of that name and cost him his side.
-    Same-role duplicates stay last-wins.
+    The registry is id-keyed and names collide two ways. Across roles, a pitcher
+    named Luis Garcia would shadow the batter of that name and cost him his side
+    — hence one map per role. Within a role, two batters named Max Muncy hit from
+    opposite sides; a name whose entries disagree is dropped rather than guessed
+    at, so its clause falls back to the slot alone.
     """
-    return (
-        {p["name"]: p["bats"] for p in players.values() if "bats" in p},
-        {p["name"]: p["throws"] for p in players.values() if "throws" in p},
-    )
+    sides: defaultdict[str, set[str]] = defaultdict(set)
+    for player in players.values():
+        if hand in player:
+            sides[player["name"]].add(player[hand])
+    return {name: seen.pop() for name, seen in sides.items() if len(seen) == 1}

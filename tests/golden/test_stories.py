@@ -22,7 +22,7 @@ from sportstradamus.prediction.stories import (
     attach_parlay_theses,
 )
 from sportstradamus.prediction.stories.bank import why_bank
-from sportstradamus.prediction.stories.lineup import attach_lineup_columns
+from sportstradamus.prediction.stories.lineup import attach_lineup_columns, batting_slot
 from sportstradamus.prediction.stories.why import story_dek
 
 _DATE = "2026-06-13"
@@ -564,11 +564,14 @@ def test_why_rotation_deterministic():
 
 
 # Two Luis Garcias, a batter and a pitcher — the registry is id-keyed, so a
-# single name map would let the pitcher shadow the hitter's batting side.
+# single name map would let the pitcher shadow the hitter's batting side. The two
+# Max Muncys are the same collision within one role, and they disagree.
 _MLB_PLAYERS = {
     592450: {"name": "Aaron Judge", "bats": "R"},
     605141: {"name": "Mookie Betts", "bats": "R"},
     677651: {"name": "Luis Garcia", "bats": "L"},
+    571970: {"name": "Max Muncy", "bats": "L"},
+    676059: {"name": "Max Muncy", "bats": "R"},
     543037: {"name": "Gerrit Cole", "throws": "R"},
     472610: {"name": "Luis Garcia", "throws": "R"},
 }
@@ -607,31 +610,72 @@ def _mlb_offer(*, position="B3", bats="R", opp_hand="L", lineup="posted") -> pd.
     )
 
 
-def _lineup_variants(branch: str, **slots: str) -> set[str]:
-    return {variant.format(**slots) for variant in why_bank()["why"]["lineup"][branch]}
+# A posted slot is tonight's card; a usual one is only the modal slot get_depth
+# fell back to, and each has its own clause family.
+_LINEUP_FAMILIES = (("posted", "lineup"), ("usual", "lineup_usual"))
+
+
+def _lineup_variants(family: str, branch: str, **slots: str) -> set[str]:
+    return {variant.format(**slots) for variant in why_bank()["why"][family][branch]}
+
+
+def test_batting_slot_maps_only_real_lineup_slots():
+    """The seam with correlation.py's Position labels: B1-B9 are slots, nothing else is."""
+    assert [batting_slot(f"B{n}") for n in range(1, 10)] == [
+        "leadoff",
+        "2nd",
+        "3rd",
+        "4th",
+        "5th",
+        "6th",
+        "7th",
+        "8th",
+        "9th",
+    ]
+    assert all(batting_slot(p) is None for p in ("P", "B0", "B10", "", ["B1", "B2"]))
 
 
 def test_lineup_clause_reads_the_platoon_edge():
     """A lefty batting 3rd against a right-hander gets both the slot and the split."""
-    why = attach_offer_why(_mlb_offer(bats="L", opp_hand="R"))["Why"].iloc[0]
-    assert "3rd" in why
-    assert any(v in why for v in _lineup_variants("platoon_edge", slot="3rd", throws="right"))
+    for lineup, family in _LINEUP_FAMILIES:
+        why = attach_offer_why(_mlb_offer(bats="L", opp_hand="R", lineup=lineup))["Why"].iloc[0]
+        assert "3rd" in why, lineup
+        variants = _lineup_variants(family, "platoon_edge", slot="3rd", throws="right")
+        assert any(v in why for v in variants), why
 
 
 def test_lineup_clause_reads_a_same_side_matchup():
-    why = attach_offer_why(_mlb_offer(bats="R", opp_hand="R"))["Why"].iloc[0]
-    assert any(v in why for v in _lineup_variants("same_side", slot="3rd", throws="right"))
+    for lineup, family in _LINEUP_FAMILIES:
+        why = attach_offer_why(_mlb_offer(bats="R", opp_hand="R", lineup=lineup))["Why"].iloc[0]
+        variants = _lineup_variants(family, "same_side", slot="3rd", throws="right")
+        assert any(v in why for v in variants), why
 
 
 def test_lineup_clause_calls_out_a_switch_hitter():
-    why = attach_offer_why(_mlb_offer(bats="S", opp_hand="R"))["Why"].iloc[0]
-    assert any(v in why for v in _lineup_variants("switch", slot="3rd", throws="right"))
+    for lineup, family in _LINEUP_FAMILIES:
+        why = attach_offer_why(_mlb_offer(bats="S", opp_hand="R", lineup=lineup))["Why"].iloc[0]
+        variants = _lineup_variants(family, "switch", slot="3rd", throws="right")
+        assert any(v in why for v in variants), why
 
 
 def test_lineup_clause_without_a_probable_starter_says_only_the_slot():
-    why = attach_offer_why(_mlb_offer(opp_hand=""))["Why"].iloc[0]
-    assert any(v in why for v in _lineup_variants("slot_only", slot="3rd"))
-    assert "-hander" not in why
+    for lineup, family in _LINEUP_FAMILIES:
+        why = attach_offer_why(_mlb_offer(opp_hand="", lineup=lineup))["Why"].iloc[0]
+        assert any(v in why for v in _lineup_variants(family, "slot_only", slot="3rd")), why
+        assert "-hander" not in why
+
+
+def test_usual_slot_never_asserts_tonights_order():
+    """The modal slot is habit, so none of the posted-card wording may appear."""
+    why = attach_offer_why(_mlb_offer(lineup="usual"))["Why"].iloc[0]
+    posted = _lineup_variants("lineup", "platoon_edge", slot="3rd", throws="left")
+    assert not any(v in why for v in posted), why
+
+
+def test_lineup_clause_ignores_a_nan_opposing_hand():
+    """An unresolved starter arrives as NaN off the parquet, not as a blank string."""
+    why = attach_offer_why(_mlb_offer(opp_hand=float("nan")))["Why"].iloc[0]
+    assert any(v in why for v in _lineup_variants("lineup", "slot_only", slot="3rd")), why
 
 
 def test_pitcher_case_is_unchanged_by_the_lineup_columns():
@@ -664,7 +708,9 @@ def test_attach_lineup_columns_reads_the_posted_order_and_probable_starter():
     The NBA row is the reason the League check exists: ``B1`` is a bench label
     there, not a leadoff hitter. The two Luis Garcia rows cover the cross-role
     name collision from both sides — the hitter keeps his own batting side, and
-    the pitcher of that name still resolves as a starter's throwing hand.
+    the pitcher of that name still resolves as a starter's throwing hand. Max
+    Muncy is the same-role collision: two batters, opposite sides, so the side is
+    dropped rather than guessed at.
     """
     offers = pd.DataFrame(
         [
@@ -672,6 +718,7 @@ def test_attach_lineup_columns_reads_the_posted_order_and_probable_starter():
             {"League": "MLB", "Team": "NYY", "Player": "Mookie Betts", "Position": "B1"},
             {"League": "MLB", "Team": "LAD", "Player": "Mookie Betts", "Position": "B2"},
             {"League": "MLB", "Team": "NYY", "Player": "Luis Garcia", "Position": "B4"},
+            {"League": "MLB", "Team": "NYY", "Player": "Max Muncy", "Position": "B5"},
             {"League": "MLB", "Team": "HOU", "Player": "Mookie Betts", "Position": "B2"},
             {"League": "MLB", "Team": "NYY", "Player": "Gerrit Cole", "Position": "P"},
             {"League": "NBA", "Team": "BOS", "Player": "Jayson Tatum", "Position": "B1"},
@@ -683,6 +730,7 @@ def test_attach_lineup_columns_reads_the_posted_order_and_probable_starter():
         ["R", "R", "usual"],
         ["R", "", "usual"],
         ["L", "R", "usual"],
+        ["", "R", "usual"],
         ["R", "R", "posted"],
         ["", "", ""],
         ["", "", ""],
