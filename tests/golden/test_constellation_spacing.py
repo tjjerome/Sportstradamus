@@ -74,6 +74,14 @@ def _key(i: int) -> str:
     return f"P{i:02d}|PTS|Over"
 
 
+def _rect(cx: float, cy: float, width: float, height: float) -> tuple[float, ...]:
+    return (cx - width / 2, cy - height / 2, cx + width / 2, cy + height / 2)
+
+
+def _disjoint(one: tuple[float, ...], other: tuple[float, ...]) -> bool:
+    return one[0] >= other[2] or one[2] <= other[0] or one[1] >= other[3] or one[3] <= other[1]
+
+
 def _node_traces(fig) -> list:
     return [t for t in fig.data if t.mode and "markers" in t.mode and t.name != DECORATION]
 
@@ -114,10 +122,14 @@ def test_a_colliding_star_moves_to_the_nearest_clear_cell():
 
 
 def test_a_moved_star_never_crosses_the_team_axis():
+    # Two placed neighbours wall the star's own half, so the nearest free air is
+    # across x=0. Left unmasked the star takes it — which is what the mask exists
+    # to forbid, and what makes the second assertion mean something.
     anchors = {"left": (-0.02, 0.0)}
-    sizes = {"left": 20.0, "blocker": 20.0}
-    placed = settle(anchors, sizes, _PX, fixed={"blocker": (-0.02, 0.0)}, side={"left": -1})
-    assert placed["left"][0] <= 0.0
+    sizes = {"left": 20.0, "twin": 20.0, "over": 38.0, "under": 38.0}
+    fixed = {"twin": (-0.02, 0.0), "over": (-0.30, 0.30), "under": (-0.30, -0.30)}
+    assert settle(anchors, sizes, _PX, fixed=fixed)["left"][0] > 0.0
+    assert settle(anchors, sizes, _PX, fixed=fixed, side={"left": -1})["left"][0] <= 0.0
 
 
 def test_fixed_stars_are_neither_moved_nor_returned():
@@ -237,19 +249,30 @@ def test_captions_are_the_slip_plus_the_biggest_candidates():
 
 
 def test_caption_boxes_never_overlap():
-    stars = _stars(constellation_figure([], None, _ladder(15), shape=_HOURGLASS))
-    boxes = []
-    for (x, y), size, text, place in stars.values():
-        left, bottom = x * PX_PER_UNIT[0], y * PX_PER_UNIT[1]
-        boxes.append((left - size / 2, bottom - size / 2, left + size / 2, bottom + size / 2))
-        if not text:
-            continue
-        width = len(text) * _CHAR_WIDTH_EM * _LABEL_FONT_SIZE
-        height = _LINE_HEIGHT_EM * _LABEL_FONT_SIZE
-        centre = bottom + (size / 2 + height / 2) * (1 if place == "top center" else -1)
-        boxes.append((left - width / 2, centre - height / 2, left + width / 2, centre + height / 2))
-    for one, other in itertools.combinations(boxes, 2):
-        assert one[0] >= other[2] or one[2] <= other[0] or one[1] >= other[3] or one[3] <= other[1]
+    """No caption lands on a glyph or on another caption, on any shape in the bank.
+
+    Only caption-involving pairs: ``settle`` separates the stars' bounding
+    *circles*, so two glyph squares may still share a corner — a real overlap of
+    two star boxes is not what a caption has to clear, and pinning it here would
+    pin the wrong guarantee.
+    """
+    pool = _ladder(15)
+    for template in shape_catalog()["templates"].values():
+        boxes = []
+        for (x, y), size, text, place in _stars(
+            constellation_figure([], None, pool, shape=template)
+        ).values():
+            cx, cy = x * PX_PER_UNIT[0], y * PX_PER_UNIT[1]
+            boxes.append((False, _rect(cx, cy, size, size)))
+            if not text:
+                continue
+            height = _LINE_HEIGHT_EM * _LABEL_FONT_SIZE
+            lift = (size / 2 + height / 2) * (1 if place == "top center" else -1)
+            width = len(text) * _CHAR_WIDTH_EM * _LABEL_FONT_SIZE
+            boxes.append((True, _rect(cx, cy + lift, width, height)))
+        for (one_is_caption, one), (other_is_caption, other) in itertools.combinations(boxes, 2):
+            if one_is_caption or other_is_caption:
+                assert _disjoint(one, other), (template["label"], one, other)
 
 
 def test_slate_shapes_classify_the_capped_set():
