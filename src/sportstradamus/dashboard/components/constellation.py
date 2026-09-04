@@ -53,6 +53,7 @@ Team fills read ``theme.team_colors(league, team)`` — real per-team primaries 
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Mapping, Sequence
 
 import networkx as nx
@@ -64,6 +65,7 @@ from sportstradamus.dashboard.components.constellation_lenses import (
     _DEEP_COLOR,
     _SKY_EXTRA_Y_MOBILE,
     _WIDER_SCALE,
+    DEEP_EDGES_PER_STAR,
     LENS_STAR_SIZE,
     LENS_STAR_SIZE_MOBILE,
     WIDER_GAMES,
@@ -360,11 +362,12 @@ def _add_deep_layer(
 ) -> list[str]:
     """Draw the deeper lens and return the slip legs it promotes to full stars.
 
-    ``info``, ``pos`` and ``sizes`` gain the tier in place. The whole tier is
-    *positioned* whether or not the lens is on, because an in-slip leg beyond the
-    default cut has to burn in the spot the lens would have given it — only the
-    unpicked stars and their ties are gated on the lens itself, so a lens-off
-    figure with nothing beyond the cut stays byte-identical to today's.
+    ``info``, ``pos`` and ``sizes`` gain the drawn tier in place. An in-slip leg
+    beyond the default cut is promoted whether or not the lens is on, because it
+    has to burn in the spot the lens would have given it; ``first`` is what makes
+    that spot the same either way. The unpicked stars and their ties are gated on
+    the lens itself, so a lens-off figure with nothing beyond the cut stays
+    byte-identical to today's.
 
     Recomputing ``_star_sizes`` over the promoted legs cannot move a main star's
     size: the top-Kelly leg is always inside the default cut, so the scale's
@@ -380,19 +383,20 @@ def _add_deep_layer(
     if not tier:
         return []
     promoted = [key for key in tier if key in active]
-    unpicked = [key for key in tier if key not in active]
-    sizes |= dict.fromkeys(unpicked, lens_size) | _star_sizes(keys + promoted, info, floor=floor)
-    placed = deep_positions(
-        tier,
+    deep = [key for key in tier if key not in active] if deep_pool is not None else []
+    drawn = promoted + deep
+    sizes |= dict.fromkeys(deep, lens_size) | _star_sizes(keys + promoted, info, floor=floor)
+    ties = game_edges(keys + drawn, rho)
+    pos |= deep_positions(
+        drawn,
         {key: pos[key] for key in keys},
         sizes,
-        game_edges(keys + tier, rho),
-        {key: info[key]["team"] for key in tier},
+        ties,
+        {key: info[key]["team"] for key in drawn},
         teams,
         px,
+        first=promoted,
     )
-    deep = unpicked if deep_pool is not None else []
-    pos |= {key: placed[key] for key in promoted + deep}
     add_deep_trace(
         fig,
         deep,
@@ -411,7 +415,7 @@ def _add_deep_layer(
     )
     _add_lens_edges(
         fig,
-        game_edges(keys + promoted + deep, rho),
+        ties,
         {(a, b) for a, b, _ in edges},
         pos,
         active=active,
@@ -433,11 +437,15 @@ def _add_lens_edges(
 
     A promoted star is lit with the lens off too, so its ties are permanent
     ``edge`` traces; a deep star's ties carry the ``deep_edge`` name instead, which
-    is how ``main.js`` gates the lens animation on them. Deep-to-deep ties are
-    dropped — at lens size they are clutter with nothing to read against.
+    is how ``main.js`` gates the lens animation on them; a deep star keeps only its
+    ``DEEP_EDGES_PER_STAR`` strongest.
     """
+    kept = _capped_deep_ties(edges, deep)
     for node_a, node_b, tie in edges:
-        if (node_a, node_b) in main_pairs or (node_a in deep and node_b in deep):
+        if (node_a, node_b) in main_pairs:
+            continue
+        lens = node_a in deep or node_b in deep
+        if lens and (node_a, node_b) not in kept:
             continue
         _add_edge(
             fig,
@@ -447,8 +455,30 @@ def _add_lens_edges(
             pos[node_b],
             tie,
             active=active,
-            name="deep_edge" if node_a in deep or node_b in deep else "edge",
+            name="deep_edge" if lens else "edge",
         )
+
+
+def _capped_deep_ties(edges: list[tuple[str, str, float]], deep: set[str]) -> set[tuple[str, str]]:
+    """Each deep star's strongest ties by |rho|, at most ``DEEP_EDGES_PER_STAR``.
+
+    Deep-to-deep ties never enter the pool — at lens size they are clutter with
+    nothing to read against — so they are the pairs the cap drops outright.
+    """
+    incident: defaultdict[str, list[tuple[str, str, float]]] = defaultdict(list)
+    for edge in edges:
+        if edge[0] in deep and edge[1] in deep:
+            continue
+        for key in (edge[0], edge[1]):
+            if key in deep:
+                incident[key].append(edge)
+    return {
+        (node_a, node_b)
+        for ties in incident.values()
+        for node_a, node_b, _ in sorted(ties, key=lambda edge: (-abs(edge[2]), edge[:2]))[
+            :DEEP_EDGES_PER_STAR
+        ]
+    }
 
 
 def _star_sizes(

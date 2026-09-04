@@ -28,7 +28,7 @@ from __future__ import annotations
 import hashlib
 import math
 import random
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 
 import plotly.graph_objects as go
@@ -55,10 +55,15 @@ LENS_STAR_SIZE_MOBILE = 16
 _DEEP_COLOR = "#5f6b80"
 _DEEP_ALPHA = 0.35
 _SIDE_FALLBACK_X = 0.6  # where an untied deep star heads when its half holds no main star
+# The strongest ties are the ones that placed the star; a 12-way fan off a 10 px
+# star is not a reading, and a whole tier's fans are a thousand traces of payload.
+DEEP_EDGES_PER_STAR = 2
 
 WIDER_GAMES = 6  # 6 games x <= 6 legs fills the open bands without crowding them
 _WIDER_ALPHA = 0.75  # dimmer than an active star, so the sky reads as background
-_WIDER_MARGIN_PX = 48  # ~half a caption: keeps a sky star out from under a main star's label
+# Clear air between a sky star and the map's outermost glyph: a sky star that
+# grazes the constellation reads as one of its own.
+_WIDER_MARGIN_PX = 48
 _WIDER_CLUSTER_PX = 30  # a game's legs scatter inside this radius and still read as one group
 _WIDER_JITTER = 0.35  # slot jitter as a fraction of slot pitch: organic, still non-overlapping
 # The focus recedes only a little — the owner asked for room, not a shrunken map.
@@ -90,18 +95,20 @@ def deep_positions(
     node_team: Mapping[str, str | None],
     teams: Sequence[str],
     px: tuple[float, float],
+    *,
+    first: Sequence[str] = (),
 ) -> dict[str, tuple[float, float]]:
     """Place the deeper lens's stars inside the map, beside what they correlate with.
 
     A tied star targets the |rho|-weighted centroid of the main stars it is tied
     to, so a single tie puts the target *on* that star and ``settle`` only has to
     find the cell next to it. An untied star takes its own half's main stars in
-    round-robin by tier rank, which spreads the field through the constellation
-    instead of piling one blob per side; with no main star to borrow it falls back
-    to its half's midpoint.
+    round-robin, counted per side so the cycle reaches all of them, which spreads
+    the field through the constellation instead of piling one blob per side; with
+    no main star to borrow it falls back to its half's midpoint.
 
     Args:
-        tier: the deep keys, strongest first — iteration order is placement priority.
+        tier: the deep keys, strongest first.
         main_pos: the drawn map in data units, passed to ``settle`` as ``fixed`` so
             no main star can be pushed by a lens.
         sizes: marker px for every tier key and every main key.
@@ -109,6 +116,9 @@ def deep_positions(
         node_team: team code per tier key.
         teams: the matchup's two codes, sorted — index 0 owns the left half.
         px: rendered css px per data unit, ``(x, y)``.
+        first: keys that place before the rest, whatever ``tier`` holds around
+            them. A promoted star is lit with the lens shut, so its place has to
+            come out the same when the lens opens and the tier grows around it.
 
     Returns:
         key -> position in data units, for the ``tier`` keys only.
@@ -120,24 +130,31 @@ def deep_positions(
             if one in rest and other in main_pos:
                 ties[one].append((abs(rho), other))
     side = {key: _half(node_team.get(key), teams) for key in tier}
-    targets = {
-        key: _deep_target(rank, ties[key], main_pos, side[key]) for rank, key in enumerate(tier)
-    }
+    order = [key for key in tier if key in first] + [key for key in tier if key not in first]
+    targets: dict[str, tuple[float, float]] = {}
+    untied: Counter[float] = Counter()
+    for key in order:
+        if ties[key]:
+            targets[key] = _tie_target(ties[key], main_pos)
+            continue
+        targets[key] = _open_target(untied[side[key]], main_pos, side[key])
+        untied[side[key]] += 1
     return settle(targets, sizes, px, fixed=main_pos, side=side)
 
 
-def _deep_target(
-    rank: int,
-    ties: list[tuple[float, str]],
-    main_pos: Mapping[str, tuple[float, float]],
-    side: float,
+def _tie_target(
+    ties: list[tuple[float, str]], main_pos: Mapping[str, tuple[float, float]]
 ) -> tuple[float, float]:
-    if ties:
-        weight = sum(rho for rho, _ in ties)
-        return (
-            sum(rho * main_pos[key][0] for rho, key in ties) / weight,
-            sum(rho * main_pos[key][1] for rho, key in ties) / weight,
-        )
+    weight = sum(rho for rho, _ in ties)
+    return (
+        sum(rho * main_pos[key][0] for rho, key in ties) / weight,
+        sum(rho * main_pos[key][1] for rho, key in ties) / weight,
+    )
+
+
+def _open_target(
+    rank: int, main_pos: Mapping[str, tuple[float, float]], side: float
+) -> tuple[float, float]:
     half = [key for key in sorted(main_pos) if side == 0 or main_pos[key][0] * side >= 0]
     if half:
         return main_pos[half[rank % len(half)]]
@@ -239,18 +256,16 @@ def wider_positions(
         exclude=footprint,
     )
     drop = (_WIDER_CLUSTER_PX + label_px) / px[1]
+    frame_y = sky_y * _FRAME_INSET
     labels = []
     for game, rows in groups:
         cluster = [corr_key(row) for row in rows if corr_key(row) in placed]
         if not cluster:
             continue
-        labels.append(
-            (
-                game,
-                sum(placed[key][0] for key in cluster) / len(cluster),
-                sum(placed[key][1] for key in cluster) / len(cluster) - drop,
-            )
-        )
+        center_x = sum(placed[key][0] for key in cluster) / len(cluster)
+        center_y = sum(placed[key][1] for key in cluster) / len(cluster)
+        below = center_y - drop
+        labels.append((game, center_x, below if below >= -frame_y else center_y + drop))
     return placed, labels
 
 
@@ -259,7 +274,7 @@ def _footprint(
     sizes: Mapping[str, float],
     px: tuple[float, float],
 ) -> tuple[float, float, float, float]:
-    """The px rectangle the drawn map fills, grown by a caption's worth of margin."""
+    """The px rectangle the drawn map fills, grown by ``_WIDER_MARGIN_PX`` of clear air."""
     reach = {key: sizes[key] / 2 + _WIDER_MARGIN_PX for key in occupied}
     return (
         min(x * px[0] - reach[key] for key, (x, _) in occupied.items()),
@@ -339,14 +354,21 @@ def add_wider_layer(
 
     Grows the figure whenever ``sky_y`` reaches past the frame — the phone's only
     way to open a band — by exactly the added y-range, so the px-per-unit the map
-    was spaced against survives the reshape.
+    was spaced against survives the reshape. The growth has to clear whatever the
+    deeper lens added below it: a tall tier otherwise squeezes the phone's bands
+    under ``_sky_bands``' floor and the whole layer silently draws nothing.
     """
+    grows = sky_y > Y_RANGE
+    if grows:
+        box = _footprint(occupied, sizes, px)
+        clear = max(box[3], -box[1]) + 2 * _WIDER_CLUSTER_PX + label_size
+        sky_y = max(sky_y, clear / (px[1] * _FRAME_INSET))
     pos, labels = wider_positions(
         groups, occupied, sizes, px, size=size, sky_y=sky_y, label_px=label_size
     )
     if not pos:
         return
-    if sky_y > Y_RANGE:
+    if grows:
         fig.update_layout(
             height=fig.layout.height + 2 * (sky_y - Y_RANGE) * px[1],
             yaxis_range=[-sky_y, sky_y],

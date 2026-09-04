@@ -82,9 +82,11 @@ def _active_lenses(
 ) -> tuple[pd.DataFrame | None, list[tuple[str, list[dict]]] | None]:
     """The two lens overlays for ``constellation_figure``, read off ``games.py``'s toggles.
 
-    "Look deeper" reuses the same unfiltered ``pool`` frame the map already has (the
-    figure itself picks out the model-passed rows) — no separate query. "Look wider"
-    reruns the existing ``satellite_groups`` query. Either lens off resolves ``None``.
+    "Look deeper" hands back the same unfiltered ``pool`` frame the map already
+    has — the figure keeps whatever rows it doesn't already know, and its tier is
+    those plus the model-liked legs its own star cut left behind — so no separate
+    query. "Look wider" reruns the existing ``satellite_groups`` query. Either
+    lens off resolves ``None``.
     """
     deep_pool = pool if st.session_state.get("lens_deep", False) else None
     if not st.session_state.get("lens_wider", False):
