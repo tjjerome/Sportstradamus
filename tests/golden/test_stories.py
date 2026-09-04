@@ -193,13 +193,13 @@ def _theses_by_family(parlays: pd.DataFrame, offers: pd.DataFrame) -> dict[tuple
 
 
 def test_version_present():
-    assert STORIES_VERSION == "p3b"
+    assert STORIES_VERSION == "p3c"
 
 
 def test_thesis_exact_strings():
     assert _theses_by_family(_PARLAYS, _OFFERS) == {
         ("BOS/PHI", 1.0): "Jayson Tatum piles on before the BOS/PHI bench empties",
-        ("BOS/PHI", 2.0): "edges on both sides of the ledger in BOS/PHI",
+        ("BOS/PHI", 2.0): "the BOS/PHI margin giveth to the bench and taketh from the stars",
         ("DEN/MIA", 1.0): ("The closer DEN/MIA gets, the better Nikola Jokic's passes become"),
     }
 

@@ -20,7 +20,7 @@ from sportstradamus.prediction.stories.menu import build_game_stories
 from sportstradamus.prediction.stories.thesis import attach_parlay_theses
 from sportstradamus.prediction.stories.why import attach_offer_why
 
-STORIES_VERSION: str = "p3b"
+STORIES_VERSION: str = "p3c"
 
 __all__ = [
     "STORIES_VERSION",
