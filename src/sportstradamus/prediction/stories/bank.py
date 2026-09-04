@@ -60,8 +60,9 @@ def bank_cell(voice: str, archetype: str, shape: str, direction: str, category: 
         (voiced, shape, "production"),
         (shared, shape, category),
         (shared, shape, "production"),
-        # Defense in depth: while shared authors every archetype/shape/direction
-        # at production, no mapped league reaches these last two or the endpoint.
+        # Defense in depth: no mapped league reaches these last two or the endpoint,
+        # because each voice authors the shaped player and game-script/Mixed nodes
+        # that shared leaves empty (pinned by test_shape_never_falls_through_to_even).
         (voiced, "even", category),
         (shared, "even", category),
     ):
