@@ -319,6 +319,13 @@ def test_why_bank_pronouns():
     assert all(isinstance(v, str) and v for v in pronouns.values())
 
 
+def test_why_bank_hands():
+    """Both throwing hands decode to a word — a missing key renders "a -hander"."""
+    hands = why_bank()["hands"]
+    assert set(hands) == {"L", "R"}
+    assert all(isinstance(v, str) and v.islower() for v in hands.values())
+
+
 def test_no_prose_literals_in_stories_source():
     """Prose lives in the JSON banks, never in code (owner directive).
 

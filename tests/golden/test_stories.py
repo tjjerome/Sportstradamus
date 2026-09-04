@@ -563,14 +563,19 @@ def test_why_rotation_deterministic():
     assert a == b
 
 
+# Two Luis Garcias, a batter and a pitcher — the registry is id-keyed, so a
+# single name map would let the pitcher shadow the hitter's batting side.
 _MLB_PLAYERS = {
     592450: {"name": "Aaron Judge", "bats": "R"},
     605141: {"name": "Mookie Betts", "bats": "R"},
+    677651: {"name": "Luis Garcia", "bats": "L"},
     543037: {"name": "Gerrit Cole", "throws": "R"},
+    472610: {"name": "Luis Garcia", "throws": "R"},
 }
-# NYY has a probable starter and a posted card; LAD has neither yet.
+# NYY and HOU have a probable starter and a posted card; LAD has neither yet.
 _MLB_UPCOMING = {
     "NYY": {"Opponent Pitcher": "Gerrit Cole", "Batting Order": ["Aaron Judge"]},
+    "HOU": {"Opponent Pitcher": "Luis Garcia", "Batting Order": ["Mookie Betts"]},
     "LAD": {"Opponent Pitcher": "", "Batting Order": []},
 }
 
@@ -657,13 +662,17 @@ def test_attach_lineup_columns_reads_the_posted_order_and_probable_starter():
     """Posted vs usual, the no-starter blank, and the rows that carry no lineup at all.
 
     The NBA row is the reason the League check exists: ``B1`` is a bench label
-    there, not a leadoff hitter.
+    there, not a leadoff hitter. The two Luis Garcia rows cover the cross-role
+    name collision from both sides — the hitter keeps his own batting side, and
+    the pitcher of that name still resolves as a starter's throwing hand.
     """
     offers = pd.DataFrame(
         [
             {"League": "MLB", "Team": "NYY", "Player": "Aaron Judge", "Position": "B3"},
             {"League": "MLB", "Team": "NYY", "Player": "Mookie Betts", "Position": "B1"},
             {"League": "MLB", "Team": "LAD", "Player": "Mookie Betts", "Position": "B2"},
+            {"League": "MLB", "Team": "NYY", "Player": "Luis Garcia", "Position": "B4"},
+            {"League": "MLB", "Team": "HOU", "Player": "Mookie Betts", "Position": "B2"},
             {"League": "MLB", "Team": "NYY", "Player": "Gerrit Cole", "Position": "P"},
             {"League": "NBA", "Team": "BOS", "Player": "Jayson Tatum", "Position": "B1"},
         ]
@@ -673,6 +682,8 @@ def test_attach_lineup_columns_reads_the_posted_order_and_probable_starter():
         ["R", "R", "posted"],
         ["R", "R", "usual"],
         ["R", "", "usual"],
+        ["L", "R", "usual"],
+        ["R", "R", "posted"],
         ["", "", ""],
         ["", "", ""],
     ]

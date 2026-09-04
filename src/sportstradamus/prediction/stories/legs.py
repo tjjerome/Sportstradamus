@@ -114,7 +114,8 @@ _STAT_CATEGORY = {
 
 # Offer columns kept per offer_index record, beyond the (Player, Bet, Line)
 # match key — read by enrich_legs and the story dek's anchor clauses
-# ("Avg 5", "DVPOA", and the three lineup columns exist only for the latter).
+# ("Avg 5", "DVPOA", "Opp Hand", and "Lineup" exist only for the latter; the
+# dek says which batting slot and against which hand, never the hitter's side).
 _OFFER_ENRICH_COLS = (
     "Market",
     "Game",
@@ -123,7 +124,6 @@ _OFFER_ENRICH_COLS = (
     "Win Prob",
     "Avg 5",
     "DVPOA",
-    "Bats",
     "Opp Hand",
     "Lineup",
 )

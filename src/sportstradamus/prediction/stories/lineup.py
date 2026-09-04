@@ -50,7 +50,7 @@ def attach_lineup_columns(offers: pd.DataFrame, stats: dict) -> pd.DataFrame:
             offers[column] = blank
         return offers
 
-    hands = {player["name"]: player for player in mlb.players.values()}
+    bats_by_name, throws_by_name = _hands_by_name(mlb.players)
     bats, opp_hand, lineup = [], [], []
     for league, team, player, position in offers[
         ["League", "Team", "Player", "Position"]
@@ -62,8 +62,22 @@ def attach_lineup_columns(offers: pd.DataFrame, stats: dict) -> pd.DataFrame:
             continue
         game = mlb.upcoming_games.get(team, {})
         starter = game.get("Opponent Pitcher")
-        bats.append(hands.get(player, {}).get("bats", ""))
-        opp_hand.append(hands.get(starter, {}).get("throws", "") if starter else "")
+        bats.append(bats_by_name.get(player, ""))
+        opp_hand.append(throws_by_name.get(starter, "") if starter else "")
         lineup.append("posted" if player in game.get("Batting Order", []) else "usual")
     offers["Bats"], offers["Opp Hand"], offers["Lineup"] = bats, opp_hand, lineup
     return offers
+
+
+def _hands_by_name(players: dict) -> tuple[dict[str, str], dict[str, str]]:
+    """Batting sides and throwing hands from the player registry, keyed by name.
+
+    Split by role rather than kept as one record per name: the registry is
+    id-keyed and names collide across roles, so a pitcher named Luis Garcia
+    would otherwise shadow the batter of that name and cost him his side.
+    Same-role duplicates stay last-wins.
+    """
+    return (
+        {p["name"]: p["bats"] for p in players.values() if "bats" in p},
+        {p["name"]: p["throws"] for p in players.values() if "throws" in p},
+    )
