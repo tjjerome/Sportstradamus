@@ -33,16 +33,19 @@ import importlib.resources as pkg_resources
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pytest
 
 from sportstradamus import data
 from sportstradamus.leg_schema import LEG_FIELDS
 from sportstradamus.prediction import correlation
 from sportstradamus.prediction.correlation import (
+    _build_cmarket,
     _build_correlation_matrices,
     _build_game_corr_map,
     _collect_game_corr,
     _leg_pair_corr_boost,
+    _resolve_player_positions,
     find_correlation,
 )
 
@@ -62,6 +65,10 @@ _needs_nba_corr = pytest.mark.skipif(
 _needs_wnba_corr = pytest.mark.skipif(
     not _has_corr_parquets("wnba"),
     reason="WNBA correlation parquets are gitignored; absent in CI",
+)
+_needs_mlb_corr = pytest.mark.skipif(
+    not _has_corr_parquets("mlb"),
+    reason="MLB correlation parquets are gitignored; absent in CI",
 )
 
 
@@ -443,6 +450,168 @@ def test_find_correlation_writes_position_labels_wnba() -> None:
     assert (labels != "").all()  # no combo legs in this fixture ⇒ every leg resolves
     # WNBA depth labels are a position letter (G/F/C) plus a usage rank digit.
     assert labels.str.match(r"^[GFC]\d+$").all()
+
+
+# --- MLB batting slots (correlation-matrix keys) ----------------------------
+
+
+class _FakeMLBStats:
+    """Stand-in for ``StatsMLB`` in the MLB branch of ``_resolve_player_positions``.
+
+    ``get_depth`` records the arguments it was handed and writes the batting
+    slots onto ``playerProfile`` the way the real method does — a dict pandas
+    aligns on the profile index, so a player the profile does not carry stays
+    absent from the ``depth`` column. A ``None`` slot puts a player in the
+    profile with no entry in that dict, i.e. NaN depth, which is what the real
+    method's ``continue`` leaves behind for a hitter it cannot place.
+    """
+
+    def __init__(self, slots: dict[str, int | None]) -> None:
+        self.playerProfile = pd.DataFrame(index=pd.Index(list(slots), name="playerName"))
+        self._slots = {k: v for k, v in slots.items() if v is not None}
+        self.depth_calls: list[tuple[list[dict], object]] = []
+
+    def get_depth(self, offers, date=None):
+        self.depth_calls.append((offers, date))
+        self.playerProfile["depth"] = self._slots
+
+
+# "Player position" is 0 on every real MLB leg (playerProfile["position"] is only
+# filled by the non-MLB get_depth), so the fixture pins it there: the branch has to
+# resolve the batting slot from the stats object, not from the column.
+def _mlb_legs() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "Player": player,
+                "Team": team,
+                "Date": "2026-09-04",
+                "Market": "hits",
+                "Player position": 0,
+            }
+            for player, team in [
+                ("Kyle Tucker", "CHC"),
+                ("Nico Hoerner", "CHC"),
+                ("Shota Imanaga", "CHC"),
+                ("Kyle Tucker + Shota Imanaga", "CHC"),
+                ("Ian Happ", "CHC"),
+                ("Oneil Cruz", "PIT"),
+            ]
+        ]
+    )
+
+
+def _mlb_stats() -> _FakeMLBStats:
+    return _FakeMLBStats(
+        {"Kyle Tucker": 3, "Nico Hoerner": 9, "Shota Imanaga": 0, "Ian Happ": None}
+    )
+
+
+def test_resolve_player_positions_mlb_labels_batting_slots() -> None:
+    """MLB slots come from ``get_depth``, not the always-zero offer column.
+
+    Reading the offer column labeled every MLB leg ``P``, so every batter pair
+    looked up a missing correlation row and scored rho 0. Slots 1-9 become
+    ``B1``..``B9``; the three ways a leg misses — a pitcher's slot 0, a NaN depth
+    (Ian Happ, in the profile but unplaced), and a player the profile never
+    carried at all (Oneil Cruz) — all fall through to ``P``. Combo legs keep the
+    one-label-per-component list shape ``_build_cmarket`` expects.
+    """
+    stat_data = _mlb_stats()
+
+    resolved = _resolve_player_positions(_mlb_legs(), "MLB", stat_data)
+
+    assert list(resolved["Player position"]) == ["B3", "B9", "P", ["B3", "P"], "P", "P"]
+    assert len(stat_data.depth_calls) == 1  # once for the league, not once per leg
+    records, call_date = stat_data.depth_calls[0]
+    assert records == [
+        {"Player": "Kyle Tucker", "Team": "CHC"},
+        {"Player": "Nico Hoerner", "Team": "CHC"},
+        {"Player": "Shota Imanaga", "Team": "CHC"},
+        {"Player": "Kyle Tucker + Shota Imanaga", "Team": "CHC"},
+        {"Player": "Ian Happ", "Team": "CHC"},
+        {"Player": "Oneil Cruz", "Team": "PIT"},
+    ]
+    assert call_date is None  # the default, today, exactly as scoring.py calls it
+
+
+def test_build_cmarket_mlb_keys_by_batting_slot() -> None:
+    """cMarket tokens must key the way the MLB corr parquets do: ``B{n}``/``P``."""
+    resolved = _resolve_player_positions(_mlb_legs(), "MLB", _mlb_stats())
+
+    cmarket = _build_cmarket(resolved, "MLB", {})["cMarket"]
+
+    assert list(cmarket) == [
+        ["B3.hits"],
+        ["B9.hits"],
+        ["P.hits"],
+        ["B3.hits", "P.hits"],
+        ["P.hits"],
+        ["P.hits"],
+    ]
+
+
+# Underdog Rivals builds MLB "A vs. B" legs, and unlike the other leagues' combo
+# legs those survive into the correlation stage, so the slate carries one.
+def _mlb_offers() -> list[dict]:
+    raw = [
+        # player, team, opp, market, line
+        ("Kyle Tucker", "CHC", "PIT", "hits", 0.5),
+        ("Nico Hoerner", "CHC", "PIT", "total bases", 1.5),
+        ("Shota Imanaga", "CHC", "PIT", "pitcher strikeouts", 5.5),
+        ("Oneil Cruz", "PIT", "CHC", "hits", 0.5),
+        ("Bryan Reynolds", "PIT", "CHC", "runs", 0.5),
+        ("Kyle Tucker vs. Oneil Cruz", "CHC/PIT", "PIT/CHC", "hits", 0.5),
+    ]
+    return [
+        {
+            "League": "MLB",
+            "Date": "2026-09-04",
+            "Team": team,
+            "Opponent": opp,
+            "Player": player,
+            "Market": market,
+            "Line": line,
+            "Boost": 1.78,  # == UNDERDOG_BOOST_BASELINE -> post-normalization 1.0
+            "Bet": "Over",
+            "Win Prob": 0.81,
+            "Market Prob": 0.71,
+            "Model EV": 1.31,
+            "Market EV": 1.0,
+            "Kelly": 1.0,
+            "Player position": 0,
+        }
+        for player, team, opp, market, line in raw
+    ]
+
+
+@_needs_mlb_corr
+def test_find_correlation_mlb_position_stays_a_string_column() -> None:
+    """The ``Position`` writeback must not leak a combo leg's list of labels.
+
+    ``persist`` writes the offers frame to parquet, and pyarrow refuses a column
+    mixing lists with strings, so a single Rivals leg would take prophecize down.
+    Combo legs get ``""`` — what ``stories/context._pos_edges`` already expects —
+    while ``Player position`` keeps the list ``_build_cmarket`` splits on.
+    """
+    stat_data = _FakeMLBStats(
+        {
+            "Kyle Tucker": 3,
+            "Nico Hoerner": 9,
+            "Shota Imanaga": 0,
+            "Oneil Cruz": 2,
+            "Bryan Reynolds": 5,
+        }
+    )
+
+    offer_df, _ = find_correlation(_mlb_offers(), {"MLB": stat_data}, "Underdog")
+
+    assert all(isinstance(p, str) for p in offer_df["Position"])
+    labels = dict(zip(offer_df["Player"], offer_df["Position"], strict=True))
+    assert labels["Kyle Tucker"] == "B3"
+    assert labels["Shota Imanaga"] == "P"
+    assert labels["Kyle Tucker vs. Oneil Cruz"] == ""
+    pa.Table.from_pandas(offer_df[["Position"]])  # the snapshot write, which a mix aborts
 
 
 # --- corr-slice collector (dashboard rail / constellation) ------------------
