@@ -432,9 +432,9 @@ def _add_lens_edges(
     """The ties the deeper lens brings in, minus the ones the base web already drew.
 
     A promoted star is lit with the lens off too, so its ties are permanent
-    ``edge`` traces; a deep star's fade in and out with it under the ``deep_edge``
-    name ``main.js`` gates the lens animation on. Deep-to-deep ties are dropped —
-    at lens size they are clutter with nothing to read against.
+    ``edge`` traces; a deep star's ties carry the ``deep_edge`` name instead, which
+    is how ``main.js`` gates the lens animation on them. Deep-to-deep ties are
+    dropped — at lens size they are clutter with nothing to read against.
     """
     for node_a, node_b, tie in edges:
         if (node_a, node_b) in main_pairs or (node_a in deep and node_b in deep):

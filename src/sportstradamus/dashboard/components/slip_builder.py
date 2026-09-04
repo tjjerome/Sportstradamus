@@ -199,7 +199,7 @@ def _render_leg_list(
     key_prefix: str, *, focus_game: str | None = None, removable: bool = True, columns: int = 1
 ) -> None:
     """List slip legs. ``focus_game`` shows only that game's legs — every one of them is
-    a star on the map, so the satellite picker lists only the other games'.
+    a star on the map, so the satellite picker lists only the other games' legs.
     ``removable=False`` drops the button column because a star leg is removed by clicking
     it on the map, and ``columns`` then flows that read-only list across that many
     side-by-side columns.
@@ -223,7 +223,7 @@ def _render_leg_list(
 
 
 def _render_non_star_legs(legs: list[dict], *, focus_game: str, key_prefix: str) -> None:
-    """List every slip leg that isn't a star on the map — the other games' — with a
+    """List every slip leg that isn't a star on the map — the other games' legs — with a
     remove control.
 
     A satellite is never drawn on the focus game's map, so this list is its only

@@ -68,7 +68,7 @@ _WIDER_SCALE = 0.8
 _SKY_EXTRA_Y_MOBILE = 1.0
 
 
-def deep_tier(info: Mapping[str, dict], keys: Sequence[str]) -> list[str]:
+def deep_tier(node_info: Mapping[str, dict], keys: Sequence[str]) -> list[str]:
     """Every known leg that is not a main star, strongest first.
 
     One sort key gives both readings the deeper lens holds — the model-liked legs
@@ -77,7 +77,8 @@ def deep_tier(info: Mapping[str, dict], keys: Sequence[str]) -> list[str]:
     """
     main = set(keys)
     return sorted(
-        (key for key in info if key not in main), key=lambda key: (-info[key]["edge"], key)
+        (key for key in node_info if key not in main),
+        key=lambda key: (-node_info[key]["edge"], key),
     )
 
 
@@ -152,7 +153,7 @@ def add_deep_trace(
     fig: go.Figure,
     keys: Sequence[str],
     pos: Mapping[str, tuple[float, float]],
-    info: Mapping[str, dict],
+    node_info: Mapping[str, dict],
     *,
     colors: Sequence[str],
     alphas: Sequence[float],
@@ -178,8 +179,8 @@ def add_deep_trace(
                 "color": list(colors),
                 "opacity": list(alphas),
             },
-            customdata=[[key, *info[key]["card"], 0] for key in keys],
-            hovertext=[info[key]["hover"] for key in keys],
+            customdata=[[key, *node_info[key]["card"], 0] for key in keys],
+            hovertext=[node_info[key]["hover"] for key in keys],
             hoverinfo="none",
         )
     )
@@ -325,7 +326,7 @@ def _scatter_band(
 def add_wider_layer(
     fig: go.Figure,
     groups: Sequence[tuple[str, list[dict]]],
-    info: Mapping[str, dict],
+    node_info: Mapping[str, dict],
     occupied: Mapping[str, tuple[float, float]],
     sizes: Mapping[str, float],
     px: tuple[float, float],
@@ -364,8 +365,8 @@ def add_wider_layer(
                 "color": [team_colors(str(row["League"]), str(row["Team"]))[0] for row in rows],
             },
             opacity=_WIDER_ALPHA,
-            customdata=[[key, *info[key]["card"], 0] for key in keys],
-            hovertext=[info[key]["hover"] for key in keys],
+            customdata=[[key, *node_info[key]["card"], 0] for key in keys],
+            hovertext=[node_info[key]["hover"] for key in keys],
             hoverinfo="none",
         )
     )
