@@ -68,6 +68,9 @@ _MLB_POSTSEASON_GAME_TYPES: frozenset[str] = frozenset({"F", "D", "L", "W", "P"}
 # postseason code (P) and anything unmapped fall back to best-of-5.
 _MLB_SERIES_GAMES_TO_WIN: dict[str, int] = {"F": 2, "D": 3, "L": 4, "W": 4, "P": 3}
 _MLB_DEFAULT_SERIES_WINS: int = 3
+# statsapi's sport id for Major League Baseball; every other id is a minor or
+# foreign league whose players never reach our gamelog.
+_MLB_SPORT_ID: int = 1
 
 # Batting-order plate-appearance structure, measured from the backfilled ~2-season
 # MLB gamelog (scripts/measure_mlb_volume_constants.py). The batting slot fixes a
@@ -910,7 +913,7 @@ class StatsMLB(Stats):
         mlb_games = mlb.schedule(
             start_date=next_day.strftime("%Y-%m-%d"), end_date=end_date.strftime("%Y-%m-%d")
         )
-        mlb_teams = mlb.get("teams", {"sportId": 1})
+        mlb_teams = mlb.get("teams", {"sportId": _MLB_SPORT_ID})
         self.upcoming_games = _build_mlb_upcoming_games(mlb_games, mlb_teams)
 
         prev_game_ids = [] if self.gamelog.empty else self.gamelog.gameId.unique()
@@ -933,7 +936,42 @@ class StatsMLB(Stats):
             self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
             self._enrich_team_markets(self.gamelog, date_col="gameDate", team_col="team")
 
+        self._refresh_handedness()
+
         write_gamelog("mlb", self.gamelog, self.teamlog, self.players)
+
+    def _refresh_handedness(self):
+        """Overwrite registry ``bats`` / ``throws`` from MLB's people feed.
+
+        ``_resolve_bat_side`` learns a side from a player's first observed plate
+        appearance and never revisits it, which freezes every switch hitter on
+        whichever box he happened to stand in first -- the registry carried zero
+        "S" before this ran. The people feed is authoritative and keyed by the
+        same numeric player id, so existing entries are corrected in place.
+
+        Feed-only ids are not added and ``name`` is never touched: registry names
+        are the unaccented spelling downstream matches offers by ("Jose Ramirez"),
+        while the feed returns the accented one. The season is
+        ``season_start.year`` rather than today's -- it is the season whose games
+        the surrounding fetch just parsed, and it does not roll over to a roster
+        that does not exist yet during the winter.
+        """
+        feed = mlb.get(
+            "sports_players",
+            {
+                "sportId": _MLB_SPORT_ID,
+                "season": self.season_start.year,
+                "fields": "people,id,batSide,code,pitchHand",
+            },
+        )
+        for person in feed["people"]:
+            entry = self.players.get(person["id"])
+            if entry is None:
+                continue
+            if "batSide" in person:
+                entry["bats"] = person["batSide"]["code"]
+            if "pitchHand" in person:
+                entry["throws"] = person["pitchHand"]["code"]
 
     def _trim_old_games(self, today):
         four_years_ago = today - timedelta(days=1461)

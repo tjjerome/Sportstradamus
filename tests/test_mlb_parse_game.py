@@ -5,6 +5,10 @@ complexity, so this locks its gamelog/teamlog row-building against a real
 (trimmed) baseballsavant payload. The input fixture and both expected snapshots
 were captured from the pre-refactor code on game_pk 716896 (CHC @ DET).
 
+``_refresh_handedness`` is covered here too: it exists to correct the ``bats`` /
+``throws`` values ``parse_game``'s resolvers cache first-write-wins, so the two
+behaviors are pinned together.
+
 Park factors are set to 1.0 (so park-adjusted == raw) and the archive-backed
 ``_enrich_team_markets`` is stubbed, isolating parse_game's own arithmetic from
 external state. The instance is built via ``__new__`` to skip ``__init__``'s
@@ -12,6 +16,7 @@ file I/O — parse_game only touches ``park_factors``, ``players``, ``gamelog``,
 ``teamlog``, and ``league``.
 """
 
+import datetime
 import json
 import pathlib
 
@@ -60,3 +65,41 @@ def test_parse_game_teamlog_matches_snapshot(parsed):
     pd.testing.assert_frame_equal(
         parsed.teamlog.reset_index(drop=True), _expected("teamlog"), check_dtype=False
     )
+
+
+def test_refresh_handedness_overwrites_from_the_people_feed(monkeypatch):
+    """Switch hitters get their true "S" back and the feed never grows the registry."""
+    stats = mlb.StatsMLB.__new__(mlb.StatsMLB)
+    stats.season_start = datetime.date(2026, 3, 25)
+    stats.players = {
+        608070: {"name": "Jose Ramirez", "bats": "R"},
+        663776: {"name": "Patrick Sandoval", "throws": "L"},
+        1: {"name": "Nobody", "bats": "L"},
+    }
+    calls = []
+
+    def fake_get(endpoint, params):
+        calls.append((endpoint, params))
+        return {
+            "people": [
+                {"id": 608070, "batSide": {"code": "S"}, "pitchHand": {"code": "R"}},
+                {"id": 663776, "pitchHand": {"code": "L"}},
+                {"id": 592450, "batSide": {"code": "L"}, "pitchHand": {"code": "R"}},
+            ]
+        }
+
+    monkeypatch.setattr(mlb.mlb, "get", fake_get)
+    stats._refresh_handedness()
+
+    assert len(calls) == 1
+    endpoint, params = calls[0]
+    assert endpoint == "sports_players"
+    assert params["sportId"] == 1
+    assert params["season"] == 2026
+    assert stats.players == {
+        # Both keys refresh whenever the feed carries them, so a batter picks up
+        # ``throws`` he never had.
+        608070: {"name": "Jose Ramirez", "bats": "S", "throws": "R"},
+        663776: {"name": "Patrick Sandoval", "throws": "L"},
+        1: {"name": "Nobody", "bats": "L"},
+    }
