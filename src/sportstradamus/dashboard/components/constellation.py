@@ -1,13 +1,18 @@
 """The constellation — an interactive star map of a game's model-liked legs.
 
 The dashboard's signature element (DESIGN.md §4a) and the slip editor's primary
-control. Every model-liked leg in the game (Kelly edge ``K`` > 0) is a star, sized
-by that edge so the strongest legs read biggest; the layout is **fixed per game**
-(the sports-object template the game was dealt, or a team-anchored force-directed
-solve when it is too thin for one) and never moves when you pick legs. A star you've
-added to the slip burns at full team color; a candidate you haven't is the same
-color desaturated and dimmed — selection is alpha + saturation, not a ring (a gold
-ring read as a team color). Stories / Builder / Moon just pre-activate a subset.
+control. The game's strongest model-liked legs are stars — the top
+``DEFAULT_STARS`` by edge with both teams represented and at most two per player;
+the rest wait behind *look deeper* — each sized by its edge so the strongest read
+biggest. The layout is **fixed per game** (the sports-object template the game was
+dealt, or a team-anchored force-directed solve when it is too thin for one) and
+never moves when you pick legs; ``constellation_spacing.settle`` then nudges only
+the stars that would collide, so the biggest keep their vertices exactly. Captions
+are sparse for the same reason — the slip's stars plus the biggest few candidates
+carry one, everything else reads from its hover card. A star you've added to the
+slip burns at full team color; a candidate you haven't is the same color
+desaturated and dimmed — selection is alpha + saturation, not a ring (a gold ring
+read as a team color). Stories / Builder / Moon just pre-activate a subset.
 
 Edges are pairwise correlations (gold, width/opacity ∝ |ρ|, dashed when ρ < 0 —
 "fights the thesis"). The whole web is drawn as a **faint base layer** so the
@@ -63,7 +68,17 @@ from sportstradamus.dashboard.components.constellation_slate import (
     game_edges,
     game_universe,
     rho_map,
+    teams_of,
     template_positions,
+)
+from sportstradamus.dashboard.components.constellation_spacing import (
+    PX_PER_UNIT,
+    PX_PER_UNIT_MOBILE,
+    X_RANGE,
+    Y_RANGE,
+    caption_positions,
+    default_stars,
+    settle,
 )
 from sportstradamus.dashboard.legs import corr_key
 from sportstradamus.dashboard.theme import GOLD, GRAY, team_colors, team_name
@@ -217,31 +232,50 @@ def constellation_figure(
     the name of isn't reading, so the drawing has to carry it alone.
     """
     fig = _blank_figure()
-    info = {key: _node_info(leg) for key, leg in game_universe(pool, slip_legs).items()}
+    universe = game_universe(pool, slip_legs)
+    info = {key: _node_info(leg) for key, leg in universe.items()}
     if not info:
         return fig
-    keys = sorted(info)
-    active = {corr_key(leg) for leg in slip_legs} & set(keys)
     game = _pool_field(pool, slip_legs, column="Game", key="game")
     league = _pool_field(pool, slip_legs, column="League", key="league")
+    teams = teams_of(game)
 
-    teams = _teams_of(game)
+    active = {corr_key(leg) for leg in slip_legs} & set(info)
+    keys = sorted(set(default_stars(universe, teams)) | active)
     _add_team_tags(fig, league, teams)
     team_color = {team: team_colors(league, team)[0] for team in teams}
-    node_team = {k: info[k]["team"] for k in keys}
-    edges = game_edges(keys, rho_map(corr, game))
-    floor, label_size, shape_scale = (
-        (_SIZE_MIN_MOBILE, _LABEL_FONT_SIZE_MOBILE, SHAPE_SCALE_MOBILE)
+    node_team = {k: node["team"] for k, node in info.items()}
+    rho = rho_map(corr, game)
+    edges = game_edges(keys, rho)
+    floor, label_size, shape_scale, px = (
+        (_SIZE_MIN_MOBILE, _LABEL_FONT_SIZE_MOBILE, SHAPE_SCALE_MOBILE, PX_PER_UNIT_MOBILE)
         if mobile
-        else (_SIZE_MIN, _LABEL_FONT_SIZE, SHAPE_SCALE)
+        else (_SIZE_MIN, _LABEL_FONT_SIZE, SHAPE_SCALE, PX_PER_UNIT)
     )
     pos, fillers = _positions(
         keys, node_team, teams, [(a, b, abs(r)) for a, b, r in edges], shape, shape_scale
     )
     sizes = _star_sizes(keys, info, floor=floor)
+    # Biggest first: a top-Kelly star keeps its vertex to the float, and only what
+    # would collide with it moves, never across its own team's half of the axis.
+    pos = settle(
+        {k: pos[k] for k in sorted(keys, key=lambda k: (-sizes[k], k))},
+        sizes,
+        px,
+        side={k: (1.0 if pos[k][0] > 0 else -1.0 if pos[k][0] < 0 else 0.0) for k in keys},
+    )
 
     focus_scale = _WIDER_SCALE if wider_groups is not None else 1.0
     pos = {k: (x * focus_scale, y * focus_scale) for k, (x, y) in pos.items()}
+    captions = caption_positions(
+        keys,
+        pos,
+        sizes,
+        {k: info[k]["label"] for k in keys},
+        active,
+        px,
+        font_px=label_size,
+    )
 
     if shape is not None:
         add_decoration(fig, shape, fillers, shape_scale, focus_scale)
@@ -256,6 +290,7 @@ def constellation_figure(
         info,
         sizes,
         team_color,
+        captions,
         active=False,
         label_size=label_size,
     )
@@ -266,6 +301,7 @@ def constellation_figure(
         info,
         sizes,
         team_color,
+        captions,
         active=True,
         label_size=label_size,
     )
@@ -415,8 +451,8 @@ def _blank_figure() -> go.Figure:
         margin={"l": 10, "r": 10, "t": 10, "b": 10},
         hovermode="closest",
         dragmode=False,  # no panning — this is a map, not a chart
-        xaxis={"visible": False, "fixedrange": True, "range": [-1.6, 1.6]},
-        yaxis={"visible": False, "fixedrange": True, "range": [-1.4, 1.4]},
+        xaxis={"visible": False, "fixedrange": True, "range": [-X_RANGE, X_RANGE]},
+        yaxis={"visible": False, "fixedrange": True, "range": [-Y_RANGE, Y_RANGE]},
     )
     return fig
 
@@ -471,11 +507,6 @@ def _pool_field(
         if value:
             return str(value)
     return ""
-
-
-def _teams_of(game: str) -> list[str]:
-    """The matchup's two team codes, sorted — the two anchored sides."""
-    return sorted(set(game.split("/"))) if game else []
 
 
 def _positions(
@@ -615,14 +646,17 @@ def _add_node_trace(
     info: dict[str, dict],
     sizes: dict[str, float],
     team_color: dict[str, str],
+    captions: Mapping[str, str],
     *,
     active: bool,
     label_size: int = _LABEL_FONT_SIZE,
 ) -> None:
     """One scatter trace of stars: active = full team color, candidate = desaturated/dim.
 
-    Both active and candidate stars carry their caption; active stars render on top.
-    The active/candidate signal is the star's fill color and opacity, not the label.
+    ``captions`` (``constellation_spacing.caption_positions``) decides which stars
+    are labelled and where; the rest carry empty text and read from the hover card.
+    Both active and candidate stars are eligible and active stars render on top —
+    the active/candidate signal is the star's fill color and opacity, never the label.
     """
     if not keys:
         return
@@ -640,8 +674,8 @@ def _add_node_trace(
                 "color": colors,
                 "opacity": 1.0 if active else _INACTIVE_ALPHA,
             },
-            text=[info[k]["label"] for k in keys],
-            textposition="top center",
+            text=[info[k]["label"] if k in captions else "" for k in keys],
+            textposition=[captions.get(k, "top center") for k in keys],
             textfont={
                 "color": _ACTIVE_LABEL_COLOR if active else GRAY,
                 "size": label_size,

@@ -1,25 +1,44 @@
-"""Pins for the constellation's readability pass: the capped star set and the
-minimum-distance spacing lattice.
+"""Pins for the constellation's readability pass: the capped star set, the
+minimum-distance spacing lattice, and sparse captions.
 
 A busy game offers far more model-liked legs than a 980x360 box can hold, so the
 map draws a bounded default set — the strongest by Kelly edge, both teams
 represented, no player owning it — and everything else waits behind *look
 deeper*. What is drawn then goes through ``settle``: the biggest stars keep their
-wanted position to the float and only a star that would collide moves, to the
-nearest free lattice cell on its own team's half.
+template vertices to the float and only a star that would collide moves, to the
+nearest free lattice cell on its own team's half. Captions stop being universal:
+the slip's stars plus the biggest few candidates carry one, and only where its
+box clears every glyph and every caption already accepted.
 """
 
 from __future__ import annotations
 
+import itertools
 import math
 
 import pandas as pd
 
+from sportstradamus.dashboard.components.constellation import (
+    _LABEL_FONT_SIZE,
+    constellation_figure,
+)
+from sportstradamus.dashboard.components.constellation_shapes import shape_catalog
+from sportstradamus.dashboard.components.constellation_slate import (
+    DECORATION,
+    SHAPE_SCALE,
+    SHAPE_SCALE_MOBILE,
+    slate_shapes,
+)
 from sportstradamus.dashboard.components.constellation_spacing import (
     _CELL_PX,
+    _CHAR_WIDTH_EM,
     _FRAME_INSET,
+    _LINE_HEIGHT_EM,
     _STAR_GAP_PX,
+    CAPTION_TOP_K,
     DEFAULT_STARS,
+    PX_PER_UNIT,
+    PX_PER_UNIT_MOBILE,
     X_RANGE,
     Y_RANGE,
     default_stars,
@@ -28,6 +47,7 @@ from sportstradamus.dashboard.components.constellation_spacing import (
 
 _PX = (100.0, 100.0)  # round px-per-unit so the primitive's distances are hand-checkable
 _TEAMS = ("NYK", "SAS")
+_HOURGLASS = shape_catalog()["templates"]["the-hourglass"]
 
 
 def _row(player: str, team: str, kelly: float, market: str = "PTS") -> dict:
@@ -52,6 +72,28 @@ def _ladder(n: int, *, top: float = 0.9, step: float = 0.05) -> pd.DataFrame:
 
 def _key(i: int) -> str:
     return f"P{i:02d}|PTS|Over"
+
+
+def _node_traces(fig) -> list:
+    return [t for t in fig.data if t.mode and "markers" in t.mode and t.name != DECORATION]
+
+
+def _stars(fig) -> dict:
+    """key -> (position, marker px, caption text, textposition)."""
+    stars = {}
+    for trace in _node_traces(fig):
+        rows = zip(
+            trace.customdata,
+            trace.x,
+            trace.y,
+            trace.marker.size,
+            trace.text,
+            trace.textposition,
+            strict=True,
+        )
+        for card, x, y, size, text, place in rows:
+            stars[card[0]] = ((float(x), float(y)), float(size), str(text), str(place))
+    return stars
 
 
 def test_a_clear_anchor_is_returned_exactly():
@@ -141,3 +183,76 @@ def test_default_set_caps_legs_per_player():
     assert len(chosen) == DEFAULT_STARS
     assert len([key for key in chosen if key.startswith("Hot|")]) == 2
     assert teams.count("NYK") >= 4 and teams.count("SAS") >= 4
+
+
+def test_in_slip_leg_beyond_the_cut_is_still_a_star():
+    pool = _ladder(15)
+    weakest = pool.to_dict("records")[14]
+    fig = constellation_figure([weakest], None, pool)
+    active = next(t for t in fig.data if t.name == "active")
+    assert [card[0] for card in active.customdata] == [_key(14)]
+
+
+def test_main_stars_keep_their_clearance_on_both_viewports():
+    pool = _ladder(15)
+    for mobile, px in ((False, PX_PER_UNIT), (True, PX_PER_UNIT_MOBILE)):
+        stars = _stars(constellation_figure([], None, pool, shape=_HOURGLASS, mobile=mobile))
+        assert len(stars) == DEFAULT_STARS
+        for one, other in itertools.combinations(sorted(stars), 2):
+            (ax, ay), size_a, *_ = stars[one]
+            (bx, by), size_b, *_ = stars[other]
+            apart = math.hypot((ax - bx) * px[0], (ay - by) * px[1])
+            assert apart >= (size_a + size_b) / 2 + _STAR_GAP_PX - 1e-9, (one, other, mobile)
+
+
+def test_spacing_never_moves_an_uncrowded_star():
+    pool = pd.DataFrame(
+        [
+            _row("A", "NYK", 0.4),
+            _row("B", "SAS", 0.3, "REB"),
+            _row("C", "NYK", 0.2, "AST"),
+            _row("D", "SAS", 0.1, "BLK"),
+        ]
+    )
+    frame = {
+        (round(v["x"] * scale[0], 5), round(v["y"] * scale[1], 5))
+        for scale in (SHAPE_SCALE, SHAPE_SCALE_MOBILE)
+        for v in _HOURGLASS["vertices"]
+    }
+    for mobile in (False, True):
+        stars = _stars(constellation_figure([], None, pool, shape=_HOURGLASS, mobile=mobile))
+        for (x, y), *_ in stars.values():
+            assert (round(x, 5), round(y, 5)) in frame
+
+
+def test_captions_are_the_slip_plus_the_biggest_candidates():
+    pool = _ladder(15)
+    picked = pool.to_dict("records")[11]  # the weakest leg the cut still draws
+    stars = _stars(constellation_figure([picked], None, pool, shape=_HOURGLASS))
+    captioned = {key for key, (_, _, text, _) in stars.items() if text}
+    candidates = sorted((k for k in stars if k != _key(11)), key=lambda k: -stars[k][1])
+    assert captioned <= {_key(11), *candidates[:CAPTION_TOP_K]}
+    assert _key(11) in captioned  # the slip's own star is captioned whatever its size
+    assert len(stars) > len(captioned)  # and the rest read from the hover card
+
+
+def test_caption_boxes_never_overlap():
+    stars = _stars(constellation_figure([], None, _ladder(15), shape=_HOURGLASS))
+    boxes = []
+    for (x, y), size, text, place in stars.values():
+        left, bottom = x * PX_PER_UNIT[0], y * PX_PER_UNIT[1]
+        boxes.append((left - size / 2, bottom - size / 2, left + size / 2, bottom + size / 2))
+        if not text:
+            continue
+        width = len(text) * _CHAR_WIDTH_EM * _LABEL_FONT_SIZE
+        height = _LINE_HEIGHT_EM * _LABEL_FONT_SIZE
+        centre = bottom + (size / 2 + height / 2) * (1 if place == "top center" else -1)
+        boxes.append((left - width / 2, centre - height / 2, left + width / 2, centre + height / 2))
+    for one, other in itertools.combinations(boxes, 2):
+        assert one[0] >= other[2] or one[2] <= other[0] or one[1] >= other[3] or one[3] <= other[1]
+
+
+def test_slate_shapes_classify_the_capped_set():
+    offers = pd.DataFrame([_row(f"P{i:02d}", _TEAMS[i % 2], 0.9 - i * 0.02) for i in range(30)])
+    shape = slate_shapes(offers, None, "2026-09-04")["NYK/SAS"]
+    assert shape.n_supernodes <= DEFAULT_STARS
