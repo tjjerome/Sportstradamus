@@ -85,6 +85,11 @@ _LEAGUE_POSITIONS = {
     "WNBA": ["G", "F", "C"],
 }
 
+# The MLB correlation matrices key hitters B1..B9, so a leg whose resolved slot
+# falls outside the lineup — a pitcher, or a hitter get_depth could not place —
+# takes the pitcher label.
+_MLB_LINEUP_SLOTS: int = 9
+
 
 def _team_slice(corr_df: pd.DataFrame, team: str) -> pd.Series:
     """Return the R series for one team from a stratified correlation DataFrame.
@@ -306,12 +311,14 @@ def _build_correlation_matrices(
 
 
 def _resolve_player_positions(league_df, league, stat_data):
-    """Map each leg's numeric depth-chart slot to a position+rank label.
+    """Label each leg with the position+rank the correlation matrices are keyed by.
 
     Non-MLB: drop combo / ``vs.`` legs, rank players within (team, position) by
     the league's usage profile, and suffix the rank (``G1``/``G2``/...). MLB:
-    batting order to ``B{n}`` (or ``P`` for pitchers). Returns the updated
-    ``league_df`` (the non-MLB branch drops rows, so the caller must rebind).
+    re-resolve each game date's batting order through ``stat_data`` and label the
+    slot ``B1``..``B9``, or ``P`` for a pitcher or an unresolved hitter. Returns
+    the updated ``league_df`` (the non-MLB branch drops rows, so the caller must
+    rebind).
     """
     if league != "MLB":
         league_df["Player position"] = league_df["Player position"].apply(
@@ -352,13 +359,22 @@ def _resolve_player_positions(league_df, league, stat_data):
         player_df = player_df["Player position"].to_dict()
         league_df["Player position"] = league_df.Player.map(player_df)
     else:
-        league_df["Player position"] = league_df["Player position"].apply(
-            lambda x: (
-                ("B" + str(x) if x > 0 else "P")
-                if isinstance(x, int)
-                else ["B" + str(i) if i > 0 else "P" for i in x]
+        # The offer column is 0 on every MLB leg — playerProfile["position"] is filled
+        # only for non-MLB leagues — and the depth process_offers resolved has since
+        # been overwritten by _game_context from posted lineups alone, so it is all
+        # zeros on any run preceding the lineup post. Re-resolve it per game date.
+        slot_labels = {}
+        for date, date_df in league_df.groupby("Date"):
+            stat_data.get_depth(
+                date_df[["Player", "Team"]].drop_duplicates().to_dict("records"),
+                pd.to_datetime(date).date(),
             )
-        )
+            depth = stat_data.playerProfile["depth"]
+            for idx, player in date_df.Player.items():
+                slots = [depth.get(p, 0) for p in player.replace(" vs. ", " + ").split(" + ")]
+                labels = [f"B{int(s)}" if 1 <= s <= _MLB_LINEUP_SLOTS else "P" for s in slots]
+                slot_labels[idx] = labels[0] if len(labels) == 1 else labels
+        league_df["Player position"] = pd.Series(slot_labels, dtype=object)
     return league_df
 
 

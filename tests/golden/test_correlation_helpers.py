@@ -29,6 +29,7 @@ so the correlation arithmetic is pinned on real values with no SciPy randomness.
 
 from __future__ import annotations
 
+import datetime
 import importlib.resources as pkg_resources
 
 import numpy as np
@@ -39,10 +40,12 @@ from sportstradamus import data
 from sportstradamus.leg_schema import LEG_FIELDS
 from sportstradamus.prediction import correlation
 from sportstradamus.prediction.correlation import (
+    _build_cmarket,
     _build_correlation_matrices,
     _build_game_corr_map,
     _collect_game_corr,
     _leg_pair_corr_boost,
+    _resolve_player_positions,
     find_correlation,
 )
 
@@ -443,6 +446,96 @@ def test_find_correlation_writes_position_labels_wnba() -> None:
     assert (labels != "").all()  # no combo legs in this fixture ⇒ every leg resolves
     # WNBA depth labels are a position letter (G/F/C) plus a usage rank digit.
     assert labels.str.match(r"^[GFC]\d+$").all()
+
+
+# --- MLB batting slots (correlation-matrix keys) ----------------------------
+
+
+class _FakeMLBStats:
+    """Stand-in for ``StatsMLB`` in the MLB branch of ``_resolve_player_positions``.
+
+    ``get_depth`` records the arguments it was handed and writes the batting
+    slots onto ``playerProfile`` the way the real method does — a dict pandas
+    aligns on the profile index, so a player the profile does not carry stays
+    absent from the ``depth`` column.
+    """
+
+    def __init__(self, slots: dict[str, int]) -> None:
+        self.playerProfile = pd.DataFrame(index=pd.Index(list(slots), name="playerName"))
+        self._slots = slots
+        self.depth_calls: list[tuple[list[dict], object]] = []
+
+    def get_depth(self, offers, date):
+        self.depth_calls.append((offers, date))
+        self.playerProfile["depth"] = self._slots
+
+
+# "Player position" is 0 on every real MLB leg (playerProfile["position"] is only
+# filled by the non-MLB get_depth), so the fixture pins it there: the branch has to
+# resolve the batting slot from the stats object, not from the column.
+def _mlb_legs() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "Player": player,
+                "Team": team,
+                "Date": "2026-09-04",
+                "Market": "hits",
+                "Player position": 0,
+            }
+            for player, team in [
+                ("Kyle Tucker", "CHC"),
+                ("Nico Hoerner", "CHC"),
+                ("Shota Imanaga", "CHC"),
+                ("Kyle Tucker + Shota Imanaga", "CHC"),
+                ("Oneil Cruz", "PIT"),
+            ]
+        ]
+    )
+
+
+def test_resolve_player_positions_mlb_labels_batting_slots() -> None:
+    """MLB slots come from ``get_depth``, not the always-zero offer column.
+
+    Reading the offer column labeled every MLB leg ``P``, so every batter pair
+    looked up a missing correlation row and scored rho 0. Slots 1-9 become
+    ``B1``..``B9``; a pitcher (slot 0) and a hitter the profile never resolved
+    both fall through to ``P``. Combo legs keep the one-label-per-component list
+    shape ``_build_cmarket`` expects.
+    """
+    stat_data = _FakeMLBStats({"Kyle Tucker": 3, "Nico Hoerner": 9, "Shota Imanaga": 0})
+
+    resolved = _resolve_player_positions(_mlb_legs(), "MLB", stat_data)
+
+    assert list(resolved["Player position"]) == ["B3", "B9", "P", ["B3", "P"], "P"]
+    assert len(stat_data.depth_calls) == 1  # once per game date, not once per leg
+    records, call_date = stat_data.depth_calls[0]
+    assert records == [
+        {"Player": "Kyle Tucker", "Team": "CHC"},
+        {"Player": "Nico Hoerner", "Team": "CHC"},
+        {"Player": "Shota Imanaga", "Team": "CHC"},
+        {"Player": "Kyle Tucker + Shota Imanaga", "Team": "CHC"},
+        {"Player": "Oneil Cruz", "Team": "PIT"},
+    ]
+    # get_depth compares `date < datetime.today().date()`, which raises on a datetime.
+    assert type(call_date) is datetime.date
+    assert call_date == datetime.date(2026, 9, 4)
+
+
+def test_build_cmarket_mlb_keys_by_batting_slot() -> None:
+    """cMarket tokens must key the way the MLB corr parquets do: ``B{n}``/``P``."""
+    stat_data = _FakeMLBStats({"Kyle Tucker": 3, "Nico Hoerner": 9, "Shota Imanaga": 0})
+    resolved = _resolve_player_positions(_mlb_legs(), "MLB", stat_data)
+
+    cmarket = _build_cmarket(resolved, "MLB", {})["cMarket"]
+
+    assert list(cmarket) == [
+        ["B3.hits"],
+        ["B9.hits"],
+        ["P.hits"],
+        ["B3.hits", "P.hits"],
+        ["P.hits"],
+    ]
 
 
 # --- corr-slice collector (dashboard rail / constellation) ------------------
