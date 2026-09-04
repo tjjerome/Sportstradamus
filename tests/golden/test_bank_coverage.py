@@ -276,12 +276,24 @@ _WHY_SLOTS = {
     ("why", "edge", "book_back"): {"model_pct", "book_pct", "side", "gap"},
     ("why", "ev", "solo"): {"ev"},
     ("why", "ev", "vs_book"): {"ev", "book_ev"},
+    ("why", "lineup", "platoon_edge"): {"slot", "throws"},
+    ("why", "lineup", "same_side"): {"slot", "throws"},
+    ("why", "lineup", "switch"): {"slot", "throws"},
+    ("why", "lineup", "slot_only"): {"slot"},
+    ("why", "lineup_usual", "platoon_edge"): {"slot", "throws"},
+    ("why", "lineup_usual", "same_side"): {"slot", "throws"},
+    ("why", "lineup_usual", "switch"): {"slot", "throws"},
+    ("why", "lineup_usual", "slot_only"): {"slot"},
     ("dek", "cluster", None): {"n", "rho"},
     ("dek", "form", "above"): {"p", "dev", "line"},
     ("dek", "form", "below"): {"p", "dev", "line"},
     ("dek", "form", "at_line"): {"p", "line"},
     ("dek", "matchup", "favorable"): {"p"},
     ("dek", "matchup", "tough"): {"p"},
+    ("dek", "lineup", "posted"): {"p", "slot"},
+    ("dek", "lineup", "posted_hand"): {"p", "slot", "throws"},
+    ("dek", "lineup", "usual"): {"p", "slot"},
+    ("dek", "lineup", "usual_hand"): {"p", "slot", "throws"},
 }
 
 
@@ -311,6 +323,13 @@ def test_why_bank_pronouns():
     assert all(isinstance(v, str) and v for v in pronouns.values())
 
 
+def test_why_bank_hands():
+    """Both throwing hands decode to a word — a missing key renders "a -hander"."""
+    hands = why_bank()["hands"]
+    assert set(hands) == {"L", "R"}
+    assert all(isinstance(v, str) and v.islower() for v in hands.values())
+
+
 def test_no_prose_literals_in_stories_source():
     """Prose lives in the JSON banks, never in code (owner directive).
 
@@ -320,7 +339,8 @@ def test_no_prose_literals_in_stories_source():
     the bank contract); the eyeball pass remains the real gate.
     """
     slot_re = re.compile(
-        r"\{(?:p|g|n|team|grp|opp|dev|line|pronoun|model_pct|book_pct|gap|side|ev|book_ev|rho)\}"
+        r"\{(?:p|g|n|team|grp|opp|dev|line|pronoun|model_pct|book_pct"
+        r"|gap|side|ev|book_ev|rho|slot|throws)\}"
     )
     package_dir = Path(engine.__file__).parent
     for source_path in sorted(package_dir.glob("*.py")):

@@ -7,7 +7,8 @@ the numbers, and rotates the variant by an md5 of the row key — repeat users
 see varied phrasing that never changes for the same row and date. ``Avg 5`` /
 ``Avg H2H`` are stored as average-minus-line deviations; the edge clause
 prefers explicit ``Win Prob`` vs ``Market Prob`` and falls back to the
-model/book EV multiples (``Model EV`` / ``Market EV``, payout x where > 1.0 is +EV).
+model/book EV multiples (``Model EV`` / ``Market EV``, payout x where > 1.0 is +EV);
+the MLB lineup clauses read the columns ``stories.lineup`` attaches.
 """
 
 import hashlib
@@ -19,6 +20,7 @@ import pandas as pd
 from sportstradamus.leg_schema import leg_label
 from sportstradamus.prediction.stories.bank import why_bank
 from sportstradamus.prediction.stories.legs import lower_leg, offer_index
+from sportstradamus.prediction.stories.lineup import batting_slot
 
 # Implied-probability gap (model vs book hit prob) below which the two sides
 # effectively agree and the edge clause is dropped.
@@ -50,7 +52,8 @@ def attach_offer_why(offers: pd.DataFrame) -> pd.DataFrame:
     rows missing a feature simply contribute fewer clauses; a row with no usable
     columns gets ``""``. Built only from columns already on ``current_offers``
     (``Avg 5``, ``Avg H2H``, ``Line``, ``DVPOA``, ``Model P`` / ``Books`` /
-    ``Model``, ``Bet``). The frame is mutated in place and returned.
+    ``Model``, ``Bet``, ``Position`` / ``Bats`` / ``Opp Hand`` / ``Lineup``).
+    The frame is mutated in place and returned.
     """
     if offers.empty:
         offers["Why"] = pd.Series(dtype=str)
@@ -60,7 +63,16 @@ def attach_offer_why(offers: pd.DataFrame) -> pd.DataFrame:
 
 
 def _offer_case(row: pd.Series) -> str:
-    clauses = [c for c in (_form_clause(row), _matchup_clause(row), _edge_clause(row)) if c]
+    clauses = [
+        c
+        for c in (
+            _form_clause(row),
+            _matchup_clause(row),
+            _lineup_clause(row),
+            _edge_clause(row),
+        )
+        if c
+    ]
     if not clauses:
         return ""
     sentence = ", ".join(clauses)
@@ -72,6 +84,12 @@ def _val(row: pd.Series, col: str) -> float | None:
         return None
     v = row[col]
     return None if pd.isna(v) else float(v)
+
+
+def _text(row: Mapping, col: str) -> str:
+    """A string column read where missing and NaN both mean "no fact"."""
+    v = row.get(col)
+    return "" if v is None or pd.isna(v) else str(v)
 
 
 def _pick(variants: Sequence[str], seed: str) -> str:
@@ -123,6 +141,33 @@ def _matchup_clause(row: pd.Series) -> str:
         return ""
     favorable = (dvpoa > 0) == (row.get("Bet") == "Over")
     return _why_variant(row, "matchup", "favorable" if favorable else "tough")
+
+
+def _lineup_clause(row: pd.Series) -> str:
+    """Batting slot, plus the platoon read against tonight's probable starter.
+
+    A ``"usual"`` slot is the modal one ``get_depth`` fell back to before the card
+    is posted, so it reads as habit ("usually 3rd") from the ``lineup_usual``
+    family rather than asserting tonight's order. Guarded on ``Lineup`` as well as
+    the slot label: ``attach_lineup_columns`` fills it only for MLB hitters, which
+    keeps an NBA bench label (``B1`` is a bench rank there) out of baseball prose.
+    """
+    slot, lineup = batting_slot(row.get("Position")), _text(row, "Lineup")
+    if slot is None or not lineup:
+        return ""
+    throws = _text(row, "Opp Hand")
+    clause = "lineup" if lineup == "posted" else "lineup_usual"
+    return _why_variant(row, clause, _lineup_branch(_text(row, "Bats"), throws)).format(
+        slot=slot, throws=why_bank()["hands"].get(throws, "")
+    )
+
+
+def _lineup_branch(bats: str, throws: str) -> str:
+    if not bats or not throws:
+        return "slot_only"
+    if bats == "S":
+        return "switch"
+    return "same_side" if bats == throws else "platoon_edge"
 
 
 def _edge_clause(row: pd.Series) -> str:
@@ -188,7 +233,7 @@ def _cluster_clause(core_bet_ids: Sequence[int], sctx, seed_tail: str) -> list[s
 
 
 def _anchor_clauses(player: str, match: Mapping, seed_tail: str) -> list[str]:
-    """Form + matchup dek clauses for the core's anchor leg, each fact-guarded."""
+    """Form, matchup, and lineup dek clauses for the core's anchor leg, each fact-guarded."""
     bank = why_bank()["dek"]
     clauses = []
     avg5, line = match.get("Avg 5"), match.get("Line")
@@ -207,7 +252,21 @@ def _anchor_clauses(player: str, match: Mapping, seed_tail: str) -> list[str]:
                 f"dek.matchup|{seed_tail}",
             ).format(p=player)
         )
+    lineup_clause = _dek_lineup_clause(player, match, seed_tail)
+    if lineup_clause:
+        clauses.append(lineup_clause)
     return clauses
+
+
+def _dek_lineup_clause(player: str, match: Mapping, seed_tail: str) -> str:
+    """The anchor's batting slot, said as posted or usual and named with the starter's hand."""
+    slot, lineup = batting_slot(match.get("Position")), _text(match, "Lineup")
+    if slot is None or not lineup:
+        return ""
+    throws = why_bank()["hands"].get(_text(match, "Opp Hand"), "")
+    branch = f"{lineup}_hand" if throws else lineup
+    template = _pick(why_bank()["dek"]["lineup"][branch], f"dek.lineup|{seed_tail}")
+    return template.format(p=player, slot=slot, throws=throws)
 
 
 def _dek_anchor(

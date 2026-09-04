@@ -12,6 +12,8 @@ half-total (the two sides sum to the game total) per the v2 context contract.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pandas as pd
 
 from sportstradamus.prediction.stories import (
@@ -19,6 +21,9 @@ from sportstradamus.prediction.stories import (
     attach_offer_why,
     attach_parlay_theses,
 )
+from sportstradamus.prediction.stories.bank import why_bank
+from sportstradamus.prediction.stories.lineup import attach_lineup_columns, batting_slot
+from sportstradamus.prediction.stories.why import story_dek
 
 _DATE = "2026-06-13"
 
@@ -556,3 +561,191 @@ def test_why_rotation_deterministic():
     a = attach_offer_why(_OFFERS.copy())["Why"].tolist()
     b = attach_offer_why(_OFFERS.copy())["Why"].tolist()
     assert a == b
+
+
+# Two Luis Garcias, a batter and a pitcher — the registry is id-keyed, so a
+# single name map would let the pitcher shadow the hitter's batting side. The two
+# Max Muncys are the same collision within one role, and they disagree.
+_MLB_PLAYERS = {
+    592450: {"name": "Aaron Judge", "bats": "R"},
+    605141: {"name": "Mookie Betts", "bats": "R"},
+    677651: {"name": "Luis Garcia", "bats": "L"},
+    571970: {"name": "Max Muncy", "bats": "L"},
+    676059: {"name": "Max Muncy", "bats": "R"},
+    543037: {"name": "Gerrit Cole", "throws": "R"},
+    472610: {"name": "Luis Garcia", "throws": "R"},
+}
+# NYY and HOU have a probable starter and a posted card; LAD has neither yet.
+_MLB_UPCOMING = {
+    "NYY": {"Opponent Pitcher": "Gerrit Cole", "Batting Order": ["Aaron Judge"]},
+    "HOU": {"Opponent Pitcher": "Luis Garcia", "Batting Order": ["Mookie Betts"]},
+    "LAD": {"Opponent Pitcher": "", "Batting Order": []},
+}
+
+
+def _fake_mlb() -> SimpleNamespace:
+    """The two ``StatsMLB`` attributes ``attach_lineup_columns`` reads."""
+    return SimpleNamespace(players=_MLB_PLAYERS, upcoming_games=_MLB_UPCOMING)
+
+
+def _mlb_offer(*, position="B3", bats="R", opp_hand="L", lineup="posted") -> pd.DataFrame:
+    """One MLB hitter offer already carrying the lineup columns."""
+    return pd.DataFrame(
+        [
+            {
+                "League": "MLB",
+                "Date": _DATE,
+                "Team": "NYY",
+                "Player": "Aaron Judge",
+                "Market": "total bases",
+                "Bet": "Over",
+                "Line": 1.5,
+                "Avg 5": 0.6,
+                "Position": position,
+                "Bats": bats,
+                "Opp Hand": opp_hand,
+                "Lineup": lineup,
+            }
+        ]
+    )
+
+
+# A posted slot is tonight's card; a usual one is only the modal slot get_depth
+# fell back to, and each has its own clause family.
+_LINEUP_FAMILIES = (("posted", "lineup"), ("usual", "lineup_usual"))
+
+
+def _lineup_variants(family: str, branch: str, **slots: str) -> set[str]:
+    return {variant.format(**slots) for variant in why_bank()["why"][family][branch]}
+
+
+def test_batting_slot_maps_only_real_lineup_slots():
+    """The seam with correlation.py's Position labels: B1-B9 are slots, nothing else is."""
+    assert [batting_slot(f"B{n}") for n in range(1, 10)] == [
+        "leadoff",
+        "2nd",
+        "3rd",
+        "4th",
+        "5th",
+        "6th",
+        "7th",
+        "8th",
+        "9th",
+    ]
+    assert all(batting_slot(p) is None for p in ("P", "B0", "B10", "", ["B1", "B2"]))
+
+
+def test_lineup_clause_reads_the_platoon_edge():
+    """A lefty batting 3rd against a right-hander gets both the slot and the split."""
+    for lineup, family in _LINEUP_FAMILIES:
+        why = attach_offer_why(_mlb_offer(bats="L", opp_hand="R", lineup=lineup))["Why"].iloc[0]
+        assert "3rd" in why, lineup
+        variants = _lineup_variants(family, "platoon_edge", slot="3rd", throws="right")
+        assert any(v in why for v in variants), why
+
+
+def test_lineup_clause_reads_a_same_side_matchup():
+    for lineup, family in _LINEUP_FAMILIES:
+        why = attach_offer_why(_mlb_offer(bats="R", opp_hand="R", lineup=lineup))["Why"].iloc[0]
+        variants = _lineup_variants(family, "same_side", slot="3rd", throws="right")
+        assert any(v in why for v in variants), why
+
+
+def test_lineup_clause_calls_out_a_switch_hitter():
+    for lineup, family in _LINEUP_FAMILIES:
+        why = attach_offer_why(_mlb_offer(bats="S", opp_hand="R", lineup=lineup))["Why"].iloc[0]
+        variants = _lineup_variants(family, "switch", slot="3rd", throws="right")
+        assert any(v in why for v in variants), why
+
+
+def test_lineup_clause_without_a_probable_starter_says_only_the_slot():
+    for lineup, family in _LINEUP_FAMILIES:
+        why = attach_offer_why(_mlb_offer(opp_hand="", lineup=lineup))["Why"].iloc[0]
+        assert any(v in why for v in _lineup_variants(family, "slot_only", slot="3rd")), why
+        assert "-hander" not in why
+
+
+def test_usual_slot_never_asserts_tonights_order():
+    """The modal slot is habit, so none of the posted-card wording may appear."""
+    why = attach_offer_why(_mlb_offer(lineup="usual"))["Why"].iloc[0]
+    posted = _lineup_variants("lineup", "platoon_edge", slot="3rd", throws="left")
+    assert not any(v in why for v in posted), why
+
+
+def test_lineup_clause_ignores_a_nan_opposing_hand():
+    """An unresolved starter arrives as NaN off the parquet, not as a blank string."""
+    why = attach_offer_why(_mlb_offer(opp_hand=float("nan")))["Why"].iloc[0]
+    assert any(v in why for v in _lineup_variants("lineup", "slot_only", slot="3rd")), why
+
+
+def test_pitcher_case_is_unchanged_by_the_lineup_columns():
+    """A pitcher carries no batting slot, so his case is byte-identical to the pre-WS-F one."""
+    pitcher = _mlb_offer(position="P", bats="", opp_hand="", lineup="")
+    before = attach_offer_why(pitcher.drop(columns=["Bats", "Opp Hand", "Lineup"]))["Why"].iloc[0]
+    assert before
+    assert attach_offer_why(pitcher)["Why"].iloc[0] == before
+
+
+def test_dek_names_the_posted_batting_slot():
+    """A hitter-anchored story's subhead carries the batting order and the starter's hand.
+
+    ``story_dek`` reads only ``date``, ``bet_df``, and ``g.p_model`` off the
+    scoring context for a single-leg core (the cluster clause needs two legs).
+    """
+    sctx = SimpleNamespace(
+        date=_DATE,
+        bet_df={0: {"Player": "Aaron Judge", "Bet": "Over", "Line": 1.5, "Market": "total bases"}},
+        g=SimpleNamespace(p_model=[0.61]),
+    )
+    dek = story_dek([0], sctx, _mlb_offer())
+    assert "Aaron Judge" in dek
+    assert "3rd" in dek and "left" in dek
+
+
+def test_attach_lineup_columns_reads_the_posted_order_and_probable_starter():
+    """Posted vs usual, the no-starter blank, and the rows that carry no lineup at all.
+
+    The NBA row is the reason the League check exists: ``B1`` is a bench label
+    there, not a leadoff hitter. The two Luis Garcia rows cover the cross-role
+    name collision from both sides — the hitter keeps his own batting side, and
+    the pitcher of that name still resolves as a starter's throwing hand. Max
+    Muncy is the same-role collision: two batters, opposite sides, so the side is
+    dropped rather than guessed at.
+    """
+    offers = pd.DataFrame(
+        [
+            {"League": "MLB", "Team": "NYY", "Player": "Aaron Judge", "Position": "B3"},
+            {"League": "MLB", "Team": "NYY", "Player": "Mookie Betts", "Position": "B1"},
+            {"League": "MLB", "Team": "LAD", "Player": "Mookie Betts", "Position": "B2"},
+            {"League": "MLB", "Team": "NYY", "Player": "Luis Garcia", "Position": "B4"},
+            {"League": "MLB", "Team": "NYY", "Player": "Max Muncy", "Position": "B5"},
+            {"League": "MLB", "Team": "HOU", "Player": "Mookie Betts", "Position": "B2"},
+            {"League": "MLB", "Team": "NYY", "Player": "Gerrit Cole", "Position": "P"},
+            {"League": "NBA", "Team": "BOS", "Player": "Jayson Tatum", "Position": "B1"},
+        ]
+    )
+    out = attach_lineup_columns(offers, {"MLB": _fake_mlb()})
+    assert out[["Bats", "Opp Hand", "Lineup"]].to_numpy().tolist() == [
+        ["R", "R", "posted"],
+        ["R", "R", "usual"],
+        ["R", "", "usual"],
+        ["L", "R", "usual"],
+        ["", "R", "usual"],
+        ["R", "R", "posted"],
+        ["", "", ""],
+        ["", "", ""],
+    ]
+
+
+def test_attach_lineup_columns_blanks_when_mlb_is_not_loaded():
+    """Out of season MLB is never loaded, so every row keeps blank lineup columns."""
+    offers = pd.DataFrame(
+        [{"League": "MLB", "Team": "NYY", "Player": "Aaron Judge", "Position": "B3"}]
+    )
+    out = attach_lineup_columns(offers, {"NBA": _fake_mlb()})
+    assert out[["Bats", "Opp Hand", "Lineup"]].to_numpy().tolist() == [["", "", ""]]
+
+
+def test_attach_lineup_columns_on_empty_offers_still_adds_the_columns():
+    out = attach_lineup_columns(pd.DataFrame(), {"MLB": _fake_mlb()})
+    assert {"Bats", "Opp Hand", "Lineup"} <= set(out.columns)

@@ -114,8 +114,19 @@ _STAT_CATEGORY = {
 
 # Offer columns kept per offer_index record, beyond the (Player, Bet, Line)
 # match key — read by enrich_legs and the story dek's anchor clauses
-# ("Avg 5" / "DVPOA" exist only for the latter).
-_OFFER_ENRICH_COLS = ("Market", "Game", "Team", "Position", "Win Prob", "Avg 5", "DVPOA")
+# ("Avg 5", "DVPOA", "Opp Hand", and "Lineup" exist only for the latter; the
+# dek says which batting slot and against which hand, never the hitter's side).
+_OFFER_ENRICH_COLS = (
+    "Market",
+    "Game",
+    "Team",
+    "Position",
+    "Win Prob",
+    "Avg 5",
+    "DVPOA",
+    "Opp Hand",
+    "Lineup",
+)
 
 
 def _stat_category(market: str) -> str:
