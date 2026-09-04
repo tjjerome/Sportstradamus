@@ -48,7 +48,7 @@ def _format_countdown(minutes: float) -> str:
 def _render_shape_legend() -> None:
     """Compact 5-column glyph + name + caption row, shared vocabulary for the cards below."""
     cols = st.columns(len(SHAPE_CAPTION))
-    for col, (shape, sub) in zip(cols, SHAPE_CAPTION.items(), strict=False):
+    for col, (shape, sub) in zip(cols, SHAPE_CAPTION.items(), strict=True):
         with col:
             st.markdown(game_shape_glyph(shape, size=_LEGEND_GLYPH_SIZE), unsafe_allow_html=True)
             st.caption(f"**{SHAPE_DISPLAY[shape]}**  \n{sub}")

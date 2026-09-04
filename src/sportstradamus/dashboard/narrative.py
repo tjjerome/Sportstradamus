@@ -15,8 +15,8 @@ from sportstradamus.dashboard import theme
 # Game-shape gloss, shared by the Games banner and the deep-dive context strip.
 SHAPE_HELP = (
     "Projected game script: shootout (high total), grind (low total), blowout "
-    "(lopsided), coinflip (tight), or clouded (no line quoted yet). It tilts which "
-    "counting stats run hot."
+    "(lopsided), coinflip (tight), or clouded (no moneyline quoted yet). It tilts "
+    "which counting stats run hot."
 )
 
 # Display name and legend caption per pipeline shape, in the Tonight legend's

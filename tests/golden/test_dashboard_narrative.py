@@ -209,13 +209,13 @@ def test_match_label_home_uses_v():
 def test_shape_display_renames_the_even_sentinel_to_clouded():
     assert SHAPE_DISPLAY["even"] == "Clouded"
     assert SHAPE_CAPTION["even"] == "unquoted"
-    # Same five pipeline shapes, in the Tonight legend's left-to-right order.
-    assert list(SHAPE_DISPLAY) == list(SHAPE_CAPTION)
-    assert set(SHAPE_DISPLAY) == {"shootout", "blowout", "coinflip", "even", "grind"}
+    # Tonight's legend takes its column count and left-to-right order from these keys.
+    assert list(SHAPE_DISPLAY) == ["shootout", "blowout", "coinflip", "even", "grind"]
+    assert list(SHAPE_CAPTION) == list(SHAPE_DISPLAY)
 
 
 def test_shape_help_glosses_the_clouded_shape():
-    assert "clouded (no line quoted yet)" in SHAPE_HELP
+    assert "clouded (no moneyline quoted yet)" in SHAPE_HELP
 
 
 def test_storyless_prophecy_names_the_favored_legs():

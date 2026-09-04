@@ -152,6 +152,37 @@ def test_app_sport_switch_rerenders_without_exception():
     assert at.session_state["sport"] == "NBA"
 
 
+def test_tonight_card_names_favored_legs_when_no_story_binds_them(monkeypatch, tmp_path):
+    """A storyless game with model-liked legs says so instead of claiming thin edges.
+
+    Three offers in one game, two of them favored (``Kelly > 0``, distinct
+    Player/Market/Bet), with the story and parlay snapshots pointed at absent files so
+    ``narrative.game_headline`` returns "". The counts differ on purpose: the card must
+    print its ``favored`` 2, never the ``offer_count`` 3 computed a line away.
+    """
+    rows = [
+        {**_OFFER_ROWS[0], "Kelly": 0.03},
+        {**_OFFER_ROWS[0], "Player": "K. Towns", "Market": "REB", "Kelly": 0.02},
+        {**_OFFER_ROWS[0], "Player": "M. Bridges", "Market": "AST", "Kelly": 0.0},
+    ]
+    fixture = tmp_path / "current_offers.parquet"
+    pd.DataFrame(rows).to_parquet(fixture)
+    data_module = importlib.import_module("sportstradamus.dashboard.data")
+    monkeypatch.setattr(data_module, "CURRENT_OFFERS_PATH", fixture)
+    monkeypatch.setattr(data_module, "CURRENT_GAME_STORIES_PATH", tmp_path / "no_stories.parquet")
+    monkeypatch.setattr(data_module, "CURRENT_PARLAYS_PATH", tmp_path / "no_parlays.parquet")
+    st.cache_data.clear()
+
+    at = AppTest.from_string(_WRAPPER, default_timeout=30)
+    at.run()
+    assert not at.exception
+    # The injected APP_CSS is markdown too and carries every .tc-* selector; the card
+    # itself is the block that opens on the .tonight-card div.
+    cards = [m.body for m in at.markdown if m.body.startswith('<div class="tonight-card')]
+    assert cards, "no Tonight game card rendered"
+    assert "No prophecy yet — 2 favored legs, no story binds them" in cards[0]
+
+
 def test_board_renders_condensed_grid(monkeypatch, tmp_path):
     """P8 Phase B smoke: Board navigates clean and the condensed grid has no exception.
 
