@@ -276,12 +276,20 @@ _WHY_SLOTS = {
     ("why", "edge", "book_back"): {"model_pct", "book_pct", "side", "gap"},
     ("why", "ev", "solo"): {"ev"},
     ("why", "ev", "vs_book"): {"ev", "book_ev"},
+    ("why", "lineup", "platoon_edge"): {"slot", "throws"},
+    ("why", "lineup", "same_side"): {"slot", "throws"},
+    ("why", "lineup", "switch"): {"slot", "throws"},
+    ("why", "lineup", "slot_only"): {"slot"},
     ("dek", "cluster", None): {"n", "rho"},
     ("dek", "form", "above"): {"p", "dev", "line"},
     ("dek", "form", "below"): {"p", "dev", "line"},
     ("dek", "form", "at_line"): {"p", "line"},
     ("dek", "matchup", "favorable"): {"p"},
     ("dek", "matchup", "tough"): {"p"},
+    ("dek", "lineup", "posted"): {"p", "slot"},
+    ("dek", "lineup", "posted_hand"): {"p", "slot", "throws"},
+    ("dek", "lineup", "usual"): {"p", "slot"},
+    ("dek", "lineup", "usual_hand"): {"p", "slot", "throws"},
 }
 
 
@@ -320,7 +328,8 @@ def test_no_prose_literals_in_stories_source():
     the bank contract); the eyeball pass remains the real gate.
     """
     slot_re = re.compile(
-        r"\{(?:p|g|n|team|grp|opp|dev|line|pronoun|model_pct|book_pct|gap|side|ev|book_ev|rho)\}"
+        r"\{(?:p|g|n|team|grp|opp|dev|line|pronoun|model_pct|book_pct"
+        r"|gap|side|ev|book_ev|rho|slot|throws)\}"
     )
     package_dir = Path(engine.__file__).parent
     for source_path in sorted(package_dir.glob("*.py")):
