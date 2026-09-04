@@ -199,13 +199,63 @@ def test_unknown_voice_reads_shared():
 
 
 def test_fallback_chain_steps_down_to_even_then_endpoint():
-    # Football authors no player/blowout boards cell and shared holds boards
-    # only under "even" — the chain must land on shared player/even boards.
-    expected = _bank()["shared"]["player"]["even"]["Over"]["boards"]
-    assert bank_cell("football", "player", "blowout", "Over", "boards") == expected
+    # Football authors no player/blowout boards cell but does author the shape,
+    # so the category degrades to production before the shape gives way.
+    assert (
+        bank_cell("football", "player", "blowout", "Over", "boards")
+        is _bank()["football"]["player"]["blowout"]["Over"]["production"]
+    )
+    # No voice authors a shaped unit cell, so shared's shaped copy outranks the
+    # voice's own even-keyed boards cell.
+    assert (
+        bank_cell("basketball", "unit", "shootout", "Over", "boards")
+        is _bank()["shared"]["unit"]["shootout"]["Over"]["production"]
+    )
+    # Nothing anywhere authors player/shootout/Mixed — only with no shaped cell
+    # at all does the chain fall to the voice's even copy.
+    assert (
+        bank_cell("basketball", "player", "shootout", "Mixed", "production")
+        is _bank()["basketball"]["player"]["even"]["Mixed"]["production"]
+    )
     # No unit cell anywhere speaks k's — must land on the guaranteed endpoint.
-    endpoint = _bank()["shared"]["unit"]["even"]["Under"]["production"]
-    assert bank_cell("hockey", "unit", "grind", "Under", "k's") == endpoint
+    assert (
+        bank_cell("hockey", "unit", "grind", "Under", "k's")
+        is _bank()["shared"]["unit"]["even"]["Under"]["production"]
+    )
+
+
+@pytest.mark.parametrize("shape", [s for s in _SHAPES if s != "even"])
+@pytest.mark.parametrize(("archetype", "direction"), _ARCH_DIRS)
+@pytest.mark.parametrize("voice", _SPORT_VOICES)
+def test_shape_survives_when_any_shape_cell_exists(voice, archetype, direction, shape):
+    """Shape outranks both voice and category.
+
+    While either bank authors *anything* for this shape and direction, no
+    category may fall through to ``even`` copy — that is how a shootout-shaped
+    game ended up telling readers the game had a low ceiling.
+    """
+    nodes = [
+        _bank()[bank_voice].get(archetype, {}).get(shape, {}).get(direction, {})
+        for bank_voice in (voice, "shared")
+    ]
+    if not any(nodes):
+        pytest.skip("no cell authored for this shape and direction")
+    shaped = [cell for node in nodes for cell in node.values()]
+    for category in _CATEGORIES:
+        returned = bank_cell(voice, archetype, shape, direction, category)
+        assert any(returned is cell for cell in shaped), category
+
+
+# Where the board's shape and the model's direction disagree, every voice owes
+# the tension its own copy rather than shape-blind even-keyed filler.
+_CONTRARIAN_PAIRS = (("shootout", "Under"), ("grind", "Over"))
+
+
+@pytest.mark.parametrize(("shape", "direction"), _CONTRARIAN_PAIRS)
+@pytest.mark.parametrize("voice", sorted(_VOICES))
+def test_contrarian_cells_exist(voice, shape, direction):
+    cell = _bank()[voice]["game-script"][shape][direction]["production"]
+    assert len(cell) >= _MIN_VARIANTS_PER_CELL
 
 
 def _cell_text(voice, archetype, shape, direction, category):
