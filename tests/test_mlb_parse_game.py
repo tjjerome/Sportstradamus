@@ -73,7 +73,7 @@ def test_refresh_handedness_corrects_but_never_adds(monkeypatch):
     stats.season_start = datetime.date(2026, 3, 25)
     stats.players = {
         608070: {"name": "Jose Ramirez", "bats": "R"},
-        663776: {"name": "Patrick Sandoval", "throws": "L"},
+        663776: {"name": "Patrick Sandoval", "throws": "R"},
         1: {"name": "Nobody", "bats": "L"},
     }
     calls = []
@@ -82,8 +82,13 @@ def test_refresh_handedness_corrects_but_never_adds(monkeypatch):
         calls.append((endpoint, params))
         return {
             "people": [
-                {"id": 608070, "batSide": {"code": "S"}, "pitchHand": {"code": "R"}},
-                {"id": 663776, "pitchHand": {"code": "L"}},
+                {
+                    "id": 608070,
+                    "fullName": "José Ramírez",
+                    "batSide": {"code": "S"},
+                    "pitchHand": {"code": "R"},
+                },
+                {"id": 663776, "batSide": {"code": "L"}, "pitchHand": {"code": "L"}},
                 {"id": 592450, "batSide": {"code": "L"}, "pitchHand": {"code": "R"}},
             ]
         }
@@ -96,10 +101,13 @@ def test_refresh_handedness_corrects_but_never_adds(monkeypatch):
     assert endpoint == "sports_players"
     assert params["sportId"] == 1
     assert params["season"] == 2026
+    # statsapi drops unrecognised params silently, so a typo in the key or a
+    # dropped field name would fetch the unfiltered payload with no error.
+    assert params["fields"] == "people,id,batSide,code,pitchHand"
     assert stats.players == {
-        # Ramirez gains no ``throws`` even though the feed carries his: an absent
-        # key is the resolvers' cache-miss signal, so values are corrected, never
-        # added.
+        # Ramirez keeps the unaccented registry spelling and gains no ``throws``,
+        # Sandoval no ``bats``, though the feed carries all of it: an absent key is
+        # the resolvers' cache-miss signal, so values are corrected, never added.
         608070: {"name": "Jose Ramirez", "bats": "S"},
         663776: {"name": "Patrick Sandoval", "throws": "L"},
         1: {"name": "Nobody", "bats": "L"},

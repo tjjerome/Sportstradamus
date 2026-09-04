@@ -915,6 +915,7 @@ class StatsMLB(Stats):
         )
         mlb_teams = mlb.get("teams", {"sportId": _MLB_SPORT_ID})
         self.upcoming_games = _build_mlb_upcoming_games(mlb_games, mlb_teams)
+        self._refresh_handedness()
 
         prev_game_ids = [] if self.gamelog.empty else self.gamelog.gameId.unique()
         mlb_game_ids = _mlb_final_game_ids(mlb_games, prev_game_ids)
@@ -936,8 +937,6 @@ class StatsMLB(Stats):
             self.gamelog["playerName"] = self.gamelog["playerName"].apply(remove_accents)
             self._enrich_team_markets(self.gamelog, date_col="gameDate", team_col="team")
 
-        self._refresh_handedness()
-
         write_gamelog("mlb", self.gamelog, self.teamlog, self.players)
 
     def _refresh_handedness(self):
@@ -955,10 +954,16 @@ class StatsMLB(Stats):
         value is only overwritten where one already exists. Feed-only ids are not
         added and ``name`` is never touched either: registry names are the
         unaccented spelling downstream matches offers by ("Jose Ramirez"), while
-        the feed returns the accented one. The season is ``season_start.year``
-        rather than today's -- it is the season whose games the surrounding fetch
-        just parsed, and it does not roll over to a roster that does not exist yet
-        during the winter.
+        the feed returns the accented one.
+
+        This runs in ``_update``'s prelude beside the other hard-failing feed
+        calls rather than next to the write, so a people-feed outage cannot
+        discard a parse loop that already ran; the cost is that a player first
+        seen this run keeps his box-score value until the next cycle. The season
+        is ``season_start.year`` because :meth:`Stats.update`'s season gate and
+        opener adoption hold ``season_start`` on the season being fetched; a
+        forced replay of an older window asks for the hand-set constant's season
+        instead, which is harmless because handedness is career-stable.
         """
         feed = mlb.get(
             "sports_players",
