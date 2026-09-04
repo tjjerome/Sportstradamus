@@ -38,19 +38,32 @@ def team_assets() -> dict:
 
 
 def bank_cell(voice: str, archetype: str, shape: str, direction: str, category: str) -> list[str]:
-    """Return the template variants for a cell via the voice → shared fallback chain.
+    """Return the template variants for a cell via the shape-first fallback chain.
 
-    Tries ``(voice, archetype, shape, direction, category)``, then the same key
-    under ``shared``, then ``shared`` with shape ``"even"``, and finally the
-    guaranteed ``shared (archetype, "even", direction, "production")`` endpoint
-    — never a KeyError, never an empty list, for any valid archetype/direction.
-    A voice missing from the bank reads straight from ``shared``.
+    Shape outranks both voice and category: a shootout keeps shootout copy even
+    when the voice authors no such cell and the category has to degrade to
+    ``production``, because shape-blind prose contradicts the game it describes
+    ("low ceiling — fade the scoring" on a Coors slate). Under a shape node the
+    chain probes ``category`` then ``production`` and nothing else, so the
+    authoring invariant the design rests on is that every authored shaped node
+    carries a ``production`` cell. Only when neither the voice nor ``shared``
+    authors *any* cell for that shape and direction does the chain fall to
+    ``"even"``, and finally to the guaranteed ``shared (archetype, "even",
+    direction, "production")`` endpoint. A voice missing from the bank reads
+    straight from ``shared``.
     """
     bank = _bank()
     shared = bank["shared"]
+    voiced = bank.get(voice, shared)
     for phrases, shape_key, category_key in (
-        (bank.get(voice, shared), shape, category),
+        (voiced, shape, category),
+        (voiced, shape, "production"),
         (shared, shape, category),
+        (shared, shape, "production"),
+        # Defense in depth: no mapped league reaches these last two or the endpoint,
+        # because each voice authors the shaped player and game-script/Mixed nodes
+        # that shared leaves empty (pinned by test_shape_never_falls_through_to_even).
+        (voiced, "even", category),
         (shared, "even", category),
     ):
         cell = phrases.get(archetype, {}).get(shape_key, {}).get(direction, {}).get(category_key)
