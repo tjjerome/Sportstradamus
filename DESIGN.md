@@ -133,9 +133,10 @@ Correlation rendered as a star map, and the slip editor's primary control. Each 
 **filled with its team's color** (the two sides of the matchup read at a glance) and **sized by
 its model edge** (the strongest legs read biggest). The map is **static per game** — its stars are
 the game's strongest model-liked legs — the top `DEFAULT_STARS` by edge with both teams
-represented — fixed in place; a slip leg beyond that cut still burns as a star, placed by the same
-layout as the rest; selecting a leg never moves a star, it only lights it up. A leg in the
-slip burns at **full color and opacity**; a candidate is the same color
+represented and at most `MAX_PER_PLAYER` per player — fixed in place; a slip leg beyond that
+cut still burns as a star, placed by the same layout as the rest; selecting a leg never moves
+a star, it only lights it up. A leg in the slip burns at **full color and opacity**; a
+candidate is the same color
 **desaturated toward gray and dimmed** — selection is alpha + saturation, never an outline (a gold
 ring read as a team color). Pairwise correlation |ρ| is the edge weight (gold, opacity/width ∝ |ρ|,
 dashed when ρ < 0 — "fights the thesis"); an edge stays hidden until one of its stars is in the

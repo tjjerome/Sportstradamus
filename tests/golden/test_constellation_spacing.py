@@ -20,6 +20,7 @@ import pandas as pd
 
 from sportstradamus.dashboard.components.constellation import (
     _LABEL_FONT_SIZE,
+    _LABEL_FONT_SIZE_MOBILE,
     constellation_figure,
 )
 from sportstradamus.dashboard.components.constellation_shapes import shape_catalog
@@ -148,13 +149,15 @@ def test_no_star_lands_inside_the_exclusion_box():
         assert not (box[0] <= x * _PX[0] <= box[2] and box[1] <= y * _PX[1] <= box[3])
 
 
-def test_settle_is_deterministic():
+def test_settle_takes_its_priority_from_iteration_order():
     anchors = {"a": (0.0, 0.0), "b": (0.0, 0.0), "c": (0.05, 0.0)}
     sizes = dict.fromkeys(anchors, 24.0)
-    assert settle(anchors, sizes, _PX) == settle(anchors, sizes, _PX)
-    reversed_order = dict(reversed(list(anchors.items())))
-    assert settle(reversed_order, sizes, _PX) == settle(reversed_order, sizes, _PX)
-    assert settle(reversed_order, sizes, _PX)["c"] == (0.05, 0.0)  # first in, first served
+    first_in = settle(anchors, sizes, _PX)
+    reversed_in = settle(dict(reversed(list(anchors.items()))), sizes, _PX)
+    assert first_in["a"] == (0.0, 0.0)  # whoever is offered first keeps the anchor
+    assert reversed_in["c"] == (0.05, 0.0)
+    assert reversed_in["a"] != (0.0, 0.0)  # and whoever comes later gives way
+    assert settle(anchors, sizes, _PX) == first_in
 
 
 def test_the_lattice_stays_inside_the_inset_frame():
@@ -206,15 +209,27 @@ def test_in_slip_leg_beyond_the_cut_is_still_a_star():
 
 
 def test_main_stars_keep_their_clearance_on_both_viewports():
+    """Both viewports, lens off and on.
+
+    Distances are the rendered ones — the figure's own coordinates already carry
+    the "look wider" shrink, which is exactly what makes that lens the hard case:
+    it pulls the stars together without shrinking a single marker.
+    """
     pool = _ladder(15)
-    for mobile, px in ((False, PX_PER_UNIT), (True, PX_PER_UNIT_MOBILE)):
-        stars = _stars(constellation_figure([], None, pool, shape=_HOURGLASS, mobile=mobile))
+    for (mobile, px), wider in itertools.product(
+        ((False, PX_PER_UNIT), (True, PX_PER_UNIT_MOBILE)), (None, [])
+    ):
+        stars = _stars(
+            constellation_figure(
+                [], None, pool, shape=_HOURGLASS, mobile=mobile, wider_groups=wider
+            )
+        )
         assert len(stars) == DEFAULT_STARS
         for one, other in itertools.combinations(sorted(stars), 2):
             (ax, ay), size_a, *_ = stars[one]
             (bx, by), size_b, *_ = stars[other]
             apart = math.hypot((ax - bx) * px[0], (ay - by) * px[1])
-            assert apart >= (size_a + size_b) / 2 + _STAR_GAP_PX - 1e-9, (one, other, mobile)
+            assert apart >= (size_a + size_b) / 2 + _STAR_GAP_PX - 1e-9, (one, other, mobile, wider)
 
 
 def test_spacing_never_moves_an_uncrowded_star():
@@ -257,25 +272,31 @@ def test_caption_boxes_never_overlap():
     pin the wrong guarantee.
     """
     pool = _ladder(15)
-    for template in shape_catalog()["templates"].values():
+    viewports = (
+        (False, PX_PER_UNIT, _LABEL_FONT_SIZE),
+        (True, PX_PER_UNIT_MOBILE, _LABEL_FONT_SIZE_MOBILE),
+    )
+    for template, (mobile, px, font_px) in itertools.product(
+        shape_catalog()["templates"].values(), viewports
+    ):
         boxes = []
         for (x, y), size, text, place in _stars(
-            constellation_figure([], None, pool, shape=template)
+            constellation_figure([], None, pool, shape=template, mobile=mobile)
         ).values():
-            cx, cy = x * PX_PER_UNIT[0], y * PX_PER_UNIT[1]
+            cx, cy = x * px[0], y * px[1]
             boxes.append((False, _rect(cx, cy, size, size)))
             if not text:
                 continue
-            height = _LINE_HEIGHT_EM * _LABEL_FONT_SIZE
+            height = _LINE_HEIGHT_EM * font_px
             lift = (size / 2 + height / 2) * (1 if place == "top center" else -1)
-            width = len(text) * _CHAR_WIDTH_EM * _LABEL_FONT_SIZE
+            width = len(text) * _CHAR_WIDTH_EM * font_px
             boxes.append((True, _rect(cx, cy + lift, width, height)))
         for (one_is_caption, one), (other_is_caption, other) in itertools.combinations(boxes, 2):
             if one_is_caption or other_is_caption:
-                assert _disjoint(one, other), (template["label"], one, other)
+                assert _disjoint(one, other), (template["label"], mobile, one, other)
 
 
 def test_slate_shapes_classify_the_capped_set():
     offers = pd.DataFrame([_row(f"P{i:02d}", _TEAMS[i % 2], 0.9 - i * 0.02) for i in range(30)])
     shape = slate_shapes(offers, None, "2026-09-04")["NYK/SAS"]
-    assert shape.n_supernodes <= DEFAULT_STARS
+    assert shape.n_supernodes == DEFAULT_STARS  # uncorrelated, so every star is its own node

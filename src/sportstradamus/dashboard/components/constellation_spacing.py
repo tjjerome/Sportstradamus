@@ -38,7 +38,10 @@ PX_PER_UNIT_MOBILE = (112.0, 128.6)
 
 _CELL_PX = 6  # lattice pitch: a nudged star lands within 6 px of ideal, invisible at star scale
 _STAR_GAP_PX = 6  # clear air between two glyphs' bounding circles
-_FRAME_INSET = 0.88  # cells stay 12% inside each axis range — clear of the frame and team tags
+# Cells stay 12% inside each axis range — clear of the frame and the Cinzel team
+# tags. The lattice therefore caps at |y| <= 1.232 while a desktop template vertex
+# reaches 1.297, so a crowded edge star settles inward, never along the frame.
+_FRAME_INSET = 0.88
 
 DEFAULT_STARS = 12  # ~ a template's vertex count (5-13, median 10), so the cut fills the shape
 MIN_PER_TEAM = 4  # both halves populated — the both-teams parlay rule, made visual
@@ -46,7 +49,7 @@ MAX_PER_PLAYER = 2  # one hot player's five markets must not own the map
 
 CAPTION_TOP_K = 5  # captions for the slip plus the five biggest candidates; the rest hover
 _CHAR_WIDTH_EM = 0.6  # IBM Plex Sans average advance — plotly cannot measure text server-side
-_LINE_HEIGHT_EM = 1.25
+_LINE_HEIGHT_EM = 1.25  # a caption is one line — plotly's single-line box at font_px
 
 
 def settle(
@@ -66,17 +69,21 @@ def settle(
             priority: an anchor with room keeps its position to the float, so
             passing the biggest stars first leaves them exactly on their vertices.
         sizes: marker px for every anchor and every ``fixed`` key.
-        px: css px per data unit, ``(x, y)`` — the whole solve runs in px because
-            the frame's aspect (and so what "too close" means) flips with the viewport.
+        px: rendered css px per data unit, ``(x, y)`` — the whole solve runs in px
+            because the frame's aspect (and so what "too close" means) flips with the
+            viewport. A caller that rescales positions after the solve folds that
+            factor in here, or the clearance it enforces is not the one drawn.
         fixed: stars that occupy space, never move, and are not returned.
         side: key -> -1 / +1 / 0, the half of the team axis a star may occupy.
             x = 0 is legal for both, mirroring ``constellation_layout._clamp_to_side``.
         frame: the figure's axis ranges; the lattice insets itself inside them.
-        exclude: px rectangle ``(x0, y0, x1, y1)`` no star may enter.
+        exclude: px rectangle ``(x0, y0, x1, y1)`` no star's centre may enter.
 
     Returns:
         key -> position in data units, for the ``anchors`` keys only.
     """
+    # style: allow-complexity — one clear-air field built in one pass; the branches
+    # are the placement rules themselves, not steps a helper could take away.
     grid = [
         np.arange(-limit * _FRAME_INSET * scale, limit * _FRAME_INSET * scale, _CELL_PX)
         for limit, scale in zip(frame, px, strict=True)
@@ -138,6 +145,10 @@ def default_stars(
     spends the rest, and no player carries more than ``per_player`` legs. Takes
     the defining rows (canonical legs or raw offer rows alike, via ``leg_field``)
     so the slate classifier can call it without building the figure's node info.
+
+    ``cap`` bounds the open ranking, not the result: the team floors are filled
+    first and keep what they took, so ``per_team`` times the number of teams
+    overshoots ``cap`` when it is set above it (the shipped 4 + 4 sits under 12).
     """
     ranked = sorted(
         (key for key, leg in universe.items() if is_model_liked(leg)),

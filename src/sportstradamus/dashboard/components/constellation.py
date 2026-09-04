@@ -261,16 +261,17 @@ def constellation_figure(
         keys, node_team, teams, [(a, b, abs(r)) for a, b, r in edges], shape, shape_scale
     )
     sizes = _star_sizes(keys, info, floor=floor)
+    focus_scale = _WIDER_SCALE if wider_groups is not None else 1.0
     # Biggest first: a top-Kelly star keeps its vertex to the float, and only what
     # would collide with it moves, never across its own team's half of the axis.
+    # Spaced against the px the viewer actually gets: "look wider" shrinks positions
+    # but not marker sizes, so the solve has to see the shrunk scale, not the base one.
     pos = settle(
         {k: pos[k] for k in sorted(keys, key=lambda k: (-sizes[k], k))},
         sizes,
-        px,
+        (px[0] * focus_scale, px[1] * focus_scale),
         side={k: _side_sign(pos[k][0]) for k in keys},
     )
-
-    focus_scale = _WIDER_SCALE if wider_groups is not None else 1.0
     pos = {k: (x * focus_scale, y * focus_scale) for k, (x, y) in pos.items()}
     captions = caption_positions(
         keys,
