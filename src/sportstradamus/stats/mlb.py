@@ -949,12 +949,16 @@ class StatsMLB(Stats):
         "S" before this ran. The people feed is authoritative and keyed by the
         same numeric player id, so existing entries are corrected in place.
 
-        Feed-only ids are not added and ``name`` is never touched: registry names
-        are the unaccented spelling downstream matches offers by ("Jose Ramirez"),
-        while the feed returns the accented one. The season is
-        ``season_start.year`` rather than today's -- it is the season whose games
-        the surrounding fetch just parsed, and it does not roll over to a roster
-        that does not exist yet during the winter.
+        Correct, never add: an absent key is the resolvers' cache-miss signal, and
+        both of them answer a miss with ``None`` to skip an unusable box score.
+        Filling a key they have never seen would silently retire that guard, so a
+        value is only overwritten where one already exists. Feed-only ids are not
+        added and ``name`` is never touched either: registry names are the
+        unaccented spelling downstream matches offers by ("Jose Ramirez"), while
+        the feed returns the accented one. The season is ``season_start.year``
+        rather than today's -- it is the season whose games the surrounding fetch
+        just parsed, and it does not roll over to a roster that does not exist yet
+        during the winter.
         """
         feed = mlb.get(
             "sports_players",
@@ -968,9 +972,9 @@ class StatsMLB(Stats):
             entry = self.players.get(person["id"])
             if entry is None:
                 continue
-            if "batSide" in person:
+            if "bats" in entry and "batSide" in person:
                 entry["bats"] = person["batSide"]["code"]
-            if "pitchHand" in person:
+            if "throws" in entry and "pitchHand" in person:
                 entry["throws"] = person["pitchHand"]["code"]
 
     def _trim_old_games(self, today):

@@ -67,8 +67,8 @@ def test_parse_game_teamlog_matches_snapshot(parsed):
     )
 
 
-def test_refresh_handedness_overwrites_from_the_people_feed(monkeypatch):
-    """Switch hitters get their true "S" back and the feed never grows the registry."""
+def test_refresh_handedness_corrects_but_never_adds(monkeypatch):
+    """Switch hitters get their true "S" back without the registry gaining a key."""
     stats = mlb.StatsMLB.__new__(mlb.StatsMLB)
     stats.season_start = datetime.date(2026, 3, 25)
     stats.players = {
@@ -97,9 +97,10 @@ def test_refresh_handedness_overwrites_from_the_people_feed(monkeypatch):
     assert params["sportId"] == 1
     assert params["season"] == 2026
     assert stats.players == {
-        # Both keys refresh whenever the feed carries them, so a batter picks up
-        # ``throws`` he never had.
-        608070: {"name": "Jose Ramirez", "bats": "S", "throws": "R"},
+        # Ramirez gains no ``throws`` even though the feed carries his: an absent
+        # key is the resolvers' cache-miss signal, so values are corrected, never
+        # added.
+        608070: {"name": "Jose Ramirez", "bats": "S"},
         663776: {"name": "Patrick Sandoval", "throws": "L"},
         1: {"name": "Nobody", "bats": "L"},
     }
