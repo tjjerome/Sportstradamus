@@ -89,8 +89,6 @@ def deep_positions(
     node_team: Mapping[str, str | None],
     teams: Sequence[str],
     px: tuple[float, float],
-    *,
-    frame: tuple[float, float] = (X_RANGE, Y_RANGE),
 ) -> dict[str, tuple[float, float]]:
     """Place the deeper lens's stars inside the map, beside what they correlate with.
 
@@ -110,7 +108,6 @@ def deep_positions(
         node_team: team code per tier key.
         teams: the matchup's two codes, sorted — index 0 owns the left half.
         px: rendered css px per data unit, ``(x, y)``.
-        frame: the figure's axis ranges.
 
     Returns:
         key -> position in data units, for the ``tier`` keys only.
@@ -125,7 +122,7 @@ def deep_positions(
     targets = {
         key: _deep_target(rank, ties[key], main_pos, side[key]) for rank, key in enumerate(tier)
     }
-    return settle(targets, sizes, px, fixed=main_pos, side=side, frame=frame)
+    return settle(targets, sizes, px, fixed=main_pos, side=side)
 
 
 def _deep_target(

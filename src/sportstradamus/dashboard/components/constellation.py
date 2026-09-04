@@ -436,7 +436,7 @@ def _add_lens_edges(
     name ``main.js`` gates the lens animation on. Deep-to-deep ties are dropped —
     at lens size they are clutter with nothing to read against.
     """
-    for node_a, node_b, corr in edges:
+    for node_a, node_b, tie in edges:
         if (node_a, node_b) in main_pairs or (node_a in deep and node_b in deep):
             continue
         _add_edge(
@@ -445,7 +445,7 @@ def _add_lens_edges(
             node_b,
             pos[node_a],
             pos[node_b],
-            corr,
+            tie,
             active=active,
             name="deep_edge" if node_a in deep or node_b in deep else "edge",
         )
