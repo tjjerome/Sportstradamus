@@ -493,7 +493,7 @@
             "Chaos in {g} cuts {n} ways at once, {p} first",
             "A game this loud carries {n} legs together, {p} out in front",
             "{p} leads {n} legs into the loudest game of the night in {g}",
-            "One wild {g} night, {n} correlated legs, {p} at the top of them"
+            "One wild {g} night, {n} legs riding the same wave, {p} at the top of them"
           ]
         },
         "Under": {
@@ -508,31 +508,31 @@
         },
         "ContrastOver": {
           "production": [
-            "The {g} scoring spree finds exactly one of these {n} names: {p}",
-            "{p} feasts on the {g} pace while the rest of the stack sits out the party",
-            "A wide-open {g}, and only {p} walks through the door",
-            "The fast game belongs to {p} alone tonight in {g}",
+            "the {g} scoring spree finds exactly one of these {n} names: {p}",
+            "{p} feasts on the {g} pace while everyone else sits out the party",
+            "a wide-open {g}, and only {p} walks through the door",
+            "the fast game belongs to {p} alone tonight in {g}",
             "{p} rides the {g} surge and the other legs let it pass",
-            "One name eats in a loud {g}, and it is {p}"
+            "one name eats in a loud {g}, and it is {p}"
           ]
         },
         "ContrastUnder": {
           "production": [
-            "The {g} scoring reaches everyone but {p}",
-            "A loud night in {g}, and {p} is the one quiet room in it",
+            "the {g} scoring reaches everyone but {p}",
+            "a loud night in {g}, and {p} is the one quiet room in it",
             "{n} legs ride the {g} pace; the sharpest one leaves {p} behind",
-            "The pace lifts every name in {g} and leaves {p} on the ground",
-            "{p} sits out the {g} fireworks while the rest of the stack lights them",
+            "the pace lifts every name in {g} and leaves {p} on the ground",
+            "{p} misses the {g} fireworks that everyone else is lighting",
             "{p} is the exception a wild {g} makes"
           ]
         },
         "Mixed": {
           "production": [
-            "A fast {g} sends {n} legs in different directions with {p} in the middle",
-            "The {g} pace helps some of these {n} names and hurts the others",
-            "Wild games play favorites, and {g} splits {n} legs behind {p}",
+            "a fast {g} sends {n} legs in different directions with {p} in the middle",
+            "the {g} pace helps some of these {n} names and hurts the others",
+            "wild games play favorites, and {g} splits {n} legs behind {p}",
             "{n} ways to read one loud {g} night, {p} the loudest of them",
-            "The scoring in {g} arrives unevenly: {n} legs, two directions, {p} up front",
+            "the scoring in {g} arrives unevenly: {n} legs, two directions, {p} up front",
             "{p} fronts {n} legs that agree about {g} and disagree about everything else"
           ]
         }
@@ -560,32 +560,32 @@
         },
         "ContrastOver": {
           "production": [
-            "The {g} grind buries the stack and spares {p}",
-            "One name gets work out of a lifeless {g}: {p}",
+            "the {g} grind buries every name here and spares {p}",
+            "one name gets work out of a lifeless {g}: {p}",
             "{p} finds something in {g} the other {n} legs never do",
-            "A slow game quiets everyone in {g} but {p}",
-            "The mud holds every name in {g} except {p}",
+            "a slow game quiets everyone in {g} but {p}",
+            "the mud holds every name in {g} except {p}",
             "{p} is the only thing moving in a stuck {g}"
           ]
         },
         "ContrastUnder": {
           "production": [
-            "The {g} grind rewards the workers and skips {p}",
+            "the {g} grind rewards the workers and skips {p}",
             "{n} legs dig in and survive {g}; {p} is the one that gets buried",
-            "A slow game feeds everyone in {g} except {p}",
-            "The others thrive in the {g} mud — {p} drowns in it",
-            "{p} is the wrong kind of night for {g}, and the stack knows it",
-            "The grind hands out rewards in {g} and hands {p} nothing"
+            "a slow game feeds everyone in {g} except {p}",
+            "the others thrive in the {g} mud — {p} drowns in it",
+            "{g} is the wrong kind of night for {p}, and the other legs know it",
+            "the grind hands out rewards in {g} and hands {p} nothing"
           ]
         },
         "Mixed": {
           "production": [
-            "A heavy {g} sorts {n} legs into workers and passengers, with {p} in the first group",
-            "The grind gives and takes across {n} legs in {g}, with {p} in the middle",
-            "Slow games split their favors, and {g} splits {n} ways behind {p}",
-            "Some names need pace and some need none — {g} has {n} of both, {p} loudest",
+            "a heavy {g} sorts {n} legs into workers and passengers, with {p} in the first group",
+            "the grind gives and takes across {n} legs in {g}, with {p} in the middle",
+            "slow games split their favors, and {g} splits {n} ways behind {p}",
+            "some names need pace and some need none — {g} has {n} of both, {p} loudest",
             "{p} fronts {n} legs that read one ugly {g} two different ways",
-            "The mud helps as many of these {n} names as it hurts, and {p} decides which"
+            "the mud helps as many of these {n} names as it hurts, and {p} decides which"
           ]
         }
       },
@@ -612,31 +612,31 @@
         },
         "ContrastOver": {
           "production": [
-            "The rout in {g} feeds one name and starves the rest: {p}",
+            "the rout in {g} feeds one name and starves the rest: {p}",
             "{p} banks a night before {g} breaks open; the others never get there",
-            "A lopsided {g} works for {p} alone",
-            "Everyone else gets pulled from a runaway {g} — {p} keeps going",
-            "One name survives the {g} margin, and it is {p}",
-            "{p} eats early in {g} while the rest of the stack waits for a game that ends"
+            "a lopsided {g} works for {p} alone",
+            "everyone else gets pulled from a runaway {g} — {p} keeps going",
+            "one name survives the {g} margin, and it is {p}",
+            "{p} eats early in {g} while the others wait for a game already decided"
           ]
         },
         "ContrastUnder": {
           "production": [
-            "The {g} rout lifts every name but {p}",
+            "the {g} rout lifts every name but {p}",
             "{p} is the one starter a lopsided {g} leaves behind",
-            "A runaway {g} spreads the volume around and skips {p}",
-            "The others feast on a broken {g}; {p} goes home early",
-            "Whatever the {g} margin hands out, none of it lands on {p}",
-            "One name sits out the {g} rout: {p}"
+            "a runaway {g} spreads the volume around and skips {p}",
+            "the others feast on a broken {g}; {p} goes home early",
+            "whatever the {g} margin hands out, none of it lands on {p}",
+            "one name sits out the {g} rout: {p}"
           ]
         },
         "Mixed": {
           "production": [
-            "A lopsided {g} makes winners and spectators of {n} legs, {p} in front",
-            "The margin gives to some of these {n} names and takes from the others in {g}",
+            "a lopsided {g} makes winners and spectators of {n} legs, {p} in front",
+            "the margin gives to some of these {n} names and takes from the others in {g}",
             "{n} legs on a game that quits early in {g}, and only half of them mind",
-            "A rout rearranges the night for {n} legs in {g}, {p} at the top",
-            "Some names need the end of {g} and some are finished before it: {n} legs, {p} loudest",
+            "a rout rearranges the night for {n} legs in {g}, {p} at the top",
+            "some names need the end of {g} and some are finished before it: {n} legs, {p} loudest",
             "{p} fronts {n} legs that split on whether {g} ever gets close"
           ]
         }
@@ -664,31 +664,31 @@
         },
         "ContrastOver": {
           "production": [
-            "A game this tight goes to one name in {g}, and that name is {p}",
-            "The pressure in {g} finds {p} and leaves the rest of the stack alone",
+            "a game this tight goes to one name in {g}, and that name is {p}",
+            "the pressure in {g} finds {p} and leaves the others alone",
             "{p} rises in a knotted {g} while the others shrink",
-            "One name gets the moment late in {g}: {p}",
-            "The careful game in {g} still has room for {p}",
-            "Everyone tightens in {g} but {p}"
+            "one name gets the moment late in {g}: {p}",
+            "the careful game in {g} still has room for {p}",
+            "everyone tightens in {g} but {p}"
           ]
         },
         "ContrastUnder": {
           "production": [
-            "The late minutes of a tight {g} find every name but {p}",
+            "the late minutes of a tight {g} find every name but {p}",
             "{p} is the one squeezed by a {g} nobody else feels",
-            "The stack rises with the pressure in {g}; {p} shrinks from it",
-            "Everyone gets a moment in a close {g} except {p}",
-            "The tension in {g} lifts the others and flattens {p}",
-            "One name loses the close game in {g}, and it is {p}"
+            "the others rise with the pressure in {g}; {p} shrinks from it",
+            "everyone gets a moment in a close {g} except {p}",
+            "the tension in {g} lifts the others and flattens {p}",
+            "one name loses the close game in {g}, and it is {p}"
           ]
         },
         "Mixed": {
           "production": [
-            "A game on a knife edge splits {n} legs in {g}, {p} at the point",
-            "Close games reward some names and punish others — {g} has {n} of both, {p} first",
+            "a game on a knife edge splits {n} legs in {g}, {p} at the point",
+            "close games reward some names and punish others — {g} has {n} of both, {p} first",
             "{n} legs read one tense {g} two ways, with {p} between them",
-            "The margin stays thin in {g} and the night thins unevenly across {n} legs",
-            "Some of these {n} names need a finish and some need it settled early",
+            "the margin stays thin in {g} and the night thins unevenly across {n} legs",
+            "some of these {n} names need a finish and some need it settled early",
             "{p} fronts {n} legs that agree {g} will be close and nothing else"
           ]
         }
@@ -1389,7 +1389,7 @@
         "Under": {
           "production": [
             "The gym in {g} runs at full tilt while {n} legs stand still, {p} slowest of all",
-            "Nobody guards anybody in {g} except the {n} names in this stack, {p} first",
+            "Nobody guards anybody in {g} and these {n} names still come up empty, {p} first",
             "A gym that loud with {n} quiet nights inside it, {p} the quietest",
             "The {g} pace lifts every jumper but these {n}, with {p} at the front",
             "Fast game, cold hands: {n} legs of {g} fade together behind {p}",
@@ -1402,7 +1402,7 @@
           "production": [
             "The {g} rockfight is where {n} legs live, and {p} lives there loudest",
             "Ugly basketball, {n} happy legs — {p} does the dirty work in {g}",
-            "Put-backs and deflections carry {n} legs through {g}, {p} first",
+            "Put-backs and deflections keep {n} legs alive in {g}, {p} first",
             "The half-court slog in {g} suits {n} names just fine, {p} best of all",
             "The {g} mud is a buffet for {n} legs and {p} eats first",
             "No pace, no problem: {n} legs of {g} behind {p}"
@@ -2617,7 +2617,7 @@
         "Over": {
           "production": [
             "The {g} trap suits {n} legs down to the ice, {p} first",
-            "Blocked shots and board battles carry {n} names through {g}, {p} leading",
+            "Blocked shots and board battles keep {n} names busy in {g}, {p} leading",
             "Heavy ice rewards {n} legs in {g}, and {p} collects most of it",
             "{n} legs live in the {g} corners, {p} working hardest in them",
             "A 2-1 game still feeds {n} legs in {g} — {p} sets the table",
