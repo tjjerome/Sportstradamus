@@ -70,7 +70,7 @@ def test_parse_game_teamlog_matches_snapshot(parsed):
 def test_refresh_handedness_corrects_but_never_adds(monkeypatch):
     """Switch hitters get their true "S" back without the registry gaining a key."""
     stats = mlb.StatsMLB.__new__(mlb.StatsMLB)
-    stats.season_start = datetime.date(2026, 3, 25)
+    stats.season_start = datetime.date(2024, 3, 28)
     stats.players = {
         608070: {"name": "Jose Ramirez", "bats": "R"},
         663776: {"name": "Patrick Sandoval", "throws": "R"},
@@ -100,7 +100,7 @@ def test_refresh_handedness_corrects_but_never_adds(monkeypatch):
     endpoint, params = calls[0]
     assert endpoint == "sports_players"
     assert params["sportId"] == 1
-    assert params["season"] == 2026
+    assert params["season"] == 2024  # not today.year: the source must be season_start
     # statsapi drops unrecognised params silently, so a typo in the key or a
     # dropped field name would fetch the unfiltered payload with no error.
     assert params["fields"] == "people,id,batSide,code,pitchHand"
