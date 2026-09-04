@@ -40,13 +40,22 @@ def _leg_keys(legs: list[dict]) -> frozenset:
 
 
 def _ctx(
-    probs, corr, *, platform="Underdog", edges=None, teams=None, game="AAA/BBB", max_size=None
+    probs,
+    corr,
+    *,
+    platform="Underdog",
+    edges=None,
+    teams=None,
+    game="AAA/BBB",
+    max_size=None,
+    players=None,
 ):
     """Build one synthetic GameScoringContext + its matching offers frame."""
     n = len(probs)
     probs = np.asarray(probs, dtype=float)
     edges = [1.30] * n if edges is None else edges
     teams = teams or (["AAA"] * (n // 2) + ["BBB"] * (n - n // 2))
+    players = players or [f"Player{i}" for i in range(n)]
     names = ["Points", "Rebounds", "Assists", "Steals", "Blocks", "Turnovers", "FG3M", "FTM"]
     markets = [names[i % len(names)] for i in range(n)]
     g = GameArrays(
@@ -67,7 +76,7 @@ def _ctx(
             "Model EV": edges[i],
             "Bet": "Over",
             "Team": teams[i],
-            "Player": f"Player{i}",
+            "Player": players[i],
             "Market": markets[i],
             "Line": 5.5 + i,
             "Win Prob": probs[i],
@@ -93,7 +102,7 @@ def _ctx(
     offers = pd.DataFrame(
         [
             {
-                "Player": f"Player{i}",
+                "Player": players[i],
                 "Bet": "Over",
                 "Line": 5.5 + i,
                 "Market": markets[i],
@@ -161,6 +170,25 @@ def test_correlation_cluster_forms_over_exact_legs():
     assert out["story_id"].nunique() == 1
     for row in out["legs"]:
         assert {leg["player"] for leg in row} == {"Player0", "Player1"}
+
+
+def test_cluster_holds_one_leg_per_player():
+    """One hot player's four correlated markets must not swallow the cluster.
+
+    Same-player legs correlate near 1, so without the rule the cap fills with
+    one name and ``validate_parlay_legs`` (distinct players) has no valid
+    subset left to pick.
+    """
+    sctx, _offers = _ctx(
+        [0.66] * 7,
+        _block_diag_corr([7], 0.4),
+        players=["Star"] * 4 + ["Player4", "Player5", "Player6"],
+    )
+    edge = menu_mod._strong_legs(sctx)
+    players = {i: sctx.bet_df[i]["Player"] for i in edge}
+    clusters = menu_mod._cluster_strong_legs(edge, sctx.g.C, players)
+    assert clusters == [[0, 4, 5, 6]]  # Star's strongest leg, then three teammates
+    assert len({players[i] for i in clusters[0]}) == 4
 
 
 def test_objectives_are_true_argmaxes_and_share_legs():
