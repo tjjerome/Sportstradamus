@@ -32,7 +32,13 @@ from sportstradamus.dashboard.data import (
     load_game_ctxs,
     sport_filtered,
 )
-from sportstradamus.dashboard.narrative import SHAPE_HELP, context_strip, game_headline, home_away
+from sportstradamus.dashboard.narrative import (
+    SHAPE_DISPLAY,
+    SHAPE_HELP,
+    context_strip,
+    game_headline,
+    home_away,
+)
 from sportstradamus.dashboard.theme import GOLD, GRAY, SEQUENTIAL_COLORS, team_name
 
 # Hero shape glyph — matches the mockup's 74px .glyphwrap.
@@ -119,7 +125,9 @@ def _render_hero(
     fav, spread = strip["fav_team"], strip["spread"]
     spread_text = f"{fav} -{spread:.1f}" if fav and spread > 0 else "Even"
     headline = game_headline(stories, parlays, game=game, date=date)
-    glyph = game_shape_glyph(str(strip["shape"]), size=_HERO_GLYPH_SIZE)
+    shape = str(strip["shape"])
+    glyph = game_shape_glyph(shape, size=_HERO_GLYPH_SIZE)
+    shape_name = SHAPE_DISPLAY.get(shape, SHAPE_DISPLAY["even"])
     subline = (
         '<div class="celestial-headline" style="font-size:17px;margin-top:2px">'
         f"{html.escape(headline)}</div>"
@@ -130,7 +138,7 @@ def _render_hero(
         (
             _hero_stat("Total", f"{strip['game_total']:.1f}"),
             _hero_stat("Spread", spread_text),
-            _hero_stat("Shape", str(strip["shape"]).title(), title=SHAPE_HELP, mono=False),
+            _hero_stat("Shape", shape_name, title=SHAPE_HELP, mono=False),
         )
     )
     st.markdown(

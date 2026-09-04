@@ -10,11 +10,15 @@ import pandas as pd
 
 from sportstradamus.dashboard import theme
 from sportstradamus.dashboard.narrative import (
+    SHAPE_CAPTION,
+    SHAPE_DISPLAY,
+    SHAPE_HELP,
     bet_arrow,
     context_strip,
     game_headline,
     home_away,
     match_label,
+    storyless_prophecy,
     top_thesis,
 )
 
@@ -200,3 +204,25 @@ def test_match_label_away_uses_at_sign():
 
 def test_match_label_home_uses_v():
     assert match_label("LVA", "IND", home=True) == "LVA v IND"
+
+
+def test_shape_display_renames_the_even_sentinel_to_clouded():
+    assert SHAPE_DISPLAY["even"] == "Clouded"
+    assert SHAPE_CAPTION["even"] == "unquoted"
+    # Same five pipeline shapes, in the Tonight legend's left-to-right order.
+    assert list(SHAPE_DISPLAY) == list(SHAPE_CAPTION)
+    assert set(SHAPE_DISPLAY) == {"shootout", "blowout", "coinflip", "even", "grind"}
+
+
+def test_shape_help_glosses_the_clouded_shape():
+    assert "clouded (no line quoted yet)" in SHAPE_HELP
+
+
+def test_storyless_prophecy_names_the_favored_legs():
+    assert storyless_prophecy(20) == "No prophecy yet — 20 favored legs, no story binds them"
+    assert storyless_prophecy(2).startswith("No prophecy yet — 2 favored legs")
+
+
+def test_storyless_prophecy_stays_thin_edges_below_two_legs():
+    assert storyless_prophecy(1) == "No prophecy tonight — thin edges"
+    assert storyless_prophecy(0) == "No prophecy tonight — thin edges"

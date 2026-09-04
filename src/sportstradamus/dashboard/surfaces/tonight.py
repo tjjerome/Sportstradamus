@@ -17,24 +17,18 @@ from sportstradamus.dashboard.data import (
     load_current_parlays,
     sport_filtered,
 )
-from sportstradamus.dashboard.narrative import context_strip, game_headline, home_away
+from sportstradamus.dashboard.narrative import (
+    SHAPE_CAPTION,
+    SHAPE_DISPLAY,
+    context_strip,
+    game_headline,
+    home_away,
+    storyless_prophecy,
+)
 
 # Legend glyph size: smaller than the default (40px) card glyph so five fit across
 # one row of st.columns(5).
 _LEGEND_GLYPH_SIZE = 28
-
-# (shape, display name, meaning) for the legend row. The glyph-type name (comet,
-# supernova, …) is dropped — the glyph itself carries that; only the game-script
-# meaning stays as the caption.
-_SHAPE_LEGEND = [
-    ("shootout", "Shootout", "fast total"),
-    ("blowout", "Blowout", "lopsided"),
-    ("coinflip", "Coinflip", "close ML"),
-    # Not a game script: "even" is what classify_shape returns when no moneyline was
-    # quoted, so the caption names the gap rather than implying a read on the game.
-    ("even", "No line yet", "unquoted"),
-    ("grind", "Grind", "low total"),
-]
 
 # A game tipping off within this many minutes is "urgent" — it rises to the top of the
 # slate and its kicker turns red. Needs the Commence tip-off timestamp on the offers;
@@ -52,11 +46,11 @@ def _format_countdown(minutes: float) -> str:
 
 def _render_shape_legend() -> None:
     """Compact 5-column glyph + name + caption row, shared vocabulary for the cards below."""
-    cols = st.columns(len(_SHAPE_LEGEND))
-    for col, (shape, name, sub) in zip(cols, _SHAPE_LEGEND, strict=False):
+    cols = st.columns(len(SHAPE_CAPTION))
+    for col, (shape, sub) in zip(cols, SHAPE_CAPTION.items(), strict=False):
         with col:
             st.markdown(game_shape_glyph(shape, size=_LEGEND_GLYPH_SIZE), unsafe_allow_html=True)
-            st.caption(f"**{name}**  \n{sub}")
+            st.caption(f"**{SHAPE_DISPLAY[shape]}**  \n{sub}")
 
 
 meta = load_current_meta()
@@ -137,6 +131,8 @@ for c in cards:
     league, home, away = c["league"], c["home"], c["away"]
     top_edge, favored, offer_count = c["top_edge"], c["favored"], c["offer_count"]
     shape, minutes = c["shape"], c["minutes"]
+    # A game with no context row has no shape at all, which is the clouded reading too.
+    shape_name = SHAPE_DISPLAY.get(shape, SHAPE_DISPLAY["even"])
 
     # A positive top edge lights the card; without one it drops to the muted "no edge"
     # state. The prophecy is the oracle voice — the story headline, or a dim placeholder.
@@ -150,7 +146,7 @@ for c in cards:
     prophecy = (
         f'<div class="tc-prophecy">“{html.escape(c["headline"])}”</div>'
         if c["headline"]
-        else '<div class="tc-prophecy tc-dim">No prophecy tonight — thin edges</div>'
+        else f'<div class="tc-prophecy tc-dim">{storyless_prophecy(favored)}</div>'
     )
     countdown = _format_countdown(minutes) if minutes != float("inf") else ""
     league_esc = html.escape(league)
@@ -172,6 +168,6 @@ for c in cards:
         f"<b>{offer_count}</b> offer{plural} &middot; <b>{favored}</b> favored</span>"
         f'<span class="tc-viewcue">View game →</span></div></div>'
         f'<div class="tc-side">{game_shape_glyph(shape, size=58)}'
-        f'<span class="tc-shapename">{html.escape(shape.title())}</span></div></div>',
+        f'<span class="tc-shapename">{shape_name}</span></div></div>',
         unsafe_allow_html=True,
     )

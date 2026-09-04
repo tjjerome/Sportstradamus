@@ -15,8 +15,32 @@ from sportstradamus.dashboard import theme
 # Game-shape gloss, shared by the Games banner and the deep-dive context strip.
 SHAPE_HELP = (
     "Projected game script: shootout (high total), grind (low total), blowout "
-    "(lopsided), or coinflip (tight). It tilts which counting stats run hot."
+    "(lopsided), coinflip (tight), or clouded (no line quoted yet). It tilts which "
+    "counting stats run hot."
 )
+
+# Display name and legend caption per pipeline shape, in the Tonight legend's
+# left-to-right order. ``classify_shape`` returns "even" when no moneyline was quoted —
+# an unknown-sentinel, not a game script — so it shows as "Clouded" beside the cloud
+# glyph rather than implying a read on the game.
+SHAPE_DISPLAY = {
+    "shootout": "Shootout",
+    "blowout": "Blowout",
+    "coinflip": "Coinflip",
+    "even": "Clouded",
+    "grind": "Grind",
+}
+SHAPE_CAPTION = {
+    "shootout": "fast total",
+    "blowout": "lopsided",
+    "coinflip": "close ML",
+    "even": "unquoted",
+    "grind": "low total",
+}
+
+# A story binds legs to each other, so it takes two: below that a missing prophecy is a
+# genuinely thin game rather than a gap in the story engine.
+_STORY_FAVORED_MIN = 2
 
 # Colorblind-safe side cues (spec §3.2): shape (up/down triangle) plus color both
 # carry Over/Under, so the aggrid JsCode cell renderer in Phase B can key off shape
@@ -73,6 +97,17 @@ def game_headline(stories: pd.DataFrame, parlays: pd.DataFrame, *, game: str, da
             if pd.notna(headline) and str(headline):
                 return str(headline)
     return top_thesis(parlays, game=game, date=date)
+
+
+def storyless_prophecy(favored: int) -> str:
+    """Tonight's placeholder line for a game :func:`game_headline` left empty.
+
+    A game carrying favored legs with no story to bind them is a correlation gap, not a
+    quiet slate, so the copy says which of the two it is.
+    """
+    if favored >= _STORY_FAVORED_MIN:
+        return f"No prophecy yet — {favored} favored legs, no story binds them"
+    return "No prophecy tonight — thin edges"
 
 
 def home_away(group: pd.DataFrame) -> tuple[str, str]:
