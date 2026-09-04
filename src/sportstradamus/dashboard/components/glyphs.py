@@ -4,7 +4,9 @@ One construction rule across all five: strokes build the form, a glowing radial 
 marks the focus. Ported from ``docs/mockups/p8-glyphs.html`` (gradient/symbol ``id``s
 renamed, namespaced per glyph type so two instances of different glyphs never collide
 on one page); the comet was later reworked (curved dust tail, larger coma) per owner
-so it reads as a meteor rather than a plain slash. These are bespoke inline SVG — the
+so it reads as a meteor rather than a plain slash, and the ``even`` lone star became a
+nebulous cloud (display name "clouded") so a game nobody quoted reads as uncertain
+rather than as a game script of its own. These are bespoke inline SVG — the
 sanctioned exception to Material-icons-only (spec §2); render via
 ``st.markdown(..., unsafe_allow_html=True)``, never ``st.html()`` (see
 ``dashboard/theme.py``'s DOMPurify comment — ``st.html()`` strips ``<svg>`` outright).
@@ -63,18 +65,24 @@ _SCALES = (
     '<circle cx="30" cy="23" r="3.6" fill="url(#glyph-scales-core)"/></svg>'
 )
 
-_LONE_STAR = (
-    '<svg viewBox="0 0 60 60"><defs><radialGradient id="glyph-lonestar-core" cx="50%" '
-    'cy="50%" r="50%"><stop offset="0" stop-color="#fff"/><stop offset=".42" '
+_CLOUD = (
+    '<svg viewBox="0 0 60 60"><defs><radialGradient id="glyph-cloud-core" cx="50%" '
+    'cy="50%" r="50%"><stop offset="0" stop-color="#fff"/><stop offset=".45" '
     'stop-color="#C9A227"/><stop offset="1" stop-color="#6f560f"/></radialGradient>'
-    '<symbol id="glyph-lonestar-star" viewBox="0 0 24 24"><path d="M12 1.6l3.09 6.9 '
-    '7.51.7-5.66 5.02 1.68 7.38L12 17.9l-6.62 3.7 1.68-7.38L1.4 9.2l7.51-.7z"/></symbol>'
-    "</defs>"
-    '<circle cx="30" cy="30" r="20" fill="none" stroke="#8A91A0" stroke-width="1" '
-    'stroke-opacity=".26"/>'
-    '<use href="#glyph-lonestar-star" x="11" y="11" width="38" height="38" fill="none" '
-    'stroke="#C9A227" stroke-width="1.4" stroke-linejoin="round"/>'
-    '<circle cx="30" cy="30" r="4.6" fill="url(#glyph-lonestar-core)"/></svg>'
+    '<radialGradient id="glyph-cloud-haze" cx="50%" cy="50%" r="50%">'
+    '<stop offset="0" stop-color="#8A91A0" stop-opacity=".12"/>'
+    '<stop offset=".55" stop-color="#8A91A0" stop-opacity=".06"/>'
+    '<stop offset="1" stop-color="#8A91A0" stop-opacity="0"/></radialGradient></defs>'
+    '<ellipse cx="30" cy="32" rx="25" ry="17" fill="url(#glyph-cloud-haze)"/>'
+    '<g fill="#8A91A0" opacity=".1"><circle cx="20" cy="33" r="10"/>'
+    '<circle cx="30" cy="27" r="12.5"/><circle cx="41" cy="32" r="9.5"/>'
+    '<ellipse cx="30" cy="35" rx="19" ry="7.5"/></g>'
+    '<g fill="none" stroke="#8A91A0" stroke-linecap="round">'
+    '<path d="M11 36 A10 10 0 0 1 20 21" stroke-width="1.4" stroke-opacity=".34"/>'
+    '<path d="M22 19 A12.5 12.5 0 0 1 41 22.5" stroke-width="1.3" stroke-opacity=".28"/>'
+    '<path d="M45 24 A9.5 9.5 0 0 1 50 33" stroke-width="1.2" stroke-opacity=".22"/>'
+    '<path d="M14 39 A19 7.5 0 0 0 44 40" stroke-width="1.1" stroke-opacity=".16"/></g>'
+    '<circle cx="30" cy="31" r="4.2" fill="url(#glyph-cloud-core)" opacity=".72"/></svg>'
 )
 
 _HOURGLASS = (
@@ -94,14 +102,14 @@ _GLYPHS = {
     "shootout": _COMET,
     "blowout": _SUPERNOVA,
     "coinflip": _SCALES,
-    "even": _LONE_STAR,
+    "even": _CLOUD,
     "grind": _HOURGLASS,
 }
 
 
 def game_shape_glyph(shape: str, *, size: int = 40) -> str:
-    """Inline SVG for a game shape; unknown shapes fall back to the lone star."""
-    svg = _GLYPHS.get(shape, _LONE_STAR)
+    """Inline SVG for a game shape; unknown shapes fall back to the clouded glyph."""
+    svg = _GLYPHS.get(shape, _CLOUD)
     return svg.replace(
         'viewBox="0 0 60 60"',
         f'class="glyph" width="{size}" height="{size}" viewBox="0 0 60 60"',
