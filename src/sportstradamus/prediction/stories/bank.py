@@ -60,7 +60,7 @@ def bank_cell(voice: str, archetype: str, shape: str, direction: str, category: 
         (voiced, shape, "production"),
         (shared, shape, category),
         (shared, shape, "production"),
-        # Defence in depth: while shared authors every archetype/shape/direction
+        # Defense in depth: while shared authors every archetype/shape/direction
         # at production, no mapped league reaches these last two or the endpoint.
         (voiced, "even", category),
         (shared, "even", category),
