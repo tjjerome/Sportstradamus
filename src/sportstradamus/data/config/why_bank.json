@@ -151,28 +151,28 @@
     },
     "lineup_usual": {
       "platoon_edge": [
-        "usually {slot} in the order, with the handedness edge on a {throws}-hander",
+        "usually {slot} in the order with the handedness edge on a {throws}-hander",
         "a regular in the {slot} spot and opposite-handed to a {throws}-hander",
-        "typically hitting {slot}, holding the platoon edge on a {throws}-hander",
-        "normally {slot} in the lineup, with the better side of the platoon against a {throws}-hander",
+        "typically hitting {slot} and holding the platoon edge on a {throws}-hander",
+        "normally {slot} in the lineup with the better side of the platoon against a {throws}-hander",
         "a fixture in the {slot} spot lately, opposite a {throws}-hander",
-        "settled in the {slot} spot, with the platoon edge against a {throws}-hander"
+        "settled in the {slot} spot with the platoon edge against a {throws}-hander"
       ],
       "same_side": [
         "usually {slot} in the order but same-side against a {throws}-hander",
-        "a regular in the {slot} spot, matched same-side with a {throws}-hander",
-        "typically hitting {slot}, with no platoon edge on a {throws}-hander",
+        "a regular in the {slot} spot and matched same-side with a {throws}-hander",
+        "typically hitting {slot} with no platoon edge on a {throws}-hander",
         "normally {slot} in the lineup and same-handed with a {throws}-hander",
         "a fixture in the {slot} spot lately, into a same-side {throws}-hander",
-        "settled in the {slot} spot, on the wrong side of a {throws}-hander"
+        "settled in the {slot} spot on the wrong side of a {throws}-hander"
       ],
       "switch": [
-        "usually {slot} in the order, switch-hitting against a {throws}-hander",
-        "a regular in the {slot} spot, turning around on a {throws}-hander",
+        "usually {slot} in the order and switch-hitting against a {throws}-hander",
+        "a regular in the {slot} spot who turns around on a {throws}-hander",
         "typically hitting {slot} as a switch hitter facing a {throws}-hander",
         "normally {slot} in the lineup and switching sides on a {throws}-hander",
         "a fixture in the {slot} spot lately, switch-hitting into a {throws}-hander",
-        "settled in the {slot} spot, a switch hitter against a {throws}-hander"
+        "settled in the {slot} spot as a switch hitter against a {throws}-hander"
       ],
       "slot_only": [
         "usually {slot} in the order",
