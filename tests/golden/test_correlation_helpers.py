@@ -34,6 +34,7 @@ import importlib.resources as pkg_resources
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pytest
 
 from sportstradamus import data
@@ -65,6 +66,10 @@ _needs_nba_corr = pytest.mark.skipif(
 _needs_wnba_corr = pytest.mark.skipif(
     not _has_corr_parquets("wnba"),
     reason="WNBA correlation parquets are gitignored; absent in CI",
+)
+_needs_mlb_corr = pytest.mark.skipif(
+    not _has_corr_parquets("mlb"),
+    reason="MLB correlation parquets are gitignored; absent in CI",
 )
 
 
@@ -536,6 +541,69 @@ def test_build_cmarket_mlb_keys_by_batting_slot() -> None:
         ["B3.hits", "P.hits"],
         ["P.hits"],
     ]
+
+
+# Underdog Rivals builds MLB "A vs. B" legs, and unlike the other leagues' combo
+# legs those survive into the correlation stage, so the slate carries one.
+def _mlb_offers() -> list[dict]:
+    raw = [
+        # player, team, opp, market, line
+        ("Kyle Tucker", "CHC", "PIT", "hits", 0.5),
+        ("Nico Hoerner", "CHC", "PIT", "total bases", 1.5),
+        ("Shota Imanaga", "CHC", "PIT", "pitcher strikeouts", 5.5),
+        ("Oneil Cruz", "PIT", "CHC", "hits", 0.5),
+        ("Bryan Reynolds", "PIT", "CHC", "runs", 0.5),
+        ("Kyle Tucker vs. Oneil Cruz", "CHC/PIT", "PIT/CHC", "hits", 0.5),
+    ]
+    return [
+        {
+            "League": "MLB",
+            "Date": "2026-09-04",
+            "Team": team,
+            "Opponent": opp,
+            "Player": player,
+            "Market": market,
+            "Line": line,
+            "Boost": 1.78,  # == UNDERDOG_BOOST_BASELINE -> post-normalization 1.0
+            "Bet": "Over",
+            "Win Prob": 0.81,
+            "Market Prob": 0.71,
+            "Model EV": 1.31,
+            "Market EV": 1.0,
+            "Kelly": 1.0,
+            "Player position": 0,
+        }
+        for player, team, opp, market, line in raw
+    ]
+
+
+@_needs_mlb_corr
+def test_find_correlation_mlb_position_stays_a_string_column() -> None:
+    """The ``Position`` writeback must not leak a combo leg's list of labels.
+
+    ``persist`` writes the offers frame to parquet, and pyarrow refuses a column
+    mixing lists with strings, so a single Rivals leg would take prophecize down.
+    Combo legs get ``""`` — what ``stories/context._pos_edges`` already expects —
+    while ``Player position`` keeps the list ``_build_cmarket`` splits on.
+    """
+    stat_data = _FakeMLBStats(
+        {
+            "Kyle Tucker": 3,
+            "Nico Hoerner": 9,
+            "Shota Imanaga": 0,
+            "Oneil Cruz": 2,
+            "Bryan Reynolds": 5,
+        }
+    )
+
+    offer_df, _ = find_correlation(_mlb_offers(), {"MLB": stat_data}, "Underdog")
+
+    assert all(isinstance(p, str) for p in offer_df["Position"])
+    labels = dict(zip(offer_df["Player"], offer_df["Position"], strict=True))
+    assert labels["Kyle Tucker"] == "B3"
+    assert labels["Shota Imanaga"] == "P"
+    assert labels["Kyle Tucker vs. Oneil Cruz"] == ""
+    pa.Table.from_pandas(offer_df[["Position"]])  # the snapshot write, which a mix aborts
 
 
 # --- corr-slice collector (dashboard rail / constellation) ------------------

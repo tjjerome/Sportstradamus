@@ -806,9 +806,14 @@ def find_correlation(
 
         league_df = _resolve_player_positions(league_df, league, stat_data)
         # _resolve_player_positions returns a slice the function otherwise drops;
-        # persist the depth-chart labels onto the returned frame (combos absent
-        # from its index keep "") so build_game_context can read Position.
-        df.loc[league_df.index, "Position"] = league_df["Player position"]
+        # persist the depth-chart labels onto the returned frame so
+        # build_game_context can read Position. Combo legs keep "" — outside MLB
+        # they are absent from the slice, and inside it they carry one label per
+        # component, which pyarrow refuses to mix with the plain strings when
+        # persist writes the offers parquet.
+        df.loc[league_df.index, "Position"] = [
+            p if isinstance(p, str) else "" for p in league_df["Player position"]
+        ]
         league_df = _build_cmarket(league_df, league, new_map)
         parlay_df = _process_league_games(
             df,
