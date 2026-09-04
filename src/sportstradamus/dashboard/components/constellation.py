@@ -201,6 +201,11 @@ def _node_info(leg: Mapping) -> dict:
     }
 
 
+def _side_sign(x: float) -> float:
+    """-1 / 0 / +1 for ``settle``'s ``side`` — 0 at ``x == 0`` stays legal on either half."""
+    return 1.0 if x > 0 else -1.0 if x < 0 else 0.0
+
+
 def constellation_figure(
     slip_legs: Sequence[Mapping],
     corr: pd.DataFrame | None,
@@ -244,7 +249,7 @@ def constellation_figure(
     keys = sorted(set(default_stars(universe, teams)) | active)
     _add_team_tags(fig, league, teams)
     team_color = {team: team_colors(league, team)[0] for team in teams}
-    node_team = {k: node["team"] for k, node in info.items()}
+    node_team = {k: info[k]["team"] for k in keys}
     rho = rho_map(corr, game)
     edges = game_edges(keys, rho)
     floor, label_size, shape_scale, px = (
@@ -262,7 +267,7 @@ def constellation_figure(
         {k: pos[k] for k in sorted(keys, key=lambda k: (-sizes[k], k))},
         sizes,
         px,
-        side={k: (1.0 if pos[k][0] > 0 else -1.0 if pos[k][0] < 0 else 0.0) for k in keys},
+        side={k: _side_sign(pos[k][0]) for k in keys},
     )
 
     focus_scale = _WIDER_SCALE if wider_groups is not None else 1.0
