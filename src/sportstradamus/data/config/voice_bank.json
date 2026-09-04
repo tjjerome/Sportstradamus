@@ -1,6 +1,54 @@
 {
   "shared": {
     "player": {
+      "shootout": {
+        "Mixed": {
+          "production": [
+            "{p} keeps up with the {g} sprint in some ways and gets swept along in others",
+            "a fast {g} lifts everything {p} does on the move and buries the rest",
+            "the pace in {g} rewards {p} in one breath and punishes in the next",
+            "{p} finds room in a wide-open {g} and loses it just as fast",
+            "in a game as loose as {g}, {p} gains on one front and gives ground on another",
+            "the speed of {g} suits half of what {p} came to do"
+          ]
+        }
+      },
+      "grind": {
+        "Mixed": {
+          "production": [
+            "the {g} grind pays {p} for effort and charges for everything else",
+            "{p} wins the ugly parts of {g} and loses the pretty ones",
+            "{p} works for every inch of {g}, and the work only pays half the time",
+            "the pace in {g} hands {p} volume without the reward that usually rides with it",
+            "{p} gets a handful of clean looks in {g} and grinds for the rest",
+            "a heavy {g} splits {p}'s night between what grinds and what glides"
+          ]
+        }
+      },
+      "blowout": {
+        "Mixed": {
+          "production": [
+            "the {g} margin frees {p} early and forgets {p} late",
+            "a runaway {g} gives {p} a fast start and a short night",
+            "{p} banks a night before {g} gets out of hand, then watches the rest",
+            "the lopsided part of {g} helps {p} one way and ends the evening another",
+            "{p} spends the first half of {g} producing and the second half resting",
+            "{p} gets the good half of a {g} rout, never the long one"
+          ]
+        }
+      },
+      "coinflip": {
+        "Mixed": {
+          "production": [
+            "a photo finish in {g} keeps {p} busy and quiet at once",
+            "the tighter {g} gets, the more {p} touches the game and the less it adds up to",
+            "{p} plays every important moment of {g} and wins only some of them",
+            "a game this close gives {p} the moment and takes away the room",
+            "nerves tighten {g}, and {p}'s night tightens unevenly with them",
+            "{p} carries a close {g} without the numbers to show all of it"
+          ]
+        }
+      },
       "even": {
         "Over": {
           "scoring": [
@@ -308,8 +356,26 @@
             "A track-meet night hands {team}'s {grp} unit everything {opp} can't guard",
             "{opp} has to trade blows, and every trade goes through {team}'s {grp}s",
             "The faster this one gets, the worse {opp}'s {grp} matchup looks",
-            "{team}'s {grp}s were made for a night like this; {opp} was not",
+            "The {grp} matchup is the one {opp} never solves at this speed",
             "Nothing slows down, and {team}'s {grp} group rides the current past {opp}"
+          ],
+          "scoring": [
+            "The scoring runs through {team}'s {grp}s tonight, and {opp} can't slow the pace",
+            "{opp} keeps trading blows, and every answer comes from {team}'s {grp}s",
+            "A high-scoring night funnels straight into {team}'s {grp}s against {opp}",
+            "{team} keeps pace with {opp} by feeding its {grp}s",
+            "The faster this gets, the more of the scoring belongs to {team}'s {grp}s",
+            "Points come in bunches for {team}'s {grp} group while {opp} chases"
+          ]
+        },
+        "Under": {
+          "production": [
+            "The scoreboard spins all night and {team}'s {grp}s never touch it — {opp} sees to that",
+            "Everything else runs hot; {opp} keeps {team}'s {grp} group cold",
+            "A wild night, and {opp} still has an answer for {team}'s {grp}s",
+            "The pace helps everyone except {team}'s {grp}s, who keep running into {opp}",
+            "{opp} concedes the scoreboard and takes away {team}'s {grp} group anyway",
+            "Points fly past {team}'s {grp}s rather than through them — {opp} closed that door"
           ]
         }
       },
@@ -323,6 +389,16 @@
             "Attrition favors {team}'s {grp} unit; {opp} wears down first",
             "Volume dries up everywhere except where {team}'s {grp}s meet {opp}"
           ]
+        },
+        "Under": {
+          "production": [
+            "A heavy night, and {opp} makes it heaviest on {team}'s {grp}s",
+            "{opp} turns the {grp} matchup into a wall {team} can't clear",
+            "There is little to go around, and {opp} keeps {team}'s {grp}s from their share",
+            "The slow pace suits {opp}, and {team}'s {grp} group pays for it",
+            "{opp} shortens the game and shortens {team}'s {grp}s with it",
+            "Every inch is contested, and {opp} wins the {grp} inches against {team}"
+          ]
         }
       },
       "blowout": {
@@ -335,6 +411,16 @@
             "The margin frees {team}'s {grp}s to hunt {opp} without a counterpunch",
             "{team} presses the advantage where it's biggest — its {grp}s against {opp}"
           ]
+        },
+        "Under": {
+          "production": [
+            "The margin decides this early, and {team}'s {grp}s never get the night back",
+            "{opp} settles it before {team}'s {grp} group gets going",
+            "A lopsided night pulls {team}'s {grp}s early with the work left undone",
+            "Once this one tips, {team}'s {grp}s become spectators — {opp} made sure of it",
+            "{team}'s {grp} group loses its minutes to the scoreboard as much as to {opp}",
+            "The rout closes the {grp} matchup between {team} and {opp} before it matters"
+          ]
         }
       },
       "coinflip": {
@@ -346,6 +432,16 @@
             "{team} spends the tight moments hunting {opp}'s {grp} weakness",
             "The margin stays thin, and the leverage keeps landing on {team}'s {grp}s",
             "{opp} can't hide the {grp} matchup in a game decided at the end"
+          ]
+        },
+        "Under": {
+          "production": [
+            "A game this tight gets careful, and careful is where {team}'s {grp}s go quiet",
+            "{opp} spends the close moments taking {team}'s {grp} group away",
+            "Nobody risks anything late, and the risks are how {team}'s {grp}s eat",
+            "The margin never opens, and neither does anything for {team}'s {grp}s against {opp}",
+            "{opp} plays the {grp} matchup safe and {team} never breaks it open",
+            "Tight games shrink roles, and {team}'s {grp}s feel the squeeze from {opp}"
           ]
         }
       },
@@ -389,6 +485,214 @@
       }
     },
     "stack": {
+      "shootout": {
+        "Over": {
+          "production": [
+            "The {g} scoreboard never stops, and {n} legs climb with it behind {p}",
+            "{n} bets on the same runaway game in {g}, and {p} is the reason",
+            "Chaos in {g} cuts {n} ways at once, {p} first",
+            "A game this loud carries {n} legs together, {p} out in front",
+            "{p} leads {n} legs into the loudest game of the night in {g}",
+            "One wild {g} night, {n} correlated legs, {p} at the top of them"
+          ]
+        },
+        "Under": {
+          "production": [
+            "The board says {g} runs wild; {n} legs say the quiet part, and {p} says it loudest",
+            "{n} fades inside a game everyone expects to explode, {p} anchoring them",
+            "The fireworks in {g} miss all {n} of these names, {p} most of all",
+            "A loud game and {n} still nights, {p} the stillest",
+            "Everyone else rides the {g} scoring; these {n} stand where they are with {p}",
+            "A shootout with {n} exceptions in {g}, and {p} is the first one"
+          ]
+        },
+        "ContrastOver": {
+          "production": [
+            "The {g} scoring spree finds exactly one of these {n} names: {p}",
+            "{p} feasts on the {g} pace while the rest of the stack sits out the party",
+            "A wide-open {g}, and only {p} walks through the door",
+            "The fast game belongs to {p} alone tonight in {g}",
+            "{p} rides the {g} surge and the other legs let it pass",
+            "One name eats in a loud {g}, and it is {p}"
+          ]
+        },
+        "ContrastUnder": {
+          "production": [
+            "The {g} scoring reaches everyone but {p}",
+            "A loud night in {g}, and {p} is the one quiet room in it",
+            "{n} legs ride the {g} pace; the sharpest one leaves {p} behind",
+            "The pace lifts every name in {g} and leaves {p} on the ground",
+            "{p} sits out the {g} fireworks while the rest of the stack lights them",
+            "{p} is the exception a wild {g} makes"
+          ]
+        },
+        "Mixed": {
+          "production": [
+            "A fast {g} sends {n} legs in different directions with {p} in the middle",
+            "The {g} pace helps some of these {n} names and hurts the others",
+            "Wild games play favorites, and {g} splits {n} legs behind {p}",
+            "{n} ways to read one loud {g} night, {p} the loudest of them",
+            "The scoring in {g} arrives unevenly: {n} legs, two directions, {p} up front",
+            "{p} fronts {n} legs that agree about {g} and disagree about everything else"
+          ]
+        }
+      },
+      "grind": {
+        "Over": {
+          "production": [
+            "The game in {g} dies and {n} legs live anyway, {p} leading them",
+            "Ugly is fine: {n} legs feed on the {g} grind with {p} first in line",
+            "{p} takes the punishment in {g} and {n} legs get paid for it",
+            "A game with nothing in it still has {n} things in it, and {p} is the biggest",
+            "The heavy going in {g} suits these {n} names, {p} most of all",
+            "Low-event {g}, {n} legs that need no events, {p} setting the tone"
+          ]
+        },
+        "Under": {
+          "production": [
+            "{g} strangles everything, and {n} legs go down together behind {p}",
+            "The clock eats {g} and takes {n} legs with it, {p} included",
+            "Whatever gets going in {g} skips these {n} names, and skips {p} entirely",
+            "A grind swallows {n} legs whole in {g}; {p} disappears first",
+            "{p} anchors {n} legs pointed at a {g} that never wakes up",
+            "Nothing happens in {g}, and it happens to all {n} of these legs, {p} first"
+          ]
+        },
+        "ContrastOver": {
+          "production": [
+            "The {g} grind buries the stack and spares {p}",
+            "One name gets work out of a lifeless {g}: {p}",
+            "{p} finds something in {g} the other {n} legs never do",
+            "A slow game quiets everyone in {g} but {p}",
+            "The mud holds every name in {g} except {p}",
+            "{p} is the only thing moving in a stuck {g}"
+          ]
+        },
+        "ContrastUnder": {
+          "production": [
+            "The {g} grind rewards the workers and skips {p}",
+            "{n} legs dig in and survive {g}; {p} is the one that gets buried",
+            "A slow game feeds everyone in {g} except {p}",
+            "The others thrive in the {g} mud — {p} drowns in it",
+            "{p} is the wrong kind of night for {g}, and the stack knows it",
+            "The grind hands out rewards in {g} and hands {p} nothing"
+          ]
+        },
+        "Mixed": {
+          "production": [
+            "A heavy {g} sorts {n} legs into workers and passengers, with {p} in the first group",
+            "The grind gives and takes across {n} legs in {g}, with {p} in the middle",
+            "Slow games split their favors, and {g} splits {n} ways behind {p}",
+            "Some names need pace and some need none — {g} has {n} of both, {p} loudest",
+            "{p} fronts {n} legs that read one ugly {g} two different ways",
+            "The mud helps as many of these {n} names as it hurts, and {p} decides which"
+          ]
+        }
+      },
+      "blowout": {
+        "Over": {
+          "production": [
+            "The scoreboard tips one way in {g} and {n} legs tip with it, {p} out front",
+            "The margin opens in {g} and {n} legs pour through behind {p}",
+            "A rout spreads volume {n} ways in {g}, starting with {p}",
+            "Nobody resists once {g} breaks, and {n} legs feed on the same collapse, {p} first",
+            "{p} leads {n} legs into a game that stops competing in {g}",
+            "A one-sided {g} keeps giving and {n} legs keep taking behind {p}"
+          ]
+        },
+        "Under": {
+          "production": [
+            "A rout ends the night early for {n} names in {g}, {p} among them",
+            "The margin settles {g} before halfway and the night ends for all {n}, {p} included",
+            "{n} legs die on the bench in a lopsided {g}, {p} leading them there",
+            "Once {g} tips, the starters stop and so do these {n} names, {p} the surest",
+            "A laugher in {g} shortens {n} nights at once, and {p}'s is shortest",
+            "Garbage time belongs to nobody in these {n} legs, {p} the emptiest"
+          ]
+        },
+        "ContrastOver": {
+          "production": [
+            "The rout in {g} feeds one name and starves the rest: {p}",
+            "{p} banks a night before {g} breaks open; the others never get there",
+            "A lopsided {g} works for {p} alone",
+            "Everyone else gets pulled from a runaway {g} — {p} keeps going",
+            "One name survives the {g} margin, and it is {p}",
+            "{p} eats early in {g} while the rest of the stack waits for a game that ends"
+          ]
+        },
+        "ContrastUnder": {
+          "production": [
+            "The {g} rout lifts every name but {p}",
+            "{p} is the one starter a lopsided {g} leaves behind",
+            "A runaway {g} spreads the volume around and skips {p}",
+            "The others feast on a broken {g}; {p} goes home early",
+            "Whatever the {g} margin hands out, none of it lands on {p}",
+            "One name sits out the {g} rout: {p}"
+          ]
+        },
+        "Mixed": {
+          "production": [
+            "A lopsided {g} makes winners and spectators of {n} legs, {p} in front",
+            "The margin gives to some of these {n} names and takes from the others in {g}",
+            "{n} legs on a game that quits early in {g}, and only half of them mind",
+            "A rout rearranges the night for {n} legs in {g}, {p} at the top",
+            "Some names need the end of {g} and some are finished before it: {n} legs, {p} loudest",
+            "{p} fronts {n} legs that split on whether {g} ever gets close"
+          ]
+        }
+      },
+      "coinflip": {
+        "Over": {
+          "production": [
+            "A {g} decided late keeps {n} legs working to the finish, {p} first",
+            "Nobody rests in a tight {g}, and {n} legs collect the extra work behind {p}",
+            "The closer {g} stays, the longer these {n} names play, {p} longest",
+            "{n} legs on a game with no ending in sight in {g}, {p} leading",
+            "{p} carries {n} legs through a {g} that refuses to be decided",
+            "Every moment of a knotted {g} counts, and {n} legs count with it behind {p}"
+          ]
+        },
+        "Under": {
+          "production": [
+            "A tight {g} turns careful, and {n} legs go quiet together, {p} first",
+            "Nobody forces anything in a close {g}; {n} names pay for the caution, {p} most",
+            "The {g} margin never opens and neither do these {n} nights, {p} the flattest",
+            "Caution runs both ways in {g} and buries {n} legs, {p} deepest",
+            "{n} legs lean on the nerves in {g}, and {p} is the surest of them",
+            "Tension in {g} squeezes {n} names at once, {p} hardest"
+          ]
+        },
+        "ContrastOver": {
+          "production": [
+            "A game this tight goes to one name in {g}, and that name is {p}",
+            "The pressure in {g} finds {p} and leaves the rest of the stack alone",
+            "{p} rises in a knotted {g} while the others shrink",
+            "One name gets the moment late in {g}: {p}",
+            "The careful game in {g} still has room for {p}",
+            "Everyone tightens in {g} but {p}"
+          ]
+        },
+        "ContrastUnder": {
+          "production": [
+            "The late minutes of a tight {g} find every name but {p}",
+            "{p} is the one squeezed by a {g} nobody else feels",
+            "The stack rises with the pressure in {g}; {p} shrinks from it",
+            "Everyone gets a moment in a close {g} except {p}",
+            "The tension in {g} lifts the others and flattens {p}",
+            "One name loses the close game in {g}, and it is {p}"
+          ]
+        },
+        "Mixed": {
+          "production": [
+            "A game on a knife edge splits {n} legs in {g}, {p} at the point",
+            "Close games reward some names and punish others — {g} has {n} of both, {p} first",
+            "{n} legs read one tense {g} two ways, with {p} between them",
+            "The margin stays thin in {g} and the night thins unevenly across {n} legs",
+            "Some of these {n} names need a finish and some need it settled early",
+            "{p} fronts {n} legs that agree {g} will be close and nothing else"
+          ]
+        }
+      },
       "even": {
         "Over": {
           "production": [
@@ -894,12 +1198,12 @@
         },
         "Mixed": {
           "production": [
-            "the {g} track meet lifts half this card and strands the other half",
-            "pace everywhere in {g}, and the numbers still split",
-            "some lines ride the {g} sprint, others watch it go by",
-            "a fast {g} is no rising tide — read each number on its own",
-            "the {g} gym runs hot and cold on the same night",
-            "half this slip catches the {g} wave, half misses it"
+            "the {g} sprint fills the guards' hands and empties the bigs'",
+            "pace everywhere in {g}, and the rebounds vanish with it",
+            "everybody scores in {g}; nobody rebounds",
+            "a fast {g} is no rising tide — some numbers drown in it",
+            "the {g} gym runs hot at one rim and cold at the other",
+            "transition points pile up in {g} while the half-court work starves"
           ]
         }
       },
@@ -934,11 +1238,11 @@
         },
         "Mixed": {
           "production": [
-            "the {g} rockfight rewards some numbers and buries the rest",
-            "mud in {g} suits half this card just fine",
-            "the {g} pace dies, and the box score splits on who still works",
-            "ugly basketball in {g} — some lines thrive on ugly",
-            "possessions shrink in {g}; not every number shrinks with them",
+            "{g} pays the rebounders and taxes the shooters",
+            "the {g} rockfight lifts the hustle stats and buries the pretty ones",
+            "possessions shrink in {g}; the bruises don't",
+            "shooters starve in {g} while the glass keeps everybody fed",
+            "every bucket in {g} costs a bruise, and the bruises count for something",
             "the {g} grind sorts the workers from the scorers"
           ]
         }
@@ -967,11 +1271,11 @@
         "Mixed": {
           "production": [
             "the {g} margin giveth to the bench and taketh from the stars",
-            "a lopsided {g} splits the box score by who's still playing",
-            "garbage time in {g} fills some columns and closes others",
-            "the {g} rout ends some nights early and starts others",
-            "starters clock out of {g}, reserves clock in — the card splits with them",
-            "half this slip needs the fourth quarter of {g}; half is done by then"
+            "the starters' night ends at halftime of {g}; the reserves' begins",
+            "garbage time in {g} pays whoever is still on the floor",
+            "{g} stops being a game early, and the minutes change hands",
+            "the {g} rout pours volume onto the wrong names",
+            "the {g} scoreboard settles early and the rotation stops making sense"
           ]
         }
       },
@@ -998,12 +1302,12 @@
         },
         "Mixed": {
           "production": [
-            "a wire-to-wire {g} stretches some lines and squeezes others",
-            "crunch time in {g} feeds the ball to a few hands and starves the rest",
-            "the {g} minutes pile up while the possessions crawl — the card splits",
-            "tight {g}, split card: heavy legs, careful shots",
+            "crunch time in {g} feeds two hands and freezes the rest",
+            "the {g} minutes pile up while the possessions crawl",
             "everyone plays the whole of {g}; not everyone eats",
-            "a knotted {g} makes stars of a few and spectators of the rest"
+            "a knotted {g} makes stars of a few and spectators of the rest",
+            "the last four minutes of {g} belong to two players and nobody else",
+            "nerves in {g} sharpen the free throws and flatten everything else"
           ]
         }
       },
@@ -1071,6 +1375,40 @@
       }
     },
     "stack": {
+      "shootout": {
+        "Over": {
+          "production": [
+            "{n} legs strapped to the {g} track meet, {p} in the front seat",
+            "The {g} pace lifts all {n} boats and {p} steers",
+            "Stack the {g} shootout {n} deep — {p} brings it home",
+            "{n} legs sprint with the {g} pace and {p} sets it",
+            "The {g} track meet carries {n} legs on {p}'s back",
+            "Stack the {g} fireworks {n} high — {p} lights them"
+          ]
+        },
+        "Under": {
+          "production": [
+            "The gym in {g} runs at full tilt while {n} legs stand still, {p} slowest of all",
+            "Nobody guards anybody in {g} except the {n} names in this stack, {p} first",
+            "A gym that loud with {n} quiet nights inside it, {p} the quietest",
+            "The {g} pace lifts every jumper but these {n}, with {p} at the front",
+            "Fast game, cold hands: {n} legs of {g} fade together behind {p}",
+            "{p} leads {n} names who never join the {g} sprint"
+          ]
+        }
+      },
+      "grind": {
+        "Over": {
+          "production": [
+            "The {g} rockfight is where {n} legs live, and {p} lives there loudest",
+            "Ugly basketball, {n} happy legs — {p} does the dirty work in {g}",
+            "Put-backs and deflections carry {n} legs through {g}, {p} first",
+            "The half-court slog in {g} suits {n} names just fine, {p} best of all",
+            "The {g} mud is a buffet for {n} legs and {p} eats first",
+            "No pace, no problem: {n} legs of {g} behind {p}"
+          ]
+        }
+      },
       "even": {
         "Over": {
           "production": [
@@ -1120,18 +1458,6 @@
             "{n} different answers out of one {g} gym, {p} the loudest",
             "a two-way ticket in {g}: {n} legs, {p} at the center",
             "{p} anchors a {g} slip that plays both ends of the floor"
-          ]
-        }
-      },
-      "shootout": {
-        "Over": {
-          "production": [
-            "{n} legs strapped to the {g} track meet, {p} in the front seat",
-            "The {g} pace lifts all {n} boats and {p} steers",
-            "Stack the {g} shootout {n} deep — {p} brings it home",
-            "{n} legs sprint with the {g} pace and {p} sets it",
-            "The {g} track meet carries {n} legs on {p}'s back",
-            "Stack the {g} fireworks {n} high — {p} lights them"
           ]
         }
       }
@@ -1484,12 +1810,12 @@
         },
         "Mixed": {
           "production": [
-            "the {g} shootout feeds one side of this card and skips the other",
-            "points everywhere in {g}, yardage in only some columns",
-            "some of these lines ride the {g} track meet; the rest watch from the sideline",
-            "no-huddle {g} rewrites half this slip and leaves the rest alone",
-            "the {g} scoreboard runs, and the box score still splits",
-            "chunk plays in {g} pick their beneficiaries — this card gets both kinds"
+            "the {g} scoring race feeds the passing game and forgets the run",
+            "points everywhere in {g}, and the defenses go home hungry",
+            "no-huddle {g} means more snaps and fewer of them for the backs",
+            "chunk plays in {g} shorten the drives that used to feed everybody",
+            "both offenses hum in {g}; the third-down units never take the field",
+            "a shootout in {g} rewards the receivers and buries the trenches"
           ]
         }
       },
@@ -1525,11 +1851,11 @@
         "Mixed": {
           "production": [
             "the {g} slugfest pays the trenches and starves the skill spots",
-            "three-and-outs in {g} hurt some of these numbers and help the rest",
-            "clock-heavy {g} splits the card between carries and catches",
-            "field position is the {g} story, and this slip sits on both sides of it",
-            "the {g} chains move slow — some lines don't need them to",
-            "ugly football in {g}, and the box score splits on who does the dirty work"
+            "three-and-outs in {g} feed the defenses and nothing else",
+            "clock-heavy {g} turns carries into a meal and catches into a rumor",
+            "field position is the whole story of {g}, and the story has two sides",
+            "the {g} chains move slow enough for the linebackers to eat",
+            "ugly football in {g} rewards whoever likes contact"
           ]
         }
       },
@@ -1557,11 +1883,11 @@
         "Mixed": {
           "production": [
             "a runaway {g} keeps some starters late and sends the rest home",
-            "the {g} margin turns half this card into garbage-time volume",
-            "kneel-downs end some {g} nights early; the backups finish the others",
-            "one side of this slip rides the {g} rout, one side gets buried by it",
-            "one side runs away with {g} while the box score splits in two",
-            "lopsided {g}: the run game feasts, the passing game clocks out"
+            "the {g} margin feeds one ground game and erases the other",
+            "kneel-downs close {g} for one offense while the other keeps throwing",
+            "the winner runs it forty times in {g}; the loser throws it forty more",
+            "backups get whole quarters of {g} while the headliners hit the showers",
+            "the {g} rout ends the starters' afternoon and starts everybody else's"
           ]
         }
       },
@@ -1588,11 +1914,11 @@
         },
         "Mixed": {
           "production": [
-            "leverage on every {g} snap, and the card still splits",
+            "leverage on every {g} snap, and the play calls get careful anyway",
             "a one-score {g} keeps everybody on the field and only some of them fed",
-            "both playbooks stay open in {g} — half these numbers benefit",
-            "tight {g}, mixed card: full snap counts, careful play calls",
-            "the {g} two-minute drill lifts a few of these lines and ignores the rest",
+            "both playbooks stay open in {g}, and neither one opens all the way",
+            "tight {g}: full snap counts, careful hands",
+            "the {g} two-minute drill lifts the receivers and forgets the backs",
             "nobody rests in {g}, but not everybody produces"
           ]
         }
@@ -1661,6 +1987,40 @@
       }
     },
     "stack": {
+      "shootout": {
+        "Over": {
+          "production": [
+            "{n} legs ride the {g} shootout with {p} at the wheel",
+            "The {g} air show lifts {n} legs — {p} flies lead",
+            "Stack {g} {n} deep; {p} keeps the drives alive",
+            "{n} legs ride the {g} air raid with {p} calling signals",
+            "Every {g} scoring drive lifts all {n} legs — {p} keeps them coming",
+            "The {g} track meet in pads carries {n} legs, {p} out front"
+          ]
+        },
+        "Under": {
+          "production": [
+            "The {g} air show goes on without these {n} names, {p} leading the sideline",
+            "Points everywhere in {g} and {n} legs still fade, with {p} the surest",
+            "A track meet in pads that {n} legs sit out, {p} first among them",
+            "The {g} scoreboard runs; {n} of these workloads don't, and {p}'s runs least",
+            "Both offenses hum in {g} while {n} legs go silent behind {p}",
+            "{p} fronts {n} names the {g} shootout forgets"
+          ]
+        }
+      },
+      "grind": {
+        "Over": {
+          "production": [
+            "The {g} slugfest belongs to {n} legs that live in the trenches, {p} first",
+            "Twelve-play drives feed {n} legs in {g}, and {p} finishes them",
+            "Ugly football pays {n} ways in {g}, with {p} collecting most",
+            "The {g} clock grinds and {n} legs grind along with it, {p} first",
+            "Field position is nobody's friend in {g} except these {n}, and {p} leads them",
+            "{n} legs built for a {g} fistfight, {p} throwing the first punch"
+          ]
+        }
+      },
       "even": {
         "Over": {
           "production": [
@@ -1710,18 +2070,6 @@
             "{p} fronts a {g} slip that plays offense and defense at once",
             "{n} reads out of one {g} huddle — {p} carries the loudest",
             "a split {g} ticket: {n} legs, both directions, {p} in the middle"
-          ]
-        }
-      },
-      "shootout": {
-        "Over": {
-          "production": [
-            "{n} legs ride the {g} shootout with {p} at the wheel",
-            "The {g} air show lifts {n} legs — {p} flies lead",
-            "Stack {g} {n} deep; {p} keeps the drives alive",
-            "{n} legs ride the {g} air raid with {p} calling signals",
-            "Every {g} scoring drive lifts all {n} legs — {p} keeps them coming",
-            "The {g} track meet in pads carries {n} legs, {p} out front"
           ]
         }
       }
@@ -2072,7 +2420,7 @@
         },
         "Under": {
           "production": [
-            "The {g} track meet leaves these stat lines standing still",
+            "The {g} goal horn works overtime; these names never trigger it",
             "Firewagon hockey in {g}, and these names never catch the wave",
             "Both goalies get shelled in {g}; these numbers stay dry anyway",
             "The {g} pace is real — these players just aren't on the ice for it",
@@ -2082,12 +2430,12 @@
         },
         "Mixed": {
           "production": [
-            "firewagon {g} lifts some of these sheets and skips the others",
-            "chances everywhere in {g}, and the card still splits",
-            "some lines ride the {g} run-and-gun; the rest chase it",
-            "the {g} lamp gets busy for half this slip",
-            "open ice in {g} rewards the shooters and nobody else on this card",
-            "a track-meet {g} splits the night by which line you're on"
+            "firewagon {g} rolls the skill lines and hangs the goalies out to dry",
+            "chances everywhere in {g}, and the checkers never touch one",
+            "the {g} run-and-gun keeps the top six on the ice and the grinders on the bench",
+            "open ice in {g} rewards the shooters and punishes everybody behind them",
+            "the lamp gets busy in {g} while the blocked-shot numbers freeze",
+            "a wide-open {g} is a different game depending on which line you're on"
           ]
         }
       },
@@ -2116,10 +2464,10 @@
           "production": [
             "the {g} trap starves the scorers and feeds the workers",
             "heavy ice in {g}: blocked shots climb, chances sink",
-            "some of these numbers live in the {g} corners, the rest need the slot",
-            "neutral-zone {g} splits the card between grinders and finishers",
-            "the {g} pace bottoms out and only half this slip goes with it",
-            "chip-and-chase {g} pays the checking lines, not the skill lines"
+            "the {g} corners get busy while the slot stays empty",
+            "neutral-zone {g} pays the checking lines and nobody else",
+            "the {g} pace bottoms out and the hits pile up",
+            "chip-and-chase {g} rewards the fourth line and strands the first"
           ]
         }
       },
@@ -2147,11 +2495,11 @@
         "Mixed": {
           "production": [
             "a lopsided {g} shortens the stars' night and lengthens everyone else's",
-            "the {g} rout hands the third period to the fourth line — the card splits",
-            "some of these sheets need the {g} finish; some are already full",
-            "power plays feast early in {g}, star shifts vanish late",
-            "the {g} margin gives to one half of this slip and takes from the other",
-            "garbage minutes close {g}, and the box score splits on who skates them"
+            "the third period of {g} belongs to the fourth line",
+            "power plays feast early in {g} and the top shifts vanish late",
+            "the {g} margin gives the depth guys a night and takes one from the top six",
+            "garbage minutes close {g}, and the goalie is the only one still working",
+            "one crease sees everything in {g}, the other sees nothing"
           ]
         }
       },
@@ -2178,11 +2526,11 @@
         },
         "Mixed": {
           "production": [
-            "a one-goal {g} double-shifts the top line and benches the rest of this card",
-            "overtime looms in {g}; only some of these numbers care",
-            "the {g} chess match tightens some lines and stretches others",
-            "tight {g}: more shifts, fewer chances — this card gets both",
-            "every {g} shift matters, and the sheets still split",
+            "a one-goal {g} double-shifts the top line and benches the fourth",
+            "overtime looms in {g}; the checkers never leave the bench",
+            "the {g} chess match tightens the neutral zone and stretches the shifts",
+            "tight {g}: more shifts, fewer chances",
+            "every {g} shift matters, and the matchups decide who gets them",
             "a knotted {g} rewards the matchup line and quiets everybody else"
           ]
         }
@@ -2243,6 +2591,40 @@
       }
     },
     "stack": {
+      "shootout": {
+        "Over": {
+          "production": [
+            "{n} legs strapped to a {g} firefight, {p} on the top line",
+            "The {g} goal rush carries {n} legs and {p} leads it",
+            "{n} legs ride the {g} firewagon and {p} drives",
+            "Odd-man rushes lift {n} {g} legs — {p} finishes them",
+            "The {g} track meet rolls {n} legs deep behind {p}",
+            "Stack the {g} goal rush {n} high; {p} keeps it lit"
+          ]
+        },
+        "Under": {
+          "production": [
+            "Firewagon hockey in {g}, and {n} legs never catch a rush; {p} watches the most of it",
+            "The goals fly in {g}; these {n} names watch them go by with {p}",
+            "{n} quiet sweaters on a night when nothing else in {g} is quiet, {p} quietest of all",
+            "The {g} run-and-gun skips {n} legs, and {p} it skips first",
+            "Odd-man rushes everywhere in {g}, none of them touching these {n}",
+            "{p} anchors {n} names the {g} scoresheet never mentions"
+          ]
+        }
+      },
+      "grind": {
+        "Over": {
+          "production": [
+            "The {g} trap suits {n} legs down to the ice, {p} first",
+            "Blocked shots and board battles carry {n} names through {g}, {p} leading",
+            "Heavy ice rewards {n} legs in {g}, and {p} collects most of it",
+            "{n} legs live in the {g} corners, {p} working hardest in them",
+            "A 2-1 game still feeds {n} legs in {g} — {p} sets the table",
+            "The neutral zone belongs to these {n} names in {g}, and {p} owns most of it"
+          ]
+        }
+      },
       "even": {
         "Over": {
           "production": [
@@ -2292,18 +2674,6 @@
             "{n} currents on one {g} rink, {p} skating the strongest",
             "a mixed {g} bench: {n} legs, both directions, {p} up front",
             "{p} headlines a {g} slip that plays both ends of the ice"
-          ]
-        }
-      },
-      "shootout": {
-        "Over": {
-          "production": [
-            "{n} legs strapped to a {g} firefight, {p} on the top line",
-            "The {g} goal rush carries {n} legs and {p} leads it",
-            "{n} legs ride the {g} firewagon and {p} drives",
-            "Odd-man rushes lift {n} {g} legs — {p} finishes them",
-            "The {g} track meet rolls {n} legs deep behind {p}",
-            "Stack the {g} goal rush {n} high; {p} keeps it lit"
           ]
         }
       }
@@ -2616,12 +2986,12 @@
         },
         "Mixed": {
           "production": [
-            "the {g} slugfest feeds the bats and buries the arms",
-            "crooked numbers in {g} lift half this card",
-            "some of these lines ride the {g} rally; the pitching lines wear it",
-            "a bullpen game in {g} splits the card between hitters and pitchers",
-            "the {g} baseball flies, and this slip sits on both sides of that",
-            "runs everywhere in {g} — not every column shows them"
+            "the {g} slugfest is a party for the bats and a funeral for the arms",
+            "crooked numbers in {g} come at the pitching's expense",
+            "some swings ride the {g} rally; the starters wear it",
+            "a bullpen game in {g} is a gift to the hitters and a bill for the relievers",
+            "the {g} baseball flies, and somebody still has to throw it",
+            "runs everywhere in {g}, and not a single whiff to show for it"
           ]
         }
       },
@@ -2648,12 +3018,12 @@
         },
         "Mixed": {
           "production": [
-            "a {g} duel feeds the arms and starves the order",
-            "zeros on the {g} board, split verdicts on this card",
-            "the {g} pitching carries some of these numbers and smothers the rest",
-            "quick innings in {g} help the strikeout lines and hurt the bats",
-            "some of this slip wants a {g} rally; the rest wants nine quiet frames",
-            "matchup baseball in {g} splits the card plate appearance by plate appearance"
+            "a {g} duel keeps the arms busy and the order silent",
+            "zeros on the {g} board, punchouts everywhere else",
+            "the {g} pitching carries the night and the bats pay for it",
+            "quick innings in {g} shrink everybody's evening except the pitchers'",
+            "the bats stay in the rack in {g} while the whiffs pile up",
+            "matchup baseball in {g} splits the night plate appearance by plate appearance"
           ]
         }
       },
@@ -2681,11 +3051,11 @@
         "Mixed": {
           "production": [
             "a lopsided {g} hands out extra at-bats and pulls the regulars early",
-            "mop-up innings in {g} feed some of these lines and end others",
+            "mop-up innings in {g} are batting practice for whoever is left",
             "the {g} rout lengthens the order and shortens the stars' day",
-            "some of this card wants the ninth inning of {g}; the rest is done by the sixth",
-            "the {g} margin turns half the slip into batting practice",
-            "bench bats finish {g}, and the box score splits with the lineup card"
+            "the bench finishes {g} while the regulars ice down",
+            "one lineup keeps swinging in {g}; the other counts outs",
+            "the last three innings of {g} stop looking like a major-league game"
           ]
         }
       },
@@ -2713,11 +3083,11 @@
         "Mixed": {
           "production": [
             "a one-run {g} burns the bullpen and rations the offense",
-            "extra innings threaten in {g} — some of these numbers grow, some just wait",
-            "the {g} managers play matchups, and the card splits with them",
+            "extra innings threaten in {g} — more outs, no more runs",
+            "the {g} managers play matchups and the starters pay for it",
             "tight {g}: more relievers, fewer rallies",
-            "matchup relievers own the late {g} innings — good for some of this card, not the rest",
-            "free baseball would suit some of these lines; the rest need nine tidy frames"
+            "matchup relievers own the late innings of {g} and the bats go cold",
+            "free baseball would suit the arms in {g}; the bats want no part of it"
           ]
         }
       },
@@ -2777,6 +3147,40 @@
       }
     },
     "stack": {
+      "shootout": {
+        "Over": {
+          "production": [
+            "{n} legs ride the {g} slugfest and {p} bats cleanup",
+            "The {g} rally lifts {n} legs at once — {p} sparks it",
+            "{n} legs ride the {g} hit parade and {p} marshals it",
+            "Every {g} rally lifts {n} legs — {p} keeps the line moving",
+            "Stack the {g} slugfest {n} deep; {p} swings first",
+            "{n} bats in one {g} barrage, {p} out front"
+          ]
+        },
+        "Under": {
+          "production": [
+            "The park says slugfest; {n} of these bats say otherwise, and {p} says it first",
+            "Runs everywhere in {g} and {n} quiet at-bats in the middle of it, {p} quietest",
+            "The {g} baseball flies for everyone but these {n} names, {p} included",
+            "A bullpen game in {g} that {n} legs never touch, with {p} leading them",
+            "Crooked numbers stack up all night in {g} without a single one of these {n} bats",
+            "{p} fronts {n} bats the {g} rally never reaches"
+          ]
+        }
+      },
+      "grind": {
+        "Over": {
+          "production": [
+            "A pitchers' duel in {g} is exactly what {n} legs wanted, {p} most",
+            "The zeros pile up in {g} and {n} legs pile up with them behind {p}",
+            "Strikeouts travel in packs in {g}: {n} legs, {p} first",
+            "Everyone else disappears in a quiet {g}; these {n} names do the opposite, {p} first of them",
+            "The {g} duel hands {n} names their night, and {p} takes the biggest share",
+            "Nine quiet innings in {g} still fill {n} legs, {p} the loudest"
+          ]
+        }
+      },
       "even": {
         "Over": {
           "production": [
@@ -2826,18 +3230,6 @@
             "{n} reads from one {g} dugout, {p} the loudest",
             "a split {g} ticket: {n} legs, both directions, {p} at the plate in the middle",
             "{p} fronts a {g} slip that swings both ways"
-          ]
-        }
-      },
-      "shootout": {
-        "Over": {
-          "production": [
-            "{n} legs ride the {g} slugfest and {p} bats cleanup",
-            "The {g} rally lifts {n} legs at once — {p} sparks it",
-            "{n} legs ride the {g} hit parade and {p} marshals it",
-            "Every {g} rally lifts {n} legs — {p} keeps the line moving",
-            "Stack the {g} slugfest {n} deep; {p} swings first",
-            "{n} bats in one {g} barrage, {p} out front"
           ]
         }
       }
