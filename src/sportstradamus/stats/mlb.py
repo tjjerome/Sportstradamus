@@ -68,6 +68,9 @@ _MLB_POSTSEASON_GAME_TYPES: frozenset[str] = frozenset({"F", "D", "L", "W", "P"}
 # postseason code (P) and anything unmapped fall back to best-of-5.
 _MLB_SERIES_GAMES_TO_WIN: dict[str, int] = {"F": 2, "D": 3, "L": 4, "W": 4, "P": 3}
 _MLB_DEFAULT_SERIES_WINS: int = 3
+# statsapi's sport id for Major League Baseball; every other id is a minor or
+# foreign league whose players never reach our gamelog.
+_MLB_SPORT_ID: int = 1
 
 # Batting-order plate-appearance structure, measured from the backfilled ~2-season
 # MLB gamelog (scripts/measure_mlb_volume_constants.py). The batting slot fixes a
@@ -910,8 +913,9 @@ class StatsMLB(Stats):
         mlb_games = mlb.schedule(
             start_date=next_day.strftime("%Y-%m-%d"), end_date=end_date.strftime("%Y-%m-%d")
         )
-        mlb_teams = mlb.get("teams", {"sportId": 1})
+        mlb_teams = mlb.get("teams", {"sportId": _MLB_SPORT_ID})
         self.upcoming_games = _build_mlb_upcoming_games(mlb_games, mlb_teams)
+        self._refresh_handedness()
 
         prev_game_ids = [] if self.gamelog.empty else self.gamelog.gameId.unique()
         mlb_game_ids = _mlb_final_game_ids(mlb_games, prev_game_ids)
@@ -934,6 +938,49 @@ class StatsMLB(Stats):
             self._enrich_team_markets(self.gamelog, date_col="gameDate", team_col="team")
 
         write_gamelog("mlb", self.gamelog, self.teamlog, self.players)
+
+    def _refresh_handedness(self):
+        """Overwrite registry ``bats`` / ``throws`` from MLB's people feed.
+
+        ``_resolve_bat_side`` learns a side from a player's first observed plate
+        appearance and never revisits it, which freezes every switch hitter on
+        whichever box he happened to stand in first -- the registry carried zero
+        "S" before this ran. The people feed is authoritative and keyed by the
+        same numeric player id, so existing entries are corrected in place.
+
+        Correct, never add: an absent key is the resolvers' cache-miss signal, and
+        both of them answer a miss with ``None`` to skip an unusable box score.
+        Filling a key they have never seen would silently retire that guard, so a
+        value is only overwritten where one already exists. Feed-only ids are not
+        added and ``name`` is never touched either: registry names are the
+        unaccented spelling downstream matches offers by ("Jose Ramirez"), while
+        the feed returns the accented one.
+
+        This runs in ``_update``'s prelude beside the other hard-failing feed
+        calls rather than next to the write, so a people-feed outage cannot
+        discard a parse loop that already ran; the cost is that a player first
+        seen this run keeps his box-score value until the next cycle. The season
+        is ``season_start.year`` because :meth:`Stats.update`'s season gate and
+        opener adoption hold ``season_start`` on the season being fetched; a
+        forced replay of an older window asks for the hand-set constant's season
+        instead, which is harmless because handedness is career-stable.
+        """
+        feed = mlb.get(
+            "sports_players",
+            {
+                "sportId": _MLB_SPORT_ID,
+                "season": self.season_start.year,
+                "fields": "people,id,batSide,code,pitchHand",
+            },
+        )
+        for person in feed["people"]:
+            entry = self.players.get(person["id"])
+            if entry is None:
+                continue
+            if "bats" in entry and "batSide" in person:
+                entry["bats"] = person["batSide"]["code"]
+            if "throws" in entry and "pitchHand" in person:
+                entry["throws"] = person["pitchHand"]["code"]
 
     def _trim_old_games(self, today):
         four_years_ago = today - timedelta(days=1461)
