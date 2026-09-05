@@ -39,8 +39,10 @@ _OFFER_KEYS = {
 }
 
 # Only the fields the dual-shape helpers below actually read off a raw offer
-# row. The rest of LEG_FIELDS (stat/league/game/date/platform/push_prob) is
-# canonical-only — every call site that needs one of those only ever holds a
+# row — league among them, because the constellation resolves a board's display
+# name for its labels, hovers and cards off raw candidate rows as readily as off
+# slip legs. The rest of LEG_FIELDS (stat/game/date/platform/push_prob) is
+# canonical-only: every call site that needs one of those only ever holds a
 # canonical leg, never a raw offer row, so it indexes directly (leg["game"])
 # instead of going through leg_field.
 _FIELD_TO_OFFER_COL = {
@@ -49,6 +51,7 @@ _FIELD_TO_OFFER_COL = {
     "market": "Market",
     "bet": "Bet",
     "line": "Line",
+    "league": "League",
     "win_prob": "Win Prob",
     "boost": "Boost",
     "kelly": "Kelly",

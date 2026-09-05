@@ -548,9 +548,7 @@ def _pool_field(
     names the matching canonical-leg key (``"game"`` / ``"league"``). Reads the raw
     pool column directly rather than bridging through ``leg_field``: a single
     ``Game`` key never spans two leagues (team codes don't collide across leagues),
-    so the first non-null value is always right, and ``leg_schema._FIELD_TO_OFFER_COL``
-    deliberately excludes ``"league"`` (every existing call site holds a canonical
-    leg for that field, never a raw offer row).
+    so the first non-null value is always right.
     """
     if pool is not None and not pool.empty and column in pool.columns:
         values = pool[column].dropna()

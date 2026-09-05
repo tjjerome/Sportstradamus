@@ -59,7 +59,7 @@ def _corr(*triples: tuple[str, str, float]) -> pd.DataFrame:
 
 
 def _ladder(n: int, *, teams: tuple[str, str] = ("NYK", "SAS")) -> pd.DataFrame:
-    return pd.DataFrame([_row(f"P{i:02d}", teams[i % 2], 0.9 - i * 0.05) for i in range(n)])
+    return pd.DataFrame([_row(f"P{i:02d}", teams[i % 2], 0.9 - i * 0.03) for i in range(n)])
 
 
 def _stars(fig, *names: str) -> dict[str, tuple[tuple[float, float], float]]:
@@ -127,13 +127,13 @@ def test_deep_stars_never_leave_the_frame():
 
 def test_liked_legs_beyond_the_cut_are_drawn_only_under_the_lens():
     """The cut is a display decision, not a verdict — the lens is where the rest live."""
-    pool = _ladder(15)
+    pool = _ladder(DEFAULT_STARS + 3)
     lens_off = _stars(constellation_figure([], None, pool))
     assert len(lens_off) == DEFAULT_STARS
     fig = constellation_figure([], None, pool, deep_pool=pool)
-    assert len(_stars(fig)) == 15
+    assert len(_stars(fig)) == DEFAULT_STARS + 3
     deep = _stars(fig, "deep")
-    assert set(deep) == {_key(f"P{i}") for i in (12, 13, 14)}
+    assert set(deep) == {_key(f"P{i}") for i in range(DEFAULT_STARS, DEFAULT_STARS + 3)}
     assert all(size < _SIZE_MIN for _, size in deep.values())
 
 
@@ -157,7 +157,9 @@ def test_untied_deep_stars_spread_over_their_sides_mains():
         [_row(f"Q{i:02d}", ("NYK", "SAS")[i % 2], -0.1 - i / 100) for i in range(24)]
     )
     per_side = DEFAULT_STARS // 2
-    borrowed = _borrowed_mains(constellation_figure([], None, _ladder(12), deep_pool=deep_pool))
+    borrowed = _borrowed_mains(
+        constellation_figure([], None, _ladder(DEFAULT_STARS), deep_pool=deep_pool)
+    )
     assert min(len(hit) for hit in borrowed.values()) > per_side // 2, borrowed
 
 

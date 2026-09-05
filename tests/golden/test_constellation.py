@@ -200,17 +200,19 @@ def test_star_size_scales_with_edge():
 
 def _ladder(n: int) -> pd.DataFrame:
     """``n`` one-leg players, teams alternating, Kelly strictly descending."""
-    return _pool(*[(f"P{i:02d}|PTS|Over", 0.9 - i * 0.05) for i in range(n)])
+    return _pool(*[(f"P{i:02d}|PTS|Over", 0.9 - i * 0.03) for i in range(n)])
 
 
 def test_layout_is_static_under_selection():
-    # The picked leg ranks 15th, outside the default cut, so it joins the map by
-    # promotion — the one case that could re-solve the layout if the node set were
-    # ever allowed to depend on the selection.
-    pool = _ladder(15)
+    # The picked leg is the pool's weakest, outside the default cut, so it joins the
+    # map by promotion — the one case that could re-solve the layout if the node set
+    # were ever allowed to depend on the selection.
+    pool = _ladder(DEFAULT_STARS + 3)
     corr = _corr(("P00|PTS|Over", "P01|PTS|Over", 0.5))
     before = _node_pos(constellation_figure([], corr, pool))
-    after = _node_pos(constellation_figure([pool.to_dict("records")[14]], corr, pool))
+    after = _node_pos(
+        constellation_figure([pool.to_dict("records")[DEFAULT_STARS + 2]], corr, pool)
+    )
     assert len(before) == DEFAULT_STARS
     assert all(after[key] == xy for key, xy in before.items())
 
@@ -381,9 +383,11 @@ def test_deep_stars_take_their_ties_to_main_stars():
 def test_deep_tier_colors_split_liked_from_passed():
     """One size, two readings: a liked leg the cut left behind is a candidate, just
     smaller; only the model-passed tier wears the lens's own gray."""
-    fig = constellation_figure([], None, _ladder(13), deep_pool=_pool(("D|PTS|Under", -0.1)))
+    fig = constellation_figure(
+        [], None, _ladder(DEFAULT_STARS + 1), deep_pool=_pool(("D|PTS|Under", -0.1))
+    )
     deep = _trace(fig, "deep")
-    assert [cd[0] for cd in deep.customdata] == ["P12|PTS|Over", "D|PTS|Under"]
+    assert [cd[0] for cd in deep.customdata] == [f"P{DEFAULT_STARS}|PTS|Over", "D|PTS|Under"]
     assert list(deep.marker.opacity) == [_INACTIVE_ALPHA, _DEEP_ALPHA]
     assert deep.marker.color[1] == _DEEP_COLOR
     assert all(color not in (GRAY, GOLD) for color in deep.marker.color)

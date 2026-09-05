@@ -43,8 +43,8 @@ _STAR_GAP_PX = 6  # clear air between two glyphs' bounding circles
 # reaches 1.297, so a crowded edge star settles inward, never along the frame.
 _FRAME_INSET = 0.88
 
-DEFAULT_STARS = 12  # ~ a template's vertex count (5-13, median 10), so the cut fills the shape
-MIN_PER_TEAM = 4  # both halves populated — the both-teams parlay rule, made visual
+DEFAULT_STARS = 20  # the template's vertices plus a field of stars around them; 12 read thin
+MIN_PER_TEAM = 6  # both halves populated — the floors scale with the cap, 4 + 4 is inert under 20
 MAX_PER_PLAYER = 2  # one hot player's five markets must not own the map
 
 CAPTION_TOP_K = 5  # captions for the slip plus the five biggest candidates; the rest hover
@@ -61,6 +61,7 @@ def settle(
     side: Mapping[str, float] | None = None,
     frame: tuple[float, float] = (X_RANGE, Y_RANGE),
     exclude: tuple[float, float, float, float] | None = None,
+    candidates: Mapping[str, Sequence[tuple[float, float]]] | None = None,
 ) -> dict[str, tuple[float, float]]:
     """Nearest free lattice cell to each anchor, given the stars already down.
 
@@ -78,6 +79,10 @@ def settle(
             x = 0 is legal for both, mirroring ``constellation_layout._clamp_to_side``.
         frame: the figure's axis ranges; the lattice insets itself inside them.
         exclude: px rectangle ``(x0, y0, x1, y1)`` no star's centre may enter.
+        candidates: key -> further data-unit positions to try in order once the
+            anchor is taken, kept to the float like the anchor itself — a caller
+            that scatters its anchors by seeded draw hands the draws it did not
+            use here, so a crowded star takes another of them before the lattice.
 
     Returns:
         key -> position in data units, for the ``anchors`` keys only.
@@ -107,16 +112,26 @@ def settle(
     placed: dict[str, tuple[float, float]] = {}
     for key, anchor in anchors.items():
         size = sizes[key]
-        x, y = anchor[0] * px[0], anchor[1] * px[1]
-        room = min(
-            (math.dist((x, y), (ox, oy)) - other / 2 - _STAR_GAP_PX for ox, oy, other in occupied),
-            default=math.inf,
-        )
-        banned = (
-            exclude is not None and exclude[0] <= x <= exclude[2] and exclude[1] <= y <= exclude[3]
-        )
-        spot = anchor
-        if room < size / 2 or banned:
+        for trial in (anchor, *(candidates or {}).get(key, ())):
+            x, y = trial[0] * px[0], trial[1] * px[1]
+            room = min(
+                (
+                    math.dist((x, y), (ox, oy)) - other / 2 - _STAR_GAP_PX
+                    for ox, oy, other in occupied
+                ),
+                default=math.inf,
+            )
+            banned = (
+                exclude is not None
+                and exclude[0] <= x <= exclude[2]
+                and exclude[1] <= y <= exclude[3]
+            )
+            if room >= size / 2 and not banned:
+                spot = trial
+                break
+        else:
+            x, y = anchor[0] * px[0], anchor[1] * px[1]
+            spot = anchor
             free = clear >= size / 2
             if side and side.get(key):
                 free &= cells_x * side[key] >= 0
@@ -148,7 +163,7 @@ def default_stars(
 
     ``cap`` bounds the open ranking, not the result: the team floors are filled
     first and keep what they took, so ``per_team`` times the number of teams
-    overshoots ``cap`` when it is set above it (the shipped 4 + 4 sits under 12).
+    overshoots ``cap`` when it is set above it (the shipped 6 + 6 sits under 20).
     """
     ranked = sorted(
         (key for key, leg in universe.items() if is_model_liked(leg)),

@@ -38,6 +38,7 @@ from sportstradamus.dashboard.components.constellation_spacing import (
     _STAR_GAP_PX,
     CAPTION_TOP_K,
     DEFAULT_STARS,
+    MIN_PER_TEAM,
     PX_PER_UNIT,
     PX_PER_UNIT_MOBILE,
     X_RANGE,
@@ -66,7 +67,7 @@ def _row(player: str, team: str, kelly: float, market: str = "PTS") -> dict:
     }
 
 
-def _ladder(n: int, *, top: float = 0.9, step: float = 0.05) -> pd.DataFrame:
+def _ladder(n: int, *, top: float = 0.9, step: float = 0.03) -> pd.DataFrame:
     """``n`` one-leg players, teams alternating, Kelly strictly descending."""
     return pd.DataFrame([_row(f"P{i:02d}", _TEAMS[i % 2], top - i * step) for i in range(n)])
 
@@ -149,6 +150,48 @@ def test_no_star_lands_inside_the_exclusion_box():
         assert not (box[0] <= x * _PX[0] <= box[2] and box[1] <= y * _PX[1] <= box[3])
 
 
+def test_a_blocked_anchor_takes_its_first_clear_candidate():
+    placed = settle(
+        {"a": (0.0, 0.0)},
+        {"a": 20.0, "blocker": 20.0},
+        _PX,
+        fixed={"blocker": (0.0, 0.0)},
+        candidates={"a": [(0.5, 0.0)]},
+    )
+    assert placed["a"] == (0.5, 0.0)  # 50 px of clear air, and kept to the float
+
+
+def test_no_clear_candidate_falls_back_to_the_lattice():
+    anchors = {"a": (0.0, 0.0)}
+    sizes = {"a": 20.0, "one": 20.0, "other": 20.0}
+    fixed = {"one": (0.0, 0.0), "other": (0.5, 0.0)}
+    placed = settle(anchors, sizes, _PX, fixed=fixed, candidates={"a": [(0.5, 0.0)]})
+    assert placed == settle(anchors, sizes, _PX, fixed=fixed)
+
+
+def test_candidates_are_tried_in_order():
+    placed = settle(
+        {"a": (0.0, 0.0)},
+        {"a": 20.0, "blocker": 20.0},
+        _PX,
+        fixed={"blocker": (0.0, 0.0)},
+        candidates={"a": [(0.5, 0.0), (-0.5, 0.0)]},
+    )
+    assert placed["a"] == (0.5, 0.0)
+
+
+def test_a_candidate_inside_the_exclusion_box_is_skipped():
+    placed = settle(
+        {"a": (0.0, 0.0)},
+        {"a": 20.0, "blocker": 20.0},
+        _PX,
+        fixed={"blocker": (0.0, 0.0)},
+        exclude=(30.0, -30.0, 70.0, 30.0),  # walls off the first draw, at (50, 0) px
+        candidates={"a": [(0.5, 0.0), (-0.5, 0.0)]},
+    )
+    assert placed["a"] == (-0.5, 0.0)
+
+
 def test_settle_takes_its_priority_from_iteration_order():
     anchors = {"a": (0.0, 0.0), "b": (0.0, 0.0), "c": (0.05, 0.0)}
     sizes = dict.fromkeys(anchors, 24.0)
@@ -170,42 +213,42 @@ def test_the_lattice_stays_inside_the_inset_frame():
 
 
 def test_default_set_is_top_n_by_kelly():
-    universe = {_key(i): row for i, row in enumerate(_ladder(15).to_dict("records"))}
+    universe = {_key(i): row for i, row in enumerate(_ladder(DEFAULT_STARS + 3).to_dict("records"))}
     chosen = default_stars(universe, list(_TEAMS))
     assert len(chosen) == DEFAULT_STARS
     assert set(chosen) == {_key(i) for i in range(DEFAULT_STARS)}  # the three weakest are out
 
 
 def test_default_set_guarantees_both_teams():
-    rows = [_row(f"N{i:02d}", "NYK", 0.9 - i * 0.05) for i in range(14)]
-    rows += [_row(f"S{i:02d}", "SAS", 0.05) for i in range(4)]
+    rows = [_row(f"N{i:02d}", "NYK", 0.9 - i * 0.03) for i in range(DEFAULT_STARS + 2)]
+    rows += [_row(f"S{i:02d}", "SAS", 0.05) for i in range(MIN_PER_TEAM)]
     universe = {f"{row['Player']}|PTS|Over": row for row in rows}
     chosen = default_stars(universe, list(_TEAMS))
     by_team = [universe[key]["Team"] for key in chosen]
     assert len(chosen) == DEFAULT_STARS
-    assert by_team.count("SAS") == 4  # the both-teams floor, over a lopsided Kelly ranking
-    assert by_team.count("NYK") == 8
+    assert by_team.count("SAS") == MIN_PER_TEAM  # the floor, over a lopsided Kelly ranking
+    assert by_team.count("NYK") == DEFAULT_STARS - MIN_PER_TEAM
 
 
 def test_default_set_caps_legs_per_player():
     markets = ("PTS", "REB", "AST", "STL", "BLK", "TOV")
     rows = [_row("Hot", "NYK", 0.9 - i * 0.04, market) for i, market in enumerate(markets)]
-    rows += [_row(f"N{i}", "NYK", 0.3) for i in range(5)]
-    rows += [_row(f"S{i}", "SAS", 0.3) for i in range(5)]
+    rows += [_row(f"N{i}", "NYK", 0.3) for i in range(9)]
+    rows += [_row(f"S{i}", "SAS", 0.3) for i in range(9)]
     universe = {f"{row['Player']}|{row['Market']}|Over": row for row in rows}
     chosen = default_stars(universe, list(_TEAMS))
     teams = [universe[key]["Team"] for key in chosen]
-    assert len(chosen) == DEFAULT_STARS
+    assert len(chosen) == DEFAULT_STARS  # the two Hot legs plus every filler, exactly
     assert len([key for key in chosen if key.startswith("Hot|")]) == 2
-    assert teams.count("NYK") >= 4 and teams.count("SAS") >= 4
+    assert teams.count("NYK") >= MIN_PER_TEAM and teams.count("SAS") >= MIN_PER_TEAM
 
 
 def test_in_slip_leg_beyond_the_cut_is_still_a_star():
-    pool = _ladder(15)
-    weakest = pool.to_dict("records")[14]
+    pool = _ladder(DEFAULT_STARS + 3)
+    weakest = pool.to_dict("records")[DEFAULT_STARS + 2]
     fig = constellation_figure([weakest], None, pool)
     active = next(t for t in fig.data if t.name == "active")
-    assert [card[0] for card in active.customdata] == [_key(14)]
+    assert [card[0] for card in active.customdata] == [_key(DEFAULT_STARS + 2)]
 
 
 def test_a_slip_with_only_a_passed_leg_still_renders():
@@ -225,7 +268,7 @@ def test_main_stars_keep_their_clearance_on_both_viewports():
     the "look wider" shrink, which is exactly what makes that lens the hard case:
     it pulls the stars together without shrinking a single marker.
     """
-    pool = _ladder(15)
+    pool = _ladder(DEFAULT_STARS + 3)
     for (mobile, px), wider in itertools.product(
         ((False, PX_PER_UNIT), (True, PX_PER_UNIT_MOBILE)), (None, [])
     ):
@@ -263,13 +306,14 @@ def test_spacing_never_moves_an_uncrowded_star():
 
 
 def test_captions_are_the_slip_plus_the_biggest_candidates():
-    pool = _ladder(15)
-    picked = pool.to_dict("records")[11]  # the weakest leg the cut still draws
+    pool = _ladder(DEFAULT_STARS + 3)
+    weakest_drawn = DEFAULT_STARS - 1
+    picked = pool.to_dict("records")[weakest_drawn]  # the weakest leg the cut still draws
     stars = _stars(constellation_figure([picked], None, pool, shape=_HOURGLASS))
     captioned = {key for key, (_, _, text, _) in stars.items() if text}
-    candidates = sorted((k for k in stars if k != _key(11)), key=lambda k: -stars[k][1])
-    assert captioned <= {_key(11), *candidates[:CAPTION_TOP_K]}
-    assert _key(11) in captioned  # the slip's own star is captioned whatever its size
+    candidates = sorted((k for k in stars if k != _key(weakest_drawn)), key=lambda k: -stars[k][1])
+    assert captioned <= {_key(weakest_drawn), *candidates[:CAPTION_TOP_K]}
+    assert _key(weakest_drawn) in captioned  # the slip's star is captioned whatever its size
     assert len(stars) > len(captioned)  # and the rest read from the hover card
 
 
@@ -281,7 +325,7 @@ def test_caption_boxes_never_overlap():
     two star boxes is not what a caption has to clear, and pinning it here would
     pin the wrong guarantee.
     """
-    pool = _ladder(15)
+    pool = _ladder(DEFAULT_STARS + 3)
     viewports = (
         (False, PX_PER_UNIT, _LABEL_FONT_SIZE),
         (True, PX_PER_UNIT_MOBILE, _LABEL_FONT_SIZE_MOBILE),

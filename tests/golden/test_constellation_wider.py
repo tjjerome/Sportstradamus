@@ -56,7 +56,7 @@ def _key(player: str, market: str = "PTS") -> str:
 
 
 def _ladder(n: int, *, teams: tuple[str, str] = ("NYK", "SAS")) -> pd.DataFrame:
-    return pd.DataFrame([_row(f"P{i:02d}", teams[i % 2], 0.9 - i * 0.05) for i in range(n)])
+    return pd.DataFrame([_row(f"P{i:02d}", teams[i % 2], 0.9 - i * 0.03) for i in range(n)])
 
 
 def _deep_pool(n: int) -> pd.DataFrame:
@@ -152,7 +152,7 @@ def test_a_deep_tier_that_closes_the_sky_grows_it_instead_of_drawing_nothing():
     tier spreads past the side inset. Both grow in y instead. The owner wants
     every leg reachable under the deeper lens, so the tier itself is never capped."""
     groups = _wider_groups(3)
-    for mobile, deep in ((True, 100), (False, 240)):
+    for mobile, deep in ((True, 100), (False, 280)):
         sky_only = constellation_figure([], None, _ladder(13), wider_groups=groups, mobile=mobile)
         both = constellation_figure(
             [], None, _ladder(13), deep_pool=_deep_pool(deep), wider_groups=groups, mobile=mobile
@@ -196,7 +196,7 @@ def test_sky_labels_never_land_on_another_games_group():
     consumed exactly and a settle nudge can still graze."""
     for names, deep, bands in (
         (["CIN/CLE", "LAA/LAD", "PHI/PIT", "ARI/ATH", "TOR/WSH", "MIN/NYM"], None, 2),
-        (["CIN/CLE", "LAA/LAD", "PHI/PIT"], _deep_pool(180), 1),
+        (["CIN/CLE", "LAA/LAD", "PHI/PIT"], _deep_pool(190), 1),
     ):
         groups = [
             (
