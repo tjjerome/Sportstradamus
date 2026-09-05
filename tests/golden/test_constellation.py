@@ -30,6 +30,7 @@ from sportstradamus.dashboard.components.constellation import (
     _SIZE_MIN,
     _SIZE_MIN_MOBILE,
     constellation_figure,
+    star_label,
 )
 from sportstradamus.dashboard.components.constellation_deep import _DEEP_ALPHA, _DEEP_COLOR
 from sportstradamus.dashboard.components.constellation_shapes import shape_catalog
@@ -186,8 +187,18 @@ def test_active_and_candidate_stars_both_carry_labels():
     legs = _slip("A|PTS|Over")
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.2))
     fig = constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.3)), pool)
-    assert list(_trace(fig, "active").text) == ["A PTS o10.5"]
-    assert list(_trace(fig, "candidate").text) == ["B REB u10.5"]  # candidates now labelled too
+    assert list(_trace(fig, "active").text) == ["A Points o10.5"]
+    assert list(_trace(fig, "candidate").text) == ["B Rebounds u10.5"]  # candidates labelled too
+
+
+def test_star_labels_name_markets_the_way_the_board_does():
+    # The map and the Board are one vocabulary: a star reads the colloquial name,
+    # never the slug the archive keys on. A leg carrying no league at all — the one
+    # shape leg_field can't resolve — still labels, on the slug.
+    canonical = {"player": "A B", "market": "PTS", "bet": "Over", "line": 10.5, "league": "NBA"}
+    assert star_label(canonical) == "B Points o10.5"
+    leagueless = {"Player": "A B", "Market": "PTS", "Bet": "Over", "Line": 10.5}
+    assert star_label(leagueless) == "B PTS o10.5"
 
 
 def test_star_size_scales_with_edge():
@@ -231,7 +242,7 @@ def test_node_customdata_carries_card_fields():
     fig = constellation_figure(_slip("A|PTS|Over"), _corr(), _pool(("A|PTS|Over", 0.4)))
     cd = _trace(fig, "active").customdata[0]
     assert cd[0] == "A|PTS|Over"
-    assert [cd[1], cd[2], cd[3]] == ["A", "PTS", "Over"]
+    assert [cd[1], cd[2], cd[3]] == ["A", "Points", "Over"]  # the card names the market too
     assert float(cd[4]) == 10.5  # line
     assert 0.0 <= float(cd[5]) <= 1.0  # win prob
     assert float(cd[6]) > 0  # boost
@@ -345,7 +356,7 @@ def test_layout_is_deterministic():
 def test_hover_shows_win_prob_boost_and_kelly():
     fig = constellation_figure(_slip("A|PTS|Over"), _corr(), _pool(("A|PTS|Over", 0.4)))
     hover = _trace(fig, "active").hovertext[0]
-    assert "PTS" in hover and "Win" in hover and "Kelly" in hover
+    assert "Points" in hover and "Win" in hover and "Kelly" in hover
 
 
 def test_active_leg_below_k_floor_still_shows():
