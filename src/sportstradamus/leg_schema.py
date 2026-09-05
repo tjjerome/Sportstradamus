@@ -70,12 +70,22 @@ def leg_field(leg: Mapping, field: str, default=None):
     return leg.get(_FIELD_TO_OFFER_COL[field], default)
 
 
+def leg_field_float(leg: Mapping, field: str, default: float = 0.0) -> float:
+    """``leg_field`` as a float, coalescing a missing/``None``/falsy read to ``default``.
+
+    A leg present in the mapping with an explicit ``None`` bypasses
+    ``leg_field``'s own default (it only applies when the key is absent), so
+    the ``or default`` here is load-bearing, not decorative.
+    """
+    return float(leg_field(leg, field, default) or default)
+
+
 def is_model_liked(leg: Mapping) -> bool:
     """Whether a leg's Kelly edge is positive — the star-vs-satellite split
     the constellation, satellite picker, and slip builder all filter on.
     Runs on either a canonical leg or a raw current_offers row via leg_field.
     """
-    return float(leg_field(leg, "kelly", 0.0) or 0.0) > 0
+    return leg_field_float(leg, "kelly") > 0
 
 
 def _numeric_or_default(row: Mapping, col: str, default: float) -> float:

@@ -105,7 +105,7 @@ from sportstradamus.dashboard.components.constellation_wider import (
 from sportstradamus.dashboard.legs import corr_key
 from sportstradamus.dashboard.theme import GOLD, GRAY, team_colors, team_name
 from sportstradamus.helpers import market_display_name
-from sportstradamus.leg_schema import leg_field
+from sportstradamus.leg_schema import leg_field, leg_field_float
 
 _NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 
@@ -179,9 +179,9 @@ def star_label(leg: Mapping) -> str:
 
 
 def _hover_text(leg: Mapping) -> str:
-    p = float(leg_field(leg, "win_prob", 0.0) or 0.0)
-    boost = float(leg_field(leg, "boost", 1.0) or 1.0)
-    k = float(leg_field(leg, "kelly", 0.0) or 0.0)
+    p = leg_field_float(leg, "win_prob")
+    boost = leg_field_float(leg, "boost", 1.0)
+    k = leg_field_float(leg, "kelly")
     head = (
         f"{leg_field(leg, 'player')} — {_market_name(leg)} "
         f"{_bet_word(leg_field(leg, 'bet'))} {float(leg_field(leg, 'line')):.10g}"
@@ -196,9 +196,9 @@ def _card_fields(leg: Mapping) -> list:
         _market_name(leg),
         _bet_word(leg_field(leg, "bet")),
         float(leg_field(leg, "line")),
-        float(leg_field(leg, "win_prob", 0.0) or 0.0),
-        float(leg_field(leg, "boost", 1.0) or 1.0),
-        float(leg_field(leg, "kelly", 0.0) or 0.0),
+        leg_field_float(leg, "win_prob"),
+        leg_field_float(leg, "boost", 1.0),
+        leg_field_float(leg, "kelly"),
     ]
 
 
@@ -206,7 +206,7 @@ def _node_info(leg: Mapping) -> dict:
     return {
         "label": star_label(leg),
         "team": leg_field(leg, "team"),
-        "edge": float(leg_field(leg, "kelly", 0.0) or 0.0),
+        "edge": leg_field_float(leg, "kelly"),
         "hover": _hover_text(leg),
         "card": _card_fields(leg),
     }
