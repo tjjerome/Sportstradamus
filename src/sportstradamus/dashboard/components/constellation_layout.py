@@ -20,7 +20,9 @@ engine is a JSON edit and a browser rerun.
 
 from __future__ import annotations
 
+import hashlib
 import math
+import random
 from collections import defaultdict
 
 import networkx as nx
@@ -36,10 +38,14 @@ _MIN_CLASSIFIABLE_NODES = 4
 # also keeps members apart at the 22px mobile touch floor.
 _EXPLODE_R0, _EXPLODE_DR, _EXPLODE_RMAX = 0.05, 0.015, 0.11
 
-# How far an overflowed star drifts from its side's centroid. Small enough to stay
-# clear of the axis, large enough that two overflows don't stack.
-_OVERFLOW_RADIUS = 0.18
-_GOLDEN_ANGLE = math.pi * (3.0 - math.sqrt(5.0))
+# How far past a side's own vertices its field stars may sit: around the figure,
+# not off in a corner of the frame.
+_FIELD_PAD = 0.2
+
+# Darts thrown per field star, the one farthest from everything already placed
+# winning. Enough to read as scattered rather than arranged, cheap enough to
+# throw for every star of every game on the slate.
+_FIELD_DARTS = 8
 
 _ZERO_READINGS = {
     "n": 0,
@@ -177,20 +183,60 @@ def _clamp_to_side(x: float, reference: float) -> float:
     return x
 
 
-def _scatter(nodes: list[str], center: tuple[float, float]) -> dict[str, tuple[float, float]]:
-    """Golden-angle spiral around ``center`` for supernodes their side had no vertex for.
+def _scatter(
+    nodes: list[str],
+    box: tuple[float, float, float, float],
+    taken: list[tuple[float, float]],
+) -> dict[str, tuple[float, float]]:
+    """Field of stars across ``box`` for the supernodes their side had no vertex for.
 
-    Overflow is not an error — a template is never stretched to fit a busy game
-    (it has to stay visibly the same shape across games), so the extras orbit
-    their own side instead.
+    Overflow is not an error but the normal state: a template is never stretched
+    to fit a busy game (it has to stay visibly the same shape across games), and
+    every template in the bank has fewer vertices than a busy game has legs. So
+    the extras read as the dim field a real constellation sits in. Each star
+    throws ``_FIELD_DARTS`` darts into ``box`` and keeps the one farthest from
+    every position in ``taken`` — best-candidate sampling reads organic where a
+    spiral drew a visible arm and a lattice draws rows. The draw is seeded by an
+    md5 of the star's own key rather than by its rank, so a leg joining the slip
+    cannot re-deal the field, and never by ``hash()``, whose ``str`` ordering
+    ``PYTHONHASHSEED`` randomizes between runs. ``taken`` grows as stars land.
     """
+    x0, y0, x1, y1 = box
     placed = {}
-    for index, node in enumerate(nodes):
-        radius = _OVERFLOW_RADIUS * math.sqrt((index + 1) / (len(nodes) + 1))
-        angle = index * _GOLDEN_ANGLE
-        x = center[0] + radius * math.cos(angle)
-        placed[node] = (_clamp_to_side(x, center[0]), center[1] + radius * math.sin(angle))
+    for node in nodes:
+        rng = random.Random(int(hashlib.md5(node.encode()).hexdigest(), 16))
+        darts = [(rng.uniform(x0, x1), rng.uniform(y0, y1)) for _ in range(_FIELD_DARTS)]
+        placed[node] = max(darts, key=lambda dart: min(math.dist(dart, seat) for seat in taken))
+        taken.append(placed[node])
     return placed
+
+
+def _field_box(
+    filled: list[tuple[float, float]], side: str | None
+) -> tuple[float, float, float, float]:
+    """Where a side's field stars may fall: the box its own vertices fill, padded.
+
+    Anchoring the field on what the side actually filled is what keeps the extras
+    around the figure. A side that filled nothing takes its whole half, and a leg
+    on neither of the matchup's teams floats near the axis — where the layout puts
+    a cross-matchup star anyway. Centre vertices sit in both sides' pools and are
+    authored a little off the axis, so they clamp onto the side that drew them
+    before the box is measured: a box reaching across x=0 would strand a star on
+    the wrong team. Everything stays inside the S1 [-1, 1] template box.
+    """
+    if side is None:
+        return (-_FIELD_PAD, -1.0, _FIELD_PAD, 1.0)
+    lo, hi = (-1.0, 0.0) if side == "L" else (0.0, 1.0)
+    if not filled:
+        return (lo, -1.0, hi, 1.0)
+    xs = [min(max(x, lo), hi) for x, _ in filled]
+    ys = [y for _, y in filled]
+    return (
+        max(min(xs) - _FIELD_PAD, lo),
+        max(min(ys) - _FIELD_PAD, -1.0),
+        min(max(xs) + _FIELD_PAD, hi),
+        min(max(ys) + _FIELD_PAD, 1.0),
+    )
 
 
 def _vertex_pools(vertices: dict[int, dict], teams: list[str]) -> dict[str | None, list[int]]:
@@ -245,8 +291,11 @@ def assign_stars(
     free vertex minimising ``Σ |ρ| · distance`` to what is already placed, so
     strongly-tied stars end up near each other and their gold edge stays short.
     Prominence breaks ties, which means it decides outright for an uncorrelated
-    game. No randomness anywhere — the same game lays out the same way every
-    rerun.
+    game. A side with more supernodes than free vertices — the normal case, a
+    template having fewer vertices than a busy game has legs — scatters the
+    remainder as a field around its own vertices (:func:`_scatter`), seeded by
+    each star's own key rather than by a process-random draw, so the same game
+    lays out the same way every rerun.
     """
     vertices = {vertex["id"]: vertex for vertex in template["vertices"]}
     xy = {vid: (vertex["x"], vertex["y"]) for vid, vertex in vertices.items()}
@@ -284,19 +333,10 @@ def assign_stars(
             )
             used.add(best)
             positions[node] = xy[best]
-        positions |= _scatter(overflow, _side_centroid(xy, vertices, side))
+        filled = [positions[node] for node in members[side] if node in positions]
+        positions |= _scatter(overflow, _field_box(filled, side), list(positions.values()))
 
     return positions, sorted(set(vertices) - used)
-
-
-def _side_centroid(
-    xy: dict[int, tuple[float, float]], vertices: dict[int, dict], side: str | None
-) -> tuple[float, float]:
-    """Where a side's overflow orbits: the mean of its own vertices, or the origin."""
-    own = [xy[vid] for vid, vertex in vertices.items() if vertex["side"] == side]
-    if not own:
-        return (0.0, 0.0)
-    return (sum(x for x, _ in own) / len(own), sum(y for _, y in own) / len(own))
 
 
 def explode_clusters(
