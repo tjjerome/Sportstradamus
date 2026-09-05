@@ -1,21 +1,17 @@
 """Supplemental leg data — non-star legs that ride along in a same-game slip.
 
-The constellation builder is same-game (DESIGN §4a) and only draws model-liked stars
-(Kelly ``K`` > 0). Two gaps need a non-star path:
-
-* :func:`satellite_groups` — a game whose ``K`` > 0 legs sit on only one of its two
-  teams can't form a valid parlay alone (``validate_parlay_legs`` needs two distinct
-  teams), so this offers ``K`` > 0 legs from *other* games on the platform, grouped by
-  game — the "look wider" lens (``constellation.py``) draws its output on the star
-  map's outer ring; tapping one adds it as a satellite.
-* A same-game leg you believe in that the model passes on (``K`` ≤ 0) rides the same
-  way — the "look deeper" lens draws those directly off the game's own offer pool.
+The constellation builder is same-game (DESIGN §4a), so a leg from another game can
+never be one of its stars. A game whose ``K`` > 0 legs sit on only one of its two teams
+can't form a valid parlay alone (``validate_parlay_legs`` needs two distinct teams), so
+:func:`satellite_groups` offers ``K`` > 0 legs from *other* games on the platform,
+grouped by game — the "look wider" lens (``constellation_lenses``) scatters its output
+through the open sky around the map, clustered by game; tapping one adds it as a
+satellite.
 
 ``satellite_groups`` is a pure query (no Streamlit, no Archive) — it slices the
-in-memory ``current_offers`` the builder already holds. :func:`render_added_legs` is
-the shared non-star leg list (used for whichever of the two kinds of leg above are
-currently in the slip, since neither is ever drawn as a star) — it returns a remove
-action for the builder to apply.
+in-memory ``current_offers`` the builder already holds. :func:`render_added_legs` lists
+whichever satellites are currently in the slip, since none of them is ever drawn as a
+star — it returns a remove action for the builder to apply.
 """
 
 from __future__ import annotations
@@ -29,7 +25,7 @@ from sportstradamus.dashboard.legs import corr_key
 from sportstradamus.leg_schema import leg_label
 
 # Top legs offered per other game — enough to grab a small second cluster, few enough
-# to keep the "look wider" ring uncluttered.
+# that one game's sky cluster still reads as a group.
 _PER_GAME_CAP = 6
 
 
@@ -68,12 +64,12 @@ def satellite_groups(
 def render_added_legs(
     items: list[tuple[int, Mapping]], key_prefix: str, *, caption: str, infix: str
 ) -> dict | None:
-    """List non-star slip legs with a remove control; return a remove action.
+    """List the slip's other-game satellites with a remove control; return the action.
 
-    Used for both other-game satellites and same-game model-passed legs — neither is a
-    star on the map, so this list is their only removal path (their traces vanish
-    once the lens that revealed them toggles off). ``items`` are ``(slip_index, leg)``
-    pairs; ``infix`` namespaces the button keys per section.
+    A satellite is never a star on the focus game's map, so this list is its only
+    removal path — its sky dot vanishes as soon as the *wider* lens toggles off.
+    ``items`` are ``(slip_index, leg)`` pairs; ``infix`` namespaces the button keys
+    per section.
     """
     if not items:
         return None

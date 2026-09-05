@@ -435,6 +435,40 @@ devel-bound PR; research-analyst only if a stage turns into a modeling question 
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
+- 2026-09-04 · **Tonight stories, constellation readability, lenses, Clouded** · Owner pass after a
+  `sync_from_prod.sh`: 12 of 15 MLB cards read "thin edges" on 20–77 favored legs, COL/STL's
+  shootout story said "low ceiling — fade the scoring", its constellation was a 117-star blob, both
+  lenses drew rings, and the unquoted glyph was a lone star. Seven workstreams in worktrees, one
+  Opus subagent each, spec + quality review per stream. **MLB ρ was zero for every batter leg** —
+  every offer resolved to `P` because `Player position` is a constant 0 on the MLB feature path;
+  `_resolve_player_positions` now resolves `B1..B9`/`P` from `stat_data.get_depth` per game date
+  (posted lineup, else modal slot), and `_leg_pair_corr_boost` reads no correlation for two
+  distinct players sharing a slot key (the modal fallback collides teammates: 162 spurious
+  cross-player pairs at |ρ| ≥ 0.7 on the Sep-4 slate → 5, all hitter-vs-pitcher). **Stories:**
+  `bank_cell` drops category before shape, contrarian `game-script/{shootout,grind,blowout,coinflip}`
+  cells exist for every voice, a cluster holds one leg per player, and MLB hitter cases carry a
+  lineup clause (`Bats`/`Opp Hand`/`Lineup` offer columns from `stories/lineup.py`: batting order
+  and platoon edge; registry handedness from the people feed). Stories land once prophecize reruns
+  on prod — the synced snapshot predates the fix. **Constellation:** the default set is the top
+  `DEFAULT_STARS` (12) by Kelly with ≥ 4 per team and ≤ 2 per player; one deterministic `settle`
+  (`constellation_spacing.py`: 6 px lattice, nearest free cell, mains stay on their vertices)
+  enforces `(sᵢ+sⱼ)/2 + 6 px` clearance per viewport; captions are the slip plus the five biggest
+  candidates. **Lenses** (`constellation_lenses.py`): *deeper* fades the remaining legs in as small
+  stars beside the |ρ|-weighted centroid of their ties (untied → md5-keyed slot among their side's
+  mains), ties drawn as `deep_edge`; *wider* recedes the map to 0.8 and scatters ≤ 6 games' legs
+  through the open sky bands in per-game, team-coloured clusters, each owning the strip its label
+  hangs into; the phone grows the sky vertically. Two live-probe finds: `PX_PER_UNIT_MOBILE`
+  retuned 112 → 107 (the phone plot box is 342 px, not 358), and `fadeInWholeMap` never existed
+  (2a1dd405) — every wider toggle threw and skipped the frame-height post; the fade is now
+  `fadeIn(indices, ms)`, the height posts first, and `test_constellation_component.py` pins every
+  bare call in `main.js` to a defined name. **Clouded:** `even` displays as "Clouded / unquoted"
+  via `SHAPE_DISPLAY`/`SHAPE_CAPTION` with a nebula glyph; the Tonight fallback separates "no story
+  binds them" from "thin edges". Live COL/STL: 12 stars both teams, 87 deep stars inside the
+  footprint with 174 ties, 36 sky stars at radial spread 0.40–0.44 of mean (no ring), 0 page
+  errors, phone iframe 831 = 673 + 158. Open: 5–6 games forced into one vertical sky band still
+  graze by ≤ 12 px (desktop, ~180 deep stars); `constellation.py` ~765 lines (spring family →
+  layout module); the dead `base.py` depth recompute; the `player` archetype no route reaches.
+
 - 2026-08-06 · **Phase D owner pass — balls, no nameplate, soft leagues, module carve** · Four owner
   asks after the phase closed. **Nameplate deleted** — the map is no longer captioned with the
   shape's name ("just let the shape speak for itself"); `_add_nameplate` + its color constant + the

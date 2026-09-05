@@ -24,7 +24,9 @@ To change behavior, edit those files and reload the dashboard — there is nothi
 
 - Python passes the plotly figure as `figure_json` (`fig.to_json()`); each node's `customdata`
   is `[key, player, market, bet, line, win, boost, kelly]` and each edge's `meta` is
-  `[endpoint_a, endpoint_b]`.
+  `[endpoint_a, endpoint_b]`. Edges come under two names — `edge` for the permanent web
+  and `deep_edge` for a tie the "look deeper" lens brings in — and both hover-preview;
+  only `deep_edge` fades in and out with the lens.
 - The component returns `{action, key, nonce}` — `action` is `"click"` (toggle the leg) or
   `"detail"` (open the offer dialog); `nonce` increments per emit so a repeat click is a fresh
   value. The caller dedups by `nonce`.

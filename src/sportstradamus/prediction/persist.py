@@ -34,7 +34,9 @@ from sportstradamus.prediction.stories import STORIES_VERSION
 #   archive.get_line — the Model-tab consensus marker, distinct from the DFS app Line), Boost
 # - Scoring: Win Prob (hit probability), Model EV (edge), Market EV, Projection (stat mean),
 #   Kelly, Projection STD, Push Prob
-# - Context: Avg 5, Avg H2H, Moneyline, O/U, DVPOA, Position (depth-chart label)
+# - Context: Avg 5, Avg H2H, Moneyline, O/U, DVPOA, Position (depth-chart label),
+#   Bats / Opp Hand / Lineup (MLB hitters only — batting side, probable starter's
+#   throwing hand, and whether the batting slot is posted or the usual one)
 # - Correlations: Corr Same, Corr Opp
 # - Narrative: Why (precomputed "the case" string, prediction/stories)
 # - Stat key: Stat (for history lookups); Model Version (identity of the model that scored the leg)
@@ -70,6 +72,9 @@ _OFFER_KEEP_COLS = [
     "O/U",
     "DVPOA",
     "Position",
+    "Bats",
+    "Opp Hand",
+    "Lineup",
     "Corr Same",
     "Corr Opp",
     "Why",

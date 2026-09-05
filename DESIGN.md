@@ -129,15 +129,24 @@ Altair / Vega-Lite inherit these automatically.
 
 ## 4a. Signature element — the constellation
 
-Correlation rendered as a star map, and the slip editor's primary control. Each leg is a star
-**filled with its team's color** (the two sides of the matchup read at a glance) and **sized by
-its model edge** (the strongest legs read biggest). The map is **static per game** — its stars are
-the game's model-liked legs, fixed in place; selecting a leg never moves a star, it only lights it
-up. A leg in the slip burns at **full color and opacity**; a candidate is the same color
-**desaturated toward gray and dimmed** — selection is alpha + saturation, never an outline (a gold
-ring read as a team color). Pairwise correlation |ρ| is the edge weight (gold, opacity/width ∝ |ρ|,
-dashed when ρ < 0 — "fights the thesis"); an edge stays hidden until one of its stars is in the
-slip and faintly previews on hover, so the clutter scales with the slip, not the game.
+Correlation rendered as a star map, and the slip editor's primary control. The game's
+strongest legs are its stars — the rest wait behind the *deeper* lens — each **filled with its
+team's color** (the two sides of the matchup read at a glance) and **sized by its model edge**
+(the strongest legs read biggest). The map is **static per game** — its stars are the top
+`DEFAULT_STARS` model-liked legs by edge, with both teams represented and at most
+`MAX_PER_PLAYER` per player, fixed in place; a slip leg beyond that cut still burns as a star,
+in the place the deeper lens would give it; selecting a leg never re-deals the map — the mains
+hold and every other star keeps the main it orbits, and only the picked star's own glyph, grown
+to full size, can nudge whoever it touches. A leg in the slip burns at **full color and
+opacity**; a candidate is the same color
+**desaturated toward gray and dimmed** — selection is alpha + saturation, never an outline (a
+gold ring read as a team color). Pairwise correlation |ρ| is the edge weight (gold,
+opacity/width ∝ |ρ|, dashed when ρ < 0 — "fights the thesis"); an edge stays hidden until one of
+its stars is in the slip and faintly previews on hover, so the clutter scales with the slip, not
+the game. Captions stay sparse — the slip's stars and the few biggest candidates; every other
+star's read lives in its hover card. Stars keep a minimum screen distance from one another: a
+star that would overlap moves to the nearest clear spot on its own side, so the shape survives
+at the cost of a few pixels.
 Layout is **template-guided and team-anchored**: a game is classified by the shape of its own
 correlation graph and dealt one of the bank's sports-object templates, distinct across the whole
 night whatever league it belongs to and drawn only from the general library plus that league's own
@@ -147,12 +156,17 @@ vertex and exploding back as a knot. A game too thin to fill a template keeps th
 **force-directed** layout: each team's most-connected leg pinned to its side, the correlation edges
 placing the rest. Either way a cross-matchup leg floats toward the centre and an
 unrepresented side leaves its half empty (the both-teams parlay rule, made visual). Legs from
-*other* games never become stars here — the map stays one game; a single-sided game reaches its
-second team through a separate satellite section beside the map, never by crowding the constellation.
+*other* games are never part of the constellation; under the *wider* lens they appear as smaller
+stars in the open sky around it — clustered by game, team-coloured, never inside the
+constellation's own footprint — and tapping one adds it as a satellite. The *deeper* lens fades
+in the game's remaining legs as smaller stars inside the constellation, each beside the main star
+it correlates with (or in its team's open space), with its ties drawn; main stars never move for
+the deeper lens, and the wider lens only recedes the whole map a little to make room.
 In the editor the map is interactive — click a star to add or remove its leg, and hover a star for a card (its
 read plus a **Full detail** link into the offer dialog, slip preserved) — with the modebar and
-zoom/pan off (it's a map, not a chart). Switching lenses (the deeper/wider toggles) animates the map
-in with a brief fade + scale settle; a bare restyle (lighting a star on a click) does not — the
+zoom/pan off (it's a map, not a chart). Switching lenses (the deeper/wider toggles) animates in
+with a brief fade (deeper) or a whole-sky settle (wider — the map recedes slightly and the sky
+fills around it); a bare restyle (lighting a star on a click) does not — the
 animation fires only when the lens actually changes the plotted trace set, and
 `prefers-reduced-motion` disables it. Beneath the stars sits the one **decoration layer** that is
 *not* data: the dealt template's filled silhouette, its engraved outline, and faint filler stars on

@@ -4,6 +4,10 @@
     "combo": "their",
     "default": "his"
   },
+  "hands": {
+    "L": "left",
+    "R": "right"
+  },
   "why": {
     "form": {
       "above": [
@@ -110,6 +114,74 @@
         "a {ev}x model read on a {book_ev}x book number",
         "the model's {ev}x stands against the book's {book_ev}x"
       ]
+    },
+    "lineup": {
+      "platoon_edge": [
+        "batting {slot} with the platoon edge on a {throws}-hander",
+        "hitting {slot} with the handedness edge on a {throws}-hander",
+        "batting {slot} and opposite-handed to a {throws}-hander",
+        "from the {slot} spot with the platoon advantage against a {throws}-hander",
+        "in the {slot} spot, holding the handedness edge on a {throws}-hander",
+        "hitting {slot} with the better side of the platoon against a {throws}-hander"
+      ],
+      "same_side": [
+        "batting {slot} but same-side against a {throws}-hander",
+        "hitting {slot} into a same-side {throws}-hander",
+        "in the {slot} spot with the platoon on the wrong side of a {throws}-hander",
+        "batting {slot} against a same-handed {throws}-hander",
+        "from the {slot} spot, matched same-side with a {throws}-hander",
+        "hitting {slot} with no platoon edge on a {throws}-hander"
+      ],
+      "switch": [
+        "switch-hitting {slot} and turning around on a {throws}-hander",
+        "batting {slot} as a switch hitter against a {throws}-hander",
+        "in the {slot} spot, switch-hitting into a {throws}-hander",
+        "hitting {slot} from the favorable box against a {throws}-hander",
+        "batting {slot} and switching sides on a {throws}-hander",
+        "from the {slot} spot, a switch hitter with the platoon on a {throws}-hander"
+      ],
+      "slot_only": [
+        "batting {slot} in the order",
+        "hitting {slot} in the lineup",
+        "in the {slot} spot in the order",
+        "penciled in {slot} tonight",
+        "carrying the {slot} spot in the lineup",
+        "posted {slot} on the card"
+      ]
+    },
+    "lineup_usual": {
+      "platoon_edge": [
+        "usually {slot} in the order with the handedness edge on a {throws}-hander",
+        "a regular in the {slot} spot and opposite-handed to a {throws}-hander",
+        "typically hitting {slot} and holding the platoon edge on a {throws}-hander",
+        "normally {slot} in the lineup with the better side of the platoon against a {throws}-hander",
+        "a fixture in the {slot} spot lately, opposite a {throws}-hander",
+        "settled in the {slot} spot with the platoon edge against a {throws}-hander"
+      ],
+      "same_side": [
+        "usually {slot} in the order but same-side against a {throws}-hander",
+        "a regular in the {slot} spot and matched same-side with a {throws}-hander",
+        "typically hitting {slot} with no platoon edge on a {throws}-hander",
+        "normally {slot} in the lineup and same-handed with a {throws}-hander",
+        "a fixture in the {slot} spot lately, into a same-side {throws}-hander",
+        "settled in the {slot} spot on the wrong side of a {throws}-hander"
+      ],
+      "switch": [
+        "usually {slot} in the order and switch-hitting against a {throws}-hander",
+        "a regular in the {slot} spot who turns around on a {throws}-hander",
+        "typically hitting {slot} as a switch hitter facing a {throws}-hander",
+        "normally {slot} in the lineup and switching sides on a {throws}-hander",
+        "a fixture in the {slot} spot lately, switch-hitting into a {throws}-hander",
+        "settled in the {slot} spot as a switch hitter against a {throws}-hander"
+      ],
+      "slot_only": [
+        "usually {slot} in the order",
+        "a regular in the {slot} spot",
+        "typically hitting {slot}",
+        "normally {slot} in the lineup",
+        "a fixture in the {slot} spot lately",
+        "settled in the {slot} spot of late"
+      ]
     }
   },
   "dek": {
@@ -163,6 +235,40 @@
         "{p} gets a defense that guards this stat well",
         "paper says {p} works uphill tonight",
         "{p} lines up against a stingy matchup"
+      ]
+    },
+    "lineup": {
+      "posted": [
+        "{p} is posted {slot}",
+        "{p} hits {slot} in tonight's posted order",
+        "the card has {p} batting {slot}",
+        "{p} draws the {slot} spot on the lineup card",
+        "{p} slots in {slot} tonight",
+        "{p} takes the {slot} spot in the posted lineup"
+      ],
+      "posted_hand": [
+        "{p} is posted {slot} against a {throws}-hander",
+        "{p} hits {slot} tonight opposite a {throws}-hander",
+        "the card has {p} batting {slot} against a {throws}-hander",
+        "{p} draws the {slot} spot against a {throws}-hander",
+        "{p} is penciled {slot} with a {throws}-hander on the mound",
+        "{p} takes the {slot} spot against a {throws}-hander"
+      ],
+      "usual": [
+        "{p} usually bats {slot}",
+        "{p} typically hits {slot} in the order",
+        "{p}'s usual spot is {slot}",
+        "{p} has been hitting {slot} of late",
+        "{p} normally slots {slot}",
+        "{p} lives in the {slot} spot most nights"
+      ],
+      "usual_hand": [
+        "{p} usually bats {slot} and sees a {throws}-hander",
+        "{p} typically hits {slot}, with a {throws}-hander starting",
+        "{p}'s usual {slot} spot meets a {throws}-hander",
+        "{p} has been hitting {slot} and draws a {throws}-hander",
+        "{p} normally slots {slot} against a {throws}-hander on the mound",
+        "{p} lives in the {slot} spot and faces a {throws}-hander"
       ]
     }
   }

@@ -39,6 +39,7 @@ from sportstradamus.dashboard.components.constellation_shapes import (
     shape_catalog,
     tuning,
 )
+from sportstradamus.dashboard.components.constellation_spacing import default_stars
 from sportstradamus.dashboard.legs import corr_key
 from sportstradamus.leg_schema import is_model_liked, leg_field
 
@@ -49,7 +50,8 @@ _MIN_EDGE_RHO = 0.05
 # the correlation-edge color and nothing else, so no engraved stroke can be
 # misread as a ρ tie.
 SILHOUETTE_ALPHA = 0.13  # faint intent signal, below the ambient-decoration ceiling
-_SILHOUETTE_FILL = f"rgba(95,107,128,{SILHOUETTE_ALPHA})"  # constellation._DEEP_COLOR #5f6b80
+# constellation_lenses._DEEP_COLOR #5f6b80
+_SILHOUETTE_FILL = f"rgba(95,107,128,{SILHOUETTE_ALPHA})"
 _OUTLINE_COLOR = "rgba(230,233,239,0.22)"  # theme TEXT #E6E9EF
 _OUTLINE_GLOW_COLOR = "rgba(230,233,239,0.08)"  # the same stroke, wider and fainter
 _FILLER_COLOR = "rgba(138,145,160,0.30)"  # theme GRAY #8A91A0
@@ -87,6 +89,11 @@ def game_universe(pool: pd.DataFrame | None, slip_legs: Sequence[Mapping]) -> di
     for leg in slip_legs:
         universe.setdefault(corr_key(leg), leg)
     return universe
+
+
+def teams_of(game: str) -> list[str]:
+    """The matchup's two team codes, sorted — the two anchored sides."""
+    return sorted(set(game.split("/"))) if game else []
 
 
 def rho_map(corr: pd.DataFrame | None, game: str) -> dict[frozenset, float]:
@@ -179,13 +186,17 @@ def slate_shapes(
     Keyed by game, over the whole date rather than one league or one platform, so a
     game keeps its shape when the user switches Underdog ↔ Sleeper or narrows the
     sport filter, and no two games showing at the same time wear the same shape.
+    The graph classified is the one actually drawn — the capped default star set,
+    not the whole model-liked pool — so the tuning cockpit's readings and
+    ``n_supernodes`` describe what a viewer sees.
     """
     cfg = tuning()
     catalog = shape_catalog()["templates"]
     graphs = {}
     for game, group in offers.groupby("Game"):
-        node_team = {key: leg_field(leg, "team") for key, leg in game_universe(group, []).items()}
-        keys = sorted(node_team)
+        universe = game_universe(group, [])
+        keys = default_stars(universe, teams_of(str(game)))
+        node_team = {key: leg_field(universe[key], "team") for key in keys}
         edges = [(a, b, abs(r)) for a, b, r in game_edges(keys, rho_map(corr, str(game)))]
         clusters, super_team, collapsed = supernodes(keys, node_team, edges)
         topo, readings = topology_class(sorted(clusters), super_team, collapsed, cfg)

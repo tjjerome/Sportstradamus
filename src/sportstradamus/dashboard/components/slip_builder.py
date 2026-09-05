@@ -50,7 +50,7 @@ from sportstradamus.dashboard.slip_engine import (
     slip_headline,
 )
 from sportstradamus.dashboard.viewport import is_mobile
-from sportstradamus.leg_schema import build_leg, is_model_liked, leg_label
+from sportstradamus.leg_schema import build_leg, leg_label
 from sportstradamus.prediction.stories.legs import validate_parlay_legs
 
 # The selected-legs list rides in a fixed-height scroll region so adding or removing a leg never
@@ -82,9 +82,11 @@ def _active_lenses(
 ) -> tuple[pd.DataFrame | None, list[tuple[str, list[dict]]] | None]:
     """The two lens overlays for ``constellation_figure``, read off ``games.py``'s toggles.
 
-    "Look deeper" reuses the same unfiltered ``pool`` frame the map already has (the
-    figure itself picks out the model-passed rows) — no separate query. "Look wider"
-    reruns the existing ``satellite_groups`` query. Either lens off resolves ``None``.
+    "Look deeper" hands back the same unfiltered ``pool`` frame the map already
+    has — the figure keeps whatever rows it doesn't already know, and its tier is
+    those plus the model-liked legs its own star cut left behind — so no separate
+    query. "Look wider" reruns the existing ``satellite_groups`` query. Either
+    lens off resolves ``None``.
     """
     deep_pool = pool if st.session_state.get("lens_deep", False) else None
     if not st.session_state.get("lens_wider", False):
@@ -107,12 +109,13 @@ def render_constellation_builder(
 ) -> None:
     """Same-game correlation-aware editor with a live deterministic thesis headline.
 
-    Draws ``focus_game``'s star map whether or not a slip is seeded: every candidate
-    (model-liked, Kelly > 0) leg is a clickable star, so a slip can be built from
-    scratch by clicking or pre-seeded from a story; a star's hover card opens the
-    full offer detail without disturbing the slip. Other-game slip legs show as
-    satellites. Two lens toggles (``games.py``'s ``lens_deep`` / ``lens_wider``
-    session-state bools) turn on the map's "look deeper" / "look wider" overlays.
+    Draws ``focus_game``'s star map whether or not a slip is seeded: the game's
+    strongest candidates are clickable stars and the rest of its legs wait behind
+    the *deeper* lens, so a slip can be built from scratch by clicking or pre-seeded
+    from a story; a star's hover card opens the full offer detail without disturbing
+    the slip. Other-game slip legs show as satellites. Two lens toggles
+    (``games.py``'s ``lens_deep`` / ``lens_wider`` session-state bools) turn on the
+    map's "look deeper" / "look wider" overlays.
     The caller draws the game's context banner above this, and deals ``shape`` —
     this game's constellation template for the night — from the whole league
     slate, so it can't depend on which platform is showing.
@@ -123,16 +126,16 @@ def render_constellation_builder(
     legs = st.session_state[_LEGS]
     platform = st.session_state[_PLATFORM]
     pool = offers.loc[(offers["Game"] == focus_game) & (offers["Platform"] == platform)]
+    # Every focus-game leg goes to the map: the figure promotes anything outside its
+    # default star cut — a model-passed leg included — so a slip leg is always lit
+    # somewhere on the map rather than vanishing from it on add.
     focus_legs = [leg for leg in legs if leg["game"] == focus_game]
-    # Only the model-liked legs are stars; a manually-added model-passed leg (Kelly ≤ 0)
-    # rides in the slip like a satellite — listed by the picker, never drawn on the map.
-    star_legs = [leg for leg in focus_legs if is_model_liked(leg)]
     deep_pool, wider_groups = _active_lenses(
         offers, legs, pool, focus_game=focus_game, platform=platform
     )
     _render_constellation(
         offers,
-        star_legs,
+        focus_legs,
         corr=corr,
         pool=pool,
         key_prefix=key_prefix,
@@ -197,16 +200,17 @@ def render_simple_builder(
 def _render_leg_list(
     key_prefix: str, *, focus_game: str | None = None, removable: bool = True, columns: int = 1
 ) -> None:
-    """List slip legs. ``focus_game`` shows only that game's **star** legs (Kelly > 0);
-    satellites and same-game model-passed legs are listed by the pickers. ``removable=False``
-    drops the button column because a star leg is removed by clicking it on the map, and
-    ``columns`` then flows that read-only list across that many side-by-side columns.
+    """List slip legs. ``focus_game`` shows only that game's legs — every one of them is
+    a star on the map, so the satellite picker lists only the other games' legs.
+    ``removable=False`` drops the button column because a star leg is removed by clicking
+    it on the map, and ``columns`` then flows that read-only list across that many
+    side-by-side columns.
     """
     legs = st.session_state[_LEGS]
     cols = st.columns(columns) if not removable and columns > 1 else None
     shown = 0
     for i, leg in enumerate(legs):
-        if focus_game is not None and (leg["game"] != focus_game or not is_model_liked(leg)):
+        if focus_game is not None and leg["game"] != focus_game:
             continue
         line = f"{leg_label(leg)}  ·  {leg['league']}"
         if not removable:
@@ -221,18 +225,14 @@ def _render_leg_list(
 
 
 def _render_non_star_legs(legs: list[dict], *, focus_game: str, key_prefix: str) -> None:
-    """List every slip leg that isn't a star on the map — other-game satellites and
-    same-game model-passed legs — with a remove control.
+    """List every slip leg that isn't a star on the map — the other games' legs — with a
+    remove control.
 
-    Neither kind is ever drawn as a star, so this list is their only removal path; it's
-    also the only place they're still visible once the lens that revealed them (deep or
-    wider) toggles back off, since that lens's trace vanishes from the figure.
+    A satellite is never drawn on the focus game's map, so this list is its only
+    removal path; it's also the only place it stays visible once the *wider* lens that
+    revealed it toggles back off and its trace leaves the figure.
     """
-    non_star = [
-        (i, leg)
-        for i, leg in enumerate(legs)
-        if leg["game"] != focus_game or not is_model_liked(leg)
-    ]
+    non_star = [(i, leg) for i, leg in enumerate(legs) if leg["game"] != focus_game]
     action = render_added_legs(non_star, key_prefix, caption="Other slip legs", infix="added")
     if action and "remove" in action:
         remove_leg(action["remove"])
@@ -256,8 +256,9 @@ def _render_constellation(
     detail** seeds the offer dialog, drawn by ``_draw_detail_dialog`` once the map has
     rendered. The component re-sends its last action on every rerun, so each is deduped
     by nonce and fires once. ``deep_pool``/``wider_groups`` are the two lens overlays —
-    a clicked deep star resolves the same way as any pool star (its key is drawn from
-    that same ``pool`` frame); a clicked wider dot falls back to the satellite add path.
+    a clicked deep star resolves the same way as any other star on the map (its key is
+    drawn from that same ``pool`` frame); a clicked sky star from another game falls back
+    to the satellite add path.
     """
     mobile = is_mobile()
     action = render_constellation(

@@ -4,7 +4,11 @@ One construction rule across all five: strokes build the form, a glowing radial 
 marks the focus. Ported from ``docs/mockups/p8-glyphs.html`` (gradient/symbol ``id``s
 renamed, namespaced per glyph type so two instances of different glyphs never collide
 on one page); the comet was later reworked (curved dust tail, larger coma) per owner
-so it reads as a meteor rather than a plain slash. These are bespoke inline SVG — the
+so it reads as a meteor rather than a plain slash, and the ``even`` lone star became a
+nebula (display name "clouded") so a game nobody quoted reads as uncertain rather
+than as a game script of its own — its form is gas, blurred gradient lobes with
+tendrils and pinprick stars around the core, so it reads as space, not as a
+weather-app cloud. These are bespoke inline SVG — the
 sanctioned exception to Material-icons-only (spec §2); render via
 ``st.markdown(..., unsafe_allow_html=True)``, never ``st.html()`` (see
 ``dashboard/theme.py``'s DOMPurify comment — ``st.html()`` strips ``<svg>`` outright).
@@ -63,18 +67,42 @@ _SCALES = (
     '<circle cx="30" cy="23" r="3.6" fill="url(#glyph-scales-core)"/></svg>'
 )
 
-_LONE_STAR = (
-    '<svg viewBox="0 0 60 60"><defs><radialGradient id="glyph-lonestar-core" cx="50%" '
-    'cy="50%" r="50%"><stop offset="0" stop-color="#fff"/><stop offset=".42" '
+_NEBULA = (
+    '<svg viewBox="0 0 60 60"><defs><radialGradient id="glyph-nebula-core" cx="50%" '
+    'cy="50%" r="50%"><stop offset="0" stop-color="#fff"/><stop offset=".45" '
     'stop-color="#C9A227"/><stop offset="1" stop-color="#6f560f"/></radialGradient>'
-    '<symbol id="glyph-lonestar-star" viewBox="0 0 24 24"><path d="M12 1.6l3.09 6.9 '
-    '7.51.7-5.66 5.02 1.68 7.38L12 17.9l-6.62 3.7 1.68-7.38L1.4 9.2l7.51-.7z"/></symbol>'
-    "</defs>"
-    '<circle cx="30" cy="30" r="20" fill="none" stroke="#8A91A0" stroke-width="1" '
-    'stroke-opacity=".26"/>'
-    '<use href="#glyph-lonestar-star" x="11" y="11" width="38" height="38" fill="none" '
-    'stroke="#C9A227" stroke-width="1.4" stroke-linejoin="round"/>'
-    '<circle cx="30" cy="30" r="4.6" fill="url(#glyph-lonestar-core)"/></svg>'
+    '<radialGradient id="glyph-nebula-gas" cx="50%" cy="50%" r="50%">'
+    '<stop offset="0" stop-color="#8A91A0" stop-opacity=".4"/>'
+    '<stop offset=".5" stop-color="#8A91A0" stop-opacity=".16"/>'
+    '<stop offset="1" stop-color="#8A91A0" stop-opacity="0"/></radialGradient>'
+    '<radialGradient id="glyph-nebula-glow" cx="50%" cy="50%" r="50%">'
+    '<stop offset="0" stop-color="#C9A227" stop-opacity=".36"/>'
+    '<stop offset=".5" stop-color="#C9A227" stop-opacity=".12"/>'
+    '<stop offset="1" stop-color="#C9A227" stop-opacity="0"/></radialGradient>'
+    '<filter id="glyph-nebula-soft" x="-20%" y="-20%" width="140%" height="140%">'
+    '<feGaussianBlur stdDeviation="1.4"/></filter></defs>'
+    '<g filter="url(#glyph-nebula-soft)" fill="url(#glyph-nebula-gas)">'
+    '<ellipse cx="28" cy="31" rx="21" ry="12" transform="rotate(-22 28 31)"/>'
+    '<ellipse cx="38" cy="25" rx="13" ry="8" transform="rotate(28 38 25)"/>'
+    '<ellipse cx="19" cy="37" rx="11" ry="7" transform="rotate(40 19 37)"/>'
+    '<ellipse cx="26" cy="21" rx="8" ry="5" transform="rotate(-10 26 21)"/>'
+    '<ellipse cx="42" cy="38" rx="9" ry="5" transform="rotate(15 42 38)"/>'
+    '<ellipse cx="13" cy="24" rx="10" ry="2.6" transform="rotate(-35 13 24)"/>'
+    '<ellipse cx="46" cy="38" rx="9" ry="2.4" transform="rotate(12 46 38)"/>'
+    '<ellipse cx="44" cy="19" rx="6" ry="3.4" transform="rotate(-30 44 19)"/>'
+    '<ellipse cx="31" cy="30" rx="12" ry="8" transform="rotate(-14 31 30)" '
+    'fill="url(#glyph-nebula-glow)"/></g>'
+    '<g fill="none" stroke="#8A91A0" stroke-linecap="round">'
+    '<path d="M10 30 C15 21 24 19 31 24" stroke-width="1.1" stroke-opacity=".28"/>'
+    '<path d="M37 27 C43 21 50 20 54 24" stroke-width=".9" stroke-opacity=".22"/>'
+    '<path d="M22 41 C27 46 35 46 43 43" stroke-width=".8" stroke-opacity=".16"/></g>'
+    '<g fill="#8A91A0"><circle cx="12" cy="16" r=".9" opacity=".7"/>'
+    '<circle cx="50" cy="17" r=".7" opacity=".5"/><circle cx="52" cy="44" r=".8" opacity=".6"/>'
+    '<circle cx="15" cy="48" r=".7" opacity=".45"/>'
+    '<circle cx="44" cy="48" r=".6" opacity=".4"/></g>'
+    '<circle cx="41" cy="22" r=".8" fill="#C9A227" opacity=".55"/>'
+    '<circle cx="30" cy="30" r="8" fill="#C9A227" opacity=".14"/>'
+    '<circle cx="30" cy="30" r="3.6" fill="url(#glyph-nebula-core)" opacity=".85"/></svg>'
 )
 
 _HOURGLASS = (
@@ -94,14 +122,14 @@ _GLYPHS = {
     "shootout": _COMET,
     "blowout": _SUPERNOVA,
     "coinflip": _SCALES,
-    "even": _LONE_STAR,
+    "even": _NEBULA,
     "grind": _HOURGLASS,
 }
 
 
 def game_shape_glyph(shape: str, *, size: int = 40) -> str:
-    """Inline SVG for a game shape; unknown shapes fall back to the lone star."""
-    svg = _GLYPHS.get(shape, _LONE_STAR)
+    """Inline SVG for a game shape; unknown shapes fall back to the clouded glyph."""
+    svg = _GLYPHS.get(shape, _NEBULA)
     return svg.replace(
         'viewBox="0 0 60 60"',
         f'class="glyph" width="{size}" height="{size}" viewBox="0 0 60 60"',

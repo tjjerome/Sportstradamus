@@ -110,8 +110,9 @@ def _stories_for_game(
         len({sctx.bet_df[i].get("Team") for i in edge if sctx.bet_df[i].get("Team")}) >= 2
     )
     new_map = _leg_market_map(sctx.league, sctx.platform, stat_map)
+    players = {i: sctx.bet_df[i]["Player"] for i in edge}
     scored = []
-    for cluster in _cluster_strong_legs(edge, sctx.g.C):
+    for cluster in _cluster_strong_legs(edge, sctx.g.C, players):
         builder, moon = _best_subsets(cluster, sctx, new_map, require_both_teams=require_both)
         if builder is not None:
             scored.append((cluster, builder, moon))
@@ -146,7 +147,9 @@ def _strong_legs(sctx: GameScoringContext) -> dict[int, float]:
     }
 
 
-def _cluster_strong_legs(edge: Mapping[int, float], corr: np.ndarray) -> list[list[int]]:
+def _cluster_strong_legs(
+    edge: Mapping[int, float], corr: np.ndarray, players: Mapping[int, str]
+) -> list[list[int]]:
     """Greedy ρ-graph clusters over the strong legs; singleton clusters dropped.
 
     Seeds on the strongest remaining leg and attaches any leg correlated with a
@@ -158,26 +161,38 @@ def _cluster_strong_legs(edge: Mapping[int, float], corr: np.ndarray) -> list[li
     clusters = []
     while remaining:
         seed = next(i for i in order if i in remaining)
-        cluster = _grow_cluster(seed, remaining, order, corr)
+        cluster = _grow_cluster(seed, remaining, order, corr, players)
         if len(cluster) >= 2:
             clusters.append(sorted(cluster))
     return clusters
 
 
 def _grow_cluster(
-    seed: int, remaining: set[int], order: Sequence[int], corr: np.ndarray
+    seed: int,
+    remaining: set[int],
+    order: Sequence[int],
+    corr: np.ndarray,
+    players: Mapping[int, str],
 ) -> list[int]:
-    """Attach legs correlated (|ρ| ≥ floor) with any member, strongest first, up to the cap."""
+    """Attach legs correlated (|ρ| ≥ floor) with any member, strongest first, up to the cap.
+
+    One leg per player: a player's strongest leg claims their slot and their
+    remaining legs stay in the pool for a later cluster. Same-player legs
+    correlate near 1, so without the rule one hot player's five markets fill the
+    cap and ``validate_parlay_legs`` (distinct players) finds no valid subset.
+    """
     cluster = [seed]
+    claimed = {players[seed]}
     remaining.discard(seed)
     changed = True
     while changed and len(cluster) < _MAX_CLUSTER_LEGS:
         changed = False
         for j in order:
-            if j not in remaining:
+            if j not in remaining or players[j] in claimed:
                 continue
             if any(abs(corr[j, m]) >= _CLUSTER_RHO_FLOOR for m in cluster):
                 cluster.append(j)
+                claimed.add(players[j])
                 remaining.discard(j)
                 changed = True
                 if len(cluster) >= _MAX_CLUSTER_LEGS:

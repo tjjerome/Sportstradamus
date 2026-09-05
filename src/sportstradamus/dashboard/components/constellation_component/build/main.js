@@ -37,16 +37,18 @@
   const HOVER_FAINT = 0.18; // faint opacity for a hidden edge previewed on hover
   const HIDE_DELAY_MS = 220; // hover-intent: keep the card while the cursor travels to it
   // Lens toggles animate two different ways, because they change the map two different ways:
-  //   - "Look deeper" only ADDS a "deep" trace of background stars — the lit map doesn't move, so
-  //     fade in just that new trace and leave every existing star exactly where it is.
-  //   - "Look wider" RESTRUCTURES the map: the focus constellation shrinks toward centre while the
-  //     outer "wider"/"wider_labels" clusters appear. Fading only the new clusters would leave the
-  //     shrink as an ugly instant snap, so settle the whole map in with one opacity fade instead.
+  //   - "Look deeper" only ADDS: a "deep" trace of small stars inside the map plus the
+  //     "deep_edge" ties they bring with them. Every star already drawn holds still, so fade
+  //     in just those new traces.
+  //   - "Look wider" RESTRUCTURES the map: the focus recedes while the "wider"/"wider_labels"
+  //     sky fills in around it, and on a phone the figure itself grows taller. Fading only the
+  //     new sky would leave the reshape as an ugly instant snap, so settle the whole map in
+  //     with one opacity fade instead.
   // A slip click adds no lens trace and never moves the focus, so it never animates. Respect
   // prefers-reduced-motion.
-  const LENS_FADE_MS = 900; // "look deeper": new background stars materialize
+  const LENS_FADE_MS = 900; // "look deeper": new stars and their ties materialize
   const WIDER_FADE_MS = 1000; // "look wider": whole-map settle — a touch slower, hides the reshape
-  const LENS_TRACE_NAMES = { deep: true, wider: true, wider_labels: true };
+  const LENS_TRACE_NAMES = { deep: true, deep_edge: true, wider: true, wider_labels: true };
   const REDUCED_MOTION =
     window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   let plotted = false;
@@ -79,23 +81,27 @@
     baseOpacity = fig.data.map(function (t) {
       return t.opacity == null ? 1 : t.opacity;
     });
+    // Both edge names carry [a, b] meta, so hover preview reaches a deeper-lens tie too.
     edgeEndpoints = fig.data.map(function (t) {
-      return t.name === "edge" ? t.meta : null;
+      return t.name === "edge" || t.name === "deep_edge" ? t.meta : null;
     });
     previewed = [];
+    // The height post comes before the animation, not after it: the phone sizes its
+    // iframe from this message and a sky clipped off the bottom is a broken page,
+    // while a fade that never runs is only a missing flourish.
+    setFrameHeight(
+      (fig.layout && fig.layout.height ? fig.layout.height : 380) +
+        FRAME_PAD +
+        (MOBILE ? MOBILE_CARD_PAD : 0)
+    );
     if (!plotted) {
       attachHandlers();
       plotted = true;
     } else if (widerReshaped) {
-      fadeInWholeMap();
+      fadeIn(fig.data.map(function (_, i) { return i; }), WIDER_FADE_MS);
     } else if (freshLens.length) {
-      fadeInLensTraces(freshLens);
+      fadeIn(freshLens, LENS_FADE_MS);
     }
-    const height =
-      (fig.layout && fig.layout.height ? fig.layout.height : 380) +
-      FRAME_PAD +
-      (MOBILE ? MOBILE_CARD_PAD : 0);
-    setFrameHeight(height);
   }
 
   // The lens traces present in a figure, as a {name: true} set (deep / wider / wider_labels).
@@ -116,13 +122,15 @@
     return idx;
   }
 
-  // Fade ONLY the freshly-revealed lens traces up from transparent to their designed opacity, so a
-  // "look deeper" / "look wider" toggle reads as new stars materializing while every existing star
-  // holds still. Ramps trace-level opacity (which multiplies each marker's own alpha) over
-  // LENS_FADE_MS on requestAnimationFrame; the start-at-0 restyle runs in the same tick as
-  // Plotly.react, so the browser never paints the full-opacity first frame. A newer render bumps
-  // renderSeq and this fade bails, so a stale ramp can't fight the current figure's trace indices.
-  function fadeInLensTraces(indices) {
+  // Ramp the given traces up from transparent to their designed opacity. "Look deeper" passes
+  // only the freshly-revealed lens traces, so the toggle reads as new stars materializing while
+  // every existing star holds still; "look wider" passes every trace, because it restructures the
+  // map and fading only the new sky would leave the recede as an instant snap. Ramps trace-level
+  // opacity (which multiplies each marker's own alpha) over `ms` on requestAnimationFrame; the
+  // start-at-0 restyle runs in the same tick as Plotly.react, so the browser never paints the
+  // full-opacity first frame. A newer render bumps renderSeq and this fade bails, so a stale ramp
+  // can't fight the current figure's trace indices.
+  function fadeIn(indices, ms) {
     if (REDUCED_MOTION) return;
     const targets = indices.map(function (i) {
       return baseOpacity[i];
@@ -133,7 +141,7 @@
     function step(now) {
       if (seq !== renderSeq) return; // a newer render superseded this fade
       if (start === null) start = now;
-      const t = Math.min(1, (now - start) / LENS_FADE_MS);
+      const t = Math.min(1, (now - start) / ms);
       const eased = 1 - Math.pow(1 - t, 3); // easeOutCubic — quick lift, gentle settle
       Plotly.restyle(
         chartDiv,

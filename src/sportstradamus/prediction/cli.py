@@ -56,6 +56,7 @@ from sportstradamus.prediction.stories import (
     build_game_stories,
 )
 from sportstradamus.prediction.stories.details import build_offer_details
+from sportstradamus.prediction.stories.lineup import attach_lineup_columns
 from sportstradamus.spiderLogger import logger
 from sportstradamus.stats import StatsMLB, StatsNBA, StatsNFL, StatsNHL, StatsWNBA
 
@@ -301,6 +302,7 @@ def main(progress, contest_variant, log_level):
             line_map[key] for key in snapshot_offers[key_cols].itertuples(index=False, name=None)
         ]
 
+    snapshot_offers = attach_lineup_columns(snapshot_offers, stats)
     snapshot_offers = attach_offer_why(snapshot_offers)
     game_context = build_game_context(snapshot_offers, archive.default_totals)
     parlay_df = attach_parlay_theses(
