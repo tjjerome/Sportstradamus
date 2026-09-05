@@ -254,3 +254,54 @@ def _box(x: float, y: float, width: float, height: float) -> tuple[float, float,
 
 def _overlaps(box: tuple[float, ...], other: tuple[float, ...]) -> bool:
     return box[0] < other[2] and box[2] > other[0] and box[1] < other[3] and box[3] > other[1]
+
+
+def _clash(
+    disc: tuple[float, float, float],
+    label: tuple[float, float, float, float],
+    blocks: tuple[tuple[float, float, float, float], tuple[float, float, float, float]],
+    rects: Sequence[tuple[float, float, float, float]],
+    discs: Sequence[tuple[float, float, float]],
+    frame: tuple[float, float, float, float],
+) -> float:
+    """How much of a throw lands on something already there; 0.0 when it clears.
+
+    ``blocks`` is the map twice: the margin-grown footprint the disc must miss
+    and the bare star box the label must miss. Boxes meet boxes by intersection
+    area and circles by penetration depth — mixed units on purpose, since the sum
+    is only ever read as a ranking between throws in a band too crammed for any
+    of them to clear, and every term goes to zero exactly when the throw is clean.
+    """
+    x, y, radius = disc
+    footprint, core = blocks
+
+    def sink(cx: float, cy: float, reach: float, rect: tuple[float, float, float, float]) -> float:
+        near = (min(max(cx, rect[0]), rect[2]), min(max(cy, rect[1]), rect[3]))
+        return max(reach - math.dist((cx, cy), near), 0.0)
+
+    def outside(rect: tuple[float, float, float, float]) -> float:
+        return sum(
+            max(gap, 0.0)
+            for gap in (
+                frame[0] - rect[0],
+                frame[1] - rect[1],
+                rect[2] - frame[2],
+                rect[3] - frame[3],
+            )
+        )
+
+    def area(
+        one: tuple[float, float, float, float], two: tuple[float, float, float, float]
+    ) -> float:
+        return max(min(one[2], two[2]) - max(one[0], two[0]), 0.0) * max(
+            min(one[3], two[3]) - max(one[1], two[1]), 0.0
+        )
+
+    total = outside((x - radius, y - radius, x + radius, y + radius)) + outside(label)
+    total += sink(x, y, radius, footprint) + area(label, core)
+    for rect in rects:
+        total += sink(x, y, radius, rect) + area(label, rect)
+    for other_x, other_y, other_radius in discs:
+        total += max(radius + other_radius - math.dist((x, y), (other_x, other_y)), 0.0)
+        total += sink(other_x, other_y, other_radius, label)
+    return total
