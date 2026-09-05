@@ -208,6 +208,16 @@ def test_in_slip_leg_beyond_the_cut_is_still_a_star():
     assert [card[0] for card in active.customdata] == [_key(14)]
 
 
+def test_a_slip_with_only_a_passed_leg_still_renders():
+    """Nothing in the pool is model-liked, so the default cut is empty and the
+    promoted slip leg is the whole map — the one case that hands the spring solve
+    an empty node set, which it cannot warm-start.
+    """
+    leg = _row("A", "NYK", -0.1)
+    stars = _stars(constellation_figure([leg], None, pd.DataFrame([leg])))
+    assert set(stars) == {"A|PTS|Over"}
+
+
 def test_main_stars_keep_their_clearance_on_both_viewports():
     """Both viewports, lens off and on.
 

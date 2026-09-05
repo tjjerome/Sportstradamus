@@ -24,20 +24,19 @@ tie. Each team's most-connected leg is pinned to its side, so a cross-matchup le
 toward the centre and an unrepresented side leaves its half empty.
 
 Two optional lenses layer onto the same figure (P8 Task C6) instead of living as
-separate expanders below the map:
+separate expanders below the map; ``constellation_lenses`` draws both:
 
-* ``deep_pool`` — "look deeper": this game's model-passed legs (``K`` ≤ 0) as dim,
-  unconnected background stars on a ring just outside the normal layout. They carry
-  no edges and never join the spring layout, so revealing them can't reshuffle the
-  lit constellation.
-* ``wider_groups`` — "look wider": the focus layout shrinks toward the centre and
-  other games' best legs orbit the edge in per-game clusters, each labelled with its
-  game key.
+* ``deep_pool`` — "look deeper": the game's remaining legs — the ones the default
+  cut left behind, then the model-passed ones — as small stars *inside* the map,
+  each beside the main star it correlates with and carrying its ties. The main
+  stars are held fixed, so revealing the tier can never reshuffle the lit map.
+* ``wider_groups`` — "look wider": the map recedes a little and other games' best
+  legs fill the open sky around it in per-game clusters, team-coloured and
+  labelled with their game key — never a ring around the edge.
 
-Both lens node sets are positioned by list index around a ring, never by hashing a
-key — Python's ``hash()`` on a ``str`` is per-process randomized (``PYTHONHASHSEED``)
-unless seeded, so index-based placement is what keeps a golden position pin honest
-across separate test runs.
+An in-slip leg beyond the default cut is *promoted* rather than laid out: it takes
+the position the deeper lens would have given it and burns as a full star with the
+lens on or off, so adding one can never re-deal the template.
 
 The figure is pure (no Streamlit, no Archive): each node carries its
 ``Player|Market|Bet`` key plus its hover-card fields as ``customdata`` (the key at
@@ -54,13 +53,27 @@ Team fills read ``theme.team_colors(league, team)`` — real per-team primaries 
 
 from __future__ import annotations
 
-import math
+from collections import defaultdict
 from collections.abc import Mapping, Sequence
 
 import networkx as nx
 import pandas as pd
 import plotly.graph_objects as go
 
+from sportstradamus.dashboard.components.constellation_lenses import (
+    _DEEP_ALPHA,
+    _DEEP_COLOR,
+    _SKY_EXTRA_Y_MOBILE,
+    _WIDER_SCALE,
+    DEEP_EDGES_PER_STAR,
+    LENS_STAR_SIZE,
+    LENS_STAR_SIZE_MOBILE,
+    WIDER_GAMES,
+    add_deep_trace,
+    add_wider_layer,
+    deep_positions,
+    deep_tier,
+)
 from sportstradamus.dashboard.components.constellation_slate import (
     SHAPE_SCALE,
     SHAPE_SCALE_MOBILE,
@@ -82,7 +95,7 @@ from sportstradamus.dashboard.components.constellation_spacing import (
 )
 from sportstradamus.dashboard.legs import corr_key
 from sportstradamus.dashboard.theme import GOLD, GRAY, team_colors, team_name
-from sportstradamus.leg_schema import is_model_liked, leg_field
+from sportstradamus.leg_schema import leg_field
 
 _NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 
@@ -100,29 +113,6 @@ _SIZE_MAX = 38
 # franchise colors to near-gray, so candidates read as a colorless field.
 _INACTIVE_DESAT = 0.35
 _INACTIVE_ALPHA = 0.60
-
-# "Look deeper" lens (p8-games-lenses.html): the game's model-passed legs as a dim,
-# unconnected background field. Flat cool-gray port of the mockup's own literal hex —
-# distinct from both a team color and GRAY (reserved for the unknown-team fallback and
-# text labels), so a deep star reads as "model passes," not a desaturated candidate.
-_DEEP_COLOR = "#5f6b80"
-_DEEP_ALPHA = 0.35
-# Ring radius just outside the normal layout's own footprint (_LAYOUT_TARGET) so deep
-# stars never overlap the lit constellation.
-_DEEP_RADIUS = 1.25
-# Alternating +/- radius offset (as a fraction of the ring radius, so it co-scales
-# with the ring rather than becoming disproportionate once "look wider" shrinks it)
-# so the ring isn't mechanically flat.
-_RING_WOBBLE_FRAC = 0.04
-
-# "Look wider" lens: the focus constellation shrinks toward the centre and other games'
-# best legs (satellite_picker.satellite_groups) orbit an outer ring, grouped by matchup.
-_WIDER_SCALE = 0.55
-_WIDER_RADIUS = 1.55  # clearly outside _DEEP_RADIUS so "deeper" and "wider" read as
-# concentric rings, not one overlapping band, when both lenses are on at once.
-_WIDER_LABEL_OFFSET = 0.12  # radial offset of a cluster's game-key label past its dots
-_WIDER_CLUSTER_SPAN = 0.06  # small fixed spacing between legs within one game's cluster
-_WIDER_ALPHA = 0.75  # dimmer than an active star so periphery legs read as background
 
 _EDGE_WIDTH_MIN = 1.0
 _EDGE_WIDTH_SPAN = 6.0  # width at |ρ|=1 ≈ 7px; weak ties stay hairlines for contrast
@@ -246,19 +236,30 @@ def constellation_figure(
     teams = teams_of(game)
 
     active = {corr_key(leg) for leg in slip_legs} & set(info)
-    keys = sorted(set(default_stars(universe, teams)) | active)
+    keys = default_stars(universe, teams)
     _add_team_tags(fig, league, teams)
     team_color = {team: team_colors(league, team)[0] for team in teams}
-    node_team = {k: info[k]["team"] for k in keys}
     rho = rho_map(corr, game)
     edges = game_edges(keys, rho)
-    floor, label_size, shape_scale, px = (
-        (_SIZE_MIN_MOBILE, _LABEL_FONT_SIZE_MOBILE, SHAPE_SCALE_MOBILE, PX_PER_UNIT_MOBILE)
+    floor, label_size, shape_scale, px, lens_size, sky_y = (
+        (
+            _SIZE_MIN_MOBILE,
+            _LABEL_FONT_SIZE_MOBILE,
+            SHAPE_SCALE_MOBILE,
+            PX_PER_UNIT_MOBILE,
+            LENS_STAR_SIZE_MOBILE,
+            Y_RANGE + _SKY_EXTRA_Y_MOBILE,
+        )
         if mobile
-        else (_SIZE_MIN, _LABEL_FONT_SIZE, SHAPE_SCALE, PX_PER_UNIT)
+        else (_SIZE_MIN, _LABEL_FONT_SIZE, SHAPE_SCALE, PX_PER_UNIT, LENS_STAR_SIZE, Y_RANGE)
     )
     pos, fillers = _positions(
-        keys, node_team, teams, [(a, b, abs(r)) for a, b, r in edges], shape, shape_scale
+        keys,
+        {k: info[k]["team"] for k in keys},
+        teams,
+        [(a, b, abs(r)) for a, b, r in edges],
+        shape,
+        shape_scale,
     )
     sizes = _star_sizes(keys, info, floor=floor)
     focus_scale = _WIDER_SCALE if wider_groups is not None else 1.0
@@ -273,6 +274,25 @@ def constellation_figure(
         side={k: _side_sign(pos[k][0]) for k in keys},
     )
     pos = {k: (x * focus_scale, y * focus_scale) for k, (x, y) in pos.items()}
+    if shape is not None:
+        add_decoration(fig, shape, fillers, shape_scale, focus_scale)
+    promoted = _add_deep_layer(
+        fig,
+        deep_pool,
+        keys,
+        info,
+        pos,
+        sizes,
+        active=active,
+        edges=edges,
+        rho=rho,
+        teams=teams,
+        team_color=team_color,
+        px=px,
+        floor=floor,
+        lens_size=lens_size,
+    )
+    keys += promoted
     captions = caption_positions(
         keys,
         pos,
@@ -282,11 +302,6 @@ def constellation_figure(
         px,
         font_px=label_size,
     )
-
-    if shape is not None:
-        add_decoration(fig, shape, fillers, shape_scale, focus_scale)
-    if deep_pool is not None:
-        _add_deep_trace(fig, deep_pool, slip_legs, radius=_DEEP_RADIUS * focus_scale, floor=floor)
     for a, b, r in edges:
         _add_edge(fig, a, b, pos[a], pos[b], r, active=active)
     _add_node_trace(
@@ -312,128 +327,158 @@ def constellation_figure(
         label_size=label_size,
     )
     if wider_groups is not None:
-        _add_wider_trace(fig, wider_groups, floor=floor)
+        groups = wider_groups[:WIDER_GAMES]
+        winfo = {corr_key(row): _node_info(row) for _, rows in groups for row in rows}
+        add_wider_layer(
+            fig,
+            groups,
+            winfo,
+            pos,
+            sizes,
+            px,
+            size=lens_size,
+            label_size=label_size,
+            sky_y=sky_y,
+        )
     return fig
 
 
-def _ring_positions(keys: list[str], *, radius: float) -> dict[str, tuple[float, float]]:
-    """Evenly distribute ``keys`` (already sorted) around a ring by index.
-
-    Never hashes a key — ``hash()`` on a ``str`` is per-process randomized unless
-    ``PYTHONHASHSEED`` is pinned, so index order is what keeps this reproducible
-    across separate runs (including two golden-test invocations in CI). A small
-    alternating radius wobble keeps the ring from reading as mechanically uniform.
-    """
-    n = len(keys)
-    wobble = radius * _RING_WOBBLE_FRAC
-    pos = {}
-    for i, key in enumerate(keys):
-        angle = 2 * math.pi * i / n
-        r = radius + (wobble if i % 2 == 0 else -wobble)
-        pos[key] = (r * math.cos(angle), r * math.sin(angle))
-    return pos
-
-
-def _add_deep_trace(
+def _add_deep_layer(
     fig: go.Figure,
-    deep_pool: pd.DataFrame,
-    slip_legs: Sequence[Mapping],
+    deep_pool: pd.DataFrame | None,
+    keys: list[str],
+    info: dict[str, dict],
+    pos: dict[str, tuple[float, float]],
+    sizes: dict[str, float],
     *,
-    radius: float,
-    floor: float = _SIZE_MIN,
-) -> None:
-    """The "look deeper" lens: this game's model-passed legs as dim, unconnected background stars.
+    active: set[str],
+    edges: list[tuple[str, str, float]],
+    rho: dict[frozenset, float],
+    teams: list[str],
+    team_color: dict[str, str],
+    px: tuple[float, float],
+    floor: float,
+    lens_size: float,
+) -> list[str]:
+    """Draw the deeper lens and return the slip legs it promotes to full stars.
 
-    Drawn before any edge or the two node traces, so it sits at the bottom of the
-    z-order. Never joins the spring-layout graph — its positions come from
-    ``_ring_positions``, entirely independent of ``_layout`` — so revealing it can
-    never move an existing star.
+    ``info``, ``pos`` and ``sizes`` gain the drawn tier in place. An in-slip leg
+    beyond the default cut is promoted whether or not the lens is on, because it
+    has to burn in the spot the lens would have given it — which is why ``drawn``
+    leads with the promoted keys, whose placement priority must not move when the
+    lens grows the tier behind them. The unpicked stars and their ties are gated
+    on the lens itself, so a lens-off figure with nothing beyond the cut stays
+    byte-identical to today's.
+
+    Recomputing ``_star_sizes`` over the promoted legs cannot move a main star's
+    size: the top-Kelly leg is always inside the default cut, so the scale's
+    denominator is the one ``settle`` already spaced against.
     """
-    exclude = {corr_key(leg) for leg in slip_legs}
-    info = {
-        corr_key(row): _node_info(row)
-        for row in deep_pool.to_dict("records")
-        if not is_model_liked(row) and corr_key(row) not in exclude
+    if deep_pool is not None:
+        info |= {
+            corr_key(row): _node_info(row)
+            for row in deep_pool.to_dict("records")
+            if corr_key(row) not in info
+        }
+    tier = deep_tier(info, keys)
+    if not tier:
+        return []
+    promoted = [key for key in tier if key in active]
+    deep = [key for key in tier if key not in active] if deep_pool is not None else []
+    drawn = promoted + deep
+    sizes |= dict.fromkeys(deep, lens_size) | _star_sizes(keys + promoted, info, floor=floor)
+    ties = game_edges(keys + drawn, rho)
+    pos |= deep_positions(
+        drawn,
+        {key: pos[key] for key in keys},
+        sizes,
+        ties,
+        {key: info[key]["team"] for key in drawn},
+        teams,
+        px,
+    )
+    add_deep_trace(
+        fig,
+        deep,
+        pos,
+        info,
+        size=lens_size,
+        # A liked leg the cut left behind is a candidate, just smaller; only the
+        # model-passed tier wears the lens's own gray.
+        colors=[
+            _desaturate(team_color.get(info[k]["team"], GRAY), _INACTIVE_DESAT)
+            if info[k]["edge"] > 0
+            else _DEEP_COLOR
+            for k in deep
+        ],
+        alphas=[_INACTIVE_ALPHA if info[k]["edge"] > 0 else _DEEP_ALPHA for k in deep],
+    )
+    _add_lens_edges(
+        fig,
+        ties,
+        {(a, b) for a, b, _ in edges},
+        pos,
+        active=active,
+        deep=set(deep),
+    )
+    return promoted
+
+
+def _add_lens_edges(
+    fig: go.Figure,
+    edges: list[tuple[str, str, float]],
+    main_pairs: set[tuple[str, str]],
+    pos: dict[str, tuple[float, float]],
+    *,
+    active: set[str],
+    deep: set[str],
+) -> None:
+    """The ties the deeper lens brings in, minus the ones the base web already drew.
+
+    A promoted star is lit with the lens off too, so its ties are permanent
+    ``edge`` traces; a deep star's ties carry the ``deep_edge`` name instead, which
+    is how ``main.js`` gates the lens animation on them; a deep star keeps only its
+    ``DEEP_EDGES_PER_STAR`` strongest.
+    """
+    kept = _capped_deep_ties(edges, deep)
+    for node_a, node_b, tie in edges:
+        if (node_a, node_b) in main_pairs:
+            continue
+        lens = node_a in deep or node_b in deep
+        if lens and (node_a, node_b) not in kept:
+            continue
+        _add_edge(
+            fig,
+            node_a,
+            node_b,
+            pos[node_a],
+            pos[node_b],
+            tie,
+            active=active,
+            name="deep_edge" if lens else "edge",
+        )
+
+
+def _capped_deep_ties(edges: list[tuple[str, str, float]], deep: set[str]) -> set[tuple[str, str]]:
+    """Each deep star's strongest ties by |rho|, at most ``DEEP_EDGES_PER_STAR``.
+
+    Deep-to-deep ties never enter the pool — at lens size they are clutter with
+    nothing to read against — so they are the pairs the cap drops outright.
+    """
+    incident: defaultdict[str, list[tuple[str, str, float]]] = defaultdict(list)
+    for node_a, node_b, rho in edges:
+        if node_a in deep and node_b in deep:
+            continue
+        for key in (node_a, node_b):
+            if key in deep:
+                incident[key].append((node_a, node_b, rho))
+    return {
+        (node_a, node_b)
+        for ties in incident.values()
+        for node_a, node_b, _ in sorted(ties, key=lambda tie: (-abs(tie[2]), tie[:2]))[
+            :DEEP_EDGES_PER_STAR
+        ]
     }
-    if not info:
-        return
-    keys = sorted(info)
-    pos = _ring_positions(keys, radius=radius)
-    fig.add_trace(
-        go.Scatter(
-            x=[pos[k][0] for k in keys],
-            y=[pos[k][1] for k in keys],
-            mode="markers",
-            name="deep",
-            marker={
-                "symbol": "star",
-                "size": [floor] * len(keys),
-                "color": _DEEP_COLOR,
-                "opacity": _DEEP_ALPHA,
-            },
-            customdata=[[k, *info[k]["card"], 0] for k in keys],
-            hovertext=[info[k]["hover"] for k in keys],
-            hoverinfo="none",
-        )
-    )
-
-
-def _add_wider_trace(
-    fig: go.Figure, wider_groups: list[tuple[str, list[dict]]], *, floor: float = _SIZE_MIN
-) -> None:
-    """The "look wider" lens: other games' best legs, clustered by matchup on an outer ring.
-
-    One angular slot per game (evenly spaced by group index — same index-based
-    determinism as ``_ring_positions``); legs within one game sit close together near
-    that slot. A separate text trace labels each cluster with its game key, offset
-    outward so it doesn't overlap the dots. These are real legs (not de-emphasized
-    model-passes), so they carry their own team colors like an active star, just
-    dimmer to read as periphery.
-    """
-    n = len(wider_groups)
-    if n == 0:
-        return
-    xs, ys, colors, customdata, hovers = [], [], [], [], []
-    label_x, label_y, label_text = [], [], []
-    for i, (game, rows) in enumerate(wider_groups):
-        angle = 2 * math.pi * i / n
-        cx, cy = _WIDER_RADIUS * math.cos(angle), _WIDER_RADIUS * math.sin(angle)
-        for j, row in enumerate(rows):
-            offset = (j - (len(rows) - 1) / 2) * _WIDER_CLUSTER_SPAN
-            xs.append(cx + offset * math.cos(angle + math.pi / 2))
-            ys.append(cy + offset * math.sin(angle + math.pi / 2))
-            info = _node_info(row)
-            colors.append(team_colors(str(row["League"]), str(row["Team"]))[0])
-            customdata.append([corr_key(row), *info["card"], 0])
-            hovers.append(info["hover"])
-        label_r = _WIDER_RADIUS + _WIDER_LABEL_OFFSET
-        label_x.append(label_r * math.cos(angle))
-        label_y.append(label_r * math.sin(angle))
-        label_text.append(game)
-    fig.add_trace(
-        go.Scatter(
-            x=xs,
-            y=ys,
-            mode="markers",
-            name="wider",
-            marker={"symbol": "star", "size": [floor] * len(xs), "color": colors},
-            opacity=_WIDER_ALPHA,
-            customdata=customdata,
-            hovertext=hovers,
-            hoverinfo="none",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=label_x,
-            y=label_y,
-            mode="text",
-            name="wider_labels",
-            text=label_text,
-            textfont={"color": GRAY, "size": _LABEL_FONT_SIZE},
-            hoverinfo="skip",
-        )
-    )
 
 
 def _star_sizes(
@@ -547,6 +592,8 @@ def _layout(
     the centre and an unrepresented team leaves an empty half. Deterministic: a
     team-biased warm start over every node plus a fixed seed (no random init).
     """
+    if not nodes:
+        return {}  # nx.spring_layout cannot warm-start an empty graph
     graph = nx.Graph()
     graph.add_nodes_from(nodes)
     for u, v, w in edges:
@@ -618,13 +665,25 @@ def _rescale(pos: dict[str, tuple[float, float]]) -> dict[str, tuple[float, floa
     return {k: (x * factor, y * factor) for k, (x, y) in centered.items()}
 
 
-def _add_edge(fig: go.Figure, a: str, b: str, p0, p1, rho: float, *, active: set[str]) -> None:
+def _add_edge(
+    fig: go.Figure,
+    a: str,
+    b: str,
+    p0,
+    p1,
+    rho: float,
+    *,
+    active: set[str],
+    name: str = "edge",
+) -> None:
     """One correlation edge: gold, width/opacity ∝ |ρ|, dashed when ρ < 0.
 
     Drawn at a faint base alpha (``_EDGE_BASE_ALPHA``) so the whole web reads as a
     sketch; brightens to full ``|ρ|``-scaled gold only when **both** endpoints are in
     the slip, so the slip's own correlations stand out over the rest. ``meta`` carries
     the endpoint keys so the component's JS can faint-preview a star's other ties on hover.
+    ``name`` is ``"deep_edge"`` for a tie one of the deeper lens's own stars owns, which
+    is how the JS knows to fade it in and out with them.
     """
     incident = a in active and b in active
     fig.add_trace(
@@ -632,7 +691,7 @@ def _add_edge(fig: go.Figure, a: str, b: str, p0, p1, rho: float, *, active: set
             x=[p0[0], p1[0]],
             y=[p0[1], p1[1]],
             mode="lines",
-            name="edge",
+            name=name,
             line={
                 "color": GOLD,
                 "width": _EDGE_WIDTH_MIN + abs(rho) * _EDGE_WIDTH_SPAN,
