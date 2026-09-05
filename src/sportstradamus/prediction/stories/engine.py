@@ -18,7 +18,9 @@ bank; the variant is a deterministic md5 of the leg-set + date, so a snapshot
 always renders the same copy yet the same matchup rotates day to day. Bank
 direction is *narrative*, not bet-literal: a leg on a negative market (TOV,
 sacks taken, ...) thrives on the Under, so its side flips before any
-unanimity or contrast read.
+unanimity or contrast read. A Mixed direction carries ``up`` / ``down`` effect
+clauses from :func:`~sportstradamus.prediction.stories.effects.split_effects`
+so the headline can name what rises and what falls.
 """
 
 from __future__ import annotations
@@ -31,6 +33,8 @@ from itertools import combinations
 
 from sportstradamus.prediction.stories.bank import bank_cell, team_assets
 from sportstradamus.prediction.stories.context import GameCtx, Leg
+from sportstradamus.prediction.stories.effects import split_effects
+from sportstradamus.prediction.stories.legs import narrative_side
 
 # League → phrase-bank voice. NBA and WNBA share the basketball voice; an unknown
 # league reads straight from the league-neutral ``shared`` cells.
@@ -157,13 +161,6 @@ def _mean_rho(legs: Sequence[Leg], ctx: GameCtx) -> float:
     return sum(found) / len(found) if found else 0.0
 
 
-def _narrative_side(leg: Leg) -> str:
-    """The leg's thriving direction: its bet, flipped on a negative market."""
-    if not leg.negative:
-        return leg.bet
-    return "Under" if leg.bet == "Over" else "Over"
-
-
 def _player_stats(legs: Sequence[Leg]) -> dict[str, tuple[int, float]]:
     """Per player: (leg count, conviction = max win prob over their legs, None→0)."""
     counts = Counter(leg.player for leg in legs)
@@ -189,7 +186,7 @@ def _stack_focus(legs: Sequence[Leg]) -> tuple[str, str]:
     """
     sides_by_player: dict[str, set[str]] = defaultdict(set)
     for leg in legs:
-        sides_by_player[leg.player].add(_narrative_side(leg))
+        sides_by_player[leg.player].add(narrative_side(leg))
     all_sides = set().union(*sides_by_player.values())
     if len(all_sides) == 1:
         return next(iter(all_sides)), _anchor(legs)
@@ -241,7 +238,7 @@ def _unit_legs(legs: Sequence[Leg], team: str, grp: str, bet: str) -> list[Leg]:
 
 
 def _modal_side(legs: Sequence[Leg]) -> str:
-    counts = Counter(_narrative_side(leg) for leg in legs)
+    counts = Counter(narrative_side(leg) for leg in legs)
     return min(counts, key=lambda side: (-counts[side], side))
 
 
@@ -350,14 +347,12 @@ def thesis_variants(
     sub_legs = _subject_legs(legs, game, archetype, subject)
     shape = ctx.shape if ctx else "even"
     league = ctx.league if ctx else ""
-    cell = bank_cell(
-        _VOICE_BY_LEAGUE.get(league, "shared"),
-        archetype,
-        shape,
-        subject.get("dir") or _direction(sub_legs),
-        _modal_category(sub_legs),
-    )
+    voice = _VOICE_BY_LEAGUE.get(league, "shared")
+    direction = subject.get("dir") or _direction(sub_legs)
+    cell = bank_cell(voice, archetype, shape, direction, _modal_category(sub_legs))
     fmt_subject = {**subject, "home": _home_city(ctx, subject.get("g", ""))}
+    if direction == "Mixed":
+        fmt_subject |= split_effects(sub_legs, voice, league)
     rendered = [_localize_g(variant).format(**fmt_subject) for variant in cell]
     if not rendered:
         return [], 0, subject
@@ -379,7 +374,7 @@ def _subject_legs(
 
 
 def _direction(legs: Sequence[Leg]) -> str:
-    sides = {_narrative_side(leg) for leg in legs}
+    sides = {narrative_side(leg) for leg in legs}
     return next(iter(sides)) if len(sides) == 1 else "Mixed"
 
 

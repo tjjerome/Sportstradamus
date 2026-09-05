@@ -9,8 +9,10 @@ and WNBA), ``football``, ``hockey``, ``baseball``, and the league-neutral
 when a negative-market leg's actual bet is Under, so templates outside the
 ``mistakes`` category must carry mood, never literal bet-side words.
 ``why_bank.json`` holds the per-offer case clauses and story-dek clauses
-(``{clause: {branch: [variants]}}`` plus the pronoun map). This module is the
-only reader and stays pure stdlib so the dashboard can import it live.
+(``{clause: {branch: [variants]}}`` plus the pronoun map). ``stat_words.json``
+holds the stat-family words a Mixed headline's engine-supplied effect clauses
+are built from. This module is the only reader and stays pure stdlib so the
+dashboard can import it live.
 """
 
 import functools
@@ -35,6 +37,17 @@ def why_bank() -> dict:
 def team_assets() -> dict:
     """Team display assets: ``{league: {abbrev: {primary, secondary, name}}}``."""
     return _bank("team_assets.json")
+
+
+def stat_words() -> dict:
+    """Effect-clause words per voice and stat family.
+
+    ``{voice: {family: {noun, thrive, fade, owned_thrive, owned_fade}}}`` — the
+    plural stat noun with the verb phrases for a thriving and a fading side,
+    plus the player-subject templates used when both sides share a family.
+    Narrative valence is baked in: a ``mistakes`` family thrives on staying down.
+    """
+    return _bank("stat_words.json")
 
 
 def bank_cell(voice: str, archetype: str, shape: str, direction: str, category: str) -> list[str]:
