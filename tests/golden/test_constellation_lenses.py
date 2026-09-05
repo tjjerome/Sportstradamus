@@ -23,12 +23,14 @@ import pandas as pd
 from sportstradamus.dashboard.components import constellation_lenses
 from sportstradamus.dashboard.components.constellation import (
     _FIG_HEIGHT,
+    _LABEL_FONT_SIZE,
     _SIZE_MAX,
     _SIZE_MIN,
     constellation_figure,
 )
 from sportstradamus.dashboard.components.constellation_lenses import (
     DEEP_EDGES_PER_STAR,
+    LENS_STAR_SIZE,
     WIDER_GAMES,
 )
 from sportstradamus.dashboard.components.constellation_slate import DECORATION
@@ -346,6 +348,57 @@ def test_a_deep_tier_that_closes_the_sky_grows_it_instead_of_drawing_nothing():
         assert len(_trace(both, "wider").x) == len(_trace(sky_only, "wider").x), mobile
         assert set(_trace(both, "wider_labels").text) == {game for game, _ in groups}
         assert both.layout.height > sky_only.layout.height, mobile
+
+
+def _sky_boxes(fig) -> tuple[list[tuple], list[tuple]]:
+    """The sky's label ink boxes and star boxes in px, as ``(game, x0, y0, x1, y1)``.
+
+    A plotly text label is centred on its point; 0.6 em a character is the usual
+    estimate for a proportional face and 1.25 its line height.
+    """
+    text_trace, sky = _trace(fig, "wider_labels"), _trace(fig, "wider")
+    labels, stars = [], []
+    for text, x, y in zip(text_trace.text, text_trace.x, text_trace.y, strict=True):
+        half_w, half_h = len(text) * 0.6 * _LABEL_FONT_SIZE / 2, 1.25 * _LABEL_FONT_SIZE / 2
+        cx, cy = float(x) * PX_PER_UNIT[0], float(y) * PX_PER_UNIT[1]
+        labels.append((text, cx - half_w, cy - half_h, cx + half_w, cy + half_h))
+    for card, x, y in zip(sky.customdata, sky.x, sky.y, strict=True):
+        cx, cy = float(x) * PX_PER_UNIT[0], float(y) * PX_PER_UNIT[1]
+        half = LENS_STAR_SIZE / 2
+        stars.append((card[0].split("|")[0][:3], cx - half, cy - half, cx + half, cy + half))
+    return labels, stars
+
+
+def _clear(one: tuple, other: tuple) -> bool:
+    return one[3] <= other[1] or other[3] <= one[1] or one[4] <= other[2] or other[4] <= one[2]
+
+
+def test_sky_labels_never_land_on_another_games_group():
+    """A vertical band stacks its games, and a label hangs below its own. With the
+    slots spaced on the cluster alone the label fell into the group beneath it —
+    measured on the desktop at two labels 10.6 px apart and a label over a
+    neighbour's star by 8.7 px, both unreadable."""
+    for names in (
+        ["CIN/CLE", "LAA/LAD", "PHI/PIT"],
+        ["ARI/ATH", "TOR/WSH", "MIN/NYM", "HOU/KC"],
+    ):
+        groups = [
+            (
+                game,
+                [_row(f"{game[:3]}{i}", game[:3], 0.3, market="3PM", game=game) for i in range(4)],
+            )
+            for game in names
+        ]
+        fig = constellation_figure(
+            [], None, _ladder(13), deep_pool=_deep_pool(180), wider_groups=groups
+        )
+        labels, stars = _sky_boxes(fig)
+        assert len({star[1] > 0 for star in stars}) == 1, "fixture no longer forces one band"
+        for one, other in itertools.combinations(labels, 2):
+            assert _clear(one, other), (names, one[0], other[0])
+        for label in labels:
+            for star in stars:
+                assert star[0] == label[0][:3] or _clear(label, star), (names, label[0], star[0])
 
 
 def test_the_desktop_keeps_its_own_height_while_its_side_bands_hold():
