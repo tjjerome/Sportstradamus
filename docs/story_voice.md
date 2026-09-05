@@ -94,8 +94,8 @@ every direction, plus `player/even/{Over,Under}/mistakes`, plus the four contrar
 
 ## Samples
 
-- baseball / game-script / shootout / Under — "Coors says slugfest. The model reads these
-  bats quieter than the number."
+- baseball / game-script / shootout / Under — "The {g} total says slugfest. The model reads
+  these bats quieter than the number."
 - baseball / game-script / grind / Mixed — "Two aces shorten {g}: {up} and {down}." →
   "Two aces shorten DET/CLE: the strikeouts climb and the hits stay down."
 - basketball / player / shootout / Over / scoring — "The {g} pace runs through {p}, and the
