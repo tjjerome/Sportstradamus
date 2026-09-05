@@ -22,6 +22,8 @@ from sportstradamus.prediction.stories import (
     attach_parlay_theses,
 )
 from sportstradamus.prediction.stories.bank import why_bank
+from sportstradamus.prediction.stories.context import Leg
+from sportstradamus.prediction.stories.effects import split_effects
 from sportstradamus.prediction.stories.lineup import attach_lineup_columns, batting_slot
 from sportstradamus.prediction.stories.why import story_dek
 
@@ -152,8 +154,8 @@ _OFFERS = pd.DataFrame(
 )
 
 # Three families: Tatum drives BOS family 1 (two markets, blowout); BOS family 2
-# is an even Embiid-Under / Tatum-Over split with no leg-majority → game-script;
-# Jokic drives DEN/MIA.
+# is an even Embiid-Under / Tatum-Over split with no leg-majority → game-script,
+# Mixed, whose same-family clauses name both players; Jokic drives DEN/MIA.
 _PARLAYS = pd.DataFrame(
     [
         {
@@ -198,23 +200,28 @@ def _theses_by_family(parlays: pd.DataFrame, offers: pd.DataFrame) -> dict[tuple
 
 
 def test_version_present():
-    assert STORIES_VERSION == "p3c"
+    assert STORIES_VERSION == "p4"
 
 
 def test_thesis_exact_strings():
     assert _theses_by_family(_PARLAYS, _OFFERS) == {
-        ("BOS/PHI", 1.0): "Jayson Tatum piles on before the BOS/PHI bench empties",
-        ("BOS/PHI", 2.0): "the BOS/PHI margin giveth to the bench and taketh from the stars",
-        ("DEN/MIA", 1.0): ("The closer DEN/MIA gets, the better Nikola Jokic's passes become"),
+        ("BOS/PHI", 1.0): "Garbage time waits, and Jayson Tatum banks the points before it",
+        ("BOS/PHI", 2.0): (
+            "The BOS/PHI margin sorts it: Jayson Tatum clears the points number "
+            "while Joel Embiid comes up short on points"
+        ),
+        ("DEN/MIA", 1.0): "One-possession games need a passer, and Nikola Jokic closes DEN/MIA",
     }
 
 
-def test_no_standout_family_routes_to_game_script_not_a_star():
+def test_no_standout_family_routes_to_game_script_and_names_both_sides():
     """The even Embiid-Under / Tatum-Over split has no leg-majority ⇒ the headline
-    is about the game, naming neither player (the v1 alphabetical-star bug)."""
+    is about the game, not one star picked alphabetically (the v1 bug). Both legs
+    share a family, so the Mixed clauses name each side's player: the split is
+    stated, never a vague "ride some, fade the rest"."""
     thesis = _theses_by_family(_PARLAYS, _OFFERS)[("BOS/PHI", 2.0)]
-    assert "Tatum" not in thesis and "Embiid" not in thesis
-    assert thesis
+    assert "Jayson Tatum" in thesis and "Joel Embiid" in thesis
+    assert thesis.index("Jayson Tatum") > 0
 
 
 def test_thesis_written_on_every_row():
@@ -536,6 +543,115 @@ def test_muddled_mixed_slip_names_nobody(monkeypatch):
     thesis = attach_parlay_theses(parlays, offers)["Thesis"].iloc[0]
     assert thesis
     assert "Alpha" not in thesis and "Zeta" not in thesis
+
+
+def _effect_leg(
+    player: str, bet: str, market: str, category: str, win_prob: float, *, negative: bool = False
+) -> Leg:
+    """An enriched leg carrying only the fields the effect clauses read."""
+    return Leg(
+        player=player,
+        bet=bet,
+        line=1.5,
+        market=market,
+        category=category,
+        negative=negative,
+        win_prob=win_prob,
+    )
+
+
+def test_effect_clauses_name_each_side_s_stat_family():
+    """Sides in different families each speak through their own stat noun."""
+    effects = split_effects(
+        [
+            _effect_leg("Tarik Skubal", "Over", "pitcher strikeouts", "k's", 0.61),
+            _effect_leg("Bobby Witt Jr.", "Under", "hits", "scoring", 0.58),
+        ],
+        "baseball",
+        "MLB",
+    )
+    assert effects == {"up": "the strikeouts climb", "down": "the hits stay down"}
+    assert effects["up"] != effects["down"]
+
+
+def test_effect_clauses_name_the_players_when_one_family_holds_both_sides():
+    """Two scoring legs would print the same noun twice, so the players carry the clause."""
+    effects = split_effects(
+        [
+            _effect_leg("Aaron Judge", "Over", "total bases", "scoring", 0.62),
+            _effect_leg("Alex Bregman", "Under", "hits", "scoring", 0.57),
+        ],
+        "baseball",
+        "MLB",
+    )
+    assert effects == {
+        "up": "Aaron Judge clears the total bases number",
+        "down": "Alex Bregman comes up short on hits",
+    }
+
+
+def test_effect_clauses_name_the_higher_conviction_leg_on_a_crowded_side():
+    """One market on both sides: the named fader is the stronger read, not the first name."""
+    effects = split_effects(
+        [
+            _effect_leg("Jayson Tatum", "Over", "PTS", "scoring", 0.59),
+            _effect_leg("Joel Embiid", "Under", "PTS", "scoring", 0.71),
+            _effect_leg("Tyrese Maxey", "Under", "PTS", "scoring", 0.55),
+        ],
+        "basketball",
+        "NBA",
+    )
+    assert effects == {
+        "up": "Jayson Tatum clears the points number",
+        "down": "Joel Embiid comes up short on points",
+    }
+
+
+def test_effect_clauses_read_a_negative_market_as_the_thriving_side():
+    """Both legs are bet Under; the TOV leg thrives and the PTS leg fades."""
+    effects = split_effects(
+        [
+            _effect_leg("Jayson Tatum", "Under", "TOV", "mistakes", 0.63, negative=True),
+            _effect_leg("Joel Embiid", "Under", "PTS", "scoring", 0.57),
+        ],
+        "basketball",
+        "NBA",
+    )
+    assert effects == {"up": "the turnovers stay down", "down": "the points dry up"}
+
+
+def test_effect_clauses_keep_acronym_board_names_capitalised():
+    """A board name reads as prose mid-clause, but PRA and RBIs are spelled that way anywhere."""
+    nba = split_effects(
+        [
+            _effect_leg("Jayson Tatum", "Over", "PRA", "scoring", 0.60),
+            _effect_leg("Joel Embiid", "Under", "PTS", "scoring", 0.57),
+        ],
+        "basketball",
+        "NBA",
+    )
+    assert nba["up"] == "Jayson Tatum clears the PRA number"
+    mlb = split_effects(
+        [
+            _effect_leg("Aaron Judge", "Over", "hits+runs+rbi", "scoring", 0.60),
+            _effect_leg("Alex Bregman", "Under", "total bases", "scoring", 0.57),
+        ],
+        "baseball",
+        "MLB",
+    )
+    assert mlb["up"] == "Aaron Judge clears the hits + runs + RBIs number"
+
+
+def test_mixed_headline_renders_both_effect_clauses(monkeypatch):
+    """The engine fills a Mixed cell's effect slots: the split Tatum/Embiid family."""
+    from sportstradamus.prediction.stories import engine as engine_mod
+
+    monkeypatch.setattr(engine_mod, "bank_cell", lambda *_k: ["{g}: {up} and {down}"])
+    mixed = _PARLAYS[_PARLAYS["Family"] == 2.0]
+    thesis = attach_parlay_theses(mixed.copy(), _OFFERS.copy())["Thesis"].iloc[0]
+    assert thesis == (
+        "BOS/PHI: Jayson Tatum clears the points number and Joel Embiid comes up short on points"
+    )
 
 
 def test_wnba_why_uses_her():

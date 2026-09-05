@@ -12,11 +12,14 @@ with no code involved — the whole premise of the D6 cockpit.
 
 from __future__ import annotations
 
+import ast
+import inspect
 import itertools
 import math
 
 import pytest
 
+from sportstradamus.dashboard.components import constellation_layout
 from sportstradamus.dashboard.components import constellation_shapes as cs
 from sportstradamus.dashboard.components.constellation_layout import (
     _EXPLODE_DR,
@@ -216,6 +219,7 @@ _MIRRORED = _template(
         _vertex(5, 0.9, -0.9, "R", 6),
     ]
 )
+_MIRRORED_XY = {(vertex["x"], vertex["y"]) for vertex in _MIRRORED["vertices"]}
 
 # One left vertex against three right ones at deliberately unequal distances, so
 # a correlation pull and a prominence ranking disagree about where to put B.
@@ -236,6 +240,16 @@ def _two_by_two():
     return nodes, teams, edges
 
 
+def _crowded_left():
+    """Eleven legs on one team against ``_MIRRORED``'s three left vertices.
+
+    Eight of them overflow — the shape of every game once the star cut exceeds a
+    template's vertex count, which is the shipped state for the whole bank.
+    """
+    nodes = [f"A{i}|PTS|Over" for i in range(11)]
+    return nodes, dict.fromkeys(nodes, "AAA")
+
+
 def test_a_star_never_lands_on_the_other_teams_half():
     """The one thing the layout is not allowed to lie about."""
     nodes, teams, edges = _two_by_two()
@@ -250,6 +264,13 @@ def test_placement_is_deterministic_whatever_order_the_inputs_arrive_in():
     assert first == assign_stars(nodes, teams, ["AAA", "BBB"], edges, _MIRRORED)
     assert first == assign_stars(
         list(reversed(nodes)), teams, ["AAA", "BBB"], list(reversed(edges)), _MIRRORED
+    )
+
+    crowded, crowded_teams = _crowded_left()
+    field = assign_stars(crowded, crowded_teams, ["AAA", "BBB"], [], _MIRRORED)
+    assert field == assign_stars(crowded, crowded_teams, ["AAA", "BBB"], [], _MIRRORED)
+    assert field == assign_stars(
+        list(reversed(crowded)), crowded_teams, ["AAA", "BBB"], [], _MIRRORED
     )
 
 
@@ -277,12 +298,41 @@ def test_a_single_team_game_leaves_the_far_half_to_fillers():
     assert {3, 4, 5} <= set(fillers)
 
 
-def test_overflow_orbits_its_own_side_instead_of_stretching_the_template():
-    nodes = [f"A{i}|PTS|Over" for i in range(5)]
-    teams = dict.fromkeys(nodes, "AAA")
+def test_overflow_scatters_as_a_field_across_its_own_side():
+    """The template is never stretched, so the extras have to read as sky around
+    the figure — spread over the side's own region, not stacked beside it."""
+    nodes, teams = _crowded_left()
     positions, _ = assign_stars(nodes, teams, ["AAA", "BBB"], [], _MIRRORED)
-    assert len(positions) == 5
+    assert len(positions) == 11
     assert all(x <= 0.0 for x, _ in positions.values()), "overflow never crosses the axis"
+
+    field = [xy for xy in positions.values() if xy not in _MIRRORED_XY]
+    assert len(field) == 8
+    # Two stars closer than this in template units read as one smudge on a phone.
+    assert min(math.dist(a, b) for a, b in itertools.combinations(field, 2)) >= 0.08
+    # The left vertices sit at x = -0.9, |y| = 0.9, so _FIELD_PAD widens their box
+    # to this and the half-clamp and the [-1, 1] template box close it.
+    assert all(-1.0 <= x <= -0.7 and -1.0 <= y <= 1.0 for x, y in field), field
+    # The old spiral kept every extra inside 0.18 of the side's centroid.
+    assert max(math.dist(xy, (-0.9, 0.0)) for xy in field) > 0.18
+
+
+def test_a_game_thinner_than_its_template_lands_only_on_vertices():
+    """The field is for overflow alone: a game that fits its shape sits on it exactly."""
+    nodes, teams, edges = _two_by_two()
+    positions, _ = assign_stars(nodes, teams, ["AAA", "BBB"], edges, _MIRRORED)
+    assert set(positions.values()) <= _MIRRORED_XY
+
+
+def test_layout_never_calls_hash():
+    """``hash()`` on a ``str`` is per-process randomized, so a field seeded on it
+    would re-deal itself between two views of the same night."""
+    called = {
+        node.func.id
+        for node in ast.walk(ast.parse(inspect.getsource(constellation_layout)))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "hash" not in called
 
 
 def test_unfilled_vertices_come_back_as_fillers_so_the_shape_still_reads():

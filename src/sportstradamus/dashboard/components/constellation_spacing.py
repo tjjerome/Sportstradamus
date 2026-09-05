@@ -43,13 +43,25 @@ _STAR_GAP_PX = 6  # clear air between two glyphs' bounding circles
 # reaches 1.297, so a crowded edge star settles inward, never along the frame.
 _FRAME_INSET = 0.88
 
-DEFAULT_STARS = 12  # ~ a template's vertex count (5-13, median 10), so the cut fills the shape
-MIN_PER_TEAM = 4  # both halves populated — the both-teams parlay rule, made visual
+DEFAULT_STARS = 20  # the template's vertices plus a field of stars around them; 12 read thin
+MIN_PER_TEAM = 6  # both halves populated — the floors scale with the cap, 4 + 4 is inert under 20
 MAX_PER_PLAYER = 2  # one hot player's five markets must not own the map
 
 CAPTION_TOP_K = 5  # captions for the slip plus the five biggest candidates; the rest hover
 _CHAR_WIDTH_EM = 0.6  # IBM Plex Sans average advance — plotly cannot measure text server-side
 _LINE_HEIGHT_EM = 1.25  # a caption is one line — plotly's single-line box at font_px
+# A hairline between a caption and the glyph it labels: an abutting box differs
+# from the glyph's edge by an ulp and the strict overlap test rejects the star's
+# own caption at random positions.
+_CAPTION_GAP_PX = 1
+# Caption placements in the order tried, as plotly textposition plus the unit
+# shift of the text box from the star: above, below, then beside it.
+_PLACEMENTS = (
+    ("top center", 0.0, 1.0),
+    ("bottom center", 0.0, -1.0),
+    ("middle right", 1.0, 0.0),
+    ("middle left", -1.0, 0.0),
+)
 
 
 def settle(
@@ -61,6 +73,7 @@ def settle(
     side: Mapping[str, float] | None = None,
     frame: tuple[float, float] = (X_RANGE, Y_RANGE),
     exclude: tuple[float, float, float, float] | None = None,
+    candidates: Mapping[str, Sequence[tuple[float, float]]] | None = None,
 ) -> dict[str, tuple[float, float]]:
     """Nearest free lattice cell to each anchor, given the stars already down.
 
@@ -78,6 +91,10 @@ def settle(
             x = 0 is legal for both, mirroring ``constellation_layout._clamp_to_side``.
         frame: the figure's axis ranges; the lattice insets itself inside them.
         exclude: px rectangle ``(x0, y0, x1, y1)`` no star's centre may enter.
+        candidates: key -> further data-unit positions to try in order once the
+            anchor is taken, kept to the float like the anchor itself — a caller
+            that scatters its anchors by seeded draw hands the draws it did not
+            use here, so a crowded star takes another of them before the lattice.
 
     Returns:
         key -> position in data units, for the ``anchors`` keys only.
@@ -107,16 +124,26 @@ def settle(
     placed: dict[str, tuple[float, float]] = {}
     for key, anchor in anchors.items():
         size = sizes[key]
-        x, y = anchor[0] * px[0], anchor[1] * px[1]
-        room = min(
-            (math.dist((x, y), (ox, oy)) - other / 2 - _STAR_GAP_PX for ox, oy, other in occupied),
-            default=math.inf,
-        )
-        banned = (
-            exclude is not None and exclude[0] <= x <= exclude[2] and exclude[1] <= y <= exclude[3]
-        )
-        spot = anchor
-        if room < size / 2 or banned:
+        for trial in (anchor, *(candidates or {}).get(key, ())):
+            x, y = trial[0] * px[0], trial[1] * px[1]
+            room = min(
+                (
+                    math.dist((x, y), (ox, oy)) - other / 2 - _STAR_GAP_PX
+                    for ox, oy, other in occupied
+                ),
+                default=math.inf,
+            )
+            banned = (
+                exclude is not None
+                and exclude[0] <= x <= exclude[2]
+                and exclude[1] <= y <= exclude[3]
+            )
+            if room >= size / 2 and not banned:
+                spot = trial
+                break
+        else:
+            x, y = anchor[0] * px[0], anchor[1] * px[1]
+            spot = anchor
             free = clear >= size / 2
             if side and side.get(key):
                 free &= cells_x * side[key] >= 0
@@ -148,7 +175,7 @@ def default_stars(
 
     ``cap`` bounds the open ranking, not the result: the team floors are filled
     first and keep what they took, so ``per_team`` times the number of teams
-    overshoots ``cap`` when it is set above it (the shipped 4 + 4 sits under 12).
+    overshoots ``cap`` when it is set above it (the shipped 6 + 6 sits under 20).
     """
     ranked = sorted(
         (key for key, leg in universe.items() if is_model_liked(leg)),
@@ -188,9 +215,12 @@ def caption_positions(
 
     The slip's stars come first, then the ``top_k`` biggest candidates — a
     caption marks importance, never selection (that stays fill + opacity, DESIGN
-    §4a). Each tries above the star then below it, and takes the first placement
-    whose text box clears every glyph and every caption already accepted.
+    §4a). Each tries above the star, below it, then beside it, and takes the
+    first placement whose text box stays on the plot and clears every glyph and
+    every caption already accepted — a caption the axis clips loses its first
+    word, which on the phone was the player's name.
     """
+    plot = (-X_RANGE * px[0], -Y_RANGE * px[1], X_RANGE * px[0], Y_RANGE * px[1])
     glyphs = [_box(pos[k][0] * px[0], pos[k][1] * px[1], sizes[k], sizes[k]) for k in keys]
     by_size = sorted(keys, key=lambda k: (-sizes[k], k))
     order = [k for k in by_size if k in active] + [k for k in by_size if k not in active][:top_k]
@@ -199,13 +229,19 @@ def caption_positions(
     captions: dict[str, str] = {}
     for key in order:
         x, y = pos[key][0] * px[0], pos[key][1] * px[1]
+        width = len(labels[key]) * _CHAR_WIDTH_EM * font_px
         height = _LINE_HEIGHT_EM * font_px
-        offset = sizes[key] / 2 + height / 2
-        for placement, direction in (("top center", 1.0), ("bottom center", -1.0)):
+        for placement, dx, dy in _PLACEMENTS:
             box = _box(
-                x, y + direction * offset, len(labels[key]) * _CHAR_WIDTH_EM * font_px, height
+                x + dx * (sizes[key] / 2 + _CAPTION_GAP_PX + width / 2),
+                y + dy * (sizes[key] / 2 + _CAPTION_GAP_PX + height / 2),
+                width,
+                height,
             )
-            if not any(_overlaps(box, other) for other in boxes):
+            on_plot = (
+                plot[0] <= box[0] and plot[1] <= box[1] and box[2] <= plot[2] and box[3] <= plot[3]
+            )
+            if on_plot and not any(_overlaps(box, other) for other in boxes):
                 captions[key] = placement
                 boxes.append(box)
                 break
@@ -218,3 +254,54 @@ def _box(x: float, y: float, width: float, height: float) -> tuple[float, float,
 
 def _overlaps(box: tuple[float, ...], other: tuple[float, ...]) -> bool:
     return box[0] < other[2] and box[2] > other[0] and box[1] < other[3] and box[3] > other[1]
+
+
+def _clash(
+    disc: tuple[float, float, float],
+    label: tuple[float, float, float, float],
+    blocks: tuple[tuple[float, float, float, float], tuple[float, float, float, float]],
+    rects: Sequence[tuple[float, float, float, float]],
+    discs: Sequence[tuple[float, float, float]],
+    frame: tuple[float, float, float, float],
+) -> float:
+    """How much of a throw lands on something already there; 0.0 when it clears.
+
+    ``blocks`` is the map twice: the margin-grown footprint the disc must miss
+    and the bare star box the label must miss. Boxes meet boxes by intersection
+    area and circles by penetration depth — mixed units on purpose, since the sum
+    is only ever read as a ranking between throws in a band too crammed for any
+    of them to clear, and every term goes to zero exactly when the throw is clean.
+    """
+    x, y, radius = disc
+    footprint, core = blocks
+
+    def sink(cx: float, cy: float, reach: float, rect: tuple[float, float, float, float]) -> float:
+        near = (min(max(cx, rect[0]), rect[2]), min(max(cy, rect[1]), rect[3]))
+        return max(reach - math.dist((cx, cy), near), 0.0)
+
+    def outside(rect: tuple[float, float, float, float]) -> float:
+        return sum(
+            max(gap, 0.0)
+            for gap in (
+                frame[0] - rect[0],
+                frame[1] - rect[1],
+                rect[2] - frame[2],
+                rect[3] - frame[3],
+            )
+        )
+
+    def area(
+        one: tuple[float, float, float, float], two: tuple[float, float, float, float]
+    ) -> float:
+        return max(min(one[2], two[2]) - max(one[0], two[0]), 0.0) * max(
+            min(one[3], two[3]) - max(one[1], two[1]), 0.0
+        )
+
+    total = outside((x - radius, y - radius, x + radius, y + radius)) + outside(label)
+    total += sink(x, y, radius, footprint) + area(label, core)
+    for rect in rects:
+        total += sink(x, y, radius, rect) + area(label, rect)
+    for other_x, other_y, other_radius in discs:
+        total += max(radius + other_radius - math.dist((x, y), (other_x, other_y)), 0.0)
+        total += sink(other_x, other_y, other_radius, label)
+    return total

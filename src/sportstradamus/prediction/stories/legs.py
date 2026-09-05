@@ -4,7 +4,9 @@
 or ``sportstradamus.leg_schema.build_leg``) back to the scored offers frame to
 attach each leg's canonical market, game, team, and depth-chart position — the
 fields the archetype engine routes on. ``_stat_category`` maps a market to the
-coarse category the phrase bank is keyed by.
+coarse category the phrase bank is keyed by, and ``narrative_side`` reads the
+market valence the same table sets: both live here because the negative-market
+list is the one place that knowledge is written down.
 """
 
 from __future__ import annotations
@@ -139,6 +141,13 @@ def _stat_category(market: str) -> str:
         if any(n in m for n in needles):
             return cat
     return "production"
+
+
+def narrative_side(leg: Leg) -> str:
+    """The leg's thriving direction: its bet, flipped on a negative market."""
+    if not leg.negative:
+        return leg.bet
+    return "Under" if leg.bet == "Over" else "Over"
 
 
 def lower_leg(row: Mapping) -> dict:

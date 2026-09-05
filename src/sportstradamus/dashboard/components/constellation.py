@@ -24,15 +24,18 @@ tie. Each team's most-connected leg is pinned to its side, so a cross-matchup le
 toward the centre and an unrepresented side leaves its half empty.
 
 Two optional lenses layer onto the same figure (P8 Task C6) instead of living as
-separate expanders below the map; ``constellation_lenses`` draws both:
+separate expanders below the map; ``constellation_deep`` and ``constellation_wider``
+draw one each:
 
 * ``deep_pool`` — "look deeper": the game's remaining legs — the ones the default
   cut left behind, then the model-passed ones — as small stars *inside* the map,
-  each beside the main star it correlates with and carrying its ties. The main
-  stars are held fixed, so revealing the tier can never reshuffle the lit map.
+  sized and lit by edge and scattered by seeded draw into the neighbourhood of the
+  main star each correlates with, carrying its ties. The main stars are held fixed,
+  so revealing the tier can never reshuffle the lit map.
 * ``wider_groups`` — "look wider": the map recedes a little and other games' best
-  legs fill the open sky around it in per-game clusters, team-coloured and
-  labelled with their game key — never a ring around the edge.
+  legs fill the open sky around it in per-game clusters, each thrown by seeded
+  draw into its band, team-coloured and labelled with their game key — never a
+  ring around the edge.
 
 An in-slip leg beyond the default cut is *promoted* rather than laid out: it takes
 the position the deeper lens would have given it and burns as a full star with the
@@ -60,17 +63,15 @@ import networkx as nx
 import pandas as pd
 import plotly.graph_objects as go
 
-from sportstradamus.dashboard.components.constellation_lenses import (
-    _DEEP_ALPHA,
+from sportstradamus.dashboard.components.constellation_deep import (
     _DEEP_COLOR,
-    _SKY_EXTRA_Y_MOBILE,
-    _WIDER_SCALE,
+    DEEP_ALPHA_MIN,
     DEEP_EDGES_PER_STAR,
-    LENS_STAR_SIZE,
-    LENS_STAR_SIZE_MOBILE,
-    WIDER_GAMES,
+    DEEP_SIZE_MAX,
+    DEEP_SIZE_MAX_MOBILE,
+    DEEP_SIZE_MIN,
+    DEEP_SIZE_MIN_MOBILE,
     add_deep_trace,
-    add_wider_layer,
     deep_positions,
     deep_tier,
 )
@@ -93,9 +94,18 @@ from sportstradamus.dashboard.components.constellation_spacing import (
     default_stars,
     settle,
 )
+from sportstradamus.dashboard.components.constellation_wider import (
+    _SKY_EXTRA_Y_MOBILE,
+    _WIDER_SCALE,
+    WIDER_GAMES,
+    WIDER_STAR_SIZE,
+    WIDER_STAR_SIZE_MOBILE,
+    add_wider_layer,
+)
 from sportstradamus.dashboard.legs import corr_key
 from sportstradamus.dashboard.theme import GOLD, GRAY, team_colors, team_name
-from sportstradamus.leg_schema import leg_field
+from sportstradamus.helpers import market_display_name
+from sportstradamus.leg_schema import leg_field, leg_field_float
 
 _NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 
@@ -146,23 +156,34 @@ def _bet_word(bet) -> str:
     return "Over" if str(bet).lower().startswith("o") else "Under"
 
 
+def _market_name(leg: Mapping) -> str:
+    """The Board's name for this leg's market, resolved per leg.
+
+    The *wider* lens can put two leagues' games on one map, and the same slug
+    reads differently in each.
+    """
+    return market_display_name(
+        str(leg_field(leg, "league", "") or ""), str(leg_field(leg, "market"))
+    )
+
+
 def star_label(leg: Mapping) -> str:
-    """Compact star caption: ``Lastname MKT o/u Line`` (e.g. ``Brunson PTS o25.5``).
+    """Compact star caption: ``Lastname Market o/u Line`` (e.g. ``Brunson Points o25.5``).
 
     ``leg`` is a canonical lowercase leg or a raw uppercase ``current_offers``
     row — ``leg_field`` bridges the two shapes (the constellation draws both a
     game's candidate pool and the slip's own legs on one map).
     """
     ou = "o" if _bet_word(leg_field(leg, "bet")) == "Over" else "u"
-    return f"{_last_name(str(leg_field(leg, 'player')))} {leg_field(leg, 'market')} {ou}{float(leg_field(leg, 'line')):.10g}"
+    return f"{_last_name(str(leg_field(leg, 'player')))} {_market_name(leg)} {ou}{float(leg_field(leg, 'line')):.10g}"
 
 
 def _hover_text(leg: Mapping) -> str:
-    p = float(leg_field(leg, "win_prob", 0.0) or 0.0)
-    boost = float(leg_field(leg, "boost", 1.0) or 1.0)
-    k = float(leg_field(leg, "kelly", 0.0) or 0.0)
+    p = leg_field_float(leg, "win_prob")
+    boost = leg_field_float(leg, "boost", 1.0)
+    k = leg_field_float(leg, "kelly")
     head = (
-        f"{leg_field(leg, 'player')} — {leg_field(leg, 'market')} "
+        f"{leg_field(leg, 'player')} — {_market_name(leg)} "
         f"{_bet_word(leg_field(leg, 'bet'))} {float(leg_field(leg, 'line')):.10g}"
     )
     return f"{head}<br>Win {p:.0%} · {boost:.2f}x · Kelly {k:.0%}"
@@ -172,12 +193,12 @@ def _card_fields(leg: Mapping) -> list:
     """Structured fields the hover card reads from a node's ``customdata`` (after the key)."""
     return [
         str(leg_field(leg, "player")),
-        str(leg_field(leg, "market")),
+        _market_name(leg),
         _bet_word(leg_field(leg, "bet")),
         float(leg_field(leg, "line")),
-        float(leg_field(leg, "win_prob", 0.0) or 0.0),
-        float(leg_field(leg, "boost", 1.0) or 1.0),
-        float(leg_field(leg, "kelly", 0.0) or 0.0),
+        leg_field_float(leg, "win_prob"),
+        leg_field_float(leg, "boost", 1.0),
+        leg_field_float(leg, "kelly"),
     ]
 
 
@@ -185,7 +206,7 @@ def _node_info(leg: Mapping) -> dict:
     return {
         "label": star_label(leg),
         "team": leg_field(leg, "team"),
-        "edge": float(leg_field(leg, "kelly", 0.0) or 0.0),
+        "edge": leg_field_float(leg, "kelly"),
         "hover": _hover_text(leg),
         "card": _card_fields(leg),
     }
@@ -241,17 +262,26 @@ def constellation_figure(
     team_color = {team: team_colors(league, team)[0] for team in teams}
     rho = rho_map(corr, game)
     edges = game_edges(keys, rho)
-    floor, label_size, shape_scale, px, lens_size, sky_y = (
+    floor, label_size, shape_scale, px, lens_size, deep_span, sky_y = (
         (
             _SIZE_MIN_MOBILE,
             _LABEL_FONT_SIZE_MOBILE,
             SHAPE_SCALE_MOBILE,
             PX_PER_UNIT_MOBILE,
-            LENS_STAR_SIZE_MOBILE,
+            WIDER_STAR_SIZE_MOBILE,
+            (DEEP_SIZE_MIN_MOBILE, DEEP_SIZE_MAX_MOBILE),
             Y_RANGE + _SKY_EXTRA_Y_MOBILE,
         )
         if mobile
-        else (_SIZE_MIN, _LABEL_FONT_SIZE, SHAPE_SCALE, PX_PER_UNIT, LENS_STAR_SIZE, Y_RANGE)
+        else (
+            _SIZE_MIN,
+            _LABEL_FONT_SIZE,
+            SHAPE_SCALE,
+            PX_PER_UNIT,
+            WIDER_STAR_SIZE,
+            (DEEP_SIZE_MIN, DEEP_SIZE_MAX),
+            Y_RANGE,
+        )
     )
     pos, fillers = _positions(
         keys,
@@ -261,7 +291,7 @@ def constellation_figure(
         shape,
         shape_scale,
     )
-    sizes = _star_sizes(keys, info, floor=floor)
+    sizes = _edge_scale(keys, info, floor=floor)
     focus_scale = _WIDER_SCALE if wider_groups is not None else 1.0
     # Biggest first: a top-Kelly star keeps its vertex to the float, and only what
     # would collide with it moves, never across its own team's half of the axis.
@@ -290,7 +320,7 @@ def constellation_figure(
         team_color=team_color,
         px=px,
         floor=floor,
-        lens_size=lens_size,
+        deep_span=deep_span,
     )
     keys += promoted
     captions = caption_positions(
@@ -358,7 +388,7 @@ def _add_deep_layer(
     team_color: dict[str, str],
     px: tuple[float, float],
     floor: float,
-    lens_size: float,
+    deep_span: tuple[float, float],
 ) -> list[str]:
     """Draw the deeper lens and return the slip legs it promotes to full stars.
 
@@ -370,9 +400,11 @@ def _add_deep_layer(
     on the lens itself, so a lens-off figure with nothing beyond the cut stays
     byte-identical to today's.
 
-    Recomputing ``_star_sizes`` over the promoted legs cannot move a main star's
+    Recomputing ``_edge_scale`` over the promoted legs cannot move a main star's
     size: the top-Kelly leg is always inside the default cut, so the scale's
-    denominator is the one ``settle`` already spaced against.
+    denominator is the one ``settle`` already spaced against. ``deep_span`` is the
+    lens tier's own size band, scaled over the tier's own strongest leg, so the
+    two scales never share a denominator.
     """
     if deep_pool is not None:
         info |= {
@@ -386,7 +418,10 @@ def _add_deep_layer(
     promoted = [key for key in tier if key in active]
     deep = [key for key in tier if key not in active] if deep_pool is not None else []
     drawn = promoted + deep
-    sizes |= dict.fromkeys(deep, lens_size) | _star_sizes(keys + promoted, info, floor=floor)
+    lo, hi = deep_span
+    sizes |= _edge_scale(deep, info, floor=lo, ceiling=hi) | _edge_scale(
+        keys + promoted, info, floor=floor
+    )
     ties = game_edges(keys + drawn, rho)
     pos |= deep_positions(
         drawn,
@@ -397,12 +432,13 @@ def _add_deep_layer(
         teams,
         px,
     )
+    alphas = _edge_scale(deep, info, floor=DEEP_ALPHA_MIN, ceiling=_INACTIVE_ALPHA)
     add_deep_trace(
         fig,
         deep,
         pos,
         info,
-        size=lens_size,
+        sizes=sizes,
         # A liked leg the cut left behind is a candidate, just smaller; only the
         # model-passed tier wears the lens's own gray.
         colors=[
@@ -411,7 +447,7 @@ def _add_deep_layer(
             else _DEEP_COLOR
             for k in deep
         ],
-        alphas=[_INACTIVE_ALPHA if info[k]["edge"] > 0 else _DEEP_ALPHA for k in deep],
+        alphas=[alphas[k] for k in deep],
     )
     _add_lens_edges(
         fig,
@@ -481,14 +517,20 @@ def _capped_deep_ties(edges: list[tuple[str, str, float]], deep: set[str]) -> se
     }
 
 
-def _star_sizes(
-    keys: list[str], info: dict[str, dict], *, floor: float = _SIZE_MIN
+def _edge_scale(
+    keys: list[str], info: dict[str, dict], *, floor: float, ceiling: float = _SIZE_MAX
 ) -> dict[str, float]:
-    """Per-node star size ∝ Kelly edge, relative to the game's strongest leg."""
+    """Per-node value in ``[floor, ceiling]`` ∝ Kelly edge, over the strongest of ``keys``.
+
+    Star size on the main map, size *and* opacity on the deeper lens's own tier —
+    one scale so the two tiers rank themselves the same way at different volumes.
+    A model-passed leg (edge ≤ 0) sits at the floor rather than below it, and a
+    set with nothing positive in it is flat there.
+    """
     top = max((info[k]["edge"] for k in keys), default=0.0)
     if top <= 0:
         return dict.fromkeys(keys, float(floor))
-    span = _SIZE_MAX - floor
+    span = ceiling - floor
     return {k: floor + max(info[k]["edge"], 0.0) / top * span for k in keys}
 
 
@@ -545,9 +587,7 @@ def _pool_field(
     names the matching canonical-leg key (``"game"`` / ``"league"``). Reads the raw
     pool column directly rather than bridging through ``leg_field``: a single
     ``Game`` key never spans two leagues (team codes don't collide across leagues),
-    so the first non-null value is always right, and ``leg_schema._FIELD_TO_OFFER_COL``
-    deliberately excludes ``"league"`` (every existing call site holds a canonical
-    leg for that field, never a raw offer row).
+    so the first non-null value is always right.
     """
     if pool is not None and not pool.empty and column in pool.columns:
         values = pool[column].dropna()
