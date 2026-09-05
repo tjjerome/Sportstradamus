@@ -1,7 +1,7 @@
 """Pins for ``dashboard.components.glyphs`` — the unified game-shape glyph set.
 
-Five bespoke celestial SVGs (comet/supernova/scales/cloud/hourglass), one per
-``current_game_context.shape`` value; unknown/empty shapes fall back to the cloud.
+Five bespoke celestial SVGs (comet/supernova/scales/nebula/hourglass), one per
+``current_game_context.shape`` value; unknown/empty shapes fall back to the nebula.
 No Streamlit, no I/O — pure string construction, so it unit-tests directly.
 """
 
@@ -19,11 +19,11 @@ def test_all_five_shapes_resolve_to_svg():
         assert "<svg" in game_shape_glyph(shape)
 
 
-def test_unknown_shape_falls_back_to_cloud():
+def test_unknown_shape_falls_back_to_nebula():
     assert game_shape_glyph("nonsense") == game_shape_glyph("even")
 
 
-def test_empty_shape_falls_back_to_cloud():
+def test_empty_shape_falls_back_to_nebula():
     assert game_shape_glyph("") == game_shape_glyph("even")
 
 
