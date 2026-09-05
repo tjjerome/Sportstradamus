@@ -76,11 +76,13 @@ _UNIT_GROUP_DISPLAY = {
 
 # Archetype firing gates (named per CLAUDE.md §9). A player must hold a *unique*
 # leg majority of at least _PLAYER_MIN_LEGS; a stack needs _STACK_MIN_LEGS
-# correlated legs averaging at least _STACK_MEAN_RHO; a unit needs
-# _UNIT_MIN_LEGS legs in one (team, group, direction) whose matchup edge clears
-# _UNIT_EDGE_FLOOR (the same 0.05 floor the per-offer "why" uses).
+# correlated legs across at least _STACK_MIN_PLAYERS players, averaging at
+# least _STACK_MEAN_RHO; a unit needs _UNIT_MIN_LEGS legs in one (team, group,
+# direction) whose matchup edge clears _UNIT_EDGE_FLOOR (the same 0.05 floor
+# the per-offer "why" uses).
 _PLAYER_MIN_LEGS: int = 2
 _STACK_MIN_LEGS: int = 3
+_STACK_MIN_PLAYERS: int = 2
 _STACK_MEAN_RHO: float = 0.10
 _UNIT_MIN_LEGS: int = 2
 _UNIT_EDGE_FLOOR: float = 0.05
@@ -120,7 +122,7 @@ def _try_player(legs: Sequence[Leg], label: str) -> dict | None:
 
 
 def _try_stack(legs: Sequence[Leg], ctx: GameCtx | None, label: str) -> dict | None:
-    if ctx is None or len(legs) < _STACK_MIN_LEGS or _distinct_players(legs) < 2:
+    if ctx is None or len(legs) < _STACK_MIN_LEGS or _distinct_players(legs) < _STACK_MIN_PLAYERS:
         return None
     if _mean_rho(legs, ctx) < _STACK_MEAN_RHO:
         return None
@@ -244,7 +246,7 @@ def _modal_side(legs: Sequence[Leg]) -> str:
 
 def _unit_groups(legs: Sequence[Leg]) -> Counter:
     """Count legs per ``(team, position-group, direction)`` — a unit candidate."""
-    groups: Counter = Counter()
+    groups = Counter()
     for leg in legs:
         if leg.team and leg.position:
             groups[(leg.team, _pos_group(leg.position), leg.bet)] += 1
