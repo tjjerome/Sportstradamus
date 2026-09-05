@@ -436,6 +436,37 @@ devel-bound PR; research-analyst only if a stage turns into a modeling question 
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
+- 2026-09-05 · **Twenty stars, board names, night-sky lenses, calm-analyst voice** · Owner pass on
+  the 12-star round: too few stars, raw market slugs on the stars, a deep tier laid out on a grid,
+  wider clusters each "assigned a specific location", and stories with no personality. **Map:**
+  `DEFAULT_STARS` 12 → 20 (`MIN_PER_TEAM` 6, ≤ 2 per player); a template's overflow is a field of
+  best-candidate darts in its side's padded box (`constellation_layout.py`); a caption may sit
+  beside its star and must sit whole on the plot (live: "enry Receptions o1.5" clipped on the
+  phone). **Names:** `star_label`, hover and card read `market_display_name`; every fantasy slug
+  displays "Fantasy Points" (`market_display.json`, 7 slugs). **Lenses:** `constellation_lenses.py`
+  split into `constellation_deep.py` + `constellation_wider.py`. *Deeper*: md5-seeded darts in
+  `DEEP_RINGS` expanding rings past the main's clear air, own main's ground first, handed to
+  `settle(candidates=)` so only a star whose rings are full takes the lattice; size 7–13 (phone
+  12–20) and alpha 0.25–0.60 both scale with edge, passes at the floor, always under the main
+  floor. *Wider*: per-game seeded dart throw with label-aware rejection and a least-overlap
+  fallback; a side band is sky when it holds the tightest disc, a band above or below when it
+  holds that disc plus the label hanging under it; a label may use the map's margin, never its
+  stars; the sky grows to the stacked height. **Stories:** `STORIES_VERSION` p4; the voice bank
+  re-authored under [docs/story_voice.md](../story_voice.md) (calm analyst: 5 voices, 331 cells,
+  2,275 variants); Mixed headlines name what climbs and what settles through engine-supplied
+  `{up}`/`{down}` clauses (`stories/effects.py`, `stat_words.json`); every headline capitalized,
+  no em-dash or semicolon, a closing period only after a second sentence; deks toned; the
+  per-offer Why left alone by owner scope. **Live probe** (COL/STL MLB 25 liked, BAL/IND NFL 14
+  liked; desktop + phone): 20 stars both teams ≤ 2 per player, clearance held, every caption and
+  card a display name ("Fantasy Points" on the Liberatore leg), deep sizes and alphas by edge with
+  passes at the floor, mains never move, deep lattice share 20/69 desktop and 28/69 phone (was 44
+  and 66 before the rings), 36 sky stars in 6 games at radial spread 0.42–0.60, labels clear every
+  foreign star, 0 page errors, phone iframe = figure + 158. Residual: one phone band in four lands
+  near an even pitch by its draw (gap CV 0.06–0.10), and the desktop's three-per-band stacks fill
+  their band's height, so their randomness is x-jitter and reach. Open: `constellation_wider.py`
+  450 lines (`_clash` is spacing geometry) and `constellation.py` 805; the NFL `{grp}` display
+  word; football `stops` cells no route reaches; the spacing module docstring predates captions.
+
 - 2026-09-04 · **Tonight stories, constellation readability, lenses, Clouded** · Owner pass after a
   `sync_from_prod.sh`: 12 of 15 MLB cards read "thin edges" on 20–77 favored legs, COL/STL's
   shootout story said "low ceiling — fade the scoring", its constellation was a 117-star blob, both
