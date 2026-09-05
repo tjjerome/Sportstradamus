@@ -1,10 +1,11 @@
 """Pins for the constellation's *look deeper* lens — the remaining legs, inside the map.
 
 *Look deeper* fades the game's remaining legs in as small stars **inside** the
-constellation — each beside the main star it correlates with, or in its own
-team's open space — with their ties drawn and no main star moved. These assert
-that geometry: the ties a deep star follows, the half it may not leave, the
-clearance and frame it keeps, and the cut it makes visible.
+constellation — each scattered into the neighbourhood of the main star it
+correlates with, or of one in its own team's open space — with their ties drawn
+and no main star moved. These assert that geometry: the ties a deep star follows,
+the half it may not leave, the clearance and frame it keeps, the scatter that
+keeps the tier off ``settle``'s lattice, and the cut it makes visible.
 """
 
 from __future__ import annotations
@@ -19,9 +20,14 @@ from sportstradamus.dashboard.components.constellation import (
     _SIZE_MIN,
     constellation_figure,
 )
-from sportstradamus.dashboard.components.constellation_deep import DEEP_EDGES_PER_STAR
+from sportstradamus.dashboard.components.constellation_deep import (
+    DEEP_ALPHA_MIN,
+    DEEP_EDGES_PER_STAR,
+    DEEP_SIZE_MIN,
+)
 from sportstradamus.dashboard.components.constellation_slate import DECORATION
 from sportstradamus.dashboard.components.constellation_spacing import (
+    _CELL_PX,
     _FRAME_INSET,
     _STAR_GAP_PX,
     DEFAULT_STARS,
@@ -94,6 +100,25 @@ def test_a_correlated_deep_star_sits_beside_its_tie_not_the_other_main_star():
     )
 
 
+def test_a_deep_star_stays_nearer_its_main_than_any_other():
+    """The scatter is bounded by the reading it must not break. A star that drifted
+    past halfway to the next main would read as *that* star's satellite, so the throw
+    band stops inside half the gap and the tie survives however the dart falls."""
+    tied = dict(zip("012345", "ABCDEF", strict=True))
+    pool = pd.DataFrame(
+        [_row(main, ("NYK", "SAS")[i % 2], 0.5 - i / 100) for i, main in enumerate(tied.values())]
+    )
+    deep_pool = pd.DataFrame(
+        [_row(f"D{i}", ("NYK", "SAS")[i % 2], -0.1 - i / 100) for i in range(len(tied))]
+    )
+    corr = _corr(*[(_key(main), _key(f"D{i}"), 0.6) for i, main in tied.items()])
+    stars = _stars(constellation_figure([], corr, pool, deep_pool=deep_pool))
+    mains = {_key(main): stars[_key(main)][0] for main in tied.values()}
+    for i, main in tied.items():
+        deep = stars[_key(f"D{i}")][0]
+        assert min(mains, key=lambda m: _apart(deep, mains[m], PX_PER_UNIT)) == _key(main)
+
+
 def test_uncorrelated_deep_stars_stay_in_their_teams_half():
     """A star that drifted across the team axis would read as the other team's leg."""
     pool = pd.DataFrame([_row("A", "NYK", 0.4), _row("Z", "SAS", 0.35)])
@@ -123,6 +148,51 @@ def test_deep_stars_never_leave_the_frame():
     )
     for (x, y), _ in _stars(constellation_figure([], None, pool, deep_pool=deep_pool)).values():
         assert abs(x) <= X_RANGE * _FRAME_INSET and abs(y) <= Y_RANGE * _FRAME_INSET
+
+
+def _on_lattice(value: float, origin: float) -> bool:
+    """Is ``value`` px on one of ``settle``'s cell lines, counting from ``origin``?"""
+    offset = (value - origin) % _CELL_PX
+    return min(offset, _CELL_PX - offset) < 1e-6
+
+
+def test_deep_stars_do_not_sit_on_the_lattice():
+    """The grid the owner saw: every deep star snapped to a 6 px cell drew concentric
+    rings of identical dots around each main. A star with room now keeps its own
+    seeded throw, and only the crowded remainder falls back to the lattice."""
+    pool = pd.DataFrame([_row("A", "NYK", 0.4), _row("Z", "SAS", 0.35)])
+    deep_pool = pd.DataFrame(
+        [_row(f"D{i:02d}", ("NYK", "SAS")[i % 2], -0.1 - i / 100) for i in range(24)]
+    )
+    stars = _stars(constellation_figure([], None, pool, deep_pool=deep_pool), "deep")
+    origin = (-X_RANGE * _FRAME_INSET * PX_PER_UNIT[0], -Y_RANGE * _FRAME_INSET * PX_PER_UNIT[1])
+    snapped = [
+        key
+        for key, ((x, y), _) in stars.items()
+        if _on_lattice(x * PX_PER_UNIT[0], origin[0]) and _on_lattice(y * PX_PER_UNIT[1], origin[1])
+    ]
+    assert len(stars) == 24
+    assert len(snapped) < len(stars) / 2, snapped
+
+
+def test_deep_star_size_and_opacity_follow_edge():
+    """Edge reads twice on a lens star — a stronger leg is both bigger and brighter —
+    so the tier carries its own ranking at a volume the main map still wins. Every
+    model-passed leg sits at the floor of both, however far under zero its edge is."""
+    pool = pd.DataFrame([_row("A", "NYK", 0.4), _row("Z", "SAS", 0.35)])
+    weakest_first = [("X1", -5.0), ("X0", -0.1), ("L2", 0.1), ("L1", 0.2), ("L0", 0.3)]
+    deep_pool = pd.DataFrame(
+        [_row(name, ("NYK", "SAS")[i % 2], kelly) for i, (name, kelly) in enumerate(weakest_first)]
+    )
+    fig = constellation_figure([], None, pool, deep_pool=deep_pool)
+    trace = next(t for t in fig.data if t.name == "deep")
+    size = dict(zip((cd[0] for cd in trace.customdata), trace.marker.size, strict=True))
+    alpha = dict(zip((cd[0] for cd in trace.customdata), trace.marker.opacity, strict=True))
+    by_edge = [_key(name) for name, _ in weakest_first]
+    assert [size[key] for key in by_edge] == sorted(size[key] for key in by_edge)
+    assert [alpha[key] for key in by_edge] == sorted(alpha[key] for key in by_edge)
+    assert size[_key("X1")] == size[_key("X0")] == DEEP_SIZE_MIN
+    assert alpha[_key("X1")] == alpha[_key("X0")] == DEEP_ALPHA_MIN
 
 
 def test_liked_legs_beyond_the_cut_are_drawn_only_under_the_lens():

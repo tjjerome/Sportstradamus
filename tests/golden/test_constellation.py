@@ -31,7 +31,12 @@ from sportstradamus.dashboard.components.constellation import (
     _SIZE_MIN_MOBILE,
     constellation_figure,
 )
-from sportstradamus.dashboard.components.constellation_deep import _DEEP_ALPHA, _DEEP_COLOR
+from sportstradamus.dashboard.components.constellation_deep import (
+    _DEEP_COLOR,
+    DEEP_ALPHA_MIN,
+    DEEP_SIZE_MIN,
+    DEEP_SIZE_MIN_MOBILE,
+)
 from sportstradamus.dashboard.components.constellation_shapes import shape_catalog
 from sportstradamus.dashboard.components.constellation_slate import (
     DECORATION,
@@ -381,14 +386,18 @@ def test_deep_stars_take_their_ties_to_main_stars():
 
 
 def test_deep_tier_colors_split_liked_from_passed():
-    """One size, two readings: a liked leg the cut left behind is a candidate, just
-    smaller; only the model-passed tier wears the lens's own gray."""
+    """Two readings: a liked leg the cut left behind is a candidate, just smaller and
+    dimmer; only the model-passed tier wears the lens's own gray, at the floor alpha
+    that keeps it present without competing with the lit map."""
     fig = constellation_figure(
         [], None, _ladder(DEFAULT_STARS + 1), deep_pool=_pool(("D|PTS|Under", -0.1))
     )
     deep = _trace(fig, "deep")
     assert [cd[0] for cd in deep.customdata] == [f"P{DEFAULT_STARS}|PTS|Over", "D|PTS|Under"]
-    assert list(deep.marker.opacity) == [_INACTIVE_ALPHA, _DEEP_ALPHA]
+    liked, passed = deep.marker.opacity
+    assert liked > passed
+    assert passed == DEEP_ALPHA_MIN
+    assert all(alpha <= _INACTIVE_ALPHA for alpha in deep.marker.opacity)
     assert deep.marker.color[1] == _DEEP_COLOR
     assert all(color not in (GRAY, GOLD) for color in deep.marker.color)
 
@@ -417,12 +426,19 @@ def test_deep_pool_does_not_move_existing_stars():
         assert with_deep[key] == xy
 
 
-def test_deep_pool_star_sizes_are_uniform_not_kelly_scaled():
-    deep_pool = _pool(("D|PTS|Under", -0.1), ("E|AST|Over", -5.0))
-    fig = constellation_figure([], _corr(), _pool(("A|PTS|Over", 0.4)), deep_pool=deep_pool)
-    deep = _trace(fig, "deep")
-    assert len(set(deep.marker.size)) == 1  # flat size, unlike the Kelly-scaled active/candidate
-    assert deep.marker.size[0] < _SIZE_MIN  # and under the floor, so it never outranks a real star
+def test_deep_pool_star_sizes_scale_with_edge_under_the_main_floor():
+    """The tier ranks itself the way the map does — edge sets a lens star's size — in
+    a band that starts over the engraving's fillers and ends under the main floor, so
+    the strongest thing behind the cut still never outranks the weakest star on it."""
+    pool = _ladder(DEFAULT_STARS + 1)
+    deep_pool = pd.concat([pool, _pool(("D|PTS|Under", -0.1), ("E|AST|Over", -5.0))])
+    deep = _trace(constellation_figure([], None, pool, deep_pool=deep_pool), "deep")
+    size = dict(zip((cd[0] for cd in deep.customdata), deep.marker.size, strict=True))
+    assert size[f"P{DEFAULT_STARS}|PTS|Over"] > size["D|PTS|Under"]
+    assert size["D|PTS|Under"] == size["E|AST|Over"] == DEEP_SIZE_MIN  # both passes, both floored
+    assert all(FILLER_SIZE < px < _SIZE_MIN for px in size.values())
+    phone = _trace(constellation_figure([], None, pool, deep_pool=deep_pool, mobile=True), "deep")
+    assert all(DEEP_SIZE_MIN_MOBILE <= px < _SIZE_MIN_MOBILE for px in phone.marker.size)
 
 
 def test_deep_pool_positions_are_deterministic_across_calls():

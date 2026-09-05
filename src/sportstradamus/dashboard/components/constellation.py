@@ -29,8 +29,9 @@ draw one each:
 
 * ``deep_pool`` — "look deeper": the game's remaining legs — the ones the default
   cut left behind, then the model-passed ones — as small stars *inside* the map,
-  each beside the main star it correlates with and carrying its ties. The main
-  stars are held fixed, so revealing the tier can never reshuffle the lit map.
+  sized and lit by edge and scattered by seeded draw into the neighbourhood of the
+  main star each correlates with, carrying its ties. The main stars are held fixed,
+  so revealing the tier can never reshuffle the lit map.
 * ``wider_groups`` — "look wider": the map recedes a little and other games' best
   legs fill the open sky around it in per-game clusters, team-coloured and
   labelled with their game key — never a ring around the edge.
@@ -62,9 +63,13 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from sportstradamus.dashboard.components.constellation_deep import (
-    _DEEP_ALPHA,
     _DEEP_COLOR,
+    DEEP_ALPHA_MIN,
     DEEP_EDGES_PER_STAR,
+    DEEP_SIZE_MAX,
+    DEEP_SIZE_MAX_MOBILE,
+    DEEP_SIZE_MIN,
+    DEEP_SIZE_MIN_MOBILE,
     add_deep_trace,
     deep_positions,
     deep_tier,
@@ -244,17 +249,26 @@ def constellation_figure(
     team_color = {team: team_colors(league, team)[0] for team in teams}
     rho = rho_map(corr, game)
     edges = game_edges(keys, rho)
-    floor, label_size, shape_scale, px, lens_size, sky_y = (
+    floor, label_size, shape_scale, px, lens_size, deep_span, sky_y = (
         (
             _SIZE_MIN_MOBILE,
             _LABEL_FONT_SIZE_MOBILE,
             SHAPE_SCALE_MOBILE,
             PX_PER_UNIT_MOBILE,
             WIDER_STAR_SIZE_MOBILE,
+            (DEEP_SIZE_MIN_MOBILE, DEEP_SIZE_MAX_MOBILE),
             Y_RANGE + _SKY_EXTRA_Y_MOBILE,
         )
         if mobile
-        else (_SIZE_MIN, _LABEL_FONT_SIZE, SHAPE_SCALE, PX_PER_UNIT, WIDER_STAR_SIZE, Y_RANGE)
+        else (
+            _SIZE_MIN,
+            _LABEL_FONT_SIZE,
+            SHAPE_SCALE,
+            PX_PER_UNIT,
+            WIDER_STAR_SIZE,
+            (DEEP_SIZE_MIN, DEEP_SIZE_MAX),
+            Y_RANGE,
+        )
     )
     pos, fillers = _positions(
         keys,
@@ -264,7 +278,7 @@ def constellation_figure(
         shape,
         shape_scale,
     )
-    sizes = _star_sizes(keys, info, floor=floor)
+    sizes = _edge_scale(keys, info, floor=floor)
     focus_scale = _WIDER_SCALE if wider_groups is not None else 1.0
     # Biggest first: a top-Kelly star keeps its vertex to the float, and only what
     # would collide with it moves, never across its own team's half of the axis.
@@ -293,7 +307,7 @@ def constellation_figure(
         team_color=team_color,
         px=px,
         floor=floor,
-        lens_size=lens_size,
+        deep_span=deep_span,
     )
     keys += promoted
     captions = caption_positions(
@@ -361,7 +375,7 @@ def _add_deep_layer(
     team_color: dict[str, str],
     px: tuple[float, float],
     floor: float,
-    lens_size: float,
+    deep_span: tuple[float, float],
 ) -> list[str]:
     """Draw the deeper lens and return the slip legs it promotes to full stars.
 
@@ -373,9 +387,11 @@ def _add_deep_layer(
     on the lens itself, so a lens-off figure with nothing beyond the cut stays
     byte-identical to today's.
 
-    Recomputing ``_star_sizes`` over the promoted legs cannot move a main star's
+    Recomputing ``_edge_scale`` over the promoted legs cannot move a main star's
     size: the top-Kelly leg is always inside the default cut, so the scale's
-    denominator is the one ``settle`` already spaced against.
+    denominator is the one ``settle`` already spaced against. ``deep_span`` is the
+    lens tier's own size band, scaled over the tier's own strongest leg, so the
+    two scales never share a denominator.
     """
     if deep_pool is not None:
         info |= {
@@ -389,7 +405,10 @@ def _add_deep_layer(
     promoted = [key for key in tier if key in active]
     deep = [key for key in tier if key not in active] if deep_pool is not None else []
     drawn = promoted + deep
-    sizes |= dict.fromkeys(deep, lens_size) | _star_sizes(keys + promoted, info, floor=floor)
+    lo, hi = deep_span
+    sizes |= _edge_scale(deep, info, floor=lo, ceiling=hi) | _edge_scale(
+        keys + promoted, info, floor=floor
+    )
     ties = game_edges(keys + drawn, rho)
     pos |= deep_positions(
         drawn,
@@ -400,12 +419,13 @@ def _add_deep_layer(
         teams,
         px,
     )
+    alphas = _edge_scale(deep, info, floor=DEEP_ALPHA_MIN, ceiling=_INACTIVE_ALPHA)
     add_deep_trace(
         fig,
         deep,
         pos,
         info,
-        size=lens_size,
+        sizes=sizes,
         # A liked leg the cut left behind is a candidate, just smaller; only the
         # model-passed tier wears the lens's own gray.
         colors=[
@@ -414,7 +434,7 @@ def _add_deep_layer(
             else _DEEP_COLOR
             for k in deep
         ],
-        alphas=[_INACTIVE_ALPHA if info[k]["edge"] > 0 else _DEEP_ALPHA for k in deep],
+        alphas=[alphas[k] for k in deep],
     )
     _add_lens_edges(
         fig,
@@ -484,14 +504,20 @@ def _capped_deep_ties(edges: list[tuple[str, str, float]], deep: set[str]) -> se
     }
 
 
-def _star_sizes(
-    keys: list[str], info: dict[str, dict], *, floor: float = _SIZE_MIN
+def _edge_scale(
+    keys: list[str], info: dict[str, dict], *, floor: float, ceiling: float = _SIZE_MAX
 ) -> dict[str, float]:
-    """Per-node star size ∝ Kelly edge, relative to the game's strongest leg."""
+    """Per-node value in ``[floor, ceiling]`` ∝ Kelly edge, over the strongest of ``keys``.
+
+    Star size on the main map, size *and* opacity on the deeper lens's own tier —
+    one scale so the two tiers rank themselves the same way at different volumes.
+    A model-passed leg (edge ≤ 0) sits at the floor rather than below it, and a
+    set with nothing positive in it is flat there.
+    """
     top = max((info[k]["edge"] for k in keys), default=0.0)
     if top <= 0:
         return dict.fromkeys(keys, float(floor))
-    span = _SIZE_MAX - floor
+    span = ceiling - floor
     return {k: floor + max(info[k]["edge"], 0.0) / top * span for k in keys}
 
 
