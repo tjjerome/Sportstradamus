@@ -98,6 +98,7 @@ from sportstradamus.dashboard.components.constellation_wider import (
 )
 from sportstradamus.dashboard.legs import corr_key
 from sportstradamus.dashboard.theme import GOLD, GRAY, team_colors, team_name
+from sportstradamus.helpers import market_display_name
 from sportstradamus.leg_schema import leg_field
 
 _NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
@@ -149,15 +150,26 @@ def _bet_word(bet) -> str:
     return "Over" if str(bet).lower().startswith("o") else "Under"
 
 
+def _market_name(leg: Mapping) -> str:
+    """The Board's name for this leg's market, resolved per leg.
+
+    The *wider* lens can put two leagues' games on one map, and the same slug
+    reads differently in each.
+    """
+    return market_display_name(
+        str(leg_field(leg, "league", "") or ""), str(leg_field(leg, "market"))
+    )
+
+
 def star_label(leg: Mapping) -> str:
-    """Compact star caption: ``Lastname MKT o/u Line`` (e.g. ``Brunson PTS o25.5``).
+    """Compact star caption: ``Lastname Market o/u Line`` (e.g. ``Brunson Points o25.5``).
 
     ``leg`` is a canonical lowercase leg or a raw uppercase ``current_offers``
     row — ``leg_field`` bridges the two shapes (the constellation draws both a
     game's candidate pool and the slip's own legs on one map).
     """
     ou = "o" if _bet_word(leg_field(leg, "bet")) == "Over" else "u"
-    return f"{_last_name(str(leg_field(leg, 'player')))} {leg_field(leg, 'market')} {ou}{float(leg_field(leg, 'line')):.10g}"
+    return f"{_last_name(str(leg_field(leg, 'player')))} {_market_name(leg)} {ou}{float(leg_field(leg, 'line')):.10g}"
 
 
 def _hover_text(leg: Mapping) -> str:
@@ -165,7 +177,7 @@ def _hover_text(leg: Mapping) -> str:
     boost = float(leg_field(leg, "boost", 1.0) or 1.0)
     k = float(leg_field(leg, "kelly", 0.0) or 0.0)
     head = (
-        f"{leg_field(leg, 'player')} — {leg_field(leg, 'market')} "
+        f"{leg_field(leg, 'player')} — {_market_name(leg)} "
         f"{_bet_word(leg_field(leg, 'bet'))} {float(leg_field(leg, 'line')):.10g}"
     )
     return f"{head}<br>Win {p:.0%} · {boost:.2f}x · Kelly {k:.0%}"
@@ -175,7 +187,7 @@ def _card_fields(leg: Mapping) -> list:
     """Structured fields the hover card reads from a node's ``customdata`` (after the key)."""
     return [
         str(leg_field(leg, "player")),
-        str(leg_field(leg, "market")),
+        _market_name(leg),
         _bet_word(leg_field(leg, "bet")),
         float(leg_field(leg, "line")),
         float(leg_field(leg, "win_prob", 0.0) or 0.0),
