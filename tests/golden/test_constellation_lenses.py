@@ -377,10 +377,13 @@ def test_sky_labels_never_land_on_another_games_group():
     """A vertical band stacks its games, and a label hangs below its own. With the
     slots spaced on the cluster alone the label fell into the group beneath it —
     measured on the desktop at two labels 10.6 px apart and a label over a
-    neighbour's star by 8.7 px, both unreadable."""
-    for names in (
-        ["CIN/CLE", "LAA/LAD", "PHI/PIT"],
-        ["ARI/ATH", "TOR/WSH", "MIN/NYM", "HOU/KC"],
+    neighbour's star by 8.7 px, both unreadable. The ordinary slate (two side
+    bands) is pinned at the shipped six games; a single crammed band at three, the
+    count where the reservation still leaves play — from four up the strip is
+    consumed exactly and a settle nudge can still graze."""
+    for names, deep, bands in (
+        (["CIN/CLE", "LAA/LAD", "PHI/PIT", "ARI/ATH", "TOR/WSH", "MIN/NYM"], None, 2),
+        (["CIN/CLE", "LAA/LAD", "PHI/PIT"], _deep_pool(180), 1),
     ):
         groups = [
             (
@@ -389,11 +392,9 @@ def test_sky_labels_never_land_on_another_games_group():
             )
             for game in names
         ]
-        fig = constellation_figure(
-            [], None, _ladder(13), deep_pool=_deep_pool(180), wider_groups=groups
-        )
+        fig = constellation_figure([], None, _ladder(13), deep_pool=deep, wider_groups=groups)
         labels, stars = _sky_boxes(fig)
-        assert len({star[1] > 0 for star in stars}) == 1, "fixture no longer forces one band"
+        assert len({star[1] > 0 for star in stars}) == bands, "fixture no longer deals its bands"
         for one, other in itertools.combinations(labels, 2):
             assert _clear(one, other), (names, one[0], other[0])
         for label in labels:

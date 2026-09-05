@@ -360,7 +360,10 @@ def _scatter_band(
     Each game gets an equal ``stride`` of the band's long axis and its legs scatter
     inside whatever that stride leaves once the label is reserved, so a crowded
     band draws tighter groups rather than overlapping ones; the jitter is a
-    fraction of what is still spare, which on a full band is nothing.
+    fraction of what is still spare, which on a full band is nothing. From four
+    games up the strip is consumed exactly (stride equals pitch), so a ``settle``
+    nudge past the anchor radius eats into the neighbour's reservation — the
+    residual graze in a crammed band.
     """
     x0, y0, x1, y1 = band
     along_x = (x1 - x0) >= (y1 - y0)

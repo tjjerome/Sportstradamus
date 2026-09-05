@@ -30,7 +30,8 @@ _GLOBALS = frozenset({"Number", "String", "clearTimeout", "requestAnimationFrame
 
 def _source() -> str:
     text = MAIN_JS.read_text()
-    return re.sub(r"(?m)//.*$", "", re.sub(r"/\*.*?\*/", " ", text, flags=re.S))
+    # A "//" that follows ":" is a URL inside a string, not a comment.
+    return re.sub(r"(?m)(?<!:)//.*$", "", re.sub(r"/\*.*?\*/", " ", text, flags=re.S))
 
 
 def test_every_function_main_js_calls_is_one_it_defines():
