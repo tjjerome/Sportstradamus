@@ -69,8 +69,16 @@ _WIDER_ALPHA = 0.75  # dimmer than an active star, so the sky reads as backgroun
 # Clear air between a sky star and the map's outermost glyph: a sky star that
 # grazes the constellation reads as one of its own.
 _WIDER_MARGIN_PX = 48
-_WIDER_CLUSTER_PX = 30  # a game's legs scatter inside this radius and still read as one group
-_WIDER_JITTER = 0.35  # slot jitter as a fraction of slot pitch: organic, still non-overlapping
+# The most a game's legs scatter from their slot and still read as one group. A
+# band with more games than room tightens it rather than letting them collide.
+_WIDER_CLUSTER_PX = 30
+# Slot jitter as a fraction of the room a slot has spare. Under a half, two
+# neighbours that jitter toward each other still clear.
+_WIDER_JITTER = 0.35
+# A game label's ink box as a multiple of its font px: plotly centres the text on
+# its y, so half a line reaches past the drop on either side.
+_LABEL_LINE_PX = 1.25
+_LABEL_DROP_PX = 12  # clear air under a cluster's lowest star: attached, not touching
 # The focus recedes only a little — the owner asked for room, not a shrunken map.
 _WIDER_SCALE = 0.8
 # y-units added above and below on the phone (~129 px a band), the one viewport
@@ -223,9 +231,9 @@ def wider_positions(
 
     The sky is the inset frame minus the constellation's own footprint, cut into
     at most four bands; the games deal round-robin into whatever survives, largest
-    band first. Each game takes an evenly spaced slot along its band's long axis,
-    jittered so the row doesn't read as a scale, and its legs scatter inside
-    ``_WIDER_CLUSTER_PX`` of that slot. ``settle`` then does the same job it does
+    band first. Each game takes a slot along its band's long axis, jittered so the
+    row doesn't read as a scale, and its legs scatter around that slot inside what
+    the slot has room for. ``settle`` then does the same job it does
     for the map — nearest free cell, everything drawn ``fixed`` — with the
     footprint excluded, which is what makes "never inside the constellation" hold
     even where a gap between two main stars is the nearest free air.
@@ -252,7 +260,9 @@ def wider_positions(
         return {}, []
     anchors: dict[str, tuple[float, float]] = {}
     for index, band in enumerate(bands):
-        anchors |= _scatter_band(band, groups[index :: len(bands)], px)
+        anchors |= _scatter_band(
+            band, groups[index :: len(bands)], px, size=size, label_px=label_px
+        )
     placed = settle(
         anchors,
         {**sizes, **dict.fromkeys(anchors, size)},
@@ -261,18 +271,33 @@ def wider_positions(
         frame=(X_RANGE, sky_y),
         exclude=footprint,
     )
-    drop = (_WIDER_CLUSTER_PX + label_px) / px[1]
+    lift = _label_lift(size, label_px) / px[1]
     frame_y = sky_y * _FRAME_INSET
     labels = []
     for game, rows in groups:
         cluster = [corr_key(row) for row in rows if corr_key(row) in placed]
         if not cluster:
             continue
-        center_x = sum(placed[key][0] for key in cluster) / len(cluster)
-        center_y = sum(placed[key][1] for key in cluster) / len(cluster)
-        below = center_y - drop
-        labels.append((game, center_x, below if below >= -frame_y else center_y + drop))
+        below = min(placed[key][1] for key in cluster) - lift
+        labels.append(
+            (
+                game,
+                sum(placed[key][0] for key in cluster) / len(cluster),
+                below if below >= -frame_y else max(placed[key][1] for key in cluster) + lift,
+            )
+        )
     return placed, labels
+
+
+def _label_lift(size: float, label_px: float) -> float:
+    """How far a game label's ink reaches past the star it hangs under, in px.
+
+    Both ends of the sky read this: ``_scatter_band`` reserves it in the stride it
+    gives each game along a vertical band, and ``wider_positions`` spends exactly
+    it placing the label. They have to be the same number or a label lands on the
+    group below.
+    """
+    return size / 2 + _LABEL_DROP_PX + _LABEL_LINE_PX * label_px / 2
 
 
 def _footprint(
@@ -323,20 +348,39 @@ def _scatter_band(
     band: tuple[float, float, float, float],
     games: Sequence[tuple[str, list[dict]]],
     px: tuple[float, float],
+    *,
+    size: float,
+    label_px: float,
 ) -> dict[str, tuple[float, float]]:
-    """One band's games as jittered clusters, evenly spaced along its long axis."""
+    """One band's games as jittered clusters, spread along its long axis.
+
+    A vertical band stacks its games one over another, so a cluster has to own the
+    strip its label hangs into as well or the label lands on the group below; along
+    a horizontal band the labels sit side by side and only the clusters compete.
+    Each game gets an equal ``stride`` of the band's long axis and its legs scatter
+    inside whatever that stride leaves once the label is reserved, so a crowded
+    band draws tighter groups rather than overlapping ones; the jitter is a
+    fraction of what is still spare, which on a full band is nothing.
+    """
     x0, y0, x1, y1 = band
     along_x = (x1 - x0) >= (y1 - y0)
     span, start = (x1 - x0, x0) if along_x else (y1 - y0, y0)
     across = (y0 + y1) / 2 if along_x else (x0 + x1) / 2
-    pitch = span / len(games)
+    ink = 0.0 if along_x else _label_lift(size, label_px)
+    reach = min(_WIDER_CLUSTER_PX, max((span / len(games) - size - ink) / 2, 0.0))
+    stride = 2 * reach + size + ink
+    lo = start + reach + size / 2 + ink
+    hi = max(lo, start + span - reach - size / 2)
+    pitch = (hi - lo) / max(len(games) - 1, 1)
+    play = _WIDER_JITTER * max(pitch - stride, 0.0)
     anchors: dict[str, tuple[float, float]] = {}
     for slot, (game, rows) in enumerate(games):
         rng = random.Random(int(hashlib.md5(game.encode()).hexdigest(), 16))
-        along = start + (slot + 0.5) * pitch + rng.uniform(-1, 1) * _WIDER_JITTER * pitch
+        seat = lo + slot * pitch if len(games) > 1 else (lo + hi) / 2
+        along = min(max(seat + rng.uniform(-1, 1) * play, lo), hi)
         center = (along, across) if along_x else (across, along)
         for row in rows:
-            radius, angle = rng.uniform(0, _WIDER_CLUSTER_PX), rng.uniform(0, 2 * math.pi)
+            radius, angle = rng.uniform(0, reach), rng.uniform(0, 2 * math.pi)
             anchors[corr_key(row)] = (
                 (center[0] + radius * math.cos(angle)) / px[0],
                 (center[1] + radius * math.sin(angle)) / px[1],

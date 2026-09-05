@@ -86,19 +86,22 @@
       return t.name === "edge" || t.name === "deep_edge" ? t.meta : null;
     });
     previewed = [];
+    // The height post comes before the animation, not after it: the phone sizes its
+    // iframe from this message and a sky clipped off the bottom is a broken page,
+    // while a fade that never runs is only a missing flourish.
+    setFrameHeight(
+      (fig.layout && fig.layout.height ? fig.layout.height : 380) +
+        FRAME_PAD +
+        (MOBILE ? MOBILE_CARD_PAD : 0)
+    );
     if (!plotted) {
       attachHandlers();
       plotted = true;
     } else if (widerReshaped) {
-      fadeInWholeMap();
+      fadeIn(fig.data.map(function (_, i) { return i; }), WIDER_FADE_MS);
     } else if (freshLens.length) {
-      fadeInLensTraces(freshLens);
+      fadeIn(freshLens, LENS_FADE_MS);
     }
-    const height =
-      (fig.layout && fig.layout.height ? fig.layout.height : 380) +
-      FRAME_PAD +
-      (MOBILE ? MOBILE_CARD_PAD : 0);
-    setFrameHeight(height);
   }
 
   // The lens traces present in a figure, as a {name: true} set (deep / wider / wider_labels).
@@ -119,13 +122,15 @@
     return idx;
   }
 
-  // Fade ONLY the freshly-revealed lens traces up from transparent to their designed opacity, so a
-  // "look deeper" / "look wider" toggle reads as new stars materializing while every existing star
-  // holds still. Ramps trace-level opacity (which multiplies each marker's own alpha) over
-  // LENS_FADE_MS on requestAnimationFrame; the start-at-0 restyle runs in the same tick as
-  // Plotly.react, so the browser never paints the full-opacity first frame. A newer render bumps
-  // renderSeq and this fade bails, so a stale ramp can't fight the current figure's trace indices.
-  function fadeInLensTraces(indices) {
+  // Ramp the given traces up from transparent to their designed opacity. "Look deeper" passes
+  // only the freshly-revealed lens traces, so the toggle reads as new stars materializing while
+  // every existing star holds still; "look wider" passes every trace, because it restructures the
+  // map and fading only the new sky would leave the recede as an instant snap. Ramps trace-level
+  // opacity (which multiplies each marker's own alpha) over `ms` on requestAnimationFrame; the
+  // start-at-0 restyle runs in the same tick as Plotly.react, so the browser never paints the
+  // full-opacity first frame. A newer render bumps renderSeq and this fade bails, so a stale ramp
+  // can't fight the current figure's trace indices.
+  function fadeIn(indices, ms) {
     if (REDUCED_MOTION) return;
     const targets = indices.map(function (i) {
       return baseOpacity[i];
@@ -136,7 +141,7 @@
     function step(now) {
       if (seq !== renderSeq) return; // a newer render superseded this fade
       if (start === null) start = now;
-      const t = Math.min(1, (now - start) / LENS_FADE_MS);
+      const t = Math.min(1, (now - start) / ms);
       const eased = 1 - Math.pow(1 - t, 3); // easeOutCubic — quick lift, gentle settle
       Plotly.restyle(
         chartDiv,
