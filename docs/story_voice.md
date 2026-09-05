@@ -13,6 +13,8 @@ once, no contentless instructions).
 1. **One thought per headline**: subject, verb, consequence. Six to fourteen rendered words.
    Present tense. No em-dash, no semicolon, at most one comma or one colon. Every variant
    leads with a capital letter or a slot, in every direction (Mixed and Contrast* included).
+   A headline is a card title: one sentence carries no closing period; a two-sentence
+   headline keeps both.
 2. **Cause first when the shape is known**, then the effect on a named stat family or player.
    Cause words by shape: *shootout* — the total, the pace, a loud number; *grind* — two aces,
    a low number, the pitching, the trenches; *blowout* — the spread, the margin, garbage time,
@@ -96,11 +98,11 @@ every direction, plus `player/even/{Over,Under}/mistakes`, plus the four contrar
 
 - baseball / game-script / shootout / Under — "The {g} total says slugfest. The model reads
   these bats quieter than the number."
-- baseball / game-script / grind / Mixed — "Two aces shorten {g}: {up} and {down}." →
-  "Two aces shorten DET/CLE: the strikeouts climb and the hits stay down."
+- baseball / game-script / grind / Mixed — "Two aces shorten {g}: {up} and {down}" →
+  "Two aces shorten DET/CLE: the strikeouts climb and the hits stay down"
 - basketball / player / shootout / Over / scoring — "The {g} pace runs through {p}, and the
-  points follow."
+  points follow"
 - shared / stack / even / ContrastOver — "{p} carries the {g} card while the rest of it sits
-  still."
+  still"
 - dek — "these {n} legs move together, {rho} average correlation · {p} runs {dev} past a
   {line} line over his last 5"

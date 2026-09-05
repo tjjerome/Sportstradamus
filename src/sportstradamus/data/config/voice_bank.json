@@ -835,416 +835,416 @@
       "shootout": {
         "Over": {
           "scoring": [
-            "The {g} pace runs through {p}, and the points follow.",
-            "A high total in {g} keeps {p} shooting into the fourth.",
-            "Extra possessions in {g} land on {p}'s usage.",
-            "The {g} total climbs and {p} takes the largest share.",
-            "Pace lifts the shot count and {p} owns most of it.",
-            "{p} sits at the center of a fast {g} night.",
-            "Transition points come easy in {g} and {p} takes the bulk."
+            "The {g} pace runs through {p}, and the points follow",
+            "A high total in {g} keeps {p} shooting into the fourth",
+            "Extra possessions in {g} land on {p}'s usage",
+            "The {g} total climbs and {p} takes the largest share",
+            "Pace lifts the shot count and {p} owns most of it",
+            "{p} sits at the center of a fast {g} night",
+            "Transition points come easy in {g} and {p} takes the bulk"
           ],
           "boards": [
-            "The {g} pace means more misses, and {p} works the glass.",
-            "Shot volume in {g} means more caroms for {p}.",
-            "The {g} total rises and the glass stays busy for {p}.",
-            "{p} works the rim while {g} trades baskets.",
-            "Quick possessions in {g} leave the boards to {p}.",
-            "A loud number in {g} keeps {p} on the glass.",
-            "The rim stays busy in {g} and {p} collects the leftovers."
+            "The {g} pace means more misses, and {p} works the glass",
+            "Shot volume in {g} means more caroms for {p}",
+            "The {g} total rises and the glass stays busy for {p}",
+            "{p} works the rim while {g} trades baskets",
+            "Quick possessions in {g} leave the boards to {p}",
+            "A loud number in {g} keeps {p} on the glass",
+            "The rim stays busy in {g} and {p} collects the leftovers"
           ],
           "playmaking": [
-            "The {g} pace runs early offense through {p}.",
-            "Transition looks in {g} start with {p}'s outlet.",
-            "A high total in {g} keeps {p} finding the open shooter.",
-            "More possessions in {g} mean more looks off {p}'s passes.",
-            "{p} keeps the {g} break organized and the assists come.",
-            "The {g} total climbs on early offense, and {p} starts it.",
-            "Pace favors the passer and {p} holds the ball in {g}."
+            "The {g} pace runs early offense through {p}",
+            "Transition looks in {g} start with {p}'s outlet",
+            "A high total in {g} keeps {p} finding the open shooter",
+            "More possessions in {g} mean more looks off {p}'s passes",
+            "{p} keeps the {g} break organized and the assists come",
+            "The {g} total climbs on early offense, and {p} starts it",
+            "Pace favors the passer and {p} holds the ball in {g}"
           ],
           "stops": [
-            "A fast {g} game gets careless, and {p} lives in the lanes.",
-            "The {g} pace opens passing lanes for {p}.",
-            "Loose possessions pile up in {g} and {p} takes them.",
-            "Tired legs late in {g} feed {p}'s hands.",
-            "Quick decisions in {g} turn sloppy, and {p} is waiting.",
-            "The {g} sprint leaves gaps and {p} steps into them.",
-            "Speed costs {g} some possessions, and {p} collects them."
+            "A fast {g} game gets careless, and {p} lives in the lanes",
+            "The {g} pace opens passing lanes for {p}",
+            "Loose possessions pile up in {g} and {p} takes them",
+            "Tired legs late in {g} feed {p}'s hands",
+            "Quick decisions in {g} turn sloppy, and {p} is waiting",
+            "The {g} sprint leaves gaps and {p} steps into them",
+            "Speed costs {g} some possessions, and {p} collects them"
           ],
           "k's": [
-            "The {g} pace sends everyone to the rim, and {p} is there.",
-            "A fast {g} game means rushed finishes, and {p} meets them.",
-            "Transition drives in {g} run into {p} at the rim.",
-            "The {g} total climbs on paint touches and {p} guards the rim.",
-            "Early offense in {g} attacks the rim where {p} waits.",
-            "More shots in {g} mean more chances for {p} to block one.",
-            "{p} holds the rim while {g} runs."
+            "The {g} pace sends everyone to the rim, and {p} is there",
+            "A fast {g} game means rushed finishes, and {p} meets them",
+            "Transition drives in {g} run into {p} at the rim",
+            "The {g} total climbs on paint touches and {p} guards the rim",
+            "Early offense in {g} attacks the rim where {p} waits",
+            "More shots in {g} mean more chances for {p} to block one",
+            "{p} holds the rim while {g} runs"
           ],
           "production": [
-            "The {g} pace runs through {p} in every column.",
-            "A loud number in {g} keeps {p} on the floor and busy.",
-            "Possessions pile up in {g} and {p} touches most of them.",
-            "The {g} total lifts the whole box score, {p}'s most of all.",
-            "A fast {g} night fills {p}'s line.",
-            "{p} is on the floor for the whole {g} sprint.",
-            "Usage plus pace is the entire {p} read in {g}."
+            "The {g} pace runs through {p} in every column",
+            "A loud number in {g} keeps {p} on the floor and busy",
+            "Possessions pile up in {g} and {p} touches most of them",
+            "The {g} total lifts the whole box score, {p}'s most of all",
+            "A fast {g} night fills {p}'s line",
+            "{p} is on the floor for the whole {g} sprint",
+            "Usage plus pace is the entire {p} read in {g}"
           ]
         },
         "Under": {
           "scoring": [
-            "The {g} pace never reaches {p}'s share of the shots.",
-            "The {g} sprint goes around {p} all night.",
-            "The {g} total climbs while {p}'s scoring stays quiet.",
-            "Pace lifts the gym in {g} and leaves {p}'s number alone.",
-            "{p} gives up the ball early in a fast {g} game.",
-            "The shots go elsewhere in {g} and {p} settles.",
-            "A loud {g} night still leaves {p} on the quiet side."
+            "The {g} pace never reaches {p}'s share of the shots",
+            "The {g} sprint goes around {p} all night",
+            "The {g} total climbs while {p}'s scoring stays quiet",
+            "Pace lifts the gym in {g} and leaves {p}'s number alone",
+            "{p} gives up the ball early in a fast {g} game",
+            "The shots go elsewhere in {g} and {p} settles",
+            "A loud {g} night still leaves {p} on the quiet side"
           ],
           "production": [
-            "The {g} sprint lifts the box score everywhere but {p}'s line.",
-            "A fast {g} night still leaves {p} on the quiet side.",
-            "Pace is loud in {g} while {p}'s numbers stay small.",
-            "{p} rides the {g} pace without collecting much from it.",
-            "The {g} total climbs and {p}'s line settles anyway.",
-            "Nothing about the {g} pace reaches {p}'s stat line."
+            "The {g} sprint lifts the box score everywhere but {p}'s line",
+            "A fast {g} night still leaves {p} on the quiet side",
+            "Pace is loud in {g} while {p}'s numbers stay small",
+            "{p} rides the {g} pace without collecting much from it",
+            "The {g} total climbs and {p}'s line settles anyway",
+            "Nothing about the {g} pace reaches {p}'s stat line"
           ]
         }
       },
       "grind": {
         "Over": {
           "scoring": [
-            "A low {g} number still leaves {p} the half-court work.",
-            "The {g} defense takes everything but {p}'s shots.",
-            "Half-court possessions in {g} run through {p}.",
-            "{p} is the offense once {g} slows to half court.",
-            "The {g} pace drops and {p}'s usage climbs to meet it.",
-            "Nothing comes easy in {g} except {p}'s shot diet.",
-            "A grinding {g} night hands {p} the ball every possession."
+            "A low {g} number still leaves {p} the half-court work",
+            "The {g} defense takes everything but {p}'s shots",
+            "Half-court possessions in {g} run through {p}",
+            "{p} is the offense once {g} slows to half court",
+            "The {g} pace drops and {p}'s usage climbs to meet it",
+            "Nothing comes easy in {g} except {p}'s shot diet",
+            "A grinding {g} night hands {p} the ball every possession"
           ],
           "boards": [
-            "A low {g} number means more misses, and {p} owns the glass.",
-            "The {g} defense forces long misses that land with {p}.",
-            "Half-court possessions in {g} end on the glass where {p} works.",
-            "Nothing falls in {g} and the boards come to {p}.",
-            "{p} settles into the paint while the shots keep missing.",
-            "The {g} grind is decided on the glass, and {p} lives there.",
-            "Contested looks in {g} rattle out to {p}."
+            "A low {g} number means more misses, and {p} owns the glass",
+            "The {g} defense forces long misses that land with {p}",
+            "Half-court possessions in {g} end on the glass where {p} works",
+            "Nothing falls in {g} and the boards come to {p}",
+            "{p} settles into the paint while the shots keep missing",
+            "The {g} grind is decided on the glass, and {p} lives there",
+            "Contested looks in {g} rattle out to {p}"
           ],
           "playmaking": [
-            "The {g} defense sits back and {p} makes the extra pass.",
-            "Half-court sets in {g} run on {p}'s reads.",
-            "A low {g} number puts every clean look on {p}.",
-            "{p} solves the {g} half court one pass at a time.",
-            "Switches in {g} take time, and {p} finds the second gap.",
-            "Slow possessions in {g} give {p} room to read the floor.",
-            "The {g} grind needs a passer and {p} is it."
+            "The {g} defense sits back and {p} makes the extra pass",
+            "Half-court sets in {g} run on {p}'s reads",
+            "A low {g} number puts every clean look on {p}",
+            "{p} solves the {g} half court one pass at a time",
+            "Switches in {g} take time, and {p} finds the second gap",
+            "Slow possessions in {g} give {p} room to read the floor",
+            "The {g} grind needs a passer and {p} is it"
           ],
           "stops": [
-            "A low {g} number rewards the defenders, and {p} is one.",
-            "Half-court possessions in {g} get crowded where {p} works.",
-            "The {g} grind turns every possession into a scrum for {p}.",
-            "Tight defense in {g} forces late passes into {p}'s hands.",
-            "{p} does the quiet work while {g} bogs down.",
-            "Nothing clean happens in {g} and {p} collects the rest.",
-            "A slow {g} game keeps {p} home in the passing lanes."
+            "A low {g} number rewards the defenders, and {p} is one",
+            "Half-court possessions in {g} get crowded where {p} works",
+            "The {g} grind turns every possession into a scrum for {p}",
+            "Tight defense in {g} forces late passes into {p}'s hands",
+            "{p} does the quiet work while {g} bogs down",
+            "Nothing clean happens in {g} and {p} collects the rest",
+            "A slow {g} game keeps {p} home in the passing lanes"
           ],
           "k's": [
-            "A low {g} number sends everything to the rim, and {p} waits.",
-            "The {g} grind lives in the paint, and {p} guards it.",
-            "Half-court possessions in {g} die at {p}'s rim.",
-            "Forced late looks in {g} come straight into {p}.",
-            "{p} anchors the paint while {g} slows to a crawl.",
-            "The {g} defense funnels every drive to {p}."
+            "A low {g} number sends everything to the rim, and {p} waits",
+            "The {g} grind lives in the paint, and {p} guards it",
+            "Half-court possessions in {g} die at {p}'s rim",
+            "Forced late looks in {g} come straight into {p}",
+            "{p} anchors the paint while {g} slows to a crawl",
+            "The {g} defense funnels every drive to {p}"
           ],
           "production": [
-            "A low {g} number leaves the honest work to {p}.",
-            "The {g} grind hands {p} usage on every possession.",
-            "Half-court basketball in {g} runs through {p}.",
-            "{p} fills the {g} box score with the unglamorous columns.",
-            "The pace dies in {g} and {p}'s minutes climb.",
-            "Ugly {g} possessions still end in {p}'s hands.",
-            "Nothing comes easy in {g}, and {p} does most of the work."
+            "A low {g} number leaves the honest work to {p}",
+            "The {g} grind hands {p} usage on every possession",
+            "Half-court basketball in {g} runs through {p}",
+            "{p} fills the {g} box score with the unglamorous columns",
+            "The pace dies in {g} and {p}'s minutes climb",
+            "Ugly {g} possessions still end in {p}'s hands",
+            "Nothing comes easy in {g}, and {p} does most of the work"
           ]
         },
         "Under": {
           "scoring": [
-            "The {g} defense packs the paint and {p}'s looks disappear.",
-            "A low {g} number leaves {p} nothing clean to shoot.",
-            "Half-court possessions in {g} squeeze {p}'s shot diet.",
-            "{p} takes the hard ones all night in {g}.",
-            "The {g} grind takes {p}'s rhythm first.",
-            "Every {p} touch in {g} arrives with help already there."
+            "The {g} defense packs the paint and {p}'s looks disappear",
+            "A low {g} number leaves {p} nothing clean to shoot",
+            "Half-court possessions in {g} squeeze {p}'s shot diet",
+            "{p} takes the hard ones all night in {g}",
+            "The {g} grind takes {p}'s rhythm first",
+            "Every {p} touch in {g} arrives with help already there"
           ],
           "production": [
-            "A low {g} number and a quiet {p} line go together.",
-            "The {g} grind trims possessions and {p}'s counting stats with them.",
-            "Half-court basketball in {g} leaves {p} little to collect.",
-            "{p} settles into a slow {g} night.",
-            "The {g} defense takes the easy work away from {p}.",
-            "Fewer possessions in {g} mean a smaller {p} line."
+            "A low {g} number and a quiet {p} line go together",
+            "The {g} grind trims possessions and {p}'s counting stats with them",
+            "Half-court basketball in {g} leaves {p} little to collect",
+            "{p} settles into a slow {g} night",
+            "The {g} defense takes the easy work away from {p}",
+            "Fewer possessions in {g} mean a smaller {p} line"
           ]
         }
       },
       "blowout": {
         "Over": {
           "scoring": [
-            "The {g} spread is wide and {p} does the damage early.",
-            "{p} scores before the {g} margin empties the benches.",
-            "A lopsided {g} night opens the floor and {p} takes the easy ones.",
-            "The {g} margin grows on {p}'s first-half work.",
-            "Garbage time waits, and {p} banks the points before it.",
-            "A wide {g} spread gives {p} three uncontested quarters.",
-            "{p} gets the points in before the {g} bench arrives."
+            "The {g} spread is wide and {p} does the damage early",
+            "{p} scores before the {g} margin empties the benches",
+            "A lopsided {g} night opens the floor and {p} takes the easy ones",
+            "The {g} margin grows on {p}'s first-half work",
+            "Garbage time waits, and {p} banks the points before it",
+            "A wide {g} spread gives {p} three uncontested quarters",
+            "{p} gets the points in before the {g} bench arrives"
           ],
           "boards": [
-            "The {g} margin grows and nobody boxes out {p}.",
-            "A lopsided {g} night leaves the glass to {p}.",
-            "Effort fades with the {g} spread, and {p}'s rebounds climb.",
-            "Garbage time in {g} is a rebounding drill for {p}.",
-            "{p} works the glass while the {g} margin does the rest.",
-            "A wide {g} spread means loose boxouts and easy boards for {p}."
+            "The {g} margin grows and nobody boxes out {p}",
+            "A lopsided {g} night leaves the glass to {p}",
+            "Effort fades with the {g} spread, and {p}'s rebounds climb",
+            "Garbage time in {g} is a rebounding drill for {p}",
+            "{p} works the glass while the {g} margin does the rest",
+            "A wide {g} spread means loose boxouts and easy boards for {p}"
           ],
           "playmaking": [
-            "The {g} margin opens passing windows and {p} uses them.",
-            "A lopsided {g} game makes every {p} read an easy one.",
-            "The {g} spread breaks the defense, and {p} keeps feeding it.",
-            "Easy looks come cheap once the {g} spread opens, and {p} deals them.",
-            "{p} runs a settled {g} game and the assists follow.",
-            "Rotations get late in a lopsided {g} game, and {p} finds them."
+            "The {g} margin opens passing windows and {p} uses them",
+            "A lopsided {g} game makes every {p} read an easy one",
+            "The {g} spread breaks the defense, and {p} keeps feeding it",
+            "Easy looks come cheap once the {g} spread opens, and {p} deals them",
+            "{p} runs a settled {g} game and the assists follow",
+            "Rotations get late in a lopsided {g} game, and {p} finds them"
           ],
           "stops": [
-            "A team chasing the {g} margin forces passes into {p}.",
-            "The {g} spread makes the trailing side careless around {p}.",
-            "Hero ball arrives late in {g} and {p} is waiting.",
-            "A lopsided {g} game turns loose possessions into {p}'s stops.",
-            "{p} gambles freely once the {g} margin is settled.",
-            "Rushed trailing possessions in {g} end in {p}'s hands."
+            "A team chasing the {g} margin forces passes into {p}",
+            "The {g} spread makes the trailing side careless around {p}",
+            "Hero ball arrives late in {g} and {p} is waiting",
+            "A lopsided {g} game turns loose possessions into {p}'s stops",
+            "{p} gambles freely once the {g} margin is settled",
+            "Rushed trailing possessions in {g} end in {p}'s hands"
           ],
           "k's": [
-            "The {g} margin sends the trailing side into {p} at the rim.",
-            "A lopsided {g} game produces forced drives into {p}.",
-            "Chasing the {g} spread means bad shots at {p}'s rim.",
-            "{p} guards the rim while the {g} margin grows.",
-            "Late-clock desperation in {g} finds {p} standing there.",
-            "The {g} rout funnels everything to the paint where {p} lives."
+            "The {g} margin sends the trailing side into {p} at the rim",
+            "A lopsided {g} game produces forced drives into {p}",
+            "Chasing the {g} spread means bad shots at {p}'s rim",
+            "{p} guards the rim while the {g} margin grows",
+            "Late-clock desperation in {g} finds {p} standing there",
+            "The {g} rout funnels everything to the paint where {p} lives"
           ],
           "production": [
-            "{p} fills the sheet before the {g} margin ends the night.",
-            "The {g} spread is wide and {p} does the early work.",
-            "A lopsided {g} night still pays {p} for three quarters.",
-            "{p} banks the numbers before garbage time reaches {g}.",
-            "The {g} margin arrives on {p}'s back.",
-            "Everything happens early in a settled {g} game, and {p} is there."
+            "{p} fills the sheet before the {g} margin ends the night",
+            "The {g} spread is wide and {p} does the early work",
+            "A lopsided {g} night still pays {p} for three quarters",
+            "{p} banks the numbers before garbage time reaches {g}",
+            "The {g} margin arrives on {p}'s back",
+            "Everything happens early in a settled {g} game, and {p} is there"
           ]
         },
         "Under": {
           "scoring": [
-            "The {g} margin ends {p}'s night in the third quarter.",
-            "A wide {g} spread costs {p} the whole fourth.",
-            "Garbage time in {g} arrives before {p}'s points do.",
-            "{p} rests once the {g} margin makes the rest routine.",
-            "The {g} bench comes early and takes {p}'s minutes with it.",
-            "A settled {g} game leaves {p} watching from the sideline."
+            "The {g} margin ends {p}'s night in the third quarter",
+            "A wide {g} spread costs {p} the whole fourth",
+            "Garbage time in {g} arrives before {p}'s points do",
+            "{p} rests once the {g} margin makes the rest routine",
+            "The {g} bench comes early and takes {p}'s minutes with it",
+            "A settled {g} game leaves {p} watching from the sideline"
           ],
           "production": [
-            "Garbage time in {g} takes {p}'s counting stats with it.",
-            "The {g} margin caps {p}'s night at three quarters.",
-            "A lopsided {g} night sends {p} to the bench early.",
-            "The {g} spread settles the game and shortens {p}'s line.",
-            "{p} sits once the {g} outcome stops being in doubt.",
-            "Minutes are the whole read, and a wide {g} spread takes them."
+            "Garbage time in {g} takes {p}'s counting stats with it",
+            "The {g} margin caps {p}'s night at three quarters",
+            "A lopsided {g} night sends {p} to the bench early",
+            "The {g} spread settles the game and shortens {p}'s line",
+            "{p} sits once the {g} outcome stops being in doubt",
+            "Minutes are the whole read, and a wide {g} spread takes them"
           ]
         }
       },
       "coinflip": {
         "Over": {
           "scoring": [
-            "A one-possession {g} game keeps the ball in {p}'s hands late.",
-            "The {g} clock stays tight and {p} takes the last shots.",
-            "A tight {g} game shortens the rotation and {p} keeps shooting.",
-            "{p} plays the whole fourth of a tight {g} game.",
-            "Every {g} possession matters, and {p} takes most of the shots.",
-            "The {g} margin stays thin and {p}'s usage climbs late."
+            "A one-possession {g} game keeps the ball in {p}'s hands late",
+            "The {g} clock stays tight and {p} takes the last shots",
+            "A tight {g} game shortens the rotation and {p} keeps shooting",
+            "{p} plays the whole fourth of a tight {g} game",
+            "Every {g} possession matters, and {p} takes most of the shots",
+            "The {g} margin stays thin and {p}'s usage climbs late"
           ],
           "boards": [
-            "A tight {g} game is decided on the glass where {p} works.",
-            "One possession decides {g}, so {p} chases every miss.",
-            "The {g} clock stays close and {p} stays on the glass.",
-            "Extra possessions matter in a tight {g} game, and {p} supplies them.",
-            "{p} plays the full fourth of a one-possession {g} night.",
-            "Close games reward the boards, and {p} owns the {g} glass."
+            "A tight {g} game is decided on the glass where {p} works",
+            "One possession decides {g}, so {p} chases every miss",
+            "The {g} clock stays close and {p} stays on the glass",
+            "Extra possessions matter in a tight {g} game, and {p} supplies them",
+            "{p} plays the full fourth of a one-possession {g} night",
+            "Close games reward the boards, and {p} owns the {g} glass"
           ],
           "playmaking": [
-            "Late-clock possessions in {g} end with a pass from {p}.",
-            "A tight {g} game runs its offense through {p}'s hands.",
-            "The {g} clock shrinks and {p} makes the last read.",
-            "One-possession games need a passer, and {p} closes {g}.",
-            "{p} stays on the floor for every meaningful {g} possession.",
-            "Crunch time in {g} puts every decision on {p}."
+            "Late-clock possessions in {g} end with a pass from {p}",
+            "A tight {g} game runs its offense through {p}'s hands",
+            "The {g} clock shrinks and {p} makes the last read",
+            "One-possession games need a passer, and {p} closes {g}",
+            "{p} stays on the floor for every meaningful {g} possession",
+            "Crunch time in {g} puts every decision on {p}"
           ],
           "stops": [
-            "A one-possession {g} game turns on stops, and {p} makes them.",
-            "The {g} clock tightens and {p} stays in the closing lineup.",
-            "Late {g} possessions get careful, and {p} reads them early.",
-            "Nobody gets a clean pass late in {g} with {p} there.",
-            "{p} closes a tight {g} game on the defensive end.",
-            "A thin {g} margin keeps {p} on the floor and working."
+            "A one-possession {g} game turns on stops, and {p} makes them",
+            "The {g} clock tightens and {p} stays in the closing lineup",
+            "Late {g} possessions get careful, and {p} reads them early",
+            "Nobody gets a clean pass late in {g} with {p} there",
+            "{p} closes a tight {g} game on the defensive end",
+            "A thin {g} margin keeps {p} on the floor and working"
           ],
           "k's": [
-            "A tight {g} game ends at the rim, and {p} protects it.",
-            "The {g} clock tightens and every drive meets {p}.",
-            "Late possessions in {g} go downhill into {p}.",
-            "{p} closes a one-possession {g} game at the rim.",
-            "One stop decides {g}, and {p} makes it at the rim.",
-            "A thin {g} margin keeps {p} guarding the paint late."
+            "A tight {g} game ends at the rim, and {p} protects it",
+            "The {g} clock tightens and every drive meets {p}",
+            "Late possessions in {g} go downhill into {p}",
+            "{p} closes a one-possession {g} game at the rim",
+            "One stop decides {g}, and {p} makes it at the rim",
+            "A thin {g} margin keeps {p} guarding the paint late"
           ],
           "production": [
-            "A tight {g} game keeps {p} on the floor all night.",
-            "The {g} clock stays close and {p}'s minutes climb.",
-            "One possession decides {g}, so {p} never rests.",
-            "Close games shorten rotations, and {p} absorbs the {g} workload.",
-            "{p} plays every meaningful minute of a thin {g} game.",
-            "Leverage runs through {p} from the first {g} possession."
+            "A tight {g} game keeps {p} on the floor all night",
+            "The {g} clock stays close and {p}'s minutes climb",
+            "One possession decides {g}, so {p} never rests",
+            "Close games shorten rotations, and {p} absorbs the {g} workload",
+            "{p} plays every meaningful minute of a thin {g} game",
+            "Leverage runs through {p} from the first {g} possession"
           ]
         },
         "Under": {
           "scoring": [
-            "A tight {g} game gets careful, and {p}'s looks dry up.",
-            "The {g} clock tightens and every {p} catch draws help.",
-            "Late possessions in {g} slow down and {p} stops shooting.",
-            "One-possession games get conservative, and {p} settles in {g}.",
-            "{p} gives it up late in a nervous {g} game.",
-            "The {g} defense keys on {p} once the clock matters."
+            "A tight {g} game gets careful, and {p}'s looks dry up",
+            "The {g} clock tightens and every {p} catch draws help",
+            "Late possessions in {g} slow down and {p} stops shooting",
+            "One-possession games get conservative, and {p} settles in {g}",
+            "{p} gives it up late in a nervous {g} game",
+            "The {g} defense keys on {p} once the clock matters"
           ],
           "production": [
-            "A careful {g} game makes for a careful {p} line.",
-            "The {g} clock tightens and the counting stats stop for {p}.",
-            "Tight games slow down, and {p}'s numbers slow with them.",
-            "{p} plays a lot of minutes in {g} and collects little.",
-            "Possessions shrink late in {g} and {p}'s line shrinks too.",
-            "A one-possession {g} game leaves {p} on the quiet side."
+            "A careful {g} game makes for a careful {p} line",
+            "The {g} clock tightens and the counting stats stop for {p}",
+            "Tight games slow down, and {p}'s numbers slow with them",
+            "{p} plays a lot of minutes in {g} and collects little",
+            "Possessions shrink late in {g} and {p}'s line shrinks too",
+            "A one-possession {g} game leaves {p} on the quiet side"
           ]
         }
       },
       "even": {
         "Over": {
           "scoring": [
-            "The board asks little of {p} in {g}.",
-            "{p} gets to the same spots every night in {g}.",
-            "The number sits low against {p}'s usage in {g}.",
-            "{p}'s shot diet stays the same and {g} does not change it.",
-            "Nothing on the {g} card slows {p}'s scoring.",
-            "The {g} board misprices what {p} does every night.",
-            "{p} takes enough shots in {g} to clear this quietly."
+            "The board asks little of {p} in {g}",
+            "{p} gets to the same spots every night in {g}",
+            "The number sits low against {p}'s usage in {g}",
+            "{p}'s shot diet stays the same and {g} does not change it",
+            "Nothing on the {g} card slows {p}'s scoring",
+            "The {g} board misprices what {p} does every night",
+            "{p} takes enough shots in {g} to clear this quietly"
           ],
           "boards": [
-            "The {g} board asks {p} for less than the glass gives.",
-            "{p} lives on the glass in {g} and the number lags.",
-            "Rebounding is a minutes stat, and {p} plays plenty in {g}.",
-            "The {g} card sets {p}'s board number below the routine.",
-            "{p} chases the long miss every possession in {g}.",
-            "Nothing in {g} keeps {p} away from the defensive glass."
+            "The {g} board asks {p} for less than the glass gives",
+            "{p} lives on the glass in {g} and the number lags",
+            "Rebounding is a minutes stat, and {p} plays plenty in {g}",
+            "The {g} card sets {p}'s board number below the routine",
+            "{p} chases the long miss every possession in {g}",
+            "Nothing in {g} keeps {p} away from the defensive glass"
           ],
           "playmaking": [
-            "The {g} card misses how much {p} touches the ball.",
-            "{p} runs the offense in {g} and the assists follow.",
-            "Every extra pass in {g} starts in {p}'s hands.",
-            "The board sets a low bar for {p}'s reads in {g}.",
-            "{p} handles the pick-and-roll all night in {g}.",
-            "Usage and touches both favor {p} on this {g} card."
+            "The {g} card misses how much {p} touches the ball",
+            "{p} runs the offense in {g} and the assists follow",
+            "Every extra pass in {g} starts in {p}'s hands",
+            "The board sets a low bar for {p}'s reads in {g}",
+            "{p} handles the pick-and-roll all night in {g}",
+            "Usage and touches both favor {p} on this {g} card"
           ],
           "stops": [
-            "{p} guards the ball in {g} and the stops follow.",
-            "The {g} card asks little of {p} in the passing lanes.",
-            "Deflections come with minutes, and {p} plays plenty in {g}.",
-            "{p} sits in the passing lanes for a full {g} night.",
-            "The board sets {p}'s defensive number below the routine.",
-            "Nothing on the {g} card keeps {p} out of the play."
+            "{p} guards the ball in {g} and the stops follow",
+            "The {g} card asks little of {p} in the passing lanes",
+            "Deflections come with minutes, and {p} plays plenty in {g}",
+            "{p} sits in the passing lanes for a full {g} night",
+            "The board sets {p}'s defensive number below the routine",
+            "Nothing on the {g} card keeps {p} out of the play"
           ],
           "k's": [
-            "{p} guards the rim every night, and {g} is no different.",
-            "The {g} card sets a light number on {p}'s rim work.",
-            "Drives keep coming to the rim where {p} waits in {g}.",
-            "{p} protects the paint in {g} and the blocks come.",
-            "Verticality is {p}'s whole game, and the {g} board misses it.",
-            "The rim belongs to {p} for a full {g} night."
+            "{p} guards the rim every night, and {g} is no different",
+            "The {g} card sets a light number on {p}'s rim work",
+            "Drives keep coming to the rim where {p} waits in {g}",
+            "{p} protects the paint in {g} and the blocks come",
+            "Verticality is {p}'s whole game, and the {g} board misses it",
+            "The rim belongs to {p} for a full {g} night"
           ],
           "production": [
-            "The {g} card sits below what {p} does most nights.",
-            "{p} fills every column in {g} without forcing anything.",
-            "Minutes and usage both point at {p} on this {g} card.",
-            "Nothing on the {g} board argues away from {p} tonight.",
-            "{p} touches the ball enough in {g} to clear this.",
-            "The board is priced for a quiet {p}, and {g} says otherwise.",
-            "{p} does a little of everything in {g}, as always."
+            "The {g} card sits below what {p} does most nights",
+            "{p} fills every column in {g} without forcing anything",
+            "Minutes and usage both point at {p} on this {g} card",
+            "Nothing on the {g} board argues away from {p} tonight",
+            "{p} touches the ball enough in {g} to clear this",
+            "The board is priced for a quiet {p}, and {g} says otherwise",
+            "{p} does a little of everything in {g}, as always"
           ],
           "mistakes": [
-            "{p} keeps the handle clean in {g}.",
-            "The {g} card asks {p} for mistakes that rarely come.",
-            "Simple reads keep {p}'s giveaways under the number in {g}.",
-            "{p} makes the simple pass in {g} and the turnovers stay down.",
-            "Pressure comes and {p}'s handle holds in {g}.",
-            "The {g} defense reaches at {p} and comes away empty.",
-            "{p} protects the ball through a full {g} night."
+            "{p} keeps the handle clean in {g}",
+            "The {g} card asks {p} for mistakes that rarely come",
+            "Simple reads keep {p}'s giveaways under the number in {g}",
+            "{p} makes the simple pass in {g} and the turnovers stay down",
+            "Pressure comes and {p}'s handle holds in {g}",
+            "The {g} defense reaches at {p} and comes away empty",
+            "{p} protects the ball through a full {g} night"
           ]
         },
         "Under": {
           "scoring": [
-            "The {g} card asks more of {p} than the shots allow.",
-            "{p}'s looks come contested all night in {g}.",
-            "The number sits above {p}'s usual night in {g}.",
-            "Nothing on the {g} board says {p} shoots more tonight.",
-            "{p} settles for the quiet side in {g}.",
-            "The shots stay scarce and {p}'s number stays high in {g}."
+            "The {g} card asks more of {p} than the shots allow",
+            "{p}'s looks come contested all night in {g}",
+            "The number sits above {p}'s usual night in {g}",
+            "Nothing on the {g} board says {p} shoots more tonight",
+            "{p} settles for the quiet side in {g}",
+            "The shots stay scarce and {p}'s number stays high in {g}"
           ],
           "boards": [
-            "{p} works away from the glass in {g}.",
-            "The {g} board asks {p} for boards that go elsewhere.",
-            "A crowded paint in {g} keeps {p} out of the rebounding scrum.",
-            "The number sits above what {p} usually collects in {g}.",
-            "{p} boxes out and somebody else takes the ball in {g}.",
-            "Long caroms in {g} land away from {p}."
+            "{p} works away from the glass in {g}",
+            "The {g} board asks {p} for boards that go elsewhere",
+            "A crowded paint in {g} keeps {p} out of the rebounding scrum",
+            "The number sits above what {p} usually collects in {g}",
+            "{p} boxes out and somebody else takes the ball in {g}",
+            "Long caroms in {g} land away from {p}"
           ],
           "playmaking": [
-            "The {g} card asks {p} for passes the offense never needs.",
-            "Help defense closes {p}'s windows early in {g}.",
-            "{p}'s assists depend on shooters, and {g} offers few.",
-            "The number sits above {p}'s usual passing night in {g}.",
-            "{p} moves the ball early in {g} and gets no credit.",
-            "Switches in {g} take the second pass away from {p}."
+            "The {g} card asks {p} for passes the offense never needs",
+            "Help defense closes {p}'s windows early in {g}",
+            "{p}'s assists depend on shooters, and {g} offers few",
+            "The number sits above {p}'s usual passing night in {g}",
+            "{p} moves the ball early in {g} and gets no credit",
+            "Switches in {g} take the second pass away from {p}"
           ],
           "stops": [
-            "{p} plays it straight in {g} and the stops stay quiet.",
-            "The {g} card asks {p} for havoc that rarely arrives.",
-            "Nothing loose finds {p}'s hands in {g}.",
-            "The number sits above {p}'s usual defensive night in {g}.",
-            "{p} guards the ball in {g} and never gambles.",
-            "Careful passing in {g} keeps {p} out of the box score."
+            "{p} plays it straight in {g} and the stops stay quiet",
+            "The {g} card asks {p} for havoc that rarely arrives",
+            "Nothing loose finds {p}'s hands in {g}",
+            "The number sits above {p}'s usual defensive night in {g}",
+            "{p} guards the ball in {g} and never gambles",
+            "Careful passing in {g} keeps {p} out of the box score"
           ],
           "k's": [
-            "The {g} card asks {p} for rim work that stays scarce.",
-            "{p} defends the perimeter in {g} and never leaves it.",
-            "Nobody drives at {p} in {g}.",
-            "The number sits above {p}'s usual paint night in {g}.",
-            "Jump shooting in {g} keeps {p} away from the rim.",
-            "{p} plays it safe at the rim all night in {g}."
+            "The {g} card asks {p} for rim work that stays scarce",
+            "{p} defends the perimeter in {g} and never leaves it",
+            "Nobody drives at {p} in {g}",
+            "The number sits above {p}'s usual paint night in {g}",
+            "Jump shooting in {g} keeps {p} away from the rim",
+            "{p} plays it safe at the rim all night in {g}"
           ],
           "production": [
-            "The {g} card asks more of {p} than the minutes allow.",
-            "{p} has a quiet night on a quiet {g} board.",
-            "The number sits above {p}'s routine in {g}.",
-            "Nothing on the {g} card points {p} upward tonight.",
-            "{p} settles in {g} and the quiet side holds.",
-            "Touches are the whole read, and {g} gives {p} few.",
-            "The board is priced for more than {p} usually does in {g}."
+            "The {g} card asks more of {p} than the minutes allow",
+            "{p} has a quiet night on a quiet {g} board",
+            "The number sits above {p}'s routine in {g}",
+            "Nothing on the {g} card points {p} upward tonight",
+            "{p} settles in {g} and the quiet side holds",
+            "Touches are the whole read, and {g} gives {p} few",
+            "The board is priced for more than {p} usually does in {g}"
           ],
           "mistakes": [
-            "The {g} defense speeds {p} up and the turnovers climb.",
-            "{p}'s handle gets loose once {g} turns the pressure up.",
-            "Live hands crowd {p} in {g} and the giveaways come.",
-            "{p}'s giveaway count runs over the number in {g}.",
-            "{p} handles too much in {g} and pays for it.",
-            "Traps come early in {g} and {p} throws into them.",
-            "Quick hands pick {p}'s pocket through the {g} night."
+            "The {g} defense speeds {p} up and the turnovers climb",
+            "{p}'s handle gets loose once {g} turns the pressure up",
+            "Live hands crowd {p} in {g} and the giveaways come",
+            "{p}'s giveaway count runs over the number in {g}",
+            "{p} handles too much in {g} and pays for it",
+            "Traps come early in {g} and {p} throws into them",
+            "Quick hands pick {p}'s pocket through the {g} night"
           ]
         },
         "Mixed": {
@@ -1264,30 +1264,30 @@
       "shootout": {
         "Over": {
           "production": [
-            "The {g} total is high and every line moves with it.",
-            "Pace is the read in {g}, top to bottom.",
-            "Possessions pile up in {g} and the numbers pile with them.",
-            "A loud {g} number lifts the whole box score.",
-            "Nobody walks the ball up in {g} tonight.",
-            "The {g} total climbs and the rotation runs with it."
+            "The {g} total is high and every line moves with it",
+            "Pace is the read in {g}, top to bottom",
+            "Possessions pile up in {g} and the numbers pile with them",
+            "A loud {g} number lifts the whole box score",
+            "Nobody walks the ball up in {g} tonight",
+            "The {g} total climbs and the rotation runs with it"
           ],
           "scoring": [
-            "The {g} total is high and the points come easy.",
-            "Neither defense slows anything down in {g}.",
-            "Pace turns into points in {g} all night.",
-            "A loud {g} number means shots for everybody.",
-            "The rims stay busy from the first {g} possession.",
-            "Transition offense decides the {g} scoreboard."
+            "The {g} total is high and the points come easy",
+            "Neither defense slows anything down in {g}",
+            "Pace turns into points in {g} all night",
+            "A loud {g} number means shots for everybody",
+            "The rims stay busy from the first {g} possession",
+            "Transition offense decides the {g} scoreboard"
           ]
         },
         "Under": {
           "production": [
             "The {g} total says pace. The model reads these lines quieter.",
-            "{g} projects a track meet, and the model leans the other way.",
-            "A loud {g} number, and the model still says settle.",
+            "{g} projects a track meet, and the model leans the other way",
+            "A loud {g} number, and the model still says settle",
             "The board says shootout. These numbers sit it out.",
-            "Fast game in {g}, and these lines still stay quiet.",
-            "The {g} pace argues up while the model argues down."
+            "Fast game in {g}, and these lines still stay quiet",
+            "The {g} pace argues up while the model argues down"
           ]
         },
         "Mixed": {
@@ -1305,29 +1305,29 @@
         "Over": {
           "production": [
             "The {g} number sits low. The model reads these lines higher.",
-            "{g} projects a rockfight, and the model leans the other way.",
-            "A low {g} total, and the model still says climb.",
+            "{g} projects a rockfight, and the model leans the other way",
+            "A low {g} total, and the model still says climb",
             "The board says grind. These numbers clear anyway.",
-            "Slow game in {g}, and the model holds these up.",
-            "The {g} defense argues down while the model argues up."
+            "Slow game in {g}, and the model holds these up",
+            "The {g} defense argues down while the model argues up"
           ]
         },
         "Under": {
           "production": [
-            "The {g} number sits low and nothing climbs out of it.",
-            "Two defenses decide the {g} tempo and it never rises.",
-            "Half-court possessions in {g} keep every line small.",
-            "The {g} pace dies early and the box scores follow.",
-            "Shot clocks run down all night in {g}.",
-            "Nothing comes easy in {g}, and the numbers show it."
+            "The {g} number sits low and nothing climbs out of it",
+            "Two defenses decide the {g} tempo and it never rises",
+            "Half-court possessions in {g} keep every line small",
+            "The {g} pace dies early and the box scores follow",
+            "Shot clocks run down all night in {g}",
+            "Nothing comes easy in {g}, and the numbers show it"
           ],
           "scoring": [
-            "The {g} number sits low and the buckets stay rationed.",
-            "Both defenses set the terms in {g} tonight.",
-            "Points come one possession at a time in {g}.",
-            "The rims tighten up in {g} after the first quarter.",
-            "Half-court possessions in {g} end without a clean look.",
-            "Nothing gets to the paint in {g}."
+            "The {g} number sits low and the buckets stay rationed",
+            "Both defenses set the terms in {g} tonight",
+            "Points come one possession at a time in {g}",
+            "The rims tighten up in {g} after the first quarter",
+            "Half-court possessions in {g} end without a clean look",
+            "Nothing gets to the paint in {g}"
           ]
         },
         "Mixed": {
@@ -1344,22 +1344,22 @@
       "blowout": {
         "Over": {
           "production": [
-            "The {g} spread is wide and the second unit plays early.",
-            "Garbage time comes early in {g} and the numbers run.",
-            "A settled {g} game frees the bench to produce.",
-            "The {g} margin grows and the rotation opens up.",
-            "Nobody guards anybody once {g} stops being close.",
-            "The {g} spread hands the fourth quarter to the reserves."
+            "The {g} spread is wide and the second unit plays early",
+            "Garbage time comes early in {g} and the numbers run",
+            "A settled {g} game frees the bench to produce",
+            "The {g} margin grows and the rotation opens up",
+            "Nobody guards anybody once {g} stops being close",
+            "The {g} spread hands the fourth quarter to the reserves"
           ]
         },
         "Under": {
           "production": [
-            "The {g} spread is wide and the starters sit early.",
-            "A settled {g} game ends the night for the closing lineup.",
-            "Garbage time in {g} takes the minutes that matter.",
-            "The {g} margin decides things by the third quarter.",
-            "Minutes are the whole read, and a lopsided {g} game shortens them.",
-            "The {g} bench arrives before the counting stats do."
+            "The {g} spread is wide and the starters sit early",
+            "A settled {g} game ends the night for the closing lineup",
+            "Garbage time in {g} takes the minutes that matter",
+            "The {g} margin decides things by the third quarter",
+            "Minutes are the whole read, and a lopsided {g} game shortens them",
+            "The {g} bench arrives before the counting stats do"
           ]
         },
         "Mixed": {
@@ -1376,22 +1376,22 @@
       "coinflip": {
         "Over": {
           "production": [
-            "A one-possession {g} game keeps the closing lineup on the floor.",
-            "The {g} clock stays tight and nobody rests.",
-            "Every {g} possession carries leverage, and the minutes show it.",
-            "A tight {g} game shortens the rotation and lengthens the workloads.",
-            "Winning time runs long in {g} tonight.",
-            "The {g} margin stays thin and the starters stay in."
+            "A one-possession {g} game keeps the closing lineup on the floor",
+            "The {g} clock stays tight and nobody rests",
+            "Every {g} possession carries leverage, and the minutes show it",
+            "A tight {g} game shortens the rotation and lengthens the workloads",
+            "Winning time runs long in {g} tonight",
+            "The {g} margin stays thin and the starters stay in"
           ]
         },
         "Under": {
           "production": [
-            "A tight {g} game gets careful and the possessions crawl.",
-            "The {g} clock stops all night and the numbers stall.",
-            "Crunch time shrinks the game in {g}.",
-            "Free throws and timeouts eat the end of {g}.",
-            "One possession decides {g}, and nobody takes a risk.",
-            "A nervous {g} game keeps every line small."
+            "A tight {g} game gets careful and the possessions crawl",
+            "The {g} clock stops all night and the numbers stall",
+            "Crunch time shrinks the game in {g}",
+            "Free throws and timeouts eat the end of {g}",
+            "One possession decides {g}, and nobody takes a risk",
+            "A nervous {g} game keeps every line small"
           ]
         },
         "Mixed": {
@@ -1408,22 +1408,22 @@
       "even": {
         "Over": {
           "production": [
-            "No single edge carries {g}, so the whole card climbs.",
-            "The {g} board sits below a deep rotation.",
-            "A balanced {g} game still fills the box scores.",
-            "The edges in {g} are spread across the rotation.",
-            "Nothing dramatic in {g}, and the numbers still clear.",
-            "A little something for every line on the {g} card."
+            "No single edge carries {g}, so the whole card climbs",
+            "The {g} board sits below a deep rotation",
+            "A balanced {g} game still fills the box scores",
+            "The edges in {g} are spread across the rotation",
+            "Nothing dramatic in {g}, and the numbers still clear",
+            "A little something for every line on the {g} card"
           ]
         },
         "Under": {
           "production": [
-            "The {g} card reads flat and the box scores stay modest.",
-            "No current to ride in {g}, so the quiet side holds.",
-            "An ordinary {g} night comes priced for more.",
-            "The {g} board asks for more than the rotation gives.",
-            "Modest minutes and modest numbers run up and down {g}.",
-            "Nothing on the {g} card argues for a climb."
+            "The {g} card reads flat and the box scores stay modest",
+            "No current to ride in {g}, so the quiet side holds",
+            "An ordinary {g} night comes priced for more",
+            "The {g} board asks for more than the rotation gives",
+            "Modest minutes and modest numbers run up and down {g}",
+            "Nothing on the {g} card argues for a climb"
           ]
         },
         "Mixed": {
@@ -1442,28 +1442,28 @@
       "even": {
         "Over": {
           "production": [
-            "{team}'s {grp}s hold the matchup edge on {opp} tonight.",
-            "The {grp} matchup is where {team} finds room on {opp}.",
-            "{opp} has no answer for the {team} {grp}s in the rotation.",
-            "{team} hunts the {grp} matchup all night against {opp}.",
-            "The numbers favor {team}'s {grp}s wherever {opp} switches.",
-            "{team} runs its offense through the {grp}s {opp} cannot guard."
+            "{team}'s {grp}s hold the matchup edge on {opp} tonight",
+            "The {grp} matchup is where {team} finds room on {opp}",
+            "{opp} has no answer for the {team} {grp}s in the rotation",
+            "{team} hunts the {grp} matchup all night against {opp}",
+            "The numbers favor {team}'s {grp}s wherever {opp} switches",
+            "{team} runs its offense through the {grp}s {opp} cannot guard"
           ],
           "scoring": [
-            "{opp} gives up too much to {grp}s, and {team} has them.",
-            "{team}'s {grp}s get downhill on {opp} whenever they want.",
-            "{team}'s {grp}s score against {opp} in every coverage.",
-            "{team} attacks the {opp} {grp} coverage from the first possession.",
-            "Switch or drop, {opp} has no coverage for {team}'s {grp}s.",
-            "Points come easy for {team}'s {grp}s in this {opp} matchup."
+            "{opp} gives up too much to {grp}s, and {team} has them",
+            "{team}'s {grp}s get downhill on {opp} whenever they want",
+            "{team}'s {grp}s score against {opp} in every coverage",
+            "{team} attacks the {opp} {grp} coverage from the first possession",
+            "Switch or drop, {opp} has no coverage for {team}'s {grp}s",
+            "Points come easy for {team}'s {grp}s in this {opp} matchup"
           ],
           "boards": [
-            "{opp} concedes the glass to {team}'s {grp}s.",
-            "{team}'s {grp}s work the {opp} glass all night.",
-            "The {grp} matchup decides the boards, and {team} wins it.",
-            "{opp} boxes out late and {team}'s {grp}s collect.",
-            "Long misses land with the {team} {grp}s, not {opp}.",
-            "Second chances belong to {team}'s {grp}s in this {opp} matchup."
+            "{opp} concedes the glass to {team}'s {grp}s",
+            "{team}'s {grp}s work the {opp} glass all night",
+            "The {grp} matchup decides the boards, and {team} wins it",
+            "{opp} boxes out late and {team}'s {grp}s collect",
+            "Long misses land with the {team} {grp}s, not {opp}",
+            "Second chances belong to {team}'s {grp}s in this {opp} matchup"
           ]
         }
       }
@@ -1472,22 +1472,22 @@
       "shootout": {
         "Over": {
           "production": [
-            "The {g} pace lifts all {n} legs, {p} first.",
-            "{n} legs ride the {g} total, with {p} at the center.",
-            "A high {g} total carries {n} correlated legs behind {p}.",
-            "Possessions pile up in {g} and all {n} legs move together.",
-            "The {g} pace is the whole case for these {n} legs.",
-            "{p} sets the tempo and {n} legs follow in {g}."
+            "The {g} pace lifts all {n} legs, {p} first",
+            "{n} legs ride the {g} total, with {p} at the center",
+            "A high {g} total carries {n} correlated legs behind {p}",
+            "Possessions pile up in {g} and all {n} legs move together",
+            "The {g} pace is the whole case for these {n} legs",
+            "{p} sets the tempo and {n} legs follow in {g}"
           ]
         },
         "Under": {
           "production": [
             "The {g} total says pace. The model reads these {n} legs quieter.",
             "{g} projects a track meet. The model leans these {n} legs down.",
-            "The {g} pace runs hot while the model keeps these {n} legs quiet.",
-            "A loud {g} number, and the model reads {p} against it.",
+            "The {g} pace runs hot while the model keeps these {n} legs quiet",
+            "A loud {g} number, and the model reads {p} against it",
             "The board says shootout. The model says these {n} legs settle.",
-            "Fast game in {g}, and the model still keeps {p} quiet."
+            "Fast game in {g}, and the model still keeps {p} quiet"
           ]
         }
       },
@@ -1495,55 +1495,55 @@
         "Over": {
           "production": [
             "The {g} number sits low. The model reads these {n} legs higher.",
-            "{g} projects a rockfight, and the model still lifts these {n} legs.",
-            "A low {g} total, and the model reads {p} above it.",
+            "{g} projects a rockfight, and the model still lifts these {n} legs",
+            "A low {g} total, and the model reads {p} above it",
             "The board says grind. The model says {p} works anyway.",
-            "The {g} defense sets a low bar and these {n} legs clear it.",
-            "Slow game in {g}, and the model holds these {n} legs up."
+            "The {g} defense sets a low bar and these {n} legs clear it",
+            "Slow game in {g}, and the model holds these {n} legs up"
           ]
         }
       },
       "even": {
         "Over": {
           "production": [
-            "{n} legs lean on {p}'s gravity in {g}.",
-            "The {g} card runs {n} deep behind {p}.",
-            "{p} tilts the {g} floor and {n} legs slide with it.",
-            "One read carries {n} correlated legs in {g}, {p} first.",
-            "{n} legs move together in {g} because {p} moves first.",
-            "The {g} board sets {n} legs below what {p} makes routine."
+            "{n} legs lean on {p}'s gravity in {g}",
+            "The {g} card runs {n} deep behind {p}",
+            "{p} tilts the {g} floor and {n} legs slide with it",
+            "One read carries {n} correlated legs in {g}, {p} first",
+            "{n} legs move together in {g} because {p} moves first",
+            "The {g} board sets {n} legs below what {p} makes routine"
           ]
         },
         "Under": {
           "production": [
-            "{n} quiet legs in {g}, and {p} sets the tone.",
-            "The {g} card points down across all {n} legs.",
-            "{p} leads {n} legs to the quiet side of {g}.",
-            "Nothing on the {g} board lifts these {n} legs.",
-            "{n} correlated legs settle together in {g} behind {p}.",
-            "The {g} floor stays still and {n} legs stay with it."
+            "{n} quiet legs in {g}, and {p} sets the tone",
+            "The {g} card points down across all {n} legs",
+            "{p} leads {n} legs to the quiet side of {g}",
+            "Nothing on the {g} board lifts these {n} legs",
+            "{n} correlated legs settle together in {g} behind {p}",
+            "The {g} floor stays still and {n} legs stay with it"
           ]
         },
         "ContrastOver": {
           "production": [
-            "{p} keeps making shots while the rest of the {g} card settles.",
-            "The {g} floor goes quiet everywhere except {p}'s corner.",
-            "{p} finds the bucket while the other legs lean down.",
-            "One shot-maker holds up in {g}, and it is {p}.",
-            "{p} works the rim while the rest of the {g} card cools.",
-            "The {g} gym stays quiet apart from {p}.",
-            "{p} leans one way while the {g} card leans the other."
+            "{p} keeps making shots while the rest of the {g} card settles",
+            "The {g} floor goes quiet everywhere except {p}'s corner",
+            "{p} finds the bucket while the other legs lean down",
+            "One shot-maker holds up in {g}, and it is {p}",
+            "{p} works the rim while the rest of the {g} card cools",
+            "The {g} gym stays quiet apart from {p}",
+            "{p} leans one way while the {g} card leans the other"
           ]
         },
         "ContrastUnder": {
           "production": [
-            "The {g} card fills up and {p} stays quiet.",
-            "{p} settles while the rest of the {g} floor climbs.",
-            "Everybody finds a bucket in {g} except {p}.",
-            "The {g} board rises and {p} is the one holdout.",
-            "{p} takes the quiet side of a busy {g} card.",
-            "One line leans down in {g}, and it is {p}'s.",
-            "The {g} floor warms up and leaves {p} out."
+            "The {g} card fills up and {p} stays quiet",
+            "{p} settles while the rest of the {g} floor climbs",
+            "Everybody finds a bucket in {g} except {p}",
+            "The {g} board rises and {p} is the one holdout",
+            "{p} takes the quiet side of a busy {g} card",
+            "One line leans down in {g}, and it is {p}'s",
+            "The {g} floor warms up and leaves {p} out"
           ]
         },
         "Mixed": {

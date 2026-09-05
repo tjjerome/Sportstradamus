@@ -154,8 +154,8 @@ _OFFERS = pd.DataFrame(
 )
 
 # Three families: Tatum drives BOS family 1 (two markets, blowout); BOS family 2
-# is an even Embiid-Under / Tatum-Over split with no leg-majority → game-script;
-# Jokic drives DEN/MIA.
+# is an even Embiid-Under / Tatum-Over split with no leg-majority → game-script,
+# Mixed, whose same-family clauses name both players; Jokic drives DEN/MIA.
 _PARLAYS = pd.DataFrame(
     [
         {
@@ -205,18 +205,23 @@ def test_version_present():
 
 def test_thesis_exact_strings():
     assert _theses_by_family(_PARLAYS, _OFFERS) == {
-        ("BOS/PHI", 1.0): "Jayson Tatum piles on before the BOS/PHI bench empties",
-        ("BOS/PHI", 2.0): "the BOS/PHI margin giveth to the bench and taketh from the stars",
-        ("DEN/MIA", 1.0): ("The closer DEN/MIA gets, the better Nikola Jokic's passes become"),
+        ("BOS/PHI", 1.0): "Garbage time waits, and Jayson Tatum banks the points before it",
+        ("BOS/PHI", 2.0): (
+            "The BOS/PHI margin sorts it: Jayson Tatum clears the points number "
+            "while Joel Embiid comes up short on points"
+        ),
+        ("DEN/MIA", 1.0): "One-possession games need a passer, and Nikola Jokic closes DEN/MIA",
     }
 
 
-def test_no_standout_family_routes_to_game_script_not_a_star():
+def test_no_standout_family_routes_to_game_script_and_names_both_sides():
     """The even Embiid-Under / Tatum-Over split has no leg-majority ⇒ the headline
-    is about the game, naming neither player (the v1 alphabetical-star bug)."""
+    is about the game, not one star picked alphabetically (the v1 bug). Both legs
+    share a family, so the Mixed clauses name each side's player: the split is
+    stated, never a vague "ride some, fade the rest"."""
     thesis = _theses_by_family(_PARLAYS, _OFFERS)[("BOS/PHI", 2.0)]
-    assert "Tatum" not in thesis and "Embiid" not in thesis
-    assert thesis
+    assert "Jayson Tatum" in thesis and "Joel Embiid" in thesis
+    assert thesis.index("Jayson Tatum") > 0
 
 
 def test_thesis_written_on_every_row():

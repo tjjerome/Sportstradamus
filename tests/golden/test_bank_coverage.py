@@ -51,7 +51,7 @@ _MAX_TEMPLATE_WORDS = 16
 _ALLOWED_SLOTS = {
     "player": {"p", "g"},
     "game-script": {"g"},
-    "unit": {"team", "grp", "opp"},
+    "unit": {"team", "grp", "opp", "g"},
     "stack": {"n", "g", "p"},
 }
 
@@ -65,6 +65,8 @@ _UNDER_WORD_RE = re.compile(r"\b(under|unders)\b", re.I)
 _BANNED_PUNCT_RE = re.compile("[—;]")
 # The calm register states a read; it never sells one.
 _HYPE_WORD_RE = re.compile(r"\b(smash|smashes|hammer|hammers|cash|cashes|lock|locks)\b", re.I)
+# A sentence break inside a template: a period, space, then a capital or a slot.
+_INNER_BREAK_RE = re.compile(r"\.\s+(?=[A-Z{])")
 
 
 def _walk_variants():
@@ -258,6 +260,15 @@ def test_no_hype_words():
     for *key, variants in _walk_variants():
         for variant in variants:
             assert not _HYPE_WORD_RE.search(variant), (key, variant)
+
+
+def test_terminal_period_only_after_a_second_sentence():
+    """A headline is a card title: one sentence carries no closing period, and a
+    two-sentence headline keeps both — one voice closing every line while the
+    others do not reads as two products on one slate."""
+    for *key, variants in _walk_variants():
+        for variant in variants:
+            assert variant.endswith(".") is bool(_INNER_BREAK_RE.search(variant)), (key, variant)
 
 
 def test_basketball_player_bank_depth():
