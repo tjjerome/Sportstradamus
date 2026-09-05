@@ -199,13 +199,14 @@ stage ends with the §9 checklist green and the dashboard runnable.
      fallback net). `stories/bank.py` is a small pure loader: a cached JSON read plus
      `bank_cell(voice, archetype, shape, direction, category)` walking the fallback chain `(voice,
      arch, shape, dir, cat) → (shared, …) → (shared, …, "even", dir, cat) → (shared, …, "even", dir,
-     "production")` (guaranteed hit). v1's 107 player variants are preserved verbatim as
-     basketball's player cells. Template slots: player `{p}`/`{g}`; unit `{team}`/`{grp}`/`{opp}`;
-     game-script `{g}`; stack `{n}`/`{g}`/`{p}` — voices use only their archetype's slots. Author
-     football/hockey/baseball from game knowledge with sport-correct vocabulary and pin via a
-     synthetic-fixture coverage golden (no live legs needed; classifier/normalization/categories are
-     league-blind, so adding a league is one JSON voice block). Decisions: **no pace source**
-     (`total_ratio` is the tempo proxy); **WNBA shares the basketball voice**.
+     "production")` (guaranteed hit). Register, slot table (player `{p}`/`{g}`; unit
+     `{team}`/`{grp}`/`{opp}`; game-script `{g}`; stack `{n}`/`{g}`/`{p}`; Mixed adds the
+     engine-supplied `{up}`/`{down}` effect clauses from `stat_words.json`), keyword floors, and
+     the banned list live in [docs/story_voice.md](../story_voice.md) — the authoring contract every
+     voice is held to. Pinned via a synthetic-fixture coverage golden (no live legs needed;
+     classifier/normalization/categories are league-blind, so adding a league is one JSON voice
+     block). Decisions: **no pace source** (`total_ratio` is the tempo proxy); **WNBA shares the
+     basketball voice**.
 
   File layout (300-line cap on CODE only — bank strings are external JSON): `stories/legs.py`
   (parse + `enrich_legs` + `_stat_category`), `why.py` (unchanged), `context.py` (`GameCtx`/`Leg`,
