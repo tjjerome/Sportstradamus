@@ -1,0 +1,257 @@
+{
+  "shared": {
+    "scoring": {
+      "noun": "the points",
+      "thrive": "keep coming",
+      "fade": "dry up",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "boards": {
+      "noun": "the rebounds",
+      "thrive": "pile up",
+      "fade": "stay down",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "playmaking": {
+      "noun": "the assists",
+      "thrive": "keep coming",
+      "fade": "dry up",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "stops": {
+      "noun": "the stops",
+      "thrive": "pile up",
+      "fade": "thin out",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "k's": {
+      "noun": "the strikeouts",
+      "thrive": "climb",
+      "fade": "stay quiet",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "production": {
+      "noun": "the numbers",
+      "thrive": "climb",
+      "fade": "settle",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "mistakes": {
+      "noun": "the mistakes",
+      "thrive": "stay down",
+      "fade": "pile up",
+      "owned_thrive": "{who} keeps the {what} down",
+      "owned_fade": "{who} lets the {what} pile up"
+    }
+  },
+  "basketball": {
+    "scoring": {
+      "noun": "the points",
+      "thrive": "keep coming",
+      "fade": "dry up",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "boards": {
+      "noun": "the rebounds",
+      "thrive": "pile up",
+      "fade": "stay down",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "playmaking": {
+      "noun": "the assists",
+      "thrive": "keep coming",
+      "fade": "dry up",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "stops": {
+      "noun": "the stops",
+      "thrive": "pile up",
+      "fade": "thin out",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "k's": {
+      "noun": "the blocks",
+      "thrive": "keep coming",
+      "fade": "dry up",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "production": {
+      "noun": "the numbers",
+      "thrive": "climb",
+      "fade": "settle",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "mistakes": {
+      "noun": "the turnovers",
+      "thrive": "stay down",
+      "fade": "pile up",
+      "owned_thrive": "{who} keeps the {what} down",
+      "owned_fade": "{who} coughs up {what}"
+    }
+  },
+  "football": {
+    "scoring": {
+      "noun": "the yards",
+      "thrive": "keep coming",
+      "fade": "dry up",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "boards": {
+      "noun": "the contested catches",
+      "thrive": "keep coming",
+      "fade": "dry up",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "playmaking": {
+      "noun": "the completions",
+      "thrive": "keep coming",
+      "fade": "dry up",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "stops": {
+      "noun": "the tackles",
+      "thrive": "pile up",
+      "fade": "thin out",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "k's": {
+      "noun": "the three-and-outs",
+      "thrive": "keep coming",
+      "fade": "dry up",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "production": {
+      "noun": "the numbers",
+      "thrive": "hold up",
+      "fade": "flatten out",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "mistakes": {
+      "noun": "the negative plays",
+      "thrive": "stay down",
+      "fade": "pile up",
+      "owned_thrive": "{who} keeps the {what} down",
+      "owned_fade": "{who} lets the {what} pile up"
+    }
+  },
+  "hockey": {
+    "scoring": {
+      "noun": "the goals",
+      "thrive": "keep coming",
+      "fade": "dry up",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "boards": {
+      "noun": "the rebounds",
+      "thrive": "keep coming",
+      "fade": "dry up",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "playmaking": {
+      "noun": "the assists",
+      "thrive": "keep coming",
+      "fade": "dry up",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "stops": {
+      "noun": "the blocks",
+      "thrive": "pile up",
+      "fade": "thin out",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "k's": {
+      "noun": "the saves",
+      "thrive": "keep coming",
+      "fade": "dry up",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "production": {
+      "noun": "the numbers",
+      "thrive": "climb",
+      "fade": "go quiet",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "mistakes": {
+      "noun": "the goals against",
+      "thrive": "stay down",
+      "fade": "pile up",
+      "owned_thrive": "{who} keeps the {what} down",
+      "owned_fade": "{who} lets the {what} climb"
+    }
+  },
+  "baseball": {
+    "scoring": {
+      "noun": "the hits",
+      "thrive": "keep coming",
+      "fade": "stay down",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "boards": {
+      "noun": "the extra bases",
+      "thrive": "keep coming",
+      "fade": "dry up",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "playmaking": {
+      "noun": "the runners",
+      "thrive": "keep coming",
+      "fade": "dry up",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "stops": {
+      "noun": "the outs",
+      "thrive": "pile up",
+      "fade": "thin out",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "k's": {
+      "noun": "the strikeouts",
+      "thrive": "climb",
+      "fade": "stay quiet",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "production": {
+      "noun": "the numbers",
+      "thrive": "climb",
+      "fade": "go quiet",
+      "owned_thrive": "{who} clears the {what} number",
+      "owned_fade": "{who} comes up short on {what}"
+    },
+    "mistakes": {
+      "noun": "the free passes",
+      "thrive": "stay down",
+      "fade": "pile up",
+      "owned_thrive": "{who} keeps the {what} down",
+      "owned_fade": "{who} lets the {what} climb"
+    }
+  }
+}
