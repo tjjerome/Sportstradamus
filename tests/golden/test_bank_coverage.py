@@ -30,6 +30,8 @@ _SPORT_VOICES = tuple(sorted(set(_LEAGUE_VOICE.values())))
 _VOICES = {*_SPORT_VOICES, "shared"}
 _SHAPES = ("shootout", "grind", "blowout", "coinflip", "even")
 _CATEGORIES = (*legs._STAT_CATEGORY, "production", "mistakes")
+# stat_words.json's per-family schema — the parts an {up}/{down} clause is built from.
+_STAT_WORD_CLAUSES = ("noun", "thrive", "fade", "owned_thrive", "owned_fade")
 
 # Every reachable (archetype, direction) pair, straight from the engine.
 _ARCH_DIRS = [
@@ -41,6 +43,10 @@ _ARCH_DIRS = [
 # Depth floor for every cell in both banks: enough variants that the md5
 # rotation and the slate-uniqueness bump have real room to move.
 _MIN_VARIANTS_PER_CELL = 6
+
+# The guide's authoring target is six to fourteen *rendered* words; a slot costs
+# one word here and renders wider, so this ceiling only catches run-ons.
+_MAX_TEMPLATE_WORDS = 16
 
 _ALLOWED_SLOTS = {
     "player": {"p", "g"},
@@ -55,6 +61,10 @@ _SLOT_RE = re.compile(r"\{([^{}]*)\}")
 _BET_WORD_RE = re.compile(r"\b(over|overs|under|unders)\b", re.I)
 _OVER_WORD_RE = re.compile(r"\b(over|overs)\b", re.I)
 _UNDER_WORD_RE = re.compile(r"\b(under|unders)\b", re.I)
+# One thought per headline: an em-dash or a semicolon splices a second one in.
+_BANNED_PUNCT_RE = re.compile("[—;]")
+# The calm register states a read; it never sells one.
+_HYPE_WORD_RE = re.compile(r"\b(smash|smashes|hammer|hammers|cash|cashes|lock|locks)\b", re.I)
 
 
 def _walk_variants():
@@ -117,9 +127,53 @@ def test_every_voice_cell_carries_min_variants():
 def test_variants_reference_only_their_archetype_slots():
     for voice, archetype, shape, direction, category, variants in _walk_variants():
         allowed = _ALLOWED_SLOTS[archetype]
+        if direction == "Mixed":
+            allowed = allowed | {"up", "down"}
         for variant in variants:
             tokens = set(_SLOT_RE.findall(variant))
             assert tokens <= allowed, (voice, archetype, shape, direction, category, variant)
+
+
+def test_mixed_variants_name_both_effects():
+    """A Mixed headline is one cause and two named effects, never a vague split.
+
+    ``{up}`` and ``{down}`` render as whole clauses, so a template that leads
+    with either opens the headline lowercase ("the strikeouts pile up").
+    """
+    for voice, archetype, shape, direction, category, variants in _walk_variants():
+        if direction != "Mixed":
+            continue
+        key = (voice, archetype, shape, direction, category)
+        for variant in variants:
+            assert variant.count("{up}") == 1, (key, variant)
+            assert variant.count("{down}") == 1, (key, variant)
+            assert not variant.startswith(("{up}", "{down}")), (key, variant)
+
+
+def test_stat_words_cover_every_voice_and_family():
+    """Every ``{up}``/``{down}`` clause a Mixed headline can ask for is authored.
+
+    ``noun`` plus ``thrive``/``fade`` compose a subjectless clause ("the
+    strikeouts" + "pile up"), so those three carry no slots of their own. When
+    both sides of a split share a family the engine names the players instead,
+    which is what the owned forms and their ``{who}``/``{what}`` are for.
+    """
+    words = _bank("stat_words.json")
+    assert set(words) == _VOICES
+    for voice in _VOICES:
+        families = words[voice]
+        assert set(_CATEGORIES) <= set(families), voice
+        for family in _CATEGORIES:
+            clauses = families[family]
+            for clause in _STAT_WORD_CLAUSES:
+                text = clauses.get(clause)
+                assert isinstance(text, str) and text, (voice, family, clause)
+            assert clauses["noun"].startswith("the "), (voice, family)
+            for clause in ("noun", "thrive", "fade"):
+                assert "{" not in clauses[clause], (voice, family, clause)
+            for clause in ("owned_thrive", "owned_fade"):
+                slots = set(_SLOT_RE.findall(clauses[clause]))
+                assert slots == {"who", "what"}, (voice, family, clause)
 
 
 class _AnySlot(dict):
@@ -177,12 +231,44 @@ def test_literal_bet_words_only_in_mistakes_cells():
                 assert not wrong_side.search(variant), (key, variant)
 
 
-def test_v1_player_bank_preserved_in_basketball():
-    """The v1 basketball player bank survives in spirit: at least its 44
-    Over/Under cells and 107 variants, and the flagship line verbatim. The
-    letter-for-letter pin was retired because 12 v1 variants were broken
-    "against {g}" strings (treating the game slug as an opponent) that had to
-    be rewritten 1:1, and every cell has since been deepened."""
+def test_no_em_dash_or_semicolon():
+    """A headline gets one comma or one colon. An em-dash or a semicolon is a
+    second thought pushed into a template built to carry one."""
+    for *key, variants in _walk_variants():
+        for variant in variants:
+            assert not _BANNED_PUNCT_RE.search(variant), (key, variant)
+    for voice, families in _bank("stat_words.json").items():
+        for family, clauses in families.items():
+            for clause, text in clauses.items():
+                assert not _BANNED_PUNCT_RE.search(text), (voice, family, clause)
+    # why_bank["why"] is exempt: the per-offer Why sentences are outside the rewrite's scope.
+    for key, variants in _walk_why_branches():
+        if key[0] == "dek":
+            for variant in variants:
+                assert not _BANNED_PUNCT_RE.search(variant), (key, variant)
+
+
+def test_headline_templates_stay_short():
+    for *key, variants in _walk_variants():
+        for variant in variants:
+            assert len(variant.split()) <= _MAX_TEMPLATE_WORDS, (key, variant)
+
+
+def test_no_hype_words():
+    for *key, variants in _walk_variants():
+        for variant in variants:
+            assert not _HYPE_WORD_RE.search(variant), (key, variant)
+
+
+def test_basketball_player_bank_depth():
+    """The depth floor outlived the v1 wording it was measured from.
+
+    Its 44 Over/Under cells and 107 variants are a floor no re-authoring may
+    drop below, but no line is pinned verbatim any more: the bank has since
+    been rewritten twice — once to repair broken "against {g}" strings, once
+    for the calm register — and a letter-for-letter pin only ever recorded
+    which sentence happened to be first.
+    """
     cells = [
         variants
         for voice, archetype, _, direction, _, variants in _walk_variants()
@@ -190,9 +276,6 @@ def test_v1_player_bank_preserved_in_basketball():
     ]
     assert len(cells) >= 44
     assert sum(len(variants) for variants in cells) >= 107
-    assert "In {g}'s track meet, {p} pours in the points" in bank_cell(
-        "basketball", "player", "shootout", "Over", "scoring"
-    )
 
 
 def test_unknown_voice_reads_shared():
@@ -299,41 +382,20 @@ def test_every_pipeline_league_has_a_voice():
     assert set(stat_meta) <= set(_LEAGUE_VOICE)
 
 
-# Lead case is a bank-wide convention: Over/Under cells read as headlines and open
-# on a capital or a slot, while Mixed and Contrast* cells read as fragments and
-# never capitalise. These cells predate the convention and keep their lowercase
-# leads; no new cell may join them.
-_LOWERCASE_LEAD_CELLS = frozenset(
-    {
-        ("shared", "player", "even", "Over", "mistakes"),
-        ("shared", "player", "even", "Under", "mistakes"),
-        ("basketball", "player", "even", "Over", "mistakes"),
-        ("basketball", "player", "even", "Under", "mistakes"),
-        ("football", "player", "even", "Over", "mistakes"),
-        ("football", "player", "even", "Under", "mistakes"),
-        ("football", "stack", "even", "Under", "production"),
-        ("hockey", "player", "even", "Over", "mistakes"),
-        ("hockey", "player", "even", "Under", "mistakes"),
-        ("hockey", "stack", "even", "Under", "production"),
-        ("baseball", "player", "even", "Over", "mistakes"),
-        ("baseball", "player", "even", "Under", "mistakes"),
-        ("baseball", "stack", "even", "Under", "production"),
-    }
-)
-
-
 def test_lead_case_matches_direction():
-    """Mixed within one cell would render the same game capitalised one day and
-    lowercase the next, since the md5 rotation moves through the variants."""
+    """One register for every headline, in every direction.
+
+    A story renders its thesis on its own, so a lowercase lead reads as the
+    back half of a sentence whose front half never arrives — and the md5
+    rotation would give the same game a capital one day and a fragment the
+    next. Mixed and Contrast* cells used to be authored as fragments; they are
+    headlines now, and a slot lead is the one exception ({p} supplies its own
+    proper noun).
+    """
     for voice, archetype, shape, direction, category, variants in _walk_variants():
         key = (voice, archetype, shape, direction, category)
         for variant in variants:
-            if variant[0] == "{":
-                continue
-            if direction in ("Mixed", "ContrastOver", "ContrastUnder"):
-                assert variant[0].islower(), (key, variant)
-            elif key not in _LOWERCASE_LEAD_CELLS:
-                assert variant[0].isupper(), (key, variant)
+            assert variant[0] == "{" or variant[0].isupper(), (key, variant)
 
 
 def _cell_text(voice, archetype, shape, direction, category):
@@ -467,7 +529,7 @@ def test_no_prose_literals_in_stories_source():
     the bank contract); the eyeball pass remains the real gate.
     """
     slot_re = re.compile(
-        r"\{(?:p|g|n|team|grp|opp|dev|line|pronoun|model_pct|book_pct"
+        r"\{(?:p|g|n|team|grp|opp|up|down|who|what|dev|line|pronoun|model_pct|book_pct"
         r"|gap|side|ev|book_ev|rho|slot|throws)\}"
     )
     package_dir = Path(engine.__file__).parent
