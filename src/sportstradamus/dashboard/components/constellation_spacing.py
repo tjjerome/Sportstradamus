@@ -54,6 +54,14 @@ _LINE_HEIGHT_EM = 1.25  # a caption is one line — plotly's single-line box at 
 # from the glyph's edge by an ulp and the strict overlap test rejects the star's
 # own caption at random positions.
 _CAPTION_GAP_PX = 1
+# Caption placements in the order tried, as plotly textposition plus the unit
+# shift of the text box from the star: above, below, then beside it.
+_PLACEMENTS = (
+    ("top center", 0.0, 1.0),
+    ("bottom center", 0.0, -1.0),
+    ("middle right", 1.0, 0.0),
+    ("middle left", -1.0, 0.0),
+)
 
 
 def settle(
@@ -207,8 +215,9 @@ def caption_positions(
 
     The slip's stars come first, then the ``top_k`` biggest candidates — a
     caption marks importance, never selection (that stays fill + opacity, DESIGN
-    §4a). Each tries above the star then below it, and takes the first placement
-    whose text box clears every glyph and every caption already accepted.
+    §4a). Each tries above the star, below it, then beside it, and takes the
+    first placement whose text box clears every glyph and every caption already
+    accepted.
     """
     glyphs = [_box(pos[k][0] * px[0], pos[k][1] * px[1], sizes[k], sizes[k]) for k in keys]
     by_size = sorted(keys, key=lambda k: (-sizes[k], k))
@@ -218,11 +227,14 @@ def caption_positions(
     captions: dict[str, str] = {}
     for key in order:
         x, y = pos[key][0] * px[0], pos[key][1] * px[1]
+        width = len(labels[key]) * _CHAR_WIDTH_EM * font_px
         height = _LINE_HEIGHT_EM * font_px
-        offset = sizes[key] / 2 + _CAPTION_GAP_PX + height / 2
-        for placement, direction in (("top center", 1.0), ("bottom center", -1.0)):
+        for placement, dx, dy in _PLACEMENTS:
             box = _box(
-                x, y + direction * offset, len(labels[key]) * _CHAR_WIDTH_EM * font_px, height
+                x + dx * (sizes[key] / 2 + _CAPTION_GAP_PX + width / 2),
+                y + dy * (sizes[key] / 2 + _CAPTION_GAP_PX + height / 2),
+                width,
+                height,
             )
             if not any(_overlaps(box, other) for other in boxes):
                 captions[key] = placement

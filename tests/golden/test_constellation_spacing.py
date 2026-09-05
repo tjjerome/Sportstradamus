@@ -36,6 +36,7 @@ from sportstradamus.dashboard.components.constellation_spacing import (
     _CHAR_WIDTH_EM,
     _FRAME_INSET,
     _LINE_HEIGHT_EM,
+    _PLACEMENTS,
     _STAR_GAP_PX,
     CAPTION_TOP_K,
     DEFAULT_STARS,
@@ -79,6 +80,9 @@ def _key(i: int) -> str:
 
 def _rect(cx: float, cy: float, width: float, height: float) -> tuple[float, ...]:
     return (cx - width / 2, cy - height / 2, cx + width / 2, cy + height / 2)
+
+
+_SHIFT = {place: (dx, dy) for place, dx, dy in _PLACEMENTS}
 
 
 def _disjoint(one: tuple[float, ...], other: tuple[float, ...]) -> bool:
@@ -343,9 +347,11 @@ def test_caption_boxes_never_overlap():
             if not text:
                 continue
             height = _LINE_HEIGHT_EM * font_px
-            lift = (size / 2 + _CAPTION_GAP_PX + height / 2) * (1 if place == "top center" else -1)
             width = len(text) * _CHAR_WIDTH_EM * font_px
-            boxes.append((True, _rect(cx, cy + lift, width, height)))
+            dx, dy = _SHIFT[place]
+            shift_x = dx * (size / 2 + _CAPTION_GAP_PX + width / 2)
+            shift_y = dy * (size / 2 + _CAPTION_GAP_PX + height / 2)
+            boxes.append((True, _rect(cx + shift_x, cy + shift_y, width, height)))
         for (one_is_caption, one), (other_is_caption, other) in itertools.combinations(boxes, 2):
             if one_is_caption or other_is_caption:
                 assert _disjoint(one, other), (template["label"], mobile, one, other)
