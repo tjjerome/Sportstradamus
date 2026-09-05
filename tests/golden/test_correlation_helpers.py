@@ -677,9 +677,9 @@ def _leg(player: str, bet: str, cmarket: str) -> dict:
 
 def test_leg_pair_corr_boost_reads_cmap_value() -> None:
     """Same-bet pair on different players: rho is the c_map entry, boost 1."""
-    c_map = {("G1.PTS", "G1.AST"): 0.4}
+    c_map = {("G1.PTS", "G2.AST"): 0.4}
     rho, boost = _leg_pair_corr_boost(
-        _leg("A", "Over", "G1.PTS"), _leg("B", "Over", "G1.AST"), c_map, {}, {}
+        _leg("A", "Over", "G1.PTS"), _leg("B", "Over", "G2.AST"), c_map, {}, {}
     )
     assert rho == pytest.approx(0.4)
     assert boost == 1
@@ -687,20 +687,50 @@ def test_leg_pair_corr_boost_reads_cmap_value() -> None:
 
 def test_leg_pair_corr_boost_opposite_bet_flips_sign() -> None:
     """Over vs Under negates the correlation increment."""
-    c_map = {("G1.PTS", "G1.AST"): 0.4}
+    c_map = {("G1.PTS", "G2.AST"): 0.4}
     rho, _ = _leg_pair_corr_boost(
-        _leg("A", "Over", "G1.PTS"), _leg("B", "Under", "G1.AST"), c_map, {}, {}
+        _leg("A", "Over", "G1.PTS"), _leg("B", "Under", "G2.AST"), c_map, {}, {}
     )
     assert rho == pytest.approx(-0.4)
 
 
 def test_leg_pair_corr_boost_reversed_key_lookup() -> None:
     """The (y, x) fallback lookup finds a pair stored in the other order."""
-    c_map = {("G1.AST", "G1.PTS"): 0.25}
+    c_map = {("G2.AST", "G1.PTS"): 0.25}
     rho, _ = _leg_pair_corr_boost(
-        _leg("A", "Over", "G1.PTS"), _leg("B", "Over", "G1.AST"), c_map, {}, {}
+        _leg("A", "Over", "G1.PTS"), _leg("B", "Over", "G2.AST"), c_map, {}, {}
     )
     assert rho == pytest.approx(0.25)
+
+
+def test_leg_pair_corr_boost_two_players_in_one_slot_read_no_correlation() -> None:
+    """Different players sharing a position key get rho 0, not the slot's own block.
+
+    MLB's modal batting-slot fallback (no lineup posted yet) can put two hitters in
+    one ``B{n}`` key; the matrix's ``B7.x ~ B7.y`` entries are within-player
+    correlations and say nothing about that pair. The banned-combo modifier still
+    applies — it is keyed by market, not by who bats where.
+    """
+    c_map = {("B7.hits", "B7.hits"): 1.0, ("B7.hits", "B7.total bases"): 0.9}
+    team_mod = {frozenset(["B.hits", "B.total bases"]): [0.8, 1.1]}
+    rho, boost = _leg_pair_corr_boost(
+        _leg("Church", "Under", "B7.hits"), _leg("Fermin", "Under", "B7.hits"), c_map, {}, {}
+    )
+    assert rho == 0
+    assert boost == 1
+    rho, boost = _leg_pair_corr_boost(
+        _leg("Church", "Under", "B7.hits"),
+        _leg("Fermin", "Under", "B7.total bases"),
+        c_map,
+        team_mod,
+        {},
+    )
+    assert rho == 0
+    assert boost == pytest.approx(0.8)
+    rho, _ = _leg_pair_corr_boost(
+        _leg("Church", "Under", "B7.hits"), _leg("Church", "Under", "B7.total bases"), c_map, {}, {}
+    )
+    assert rho == pytest.approx(0.9)
 
 
 def test_leg_pair_corr_boost_same_player_zeroes_boost() -> None:
@@ -736,7 +766,7 @@ def _matrix_game() -> tuple[pd.DataFrame, dict]:
             "Boost": [1.0, 1.0, 1.0],
             "Player": ["A", "B", "C"],
             "Bet": ["Over", "Over", "Over"],
-            "cMarket": [["G1.PTS"], ["G1.AST"], ["C1.REB"]],
+            "cMarket": [["G1.PTS"], ["G2.AST"], ["C1.REB"]],
             # Deliberately not real stat_map["Underdog"] keys — keeps
             # _leg_shrinkage on its no-I/O 1.0 fallback path in these tests.
             "Market": ["Test1", "Test2", "Test3"],
@@ -748,7 +778,7 @@ def _matrix_game() -> tuple[pd.DataFrame, dict]:
 def test_build_correlation_matrices_structure_and_values() -> None:
     """C/M are symmetric leg matrices; EV follows the documented closed form."""
     game_df, game_dict = _matrix_game()
-    c_map = {("G1.PTS", "G1.AST"): 0.4, ("G1.AST", "C1.REB"): 0.2}
+    c_map = {("G1.PTS", "G2.AST"): 0.4, ("G2.AST", "C1.REB"): 0.2}
 
     g = _build_correlation_matrices(game_df, game_dict, c_map, {}, {}, [3.0], "Underdog", "NBA", {})
     C, M, EV, EVb, p_push = g.C, g.M, g.EV, g.EVb, g.p_push
@@ -801,7 +831,9 @@ def test_kernel_reads_real_nba_cmap() -> None:
     c_map = _build_game_corr_map("NYK", "SAS", c_same, c_opp)
     assert c_map, "real NBA c_map is empty — parquet vocabulary changed?"
 
-    (x, y), expected = next((k, v) for k, v in c_map.items() if k[0] != k[1])
+    (x, y), expected = next(
+        (k, v) for k, v in c_map.items() if k[0].split(".")[0] != k[1].split(".")[0]
+    )
     rho, boost = _leg_pair_corr_boost(_leg("A", "Over", x), _leg("B", "Over", y), c_map, {}, {})
     assert rho == pytest.approx(expected)
     assert boost == 1

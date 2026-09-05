@@ -170,11 +170,18 @@ def _leg_pair_corr_boost(leg1, leg2, c_map, team_mod_map, opp_mod_map):
     n1 = leg1["Player"]
     n2 = leg2["Player"]
 
+    distinct = not (n1 in n2 or n2 in n1)
     rho = 0
-    boost = 0 if (n1 in n2 or n2 in n1) else 1
+    boost = 1 if distinct else 0
     for xi, x in enumerate(cm1):
         for yi, y in enumerate(cm2):
-            increment = c_map.get((x, y), c_map.get((y, x), 0))
+            # Two players resolved to one position key (MLB's modal batting-slot
+            # fallback before lineups post) would read the slot's own block — a
+            # within-player correlation that says nothing about the pair.
+            if distinct and x.split(".", 1)[0] == y.split(".", 1)[0]:
+                increment = 0
+            else:
+                increment = c_map.get((x, y), c_map.get((y, x), 0))
             if b1[xi] != b2[yi]:
                 increment = -increment
             rho += increment
