@@ -466,16 +466,16 @@ def _capped_deep_ties(edges: list[tuple[str, str, float]], deep: set[str]) -> se
     nothing to read against — so they are the pairs the cap drops outright.
     """
     incident: defaultdict[str, list[tuple[str, str, float]]] = defaultdict(list)
-    for edge in edges:
-        if edge[0] in deep and edge[1] in deep:
+    for node_a, node_b, rho in edges:
+        if node_a in deep and node_b in deep:
             continue
-        for key in (edge[0], edge[1]):
+        for key in (node_a, node_b):
             if key in deep:
-                incident[key].append(edge)
+                incident[key].append((node_a, node_b, rho))
     return {
         (node_a, node_b)
         for ties in incident.values()
-        for node_a, node_b, _ in sorted(ties, key=lambda edge: (-abs(edge[2]), edge[:2]))[
+        for node_a, node_b, _ in sorted(ties, key=lambda tie: (-abs(tie[2]), tie[:2]))[
             :DEEP_EDGES_PER_STAR
         ]
     }
