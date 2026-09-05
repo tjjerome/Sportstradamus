@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from sportstradamus.helpers.combined_markets import ComboComponent, combo_sum_quote
+from sportstradamus.helpers.config import stat_cv
 from sportstradamus.helpers.io import market_file_slug
 from sportstradamus.training import scorecard
 from sportstradamus.training.component_cells import (
@@ -25,6 +26,22 @@ from sportstradamus.training.component_sum import _model_rho, _thinned, componen
 _MARGINAL_TOL = 2e-3
 
 _DATES = [f"2026-01-{day:02d}" for day in range(1, 6)]
+
+
+@pytest.fixture(autouse=True)
+def _pinned_cv(monkeypatch):
+    """Pin the per-cell cv the component loader hands the kernel.
+
+    ``stat_calibration.json`` is gitignored and rewritten by every ``meditate``:
+    a fresh clone (CI) reads the cv=1.0 default for every cell, which the NegBin
+    guard in ``load_component_cell`` rejects, and a dev box reads whatever the
+    last run left. The cells decoded here need a dispersion, not a live one.
+    """
+    monkeypatch.setitem(
+        stat_cv,
+        "NBA",
+        {"BLK": 1.4, "STL": 1.35, "REB": 1.25, "PTS": 1.2, "MIN": 1.05, "BLST": 1.3},
+    )
 
 
 def _rho_zero(_a, _b):
