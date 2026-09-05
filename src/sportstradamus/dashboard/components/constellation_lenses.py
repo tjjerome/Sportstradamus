@@ -1,8 +1,9 @@
 """The constellation's two lenses — deeper inside the map, wider around it.
 
 Both are optional overlays on ``constellation.py``'s figure and both obey one
-rule: a lens may add stars, never move the ones already drawn — and neither may
-a click, which nothing animates. *Look deeper* fades the game's remaining legs
+rule: a lens may add stars, never move the ones already drawn. A click grows
+only the picked star's own glyph, which may nudge the neighbours it touches,
+and nothing animates. *Look deeper* fades the game's remaining legs
 in as small stars **inside** the constellation, each settled beside the main
 star it correlates with (or into its own team's open space) with its ties drawn,
 so the map gains detail instead of a second ring around it. *Look wider* leaves

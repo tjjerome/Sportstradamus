@@ -31,10 +31,10 @@ from sportstradamus.leg_schema import is_model_liked, leg_field
 X_RANGE, Y_RANGE = 1.6, 1.4  # the figure's locked axis ranges (constellation._blank_figure)
 
 # Data units to css px, per viewport: the desktop plot box is ~980x360 over the
-# 3.2 x 2.8 unit frame, the phone ~358 wide at the same height — the aspect
-# inversion SHAPE_SCALE_MOBILE is tuned for.
+# 3.2 x 2.8 unit frame, the phone's ~342 wide at the same height (measured on a
+# 390 px viewport) — the aspect inversion SHAPE_SCALE_MOBILE is tuned for.
 PX_PER_UNIT = (306.0, 128.6)
-PX_PER_UNIT_MOBILE = (112.0, 128.6)
+PX_PER_UNIT_MOBILE = (107.0, 128.6)
 
 _CELL_PX = 6  # lattice pitch: a nudged star lands within 6 px of ideal, invisible at star scale
 _STAR_GAP_PX = 6  # clear air between two glyphs' bounding circles
