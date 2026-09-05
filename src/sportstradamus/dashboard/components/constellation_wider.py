@@ -110,8 +110,9 @@ def wider_positions(
         ``(key -> position, [(game, label x, label y)])``, all in data units.
     """
     footprint = _footprint(occupied, sizes, px)
+    members = max((len(rows) for _, rows in groups), default=0)
     bands = sorted(
-        _sky_bands(footprint, px, sky_y=sky_y, size=size, label_px=label_px),
+        _sky_bands(footprint, px, sky_y=sky_y, size=size, label_px=label_px, members=members),
         key=lambda band: (band[2] - band[0]) * (band[3] - band[1]),
         reverse=True,
     )[: len(groups)]
@@ -123,7 +124,11 @@ def wider_positions(
         X_RANGE * _FRAME_INSET * px[0],
         sky_y * _FRAME_INSET * px[1],
     )
-    rects, discs = [footprint], []
+    # A label may use the map's margin — text beside the outermost star reads as a
+    # name, where a sky star there reads as one of the map's own.
+    blocks = (footprint, _footprint(occupied, sizes, px, margin=0.0))
+    rects: list[tuple[float, float, float, float]] = []
+    discs: list[tuple[float, float, float]] = []
     anchors: dict[str, tuple[float, float]] = {}
     labels: list[tuple[str, float, float]] = []
     for index, (game, rows) in enumerate(groups):
@@ -131,6 +136,7 @@ def wider_positions(
             game,
             len(rows),
             bands[index % len(bands)],
+            blocks,
             rects,
             discs,
             size=size,
@@ -156,6 +162,7 @@ def _throw_cluster(
     game: str,
     members: int,
     band: tuple[float, float, float, float],
+    blocks: tuple[tuple[float, float, float, float], tuple[float, float, float, float]],
     rects: list[tuple[float, float, float, float]],
     discs: list[tuple[float, float, float]],
     *,
@@ -166,26 +173,25 @@ def _throw_cluster(
     """One game's cluster: seeded throws into its band, the first that clears.
 
     A throw is a centre anywhere in the band and a ``reach`` its legs scatter
-    within, uniformly over that disc. It clears when the disc and the ink box its
-    label hangs in miss every rectangle in ``rects`` — the map's footprint, then
-    the labels already reserved — every disc already thrown, and the frame. Half
-    the throws take a random reach and half the tightest one the legs fit in, so
-    a band with room reads loose while a crammed one still has throws that can
-    squeeze. The label hangs under the lowest leg, or over the highest where the
-    frame leaves no room below, and is drawn exactly where it was reserved:
-    ``settle`` may still nudge a leg, but never the name.
+    within, uniformly over that disc. It clears when the disc misses the map's
+    footprint and the ink box its label hangs in misses the map's stars (the two
+    ``blocks``), and both miss every label in ``rects``, every disc already
+    thrown, and the frame. Half the throws take a random reach and half the
+    tightest one the legs fit in, so a band with room reads loose while a crammed
+    one still has throws that can squeeze. The label hangs under the lowest leg,
+    or over the highest where the frame leaves no room below, and is drawn
+    exactly where it was reserved: ``settle`` may still nudge a leg, but never
+    the name.
 
     Reserves the throw it takes (appending to ``rects`` and ``discs``) and returns
     the legs' px positions in row order plus the label's px position.
     """
     rng = random.Random(int(hashlib.md5(game.encode()).hexdigest(), 16))
     lift = _label_lift(size, label_px)
-    pad = size + _SKY_NUDGE_PX
+    pad = _label_pad(size)
     width = len(game) * _CHAR_WIDTH_EM * label_px + 2 * pad
     height = _LABEL_LINE_PX * label_px + 2 * pad
-    # Enough disc for one glyph per member and its clear air, so the legs rarely
-    # collide and a settle nudge stays inside the reach the throw reserved.
-    lo = max(_WIDER_REACH_MIN, math.sqrt(members) * (size + _STAR_GAP_PX) / 2)
+    lo = _tight_reach(members, size)
     hi = max(lo, _WIDER_REACH_MAX)
     spread = [(math.sqrt(rng.random()), rng.uniform(0, math.tau)) for _ in range(members)]
     best = None
@@ -200,7 +206,7 @@ def _throw_cluster(
         if label_y - height / 2 < frame[1]:
             label_y = max(py for _, py in points) + lift
         label = _box(x, label_y, width, height)
-        clash = _clash((x, y, room), label, rects, discs, frame)
+        clash = _clash((x, y, room), label, blocks, rects, discs, frame)
         if best is None or clash < best[0]:
             best = (clash, (x, y, room), label, points, label_y)
         if not clash:
@@ -217,18 +223,21 @@ def _throw_cluster(
 def _clash(
     disc: tuple[float, float, float],
     label: tuple[float, float, float, float],
+    blocks: tuple[tuple[float, float, float, float], tuple[float, float, float, float]],
     rects: Sequence[tuple[float, float, float, float]],
     discs: Sequence[tuple[float, float, float]],
     frame: tuple[float, float, float, float],
 ) -> float:
     """How much of a throw lands on something already there; 0.0 when it clears.
 
-    Boxes meet boxes by intersection area and circles by penetration depth —
-    mixed units on purpose, since the sum is only ever read as a ranking between
-    throws in a band too crammed for any of them to clear, and every term goes to
-    zero exactly when the throw is clean.
+    ``blocks`` is the map twice: the margin-grown footprint the disc must miss
+    and the bare star box the label must miss. Boxes meet boxes by intersection
+    area and circles by penetration depth — mixed units on purpose, since the sum
+    is only ever read as a ranking between throws in a band too crammed for any
+    of them to clear, and every term goes to zero exactly when the throw is clean.
     """
     x, y, radius = disc
+    footprint, core = blocks
 
     def sink(cx: float, cy: float, reach: float, rect: tuple[float, float, float, float]) -> float:
         near = (min(max(cx, rect[0]), rect[2]), min(max(cy, rect[1]), rect[3]))
@@ -245,11 +254,17 @@ def _clash(
             )
         )
 
+    def area(
+        one: tuple[float, float, float, float], two: tuple[float, float, float, float]
+    ) -> float:
+        return max(min(one[2], two[2]) - max(one[0], two[0]), 0.0) * max(
+            min(one[3], two[3]) - max(one[1], two[1]), 0.0
+        )
+
     total = outside((x - radius, y - radius, x + radius, y + radius)) + outside(label)
+    total += sink(x, y, radius, footprint) + area(label, core)
     for rect in rects:
-        total += sink(x, y, radius, rect) + max(
-            min(label[2], rect[2]) - max(label[0], rect[0]), 0.0
-        ) * max(min(label[3], rect[3]) - max(label[1], rect[1]), 0.0)
+        total += sink(x, y, radius, rect) + area(label, rect)
     for other_x, other_y, other_radius in discs:
         total += max(radius + other_radius - math.dist((x, y), (other_x, other_y)), 0.0)
         total += sink(other_x, other_y, other_radius, label)
@@ -261,13 +276,41 @@ def _label_lift(size: float, label_px: float) -> float:
     return size / 2 + _LABEL_DROP_PX + _LABEL_LINE_PX * label_px / 2
 
 
+def _label_pad(size: float) -> float:
+    """Clear air reserved around a label's ink: a glyph's radius plus the nudge."""
+    return size / 2 + _SKY_NUDGE_PX
+
+
+def _tight_reach(members: int, size: float) -> float:
+    """The tightest disc ``members`` glyphs fit in with their clear air, in px.
+
+    One glyph's worth of area per member, so the legs rarely collide and a settle
+    nudge stays inside the reach the throw reserved.
+    """
+    return max(_WIDER_REACH_MIN, math.sqrt(members) * (size + _STAR_GAP_PX) / 2)
+
+
+def _band_room(members: int, size: float, label_px: float) -> tuple[float, float]:
+    """Px a band must span to be sky: ``(across a side band, across a top or bottom one)``.
+
+    A side band has the map's whole height for the label to hang into, so it
+    only has to be as wide as the tightest disc; a band above or below the map
+    stacks the label under the disc, so it has to be that tall.
+    """
+    disc = 2 * (_tight_reach(members, size) + size)
+    hang = _label_lift(size, label_px) + _LABEL_LINE_PX * label_px / 2 + _label_pad(size)
+    return disc, disc + hang
+
+
 def _footprint(
     occupied: Mapping[str, tuple[float, float]],
     sizes: Mapping[str, float],
     px: tuple[float, float],
+    *,
+    margin: float = _WIDER_MARGIN_PX,
 ) -> tuple[float, float, float, float]:
-    """The px rectangle the drawn map fills, grown by ``_WIDER_MARGIN_PX`` of clear air."""
-    reach = {key: sizes[key] / 2 + _WIDER_MARGIN_PX for key in occupied}
+    """The px rectangle the drawn map fills, grown by ``margin`` of clear air."""
+    reach = {key: sizes[key] / 2 + margin for key in occupied}
     return (
         min(x * px[0] - reach[key] for key, (x, _) in occupied.items()),
         min(y * px[1] - reach[key] for key, (_, y) in occupied.items()),
@@ -283,25 +326,26 @@ def _sky_bands(
     sky_y: float,
     size: float,
     label_px: float,
+    members: int,
 ) -> list[tuple[float, float, float, float]]:
     """The open px rectangles around the footprint: left, right, above, below.
 
-    A band too thin to hold the tightest cluster and the label hanging under it
-    is a gutter, not sky, and is dropped — which is how the desktop ends up with
-    only its two side bands and the phone, whose map spans the width, with only
-    the two it grew in y.
+    A band too thin to hold the tightest cluster (and, above or below the map,
+    the label hanging under it — :func:`_band_room`) is a gutter, not sky, and
+    is dropped — which is how the desktop ends up with only its two side bands
+    and the phone, whose map spans the width, with only the two it grew in y.
     """
     left, bottom = -X_RANGE * _FRAME_INSET * px[0], -sky_y * _FRAME_INSET * px[1]
     right, top = -left, -bottom
     x0, y0, x1, y1 = footprint
-    room = 2 * (_WIDER_REACH_MIN + size) + _label_lift(size, label_px)
+    beside, stacked = _band_room(members, size, label_px)
     return [
         band
-        for band in (
-            (left, bottom, x0, top),
-            (x1, bottom, right, top),
-            (left, y1, right, top),
-            (left, bottom, right, y0),
+        for band, room in (
+            ((left, bottom, x0, top), beside),
+            ((x1, bottom, right, top), beside),
+            ((left, y1, right, top), stacked),
+            ((left, bottom, right, y0), stacked),
         )
         if min(band[2] - band[0], band[3] - band[1]) >= room
     ]
@@ -315,6 +359,7 @@ def _grown_sky(
     sky_y: float,
     size: float,
     label_px: float,
+    members: int,
 ) -> float:
     """``sky_y``, opened in y until the sky above and below the map both hold.
 
@@ -327,13 +372,13 @@ def _grown_sky(
     exactly what that takes.
     """
     box = _footprint(occupied, sizes, px)
-    bands = _sky_bands(box, px, sky_y=sky_y, size=size, label_px=label_px)
+    bands = _sky_bands(box, px, sky_y=sky_y, size=size, label_px=label_px, members=members)
     if any(band[2] <= box[0] or band[0] >= box[2] for band in bands):
         return sky_y
     # A lattice cell of play past the gutter test: the sky opens the same amount
     # above and below, and the band that lands an ulp short would be dropped.
-    clear = max(box[3], -box[1]) + 2 * (_WIDER_REACH_MIN + size) + _label_lift(size, label_px)
-    return max(sky_y, (clear + _CELL_PX) / (px[1] * _FRAME_INSET))
+    clear = max(box[3], -box[1]) + _band_room(members, size, label_px)[1] + _CELL_PX
+    return max(sky_y, clear / (px[1] * _FRAME_INSET))
 
 
 def add_wider_layer(
@@ -354,7 +399,15 @@ def add_wider_layer(
     frame the figure grows by exactly the added y-range, so the px-per-unit the map
     was spaced against survives the reshape.
     """
-    sky_y = _grown_sky(occupied, sizes, px, sky_y=sky_y, size=size, label_px=label_size)
+    sky_y = _grown_sky(
+        occupied,
+        sizes,
+        px,
+        sky_y=sky_y,
+        size=size,
+        label_px=label_size,
+        members=max((len(rows) for _, rows in groups), default=0),
+    )
     pos, labels = wider_positions(
         groups, occupied, sizes, px, size=size, sky_y=sky_y, label_px=label_size
     )

@@ -216,9 +216,11 @@ def caption_positions(
     The slip's stars come first, then the ``top_k`` biggest candidates — a
     caption marks importance, never selection (that stays fill + opacity, DESIGN
     §4a). Each tries above the star, below it, then beside it, and takes the
-    first placement whose text box clears every glyph and every caption already
-    accepted.
+    first placement whose text box stays on the plot and clears every glyph and
+    every caption already accepted — a caption the axis clips loses its first
+    word, which on the phone was the player's name.
     """
+    plot = (-X_RANGE * px[0], -Y_RANGE * px[1], X_RANGE * px[0], Y_RANGE * px[1])
     glyphs = [_box(pos[k][0] * px[0], pos[k][1] * px[1], sizes[k], sizes[k]) for k in keys]
     by_size = sorted(keys, key=lambda k: (-sizes[k], k))
     order = [k for k in by_size if k in active] + [k for k in by_size if k not in active][:top_k]
@@ -236,7 +238,10 @@ def caption_positions(
                 width,
                 height,
             )
-            if not any(_overlaps(box, other) for other in boxes):
+            on_plot = (
+                plot[0] <= box[0] and plot[1] <= box[1] and box[2] <= plot[2] and box[3] <= plot[3]
+            )
+            if on_plot and not any(_overlaps(box, other) for other in boxes):
                 captions[key] = placement
                 boxes.append(box)
                 break

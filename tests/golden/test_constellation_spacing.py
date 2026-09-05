@@ -45,6 +45,7 @@ from sportstradamus.dashboard.components.constellation_spacing import (
     PX_PER_UNIT_MOBILE,
     X_RANGE,
     Y_RANGE,
+    caption_positions,
     default_stars,
     settle,
 )
@@ -355,6 +356,26 @@ def test_caption_boxes_never_overlap():
         for (one_is_caption, one), (other_is_caption, other) in itertools.combinations(boxes, 2):
             if one_is_caption or other_is_caption:
                 assert _disjoint(one, other), (template["label"], mobile, one, other)
+        for is_caption, box in boxes:
+            if is_caption:
+                assert -X_RANGE * px[0] <= box[0] and box[2] <= X_RANGE * px[0], (mobile, box)
+                assert -Y_RANGE * px[1] <= box[1] and box[3] <= Y_RANGE * px[1], (mobile, box)
+
+
+def test_a_caption_never_takes_a_placement_the_axis_would_clip():
+    """Seen live on the phone: a star on the map's left edge took the outward
+    beside placement and the plot clipped its caption to "enry Receptions o1.5".
+    A long caption there turns inward; one that fits whole still sits on top."""
+    pos = {"edge": (-1.0, 0.0)}
+    sizes = {"edge": 22.0}
+    for label, placement in (
+        ("Hill o1.5", "top center"),
+        ("Henry Receptions o1.5", "middle right"),
+    ):
+        captions = caption_positions(
+            ["edge"], pos, sizes, {"edge": label}, set(), PX_PER_UNIT_MOBILE, font_px=13
+        )
+        assert captions == {"edge": placement}, label
 
 
 def test_slate_shapes_classify_the_capped_set():

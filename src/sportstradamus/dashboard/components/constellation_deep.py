@@ -9,9 +9,10 @@ with (or into its own team's open space) with its ties drawn, so the map gains
 detail instead of a second ring around it.
 
 A deep star lands *near* the main star it belongs to, never on it: seeded polar
-throws into the ring outside that main's clear air, bounded inside half the gap
-to the next main so the tie still reads. ``constellation_spacing.settle`` takes
-the throws it did not use as candidates, so only a crowded star falls back to the
+throws into rings that start outside that main's clear air and step outward,
+own main's ground before another's, so the tie still reads for as long as there
+is room beside it. ``constellation_spacing.settle`` takes the throws it did not
+use as candidates, so only a star whose every ring is full falls back to the
 lattice — placing every star on the lattice drew a ring of identical dots around
 each main, which is a grid, not a sky. Everything already on screen goes to
 ``settle`` as ``fixed``, which is what makes "revealing a lens never moves a
@@ -58,7 +59,10 @@ _SIDE_FALLBACK_X = 0.6  # where an untied deep star heads when its half holds no
 # How far past clear air a deep star may drift from its main: its neighbourhood,
 # never halfway to the next one.
 DEEP_SCATTER_PX = 28
-DEEP_DARTS = 12  # seeded throws before the lattice fallback
+DEEP_DARTS = 12  # seeded throws per ring
+# A crowded star spirals out one DEEP_SCATTER_PX ring at a time before it takes
+# the lattice: a dense tier that fell back on the first ring drew a grid again.
+DEEP_RINGS = 4
 # The strongest ties are the ones that placed the star; a 12-way fan off a 10 px
 # star is not a reading, and a whole tier's fans are a thousand traces of payload.
 DEEP_EDGES_PER_STAR = 2
@@ -144,45 +148,39 @@ def _scatter_darts(
     side: float,
     px: tuple[float, float],
 ) -> list[tuple[float, float]]:
-    """Seeded throws around ``target``, into the ring a deep star may occupy.
+    """Seeded throws around ``target``, nearest ring first, own main's ground first.
 
-    The band starts outside the clear air of ``target``'s nearest main star and
-    reaches ``DEEP_SCATTER_PX`` further out, but never past half the gap to the
-    next main: inside that half a star is always nearer its own main, which is
-    what keeps "beside its tie" — and the borrowed-main reading of an untied star
-    — true whatever the throw does. A throw that would leave the frame or cross
-    onto the other team's half is dropped rather than clamped, since a clamp
-    piles stars along the line it clamps to.
+    The first ring starts outside the clear air of ``target``'s nearest main star
+    and reaches ``DEEP_SCATTER_PX`` further out; each ring after it reaches one
+    ``DEEP_SCATTER_PX`` further, ``DEEP_RINGS`` deep. Within every ring the throws
+    that land nearer that main than any other come first, so a star keeps
+    "beside its tie" — and the borrowed-main reading of an untied star — for as
+    long as its own ground has room, and only a star whose neighbourhood is full
+    drifts onto another main's. A throw that would leave the frame or cross onto
+    the other team's half is dropped rather than clamped, since a clamp piles
+    stars along the line it clamps to.
 
-    ``mains_px`` is ``main_pos`` in px; the band is measured there because the
+    ``mains_px`` is ``main_pos`` in px; the rings are measured there because the
     frame's aspect flips with the viewport.
     """
     size = sizes[key]
     at = (target[0] * px[0], target[1] * px[1])
     home = min(mains_px, key=lambda main: math.dist(at, mains_px[main]), default=None)
-    if home is None:
-        r_lo, cap = size / 2 + _STAR_GAP_PX, math.inf
-    else:
-        r_lo = (sizes[home] + size) / 2 + _STAR_GAP_PX
-        cap = min(
-            (
-                math.dist(mains_px[home], mains_px[other]) / 2 - size / 2
-                for other in mains_px
-                if other != home
-            ),
-            default=math.inf,
-        )
-    r_hi = max(r_lo, min(r_lo + DEEP_SCATTER_PX, cap))
-
+    r_lo = size / 2 + _STAR_GAP_PX + (sizes[home] / 2 if home else 0.0)
     rng = random.Random(int(hashlib.md5(key.encode()).hexdigest(), 16))
-    darts = []
-    for _ in range(DEEP_DARTS):
-        angle, radius = rng.uniform(0, math.tau), rng.uniform(r_lo, r_hi)
-        x = target[0] + radius * math.cos(angle) / px[0]
-        y = target[1] + radius * math.sin(angle) / px[1]
-        if x * side >= 0 and abs(x) <= X_RANGE * _FRAME_INSET and abs(y) <= Y_RANGE * _FRAME_INSET:
-            darts.append((x, y))
-    return darts
+    own: list[tuple[float, float]] = []
+    other: list[tuple[float, float]] = []
+    for ring in range(DEEP_RINGS):
+        for _ in range(DEEP_DARTS):
+            angle = rng.uniform(0, math.tau)
+            radius = r_lo + DEEP_SCATTER_PX * (ring + rng.random())
+            dart = (at[0] + radius * math.cos(angle), at[1] + radius * math.sin(angle))
+            x, y = dart[0] / px[0], dart[1] / px[1]
+            if x * side < 0 or abs(x) > X_RANGE * _FRAME_INSET or abs(y) > Y_RANGE * _FRAME_INSET:
+                continue
+            nearest = min(mains_px, key=lambda main: math.dist(dart, mains_px[main]), default=None)
+            (own if nearest == home else other).append((x, y))
+    return own + other
 
 
 def _tie_target(

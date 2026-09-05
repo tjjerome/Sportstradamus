@@ -156,7 +156,7 @@ def test_a_deep_tier_that_closes_the_sky_grows_it_instead_of_drawing_nothing():
     tier spreads past the side inset. Both grow in y instead. The owner wants
     every leg reachable under the deeper lens, so the tier itself is never capped."""
     groups = _wider_groups(3)
-    for mobile, deep in ((True, 100), (False, 280)):
+    for mobile, deep in ((True, 100), (False, 340)):
         sky_only = constellation_figure([], None, _ladder(13), wider_groups=groups, mobile=mobile)
         both = constellation_figure(
             [], None, _ladder(13), deep_pool=_deep_pool(deep), wider_groups=groups, mobile=mobile
@@ -198,12 +198,12 @@ def test_sky_labels_never_land_on_another_games_group():
     slots spaced on the cluster alone the label fell into the group beneath it —
     measured on the desktop at two labels 10.6 px apart and a label over a
     neighbour's star by 8.7 px, both unreadable. The ordinary slate (two side
-    bands) is pinned at the shipped six games; a single crammed band at three, the
-    count where the reservation still leaves play — from four up the strip is
-    consumed exactly and a settle nudge can still graze."""
+    bands) is pinned at the shipped six games, and three games again against a
+    tier that narrows both side bands to the tightest disc, where a label is
+    wider than the band it hangs under."""
     for names, deep, bands in (
         (["CIN/CLE", "LAA/LAD", "PHI/PIT", "ARI/ATH", "TOR/WSH", "MIN/NYM"], None, 2),
-        (["CIN/CLE", "LAA/LAD", "PHI/PIT"], _deep_pool(190), 1),
+        (["CIN/CLE", "LAA/LAD", "PHI/PIT"], _deep_pool(190), 2),
     ):
         groups = [
             (
@@ -251,10 +251,17 @@ def _clusters(fig, px) -> dict[str, list[tuple[float, float]]]:
 
 def test_wider_clusters_are_not_on_a_fixed_pitch():
     """The owner's second look: "each cluster is assigned a specific location it's
-    allowed to be". A band's games used to sit at one even pitch; a seeded throw
-    puts them where it lands, so the gaps along a band vary and no two clusters
-    open to the same reach."""
-    fig = constellation_figure([], None, _ladder(13), wider_groups=_wider_groups(WIDER_GAMES))
+    allowed to be". A band's games used to sit at one even pitch whatever their
+    size; a seeded throw puts each where it lands, so with games of the slate's
+    usual mixed sizes the gaps along a band vary and no two clusters open to the
+    same reach."""
+    groups = [
+        (game, rows[:legs])
+        for (game, rows), legs in zip(
+            _wider_groups(WIDER_GAMES, per_game=6), (6, 2, 5, 3, 4, 2), strict=True
+        )
+    ]
+    fig = constellation_figure([], None, _ladder(13), wider_groups=groups)
     clusters = _clusters(fig, PX_PER_UNIT)
     centre = {
         game: (statistics.mean(x for x, _ in pts), statistics.mean(y for _, y in pts))
@@ -269,9 +276,23 @@ def test_wider_clusters_are_not_on_a_fixed_pitch():
         assert statistics.pstdev(gaps) / statistics.mean(gaps) >= 0.15, (side, gaps)
 
 
+def _map_boxes(fig, px) -> list[tuple]:
+    """Every main and deep star's px box, as ``("map", x0, y0, x1, y1)``."""
+    boxes = []
+    for trace in fig.data:
+        if trace.name not in ("active", "candidate", "deep"):
+            continue
+        for x, y, size in zip(trace.x, trace.y, trace.marker.size, strict=True):
+            cx, cy = float(x) * px[0], float(y) * px[1]
+            boxes.append(("map", cx - size / 2, cy - size / 2, cx + size / 2, cy + size / 2))
+    return boxes
+
+
 def test_wider_label_boxes_clear_every_foreign_star_on_both_viewports():
-    """The crammed single band from the label test, on the phone too, where the
-    labels are bigger and the bands are the pair the sky grew in y."""
+    """The crammed fixture from the label test, on the phone too, where the labels
+    are bigger and the bands are the pair the sky grew in y. A label may hang
+    into the map's margin, where a sky star may not, so it is also held clear of
+    every main and deep star."""
     names = ["CIN/CLE", "LAA/LAD", "PHI/PIT"]
     groups = [
         (game, [_row(f"{game[:3]}{i}", game[:3], 0.3, market="3PM", game=game) for i in range(4)])
@@ -289,5 +310,5 @@ def test_wider_label_boxes_clear_every_foreign_star_on_both_viewports():
         for one, other in itertools.combinations(labels, 2):
             assert _clear(one, other), (mobile, one[0], other[0])
         for label in labels:
-            for star in stars:
+            for star in stars + _map_boxes(fig, px):
                 assert star[0] == label[0][:3] or _clear(label, star), (mobile, label[0], star[0])
