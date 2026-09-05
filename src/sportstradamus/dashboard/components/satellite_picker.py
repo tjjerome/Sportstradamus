@@ -4,7 +4,7 @@ The constellation builder is same-game (DESIGN §4a), so a leg from another game
 never be one of its stars. A game whose ``K`` > 0 legs sit on only one of its two teams
 can't form a valid parlay alone (``validate_parlay_legs`` needs two distinct teams), so
 :func:`satellite_groups` offers ``K`` > 0 legs from *other* games on the platform,
-grouped by game — the "look wider" lens (``constellation_lenses``) scatters its output
+grouped by game — the "look wider" lens (``constellation_wider``) scatters its output
 through the open sky around the map, clustered by game; tapping one adds it as a
 satellite.
 

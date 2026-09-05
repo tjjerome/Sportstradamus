@@ -31,12 +31,7 @@ from sportstradamus.dashboard.components.constellation import (
     _SIZE_MIN_MOBILE,
     constellation_figure,
 )
-from sportstradamus.dashboard.components.constellation_lenses import (
-    _DEEP_ALPHA,
-    _DEEP_COLOR,
-    _WIDER_SCALE,
-    WIDER_GAMES,
-)
+from sportstradamus.dashboard.components.constellation_deep import _DEEP_ALPHA, _DEEP_COLOR
 from sportstradamus.dashboard.components.constellation_shapes import shape_catalog
 from sportstradamus.dashboard.components.constellation_slate import (
     DECORATION,
@@ -52,6 +47,7 @@ from sportstradamus.dashboard.components.constellation_spacing import (
     PX_PER_UNIT,
     PX_PER_UNIT_MOBILE,
 )
+from sportstradamus.dashboard.components.constellation_wider import _WIDER_SCALE, WIDER_GAMES
 from sportstradamus.dashboard.theme import GOLD, GRAY, team_colors
 
 _TEAMS = ("NYK", "SAS")  # sorted -> NYK anchors left (-x), SAS right (+x); real NBA codes
