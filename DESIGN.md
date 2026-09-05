@@ -135,8 +135,9 @@ team's color** (the two sides of the matchup read at a glance) and **sized by it
 (the strongest legs read biggest). The map is **static per game** — its stars are the top
 `DEFAULT_STARS` model-liked legs by edge, with both teams represented and at most
 `MAX_PER_PLAYER` per player, fixed in place; a slip leg beyond that cut still burns as a star,
-in the place the deeper lens would give it; selecting a leg never moves a star, it only lights
-it up. A leg in the slip burns at **full color and opacity**; a candidate is the same color
+in the place the deeper lens would give it; selecting a leg never re-deals the map — the mains
+hold and every other star keeps the main it orbits, and only the picked star's own glyph, grown
+to full size, can nudge whoever it touches. A leg in the slip burns at **full color and opacity**; a candidate is the same color
 **desaturated toward gray and dimmed** — selection is alpha + saturation, never an outline (a
 gold ring read as a team color). Pairwise correlation |ρ| is the edge weight (gold,
 opacity/width ∝ |ρ|, dashed when ρ < 0 — "fights the thesis"); an edge stays hidden until one of

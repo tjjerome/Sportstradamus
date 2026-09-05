@@ -364,9 +364,10 @@ def _add_deep_layer(
 
     ``info``, ``pos`` and ``sizes`` gain the drawn tier in place. An in-slip leg
     beyond the default cut is promoted whether or not the lens is on, because it
-    has to burn in the spot the lens would have given it; ``first`` is what makes
-    that spot the same either way. The unpicked stars and their ties are gated on
-    the lens itself, so a lens-off figure with nothing beyond the cut stays
+    has to burn in the spot the lens would have given it — which is why ``drawn``
+    leads with the promoted keys, whose placement priority must not move when the
+    lens grows the tier behind them. The unpicked stars and their ties are gated
+    on the lens itself, so a lens-off figure with nothing beyond the cut stays
     byte-identical to today's.
 
     Recomputing ``_star_sizes`` over the promoted legs cannot move a main star's
@@ -395,7 +396,6 @@ def _add_deep_layer(
         {key: info[key]["team"] for key in drawn},
         teams,
         px,
-        first=promoted,
     )
     add_deep_trace(
         fig,

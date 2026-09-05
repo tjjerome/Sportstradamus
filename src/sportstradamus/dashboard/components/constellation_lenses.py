@@ -1,26 +1,30 @@
 """The constellation's two lenses — deeper inside the map, wider around it.
 
 Both are optional overlays on ``constellation.py``'s figure and both obey one
-rule: a lens may add stars, never move the ones already drawn. *Look deeper*
-fades the game's remaining legs in as small stars **inside** the constellation,
-each settled beside the main star it correlates with (or into its own team's open
-space) with its ties drawn, so the map gains detail instead of a second ring
-around it. *Look wider* leaves the map alone apart from a slight recede and fills
+rule: a lens may add stars, never move the ones already drawn — and neither may a
+click, which nothing animates. *Look deeper* fades the game's remaining legs in as
+small stars **inside** the constellation, each settled beside the main star it
+correlates with (or into its own team's open space) with its ties drawn, so the
+map gains detail instead of a second ring around it. *Look wider* leaves the map alone apart from a slight recede and fills
 the open sky around it with other games' best legs, scattered in per-game
 clusters and coloured by team.
 
 Placement is ``constellation_spacing.settle`` in both cases, with everything
 already on screen passed as ``fixed`` — which is what makes "revealing a lens
-never moves a star" a property of the geometry rather than a convention. The only
-randomness anywhere is the sky's cluster jitter, seeded per game from an md5 of
-the game key (the seeding ``constellation_shapes.assign_templates`` uses) and
-never ``hash()``, whose ``str`` ordering ``PYTHONHASHSEED`` randomizes between
-runs.
+never moves a star" a property of the geometry rather than a convention. Every
+choice that looks arbitrary — the main star an untied deep star borrows, where a
+sky cluster sits along its band — is an md5 of the key it belongs to (the seeding
+``constellation_shapes.assign_templates`` uses) and never ``hash()``, whose
+``str`` ordering ``PYTHONHASHSEED`` randomizes between runs. Keying those on the
+star rather than on its rank is the second half of the rule: a running counter
+re-deals every star behind the one you just clicked.
 
-The phone is the one viewport with no room beside the map: even receded, the
-constellation spans nearly the whole width. Its sky therefore grows in y instead
-(``_SKY_EXTRA_Y_MOBILE``), and the figure grows with it — which is what keeps
-px-per-unit, and so every clearance already solved against it, unchanged.
+The phone starts with no room beside the map: even receded, the constellation
+spans nearly the whole width, so its sky opens in y from the outset
+(``_SKY_EXTRA_Y_MOBILE``). A deep enough tier walks the desktop into the same
+corner, and both take the same way out — grow in y until a band fits, and grow
+the figure with it, which is what keeps px-per-unit, and so every clearance
+already solved against it, unchanged.
 """
 
 from __future__ import annotations
@@ -28,7 +32,7 @@ from __future__ import annotations
 import hashlib
 import math
 import random
-from collections import Counter, defaultdict
+from collections import defaultdict
 from collections.abc import Mapping, Sequence
 
 import plotly.graph_objects as go
@@ -95,20 +99,21 @@ def deep_positions(
     node_team: Mapping[str, str | None],
     teams: Sequence[str],
     px: tuple[float, float],
-    *,
-    first: Sequence[str] = (),
 ) -> dict[str, tuple[float, float]]:
     """Place the deeper lens's stars inside the map, beside what they correlate with.
 
     A tied star targets the |rho|-weighted centroid of the main stars it is tied
     to, so a single tie puts the target *on* that star and ``settle`` only has to
-    find the cell next to it. An untied star takes its own half's main stars in
-    round-robin, counted per side so the cycle reaches all of them, which spreads
-    the field through the constellation instead of piling one blob per side; with
-    no main star to borrow it falls back to its half's midpoint.
+    find the cell next to it. An untied star borrows one of its own half's main
+    stars instead, which spreads the field through the constellation rather than
+    piling one blob per side; with no main star to borrow it falls back to its
+    half's midpoint.
 
     Args:
-        tier: the deep keys, strongest first.
+        tier: the deep keys — iteration order is placement priority, and the
+            caller puts its promoted keys first because a promoted star is lit
+            with the lens shut, so its place must not depend on the tier growing
+            around it.
         main_pos: the drawn map in data units, passed to ``settle`` as ``fixed`` so
             no main star can be pushed by a lens.
         sizes: marker px for every tier key and every main key.
@@ -116,9 +121,6 @@ def deep_positions(
         node_team: team code per tier key.
         teams: the matchup's two codes, sorted — index 0 owns the left half.
         px: rendered css px per data unit, ``(x, y)``.
-        first: keys that place before the rest, whatever ``tier`` holds around
-            them. A promoted star is lit with the lens shut, so its place has to
-            come out the same when the lens opens and the tier grows around it.
 
     Returns:
         key -> position in data units, for the ``tier`` keys only.
@@ -130,15 +132,12 @@ def deep_positions(
             if one in rest and other in main_pos:
                 ties[one].append((abs(rho), other))
     side = {key: _half(node_team.get(key), teams) for key in tier}
-    order = [key for key in tier if key in first] + [key for key in tier if key not in first]
-    targets: dict[str, tuple[float, float]] = {}
-    untied: Counter[float] = Counter()
-    for key in order:
-        if ties[key]:
-            targets[key] = _tie_target(ties[key], main_pos)
-            continue
-        targets[key] = _open_target(untied[side[key]], main_pos, side[key])
-        untied[side[key]] += 1
+    targets = {
+        key: _tie_target(ties[key], main_pos)
+        if ties[key]
+        else _open_target(key, main_pos, side[key])
+        for key in tier
+    }
     return settle(targets, sizes, px, fixed=main_pos, side=side)
 
 
@@ -153,12 +152,18 @@ def _tie_target(
 
 
 def _open_target(
-    rank: int, main_pos: Mapping[str, tuple[float, float]], side: float
+    key: str, main_pos: Mapping[str, tuple[float, float]], side: float
 ) -> tuple[float, float]:
-    half = [key for key in sorted(main_pos) if side == 0 or main_pos[key][0] * side >= 0]
-    if half:
-        return main_pos[half[rank % len(half)]]
-    return (side * _SIDE_FALLBACK_X, 0.0)
+    """The main star an untied deep star borrows, drawn from its own half by key.
+
+    The draw has to be a property of the key alone. A running rank would re-deal
+    every star behind the one that leaves the sequence — which is what promoting a
+    star does — and a click is not animated, so those stars would teleport.
+    """
+    half = [main for main in sorted(main_pos) if side == 0 or main_pos[main][0] * side >= 0]
+    if not half:
+        return (side * _SIDE_FALLBACK_X, 0.0)
+    return main_pos[half[int(hashlib.md5(key.encode()).hexdigest(), 16) % len(half)]]
 
 
 def _half(team: str | None, teams: Sequence[str]) -> float:
@@ -338,6 +343,28 @@ def _scatter_band(
     return anchors
 
 
+def _grown_sky(
+    occupied: Mapping[str, tuple[float, float]],
+    sizes: Mapping[str, float],
+    px: tuple[float, float],
+    *,
+    sky_y: float,
+    label_px: float,
+) -> float:
+    """``sky_y``, opened in y far enough that the map leaves at least one band.
+
+    A deep enough tier closes every band the sky had — immediately on the phone,
+    whose map already spans the width, and on the desktop once the tier spreads
+    past the side inset. Either way the layer would otherwise draw nothing at all,
+    with no feedback, so both viewports take the phone's own way out and grow.
+    """
+    box = _footprint(occupied, sizes, px)
+    if _sky_bands(box, px, sky_y=sky_y, label_px=label_px):
+        return sky_y
+    clear = max(box[3], -box[1]) + 2 * _WIDER_CLUSTER_PX + label_px
+    return max(sky_y, clear / (px[1] * _FRAME_INSET))
+
+
 def add_wider_layer(
     fig: go.Figure,
     groups: Sequence[tuple[str, list[dict]]],
@@ -352,23 +379,17 @@ def add_wider_layer(
 ) -> None:
     """The wider lens: other games' best legs out in the sky, one label per game.
 
-    Grows the figure whenever ``sky_y`` reaches past the frame — the phone's only
-    way to open a band — by exactly the added y-range, so the px-per-unit the map
-    was spaced against survives the reshape. The growth has to clear whatever the
-    deeper lens added below it: a tall tier otherwise squeezes the phone's bands
-    under ``_sky_bands``' floor and the whole layer silently draws nothing.
+    ``_grown_sky`` says how far the sky has to open; whenever that reaches past the
+    frame the figure grows by exactly the added y-range, so the px-per-unit the map
+    was spaced against survives the reshape.
     """
-    grows = sky_y > Y_RANGE
-    if grows:
-        box = _footprint(occupied, sizes, px)
-        clear = max(box[3], -box[1]) + 2 * _WIDER_CLUSTER_PX + label_size
-        sky_y = max(sky_y, clear / (px[1] * _FRAME_INSET))
+    sky_y = _grown_sky(occupied, sizes, px, sky_y=sky_y, label_px=label_size)
     pos, labels = wider_positions(
         groups, occupied, sizes, px, size=size, sky_y=sky_y, label_px=label_size
     )
     if not pos:
         return
-    if grows:
+    if sky_y > Y_RANGE:
         fig.update_layout(
             height=fig.layout.height + 2 * (sky_y - Y_RANGE) * px[1],
             yaxis_range=[-sky_y, sky_y],

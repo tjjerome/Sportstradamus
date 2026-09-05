@@ -22,6 +22,8 @@ import pandas as pd
 
 from sportstradamus.dashboard.components import constellation_lenses
 from sportstradamus.dashboard.components.constellation import (
+    _FIG_HEIGHT,
+    _SIZE_MAX,
     _SIZE_MIN,
     constellation_figure,
 )
@@ -173,21 +175,58 @@ def test_liked_legs_beyond_the_cut_are_drawn_only_under_the_lens():
     assert all(size < _SIZE_MIN for _, size in deep.values())
 
 
-def test_untied_deep_stars_reach_every_main_star_on_their_side():
-    """The owner's "don't let a small group dominate": an untied star takes its own
-    side's mains in round-robin, so a full tier spreads over all of them rather
-    than piling around the handful a global rank happens to land on."""
-    pool = _ladder(12)
-    deep_pool = pd.DataFrame(
-        [_row(f"Q{i:02d}", ("NYK", "SAS")[i % 2], -0.1 - i / 100) for i in range(16)]
-    )
-    fig = constellation_figure([], None, pool, deep_pool=deep_pool)
+def _borrowed_mains(fig) -> dict[str, set[str]]:
+    """Per team, the main stars the drawn deep stars ended up nearest to."""
     mains = {key: pos for key, (pos, _) in _stars(fig).items() if key.startswith("P")}
-    nearest = {"NYK": set(), "SAS": set()}
+    borrowed: dict[str, set[str]] = {"NYK": set(), "SAS": set()}
     for key, (pos, _) in _stars(fig, "deep").items():
-        side = ("NYK", "SAS")[int(key[1:3]) % 2]
-        nearest[side].add(min(mains, key=lambda m: _apart(pos, mains[m], PX_PER_UNIT)))
-    assert {len(hit) for hit in nearest.values()} == {DEFAULT_STARS // 2}
+        borrowed[("NYK", "SAS")[int(key[1:3]) % 2]].add(
+            min(mains, key=lambda main: _apart(pos, mains[main], PX_PER_UNIT))
+        )
+    return borrowed
+
+
+def test_untied_deep_stars_spread_over_their_sides_mains():
+    """The owner's "don't let a small group dominate": an untied star draws a main
+    from its own half by key, so a tier spreads over most of the half rather than
+    piling around the few a running rank happens to reach (which was three of six).
+    An md5 draw collides, so this is a floor, not a sweep."""
+    deep_pool = pd.DataFrame(
+        [_row(f"Q{i:02d}", ("NYK", "SAS")[i % 2], -0.1 - i / 100) for i in range(24)]
+    )
+    per_side = DEFAULT_STARS // 2
+    borrowed = _borrowed_mains(constellation_figure([], None, _ladder(12), deep_pool=deep_pool))
+    assert min(len(hit) for hit in borrowed.values()) > per_side // 2, borrowed
+
+
+def test_promoting_a_deep_star_does_not_re_deal_the_tier():
+    """Nothing animates a click, so a star that shifts when a neighbour is picked
+    teleports. The draw is key-intrinsic for exactly this reason: promoting a star
+    takes it out of the tier's placement order, and a running rank would have
+    re-dealt every star behind it (measured: a 301 px jump across the map).
+
+    What is left is the promoted star's own glyph growing to full size and nudging
+    whoever it touches — a local settle, never a new main to orbit."""
+    pool = _ladder(12)
+    rows = [_row(f"D{i:02d}", ("NYK", "SAS")[i % 2], -0.1 - i / 100) for i in range(16)]
+    deep_pool = pd.DataFrame(rows)
+    before = _stars(constellation_figure([], None, pool, deep_pool=deep_pool))
+    mains = {key: pos for key, (pos, _) in before.items() if key.startswith("P")}
+    nearest = {
+        key: min(mains, key=lambda main: _apart(pos, mains[main], PX_PER_UNIT))
+        for key, (pos, _) in before.items()
+    }
+    for leg in rows:
+        after = _stars(constellation_figure([leg], None, pool, deep_pool=deep_pool))
+        picked = _key(leg["Player"])
+        for key, (pos, _) in before.items():
+            if key == picked or after[key][0] == pos:
+                continue
+            moved = after[key][0]
+            assert nearest[key] == min(
+                mains, key=lambda main: _apart(moved, mains[main], PX_PER_UNIT)
+            ), (picked, key)
+            assert _apart(pos, after[picked][0], PX_PER_UNIT) <= 3 * _SIZE_MAX, (picked, key)
 
 
 def test_a_deep_star_shows_only_its_strongest_ties():
@@ -285,25 +324,39 @@ def test_wider_keeps_its_game_labels():
             assert max(abs(float(y)) for y in labels.y) <= bound, (mobile, count)
 
 
-def test_the_phone_grows_its_sky_past_a_deep_tier():
-    """The phone has no side band, so a deep tier tall enough to squeeze its two
-    y-bands under the cluster floor used to take the whole wider layer with it."""
-    markets = ("PTS", "REB", "AST", "3PM", "STL")
-    deep_pool = pd.DataFrame(
-        [
-            _row(f"Q{i:02d}", ("NYK", "SAS")[i % 2], -0.05 - i / 500, market=markets[i % 5])
-            for i in range(50)
-        ]
+def _deep_pool(n: int) -> pd.DataFrame:
+    return pd.DataFrame(
+        [_row(f"Q{i:03d}", ("NYK", "SAS")[i % 2], -0.05 - i / 2000) for i in range(n)]
     )
+
+
+def test_a_deep_tier_that_closes_the_sky_grows_it_instead_of_drawing_nothing():
+    """A tier deep enough to reach the frame leaves no band wide enough for a
+    cluster, and the whole wider layer used to vanish with no feedback — on the
+    phone first, whose map already spans the width, and on the desktop once the
+    tier spreads past the side inset. Both grow in y instead. The owner wants
+    every leg reachable under the deeper lens, so the tier itself is never capped."""
     groups = _wider_groups(3)
-    sky_only = constellation_figure([], None, _ladder(13), wider_groups=groups, mobile=True)
-    both = constellation_figure(
-        [], None, _ladder(13), deep_pool=deep_pool, wider_groups=groups, mobile=True
-    )
-    assert len(_trace(both, "deep").x) > DEFAULT_STARS
-    assert len(_trace(both, "wider").x) == len(_trace(sky_only, "wider").x)
-    assert set(_trace(both, "wider_labels").text) == {game for game, _ in groups}
-    assert both.layout.height > sky_only.layout.height
+    for mobile, deep in ((True, 100), (False, 240)):
+        sky_only = constellation_figure([], None, _ladder(13), wider_groups=groups, mobile=mobile)
+        both = constellation_figure(
+            [], None, _ladder(13), deep_pool=_deep_pool(deep), wider_groups=groups, mobile=mobile
+        )
+        assert len(_trace(both, "deep").x) > DEFAULT_STARS
+        assert len(_trace(both, "wider").x) == len(_trace(sky_only, "wider").x), mobile
+        assert set(_trace(both, "wider_labels").text) == {game for game, _ in groups}
+        assert both.layout.height > sky_only.layout.height, mobile
+
+
+def test_the_desktop_keeps_its_own_height_while_its_side_bands_hold():
+    """The desktop's sky is the two side bands; growing in y is the last resort,
+    not the default, so an ordinary slate must not reshape the figure."""
+    for deep in (None, _deep_pool(40)):
+        fig = constellation_figure(
+            [], None, _ladder(13), deep_pool=deep, wider_groups=_wider_groups(3)
+        )
+        assert fig.layout.height == _FIG_HEIGHT
+        assert tuple(fig.layout.yaxis.range) == (-Y_RANGE, Y_RANGE)
 
 
 def test_only_the_best_wider_games_are_drawn():
