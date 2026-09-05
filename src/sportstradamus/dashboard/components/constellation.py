@@ -24,7 +24,8 @@ tie. Each team's most-connected leg is pinned to its side, so a cross-matchup le
 toward the centre and an unrepresented side leaves its half empty.
 
 Two optional lenses layer onto the same figure (P8 Task C6) instead of living as
-separate expanders below the map; ``constellation_lenses`` draws both:
+separate expanders below the map; ``constellation_deep`` and ``constellation_wider``
+draw one each:
 
 * ``deep_pool`` — "look deeper": the game's remaining legs — the ones the default
   cut left behind, then the model-passed ones — as small stars *inside* the map,
@@ -60,17 +61,11 @@ import networkx as nx
 import pandas as pd
 import plotly.graph_objects as go
 
-from sportstradamus.dashboard.components.constellation_lenses import (
+from sportstradamus.dashboard.components.constellation_deep import (
     _DEEP_ALPHA,
     _DEEP_COLOR,
-    _SKY_EXTRA_Y_MOBILE,
-    _WIDER_SCALE,
     DEEP_EDGES_PER_STAR,
-    LENS_STAR_SIZE,
-    LENS_STAR_SIZE_MOBILE,
-    WIDER_GAMES,
     add_deep_trace,
-    add_wider_layer,
     deep_positions,
     deep_tier,
 )
@@ -92,6 +87,14 @@ from sportstradamus.dashboard.components.constellation_spacing import (
     caption_positions,
     default_stars,
     settle,
+)
+from sportstradamus.dashboard.components.constellation_wider import (
+    _SKY_EXTRA_Y_MOBILE,
+    _WIDER_SCALE,
+    WIDER_GAMES,
+    WIDER_STAR_SIZE,
+    WIDER_STAR_SIZE_MOBILE,
+    add_wider_layer,
 )
 from sportstradamus.dashboard.legs import corr_key
 from sportstradamus.dashboard.theme import GOLD, GRAY, team_colors, team_name
@@ -247,11 +250,11 @@ def constellation_figure(
             _LABEL_FONT_SIZE_MOBILE,
             SHAPE_SCALE_MOBILE,
             PX_PER_UNIT_MOBILE,
-            LENS_STAR_SIZE_MOBILE,
+            WIDER_STAR_SIZE_MOBILE,
             Y_RANGE + _SKY_EXTRA_Y_MOBILE,
         )
         if mobile
-        else (_SIZE_MIN, _LABEL_FONT_SIZE, SHAPE_SCALE, PX_PER_UNIT, LENS_STAR_SIZE, Y_RANGE)
+        else (_SIZE_MIN, _LABEL_FONT_SIZE, SHAPE_SCALE, PX_PER_UNIT, WIDER_STAR_SIZE, Y_RANGE)
     )
     pos, fillers = _positions(
         keys,
