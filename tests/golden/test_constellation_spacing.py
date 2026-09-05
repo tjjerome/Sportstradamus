@@ -31,6 +31,7 @@ from sportstradamus.dashboard.components.constellation_slate import (
     slate_shapes,
 )
 from sportstradamus.dashboard.components.constellation_spacing import (
+    _CAPTION_GAP_PX,
     _CELL_PX,
     _CHAR_WIDTH_EM,
     _FRAME_INSET,
@@ -342,7 +343,7 @@ def test_caption_boxes_never_overlap():
             if not text:
                 continue
             height = _LINE_HEIGHT_EM * font_px
-            lift = (size / 2 + height / 2) * (1 if place == "top center" else -1)
+            lift = (size / 2 + _CAPTION_GAP_PX + height / 2) * (1 if place == "top center" else -1)
             width = len(text) * _CHAR_WIDTH_EM * font_px
             boxes.append((True, _rect(cx, cy + lift, width, height)))
         for (one_is_caption, one), (other_is_caption, other) in itertools.combinations(boxes, 2):

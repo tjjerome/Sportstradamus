@@ -42,6 +42,10 @@ _EXPLODE_R0, _EXPLODE_DR, _EXPLODE_RMAX = 0.05, 0.015, 0.11
 # not off in a corner of the frame.
 _FIELD_PAD = 0.2
 
+# S1's star-bearing ceiling: a glyph any higher clips the frame once the
+# renderer stretches y.
+_FIELD_Y = 0.9
+
 # Darts thrown per field star, the one farthest from everything already placed
 # winning. Enough to read as scattered rather than arranged, cheap enough to
 # throw for every star of every game on the slate.
@@ -222,20 +226,21 @@ def _field_box(
     a cross-matchup star anyway. Centre vertices sit in both sides' pools and are
     authored a little off the axis, so they clamp onto the side that drew them
     before the box is measured: a box reaching across x=0 would strand a star on
-    the wrong team. Everything stays inside the S1 [-1, 1] template box.
+    the wrong team. x stays inside the S1 [-1, 1] template box and y under its
+    star-bearing ceiling.
     """
     if side is None:
-        return (-_FIELD_PAD, -1.0, _FIELD_PAD, 1.0)
+        return (-_FIELD_PAD, -_FIELD_Y, _FIELD_PAD, _FIELD_Y)
     lo, hi = (-1.0, 0.0) if side == "L" else (0.0, 1.0)
     if not filled:
-        return (lo, -1.0, hi, 1.0)
+        return (lo, -_FIELD_Y, hi, _FIELD_Y)
     xs = [min(max(x, lo), hi) for x, _ in filled]
     ys = [y for _, y in filled]
     return (
         max(min(xs) - _FIELD_PAD, lo),
-        max(min(ys) - _FIELD_PAD, -1.0),
+        max(min(ys) - _FIELD_PAD, -_FIELD_Y),
         min(max(xs) + _FIELD_PAD, hi),
-        min(max(ys) + _FIELD_PAD, 1.0),
+        min(max(ys) + _FIELD_PAD, _FIELD_Y),
     )
 
 
