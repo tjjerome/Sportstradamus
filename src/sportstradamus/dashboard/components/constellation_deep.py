@@ -8,32 +8,57 @@ animates. *Look deeper* fades the game's remaining legs in as small stars
 with (or into its own team's open space) with its ties drawn, so the map gains
 detail instead of a second ring around it.
 
-Placement is ``constellation_spacing.settle``, with everything already on screen
-passed as ``fixed`` — which is what makes "revealing a lens never moves a star" a
-property of the geometry rather than a convention. The one choice that looks
-arbitrary — the main star an untied deep star borrows — is an md5 of the key it
-belongs to (the seeding ``constellation_shapes.assign_templates`` uses) and never
-``hash()``, whose ``str`` ordering ``PYTHONHASHSEED`` randomizes between runs.
-Keying it on the star rather than on its rank is the second half of the rule: a
-running counter re-deals every star behind the one you just clicked.
+A deep star lands *near* the main star it belongs to, never on it: seeded polar
+throws into the ring outside that main's clear air, bounded inside half the gap
+to the next main so the tie still reads. ``constellation_spacing.settle`` takes
+the throws it did not use as candidates, so only a crowded star falls back to the
+lattice — placing every star on the lattice drew a ring of identical dots around
+each main, which is a grid, not a sky. Everything already on screen goes to
+``settle`` as ``fixed``, which is what makes "revealing a lens never moves a
+star" a property of the geometry rather than a convention. Size and opacity both
+carry the star's Kelly edge, so the tier ranks itself in a band that starts over
+the engraving and stops under the main map's floor.
+
+Every draw — the scatter and the main star an untied deep star borrows — is an
+md5 of the key it belongs to (the seeding ``constellation_shapes.assign_templates``
+uses) and never ``hash()``, whose ``str`` ordering ``PYTHONHASHSEED`` randomizes
+between runs. Keying it on the star rather than on its rank is the second half of
+the rule: a running counter re-deals every star behind the one you just clicked.
 """
 
 from __future__ import annotations
 
 import hashlib
+import math
+import random
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 
 import plotly.graph_objects as go
 
-from sportstradamus.dashboard.components.constellation_spacing import settle
+from sportstradamus.dashboard.components.constellation_spacing import (
+    _FRAME_INSET,
+    _STAR_GAP_PX,
+    X_RANGE,
+    Y_RANGE,
+    settle,
+)
 
 # The model-passed tier: a flat cool gray, distinct from both a team color and
 # GRAY (the unknown-team fallback and the label color), so it reads as "the model
 # passes on this" rather than as one more desaturated candidate.
 _DEEP_COLOR = "#5f6b80"
-_DEEP_ALPHA = 0.35
+# Over the engraving's FILLER_SIZE (6) so a lens star never reads as decoration,
+# under the main map's floor (_SIZE_MIN 14) so it never outranks a real star.
+DEEP_SIZE_MIN, DEEP_SIZE_MAX = 7, 13
+# A thumb needs ~12 px; 20 stays under the 22 px mobile main floor.
+DEEP_SIZE_MIN_MOBILE, DEEP_SIZE_MAX_MOBILE = 12, 20
+DEEP_ALPHA_MIN = 0.25  # the model-passed floor: present, never a distraction
 _SIDE_FALLBACK_X = 0.6  # where an untied deep star heads when its half holds no main star
+# How far past clear air a deep star may drift from its main: its neighbourhood,
+# never halfway to the next one.
+DEEP_SCATTER_PX = 28
+DEEP_DARTS = 12  # seeded throws before the lattice fallback
 # The strongest ties are the ones that placed the star; a 12-way fan off a 10 px
 # star is not a reading, and a whole tier's fans are a thousand traces of payload.
 DEEP_EDGES_PER_STAR = 2
@@ -65,11 +90,13 @@ def deep_positions(
     """Place the deeper lens's stars inside the map, beside what they correlate with.
 
     A tied star targets the |rho|-weighted centroid of the main stars it is tied
-    to, so a single tie puts the target *on* that star and ``settle`` only has to
-    find the cell next to it. An untied star borrows one of its own half's main
-    stars instead, which spreads the field through the constellation rather than
-    piling one blob per side; with no main star to borrow it falls back to its
-    half's midpoint.
+    to, so a single tie puts the target *on* that star. An untied star borrows one
+    of its own half's main stars instead, which spreads the field through the
+    constellation rather than piling one blob per side; with no main star to
+    borrow it falls back to its half's midpoint. The star then scatters off that
+    target by seeded throw (:func:`_scatter_darts`) and hands ``settle`` the
+    throws it did not use, so a star with room keeps a float position of its own
+    and only a crowded one takes a lattice cell.
 
     Args:
         tier: the deep keys — iteration order is placement priority, and the
@@ -94,13 +121,68 @@ def deep_positions(
             if one in rest and other in main_pos:
                 ties[one].append((abs(rho), other))
     side = {key: _half(node_team.get(key), teams) for key in tier}
-    targets = {
-        key: _tie_target(ties[key], main_pos)
-        if ties[key]
-        else _open_target(key, main_pos, side[key])
-        for key in tier
-    }
-    return settle(targets, sizes, px, fixed=main_pos, side=side)
+    mains_px = {key: (x * px[0], y * px[1]) for key, (x, y) in main_pos.items()}
+    anchors: dict[str, tuple[float, float]] = {}
+    candidates: dict[str, list[tuple[float, float]]] = {}
+    for key in tier:
+        target = (
+            _tie_target(ties[key], main_pos)
+            if ties[key]
+            else _open_target(key, main_pos, side[key])
+        )
+        darts = _scatter_darts(key, target, mains_px, sizes, side[key], px)
+        anchors[key] = darts[0] if darts else target
+        candidates[key] = darts[1:]
+    return settle(anchors, sizes, px, fixed=main_pos, side=side, candidates=candidates)
+
+
+def _scatter_darts(
+    key: str,
+    target: tuple[float, float],
+    mains_px: Mapping[str, tuple[float, float]],
+    sizes: Mapping[str, float],
+    side: float,
+    px: tuple[float, float],
+) -> list[tuple[float, float]]:
+    """Seeded throws around ``target``, into the ring a deep star may occupy.
+
+    The band starts outside the clear air of ``target``'s nearest main star and
+    reaches ``DEEP_SCATTER_PX`` further out, but never past half the gap to the
+    next main: inside that half a star is always nearer its own main, which is
+    what keeps "beside its tie" — and the borrowed-main reading of an untied star
+    — true whatever the throw does. A throw that would leave the frame or cross
+    onto the other team's half is dropped rather than clamped, since a clamp
+    piles stars along the line it clamps to.
+
+    ``mains_px`` is ``main_pos`` in px; the band is measured there because the
+    frame's aspect flips with the viewport.
+    """
+    size = sizes[key]
+    at = (target[0] * px[0], target[1] * px[1])
+    home = min(mains_px, key=lambda main: math.dist(at, mains_px[main]), default=None)
+    if home is None:
+        r_lo, cap = size / 2 + _STAR_GAP_PX, math.inf
+    else:
+        r_lo = (sizes[home] + size) / 2 + _STAR_GAP_PX
+        cap = min(
+            (
+                math.dist(mains_px[home], mains_px[other]) / 2 - size / 2
+                for other in mains_px
+                if other != home
+            ),
+            default=math.inf,
+        )
+    r_hi = max(r_lo, min(r_lo + DEEP_SCATTER_PX, cap))
+
+    rng = random.Random(int(hashlib.md5(key.encode()).hexdigest(), 16))
+    darts = []
+    for _ in range(DEEP_DARTS):
+        angle, radius = rng.uniform(0, math.tau), rng.uniform(r_lo, r_hi)
+        x = target[0] + radius * math.cos(angle) / px[0]
+        y = target[1] + radius * math.sin(angle) / px[1]
+        if x * side >= 0 and abs(x) <= X_RANGE * _FRAME_INSET and abs(y) <= Y_RANGE * _FRAME_INSET:
+            darts.append((x, y))
+    return darts
 
 
 def _tie_target(
@@ -141,13 +223,14 @@ def add_deep_trace(
     *,
     colors: Sequence[str],
     alphas: Sequence[float],
-    size: float,
+    sizes: Mapping[str, float],
 ) -> None:
     """The deeper lens's own stars, as the one fade-able trace named ``deep``.
 
-    Colour and opacity arrive per point because the tier carries two readings at
-    one size: a model-liked leg the cut left behind wears the candidate look, a
-    model-passed one the cool gray of the lens itself.
+    Everything arrives per point because the tier carries two readings and a
+    ranking inside each: a model-liked leg the cut left behind wears the candidate
+    look, a model-passed one the cool gray of the lens itself, and edge sets how
+    big and how bright either is.
     """
     if not keys:
         return
@@ -159,7 +242,7 @@ def add_deep_trace(
             name="deep",
             marker={
                 "symbol": "star",
-                "size": [size] * len(keys),
+                "size": [sizes[key] for key in keys],
                 "color": list(colors),
                 "opacity": list(alphas),
             },
