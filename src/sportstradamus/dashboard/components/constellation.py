@@ -33,8 +33,9 @@ draw one each:
   main star each correlates with, carrying its ties. The main stars are held fixed,
   so revealing the tier can never reshuffle the lit map.
 * ``wider_groups`` — "look wider": the map recedes a little and other games' best
-  legs fill the open sky around it in per-game clusters, team-coloured and
-  labelled with their game key — never a ring around the edge.
+  legs fill the open sky around it in per-game clusters, each thrown by seeded
+  draw into its band, team-coloured and labelled with their game key — never a
+  ring around the edge.
 
 An in-slip leg beyond the default cut is *promoted* rather than laid out: it takes
 the position the deeper lens would have given it and burns as a full star with the

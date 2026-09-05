@@ -161,7 +161,10 @@ stars in the open sky around it — clustered by game, team-coloured, never insi
 constellation's own footprint — and tapping one adds it as a satellite. The *deeper* lens fades
 in the game's remaining legs as smaller stars inside the constellation, each beside the main star
 it correlates with (or in its team's open space), with its ties drawn; main stars never move for
-the deeper lens, and the wider lens only recedes the whole map a little to make room.
+the deeper lens, and the wider lens only recedes the whole map a little to make room. Within a
+lens tier, size and opacity both scale with edge (a model-passed leg sits at the floor); every
+lens star stays under the main-star floor, and a slip leg still burns at full opacity above any
+lens star. Both lenses scatter by seeded draw, never a grid and never a ring.
 In the editor the map is interactive — click a star to add or remove its leg, and hover a star for a card (its
 read plus a **Full detail** link into the offer dialog, slip preserved) — with the modebar and
 zoom/pan off (it's a map, not a chart). Switching lenses (the deeper/wider toggles) animates in

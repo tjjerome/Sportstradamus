@@ -7,10 +7,13 @@ games' best legs, scattered in per-game clusters and coloured by team.
 
 Placement is ``constellation_spacing.settle``, with everything already on screen
 passed as ``fixed`` — which is what makes "revealing a lens never moves a star" a
-property of the geometry rather than a convention. The one choice that looks
-arbitrary — where a sky cluster sits along its band — is an md5 of the key it
-belongs to (the seeding ``constellation_shapes.assign_templates`` uses) and never
-``hash()``, whose ``str`` ordering ``PYTHONHASHSEED`` randomizes between runs.
+property of the geometry rather than a convention. Where in its band a cluster
+lands, and how far it spreads, is a seeded dart throw (:func:`_throw_cluster`)
+rather than a seat dealt along the band: an even pitch reads as six games each
+assigned the one place it is allowed to be, which is the opposite of a sky. The
+seed is an md5 of the game key (the seeding ``constellation_shapes.assign_templates``
+uses) and never ``hash()``, whose ``str`` ordering ``PYTHONHASHSEED`` randomizes
+between runs.
 
 The phone starts with no room beside the map: even receded, the constellation
 spans nearly the whole width, so its sky opens in y from the outset
@@ -30,16 +33,20 @@ from collections.abc import Mapping, Sequence
 import plotly.graph_objects as go
 
 from sportstradamus.dashboard.components.constellation_spacing import (
+    _CELL_PX,
+    _CHAR_WIDTH_EM,
     _FRAME_INSET,
+    _STAR_GAP_PX,
     X_RANGE,
     Y_RANGE,
+    _box,
     settle,
 )
 from sportstradamus.dashboard.legs import corr_key
 from sportstradamus.dashboard.theme import GRAY, team_colors
 
-# Both lenses draw at one flat size: under the main floor (14 desktop / 22 phone)
-# so a lens star can never outrank a real one, over the engraving's FILLER_SIZE 6
+# The sky draws at one flat size: under the main floor (14 desktop / 22 phone)
+# so a sky star can never outrank a real one, over the engraving's FILLER_SIZE 6
 # so it never reads as decoration. The phone value stays a tappable target — a
 # missed tap lands on a neighbour's card, not on nothing.
 WIDER_STAR_SIZE = 10
@@ -50,12 +57,13 @@ _WIDER_ALPHA = 0.75  # dimmer than an active star, so the sky reads as backgroun
 # Clear air between a sky star and the map's outermost glyph: a sky star that
 # grazes the constellation reads as one of its own.
 _WIDER_MARGIN_PX = 48
-# The most a game's legs scatter from their slot and still read as one group. A
-# band with more games than room tightens it rather than letting them collide.
-_WIDER_CLUSTER_PX = 30
-# Slot jitter as a fraction of the room a slot has spare. Under a half, two
-# neighbours that jitter toward each other still clear.
-_WIDER_JITTER = 0.35
+_WIDER_REACH_MIN = 16  # the tightest cluster radius that still reads as a group, not a knot
+_WIDER_REACH_MAX = 44  # the loosest that still reads as one game
+_WIDER_DARTS = 64  # seeded throws per cluster; the second half throw at the tight reach
+# A settle nudge in a crammed disc carries a sky star about two lattice cells. A
+# label box lies outside settle's occupancy, so it is padded by this much or a
+# nudged star lands on the neighbour's name.
+_SKY_NUDGE_PX = 12
 # A game label's ink box as a multiple of its font px: plotly centres the text on
 # its y, so half a line reaches past the drop on either side.
 _LABEL_LINE_PX = 1.25
@@ -81,12 +89,13 @@ def wider_positions(
 
     The sky is the inset frame minus the constellation's own footprint, cut into
     at most four bands; the games deal round-robin into whatever survives, largest
-    band first. Each game takes a slot along its band's long axis, jittered so the
-    row doesn't read as a scale, and its legs scatter around that slot inside what
-    the slot has room for. ``settle`` then does the same job it does
-    for the map — nearest free cell, everything drawn ``fixed`` — with the
-    footprint excluded, which is what makes "never inside the constellation" hold
-    even where a gap between two main stars is the nearest free air.
+    band first. Where a game lands inside its band, and how wide it opens, is its
+    own seeded throw (:func:`_throw_cluster`), taken best game first so a weaker
+    one joining the sky only ever fits itself around what is already there.
+    ``settle`` then does the same job it does for the map — nearest free cell,
+    everything drawn ``fixed`` — with the footprint excluded, which is what makes
+    "never inside the constellation" hold even where a gap between two main stars
+    is the nearest free air.
 
     Args:
         groups: ``(game key, rows)`` per other game, best game first.
@@ -102,17 +111,36 @@ def wider_positions(
     """
     footprint = _footprint(occupied, sizes, px)
     bands = sorted(
-        _sky_bands(footprint, px, sky_y=sky_y, label_px=label_px),
+        _sky_bands(footprint, px, sky_y=sky_y, size=size, label_px=label_px),
         key=lambda band: (band[2] - band[0]) * (band[3] - band[1]),
         reverse=True,
     )[: len(groups)]
     if not bands:
         return {}, []
+    frame = (
+        -X_RANGE * _FRAME_INSET * px[0],
+        -sky_y * _FRAME_INSET * px[1],
+        X_RANGE * _FRAME_INSET * px[0],
+        sky_y * _FRAME_INSET * px[1],
+    )
+    rects, discs = [footprint], []
     anchors: dict[str, tuple[float, float]] = {}
-    for index, band in enumerate(bands):
-        anchors |= _scatter_band(
-            band, groups[index :: len(bands)], px, size=size, label_px=label_px
+    labels: list[tuple[str, float, float]] = []
+    for index, (game, rows) in enumerate(groups):
+        points, (label_x, label_y) = _throw_cluster(
+            game,
+            len(rows),
+            bands[index % len(bands)],
+            rects,
+            discs,
+            size=size,
+            label_px=label_px,
+            frame=frame,
         )
+        anchors |= {
+            corr_key(row): (x / px[0], y / px[1]) for row, (x, y) in zip(rows, points, strict=True)
+        }
+        labels.append((game, label_x / px[0], label_y / px[1]))
     placed = settle(
         anchors,
         {**sizes, **dict.fromkeys(anchors, size)},
@@ -121,32 +149,115 @@ def wider_positions(
         frame=(X_RANGE, sky_y),
         exclude=footprint,
     )
-    lift = _label_lift(size, label_px) / px[1]
-    frame_y = sky_y * _FRAME_INSET
-    labels = []
-    for game, rows in groups:
-        cluster = [corr_key(row) for row in rows if corr_key(row) in placed]
-        if not cluster:
-            continue
-        below = min(placed[key][1] for key in cluster) - lift
-        labels.append(
-            (
-                game,
-                sum(placed[key][0] for key in cluster) / len(cluster),
-                below if below >= -frame_y else max(placed[key][1] for key in cluster) + lift,
-            )
-        )
     return placed, labels
 
 
-def _label_lift(size: float, label_px: float) -> float:
-    """How far a game label's ink reaches past the star it hangs under, in px.
+def _throw_cluster(
+    game: str,
+    members: int,
+    band: tuple[float, float, float, float],
+    rects: list[tuple[float, float, float, float]],
+    discs: list[tuple[float, float, float]],
+    *,
+    size: float,
+    label_px: float,
+    frame: tuple[float, float, float, float],
+) -> tuple[list[tuple[float, float]], tuple[float, float]]:
+    """One game's cluster: seeded throws into its band, the first that clears.
 
-    Both ends of the sky read this: ``_scatter_band`` reserves it in the stride it
-    gives each game along a vertical band, and ``wider_positions`` spends exactly
-    it placing the label. They have to be the same number or a label lands on the
-    group below.
+    A throw is a centre anywhere in the band and a ``reach`` its legs scatter
+    within, uniformly over that disc. It clears when the disc and the ink box its
+    label hangs in miss every rectangle in ``rects`` — the map's footprint, then
+    the labels already reserved — every disc already thrown, and the frame. Half
+    the throws take a random reach and half the tightest one the legs fit in, so
+    a band with room reads loose while a crammed one still has throws that can
+    squeeze. The label hangs under the lowest leg, or over the highest where the
+    frame leaves no room below, and is drawn exactly where it was reserved:
+    ``settle`` may still nudge a leg, but never the name.
+
+    Reserves the throw it takes (appending to ``rects`` and ``discs``) and returns
+    the legs' px positions in row order plus the label's px position.
     """
+    rng = random.Random(int(hashlib.md5(game.encode()).hexdigest(), 16))
+    lift = _label_lift(size, label_px)
+    pad = size + _SKY_NUDGE_PX
+    width = len(game) * _CHAR_WIDTH_EM * label_px + 2 * pad
+    height = _LABEL_LINE_PX * label_px + 2 * pad
+    # Enough disc for one glyph per member and its clear air, so the legs rarely
+    # collide and a settle nudge stays inside the reach the throw reserved.
+    lo = max(_WIDER_REACH_MIN, math.sqrt(members) * (size + _STAR_GAP_PX) / 2)
+    hi = max(lo, _WIDER_REACH_MAX)
+    spread = [(math.sqrt(rng.random()), rng.uniform(0, math.tau)) for _ in range(members)]
+    best = None
+    for throw in range(_WIDER_DARTS):
+        reach = rng.uniform(lo, hi) if 2 * throw < _WIDER_DARTS else lo
+        room = reach + size
+        x0, x1, y0, y1 = band[0] + room, band[2] - room, band[1] + room, band[3] - room
+        x = rng.uniform(x0, x1) if x1 > x0 else (band[0] + band[2]) / 2
+        y = rng.uniform(y0, y1) if y1 > y0 else (band[1] + band[3]) / 2
+        points = [(x + reach * r * math.cos(a), y + reach * r * math.sin(a)) for r, a in spread]
+        label_y = min(py for _, py in points) - lift
+        if label_y - height / 2 < frame[1]:
+            label_y = max(py for _, py in points) + lift
+        label = _box(x, label_y, width, height)
+        clash = _clash((x, y, room), label, rects, discs, frame)
+        if best is None or clash < best[0]:
+            best = (clash, (x, y, room), label, points, label_y)
+        if not clash:
+            break
+    # A band can be crammed past what any throw clears — six games and one narrow
+    # strip. Drawing the least-overlapping throw keeps every game in the sky,
+    # which is the promise the lens makes.
+    _, disc, label, points, label_y = best
+    discs.append(disc)
+    rects.append(label)
+    return points, (disc[0], label_y)
+
+
+def _clash(
+    disc: tuple[float, float, float],
+    label: tuple[float, float, float, float],
+    rects: Sequence[tuple[float, float, float, float]],
+    discs: Sequence[tuple[float, float, float]],
+    frame: tuple[float, float, float, float],
+) -> float:
+    """How much of a throw lands on something already there; 0.0 when it clears.
+
+    Boxes meet boxes by intersection area and circles by penetration depth —
+    mixed units on purpose, since the sum is only ever read as a ranking between
+    throws in a band too crammed for any of them to clear, and every term goes to
+    zero exactly when the throw is clean.
+    """
+    x, y, radius = disc
+
+    def sink(cx: float, cy: float, reach: float, rect: tuple[float, float, float, float]) -> float:
+        near = (min(max(cx, rect[0]), rect[2]), min(max(cy, rect[1]), rect[3]))
+        return max(reach - math.dist((cx, cy), near), 0.0)
+
+    def outside(rect: tuple[float, float, float, float]) -> float:
+        return sum(
+            max(gap, 0.0)
+            for gap in (
+                frame[0] - rect[0],
+                frame[1] - rect[1],
+                rect[2] - frame[2],
+                rect[3] - frame[3],
+            )
+        )
+
+    total = outside((x - radius, y - radius, x + radius, y + radius)) + outside(label)
+    for rect in rects:
+        total += sink(x, y, radius, rect) + max(
+            min(label[2], rect[2]) - max(label[0], rect[0]), 0.0
+        ) * max(min(label[3], rect[3]) - max(label[1], rect[1]), 0.0)
+    for other_x, other_y, other_radius in discs:
+        total += max(radius + other_radius - math.dist((x, y), (other_x, other_y)), 0.0)
+        total += sink(other_x, other_y, other_radius, label)
+    return total
+
+
+def _label_lift(size: float, label_px: float) -> float:
+    """How far a game label's ink reaches past the star it hangs under, in px."""
     return size / 2 + _LABEL_DROP_PX + _LABEL_LINE_PX * label_px / 2
 
 
@@ -170,18 +281,20 @@ def _sky_bands(
     px: tuple[float, float],
     *,
     sky_y: float,
+    size: float,
     label_px: float,
 ) -> list[tuple[float, float, float, float]]:
     """The open px rectangles around the footprint: left, right, above, below.
 
-    A band too thin to hold a cluster and its label is a gutter, not sky, and is
-    dropped — which is how the desktop ends up with only its two side bands and
-    the phone, whose map spans the width, with only the two it grew in y.
+    A band too thin to hold the tightest cluster and the label hanging under it
+    is a gutter, not sky, and is dropped — which is how the desktop ends up with
+    only its two side bands and the phone, whose map spans the width, with only
+    the two it grew in y.
     """
     left, bottom = -X_RANGE * _FRAME_INSET * px[0], -sky_y * _FRAME_INSET * px[1]
     right, top = -left, -bottom
     x0, y0, x1, y1 = footprint
-    room = 2 * _WIDER_CLUSTER_PX + label_px
+    room = 2 * (_WIDER_REACH_MIN + size) + _label_lift(size, label_px)
     return [
         band
         for band in (
@@ -194,73 +307,33 @@ def _sky_bands(
     ]
 
 
-def _scatter_band(
-    band: tuple[float, float, float, float],
-    games: Sequence[tuple[str, list[dict]]],
-    px: tuple[float, float],
-    *,
-    size: float,
-    label_px: float,
-) -> dict[str, tuple[float, float]]:
-    """One band's games as jittered clusters, spread along its long axis.
-
-    A vertical band stacks its games one over another, so a cluster has to own the
-    strip its label hangs into as well or the label lands on the group below; along
-    a horizontal band the labels sit side by side and only the clusters compete.
-    Each game gets an equal ``stride`` of the band's long axis and its legs scatter
-    inside whatever that stride leaves once the label is reserved, so a crowded
-    band draws tighter groups rather than overlapping ones; the jitter is a
-    fraction of what is still spare, which on a full band is nothing. From four
-    games up the strip is consumed exactly (stride equals pitch), so a ``settle``
-    nudge past the anchor radius eats into the neighbour's reservation — the
-    residual graze in a crammed band.
-    """
-    x0, y0, x1, y1 = band
-    along_x = (x1 - x0) >= (y1 - y0)
-    span, start = (x1 - x0, x0) if along_x else (y1 - y0, y0)
-    across = (y0 + y1) / 2 if along_x else (x0 + x1) / 2
-    ink = 0.0 if along_x else _label_lift(size, label_px)
-    reach = min(_WIDER_CLUSTER_PX, max((span / len(games) - size - ink) / 2, 0.0))
-    stride = 2 * reach + size + ink
-    lo = start + reach + size / 2 + ink
-    hi = max(lo, start + span - reach - size / 2)
-    pitch = (hi - lo) / max(len(games) - 1, 1)
-    play = _WIDER_JITTER * max(pitch - stride, 0.0)
-    anchors: dict[str, tuple[float, float]] = {}
-    for slot, (game, rows) in enumerate(games):
-        rng = random.Random(int(hashlib.md5(game.encode()).hexdigest(), 16))
-        seat = lo + slot * pitch if len(games) > 1 else (lo + hi) / 2
-        along = min(max(seat + rng.uniform(-1, 1) * play, lo), hi)
-        center = (along, across) if along_x else (across, along)
-        for row in rows:
-            radius, angle = rng.uniform(0, reach), rng.uniform(0, 2 * math.pi)
-            anchors[corr_key(row)] = (
-                (center[0] + radius * math.cos(angle)) / px[0],
-                (center[1] + radius * math.sin(angle)) / px[1],
-            )
-    return anchors
-
-
 def _grown_sky(
     occupied: Mapping[str, tuple[float, float]],
     sizes: Mapping[str, float],
     px: tuple[float, float],
     *,
     sky_y: float,
+    size: float,
     label_px: float,
 ) -> float:
-    """``sky_y``, opened in y far enough that the map leaves at least one band.
+    """``sky_y``, opened in y until the sky above and below the map both hold.
 
-    A deep enough tier closes every band the sky had — immediately on the phone,
-    whose map already spans the width, and on the desktop once the tier spreads
-    past the side inset. Either way the layer would otherwise draw nothing at all,
-    with no feedback, so both viewports take the phone's own way out and grow.
+    The desktop's sky is its two side bands; while one of those survives the
+    figure keeps its height. A deep enough tier closes both — immediately on the
+    phone, whose map already spans the width — and the sky the map has left is
+    the pair above and below it. The map's footprint is rarely symmetric in y,
+    so one of that pair fits before the other, and a lens that takes the first
+    piles every game into half a sky: both have to fit, and the figure grows by
+    exactly what that takes.
     """
     box = _footprint(occupied, sizes, px)
-    if _sky_bands(box, px, sky_y=sky_y, label_px=label_px):
+    bands = _sky_bands(box, px, sky_y=sky_y, size=size, label_px=label_px)
+    if any(band[2] <= box[0] or band[0] >= box[2] for band in bands):
         return sky_y
-    clear = max(box[3], -box[1]) + 2 * _WIDER_CLUSTER_PX + label_px
-    return max(sky_y, clear / (px[1] * _FRAME_INSET))
+    # A lattice cell of play past the gutter test: the sky opens the same amount
+    # above and below, and the band that lands an ulp short would be dropped.
+    clear = max(box[3], -box[1]) + 2 * (_WIDER_REACH_MIN + size) + _label_lift(size, label_px)
+    return max(sky_y, (clear + _CELL_PX) / (px[1] * _FRAME_INSET))
 
 
 def add_wider_layer(
@@ -281,7 +354,7 @@ def add_wider_layer(
     frame the figure grows by exactly the added y-range, so the px-per-unit the map
     was spaced against survives the reshape.
     """
-    sky_y = _grown_sky(occupied, sizes, px, sky_y=sky_y, label_px=label_size)
+    sky_y = _grown_sky(occupied, sizes, px, sky_y=sky_y, size=size, label_px=label_size)
     pos, labels = wider_positions(
         groups, occupied, sizes, px, size=size, sky_y=sky_y, label_px=label_size
     )

@@ -12,6 +12,7 @@ import ast
 import inspect
 import itertools
 import math
+import statistics
 
 import pandas as pd
 
@@ -19,17 +20,20 @@ from sportstradamus.dashboard.components import constellation_deep, constellatio
 from sportstradamus.dashboard.components.constellation import (
     _FIG_HEIGHT,
     _LABEL_FONT_SIZE,
+    _LABEL_FONT_SIZE_MOBILE,
     constellation_figure,
 )
 from sportstradamus.dashboard.components.constellation_spacing import (
     _FRAME_INSET,
     DEFAULT_STARS,
     PX_PER_UNIT,
+    PX_PER_UNIT_MOBILE,
     Y_RANGE,
 )
 from sportstradamus.dashboard.components.constellation_wider import (
     WIDER_GAMES,
     WIDER_STAR_SIZE,
+    WIDER_STAR_SIZE_MOBILE,
 )
 from sportstradamus.dashboard.theme import team_colors
 
@@ -163,7 +167,9 @@ def test_a_deep_tier_that_closes_the_sky_grows_it_instead_of_drawing_nothing():
         assert both.layout.height > sky_only.layout.height, mobile
 
 
-def _sky_boxes(fig) -> tuple[list[tuple], list[tuple]]:
+def _sky_boxes(
+    fig, *, px=PX_PER_UNIT, size=WIDER_STAR_SIZE, font=_LABEL_FONT_SIZE
+) -> tuple[list[tuple], list[tuple]]:
     """The sky's label ink boxes and star boxes in px, as ``(game, x0, y0, x1, y1)``.
 
     A plotly text label is centred on its point; 0.6 em a character is the usual
@@ -172,13 +178,14 @@ def _sky_boxes(fig) -> tuple[list[tuple], list[tuple]]:
     text_trace, sky = _trace(fig, "wider_labels"), _trace(fig, "wider")
     labels, stars = [], []
     for text, x, y in zip(text_trace.text, text_trace.x, text_trace.y, strict=True):
-        half_w, half_h = len(text) * 0.6 * _LABEL_FONT_SIZE / 2, 1.25 * _LABEL_FONT_SIZE / 2
-        cx, cy = float(x) * PX_PER_UNIT[0], float(y) * PX_PER_UNIT[1]
+        half_w, half_h = len(text) * 0.6 * font / 2, 1.25 * font / 2
+        cx, cy = float(x) * px[0], float(y) * px[1]
         labels.append((text, cx - half_w, cy - half_h, cx + half_w, cy + half_h))
     for card, x, y in zip(sky.customdata, sky.x, sky.y, strict=True):
-        cx, cy = float(x) * PX_PER_UNIT[0], float(y) * PX_PER_UNIT[1]
-        half = WIDER_STAR_SIZE / 2
-        stars.append((card[0].split("|")[0][:3], cx - half, cy - half, cx + half, cy + half))
+        cx, cy = float(x) * px[0], float(y) * px[1]
+        stars.append(
+            (card[0].split("|")[0][:3], cx - size / 2, cy - size / 2, cx + size / 2, cy + size / 2)
+        )
     return labels, stars
 
 
@@ -231,3 +238,56 @@ def test_only_the_best_wider_games_are_drawn():
     fig = constellation_figure([], None, _ladder(13), wider_groups=groups)
     assert len(_trace(fig, "wider_labels").text) == WIDER_GAMES
     assert set(_trace(fig, "wider_labels").text) == {game for game, _ in groups[:WIDER_GAMES]}
+
+
+def _clusters(fig, px) -> dict[str, list[tuple[float, float]]]:
+    """Sky star px positions by game — the fixtures name a game's players after its home code."""
+    wider = _trace(fig, "wider")
+    out: dict[str, list[tuple[float, float]]] = {}
+    for card, x, y in zip(wider.customdata, wider.x, wider.y, strict=True):
+        out.setdefault(card[0].split("|")[0][:3], []).append((float(x) * px[0], float(y) * px[1]))
+    return out
+
+
+def test_wider_clusters_are_not_on_a_fixed_pitch():
+    """The owner's second look: "each cluster is assigned a specific location it's
+    allowed to be". A band's games used to sit at one even pitch; a seeded throw
+    puts them where it lands, so the gaps along a band vary and no two clusters
+    open to the same reach."""
+    fig = constellation_figure([], None, _ladder(13), wider_groups=_wider_groups(WIDER_GAMES))
+    clusters = _clusters(fig, PX_PER_UNIT)
+    centre = {
+        game: (statistics.mean(x for x, _ in pts), statistics.mean(y for _, y in pts))
+        for game, pts in clusters.items()
+    }
+    reach = {game: max(math.dist(p, centre[game]) for p in pts) for game, pts in clusters.items()}
+    assert len({round(r) for r in reach.values()}) > 1, reach
+    for side in (True, False):
+        along = sorted(cy for cx, cy in centre.values() if (cx > 0) is side)
+        gaps = [b - a for a, b in itertools.pairwise(along)]
+        assert len(gaps) >= 2, "fixture no longer deals three games a side"
+        assert statistics.pstdev(gaps) / statistics.mean(gaps) >= 0.15, (side, gaps)
+
+
+def test_wider_label_boxes_clear_every_foreign_star_on_both_viewports():
+    """The crammed single band from the label test, on the phone too, where the
+    labels are bigger and the bands are the pair the sky grew in y."""
+    names = ["CIN/CLE", "LAA/LAD", "PHI/PIT"]
+    groups = [
+        (game, [_row(f"{game[:3]}{i}", game[:3], 0.3, market="3PM", game=game) for i in range(4)])
+        for game in names
+    ]
+    for mobile, px, size, font in (
+        (False, PX_PER_UNIT, WIDER_STAR_SIZE, _LABEL_FONT_SIZE),
+        (True, PX_PER_UNIT_MOBILE, WIDER_STAR_SIZE_MOBILE, _LABEL_FONT_SIZE_MOBILE),
+    ):
+        fig = constellation_figure(
+            [], None, _ladder(13), deep_pool=_deep_pool(190), wider_groups=groups, mobile=mobile
+        )
+        labels, stars = _sky_boxes(fig, px=px, size=size, font=font)
+        assert {label[0] for label in labels} == set(names), mobile
+        for one, other in itertools.combinations(labels, 2):
+            assert _clear(one, other), (mobile, one[0], other[0])
+        for label in labels:
+            for star in stars:
+                assert star[0] == label[0][:3] or _clear(label, star), (mobile, label[0], star[0])
