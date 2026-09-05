@@ -1,13 +1,13 @@
 """The constellation's two lenses — deeper inside the map, wider around it.
 
 Both are optional overlays on ``constellation.py``'s figure and both obey one
-rule: a lens may add stars, never move the ones already drawn — and neither may a
-click, which nothing animates. *Look deeper* fades the game's remaining legs in as
-small stars **inside** the constellation, each settled beside the main star it
-correlates with (or into its own team's open space) with its ties drawn, so the
-map gains detail instead of a second ring around it. *Look wider* leaves the map alone apart from a slight recede and fills
-the open sky around it with other games' best legs, scattered in per-game
-clusters and coloured by team.
+rule: a lens may add stars, never move the ones already drawn — and neither may
+a click, which nothing animates. *Look deeper* fades the game's remaining legs
+in as small stars **inside** the constellation, each settled beside the main
+star it correlates with (or into its own team's open space) with its ties drawn,
+so the map gains detail instead of a second ring around it. *Look wider* leaves
+the map alone apart from a slight recede and fills the open sky around it with
+other games' best legs, scattered in per-game clusters and coloured by team.
 
 Placement is ``constellation_spacing.settle`` in both cases, with everything
 already on screen passed as ``fixed`` — which is what makes "revealing a lens
