@@ -10,6 +10,7 @@
 #   close-lines        confer --close-lines
 #   meditate           train/retrain models
 #   reflect            nightly resolution
+#   export-line-movement  refresh the Board's DFS line-movement snapshot from the archive
 #   gate-status        scripts/gate_status_update.sh (monthly: refresh main ship_config, open PR)
 #   fp-fetch           fetch fp run (weekly: snapshot Fantasy Points Data Suite)
 #   ctg-fetch          fetch ctg run (snapshot Cleaning the Glass NBA tables)
@@ -48,7 +49,7 @@ LOG_DIR="${LOG_DIR:-$PROJECT_DIR/logs}"
 LOCK_DIR="${LOCK_DIR:-/tmp}"
 
 if [[ $# -lt 1 ]]; then
-    echo "usage: $(basename "$0") <prophecize|confer|close-lines|meditate|reflect|gate-status|fp-fetch|ctg-fetch|savant-fetch|ledger-commit> [args...]" >&2
+    echo "usage: $(basename "$0") <prophecize|confer|close-lines|meditate|reflect|export-line-movement|gate-status|fp-fetch|ctg-fetch|savant-fetch|ledger-commit> [args...]" >&2
     exit 64
 fi
 
@@ -64,6 +65,7 @@ case "$JOB" in
     close-lines)  CMD=("${UMBRELLA[@]}" confer --close-lines) ;;
     meditate)     CMD=("${UMBRELLA[@]}" meditate) ;;
     reflect)      CMD=("${UMBRELLA[@]}" reflect) ;;
+    export-line-movement) CMD=("${UMBRELLA[@]}" export-line-movement) ;;
     gate-status)  CMD=(bash "$SCRIPT_DIR/gate_status_update.sh") ;;
     fp-fetch)     CMD=("${UMBRELLA[@]}" fetch fp run) ;;
     ctg-fetch)    CMD=("${UMBRELLA[@]}" fetch ctg run) ;;

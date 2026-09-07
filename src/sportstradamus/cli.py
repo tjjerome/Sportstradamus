@@ -41,6 +41,9 @@ class LazyGroup(click.Group):
         "meditate": "sportstradamus.training.cli:meditate",
         "reflect": "sportstradamus.nightly:run",
         "dashboard": "sportstradamus.dashboard:run",
+        # Top level, not under `admin`: this group is what scripts/run_job.sh dispatches as a
+        # cron job, and export-line-movement has a case there. `admin` is hand-run maintenance.
+        "export-line-movement": "sportstradamus.scripts.export_line_movement:export_line_movement",
     },
 )
 def cli() -> None:
