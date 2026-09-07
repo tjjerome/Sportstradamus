@@ -1,6 +1,6 @@
 # Dashboard UX — "the Oracle"
 
-> Status: ACTIVE — **Phase D (loose constellation shapes) is built and gates-green on `feature/dashboard-ux`, owner live-check outstanding**: plan [plans/2026-07-03-p8-phaseD-constellation-shapes.md](../archive/superpowers/plans/2026-07-03-p8-phaseD-constellation-shapes.md). P8 (0/A/B/C + R remediation) shipped and owner-live-checked 2026-07-16; Phase M is built and gates-green with the owner's real-phone pass still outstanding; E art catalog stays parked.
+> Status: ACTIVE — **Phase D (loose constellation shapes) is built and gates-green on `feature/dashboard-ux`, owner live-check outstanding**: plan [plans/2026-07-03-p8-phaseD-constellation-shapes.md](../archive/superpowers/plans/2026-07-03-p8-phaseD-constellation-shapes.md). P8 (0/A/B/C + R remediation) shipped and owner-live-checked 2026-07-16; Phase M is built and gates-green with the owner's real-phone pass still outstanding; E art catalog stays parked. **L1 (line-movement export) landed 2026-09-07** and lit the Board's `Move` sparkline; the constellation card's last-five spark landed with it.
 
 ## 1. Mission & money logic
 
@@ -44,6 +44,8 @@ stop and ask the owner (material).
     python3 -c "import pandas as pd; print(pd.read_parquet('src/sportstradamus/data/runtime/current_offers.parquet').columns.tolist())"
                                                   # K/Why/Game present ⇒ P2 landed
     ls src/sportstradamus/data/runtime/current_game_corr.parquet 2>/dev/null
+    python3 -c "import pandas as pd; m=pd.read_parquet('src/sportstradamus/data/runtime/current_line_movement.parquet'); print(len(m), 'rows,', (m['n_moves']>0).sum(), 'moved')"
+                                                  # L1 landed; 'moved' is a minority by nature
     ls src/sportstradamus/data/runtime/user_slips.parquet 2>/dev/null  # ⇒ P3 produced saves
     poetry run python -c "import streamlit; print(streamlit.__version__)"  # needs ≥1.45 for st.navigation icons
     # CLV corruption check (Phase 0.9 fixes; >0 impossible-probability rows ⇒ still broken):
@@ -102,6 +104,10 @@ May touch:
   `history_schema.py`, `scripts/migrate_leg_schema.py` (new).
 - Recorded exception (owner-approved via the Phase B plan): one additive hook in
   `training/correlate.py:_write_corr_outputs` emitting `corr_market_summary.parquet`.
+- Recorded exception (L1, 2026-09-07): one additive **read** method on
+  `helpers/archive.py` — `get_book_line_histories`, the bulk sibling of `get_line_history`
+  that keeps `odds.line`. L1 is registered as an Archive→parquet export, so it cannot avoid
+  reading the archive; no schema change and no write path.
 - `src/sportstradamus/scripts/`: `export_line_movement.py`, `build_team_assets.py` (new).
 - `src/sportstradamus/data/config/team_assets.json`,
   `src/sportstradamus/data/config/constellation_shapes.json`,
@@ -375,8 +381,15 @@ stage ends with the §9 checklist green and the dashboard runnable.
     pass (NASA/Unsplash class; owner approves binaries before commit).
   Deferred (spec §6, registered in roadmap §8): forward sim-bettor ledger (own lane),
   empirical-vs-model ρ overlay.
-- **L1 — line-movement export.** `export-line-movement` cron (Archive→parquet) + run_job.sh case
-  + crontab + healthcheck + CLI snapshot; dialog tab flips on. Owner wires cron.
+- **L1 — line-movement export.** ✔ Built 2026-09-07. `prophecize` writes
+  `current_line_movement.parquet` (one row per offer: open/close line, net move, a
+  flicker-tolerant `n_moves`, and a 12-point time-even trajectory) from the new
+  `archive.get_book_line_histories`; `sportstradamus export-line-movement` + a `run_job.sh`
+  case refresh it off-cycle. Folded into `prophecize` rather than left to a cron so the
+  snapshot needs no ops work and key-aligns with the offers from the same run — **crontab +
+  healthcheck stay owner-only** (§8); the optional standalone schedule is written up in
+  `docs/OPERATIONS.md`. Board `Move` column flipped on; the deep-dive line-movement tab is
+  still unbuilt.
 - **L2 — comps persistence.** Persist comp outputs at prophecize time; comps panel + chip flip
   on.
 - **L3 — game lines into the correlation engine.** Book-implied probs only; Game-board rows +
@@ -435,6 +448,34 @@ devel-bound PR; research-analyst only if a stage turns into a modeling question 
 - Durable non-obvious lesson? Offer a memory capture (CLAUDE.md §Agentic workflow conventions).
 
 ## 10. Ledger (append-only, newest first, cap ~15)
+
+- 2026-09-07 · **Sparklines: board line movement, card last five** · Both scars filled, and
+  they wanted different data. **Board** (`Move`, after `Line`, 10 → 11 cols): how the **DFS
+  book's own** line moved since the offer opened — the platform you'd bet, never the consensus.
+  That needed **L1**, which turned out not to be blocked at all: `odds` already carries
+  `observed_at`/`book`/`line`, Underdog and Sleeper have written there since 2026-03-16, and all
+  2,236 UD offer keys match `(league, entity, market)`. New bulk `archive.get_book_line_histories`
+  → pure `prediction/line_movement.py` → `current_line_movement.parquet`, written by `prophecize`
+  (0.19 s scan, 151k rows; 2,239 offers join 0 unmatched). **Card**: `.cst-scar` "Last 5 — coming
+  soon" → the mockup's `.cst-spark`, fed by a render-time gamelog tail — one `groupby.tail(5)` per
+  league, not `build_recent_history`'s per-row rescan. Travels as a new `sparks` component arg,
+  **not** widened `customdata` (three traces carry it, and `test_constellation.py` pins
+  `len(cd) == 9`) — that test passing unchanged is the proof. One `spark_svg.py` builds both SVGs
+  in Python, so no sparkline geometry lives in `main.js`; the grid draws it through a class-based
+  `getGui` renderer (a function renderer escapes SVG in AG Grid 34). **The honest limit:** only
+  14.5% of a board's lines ever move — NFL posted days out 50–64%, same-day MLB 4% — so a held
+  line draws a flat gray rule, not a blank cell. **Bug the review caught:** deciding "held" from
+  the net delta called 44 real round-trip offers unmoved (Brock Purdy attempts, 4 moves, net 0);
+  `n_moves` is now passed separately, since the 12-point resample can itself miss a reverted move.
+  **Live** (desktop 1600x1000 + phone 390x844, real snapshot): board 34/34 `Move` cells real
+  `<svg>`, 0 escaped, header 140 px, sorts numerically (top row `+17.0`, "Line 189.5 → 206.5");
+  12-point traces in `GREEN`/`RED` by who the drift favors, MLB rows the gray held rule. Card
+  sparks desktop 6/10 and 46/46 under *Look wider*, phone 8/10 and 44/46 — every miss is a hover
+  landing on an overlapping star, never a card without a spark, and the wider lens is the case
+  that forced `form_sparks` to group by league itself rather than take one. 0 page errors, iframe
+  height posts on every lens toggle. Snapshot shape matches the archive read: NFL 55.3% moved at a
+  12-point median, MLB 0.1% at 1 point. Open: the deep-dive line-movement tab; the phone card
+  stays silent on a net-zero round trip.
 
 - 2026-09-05 · **Twenty stars, board names, night-sky lenses, calm-analyst voice** · Owner pass on
   the 12-star round: too few stars, raw market slugs on the stars, a deep tier laid out on a grid,

@@ -76,6 +76,19 @@ Couplings to keep in sync:
 - Season starts/ends never require cron edits: idle leagues cost one free
   events call per broad run, and `prophecize`/`meditate` skip them.
 
+`export-line-movement` is **not** in the crontab either, because `prophecize`
+already writes `current_line_movement.parquet` on every run — the Board's move
+column tracks the hourly pipeline by default. Schedule it only to refresh that
+snapshot between `prophecize` runs: it re-derives the movement from the archive
+against the offers already on disk, so it costs one archive read and no scrape.
+
+```cron
+20 8-20 * * *          <repo-dir>/scripts/run_job.sh export-line-movement
+```
+
+Keep it off the `:50` minute `prophecize` and `close-lines` already share — it
+takes the same archive lock.
+
 Dev-side collectors (`ctg-fetch` NBA, `savant-fetch` MLB) are **not** in the prod
 crontab — they run on the dev box beside the manual weekly `meditate`, then
 `scripts/sync_to_prod.sh` uploads the models, the gitignored serving artifacts
