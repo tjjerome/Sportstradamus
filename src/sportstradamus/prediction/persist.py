@@ -17,6 +17,7 @@ from sportstradamus.helpers.io import (
     CURRENT_GAME_CONTEXT_PATH,
     CURRENT_GAME_CORR_PATH,
     CURRENT_GAME_STORIES_PATH,
+    CURRENT_LINE_MOVEMENT_PATH,
     CURRENT_META_PATH,
     CURRENT_OFFER_DETAILS_PATH,
     CURRENT_OFFERS_PATH,
@@ -163,6 +164,18 @@ def write_current_game_context(context: pd.DataFrame) -> None:
     so the dashboard reflects the latest run.
     """
     _atomic_write_parquet(context, CURRENT_GAME_CONTEXT_PATH)
+
+
+def write_line_movement(movement: pd.DataFrame) -> None:
+    """Write the per-offer DFS line-movement snapshot atomically.
+
+    ``movement`` is the ``prediction.line_movement.build_line_movement`` frame:
+    one row per ``(League, Platform, Market, Player, Date)`` carrying the
+    open/close line, the net move, a flicker-tolerant change count, and the
+    JSON sparkline series. Column-stable on an empty slate, so a header-only
+    snapshot still writes for the dashboard to read.
+    """
+    _atomic_write_parquet(movement, CURRENT_LINE_MOVEMENT_PATH)
 
 
 def write_current_game_stories(stories: pd.DataFrame) -> None:

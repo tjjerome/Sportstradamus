@@ -28,7 +28,7 @@ import operator
 import os
 import time
 import warnings
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import timedelta
 from pathlib import Path
 
@@ -84,6 +84,18 @@ _DIVERGENCE_ABS_FLOOR = 2.0
 # High lines jitter proportionally, so the tolerance also scales with the median.
 _DIVERGENCE_REL_FACTOR = 0.25
 _DEFAULT_DB_PATH = Path("archive/archive.duckdb")
+
+# get_book_line_histories joins the caller's key frame through this DuckDB view.
+_KEY_JOIN_VIEW = "book_line_history_keys"
+_BOOK_LINE_HISTORY_COLS = [
+    "league",
+    "market",
+    "game_date",
+    "entity",
+    "book",
+    "observed_at",
+    "line",
+]
 
 # Hours before commence_time treated as "the books' line" during training.
 # Aligned with the typical Vegas closing-window inflection (~8h pre-game).
@@ -1011,6 +1023,52 @@ class Archive:
             params.append(until)
         sql += " ORDER BY observed_at"
         return self._connection.execute(sql, params).fetchdf()
+
+    def get_book_line_histories(
+        self, keys: pd.DataFrame, *, books: Sequence[str], since: datetime.date
+    ) -> pd.DataFrame:
+        """Bulk per-book line time-series for many ``(league, entity, market)`` keys.
+
+        The bulk sibling of :meth:`get_line_history`, and the only reader that
+        keeps ``odds.line`` — the line a *named* book posted. The ``lines``
+        table cannot express that: it has no book column, so its rows are the
+        cross-book consensus. Callers that need "how did Underdog's own number
+        move" must read ``odds``.
+
+        One scan joins every key at once; a per-entity loop over a full slate is
+        thousands of round trips against the same table pages.
+
+        Args:
+            keys: Frame carrying ``league``, ``entity`` and ``market`` columns.
+                Extra columns are ignored, duplicates collapsed.
+            books: Books to keep, e.g. ``("Underdog", "Sleeper")``.
+            since: Earliest ``game_date`` to scan, inclusive.
+
+        Returns:
+            ``[league, market, game_date, entity, book, observed_at, line]``
+            sorted by key then ``observed_at``, excluding rows written before
+            ``observed_at`` existed. Column-stable and empty when ``keys`` or
+            ``books`` is empty.
+        """
+        wanted = keys[["league", "entity", "market"]].drop_duplicates()
+        if wanted.empty or not books:
+            return pd.DataFrame(columns=_BOOK_LINE_HISTORY_COLS)
+
+        placeholders = ", ".join("?" * len(books))
+        self._connection.register(_KEY_JOIN_VIEW, wanted)
+        try:
+            return self._connection.execute(
+                "SELECT o.league, o.market, o.game_date, o.entity, o.book, "
+                "       o.observed_at, o.line "
+                f"FROM odds o JOIN {_KEY_JOIN_VIEW} k "
+                "  ON o.league = k.league AND o.entity = k.entity AND o.market = k.market "
+                f"WHERE o.book IN ({placeholders}) "
+                "  AND o.game_date >= ? AND o.observed_at IS NOT NULL "
+                "ORDER BY o.league, o.market, o.game_date, o.entity, o.book, o.observed_at",
+                [*books, since],
+            ).fetchdf()
+        finally:
+            self._connection.unregister(_KEY_JOIN_VIEW)
 
     def get_ev_history(
         self,

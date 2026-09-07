@@ -40,6 +40,7 @@ from sportstradamus.helpers.io import (
     write_history,
 )
 from sportstradamus.history_schema import HISTORY_COLS, PREDICTION_KEY
+from sportstradamus.prediction.line_movement import build_line_movement
 from sportstradamus.prediction.persist import (
     write_current_game_context,
     write_current_game_corr,
@@ -47,6 +48,7 @@ from sportstradamus.prediction.persist import (
     write_current_offer_details,
     write_current_offers,
     write_current_pickem,
+    write_line_movement,
 )
 from sportstradamus.prediction.scoring import process_offers
 from sportstradamus.prediction.stories import (
@@ -135,6 +137,35 @@ def _offer_details_frame(snapshot_offers: pd.DataFrame, stats: dict) -> pd.DataF
     return build_offer_details(
         snapshot_offers, league_data, importances, exclude=frozenset(), today=today
     )
+
+
+def snapshot_line_movement(offers: pd.DataFrame) -> pd.DataFrame:
+    """Snapshot how each offer's DFS line has moved since it was posted.
+
+    Reads the line history the offers' own platforms wrote to the archive
+    (``odds.line`` — the book's own number, not the cross-book consensus the
+    ``lines`` table holds), folds it into one row per offer, and writes the
+    dashboard snapshot. Shared with the standalone ``export-line-movement``
+    refresh so both scan the archive the same way.
+
+    Returns:
+        The frame that was written, so a caller can report on it.
+    """
+    observations = pd.DataFrame()
+    if not offers.empty:
+        keys = (
+            offers[["League", "Player", "Market"]]
+            .drop_duplicates()
+            .rename(columns={"League": "league", "Player": "entity", "Market": "market"})
+        )
+        observations = archive.get_book_line_histories(
+            keys,
+            books=sorted(offers["Platform"].unique()),
+            since=datetime.date.fromisoformat(offers["Date"].min()),
+        )
+    movement = build_line_movement(observations, offers)
+    write_line_movement(movement)
+    return movement
 
 
 def _stamp_alt_line(offers: pd.DataFrame) -> pd.DataFrame:
@@ -320,6 +351,7 @@ def main(progress, contest_variant, log_level):
     )
     write_current_game_corr(corr_sink)
     write_current_game_context(game_context)
+    snapshot_line_movement(snapshot_offers)
     write_current_game_stories(game_stories)
     write_current_offer_details(offer_details)
 

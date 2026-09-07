@@ -1,12 +1,12 @@
 """The Board's mobile card list — one bordered card per offer (Phase M spec §4.3).
 
-The phone replacement for the 10-column AG-Grid, which can't fit a 390px
+The phone replacement for the 11-column AG-Grid, which can't fit a 390px
 viewport. Each card carries the row's read (player, market, line/side, Win %,
-Model Edge, platform) with numerals in the mono code face, plus the grid's two
-actions: Detail (the deep-dive dialog, via the shared ``detail_stack``) and Add
-to slip (the same ``add_to_simple_slip`` path the grid selection uses). Pages
-``_PAGE_SIZE`` at a time — a slate can run hundreds of offers and phone DOM is
-the constraint.
+Model Edge, platform, any line movement) with numerals in the mono code face,
+plus the grid's two actions: Detail (the deep-dive dialog, via the shared
+``detail_stack``) and Add to slip (the same ``add_to_simple_slip`` path the grid
+selection uses). Pages ``_PAGE_SIZE`` at a time — a slate can run hundreds of
+offers and phone DOM is the constraint.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from sportstradamus.dashboard import columns
 from sportstradamus.dashboard.components.slip_state import add_to_simple_slip
 
 # Cards rendered before the "Show more" button extends the list; sized so a full
@@ -43,11 +44,19 @@ def _render_card(idx, row: pd.Series) -> None:
     win = float(row.get("Win Prob") or 0.0)
     edge = float(row.get("Model Edge") or 0.0)
     market = row.get("Market Display") or row.get("Market", "")
+    # A 78px sparkline is unreadable at 390px, so the phone reads the same movement as text
+    # — and reads nothing at all when the book never moved this line, which on a same-day
+    # board is most of it.
+    move_text = row.get(columns.MOVE_TEXT) or ""
+    moved = ""
+    if move_text:
+        move_arrow = "▲" if row[columns.MOVE] > 0 else "▼"
+        moved = f"  \nLine `{move_text}` {move_arrow}"
     with st.container(border=True):
         st.markdown(
             f"**{row['Player']}** · {market} {arrow} `{row['Line']:.10g}`  \n"
             f"Win `{win:.0%}` · Edge `{edge:+.1f}%` · {row.get('Platform', '')} · "
-            f"{row.get('League', '')}"
+            f"{row.get('League', '')}{moved}"
         )
         detail_col, add_col = st.columns(2)
         if detail_col.button("Detail", key=f"offer_card_detail_{idx}"):
