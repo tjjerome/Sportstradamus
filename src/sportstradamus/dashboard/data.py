@@ -21,11 +21,13 @@ from sportstradamus.helpers.io import (
     CURRENT_GAME_CONTEXT_PATH,
     CURRENT_GAME_CORR_PATH,
     CURRENT_GAME_STORIES_PATH,
+    CURRENT_LINE_MOVEMENT_PATH,
     CURRENT_META_PATH,
     CURRENT_OFFER_DETAILS_PATH,
     CURRENT_OFFERS_PATH,
     CURRENT_PARLAYS_PATH,
     HISTORY_PATH,
+    LINE_MOVEMENT_COLS,
     MODEL_STATS_PATH,
     PARLAY_HIST_PATH,
     PROFIT_SIM_SUMMARY_PATH,
@@ -303,6 +305,25 @@ def load_game_ctxs() -> dict:
     fresh ``prophecize`` snapshot still refreshes it.
     """
     return _load_game_ctxs_cached(_mtime(CURRENT_GAME_CONTEXT_PATH), _mtime(CURRENT_GAME_CORR_PATH))
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading line movement...")
+def _load_current_line_movement_cached(path: Path, mtime: float) -> pd.DataFrame:
+    df = read_parquet_safe(path)
+    return df if not df.empty else pd.DataFrame(columns=LINE_MOVEMENT_COLS)
+
+
+def load_current_line_movement() -> pd.DataFrame:
+    """Per-offer DFS line trajectories from the latest ``prophecize`` snapshot.
+
+    One row per ``League, Platform, Market, Player, Date`` (``Market`` the raw slug) with
+    ``open_line``/``close_line``/``move``/``n_moves``, the first/last timestamps, and
+    ``series`` — a JSON float list the Board's sparkline draws. Stays column-stable when
+    the export is absent so the Board's join still keys off it and simply finds nothing.
+    """
+    return _load_current_line_movement_cached(
+        CURRENT_LINE_MOVEMENT_PATH, _mtime(CURRENT_LINE_MOVEMENT_PATH)
+    )
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading offer details...")

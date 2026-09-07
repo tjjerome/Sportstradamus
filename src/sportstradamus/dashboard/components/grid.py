@@ -37,6 +37,17 @@ _SIGNED_PERCENT_FORMATTER = JsCode(
 _FIXED3_FORMATTER = JsCode(
     "function(params){return (params.value==null||isNaN(params.value))?'':params.value.toFixed(3);}"
 )
+# Signed delta with no unit suffix — the Board's Move column is a line delta (+4.0 points,
+# -0.5 receptions), not a percentage, so the "%" the signed-percent formatter appends is wrong.
+_SIGNED_FORMATTER = JsCode(
+    "function(params){if(params.value==null||isNaN(params.value))return '';"
+    "return (params.value>0?'+':'')+params.value.toFixed(1);}"
+)
+
+# The sparkline cell holds a fixed 78px SVG box (spark_svg's geometry) plus the signed delta.
+# fit_columns_on_grid_load sizes every other column from its header text, which would clip
+# the trace, so this column states its own width and holds it as the flex floor.
+_SPARK_COL_WIDTH = 140
 
 # Light text (textColor token) reads on every painted bucket because only the saturated
 # ramp ends are painted — the near-neutral band stays unpainted.
@@ -156,6 +167,24 @@ def _arrow_cellrenderer() -> JsCode:
     )
 
 
+def _spark_cellrenderer(svg_col: str) -> JsCode:
+    """A class-based AG Grid cellRenderer drawing the row's finished sparkline SVG from
+    ``svg_col`` ahead of the cell's own formatted value.
+
+    Class-based for the same reason as :func:`_arrow_cellrenderer`: a plain-function
+    renderer returning an SVG string renders it as an *escaped* text node in AG Grid 34.
+    The SVG rides in its own (hidden) row-data column so the cell's *value* stays the
+    numeric signed move and the column click-sorts on it. ``components.spark_svg`` stays
+    the one source of the geometry — no sparkline is drawn in JavaScript.
+    """
+    return JsCode(
+        "class SparkCellRenderer{init(p){"
+        "this.eGui=document.createElement('span');"
+        "this.eGui.innerHTML=(p.data[" + repr(svg_col) + "]||'')+' '+(p.valueFormatted||'');"
+        "}getGui(){return this.eGui;}}"
+    )
+
+
 def _heat_expr(bg: str) -> str:
     return (
         "{'backgroundColor':'"
@@ -212,11 +241,17 @@ def _numeric_col_kwargs(
     decimal: set[str],
     arrow_col: str | None,
     has_bet: bool,
+    spark_col: str | None,
+    spark_svg_col: str | None,
     tip: str | None,
 ) -> dict:
     """``configure_column`` kwargs for one numeric column: heatmap-or-plain cellStyle, an
     optional "%" formatter (signed for ``signed_pct``, plain for ``pct``) or a 3-decimal
-    formatter (``decimal``), an optional arrow cellRenderer, an optional tooltip.
+    formatter (``decimal``), an optional arrow or sparkline cellRenderer, an optional tooltip.
+
+    The sparkline column brings its own signed-delta formatter and width rather than taking
+    them from the format buckets: a trace plus a "%" suffix is not a combination any caller
+    wants, and the fixed-width SVG can't survive header-width column fitting.
     """
     cell_style = _heatmap_cellstyle(heatmap_center) if col == heatmap_col else dict(_RIGHT_STYLE)
     kwargs = {"cellStyle": cell_style}
@@ -228,6 +263,10 @@ def _numeric_col_kwargs(
         kwargs["valueFormatter"] = _FIXED3_FORMATTER
     if col == arrow_col and has_bet:
         kwargs["cellRenderer"] = _arrow_cellrenderer()
+    elif col == spark_col and spark_svg_col:
+        kwargs["cellRenderer"] = _spark_cellrenderer(spark_svg_col)
+        kwargs["valueFormatter"] = _SIGNED_FORMATTER
+        kwargs["width"] = kwargs["minWidth"] = _SPARK_COL_WIDTH
     if tip:
         kwargs["headerTooltip"] = tip
     return kwargs
@@ -343,11 +382,12 @@ def build_themed_grid_options(
     heatmap_center: float = 0.0,
     header_help: Mapping[str, str] | None = None,
     selection_mode: str = "single",
-    sparkline_col: str | None = None,  # L1 scar hook — line-movement sparklines, not built
     percent_cols: Sequence[str] = (),
     signed_percent_cols: Sequence[str] = (),
     decimal_cols: Sequence[str] = (),
     arrow_col: str | None = None,
+    spark_col: str | None = None,
+    spark_svg_col: str | None = None,
     hidden_cols: Sequence[str] = (),
     flag_col: str | None = None,
     flag_below: float = 0.0,
@@ -364,7 +404,9 @@ def build_themed_grid_options(
     numeric so sorting is unaffected. Pure — no Streamlit call.
 
     ``arrow_col`` prefixes that column's cells with the row's Over/Under arrow, keyed
-    off a ``Bet`` column in the row data. ``hidden_cols`` stays in the row data (so
+    off a ``Bet`` column in the row data. ``spark_col`` does the same with a sparkline,
+    reading the finished SVG from the (normally hidden) ``spark_svg_col`` so the cell's
+    own value stays the number the column sorts on. ``hidden_cols`` stays in the row data (so
     selection callbacks and JS renderers can still read it) without rendering as its
     own grid column — e.g. ``Bet`` for the arrow renderer, or a logic-only slug column
     that a display column already covers. ``flag_col`` paints an amber left-rail on any
@@ -403,6 +445,8 @@ def build_themed_grid_options(
             decimal=decimal,
             arrow_col=arrow_col,
             has_bet=has_bet,
+            spark_col=spark_col,
+            spark_svg_col=spark_svg_col,
             tip=help_map.get(col),
         )
         gb.configure_column(col, **kwargs)
@@ -430,6 +474,8 @@ def render_themed_grid(
     signed_percent_cols: Sequence[str] = (),
     decimal_cols: Sequence[str] = (),
     arrow_col: str | None = None,
+    spark_col: str | None = None,
+    spark_svg_col: str | None = None,
     hidden_cols: Sequence[str] = (),
     flag_col: str | None = None,
     flag_below: float = 0.0,
@@ -456,6 +502,8 @@ def render_themed_grid(
         signed_percent_cols=signed_percent_cols,
         decimal_cols=decimal_cols,
         arrow_col=arrow_col,
+        spark_col=spark_col,
+        spark_svg_col=spark_svg_col,
         hidden_cols=hidden_cols,
         flag_col=flag_col,
         flag_below=flag_below,

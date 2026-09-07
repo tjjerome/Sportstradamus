@@ -24,6 +24,10 @@ GRAY = "#8A91A0"
 # so the (primary, secondary) fallback pair still reads as two distinct tones.
 GRAY_SECONDARY = "#5A6070"
 
+# Hairline separator — chart gridlines, card edges, and the sparkline's reference rule.
+# Reads as structure against the dark ground without competing with a data mark.
+BORDER = "#2A2E37"
+
 # Diverging heatmap ramp (red ↔ neutral ↔ blue) for above/below-centre table cells
 # — mirrors config.toml chartDivergingColors so runtime grid code reaches it without a
 # TOML read; tests/golden/test_design_tokens.py pins this equal to the config ramp.
@@ -116,8 +120,8 @@ def register_plotly_template() -> None:
                 "#0072B2",
                 "#F0E442",
             ],
-            "xaxis": {"gridcolor": "#2A2E37", "zerolinecolor": "#2A2E37"},
-            "yaxis": {"gridcolor": "#2A2E37", "zerolinecolor": "#2A2E37"},
+            "xaxis": {"gridcolor": BORDER, "zerolinecolor": BORDER},
+            "yaxis": {"gridcolor": BORDER, "zerolinecolor": BORDER},
         }
     )
     pio.templates.default = "sportstradamus"

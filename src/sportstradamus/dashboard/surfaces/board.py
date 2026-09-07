@@ -13,6 +13,7 @@ from sportstradamus.dashboard.components.slip_state import add_to_simple_slip
 from sportstradamus.dashboard.data import (
     format_ts,
     load_current_game_corr,
+    load_current_line_movement,
     load_current_meta,
     load_current_offers,
     sport_filtered,
@@ -41,6 +42,7 @@ MAIN_COLS = [
     "Player",
     "Market Display",
     "Line",
+    columns.MOVE,
     "Boost",
     "Win Prob",
     "Model Edge",
@@ -132,13 +134,17 @@ init_detail_state()
 
 filtered = columns.add_match_column(filtered)
 filtered = columns.add_market_display(filtered)
+filtered = columns.add_line_movement(filtered, load_current_line_movement())
 
 # Bet rides along hidden (grid.py's arrow_col auto-hides it) for the Line arrow
 # cellRenderer's params.data.Bet; the Market slug rides along, renamed out of the way,
 # for the row-selection/slip-building code below (which matches offers by slug) — it
 # would otherwise collide with Market Display's LABELS rename to the same "Market"
-# header. Neither is one of the displayed MAIN_COLS.
-display_cols = [c for c in [*MAIN_COLS, "Bet", "Market"] if c in filtered.columns]
+# header. Move Spark carries the finished sparkline SVG the Move cellRenderer draws.
+# None of the three is a displayed MAIN_COLS entry.
+display_cols = [
+    c for c in [*MAIN_COLS, "Bet", "Market", columns.MOVE_SPARK] if c in filtered.columns
+]
 grid_df = filtered[display_cols].copy()
 if "Market" in grid_df.columns:
     grid_df = grid_df.rename(columns={"Market": "Market Slug"})
@@ -161,7 +167,9 @@ grid_df = grid_df.rename(columns=columns.LABELS)
 # frame, so every lookup below keys off the post-rename name, same as "Win %" already
 # does for Win Prob.
 numeric_cols = [
-    c for c in ("Line", "Boost", "Win %", columns.MODEL_EDGE, "Cons Edge") if c in grid_df.columns
+    c
+    for c in ("Line", columns.MOVE, "Boost", "Win %", columns.MODEL_EDGE, "Cons Edge")
+    if c in grid_df.columns
 ]
 if mobile:
     # Cards read the pre-rename filtered frame (raw 0–1 Win Prob; Model Edge ×100
@@ -182,9 +190,10 @@ else:
         percent_cols=["Win %"],
         signed_percent_cols=[columns.MODEL_EDGE, "Cons Edge"],
         arrow_col="Line",
-        hidden_cols=["Bet", "Market Slug"],
+        spark_col=columns.MOVE,
+        spark_svg_col=columns.MOVE_SPARK,
+        hidden_cols=["Bet", "Market Slug", columns.MOVE_SPARK],
     )
-    st.caption("Trend sparklines arrive with the L1 line-movement export.")
 
 if st.session_state.corr_nav:
     # Rerun from "View →" button — keep the stack as-is, just clear the flag.
