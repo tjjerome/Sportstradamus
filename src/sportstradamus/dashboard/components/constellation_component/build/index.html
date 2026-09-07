@@ -85,6 +85,7 @@
       .cst-kelly {
         color: var(--gold);
       }
+      /* The last-five fallback: a leg the gamelog can't answer for. */
       .cst-scar {
         border: 1px dashed var(--border);
         color: var(--gray);
@@ -93,6 +94,23 @@
         text-align: center;
         font-size: 11px;
         margin-bottom: 8px;
+      }
+      /* Last-five form: Python hands over a finished 78x22 <svg>, so this only has to
+         seat it beside its caption. The trace draws with preserveAspectRatio="none",
+         which means a flex squeeze would silently distort it — hence flex: 0 0 auto. */
+      .cst-spark {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 6px 8px;
+        margin-bottom: 8px;
+        color: var(--gray);
+        font-size: 11px;
+      }
+      .cst-spark svg {
+        flex: 0 0 auto;
       }
       .cst-btn {
         width: 100%;

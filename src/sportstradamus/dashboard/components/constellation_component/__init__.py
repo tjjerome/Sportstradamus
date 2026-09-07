@@ -21,12 +21,21 @@ _BUILD_DIR = Path(__file__).parent / "build"
 _component = components.declare_component("constellation", path=str(_BUILD_DIR))
 
 
-def render_constellation(fig: go.Figure, *, key: str, mobile: bool = False) -> dict | None:
+def render_constellation(
+    fig: go.Figure, *, key: str, sparks: dict[str, str], mobile: bool = False
+) -> dict | None:
     """Render the star map; return the last ``{action, key, nonce}`` the user fired.
 
     ``action`` is ``"click"`` (toggle the star's leg) or ``"detail"`` (open the offer
     dialog); ``key`` is the star's ``Player|Market|Bet``. ``None`` until the user acts.
     The caller dedups by ``nonce`` — a repeat click re-sends the same value.
     ``mobile`` switches the frontend to its touch flow (docked tap card, no hover).
+
+    ``sparks`` maps a star's key to its hover card's last-five markup. It travels beside
+    the figure rather than inside ``customdata`` because three traces carry customdata —
+    a field there would ship the same SVG three times and renumber every reader of the
+    positional card fields.
     """
-    return _component(figure_json=fig.to_json(), mobile=mobile, key=key, default=None)
+    return _component(
+        figure_json=fig.to_json(), mobile=mobile, sparks=sparks, key=key, default=None
+    )

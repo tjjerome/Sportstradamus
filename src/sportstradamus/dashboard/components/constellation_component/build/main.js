@@ -59,6 +59,7 @@
   let nonce = 0;
   let activeKey = null; // key whose card is showing
   let MOBILE = false; // set per render from Python's mobile prop (viewport.is_mobile)
+  let SPARKS = {}; // star key -> its card's last-five markup, built server-side
   let skyTap = true; // a plotly star tap clears this before the DOM click handler sees it
   const COARSE_POINTER =
     window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
@@ -71,6 +72,7 @@
     renderSeq += 1;
     const fig = JSON.parse(args.figure_json);
     MOBILE = !!args.mobile || COARSE_POINTER;
+    SPARKS = args.sparks || {};
     const config = { displayModeBar: false, scrollZoom: false, responsive: true };
     const curLensNames = lensNamesOf(fig.data);
     const freshLens = plotted && prevLensNames ? newLensTraces(fig.data, prevLensNames) : [];
@@ -314,6 +316,16 @@
     });
   }
 
+  // The star's last-five row, already drawn as SVG by Python — nothing here computes
+  // geometry. A star the gamelog can't answer for (a player it doesn't carry, a market
+  // that names no column of it) says so, rather than showing an empty box.
+  function sparkHtml(key) {
+    const spark = SPARKS[key];
+    return spark
+      ? '<div class="cst-spark">' + spark + "</div>"
+      : '<div class="cst-scar">No last 5 for this leg</div>';
+  }
+
   function cardHtml(cd) {
     const player = cd[1];
     const market = cd[2];
@@ -339,7 +351,7 @@
       'x · <span class="cst-kelly">Kelly ',
       pct(kelly),
       "</span></div>",
-      '<div class="cst-scar">Last 5 — coming soon</div>',
+      sparkHtml(cd[0]),
       '<div class="cst-actions">',
       MOBILE
         ? '<button class="cst-btn cst-toggle" type="button">' +
