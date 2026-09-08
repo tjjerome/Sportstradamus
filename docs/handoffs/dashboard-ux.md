@@ -473,7 +473,17 @@ devel-bound PR; research-analyst only if a stage turns into a modeling question 
   sparks desktop 6/10 and 46/46 under *Look wider*, phone 8/10 and 44/46 — every miss is a hover
   landing on an overlapping star, never a card without a spark, and the wider lens is the case
   that forced `form_sparks` to group by league itself rather than take one. 0 page errors, iframe
-  height posts on every lens toggle. Snapshot shape matches the archive read: NFL 55.3% moved at a
+  height posts on every lens toggle. **Card encoding revised on owner review:** a polyline was the
+  wrong read — every gamelog value is a whole number and every DFS line sits at a half, so a
+  connecting stroke sloped through counts that cannot occur, 78% of offers dipped it to the floor
+  on a zero, and the 7.1% whose five games tie drew a dead stroke. `form_svg` now draws one bar per
+  game off a **fixed** centre rule, green above and red below by margin — the same read as
+  `deep_dive_charts.history_chart` at ten games, so the app has one language for form-vs-line at two
+  scales. Bars measure the *deviation*, not the value, because every |value − line| ≥ 0.5 here
+  (0 pushes in 11,136 observations), so no bar can be invisible — which value-bars would be on the
+  78%. Fixes a live §2 breach as a side effect: the old trace was green whatever the games did.
+  Re-verified live on 108 cards — bar count = the caption's games, green count = its hits, clears
+  end on the rule and misses start at it, widest margin spans the half-box, 0 page errors. Snapshot shape matches the archive read: NFL 55.3% moved at a
   12-point median, MLB 0.1% at 1 point. Open: the deep-dive line-movement tab; the phone card
   stays silent on a net-zero round trip.
 

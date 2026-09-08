@@ -1,6 +1,6 @@
-"""Last-five form sparklines for the constellation's hover card.
+"""Last-five form charts for the constellation's hover card.
 
-The card is assembled in the component's JavaScript, so the sparkline has to reach it as
+The card is assembled in the component's JavaScript, so the chart has to reach it as
 finished markup — ``spark_svg`` keeps every coordinate on this side. One grouped tail over
 the league gamelog serves the whole map: ``deep_dive_charts.build_recent_history`` re-scans
 the full log per row, which a thirty-star game would pay for thirty times.
