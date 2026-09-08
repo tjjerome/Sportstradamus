@@ -1,10 +1,14 @@
-"""Inline-SVG sparklines shared by the Board grid and the constellation hover card.
+"""Inline-SVG micro-charts for the Board grid and the constellation hover card.
 
 Both consumers need a finished ``<svg>`` string rather than a chart object: AG Grid 34
 only renders markup handed to it through a cellRenderer's ``getGui`` DOM node, and the
 constellation's hand-authored frontend drops the card's body straight into ``innerHTML``.
-Keeping every coordinate here means neither surface writes sparkline geometry in
-JavaScript, where no gate we run would read it.
+Keeping every coordinate here means neither surface writes chart geometry in JavaScript,
+where no gate we run would read it.
+
+The two share a box and a reference rule but not an encoding, because they describe
+different things: a book's line is one quantity moving through time and reads as a trace,
+while a player's last games are discrete results and read as bars off the line.
 
 Colors are semantic by intent (DESIGN.md §2) — never gold, which is chrome.
 """
@@ -22,6 +26,9 @@ _HEIGHT = 22.0
 _INSET = 2.0
 _STROKE = 1.6
 _RULE_DASH = "2 3"
+# How much of its slot a form bar fills. At five games a slot is ~15px, so this leaves a
+# gap wide enough to read as a separator without starving the bar itself.
+_BAR_SLOT_SHARE = 0.62
 
 
 def _scale_y(value: float, lo: float, hi: float) -> float:
@@ -63,6 +70,28 @@ def _trace(points: str, color: str) -> str:
     )
 
 
+def _bars(deviations: Sequence[float], reach: float) -> str:
+    """One bar per game off the box's centre line, oldest first.
+
+    ``reach`` is the largest deviation on the card, so the game that missed or cleared by
+    the most spans the half-box and every other bar reads against it.
+    """
+    mid = _HEIGHT / 2
+    slot = (_WIDTH - 2 * _INSET) / len(deviations)
+    width = slot * _BAR_SLOT_SHARE
+    bars = []
+    for i, deviation in enumerate(deviations):
+        length = abs(deviation) / reach * (mid - _INSET)
+        x = _INSET + i * slot + (slot - width) / 2
+        y = mid - length if deviation >= 0 else mid
+        color = theme.GREEN if deviation >= 0 else theme.RED
+        bars.append(
+            f'<rect x="{x:.4g}" y="{y:.4g}" width="{width:.4g}" '
+            f'height="{length:.4g}" fill="{color}"/>'
+        )
+    return "".join(bars)
+
+
 def movement_svg(series: Sequence[float], *, bet: str, n_moves: int) -> str:
     """The DFS book's own line trajectory for one offer, colored by who it favors.
 
@@ -94,16 +123,24 @@ def movement_svg(series: Sequence[float], *, bet: str, n_moves: int) -> str:
 
 
 def form_svg(values: Sequence[float], line: float) -> str:
-    """The player's recent results against this offer's line, with the line as the rule.
+    """The player's recent games as their distance from this offer's line.
 
-    The rule shares the trace's scale, so a run of bars clearing it reads as clearing it.
+    Each game is its own bar off a fixed centre rule — green above the line, red below,
+    length the margin. Bars and not a trace because these are discrete results rather than
+    a series: every value in the gamelogs is a whole number and every DFS line sits at a
+    half, so a connecting stroke would slope through counts that cannot happen. It also
+    keeps the card reading the same way as the deep-dive History tab, which draws the same
+    question at ten games (``deep_dive_charts.history_chart``).
+
+    A card whose games all landed exactly on the line has no deviation to draw and keeps
+    the bare rule, the way an unmoved line does in :func:`movement_svg`.
     """
-    vals = [float(v) for v in values]
-    if not vals:
+    deviations = [float(v) - line for v in values]
+    if not deviations:
         return ""
-    lo, hi = min([*vals, line]), max([*vals, line])
-    hits = sum(1 for v in vals if v >= line)
-    body = _rule(_scale_y(line, lo, hi), theme.BORDER) + _trace(
-        _plot_points(vals, lo, hi), theme.GREEN
-    )
-    return _svg(body, f"{hits}/{len(vals)} over {line:.10g}")
+    hits = sum(1 for deviation in deviations if deviation >= 0)
+    reach = max(abs(deviation) for deviation in deviations)
+    body = _rule(_HEIGHT / 2, theme.BORDER)
+    if reach:
+        body += _bars(deviations, reach)
+    return _svg(body, f"{hits}/{len(deviations)} over {line:.10g}")
