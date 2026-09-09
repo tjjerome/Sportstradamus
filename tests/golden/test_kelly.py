@@ -76,7 +76,7 @@ def test_resolve_midramp_blends_evenly():
     assert out == pytest.approx(expected, abs=1e-9)
 
 
-def test_resolve_neither_logs_debug_and_returns_zero(caplog, monkeypatch):
+def test_resolve_neither_logs_debug_and_returns_unmeasured_prior(caplog, monkeypatch):
     # The structured logger silences DEBUG and disables propagation; swap in
     # a plain stdlib logger for the duration of this test so caplog can see
     # the DEBUG record.
@@ -85,7 +85,8 @@ def test_resolve_neither_logs_debug_and_returns_zero(caplog, monkeypatch):
     monkeypatch.setattr(kelly, "_logger", plain)
     with caplog.at_level(logging.DEBUG, logger="kelly-test"):
         out = resolve_shrinkage(training_bss=None, live_bss=None, live_n=0)
-    assert out == NO_EVIDENCE_SHRINKAGE == 0.0
+    assert out == NO_EVIDENCE_SHRINKAGE
+    assert out > 0.0  # unmeasured is a small prior, not a measured-worthless 0.0
     assert any("fallback" in rec.message for rec in caplog.records)
 
 
@@ -124,7 +125,9 @@ def test_portfolio_per_leg_cap_holds():
 def test_size_candidates_shrinks_filters_and_pairs():
     # Direct (cvxpy-free) pin of the sizing step: shrinkage-adjusted p, net odds
     # b, and the floor/EV drops. Expected values derived by hand from the
-    # effective_p = 0.5 + (win_prob - 0.5) * shrinkage rule.
+    # effective_p = p_book + (win_prob - p_book) * shrinkage rule, p_book = 1/payout:
+    # "a" is full trust so p is its own 0.6; "b" is half trust toward the book's
+    # 1/3, giving 1/3 + (0.65 - 1/3) * 0.5 = 0.491667.
     sized_p, sized_b, bet_ids = kelly._size_candidates(
         [
             KellyCandidate("a", win_prob=0.6, payout_multiplier=Decimal("3")),
@@ -136,7 +139,7 @@ def test_size_candidates_shrinks_filters_and_pairs():
         ]
     )
     assert bet_ids == ["a", "b"]
-    assert sized_p == pytest.approx([0.6, 0.575])
+    assert sized_p == pytest.approx([0.6, 0.4916666666666667])
     assert sized_b == pytest.approx([2.0, 2.0])
 
 
@@ -198,12 +201,14 @@ def test_resolution_chain_via_fractional_kelly_stake():
     s = resolve_shrinkage(training_bss=0.8, live_bss=None, live_n=0)
     assert s == pytest.approx(0.8)
 
-    # Final fallback: no evidence means zero trust, not full trust.
+    # Final fallback: unmeasured gets a small prior, never full trust. Measured
+    # skill of exactly 0.0 (the rungs above) still means zero trust.
     s = resolve_shrinkage(training_bss=None, live_bss=None, live_n=0)
-    assert s == 0.0
+    assert s == NO_EVIDENCE_SHRINKAGE
+    assert 0.0 < s < 0.1
 
 
-def test_no_evidence_cell_resolves_to_zero_with_fallback_source(monkeypatch):
+def test_no_evidence_cell_resolves_to_unmeasured_prior_with_fallback_source(monkeypatch):
     """A cell with no model_stats row (NaN training BSS) and no CLV segment
     (n=0) must land on the ``"fallback"`` rung at shrinkage 0.0 — not 1.0,
     which handed full trust to exactly the cells with no evidence.
@@ -227,7 +232,7 @@ def test_no_evidence_cell_resolves_to_zero_with_fallback_source(monkeypatch):
 
     shrinkage, source = resolve_market_shrinkage("WNBA", "PTS")
     assert source == "fallback"
-    assert shrinkage == 0.0
+    assert shrinkage == NO_EVIDENCE_SHRINKAGE
 
 
 def test_fallback_source_entry_stakes_zero():
@@ -243,15 +248,24 @@ def test_fallback_source_entry_stakes_zero():
     )
     assert stake == Decimal("0")
 
-    # ...because even a small positive default anchors effective_p toward 0.5
-    # and manufactures a stake out of no evidence.
-    manufactured = fractional_kelly_stake(
+    # ...and no shrinkage value manufactures one, because the anchor is the book's
+    # implied 1/20 = 0.05 and the model's 0.03 is below it. Under the old coin-flip
+    # anchor every one of these staked, which is the bug the reject was hiding.
+    for s_any in (0.01, 0.05, 0.25, 1.0):
+        assert fractional_kelly_stake(
+            bankroll=Decimal("1000"),
+            win_prob=0.03,
+            payout_multiplier=Decimal("20"),
+            model_shrinkage=s_any,
+        ) == Decimal("0")
+
+    # A model that genuinely beats the book's line still stakes, scaled by trust.
+    assert fractional_kelly_stake(
         bankroll=Decimal("1000"),
-        win_prob=0.03,
+        win_prob=0.10,
         payout_multiplier=Decimal("20"),
-        model_shrinkage=0.05,
-    )
-    assert manufactured > Decimal("0")
+        model_shrinkage=1.0,
+    ) > Decimal("0")
 
 
 # --------------------------------------------------------------------------- #
@@ -279,25 +293,30 @@ def test_kelly_units_uses_shrinkage_and_max_fraction_cap():
     # Direct test of parlay.py's units formula's pure-math half: shrinkage
     # genuinely discounts the edge vs full trust, and units scale by
     # DEFAULT_KELLY_FRACTION / MAX_FRACTION_OF_BANKROLL.
+    # Half trust sits halfway between the book's implied 1/3 and the model's 0.7:
+    # p = 1/3 + (0.7 - 1/3) * 0.5 = 0.516667, raw = (2p - (1-p)) / 2 = 0.275.
     raw_full_trust = kelly_edge(win_prob=0.7, payout_multiplier=3.0, model_shrinkage=1.0)
     raw_half_trust = kelly_edge(win_prob=0.7, payout_multiplier=3.0, model_shrinkage=0.5)
     assert raw_half_trust < raw_full_trust
-    assert raw_half_trust == pytest.approx(0.4)
+    assert raw_full_trust == pytest.approx(0.55)
+    assert raw_half_trust == pytest.approx(0.275)
 
     units = raw_half_trust * DEFAULT_KELLY_FRACTION / MAX_FRACTION_OF_BANKROLL
-    assert units == pytest.approx(20.0)
+    assert units == pytest.approx(13.75)
 
 
-def test_kelly_units_floors_shrinkage_zero_to_reject():
-    # Zero shrinkage collapses win_prob to a coin flip regardless of edge.
-    # kelly_edge itself still scores a coin flip +EV at payout=3x (0.25 > 0)
-    # -- rejecting that is the parlay layer's job (see the floor pin below).
-    raw = kelly_edge(win_prob=0.9, payout_multiplier=3.0, model_shrinkage=0.0)
-    assert raw == pytest.approx(0.25)
+def test_zero_shrinkage_is_exactly_zero_edge_at_every_payout():
+    # The property the book anchor exists for. Under the old coin-flip anchor
+    # zero trust scored +0.25 at 3x and +0.46 at 15x, so a no-evidence leg looked
+    # recommendable at any payout above 2x and had to be special-cased away.
+    for payout in (1.5, 2.0, 3.0, 6.0, 15.0, 100.0):
+        assert kelly_edge(
+            win_prob=0.9, payout_multiplier=payout, model_shrinkage=0.0
+        ) == pytest.approx(0.0, abs=1e-12)
 
-    raw_losing = kelly_edge(win_prob=0.9, payout_multiplier=1.5, model_shrinkage=0.0)
-    assert raw_losing == pytest.approx(-0.5)
-    assert raw_losing < 0
+    # Trust scales the edge away from the book's line rather than toward 0.5.
+    assert kelly_edge(win_prob=0.9, payout_multiplier=3.0, model_shrinkage=1.0) > 0
+    assert kelly_edge(win_prob=0.1, payout_multiplier=3.0, model_shrinkage=1.0) < 0
 
 
 def test_parlay_kelly_units_rejects_no_evidence_leg():

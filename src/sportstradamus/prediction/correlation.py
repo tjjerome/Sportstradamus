@@ -226,7 +226,7 @@ def _leg_shrinkage(game_df, platform, league, shrinkage_cache):
     whose ``Market`` has no ``stat_map`` entry for this platform keep ``1.0``:
     those are game legs (moneylines, totals) with no per-market calibration
     concept, not no-evidence player cells — ``resolve_shrinkage``'s own
-    no-evidence default is ``NO_EVIDENCE_SHRINKAGE`` (0.0).
+    no-evidence default is the smaller :data:`NO_EVIDENCE_SHRINKAGE`.
     """
     from sportstradamus.strategies.underdog_pickem import resolve_market_shrinkage
 

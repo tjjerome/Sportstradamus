@@ -8,10 +8,11 @@ Phase 3 §3.1. Public API:
   skill scores into a single ``[0, 1]`` shrinkage weight; rules
   documented in ``strategies/README.md``.
 
-``effective_p = 0.5 + (win_prob - 0.5) * shrinkage`` — shrinkage at
-``1.0`` is a no-op, ``0.0`` collapses to a coin flip and forces zero
-stake. Shrinkage is plumbed through every entrypoint so the dashboard
-can audit which source (CLV vs. training) sized any given bet.
+``effective_p = p_book + (win_prob - p_book) * shrinkage``, where ``p_book``
+is the book's implied ``1 / payout`` (see :func:`anchored_win_prob`) — shrinkage
+at ``1.0`` is a no-op and ``0.0`` returns the book's own line, which is exactly
+zero edge. Shrinkage is plumbed through every entrypoint so the dashboard can
+audit which source (CLV vs. training) sized any given bet.
 """
 
 from __future__ import annotations
@@ -36,15 +37,15 @@ DEFAULT_KELLY_FRACTION: float = 0.25
 # misestimated edge regardless of what fractional Kelly recommends.
 MAX_FRACTION_OF_BANKROLL: float = 0.005
 
-# Below this shrinkage value the win probability collapses to 0.5;
-# treat the leg as no-information and stake zero rather than negative.
+# At this shrinkage the model contributes nothing and the win probability is the
+# book's own implied line — exactly zero edge, so the bet is skipped, not staked.
 SHRINKAGE_FLOOR: float = 0.0
 
-# Shrinkage anchors effective_p = 0.5 + (p - 0.5) * s on an entry's JOINT win
-# probability, so any positive no-evidence default drags a multi-leg entry's tiny
-# joint_p toward 0.5 against a 10-20x payout and manufactures edge; 0.0 instead
-# stakes zero via the SHRINKAGE_FLOOR check.
-NO_EVIDENCE_SHRINKAGE: float = 0.0
+# A cell below the blend-fit cluster floor has no measured skill, but "unmeasured"
+# is not "measured worthless" — serving still runs those cells at model_weight 1.0.
+# Price them at the median shrinkage of the cells that DO carry evidence, so they
+# enter on a typical prior instead of being rejected for lacking a measurement.
+NO_EVIDENCE_SHRINKAGE: float = 0.01
 
 # CLV-segment leg count below which live BSS is ignored; the segment is
 # still mostly noise at this size even if it cleared CLV_SEGMENT_MIN_N.
@@ -84,7 +85,7 @@ def resolve_shrinkage(
        ``live_n >= LIVE_BLEND_FLOOR`` → blended per the ``w_live`` ramp.
     3. Only ``training_bss`` (or live below the floor) → training_bss.
     4. Only ``live_bss`` (training missing) → live_bss.
-    5. Neither → :data:`NO_EVIDENCE_SHRINKAGE` (``0.0``), logged at DEBUG.
+    5. Neither → :data:`NO_EVIDENCE_SHRINKAGE`, logged at DEBUG.
 
     NaNs in ``training_bss`` / ``live_bss`` are treated as missing.
     Result is clipped to ``[SHRINKAGE_FLOOR, 1.0]``.
@@ -120,14 +121,32 @@ def _blend_shrinkage(training_bss: float, live_bss: float, live_n: int) -> float
 def kelly_edge(win_prob: float, payout_multiplier: float, model_shrinkage: float = 1.0) -> float:
     """Shrinkage-adjusted raw Kelly fraction ``f* = (bp - q) / b``.
 
+    ``model_shrinkage`` blends the model's probability toward the book's implied
+    probability ``1 / payout_multiplier`` — i.e. ``p = s * win_prob + (1 - s) * p_book``.
+    Anchoring on the book rather than on 0.5 is what makes zero trust mean zero
+    edge: a coin-flip anchor scores every payout above 2x as +EV no matter how
+    little the model is trusted, manufacturing edge on long multi-leg entries.
+
     Returns ``-1.0`` (not clamped to 0) when ``payout_multiplier <= 1`` —
     callers decide their own reject threshold, same as a negative edge.
     """
-    p = 0.5 + (win_prob - 0.5) * _clip01(model_shrinkage)
     b = payout_multiplier - 1.0
     if b <= 0.0:
         return -1.0
+    p = anchored_win_prob(win_prob, payout_multiplier, model_shrinkage)
     return (b * p - (1.0 - p)) / b
+
+
+def anchored_win_prob(win_prob: float, payout_multiplier: float, model_shrinkage: float) -> float:
+    """Model probability blended toward the book's implied line by ``model_shrinkage``.
+
+    ``s = 1`` trusts the model outright, ``s = 0`` returns the book's ``1 / payout``.
+    Both the scalar edge and the portfolio solver price off this one definition —
+    they drifted apart once already, leaving the solver on a 0.5 anchor that scored
+    no-evidence legs as +EV at every payout above 2x.
+    """
+    p_book = 1.0 / payout_multiplier
+    return p_book + (win_prob - p_book) * _clip01(model_shrinkage)
 
 
 def fractional_kelly_stake(
@@ -236,11 +255,12 @@ def _size_candidates(
     bet_ids: list[str] = []
     for c in candidates:
         s = _clip01(c.model_shrinkage)
-        if s <= SHRINKAGE_FLOOR:
+        payout = float(c.payout_multiplier)
+        if s <= SHRINKAGE_FLOOR or payout <= 1.0:
             continue
-        p = 0.5 + (float(c.win_prob) - 0.5) * s
-        b = float(c.payout_multiplier) - 1.0
-        if b <= 0.0 or b * p - (1.0 - p) <= 0.0:
+        p = anchored_win_prob(float(c.win_prob), payout, s)
+        b = payout - 1.0
+        if b * p - (1.0 - p) <= 0.0:
             continue
         sized_p.append(p)
         sized_b.append(b)

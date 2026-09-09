@@ -44,7 +44,13 @@ Order of precedence, used by `fractional_kelly_stake` when no explicit
 
 3. Only training BSS → use it directly.
 4. Only live BSS → use it directly.
-5. Neither → `NO_EVIDENCE_SHRINKAGE` (`0.0`, zero stake), logged at DEBUG.
+5. Neither → `NO_EVIDENCE_SHRINKAGE` (a small prior: unmeasured is not
+   measured-worthless), logged at DEBUG.
+
+`kelly_edge` blends toward the book's implied probability `1 / payout`, not
+toward 0.5, so shrinkage `0.0` is exactly zero edge at every payout. A
+coin-flip anchor instead scored any payout above 2x as +EV however little
+the model was trusted, which manufactured edge on long multi-leg entries.
 
 The ramp constants (`LIVE_BLEND_FLOOR=25`, `LIVE_BLEND_FULL=100`) are
 roadmap-aligned with `CLV_SEGMENT_MIN_N=20`: live signal is no longer
