@@ -130,8 +130,8 @@ def test_upsert_retention_prunes_old_day_files(tmp_path, monkeypatch):
     io.upsert_parlay_hist(
         _parlays([("CHC/STL", recent_day, 1.30, 1.15, None)]),
         dedup_subset=["Model EV", "Market EV"],
-        retention_days=365,
     )
+    assert io.trim_parlay_hist(365) == 1
     assert not (tmp_path / "parlay_hist" / f"{old_day}.parquet").exists()
     assert set(io.read_parlay_hist()["Date"]) == {recent_day}
 
@@ -167,3 +167,53 @@ def test_read_column_projection_spans_partitions_and_legacy(tmp_path, monkeypatc
     back = io.read_parlay_hist(columns=["Date", "Model EV"])
     assert list(back.columns) == ["Date", "Model EV"]
     assert sorted(back["Date"]) == ["2026-08-01", "2026-08-02"]
+
+
+def test_days_read_returns_only_listed_partitions(tmp_path, monkeypatch):
+    _patch_paths(tmp_path, monkeypatch)
+    io.write_parlay_hist(
+        _parlays(
+            [
+                ("BOS/NYY", "2026-08-01", 1.10, 1.00, 3.0),
+                ("LAD/SD", "2026-08-02", 1.20, 1.05, None),
+                ("CHC/STL", "2026-08-03", 1.30, 1.15, None),
+            ]
+        )
+    )
+    back = io.read_parlay_hist(days=["2026-08-02", "2026-08-03"])
+    assert set(back["Date"]) == {"2026-08-02", "2026-08-03"}
+    assert len(back) == 2
+
+
+def test_days_read_skips_the_legacy_single_file(tmp_path, monkeypatch):
+    """A ``days`` read is the sole source for the write-back, so the un-partitioned
+    legacy file must not leak other dates into it."""
+    _patch_paths(tmp_path, monkeypatch)
+    io.write_parlay_hist(_parlays([("LAD/SD", "2026-08-02", 1.20, 1.05, None)]))
+    _parlays([("OLD/GAME", "2025-01-01", 1.40, 1.20, None)]).to_parquet(
+        io.PARLAY_HIST_PATH, index=False
+    )
+    assert set(io.read_parlay_hist(days=["2026-08-02"])["Date"]) == {"2026-08-02"}
+
+
+def test_resolving_one_day_keeps_that_day_s_already_resolved_rows(tmp_path, monkeypatch):
+    """The narrowed read loads whole partitions: a day's settled rows must survive
+    the write-back, not be dropped because only pending rows were graded."""
+    _patch_paths(tmp_path, monkeypatch)
+    io.write_parlay_hist(
+        _parlays(
+            [
+                ("BOS/NYY", "2026-08-02", 1.10, 1.00, 3.0),
+                ("LAD/SD", "2026-08-02", 1.20, 1.05, None),
+                ("CHC/STL", "2026-08-05", 1.30, 1.15, 2.0),
+            ]
+        )
+    )
+    day = io.read_parlay_hist(days=["2026-08-02"])
+    day.loc[day["Legs Resolved"].isna(), ["Legs Resolved", "Misses"]] = [(4.0, 0)]
+    io.write_parlay_hist(day, days=["2026-08-02"])
+
+    back = io.read_parlay_hist()
+    assert len(back) == 3
+    assert not back["Legs Resolved"].isna().any()
+    assert sorted(back.loc[back["Date"] == "2026-08-02", "Legs Resolved"]) == [3.0, 4.0]

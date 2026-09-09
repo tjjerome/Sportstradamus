@@ -207,6 +207,9 @@ def test_pipeline_smoke(
 
     monkeypatch.setattr(prediction_cli, "write_history", _noop_write)
     monkeypatch.setattr(prediction_cli, "upsert_parlay_hist", _noop_write)
+    # Retention runs on every slate now, parlays or not -- unstubbed it would
+    # delete real day partitions out of the developer's data/runtime.
+    monkeypatch.setattr(prediction_cli, "trim_parlay_hist", _noop_write)
     monkeypatch.setattr(prediction_cli, "read_history", _empty_df)
 
     if not _REAL_APIS:

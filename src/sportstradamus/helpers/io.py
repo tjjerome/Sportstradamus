@@ -253,17 +253,14 @@ def write_parlay_hist(df: pd.DataFrame, days: list[str] | None = None) -> None:
         _write_parlay_day(df.loc[df["Date"] == day], day)
 
 
-def upsert_parlay_hist(
-    new_df: pd.DataFrame, dedup_subset: list[str], retention_days: int | None = None
-) -> None:
+def upsert_parlay_hist(new_df: pd.DataFrame, dedup_subset: list[str]) -> None:
     """Merge freshly built parlays into their day partitions.
 
     Reads only the day files ``new_df`` touches, keeps the new row on a
     ``dedup_subset`` collision, and rewrites just those partitions. If the
     legacy single-file history still exists it is migrated (partitioned and
-    deleted) first, so the first post-deploy run self-migrates. With
-    ``retention_days``, partitions older than that many days are deleted —
-    mirroring the history parquet's retention trim.
+    deleted) first, so the first post-deploy run self-migrates. Retention is
+    :func:`trim_parlay_hist`'s job — it has to run on days that build no parlays.
     """
     if Path(str(PARLAY_HIST_PATH)).is_file():
         write_parlay_hist(read_parlay_hist())
@@ -273,11 +270,22 @@ def upsert_parlay_hist(
         if not day_old.empty:
             day_new = pd.concat([day_new, day_old], ignore_index=True)
         _write_parlay_day(day_new.drop_duplicates(subset=dedup_subset, ignore_index=True), day)
-    if retention_days is not None:
-        cutoff = pd.Timestamp.today().date() - pd.Timedelta(days=retention_days)
-        for day_file in _parlay_day_files():
-            if pd.Timestamp(day_file.stem).date() < cutoff:
-                day_file.unlink()
+
+
+def trim_parlay_hist(retention_days: int) -> int:
+    """Delete day partitions older than the retention window; returns the count.
+
+    Separate from ``upsert_parlay_hist`` so retention still runs on days that
+    build no parlays -- folded into the upsert it silently stops trimming for
+    any stretch where the pipeline produces nothing.
+    """
+    cutoff = pd.Timestamp.today().date() - pd.Timedelta(days=retention_days)
+    trimmed = 0
+    for day_file in _parlay_day_files():
+        if pd.Timestamp(day_file.stem).date() < cutoff:
+            day_file.unlink()
+            trimmed += 1
+    return trimmed
 
 
 def parlay_hist_mtime() -> float:
@@ -290,15 +298,26 @@ def parlay_hist_mtime() -> float:
     return max((p.stat().st_mtime for p in paths if p.is_file()), default=0.0)
 
 
-def read_parlay_hist(columns: list[str] | None = None) -> pd.DataFrame:
+def read_parlay_hist(
+    columns: list[str] | None = None, days: list[str] | None = None
+) -> pd.DataFrame:
     """Read the parlay history (all day partitions, plus the legacy file if present).
 
     ``columns`` projects the read (pyarrow-level) for callers that only need scalar
     columns; the list<->tuple normalization then only touches whichever list columns
-    were actually requested.
+    were actually requested. ``days`` restricts the read to those date partitions,
+    for callers that resolve a handful of recent days -- reading the whole history
+    materializes every nested ``legs`` list as Python objects and costs GBs.
+
+    A ``days`` read deliberately skips the legacy single file, which is not
+    date-partitioned: callers that pass ``days`` migrate it first (see
+    ``write_parlay_hist``) so the partitions are the sole source.
     """
-    frames = [read_parquet_safe(p, columns=columns) for p in _parlay_day_files()]
-    frames.append(read_parquet_safe(PARLAY_HIST_PATH, columns=columns))
+    if days is not None:
+        frames = [read_parquet_safe(_parlay_day_path(d), columns=columns) for d in days]
+    else:
+        frames = [read_parquet_safe(p, columns=columns) for p in _parlay_day_files()]
+        frames.append(read_parquet_safe(PARLAY_HIST_PATH, columns=columns))
     frames = [f for f in frames if not f.empty]
     if not frames:
         return pd.DataFrame()

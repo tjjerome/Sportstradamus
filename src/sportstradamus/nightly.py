@@ -489,31 +489,45 @@ def _resolve_and_clv_history(stats):
 
 
 def _resolve_parlays(stats, history_only):
-    n_resolved_parl = 0
-    if not history_only:
-        parlays = read_parlay_hist()
-        stat_map = json.loads((pkg_resources.files(data) / "config" / "stat_map.json").read_text())
+    if history_only:
+        return 0
+    if Path(str(PARLAY_HIST_PATH)).is_file():
+        # Legacy single-file history still present: full write migrates it into day
+        # partitions before the partition-scoped read below can miss its rows.
+        write_parlay_hist(read_parlay_hist())
 
-        unresolved = parlays.loc[parlays["Legs Resolved"].isna()]
-        n_before_parl = len(unresolved)
-        logger.info(f"Resolving {n_before_parl} pending parlay rows")
+    # Only a handful of days ever carry unresolved rows, so find them from the two
+    # scalar columns and load just those partitions. Reading the whole history
+    # rebuilds every nested `legs` list as Python objects -- ~16 GB of transient
+    # allocation to grade a few thousand rows, which OOMs the production box.
+    pending = read_parlay_hist(columns=["Date", "Legs Resolved"])
+    unresolved_days = (
+        sorted(pending.loc[pending["Legs Resolved"].isna(), "Date"].unique())
+        if not pending.empty
+        else []
+    )
+    n_before_parl = 0 if pending.empty else int(pending["Legs Resolved"].isna().sum())
+    logger.info(
+        f"Resolving {n_before_parl} pending parlay rows across "
+        f"{len(unresolved_days)} day partitions"
+    )
+    if not unresolved_days:
+        return 0
 
-        if n_before_parl > 0:
-            tqdm.pandas(desc="Resolving parlays")
-            results = unresolved.progress_apply(
-                lambda bet: check_bet(bet, stats, stat_map), axis=1
-            ).tolist()
-            parlays.loc[parlays["Legs Resolved"].isna(), ["Legs Resolved", "Misses"]] = results
-            if Path(str(PARLAY_HIST_PATH)).is_file():
-                # Legacy single-file history still present: full write migrates it
-                # into day partitions before any partial day-write can fork state.
-                write_parlay_hist(parlays)
-            else:
-                write_parlay_hist(parlays, days=list(unresolved["Date"].unique()))
-            n_resolved_parl = sum(
-                1 for legs, _ in results if not (isinstance(legs, float) and np.isnan(legs))
-            )
-            logger.info(f"Parlays: resolved {n_resolved_parl} / {n_before_parl} pending rows")
+    parlays = read_parlay_hist(days=unresolved_days)
+    stat_map = json.loads((pkg_resources.files(data) / "config" / "stat_map.json").read_text())
+    unresolved = parlays.loc[parlays["Legs Resolved"].isna()]
+    tqdm.pandas(desc="Resolving parlays")
+    results = unresolved.progress_apply(
+        lambda bet: check_bet(bet, stats, stat_map), axis=1
+    ).tolist()
+    parlays.loc[parlays["Legs Resolved"].isna(), ["Legs Resolved", "Misses"]] = results
+    # Whole partitions were loaded, so this rewrites their resolved rows too.
+    write_parlay_hist(parlays, days=unresolved_days)
+    n_resolved_parl = sum(
+        1 for legs, _ in results if not (isinstance(legs, float) and np.isnan(legs))
+    )
+    logger.info(f"Parlays: resolved {n_resolved_parl} / {n_before_parl} pending rows")
     return n_resolved_parl
 
 

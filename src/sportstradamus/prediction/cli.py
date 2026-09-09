@@ -36,6 +36,7 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.cli_options import LOG_LEVEL_OPTION
 from sportstradamus.helpers.io import (
     read_history,
+    trim_parlay_hist,
     upsert_parlay_hist,
     write_history,
 )
@@ -358,11 +359,10 @@ def main(progress, contest_variant, log_level):
     _write_pickem_snapshot({"Underdog": scored_ud, "Sleeper": scored_sl}, stats)
 
     if not parlay_df.empty:
-        upsert_parlay_hist(
-            parlay_df,
-            dedup_subset=["Model EV", "Market EV"],
-            retention_days=_HISTORY_RETENTION_DAYS,
-        )
+        upsert_parlay_hist(parlay_df, dedup_subset=["Model EV", "Market EV"])
+    # Outside the empty check: a stretch of slates that build no parlays must not
+    # stop retention, or the history grows past the window unnoticed.
+    trim_parlay_hist(_HISTORY_RETENTION_DAYS)
 
     archive.write()
     logger.info("Checking historical predictions")
