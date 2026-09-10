@@ -170,9 +170,12 @@ def write_line_movement(movement: pd.DataFrame) -> None:
     """Write the per-offer DFS line-movement snapshot atomically.
 
     ``movement`` is the ``prediction.line_movement.build_line_movement`` frame:
-    one row per ``(League, Platform, Market, Player, Date)`` carrying the
-    open/close line, the net move, a flicker-tolerant change count, and the
-    JSON sparkline series. Column-stable on an empty slate, so a header-only
+    one row per ``(League, Platform, Market, Player, Date)``. The main line —
+    each poll's rung priced nearest even money — carries the open/close, net
+    move, change count and JSON sparkline ``series``; the fair line its price
+    implies carries ``fair_move``, ``fair_series`` and ``n_price_moves`` (polls
+    where only the price moved); and ``changes`` is the JSON list of polls where
+    either line changed. Column-stable on an empty slate, so a header-only
     snapshot still writes for the dashboard to read.
     """
     _atomic_write_parquet(movement, CURRENT_LINE_MOVEMENT_PATH)

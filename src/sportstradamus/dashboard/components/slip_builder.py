@@ -28,7 +28,7 @@ from sportstradamus.dashboard.components.astrolabe_component import render_astro
 from sportstradamus.dashboard.components.constellation import constellation_figure
 from sportstradamus.dashboard.components.constellation_component import render_constellation
 from sportstradamus.dashboard.components.deep_dive import init_detail_state, show_detail
-from sportstradamus.dashboard.components.form_spark import form_sparks
+from sportstradamus.dashboard.components.form_spark import form_sparks, move_sparks
 from sportstradamus.dashboard.components.satellite_picker import (
     render_added_legs,
     satellite_groups,
@@ -259,8 +259,9 @@ def _render_constellation(
     by nonce and fires once. ``deep_pool``/``wider_groups`` are the two lens overlays —
     a clicked deep star resolves the same way as any other star on the map (its key is
     drawn from that same ``pool`` frame); a clicked sky star from another game falls back
-    to the satellite add path. The hover card's last-five sparklines ride alongside the
-    figure keyed by star, since a wider dot from another game has no row in ``pool``.
+    to the satellite add path. The hover card's last-five and line-movement rows ride
+    alongside the figure keyed by star, since a wider dot from another game has no row in
+    ``pool``.
     """
     mobile = is_mobile()
     # The wider lens draws other games' legs as sky stars, and their cards open like any
@@ -279,6 +280,7 @@ def _render_constellation(
         ),
         key=f"{key_prefix}_constellation",
         sparks=form_sparks(sparked),
+        moves=move_sparks(sparked),
         mobile=mobile,
     )
     if _apply_constellation_action(action, offers, pool, wider_groups, key_prefix):

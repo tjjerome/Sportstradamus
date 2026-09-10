@@ -1,6 +1,6 @@
 # Dashboard UX — "the Oracle"
 
-> Status: ACTIVE — **Phase D (loose constellation shapes) is built and gates-green on `feature/dashboard-ux`, owner live-check outstanding**: plan [plans/2026-07-03-p8-phaseD-constellation-shapes.md](../archive/superpowers/plans/2026-07-03-p8-phaseD-constellation-shapes.md). P8 (0/A/B/C + R remediation) shipped and owner-live-checked 2026-07-16; Phase M is built and gates-green with the owner's real-phone pass still outstanding; E art catalog stays parked. **L1 (line-movement export) landed 2026-09-07** and lit the Board's `Move` sparkline; the constellation card's last-five spark landed with it.
+> Status: ACTIVE — **Phase D (loose constellation shapes) is built and gates-green on `feature/dashboard-ux`, owner live-check outstanding**: plan [plans/2026-07-03-p8-phaseD-constellation-shapes.md](../archive/superpowers/plans/2026-07-03-p8-phaseD-constellation-shapes.md). P8 (0/A/B/C + R remediation) shipped and owner-live-checked 2026-07-16; Phase M is built and gates-green with the owner's real-phone pass still outstanding; E art catalog stays parked. **L1 (line movement) is built**: one fair-line trend, read from the `ladder` table, feeds the Board's `Move` sparkline, the offer dialog's Movement tab and the Games hover card; the constellation card also carries a last-five spark.
 
 ## 1. Mission & money logic
 
@@ -44,8 +44,8 @@ stop and ask the owner (material).
     python3 -c "import pandas as pd; print(pd.read_parquet('src/sportstradamus/data/runtime/current_offers.parquet').columns.tolist())"
                                                   # K/Why/Game present ⇒ P2 landed
     ls src/sportstradamus/data/runtime/current_game_corr.parquet 2>/dev/null
-    python3 -c "import pandas as pd; m=pd.read_parquet('src/sportstradamus/data/runtime/current_line_movement.parquet'); print(len(m), 'rows,', (m['n_moves']>0).sum(), 'moved')"
-                                                  # L1 landed; 'moved' is a minority by nature
+    python3 -c "import pandas as pd; m=pd.read_parquet('src/sportstradamus/data/runtime/current_line_movement.parquet'); print(len(m), 'rows,', (m['n_moves']>0).sum(), 'line moved,', ((m['n_moves']==0)&(m['n_price_moves']>0)).sum(), 'price only')"
+                                                  # L1 landed; KeyError ⇒ snapshot predates the fair line
     ls src/sportstradamus/data/runtime/user_slips.parquet 2>/dev/null  # ⇒ P3 produced saves
     poetry run python -c "import streamlit; print(streamlit.__version__)"  # needs ≥1.45 for st.navigation icons
     # CLV corruption check (Phase 0.9 fixes; >0 impossible-probability rows ⇒ still broken):
@@ -105,9 +105,9 @@ May touch:
 - Recorded exception (owner-approved via the Phase B plan): one additive hook in
   `training/correlate.py:_write_corr_outputs` emitting `corr_market_summary.parquet`.
 - Recorded exception (L1, 2026-09-07): one additive **read** method on
-  `helpers/archive.py` — `get_book_line_histories`, the bulk sibling of `get_line_history`
-  that keeps `odds.line`. L1 is registered as an Archive→parquet export, so it cannot avoid
-  reading the archive; no schema change and no write path.
+  `helpers/archive.py` — `get_book_line_histories`, which reads every rung a DFS book posted,
+  with its de-vigged price, from the `ladder` table. L1 is registered as an Archive→parquet
+  export, so it cannot avoid reading the archive; no schema change and no write path.
 - `src/sportstradamus/scripts/`: `export_line_movement.py`, `build_team_assets.py` (new).
 - `src/sportstradamus/data/config/team_assets.json`,
   `src/sportstradamus/data/config/constellation_shapes.json`,
@@ -381,15 +381,14 @@ stage ends with the §9 checklist green and the dashboard runnable.
     pass (NASA/Unsplash class; owner approves binaries before commit).
   Deferred (spec §6, registered in roadmap §8): forward sim-bettor ledger (own lane),
   empirical-vs-model ρ overlay.
-- **L1 — line-movement export.** ✔ Built 2026-09-07. `prophecize` writes
-  `current_line_movement.parquet` (one row per offer: open/close line, net move, a
-  flicker-tolerant `n_moves`, and a 12-point time-even trajectory) from the new
-  `archive.get_book_line_histories`; `sportstradamus export-line-movement` + a `run_job.sh`
-  case refresh it off-cycle. Folded into `prophecize` rather than left to a cron so the
-  snapshot needs no ops work and key-aligns with the offers from the same run — **crontab +
-  healthcheck stay owner-only** (§8); the optional standalone schedule is written up in
-  `docs/OPERATIONS.md`. Board `Move` column flipped on; the deep-dive line-movement tab is
-  still unbuilt.
+- **L1 — line-movement export.** ✔ Built. `prophecize` writes `current_line_movement.parquet`
+  (one row per offer) from `archive.get_book_line_histories`, which reads every rung each DFS
+  book posted, with its price. Each poll's main line is the rung priced nearest even money, and
+  the **fair line** (where that price would be even money) blends line and multiplier into one
+  trace, so a price-only move registers. It runs after the run's `archive.write()` flush and
+  key-aligns with that run's offers; `sportstradamus export-line-movement` refreshes it
+  off-cycle (**crontab + healthcheck stay owner-only**, §8; schedule in `docs/OPERATIONS.md`).
+  Read by the Board `Move` column, the offer dialog's Movement tab and the Games hover card.
 - **L2 — comps persistence.** Persist comp outputs at prophecize time; comps panel + chip flip
   on.
 - **L3 — game lines into the correlation engine.** Book-implied probs only; Game-board rows +
@@ -448,6 +447,21 @@ devel-bound PR; research-analyst only if a stage turns into a modeling question 
 - Durable non-obvious lesson? Offer a memory capture (CLAUDE.md §Agentic workflow conventions).
 
 ## 10. Ledger (append-only, newest first, cap ~15)
+
+- 2026-09-10 · **Line movement: balanced rung, fair line, Movement tab, Games card** · Trend reads
+  `ladder`, not `odds`: each poll's main line is the rung priced nearest even money, so Sleeper's
+  alt tiers stop driving it (UD was already clean). New **fair line**, where the app's price would
+  be even money (interpolated across even, else `L + σ·Φ⁻¹(p_over)`), drives `Move`'s trace, sort
+  and color, so UD NFL `tds` multiplier moves (83% of keys, 0% line moves) register; the posted
+  line keeps the wording. Snapshot moved after `archive.write()`, which it used to miss its own
+  poll behind. Movement is the dialog's sixth tab (Board, phone cards, Games *Full detail*) plus a
+  Games hover-card row. Flagged, not done: `add_dfs` still archives Sleeper's lowest tier as its
+  `odds` row (a consensus input); `merge_archives` skips `ladder`. **Live** (desktop 1600x1000,
+  phone 390x844; local data is two ladder polls, Sleeper only): 21 `Move` cells real `<svg>`, 0
+  escaped; desc sort tops a price-only row ("Fair 57.11 → 57.31 (+0.2) · line held at 57.5");
+  Movement tab opens from Board, phone card and Games *Full detail*; hover-card movement row on
+  4/10 cards, 25/46 *Look wider*, 47/76 *Look deeper* (the rest have no local ladder history);
+  phone iframe height = fig + 8 + 200 on both lenses; 0 app page errors.
 
 - 2026-09-07 · **Sparklines: board line movement, card last five** · Both scars filled, and
   they wanted different data. **Board** (`Move`, after `Line`, 10 → 11 cols): how the **DFS

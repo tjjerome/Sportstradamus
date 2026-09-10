@@ -42,9 +42,10 @@ CURRENT_GAME_STORIES_PATH = _RUNTIME_DIR / "current_game_stories.parquet"
 # stats"), keyed by (League, Date, Player, Market, Opponent). Written by prophecize.
 CURRENT_OFFER_DETAILS_PATH = _RUNTIME_DIR / "current_offer_details.parquet"
 CURRENT_PICKEM_PATH = _RUNTIME_DIR / "current_pickem.parquet"
-# Per-offer trajectory of the DFS book's own posted line since the offer went up.
-# Written by prophecize; the dashboard left-joins it onto current_offers on the key
-# columns, so producer and reader share one spelling of the schema.
+# Per-offer trajectory of the DFS book's main line, and of the fair line its price
+# implies, since the offer went up. Written by prophecize; the dashboard left-joins it
+# onto current_offers on the key columns, so producer and reader share one spelling of
+# the schema.
 CURRENT_LINE_MOVEMENT_PATH = _RUNTIME_DIR / "current_line_movement.parquet"
 LINE_MOVEMENT_KEYS = ["League", "Platform", "Market", "Player", "Date"]
 LINE_MOVEMENT_COLS = [
@@ -56,6 +57,10 @@ LINE_MOVEMENT_COLS = [
     "first_seen",
     "last_seen",
     "series",
+    "n_price_moves",
+    "fair_move",
+    "fair_series",
+    "changes",
 ]
 CURRENT_META_PATH = _RUNTIME_DIR / "current_meta.json"
 MODEL_STATS_PATH = _TRAINING_DIR / "model_stats.parquet"

@@ -106,7 +106,8 @@ rail — placeholder until the pairing-rule model lands.
 - **Market trust** — this market's live 30-day record (`live_metrics_per_market.parquet`
   precision for the bet side) + deep link to its Model Lab cell page.
 - **Pairs well with** — top correlated legs with ρ badges; add-to-slip inline.
-- Scarred: line-movement timeline tab (needs the archive→parquet export job); comps panel.
+- **Movement** tab — the app's posted line and its price-blended fair line over time
+  (`current_line_movement.parquet`). Scarred: comps panel.
 
 **Swap-a-leg dialog** (from any prophecy or the rail): keeps the story context on top
 (headline + remaining legs); candidates from the same game ranked by **story fit** = corr with
@@ -139,7 +140,8 @@ brief's current phase.
   reservation, compounded payout); correlation-aware combo EV appears only after
   dfs-products stage 5; cash-out is not valued (lane brief §4).
 - Evidence chain for an event leg: no projected-distribution tab (no model);
-  shows consensus source, price history when the line-movement artifact exists.
+  shows consensus source, and price history once the line-movement snapshot covers event legs
+  (today it reads DFS player-prop ladders only).
 
 **Alt-line markers** (Board + rail + Receipts):
 - Alt-line flag chip on any offer row whose `Alt Line` is true (flag already stamped
@@ -201,7 +203,7 @@ Owned by the pipeline (canonical detail in code; this table is the UI's reading 
 | `data/config/team_assets.json` | new file | assets layer |
 | `data/training/feature_importances.csv` | existing, newly wired | deep-dive chip ranking |
 | `data/runtime/live_metrics_per_market.parquet` | existing, newly wired | market-trust lines, Model Lab |
-| `data/runtime/line_movement.parquet` | later stage (archive export cron) | line-movement tab (scarred) |
+| `data/runtime/current_line_movement.parquet` (per-offer posted + fair line history) | new file (written by `prophecize`) | Board `Move` column, deep-dive Movement tab, Games hover card |
 | game-line offer rows (provenance=book-implied) in `current_offers` | later stage (dfs-products stage 4) | Game board rows, rail, §5b chips |
 | `Alt Line` flag column in `current_offers`/`current_pickem` | later stage (dfs-products stage 2c; `persist.py` `_OFFER_KEEP_COLS`) | §5b alt markers, Receipts split |
 | ladder entry/rung columns (new snapshot artifact) | later stage (dfs-products stage 3) | §5b Ladders views, Receipts per-rung grading |
@@ -211,16 +213,15 @@ Owned by the pipeline (canonical detail in code; this table is the UI's reading 
 Every scar renders a real panel with "coming" microcopy, feature-detects its data artifact
 (flips on when the file/column exists), and is registered in the lane brief's stage plan:
 
-1. Line-movement timeline (per-offer dialog tab) — needs `export-line-movement` cron.
-2. Comps panel + comps stat chip — needs comp outputs persisted at prophecize time.
-3. Correlation-block risk chip on the rail — needs UD/Sleeper pairing-rule model.
-4. Game-line rows on the Game board + team nodes in the constellation — book-implied probs only
+1. Comps panel + comps stat chip — needs comp outputs persisted at prophecize time.
+2. Correlation-block risk chip on the rail — needs UD/Sleeper pairing-rule model.
+3. Game-line rows on the Game board + team nodes in the constellation — book-implied probs only
    (**no modeling engine** — locked, [handoffs/dfs-products.md](handoffs/dfs-products.md) §4;
    Combo-Entry mechanics live there §3); joins the correlation engine at dfs-products stage 5.
-5. Ambient-image slots — need acquired art (manifest fill-in).
-6. Optional free-LLM prose rewriter seam — documented only; templates are the contract.
-7. Ladders views (§5b) — flip on the ladder snapshot artifact (dfs-products stage 3).
-8. Alt-line markers + per-rung Receipts grading (§5b) — flip on the `Alt Line` snapshot column
+4. Ambient-image slots — need acquired art (manifest fill-in).
+5. Optional free-LLM prose rewriter seam — documented only; templates are the contract.
+6. Ladders views (§5b) — flip on the ladder snapshot artifact (dfs-products stage 3).
+7. Alt-line markers + per-rung Receipts grading (§5b) — flip on the `Alt Line` snapshot column
    (dfs-products stage 2c).
 9. Combo-EV chips on the rail (§5b) — flip on game-line offer rows (dfs-products stage 4;
    correlation-aware EV at stage 5).

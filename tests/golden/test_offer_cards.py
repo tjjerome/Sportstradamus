@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from streamlit.testing.v1 import AppTest
 
+from sportstradamus.dashboard import columns
+
 _SCRIPT = """
 import pandas as pd
 import streamlit as st
@@ -46,16 +48,16 @@ def _rows(n: int) -> list[dict]:
     ]
 
 
-def _card_test(n: int) -> AppTest:
+def _card_test(rows: list[dict]) -> AppTest:
     at = AppTest.from_string(_SCRIPT, default_timeout=15)
-    at.session_state["_fixture_rows"] = _rows(n)
+    at.session_state["_fixture_rows"] = rows
     at.run()
     assert not at.exception
     return at
 
 
 def test_cards_render_and_page():
-    at = _card_test(35)
+    at = _card_test(_rows(35))
     assert any(b.key == "offer_cards_more" for b in at.button)
     body = " ".join(m.value for m in at.markdown)
     assert "Player 0" in body and "Player 34" not in body
@@ -65,13 +67,26 @@ def test_cards_render_and_page():
 
 
 def test_add_seeds_simple_slip():
-    at = _card_test(3)
+    at = _card_test(_rows(3))
     at.button(key="offer_card_add_0").click().run()
     assert len(at.session_state["slip_legs"]) == 1
     assert at.session_state["slip_builder"] == "simple"
 
 
 def test_detail_pushes_stack():
-    at = _card_test(3)
+    at = _card_test(_rows(3))
     at.button(key="offer_card_detail_1").click().run()
     assert at.session_state["detail_stack"] == [1]
+
+
+def test_card_prints_move_text_as_given_with_no_arrow_from_the_fair_move():
+    """``Move Text`` carries the posted line's own arrow. ``Move`` is the fair line's delta,
+    which can run the other way — here the posted line rose while the fair line fell — so
+    the card must not derive an arrow from its sign. A price-only move prints no text.
+    """
+    rows = _rows(2)
+    rows[0] |= {columns.MOVE: -0.3, columns.MOVE_TEXT: "Line `21.5 → 22.5` ▲"}
+    rows[1] |= {columns.MOVE: 0.16, columns.MOVE_TEXT: ""}
+    moved, price_only = (m.value for m in _card_test(rows).markdown)
+    assert moved.endswith("  \nLine `21.5 → 22.5` ▲")
+    assert "Line `" not in price_only

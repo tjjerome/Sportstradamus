@@ -1,5 +1,5 @@
-"""The five tab bodies of the offer-detail dialog (History, Model, Comps, Other stats,
-Correlated).
+"""The History, Model, Comps, Other-stats and Correlated tab bodies of the offer-detail
+dialog (the Movement tab is ``deep_dive_movement``).
 
 ``deep_dive.show_detail`` builds the header/case/context strip and the ``st.tabs``
 shell, then calls the five public renderers here. Split out of ``deep_dive.py`` so the
@@ -24,7 +24,6 @@ from sportstradamus.dashboard.components.deep_dive_charts import (
     distribution_chart,
     distribution_frame,
     history_chart,
-    resolve_std,
     sparkline,
 )
 from sportstradamus.dashboard.components.slip_state import add_to_simple_slip
@@ -36,6 +35,7 @@ from sportstradamus.dashboard.data import (
 from sportstradamus.dashboard.legs import find_offer_idx
 from sportstradamus.dashboard.slip_engine import ev_lift
 from sportstradamus.dashboard.theme import DIVERGING_COLORS, GRAY, SEQUENTIAL_COLORS
+from sportstradamus.helpers.distributions import resolve_std
 from sportstradamus.leg_schema import build_leg, leg_label
 
 # Comps-tab heatmap on the "vs their avg" column: same diverging-ramp bucket semantics

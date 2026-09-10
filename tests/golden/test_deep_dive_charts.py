@@ -1,7 +1,8 @@
 """Deep-dive History/Model chart pins: colors, line overlays, gold tag.
 
 ``distribution_chart`` overlays three references on the predictive curve — the app
-betting line (white dashed rule, unchanged), the consensus market line (a distinct
+betting line (the white dashed ``app_line_rule`` every deep-dive chart shares, run up
+the curve here and across the History bars), the consensus market line (a distinct
 solid rule), and the model projection (a dot + numeric label, not a rule). These pins
 assert the altair layer spec carries each without re-shading the over/under split, and
 that both charts encode over/under with the theme green/red (P8 Phase C rev-3 recolor).
@@ -16,9 +17,9 @@ from sportstradamus.dashboard.components.deep_dive_charts import (
     distribution_chart,
     distribution_frame,
     history_chart,
-    resolve_std,
 )
 from sportstradamus.dashboard.theme import GOLD, GREEN, RED
+from sportstradamus.helpers.distributions import resolve_std
 
 _APP_LINE = "#FFFFFF"
 
@@ -96,6 +97,7 @@ def test_app_line_unchanged_without_overlays():
     rules = _rules(_layers(chart))
     assert len(rules) == 1
     assert rules[0]["mark"]["color"] == _APP_LINE and rules[0]["mark"].get("strokeDash")
+    assert rules[0]["encoding"] == {"x": {"field": "Line", "type": "quantitative"}}
 
 
 def test_over_under_shading_not_resplit_by_consensus():
@@ -185,6 +187,7 @@ def test_history_app_line_still_white_dashed():
     rules = _rules(_layers(history_chart(_history_df(), 20.0)))
     assert len(rules) == 1
     assert rules[0]["mark"]["color"] == _APP_LINE and rules[0]["mark"].get("strokeDash")
+    assert rules[0]["encoding"] == {"y": {"field": "Line", "type": "quantitative"}}
 
 
 def test_distribution_side_recolored_green_red_continuous():

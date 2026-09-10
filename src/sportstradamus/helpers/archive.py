@@ -95,6 +95,7 @@ _BOOK_LINE_HISTORY_COLS = [
     "book",
     "observed_at",
     "line",
+    "p_over",
 ]
 
 # Hours before commence_time treated as "the books' line" during training.
@@ -1027,16 +1028,18 @@ class Archive:
     def get_book_line_histories(
         self, keys: pd.DataFrame, *, books: Sequence[str], since: datetime.date
     ) -> pd.DataFrame:
-        """Bulk per-book line time-series for many ``(league, entity, market)`` keys.
+        """Bulk per-book ladder time-series for many ``(league, entity, market)`` keys.
 
-        The bulk sibling of :meth:`get_line_history`, and the only reader that
-        keeps ``odds.line`` — the line a *named* book posted. The ``lines``
-        table cannot express that: it has no book column, so its rows are the
-        cross-book consensus. Callers that need "how did Underdog's own number
-        move" must read ``odds``.
+        Reads ``ladder``, the one table that keeps every rung a DFS book posted on
+        every poll together with its de-vigged ``p_over``. ``odds`` cannot say how a
+        book's own number moved: ``add_dfs`` archives a single tier per player-market
+        there, and for Sleeper that tier is the lowest alt rung rather than the main
+        line. ``lines`` has no book column at all. Choosing each poll's main rung is
+        the caller's job (``prediction.line_movement``).
 
         One scan joins every key at once; a per-entity loop over a full slate is
-        thousands of round trips against the same table pages.
+        thousands of round trips against the same table pages. Rungs staged this run
+        stay invisible until :meth:`write` flushes them.
 
         Args:
             keys: Frame carrying ``league``, ``entity`` and ``market`` columns.
@@ -1045,10 +1048,9 @@ class Archive:
             since: Earliest ``game_date`` to scan, inclusive.
 
         Returns:
-            ``[league, market, game_date, entity, book, observed_at, line]``
-            sorted by key then ``observed_at``, excluding rows written before
-            ``observed_at`` existed. Column-stable and empty when ``keys`` or
-            ``books`` is empty.
+            ``[league, market, game_date, entity, book, observed_at, line, p_over]``
+            sorted by key then ``observed_at``; a ladder poll contributes one row per
+            rung. Column-stable and empty when ``keys`` or ``books`` is empty.
         """
         wanted = keys[["league", "entity", "market"]].drop_duplicates()
         if wanted.empty or not books:
@@ -1058,13 +1060,12 @@ class Archive:
         self._connection.register(_KEY_JOIN_VIEW, wanted)
         try:
             return self._connection.execute(
-                "SELECT o.league, o.market, o.game_date, o.entity, o.book, "
-                "       o.observed_at, o.line "
-                f"FROM odds o JOIN {_KEY_JOIN_VIEW} k "
-                "  ON o.league = k.league AND o.entity = k.entity AND o.market = k.market "
-                f"WHERE o.book IN ({placeholders}) "
-                "  AND o.game_date >= ? AND o.observed_at IS NOT NULL "
-                "ORDER BY o.league, o.market, o.game_date, o.entity, o.book, o.observed_at",
+                "SELECT l.league, l.market, l.game_date, l.entity, l.book, "
+                "       l.observed_at, l.line, l.p_over "
+                f"FROM ladder l JOIN {_KEY_JOIN_VIEW} k "
+                "  ON l.league = k.league AND l.entity = k.entity AND l.market = k.market "
+                f"WHERE l.book IN ({placeholders}) AND l.game_date >= ? "
+                "ORDER BY l.league, l.market, l.game_date, l.entity, l.book, l.observed_at",
                 [*books, since],
             ).fetchdf()
         finally:

@@ -17,7 +17,7 @@ from collections.abc import Sequence
 
 import pandas as pd
 
-from sportstradamus.dashboard.components.spark_svg import movement_svg
+from sportstradamus.dashboard.components.spark_svg import movement_summary, movement_svg
 from sportstradamus.dashboard.narrative import match_label
 from sportstradamus.helpers import market_display_name
 from sportstradamus.helpers.io import LINE_MOVEMENT_KEYS
@@ -26,6 +26,7 @@ MODEL_EDGE = "Model Edge"
 CONSENSUS_EDGE = "Consensus Edge"
 MOVE = "Move"
 MOVE_SPARK = "Move Spark"
+MOVE_SUMMARY = "Move Summary"
 MOVE_TEXT = "Move Text"
 _EV_BREAK_EVEN = 1.0
 
@@ -38,9 +39,12 @@ HELP = {
     "Cons Edge": "The consensus book's edge at the same DFS payout: Market EV − 1. Above 0% "
     "the book agrees the line is soft; below 0% the book disagrees (you're contrarian).",
     "Kelly": "Kelly edge — the bankroll fraction full-Kelly would stake on this leg.",
-    MOVE: "How far this row's Platform has moved its own line since the offer opened — the "
-    "DFS book you'd bet, not the consensus. The trace runs green when the line moved toward "
-    "your side and red when it moved away; a flat gray rule means the app never moved it.",
+    MOVE: "How far the fair line has moved since the offer opened, in the stat's own units, on "
+    "this row's Platform — the DFS app you'd bet, not the consensus. The fair line is where "
+    "the app's price would be even money, so a multiplier change counts even while the posted "
+    "line holds. The trace runs green when it moved toward your side (down for an Over, up "
+    "for an Under), red when it moved away, and gray when it came back; a flat gray rule "
+    "means neither the line nor its price ever moved.",
 }
 
 
@@ -74,39 +78,73 @@ def add_match_column(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _move_text(trajectory: Sequence[float]) -> str:
-    """``"209.5 → 213.5"`` for the phone card, or ``""`` when it ended where it started.
+def _move_text(posted: Sequence[float]) -> str:
+    """The phone card's ``"Line `209.5 → 213.5` ▲"``, or ``""`` when the posted line netted zero.
 
-    A round trip reads as no movement here on purpose: "2.5 → 2.5" spends a line of a
-    390px card to say nothing. The desktop trace still draws the journey.
+    The arrow is the posted line's own direction: the fair line's can run the other way, and
+    this text names the posted line. A round trip reads as no movement here on purpose —
+    "2.5 → 2.5" spends a line of a 390px card to say nothing — and so does a price-only
+    move, which the phone leaves to the desktop trace.
     """
-    if len(trajectory) < 2 or trajectory[0] == trajectory[-1]:
+    if posted[0] == posted[-1]:
         return ""
-    return f"{trajectory[0]:.10g} → {trajectory[-1]:.10g}"
+    arrow = "▲" if posted[-1] > posted[0] else "▼"
+    return f"Line `{posted[0]:.10g} → {posted[-1]:.10g}` {arrow}"
 
 
 def add_line_movement(df: pd.DataFrame, movement: pd.DataFrame) -> pd.DataFrame:
     """Append the DFS book's line-movement columns from a ``current_line_movement`` frame.
 
-    ``Move`` is the signed delta — the grid's cell *value*, so the column click-sorts —
-    ``Move Spark`` the finished sparkline SVG its cellRenderer draws, and ``Move Text``
-    the phone card's plain-text delta. An offer with no movement row gets NaN and empty
-    strings, which every surface renders as no movement at all; on a same-day slate that
-    is most of the board.
+    The fair line drives every encoding: ``Move`` is its signed delta (``fair_move``) — the
+    grid cell's *value*, so the column click-sorts on it — and ``Move Spark`` the sparkline
+    SVG its cellRenderer draws, titled with ``Move Summary`` (:func:`movement_summary`),
+    which also rides along on its own for surfaces that print the words. ``Move Text`` is
+    the phone card's posted-line text. An offer with no movement row, or one from a
+    snapshot written before the fair-line columns, gets NaN and empty strings, which every
+    surface renders as no movement at all; on a same-day slate that is most of the board.
+    An old row's posted-only numbers never stand in: they would draw every price move as
+    held and sort ``Move`` by a different quantity than the rest of the board.
+
+    Args:
+        df: Offers carrying the ``LINE_MOVEMENT_KEYS`` columns and ``Bet``.
+        movement: A ``current_line_movement`` frame with every ``LINE_MOVEMENT_COLS``
+            column, as ``dashboard.data.load_current_line_movement`` returns it.
+
+    Returns:
+        A copy of ``df``, index unchanged, with ``Move``, ``Move Spark``, ``Move Summary``
+        and ``Move Text`` appended.
     """
     df = df.copy()
     keyed = movement.set_index(LINE_MOVEMENT_KEYS)
-    joined = df.join(keyed[["move", "n_moves", "series"]], on=LINE_MOVEMENT_KEYS)
-    df[MOVE] = pd.to_numeric(joined["move"], errors="coerce")
-    # n_moves, not the net delta, is what tells a line that was never repriced from one
-    # that wandered and came back — see movement_svg. Missing rows count as never.
-    moves = pd.to_numeric(joined["n_moves"], errors="coerce").fillna(0).astype(int)
-    sparks, texts = [], []
-    for raw, bet, n_moves in zip(joined["series"], df["Bet"], moves, strict=True):
-        trajectory = json.loads(raw) if isinstance(raw, str) else []
-        sparks.append(movement_svg(trajectory, bet=bet, n_moves=n_moves))
-        texts.append(_move_text(trajectory))
+    joined = df.join(
+        keyed[["fair_move", "fair_series", "series", "n_moves", "n_price_moves"]],
+        on=LINE_MOVEMENT_KEYS,
+    )
+    df[MOVE] = pd.to_numeric(joined["fair_move"], errors="coerce")
+    sparks, summaries, texts = [], [], []
+    for fair_json, posted_json, bet, n_moves, n_price_moves in zip(
+        joined["fair_series"],
+        joined["series"],
+        df["Bet"],
+        joined["n_moves"],
+        joined["n_price_moves"],
+        strict=True,
+    ):
+        spark = summary = text = ""
+        if isinstance(fair_json, str):
+            fair, posted = json.loads(fair_json), json.loads(posted_json)
+            summary = movement_summary(
+                fair, posted, n_moves=int(n_moves), n_price_moves=int(n_price_moves)
+            )
+            spark = movement_svg(
+                fair, bet=bet, n_changes=int(n_moves + n_price_moves), title=summary
+            )
+            text = _move_text(posted)
+        sparks.append(spark)
+        summaries.append(summary)
+        texts.append(text)
     df[MOVE_SPARK] = sparks
+    df[MOVE_SUMMARY] = summaries
     df[MOVE_TEXT] = texts
     return df
 

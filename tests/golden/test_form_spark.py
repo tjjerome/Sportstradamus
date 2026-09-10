@@ -1,9 +1,10 @@
-"""Pins for the constellation hover card's last-five form sparklines.
+"""Pins for the constellation hover card's chart rows: last-five form and line movement.
 
-``form_sparks`` is the only thing standing between the gamelog and the card's markup:
-the frontend drops what it returns straight into ``innerHTML`` without validating it,
-and a leg the map can't build a series for has to go missing rather than draw an empty
-box. The window and its ordering are pinned here because the chart reads left to right.
+``form_sparks`` and ``move_sparks`` are all that stand between the data and the card's
+markup: the frontend drops what they return straight into ``innerHTML`` without
+validating it, and a leg they can't build a row for has to go missing rather than draw
+an empty box. The form window and its ordering are pinned here because the chart reads
+left to right.
 """
 
 from __future__ import annotations
@@ -11,8 +12,9 @@ from __future__ import annotations
 import pandas as pd
 
 from sportstradamus.dashboard.components import form_spark
-from sportstradamus.dashboard.components.form_spark import form_sparks
-from sportstradamus.dashboard.components.spark_svg import form_svg
+from sportstradamus.dashboard.components.form_spark import form_sparks, move_sparks
+from sportstradamus.dashboard.components.spark_svg import form_svg, movement_summary, movement_svg
+from sportstradamus.helpers.io import LINE_MOVEMENT_COLS
 
 # Deliberately out of date order: a correct read sorts on GAME_DATE, not row position.
 _NBA_GAMELOG = pd.DataFrame(
@@ -35,18 +37,65 @@ _NBA_GAMELOG = pd.DataFrame(
 _STAR_LAST_5 = [18.0, 22.0, 24.0, 27.0, 31.0]
 
 
+# The line-movement snapshot, column-stable the way its loader returns it. Star's posted
+# line fell a point and its fair line with it; Wide, an NFL TD prop, held its line while
+# its price moved. No row for anyone else.
+_MOVEMENT = pd.DataFrame(
+    [
+        {
+            "League": "NBA",
+            "Platform": "Underdog",
+            "Market": "Points",
+            "Player": "Star",
+            "Date": "2026-01-08",
+            "n_moves": 1,
+            "n_price_moves": 0,
+            "series": "[20.5, 19.5]",
+            "fair_series": "[20.5, 19.8]",
+        },
+        {
+            "League": "NFL",
+            "Platform": "Underdog",
+            "Market": "tds",
+            "Player": "Wide",
+            "Date": "2026-01-09",
+            "n_moves": 0,
+            "n_price_moves": 1,
+            "series": "[0.5, 0.5]",
+            "fair_series": "[0.5, 0.66]",
+        },
+    ]
+).reindex(columns=LINE_MOVEMENT_COLS)
+
+
 def _pool(*rows: dict) -> pd.DataFrame:
     """A focus game's offer rows. Empty keeps its columns, the way an ``offers`` slice does."""
     filled = [
-        {"League": "NBA", "Market": "Points", "Bet": "Over", "Stat": "PTS", "Line": 20.5, **row}
+        {
+            "League": "NBA",
+            "Platform": "Underdog",
+            "Date": "2026-01-08",
+            "Market": "Points",
+            "Bet": "Over",
+            "Stat": "PTS",
+            "Line": 20.5,
+            **row,
+        }
         for row in rows
     ]
-    return pd.DataFrame(filled, columns=["League", "Player", "Market", "Bet", "Stat", "Line"])
+    return pd.DataFrame(
+        filled, columns=["League", "Platform", "Date", "Player", "Market", "Bet", "Stat", "Line"]
+    )
 
 
 def _sparks(pool: pd.DataFrame, monkeypatch, gamelog=_NBA_GAMELOG) -> dict:
     monkeypatch.setattr(form_spark, "load_gamelog", lambda _league: gamelog)
     return form_sparks(pool)
+
+
+def _moves(pool: pd.DataFrame, monkeypatch) -> dict:
+    monkeypatch.setattr(form_spark, "load_current_line_movement", lambda: _MOVEMENT)
+    return move_sparks(pool)
 
 
 def test_the_window_is_the_last_five_games_oldest_first(monkeypatch):
@@ -130,3 +179,37 @@ def test_an_nfl_pool_reads_the_frame_order_it_has_no_date_column(monkeypatch):
     )
     sparks = _sparks(pool, monkeypatch, gamelog=gamelog)
     assert sparks["Star|Receptions|Over"].startswith(form_svg([2.0, 3.0, 4.0, 5.0, 6.0], 4.5))
+
+
+def test_an_offer_with_a_movement_row_gets_its_trace_beside_its_summary(monkeypatch):
+    summary = movement_summary([20.5, 19.8], [20.5, 19.5], n_moves=1, n_price_moves=0)
+    trace = movement_svg([20.5, 19.8], bet="Over", n_changes=1, title=summary)
+    moves = _moves(_pool({"Player": "Star"}), monkeypatch)
+    assert moves == {"Star|Points|Over": f"{trace}<span>{summary}</span>"}
+
+
+def test_an_offer_the_snapshot_has_no_row_for_is_absent(monkeypatch):
+    """Absent rather than blank: the frontend draws no movement row for a missing key,
+    since an offer the ladder never saw has no movement to be missing."""
+    moves = _moves(_pool({"Player": "Star"}, {"Player": "Rookie"}), monkeypatch)
+    assert set(moves) == {"Star|Points|Over"}
+
+
+def test_a_wider_lens_star_from_another_league_reads_its_own_row(monkeypatch):
+    """``_render_constellation`` concatenates the lens's other-game records onto the focus
+    pool, so the frame it hands over mixes leagues and repeats index labels — each offer
+    must still read the movement row its own keys name, and the focus star's is unchanged."""
+    wide = {
+        "League": "NFL",
+        "Date": "2026-01-09",
+        "Player": "Wide",
+        "Market": "tds",
+        "Bet": "Under",
+        "Stat": "tds",
+        "Line": 0.5,
+    }
+    summary = movement_summary([0.5, 0.66], [0.5, 0.5], n_moves=0, n_price_moves=1)
+    trace = movement_svg([0.5, 0.66], bet="Under", n_changes=1, title=summary)
+    alone = _moves(_pool({"Player": "Star"}), monkeypatch)
+    moves = _moves(pd.concat([_pool({"Player": "Star"}), _pool(wide)]), monkeypatch)
+    assert moves == {**alone, "Wide|tds|Under": f"{trace}<span>{summary}</span>"}

@@ -2,16 +2,20 @@
 
 The evidence-chain view a user opens on any offer: a themed header (Cinzel kicker,
 player + market, side line, edge badge, gold rule), the model's "case" (the per-offer
-``Why``), a one-line game-context strip, and five tabs (History, Model, Comps, Other
-stats, Correlated). The Comps / Other-stats tabs read the ``current_offer_details``
-sidecar prerendered at ``prophecize`` time so the server never recomputes them live.
+``Why``), a one-line game-context strip, and six tabs (History, Model, Comps, Other
+stats, Correlated, Movement). The Comps / Other-stats tabs read the
+``current_offer_details`` sidecar prerendered at ``prophecize`` time so the server never
+recomputes them live; the Movement tab reads the ``current_line_movement`` snapshot,
+matched on Platform too, because each app moves its own line.
 """
 
 import html
+from collections.abc import Sequence
 
 import pandas as pd
 import streamlit as st
 
+from sportstradamus.dashboard.components.deep_dive_movement import render_movement_tab
 from sportstradamus.dashboard.components.deep_dive_tabs import (
     render_comps_tab,
     render_corr_tab,
@@ -22,12 +26,14 @@ from sportstradamus.dashboard.components.deep_dive_tabs import (
 from sportstradamus.dashboard.components.glyphs import game_shape_glyph
 from sportstradamus.dashboard.data import (
     load_current_game_context,
+    load_current_line_movement,
     load_current_offer_details,
 )
 from sportstradamus.dashboard.narrative import SHAPE_HELP, bet_arrow, context_strip
 from sportstradamus.dashboard.theme import GOLD, GRAY
+from sportstradamus.helpers.io import LINE_MOVEMENT_KEYS
 
-_DETAIL_KEY = ["League", "Date", "Player", "Market", "Opponent"]
+_DETAIL_KEY = ("League", "Date", "Player", "Market", "Opponent")
 
 # Compact glyph for the one-line context strip — smaller than Tonight's cards.
 _STRIP_GLYPH_SIZE = 22
@@ -149,14 +155,16 @@ def _render_context_strip(row: pd.Series, game_context: pd.DataFrame) -> None:
     )
 
 
-def _detail_row(row: pd.Series, details: pd.DataFrame) -> pd.Series | None:
-    """The prerendered detail row matching this offer's key, or ``None`` if absent."""
-    if details.empty:
+def _detail_row(
+    row: pd.Series, frame: pd.DataFrame, keys: Sequence[str] = _DETAIL_KEY
+) -> pd.Series | None:
+    """The row of a per-offer snapshot matching this offer on ``keys``, or ``None``."""
+    if frame.empty:
         return None
-    mask = pd.Series(True, index=details.index)
-    for col in _DETAIL_KEY:
-        mask &= details[col].astype(str) == str(row.get(col))
-    sub = details[mask]
+    mask = pd.Series(True, index=frame.index)
+    for col in keys:
+        mask &= frame[col].astype(str) == str(row.get(col))
+    sub = frame[mask]
     return sub.iloc[0] if not sub.empty else None
 
 
@@ -180,6 +188,7 @@ def show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
     _render_context_strip(row, load_current_game_context())
 
     detail = _detail_row(row, load_current_offer_details())
+    movement = _detail_row(row, load_current_line_movement(), LINE_MOVEMENT_KEYS)
     tabs = st.tabs(
         [
             ":material/history: History",
@@ -187,6 +196,7 @@ def show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
             ":material/group: Comps",
             ":material/insights: Other stats",
             ":material/hub: Correlated",
+            ":material/timeline: Movement",
         ]
     )
     with tabs[0]:
@@ -199,3 +209,5 @@ def show_detail(row: pd.Series, filtered: pd.DataFrame) -> None:
         render_other_stats_tab(detail, row)
     with tabs[4]:
         render_corr_tab(row, filtered)
+    with tabs[5]:
+        render_movement_tab(movement, row)
