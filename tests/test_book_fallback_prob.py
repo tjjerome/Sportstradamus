@@ -22,7 +22,7 @@ import pytest
 
 from sportstradamus.helpers.distributions import get_ev
 from sportstradamus.helpers.training_quotes import ArchivedBookQuote
-from sportstradamus.prediction import book_quotes
+from sportstradamus.prediction import book_quotes, offer_records
 from sportstradamus.stats import base
 
 # ``sportstradamus.prediction`` re-exports the ``model_prob`` function, which
@@ -49,6 +49,14 @@ class _StubArchive:
 
     def get_training_quote_inputs(self, league, market, date, entities, at=None):
         return {e: (self._rows.get(e, []), None) for e in entities}
+
+
+@pytest.fixture(autouse=True)
+def _stub_record_archive(monkeypatch):
+    # finalize_records reads default_totals off offer_records' own LazyArchive, so a test
+    # that stubs only book_quotes still opens the real archive and, under xdist, waits on
+    # the lock of whichever worker already holds it.
+    monkeypatch.setattr(offer_records, "archive", _StubArchive({}))
 
 
 class _StubStats:
