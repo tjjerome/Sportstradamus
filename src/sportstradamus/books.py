@@ -22,10 +22,12 @@ from sportstradamus.helpers import (
 from sportstradamus.helpers.scraping import REQUEST_TIMEOUT_S
 from sportstradamus.spiderLogger import logger
 
-# Underdog Fantasy API endpoints
+# Underdog Fantasy API endpoints. A retired version answers 426 upgrade_required, which
+# Scrape.get logs only at DEBUG, so a retirement surfaces as "Max Attempts Reached" then
+# "No offers found".
 _UD_BASE = "https://api.underdogfantasy.com"
 UD_TEAMS_URL = "https://stats.underdogfantasy.com/v1/teams"
-UD_LINES_URL = f"{_UD_BASE}/beta/v6/over_under_lines"
+UD_LINES_URL = f"{_UD_BASE}/v1/over_under_lines"
 UD_RIVALS_URL = f"{_UD_BASE}/beta/v3/rival_lines"
 
 # Sleeper API endpoints
