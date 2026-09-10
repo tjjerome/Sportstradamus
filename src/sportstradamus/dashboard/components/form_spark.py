@@ -1,17 +1,19 @@
-"""Last-five form charts for the constellation's hover card.
+"""The constellation hover card's two chart rows: last-five form and line movement.
 
-The card is assembled in the component's JavaScript, so the chart has to reach it as
+The card is assembled in the component's JavaScript, so each row has to reach it as
 finished markup — ``spark_svg`` keeps every coordinate on this side. One grouped tail over
-the league gamelog serves the whole map: ``deep_dive_charts.build_recent_history`` re-scans
-the full log per row, which a thirty-star game would pay for thirty times.
+the league gamelog serves every star's form row: ``deep_dive_charts.build_recent_history``
+re-scans the full log per row, which a thirty-star game would pay for thirty times. The
+movement row is the Board's own ``Move`` cell, lifted onto the card (:func:`move_sparks`).
 """
 
 from __future__ import annotations
 
 import pandas as pd
 
+from sportstradamus.dashboard import columns
 from sportstradamus.dashboard.components.spark_svg import form_svg
-from sportstradamus.dashboard.data import GAMELOG_SCHEMA, load_gamelog
+from sportstradamus.dashboard.data import GAMELOG_SCHEMA, load_current_line_movement, load_gamelog
 from sportstradamus.dashboard.legs import corr_key
 
 # Five games is the recent-form window the offer row already carries as ``Avg 5``, so the
@@ -57,3 +59,23 @@ def form_sparks(pool: pd.DataFrame) -> dict[str, str]:
                 f"<span>last {len(values)} vs line · {hits}/{len(values)} over</span>"
             )
     return sparks
+
+
+def move_sparks(pool: pd.DataFrame) -> dict[str, str]:
+    """``corr_key`` → the hover card's line-movement row, per offer in ``pool``.
+
+    Each row is the Board's ``Move`` trace beside its summary, so the card and the grid tell
+    a move in the same words. An offer ``columns.add_line_movement`` leaves blank is absent,
+    and the frontend then draws no row at all rather than a scar: an offer the ladder never
+    saw has no movement to be missing.
+
+    ``pool`` needs ``Bet`` and the ``LINE_MOVEMENT_KEYS`` columns. Each offer reads its own
+    row by them, so a frame that mixes in the "look wider" lens's other games and leagues
+    needs nothing extra.
+    """
+    moved = columns.add_line_movement(pool, load_current_line_movement())
+    return {
+        corr_key(offer): f"{offer[columns.MOVE_SPARK]}<span>{offer[columns.MOVE_SUMMARY]}</span>"
+        for offer in moved.to_dict("records")
+        if offer[columns.MOVE_SPARK]
+    }

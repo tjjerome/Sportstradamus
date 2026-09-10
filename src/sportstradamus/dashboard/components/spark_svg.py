@@ -7,8 +7,10 @@ Keeping every coordinate here means neither surface writes chart geometry in Jav
 where no gate we run would read it.
 
 The two share a box and a reference rule but not an encoding, because they describe
-different things: a book's line is one quantity moving through time and reads as a trace,
-while a player's last games are discrete results and read as bars off the line.
+different things: an offer's fair line is one quantity moving through time and reads as a
+trace, while a player's last games are discrete results and read as bars off the line. The
+movement's wording lives here too (:func:`movement_summary`), so the trace's tooltip and
+every other surface that describes a move say it the same way.
 
 Colors are semantic by intent (DESIGN.md §2) — never gold, which is chrome.
 """
@@ -29,6 +31,9 @@ _RULE_DASH = "2 3"
 # How much of its slot a form bar fills. At five games a slot is ~15px, so this leaves a
 # gap wide enough to read as a separator without starving the bar itself.
 _BAR_SLOT_SHARE = 0.62
+# The fair line is derived from prices rather than posted, so it can carry float noise past
+# the hundredths the snapshot rounds ``fair_move`` to; the wording stops at the same place.
+_FAIR_DECIMALS = 2
 
 
 def _scale_y(value: float, lo: float, hi: float) -> float:
@@ -92,33 +97,97 @@ def _bars(deviations: Sequence[float], reach: float) -> str:
     return "".join(bars)
 
 
-def movement_svg(series: Sequence[float], *, bet: str, n_moves: int) -> str:
-    """The DFS book's own line trajectory for one offer, colored by who it favors.
+def move_color(delta: float, bet: str) -> str:
+    """The semantic color of a fair-line move, read from the bet's side.
 
-    A line drifting away from the bet side is money leaving the table, so ``Over`` reads
-    green on a falling line and ``Under`` on a rising one. A line that never moved draws
-    a flat gray rule rather than an empty cell — "the app held" is itself the answer, and
-    on a same-day slate it is the answer for most offers.
+    A falling fair line means the app now prices the Over more generously — a lower line to
+    clear, or a richer multiplier at the same line — and a rising one the Under. So a move
+    toward the bet's side is green and a move away red; a move that netted to zero is gray,
+    whatever path it took.
 
-    Three states occur in the data, and only ``n_moves`` separates them: never repriced,
-    moved and stayed, and moved and came back. The last two both net to a delta that can
-    be zero, and ``series`` cannot settle it either — it is a fixed-width resample, so a
-    move that reverted between two of its ticks leaves no trace in it at all. ``n_moves``
-    counts every raw observation before resampling, so it is the one honest witness.
+    Args:
+        delta: Fair close minus fair open, in the stat's own units.
+        bet: The offer's side; anything starting with "o" (any case) is the Over.
+
+    Returns:
+        ``theme.GREEN``, ``theme.RED``, or ``theme.GRAY`` at zero.
     """
-    values = [float(v) for v in series]
+    if delta == 0:
+        return theme.GRAY
+    favorable = delta < 0 if bet.lower().startswith("o") else delta > 0
+    return theme.GREEN if favorable else theme.RED
+
+
+def movement_summary(
+    fair: Sequence[float], posted: Sequence[float], *, n_moves: int, n_price_moves: int
+) -> str:
+    """One line of words for an offer's movement: the fair line's move, then the posted line's.
+
+    The single source of this wording — the Board trace's tooltip and every other surface
+    that describes a move read it from here. The fair line leads because it is what the
+    trace draws and ``Move`` sorts by; the posted line follows because it is what the app
+    shows. The counts, not the endpoints, decide held-or-moved: the series are fixed-width
+    resamples, so a move that reverted between two ticks leaves no trace in them, while the
+    counts are taken over every raw poll. That is why a net-zero move reads "back at",
+    never "held".
+
+    Args:
+        fair: The fair line per resample tick, oldest first, in the stat's units.
+        posted: The posted main line on the same ticks.
+        n_moves: Polls where the posted line changed.
+        n_price_moves: Polls where the fair line changed while the posted line held.
+
+    Returns:
+        ``"Held at 0.5"`` when neither moved, else the fair part and the line part, e.g.
+        ``"Fair 0.5 → 0.66 (+0.16) · line held at 0.5"`` or
+        ``"Fair 21.4 → 20.6 (-0.8) · line 21.5 → 20.5"``.
+    """
+    posted_close = f"{posted[-1]:.10g}"
+    if n_moves == 0 and n_price_moves == 0:
+        return f"Held at {posted_close}"
+    fair_open, fair_close = (f"{round(v, _FAIR_DECIMALS):.10g}" for v in (fair[0], fair[-1]))
+    fair_delta = round(fair[-1] - fair[0], _FAIR_DECIMALS)
+    if fair_delta == 0:
+        fair_part = f"Fair back at {fair_close}"
+    else:
+        fair_part = f"Fair {fair_open} → {fair_close} ({fair_delta:+.10g})"
+    if n_moves == 0:
+        line_part = f"line held at {posted_close}"
+    elif posted[-1] != posted[0]:
+        line_part = f"line {posted[0]:.10g} → {posted_close}"
+    else:
+        line_part = f"line back at {posted_close}"
+    return f"{fair_part} · {line_part}"
+
+
+def movement_svg(fair: Sequence[float], *, bet: str, n_changes: int, title: str) -> str:
+    """An offer's fair-line trajectory, colored by :func:`move_color`.
+
+    The fair line — the line at which the app's price would be even money — folds the
+    posted line and its multiplier into one stat-unit trace, so a price-only move (a TD
+    prop whose multiplier drifts while its line never does) draws like any other. Only an
+    offer whose line and price both held draws the flat gray rule rather than an empty cell
+    — "the app held" is itself the answer, and on a same-day slate it is the answer for
+    most offers.
+
+    ``n_changes``, not ``fair``, decides held-or-moved, for the reason
+    :func:`movement_summary` gives; a move that came back draws a gray trace.
+
+    Args:
+        fair: The fair line per resample tick, oldest first.
+        bet: The offer's side, read by :func:`move_color`.
+        n_changes: Every recorded change — posted-line moves plus price-only moves.
+        title: The tooltip; the Board passes :func:`movement_summary`.
+
+    Returns:
+        The ``<svg>`` markup, or ``""`` for an empty series.
+    """
+    values = [float(v) for v in fair]
     if not values:
         return ""
-    open_line, close_line = values[0], values[-1]
-    if not n_moves:
-        return _svg(_rule(_HEIGHT / 2, theme.GRAY), f"Line held at {close_line:.10g}")
-    move = close_line - open_line
-    if not move:
-        color, title = theme.GRAY, f"Line left {close_line:.10g} and came back"
-    else:
-        favorable = move < 0 if bet.lower().startswith("o") else move > 0
-        color = theme.GREEN if favorable else theme.RED
-        title = f"Line {open_line:.10g} → {close_line:.10g} ({move:+.10g})"
+    if n_changes == 0:
+        return _svg(_rule(_HEIGHT / 2, theme.GRAY), title)
+    color = move_color(values[-1] - values[0], bet)
     return _svg(_trace(_plot_points(values, min(values), max(values)), color), title)
 
 

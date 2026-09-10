@@ -141,13 +141,17 @@ def _offer_details_frame(snapshot_offers: pd.DataFrame, stats: dict) -> pd.DataF
 
 
 def snapshot_line_movement(offers: pd.DataFrame) -> pd.DataFrame:
-    """Snapshot how each offer's DFS line has moved since it was posted.
+    """Snapshot how each offer's DFS line and price have moved since it was posted.
 
-    Reads the line history the offers' own platforms wrote to the archive
-    (``odds.line`` — the book's own number, not the cross-book consensus the
-    ``lines`` table holds), folds it into one row per offer, and writes the
-    dashboard snapshot. Shared with the standalone ``export-line-movement``
-    refresh so both scan the archive the same way.
+    Reads the ladder — every rung the offers' own platforms posted on every poll,
+    each with its price — folds it into one row per offer (main line, fair line,
+    change log; see ``build_line_movement``), and writes the dashboard snapshot.
+    Shared with the standalone ``export-line-movement`` refresh so both scan the
+    archive the same way.
+
+    Must run after ``archive.write()``: rungs staged this run stay invisible to
+    reads until that flush, so an earlier snapshot misses the run's own poll and
+    gives an offer first posted this run no row at all.
 
     Returns:
         The frame that was written, so a caller can report on it.
@@ -352,7 +356,6 @@ def main(progress, contest_variant, log_level):
     )
     write_current_game_corr(corr_sink)
     write_current_game_context(game_context)
-    snapshot_line_movement(snapshot_offers)
     write_current_game_stories(game_stories)
     write_current_offer_details(offer_details)
 
@@ -365,6 +368,8 @@ def main(progress, contest_variant, log_level):
     trim_parlay_hist(_HISTORY_RETENTION_DAYS)
 
     archive.write()
+    # After the flush, or the snapshot misses the ladder rungs this run just staged.
+    snapshot_line_movement(snapshot_offers)
     logger.info("Checking historical predictions")
 
     history = read_history()

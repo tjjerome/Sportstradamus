@@ -309,17 +309,19 @@ def load_game_ctxs() -> dict:
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading line movement...")
 def _load_current_line_movement_cached(path: Path, mtime: float) -> pd.DataFrame:
-    df = read_parquet_safe(path)
-    return df if not df.empty else pd.DataFrame(columns=LINE_MOVEMENT_COLS)
+    return read_parquet_safe(path).reindex(columns=LINE_MOVEMENT_COLS)
 
 
 def load_current_line_movement() -> pd.DataFrame:
     """Per-offer DFS line trajectories from the latest ``prophecize`` snapshot.
 
-    One row per ``League, Platform, Market, Player, Date`` (``Market`` the raw slug) with
-    ``open_line``/``close_line``/``move``/``n_moves``, the first/last timestamps, and
-    ``series`` — a JSON float list the Board's sparkline draws. Stays column-stable when
-    the export is absent so the Board's join still keys off it and simply finds nothing.
+    One row per ``League, Platform, Market, Player, Date`` (``Market`` the raw slug): the
+    posted main line's ``open_line``/``close_line``/``move``/``n_moves`` and ``series``, the
+    fair line's ``n_price_moves``/``fair_move``/``fair_series`` the Board draws, the
+    per-poll ``changes``, and the first/last timestamps (the two series and ``changes`` are
+    JSON text). Reindexed to ``LINE_MOVEMENT_COLS``, so an absent export — or a snapshot
+    written before a column existed, until the next ``prophecize`` — still reads
+    column-stable, the missing columns blank, and the Board's join simply finds nothing.
     """
     return _load_current_line_movement_cached(
         CURRENT_LINE_MOVEMENT_PATH, _mtime(CURRENT_LINE_MOVEMENT_PATH)

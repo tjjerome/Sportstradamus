@@ -27,6 +27,7 @@ serve time; the fitters themselves live in ``training.posthoc``.
 from dataclasses import dataclass
 
 import numpy as np
+import pandas as pd
 from scipy.optimize import brentq, minimize
 from scipy.special import beta as beta_fn
 from scipy.special import expit, gammaln, logit, logsumexp, xlogy
@@ -863,6 +864,27 @@ def predictive_std(dist: str, decoded: DecodedParams) -> np.ndarray:
         delta = skew / np.sqrt(1 + skew**2)
         return sigma * np.sqrt(np.clip(1 - 2 * delta**2 / np.pi, 0, None))
     return np.full_like(mean, np.nan)
+
+
+# Last-resort coefficient of variation for an offer carrying neither a model spread nor a
+# calibrated CV: a middling counting-stat dispersion, there only to keep the spread finite.
+_FALLBACK_CV = 0.3
+
+
+def resolve_std(projection_std: float | None, ev: float, cv: float) -> float:
+    """A positive, finite spread for one offer's outcome distribution.
+
+    Prefers the model's ``Projection STD``; book-fallback offers carry none, so it falls
+    back to the CV-implied ``ev * cv`` (``cv`` is always present), then
+    ``ev * _FALLBACK_CV``. The NaN guard matters: ``NaN or default`` keeps the NaN (NaN is
+    truthy), which would blank the deep-dive curve's x-range and every fair line the
+    line-movement snapshot scales by this spread.
+    """
+    if pd.notna(projection_std) and projection_std > 0:
+        return float(projection_std)
+    if pd.notna(cv) and cv > 0:
+        return float(ev) * float(cv)
+    return float(ev) * _FALLBACK_CV
 
 
 def apply_temperature(p_over, temperature):

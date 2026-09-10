@@ -95,9 +95,10 @@
         font-size: 11px;
         margin-bottom: 8px;
       }
-      /* Last-five form: Python hands over a finished 78x22 <svg>, so this only has to
-         seat it beside its caption. It draws with preserveAspectRatio="none", which means
-         a flex squeeze would silently distort the bars — hence flex: 0 0 auto. */
+      /* The card's two chart rows, last-five form then line movement: Python hands over a
+         finished 78x22 <svg> for each, so this only has to seat it beside its caption. Both
+         draw with preserveAspectRatio="none", which means a flex squeeze would silently
+         distort the bars or the trace — hence flex: 0 0 auto. */
       .cst-spark {
         display: flex;
         align-items: center;

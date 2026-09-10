@@ -22,6 +22,7 @@ from sportstradamus.dashboard.columns import (
     MODEL_EDGE,
     MOVE,
     MOVE_SPARK,
+    MOVE_SUMMARY,
     MOVE_TEXT,
     add_edges,
     add_line_movement,
@@ -35,6 +36,7 @@ from sportstradamus.dashboard.components.grid import (
     _OBSIDIAN_CSS,
     build_themed_grid_options,
 )
+from sportstradamus.dashboard.data import _load_current_line_movement_cached
 from sportstradamus.dashboard.lenses import LENSES, apply_lens
 from sportstradamus.helpers.io import LINE_MOVEMENT_COLS
 
@@ -254,8 +256,8 @@ def test_arrow_col_adds_cellrenderer_and_hidden_cols_hide() -> None:
 
 
 def test_spark_col_draws_the_hidden_svg_column_and_keeps_the_value_sortable() -> None:
-    """The Board's Move column (L1): the cell's *value* stays the signed line delta so the
-    column click-sorts, while the finished sparkline SVG rides in a hidden column the
+    """The Board's Move column (L1): the cell's *value* stays the signed fair-line delta so
+    the column click-sorts, while the finished sparkline SVG rides in a hidden column the
     cellRenderer reads — the same split ``arrow_col`` uses to leave Line sorting numerically.
     """
     df = pd.DataFrame({MOVE: [1.5, -2.0], MOVE_SPARK: ["<svg/>", "<svg/>"]})
@@ -275,8 +277,10 @@ def test_spark_col_draws_the_hidden_svg_column_and_keeps_the_value_sortable() ->
 
 
 def test_spark_col_formatter_is_a_plain_signed_number_not_a_percent() -> None:
-    """A line delta is +4.0 points, not +4.0% — the spark column brings its own signed
-    formatter rather than colliding with the edge columns' signed-percent one.
+    """A fair-line delta is +0.16 TDs, not +0.16% — the spark column brings its own signed
+    formatter rather than colliding with the edge columns' signed-percent one. It prints two
+    decimals: a price-only move on a TD prop shifts the fair line by hundredths, which one
+    decimal would round to "+0.0".
     """
     df = pd.DataFrame({MOVE: [1.5], MODEL_EDGE: [6.0], MOVE_SPARK: ["<svg/>"]})
     options = build_themed_grid_options(
@@ -289,6 +293,7 @@ def test_spark_col_formatter_is_a_plain_signed_number_not_a_percent() -> None:
     defs = _column_defs(options)
     spark_fmt = defs[MOVE]["valueFormatter"].js_code
     assert ">0?'+'" in spark_fmt and "%" not in spark_fmt
+    assert "toFixed(2)" in spark_fmt
     assert "%" in defs[MODEL_EDGE]["valueFormatter"].js_code
 
 
@@ -311,127 +316,184 @@ def test_spark_col_noop_without_the_svg_column_kwarg() -> None:
     assert "cellRenderer" not in _column_defs(options)[MOVE]
 
 
-def test_add_line_movement_attaches_move_spark_and_text() -> None:
-    """``Move`` is the sortable delta, ``Move Spark`` the grid's SVG, ``Move Text`` the
-    phone card's plain-text delta. An offer with no movement row — most of a same-day
-    board — degrades to NaN/empty rather than crashing the join.
+_KEY = {
+    "League": "NBA",
+    "Platform": "Underdog",
+    "Market": "PTS",
+    "Player": "A",
+    "Date": "2026-07-04",
+}
+_MOVE_CELLS = [MOVE_SPARK, MOVE_SUMMARY, MOVE_TEXT]
+
+
+def _snapshot(*rows: dict) -> pd.DataFrame:
+    """``current_line_movement`` rows on ``_KEY`` unless a row overrides a key, reindexed
+    onto the real schema the way the loader does — a hand-copied column list drifts the
+    moment a column is added, which is exactly how this fixture went stale once already.
+    """
+    return pd.DataFrame([{**_KEY, **row} for row in rows]).reindex(columns=LINE_MOVEMENT_COLS)
+
+
+def test_add_line_movement_attaches_the_fair_move_its_spark_summary_and_phone_text() -> None:
+    """``Move`` is the fair line's sortable delta, not the posted line's; ``Move Spark`` the
+    grid's SVG, titled with ``Move Summary``; ``Move Text`` the phone card's posted-line
+    text. An offer with no movement row — most of a same-day board — degrades to NaN/empty
+    rather than crashing the join.
     """
     offers = pd.DataFrame(
-        {
-            "League": ["NBA", "NBA"],
-            "Platform": ["Underdog", "Underdog"],
-            "Market": ["PTS", "AST"],
-            "Player": ["A", "B"],
-            "Date": ["2026-07-04", "2026-07-04"],
-            "Bet": ["Over", "Under"],
-        },
+        [{**_KEY, "Bet": "Over"}, {**_KEY, "Market": "AST", "Player": "B", "Bet": "Under"}],
         index=[7, 9],
     )
-    movement = pd.DataFrame(
+    movement = _snapshot(
         {
-            "League": ["NBA"],
-            "Platform": ["Underdog"],
-            "Market": ["PTS"],
-            "Player": ["A"],
-            "Date": ["2026-07-04"],
-            "move": [2.5],
-            "n_moves": [2],
-            "series": ["[21.0, 22.0, 23.5]"],
+            "move": 2.5,
+            "n_moves": 2,
+            "series": "[21.0, 22.0, 23.5]",
+            "n_price_moves": 1,
+            "fair_move": 2.1,
+            "fair_series": "[21.2, 22.1, 23.3]",
         }
     )
     out = add_line_movement(offers, movement)
     # The Board reads back through this index (detail_stack holds row labels), so the
     # join must not renumber the frame.
     assert out.index.tolist() == [7, 9]
-    assert out.loc[7, MOVE] == pytest.approx(2.5)
-    assert out.loc[7, MOVE_SPARK].startswith("<svg") and MOVE_SPARK in out.columns
-    assert out.loc[7, MOVE_TEXT] == "21 → 23.5"
+    assert out.loc[7, MOVE] == pytest.approx(2.1)
+    summary = "Fair 21.2 → 23.3 (+2.1) · line 21 → 23.5"
+    assert out.loc[7, MOVE_SUMMARY] == summary
+    assert out.loc[7, MOVE_SPARK].startswith("<svg")
+    assert f"<title>{summary}</title>" in out.loc[7, MOVE_SPARK]
+    assert out.loc[7, MOVE_TEXT] == "Line `21 → 23.5` ▲"
     assert pd.isna(out.loc[9, MOVE])
-    assert out.loc[9, MOVE_SPARK] == "" and out.loc[9, MOVE_TEXT] == ""
+    assert out.loc[9, _MOVE_CELLS].tolist() == ["", "", ""]
 
 
-def test_add_line_movement_held_line_draws_a_rule_but_says_nothing_on_the_phone() -> None:
-    """ "The app never moved this line" is the common case and is itself an answer: the
-    grid still draws a flat rule, while the phone card omits its movement line entirely.
+def test_add_line_movement_held_offer_draws_a_rule_but_says_nothing_on_the_phone() -> None:
+    """ "The app never moved this line or its price" is the common case and is itself an
+    answer: the grid still draws a flat rule, while the phone card omits its movement line.
     """
-    offers = pd.DataFrame(
+    movement = _snapshot(
         {
-            "League": ["NBA"],
-            "Platform": ["Underdog"],
-            "Market": ["PTS"],
-            "Player": ["A"],
-            "Date": ["2026-07-04"],
-            "Bet": ["Over"],
+            "move": 0.0,
+            "n_moves": 0,
+            "series": "[23.5, 23.5]",
+            "n_price_moves": 0,
+            "fair_move": 0.0,
+            "fair_series": "[23.5, 23.5]",
         }
     )
-    movement = pd.DataFrame(
-        {
-            "League": ["NBA"],
-            "Platform": ["Underdog"],
-            "Market": ["PTS"],
-            "Player": ["A"],
-            "Date": ["2026-07-04"],
-            "move": [0.0],
-            "n_moves": [0],
-            "series": ["[23.5, 23.5]"],
-        }
-    )
-    out = add_line_movement(offers, movement)
-    assert "Line held at 23.5" in out.loc[0, MOVE_SPARK]
+    out = add_line_movement(pd.DataFrame([{**_KEY, "Bet": "Over"}]), movement)
+    assert "<line" in out.loc[0, MOVE_SPARK] and "polyline" not in out.loc[0, MOVE_SPARK]
+    assert out.loc[0, MOVE_SUMMARY] == "Held at 23.5"
     assert out.loc[0, MOVE_TEXT] == ""
 
 
-def test_add_line_movement_carries_n_moves_through_to_a_round_trip_trace() -> None:
-    """A line that wandered and came back nets to zero, so the delta alone would call it
-    held and hide every move. ``n_moves`` has to reach ``movement_svg`` through the join —
-    this pins the wiring, not just the drawing.
+def test_add_line_movement_price_only_move_draws_a_trace_but_no_phone_text() -> None:
+    """A UD NFL TD prop: the multiplier moved, the line never did. ``n_price_moves`` has to
+    reach ``movement_svg`` through the join or the cell falls back to the held rule — and
+    the phone text stays blank, since it names the posted line only.
     """
-    offers = pd.DataFrame(
+    movement = _snapshot(
         {
-            "League": ["NBA"],
-            "Platform": ["Underdog"],
-            "Market": ["PTS"],
-            "Player": ["A"],
-            "Date": ["2026-07-04"],
-            "Bet": ["Over"],
+            "move": 0.0,
+            "n_moves": 0,
+            "series": "[0.5, 0.5, 0.5]",
+            "n_price_moves": 3,
+            "fair_move": 0.16,
+            "fair_series": "[0.5, 0.58, 0.66]",
         }
     )
-    movement = pd.DataFrame(
+    out = add_line_movement(pd.DataFrame([{**_KEY, "Bet": "Over"}]), movement)
+    assert out.loc[0, MOVE] == pytest.approx(0.16)
+    assert "polyline" in out.loc[0, MOVE_SPARK]
+    assert out.loc[0, MOVE_SUMMARY] == "Fair 0.5 → 0.66 (+0.16) · line held at 0.5"
+    assert out.loc[0, MOVE_TEXT] == ""
+
+
+def test_add_line_movement_carries_n_moves_through_to_a_trace() -> None:
+    """A line that moved and came back between two resample ticks leaves both series flat,
+    so only ``n_moves`` tells it from a held line — it has to reach ``movement_svg`` through
+    the join. This pins the wiring, not just the drawing.
+    """
+    movement = _snapshot(
         {
-            "League": ["NBA"],
-            "Platform": ["Underdog"],
-            "Market": ["PTS"],
-            "Player": ["A"],
-            "Date": ["2026-07-04"],
-            "move": [0.0],
-            "n_moves": [4],
-            "series": ["[23.5, 24.5, 24.5, 23.5]"],
+            "move": 0.0,
+            "n_moves": 4,
+            "series": "[23.5, 23.5]",
+            "n_price_moves": 0,
+            "fair_move": 0.0,
+            "fair_series": "[23.5, 23.5]",
         }
     )
-    spark = add_line_movement(offers, movement).loc[0, MOVE_SPARK]
-    assert "polyline" in spark and "held" not in spark
+    out = add_line_movement(pd.DataFrame([{**_KEY, "Bet": "Over"}]), movement)
+    assert "polyline" in out.loc[0, MOVE_SPARK]
+    assert out.loc[0, MOVE_SUMMARY] == "Fair back at 23.5 · line back at 23.5"
+
+
+def test_add_line_movement_phone_arrow_follows_the_posted_line_not_the_fair_line() -> None:
+    """The fair line folds in the multiplier, so it can run against the posted line — a line
+    raised a point while the Over's price swung harder the other way. The phone text names
+    the posted line, so its arrow is the posted line's own, whatever ``Move`` says.
+    """
+    offers = pd.DataFrame([{**_KEY, "Bet": "Over"}, {**_KEY, "Player": "B", "Bet": "Over"}])
+    movement = _snapshot(
+        {
+            "move": 1.0,
+            "n_moves": 1,
+            "series": "[21.5, 22.5]",
+            "n_price_moves": 0,
+            "fair_move": -0.3,
+            "fair_series": "[22.4, 22.1]",
+        },
+        {
+            "Player": "B",
+            "move": -1.0,
+            "n_moves": 1,
+            "series": "[22.5, 21.5]",
+            "n_price_moves": 0,
+            "fair_move": 0.3,
+            "fair_series": "[22.1, 22.4]",
+        },
+    )
+    out = add_line_movement(offers, movement)
+    assert out[MOVE].tolist() == pytest.approx([-0.3, 0.3])
+    assert out[MOVE_TEXT].tolist() == ["Line `21.5 → 22.5` ▲", "Line `22.5 → 21.5` ▼"]
+
+
+def test_add_line_movement_old_schema_snapshot_leaves_every_cell_blank() -> None:
+    """A snapshot written before the fair-line columns — on disk until the next prophecize,
+    and after a ``sync_from_prod`` — reads back with them blank. Its posted-only numbers
+    must not stand in: they would draw every price move as held.
+    """
+    old = _snapshot({"move": 2.5, "n_moves": 2, "series": "[21.0, 22.0, 23.5]"})
+    out = add_line_movement(pd.DataFrame([{**_KEY, "Bet": "Over"}]), old)
+    assert pd.isna(out.loc[0, MOVE])
+    assert out.loc[0, _MOVE_CELLS].tolist() == ["", "", ""]
 
 
 def test_add_line_movement_with_no_export_leaves_every_cell_empty() -> None:
     """The export lands later than this column; an absent file reaches the loader as a
     column-stable empty frame and the Board must render with every Move cell blank.
     """
-    offers = pd.DataFrame(
-        {
-            "League": ["NBA"],
-            "Platform": ["Underdog"],
-            "Market": ["PTS"],
-            "Player": ["A"],
-            "Date": ["2026-07-04"],
-            "Bet": ["Over"],
-        }
-    )
-    # The real schema, not a hand-copy of it — a local list drifts the moment a column
-    # is added, which is exactly how this fixture went stale once already.
-    empty = pd.DataFrame(columns=LINE_MOVEMENT_COLS)
-    out = add_line_movement(offers, empty)
+    out = add_line_movement(pd.DataFrame([{**_KEY, "Bet": "Over"}]), _snapshot())
     assert pd.isna(out.loc[0, MOVE])
-    assert out.loc[0, MOVE_SPARK] == "" and out.loc[0, MOVE_TEXT] == ""
+    assert out.loc[0, _MOVE_CELLS].tolist() == ["", "", ""]
+
+
+def test_line_movement_loader_reindexes_an_old_snapshot_onto_the_current_schema(tmp_path) -> None:
+    """The dashboard reads whatever snapshot is on disk, and the smoke goldens read the real
+    one: an old-schema file loads with the fair-line columns present and blank and its own
+    columns intact, and an absent file loads column-stable and empty.
+    """
+    path = tmp_path / "current_line_movement.parquet"
+    old_row = {**_KEY, "move": 2.5, "n_moves": 2, "series": "[21.0, 22.0, 23.5]"}
+    pd.DataFrame([old_row]).to_parquet(path)
+    loaded = _load_current_line_movement_cached(path, path.stat().st_mtime)
+    assert loaded.columns.tolist() == LINE_MOVEMENT_COLS
+    assert loaded.loc[0, "move"] == 2.5
+    assert loaded[["n_price_moves", "fair_move", "fair_series", "changes"]].isna().all().all()
+    absent = _load_current_line_movement_cached(tmp_path / "absent.parquet", 0.0)
+    assert absent.empty and absent.columns.tolist() == LINE_MOVEMENT_COLS
 
 
 def test_arrow_col_noop_without_bet_column() -> None:

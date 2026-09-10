@@ -44,14 +44,11 @@ def _render_card(idx, row: pd.Series) -> None:
     win = float(row.get("Win Prob") or 0.0)
     edge = float(row.get("Model Edge") or 0.0)
     market = row.get("Market Display") or row.get("Market", "")
-    # A 78px sparkline is unreadable at 390px, so the phone reads the same movement as text
-    # — and reads nothing at all when the book never moved this line, which on a same-day
-    # board is most of it.
-    move_text = row.get(columns.MOVE_TEXT) or ""
-    moved = ""
-    if move_text:
-        move_arrow = "▲" if row[columns.MOVE] > 0 else "▼"
-        moved = f"  \nLine `{move_text}` {move_arrow}"
+    # A 78px sparkline is unreadable at 390px, so the phone reads the posted line's move as
+    # text instead — and reads nothing when that line held, which on a same-day board is
+    # most of it.
+    move_text = row.get(columns.MOVE_TEXT)
+    moved = f"  \n{move_text}" if move_text else ""
     with st.container(border=True):
         st.markdown(
             f"**{row['Player']}** · {market} {arrow} `{row['Line']:.10g}`  \n"

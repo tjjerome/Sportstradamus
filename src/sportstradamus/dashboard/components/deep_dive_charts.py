@@ -25,6 +25,20 @@ DIST_PARAM_COLS = {
 }
 
 
+def app_line_rule(line: float, channel: str) -> alt.Chart:
+    """The offer's own line as the dialog's white dashed rule, on ``channel`` (``"x"``/``"y"``).
+
+    One definition so every deep-dive chart marks the line the user would bet the same way:
+    the History bars and the Movement steps run it across (``"y"``), the Model curve up it
+    (``"x"``).
+    """
+    return (
+        alt.Chart(pd.DataFrame({"Line": [line]}))
+        .mark_rule(strokeDash=[6, 3], color="#FFFFFF", strokeWidth=1.5)
+        .encode(**{channel: "Line:Q"})
+    )
+
+
 def history_chart(df: pd.DataFrame, line: float) -> alt.Chart:
     """Bar chart of recent games with a dashed betting-line rule and gold line tag.
 
@@ -50,11 +64,6 @@ def history_chart(df: pd.DataFrame, line: float) -> alt.Chart:
             tooltip=["Label:N", "StatValue:Q"],
         )
     )
-    rule = (
-        alt.Chart(pd.DataFrame({"Line": [line]}))
-        .mark_rule(strokeDash=[6, 3], color="#FFFFFF", strokeWidth=1.5)
-        .encode(y="Line:Q")
-    )
     # Gold "line {x}" callout anchored to the leftmost bar at the line's height.
     tag_df = pd.DataFrame(
         {"Label": [df["Label"].iloc[0]], "Line": [line], "tag": [f"line {line:.10g}"]}
@@ -64,7 +73,7 @@ def history_chart(df: pd.DataFrame, line: float) -> alt.Chart:
         .mark_text(align="left", baseline="bottom", dx=-14, dy=-3, color=GOLD, fontWeight="bold")
         .encode(x=alt.X("Label:N", sort=None), y="Line:Q", text="tag:N")
     )
-    return bars + rule + tag
+    return bars + app_line_rule(line, "y") + tag
 
 
 def _recal_density(xs: np.ndarray, cdf: np.ndarray, recal_blob: dict) -> np.ndarray:
@@ -156,21 +165,6 @@ def distribution_frame(
     return df_pdf, y_title, is_continuous
 
 
-def resolve_std(projection_std, ev: float, cv: float) -> float:
-    """A positive, finite spread for the distribution x-range.
-
-    Prefers the model's ``Projection STD``; book-fallback offers carry none, so it
-    falls back to the CV-implied ``ev * cv`` (``cv`` is always present), then ``ev * 0.3``.
-    The NaN guard matters: ``NaN or default`` keeps the NaN (NaN is truthy), which blanks
-    the x-range and renders the curve invisible.
-    """
-    if pd.notna(projection_std) and projection_std > 0:
-        return float(projection_std)
-    if pd.notna(cv) and cv > 0:
-        return float(ev) * float(cv)
-    return float(ev) * 0.3
-
-
 def _projection_overlay(df_pdf: pd.DataFrame, projection: float) -> tuple[alt.Chart, alt.Chart]:
     """A dot at the model mean (sitting on its own density) plus a numeric label.
 
@@ -234,12 +228,7 @@ def distribution_chart(
                 tooltip=["x:Q", "P:Q", "Side:N"],
             )
         )
-    betting_line = (
-        alt.Chart(pd.DataFrame({"Line": [line]}))
-        .mark_rule(strokeDash=[6, 3], color="#FFFFFF", strokeWidth=1.5)
-        .encode(x="Line:Q")
-    )
-    chart = chart + betting_line
+    chart = chart + app_line_rule(line, "x")
     # Consensus market line: solid GRAY rule, distinct from the white dashed app line,
     # and carrying no color encoding so it never re-splits the over/under shading.
     if consensus_line is not None and not pd.isna(consensus_line):

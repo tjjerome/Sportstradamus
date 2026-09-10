@@ -19,7 +19,7 @@ in this repo or on the production box:
 
 To change behavior, edit those files and reload the dashboard — there is nothing to compile.
 `__init__.py` declares the component against `build/` and exposes
-`render_constellation(fig, *, key, sparks, mobile=False)`.
+`render_constellation(fig, *, key, sparks, moves, mobile=False)`.
 
 ## Contract
 
@@ -28,10 +28,12 @@ To change behavior, edit those files and reload the dashboard — there is nothi
   `[endpoint_a, endpoint_b]`. Edges come under two names — `edge` for the permanent web
   and `deep_edge` for a tie the "look deeper" lens brings in — and both hover-preview;
   only `deep_edge` fades in and out with the lens.
-- `sparks` maps a node's key to its hover card's last-five markup, already drawn as SVG on the
-  Python side. It travels beside the figure rather than inside `customdata` because three traces
-  carry customdata (main, deep, wider), so a field there would ship the same markup three times
-  and renumber every positional reader of the card fields. A key with no entry keeps the scar.
+- `sparks` and `moves` map a node's key to its hover card's last-five and line-movement
+  markup, already drawn as SVG on the Python side. They travel beside the figure rather than
+  inside `customdata` because three traces carry customdata (main, deep, wider), so a field
+  there would ship the same markup three times and renumber every positional reader of the
+  card fields. A key with no `sparks` entry keeps the scar; one with no `moves` entry draws no
+  movement row.
 - `mobile` switches the frontend to its touch flow: a docked tap card, no hover, and a taller
   frame so the card clears the map.
 - The component returns `{action, key, nonce}` — `action` is `"click"` (toggle the leg) or

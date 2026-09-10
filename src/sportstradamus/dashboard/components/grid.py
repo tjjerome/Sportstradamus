@@ -37,11 +37,13 @@ _SIGNED_PERCENT_FORMATTER = JsCode(
 _FIXED3_FORMATTER = JsCode(
     "function(params){return (params.value==null||isNaN(params.value))?'':params.value.toFixed(3);}"
 )
-# Signed delta with no unit suffix — the Board's Move column is a line delta (+4.0 points,
-# -0.5 receptions), not a percentage, so the "%" the signed-percent formatter appends is wrong.
+# Signed delta with no unit suffix — the Board's Move column is a fair-line delta in the
+# stat's own units (+4.00 points, -0.16 TDs), not a percentage, so the "%" the signed-percent
+# formatter appends is wrong. Two decimals because a price-only move on a TD prop shifts the
+# fair line by hundredths, which one decimal would print as "+0.0".
 _SIGNED_FORMATTER = JsCode(
     "function(params){if(params.value==null||isNaN(params.value))return '';"
-    "return (params.value>0?'+':'')+params.value.toFixed(1);}"
+    "return (params.value>0?'+':'')+params.value.toFixed(2);}"
 )
 
 # The sparkline cell holds a fixed 78px SVG box (spark_svg's geometry) plus the signed delta.

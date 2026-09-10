@@ -60,10 +60,13 @@
   let activeKey = null; // key whose card is showing
   let MOBILE = false; // set per render from Python's mobile prop (viewport.is_mobile)
   let SPARKS = {}; // star key -> its card's last-five markup, built server-side
+  let MOVES = {}; // star key -> its card's line-movement markup, built server-side
   let skyTap = true; // a plotly star tap clears this before the DOM click handler sees it
   const COARSE_POINTER =
     window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
-  const MOBILE_CARD_PAD = 150; // extra frame height so the docked card clears the map
+  // Extra frame height so the docked card clears the map. It tracks the card's height —
+  // last-five and movement rows included — so a row the card gains has to grow it too.
+  const MOBILE_CARD_PAD = 200;
   let prevLensNames = null; // {name: true} lens traces shown last render — a new one marks a reveal
   let renderSeq = 0; // bumped each render so an in-flight lens fade from a stale render bails out
 
@@ -73,6 +76,7 @@
     const fig = JSON.parse(args.figure_json);
     MOBILE = !!args.mobile || COARSE_POINTER;
     SPARKS = args.sparks || {};
+    MOVES = args.moves || {};
     const config = { displayModeBar: false, scrollZoom: false, responsive: true };
     const curLensNames = lensNamesOf(fig.data);
     const freshLens = plotted && prevLensNames ? newLensTraces(fig.data, prevLensNames) : [];
@@ -326,6 +330,13 @@
       : '<div class="cst-scar">No last 5 for this leg</div>';
   }
 
+  // The offer's line-movement row, drawn by Python the same way. Unlike the last five it
+  // has no scar: an offer the ladder never saw has no movement to be missing.
+  function moveHtml(key) {
+    const move = MOVES[key];
+    return move ? '<div class="cst-spark">' + move + "</div>" : "";
+  }
+
   function cardHtml(cd) {
     const player = cd[1];
     const market = cd[2];
@@ -352,6 +363,7 @@
       pct(kelly),
       "</span></div>",
       sparkHtml(cd[0]),
+      moveHtml(cd[0]),
       '<div class="cst-actions">',
       MOBILE
         ? '<button class="cst-btn cst-toggle" type="button">' +
