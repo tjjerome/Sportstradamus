@@ -5,6 +5,8 @@ import json
 import os.path
 import pickle
 from datetime import date, datetime, timedelta
+from http import HTTPStatus
+from urllib.error import HTTPError
 
 import nfl_data_py as nfl
 import nflreadpy as nflr
@@ -158,6 +160,27 @@ _TARGET_CAP: int = 20  # absolute single-player target ceiling per game
 # (~6 seasons). Keeping more than 6 seasons of NFL data inflates storage and
 # includes pre-analytics-era play-by-play that is noisier than modern data.
 _GAMELOG_RETENTION_DAYS: int = 2191  # 6 * 365 + 1 leap day
+
+# nflverse creates a season's FTN charting and weekly PFR files only once its first
+# games are charted, so for a while after the opener a 404 on them means "not yet".
+# Two weeks clears FTN's 48 h charting lag with room for PFR; a 404 past that means
+# the release moved, and the backfill fails loud.
+_NFLVERSE_PUBLISH_GRACE_DAYS: int = 14
+
+# Weekly PFR columns the pbp stats read; the empty stand-in carries them until the
+# season's PFR files exist.
+_PFR_WEEKLY_COLUMNS: list[str] = [
+    "pfr_player_name",
+    "team",
+    "opponent",
+    "week",
+    "times_pressured",
+    "rushing_broken_tackles",
+    "receiving_broken_tackles",
+    "rushing_yards_after_contact_avg",
+    "receiving_drop_pct",
+    "passing_drop_pct",
+]
 
 # KNN comp-pool filtering thresholds. The percentile gate removes very
 # low-usage players who would pollute the nearest-neighbor set with
@@ -968,8 +991,13 @@ class StatsNFL(Stats):
             self.pbp = self.pbp.loc[
                 self.pbp["play_type"].isin(["run", "pass"]) | (self.pbp["desc"] == "END GAME")
             ]
+            ftn = None
             if self.season_start.year > 2021:
-                ftn = nfl.import_ftn_data([self.season_start.year])
+                try:
+                    ftn = nfl.import_ftn_data([self.season_start.year])
+                except HTTPError as exc:
+                    self._raise_unless_unpublished(exc)
+            if ftn is not None:
                 ftn["game_id"] = ftn["nflverse_game_id"]
                 ftn["play_id"] = ftn["nflverse_play_id"]
                 ftn.drop(columns=["week", "season", "nflverse_game_id"], inplace=True)
@@ -1004,15 +1032,35 @@ class StatsNFL(Stats):
                 nfl.import_ngs_data("rushing", [self.season_start.year]), how="outer"
             )
             self.ngs["player_display_name"] = self.ngs["player_display_name"].apply(remove_accents)
-            self.pfr = nfl.import_weekly_pfr("pass", [self.season_start.year])
-            self.pfr = self.pfr.merge(
-                nfl.import_weekly_pfr("rush", [self.season_start.year]), how="outer"
-            )
-            self.pfr = self.pfr.merge(
-                nfl.import_weekly_pfr("rec", [self.season_start.year]), how="outer"
-            )
+            try:
+                self.pfr = nfl.import_weekly_pfr("pass", [self.season_start.year])
+                self.pfr = self.pfr.merge(
+                    nfl.import_weekly_pfr("rush", [self.season_start.year]), how="outer"
+                )
+                self.pfr = self.pfr.merge(
+                    nfl.import_weekly_pfr("rec", [self.season_start.year]), how="outer"
+                )
+            except HTTPError as exc:
+                self._raise_unless_unpublished(exc)
+                # float dtype: an empty object column sums to int 0, which raises on 0/0
+                # where the real frame's numpy scalars give NaN.
+                self.pfr = pd.DataFrame(columns=_PFR_WEEKLY_COLUMNS, dtype=float)
             self.pfr["pfr_player_name"] = self.pfr["pfr_player_name"].apply(remove_accents)
             self.need_pbp = False
+
+    def _raise_unless_unpublished(self, exc: HTTPError) -> None:
+        """Re-raise ``exc`` unless it is a season file nflverse has not published yet.
+
+        nflverse creates a season's FTN charting and weekly PFR files only after its
+        first games are charted, while pbp, player stats and snaps already carry them.
+        Past the grace window a 404 means the release moved, so it fails loud.
+        """
+        season_age = datetime.today().date() - self.season_start
+        if exc.code != HTTPStatus.NOT_FOUND or season_age > timedelta(
+            days=_NFLVERSE_PUBLISH_GRACE_DAYS
+        ):
+            raise exc
+        logger.warning("nflverse file not published yet, backfilling without it: %s", exc.url)
 
     def _ratio(self, num, den):
         return num / den if den > 0 else np.nan
