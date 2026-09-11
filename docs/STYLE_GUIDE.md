@@ -492,7 +492,7 @@ A paragraph each for the terms that appear everywhere. Skim this before
 grepping the codebase for meaning.
 
 - **Offer.** A single row from a sportsbook: player, market, line, odds.
-  Produced by `books.py` scrapers and `moneylines.get_props`.
+  Produced by the `books/` scrapers and `moneylines.get_props`.
 - **Market.** A betting category for a player's performance in one game
   (e.g. "NBA: points", "NFL: receiving yards"). Each trained model corresponds
   to one market.

@@ -95,7 +95,7 @@ def test_build_candidate_universe_combines_both_platforms(monkeypatch) -> None:
     def _fake_live_load(config, platform):
         return {}, pd.DataFrame()
 
-    def _fake_construct_entries(date, bankroll, config, *, parlay_dfs, offers_df, platform):
+    def _fake_construct_entries(date, bankroll, config, *, parlay_dfs, platform):
         prefix = "ud" if platform == "Underdog" else "sl"
         return [_recommended_entry(f"{prefix}-same-1", f"{prefix.upper()} Same Player", platform)]
 

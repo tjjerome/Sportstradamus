@@ -191,7 +191,7 @@ def _stamp_alt_line(offers: pd.DataFrame) -> pd.DataFrame:
 @click.option("--progress/--no-progress", default=True, help="Display progress bars")
 @click.option(
     "--contest-variant",
-    type=click.Choice(["pooled", "power", "flex", "insurance", "rivals"]),
+    type=click.Choice(["pooled", "power", "flex", "insurance"]),
     default="pooled",
     help=(
         "Underdog payout pool for parlay scoring. Default 'pooled' "
@@ -288,7 +288,7 @@ def main(progress, contest_variant, log_level):
         sl_offers["Stat"] = sl_offers[
             "Market"
         ]  # preserve gamelog key for dashboard history lookups
-        # Sleeper Boost stays at the raw books.py value (model_prob only
+        # Sleeper Boost stays at the raw books/sleeper.py value (model_prob only
         # applies UNDERDOG_BOOST_BASELINE to platform == "Underdog"), so no
         # division is needed here for display/storage to match the raw
         # Sleeper promo multiplier.
@@ -427,9 +427,7 @@ def _write_pickem_snapshot(scored_by_platform: dict[str, pd.DataFrame | None], s
     """
     from sportstradamus.strategies._pickem_emit import entries_to_frame
     from sportstradamus.strategies.underdog_pickem import (
-        PLATFORM_CONTEST_VARIANTS,
         REFERENCE_BANKROLL,
-        PickemConfig,
         build_entries_from_scored,
     )
 
@@ -438,14 +436,12 @@ def _write_pickem_snapshot(scored_by_platform: dict[str, pd.DataFrame | None], s
         if scored is None or scored.empty:
             continue
         try:
-            config = PickemConfig(contest_variants=PLATFORM_CONTEST_VARIANTS[platform])
             all_entries.extend(
                 build_entries_from_scored(
                     datetime.date.today(),
                     REFERENCE_BANKROLL,
                     scored,
                     stats,
-                    config,
                     platform=platform,
                 )
             )

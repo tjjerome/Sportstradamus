@@ -1,4 +1,4 @@
-"""Characterization of ``books.get_sleeper`` — the Sleeper payload parser.
+"""Characterization of ``books.sleeper.get_sleeper`` — the Sleeper payload parser.
 
 ``get_sleeper`` is network-bound and stubbed (``-> dict``) in the integration
 suite, so it has no behavioral coverage. This pins its output on a hand-built
@@ -15,7 +15,7 @@ from http import HTTPStatus
 
 import pytest
 
-from sportstradamus import books
+from sportstradamus.books import sleeper
 
 _PLAYERS_NBA = {
     "p1": {"first_name": "LeBron", "last_name": "James", "team": "LAL"},
@@ -75,10 +75,10 @@ _ALT = [
 ]
 
 _ROUTES = {
-    books.SLEEPER_AVAILABLE_URL: _AVAILABLE,
-    books.SLEEPER_ALT_URL: _ALT,
-    books.SLEEPER_GAMES_URL: _GAMES,
-    books.SLEEPER_PLAYERS_URL.format(league="NBA"): _PLAYERS_NBA,
+    sleeper.SLEEPER_AVAILABLE_URL: _AVAILABLE,
+    sleeper.SLEEPER_ALT_URL: _ALT,
+    sleeper.SLEEPER_GAMES_URL: _GAMES,
+    sleeper.SLEEPER_PLAYERS_URL.format(league="NBA"): _PLAYERS_NBA,
 }
 
 
@@ -143,6 +143,6 @@ _EXPECTED = {
 
 
 def test_get_sleeper_parses_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(books, "requests", _FakeRequests)
+    monkeypatch.setattr(sleeper, "requests", _FakeRequests)
 
-    assert books.get_sleeper() == _EXPECTED
+    assert sleeper.get_sleeper() == _EXPECTED

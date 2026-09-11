@@ -201,7 +201,7 @@ def _leg_opp_boost(game_df, platform):
     """Opposite-side payout multiplier per leg — Sleeper Flex devig input only.
 
     ``Boost_Over``/``Boost_Under`` mean different things per platform: for
-    Sleeper they are raw decimal odds (books.py::get_sleeper); for Underdog
+    Sleeper they are raw decimal odds (books/sleeper.py::get_sleeper); for Underdog
     they are baseline-scaled promo components (model_prob.py's
     UNDERDOG_BOOST_BASELINE multiply). Gate on platform explicitly rather
     than column presence alone, or Underdog's values would silently feed
@@ -706,7 +706,7 @@ def find_correlation(
     stats,
     platform,
     *,
-    contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"] = "pooled",
+    contest_variant: Literal["pooled", "power", "flex", "insurance"] = "pooled",
     corr_sink: list | None = None,
     story_sink: list | None = None,
 ):

@@ -96,7 +96,7 @@ sportstradamus
 ├── dashboard             launch the Streamlit dashboard
 ├── bet
 │   ├── kelly             re-size a recommendations YAML offline
-│   ├── pickem            build Underdog Power/Flex/Rivals entries -> YAML
+│   ├── pickem            build Underdog/Sleeper Power/Flex entries -> YAML
 │   └── ledger-commit     twice-daily simulated-bettor ledger commit
 ├── fetch
 │   ├── fp ...            Fantasy Points snapshots (NFL)

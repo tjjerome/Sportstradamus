@@ -25,6 +25,13 @@ MIN_TREND_ROWS = 3
 # How far ahead to fetch MLB schedules when building the probable-pitcher dict.
 MLB_PITCHER_LOOKAHEAD_DAYS = 7
 
+# Team abbreviation corrections applied by both DFS scrapers. PDX→POR makes
+# Portland's WNBA team match the NBA code (Sleeper uses the airport code PDX). Kept
+# for Sleeper's wire format only — abbreviations.json now emits POR, so nothing
+# writes PDX into the archive; it used to, and every archived Portland total read
+# back as the league default.
+ABBR_MAP = {"WSH": "WAS", "GS": "GSW", "PHO": "PHX", "NOP": "NO", "AZ": "ARI", "PDX": "POR"}
+
 
 def remove_accents(input_str):
     """Normalize a player name to the project's canonical spelling.

@@ -38,7 +38,11 @@ grep -rn "roadmap_v2" docs/*.md .claude/ 2>/dev/null | grep -v archive  # drift
 ### Volatile product assumptions
 
 - `data/config/underdog_payouts.json` multipliers vs the live Underdog
-  product — the recurring per-season check this lane owns (stage 3).
+  product — the recurring per-season check this lane owns (stage 3). The live
+  numbers come from `GET /v3/entry_slips/estimate` with a token
+  ([underdog_api.md §6.8](../underdog_api.md#68-entry-slip-pricing)); on
+  2026-09-10 the quotes disagreed with the file on most cells (2-pick Power 3.5
+  vs 3.0, 3-pick Flex 3.25/1.09 vs 2.25/1.25).
 
 ## 4. Locked decisions
 

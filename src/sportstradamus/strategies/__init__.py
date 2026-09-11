@@ -1,7 +1,7 @@
 """Bet-sizing and contest-construction strategies.
 
-Phase 3 §3.1 introduces fractional-Kelly sizing here; §3.3 + §3.5 Rivals add
-the :mod:`underdog_pickem` orchestrator that drives ``pickem-build``.
+Phase 3 §3.1 introduces fractional-Kelly sizing here; §3.3 adds the
+:mod:`underdog_pickem` orchestrator that drives ``pickem-build``.
 """
 
 from sportstradamus.strategies.kelly import (

@@ -193,15 +193,14 @@ capital path (§ Ensemble sizing); replicates 1–39 are notional, for
 variance measurement only.
 
 **Candidate universe (shared).** Power (2–3 legs) + Flex (4+ legs) only —
-Rivals excluded (unpriced leg type, not a contest — `dfs-products.md` Stage
-1 still owes it a `P(A−B>k)` difference-pricer); Ladders and Game Lines out
-of scope (unimplemented — `dfs-products.md` Stages 3/4). **Scar:** when
+Rivals retired (Underdog dropped the product 2026-09-10); Ladders and Game
+Lines out of scope (unimplemented — `dfs-products.md` Stages 3/4). **Scar:** when
 either ships, policy_v2 decides whether to admit it. `PickemConfig
 .entry_sizes = (2, 3, 4, 5, 6)` (widened from the live dashboard's `(3, 5)`
 default), `contest_variants = ("power", "flex")`, `min_ev = 0.05` (upstream
 default, unchanged), `top_k = 100` (raised from the live default of 20 so
 the size/variant partition — keep `power` + size∈{2,3}, keep `flex` +
-size≥4, drop everything else, including any rivals-tagged candidate — never
+size≥4, drop everything else — never
 truncates a valid candidate before it's evaluated; `underdog_payouts.json`
 currently defines a flex-3 tier this partition treats as not applicable to
 selection, flagged not fixed).

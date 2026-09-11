@@ -8,12 +8,11 @@ prediction pipeline — no league-specific math lives here.
 | Module | Purpose |
 |---|---|
 | `kelly` | Fractional-Kelly stake sizing with CLV/training shrinkage blend. CLI `poetry run kelly`. |
-| `underdog_pickem` | Pick'em (Power/Flex/Rivals) entry construction for Underdog and Sleeper. `prophecize` snapshots ranked entries to `current_pickem.parquet` for the dashboard's **Predictions — Pickem** page; CLI `poetry run pickem-build --platform {Underdog,Sleeper}` emits a YAML for offline use. |
+| `underdog_pickem` | Pick'em (Power/Flex) entry construction for Underdog and Sleeper. `prophecize` snapshots ranked entries to `current_pickem.parquet` for the dashboard's **Predictions — Pickem** page; CLI `poetry run pickem-build --platform {Underdog,Sleeper}` emits a YAML for offline use. |
 
 ## Pick'em entries (`underdog_pickem`)
 
-`construct_entries` ranks and Kelly-sizes Pick'em contest entries
-(Power/Flex/Rivals — Rivals is Underdog-only, see `PLATFORM_CONTEST_VARIANTS`).
+`construct_entries` ranks and Kelly-sizes Pick'em contest entries (Power/Flex).
 Two front doors, both `platform`-parameterized (`"Underdog"` or `"Sleeper"`):
 
 - **Dashboard (primary).** The hourly `prophecize` run calls

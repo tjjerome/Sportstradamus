@@ -145,8 +145,9 @@ outside this footprint is a stop condition (§8).
   copula default; **t-copula only as a tested branch** (adopt iff pooled exceedance-Spearman clears
   a simulated Gaussian null in both tails AND pooled pseudo-MLE with one ν per league gives ΔAIC≥10,
   ν̂≤15 — never per-pair ν). EB shrinkage is **two-level hierarchical in Fisher-z** (team → pair-type
-  mean → 0), not the incumbent's shrink-thin-pairs-toward-zero. Rivals-first is a YES (2-dim,
-  incumbent ρ suffices at d=2 — the cheap early product win, model_improvement_track.md §6.11).
+  mean → 0), not the incumbent's shrink-thin-pairs-toward-zero. Rivals-first was a YES (2-dim,
+  incumbent ρ suffices at d=2) but the product is retired (Underdog dropped Rivals 2026-09-10,
+  model_improvement_track.md §6.11).
   Full stage-acceptance gates and the PIT-source recipe are in the brief and mirrored in §6.11.
 - **Remaining Stage-0 work: the census script** `census_parlay_pairs.py` (read-only Sonnet task
   over the `{LEAGUE}_corr.parquet` caches). **Kill rule: a league is viable iff ≥15 fit-eligible

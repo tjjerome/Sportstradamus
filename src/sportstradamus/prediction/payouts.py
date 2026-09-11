@@ -41,10 +41,9 @@ def _pooled_underdog_curve() -> dict[int, list[float]]:
 
     Underdog entries are not separate interchangeable contests: a 2- or
     3-leg slip pays out on the all-or-nothing ``power`` schedule, while a
-    4+-leg slip pays out on the partial-hit ``flex`` schedule. ``rivals``
-    legs carry no special schedule — they sit in the same pool as any
-    other leg. The legacy ``insurance`` table is an old alias of ``flex``
-    and is intentionally not consulted here.
+    4+-leg slip pays out on the partial-hit ``flex`` schedule. The legacy
+    ``insurance`` table is an old alias of ``flex`` and is intentionally not
+    consulted here.
     """
     power = underdog_payouts["power"]
     flex = underdog_payouts["flex"]
@@ -61,7 +60,7 @@ def _pooled_underdog_curve() -> dict[int, list[float]]:
 
 
 def _sleeper_curve(
-    contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"],
+    contest_variant: Literal["pooled", "power", "flex", "insurance"],
 ) -> dict[int, list[float]]:
     """Sleeper payout curve keyed by bet size.
 
@@ -115,7 +114,7 @@ def _sleeper_curve(
 
 def payout_curve_for(
     platform: str,
-    contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"],
+    contest_variant: Literal["pooled", "power", "flex", "insurance"],
 ) -> tuple[list[float], dict[int, list[float]]]:
     """Build the (per-size search list, per-(size,misses) payout table) for a platform.
 
@@ -142,7 +141,7 @@ def payout_curve_for(
     }
     if platform != "Underdog":
         lst = legacy_tables[platform]
-        full = {i + 2: [lst[i], 0.0] for i in range(len(lst))}
+        full = {i + 2: [mult, 0.0] for i, mult in enumerate(lst)}
         return lst, full
 
     if contest_variant == "pooled":

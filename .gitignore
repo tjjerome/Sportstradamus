@@ -228,3 +228,6 @@ src/sportstradamus/data/runtime/*
 
 # Timestamped stat_meta backups a confirm/supersede walk writes before each persist
 src/sportstradamus/data/config/stat_meta.*.bak.json
+
+# Underdog web-session HAR captures (docs/underdog_api.md source): hold live tokens + PII
+new_ud_api/

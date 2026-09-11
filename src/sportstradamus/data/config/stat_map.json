@@ -133,6 +133,7 @@
         "Rush + Rec TDs": "tds",
         "Receptions": "receptions",
         "Interceptions": "interceptions",
+        "INTs Thrown": "interceptions",
         "Passing Attempts": "attempts",
         "Pass Attempts": "attempts",
         "Completions": "completions",

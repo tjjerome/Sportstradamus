@@ -5,7 +5,7 @@ Usage: sportstradamus prophecize [OPTIONS]
 
 Options:
   --progress / --no-progress      Display progress bars
-  --contest-variant [pooled|power|flex|insurance|rivals]
+  --contest-variant [pooled|power|flex|insurance]
                                   Underdog payout pool for parlay scoring.
                                   Default 'pooled' combines power (2-3 legs) and
                                   flex (4+ legs) into one pool; single-variant
