@@ -1579,14 +1579,6 @@
             "{p} works the middle while {g} trades scoring drives",
             "Two-minute pace in {g} funnels the completions toward {p}"
           ],
-          "stops": [
-            "The {g} pace runs plays at the defense, and {p} collects tackles",
-            "A loud {g} number means snaps, and snaps find {p}",
-            "A pass-first {g} script keeps {p} rushing the passer",
-            "Every {g} drive ends somewhere, and {p} is there for it",
-            "{p} works a {g} script that never leaves the field",
-            "The {g} tempo stacks snaps, and the tackle sheet fills for {p}"
-          ],
           "production": [
             "The {g} total is loud, and {p} sits at the center of it",
             "A shootout script in {g} keeps {p} on the field",
@@ -1632,14 +1624,6 @@
             "Short fields and short throws in {g} keep {p} busy",
             "{p} is the safe read every time {g} bogs down",
             "The {g} grind takes the deep shots away and leaves {p}"
-          ],
-          "stops": [
-            "A low {g} number means the front is winning, and {p} leads it",
-            "A run-heavy {g} script sends carries straight at {p}",
-            "The {g} trenches decide it, and {p} works down there",
-            "Heavy boxes in {g} mean tackle after tackle for {p}",
-            "{p} works the interior while {g} stays on the ground",
-            "Every {g} drive stalls somewhere, and {p} is usually the reason"
           ],
           "production": [
             "The {g} number is low, and {p} is the one engine running",
@@ -1687,14 +1671,6 @@
             "{p} collects the easy targets a settled {g} script hands out",
             "The {g} deficit forces throws, and most of them go to {p}"
           ],
-          "stops": [
-            "The {g} spread is wide, and a one-way script feeds {p}",
-            "A trailing {g} offense gets predictable, and {p} rushes freely",
-            "The {g} margin creates obvious passing downs, and {p} works them",
-            "Garbage time in {g} still ends drives, and {p} ends them",
-            "{p} hunts the quarterback once the {g} margin settles it",
-            "A deficit that throws in {g} keeps {p} in the backfield"
-          ],
           "production": [
             "The {g} spread is wide, and {p} works while it holds",
             "A one-way {g} script keeps handing {p} the ball",
@@ -1740,14 +1716,6 @@
             "Every {g} possession counts, and the ball goes to {p}",
             "{p} is the answer on the downs that decide {g}",
             "Late leverage in {g} narrows the reads to {p}"
-          ],
-          "stops": [
-            "The {g} margin stays thin, and {p} keeps ending drives",
-            "A one-score {g} is settled in the trenches where {p} works",
-            "Every {g} snap carries weight, and {p} plays them all",
-            "The {g} clock keeps both offenses honest, and {p} keeps hitting",
-            "{p} makes the stop a tight {g} game turns on",
-            "Late drives in {g} keep running into {p}"
           ],
           "production": [
             "The {g} clock never gets safe, and {p} never leaves the field",
@@ -1795,14 +1763,6 @@
             "The {g} passing game runs on {p} alone",
             "Quick game and screens keep the ball on {p} in {g}"
           ],
-          "stops": [
-            "{p} spends the afternoon in the {g} backfield",
-            "The {g} card points every run fit at {p}",
-            "{p} sheds blocks all afternoon in {g}",
-            "The {g} pocket collapses wherever {p} lines up",
-            "Every {g} drive runs into {p} somewhere",
-            "{p} sets the line of scrimmage in {g}"
-          ],
           "production": [
             "{p} touches everything the {g} game plan calls",
             "The {g} board reads like a {p} workload",
@@ -1836,14 +1796,6 @@
             "The {g} targets go somewhere other than {p}",
             "{p} runs routes into traffic all day in {g}",
             "The {g} board leaves {p} third in the target share"
-          ],
-          "stops": [
-            "The {g} play calls run away from {p} all afternoon",
-            "The {g} blockers get to {p} before the ball does",
-            "{p} arrives late to every {g} play",
-            "The {g} card keeps the ball on the far hash from {p}",
-            "Screens and traps in {g} take {p} out of the play",
-            "A quiet afternoon in the trenches waits for {p} in {g}"
           ],
           "production": [
             "The {g} scheme keeps {p} on the field and off the ball",
@@ -2071,14 +2023,6 @@
             "The {team} {grp}s stack first downs on {opp}",
             "The {opp} secondary keeps losing the {team} {grp}s",
             "Chunk plays come out of the {team} {grp} room"
-          ],
-          "stops": [
-            "The {team} {grp}s live in the {opp} backfield",
-            "The {opp} protection cracks, and the {team} {grp}s come through",
-            "The {team} {grp}s win the line of scrimmage against {opp}",
-            "Third downs die on the {team} {grp} rush",
-            "{opp} blockers have no answer for the {team} {grp}s",
-            "The {team} {grp}s set up camp in the {opp} backfield"
           ]
         }
       }

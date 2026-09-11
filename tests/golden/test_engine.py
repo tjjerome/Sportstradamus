@@ -10,10 +10,13 @@ alphabetical "star".
 
 from __future__ import annotations
 
+import re
 from itertools import combinations
 
 import pandas as pd
+import pytest
 
+from sportstradamus.prediction.correlation import _LEAGUE_POSITIONS
 from sportstradamus.prediction.stories import engine
 from sportstradamus.prediction.stories.context import GameCtx, Leg
 from sportstradamus.prediction.stories.engine import (
@@ -340,6 +343,24 @@ def test_unit_subject_filters_group_and_maps_display():
     assert subject["dir"] == "Over"  # the group's narrative side, not the bystander's
     sub = _subject_legs(legs, "X/Y", "unit", subject)
     assert [leg.player for leg in sub] == ["A", "B"]
+
+
+@pytest.mark.parametrize("position", _LEAGUE_POSITIONS["NFL"])
+def test_nfl_unit_headline_names_the_position_group(position):
+    """Every NFL depth-chart group the resolver emits renders as a word, never its letters."""
+    legs = _legs(
+        ("A", "Over", 60.5, "receiving yards", "KC/LV", "KC", f"{position}1", "scoring"),
+        ("B", "Over", 40.5, "receiving yards", "KC/LV", "KC", f"{position}2", "scoring"),
+    )
+    ctx = GameCtx(league="NFL", game="KC/LV", pos_edges={"KC": {position: {"dvpoa": 0.12, "n": 2}}})
+    archetype, subject = route(legs, {"KC/LV": ctx})
+    assert archetype == "unit"
+    word = engine._UNIT_GROUP_DISPLAY[("NFL", position)]
+    assert subject["grp"] == word
+    rendered, _, _ = thesis_variants(legs, {"KC/LV": ctx})
+    for variant in rendered:
+        assert word in variant
+        assert not re.search(rf"\b{position}s?\b", variant)
 
 
 def test_thesis_variants_uses_stack_focus_direction(monkeypatch):

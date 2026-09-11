@@ -57,8 +57,10 @@ _DIRECTIONS_BY_ARCHETYPE = {
 }
 
 # Unit {grp} display words where the raw depth-chart letter reads poorly in
-# prose; unmapped labels (QB, RB, G, D, ...) pass through raw. NBA letters per
-# correlation._resolve_player_positions.
+# prose; unmapped labels (NHL G, D) pass through raw. Letters per
+# correlation._LEAGUE_POSITIONS. The unit templates inflect the word as
+# "{grp}s", "{grp} room", "{grp} group", so a bare "back" (reads as a place)
+# takes its two-word form.
 _UNIT_GROUP_DISPLAY = {
     ("MLB", "B"): "bat",
     ("MLB", "P"): "arm",
@@ -70,6 +72,10 @@ _UNIT_GROUP_DISPLAY = {
     ("WNBA", "G"): "guard",
     ("WNBA", "F"): "forward",
     ("WNBA", "C"): "center",
+    ("NFL", "QB"): "quarterback",
+    ("NFL", "RB"): "running back",
+    ("NFL", "WR"): "receiver",
+    ("NFL", "TE"): "tight end",
     ("NHL", "C"): "center",
     ("NHL", "W"): "wing",
 }
