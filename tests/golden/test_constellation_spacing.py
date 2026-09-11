@@ -25,6 +25,7 @@ from sportstradamus.dashboard.components.constellation_slate import (
     SHAPE_SCALE,
     SHAPE_SCALE_MOBILE,
     slate_shapes,
+    supernodes,
 )
 from sportstradamus.dashboard.components.constellation_spacing import (
     _CAPTION_GAP_PX,
@@ -48,6 +49,7 @@ from sportstradamus.dashboard.components.constellation_spacing import (
 from sportstradamus.dashboard.components.constellation_traces import (
     _LABEL_FONT_SIZE,
     _LABEL_FONT_SIZE_MOBILE,
+    _SIZE_MIN_MOBILE,
 )
 
 _PX = (100.0, 100.0)  # round px-per-unit so the primitive's distances are hand-checkable
@@ -289,6 +291,32 @@ def test_main_stars_keep_their_clearance_on_both_viewports():
             (bx, by), size_b, *_ = stars[other]
             apart = math.hypot((ax - bx) * px[0], (ay - by) * px[1])
             assert apart >= (size_a + size_b) / 2 + _STAR_GAP_PX - 1e-9, (one, other, mobile, wider)
+
+
+def test_a_knots_members_stay_a_fingertip_apart_on_the_phone():
+    """A player's tied legs collapse to one supernode and explode back around its
+    vertex on a ring that reads as one bright point — 0.05 template units, about
+    13 px on a phone, well under the 22 px touch floor the markers are lifted to.
+    ``settle`` is what keeps both members tappable there: the one that would
+    overlap moves to the nearest free cell, never onto its twin.
+    """
+    pool = pd.DataFrame(
+        [_row("A", "NYK", 0.4), _row("A", "NYK", 0.35, "PRA"), _row("B", "SAS", 0.3)]
+    )
+    knot = ("A|PRA|Over", "A|PTS|Over")
+    corr = pd.DataFrame(
+        [{"League": "NBA", "Game": "NYK/SAS", "leg_a": knot[0], "leg_b": knot[1], "rho": 0.8}]
+    )
+    clusters, _, _ = supernodes(
+        [*knot, "B|PTS|Over"], {knot[0]: "NYK", knot[1]: "NYK", "B|PTS|Over": "SAS"}, [(*knot, 0.8)]
+    )
+    assert "+".join(knot) in clusters, "fixture no longer forms a knot"
+    stars = _stars(constellation_figure([], corr, pool, shape=_HOURGLASS, mobile=True))
+    (ax, ay), size_a, *_ = stars[knot[0]]
+    (bx, by), size_b, *_ = stars[knot[1]]
+    assert min(size_a, size_b) >= _SIZE_MIN_MOBILE
+    apart = math.hypot((ax - bx) * PX_PER_UNIT_MOBILE[0], (ay - by) * PX_PER_UNIT_MOBILE[1])
+    assert apart >= _SIZE_MIN_MOBILE, apart
 
 
 def test_spacing_never_moves_an_uncrowded_star():
