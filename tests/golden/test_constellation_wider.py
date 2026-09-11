@@ -17,18 +17,18 @@ import statistics
 import pandas as pd
 
 from sportstradamus.dashboard.components import constellation_deep, constellation_wider
-from sportstradamus.dashboard.components.constellation import (
-    _FIG_HEIGHT,
-    _LABEL_FONT_SIZE,
-    _LABEL_FONT_SIZE_MOBILE,
-    constellation_figure,
-)
+from sportstradamus.dashboard.components.constellation import constellation_figure
 from sportstradamus.dashboard.components.constellation_spacing import (
     _FRAME_INSET,
     DEFAULT_STARS,
     PX_PER_UNIT,
     PX_PER_UNIT_MOBILE,
     Y_RANGE,
+)
+from sportstradamus.dashboard.components.constellation_traces import (
+    _FIG_HEIGHT,
+    _LABEL_FONT_SIZE,
+    _LABEL_FONT_SIZE_MOBILE,
 )
 from sportstradamus.dashboard.components.constellation_wider import (
     WIDER_GAMES,

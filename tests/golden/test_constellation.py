@@ -22,16 +22,7 @@ import math
 import pandas as pd
 import pytest
 
-from sportstradamus.dashboard.components.constellation import (
-    _EDGE_BASE_ALPHA,
-    _INACTIVE_ALPHA,
-    _LABEL_FONT_SIZE_MOBILE,
-    _SIZE_MAX,
-    _SIZE_MIN,
-    _SIZE_MIN_MOBILE,
-    constellation_figure,
-    star_label,
-)
+from sportstradamus.dashboard.components.constellation import constellation_figure
 from sportstradamus.dashboard.components.constellation_deep import (
     _DEEP_COLOR,
     DEEP_ALPHA_MIN,
@@ -52,6 +43,15 @@ from sportstradamus.dashboard.components.constellation_spacing import (
     DEFAULT_STARS,
     PX_PER_UNIT,
     PX_PER_UNIT_MOBILE,
+)
+from sportstradamus.dashboard.components.constellation_traces import (
+    _EDGE_BASE_ALPHA,
+    _INACTIVE_ALPHA,
+    _LABEL_FONT_SIZE_MOBILE,
+    _SIZE_MAX,
+    _SIZE_MIN,
+    _SIZE_MIN_MOBILE,
+    star_label,
 )
 from sportstradamus.dashboard.components.constellation_wider import _WIDER_SCALE, WIDER_GAMES
 from sportstradamus.dashboard.theme import GOLD, GRAY, team_colors

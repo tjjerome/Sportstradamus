@@ -15,11 +15,7 @@ import math
 
 import pandas as pd
 
-from sportstradamus.dashboard.components.constellation import (
-    _SIZE_MAX,
-    _SIZE_MIN,
-    constellation_figure,
-)
+from sportstradamus.dashboard.components.constellation import constellation_figure
 from sportstradamus.dashboard.components.constellation_deep import (
     DEEP_ALPHA_MIN,
     DEEP_EDGES_PER_STAR,
@@ -35,6 +31,7 @@ from sportstradamus.dashboard.components.constellation_spacing import (
     X_RANGE,
     Y_RANGE,
 )
+from sportstradamus.dashboard.components.constellation_traces import _SIZE_MAX, _SIZE_MIN
 
 _GAME = "NYK/SAS"
 

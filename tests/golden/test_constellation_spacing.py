@@ -18,11 +18,7 @@ import math
 
 import pandas as pd
 
-from sportstradamus.dashboard.components.constellation import (
-    _LABEL_FONT_SIZE,
-    _LABEL_FONT_SIZE_MOBILE,
-    constellation_figure,
-)
+from sportstradamus.dashboard.components.constellation import constellation_figure
 from sportstradamus.dashboard.components.constellation_shapes import shape_catalog
 from sportstradamus.dashboard.components.constellation_slate import (
     DECORATION,
@@ -48,6 +44,10 @@ from sportstradamus.dashboard.components.constellation_spacing import (
     caption_positions,
     default_stars,
     settle,
+)
+from sportstradamus.dashboard.components.constellation_traces import (
+    _LABEL_FONT_SIZE,
+    _LABEL_FONT_SIZE_MOBILE,
 )
 
 _PX = (100.0, 100.0)  # round px-per-unit so the primitive's distances are hand-checkable
