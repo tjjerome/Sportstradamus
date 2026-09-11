@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from sportstradamus.helpers.config import stat_meta
+from sportstradamus.helpers.config import stat_map, stat_meta
 from sportstradamus.prediction.stories import bank as bank_module
 from sportstradamus.prediction.stories import engine, legs
 from sportstradamus.prediction.stories.bank import _bank, bank_cell, why_bank
@@ -433,6 +433,26 @@ def test_football_voice_speaks_football():
     assert any(w in contrast for w in ("field", "drive", "chain", "boundary", "clock"))
     mistakes = _cell_text("football", "player", "even", "Under", "mistakes")
     assert any(w in mistakes for w in ("sack", "pick", "fumble", "pocket"))
+
+
+def test_football_voice_authors_no_stops_cell():
+    """No NFL market reads as ``stops``, so the football voice carries no ``stops`` cell.
+
+    The defensive-looking NFL slugs (``sacks taken``, ``interceptions``) are negative
+    markets and read as ``mistakes`` — on the slug and on every Underdog/Sleeper display
+    name behind it. A cell no route reaches is dead prose; the first assertion is the
+    reachability fact, the second the authoring rule that follows from it.
+    """
+    nfl_slugs = set(stat_meta["NFL"])
+    names = nfl_slugs | {
+        name
+        for platform in ("Underdog", "Sleeper")
+        for name, slug in stat_map[platform].items()
+        if slug in nfl_slugs
+    }
+    assert "stops" not in {legs._stat_category(name) for name in names}
+    authored = {category for voice, *_node, category, _ in _walk_variants() if voice == "football"}
+    assert "stops" not in authored
 
 
 def test_hockey_voice_speaks_hockey():

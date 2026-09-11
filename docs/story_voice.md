@@ -87,7 +87,9 @@ player-subject templates with exactly `{who}` and `{what}` ("{who} clears the {w
 
 Every cell that exists today must survive with at least six distinct variants; adding a
 category cell under an existing node is welcome; removing a shaped node breaks
-`test_shape_never_falls_through_to_even`. Every shaped node carries a `production` cell. Each
+`test_shape_never_falls_through_to_even`. Every shaped node carries a `production` cell. The
+football voice authors no `stops` cell: no NFL market maps there (`sacks taken` and
+`interceptions` are negative markets and read as `mistakes`). Each
 sport voice authors its own `even/production` cells for player, stack, and game-script in
 every direction, plus `player/even/{Over,Under}/mistakes`, plus the four contrarian cells
 (`game-script/shootout/Under`, `game-script/grind/Over`, `stack/shootout/Under`,
