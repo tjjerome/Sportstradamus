@@ -91,6 +91,11 @@ def _ud_date(scheduled_at: str) -> str:
     )
 
 
+def _ud_league(sport_id: str) -> str:
+    """Strip Underdog's "COMBOS" suffix from a sport_id to get the league code."""
+    return sport_id.replace("COMBOS", "")
+
+
 def _by_id(container) -> dict:
     """Index a feed list or a lobby dict by ``str(id)``: JSON keys are strings, match ids ints."""
     items = container.values() if isinstance(container, dict) else container
@@ -115,7 +120,7 @@ def _ud_matches(games: dict, solo_games: dict, team_abbr: dict) -> dict:
         matches[match_id] = {
             "Home": team_abbr.get(game["home_team_id"], ""),
             "Away": team_abbr.get(game["away_team_id"], ""),
-            "League": game["sport_id"].replace("COMBOS", ""),
+            "League": _ud_league(game["sport_id"]),
             "Date": _ud_date(game["scheduled_at"]),
             "Commence": game["scheduled_at"],
         }
@@ -126,7 +131,7 @@ def _ud_matches(games: dict, solo_games: dict, team_abbr: dict) -> dict:
         matches[match_id] = {
             "Home": sides[0],
             "Away": sides[1],
-            "League": game["sport_id"].replace("COMBOS", ""),
+            "League": _ud_league(game["sport_id"]),
             "Date": _ud_date(game["scheduled_at"]),
             "Commence": game["scheduled_at"],
         }
@@ -390,7 +395,7 @@ def get_ud():
             "Underdog feed returned nothing; check for a retired endpoint (docs/underdog_api.md §2)"
         )
         return {}
-    sports = {game["sport_id"].replace("COMBOS", "") for game in feed["games"]}
+    sports = {_ud_league(game["sport_id"]) for game in feed["games"]}
     team_offers, team_abbr = _ud_team_offers(scraper, sports)
     priced = _ud_offers(feed, team_abbr) + team_offers
     candidates = [
