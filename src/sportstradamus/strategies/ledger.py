@@ -73,17 +73,15 @@ def build_candidate_universe(
     universe: list[_ledger_selection.LedgerCandidate] = []
     for platform in _PLATFORMS:
         parlay_dfs, offers_df = live_load(_SHARED_CONFIG, platform)
+        entries = construct_entries(
+            date,
+            _ledger_selection.BANKROLL_PER_REPLICATE,
+            _SHARED_CONFIG,
+            parlay_dfs=parlay_dfs,
+            platform=platform,
+        )
         same_game = _partition_by_size_rule(
-            [
-                _ledger_selection.from_recommended_entry(e)
-                for e in construct_entries(
-                    date,
-                    _ledger_selection.BANKROLL_PER_REPLICATE,
-                    _SHARED_CONFIG,
-                    parlay_dfs=parlay_dfs,
-                    platform=platform,
-                )
-            ]
+            [_ledger_selection.from_recommended_entry(e) for e in entries]
         )
         cross_game = _ledger_cross_game.build_cross_game_candidates(
             offers_df, _SHARED_CONFIG, date, run_slot, platform=platform
@@ -177,8 +175,7 @@ def run_commit(date: datetime.date, run_slot: str) -> int:
 
     rngs = _ledger_selection.replicate_rngs(date, run_slot)
     total = 0
-    for replicate_id in range(_ledger_selection.LEDGER_REPLICATES):
-        rng = rngs[replicate_id]
+    for replicate_id, rng in enumerate(rngs):
         records: list[dict] = []
         for persona in _ledger_selection.PERSONAS:
             remaining, seen = _ledger_selection.remaining_budget_and_seen_players(

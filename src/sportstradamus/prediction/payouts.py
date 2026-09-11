@@ -141,7 +141,7 @@ def payout_curve_for(
     }
     if platform != "Underdog":
         lst = legacy_tables[platform]
-        full = {i + 2: [lst[i], 0.0] for i in range(len(lst))}
+        full = {i + 2: [mult, 0.0] for i, mult in enumerate(lst)}
         return lst, full
 
     if contest_variant == "pooled":

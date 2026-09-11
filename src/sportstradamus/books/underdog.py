@@ -59,6 +59,10 @@ UD_TEAM_PILLS = {
     }
 }
 
+# Rows a single pinned-pill request returns; every pill's board is well under
+# this, so one page always covers it.
+UD_TEAM_PILLS_LIMIT = 1000
+
 # Alternate lines come one market per request with no batch form. Three workers
 # on one keep-alive session read ~17 markets/s: ~2,000 markets per two-minute
 # budget, nearest kickoffs first, the rest left to a later hourly run. Four
@@ -282,7 +286,8 @@ def _ud_team_offers(scraper: Scrape, sports: set[str]) -> tuple[list[tuple[dict,
         for filter_id in UD_TEAM_PILLS.get(sport, {}).values():
             urls.append(
                 f"{UD_LOBBY_URL}/lines?sport_id={sport}&filter_id={filter_id}&filter_type=MarketGroup"
-                f"&limit=1000&include_live=true&show_mass_option_markets=true&{_UD_QUERY}"
+                f"&limit={UD_TEAM_PILLS_LIMIT}&include_live=true&show_mass_option_markets=true"
+                f"&{_UD_QUERY}"
             )
     priced, team_abbr = [], {}
     for url in tqdm(urls, desc="Getting Underdog team markets", unit="request"):

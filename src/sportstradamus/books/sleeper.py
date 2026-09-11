@@ -79,6 +79,14 @@ def _sleeper_prop_offers(prop: dict, players: dict, league: str, games: dict) ->
     return offers
 
 
+def _sleeper_fetch_json(url: str) -> dict | list | None:
+    """GET a Sleeper endpoint; return the parsed JSON body, or ``None`` on a non-200."""
+    response = requests.get(url, timeout=REQUEST_TIMEOUT_S)
+    if response.status_code != HTTPStatus.OK:
+        return None
+    return response.json()
+
+
 def get_sleeper():
     """Retrieve player prop offers from the Sleeper API.
 
@@ -92,27 +100,24 @@ def get_sleeper():
             Returns ``{}`` on API failure.
     """
     offers = {}
-    res = requests.get(SLEEPER_AVAILABLE_URL, timeout=REQUEST_TIMEOUT_S)
-    if res.status_code != HTTPStatus.OK:
+    res = _sleeper_fetch_json(SLEEPER_AVAILABLE_URL)
+    if res is None:
         return offers
-
-    res = res.json()
     leagues = {x["sport"] for x in res}
 
-    alt = requests.get(SLEEPER_ALT_URL, timeout=REQUEST_TIMEOUT_S)
-    if alt.status_code == HTTPStatus.OK:
-        res.extend(alt.json())
+    alt = _sleeper_fetch_json(SLEEPER_ALT_URL)
+    if alt is not None:
+        res.extend(alt)
 
-    game_res = requests.get(SLEEPER_GAMES_URL, timeout=REQUEST_TIMEOUT_S)
-    if game_res.status_code != HTTPStatus.OK:
+    games_payload = _sleeper_fetch_json(SLEEPER_GAMES_URL)
+    if games_payload is None:
         return offers
-    games = _sleeper_games_map(game_res.json())
+    games = _sleeper_games_map(games_payload)
 
     for league in tqdm(leagues, desc="Getting Sleeper lines...", leave=False):
-        players = requests.get(SLEEPER_PLAYERS_URL.format(league=league), timeout=REQUEST_TIMEOUT_S)
-        if players.status_code != HTTPStatus.OK:
+        players = _sleeper_fetch_json(SLEEPER_PLAYERS_URL.format(league=league))
+        if players is None:
             continue
-        players = players.json()
         props = [x for x in res if x["sport"] == league]
         for prop in props:
             for n in _sleeper_prop_offers(prop, players, league, games):
