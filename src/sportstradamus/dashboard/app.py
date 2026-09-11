@@ -22,7 +22,11 @@ from sportstradamus.dashboard.components.slip_dock import render_slip_dock
 from sportstradamus.dashboard.components.slip_state import init_slip_state
 from sportstradamus.dashboard.viewport import is_mobile
 
-st.set_page_config(page_title="Sportstradamus Dashboard", layout="wide")
+st.set_page_config(
+    page_title="Sportstradamus Dashboard",
+    page_icon=str(Path(__file__).parent / "static/favicon.svg"),
+    layout="wide",
+)
 
 # APP_CSS is a <style> block: it must go through st.markdown with unsafe HTML,
 # NOT st.html — st.html's DOMPurify (USE_PROFILES {html:true}) strips <style>/<svg>
