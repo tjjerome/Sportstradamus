@@ -39,7 +39,8 @@ _STAR_LAST_5 = [18.0, 22.0, 24.0, 27.0, 31.0]
 
 # The line-movement snapshot, column-stable the way its loader returns it. Star's posted
 # line fell a point and its fair line with it; Wide, an NFL TD prop, held its line while
-# its price moved. No row for anyone else.
+# its price moved; Back's line moved four times and landed where it opened. No row for
+# anyone else.
 _MOVEMENT = pd.DataFrame(
     [
         {
@@ -63,6 +64,19 @@ _MOVEMENT = pd.DataFrame(
             "n_price_moves": 1,
             "series": "[0.5, 0.5]",
             "fair_series": "[0.5, 0.66]",
+        },
+        {
+            "League": "NBA",
+            "Platform": "Underdog",
+            "Market": "Points",
+            "Player": "Back",
+            "Date": "2026-01-08",
+            "n_moves": 4,
+            "n_price_moves": 0,
+            "move": 0.0,
+            "fair_move": 0.0,
+            "series": "[2.5, 3.5, 3.5, 2.5]",
+            "fair_series": "[2.5, 3.4, 3.4, 2.5]",
         },
     ]
 ).reindex(columns=LINE_MOVEMENT_COLS)
@@ -186,6 +200,20 @@ def test_an_offer_with_a_movement_row_gets_its_trace_beside_its_summary(monkeypa
     trace = movement_svg([20.5, 19.8], bet="Over", n_changes=1, title=summary)
     moves = _moves(_pool({"Player": "Star"}), monkeypatch)
     assert moves == {"Star|Points|Over": f"{trace}<span>{summary}</span>"}
+
+
+def test_a_line_that_moved_and_came_back_keeps_its_row(monkeypatch):
+    """A round trip nets to zero, which is exactly the offer a net-delta test would drop.
+    The row rides on the change counts, so the card says what the Board's cell says —
+    "back at", never silence — and draws the journey rather than a held rule."""
+    summary = movement_summary(
+        [2.5, 3.4, 3.4, 2.5], [2.5, 3.5, 3.5, 2.5], n_moves=4, n_price_moves=0
+    )
+    trace = movement_svg([2.5, 3.4, 3.4, 2.5], bet="Over", n_changes=4, title=summary)
+    moves = _moves(_pool({"Player": "Back", "Line": 2.5}), monkeypatch)
+    assert moves == {"Back|Points|Over": f"{trace}<span>{summary}</span>"}
+    assert "back at 2.5" in summary
+    assert "polyline" in trace
 
 
 def test_an_offer_the_snapshot_has_no_row_for_is_absent(monkeypatch):
