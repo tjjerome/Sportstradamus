@@ -34,7 +34,7 @@ WorkingDirectory=<repo-checkout>
 Environment=STREAMLIT_SERVER_PORT=8501
 Environment=STREAMLIT_SERVER_ADDRESS=127.0.0.1
 Environment=STREAMLIT_SERVER_HEADLESS=true
-ExecStart=<path-to-poetry> run dashboard
+ExecStart=<path-to-poetry> run python -m sportstradamus dashboard
 Restart=always
 RestartSec=5
 User=<user>

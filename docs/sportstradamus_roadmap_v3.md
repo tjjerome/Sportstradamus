@@ -54,12 +54,15 @@ ledgers, not here):
   copula, push-aware EV, PSD repair — the swappable Σ seam; ARCHITECTURE
   §Stable Seams).
 - CLV — `clv.py` wired into `nightly.py:reflect`; per-segment summaries.
-- Retrospective strategy backtest — `strategies/profit_sim.py` +
-  `pages/6_Stats_Profit_Sim.py` (Monte Carlo over resolved history).
+- Retrospective strategy backtest — `strategies/profit_sim.py` + the Receipts
+  strategy simulator (nightly precomputed grid + live Customize; Monte Carlo
+  over resolved history).
 - Structured JSON logging — `helpers/logging.py`; fake-mode end-to-end
   integration test — `tests/integration/test_end_to_end.py`.
-- Dashboard — `pages/` incl. Pick'em and Parlays recommendation views reading
-  parquet snapshots only.
+- Dashboard — the `dashboard/` package (Tonight / Board / Games / Receipts +
+  Model Lab): constellation slip builder, story engine, phone money loop,
+  celestial skin; reads parquet snapshots only
+  ([`dashboard_ux_redesign.md`](dashboard_ux_redesign.md)).
 - Model lifecycle — six offline gates ([`ship_gate.md`](ship_gate.md)),
   live Gate-2 graduation (`check-graduation`, `gate-status` cron),
   `stat_meta.json` `shipped` release control (CONTRIBUTING §Shipping).
@@ -78,7 +81,7 @@ an exception. A session works one lane and reads that lane's brief.
 | `parlay-dependence` | Copula on PIT residuals — biggest product-EV lever | BLOCKED (on: D3) | D3 | [handoffs/parlay-dependence.md](handoffs/parlay-dependence.md) |
 | `dfs-products` | New bet-type decision engines: game-line combos (verify-first) + Underdog Ladders + alt-line hardening | ACTIVE | — (stage 0 near-done; 1 retired; 2a startable now; 2b/2c/5 queue per §5; stage 4 owner go/no-go) | [handoffs/dfs-products.md](handoffs/dfs-products.md) |
 | `mlb-nhl-activation` | Activated both leagues (D1/D2 = GO); post-GO grind runs in model-track WS-2; brief keeps the per-league detail | DONE (absorbed: model-track WS-2) | — | [archive/mlb-nhl-activation.md](archive/mlb-nhl-activation.md) |
-| `dashboard-ux` | Narrative-first dashboard: six surfaces, slip builder, receipts, celestial skin | ACTIVE | — | [handoffs/dashboard-ux.md](handoffs/dashboard-ux.md) |
+| `dashboard-ux` | Narrative-first dashboard: surfaces, slip builder, receipts, celestial skin, phone loop | DONE (closed 2026-09-11; the §5b UI scars flip on behind dfs-products, spec §8) | — | [archive/dashboard-ux.md](archive/dashboard-ux.md) |
 | `bestball-2027` | Draft products for the 2027 season | BLOCKED (on: D4) | D4 | [handoffs/bestball-2027.md](handoffs/bestball-2027.md) |
 | `low-weight-models` | Repair the model legs hidden behind a floor blend weight; ship criterion = free `w ≥ 0.3` + 6/6 gates, every lever sweep-testable | ACTIVE | — | [handoffs/low_weight_models.md](handoffs/low_weight_models.md) |
 | `hygiene-closeout` | Triage, calibration re-run, drift fixes, recurring checks | ACTIVE | — | [handoffs/hygiene-closeout.md](handoffs/hygiene-closeout.md) |
@@ -144,7 +147,7 @@ flowchart LR
         HG23["S2 calibration re-run (owner-assisted) + S3 recurring sweeps"]:::haiku
     end
 
-    DU["dashboard-ux — P8 phases (Phase D: Opus)"]:::sonnet
+    DU["dashboard-ux — DONE 2026-09-11 (archive/dashboard-ux.md)"]:::sonnet
     BB["bestball-2027 S0-S6 (simulators S3-S4: Opus)"]:::sonnet
 
     D3{"D3 start parlay-dependence"}:::owner
@@ -276,6 +279,13 @@ sketches live in the archived v2.
   product (archived v2 §Suggestions).
 - **Empirical-vs-model ρ overlay** — Correlations Lab heatmap overlay flagging
   pairs the copula mis-prices (P8 spec §6.4).
+- **Dashboard art sourcing (Phase E5)** — free/licensed ambient files + the
+  commissioned logo; the slots, manifest and licence gate are wired, the owner
+  approves every binary (`docs/art_assets.md`).
+- **Dashboard follow-ups at lane close** — owner decisions (Ladder/Combo/Omen
+  names, game-total star fill, team marks, headshot CDN, the optional
+  `export-line-movement` cron) and routed debts, listed in
+  [archive/dashboard-ux.md](archive/dashboard-ux.md) §11.
 - **Idea backlog** — archived v2 §Suggestions for Further Improvement.
 
 ## 9. Doc map (canonical homes)
@@ -296,6 +306,7 @@ sketches live in the archived v2.
 
 ## Changelog
 
+- dashboard-ux lane closed: Phase E scaffolding (art catalog, manifest loader, favicon, logo slot), constellation modules split, ledger debts fixed or routed; §3/§4/§8 trued; brief archived.
 - sleeper-parity stages 0-4 done (EV engine, decision-layer plumb-through, live-rail pricing, ledger integration incl. 2 push-refund bug fixes); PR to devel opened; §4 row trued.
 - roadmap trued vs audit: D1/D2 RESOLVED GO; mlb-nhl lane DONE→model-track WS-2; dfs-products ACTIVE; sleeper-parity flagged CRITICAL PATH (next code-heavy lane); §4.1 build-path diagram added; §5 constraints 1+5 merged post parlay.py seam split (payouts.py + joint.py, ARCHITECTURE §Stable Seams); breadth thresholds de-duped to model-track §1; model_stats path fixed.
 - dfs-products lane added (game-line combos verify-first, Ladders graduated from §8, alt-line hardening, Rivals pricer); §5 gains its serialization rule; PARLAY_AUDIT refreshed w/ dispositions; stage-0 briefs in docs/archive.

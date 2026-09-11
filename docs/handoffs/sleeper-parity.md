@@ -237,7 +237,7 @@ inference-path compatibility checklist in
   (`dashboard/slip_engine.py`, `dashboard/components/slip_builder.py` +
   `slip_state.py`) embedded in the `Board`/`Games` surfaces. No dashboard
   code reads `current_pickem.parquet` — that pipeline is CLI/ledger-only
-  (`pickem-build`), and the six-surface IA is owner-locked ("no relitigating
+  (`pickem-build`), and the dashboard IA is owner-locked ("no relitigating
   page structure"), so this stage does not add a page. The rail is
   platform-aware end-to-end (`slip_state.py`'s Underdog/Sleeper toggle);
   Stage 3 wires its Sleeper pricing (`_platform_pricing`, previously a

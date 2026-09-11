@@ -2,7 +2,9 @@
 
 **Stage:** P8 of the dashboard UX redesign ("the Oracle")
 **Branch:** `feature/dashboard-ux`
-**Status:** Design locked. Ready for implementation planning.
+**Status:** SHIPPED — Phases 0/A/B/C + R (2026-07-16), M (2026-07-16), D (2026-08-06),
+E1–E4 (2026-09-11); E5 art sourcing stays owner-parked. Archived record; the live design
+home is `docs/dashboard_ux_redesign.md`.
 
 ## How to read this spec (handoff chain)
 
@@ -22,7 +24,7 @@ points at.
   (the committed visual identity and the FIXED token set), and
   [docs/dashboard_ux_redesign.md](../../../docs/dashboard_ux_redesign.md) (the six-surface
   redesign spec P8 polishes).
-- **The predecessor lane brief** is [docs/handoffs/dashboard-ux.md](../../../docs/handoffs/dashboard-ux.md).
+- **The predecessor lane brief** is [docs/archive/dashboard-ux.md](../../dashboard-ux.md) (closed 2026-09-11).
 - P8 is **large** (8 surfaces + shared infrastructure + follow-up lanes). §10
   proposes a phasing so the plan can be decomposed into buildable units. Fable
   should feel free to split the implementation plan into parts (shared infra
@@ -599,8 +601,9 @@ The dashboard reads parquet snapshots only. P8 introduces or depends on:
 
 ## 6. Follow-up lanes (out of P8 scope — captured for direction)
 
-These are explicitly **not** built in P8, but the direction is locked so the plan
-knows where things are going. Each is its own future lane.
+These were explicitly **not** built in P8's first four phases; the direction was locked so the
+plan knew where things were going. Since then §6.1 shipped as Phase D (2026-08-06) and §6.2 as
+Phase E (2026-09-11); §6.3 has its own lane and §6.4 stays in roadmap §8.
 
 ### 6.1 Skyrim-style constellation shapes (loose)
 

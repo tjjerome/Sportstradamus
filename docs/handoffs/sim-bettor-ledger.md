@@ -18,7 +18,7 @@ the evidence gate D7 (real-stake scaling) reads. Every week not logging is
 evidence permanently lost — the lane's value accrues with calendar time.
 
 The existing [`strategies/profit_sim.py`](../../src/sportstradamus/strategies/profit_sim.py)
-+ [`pages/6_Stats_Profit_Sim.py`](../../src/sportstradamus/pages/6_Stats_Profit_Sim.py)
++ the Receipts strategy simulator ([`dashboard/components/profit_sim.py`](../../src/sportstradamus/dashboard/components/profit_sim.py))
 are **retrospective** Monte Carlo over resolved history — strategy exploration
 with hindsight and selection effects. This ledger is the forward sibling, not a
 replacement: `profit_sim.py` is load-bearing for the S3 supersede gate

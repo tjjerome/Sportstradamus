@@ -159,14 +159,16 @@ into features. Canonical guide: [docs/data_collectors.md](data_collectors.md).
 
 | Module | What's in it |
 |---|---|
-| `__init__.py` | The `dashboard` console script — launches Streamlit on `dashboard/app.py` |
+| `__init__.py` | `run` behind the `sportstradamus dashboard` subcommand — launches Streamlit on `dashboard/app.py` with the file watcher off |
 | `app.py` | Main Streamlit app: page registry and navigation |
 | `data.py` | Mtime-keyed cached loading of the parquet snapshots |
 | `theme.py` | Non-Streamlit mirror of the design tokens (see [DESIGN.md](../DESIGN.md)) |
+| `assets.py` | License-gated ambient-art loader over `data/assets/ambient/ambient_manifest.json` — a slot renders only with a file *and* a license, else the token gradient (slot catalog: [art_assets.md](art_assets.md)) |
+| `static/` | Hand-authored favicon; the `st.logo` files land here when commissioned |
 | `columns.py`, `legs.py`, `lenses.py`, `narrative.py`, `viewport.py` | Scoring-column semantics, leg lookup, preset filter lenses, narrative display, mobile detection |
 | `slip_engine.py` | Live slip scoring for the builders — the one sanctioned live calc |
 | `surfaces/` | The pages: board, tonight, games, receipts, and the lab_* diagnostics surfaces |
-| `components/` | Reusable widgets: slip dock/builder, offer cards, tickets, constellation, deep-dive, gate matrix |
+| `components/` | Reusable widgets: slip dock/builder, offer cards, tickets, deep-dive, gate matrix, and the constellation family — `constellation.py` orchestrates the figure; `_spring` (shapeless layout), `_slate` + `_shapes` (dealt templates), `_traces` (node/edge/label builders), `_spacing` + `_layout` (px geometry), `_deep` + `_deep_layer` and `_wider` + `_sky` (the two lenses) |
 
 The dashboard reads pre-computed parquet snapshots only — it never opens the
 DuckDB archive. DuckDB holds an exclusive file lock for the lifetime of any

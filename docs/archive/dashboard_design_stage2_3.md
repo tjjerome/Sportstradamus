@@ -3,7 +3,7 @@
 > Absorbed by the `dashboard-ux` lane: AG Grid theming → stage P5, metric hierarchy → P4/P7,
 > `st.navigation` migration → P1. Canonical homes now
 > [`docs/dashboard_ux_redesign.md`](../dashboard_ux_redesign.md) and
-> [`docs/handoffs/dashboard-ux.md`](../handoffs/dashboard-ux.md). Kept for the component-library
+> the closed lane brief [`docs/archive/dashboard-ux.md`](dashboard-ux.md). Kept for the component-library
 > research notes; status claims are stale.
 
 Stage 1 (committed visual identity + governance) shipped: `.streamlit/config.toml` tokens,

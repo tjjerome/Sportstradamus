@@ -1,5 +1,9 @@
 # P8 Phase R — Remediation & Polish Implementation Plan
 
+> **Status: SHIPPED 2026-07-16** (`2fb7bb9..312e5f4`, every task owner-live-checked). R0's
+> unticked steps 1, 2, 4 and 5 were deliberately not run — the migration and `reflect` had
+> already completed on prod (see the R0 note below); no R0 code shipped.
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking — **tick them as you go and write the §10 ledger entry

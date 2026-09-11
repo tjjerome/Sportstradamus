@@ -1,5 +1,9 @@
 # P8 Phase 0 — Legacy Data-Model Retirement Implementation Plan
 
+> **Status: SHIPPED 2026-07-05** (merged to devel in `84c3342`; the half-run migration was
+> finished on prod 2026-07-10, Phase R0). Checkboxes were not maintained during execution —
+> the record is the archived lane brief `docs/archive/dashboard-ux.md`.
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.

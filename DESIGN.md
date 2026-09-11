@@ -7,7 +7,7 @@ these constraints with your own defaults.** When a case isn't covered, pick from
 ask — do not invent new values.
 
 Enforcement: the `design-lint` hook nudges live on banned patterns; `tests/golden/test_design_tokens.py`
-is the hard gate. The UX redesign (six surfaces, slip rail, celestial layer) is specified in
+is the hard gate. The UX redesign (surfaces, slip rail, celestial layer) is specified in
 [docs/dashboard_ux_redesign.md](docs/dashboard_ux_redesign.md); it absorbed the old Stage 2/3 parking
 doc (now in `docs/archive/`). The vendored
 [frontend-design skill](.claude/skills/frontend-design/SKILL.md) carries the same bans at the agent
@@ -94,8 +94,10 @@ Altair / Vega-Lite inherit these automatically.
   only**. The purple/violet gradient ban (§6) stands untouched.
 - **Ambient imagery**: semi-transparent background art blending mystic + sports (night-sky fields,
   hourglass/sand motifs, celestial sports equipment). Slots and files are declared in
-  `data/assets/ambient/ambient_manifest.json` (slot → file, opacity, placement, license/attribution);
-  slots without art render token-palette gradients. Rules: opacity ≤ 20% over `backgroundColor`,
+  `data/assets/ambient/ambient_manifest.json` (slot → file, opacity, placement, license/attribution)
+  and read by `dashboard/assets.py:ambient_css`, which renders a slot only when its entry names
+  both a file and a license — unlicensed art never renders; slots without art render token-palette
+  gradients. The slot catalog is [docs/art_assets.md](docs/art_assets.md). Rules: opacity ≤ 20% over `backgroundColor`,
   body text on top must keep WCAG AA contrast, **never behind dense tables or stat grids**, and art
   is stock or commissioned only — no AI-generated images, license recorded in the manifest.
   The ambient **starfield** layer (`theme.APP_CSS`, wide layout) obeys these rules: static dust and
@@ -191,8 +193,10 @@ The themed `streamlit-aggrid` stat grids (everything through `dashboard/componen
 brackets, under engraved small-caps headers, over 1px gold-etched row separators, with a faint top
 sheen. It introduces **no new colors**: the slab is the surface/background tokens; the frame, rules,
 and row hover are the gold token as *chrome* (never a data mark, §2); the header ink is the neutral
-gray token. The skin is a FLEXIBLE table treatment (§7) — which surfaces lean on it vs. `st.dataframe`
-stays open — but the FIXED tokens above still bind inside it.
+gray token. The skin is a FLEXIBLE table treatment (§7): the Board, the Receipts record grid, Lab
+Diagnostics and the gate matrix wear it; the Games leg tables, Lab Correlations/Training, the
+deep-dive tabs and the strategy simulator stay on `st.dataframe`. The FIXED tokens above bind inside
+it either way.
 
 **AG-Grid renders in an iframe**, which drives the theming constraints below. The `grid.py` comments
 are the canonical detail; a designer needs the shape:
@@ -270,8 +274,8 @@ block.
 
 ## 9. References
 
-- [docs/dashboard_ux_redesign.md](docs/dashboard_ux_redesign.md) — the UX redesign spec (six
-  surfaces, slip rail, deep-dive v2, naming map, ambient-imagery slot map + artist brief).
+- [docs/dashboard_ux_redesign.md](docs/dashboard_ux_redesign.md) — the UX redesign spec (surfaces,
+  slip rail, deep-dive v2, naming map, ambient-imagery slot map + artist brief).
 - [.claude/skills/frontend-design/SKILL.md](.claude/skills/frontend-design/SKILL.md) — Anthropic's
   frontend-design skill (the named bans, at the agent level).
 - Streamlit theming reference (bundled): `streamlit/.agents/skills/developing-with-streamlit/references/theme.md`.

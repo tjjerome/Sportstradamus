@@ -1,5 +1,9 @@
 # Constellation Satellite Legs Implementation Plan
 
+> **Status: SHIPPED 2026-06-14** (`feature/dashboard-ux`, merged to devel via PR #79).
+> Checkboxes were not maintained during execution — the record is the archived lane brief
+> `docs/archive/dashboard-ux.md`.
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let a slip pull edge legs from other games into a separate "satellite" section so a single-team game can still form a valid parlay, and show captions on candidate stars.

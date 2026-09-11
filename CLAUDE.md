@@ -120,10 +120,10 @@ to redo the work.
   that keeps the app from looking AI-generated (no default-red, no purple gradients, no
   Inter/Roboto, Material icons not emoji). Treat the FIXED tokens as inviolable and do not
   supplement them with your own defaults. The `design-lint` hook nudges live and
-  `tests/golden/test_design_tokens.py` is the hard gate. The UX redesign spec (six surfaces,
+  `tests/golden/test_design_tokens.py` is the hard gate. The UX redesign spec (surfaces,
   slip rail, taxonomy, scars) is
-  [docs/dashboard_ux_redesign.md](docs/dashboard_ux_redesign.md); its lane brief is
-  [docs/handoffs/dashboard-ux.md](docs/handoffs/dashboard-ux.md).
+  [docs/dashboard_ux_redesign.md](docs/dashboard_ux_redesign.md); the closed lane brief is
+  [docs/archive/dashboard-ux.md](docs/archive/dashboard-ux.md).
 
 ## Agentic workflow conventions
 
@@ -177,7 +177,7 @@ Do not undo that work:
 * **Dashboard never touches the DuckDB archive.** The Streamlit dashboard reads
   pre-computed parquet snapshots only (`data/runtime/history.parquet`,
   `data/runtime/parlay_hist/` day partitions, `data/training/model_stats.parquet`,
-  `data/runtime/current_pickem.parquet`). DuckDB holds an
+  the `data/runtime/current_*.parquet` snapshots). DuckDB holds an
   exclusive file lock for the entire lifetime of any read-write connection;
   the dashboard is the only long-lived process in the system, so any archive
   connection it opens — even accidentally via a module-level `Archive()` in
@@ -402,7 +402,7 @@ Single source of truth for per-cell training diagnostics. Written by
 `training/report.py:report()` at the end of each league pass of a `meditate`
 run as **one wide row per `(league, market)` cell**; consumed by:
 
-* The Streamlit dashboard (`pages/7_Stats_Model_Training.py`) — tab views
+* The Streamlit dashboard (`dashboard/surfaces/lab_training.py`) — tab views
   by metric family with `lifecycle_state` joined in from
   `training/graduation.py:lifecycle_table()`.
 * `training.report.get_market_calibration(league, market)` — kelly's
