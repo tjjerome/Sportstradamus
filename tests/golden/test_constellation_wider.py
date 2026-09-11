@@ -16,7 +16,11 @@ import statistics
 
 import pandas as pd
 
-from sportstradamus.dashboard.components import constellation_deep, constellation_wider
+from sportstradamus.dashboard.components import (
+    constellation_deep,
+    constellation_sky,
+    constellation_wider,
+)
 from sportstradamus.dashboard.components.constellation import constellation_figure
 from sportstradamus.dashboard.components.constellation_spacing import (
     _FRAME_INSET,
@@ -123,7 +127,7 @@ def test_wider_stars_cluster_by_game_and_wear_team_colors():
 def test_wider_sky_is_seeded_by_md5_not_hash():
     """``hash()`` on a ``str`` is per-process randomized, which would unpin every
     position here between two test runs."""
-    for module in (constellation_deep, constellation_wider):
+    for module in (constellation_deep, constellation_sky, constellation_wider):
         called = {
             node.func.id
             for node in ast.walk(ast.parse(inspect.getsource(module)))
