@@ -43,25 +43,11 @@ _UD_QUERY = (
 # where prophecize can price them.
 UD_MODELED_LEAGUES = ("NFL", "MLB", "NBA", "WNBA", "NHL")
 
-# market_filters pill ids (docs/underdog_api.md §6.4). Listing the pills needs a
-# token, so the ids are pinned here; re-read them with a token when a pill answers
-# empty through a whole game day.
-UD_TEAM_PILLS = {
-    "NFL": {
-        "Team Totals": "59179c3c-176b-4c51-8858-8b03dd0b960b",
-        "TD Picks": "09c12426-e47f-4b74-acde-e8974bd9de8f",
-        "1Q Team Picks": "069d9262-8a77-4cce-a52f-51c17a9f9e7a",
-        "2Q Team Picks": "7b4c392d-f8fe-4293-aeee-7e1833073e5a",
-        "3Q Team Picks": "e66445e0-2dec-4946-bc6f-b84d03496b29",
-        "4Q Team Picks": "90dc8d4c-4ea1-40dd-aed5-c7de567bfeb0",
-        "1H Team Picks": "33dc0bff-2565-4012-8e67-01c42b275422",
-        "2H Team Picks": "92b50fa9-4455-4f12-94dc-176960fed6d9",
-    }
-}
-
-# Rows a single pinned-pill request returns; every pill's board is well under
-# this, so one page always covers it.
-UD_TEAM_PILLS_LIMIT = 1000
+# Lobby line categories (docs/underdog_api.md §7.6). The feed already carries
+# player_prop, so one lobby read per league asks for the other four: moneyline /
+# spread / total, period lines, team totals and props, yes/no game props. No pill
+# id or token is involved, so every modeled league gets the same coverage.
+UD_TEAM_CATEGORIES = ("core", "partial_core", "team_prop", "misc")
 
 # Alternate lines come one market per request with no batch form. Three workers
 # on one keep-alive session read ~17 markets/s: ~2,000 markets per two-minute
@@ -82,6 +68,10 @@ _BINARY_LINE = 0.5
 # Option choices by payout slot: over is higher / yes / the home side of a
 # moneyline or spread, under the other side.
 _CHOICE_SLOT = {"higher": 0, "yes": 0, "home": 0, "lower": 1, "no": 1, "away": 1}
+# A line is priced only when each of its options is one of these, once. Mass-option
+# markets (race to X, winning margin, halftime/fulltime, first team to score) repeat
+# yes / no once per outcome inside one line and have no two-sided reading.
+_LINE_CHOICES = frozenset(_CHOICE_SLOT) | {"draw"}
 
 _scraper: Scrape | None = None
 
@@ -225,9 +215,11 @@ def _ud_offer(
     Player lines keep the legacy shape. Team-appearance lines (team totals, team
     TDs) are keyed on the team and match-appearance lines (moneyline, spread, game
     total, period lines) on the home team, whose handicap ``stat_value`` carries.
-    Both use the API ``stat`` slug as the market rather than the display name: a
-    match moneyline archived under "Moneyline" would be read back as the sportsbook
-    team market (``archive._TEAM_ONLY_MARKETS``) and leak into the moneyline feature.
+    Their market is the appearance type plus the API ``stat`` slug (``team runs``,
+    ``match moneyline``): the display name "Moneyline" is the sportsbook team market
+    in the archive (``archive._TEAM_ONLY_MARKETS``) and the bare slug (``runs``,
+    ``points``) is a player market's internal name, and the archive enumerates a
+    market's entities as players when it builds training data.
     """
     stat = line["over_under"]["appearance_stat"]
     appearance = appearances[stat["appearance_id"]]
@@ -241,7 +233,7 @@ def _ud_offer(
     if appearance["type"] == "Player":
         market = _ud_fantasy_market(entity, league, stat["display_stat"])
     else:
-        market = stat["stat"]
+        market = f"{appearance['type'].lower()} {stat['stat']}"
     opponent = game["Away"] if game["Home"] == team else game["Home"]
     boosts = _ud_boosts(line["options"])
     return {
@@ -264,7 +256,13 @@ def _ud_offers(payload: dict, team_abbr: dict | None = None) -> list[tuple[dict,
     lines = payload["over_under_lines"]
     priced = []
     for line in lines.values() if isinstance(lines, dict) else lines:
-        if line["status"] != "active" or line["live_event"]:
+        choices = [option["choice"] for option in line["options"]]
+        if (
+            line["status"] != "active"
+            or line["live_event"]
+            or len(set(choices)) < len(choices)
+            or not set(choices) <= _LINE_CHOICES
+        ):
             continue
         offer = _ud_offer(line, players, appearances, matches, team_abbr)
         if offer is not None:
@@ -275,20 +273,14 @@ def _ud_offers(payload: dict, team_abbr: dict | None = None) -> list[tuple[dict,
 def _ud_team_offers(scraper: Scrape, sports: set[str]) -> tuple[list[tuple[dict, dict]], dict]:
     """Team and game markets per modeled sport, plus the team abbreviations their lobbies carry.
 
-    One ``match_grouped_lines`` request per sport (moneyline, spread, total) and one
-    per pinned pill (NFL team totals, TD picks, quarter and half team lines).
+    One ``match_grouped_lines`` request per sport carrying every category in
+    ``UD_TEAM_CATEGORIES``; the combined answer is the union of the single ones.
     """
-    urls = []
-    for sport in sorted(sports & set(UD_MODELED_LEAGUES)):
-        urls.append(
-            f"{UD_LOBBY_URL}/match_grouped_lines?sport_id={sport}&include_live=true&{_UD_QUERY}"
-        )
-        for filter_id in UD_TEAM_PILLS.get(sport, {}).values():
-            urls.append(
-                f"{UD_LOBBY_URL}/lines?sport_id={sport}&filter_id={filter_id}&filter_type=MarketGroup"
-                f"&limit={UD_TEAM_PILLS_LIMIT}&include_live=true&show_mass_option_markets=true"
-                f"&{_UD_QUERY}"
-            )
+    categories = "&".join(f"market_categories%5B%5D={category}" for category in UD_TEAM_CATEGORIES)
+    urls = [
+        f"{UD_LOBBY_URL}/match_grouped_lines?sport_id={sport}&include_live=true&{categories}&{_UD_QUERY}"
+        for sport in sorted(sports & set(UD_MODELED_LEAGUES))
+    ]
     priced, team_abbr = [], {}
     for url in tqdm(urls, desc="Getting Underdog team markets", unit="request"):
         payload = scraper.get(url)
@@ -382,13 +374,13 @@ def get_ud():
             (full tip-off ISO timestamp, for the dashboard's "locks in"
             countdown), ``Market``, ``Line``, ``Boost_Over`` and ``Boost_Under``.
             Team and game markets are keyed on the team (the home team for
-            match-level lines) with the API stat slug as ``Market``; alternate
-            lines are extra offers on the same market with their own ``Line``.
-            ``{}`` when the feed answers nothing.
+            match-level lines) under ``"team <slug>"`` / ``"match <slug>"``;
+            alternate lines are extra offers on the same market with their own
+            ``Line``. ``{}`` when the feed answers nothing.
 
     Requests per run: the feed, one lobby read per modeled league with games in
-    it plus that league's pinned pills, then one alternate-line read per modeled,
-    mapped player prop until the budget runs out.
+    it (all of its team and game categories), then one alternate-line read per
+    modeled, mapped player prop until the budget runs out.
     """
     scraper = _get_scraper()
     logger.info("Getting Underdog Lines")

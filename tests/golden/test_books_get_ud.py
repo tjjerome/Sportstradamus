@@ -6,11 +6,12 @@ so this pins its output and its request plan on hand-built payloads. The feed
 a combo player, a suspended line, a season future with no game, a one-sided
 line whose other side is suspended, and a solo-game line in an unmodeled
 league. The NBA lobby payload (dict containers) carries a team total, a spread,
-a moneyline, a yes/no line, a three-way period moneyline, a suspended line and
-a live line. NFL is absent from the feed, so no NFL pill is requested; only the
-NBA player line qualifies for an alternate-line fetch. The feed's NBA game title
-is listed away-first so the lobby ``teams`` dict, not the title, must set the
-sides; the MLB lobby answers empty so its sides come from the title.
+a moneyline, a yes/no line, a three-way period moneyline, a suspended line, a
+live line and a mass-option line. One lobby read per modeled league in the feed
+asks for all four team and game categories; only the NBA player line qualifies
+for an alternate-line fetch. The feed's NBA game title is listed away-first so
+the lobby ``teams`` dict, not the title, must set the sides; the MLB lobby
+answers empty so its sides come from the title.
 """
 
 from __future__ import annotations
@@ -185,6 +186,20 @@ _NBA_LOBBY = {
             "c6", "h1", "team_total_points", "Team Total Points", "110.5", _EVEN, status="suspended"
         ),
         "c7": _line("c7", "m1", "points", "Total Points", "225.5", _EVEN, live=True),
+        # A mass-option market: yes / no repeated once per outcome in one line.
+        "c8": _line(
+            "c8",
+            "m1",
+            "winning_margin",
+            "Winning Margin",
+            None,
+            [
+                ("yes", "2.0", "active"),
+                ("no", "0.8", "active"),
+                ("yes", "3.0", "active"),
+                ("no", "0.6", "active"),
+            ],
+        ),
     },
 }
 
@@ -221,6 +236,8 @@ _ALT_F1 = {
 def _core_url(sport: str) -> str:
     return (
         f"{underdog.UD_LOBBY_URL}/match_grouped_lines?sport_id={sport}&include_live=true"
+        "&market_categories%5B%5D=core&market_categories%5B%5D=partial_core"
+        "&market_categories%5B%5D=team_prop&market_categories%5B%5D=misc"
         f"&{underdog._UD_QUERY}"
     )
 
@@ -298,16 +315,16 @@ _EXPECTED = {
         "Technical Fouls": [
             _offer("Jayson Tatum", "NBA", "BOS", "LAL", "Technical Fouls", 0.5, 1.9, 0.0)
         ],
-        "team_total_points": [
-            _offer("LAL", "NBA", "LAL", "BOS", "team_total_points", 112.5, 0.9, 1.0)
+        "team team_total_points": [
+            _offer("LAL", "NBA", "LAL", "BOS", "team team_total_points", 112.5, 0.9, 1.0)
         ],
-        "spread": [_offer("LAL", "NBA", "LAL", "BOS", "spread", -3.5, 0.95, 0.95)],
-        "moneyline": [_offer("LAL", "NBA", "LAL", "BOS", "moneyline", 0.5, 0.7, 1.3)],
-        "team_first_basket": [
-            _offer("BOS", "NBA", "BOS", "LAL", "team_first_basket", 0.5, 1.5, 0.5)
+        "match spread": [_offer("LAL", "NBA", "LAL", "BOS", "match spread", -3.5, 0.95, 0.95)],
+        "match moneyline": [_offer("LAL", "NBA", "LAL", "BOS", "match moneyline", 0.5, 0.7, 1.3)],
+        "team team_first_basket": [
+            _offer("BOS", "NBA", "BOS", "LAL", "team team_first_basket", 0.5, 1.5, 0.5)
         ],
-        "period_1_moneyline": [
-            _offer("LAL", "NBA", "LAL", "BOS", "period_1_moneyline", 0.5, 0.8, 0.0)
+        "match period_1_moneyline": [
+            _offer("LAL", "NBA", "LAL", "BOS", "match period_1_moneyline", 0.5, 0.8, 0.0)
         ],
     },
     # Solo games carry no team id: the legacy quirk keeps Team empty and names
