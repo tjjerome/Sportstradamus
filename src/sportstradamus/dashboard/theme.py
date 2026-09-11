@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 
 from sportstradamus import data
+from sportstradamus.dashboard.assets import ambient_css
 
 # Celestial gold accent — oracle decoration (kickers, prophecy, constellation) and
 # interactive-highlight (active/selected/hovered UI states); never a data mark except
@@ -137,6 +138,15 @@ _STARFIELD_MAX_ALPHA = 0.20  # DESIGN §3 static-ambient ceiling (twinkles exemp
 # rules reshape below this width; render-level differences go through is_mobile().
 MOBILE_MAX_PX = 767
 
+# Tonight card nebula wash (mockup p8-tonight.html .card) — the ambient_tonight manifest
+# slot's fallback, rendered as-is until a licensed file lands (DESIGN §3 scar contract via
+# assets.ambient_css).
+_TONIGHT_CARD_BG_FALLBACK = (
+    "radial-gradient(ellipse at 16% -45%, rgba(46,107,230,.16), transparent 55%),\n"
+    "    radial-gradient(ellipse at 93% 8%, rgba(201,162,39,.10), transparent 46%), "
+    "rgba(26,29,36,.84)"
+)
+
 
 def _starfield_background() -> str:
     """CSS ``background`` layers for ``.starfield``: dust dots + nebula washes + base.
@@ -201,8 +211,7 @@ _APP_CSS_TEMPLATE = """
 .tonight-card{position:relative;overflow:hidden;display:flex;gap:14px;border:1px solid #3a3450;
   border-radius:4px;padding:15px 17px;margin:12px 0;text-decoration:none;color:inherit;
   cursor:pointer;transition:border-color .15s ease;
-  background:radial-gradient(ellipse at 16% -45%, rgba(46,107,230,.16), transparent 55%),
-    radial-gradient(ellipse at 93% 8%, rgba(201,162,39,.10), transparent 46%), rgba(26,29,36,.84)}
+  background:__TONIGHT_CARD_BG__}
 /* The card shell is a <div> (a block tag st.markdown passes verbatim; an outer <a> is not a
    CommonMark block tag, so the parser splits it into one box per child). A stretched, transparent
    <a> overlay (.tc-cardlink) turns the whole card into the View-game link; gold border on hover
@@ -314,8 +323,10 @@ button[data-testid="stBaseButton-segmented_controlActive"]{
 </style>
 """
 
-APP_CSS = _APP_CSS_TEMPLATE.replace("__STARFIELD_DUST__", _starfield_background()).replace(
-    "__MOBILE_MAX__", str(MOBILE_MAX_PX)
+APP_CSS = (
+    _APP_CSS_TEMPLATE.replace("__STARFIELD_DUST__", _starfield_background())
+    .replace("__MOBILE_MAX__", str(MOBILE_MAX_PX))
+    .replace("__TONIGHT_CARD_BG__", ambient_css("ambient_tonight", _TONIGHT_CARD_BG_FALLBACK))
 )
 
 # Dust + wash render via .starfield's own CSS background above; these 11 divs are

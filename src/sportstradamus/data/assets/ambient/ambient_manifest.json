@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "slots": {
+    "ambient_tonight": {
+      "file": null,
+      "opacity": 0.14,
+      "placement": "card-background",
+      "license": null,
+      "attribution": null,
+      "source_url": null
+    },
+    "ambient_receipts_hero": {
+      "file": null,
+      "opacity": 0.16,
+      "placement": "hero-background",
+      "license": null,
+      "attribution": null,
+      "source_url": null
+    }
+  }
+}
