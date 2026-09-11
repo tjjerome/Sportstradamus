@@ -24,8 +24,8 @@ from sportstradamus.dashboard.components.constellation_deep import (
 )
 from sportstradamus.dashboard.components.constellation_slate import game_edges
 from sportstradamus.dashboard.components.constellation_traces import (
-    _INACTIVE_ALPHA,
-    _INACTIVE_DESAT,
+    INACTIVE_ALPHA,
+    INACTIVE_DESAT,
     add_edge,
     desaturate,
     edge_scale,
@@ -94,7 +94,7 @@ def add_deep_layer(
         teams,
         px,
     )
-    alphas = edge_scale(deep, info, floor=DEEP_ALPHA_MIN, ceiling=_INACTIVE_ALPHA)
+    alphas = edge_scale(deep, info, floor=DEEP_ALPHA_MIN, ceiling=INACTIVE_ALPHA)
     add_deep_trace(
         fig,
         deep,
@@ -104,7 +104,7 @@ def add_deep_layer(
         # A liked leg the cut left behind is a candidate, just smaller; only the
         # model-passed tier wears the lens's own gray.
         colors=[
-            desaturate(team_color.get(info[k]["team"], GRAY), _INACTIVE_DESAT)
+            desaturate(team_color.get(info[k]["team"], GRAY), INACTIVE_DESAT)
             if info[k]["edge"] > 0
             else _DEEP_COLOR
             for k in deep

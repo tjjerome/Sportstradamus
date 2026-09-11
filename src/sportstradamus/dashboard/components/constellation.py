@@ -89,10 +89,10 @@ from sportstradamus.dashboard.components.constellation_spacing import (
 )
 from sportstradamus.dashboard.components.constellation_spring import star_positions
 from sportstradamus.dashboard.components.constellation_traces import (
-    _LABEL_FONT_SIZE,
-    _LABEL_FONT_SIZE_MOBILE,
-    _SIZE_MIN,
-    _SIZE_MIN_MOBILE,
+    LABEL_FONT_SIZE,
+    LABEL_FONT_SIZE_MOBILE,
+    SIZE_MIN,
+    SIZE_MIN_MOBILE,
     add_edge,
     add_node_trace,
     add_team_tags,
@@ -188,8 +188,8 @@ def constellation_figure(
     edges = game_edges(keys, rho)
     floor, label_size, shape_scale, px, lens_size, deep_span, sky_y = (
         (
-            _SIZE_MIN_MOBILE,
-            _LABEL_FONT_SIZE_MOBILE,
+            SIZE_MIN_MOBILE,
+            LABEL_FONT_SIZE_MOBILE,
             SHAPE_SCALE_MOBILE,
             PX_PER_UNIT_MOBILE,
             WIDER_STAR_SIZE_MOBILE,
@@ -198,8 +198,8 @@ def constellation_figure(
         )
         if mobile
         else (
-            _SIZE_MIN,
-            _LABEL_FONT_SIZE,
+            SIZE_MIN,
+            LABEL_FONT_SIZE,
             SHAPE_SCALE,
             PX_PER_UNIT,
             WIDER_STAR_SIZE,

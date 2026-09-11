@@ -30,9 +30,9 @@ from sportstradamus.dashboard.components.constellation_spacing import (
     Y_RANGE,
 )
 from sportstradamus.dashboard.components.constellation_traces import (
-    _FIG_HEIGHT,
-    _LABEL_FONT_SIZE,
-    _LABEL_FONT_SIZE_MOBILE,
+    FIG_HEIGHT,
+    LABEL_FONT_SIZE,
+    LABEL_FONT_SIZE_MOBILE,
 )
 from sportstradamus.dashboard.components.constellation_wider import (
     WIDER_GAMES,
@@ -172,7 +172,7 @@ def test_a_deep_tier_that_closes_the_sky_grows_it_instead_of_drawing_nothing():
 
 
 def _sky_boxes(
-    fig, *, px=PX_PER_UNIT, size=WIDER_STAR_SIZE, font=_LABEL_FONT_SIZE
+    fig, *, px=PX_PER_UNIT, size=WIDER_STAR_SIZE, font=LABEL_FONT_SIZE
 ) -> tuple[list[tuple], list[tuple]]:
     """The sky's label ink boxes and star boxes in px, as ``(game, x0, y0, x1, y1)``.
 
@@ -233,7 +233,7 @@ def test_the_desktop_keeps_its_own_height_while_its_side_bands_hold():
         fig = constellation_figure(
             [], None, _ladder(13), deep_pool=deep, wider_groups=_wider_groups(3)
         )
-        assert fig.layout.height == _FIG_HEIGHT
+        assert fig.layout.height == FIG_HEIGHT
         assert tuple(fig.layout.yaxis.range) == (-Y_RANGE, Y_RANGE)
 
 
@@ -303,8 +303,8 @@ def test_wider_label_boxes_clear_every_foreign_star_on_both_viewports():
         for game in names
     ]
     for mobile, px, size, font in (
-        (False, PX_PER_UNIT, WIDER_STAR_SIZE, _LABEL_FONT_SIZE),
-        (True, PX_PER_UNIT_MOBILE, WIDER_STAR_SIZE_MOBILE, _LABEL_FONT_SIZE_MOBILE),
+        (False, PX_PER_UNIT, WIDER_STAR_SIZE, LABEL_FONT_SIZE),
+        (True, PX_PER_UNIT_MOBILE, WIDER_STAR_SIZE_MOBILE, LABEL_FONT_SIZE_MOBILE),
     ):
         fig = constellation_figure(
             [], None, _ladder(13), deep_pool=_deep_pool(190), wider_groups=groups, mobile=mobile

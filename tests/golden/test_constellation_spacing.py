@@ -47,9 +47,9 @@ from sportstradamus.dashboard.components.constellation_spacing import (
     settle,
 )
 from sportstradamus.dashboard.components.constellation_traces import (
-    _LABEL_FONT_SIZE,
-    _LABEL_FONT_SIZE_MOBILE,
-    _SIZE_MIN_MOBILE,
+    LABEL_FONT_SIZE,
+    LABEL_FONT_SIZE_MOBILE,
+    SIZE_MIN_MOBILE,
 )
 
 _PX = (100.0, 100.0)  # round px-per-unit so the primitive's distances are hand-checkable
@@ -314,9 +314,9 @@ def test_a_knots_members_stay_a_fingertip_apart_on_the_phone():
     stars = _stars(constellation_figure([], corr, pool, shape=_HOURGLASS, mobile=True))
     (ax, ay), size_a, *_ = stars[knot[0]]
     (bx, by), size_b, *_ = stars[knot[1]]
-    assert min(size_a, size_b) >= _SIZE_MIN_MOBILE
+    assert min(size_a, size_b) >= SIZE_MIN_MOBILE
     apart = math.hypot((ax - bx) * PX_PER_UNIT_MOBILE[0], (ay - by) * PX_PER_UNIT_MOBILE[1])
-    assert apart >= _SIZE_MIN_MOBILE, apart
+    assert apart >= SIZE_MIN_MOBILE, apart
 
 
 def test_spacing_never_moves_an_uncrowded_star():
@@ -361,8 +361,8 @@ def test_caption_boxes_never_overlap():
     """
     pool = _ladder(DEFAULT_STARS + 3)
     viewports = (
-        (False, PX_PER_UNIT, _LABEL_FONT_SIZE),
-        (True, PX_PER_UNIT_MOBILE, _LABEL_FONT_SIZE_MOBILE),
+        (False, PX_PER_UNIT, LABEL_FONT_SIZE),
+        (True, PX_PER_UNIT_MOBILE, LABEL_FONT_SIZE_MOBILE),
     )
     for template, (mobile, px, font_px) in itertools.product(
         shape_catalog()["templates"].values(), viewports

@@ -50,7 +50,7 @@ from sportstradamus.dashboard.components.constellation_spacing import (
 # passes on this" rather than as one more desaturated candidate.
 _DEEP_COLOR = "#5f6b80"
 # Over the engraving's FILLER_SIZE (6) so a lens star never reads as decoration,
-# under the main map's floor (_SIZE_MIN 14) so it never outranks a real star.
+# under the main map's floor (SIZE_MIN 14) so it never outranks a real star.
 DEEP_SIZE_MIN, DEEP_SIZE_MAX = 7, 13
 # A thumb needs ~12 px; 20 stays under the 22 px mobile main floor.
 DEEP_SIZE_MIN_MOBILE, DEEP_SIZE_MAX_MOBILE = 12, 20

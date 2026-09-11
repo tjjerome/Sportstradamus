@@ -45,12 +45,12 @@ from sportstradamus.dashboard.components.constellation_spacing import (
     PX_PER_UNIT_MOBILE,
 )
 from sportstradamus.dashboard.components.constellation_traces import (
-    _EDGE_BASE_ALPHA,
-    _INACTIVE_ALPHA,
-    _LABEL_FONT_SIZE_MOBILE,
-    _SIZE_MAX,
-    _SIZE_MIN,
-    _SIZE_MIN_MOBILE,
+    EDGE_BASE_ALPHA,
+    INACTIVE_ALPHA,
+    LABEL_FONT_SIZE_MOBILE,
+    SIZE_MAX,
+    SIZE_MIN,
+    SIZE_MIN_MOBILE,
     star_label,
 )
 from sportstradamus.dashboard.components.constellation_wider import _WIDER_SCALE, WIDER_GAMES
@@ -152,7 +152,7 @@ def test_active_full_color_candidate_desaturated_and_dim():
     assert active.marker.symbol == "star"
     assert active.marker.opacity == 1.0
     assert list(active.marker.color) == [nyk_primary]  # full NYK fill
-    assert cand.marker.opacity == _INACTIVE_ALPHA
+    assert cand.marker.opacity == INACTIVE_ALPHA
     assert cand.marker.color[0] != team_colors("NBA", "SAS")[0]  # blended toward gray, not raw
 
 
@@ -211,7 +211,7 @@ def test_star_size_scales_with_edge():
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.1))
     sizes = _sizes(constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.3)), pool))
     assert sizes["A|PTS|Over"] > sizes["B|REB|Under"]  # higher K → bigger star
-    assert sizes["A|PTS|Over"] == _SIZE_MAX  # the game's strongest leg maxes out
+    assert sizes["A|PTS|Over"] == SIZE_MAX  # the game's strongest leg maxes out
 
 
 def _ladder(n: int) -> pd.DataFrame:
@@ -322,11 +322,9 @@ def test_slip_edges_brighten_over_the_faint_base_web():
         ("B|REB|Under", "C|AST|Over", 0.5),
     )
     edges = _edge_by_pair(constellation_figure(legs, corr, pool))
-    assert (
-        edges[frozenset(("A|PTS|Over", "B|REB|Under"))].opacity > _EDGE_BASE_ALPHA
-    )  # both in slip
-    assert edges[frozenset(("A|PTS|Over", "C|AST|Over"))].opacity == _EDGE_BASE_ALPHA  # candidate
-    assert edges[frozenset(("B|REB|Under", "C|AST|Over"))].opacity == _EDGE_BASE_ALPHA  # candidate
+    assert edges[frozenset(("A|PTS|Over", "B|REB|Under"))].opacity > EDGE_BASE_ALPHA  # both in slip
+    assert edges[frozenset(("A|PTS|Over", "C|AST|Over"))].opacity == EDGE_BASE_ALPHA  # candidate
+    assert edges[frozenset(("B|REB|Under", "C|AST|Over"))].opacity == EDGE_BASE_ALPHA  # candidate
 
 
 def test_single_slip_leg_leaves_only_the_faint_base_web():
@@ -337,7 +335,7 @@ def test_single_slip_leg_leaves_only_the_faint_base_web():
     edges = _edge_traces(
         constellation_figure(legs, _corr(("A|PTS|Over", "B|REB|Under", 0.5)), pool)
     )
-    assert edges and all(e.opacity == _EDGE_BASE_ALPHA for e in edges)
+    assert edges and all(e.opacity == EDGE_BASE_ALPHA for e in edges)
 
 
 def test_empty_slip_shows_the_faint_base_web():
@@ -346,7 +344,7 @@ def test_empty_slip_shows_the_faint_base_web():
     pool = _pool(("A|PTS|Over", 0.4), ("B|REB|Under", 0.3))
     edges = _edge_traces(constellation_figure([], _corr(("A|PTS|Over", "B|REB|Under", 0.5)), pool))
     assert edges  # the tie is present as a (base-web) trace
-    assert all(e.opacity == _EDGE_BASE_ALPHA for e in edges)
+    assert all(e.opacity == EDGE_BASE_ALPHA for e in edges)
 
 
 def test_layout_is_deterministic():
@@ -393,7 +391,7 @@ def test_deep_stars_take_their_ties_to_main_stars():
     )
     tie = next(e for e in _edge_traces(fig) if set(e.meta) == {"A|PTS|Over", "D|PTS|Under"})
     assert tie.name == "deep_edge"  # a lens trace, so it fades in and out with its star
-    assert tie.opacity == _EDGE_BASE_ALPHA  # only a both-ends-in-slip tie brightens
+    assert tie.opacity == EDGE_BASE_ALPHA  # only a both-ends-in-slip tie brightens
 
 
 def test_deep_tier_colors_split_liked_from_passed():
@@ -408,7 +406,7 @@ def test_deep_tier_colors_split_liked_from_passed():
     liked, passed = deep.marker.opacity
     assert liked > passed
     assert passed == DEEP_ALPHA_MIN
-    assert all(alpha <= _INACTIVE_ALPHA for alpha in deep.marker.opacity)
+    assert all(alpha <= INACTIVE_ALPHA for alpha in deep.marker.opacity)
     assert deep.marker.color[1] == _DEEP_COLOR
     assert all(color not in (GRAY, GOLD) for color in deep.marker.color)
 
@@ -423,7 +421,7 @@ def test_an_in_slip_deep_leg_burns_as_a_promoted_star():
     assert {cd[0] for cd in _trace(fig, "deep").customdata} == {"E|AST|Over"}
     active = _trace(fig, "active")
     assert [cd[0] for cd in active.customdata] == ["D|PTS|Under"]
-    assert active.marker.size[0] >= _SIZE_MIN
+    assert active.marker.size[0] >= SIZE_MIN
 
 
 def test_deep_pool_does_not_move_existing_stars():
@@ -447,9 +445,9 @@ def test_deep_pool_star_sizes_scale_with_edge_under_the_main_floor():
     size = dict(zip((cd[0] for cd in deep.customdata), deep.marker.size, strict=True))
     assert size[f"P{DEFAULT_STARS}|PTS|Over"] > size["D|PTS|Under"]
     assert size["D|PTS|Under"] == size["E|AST|Over"] == DEEP_SIZE_MIN  # both passes, both floored
-    assert all(FILLER_SIZE < px < _SIZE_MIN for px in size.values())
+    assert all(FILLER_SIZE < px < SIZE_MIN for px in size.values())
     phone = _trace(constellation_figure([], None, pool, deep_pool=deep_pool, mobile=True), "deep")
-    assert all(DEEP_SIZE_MIN_MOBILE <= px < _SIZE_MIN_MOBILE for px in phone.marker.size)
+    assert all(DEEP_SIZE_MIN_MOBILE <= px < SIZE_MIN_MOBILE for px in phone.marker.size)
 
 
 def test_deep_pool_positions_are_deterministic_across_calls():
@@ -522,7 +520,7 @@ def test_wider_lens_recedes_the_focus_and_keeps_clearance():
             )
             # Only the spacing pass moves a star off the exact recede, and never by
             # more than its own radius — the drawing stays the same drawing.
-            assert drift <= _SIZE_MAX / 2, (key, mobile, drift)
+            assert drift <= SIZE_MAX / 2, (key, mobile, drift)
         for one, other in itertools.combinations(sorted(before), 2):
             apart = math.hypot(
                 (after[one][0] - after[other][0]) * px[0],
@@ -646,8 +644,8 @@ def test_mobile_figure_raises_size_floor_and_flags_slip_membership():
     node_traces = _node_traces(fig)
     assert node_traces
     for t in node_traces:
-        assert min(t.marker.size) >= _SIZE_MIN_MOBILE
-        assert t.textfont.size == _LABEL_FONT_SIZE_MOBILE
+        assert min(t.marker.size) >= SIZE_MIN_MOBILE
+        assert t.textfont.size == LABEL_FONT_SIZE_MOBILE
         for cd in t.customdata:
             assert len(cd) == 9
             assert cd[8] in (0, 1)
@@ -731,7 +729,7 @@ def test_stars_land_on_template_vertices():
 def test_unfilled_vertices_get_filler_stars_too_small_to_read_as_legs():
     fillers = [t for t in _decoration_traces(_shaped()) if t.mode == "markers"]
     assert len(fillers) == 1
-    assert fillers[0].marker.size == FILLER_SIZE < _SIZE_MIN
+    assert fillers[0].marker.size == FILLER_SIZE < SIZE_MIN
     assert len(fillers[0].x) == len(_HOURGLASS["vertices"]) - len(_node_pos(_shaped()))
 
 

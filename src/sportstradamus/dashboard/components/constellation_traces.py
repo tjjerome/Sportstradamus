@@ -23,13 +23,13 @@ from sportstradamus.leg_schema import leg_field, leg_field_float
 _NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 
 # Star size scales with the leg's Kelly edge, relative to the game's strongest leg.
-_SIZE_MIN = 14
-_SIZE_MAX = 38
+SIZE_MIN = 14
+SIZE_MAX = 38
 # A candidate (not-in-slip) star keeps most of its team hue — only a light blend toward
 # gray plus reduced opacity marks it not-yet-picked. The old 0.55/0.45 crushed dark
 # franchise colors to near-gray, so candidates read as a colorless field.
-_INACTIVE_DESAT = 0.35
-_INACTIVE_ALPHA = 0.60
+INACTIVE_DESAT = 0.35
+INACTIVE_ALPHA = 0.60
 
 _EDGE_WIDTH_MIN = 1.0
 _EDGE_WIDTH_SPAN = 6.0  # width at |ρ|=1 ≈ 7px; weak ties stay hairlines for contrast
@@ -37,14 +37,14 @@ _EDGE_ALPHA_MIN = 0.25
 # The whole correlation web is drawn barely-there at this alpha so the structure reads
 # before any pick without drowning the field; a tie whose both endpoints are in the slip
 # brightens to full gold (add_edge), well above this base.
-_EDGE_BASE_ALPHA = 0.03
-_FIG_HEIGHT = 380
-_LABEL_FONT_SIZE = 11  # active-star caption — small enough to fit in a dense game
+EDGE_BASE_ALPHA = 0.03
+FIG_HEIGHT = 380
+LABEL_FONT_SIZE = 11  # active-star caption — small enough to fit in a dense game
 
 # Phase M touch floors: a fingertip needs ~22px; the label lifts with it. The Kelly
 # ordering (size = edge) survives — the floor compresses the range, never reorders it.
-_SIZE_MIN_MOBILE = 22
-_LABEL_FONT_SIZE_MOBILE = 13
+SIZE_MIN_MOBILE = 22
+LABEL_FONT_SIZE_MOBILE = 13
 _ACTIVE_LABEL_COLOR = "#C7CEDA"  # in-slip captions read brighter than gray candidate labels
 
 # Cinzel team tags framing the two sides of the map (docs/mockups/p8-games.html .teamtag).
@@ -121,7 +121,7 @@ def node_info(leg: Mapping) -> dict:
 
 
 def edge_scale(
-    keys: list[str], info: dict[str, dict], *, floor: float, ceiling: float = _SIZE_MAX
+    keys: list[str], info: dict[str, dict], *, floor: float, ceiling: float = SIZE_MAX
 ) -> dict[str, float]:
     """Per-node value in ``[floor, ceiling]`` ∝ Kelly edge, over the strongest of ``keys``.
 
@@ -141,7 +141,7 @@ def blank_figure() -> go.Figure:
     """The empty locked frame every constellation is drawn into (no zoom, no pan)."""
     fig = go.Figure()
     fig.update_layout(
-        height=_FIG_HEIGHT,
+        height=FIG_HEIGHT,
         showlegend=False,
         paper_bgcolor="rgba(0,0,0,0)",  # transparent — the page starfield reads through the map
         plot_bgcolor="rgba(0,0,0,0)",
@@ -193,7 +193,7 @@ def add_edge(
 ) -> None:
     """One correlation edge: gold, width/opacity ∝ |ρ|, dashed when ρ < 0.
 
-    Drawn at a faint base alpha (``_EDGE_BASE_ALPHA``) so the whole web reads as a
+    Drawn at a faint base alpha (``EDGE_BASE_ALPHA``) so the whole web reads as a
     sketch; brightens to full ``|ρ|``-scaled gold only when **both** endpoints are in
     the slip, so the slip's own correlations stand out over the rest. ``meta`` carries
     the endpoint keys so the component's JS can faint-preview a star's other ties on hover.
@@ -212,7 +212,7 @@ def add_edge(
                 "width": _EDGE_WIDTH_MIN + abs(rho) * _EDGE_WIDTH_SPAN,
                 "dash": "dot" if rho < 0 else "solid",
             },
-            opacity=min(1.0, _EDGE_ALPHA_MIN + abs(rho)) if incident else _EDGE_BASE_ALPHA,
+            opacity=min(1.0, _EDGE_ALPHA_MIN + abs(rho)) if incident else EDGE_BASE_ALPHA,
             meta=[a, b],
             hoverinfo="skip",
         )
@@ -229,7 +229,7 @@ def add_node_trace(
     captions: Mapping[str, str],
     *,
     active: bool,
-    label_size: int = _LABEL_FONT_SIZE,
+    label_size: int = LABEL_FONT_SIZE,
 ) -> None:
     """One scatter trace of stars: active = full team color, candidate = desaturated/dim.
 
@@ -241,7 +241,7 @@ def add_node_trace(
     if not keys:
         return
     base_colors = [team_color.get(info[k]["team"], GRAY) for k in keys]
-    colors = [c if active else desaturate(c, _INACTIVE_DESAT) for c in base_colors]
+    colors = [c if active else desaturate(c, INACTIVE_DESAT) for c in base_colors]
     fig.add_trace(
         go.Scatter(
             x=[pos[k][0] for k in keys],
@@ -252,7 +252,7 @@ def add_node_trace(
                 "symbol": "star",
                 "size": [sizes[k] for k in keys],
                 "color": colors,
-                "opacity": 1.0 if active else _INACTIVE_ALPHA,
+                "opacity": 1.0 if active else INACTIVE_ALPHA,
             },
             text=[info[k]["label"] if k in captions else "" for k in keys],
             textposition=[captions.get(k, "top center") for k in keys],
