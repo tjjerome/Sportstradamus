@@ -177,7 +177,7 @@ with the pipelines use `LazyArchive` from `sportstradamus.helpers`.
 | Module | CLI command | What it does |
 |---|---|---|
 | `moneylines.py` | `confer` | Odds API ingest for game-level and player-prop markets: `get_moneylines`, `get_props` |
-| `books.py` | (called from `prediction/cli.py`) | Underdog (`get_ud`) and Sleeper (`get_sleeper`) scrapers |
+| `books.py` | (called from `prediction/cli.py`) | Underdog (`get_ud`) and Sleeper (`get_sleeper`) scrapers. Underdog API reference: [underdog_api.md](underdog_api.md) |
 | `nightly.py` | `reflect` | Resolves predictions against results; historical parlay performance |
 | `analysis.py` / `clv.py` | — | Shared metric functions; closing-line-value computation |
 | `skew_normal.py`, `skew_normal_centered.py`, `double_poisson.py`, `hurdle.py` | — | Custom PyTorch distributions for LightGBMLSS (SkewNormal, centered parametrization, Double Poisson, HurdleZINB) |

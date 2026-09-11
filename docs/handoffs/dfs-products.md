@@ -104,7 +104,11 @@ relevant stage-0 capture, revise this brief in place, resume.
   a void with all others won ⇒ Win paid at the REDUCED pick-count table (4-pick with
   one void pays as a 3-pick win); a 3-pick ladder with void(s) refunds — the pricer
   carries P(void) per pick and re-tiers the payout table on void. Still open: API
-  payload existence (VERIFY-6).
+  payload existence (VERIFY-6) — no ladders endpoint on the web surface (2026-09-10:
+  none in the capture or bundles, three path guesses 404 with a token; the feature
+  flags and deep link point at the mobile apps); `/v2/sports` reports NFL
+  `ladder_status: active` (see
+  [underdog_api.md §6.9](../underdog_api.md#69-not-seen-anywhere)).
 - **Sleeper: team-line × player pairing NOT allowed yet (owner verified in-app
   2026-07-10)** — Sleeper sub-lane is standalone-contract + player-parlay only for now,
   though player×player correlation repricing exists there too. Contract shape + $0.02 fee
@@ -120,11 +124,32 @@ relevant stage-0 capture, revise this brief in place, resume.
   `data/config/banned_combos.json` (platform × league × team/opponent ×
   `"POS.market & POS.market"` → `[same-direction, opposite-direction]` modifiers,
   `0.0` = hard ban) — it drifts and has no prediction-market pairs yet; the stage-0
-  modifier-extraction harness owns refreshing it. Stage-4 edge thesis is therefore
+  modifier-extraction harness owns refreshing it; the tax itself is now readable from
+  the API (`GET /v3/entry_slips/estimate`, token + `UD-User-ID`) and its mechanism is
+  mapped in [underdog_api.md §6.8](../underdog_api.md#68-entry-slip-pricing): the
+  slip pays table × Π(pick multipliers) × m, with m = Π p_i / P(all same-game picks
+  hit), clipped at 1. Flex computes m from a Gaussian copula with one ρ per pair type
+  (QB pass yds × any same-team receiving yds: 0.48, whatever the receiver); Power from
+  a pair-specific, asymmetric joint that is 1.0 wherever it has no history (a rookie
+  TE, opposing QBs' yards). What the pricer does with that: (a) reproduce m_flex
+  offline from our de-vigged line probabilities and that ρ table, so Flex EV is
+  computable without a token; (b) our `corr_same_team.parquet` ρ against their 0.48
+  says which receivers Flex overcharges (low-target TE/RB) and which it undercharges
+  (a WR1 with ρ above 0.48); (c) positive-ρ pairs Power quotes at 1.0 (new pairings,
+  opposing QBs in a shootout) are free correlation and the only place a same-game
+  Power stack is ever fairly priced; (d) opposite-side and WR + WR pairs are quoted as
+  independent although the joint probability is lower, so they are always overpriced.
+  The Power/Flex tables it quotes differ from `underdog_payouts.json` on most cells. Stage-4 edge thesis is therefore
   tax-vs-true-ρ mismatch per pair-type, not an untaxed coupling; B8's "taxed ⇒ kill"
   fires only if the tax-curve sweep (weak/strong/negative-ρ pairs, filler variation)
-  shows no exploitable mismatch. **UD alt-rung API breadth** (`get_ud`) still
-  unverified.
+  shows no exploitable mismatch. **UD alt-rung API breadth** (`get_ud`): probe P1
+  (2026-09-10) found `has_alternates` flagged on 5,447 of 12,272 `v1/over_under_lines`
+  rows but one line per (appearance, stat), so no rungs are fetched today; the rungs
+  come one market per call from `v3/over_unders/<id>/alternate_projections` (spreads
+  25 rungs, yardage 11–16, TDs 3), costed in
+  [underdog_api.md §9.4](../underdog_api.md#94-alternate-rungs). Team and game markets
+  (team totals, period lines, both-teams-to-score) are lobby-only, catalogued in
+  [underdog_api.md §7.6](../underdog_api.md#76-team-and-game-markets).
 - **Payout tables are consumed, not owned.** UD per-season table drift is a
   `hygiene-closeout` housekeeping item, not this lane's; Sleeper's table lives in
   `sleeper-parity` stage 0. This lane reads whatever those lanes/stage-0 captures land.

@@ -332,7 +332,8 @@ Full per-submodule breakdown is in docs/ARCHITECTURE.md §Package Map.
 
 ### Data Pipeline
 
-1. **Collection** (`books.py`, `moneylines.py`): Scrapes Underdog and Sleeper directly;
+1. **Collection** (`books.py`, `moneylines.py`): Scrapes Underdog and Sleeper directly
+   (Underdog endpoints, payloads, caching: [docs/underdog_api.md](docs/underdog_api.md));
    fetches all other sportsbook props via the Odds API. Uses `Scrape` helper with
    ScrapeOps header rotation.
 2. **Enrichment** (`stats/`): `Stats` subclasses fetch player game logs from league APIs

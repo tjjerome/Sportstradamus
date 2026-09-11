@@ -102,6 +102,10 @@ You need a **sharp consensus** to compare Underdog's static prop lines against. 
 
 ### 2.2 Underdog line capture
 
+This repo scrapes Underdog directly (`books.py:get_ud`); the endpoints, payloads and
+polling floors live in [underdog_api.md](underdog_api.md). The caution below still
+applies to that scraper.
+
 This is the one area where you must tread carefully. Three approaches in increasing aggressiveness:
 
 1. **Manual export.** Underdog has no built-in export. Open-source Chrome extensions like the *Underdog Bet Exporter* exist for capturing your own bet history. **Use this only for capturing your own placed entries**, not for scraping.
