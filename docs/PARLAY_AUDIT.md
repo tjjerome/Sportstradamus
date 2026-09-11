@@ -111,7 +111,7 @@ module-level constants in `parlay.py` (`_BEAM_WIDTH`, `_PARLAY_GEO_MEAN_FLOOR`,
 ### 2.4 Payout source
 
 Payout curves load from `data/config/underdog_payouts.json` via `_payout_curve_for`
-(`parlay.py:128-195`) with contest variants (power / flex / insurance / rivals; pooled
+(`parlay.py:128-195`) with contest variants (power / flex / insurance; pooled
 default); the old hardcoded search table and display-time `Boost` overwrite survive
 only behind `legacy=True` (`correlation.py:88-99`, default off), so search and display
 use the same regime on the current path.

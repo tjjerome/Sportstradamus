@@ -75,8 +75,8 @@ All owner-locked 2026-06-11 (the mockup-review session); changes are owner-only:
 - Prose is precomputed templates/phrase banks at prophecize time. Free-LLM rewriter is an
   optional later seam, never a dependency. No paid APIs anywhere in the dashboard path.
 - Platform taxonomy: platforms = Underdog, Sleeper. Power/Flex = auto play types (2–3 / 4+
-  legs), informational chip only. Rivals = leg type (sits inside a Power/Flex slip beside player
-  props and game lines, not a separate contest). Internal `contest_variant` field names unchanged.
+  legs), informational chip only. Rivals legs retired since 2026-09-10 (H2H chip gone).
+  Internal `contest_variant` field names unchanged.
 - Slips is a **story menu**, not the old `Family` cluster: up to 5 data-driven stories per game,
   each offering a **Bankroll Builder** (max Kelly log-growth, sun motif) and a **Shoot the Moon**
   (max EV, moon motif) starting parlay, edited from there in the constellation. Menu stakes are a
@@ -243,8 +243,8 @@ stage ends with the §9 checklist green and the dashboard runnable.
   start at the 0.05 the unit gate and per-offer "why" already use) and the correlation clusters
   among them. **No "always" archetype** — a thin game yields few or zero stories; game-script
   surfaces only when the shape is itself the signal (the engine keeps its game-script *fallback* for
-  labeling a user-built slip, but the generator has none). Eligible leg types are player props,
-  **Rivals** matchup legs, and — behind **L3** — game lines, which double as correlation anchors that
+  labeling a user-built slip, but the generator has none). Eligible leg types are player props
+  and — behind **L3** — game lines, which double as correlation anchors that
   pull player legs into a story (a DFS line diverging from our weighted consensus is the edge). For
   each story emit two parlays over its eligible legs, **free to share legs**:
   - **Bankroll Builder** (sun motif) = max expected **log-growth** G — the full-Kelly geometric
@@ -291,7 +291,7 @@ stage ends with the §9 checklist green and the dashboard runnable.
   context strip shows total / derived spread / favorite (replacing the per-row `O/U`/`Moneyline`
   peek at `surfaces/game.py:51-56`); Tonight cards show the top per-leg-set thesis headline per
   game. **Constellation v1 doubles as the slip editor the P3 story menu loads into** — nodes are the
-  game's candidate legs (player props, Rivals, L3 game lines), edges the `current_game_corr` ρ;
+  game's candidate legs (player props, L3 game lines), edges the `current_game_corr` ρ;
   add/remove/swap drives the live rail + thesis regen (graph viz here, the seeded parlay + rail
   mechanics are P3). Acceptance: render pins; archive-lock gate green; View-game lands on the clicked game
   (doubleheaders included); context strip shows the derived spread for a fixture game. Est: 1–2
@@ -421,8 +421,7 @@ stage ends with the §9 checklist green and the dashboard runnable.
 - Slip state lives under plain non-widget `st.session_state` keys; rail renders from `app.py` so
   its widgets exist on every page.
 - Money is `Decimal` (CLAUDE.md); play-type rule is one named constant in `slip/math.py`.
-- All display copy follows the spec §2 taxonomy (platforms = UD/Sleeper; Power/Flex = chip;
-  Rivals = leg type).
+- All display copy follows the spec §2 taxonomy (platforms = UD/Sleeper; Power/Flex = chip).
 - Conflict order: command output > CLAUDE.md/CONTRIBUTING.md > DESIGN.md/spec > this brief >
   roadmap v3.
 

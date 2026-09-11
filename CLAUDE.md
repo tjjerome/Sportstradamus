@@ -246,7 +246,7 @@ sportstradamus confer           # fetch current odds/props
 sportstradamus meditate         # train/retrain ML models
 sportstradamus reflect          # historical parlay performance
 sportstradamus dashboard        # Streamlit dashboard
-sportstradamus bet pickem       # Underdog Power/Flex/Rivals recommendations YAML
+sportstradamus bet pickem       # Underdog/Sleeper Power/Flex recommendations YAML
 sportstradamus bet kelly        # re-size a recommendations YAML offline
 
 # Quality gates — all three must pass before committing
@@ -332,10 +332,11 @@ Full per-submodule breakdown is in docs/ARCHITECTURE.md §Package Map.
 
 ### Data Pipeline
 
-1. **Collection** (`books.py`, `moneylines.py`): Scrapes Underdog and Sleeper directly
-   (Underdog endpoints, payloads, caching: [docs/underdog_api.md](docs/underdog_api.md));
-   fetches all other sportsbook props via the Odds API. Uses `Scrape` helper with
-   ScrapeOps header rotation.
+1. **Collection** (`books/`, `moneylines.py`): Scrapes Underdog and Sleeper directly
+   (Underdog covers player props, team/game markets and alternate lines; endpoints,
+   payloads, caching: [docs/underdog_api.md](docs/underdog_api.md)); fetches all other
+   sportsbook props via the Odds API. Uses `Scrape` helper with ScrapeOps header
+   rotation.
 2. **Enrichment** (`stats/`): `Stats` subclasses fetch player game logs from league APIs
    (mlb-statsapi, nba-api, nfl-data-py), compute rolling features, and build KNN
    player-comparable feature sets.

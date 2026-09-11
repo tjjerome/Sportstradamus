@@ -1,9 +1,9 @@
 # Underdog Fantasy API reference
 
 How the Underdog web app talks to its backend today, what the payloads carry, and how
-to pull the most lines per request. This is a reference for the scraper follow-up, not
-a scraper change: `books.py` is unmodified and still reads the legacy feed described in
-§2. The board-capture ToS caution stays canonical in
+to pull the most lines per request. The scraper
+([books/underdog.py](../src/sportstradamus/books/underdog.py)) is built on it; §2 is
+its request plan. The board-capture ToS caution stays canonical in
 [underdog_edge_suite.md §2.2](underdog_edge_suite.md#22-underdog-line-capture); nothing
 here changes it.
 
@@ -54,20 +54,26 @@ parser change away (§8, §10).
 
 ## 2. The scraper today
 
-`get_ud` makes three unauthenticated GETs
-([books.py:257-279](../src/sportstradamus/books.py#L257-L279)) **[CODE]**:
+`get_ud` ([books/underdog.py](../src/sportstradamus/books/underdog.py)) makes only
+unauthenticated GETs **[CODE]**:
 
-| Call | Constant | Purpose |
+| Call | When | Purpose |
 |---|---|---|
-| `GET stats.underdogfantasy.com/v1/teams` | `UD_TEAMS_URL` | team id → abbreviation |
-| `GET api.underdogfantasy.com/v1/over_under_lines` | `UD_LINES_URL` | every over/under line, all sports |
-| `GET api.underdogfantasy.com/beta/v3/rival_lines` | `UD_RIVALS_URL` | head-to-head lines |
+| `GET api…/v1/over_under_lines` (`UD_LINES_URL`) | once | every player prop, all sports (§6.1) |
+| `GET api…/v1/lobbies/content/match_grouped_lines?sport_id=<X>` + trio (`UD_LOBBY_URL`) | once per modeled league (`UD_MODELED_LEAGUES`) with games in the feed | moneyline, spread, total; its `teams` dict also names the feed's teams (§7.3) |
+| `GET api…/v1/lobbies/content/lines?sport_id=NFL&filter_id=<pill>&limit=1000…` + trio | once per pinned pill (`UD_TEAM_PILLS`: Team Totals, TD Picks, 1Q–4Q / 1H / 2H Team Picks) | team totals, team TDs, period team lines (§7.6) |
+| `GET api…/v3/over_unders/<over_under_id>/alternate_projections` (`UD_ALT_LINES_URL`) | one per modeled, `stat_map`-mapped player prop flagged `has_alternates`, three workers on one session, until `UD_ALT_LINES_BUDGET_S` (120 s) runs out or `UD_ALT_LINES_EMPTY_STREAK` (25) markets in a row answer without rungs; games about to lock and deep lines first | alternate lines (§9.4) |
 
-The parser reads `over_under.appearance_stat.appearance_id` / `display_stat`,
-`options[].choice` / `payout_multiplier`, and `float(o["stat_value"])`
-([books.py:165-200](../src/sportstradamus/books.py#L165-L200)). The frozen contract is
-[tests/golden/test_books_get_ud.py](../tests/golden/test_books_get_ud.py). The third
-call is dead weight: the Rivals product is retired (§6.1).
+The parser takes both container styles (§7.3), drops suspended and live lines, combo
+players and appearances without a game (season futures), and prices a suspended
+option side at 0. Team lines are keyed on the team and match lines on the home team,
+with the API `stat` slug as the market (`moneyline`, `spread`, `points`,
+`team_total_points`, `period_1_moneyline`, …) so nothing collides with the
+sportsbook team markets in the archive; a null `stat_value` becomes a 0.5 line. The
+frozen contract is
+[tests/golden/test_books_get_ud.py](../tests/golden/test_books_get_ud.py). An empty
+feed logs at WARNING and returns nothing: a 426 from a retired path is the signature
+to watch (§12). `/v1/teams` and `beta/v3/rival_lines` are no longer requested.
 
 The web app's own bundle still knows this feed: the `entry.app` chunk maps
 `regular` → `/v1/over_under_lines` and `live` → `/beta/v2/live_over_under_lines`
@@ -741,7 +747,12 @@ or `Match` (both null: moneyline, spread, total and the `misc` game props);
   (`rushing_yds`, `period_1_2_passing_yds`) is the stable machine slug and
   `display_stat` the label the current parser keys on **[HAR]**.
 - `match_id` is an **integer** on the new surface and in the legacy feed today; the
-  golden fixture still uses strings **[CODE]**.
+  scraper keys matches on `str(id)` **[CODE]**.
+- `games[].abbreviated_title` is `AWAY @ HOME` in the US sports and `HOME vs AWAY` in
+  soccer, but `AWAY vs HOME` in esports (every CS and LOL game checked against the
+  lobby `teams` dicts and `/v1/teams`), and one CFL game contradicted its own ids
+  **[P-42]**; the scraper takes abbreviations from the lobby `teams` dicts and reads
+  the title only for leagues it does not model.
 - Lobby content keys `over_under_lines`, `appearances`, `players`, `games`, `teams`,
   `sports`, `series`, `solo_games` by id (dicts); ordering lives in `lines[]`,
   `match_groups[]` or `player_groups[]`. `search_results` and the legacy feed return
@@ -754,8 +765,8 @@ or `Match` (both null: moneyline, spread, total and the `misc` game props);
 
 ### 7.4 Pricing fields
 
-`payout_multiplier` is what the scraper already reads per side
-([books.py:181-186](../src/sportstradamus/books.py#L181-L186)) and what the app shows;
+`payout_multiplier` is what the scraper reads per side (`_ud_boosts` in
+[books/underdog.py](../src/sportstradamus/books/underdog.py)) and what the app shows;
 treat it as the settle value. The other fields are representations of the same price
 whose exact relationship is **[INF]** until a settled entry confirms it:
 
@@ -888,18 +899,18 @@ no field the new surface exposes on a line that the legacy feed lacks; what the 
 lacks are whole markets (team and game, in-play) and the rungs. The differences are
 structural:
 
-| Aspect | Legacy `v1/over_under_lines` | Lobby content | Effect on `books.py` |
+| Aspect | Legacy `v1/over_under_lines` | Lobby content | `books/underdog.py` |
 |---|---|---|---|
-| Containers | lists | dicts keyed by id, order in `lines[]` | `_ud_player_ids` / `_ud_match_ids` iterate lists **[CODE]** |
-| Scope | all sports, one request | one sport / pill / match / section per request | — |
-| Alternates | absent inline; `has_alternates` flags 5,447 lines; rungs come from one `v3/over_unders/<id>/alternate_projections` call per market (§6.2, §9.4) | same flag, same fetch | the ladder input for `Archive.add_ladder` exists; `dfs-products.md` VERIFY-6 answered for alternates, still open for ladders |
-| Live lines | separate `beta/v2/live_over_under_lines` | `include_live=true` inline, `live_event: true` | — |
-| Team and game markets | **absent**: every legacy line is `player_prop` **[P-1] [P-21]** | `core`, `partial_core`, `team_prop`, `misc` behind the team pills (§7.6) | `_ud_over_under_offer` only sets boosts for `higher` / `lower`, so `away` / `home` / `draw` / `yes` / `no` stay 0; `float(o["stat_value"])` raises on moneyline's null **[CODE]** |
-| Suspended lines | `status: "suspended"` present | present | not filtered today |
-| `match_id` | int | int | fixture uses strings; parser passes ids through as dict keys, so fine, but any `str` comparison would not be |
-| Rivals | `beta/v3/rival_lines` answers with empty lists; the product is retired (§6.1) | not seen | the rivals leg is dead weight: the call, the `H2H` parsing and the `rivals` table in `underdog_payouts.json` can go |
-| Stat coverage | 14 sports; NFL period props, kicking, defense, TD scorers, each-quarter / each-half props | same plus the team stats of §7.6 | 33 of the 50 NFL `display_stat` values unmapped (§7.5); no team stat mapped |
-| Combo players | still one player per line | — | combo legs still dropped by the parser |
+| Containers | lists | dicts keyed by id, order in `lines[]` | `_by_id` indexes either style **[CODE]** |
+| Scope | all sports, one request | one sport / pill / match / section per request | feed for player props, lobby for team and game markets (§2) |
+| Alternates | absent inline; `has_alternates` flags 5,447 lines; rungs come from one `v3/over_unders/<id>/alternate_projections` call per market (§6.2, §9.4) | same flag, same fetch | fetched in-run under a wall-clock budget (§9.4); ladders still have no endpoint |
+| Live lines | separate `beta/v2/live_over_under_lines` | `include_live=true` inline, `live_event: true` | `live_event` lines dropped |
+| Team and game markets | **absent**: every legacy line is `player_prop` **[P-1] [P-21]** | `core`, `partial_core`, `team_prop`, `misc` behind the team pills (§7.6) | `higher` / `yes` / `home` price the over slot, `lower` / `no` / `away` the under, `draw` leaves the under at 0; null `stat_value` → 0.5; keyed on the team (home team for `Match`) with the `stat` slug as market **[CODE]** |
+| Suspended lines | `status: "suspended"` present | present | dropped; a suspended option side prices at 0 |
+| `match_id` | int | int | `str()` on both sides |
+| Rivals | `beta/v3/rival_lines` answers with empty lists; the product is retired (§6.1) | not seen | gone: the call, the `H2H` parsing, the `rivals` payout table and the pickem variant |
+| Stat coverage | 14 sports; NFL period props, kicking, defense, TD scorers, each-quarter / each-half props | same plus the team stats of §7.6 | `INTs Thrown` mapped; the other unmapped NFL `display_stat` values (§7.5) and every team stat archive under their raw names |
+| Combo players | still one player per line | — | dropped |
 
 ## 9. Efficiency playbook
 
@@ -910,20 +921,21 @@ brotli-compressed 5–12× on the wire. Each row states the tag its numbers rest
 
 | Strategy | Requests per run | Bytes (decoded) | Auth | Notes | Tag |
 |---|---|---|---|---|---|
-| **Legacy feed (today)** | 3 (`teams`, `over_under_lines`, `rival_lines`) | 11.3 MB + 32.7 MB + 0.1 KB | none | one request already returns 12,272 lines across 14 sports with the full §7.1 object; `teams` has a 900 s TTL and changes yearly, so fetch it once a day (or on a 304 miss), and the rivals call is dead (§6.1): the run drops to 1 request | [P-1] [HAR] |
+| **Legacy feed + lobby (implemented, §2)** | 1 feed + 1 `match_grouped_lines` per modeled league in play + 8 NFL pills + rungs under a budget: 11 + 2,013 rung reads on 2026-09-11 (MLB and NFL in play) | 32.7 MB + ~0.4 MB per league + ≤2.4 MB + 4–56 KB per rung set | none | the feed alone returns every player prop across 14 sports with the full §7.1 object; the core call per league adds moneyline / spread / total and the `teams` dict that names the feed's teams; the eight pills add the team totals, TD and period markets; `/v1/teams` (11.3 MB, yearly) and the dead `rival_lines` call (§6.1) are gone | [P-1] [P-21] [P-44] |
 | Lobby `lines` per market pill | 29 for NFL (one per `market_filters` pill, `limit=1000`) | 19.5 MB for 5,013 NFL markets (≈3.9 KB per line) | none with the pill ids pinned from §6.4 (`market_filters` itself needs a token) | measured: every legacy NFL market plus the 676 team, game and in-play markets the feed lacks (§7.6); pills overlap by 20 rows; no single-request sport sweep exists (`limit` needs a pill); 14 active sports ≈ 150–300 requests | [P-15] [P-21] [P-33] |
 | **Team pills only** (Team Picks, Team Totals, 1Q–4Q / 1H / 2H Team Picks, TD Picks, Both Teams to Score, Overtime, Race to X, Game High, Halftime/Fulltime, Winning Margin) | 15 for NFL (10 non-empty on a Thursday) | 2.4 MB for 522 markets | none | the cheapest way to add the team and game markets on top of the legacy feed; the 19 team-sacks rows ride inside the Defense pill; `match_grouped_lines` alone (1 request, 429 KB) covers just moneyline / spread / total | [P-17] [P-21] |
-| Alternate rungs for the whole NFL board | 2,928 (one `alternate_projections` per flagged market) | 4–56 KB each | none | too many for an hourly pass; fetch on demand (§9.4) | [P-23] |
+| Alternate rungs for the whole board | 3,188 flagged, modeled, mapped player props on 2026-09-11 (one `alternate_projections` each) | 4–56 KB each | none | ~2,000 fit the 120 s budget at three workers; the rest, the latest kickoffs, wait for a later hourly run (§9.4) | [P-23] [P-44] |
 | `pickem_lobby_sections` via `scaffolds/home` | 1 + ~40 sections | 550 KB per section | none (one 401 seen, §4) | curated rails, not the whole board | [HAR] [P-4] [P-30] |
 | `search_results?sport_id=X` | 1 per sport | 240 KB | none | capped near 100 lines, options lack `odds` | [HAR] [P-4] |
 
-Recommendation: keep `v1/over_under_lines` as the primary feed for player props; it
+The scraper (§2) keeps `v1/over_under_lines` as the primary feed for player props (it
 is public, complete for that category, and the web app's own slip flow still depends
-on it (§2). Add the team pills (15 requests for NFL) when team and game markets are
-wanted, and fetch rungs on demand (§9.4). Send `If-None-Match` so an unchanged board
-costs a 304. Add a liveness canary: a 426 or non-200 from the feed should log at
-WARNING and page, not fall through to "No offers found". The full pill sweep is the
-fallback if the feed retires, priced above.
+on it), adds `match_grouped_lines` per modeled league and the eight NFL team pills
+that carry the team and game markets it wants, and fetches rungs in-run under a
+budget (§9.4); an empty feed logs at WARNING. Still open: `If-None-Match` so an
+unchanged board costs a 304, the other sports' team pills (their ids need a tokened
+`market_filters` read, §6.4). The full pill sweep is the fallback if the feed retires,
+priced above.
 
 ### 9.2 Line movement inside the hour
 
@@ -977,8 +989,14 @@ each with its own line `id` and the full §7.1 options **[P-19] [P-23]**. Measur
 Cost of a full catalog: 2,928 NFL markets carried `has_alternates` in the sweep (2,633
 player props, 150 period team lines, 96 team props, 32 core, 17 misc) **[P-21]**, so
 one pass is ~2,900 requests and, at the sizes above, roughly 50 MB decoded; at the
-1.5 s spacing used here that is over an hour, and no rate limit was met at that pace
-(faster is untested). The cheapest correct scheme:
+1.5 s spacing used here that is over an hour. Measured on 2026-09-11 from one
+keep-alive session **[P-44]**: three workers read 2,013 markets in 120 s (~17/s) and
+every answer carried rungs; four workers ran at ~36/s and, after about 1,850 requests
+inside a minute, the origin kept answering 200 but with empty `projections` for the
+rest of the pass (no 429, no rate-limit header, `cf-cache-status` MISS / EXPIRED),
+while an ordered 1,200-request pass at ~23/s stayed clean. The scraper therefore runs
+three workers and stops a pass after 25 consecutive empty answers
+(`UD_ALT_LINES_EMPTY_STREAK`). The cheapest correct scheme:
 
 1. Take `over_under_id` and `has_alternates` from the legacy feed (player props) and
    the team pills (team and game markets); the id is stable across moves (§7.3), so it
@@ -995,6 +1013,12 @@ one pass is ~2,900 requests and, at the sizes above, roughly 50 MB decoded; at t
    `lines-alternate;Game-<id>;PickemStat-<uuid>;<provider>` channel beside the
    `lines-balanced;…` one, so once the Pusher cluster is known (§11) rung updates can
    arrive without polling.
+
+As implemented (§2): the scraper fetches in-run, every modeled and `stat_map`-mapped
+player prop flagged `has_alternates`, ordered by kickoff and then by line descending,
+three workers on one session, a 120 s budget and 10 s per request; on 2026-09-11 that
+returned 2,378 NFL and 4,127 MLB rungs **[P-44]**. Items 3–5 (move-triggered
+re-reads, watch-lists, push) are still open.
 
 ## 10. Levers for edge, ranked
 
@@ -1055,7 +1079,8 @@ used a fresh token the owner pasted into `creds/keys.json` at 21:41 CDT (20 requ
 in five minutes; an earlier paste had already expired, P24), P35–P38 a third token
 later that evening (24 requests in four minutes) and P39–P41 a fourth at 22:02 (71
 requests in eight minutes). P12–P23 followed once the bundle gave up the alternates
-path.
+path. P42–P44 ran on 2026-09-11 from the scraper's own client (about 6,500 requests
+across two full runs and two pace probes).
 
 | # | Question | Probe | Result |
 |---|---|---|---|
@@ -1100,6 +1125,9 @@ path.
 | P39 | Modifier structure | 57 quotes: one pair with three fillers and at 3–6 picks, four side combinations, QB × each of 16 receivers on three teams, seven rungs, six stat pairs, twelve position pairs, QB + WR1 + WR2, two pairs in one slip, a repeat; two ladders | §6.8 "How the number arises" |
 | P40 | Lower tail and combined rungs | both-under for four more pairs, two lower-side rungs, a QB rung with a WR rung, fantasy points both-under; two ladders re-read | Power asymmetric per pair, Flex symmetric; one rung suspended mid-run |
 | P41 | Cross-team leg inside a taxed pair | QB + WR1 + opposing QB (+ filler); QB + opposing QB with two fillers | 0.80 / 0.789 against 0.7925 / 0.76 and 1.0 / 0.90: one joint over the game, not a product |
+| P42 | Title order against the ids | `abbreviated_title` vs `home_team_id` / `away_team_id` for every game in the feed and the lobby `teams` dicts | US sports `AWAY @ HOME`; soccer `HOME vs AWAY` (FIFA 69/69); esports `AWAY vs HOME` (CS 42/42, LOL 24/24 swapped); one CFL title contradicts its own ids; the scraper seeds abbreviations from the lobby `teams` dicts and falls back to titles (§7.3) |
+| P43 | Do the lobby reads answer the scraper's bare client? | `match_grouped_lines?sport_id=MLB` and an NFL pill with the python-requests default User-Agent | 200 both (60 core lines / 30 games / 30 teams; the full pill page), so `Scrape.get`'s header-less first attempt suffices |
+| P44 | Full run and rung pace | `get_ud` end to end at four and at three workers, a 40-request burst, a 1,200-request ordered pass | four workers: 3,156 rung reads in 88 s (~36/s), 200 with empty `projections` after ~1,850 in a minute; 1,200 at ~23/s clean; three workers: 2,013 in 120 s (~17/s) clean, 21,066 offers (6,533 rungs) in 130 s wall (§9.4) |
 
 Still open, in priority order:
 
@@ -1107,7 +1135,7 @@ Still open, in priority order:
 |---|---|
 | Pusher cluster and whether the line channels are public | find the Pusher vendor chunk (search the `critical` bundle's chunk loader for `pusher`), then open `wss://ws-<cluster>.pusher.com/app/d65207c183930ff953dc?protocol=7` and subscribe to `over_under_lines-NFL-balanced` and a `lines-alternate;…` channel |
 | Whether a rung re-price moves the balanced line's `updated_at` (the trigger in §9.4) | poll one market's feed row and its rungs through a line move |
-| How fast `alternate_projections` can be polled | a full pass at 0.5 s spacing, watching for 429 or a CDN block |
+| Where the `alternate_projections` ceiling sits: 200 with empty `projections` at ~36/s after ~1,850 reads in a minute, clean at ~23/s, never a 429 **[P-44]** | a four-worker pass that pauses 2 s every 500 reads, watching when the empties start and how long they last |
 | The pills empty on a Thursday (Race to X, Game High, Halftime/Fulltime, Winning Margin, 2H Team Picks) and the other 13 active sports' pills | rerun the pill sweep on a Sunday morning and per sport |
 | Ladders (pinned by the owner) | a proxy capture from the iOS or Android app (§6.9); nothing on the web surface answers |
 | `market_filters` without a token | the ids in §6.4 come from tokened reads; re-read them with a token each season (three pills were new by 21:52) or ask by `pickem_stat_id` |
@@ -1144,6 +1172,7 @@ whatever the current `entry.app` chunk maps under `regular` (§2).
 
 ## Changelog
 
+- 2026-09-11 scraper rebuilt on this doc (`books/underdog.py`): feed + core + NFL team pills + budgeted rungs (three workers, 120 s, empty-streak stop; the origin answers empty past ~36/s, §9.4); `/v1/teams` and `rival_lines` gone; team codes from lobby `teams` dicts (esports titles list the away side first, §7.3)
 - 2026-09-10 modifier mapped: slip = table × Π picks × m; Flex m = Gaussian copula, ρ 0.48 per pair type; Power m pair-specific + asymmetric; untaxed pairs = free correlation. Rivals retired, Ladders replaced them (owner)
 - 2026-09-10 authed batch: `entry_slips/estimate` quotes payout tables (2–8 picks) + which pairs are taxed; scaffolds/sections public, `market_filters` needs token; `state_configs` needs lat/long; ladders not on web
 - 2026-09-10 alternates path found (`v3/over_unders/<id>/alternate_projections`); team/game markets catalogued (5 categories, 29-pill sweep); feed filters by `over_under_ids`; `limit` needs a pill

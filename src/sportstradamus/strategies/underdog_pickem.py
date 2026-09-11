@@ -1,4 +1,4 @@
-"""Pick'em orchestrator for Underdog and Sleeper (Phase 3 §3.3 + §3.5 Rivals).
+"""Pick'em orchestrator for Underdog and Sleeper (Phase 3 §3.3).
 
 Pure orchestrator over ``prediction.scoring.process_offers`` and
 ``prediction.correlation.find_correlation`` (one search per contest
@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import datetime
 import hashlib
-from collections.abc import Iterable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -32,23 +31,12 @@ from sportstradamus.strategies.kelly import (
 
 _logger = get_logger("pickem-build")
 
-# Roadmap §3.5: Rivals payout structure caps the variant at 2-3 leg entries
-# regardless of what the user sets in ``PickemConfig.entry_sizes``.
-_RIVALS_LEG_SIZES: tuple[int, ...] = (2, 3)
-
 _RECOMMENDATIONS_DIR = Path("data") / "recommendations"
 
 # prophecize's hourly snapshot sizes stakes at this nominal bankroll purely to
 # drive rank_and_dedupe ordering (bankroll-invariant below the per-bet cap); the
 # dashboard re-sizes every entry against the user's actual bankroll.
 REFERENCE_BANKROLL = Decimal("1000")
-
-# Sleeper has no Rivals/H2H game mode; callers building a Sleeper PickemConfig
-# override contest_variants with this instead of the Underdog-shaped default.
-PLATFORM_CONTEST_VARIANTS: dict[str, tuple[str, ...]] = {
-    "Underdog": ("power", "flex", "rivals"),
-    "Sleeper": ("power", "flex"),
-}
 
 
 @dataclass(frozen=True)
@@ -61,7 +49,7 @@ class PickemConfig:
     min_correlation: float = 0.10
     min_ev: float = 0.05
     entry_sizes: tuple[int, ...] = (3, 5)
-    contest_variants: tuple[str, ...] = ("power", "flex", "rivals")
+    contest_variants: tuple[str, ...] = ("power", "flex")
     top_k: int = 20
     max_overlap: int = 2
     kelly_fraction: float = DEFAULT_KELLY_FRACTION
@@ -105,38 +93,14 @@ def filter_legs(offers: pd.DataFrame, config: PickemConfig) -> pd.DataFrame:
     return df.loc[keep].copy()
 
 
-def _filter_parlays(
-    parlay_df: pd.DataFrame, variant: str, entry_sizes: Iterable[int], config: PickemConfig
-) -> pd.DataFrame:
-    """Apply post-search size + EV filters; Rivals is forced to 2/3 legs."""
+def _filter_parlays(parlay_df: pd.DataFrame, config: PickemConfig) -> pd.DataFrame:
+    """Apply post-search size + EV filters."""
     if parlay_df.empty:
         return parlay_df
-    sizes = set(_RIVALS_LEG_SIZES if variant == "rivals" else entry_sizes)
     df = parlay_df.copy()
-    df = df[df["Bet Size"].isin(sizes)]
+    df = df[df["Bet Size"].isin(set(config.entry_sizes))]
     df = df[(df["Model EV"] - 1.0) >= config.min_ev]
     return df.reset_index(drop=True)
-
-
-def _rivals_row_covered(row: pd.Series, players: list[str]) -> bool:
-    for leg in row["legs"]:
-        desc = str(leg["player"])
-        if "vs." not in desc:
-            continue
-        sides = [s.strip() for s in desc.split("vs.")[:2]]
-        covered = sum(1 for side in sides if any(side and side.split()[0] in p for p in players))
-        if covered < 2:
-            _logger.warning("rivals candidate dropped: one-sided (%s)", desc)
-            return False
-    return True
-
-
-def _validate_rivals_coverage(parlay_df: pd.DataFrame, offers: pd.DataFrame) -> pd.DataFrame:
-    if parlay_df.empty or offers.empty:
-        return parlay_df
-    players = offers["Player"].astype(str).tolist() if "Player" in offers.columns else []
-    keep_rows = [row for _, row in parlay_df.iterrows() if _rivals_row_covered(row, players)]
-    return pd.DataFrame(keep_rows).reset_index(drop=True) if keep_rows else parlay_df.iloc[0:0]
 
 
 def _row_to_entry(
@@ -219,28 +183,23 @@ def construct_entries(
     config: PickemConfig | None = None,
     *,
     parlay_dfs: dict[str, pd.DataFrame] | None = None,
-    offers_df: pd.DataFrame | None = None,
     platform: str = "Underdog",
 ) -> list[RecommendedEntry]:
     """Build ranked, sized Pick'em entries for ``date`` on ``platform``.
 
-    ``parlay_dfs`` / ``offers_df`` injection short-circuits the live scraper
-    so tests and offline reruns do not hit the network.
+    ``parlay_dfs`` injection short-circuits the live scraper so tests and
+    offline reruns do not hit the network.
     """
     config = config or PickemConfig()
     if parlay_dfs is None:
-        parlay_dfs, offers_df = live_load(config, platform)
-    offers_df = pd.DataFrame() if offers_df is None else offers_df
-    filtered_offers = filter_legs(offers_df, config) if not offers_df.empty else offers_df
+        parlay_dfs, _ = live_load(config, platform)
 
     entries: list[RecommendedEntry] = []
     for variant in config.contest_variants:
         parlays = parlay_dfs.get(variant, pd.DataFrame())
         if parlays.empty:
             continue
-        parlays = _filter_parlays(parlays, variant, config.entry_sizes, config)
-        if variant == "rivals":
-            parlays = _validate_rivals_coverage(parlays, filtered_offers)
+        parlays = _filter_parlays(parlays, config)
         entries.extend(_variant_entries(parlays, variant, bankroll, config, platform))
 
     return rank_and_dedupe(entries, config)
@@ -334,7 +293,6 @@ def build_entries_from_scored(
         bankroll,
         config,
         parlay_dfs=parlay_dfs,
-        offers_df=scored_offers_df,
         platform=platform,
     )
 
@@ -391,7 +349,7 @@ def live_load(
 def pickem_build(date: str, bankroll: str, platform: str, out_path: str | None) -> None:
     """Build today's Pick'em entries for ``platform`` and emit recommendations YAML."""
     slate_date = datetime.date.today() if date == "today" else datetime.date.fromisoformat(date)
-    config = PickemConfig(contest_variants=PLATFORM_CONTEST_VARIANTS[platform])
+    config = PickemConfig()
     entries = construct_entries(slate_date, Decimal(bankroll), config, platform=platform)
     target = (
         Path(out_path)

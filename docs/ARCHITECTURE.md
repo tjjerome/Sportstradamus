@@ -33,7 +33,10 @@ Sportstradamus/
 │   │   ├── collectors/          # authenticated data-collector framework (fp/ctg/savant)
 │   │   ├── dashboard/           # Streamlit dashboard package
 │   │   ├── scripts/             # standalone maintenance / backfill / diagnostic scripts
-│   │   ├── books.py             # Underdog + Sleeper scrapers
+│   │   ├── books/               # DFS scrapers
+│   │   │   ├── __init__.py      # re-exports get_ud, get_sleeper
+│   │   │   ├── underdog.py      # Underdog: props, team/game markets, alternate lines
+│   │   │   └── sleeper.py       # Sleeper props
 │   │   ├── moneylines.py        # Odds API ingest (confer command)
 │   │   ├── nightly.py           # reflect command (prediction resolution)
 │   │   ├── analysis.py          # shared metric functions
@@ -75,7 +78,7 @@ Sportstradamus/
 | `parlay_modifiers.py` | Expected-vs-actual quote reconciliation for pick'em correlation modifiers |
 | `provenance.py` | Code-version stamps for training artifacts |
 | `training_quotes.py` | Training-quote resolution with explicit provenance |
-| `text.py` | String normalization and small collection utilities (`remove_accents`, `merge_dict`, `hmean`) |
+| `text.py` | String normalization and small collection utilities (`remove_accents`, `merge_dict`, `hmean`), plus `ABBR_MAP` — team-abbreviation corrections shared by both DFS scrapers |
 | `__init__.py` | Re-exports the public API — `from sportstradamus.helpers import X` is the canonical import |
 
 ### `stats/` — Player statistics and feature engineering
@@ -137,7 +140,7 @@ Sportstradamus/
 | Module | What's in it |
 |---|---|
 | `kelly.py` | `fractional_kelly_stake`, `joint_kelly_portfolio` (cvxpy SCS), `resolve_shrinkage` (explicit > live CLV-segment BSS > training BSS > fallback `1.0`), and the `kelly` CLI for offline re-sizing of a recommendations YAML. cvxpy / pyyaml / tabulate are ordinary runtime dependencies imported at module top |
-| `underdog_pickem.py` | `PickemConfig`, `RecommendedEntry`, `construct_entries`, and the `pickem-build` CLI. Pure orchestrator — no math. Covers Power, Flex, and Rivals; emits `data/recommendations/{date}.yaml` |
+| `underdog_pickem.py` | `PickemConfig`, `RecommendedEntry`, `construct_entries`, and the `pickem-build` CLI. Pure orchestrator — no math. Covers Power and Flex; emits `data/recommendations/{date}.yaml` |
 | `_pickem_emit.py` | YAML-emit helpers split out of `underdog_pickem.py` |
 | `ledger.py` + `_ledger_*.py` | Simulated-bettor ledger: twice-daily commit orchestrator with selection, cross-game candidate, settlement, bankroll, and JSONL store layers |
 | `profit_sim.py` | Kelly-sized profit / ROI / Sharpe / drawdown backtest |
@@ -177,7 +180,7 @@ with the pipelines use `LazyArchive` from `sportstradamus.helpers`.
 | Module | CLI command | What it does |
 |---|---|---|
 | `moneylines.py` | `confer` | Odds API ingest for game-level and player-prop markets: `get_moneylines`, `get_props` |
-| `books.py` | (called from `prediction/cli.py`) | Underdog (`get_ud`) and Sleeper (`get_sleeper`) scrapers. Underdog API reference: [underdog_api.md](underdog_api.md) |
+| `books/` | (called from `prediction/cli.py`) | Underdog (`underdog.py:get_ud` — player props, team/game markets, alternate lines) and Sleeper (`sleeper.py:get_sleeper`) scrapers. Underdog API reference: [underdog_api.md](underdog_api.md) |
 | `nightly.py` | `reflect` | Resolves predictions against results; historical parlay performance |
 | `analysis.py` / `clv.py` | — | Shared metric functions; closing-line-value computation |
 | `skew_normal.py`, `skew_normal_centered.py`, `double_poisson.py`, `hurdle.py` | — | Custom PyTorch distributions for LightGBMLSS (SkewNormal, centered parametrization, Double Poisson, HurdleZINB) |

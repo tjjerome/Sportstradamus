@@ -11,10 +11,8 @@ import pytest
 
 from sportstradamus.strategies._pickem_emit import emit_yaml, entries_to_frame
 from sportstradamus.strategies.underdog_pickem import (
-    PLATFORM_CONTEST_VARIANTS,
     PickemConfig,
     _filter_parlays,
-    _validate_rivals_coverage,
     construct_entries,
     filter_legs,
 )
@@ -148,11 +146,11 @@ def test_parlays_per_variant_empty_pool_skips_search(monkeypatch):
         raise AssertionError("find_correlation must not run on an empty pool")
 
     monkeypatch.setattr(correlation, "find_correlation", boom)
-    cfg = PickemConfig(contest_variants=("power", "flex", "rivals"))
+    cfg = PickemConfig(contest_variants=("power", "flex"))
     no_edge = pd.DataFrame({"Player": ["NoEdge"], "Win Prob": [0.50], "Market Prob": [0.50]})
     for scored in (no_edge, pd.DataFrame()):
         out = up._parlays_per_variant(scored, {}, cfg, "Underdog")
-        assert set(out) == {"power", "flex", "rivals"}
+        assert set(out) == {"power", "flex"}
         assert all(df.empty for df in out.values())
 
 
@@ -168,54 +166,9 @@ def test_filter_parlays_size_and_ev():
             _parlay(["L1", "L2", "L3"], model_ev=1.05),  # below min_ev
         ]
     )
-    out = _filter_parlays(df, "power", cfg.entry_sizes, cfg)
+    out = _filter_parlays(df, cfg)
     assert len(out) == 1
     assert out["Bet Size"].iloc[0] == 3
-
-
-def test_filter_parlays_rivals_overrides_entry_sizes():
-    cfg = PickemConfig(min_ev=0.0, entry_sizes=(5, 6))
-    df = pd.DataFrame(
-        [
-            _parlay(["A vs. B", "C vs. D"], model_ev=1.5),
-            _parlay(["A vs. B", "C vs. D", "E vs. F", "G vs. H", "I vs. J"], model_ev=2.0),
-        ]
-    )
-    out = _filter_parlays(df, "rivals", cfg.entry_sizes, cfg)
-    assert list(out["Bet Size"]) == [2]
-
-
-# --- rivals coverage ---------------------------------------------------------
-
-
-def test_rivals_one_sided_dropped(caplog):
-    import logging
-
-    target = logging.getLogger("sportstradamus.cli.pickem-build")
-    target.addHandler(caplog.handler)
-    target.setLevel(logging.WARNING)
-    try:
-        offers = _offers([("Caitlin Clark", "IND", "PTS", "Over", 0.55, 0.54)])
-        df = pd.DataFrame(
-            [_parlay(["Caitlin Clark vs. Sabrina Ionescu", "A'ja Wilson vs. Breanna Stewart"])]
-        )
-        out = _validate_rivals_coverage(df, offers)
-    finally:
-        target.removeHandler(caplog.handler)
-    assert out.empty
-    assert any("rivals candidate dropped" in r.getMessage() for r in caplog.records)
-
-
-def test_rivals_both_sides_kept():
-    offers = _offers(
-        [
-            ("Caitlin Clark", "IND", "PTS", "Over", 0.55, 0.54),
-            ("Sabrina Ionescu", "NY", "PTS", "Under", 0.55, 0.54),
-        ]
-    )
-    df = pd.DataFrame([_parlay(["Caitlin Clark vs. Sabrina Ionescu"], model_ev=1.5)])
-    out = _validate_rivals_coverage(df, offers)
-    assert len(out) == 1
 
 
 # --- end-to-end with injection -----------------------------------------------
@@ -229,41 +182,29 @@ def fake_market_calibration(monkeypatch):
     )
 
 
-def test_construct_entries_all_three_variants(fake_market_calibration):
+def test_construct_entries_both_variants(fake_market_calibration):
     cfg = PickemConfig(
         min_model_edge=0.0,
         min_sharp_edge=0.0,
         disagreement_threshold=1.0,
         min_ev=0.0,
         entry_sizes=(3,),
-        contest_variants=("power", "flex", "rivals"),
+        contest_variants=("power", "flex"),
         top_k=10,
         max_overlap=2,
-    )
-    offers = _offers(
-        [
-            ("Clark", "IND", "PTS", "Over", 0.55, 0.54),
-            ("Wilson", "LV", "PTS", "Over", 0.55, 0.54),
-            ("Ionescu", "NY", "PTS", "Over", 0.55, 0.54),
-            ("Stewart", "NY", "PTS", "Over", 0.55, 0.54),
-        ]
     )
     parlay_dfs = {
         "power": pd.DataFrame([_parlay(["P1", "P2", "P3"], model_ev=1.4)]),
         "flex": pd.DataFrame([_parlay(["F1", "F2", "F3"], model_ev=1.3)]),
-        "rivals": pd.DataFrame(
-            [_parlay(["Clark vs. Ionescu", "Wilson vs. Stewart"], model_ev=1.5)]
-        ),
     }
     out = construct_entries(
         datetime.date(2026, 5, 8),
         Decimal("500"),
         cfg,
         parlay_dfs=parlay_dfs,
-        offers_df=offers,
     )
     variants = {e.contest_variant for e in out}
-    assert variants == {"power", "flex", "rivals"}
+    assert variants == {"power", "flex"}
     assert all(leg for e in out for leg in e.legs)
 
 
@@ -276,14 +217,12 @@ def test_construct_entries_yaml_roundtrip(tmp_path: Path, fake_market_calibratio
         entry_sizes=(3,),
         contest_variants=("power",),
     )
-    offers = _offers([("Clark", "IND", "PTS", "Over", 0.6, 0.58)])
     parlay_dfs = {"power": pd.DataFrame([_parlay(["L1", "L2", "L3"], model_ev=1.5)])}
     entries = construct_entries(
         datetime.date(2026, 5, 8),
         Decimal("500"),
         cfg,
         parlay_dfs=parlay_dfs,
-        offers_df=offers,
     )
     assert len(entries) == 1
 
@@ -383,41 +322,30 @@ def test_parlay_shrinkage_sleeper_uses_sleeper_stat_map(monkeypatch):
 # --- Sleeper platform threading ------------------------------------------------
 
 
-def test_construct_entries_sleeper_excludes_rivals(fake_market_calibration):
+def test_construct_entries_sleeper_platform(fake_market_calibration):
     cfg = PickemConfig(
         min_model_edge=0.0,
         min_sharp_edge=0.0,
         disagreement_threshold=1.0,
         min_ev=0.0,
         entry_sizes=(3,),
-        contest_variants=PLATFORM_CONTEST_VARIANTS["Sleeper"],
+        contest_variants=("power", "flex"),
         top_k=10,
         max_overlap=2,
-    )
-    offers = _offers(
-        [
-            ("Clark", "IND", "PTS", "Over", 0.55, 0.54),
-            ("Wilson", "LV", "PTS", "Over", 0.55, 0.54),
-        ]
     )
     parlay_dfs = {
         "power": pd.DataFrame([_parlay(["P1", "P2", "P3"], model_ev=1.4, platform="Sleeper")]),
         "flex": pd.DataFrame([_parlay(["F1", "F2", "F3"], model_ev=1.3, platform="Sleeper")]),
-        # If a rivals frame ever leaked in it must never surface in the output
-        # because "rivals" isn't in Sleeper's contest_variants.
-        "rivals": pd.DataFrame([_parlay(["Clark vs. Wilson"], model_ev=1.5, platform="Sleeper")]),
     }
     out = construct_entries(
         datetime.date(2026, 5, 8),
         Decimal("500"),
         cfg,
         parlay_dfs=parlay_dfs,
-        offers_df=offers,
         platform="Sleeper",
     )
     variants = {e.contest_variant for e in out}
     assert variants == {"power", "flex"}
-    assert "rivals" not in variants
     assert all(e.platform == "Sleeper" for e in out)
 
 
@@ -433,7 +361,7 @@ def test_construct_entries_sleeper_push_case_sizes(fake_market_calibration):
         disagreement_threshold=1.0,
         min_ev=0.0,
         entry_sizes=(2, 3, 4, 5, 6),
-        contest_variants=PLATFORM_CONTEST_VARIANTS["Sleeper"],
+        contest_variants=("power", "flex"),
         top_k=10,
         max_overlap=5,
     )
@@ -474,7 +402,6 @@ def test_recommended_entry_platform_roundtrips_yaml_and_frame(
         entry_sizes=(3,),
         contest_variants=("power",),
     )
-    offers = _offers([("Clark", "IND", "PTS", "Over", 0.6, 0.58)])
     parlay_dfs = {
         "power": pd.DataFrame([_parlay(["L1", "L2", "L3"], model_ev=1.5, platform=platform)])
     }
@@ -483,7 +410,6 @@ def test_recommended_entry_platform_roundtrips_yaml_and_frame(
         Decimal("500"),
         cfg,
         parlay_dfs=parlay_dfs,
-        offers_df=offers,
         platform=platform,
     )
     assert len(entries) == 1

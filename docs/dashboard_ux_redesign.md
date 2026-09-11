@@ -40,8 +40,7 @@ Platform taxonomy (binding for all display copy and slip logic):
 - **Power / Flex are play types, not platforms or user choices**: 2–3 legs ⇒ Power, 4+ legs ⇒
   Flex. The slip rail shows an informational chip ("Power play" / "Flex play"); there is never a
   Power/Flex selector.
-- **Rivals is a leg type** (Underdog head-to-head leg), shown as a chip on the leg — never a
-  platform or contest grouping.
+- Rivals legs are retired since 2026-09-10 (Underdog dropped the product); the H2H chip is gone.
 - Internal pipeline names (`contest_variant` in pickem emit/parquet) are unchanged; the taxonomy
   governs UI language and slip-engine rules only.
 - **Game lines are event-contract legs, not pick'em legs.** Underdog "Prediction Picks" and
@@ -63,7 +62,7 @@ Platform taxonomy (binding for all display copy and slip logic):
 | **Tonight** (home) | "What's on tonight?" | Game cards: matchup, lock countdown, top prophecy headline, top single-leg edge, story count. Click → Game. |
 | **Game** | One matchup, fully told | Its prophecies (headline + legs + per-leg case + add/swap), full offer board for the game incl. game-line scar rows, matchup context strip (total, spread/ML, pace), constellation of the game's correlations. |
 | **Board** | Cross-game shopping | Every offer; AG Grid themed to tokens; columns: form sparkline, model P, book P, edge, kelly `K`; prophecy chips as filter lenses; "+ slip" per row. |
-| **Slips** | Model's pre-built entries | `current_parlays` families + pickem entries, play-type chips (Power/Flex), Rivals legs marked; "Load into rail" → edit as your own. |
+| **Slips** | Model's pre-built entries | `current_parlays` families + pickem entries, play-type chips (Power/Flex); "Load into rail" → edit as your own. |
 | **Receipts** | Prove it | Hero: "if you'd tailed every rec" cumulative units + record. Skeptic checks: record at EV>5%, CLV beat rate, calibration one-liner, worst month (losers shown, never hidden). By league/market/platform grid. Strategy simulator (Profit Sim fold-in). **Your slips**, graded nightly. |
 | **Model Lab** | How the sausage is made | Per-market cell health (model_stats + live metrics + lifecycle), calibration/diagnostics/correlation views (old pages 4/5/7), deep-link target from every "market trust" line. |
 
@@ -75,8 +74,8 @@ rail is mounted on every page.
 Lives on every surface (session state, plain non-widget keys). Entry points: "Add to slip" on any
 offer row, any prophecy ("add story"), any pre-built entry ("load into rail").
 
-Shows, live, per edit: platform toggle (Underdog | Sleeper) · legs with remove buttons (Rivals
-chip where applicable) · auto play-type chip (2–3 → Power, 4+ → Flex) · independent joint
+Shows, live, per edit: platform toggle (Underdog | Sleeper) · legs with remove buttons ·
+auto play-type chip (2–3 → Power, 4+ → Flex) · independent joint
 probability (∏p) **and** correlation-adjusted joint probability (Gaussian copula over the
 per-game correlation slices; cross-game pairs ρ=0) · payout multiplier (platform + play type +
 leg count) · EV · fractional-Kelly stake from a bankroll input. Money is `Decimal`.

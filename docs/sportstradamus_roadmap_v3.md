@@ -48,7 +48,7 @@ ledgers, not here):
 - Kelly sizing — `strategies/kelly.py` + `kelly` CLI (fractional, shrinkage
   blend, cvxpy portfolio).
 - Underdog pick'em engine — `strategies/underdog_pickem.py` + `pickem-build`
-  CLI → recommendations YAML; Rivals folded in.
+  CLI → recommendations YAML.
 - Parlay pricing — `prediction/parlay.py` (beam search) + `prediction/payouts.py`
   (`contest_variant` payout tables/curves) + `prediction/joint.py` (Gaussian
   copula, push-aware EV, PSD repair — the swappable Σ seam; ARCHITECTURE
@@ -76,7 +76,7 @@ an exception. A session works one lane and reads that lane's brief.
 | `sim-bettor-ledger` | Pre-registered paper-trading ledger + circuit breakers | ACTIVE | — (D6 resolved; stage 1 commit path next) | [handoffs/sim-bettor-ledger.md](handoffs/sim-bettor-ledger.md) |
 | `sleeper-parity` | Full Sleeper decision-layer parity | ACTIVE — **CRITICAL PATH** (blocks D3 + dfs-products 2b/2c/5); stages 0-4 complete on `feature/sleeper-parity`, PR to devel pending merge; target merge ~Aug 2026 (pre NFL Wk 1) | devel merge → unblocks stage 5 live soak | [handoffs/sleeper-parity.md](handoffs/sleeper-parity.md) |
 | `parlay-dependence` | Copula on PIT residuals — biggest product-EV lever | BLOCKED (on: D3) | D3 | [handoffs/parlay-dependence.md](handoffs/parlay-dependence.md) |
-| `dfs-products` | New bet-type decision engines: game-line combos (verify-first) + Underdog Ladders + alt-line hardening + Rivals difference-pricer | ACTIVE | — (stage 0 near-done; 1/2a startable now; 2b/2c/5 queue per §5; stage 4 owner go/no-go) | [handoffs/dfs-products.md](handoffs/dfs-products.md) |
+| `dfs-products` | New bet-type decision engines: game-line combos (verify-first) + Underdog Ladders + alt-line hardening | ACTIVE | — (stage 0 near-done; 1 retired; 2a startable now; 2b/2c/5 queue per §5; stage 4 owner go/no-go) | [handoffs/dfs-products.md](handoffs/dfs-products.md) |
 | `mlb-nhl-activation` | Activated both leagues (D1/D2 = GO); post-GO grind runs in model-track WS-2; brief keeps the per-league detail | DONE (absorbed: model-track WS-2) | — | [archive/mlb-nhl-activation.md](archive/mlb-nhl-activation.md) |
 | `dashboard-ux` | Narrative-first dashboard: six surfaces, slip builder, receipts, celestial skin | ACTIVE | — | [handoffs/dashboard-ux.md](handoffs/dashboard-ux.md) |
 | `bestball-2027` | Draft products for the 2027 season | BLOCKED (on: D4) | D4 | [handoffs/bestball-2027.md](handoffs/bestball-2027.md) |
@@ -121,7 +121,7 @@ flowchart LR
 
     subgraph DP["dfs-products"]
         DP0["S0 wrap: tax-curve sweep + owner packet"]:::sonnet
-        DP1["S1 Rivals difference-pricer (startable)"]:::sonnet
+        DP1["S1 Rivals difference-pricer (retired)"]:::sonnet
         DP2a["S2a Sleeper alt-line de-vig (startable)"]:::sonnet
         DP2bc["S2b/2c ladder + alt-line snapshot columns"]:::sonnet
         DP3["S3 Ladders QMC pricer + DeepScore"]:::opus

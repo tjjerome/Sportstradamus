@@ -102,7 +102,7 @@ You need a **sharp consensus** to compare Underdog's static prop lines against. 
 
 ### 2.2 Underdog line capture
 
-This repo scrapes Underdog directly (`books.py:get_ud`); the endpoints, payloads and
+This repo scrapes Underdog directly (`books/underdog.py:get_ud`); the endpoints, payloads and
 polling floors live in [underdog_api.md](underdog_api.md). The caution below still
 applies to that scraper.
 

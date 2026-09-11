@@ -332,7 +332,7 @@ def beam_search_parlays(
     opp,
     stat_map,
     *,
-    contest_variant: Literal["pooled", "power", "flex", "insurance", "rivals"] = "pooled",
+    contest_variant: Literal["pooled", "power", "flex", "insurance"] = "pooled",
     full_refund_below_size: int | None = None,
 ):
     """Enumerate top parlay combinations via beam search.

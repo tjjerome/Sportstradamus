@@ -67,9 +67,8 @@ def build_candidate_universe(
 ) -> list[_ledger_selection.LedgerCandidate]:
     """One live scrape per platform (via live_load), reused by that
     platform's own same-game and cross-game candidate builders. Do not call
-    construct_entries without parlay_dfs/offers_df here -- that would
-    trigger a second, redundant scrape for whichever platform it's called
-    under.
+    construct_entries without parlay_dfs here -- that would trigger a
+    second, redundant scrape for whichever platform it's called under.
     """
     universe: list[_ledger_selection.LedgerCandidate] = []
     for platform in _PLATFORMS:
@@ -82,7 +81,6 @@ def build_candidate_universe(
                     _ledger_selection.BANKROLL_PER_REPLICATE,
                     _SHARED_CONFIG,
                     parlay_dfs=parlay_dfs,
-                    offers_df=offers_df,
                     platform=platform,
                 )
             ]

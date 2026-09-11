@@ -104,7 +104,7 @@ than the line alone. A tie passes — that is the entire point. It follows that:
 | Sweep board (per-cell best corner + gate slacks) | `data/research/strategy_research_board.csv` |
 | Live telemetry / recorded picks / graduation | `data/runtime/*.parquet` + `sportstradamus ship graduation` |
 | Served-offer snapshots the dashboard reads | `data/runtime/{current_pickem,current_offers,history}.parquet` |
-| Product-payout rules (Rivals, Ladders, multipliers) | the decision lanes (`strategies/`, `books.py`), **not** this track |
+| Product-payout rules (Ladders, multipliers) | the decision lanes (`strategies/`, `books/`), **not** this track |
 | Lever stack, stages, per-league routing, session rules | **this doc** |
 | Research verdicts, citations, commit refs | [`../operation_ship_references.md`](../operation_ship_references.md) |
 | Program index, other lanes, decision gates D1–D7, deferred register | [`../sportstradamus_roadmap_v3.md`](../sportstradamus_roadmap_v3.md) |
@@ -186,7 +186,7 @@ lens (§1.1) and go stale silently, so verify them at the start of any WS-1/WS-4
 - **App coverage** — which apps/markets are actually served today (`current_offers` platform
   split); a market we model but nobody serves earns nothing.
 - **Sleeper multipliers / Underdog boosts** — the payout curves live in the decision lanes
-  (`books.py`, `strategies/`); a multiplier change moves EV without any model change.
+  (`books/`, `strategies/`); a multiplier change moves EV without any model change.
 - **Ladder / alt-line accrual** — the `ladder` archive table must keep filling (the §3 probe).
   Seeded to 15.5M rungs across all five leagues by the 2026-07 historical backfill; live accrual
   adds only primary-market rungs (the `*_alternate` keys are backfill-only by design —
@@ -581,7 +581,7 @@ mechanics; this table is the priority overlay.
 | WS-0 | Standing breadth harvest (monthly registry sweep + confirm, free-passer, near-miss walks) | High / Low | §6.0 |
 | WS-2 | MLB (now) + NHL (by Sep) activation | High / M | §6.7 |
 | WS-3 | Family escalation — count wall (Double Poisson) + shape-bound (centered-SN / SHASH) | High / High | §6.6 |
-| WS-4 | Ladder/tail + Rivals difference-pricer + D3 | High / Low-M | §6.11 |
+| WS-4 | Ladder/tail + D3 (Rivals retired) | High / Low-M | §6.11 |
 | WS-5 | Targeted features (M-1), narrowed | Med / M-High | §6.3 |
 
 WS-1 is Priority 1 (§4, 2026-07-07). Breadth (WS-0/WS-3) stays a standing harvest feeding D3/D5;
@@ -1601,18 +1601,14 @@ decision packet, never a session edit.
 ledger** (roadmap D6). A serving-side *mechanism* implicated (not just sizing) → `research-analyst`
 brief first (§8.2 — live serving-distribution changes are research-gated).
 
-### §6.11 WS-4 — Ladder / tail calibration + Rivals + D3
+### §6.11 WS-4 — Ladder / tail calibration + D3
 
-The product-EV surface where calibration pays off directly: alt-line ladders, the right tail, and
-Rivals head-to-heads. Copula research is **done** (R3 brief `/tmp/researcher_copula_stage0.md`).
+The product-EV surface where calibration pays off directly: alt-line ladders and the right tail.
+Copula research is **done** (R3 brief `/tmp/researcher_copula_stage0.md`).
 
-- **Rivals difference-pricer — the cheap early product win.** Rivals is 2-dimensional; cross-game
-  pairings are independence-correct (edge = the certified marginals alone) and same-game needs a
-  single ρ the **incumbent correlation matrix already supplies at d=2**. Ingestion exists
-  (`books.py` `rival_lines`, payout curve, `"vs."` flip); the only missing piece is a small
-  **P(A−B>k) difference pricer** with push handling. The pricer **build is homed in the
-  `dfs-products` lane, stage 1** ([`dfs-products.md`](dfs-products.md)); this track keeps the
-  tail/ladder read below.
+- **Rivals — retired 2026-09-10.** Underdog dropped the product (owner; Ladders replaced it), so
+  the `P(A−B>k)` difference-pricer once homed in `dfs-products` stage 1 is moot; this track keeps
+  the tail/ladder read below.
 - **Ladder / tail read (query, not build).** The `ladder` table holds **15.5M historical rungs
   across all five leagues**: MLB 7.0M (18 markets, 4 alt-enriched: hits / total bases / home runs
   / pitcher strikeouts), NBA 4.2M (PTS/REB/AST/FG3M alternates, 2024-10→2026-06), NHL 3.5M (7

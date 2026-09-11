@@ -14,12 +14,12 @@ platform; only the decision layer is Underdog-hardcoded.
 
 A second app roughly doubles the slate surface at near-zero modeling cost:
 models, scrape, and scoring are already platform-agnostic —
-[`books.py:344`](../../src/sportstradamus/books.py) `get_sleeper` scrapes it,
+[`books/sleeper.py:82`](../../src/sportstradamus/books/sleeper.py) `get_sleeper` scrapes it,
 [`prediction/cli.py:155-176`](../../src/sportstradamus/prediction/cli.py)
 scores it via `process_offers`. Sleeper also prices each leg with a dynamic
 per-leg multiplier (`payout_multiplier` → `Boost_Over`/`Boost_Under`,
-[`books.py:339-340`](../../src/sportstradamus/books.py); alternates included,
-[`books.py:328-329`](../../src/sportstradamus/books.py)) — pricing variance
+[`books/sleeper.py:75-76`](../../src/sportstradamus/books/sleeper.py); alternates included,
+[`books/sleeper.py:102-104`](../../src/sportstradamus/books/sleeper.py)) — pricing variance
 Underdog's fixed tables do not have, hence more mispricings to harvest.
 
 The load-bearing design fact: **the two apps have different engine shapes.**
@@ -37,7 +37,7 @@ EV path — new code, not a config entry beside the legacy stub
 1. [`CLAUDE.md`](../../CLAUDE.md) §Hard rules + §MANDATORY refactoring-specialist — assumed-read law; this lane leans on the dashboard-parquet rule and the duplicate-code gate.
 2. [`CONTRIBUTING.md`](../../CONTRIBUTING.md) §Package Map + §Shipping to Production (`devel`) — canonical import paths and the devel-ship-curator PR mechanics.
 3. [`sportstradamus_roadmap_v3.md`](../sportstradamus_roadmap_v3.md) §5 — cross-lane constraints: this lane lands **before** `parlay-dependence`; the `sim-bettor-ledger` schema preferably lands before this lane finishes.
-4. [`books.py`](../../src/sportstradamus/books.py) — the Sleeper scrape (`get_sleeper`, `_sleeper_prop_offers`, the four `SLEEPER_*_URL` endpoints at :31-34). Read-only in this lane (§4).
+4. [`books/sleeper.py`](../../src/sportstradamus/books/sleeper.py) — the Sleeper scrape (`get_sleeper`, `_sleeper_prop_offers`, the four `SLEEPER_*_URL` endpoints at :11-14). Read-only in this lane (§4).
 5. [`prediction/payouts.py`](../../src/sportstradamus/prediction/payouts.py) — the payout engine to extend: `payout_curve_for`, `expected_payout_with_pushes` (post parlay.py seam-split; `beam_search_parlays` stays in [`parlay.py`](../../src/sportstradamus/prediction/parlay.py), joint pricing in [`joint.py`](../../src/sportstradamus/prediction/joint.py)).
 6. [`prediction/correlation.py`](../../src/sportstradamus/prediction/correlation.py) — `find_correlation(offers, stats, platform, ...)` (:625), the platform plumb-through point.
 7. [`strategies/underdog_pickem.py`](../../src/sportstradamus/strategies/underdog_pickem.py) + [`strategies/README.md`](../../src/sportstradamus/strategies/README.md) — the decision layer to generalize (`live_load` :336 calls `get_ud()` and hardcodes `"Underdog"` in the same line, :356).
@@ -54,7 +54,7 @@ git fetch origin && git log --oneline origin/devel -3
 grep -n 'get_ud()\|"Underdog"' src/sportstradamus/strategies/underdog_pickem.py
 # Legacy Sleeper stub still in place? (expect '"Sleeper": [1.0, 1.0]' at ~:84, payouts.py not parlay.py)
 grep -n '"Sleeper"' src/sportstradamus/prediction/payouts.py
-# Picks-board shape unchanged? books.py parses: subject_id, wager_type, game_id, options[].outcome/outcome_value/payout_multiplier
+# Picks-board shape unchanged? books/sleeper.py parses: subject_id, wager_type, game_id, options[].outcome/outcome_value/payout_multiplier
 curl -s https://api.sleeper.app/lines/available | python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d), sorted({x['sport'] for x in d})); print(json.dumps(d[0], indent=2)[:800])"
 poetry run pytest tests/golden/ -k "pickem or kelly or parlay" -q
 ```
@@ -99,8 +99,8 @@ stage 0, revise this brief in place, then resume.
 4. **Picks-board API shape.** Verified 2026-07-12 via the `curl` above: 246
    active lines returned; all expected fields present (`subject_id`,
    `wager_type`, `game_id`, `outcome`, `outcome_value`, `payout_multiplier`).
-   Endpoints ([`books.py:31-34`](../../src/sportstradamus/books.py)) and
-   field parsing (`_sleeper_prop_offers`, `books.py:303`) still match.
+   Endpoints ([`books/sleeper.py:11-14`](../../src/sportstradamus/books/sleeper.py)) and
+   field parsing (`_sleeper_prop_offers`, `books/sleeper.py:39`) still match.
 5. **Kill-criteria sanity check** (gates stage 0; not originally a numbered
    assumption). Verified 2026-07-12 (owner): Sleeper Picks prices as a
    fixed/quoted multiplier per leg, matching what the API returns — not
@@ -131,7 +131,7 @@ Cross-lane gates live in [roadmap v3 §6](../sportstradamus_roadmap_v3.md).
   probability internals stay numpy. The rule is being rehomed to
   [`CLAUDE.md`](../../CLAUDE.md) — cite it there once landed.
 - Observation stays within the existing
-  [`books.py`](../../src/sportstradamus/books.py) endpoints (owner,
+  [`books/sleeper.py`](../../src/sportstradamus/books/sleeper.py) endpoints (owner,
   2026-06-10): no new scrape surface (ToS exposure); adding one is owner-only.
 - Platform-aware from day one (owner, 2026-06-10): every entry artifact
   carries its platform so the `sim-bettor-ledger` lane can log Sleeper entries
@@ -291,7 +291,7 @@ inference-path compatibility checklist in
   doc > this brief > roadmap v3.
 - The dashboard reads parquet snapshots only, never DuckDB —
   [`CLAUDE.md`](../../CLAUDE.md) §Hard rules.
-- `books.py` is read-only here (§4); platform quirks live downstream, the way
+- `books/sleeper.py` is read-only here (§4); platform quirks live downstream, the way
   [`model_prob.py:418`](../../src/sportstradamus/prediction/model_prob.py)
   applies `UNDERDOG_BOOST_BASELINE` to Underdog only, leaving Sleeper boosts raw.
 - Parameterize, don't duplicate: parallel code only where the *knowledge*
