@@ -28,6 +28,14 @@ st.set_page_config(
     layout="wide",
 )
 
+# Reserved commissioned-logo slot (docs/art_briefs/logo_guru.md): neither file is
+# committed today, so this renders nothing and the sidebar keeps its plain text
+# title — dropping the two PNGs in place makes the logo appear with zero code change.
+_LOGO = Path(__file__).parent / "static/logo_wordmark.png"
+_MARK = Path(__file__).parent / "static/logo_mark.png"
+if _LOGO.exists():
+    st.logo(str(_LOGO), icon_image=str(_MARK) if _MARK.exists() else None)
+
 # APP_CSS is a <style> block: it must go through st.markdown with unsafe HTML,
 # NOT st.html — st.html's DOMPurify (USE_PROFILES {html:true}) strips <style>/<svg>
 # outright, so the whole celestial CSS layer silently no-ops (renders flat).

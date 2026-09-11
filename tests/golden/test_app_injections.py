@@ -48,6 +48,15 @@ def test_favicon_wired_and_present():
     assert Path("src/sportstradamus/dashboard/static/favicon.svg").exists()
 
 
+def test_logo_slot_reserved_and_guarded():
+    # E4: existence-guarded st.logo slot — commissioned files aren't committed today,
+    # so the slot must stay a no-op (docs/art_briefs/logo_guru.md is the brief).
+    assert '_LOGO = Path(__file__).parent / "static/logo_wordmark.png"' in APP
+    assert "if _LOGO.exists():" in APP
+    assert not Path("src/sportstradamus/dashboard/static/logo_wordmark.png").exists()
+    assert not Path("src/sportstradamus/dashboard/static/logo_mark.png").exists()
+
+
 def test_app_injects_css_once_via_markdown():
     # The global <style> block must be injected via st.markdown(unsafe_allow_html=True),
     # NOT st.html: st.html's DOMPurify (USE_PROFILES {html:true}) strips <style> outright,
