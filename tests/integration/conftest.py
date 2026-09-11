@@ -57,10 +57,16 @@ def reset_archive_singleton():
 # integration suite leaves no on-disk side effects. ``config/stat_meta.json``
 # is COMMITTED -- meditate's gate/ship logic rewrites its ``shipped`` fields
 # from fixture gate results, which must never be left staged against production.
+# The runtime snapshots are the dev box's real dashboard data: the fake-mode
+# ``prophecize`` stubs the offer/parlay writers but its line-movement, offer-
+# details and pick'em writers run for real and would leave empty frames behind.
 _DATA_FILES_TO_PROTECT = (
-    "book_weights.json",
-    "upcoming_events.json",
+    "config/book_weights.json",
     "config/stat_meta.json",
+    "runtime/upcoming_events.json",
+    "runtime/current_line_movement.parquet",
+    "runtime/current_offer_details.parquet",
+    "runtime/current_pickem.parquet",
 )
 
 
