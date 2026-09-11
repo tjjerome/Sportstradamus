@@ -42,6 +42,21 @@ def test_page_hero_defined_and_banners_retired():
     assert "segmented_controlActive" in theme.APP_CSS
 
 
+def test_favicon_wired_and_present():
+    # E3: page_icon is set in the same set_page_config call app.py already opens with.
+    assert 'page_icon=str(Path(__file__).parent / "static/favicon.svg")' in APP
+    assert Path("src/sportstradamus/dashboard/static/favicon.svg").exists()
+
+
+def test_logo_slot_reserved_and_guarded():
+    # E4: existence-guarded st.logo slot — commissioned files aren't committed today,
+    # so the slot must stay a no-op (docs/art_briefs/logo_guru.md is the brief).
+    assert '_LOGO = Path(__file__).parent / "static/logo_wordmark.png"' in APP
+    assert "if _LOGO.exists():" in APP
+    assert not Path("src/sportstradamus/dashboard/static/logo_wordmark.png").exists()
+    assert not Path("src/sportstradamus/dashboard/static/logo_mark.png").exists()
+
+
 def test_app_injects_css_once_via_markdown():
     # The global <style> block must be injected via st.markdown(unsafe_allow_html=True),
     # NOT st.html: st.html's DOMPurify (USE_PROFILES {html:true}) strips <style> outright,

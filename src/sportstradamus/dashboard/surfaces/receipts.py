@@ -23,6 +23,7 @@ from sportstradamus.analysis import (
     tailed_record,
     worst_month,
 )
+from sportstradamus.dashboard.assets import ambient_css
 from sportstradamus.dashboard.components.grid import render_themed_grid
 from sportstradamus.dashboard.components.hero import desk_only_notice, page_hero
 from sportstradamus.dashboard.components.profit_sim import (
@@ -50,10 +51,13 @@ from sportstradamus.dashboard.theme import GOLD, GRAY
 # Nebula wash (DESIGN.md §3): blue radial stop + gold held at 7% opacity, both well under
 # the hero-card 12% gold ceiling — literal values ported from the mockup's own .hero
 # background (docs/mockups/p8-receipts.html:29-30).
-_HERO_BG = (
+_HERO_BG_FALLBACK = (
     "radial-gradient(ellipse at 88% -20%, rgba(46,107,230,.15), transparent 48%),"
     "radial-gradient(ellipse at 8% 130%, rgba(201,162,39,.07), transparent 46%),#1A1D24"
 )
+# ambient_css swaps in the ambient_receipts_hero manifest slot's licensed art once one
+# lands; until then this resolves to _HERO_BG_FALLBACK unchanged.
+_HERO_BG = ambient_css("ambient_receipts_hero", _HERO_BG_FALLBACK)
 
 # Window filter re-scoping the hero + by-dimension grid only (every other df-consuming
 # section keeps reading the full, unwindowed df). Four of TIMEFRAMES' five labels map to
