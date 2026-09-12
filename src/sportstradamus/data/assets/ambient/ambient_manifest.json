@@ -2,18 +2,18 @@
   "version": 1,
   "slots": {
     "ambient_tonight": {
-      "file": null,
+      "file": "night_sky.jpg",
       "opacity": 0.14,
       "placement": "card-background",
       "attribution": null,
-      "source_url": null
+      "source_url": "https://i0.pickpik.com/photos/536/433/112/cosmos-dark-hd-wallpaper-milky-way-c60a66706c409f84334b87224640102c.jpg"
     },
     "ambient_receipts_hero": {
-      "file": null,
+      "file": "nebula.jpg",
       "opacity": 0.16,
       "placement": "hero-background",
       "attribution": null,
-      "source_url": null
+      "source_url": "https://upload.wikimedia.org/wikipedia/commons/4/4e/IC434_et_Barnard_33_N%C3%A9buleuse_de_la_t%C3%AAte_de_cheval_24-10-2024.jpg?utm_source=commons.wikimedia.org&utm_campaign=index&utm_content=original"
     }
   }
 }
