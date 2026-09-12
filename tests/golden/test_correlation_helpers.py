@@ -99,6 +99,18 @@ def _stats_for(players: list[str], usage_col: str, tiebreaker_col: str) -> _Fake
     return _FakeStats(profile)
 
 
+def test_find_correlation_empty_slate_returns_column_stable_frames() -> None:
+    """Every league skipped ⇒ no offers, and the old unguarded ``df["Player"]`` raised
+    KeyError there — which cli.py's bare except swallowed, dropping the whole platform's
+    slate. The empty frame must still carry the columns cli.py reads before ``.empty``."""
+    offer_df, parlay_df = find_correlation([], {}, "Underdog")
+
+    assert offer_df.empty
+    assert parlay_df.empty
+    assert "Market" in offer_df.columns
+    assert "Boost" in offer_df.columns
+
+
 # --- real NBA slate (offer-correlation characterization) --------------------
 
 

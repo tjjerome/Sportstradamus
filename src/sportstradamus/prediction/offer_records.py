@@ -54,6 +54,49 @@ _MAX_OFFERS_PER_PLAYER: int = 3
 # that happens to be absent from one board from silently dropping out of the category.
 _POSITION_CATEGORY_RANGE = range(-1, 5)
 
+# The scored-offer export schema ``finalize_records`` returns. ``find_correlation``
+# extends it with its own correlation columns to build a column-stable empty frame
+# when a platform's slate comes back empty.
+SCORED_RECORD_COLS = [
+    "League",
+    "Date",
+    "Commence",
+    "Team",
+    "Opponent",
+    "Home",
+    "Player",
+    "Market",
+    "Line",
+    "Boost",
+    "Boost_Over",
+    "Boost_Under",
+    "Bet",
+    "Market EV",
+    "Model EV",
+    "Avg 5",
+    "Avg H2H",
+    "Moneyline",
+    "O/U",
+    "DVPOA",
+    "Player position",
+    "Projection",
+    "Model Param",
+    "Projection STD",
+    "Win Prob",
+    "Push Prob",
+    "Market Projection",
+    "Market Prob",
+    "Kelly",
+    "Dist",
+    "CV",
+    "Gate",
+    "Temperature",
+    "Disp Cal",
+    "Step",
+    "Model Version",
+    "Model PIT Recal",
+]
+
 
 def book_over_prob(
     offer_df: pd.DataFrame,
@@ -268,44 +311,4 @@ def finalize_records(
     # serves. Null for every other cell — the raw parametric curve is exact there.
     offer_df["Model PIT Recal"] = json.dumps(pit_recal_blob) if pit_recal_blob else None
 
-    return offer_df[
-        [
-            "League",
-            "Date",
-            "Commence",
-            "Team",
-            "Opponent",
-            "Home",
-            "Player",
-            "Market",
-            "Line",
-            "Boost",
-            "Boost_Over",
-            "Boost_Under",
-            "Bet",
-            "Market EV",
-            "Model EV",
-            "Avg 5",
-            "Avg H2H",
-            "Moneyline",
-            "O/U",
-            "DVPOA",
-            "Player position",
-            "Projection",
-            "Model Param",
-            "Projection STD",
-            "Win Prob",
-            "Push Prob",
-            "Market Projection",
-            "Market Prob",
-            "Kelly",
-            "Dist",
-            "CV",
-            "Gate",
-            "Temperature",
-            "Disp Cal",
-            "Step",
-            "Model Version",
-            "Model PIT Recal",
-        ]
-    ].to_dict("records")
+    return offer_df[SCORED_RECORD_COLS].to_dict("records")

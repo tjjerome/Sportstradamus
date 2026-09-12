@@ -24,6 +24,7 @@ from tqdm import tqdm
 
 from sportstradamus import data
 from sportstradamus.helpers import UNDERDOG_BOOST_BASELINE, banned, stat_map
+from sportstradamus.prediction.offer_records import SCORED_RECORD_COLS
 from sportstradamus.prediction.parlay import (
     GameArrays,
     GameScoringContext,
@@ -736,8 +737,15 @@ def find_correlation(
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]: ``(offer_df, parlay_df)`` where
             ``offer_df`` is the full scored slate sorted by ``Model EV`` and
-            ``parlay_df`` has beam-search parlay candidates.
+            ``parlay_df`` has beam-search parlay candidates. An empty ``offers``
+            list returns empty frames carrying the same offer columns.
     """
+    if not offers:
+        # cli.py maps Market and divides Boost before it checks .empty, so a platform
+        # whose every league was skipped still has to hand back the full schema.
+        empty_cols = [*SCORED_RECORD_COLS, "Corr Same", "Corr Opp", "Position", "Game"]
+        return pd.DataFrame(columns=empty_cols), pd.DataFrame()
+
     logger.info("Finding Correlations")
 
     new_map = stat_map[platform].copy()

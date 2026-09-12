@@ -13,7 +13,6 @@ was trained on.
 
 from __future__ import annotations
 
-import datetime
 import importlib.resources as pkg_resources
 import os.path
 import pickle
@@ -89,8 +88,7 @@ def _match_league_offers(league, markets, stats, book, pbar):
     """Archive and score one league's markets; return its scored offer records.
 
     A league with no active ``Stats`` object still has its DFS lines archived
-    (so the odds land in the archive) but is not scored; a league whose season
-    has not started is skipped entirely.
+    (so the odds land in the archive) but is not scored.
     """
     if league not in stats:
         for offers in markets.values():
@@ -99,10 +97,6 @@ def _match_league_offers(league, markets, stats, book, pbar):
         return []
 
     stat_data = stats.get(league)
-    if stat_data.season_start > datetime.datetime.today().date() - datetime.timedelta(days=14):
-        logger.info(f"{league} season has not started, skipping stat matching")
-        return []
-
     all_offers = {}
     for offers in markets.values():
         all_offers.update({v["Player"]: v for v in offers})

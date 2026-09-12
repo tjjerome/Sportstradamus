@@ -1000,7 +1000,8 @@ def fused_loc(
             evaluated at the quoted line). ``None`` → legacy ``ev_b*cv``.
         book_skew_alpha: Per-observation book SkewNormal skewness. ``None`` → 0
             (symmetric), paired with the legacy ``book_sigma`` default.
-        phi: DPO per-observation precision from the model.
+        phi: DPO per-observation precision from the model. ``None`` → the book's
+            own precision, collapsing the pool to the book side.
 
     Returns:
         NegBin → ``(r_blend, p, gate_blend)``,
@@ -1021,9 +1022,9 @@ def fused_loc(
         ev_b = np.clip(np.asarray(ev_b, dtype=float), 1e-9, None)
         mean_blend = np.exp(w * np.log(ev_a) + (1 - w) * np.log(ev_b))
         phi_book = 1.0 / (1.0 + cv * ev_b)
-        phi_blend = np.exp(
-            w * np.log(np.clip(phi, _DP_PHI_FLOOR, _DP_PHI_CEILING)) + (1 - w) * np.log(phi_book)
-        )
+        # No model phi (volume-stats decode) — no model precision to pool.
+        phi_model = phi_book if phi is None else np.clip(phi, _DP_PHI_FLOOR, _DP_PHI_CEILING)
+        phi_blend = np.exp(w * np.log(phi_model) + (1 - w) * np.log(phi_book))
         return mean_blend, phi_blend, gate_blend
 
     if dist == "NegBin":

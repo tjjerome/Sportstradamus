@@ -4,13 +4,14 @@
 suite, so it has no behavioral coverage. This pins its output on a hand-built
 payload that exercises every parse seam — the games map (dict-form vs
 string-form team metadata), the ``available`` + ``alt`` line merge, per-line
-outcome padding (over-only and under-only), opponent resolution, and the
-unknown-player skip — so the CC-19 decomposition can be proven behavior
-preserving.
+outcome padding (over-only and under-only), opponent resolution, the
+unknown-player skip, and the missing-game skip — so the CC-19 decomposition
+can be proven behavior preserving.
 """
 
 from __future__ import annotations
 
+import copy
 from http import HTTPStatus
 
 import pytest
@@ -60,6 +61,16 @@ _AVAILABLE = [
             {"outcome": "over", "outcome_value": 1.5, "payout_multiplier": 1.0},
         ],
     },
+    {
+        "sport": "NBA",
+        "subject_id": "p2",
+        "game_id": "g9",
+        "wager_type": "Blocks",
+        "options": [
+            {"outcome": "over", "outcome_value": 1.5, "payout_multiplier": 1.0},
+            {"outcome": "under", "outcome_value": 1.5, "payout_multiplier": 1.0},
+        ],
+    },
 ]
 
 _ALT = [
@@ -88,7 +99,10 @@ class _FakeResponse:
         self._payload = payload
 
     def json(self):
-        return self._payload
+        # requests parses a fresh object per call. Handing back the shared fixture
+        # lets get_sleeper's ``res.extend(alt)`` append to it permanently, so a
+        # second call in the same module would see the alt lines twice.
+        return copy.deepcopy(self._payload)
 
 
 class _FakeRequests:
@@ -146,3 +160,12 @@ def test_get_sleeper_parses_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sleeper, "requests", _FakeRequests)
 
     assert sleeper.get_sleeper() == _EXPECTED
+
+
+def test_get_sleeper_skips_prop_whose_game_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sleeper, "requests", _FakeRequests)
+
+    offers = sleeper.get_sleeper()
+
+    assert "Blocks" not in offers["NBA"]
+    assert offers == _EXPECTED

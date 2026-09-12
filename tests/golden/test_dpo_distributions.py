@@ -111,6 +111,17 @@ def test_fused_loc_dpo_endpoints():
     np.testing.assert_allclose(phi_w0, 1.0 / (1.0 + cv * ev_book), rtol=1e-9)
 
 
+def test_fused_loc_dpo_missing_model_phi_collapses_to_book():
+    ev_model = np.array([2.0, 0.8])
+    ev_book = np.array([1.6, 1.0])
+    cv = 0.7
+    phi_book = 1.0 / (1.0 + cv * ev_book)
+    _, phi_none, _ = fused_loc(0.6, ev_model, ev_book, cv, "DPO", phi=None)
+    _, phi_explicit, _ = fused_loc(0.6, ev_model, ev_book, cv, "DPO", phi=phi_book)
+    np.testing.assert_allclose(phi_none, phi_book, rtol=1e-9)
+    np.testing.assert_allclose(phi_none, phi_explicit, rtol=1e-9)
+
+
 def test_decode_predictive_mean_dpo():
     params = pd.DataFrame({"mu": [0.5, 2.0], "phi": [2.0, 0.5]})
     decoded = decode_predictive_mean(params, "DPO")

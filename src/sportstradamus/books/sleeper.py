@@ -49,11 +49,12 @@ def _sleeper_prop_offers(prop: dict, players: dict, league: str, games: dict) ->
 
     player_name = remove_accents(" ".join([player["first_name"], player["last_name"]]))
     player_team = player["team"]
-    teams = games.get(league, {}).get(prop["game_id"], {}).get("teams")
-    if len(teams) != 2:
+    game = games.get(league, {}).get(prop["game_id"], {})
+    teams = game.get("teams")
+    if not teams or len(teams) != 2:
         return []
 
-    game_date = games.get(league, {}).get(prop["game_id"], {}).get("date")
+    game_date = game.get("date")
     opp = next(team for team in teams if team != player_team) if player_team else None
 
     all_outcomes = sorted(prop["options"], key=itemgetter("outcome", "outcome_value"))
