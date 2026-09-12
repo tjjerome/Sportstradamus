@@ -15,7 +15,7 @@ one place it is allowed to be, which is the opposite of a sky.
 
 The phone starts with no room beside the map: even receded, the constellation
 spans nearly the whole width, so its sky opens in y from the outset
-(``_SKY_EXTRA_Y_MOBILE``). A deep enough tier walks the desktop into the same
+(``SKY_EXTRA_Y_MOBILE``). A deep enough tier walks the desktop into the same
 corner, and both take the same way out — grow in y until a band fits, and grow
 the figure with it, which is what keeps px-per-unit, and so every clearance
 already solved against it, unchanged.
@@ -52,10 +52,10 @@ WIDER_STAR_SIZE_MOBILE = 16
 WIDER_GAMES = 6  # 6 games x <= 6 legs fills the open bands without crowding them
 _WIDER_ALPHA = 0.75  # dimmer than an active star, so the sky reads as background
 # The focus recedes only a little — the owner asked for room, not a shrunken map.
-_WIDER_SCALE = 0.8
+WIDER_SCALE = 0.8
 # y-units added above and below on the phone (~129 px a band), the one viewport
 # with no side band left after the recede.
-_SKY_EXTRA_Y_MOBILE = 1.0
+SKY_EXTRA_Y_MOBILE = 1.0
 
 
 def wider_positions(

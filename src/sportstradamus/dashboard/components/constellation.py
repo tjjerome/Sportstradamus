@@ -101,9 +101,9 @@ from sportstradamus.dashboard.components.constellation_traces import (
     node_info,
 )
 from sportstradamus.dashboard.components.constellation_wider import (
-    _SKY_EXTRA_Y_MOBILE,
-    _WIDER_SCALE,
+    SKY_EXTRA_Y_MOBILE,
     WIDER_GAMES,
+    WIDER_SCALE,
     WIDER_STAR_SIZE,
     WIDER_STAR_SIZE_MOBILE,
     add_wider_layer,
@@ -194,7 +194,7 @@ def constellation_figure(
             PX_PER_UNIT_MOBILE,
             WIDER_STAR_SIZE_MOBILE,
             (DEEP_SIZE_MIN_MOBILE, DEEP_SIZE_MAX_MOBILE),
-            Y_RANGE + _SKY_EXTRA_Y_MOBILE,
+            Y_RANGE + SKY_EXTRA_Y_MOBILE,
         )
         if mobile
         else (
@@ -216,7 +216,7 @@ def constellation_figure(
         shape_scale,
     )
     sizes = edge_scale(keys, info, floor=floor)
-    focus_scale = _WIDER_SCALE if wider_groups is not None else 1.0
+    focus_scale = WIDER_SCALE if wider_groups is not None else 1.0
     # Biggest first: a top-Kelly star keeps its vertex to the float, and only what
     # would collide with it moves, never across its own team's half of the axis.
     # Spaced against the px the viewer actually gets: "look wider" shrinks positions

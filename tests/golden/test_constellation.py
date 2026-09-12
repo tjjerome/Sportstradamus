@@ -53,7 +53,7 @@ from sportstradamus.dashboard.components.constellation_traces import (
     SIZE_MIN_MOBILE,
     star_label,
 )
-from sportstradamus.dashboard.components.constellation_wider import _WIDER_SCALE, WIDER_GAMES
+from sportstradamus.dashboard.components.constellation_wider import WIDER_GAMES, WIDER_SCALE
 from sportstradamus.dashboard.theme import GOLD, GRAY, team_colors
 
 _TEAMS = ("NYK", "SAS")  # sorted -> NYK anchors left (-x), SAS right (+x); real NBA codes
@@ -515,8 +515,8 @@ def test_wider_lens_recedes_the_focus_and_keeps_clearance():
         before, after, sizes = _node_pos(plain), _node_pos(wider), _sizes(wider)
         for key, (x, y) in before.items():
             drift = math.hypot(
-                (after[key][0] - x * _WIDER_SCALE) * px[0],
-                (after[key][1] - y * _WIDER_SCALE) * px[1],
+                (after[key][0] - x * WIDER_SCALE) * px[0],
+                (after[key][1] - y * WIDER_SCALE) * px[1],
             )
             # Only the spacing pass moves a star off the exact recede, and never by
             # more than its own radius — the drawing stays the same drawing.
@@ -739,7 +739,7 @@ def test_the_engraving_shrinks_with_its_stars_under_the_look_wider_lens():
     plain = next(t for t in _decoration_traces(_shaped()) if t.mode == "lines")
     span = max(x for x in outline.x if x is not None)
     plain_span = max(x for x in plain.x if x is not None)
-    assert span == pytest.approx(plain_span * _WIDER_SCALE)
+    assert span == pytest.approx(plain_span * WIDER_SCALE)
 
 
 def test_a_silhouette_rescales_x_and_y_independently():
