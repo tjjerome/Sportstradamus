@@ -2,21 +2,21 @@
 
 ``dashboard.assets.ambient_css`` is the scar mechanism DESIGN.md §3 describes: a slot
 renders its caller's fallback gradient unless it names a file that exists on disk. These
-pins cover the file gate, the opacity ceiling, the malformed-manifest fail-loud contract,
-and that the two wired surfaces (Tonight card, Receipts hero) still emit their original
-background strings against the shipped (empty) manifest.
+pins cover the file gate, the opacity ceiling, the placement → CSS geometry map, the
+import-time downscale of oversized originals, the malformed-manifest fail-loud contract,
+and that the shipped manifest's files exist and reach the three wired surfaces (Tonight
+cards, Receipts hero, Games hero).
 """
 
 from __future__ import annotations
 
 import base64
-import contextlib
-import importlib
+import io
 import json
-import sys
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from sportstradamus.dashboard import assets, theme
 
@@ -24,6 +24,7 @@ _REPO = Path(__file__).resolve().parents[2]
 _MANIFEST_PATH = (
     _REPO / "src" / "sportstradamus" / "data" / "assets" / "ambient" / "ambient_manifest.json"
 )
+_SURFACES = _REPO / "src" / "sportstradamus" / "dashboard" / "surfaces"
 
 # Smallest legal PNG (1x1, transparent) — stands in for a real ambient asset without
 # committing a binary fixture to the repo.
@@ -66,7 +67,16 @@ def test_named_file_missing_on_disk_returns_fallback(tmp_path, monkeypatch):
     assert assets.ambient_css("demo", _FALLBACK) == _FALLBACK
 
 
-def test_present_file_yields_data_uri_and_surface_overlay(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("placement", "geometry"),
+    [
+        ("card-background", "0 0/100% auto repeat-y"),
+        ("hero-background", "center/cover no-repeat"),
+    ],
+)
+def test_present_file_yields_data_uri_under_surface_overlay_per_placement(
+    tmp_path, monkeypatch, placement, geometry
+):
     (tmp_path / "night.png").write_bytes(_TINY_PNG)
     path = tmp_path / "ambient_manifest.json"
     _write_manifest(
@@ -75,6 +85,7 @@ def test_present_file_yields_data_uri_and_surface_overlay(tmp_path, monkeypatch)
             "demo": {
                 **_BASE_SLOT,
                 "file": "night.png",
+                "placement": placement,
                 "attribution": "NASA",
                 "source_url": "https://example.com/night.png",
             }
@@ -82,10 +93,23 @@ def test_present_file_yields_data_uri_and_surface_overlay(tmp_path, monkeypatch)
     )
     monkeypatch.setattr(assets, "MANIFEST_PATH", path)
     css = assets.ambient_css("demo", _FALLBACK)
-    assert css != _FALLBACK
+    # opacity 0.14 -> overlay alpha 1 - 0.14 = 0.86, over the DESIGN §2 surface tone; a
+    # file under the embed ceiling ships byte-for-byte in its own format.
+    assert css.startswith("linear-gradient(rgba(26,29,36,0.86),rgba(26,29,36,0.86)),url(")
     assert "data:image/png;base64," in css
-    # opacity 0.14 -> overlay alpha 1 - 0.14 = 0.86, over the DESIGN §2 surface tone.
-    assert "rgba(26,29,36,0.86)" in css
+    assert css.endswith(f") {geometry}")
+
+
+def test_wide_file_is_downscaled_to_webp_before_embedding(tmp_path, monkeypatch):
+    Image.new("RGB", (3200, 200), "navy").save(tmp_path / "wide.png")
+    path = tmp_path / "ambient_manifest.json"
+    _write_manifest(path, {"demo": {**_BASE_SLOT, "file": "wide.png"}})
+    monkeypatch.setattr(assets, "MANIFEST_PATH", path)
+    css = assets.ambient_css("demo", _FALLBACK)
+    uri = css.split("url(", 1)[1].split(")", 1)[0]
+    assert uri.startswith("data:image/webp;base64,")
+    embedded = Image.open(io.BytesIO(base64.b64decode(uri.split(",", 1)[1])))
+    assert embedded.size == (1600, 100)
 
 
 @pytest.mark.parametrize(
@@ -94,6 +118,7 @@ def test_present_file_yields_data_uri_and_surface_overlay(tmp_path, monkeypatch)
         ("bad_version", "version"),
         ("missing_key", "missing keys"),
         ("opacity_too_high", "ceiling"),
+        ("unknown_placement", "placement"),
     ],
 )
 def test_malformed_manifest_fails_loud(tmp_path, monkeypatch, break_, needle):
@@ -104,6 +129,8 @@ def test_malformed_manifest_fails_loud(tmp_path, monkeypatch, break_, needle):
         del manifest["slots"]["demo"]["placement"]
     elif break_ == "opacity_too_high":
         manifest["slots"]["demo"]["opacity"] = 0.9
+    elif break_ == "unknown_placement":
+        manifest["slots"]["demo"]["placement"] = "sidebar"
 
     path = tmp_path / "ambient_manifest.json"
     path.write_text(json.dumps(manifest))
@@ -112,27 +139,34 @@ def test_malformed_manifest_fails_loud(tmp_path, monkeypatch, break_, needle):
         assets.ambient_css("demo", _FALLBACK)
 
 
-def test_tonight_card_wash_unchanged_with_shipped_manifest():
+def test_shipped_manifest_names_files_that_exist():
+    manifest = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))
+    for slot, entry in manifest["slots"].items():
+        assert entry["file"], f"{slot} has no file — the slot renders its fallback"
+        assert (_MANIFEST_PATH.parent / entry["file"]).is_file(), f"{slot} names a missing file"
+
+
+def test_tonight_cards_embed_the_shipped_night_sky():
     """theme.py has no Streamlit import, so its build result is safe to import directly."""
-    assert (
-        assets.ambient_css("ambient_tonight", theme._TONIGHT_CARD_BG_FALLBACK)
-        == theme._TONIGHT_CARD_BG_FALLBACK
-    )
-    assert theme._TONIGHT_CARD_BG_FALLBACK in theme.APP_CSS
+    assert theme.TONIGHT_CARD_HAS_ART
     assert "__TONIGHT_CARD_BG__" not in theme.APP_CSS
+    assert "__TONIGHT_CARD_MUTED_BG__" not in theme.APP_CSS
+    # Lit and muted cards share the same tiled image so the column reads as one sky.
+    assert theme.APP_CSS.count(theme._TONIGHT_CARD_BG) == 2
+    assert theme._TONIGHT_CARD_BG.endswith(") 0 0/100% auto repeat-y")
 
 
-def test_receipts_hero_unchanged_with_shipped_manifest():
-    """Importing a surfaces/*.py script can raise past its early module-level constants
-    (no live ScriptRunContext here) — sys.modules still holds whatever bound before that,
-    same partial-import contract test_dashboard_no_archive_lock.py already relies on.
+@pytest.mark.parametrize(
+    ("surface", "slot"),
+    [("receipts", "ambient_receipts_hero"), ("games", "ambient_games_hero")],
+)
+def test_heroes_embed_the_shipped_nebula(surface, slot):
+    """The page scripts don't import in bare mode (games.py is dropped from sys.modules
+    when its body raises), so pin the wiring in source and the slot's render separately.
     """
-    module_name = "sportstradamus.dashboard.surfaces.receipts"
-    with contextlib.suppress(Exception):
-        importlib.import_module(module_name)
-    receipts = sys.modules[module_name]
-    assert (
-        assets.ambient_css("ambient_receipts_hero", receipts._HERO_BG_FALLBACK)
-        == receipts._HERO_BG_FALLBACK
-    )
-    assert receipts._HERO_BG == receipts._HERO_BG_FALLBACK
+    source = (_SURFACES / f"{surface}.py").read_text(encoding="utf-8")
+    assert f'_HERO_BG = ambient_css("{slot}", _HERO_BG_FALLBACK)' in source
+    css = assets.ambient_css(slot, _FALLBACK)
+    assert css.startswith("linear-gradient(rgba(26,29,36,0.84),rgba(26,29,36,0.84)),url(")
+    assert "data:image/webp;base64," in css
+    assert css.endswith(") center/cover no-repeat")

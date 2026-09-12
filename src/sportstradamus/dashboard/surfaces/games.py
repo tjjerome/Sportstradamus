@@ -11,6 +11,7 @@ import html
 import pandas as pd
 import streamlit as st
 
+from sportstradamus.dashboard.assets import ambient_css
 from sportstradamus.dashboard.components.constellation_slate import GameShape, slate_shapes
 from sportstradamus.dashboard.components.glyphs import game_shape_glyph
 from sportstradamus.dashboard.components.hero import page_hero
@@ -46,10 +47,13 @@ _HERO_GLYPH_SIZE = 74
 # Nebula wash (DESIGN.md §3): blue radial stop off chartSequentialColors, gold held
 # at 7% opacity, both well under the hero-card 12% gold ceiling — literal values
 # ported from the mockup's own .hero background (docs/mockups/p8-games.html:35-39).
-_HERO_BG = (
+_HERO_BG_FALLBACK = (
     f"radial-gradient(ellipse at 82% -10%, {SEQUENTIAL_COLORS[6]}29, transparent 46%),"
     f"radial-gradient(ellipse at 12% 120%, {GOLD}12, transparent 45%),#1A1D24"
 )
+# The ambient_games_hero manifest slot (the Receipts nebula, by owner request) replaces
+# the wash when its file is present; empty, this is _HERO_BG_FALLBACK unchanged.
+_HERO_BG = ambient_css("ambient_games_hero", _HERO_BG_FALLBACK)
 
 
 def _candidate_games(offers: pd.DataFrame, platform: str) -> dict[str, dict]:

@@ -5,6 +5,7 @@ from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from sportstradamus.dashboard.components.glyphs import game_shape_glyph
 from sportstradamus.dashboard.components.hero import page_hero
@@ -25,6 +26,7 @@ from sportstradamus.dashboard.narrative import (
     home_away,
     storyless_prophecy,
 )
+from sportstradamus.dashboard.theme import TONIGHT_CARD_HAS_ART
 
 # Card-side glyph is the largest on this page; the legend row below shrinks to fit
 # five across one line of st.columns(5).
@@ -35,6 +37,40 @@ _LEGEND_GLYPH_SIZE = 28
 # slate and its kicker turns red. Needs the Commence tip-off timestamp on the offers;
 # absent it (older snapshots, Sleeper), every game reads as non-urgent.
 _URGENT_MINUTES = 60
+
+# Each card shows the next horizontal slice of the ambient_tonight image: theme.py scales
+# it to the column width and tiles it downward, and this script shifts every card's image
+# layer up by the heights of the cards above it, so the slices abut and the sky loops once
+# the column outruns the image. Card heights depend on wrapped prose and the viewport, so
+# the offsets are measured in the browser rather than computed here. The observers are
+# created in the parent window so they outlive this iframe across Streamlit reruns; a
+# reload disconnects the previous pair first.
+_SLICE_SCRIPT = """
+<script>
+(() => {
+  const top = window.parent;
+  const doc = top.document;
+  const cards = () => doc.querySelectorAll(".tonight-card");
+  const layout = () => {
+    let offset = 0;
+    for (const card of cards()) {
+      card.style.backgroundPosition = `0 0, 0 ${-offset}px`;
+      offset += card.clientHeight;
+    }
+  };
+  const sizes = new top.ResizeObserver(layout);
+  const watch = () => {
+    cards().forEach((card) => sizes.observe(card));
+    layout();
+  };
+  (top.__tonightSlice || []).forEach((observer) => observer.disconnect());
+  const churn = new top.MutationObserver(watch);
+  churn.observe(doc.body, { childList: true, subtree: true });
+  top.__tonightSlice = [sizes, churn];
+  watch();
+})();
+</script>
+"""
 
 
 def _format_countdown(minutes: float) -> str:
@@ -172,3 +208,6 @@ for c in cards:
         f'<span class="tc-shapename">{shape_name}</span></div></div>',
         unsafe_allow_html=True,
     )
+
+if TONIGHT_CARD_HAS_ART:
+    components.html(_SLICE_SCRIPT, height=0)

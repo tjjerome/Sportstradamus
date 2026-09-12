@@ -146,6 +146,14 @@ _TONIGHT_CARD_BG_FALLBACK = (
     "    radial-gradient(ellipse at 93% 8%, rgba(201,162,39,.10), transparent 46%), "
     "rgba(26,29,36,.84)"
 )
+# The no-edge card drops the wash for a flat surface; with art in the slot it shows its
+# slice like every other card, so the sky stays continuous down the column.
+_TONIGHT_CARD_MUTED_BG_FALLBACK = "rgba(26,29,36,.82)"
+_TONIGHT_CARD_BG = ambient_css("ambient_tonight", _TONIGHT_CARD_BG_FALLBACK)
+_TONIGHT_CARD_MUTED_BG = ambient_css("ambient_tonight", _TONIGHT_CARD_MUTED_BG_FALLBACK)
+# surfaces/tonight.py injects the per-card slice offsets only when there is art to slice —
+# on the gradient fallback the offsets would shift its second radial stop instead.
+TONIGHT_CARD_HAS_ART = _TONIGHT_CARD_BG != _TONIGHT_CARD_BG_FALLBACK
 
 
 def _starfield_background() -> str:
@@ -206,8 +214,10 @@ _APP_CSS_TEMPLATE = """
 /* Tonight prophecy cards (mockup p8-tonight.html .card): matchup-first in sober Plex,
    the oracle voice demoted to a gold Cormorant subline (DESIGN §1 broadcast-fact +
    mystic-chrome split). Two-stop nebula wash over the surface so stars glow through
-   faintly; the game-shape glyph + Cinzel name ride the right rail. .muted is the
-   no-edge state. #3a3450 is the mockup's celestial border (solid, not a gradient). */
+   faintly — or, with art in the ambient_tonight slot, the image scaled to the column and
+   tiled down it, each card offset to its own slice by tonight.py's script; the game-shape
+   glyph + Cinzel name ride the right rail. .muted is the no-edge state. #3a3450 is the
+   mockup's celestial border (solid, not a gradient). */
 .tonight-card{position:relative;overflow:hidden;display:flex;gap:14px;border:1px solid #3a3450;
   border-radius:4px;padding:15px 17px;margin:12px 0;text-decoration:none;color:inherit;
   cursor:pointer;transition:border-color .15s ease;
@@ -218,7 +228,7 @@ _APP_CSS_TEMPLATE = """
    signals it clicks through. */
 .tonight-card:hover{border-color:#C9A227}
 .tc-cardlink{position:absolute;inset:0;z-index:1;border-radius:inherit}
-.tonight-card.muted{border-color:#2A2E37;background:rgba(26,29,36,.82)}
+.tonight-card.muted{border-color:#2A2E37;background:__TONIGHT_CARD_MUTED_BG__}
 .tonight-card .tc-main{flex:1;min-width:0}
 .tonight-card .tc-side{flex:0 0 72px;display:flex;flex-direction:column;align-items:center;
   justify-content:center;gap:6px}
@@ -326,7 +336,8 @@ button[data-testid="stBaseButton-segmented_controlActive"]{
 APP_CSS = (
     _APP_CSS_TEMPLATE.replace("__STARFIELD_DUST__", _starfield_background())
     .replace("__MOBILE_MAX__", str(MOBILE_MAX_PX))
-    .replace("__TONIGHT_CARD_BG__", ambient_css("ambient_tonight", _TONIGHT_CARD_BG_FALLBACK))
+    .replace("__TONIGHT_CARD_BG__", _TONIGHT_CARD_BG)
+    .replace("__TONIGHT_CARD_MUTED_BG__", _TONIGHT_CARD_MUTED_BG)
 )
 
 # Dust + wash render via .starfield's own CSS background above; these 11 divs are
