@@ -52,8 +52,9 @@ Platform taxonomy (binding for all display copy and slip logic):
   they are scarred into the UI (game-line rows on the Game board, team nodes in the
   constellation, slip accepts them) and join the correlation engine at dfs-products stage 5.
 - **Ladders is a play type** (Underdog: 3–5 picks × 3 rungs, payout keyed to the lowest rung
-  reached). Display-name candidates for the prophecy voice — **owner picks on build, none
-  locked**: Ladder → "Ascension"; Combo Entry → "Conjunction"; game-line leg → "Omen".
+  reached). Product names stay the DFS apps' own — Ladder, Combo Entry, game lines — in
+  every voice; no prophecy-voice renames (locked,
+  [handoffs/dfs-products.md](handoffs/dfs-products.md) §4).
 
 ## 3. The surfaces (`st.navigation`, Material icons, sport switch on every page)
 
@@ -156,8 +157,8 @@ brief's current phase.
 
 **Constellation application** (grammar home stays DESIGN.md §4a; changes owner-only):
 - Moneyline/spread star fills with that team's color — grammar-consistent, no change.
-- Game-total star has no single team: **PROPOSAL** (owner decision) — neutral-gray
-  fallback fill, centre-anchored between the team clusters.
+- Game-total star has no single team: it fills with a gradient blend of the two teams'
+  primary colours, centre-anchored between the team clusters (locked, dfs-products §4).
 - Ladder picks render as one star per pick (no new mark grammar); rung detail lives in
   the hover card and rail only.
 - Edges to game-line stars appear only when player×game-line ρ exists (dfs-products
@@ -168,9 +169,10 @@ brief's current phase.
 The slot catalog (every slot, its placeholder, source, license, priority) is
 [docs/art_assets.md](art_assets.md); this section is the contract.
 
-- **Player assets**: not built. `player_assets.parquet` was never written — headshot CDN terms
-  are an owner decision — so the initials disc + team colours are the shipped fallback and the
-  constellation card's headshot slot is a visible scar (§8).
+- **Player assets**: not built yet — the [`player-headshots`](handoffs/player-headshots.md)
+  lane owns them (per-league CDN fetch into a gitignored disk cache, a `shots` side channel
+  into the constellation card, a monthly refresh); the initials disc + team colours are the
+  shipped fallback until it lands (§8).
 - **Team assets**: committed `data/config/team_assets.json` (team → primary/secondary hex only;
   league marks are an owner IP decision), generated once by `scripts/build_team_assets.py`.
 - **Ambient imagery**: slot manifest at `data/assets/ambient/ambient_manifest.json` (slot →
@@ -236,8 +238,9 @@ and the ambient-image slots (owner-sourced files, [art_assets.md](art_assets.md)
 2. Game-line rows on the Game board + team nodes in the constellation — book-implied probs only
    (**no modeling engine** — locked, [handoffs/dfs-products.md](handoffs/dfs-products.md) §4;
    Combo-Entry mechanics live there §3); joins the correlation engine at dfs-products stage 5.
-3. Player headshots — the owner wants them, a lane of its own; the initials disc stands
-   until then. Team marks: skipped, colours only ([art_assets.md](art_assets.md)).
+3. Player headshots — the initials disc stands until the
+   [`player-headshots`](handoffs/player-headshots.md) lane lands. Team marks: skipped,
+   colours only ([art_assets.md](art_assets.md)).
 4. Optional free-LLM prose rewriter seam — documented only; templates are the contract.
 5. Ladders views (§5b) — flip on the ladder snapshot artifact (dfs-products stage 3).
 6. Alt-line markers + per-rung Receipts grading (§5b) — flip on the `Alt Line` snapshot column
@@ -247,6 +250,7 @@ and the ambient-image slots (owner-sourced files, [art_assets.md](art_assets.md)
 
 ## Changelog
 
+- 2026-09-12 — product names locked to the DFS apps' own and the game-total star fill to a two-team gradient (§2, §5b; dfs-products §4); headshots routed to the `player-headshots` lane (§6, §8).
 - 2026-09-11 — lane closed: §3 trued to the shipped nav (Games absorbs Game + Slips, Pick'em retired); Sleeper pricing, comps, `Move` spark and the asset layer trued; §8 renumbered; brief archived.
 - 2026-07-10 — §5b new bet-type presentation added (Ladders, game-line combos, alt-line markers); taxonomy + contracts + scars extended; producers = dfs-products lane.
 - 2026-06-11 — spec created from owner-approved mockup review (P0 of the dashboard-ux lane).

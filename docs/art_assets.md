@@ -19,9 +19,9 @@ present file is `dashboard/assets.py`; ambient slot state lives in
 | `page_hero_wash` | Every surface's `.page-hero` header band (`dashboard/theme.py`) | Generated CSS two-stop nebula wash | keep — generated is the design | generated-SVG-keep | n/a | n/a | P3 |
 | `glyphs_game_shape` | Tonight/Games game-shape glyphs (`dashboard/components/glyphs.py`) | Generated inline SVG (comet, supernova, scales, nebula, hourglass) | keep; optional licensed-texture upgrade later | generated-SVG-keep | n/a | n/a | P3 |
 | `astrolabe_engraving` | Slip-builder astrolabe bezel (`dashboard/components/astrolabe_component/build/index.html`) | Generated SVG bezel/orbitals/dials | keep; optional licensed engraving texture | generated-SVG-keep | n/a | n/a | P3 |
-| `constellation_silhouettes` | Games constellation decoration layer (`data/config/constellation_shapes.json`, rendered by `constellation_component`) | Generated SVG template paths (100-template bank) | keep; optional artist pass | catalog-only here — Phase D owns these files | n/a | n/a | P3 |
+| `constellation_silhouettes` | Games constellation decoration layer (`data/config/constellation_shapes.json`, rendered by `constellation_component`) | Generated SVG template paths (100-template bank) | Licence-free clip art filtered to faint light-blue line drawings, one per template | [`constellation-art`](handoffs/constellation-art.md) lane — automated Commons search, owner approves each | owner checks each image; source + artist + licence per image in the lane's manifest | ≤ 600 px RGBA PNG, tinted `#7FAAE8`, blurred, translucent | lane |
 | `team_marks` | Anywhere a team renders — constellation star fills, badges — via `theme.team_colors()` | Hex colors + full names only (`data/config/team_assets.json`); no logo art | none — **skipped** by the owner; colors carry the constellation grammar (DESIGN §4a) | n/a | n/a | n/a | skipped |
-| `player_headshots` | Constellation ticket-card headshot disc — `.cst-shot` (`dashboard/components/constellation_component/build/main.js:350`, title "Player headshot — coming soon") | Initials-disc scar (`initials()` fallback) | League-CDN player headshots | **wanted** by the owner — next lane | owner verifies each league CDN's terms; disk-cache locally rather than hot-link | circular crop, ~34×34 render (`.cst-shot`) | next lane |
+| `player_headshots` | Constellation ticket-card headshot disc — `.cst-shot` (`dashboard/components/constellation_component/build/main.js:350`, title "Player headshot — coming soon") | Initials-disc scar (`initials()` fallback) | League-CDN player headshots | [`player-headshots`](handoffs/player-headshots.md) lane (CDN patterns verified there) | owner verifies each league CDN's terms; disk-cache locally rather than hot-link | circular crop, ~34×34 render (`.cst-shot`); 128 px WebP in the cache | lane |
 
 The `player_headshots` scar lives in the constellation component's ticket card, not in
 `components/deep_dive.py` — there is no separate person-icon stand-in on the offer-detail
@@ -63,8 +63,10 @@ either `generated-SVG-keep` (no sourcing needed — the generated form *is* the 
 **Team marks**: skipped by the owner — colors-only stays; the constellation grammar never
 needed logos.
 
-**Player headshots**: the owner wants them — a lane of its own, not a file drop:
-per-league CDN URL patterns, a disk cache, and the `main.js` "coming soon" disc replaced.
+**Player headshots**: the [`player-headshots`](handoffs/player-headshots.md) lane — not a
+file drop: per-league CDN patterns, a gitignored disk cache filled by a monthly job, and the
+`main.js` "coming soon" disc replaced. The owner's part is clearing each league's CDN terms
+before the job goes on the production cron.
 
 **Commissioned logo**: the brief is [`art_briefs/logo_guru.md`](art_briefs/logo_guru.md).
 `app.py` already carries the reserved, existence-guarded slot — dropping

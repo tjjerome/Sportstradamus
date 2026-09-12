@@ -194,6 +194,15 @@ relevant stage-0 capture, revise this brief in place, resume.
   for Stages 3–4 (CLAUDE.md "research-first" convention). Any later dependence-mechanism
   change (e.g. adopting the ladders brief's t-copula branch, or a new copula family)
   needs a fresh `research-analyst` dispatch — no waiver.
+- 2026-09-12 — **Product names stay the DFS apps' own** (owner). Ladder, Combo Entry
+  and game lines keep their official names everywhere the dashboard voices them; the
+  prophecy-voice candidates ("Ascension" / "Conjunction" / "Omen") are dropped — a
+  renamed product would not match what the owner sees in the app.
+- 2026-09-12 — **Game-total star fill = gradient blend of the two teams' colours**
+  (owner). A game-total pick has no single team, so its constellation star fills with a
+  gradient from one team's primary colour to the other's (`theme.team_colors()`),
+  centre-anchored between the two clusters (spec §5b); moneyline and spread stars keep
+  the single-team fill.
 
 ## 5. Module footprint & canonical paths
 

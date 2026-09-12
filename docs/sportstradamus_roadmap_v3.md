@@ -85,6 +85,9 @@ an exception. A session works one lane and reads that lane's brief.
 | `bestball-2027` | Draft products for the 2027 season | BLOCKED (on: D4) | D4 | [handoffs/bestball-2027.md](handoffs/bestball-2027.md) |
 | `low-weight-models` | Repair the model legs hidden behind a floor blend weight; ship criterion = free `w ≥ 0.3` + 6/6 gates, every lever sweep-testable | ACTIVE | — | [handoffs/low_weight_models.md](handoffs/low_weight_models.md) |
 | `hygiene-closeout` | Triage, calibration re-run, drift fixes, recurring checks | ACTIVE | — | [handoffs/hygiene-closeout.md](handoffs/hygiene-closeout.md) |
+| `cleanup-pass` | The five debts the dashboard close-out routed: Sleeper/ladder archive, Rivals residue, dead depth recompute, voice bank, `market_display` | ACTIVE | — | [handoffs/cleanup-pass.md](handoffs/cleanup-pass.md) |
+| `player-headshots` | Fetch, cache and render headshots for every player in all five leagues; monthly refresh picks up rookies | ACTIVE | prod cron waits on the owner clearing each league's CDN | [handoffs/player-headshots.md](handoffs/player-headshots.md) |
+| `constellation-art` | Replace the generated constellation silhouettes with filtered licence-free line art; shape bank re-fit to the images | ACTIVE | — (owner approves each sourced image) | [handoffs/constellation-art.md](handoffs/constellation-art.md) |
 
 ### 4.1 Build path (visual index)
 
@@ -149,6 +152,10 @@ flowchart LR
 
     DU["dashboard-ux — DONE 2026-09-11 (archive/dashboard-ux.md)"]:::sonnet
     BB["bestball-2027 S0-S6 (simulators S3-S4: Opus)"]:::sonnet
+    CP["cleanup-pass S1-S5 (independent debts)"]:::sonnet
+    PH["player-headshots S1-S3 (S0: owner clears CDNs)"]:::sonnet
+    CA["constellation-art S1-S5 (S2: owner approves images)"]:::sonnet
+    CP -.-> DP3
 
     D3{"D3 start parlay-dependence"}:::owner
     D4{"D4 start bestball-2027 (~Nov 2026)"}:::owner
@@ -281,11 +288,11 @@ sketches live in the archived v2.
   pairs the copula mis-prices (P8 spec §6.4).
 - **Dashboard logo commission** — the ambient files landed; the `st.logo` slot
   waits on the commissioned mark (`docs/art_briefs/logo_guru.md`).
-- **Player headshots** — the owner wants them; a lane of its own, not yet
-  planned (`docs/art_assets.md` row).
-- **Dashboard follow-ups at lane close** — owner decisions (Ladder/Combo/Omen
-  names, game-total star fill, the optional `export-line-movement` cron) and
-  routed debts, listed in [archive/dashboard-ux.md](archive/dashboard-ux.md) §11.
+- **Dashboard follow-ups at lane close** — the optional `export-line-movement`
+  cron (owner call; `prophecize` already writes the snapshot hourly) and the
+  constellation residuals in [archive/dashboard-ux.md](archive/dashboard-ux.md)
+  §11. The name / star-fill decisions are locked in dfs-products §4; the routed
+  debts, headshots and silhouettes each have a lane (§4).
 - **Idea backlog** — archived v2 §Suggestions for Further Improvement.
 
 ## 9. Doc map (canonical homes)
@@ -306,6 +313,7 @@ sketches live in the archived v2.
 
 ## Changelog
 
+- three follow-on lanes briefed off the dashboard close-out — `cleanup-pass`, `player-headshots`, `constellation-art` (§4 rows, §4.1 nodes); owner locked product names + game-total star fill (dfs-products §4); §8 trimmed.
 - dashboard-ux lane closed: Phase E scaffolding (art catalog, manifest loader, favicon, logo slot), constellation modules split, ledger debts fixed or routed; §3/§4/§8 trued; brief archived.
 - sleeper-parity stages 0-4 done (EV engine, decision-layer plumb-through, live-rail pricing, ledger integration incl. 2 push-refund bug fixes); PR to devel opened; §4 row trued.
 - roadmap trued vs audit: D1/D2 RESOLVED GO; mlb-nhl lane DONE→model-track WS-2; dfs-products ACTIVE; sleeper-parity flagged CRITICAL PATH (next code-heavy lane); §4.1 build-path diagram added; §5 constraints 1+5 merged post parlay.py seam split (payouts.py + joint.py, ARCHITECTURE §Stable Seams); breadth thresholds de-duped to model-track §1; model_stats path fixed.
