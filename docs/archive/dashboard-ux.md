@@ -135,10 +135,10 @@ Owner-locked 2026-06-11 and amended by owner review during the build; changes ar
 | L2 comps persistence | 2026-06-15 (P6a.1) | `current_offer_details.parquet` |
 | P8 E1–E4 art catalog, ambient manifest + loader, favicon, logo slot | 2026-09-11 | `486a50c7` |
 | Close-out — `constellation.py` / `constellation_wider.py` split under the cap (`119b2d2c`), NFL unit words + dead-cell prune (`15bba76e`), integration snapshot guard (`8229fed1`) | 2026-09-11 | `3ddcc4a5` docs |
+| P8 E5 ambient files (owner-sourced night sky + nebula, `f82cd816`); Tonight cards slice the sky consecutively, Games hero shares the nebula, loader downscales originals at import | 2026-09-12 | `23946a6e` |
 
-Not built, by decision: **E5** art sourcing (owner approves binaries — roadmap §8); **L3–L9** UI
-scars flip on behind dfs-products (spec §8); **L6** free-LLM rewriter (documented only);
-empirical-vs-model ρ overlay (roadmap §8).
+Not built, by decision: **L3–L9** UI scars flip on behind dfs-products (spec §8); **L6**
+free-LLM rewriter (documented only); empirical-vs-model ρ overlay (roadmap §8).
 
 ## 7. Working rules (still binding for any dashboard edit)
 
@@ -171,6 +171,7 @@ a live-browser verdict for anything rendered.
 
 ## 10. Ledger (newest first; trimmed at close — the full entries are in this file's git history under `docs/handoffs/dashboard-ux.md`)
 
+- 2026-09-12 · ambient files landed (`f82cd816`); Tonight cards show consecutive slices of one sky (per-card offsets from a parent-window script), Games hero shares the nebula, loader downsizes >1600 px originals to WebP at import (`23946a6e`) · live: offsets exactly cumulative on 5 desktop / 17 phone cards, both heroes nebula-backed, 0 page errors.
 - 2026-09-12 · licence gate dropped from `assets.py` at owner request (owner checks licences before a file lands); team marks skipped, player headshots wanted → next lane.
 - 2026-09-11 · lane closed · Phase E1–E4 built, constellation split (142 figure JSONs byte-equal), story debts, integration guard; docs trued, brief archived, `feature/dashboard-ux` deleted · gates: ruff clean, golden 4682 passed + 1 xpassed, integration 34 passed 2 skipped · live (playwright 1600×1000 + 390×844): favicon inline gold mark, no logo, Tonight wash + Receipts hero unchanged, constellation main/deeper/wider renders with the iframe height posted on both viewports, hover + tap cards render, 0 page errors from our code (Streamlit's telemetry webhook and deep-link `_stcore` probes only) · `export-line-movement` wrote 0 rows: the dev archive holds no MLB ladder polls, so the card's movement row rests on its golden.
 - 2026-09-10 · line movement reads the ladder's balanced rung + a fair line; Movement tab; Games card row (`75ec341e`).
@@ -198,8 +199,8 @@ Owner decisions (nothing blocks on them; each has an honest fallback in place):
 - Game-total star fill (neutral gray proposal, spec §5b) — same trigger.
 - Team marks: skipped; player headshots: wanted, next lane (owner, 2026-09-12) —
   [art_assets.md](../art_assets.md).
-- E5 art sourcing + the commissioned logo (`docs/art_briefs/logo_guru.md`) — owner approves
-  every binary; the manifest and `st.logo` slot need zero code when files land.
+- The commissioned logo (`docs/art_briefs/logo_guru.md`) — the `st.logo` slot needs zero
+  code when the files land.
 - The optional `export-line-movement` cron + healthcheck ([OPERATIONS.md](../OPERATIONS.md));
   `prophecize` already writes the snapshot hourly.
 

@@ -96,8 +96,9 @@ Altair / Vega-Lite inherit these automatically.
   hourglass/sand motifs, celestial sports equipment). Slots and files are declared in
   `data/assets/ambient/ambient_manifest.json` (slot → file, opacity, placement, attribution notes)
   and read by `dashboard/assets.py:ambient_css`, which renders a slot only when its entry names
-  a file on disk; slots without art render token-palette
-  gradients. The slot catalog is [docs/art_assets.md](docs/art_assets.md). Rules: opacity ≤ 20% over `backgroundColor`,
+  a file on disk; slots without art render token-palette gradients. `placement` picks the
+  geometry: heroes crop to cover, the Tonight card deck tiles the image down the column with
+  each card showing the next slice. The slot catalog is [docs/art_assets.md](docs/art_assets.md). Rules: opacity ≤ 20% over `backgroundColor`,
   body text on top must keep WCAG AA contrast, **never behind dense tables or stat grids**, and art
   is stock or commissioned only — no AI-generated images; the owner clears the license before a
   file lands (nothing in code checks it).

@@ -279,9 +279,8 @@ sketches live in the archived v2.
   product (archived v2 §Suggestions).
 - **Empirical-vs-model ρ overlay** — Correlations Lab heatmap overlay flagging
   pairs the copula mis-prices (P8 spec §6.4).
-- **Dashboard art sourcing (Phase E5)** — free ambient files + the commissioned
-  logo; the slots, manifest and loader are wired, the owner clears each licence
-  and approves every binary (`docs/art_assets.md`).
+- **Dashboard logo commission** — the ambient files landed; the `st.logo` slot
+  waits on the commissioned mark (`docs/art_briefs/logo_guru.md`).
 - **Player headshots** — the owner wants them; a lane of its own, not yet
   planned (`docs/art_assets.md` row).
 - **Dashboard follow-ups at lane close** — owner decisions (Ladder/Combo/Omen

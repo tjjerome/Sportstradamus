@@ -12,11 +12,11 @@ present file is `dashboard/assets.py`; ambient slot state lives in
 | `logo_wordmark` | Sidebar via `st.logo()` (`dashboard/app.py`) | none — plain nav, no wordmark | Guru/genie mystic-sports mark + "SPORTSTRADAMUS" wordmark, horizontal lockup | **commissioned** ([`art_briefs/logo_guru.md`](art_briefs/logo_guru.md)) | full exclusive commercial rights assigned; artist credited in this row once delivered | SVG master + PNG @1x/@2x, ~600×160 | P1 |
 | `logo_mark` | Collapsed-sidebar icon, `st.logo(icon_image=...)` (`dashboard/app.py`) | none | Square mark alone; also the eventual favicon source, reads at 16px | **commissioned** (same brief) | same rights as `logo_wordmark`; artist credited in this row once delivered | SVG master + PNG @1x/@2x, 512×512 | P1 |
 | `favicon` | Browser tab (`st.set_page_config(page_icon=...)`, `dashboard/app.py`) | Streamlit default icon | Logo-derived mark | generated now (hand-drawn ◈ comet SVG) → replaced by `logo_mark` later, zero code change | hand-drawn vector is licence-exempt (generated-SVG-keep) | SVG (64×64 PNG fallback if Streamlit won't serve SVG), legible at 16×16 | P1 |
-| `ambient_tonight` | Tonight card wash — `.tonight-card` background (`dashboard/theme.py`) | CSS radial-gradient nebula wash | Faint night-sky field behind the card | free-stock (NASA/ESA or Unsplash/Pexels class) | commercial-clean licence, owner-checked; `attribution`/`source_url` notes in `ambient_manifest.json` | JPEG/WebP < 300 KB; manifest opacity 0.14 | P2 |
-| `ambient_receipts_hero` | Receipts verdict hero — `_HERO_BG` (`dashboard/surfaces/receipts.py`) | CSS radial-gradient nebula wash | Licensed nebula/night-sky texture | free-stock (NASA/ESA class) | same as `ambient_tonight` | JPEG/WebP < 300 KB; manifest opacity 0.16 | P2 |
+| `ambient_tonight` | Tonight card deck — `.tonight-card` background (`dashboard/theme.py`) | `night_sky.jpg` at 0.14, scaled to the column and tiled down it; each card shows the next slice (`surfaces/tonight.py` script) | — | free-stock (pickpik) | owner-checked; `source_url` in `ambient_manifest.json` | 6016×4016 JPEG source, downscaled to 1600 px WebP at import | done |
+| `ambient_receipts_hero` | Receipts verdict hero — `_HERO_BG` (`dashboard/surfaces/receipts.py`) | `nebula.jpg` (Horsehead, Wikimedia Commons) at 0.16, cropped to cover | — | free-stock | owner-checked; `source_url` in the manifest | 7300×4867 JPEG source (18 MB in git), downscaled to 1600 px WebP at import | done |
+| `ambient_games_hero` | Games hero card — `_HERO_BG` (`dashboard/surfaces/games.py`) | the same `nebula.jpg` as the Receipts hero, by owner request | — | same | same | same | done |
 | `ambient_gutters` (starfield) | App-level starfield — `theme._starfield_background()` + `STARFIELD_HTML` | Generated CSS dust dots + twinkle divs, seeded PRNG | keep — generated is the design | generated-SVG-keep | n/a | n/a | P3 |
 | `page_hero_wash` | Every surface's `.page-hero` header band (`dashboard/theme.py`) | Generated CSS two-stop nebula wash | keep — generated is the design | generated-SVG-keep | n/a | n/a | P3 |
-| `games_hero_wash` | Games hero card — `_HERO_BG` (`dashboard/surfaces/games.py`) | CSS radial-gradient nebula wash | Same ambient upgrade as the other two hero washes | catalog-only here — `games.py` is Phase D territory, not wired by the E2 loader | n/a until D wires it | n/a | P3 |
 | `glyphs_game_shape` | Tonight/Games game-shape glyphs (`dashboard/components/glyphs.py`) | Generated inline SVG (comet, supernova, scales, nebula, hourglass) | keep; optional licensed-texture upgrade later | generated-SVG-keep | n/a | n/a | P3 |
 | `astrolabe_engraving` | Slip-builder astrolabe bezel (`dashboard/components/astrolabe_component/build/index.html`) | Generated SVG bezel/orbitals/dials | keep; optional licensed engraving texture | generated-SVG-keep | n/a | n/a | P3 |
 | `constellation_silhouettes` | Games constellation decoration layer (`data/config/constellation_shapes.json`, rendered by `constellation_component`) | Generated SVG template paths (100-template bank) | keep; optional artist pass | catalog-only here — Phase D owns these files | n/a | n/a | P3 |
@@ -32,29 +32,33 @@ twice, `games.py`, `receipts.py`) — no other surface builds one.
 
 ## The scar mechanism
 
-`ambient_tonight` and `ambient_receipts_hero` are wired through
+`ambient_tonight`, `ambient_receipts_hero` and `ambient_games_hero` are wired through
 `dashboard.assets.ambient_css(slot, fallback_gradient)`: it returns `fallback_gradient`
 byte-identical unless the manifest slot names a `file` that exists on disk. A present file
 is embedded as a base64 data URI (Streamlit serves no arbitrary static files) under a solid
-overlay of the surface color, so it never exceeds its manifest `opacity`. Every other row
-above is either `generated-SVG-keep` (no sourcing needed — the generated form *is* the
-design) or `catalog-only` (owned by another phase).
+overlay of the surface color, so it never exceeds its manifest `opacity`; anything wider
+than 1600 px is downscaled to WebP at import, so the page never ships an original. The
+slot's `placement` picks the geometry: `hero-background` crops to cover the box;
+`card-background` scales the image to the column width and tiles it downward, and the
+Tonight page's script offsets each card by the cards above it, so the column reads as one
+sky sliced card by card, looping once it runs out of image. Every other row above is
+either `generated-SVG-keep` (no sourcing needed — the generated form *is* the design) or
+`catalog-only` (owned by another phase).
 
 ## What the owner does next
 
-**Ambient files (E5)** — two images, no code:
+**Swapping an ambient file** — no code:
 
-1. Pick a mostly-dark night-sky photo for `ambient_tonight` (renders at 0.14 under body
-   text, so no bright foreground subject) and a nebula image for `ambient_receipts_hero`
-   (0.16, can be a little richer). NASA/ESA public-domain releases are the easy source;
-   Unsplash/Pexels-class night-sky photography also works. Check the licence yourself —
-   skip editorial-only, NC, or unclear terms; nothing in code checks it.
-2. Drop each file into `src/sportstradamus/data/assets/ambient/` (JPEG or WebP, under
-   ~300 KB — it is embedded inline in the page CSS on every load).
-3. Write the filename into that slot's `"file"` in `ambient_manifest.json`, plus
-   `attribution` / `source_url` if you want the note. Leave `opacity` alone: 0.14 / 0.16 are
-   tuned, and the loader refuses anything above 0.20.
-4. Restart the dashboard service — both callers read the manifest at import.
+1. Check the licence yourself — skip editorial-only, NC, or unclear terms; nothing in code
+   checks it. Mostly-dark images work best: the Tonight deck renders at 0.14 under body
+   text, the heroes at 0.16.
+2. Drop the file into `src/sportstradamus/data/assets/ambient/` (JPEG, PNG or WebP, any
+   size — the loader downscales anything wider than 1600 px at import, but git keeps every
+   committed version forever, so a web-sized file is kinder to the repo).
+3. Point that slot's `"file"` at it in `ambient_manifest.json`, plus `attribution` /
+   `source_url` if you want the note. Leave `opacity` alone: 0.14 / 0.16 are tuned, and the
+   loader refuses anything above 0.20.
+4. Restart the dashboard service — the callers read the manifest at import.
 
 **Team marks**: skipped by the owner — colors-only stays; the constellation grammar never
 needed logos.
