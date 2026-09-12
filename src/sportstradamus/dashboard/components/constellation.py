@@ -46,35 +46,30 @@ The figure is pure (no Streamlit, no Archive): each node carries its
 index 0 — a plotly click turns into an add/remove), and each edge carries its two
 endpoint keys in ``meta`` so the component's JS can dim-in a star's incident ties on
 hover. It locks its own axes (no zoom/pan) — the builder hides the modebar. Positions
-come from ``constellation_slate`` when the game carries a template and from networkx's
-force solve when it doesn't; plotly draws. The shape half — which template a night's
-games are dealt, where the stars sit on one, and the engraving beneath them — all
-lives in ``constellation_slate``; this module is the figure.
+come from ``constellation_slate`` when the game carries a template and from
+``constellation_spring``'s force solve when it doesn't; ``constellation_traces`` owns
+the node and edge traces and the text they carry, ``constellation_deep_layer`` the
+deeper lens's layer. The shape half — which template a night's games are dealt, where
+the stars sit on one, and the engraving beneath them — all lives in
+``constellation_slate``; this module is the figure's orchestrator.
 Team fills read ``theme.team_colors(league, team)`` — real per-team primaries from
 ``team_assets.json``, never gold (gold is the correlation-edge color).
 """
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Mapping, Sequence
 
-import networkx as nx
 import pandas as pd
 import plotly.graph_objects as go
 
 from sportstradamus.dashboard.components.constellation_deep import (
-    _DEEP_COLOR,
-    DEEP_ALPHA_MIN,
-    DEEP_EDGES_PER_STAR,
     DEEP_SIZE_MAX,
     DEEP_SIZE_MAX_MOBILE,
     DEEP_SIZE_MIN,
     DEEP_SIZE_MIN_MOBILE,
-    add_deep_trace,
-    deep_positions,
-    deep_tier,
 )
+from sportstradamus.dashboard.components.constellation_deep_layer import add_deep_layer
 from sportstradamus.dashboard.components.constellation_slate import (
     SHAPE_SCALE,
     SHAPE_SCALE_MOBILE,
@@ -83,138 +78,67 @@ from sportstradamus.dashboard.components.constellation_slate import (
     game_universe,
     rho_map,
     teams_of,
-    template_positions,
 )
 from sportstradamus.dashboard.components.constellation_spacing import (
     PX_PER_UNIT,
     PX_PER_UNIT_MOBILE,
-    X_RANGE,
     Y_RANGE,
     caption_positions,
     default_stars,
     settle,
 )
+from sportstradamus.dashboard.components.constellation_spring import star_positions
+from sportstradamus.dashboard.components.constellation_traces import (
+    LABEL_FONT_SIZE,
+    LABEL_FONT_SIZE_MOBILE,
+    SIZE_MIN,
+    SIZE_MIN_MOBILE,
+    add_edge,
+    add_node_trace,
+    add_team_tags,
+    blank_figure,
+    edge_scale,
+    node_info,
+)
 from sportstradamus.dashboard.components.constellation_wider import (
-    _SKY_EXTRA_Y_MOBILE,
-    _WIDER_SCALE,
+    SKY_EXTRA_Y_MOBILE,
     WIDER_GAMES,
+    WIDER_SCALE,
     WIDER_STAR_SIZE,
     WIDER_STAR_SIZE_MOBILE,
     add_wider_layer,
 )
 from sportstradamus.dashboard.legs import corr_key
-from sportstradamus.dashboard.theme import GOLD, GRAY, team_colors, team_name
-from sportstradamus.helpers import market_display_name
-from sportstradamus.leg_schema import leg_field, leg_field_float
-
-_NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
-
-# Force-directed layout: each team's hub is pinned to its side, edges place the rest.
-_LAYOUT_SEED = 17
-_LAYOUT_TARGET = 1.1  # rescale radius — keeps stars + their top labels inside the frame
-_ANCHOR_X = (-1.0, 1.0)  # team[0] pinned left, team[1] pinned right
-_WARM_INSET = 0.6  # free nodes warm-start inside the anchors so springs can move them
-
-# Star size scales with the leg's Kelly edge, relative to the game's strongest leg.
-_SIZE_MIN = 14
-_SIZE_MAX = 38
-# A candidate (not-in-slip) star keeps most of its team hue — only a light blend toward
-# gray plus reduced opacity marks it not-yet-picked. The old 0.55/0.45 crushed dark
-# franchise colors to near-gray, so candidates read as a colorless field.
-_INACTIVE_DESAT = 0.35
-_INACTIVE_ALPHA = 0.60
-
-_EDGE_WIDTH_MIN = 1.0
-_EDGE_WIDTH_SPAN = 6.0  # width at |ρ|=1 ≈ 7px; weak ties stay hairlines for contrast
-_EDGE_ALPHA_MIN = 0.25
-# The whole correlation web is drawn barely-there at this alpha so the structure reads
-# before any pick without drowning the field; a tie whose both endpoints are in the slip
-# brightens to full gold (_add_edge), well above this base.
-_EDGE_BASE_ALPHA = 0.03
-_FIG_HEIGHT = 380
-_LABEL_FONT_SIZE = 11  # active-star caption — small enough to fit in a dense game
-
-# Phase M touch floors: a fingertip needs ~22px; the label lifts with it. The Kelly
-# ordering (size = edge) survives — the floor compresses the range, never reorders it.
-_SIZE_MIN_MOBILE = 22
-_LABEL_FONT_SIZE_MOBILE = 13
-_ACTIVE_LABEL_COLOR = "#C7CEDA"  # in-slip captions read brighter than gray candidate labels
-
-# Cinzel team tags framing the two sides of the map (docs/mockups/p8-games.html .teamtag).
-_TAG_LEFT_COLOR = "#e2909b"  # team[0] tag — warm, left side
-_TAG_RIGHT_COLOR = "#8ea6c9"  # team[1] tag — cool, right side
-
-
-def _last_name(player: str) -> str:
-    parts = player.split()
-    while len(parts) > 1 and parts[-1].rstrip(".").lower() in _NAME_SUFFIXES:
-        parts.pop()
-    return parts[-1] if parts else player
-
-
-def _bet_word(bet) -> str:
-    return "Over" if str(bet).lower().startswith("o") else "Under"
-
-
-def _market_name(leg: Mapping) -> str:
-    """The Board's name for this leg's market, resolved per leg.
-
-    The *wider* lens can put two leagues' games on one map, and the same slug
-    reads differently in each.
-    """
-    return market_display_name(
-        str(leg_field(leg, "league", "") or ""), str(leg_field(leg, "market"))
-    )
-
-
-def star_label(leg: Mapping) -> str:
-    """Compact star caption: ``Lastname Market o/u Line`` (e.g. ``Brunson Points o25.5``).
-
-    ``leg`` is a canonical lowercase leg or a raw uppercase ``current_offers``
-    row — ``leg_field`` bridges the two shapes (the constellation draws both a
-    game's candidate pool and the slip's own legs on one map).
-    """
-    ou = "o" if _bet_word(leg_field(leg, "bet")) == "Over" else "u"
-    return f"{_last_name(str(leg_field(leg, 'player')))} {_market_name(leg)} {ou}{float(leg_field(leg, 'line')):.10g}"
-
-
-def _hover_text(leg: Mapping) -> str:
-    p = leg_field_float(leg, "win_prob")
-    boost = leg_field_float(leg, "boost", 1.0)
-    k = leg_field_float(leg, "kelly")
-    head = (
-        f"{leg_field(leg, 'player')} — {_market_name(leg)} "
-        f"{_bet_word(leg_field(leg, 'bet'))} {float(leg_field(leg, 'line')):.10g}"
-    )
-    return f"{head}<br>Win {p:.0%} · {boost:.2f}x · Kelly {k:.0%}"
-
-
-def _card_fields(leg: Mapping) -> list:
-    """Structured fields the hover card reads from a node's ``customdata`` (after the key)."""
-    return [
-        str(leg_field(leg, "player")),
-        _market_name(leg),
-        _bet_word(leg_field(leg, "bet")),
-        float(leg_field(leg, "line")),
-        leg_field_float(leg, "win_prob"),
-        leg_field_float(leg, "boost", 1.0),
-        leg_field_float(leg, "kelly"),
-    ]
-
-
-def _node_info(leg: Mapping) -> dict:
-    return {
-        "label": star_label(leg),
-        "team": leg_field(leg, "team"),
-        "edge": leg_field_float(leg, "kelly"),
-        "hover": _hover_text(leg),
-        "card": _card_fields(leg),
-    }
+from sportstradamus.dashboard.theme import team_colors
 
 
 def _side_sign(x: float) -> float:
     """-1 / 0 / +1 for ``settle``'s ``side`` — 0 at ``x == 0`` stays legal on either half."""
     return 1.0 if x > 0 else -1.0 if x < 0 else 0.0
+
+
+def _pool_field(
+    pool: pd.DataFrame | None, slip_legs: Sequence[Mapping], *, column: str, key: str
+) -> str:
+    """A single-valued matchup field — read from the candidate ``pool`` so it's
+    static per game and renders before any leg is picked; falls back to the slip's
+    own legs when there is no pool (e.g. an active leg whose offer has expired).
+
+    ``column`` names the raw ``pool`` column (``"Game"`` / ``"League"``); ``key``
+    names the matching canonical-leg key (``"game"`` / ``"league"``). Reads the raw
+    pool column directly rather than bridging through ``leg_field``: a single
+    ``Game`` key never spans two leagues (team codes don't collide across leagues),
+    so the first non-null value is always right.
+    """
+    if pool is not None and not pool.empty and column in pool.columns:
+        values = pool[column].dropna()
+        if not values.empty:
+            return str(values.iloc[0])
+    for leg in slip_legs:
+        value = leg.get(key)
+        if value:
+            return str(value)
+    return ""
 
 
 def constellation_figure(
@@ -247,9 +171,9 @@ def constellation_figure(
     never captioned with the shape's name: an engraving a viewer has to be told
     the name of isn't reading, so the drawing has to carry it alone.
     """
-    fig = _blank_figure()
+    fig = blank_figure()
     universe = game_universe(pool, slip_legs)
-    info = {key: _node_info(leg) for key, leg in universe.items()}
+    info = {key: node_info(leg) for key, leg in universe.items()}
     if not info:
         return fig
     game = _pool_field(pool, slip_legs, column="Game", key="game")
@@ -258,24 +182,24 @@ def constellation_figure(
 
     active = {corr_key(leg) for leg in slip_legs} & set(info)
     keys = default_stars(universe, teams)
-    _add_team_tags(fig, league, teams)
+    add_team_tags(fig, league, teams)
     team_color = {team: team_colors(league, team)[0] for team in teams}
     rho = rho_map(corr, game)
     edges = game_edges(keys, rho)
     floor, label_size, shape_scale, px, lens_size, deep_span, sky_y = (
         (
-            _SIZE_MIN_MOBILE,
-            _LABEL_FONT_SIZE_MOBILE,
+            SIZE_MIN_MOBILE,
+            LABEL_FONT_SIZE_MOBILE,
             SHAPE_SCALE_MOBILE,
             PX_PER_UNIT_MOBILE,
             WIDER_STAR_SIZE_MOBILE,
             (DEEP_SIZE_MIN_MOBILE, DEEP_SIZE_MAX_MOBILE),
-            Y_RANGE + _SKY_EXTRA_Y_MOBILE,
+            Y_RANGE + SKY_EXTRA_Y_MOBILE,
         )
         if mobile
         else (
-            _SIZE_MIN,
-            _LABEL_FONT_SIZE,
+            SIZE_MIN,
+            LABEL_FONT_SIZE,
             SHAPE_SCALE,
             PX_PER_UNIT,
             WIDER_STAR_SIZE,
@@ -283,7 +207,7 @@ def constellation_figure(
             Y_RANGE,
         )
     )
-    pos, fillers = _positions(
+    pos, fillers = star_positions(
         keys,
         {k: info[k]["team"] for k in keys},
         teams,
@@ -291,8 +215,8 @@ def constellation_figure(
         shape,
         shape_scale,
     )
-    sizes = _edge_scale(keys, info, floor=floor)
-    focus_scale = _WIDER_SCALE if wider_groups is not None else 1.0
+    sizes = edge_scale(keys, info, floor=floor)
+    focus_scale = WIDER_SCALE if wider_groups is not None else 1.0
     # Biggest first: a top-Kelly star keeps its vertex to the float, and only what
     # would collide with it moves, never across its own team's half of the axis.
     # Spaced against the px the viewer actually gets: "look wider" shrinks positions
@@ -306,7 +230,7 @@ def constellation_figure(
     pos = {k: (x * focus_scale, y * focus_scale) for k, (x, y) in pos.items()}
     if shape is not None:
         add_decoration(fig, shape, fillers, shape_scale, focus_scale)
-    promoted = _add_deep_layer(
+    promoted = add_deep_layer(
         fig,
         deep_pool,
         keys,
@@ -333,8 +257,8 @@ def constellation_figure(
         font_px=label_size,
     )
     for a, b, r in edges:
-        _add_edge(fig, a, b, pos[a], pos[b], r, active=active)
-    _add_node_trace(
+        add_edge(fig, a, b, pos[a], pos[b], r, active=active)
+    add_node_trace(
         fig,
         [k for k in keys if k not in active],
         pos,
@@ -345,7 +269,7 @@ def constellation_figure(
         active=False,
         label_size=label_size,
     )
-    _add_node_trace(
+    add_node_trace(
         fig,
         [k for k in keys if k in active],
         pos,
@@ -358,7 +282,7 @@ def constellation_figure(
     )
     if wider_groups is not None:
         groups = wider_groups[:WIDER_GAMES]
-        winfo = {corr_key(row): _node_info(row) for _, rows in groups for row in rows}
+        winfo = {corr_key(row): node_info(row) for _, rows in groups for row in rows}
         add_wider_layer(
             fig,
             groups,
@@ -371,435 +295,3 @@ def constellation_figure(
             sky_y=sky_y,
         )
     return fig
-
-
-def _add_deep_layer(
-    fig: go.Figure,
-    deep_pool: pd.DataFrame | None,
-    keys: list[str],
-    info: dict[str, dict],
-    pos: dict[str, tuple[float, float]],
-    sizes: dict[str, float],
-    *,
-    active: set[str],
-    edges: list[tuple[str, str, float]],
-    rho: dict[frozenset, float],
-    teams: list[str],
-    team_color: dict[str, str],
-    px: tuple[float, float],
-    floor: float,
-    deep_span: tuple[float, float],
-) -> list[str]:
-    """Draw the deeper lens and return the slip legs it promotes to full stars.
-
-    ``info``, ``pos`` and ``sizes`` gain the drawn tier in place. An in-slip leg
-    beyond the default cut is promoted whether or not the lens is on, because it
-    has to burn in the spot the lens would have given it — which is why ``drawn``
-    leads with the promoted keys, whose placement priority must not move when the
-    lens grows the tier behind them. The unpicked stars and their ties are gated
-    on the lens itself, so a lens-off figure with nothing beyond the cut stays
-    byte-identical to today's.
-
-    Recomputing ``_edge_scale`` over the promoted legs cannot move a main star's
-    size: the top-Kelly leg is always inside the default cut, so the scale's
-    denominator is the one ``settle`` already spaced against. ``deep_span`` is the
-    lens tier's own size band, scaled over the tier's own strongest leg, so the
-    two scales never share a denominator.
-    """
-    if deep_pool is not None:
-        info |= {
-            corr_key(row): _node_info(row)
-            for row in deep_pool.to_dict("records")
-            if corr_key(row) not in info
-        }
-    tier = deep_tier(info, keys)
-    if not tier:
-        return []
-    promoted = [key for key in tier if key in active]
-    deep = [key for key in tier if key not in active] if deep_pool is not None else []
-    drawn = promoted + deep
-    lo, hi = deep_span
-    sizes |= _edge_scale(deep, info, floor=lo, ceiling=hi) | _edge_scale(
-        keys + promoted, info, floor=floor
-    )
-    ties = game_edges(keys + drawn, rho)
-    pos |= deep_positions(
-        drawn,
-        {key: pos[key] for key in keys},
-        sizes,
-        ties,
-        {key: info[key]["team"] for key in drawn},
-        teams,
-        px,
-    )
-    alphas = _edge_scale(deep, info, floor=DEEP_ALPHA_MIN, ceiling=_INACTIVE_ALPHA)
-    add_deep_trace(
-        fig,
-        deep,
-        pos,
-        info,
-        sizes=sizes,
-        # A liked leg the cut left behind is a candidate, just smaller; only the
-        # model-passed tier wears the lens's own gray.
-        colors=[
-            _desaturate(team_color.get(info[k]["team"], GRAY), _INACTIVE_DESAT)
-            if info[k]["edge"] > 0
-            else _DEEP_COLOR
-            for k in deep
-        ],
-        alphas=[alphas[k] for k in deep],
-    )
-    _add_lens_edges(
-        fig,
-        ties,
-        {(a, b) for a, b, _ in edges},
-        pos,
-        active=active,
-        deep=set(deep),
-    )
-    return promoted
-
-
-def _add_lens_edges(
-    fig: go.Figure,
-    edges: list[tuple[str, str, float]],
-    main_pairs: set[tuple[str, str]],
-    pos: dict[str, tuple[float, float]],
-    *,
-    active: set[str],
-    deep: set[str],
-) -> None:
-    """The ties the deeper lens brings in, minus the ones the base web already drew.
-
-    A promoted star is lit with the lens off too, so its ties are permanent
-    ``edge`` traces; a deep star's ties carry the ``deep_edge`` name instead, which
-    is how ``main.js`` gates the lens animation on them; a deep star keeps only its
-    ``DEEP_EDGES_PER_STAR`` strongest.
-    """
-    kept = _capped_deep_ties(edges, deep)
-    for node_a, node_b, tie in edges:
-        if (node_a, node_b) in main_pairs:
-            continue
-        lens = node_a in deep or node_b in deep
-        if lens and (node_a, node_b) not in kept:
-            continue
-        _add_edge(
-            fig,
-            node_a,
-            node_b,
-            pos[node_a],
-            pos[node_b],
-            tie,
-            active=active,
-            name="deep_edge" if lens else "edge",
-        )
-
-
-def _capped_deep_ties(edges: list[tuple[str, str, float]], deep: set[str]) -> set[tuple[str, str]]:
-    """Each deep star's strongest ties by |rho|, at most ``DEEP_EDGES_PER_STAR``.
-
-    Deep-to-deep ties never enter the pool — at lens size they are clutter with
-    nothing to read against — so they are the pairs the cap drops outright.
-    """
-    incident: defaultdict[str, list[tuple[str, str, float]]] = defaultdict(list)
-    for node_a, node_b, rho in edges:
-        if node_a in deep and node_b in deep:
-            continue
-        for key in (node_a, node_b):
-            if key in deep:
-                incident[key].append((node_a, node_b, rho))
-    return {
-        (node_a, node_b)
-        for ties in incident.values()
-        for node_a, node_b, _ in sorted(ties, key=lambda tie: (-abs(tie[2]), tie[:2]))[
-            :DEEP_EDGES_PER_STAR
-        ]
-    }
-
-
-def _edge_scale(
-    keys: list[str], info: dict[str, dict], *, floor: float, ceiling: float = _SIZE_MAX
-) -> dict[str, float]:
-    """Per-node value in ``[floor, ceiling]`` ∝ Kelly edge, over the strongest of ``keys``.
-
-    Star size on the main map, size *and* opacity on the deeper lens's own tier —
-    one scale so the two tiers rank themselves the same way at different volumes.
-    A model-passed leg (edge ≤ 0) sits at the floor rather than below it, and a
-    set with nothing positive in it is flat there.
-    """
-    top = max((info[k]["edge"] for k in keys), default=0.0)
-    if top <= 0:
-        return dict.fromkeys(keys, float(floor))
-    span = ceiling - floor
-    return {k: floor + max(info[k]["edge"], 0.0) / top * span for k in keys}
-
-
-def _blank_figure() -> go.Figure:
-    fig = go.Figure()
-    fig.update_layout(
-        height=_FIG_HEIGHT,
-        showlegend=False,
-        paper_bgcolor="rgba(0,0,0,0)",  # transparent — the page starfield reads through the map
-        plot_bgcolor="rgba(0,0,0,0)",
-        margin={"l": 10, "r": 10, "t": 10, "b": 10},
-        hovermode="closest",
-        dragmode=False,  # no panning — this is a map, not a chart
-        xaxis={"visible": False, "fixedrange": True, "range": [-X_RANGE, X_RANGE]},
-        yaxis={"visible": False, "fixedrange": True, "range": [-Y_RANGE, Y_RANGE]},
-    )
-    return fig
-
-
-def _add_team_tags(fig: go.Figure, league: str, teams: list[str]) -> None:
-    """Cinzel team-name tags framing the two sides (left = ``team[0]``, right = ``team[1]``).
-
-    Ports the mockup's ``.teamtag`` labels; :func:`theme.team_name` gives the full name
-    (abbrev fallback). No-op when the matchup isn't two-sided (an unrepresented side or a
-    solo/combo game).
-    """
-    if len(teams) != 2:
-        return
-    for team, x, anchor, color in (
-        (teams[0], 0.0, "left", _TAG_LEFT_COLOR),
-        (teams[1], 1.0, "right", _TAG_RIGHT_COLOR),
-    ):
-        fig.add_annotation(
-            text=team_name(league, team).upper(),
-            xref="paper",
-            yref="paper",
-            x=x,
-            y=1.0,
-            xanchor=anchor,
-            yanchor="top",
-            showarrow=False,
-            font={"family": "Cinzel, serif", "size": 11, "color": color},
-        )
-
-
-def _pool_field(
-    pool: pd.DataFrame | None, slip_legs: Sequence[Mapping], *, column: str, key: str
-) -> str:
-    """A single-valued matchup field — read from the candidate ``pool`` so it's
-    static per game and renders before any leg is picked; falls back to the slip's
-    own legs when there is no pool (e.g. an active leg whose offer has expired).
-
-    ``column`` names the raw ``pool`` column (``"Game"`` / ``"League"``); ``key``
-    names the matching canonical-leg key (``"game"`` / ``"league"``). Reads the raw
-    pool column directly rather than bridging through ``leg_field``: a single
-    ``Game`` key never spans two leagues (team codes don't collide across leagues),
-    so the first non-null value is always right.
-    """
-    if pool is not None and not pool.empty and column in pool.columns:
-        values = pool[column].dropna()
-        if not values.empty:
-            return str(values.iloc[0])
-    for leg in slip_legs:
-        value = leg.get(key)
-        if value:
-            return str(value)
-    return ""
-
-
-def _positions(
-    nodes: list[str],
-    node_team: dict[str, str | None],
-    teams: list[str],
-    edges: list[tuple[str, str, float]],
-    template: dict | None,
-    scale: tuple[float, float],
-) -> tuple[dict[str, tuple[float, float]], list[int]]:
-    """Star positions, plus the template vertices no star filled.
-
-    Without a template this is the spring layout and an empty filler list — the
-    original behavior, untouched; with one, ``constellation_slate`` places the
-    stars on the shape.
-    """
-    if template is None:
-        return _layout(nodes, node_team, teams, edges), []
-    return template_positions(nodes, node_team, teams, edges, template, scale)
-
-
-def _layout(
-    nodes: list[str],
-    node_team: dict[str, str | None],
-    teams: list[str],
-    edges: list[tuple[str, str, float]],
-) -> dict[str, tuple[float, float]]:
-    """Team-anchored force-directed positions.
-
-    Each team's most-connected node is pinned to its side; a weighted spring layout
-    (|ρ| edges) then places the rest, so cross-team correlations pull stars toward
-    the centre and an unrepresented team leaves an empty half. Deterministic: a
-    team-biased warm start over every node plus a fixed seed (no random init).
-    """
-    if not nodes:
-        return {}  # nx.spring_layout cannot warm-start an empty graph
-    graph = nx.Graph()
-    graph.add_nodes_from(nodes)
-    for u, v, w in edges:
-        graph.add_edge(u, v, weight=w)
-    anchors = _anchors(graph, node_team, teams)
-    init = _initial_positions(nodes, node_team, teams) | anchors
-    pos = nx.spring_layout(
-        graph, pos=init, fixed=list(anchors) or None, weight="weight", seed=_LAYOUT_SEED
-    )
-    return _rescale(pos)
-
-
-def _anchors(
-    graph: nx.Graph, node_team: dict[str, str | None], teams: list[str]
-) -> dict[str, tuple[float, float]]:
-    """Pin each team's most-connected node to its side (left / right)."""
-    strength = graph.degree(weight="weight")
-    pinned: dict[str, tuple[float, float]] = {}
-    for team, x in zip(teams, _ANCHOR_X, strict=False):
-        members = [n for n in graph.nodes if node_team.get(n) == team]
-        if members:
-            pinned[max(members, key=lambda n: (strength[n], n))] = (x, 0.0)
-    return pinned
-
-
-def _initial_positions(
-    nodes: list[str], node_team: dict[str, str | None], teams: list[str]
-) -> dict[str, tuple[float, float]]:
-    """Team-biased warm start: team[0] left, team[1] right, the rest centre.
-
-    Seeds the spring layout in a left-right basin (and makes it deterministic)
-    instead of leaving free nodes to a seed-dependent tangle.
-    """
-    side = dict(zip(teams, _ANCHOR_X, strict=False))
-    init: dict[str, tuple[float, float]] = {}
-    for x in (*_ANCHOR_X, 0.0):
-        members = [n for n in sorted(nodes) if side.get(node_team.get(n), 0.0) == x]
-        for n, y in zip(members, _spread(len(members)), strict=True):
-            init[n] = (x * _WARM_INSET, y * _WARM_INSET)
-    return init
-
-
-def _spread(n: int) -> list[float]:
-    """``n`` y-coordinates evenly spaced top→bottom in [-1, 1] (centre when n == 1)."""
-    if n <= 1:
-        return [0.0] * n
-    return [1.0 - 2.0 * i / (n - 1) for i in range(n)]
-
-
-def _rescale(pos: dict[str, tuple[float, float]]) -> dict[str, tuple[float, float]]:
-    """Center on the bbox midpoint, then uniformly scale to fill the frame (radius ``_LAYOUT_TARGET``).
-
-    Centering first keeps a one-sided game (all stars on one team, or a lopsided web)
-    from piling against a frame edge — scaling about the raw origin leaves an off-center
-    cloud off-center. A normal two-team game is already ~symmetric about its anchors, so
-    the shift is near-zero there.
-    """
-    if not pos:
-        return {}
-    xs = [x for x, _ in pos.values()]
-    ys = [y for _, y in pos.values()]
-    cx = (min(xs) + max(xs)) / 2
-    cy = (min(ys) + max(ys)) / 2
-    centered = {k: (x - cx, y - cy) for k, (x, y) in pos.items()}
-    span = max((max(abs(x), abs(y)) for x, y in centered.values()), default=0.0)
-    if span == 0.0:
-        return dict.fromkeys(pos, (0.0, 0.0))
-    factor = _LAYOUT_TARGET / span
-    return {k: (x * factor, y * factor) for k, (x, y) in centered.items()}
-
-
-def _add_edge(
-    fig: go.Figure,
-    a: str,
-    b: str,
-    p0,
-    p1,
-    rho: float,
-    *,
-    active: set[str],
-    name: str = "edge",
-) -> None:
-    """One correlation edge: gold, width/opacity ∝ |ρ|, dashed when ρ < 0.
-
-    Drawn at a faint base alpha (``_EDGE_BASE_ALPHA``) so the whole web reads as a
-    sketch; brightens to full ``|ρ|``-scaled gold only when **both** endpoints are in
-    the slip, so the slip's own correlations stand out over the rest. ``meta`` carries
-    the endpoint keys so the component's JS can faint-preview a star's other ties on hover.
-    ``name`` is ``"deep_edge"`` for a tie one of the deeper lens's own stars owns, which
-    is how the JS knows to fade it in and out with them.
-    """
-    incident = a in active and b in active
-    fig.add_trace(
-        go.Scatter(
-            x=[p0[0], p1[0]],
-            y=[p0[1], p1[1]],
-            mode="lines",
-            name=name,
-            line={
-                "color": GOLD,
-                "width": _EDGE_WIDTH_MIN + abs(rho) * _EDGE_WIDTH_SPAN,
-                "dash": "dot" if rho < 0 else "solid",
-            },
-            opacity=min(1.0, _EDGE_ALPHA_MIN + abs(rho)) if incident else _EDGE_BASE_ALPHA,
-            meta=[a, b],
-            hoverinfo="skip",
-        )
-    )
-
-
-def _add_node_trace(
-    fig: go.Figure,
-    keys: list[str],
-    pos: dict,
-    info: dict[str, dict],
-    sizes: dict[str, float],
-    team_color: dict[str, str],
-    captions: Mapping[str, str],
-    *,
-    active: bool,
-    label_size: int = _LABEL_FONT_SIZE,
-) -> None:
-    """One scatter trace of stars: active = full team color, candidate = desaturated/dim.
-
-    ``captions`` (``constellation_spacing.caption_positions``) decides which stars
-    are labelled and where; the rest carry empty text and read from the hover card.
-    Both active and candidate stars are eligible and active stars render on top —
-    the active/candidate signal is the star's fill color and opacity, never the label.
-    """
-    if not keys:
-        return
-    base_colors = [team_color.get(info[k]["team"], GRAY) for k in keys]
-    colors = [c if active else _desaturate(c, _INACTIVE_DESAT) for c in base_colors]
-    fig.add_trace(
-        go.Scatter(
-            x=[pos[k][0] for k in keys],
-            y=[pos[k][1] for k in keys],
-            mode="markers+text",
-            name="active" if active else "candidate",
-            marker={
-                "symbol": "star",
-                "size": [sizes[k] for k in keys],
-                "color": colors,
-                "opacity": 1.0 if active else _INACTIVE_ALPHA,
-            },
-            text=[info[k]["label"] if k in captions else "" for k in keys],
-            textposition=[captions.get(k, "top center") for k in keys],
-            textfont={
-                "color": _ACTIVE_LABEL_COLOR if active else GRAY,
-                "size": label_size,
-            },
-            customdata=[[k, *info[k]["card"], 1 if active else 0] for k in keys],
-            hovertext=[info[k]["hover"] for k in keys],
-            hoverinfo="none",  # the component draws the hover card; suppress the native tooltip
-        )
-    )
-
-
-def _desaturate(hex_color: str, amount: float) -> str:
-    """Blend ``hex_color`` toward gray by ``amount`` ∈ [0, 1] (1 = full gray)."""
-    rgb = _hex_rgb(hex_color)
-    gray = _hex_rgb(GRAY)
-    mixed = tuple(round(c + (g - c) * amount) for c, g in zip(rgb, gray, strict=True))
-    return "#{:02x}{:02x}{:02x}".format(*mixed)
-
-
-def _hex_rgb(hex_color: str) -> tuple[int, int, int]:
-    h = hex_color.lstrip("#")
-    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)

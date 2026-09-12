@@ -28,7 +28,7 @@ import numpy as np
 
 from sportstradamus.leg_schema import is_model_liked, leg_field
 
-X_RANGE, Y_RANGE = 1.6, 1.4  # the figure's locked axis ranges (constellation._blank_figure)
+X_RANGE, Y_RANGE = 1.6, 1.4  # the figure's locked axis ranges (constellation_traces.blank_figure)
 
 # Data units to css px, per viewport: the desktop plot box is ~980x360 over the
 # 3.2 x 2.8 unit frame, the phone's ~342 wide at the same height (measured on a

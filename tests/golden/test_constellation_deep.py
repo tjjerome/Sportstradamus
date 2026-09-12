@@ -15,11 +15,7 @@ import math
 
 import pandas as pd
 
-from sportstradamus.dashboard.components.constellation import (
-    _SIZE_MAX,
-    _SIZE_MIN,
-    constellation_figure,
-)
+from sportstradamus.dashboard.components.constellation import constellation_figure
 from sportstradamus.dashboard.components.constellation_deep import (
     DEEP_ALPHA_MIN,
     DEEP_EDGES_PER_STAR,
@@ -35,6 +31,7 @@ from sportstradamus.dashboard.components.constellation_spacing import (
     X_RANGE,
     Y_RANGE,
 )
+from sportstradamus.dashboard.components.constellation_traces import SIZE_MAX, SIZE_MIN
 
 _GAME = "NYK/SAS"
 
@@ -204,7 +201,7 @@ def test_liked_legs_beyond_the_cut_are_drawn_only_under_the_lens():
     assert len(_stars(fig)) == DEFAULT_STARS + 3
     deep = _stars(fig, "deep")
     assert set(deep) == {_key(f"P{i}") for i in range(DEFAULT_STARS, DEFAULT_STARS + 3)}
-    assert all(size < _SIZE_MIN for _, size in deep.values())
+    assert all(size < SIZE_MIN for _, size in deep.values())
 
 
 def _borrowed_mains(fig) -> dict[str, set[str]]:
@@ -260,7 +257,7 @@ def test_promoting_a_deep_star_does_not_re_deal_the_tier():
             assert nearest[key] == min(
                 mains, key=lambda main: _apart(moved, mains[main], PX_PER_UNIT)
             ), (picked, key)
-            assert _apart(pos, after[picked][0], PX_PER_UNIT) <= 3 * _SIZE_MAX, (picked, key)
+            assert _apart(pos, after[picked][0], PX_PER_UNIT) <= 3 * SIZE_MAX, (picked, key)
 
 
 def test_a_deep_star_shows_only_its_strongest_ties():

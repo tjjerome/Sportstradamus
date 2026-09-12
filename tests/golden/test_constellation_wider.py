@@ -16,19 +16,23 @@ import statistics
 
 import pandas as pd
 
-from sportstradamus.dashboard.components import constellation_deep, constellation_wider
-from sportstradamus.dashboard.components.constellation import (
-    _FIG_HEIGHT,
-    _LABEL_FONT_SIZE,
-    _LABEL_FONT_SIZE_MOBILE,
-    constellation_figure,
+from sportstradamus.dashboard.components import (
+    constellation_deep,
+    constellation_sky,
+    constellation_wider,
 )
+from sportstradamus.dashboard.components.constellation import constellation_figure
 from sportstradamus.dashboard.components.constellation_spacing import (
     _FRAME_INSET,
     DEFAULT_STARS,
     PX_PER_UNIT,
     PX_PER_UNIT_MOBILE,
     Y_RANGE,
+)
+from sportstradamus.dashboard.components.constellation_traces import (
+    FIG_HEIGHT,
+    LABEL_FONT_SIZE,
+    LABEL_FONT_SIZE_MOBILE,
 )
 from sportstradamus.dashboard.components.constellation_wider import (
     WIDER_GAMES,
@@ -123,7 +127,7 @@ def test_wider_stars_cluster_by_game_and_wear_team_colors():
 def test_wider_sky_is_seeded_by_md5_not_hash():
     """``hash()`` on a ``str`` is per-process randomized, which would unpin every
     position here between two test runs."""
-    for module in (constellation_deep, constellation_wider):
+    for module in (constellation_deep, constellation_sky, constellation_wider):
         called = {
             node.func.id
             for node in ast.walk(ast.parse(inspect.getsource(module)))
@@ -168,7 +172,7 @@ def test_a_deep_tier_that_closes_the_sky_grows_it_instead_of_drawing_nothing():
 
 
 def _sky_boxes(
-    fig, *, px=PX_PER_UNIT, size=WIDER_STAR_SIZE, font=_LABEL_FONT_SIZE
+    fig, *, px=PX_PER_UNIT, size=WIDER_STAR_SIZE, font=LABEL_FONT_SIZE
 ) -> tuple[list[tuple], list[tuple]]:
     """The sky's label ink boxes and star boxes in px, as ``(game, x0, y0, x1, y1)``.
 
@@ -229,7 +233,7 @@ def test_the_desktop_keeps_its_own_height_while_its_side_bands_hold():
         fig = constellation_figure(
             [], None, _ladder(13), deep_pool=deep, wider_groups=_wider_groups(3)
         )
-        assert fig.layout.height == _FIG_HEIGHT
+        assert fig.layout.height == FIG_HEIGHT
         assert tuple(fig.layout.yaxis.range) == (-Y_RANGE, Y_RANGE)
 
 
@@ -299,8 +303,8 @@ def test_wider_label_boxes_clear_every_foreign_star_on_both_viewports():
         for game in names
     ]
     for mobile, px, size, font in (
-        (False, PX_PER_UNIT, WIDER_STAR_SIZE, _LABEL_FONT_SIZE),
-        (True, PX_PER_UNIT_MOBILE, WIDER_STAR_SIZE_MOBILE, _LABEL_FONT_SIZE_MOBILE),
+        (False, PX_PER_UNIT, WIDER_STAR_SIZE, LABEL_FONT_SIZE),
+        (True, PX_PER_UNIT_MOBILE, WIDER_STAR_SIZE_MOBILE, LABEL_FONT_SIZE_MOBILE),
     ):
         fig = constellation_figure(
             [], None, _ladder(13), deep_pool=_deep_pool(190), wider_groups=groups, mobile=mobile
