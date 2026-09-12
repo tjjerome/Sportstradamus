@@ -89,8 +89,9 @@ Owner-locked 2026-06-11 and amended by owner review during the build; changes ar
   per night with no repeats, leagues walled to the general library plus their own gear;
   decoration never gold, never interactive, uncaptioned (DESIGN §4a).
 - **Underdog game lines get no modeling engine** — correlation-engine citizens only.
-- **Art is stock or commissioned, never AI-generated;** the licence gate is code
-  (`dashboard/assets.py` renders a slot only with a file *and* a licence).
+- **Art is stock or commissioned, never AI-generated;** licensing is the owner's check before
+  a file lands (`dashboard/assets.py` renders any slot that names a file on disk; the code
+  gate was dropped 2026-09-12 at the owner's request).
 - **Precompute-first:** the dashboard reads snapshots; the only live calc is `slip_engine.py`.
 
 ## 5. Module footprint (as shipped)
@@ -132,7 +133,7 @@ Owner-locked 2026-06-11 and amended by owner review during the build; changes ar
 | Sep polish — Clouded shape, 20 stars, spacing, deep/wider lenses, calm-analyst voice | 2026-09-04/05 | `40205770`, `ea737e63` |
 | L1 line movement — fair line from the `ladder` table, Board `Move`, Movement tab, card row | 2026-09-07/10 | `99b0aded`, `75ec341e` |
 | L2 comps persistence | 2026-06-15 (P6a.1) | `current_offer_details.parquet` |
-| P8 E1–E4 art catalog, ambient manifest + licence-gated loader, favicon, logo slot | 2026-09-11 | `486a50c7` |
+| P8 E1–E4 art catalog, ambient manifest + loader, favicon, logo slot | 2026-09-11 | `486a50c7` |
 | Close-out — `constellation.py` / `constellation_wider.py` split under the cap (`119b2d2c`), NFL unit words + dead-cell prune (`15bba76e`), integration snapshot guard (`8229fed1`) | 2026-09-11 | `3ddcc4a5` docs |
 
 Not built, by decision: **E5** art sourcing (owner approves binaries — roadmap §8); **L3–L9** UI
@@ -170,6 +171,7 @@ a live-browser verdict for anything rendered.
 
 ## 10. Ledger (newest first; trimmed at close — the full entries are in this file's git history under `docs/handoffs/dashboard-ux.md`)
 
+- 2026-09-12 · licence gate dropped from `assets.py` at owner request (owner checks licences before a file lands); team marks skipped, player headshots wanted → next lane.
 - 2026-09-11 · lane closed · Phase E1–E4 built, constellation split (142 figure JSONs byte-equal), story debts, integration guard; docs trued, brief archived, `feature/dashboard-ux` deleted · gates: ruff clean, golden 4682 passed + 1 xpassed, integration 34 passed 2 skipped · live (playwright 1600×1000 + 390×844): favicon inline gold mark, no logo, Tonight wash + Receipts hero unchanged, constellation main/deeper/wider renders with the iframe height posted on both viewports, hover + tap cards render, 0 page errors from our code (Streamlit's telemetry webhook and deep-link `_stcore` probes only) · `export-line-movement` wrote 0 rows: the dev archive holds no MLB ladder polls, so the card's movement row rests on its golden.
 - 2026-09-10 · line movement reads the ladder's balanced rung + a fair line; Movement tab; Games card row (`75ec341e`).
 - 2026-09-07 · Board `Move` spark (L1 via `get_book_line_histories`); card last five as deviation bars (`99b0aded`, `59464e6e`).
@@ -194,7 +196,8 @@ Owner decisions (nothing blocks on them; each has an honest fallback in place):
 - Prophecy-voice names for Ladder / Combo Entry / game-line leg ("Ascension" / "Conjunction" /
   "Omen" proposed, spec §2) — picked when dfs-products builds those views.
 - Game-total star fill (neutral gray proposal, spec §5b) — same trigger.
-- Team marks (league IP) and player headshots (CDN terms) — [art_assets.md](../art_assets.md).
+- Team marks: skipped; player headshots: wanted, next lane (owner, 2026-09-12) —
+  [art_assets.md](../art_assets.md).
 - E5 art sourcing + the commissioned logo (`docs/art_briefs/logo_guru.md`) — owner approves
   every binary; the manifest and `st.logo` slot need zero code when files land.
 - The optional `export-line-movement` cron + healthcheck ([OPERATIONS.md](../OPERATIONS.md));

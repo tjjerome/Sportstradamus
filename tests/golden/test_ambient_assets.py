@@ -1,11 +1,10 @@
-"""Golden pins for the ambient-art manifest + its license-gated loader.
+"""Golden pins for the ambient-art manifest + its loader.
 
 ``dashboard.assets.ambient_css`` is the scar mechanism DESIGN.md §3 describes: a slot
-renders its caller's fallback gradient unless a file exists on disk *and* carries a
-recorded license. These pins cover the license gate, the opacity ceiling, the
-malformed-manifest fail-loud contract, and that the two wired surfaces (Tonight card,
-Receipts hero) still emit their original background strings against the shipped
-(empty) manifest.
+renders its caller's fallback gradient unless it names a file that exists on disk. These
+pins cover the file gate, the opacity ceiling, the malformed-manifest fail-loud contract,
+and that the two wired surfaces (Tonight card, Receipts hero) still emit their original
+background strings against the shipped (empty) manifest.
 """
 
 from __future__ import annotations
@@ -38,7 +37,6 @@ _BASE_SLOT = {
     "file": None,
     "opacity": 0.14,
     "placement": "card-background",
-    "license": None,
     "attribution": None,
     "source_url": None,
 }
@@ -61,15 +59,14 @@ def test_shipped_manifest_slots_stay_under_the_opacity_ceiling():
         assert 0 <= entry["opacity"] <= 0.20, f"{slot} exceeds the DESIGN.md §3 ceiling"
 
 
-def test_unlicensed_file_returns_fallback(tmp_path, monkeypatch):
-    (tmp_path / "night.png").write_bytes(_TINY_PNG)
+def test_named_file_missing_on_disk_returns_fallback(tmp_path, monkeypatch):
     path = tmp_path / "ambient_manifest.json"
-    _write_manifest(path, {"demo": {**_BASE_SLOT, "file": "night.png", "license": None}})
+    _write_manifest(path, {"demo": {**_BASE_SLOT, "file": "night.png"}})
     monkeypatch.setattr(assets, "MANIFEST_PATH", path)
     assert assets.ambient_css("demo", _FALLBACK) == _FALLBACK
 
 
-def test_licensed_file_yields_data_uri_and_surface_overlay(tmp_path, monkeypatch):
+def test_present_file_yields_data_uri_and_surface_overlay(tmp_path, monkeypatch):
     (tmp_path / "night.png").write_bytes(_TINY_PNG)
     path = tmp_path / "ambient_manifest.json"
     _write_manifest(
@@ -78,7 +75,6 @@ def test_licensed_file_yields_data_uri_and_surface_overlay(tmp_path, monkeypatch
             "demo": {
                 **_BASE_SLOT,
                 "file": "night.png",
-                "license": "CC0",
                 "attribution": "NASA",
                 "source_url": "https://example.com/night.png",
             }
@@ -105,7 +101,7 @@ def test_malformed_manifest_fails_loud(tmp_path, monkeypatch, break_, needle):
     if break_ == "bad_version":
         manifest["version"] = 2
     elif break_ == "missing_key":
-        del manifest["slots"]["demo"]["license"]
+        del manifest["slots"]["demo"]["placement"]
     elif break_ == "opacity_too_high":
         manifest["slots"]["demo"]["opacity"] = 0.9
 

@@ -174,11 +174,12 @@ The slot catalog (every slot, its placeholder, source, license, priority) is
 - **Team assets**: committed `data/config/team_assets.json` (team → primary/secondary hex only;
   league marks are an owner IP decision), generated once by `scripts/build_team_assets.py`.
 - **Ambient imagery**: slot manifest at `data/assets/ambient/ambient_manifest.json` (slot →
-  file, opacity, placement, license, attribution, source_url); slots `ambient_tonight` (card
+  file, opacity, placement, attribution, source_url); slots `ambient_tonight` (card
   wash) and `ambient_receipts_hero`, both `file: null` today. `dashboard/assets.py:ambient_css`
-  renders a slot only when its entry names a file on disk *and* a license; otherwise the caller's
-  token gradient renders byte-identical. Rules (opacity ceiling, contrast floor, never behind
-  tables, no AI art) are FIXED in DESIGN.md §3.
+  renders a slot only when its entry names a file on disk; otherwise the caller's token
+  gradient renders byte-identical. Licensing is the owner's check before a file lands
+  (`attribution` / `source_url` are notes the loader never reads). Rules (opacity ceiling,
+  contrast floor, never behind tables, no AI art) are FIXED in DESIGN.md §3.
 - **Favicon + logo**: hand-authored `dashboard/static/favicon.svg` (`page_icon`); `st.logo`
   renders `dashboard/static/logo_wordmark.png` / `logo_mark.png` only when they exist — the
   commission brief is `docs/art_briefs/logo_guru.md`.
@@ -195,8 +196,8 @@ The slot catalog (every slot, its placeholder, source, license, priority) is
 5. Moon phases as a countdown strip; tarot-frame borders for prophecy cards; nebula behind a
    goalpost silhouette (alternates).
 
-All stock or commissioned; license + attribution recorded per manifest entry; semi-transparent
-per DESIGN.md §3 limits.
+All stock or commissioned; the owner clears the license before a file lands and notes
+attribution in the manifest entry; semi-transparent per DESIGN.md §3 limits.
 
 ## 7. Data contracts the UI reads
 
@@ -231,10 +232,10 @@ Every scar renders a real panel with "coming" microcopy, feature-detects its dat
 2. Game-line rows on the Game board + team nodes in the constellation — book-implied probs only
    (**no modeling engine** — locked, [handoffs/dfs-products.md](handoffs/dfs-products.md) §4;
    Combo-Entry mechanics live there §3); joins the correlation engine at dfs-products stage 5.
-3. Ambient-image slots — manifest + license-gated loader wired (`dashboard/assets.py`); the
-   files are owner-sourced (Phase E5, [art_assets.md](art_assets.md)).
-4. Player headshots + team marks — owner decisions (CDN terms / league IP), catalogued in
-   [art_assets.md](art_assets.md); the initials disc and team colours stand until then.
+3. Ambient-image slots — manifest + loader wired (`dashboard/assets.py`); the files are
+   owner-sourced (Phase E5, [art_assets.md](art_assets.md)).
+4. Player headshots — the owner wants them, a lane of its own; the initials disc stands
+   until then. Team marks: skipped, colours only ([art_assets.md](art_assets.md)).
 5. Optional free-LLM prose rewriter seam — documented only; templates are the contract.
 6. Ladders views (§5b) — flip on the ladder snapshot artifact (dfs-products stage 3).
 7. Alt-line markers + per-rung Receipts grading (§5b) — flip on the `Alt Line` snapshot column

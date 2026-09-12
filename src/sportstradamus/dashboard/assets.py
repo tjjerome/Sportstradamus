@@ -1,12 +1,13 @@
-"""License-gated ambient-art loader (DESIGN.md §3) — the scar mechanism.
+"""Ambient-art loader (DESIGN.md §3) — the scar mechanism.
 
-Ambient art is optional dressing over a token gradient: a slot with no file, or a file
-whose license is unrecorded, renders its caller's fallback gradient byte-identical to
-today. Only a slot with both a real file on disk *and* a recorded license renders the
-image, layered under a solid overlay of the surface color so it never shows above the
-slot's manifest opacity. The manifest (``data/assets/ambient/ambient_manifest.json``) is
-the owner's tuning surface, not a build artifact — same mtime-cached, validate-on-load
-contract as ``constellation_shapes.py``.
+Ambient art is optional dressing over a token gradient: a slot with no file renders its
+caller's fallback gradient byte-identical to today. A slot that names a real file on
+disk renders the image, layered under a solid overlay of the surface color so it never
+shows above the slot's manifest opacity. The manifest
+(``data/assets/ambient/ambient_manifest.json``) is the owner's tuning surface, not a
+build artifact — same mtime-cached, validate-on-load contract as
+``constellation_shapes.py``. Licensing is the owner's call, made before a file lands;
+``attribution`` / ``source_url`` are free notes the loader never reads.
 """
 
 from __future__ import annotations
@@ -30,9 +31,7 @@ _SURFACE_RGB = "26,29,36"
 # DESIGN.md §3 ambient opacity ceiling — static ambient art never exceeds this.
 _OPACITY_CEILING = 0.20
 
-_REQUIRED_SLOT_KEYS = frozenset(
-    {"file", "opacity", "placement", "license", "attribution", "source_url"}
-)
+_REQUIRED_SLOT_KEYS = frozenset({"file", "opacity", "placement"})
 
 _MIME_BY_SUFFIX = {
     ".jpg": "image/jpeg",
@@ -81,12 +80,10 @@ def _data_uri(path: Path) -> str:
 def ambient_css(slot: str, fallback_gradient: str) -> str:
     """CSS ``background`` value for ``slot``.
 
-    Returns ``fallback_gradient`` unchanged unless the manifest slot has both a ``file``
-    that exists under ``data/assets/ambient/`` and a non-null ``license`` — a file with no
-    recorded license is treated as absent, so unlicensed art never renders. A licensed
-    file is embedded as a base64 data URI (Streamlit serves no arbitrary static files)
-    under a solid surface-color overlay, so the image never shows above its manifest
-    ``opacity``.
+    Returns ``fallback_gradient`` unchanged unless the manifest slot names a ``file``
+    that exists under ``data/assets/ambient/``. A present file is embedded as a base64
+    data URI (Streamlit serves no arbitrary static files) under a solid surface-color
+    overlay, so the image never shows above its manifest ``opacity``.
 
     Args:
         slot: Key into ``ambient_manifest.json``'s ``"slots"`` object.
@@ -96,7 +93,7 @@ def ambient_css(slot: str, fallback_gradient: str) -> str:
         A CSS ``background`` property value.
     """
     entry = _manifest()["slots"][slot]
-    if not entry["file"] or not entry["license"]:
+    if not entry["file"]:
         return fallback_gradient
     image_path = MANIFEST_PATH.parent / entry["file"]
     if not image_path.exists():

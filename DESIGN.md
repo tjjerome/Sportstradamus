@@ -94,12 +94,13 @@ Altair / Vega-Lite inherit these automatically.
   only**. The purple/violet gradient ban (§6) stands untouched.
 - **Ambient imagery**: semi-transparent background art blending mystic + sports (night-sky fields,
   hourglass/sand motifs, celestial sports equipment). Slots and files are declared in
-  `data/assets/ambient/ambient_manifest.json` (slot → file, opacity, placement, license/attribution)
+  `data/assets/ambient/ambient_manifest.json` (slot → file, opacity, placement, attribution notes)
   and read by `dashboard/assets.py:ambient_css`, which renders a slot only when its entry names
-  both a file and a license — unlicensed art never renders; slots without art render token-palette
+  a file on disk; slots without art render token-palette
   gradients. The slot catalog is [docs/art_assets.md](docs/art_assets.md). Rules: opacity ≤ 20% over `backgroundColor`,
   body text on top must keep WCAG AA contrast, **never behind dense tables or stat grids**, and art
-  is stock or commissioned only — no AI-generated images, license recorded in the manifest.
+  is stock or commissioned only — no AI-generated images; the owner clears the license before a
+  file lands (nothing in code checks it).
   The ambient **starfield** layer (`theme.APP_CSS`, wide layout) obeys these rules: static dust and
   nebula washes stay ≤ 20% alpha and are occluded behind grids, dataframes, dialogs, and the sidebar.
   One sanctioned exception: the animated twinkle accents (`.tw`) may exceed the 0.20 static ceiling,
@@ -236,8 +237,8 @@ team/sport marks: inline SVG recolored via `currentColor`.
 - **NEVER** theme via inline CSS when `config.toml` can do it.
 - **NEVER** set numeric/data content in a text face — not the Spectral body serif, not the
   Cinzel/Cormorant display faces. Numerals are always Plex Mono.
-- **NEVER** ship an AI-generated image; ambient art is stock/commissioned with a manifest license
-  line.
+- **NEVER** ship an AI-generated image; ambient art is stock/commissioned, license cleared by the
+  owner before the file lands.
 
 ## 7. FIXED vs FLEXIBLE
 

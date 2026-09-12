@@ -139,7 +139,7 @@ _STARFIELD_MAX_ALPHA = 0.20  # DESIGN §3 static-ambient ceiling (twinkles exemp
 MOBILE_MAX_PX = 767
 
 # Tonight card nebula wash (mockup p8-tonight.html .card) — the ambient_tonight manifest
-# slot's fallback, rendered as-is until a licensed file lands (DESIGN §3 scar contract via
+# slot's fallback, rendered as-is until a file lands (DESIGN §3 scar contract via
 # assets.ambient_css).
 _TONIGHT_CARD_BG_FALLBACK = (
     "radial-gradient(ellipse at 16% -45%, rgba(46,107,230,.16), transparent 55%),\n"

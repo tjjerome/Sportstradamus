@@ -55,8 +55,8 @@ _HERO_BG_FALLBACK = (
     "radial-gradient(ellipse at 88% -20%, rgba(46,107,230,.15), transparent 48%),"
     "radial-gradient(ellipse at 8% 130%, rgba(201,162,39,.07), transparent 46%),#1A1D24"
 )
-# ambient_css swaps in the ambient_receipts_hero manifest slot's licensed art once one
-# lands; until then this resolves to _HERO_BG_FALLBACK unchanged.
+# ambient_css swaps in the ambient_receipts_hero manifest slot's art once a file lands;
+# until then this resolves to _HERO_BG_FALLBACK unchanged.
 _HERO_BG = ambient_css("ambient_receipts_hero", _HERO_BG_FALLBACK)
 
 # Window filter re-scoping the hero + by-dimension grid only (every other df-consuming

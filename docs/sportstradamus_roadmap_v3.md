@@ -279,13 +279,14 @@ sketches live in the archived v2.
   product (archived v2 §Suggestions).
 - **Empirical-vs-model ρ overlay** — Correlations Lab heatmap overlay flagging
   pairs the copula mis-prices (P8 spec §6.4).
-- **Dashboard art sourcing (Phase E5)** — free/licensed ambient files + the
-  commissioned logo; the slots, manifest and licence gate are wired, the owner
-  approves every binary (`docs/art_assets.md`).
+- **Dashboard art sourcing (Phase E5)** — free ambient files + the commissioned
+  logo; the slots, manifest and loader are wired, the owner clears each licence
+  and approves every binary (`docs/art_assets.md`).
+- **Player headshots** — the owner wants them; a lane of its own, not yet
+  planned (`docs/art_assets.md` row).
 - **Dashboard follow-ups at lane close** — owner decisions (Ladder/Combo/Omen
-  names, game-total star fill, team marks, headshot CDN, the optional
-  `export-line-movement` cron) and routed debts, listed in
-  [archive/dashboard-ux.md](archive/dashboard-ux.md) §11.
+  names, game-total star fill, the optional `export-line-movement` cron) and
+  routed debts, listed in [archive/dashboard-ux.md](archive/dashboard-ux.md) §11.
 - **Idea backlog** — archived v2 §Suggestions for Further Improvement.
 
 ## 9. Doc map (canonical homes)

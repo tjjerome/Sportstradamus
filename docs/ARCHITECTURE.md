@@ -163,7 +163,7 @@ into features. Canonical guide: [docs/data_collectors.md](data_collectors.md).
 | `app.py` | Main Streamlit app: page registry and navigation |
 | `data.py` | Mtime-keyed cached loading of the parquet snapshots |
 | `theme.py` | Non-Streamlit mirror of the design tokens (see [DESIGN.md](../DESIGN.md)) |
-| `assets.py` | License-gated ambient-art loader over `data/assets/ambient/ambient_manifest.json` — a slot renders only with a file *and* a license, else the token gradient (slot catalog: [art_assets.md](art_assets.md)) |
+| `assets.py` | Ambient-art loader over `data/assets/ambient/ambient_manifest.json` — a slot renders only when it names a file on disk, else the token gradient (slot catalog: [art_assets.md](art_assets.md)) |
 | `static/` | Hand-authored favicon; the `st.logo` files land here when commissioned |
 | `columns.py`, `legs.py`, `lenses.py`, `narrative.py`, `viewport.py` | Scoring-column semantics, leg lookup, preset filter lenses, narrative display, mobile detection |
 | `slip_engine.py` | Live slip scoring for the builders — the one sanctioned live calc |
