@@ -154,7 +154,7 @@ def footprint(
 
 
 def sky_bands(
-    footprint: tuple[float, float, float, float],
+    box: tuple[float, float, float, float],
     px: tuple[float, float],
     *,
     sky_y: float,
@@ -171,7 +171,7 @@ def sky_bands(
     """
     left, bottom = -X_RANGE * _FRAME_INSET * px[0], -sky_y * _FRAME_INSET * px[1]
     right, top = -left, -bottom
-    x0, y0, x1, y1 = footprint
+    x0, y0, x1, y1 = box
     beside, stacked = _band_room(members, size, label_px)
     return [
         band
