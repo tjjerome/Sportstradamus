@@ -30,6 +30,7 @@ from sportstradamus.dashboard.components.constellation import constellation_figu
 from sportstradamus.dashboard.components.constellation_component import render_constellation
 from sportstradamus.dashboard.components.deep_dive import init_detail_state, show_detail
 from sportstradamus.dashboard.components.form_spark import form_sparks, move_sparks
+from sportstradamus.dashboard.components.pair_note import render_pair_note
 from sportstradamus.dashboard.components.satellite_picker import (
     render_added_legs,
     satellite_groups,
@@ -48,6 +49,7 @@ from sportstradamus.dashboard.legs import corr_key, find_offer_idx
 from sportstradamus.dashboard.slip_engine import (
     SlipScore,
     astrolabe_payload,
+    banned_partners,
     score_slip,
     slip_headline,
 )
@@ -103,6 +105,7 @@ def _active_lenses(
 def render_constellation_builder(
     offers: pd.DataFrame,
     corr: pd.DataFrame,
+    mods: pd.DataFrame,
     ctxs: Mapping,
     *,
     focus_game: str,
@@ -117,7 +120,9 @@ def render_constellation_builder(
     from a story; a star's hover card opens the full offer detail without disturbing
     the slip. Other-game slip legs show as satellites. Two lens toggles
     (``games.py``'s ``lens_deep`` / ``lens_wider`` session-state bools) turn on the
-    map's "look deeper" / "look wider" overlays.
+    map's "look deeper" / "look wider" overlays. ``mods`` is the pair-modifier slice:
+    stars the platform won't pair with the slip wear an orange ×, the note under the
+    readout names the refused and repriced pairs, and a refused slip can't be locked.
     The caller draws the game's context banner above this, and deals ``shape`` —
     this game's constellation template for the night — from the whole league
     slate, so it can't depend on which platform is showing.
@@ -144,6 +149,7 @@ def render_constellation_builder(
         deep_pool=deep_pool,
         wider_groups=wider_groups,
         shape=shape,
+        bans=banned_partners(legs, mods, platform=platform),
     )
     if legs:
         with st.container(height=_LEG_PANEL_HEIGHT, border=False, key="constellation_legpanel"):
@@ -164,6 +170,7 @@ def render_constellation_builder(
     score = score_slip(
         legs,
         corr,
+        mods,
         platform=platform,
         bankroll=Decimal(str(st.session_state[_BANKROLL])),
         shrinkage=shrink,
@@ -172,12 +179,12 @@ def render_constellation_builder(
     if headline:
         st.markdown(f"#### {headline}")
     _render_metrics(score, legs, key_prefix=key_prefix)
-    st.caption("Pairing-block risk arrives with the correlation-block model.")
-    _render_lock_in(score, headline, shrink, key_prefix, can_lock=valid)
+    render_pair_note(score, legs, platform)
+    _render_lock_in(score, headline, shrink, key_prefix, can_lock=valid and not score.banned)
 
 
 def render_simple_builder(
-    offers: pd.DataFrame, corr: pd.DataFrame, *, key_prefix: str = "sb"
+    offers: pd.DataFrame, corr: pd.DataFrame, mods: pd.DataFrame, *, key_prefix: str = "sb"
 ) -> None:
     """Any-game grade-only editor (no thesis); legs come from a Board selection."""
     legs = st.session_state[_LEGS]
@@ -187,16 +194,24 @@ def render_simple_builder(
     if len(legs) < 2:
         st.caption("Select at least two legs to price the slip.")
         return
+    platform = st.session_state[_PLATFORM]
+    # A Board slip spans games, so the both-teams rule doesn't apply; a repeated player
+    # still blocks the lock, and the pair note leaves saying so to this warning.
+    valid, reason = validate_parlay_legs(legs, require_both_teams=False)
+    if not valid:
+        st.warning(reason)
     shrink = slip_shrinkage(legs)
     score = score_slip(
         legs,
         corr,
-        platform=st.session_state[_PLATFORM],
+        mods,
+        platform=platform,
         bankroll=Decimal(str(st.session_state[_BANKROLL])),
         shrinkage=shrink,
     )
     _render_metrics(score, legs, key_prefix=key_prefix)
-    _render_lock_in(score, "", shrink, key_prefix)
+    render_pair_note(score, legs, platform)
+    _render_lock_in(score, "", shrink, key_prefix, can_lock=valid and not score.banned)
 
 
 def _render_leg_list(
@@ -251,6 +266,7 @@ def _render_constellation(
     deep_pool: pd.DataFrame | None,
     wider_groups: list[tuple[str, list[dict]]] | None,
     shape: dict | None,
+    bans: dict[str, str],
 ) -> None:
     """Draw the interactive star map and act on the component's click/detail callback.
 
@@ -262,7 +278,8 @@ def _render_constellation(
     drawn from that same ``pool`` frame); a clicked sky star from another game falls back
     to the satellite add path. The hover card's last-five and line-movement rows ride
     alongside the figure keyed by star, and its headshots keyed by player, since a wider
-    dot from another game has no row in ``pool``.
+    dot from another game has no row in ``pool``. ``bans`` crosses each star the platform
+    won't pair with the slip and fills its card's "won't pair" row.
     """
     mobile = is_mobile()
     # The wider lens draws other games' legs as sky stars, and their cards open like any
@@ -278,12 +295,13 @@ def _render_constellation(
             wider_groups=wider_groups,
             mobile=mobile,
             shape=shape,
+            banned=bans,
         ),
         key=f"{key_prefix}_constellation",
         sparks=form_sparks(sparked),
         moves=move_sparks(sparked),
         shots=headshot_uris(sparked),
-        bans={},
+        bans=bans,
         mobile=mobile,
     )
     if _apply_constellation_action(action, offers, pool, wider_groups, key_prefix):
@@ -424,7 +442,7 @@ def _render_metrics(score: SlipScore, legs: Sequence[Mapping], *, key_prefix: st
 
 
 def _render_lock_in(
-    score: SlipScore, headline: str, shrink: float, key_prefix: str, *, can_lock: bool = True
+    score: SlipScore, headline: str, shrink: float, key_prefix: str, *, can_lock: bool
 ) -> None:
     lock_col, clear_col = st.columns(2)
     if lock_col.button(

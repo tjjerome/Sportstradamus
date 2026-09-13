@@ -2,13 +2,15 @@
 
 These prove ``score_slip`` reuses the prediction layer's copula scorer over a
 **block-diagonal** correlation matrix, prices Underdog vs Sleeper per the lane
-contract, and sizes a ``Decimal`` fractional-Kelly stake — the one sanctioned
-live calc. Exact equality is asserted only at two legs, where
-``multivariate_normal.cdf`` is the closed-form bivariate normal (≥3 legs is
-randomized QMC, ~1e-4 jitter, so those assertions stay structural).
+contract, folds the platform's same-game pair modifiers into the boost, and sizes a
+``Decimal`` fractional-Kelly stake — the one sanctioned live calc. Exact equality is
+asserted only at two legs, where ``multivariate_normal.cdf`` is the closed-form
+bivariate normal (≥3 legs is randomized QMC, ~1e-4 jitter, so those assertions stay
+structural).
 
 ``ev_lift`` and ``astrolabe_payload`` are thin reads on top of the same
-``score_slip`` path (spec §4.1, §4.4c), pinned below.
+``score_slip`` path (spec §4.1, §4.4c); ``banned_partners`` reads the same
+pair-modifier slice for the star map. All pinned below.
 """
 
 from __future__ import annotations
@@ -22,11 +24,15 @@ import pytest
 from sportstradamus.dashboard.slip_engine import (
     _block_diagonal_sig,
     astrolabe_payload,
+    banned_partners,
     ev_lift,
     score_slip,
 )
+from sportstradamus.helpers.io import PAIR_MODIFIER_COLS
+from sportstradamus.leg_schema import leg_label
 from sportstradamus.prediction.joint import parlay_payout_prob, psd_or_none
 from sportstradamus.prediction.payouts import (
+    PAYOUT_CLIP_HI,
     PAYOUT_CLIP_LO,
     SLEEPER_FULL_REFUND_MAX_SIZE,
     expected_payout_with_pushes,
@@ -51,6 +57,10 @@ def _corr(rows):
     return pd.DataFrame(rows, columns=["Game", "leg_a", "leg_b", "rho"])
 
 
+def _mods(rows):
+    return pd.DataFrame(rows, columns=PAIR_MODIFIER_COLS)
+
+
 def test_block_diagonal_zeroes_cross_game():
     legs = [
         _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y"),
@@ -71,7 +81,7 @@ def test_two_leg_same_game_matches_direct_parlay_call():
         _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y"),
     ]
     corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
-    score = score_slip(legs, corr, platform="Underdog", bankroll=Decimal("1000"))
+    score = score_slip(legs, corr, _mods([]), platform="Underdog", bankroll=Decimal("1000"))
 
     p = np.array([0.6, 0.55])
     push = np.zeros(2)
@@ -93,7 +103,7 @@ def test_cross_game_pair_scores_as_independent():
         _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y"),
         _leg("C", "AST", "Over", 5.5, 0.5, 1.0, "Z/W"),
     ]
-    score = score_slip(legs, _corr([]), platform="Underdog", bankroll=Decimal("1000"))
+    score = score_slip(legs, _corr([]), _mods([]), platform="Underdog", bankroll=Decimal("1000"))
     assert score.joint_p == pytest.approx(score.indep_p, rel=1e-9)
 
 
@@ -103,7 +113,7 @@ def test_sleeper_payout_is_product_of_boosts():
         _leg("B", "REB", "Over", 8.5, 0.55, 2.0, "X/Y"),
     ]
     corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
-    score = score_slip(legs, corr, platform="Sleeper", bankroll=Decimal("1000"))
+    score = score_slip(legs, corr, _mods([]), platform="Sleeper", bankroll=Decimal("1000"))
     assert score.payout == pytest.approx(1.8 * 2.0)  # size-2 Max carries no bonus
     assert not score.payout_approximate
     assert score.play_type == "Max"
@@ -117,7 +127,7 @@ def test_sleeper_max_size3_applies_real_bonus():
         _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y"),
         _leg("C", "AST", "Over", 5.5, 0.5, 1.0, "X/Y"),
     ]
-    score = score_slip(legs, _corr([]), platform="Sleeper", bankroll=Decimal("1000"))
+    score = score_slip(legs, _corr([]), _mods([]), platform="Sleeper", bankroll=Decimal("1000"))
     search, _ = payout_curve_for("Sleeper", "pooled")
     assert score.payout == pytest.approx(float(search[1]))  # size-3 index, boost=1.0
     assert score.play_type == "Max"
@@ -136,7 +146,7 @@ def test_sleeper_flex_size5_wiring():
         _leg("D", "STL", "Over", 1.5, 0.5, 1.0, "X/Y"),
         _leg("E", "BLK", "Over", 0.5, 0.5, 1.0, "X/Y"),
     ]
-    score = score_slip(legs, _corr([]), platform="Sleeper", bankroll=Decimal("1000"))
+    score = score_slip(legs, _corr([]), _mods([]), platform="Sleeper", bankroll=Decimal("1000"))
     search, _ = payout_curve_for("Sleeper", "pooled")
     # base (search[3], size-5 index) is 0.751 < PAYOUT_CLIP_LO, so boost(1.0) * base
     # clips up to the floor -- score_slip's existing clip, not this test's math.
@@ -155,14 +165,12 @@ def test_underdog_play_type_by_size():
         _leg("C", "AST", "Over", 5.5, 0.6, 1.0, "X/Y"),
         _leg("D", "STL", "Over", 1.5, 0.6, 1.0, "X/Y"),
     ]
-    assert (
-        score_slip(two, _corr([]), platform="Underdog", bankroll=Decimal("1000")).play_type
-        == "Power"
+    two_score = score_slip(two, _corr([]), _mods([]), platform="Underdog", bankroll=Decimal("1000"))
+    four_score = score_slip(
+        four, _corr([]), _mods([]), platform="Underdog", bankroll=Decimal("1000")
     )
-    assert (
-        score_slip(four, _corr([]), platform="Underdog", bankroll=Decimal("1000")).play_type
-        == "Flex"
-    )
+    assert two_score.play_type == "Power"
+    assert four_score.play_type == "Flex"
 
 
 def test_negative_edge_yields_zero_stake():
@@ -170,7 +178,7 @@ def test_negative_edge_yields_zero_stake():
         _leg("A", "PTS", "Over", 20.5, 0.2, 1.0, "X/Y"),
         _leg("B", "REB", "Over", 8.5, 0.2, 1.0, "X/Y"),
     ]
-    score = score_slip(legs, _corr([]), platform="Underdog", bankroll=Decimal("1000"))
+    score = score_slip(legs, _corr([]), _mods([]), platform="Underdog", bankroll=Decimal("1000"))
     assert score.stake == Decimal("0")
 
 
@@ -181,7 +189,7 @@ def test_push_leg_routes_finite_ev():
         _leg("C", "AST", "Over", 5.5, 0.5, 1.0, "X/Y"),
     ]
     corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.3)])
-    score = score_slip(legs, corr, platform="Underdog", bankroll=Decimal("1000"))
+    score = score_slip(legs, corr, _mods([]), platform="Underdog", bankroll=Decimal("1000"))
     assert np.isfinite(score.model_ev)
     assert score.bet_size == 3
 
@@ -195,7 +203,7 @@ def test_sleeper_two_leg_slip_push_refunds_in_full_via_score_slip():
         _leg("A", "PTS", "Over", 20.5, 0.0, 1.0, "X/Y", push=1.0),  # guaranteed push
         _leg("B", "REB", "Over", 8.5, 0.0, 1.0, "X/Y"),  # guaranteed loss
     ]
-    score = score_slip(legs, _corr([]), platform="Sleeper", bankroll=Decimal("1000"))
+    score = score_slip(legs, _corr([]), _mods([]), platform="Sleeper", bankroll=Decimal("1000"))
 
     # Reference values for the two branches (mirrors test_parlay_search.py's
     # test_sleeper_two_leg_push_refunds_in_full_even_with_a_loss): Sleeper's
@@ -226,16 +234,81 @@ def test_sleeper_two_leg_slip_push_refunds_in_full_via_score_slip():
     assert score.model_ev == pytest.approx(refunded, abs=1e-4)
 
 
+def test_refused_pair_prices_at_zero_before_the_payout_clip():
+    """A 0.0 modifier is the app refusing the pair: the slip is worth $0, not a clipped 1x."""
+    legs = [
+        _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y"),
+        _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y"),
+    ]
+    corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
+    mods = _mods([("Underdog", "NBA", "X/Y", "A|PTS|Over", "B|REB|Over", 0.0)])
+    score = score_slip(legs, corr, mods, platform="Underdog", bankroll=Decimal("1000"))
+    assert score.banned
+    assert score.pair_mods == ((0, 1, 0.0),)
+    assert score.payout == 0.0
+    assert score.model_ev == 0.0
+    assert score.stake == Decimal("0")
+
+
+def test_repriced_pair_matches_direct_parlay_call_with_modifier_in_boost():
+    """Parity with the story menu's pricing: boost = leg boosts x pair modifiers.
+
+    The slip lists B before A, the reverse of the row's ``leg_a < leg_b`` order, so the
+    match can't lean on leg order.
+    """
+    legs = [
+        _leg("B", "REB", "Over", 8.5, 0.55, 0.9, "X/Y"),
+        _leg("A", "PTS", "Over", 20.5, 0.6, 1.1, "X/Y"),
+    ]
+    corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
+    mods = _mods([("Underdog", "NBA", "X/Y", "A|PTS|Over", "B|REB|Over", 0.85)])
+    score = score_slip(legs, corr, mods, platform="Underdog", bankroll=Decimal("1000"))
+
+    search, full = payout_curve_for("Underdog", "pooled")
+    base = float(search[0])
+    boost = 0.9 * 1.1 * 0.85
+    payout = float(np.clip(boost * base, PAYOUT_CLIP_LO, PAYOUT_CLIP_HI))
+    sig = psd_or_none(np.array([[1.0, 0.4], [0.4, 1.0]]))
+    p = np.array([0.55, 0.6])
+    expected = float(parlay_payout_prob(p, np.zeros(2), sig, 2, boost, payout, full, base))
+
+    assert not score.banned
+    assert score.pair_mods == ((0, 1, 0.85),)
+    assert score.payout == pytest.approx(payout)
+    assert score.model_ev == pytest.approx(expected, rel=1e-9)
+
+
+def test_mods_off_the_slips_game_or_platform_are_ignored():
+    legs = [
+        _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y"),
+        _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y"),
+    ]
+    corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
+    mods = _mods(
+        [
+            ("Underdog", "NBA", "Z/W", "A|PTS|Over", "B|REB|Over", 0.0),
+            ("Sleeper", "NBA", "X/Y", "A|PTS|Over", "B|REB|Over", 0.0),
+        ]
+    )
+    score = score_slip(legs, corr, mods, platform="Underdog", bankroll=Decimal("1000"))
+    clean = score_slip(legs, corr, _mods([]), platform="Underdog", bankroll=Decimal("1000"))
+    assert score.pair_mods == ()
+    assert score.payout == clean.payout
+    assert score.model_ev == pytest.approx(clean.model_ev, rel=1e-9)
+
+
 def test_ev_lift_matches_hand_built_pair_minus_solo():
     """The reuse pin: ``ev_lift`` equals a hand-built pair/solo ``score_slip`` diff."""
     focus = _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y")
     candidate = _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y")
     corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
 
-    lift = ev_lift(focus, candidate, corr, platform="Underdog", bankroll=0.0)
+    lift = ev_lift(focus, candidate, corr, _mods([]), platform="Underdog", bankroll=0.0)
 
-    pair = score_slip([focus, candidate], corr, platform="Underdog", bankroll=Decimal("0"))
-    solo = score_slip([focus], corr, platform="Underdog", bankroll=Decimal("0"))
+    pair = score_slip(
+        [focus, candidate], corr, _mods([]), platform="Underdog", bankroll=Decimal("0")
+    )
+    solo = score_slip([focus], corr, _mods([]), platform="Underdog", bankroll=Decimal("0"))
     assert lift == pytest.approx(pair.model_ev - solo.model_ev, rel=1e-9)
     # score_slip's single-leg early return hardcodes model_ev=0.0 (it's a parlay
     # scorer), so the solo term is always zero and the lift equals the pair EV.
@@ -250,21 +323,82 @@ def test_ev_lift_positive_rho_exceeds_zero_rho():
     positive_rho = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
     zero_rho = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.0)])
 
-    lift_positive = ev_lift(focus, candidate, positive_rho, platform="Underdog", bankroll=0.0)
-    lift_zero = ev_lift(focus, candidate, zero_rho, platform="Underdog", bankroll=0.0)
+    lift_positive = ev_lift(
+        focus, candidate, positive_rho, _mods([]), platform="Underdog", bankroll=0.0
+    )
+    lift_zero = ev_lift(focus, candidate, zero_rho, _mods([]), platform="Underdog", bankroll=0.0)
 
     assert lift_positive > lift_zero
     # Zero-rho collapses to the independent-joint case: same lift as an empty
     # corr slice and as a cross-game candidate (both default to rho=0).
-    lift_empty_corr = ev_lift(focus, candidate, _corr([]), platform="Underdog", bankroll=0.0)
+    lift_empty_corr = ev_lift(
+        focus, candidate, _corr([]), _mods([]), platform="Underdog", bankroll=0.0
+    )
     assert lift_zero == pytest.approx(lift_empty_corr, rel=1e-9)
+
+
+def test_ev_lift_prices_the_pair_modifier():
+    """A refused candidate lifts nothing, so it drops off the Correlated tab; a repriced
+    one lifts by its repriced pair EV."""
+    focus = _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y")
+    candidate = _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y")
+    corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
+    refused = _mods([("Underdog", "NBA", "X/Y", "A|PTS|Over", "B|REB|Over", 0.0)])
+    repriced = _mods([("Underdog", "NBA", "X/Y", "A|PTS|Over", "B|REB|Over", 0.85)])
+
+    clean_lift = ev_lift(focus, candidate, corr, _mods([]), platform="Underdog")
+    repriced_lift = ev_lift(focus, candidate, corr, repriced, platform="Underdog")
+    pair = score_slip(
+        [focus, candidate], corr, repriced, platform="Underdog", bankroll=Decimal("0")
+    )
+
+    assert ev_lift(focus, candidate, corr, refused, platform="Underdog") == 0.0
+    assert repriced_lift < clean_lift
+    assert repriced_lift == pytest.approx(pair.model_ev, rel=1e-9)
+
+
+def test_banned_partners_marks_a_satellites_partner_in_its_own_game():
+    """Only the platform's refusals in the leg's own game count — not a reprice, not the
+    same key in another game, not the other platform."""
+    focus = _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y")
+    satellite = _leg("C", "AST", "Over", 5.5, 0.5, 1.0, "Z/W")
+    mods = _mods(
+        [
+            ("Underdog", "NBA", "Z/W", "C|AST|Over", "D|STL|Over", 0.0),
+            ("Underdog", "NBA", "Z/W", "C|AST|Over", "E|BLK|Over", 0.85),
+            ("Underdog", "NBA", "X/Y", "C|AST|Over", "F|REB|Over", 0.0),
+            ("Sleeper", "NBA", "Z/W", "C|AST|Over", "G|PTS|Over", 0.0),
+        ]
+    )
+    assert banned_partners([focus, satellite], mods, platform="Underdog") == {
+        "D|STL|Over": f"Underdog won't pair this with {leg_label(satellite)}"
+    }
+
+
+def test_banned_partners_marks_both_legs_of_a_refused_slip_pair():
+    a = _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y")
+    b = _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y")
+    mods = _mods(
+        [
+            ("Underdog", "NBA", "X/Y", "A|PTS|Over", "B|REB|Over", 0.0),
+            ("Underdog", "NBA", "X/Y", "A|PTS|Over", "D|STL|Over", 0.0),
+            ("Underdog", "NBA", "X/Y", "B|REB|Over", "D|STL|Over", 0.0),
+        ]
+    )
+    assert banned_partners([a, b], mods, platform="Underdog") == {
+        "A|PTS|Over": f"Underdog won't pair this with {leg_label(b)}",
+        "B|REB|Over": f"Underdog won't pair this with {leg_label(a)}",
+        "D|STL|Over": f"Underdog won't pair this with {leg_label(a)}, {leg_label(b)}",
+    }
 
 
 def test_astrolabe_payload_shape_and_crowns():
     focus = _leg("A", "PTS", "Over", 20.5, 0.6, 1.0, "X/Y")
     candidate = _leg("B", "REB", "Over", 8.5, 0.55, 1.0, "X/Y")
     corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
-    score = score_slip([focus, candidate], corr, platform="Underdog", bankroll=Decimal("1000"))
+    score = score_slip(
+        [focus, candidate], corr, _mods([]), platform="Underdog", bankroll=Decimal("1000")
+    )
 
     payload = astrolabe_payload(score, nonce=3)
 
@@ -287,7 +421,7 @@ def test_astrolabe_payload_clamps_negative_kelly():
         _leg("A", "PTS", "Over", 20.5, 0.2, 1.0, "X/Y"),
         _leg("B", "REB", "Over", 8.5, 0.2, 1.0, "X/Y"),
     ]
-    score = score_slip(legs, _corr([]), platform="Underdog", bankroll=Decimal("1000"))
+    score = score_slip(legs, _corr([]), _mods([]), platform="Underdog", bankroll=Decimal("1000"))
     raw_kelly = (score.model_ev - 1) / (score.payout - 1)
     assert raw_kelly < 0.0
 
@@ -301,7 +435,7 @@ def test_astrolabe_payload_sleeper_play_type_and_payout_passes_through():
         _leg("B", "REB", "Over", 8.5, 0.55, 2.0, "X/Y"),
     ]
     corr = _corr([("X/Y", "A|PTS|Over", "B|REB|Over", 0.4)])
-    score = score_slip(legs, corr, platform="Sleeper", bankroll=Decimal("1000"))
+    score = score_slip(legs, corr, _mods([]), platform="Sleeper", bankroll=Decimal("1000"))
     assert not score.payout_approximate
 
     payload = astrolabe_payload(score, nonce=9)

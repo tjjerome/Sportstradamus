@@ -16,6 +16,7 @@ from sportstradamus.dashboard.data import (
     load_current_line_movement,
     load_current_meta,
     load_current_offers,
+    load_current_pair_modifiers,
     sport_filtered,
 )
 from sportstradamus.dashboard.lenses import LENSES, apply_lens
@@ -247,7 +248,7 @@ if not mobile:
             st.caption("Select an Underdog or Sleeper row to add it to a slip.")
     else:
         st.caption("Select a row above, then add it to your slip.")
-render_simple_builder(filtered, load_current_game_corr())
+render_simple_builder(filtered, load_current_game_corr(), load_current_pair_modifiers())
 
 with st.expander("Snapshot info"):
     st.json(meta)

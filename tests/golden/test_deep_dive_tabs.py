@@ -25,6 +25,7 @@ from sportstradamus.dashboard.components.deep_dive_tabs import (
     _p_over,
 )
 from sportstradamus.dashboard.legs import find_offer_idx
+from sportstradamus.helpers.io import PAIR_MODIFIER_COLS
 from sportstradamus.leg_schema import build_leg
 
 
@@ -152,10 +153,13 @@ def _corr_fixture() -> tuple[pd.DataFrame, dict, pd.DataFrame]:
     return filtered, focus_leg, corr
 
 
+_NO_MODS = pd.DataFrame(columns=PAIR_MODIFIER_COLS)
+
+
 def test_lift_survivors_resolves_idx_and_returns_multiplier():
     filtered, focus_leg, corr = _corr_fixture()
     items = [{"player": "J. Young", "market": "3PM", "bet": "Over", "line": 2.5, "mult": 1.15}]
-    survivors = _lift_survivors(items, filtered, focus_leg, corr, "Underdog")
+    survivors = _lift_survivors(items, filtered, focus_leg, corr, _NO_MODS, "Underdog")
     assert len(survivors) == 1
     item, idx, lift = survivors[0]
     assert item["player"] == "J. Young"
@@ -169,14 +173,21 @@ def test_lift_survivors_drops_missing_and_nonpositive():
     filtered, focus_leg, corr = _corr_fixture()
     # A partner not in the current grid (idx None) has no computable lift — dropped.
     missing = [{"player": "Nobody", "market": "AST", "bet": "Over", "line": 5.5, "mult": 1.2}]
-    assert _lift_survivors(missing, filtered, focus_leg, corr, "Underdog") == []
+    assert _lift_survivors(missing, filtered, focus_leg, corr, _NO_MODS, "Underdog") == []
 
     # A low-probability pair prices below the solo baseline (lift <= 1.0) — dropped, so
     # the "positive-lift rows only" filter isn't silently defeated.
     cold = filtered.assign(**{"Win Prob": [0.25, 0.25, 0.25], "Kelly": [-0.5, -0.5, -0.5]})
     cold_focus = build_leg(cold.loc[10])
     items = [{"player": "J. Young", "market": "3PM", "bet": "Over", "line": 2.5, "mult": 1.15}]
-    assert _lift_survivors(items, cold, cold_focus, corr, "Underdog") == []
+    assert _lift_survivors(items, cold, cold_focus, corr, _NO_MODS, "Underdog") == []
+
+    # The survivor of the test above, once Underdog refuses it beside the focus: $0 — dropped.
+    refused = pd.DataFrame(
+        [["Underdog", "WNBA", "LVA/IND", "A. Wilson|PTS|Over", "J. Young|3PM|Over", 0.0]],
+        columns=PAIR_MODIFIER_COLS,
+    )
+    assert _lift_survivors(items, filtered, focus_leg, corr, refused, "Underdog") == []
 
 
 def _extract_corr_items(raw):

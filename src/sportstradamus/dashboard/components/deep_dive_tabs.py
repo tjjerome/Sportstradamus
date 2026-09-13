@@ -30,6 +30,7 @@ from sportstradamus.dashboard.components.slip_state import add_to_simple_slip
 from sportstradamus.dashboard.data import (
     GAMELOG_SCHEMA,
     load_current_game_corr,
+    load_current_pair_modifiers,
     load_stat_tooltips,
 )
 from sportstradamus.dashboard.legs import find_offer_idx
@@ -218,6 +219,7 @@ def _lift_survivors(
     filtered: pd.DataFrame,
     focus_leg: dict,
     corr: pd.DataFrame,
+    mods: pd.DataFrame,
     platform: str | None,
 ) -> list[tuple[dict, int, float]]:
     """``(item, offer_idx, lift)`` for each partner with positive EV lift.
@@ -227,14 +229,15 @@ def _lift_survivors(
     against the focus alone. A partner that isn't in the current grid (``idx is None``,
     e.g. a Board selection narrower than the offer pool) has no computable lift and is
     dropped, as is any candidate whose lift isn't positive (``ev_lift`` returns a raw EV
-    multiplier, so "positive lift" is ``> 1.0`` — the ``_edge_badge`` convention).
+    multiplier, so "positive lift" is ``> 1.0`` — the ``_edge_badge`` convention). A
+    partner the book refuses beside the focus prices at $0, so it drops the same way.
     """
     survivors = []
     for item in items:
         idx = find_offer_idx(item, filtered, platform=platform)
         if idx is None:
             continue
-        lift = ev_lift(focus_leg, build_leg(filtered.loc[idx]), corr, platform=platform or "")
+        lift = ev_lift(focus_leg, build_leg(filtered.loc[idx]), corr, mods, platform=platform or "")
         if lift > 1.0:
             survivors.append((item, idx, lift))
     return survivors
@@ -354,8 +357,9 @@ def render_corr_tab(row: pd.Series, filtered: pd.DataFrame) -> None:
     platform = row.get("Platform")
     focus_leg = build_leg(row)
     corr = load_current_game_corr()
-    same = _lift_survivors(same_items, filtered, focus_leg, corr, platform)
-    opp = _lift_survivors(opp_items, filtered, focus_leg, corr, platform)
+    mods = load_current_pair_modifiers()
+    same = _lift_survivors(same_items, filtered, focus_leg, corr, mods, platform)
+    opp = _lift_survivors(opp_items, filtered, focus_leg, corr, mods, platform)
     _render_corr_cards(same, f"Same team — {row['Team']}", filtered, "corr_same")
     _render_corr_cards(opp, f"Opponent — {row['Opponent']}", filtered, "corr_opp")
     if not same and not opp:

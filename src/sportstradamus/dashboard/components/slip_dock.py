@@ -18,6 +18,7 @@ from decimal import Decimal
 
 import streamlit as st
 
+from sportstradamus.dashboard.components.pair_note import render_pair_note
 from sportstradamus.dashboard.components.slip_builder import slip_shrinkage
 from sportstradamus.dashboard.components.slip_state import (
     _BANKROLL,
@@ -28,7 +29,7 @@ from sportstradamus.dashboard.components.slip_state import (
     lock_in,
     remove_leg,
 )
-from sportstradamus.dashboard.data import load_current_game_corr
+from sportstradamus.dashboard.data import load_current_game_corr, load_current_pair_modifiers
 from sportstradamus.dashboard.slip_engine import SlipScore, score_slip
 from sportstradamus.leg_schema import leg_label
 from sportstradamus.prediction.stories.legs import validate_parlay_legs
@@ -91,6 +92,7 @@ def _price(legs: Sequence[dict]) -> SlipScore | None:
     return score_slip(
         legs,
         load_current_game_corr(),
+        load_current_pair_modifiers(),
         platform=st.session_state[_PLATFORM],
         bankroll=Decimal(str(st.session_state[_BANKROLL])),
         shrinkage=slip_shrinkage(legs),
@@ -100,6 +102,8 @@ def _price(legs: Sequence[dict]) -> SlipScore | None:
 def _summary(legs: Sequence[dict], score: SlipScore | None) -> str:
     if score is None:
         return f"{len(legs)} leg · add another to price"
+    if score.banned:
+        return f"{len(legs)} legs · won't pair · $0"
     return (
         f"{len(legs)} legs · {float(score.payout):.2f}x · "
         f"EV {float(score.model_ev) - 1:+.0%} · ${score.stake}"
@@ -124,13 +128,16 @@ def _render_sheet(legs: Sequence[dict], score: SlipScore | None) -> None:
     valid, reason = validate_parlay_legs(legs)
     if not valid:
         st.warning(reason)
+    render_pair_note(score, legs, st.session_state[_PLATFORM])
     st.markdown(
         f'<div class="slip-dock-line">Kelly stake ${score.stake} · '
         f"joint {float(score.joint_p):.0%}</div>",
         unsafe_allow_html=True,
     )
     lock_col, clear_col = st.columns(2)
-    if lock_col.button("Lock it in!", key="slip_dock_lock", type="primary", disabled=not valid):
+    if lock_col.button(
+        "Lock it in!", key="slip_dock_lock", type="primary", disabled=not valid or score.banned
+    ):
         lock_in(score, "", slip_shrinkage(legs))
     if clear_col.button("Clear", key="slip_dock_clear"):
         clear_slip()

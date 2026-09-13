@@ -194,7 +194,12 @@ known = math.prod(p.value for p in pairs if p.value is not None)
 expected = (rake if rake is not None else 1.0) * product * known
 
 for p in pairs:
-    shown = "UNKNOWN" if p.value is None else f"{p.value}"
+    if p.value is not None:
+        shown = f"{p.value}"
+    elif p.disk_key:
+        shown = "0.0 on record (solving)"
+    else:
+        shown = "UNKNOWN"
     st.caption(f"pair [{p.league}/{p.relation}/{_slot_name(p.slot)}] {p.display_key}: {shown}")
 rake_note = (
     f"rake[{len(legs_input)}]={rake}"

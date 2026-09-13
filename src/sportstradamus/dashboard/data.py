@@ -25,10 +25,12 @@ from sportstradamus.helpers.io import (
     CURRENT_META_PATH,
     CURRENT_OFFER_DETAILS_PATH,
     CURRENT_OFFERS_PATH,
+    CURRENT_PAIR_MODIFIERS_PATH,
     CURRENT_PARLAYS_PATH,
     HISTORY_PATH,
     LINE_MOVEMENT_COLS,
     MODEL_STATS_PATH,
+    PAIR_MODIFIER_COLS,
     PARLAY_HIST_PATH,
     PROFIT_SIM_SUMMARY_PATH,
     USER_SLIPS_PATH,
@@ -223,6 +225,24 @@ def load_current_game_corr() -> pd.DataFrame:
     copula, the constellation, and the swap dialog.
     """
     return _load_current_game_corr_cached(CURRENT_GAME_CORR_PATH, _mtime(CURRENT_GAME_CORR_PATH))
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading pair modifiers...")
+def _load_current_pair_modifiers_cached(path: Path, mtime: float) -> pd.DataFrame:
+    return read_parquet_safe(path).reindex(columns=PAIR_MODIFIER_COLS)
+
+
+def load_current_pair_modifiers() -> pd.DataFrame:
+    """Per-platform same-game leg-pair payout modifiers from the latest ``prophecize`` snapshot.
+
+    Columns ``Platform, League, Game, leg_a, leg_b, modifier``, keyed like
+    ``load_current_game_corr``. Only pairs whose modifier isn't 1.0 are on record, and
+    0.0 means the app refuses the pair. Reindexed so a missing snapshot (before the
+    first run that writes it) reads back as a column-stable empty frame.
+    """
+    return _load_current_pair_modifiers_cached(
+        CURRENT_PAIR_MODIFIERS_PATH, _mtime(CURRENT_PAIR_MODIFIERS_PATH)
+    )
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading story menu...")

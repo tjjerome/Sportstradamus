@@ -29,6 +29,7 @@ from sportstradamus.dashboard.data import (
     load_current_game_stories,
     load_current_meta,
     load_current_offers,
+    load_current_pair_modifiers,
     load_current_parlays,
     load_game_ctxs,
     sport_filtered,
@@ -305,6 +306,7 @@ page_hero("THE CONSTELLATION", "Games", format_ts(meta.get("generated_at", "no r
 slate = load_current_offers()
 offers = sport_filtered(slate).reset_index(drop=True)
 corr = load_current_game_corr()
+mods = load_current_pair_modifiers()
 game_context = load_current_game_context()
 ctxs = load_game_ctxs()
 stories = sport_filtered(load_current_game_stories())
@@ -345,6 +347,7 @@ if focus_game:
 render_constellation_builder(
     offers,
     corr,
+    mods,
     ctxs,
     focus_game=focus_game,
     shape=shapes[focus_game].template if focus_game in shapes else None,
