@@ -160,15 +160,18 @@ def write_current_game_corr(corr_rows: list[dict] | pd.DataFrame) -> None:
         corr_rows, columns=["Platform", "League", "Game", "leg_a", "leg_b", "rho", "modifier"]
     )
 
-    rho_cols = ["League", "Game", "leg_a", "leg_b", "rho"]
-    rho_df = df[rho_cols]
+    rho_df = df[["League", "Game", "leg_a", "leg_b", "rho"]]
     if not rho_df.empty:
-        rho_df = rho_df.drop_duplicates(subset=rho_cols[:-1], ignore_index=True)
+        rho_df = rho_df.drop_duplicates(
+            subset=["League", "Game", "leg_a", "leg_b"], ignore_index=True
+        )
     _atomic_write_parquet(rho_df, CURRENT_GAME_CORR_PATH)
 
     mod_df = df.loc[df["modifier"] != 1.0, PAIR_MODIFIER_COLS]
     if not mod_df.empty:
-        mod_df = mod_df.drop_duplicates(subset=PAIR_MODIFIER_COLS[:-1], ignore_index=True)
+        mod_df = mod_df.drop_duplicates(
+            subset=["Platform", "League", "Game", "leg_a", "leg_b"], ignore_index=True
+        )
     _atomic_write_parquet(mod_df, CURRENT_PAIR_MODIFIERS_PATH)
 
 
