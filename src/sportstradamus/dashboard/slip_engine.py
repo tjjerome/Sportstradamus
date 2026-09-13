@@ -3,7 +3,8 @@
 ``score_slip`` prices an arbitrary ≤6-leg user slip by reusing the prediction
 layer's Gaussian-copula scorer (``joint.parlay_payout_prob``) over a
 **block-diagonal** correlation matrix: within-game leg pairs take their ρ from
-the ``current_game_corr`` slice, cross-game pairs are independent (ρ=0). This is
+the game's :class:`GameCtx` (its ``current_game_corr`` slice, indexed by pair),
+cross-game pairs are independent (ρ=0). This is
 exactly the "pure numpy/scipy on ≤6 legs" exception the redesign spec carves out
 of the precompute-first rule — both the same-game constellation builder and the
 cross-game simple builder call it (a cross-game slip just makes the off-blocks
@@ -16,7 +17,9 @@ Max/Flex) that the boost product multiplies on top of. That product also carries
 the platform's same-game pair modifiers from ``current_pair_modifiers`` — the same
 leg-boosts × pair-modifiers product prophecize's story menu prices with — so the
 live slip prices the way the app quotes it. A 0.0 modifier means the app refuses
-the pair, and a slip holding one scores zero. Money is ``Decimal``.
+the pair, and a slip holding one scores zero. Both pair lookups are dicts built once
+per snapshot, so a price costs the copula, not a scan of the slate. Money is
+``Decimal``.
 
 ``slip_headline`` reuses the P2 thesis engine so the constellation builder's live
 headline is a deterministic, path-independent function of the leg-set.
@@ -45,6 +48,7 @@ from sportstradamus.prediction.payouts import (
     SLEEPER_MAX_SIZE,
     payout_curve_for,
 )
+from sportstradamus.prediction.stories.context import GameCtx
 from sportstradamus.prediction.stories.engine import thesis_variants
 from sportstradamus.prediction.stories.legs import enrich_legs
 from sportstradamus.strategies.kelly import fractional_kelly_stake
@@ -56,6 +60,9 @@ _PROB_EPS: float = 1e-6
 _CROWN_WIN: float = 0.30
 _CROWN_EV: float = 0.12
 _CROWN_KELLY: float = 0.03
+
+# Game -> frozenset of a leg pair's two ``corr_key`` keys -> that pair's ρ or payout modifier.
+PairValues = Mapping[str, Mapping[frozenset, float]]
 
 
 @dataclass(frozen=True)
@@ -80,8 +87,8 @@ class SlipScore:
 
 def score_slip(
     legs: Sequence[Mapping],
-    corr: pd.DataFrame,
-    mods: pd.DataFrame,
+    ctxs: Mapping[str, GameCtx],
+    mods: Mapping[str, PairValues],
     *,
     platform: str,
     bankroll: Decimal,
@@ -90,22 +97,23 @@ def score_slip(
     """Price a user slip by reusing the parlay copula scorer.
 
     ``legs`` are canonical structured legs (``sportstradamus.leg_schema.LEG_FIELDS``);
-    ``corr`` is the ``current_game_corr`` slice and ``mods`` the
-    ``current_pair_modifiers`` slice. A slip holding a pair ``platform`` refuses
-    returns the zero score before the payout clip, which would lift its 0.0 back to 1x.
+    ``ctxs`` is the per-game context map, whose ``rho`` the copula reads, and ``mods``
+    the per-platform pair modifiers ``modifier_map`` indexes. A slip holding a pair
+    ``platform`` refuses returns the zero score before the payout clip, which would
+    lift its 0.0 back to 1x.
     """
     n = len(legs)
     p = np.clip(np.array([float(leg["win_prob"]) for leg in legs]), _PROB_EPS, 1 - _PROB_EPS)
     indep_p = float(np.prod(p))
     play_type, full_payouts, base, payout_approximate = _platform_pricing(platform, n)
-    pair_mods = tuple(_same_game_pairs(legs, mods.loc[mods["Platform"] == platform], "modifier"))
+    pair_mods = tuple(_same_game_pairs(legs, mods.get(platform, {})))
     unpriced = SlipScore(
         indep_p, indep_p, 0.0, 0.0, n, play_type, Decimal("0"), payout_approximate, pair_mods
     )
     if n < 2 or base <= 0.0 or unpriced.banned:
         return unpriced
 
-    sig = psd_or_none(_block_diagonal_sig(legs, corr))
+    sig = psd_or_none(_block_diagonal_sig(legs, ctxs))
     joint_p = float(multivariate_normal.cdf(norm.ppf(p), np.zeros(n), sig))
     boost = float(
         np.prod([float(leg["boost"]) for leg in legs]) * np.prod([m for _, _, m in pair_mods])
@@ -141,8 +149,8 @@ def score_slip(
 def ev_lift(
     focus: Mapping,
     candidate: Mapping,
-    corr: pd.DataFrame,
-    mods: pd.DataFrame,
+    ctxs: Mapping[str, GameCtx],
+    mods: Mapping[str, PairValues],
     *,
     platform: str,
     bankroll: float = 0.0,
@@ -155,36 +163,55 @@ def ev_lift(
     the platform refuses beside the focus prices at $0, so it lifts nothing.
     """
     pair = score_slip(
-        [focus, candidate], corr, mods, platform=platform, bankroll=bankroll, shrinkage=shrinkage
+        [focus, candidate], ctxs, mods, platform=platform, bankroll=bankroll, shrinkage=shrinkage
     )
     solo = score_slip(
-        [focus], corr, mods, platform=platform, bankroll=bankroll, shrinkage=shrinkage
+        [focus], ctxs, mods, platform=platform, bankroll=bankroll, shrinkage=shrinkage
     )
     return pair.model_ev - solo.model_ev
 
 
 def banned_partners(
-    legs: Sequence[Mapping], mods: pd.DataFrame, *, platform: str
+    legs: Sequence[Mapping], mods: Mapping[str, PairValues], *, platform: str
 ) -> dict[str, str]:
     """Map each star ``platform`` won't pair with the slip to its card's "won't pair" text.
 
     Walks every slip leg, other-game satellites included, against the platform's 0.0
-    rows in that leg's own game; the star is the row's other side. Two slip legs that
-    refuse each other both land, and a same-player row marks a slip player's other
+    pairs in that leg's own game; the star is the pair's other side. Two slip legs that
+    refuse each other both land, and a same-player pair marks a slip player's other
     markets.
     """
-    refused = mods.loc[(mods["Platform"] == platform) & (mods["modifier"] == 0.0)]
+    by_game = mods.get(platform, {})
     conflicts: dict[str, list[str]] = defaultdict(list)
     for leg in legs:
         key = corr_key(leg)
-        game = refused.loc[refused["Game"] == leg["game"]]
-        for leg_a, leg_b in zip(game["leg_a"], game["leg_b"], strict=True):
-            if key in (leg_a, leg_b):
-                conflicts[leg_b if leg_a == key else leg_a].append(leg_label(leg))
+        for pair, modifier in by_game.get(leg["game"], {}).items():
+            if modifier == 0.0 and key in pair:
+                (star,) = pair - {key}
+                conflicts[star].append(leg_label(leg))
     return {
         star: f"{platform} won't pair this with {', '.join(labels)}"
         for star, labels in conflicts.items()
     }
+
+
+def modifier_map(mods: pd.DataFrame) -> dict[str, dict[str, dict[frozenset, float]]]:
+    """Index a ``current_pair_modifiers`` frame as ``Platform`` → ``Game`` → pair → modifier.
+
+    The lookup ``score_slip`` and ``banned_partners`` read. Built once per snapshot, so a
+    price never walks the slate's hundred thousand pairs.
+    """
+    out: dict[str, dict[str, dict[frozenset, float]]] = {}
+    for platform, game, leg_a, leg_b, modifier in zip(
+        mods["Platform"],
+        mods["Game"],
+        mods["leg_a"],
+        mods["leg_b"],
+        mods["modifier"].tolist(),
+        strict=True,
+    ):
+        out.setdefault(platform, {}).setdefault(game, {})[frozenset((leg_a, leg_b))] = modifier
+    return out
 
 
 def astrolabe_payload(score: SlipScore, *, nonce: int) -> dict:
@@ -230,38 +257,28 @@ def _platform_pricing(platform: str, n: int) -> tuple[str, dict, float, bool]:
     return play_type, full_curve, float(base), False
 
 
-def _block_diagonal_sig(legs: Sequence[Mapping], corr: pd.DataFrame) -> np.ndarray:
-    """Correlation matrix: within-game ρ from the slice, cross-game pairs ρ=0."""
+def _block_diagonal_sig(legs: Sequence[Mapping], ctxs: Mapping[str, GameCtx]) -> np.ndarray:
+    """Correlation matrix: within-game ρ off each game's context, cross-game pairs ρ=0."""
     sig = np.eye(len(legs))
-    for i, j, rho in _same_game_pairs(legs, corr, "rho"):
-        sig[i, j] = sig[j, i] = rho
+    rho = {game: ctx.rho for game, ctx in ctxs.items()}
+    for i, j, value in _same_game_pairs(legs, rho):
+        sig[i, j] = sig[j, i] = value
     return sig
 
 
-def _same_game_pairs(
-    legs: Sequence[Mapping], frame: pd.DataFrame, column: str
-) -> list[tuple[int, int, float]]:
-    """``(i, j, value)`` for each same-game leg pair ``frame`` holds a ``column`` value for.
+def _same_game_pairs(legs: Sequence[Mapping], values: PairValues) -> list[tuple[int, int, float]]:
+    """``(i, j, value)`` for each same-game leg pair ``values`` holds.
 
-    ``frame`` is keyed like ``current_game_corr``: ``Game`` plus the pair's two
-    ``corr_key`` keys in ``leg_a``/``leg_b``, matched whichever order the slip lists them.
+    A pair is keyed as a ``frozenset``, so it matches whichever order the slip lists
+    its two legs in.
     """
-    # read_parquet_safe hands back a frame with no columns at all for an unwritten snapshot.
-    if frame.empty:
-        return []
-    games = [leg["game"] for leg in legs]
     keys = [corr_key(leg) for leg in legs]
-    rows = frame.loc[frame["Game"].isin(games)]
-    values = {
-        (game, frozenset((leg_a, leg_b))): float(value)
-        for game, leg_a, leg_b, value in zip(
-            rows["Game"], rows["leg_a"], rows["leg_b"], rows[column], strict=True
-        )
-    }
     pairs = []
     for i, j in combinations(range(len(legs)), 2):
-        value = values.get((games[i], frozenset((keys[i], keys[j]))))
-        if games[i] and games[i] == games[j] and value is not None:
+        if legs[i]["game"] != legs[j]["game"]:
+            continue
+        value = values.get(legs[i]["game"], {}).get(frozenset((keys[i], keys[j])))
+        if value is not None:
             pairs.append((i, j, value))
     return pairs
 

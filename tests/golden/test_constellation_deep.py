@@ -33,15 +33,12 @@ from sportstradamus.dashboard.components.constellation_spacing import (
 )
 from sportstradamus.dashboard.components.constellation_traces import SIZE_MAX, SIZE_MIN
 from sportstradamus.dashboard.theme import GREEN, RED
-from tests.golden.constellation_rows import GAME as _GAME
 from tests.golden.constellation_rows import offer_row as _row
 from tests.golden.constellation_rows import star_key as _key
 
 
-def _corr(*triples: tuple[str, str, float]) -> pd.DataFrame:
-    return pd.DataFrame(
-        [{"League": "NBA", "Game": _GAME, "leg_a": a, "leg_b": b, "rho": r} for a, b, r in triples]
-    )
+def _corr(*triples: tuple[str, str, float]) -> dict[frozenset, float]:
+    return {frozenset((a, b)): r for a, b, r in triples}
 
 
 def _ladder(n: int, *, teams: tuple[str, str] = ("NYK", "SAS")) -> pd.DataFrame:

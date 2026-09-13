@@ -14,8 +14,9 @@ what its own league is eligible for: the general library of unaffiliated objects
 that most of the bank is, plus that league's own equipment. Another league's gear
 is never on the table, so an NFL night cannot be dealt The Bat.
 
-Deliberately uncached at every level: the catalog's ``tuning`` block is the
-owner's live surface, and an edit has to reclassify and re-deal on the very next
+Uncached here: ``dashboard.data.load_slate_shapes`` caches the night's deal on both
+snapshots and on the catalog file's mtime, because the catalog's ``tuning`` block is
+the owner's live surface and an edit has to reclassify and re-deal on the very next
 browser rerun.
 """
 

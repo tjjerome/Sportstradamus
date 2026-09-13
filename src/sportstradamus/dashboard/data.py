@@ -15,7 +15,10 @@ import streamlit as st
 
 from sportstradamus import data
 from sportstradamus.analysis import annotate_offer_outcomes
+from sportstradamus.dashboard.components import constellation_shapes
+from sportstradamus.dashboard.components.constellation_slate import GameShape, slate_shapes
 from sportstradamus.dashboard.components.lab_filters import FILTER_AXES
+from sportstradamus.dashboard.slip_engine import modifier_map
 from sportstradamus.helpers.io import (
     CALIBRATION_SUMMARY_PATH,
     CURRENT_GAME_CONTEXT_PATH,
@@ -221,26 +224,28 @@ def load_current_game_corr() -> pd.DataFrame:
     """Per-game leg-pair correlation slices from the latest ``prophecize`` snapshot.
 
     Columns ``League, Game, leg_a, leg_b, rho`` with leg key ``Player|Market|Bet``;
-    joins ``current_offers`` on the canonical ``Game`` key. Feeds the slip rail
-    copula, the constellation, and the swap dialog.
+    joins ``current_offers`` on the canonical ``Game`` key. Feeds the game contexts'
+    rho (:func:`load_game_ctxs`) and the night's shape deal (:func:`load_slate_shapes`).
     """
     return _load_current_game_corr_cached(CURRENT_GAME_CORR_PATH, _mtime(CURRENT_GAME_CORR_PATH))
 
 
-@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading pair modifiers...")
-def _load_current_pair_modifiers_cached(path: Path, mtime: float) -> pd.DataFrame:
-    return read_parquet_safe(path).reindex(columns=PAIR_MODIFIER_COLS)
+# cache_resource, not cache_data: the slip scorer reads this map on every price, and
+# cache_data would unpickle a fresh copy of it per call. Nothing writes to it.
+@st.cache_resource(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading pair modifiers...")
+def _load_pair_modifiers_cached(path: Path, mtime: float) -> dict:
+    return modifier_map(read_parquet_safe(path).reindex(columns=PAIR_MODIFIER_COLS))
 
 
-def load_current_pair_modifiers() -> pd.DataFrame:
+def load_pair_modifiers() -> dict:
     """Per-platform same-game leg-pair payout modifiers from the latest ``prophecize`` snapshot.
 
-    Columns ``Platform, League, Game, leg_a, leg_b, modifier``, keyed like
-    ``load_current_game_corr``. Only pairs whose modifier isn't 1.0 are on record, and
-    0.0 means the app refuses the pair. Reindexed so a missing snapshot (before the
-    first run that writes it) reads back as a column-stable empty frame.
+    Indexed ``Platform`` → ``Game`` → the pair's two ``Player|Market|Bet`` keys → modifier
+    (``slip_engine.modifier_map``). Only pairs whose modifier isn't 1.0 are on record, and
+    0.0 means the app refuses the pair; a missing snapshot (before the first run that
+    writes it) reads as no pairs.
     """
-    return _load_current_pair_modifiers_cached(
+    return _load_pair_modifiers_cached(
         CURRENT_PAIR_MODIFIERS_PATH, _mtime(CURRENT_PAIR_MODIFIERS_PATH)
     )
 
@@ -311,20 +316,62 @@ def load_current_game_context() -> pd.DataFrame:
     )
 
 
-@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
-def _load_game_ctxs_cached(ctx_mtime: float, corr_mtime: float) -> dict:
+# cache_resource, not cache_data: every context carries its game's whole rho dict, and
+# cache_data unpickled a fresh copy of all of them on every call, most of a second per
+# rerun. GameCtx is frozen and nothing writes to its rho.
+@st.cache_resource(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
+def _load_game_ctxs_cached(
+    ctx_path: Path, ctx_mtime: float, corr_path: Path, corr_mtime: float
+) -> dict:
     return ctxs_from_frame(load_current_game_context(), load_current_game_corr())
 
 
 def load_game_ctxs() -> dict:
-    """Per-game :class:`GameCtx` map, built once per snapshot instead of every rerun.
+    """Per-game :class:`GameCtx` map, built once per snapshot and shared across reruns.
 
     ``ctxs_from_frame`` walks the whole ``current_game_corr`` slice (tens of thousands of
-    rows) to attach each game's rho, so rebuilding it on every constellation click was the
-    Games surface's biggest per-rerun cost. Cache-keyed on both source files' mtimes so a
-    fresh ``prophecize`` snapshot still refreshes it.
+    rows) to attach each game's rho, the pair lookup the thesis engine, the slip scorer and
+    the star map's edges all read. Cache-keyed on both source files so a fresh
+    ``prophecize`` snapshot still refreshes it.
     """
-    return _load_game_ctxs_cached(_mtime(CURRENT_GAME_CONTEXT_PATH), _mtime(CURRENT_GAME_CORR_PATH))
+    return _load_game_ctxs_cached(
+        CURRENT_GAME_CONTEXT_PATH,
+        _mtime(CURRENT_GAME_CONTEXT_PATH),
+        CURRENT_GAME_CORR_PATH,
+        _mtime(CURRENT_GAME_CORR_PATH),
+    )
+
+
+@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
+def _load_slate_shapes_cached(
+    offers_path: Path,
+    offers_mtime: float,
+    corr_path: Path,
+    corr_mtime: float,
+    catalog_mtime_ns: int,
+    date: str,
+) -> dict[str, GameShape]:
+    slate = load_current_offers()
+    return slate_shapes(
+        slate.loc[slate["Date"].astype(str) == date], load_current_game_corr(), date
+    )
+
+
+def load_slate_shapes(date: str) -> dict[str, GameShape]:
+    """Every game on ``date`` dealt its constellation (``constellation_slate.slate_shapes``).
+
+    Dealing classifies each game's correlation web across the whole night, about a second
+    of work, so it is cached on both snapshots and on the shape catalog's mtime: a tuning
+    edit still re-deals on the next rerun.
+    """
+    return _load_slate_shapes_cached(
+        CURRENT_OFFERS_PATH,
+        _mtime(CURRENT_OFFERS_PATH),
+        CURRENT_GAME_CORR_PATH,
+        _mtime(CURRENT_GAME_CORR_PATH),
+        constellation_shapes.CATALOG_PATH.stat().st_mtime_ns,
+        date,
+    )
 
 
 @st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner="Loading line movement...")
@@ -375,7 +422,9 @@ def load_user_slips() -> pd.DataFrame:
     return _load_user_slips_cached(USER_SLIPS_PATH, _mtime(USER_SLIPS_PATH))
 
 
-@st.cache_data(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
+# cache_resource, not cache_data: the Games map's hover cards read the whole season log on
+# every rerun, and cache_data unpickled a fresh copy of it each time.
+@st.cache_resource(ttl=_CACHE_TTL_SECONDS, show_spinner=False)
 def _load_gamelog_cached(league: str, mtime: float) -> pd.DataFrame:
     schema = GAMELOG_SCHEMA.get(league)
     if schema is None:
@@ -388,7 +437,7 @@ def load_gamelog(league: str) -> pd.DataFrame:
 
     Returns an empty DataFrame if the league is unrecognised or the file is
     missing.  Callers are responsible for filtering to the relevant player and
-    stat column.
+    stat column, and must not modify the frame: every caller shares one copy.
     """
     schema = GAMELOG_SCHEMA.get(league)
     gamelog_path = pkg_resources.files(data) / schema["file"] if schema else None
@@ -608,6 +657,7 @@ def sidebar_filters(
         help="Force-reload all parquet snapshots, bypassing the data cache.",
     ):
         st.cache_data.clear()
+        st.cache_resource.clear()
         st.rerun()
     st.sidebar.header("Filters")
 

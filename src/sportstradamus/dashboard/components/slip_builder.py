@@ -104,8 +104,7 @@ def _active_lenses(
 
 def render_constellation_builder(
     offers: pd.DataFrame,
-    corr: pd.DataFrame,
-    mods: pd.DataFrame,
+    mods: Mapping,
     ctxs: Mapping,
     *,
     focus_game: str,
@@ -120,7 +119,7 @@ def render_constellation_builder(
     from a story; a star's hover card opens the full offer detail without disturbing
     the slip. Other-game slip legs show as satellites. Two lens toggles
     (``games.py``'s ``lens_deep`` / ``lens_wider`` session-state bools) turn on the
-    map's "look deeper" / "look wider" overlays. ``mods`` is the pair-modifier slice:
+    map's "look deeper" / "look wider" overlays. ``mods`` is the pair-modifier map:
     stars the platform won't pair with the slip wear an orange ×, the note under the
     readout names the refused and repriced pairs, and a refused slip can't be locked.
     The caller draws the game's context banner above this, and deals ``shape`` —
@@ -143,7 +142,7 @@ def render_constellation_builder(
     _render_constellation(
         offers,
         focus_legs,
-        corr=corr,
+        rho=ctxs[focus_game].rho if focus_game in ctxs else {},
         pool=pool,
         key_prefix=key_prefix,
         deep_pool=deep_pool,
@@ -169,7 +168,7 @@ def render_constellation_builder(
     shrink = slip_shrinkage(legs)
     score = score_slip(
         legs,
-        corr,
+        ctxs,
         mods,
         platform=platform,
         bankroll=Decimal(str(st.session_state[_BANKROLL])),
@@ -184,7 +183,7 @@ def render_constellation_builder(
 
 
 def render_simple_builder(
-    offers: pd.DataFrame, corr: pd.DataFrame, mods: pd.DataFrame, *, key_prefix: str = "sb"
+    offers: pd.DataFrame, ctxs: Mapping, mods: Mapping, *, key_prefix: str = "sb"
 ) -> None:
     """Any-game grade-only editor (no thesis); legs come from a Board selection."""
     legs = st.session_state[_LEGS]
@@ -203,7 +202,7 @@ def render_simple_builder(
     shrink = slip_shrinkage(legs)
     score = score_slip(
         legs,
-        corr,
+        ctxs,
         mods,
         platform=platform,
         bankroll=Decimal(str(st.session_state[_BANKROLL])),
@@ -260,7 +259,7 @@ def _render_constellation(
     offers: pd.DataFrame,
     legs: list[dict],
     *,
-    corr: pd.DataFrame,
+    rho: Mapping[frozenset, float],
     pool: pd.DataFrame,
     key_prefix: str,
     deep_pool: pd.DataFrame | None,
@@ -289,7 +288,7 @@ def _render_constellation(
     action = render_constellation(
         constellation_figure(
             legs,
-            corr,
+            rho,
             pool,
             deep_pool=deep_pool,
             wider_groups=wider_groups,

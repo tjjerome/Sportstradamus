@@ -29,7 +29,7 @@ from sportstradamus.dashboard.components.slip_state import (
     lock_in,
     remove_leg,
 )
-from sportstradamus.dashboard.data import load_current_game_corr, load_current_pair_modifiers
+from sportstradamus.dashboard.data import load_game_ctxs, load_pair_modifiers
 from sportstradamus.dashboard.slip_engine import SlipScore, score_slip
 from sportstradamus.leg_schema import leg_label
 from sportstradamus.prediction.stories.legs import validate_parlay_legs
@@ -91,8 +91,8 @@ def _price(legs: Sequence[dict]) -> SlipScore | None:
         return None
     return score_slip(
         legs,
-        load_current_game_corr(),
-        load_current_pair_modifiers(),
+        load_game_ctxs(),
+        load_pair_modifiers(),
         platform=st.session_state[_PLATFORM],
         bankroll=Decimal(str(st.session_state[_BANKROLL])),
         shrinkage=slip_shrinkage(legs),

@@ -26,6 +26,7 @@ from sportstradamus.dashboard.slip_engine import (
     astrolabe_payload,
     banned_partners,
     ev_lift,
+    modifier_map,
     score_slip,
 )
 from sportstradamus.helpers.io import PAIR_MODIFIER_COLS
@@ -38,6 +39,7 @@ from sportstradamus.prediction.payouts import (
     expected_payout_with_pushes,
     payout_curve_for,
 )
+from sportstradamus.prediction.stories.context import ctxs_from_frame
 
 
 def _leg(player, market, bet, line, p, boost, game, push=0.0):
@@ -54,11 +56,11 @@ def _leg(player, market, bet, line, p, boost, game, push=0.0):
 
 
 def _corr(rows):
-    return pd.DataFrame(rows, columns=["Game", "leg_a", "leg_b", "rho"])
+    return ctxs_from_frame(None, pd.DataFrame(rows, columns=["Game", "leg_a", "leg_b", "rho"]))
 
 
 def _mods(rows):
-    return pd.DataFrame(rows, columns=PAIR_MODIFIER_COLS)
+    return modifier_map(pd.DataFrame(rows, columns=PAIR_MODIFIER_COLS))
 
 
 def test_block_diagonal_zeroes_cross_game():

@@ -87,13 +87,8 @@ def _pool(*specs) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _corr(*triples: tuple[str, str, float]) -> pd.DataFrame:
-    return pd.DataFrame(
-        [
-            {"League": "NBA", "Game": "NYK/SAS", "leg_a": a, "leg_b": b, "rho": r}
-            for a, b, r in triples
-        ]
-    )
+def _corr(*triples: tuple[str, str, float]) -> dict[frozenset, float]:
+    return {frozenset((a, b)): r for a, b, r in triples}
 
 
 def _trace(fig, name: str):

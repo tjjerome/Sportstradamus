@@ -12,7 +12,7 @@ import pandas as pd
 import streamlit as st
 
 from sportstradamus.dashboard.assets import ambient_css
-from sportstradamus.dashboard.components.constellation_slate import GameShape, slate_shapes
+from sportstradamus.dashboard.components.constellation_slate import GameShape
 from sportstradamus.dashboard.components.glyphs import game_shape_glyph
 from sportstradamus.dashboard.components.hero import page_hero
 from sportstradamus.dashboard.components.slip_builder import render_constellation_builder
@@ -25,13 +25,13 @@ from sportstradamus.dashboard.components.slip_state import (
 from sportstradamus.dashboard.data import (
     format_ts,
     load_current_game_context,
-    load_current_game_corr,
     load_current_game_stories,
     load_current_meta,
     load_current_offers,
-    load_current_pair_modifiers,
     load_current_parlays,
     load_game_ctxs,
+    load_pair_modifiers,
+    load_slate_shapes,
     sport_filtered,
 )
 from sportstradamus.dashboard.narrative import (
@@ -305,8 +305,7 @@ page_hero("THE CONSTELLATION", "Games", format_ts(meta.get("generated_at", "no r
 
 slate = load_current_offers()
 offers = sport_filtered(slate).reset_index(drop=True)
-corr = load_current_game_corr()
-mods = load_current_pair_modifiers()
+mods = load_pair_modifiers()
 game_context = load_current_game_context()
 ctxs = load_game_ctxs()
 stories = sport_filtered(load_current_game_stories())
@@ -337,7 +336,7 @@ else:
         # Dealt from the whole night — every league, every platform — so a game's shape
         # can't change under the user when they switch Underdog <-> Sleeper or narrow
         # the sport filter, and two games showing at once can't wear the same shape.
-        shapes = slate_shapes(slate.loc[slate["Date"].astype(str) == focus_date], corr, focus_date)
+        shapes = load_slate_shapes(focus_date)
         _render_hero(game_context, parlays, stories, league, focus_game, focus_date, home, away)
         _render_story_preloader(stories, st.session_state[_PLATFORM], focus_game, offers)
 
@@ -346,7 +345,6 @@ if focus_game:
     _render_lens_toggles()
 render_constellation_builder(
     offers,
-    corr,
     mods,
     ctxs,
     focus_game=focus_game,

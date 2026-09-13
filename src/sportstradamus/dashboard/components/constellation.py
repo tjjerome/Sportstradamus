@@ -77,7 +77,6 @@ from sportstradamus.dashboard.components.constellation_slate import (
     add_decoration,
     game_edges,
     game_universe,
-    rho_map,
     teams_of,
 )
 from sportstradamus.dashboard.components.constellation_spacing import (
@@ -144,7 +143,7 @@ def _pool_field(
 
 def constellation_figure(
     slip_legs: Sequence[Mapping],
-    corr: pd.DataFrame | None,
+    rho: Mapping[frozenset, float] | None,
     pool: pd.DataFrame | None = None,
     *,
     deep_pool: pd.DataFrame | None = None,
@@ -156,8 +155,8 @@ def constellation_figure(
     """Static star map of the game's model-liked legs, the slip's legs lit up.
 
     ``pool`` is the game's candidate offers — the static universe is its ``K`` > 0
-    legs; ``slip_legs`` are the ones currently in the slip (drawn active). ``corr``
-    is a ``current_game_corr`` slice. Each node carries its ``Player|Market|Bet`` key
+    legs; ``slip_legs`` are the ones currently in the slip (drawn active). ``rho`` is
+    the game's pair map (``GameCtx.rho``). Each node carries its ``Player|Market|Bet`` key
     as customdata for click handling; the layout never depends on the selection.
 
     ``deep_pool`` (the "look deeper" lens) and ``wider_groups`` (the "look wider"
@@ -188,7 +187,7 @@ def constellation_figure(
     keys = default_stars(universe, teams)
     add_team_tags(fig, league, teams)
     team_color = {team: team_colors(league, team)[0] for team in teams}
-    rho = rho_map(corr, game)
+    rho = rho or {}
     edges = game_edges(keys, rho)
     floor, label_size, shape_scale, px, lens_size, deep_span, sky_y = (
         (

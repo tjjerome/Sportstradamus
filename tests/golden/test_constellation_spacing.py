@@ -304,9 +304,7 @@ def test_a_knots_members_stay_a_fingertip_apart_on_the_phone():
         [_row("A", "NYK", 0.4), _row("A", "NYK", 0.35, "PRA"), _row("B", "SAS", 0.3)]
     )
     knot = ("A|PRA|Over", "A|PTS|Over")
-    corr = pd.DataFrame(
-        [{"League": "NBA", "Game": "NYK/SAS", "leg_a": knot[0], "leg_b": knot[1], "rho": 0.8}]
-    )
+    corr = {frozenset(knot): 0.8}
     clusters, _, _ = supernodes(
         [*knot, "B|PTS|Over"], {knot[0]: "NYK", knot[1]: "NYK", "B|PTS|Over": "SAS"}, [(*knot, 0.8)]
     )

@@ -12,11 +12,11 @@ from sportstradamus.dashboard.components.slip_builder import render_simple_build
 from sportstradamus.dashboard.components.slip_state import add_to_simple_slip
 from sportstradamus.dashboard.data import (
     format_ts,
-    load_current_game_corr,
     load_current_line_movement,
     load_current_meta,
     load_current_offers,
-    load_current_pair_modifiers,
+    load_game_ctxs,
+    load_pair_modifiers,
     sport_filtered,
 )
 from sportstradamus.dashboard.lenses import LENSES, apply_lens
@@ -248,7 +248,7 @@ if not mobile:
             st.caption("Select an Underdog or Sleeper row to add it to a slip.")
     else:
         st.caption("Select a row above, then add it to your slip.")
-render_simple_builder(filtered, load_current_game_corr(), load_current_pair_modifiers())
+render_simple_builder(filtered, load_game_ctxs(), load_pair_modifiers())
 
 with st.expander("Snapshot info"):
     st.json(meta)

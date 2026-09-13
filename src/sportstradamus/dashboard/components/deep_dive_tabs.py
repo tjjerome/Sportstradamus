@@ -29,8 +29,8 @@ from sportstradamus.dashboard.components.deep_dive_charts import (
 from sportstradamus.dashboard.components.slip_state import add_to_simple_slip
 from sportstradamus.dashboard.data import (
     GAMELOG_SCHEMA,
-    load_current_game_corr,
-    load_current_pair_modifiers,
+    load_game_ctxs,
+    load_pair_modifiers,
     load_stat_tooltips,
 )
 from sportstradamus.dashboard.legs import find_offer_idx
@@ -218,8 +218,8 @@ def _lift_survivors(
     items: list[dict],
     filtered: pd.DataFrame,
     focus_leg: dict,
-    corr: pd.DataFrame,
-    mods: pd.DataFrame,
+    ctxs: dict,
+    mods: dict,
     platform: str | None,
 ) -> list[tuple[dict, int, float]]:
     """``(item, offer_idx, lift)`` for each partner with positive EV lift.
@@ -237,7 +237,7 @@ def _lift_survivors(
         idx = find_offer_idx(item, filtered, platform=platform)
         if idx is None:
             continue
-        lift = ev_lift(focus_leg, build_leg(filtered.loc[idx]), corr, mods, platform=platform or "")
+        lift = ev_lift(focus_leg, build_leg(filtered.loc[idx]), ctxs, mods, platform=platform or "")
         if lift > 1.0:
             survivors.append((item, idx, lift))
     return survivors
@@ -356,10 +356,10 @@ def render_corr_tab(row: pd.Series, filtered: pd.DataFrame) -> None:
     opp_items = [] if raw_opp is None else list(raw_opp)
     platform = row.get("Platform")
     focus_leg = build_leg(row)
-    corr = load_current_game_corr()
-    mods = load_current_pair_modifiers()
-    same = _lift_survivors(same_items, filtered, focus_leg, corr, mods, platform)
-    opp = _lift_survivors(opp_items, filtered, focus_leg, corr, mods, platform)
+    ctxs = load_game_ctxs()
+    mods = load_pair_modifiers()
+    same = _lift_survivors(same_items, filtered, focus_leg, ctxs, mods, platform)
+    opp = _lift_survivors(opp_items, filtered, focus_leg, ctxs, mods, platform)
     _render_corr_cards(same, f"Same team — {row['Team']}", filtered, "corr_same")
     _render_corr_cards(opp, f"Opponent — {row['Opponent']}", filtered, "corr_opp")
     if not same and not opp:
