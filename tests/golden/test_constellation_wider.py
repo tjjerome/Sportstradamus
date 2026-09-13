@@ -39,16 +39,24 @@ from sportstradamus.dashboard.components.constellation_wider import (
     WIDER_STAR_SIZE,
     WIDER_STAR_SIZE_MOBILE,
 )
-from sportstradamus.dashboard.theme import team_colors
+from sportstradamus.dashboard.theme import GREEN, RED, team_colors
 
 _GAME = "NYK/SAS"
 
 
-def _row(player: str, team: str, kelly: float, *, market: str = "PTS", game: str = _GAME) -> dict:
+def _row(
+    player: str,
+    team: str,
+    kelly: float,
+    *,
+    market: str = "PTS",
+    game: str = _GAME,
+    bet: str = "Over",
+) -> dict:
     return {
         "Player": player,
         "Market": market,
-        "Bet": "Over",
+        "Bet": bet,
         "Line": 10.5,
         "Game": game,
         "League": "NBA",
@@ -59,8 +67,8 @@ def _row(player: str, team: str, kelly: float, *, market: str = "PTS", game: str
     }
 
 
-def _key(player: str, market: str = "PTS") -> str:
-    return f"{player}|{market}|Over"
+def _key(player: str, market: str = "PTS", bet: str = "Over") -> str:
+    return f"{player}|{market}|{bet}"
 
 
 def _ladder(n: int, *, teams: tuple[str, str] = ("NYK", "SAS")) -> pd.DataFrame:
@@ -122,6 +130,24 @@ def test_wider_stars_cluster_by_game_and_wear_team_colors():
     for game, rows in groups:
         for row in rows:
             assert colors[_key(row["Player"], "3PM")] == team_colors("NBA", row["Team"])[0], game
+
+
+def test_wider_star_border_follows_bet_side():
+    """The Over/Under border (DESIGN §4a) reads off each leg's own Bet, same as the main map."""
+    groups = [
+        (
+            "MIA/ORL",
+            [
+                _row("W0", "MIA", 0.3, market="3PM", game="MIA/ORL", bet="Over"),
+                _row("W1", "MIA", 0.25, market="3PM", game="MIA/ORL", bet="Under"),
+            ],
+        ),
+    ]
+    fig = constellation_figure([], None, _ladder(13), wider_groups=groups)
+    wider = _trace(fig, "wider")
+    color = dict(zip((cd[0] for cd in wider.customdata), wider.marker.line.color, strict=True))
+    assert color[_key("W0", "3PM", bet="Over")] == GREEN
+    assert color[_key("W1", "3PM", bet="Under")] == RED
 
 
 def test_wider_sky_is_seeded_by_md5_not_hash():

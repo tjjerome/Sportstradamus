@@ -32,15 +32,24 @@ from sportstradamus.dashboard.components.constellation_spacing import (
     Y_RANGE,
 )
 from sportstradamus.dashboard.components.constellation_traces import SIZE_MAX, SIZE_MIN
+from sportstradamus.dashboard.theme import GREEN, RED
 
 _GAME = "NYK/SAS"
 
 
-def _row(player: str, team: str, kelly: float, *, market: str = "PTS", game: str = _GAME) -> dict:
+def _row(
+    player: str,
+    team: str,
+    kelly: float,
+    *,
+    market: str = "PTS",
+    game: str = _GAME,
+    bet: str = "Over",
+) -> dict:
     return {
         "Player": player,
         "Market": market,
-        "Bet": "Over",
+        "Bet": bet,
         "Line": 10.5,
         "Game": game,
         "League": "NBA",
@@ -51,8 +60,8 @@ def _row(player: str, team: str, kelly: float, *, market: str = "PTS", game: str
     }
 
 
-def _key(player: str, market: str = "PTS") -> str:
-    return f"{player}|{market}|Over"
+def _key(player: str, market: str = "PTS", bet: str = "Over") -> str:
+    return f"{player}|{market}|{bet}"
 
 
 def _corr(*triples: tuple[str, str, float]) -> pd.DataFrame:
@@ -190,6 +199,20 @@ def test_deep_star_size_and_opacity_follow_edge():
     assert [alpha[key] for key in by_edge] == sorted(alpha[key] for key in by_edge)
     assert size[_key("X1")] == size[_key("X0")] == DEEP_SIZE_MIN
     assert alpha[_key("X1")] == alpha[_key("X0")] == DEEP_ALPHA_MIN
+
+
+def test_deep_star_border_follows_bet_side():
+    """The Over/Under border (DESIGN §4a) reads off each leg's own Bet, independent
+    of the liked/passed fill split."""
+    pool = pd.DataFrame([_row("A", "NYK", 0.4), _row("Z", "SAS", 0.35)])
+    deep_pool = pd.DataFrame(
+        [_row("L0", "NYK", 0.3, bet="Over"), _row("L1", "SAS", 0.2, bet="Under")]
+    )
+    fig = constellation_figure([], None, pool, deep_pool=deep_pool)
+    trace = next(t for t in fig.data if t.name == "deep")
+    color = dict(zip((cd[0] for cd in trace.customdata), trace.marker.line.color, strict=True))
+    assert color[_key("L0", bet="Over")] == GREEN
+    assert color[_key("L1", bet="Under")] == RED
 
 
 def test_liked_legs_beyond_the_cut_are_drawn_only_under_the_lens():

@@ -39,6 +39,7 @@ from sportstradamus.dashboard.components.constellation_spacing import (
     Y_RANGE,
     settle,
 )
+from sportstradamus.dashboard.components.constellation_traces import bet_marker_line
 from sportstradamus.dashboard.legs import corr_key
 from sportstradamus.dashboard.theme import GRAY, team_colors
 
@@ -190,6 +191,7 @@ def add_wider_layer(
                 "symbol": "star",
                 "size": [size] * len(keys),
                 "color": [team_colors(str(row["League"]), str(row["Team"]))[0] for row in rows],
+                "line": bet_marker_line(node_info, keys),
             },
             opacity=_WIDER_ALPHA,
             customdata=[[key, *node_info[key]["card"], 0] for key in keys],

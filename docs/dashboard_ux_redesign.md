@@ -163,6 +163,9 @@ brief's current phase.
   the hover card and rail only.
 - Edges to game-line stars appear only when player×game-line ρ exists (dfs-products
   stage 5); until then game-line stars render edge-less.
+- Every star (main map, *deeper* and *wider* lenses) carries a thin green/red border
+  for the model's own Over/Under call (`theme.GREEN`/`theme.RED`) — leg-type-agnostic,
+  a grammar channel alongside fill/size/brightness (locked, DESIGN §4a).
 
 ## 6. Asset layer
 
@@ -249,6 +252,7 @@ card's player headshots (§6).
 
 ## Changelog
 
+- 2026-09-13 — star border keyed to the model's Over/Under call, green/red (§5b; DESIGN §4a).
 - 2026-09-12 — product names locked to the DFS apps' own and the game-total star fill to a two-team gradient (§2, §5b; dfs-products §4); headshots routed to the `player-headshots` lane (§6, §8).
 - 2026-09-11 — lane closed: §3 trued to the shipped nav (Games absorbs Game + Slips, Pick'em retired); Sleeper pricing, comps, `Move` spark and the asset layer trued; §8 renumbered; brief archived.
 - 2026-07-10 — §5b new bet-type presentation added (Ladders, game-line combos, alt-line markers); taxonomy + contracts + scars extended; producers = dfs-products lane.

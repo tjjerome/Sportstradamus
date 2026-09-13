@@ -54,7 +54,7 @@ from sportstradamus.dashboard.components.constellation_traces import (
     star_label,
 )
 from sportstradamus.dashboard.components.constellation_wider import WIDER_GAMES, WIDER_SCALE
-from sportstradamus.dashboard.theme import GOLD, GRAY, team_colors
+from sportstradamus.dashboard.theme import GOLD, GRAY, GREEN, RED, team_colors
 
 _TEAMS = ("NYK", "SAS")  # sorted -> NYK anchors left (-x), SAS right (+x); real NBA codes
 
@@ -152,8 +152,10 @@ def test_active_full_color_candidate_desaturated_and_dim():
     assert active.marker.symbol == "star"
     assert active.marker.opacity == 1.0
     assert list(active.marker.color) == [nyk_primary]  # full NYK fill
+    assert list(active.marker.line.color) == [GREEN]  # A is an Over call
     assert cand.marker.opacity == INACTIVE_ALPHA
     assert cand.marker.color[0] != team_colors("NBA", "SAS")[0]  # blended toward gray, not raw
+    assert list(cand.marker.line.color) == [RED]  # B is an Under call
 
 
 def test_two_team_fixture_resolves_two_distinct_team_primaries():
@@ -186,6 +188,7 @@ def test_no_node_marker_color_equals_gold():
     fig = constellation_figure(legs, _corr(("A|PTS|Over", "B|PTS|Over", 0.5)), pool)
     for trace in _node_traces(fig):
         assert all(c != GOLD for c in trace.marker.color)
+        assert all(c != GOLD for c in trace.marker.line.color)
 
 
 def test_active_and_candidate_stars_both_carry_labels():
@@ -409,6 +412,7 @@ def test_deep_tier_colors_split_liked_from_passed():
     assert all(alpha <= INACTIVE_ALPHA for alpha in deep.marker.opacity)
     assert deep.marker.color[1] == _DEEP_COLOR
     assert all(color not in (GRAY, GOLD) for color in deep.marker.color)
+    assert list(deep.marker.line.color) == [GREEN, RED]  # liked=Over, passed=Under
 
 
 def test_an_in_slip_deep_leg_burns_as_a_promoted_star():
@@ -535,12 +539,15 @@ def test_wider_groups_renders_other_games_legs_with_customdata():
     pool = _pool(("A|PTS|Over", 0.4))
     groups = [
         ("NYK/SAS", [_wider_row("Brunson", "PTS", "Over", "NYK/SAS", "NYK", "NBA", 0.5)]),
-        ("MIA/ORL", [_wider_row("Herro", "3PM", "Over", "MIA/ORL", "MIA", "NBA", 0.3)]),
+        ("MIA/ORL", [_wider_row("Herro", "3PM", "Under", "MIA/ORL", "MIA", "NBA", 0.3)]),
     ]
     fig = constellation_figure([], _corr(), pool, wider_groups=groups)
     wider = _trace(fig, "wider")
     assert wider is not None
-    assert {cd[0] for cd in wider.customdata} == {"Brunson|PTS|Over", "Herro|3PM|Over"}
+    assert {cd[0] for cd in wider.customdata} == {"Brunson|PTS|Over", "Herro|3PM|Under"}
+    colors = dict(zip((cd[0] for cd in wider.customdata), wider.marker.line.color, strict=True))
+    assert colors["Brunson|PTS|Over"] == GREEN
+    assert colors["Herro|3PM|Under"] == RED
 
 
 def test_wider_groups_have_no_edges():

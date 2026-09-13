@@ -44,6 +44,7 @@ from sportstradamus.dashboard.components.constellation_spacing import (
     Y_RANGE,
     settle,
 )
+from sportstradamus.dashboard.components.constellation_traces import bet_marker_line
 
 # The model-passed tier: a flat cool gray, distinct from both a team color and
 # GRAY (the unknown-team fallback and the label color), so it reads as "the model
@@ -243,6 +244,7 @@ def add_deep_trace(
                 "size": [sizes[key] for key in keys],
                 "color": list(colors),
                 "opacity": list(alphas),
+                "line": bet_marker_line(node_info, keys),
             },
             customdata=[[key, *node_info[key]["card"], 0] for key in keys],
             hovertext=[node_info[key]["hover"] for key in keys],

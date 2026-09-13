@@ -144,7 +144,9 @@ hold and every other star keeps the main it orbits, and only the picked star's o
 to full size, can nudge whoever it touches. A leg in the slip burns at **full color and
 opacity**; a candidate is the same color
 **desaturated toward gray and dimmed** — selection is alpha + saturation, never an outline (a
-gold ring read as a team color). Pairwise correlation |ρ| is the edge weight (gold,
+gold ring read as a team color). Every star also carries a thin **border for the model's own
+Over/Under call** — green for Over, red for Under (`theme.GREEN`/`theme.RED`) — a second,
+independent channel from selection above, and never gold. Pairwise correlation |ρ| is the edge weight (gold,
 opacity/width ∝ |ρ|, dashed when ρ < 0 — "fights the thesis"); an edge stays hidden until one of
 its stars is in the slip and faintly previews on hover, so the clutter scales with the slip, not
 the game. Captions stay sparse — the slip's stars and the few biggest candidates; every other
@@ -183,7 +185,7 @@ gold stays the correlation-edge color alone, so no engraved stroke can be misrea
 carries no `customdata` and is inert to click and hover, and a game with no template draws none of it. Everything else here *is* data: use the map on the slip
 editor, Game pages, and parlay detail, keep it on `backgroundColor`, never let it crowd a table. It
 is the brand's signature; treat its grammar — star = leg, **fill = team**, **size = edge**,
-**brightness = in the slip**, edge = correlation — as FIXED. Team fills come from
+**brightness = in the slip**, **border = over/under**, edge = correlation — as FIXED. Team fills come from
 `team_assets.json` via `theme.team_colors(league, code)`; an unmapped code gets the neutral
 gray fallback. Team fills are never gold — gold is the correlation-edge color.
 

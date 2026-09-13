@@ -11,12 +11,12 @@ decides where a star sits — positions arrive from ``constellation_spring``,
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 import plotly.graph_objects as go
 
 from sportstradamus.dashboard.components.constellation_spacing import X_RANGE, Y_RANGE
-from sportstradamus.dashboard.theme import GOLD, GRAY, team_name
+from sportstradamus.dashboard.theme import GOLD, GRAY, GREEN, RED, team_name
 from sportstradamus.helpers import market_display_name
 from sportstradamus.leg_schema import leg_field, leg_field_float
 
@@ -30,6 +30,9 @@ SIZE_MAX = 38
 # franchise colors to near-gray, so candidates read as a colorless field.
 INACTIVE_DESAT = 0.35
 INACTIVE_ALPHA = 0.60
+# Flat stroke width for the Over/Under border, every tier — matches the module's
+# other flat stroke constants (_EDGE_WIDTH_MIN) rather than scaling with star size.
+BET_BORDER_WIDTH = 1.5
 
 _EDGE_WIDTH_MIN = 1.0
 _EDGE_WIDTH_SPAN = 6.0  # width at |ρ|=1 ≈ 7px; weak ties stay hairlines for contrast
@@ -61,6 +64,19 @@ def _last_name(player: str) -> str:
 
 def _bet_word(bet) -> str:
     return "Over" if str(bet).lower().startswith("o") else "Under"
+
+
+def bet_color(bet_word: str) -> str:
+    """GREEN for an Over call, RED for Under — never gold (DESIGN.md §4a)."""
+    return GREEN if bet_word == "Over" else RED
+
+
+def bet_marker_line(info: Mapping[str, dict], keys: Sequence[str]) -> dict:
+    """Marker ``line`` style for a trace's Over/Under border, keyed off each key's ``card``."""
+    return {
+        "color": [bet_color(info[k]["card"][2]) for k in keys],
+        "width": BET_BORDER_WIDTH,
+    }
 
 
 def _market_name(leg: Mapping) -> str:
@@ -253,6 +269,7 @@ def add_node_trace(
                 "size": [sizes[k] for k in keys],
                 "color": colors,
                 "opacity": 1.0 if active else INACTIVE_ALPHA,
+                "line": bet_marker_line(info, keys),
             },
             text=[info[k]["label"] if k in captions else "" for k in keys],
             textposition=[captions.get(k, "top center") for k in keys],
