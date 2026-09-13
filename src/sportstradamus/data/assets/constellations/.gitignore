@@ -1,0 +1,8 @@
+# openclipart downloads are one `pick <slug> <id>` away (manifest source_url) and some run
+# to megabytes; only inputs that cannot be re-fetched are committed.
+sources/*
+!sources/Baseball_bat.svg
+!sources/Football_gridiron.svg
+!sources/Gerald_G_Baseball_2.svg
+!sources/crossed-bats.svg
+!sources/crossed-sticks.svg

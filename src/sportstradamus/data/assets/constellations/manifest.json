@@ -1,5 +1,29 @@
 {
   "templates": {
+    "the-arrow": {
+      "artist": "qubodup",
+      "file": "the-arrow.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/arrow-right.svg",
+      "source_url": "https://openclipart.org/detail/332083"
+    },
+    "the-backboard": {
+      "artist": "User:Reisio",
+      "file": "the-backboard.png",
+      "licence": "Public domain",
+      "mode": "edges",
+      "source": "sources/2008_NCAA_Basketball_backboard_dimensions.svg",
+      "source_url": "https://commons.wikimedia.org/wiki/File:2008_NCAA_Basketball_backboard_dimensions.svg"
+    },
+    "the-banner": {
+      "artist": "nerdy",
+      "file": "the-banner.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/gold-thicker-banner.svg",
+      "source_url": "https://openclipart.org/detail/349300"
+    },
     "the-baseball": {
       "artist": "Gerald_G",
       "file": "the-baseball.png",
@@ -7,6 +31,22 @@
       "mode": "ink",
       "source": "sources/Gerald_G_Baseball_2.svg",
       "source_url": "http://openclipart.org/detail/8297/baseball-by-gerald_g-8297"
+    },
+    "the-basepath": {
+      "artist": "johnny_automatic",
+      "file": "the-basepath.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/johnny-automatic-running-home.svg",
+      "source_url": "https://openclipart.org/detail/9389"
+    },
+    "the-basketball": {
+      "artist": "cactus_cowboy",
+      "file": "the-basketball.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/1502840681.svg",
+      "source_url": "https://openclipart.org/detail/285013"
     },
     "the-bat": {
       "artist": "Gerald G",
@@ -16,6 +56,126 @@
       "source": "sources/Baseball_bat.svg",
       "source_url": "https://commons.wikimedia.org/wiki/File:Baseball_bat.svg"
     },
+    "the-batters-boxes": {
+      "artist": "liftarn",
+      "file": "the-batters-boxes.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/vintage-baseball-hitter-logo.svg",
+      "source_url": "https://openclipart.org/detail/321736"
+    },
+    "the-binoculars": {
+      "artist": "oksmith",
+      "file": "the-binoculars.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/1548207023.svg",
+      "source_url": "https://openclipart.org/detail/314101"
+    },
+    "the-bleachers": {
+      "artist": "Temaki contributors",
+      "file": "the-bleachers.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/Bleachers_Pinhead_icon.svg",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Bleachers_Pinhead_icon.svg"
+    },
+    "the-blue-lines": {
+      "artist": "Dustwin",
+      "file": "the-blue-lines.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/Hockey-Rink.svg",
+      "source_url": "https://openclipart.org/detail/202319"
+    },
+    "the-bolt": {
+      "artist": "NicholasJudy567",
+      "file": "the-bolt.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/lightningbolt2.svg",
+      "source_url": "https://openclipart.org/detail/323469"
+    },
+    "the-boomerang": {
+      "artist": "NicholasJudy567",
+      "file": "the-boomerang.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/boomerang.svg",
+      "source_url": "https://openclipart.org/detail/330484"
+    },
+    "the-cage": {
+      "artist": "j4p4n",
+      "file": "the-cage.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/vintage-victorian-birdcage-withwoman.svg",
+      "source_url": "https://openclipart.org/detail/344938"
+    },
+    "the-cap": {
+      "artist": "algotruneman",
+      "file": "the-cap.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/1527199626.svg",
+      "source_url": "https://openclipart.org/detail/302421"
+    },
+    "the-catchers-mask": {
+      "artist": "j4p4n",
+      "file": "the-catchers-mask.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/baseballcatcher1919.svg",
+      "source_url": "https://openclipart.org/detail/348452"
+    },
+    "the-clipboard": {
+      "artist": "AdamStanislav",
+      "file": "the-clipboard.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/clipboard.svg",
+      "source_url": "https://openclipart.org/detail/330803"
+    },
+    "the-comet": {
+      "artist": "NicholasJudy456",
+      "file": "the-comet.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/Shooting-Star-2.svg",
+      "source_url": "https://openclipart.org/detail/263576"
+    },
+    "the-compass": {
+      "artist": "Firkin",
+      "file": "the-compass.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/CompassRose.svg",
+      "source_url": "https://openclipart.org/detail/233062"
+    },
+    "the-court": {
+      "artist": "pianoBrad",
+      "file": "the-court.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/NBA-Court-Sports2010.svg",
+      "source_url": "https://openclipart.org/detail/75949"
+    },
+    "the-crease": {
+      "artist": "J_Alves",
+      "file": "the-crease.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/hockey-goal.svg",
+      "source_url": "https://openclipart.org/detail/38065"
+    },
+    "the-crescent": {
+      "artist": "GDJ",
+      "file": "the-crescent.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/Floral-Crescent-Moon-Mark-II.svg",
+      "source_url": "https://openclipart.org/detail/251334"
+    },
     "the-crossed-bats": {
       "artist": "Gerald_G",
       "file": "the-crossed-bats.png",
@@ -24,6 +184,110 @@
       "source": "sources/crossed-bats.svg",
       "source_url": "https://openclipart.org/detail/8300/baseball-bat-by-gerald_g-8300"
     },
+    "the-crossed-sticks": {
+      "artist": "J_Alves",
+      "file": "the-crossed-sticks.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/crossed-sticks.svg",
+      "source_url": "https://openclipart.org/detail/35545"
+    },
+    "the-crown": {
+      "artist": "barnheartowl",
+      "file": "the-crown.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/Fw-gold-crown.svg",
+      "source_url": "https://openclipart.org/detail/213417"
+    },
+    "the-cymbals": {
+      "artist": "oksmith",
+      "file": "the-cymbals.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/mancymbals-0055945rudzwl.svg",
+      "source_url": "https://openclipart.org/detail/335037"
+    },
+    "the-diamond": {
+      "artist": "cactus_cowboy",
+      "file": "the-diamond.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/baseball-diamond.svg",
+      "source_url": "https://openclipart.org/detail/284680"
+    },
+    "the-dumbbell": {
+      "artist": "culturalibre",
+      "file": "the-dumbbell.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/dumbbell.svg",
+      "source_url": "https://openclipart.org/detail/340219"
+    },
+    "the-facemask": {
+      "artist": "Simanek",
+      "file": "the-facemask.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/FootballHelmet.svg",
+      "source_url": "https://openclipart.org/detail/86827"
+    },
+    "the-faceoff": {
+      "artist": "Firkin",
+      "file": "the-faceoff.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/IceHockey.svg",
+      "source_url": "https://openclipart.org/detail/274212"
+    },
+    "the-fan": {
+      "artist": "pitr",
+      "file": "the-fan.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/lutz-a-fan-outline.svg",
+      "source_url": "https://openclipart.org/detail/353964"
+    },
+    "the-gloves": {
+      "artist": "NicholasJudy567",
+      "file": "the-gloves.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/boxing-glove.svg",
+      "source_url": "https://openclipart.org/detail/322453"
+    },
+    "the-goal-light": {
+      "artist": "Dustwin",
+      "file": "the-goal-light.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/Goal-Light.svg",
+      "source_url": "https://openclipart.org/detail/215515"
+    },
+    "the-goalie-mask": {
+      "artist": "Gerald_G",
+      "file": "the-goalie-mask.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/Goalie-mask-simple-bw.svg",
+      "source_url": "https://openclipart.org/detail/51169"
+    },
+    "the-goalie-pads": {
+      "artist": "Rshaker3",
+      "file": "the-goalie-pads.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/Hockey_Goalie.svg",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Hockey_Goalie.svg"
+    },
+    "the-goggles": {
+      "artist": "liftarn",
+      "file": "the-goggles.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/woman-in-goggles.svg",
+      "source_url": "https://openclipart.org/detail/349314"
+    },
     "the-gridiron": {
       "artist": "cactus cowboy",
       "file": "the-gridiron.png",
@@ -31,6 +295,414 @@
       "mode": "edges",
       "source": "sources/Football_gridiron.svg",
       "source_url": "https://commons.wikimedia.org/wiki/File:Football_gridiron.svg"
+    },
+    "the-hashmarks": {
+      "artist": "EncyclopedianWP",
+      "file": "the-hashmarks.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/American_football_field_(imperial).svg",
+      "source_url": "https://commons.wikimedia.org/wiki/File:American_football_field_(imperial).svg"
+    },
+    "the-headphones": {
+      "artist": "GDJ",
+      "file": "the-headphones.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/Stylized-Headphones-Icon.svg",
+      "source_url": "https://openclipart.org/detail/285116"
+    },
+    "the-helmet": {
+      "artist": "Lazur",
+      "file": "the-helmet.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/Football-Helmet.svg",
+      "source_url": "https://openclipart.org/detail/258671"
+    },
+    "the-hoop": {
+      "artist": "oksmith",
+      "file": "the-hoop.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/1545429144.svg",
+      "source_url": "https://openclipart.org/detail/312211"
+    },
+    "the-hourglass": {
+      "artist": "liftarn",
+      "file": "the-hourglass.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/1582910451hourglass-clipart-cricut-freesvgorg.svg",
+      "source_url": "https://openclipart.org/detail/319694"
+    },
+    "the-huddle": {
+      "artist": "j4p4n",
+      "file": "the-huddle.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/footballhuddle1926.svg",
+      "source_url": "https://openclipart.org/detail/353950"
+    },
+    "the-hurdle": {
+      "artist": "Fabuio",
+      "file": "the-hurdle.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/steeplechase-silhouette.svg",
+      "source_url": "https://openclipart.org/detail/177334"
+    },
+    "the-javelin": {
+      "artist": "j4p4n",
+      "file": "the-javelin.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/javilan-wpa-pd.svg",
+      "source_url": "https://openclipart.org/detail/335843"
+    },
+    "the-jersey": {
+      "artist": "Bingenberg",
+      "file": "the-jersey.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/1526493991.svg",
+      "source_url": "https://openclipart.org/detail/302032"
+    },
+    "the-key": {
+      "artist": "GateKeeperX",
+      "file": "the-key.png",
+      "licence": "Public domain",
+      "mode": "edges",
+      "source": "sources/Basketball_positions.svg",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Basketball_positions.svg"
+    },
+    "the-ladder": {
+      "artist": "Viscious-Speed",
+      "file": "the-ladder.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/1408137166.svg",
+      "source_url": "https://openclipart.org/detail/196261"
+    },
+    "the-lantern": {
+      "artist": "teck5",
+      "file": "the-lantern.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/lantern.svg",
+      "source_url": "https://openclipart.org/detail/352345"
+    },
+    "the-laurels": {
+      "artist": "joaolima",
+      "file": "the-laurels.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/laurel-leaf.svg",
+      "source_url": "https://openclipart.org/detail/183686"
+    },
+    "the-locker": {
+      "artist": "j4p4n",
+      "file": "the-locker.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/1540794866.svg",
+      "source_url": "https://openclipart.org/detail/309227"
+    },
+    "the-medal": {
+      "artist": "Issi",
+      "file": "the-medal.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/1529054368.svg",
+      "source_url": "https://openclipart.org/detail/303266"
+    },
+    "the-mitt": {
+      "artist": "NicholasJudy456",
+      "file": "the-mitt.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/Baseball-Glove.svg",
+      "source_url": "https://openclipart.org/detail/257385"
+    },
+    "the-mound": {
+      "artist": "liftarn",
+      "file": "the-mound.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/baseball-pitcher-silhouette.svg",
+      "source_url": "https://openclipart.org/detail/321739"
+    },
+    "the-net": {
+      "artist": "GDJ",
+      "file": "the-net.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/1552595090.svg",
+      "source_url": "https://openclipart.org/detail/316733"
+    },
+    "the-oar": {
+      "artist": "j4p4n",
+      "file": "the-oar.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/supcolour.svg",
+      "source_url": "https://openclipart.org/detail/343601"
+    },
+    "the-parachute": {
+      "artist": "oksmith",
+      "file": "the-parachute.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/1549153478.svg",
+      "source_url": "https://openclipart.org/detail/314749"
+    },
+    "the-pennant": {
+      "artist": "Bingenberg",
+      "file": "the-pennant.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/wimpel-m.svg",
+      "source_url": "https://openclipart.org/detail/331074"
+    },
+    "the-pigskin": {
+      "artist": "feraliminal",
+      "file": "the-pigskin.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/1287178070.svg",
+      "source_url": "https://openclipart.org/detail/91027"
+    },
+    "the-plate": {
+      "artist": "pianoBrad",
+      "file": "the-plate.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/Home-Plate-Sports2010.svg",
+      "source_url": "https://openclipart.org/detail/75943"
+    },
+    "the-plume": {
+      "artist": "ysabeau",
+      "file": "the-plume.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/feather-quill-and-inkwell-silhouette-cut.svg",
+      "source_url": "https://openclipart.org/detail/355839"
+    },
+    "the-ring": {
+      "artist": "j4p4n",
+      "file": "the-ring.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/jewelring-colourremix.svg",
+      "source_url": "https://openclipart.org/detail/335686"
+    },
+    "the-route": {
+      "artist": "Sacamol",
+      "file": "the-route.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/RouteTree.svg",
+      "source_url": "https://commons.wikimedia.org/wiki/File:RouteTree.svg"
+    },
+    "the-scales": {
+      "artist": "nerdy",
+      "file": "the-scales.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/justice-scales-vector.svg",
+      "source_url": "https://openclipart.org/detail/348606"
+    },
+    "the-scoreboard": {
+      "artist": "StudioFibonacci",
+      "file": "the-scoreboard.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/StudioFibonacci-Baseball-Scoreboard.svg",
+      "source_url": "https://openclipart.org/detail/21752"
+    },
+    "the-shield": {
+      "artist": "otuva",
+      "file": "the-shield.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/shield.svg",
+      "source_url": "https://openclipart.org/detail/339018"
+    },
+    "the-shin-guards": {
+      "artist": "oksmith",
+      "file": "the-shin-guards.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/catcher-0033065axwlow.svg",
+      "source_url": "https://openclipart.org/detail/327114"
+    },
+    "the-shoulder-pads": {
+      "artist": "Firkin",
+      "file": "the-shoulder-pads.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/FootballPlayer.svg",
+      "source_url": "https://openclipart.org/detail/284512"
+    },
+    "the-shuttlecock": {
+      "artist": "a.l.e",
+      "file": "the-shuttlecock.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/badminton-shuttlecock-lineart.svg",
+      "source_url": "https://openclipart.org/detail/201736"
+    },
+    "the-skate": {
+      "artist": "Firkin",
+      "file": "the-skate.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/Skate2.svg",
+      "source_url": "https://openclipart.org/detail/290925"
+    },
+    "the-ski": {
+      "artist": "Darkmoon-Art",
+      "file": "the-ski.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/skiing-01.svg",
+      "source_url": "https://openclipart.org/detail/334912"
+    },
+    "the-slapshot": {
+      "artist": "liftarn",
+      "file": "the-slapshot.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/hockey-player.svg",
+      "source_url": "https://openclipart.org/detail/337344"
+    },
+    "the-sneakers": {
+      "artist": "n3aak",
+      "file": "the-sneakers.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/high-tops.svg",
+      "source_url": "https://openclipart.org/detail/297695"
+    },
+    "the-spotlight": {
+      "artist": "j4p4n",
+      "file": "the-spotlight.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/twokids-onstage.svg",
+      "source_url": "https://openclipart.org/detail/340240"
+    },
+    "the-staircase": {
+      "artist": "qubodup",
+      "file": "the-staircase.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/upstairs-comp-by-qubodup.svg",
+      "source_url": "https://openclipart.org/detail/354503"
+    },
+    "the-stick": {
+      "artist": "J_Alves",
+      "file": "the-stick.png",
+      "licence": "CC0",
+      "mode": "ink",
+      "source": "sources/hockey-stick-1.svg",
+      "source_url": "https://openclipart.org/detail/35545"
+    },
+    "the-stopwatch": {
+      "artist": "Henry",
+      "file": "the-stopwatch.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/timeroutlineblack.svg",
+      "source_url": "https://openclipart.org/detail/343539"
+    },
+    "the-tickets": {
+      "artist": "marcos1a2m",
+      "file": "the-tickets.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/atickets.svg",
+      "source_url": "https://openclipart.org/detail/322665"
+    },
+    "the-torch": {
+      "artist": "liftarn",
+      "file": "the-torch.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/hand-torch-silhouette.svg",
+      "source_url": "https://openclipart.org/detail/320998"
+    },
+    "the-track": {
+      "artist": "dear_theophilus",
+      "file": "the-track.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/racetrack.svg",
+      "source_url": "https://openclipart.org/detail/296838"
+    },
+    "the-trapper": {
+      "artist": "Rose197",
+      "file": "the-trapper.png",
+      "licence": "Public domain",
+      "mode": "edges",
+      "source": "sources/Goalkeeper_glove_icon.svg",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Goalkeeper_glove_icon.svg"
+    },
+    "the-trophy": {
+      "artist": "monsterbraingames",
+      "file": "the-trophy.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/trophy-remix-by-monsterbraingames.svg",
+      "source_url": "https://openclipart.org/detail/202115"
+    },
+    "the-umbrella": {
+      "artist": "j4p4n",
+      "file": "the-umbrella.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/lessboringumbrella.svg",
+      "source_url": "https://openclipart.org/detail/295538"
+    },
+    "the-warning-track": {
+      "artist": "Robert Merkel",
+      "file": "the-warning-track.png",
+      "licence": "Public domain",
+      "mode": "ink",
+      "source": "sources/Baseball_field_overview.svg",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Baseball_field_overview.svg"
+    },
+    "the-wave": {
+      "artist": "marcodiego",
+      "file": "the-wave.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/electromagneticwave.svg",
+      "source_url": "https://openclipart.org/detail/323702"
+    },
+    "the-windmill": {
+      "artist": "GDJ",
+      "file": "the-windmill.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/Windmill-Silhouette-2.svg",
+      "source_url": "https://openclipart.org/detail/288589"
+    },
+    "the-wings": {
+      "artist": "GDJ",
+      "file": "the-wings.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/Hand-Drawn-Wings-Silhouette.svg",
+      "source_url": "https://openclipart.org/detail/281296"
+    },
+    "the-zamboni": {
+      "artist": "j4p4n",
+      "file": "the-zamboni.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/zamboni-pd.svg",
+      "source_url": "https://openclipart.org/detail/335691"
     }
   },
   "version": 1
