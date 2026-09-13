@@ -16,6 +16,14 @@
       "source": "sources/Baseball_bat.svg",
       "source_url": "https://commons.wikimedia.org/wiki/File:Baseball_bat.svg"
     },
+    "the-crossed-bats": {
+      "artist": "Gerald_G",
+      "file": "the-crossed-bats.png",
+      "licence": "Public domain",
+      "mode": "ink",
+      "source": "sources/crossed-bats.svg",
+      "source_url": "https://openclipart.org/detail/8300/baseball-bat-by-gerald_g-8300"
+    },
     "the-gridiron": {
       "artist": "cactus cowboy",
       "file": "the-gridiron.png",

@@ -118,8 +118,12 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
 0. **Proof of concept** — done 2026-09-12 (§1). The owner's three sample files:
    the openclipart baseball (Gerald_G, public domain) is `the-baseball` (ink);
    the football gridiron SVG is byte-for-byte Commons' CC0 copy already under
-   `sources/`; the crossed-bats line-art PNG has been shown but not handed over
-   as a file — it needs a path, then a template of its own (§4 remake authority).
+   `sources/`; the crossed-bats line-art PNG was shown but never handed over as
+   a file, so `the-crossed-bats` (MLB, twin, the first template made under the §4
+   remake authority, 2026-09-13) is composed instead: two copies of Gerald_G's
+   public-domain openclipart bat (8300), the second mirrored, as
+   `sources/crossed-bats.svg` (ink). The owner's own PNG can replace it through
+   the same `process` call.
 1. **Processing tool** — done 2026-09-13.
    `poetry run python -m sportstradamus.scripts.constellation_art process <src>
    --slug <slug> --mode ink|edges --source-url … --artist … --licence …` writes
@@ -191,5 +195,6 @@ the outline-only fallback); stage 3 can land on the POC images alone.
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
+- 2026-09-13 · crossed bats · `the-crossed-bats` template (MLB, twin/chain, 9 stars: tips, knobs, barrel and handle mids, the crossing) + its layer composed from two mirrored copies of Gerald_G's public-domain openclipart bat (8300, ink); stars checked on an overlay of the layer at its own aspect; catalog 100 → 101, MLB eligible 65 · next: stage 2 sourcing
 - 2026-09-13 · stage 1 · `src/sportstradamus/scripts/constellation_art.py` (`process`, `sheet`) + golden pins; first three layers committed (the-bat + the-gridiron from Commons CC0 art, edges; the-baseball from the owner's openclipart file, ink) with manifest rows + sources; `render` folded into `process`, `search` deferred to stage 2; chromium synthesises a viewBox for width/height-only SVGs, so `object-fit: contain` scales every Commons file seen so far · next: stage 2 sourcing; the crossed-bats PNG still needs a file path
 - 2026-09-12 · stage 0 · brief written; POC on the owner's baseball SVG + a CC0 Commons bat (ink and edge masks, blur, tint, alpha) reads right over the starfield; Commons API confirmed as the automated source, openclipart API dead from the dev box · next: stage 1 processing tool
