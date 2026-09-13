@@ -49,6 +49,8 @@
   const LENS_FADE_MS = 900; // "look deeper": new stars and their ties materialize
   const WIDER_FADE_MS = 1000; // "look wider": whole-map settle — a touch slower, hides the reshape
   const LENS_TRACE_NAMES = { deep: true, deep_edge: true, wider: true, wider_labels: true };
+  // A lens star's "won't pair" × is a trace of its own, so it has to fade with its lens.
+  const MARK_LENS = { deep_banned: "deep", wider_banned: "wider" };
   const REDUCED_MOTION =
     window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   let plotted = false;
@@ -62,12 +64,16 @@
   let SPARKS = {}; // star key -> its card's last-five markup, built server-side
   let MOVES = {}; // star key -> its card's line-movement markup, built server-side
   let SHOTS = {}; // player name -> their headshot data URI, embedded server-side
+  let BANS = {}; // star key -> its card's "won't pair" text, worded server-side
   let skyTap = true; // a plotly star tap clears this before the DOM click handler sees it
   const COARSE_POINTER =
     window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
   // Extra frame height so the docked card clears the map. It tracks the card's height —
   // last-five and movement rows included — so a row the card gains has to grow it too.
   const MOBILE_CARD_PAD = 200;
+  // The ban row, added only while some star has one. On a phone its sentence wraps to two
+  // 12px lines (16px each at the card's 1.35 line-height), plus the row's 8px margin.
+  const MOBILE_BAN_ROW_PAD = 40;
   let prevLensNames = null; // {name: true} lens traces shown last render — a new one marks a reveal
   let renderSeq = 0; // bumped each render so an in-flight lens fade from a stale render bails out
 
@@ -79,6 +85,7 @@
     SPARKS = args.sparks || {};
     MOVES = args.moves || {};
     SHOTS = args.shots || {};
+    BANS = args.bans || {};
     const config = { displayModeBar: false, scrollZoom: false, responsive: true };
     const curLensNames = lensNamesOf(fig.data);
     const freshLens = plotted && prevLensNames ? newLensTraces(fig.data, prevLensNames) : [];
@@ -100,7 +107,7 @@
     setFrameHeight(
       (fig.layout && fig.layout.height ? fig.layout.height : 380) +
         FRAME_PAD +
-        (MOBILE ? MOBILE_CARD_PAD : 0)
+        (MOBILE ? MOBILE_CARD_PAD + (Object.keys(BANS).length > 0 ? MOBILE_BAN_ROW_PAD : 0) : 0)
     );
     if (!plotted) {
       attachHandlers();
@@ -122,10 +129,13 @@
   }
 
   // Indices of lens traces present now but absent last render — the genuinely new stars to fade in.
+  // A lens star's × counts as new only when its lens is, so a mark a slip click adds under an
+  // open lens holds still like any other restyle.
   function newLensTraces(data, prev) {
     const idx = [];
     data.forEach(function (t, i) {
-      if (LENS_TRACE_NAMES[t.name] && !prev[t.name]) idx.push(i);
+      const name = MARK_LENS[t.name] || t.name;
+      if (LENS_TRACE_NAMES[name] && !prev[name]) idx.push(i);
     });
     return idx;
   }
@@ -349,6 +359,13 @@
       : '<div class="cst-shot">' + esc(initials(player)) + "</div>";
   }
 
+  // The platform's refusal to pair this leg with one already in the slip, worded
+  // server-side. Most stars carry none, and those draw no row.
+  function banHtml(key) {
+    const ban = BANS[key];
+    return ban ? '<div class="cst-ban">' + esc(ban) + "</div>" : "";
+  }
+
   function cardHtml(cd) {
     const player = cd[1];
     const market = cd[2];
@@ -372,6 +389,7 @@
       'x · <span class="cst-kelly">Kelly ',
       pct(kelly),
       "</span></div>",
+      banHtml(cd[0]),
       sparkHtml(cd[0]),
       moveHtml(cd[0]),
       '<div class="cst-actions">',

@@ -28,6 +28,7 @@ def render_constellation(
     sparks: dict[str, str],
     moves: dict[str, str],
     shots: dict[str, str],
+    bans: dict[str, str],
     mobile: bool = False,
 ) -> dict | None:
     """Render the star map; return the last ``{action, key, nonce}`` the user fired.
@@ -40,10 +41,11 @@ def render_constellation(
     ``sparks`` maps a star's key to its hover card's last-five markup, and ``moves`` to its
     line-movement row; a key missing from ``moves`` draws no row at all. ``shots`` maps a
     player's display name to their headshot data URI, keyed by name rather than star key so
-    one face serves all of that player's legs. All three travel beside the figure rather
-    than inside ``customdata`` because three traces carry customdata — a field there would
-    ship the same payload three times and renumber every reader of the positional card
-    fields.
+    one face serves all of that player's legs. ``bans`` maps a star's key to the text of its
+    "won't pair" row; a key missing from ``bans`` draws no row either. All four travel beside
+    the figure rather than inside ``customdata`` because four traces carry customdata
+    (active, candidate, deep, wider) — a field there would ship the same payload four times
+    and renumber every reader of the positional card fields.
     """
     return _component(
         figure_json=fig.to_json(),
@@ -51,6 +53,7 @@ def render_constellation(
         sparks=sparks,
         moves=moves,
         shots=shots,
+        bans=bans,
         key=key,
         default=None,
     )

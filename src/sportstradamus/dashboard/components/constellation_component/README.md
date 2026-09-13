@@ -19,7 +19,7 @@ in this repo or on the production box:
 
 To change behavior, edit those files and reload the dashboard — there is nothing to compile.
 `__init__.py` declares the component against `build/` and exposes
-`render_constellation(fig, *, key, sparks, moves, mobile=False)`.
+`render_constellation(fig, *, key, sparks, moves, shots, bans, mobile=False)`.
 
 ## Contract
 
@@ -27,13 +27,17 @@ To change behavior, edit those files and reload the dashboard — there is nothi
   is `[key, player, market, bet, line, win, boost, kelly, in_slip]` and each edge's `meta` is
   `[endpoint_a, endpoint_b]`. Edges come under two names — `edge` for the permanent web
   and `deep_edge` for a tie the "look deeper" lens brings in — and both hover-preview;
-  only `deep_edge` fades in and out with the lens.
-- `sparks` and `moves` map a node's key to its hover card's last-five and line-movement
-  markup, already drawn as SVG on the Python side. They travel beside the figure rather than
-  inside `customdata` because three traces carry customdata (main, deep, wider), so a field
-  there would ship the same markup three times and renumber every positional reader of the
-  card fields. A key with no `sparks` entry keeps the scar; one with no `moves` entry draws no
-  movement row.
+  only `deep_edge` fades in and out with the lens. A star the platform won't pair with the
+  slip wears an × drawn by an overlay trace named `<host>_banned`, which carries no
+  `customdata`; `deep_banned` and `wider_banned` fade in with their lens.
+- Four side channels travel beside the figure: `sparks`, `moves`, `shots` and `bans`. They
+  stay out of `customdata` because four traces carry it (active, candidate, deep, wider), so a
+  field there would ship the same payload four times and renumber every positional reader of
+  the card fields. `sparks` and `moves` map a node's key to its hover card's last-five and
+  line-movement markup, already drawn as SVG on the Python side; `shots` maps a player's name
+  to their headshot data URI; `bans` maps a node's key to its "won't pair" row text. A key
+  with no `sparks` entry keeps the scar; one with no `moves` or `bans` entry draws no row, and
+  a player with no `shots` entry gets the initials disc.
 - `mobile` switches the frontend to its touch flow: a docked tap card, no hover, and a taller
   frame so the card clears the map.
 - The component returns `{action, key, nonce}` — `action` is `"click"` (toggle the leg) or

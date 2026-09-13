@@ -58,11 +58,12 @@ Team fills read ``theme.team_colors(league, team)`` — real per-team primaries 
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 
 import pandas as pd
 import plotly.graph_objects as go
 
+from sportstradamus.dashboard.components.constellation_bans import add_ban_marks
 from sportstradamus.dashboard.components.constellation_deep import (
     DEEP_SIZE_MAX,
     DEEP_SIZE_MAX_MOBILE,
@@ -150,6 +151,7 @@ def constellation_figure(
     wider_groups: list[tuple[str, list[dict]]] | None = None,
     mobile: bool = False,
     shape: dict | None = None,
+    banned: Collection[str] = (),
 ) -> go.Figure:
     """Static star map of the game's model-liked legs, the slip's legs lit up.
 
@@ -170,6 +172,8 @@ def constellation_figure(
     byte-for-byte, so the shapeless path is exactly today's figure. The map is
     never captioned with the shape's name: an engraving a viewer has to be told
     the name of isn't reading, so the drawing has to carry it alone.
+
+    ``banned`` keys the stars the platform won't pair with the slip; each gets an orange ×.
     """
     fig = blank_figure()
     universe = game_universe(pool, slip_legs)
@@ -294,4 +298,5 @@ def constellation_figure(
             label_size=label_size,
             sky_y=sky_y,
         )
+    add_ban_marks(fig, banned)
     return fig

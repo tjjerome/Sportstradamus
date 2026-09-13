@@ -283,6 +283,7 @@ def _render_constellation(
         sparks=form_sparks(sparked),
         moves=move_sparks(sparked),
         shots=headshot_uris(sparked),
+        bans={},
         mobile=mobile,
     )
     if _apply_constellation_action(action, offers, pool, wider_groups, key_prefix):
