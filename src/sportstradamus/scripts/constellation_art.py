@@ -77,6 +77,10 @@ _CROP_MARGIN = 0.06
 # Brief §7: commit web-sized files only — git keeps every version of a binary.
 _LAYER_MAX_PX = 600
 
+# Sixteen alpha steps are invisible at the layer's on-screen opacity and shrink the PNGs
+# by about two thirds — what keeps a hundred layers under the brief's §8 line.
+_ALPHA_LEVELS = 16
+
 # The theme's light blue (#7FAAE8) is the locked tint; no new hex.
 _TINT = ImageColor.getrgb(SEQUENTIAL_COLORS[3])
 
@@ -189,8 +193,10 @@ def layer(rgb: Image.Image, mode: str) -> Image.Image:
     # pixel stays exactly the tint instead of drifting at the translucent fringe.
     alpha_band = Image.fromarray(np.round(alpha * 255).astype(np.uint8), "L").crop(box)
     alpha_band.thumbnail((_LAYER_MAX_PX, _LAYER_MAX_PX), Image.Resampling.LANCZOS)
+    step = 255 // (_ALPHA_LEVELS - 1)
+    stepped = (np.round(np.asarray(alpha_band) / step) * step).astype(np.uint8)
     out = Image.new("RGBA", alpha_band.size, _TINT)
-    out.putalpha(alpha_band)
+    out.putalpha(Image.fromarray(stepped, "L"))
     return out
 
 

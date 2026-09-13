@@ -113,6 +113,12 @@ def test_layer_caps_the_longest_side():
     assert max(out.size) == art._LAYER_MAX_PX
 
 
+def test_layer_stores_alpha_in_a_few_even_steps():
+    levels = np.unique(np.asarray(art.layer(_ring(), "ink"))[..., 3])
+    assert len(levels) <= art._ALPHA_LEVELS
+    assert (levels % (255 // (art._ALPHA_LEVELS - 1)) == 0).all(), "0, 17, 34 … 255"
+
+
 def test_process_writes_layer_manifest_row_and_source_copy(tmp_path, monkeypatch):
     assets, src = _ring_source(tmp_path, monkeypatch)
 
@@ -192,7 +198,9 @@ def test_shipped_row_is_complete_and_its_layer_is_web_sized(slug, row):
     assert all(row.values()), f"{slug} has an empty provenance field"
     assert slug in shape_catalog()["templates"], f"{slug} is not a template"
     assert row["mode"] in ("ink", "edges")
-    assert (_SHIPPED / row["source"]).is_file(), f"{slug} names a missing source"
+    # Downloads are gitignored (megabytes); a missing one must be one URL away.
+    if not (_SHIPPED / row["source"]).is_file():
+        assert row["source_url"].startswith("https://"), f"{slug} names a missing source"
     with Image.open(_SHIPPED / row["file"]) as layer:
         assert layer.mode == "RGBA"
         assert max(layer.size) <= art._LAYER_MAX_PX
@@ -201,7 +209,9 @@ def test_shipped_row_is_complete_and_its_layer_is_web_sized(slug, row):
 
 
 def test_shipped_set_stays_under_the_budget():
-    total = sum(path.stat().st_size for path in _SHIPPED.rglob("*") if path.is_file())
+    # The committed set is the layers and the manifest; sources/ holds gitignored downloads
+    # beside a few KB-scale compositions.
+    total = sum(path.stat().st_size for path in _SHIPPED.iterdir() if path.is_file())
     assert total <= _SHIPPED_BUDGET_BYTES
 
 
