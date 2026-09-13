@@ -1,4 +1,9 @@
-"""Ambient-art loader (DESIGN.md §3) — the scar mechanism.
+"""Image loaders for the dashboard's two optional asset families — the scar mechanism.
+
+Streamlit serves no arbitrary static files, so every image here travels to the browser as
+a base64 data URI. Both families are dressing: ambient art falls back to a token gradient
+and a headshot falls back to the card's initials disc, so a box holding neither renders
+exactly as it did before either landed.
 
 Ambient art is optional dressing over a token gradient: a slot with no file renders its
 caller's fallback gradient byte-identical to today. A slot that names a real file on
@@ -12,6 +17,10 @@ The manifest (``data/assets/ambient/ambient_manifest.json``) is the owner's tuni
 surface, not a build artifact — same mtime-cached, validate-on-load contract as
 ``constellation_shapes.py``. Licensing is the owner's call, made before a file lands;
 ``attribution`` / ``source_url`` are free notes the loader never reads.
+
+Headshots are the gitignored per-box cache ``fetch headshots`` fills, read through the
+index parquet beside it. They are already cropped and sized for the disc, so ``_data_uri``
+embeds them whole.
 """
 
 from __future__ import annotations
@@ -23,13 +32,19 @@ import io
 import json
 from pathlib import Path
 
+import pandas as pd
 from PIL import Image, ImageOps
 
 from sportstradamus import data
+from sportstradamus.helpers.io import read_parquet_safe
+from sportstradamus.helpers.text import remove_accents
 
 MANIFEST_PATH = Path(
     str(pkg_resources.files(data) / "assets" / "ambient" / "ambient_manifest.json")
 )
+
+HEADSHOT_DIR = Path(str(pkg_resources.files(data) / "assets" / "headshots"))
+HEADSHOT_INDEX_PATH = HEADSHOT_DIR / "index.parquet"
 
 # DESIGN.md §2 secondaryBackgroundColor #1A1D24, as r,g,b for the overlay below — the
 # same surface tone every wired hero/card background already ends its gradient on.
@@ -98,7 +113,9 @@ def _manifest() -> dict:
     return _load(MANIFEST_PATH, MANIFEST_PATH.stat().st_mtime_ns)
 
 
-@functools.lru_cache(maxsize=8)
+# One entry per distinct image. Ambient needs three; a constellation figure can show
+# sixty faces at once and re-embeds them on every lens toggle, so the ceiling tracks that.
+@functools.lru_cache(maxsize=512)
 def _data_uri(path: Path, mtime_ns: int) -> str:
     """Base64 data URI for ``path``; a file wider than the ceiling is downscaled to WebP.
 
@@ -145,3 +162,52 @@ def ambient_css(slot: str, fallback_gradient: str) -> str:
     return (
         f"linear-gradient({overlay},{overlay}),url({uri}) {_PLACEMENT_GEOMETRY[entry['placement']]}"
     )
+
+
+@functools.lru_cache(maxsize=1)
+def _headshot_rows(path: Path, mtime_ns: int) -> dict[tuple[str, str], list[dict]]:
+    """Cache index grouped by ``(league, name)``; ``mtime_ns`` is cache-key only, as in ``_load``.
+
+    Every row is grouped, misses included, so a name two players share stays visibly
+    ambiguous instead of collapsing onto whichever of them has a photo.
+    """
+    rows: dict[tuple[str, str], list[dict]] = {}
+    for row in read_parquet_safe(path).to_dict("records"):
+        rows.setdefault((row["league"], row["name"]), []).append(row)
+    return rows
+
+
+def _headshot_index() -> dict[tuple[str, str], list[dict]]:
+    mtime_ns = HEADSHOT_INDEX_PATH.stat().st_mtime_ns if HEADSHOT_INDEX_PATH.is_file() else 0
+    return _headshot_rows(HEADSHOT_INDEX_PATH, mtime_ns)
+
+
+def headshot_uris(pool: pd.DataFrame) -> dict[str, str]:
+    """Player name → a data URI for their cached headshot, one entry per distinct face.
+
+    Keyed by the display name the constellation card already carries in its customdata, so
+    the frontend reads it with no new field and a player's many legs share one embed. A
+    player this box has no file for is simply absent and the card draws its initials disc —
+    which is also every player on a box that has never run ``fetch headshots``.
+
+    Reads each row's own ``League``: the "look wider" lens puts other games' stars on the
+    map and they need not share the focus game's league. ``Team`` breaks a tie between two
+    players the index knows under one name, and a name still ambiguous after that resolves
+    to nothing at all — initials on both beats the wrong face on one.
+    """
+    index = _headshot_index()
+    files: dict[str, set[str]] = {}
+    for offer in pool.to_dict("records"):
+        rows = index.get((offer["League"], remove_accents(offer["Player"])), [])
+        if len(rows) > 1:
+            rows = [row for row in rows if row["team"] == offer["Team"]]
+        if len(rows) == 1 and rows[0]["file"]:
+            files.setdefault(offer["Player"], set()).add(rows[0]["file"])
+
+    uris: dict[str, str] = {}
+    for player, candidates in files.items():
+        if len(candidates) != 1:
+            continue
+        path = HEADSHOT_DIR / candidates.pop()
+        uris[player] = _data_uri(path, path.stat().st_mtime_ns)
+    return uris

@@ -21,12 +21,12 @@ present file is `dashboard/assets.py`; ambient slot state lives in
 | `astrolabe_engraving` | Slip-builder astrolabe bezel (`dashboard/components/astrolabe_component/build/index.html`) | Generated SVG bezel/orbitals/dials | keep; optional licensed engraving texture | generated-SVG-keep | n/a | n/a | P3 |
 | `constellation_silhouettes` | Games constellation decoration layer (`data/config/constellation_shapes.json`, rendered by `constellation_component`) | Generated SVG template paths (100-template bank) | Licence-free clip art filtered to faint light-blue line drawings, one per template | [`constellation-art`](handoffs/constellation-art.md) lane — automated Commons search, owner approves each | owner checks each image; source + artist + licence per image in the lane's manifest | ≤ 600 px RGBA PNG, tinted `#7FAAE8`, blurred, translucent | lane |
 | `team_marks` | Anywhere a team renders — constellation star fills, badges — via `theme.team_colors()` | Hex colors + full names only (`data/config/team_assets.json`); no logo art | none — **skipped** by the owner; colors carry the constellation grammar (DESIGN §4a) | n/a | n/a | n/a | skipped |
-| `player_headshots` | Constellation ticket-card headshot disc — `.cst-shot` (`dashboard/components/constellation_component/build/main.js:350`, title "Player headshot — coming soon") | Initials-disc scar (`initials()` fallback) | League-CDN player headshots | [`player-headshots`](handoffs/player-headshots.md) lane (CDN patterns verified there) | owner verifies each league CDN's terms; disk-cache locally rather than hot-link | circular crop, ~34×34 render (`.cst-shot`); 128 px WebP in the cache | lane |
+| `player_headshots` | Constellation ticket-card headshot disc — `.cst-shot` (`constellation_component/build/main.js`, `shotHtml`) | The player's face from this box's cache; the initials disc (`initials()`) when it holds none | — | League CDNs, cached by the monthly `fetch headshots` job | owner clears each league's CDN terms before the prod cron row; disk-cache, never hot-link | 34×34 circular render; 128 px WebP in the gitignored cache, ~4.6 KB a face | done |
 
-The `player_headshots` scar lives in the constellation component's ticket card, not in
-`components/deep_dive.py` — there is no separate person-icon stand-in on the offer-detail
-dialog or the Board's mobile cards (`components/offer_cards.py`); the sweep for
-`:material/person:`-style icons and other `avatar`/`disc` stand-ins turned up nothing else.
+The headshot disc lives in the constellation component's ticket card and nowhere else: there
+is no separate person-icon stand-in on the offer-detail dialog (`components/deep_dive.py`) or
+the Board's mobile cards (`components/offer_cards.py`); the sweep for `:material/person:`-style
+icons and other `avatar`/`disc` stand-ins turned up nothing else.
 The `radial-gradient` sweep found exactly the four hero/card washes above (`theme.py`
 twice, `games.py`, `receipts.py`) — no other surface builds one.
 
@@ -41,9 +41,12 @@ than 1600 px is downscaled to WebP at import, so the page never ships an origina
 slot's `placement` picks the geometry: `hero-background` crops to cover the box;
 `card-background` scales the image to the column width and tiles it downward, and the
 Tonight page's script offsets each card by the cards above it, so the column reads as one
-sky sliced card by card, looping once it runs out of image. Every other row above is
-either `generated-SVG-keep` (no sourcing needed — the generated form *is* the design) or
-`catalog-only` (owned by another phase).
+sky sliced card by card, looping once it runs out of image.
+
+`player_headshots` is the same shape through a different door: `dashboard.assets.headshot_uris`
+answers only for the players this box's cache holds a file for, so every other star draws the
+initials disc it always drew. Every remaining row above is either `generated-SVG-keep` (no
+sourcing needed — the generated form *is* the design) or `catalog-only` (owned by another phase).
 
 ## What the owner does next
 
@@ -63,10 +66,11 @@ either `generated-SVG-keep` (no sourcing needed — the generated form *is* the 
 **Team marks**: skipped by the owner — colors-only stays; the constellation grammar never
 needed logos.
 
-**Player headshots**: the [`player-headshots`](handoffs/player-headshots.md) lane — not a
-file drop: per-league CDN patterns, a gitignored disk cache filled by a monthly job, and the
-`main.js` "coming soon" disc replaced. The owner's part is clearing each league's CDN terms
-before the job goes on the production cron.
+**Player headshots**: not a file drop — `sportstradamus fetch headshots` fills a gitignored
+per-box cache from the league CDNs and the card reads it, so a box that has never run the job
+shows the initials disc and nothing breaks. The owner's part is clearing each league's CDN
+terms before the job goes on the production cron; the lane is
+[`player-headshots`](handoffs/player-headshots.md).
 
 **Commissioned logo**: the brief is [`art_briefs/logo_guru.md`](art_briefs/logo_guru.md).
 `app.py` already carries the reserved, existence-guarded slot — dropping

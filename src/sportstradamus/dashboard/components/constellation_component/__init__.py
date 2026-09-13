@@ -22,7 +22,13 @@ _component = components.declare_component("constellation", path=str(_BUILD_DIR))
 
 
 def render_constellation(
-    fig: go.Figure, *, key: str, sparks: dict[str, str], moves: dict[str, str], mobile: bool = False
+    fig: go.Figure,
+    *,
+    key: str,
+    sparks: dict[str, str],
+    moves: dict[str, str],
+    shots: dict[str, str],
+    mobile: bool = False,
 ) -> dict | None:
     """Render the star map; return the last ``{action, key, nonce}`` the user fired.
 
@@ -32,11 +38,19 @@ def render_constellation(
     ``mobile`` switches the frontend to its touch flow (docked tap card, no hover).
 
     ``sparks`` maps a star's key to its hover card's last-five markup, and ``moves`` to its
-    line-movement row; a key missing from ``moves`` draws no row at all. Both travel beside
-    the figure rather than inside ``customdata`` because three traces carry customdata — a
-    field there would ship the same SVG three times and renumber every reader of the
-    positional card fields.
+    line-movement row; a key missing from ``moves`` draws no row at all. ``shots`` maps a
+    player's display name to their headshot data URI, keyed by name rather than star key so
+    one face serves all of that player's legs. All three travel beside the figure rather
+    than inside ``customdata`` because three traces carry customdata — a field there would
+    ship the same payload three times and renumber every reader of the positional card
+    fields.
     """
     return _component(
-        figure_json=fig.to_json(), mobile=mobile, sparks=sparks, moves=moves, key=key, default=None
+        figure_json=fig.to_json(),
+        mobile=mobile,
+        sparks=sparks,
+        moves=moves,
+        shots=shots,
+        key=key,
+        default=None,
     )

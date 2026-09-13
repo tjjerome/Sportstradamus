@@ -86,7 +86,7 @@ an exception. A session works one lane and reads that lane's brief.
 | `low-weight-models` | Repair the model legs hidden behind a floor blend weight; ship criterion = free `w ≥ 0.3` + 6/6 gates, every lever sweep-testable | ACTIVE | — | [handoffs/low_weight_models.md](handoffs/low_weight_models.md) |
 | `hygiene-closeout` | Triage, calibration re-run, drift fixes, recurring checks | ACTIVE | — | [handoffs/hygiene-closeout.md](handoffs/hygiene-closeout.md) |
 | `cleanup-pass` | The five debts the dashboard close-out routed: Sleeper/ladder archive, Rivals residue, dead depth recompute, voice bank, `market_display` | DONE | — | [handoffs/cleanup-pass.md](handoffs/cleanup-pass.md) |
-| `player-headshots` | Fetch, cache and render headshots for every player in all five leagues; monthly refresh picks up rookies | ACTIVE | prod cron waits on the owner clearing each league's CDN | [handoffs/player-headshots.md](handoffs/player-headshots.md) |
+| `player-headshots` | Fetch, cache and render headshots for every player in all five leagues; monthly refresh picks up rookies | ACTIVE (stages 1-3 built + live-verified; the cache is per-box, so each box runs `fetch headshots` once) | prod cron row waits on the owner clearing each league's CDN | [handoffs/player-headshots.md](handoffs/player-headshots.md) |
 | `constellation-art` | Replace the generated constellation silhouettes with filtered licence-free line art; shape bank re-fit to the images | ACTIVE | — (owner approves each sourced image) | [handoffs/constellation-art.md](handoffs/constellation-art.md) |
 
 ### 4.1 Build path (visual index)
@@ -313,6 +313,7 @@ sketches live in the archived v2.
 
 ## Changelog
 
+- player-headshots stages 1-3 built: `fetch headshots` cache, monthly job, and the face on the ticket card; §4 row trued, the prod cron row still waits on the owner's CDN clearance.
 - three follow-on lanes briefed off the dashboard close-out — `cleanup-pass`, `player-headshots`, `constellation-art` (§4 rows, §4.1 nodes); owner locked product names + game-total star fill (dfs-products §4); §8 trimmed.
 - dashboard-ux lane closed: Phase E scaffolding (art catalog, manifest loader, favicon, logo slot), constellation modules split, ledger debts fixed or routed; §3/§4/§8 trued; brief archived.
 - sleeper-parity stages 0-4 done (EV engine, decision-layer plumb-through, live-rail pricing, ledger integration incl. 2 push-refund bug fixes); PR to devel opened; §4 row trued.

@@ -47,6 +47,7 @@ stays invisible.
 */10 11-23,0-1 * * *   <repo-dir>/scripts/run_job.sh close-lines
 0 4 1 * *              <repo-dir>/scripts/run_job.sh gate-status
 0 10 * * 3             <repo-dir>/scripts/run_job.sh fp-fetch
+0 5 1 * *              <repo-dir>/scripts/run_job.sh headshots
 ```
 
 | Job | Cadence | Purpose |
@@ -59,6 +60,7 @@ stays invisible.
 | `close-lines` | every 10 min, game hours | closing-line capture for games starting in 5–25 min; no-op tick when nothing is due |
 | `gate-status` | monthly | Gate-2 promote/demote PR against `main`; needs `gh` auth and `HEALTHCHECK_URL_GATE_STATUS` |
 | `fp-fetch` | Wed 10am (NFL season) | Fantasy Points endpoint snapshots; needs a fresh session cookie and `HEALTHCHECK_URL_FP_FETCH` |
+| `headshots` | monthly | refresh the player-headshot cache the constellation card draws; needs `HEALTHCHECK_URL_HEADSHOTS` |
 
 Couplings to keep in sync:
 
@@ -73,6 +75,9 @@ Couplings to keep in sync:
   the closing lines for games tipping in that window. Every job takes that lock,
   including ones like `gate-status` that never read the archive, which is why it
   sits at 4am rather than sharing `reflect`'s start minute.
+- The headshot cache is per-box and gitignored, so `headshots` runs on the dev box
+  and the prod box independently and is deliberately absent from `sync_to_prod.sh`'s
+  `COLLECTOR_RELS` — don't "fix" that omission by adding it.
 - Season starts/ends never require cron edits: idle leagues cost one free
   events call per broad run, and `prophecize`/`meditate` skip them.
 

@@ -23,6 +23,14 @@ from sportstradamus.spiderLogger import logger
 
 REQUEST_TIMEOUT_S = 60  # bound network hangs; generous because proxy-routed fetches legitimately take tens of seconds
 
+# Statuses that mean "stop asking" rather than "try again": a rotated header is a
+# different browser, not a different client, so retrying either is just knocking harder.
+_BLOCKED_STATUSES = (HTTPStatus.FORBIDDEN, HTTPStatus.TOO_MANY_REQUESTS)
+
+
+class BlockedError(Exception):
+    """A host answered 403/429. Back off and stop; never route around it via a proxy."""
+
 
 class Scrape:
     """HTTP GET client that rotates browser headers on retry.
@@ -152,3 +160,41 @@ class Scrape:
 
             logger.warning(f"Max Attempts Reached (csv): {url}")
             return pd.DataFrame()
+
+    def get_bytes(self, url, max_attempts=2):
+        """GET a binary endpoint with header rotation, returning the raw body.
+
+        The browser header rides the first attempt, unlike :meth:`get` — a CDN that
+        rejects the default requests UA would never get to a second one. Redirects are
+        not followed either: a host that answers an unknown id with a 3xx to a generic
+        placeholder image is saying "no such player", not "look over there".
+
+        Raises:
+            BlockedError: The host answered 403/429.
+
+        Returns:
+            The response body on success, or ``None`` once retries are exhausted.
+            Callers treat the ``None`` sentinel as "no data".
+        """
+        with logging_redirect_tqdm():
+            for i in range(1, max_attempts + 1):
+                if i > 1:
+                    self._new_headers()
+                    sleep(random.uniform(1, 3))
+                try:
+                    response = requests.get(
+                        url,
+                        headers=self.header,
+                        timeout=REQUEST_TIMEOUT_S,
+                        allow_redirects=False,
+                    )
+                    if response.status_code == HTTPStatus.OK:
+                        return response.content
+                    if response.status_code in _BLOCKED_STATUSES:
+                        raise BlockedError(f"{response.status_code} from {url}")
+                    logger.debug(f"Attempt {i}, bytes status={response.status_code}")
+                except requests.RequestException:
+                    logger.exception(f"Attempt {i},")
+
+            logger.warning(f"Max Attempts Reached (bytes): {url}")
+            return None

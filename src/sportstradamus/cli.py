@@ -70,6 +70,7 @@ cli.add_command(
             "fp": "sportstradamus.collectors.fantasypoints.cli:fp_fetch",
             "ctg": "sportstradamus.collectors.cleaningtheglass.cli:ctg_fetch",
             "savant": "sportstradamus.collectors.baseballsavant.cli:savant_fetch",
+            "headshots": "sportstradamus.collectors.headshots:headshots",
         },
     )
 )

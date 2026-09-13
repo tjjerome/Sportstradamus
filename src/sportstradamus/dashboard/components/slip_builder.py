@@ -24,6 +24,7 @@ from decimal import Decimal
 import pandas as pd
 import streamlit as st
 
+from sportstradamus.dashboard.assets import headshot_uris
 from sportstradamus.dashboard.components.astrolabe_component import render_astrolabe
 from sportstradamus.dashboard.components.constellation import constellation_figure
 from sportstradamus.dashboard.components.constellation_component import render_constellation
@@ -260,8 +261,8 @@ def _render_constellation(
     a clicked deep star resolves the same way as any other star on the map (its key is
     drawn from that same ``pool`` frame); a clicked sky star from another game falls back
     to the satellite add path. The hover card's last-five and line-movement rows ride
-    alongside the figure keyed by star, since a wider dot from another game has no row in
-    ``pool``.
+    alongside the figure keyed by star, and its headshots keyed by player, since a wider
+    dot from another game has no row in ``pool``.
     """
     mobile = is_mobile()
     # The wider lens draws other games' legs as sky stars, and their cards open like any
@@ -281,6 +282,7 @@ def _render_constellation(
         key=f"{key_prefix}_constellation",
         sparks=form_sparks(sparked),
         moves=move_sparks(sparked),
+        shots=headshot_uris(sparked),
         mobile=mobile,
     )
     if _apply_constellation_action(action, offers, pool, wider_groups, key_prefix):

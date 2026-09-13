@@ -61,6 +61,7 @@
   let MOBILE = false; // set per render from Python's mobile prop (viewport.is_mobile)
   let SPARKS = {}; // star key -> its card's last-five markup, built server-side
   let MOVES = {}; // star key -> its card's line-movement markup, built server-side
+  let SHOTS = {}; // player name -> their headshot data URI, embedded server-side
   let skyTap = true; // a plotly star tap clears this before the DOM click handler sees it
   const COARSE_POINTER =
     window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
@@ -77,6 +78,7 @@
     MOBILE = !!args.mobile || COARSE_POINTER;
     SPARKS = args.sparks || {};
     MOVES = args.moves || {};
+    SHOTS = args.shots || {};
     const config = { displayModeBar: false, scrollZoom: false, responsive: true };
     const curLensNames = lensNamesOf(fig.data);
     const freshLens = plotted && prevLensNames ? newLensTraces(fig.data, prevLensNames) : [];
@@ -337,6 +339,16 @@
     return move ? '<div class="cst-spark">' + move + "</div>" : "";
   }
 
+  // The player's face, embedded server-side from this box's headshot cache. A box that has
+  // never run `fetch headshots`, or a player it holds no file for, draws the initials disc
+  // this replaced — so a miss is indistinguishable from the card before faces existed.
+  function shotHtml(player) {
+    const uri = SHOTS[player];
+    return uri
+      ? '<img class="cst-shot" alt="" src="' + esc(uri) + '">'
+      : '<div class="cst-shot">' + esc(initials(player)) + "</div>";
+  }
+
   function cardHtml(cd) {
     const player = cd[1];
     const market = cd[2];
@@ -347,9 +359,7 @@
     const kelly = cd[7];
     return [
       '<div class="cst-head">',
-      '<div class="cst-shot" title="Player headshot — coming soon">',
-      esc(initials(player)),
-      "</div>",
+      shotHtml(player),
       '<div class="cst-id"><div class="cst-name">',
       esc(player),
       '</div><div class="cst-leg">',

@@ -1,13 +1,14 @@
 # Player Headshots
 
-> Status: ACTIVE — stage 0 (owner clears the CDNs) ∥ stage 1 not started (briefed 2026-09-12)
+> Status: ACTIVE — stages 1-3 built and live-verified ∥ stage 0 (owner clears the CDNs) still
+> open, and gates only the production cron row, not the code
 
 ## 1. Mission & money logic
 
-Put a face on every player star. The constellation ticket card ships an initials
-disc titled "Player headshot — coming soon"
-(`dashboard/components/constellation_component/build/main.js`, `.cst-shot`) — the
-one visible scar left on the Games surface. No money logic; the dashboard is the
+Put a face on every player star. The constellation ticket card drew an initials
+disc titled "Player headshot — coming soon" — the last visible scar on the Games
+surface. It now draws the face this box's cache holds and that disc when it holds
+none (`build/main.js`, `shotHtml`). No money logic; the dashboard is the
 product the owner reads nightly and a face is recognition at a glance across
 forty stars on a phone. Scope, in the owner's words: find, download and cache
 headshots for all players in all five leagues (MLB, NBA, WNBA, NHL, NFL), and a
@@ -44,8 +45,8 @@ pipeline that picks up new and rookie headshots as they appear, runnable monthly
 
 ```bash
 git fetch origin && git log --oneline origin/devel -3
-grep -n "coming soon" src/sportstradamus/dashboard/components/constellation_component/build/main.js   # scar present = stage 3 open
-ls src/sportstradamus/data/assets/headshots/ 2>/dev/null | head                                        # cache built?
+grep -n "shotHtml" src/sportstradamus/dashboard/components/constellation_component/build/main.js      # the render
+ls src/sportstradamus/data/assets/headshots/ 2>/dev/null | head                                        # this box's cache
 poetry run python - <<'EOF'
 import pandas as pd
 for lg, col in [("mlb","playerId"),("nba","PLAYER_ID"),("wnba","PLAYER_ID"),("nhl","playerId"),("nfl","player id")]:
@@ -55,22 +56,25 @@ EOF
 curl -sI https://cdn.nba.com/headshots/nba/latest/1040x760/2544.png | head -1                         # pattern still live?
 ```
 
-CDN patterns, each answered `200` to a HEAD from the dev box on 2026-09-12:
+CDN patterns, as `collectors/headshots.py` sends them. A `200` is not proof of a face:
+NBA and WNBA answer an unknown id with a flat grey silhouette and NHL redirects to one, so
+every decoded image is colour-count probed before it reaches the cache.
 
 | League | Id column | Pattern |
 |---|---|---|
-| MLB | `playerId` (StatsAPI person id) | `https://img.mlbstatic.com/mlb-photos/image/upload/w_213,q_100/v1/people/{id}/headshot/67/current` (JPEG) |
+| MLB | `playerId` (StatsAPI person id) | `https://img.mlbstatic.com/mlb-photos/image/upload/w_256,c_fill,ar_1:1,g_face/v1/people/{id}/headshot/67/current` — Cloudinary, so the face crop is a URL param. The only league that 404s honestly |
 | NBA | `PLAYER_ID` | `https://cdn.nba.com/headshots/nba/latest/1040x760/{id}.png` |
 | WNBA | `PLAYER_ID` | `https://cdn.wnba.com/headshots/wnba/latest/1040x760/{id}.png` |
-| NHL | `playerId` | `https://assets.nhle.com/mugs/nhl/{season}/{TEAM}/{id}.png` — season-stamped and team-stamped; `https://api-web.nhle.com/v1/player/{id}/landing` returns the current `headshot` URL |
-| NFL | `player id` = `gsis_id` | `nflreadpy.load_rosters([season])` column `headshot_url` (2025: 3,137 rows, 2.9 % null) |
+| NHL | `playerId` | `https://assets.nhle.com/mugs/nhl/latest/{id}.png` — answers for traded and retired players alike (40/40 gamelog ids), so neither the season/team path nor the `landing` endpoint is needed |
+| NFL | `player id` = `gsis_id` | `nflreadpy.load_rosters(...)` column `headshot_url`, over the gamelog's **whole season span** — one season covers 62 % of its ids, the span 99.8 %. Also Cloudinary: splicing a face crop into the URL cuts a transfer from 3.8 MB to ~21 KB |
 
 ### Volatile product assumptions
 
 - CDN terms of use — the owner clears each league before the job goes on the
   production cron (stage 0); nothing in code checks it.
-- The patterns are unversioned and can move; the NHL path changes every season
-  and on every trade (the `landing` endpoint is the stable lookup).
+- The patterns are unversioned and can move. A league that starts answering a
+  placeholder in a new shape would slip past the colour probe — the monthly run's
+  `missing=` count is the tell.
 - The NFL roster release carries rookies before they have a gamelog row; the
   other leagues' rookies appear only once they play.
 
@@ -96,40 +100,37 @@ CDN patterns, each answered `200` to a HEAD from the dev box on 2026-09-12:
 | `data/assets/headshots/{league}/{id}.webp` + `data/assets/headshots/index.parquet` (NEW, gitignored) | the cache and its index: `league, id, name, team, file, fetched_at, status` |
 | `collectors/headshots.py` (NEW) + `cli.py` `fetch headshots` | enumerate ids, download misses, crop/resize, write the index; tqdm bar |
 | `helpers/scraping.py` | `Scrape.get_bytes` (NEW, small) — reuses the header rotation and retry loop |
-| `dashboard/assets.py` | `headshot_uri(league, player, team)` → data URI or `None`, mtime-cached like `_data_uri` |
+| `dashboard/assets.py` | `headshot_uris(pool)` → `{player: data URI}` for the stars on one figure, mtime-cached like `_data_uri` |
 | `dashboard/components/slip_builder.py` / `constellation_component/__init__.py` / `build/main.js` / `build/index.html` | the `shots` side channel and the `<img>` render in the card |
 | `scripts/run_job.sh`, `docs/OPERATIONS.md`, `.gitignore` | the monthly job |
-| `tests/golden/test_headshots.py` (NEW); `test_constellation_component.py` stays green | index schema, resolver miss → `None`, payload cap |
+| `tests/golden/test_headshots.py`; `test_constellation_component.py` stays green | crop + placeholder probe, index round-trip, resolver miss → no entry |
 
 The collector never opens the archive (no DuckDB); `run_job.sh` takes the archive
 flock for every job regardless, so schedule it off `reflect`'s window like `gate-status`.
 
 ## 6. Stage plan
 
-0. **Owner clears the CDNs** (owner, minutes; gates the prod cron, not the build):
-   yes / no per league for the five patterns in §3. A "no" league keeps the
-   initials disc and is skipped by a league list in the collector.
-1. **Fetcher + cache** (1–2 sessions). `sportstradamus fetch headshots
-   [--league …] [--force]`: enumerate ids per league from the gamelog parquet
-   (NFL: union with `load_rosters` so rookies land pre-season; NHL: build the
-   season/team URL from the gamelog, fall back to `landing`); download misses
-   through `Scrape.get_bytes` with the usual jittered sleep; centre-crop square,
-   resize to 128 px (renders at 34 px; 2× phone DPR needs 68), WebP; write the
-   index with `status` so misses retry next month. Idempotent — a second run
-   downloads nothing. Acceptance: index rows ≥ 95 % of gamelog ids per league
-   (counts in the ledger); second run 0 downloads.
-2. **Monthly job** (½ session). `run_job.sh` case `headshots`, OPERATIONS.md cron
-   row + table row (`0 5 1 * *`, after `gate-status`), `HEALTHCHECK_URL_HEADSHOTS`.
-   Acceptance: a dry run on the dev box adds only new ids; the healthcheck ping fires.
-3. **Render** (1 session). `slip_builder` builds `shots = {key: uri}` for the
-   stars on the figure — league and team are known server-side, the name
-   matches the index through `remove_accents`, team breaks a name tie, no match
-   → no entry. `_component(..., shots=shots)`; `main.js` draws `<img
-   class="cst-shot">` (`object-fit: cover; border-radius: 50%`) when the key has
-   a shot, initials otherwise. Payload: ~40 stars × ~4 KB. Live-verify with
-   playwright on desktop and phone: zero page errors, iframe height posts on each
-   lens toggle, one star with a file shows the face, one without shows initials.
-   Acceptance: live verdict in the ledger; goldens green.
+0. **Owner clears the CDNs** — OPEN (owner, minutes; gates the prod cron, not the
+   build): yes / no per league for the five patterns in §3. A "no" league keeps the
+   initials disc and is skipped by `--league` on the job's command.
+1. **Fetcher + cache** — BUILT. `sportstradamus fetch headshots [--league …] [--force]`
+   enumerates ids per league from the gamelog parquet (NFL unions `load_rosters` so
+   rookies land pre-season), downloads through `Scrape.get_bytes`, crops square to the
+   alpha bounding box, resizes to 128 px WebP, and writes the index with `status` so
+   misses retry next month. No per-request sleep: these are public CDNs serving browser
+   traffic and a 1–3 s pause makes the cold run four hours; a `403`/`429` raises
+   `BlockedError` instead of knocking again. Cold runs: WNBA 337 ok / 4 missing (all four
+   the CDN's own silhouette), MLB 1631/1631. A second run downloads nothing.
+2. **Monthly job** — BUILT. `run_job.sh` case `headshots`, OPERATIONS.md cron row + table
+   row (`0 5 1 * *`, after `gate-status`), `HEALTHCHECK_URL_HEADSHOTS`. Installing the
+   crontab row is the owner's action, gated on stage 0.
+3. **Render** — BUILT. `slip_builder` passes `shots = {player: uri}` for the stars on the
+   figure; `assets.headshot_uris` reads each row's own league (the wider lens mixes them),
+   breaks a name tie on team, and resolves a still-ambiguous name to nothing. `main.js`
+   `shotHtml` draws `<img class="cst-shot">` when the player has a URI and the initials
+   disc when not. Live playwright verdict, desktop 1600×1000 and phone 390×844, zero page
+   errors both: a cached player renders the `<img>` at 34×34 from a WebP data URI, and the
+   same stars against an empty cache render the initials disc at an identical iframe height.
 
 Only the constellation card carries the scar (the art-catalog sweep found no
 other person-icon stand-in); stop there unless the owner asks for more surfaces.
@@ -140,8 +141,8 @@ other person-icon stand-in); stop there unless the owner asks for more surfaces.
   doc > this brief > roadmap v3.
 - One module per subagent; no HEAD-moving git in subagent prompts; `git add` by
   explicit path (never the cache directory — it is gitignored anyway).
-- The fetcher never runs inside the integration suite (network); goldens use a
-  two-file fixture cache.
+- The fetcher never runs inside the integration suite (network); goldens build
+  every image in memory and commit no binary for a gitignored cache.
 - `main.js` has no test runner: every edit gets the playwright verdict
   (pageerror + iframe height on lens toggles).
 - DESIGN.md tokens only for the disc ring/border; no new hex.
@@ -172,4 +173,5 @@ stage 0.
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
+- 2026-09-13 · stages 1-3 · `fetch headshots` + monthly job + card render built and live-verified (desktop + phone, both the face and the initials fallback); three §3 claims corrected in place · next: owner clears the CDNs, then the cron row goes live
 - 2026-09-12 · stage 0 · brief written; five CDN patterns verified `200` from the dev box (§3), NFL via nflverse `headshot_url`; render path chosen = `shots` side channel, not customdata · next: owner clears CDNs ∥ stage 1 fetcher

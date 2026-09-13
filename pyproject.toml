@@ -58,6 +58,9 @@ streamlit-aggrid = "^1.2.1.post2"
 # Constellation graph layout (dashboard); previously reached the env only as a
 # stray transitive install — declared here so a locked install actually has it.
 networkx = ">=3.1"
+# Headshot crop/encode (collectors) and ambient-art embedding (dashboard); arrived
+# only as a streamlit transitive, which pins no version this code can rely on.
+pillow = ">=10"
 # Research-only (model-research branch): powers scripts/zinb_routing_diagnostics.py,
 # which was stripped from devel along with statsmodels. Re-added here so the
 # diagnostic and its golden test still resolve on this branch; devel has neither.

@@ -169,10 +169,10 @@ brief's current phase.
 The slot catalog (every slot, its placeholder, source, license, priority) is
 [docs/art_assets.md](art_assets.md); this section is the contract.
 
-- **Player assets**: not built yet — the [`player-headshots`](handoffs/player-headshots.md)
-  lane owns them (per-league CDN fetch into a gitignored disk cache, a `shots` side channel
-  into the constellation card, a monthly refresh); the initials disc + team colours are the
-  shipped fallback until it lands (§8).
+- **Player assets**: headshots, owned by the [`player-headshots`](handoffs/player-headshots.md)
+  lane — `fetch headshots` fills a gitignored per-box disk cache from the league CDNs monthly
+  and a `shots` side channel carries the faces into the constellation card. A player this box
+  has no file for keeps the initials disc, so a box that never runs the job renders as before.
 - **Team assets**: committed `data/config/team_assets.json` (team → primary/secondary hex only;
   league marks are an owner IP decision), generated once by `scripts/build_team_assets.py`.
 - **Ambient imagery**: slot manifest at `data/assets/ambient/ambient_manifest.json` (slot →
@@ -232,15 +232,14 @@ Every scar renders a real panel with "coming" microcopy, feature-detects its dat
 (flips on when the file/column exists), and is registered in the closed lane brief's follow-ups
 (builds queue behind the producing lane). Filled since this spec was written: the comps panel
 (`current_offer_details`), the Board sparkline (`Move`, line movement), the card's last five,
-and the ambient-image slots (owner-sourced files, [art_assets.md](art_assets.md)).
+the ambient-image slots (owner-sourced files, [art_assets.md](art_assets.md)), and the ticket
+card's player headshots (§6).
 
 1. Correlation-block risk chip on the rail — needs UD/Sleeper pairing-rule model.
 2. Game-line rows on the Game board + team nodes in the constellation — book-implied probs only
    (**no modeling engine** — locked, [handoffs/dfs-products.md](handoffs/dfs-products.md) §4;
    Combo-Entry mechanics live there §3); joins the correlation engine at dfs-products stage 5.
-3. Player headshots — the initials disc stands until the
-   [`player-headshots`](handoffs/player-headshots.md) lane lands. Team marks: skipped,
-   colours only ([art_assets.md](art_assets.md)).
+3. Team marks — skipped by the owner, colours only ([art_assets.md](art_assets.md)).
 4. Optional free-LLM prose rewriter seam — documented only; templates are the contract.
 5. Ladders views (§5b) — flip on the ladder snapshot artifact (dfs-products stage 3).
 6. Alt-line markers + per-rung Receipts grading (§5b) — flip on the `Alt Line` snapshot column

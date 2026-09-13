@@ -1,0 +1,14 @@
+Usage: sportstradamus fetch headshots [OPTIONS]
+
+  Fill this box's player-headshot cache, one square WebP per player.
+
+  Idempotent: a player already cached is skipped, so a monthly run downloads
+  only newcomers and retries the players a CDN had no photo for last time —
+  which is how a rookie's face eventually lands.
+
+Options:
+  --league [mlb|nba|wnba|nhl|nfl]
+                                  League to fetch; repeatable. Defaults to all
+                                  five.
+  --force                         Re-download players already cached.
+  --help                          Show this message and exit.

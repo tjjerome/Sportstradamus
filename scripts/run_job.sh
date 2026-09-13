@@ -15,6 +15,7 @@
 #   fp-fetch           fetch fp run (weekly: snapshot Fantasy Points Data Suite)
 #   ctg-fetch          fetch ctg run (snapshot Cleaning the Glass NBA tables)
 #   savant-fetch       fetch savant run (snapshot Baseball Savant MLB leaderboards)
+#   headshots          fetch headshots (monthly: refresh the player-headshot cache)
 #   ledger-commit      bet ledger-commit --run-slot {morning,afternoon}
 #
 # Environment (optional):
@@ -49,7 +50,7 @@ LOG_DIR="${LOG_DIR:-$PROJECT_DIR/logs}"
 LOCK_DIR="${LOCK_DIR:-/tmp}"
 
 if [[ $# -lt 1 ]]; then
-    echo "usage: $(basename "$0") <prophecize|confer|close-lines|meditate|reflect|export-line-movement|gate-status|fp-fetch|ctg-fetch|savant-fetch|ledger-commit> [args...]" >&2
+    echo "usage: $(basename "$0") <prophecize|confer|close-lines|meditate|reflect|export-line-movement|gate-status|fp-fetch|ctg-fetch|savant-fetch|headshots|ledger-commit> [args...]" >&2
     exit 64
 fi
 
@@ -70,6 +71,7 @@ case "$JOB" in
     fp-fetch)     CMD=("${UMBRELLA[@]}" fetch fp run) ;;
     ctg-fetch)    CMD=("${UMBRELLA[@]}" fetch ctg run) ;;
     savant-fetch) CMD=("${UMBRELLA[@]}" fetch savant run) ;;
+    headshots)    CMD=("${UMBRELLA[@]}" fetch headshots) ;;
     ledger-commit) CMD=("${UMBRELLA[@]}" bet ledger-commit) ;;
     *)
         echo "unknown job: $JOB" >&2
