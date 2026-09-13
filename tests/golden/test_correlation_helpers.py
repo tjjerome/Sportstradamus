@@ -640,12 +640,14 @@ def test_collect_game_corr_keys_canonical_and_symmetric() -> None:
         }
     )
     C = np.array([[1.0, 0.3, 0.5], [0.3, 1.0, -0.2], [0.5, -0.2, 1.0]])
+    M = np.array([[0.0, 1.1, 0.9], [1.1, 0.0, 1.05], [0.9, 1.05, 0.0]])
     market_map = {"Points": "PTS", "Rebounds": "REB"}
 
-    rows = _collect_game_corr(game_df, C, "WNBA", "LVA/NYL", market_map)
+    rows = _collect_game_corr(game_df, C, M, "Underdog", "WNBA", "LVA/NYL", market_map)
 
     assert len(rows) == 3  # 3 distinct legs → 3 unique pairs
     for r in rows:
+        assert r["Platform"] == "Underdog"
         assert r["League"] == "WNBA"
         assert r["Game"] == "LVA/NYL"
         assert r["leg_a"] < r["leg_b"]  # canonical pair ordering
@@ -676,8 +678,41 @@ def test_collect_game_corr_skips_identical_leg_keys() -> None:
         }
     )
     C = np.array([[1.0, 0.9], [0.9, 1.0]])
-    rows = _collect_game_corr(game_df, C, "WNBA", "LVA/NYL", {"Points": "PTS"})
+    M = np.array([[0.0, 1.0], [1.0, 0.0]])
+    rows = _collect_game_corr(game_df, C, M, "Underdog", "WNBA", "LVA/NYL", {"Points": "PTS"})
     assert rows == []
+
+
+def test_collect_game_corr_carries_platform_and_modifier() -> None:
+    """Every row carries the passed Platform and modifier == M[i, j], including a
+    same-player pair whose M is 0.0 — the dashboard needs that row to mark a
+    slip player's other markets as mutually exclusive, so it must not be dropped
+    or overridden."""
+    game_df = pd.DataFrame(
+        {
+            "Player": ["A. Wilson", "A. Wilson", "S. Ionescu"],
+            "Market": ["Points", "Rebounds", "Points"],
+            "Bet": ["Over", "Over", "Over"],
+        }
+    )
+    C = np.array([[1.0, 0.2, 0.4], [0.2, 1.0, 0.1], [0.4, 0.1, 1.0]])
+    # Same-player pair (0, 1) is uncombinable -> M is 0.0, same as
+    # _leg_pair_corr_boost would compute; must survive into the row untouched.
+    M = np.array([[0.0, 0.0, 1.2], [0.0, 0.0, 0.83], [1.2, 0.83, 0.0]])
+    market_map = {"Points": "PTS", "Rebounds": "REB"}
+
+    rows = _collect_game_corr(game_df, C, M, "Sleeper", "WNBA", "LVA/NYL", market_map)
+
+    assert all(r["Platform"] == "Sleeper" for r in rows)
+    by_pair = {(r["leg_a"], r["leg_b"]): r["modifier"] for r in rows}
+    same_player_pair = tuple(sorted(["A. Wilson|PTS|Over", "A. Wilson|REB|Over"]))
+    assert by_pair[same_player_pair] == pytest.approx(0.0)
+    assert by_pair[tuple(sorted(["A. Wilson|PTS|Over", "S. Ionescu|PTS|Over"]))] == pytest.approx(
+        1.2
+    )
+    assert by_pair[tuple(sorted(["A. Wilson|REB|Over", "S. Ionescu|PTS|Over"]))] == pytest.approx(
+        0.83
+    )
 
 
 # --- pure-kernel unit tests -------------------------------------------------

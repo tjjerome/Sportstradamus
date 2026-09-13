@@ -512,15 +512,18 @@ def _annotate_correlation_columns(df, game_df, g):
         df.loc[mask, "Corr Opp"] = pd.Series([other_partners] * mask.sum(), index=df.index[mask])
 
 
-def _collect_game_corr(game_df, C, league, game_label, market_map):
-    """Per-game upper-triangle correlation slice for the dashboard rail/constellation.
+def _collect_game_corr(game_df, C, M, platform, league, game_label, market_map):
+    """Per-game upper-triangle correlation + pair-modifier slice for the dashboard.
 
     Emits one row per distinct leg pair, keyed by ``Player|Market|Bet`` with the
     canonical ``Market`` code (``market_map`` mirrors the post-``process_offers``
-    remap ``cli`` applies) so the slice joins ``current_offers.parquet``. ``C`` is
-    positionally aligned to ``game_df`` (the caller reset its index). Correlation
+    remap ``cli`` applies) so the slice joins ``current_offers.parquet``. ``C``/``M``
+    are positionally aligned to ``game_df`` (the caller reset its index). Correlation
     is line-independent, so same-key pairs at different lines collapse on the
-    caller's dedup.
+    caller's dedup. ``modifier`` is carried through exactly as prophecize priced the
+    pair, including 0.0 for a same-player pair — the dashboard uses those rows to
+    mark a slip player's other markets as mutually exclusive, the same way the DFS
+    apps refuse them.
     """
     players = game_df["Player"].to_numpy()
     markets = game_df["Market"].to_numpy()
@@ -534,11 +537,13 @@ def _collect_game_corr(game_df, C, league, game_label, market_map):
         leg_a, leg_b = sorted((leg_i, leg_j))
         rows.append(
             {
+                "Platform": platform,
                 "League": league,
                 "Game": game_label,
                 "leg_a": leg_a,
                 "leg_b": leg_b,
                 "rho": float(C[i, j]),
+                "modifier": float(M[i, j]),
             }
         )
     return rows
@@ -657,7 +662,15 @@ def _process_league_games(
 
         if corr_sink is not None:
             corr_sink.extend(
-                _collect_game_corr(game_df, g.C, league, "/".join(sorted([team, opp])), market_map)
+                _collect_game_corr(
+                    game_df,
+                    g.C,
+                    g.M,
+                    platform,
+                    league,
+                    "/".join(sorted([team, opp])),
+                    market_map,
+                )
             )
 
         if platform in ["Chalkboard", "ParlayPlay"] and league == "MLB":
@@ -726,9 +739,11 @@ def find_correlation(
             the single-variant names are accepted for the ``pickem-build``
             path. Ignored for non-Underdog platforms.
         corr_sink: When provided, each game appends its upper-triangle
-            correlation slice (``League, Game, leg_a, leg_b, rho``) to this list
-            for the dashboard rail/constellation. The pickem variant-sweep caller
-            leaves it None.
+            correlation + pair-modifier slice (``Platform, League, Game, leg_a,
+            leg_b, rho, modifier``) to this list for the dashboard rail/
+            constellation, where ``modifier`` is the exact pair payout multiplier
+            priced in (0.0 for a banned/same-player pair). The pickem
+            variant-sweep caller leaves it None.
         story_sink: When provided, each game appends a
             :class:`~sportstradamus.prediction.parlay.GameScoringContext` to this
             list so the story-menu generator can price story subsets. The pickem

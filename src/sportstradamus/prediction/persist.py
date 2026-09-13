@@ -21,8 +21,10 @@ from sportstradamus.helpers.io import (
     CURRENT_META_PATH,
     CURRENT_OFFER_DETAILS_PATH,
     CURRENT_OFFERS_PATH,
+    CURRENT_PAIR_MODIFIERS_PATH,
     CURRENT_PARLAYS_PATH,
     CURRENT_PICKEM_PATH,
+    PAIR_MODIFIER_COLS,
     _atomic_write_json,
     _atomic_write_parquet,
 )
@@ -140,18 +142,34 @@ def write_current_offers(
 
 
 def write_current_game_corr(corr_rows: list[dict] | pd.DataFrame) -> None:
-    """Write the per-game correlation slices snapshot atomically.
+    """Write the per-game correlation and pair-modifier snapshots atomically.
 
     ``corr_rows`` is the collector list filled by ``find_correlation`` (one row
-    per game leg pair: ``League, Game, leg_a, leg_b, rho``). Deduped on the
-    matchup + leg-pair key — the same pair recurs across platforms and across a
-    player's multiple lines, and correlation is line-independent. Written even
-    when empty so the dashboard reflects the latest run.
+    per game leg pair: ``Platform, League, Game, leg_a, leg_b, rho, modifier``).
+    Splits into two files: the rho slice (``League, Game, leg_a, leg_b, rho``),
+    deduped on the matchup + leg-pair key — the same pair recurs across
+    platforms and across a player's multiple lines, and correlation is
+    platform/line-independent — written to ``CURRENT_GAME_CORR_PATH``; and the
+    sparse per-platform pair-payout-modifier slice (``PAIR_MODIFIER_COLS``, 1.0
+    rows dropped, deduped per platform since a modifier depends on position/
+    stat/direction and never on the line) written to
+    ``CURRENT_PAIR_MODIFIERS_PATH``. Both written even when empty so the
+    dashboard reflects the latest run.
     """
-    df = pd.DataFrame(corr_rows, columns=["League", "Game", "leg_a", "leg_b", "rho"])
-    if not df.empty:
-        df = df.drop_duplicates(subset=["League", "Game", "leg_a", "leg_b"], ignore_index=True)
-    _atomic_write_parquet(df, CURRENT_GAME_CORR_PATH)
+    df = pd.DataFrame(
+        corr_rows, columns=["Platform", "League", "Game", "leg_a", "leg_b", "rho", "modifier"]
+    )
+
+    rho_cols = ["League", "Game", "leg_a", "leg_b", "rho"]
+    rho_df = df[rho_cols]
+    if not rho_df.empty:
+        rho_df = rho_df.drop_duplicates(subset=rho_cols[:-1], ignore_index=True)
+    _atomic_write_parquet(rho_df, CURRENT_GAME_CORR_PATH)
+
+    mod_df = df.loc[df["modifier"] != 1.0, PAIR_MODIFIER_COLS]
+    if not mod_df.empty:
+        mod_df = mod_df.drop_duplicates(subset=PAIR_MODIFIER_COLS[:-1], ignore_index=True)
+    _atomic_write_parquet(mod_df, CURRENT_PAIR_MODIFIERS_PATH)
 
 
 def write_current_game_context(context: pd.DataFrame) -> None:
