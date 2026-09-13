@@ -159,8 +159,7 @@ def test_pipeline_smoke(
     # ----- Phase 3: prophecize (CLI invoked; parquet snapshot + scrapers mocked) -----
     from sportstradamus.prediction import cli as prediction_cli
 
-    monkeypatch.setattr(prediction_cli, "get_ud", dict)
-    monkeypatch.setattr(prediction_cli, "get_sleeper", dict)
+    writes = _stub_prophecize_writers(monkeypatch)
 
     captured: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = {}
 
@@ -172,55 +171,14 @@ def test_pipeline_smoke(
 
     monkeypatch.setattr(prediction_cli, "process_offers", stub_process_offers)
 
-    snapshot_calls: list[dict] = []
-
-    def stub_write_current_offers(
-        offers, parlays, leagues, platforms, contest_variant="power", stats_dict=None
-    ):
-        snapshot_calls.append(
-            {
-                "offers": offers,
-                "parlays": parlays,
-                "leagues": list(leagues),
-                "platforms": list(platforms),
-                "contest_variant": contest_variant,
-            }
-        )
-
-    monkeypatch.setattr(prediction_cli, "write_current_offers", stub_write_current_offers)
-
-    game_corr_calls: list = []
-    monkeypatch.setattr(prediction_cli, "write_current_game_corr", game_corr_calls.append)
-
-    game_context_calls: list = []
-    monkeypatch.setattr(prediction_cli, "write_current_game_context", game_context_calls.append)
-
-    game_stories_calls: list = []
-    monkeypatch.setattr(prediction_cli, "write_current_game_stories", game_stories_calls.append)
-
-    # Skip writing prediction history to data/history.dat.
-    def _noop_write(_df, **_kwargs):
-        return None
-
-    def _empty_df():
-        return pd.DataFrame()
-
-    monkeypatch.setattr(prediction_cli, "write_history", _noop_write)
-    monkeypatch.setattr(prediction_cli, "upsert_parlay_hist", _noop_write)
-    # Retention runs on every slate now, parlays or not -- unstubbed it would
-    # delete real day partitions out of the developer's data/runtime.
-    monkeypatch.setattr(prediction_cli, "trim_parlay_hist", _noop_write)
-    monkeypatch.setattr(prediction_cli, "read_history", _empty_df)
-
     if not _REAL_APIS:
         _stub_stats_loaders(monkeypatch)
 
-    from sportstradamus.prediction.cli import main as prophecize_main
-
-    result = runner.invoke(prophecize_main, [], catch_exceptions=False)
+    result = runner.invoke(prediction_cli.main, [], catch_exceptions=False)
     assert result.exit_code == 0, f"prophecize failed: {result.output}"
 
     # The parquet snapshot writer was reached but no real disk write fired.
+    snapshot_calls = writes["offers"]
     assert snapshot_calls, "write_current_offers was never invoked"
 
     # The orchestration produced offers with EV and at least one parlay candidate.
@@ -241,12 +199,12 @@ def test_pipeline_smoke(
     assert "Thesis" in snapshot_parlays.columns, (
         "attach_parlay_theses did not add the Thesis column"
     )
-    assert game_corr_calls, "write_current_game_corr was never invoked"
+    assert writes["corr"], "write_current_game_corr was never invoked"
 
     # Game context is built once and the same frame fed to the writer: one row per
     # (League, Game, Date) with a classified shape.
-    assert game_context_calls, "write_current_game_context was never invoked"
-    context = game_context_calls[0]
+    assert writes["context"], "write_current_game_context was never invoked"
+    context = writes["context"][0]
     assert not context.empty, "build_game_context produced no rows from the offers frame"
     assert set(context["Game"]) == {"LVA/NYL", "PHX/SEA"}, (
         f"unexpected games: {set(context['Game'])}"
@@ -258,11 +216,115 @@ def test_pipeline_smoke(
     # stories (story generation itself is covered by tests/golden/test_story_menu).
     from sportstradamus.prediction.stories.menu import _STORY_COLS
 
-    assert game_stories_calls, "write_current_game_stories was never invoked"
-    assert list(game_stories_calls[0].columns) == _STORY_COLS
+    assert writes["stories"], "write_current_game_stories was never invoked"
+    assert list(writes["stories"][0].columns) == _STORY_COLS
+
+
+@pytest.mark.integration
+def test_prophecize_isolates_a_failed_platform(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fixtures_dir: Path,
+    reset_archive_singleton,
+    preserve_data_files,
+) -> None:
+    """A platform that raises publishes none of its state, and the run alerts.
+
+    Regression for the partial publish: ``corr_sink`` / ``story_sink`` are mutated
+    in place inside ``process_offers``, so sharing one sink across both platforms
+    left a failed Underdog's correlation slices in ``current_game_corr`` for offers
+    that never reached the snapshot. The run must also exit non-zero —
+    ``run_job.sh`` pings Healthchecks off the exit code, and a swallowed platform
+    used to exit 0.
+    """
+    (tmp_path / "archive").mkdir(parents=True)
+    shutil.copy(
+        fixtures_dir / "legacy_archive.duckdb",
+        tmp_path / "archive" / "archive.duckdb",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    from sportstradamus.prediction import cli as prediction_cli
+
+    writes = _stub_prophecize_writers(monkeypatch)
+    _stub_stats_loaders(monkeypatch)
+
+    def stub_process_offers(offer_dict, book, stats, **kwargs):
+        # find_correlation fills the sink game by game, so a raise part-way through
+        # leaves slices behind for a platform that goes on to publish no offers.
+        kwargs["corr_sink"].extend(_synthetic_corr(book))
+        if book == "Underdog":
+            raise TimeoutError("Underdog scrape stalled")
+        return _synthetic_offers(), _synthetic_parlays(book)
+
+    monkeypatch.setattr(prediction_cli, "process_offers", stub_process_offers)
+
+    result = CliRunner().invoke(prediction_cli.main, [], catch_exceptions=False)
+    assert result.exit_code == 1, f"a failed platform must exit non-zero: {result.output}"
+    assert isinstance(result.exception, SystemExit)
+    assert result.exception.code == 1
+
+    snapshot = writes["offers"][0]
+    assert snapshot["platforms"] == ["Sleeper"], (
+        f"only the platform that completed may be reported as run: {snapshot['platforms']}"
+    )
+    assert set(snapshot["offers"]["Platform"]) == {"Sleeper"}
+    assert set(snapshot["parlays"]["Platform"]) == {"Sleeper"}, (
+        f"a failed platform leaked parlays into parlay_df: {snapshot['parlays']}"
+    )
+
+    corr_rows = writes["corr"][0]
+    assert corr_rows, "the surviving platform's corr slices must still be written"
+    assert all(row["leg_a"].startswith("Sleeper") for row in corr_rows), (
+        f"a failed platform leaked corr slices into the shared sink: {corr_rows}"
+    )
 
 
 # --- helpers --------------------------------------------------------------
+
+
+def _stub_prophecize_writers(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
+    """Intercept every ``prophecize`` disk write; return the per-writer capture lists.
+
+    ``process_offers`` is deliberately left unpatched — it is the one seam the
+    two prophecize tests drive differently.
+    """
+    from sportstradamus.prediction import cli as prediction_cli
+
+    monkeypatch.setattr(prediction_cli, "get_ud", dict)
+    monkeypatch.setattr(prediction_cli, "get_sleeper", dict)
+
+    calls: dict[str, list] = {"offers": [], "corr": [], "context": [], "stories": []}
+
+    def stub_write_current_offers(
+        offers, parlays, leagues, platforms, contest_variant="power", stats_dict=None
+    ):
+        calls["offers"].append(
+            {
+                "offers": offers,
+                "parlays": parlays,
+                "leagues": list(leagues),
+                "platforms": list(platforms),
+                "contest_variant": contest_variant,
+            }
+        )
+
+    monkeypatch.setattr(prediction_cli, "write_current_offers", stub_write_current_offers)
+    monkeypatch.setattr(prediction_cli, "write_current_game_corr", calls["corr"].append)
+    monkeypatch.setattr(prediction_cli, "write_current_game_context", calls["context"].append)
+    monkeypatch.setattr(prediction_cli, "write_current_game_stories", calls["stories"].append)
+
+    # Skip writing prediction history to data/history.dat.
+    def _noop_write(_df, **_kwargs):
+        return None
+
+    monkeypatch.setattr(prediction_cli, "write_history", _noop_write)
+    monkeypatch.setattr(prediction_cli, "upsert_parlay_hist", _noop_write)
+    # Retention runs on every slate now, parlays or not -- unstubbed it would
+    # delete real day partitions out of the developer's data/runtime.
+    monkeypatch.setattr(prediction_cli, "trim_parlay_hist", _noop_write)
+    monkeypatch.setattr(prediction_cli, "read_history", pd.DataFrame)
+    return calls
 
 
 def _stub_stats_loaders(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -375,6 +437,19 @@ def _synthetic_offers() -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+def _synthetic_corr(book: str) -> list[dict]:
+    """One ``current_game_corr`` slice, leg-tagged so a leaked platform is identifiable."""
+    return [
+        {
+            "League": "WNBA",
+            "Game": "LVA/NYL",
+            "leg_a": f"{book} Leg A|PTS|Over",
+            "leg_b": f"{book} Leg B|PTS|Over",
+            "rho": 0.31,
+        }
+    ]
 
 
 def _synthetic_parlays(book: str) -> pd.DataFrame:

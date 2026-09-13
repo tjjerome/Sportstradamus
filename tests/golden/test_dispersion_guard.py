@@ -7,8 +7,9 @@ overconfident-unders vector) means the joint ``(c, s)`` fit diverged, so
 whose ``stat_meta`` says ``withheld`` must serve nothing even when a missed
 ``meditate`` left a stale pickle on disk (two weeks of WNBA PRA, 2026-08).
 And a pickle whose strategy identity no longer validates costs its own cell
-only — ``process_offers`` scores every market inside one try/except per
-platform, so raising there would drop the whole slate.
+only — it is a known-unservable cell rather than a crash, so it warns and
+serves nothing instead of reaching ``_match_league_offers``' per-market
+bulkhead as an unexpected failure.
 """
 
 import dataclasses

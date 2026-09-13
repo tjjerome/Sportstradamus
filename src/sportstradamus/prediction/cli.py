@@ -234,25 +234,28 @@ def main(progress, contest_variant, log_level):
     all_offers: list[pd.DataFrame] = []
     parlay_df = pd.DataFrame()
     platforms_run: list[str] = []
+    platforms_failed: list[str] = []
     corr_sink: list[dict] = []
     story_sink: list = []
     scored_ud: pd.DataFrame | None = None
     scored_sl: pd.DataFrame | None = None
 
+    # Each platform scores into its own sinks and only merges them into the shared
+    # ones from ``else``, so a raise mid-block cannot leave that platform's parlays
+    # or corr slices in state the snapshot then publishes without its offers.
+    ud_corr, ud_story = [], []
     try:
-        ud_dict = get_ud()
-        ud_offers, ud5 = process_offers(
-            ud_dict,
+        ud_offers, ud_parlays = process_offers(
+            get_ud(),
             "Underdog",
             stats,
             contest_variant=contest_variant,
-            corr_sink=corr_sink,
-            story_sink=story_sink,
+            corr_sink=ud_corr,
+            story_sink=ud_story,
         )
-        parlay_df = pd.concat([parlay_df, ud5])
         # Capture the raw scored frame (pre Market-remap / Boost-rescale) for the
         # Pick'em snapshot — find_correlation expects the process_offers shape.
-        scored_ud = ud_offers.copy()
+        ud_scored = ud_offers.copy()
         ud_offers["Market"] = ud_offers["Market"].map(stat_map["Underdog"])
         ud_offers["Stat"] = ud_offers[
             "Market"
@@ -265,25 +268,30 @@ def main(progress, contest_variant, log_level):
         # user sees on Underdog (1.00 = no promo, 1.05 = 5% promo).
         ud_offers["Boost"] = ud_offers["Boost"] / UNDERDOG_BOOST_BASELINE
         ud_offers["Platform"] = "Underdog"
-        all_offers.append(ud_offers)
-        platforms_run.append("Underdog")
     except Exception:
         logger.exception("Failed to get Underdog")
+        platforms_failed.append("Underdog")
+    else:
+        parlay_df = pd.concat([parlay_df, ud_parlays])
+        all_offers.append(ud_offers)
+        platforms_run.append("Underdog")
+        corr_sink.extend(ud_corr)
+        story_sink.extend(ud_story)
+        scored_ud = ud_scored
 
+    sl_corr, sl_story = [], []
     try:
-        sl_dict = get_sleeper()
-        sl_offers, sl5 = process_offers(
-            sl_dict,
+        sl_offers, sl_parlays = process_offers(
+            get_sleeper(),
             "Sleeper",
             stats,
             contest_variant=contest_variant,
-            corr_sink=corr_sink,
-            story_sink=story_sink,
+            corr_sink=sl_corr,
+            story_sink=sl_story,
         )
-        parlay_df = pd.concat([parlay_df, sl5])
         # Capture the raw scored frame (pre Market-remap) for the Pick'em
         # snapshot — find_correlation expects the process_offers shape.
-        scored_sl = sl_offers.copy()
+        sl_scored = sl_offers.copy()
         sl_offers["Market"] = sl_offers["Market"].map(stat_map["Sleeper"])
         sl_offers["Stat"] = sl_offers[
             "Market"
@@ -293,10 +301,16 @@ def main(progress, contest_variant, log_level):
         # division is needed here for display/storage to match the raw
         # Sleeper promo multiplier.
         sl_offers["Platform"] = "Sleeper"
-        all_offers.append(sl_offers)
-        platforms_run.append("Sleeper")
     except Exception:
         logger.exception("Failed to get Sleeper")
+        platforms_failed.append("Sleeper")
+    else:
+        parlay_df = pd.concat([parlay_df, sl_parlays])
+        all_offers.append(sl_offers)
+        platforms_run.append("Sleeper")
+        corr_sink.extend(sl_corr)
+        story_sink.extend(sl_story)
+        scored_sl = sl_scored
 
     snapshot_offers = pd.concat(all_offers) if all_offers else pd.DataFrame()
     if not parlay_df.empty:
@@ -413,6 +427,12 @@ def main(progress, contest_variant, log_level):
     ]
     write_history(history)
 
+    # Non-zero only after every capture and snapshot has landed: run_job.sh pings
+    # Healthchecks /fail on the exit code, and a swallowed platform that exits 0
+    # is how Underdog went dark for four days without an alert.
+    if platforms_failed:
+        logger.error("platforms failed: %s", ", ".join(platforms_failed))
+        raise SystemExit(1)
     logger.info("Success!")
 
 

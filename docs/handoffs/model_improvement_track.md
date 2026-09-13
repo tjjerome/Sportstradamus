@@ -447,8 +447,8 @@ controls, the pickle's actual distribution and `expected_columns`, plus corner/m
 identity; a structural adapter dispatches only from that validated selector. Identity-absent
 base-family legacy artifacts remain compatible, but a legacy structural blob without generic
 identity fails closed. A cell that fails any of those checks is skipped with a warning and serves
-nothing, rather than raising — `process_offers` scores every league and market inside one
-try/except per platform, so a single unservable pickle would otherwise drop the whole slate. The
+nothing, rather than raising — an unservable pickle is a known state, not a crash, so it warns
+without the traceback `_match_league_offers`' per-market bulkhead logs for a real failure. The
 signed recipe is also checked against every independently persisted
 runtime field (distribution, normalization/normalized semantics, SN parameterization, ZINB mode,
 and fixed posthoc settings). Live supersession requires the fresh candidate-bound `model_stats`

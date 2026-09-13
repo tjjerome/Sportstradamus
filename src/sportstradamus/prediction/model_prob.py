@@ -1107,9 +1107,8 @@ def model_prob(
     try:
         strategy_identity = _resolve_serving_strategy(filedict, league, market)
     except ValueError as e:
-        # process_offers scores every league and market inside one try/except per platform, so
-        # letting this propagate drops the whole slate over one unservable cell. Skip the cell
-        # instead, as the withheld and missing-pickle guards above already do.
+        # A known-unservable cell, not a crash: warn without a traceback rather than let
+        # _match_league_offers' per-market bulkhead log this one as an unexpected failure.
         logger.warning(f"{filename} not served: {e}")
         return []
     structural_strategy = strategy_identity.structural_strategy

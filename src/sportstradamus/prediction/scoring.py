@@ -87,30 +87,36 @@ def process_offers(
 def _match_league_offers(league, markets, stats, book, pbar):
     """Archive and score one league's markets; return its scored offer records.
 
-    A league with no active ``Stats`` object still has its DFS lines archived
-    (so the odds land in the archive) but is not scored.
+    Every market's lines reach the archive before anything that can raise, so a
+    scoring crash never costs a capture: a feature-prep failure costs the league
+    its scoring and returns the empty sentinel, a scoring failure costs only that
+    market's records. A league with no active ``Stats`` object is archived but
+    never scored.
     """
+    for offers in markets.values():
+        archive.add_dfs(offers, book, stat_map[book])
+        pbar.update(len(offers))
     if league not in stats:
-        for offers in markets.values():
-            archive.add_dfs(offers, book, stat_map[book])
-            pbar.update(len(offers))
         return []
 
-    stat_data = stats.get(league)
-    all_offers = {}
-    for offers in markets.values():
-        all_offers.update({v["Player"]: v for v in offers})
-    all_offers = list(all_offers.values())
-    stat_data.get_depth(all_offers)
-    stat_data.get_volume_stats(all_offers)
-    if league == "MLB":
-        stat_data.get_volume_stats(all_offers, pitcher=True)
+    stat_data = stats[league]
+    by_player = {offer["Player"]: offer for offers in markets.values() for offer in offers}
+    all_offers = list(by_player.values())
+    try:
+        stat_data.get_depth(all_offers)
+        stat_data.get_volume_stats(all_offers)
+        if league == "MLB":
+            stat_data.get_volume_stats(all_offers, pitcher=True)
+    except Exception:
+        logger.exception(f"{league} features unavailable, markets not scored")
+        return []
 
     scored = []
     for market, offers in markets.items():
-        archive.add_dfs(offers, book, stat_map[book])
-        pbar.update(len(offers))
-        scored.extend(_score_market(offers, league, market, book, stat_data))
+        try:
+            scored.extend(_score_market(offers, league, market, book, stat_data))
+        except Exception:
+            logger.exception(f"{league} {market} not scored")
     return scored
 
 
