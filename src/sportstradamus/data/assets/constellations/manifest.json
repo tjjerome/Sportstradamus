@@ -1,0 +1,21 @@
+{
+  "templates": {
+    "the-bat": {
+      "artist": "Gerald G",
+      "file": "the-bat.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/Baseball_bat.svg",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Baseball_bat.svg"
+    },
+    "the-gridiron": {
+      "artist": "cactus cowboy",
+      "file": "the-gridiron.png",
+      "licence": "CC0",
+      "mode": "edges",
+      "source": "sources/Football_gridiron.svg",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Football_gridiron.svg"
+    }
+  },
+  "version": 1
+}

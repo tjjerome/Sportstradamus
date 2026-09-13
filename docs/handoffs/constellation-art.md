@@ -1,6 +1,6 @@
 # Constellation Art
 
-> Status: ACTIVE — stage 0 done (proof of concept), stage 1 not started (briefed 2026-09-12)
+> Status: ACTIVE — stage 1 done (processing tool, 2026-09-13), stage 2 not started
 
 ## 1. Mission & money logic
 
@@ -18,7 +18,8 @@ Proof of concept (2026-09-12, session scratchpad): the owner's openclipart
 baseball (Gerald_G, public domain) rasterized at 900 px, ink mask, blur, tint,
 alpha → a soft blue line drawing over the starfield that already looks right; a
 coloured Commons SVG (`File:Baseball bat.svg`, CC0) through a Sobel edge mask
-works too, with a noisier interior. Recipe in §6 stage 1.
+works too, with a noisier interior. The recipe lives as named constants in
+`src/sportstradamus/scripts/constellation_art.py` (stage 1).
 
 ## 2. Read first (in order)
 
@@ -58,7 +59,7 @@ works too, with a noisier interior. Recipe in §6 stage 1.
 git fetch origin && git log --oneline origin/devel -3
 poetry run python -c "import json; d=json.load(open('src/sportstradamus/data/config/constellation_shapes.json')); t=d['templates']; print(len(t), sum('silhouette' in v for v in t.values()), sum('image' in v for v in t.values()))"
 grep -n "layout.images\|add_layout_image\|images=" src/sportstradamus/dashboard/components/constellation*.py   # empty = stage 3 open
-ls src/sportstradamus/data/assets/constellations/ 2>/dev/null | wc -l                                          # processed layers so far
+ls src/sportstradamus/data/assets/constellations/*.png 2>/dev/null | wc -l                                     # processed layers so far
 poetry run python -c "import cairosvg" 2>&1 | tail -1     # not on the dev box; playwright chromium rasterizes SVG instead
 curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=baseball%20bat%20svg&gsrnamespace=6&gsrlimit=3&prop=imageinfo&iiprop=url|extmetadata&iiextmetadatafilter=LicenseShortName|Artist&format=json' | head -c 600
 ```
@@ -101,8 +102,8 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
 
 | Module | Role |
 |---|---|
-| `data/assets/constellations/{slug}.png` (NEW, committed, ≤ 600 px RGBA) + `manifest.json` | one processed layer per template; `slug → {file, source_url, artist, licence, recipe}` |
-| `scripts/constellation_art.py` (NEW, dev-side; never a prod job) | `search` (Commons API → candidates per template), `render` (SVG → PNG via playwright; PNG passthrough), `process` (mask → blur → tint → alpha), `sheet` (contact sheet over the page ground for owner review) |
+| `data/assets/constellations/{slug}.png` (committed, ≤ 600 px RGBA) + `manifest.json` + `sources/` | one processed layer per template; `slug → {file, source, source_url, artist, licence, mode}`; the input kept under `sources/` so a run reproduces offline |
+| `src/sportstradamus/scripts/constellation_art.py` (dev-side; never a prod job) | `process` (SVG through chromium or PNG through PIL → mask → blur → tint → alpha → crop; writes the layer, its manifest row and the source copy), `sheet` (contact sheet over the page ground for owner review); `search` (Commons API → candidates per template) arrives at stage 2 |
 | `data/config/constellation_shapes.json` | `image` per template replaces `silhouette`; vertices re-fit where needed |
 | `components/constellation_shapes.py` | schema: `image` (nullable) validated, file must exist; path rules retire with the last silhouette |
 | `components/constellation_slate.py` | `add_decoration`: a `layout.images` entry (data URI, `xref`/`yref` data, `sizex`/`sizey` from the same `sx, sy`, `layer="below"`, opacity knob) replaces the path shape; `scale_path` retires |
@@ -113,17 +114,16 @@ curl -s -m 20 -A "Sportstradamus/0.1 (dev)" 'https://commons.wikimedia.org/w/api
 
 0. **Proof of concept** — done 2026-09-12 (§1). The owner holds three sample
    files (openclipart baseball by Gerald_G, a crossed-bats line-art PNG, a
-   football gridiron SVG); ask for them at stage 1 and keep them under
-   `data/assets/constellations/sources/`.
-1. **Processing tool** (1 session). `scripts/constellation_art.py process <src>
-   --mode ink|edges --slug <slug>`: render SVG at 900 px through chromium;
-   `ink` mask = pixels darker than 75 % grey (line art on a light ground),
-   `edges` mask = Sobel magnitude normalised at its 99.5th percentile (filled
-   colour art); gaussian σ ≈ 2.2 px at 900 px; tint `#7FAAE8`; alpha peak ≈ 0.55
-   before the render-time opacity knob; crop to the ink bounding box with a
-   margin; save ≤ 600 px RGBA PNG. Every number a named constant with a why.
-   `sheet` tiles every processed layer over `#0E1117` with dust dots. Acceptance:
-   the two POC inputs reproduce; the sheet renders.
+   football gridiron SVG); asked for on 2026-09-13, not yet received. They go
+   through `process` like any other input (baseball → `the-baseball`; the
+   crossed bats match no template yet, so that file waits under `sources/`).
+1. **Processing tool** — done 2026-09-13.
+   `poetry run python -m sportstradamus.scripts.constellation_art process <src>
+   --slug <slug> --mode ink|edges --source-url … --artist … --licence …` writes
+   the layer, its manifest row and the source copy; `sheet --out <png>` tiles
+   every layer over the page ground with dust. Every recipe number is a named
+   constant in the module. Pins: `tests/golden/test_constellation_art.py`.
+   First layers: `the-bat` and `the-gridiron` from Commons CC0 art, both `edges`.
 2. **Sourcing** (1–2 sessions + one owner sitting). For each template, query
    Commons (`generator=search`, namespace 6, `iiextmetadatafilter=LicenseShortName|Artist`)
    with the label's nouns plus "svg" / "line art" / "clip art"; keep CC0 and
@@ -187,4 +187,5 @@ the outline-only fallback); stage 3 can land on the POC images alone.
 
 ## 10. Ledger (append-only, newest first, cap ~15)
 
+- 2026-09-13 · stage 1 · `src/sportstradamus/scripts/constellation_art.py` (`process`, `sheet`) + golden pins; first two layers committed from Commons CC0 art (the-bat, the-gridiron, both edges) with manifest rows + sources; `render` folded into `process`, `search` deferred to stage 2; chromium synthesises a viewBox for width/height-only SVGs, so `object-fit: contain` scales every Commons file seen so far · next: stage 2 sourcing; the owner's three POC files still to land
 - 2026-09-12 · stage 0 · brief written; POC on the owner's baseball SVG + a CC0 Commons bat (ink and edge masks, blur, tint, alpha) reads right over the starfield; Commons API confirmed as the automated source, openclipart API dead from the dev box · next: stage 1 processing tool
