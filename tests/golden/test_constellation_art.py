@@ -3,15 +3,19 @@
 ``scripts/constellation_art.py`` turns one piece of clip art into the soft light-blue
 layer a template will render beneath its stars (constellation-art lane, stage 1). The
 pins cover the two masks, the layer contract (tint, alpha peak, crop, size cap), the
-``process`` command's three outputs (layer, manifest row, source copy) and the ``sheet``
-command. Every fixture is drawn in memory at the render size; nothing here launches
-chromium, so the SVG path is accepted by eye on the contact sheet instead.
+``process`` command's three outputs (layer, manifest row, source copy), the ``sheet`` command,
+and the stage-2 openclipart pair: ``search`` (query → candidates, thumbnails, review
+sheet) and ``pick`` (one openclipart id → layer + provenance). Every fixture is drawn in
+memory at the render size and every HTTP call goes through the stubbed ``_get`` seam;
+nothing here launches chromium, so the SVG path is accepted by eye on the contact sheet.
 """
 
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -199,3 +203,201 @@ def test_shipped_row_is_complete_and_its_layer_is_web_sized(slug, row):
 def test_shipped_set_stays_under_the_budget():
     total = sum(path.stat().st_size for path in _SHIPPED.rglob("*") if path.is_file())
     assert total <= _SHIPPED_BUDGET_BYTES
+
+
+_SEARCH_HTML = """<h2 class="text-center"> 2 clipart for "hockey stick" <small> (Page 1 of 1) </small></h2>
+<div class="gallery"> <div class="artwork"> <a href="/detail/74437/hockey-stick-ball">
+<img src="/image/800px/74437" alt="Hockey Stick &amp; Ball" /> </a> </div>
+<div class="artwork"> <a href="/detail/35545/hockey-stick"> <img src="/image/800px/35545" alt="Hockey Stick" /> </a> </div> </div>"""
+
+_DETAIL_HTML = (
+    """<title>Ring - Openclipart</title> <p>by <a href="/artist/Nobody">Nobody</a> </p>"""
+)
+
+
+def _png_bytes(image: Image.Image) -> bytes:
+    buffer = io.BytesIO()
+    image.save(buffer, "PNG")
+    return buffer.getvalue()
+
+
+def _fake_openclipart(monkeypatch, hits: int = 2):
+    """Route every ``_get`` to canned openclipart pages; return the URLs asked for."""
+    asked = []
+    gallery = "".join(
+        f'<div class="artwork"> <a href="/detail/{1000 + i}/x"> '
+        f'<img src="/image/800px/{1000 + i}" alt="Item {i}" /> </a> </div>'
+        for i in range(hits)
+    )
+    thumb = _png_bytes(Image.new("RGBA", (art._THUMB_PX, 180), (0, 0, 0, 0)))
+
+    def fake_get(url, params=None):
+        asked.append((url, params))
+        if "/search/" in url:
+            return SimpleNamespace(text=_SEARCH_HTML if hits == 2 else gallery, url=url)
+        if "/image/" in url:
+            return SimpleNamespace(content=thumb, url=url)
+        if "/download/" in url:
+            return SimpleNamespace(content=_png_bytes(_ring()), url=f"{url}/ring.png")
+        if "/detail/" in url:
+            return SimpleNamespace(text=_DETAIL_HTML, url=url)
+        raise AssertionError(url)
+
+    monkeypatch.setattr(art, "_get", fake_get)
+    return asked
+
+
+@pytest.mark.parametrize(
+    ("slug", "query"),
+    [
+        ("the-hoop", "basketball hoop"),
+        ("the-goalposts", "football goalposts"),
+        ("the-catchers-mask", "baseball catcher's mask"),
+        ("the-crossed-sticks", "hockey crossed sticks"),
+        ("the-hourglass", "hourglass"),
+        ("the-basketball", "basketball"),
+    ],
+)
+def test_default_query_is_the_label_prefixed_by_the_sport(slug, query):
+    assert art._query(slug) == query
+
+
+def test_search_parses_openclipart_hits_in_page_order(monkeypatch):
+    _fake_openclipart(monkeypatch)
+
+    assert art.search_openclipart("hockey stick") == [
+        {"id": 74437, "title": "Hockey Stick & Ball"},
+        {"id": 35545, "title": "Hockey Stick"},
+    ]
+
+
+def test_search_keeps_only_the_first_few_hits(monkeypatch):
+    _fake_openclipart(monkeypatch, hits=art._CANDIDATES_PER_TEMPLATE + 3)
+
+    hits = art.search_openclipart("anything")
+
+    assert [hit["id"] for hit in hits] == list(range(1000, 1000 + art._CANDIDATES_PER_TEMPLATE))
+
+
+def test_search_command_writes_candidates_thumbs_and_one_sheet_per_group(tmp_path, monkeypatch):
+    asked = _fake_openclipart(monkeypatch)
+    out = tmp_path / "review"
+
+    result = _RUNNER.invoke(
+        art.constellation_art,
+        ["search", "--out", str(out), "the-bat", "the-hoop"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    queries = [params["query"] for url, params in asked if "/search/" in url]
+    assert queries == ["baseball bat", "basketball hoop"]
+    thumbs = [url for url, _ in asked if "/image/" in url]
+    assert thumbs and all(f"/image/{art._THUMB_FETCH_PX}px/" in url for url in thumbs)
+    assert art._THUMB_FETCH_PX > art._THUMB_PX, "fetched above the tile size, never below"
+    rows = json.loads((out / "candidates.json").read_text(encoding="utf-8"))["templates"]
+    assert rows["the-hoop"] == {
+        "query": "basketball hoop",
+        "candidates": [
+            {"id": 74437, "title": "Hockey Stick & Ball"},
+            {"id": 35545, "title": "Hockey Stick"},
+        ],
+    }
+    assert (out / "thumbs" / "74437.png").is_file()
+    assert sorted(path.name for path in out.glob("sheet-*.png")) == [
+        "sheet-MLB-1.png",
+        "sheet-NBA+WNBA-1.png",
+    ]
+    with Image.open(out / "sheet-MLB-1.png") as sheet:
+        assert sheet.size == (
+            art._CAND_LABEL_PX + art._CANDIDATES_PER_TEMPLATE * art._CAND_TILE_PX,
+            art._CAND_ROW_PX,
+        )
+
+
+def test_search_sheet_survives_a_thumbnail_openclipart_did_not_render(tmp_path, monkeypatch):
+    real = _fake_openclipart(monkeypatch)
+    routed = art._get
+
+    def with_one_bad_thumb(url, params=None):
+        response = routed(url, params)
+        if url.endswith("/74437"):
+            return SimpleNamespace(content=b"<html>not an image</html>", url=url)
+        return response
+
+    monkeypatch.setattr(art, "_get", with_one_bad_thumb)
+
+    result = _RUNNER.invoke(
+        art.constellation_art, ["search", "--out", str(tmp_path), "the-bat"], catch_exceptions=False
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (tmp_path / "sheet-MLB-1.png").is_file()
+    assert real, "the stub was consulted"
+
+
+def test_search_command_takes_a_query_override_for_one_slug(tmp_path, monkeypatch):
+    asked = _fake_openclipart(monkeypatch)
+
+    result = _RUNNER.invoke(
+        art.constellation_art,
+        ["search", "--out", str(tmp_path), "--query", "goal post", "the-goalposts"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert [params["query"] for url, params in asked if "/search/" in url] == ["goal post"]
+    rows = json.loads((tmp_path / "candidates.json").read_text(encoding="utf-8"))["templates"]
+    assert rows["the-goalposts"]["query"] == "goal post"
+
+
+def test_search_command_merges_into_an_existing_candidates_file(tmp_path, monkeypatch):
+    _fake_openclipart(monkeypatch)
+    for slug in ("the-bat", "the-hoop"):
+        _RUNNER.invoke(
+            art.constellation_art, ["search", "--out", str(tmp_path), slug], catch_exceptions=False
+        )
+
+    rows = json.loads((tmp_path / "candidates.json").read_text(encoding="utf-8"))["templates"]
+
+    assert list(rows) == ["the-hoop", "the-bat"], "both rows kept, in catalog order"
+
+
+def test_pick_downloads_the_file_and_records_openclipart_provenance(tmp_path, monkeypatch):
+    assets = tmp_path / "constellations"
+    monkeypatch.setattr(art, "ASSETS_DIR", assets)
+    _fake_openclipart(monkeypatch)
+
+    result = _RUNNER.invoke(
+        art.constellation_art, ["pick", "the-bat", "77", "--mode", "ink"], catch_exceptions=False
+    )
+
+    assert result.exit_code == 0, result.output
+    with Image.open(assets / "the-bat.png") as layer:
+        assert layer.mode == "RGBA"
+    assert (assets / "sources" / "ring.png").read_bytes() == _png_bytes(_ring())
+    manifest = json.loads((assets / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["templates"]["the-bat"] == {
+        "file": "the-bat.png",
+        "source": "sources/ring.png",
+        "source_url": "https://openclipart.org/detail/77",
+        "artist": "Nobody",
+        "licence": "CC0",
+        "mode": "ink",
+    }
+
+
+def test_pick_refuses_an_id_openclipart_answers_with_its_logo(tmp_path, monkeypatch):
+    monkeypatch.setattr(art, "ASSETS_DIR", tmp_path / "constellations")
+    monkeypatch.setattr(
+        art,
+        "_get",
+        lambda url, params=None: SimpleNamespace(
+            content=b"<svg/>", url="https://openclipart.org/assets/images/openclipart-logo-2019.svg"
+        ),
+    )
+
+    result = _RUNNER.invoke(art.constellation_art, ["pick", "the-bat", "0", "--mode", "ink"])
+
+    assert result.exit_code == 2
+    assert "0" in result.output and not (tmp_path / "constellations").exists()
