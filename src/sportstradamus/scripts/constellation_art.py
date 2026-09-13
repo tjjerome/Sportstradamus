@@ -112,6 +112,7 @@ _CAND_LABEL_PX = 170
 _CAND_TILE_PX = 260
 _CAND_ROW_PX = 300
 _CAND_ROWS_PER_PAGE = 12
+_CAND_CAPTION_CHARS = 28  # of the title, after the id: what a tile holds at the label size
 
 # A sport word in front of a league template's label: "hoop" alone finds hula hoops.
 _SPORT_WORD = {
@@ -254,7 +255,7 @@ def _review_sheets(out: Path, rows: dict) -> None:
                     except UnidentifiedImageError:
                         # A few old ids answer 200 with an empty body instead of a 404.
                         draw.text((left, top + 8), "no preview", fill=GRAY, font=font)
-                    caption = f"{hit['id']}  {hit['title'][:28]}"
+                    caption = f"{hit['id']}  {hit['title'][:_CAND_CAPTION_CHARS]}"
                     draw.text((left, top + _THUMB_PX + 6), caption, fill="black", font=font)
             canvas.save(out / f"sheet-{group}-{page}.png")
 
@@ -288,18 +289,16 @@ def _write_layer(
         )
 
 
+_SLUG_CHOICE = click.Choice(sorted(shape_catalog()["templates"]))
+
+
 @click.group()
 def constellation_art() -> None:
     """Clip art into constellation layers (docs/handoffs/constellation-art.md)."""
 
 
 @constellation_art.command()
-@click.argument(
-    "slugs",
-    nargs=-1,
-    type=click.Choice(sorted(shape_catalog()["templates"])),
-    metavar="[SLUG]...",
-)
+@click.argument("slugs", nargs=-1, type=_SLUG_CHOICE, metavar="[SLUG]...")
 @click.option(
     "--out",
     required=True,
@@ -334,7 +333,7 @@ def search(slugs: tuple[str, ...], out: Path, query: str | None) -> None:
 
 
 @constellation_art.command()
-@click.argument("slug", type=click.Choice(sorted(shape_catalog()["templates"])), metavar="SLUG")
+@click.argument("slug", type=_SLUG_CHOICE, metavar="SLUG")
 @click.argument("oca_id", type=int, metavar="ID")
 @click.option(
     "--mode",
@@ -361,7 +360,7 @@ def pick(slug: str, oca_id: int, mode: str) -> None:
 @click.option(
     "--slug",
     required=True,
-    type=click.Choice(sorted(shape_catalog()["templates"])),
+    type=_SLUG_CHOICE,
     metavar="SLUG",
     help="The template this layer belongs to.",
 )
